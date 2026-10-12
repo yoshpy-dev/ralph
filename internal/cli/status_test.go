@@ -767,3 +767,126 @@ func TestStatusCmd_OrgWatchFallsBackToTheDefaultDeadmanWhenRalphTomlDoesNotLoad(
 		t.Errorf("org watch line with a broken ralph.toml:\n got %q\nwant %q", got, want)
 	}
 }
+
+// Plan 2026-10-12-org-watch-gate, AC13 and AC14 on `ralph status`: a watch
+// that has run its last cycle and still holds watch.lock is stopping, not
+// "not running" or stale, and a running --once watch says (--once), since
+// neither accepts new work; --json carries state stopping and once. A
+// stopping mark left by a killed watch, and one held but old, read as a
+// running mark would.
+func TestStatusCmd_OrgWatchShowsStoppingAndOnce(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	stopping := func(pid int, ts time.Time) *org.WatchAlive {
+		mark := runningMark(pid, ts)
+		mark.State = org.WatchAliveStopping
+		return mark
+	}
+	fresh := stopping(4250, now)
+	old := stopping(4251, now.Add(-time.Hour))
+	killed := stopping(4252, now)
+	once := runningMark(4253, now)
+	once.Once = true
+	markJSON := func(state string, m *org.WatchAlive) map[string]any {
+		want := map[string]any{
+			"state": state, "pid": float64(m.PID), "started_at": m.StartedAt,
+			"updated_at": m.TS, "mark_state": m.State,
+		}
+		if m.Once {
+			want["once"] = true
+		}
+		return want
+	}
+	const staleTail = " -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than the larger of deadman_minutes (10 when below 1) and two of its intervals"
+
+	cases := []struct {
+		name     string
+		setup    func(t *testing.T, stateDir string)
+		wantLine string
+		wantJSON map[string]any
+	}{
+		{
+			name:     "stopping",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, fresh) },
+			wantLine: "org watch: stopping (pid 4250, mark updated " + fresh.TS + ") -- it has run its last cycle and accepts no new work; it releases watch.lock once its in-flight work ends",
+			wantJSON: markJSON("stopping", fresh),
+		},
+		{
+			name:     "running --once",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, once) },
+			wantLine: "org watch: running (--once) (pid 4253, mark updated " + once.TS + ") -- it ends after its cycle and accepts no new work",
+			wantJSON: markJSON("running", once),
+		},
+		{
+			name:     "stale with an old stopping mark",
+			setup:    func(t *testing.T, stateDir string) { holdWatchLock(t, stateDir, old) },
+			wantLine: "org watch: stale (pid 4251, mark updated " + old.TS + ")" + staleTail,
+			wantJSON: markJSON("stale", old),
+		},
+		{
+			name:     "not running with the stopping mark of a killed watch",
+			setup:    func(t *testing.T, stateDir string) { writeWatchMark(t, stateDir, killed) },
+			wantLine: "org watch: not running (a stopping mark is left from pid 4252, mark updated " + killed.TS + ")",
+			wantJSON: markJSON("not_running", killed),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedTwoOrgManifest(t, dir)
+			tc.setup(t, dir)
+
+			out, err := runStatusCmd(t, "--state-dir", dir)
+			if err != nil {
+				t.Fatalf("status: %v (output: %s)", err, out)
+			}
+			if got := statusOrgWatchLine(t, out); got != tc.wantLine {
+				t.Errorf("org watch line:\n got %q\nwant %q", got, tc.wantLine)
+			}
+
+			jsonOut, err := runStatusCmd(t, "--state-dir", dir, "--json")
+			if err != nil {
+				t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+			}
+			if got := statusOrgWatchJSONOf(t, jsonOut); !reflect.DeepEqual(got, tc.wantJSON) {
+				t.Errorf("org_watch:\n got %v\nwant %v", got, tc.wantJSON)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-12-org-watch-gate, AC7 on `ralph status`: a mark that carries
+// the watch's own deadman_minutes is judged by it, not by ./ralph.toml, so a
+// watch started with another --config reads right. A 30-minute-old mark of a
+// watch with 60 is running with no ralph.toml (10), and one of a watch with 0
+// (the default 10) is stale under a ralph.toml with 60.
+func TestStatusCmd_OrgWatchJudgesTheMarkByTheWatchsOwnDeadmanMinutes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		watchDM   int
+		ralphToml string
+		want      string
+	}{
+		{name: "watch 60, no ralph.toml", watchDM: 60, want: "org watch: running (pid 4254, "},
+		{name: "watch 0, ralph.toml 60", watchDM: 0, ralphToml: "[org]\ndeadman_minutes = 60\n", want: "org watch: stale (pid 4254, "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			if tc.ralphToml != "" {
+				if err := os.WriteFile("ralph.toml", []byte(tc.ralphToml), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stateDir := t.TempDir()
+			mark := runningMark(4254, time.Now().Add(-30*time.Minute))
+			mark.DeadmanMinutes = &tc.watchDM
+			holdWatchLock(t, stateDir, mark)
+			out, err := runStatusCmd(t, "--state-dir", stateDir)
+			if err != nil {
+				t.Fatalf("status: %v (output: %s)", err, out)
+			}
+			if got := statusOrgWatchLine(t, out); !strings.HasPrefix(got, tc.want) {
+				t.Errorf("org watch line = %q; want it to start %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -773,8 +773,10 @@ func TestOrgWatch_AStopRequestCancelsAnInFlightWatcherCall(t *testing.T) {
 
 // Cross-review cycle 1 #1 on the CLI: a `watch --all --once` whose
 // on-demand watcher call is still in flight after its one cycle (self-review
-// M-5 lets `--once` wait for it) keeps watch.lock and a running mark until
-// the call has ended. Meanwhile a second `watch --all --once` is refused,
+// M-5 lets `--once` wait for it) keeps watch.lock until the call has ended,
+// with a fresh mark that says stopping (plan 2026-10-12-org-watch-gate, F9
+// and AC13: it said running before) and once. Meanwhile a second
+// `watch --all --once` is refused,
 // and a `--stop` waits for the watch instead of saying it is not running,
 // then reports it stopped. A first `--once` records the seat's worktree
 // status, and a new file in the worktree makes the next one see a scope
@@ -860,16 +862,19 @@ func TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds(t *testing.T)
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	if got := org.ProbeWatch(stateDir, time.Now(), 10).State; got != org.WatchLivenessRunning {
-		t.Errorf("ProbeWatch while the watcher call is in flight = %q; want running", got)
+	// The claude may start before the cycle has ended, so wait for the
+	// drain's stopping mark rather than probing once.
+	waitForWatchState(t, stateDir, org.WatchLivenessStopping, 0)
+	if mark, err := org.ReadWatchAlive(stateDir); err != nil || !mark.Once {
+		t.Errorf("mark while the watcher call is in flight = %+v (%v); want once", mark, err)
 	}
 	if _, _, err := runOrgCmdStreams(t, watchOnce...); !errors.Is(err, org.ErrWatchRunning) {
 		t.Errorf("a second watch --all --once while the first waits for its watcher call = %v; want ErrWatchRunning", err)
 	}
 	stop := run("watch", "--stop", "--state-dir", stateDir)
 	pending[stop] = true
-	// --stop writes its request only after its probe found the watch running
-	// or stale.
+	// --stop writes its request only after its probe found the watch
+	// holding the lock (here stopping).
 	for deadline := time.Now().Add(10 * time.Second); ; {
 		if _, err := org.ReadWatchStopRequest(stateDir); err == nil {
 			break

@@ -231,6 +231,14 @@ type SendResult struct {
 // event is appended and before any driver call is attempted -- Send fails
 // closed, not open.
 //
+// A TASK starts autonomous work, so right after validation Send runs the
+// watch gate (Org.WatchGate, when set; watchgate.go) for a message whose
+// TYPE is TASK, DryRun included, and a refusal also appends no event and
+// makes no driver call. A Raw message is not validated, but its TYPE is
+// read with protocol.Parse the same way: one whose first line reads as
+// `TYPE: TASK` (spaces trimmed, case kept) is a TASK, and one whose first
+// line is no TYPE header is not (plan 2026-10-12-org-watch-gate, F4 and F5).
+//
 // No-resend design decision: Send presses Enter at most once, ever, per
 // call -- see confirmSubmitted's doc comment for why a second Enter is
 // unsafe.
@@ -266,9 +274,19 @@ type SendResult struct {
 // after the idle/done wait below), so that case never types anything and
 // leaves Progress at its SendProgressNothingSent zero value.
 func (o *Org) Send(p SendParams) SendResult {
+	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
-		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
+		err := parseErr
+		if err == nil {
+			err = protocol.Validate(msg, protocol.DefaultMaxBodyChars)
+		}
+		if err != nil {
 			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
+		}
+	}
+	if parseErr == nil && strings.TrimSpace(msg.Type) == protocol.TypeTask {
+		if err := o.checkWatchGate(); err != nil {
+			return SendResult{Err: fmt.Errorf("org: send: TASK not sent: %w", err)}
 		}
 	}
 

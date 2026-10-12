@@ -20,10 +20,11 @@ import (
 // reserve.go). StartFeature runs it in this order:
 //
 //  1. the split plan and the feature, with no side effect;
-//  2. the leader spawn's own checks on an unlocked read of the manifest
-//     (checkSpawnInput and spawnPrecheckErr, spawn.go): max_orgs,
-//     max_total_seats, the reservation and its binding, and the rest of what
-//     Spawn refuses;
+//  2. the leader spawn's own checks, in Spawn's order (spawn.go):
+//     checkSpawnInput, the watch gate (Org.WatchGate, when set;
+//     watchgate.go), then spawnPrecheckErr on an unlocked read of the
+//     manifest: max_orgs, max_total_seats, the reservation and its binding,
+//     and the rest of what Spawn refuses;
 //  3. the ralph-worktree.sh record of the worktree: an existing one is reused
 //     only when it was made for the same split plan feature, at the same path
 //     on the same branch, and that branch is checked out there;
@@ -192,6 +193,9 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 
 	checked, err := checkSpawnInput(leader)
 	if err != nil {
+		return refuse(err)
+	}
+	if err := o.checkWatchGate(); err != nil {
 		return refuse(err)
 	}
 	rr, err := o.Manifest.Read()

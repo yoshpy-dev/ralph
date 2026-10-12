@@ -807,6 +807,59 @@ func (f *watchAllFixture) gitCallCount(cwd string) int {
 	return f.gitCalls[cwd]
 }
 
+// Plan 2026-10-12-org-watch-gate, AC7 and AC14 at the watch: the mark
+// carries the watch's own deadman_minutes as configured (0 included) and
+// once for a run with Cycles > 0, from the first mark to the stopped one.
+// ProbeWatch then judges the mark by that deadman_minutes, not by its
+// caller's: 30 minutes after a cycle, a watch with 60 is running for a
+// caller with 10, and one with 0 (the default 10) is stale for a caller
+// with 60. The fixture's 1 ms interval makes interval_seconds 0, so the
+// deadman alone sets the window.
+func TestRunWatchAll_TheMarkCarriesTheWatchsDeadmanMinutesAndOnce(t *testing.T) {
+	cases := []struct {
+		name      string
+		deadman   int
+		cycles    int
+		wantOnce  bool
+		callerDM  int
+		wantAfter string
+	}{
+		{name: "deadman 60, Cycles 2", deadman: 60, cycles: 2, wantOnce: true, callerDM: 10, wantAfter: WatchLivenessRunning},
+		{name: "deadman 0, long-running", deadman: 0, cycles: 0, callerDM: 60, wantAfter: WatchLivenessStale},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			f.o.Config.DeadmanMinutes = tc.deadman
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			check := func(what string, mark WatchAlive) {
+				t.Helper()
+				if mark.DeadmanMinutes == nil || *mark.DeadmanMinutes != tc.deadman || mark.Once != tc.wantOnce {
+					t.Errorf("%s = %+v (deadman_minutes %v); want deadman_minutes %d, once %t", what, mark, mark.DeadmanMinutes, tc.deadman, tc.wantOnce)
+				}
+			}
+			hooks := WatchHooks{OnCycle: func(n int, ts time.Time) {
+				check(fmt.Sprintf("mark after cycle %d", n), f.mark(t))
+				if got := ProbeWatch(f.dir, ts.Add(30*time.Minute), tc.callerDM).State; got != tc.wantAfter {
+					t.Errorf("ProbeWatch 30 minutes after cycle %d with the caller's deadman %d = %q; want %q", n, tc.callerDM, got, tc.wantAfter)
+				}
+				if tc.cycles == 0 && n == 2 {
+					cancel()
+				}
+			}}
+			if err := runWatchAll(t, f.o, ctx, f.params(tc.cycles), hooks); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			mark := f.mark(t)
+			if mark.State != WatchAliveStopped {
+				t.Errorf("mark at the end = %+v; want stopped", mark)
+			}
+			check("the stopped mark", mark)
+		})
+	}
+}
+
 // A stop request written while the watch waits between cycles ends it
 // within about a tick: the mark is stopped, the request removed, and the
 // lock free.
@@ -1115,12 +1168,15 @@ func TestRunWatchAll_WritesTheStoppedMarkBeforeReleasingTheLock(t *testing.T) {
 }
 
 // Cross-review cycle 1 #1: however the run ends after its first cycle,
-// hooks.BeforeStop runs while the watch still holds watch.lock and its mark
-// says running. While BeforeStop blocks, ProbeWatch says running, a second
-// AcquireWatchLock and a second RunWatchAll are refused (the refused one
-// calls no BeforeStop), and the mark's ts is rewritten every interval. Once
-// BeforeStop returns, the mark is stopped and the lock free.
-func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunning(t *testing.T) {
+// hooks.BeforeStop runs while the watch still holds watch.lock. Plan
+// 2026-10-12-org-watch-gate (F9, AC13) changed what the mark says then: it
+// is stopping already when BeforeStop is called, not running. While
+// BeforeStop blocks, ProbeWatch says stopping, so WatchAcceptsWork is false,
+// a second AcquireWatchLock and a second RunWatchAll are refused (the
+// refused one calls no BeforeStop), and the stopping mark's ts is rewritten
+// every interval. Once BeforeStop returns, the mark is stopped and the lock
+// free.
+func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysStopping(t *testing.T) {
 	cases := []struct {
 		name string
 		// end ends a run with no Cycles after its first cycle; nil runs
@@ -1145,6 +1201,10 @@ func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunnin
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			var beforeStopCalls, cycles int
+			// atEntry is the mark BeforeStop finds when it is called; the
+			// close of entered publishes it to the test goroutine.
+			var atEntry *WatchAlive
+			var atEntryErr error
 			hooks := WatchHooks{
 				OnCycle: func(n int, _ time.Time) {
 					cycles = n
@@ -1154,6 +1214,7 @@ func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunnin
 				},
 				BeforeStop: func() {
 					beforeStopCalls++
+					atEntry, atEntryErr = ReadWatchAlive(f.dir)
 					close(entered)
 					<-release
 				},
@@ -1168,8 +1229,15 @@ func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunnin
 				t.Fatal("RunWatchAll did not call BeforeStop within 10s")
 			}
 
-			if probe := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes); probe.State != WatchLivenessRunning {
-				t.Errorf("ProbeWatch during BeforeStop = %+v; want running", probe)
+			if atEntryErr != nil || atEntry.State != WatchAliveStopping || atEntry.Once != (p.Cycles > 0) {
+				t.Errorf("mark when BeforeStop is called = %+v (%v); want stopping, once %t", atEntry, atEntryErr, p.Cycles > 0)
+			}
+			probe := ProbeWatch(f.dir, f.clk.Now(), f.o.Config.DeadmanMinutes)
+			if probe.State != WatchLivenessStopping {
+				t.Errorf("ProbeWatch during BeforeStop = %+v; want stopping", probe)
+			}
+			if WatchAcceptsWork(probe) {
+				t.Errorf("WatchAcceptsWork during BeforeStop = true for %+v; want false", probe)
 			}
 			if _, err := AcquireWatchLock(f.dir, 20*time.Millisecond); !errors.Is(err, ErrWatchRunning) {
 				t.Errorf("AcquireWatchLock during BeforeStop = %v; want ErrWatchRunning", err)
@@ -1184,11 +1252,11 @@ func TestRunWatchAll_CallsBeforeStopWhileItStillHoldsTheLockAndTheMarkSaysRunnin
 			refreshed := f.clk.Now().Format(time.RFC3339)
 			for deadline := time.Now().Add(10 * time.Second); ; {
 				mark := f.mark(t)
-				if mark.State == WatchAliveRunning && mark.TS == refreshed {
+				if mark.State == WatchAliveStopping && mark.TS == refreshed {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("mark during BeforeStop = %+v; want running with ts rewritten to %s", mark, refreshed)
+					t.Fatalf("mark during BeforeStop = %+v; want stopping with ts rewritten to %s", mark, refreshed)
 				}
 				time.Sleep(time.Millisecond)
 			}

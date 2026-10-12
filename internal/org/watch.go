@@ -173,7 +173,7 @@ type EscalateFunc func(ctx context.Context, message string) error
 // WatchHooks lets a caller observe watch-cycle events. Every hook is
 // optional (nil-safe). OnSemanticTrigger and OnCycle only observe;
 // BeforeStop also sets when the run ends, because RunWatchAll keeps
-// watch.lock and a running mark until it returns.
+// watch.lock and a fresh stopping mark until it returns.
 type WatchHooks struct {
 	// OnSemanticTrigger fires when a condition warrants on-demand watcher
 	// judgment (the Slice 4 seam: an on-demand `claude -p` verdict call for
@@ -187,15 +187,20 @@ type WatchHooks struct {
 	// BeforeStop fires once as RunWatchAll ends, after its last cycle and
 	// before it writes the stopped mark and releases watch.lock, so the work
 	// a caller started from OnSemanticTrigger (the on-demand watcher
-	// goroutines of `ralph org watch --all`) can end while `--stop` and a
-	// second watch still see this watch running (cross-review cycle 1 #1,
+	// goroutines of `ralph org watch --all`) can end while this watch still
+	// holds watch.lock: a second watch is refused, and `--stop` waits for the
+	// lock (cross-review cycle 1 #1,
 	// docs/reports/cross-review-triage-org-cross-watch.md). RunWatchAll
-	// rewrites the running mark every interval until BeforeStop returns.
-	// BeforeStop must return within a bound: while it runs, the watch keeps
-	// watch.lock and a fresh running mark but runs no cycle, so one that
-	// never returns leaves the watch "running" with no cycles. The CLI's
-	// BeforeStop waits for its watcher goroutines, each bounded by
-	// watcherInvokeTimeout plus the ALERT send's DriverCallTimeout.
+	// writes the mark as stopping before it calls BeforeStop and rewrites
+	// the stopping mark every interval until BeforeStop returns, so
+	// ProbeWatch says stopping, and the watch gate does not take a watch
+	// that runs no more cycles for one that accepts new work (plan
+	// 2026-10-12-org-watch-gate, F9). BeforeStop must return within a bound:
+	// while it runs, the watch keeps watch.lock and a fresh stopping mark but
+	// runs no cycle, so one that never returns leaves the watch "stopping"
+	// with no end. The CLI's BeforeStop waits for its watcher goroutines,
+	// each bounded by watcherInvokeTimeout plus the ALERT send's
+	// DriverCallTimeout.
 	BeforeStop func()
 }
 
@@ -455,9 +460,10 @@ type WatchAllParams struct {
 	// also <= 0.
 	Interval time.Duration
 	// Cycles, when > 0, ends the run after exactly that many cycles -- the
-	// `--once` (Cycles: 1) and test path. Zero (a real long-running
-	// `ralph org watch --all`) means run until ctx is done or a stop request
-	// for this run is there.
+	// `--once` (Cycles: 1) and test path. Such a run marks itself once
+	// (WatchAlive.Once), so it accepts no new work. Zero (a real
+	// long-running `ralph org watch --all`) means run until ctx is done or a
+	// stop request for this run is there.
 	Cycles int
 	// GitStatus overrides the scope-change condition's git probe; nil uses
 	// the real `git status --porcelain` (realGitStatus).
@@ -483,7 +489,8 @@ type WatchAllParams struct {
 // is written), removes a stop request that is not later than its start
 // (one that is later is followed after the first cycle;
 // takeStopRequestAtStart), and writes the liveness mark (running, its pid,
-// its start) before the first cycle. Each cycle then, in this order:
+// its start, its deadman_minutes, and once when Cycles > 0) before the
+// first cycle. Each cycle then, in this order:
 //
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
@@ -503,8 +510,9 @@ type WatchAllParams struct {
 // waits Interval in ticks of StopPollInterval and ends after the cycle when
 // ctx is done or a stop request later than its start is there; Cycles > 0
 // ends it after that many cycles. However it ends once it holds the lock (a
-// panic included), it calls hooks.BeforeStop while it still holds the lock
-// and its mark still says running, then writes the mark as stopped with
+// panic included), it writes the mark as stopping and calls
+// hooks.BeforeStop while it still holds the lock (with no BeforeStop it
+// writes no stopping mark), then writes the mark as stopped with
 // stopped_at, removes a stop request meant for it, and releases the lock
 // (finish). It returns an error only when it does not start (no StatusDir,
 // or watch.lock not taken), and then calls no hook; every end after the
@@ -584,6 +592,7 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 	if stderr == nil {
 		stderr = os.Stderr
 	}
+	deadman := o.Config.DeadmanMinutes
 	return &watchAllRun{
 		org: o, dir: p.StatusDir, stderr: stderr,
 		interval: interval, tick: tick, startedAt: startedAt,
@@ -598,6 +607,8 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 			State: WatchAliveRunning, PID: os.Getpid(),
 			StartedAt:       startedAt.UTC().Format(time.RFC3339Nano),
 			IntervalSeconds: int(interval / time.Second),
+			DeadmanMinutes:  &deadman,
+			Once:            p.Cycles > 0,
 		},
 		beforeStop: hooks.BeforeStop,
 	}
@@ -753,16 +764,18 @@ func (w *watchAllRun) finish(lock *WatchLock) {
 	w.drainBeforeStop()
 }
 
-// drainBeforeStop calls beforeStop, if set, while the lock is held and the
-// mark says running. Until beforeStop returns, a goroutine rewrites the
-// running mark every interval (writeMark), so a drain longer than the
-// window of ProbeWatch does not read as stale; drainBeforeStop waits for
-// that goroutine to end before it returns, so its last rewrite comes before
-// the stopped mark.
+// drainBeforeStop calls beforeStop, if set, while the lock is held. It
+// first writes the mark as stopping, and until beforeStop returns, a
+// goroutine rewrites the stopping mark every interval (writeMark), so a
+// drain longer than the window of ProbeWatch reads as stopping, not stale;
+// drainBeforeStop waits for that goroutine to end before it returns, so its
+// last rewrite comes before the stopped mark.
 func (w *watchAllRun) drainBeforeStop() {
 	if w.beforeStop == nil {
 		return
 	}
+	w.mark.State = WatchAliveStopping
+	w.writeMark()
 	done := make(chan struct{})
 	refresherDone := make(chan struct{})
 	go func() {
