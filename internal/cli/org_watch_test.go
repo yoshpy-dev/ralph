@@ -334,7 +334,7 @@ func TestOrgWatchDetach_Stale_StartsNothingAndSaysHowToStopIt(t *testing.T) {
 			if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
 				t.Errorf("--detach refused the stale watch after %v; want it to wait the 300ms deadline first", elapsed)
 			}
-			for _, want := range append([]string{"nothing was started", "ralph org watch --stop"}, tc.want...) {
+			for _, want := range append([]string{"so no new watch runs", "ralph org watch --stop"}, tc.want...) {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not contain %q", err, want)
 				}
@@ -501,11 +501,11 @@ func TestOrgWatchDetach_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_
 		want string
 	}{
 		{name: "stopping", mark: func() *org.WatchAlive { return stoppingWatchMark(4305, time.Now()) },
-			want: "(pid 4305) is stopping, so nothing was started; run ralph org watch --all --detach again once it has ended"},
+			want: "(pid 4305) is stopping, so no new watch runs; run ralph org watch --all --detach again once it has ended"},
 		{name: "running --once", mark: func() *org.WatchAlive { return onceWatchMark(4306, time.Now()) },
-			want: "(pid 4306) is a --once run, which ends after its cycle, so nothing was started"},
+			want: "(pid 4306) is a --once run, which ends after its cycle, so no new watch runs"},
 		{name: "stale until the deadline", mark: func() *org.WatchAlive { return nil },
-			want: "but its liveness mark is not fresh (pid unknown), so nothing was started; stop it with ralph org watch --stop"},
+			want: "but its liveness mark is not fresh (pid unknown), so no new watch runs; stop it with ralph org watch --stop"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -606,8 +606,8 @@ func TestOrgWatchDetach_AStoppingOrOnceWatch_StartsNothing(t *testing.T) {
 		mark *org.WatchAlive
 		want string
 	}{
-		{name: "stopping", mark: stoppingWatchMark(4303, time.Now()), want: "(pid 4303) is stopping, so nothing was started"},
-		{name: "running --once", mark: onceWatchMark(4304, time.Now()), want: "(pid 4304) is a --once run, which ends after its cycle, so nothing was started"},
+		{name: "stopping", mark: stoppingWatchMark(4303, time.Now()), want: "(pid 4303) is stopping, so no new watch runs"},
+		{name: "running --once", mark: onceWatchMark(4304, time.Now()), want: "(pid 4304) is a --once run, which ends after its cycle, so no new watch runs"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

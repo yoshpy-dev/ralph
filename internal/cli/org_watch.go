@@ -533,19 +533,21 @@ func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir, stateDirSource
 }
 
 // orgWatchDetachRefusal is the error of --detach for a watch that holds
-// watch.lock and accepts no work, so nothing was started: for a stale one,
-// how to stop it; for a stopping or --once one, which ends soon, to run
-// --detach again once it has ended.
+// watch.lock and accepts no work, so no new watch runs: for a stale one, how
+// to stop it; for a stopping or --once one, which ends soon, to run --detach
+// again once it has ended. It is also the error after a child --detach
+// launched has exited, refused the lock by that watch
+// (launchAndAwaitOrgWatch); the child's refusal stays in watch.log.
 func orgWatchDetachRefusal(stateDir string, probe org.WatchLiveness) error {
 	if probe.State == org.WatchLivenessStale {
-		return fmt.Errorf("org: watch --detach: a watch holds %s but its liveness mark is not fresh (%s), so nothing was started; stop it with ralph org watch --stop, or %s",
+		return fmt.Errorf("org: watch --detach: a watch holds %s but its liveness mark is not fresh (%s), so no new watch runs; stop it with ralph org watch --stop, or %s",
 			org.WatchLockPathIn(stateDir), org.WatchPIDText(probe.Mark), org.WatchKillHint(stateDir, probe.Mark))
 	}
 	ends := "is stopping"
 	if probe.State == org.WatchLivenessRunning {
 		ends = "is a --once run, which ends after its cycle"
 	}
-	return fmt.Errorf("org: watch --detach: the watch that holds %s (%s) %s, so nothing was started; run ralph org watch --all --detach again once it has ended",
+	return fmt.Errorf("org: watch --detach: the watch that holds %s (%s) %s, so no new watch runs; run ralph org watch --all --detach again once it has ended",
 		org.WatchLockPathIn(stateDir), org.WatchPIDText(probe.Mark), ends)
 }
 

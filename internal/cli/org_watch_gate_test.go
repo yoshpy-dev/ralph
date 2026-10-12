@@ -343,9 +343,9 @@ func TestOrgSend_WatchGate_RefusesOnlyATask(t *testing.T) {
 	}
 }
 
-// A send error that does not start with "org: send: " in the org layer (the
-// dry-run event's append, here to a manifest path that is a directory) gets
-// that prefix from the CLI, once, and keeps its cause.
+// A send error whose cause carries no "org: send: " (the dry-run event's
+// append, here to a manifest path that is a directory) says it once, as the
+// org layer adds it and the CLI adds none, and keeps its cause.
 func TestOrgSend_AnErrorWithoutTheSendPrefixGetsItOnce(t *testing.T) {
 	setupOrgStubPATH(t)
 	stateDir := t.TempDir()

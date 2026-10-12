@@ -338,7 +338,7 @@ func TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefu
 	}
 }
 
-// AC13 and AC14:a watch that holds watch.lock and is stopping, or is a
+// AC13 and AC14: a watch that holds watch.lock and is stopping, or is a
 // --once run, accepts no work and ends soon: both forms of start are
 // refused at once with the gate's refusal, launch nothing, and record or
 // make nothing.

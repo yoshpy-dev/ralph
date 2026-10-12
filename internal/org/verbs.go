@@ -238,7 +238,8 @@ func (e taskNotSentError) Unwrap() error { return e.gate }
 // entirely and only appends the (dry_run: true) history event -- but
 // protocol validation still runs first for DryRun too, since it is a
 // pure, side-effect-free check; DryRun never waits or confirms, so
-// SendResult.SubmitConfirmed is always false for it.
+// SendResult.SubmitConfirmed is always false for it. Every SendResult.Err
+// starts with "org: send: ", which `ralph org send` prints as it is.
 //
 // AC-11: an invalid message (unless Raw) is rejected before any manifest
 // event is appended and before any driver call is attempted -- Send fails
@@ -311,11 +312,13 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	if p.DryRun {
-		err := o.appendEvent(ManifestEvent{
+		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
 			DryRun: true, Details: rawPrefix + truncateForDetails(p.Text),
-		})
-		return SendResult{Err: err}
+		}); err != nil {
+			return SendResult{Err: fmt.Errorf("org: send: %w", err)}
+		}
+		return SendResult{}
 	}
 
 	seat, ok, err := o.findSeat(p.OrgID, p.To)

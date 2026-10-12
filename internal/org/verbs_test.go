@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -955,6 +956,27 @@ func TestOrgSend_DryRun_ValidMessage_AppendsEventWithoutDriverCalls(t *testing.T
 	last := events[len(events)-1]
 	if last.Event != EventSent || !last.DryRun {
 		t.Fatalf("expected a dry-run sent event, got %+v", last)
+	}
+}
+
+// A dry-run send whose event cannot be appended (the manifest path is a
+// directory) fails with an error that starts with "org: send: " like every
+// other error of Send, says it once, and keeps the append's cause.
+func TestOrgSend_DryRun_AppendFails_ErrorStartsWithTheSendPrefix(t *testing.T) {
+	o, h, a := testOrg(t)
+	manifest := t.TempDir()
+	o.Manifest = NewManifestStoreAtPath(manifest)
+
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: "TYPE: QUESTION\n\nwhich plan?", DryRun: true})
+	want := "org: send: org: open " + manifest + ": "
+	if result.Err == nil || !strings.HasPrefix(result.Err.Error(), want) || strings.Count(result.Err.Error(), "org: send:") != 1 {
+		t.Fatalf("dry-run send with a manifest that cannot be opened = %v; want it to start with %q", result.Err, want)
+	}
+	if !errors.Is(result.Err, syscall.EISDIR) {
+		t.Errorf("error %v does not wrap EISDIR; want the append's cause kept", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Errorf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
 	}
 }
 
