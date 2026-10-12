@@ -526,7 +526,15 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"A spawn, --dry-run included, is refused while no long-running\n" +
 			"`ralph org watch --all` (not stopping, not a --once run) runs on the\n" +
-			"ledger; the refusal says how to start one or stop a stale one.",
+			"ledger; the refusal says how to start one or stop a stale one.\n" +
+			"\n" +
+			"In an org started with `ralph org start --plan`, a spawn of any seat\n" +
+			"but the leader is refused while the org's leader seat is not running.\n" +
+			"When the org's approval mode (the [org.approval].mode recorded when\n" +
+			"the org was started) is per-plan, a spawn of a seat whose role is\n" +
+			"implementer is also refused until an approval recorded with\n" +
+			"`ralph org approve` since the org's last disband matches the plan\n" +
+			"file. Either refusal, --dry-run included, is recorded as `rejected`.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -885,7 +893,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
 			"included, is refused while no long-running `ralph org watch --all`\n" +
-			"(not stopping, not a --once run) runs on the ledger.",
+			"(not stopping, not a --once run) runs on the ledger.\n" +
+			"\n" +
+			"In an org started with `ralph org start --plan` whose approval mode is\n" +
+			"per-plan, a TASK to a seat whose role is implementer, --raw and\n" +
+			"--dry-run included, is refused with nothing recorded unless its header\n" +
+			"has exactly one `PLAN: <path in the worktree> sha256:<digest>` line\n" +
+			"and that plan matches an approval recorded with `ralph org approve`.\n" +
+			"The refusal says what the check found, then\n" +
+			"`refused by the approval check` and the next step.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
