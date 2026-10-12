@@ -1,6 +1,6 @@
-# 横断の見張りの検査の実機確認(org-watch-gate、/test cycle 1 と cycle 2)
+# 横断の見張りの検査の実機確認(org-watch-gate、/test cycle 1〜3)
 
-cycle 2(HEAD 755e082d)の確認は末尾の「cycle 2」の節にある。それより上は cycle 1(HEAD ae349cc4)の記録で、書き換えていない(この見出しとこの段落を足しただけ)。
+cycle 2(HEAD 755e082d)と cycle 3(HEAD d9321812)の確認は、末尾の「cycle 2」と「cycle 3」の節にある。それより上は cycle 1(HEAD ae349cc4)の記録で、書き換えていない(この見出しとこの段落を足しただけ)。
 
 - Date: 2026-10-12(実機確認は JST 14:50〜14:53、base との比較は 14:38〜14:41)
 - Plan: docs/plans/active/2026-10-12-org-watch-gate.md(AC1〜AC5、AC9、AC13〜AC15、F7、F10)
@@ -1091,5 +1091,379 @@ $ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yos
 $ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph-base org watch'
 [pgrep rc=1]
 $ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph org watch'
+[pgrep rc=1]
+```
+
+## cycle 3(HEAD d9321812)
+
+- Date: 2026-10-12(JST 20:55)
+- 目的: 8d8ddbd2(cross-review cycle 2 #1 の直し)のあと、repo の root に移って動く見張りの子が、相対の agmsg home を、打った場所から見た絶対のパスとして 1 つだけ受け取ることを、ビルドしたバイナリで確かめる。1 は `RALPH_ORG_AGMSG_HOME` の相対の値、2 は環境変数なしで `--config` の `agmsg_home` の相対の値を渡す。どちらも同じ手順を直す前のビルド(cycle 2 の HEAD 755e082d)でも打ち、手順が違いを捕まえられることを示す。3 では cycle 2 の後退の手順(同時の `--detach` 8 本のすぐあとの `--stop`)を 1 回打ち直す。最後に `pgrep` で何も残っていないことを確かめる
+- 環境: 隔離は cycle 1・2 と同じ(`env -i`、scratch の HOME と XDG、`SHELL=/bin/bash`、`osascript` を外した PATH)。herdr と agmsg は PATH になく、herdr のサーバーも立てていない。git は `/usr/bin/git`。HEAD は `go build -o <scratch>/c3/ralph ./cmd/ralph` でビルドし、対照には cycle 2 の `<scratch>/c2/ralph` を使った。利用者の herdr サーバーと `~/.config/herdr` には触れていない
+- 1 と 2 の台帳: 打つたびに、scratch の下に `git init` だけで repo を作った(コミットはない)。台帳はその既定の台帳 `<repo>/.harness/state/org` で、下の `pkg/sub` から `--state-dir` で名指した。repo の中なので、子は repo の root で動く。manifest には手で書いた `spawned` の座席を 1 つ置いた。見張りは最初のサイクルで org-a を見る。herdr がないので `herdr agent get` が失敗し、liveness の ALERT を送るために agmsg の `scripts/join.sh` と `scripts/send.sh` を呼ぶ
+- stub の agmsg home: `<repo>/pkg/agmsg-stub` に、`exit 0` だけのスクリプトを 2 つ置いた。`pkg/sub` から見た `../agmsg-stub` はこの stub で、root から見た `../agmsg-stub` は存在しない。子が使った agmsg home は 3 つの面から見た。`ps eww` で読む子の環境、`join.sh` が動いて 0 で終わったときだけ付く `watch-status-org-a.json` の `watchdog_joined: true`、それに子が呼べなかったスクリプトのパスを書く `watch.log` の ALERT の失敗の行である
+- 3 の台帳は、cycle 2 と同じく git の外の `--state-dir`
+- 1 回目の実行(`live3.out.try1`)では、子の環境の `RALPH_ORG_AGMSG_HOME` の数だけを出していた。値も出すようにスクリプトを直して打ち直し、下にはその 2 回目を貼った(数と、ほかの結果は 1 回目と同じ)
+- 打ったときの load average は 3.5〜3.7
+
+### 結果
+
+| 確認 | HEAD d9321812 | 対照: 755e082d |
+|---|---|---|
+| 1. `pkg/sub` から `RALPH_ORG_AGMSG_HOME=../agmsg-stub` で `--detach` | 子は root で動く(`lsof` の cwd)。環境の `RALPH_ORG_AGMSG_HOME` は 1 つで、`<repo>/pkg/agmsg-stub`(絶対)。`watchdog_joined: true` で、`watch.log` に ALERT の失敗はない | 子は root で動き、環境は `RALPH_ORG_AGMSG_HOME=../agmsg-stub` のまま。`watchdog_joined` はなく、`watch.log` に `bash: ../agmsg-stub/scripts/send.sh: No such file or directory` |
+| 2. `pkg/sub` から、環境変数なし、`--config ralph.toml`(`agmsg_home = "../agmsg-stub"`)で `--detach` | 子の argv は `--config <repo>/pkg/sub/ralph.toml`(絶対)。環境に `RALPH_ORG_AGMSG_HOME=<repo>/pkg/agmsg-stub` が 1 つ。`watchdog_joined: true` で、失敗はない | argv は HEAD と同じ。環境に `RALPH_ORG_AGMSG_HOME` はない。子は設定の `../agmsg-stub` を root から読み、1 と同じ `send.sh` の失敗になる |
+| 1・2 の共通 | `--detach` は rc 0 で 0.2 s、`--stop` は rc 0 で 0.7〜0.8 s。どの子も liveness の ALERT まで進んだ(状態ファイルに `org-a/worker-1/liveness@…` がある) | 同じ |
+
+| 確認 | 結果 |
+|---|---|
+| 3. 8 本の同時の `--detach` のすぐあとの `--stop`(HEAD、1 回) | 8 本すべて rc 0 で、`started` は 1 本。返るまでの時間は、`started` の本と子を起動しなかった本が 0.1〜0.2 s、子がロックの取り合いに負けた 4 本が 2.1 s。すべて返った時点の見張りのプロセスは 1 で、`--stop` は rc 0(0.9 s)、そのあと 0。`watch.log` の banner は 1 行で、負けた 4 本の子は拒否の 1 行ずつ |
+| 4. 終わり | どの台帳にも `--stop` を打ったあと、2 つのバイナリのどちらについても `pgrep -fl '<バイナリ> org watch'` は何も返さず rc 1 |
+
+対照のビルドでは 1 と 2 のどちらも、子が root から `../agmsg-stub` を読んで agmsg を呼べなかった。HEAD では、子の環境に入った絶対のパスで stub を呼べた。
+
+### スクリプトと出力(cycle 3)
+
+以下のコードブロックは、スクリプトと出力のファイルを、そのまま byte 単位で貼ったもの。
+
+#### live3.sh
+
+```bash
+#!/bin/bash
+# Live check of org-watch-gate, /test cycle 3 (HEAD d9321812), with the built
+# binary <c3>/ralph and, for the control, cycle 2's <c2>/ralph (755e082d,
+# before 8d8ddbd2). Same isolation as cycles 1 and 2: env -i, a scratch HOME
+# and XDG dirs, SHELL=/bin/bash, PATH = a dir of symlinks to every /usr/bin
+# and /bin entry except osascript (no herdr, no agmsg; git is /usr/bin/git).
+#
+# 1 and 2: each run gets a throwaway git repo <live>/<name> (git init, no
+# commit) whose default ledger <repo>/.harness/state/org is named with
+# --state-dir from the subdirectory <repo>/pkg/sub, so the detached watch
+# runs in the repo root. The ledger's manifest has one hand-written
+# `spawned` seat, so the watch's first cycle evaluates org-a: herdr is not
+# on PATH, so `herdr agent get` fails, the liveness ALERT goes out, and the
+# watch runs <agmsg home>/scripts/join.sh and send.sh. The stub agmsg home
+# <repo>/pkg/agmsg-stub holds only those two scripts (`exit 0`); it is
+# ../agmsg-stub from pkg/sub, and ../agmsg-stub from the root does not
+# exist. The child's environment is read with `ps eww` (its
+# RALPH_ORG_AGMSG_HOME and PWD entries), and its effect with
+# watchdog_joined in watch-status-org-a.json (join.sh ran and exited 0) and
+# the ALERT failure lines of watch.log (they name the script path the child
+# tried).
+# 3: cycle 2's regression procedure, once, on a ledger outside any repo.
+set -u
+SC=$(cd "$(dirname "$0")" && pwd)
+HEADBIN=$SC/ralph
+C2BIN=$(cd "$SC/.." && pwd)/c2/ralph
+L=$SC/live
+rm -rf "$L"
+mkdir -p "$L/home" "$L/bin" "$L/wd" "$L/xdg/config" "$L/xdg/data" "$L/xdg/state" "$L/xdg/cache" "$L/xdg/run"
+for d in /usr/bin /bin; do
+  for f in "$d"/*; do
+    n=${f##*/}
+    [ "$n" = osascript ] && continue
+    [ -e "$L/bin/$n" ] || ln -s "$f" "$L/bin/$n"
+  done
+done
+cleanup() {
+  pkill -9 -f "$HEADBIN org watch" 2>/dev/null
+  pkill -9 -f "$C2BIN org watch" 2>/dev/null
+}
+trap cleanup EXIT
+
+B=$HEADBIN
+r() {
+  env -i HOME="$L/home" PATH="$L/bin" SHELL=/bin/bash \
+    XDG_CONFIG_HOME="$L/xdg/config" XDG_DATA_HOME="$L/xdg/data" XDG_STATE_HOME="$L/xdg/state" \
+    XDG_CACHE_HOME="$L/xdg/cache" XDG_RUNTIME_DIR="$L/xdg/run" ${EXTRAENV:-} "$B" "$@"
+}
+now() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
+x() {
+  printf '\n$ %sralph' "${EXTRAENV:+$EXTRAENV }"; printf ' %q' "$@"; printf '\n'
+  local t0 t1 rc
+  t0=$(now); r "$@" 2>&1; rc=$?; t1=$(now)
+  printf '[rc=%d elapsed=%.1fs]\n' "$rc" "$(echo "$t1 - $t0" | bc)"
+}
+h() { printf '\n## %s\n' "$*"; }
+nwatch() { pgrep -f "$B org watch --all --state-dir $1" | wc -l | tr -d ' '; }
+
+# mkrepo <name>: the throwaway repo, its stub agmsg home, and a ledger with
+# one active seat of org-a.
+mkrepo() {
+  local R=$L/$1
+  mkdir -p "$R/pkg/sub" "$R/pkg/agmsg-stub/scripts" "$R/.harness/state/org"
+  env -i HOME="$L/home" PATH="$L/bin" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git init -q "$R"
+  printf '#!/bin/sh\nexit 0\n' > "$R/pkg/agmsg-stub/scripts/join.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$R/pkg/agmsg-stub/scripts/send.sh"
+  chmod +x "$R/pkg/agmsg-stub/scripts/join.sh" "$R/pkg/agmsg-stub/scripts/send.sh"
+  printf '{"ts":"%s","org_id":"org-a","seat_id":"worker-1","event":"spawned","role":"worker","driver":"claude","model":"sonnet"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$R/.harness/state/org/manifest.jsonl"
+}
+
+# relocated <repo> <tag> <args...>: run `org watch --all --detach
+# --state-dir <ledger> <args...>` from <repo>/pkg/sub, then show where the
+# child runs, its argv, what ps shows of it, and which agmsg home it used.
+relocated() {
+  local R=$L/$1 tag=$2 out pid i
+  shift 2
+  local LG=$R/.harness/state/org
+  echo
+  echo "### $tag"
+  echo "\$ cd $R/pkg/sub"
+  cd "$R/pkg/sub" || exit 1
+  out=$(x org watch --all --detach --state-dir "$LG" "$@")
+  printf '%s\n' "$out"
+  pid=$(printf '%s\n' "$out" | sed -n 's/^started ralph org watch --all (pid \([0-9]*\)).*/\1/p')
+  cd "$L/wd" || exit 1
+  [ -n "$pid" ] || { echo "(no child pid)"; return; }
+  for i in $(seq 1 100); do
+    grep -q '"pending_alerts"' "$LG/watch-status-org-a.json" 2>/dev/null && break
+    sleep 0.1
+  done
+  echo "\$ lsof -a -p $pid -d cwd -Fn | sed -n 's/^n//p'"; lsof -a -p "$pid" -d cwd -Fn | sed -n 's/^n//p'
+  echo "\$ ps -o args= -p $pid"; ps -o args= -p "$pid"
+  echo "\$ ps eww -o command= -p $pid | tr ' ' '\\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='"
+  ps eww -o command= -p "$pid" | tr ' ' '\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='
+  echo "\$ ps eww -o command= -p $pid | tr ' ' '\\n' | grep -c '^RALPH_ORG_AGMSG_HOME='"
+  ps eww -o command= -p "$pid" | tr ' ' '\n' | grep -c '^RALPH_ORG_AGMSG_HOME='
+  echo "\$ grep -o '\"watchdog_joined\": *[a-z]*' watch-status-org-a.json || echo '(no watchdog_joined: false)'"
+  grep -o '"watchdog_joined": *[a-z]*' "$LG/watch-status-org-a.json" || echo '(no watchdog_joined: false)'
+  echo "\$ grep -c '\"org-a/worker-1/liveness@' watch-status-org-a.json"
+  grep -c '"org-a/worker-1/liveness@' "$LG/watch-status-org-a.json"
+  echo "\$ cat watch.log"; cat "$LG/watch.log"
+  x org watch --stop --state-dir "$LG"
+}
+
+# eight <ledger> <tag>: 8 x --detach at once, each with its own elapsed time,
+# then --stop at once, then what is left (cycle 2's procedure).
+eight() {
+  local E=$1 tag=$2 pids=() i t0
+  echo "\$ 8 x ralph org watch --all --detach --state-dir $E (at once)"
+  t0=$(now)
+  for i in 1 2 3 4 5 6 7 8; do
+    ( s=$(now); r org watch --all --detach --state-dir "$E" > "$L/$tag-$i.out" 2>&1; rc=$?
+      printf 'rc=%d returned after %.1fs\n' "$rc" "$(echo "$(now) - $s" | bc)" >> "$L/$tag-$i.out" ) &
+    pids+=($!)
+  done
+  wait "${pids[@]}"
+  printf '(all 8 returned %.1fs after the first was started)\n' "$(echo "$(now) - $t0" | bc)"
+  for i in 1 2 3 4 5 6 7 8; do printf '%d: %s\n' "$i" "$(tr '\n' ' ' < "$L/$tag-$i.out")"; done
+  echo "ralph org watch processes on the ledger once all 8 returned: $(nwatch "$E")"
+  x org watch --stop --state-dir "$E"
+  sleep 0.5
+  echo "ralph org watch processes on the ledger after the --stop: $(nwatch "$E")"
+  echo "\$ grep -c '^watching every org' watch.log"; grep -c '^watching every org' "$E/watch.log"
+  echo "\$ grep -v '^watching every org' watch.log"; grep -v '^watching every org' "$E/watch.log"
+}
+
+cd "$L/wd" || exit 1
+echo "HEAD binary: $HEADBIN (built from d9321812)"
+echo "control binary: $C2BIN (built from 755e082d, /test cycle 2, before 8d8ddbd2)"
+echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+for n in A A0 B B0; do mkrepo "$n"; done
+echo "\$ ls -R $L/A/pkg"; ls -R "$L/A/pkg"
+echo "\$ cat $L/A/pkg/agmsg-stub/scripts/join.sh"; cat "$L/A/pkg/agmsg-stub/scripts/join.sh"
+echo "\$ cat $L/A/.harness/state/org/manifest.jsonl"; cat "$L/A/.harness/state/org/manifest.jsonl"
+echo "\$ ls $L/A/pkg/sub/../agmsg-stub $L/A/../agmsg-stub"; ls "$L/A/pkg/sub/../agmsg-stub" "$L/A/../agmsg-stub" 2>&1
+
+h "1. a relative RALPH_ORG_AGMSG_HOME (../agmsg-stub), run from pkg/sub"
+B=$HEADBIN
+EXTRAENV="RALPH_ORG_AGMSG_HOME=../agmsg-stub" relocated A "HEAD d9321812"
+B=$C2BIN
+EXTRAENV="RALPH_ORG_AGMSG_HOME=../agmsg-stub" relocated A0 "control: 755e082d"
+
+h "2. RALPH_ORG_AGMSG_HOME unset, --config ralph.toml of pkg/sub with agmsg_home = \"../agmsg-stub\""
+for n in B B0; do printf '[org]\nagmsg_home = "../agmsg-stub"\n' > "$L/$n/pkg/sub/ralph.toml"; done
+echo "\$ cat $L/B/pkg/sub/ralph.toml"; cat "$L/B/pkg/sub/ralph.toml"
+B=$HEADBIN
+relocated B "HEAD d9321812" --config ralph.toml
+B=$C2BIN
+relocated B0 "control: 755e082d" --config ralph.toml
+
+h "3. cycle 2's regression procedure: 8 concurrent --detach, then --stop at once (HEAD, 1 round)"
+B=$HEADBIN
+echo
+echo "### round 1 (HEAD)"
+eight "$L/R1" r1
+
+h "4. end: --stop on every ledger, then no ralph org watch process of either binary remains"
+for d in "$L"/A "$L"/A0 "$L"/B "$L"/B0; do
+  r org watch --stop --state-dir "$d/.harness/state/org" 2>&1 | grep -v 'is not running on' || true
+done
+r org watch --stop --state-dir "$L/R1" 2>&1 | grep -v 'is not running on' || true
+sleep 0.5
+echo "\$ pgrep -fl '$HEADBIN org watch'"; pgrep -fl "$HEADBIN org watch"; echo "[pgrep rc=$?]"
+echo "\$ pgrep -fl '$C2BIN org watch'"; pgrep -fl "$C2BIN org watch"; echo "[pgrep rc=$?]"
+```
+
+#### live3.sh の出力(2026-10-12 20:55 JST)
+
+```text
+HEAD binary: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/ralph (built from d9321812)
+control binary: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph (built from 755e082d, /test cycle 2, before 8d8ddbd2)
+date: 2026-10-12T11:55:47Z
+$ ls -R /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg
+agmsg-stub
+sub
+
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/agmsg-stub:
+scripts
+
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/agmsg-stub/scripts:
+join.sh
+send.sh
+
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/sub:
+$ cat /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/agmsg-stub/scripts/join.sh
+#!/bin/sh
+exit 0
+$ cat /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org/manifest.jsonl
+{"ts":"2026-10-12T11:55:47Z","org_id":"org-a","seat_id":"worker-1","event":"spawned","role":"worker","driver":"claude","model":"sonnet"}
+$ ls /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/sub/../agmsg-stub /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/../agmsg-stub
+ls: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/../agmsg-stub: No such file or directory
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/sub/../agmsg-stub:
+scripts
+
+## 1. a relative RALPH_ORG_AGMSG_HOME (../agmsg-stub), run from pkg/sub
+
+### HEAD d9321812
+$ cd /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/sub
+
+$ RALPH_ORG_AGMSG_HOME=../agmsg-stub ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org
+started ralph org watch --all (pid 40829); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org/watch.log
+[rc=0 elapsed=0.2s]
+$ lsof -a -p 40829 -d cwd -Fn | sed -n 's/^n//p'
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A
+$ ps -o args= -p 40829
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/ralph org watch --all --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org
+$ ps eww -o command= -p 40829 | tr ' ' '\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='
+PWD=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A
+RALPH_ORG_AGMSG_HOME=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/pkg/agmsg-stub
+$ ps eww -o command= -p 40829 | tr ' ' '\n' | grep -c '^RALPH_ORG_AGMSG_HOME='
+1
+$ grep -o '"watchdog_joined": *[a-z]*' watch-status-org-a.json || echo '(no watchdog_joined: false)'
+"watchdog_joined": true
+$ grep -c '"org-a/worker-1/liveness@' watch-status-org-a.json
+2
+$ cat watch.log
+watching every org (interval=30s once=false state-dir=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org (source: flag))
+
+$ RALPH_ORG_AGMSG_HOME=../agmsg-stub ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A/.harness/state/org
+stopped ralph org watch --all (pid 40829)
+[rc=0 elapsed=0.8s]
+
+### control: 755e082d
+$ cd /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/pkg/sub
+
+$ RALPH_ORG_AGMSG_HOME=../agmsg-stub ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/.harness/state/org
+started ralph org watch --all (pid 40947); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/.harness/state/org/watch.log
+[rc=0 elapsed=0.2s]
+$ lsof -a -p 40947 -d cwd -Fn | sed -n 's/^n//p'
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0
+$ ps -o args= -p 40947
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph org watch --all --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/.harness/state/org
+$ ps eww -o command= -p 40947 | tr ' ' '\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='
+RALPH_ORG_AGMSG_HOME=../agmsg-stub
+PWD=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0
+$ ps eww -o command= -p 40947 | tr ' ' '\n' | grep -c '^RALPH_ORG_AGMSG_HOME='
+1
+$ grep -o '"watchdog_joined": *[a-z]*' watch-status-org-a.json || echo '(no watchdog_joined: false)'
+(no watchdog_joined: false)
+$ grep -c '"org-a/worker-1/liveness@' watch-status-org-a.json
+2
+$ cat watch.log
+watching every org (interval=30s once=false state-dir=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/.harness/state/org (source: flag))
+watchdog: failed to ALERT leader for org "org-a" condition "liveness": bash: exit status 127: bash: ../agmsg-stub/scripts/send.sh: No such file or directory
+
+$ RALPH_ORG_AGMSG_HOME=../agmsg-stub ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/A0/.harness/state/org
+stopped ralph org watch --all (pid 40947)
+[rc=0 elapsed=0.7s]
+
+## 2. RALPH_ORG_AGMSG_HOME unset, --config ralph.toml of pkg/sub with agmsg_home = "../agmsg-stub"
+$ cat /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/pkg/sub/ralph.toml
+[org]
+agmsg_home = "../agmsg-stub"
+
+### HEAD d9321812
+$ cd /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/pkg/sub
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/.harness/state/org --config ralph.toml
+started ralph org watch --all (pid 41045); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/.harness/state/org/watch.log
+[rc=0 elapsed=0.2s]
+$ lsof -a -p 41045 -d cwd -Fn | sed -n 's/^n//p'
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B
+$ ps -o args= -p 41045
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/ralph org watch --all --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/.harness/state/org --config /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/pkg/sub/ralph.toml
+$ ps eww -o command= -p 41045 | tr ' ' '\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='
+PWD=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B
+RALPH_ORG_AGMSG_HOME=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/pkg/agmsg-stub
+$ ps eww -o command= -p 41045 | tr ' ' '\n' | grep -c '^RALPH_ORG_AGMSG_HOME='
+1
+$ grep -o '"watchdog_joined": *[a-z]*' watch-status-org-a.json || echo '(no watchdog_joined: false)'
+"watchdog_joined": true
+$ grep -c '"org-a/worker-1/liveness@' watch-status-org-a.json
+2
+$ cat watch.log
+watching every org (interval=30s once=false state-dir=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/.harness/state/org (source: flag))
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B/.harness/state/org
+stopped ralph org watch --all (pid 41045)
+[rc=0 elapsed=0.7s]
+
+### control: 755e082d
+$ cd /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/pkg/sub
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/.harness/state/org --config ralph.toml
+started ralph org watch --all (pid 41130); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/.harness/state/org/watch.log
+[rc=0 elapsed=0.2s]
+$ lsof -a -p 41130 -d cwd -Fn | sed -n 's/^n//p'
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0
+$ ps -o args= -p 41130
+/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph org watch --all --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/.harness/state/org --config /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/pkg/sub/ralph.toml
+$ ps eww -o command= -p 41130 | tr ' ' '\n' | grep -E '^(RALPH_ORG_AGMSG_HOME|PWD)='
+PWD=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0
+$ ps eww -o command= -p 41130 | tr ' ' '\n' | grep -c '^RALPH_ORG_AGMSG_HOME='
+0
+$ grep -o '"watchdog_joined": *[a-z]*' watch-status-org-a.json || echo '(no watchdog_joined: false)'
+(no watchdog_joined: false)
+$ grep -c '"org-a/worker-1/liveness@' watch-status-org-a.json
+2
+$ cat watch.log
+watching every org (interval=30s once=false state-dir=/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/.harness/state/org (source: flag))
+watchdog: failed to ALERT leader for org "org-a" condition "liveness": bash: exit status 127: bash: ../agmsg-stub/scripts/send.sh: No such file or directory
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/B0/.harness/state/org
+stopped ralph org watch --all (pid 41130)
+[rc=0 elapsed=0.7s]
+
+## 3. cycle 2's regression procedure: 8 concurrent --detach, then --stop at once (HEAD, 1 round)
+
+### round 1 (HEAD)
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1 (at once)
+(all 8 returned 2.2s after the first was started)
+1: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 2.1s 
+2: started ralph org watch --all (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 0.2s 
+3: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 2.1s 
+4: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 2.1s 
+5: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 0.1s 
+6: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 2.1s 
+7: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 0.1s 
+8: ralph org watch --all is already running (pid 41228); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch.log rc=0 returned after 0.1s 
+ralph org watch processes on the ledger once all 8 returned: 1
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1
+stopped ralph org watch --all (pid 41228)
+[rc=0 elapsed=0.9s]
+ralph org watch processes on the ledger after the --stop: 0
+$ grep -c '^watching every org' watch.log
+1
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 41228, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 41228, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 41228, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 41228, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/live/R1/watch-alive.json)
+
+## 4. end: --stop on every ledger, then no ralph org watch process of either binary remains
+$ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c3/ralph org watch'
+[pgrep rc=1]
+$ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph org watch'
 [pgrep rc=1]
 ```

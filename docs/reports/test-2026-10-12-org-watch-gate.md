@@ -1,5 +1,156 @@
 # Test report: org-watch-gate
 
+- Date: 2026-10-12(cycle 3。JST 20:42〜22:15。21:45 から 22:10 まで、API の接続エラーで中断した)
+- Plan: docs/plans/active/2026-10-12-org-watch-gate.md(承認済み、digest de5ca6b7e6f0)
+- Tester: tester subagent (Claude Opus 5.5)。pipeline cycle 3(上限を 3 に上げて回した。`cycle-count.json` は cross-review の skill の決まりで 2 のまま)。cycle 2 の test(926efd94)のあと、生き残りの K8 を閉じるテスト(47635690)と、cross-review cycle 2 #1 の直し(8d8ddbd2)が入ってからの実行。cycle 2 と cycle 1 の結果は末尾の「付録」に残してある
+- Scope: HEAD d9321812(base dc41c4f5)。cycle 2 の test のあとにコードを変えたのは 8d8ddbd2 だけで、`internal/cli/org_watch.go`(`orgWatchChildAgmsgHome` を足し、`orgWatchChild` に引数 `cfgAgmsgHome` を足した)と `internal/cli/org.go`(start の呼び手の 1 行)の 2 ファイル(+54/-8)。2fada512 はコメントだけ。テストは 47635690 と 8d8ddbd2 の 3 本で、`git diff --shortstat 755e082d..HEAD -- '*_test.go'` は +180/-0。behavioral test だけを実行した(静的解析は /verify の担当で、cycle 3 の verify は pass)。依頼のとおり、`run-test.sh` と `go test`(`-race` を含む)、`go test -overlay` の mutation(8d8ddbd2 の枝と K8 の 2 つの値)、隔離した実機確認を行った
+- Evidence: `docs/evidence/test-2026-10-12-org-watch-gate-c3.log`(`docs/evidence/*.log` は gitignore の対象で、手元にだけ残る。`git check-ignore` で確かめた)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-12-114320.log`(時刻は UTC)。実機確認は `docs/evidence/org-watch-gate-live-2026-10-12.md` の「cycle 3」の節(コミットする。コードブロックは生のファイルと byte 単位で同じ)
+- テストは足していない。mutant の写しは scratchpad の `owg-test/c3/` に置き、`go test -overlay` で使った。worktree で書いたのは、このレポート、実機の記録、insight event だけ
+
+## Latest run: cycle 3(HEAD d9321812)
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` | shell 40 本(PASS の行 4,081)、Go 8 パッケージ | すべて | 0 | shell 1(下の注) | 12 分 7 秒、rc 0 |
+| `go test ./... -count=1 -v -coverprofile` | top-level 1,447、subtest 1,597 | top-level 1,444、subtest 1,597 | 0 | 3 | 203 s(cli 200.3 s、org 46.7 s)、rc 0 |
+| `go test -race ./internal/org/ ./internal/cli/ -count=1` | 2 パッケージ | 2 | 0 | 0 | 216 s(org 44.6 s、cli 215.2 s)、rc 0 |
+| `go test -race -count=5 -run '<下の注>' -v`(org と cli) | top-level 1,035(207 本 × 5)、subtest 1,135 | すべて | 0 | 0 | 374 s、rc 0。`DATA RACE` は 0 件 |
+| mutation(`go test -overlay`、HEAD のテスト) | 18 件 | red 17 件 | 生き残り 1 件(等価、下の節) | - | 1 件 1〜8 s(対象のテストだけ)、生き残りは cli の全体で 187 s |
+| 実機確認(macOS、HEAD と cycle 2 の HEAD のビルド) | 下の「実機確認」 | すべて期待どおり | 0 | - | 31 s |
+
+- shell は、suite ごとの PASS・FAIL・SKIP の行の数が、cycle 1 と cycle 2 の `run-test.sh` の出力を同じ数え方で数え直したものと `diff` で一致した。Skipped は `tests/test-secret-scan-branch.sh` の 1 件(実物の git が 2.41 より古い場合で、git 2.49.0 では飛ばす)。cycle 1 と cycle 2 のレポートの「shell 3」は、`tests/test-lib-json.sh` と `tests/test-pre-bash-guard.sh` の集計の行 `SKIP: 0` も数えていた。3 回の出力は、どれも `SKIP: 0` の行が 2 本と、ほかの SKIP の行が 1 本で、変わっていない
+- Go の top-level は cycle 2 の 1,441 本 PASS から 3 本増え、消えたテストはない(名前の一覧を `comm` で比べた)。増えたのは `TestOrgWatchChildExitWait_OutlastsTheChildsLockWait`(47635690)、`TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild`(subtest 11)、`TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch`(subtest 2)で、subtest は cycle 2 の 1,584 から 13 増えた。Skipped の 3 件は cycle 1・2 と同じ(`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` と `internal/scaffold` の 2 件)
+- `-race -count=5` の `-run` は、cycle 2 の式に `ChildExitWait` を足したもの: `Gate|Start.*Watch|Detach|Probe|Alive|Stopping|Once|OnLocked|Send|RenderRolePrompt_Leader_Watch|StatusCmd_OrgWatch|OrgWatch_|RunWatchAll_|OrgStart_|ChildExitWait`。47635690 のテストの名前は、cycle 2 の式のどれにも当たらないため。この PR が足した 64 本(cycle 1 の 46 本、cycle 2 の 15 本、cycle 3 の 3 本)がすべて 207 本の中にあることを確かめた
+- 各実行の始まりと終わりの load average は 3.5〜8.4 で、cycle 2(7〜288)より低かった。依頼にあった 2 本(`TestCheckScaffoldIntegrity_GitignoreTemplateMarkersBroken_ManagedBlocksStrictFails`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)は、`run-test.sh`、`-count=1` の全体、`-race` のどれでも落ちなかったので、単独の再実行はしていない
+
+### Coverage
+
+- Statement: `internal/cli` 86.6%、`internal/org` 94.3% で、cycle 2 と同じ。ほかの 6 パッケージも cycle 2 と同じ
+- Function(8d8ddbd2 が変えた関数): `orgWatchChildAgmsgHome` は 90.9% で、残るのは `filepath.Abs` が失敗する枝だけ(作業ディレクトリが読めないときに限る)。`orgWatchChild` は cycle 2 の 93.8% から 90.9% になった。残る 2 つの枝は、子の引数(`orgWatchChildArgs`)のエラーを返すもの(前から)と、`orgWatchChildAgmsgHome` のエラーを返すもの(新しい)。`runOrgWatchDetach` と `wireOrgStartWatchGate` は 100%
+- Branch: Go の標準ツールには branch coverage がないので測っていない
+
+### cross-review cycle 2 #1 の直し(8d8ddbd2)とテストの対応
+
+repo の root に移って動く子に、相対の agmsg home を打った場所から見た絶対のパスで渡す規則を、次のテストが固定する。どちらも子の要求(作業ディレクトリと環境)を in-process の起動で受け取って見る。
+
+- `TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild`(`internal/cli/org_watch_test.go:1082`、11 通り)
+- `TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch`(`internal/cli/org_start_watch_test.go:689`、2 通り。leader の spawn までを通す)
+
+| 規則 | 固定する subtest(D は `--detach`、S は start) | 落とす mutant |
+| --- | --- | --- |
+| 環境変数の相対の値を、打った場所から絶対にする | D・S `a relative env value` | A1 |
+| 環境変数が空か無いときは、渡した `--config` の相対の `agmsg_home` を絶対にする | D・S `env unset, a relative agmsg_home in --config`、D `env empty, …` | A2、A3、A9、A10 |
+| 両方が相対なら環境変数が勝つ | D `a relative env value and a relative agmsg_home in --config` | A1、A6 |
+| 絶対の値と `~/` の値は書き換えない | D `an absolute env value`、`a ~/ env value`、`env unset, an absolute agmsg_home in --config`、`env unset, --config without agmsg_home`(設定の読み込みが既定の `~/.agents/skills/agmsg` を入れる) | A7、A11 |
+| `--config` なしと空の `--config` では書き換えない(子は root の `ralph.toml` を読む) | D `env unset, no --config, …`、`env unset, an empty --config, …` | A4、A8 |
+| 子が作業ディレクトリを変えないとき(repo の外の `--state-dir`)は書き換えない | D `--state-dir outside the repository, a relative env value` | A5 |
+| 子の環境の `RALPH_ORG_AGMSG_HOME` は 1 つ | すべての case(値の一覧を `slices.Equal` で比べる) | A6 |
+
+実機では、`--detach` で 1(相対の環境変数)と 2(`--config` の相対の `agmsg_home`)を確かめ、直す前の 755e082d のビルドを対照にした(下の「実機確認」)。
+
+### Mutation
+
+`scratchpad/owg-test/c3/mut3.py` は、cycle 2 の `mut2.py` の build・run・main をそのまま使い、mutant だけを入れ替えたもの。書き換える文字列がファイルに 1 回だけあることを当てる前に確かめ、18 件ともコンパイルが通った。
+
+走らせ方は 2 段にした。1 回目は 3 本に分けて、どの mutant にも `internal/cli` の全体を `-timeout 240s` で走らせたが、並べた負荷でパッケージが 240 秒を超え、6 件が終わったところで止めた。この結果は使っていない(`c3/attempt1/` に残した)。2 回目は、まず子の要求を見るテスト(`-run 'ARelativeAgmsgHome|InTheMainWorktree|StartDetachedProcess'`)だけを、K8 と K8b は 47635690 のテストだけを、`-timeout 900s` で走らせた。そこで生き残った 1 件(A8a)には `internal/cli` の全体を走らせた。red になった mutant は対象のテストが落としたので、全体を走らせても red は変わらない。「落としたテスト」は対象のテストの中だけを数えている。
+
+依頼の項目ごとの mutant は次の表のとおり。
+
+| 依頼 | mutant | 結果 |
+| --- | --- | --- |
+| 規則 1(環境変数の相対の値を絶対に)を消す | A1 | red |
+| 規則 2(渡した `--config` の相対の `agmsg_home` を絶対に)を消す | A2 | red |
+| 空の環境変数を無いものとして扱うのをやめる | A3(`os.LookupEnv` で、空でも設定ありとする) | red |
+| `configPath != ""` を消す | A4 | red |
+| `req.dir != ""` を消す | A5 | red |
+| 受け継いだ値を残す(2 つになる) | A6 | red |
+| `~/` の除外を消す | A7 | red |
+| `--config` がなくても設定の値を使う | A8(`--config` の条件をすべて消す) | red |
+| K8: `orgWatchChildExitWait` を 0 に、`org.DefaultWatchLockWait` に | K8、K8b | どちらも red |
+
+依頼にない 8 件も足した。`!cmd.Flags().Changed("config")` だけを消す A8a、2 つの呼び手が設定の値を渡さない A9 と A10、絶対の値の除外を消す A11 である。cycle 1 の C 系の mutant のうち `orgWatchChild` に当たる 4 件(C1、C3、C3b、C4)は、8d8ddbd2 がこの関数を変えたので走らせ直した(C1 と C3b は、書き換え先の行が変わったので新しい行に当てた)。cycle 1 と cycle 2 のほかの mutant は走らせ直していない。それらが書き換えるコードは cycle 2 のあと変わっておらず、それを落としたテストも消えも弱まりもしていない(`git diff 755e082d..HEAD -- '*_test.go'` に `-` の行はない)。
+
+全体は 18 件で、17 件が red、1 件(A8a)が生き残った。A8a は等価である。「落としたテスト」は `Test` を省き、`OrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild` を D、`OrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch` を S と書いた。
+
+| ID | 書き換え | 結果 | 落としたテスト(subtest) |
+| --- | --- | --- | --- |
+| A1 | 環境変数の相対の値を絶対にしない(子は受け継いだ相対の値を使う) | red | S と D の `a relative env value`、D の `a relative env value and a relative agmsg_home in --config` |
+| A2 | 渡した `--config` の相対の `agmsg_home` を絶対にしない | red | S と D の `env unset, a relative agmsg_home in --config`、D の `env empty, …` |
+| A3 | 空の `RALPH_ORG_AGMSG_HOME` を設定ありとする(`os.LookupEnv`) | red | D の `env empty, a relative agmsg_home in --config` |
+| A4 | `configPath != ""` を消す(空の `--config` でも読み込んだ設定の値を使う) | red | D の `env unset, an empty --config, …` |
+| A5 | `req.dir != ""` を消す(子が作業ディレクトリを変えなくても書き換える) | red | D の `--state-dir outside the repository, a relative env value` |
+| A6 | 受け継いだ `RALPH_ORG_AGMSG_HOME` を残す(子の環境に 2 つ) | red | S と D の `a relative env value`、D の `env empty, …`(受け継いだ空の値が残る)と `a relative env value and a relative agmsg_home in --config` |
+| A7 | `~/` の除外を消す(作業ディレクトリから絶対にする) | red | D の `a ~/ env value`、`env unset, --config without agmsg_home` |
+| A8 | `--config` の条件をすべて消す(`--config` がなくても設定の値を使う) | red | D の `env unset, no --config, …`、`env unset, an empty --config, …` |
+| A8a | `!cmd.Flags().Changed("config")` だけを消す | **生き残り**(等価、cli の全体) | - |
+| A9 | start の呼び手が設定の `agmsg_home` を渡さない | red | S の `env unset, a relative agmsg_home in --config` |
+| A10 | `--detach` の呼び手が設定の `agmsg_home` を渡さない | red | D の `env unset, a relative agmsg_home in --config`、`env empty, …` |
+| A11 | 絶対の値の除外を消す | red | D の `env unset, an absolute agmsg_home in --config`(環境変数の絶対の値は `filepath.Abs` で変わらず、等価になる) |
+| C1 | 子の環境に `HERDR_*` を残す | red | `OrgWatchDetach_TheChildRunsInTheMainWorktreeWithoutTheHerdrPaneEnv`、`OrgStart_TheWatchRunsInTheMainWorktreeWithoutTheHerdrPaneEnv` |
+| C3 | 子の PWD を新しい作業ディレクトリにしない | red | 同上 |
+| C3b | 子の環境に元の PWD も残す | red | 同上 |
+| C4 | 子の作業ディレクトリを設定しない | red | 同上と、S の 2 通りと D の 10 通り(repo の外の case のほかすべて) |
+| K8 | `orgWatchChildExitWait` を 0 に | red | `OrgWatchChildExitWait_OutlastsTheChildsLockWait`(`orgWatchChildExitWait = 0s; want longer than the child's own lock wait 2s`) |
+| K8b | `orgWatchChildExitWait` を `org.DefaultWatchLockWait` に(余裕なし) | red | 同上(`= 2s`) |
+
+#### 生き残った mutant
+
+- **A8a(等価)**: `--config` のフラグの既定は空の文字列なので、フラグを打たなければ `configPath` は空で、`configPath == ""` だけで同じ枝に入る。`!cmd.Flags().Changed("config")` は、その場合を名前で読めるようにしている条件で、動きは変わらない。`internal/cli` の全体(187 s)でも生き残った
+
+### 実機確認
+
+`docs/evidence/org-watch-gate-live-2026-10-12.md` の「cycle 3」の節に、スクリプト(`live3.sh`)と出力を byte 単位でそのまま貼った(貼ったあとでコードブロックを取り出して元のファイルと比べ、cycle 1 の 5 つ、cycle 2 の 2 つ、cycle 3 の 2 つがすべて一致した)。隔離は cycle 1・2 と同じで、`env -i`、scratch の HOME と XDG、`SHELL=/bin/bash`、`osascript` を外した PATH(herdr と agmsg はない)。herdr のサーバーは立てず、利用者の herdr サーバーと `~/.config/herdr` には触れていない。
+
+1 と 2 では、scratch の下に `git init` だけの repo を作り、その既定の台帳を下の `pkg/sub` から `--state-dir` で名指した。manifest に手で書いた座席が 1 つあるので、子は最初のサイクルで liveness の ALERT を送ろうとして、agmsg の `join.sh` と `send.sh` を呼ぶ。stub の agmsg home(`exit 0` だけの 2 つのスクリプト)は `pkg/sub` から `../agmsg-stub` で届き、root から見た `../agmsg-stub` は存在しない。
+
+| # | 確認 | HEAD d9321812 | 対照: 755e082d(直す前) |
+| --- | --- | --- | --- |
+| 1 | `RALPH_ORG_AGMSG_HOME=../agmsg-stub` で `--detach` | 子は root で動き(`lsof` の cwd)、`ps eww` で読んだ環境の `RALPH_ORG_AGMSG_HOME` は 1 つで、`<repo>/pkg/agmsg-stub`(絶対)。`watchdog_joined: true` になり、`watch.log` に ALERT の失敗はない | 子の環境は `../agmsg-stub` のまま。`watch.log` に `bash: ../agmsg-stub/scripts/send.sh: No such file or directory` が出て、`watchdog_joined` は付かない |
+| 2 | 環境変数なし、`--config ralph.toml`(`agmsg_home = "../agmsg-stub"`)で `--detach` | 子の argv は絶対の `--config`。環境に `RALPH_ORG_AGMSG_HOME=<repo>/pkg/agmsg-stub` が 1 つあり、`watchdog_joined: true`、失敗はない | 環境に `RALPH_ORG_AGMSG_HOME` はなく、子は設定の `../agmsg-stub` を root から読んで、1 と同じ失敗になる |
+| 3 | cycle 2 の後退の手順(同時の `--detach` 8 本のすぐあとの `--stop`)を HEAD で 1 回 | 8 本すべて rc 0 で、`started` は 1 本。子がロックの取り合いに負けた 4 本は 2.1 s、ほかは 0.1〜0.2 s で返った。すべて返った時点の見張りは 1 つで、`--stop` は rc 0(0.9 s)、そのあと 0。banner は 1 行 | - |
+| 4 | 終わり | どの台帳にも `--stop` を打ったあと、2 つのバイナリのどちらについても `pgrep -fl '<バイナリ> org watch'` は何も返さず rc 1 | 同じ |
+
+1 回目の実行では、子の環境の `RALPH_ORG_AGMSG_HOME` の数だけを出していた。値も出すようにスクリプトを直して打ち直し、記録には 2 回目を貼った(数とほかの結果は 1 回目と同じ)。
+
+`ralph org start` が起動する子の環境は、実機では見ていない(テストの S だけが見る)。
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | テストの失敗はない。mutation の 1 回目の時間切れは、mutant ではなく `-timeout 240s` が並べた負荷に足りなかったため(使わずに走らせ直した) | - |
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 2 #1: root に移って動く子が、相対の agmsg home を root から読む | 直った | D と S、mutant A1〜A11(等価の A8a を除く)と C4、実機 1・2(755e082d のビルドでは今も再現する) |
+| cycle 2 の生き残り K8: 本番の `orgWatchChildExitWait` を固定するテストがない | 閉じた | `TestOrgWatchChildExitWait_OutlastsTheChildsLockWait`(47635690)、mutant K8 と K8b |
+| cycle 1 の「見つけたこと」: 同時の `--detach` のすぐあとの `--stop` が効かず、別の見張りが残る | 直ったまま | 実機 3 |
+| tech-debt 205: 子が打った worktree と herdr の pane の環境を引き継ぐ | 直ったまま | mutant C1・C3・C3b・C4(8d8ddbd2 が変えた `orgWatchChild` に当てて、すべて red) |
+| cycle 1・2 で確かめた動き | 変わらない | 名前のまま全テストが通る。`-race -count=5` の 207 本 |
+
+### Test gaps
+
+- K8 は 47635690 で閉じた(cycle 2 のレポートは、probe 6 が閉じるがコミットしていないとして、開いたままにしていた)。足されたテストは値を `org.DefaultWatchLockWait` と比べるもので、cycle 2 の probe 6 のように、自分で終わる子を止めずに待つ動きまでは見ない。それでも K8(0)と K8b(余裕なし)はどちらも落ちる
+- `orgWatchChildAgmsgHome` の `filepath.Abs` の失敗と、`orgWatchChild` がそれを返す枝は通らない。作業ディレクトリが読めないときだけの枝で、テストも実機の確かめもない
+- `ralph org start` が起動する子の環境は、in-process の起動のテスト(S)だけが見ていて、実機では `--detach` だけを確かめた
+- cycle 2 の Test gaps のうち、返る前の別の端末からの `--stop`、子が負けた `--detach` と start の約 2 秒の遅れ、C2-1 の流れ、cycle 1 から残るもの(本物の後始末の間の拒否、AC8 の座席の `wait` と inbox の動詞、AC6 の main worktree の台帳での実機の起動、Linux、herdr のある実機)は、そのまま残る(付録)
+- そのうち AC6 の main worktree の中の台帳での実機の起動は、main worktree の台帳を `--state-dir` で名指した `--detach` について、この cycle の実機 1・2 で子が root で動くことを見た。`--state-dir` なしの既定の台帳と start は、実機では見ていない
+
+## Verdict
+
+- Verdict: pass
+- Pass: `./scripts/run-test.sh` は rc 0(shell 40 本、Go 8 パッケージ)。全パッケージを `-count=1` で流し直して 0 fail(top-level 1,444 本が PASS、cycle 2 より 3 本多く、消えたテストはない)。`-race`(org と cli)と、この PR のテスト 64 本を含む 207 本の `-race -count=5` も 0 fail で、DATA RACE は 0 件。依頼の mutant(8d8ddbd2 の枝の A1〜A8 と、K8 の 2 つの値)はすべて落ちた。18 件のうち 17 件が red で、生き残りは等価の A8a だけ。実機では、相対の環境変数と `--config` の相対の `agmsg_home` のどちらでも、root で動く子が絶対のパスを 1 つ受け取って stub の agmsg を呼べた。直す前のビルドでは同じ手順で呼べなかった。cycle 2 で確かめた後退の直しも、同じ手順で効いたまま
+- Fail: 0
+- Blocked: なし
+
+## 付録: cycle 2 の結果(HEAD 755e082d の時点)
+
+cycle 2 の header(Date から、テストを足していない旨の行まで)と本文を、そのとき書いたまま残す。見出しはどれも 1 段下げ、「Latest run: cycle 2(HEAD 755e082d)」は「cycle 2 の実行(HEAD 755e082d)」に、`## Verdict` は「判定(cycle 2)」に変えた。cycle 2 が開いたままとした K8 は 47635690 で閉じた(上の Test gaps)。cycle 1 の付録は、その下に cycle 2 のときのまま残す。
+
 - Date: 2026-10-12(cycle 2。JST 18:06〜19:05)
 - Plan: docs/plans/active/2026-10-12-org-watch-gate.md(承認済み、digest de5ca6b7e6f0)
 - Tester: tester subagent (Claude Opus 5.5)。pipeline cycle 2(`cycle-count.json` は 2、上限 2)。cycle 1 の test(a0149a10)が実機で見つけた後退の直し(fdfb5b23)と、self-review cycle 2 の C2-1〜C2-3 の直し(3fb0fd1b)のあとの実行。cycle 1 の結果は末尾の「付録」に残してある
@@ -7,9 +158,9 @@
 - Evidence: `docs/evidence/test-2026-10-12-org-watch-gate-c2.log`(`docs/evidence/*.log` は gitignore の対象で、手元にだけ残る。`git check-ignore` で確かめた)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-12-090609.log`(時刻は UTC)。実機確認は `docs/evidence/org-watch-gate-live-2026-10-12.md` の「cycle 2」の節(コミットする。コードブロックは生の出力と byte 単位で同じ)
 - テストは足していない。mutant の写しと probe のテストは scratchpad の `owg-test/c2/` に置き、`go test -overlay` で使った。worktree で書いたのは、このレポート、実機の記録、insight event だけ
 
-## Latest run: cycle 2(HEAD 755e082d)
+### cycle 2 の実行(HEAD 755e082d)
 
-### Test execution
+#### Test execution
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- |
@@ -26,13 +177,13 @@
 - `-race -count=5` の `-run` は cycle 1 の式に `OrgStart_` を足したもの: `Gate|Start.*Watch|Detach|Probe|Alive|Stopping|Once|OnLocked|Send|RenderRolePrompt_Leader_Watch|StatusCmd_OrgWatch|OrgWatch_|RunWatchAll_|OrgStart_`。この PR が足した 61 本(cycle 1 の 46 本と cycle 2 の 15 本)がすべて 204 本の中にあることを確かめた
 - ほかのセッションの負荷で、load average は実行中に 7〜288 まで動いた(`run-test.sh` の終わりは 288、`go test ./...` の終わりは 274)。それでも落ちたテストはなく、cycle 1 で名前の出た 2 本(`TestCheckScaffoldIntegrity_…`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)も落ちなかった
 
-### Coverage
+#### Coverage
 
 - Statement: `internal/cli` 86.6%、`internal/org` 94.3%(cycle 1 は 86.5% と 94.3%)。ほかの 6 パッケージは cycle 1 と同じ
 - Function(cycle 2 で変わった関数): `ensureOrgWatch`、`runOrgWatchDetach`、`orgWatchDetachRefusal`、`wireOrgStartWatchGate`、`CommandWithStateDir`、`watchGateCommand` は 100%。`wireOrgWatchGate` は 85.7% から 100% になった(本番の settle の既定の枝を、取り込まれた `TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds` が通る)。`launchAndAwaitOrgWatch` は 92.0% から 97.4% になり、残るのは子の要求(`orgWatchChildArgs` の `filepath.Abs`)が失敗する枝だけ
 - Branch: Go の標準ツールには branch coverage がないので測っていない
 
-### cycle 1 の「見つけたこと」は直ったか
+#### cycle 1 の「見つけたこと」は直ったか
 
 直った。cycle 1 で後退を見つけた手順(同じ新しい台帳に `--detach` を 8 本同時に打ち、すべて返った直後に `--stop`)を HEAD のビルドで 3 回打った。
 
@@ -48,7 +199,7 @@ cycle 1 の HEAD のビルドでは同じ手順が今も後退を再現するの
 
 残る穴は計画の Progress と self-review の C2-4 のとおり、`--detach` か start が返る前に、別の端末から `--stop` を打った場合である。ロックを待つ見張りがあとを取ることは base にもあり(cycle 1 の付録の「base との比較」の 1 行目。foreground の `watch --all` も同じ)、この PR では変わらない。
 
-### AC とテストの対応(cycle 1 からの変更)
+#### AC とテストの対応(cycle 1 からの変更)
 
 cycle 1 の表(付録)から変わった行だけを書く。ほかの AC は、コードもテストも cycle 1 のあと変わっていないので、付録の対応がそのまま使える。テストはすべて HEAD で通った。
 
@@ -60,7 +211,7 @@ cycle 1 の表(付録)から変わった行だけを書く。ほかの AC は、
 | AC15 最初の印の前の stale を待つ | `TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds`(`internal/cli/org_watch_gate_test.go:248`)、`TestOrgWatchDetach_AStaleHolderThatEndsDuringTheWait_LaunchesTheWatch`(`org_watch_test.go:956`)、`TestOrgStart_AStaleHolderThatEndsDuringTheWait_LaunchesTheWatch`(`org_start_watch_test.go:550`) | - | なし(cycle 1 の S4 と E4 は閉じた) |
 | C2-3 案内の `--state-dir`(AC1 と AC4 の文) | `TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir`(`org_watch_test.go:871`。stale、stopping、ロックを放さない子 × `--state-dir` の有無)、`TestOrgStart_AStoppedWatchThatKeepsTheLock_NamesRalphStatusWithAnExplicitStateDir` | 実機 cycle 2(stale の案内に `--stop --state-dir '<台帳>'` が付き、`RALPH_ORG_STATE_DIR` で指したときは付かない。stopping の案内に `--detach --state-dir '<台帳>'` が付く) | なし |
 
-### Mutation
+#### Mutation
 
 `scratchpad/owg-test/c2/mut2.py` は cycle 1 の `mut.py` の写しに、cycle 2 の mutant(K1〜K10)を足したもの。書き換える文字列がファイルに 1 回だけあることを当てる前に確かめた。cycle 1 の mutant は、cycle 2 で変わった関数に当たるもの(E1、E1b、E2、E5、E6、L1、X1、X2、X3、T10)を走らせ直した。E2 は書き換え先の行がなくなったので、同じ意味(自分の子の pid のときだけ成功)の新しい形にし、T10 は新しい引数に合わせた。cycle 2 で変わっていないコードの mutant(G、W、P、D、M、B、S1、S3、N、T1〜T9、C、ST)は走らせ直していない。それを落としたテストは cycle 2 で消えも弱まりもしていない(テストの `-` の行は案内の文の 2 行だけ)。32 件ともコンパイルが通った。CLI の mutant は `internal/cli` の全体を、K10 は `internal/org` を走らせた。3 本に分けて並べて走らせた。
 
@@ -114,13 +265,13 @@ cycle 1 の表(付録)から変わった行だけを書く。ほかの AC は、
 | X1 | `--detach` がどの見張りにも `started` と言う | red | 8 本(`OrgWatchDetach_AnotherWatchRuns_ReturnsOnlyOnceItsChildHasExited` を含む) |
 | X2 | `--detach` の `--once` への拒否を stopping の文に | red | `OrgWatchDetach_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefused`、`OrgWatchDetach_AStoppingOrOnceWatch_StartsNothing` |
 
-#### 生き残った mutant
+##### 生き残った mutant
 
 - **K8**: 本番の `orgWatchChildExitWait`(`org.DefaultWatchLockWait` + 1 秒 = 3 秒)を固定するテストはない。子の終わりを待つテストはどれも値を自分で設定する(3 s、200 ms、100 ms)。0 にすると、ほかの見張りが受け付けた次の判定で子を止める。本番の `stop` は子が終わるまで待つので、返るまでの時間はほぼ変わらないが、待つ間にほかの見張りが終わって子がロックを取る場合に、`started` ではなく「止めた子のあとに見張りがいない」の拒否になる。probe 6 は値を設定せずに、300 ms 後に終わる子を止めずに待つことと、値が子のロックの待ち以上であることを見る(HEAD で `-count=3` が通り、K8 で落ちる)。実機の 2.3〜2.6 s は子が自分で終わった時間で、この値の確かめにはならない
 - **K9(等価)**: 止めたあとに `exited` を nil にしないと、次の待ちが閉じた channel で 1 回だけ待たずに抜ける。本番の `stop` も偽の子の `stop` も、`exited` が閉じてから返るので、違いは判定が 1 回早まることだけ
 - **T2(等価)**: cycle 1 と同じ(付録)
 
-#### Probe のテスト
+##### Probe のテスト
 
 cycle 1 の probe 1〜5(付録)は fdfb5b23 で 8 本のテストとして取り込まれ、どれも cycle 1 の生き残りを落とした(上の表の S4、E4、E7、E7c、E7d、E8)。続きの番号で 1 本を書いた。scratchpad の `owg-test/c2/probe/zz_probe_owg_c2_test.go`(`internal/cli`)にあり、`go test -overlay`(`c2/probe-head.json`)で足した。コミットしていない。
 
@@ -130,7 +281,7 @@ cycle 1 の probe 1〜5(付録)は fdfb5b23 で 8 本のテストとして取り
 
 依頼のとおり、テストは足していない。足すかは orchestrator が決める。
 
-### 実機確認
+#### 実機確認
 
 `docs/evidence/org-watch-gate-live-2026-10-12.md` の「cycle 2」の節に、スクリプト(`live2.sh`)と出力を byte 単位でそのまま貼った(貼ったあとでコードブロックを取り出して元のファイルと比べ、cycle 1 の 5 つと cycle 2 の 2 つがすべて一致した)。隔離は cycle 1 と同じで、`env -i`、scratch の HOME と XDG、`osascript` を外した PATH(herdr と agmsg はない)、台帳はすべて repo の外の `--state-dir`。利用者の herdr サーバーと `~/.config/herdr` には触れていない。
 
@@ -145,13 +296,13 @@ cycle 1 の probe 1〜5(付録)は fdfb5b23 で 8 本のテストとして取り
 
 本物の見張りの後始末の間(stopping)と、C2-1 の流れ(子を止めている間に、ほかの見張りが終わるか替わる)は、実機では作れなかった。どちらもテスト(偽の子と手で置いた印)だけが見ている。
 
-### Failure analysis
+#### Failure analysis
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
 | なし | - | テストの失敗はない。load average が 200 を超えた時間帯の実行でも落ちなかった | - |
 
-### Regression checks
+#### Regression checks
 
 | Previously broken behavior | Status | Evidence |
 | --- | --- | --- |
@@ -162,7 +313,7 @@ cycle 1 の probe 1〜5(付録)は fdfb5b23 で 8 本のテストとして取り
 | cycle 1 の生き残り 6 件(S4、E4、E7、E7c、E7d、E8) | テストが落とす | 上の Mutation の表 |
 | cycle 1 で確かめた動き(spawn と TASK の拒否、start の起動、stale の待ち、`--once` と stopping への拒否など) | 変わらない | 名前のまま全テストが通る。`-race -count=5` の 204 本 |
 
-### Test gaps
+#### Test gaps
 
 - `--detach` か start が返る前に、別の端末から `--stop` を打つと、ロックを待つ子があとを取りうる(base にもある。foreground の `watch --all` も同じ)。計画と self-review の C2-4 のとおり tech-debt に書く予定のもので、テストも実機の確かめもない
 - 本番の `orgWatchChildExitWait` の値(mutant K8)。probe 6 が閉じる(コミットしていない)
@@ -170,7 +321,7 @@ cycle 1 の probe 1〜5(付録)は fdfb5b23 で 8 本のテストとして取り
 - C2-1 の流れ(子を止めている間に、ほかの見張りが終わる、止まりかける、替わる)は偽の子のテストだけで、実機では見ていない
 - cycle 1 の Test gaps のうち、本物の後始末の間の拒否、AC8 の座席の `wait` と inbox の動詞、AC6 の main worktree の台帳での実機の起動、Linux、herdr のある実機は、そのまま残る(付録)
 
-## Verdict
+### 判定(cycle 2)
 
 - Verdict: pass
 - Pass: `./scripts/run-test.sh` は rc 0(shell 40 本、Go 8 パッケージ)。全パッケージを `-count=1` で流し直して 0 fail(top-level 1,441 本が PASS、cycle 1 より 15 本多く、消えたテストはない)。`-race`(org と cli)と、この PR のテスト 61 本を含む 204 本の `-race -count=5` も 0 fail で、DATA RACE は 0 件。依頼の mutant(新しい枝の K1〜K7e と cycle 1 の生き残り 6 件)はすべて落ちた。32 件のうち 29 件が red で、生き残りは等価の 2 件と、probe 6 が閉じる K8 の 1 件。cycle 1 で見つけた後退は直った: 同じ手順で HEAD は 3 回とも `--stop` が効いて何も残らず、cycle 1 の HEAD のビルドでは今も再現し、base とも合う。案内の `--state-dir` も実機で確かめた
