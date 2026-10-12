@@ -677,13 +677,21 @@ per-plan の org では、次の検査がかかる。
   - TASK の `PLAN:` のヘッダがない、2 行ある、形が違う: `TASK_ID:` の次の行に
     1 行付けて送り直す。
   - TASK の `PLAN:` の digest が今のファイルのものと違い(承認し直す前の
-    digest か打ち間違い)、今の digest なら照合を通る: 拒否の文がその digest を
-    書くので、ヘッダを `PLAN: <path> sha256:<その digest>` に直して送り直す。
-  - TASK の `PLAN:` が承認し直す前の digest で、今の digest の承認は記録
-    されているのに先頭の 2 行がまだ古い(Draft と TBD のまま、または前の
-    digest のまま): 拒否の文は先頭の 2 行のものになり、今の digest を書く
-    ので、2 行をその digest で書いてコミットする。同じ TASK を送り直すと
-    前の項目の拒否になるので、`PLAN:` をその digest に直して送り直す。
+    digest か打ち間違い)、今の digest がその計画の最新の承認で照合を通る:
+    拒否の文がその digest を書くので、ヘッダを
+    `PLAN: <path> sha256:<その digest>` に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest で、今の digest が最新の承認なのに
+    先頭の 2 行がまだ古い(Draft と TBD のまま、または前の digest のまま):
+    拒否の文は先頭の 2 行のものになり、今の digest を書くので、2 行をその
+    digest で書いてコミットする。同じ TASK を送り直すと前の項目の拒否になる
+    ので、`PLAN:` をその digest に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest か打ち間違いで、今のファイルは
+    最新の承認の版だが、承認のあとに digest が読まない場所(Progress
+    checklist のメモ、`- Branch:` の行など)が変わった: 拒否の文は今の digest
+    の「承認のあとに計画が変わった」になるので、その変更だけを戻す。
+  - 今のファイルの digest が最新の承認でなければ(TASK が最新の承認を書き、
+    ファイルが変わったか、前に承認した版に戻った、など)、拒否の文は TASK の
+    digest についてのもののままで、ほかの digest へは案内しない。
   - そのほか(結びつきが不完全、計画のファイルがない、worktree の外を
     指す): BLOCKED を escalate する。
 

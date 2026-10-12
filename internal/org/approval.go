@@ -407,9 +407,10 @@ const (
 	approvalRefusalPlanChanged
 	// approvalRefusalTaskHeader: the TASK has no PLAN: header, two of them,
 	// or a malformed one (ParsePlanHeader), or its PLAN: names a digest that
-	// is not the plan's current one while the current one passes the check
-	// (checkTaskPlanApproved). The leader puts one on the TASK, or changes
-	// it to name the current digest, and sends the TASK again.
+	// is not the plan's current one while the current one is the plan's
+	// latest approval and passes the check (checkTaskPlanApproved). The
+	// leader puts one on the TASK, or changes it to name the current digest,
+	// and sends the TASK again.
 	approvalRefusalTaskHeader
 )
 
@@ -448,25 +449,39 @@ func approvalCheckErrorOf(err error) approvalCheckError {
 // checkTaskPlanApproved is the approval check of text, a TASK to an
 // implementer seat of orgID, bound to f: text names one plan in its header
 // (ParsePlanHeader, whose errors become approvalRefusalTaskHeader reasons)
-// and checkPlanApproved passes that plan. When checkPlanApproved refuses it
-// for no approval of its digest or for a plan changed since, while the
-// plan's file has another digest now (currentPlanRef), the header names an
-// old or mistyped digest, and checkPlanApproved of the current digest picks
-// the refusal (self-review N1 of org-plan-approval): the next steps of the
-// two kinds above would have the leader undo the plan a human approved last
-// or ask again. When the current digest passes, the refusal is of kind
+// and checkPlanApproved passes that plan.
+//
+// When checkPlanApproved refuses it for no approval of its digest or for a
+// plan changed since, the header may name an old or mistyped digest of a
+// plan whose file holds the version a human approved last: the digest the
+// file has now (currentPlanRef), which is not the TASK's, is the plan's
+// latest approval in orgID's current life (latestApprovedDigest). Then
+// checkPlanApproved of the current digest picks the refusal (self-review N1
+// and N6 of org-plan-approval), since the next steps of the TASK's own
+// refusal would have the leader undo the version a human approved last or
+// ask again. When the current digest passes, the refusal is of kind
 // approvalRefusalTaskHeader with the current digest, whose next step tells
 // the leader to name it. When the current digest is refused for the plan's
-// two header lines (approvalRefusalPlanHeader), it is approved but the lines
-// do not say so yet, as when the plan was approved again and the leader has
-// not written them since: that refusal, of the current digest, is returned,
-// whose next step tells the leader to write the lines naming it.
-// The TASK then goes through in two steps: sent again with the same PLAN:,
-// it gets the approvalRefusalTaskHeader refusal, which tells the leader to
-// change its PLAN: header to the current digest. Any other refusal of the
-// current digest leaves the refusal of the TASK's own. checkPlanApproved
-// itself is left as it is: checkAnyPlanApproved runs it for a spawn, which
-// names no plan.
+// two header lines (approvalRefusalPlanHeader), the plan was approved again
+// and the leader has not written the lines since, and that refusal, whose
+// next step writes the lines naming the current digest, is returned; sent
+// again with the same PLAN: once they are written, the TASK gets the
+// approvalRefusalTaskHeader refusal. When the current digest is refused as a
+// plan changed after its approval where its digest does not show (a Progress
+// checklist note, a - Branch: line), that refusal is returned too, whose
+// next step undoes only that change. Any other refusal of the current digest
+// leaves the TASK's own refusal.
+//
+// The refusal moves the TASK only to the latest approval (self-review N7 and
+// cross-review #2 of org-plan-approval). When the TASK names the latest
+// approval, as the leader template has it do, the file's digest is another
+// one: the plan was changed after that approval or set back to an earlier
+// approved version, and the TASK's own refusal, whose next step undoes the
+// change, is returned. When the file's digest is an earlier approval, or no
+// approval, moving the TASK to it would have the leader implement a version
+// a human replaced, so the TASK's own refusal is returned as well.
+// checkPlanApproved itself is left as it is: checkAnyPlanApproved runs it for
+// a spawn, which names no plan.
 func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, text string) error {
 	ref, err := ParsePlanHeader(text)
 	if err != nil {
@@ -479,17 +494,20 @@ func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBindi
 	if kind := approvalCheckErrorOf(err).kind; kind != approvalRefusalNoApproval && kind != approvalRefusalPlanChanged {
 		return err
 	}
+	// current.Digest is not ref.Digest, so a TASK naming the latest approval
+	// keeps its own refusal here too.
 	current, ok := currentPlanRef(f, ref)
-	if !ok {
+	if !ok || current.Digest != latestApprovedDigest(currentPlanApprovals(events, orgID), ref.Path) {
 		return err
 	}
 	currentErr := checkPlanApproved(events, orgID, f, current)
-	switch {
-	case currentErr == nil:
+	if currentErr == nil {
 		return approvalCheckError{kind: approvalRefusalTaskHeader, plan: current.Path, digest: current.Digest,
 			err: fmt.Errorf("org: the TASK's PLAN: header names sha256:%s of plan %s of org_id %q, and the plan's current approved digest is sha256:%s",
 				ref.Digest, ref.Path, orgID, current.Digest)}
-	case approvalCheckErrorOf(currentErr).kind == approvalRefusalPlanHeader:
+	}
+	switch approvalCheckErrorOf(currentErr).kind {
+	case approvalRefusalPlanHeader, approvalRefusalPlanChanged:
 		return currentErr
 	default:
 		return err
@@ -531,26 +549,34 @@ func checkPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, 
 		return approvalRefusalf(approvalRefusalOther,
 			"org: org_id %q has no complete split plan feature binding, so no plan approval can be checked", orgID)
 	}
+	approvals := currentPlanApprovals(events, orgID)
 	var matching []planApproval
-	latest := ""
-	for _, a := range currentPlanApprovals(events, orgID) {
-		if a.Plan != ref.Path {
-			continue
-		}
-		latest = a.Digest
-		if a.Digest == ref.Digest {
+	for _, a := range approvals {
+		if a.Plan == ref.Path && a.Digest == ref.Digest {
 			matching = append(matching, a)
 		}
 	}
 	if len(matching) == 0 {
 		since := ""
-		if latest != "" {
+		if latest := latestApprovedDigest(approvals, ref.Path); latest != "" {
 			since = fmt.Sprintf(" (its latest approval is of sha256:%s)", latest)
 		}
 		return approvalRefusalf(approvalRefusalNoApproval,
 			"org: org_id %q has no approval recorded for plan %s since its last disband%s", orgID, ref, since)
 	}
 	return checkApprovedPlanFile(orgID, f, ref, matching)
+}
+
+// latestApprovedDigest is the digest of the plan at path that a human
+// approved last: that of the last of approvals (currentPlanApprovals, in file
+// order) for path, or "" when none is for it.
+func latestApprovedDigest(approvals []planApproval, path string) string {
+	for i := len(approvals) - 1; i >= 0; i-- {
+		if approvals[i].Plan == path {
+			return approvals[i].Digest
+		}
+	}
+	return ""
 }
 
 // checkApprovedPlanFile is the file half of checkPlanApproved: approvals are

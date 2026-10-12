@@ -266,7 +266,16 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // role is implementer must then name, in exactly one PLAN: header, a plan
 // checkPlanApproved passes. A refusal appends no event and makes no driver
 // call, and is a taskNotSentError for which errors.Is(err,
-// ErrPlanNotApproved) holds.
+// ErrPlanNotApproved) holds. On the real path Send runs the approval check
+// once more, on a fresh read of the manifest, after the wait for the seat to
+// go idle and before it types anything: while Send waits, a seat at work
+// (the implementer the TASK is for, among others) can rewrite the plan in
+// the same feature worktree, so the check before the wait no longer says
+// what the TASK would start (cross-review #1 of org-plan-approval). That
+// refusal is the same as the first one, with nothing typed, nothing
+// recorded, and Progress left at SendProgressNothingSent. The watch gate is
+// not run again: it is a check at the time of the call (plan
+// 2026-10-12-org-watch-gate).
 //
 // No-resend design decision: Send presses Enter at most once, ever, per
 // call -- see confirmSubmitted's doc comment for why a second Enter is
@@ -313,17 +322,14 @@ func (o *Org) Send(p SendParams) SendResult {
 			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
 		}
 	}
-	if parseErr == nil && msg.Type == protocol.TypeTask {
+	isTask := parseErr == nil && msg.Type == protocol.TypeTask
+	if isTask {
 		if err := o.checkWatchGate(); err != nil {
 			return SendResult{Err: taskNotSentError{refusal: err}}
 		}
 		// The approval check runs next, before the dry-run branch, so a
 		// refusal records nothing and dry-run predicts it.
-		rr, err := o.Manifest.Read()
-		if err != nil {
-			return SendResult{Err: fmt.Errorf("org: send: read manifest: %w", err)}
-		}
-		if err := sendApprovalErr(rr.Events, p); err != nil {
+		if err := o.checkSendApproval(p); err != nil {
 			return SendResult{Err: err}
 		}
 	}
@@ -377,6 +383,15 @@ func (o *Org) Send(p SendParams) SendResult {
 	// perfectly receptive seat (found by the PR③ live smoke).
 	if _, err := o.Herdr.AgentWait(ctx, name, []string{"idle", "done"}, timeoutMS); err != nil {
 		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done: %w", p.To, err)}
+	}
+
+	// The approval check again, now that the seat is idle: the plan may have
+	// changed while Send waited (see Send's doc comment). The watch gate is
+	// not run again.
+	if isTask {
+		if err := o.checkSendApproval(p); err != nil {
+			return SendResult{Err: err}
+		}
 	}
 
 	// Fail closed *before* typing anything: Send always builds ctx via
@@ -476,6 +491,17 @@ func (o *Org) Send(p SendParams) SendResult {
 // check alike.
 func sendSeatNotFoundErr(p SendParams) error {
 	return fmt.Errorf("org: send: seat %q not found in org_id %q", p.To, p.OrgID)
+}
+
+// checkSendApproval is sendApprovalErr of p against the manifest as it is
+// now: Send runs it before the dry-run branch and again after the wait for
+// the seat to go idle.
+func (o *Org) checkSendApproval(p SendParams) error {
+	rr, err := o.Manifest.Read()
+	if err != nil {
+		return fmt.Errorf("org: send: read manifest: %w", err)
+	}
+	return sendApprovalErr(rr.Events, p)
 }
 
 // sendApprovalErr is Send's approval check of a TASK p against events (see

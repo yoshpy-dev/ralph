@@ -939,7 +939,16 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 // plan-header refusal of the current digest, word for word, whose step
 // writes the lines naming it; (e2) once they are written, the same TASK gets
 // the step to change its PLAN: header to the current digest, and a TASK
-// naming it passes.
+// naming it passes. Only the plan's latest approval is moved to (self-review
+// N7 and cross-review #2): with the plan approved again and its file set back
+// to the first approval's version, (f) a TASK naming the latest approval gets
+// the plan-changed refusal of its own digest, and (g) a TASK with a mistyped
+// digest gets its own no-approval refusal, neither naming the first
+// approval's digest in its next step, although that version passes the check.
+// (h) When the file holds the latest approval but changed since where its
+// digest does not show (a Progress checklist note), a TASK naming an old or
+// mistyped digest gets checkPlanApproved's plan-changed refusal of the
+// current digest, word for word (self-review N6).
 func TestCheckTaskPlanApproved_StaleOrMistypedDigest(t *testing.T) {
 	refusal := func(t *testing.T, fx *checkFixture, text string) (approvalCheckError, string) {
 		t.Helper()
@@ -1076,6 +1085,87 @@ func TestCheckTaskPlanApproved_StaleOrMistypedDigest(t *testing.T) {
 			assertRestated(t, r, msg, fx.ref.Digest, next.Digest)
 			if err := checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, planTask(next)); err != nil {
 				t.Fatalf("a TASK naming the digest the refusal names = %v; want it to pass", err)
+			}
+		})
+	}
+
+	// assertOwnRefusal checks that the TASK naming named is refused with
+	// checkPlanApproved's reason for named, word for word, of kind, and that
+	// its next step neither changes the PLAN: header nor names notNamed.
+	assertOwnRefusal := func(t *testing.T, fx *checkFixture, named PlanRef, kind approvalRefusalKind, notNamed string) {
+		t.Helper()
+		want := checkPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, named)
+		if want == nil || approvalCheckErrorOf(want).kind != kind {
+			t.Fatalf("checkPlanApproved of %s = %v; want a refusal of kind %d", named, want, kind)
+		}
+		r, msg := refusal(t, fx, planTask(named))
+		if r.kind != kind || r.digest != "" || r.Error() != want.Error() {
+			t.Fatalf("reason %q of kind %d, digest %q; want checkPlanApproved's %q of kind %d", r, r.kind, r.digest, want, kind)
+		}
+		_, next, _ := strings.Cut(msg, "; "+planNotApprovedMarker+": ")
+		if strings.Contains(msg, taskHeaderRestated) || strings.Contains(next, notNamed) || !strings.Contains(next, nextStepSignatures[kind]) {
+			t.Errorf("refusal %q: want only the step of kind %d, naming no sha256:%s", msg, kind, notNamed)
+		}
+	}
+	// setBackToFirst approves the plan again and then sets its file back to
+	// the first approval's version with that approval's two header lines,
+	// which passes the check; it returns the latest approval's ref.
+	setBackToFirst := func(t *testing.T, fx *checkFixture) PlanRef {
+		t.Helper()
+		next := fx.reapprove(t)
+		fx.markApproved(t, nil)
+		if err := checkPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, fx.ref); err != nil {
+			t.Fatalf("checkPlanApproved of the first approval, set back = %v; want it to pass", err)
+		}
+		return next
+	}
+	t.Run("(f) the file set back to the first approval, the PLAN digest of the latest approval", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		next := setBackToFirst(t, fx)
+		assertOwnRefusal(t, fx, next, approvalRefusalPlanChanged, fx.ref.Digest)
+	})
+	t.Run("(g) the file set back to the first approval, a mistyped PLAN digest", func(t *testing.T) {
+		fx := newCheckFixture(t)
+		next := setBackToFirst(t, fx)
+		assertOwnRefusal(t, fx, PlanRef{Path: testPlanRel, Digest: mistypedDigest}, approvalRefusalNoApproval, fx.ref.Digest)
+		if _, msg := refusal(t, fx, planTask(PlanRef{Path: testPlanRel, Digest: mistypedDigest})); !strings.Contains(msg, "(its latest approval is of sha256:"+next.Digest+")") {
+			t.Errorf("refusal %q; want it to name the latest approval sha256:%s", msg, next.Digest)
+		}
+	})
+
+	progressNote := replaceOnce("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n")
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, fx *checkFixture) (named, current PlanRef)
+	}{
+		{"the PLAN digest of the first approval after the plan was approved again", func(t *testing.T, fx *checkFixture) (PlanRef, PlanRef) {
+			next := fx.reapprove(t)
+			writePlan(t, fx.worktree, testPlanRel, progressNote(approvedPlanText(revised, next.Digest)))
+			return fx.ref, next
+		}},
+		{"a mistyped PLAN digest", func(t *testing.T, fx *checkFixture) (PlanRef, PlanRef) {
+			fx.record(t)
+			fx.markApproved(t, progressNote)
+			return PlanRef{Path: testPlanRel, Digest: mistypedDigest}, fx.ref
+		}},
+	} {
+		t.Run("(h) a Progress note added after the latest approval: "+tc.name, func(t *testing.T) {
+			fx := newCheckFixture(t)
+			named, current := tc.setup(t, fx)
+			changedErr := checkPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, current)
+			if changedErr == nil || approvalCheckErrorOf(changedErr).kind != approvalRefusalPlanChanged ||
+				!strings.Contains(changedErr.Error(), "which its digest "+current.Digest+" does not show") {
+				t.Fatalf("checkPlanApproved of the current digest = %v; want the refusal of a change its digest does not show", changedErr)
+			}
+			r, msg := refusal(t, fx, planTask(named))
+			if r.kind != approvalRefusalPlanChanged || r.Error() != changedErr.Error() {
+				t.Fatalf("reason %q of kind %d; want checkPlanApproved's %q of the current digest, of kind %d (plan changed)",
+					r, r.kind, changedErr, approvalRefusalPlanChanged)
+			}
+			for _, notWant := range []string{taskHeaderRestated, "approved digest " + named.Digest, "has no approval recorded"} {
+				if strings.Contains(msg, notWant) {
+					t.Errorf("refusal %q; want no %q", msg, notWant)
+				}
 			}
 		})
 	}

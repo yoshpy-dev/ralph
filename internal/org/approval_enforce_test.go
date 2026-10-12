@@ -1,6 +1,7 @@
 package org
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -286,6 +287,89 @@ func TestOrgSend_ApprovalCheck_PassesAndApprovedAgain(t *testing.T) {
 		` of org_id "org-a", and the plan's current approved digest is sha256:`+newRef.Digest+"; ")
 	assertTaskRefused(t, stale, planNotApprovedMarker+": the leader changes the TASK's PLAN: header to PLAN: "+newRef.String()+
 		" and sends the TASK again; ")
+}
+
+// planEditingHerdr is fakeHerdr whose first AgentWait, Send's wait for the
+// seat to go idle, runs onWait before it returns: the seat at work edits the
+// plan while Send waits for it.
+type planEditingHerdr struct {
+	*fakeHerdr
+	onWait func()
+}
+
+func (h *planEditingHerdr) AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error) {
+	out, err := h.fakeHerdr.AgentWait(ctx, target, until, timeoutMS)
+	if h.onWait != nil {
+		onWait := h.onWait
+		h.onWait = nil
+		onWait()
+	}
+	return out, err
+}
+
+// TestOrgSend_ApprovalCheck_AgainAfterTheWait covers cross-review #1 of
+// org-plan-approval: Send runs the approval check again after it waits for
+// the seat to go idle, so a TASK whose plan changed while Send waited (in
+// its digest, or only where the digest does not show) is refused, typed and
+// raw alike, with nothing typed (no PaneSendText, no PaneSendKeys) and the
+// manifest and the receipts byte for byte as they were. The controls: a wait
+// during which the plan does not change, or only a checkbox is ticked, sends
+// the TASK. TestOrgSend_ApprovalCheck_PassesAndApprovedAgain sends with the
+// plain fake.
+func TestOrgSend_ApprovalCheck_AgainAfterTheWait(t *testing.T) {
+	cases := []struct {
+		name    string
+		edit    func(string) string // the edit of the plan during the wait; nil: none
+		refused string              // what the refusal contains; "": sent
+	}{
+		{"the plan changed while Send waited", replaceOnce("Add the login form.", "Add the signup form."),
+			"changed after its approval: approved digest "},
+		{"a Progress checklist line added while Send waited",
+			replaceOnce("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n"),
+			"changed after its approval outside its - Status: and - Approved: lines and checkbox marks"},
+		{"nothing changed while Send waited", nil, ""},
+		{"a checkbox ticked while Send waited", replaceOnce("- [ ] AC1", "- [x] AC1"), ""},
+	}
+	for _, tc := range cases {
+		for _, raw := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s raw=%v", tc.name, raw), func(t *testing.T) {
+				fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+				seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+				fx.record(t)
+				fx.mark(t, nil)
+				waited := false
+				fx.o.Herdr = &planEditingHerdr{fakeHerdr: fx.h, onWait: func() {
+					waited = true
+					if tc.edit != nil {
+						fx.mark(t, tc.edit)
+					}
+				}}
+				manifest, receipts := fileOrAbsent(t, fx.o.Manifest.Path()), fileOrAbsent(t, fx.o.Receipts.Path())
+				r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), Raw: raw})
+				if !waited {
+					t.Fatalf("send = %+v without waiting for the seat; want the wait first", r)
+				}
+				if tc.refused == "" {
+					if r.Err != nil || r.Progress != SendProgressEnterPressed {
+						t.Fatalf("send = %+v; want it sent", r)
+					}
+					if last := lastEvent(t, fx.o); last.Event != EventSent || last.DryRun || last.SeatID != implementerSeatID {
+						t.Fatalf("last event = %+v; want sent to the implementer", last)
+					}
+					return
+				}
+				assertTaskRefused(t, r, tc.refused)
+				for _, call := range fx.h.calls {
+					if call == "pane_send_text" || call == "pane_send_keys" {
+						t.Fatalf("herdr calls %v; want nothing typed after the second approval check refused", fx.h.calls)
+					}
+				}
+				if fileOrAbsent(t, fx.o.Manifest.Path()) != manifest || fileOrAbsent(t, fx.o.Receipts.Path()) != receipts {
+					t.Fatal("a TASK refused after the wait changed the manifest or the receipts")
+				}
+			})
+		}
+	}
 }
 
 // TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest covers self-review N1
