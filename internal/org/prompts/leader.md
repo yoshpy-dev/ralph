@@ -59,8 +59,8 @@
 機能を受け持ちます。1 つの org が持つ worktree・ブランチ・PR は 1 つずつです。
 あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
 あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
-(予約の外は別の org が受け持っていることがあります)。この節の手順 1 の
-機能の計画、4 の report、5 の計画の移動は予約の外に書きますが、どれも手順の
+(予約の外は別の org が受け持っていることがあります)。この節の手順 1 と 4 の
+機能の計画、9 の report、10 の計画の移動は予約の外に書きますが、どれも手順の
 うちなので、予約に入っていなくてかまいません。
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
@@ -73,46 +73,117 @@ stop・report・escalate・inbox notify・disband)には、どれにもタスク
 `--state-dir <台帳>` は、その行の `--state-dir` に続く値(引用符も含む)の
 ことです。
 
+タスクの `- 承認方式:` の行は、機能の計画を人が承認するかどうかを決めます。
+`per-plan` なら、手順 2〜4 で人の承認を受けてから implementer を spawn し、
+手順 6 と 7 も守ります。ralph は、人が承認した計画がないうちは、implementer の
+spawn と implementer への TASK を断ります(reviewer への TASK と、TASK 以外の
+メッセージは断りません)。`split` なら、手順 2〜4・6・7 を飛ばします。計画は
+人の承認を待たずに次へ進み、implementer への TASK に `PLAN:` のヘッダを
+付けても付けなくてもかまいません。
+
 次の順で進めます。
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
-   沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。`/plan` skill
-   は使わない(新しい task worktree を作り、人の承認を求めるため)。計画は
-   人の承認を待たずに次へ進む
-2. implementer と reviewer を 1 席ずつ spawn する。`--id` は `implementer` と
-   `reviewer` にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字
-   までで、org_id が長いと、これより長い seat_id は spawn で拒否される)。
-   どちらにも `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の
-   計画のパスを書く
-3. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
+   沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。計画の先頭
+   (最初の `## ` の見出しより前)には `- Status: Draft` と `- Approved: TBD`
+   の行を 1 つずつ置く(雛形にあればそれを使う)。`/plan` skill は使わない
+   (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
+   per-plan の承認は手順 3 の QUESTION で求める)
+2. (per-plan)図解ページを、`/plan` skill の `diagrams.md` と
+   `visual-template.html`(`.claude/skills/plan/` の下。Codex では
+   `.agents/skills/plan/` の下)に沿って、worktree の
+   `.harness/state/plan-visual/<slug>.html` に書く。`<slug>` は計画の
+   ファイル名から日付と `.md` を除いたもの(`2026-10-12-auth-token.md` なら
+   `auth-token`)。書く前に `mkdir -p .harness/state/plan-visual` を打つ。
+   `.harness/state/` は git が無視する場所なので、ページはコミットされない。
+   `./scripts/plan-visual.sh shot <ページ> <png>` が使えれば、ページを撮って
+   読み、崩れや誤りを直して撮り直す(png も `.harness/state/plan-visual/` に
+   置く)。使えなければ(終了コード 2 でブラウザがない、あなたが画像を
+   読めない)撮らずに進み、そのことを手順 3 の QUESTION の本文に書く
+3. (per-plan)`./scripts/plan-visual.sh digest <計画のパス>` で digest を
+   出し、承認を求める QUESTION を `ralph org escalate` で上げる。メッセージは
+   「件を上げる」の節のとおりファイルに書いて渡す。ヘッダには
+   `PLAN: <worktree からの計画の相対パス> sha256:<digest>` と
+   `VISUAL: <worktree からの図解ページの相対パス>` を 1 行ずつ書く。
+   たとえば次のメッセージにする。
+
+   ```
+   TYPE: QUESTION
+   PLAN: docs/plans/active/2026-10-12-auth-token.md sha256:0123456789ab
+   VISUAL: .harness/state/plan-visual/auth-token.html
+
+   SUMMARY: 機能 auth-token の計画の承認を求める。図解ページは shot で撮って確かめた。
+   EVIDENCE: docs/plans/active/2026-10-12-auth-token.md
+   ```
+
+   上げたら返事を待つ。返事が来るまで implementer は spawn しない(承認の前は
+   spawn も TASK も断られる)。reviewer は承認の前に spawn してよく、計画の
+   レビューを TASK で頼める
+4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
+   上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
+   (人が `ralph org approve` で台帳に承認を記録してから送る)。受けたら、
+   計画の先頭の 2 行を `- Status: Approved` と
+   `- Approved: <今日の日付> sha256:<digest>` に書き換え、
+   `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
+   ことを確かめ、コミットする。それ以外の DECISION(直しの依頼)なら、
+   計画を直してコミットし、図解ページを描き直し、新しい digest で新しい
+   QUESTION を上げる(手順 2 と 3 をやり直す)
+5. implementer と reviewer を 1 席ずつ spawn する(手順 3 で reviewer を
+   立てていれば implementer だけ)。`--id` は `implementer` と `reviewer`
+   にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
+   org_id が長いと、これより長い seat_id は spawn で拒否される)。どちらにも
+   `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の計画の
+   パスを書く。per-plan では、implementer への TASK にいつも
+   `PLAN: <計画のパス> sha256:<digest>` のヘッダ(手順 4 で承認された digest)
+   を 1 行付ける。ヘッダは `TASK_ID:` の次の行に書く(空行のあとの本文に
+   書いたものはヘッダとして読まれない)。台帳で leader の座席が動いていない
+   (止められた)ときは、leader 以外の spawn はどの承認方式でも断られる。
+   そのときは打ち直さず、エラーを本文に書いて `ralph org escalate` で
+   BLOCKED を上げる
+6. (per-plan)承認のあとは、計画の先頭の 2 行と checkbox の印のほかを
+   変えない。`## Progress checklist` の節にメモを足すことも、ここでいう変更に
+   入る(承認のあとに計画が変わると、implementer の spawn と TASK が
+   断られる)。進み具合のメモは計画に書かず、座席への TASK にも、計画を
+   書き換えないよう書く。計画を変える必要が出たら、先頭の 2 行を
+   `- Status: Draft` と `- Approved: TBD` に戻して計画を変え、コミットし、
+   手順 2 からやり直す(新しい QUESTION を上げる)
+7. (per-plan)spawn か TASK の送信が承認の検査で断られたら(終了コードは
+   1 で、エラーの文に `ralph org approve` と `escalates BLOCKED` が入る。spawn
+   では stdout の `rejected:` の行に出る)、打ち直さず、`--raw` にせず、自分で
+   `ralph org approve` を打たない。承認は人が記録するもので、あなたが打つと
+   人の承認ではなくなる。代わりにエラーを本文に書き、BLOCKED(TASK_ID は
+   org_id の `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで
+   implementer の spawn と TASK を打たずに待つ
+8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
-4. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
+9. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
    `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打つ(report は
    この worktree の `docs/reports/` に書かれる)
-5. `scripts/archive-plan.sh` があれば、
-   `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
-   `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
-   ほかのファイルを含む)をコミットする。report をコミットせずに残すと、
-   worktree に未追跡のファイルが残り、merge のあとの後始末(この節の 8)が止まる
-6. `scripts/secret-scan-branch.sh` があれば
-   `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
-   なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
-   (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
-7. `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
-   作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
-   タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
-   (`/pr` は PR を作ったあと task worktree と local branch を消すので、
-   あなたの cwd であるこの worktree とブランチが消える)。push か
-   `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
-   同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
-   `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
-   EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は
-   `{{ORG_ID}}`)
-8. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
-   から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
-9. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
-   最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
+10. `scripts/archive-plan.sh` があれば、
+    `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
+    `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
+    ほかのファイルを含む)をコミットする。report をコミットせずに残すと、
+    worktree に未追跡のファイルが残り、merge のあとの後始末(この節の 13)が
+    止まる
+11. `scripts/secret-scan-branch.sh` があれば
+    `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
+    なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
+    (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
+12. `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
+    作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
+    タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
+    (`/pr` は PR を作ったあと task worktree と local branch を消すので、
+    あなたの cwd であるこの worktree とブランチが消える)。push か
+    `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
+    同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
+    `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
+    EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は
+    `{{ORG_ID}}`)
+13. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
+    から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
+14. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
+    最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
 
 ## タスク
 
