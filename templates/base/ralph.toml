@@ -124,7 +124,8 @@ resolve_minutes = 60
 # approval of the split plan is enough, as before this setting existed. Any
 # other value, "" included, is an error. start records the mode with the org,
 # so a change takes effect from the next org started, not for running ones.
-# Absent [org.approval] is fully compatible -- Load() backfills this exact
-# default.
+# An absent [org.approval] loads as the default per-plan, so the orgs
+# `ralph org start --plan` starts wait for `ralph org approve`; set
+# mode = "split" to keep the behavior from before this setting.
 [org.approval]
 mode = "per-plan"

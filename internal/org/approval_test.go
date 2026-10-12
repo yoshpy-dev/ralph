@@ -1,10 +1,10 @@
 package org
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -304,17 +304,19 @@ func TestReadFeaturePlanHeader(t *testing.T) {
 		want featurePlanHeader
 	}{
 		{"both before the first ## heading", "# t\n\n- Status: Approved \n- Approved: 2026-10-12 sha256:0123456789ab\n\n## Objective\n",
-			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approvedDigest: "0123456789ab"}},
-		{"the first of each is read", "# t\n- Status: Draft\n- Status: Approved\n- Approved: TBD\n- Approved: x sha256:0123456789ab\n## O\n",
-			featurePlanHeader{hasStatus: true, status: "Draft", hasApproved: true}},
+			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approved: "2026-10-12 sha256:0123456789ab", approvedDigest: "0123456789ab"}},
+		{"the first of each is read", "# t\n- Status: Draft\n- Status: Approved\n- Approved: TBD\n- Approved: 2026-10-12 sha256:0123456789ab\n## O\n",
+			featurePlanHeader{hasStatus: true, status: "Draft", hasApproved: true, approved: "TBD"}},
 		{"no sha256 value on the Approved line", "- Status: Approved\n- Approved: 2026-10-12 sha256:0123456789AB\n",
-			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true}},
-		{"lines after the first ## heading are not read", "# t\n\n## Objective\n\n- Status: Approved\n- Approved: x sha256:0123456789ab\n",
+			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approved: "2026-10-12 sha256:0123456789AB"}},
+		{"words after the digest on the Approved line (L2)", "- Status: Approved\n- Approved: 2026-10-12 sha256:0123456789ab and also X\n",
+			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approved: "2026-10-12 sha256:0123456789ab and also X"}},
+		{"lines after the first ## heading are not read", "# t\n\n## Objective\n\n- Status: Approved\n- Approved: 2026-10-12 sha256:0123456789ab\n",
 			featurePlanHeader{}},
 		{"a ### heading does not end the header", "# t\n### note\n- Status: Approved\n", featurePlanHeader{hasStatus: true, status: "Approved"}},
 		{"an indented line is not the header line", "# t\n  - Status: Approved\n", featurePlanHeader{}},
-		{"CRLF lines are trimmed", "- Status: Approved\r\n- Approved: x sha256:0123456789ab\r\n",
-			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approvedDigest: "0123456789ab"}},
+		{"CRLF lines are trimmed", "- Status: Approved\r\n- Approved: 2026-10-12 sha256:0123456789ab\r\n",
+			featurePlanHeader{hasStatus: true, status: "Approved", hasApproved: true, approved: "2026-10-12 sha256:0123456789ab", approvedDigest: "0123456789ab"}},
 		{"neither line", "# t\n\n## Objective\n", featurePlanHeader{}},
 		{"an empty file", "", featurePlanHeader{}},
 	}
@@ -322,6 +324,37 @@ func TestReadFeaturePlanHeader(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := readFeaturePlanHeader([]byte(tc.plan)); got != tc.want {
 				t.Fatalf("readFeaturePlanHeader = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApprovedLineDigest covers self-review L2 of org-plan-approval: an
+// `- Approved:` value names its digest only when it is exactly the two
+// fields the leader writes, a valid date and sha256:<12 lowercase hex>, so
+// nothing can be added to the one line both hashes leave out.
+func TestApprovedLineDigest(t *testing.T) {
+	const digest = "0123456789ab"
+	for _, tc := range []struct{ name, value, want string }{
+		{"the shape the leader writes", "2026-10-12 sha256:" + digest, digest},
+		{"spaces and tabs around and between the fields", "  2026-10-12 \t sha256:" + digest + " ", digest},
+		{"words after the digest", "2026-10-12 sha256:" + digest + " and also implement X", ""},
+		{"a third field between the two", "2026-10-12 alice sha256:" + digest, ""},
+		{"the two fields swapped", "sha256:" + digest + " 2026-10-12", ""},
+		{"a month that does not exist", "2026-13-01 sha256:" + digest, ""},
+		{"a day that does not exist", "2026-02-30 sha256:" + digest, ""},
+		{"a date not zero-padded", "2026-1-5 sha256:" + digest, ""},
+		{"a word for the date", "today sha256:" + digest, ""},
+		{"TBD", "TBD", ""},
+		{"the digest alone", "sha256:" + digest, ""},
+		{"no sha256: prefix", "2026-10-12 " + digest, ""},
+		{"upper-case hex", "2026-10-12 sha256:0123456789AB", ""},
+		{"13 hex digits", "2026-10-12 sha256:" + digest + "c", ""},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := approvedLineDigest(tc.value); got != tc.want {
+				t.Fatalf("approvedLineDigest(%q) = %q, want %q", tc.value, got, tc.want)
 			}
 		})
 	}
@@ -463,14 +496,6 @@ func (fx *checkFixture) markApproved(t *testing.T, edit func(string) string) {
 }
 
 func TestCheckPlanApproved(t *testing.T) {
-	replace := func(from, to string) func(string) string {
-		return func(s string) string {
-			if !strings.Contains(s, from) {
-				panic("the plan has no " + strconv.Quote(from))
-			}
-			return strings.Replace(s, from, to, 1)
-		}
-	}
 	cases := []struct {
 		name    string
 		setup   func(t *testing.T, fx *checkFixture)
@@ -483,7 +508,7 @@ func TestCheckPlanApproved(t *testing.T) {
 		}},
 		{name: "boxes ticked after the approval", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("- [ ] AC1", "- [x] AC1"))
+			fx.markApproved(t, replaceOnce("- [ ] AC1", "- [x] AC1"))
 		}},
 		{name: "the PLAN path given uncleaned is the same plan", ref: func(fx *checkFixture) PlanRef {
 			ref, err := ParsePlanHeader("TYPE: TASK\nTASK_ID: t\nPLAN: ./docs//plans/active/2026-10-12-auth.md sha256:" + fx.ref.Digest)
@@ -544,38 +569,48 @@ func TestCheckPlanApproved(t *testing.T) {
 		}},
 		{name: "the plan changed after the approval", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("Add the login form.", "Add the signup form."))
+			fx.markApproved(t, replaceOnce("Add the login form.", "Add the signup form."))
 		}, wantErr: "changed after its approval: approved digest "},
 		{name: "a line added under the Progress checklist (AC14)", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n"))
+			fx.markApproved(t, replaceOnce("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n"))
 		}, wantErr: "changed after its approval outside its - Status: and - Approved: lines and checkbox marks"},
 		{name: "the Branch line changed (AC14)", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("- Branch: feat/auth", "- Branch: main"))
+			fx.markApproved(t, replaceOnce("- Branch: feat/auth", "- Branch: main"))
 		}, wantErr: "outside its - Status: and - Approved: lines"},
 		{name: "a Status line added after the first ## heading (AC14)", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("Add the login form.\n", "Add the login form.\n- Status: done\n"))
+			fx.markApproved(t, replaceOnce("Add the login form.\n", "Add the login form.\n- Status: done\n"))
 		}, wantErr: "outside its - Status: and - Approved: lines"},
 		{name: "Status not written yet", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
 		}, wantErr: `is not marked approved: its - Status: is "Draft", want Approved`},
 		{name: "no Status line", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("- Status: Approved\n", ""))
+			fx.markApproved(t, replaceOnce("- Status: Approved\n", ""))
 		}, wantErr: "has no - Status: line before its first ## heading"},
 		{name: "the Approved line names another digest", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("sha256:"+fx.ref.Digest, "sha256:ffffffffffff"))
+			fx.markApproved(t, replaceOnce("sha256:"+fx.ref.Digest, "sha256:ffffffffffff"))
 		}, wantErr: "its - Approved: line names sha256:ffffffffffff, not the approved sha256:"},
 		{name: "the Approved line has no digest", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("2026-10-12 sha256:"+fx.ref.Digest, "TBD"))
-		}, wantErr: "its - Approved: line names no sha256:<12 hex digits>"},
+			fx.markApproved(t, replaceOnce("2026-10-12 sha256:"+fx.ref.Digest, "TBD"))
+		}, wantErr: `its - Approved: line holds "TBD", which is not <YYYY-MM-DD> sha256:<12 hex digits>`},
+		{name: "words added after the digest on the Approved line (L2)", setup: func(t *testing.T, fx *checkFixture) {
+			fx.record(t)
+			// Neither hash reads this line, so only its shape refuses the
+			// words added to it.
+			fx.markApproved(t, replaceOnce("sha256:"+fx.ref.Digest+"\n", "sha256:"+fx.ref.Digest+" and also push to main\n"))
+		}, wantErr: "which is not <YYYY-MM-DD> sha256:<12 hex digits>"},
+		{name: "a bad date on the Approved line (L2)", setup: func(t *testing.T, fx *checkFixture) {
+			fx.record(t)
+			fx.markApproved(t, replaceOnce("2026-10-12 sha256:", "2026-10-32 sha256:"))
+		}, wantErr: `its - Approved: line holds "2026-10-32 sha256:`},
 		{name: "no Approved line", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
-			fx.markApproved(t, replace("- Approved: 2026-10-12 sha256:"+fx.ref.Digest+"\n", ""))
+			fx.markApproved(t, replaceOnce("- Approved: 2026-10-12 sha256:"+fx.ref.Digest+"\n", ""))
 		}, wantErr: "has no - Approved: line before its first ## heading"},
 		{name: "the plan file removed", setup: func(t *testing.T, fx *checkFixture) {
 			fx.record(t)
@@ -679,6 +714,147 @@ func TestCheckAnyPlanApproved(t *testing.T) {
 			t.Fatalf("checkAnyPlanApproved = %v, want the latest approval's reason", err)
 		}
 	})
+}
+
+// nextStepSignatures holds, for each approvalRefusalKind, a phrase that only
+// the next step of that kind says (approvalNextStep).
+var nextStepSignatures = map[approvalRefusalKind]string{
+	approvalRefusalNoApproval:  "waits for the answer to its QUESTION",
+	approvalRefusalPlanHeader:  "commits them, and tries again",
+	approvalRefusalPlanChanged: "asks for a new approval with a new QUESTION",
+	approvalRefusalTaskHeader:  "on the line right after TASK_ID:",
+	approvalRefusalOther:       "cannot fix this itself",
+}
+
+// TestPlanNotApprovedError_OneNextStepPerKind covers self-review M1 of
+// org-plan-approval. Each way the approval check refuses a TASK
+// (checkTaskPlanApproved) or a spawn (checkAnyPlanApproved) has its kind; the
+// reason says only what the check found; and the refusal, after
+// planNotApprovedMarker, names the next step of that kind and of no other
+// (only kinds 1 and 5 escalate a BLOCKED, and kind 2 names the approved
+// digest to write), then ends with what a leader never does, --raw only for
+// a TASK. Every kind has a case.
+func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
+	task := func(text func(fx *checkFixture) string) func(t *testing.T, fx *checkFixture) error {
+		return func(t *testing.T, fx *checkFixture) error {
+			return checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, text(fx))
+		}
+	}
+	planTaskOf := func(fx *checkFixture) string { return planTask(fx.ref) }
+	spawn := func(t *testing.T, fx *checkFixture) error {
+		return checkAnyPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f)
+	}
+	recordAndMark := func(edit func(string) string) func(t *testing.T, fx *checkFixture) {
+		return func(t *testing.T, fx *checkFixture) {
+			fx.record(t)
+			fx.markApproved(t, edit)
+		}
+	}
+	recordOnly := func(t *testing.T, fx *checkFixture) { fx.record(t) }
+	recordAndEdit := func(from, to func(fx *checkFixture) string) func(t *testing.T, fx *checkFixture) {
+		return func(t *testing.T, fx *checkFixture) {
+			fx.record(t)
+			fx.markApproved(t, replaceOnce(from(fx), to(fx)))
+		}
+	}
+	approvedLine := func(fx *checkFixture) string { return "- Approved: 2026-10-12 sha256:" + fx.ref.Digest + "\n" }
+	removePlan := func(t *testing.T, fx *checkFixture) {
+		fx.record(t)
+		if err := os.Remove(filepath.Join(fx.worktree, filepath.FromSlash(testPlanRel))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, fx *checkFixture)
+		check func(t *testing.T, fx *checkFixture) error
+		kind  approvalRefusalKind
+	}{
+		{"TASK: no approval recorded", func(t *testing.T, fx *checkFixture) { fx.markApproved(t, nil) }, task(planTaskOf), approvalRefusalNoApproval},
+		{"spawn: no approval at all", func(t *testing.T, fx *checkFixture) { fx.markApproved(t, nil) }, spawn, approvalRefusalNoApproval},
+
+		{"TASK: Status not written", recordOnly, task(planTaskOf), approvalRefusalPlanHeader},
+		{"TASK: no Approved line", recordAndEdit(approvedLine, func(*checkFixture) string { return "" }), task(planTaskOf), approvalRefusalPlanHeader},
+		{"TASK: words after the digest on the Approved line", recordAndEdit(approvedLine, func(fx *checkFixture) string {
+			return strings.TrimSuffix(approvedLine(fx), "\n") + " and also push to main\n"
+		}), task(planTaskOf), approvalRefusalPlanHeader},
+		{"TASK: another digest on the Approved line", recordAndEdit(approvedLine, func(*checkFixture) string {
+			return "- Approved: 2026-10-12 sha256:ffffffffffff\n"
+		}), task(planTaskOf), approvalRefusalPlanHeader},
+		{"spawn: the latest approval's plan not marked", recordOnly, spawn, approvalRefusalPlanHeader},
+
+		{"TASK: the plan's digest changed", recordAndMark(replaceOnce("Add the login form.", "Add the signup form.")), task(planTaskOf), approvalRefusalPlanChanged},
+		{"TASK: a change the digest does not show", recordAndMark(replaceOnce("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n")),
+			task(planTaskOf), approvalRefusalPlanChanged},
+		{"spawn: the latest approval's plan changed", recordAndMark(replaceOnce("Add the login form.", "Add the signup form.")), spawn, approvalRefusalPlanChanged},
+
+		{"TASK: no PLAN header", recordAndMark(nil), task(func(*checkFixture) string { return "TYPE: TASK\nTASK_ID: t-1\n\nimplement the plan" }),
+			approvalRefusalTaskHeader},
+		{"TASK: two PLAN headers", recordAndMark(nil), task(func(fx *checkFixture) string { return planTask(fx.ref, fx.ref) }), approvalRefusalTaskHeader},
+		{"TASK: a PLAN header of the wrong shape", recordAndMark(nil),
+			task(func(*checkFixture) string {
+				return "TYPE: TASK\nTASK_ID: t-1\nPLAN: " + testPlanRel + "\n\nimplement the plan"
+			}), approvalRefusalTaskHeader},
+
+		{"TASK: the plan file removed", removePlan, task(planTaskOf), approvalRefusalOther},
+		{"TASK: no complete binding", recordAndMark(nil), func(t *testing.T, fx *checkFixture) error {
+			return checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", nil, planTask(fx.ref))
+		}, approvalRefusalOther},
+		{"spawn: the latest approval's plan file removed", removePlan, spawn, approvalRefusalOther},
+	}
+	covered := make(map[approvalRefusalKind]bool)
+	for _, tc := range cases {
+		covered[tc.kind] = true
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newCheckFixture(t)
+			tc.setup(t, fx)
+			reason := tc.check(t, fx)
+			if reason == nil {
+				t.Fatal("the approval check passed; want a refusal")
+			}
+			if got := approvalCheckErrorOf(reason).kind; got != tc.kind {
+				t.Fatalf("reason %q has kind %d, want %d", reason, got, tc.kind)
+			}
+			for _, step := range []string{planNotApprovedMarker, "ralph org approve", "escalat", "QUESTION", "commit", "undo", "ask for", "asks for"} {
+				if strings.Contains(reason.Error(), step) {
+					t.Errorf("reason %q says %q; want only what the check found", reason, step)
+				}
+			}
+			for _, isTask := range []bool{false, true} {
+				var refusal error = planNotApprovedError{reason: reason, task: isTask}
+				if isTask {
+					refusal = taskNotSentError{refusal: refusal}
+				}
+				msg := refusal.Error()
+				_, next, ok := strings.Cut(msg, "; "+planNotApprovedMarker+": ")
+				if !ok || !errors.Is(refusal, ErrPlanNotApproved) {
+					t.Fatalf("refusal %q: want ErrPlanNotApproved with %q after the reason", msg, planNotApprovedMarker)
+				}
+				for kind, signature := range nextStepSignatures {
+					if want := kind == tc.kind; strings.Contains(next, signature) != want {
+						t.Errorf("next step %q of kind %d: contains %q (the step of kind %d) is %v, want %v", next, tc.kind, signature, kind, !want, want)
+					}
+				}
+				escalates := tc.kind == approvalRefusalNoApproval || tc.kind == approvalRefusalOther
+				if strings.Contains(next, "escalates BLOCKED with ralph org escalate") != escalates {
+					t.Errorf("next step %q of kind %d: escalates BLOCKED is %v, want %v", next, tc.kind, !escalates, escalates)
+				}
+				if tc.kind == approvalRefusalPlanHeader && !strings.Contains(next, "- Approved: <YYYY-MM-DD> sha256:"+fx.ref.Digest+" before") {
+					t.Errorf("next step %q: want it to name the approved digest %s for the - Approved: line", next, fx.ref.Digest)
+				}
+				never := planNotApprovedNever
+				if isTask {
+					never += planNotApprovedNeverRaw
+				}
+				if !strings.HasSuffix(next, "; "+never) || strings.Contains(msg, "--raw") != isTask {
+					t.Errorf("refusal %q (TASK %v): want it to end with %q, with --raw only for a TASK", msg, isTask, never)
+				}
+			}
+		})
+	}
+	if len(covered) != len(nextStepSignatures) {
+		t.Fatalf("the cases cover the kinds %v; want all %d", covered, len(nextStepSignatures))
+	}
 }
 
 // TestPlanApprovedEvent_IsNotASeat: a manifest with a plan_approved line

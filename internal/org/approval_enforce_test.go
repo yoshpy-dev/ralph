@@ -61,7 +61,8 @@ func (fx *enforceFixture) mark(t *testing.T, edit func(string) string) {
 
 // replaceOnce returns an edit that replaces from with to once, and panics
 // when the text has no from, so a case cannot pass on an edit that did
-// nothing.
+// nothing. The plan edits of the check tests (TestCheckPlanApproved) use it
+// too.
 func replaceOnce(from, to string) func(string) string {
 	return func(s string) string {
 		if !strings.Contains(s, from) {
@@ -121,15 +122,17 @@ func takeLedgerSnapshot(t *testing.T, o *Org, h *fakeHerdr, a *fakeAgmsg) ledger
 
 // assertTaskRefused checks that r is the approval check's refusal of a TASK
 // containing want: errors.Is ErrPlanNotApproved, "org: send: TASK not sent: "
-// first, "org:" once, what a leader does next last, and nothing sent.
+// first, "org:" once, the marker and the next step, what a leader never does
+// (--raw included) last, and nothing sent.
 func assertTaskRefused(t *testing.T, r SendResult, want string) {
 	t.Helper()
 	if r.Err == nil || !errors.Is(r.Err, ErrPlanNotApproved) {
 		t.Fatalf("send = %v; want a refusal that is ErrPlanNotApproved", r.Err)
 	}
 	msg := r.Err.Error()
-	if !strings.HasPrefix(msg, "org: send: TASK not sent: ") || !strings.Contains(msg, want) || !strings.HasSuffix(msg, planNotApprovedNext) {
-		t.Fatalf("send = %q; want it to start with \"org: send: TASK not sent: \", contain %q and end with what a leader does next", msg, want)
+	if !strings.HasPrefix(msg, "org: send: TASK not sent: ") || !strings.Contains(msg, want) ||
+		!strings.Contains(msg, "; "+planNotApprovedMarker+": ") || !strings.HasSuffix(msg, "; "+planNotApprovedNever+planNotApprovedNeverRaw) {
+		t.Fatalf("send = %q; want it to start with \"org: send: TASK not sent: \", contain %q and the marker, and end with what a leader never does", msg, want)
 	}
 	if n := strings.Count(msg, "org:"); n != 1 {
 		t.Errorf("send = %q says \"org:\" %d times; want once", msg, n)
@@ -464,8 +467,10 @@ func TestOrgSend_ApprovalCheck_ModeFromTheRecord(t *testing.T) {
 func assertSpawnApprovalRefused(t *testing.T, o *Org, r SpawnResult, seatID, want string) {
 	t.Helper()
 	assertRejectedRecorded(t, o, r, "org-a", seatID, want)
-	if !errors.Is(r.Err, ErrPlanNotApproved) || !strings.HasSuffix(r.Err.Error(), planNotApprovedNext) {
-		t.Fatalf("spawn = %v; want ErrPlanNotApproved, ending with what a leader does next", r.Err)
+	msg := r.Err.Error()
+	if !errors.Is(r.Err, ErrPlanNotApproved) || !strings.Contains(msg, "; "+planNotApprovedMarker+": ") ||
+		!strings.HasSuffix(msg, "; "+planNotApprovedNever) || strings.Contains(msg, "--raw") {
+		t.Fatalf("spawn = %v; want ErrPlanNotApproved with the marker, ending with what a leader never does and no --raw", r.Err)
 	}
 }
 

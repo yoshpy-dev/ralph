@@ -59,7 +59,7 @@
 機能を受け持ちます。1 つの org が持つ worktree・ブランチ・PR は 1 つずつです。
 あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
 あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
-(予約の外は別の org が受け持っていることがあります)。この節の手順 1 と 4 の
+(予約の外は別の org が受け持っていることがあります)。この節の手順 1・4・6 の
 機能の計画、9 の report、10 の計画の移動は予約の外に書きますが、どれも手順の
 うちなので、予約に入っていなくてかまいません。
 
@@ -124,7 +124,7 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
    (人が `ralph org approve` で台帳に承認を記録してから送る)。受けたら、
    計画の先頭の 2 行を `- Status: Approved` と
-   `- Approved: <今日の日付> sha256:<digest>` に書き換え、
+   `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え、
    `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
    ことを確かめ、コミットする。それ以外の DECISION(直しの依頼)なら、
    計画を直してコミットし、図解ページを描き直し、新しい digest で新しい
@@ -149,12 +149,14 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    `- Status: Draft` と `- Approved: TBD` に戻して計画を変え、コミットし、
    手順 2 からやり直す(新しい QUESTION を上げる)
 7. (per-plan)spawn か TASK の送信が承認の検査で断られたら(終了コードは
-   1 で、エラーの文に `ralph org approve` と `escalates BLOCKED` が入る。spawn
-   では stdout の `rejected:` の行に出る)、打ち直さず、`--raw` にせず、自分で
-   `ralph org approve` を打たない。承認は人が記録するもので、あなたが打つと
-   人の承認ではなくなる。代わりにエラーを本文に書き、BLOCKED(TASK_ID は
-   org_id の `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで
-   implementer の spawn と TASK を打たずに待つ
+   1 で、エラーの文に `refused by the approval check` が入る。spawn では
+   stdout の `rejected:` の行に出る)、その後ろに書かれた次の手(断られた
+   理由ごとに 1 つ)に従う。どの場合も、同じコマンドをそのまま打ち直さず、
+   `--raw` にせず、自分で `ralph org approve` を打たない。承認は人が記録する
+   もので、あなたが打つと人の承認ではなくなる。次の手が BLOCKED を上げる
+   ことなら、エラーを本文に書き、BLOCKED(TASK_ID は org_id の
+   `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が来るまで implementer の
+   spawn と TASK を打たずに待つ
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
 9. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、

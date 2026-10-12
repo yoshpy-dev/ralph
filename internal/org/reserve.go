@@ -528,15 +528,14 @@ func TotalActiveSeats(events []ManifestEvent) int {
 // approved again with another digest, or started with another approval
 // mode), even for the same paths; an org with a plain reservation refuses
 // one with a binding; and a plain reservation with other paths is refused as
-// before. When orgID holds none, a want with
-// a binding is refused if the org is running (RunningOrgs: an active seat or
-// an open workspace, as for a promoted session's leader or an org from
-// `ralph org start <task>`), since that org was not started for the feature.
-// Otherwise want's paths are checked against the reservation of every other
-// org that holds one (an org with a reservation is running, see
-// RunningOrgs): the first such org in org_id order whose paths overlap want
-// refuses it, naming the overlapping paths. record is true when the caller
-// must append the EventScopeReserved.
+// before. When orgID holds none, a want with a binding is refused if the org
+// is running (RunningOrgs: an active seat or an open workspace, as for a
+// promoted session's leader or an org from `ralph org start <task>`), since
+// that org was not started for the feature. Otherwise want's paths are
+// checked against the reservation of every other org that holds one (an org
+// with a reservation is running, see RunningOrgs): the first such org in
+// org_id order whose paths overlap want refuses it, naming the overlapping
+// paths. record is true when the caller must append the EventScopeReserved.
 func reservationDecision(events []ManifestEvent, orgID string, want Reservation) (record bool, err error) {
 	lives := currentOrgLives(events)
 	if own, ok := lives[orgID]; ok && own.reservation.Paths != nil {

@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -62,14 +61,9 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// The directory is recorded for an audit only; Approve reads it
-			// again itself when it gets "" and records cwd="" when that fails
-			// too.
-			cwd, err := os.Getwd()
-			if err != nil {
-				cwd = ""
-			}
-			res := rt.Approve(org.ApproveParams{IDs: args, Cwd: cwd})
+			// Cwd is left empty: Approve records os.Getwd(), and cwd="" when
+			// that fails (the directory is for an audit only).
+			res := rt.Approve(org.ApproveParams{IDs: args})
 			// res.Approved is what the manifest holds, also when res.Err is
 			// set (a resolve or an append that failed after a record), so
 			// those items are printed before the error. A refusal records

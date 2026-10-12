@@ -36,8 +36,11 @@ type ApprovedPlan struct {
 	// the org was started in split mode or by an older start: the approval
 	// is recorded, but the org's check does not read it, so the CLI says so.
 	RequiresApproval bool
-	// Resolved reports that the inbox item was resolved after the record,
-	// with the note `approved <path> sha256:<digest>`.
+	// Resolved reports that Approve resolved the inbox item after the
+	// record, with the note `approved <path> sha256:<digest>`. It is false
+	// for an item it could not resolve, one resolved by someone else in the
+	// meantime included (Err says which). The CLI prints Approved and Err
+	// only; Resolved is for tests and callers that want the result per item.
 	Resolved bool
 }
 
@@ -53,8 +56,9 @@ type ApproveRefusal struct {
 // since nothing was recorded. Approved holds, in argument order, the items
 // whose approval is in the manifest, which may be fewer than asked when an
 // append failed midway (Err then names the items not recorded and the
-// command to run again), and an item there with Resolved false has its
-// `ralph org inbox resolve` command in Err.
+// command to run again), and an item there with Resolved false is named in
+// Err (resolveApproved). The CLI prints Approved and Err only; Refused is
+// for tests and callers that want the refusals one by one.
 type ApproveResult struct {
 	Approved []ApprovedPlan
 	Refused  []ApproveRefusal
@@ -369,24 +373,36 @@ func ApprovalDecisionCommand(orgID string, ref PlanRef, stateDir string) string 
 }
 
 // resolveApproved resolves each recorded item with its approveNote and sets
-// Resolved on it. A resolve that fails keeps the approval record; the error
-// names those items and the `ralph org inbox resolve` command (InboxCommand
+// Resolved on it. A resolve that fails keeps the approval record. An item
+// someone else resolved after Approve read the inbox (ErrInboxResolved) has
+// nothing left to resolve, so the error names it and says the approval is
+// recorded all the same, with no command. For any other failure the error
+// names the items and the `ralph org inbox resolve` command (InboxCommand
 // with --note) that finishes each.
 func (o *Org) resolveApproved(approved []ApprovedPlan) error {
-	var failed, commands []string
+	var elsewhere, failed, commands []string
 	for i := range approved {
 		a := &approved[i]
 		note := approveNote(PlanRef{Path: a.Plan, Digest: a.Digest})
-		if err := o.Inbox.Resolve(a.ID, note); err != nil {
+		err := o.Inbox.Resolve(a.ID, note)
+		switch {
+		case err == nil:
+			a.Resolved = true
+		case errors.Is(err, ErrInboxResolved):
+			elsewhere = append(elsewhere, a.ID)
+		default:
 			failed = append(failed, fmt.Sprintf("%s (%v)", a.ID, err))
 			commands = append(commands, "`"+InboxCommand("resolve", a.ID, o.InboxHintStateDir)+" --note "+shellQuote(note)+"`")
-			continue
 		}
-		a.Resolved = true
 	}
-	if len(failed) == 0 {
-		return nil
+	var errs []error
+	if len(elsewhere) > 0 {
+		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded all the same, but the inbox item was already "+
+			"resolved by someone else after approve read the inbox, so nothing is left to resolve: %s", strings.Join(elsewhere, ", ")))
 	}
-	return fmt.Errorf("org: approve: the approval is recorded, but the inbox item could not be resolved: %s; run %s to finish",
-		strings.Join(failed, ", "), strings.Join(commands, " and "))
+	if len(failed) > 0 {
+		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded, but the inbox item could not be resolved: %s; run %s to finish",
+			strings.Join(failed, ", "), strings.Join(commands, " and ")))
+	}
+	return errors.Join(errs...)
 }

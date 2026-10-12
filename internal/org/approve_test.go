@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
@@ -418,6 +419,61 @@ func TestOrgApprove_ResolveFailureKeepsTheRecord(t *testing.T) {
 	}
 	if item := s.item(t, s.id); item.State != InboxStateOpen {
 		t.Fatalf("item = %+v, want it still open", item)
+	}
+}
+
+// TestOrgApprove_ResolvedBySomeoneElse covers self-review L3 of
+// org-plan-approval: when someone else resolves an item between approve's
+// read of the inbox and its own resolve (Inbox.Resolve wraps
+// ErrInboxResolved), the record stays, the error says the item was already
+// resolved by someone else and the approval is recorded all the same, and it
+// prints no `ralph org inbox resolve` command, which would fail. The other
+// item of the batch is resolved as usual.
+func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
+	s := newApproveSetup(t)
+	s.o.InboxHintStateDir = s.stateDir
+	wt := t.TempDir()
+	s.bind(t, "org-b", wt, config.ApprovalModePerPlan)
+	data := writePlan(t, wt, "plan.md", "# b\n")
+	secondRef := PlanRef{"plan.md", PlanDigest(data)}
+	second := s.ask(t, "org-b", "QUESTION", planQuestion(secondRef))
+	// Org.Now is first read for the first record's TS: after approve read
+	// the inbox, before it resolves. A human's `ralph org inbox resolve`
+	// lands there.
+	clock, raced := s.o.Now, false
+	s.o.Now = func() time.Time {
+		if !raced {
+			raced = true
+			if err := s.o.Inbox.Resolve(s.id, "handled by hand"); err != nil {
+				t.Errorf("the racing resolve: %v", err)
+			}
+		}
+		return clock()
+	}
+
+	res := s.o.Approve(ApproveParams{IDs: []string{s.id, second}, Cwd: "/w"})
+	if !raced {
+		t.Fatal("Org.Now was never read between the inbox read and the resolve, so nothing raced approve")
+	}
+	if len(res.Approved) != 2 || res.Approved[0].Resolved || !res.Approved[1].Resolved || res.Err == nil {
+		t.Fatalf("Approve = %+v, want both recorded, only %s resolved by approve, and an error", res, second)
+	}
+	msg := res.Err.Error()
+	if want := "the approval is recorded all the same, but the inbox item was already resolved by someone else " +
+		"after approve read the inbox, so nothing is left to resolve: " + s.id; !strings.Contains(msg, want) {
+		t.Fatalf("Err = %q, want it to contain %q", msg, want)
+	}
+	if strings.Contains(msg, "ralph org inbox resolve") || strings.Contains(msg, "--note") || strings.Contains(msg, second) {
+		t.Fatalf("Err = %q, want no resolve command and no word of the item approve resolved", msg)
+	}
+	if got := planApprovedEvents(t, s.o); len(got) != 2 {
+		t.Fatalf("expected both records to stay, got %+v", got)
+	}
+	if item := s.item(t, s.id); item.State != InboxStateResolved || item.Note != "handled by hand" {
+		t.Fatalf("item %s = %+v, want it resolved with the other resolve's note", s.id, item)
+	}
+	if item := s.item(t, second); item.State != InboxStateResolved || item.Note != approveNote(secondRef) {
+		t.Fatalf("item %s = %+v, want it resolved with approve's note", second, item)
 	}
 }
 

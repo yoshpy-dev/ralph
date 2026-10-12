@@ -556,14 +556,13 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// stale-in-flight detection, the capacity check, the feature org's
 	// checks, and the spawn_started append all run inside withManifestLock:
 	// this is the exact "read manifest -> ActiveSeatCount -> ValidateSpawn ->
-	// appendEvent" window
-	// docs/tech-debt/README.md
-	// flagged as an unlocked TOCTOU race ("max_seats is enforced across an
-	// unlocked read-then-append window"). Two concurrent Spawn calls used to
-	// be able to both observe the same activeSeats snapshot and both pass
-	// ValidateSpawnCapacity, exceeding [org].max_seats; the flock in
-	// withManifestLock (lockfile.go) now serializes this section across
-	// goroutines and processes on the same host.
+	// appendEvent" window docs/tech-debt/README.md flagged as an unlocked
+	// TOCTOU race ("max_seats is enforced across an unlocked read-then-append
+	// window"). Two concurrent Spawn calls used to be able to both observe
+	// the same activeSeats snapshot and both pass ValidateSpawnCapacity,
+	// exceeding [org].max_seats; the flock in withManifestLock (lockfile.go)
+	// now serializes this section across goroutines and processes on the
+	// same host.
 	//
 	// Final locking shape (fixed self-review MEDIUM-3: the lock used to also
 	// wrap compensateStale's herdr PaneSendKeys round trip, contradicting

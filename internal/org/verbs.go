@@ -223,13 +223,13 @@ type SendResult struct {
 // the message says "org:" once (self-review L3 of org-watch-gate). It
 // unwraps to the refusal, so errors.Is(err, ErrNoRunningWatch) or
 // errors.Is(err, ErrPlanNotApproved) holds for it.
-type taskNotSentError struct{ gate error }
+type taskNotSentError struct{ refusal error }
 
 func (e taskNotSentError) Error() string {
-	return "org: send: TASK not sent: " + strings.TrimPrefix(e.gate.Error(), "org: ")
+	return "org: send: TASK not sent: " + strings.TrimPrefix(e.refusal.Error(), "org: ")
 }
 
-func (e taskNotSentError) Unwrap() error { return e.gate }
+func (e taskNotSentError) Unwrap() error { return e.refusal }
 
 // Send validates Text against the typed message protocol (unless Raw),
 // waits for the target seat to go idle, then types Text into its pane,
@@ -315,7 +315,7 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 	if parseErr == nil && msg.Type == protocol.TypeTask {
 		if err := o.checkWatchGate(); err != nil {
-			return SendResult{Err: taskNotSentError{gate: err}}
+			return SendResult{Err: taskNotSentError{refusal: err}}
 		}
 		// The approval check runs next, before the dry-run branch, so a
 		// refusal records nothing and dry-run predicts it.
@@ -485,8 +485,9 @@ func sendSeatNotFoundErr(p SendParams) error {
 // implementerRole (a TASK to the reviewer needs no approval, A5). In an org
 // that requires it, a seat the manifest does not have is refused with
 // sendSeatNotFoundErr, and a TASK to an implementer seat must have one PLAN:
-// header (ParsePlanHeader) naming a plan checkPlanApproved passes; that
-// refusal is a taskNotSentError around a planNotApprovedError.
+// header naming a plan checkPlanApproved passes (checkTaskPlanApproved);
+// that refusal is a taskNotSentError around a planNotApprovedError for a
+// TASK.
 func sendApprovalErr(events []ManifestEvent, p SendParams) error {
 	f := ActiveFeature(events, p.OrgID)
 	if f == nil || !f.RequiresApproval() {
@@ -498,12 +499,8 @@ func sendApprovalErr(events []ManifestEvent, p SendParams) error {
 	if seatRoleFromEvents(events, p.OrgID, p.To) != implementerRole {
 		return nil
 	}
-	ref, err := ParsePlanHeader(p.Text)
-	if err == nil {
-		err = checkPlanApproved(events, p.OrgID, f, ref)
-	}
-	if err != nil {
-		return taskNotSentError{gate: planNotApprovedError{reason: err}}
+	if err := checkTaskPlanApproved(events, p.OrgID, f, p.Text); err != nil {
+		return taskNotSentError{refusal: planNotApprovedError{reason: err, task: true}}
 	}
 	return nil
 }

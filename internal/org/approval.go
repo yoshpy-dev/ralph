@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
@@ -212,7 +213,8 @@ func featurePlanHeaderLines(lines []string) (status, approved int) {
 type featurePlanHeader struct {
 	hasStatus, hasApproved bool   // the plan has the `- Status:` / `- Approved:` line
 	status                 string // the `- Status:` value, trimmed
-	approvedDigest         string // approvedDigestFrom the `- Approved:` value ("" without sha256:<12 hex>)
+	approved               string // the `- Approved:` value, trimmed
+	approvedDigest         string // approvedLineDigest of the `- Approved:` value ("" when it is not of that shape)
 }
 
 // readFeaturePlanHeader reads a feature plan's header lines from its bytes.
@@ -226,9 +228,32 @@ func readFeaturePlanHeader(data []byte) featurePlanHeader {
 	}
 	if approved >= 0 {
 		h.hasApproved = true
-		h.approvedDigest = approvedDigestFrom(strings.TrimPrefix(lines[approved], "- Approved:"))
+		h.approved = strings.TrimSpace(strings.TrimPrefix(lines[approved], "- Approved:"))
+		h.approvedDigest = approvedLineDigest(h.approved)
 	}
 	return h
+}
+
+// approvedLineDigest returns the digest a feature plan's `- Approved:` value
+// names when the value is exactly two whitespace-separated fields, a valid
+// date YYYY-MM-DD and `sha256:<12 lowercase hex digits>`, and "" for any
+// other value. PlanContentHash leaves this line out, so the check accepts
+// nothing else on it: with approvedDigestFrom's reading (the first sha256:
+// value anywhere on the line), words added to the line after the approval
+// would change neither hash (self-review L2 of org-plan-approval).
+func approvedLineDigest(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) != 2 {
+		return ""
+	}
+	if _, err := time.Parse(time.DateOnly, fields[0]); err != nil {
+		return ""
+	}
+	digest, ok := strings.CutPrefix(fields[1], "sha256:")
+	if !ok || !approvedDigestPattern.MatchString(digest) {
+		return ""
+	}
+	return digest
 }
 
 // PlanContentHash returns the lowercase hex SHA-256 (64 digits) of a feature
@@ -349,17 +374,93 @@ func currentPlanApprovals(events []ManifestEvent, orgID string) []planApproval {
 	return approvals
 }
 
+// approvalRefusalKind is the kind of reason the approval check refuses with.
+// The reason only says what the check found; its kind picks the one next
+// step the refusal tells a leader (approvalNextStep), so the two never give
+// different instructions (self-review M1 of org-plan-approval). The zero
+// value is approvalRefusalOther, the kind a leader cannot fix itself.
+type approvalRefusalKind int
+
+const (
+	// approvalRefusalOther: an incomplete binding, a plan path that resolves
+	// outside the feature worktree, a plan file that is missing, not a
+	// regular file, or unreadable. The leader escalates BLOCKED.
+	approvalRefusalOther approvalRefusalKind = iota
+	// approvalRefusalNoApproval: no approval recorded for the plan and
+	// digest, or none at all, in the org's current life. The leader waits
+	// for the answer to its QUESTION, or escalates BLOCKED when an approving
+	// DECISION came without the record.
+	approvalRefusalNoApproval
+	// approvalRefusalPlanHeader: the approval is recorded, but the plan's
+	// first `- Status:` or `- Approved:` line before its first `## ` heading
+	// is missing or does not say the approval (checkApprovedPlanHeader). The
+	// leader writes the two lines, commits them, and tries again.
+	approvalRefusalPlanHeader
+	// approvalRefusalPlanChanged: the plan changed after the approval, in
+	// its digest or only in its PlanContentHash. The leader undoes the
+	// change, or asks for a new approval.
+	approvalRefusalPlanChanged
+	// approvalRefusalTaskHeader: the TASK has no PLAN: header, two of them,
+	// or a malformed one (ParsePlanHeader). The leader puts one on the TASK
+	// and sends it again.
+	approvalRefusalTaskHeader
+)
+
+// approvalCheckError is a reason the approval check refuses with: err says
+// what the check found, kind picks the next step (approvalNextStep), and
+// digest is the approved digest that an approvalRefusalPlanHeader step tells
+// the leader to write.
+type approvalCheckError struct {
+	kind   approvalRefusalKind
+	digest string
+	err    error
+}
+
+func (e approvalCheckError) Error() string { return e.err.Error() }
+
+func (e approvalCheckError) Unwrap() error { return e.err }
+
+// approvalRefusalf is an approvalCheckError of kind whose err is
+// fmt.Errorf(format, args...).
+func approvalRefusalf(kind approvalRefusalKind, format string, args ...any) error {
+	return approvalCheckError{kind: kind, err: fmt.Errorf(format, args...)}
+}
+
+// approvalCheckErrorOf returns the approvalCheckError err is or wraps, or one
+// of kind approvalRefusalOther around err when it has none.
+func approvalCheckErrorOf(err error) approvalCheckError {
+	var e approvalCheckError
+	if errors.As(err, &e) {
+		return e
+	}
+	return approvalCheckError{kind: approvalRefusalOther, err: err}
+}
+
+// checkTaskPlanApproved is the approval check of text, a TASK to an
+// implementer seat of orgID, bound to f: text names one plan in its header
+// (ParsePlanHeader, whose errors become approvalRefusalTaskHeader reasons)
+// and checkPlanApproved passes that plan.
+func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, text string) error {
+	ref, err := ParsePlanHeader(text)
+	if err != nil {
+		return approvalCheckError{kind: approvalRefusalTaskHeader, err: err}
+	}
+	return checkPlanApproved(events, orgID, f, ref)
+}
+
 // checkPlanApproved returns nil when the plan ref (a TASK's PLAN: header,
 // ParsePlanHeader) is approved for orgID, bound to f: orgID's current life
 // has a plan_approved for the same path and digest (currentPlanApprovals),
 // the file at that path in f's worktree (resolvePlanFile) has that digest
 // now (PlanDigest), its header's first `- Status:` is Approved and its first
-// `- Approved:` names that digest (featurePlanHeaderLines), and its
-// PlanContentHash equals the content one of those records holds. Each way to
-// fail has its own error, naming what to do.
+// `- Approved:` is `<YYYY-MM-DD> sha256:<that digest>`
+// (checkApprovedPlanHeader), and its PlanContentHash equals the content one
+// of those records holds. Each way to fail has its own approvalCheckError,
+// which says what the check found and carries its approvalRefusalKind.
 func checkPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, ref PlanRef) error {
 	if f == nil || !f.Complete() {
-		return fmt.Errorf("org: org_id %q has no complete split plan feature binding, so no plan approval can be checked", orgID)
+		return approvalRefusalf(approvalRefusalOther,
+			"org: org_id %q has no complete split plan feature binding, so no plan approval can be checked", orgID)
 	}
 	var matching []planApproval
 	latest := ""
@@ -377,9 +478,8 @@ func checkPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, 
 		if latest != "" {
 			since = fmt.Sprintf(" (its latest approval is of sha256:%s)", latest)
 		}
-		return fmt.Errorf("org: org_id %q has no approval recorded for plan %s since its last disband%s: "+
-			"the leader asks for it with an inbox QUESTION whose header has PLAN: %s, and a human runs ralph org approve <inbox ID>",
-			orgID, ref, since, ref)
+		return approvalRefusalf(approvalRefusalNoApproval,
+			"org: org_id %q has no approval recorded for plan %s since its last disband%s", orgID, ref, since)
 	}
 	return checkApprovedPlanFile(orgID, f, ref, matching)
 }
@@ -389,55 +489,63 @@ func checkPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, 
 func checkApprovedPlanFile(orgID string, f *FeatureBinding, ref PlanRef, approvals []planApproval) error {
 	abs, err := resolvePlanFile(f.Worktree, ref.Path)
 	if err != nil {
-		return fmt.Errorf("org: org_id %q: %w", orgID, err)
+		return approvalRefusalf(approvalRefusalOther, "org: org_id %q: %w", orgID, err)
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
-		return fmt.Errorf("org: org_id %q: plan %s: %w", orgID, ref.Path, pathErrorCause(err))
+		return approvalRefusalf(approvalRefusalOther, "org: org_id %q: plan %s: %w", orgID, ref.Path, pathErrorCause(err))
 	}
 	if d := PlanDigest(data); d != ref.Digest {
-		return fmt.Errorf("org: plan %s of org_id %q changed after its approval: approved digest %s, current digest %s: "+
-			"ask for the approval again with a new QUESTION that names the current digest", ref.Path, orgID, ref.Digest, d)
+		return approvalRefusalf(approvalRefusalPlanChanged,
+			"org: plan %s of org_id %q changed after its approval: approved digest %s, current digest %s", ref.Path, orgID, ref.Digest, d)
 	}
-	h := readFeaturePlanHeader(data)
-	write := fmt.Sprintf("write - Status: %s and - Approved: <date> sha256:%s in its header, before the first ## heading, and commit them",
-		planApprovedStatus, ref.Digest)
-	switch {
-	case !h.hasStatus:
-		return fmt.Errorf("org: plan %s of org_id %q has no - Status: line before its first ## heading: %s", ref.Path, orgID, write)
-	case h.status != planApprovedStatus:
-		return fmt.Errorf("org: plan %s of org_id %q is not marked approved: its - Status: is %q, want %s: %s",
-			ref.Path, orgID, h.status, planApprovedStatus, write)
-	case !h.hasApproved:
-		return fmt.Errorf("org: plan %s of org_id %q has no - Approved: line before its first ## heading: %s", ref.Path, orgID, write)
-	case h.approvedDigest != ref.Digest:
-		named := "no sha256:<12 hex digits>"
-		if h.approvedDigest != "" {
-			named = "sha256:" + h.approvedDigest
-		}
-		return fmt.Errorf("org: plan %s of org_id %q: its - Approved: line names %s, not the approved sha256:%s: %s",
-			ref.Path, orgID, named, ref.Digest, write)
+	if err := checkApprovedPlanHeader(orgID, ref, readFeaturePlanHeader(data)); err != nil {
+		return err
 	}
 	content := PlanContentHash(data)
 	if !slices.ContainsFunc(approvals, func(a planApproval) bool { return a.Content == content }) {
-		return fmt.Errorf("org: plan %s of org_id %q changed after its approval outside its - Status: and - Approved: lines and checkbox marks, "+
-			"which its digest %s does not show (the digest skips the %s section and every - Status:, - Approved: and - Branch: line): "+
-			"undo the change, or ask for the approval again", ref.Path, orgID, ref.Digest, planProgressHeading)
+		return approvalRefusalf(approvalRefusalPlanChanged,
+			"org: plan %s of org_id %q changed after its approval outside its - Status: and - Approved: lines and checkbox marks, "+
+				"which its digest %s does not show (the digest skips the %s section and every - Status:, - Approved: and - Branch: line)",
+			ref.Path, orgID, ref.Digest, planProgressHeading)
 	}
 	return nil
+}
+
+// checkApprovedPlanHeader is the header half of checkApprovedPlanFile: h, the
+// plan's header lines, has `- Status: Approved` and an `- Approved:` line of
+// approvedLineDigest's shape that names ref.Digest. Its refusals are of kind
+// approvalRefusalPlanHeader, with ref.Digest for the lines to write.
+func checkApprovedPlanHeader(orgID string, ref PlanRef, h featurePlanHeader) error {
+	var found string
+	switch {
+	case !h.hasStatus:
+		found = " has no - Status: line before its first ## heading"
+	case h.status != planApprovedStatus:
+		found = fmt.Sprintf(" is not marked approved: its - Status: is %q, want %s", h.status, planApprovedStatus)
+	case !h.hasApproved:
+		found = " has no - Approved: line before its first ## heading"
+	case h.approvedDigest == "":
+		found = fmt.Sprintf(": its - Approved: line holds %q, which is not <YYYY-MM-DD> sha256:<12 hex digits>", h.approved)
+	case h.approvedDigest != ref.Digest:
+		found = fmt.Sprintf(": its - Approved: line names sha256:%s, not the approved sha256:%s", h.approvedDigest, ref.Digest)
+	default:
+		return nil
+	}
+	return approvalCheckError{kind: approvalRefusalPlanHeader, digest: ref.Digest,
+		err: fmt.Errorf("org: plan %s of org_id %q%s", ref.Path, orgID, found)}
 }
 
 // checkAnyPlanApproved returns nil when at least one approval of orgID's
 // current life passes checkPlanApproved with its own path and digest: the
 // check of an implementer spawn, which names no plan. With no approval at all
-// the error says no plan of the org was approved; otherwise it gives the
-// reason the latest approval does not pass.
+// the error says no plan of the org was approved (approvalRefusalNoApproval);
+// otherwise it gives the reason the latest approval does not pass, with that
+// reason's kind and digest.
 func checkAnyPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding) error {
 	approvals := currentPlanApprovals(events, orgID)
 	if len(approvals) == 0 {
-		return fmt.Errorf("org: no plan of org_id %q has been approved since its last disband: "+
-			"the leader asks for the approval with an inbox QUESTION whose header has PLAN: <path> sha256:<digest>, "+
-			"and a human runs ralph org approve <inbox ID>", orgID)
+		return approvalRefusalf(approvalRefusalNoApproval, "org: no plan of org_id %q has been approved since its last disband", orgID)
 	}
 	var latestErr error
 	for i := len(approvals) - 1; i >= 0; i-- {
@@ -450,8 +558,10 @@ func checkAnyPlanApproved(events []ManifestEvent, orgID string, f *FeatureBindin
 			latestErr = err
 		}
 	}
-	return fmt.Errorf("org: none of the %d plan approvals of org_id %q since its last disband passes the check; the latest: %s",
-		len(approvals), orgID, strings.TrimPrefix(latestErr.Error(), "org: "))
+	latest := approvalCheckErrorOf(latestErr)
+	return approvalCheckError{kind: latest.kind, digest: latest.digest,
+		err: fmt.Errorf("org: none of the %d plan approvals of org_id %q since its last disband passes the check; the latest: %s",
+			len(approvals), orgID, strings.TrimPrefix(latestErr.Error(), "org: "))}
 }
 
 // ErrPlanNotApproved is what every refusal of the approval check is
@@ -459,19 +569,66 @@ func checkAnyPlanApproved(events []ManifestEvent, orgID string, f *FeatureBindin
 // (Spawn) in an org whose binding RequiresApproval.
 var ErrPlanNotApproved = errors.New("org: no approved plan passes the approval check")
 
-// planNotApprovedNext ends every refusal of the approval check: what a
-// leader does instead of trying again (the full procedure is in
-// prompts/leader.md).
-const planNotApprovedNext = "; a leader does not retry this, send it with --raw, or run ralph org approve itself, " +
-	"but escalates BLOCKED with ralph org escalate"
+// planNotApprovedMarker is the phrase every refusal of the approval check
+// carries, by which the leader template (prompts/leader.md, step 7 of the
+// 機能ごとの org section) tells a leader to recognize it; the one next step
+// follows it.
+const planNotApprovedMarker = "refused by the approval check"
 
-// planNotApprovedError is a refusal of the approval check: reason, an "org: "
-// error of ParsePlanHeader, checkPlanApproved or checkAnyPlanApproved, then
-// planNotApprovedNext. errors.Is(err, ErrPlanNotApproved) holds for it, and
-// it unwraps to reason.
-type planNotApprovedError struct{ reason error }
+// planNotApprovedNever ends every refusal of the approval check: what a
+// leader never does whatever the reason. A TASK's refusal adds
+// planNotApprovedNeverRaw; a spawn's does not, since ralph org spawn has no
+// --raw.
+const (
+	planNotApprovedNever    = "the leader never runs ralph org approve itself"
+	planNotApprovedNeverRaw = " and never sends the TASK with --raw"
+)
 
-func (e planNotApprovedError) Error() string { return e.reason.Error() + planNotApprovedNext }
+// approvalNextStep is the one next step a refusal of kind tells a leader.
+// digest is the approved digest an approvalRefusalPlanHeader step names
+// ("" writes <digest>).
+func approvalNextStep(kind approvalRefusalKind, digest string) string {
+	switch kind {
+	case approvalRefusalNoApproval:
+		return "if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, " +
+			"and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate"
+	case approvalRefusalPlanHeader:
+		if digest == "" {
+			digest = "<digest>"
+		}
+		return "the leader writes - Status: " + planApprovedStatus + " and - Approved: <YYYY-MM-DD> sha256:" + digest +
+			" before the plan's first ## heading, commits them, and tries again"
+	case approvalRefusalPlanChanged:
+		return "the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD " +
+			"and asks for a new approval with a new QUESTION (step 6 of its procedure)"
+	case approvalRefusalTaskHeader:
+		return "the leader puts one PLAN: <path> sha256:<digest> header naming the approved plan on the line right after TASK_ID: " +
+			"and sends the TASK again"
+	default:
+		return "the leader cannot fix this itself, so it escalates BLOCKED with ralph org escalate"
+	}
+}
+
+// planNotApprovedError is a refusal of the approval check: reason (an
+// approvalCheckError of checkTaskPlanApproved or checkAnyPlanApproved), then
+// planNotApprovedMarker, the one next step of the reason's kind
+// (approvalNextStep), and planNotApprovedNever. task is true for the refusal
+// of a TASK (Send), which also gets planNotApprovedNeverRaw, and false for
+// that of a spawn (Spawn). errors.Is(err, ErrPlanNotApproved) holds for it,
+// and it unwraps to reason.
+type planNotApprovedError struct {
+	reason error
+	task   bool
+}
+
+func (e planNotApprovedError) Error() string {
+	r := approvalCheckErrorOf(e.reason)
+	never := planNotApprovedNever
+	if e.task {
+		never += planNotApprovedNeverRaw
+	}
+	return e.reason.Error() + "; " + planNotApprovedMarker + ": " + approvalNextStep(r.kind, r.digest) + "; " + never
+}
 
 func (e planNotApprovedError) Is(target error) bool { return target == ErrPlanNotApproved }
 
