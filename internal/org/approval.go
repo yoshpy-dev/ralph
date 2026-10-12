@@ -449,14 +449,24 @@ func approvalCheckErrorOf(err error) approvalCheckError {
 // implementer seat of orgID, bound to f: text names one plan in its header
 // (ParsePlanHeader, whose errors become approvalRefusalTaskHeader reasons)
 // and checkPlanApproved passes that plan. When checkPlanApproved refuses it
-// for no approval of its digest or for a plan changed since, but the plan's
-// current digest passes (currentApprovedRef), the header names an old or
-// mistyped digest of an approved plan, so the refusal is of kind
+// for no approval of its digest or for a plan changed since, while the
+// plan's file has another digest now (currentPlanRef), the header names an
+// old or mistyped digest, and checkPlanApproved of the current digest picks
+// the refusal (self-review N1 of org-plan-approval): the next steps of the
+// two kinds above would have the leader undo the plan a human approved last
+// or ask again. When the current digest passes, the refusal is of kind
 // approvalRefusalTaskHeader with the current digest, whose next step tells
-// the leader to name it (self-review N1 of org-plan-approval). The other
-// kinds' next steps would have it undo the plan a human approved last or ask
-// again. checkPlanApproved itself is left as it is: checkAnyPlanApproved
-// runs it for a spawn, which names no plan.
+// the leader to name it. When the current digest is refused for the plan's
+// two header lines (approvalRefusalPlanHeader), it is approved but the lines
+// do not say so yet, as when the plan was approved again and the leader has
+// not written them since: that refusal, of the current digest, is returned,
+// whose next step tells the leader to write the lines naming it.
+// The TASK then goes through in two steps: sent again with the same PLAN:,
+// it gets the approvalRefusalTaskHeader refusal, which tells the leader to
+// change its PLAN: header to the current digest. Any other refusal of the
+// current digest leaves the refusal of the TASK's own. checkPlanApproved
+// itself is left as it is: checkAnyPlanApproved runs it for a spawn, which
+// names no plan.
 func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, text string) error {
 	ref, err := ParsePlanHeader(text)
 	if err != nil {
@@ -469,21 +479,29 @@ func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBindi
 	if kind := approvalCheckErrorOf(err).kind; kind != approvalRefusalNoApproval && kind != approvalRefusalPlanChanged {
 		return err
 	}
-	current, ok := currentApprovedRef(events, orgID, f, ref)
+	current, ok := currentPlanRef(f, ref)
 	if !ok {
 		return err
 	}
-	return approvalCheckError{kind: approvalRefusalTaskHeader, plan: current.Path, digest: current.Digest,
-		err: fmt.Errorf("org: the TASK's PLAN: header names sha256:%s of plan %s of org_id %q, and the plan's current approved digest is sha256:%s",
-			ref.Digest, ref.Path, orgID, current.Digest)}
+	currentErr := checkPlanApproved(events, orgID, f, current)
+	switch {
+	case currentErr == nil:
+		return approvalCheckError{kind: approvalRefusalTaskHeader, plan: current.Path, digest: current.Digest,
+			err: fmt.Errorf("org: the TASK's PLAN: header names sha256:%s of plan %s of org_id %q, and the plan's current approved digest is sha256:%s",
+				ref.Digest, ref.Path, orgID, current.Digest)}
+	case approvalCheckErrorOf(currentErr).kind == approvalRefusalPlanHeader:
+		return currentErr
+	default:
+		return err
+	}
 }
 
-// currentApprovedRef returns the plan at ref.Path with the digest its file in
-// f's worktree has now (PlanDigest), and true, when that digest is not
-// ref.Digest and checkPlanApproved passes it. It returns false otherwise, and
-// when the file cannot be resolved (resolvePlanFile) or read. f is a complete
-// binding (checkPlanApproved refused ref for a reason found after that check).
-func currentApprovedRef(events []ManifestEvent, orgID string, f *FeatureBinding, ref PlanRef) (PlanRef, bool) {
+// currentPlanRef returns the plan at ref.Path with the digest its file in f's
+// worktree has now (PlanDigest), and true, when that digest is not
+// ref.Digest. It returns false otherwise, and when the file cannot be
+// resolved (resolvePlanFile) or read. f is a complete binding
+// (checkPlanApproved refused ref for a reason found after that check).
+func currentPlanRef(f *FeatureBinding, ref PlanRef) (PlanRef, bool) {
 	abs, err := resolvePlanFile(f.Worktree, ref.Path)
 	if err != nil {
 		return PlanRef{}, false
@@ -493,7 +511,7 @@ func currentApprovedRef(events []ManifestEvent, orgID string, f *FeatureBinding,
 		return PlanRef{}, false
 	}
 	current := PlanRef{Path: ref.Path, Digest: PlanDigest(data)}
-	if current.Digest == ref.Digest || checkPlanApproved(events, orgID, f, current) != nil {
+	if current.Digest == ref.Digest {
 		return PlanRef{}, false
 	}
 	return current, true

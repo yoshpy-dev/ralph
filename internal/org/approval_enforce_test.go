@@ -296,7 +296,12 @@ func TestOrgSend_ApprovalCheck_PassesAndApprovedAgain(t *testing.T) {
 // drivers as they were: (a) the digest of the first approval after the plan
 // was approved again, (b) a mistyped digest. (c) A revision with no approval
 // keeps the plan-changed refusal, and (d) a TASK with no PLAN: header keeps
-// the step to put one on it.
+// the step to put one on it. (e) After the plan was approved again, while
+// its two header lines do not name the new digest yet (still Draft and TBD,
+// or still the first approval's lines), a TASK naming the first approval's
+// digest gets the step to write the lines naming the new digest; (e2) once
+// they are written, the same TASK gets the step to change its PLAN: header to
+// the new digest, and a TASK naming it is sent.
 func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 	revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
 	draftRef := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(testPlanDraft))}
@@ -304,13 +309,22 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 	if draftRef.Digest == revisedRef.Digest || mistypedDigest == draftRef.Digest {
 		t.Fatal("the revision or the mistyped digest is the draft's digest")
 	}
-	approveRevision := func(t *testing.T, fx *enforceFixture) {
-		fx.record(t)
-		if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", revisedRef, PlanContentHash([]byte(revised)))); err != nil {
-			t.Fatal(err)
+	// approveRevisionAs records the approvals of the draft and the revision,
+	// and leaves plan, the revision with some header lines, as the plan file.
+	approveRevisionAs := func(plan string) func(*testing.T, *enforceFixture) {
+		return func(t *testing.T, fx *enforceFixture) {
+			t.Helper()
+			if PlanDigest([]byte(plan)) != revisedRef.Digest {
+				t.Fatal("the plan is not the approved revision")
+			}
+			fx.record(t)
+			if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", revisedRef, PlanContentHash([]byte(revised)))); err != nil {
+				t.Fatal(err)
+			}
+			writePlan(t, fx.worktree, testPlanRel, plan)
 		}
-		writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, revisedRef.Digest))
 	}
+	approveRevision := approveRevisionAs(approvedPlanText(revised, revisedRef.Digest))
 	recordAndMark := func(edit func(string) string) func(*testing.T, *enforceFixture) {
 		return func(t *testing.T, fx *enforceFixture) {
 			fx.record(t)
@@ -324,6 +338,11 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 			planNotApprovedMarker + ": the leader changes the TASK's PLAN: header to PLAN: " + current.String() + " and sends the TASK again; ",
 		}
 	}
+	writeLines := func(approved PlanRef) string {
+		return planNotApprovedMarker + ": the leader writes - Status: Approved and - Approved: <YYYY-MM-DD> sha256:" + approved.Digest +
+			" before the plan's first ## heading, commits them, and tries again; "
+	}
+	notRestatedOrUndone := []string{"changes the TASK's PLAN: header", "changed after its approval", "undoes the change"}
 	cases := []struct {
 		name          string
 		setup         func(*testing.T, *enforceFixture)
@@ -343,6 +362,18 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 		{"(d) no PLAN header", approveRevision, "TYPE: TASK\nTASK_ID: t-1\n\nimplement the plan",
 			[]string{"TASK not sent: no PLAN: header", "on the line right after TASK_ID: and sends the TASK again; "},
 			[]string{"changes the TASK's PLAN: header"}},
+		{"(e) approved again, the lines still Draft and TBD", approveRevisionAs(revised), planTask(draftRef),
+			[]string{
+				"TASK not sent: plan " + testPlanRel + ` of org_id "org-a" is not marked approved: its - Status: is "Draft", want Approved; `,
+				writeLines(revisedRef),
+			}, notRestatedOrUndone},
+		{"(e) approved again, the first approval's lines still there", approveRevisionAs(approvedPlanText(revised, draftRef.Digest)),
+			planTask(draftRef),
+			[]string{
+				"TASK not sent: plan " + testPlanRel + ` of org_id "org-a": its - Approved: line names sha256:` + draftRef.Digest +
+					", not the approved sha256:" + revisedRef.Digest + "; ",
+				writeLines(revisedRef),
+			}, notRestatedOrUndone},
 	}
 	for _, tc := range cases {
 		for _, v := range sendVariants {
@@ -365,6 +396,33 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 				}
 			})
 		}
+	}
+
+	for _, v := range sendVariants {
+		t.Run("(e2) approved again, the lines written after the refusal "+v.name, func(t *testing.T) {
+			fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+			seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+			approveRevisionAs(revised)(t, fx)
+			send := func(ref PlanRef) SendResult {
+				return fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(ref), Raw: v.raw, DryRun: v.dryRun})
+			}
+			before := takeLedgerSnapshot(t, fx.o, fx.h, fx.a)
+			assertTaskRefused(t, send(draftRef), writeLines(revisedRef))
+			writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, revisedRef.Digest))
+			stale := send(draftRef)
+			for _, want := range restated(draftRef.Digest, revisedRef) {
+				assertTaskRefused(t, stale, want)
+			}
+			if after := takeLedgerSnapshot(t, fx.o, fx.h, fx.a); after != before {
+				t.Fatalf("a refused TASK changed the ledger or called a driver:\nbefore %+v\nafter  %+v", before, after)
+			}
+			if r := send(revisedRef); r.Err != nil {
+				t.Fatalf("send naming the digest the refusal names = %v; want it sent", r.Err)
+			}
+			if last := lastEvent(t, fx.o); last.Event != EventSent || last.DryRun != v.dryRun || last.SeatID != implementerSeatID {
+				t.Fatalf("last event = %+v; want sent to the implementer, dry_run %t", last, v.dryRun)
+			}
+		})
 	}
 }
 

@@ -679,6 +679,11 @@ per-plan の org では、次の検査がかかる。
   - TASK の `PLAN:` の digest が今のファイルのものと違い(承認し直す前の
     digest か打ち間違い)、今の digest なら照合を通る: 拒否の文がその digest を
     書くので、ヘッダを `PLAN: <path> sha256:<その digest>` に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest で、今の digest の承認は記録
+    されているのに先頭の 2 行がまだ古い(Draft と TBD のまま、または前の
+    digest のまま): 拒否の文は先頭の 2 行のものになり、今の digest を書く
+    ので、2 行をその digest で書いてコミットする。同じ TASK を送り直すと
+    前の項目の拒否になるので、`PLAN:` をその digest に直して送り直す。
   - そのほか(結びつきが不完全、計画のファイルがない、worktree の外を
     指す): BLOCKED を escalate する。
 

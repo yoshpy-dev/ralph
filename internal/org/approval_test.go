@@ -932,7 +932,14 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 // approval after the plan was approved again, (b) a mistyped digest. (c) A
 // plan changed after its approval with no approval of the change keeps the
 // plan-changed refusal of checkPlanApproved, word for word, and (d) a TASK
-// with no PLAN: header keeps the step to put one on the TASK.
+// with no PLAN: header keeps the step to put one on the TASK. (e) When the
+// plan was approved again but its two header lines do not name the new
+// digest yet (still Draft and TBD, or still the first approval's lines), a
+// TASK naming the first approval's digest gets checkPlanApproved's
+// plan-header refusal of the current digest, word for word, whose step
+// writes the lines naming it; (e2) once they are written, the same TASK gets
+// the step to change its PLAN: header to the current digest, and a TASK
+// naming it passes.
 func TestCheckTaskPlanApproved_StaleOrMistypedDigest(t *testing.T) {
 	refusal := func(t *testing.T, fx *checkFixture, text string) (approvalCheckError, string) {
 		t.Helper()
@@ -1013,6 +1020,65 @@ func TestCheckTaskPlanApproved_StaleOrMistypedDigest(t *testing.T) {
 			t.Errorf("refusal %q; want it to contain %q and not %q", msg, want, taskHeaderRestated)
 		}
 	})
+
+	// The plan as fx.reapprove leaves it, but with the two header lines the
+	// leader has not written for the new approval yet: still Draft and TBD
+	// from its new QUESTION, or still naming the first approval (first).
+	revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+	unwritten := []struct {
+		name string
+		plan func(first PlanRef) string
+	}{
+		{"Draft and TBD", func(PlanRef) string { return revised }},
+		{"the first approval's lines", func(first PlanRef) string { return approvedPlanText(revised, first.Digest) }},
+	}
+	reapproveUnwritten := func(t *testing.T, fx *checkFixture, plan string) PlanRef {
+		t.Helper()
+		next := fx.reapprove(t)
+		if PlanDigest([]byte(plan)) != next.Digest {
+			t.Fatal("the plan with the unwritten lines is not the revision reapprove approved")
+		}
+		writePlan(t, fx.worktree, testPlanRel, plan)
+		return next
+	}
+	for _, u := range unwritten {
+		t.Run("(e) approved again, the lines not written yet: "+u.name, func(t *testing.T) {
+			fx := newCheckFixture(t)
+			next := reapproveUnwritten(t, fx, u.plan(fx.ref))
+			headerErr := checkPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, next)
+			if headerErr == nil || approvalCheckErrorOf(headerErr).kind != approvalRefusalPlanHeader {
+				t.Fatalf("checkPlanApproved of the revision = %v; want a plan-header refusal", headerErr)
+			}
+			r, msg := refusal(t, fx, planTask(fx.ref))
+			if r.kind != approvalRefusalPlanHeader || r.digest != next.Digest || r.Error() != headerErr.Error() {
+				t.Fatalf("reason %q of kind %d, digest %q; want checkPlanApproved's %q of the revision, of kind %d (plan header) with digest %s",
+					r, r.kind, r.digest, headerErr, approvalRefusalPlanHeader, next.Digest)
+			}
+			if want := planNotApprovedMarker + ": the leader writes - Status: Approved and - Approved: <YYYY-MM-DD> sha256:" + next.Digest +
+				" before the plan's first ## heading, commits them, and tries again; " + planNotApprovedNever; !strings.Contains(msg, want) {
+				t.Errorf("refusal %q; want it to contain %q", msg, want)
+			}
+			for _, notWant := range []string{taskHeaderRestated, nextStepSignatures[approvalRefusalPlanChanged], "undoes the change",
+				"sha256:" + fx.ref.Digest + " before"} {
+				if strings.Contains(msg, notWant) {
+					t.Errorf("refusal %q; want no %q", msg, notWant)
+				}
+			}
+		})
+		t.Run("(e2) approved again, the lines written after the refusal: "+u.name, func(t *testing.T) {
+			fx := newCheckFixture(t)
+			next := reapproveUnwritten(t, fx, u.plan(fx.ref))
+			if r, msg := refusal(t, fx, planTask(fx.ref)); r.kind != approvalRefusalPlanHeader {
+				t.Fatalf("refusal %q of kind %d before the lines are written; want kind %d (plan header)", msg, r.kind, approvalRefusalPlanHeader)
+			}
+			writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, next.Digest))
+			r, msg := refusal(t, fx, planTask(fx.ref))
+			assertRestated(t, r, msg, fx.ref.Digest, next.Digest)
+			if err := checkTaskPlanApproved(mustReadEvents(t, fx.o), "org-a", fx.f, planTask(next)); err != nil {
+				t.Fatalf("a TASK naming the digest the refusal names = %v; want it to pass", err)
+			}
+		})
+	}
 }
 
 // TestPlanApprovedEvent_IsNotASeat: a manifest with a plan_approved line
