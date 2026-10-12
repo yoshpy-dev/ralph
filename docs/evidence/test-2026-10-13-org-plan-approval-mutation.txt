@@ -1,0 +1,500 @@
+# Mutation evidence of org-plan-approval (/test cycle 1, HEAD 9dcdbfab)
+# Every mutant is a go test -overlay replacement; the worktree was never written.
+# <M> = /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/opa/mut
+
+==================== results, round 1 and round 2 (res.tsv: id, verdict, seconds and the failing top-level tests)
+P01	killed	71s TestOrgApprove_Refusals,TestOrgSend_ApprovalCheck_Refusals,TestParsePlanHeader,TestPlanNotApprovedError_OneNextStepPerKind
+P02	killed	76s TestParsePlanHeader
+P03	killed	75s TestOrgApprove_Refusals,TestParsePlanHeader,TestPlanApprovedDetails_RoundTrip
+P04	killed	109s TestOrgApprove_Refusals,TestParsePlanHeader
+P05	build	['FAIL', '# github.com/yoshpy-dev/ralph/internal/org [github.com/yoshpy-dev/ralph/internal/org.test]', '<M>/m/P05/approval.go:177:2: declared and not used: inside']
+P06	killed	114s TestOrgApprove_Refusals,TestResolvePlanFile
+P07	killed	111s TestReadFeaturePlanHeader
+P08	killed	91s TestApprovedLineDigest,TestCheckPlanApproved
+H01	killed	90s TestCheckPlanApproved,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSpawn_ApprovalCheck_Implementer,TestPlanContentHash
+H02	build	['FAIL', '# github.com/yoshpy-dev/ralph/internal/org [github.com/yoshpy-dev/ralph/internal/org.test]', '<M>/m/H02/approval.go:284:6: declared and not used: i']
+H03	killed	88s TestCheckAnyPlanApproved,TestCheckPlanApproved,TestOrgSend_ApprovalCheck_Refusals,TestOrgSpawn_ApprovalCheck_Implementer
+H04	killed	84s TestCheckPlanApproved
+H05	killed	91s TestCheckPlanApproved
+K01	killed	92s TestCheckPlanApproved,TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+K02	killed	93s TestCheckPlanApproved,TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+K03	killed	94s TestCheckAnyPlanApproved,TestCheckPlanApproved,TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgApprove_RecordsResolvesAndLeavesThePlan,TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest (+1)
+K04	killed	91s TestCheckPlanApproved,TestOrgApprove_RecordsTheFileAsItIsThen,TestOrgSend_ApprovalCheck_Refusals,TestOrgSpawn_ApprovalCheck_Implementer,TestPlanNotApprovedError_OneNextStepPerKind
+K05	killed	74s TestCheckAnyPlanApproved,TestCheckPlanApproved,TestOrgApprove_RecordsResolvesAndLeavesThePlan,TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest
+K06	killed	80s TestCheckPlanApproved,TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+K07	killed	80s TestCheckPlanApproved
+K08	killed	86s TestCheckAnyPlanApproved,TestOrgSpawn_ApprovalCheck_Implementer,TestPlanNotApprovedError_OneNextStepPerKind
+K09	killed	94s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+K10	killed	95s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest
+K11	killed	70s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+K12	killed	83s TestCheckPlanApproved
+B01	killed	82s TestFeatureBinding_ApprovalModeRead,TestOrgSend_ApprovalCheck_ModeFromTheRecord
+B02	killed	69s TestFeatureBinding_ApprovalModeRead,TestOrgApprove_Batch,TestOrgSend_ApprovalCheck_NotApplied
+B03	killed	79s TestFeatureBinding_ApprovalModeRead,TestOrgSend_ApprovalCheck_ModeFromTheRecord
+S01	killed	79s TestOrgSpawn_FeatureOrgNeedsItsLeader,TestSpawnPrecheckErr_MatchesSpawn
+S02	killed	78s TestOrgSpawn_ApprovalCheck_Implementer,TestOrgSpawn_Feature_PlainReserveIntoBoundOrgRefused,TestSpawnPrecheckErr_MatchesSpawn
+S03	killed	80s TestOrgSpawn_ApprovalCheck_Implementer,TestSpawnPrecheckErr_MatchesSpawn
+S04	killed	77s TestOrgSpawn_FeatureOrgNeedsItsLeader
+S05	killed	75s TestOrgSpawn_ApprovalCheck_Implementer,TestOrgSpawn_FeatureOrgNeedsItsLeader
+S06	killed	71s TestOrgSpawn_ApprovalCheck_Implementer,TestOrgSpawn_FeatureOrgNeedsItsLeader,TestSpawnPrecheckErr_MatchesSpawn
+S07	killed	72s TestSpawnPrecheckErr_MatchesSpawn
+V01	killed	71s TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_SeatMidSpawn,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestOrgSend_ApprovalCheck_UnknownSeat
+V02	killed	74s TestOrgSend_ApprovalCheck_NotApplied,TestOrgSend_ApprovalCheck_SeatMidSpawn
+V03	killed	73s TestOrgSend_ApprovalCheck_UnknownSeat
+V04	killed	72s TestOrgSend_ApprovalCheck_SeatMidSpawn
+V05	killed	73s TestOrgSend_ApprovalCheck_ModeFromTheRecord,TestOrgSend_ApprovalCheck_NotApplied
+V06	killed	74s TestOrgSend_ApprovalCheck_Refusals,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestOrgSend_WatchGate_RefusesATaskOnly
+T01	killed	78s TestOrgApprove_Tripwire
+T02	killed	81s TestOrgApprove_Tripwire
+T03	killed	82s TestOrgApprove_Tripwire
+A01	killed	6s TestOrgApprove_Refusals
+A02	killed	81s TestOrgApprove_AllOrNothing
+A03	killed	86s TestOrgApprove_Refusals
+A04	killed	84s TestOrgApprove_Refusals
+A05	killed	77s TestOrgApprove_AllOrNothing,TestOrgApprove_Refusals
+A06	killed	74s TestOrgApprove_Refusals
+A07	killed	74s TestOrgApprove_RecordsResolvesAndLeavesThePlan,TestOrgApprove_Tripwire
+A08	killed	67s TestOrgApprove_IDList
+A09	killed	83s TestOrgApprove_Batch,TestOrgApprove_RecordsResolvesAndLeavesThePlan,TestOrgApprove_ResolveFailureKeepsTheRecord,TestOrgApprove_ResolvedBySomeoneElse
+F01	killed	86s TestStartFeature_AfterDisband,TestStartFeature_OrgIDAndTypeDefault,TestStartFeature_RecordsApprovalMode,TestStartFeature_StartsLeaderInFeatureWorktree
+F02	killed	91s TestFeatureLeaderTask,TestRenderRolePrompt_Leader_FeatureOrgPlanApproval,TestStartFeature_RecordsApprovalMode
+L01	killed	42s TestOrgStartPlan_ApprovalModeFromMainWorktree
+C01	killed	6s TestLoad_OrgApproval
+C02	killed	4s TestDefault_OrgApproval,TestDefaultsLockStep,TestLoad_OrgApproval
+P05b	killed	71s TestCheckPlanApproved,TestOrgApprove_Refusals,TestResolvePlanFile
+H02b	killed	72s TestCheckPlanApproved,TestPlanContentHash
+R01	killed	71s TestOrgApprove_Tripwire
+R02	killed	73s TestCheckAnyPlanApproved
+R03	SURVIVED	73s
+R04	SURVIVED	75s
+R05	SURVIVED	80s
+R06	killed	82s TestParsePlanHeader
+R07	killed	74s TestParsePlanHeader
+R08	killed	79s TestFeatureBinding_ApprovalModeRead,TestOrgSend_ApprovalCheck_ModeFromTheRecord,TestReservationFromEvent_DamagedBindingMatchesNothing
+R09	killed	77s TestStartFeature_RecordsApprovalMode,TestValidateFeatureBinding
+R10	killed	34s TestOrgApprove_AnOrgThatDoesNotWaitGetsANoteOnStderr
+R11	SURVIVED	83s
+R12	killed	83s TestCheckPlanApproved
+R13	killed	68s TestCheckPlanApproved
+
+==================== survivors against the whole internal/cli package (run_cli.py)
+R03-cli	killed	245s TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected
+R04-cli	killed	245s TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected
+R05-cli	SURVIVED	174s
+R11-cli	SURVIVED	174s
+# R03-cli and R04-cli were failed only by TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected: 'claude --version timed out after 5s' under load
+# (that test passed 3/3 alone at HEAD), so both were run again with -skip '^TestRunDoctor':
+R03-cli-skip	SURVIVED	170s
+R04-cli-skip	SURVIVED	169s
+
+==================== probes (probe.py): HEAD and each survivor
+--- HEAD
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/typed
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestProbe_SendWatchGateBeforeApprovalCheck (0.02s)
+=== RUN   TestProbe_SpawnCapacityBeforeFeatureCheck
+--- PASS: TestProbe_SpawnCapacityBeforeFeatureCheck (0.01s)
+=== RUN   TestProbe_ApproveRefusesAnItemItCannotResolve
+--- PASS: TestProbe_ApproveRefusesAnItemItCannotResolve (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.887s
+--- R03
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/typed
+    zz_probe_approval_test.go:28: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it 
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw
+    zz_probe_approval_test.go:28: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it 
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/dry-run
+    zz_probe_approval_test.go:28: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it 
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw_dry-run
+    zz_probe_approval_test.go:28: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it 
+--- FAIL: TestProbe_SendWatchGateBeforeApprovalCheck (0.01s)
+=== RUN   TestProbe_SpawnCapacityBeforeFeatureCheck
+--- PASS: TestProbe_SpawnCapacityBeforeFeatureCheck (0.00s)
+=== RUN   TestProbe_ApproveRefusesAnItemItCannotResolve
+--- PASS: TestProbe_ApproveRefusesAnItemItCannotResolve (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.806s
+FAIL
+--- R04
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/typed
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestProbe_SendWatchGateBeforeApprovalCheck (0.01s)
+=== RUN   TestProbe_SpawnCapacityBeforeFeatureCheck
+    zz_probe_approval_test.go:45: dry_run=true: spawn = {Outcome:rejected Seat:{OrgID: SeatID: Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: Event: Active:false DryRun:false Details: TS:} Err:org: no plan of org_id "org-a" has been approved since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for 
+--- FAIL: TestProbe_SpawnCapacityBeforeFeatureCheck (0.00s)
+=== RUN   TestProbe_ApproveRefusesAnItemItCannotResolve
+--- PASS: TestProbe_ApproveRefusesAnItemItCannotResolve (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.842s
+FAIL
+--- R05
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/typed
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestProbe_SendWatchGateBeforeApprovalCheck (0.01s)
+=== RUN   TestProbe_SpawnCapacityBeforeFeatureCheck
+    zz_probe_approval_test.go:45: dry_run=false: spawn = {Outcome:rejected Seat:{OrgID: SeatID: Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: Event: Active:false DryRun:false Details: TS:} Err:org: no plan of org_id "org-a" has been approved since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for
+--- FAIL: TestProbe_SpawnCapacityBeforeFeatureCheck (0.01s)
+=== RUN   TestProbe_ApproveRefusesAnItemItCannotResolve
+--- PASS: TestProbe_ApproveRefusesAnItemItCannotResolve (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.824s
+FAIL
+--- R11
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/typed
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestProbe_SendWatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestProbe_SendWatchGateBeforeApprovalCheck (0.01s)
+=== RUN   TestProbe_SpawnCapacityBeforeFeatureCheck
+--- PASS: TestProbe_SpawnCapacityBeforeFeatureCheck (0.01s)
+=== RUN   TestProbe_ApproveRefusesAnItemItCannotResolve
+    zz_probe_approval_test.go:66: Approve = {Approved:[{ID:e1 OrgID:org-a Plan:docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+--- FAIL: TestProbe_ApproveRefusesAnItemItCannotResolve (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.848s
+FAIL
+
+==================== mut.py
+#!/usr/bin/env python3
+"""Overlay mutants for org-plan-approval (HEAD 9dcdbfab).
+
+Each mutant replaces one exact snippet of one source file (it must occur
+exactly once) and runs the given go test command with -overlay, so the
+worktree is never written. A mutant is "killed" when the tests fail, "SURVIVED"
+when they pass, and "build" when the mutant does not compile (fix the mutant).
+Results go to res.tsv, one line per mutant; logs to logs/<id>.txt.
+"""
+import concurrent.futures as cf
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+W = "/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-plan-approval"
+D = os.path.dirname(os.path.abspath(__file__))
+ORG = ["./internal/org/"]
+CLI = ["./internal/cli/", "-run", "^(TestOrgStartPlan_|TestOrgStartHelp_|TestOrgStatus_|TestOrgApprove|TestOrgSendSpawn_)"]
+CFG = ["./internal/config/"]
+
+AP = "internal/org/approval.go"
+AV = "internal/org/approve.go"
+SP = "internal/org/spawn.go"
+VB = "internal/org/verbs.go"
+RS = "internal/org/reserve.go"
+FT = "internal/org/feature.go"
+CF = "internal/config/config.go"
+CO = "internal/cli/org.go"
+
+M = [
+    # --- PLAN: header and path (approval.go)
+    ("P01", AP, "\tdefault:\n\t\treturn PlanRef{}, fmt.Errorf(\"%d PLAN: headers",
+     "\tdefault:\n\t\tif true {\n\t\t\treturn parsePlanRef(values[len(values)-1])\n\t\t}\n\t\treturn PlanRef{}, fmt.Errorf(\"%d PLAN: headers", ORG),
+    ("P02", AP, "\tif !ok || !approvedDigestPattern.MatchString(digest) {\n\t\treturn PlanRef{}, fmt.Errorf(\"PLAN: %q: the second word",
+     "\tif !ok {\n\t\treturn PlanRef{}, fmt.Errorf(\"PLAN: %q: the second word", ORG),
+    ("P03", AP, "\tcase slices.Contains(strings.Split(filepath.ToSlash(raw), \"/\"), \"..\"):",
+     "\tcase false && slices.Contains(strings.Split(filepath.ToSlash(raw), \"/\"), \"..\"):", ORG),
+    ("P04", AP, "\tcase filepath.IsAbs(raw):", "\tcase false && filepath.IsAbs(raw):", ORG),
+    ("P05", AP, "if err != nil || inside == \"..\" || strings.HasPrefix(inside, \"..\"+string(filepath.Separator)) {",
+     "if err != nil {", ORG),
+    ("P06", AP, "\tif !info.Mode().IsRegular() {", "\tif false && !info.Mode().IsRegular() {", ORG),
+    ("P07", AP, "\t\tcase strings.HasPrefix(line, \"## \"):\n\t\t\treturn status, approved\n",
+     "\t\tcase false && strings.HasPrefix(line, \"## \"):\n\t\t\treturn status, approved\n", ORG),
+    ("P08", AP, "\tif _, err := time.Parse(time.DateOnly, fields[0]); err != nil {",
+     "\tif _, err := time.Parse(time.DateOnly, fields[0]); false && err != nil {", ORG),
+    # --- content hash, approvals of the current life
+    ("H01", AP, "\t\tif j := checkedBoxIndex(line); j >= 0 {", "\t\tif j := checkedBoxIndex(line); false && j >= 0 {", ORG),
+    ("H02", AP, "\t\tif i == status || i == approved {",
+     "\t\tif _, _ = status, approved; strings.HasPrefix(line, \"- Status:\") || strings.HasPrefix(line, \"- Approved:\") {", ORG),
+    ("H03", AP, "\t\tstart = d + 1", "\t\tstart = d * 0", ORG),
+    ("H04", AP, "\t\tif ev.DryRun || ev.OrgID != orgID || ev.SeatID != \"\" || ev.Event != EventPlanApproved {",
+     "\t\tif ev.OrgID != orgID || ev.SeatID != \"\" || ev.Event != EventPlanApproved {", ORG),
+    ("H05", AP, "\t\tif ev.DryRun || ev.OrgID != orgID || ev.SeatID != \"\" || ev.Event != EventPlanApproved {",
+     "\t\tif ev.DryRun || ev.SeatID != \"\" || ev.Event != EventPlanApproved {", ORG),
+    # --- the check (checkPlanApproved and its file half)
+    ("K01", AP, "\t\tif a.Digest == ref.Digest {\n\t\t\tmatching = append(matching, a)",
+     "\t\tif true {\n\t\t\tmatching = append(matching, a)", ORG),
+    ("K02", AP, "\tif d := PlanDigest(data); d != ref.Digest {\n\t\treturn approvalRefusalf(approvalRefusalPlanChanged,",
+     "\tif d := PlanDigest(data); false && d != ref.Digest {\n\t\treturn approvalRefusalf(approvalRefusalPlanChanged,", ORG),
+    ("K03", AP, "\tif err := checkApprovedPlanHeader(orgID, ref, readFeaturePlanHeader(data)); err != nil {",
+     "\tif err := checkApprovedPlanHeader(orgID, ref, readFeaturePlanHeader(data)); err != nil && false {", ORG),
+    ("K04", AP, "\tif !slices.ContainsFunc(approvals, func(a planApproval) bool { return a.Content == content }) {",
+     "\tif false && !slices.ContainsFunc(approvals, func(a planApproval) bool { return a.Content == content }) {", ORG),
+    ("K05", AP, "\tcase h.status != planApprovedStatus:", "\tcase false:", ORG),
+    ("K06", AP, "\tcase h.approvedDigest != ref.Digest:", "\tcase false:", ORG),
+    ("K07", AP, "\tcase !h.hasStatus:", "\tcase false:", ORG),
+    ("K08", AP, "\tvar latestErr error\n\tfor i := len(approvals) - 1; i >= 0; i-- {",
+     "\tif len(approvals) > 0 {\n\t\treturn nil\n\t}\n\tvar latestErr error\n\tfor i := len(approvals) - 1; i >= 0; i-- {", ORG),
+    ("K09", AP, "\tcase currentErr == nil:\n", "\tcase false:\n", ORG),
+    ("K10", AP, "\tcase approvalCheckErrorOf(currentErr).kind == approvalRefusalPlanHeader:", "\tcase false:", ORG),
+    ("K11", AP, "\tif kind := approvalCheckErrorOf(err).kind; kind != approvalRefusalNoApproval && kind != approvalRefusalPlanChanged {",
+     "\tif kind := approvalCheckErrorOf(err).kind; true || kind != approvalRefusalNoApproval && kind != approvalRefusalPlanChanged {", ORG),
+    ("K12", AP, "\tif f == nil || !f.Complete() {\n\t\treturn approvalRefusalf(approvalRefusalOther,",
+     "\tif f == nil {\n\t\treturn approvalRefusalf(approvalRefusalOther,", ORG),
+    # --- the binding's mode (reserve.go)
+    ("B01", RS, "\treturn f.Approval != \"\" && f.Approval != config.ApprovalModeSplit",
+     "\treturn f.Approval == config.ApprovalModePerPlan", ORG),
+    ("B02", RS, "\treturn f.Approval != \"\" && f.Approval != config.ApprovalModeSplit",
+     "\treturn f.Approval != config.ApprovalModeSplit", ORG),
+    ("B03", RS, "\tif read[scopeReservedApprovalKey] > 0 && f.Approval == \"\" {",
+     "\tif false && read[scopeReservedApprovalKey] > 0 && f.Approval == \"\" {", ORG),
+    # --- spawn (spawn.go)
+    ("S01", SP, "\tif leader, ok := seatFromEvents(events, p.OrgID, LeaderIdentity); !ok || !leader.Active {",
+     "\tif leader, ok := seatFromEvents(events, p.OrgID, LeaderIdentity); false && (!ok || !leader.Active) {", ORG),
+    ("S02", SP, "\tif f.RequiresApproval() && p.Role == implementerRole {", "\tif f.RequiresApproval() {", ORG),
+    ("S03", SP, "\tif f.RequiresApproval() && p.Role == implementerRole {", "\tif p.Role == implementerRole {", ORG),
+    ("S04", SP, "\tif f == nil || (p.SeatID == LeaderIdentity && p.Role == LeaderIdentity) {",
+     "\tif f == nil || p.Role == LeaderIdentity {", ORG),
+    ("S05", SP, "\t\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n\t\treturn o.dryRunSpawn(",
+     "\t\treturn o.dryRunSpawn(", ORG),
+    ("S06", SP, "\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\tr := o.reject(p, err)",
+     "\tif err := spawnFeatureSeatErr(p, events); err != nil && false {\n\t\tr := o.reject(p, err)", ORG),
+    ("S07", SP, "\treturn spawnFeatureSeatErr(p, events)\n}", "\t_ = spawnFeatureSeatErr\n\treturn nil\n}", ORG),
+    # --- send (verbs.go)
+    ("V01", VB, "\t\tif err := sendApprovalErr(rr.Events, p); err != nil {",
+     "\t\tif err := sendApprovalErr(rr.Events, p); err != nil && !p.DryRun {", ORG),
+    ("V02", VB, "\tif seatRoleFromEvents(events, p.OrgID, p.To) != implementerRole {",
+     "\tif false && seatRoleFromEvents(events, p.OrgID, p.To) != implementerRole {", ORG),
+    ("V03", VB, "\tif _, ok := seatFromEvents(events, p.OrgID, p.To); !ok {\n\t\treturn sendSeatNotFoundErr(p)",
+     "\tif _, ok := seatFromEvents(events, p.OrgID, p.To); !ok {\n\t\treturn nil", ORG),
+    ("V04", VB, "isStateEvent(ev.Event) && ev.Role != \"\" {", "isStateEvent(ev.Event) {", ORG),
+    ("V05", VB, "\tif f == nil || !f.RequiresApproval() {\n\t\treturn nil\n\t}\n\tif _, ok := seatFromEvents(",
+     "\tif f == nil {\n\t\treturn nil\n\t}\n\tif _, ok := seatFromEvents(", ORG),
+    ("V06", VB, "\tif parseErr == nil && msg.Type == protocol.TypeTask {\n\t\tif err := o.checkWatchGate(); err != nil {",
+     "\tif parseErr == nil && msg.Type == protocol.TypeTask && !p.Raw {\n\t\tif err := o.checkWatchGate(); err != nil {", ORG),
+    # --- approve (approve.go)
+    ("T01", AV, "\tif pane == \"\" {\n\t\treturn nil\n\t}\n\tfor _, s := range Roster(",
+     "\tif true || pane == \"\" {\n\t\treturn nil\n\t}\n\tfor _, s := range Roster(", ORG),
+    ("T02", AV, "\t\tif s.Active && s.PaneID == pane {", "\t\tif s.PaneID == pane {", ORG),
+    ("T03", AV, "\tpane := o.getenv(herdrPaneIDEnv)\n\tif err := approveTripwire(rr.Events, pane); err != nil {\n\t\treturn ApproveResult{Err: err}\n\t}\n\tinbox, err := o.Inbox.Read()\n\tif err != nil {\n\t\treturn ApproveResult{Err: fmt.Errorf(\"org: approve: %w\", err)}\n\t}\n",
+     "\tpane := o.getenv(herdrPaneIDEnv)\n\tinbox, err := o.Inbox.Read()\n\tif err != nil {\n\t\treturn ApproveResult{Err: fmt.Errorf(\"org: approve: %w\", err)}\n\t}\n\tif err := approveTripwire(rr.Events, pane); err != nil {\n\t\treturn ApproveResult{Err: err}\n\t}\n", ORG),
+    ("A01", AV, "\t\tif slices.ContainsFunc(candidates, func(c *approveCandidate) bool { return c.err != nil }) {\n\t\t\treturn nil\n\t\t}\n\t\trecorded, appendErr = o.recordApprovals(candidates, record)",
+     "\t\trecorded, appendErr = o.recordApprovals(candidates, record)", ORG),
+    ("A02", AV, "\t\tif slices.ContainsFunc(candidates, func(c *approveCandidate) bool { return c.err != nil }) {\n\t\t\treturn nil\n\t\t}\n\t\trecorded, appendErr = o.recordApprovals(candidates, record)",
+     "\t\tvar ok []*approveCandidate\n\t\tfor _, c := range candidates {\n\t\t\tif c.err == nil {\n\t\t\t\tok = append(ok, c)\n\t\t\t}\n\t\t}\n\t\trecorded, appendErr = o.recordApprovals(ok, record)", ORG),
+    ("A03", AV, "\t\tcase c.item.State == InboxStateResolved:", "\t\tcase false:", ORG),
+    ("A04", AV, "\t\tcase c.item.Type != protocol.TypeQuestion:", "\t\tcase false:", ORG),
+    ("A05", AV, "\tif d := PlanDigest(data); d != c.ref.Digest {", "\tif d := PlanDigest(data); false && d != c.ref.Digest {", ORG),
+    ("A06", AV, "\tcase !f.Complete():\n\t\treturn nil, \"\", fmt.Errorf(\"org: approve %s: org_id %q is bound to %s",
+     "\tcase false:\n\t\treturn nil, \"\", fmt.Errorf(\"org: approve %s: org_id %q is bound to %s", ORG),
+    ("A07", AV, "\trecord := planApproval{By: approverName(o.getenv(\"USER\")), HerdrPane: pane != \"\", Cwd: p.Cwd}",
+     "\trecord := planApproval{By: approverName(o.getenv(\"USER\")), HerdrPane: false, Cwd: p.Cwd}", ORG),
+    ("A08", AV, "\t\tif slices.Contains(ids[:i], id) {", "\t\tif false && slices.Contains(ids[:i], id) {", ORG),
+    ("A09", AV, "\tres.Err = errors.Join(res.Err, o.resolveApproved(res.Approved))\n",
+     "\t_ = o.resolveApproved\n", ORG),
+    # --- start's mode (feature.go, cli org.go) and the config
+    ("F01", FT, "\tif cfg.Approval.Mode == \"\" {\n\t\treturn config.ApprovalModePerPlan",
+     "\tif cfg.Approval.Mode == \"\" {\n\t\treturn config.ApprovalModeSplit", ORG),
+    ("F02", FT, "\t\t\"- 承認方式: \" + approval,", "\t\t\"- 承認方式: \" + config.ApprovalModePerPlan,", ORG),
+    ("L01", CO, "\tcfg.Approval = mainCfg.Org.Approval\n", "", CLI),
+    ("C01", CF, "\tif mode := cfg.Org.Approval.Mode; mode != ApprovalModePerPlan && mode != ApprovalModeSplit {",
+     "\tif mode := cfg.Org.Approval.Mode; mode != \"\" && mode != ApprovalModePerPlan && mode != ApprovalModeSplit {", CFG),
+    ("C02", CF, "\t\t\t\tMode: ApprovalModePerPlan,", "\t\t\t\tMode: ApprovalModeSplit,", CFG),
+    # --- round 2: order of the checks, and finer conditions
+    ("R01", AV, "\tfor _, s := range Roster(events, RosterOptions{}) {\n\t\tif s.Active && s.PaneID == pane {",
+     "\tfor _, s := range Roster(events, RosterOptions{IncludeDryRun: true}) {\n\t\tif s.Active && s.PaneID == pane {", ORG),
+    ("R02", AP, "\tfor i := len(approvals) - 1; i >= 0; i-- {", "\tfor i := 0; i < len(approvals); i++ {", ORG),
+    ("R03", VB, "\t\tif err := o.checkWatchGate(); err != nil {\n\t\t\treturn SendResult{Err: taskNotSentError{refusal: err}}\n\t\t}\n"
+     "\t\t// The approval check runs next, before the dry-run branch, so a\n\t\t// refusal records nothing and dry-run predicts it.\n"
+     "\t\trr, err := o.Manifest.Read()\n\t\tif err != nil {\n\t\t\treturn SendResult{Err: fmt.Errorf(\"org: send: read manifest: %w\", err)}\n\t\t}\n"
+     "\t\tif err := sendApprovalErr(rr.Events, p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n",
+     "\t\trr, err := o.Manifest.Read()\n\t\tif err != nil {\n\t\t\treturn SendResult{Err: fmt.Errorf(\"org: send: read manifest: %w\", err)}\n\t\t}\n"
+     "\t\tif err := sendApprovalErr(rr.Events, p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n"
+     "\t\tif err := o.checkWatchGate(); err != nil {\n\t\t\treturn SendResult{Err: taskNotSentError{refusal: err}}\n\t\t}\n", ORG),
+    ("R04", SP, "\t\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\t\tif err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n"
+     "\t\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n",
+     "\t\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n"
+     "\t\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\t\tif err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n", ORG),
+    ("R05", SP, "\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\tif err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n"
+     "\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n",
+     "\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n"
+     "\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\tif err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n", ORG),
+    ("R06", AP, "\tif p == \".\" {", "\tif false && p == \".\" {", ORG),
+    ("R07", AP, "\tcase strings.ContainsFunc(raw, unicode.IsControl):", "\tcase false && strings.ContainsFunc(raw, unicode.IsControl):", ORG),
+    ("R08", RS, "\t\tif n > 1 {\n\t\t\t*fields[key] = \"\"", "\t\tif false && n > 1 {\n\t\t\t*fields[key] = \"\"", ORG),
+    ("R09", RS, "\tif f.Approval != config.ApprovalModePerPlan && f.Approval != config.ApprovalModeSplit {\n\t\treturn fmt.Errorf(\"org: the split plan feature's approval mode",
+     "\tif false && f.Approval != config.ApprovalModePerPlan && f.Approval != config.ApprovalModeSplit {\n\t\treturn fmt.Errorf(\"org: the split plan feature's approval mode", ORG),
+    ("R10", "internal/cli/org_approve.go", "\t\tif !a.RequiresApproval {", "\t\tif false && !a.RequiresApproval {", CLI),
+    ("R11", AV, "\t\tif err := ValidateInboxNote(approveNote(ref)); err != nil {", "\t\tif err := ValidateInboxNote(approveNote(ref)); false && err != nil {", ORG),
+    ("R12", AP, "\t\tif a.Plan != ref.Path {\n\t\t\tcontinue", "\t\tif false && a.Plan != ref.Path {\n\t\t\tcontinue", ORG),
+    ("R13", AP, "\t\tif ev.DryRun || ev.OrgID != orgID || ev.SeatID != \"\" || ev.Event != EventPlanApproved {",
+     "\t\tif ev.DryRun || ev.OrgID != orgID || ev.Event != EventPlanApproved {", ORG),
+    # compile fixes of P05 and H02 (declared and not used)
+    ("P05b", AP, "if err != nil || inside == \"..\" || strings.HasPrefix(inside, \"..\"+string(filepath.Separator)) {",
+     "if _ = inside; err != nil {", ORG),
+    ("H02b", AP, "\t\tif i == status || i == approved {",
+     "\t\tif _, _, _ = i, status, approved; strings.HasPrefix(line, \"- Status:\") || strings.HasPrefix(line, \"- Approved:\") {", ORG),
+]
+
+
+def run(m):
+    mid, rel, old, new, args = m
+    src = os.path.join(W, rel)
+    text = open(src, encoding="utf-8").read()
+    n = text.count(old)
+    if n != 1:
+        return mid, "snippet", f"occurs {n} times"
+    mdir = os.path.join(D, "m", mid)
+    os.makedirs(mdir, exist_ok=True)
+    mfile = os.path.join(mdir, os.path.basename(rel))
+    open(mfile, "w", encoding="utf-8").write(text.replace(old, new, 1))
+    ov = os.path.join(mdir, "overlay.json")
+    json.dump({"Replace": {src: mfile}}, open(ov, "w"))
+    cmd = ["go", "test", "-overlay", ov, "-count=1", "-timeout", "6m"] + args
+    t0 = time.time()
+    p = subprocess.run(cmd, cwd=W, capture_output=True, text=True)
+    dt = time.time() - t0
+    out = p.stdout + p.stderr
+    os.makedirs(os.path.join(D, "logs"), exist_ok=True)
+    open(os.path.join(D, "logs", mid + ".txt"), "w").write(" ".join(cmd) + "\n" + out)
+    if p.returncode == 0:
+        return mid, "SURVIVED", f"{dt:.0f}s"
+    if "[build failed]" in out or "[setup failed]" in out or re.search(r"\.go:\d+:\d+: ", out) and "--- FAIL" not in out:
+        return mid, "build", out.strip().splitlines()[-3:]
+    fails = sorted(set(re.findall(r"^\s*--- FAIL: (\S+)", out, re.M)))
+    top = [f for f in fails if "/" not in f]
+    if "panic: test timed out" in out:
+        top.append("TIMEOUT")
+    return mid, "killed", f"{dt:.0f}s " + ",".join(top[:6]) + (f" (+{len(top)-6})" if len(top) > 6 else "")
+
+
+def main():
+    ids = sys.argv[1:]
+    todo = [m for m in M if not ids or m[0] in ids]
+    jobs = int(os.environ.get("JOBS", "3"))
+    with open(os.path.join(D, "res.tsv"), "a") as res, cf.ThreadPoolExecutor(jobs) as ex:
+        for mid, verdict, info in ex.map(run, todo):
+            line = f"{mid}\t{verdict}\t{info}"
+            print(line, flush=True)
+            res.write(line + "\n")
+            res.flush()
+
+
+if __name__ == "__main__":
+    main()
+
+==================== run_cli.py
+# Re-run given mutants of mut.py against the whole internal/cli package.
+import sys, mut, concurrent.futures as cf
+todo = [(m[0] + "-cli", m[1], m[2], m[3], ["./internal/cli/"]) for m in mut.M if m[0] in sys.argv[1:]]
+with cf.ThreadPoolExecutor(2) as ex:
+    for r in ex.map(mut.run, todo):
+        print("\t".join(map(str, r)), flush=True)
+
+==================== run_cli_skip.py
+# Re-run given mutants against the whole internal/cli package minus the
+# doctor tests (their 5 s probe timeouts fail under load, unrelated to the
+# approval code).
+import sys, mut, concurrent.futures as cf
+todo = [(m[0] + "-cli-skip", m[1], m[2], m[3], ["./internal/cli/", "-skip", "^TestRunDoctor"]) for m in mut.M if m[0] in sys.argv[1:]]
+with cf.ThreadPoolExecutor(2) as ex:
+    for r in ex.map(mut.run, todo):
+        print("\t".join(map(str, r)), flush=True)
+
+==================== probe.py
+# Run the overlay-only probes at HEAD and on each survivor mutant.
+import json, os, subprocess, sys, mut
+D = mut.D
+probe_src = os.path.join(D, "probe", "zz_probe_approval_test.go")
+probe_dst = os.path.join(mut.W, "internal/org/zz_probe_approval_test.go")
+def go(mid, replace):
+    ov = os.path.join(D, "probe", f"overlay-{mid}.json")
+    json.dump({"Replace": replace}, open(ov, "w"))
+    p = subprocess.run(["go", "test", "-overlay", ov, "-count=1", "-run", "^TestProbe_", "-v", "./internal/org/"],
+                       cwd=mut.W, capture_output=True, text=True)
+    out = p.stdout + p.stderr
+    open(os.path.join(D, "probe", f"{mid}.txt"), "w").write(out)
+    res = [l.strip() for l in out.splitlines() if l.startswith("--- ")]
+    print(mid, "rc=%d" % p.returncode, "; ".join(res), flush=True)
+go("HEAD", {probe_dst: probe_src})
+for m in mut.M:
+    if m[0] in sys.argv[1:]:
+        mfile = os.path.join(D, "m", m[0], os.path.basename(m[1]))
+        go(m[0], {probe_dst: probe_src, os.path.join(mut.W, m[1]): mfile})
+
+==================== probe/zz_probe_approval_test.go (overlay only, not committed to internal/org)
+package org
+
+// Overlay-only probes of the /test cycle 1 mutation survivors of
+// org-plan-approval (not committed). Each is green at HEAD 9dcdbfab and red
+// on the mutant it names.
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
+)
+
+// R03: Send runs the watch gate before the approval check. With no watch and
+// no approval, a TASK to the implementer of a per-plan feature org is
+// refused by the watch gate, so the leader's next step is to start a watch.
+func TestProbe_SendWatchGateBeforeApprovalCheck(t *testing.T) {
+	for _, v := range sendVariants {
+		t.Run(v.name, func(t *testing.T) {
+			fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+			seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+			fx.mark(t, nil)
+			gate := refusingWatchGate()
+			fx.o.WatchGate = gate.gate
+			r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), Raw: v.raw, DryRun: v.dryRun})
+			if !errors.Is(r.Err, ErrNoRunningWatch) || errors.Is(r.Err, ErrPlanNotApproved) {
+				t.Fatalf("send = %v; want the watch gate's refusal, not the approval check's", r.Err)
+			}
+		})
+	}
+}
+
+// R04 and R05: Spawn runs the capacity check (max_seats) before the feature
+// org's checks, in the dry run and the real path alike. With max_seats
+// reached and no approval, an implementer spawn is refused for max_seats.
+func TestProbe_SpawnCapacityBeforeFeatureCheck(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		fx.o.Config.MaxSeats = 1 // the leader holds the one seat
+		p := implementerParams("org-a")
+		p.DryRun = dryRun
+		r := fx.o.Spawn(p)
+		if r.Outcome != SpawnOutcomeRejected || errors.Is(r.Err, ErrPlanNotApproved) || r.Err == nil || !strings.Contains(r.Err.Error(), "max_seats 1 reached") {
+			t.Fatalf("dry_run=%t: spawn = %+v; want the max_seats refusal, not the approval check's", dryRun, r)
+		}
+	}
+}
+
+// R11: approve refuses, before recording anything, a QUESTION whose resolve
+// note (approved <path> sha256:<digest>) would be longer than the inbox
+// accepts, so no approval is recorded for an item it then cannot resolve.
+func TestProbe_ApproveRefusesAnItemItCannotResolve(t *testing.T) {
+	fx := newApprovalFixture(t)
+	worktree := t.TempDir()
+	fx.bind(t, "org-a", worktree, config.ApprovalModePerPlan)
+	rel := "docs/" + strings.Repeat("a", 200) + "/" + strings.Repeat("b", 200) + "/" + strings.Repeat("c", 80) + ".md"
+	ref := PlanRef{Path: rel, Digest: PlanDigest(writePlan(t, worktree, rel, testPlanDraft))}
+	if n := len("approved " + ref.String()); n <= InboxNoteMaxRunes {
+		t.Fatalf("the note is %d characters; the probe needs more than %d", n, InboxNoteMaxRunes)
+	}
+	id := fx.ask(t, "org-a", "QUESTION", planQuestion(ref))
+	before := fx.ledgerBytes(t)
+	res := fx.o.Approve(ApproveParams{IDs: []string{id}})
+	if res.Err == nil || len(res.Refused) != 1 || len(res.Approved) != 0 {
+		t.Fatalf("Approve = %+v; want the item refused", res)
+	}
+	if !strings.Contains(res.Err.Error(), "could not be resolved with the note") {
+		t.Fatalf("Approve error = %v; want the note refusal", res.Err)
+	}
+	if after := fx.ledgerBytes(t); after != before {
+		t.Fatalf("a refused approve changed the ledger")
+	}
+}
