@@ -93,13 +93,13 @@ func TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork(t *testing.T) {
 			name:  "running --once",
 			setup: func(t *testing.T, dir string) { holdWatchWithMark(t, dir, onceMark(4242, time.Now())) },
 			state: WatchLivenessRunning,
-			want:  []string{"pid 4242", "is a --once run", "accepts no new work", "run this again once it has ended", "ralph org watch --all --detach"},
+			want:  []string{"pid 4242", "is a --once run", "accepts no new work", "run this again once it has ended", "ralph org start then starts a long-running watch itself", "ralph org watch --all --detach"},
 		},
 		{
 			name:  "stopping",
 			setup: func(t *testing.T, dir string) { holdWatchWithMark(t, dir, stoppingMark(4242, time.Now())) },
 			state: WatchLivenessStopping,
-			want:  []string{"pid 4242", "is stopping", "accepts no new work", "run this again once it has ended", "ralph org watch --all --detach"},
+			want:  []string{"pid 4242", "is stopping", "accepts no new work", "run this again once it has ended", "ralph org start then starts a long-running watch itself", "ralph org watch --all --detach"},
 		},
 		{
 			name: "stale with an old mark",
@@ -221,8 +221,8 @@ func TestWatchGateError_TheCommandsRepeatHintStateDir(t *testing.T) {
 	}{
 		{name: "not running", l: WatchLiveness{State: WatchLivenessNotRunning}, want: []string{"start one with " + detach + ", "}},
 		{name: "stale", l: WatchLiveness{State: WatchLivenessStale, Mark: &mark}, want: []string{"stop it with ralph org watch --stop --state-dir '/led ger', "}},
-		{name: "stopping", l: WatchLiveness{State: WatchLivenessStopping, Mark: &stopping}, want: []string{"(" + detach + " starts one)"}},
-		{name: "running --once", l: WatchLiveness{State: WatchLivenessRunning, Mark: &once}, want: []string{"(" + detach + " starts one)"}},
+		{name: "stopping", l: WatchLiveness{State: WatchLivenessStopping, Mark: &stopping}, want: []string{"start one with " + detach + ")"}},
+		{name: "running --once", l: WatchLiveness{State: WatchLivenessRunning, Mark: &once}, want: []string{"start one with " + detach + ")"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

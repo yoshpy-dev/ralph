@@ -43,7 +43,10 @@ func (e *WatchGateError) Is(target error) bool {
 func (e *WatchGateError) Error() string {
 	mark := e.Liveness.Mark
 	detach := watchGateCommand("--all --detach", e.HintStateDir)
-	later := "run this again once it has ended and a long-running watch is up (" + detach + " starts one)"
+	// ralph org start launches a watch itself once this one has ended, so
+	// only a spawn or a TASK send needs one started for it.
+	later := "run this again once it has ended (ralph org start then starts a long-running watch itself; " +
+		"for a spawn or a TASK send, start one with " + detach + ")"
 	switch e.Liveness.State {
 	case WatchLivenessNotRunning:
 		return fmt.Sprintf("org: no ralph org watch --all is running on the org state dir %s, so no new work starts; "+

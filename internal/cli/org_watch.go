@@ -59,7 +59,12 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"current cycle.\n\n" +
 			"  --all --once    run exactly one cycle and exit (useful for cron/smoke)\n" +
 			"  --all --detach  start the watch as a detached process that logs to\n" +
-			"                  <state-dir>/watch.log, and return once it is running\n" +
+			"                  <state-dir>/watch.log, and return once it is running;\n" +
+			"                  it runs in the ledger's main worktree root (when it has\n" +
+			"                  one), without HERDR_PANE_ID, HERDR_TAB_ID,\n" +
+			"                  HERDR_WORKSPACE_ID, and HERDR_ENV. It exits 0 when a\n" +
+			"                  watch already runs, and 1 when a stale, stopping, or\n" +
+			"                  --once one holds the lock\n" +
 			"  --stop          ask the running watch to stop: write\n" +
 			"                  <state-dir>/watch-stop.json (no signal is sent) and\n" +
 			"                  wait up to 30s for it to end\n\n" +

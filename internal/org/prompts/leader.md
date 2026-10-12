@@ -233,3 +233,16 @@ ralph org escalate --state-dir <台帳> --org-id {{ORG_ID}} --text "$(cat .harne
   あなたの最終責任です。disband はあなた自身の pane を含む workspace を
   閉じるので、必ず最後のコマンドにしてください(disband のあとに report は
   打てません)。
+- `ralph org spawn` か TASK の `ralph org send` が、横断の見張り
+  (`ralph org watch --all`)が動いていないために断られたら、打ち直さないで
+  ください。終了コードは 1 で、エラーの文は `ralph org watch --all` に触れ、
+  `no new work` を含みます(spawn では stdout の `rejected:` の行に出ます)。
+  TYPE を変えたり `--raw` にしたりして送り直すこともしません。見張りも自分で
+  起動しません。エラーが `ralph org watch --all --detach` を案内していても
+  打たないでください。あなたは herdr の pane の中で動いています。見張りは
+  herdr の外で動かすもので、起動するのは `ralph org start` か人です。代わりに
+  BLOCKED(TASK_ID は org_id の `{{ORG_ID}}`)を「件を上げる」の節の手順で
+  `.harness/state/escalate-{{ORG_ID}}.txt` に書き、`ralph org escalate` で
+  上げてください。SUMMARY には断られたコマンドを、EVIDENCE にはエラーの文の
+  要点(見張りの状態と pid)を書きます。上げたら、返事が来るまで spawn と
+  TASK の送信を打たずに待ってください。

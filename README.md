@@ -232,6 +232,7 @@ See `.claude/rules/ralph/post-implementation-pipeline.md` for the canonical pipe
 For autonomous execution outside the interactive `/implement` loop, `ralph org` spawns and coordinates multiple agent seats (a `leader` plus `implementer` and `reviewer` seats) over a typed messaging protocol (star topology — every seat addresses `TO: leader` only), with a two-layer watchdog (pulse watch + on-demand watcher) and an append-only manifest so `ralph status` works even if the underlying driver is stopped.
 
 ```sh
+ralph org watch --all --detach
 ralph org spawn --org-id my-task --id leader --role leader
 ralph org send --org-id my-task --to leader --text "TYPE: TASK
 TASK_ID: 1
@@ -242,6 +243,8 @@ ralph org report --org-id my-task
 ralph org disband --org-id my-task
 ```
 
+`spawn` and a `TASK` sent with `send` are refused while no long-running `ralph org watch --all` runs on the ledger, so the example starts one first; `ralph org start` starts one itself when none runs.
+
 `disband` closes the org's herdr workspace, so a headless leader running inside it ends there; the leader runs `report` first and `disband` as its last command.
 
 `[org].max_orgs` (default 10) and `[org].max_total_seats` (default 30) cap running orgs and active seats across every org sharing the ledger, on top of the per-org `max_seats`; a refused `spawn` says to free slots with `ralph org disband --org-id <id>` or `--all`.
@@ -250,7 +253,7 @@ One org handles one feature, with one worktree, one branch and one PR; its defau
 
 A leader raises a question, a block, or an opened PR with `ralph org escalate`, which records the item in the org inbox (`<state dir>/inbox.jsonl`, shared by every org) and, until a director can be registered, also sends it to the human at once (a line in `escalations.jsonl`, a banner on stderr, a macOS notification); `ralph org inbox` lists the items and moves one open → acked → resolved.
 
-`ralph org watch --all` runs once per ledger, for every org: each cycle it sends the inbox items past a deadline to the human, runs each running org's pulse (stall, liveness, and scope-change ALERTs, the deadman escalation), and rewrites its liveness mark. The deadlines come from `[org.director]`: an open item that was never notified is sent `ack_minutes` (default 10) after it was escalated, and an item still unresolved after `resolve_minutes` (default 60) is sent once more, so resolve every item, an opened PR's `RESULT` included, within that time. Start it with `ralph org watch --all --detach`, check it on the `org watch:` line of `ralph status`, and stop it with `ralph org watch --stop`; a second watch on the same ledger is refused.
+`ralph org watch --all` runs once per ledger, for every org: each cycle it sends the inbox items past a deadline to the human, runs each running org's pulse (stall, liveness, and scope-change ALERTs, the deadman escalation), and rewrites its liveness mark. The deadlines come from `[org.director]`: an open item that was never notified is sent `ack_minutes` (default 10) after it was escalated, and an item still unresolved after `resolve_minutes` (default 60) is sent once more, so resolve every item, an opened PR's `RESULT` included, within that time. `ralph org start` launches it when none runs; otherwise start it with `ralph org watch --all --detach`. Either way the watch runs detached in the ledger's main worktree root, so without `--config` it reads that root's `ralph.toml`. Check it on the `org watch:` line of `ralph status` (`running`, `stopping` while it drains, `stale`, or `not running`), and stop it with `ralph org watch --stop`; a second watch on the same ledger is refused. A watch that dies mid-run does not stop the seats already running; nothing notices until the next `start`, `spawn`, or `TASK`, or a look at `ralph status`.
 
 See `docs/specs/2026-08-01-org-runtime.md` for the full protocol and `.claude/rules/ralph/agent-messaging.md` for the message-shape contract.
 
