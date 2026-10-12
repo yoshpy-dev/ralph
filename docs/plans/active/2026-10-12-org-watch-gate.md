@@ -201,4 +201,5 @@
   - self-review の cycle 3(1005f3bc): Merge yes、LOW 2 件。C2-1〜C2-4・L5・L6 は直った。C3-1(3 つのコメントが「cross-review cycle 2 #1」と書くが、triage の報告は cycle ごとに書き直される)は、cycle 3 の triage で cycle 2 の内容を付録に残して指し先を保つ。C3-2(`org.CommandWithStateDir` が `org.InboxCommand` の 4 行の写し)は、直すと全段のやり直しになるので sync-docs で tech-debt に書く
   - verify の cycle 3(d9321812): pass。8d8ddbd2 のあとも AC6 は成り立ち、優先順位は `driver.ResolveAgmsgHome` と同じ。実機で、相対の env と `--config` の相対の `agmsg_home` のどちらでも子が絶対パスの値を 1 つだけ受け取ることを見た。sync-docs に回す文書のずれ: D11(README)、D12(skill の 4 面)、D13(tech-debt 205 の注)、D14(C3-2 の新しい行)
   - test の cycle 3(b28ad4e0): pass(top-level 1,444 本、-race -count=5 で DATA RACE 0)。mutation 18 件中 17 件が落ち、生き残りの A8a は等価。実機で、相対の agmsg home の子が stub の agmsg を呼べること(対照の 755e082d では `No such file`)と、8 本の同時 `--detach` のあとの `--stop` が 0.9 秒で通ることを見た。cycle 1・2 の報告の「shell の SKIP 3」は数え違いで、本当は 1(cycle 3 の報告に書いた)
+  - sync-docs の cycle 3(073e9119): D11〜D15 をすべて入れた(README と skill の 4 面と仕様の注に、相対の agmsg home を打った場所から絶対パスにして渡すことを足し、tech-debt 205 の注にその直しとテスト 2 本を、新しい行に C3-2 を書いた)。run-verify は rc 0
 - [ ] PR created
