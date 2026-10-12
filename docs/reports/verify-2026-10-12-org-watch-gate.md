@@ -1,14 +1,118 @@
 # Verify report: org-watch-gate
 
+- Date: 2026-10-12(cycle 3)
+- Plan: docs/plans/active/2026-10-12-org-watch-gate.md(承認済み。`scripts/plan-visual.sh digest` の値 de5ca6b7e6f0 は `- Approved:` 行と一致する)
+- Verifier: verifier subagent (Claude)。パイプライン 3 回目(cycle 3)。上限は `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げてあり、これが最後の cycle である。`cycle-count.json` は cross-review の規則で 2 のままなので、cycle 3 の番号はここと insight event の `--cycle 3` で付けた。cross-review cycle 2 の ACTION_REQUIRED 1 件を 8d8ddbd2 で直したあとの、全段のやり直し。cycle 2 と cycle 1 の結果は末尾の「付録」に残してある
+- Scope: 仕様適合、静的解析、文書の整合。ブランチ全体は `git diff dc41c4f5...HEAD`(HEAD 522776ac)。主に見たのは cycle 2 の verify(755e082d、HEAD 5739e1ba を見た)のあとのコードの変更 3 つで、`git diff 5739e1ba..HEAD -- internal/` は 4 ファイル、+234/-8。47635690 はテスト 1 本(`orgWatchChildExitWait` が `org.DefaultWatchLockWait` より長いこと)、2fada512 は `runOrgWatchStop` の doc の 2 行、8d8ddbd2 は相対の agmsg home を絶対パスにして子に渡す直し(`internal/` で +223/-6、テスト 13 ケース)。8d8ddbd2 は全文を読んだ。テストは走らせていない(/test の担当)。HEAD のビルドで、相対の agmsg home を持つ `--detach` の子の環境と作業ディレクトリを実機で確かめた
+- Evidence: `docs/evidence/verify-2026-10-12-org-watch-gate.log`(gitignore の対象で、コミットしない。cycle 3 の出力は末尾に足した)
+
+## Latest run: cycle 3(HEAD 522776ac)
+
+### Spec compliance
+
+cycle 2 の判定(付録)から、3 つのコミットで変わった AC を見直した。3 つが触れた非テストのコードは `internal/cli/org_watch.go`(`orgWatchChild` の新しい引数 `cfgAgmsgHome`、新しい `orgWatchChildAgmsgHome` と定数 `orgAgmsgHomeEnv`、`runOrgWatchStop` の doc)と `internal/cli/org.go`(start が `orgWatchChild` に `rt.Config.AgmsgHome` を渡す 1 行)だけで、`internal/org/` は変わっていない。検査の位置、TASK の判定、印、status、起動と待ち、雛形のコードは変わっていない。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC6 子の作業ディレクトリ、`--config`、環境 | 満たす(子の環境の手当てが 1 つ増えた) | `orgWatchChild`(`internal/cli/org_watch.go:325`)の作業ディレクトリ(`org.LedgerMainWorktreeRoot`、`:331-333`)、`--config` の絶対パス(`orgWatchChildArgs`、`:282-293`)、HERDR_* の 4 つを外すことと `PWD`(`:344`、`:349-351`)は cycle 2 と同じ。足されたのは、作業ディレクトリを変えるとき(`:335`)だけ `orgWatchChildAgmsgHome`(`:369`)を呼び、値が返れば継承した `RALPH_ORG_AGMSG_HOME` を落として(`:344`)絶対パスの 1 件を足すこと(`:352-354`)である。AC6 の文(main worktree のルートで動く、`--config` は絶対パス、HERDR_* の 4 つがない)はそのまま成り立つ。AC6 のテスト 3 本(`TestOrgWatchDetach_TheChildRunsInTheMainWorktreeWithoutTheHerdrPaneEnv`、`internal/cli/org_watch_test.go:998`、`TestOrgStart_TheWatchRunsInTheMainWorktreeWithoutTheHerdrPaneEnv`、`internal/cli/org_start_watch_test.go:643`、`TestOrgWatchDetach_StartDetachedProcess_RunsInDirWithEnv`、`org_watch_test.go:1177`)と helper の `checkOrgWatchChild`(`:1048`)は 1 行も変わっていない。新しいテストは `TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild`(`:1082`、11 ケース)と `TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch`(`org_start_watch_test.go:689`、2 ケース)。実機でも、子は main worktree のルートで動き、`PWD` はそのルートの 1 件、親に置いた `HERDR_PANE_ID` は子になく、`RALPH_ORG_AGMSG_HOME` は絶対パスの 1 件だった(下の「Observational checks」) |
+| AC5 子が先に終わっても、ほかの見張りが running なら成功 | 満たす(変わらない。本番の待ちの長さが固定された) | `launchAndAwaitOrgWatch` のコードは cycle 3 で変わっていない。47635690 の `TestOrgWatchChildExitWait_OutlastsTheChildsLockWait`(`org_watch_test.go:647`)が、本番の `orgWatchChildExitWait` が `org.DefaultWatchLockWait` より長いことを確かめる。/test cycle 2 の生き残り K8(本番の値を 0 にする)を閉じるテストである |
+| AC10 既存のテストを書き換えない | 満たす | `git diff 5739e1ba..HEAD -- 'internal/**/*_test.go'` で消えた行は 0。非テストのコードで消えた行は、`orgWatchChild` の署名・doc の 1 行・`make` の容量・除外の条件、その 2 つの呼び出し、`runOrgWatchStop` の doc の 2 行だけ |
+| AC12 文書の整合と同期の検査 | 一部(D11〜D14 を /sync-docs で入れる) | cycle 2 の D1〜D10 は 2fada512 で直った(下の「Documentation drift」で 10 件とも確かめた)。`check-sync.sh` と `check-skill-sync.sh` は rc 0 で、skill の 4 面は同じ sha256(09fb4c13…)。8d8ddbd2 は文書に触れていないので、相対の agmsg home の扱いを書いた文書がない(D11〜D13)。self-review C3-2 の tech-debt の行もまだない(D14) |
+| AC1〜AC4、AC7〜AC9、AC11、AC13〜AC15 | 満たす(変わらない) | 関わるコードが cycle 3 で変わっていない。AC3 と AC4 の start の起動は、`orgWatchChild` の呼び出し(`internal/cli/org.go:300`)に引数が 1 つ増えただけで、流れ(`ensureOrgWatch`、`launchAndAwaitOrgWatch`)は同じ。AC8 の残り(座席の `wait` と `inbox show/ack/resolve/notify` は grep だけ)は cycle 1 と同じ |
+
+#### 8d8ddbd2 の確認
+
+- 優先順位: `driver.ResolveAgmsgHome`(`internal/org/driver/agmsg.go:123-132`)は、env `RALPH_ORG_AGMSG_HOME` が空でなければそれ、空なら設定の値、それも空なら既定の `~/.agents/skills/agmsg` を取り、`~/` で始まるときだけ `os.UserHomeDir` で展開する。`orgWatchChildAgmsgHome`(`internal/cli/org_watch.go:369-385`)も、env が空でなければそれ(`:370`)、空なら `--config` を明示して空でないときだけ設定の値(`:371-376`)を取る。空の env を未設定と同じに扱う点も一致する。絶対パスと `~/` で始まる値は触らない(`:377`)。既定の値は `~/` で始まるので触らない。`~` だけの値や `~user/…` は `expandTilde` が展開せず、作業ディレクトリから読む相対の値になるので、それを絶対パスにするのも `ResolveAgmsgHome` の読み方と合う
+- 設定の値の出どころ: 2 つの呼び手(`internal/cli/org.go:300`、`internal/cli/org_watch.go:611`)はどちらも `rt.Config.AgmsgHome` を渡す。`rt.Config` は `resolveOrgConfig(configPath)`(`internal/cli/org.go:391`)が読んだ設定で、start の `withMainWorktreeOrgLimits` が書き換えるのは `MaxOrgs` と `MaxTotalSeats` だけなので、`AgmsgHome` は `--config` のファイルの値のままである
+- `--config` を渡さないときに触らないこと: 子は `--config` なしで起動し(`orgWatchChildArgs`、`:284`)、作業ディレクトリ(main worktree のルート)の `ralph.toml` を読むので、親が読んだ `./ralph.toml` とは別のファイルの値になる。`--config ""` のときも子に `--config ""` を渡し(`:284-292`)、`resolveOrgConfig("")` が同じく作業ディレクトリの `ralph.toml` を読む。どちらも計画の F6 と README の「without `--config` it reads that root's `ralph.toml`」のとおりで、絶対パスにしないのが正しい
+- 起点: 絶対パスにする起点は親の作業ディレクトリ(`filepath.Abs`、`:380`)で、triage と consult が選んだ案 A のとおり
+- 作業ディレクトリを変えない子(台帳に main worktree がない)は、継承した値をそのまま使う(`:335`)。base と同じ動きである
+- 新しい問題は見つからなかった。self-review の C3-1(コメントが triage の項目番号を指す)と C3-2(`org.CommandWithStateDir` が `org.InboxCommand` の写し)は、どちらも挙動に触れない
+
+#### Design decisions F1〜F10 とコード
+
+cycle 2 の判定(付録)のまま、10 個ともコードと一致する。8d8ddbd2 は F6(子の作業ディレクトリと環境)に、作業ディレクトリを移したことで指す場所の変わる相対の agmsg home の手当てを足した。F6 が決めた 3 つ(main worktree のルートで動く、`--config` を絶対パスで渡す、環境から HERDR_* の 4 つを外す)は変わらない。F6 の「HERDR_* の 4 つだけを外す」(Scope の「ほかの変数は残す」)とのずれは、下の「計画からのずれ」1 で扱う。ほかの決定のコードは cycle 3 で変わっていない。
+
+#### 仕様 FR-6 との対応
+
+cycle 2 の判定(付録)から変わらない。8d8ddbd2 は起動した子の環境の話で、要件の読み方は変えていない。仕様の「6 段目の後半で決めたこと」の注(`docs/specs/2026-10-07-org-multi-org-director.md:64`)は子の性質を 3 つ挙げるが、相対の agmsg home には触れていない(D15、任意)。
+
+#### 計画からのずれ(cycle 3 で Progress に足された記録)の判断
+
+1. 8d8ddbd2 の直し(Progress、`docs/plans/active/2026-10-12-org-watch-gate.md:200`): 妥当。F6(`:103`)と Scope(`:45`)は「HERDR_* の 4 つを外し、ほかの変数は残す」と書くが、作業ディレクトリを移すときは、相対の `RALPH_ORG_AGMSG_HOME` を絶対パスに書き換え、env が空か未設定で、明示した `--config` に相対の `agmsg_home` があればこの変数を足すようになった。どちらも、作業ディレクトリを移したために別の場所を指すようになった値を、打った場所で指していた場所に戻すものである。「ほかの変数は残す」の理由(XDG の変数で herdr の server を分けている環境のため)には触れない。退けた 3 案(`ResolveAgmsgHome` で絶対パスにする、作業ディレクトリを移さない、tech-debt に書くだけ)の理由は triage にある
+2. 上限を 3 に上げ、全段を cycle 3 として回し直したこと(Progress `:199`): ユーザーの指示と `post-implementation-pipeline.md` の規則どおり。`cycle-count.json` は cross-review の規則で 2 のまま
+3. 47635690 をテスト 1 本の追加として run-verify と cross-review に回したこと(Progress `:197`): テストを足しただけで挙動は変わらない。cycle 3 の self-review(1005f3bc)とこの verify が読んだ
+4. C3-1 は cycle 3 の triage が cycle 2 の内容を付録に残して指し先を保ち、C3-2 は /sync-docs が tech-debt に書く(Progress `:201`): 妥当。どちらも挙動に触れない LOW で、直すと全段のやり直しになる。C3-2 の行は D14
+
+### Static analysis
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | rc 0 | `gofmt: ok`、`go vet` は出力なし、`golangci-lint` は `0 issues.`、staticcheck は出力なし(飛ばした linter はない)。shellcheck、hook の `sh -n`、guard の awk の構文、settings の `jq -e`、Codex の guard 3 つ、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の plan 参照の検査、branch の secret scan(dc41c4f5..522776ac、clean)も通った |
+| `./scripts/check-sync.sh` | rc 0 | IDENTICAL 167、DRIFTED 0、KNOWN_DIFF 5 |
+| `./scripts/check-skill-sync.sh` | rc 0 | 13 skill(s) in lock-step |
+| `./scripts/plan-visual.sh digest <plan>` | de5ca6b7e6f0 | `- Approved:` 行と一致 |
+| `go build -o <scratchpad>/ralph ./cmd/ralph`(HEAD 522776ac) | 成功 | 実機確認のため |
+
+### Documentation drift
+
+cycle 2 の D1〜D10 は 2fada512 で直った。D1(`docs/tech-debt/README.md:183` は `newOrgSpawnRuntime` を消えた名前として挙げるだけ)、D2(`:205` の呼び手に `start <task>`)、D3(`:202` の「still open」に取り消し線)、D4(`README.md:256` に「when the ledger has one」)、D5(`README.md:125` に `stopping` と `running (--once)`)、D6 と D10(skill の「待つ間に持ち主が終われば」と「最大で約 3 秒」。4 面とも同じ sha256)、D7(`runOrgWatchStop` の doc に stopping)、D8(`:211` の新しい行)、D9(`:208` の注に `orgWatchChildExitWait` の待ちとそれを固定するテスト。「as of S3 no live run」の文はなくなった)を確かめた。cycle 3 では D11〜D15 が増えた。どれも 8d8ddbd2 が足した挙動(相対の agmsg home を絶対パスにして子に渡す)か、self-review C3-2 の記録である。
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| D11 `README.md:256` | いいえ | 「Either way the watch runs detached in the ledger's main worktree root (…), so without `--config` it reads that root's `ralph.toml`.」のあとに、たとえば「A relative `RALPH_ORG_AGMSG_HOME`, or else the relative `agmsg_home` of the `--config` given, is passed to it made absolute from where the command was typed.」を足す。今の文だけを読むと、相対の値は main worktree のルートから読まれると受け取れる |
+| D12 `.claude/skills/org/SKILL.md:176`(4 面) | いいえ | `watch` の行の「起動したプロセスは台帳の main worktree のルート(求められなければ打った場所)で動き、`--config` を絶対パスで受け取り、環境から `HERDR_PANE_ID`・…・`HERDR_ENV` を外される。」に、「相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)は、打った場所から絶対パスにして渡される」を足す。`:177` の `start` の行の括弧(「start に渡した `--config` は絶対パスにして渡す。間隔は設定の値」)にも同じ一言を足すと揃う(こちらは任意)。4 面とも同じに |
+| D13 `docs/tech-debt/README.md:206`(RESOLVED の注)と `:207`(行の RESOLVED の文) | いいえ | 注は子の作業ディレクトリ、`--config`、HERDR_* の 4 つ、`PWD` を挙げるが、8d8ddbd2 の手当てがない。注に「a relative agmsg home (`RALPH_ORG_AGMSG_HOME`, or else the `agmsg_home` of an explicit `--config`) is passed to the child made absolute from the launching directory, since the child no longer runs there (cross-review cycle 2 of feat/org-watch-gate, commit 8d8ddbd2)」と、それを固定するテスト 2 本(`TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild`、`TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch`)を足す。`:207` の「(RESOLVED 2026-10-12 in feat/org-watch-gate: the child runs in the main worktree root without the herdr pane variables)」に「, with a relative agmsg home made absolute」を足すと揃う |
+| D14 `docs/tech-debt/README.md`(新しい行、self-review C3-2) | いいえ | 行がない。self-review の「Tech debt identified」の行から (a)(C3-1)を除いた形で書く。C3-1 は cycle 3 の triage が cycle 2 の内容を付録に残して指し先を保つので、行に入れない。Debt item: `org.CommandWithStateDir`(`internal/org/watchgate.go:80`)は `org.InboxCommand`(`internal/org/escalate.go:85`)の `--state-dir` を足す 4 行の写しで、`--state-dir` の引用(`shellQuote`)の規則が `internal/org` の 2 か所にある。Impact: 実行時の害はない。片方の引用を変えると、もう片方が古いまま残る。Why deferred: cycle 3(上限 3、最後の cycle)で見つけた LOW で、直すと全段のやり直しになる。Trigger: 次に `internal/org` の `--state-dir` の引用を変えるとき、または `InboxCommand` か `CommandWithStateDir` を触るとき。`InboxCommand` の本体を `return CommandWithStateDir("ralph org inbox "+verb+" "+id, stateDir)` にする(`TestInboxCommand`、`internal/org/escalate_test.go:615`、の期待は変わらない見込み)。Related: `docs/reports/self-review-2026-10-12-org-watch-gate.md`(C3-2)、`docs/plans/active/2026-10-12-org-watch-gate.md`(Progress の self-review cycle 3 の記録。`:211` の行と同じく active の path で書く) |
+| D15 `docs/specs/2026-10-07-org-multi-org-director.md:64`、`watch --help`(`internal/cli/org_watch.go:61-66`)、start の help(`internal/cli/org.go:691-696`)(任意) | ほぼ合う | どれも子の性質を挙げるが、相対の agmsg home には触れない。挙げていることは今も正しい(help は外す変数と動く場所を言うだけで、環境がそれだけ違うとは言わない)。help の文言は `internal/` の変更になるので、直さずに残すのを勧める。仕様の注に足すなら「相対の agmsg home は打った場所から絶対パスにして渡す」の一言 |
+| ほかの文書(`/org` skill の残り、README の残り、AGENTS.md、agent-messaging、quality-gates、leader の雛形、`templates/base/ralph.toml` の `agmsg_home` の説明) | 合う | cycle 2 の判定(付録)から変わらない。`templates/base/ralph.toml:57-59` の `agmsg_home` の説明は相対の値の扱いに触れておらず、8d8ddbd2 でも崩れない |
+
+D11〜D14 は /sync-docs で入れる。D15 は任意。
+
+### Observational checks
+
+HEAD 522776ac のビルドで、scratchpad の使い捨ての git repo(`main` に 1 コミット)を使って確かめた。`env -i` で HOME と XDG の 5 変数を scratchpad に向け、PATH は git・sh・bash の 3 つの symlink だけ(osascript も herdr もない)、`SHELL=/bin/bash`、親の環境に `HERDR_PANE_ID=probe-pane` を置いた。打った場所は repo の `pkg/sub`、stub の agmsg home は repo の `stub-agmsg`(`pkg/sub` から `../../stub-agmsg`)、台帳は `--state-dir <repo>/.harness/state/org`。子の環境は `ps eww`、作業ディレクトリは `lsof -d cwd` で読み、毎回 `--stop` で止めた。herdr の server は立てていない。出力は evidence の log の末尾にある。
+
+| 場合 | `--detach` | 子の作業ディレクトリ | 子の `RALPH_ORG_AGMSG_HOME` | `--stop` |
+| --- | --- | --- | --- | --- |
+| 相対の env(`../../stub-agmsg`) | rc 0、`started` | repo のルート | `<repo>/stub-agmsg` の 1 件 | rc 0 |
+| env なし、`--config ralph.toml`(`agmsg_home = "../../stub-agmsg"`) | rc 0、`started` | repo のルート(子の引数は `--config <repo>/pkg/sub/ralph.toml`) | `<repo>/stub-agmsg` の 1 件 | rc 0 |
+| 対照: env なし、`--config` なし、`./ralph.toml` に相対の `agmsg_home` | rc 0、`started` | repo のルート | なし | rc 0 |
+| 対照: `--state-dir` が repo の外、相対の env | rc 0、`started` | 打った場所(`pkg/sub`) | `../../stub-agmsg` のまま | rc 0 |
+
+- 4 回とも子の環境に `HERDR_*` はなく、作業ディレクトリを移した 3 回は `PWD` がそのルートの 1 件だった(AC6)
+- 各回の `--stop` の 1 秒後と最後に、scratch のバイナリのプロセスは 0 だった(`pgrep -f`)。repo の台帳の `watch.log` の banner は 3 行で、起動 3 回に 1 行ずつ
+- 台帳に org がないので、見張りは agmsg を呼ばない。子が絶対パスの home で agmsg の script を呼べるところまでは見ていない
+- cycle 1 から残っていた「main worktree の中の台帳での子の作業ディレクトリ」は、`--detach` について今回の実機で確かめた
+
+### Coverage gaps
+
+- テストは走らせていない(/test の担当)。8d8ddbd2 の 13 ケースが通ること、各ガードを外すと落ちることは読んだだけである(self-review も読んで確かめ、Progress は mutation 6 体がすべて落ちたと書く)
+- 実機は `--detach` だけで、start の経路(`wireOrgStartWatchGate`)の相対の agmsg home は偽の起動のテスト(`TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch`)だけで見ている
+- 子が絶対パスの home で agmsg の script を呼ぶところ(ALERT の送信、history の読み取り)は、org のない台帳なので通っていない
+- linked worktree から打つ場合、打った場所がシンボリックリンクの下にある場合(`/tmp` から打つなど)、`filepath.Abs` が失敗する枝は試していない
+- cycle 2 の Coverage gaps のうち、C2-1 の流れの実機、残る穴(cycle 2 の D8)の再現、本物の後始末の間の拒否、AC8 の残り、`start --plan` の起動と並行の start の実機、Linux、前の版の見張りとの共有は、cycle 3 でも変わらない
+- 計画の受け入れ条件のチェックボックス(AC1〜AC15)はまだ付いていない。これまでと同じく、検証のあとに付ける段取りと読んだ
+
+## Verdict
+
+pass
+
+- Verified: 8d8ddbd2 のあとも AC1〜AC11 と AC13〜AC15 を満たす。AC6 は、作業ディレクトリ、`--config` の絶対パス、HERDR_* を外すこと、`PWD` が cycle 2 と同じで、相対の agmsg home を絶対パスの 1 件にして渡すことが足された。その順(env が空でなければ env、なければ明示した `--config` の値)と、絶対パス・`~/` を触らないことは `driver.ResolveAgmsgHome` の優先順位と展開に合う。AC5 の本番の待ちの長さは 47635690 が固定した。F1〜F10 と仕様 FR-6 の対応は cycle 2 のまま。Progress の 8d8ddbd2 のずれ(F6 の「ほかの変数は残す」から、相対の agmsg home だけを書き換える)は妥当。cycle 2 の文書のずれ D1〜D10 は 2fada512 で直った。静的解析(changed scope)、`check-sync.sh`、`check-skill-sync.sh` は rc 0。実機で、相対の env と `--config` の相対の `agmsg_home` の 2 通りで子が絶対パスの 1 件を受け取り、対照の 2 通りでは変わらないこと、毎回の `--stop` のあとに見張りが残らないことを確かめた
+- Partially verified: AC12(D11〜D14 を /sync-docs で入れる。D15 は任意)、AC8(座席の `wait` と `inbox show/ack/resolve/notify` は grep だけ)
+- Not verified: テストの実行、start の経路の相対の agmsg home の実機、子が絶対パスの home で agmsg を呼ぶところ、linked worktree とシンボリックリンクの下からの起動、C2-1 の流れの実機、本物の後始末の間の拒否、Linux
+
+## 付録: cycle 2 の結果(HEAD 5739e1ba の時点)
+
+cycle 2 の header(Date から Evidence まで)と本文を、そのとき書いたまま残す。`## Latest run: cycle 2(HEAD 5739e1ba)` の見出しはこの付録の見出しに替え、本文の見出しには「(cycle 2)」を付け、判定の見出しは `## Verdict` から 1 段下げて「判定(cycle 2)」にした。見出しの深さは下の cycle 1 の付録と同じになる。本文の行番号は cycle 2 の時点のものである。D1〜D10 は、上の cycle 3 の「Documentation drift」が 2fada512 で直ったと確かめたものと同じものを指す。
+
 - Date: 2026-10-12(cycle 2)
 - Plan: docs/plans/active/2026-10-12-org-watch-gate.md(承認済み。`scripts/plan-visual.sh digest` の値 de5ca6b7e6f0 は `- Approved:` 行と一致する)
 - Verifier: verifier subagent (Claude)。パイプライン 2 回目(cycle 2、上限 2)。/test cycle 1 が実機で見つけた後退を fdfb5b23 で直したあとの、全段のやり直し。cycle 1 の結果は末尾の「付録」に残してある
 - Scope: 仕様適合、静的解析、文書の整合。ブランチ全体は `git diff dc41c4f5...HEAD`(HEAD 5739e1ba)。主に見たのは cycle 1 の verify(ae349cc4)のあとのコードの変更 2 つで、`git diff ae349cc4..HEAD -- internal/` は 8 ファイル、+670/-41。fdfb5b23 は後退の直しと /test の probe 5 本の取り込み(`internal/` で +433/-16)、3fb0fd1b は cycle 2 の self-review の C2-1〜C2-3 の直し(+247/-35)。3fb0fd1b は self-review を通していないので全文を読んだ。テストは走らせていない(/test の担当)。HEAD のビルドで、後退を見つけた手順(同時の `--detach` 8 本のすぐあとの `--stop`)を実機で流し直した
 - Evidence: `docs/evidence/verify-2026-10-12-org-watch-gate.log`(gitignore の対象で、コミットしない。cycle 2 の出力は末尾に足した)
 
-## Latest run: cycle 2(HEAD 5739e1ba)
-
-### Spec compliance
+### Spec compliance(cycle 2)
 
 cycle 1 の判定(付録)から、2 つのコミットで変わった AC を見直した。2 つのコミットが触れたコードは `internal/cli/org_watch.go`、`internal/cli/org.go`(start の起動の失敗の案内に `hintStateDir` を渡す 1 行)、`internal/org/watchalive.go`(`defaultWatchLockWait` を `DefaultWatchLockWait` として出しただけ)、`internal/org/watchgate.go`(`CommandWithStateDir` の切り出し)、`internal/org/watch.go`(コメント 1 行)とテストだけである。検査の位置、TASK の判定、印、status、雛形のコードは変わっていない。
 
@@ -21,15 +125,15 @@ cycle 1 の判定(付録)から、2 つのコミットで変わった AC を見�
 | AC12 文書の整合と同期の検査 | 一部(D1〜D5 と新しい D8・D9 を /sync-docs で直す) | `check-sync.sh` と `check-skill-sync.sh` は rc 0。cycle 1 のあとに文書へのコミットはない(`git log ae349cc4..HEAD -- README.md docs/tech-debt/README.md .claude/skills docs/specs AGENTS.md .claude/rules docs/quality internal/org/prompts` は空)ので、D1〜D7 は残っている。下の「Documentation drift」 |
 | AC1〜AC3、AC6〜AC9、AC11、AC13、AC14 | 満たす(変わらない) | どれも、cycle 2 で関わるコードが変わっていない。cycle 1 の Coverage gaps に挙げた「stale を待つ間に持ち主が終わって起動へ進む分岐」は、取り込んだ probe の `TestOrgWatchDetach_AStaleHolderThatEndsDuringTheWait_LaunchesTheWatch`(`org_watch_test.go:956`)と `TestOrgStart_AStaleHolderThatEndsDuringTheWait_LaunchesTheWatch`(`org_start_watch_test.go:550`)が固定するようになった。前半の版の印(`deadman_minutes` なし)を呼んだ側の設定で読むことは `TestOrgWatchDetach_AMarkWithoutDeadmanMinutes_IsJudgedByTheCallersConfig`(`org_watch_test.go:1308`)、`_TheFirstProbeJudgesAMarkWithoutDeadmanMinutesByTheCallersConfig`(`:1326`)、`TestOrgStart_AMarkWithoutDeadmanMinutes_IsJudgedByTheCallersConfig`(`org_start_watch_test.go:588`)が、起動の失敗の文の接頭辞は `TestOrgWatchDetach_ALaunchThatFails_IsTheErrorAfterTheDetachPrefix`(`org_watch_test.go:446`)と `TestOrgStart_ALaunchThatFails_IsRefusedWithThePrefixAndNothingStarted`(`org_start_watch_test.go:257`)が固定する。AC8 の残り(座席の `wait` と `inbox show/ack/resolve/notify` は grep だけ)は cycle 1 と同じ |
 
-#### Design decisions F1〜F10 とコード
+#### Design decisions F1〜F10 とコード(cycle 2)
 
 cycle 1 の判定(付録)のまま、10 個ともコードと一致する。2 つのコミットが触れたのは起動の待ち(F8 の tech-debt 206)と、`--detach` と start の案内の文だけである。検査の位置(F1〜F3)、TASK の判定(F4・F5)、子の作業ディレクトリと環境(F6)、stopping と `once`(F9)、stale の待ち(F10)のコードは変わっていない。F8 の 206(同時の `--detach` が終了コード 1 になる)は、直ったまま後退も起きていないことを実機で確かめた(AC5 の行)。
 
-#### 仕様 FR-6 との対応
+#### 仕様 FR-6 との対応(cycle 2)
 
 cycle 1 の判定(付録)から変わらない。FR-6 の残り 4 項目と、受け入れ条件 107 行の読み替え(F7)を満たす。後退の直しは「start は見張りが動いていなければ起動する」の起動の経路の中だけの話で、要件の読み方は変えていない。
 
-#### 計画からのずれ(cycle 2 で Progress に足された記録)の判断
+#### 計画からのずれ(cycle 2 で Progress に足された記録)の判断(cycle 2)
 
 1. fdfb5b23 の直し方((a) 自分の子が終わるのを待つ): 妥当。org 層の規則(ロックの待ち、止める頼みの扱い)を変えず、待ちの長さを org 層の定数 `DefaultWatchLockWait` から決めるので、片方だけが変わることもない。退けた 2 案(子のロックの待ちを 0 にする、止める頼みを消さない)の理由も記録にある。直ったことは上の実機確認で確かめた
 2. 残る穴(`--detach` が返る前に別の端末から `--stop` を打つと、ロックを待つ子があとを取りうる。foreground の `watch --all` も同じ。base にもある): 計画の範囲の外で、base からある動きなので、この PR で直さないのは妥当。ただし Progress は「tech-debt に書く」としていて、まだ書かれていない(D8)。cycle の上限(2/2)に達しているので、/sync-docs で必ず入れる
@@ -37,14 +141,14 @@ cycle 1 の判定(付録)から変わらない。FR-6 の残り 4 項目と、�
 4. コードの直しなので全段を cycle 2 として回し直したこと: `post-implementation-pipeline.md` の規則どおり。`cycle-count.json` は 2
 5. 3fb0fd1b(C2-1〜C2-3)を self-review に通さず verify に回したこと: 下の「3fb0fd1b の確認」で読んだ。C2-4 は /sync-docs に回してあり(D8、D1〜D4)、上限での先送りに決め手が付いている
 
-#### 3fb0fd1b の確認
+#### 3fb0fd1b の確認(cycle 2)
 
 - C2-1(子を止めたあとの判定し直し): 子を止めたら `stopped, childExited, exited = true, true, nil` にしてループの頭に戻り、新しい probe で決める(`org_watch.go:510-512`)。結果は 3 通りある。ほかの見張りが作業を受け付けていればその pid を返す(`:504-505`)。stopping・`--once`・期限まで stale の見張りなら `e.refuse` で断る(`:530-531`)。ロックが空いていれば「the watch (pid N) was stopped while another watch held …, and that one has ended too, so no watch runs; see <watch.log>」で断る(`:533-536`)。止めて回収した子はロックを放しているので、その pid が作業を受け付けると読まれることはない。`child.stop()` は SIGTERM のあと最大 `orgWatchChildStopGrace`(5 秒)で SIGKILL を送るので、待ちには上限がある。doc の前提「SIGTERM ではロックの待ちが終わらない」は、`runOrgWatchAll` が SIGTERM を `signal.NotifyContext` で受けること(`:153`)と、`acquireHeldFileLock` が ctx を取らないこと(`internal/org/lockfile.go:118`)に合う。`continue` で select を 1 回飛ばすだけで、次の周回は `exited` が nil なので probe の間隔で待つ。空回りはしない。`exitBy` を決めたあとの枝は全体の期限を見ないが、`exitBy`(3 秒)で抑えられる。`TestOrgWatchDetach_AnotherWatchRuns_AStoppedChildIsJudgedByAProbeAfterTheStop`(`org_watch_test.go:652`)が 3 通りを見る
 - C2-2(`runOrgWatchDetach` の doc): doc だけ。「nothing started」は消え、`already running` は自分の子が終わるか止められてから出すことを書いた(`:551-559`)
 - C2-3(案内のコマンドに `--state-dir`): `CommandWithStateDir`(`internal/org/watchgate.go:80`)を org 層に出し、`watchGateCommand`(`:72-74`)もそれを使う。組み立ては前と同じなので、`WatchGateError` の文は変わらない。`--detach` の拒否の 2 通り(`org_watch.go:594`、`:601`)と、ロックが残ったときの起動の失敗(`:543`)が使う。start も同じ hint を渡す(`internal/cli/org.go:303`)。付けるのは `--state-dir` を明示したときだけ(`orgInboxHintStateDir`)。実機では、stale の台帳の `--detach` の拒否が `stop it with ralph org watch --stop --state-dir '<台帳>'` と案内した。テストは `TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir`(`org_watch_test.go:871`)と、AC4 の行の start のテスト
 - 新しい問題は見つからなかった。cycle 1 の「気づいたこと」(`--detach` の文に `--state-dir` が付かない)は、この C2-3 で直った
 
-### Static analysis
+### Static analysis(cycle 2)
 
 | Command | Result | Notes |
 | --- | --- | --- |
@@ -54,7 +158,7 @@ cycle 1 の判定(付録)から変わらない。FR-6 の残り 4 項目と、�
 | `./scripts/plan-visual.sh digest <plan>` | de5ca6b7e6f0 | `- Approved:` 行と一致(Progress への追記は digest に入らない) |
 | `go build ./cmd/ralph`(一時の場所へ、HEAD 5739e1ba) | 成功 | 実機確認のため |
 
-### Documentation drift
+### Documentation drift(cycle 2)
 
 cycle 1 の D1〜D7 は、文書へのコミットがないので、そのまま残っている。行番号も変わっていない(D7 だけ、コードが増えたので `internal/cli/org_watch.go:609-610` に移った)。cycle 2 で D8 と D9 が増えた。
 
@@ -74,7 +178,7 @@ cycle 1 の D1〜D7 は、文書へのコミットがないので、そのまま
 
 D1〜D5、D8、D9 は /sync-docs で直す。D6、D7、D10 は任意。
 
-### Observational checks
+### Observational checks(cycle 2)
 
 HEAD 5739e1ba のビルドで、repo の外の一時の台帳(`--state-dir`)を使って確かめた。herdr の座席は立てていない。出力は evidence の log の末尾にある。
 
@@ -82,14 +186,14 @@ HEAD 5739e1ba のビルドで、repo の外の一時の台帳(`--state-dir`)を�
 - python の flock でロックを持ち、1 時間前の印を置いた台帳で、`--detach` は 10 秒待ってから rc 1 で断り、案内は `stop it with ralph org watch --stop --state-dir '<台帳>'` だった(C2-3)
 - 終わったあと、一時の ralph のプロセスは残っていない(念のための `pkill` の前に数えて 0)
 
-### Coverage gaps
+### Coverage gaps(cycle 2)
 
 - テストは走らせていない(/test の担当)
 - `exitBy` を過ぎても子が生きていて止める流れ(C2-1 の 3 通りを含む)は、偽の子のテストだけで見ている。本物の子は 2 秒のロックの待ちで自分から終わるので、実機では通らなかった
 - 残る穴(D8)は、計画どおり直していないので、実機でも再現を試していない
 - cycle 1 の Coverage gaps のうち、本物の後始末(stopping)の間の拒否、AC8 の残り、main worktree の中の台帳での実機、Linux、前の版の見張りとの共有は、cycle 2 でも変わらない。stale を待つ間に持ち主が終わる分岐は、取り込んだ probe で閉じた
 
-## Verdict
+### 判定(cycle 2)
 
 pass
 
