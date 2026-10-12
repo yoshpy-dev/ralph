@@ -182,7 +182,9 @@
   - S4(ed66d634): leader の雛形の `## 運用規律` に、見張りの不在で断られたら打ち直さず、TYPE を変えたり `--raw` にしたりして送り直さず、見張りを自分で起動せず、BLOCKED を escalate して返事を待つ項目を足し、`TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry` で固定した(`WatchGateError` の全状態の文が雛形の見分け方の語を含むことも確かめる)。`WatchGateError` の stopping と `--once` の文の後半を、start が自分で起動することに合わせて直した。/org skill の 4 面、README、仕様の「6 段目の後半で決めたこと」の注(F7 の読み替えを明記)、agent-messaging(2 面)、quality-gates(2 面)、AGENTS.md の repo map、`watch --help` の `--detach` を直した。tech-debt の 201・205・206 と 204 の (e) を閉じ、見張りが途中で落ちたときの穴を新しい行にした。待つ条件は雛形の既存の語「返事が来るまで」にした(escalate への返事は DECISION の型で届かないため)。検証の途中で、この差分に触れない 2 本(`TestCheckScaffoldIntegrity_GitignoreTemplateMarkersBroken_ManagedBlocksStrictFails`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`)が負荷の高い全体の実行で 1 回ずつ落ち、再実行と単独では通った
   - 記録の直し: S2 の記録を足したときに改行が抜け、下の「Review artifact created」の行が S3 の記録の末尾につながっていたので戻した
   - 実装は終わり。次はパイプライン(cycle 1/2)
-- [ ] Review artifact created
+- [x] Review artifact created
+  - self-review(f7a6fe6c): Merge yes、LOW 6(L1〜L6)。dbeb45ca で L1〜L4 を直した(L1: 起動した子が終わったあと、ロックを止まりかけ・`--once`・stale の見張りが持っていれば、最初の判定と同じ拒否を返す。L2: not_running の文の `ralph org start` を「新しい org なら」に限った。L3: send の拒否の `org:` の重なりを除いた。L4: pid の表示と kill の案内を org 層の 1 つにし、`orgWatchGateOverride` を `func() error` に、`orgWatchDetachDeadline` を `orgWatchEnsureDeadline` に改名した)。L3 を調べたときに、CLI の send がすべてのエラーを `org: send:` で包み直していること(この PR より前から)が分かり、7d2e4bbb で包み直さないようにした。L5・L6(tech-debt と README の文)は sync-docs に回す
+  - self-review の再実行(264951e6): Merge yes、新しい LOW 3(N1〜N3)。bda15444 で 3 つとも直した(N1: テストのコメントの空白、N2: `--detach` の拒否の文を、子を起動したあとにも合う「so no new watch runs」に、N3: dry-run の追記のエラーも org 層で `org: send:` で包み、CLI の文字列の比較をやめた)。bda15444 は文言とエラーの包み方だけなので self-review を通さず、verify に読んでもらう
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
