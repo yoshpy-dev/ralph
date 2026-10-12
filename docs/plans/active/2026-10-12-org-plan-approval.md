@@ -190,3 +190,4 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 - 2026-10-13: 逸脱 4。`internal/org/approval.go` の拒否の文から、雛形の手順番号(「step 6」)を外した(N2)。雛形の手順 7 は「原因を直す前に同じコマンドを打ち直さない」に書き換えた
 - 2026-10-13: N4 はコードを変えていない。2 つの fixture(`approval_test.go` の `checkFixture` と `approval_enforce_test.go` の `enforceFixture`)の `record` と `mark` は重なったままにした。9fb3fafa の本文は「L8 を直した」とだけ書いているが、まとめたのは置き換えの helper(`replaceOnce`)だけである
 - 2026-10-13: 3 回目の self-review では、止める条件を HIGH 以上にする(consult の判定)。MEDIUM 以下は tech-debt の行に書いて先へ進む
+- 2026-10-13: sync-docs の cycle 1(報告は `docs/reports/sync-docs-2026-10-13-org-plan-approval.md`)。verify の D1(`/org` skill の `approve` の行の括弧、4 面)と D3(仕様 FR-7 の注)を文書だけで直した。D2(`--help` の文字列)は cycle 2 の直しで扱い、D4・D5 は記録だけ。AC と checklist の印は cycle 2 で付ける
