@@ -1,6 +1,120 @@
 # Self-review report: org-plan-approval
 
-cycle 1, run 3 (after 4b6d0d55..ee680eff)
+## Latest run: cycle 2(HEAD 48333f62)
+
+- Date: 2026-10-13
+- Plan: docs/plans/active/2026-10-12-org-plan-approval.md(承認済み、digest 951cf09bd7bc。cycle 2 の直しは Progress checklist に 1 行足しただけで、本文は変えていない)
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2)。cross-review の ACTION_REQUIRED 2 件(#1、#2)、/test の mutation の生き残り(R03〜R05、R11)、/verify の D2 を直した 4 コミット(3563129d、2d238702、5e809ac6、48333f62)を見た。cycle 1 の 3 回分(3 回目、2 回目、最初の結果)は末尾の付録 3 つにそのまま残した(コードのコメントとテストの doc が「self-review N7 of org-plan-approval」などの形でその ID を指すため)
+- Scope: diff の品質だけ。直しの範囲 `git diff b1f934c9..48333f62`(4 コミット、13 ファイル、+417/-73)を重点に見た。ブランチ全体 `git diff 225dff27...HEAD` は、直しが前の部分と食い違わないかを確かめる範囲で読んだ。テスト・静的解析・仕様適合・文書のずれの検査は /test・/verify・/sync-docs が受け持つので、ここでは行っていない
+- 止める条件: `RALPH_STANDARD_MAX_PIPELINE_CYCLES` が既定の 2 のままなら(`scripts/ralph-config.sh:30`)、この回が最後の run になる。止めて直すのは CRITICAL と HIGH だけで、MEDIUM 以下は tech-debt の行にして先へ進む。LOW の行の案は「Tech debt identified」に書いた
+- 番号の付け方: cycle 1 の M1、L1〜L11、N1〜N8 はそのまま使う(付録にある)。今回足した指摘は C2-1〜C2-5。`/cross-review` の報告は cycle ごとに書き直されるので、cross-review の指摘は「cross-review cycle 1 の #1」のように cycle をつけて書く
+
+### 前の指摘の扱い(cycle 1 の 3 回目の N6〜N8 と cross-review の 2 件)
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| N6 | 3563129d で直った | 今の digest の拒否が PlanHeader のときに加えて PlanChanged のときも、`checkTaskPlanApproved` はその拒否を返す(`internal/org/approval.go:509-511`)。承認し直したあとに Progress のメモなど digest が読まない場所が変わった計画へ、古い digest か打ち間違えた digest の TASK を送ると、今の digest の「承認のあとに計画が変わった」が返り、次の手はその変更を戻すことだけになる。戻して送り直せば TaskHeader になり、通る。テスト (h) の 2 ケース(`approval_test.go:1136-1170`)が、拒否を今の digest の `checkPlanApproved` の error と文字列ごと比べ、TASK 自身の拒否の語句(`approved digest <TASK の digest>`、`has no approval recorded`)がないことも見る。tech-debt の N6 の行は消えた |
+| N7 | 3563129d で直った | 振り替えの条件に「今の digest がそのパスの最新の承認である」が入った(`approval.go:499-502`、`latestApprovedDigest` は `:570-580`)。TASK が最新の承認を名指すとき、`currentPlanRef` は TASK の digest と違うものしか返さないので、この条件は偽になり、TASK 自身の拒否が残る(`:497-498` のコメント)。ファイルが前の版に戻った場合も、今の digest は最新の承認でないので同じになる。(f) と (g)(`approval_test.go:1122-1134`)がこの 2 つを固定する。雛形の手順 5(最後に承認された digest)は変えておらず、拒否と雛形が同じ digest を言うようになった。tech-debt の N7 の行は消えた |
+| N8 | 直っていない。tech-debt の行が残る(`docs/tech-debt/README.md:218`) | cycle 2 は `internal/org/approve.go` にも `approvalNextStep` にも触れていない(`git diff --stat b1f934c9..48333f62 -- internal/org/approve.go` は空)。行の「改訂の前の digest の TASK が新しい digest の PlanHeader の拒否になる」は、今の digest が最新の承認である場合の枝(`approval.go:509-511`)として残るので、3563129d のあとも成り立つ |
+| N4 | 意図して残した(README の 219 行に行がある) | 同じ種類の重なりが cycle 2 のテストで 3 つ増えた(C2-5) |
+| cross-review cycle 1 の #1 | 3563129d の (a) で直った | `Send` は `AgentWait`(`internal/org/verbs.go:384`)のあと、`PaneSendText`(`:426`)の前に `checkSendApproval` を呼び直す(`:391-395`)。テストは `TestOrgSend_ApprovalCheck_AgainAfterTheWait`(`approval_enforce_test.go:319`)。doc の指し先に小さい残りがある(C2-3) |
+| cross-review cycle 1 の #2 | 3563129d の (b) で直った | 承認 A、B の順のあとファイルを A に戻し、TASK が B を名指す入力は、N7 と同じ分岐で TASK 自身の PlanChanged が残る。(f) が固定する |
+| /test の R03〜R05、R11 と /verify の D2 | 2d238702(テスト 3 本)と 5e809ac6(help)で手当てした | mutant が本当に落ちるかと help の文書としての判定は /test と /verify の仕事で、ここでは書き方とコードとの合い方だけを見た(下の点 3 と 4) |
+
+### Evidence reviewed
+
+- コミットの並び: `git log --format='%h parent=%p' b1f934c9..HEAD` は 3563129d(親 b1f934c9)、2d238702、5e809ac6、48333f62 の 1 本の列で、どの報告より前に書かれた直しも混ざっていない。HEAD は読み始めも書く前も 48333f62、作業ツリーはきれいだった
+- 読んだコード: `internal/org/verbs.go` の `Send` の全体(`:234-487`)、`checkSendApproval`、`sendApprovalErr`、`seatRoleFromEvents`。`internal/org/approval.go` の `:380-740`(`approvalRefusalKind` から `planNotApprovedError` まで)。`internal/org/spawn.go` の `Spawn` の dry-run の枝、`spawnPrecheckErr`、`checkCapacityAndStart`、`spawnCapacityErr`、`spawnFeatureSeatErr`、`reject`。`internal/org/approve.go` の `approveCandidates` の note の検査。`internal/cli/org.go` の spawn と send の help
+- 読んだテスト: 新規と変更のすべてを、fixture の helper まで。`planEditingHerdr`、`fakeHerdr.AgentWait`(`internal/org/spawn_test.go:239`)、`enforceFixture`(`record`、`mark`)、`checkFixture`(`reapprove`、`markApproved`)、`assertTaskRefused`、`sendVariants`、`TestCheckTaskPlanApproved_StaleOrMistypedDigest` の (f)(g)(h)
+- 読んだ文書: 4 つの `/org` SKILL.md の差分、`docs/quality/quality-gates.md` の 81 行目、`templates/base/docs/quality/quality-gates.md` の 80 行目、`docs/tech-debt/README.md` と計画の差分、`internal/org/prompts/leader.md` の手順 5〜7(変更なし)、`.claude/rules/ralph/agent-messaging.md` の承認の段落(変更なし)、アーカイブした `docs/plans/archive/2026-10-12-org-watch-gate.md` の 71、99、108 行目
+- 機械的に確かめたこと
+  - spawn の側、leader の雛形、start は変わっていない: `git diff --stat b1f934c9..48333f62 -- internal/org/approve.go internal/org/spawn.go internal/org/reserve.go internal/org/feature.go internal/org/prompts/` は空
+  - `checkPlanApproved` の書き換えは、`latest` の求め方を `latestApprovedDigest` に移しただけである。`matching` の条件と `since` の文字列は前と同じで、拒否の文は変わっていない(diff を読んだ)
+  - 4 つの `/org` SKILL.md(`.claude/`、`.agents/`、`templates/base/` の 2 つ)は md5 が同じ
+  - 足した Go のコメントの行は、タブを 4 桁と数えてどれも 80 桁以内。追加行に TODO、デバッグ出力、secret らしい文字列、U+FFFD はない
+  - 足したコメントにある CamelCase の識別子 24 個は、どれもコメント以外の行に定義か使い道がある(`git grep -w`)。新しい `func` と `type` の直上の doc は、その直上にある
+  - cycle をつけずに報告の番号を指すコメントは 7 か所(`git grep -n 'cross-review #\|test report of org-plan-approval'`)
+  - tech-debt の README は、消えた 2 行(N6、N7)以外の差分がない
+- 確かめていないもの: テスト、静的解析、実機の確認はしていない。「どの変更を戻すとどのテストが落ちるか」は、コードとテストを読んで組み立てたもので、mutant を動かしてはいない
+
+### 依頼された点の結論
+
+1. `Send` の確かめ直し(3563129d の (a))
+   - 置き場所: `AgentWait`(`verbs.go:384`)のあと、`--timeout-ms` の残りの検査(`:412-424`)と `PaneSendText`(`:426`)の前(`:391-395`)。残りの検査より前に置いたのは正しい。あちらは `time.Until(deadline)` で測るので、承認の検査が manifest と計画のファイルを読む時間も、その見積もりに入る
+   - 拒否のとき: `SendResult{Err: err}` を返し、`Progress` は零値の `SendProgressNothingSent`、`PaneID` は空のままになる。`PaneSendText`、`PaneSendKeys`、`sent` の `appendEvent` はどれもこの後ろにあるので、何も打たず何も記録しない。テストは `assertTaskRefused`(Progress と PaneID)、`fx.h.calls` に `pane_send_text` と `pane_send_keys` がないこと、manifest と receipts のバイト列が前と同じことを見る
+   - エラーの形: 早い検査と同じ `checkSendApproval` から `sendApprovalErr` を通るので、`taskNotSentError` の中の `planNotApprovedError` で、manifest を読めないときの文(`org: send: read manifest: ...`)も同じになる。テストは早い検査のテストと同じ `assertTaskRefused` を使う
+   - 見張りの関門: doc(`:276-278`)が「もう一度は走らせない。時点の検査である(plan 2026-10-12-org-watch-gate)」と書く。その計画が「検査は時点の判定」と決めている(archive の 71、99、108 行目)ので、理由と出典がある
+   - fake: `planEditingHerdr`(`approval_enforce_test.go:295`)は、埋め込んだ `fakeHerdr.AgentWait` が戻ったあとに 1 回だけ `onWait` を呼ぶ。`Send` は `AgentWait` を最初の検査のあとに呼ぶので、`onWait` が計画のファイルを書くのは「最初の検査のあと、2 回目の前」になり、待つ間の変更を再現している。`waited` の確認は、最初の検査で断られて待たずに終わった場合の空振りを塞ぐ。ケースは、digest が変わる編集、digest が読まない Progress のメモ、編集なし、checkbox の印の 4 つを、型付きと `--raw` で回す(8 本)。2 回目の検査を消すと断られるはずの 4 本が落ち、`PaneSendText` の後ろへ動かすと `calls` の確認で落ちる(読んで組み立てたもの)。dry-run は待たないので対象外で、早い検査のテストが受け持つ
+   - 小さい残り: `Send` の doc の `--timeout-ms` の説明(`:310-313`)の「idle/done の待ちのすぐ後」が、今は承認の確かめ直しを指す(C2-3)
+2. `checkTaskPlanApproved` の新しい規則(3563129d の (b))
+   - 規則: 最初の検査が NoApproval か PlanChanged で断り、ファイルの今の digest が TASK のものと違い、かつそのパスの最新の承認と等しいときだけ、今の digest で `checkPlanApproved` を回す(`approval.go:499-514`)。通れば TaskHeader、断りが PlanHeader か PlanChanged ならその断り、ほかは TASK 自身の断りを返す。今の digest の PlanChanged を返す枝が N6 を直し、「最新の承認」の条件が N7 と cross-review #2 を直す
+   - `latestApprovedDigest` は、前に `checkPlanApproved` の中で回していた `latest`(`a.Plan == ref.Path` の最後の digest)と同じ求め方である。「its latest approval is of sha256:…」の文は同じ条件で出る。承認の読み込みは `approvals` に 1 回にまとめた
+   - (f)(g)(h): 直す前のコードで落ちる。(f) は今の digest(最初の承認の版)が `checkPlanApproved` を通るので、直す前は TaskHeader になり、kind の確認で落ちる。(g) も同じ理由で、NoApproval を期待する。(h) の 2 ケースは、直す前は TASK 自身の拒否(古い digest の PlanChanged か NoApproval)が返り、`r.Error() != changedErr.Error()` で落ちる。cross-review #2 は (f)、N7 は (f) と (g)、N6 は (h) が固定する
+   - `/org` skill と quality-gates: SKILL.md の 4 項目は、TaskHeader の枝、PlanHeader の枝、PlanChanged の枝、TASK 自身の拒否が残る場合に 1 つずつ対応する。PlanChanged の項目の「その変更だけを戻す」は、次の手(変更を戻すか、Draft に戻して頼み直す)の前半だけを言うが、従っても誤らない。quality-gates の「whose current version is its latest approval and passes the check, never to an earlier approved version」は TaskHeader の条件と合う。`checkTaskPlanApproved` の doc の 2 段目(`approval.go:475-484`)も、TASK が最新の承認を名指す場合と、ファイルが前の承認の版に戻った場合の両方を書き、コードと合う
+3. 2d238702 のテスト 3 本
+   - `TestOrgSend_WatchGateBeforeApprovalCheck`(`approval_enforce_test.go:519`): 名前と doc は計画の Scope(40 行目の「見張りの検査のあと、dry-run の枝の前」)のとおり。計画に 2 行は書いたが承認は記録しない台帳で、見張りの関門だけが断る状態にし、型付き、`--raw`、dry-run、`--raw` の dry-run の 4 通りで `ErrNoRunningWatch` で断られ `ErrPlanNotApproved` でないことを見る。2 つの検査の順を入れ替えると 4 通りとも落ちる
+   - `TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks`(`:542`): Scope の 41 行目(「今の `spawnCapacityErr` のあと」)の順を、dry-run と本番で固定する。`max_seats` を 1 にして leader に席を埋めさせ、承認のない implementer の spawn が `max_seats 1 reached` で断られることを見る。ただし名前と doc は「leader の検査、そのあと承認の検査」が容量の検査のあとと言うのに、fixture の leader は動いているので、leader の検査はどの順でも通り、観測できるのは承認の半分だけである。`spawnFeatureSeatErr` は 2 つの検査を 1 つの関数に持つので、呼び出しの順を入れ替える mutant は承認の側で落ち、実害はない(C2-4)
+   - `TestOrgApprove_RefusesAnItemItCannotResolve`(`approve_test.go:299`): 計画のパスを 490 字にして note(`approved <パス> sha256:<12 桁>`)が 500 字を超えることを先に確かめ、`Refused` が 1 件、`Approved` が 0 件、manifest と受信箱のバイト列が前と同じことを見る。AC3 の「1 件でも断られたら何も記録しない」のうち、resolve できない件の端を言い当てている。複数の ID の場合は `TestOrgApprove_AllOrNothing` が受け持つので、1 件で足りる
+   - 3 本とも、doc が指す `test report of org-plan-approval` の R03 などに cycle がない(C2-1)
+4. 5e809ac6 の help: spawn の 3 文と send の文は、どれもコードと合う
+   - spawn、leader のいない org で leader 以外を断る: `spawnFeatureSeatErr`(`spawn.go:1284-1291`)。承認方式は問わない
+   - spawn、方式が per-plan で role が implementer の座席を、`ralph org approve` で記録した承認が計画のファイルに合うまで断る: `spawn.go:1292-1295` と `checkAnyPlanApproved`(どれか 1 つの承認が検査を通ればよい)
+   - spawn、どちらの拒否も dry-run を含めて `rejected` で記録する: dry-run は `o.reject`(`spawn.go:546-548`)が `DryRun: true` の `rejected` と receipt を書き、本番は `checkCapacityAndStart`(`:1227-1229`)が書く
+   - send、per-plan で宛先の role が implementer の TASK を、`--raw` と `--dry-run` を含め、何も記録せず断る: `Send` の `isTask` の枝(`verbs.go:325-335`)が dry-run の枝の前にある。「ちょうど 1 行の `PLAN:`」は `HeaderValues` の 1 行の規則。文の順(見つけたこと、目印、次の手)は `planNotApprovedError.Error` と同じ
+5. `templates/base/docs/quality/quality-gates.md:80`: 確かめた。root の 81 行目だけが「latest approval ... never to an earlier approved version」に変わり、template の 80 行目は直す前の文のままである。`scripts/check-sync.sh` は `docs/quality/quality-gates.md` を `KNOWN_DIFFS`(98〜101 行目)に入れているので、ファイルごと照合から外れ、この差は機械では見つからない。cycle 1 の 3 回目の時点では 2 つの行は同じだった。`ralph init` が配る面なので、/sync-docs が直す前提で LOW(C2-2)にした
+
+### Findings
+
+<!-- Area recommended values: naming, readability, unnecessary-change, typo,
+     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 5 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | C2-1: 7 か所のコメントとテストの doc が、`/cross-review` の報告の番号(`cross-review #1`、`#2`)と `/test` の報告の mutation の番号(`R03`、`R04`、`R05`、`R11`)を、cycle をつけずに指す。triage の報告は slug ごとに 1 ファイル(`cross-review-triage-org-plan-approval.md`)で、見出しに今の cycle を書き(今は `Cycle: 1/2`、skill の例は `Cycle: 2/2 (cap reached)`)、cycle 2 の run が書き直す。`/test` の報告は `test-<date>-<slug>.md` で、同じ日の run なら同じ名前になる(未確認)。書き直されると、`#1`、`#2`、`R03` は別の指摘を指しうる。同じ系列の前の PR は `mutation survivor E8 of /test cycle 1 of org-watch-gate` と cycle をつけている。今回の self-review の ID は、cycle 1 の 3 回分を付録に残したので壊れない | `internal/org/verbs.go:274`、`internal/org/approval.go:476`、`internal/org/approval_test.go:943`、`internal/org/approval_enforce_test.go:310`、`:517`、`:540`、`internal/org/approve_test.go:298`。前の PR の書き方は `internal/cli/org_watch_test.go:444`。`.claude/skills/cross-review/SKILL.md:111` | 7 か所に cycle を足す(`cross-review cycle 1 #1 of org-plan-approval`、`R03 of /test cycle 1 of org-plan-approval`)。Go のコメントだけの直しでも、上限に届いたあとは全工程の回し直しになるので、直さないなら tech-debt の 1 行にまとめる |
+| LOW | maintainability | C2-2: `templates/base/docs/quality/quality-gates.md` の 80 行目に、直す前の文が残る。root の 81 行目は 3563129d で `whose current version is its latest approval and passes the check, never to an earlier approved version` に書き直されたが、template の同じ行は `whose current version is approved` のままである。`ralph init` はこの template を配るので、downstream の project には、直す前の案内の規則が出る。`KNOWN_DIFFS` はこのファイルをまるごと照合から外すので、機械は気づかない。cycle 1 の 3 回目の時点では 2 つの行は同じ文だった。同じ commit で、template 側の `/org` skill 2 面は更新している | `templates/base/docs/quality/quality-gates.md:80`、`docs/quality/quality-gates.md:81`、`scripts/check-sync.sh:98-101`、`git diff --stat b1f934c9..48333f62` に template の quality-gates がない | /sync-docs で template の 80 行目に root の 81 行目と同じ文を足し、2 つの行を同じ文に戻す |
+| LOW | readability | C2-3: 3563129d が触った 2 つの doc の文が、コードより古いか狭い。(1) `Send` の doc は `--timeout-ms` の予算の検査を「idle/done の待ちのすぐ後」(`verbs.go:310-313`)と指すが、そこには今、承認の確かめ直しがあり、予算の検査はその次になった。(2) `checkTaskPlanApproved` の doc は、今の digest が PlanHeader で断られる場合を「the plan was approved again and the leader has not written the lines since」と言う。コードは、1 回だけ承認した計画で、leader が 2 行をまだ書いていないときに打ち間違えた digest の TASK を送った場合も同じ枝に入る(今の digest が最新の承認で、2 行が Draft と TBD のまま)。前の版は「as when the plan was approved again」と例として書いていた。(2) は例が条件に変わった形で、テスト (e) も再承認の入力だけを使う | `internal/org/verbs.go:310-313`、`:391-395`、`internal/org/approval.go:464-467`、`internal/org/approval_test.go:1054-1090`(e)(e2) | (1) は「承認の確かめ直しのあと、`PaneSendText` の前の予算の検査」と書く。(2) は「as when」を戻す |
+| LOW | naming | C2-4: `TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks` の名前と doc は、機能の org の検査(leader の検査、そのあとに承認の検査)が容量の検査のあとに来ると言う。fixture は leader が動いているので(`newEnforceFixture` が leader を spawn する)、leader の検査は順に関係なく通り、テストが観測できるのは承認の半分だけである。`spawnFeatureSeatErr` は leader の検査と承認の検査を 1 つの関数に持つので、呼び出しの順を入れ替える mutant(R04、R05)は承認の側で落ち、実害のある穴ではない。範囲を広く言う名前と doc だけが残る | `internal/org/approval_enforce_test.go:535-554`、`internal/org/spawn.go:1282-1298`(`spawnFeatureSeatErr`)、`:1257-1268`(`spawnCapacityErr`) | 名前と doc を承認の検査に絞る(`TestOrgSpawn_CapacityCheckBeforeApprovalCheck`)。leader の検査の順も言うなら、leader が止まっていて org 全体の上限に届いている台帳のケースを足す |
+| LOW | maintainability | C2-5: N4 の重なりが cycle 2 のテストで増えた。Progress のメモを足す編集 `replaceOnce("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n")` が 2 つのテストファイルに 6 か所あり、cycle 2 が 2 か所(`approval_test.go:1136`、`approval_enforce_test.go:328`)、`replaceOnce("Add the login form.", "Add the signup form.")` を 1 か所(`approval_enforce_test.go:325`)足した。N4 の行(README の 219 行)は承認の記録と 2 行を書く helper の重なりだけを挙げ、この編集のリテラルは含まない | `git diff b1f934c9..48333f62 -- internal/org/approval_test.go internal/org/approval_enforce_test.go` の追加行、`git grep -c 'skip the tests'`(両ファイルとも 3) | `approval_enforce_test.go` の `replaceOnce` の隣に、Progress のメモを足す編集の変数を 1 つ置いて使い回す。直さないなら N4 の行にこの 1 句を足す |
+
+### Positive notes
+
+- 2 回目の確かめ直しは、早い検査と同じ `checkSendApproval` を呼ぶので、エラーの形が 2 つの位置でずれない。残りの検査より前に置いたので、承認の検査が読む時間も予算の見積もりに入る
+- `latestApprovedDigest` を、拒否の文の「its latest approval is of sha256:…」と振り替えの条件の 2 か所が使う。「最新」の意味が 2 か所で別々に決まらない
+- (f)(g)(h) は、拒否の kind と、今の digest の `checkPlanApproved` の error の文字列を突き合わせる。直す前のコードでは kind の段で落ちるので、assert が空振りしない
+- `TestOrgSend_ApprovalCheck_AgainAfterTheWait` は、digest が変わる編集と digest が読まない編集の両方を断り、編集なしと checkbox の印を通す。2 回目の検査が何でも断る実装になっても落ちる。`waited` の確認が、最初の検査で断られた場合の空振りを塞ぐ
+- 3 本のテストは、それぞれ名指しの mutant に結びつき、`TestOrgApprove_RefusesAnItemItCannotResolve` は fixture が note の上限を超えることを先に確かめる。fixture が足りなくて通ってしまう道がない
+- 4 つの `/org` SKILL.md と quality-gates の root の行を、コードの直しと同じ commit で書き換えた。leader の雛形は、手順 5 が最初から「最後に承認された digest」なので、変える必要がなかった
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Small leftovers of the org-plan-approval cycle-2 fixes; none changes what is refused or allowed. (a) Seven comments cite `cross-review #1`, `cross-review #2` and the `/test` mutation survivors `R03`, `R04`, `R05`, `R11` of org-plan-approval without a cycle (`Send`'s doc in `internal/org/verbs.go`, `checkTaskPlanApproved`'s doc in `internal/org/approval.go`, and tests in `approval_test.go`, `approval_enforce_test.go` (three) and `approve_test.go`); the triage report and the test report are one file per slug that a later cycle rewrites, so the numbers can come to name other findings. (b) `Send`'s doc still places the `--timeout-ms` budget check "right after the idle/done wait", where the second approval check now is, and `checkTaskPlanApproved`'s doc says the plan-header step applies when "the plan was approved again", although it also applies to a plan approved once whose two header lines the leader has not written. (c) `TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks` says the feature org's leader check and approval check follow the capacity check, but its leader runs, so it observes only the approval half (a swap of the two calls is still caught, since both checks sit in one function). (d) The Progress-note plan edit is spelled as a literal at six sites of the two approval test files, three of the copies added by cycle 2 | (a) A reader after merge may open the wrong finding. (b) A reader of the two docs gets a narrower or older account than the code. (c) A reader takes the test for a pin of the leader check's position too. (d) A change to the plan format has to be made at each site | Found by self-review cycle 2 of org-plan-approval (C2-1, C2-3, C2-4, C2-5). At the cycle cap, a comment-only fix still needs a full pipeline re-run, and none of the five changes behavior | The next change to `Send`, `checkTaskPlanApproved`, or the org-plan-approval tests: add `cycle 1` to the seven citations, fix the two doc phrases, narrow the spawn test's name or add the leader case, and share one Progress-note edit next to `replaceOnce` (the N4 row has the same trigger) | `docs/reports/self-review-2026-10-13-org-plan-approval.md` (C2-1, C2-3, C2-4, C2-5); `internal/org/verbs.go`; `internal/org/approval.go`; `internal/org/approval_test.go`; `internal/org/approval_enforce_test.go`; `internal/org/approve_test.go`; commits 3563129d and 2d238702 |
+
+_(この 1 行は、依頼の指示(この報告と insight のほかは書かない)に従い、`docs/tech-debt/README.md` に足していない。C2-2 は /sync-docs が直す前提なので行にしていない。直されずに残るなら、同じ行に足す。列の順は README の表と同じで、エスケープしていない `|` は 6 本である。)_
+
+### Coverage gaps
+
+- 2 回目の確かめ直しが戻る mutant(検査を消す、`PaneSendText` の後ろへ動かす)と、(f)(g)(h) が直す前に赤いこと、3 本のテストが名指しの mutant で落ちることは、読んで組み立てたもので、動かしていない。/test が確かめる
+- (f)(g)(h) は `checkTaskPlanApproved` の段だけを通る。Send を通る古い digest のテスト(`TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest`)は (a)〜(e2) の入力までで、(f)(g)(h) の入力は含まない。Send の包み(`sendApprovalErr`)は cycle 2 で変えていないので、指摘にはしない
+- 2 回目の検査から `PaneSendText` までの窓は残る(manifest と計画のファイルを読み、予算を測るだけの時間)。計画の A2 のとおり検査は境界ではなく tripwire なので、指摘にしない
+- 新しい help の段落を読むテストはない(verify の D2 が、help は固定されていないと書いた)。検査を変えたときに help が黙って古くなる。文書の判定は /verify と /sync-docs の仕事である
+- spawn には、`Send` の確かめ直しに当たるものがない。spawn は計画を名指さず、承認の検査はロックの中の 1 回だけである
+
+### Recommendation
+
+- Merge: yes(CRITICAL、HIGH、MEDIUM はなく、LOW は C2-1〜C2-5 の 5 件。cycle 2 の直しは cross-review の 2 件と N6、N7 を直し、cycle 1 の部分とは食い違わない。残る LOW はどれも挙動を変えない)
+- Follow-ups:
+  - C2-2: /sync-docs で template の quality-gates の 80 行目に root の 81 行目と同じ文を足す
+  - C2-1、C2-3〜C2-5: 上限が 2 のままなら直さず、上の「Tech debt identified」の 1 行を `docs/tech-debt/README.md` に足す(orchestrator か /sync-docs)。上限を上げて回し直すなら、5 件とも一緒に直せる。C2-1 は cycle 2 の `/cross-review` が報告を書き直す前に直すほど、指し先が壊れにくい
+  - N8 と N4 の README の行は残す。N4 の行には C2-5 の 1 句を足してもよい
+  - insight event: `docs/insights/events/2026-10-12-org-plan-approval.jsonl` の最後の行に足した(`self_review`、cycle 2、verdict pass、critical 0、high 0、medium 0、low 5)。UTC の日付がまだ 10-12 だったので、cycle 1 の event と同じファイルに入った
+
+## 付録: cycle 1 の 3 回目の結果(HEAD ee680eff の時点)
+
+3 回目の結果の本文を、見出しを 1 段下げて名前に「(3 回目の結果)」を足し、`Merge:` の行の名前を「3 回目の結果の判定」に変えたほかは、そのまま残す。N6 と N7 は cycle 2 の 3563129d で直ったので、本文の「tech-debt の 4 行」のうち N6 と N7 の行は、今の README にない。本文の中の「付録」は、この報告の最後の 2 つの節を指す。
 
 - Date: 2026-10-13
 - Plan: docs/plans/active/2026-10-12-org-plan-approval.md(承認済み、digest 951cf09bd7bc)
@@ -9,7 +123,7 @@ cycle 1, run 3 (after 4b6d0d55..ee680eff)
 - 止める条件: orchestrator が consult の判定に従って決めたとおり、この回で止めて直すのは CRITICAL と HIGH だけである。MEDIUM と LOW には、「Tech debt identified」に貼り付けられる行の案を書いた
 - 番号の付け方: 最初の結果の M1・L1〜L11 と、2 回目の結果の N1〜N5 はそのまま使う。今回足した指摘は N6〜N8
 
-## 2 回目の結果の指摘の扱い(HEAD ee680eff)
+### 2 回目の結果の指摘の扱い(HEAD ee680eff)(3 回目の結果)
 
 | ID | 状態 | 根拠 |
 | --- | --- | --- |
@@ -19,7 +133,7 @@ cycle 1, run 3 (after 4b6d0d55..ee680eff)
 | N4 | 意図して残した。計画のメモにはあり、tech-debt にはない | 計画の Progress checklist(ee680eff)が、2 つの fixture の `record` と `mark` を重ねたままにしたことと、9fb3fafa の本文の書き方を記録している。この直しで同じ重なりが 1 組増えた。`checkFixture.reapprove`(`internal/org/approval_test.go:503`)と、`TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest` の `approveRevisionAs`(`internal/org/approval_enforce_test.go:314`)は、最初の承認を記録し、改訂の承認を追記し、計画を書く、を同じ形で行う。`/pr` で計画は archive されるので、tech-debt の行の案を下に書いた |
 | N5 | 4b6d0d55 で直った | `featurePlanHeaderLines` の doc(`approval.go:194-200`)は、行の探し方は /implement と同じで、`- Approved:` の値は `approvedLineDigest` がより厳しく読み、語を足した行は /implement を通りこの検査で断られる、と書く。/implement の 4 手目(`.claude/skills/implement/SKILL.md:34`)と合う |
 
-## Evidence reviewed
+### Evidence reviewed(3 回目の結果)
 
 - コミットの並び: `git log --format='%h parent=%p' 02019f48..HEAD` は 4b6d0d55(親 02019f48)、0326574e、ee680eff の 1 本の列で、2 回目の報告より前に書かれた直しはない
 - 直しの範囲で読んだもの: `internal/org/approval.go` の `featurePlanHeaderLines` の doc、`approvalRefusalKind` と `approvalCheckError`、`checkTaskPlanApproved`、`currentPlanRef`、`approvalNextStep`、`planNotApprovedError`。変わっていないことを確かめるために `checkPlanApproved`、`checkApprovedPlanFile`、`checkApprovedPlanHeader`、`checkAnyPlanApproved`、`PlanContentHash` の doc も読んだ。ほかに `internal/org/approve.go` の `resolveApproved`、`internal/cli/org_approve.go` のコメントと `printApprovedPlans`、`internal/cli/org_inbox.go` の `show`、`internal/org/prompts/leader.md` の手順 3〜7 と `implementer.md` のミッション、4 つの `/org` SKILL.md の承認の節、`docs/quality/quality-gates.md` の 2 つの面、計画の Progress checklist の新しいメモ
@@ -34,7 +148,7 @@ cycle 1, run 3 (after 4b6d0d55..ee680eff)
   - 作業ツリーは読み始めのとききれいで、HEAD は ee680eff だった
 - 確かめていないもの: テスト、静的解析、実機の確認はしていない。N6〜N8 はコードを読んで組み立てた入力で、動かしてはいない
 
-## 依頼された点の結論
+### 依頼された点の結論(3 回目の結果)
 
 1. `checkTaskPlanApproved` と `currentPlanRef` の分岐の順と種類: 最初の検査が NoApproval か PlanChanged で断ったときだけ先へ進む(`approval.go:479-481`)。Other(結びつきが不完全など)はここで返るので、`currentPlanRef` が `f.Worktree` を読むとき f は必ず完全で、その前提は `currentPlanRef` の doc(`:502-503`)にある。TASK の digest の PlanHeader もここで返る。全文のハッシュだけが違う PlanChanged は digest が同じなので、`currentPlanRef` が false を返して元の拒否が残る。最初の検査が失敗したあとの枝はどれも error を返すので、通る道は増えていない。種類は、今の digest が通れば TaskHeader(今の digest と path を持つ)、先頭の 2 行で断られれば今の digest の PlanHeader、それ以外は TASK の digest の拒否になる。残りは、最後の枝に今の digest の PlanChanged が入ること(N6)と、基準が最後の承認ではなくファイルの digest であること(N7)
 2. leader が従う拒否の並びが止まらなくなるか、承認済みの計画を捨てさせるか: 止まらなくなる並びは見つからなかった。PlanHeader(今の digest)の手は先頭の 2 行を、TaskHeader の手は TASK のヘッダを変えるので、どちらも次の入力が変わり、2 手で通る。承認済みの計画を捨てさせる並びは 2 つ残る。(a) 承認し直したあとに、計画の digest が読まない部分(Progress のメモなど)が変わると、「新しい digest で 2 行を書け」のすぐあとに「変更を戻せ」が来る(N6)。(b) ファイルが前に承認された版に戻っていて、TASK が最後の承認の digest を名指すと、拒否は前の版の 2 行を書かせ、ヘッダを前の版の digest に直させる(N7)。どちらも行き着くのはこの命の中で人が承認した版で、承認のない計画が通ることはない
@@ -44,7 +158,7 @@ cycle 1, run 3 (after 4b6d0d55..ee680eff)
 6. 文書の面: `docs/quality/quality-gates.md` の 2 つの面は、`PLAN:` のヘッダの手を「ないか形が違えば `TASK_ID:` の次に付ける」と「古いか打ち間違えた digest なら今の digest に直す」の 2 つに分けて書き、コードと合う。0326574e の、先に 2 行を書かせる拒否は、同じ行の「計画の先頭の 2 行を書いてコミットする」に含まれる。4 つの SKILL.md の新しい 2 項目もコードと合う。2 つ目の項目(`SKILL.md:682-686`)は場合を「承認し直す前の digest」に絞って書くが、コードは打ち間違えた digest で 2 行がまだのときも同じ拒否を返す。例が狭いだけで、従っても誤らない。どの面も「古いか打ち間違えた digest」という書き方で、TASK の digest のほうが新しい N7 の入力は書いていない
 7. leader.md の手順 5 と 7: 手順 5 の「最後に承認された digest。計画の `- Approved:` の行の digest」は、手順 4 で 2 行を書いてから手順 5 に進む順と合う。手順 7 の「原因を直す前に同じコマンドを打ち直さず」は、種類ごとの次の手(PlanHeader は 2 行を直してから tries again、TaskHeader はヘッダを変えたコマンド)と食い違わない。`prompts_test.go` が両方の語句を固定している。N7 の入力でだけ、手順 5 は最後の承認の digest を、拒否は前の版の digest を名指し、2 つが別の digest を言う
 
-## Findings
+### Findings(3 回目の結果)
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
@@ -57,7 +171,7 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 3 件。
 | LOW | maintainability | N7: N1 の直しが振り替え先にするのは、計画のファイルが今持つ digest で、そのパスの最後の承認ではない。ファイルが前に承認された版 Y に戻っていて(承認し直したあとの revert など)、TASK が最後の承認 Z を名指すと、最初の検査は Z の PlanChanged になり、今の digest は Y になる。2 行が Z のままなら「`sha256:Y` で 2 行を書け」、書けば「ヘッダを `PLAN: <path> sha256:Y` に直して送れ」が来て、leader は人が置き換えた版で進む。直す前は Z の PlanChanged「変更を戻すか、頼み直す」が返り、戻せば Z に戻った。doc は、この枝に来るのはヘッダが「old or mistyped digest」を名指すときで、直しの目的は「the plan a human approved last」を捨てさせないことだと書くが、この入力ではどちらも成り立たない。雛形の手順 5 は TASK のヘッダに最後に承認された digest を書かせるので、手順 5 と拒否が別の digest を名指す。今の命のどの承認でも通るのは計画の決め方どおり(`checkAnyPlanApproved` も同じ)で、承認のない版は通らず、ファイルが前の版に戻されたときだけの話なので LOW とした | `internal/org/approval.go:451-457`(doc)、`:482-486`(`currentPlanRef` と 2 回目の検査)、`:504-518`(`currentPlanRef`)、`checkPlanApproved` の `latest`(`:535-544`)、`internal/org/prompts/leader.md:137-139`(手順 5)、`docs/quality/quality-gates.md:81` と `.claude/skills/org/SKILL.md:679-681`(「古いか打ち間違えた digest」) | TASK の digest がそのパスの最後の承認であるときは、今の digest へ振り替えずに元の拒否を返す(`checkPlanApproved` がすでに `latest` を求めている)。コードを変えないなら、doc と SKILL.md・quality-gates の書き方を「ファイルが今持つ承認済みの版へ振り替える(前の版に戻っていればその版)」にする |
 | LOW | exception-handling | N8: N3 の直しの文は、ほかの誰かが resolve した件について「承認の DECISION をまだ leader に送らない」と言うが、承認は DECISION がなくても効いている。記録は残り、今の命の中でそれを取り消す動詞はない。承認の検査は記録と計画の 2 行を読み、DECISION は読まない。PlanHeader の次の手は、NoApproval の手と違って承認の DECISION を受けたかを条件にせず、「2 行を書いてコミットし、送り直す」と言う。そのため、先に resolve した人が直しを頼んでいて、人の次の DECISION より前に leader が TASK を送ると、leader は計画に承認の 2 行を自分で書くよう言われ、そのまま進める。0326574e の枝で、改訂の前の digest の TASK も同じ拒否になる。2 人が同じ件を扱い、さらに leader が雛形に反して DECISION の前に TASK を送ったときだけなので LOW とした | `internal/org/approve.go:404-409`(文)、`internal/org/approval.go:665-667`(NoApproval の手の条件)、`:668-674`(PlanHeader の手)、`:492-493`(0326574e の枝)、`internal/org/prompts/leader.md:120-125`(手順 3 と 4: 返事を待ち、DECISION を受けてから 2 行を書く) | PlanHeader の手に NoApproval と同じ条件を付ける(承認の DECISION をまだ受けていなければ QUESTION の返事を待つ)。コードを変えないなら、approve の文を「承認はもう効いている。メモが直しの依頼なら、承認の DECISION ではなく直しを頼む DECISION を送る」にする |
 
-## Positive notes
+### Positive notes(3 回目の結果)
 
 - 最初の検査が失敗したあとの枝はどれも error を返し、`checkPlanApproved` と `checkAnyPlanApproved` には手を入れていない。振り替えで通る道は増えず、spawn の拒否の種類と並びも変わらない
 - (e) は理由の文を、今の digest での `checkPlanApproved` の error と文字列ごと比べるので、0326574e の枝を消すと落ちる。(e2) は 2 手で通るところまでを、検査と Send の両方で、typed・raw・dry-run の 3 通りで確かめ、断られた前後で台帳と driver の写しが変わらないことも見る
@@ -65,7 +179,7 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 3 件。
 - `TestOrgApprove_ResolvedBySomeoneElse` は、一時ディレクトリの名前に別の件の ID が入りうることを踏まえ、`inbox show` のコマンドを取り除いてから ID がないことを確かめる。テストが偶然落ちる道を先に塞いでいる
 - 0326574e は `currentApprovedRef` を `currentPlanRef` に改め、この関数は今の digest を読むだけになり、検査は呼び出し元が回す。古い名前はどこにも残っていない
 
-## Tech debt identified
+### Tech debt identified(3 回目の結果)
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
@@ -76,9 +190,9 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 3 件。
 
 _(この 4 行は、依頼の指示(この報告のファイル以外は書かない)に従い、`docs/tech-debt/README.md` に足していない。列の順は README の表と同じで、どの行もエスケープしていない `|` は 6 本である。4 行目は 2 回目の結果の N4 で、計画のメモにしか書かれておらず、計画は `/pr` で archive されるので足した。)_
 
-## Recommendation
+### Recommendation(3 回目の結果)
 
-- Merge: yes(CRITICAL と HIGH はなく、この回の止める条件に当たる指摘はない。LOW は N6〜N8 の 3 件で、どれも上の行を tech-debt に足して先へ進められる)
+- 3 回目の結果の判定: yes(CRITICAL と HIGH はなく、この回の止める条件に当たる指摘はない。LOW は N6〜N8 の 3 件で、どれも上の行を tech-debt に足して先へ進められる)
 - Follow-ups:
   - N6〜N8 と N4: 上の 4 行を `docs/tech-debt/README.md` に足す(orchestrator か /sync-docs)
   - N6 は枝を 1 つ足せば直るので、cross-review の結果でコードに戻る回があれば一緒に直せる
