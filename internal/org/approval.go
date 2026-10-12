@@ -802,6 +802,33 @@ func approveCommand(ids []string, stateDir string) string {
 	return command
 }
 
+// ApprovalDecisionText is the DECISION message that tells a feature org's
+// leader a human approved the plan ref names: TYPE: DECISION, a PLAN: header
+// with the plan and digest of the leader's QUESTION, and a body that starts
+// with `approved`, which the leader prompt reads as the approval. `ralph org
+// approve` prints it in ApprovalDecisionCommand and never sends it (A3).
+func ApprovalDecisionText(ref PlanRef) string {
+	return "TYPE: " + protocol.TypeDecision + "\n" + planHeaderKey + ": " + ref.String() + "\n\napproved"
+}
+
+// ApprovalDecisionCommand is the one POSIX shell command, `ralph org send`,
+// that sends ApprovalDecisionText(ref) to the leader seat (LeaderIdentity)
+// of orgID, with --state-dir stateDir when it is set (the rule of
+// InboxCommand). The --text value is single-quoted with its line breaks kept
+// (shellQuote). An orgID that is not an identifier (ValidateIdentifier),
+// which only a hand-edited ledger holds, is quoted too.
+func ApprovalDecisionCommand(orgID string, ref PlanRef, stateDir string) string {
+	orgWord := orgID
+	if ValidateIdentifier("org_id", orgID) != nil {
+		orgWord = shellQuote(orgID)
+	}
+	command := "ralph org send --org-id " + orgWord + " --to " + LeaderIdentity
+	if stateDir != "" {
+		command += " --state-dir " + shellQuote(stateDir)
+	}
+	return command + " --text " + shellQuote(ApprovalDecisionText(ref))
+}
+
 // resolveApproved resolves each recorded item with its approveNote and sets
 // Resolved on it. A resolve that fails keeps the approval record; the error
 // names those items and the `ralph org inbox resolve` command (InboxCommand

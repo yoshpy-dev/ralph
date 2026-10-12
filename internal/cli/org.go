@@ -36,10 +36,12 @@ func newOrgCmd() *cobra.Command {
 			"disbanding an entire org_id. Every verb records its outcome to an\n" +
 			"append-only manifest so `ralph org status` works even with herdr/agmsg\n" +
 			"absent or stopped. `ralph org escalate` and `ralph org inbox` keep the\n" +
-			"org inbox, which every org in the ledger shares, next to the manifest.",
+			"org inbox, which every org in the ledger shares, next to the manifest,\n" +
+			"and `ralph org approve` records a human's approval of the plan a feature\n" +
+			"org's leader asked for there.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, approve, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
@@ -56,6 +58,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgWatchCmd(&orgID, &stateDir, &configPath),
 		newOrgEscalateCmd(&orgID, &stateDir, &configPath),
 		newOrgInboxCmd(&stateDir, &configPath),
+		newOrgApproveCmd(&stateDir, &configPath),
 	)
 
 	return cmd
