@@ -679,6 +679,76 @@ func TestOrgStart_TheWatchRunsInTheMainWorktreeWithoutTheHerdrPaneEnv(t *testing
 	}
 }
 
+// Cross-review cycle 2 #1 of org-watch-gate for start: `ralph org start
+// <task>` from a subdirectory of the main checkout launches the watch in the
+// main worktree root with a relative agmsg home made absolute from that
+// subdirectory, as its one RALPH_ORG_AGMSG_HOME: the variable's value, or,
+// with the variable unset, the agmsg_home of the --config given. The
+// relative home names the stub agmsg home from the subdirectory, so the
+// leader is spawned through it.
+func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
+	cases := []struct {
+		name     string
+		inConfig bool // the relative home is the --config's agmsg_home, with RALPH_ORG_AGMSG_HOME unset
+	}{
+		{name: "a relative env value"},
+		{name: "env unset, a relative agmsg_home in --config", inConfig: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			useRealOrgWatchGate(t)
+			setupOrgStubPATH(t)
+			stubHome := os.Getenv(orgAgmsgHomeEnv)
+			root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
+			sub := filepath.Join(root, "pkg", "sub")
+			if err := os.MkdirAll(sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			configPath := writeOrgConfig(t, sub, 5)
+			ledger := filepath.Join(root, ".harness", "state", "org")
+			t.Chdir(sub)
+			wd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rel, err := filepath.Rel(wd, stubHome)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.inConfig {
+				data, err := os.ReadFile(configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeTestFile(t, configPath, strings.Replace(string(data), "[org]\n", fmt.Sprintf("[org]\nagmsg_home = %q\n", rel), 1))
+				setOrUnsetEnv(t, orgAgmsgHomeEnv, "", true)
+			} else {
+				t.Setenv(orgAgmsgHomeEnv, rel)
+			}
+			var got []orgWatchLaunchRequest
+			setOrgWatchLaunch(t, inProcessLauncher(t, ledger, &got))
+
+			stdout, stderr, err := runOrgCmdStreams(t, "start", "--org-id", "org-a", "--driver", "claude", "--model", "sonnet",
+				"--cwd", sub, "--scope", "org-wide", "--config", "ralph.toml", "do the task")
+			if err != nil {
+				t.Fatalf("start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			if len(got) != 1 {
+				t.Fatalf("launches = %d; want 1", len(got))
+			}
+			if got[0].dir != root {
+				t.Errorf("child dir = %q; want %q", got[0].dir, root)
+			}
+			if homes, want := agmsgHomeEnvValues(got[0].env), []string{filepath.Join(wd, rel)}; !slices.Equal(homes, want) {
+				t.Errorf("child %s = %q; want %q", orgAgmsgHomeEnv, homes, want)
+			}
+			if ev := lastSeatEvent(t, ledger, "org-a", org.LeaderIdentity); ev.Event != org.EventSpawned {
+				t.Errorf("last leader event = %s; want %s", ev.Event, org.EventSpawned)
+			}
+		})
+	}
+}
+
 // Help (plan 2026-10-12-org-watch-gate, Scope): start says it launches the
 // watch and when it is refused, spawn and send say when they are refused.
 func TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes(t *testing.T) {

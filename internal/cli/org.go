@@ -297,7 +297,7 @@ func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, st
 	ensure := orgWatchEnsure{
 		stateDir: resolvedStateDir, deadman: rt.Config.DeadmanMinutes,
 		child: func() (orgWatchLaunchRequest, error) {
-			return orgWatchChild(cmd, resolvedStateDir, stateDirSource, configPath, 0)
+			return orgWatchChild(cmd, resolvedStateDir, stateDirSource, configPath, rt.Config.AgmsgHome, 0)
 		},
 		errPrefix:    "org: start: the cross-org watch did not start, so no leader was started",
 		hintStateDir: hintStateDir,

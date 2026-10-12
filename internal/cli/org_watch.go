@@ -304,6 +304,10 @@ func orgWatchChildArgs(cmd *cobra.Command, resolvedStateDir, configPath string, 
 // ones that can point herdr at an isolated server.
 var orgWatchChildDroppedEnv = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_ENV"}
 
+// orgAgmsgHomeEnv is the variable driver.ResolveAgmsgHome reads before the
+// [org].agmsg_home config value.
+const orgAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
+
 // orgWatchChild returns the detached watch that --detach and `ralph org
 // start` launch (plan 2026-10-12-org-watch-gate, F6): orgWatchChildArgs,
 // logging to watch.log of the state dir, run in the main worktree root of
@@ -313,8 +317,12 @@ var orgWatchChildDroppedEnv = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_W
 // main worktree (a --state-dir outside the repository) keeps this process's
 // working directory. The environment is this process's less
 // orgWatchChildDroppedEnv, with PWD set to the new working directory, as
-// os/exec sets it for a nil Env.
-func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string, intervalSeconds int) (orgWatchLaunchRequest, error) {
+// os/exec sets it for a nil Env. When the working directory changes, a
+// relative agmsg home is passed made absolute in RALPH_ORG_AGMSG_HOME
+// (orgWatchChildAgmsgHome; cross-review cycle 2 #1 of org-watch-gate), so it
+// names the directory it named here. cfgAgmsgHome is the agmsg_home of the
+// config loaded from configPath.
+func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath, cfgAgmsgHome string, intervalSeconds int) (orgWatchLaunchRequest, error) {
 	args, err := orgWatchChildArgs(cmd, resolvedStateDir, configPath, intervalSeconds)
 	if err != nil {
 		return orgWatchLaunchRequest{}, err
@@ -323,11 +331,17 @@ func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configP
 	if root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource); ok {
 		req.dir = root
 	}
+	agmsgHome := ""
+	if req.dir != "" {
+		if agmsgHome, err = orgWatchChildAgmsgHome(cmd, configPath, cfgAgmsgHome); err != nil {
+			return orgWatchLaunchRequest{}, err
+		}
+	}
 	environ := os.Environ()
-	req.env = make([]string, 0, len(environ)+1)
+	req.env = make([]string, 0, len(environ)+2)
 	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(orgWatchChildDroppedEnv, name) || (req.dir != "" && name == "PWD") {
+		if slices.Contains(orgWatchChildDroppedEnv, name) || (req.dir != "" && name == "PWD") || (agmsgHome != "" && name == orgAgmsgHomeEnv) {
 			continue
 		}
 		req.env = append(req.env, kv)
@@ -335,7 +349,39 @@ func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configP
 	if req.dir != "" {
 		req.env = append(req.env, "PWD="+req.dir)
 	}
+	if agmsgHome != "" {
+		req.env = append(req.env, orgAgmsgHomeEnv+"="+agmsgHome)
+	}
 	return req, nil
+}
+
+// orgWatchChildAgmsgHome returns the agmsg home a detached watch that runs in
+// another working directory gets in RALPH_ORG_AGMSG_HOME, or "" when its
+// environment keeps what it inherits. driver.ResolveAgmsgHome reads the
+// variable, else the config's agmsg_home, and leaves a relative value
+// relative to the working directory. So a relative value of the variable, or
+// else (the variable empty or unset) a relative cfgAgmsgHome of a --config
+// that was given, is made absolute from this process's working directory.
+// Nothing else changes: without --config (or with an empty one) the child
+// reads the main worktree root's ralph.toml, whose relative agmsg_home names
+// a directory from that root, and an absolute value, or one that starts with
+// "~/", names the same directory from anywhere.
+func orgWatchChildAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string) (string, error) {
+	home := os.Getenv(orgAgmsgHomeEnv)
+	if home == "" {
+		if !cmd.Flags().Changed("config") || configPath == "" {
+			return "", nil
+		}
+		home = cfgAgmsgHome
+	}
+	if home == "" || filepath.IsAbs(home) || strings.HasPrefix(home, "~/") {
+		return "", nil
+	}
+	abs, err := filepath.Abs(home)
+	if err != nil {
+		return "", fmt.Errorf("make the agmsg home %s absolute: %w", home, err)
+	}
+	return abs, nil
 }
 
 // launchOrgWatch is orgWatchLaunch in production: the running ralph binary
@@ -562,7 +608,7 @@ func runOrgWatchDetach(cmd *cobra.Command, rt *org.Org, stateDir, stateDirSource
 	got, err := ensureOrgWatch(orgWatchEnsure{
 		stateDir: stateDir, deadman: rt.Config.DeadmanMinutes,
 		child: func() (orgWatchLaunchRequest, error) {
-			return orgWatchChild(cmd, stateDir, stateDirSource, configPath, intervalSeconds)
+			return orgWatchChild(cmd, stateDir, stateDirSource, configPath, rt.Config.AgmsgHome, intervalSeconds)
 		},
 		errPrefix:    "org: watch --detach",
 		hintStateDir: hintStateDir,

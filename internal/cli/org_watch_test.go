@@ -1071,6 +1071,107 @@ func checkOrgWatchChild(t *testing.T, req orgWatchLaunchRequest, stateDir, confi
 	}
 }
 
+// Cross-review cycle 2 #1 of org-watch-gate for --detach: the child runs in
+// the main worktree root, so a relative agmsg home is passed made absolute
+// from this process's working directory (a subdirectory) as its one
+// RALPH_ORG_AGMSG_HOME: the variable's value, or else (the variable empty or
+// unset) the agmsg_home of the --config given. An absolute or "~/" value, a
+// relative agmsg_home of the ralph.toml read without --config, and a child
+// that keeps this working directory (a --state-dir outside the repository)
+// leave the environment as it is.
+func TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild(t *testing.T) {
+	root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
+	sub := filepath.Join(root, "pkg", "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ledger := filepath.Join(root, ".harness", "state", "org")
+	outside := filepath.Join(t.TempDir(), "state")
+	t.Chdir(sub)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name     string
+		unset    bool   // RALPH_ORG_AGMSG_HOME is not in the environment
+		env      string // else its value
+		cfgHome  string // agmsg_home of ./ralph.toml ("" for none)
+		args     []string
+		wantDir  string
+		wantHome []string // the RALPH_ORG_AGMSG_HOME values of the child's env
+	}{
+		{name: "a relative env value", env: "rel/agmsg", wantDir: root, wantHome: []string{filepath.Join(wd, "rel", "agmsg")}},
+		{name: "env unset, a relative agmsg_home in --config", unset: true, cfgHome: "cfg/agmsg", args: []string{"--config", "ralph.toml"},
+			wantDir: root, wantHome: []string{filepath.Join(wd, "cfg", "agmsg")}},
+		{name: "env empty, a relative agmsg_home in --config", env: "", cfgHome: "cfg/agmsg", args: []string{"--config", "ralph.toml"},
+			wantDir: root, wantHome: []string{filepath.Join(wd, "cfg", "agmsg")}},
+		{name: "a relative env value and a relative agmsg_home in --config", env: "rel/agmsg", cfgHome: "cfg/agmsg", args: []string{"--config", "ralph.toml"},
+			wantDir: root, wantHome: []string{filepath.Join(wd, "rel", "agmsg")}},
+		{name: "an absolute env value", env: "/opt/agmsg", wantDir: root, wantHome: []string{"/opt/agmsg"}},
+		{name: "a ~/ env value", env: "~/agmsg", wantDir: root, wantHome: []string{"~/agmsg"}},
+		{name: "env unset, an absolute agmsg_home in --config", unset: true, cfgHome: "/opt/agmsg", args: []string{"--config", "ralph.toml"}, wantDir: root},
+		{name: "env unset, --config without agmsg_home", unset: true, args: []string{"--config", "ralph.toml"}, wantDir: root},
+		{name: "env unset, no --config, a relative agmsg_home in ./ralph.toml", unset: true, cfgHome: "cfg/agmsg", wantDir: root},
+		{name: "env unset, an empty --config, a relative agmsg_home in ./ralph.toml", unset: true, cfgHome: "cfg/agmsg", args: []string{"--config", ""}, wantDir: root},
+		{name: "--state-dir outside the repository, a relative env value", env: "rel/agmsg", args: []string{"--state-dir", outside}, wantHome: []string{"rel/agmsg"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setOrUnsetEnv(t, orgAgmsgHomeEnv, tc.env, tc.unset)
+			config := "[org]\n"
+			if tc.cfgHome != "" {
+				config += fmt.Sprintf("agmsg_home = %q\n", tc.cfgHome)
+			}
+			writeTestFile(t, filepath.Join(sub, "ralph.toml"), config)
+			stateDir := ledger // the ledger the child watches
+			if tc.wantDir == "" {
+				stateDir = outside
+			}
+			var got []orgWatchLaunchRequest
+			setOrgWatchLaunch(t, inProcessLauncher(t, stateDir, &got))
+			args := append([]string{"watch", "--all", "--detach"}, tc.args...)
+			if _, _, err := runOrgCmdStreams(t, args...); err != nil {
+				t.Fatalf("--detach: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("launches = %d; want 1", len(got))
+			}
+			if got[0].dir != tc.wantDir {
+				t.Errorf("child dir = %q; want %q", got[0].dir, tc.wantDir)
+			}
+			if homes := agmsgHomeEnvValues(got[0].env); !slices.Equal(homes, tc.wantHome) {
+				t.Errorf("child %s = %q; want %q", orgAgmsgHomeEnv, homes, tc.wantHome)
+			}
+		})
+	}
+}
+
+// setOrUnsetEnv sets name to value for the test, or removes it from the
+// environment when unset is true; t.Setenv restores it either way.
+func setOrUnsetEnv(t *testing.T, name, value string, unset bool) {
+	t.Helper()
+	t.Setenv(name, value)
+	if unset {
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatalf("unsetenv %s: %v", name, err)
+		}
+	}
+}
+
+// agmsgHomeEnvValues returns the values of the RALPH_ORG_AGMSG_HOME entries
+// of env, in order.
+func agmsgHomeEnvValues(env []string) []string {
+	var homes []string
+	for _, kv := range env {
+		if name, value, _ := strings.Cut(kv, "="); name == orgAgmsgHomeEnv {
+			homes = append(homes, value)
+		}
+	}
+	return homes
+}
+
 // startDetachedProcess runs the child in the request's dir with exactly the
 // request's environment.
 func TestOrgWatchDetach_StartDetachedProcess_RunsInDirWithEnv(t *testing.T) {
