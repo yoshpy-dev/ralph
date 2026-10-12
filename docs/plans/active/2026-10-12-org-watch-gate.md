@@ -185,6 +185,10 @@
 - [x] Review artifact created
   - self-review(f7a6fe6c): Merge yes、LOW 6(L1〜L6)。dbeb45ca で L1〜L4 を直した(L1: 起動した子が終わったあと、ロックを止まりかけ・`--once`・stale の見張りが持っていれば、最初の判定と同じ拒否を返す。L2: not_running の文の `ralph org start` を「新しい org なら」に限った。L3: send の拒否の `org:` の重なりを除いた。L4: pid の表示と kill の案内を org 層の 1 つにし、`orgWatchGateOverride` を `func() error` に、`orgWatchDetachDeadline` を `orgWatchEnsureDeadline` に改名した)。L3 を調べたときに、CLI の send がすべてのエラーを `org: send:` で包み直していること(この PR より前から)が分かり、7d2e4bbb で包み直さないようにした。L5・L6(tech-debt と README の文)は sync-docs に回す
   - self-review の再実行(264951e6): Merge yes、新しい LOW 3(N1〜N3)。bda15444 で 3 つとも直した(N1: テストのコメントの空白、N2: `--detach` の拒否の文を、子を起動したあとにも合う「so no new watch runs」に、N3: dry-run の追記のエラーも org 層で `org: send:` で包み、CLI の文字列の比較をやめた)。bda15444 は文言とエラーの包み方だけなので self-review を通さず、verify に読んでもらう
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+  - verify(ae349cc4): pass。AC12 は一部(文書のずれ D1〜D7 を sync-docs で直す)、AC8 は一部(座席の `wait` と inbox の show/ack/resolve/notify は配線がないことを grep で見ただけ)。記録にないずれ 2 つ(stale を待つ間に持ち主が消えたら起動へ進む、bda15444 で 6a のテスト 1 本の文言が変わった)も妥当とした。気づき: `--detach` の拒否の文は `--state-dir` を明示しても案内のコマンドに付けない(LOW)
+- [x] Test artifact created
+  - test(a0149a10): pass(1,426 本、-race も 0)。mutation 64 件中、本物の穴 6 件(本番の settle、stale の持ち主が消えたあとの起動、古い版の印の deadman、起動の失敗の文)を probe で閉じられると報告した。実機で後退を 1 件見つけた: 同時の `--detach` 8 本が返った直後の `--stop` が 30 秒で時間切れになり、ロックを待っていた負けた子が、止まった見張りのあとにロックを取って動き続ける(base では起きない。S3 の AC5 の直しで、`--detach` と start が自分の子の終了を待たずに返るようになったため)
+  - 後退の直し(fdfb5b23): consult(stuck)に聞き、(a) 自分の子の終了を待つ案にした。ほかの見張りが作業を受け付けているときも、自分の子が終わるまで(org 層の `DefaultWatchLockWait` 2 秒 + 1 秒)待ってから `already running` を返し、待つ間に子がロックを取れば `started`、期限を過ぎて子が生きていれば止めて回収する。退けた案: 子のロック待ちを 0 にする(ProbeWatch の一瞬の共有ロックと競う)、止める頼みを消さない(6a の頼みの規則を崩す)。test の probe 5 本も取り込んだ。HEAD の版で落ち直したあとで通るテスト 4 本、実機で `--stop` が 0.85〜0.94 秒で通り見張りが残らないこと(3 回 × 2)を確かめた。残る穴(base にもある): `--detach` が返る前に別の端末から `--stop` を打つと、ロックを待つ子があとを取りうる。foreground の `watch --all` がロックを待つ間の `--stop` も同じ。tech-debt に書く
+  - consult の指摘に従い、コードの直しなので self-review から全段を cycle 2 として回し直す(post-implementation-pipeline.md の「fix-and-revalidate なら全段」)
 - [ ] PR created
