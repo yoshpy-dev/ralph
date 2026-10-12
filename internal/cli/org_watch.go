@@ -606,8 +606,8 @@ func orgWatchDetachRefusal(stateDir, hintStateDir string, probe org.WatchLivenes
 // new watch has taken watch.lock and not yet written its mark, and by then
 // it can name another process. It writes the stop request instead, which
 // the watch reads between cycles, and waits up to orgWatchStopDeadline for
-// watch.lock to be free. It reads no config: running and stale are handled
-// alike, so deadman_minutes does not matter (ProbeWatch gets 0, which
+// watch.lock to be free. It reads no config: running, stopping, and stale are
+// handled alike, so deadman_minutes does not matter (ProbeWatch gets 0, which
 // judges by the default deadman), and a ralph.toml broken since the watch
 // started does not keep it from stopping.
 func runOrgWatchStop(cmd *cobra.Command, stateDir string) error {
