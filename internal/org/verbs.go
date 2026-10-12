@@ -217,6 +217,19 @@ type SendResult struct {
 	PaneID string
 }
 
+// taskNotSentError is Send's error for a TASK the watch gate refused: "org:
+// send: TASK not sent: " and the gate's error, less the "org: " that a
+// *WatchGateError starts with, so the message says "org:" once (self-review
+// L3 of org-watch-gate). It unwraps to the gate's error, so
+// errors.Is(err, ErrNoRunningWatch) holds for it.
+type taskNotSentError struct{ gate error }
+
+func (e taskNotSentError) Error() string {
+	return "org: send: TASK not sent: " + strings.TrimPrefix(e.gate.Error(), "org: ")
+}
+
+func (e taskNotSentError) Unwrap() error { return e.gate }
+
 // Send validates Text against the typed message protocol (unless Raw),
 // waits for the target seat to go idle, then types Text into its pane,
 // waits briefly, and presses Enter exactly once. It then tries to confirm
@@ -225,11 +238,22 @@ type SendResult struct {
 // entirely and only appends the (dry_run: true) history event -- but
 // protocol validation still runs first for DryRun too, since it is a
 // pure, side-effect-free check; DryRun never waits or confirms, so
-// SendResult.SubmitConfirmed is always false for it.
+// SendResult.SubmitConfirmed is always false for it. Every SendResult.Err
+// starts with "org: send: ", which `ralph org send` prints as it is.
 //
 // AC-11: an invalid message (unless Raw) is rejected before any manifest
 // event is appended and before any driver call is attempted -- Send fails
 // closed, not open.
+//
+// A TASK starts autonomous work, so right after validation Send runs the
+// watch gate (Org.WatchGate, when set; watchgate.go) for a message whose
+// TYPE is TASK, DryRun included, and a refusal also appends no event and
+// makes no driver call. A Raw message is not validated, but its TYPE is
+// read with protocol.Parse the same way: one whose first line reads as
+// `TYPE: TASK` (Parse trims the spaces around the key and the value and
+// keeps their case) is a TASK, and one whose first line is no TYPE header is
+// not (plan 2026-10-12-org-watch-gate, F4 and F5). The refusal is a
+// taskNotSentError.
 //
 // No-resend design decision: Send presses Enter at most once, ever, per
 // call -- see confirmSubmitted's doc comment for why a second Enter is
@@ -266,9 +290,19 @@ type SendResult struct {
 // after the idle/done wait below), so that case never types anything and
 // leaves Progress at its SendProgressNothingSent zero value.
 func (o *Org) Send(p SendParams) SendResult {
+	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
-		if err := protocol.ValidateText(p.Text, protocol.DefaultMaxBodyChars); err != nil {
+		err := parseErr
+		if err == nil {
+			err = protocol.Validate(msg, protocol.DefaultMaxBodyChars)
+		}
+		if err != nil {
 			return SendResult{Err: fmt.Errorf("org: send: message rejected by protocol validation (use --raw to bypass): %w", err)}
+		}
+	}
+	if parseErr == nil && msg.Type == protocol.TypeTask {
+		if err := o.checkWatchGate(); err != nil {
+			return SendResult{Err: taskNotSentError{gate: err}}
 		}
 	}
 
@@ -278,11 +312,13 @@ func (o *Org) Send(p SendParams) SendResult {
 	}
 
 	if p.DryRun {
-		err := o.appendEvent(ManifestEvent{
+		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.To, Event: EventSent,
 			DryRun: true, Details: rawPrefix + truncateForDetails(p.Text),
-		})
-		return SendResult{Err: err}
+		}); err != nil {
+			return SendResult{Err: fmt.Errorf("org: send: %w", err)}
+		}
+		return SendResult{}
 	}
 
 	seat, ok, err := o.findSeat(p.OrgID, p.To)

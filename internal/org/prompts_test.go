@@ -693,6 +693,69 @@ func TestRenderRolePrompt_Leader_NamesWhichInbox(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry pins AC11 of
+// plan 2026-10-12-org-watch-gate: a spawn or a TASK send refused because no
+// cross-org watch accepts work is not retried, not sent again as another
+// TYPE or as --raw, and the leader does not start the watch itself, even
+// though the refusal names `ralph org watch --all --detach`; it escalates a
+// BLOCKED with the org_id for its TASK_ID and waits. The words the rule
+// tells the refusal by are in every WatchGateError, so a reworded refusal
+// cannot leave the rule pointing at text the gate no longer prints, and the
+// template names the watch command nowhere else.
+func TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 運用規律")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 運用規律' section, got:\n%s", text)
+	}
+	const marker = "TASK の `ralph org send` が"
+	item, ok := markdownItem(section, marker)
+	if !ok {
+		t.Fatalf("expected the 運用規律 section to have an item naming %q, got section:\n%s", marker, section)
+	}
+	const watchCommand, refusalWords = "ralph org watch --all", "no new work"
+	for _, want := range []string{
+		"横断の見張り(`" + watchCommand + "`)が動いていないために断られたら、打ち直さないでください",
+		"エラーの文は `" + watchCommand + "` に触れ、`" + refusalWords + "` を含みます",
+		"spawn では stdout の `rejected:` の行に出ます",
+		"TYPE を変えたり `--raw` にしたりして送り直すこともしません",
+		"見張りも自分で起動しません",
+		"エラーが `ralph org watch --all --detach` を案内していても打たないでください",
+		"起動するのは `ralph org start` か人です",
+		"BLOCKED(TASK_ID は org_id の `org-a`)を「件を上げる」の節の手順で `.harness/state/escalate-org-a.txt` に書き、`ralph org escalate` で上げてください",
+		"返事が来るまで spawn と TASK の送信を打たずに待ってください",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the 運用規律 item naming %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	// The template names the watch command only in this item, to say not
+	// to run it.
+	if all, inItem := strings.Count(squashSpace(text), squashSpace(watchCommand)), strings.Count(squashSpace(item), squashSpace(watchCommand)); all != inItem {
+		t.Errorf("expected %q only in the 運用規律 item naming %q (%d of %d), got:\n%s", watchCommand, marker, inItem, all, text)
+	}
+
+	// Every refusal of the gate, whatever the watch's state, carries the
+	// words the item tells it by.
+	running := WatchAlive{State: WatchAliveRunning, PID: 4242}
+	once := WatchAlive{State: WatchAliveRunning, PID: 4242, Once: true}
+	stopping := WatchAlive{State: WatchAliveStopping, PID: 4242}
+	for _, l := range []WatchLiveness{
+		{State: WatchLivenessNotRunning},
+		{State: WatchLivenessStale, Mark: &running},
+		{State: WatchLivenessStale},
+		{State: WatchLivenessStopping, Mark: &stopping},
+		{State: WatchLivenessRunning, Mark: &once},
+	} {
+		msg := (&WatchGateError{StateDir: "/ledger", Liveness: l}).Error()
+		if !strings.Contains(msg, watchCommand) || !strings.Contains(msg, refusalWords) {
+			t.Errorf("WatchGateError for %s (once=%t) = %q; want it to contain %q and %q, which the leader template tells the refusal by",
+				l.State, l.Mark != nil && l.Mark.Once, msg, watchCommand, refusalWords)
+		}
+	}
+}
+
 func TestRenderRolePrompt_UnknownRole_NoTemplate(t *testing.T) {
 	text, ok, err := RenderRolePrompt("unknown-role", testRolePromptVars())
 	if err != nil {

@@ -15,9 +15,9 @@ import (
 // One `ralph org watch --all` runs per org state dir (RunWatchAll,
 // watch.go). It holds watch.lock for its lifetime and rewrites
 // watch-alive.json, the liveness mark, before its first cycle, after every
-// cycle, and every interval while its caller's work ends
+// cycle, and, saying stopping, every interval while its caller's work ends
 // (WatchHooks.BeforeStop). ProbeWatch reads both to tell whether a watch is
-// running.
+// running, and WatchAcceptsWork whether it accepts new work (watchgate.go).
 // `ralph org watch --stop` sends no signal: it writes watch-stop.json, which
 // the watch reads between cycles (a signal could reach an unrelated process
 // that reuses the pid of a mark not yet rewritten).
@@ -39,7 +39,11 @@ const (
 // States of the liveness mark (WatchAlive.State).
 const (
 	WatchAliveRunning = "running"
-	WatchAliveStopped = "stopped"
+	// WatchAliveStopping is the mark of a watch that has run its last cycle
+	// and still holds watch.lock while its caller's work ends
+	// (WatchHooks.BeforeStop); it writes stopped next.
+	WatchAliveStopping = "stopping"
+	WatchAliveStopped  = "stopped"
 )
 
 // States ProbeWatch returns (WatchLiveness.State).
@@ -47,20 +51,26 @@ const (
 	// WatchLivenessRunning: watch.lock is held and the mark says running
 	// with a ts within the window of ProbeWatch.
 	WatchLivenessRunning = "running"
+	// WatchLivenessStopping: watch.lock is held and the mark says stopping
+	// with a ts within the window of ProbeWatch. The watch runs no more
+	// cycles, so it accepts no new work (WatchAcceptsWork).
+	WatchLivenessStopping = "stopping"
 	// WatchLivenessStale: watch.lock is held, but the mark is missing, does
-	// not parse, says stopped, or is older than the window of ProbeWatch.
-	// The holder may be hung, or may have taken the lock and not written its
-	// mark yet.
+	// not parse, says stopped, or says running or stopping and is older than
+	// the window of ProbeWatch. The holder may be hung, or may have taken the
+	// lock and not written its mark yet.
 	WatchLivenessStale = "stale"
 	// WatchLivenessNotRunning: no one holds watch.lock, whatever the mark
 	// says (a killed watch leaves a running mark behind).
 	WatchLivenessNotRunning = "not_running"
 )
 
-// defaultWatchLockWait is how long AcquireWatchLock waits for watch.lock
+// DefaultWatchLockWait is how long AcquireWatchLock waits for watch.lock
 // when its caller passes no wait: long enough to outlast ProbeWatch's
-// momentary shared lock, short enough that a second watch fails at once.
-const defaultWatchLockWait = 2 * time.Second
+// momentary shared lock, short enough that a second watch fails at once. A
+// watch refused the lock lives that long, which the CLI waits out after it
+// launched one (launchAndAwaitOrgWatch).
+const DefaultWatchLockWait = 2 * time.Second
 
 // ErrWatchRunning is wrapped by AcquireWatchLock's error when another watch
 // holds watch.lock.
@@ -69,18 +79,28 @@ var ErrWatchRunning = errors.New("another ralph org watch --all is running on th
 // WatchAlive is the liveness mark, watch-alive.json. StartedAt carries
 // nanoseconds because a stop request counts only when it is later than
 // StartedAt, and a `--stop` right after a start falls in the same second.
-// TS is the last time the watch wrote its running mark: at the start, after
-// each cycle, and every interval while it drains its watchers before
-// stopping (WatchHooks.BeforeStop), so it is not always a cycle's end; the
-// stopped mark keeps it. TS and StoppedAt are whole seconds; all are UTC
-// RFC3339.
+// TS is the last time the watch wrote its running or stopping mark: running
+// at the start and after each cycle, then stopping as it starts to drain
+// its watchers (WatchHooks.BeforeStop) and every interval until they end, so
+// it is not always a cycle's end; the stopped mark keeps it. TS and
+// StoppedAt are whole seconds; all are UTC RFC3339.
 type WatchAlive struct {
 	State           string `json:"state"`
 	PID             int    `json:"pid"`
 	StartedAt       string `json:"started_at"`
 	TS              string `json:"ts"`
 	IntervalSeconds int    `json:"interval_seconds"`
-	StoppedAt       string `json:"stopped_at,omitempty"`
+	// DeadmanMinutes is the watch's own [org].deadman_minutes as configured,
+	// below 1 included, so ProbeWatch judges the mark by the window of the
+	// watch that wrote it rather than by its reader's ralph.toml. It is nil
+	// in a mark written before the field was added; ProbeWatch then uses the
+	// value its caller passes.
+	DeadmanMinutes *int `json:"deadman_minutes,omitempty"`
+	// Once is true for a run that ends after its cycles
+	// (WatchAllParams.Cycles > 0; `--once` is 1). Such a watch accepts no
+	// new work even while it runs (WatchAcceptsWork).
+	Once      bool   `json:"once,omitempty"`
+	StoppedAt string `json:"stopped_at,omitempty"`
 }
 
 // WatchLiveness is what ProbeWatch found: State is one of the
@@ -121,13 +141,13 @@ type WatchLock struct {
 }
 
 // AcquireWatchLock takes watch.lock in stateDir and keeps it until Release,
-// waiting up to wait for it (defaultWatchLockWait when wait <= 0). When
+// waiting up to wait for it (DefaultWatchLockWait when wait <= 0). When
 // another watch keeps holding it, the error wraps ErrWatchRunning and names
 // the pid of the mark, or says the pid is unknown when the mark cannot be
 // read.
 func AcquireWatchLock(stateDir string, wait time.Duration) (*WatchLock, error) {
 	if wait <= 0 {
-		wait = defaultWatchLockWait
+		wait = DefaultWatchLockWait
 	}
 	held, err := acquireHeldFileLock(stateDir, WatchLockFileName, "watch", wait)
 	if errors.Is(err, errFileLockHeld) {
@@ -175,32 +195,40 @@ func writeWatchAlive(stateDir string, mark WatchAlive) error {
 // says no watch holds the lock, which this probe could not tell, and
 // running still needs a fresh running mark.
 //
-// A running mark is fresh when its ts is no older than the window
-// watchAliveWindow returns: deadmanMinutes, or the default deadman_minutes
-// (config.Default, 10) when deadmanMinutes is below 1, and never shorter
-// than two of the mark's own interval_seconds. A deadman_minutes of 0 means
-// the deadman never escalates by timeout (checkDeadman), not that no watch
-// is running, and a watch whose interval is longer than deadman_minutes
+// A running or stopping mark is fresh when its ts is no older than the
+// window watchAliveWindow returns: the mark's own deadman_minutes when it
+// carries one, else deadmanMinutes, or the default deadman_minutes
+// (config.Default, 10) when that value is below 1, and never shorter than
+// two of the mark's own interval_seconds. A deadman_minutes of 0 means the
+// deadman never escalates by timeout (checkDeadman), not that no watch is
+// running, and a watch whose interval is longer than deadman_minutes
 // rewrites its mark only once per interval, so it is not stale between two
-// cycles.
+// cycles. A fresh running mark is running and a fresh stopping mark is
+// stopping.
 func ProbeWatch(stateDir string, now time.Time, deadmanMinutes int) WatchLiveness {
 	held, err := fileLockHeld(WatchLockPathIn(stateDir))
 	mark, _ := ReadWatchAlive(stateDir)
 	if err == nil && !held {
 		return WatchLiveness{State: WatchLivenessNotRunning, Mark: mark}
 	}
-	if mark == nil || mark.State != WatchAliveRunning {
+	if mark == nil || (mark.State != WatchAliveRunning && mark.State != WatchAliveStopping) {
 		return WatchLiveness{State: WatchLivenessStale, Mark: mark}
+	}
+	if mark.DeadmanMinutes != nil {
+		deadmanMinutes = *mark.DeadmanMinutes
 	}
 	ts, err := time.Parse(time.RFC3339, mark.TS)
 	if err != nil || now.Sub(ts) > watchAliveWindow(deadmanMinutes, mark.IntervalSeconds) {
 		return WatchLiveness{State: WatchLivenessStale, Mark: mark}
 	}
+	if mark.State == WatchAliveStopping {
+		return WatchLiveness{State: WatchLivenessStopping, Mark: mark}
+	}
 	return WatchLiveness{State: WatchLivenessRunning, Mark: mark}
 }
 
-// watchAliveWindow is how old a running mark may be and still count as
-// fresh (see ProbeWatch).
+// watchAliveWindow is how old a running or stopping mark may be and still
+// count as fresh (see ProbeWatch).
 func watchAliveWindow(deadmanMinutes, intervalSeconds int) time.Duration {
 	if deadmanMinutes < 1 {
 		deadmanMinutes = config.Default().Org.DeadmanMinutes

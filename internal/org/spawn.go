@@ -257,6 +257,13 @@ type Org struct {
 	// defaultInboxPollInterval" (1s) -- tests set a tiny value so a wait
 	// for an item that arrives later returns fast.
 	InboxPollInterval time.Duration
+	// WatchGate is the watch gate (watchgate.go): Spawn, StartFeature, and
+	// Send of a TASK call it before they write to the manifest or call herdr
+	// or agmsg, and a non-nil error refuses them with nothing recorded. nil
+	// (the field's default) means no check. The CLI sets it (NewWatchGate)
+	// for spawn, start, and send only, so the other verbs work with no watch
+	// running.
+	WatchGate func() error
 }
 
 func (o *Org) now() string {
@@ -367,8 +374,8 @@ type SpawnResult struct {
 	// never persisted. It is the zero Receipt on every path that appends no
 	// receipt at all, or whose append failed: an idempotent respawn, a
 	// plain rejection that never reaches reject() (identifier validation, a
-	// retired role name, a retired ralph.toml key; see Spawn's own doc
-	// comment), every SpawnOutcomeFailed return, and a
+	// retired role name, the watch gate, a retired ralph.toml key; see
+	// Spawn's own doc comment), every SpawnOutcomeFailed return, and a
 	// reject()/dryRunSpawn receipts-append
 	// failure. The CLI layer reads this to decide whether to print the
 	// codex model-mismatch warning (AC-6), without re-reading the receipts
@@ -389,7 +396,10 @@ type SpawnResult struct {
 //     run before the manifest is read, each a plain rejection with no
 //     manifest event and no receipt. They run in dry-run mode too. A
 //     non-empty Cwd is resolved against the caller's working directory at
-//     the same point.
+//     the same point. The watch gate (Org.WatchGate, when set;
+//     watchgate.go) runs right after them, also before the manifest is
+//     read and in dry-run mode too, and its refusal is a plain rejection as
+//     well (plan 2026-10-12-org-watch-gate, F1 and F3).
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no config-dependent validation attempted at all (so an
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
@@ -443,15 +453,21 @@ type SpawnResult struct {
 //
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
 // worktree for a spawn this would refuse, so it first runs checkSpawnInput
-// (step 0) and spawnPrecheckErr, which repeats steps 1 to 6 on an unlocked
-// read without writing anything. A change to the order or to a check of
-// steps 1 to 6 must be made in spawnPrecheckErr too.
+// and the watch gate (step 0) and spawnPrecheckErr, which repeats steps 1
+// to 6 on an unlocked read without writing anything. A change to the order
+// or to a check of steps 1 to 6 must be made in spawnPrecheckErr too.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// The input-only checks (step 0 above) run first, before any manifest
 	// read or write; see checkSpawnInput. From here on p holds the
 	// normalized Reserve and the cleaned Feature it returns.
 	p, err := checkSpawnInput(p)
 	if err != nil {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+	}
+	// The watch gate (step 0 above) comes next, before the manifest read
+	// and the dry-run branch, so a refusal records nothing and dry-run
+	// predicts it.
+	if err := o.checkWatchGate(); err != nil {
 		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
 	}
 

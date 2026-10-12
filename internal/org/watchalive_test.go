@@ -41,6 +41,20 @@ func runningMark(pid int, at time.Time) WatchAlive {
 	}
 }
 
+// stoppingMark is runningMark as a watch that has run its last cycle writes
+// it while it drains (WatchAliveStopping).
+func stoppingMark(pid int, at time.Time) WatchAlive {
+	mark := runningMark(pid, at)
+	mark.State = WatchAliveStopping
+	return mark
+}
+
+// withDeadman returns mark carrying the watch's own deadman_minutes dm.
+func withDeadman(mark WatchAlive, dm int) WatchAlive {
+	mark.DeadmanMinutes = &dm
+	return mark
+}
+
 // dirEntries returns the names in dir, sorted.
 func dirEntries(t *testing.T, dir string) []string {
 	t.Helper()
@@ -203,6 +217,130 @@ func TestProbeWatch_TellsRunningStaleAndNotRunningApart(t *testing.T) {
 	}
 }
 
+// Plan 2026-10-12-org-watch-gate, AC13 at the probe: a watch that has run
+// its last cycle writes a stopping mark. Held and fresh, it is stopping;
+// held and older than the window, stale, like a running mark; with no one
+// holding watch.lock (a watch killed while it drained), not_running.
+func TestProbeWatch_AStoppingMarkIsStoppingOnlyWhileHeldAndFresh(t *testing.T) {
+	now := watchAliveT0
+	cases := []struct {
+		name     string
+		locked   bool
+		released bool
+		mark     WatchAlive
+		want     string
+	}{
+		{name: "locked, fresh stopping mark", locked: true, mark: stoppingMark(7, now.Add(-time.Minute)), want: WatchLivenessStopping},
+		{name: "locked, stopping mark exactly deadman_minutes old", locked: true, mark: stoppingMark(7, now.Add(-10*time.Minute)), want: WatchLivenessStopping},
+		{name: "locked, stopping mark older than deadman_minutes", locked: true, mark: stoppingMark(7, now.Add(-10*time.Minute-time.Second)), want: WatchLivenessStale},
+		{name: "not locked, fresh stopping mark (a watch killed while it drained)", released: true, mark: stoppingMark(7, now), want: WatchLivenessNotRunning},
+		{name: "no watch.lock, fresh stopping mark", mark: stoppingMark(7, now), want: WatchLivenessNotRunning},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.locked || tc.released {
+				lock := mustAcquireWatchLock(t, dir)
+				if tc.released {
+					if err := lock.Release(); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			mustWriteWatchAlive(t, dir, tc.mark)
+			got := ProbeWatch(dir, now, 10)
+			if got.State != tc.want {
+				t.Errorf("State = %q; want %q", got.State, tc.want)
+			}
+			if got.Mark == nil || got.Mark.State != WatchAliveStopping {
+				t.Errorf("Mark = %+v; want the stopping mark", got.Mark)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-12-org-watch-gate, AC7 at the probe: the window comes from
+// the mark's own deadman_minutes when it carries one, and from the caller's
+// only when it does not (a mark of the previous version). Below 1 still
+// means the default 10, whichever side it comes from, and a stopping mark
+// is judged the same way.
+func TestProbeWatch_JudgesTheWindowByTheDeadmanMinutesOfTheMark(t *testing.T) {
+	now := watchAliveT0
+	aged := func(age time.Duration) WatchAlive { return runningMark(7, now.Add(-age)) }
+	cases := []struct {
+		name   string
+		mark   WatchAlive
+		caller int
+		want   string
+	}{
+		{name: "mark 30, caller 10, 20 minutes old", mark: withDeadman(aged(20*time.Minute), 30), caller: 10, want: WatchLivenessRunning},
+		{name: "mark 30, caller 10, 31 minutes old", mark: withDeadman(aged(31*time.Minute), 30), caller: 10, want: WatchLivenessStale},
+		{name: "mark 10, caller 30, 20 minutes old", mark: withDeadman(aged(20*time.Minute), 10), caller: 30, want: WatchLivenessStale},
+		{name: "mark 10, caller 30, 10 minutes old", mark: withDeadman(aged(10*time.Minute), 10), caller: 30, want: WatchLivenessRunning},
+		{name: "no deadman in the mark, caller 30, 20 minutes old", mark: aged(20 * time.Minute), caller: 30, want: WatchLivenessRunning},
+		{name: "no deadman in the mark, caller 10, 20 minutes old", mark: aged(20 * time.Minute), caller: 10, want: WatchLivenessStale},
+		{name: "mark 0, caller 30, 20 minutes old (the default 10)", mark: withDeadman(aged(20*time.Minute), 0), caller: 30, want: WatchLivenessStale},
+		{name: "mark 0, caller 30, 9 minutes old (the default 10)", mark: withDeadman(aged(9*time.Minute), 0), caller: 30, want: WatchLivenessRunning},
+		{name: "mark -3, caller 30, 20 minutes old (the default 10)", mark: withDeadman(aged(20*time.Minute), -3), caller: 30, want: WatchLivenessStale},
+		{name: "mark 30, caller 0, 20 minutes old", mark: withDeadman(aged(20*time.Minute), 30), caller: 0, want: WatchLivenessRunning},
+		{name: "stopping mark 30, caller 10, 20 minutes old", mark: withDeadman(stoppingMark(7, now.Add(-20*time.Minute)), 30), caller: 10, want: WatchLivenessStopping},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mustAcquireWatchLock(t, dir)
+			mustWriteWatchAlive(t, dir, tc.mark)
+			if got := ProbeWatch(dir, now, tc.caller).State; got != tc.want {
+				t.Errorf("State = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// deadman_minutes and once go through watch-alive.json and back: 0 is
+// written (only a mark with no value leaves the key out), and a mark of the
+// previous version, with neither key, reads as no deadman_minutes and not
+// once.
+func TestWatchAlive_DeadmanMinutesAndOnceRoundTrip(t *testing.T) {
+	with := withDeadman(runningMark(7, watchAliveT0), 0)
+	with.Once = true
+	data := markJSON(t, with)
+	for _, want := range []string{`"deadman_minutes": 0`, `"once": true`} {
+		if !strings.Contains(data, want) {
+			t.Errorf("mark JSON = %s; want it to carry %s", data, want)
+		}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(WatchAlivePathIn(dir), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadWatchAlive(dir)
+	if err != nil {
+		t.Fatalf("ReadWatchAlive: %v", err)
+	}
+	if got.DeadmanMinutes == nil || *got.DeadmanMinutes != 0 || !got.Once {
+		t.Errorf("read back %+v (deadman_minutes %v); want deadman_minutes 0 and once", got, got.DeadmanMinutes)
+	}
+
+	without := markJSON(t, runningMark(7, watchAliveT0))
+	for _, key := range []string{`"deadman_minutes"`, `"once"`} {
+		if strings.Contains(without, key) {
+			t.Errorf("mark JSON with no deadman_minutes and not once = %s; want no %s key", without, key)
+		}
+	}
+	old := `{"state":"running","pid":7,"started_at":"2026-10-11T11:00:00Z","ts":"2026-10-11T12:00:00Z","interval_seconds":30}`
+	if err := os.WriteFile(WatchAlivePathIn(dir), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadWatchAlive(dir)
+	if err != nil {
+		t.Fatalf("ReadWatchAlive of a previous version's mark: %v", err)
+	}
+	if got.DeadmanMinutes != nil || got.Once {
+		t.Errorf("previous version's mark read as %+v; want no deadman_minutes and not once", got)
+	}
+}
+
 // A probe on a state dir with no watch.lock does not create one, and leaves
 // a held lock held.
 func TestProbeWatch_CreatesNoLockAndLeavesAHolderHolding(t *testing.T) {
@@ -241,6 +379,7 @@ func TestProbeWatch_ALockFileThatCannotBeOpenedCountsAsHeld(t *testing.T) {
 		{name: "no mark", want: WatchLivenessStale},
 		{name: "stopped mark", mark: markJSON(t, WatchAlive{State: WatchAliveStopped, PID: 7, TS: now.Format(time.RFC3339), StoppedAt: now.Format(time.RFC3339)}), want: WatchLivenessStale},
 		{name: "fresh running mark", mark: markJSON(t, runningMark(7, now)), want: WatchLivenessRunning},
+		{name: "fresh stopping mark", mark: markJSON(t, stoppingMark(7, now)), want: WatchLivenessStopping},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

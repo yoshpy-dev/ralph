@@ -113,21 +113,16 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
 }
 
-// newOrgSpawnRuntime is newOrgRuntime for the verbs that start seats
+// newOrgSpawnRuntimeAt is newOrgRuntime for the verbs that start seats
 // (`ralph org spawn` and `ralph org start`), the only ones that check the
 // org-wide limits: it also replaces the config's MaxOrgs and MaxTotalSeats
 // via withMainWorktreeOrgLimits, so the ledger shared by every worktree gets
 // one set of limits. Every other verb keeps reading only the caller's config.
-func newOrgSpawnRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	return newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, configPath)
-}
-
-// newOrgSpawnRuntimeAt is newOrgSpawnRuntime for a state dir that
-// org.ResolveOrgStateDir already resolved, the same split as newOrgRuntimeAt:
-// `ralph org start --plan` resolves it once, since it also passes the
-// directory and its source on (StartFeatureParams.StateDir and
-// org.FeatureRepoRoot).
+// It takes a state dir that org.ResolveOrgStateDir already resolved, the same
+// split as newOrgRuntimeAt: each caller also passes the directory on, to
+// wireOrgWatchGate (spawn) or wireOrgStartWatchGate (start), and `ralph org
+// start --plan` to StartFeatureParams.StateDir and org.FeatureRepoRoot with
+// its source.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 		return nil, err
@@ -258,6 +253,84 @@ var orgDesktopNotifyOverride org.EscalateFunc
 // `ralph org wait --inbox` reads the inbox again every second; a test that
 // waits for an item escalated later sets a tiny value.
 var orgInboxPollIntervalOverride time.Duration
+
+// wireOrgWatchGate sets rt.WatchGate, the watch gate of plan
+// 2026-10-12-org-watch-gate: spawn, both forms of start, and send call it
+// right after they build their runtime, and no other verb does, so stop,
+// disband, escalate, the inbox verbs, wait, read, status, report, and watch
+// work with no watch running. The gate (org.NewWatchGate) probes the ledger
+// at resolvedStateDir and judges a liveness mark that carries no
+// deadman_minutes by rt.Config's. Its refusal repeats --state-dir in the
+// commands it names when --state-dir was given, by orgInboxHintStateDir's
+// rule.
+func wireOrgWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir string) {
+	if orgWatchGateOverride != nil {
+		rt.WatchGate = orgWatchGateOverride
+		return
+	}
+	settle := orgWatchGateSettleOverride
+	if settle == 0 {
+		settle = org.DefaultWatchGateSettle
+	}
+	rt.WatchGate = org.NewWatchGate(resolvedStateDir, orgInboxHintStateDir(cmd, resolvedStateDir), nil, rt.Config.DeadmanMinutes, settle)
+}
+
+// wireOrgStartWatchGate is wireOrgWatchGate for both forms of `ralph org
+// start`, which starts the cross-org watch when none runs (plan
+// 2026-10-12-org-watch-gate, FR-6): its gate first runs ensureOrgWatch,
+// which launches the watch --detach would (orgWatchChild) and prints one
+// line on stderr when it did, and then the gate wireOrgWatchGate sets. The
+// org layer calls the gate after the start's own input checks and before it
+// writes anything (StartFeature before the worktree, then Spawn again, which
+// finds the watch running and launches nothing), so a start refused for its
+// input launches no watch. A watch that holds watch.lock and accepts no work
+// is refused as the gate refuses it (*org.WatchGateError). The launched
+// watch keeps running after start returns. With orgWatchGateOverride set
+// (TestMain), only that gate runs.
+func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirSource, configPath string) {
+	wireOrgWatchGate(cmd, rt, resolvedStateDir)
+	if orgWatchGateOverride != nil {
+		return
+	}
+	check := rt.WatchGate
+	hintStateDir := orgInboxHintStateDir(cmd, resolvedStateDir)
+	ensure := orgWatchEnsure{
+		stateDir: resolvedStateDir, deadman: rt.Config.DeadmanMinutes,
+		child: func() (orgWatchLaunchRequest, error) {
+			return orgWatchChild(cmd, resolvedStateDir, stateDirSource, configPath, rt.Config.AgmsgHome, 0)
+		},
+		errPrefix:    "org: start: the cross-org watch did not start, so no leader was started",
+		hintStateDir: hintStateDir,
+		refuse: func(probe org.WatchLiveness) error {
+			return &org.WatchGateError{StateDir: resolvedStateDir, HintStateDir: hintStateDir, Liveness: probe}
+		},
+	}
+	rt.WatchGate = func() error {
+		got, err := ensureOrgWatch(ensure)
+		if err != nil {
+			return err
+		}
+		if got.launched {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "ralph org start: started the cross-org watch (pid %d); log: %s\n",
+				got.pid, filepath.Join(resolvedStateDir, org.WatchLogFileName))
+		}
+		return check()
+	}
+}
+
+// orgWatchGateOverride, when not nil, is the Org.WatchGate that
+// wireOrgWatchGate sets in place of the one org.NewWatchGate builds, and
+// makes wireOrgStartWatchGate set only that gate. nil in production.
+// TestMain sets one that always passes, so the tests of spawn, start, and
+// send need no watch and start launches none; a test of the gate itself sets
+// it back to nil.
+var orgWatchGateOverride func() error
+
+// orgWatchGateSettleOverride is the settle of the gate wireOrgWatchGate
+// builds: how long it waits for a stale watch to accept work. Zero in
+// production, which means org.DefaultWatchGateSettle (2 s); TestMain
+// shortens it so a test of a stale refusal does not wait 2 s.
+var orgWatchGateSettleOverride time.Duration
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed
 // in send's post-failure notes and its unconfirmed-submit warning (AR-2,
@@ -441,7 +514,11 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"--reserve claims paths of the repo for the org. Only the leader seat\n" +
 			"(--id leader) takes it, and an org keeps one reservation until it is\n" +
-			"disbanded: the same paths again pass, different ones are refused.",
+			"disbanded: the same paths again pass, different ones are refused.\n" +
+			"\n" +
+			"A spawn, --dry-run included, is refused while no long-running\n" +
+			"`ralph org watch --all` (not stopping, not a --once run) runs on the\n" +
+			"ledger; the refusal says how to start one or stop a stale one.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -470,10 +547,12 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
 			}
+			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, role, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -609,6 +688,13 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"is disbanded: starting the org again with the same paths passes, with\n" +
 			"different ones is refused.\n" +
 			"\n" +
+			"Both forms make sure a long-running `ralph org watch --all` watches\n" +
+			"the ledger before the leader is spawned: when none is running, start\n" +
+			"launches one as `ralph org watch --all --detach` does (in the ledger's\n" +
+			"main worktree root when it has one, logging to <state dir>/watch.log)\n" +
+			"and waits up to 10s for it, and it is refused when a watch holds the\n" +
+			"lock but is stale, stopping, or a --once run.\n" +
+			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if orgStartUsesPlan(cmd) {
@@ -637,10 +723,12 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
 			}
+			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath)
 			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeaderIdentity, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -724,17 +812,20 @@ type orgStartPlanParams struct {
 // runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
 // it resolves the state dir once, builds the spawn runtime on it (the
 // legacy-ledger guard and the main worktree's org-wide limits, as for every
-// start), and runs (*org.Org).StartFeature with that dir and the main
-// worktree root (org.FeatureRepoRoot). The result is printed as a spawn's,
-// followed on success by the worktree, the branch and the status hint; a
-// refusal or failure is returned as StartFeature's error, which already says
-// whether the worktree stays and how to remove it.
+// start) with start's watch gate (wireOrgStartWatchGate, which launches the
+// watch when none runs; StartFeature runs it before it makes the worktree),
+// and runs (*org.Org).StartFeature with that dir and the main worktree root
+// (org.FeatureRepoRoot). The result is printed as a spawn's, followed on
+// success by the worktree, the branch and the status hint; a refusal or
+// failure is returned as StartFeature's error, which already says whether
+// the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(p.stateDir, cmd.Flags().Changed("state-dir"))
 	rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, p.configPath)
 	if err != nil {
 		return err
 	}
+	wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath)
 	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return err
@@ -777,7 +868,11 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"After typing the text, send waits briefly and presses Enter once, then\n" +
 			"tries to confirm the seat left idle/done. It never presses Enter a\n" +
 			"second time: if the submit cannot be confirmed, it prints a warning\n" +
-			"instead of guessing -- see --enter-delay-ms below.",
+			"instead of guessing -- see --enter-delay-ms below.\n" +
+			"\n" +
+			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
+			"included, is refused while no long-running `ralph org watch --all`\n" +
+			"(not stopping, not a --once run) runs on the ledger.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")
@@ -804,6 +899,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			result := rt.Send(org.SendParams{
 				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
 				EnterDelayMS: enterDelayMS,
@@ -855,7 +951,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 							"Check the seat with '%s'.\n",
 						to, result.PaneID, readHint)
 				}
-				return fmt.Errorf("org: send: %w", result.Err)
+				// Every error of Send already starts with "org: send: ".
+				return result.Err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
 			// A submit that Send could not confirm is not a failure (a very

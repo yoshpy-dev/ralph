@@ -93,6 +93,12 @@ genuinely need it (e.g. relaying an external tool's raw output during
 debugging). The `sent` manifest event records `raw=true` when the bypass
 was used, so a bypassed message is always traceable after the fact.
 
+A `TASK` starts autonomous work, so `ralph org send` also refuses one, with
+nothing recorded, while no long-running cross-org watch
+(`ralph org watch --all`) runs on the ledger. A `--raw` message counts as a
+`TASK` when its first line reads `TYPE: TASK`. Every other TYPE is sent with
+no watch running.
+
 ## Escalation to the org inbox
 
 `ralph org escalate --text` raises an item in the org inbox instead of

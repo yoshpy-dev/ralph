@@ -165,16 +165,16 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 | 動詞 | 用途 | 代表例 |
 |---|---|---|
-| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--cwd`(座席の作業ディレクトリ。相対パスはコマンドを打った場所を基準に絶対パスにしてから herdr に渡し、台帳にも絶対パスで記録する)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
-| `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
+| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--cwd`(座席の作業ディレクトリ。相対パスはコマンドを打った場所を基準に絶対パスにしてから herdr に渡し、台帳にも絶対パスで記録する)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。台帳で長時間動く `ralph org watch --all`(止まりかけでも `--once` でもないもの)が running でなければ、`--dry-run` も含めて終了コード 1 で断られる(stdout に `rejected: ...`。台帳にも receipt にも何も書かず、herdr と agmsg も呼ばない)。見張りが stale(ロックはあるが印が古いか、まだない)のときは最大 2 秒待ち、その間に running になれば通る。エラーは見張りの状態ごとに次の手を示す(「permission 作法」節の長時間運用の項)。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
+| `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。TYPE が `TASK` のメッセージは、宛先の役割を問わず、`spawn` と同じ見張りの検査に通らなければ `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない。`--raw` のメッセージも 1 行目の `TYPE:` で読み(値の前後の空白を除き、大文字小文字はそのままで `TASK` と一致すれば TASK)、1 行目が `TYPE:` でなければ TASK とみなさない。TASK 以外の TYPE は見張りがなくても送れる。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。`--inbox` は座席ではなく受信箱を待つ(「受信箱」節)。`--org-id` と `--seat` は要らず、`--org-id` / `--seat` / `--until` との併用は拒否される。open の件があればすぐ返り、なければ 1 秒ごとに読み直して open の件が届いた時点で返り、open の件を 1 行ずつ(ID、org、TYPE、本文の 1 行目)出す。acked の件では返らない。`--timeout-ms` の扱いは同じ(届かなければ終了コード 1、`0` で無期限)。 | `ralph org wait --org-id X --seat reviewer-1`、`ralph org wait --inbox --timeout-ms 0` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
 | `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。`start --plan` で立てた org には、その次に `feature: <split>/<slug> branch <branch> worktree <path>` の行も出す(`--json` は `feature`。キーは `split`・`feature`・`digest`・`branch`・`worktree`)。壊れた記録から読んだ結びつきは、行の末尾に `(incomplete record)` が付き、`--json` に `"incomplete": true` が足される。 | `ralph org status --org-id X --all` |
 | `stop` | 座席を停止する。pane に C-c を送ったあと pane を閉じて座席のプロセスを終わらせ(画面の出力も消えるので、要るなら先に `read` で読む)、agmsg から外して `stopped` を記録する。pane が見つからないときは閉じ済みとして扱う。pane を閉じられなかったとき(herdr に繋がらない、1 回 10 秒の期限切れなど)は `stopped` を書かずに `stop_failed` を記録し、座席は active のまま終了コード 1 になる。herdr が戻ってから打ち直せば拾う。C-c を送る前に、pane のある tab の label が座席 id か、workspace の label が org_id かを herdr で確かめ、違えば(herdr のセッションが失われて id が振り直された場合など)C-c も送らず pane も閉じずに `stop_failed` で終了コード 1 にする(`--force` でも閉じない)。`--all` は `--org-id` なしで全 org の active な座席を止め(`--org-id` / `--seat` とは併用不可)、1 つ止められなくても残りを止めて、止められなかった座席を `<org_id>/<seat_id>` と理由で stderr に並べ終了コード 1。`--force` は閉じられなかった座席にも `stopped` を書き、失敗を警告にして終了コード 0(pane は herdr に残っていることがある)。`--dry-run` は herdr / agmsg を呼ばず記録だけ。コマンドを打った pane(`HERDR_PANE_ID`)の座席は、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。`--all` でほかに止められなかった座席があれば、その座席は止めずに残す。最後の close が失敗したときは、座席を active に戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。 | `ralph org stop --org-id X --seat reviewer-1`、`ralph org stop --all` |
 | `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
-| `watch` | 台帳のすべての org を 1 つのプロセスで見張る。`--all` が必須で、`--org-id` は拒否される(1 org ごとの watch は廃止した)。`--interval-seconds`(既定は `[org.watchdog].interval_seconds` の 30 秒)ごとの 1 サイクルで、まず受信箱の期限が切れた件を人へ送り(「受信箱」節)、次に走っている org ごとにパルス層の決定論監視(stall/生存/スコープ変更の ALERT を leader へ送る・デッドマン時の人間エスカレーション)を回し、最後に生存の印 `<台帳>/watch-alive.json` を書く。herdr・agmsg・git の呼び出しは 1 回 10 秒で打ち切り、1 つの org の失敗は stderr に 1 行書いてその org だけ飛ばす。台帳の下の `watch.lock` を持ち続けるので、同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で断られる。SIGINT と SIGTERM では、そのサイクルを終えてから止まる。`--once` は 1 サイクルで終わる。`--detach` は見張りを切り離したプロセスで起動し(stdout と stderr は `<台帳>/watch.log` に追記)、その印が running になったら pid と `watch.log` のパスを出して終了コード 0 で返る。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1。すでに動いていれば何も起動せず終了コード 0、ロックを持つ見張りの印が古ければ起動せず終了コード 1。`--stop` はシグナルを送らず、`<台帳>/watch-stop.json` に止める頼みを書いて、見張りが止まるまで最大 30 秒待つ(動いていなければ終了コード 0)。見張りが止まるのは、そのサイクルを終え、実行中のオンデマンド watcher の呼び出しの待ちも終えてから。長時間動かしている見張りはその呼び出しを取り消すので待ちはすぐ終わり、`--once` の見張りは取り消さずに待つので、最大でおよそ 70 秒(呼び出し 60 秒 + ALERT の送信 10 秒)かかる。意味判定はトリガー時のみオンデマンド LLM(watcher_model。全 org で同時に 1 つまで)。 | `ralph org watch --all --detach`、`ralph org watch --stop` |
-| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。形は 2 つ。`start --plan <分割計画> --feature <slug>` は、分割計画の 1 つの機能のための org を立てる(「機能ごとの org」節)。org_id は既定で slug で、`--org-id` で変えられる。worktree・予約・機能との結びつき・タスクを分割計画から作るので、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / 位置引数の task との併用、`--plan` と `--feature` の片方だけ、空白の値は拒否される。`start <task>` は `--cwd` の場所に leader を立て、`<task>` をタスクにする。分割計画には結びつかず、worktree も作らない。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。 | `ralph org start --plan .harness/state/org/splits/auth.md --feature auth-token --driver claude --model opus`、`ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
+| `watch` | 台帳のすべての org を 1 つのプロセスで見張る。`--all` が必須で、`--org-id` は拒否される(1 org ごとの watch は廃止した)。`--interval-seconds`(既定は `[org.watchdog].interval_seconds` の 30 秒)ごとの 1 サイクルで、まず受信箱の期限が切れた件を人へ送り(「受信箱」節)、次に走っている org ごとにパルス層の決定論監視(stall/生存/スコープ変更の ALERT を leader へ送る・デッドマン時の人間エスカレーション)を回し、最後に生存の印 `<台帳>/watch-alive.json` を書く(印には見張り自身の `deadman_minutes` と、`--once` の見張りなら `once` も入る)。herdr・agmsg・git の呼び出しは 1 回 10 秒で打ち切り、1 つの org の失敗は stderr に 1 行書いてその org だけ飛ばす。台帳の下の `watch.lock` を持ち続けるので、同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で断られる。起動の行(`watching every org ...`)はロックを取ってから出すので、断られた 2 つ目は出さない。SIGINT と SIGTERM では、そのサイクルを終えてから止まる。`--once` は 1 サイクルで終わり、動いている間も新しい作業を受け付けない(`spawn` と TASK の `send` は断られる)。`--detach` は見張りを切り離したプロセスで起動し(stdout と stderr は `<台帳>/watch.log` に追記)、その印が running になったら `started`・pid・`watch.log` のパスを出して終了コード 0 で返る。起動したプロセスは台帳の main worktree のルート(求められなければ打った場所)で動き、`--config` を絶対パスで受け取り、環境から `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV` を外される。main worktree のルートで動くときは、相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)は、打った場所から絶対パスにして渡される。`--config` を渡さなければ main worktree のルートの `ralph.toml` を読む。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1。長時間動く見張りがすでに動いていれば、何も起動せず `already running (pid N)` を出して終了コード 0。同時に打った別の `--detach` か start の見張りが先にロックを取った場合は、自分の子を起動したうえで、その子がロックを断られて終わるのを待ち(最大で約 3 秒)、同じく `already running (pid N)` を出して終了コード 0 で返る。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ終了コード 1。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せず終了コード 1(終わってから打ち直す)。`--stop` はシグナルを送らず、`<台帳>/watch-stop.json` に止める頼みを書いて、見張りが止まるまで最大 30 秒待つ(動いていなければ終了コード 0)。見張りが止まるのは、そのサイクルを終え、実行中のオンデマンド watcher の呼び出しの待ちも終えてから。その待ちの間は印が `stopping` になり(ロックは持ったまま。新しい作業は受け付けない)、終えてから `stopped` を書いてロックを放す。長時間動かしている見張りはその呼び出しを取り消すので待ちはすぐ終わり、`--once` の見張りは取り消さずに待つので、最大でおよそ 70 秒(呼び出し 60 秒 + ALERT の送信 10 秒)かかる。意味判定はトリガー時のみオンデマンド LLM(watcher_model。全 org で同時に 1 つまで)。 | `ralph org watch --all --detach`、`ralph org watch --stop` |
+| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。形は 2 つ。`start --plan <分割計画> --feature <slug>` は、分割計画の 1 つの機能のための org を立てる(「機能ごとの org」節)。org_id は既定で slug で、`--org-id` で変えられる。worktree・予約・機能との結びつき・タスクを分割計画から作るので、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / 位置引数の task との併用、`--plan` と `--feature` の片方だけ、空白の値は拒否される。`start <task>` は `--cwd` の場所に leader を立て、`<task>` をタスクにする。分割計画には結びつかず、worktree も作らない。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。どちらの形も、leader を立てる前に横断の見張りを確かめる。長時間動く見張りが running ならそのまま進む。動いていなければ、`watch --all --detach` と同じ方法で見張りを起動し(start に渡した `--config` は絶対パスにして渡す。相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)も、打った場所から絶対パスにして渡す。間隔は設定の値)、その印が running になるまで最大 10 秒待ってから進み、stderr に pid と `watch.log` のパスを 1 行出す。同時に打った別の start か `--detach` の見張りが先にロックを取っても、running になれば進む(start が起動した子はロックを断られて終わるので、その終わりを最大で約 3 秒待ってから進む)。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1(leader は立てない)。起動した見張りは start が終わっても動き続ける(止めるのは `watch --stop`)。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ断る。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せずにすぐ断る(終わってから打ち直す)。見張りを確かめるのは、フラグ・分割計画・座席の入力(id の形、予約のパス)の検査のあとなので、それらで断られる start は見張りを起動しない。それより後の検査(エンベロープ、`--scope`、上限、予約の重なり、worktree)で断られた start でも、起動した見張りは動き続ける。 | `ralph org start --plan .harness/state/org/splits/auth.md --feature auth-token --driver claude --model opus`、`ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
 | `escalate` | leader が受信箱に件を上げる(「受信箱」節)。`--text` は typed message で、TYPE は `QUESTION`(判断がほしい)・`BLOCKED`(進めない)・`RESULT`(終わった)のどれか。`BLOCKED` と `RESULT` は TASK_ID が必須で、org 全体の件には org_id を入れる。本文は 2,000 文字まで。検査に通らなければ終了コード 1 で、何も書かない。通れば件を記録して stdout に `escalated <id> (org=<org_id> type=<TYPE>)` を出し(ID は `e1`、`e2`、…)、続けて人に知らせる。記録はできたが通知が終わらなかったときは、ID を出したうえで終了コード 1 になる。そのときは `inbox notify <id>` で送り直す(escalate を打ち直すと別の件が増える)。受信箱に書けなかったときも、`ralph.toml` を読めなかったときも、stderr の表示とデスクトップ通知を出してから終了コード 1 になる(ID は出ない)。メッセージのファイルの置き場所と書き方は「受信箱」節。 | `ralph org escalate --org-id X --text "$(cat .harness/state/escalate-X.txt)"` |
 | `inbox` | 受信箱の件を一覧する。既定は open と acked、`--all` で resolved も、`--json` で機械向けの形。列は `ID` / `STATE` / `ORG` / `TYPE` / `TASK_ID` / `ESCALATED_AT` / `NOTIFIED` / `SUMMARY`(本文の 1 行目)。読めない行と無視したイベントは数を stderr に出す。`inbox show <id>` は件の欄・本文・履歴を出す(`--json` も可)。一覧と `show` のテキストの出力は、制御文字を `\x1b` のようにエスケープする。`inbox ack <id>` は open を acked にする(acked にもう一度打つと何もせず終了コード 0)。`inbox resolve <id> --note <ポインタ>` は open か acked を resolved にする。note は必須で、report のパスや PR の URL のようなポインタを 1 行、500 文字まで、制御文字なしで書く。`inbox notify <id>` は人への通知を同じ ID のまま送り直す。`show` は知らない ID で、`ack` / `resolve` / `notify` は知らない ID と resolved の件で、終了コード 1 になる。受信箱は台帳の全 org が共有するので、`inbox` の動詞は `--org-id` を拒否する。 | `ralph org inbox`、`ralph org inbox show e3`、`ralph org inbox resolve e3 --note docs/reports/org-manifest-X-<date>.md` |
 
@@ -460,9 +460,10 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    `- Approved:` の digest が今の中身の digest と一致する)、`--feature` の
    機能があることを確かめる。org_id は既定で slug で、`--org-id` を渡せば
    その値を使う。
-2. 台帳をロックなしで読み、leader の spawn と同じ判定(`max_orgs`、
-   `max_total_seats`、予約の重なり、機能との結びつき)を先にかける。ここで
-   拒否されたら worktree を作らず、台帳にも何も書かない。
+2. 横断の見張りを確かめ、動いていなければ起動する(動詞リファレンスの
+   `start` の行)。続けて台帳をロックなしで読み、leader の spawn と同じ
+   判定(`max_orgs`、`max_total_seats`、予約の重なり、機能との結びつき)を
+   先にかける。ここで拒否されたら worktree を作らず、台帳にも何も書かない。
 3. `scripts/ralph-worktree.sh` の記録 `org-<org_id>` があれば、使い回して
    よいかを確かめる(下の「start が拒否するもの」)。
 4. main worktree のルートで `scripts/ralph-worktree.sh ensure` を打ち、
@@ -580,6 +581,12 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   のない repo(bare リポジトリの linked worktree)から打ったとき。
 - `max_orgs`、`max_total_seats`、ほかの走っている org の予約との重なり
   (上の手順の 2 の先読みで拒否し、worktree を作らない)。
+- 横断の見張りを使えないとき(上の手順の 2。worktree を作らない)。ロックを
+  持つ見張りが 10 秒待っても stale のまま、止まりかけ(stopping)か `--once`
+  の見張りが動いている、起動した見張りが 10 秒で running にならない、の
+  どれか。エラーは順に、見張りの止め方、終わってから打ち直すこと、
+  `watch.log` のパスを示す。stale の見張りを待つ間にロックの持ち主が
+  終わったときは、断らずに見張りを起動して進む。
 
 手順の 2 の先読みを通ったあと 6 のロックの下で拒否されたとき(その間にほかの org が
 枠か範囲を取った場合など)は、worktree とブランチが残る。エラー文のとおり、
@@ -672,10 +679,15 @@ receipts / 役割雛形)を使うため、手順は共通。
 - **(A) 現セッション昇格**: 対話セッションがそのまま Leader になり、
   この skill の動詞リファレンスに従って `ralph org` を実行し座席を編成する。
   ユーザーとの対話を続けながら編成できる。分割計画には結びつかない。
+  この経路は `ralph org start` を通らないので、見張りは自動では起動しない。
+  座席を立てる前に `ralph org watch --all --detach` を打つ(`spawn` と TASK の
+  `send` は見張りがないと断られる。すでに動いていれば何もせずに返る)。
 - **(B) headless**: leader 座席を herdr pane 内の常駐セッションとして起動する。
   `ralph` バイナリに埋め込まれた leader 用の役割プロンプト雛形にタスクと
   エンベロープ要約が展開され、起動した leader が以後この skill の手順に従って
   自律編成する。人間が張り付けない・複数タスクを並行で走らせたい場合に使う。
+  start は見張りが動いていなければ起動してから leader を立てる(動詞
+  リファレンスの `start` の行)。leader 自身は見張りを起動しない。
   形は 2 つある。
   - `ralph org start --plan <分割計画> --feature <slug> --driver <driver> --model <model>`
     は機能ごとの org を立てる(通常の形。「機能ごとの org」節)。worktree・
@@ -766,20 +778,38 @@ agmsg の受信箱の確認は `/agmsg` skill の手順に従う(未導入環境
   出力に記録され、事後に監査できる。
 - 座席には有界タイムアウト(`--timeout-ms`)を必ず設定する(既定値あり)。
   無期限待機は避ける。
-- 長時間運用では、台帳ごとに 1 つ `ralph org watch --all --detach` を起動
-  しておく(全 org の停滞/生存/スコープ変更の ALERT・デッドマン時の人間
-  エスカレーションと、受信箱の期限)。今は `ralph org start` も `spawn` も
-  見張りを起動しないので、自分で起動する。watch の通知は typed `ALERT` と
-  して各 org の leader に届く。動いているかは `ralph status` の
-  `org watch:` の行で確かめる。`running`、`stale`(ロックは持たれているが、
+- 長時間運用では、台帳ごとに 1 つ `ralph org watch --all` を動かしておく
+  (全 org の停滞/生存/スコープ変更の ALERT・デッドマン時の人間
+  エスカレーションと、受信箱の期限)。見張りのいないところでは自律の作業を
+  始めない。長時間動く見張り(止まりかけでも `--once` でもないもの)が
+  running でなければ、`spawn` と TASK の `send` は断られ、`ralph org start`
+  は見張りを起動してから leader を立てる(動詞リファレンスの `spawn`・
+  `send`・`start` の行)。start を通らないとき(現セッション昇格、`spawn`
+  だけで立てる org)は、`ralph org watch --all --detach` で自分で起動する。
+  headless の leader は見張りを起動しない(leader は herdr の中で動き、
+  見張りは herdr の外で動かす)。見張りの拒否で断られた leader は
+  `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
+  返事をする。`stop`・`disband`(どちらも `--all` を含む)・`escalate`・
+  `inbox` の動詞・`wait`・`read`・`status`・`report`・`watch` は、見張りが
+  なくても使える。検査はその時点の判定なので、見張りが途中で落ちても動いて
+  いる座席は止まらず、次の `start`・`spawn`・TASK か `ralph status` まで
+  誰も気づかない。watch の通知は typed `ALERT` として各 org の leader に
+  届く。動いているかは `ralph status` の `org watch:` の行で確かめる。
+  `running`(`--once` の見張りは `running (--once)`)、`stopping`(最後の
+  サイクルを終え、ロックを持ったまま実行中のオンデマンド watcher の呼び出しを
+  待っている。新しい作業は受け付けない)、`stale`(ロックは持たれているが、
   生存の印がない・止まっている・古い。古いとは、印の時刻(見張りが最後に
-  running の印を書いた時刻。`ralph status` では `mark updated`)が
-  `[org].deadman_minutes`(1 未満なら 10 分)と見張りの間隔の 2 倍のうち、
-  長いほうより前のこと)、`not running` のどれかで、`--json` では
-  `org_watch.state` が `running` / `stale` / `not_running` になる。印の
-  時刻(`--json` では `org_watch.updated_at`)は、最初のサイクルの前と
-  各サイクルの終わりに書き直し、止まる前にオンデマンド watcher の呼び出しを
-  待つ間も間隔ごとに書き直す。見張りは止めるまで動き続ける。止めるときは
+  running か stopping の印を書いた時刻。`ralph status` では
+  `mark updated`)が、`deadman_minutes`(1 未満なら 10 分)と見張りの間隔の
+  2 倍のうち、長いほうより前のこと。`deadman_minutes` は見張りが印に書いた
+  自分の値で、印にない古い版の見張りのときだけ、読む側の
+  `[org].deadman_minutes` を使う)、`not running` のどれかで、`--json` では
+  `org_watch.state` が `running` / `stopping` / `stale` / `not_running` に
+  なる(`--once` の見張りは `org_watch.once` が `true`)。印の時刻(`--json`
+  では `org_watch.updated_at`)は、最初のサイクルの前と各サイクルの終わりに
+  書き直し、止まる前にオンデマンド watcher の呼び出しを待つ間も `stopping`
+  の印を間隔ごとに書き直す。見張りは止めるまで動き続ける(start が起動した
+  見張りも同じ)。止めるときは
   `ralph org watch --stop` を打つ。30 秒で止まらなくても頼みは残り、見張りは
   そのサイクルが終わり、実行中のオンデマンド watcher の呼び出しの待ちも
   終わると止まる。すぐ止めたいときは、エラーに出る pid が

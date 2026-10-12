@@ -44,9 +44,10 @@ func newStatusCmd() *cobra.Command {
 			"seat counts, and -- when `ralph org watch` has run for that org -- the last\n" +
 			"watch heartbeat and pending alert count.\n\n" +
 			"An `org watch:` line shows whether `ralph org watch --all` is running on the\n" +
-			"state directory: running, stale (it holds the lock but its liveness mark is\n" +
-			"not fresh), or not running, with the pid and the time that mark was last\n" +
-			"updated.\n\n" +
+			"state directory: running (marked (--once) for a --once watch), stopping (it\n" +
+			"has run its last cycle and holds the lock until its in-flight work ends),\n" +
+			"stale (it holds the lock but its liveness mark is not fresh), or not running,\n" +
+			"with the pid and the time that mark was last updated.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -142,11 +143,12 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 }
 
 // statusDeadmanMinutes returns the deadman_minutes `ralph status` judges the
-// watch's liveness mark by (org.ProbeWatch): the [org] table of ./ralph.toml
-// when present, read as the ralph org verbs read it without --config
-// (resolveOrgConfig), else the built-in default. status only reads, so a
-// ralph.toml that does not load falls back to the default with a warning on
-// stderr instead of failing the command.
+// watch's liveness mark by (org.ProbeWatch) when the mark does not carry the
+// watch's own deadman_minutes (a mark of an older version): the [org] table
+// of ./ralph.toml when present, read as the ralph org verbs read it without
+// --config (resolveOrgConfig), else the built-in default. status only reads,
+// so a ralph.toml that does not load falls back to the default with a
+// warning on stderr instead of failing the command.
 func statusDeadmanMinutes(stderr io.Writer) int {
 	cfg, err := resolveOrgConfig("")
 	if err != nil {
@@ -160,13 +162,21 @@ func statusDeadmanMinutes(stderr io.Writer) int {
 // orgWatchLine renders what org.ProbeWatch found about the cross-org watch
 // as the one `org watch:` line `ralph status` prints. The pid and times come
 // from the liveness mark, and each is left out when the mark is missing or
-// does not carry it. Once no one holds watch.lock, the mark only tells how
-// the last watch ended: stopped, or killed with its running mark left.
+// does not carry it. A running --once watch says so, as it accepts no new
+// work. Once no one holds watch.lock, the mark only tells how the last
+// watch ended: stopped, or killed with its running or stopping mark left.
 func orgWatchLine(probe org.WatchLiveness) string {
 	mark := probe.Mark
 	switch probe.State {
 	case org.WatchLivenessRunning:
+		if mark != nil && mark.Once {
+			return "org watch: running (--once)" + orgWatchMarkDetails(mark) +
+				" -- it ends after its cycle and accepts no new work"
+		}
 		return "org watch: running" + orgWatchMarkDetails(mark)
+	case org.WatchLivenessStopping:
+		return "org watch: stopping" + orgWatchMarkDetails(mark) +
+			" -- it has run its last cycle and accepts no new work; it releases watch.lock once its in-flight work ends"
 	case org.WatchLivenessStale:
 		return "org watch: stale" + orgWatchMarkDetails(mark) +
 			" -- a watch holds watch.lock, but its liveness mark is missing, stopped, or older than the larger of deadman_minutes (10 when below 1) and two of its intervals"
@@ -174,8 +184,8 @@ func orgWatchLine(probe org.WatchLiveness) string {
 	switch {
 	case mark != nil && mark.State == org.WatchAliveStopped && mark.StoppedAt != "":
 		return "org watch: not running (stopped at " + mark.StoppedAt + ")"
-	case mark != nil && mark.State == org.WatchAliveRunning:
-		left := "a running mark is left"
+	case mark != nil && (mark.State == org.WatchAliveRunning || mark.State == org.WatchAliveStopping):
+		left := "a " + mark.State + " mark is left"
 		if mark.PID > 0 {
 			left += fmt.Sprintf(" from pid %d", mark.PID)
 		}
@@ -396,11 +406,12 @@ type statusJSON struct {
 }
 
 // statusOrgWatchJSON is the --json wire shape of the cross-org watch: State
-// is what org.ProbeWatch found (running, stale, or not_running), and the
-// rest is copied from the liveness mark it read, all left out when it read
-// none. MarkState is the mark's own running or stopped, which can differ
-// from State: a killed watch leaves a running mark behind with no one
-// holding watch.lock.
+// is what org.ProbeWatch found (running, stopping, stale, or not_running),
+// and the rest is copied from the liveness mark it read, all left out when
+// it read none. MarkState is the mark's own running, stopping, or stopped,
+// which can differ from State: a killed watch leaves a running mark behind
+// with no one holding watch.lock. Once is true for the mark of a --once
+// watch, which accepts no new work.
 type statusOrgWatchJSON struct {
 	State     string `json:"state"`
 	PID       int    `json:"pid,omitempty"`
@@ -408,6 +419,7 @@ type statusOrgWatchJSON struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 	StoppedAt string `json:"stopped_at,omitempty"`
 	MarkState string `json:"mark_state,omitempty"`
+	Once      bool   `json:"once,omitempty"`
 }
 
 // buildStatusOrgWatchJSON renders probe into its --json wire shape.
@@ -419,6 +431,7 @@ func buildStatusOrgWatchJSON(probe org.WatchLiveness) statusOrgWatchJSON {
 		result.UpdatedAt = mark.TS
 		result.StoppedAt = mark.StoppedAt
 		result.MarkState = mark.State
+		result.Once = mark.Once
 	}
 	return result
 }
