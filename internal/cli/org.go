@@ -299,7 +299,8 @@ func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, st
 		child: func() (orgWatchLaunchRequest, error) {
 			return orgWatchChild(cmd, resolvedStateDir, stateDirSource, configPath, 0)
 		},
-		errPrefix: "org: start: the cross-org watch did not start, so no leader was started",
+		errPrefix:    "org: start: the cross-org watch did not start, so no leader was started",
+		hintStateDir: hintStateDir,
 		refuse: func(probe org.WatchLiveness) error {
 			return &org.WatchGateError{StateDir: resolvedStateDir, HintStateDir: hintStateDir, Liveness: probe}
 		},

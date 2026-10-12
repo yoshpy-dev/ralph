@@ -68,10 +68,16 @@ func (e *WatchGateError) Error() string {
 }
 
 // watchGateCommand is the `ralph org watch <args>` command a WatchGateError
-// names, followed by --state-dir stateDir when stateDir is not "", as
-// InboxCommand builds the inbox commands.
+// names (CommandWithStateDir).
 func watchGateCommand(args, stateDir string) string {
-	command := "ralph org watch " + args
+	return CommandWithStateDir("ralph org watch "+args, stateDir)
+}
+
+// CommandWithStateDir is command followed by --state-dir stateDir when
+// stateDir is not "", as InboxCommand builds the inbox commands: the
+// commands a WatchGateError names, and those the CLI's --detach and start
+// messages name, with the same HintStateDir.
+func CommandWithStateDir(command, stateDir string) string {
 	if stateDir != "" {
 		command += " --state-dir " + shellQuote(stateDir)
 	}

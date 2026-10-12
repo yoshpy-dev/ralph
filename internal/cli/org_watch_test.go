@@ -521,7 +521,7 @@ func TestOrgWatchDetach_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_
 		want string
 	}{
 		{name: "stopping", mark: func() *org.WatchAlive { return stoppingWatchMark(4305, time.Now()) },
-			want: "(pid 4305) is stopping, so no new watch runs; run ralph org watch --all --detach again once it has ended"},
+			want: "(pid 4305) is stopping, so no new watch runs; run ralph org watch --all --detach --state-dir "},
 		{name: "running --once", mark: func() *org.WatchAlive { return onceWatchMark(4306, time.Now()) },
 			want: "(pid 4306) is a --once run, which ends after its cycle, so no new watch runs"},
 		{name: "stale until the deadline", mark: func() *org.WatchAlive { return nil },
@@ -638,6 +638,84 @@ func TestOrgWatchDetach_AnotherWatchRuns_AChildThatDoesNotExitInTimeIsStopped(t 
 	}
 	if got := org.ProbeWatch(stateDir, time.Now(), 10); got.State != org.WatchLivenessRunning || got.Mark == nil || got.Mark.PID != 4346 {
 		t.Errorf("ProbeWatch after --detach = %+v; want the other watch (pid 4346) running", got)
+	}
+}
+
+// Self-review C2-1 of org-watch-gate: the stop of a child still alive at the
+// end of orgWatchChildExitWait can take the rest of its lock wait, and the
+// watch that was running may change meanwhile, so --detach judges by a
+// probe after the stop, not by the one before it. Here the child's stop
+// changes the ledger before the child exits: the other watch (pid 4348)
+// ends, turns stopping, or hands the lock to another watch (pid 4349).
+// --detach says `already running` only for a watch that accepts work after
+// the stop, with that watch's pid; otherwise it exits 1.
+func TestOrgWatchDetach_AnotherWatchRuns_AStoppedChildIsJudgedByAProbeAfterTheStop(t *testing.T) {
+	cases := []struct {
+		name string
+		// during is what happens to the other watch while the child stops;
+		// release frees that watch's lock.
+		during     func(t *testing.T, stateDir string, release func())
+		wantStdout string
+		wantErr    []string
+	}{
+		{name: "the other watch ended",
+			during:  func(t *testing.T, stateDir string, release func()) { release() },
+			wantErr: []string{"org: watch --detach: the watch (pid 4242) was stopped while another watch held ", "and that one has ended too, so no watch runs; see "}},
+		{name: "the other watch is stopping",
+			during: func(t *testing.T, stateDir string, release func()) {
+				writeWatchMark(t, stateDir, stoppingWatchMark(4348, time.Now()))
+			},
+			wantErr: []string{"(pid 4348) is stopping, so no new watch runs"}},
+		{name: "another watch took the lock",
+			during: func(t *testing.T, stateDir string, release func()) {
+				release()
+				holdWatchLock(t, stateDir, runningMark(4349, time.Now()))
+			},
+			wantStdout: "ralph org watch --all is already running (pid 4349); log: "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setOrgWatchDuration(t, &orgWatchChildExitWait, 100*time.Millisecond)
+			setOrgWatchDuration(t, &orgWatchProbeInterval, 10*time.Millisecond)
+			stateDir := t.TempDir()
+			stops := 0
+			setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+				release := holdWatchLock(t, stateDir, runningMark(4348, time.Now()))
+				exited := make(chan struct{})
+				return &orgWatchProcess{pid: 4242, exited: exited, stop: func() {
+					stops++
+					if stops == 1 {
+						tc.during(t, stateDir, release)
+						close(exited)
+					}
+				}}, nil
+			})
+
+			stdout, _, err := runOrgCmdStreams(t, "watch", "--all", "--detach", "--state-dir", stateDir)
+			if stops != 1 {
+				t.Errorf("the child was stopped %d times; want once", stops)
+			}
+			if tc.wantStdout != "" {
+				if err != nil {
+					t.Fatalf("--detach = %v (stdout %q); want exit 0", err, stdout)
+				}
+				if want := tc.wantStdout + filepath.Join(stateDir, org.WatchLogFileName) + "\n"; stdout != want {
+					t.Errorf("stdout = %q; want %q", stdout, want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("--detach succeeded (stdout %q); want exit 1, not already running for the watch seen before the stop", stdout)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want nothing", stdout)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
 	}
 }
 
@@ -759,7 +837,7 @@ func TestOrgWatchDetach_AStoppingOrOnceWatch_StartsNothing(t *testing.T) {
 			if err == nil {
 				t.Fatalf("--detach with a %s watch succeeded (stdout %q); want exit 1", tc.name, stdout)
 			}
-			for _, want := range []string{tc.want, "the watch that holds " + org.WatchLockPathIn(stateDir), "run ralph org watch --all --detach again once it has ended"} {
+			for _, want := range []string{tc.want, "the watch that holds " + org.WatchLockPathIn(stateDir), "run ralph org watch --all --detach --state-dir '" + stateDir + "' again once it has ended"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not contain %q", err, want)
 				}
@@ -768,6 +846,78 @@ func TestOrgWatchDetach_AStoppingOrOnceWatch_StartsNothing(t *testing.T) {
 				t.Errorf("--detach refused the %s watch after %v; want at once, not after a wait", tc.name, elapsed)
 			}
 		})
+	}
+}
+
+// keepLockOrgWatchLaunch sets a launcher whose child, with pid, takes
+// watch.lock, never writes a running mark, and keeps the lock after its
+// stop (until the test's cleanup), as a watch that ignores its SIGTERM would.
+func keepLockOrgWatchLaunch(t *testing.T, stateDir string, pid int) {
+	t.Helper()
+	setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+		holdWatchLock(t, stateDir, nil)
+		exited := make(chan struct{})
+		var once sync.Once
+		return &orgWatchProcess{pid: pid, exited: exited, stop: func() { once.Do(func() { close(exited) }) }}, nil
+	})
+}
+
+// Self-review C2-3 of org-watch-gate: the commands the errors of --detach
+// name (`ralph org watch --stop` for a stale watch, --detach again for a
+// stopping one, and `ralph status` after a stopped child that keeps
+// watch.lock) repeat --state-dir, quoted, when it was given, as the gate's
+// refusal does (TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir), and
+// name none for a ledger found without it (here RALPH_ORG_STATE_DIR).
+func TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, stateDir string)
+		// want is the command as the error names it, with %[1]s for the
+		// --state-dir part (" --state-dir '<dir>'", or "") and %[2]s for
+		// watch.log.
+		want string
+	}{
+		{name: "stale", want: "stop it with ralph org watch --stop%[1]s, or kill 4360",
+			setup: func(t *testing.T, stateDir string) {
+				refuseOrgWatchLaunch(t)
+				holdWatchLock(t, stateDir, runningMark(4360, time.Now().Add(-time.Hour)))
+			}},
+		{name: "stopping", want: "run ralph org watch --all --detach%[1]s again once it has ended",
+			setup: func(t *testing.T, stateDir string) {
+				refuseOrgWatchLaunch(t)
+				holdWatchLock(t, stateDir, stoppingWatchMark(4361, time.Now()))
+			}},
+		{name: "a stopped child that keeps the lock", want: ".lock is still held; see %[2]s and ralph status%[1]s",
+			setup: func(t *testing.T, stateDir string) {
+				setOrgWatchDuration(t, &orgWatchReleaseDeadline, 50*time.Millisecond)
+				keepLockOrgWatchLaunch(t, stateDir, 4362)
+			}},
+	}
+	for _, tc := range cases {
+		for _, given := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, --state-dir given %t", tc.name, given), func(t *testing.T) {
+				shortenOrgWatchDeadline(t)
+				stateDir := filepath.Join(t.TempDir(), "led ger")
+				tc.setup(t, stateDir)
+				args, part := []string{"watch", "--all", "--detach"}, ""
+				t.Setenv(org.EnvOrgStateDir, "")
+				if given {
+					args = append(args, "--state-dir", stateDir)
+					part = " --state-dir '" + stateDir + "'"
+				} else {
+					t.Setenv(org.EnvOrgStateDir, stateDir)
+				}
+
+				stdout, _, err := runOrgCmdStreams(t, args...)
+				want := fmt.Sprintf(tc.want, part, filepath.Join(stateDir, org.WatchLogFileName))
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("--detach = %v (stdout %q); want an error naming %q", err, stdout, want)
+				}
+				if !given && strings.Contains(err.Error(), "--state-dir") {
+					t.Errorf("error with the ledger from %s = %q; want no --state-dir", org.EnvOrgStateDir, err)
+				}
+			})
+		}
 	}
 }
 
