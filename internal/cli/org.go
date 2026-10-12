@@ -113,21 +113,15 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
 }
 
-// newOrgSpawnRuntime is newOrgRuntime for the verbs that start seats
+// newOrgSpawnRuntimeAt is newOrgRuntime for the verbs that start seats
 // (`ralph org spawn` and `ralph org start`), the only ones that check the
 // org-wide limits: it also replaces the config's MaxOrgs and MaxTotalSeats
 // via withMainWorktreeOrgLimits, so the ledger shared by every worktree gets
 // one set of limits. Every other verb keeps reading only the caller's config.
-func newOrgSpawnRuntime(cmd *cobra.Command, stateDir, configPath string) (*org.Org, error) {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	return newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, configPath)
-}
-
-// newOrgSpawnRuntimeAt is newOrgSpawnRuntime for a state dir that
-// org.ResolveOrgStateDir already resolved, the same split as newOrgRuntimeAt:
-// `ralph org start --plan` resolves it once, since it also passes the
-// directory and its source on (StartFeatureParams.StateDir and
-// org.FeatureRepoRoot).
+// It takes a state dir that org.ResolveOrgStateDir already resolved, the same
+// split as newOrgRuntimeAt: each caller also passes the directory on, to
+// wireOrgWatchGate, and `ralph org start --plan` to StartFeatureParams.StateDir
+// and org.FeatureRepoRoot with its source.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 		return nil, err
@@ -258,6 +252,40 @@ var orgDesktopNotifyOverride org.EscalateFunc
 // `ralph org wait --inbox` reads the inbox again every second; a test that
 // waits for an item escalated later sets a tiny value.
 var orgInboxPollIntervalOverride time.Duration
+
+// wireOrgWatchGate sets rt.WatchGate, the watch gate of plan
+// 2026-10-12-org-watch-gate: spawn, both forms of start, and send call it
+// right after they build their runtime, and no other verb does, so stop,
+// disband, escalate, the inbox verbs, wait, read, status, report, and watch
+// work with no watch running. The gate (org.NewWatchGate) probes the ledger
+// at resolvedStateDir and judges a liveness mark that carries no
+// deadman_minutes by rt.Config's. Its refusal repeats --state-dir in the
+// commands it names when --state-dir was given, by orgInboxHintStateDir's
+// rule.
+func wireOrgWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir string) {
+	if orgWatchGateOverride != nil {
+		rt.WatchGate = orgWatchGateOverride(resolvedStateDir, rt.Config.DeadmanMinutes)
+		return
+	}
+	settle := orgWatchGateSettleOverride
+	if settle == 0 {
+		settle = org.DefaultWatchGateSettle
+	}
+	rt.WatchGate = org.NewWatchGate(resolvedStateDir, orgInboxHintStateDir(cmd, resolvedStateDir), nil, rt.Config.DeadmanMinutes, settle)
+}
+
+// orgWatchGateOverride, when not nil, builds the Org.WatchGate that
+// wireOrgWatchGate sets, from the resolved state dir and rt.Config's
+// deadman_minutes, in place of org.NewWatchGate. nil in production. TestMain
+// sets one that always passes, so the tests of spawn, start, and send need
+// no watch; a test of the gate itself sets it back to nil.
+var orgWatchGateOverride func(stateDir string, deadmanMinutes int) func() error
+
+// orgWatchGateSettleOverride is the settle of the gate wireOrgWatchGate
+// builds: how long it waits for a stale watch to accept work. Zero in
+// production, which means org.DefaultWatchGateSettle (2 s); TestMain
+// shortens it so a test of a stale refusal does not wait 2 s.
+var orgWatchGateSettleOverride time.Duration
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed
 // in send's post-failure notes and its unconfirmed-submit warning (AR-2,
@@ -470,10 +498,12 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
 			}
+			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, role, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -637,10 +667,12 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			rt, err := newOrgSpawnRuntime(cmd, *stateDir, *configPath)
+			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
 			}
+			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeaderIdentity, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -724,17 +756,19 @@ type orgStartPlanParams struct {
 // runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
 // it resolves the state dir once, builds the spawn runtime on it (the
 // legacy-ledger guard and the main worktree's org-wide limits, as for every
-// start), and runs (*org.Org).StartFeature with that dir and the main
-// worktree root (org.FeatureRepoRoot). The result is printed as a spawn's,
-// followed on success by the worktree, the branch and the status hint; a
-// refusal or failure is returned as StartFeature's error, which already says
-// whether the worktree stays and how to remove it.
+// start) with the watch gate (wireOrgWatchGate; StartFeature runs it before
+// it makes the worktree), and runs (*org.Org).StartFeature with that dir and
+// the main worktree root (org.FeatureRepoRoot). The result is printed as a
+// spawn's, followed on success by the worktree, the branch and the status
+// hint; a refusal or failure is returned as StartFeature's error, which
+// already says whether the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(p.stateDir, cmd.Flags().Changed("state-dir"))
 	rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, p.configPath)
 	if err != nil {
 		return err
 	}
+	wireOrgWatchGate(cmd, rt, resolvedStateDir)
 	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return err
@@ -804,6 +838,7 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			wireOrgWatchGate(cmd, rt, resolvedStateDir)
 			result := rt.Send(org.SendParams{
 				OrgID: *orgID, To: to, Text: text, TimeoutMS: timeoutMS, DryRun: dryRun, Raw: raw,
 				EnterDelayMS: enterDelayMS,

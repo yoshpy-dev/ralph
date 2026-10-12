@@ -27,9 +27,12 @@ var ErrNoRunningWatch = errors.New("no ralph org watch --all accepts work on thi
 
 // WatchGateError is a refusal of the watch gate: Liveness is what ProbeWatch
 // last found on StateDir. Its message names that state and what to do next.
+// HintStateDir is the --state-dir the `ralph org watch` commands in the
+// message repeat (watchGateCommand); "" repeats none.
 type WatchGateError struct {
-	StateDir string
-	Liveness WatchLiveness
+	StateDir     string
+	HintStateDir string
+	Liveness     WatchLiveness
 }
 
 // Is makes errors.Is(err, ErrNoRunningWatch) true for a *WatchGateError.
@@ -39,18 +42,19 @@ func (e *WatchGateError) Is(target error) bool {
 
 func (e *WatchGateError) Error() string {
 	mark := e.Liveness.Mark
-	const later = "run this again once it has ended and a long-running watch is up (ralph org watch --all --detach starts one)"
+	detach := watchGateCommand("--all --detach", e.HintStateDir)
+	later := "run this again once it has ended and a long-running watch is up (" + detach + " starts one)"
 	switch e.Liveness.State {
 	case WatchLivenessNotRunning:
 		return fmt.Sprintf("org: no ralph org watch --all is running on the org state dir %s, so no new work starts; "+
-			"start one with ralph org watch --all --detach, or start the org with ralph org start, which starts one", e.StateDir)
+			"start one with %s, or start the org with ralph org start, which starts one", e.StateDir, detach)
 	case WatchLivenessStale:
 		kill := fmt.Sprintf("find the process that holds %s and kill it", WatchLockPathIn(e.StateDir))
 		if mark != nil && mark.PID > 0 {
 			kill = fmt.Sprintf("check that pid %d is a ralph org watch and kill it", mark.PID)
 		}
 		return fmt.Sprintf("org: the ralph org watch --all that holds the lock of the org state dir %s has not refreshed its liveness mark (%s), "+
-			"so no new work starts; stop it with ralph org watch --stop, or %s", e.StateDir, watchGatePIDText(mark), kill)
+			"so no new work starts; stop it with %s, or %s", e.StateDir, watchGatePIDText(mark), watchGateCommand("--stop", e.HintStateDir), kill)
 	case WatchLivenessStopping:
 		return fmt.Sprintf("org: the ralph org watch --all on the org state dir %s (%s) is stopping and accepts no new work; %s",
 			e.StateDir, watchGatePIDText(mark), later)
@@ -59,6 +63,17 @@ func (e *WatchGateError) Error() string {
 			e.StateDir, watchGatePIDText(mark), later)
 	}
 	return fmt.Sprintf("org: the ralph org watch --all on the org state dir %s is %q and accepts no new work", e.StateDir, e.Liveness.State)
+}
+
+// watchGateCommand is the `ralph org watch <args>` command a WatchGateError
+// names, followed by --state-dir stateDir when stateDir is not "", as
+// InboxCommand builds the inbox commands.
+func watchGateCommand(args, stateDir string) string {
+	command := "ralph org watch " + args
+	if stateDir != "" {
+		command += " --state-dir " + shellQuote(stateDir)
+	}
+	return command
 }
 
 // watchGatePIDText names the pid of a liveness mark in a WatchGateError.
@@ -85,9 +100,11 @@ func WatchAcceptsWork(l WatchLiveness) bool {
 // watchGateProbeInterval until settle has passed, and passes once the watch
 // accepts work (plan 2026-10-12-org-watch-gate, F10). Every other state is
 // refused at once, as is stale after settle; the refusal is a
-// *WatchGateError. The settle reads the real clock; a nil now means
-// time.Now.
-func NewWatchGate(stateDir string, now func() time.Time, deadmanMinutes int, settle time.Duration) func() error {
+// *WatchGateError whose commands repeat hintStateDir as --state-dir
+// (WatchGateError.HintStateDir; the CLI passes the state dir only when
+// --state-dir was given, as for Org.InboxHintStateDir). The settle reads the
+// real clock; a nil now means time.Now.
+func NewWatchGate(stateDir, hintStateDir string, now func() time.Time, deadmanMinutes int, settle time.Duration) func() error {
 	if now == nil {
 		now = time.Now
 	}
@@ -100,7 +117,7 @@ func NewWatchGate(stateDir string, now func() time.Time, deadmanMinutes int, set
 			}
 			left := time.Until(deadline)
 			if l.State != WatchLivenessStale || left <= 0 {
-				return &WatchGateError{StateDir: stateDir, Liveness: l}
+				return &WatchGateError{StateDir: stateDir, HintStateDir: hintStateDir, Liveness: l}
 			}
 			time.Sleep(min(watchGateProbeInterval, left))
 		}

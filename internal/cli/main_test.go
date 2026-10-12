@@ -42,6 +42,13 @@ import (
 // and how often it looks for a stop request (orgWatchLockWaitOverride,
 // orgWatchStopPollIntervalOverride), so a refused second watch and a
 // `--stop` take milliseconds instead of seconds.
+//
+// It also sets orgWatchGateOverride to a watch gate that always passes, so
+// the tests of spawn, start, and send run as they did before the gate,
+// with no watch on their ledger; a test of the gate sets it back to nil
+// (useRealOrgWatchGate). And it shortens the gate's settle
+// (orgWatchGateSettleOverride), so a refusal of a stale watch comes in
+// milliseconds instead of 2 s.
 func TestMain(m *testing.M) {
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
@@ -59,5 +66,7 @@ func TestMain(m *testing.M) {
 	}
 	orgWatchLockWaitOverride = 50 * time.Millisecond
 	orgWatchStopPollIntervalOverride = 5 * time.Millisecond
+	orgWatchGateOverride = func(string, int) func() error { return func() error { return nil } }
+	orgWatchGateSettleOverride = 50 * time.Millisecond
 	os.Exit(m.Run())
 }

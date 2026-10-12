@@ -890,3 +890,46 @@ func TestStatusCmd_OrgWatchJudgesTheMarkByTheWatchsOwnDeadmanMinutes(t *testing.
 		})
 	}
 }
+
+// Plan 2026-10-12-org-watch-gate, AC7 on `ralph status`, the case of a watch
+// run with a --config whose deadman_minutes differs from ./ralph.toml's: a
+// 20-minute-old mark of a watch with 30 reads running under a ralph.toml with
+// 10, in the text and in --json, while the same mark without
+// deadman_minutes, as an older version wrote it, reads stale by the 10.
+func TestStatusCmd_OrgWatchOfAWatchWithAnotherConfigReadsByItsMark(t *testing.T) {
+	thirty := 30
+	for _, tc := range []struct {
+		name    string
+		watchDM *int
+		state   string
+	}{
+		{name: "mark with deadman_minutes 30", watchDM: &thirty, state: org.WatchLivenessRunning},
+		{name: "mark without deadman_minutes", state: org.WatchLivenessStale},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			if err := os.WriteFile("ralph.toml", []byte("[org]\ndeadman_minutes = 10\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			stateDir := t.TempDir()
+			mark := runningMark(4255, time.Now().Add(-20*time.Minute))
+			mark.DeadmanMinutes = tc.watchDM
+			holdWatchLock(t, stateDir, mark)
+
+			out, err := runStatusCmd(t, "--state-dir", stateDir)
+			if err != nil {
+				t.Fatalf("status: %v (output: %s)", err, out)
+			}
+			if want := "org watch: " + tc.state + " (pid 4255, "; !strings.HasPrefix(statusOrgWatchLine(t, out), want) {
+				t.Errorf("org watch line = %q; want it to start %q", statusOrgWatchLine(t, out), want)
+			}
+			jsonOut, err := runStatusCmd(t, "--state-dir", stateDir, "--json")
+			if err != nil {
+				t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+			}
+			if got := statusOrgWatchJSONOf(t, jsonOut)["state"]; got != tc.state {
+				t.Errorf("org_watch state = %v; want %s", got, tc.state)
+			}
+		})
+	}
+}

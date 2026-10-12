@@ -129,7 +129,7 @@ func TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork(t *testing.T) {
 			dir := t.TempDir()
 			tc.setup(t, dir)
 			start := time.Now()
-			err := NewWatchGate(dir, nil, 10, settle)()
+			err := NewWatchGate(dir, "", nil, 10, settle)()
 			elapsed := time.Since(start)
 			if tc.wantPass {
 				if err != nil {
@@ -173,7 +173,7 @@ func TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle(t *testing.T) 
 				written <- writeWatchAlive(dir, tc.mark())
 			}()
 			start := time.Now()
-			err := NewWatchGate(dir, nil, 10, settle)()
+			err := NewWatchGate(dir, "", nil, 10, settle)()
 			elapsed := time.Since(start)
 			if werr := <-written; werr != nil {
 				t.Fatal(werr)
@@ -197,9 +197,56 @@ func TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle(t *testing.T) 
 func TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow(t *testing.T) {
 	dir := t.TempDir()
 	holdWatchWithMark(t, dir, runningMark(4242, watchAliveT0))
-	if err := NewWatchGate(dir, func() time.Time { return watchAliveT0 }, 10, 0)(); err != nil {
+	if err := NewWatchGate(dir, "", func() time.Time { return watchAliveT0 }, 10, 0)(); err != nil {
 		t.Fatalf("gate at the mark's ts = %v; want it to pass", err)
 	}
 	later := func() time.Time { return watchAliveT0.Add(time.Hour) }
-	gateErr(t, NewWatchGate(dir, later, 10, 0)(), dir, WatchLivenessStale)
+	gateErr(t, NewWatchGate(dir, "", later, 10, 0)(), dir, WatchLivenessStale)
+}
+
+// The `ralph org watch` commands a refusal names repeat HintStateDir as
+// --state-dir, quoted as InboxCommand quotes it, in every state, and an empty
+// HintStateDir repeats none. NewWatchGate passes its hintStateDir on to the
+// refusal.
+func TestWatchGateError_TheCommandsRepeatHintStateDir(t *testing.T) {
+	const hint = "/led ger"
+	mark := runningMark(4242, watchAliveT0)
+	once := onceMark(4242, watchAliveT0)
+	stopping := stoppingMark(4242, watchAliveT0)
+	detach := "ralph org watch --all --detach --state-dir '/led ger'"
+	cases := []struct {
+		name string
+		l    WatchLiveness
+		want []string
+	}{
+		{name: "not running", l: WatchLiveness{State: WatchLivenessNotRunning}, want: []string{"start one with " + detach + ", "}},
+		{name: "stale", l: WatchLiveness{State: WatchLivenessStale, Mark: &mark}, want: []string{"stop it with ralph org watch --stop --state-dir '/led ger', "}},
+		{name: "stopping", l: WatchLiveness{State: WatchLivenessStopping, Mark: &stopping}, want: []string{"(" + detach + " starts one)"}},
+		{name: "running --once", l: WatchLiveness{State: WatchLivenessRunning, Mark: &once}, want: []string{"(" + detach + " starts one)"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			with := (&WatchGateError{StateDir: "/ledger", HintStateDir: hint, Liveness: tc.l}).Error()
+			for _, w := range tc.want {
+				if !strings.Contains(with, w) {
+					t.Errorf("error with HintStateDir %q = %q; want it to say %q", hint, with, w)
+				}
+			}
+			without := (&WatchGateError{StateDir: "/ledger", Liveness: tc.l}).Error()
+			if strings.Contains(without, "--state-dir") {
+				t.Errorf("error with no HintStateDir = %q; want no --state-dir", without)
+			}
+			if want := strings.ReplaceAll(with, " --state-dir '/led ger'", ""); without != want {
+				t.Errorf("error with no HintStateDir:\n got %q\nwant %q", without, want)
+			}
+		})
+	}
+
+	dir := t.TempDir()
+	err := NewWatchGate(dir, hint, nil, 10, 0)()
+	gateErr(t, err, dir, WatchLivenessNotRunning, detach)
+	var gerr *WatchGateError
+	if errors.As(err, &gerr) && gerr.HintStateDir != hint {
+		t.Errorf("HintStateDir = %q; want %q", gerr.HintStateDir, hint)
+	}
 }
