@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -323,8 +324,8 @@ func TestOrgSend_WatchGate_RefusesOnlyATask(t *testing.T) {
 				return
 			}
 			checkGateRefusal(t, err, stateDir, "org: send: TASK not sent: no ralph org watch --all is running", "start one with ralph org watch --all --detach")
-			if strings.Contains(err.Error(), "TASK not sent: org:") {
-				t.Errorf("error %q repeats \"org:\" after \"TASK not sent:\"; want the gate's refusal without its own prefix", err)
+			if !strings.HasPrefix(err.Error(), "org: send: TASK not sent: ") || strings.Count(err.Error(), "org:") != 1 {
+				t.Errorf("error %q; want it to start with \"org: send: TASK not sent: \" and say \"org:\" only there", err)
 			}
 			if stdout != "" {
 				t.Errorf("stdout = %q; want nothing", stdout)
@@ -339,6 +340,27 @@ func TestOrgSend_WatchGate_RefusesOnlyATask(t *testing.T) {
 				t.Errorf("agmsg calls = %v; want none", lines)
 			}
 		})
+	}
+}
+
+// A send error that does not start with "org: send: " in the org layer (the
+// dry-run event's append, here to a manifest path that is a directory) gets
+// that prefix from the CLI, once, and keeps its cause.
+func TestOrgSend_AnErrorWithoutTheSendPrefixGetsItOnce(t *testing.T) {
+	setupOrgStubPATH(t)
+	stateDir := t.TempDir()
+	if err := os.Mkdir(org.ManifestPathIn(stateDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := runOrgCmdStreams(t, "send", "--org-id", "org-a", "--to", "seat-1",
+		"--text", "TYPE: QUESTION\n\nwhich plan?", "--dry-run", "--state-dir", stateDir)
+	want := "org: send: org: open " + org.ManifestPathIn(stateDir) + ": "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || strings.Count(err.Error(), "org: send:") != 1 {
+		t.Fatalf("dry-run send with a manifest that cannot be opened = %v; want it to start with %q", err, want)
+	}
+	if !errors.Is(err, syscall.EISDIR) {
+		t.Errorf("error %v does not wrap EISDIR; want the append's cause kept", err)
 	}
 }
 

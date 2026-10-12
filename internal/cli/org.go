@@ -950,6 +950,11 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 							"Check the seat with '%s'.\n",
 						to, result.PaneID, readHint)
 				}
+				// Most of Send's errors already start with "org: send: ";
+				// only the others (the dry-run event's append) get it here.
+				if strings.HasPrefix(result.Err.Error(), "org: send: ") {
+					return result.Err
+				}
 				return fmt.Errorf("org: send: %w", result.Err)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "sent message to seat %q\n", to)
