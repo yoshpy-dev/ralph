@@ -1,4 +1,6 @@
-# 横断の見張りの検査の実機確認(org-watch-gate、/test cycle 1)
+# 横断の見張りの検査の実機確認(org-watch-gate、/test cycle 1 と cycle 2)
+
+cycle 2(HEAD 755e082d)の確認は末尾の「cycle 2」の節にある。それより上は cycle 1(HEAD ae349cc4)の記録で、書き換えていない(この見出しとこの段落を足しただけ)。
 
 - Date: 2026-10-12(実機確認は JST 14:50〜14:53、base との比較は 14:38〜14:41)
 - Plan: docs/plans/active/2026-10-12-org-watch-gate.md(AC1〜AC5、AC9、AC13〜AC15、F7、F10)
@@ -738,4 +740,356 @@ watch processes after the stop: 1
 banners in watch.log: 2
 stopped ralph org watch --all (pid 88241)
 rc=0
+```
+
+## cycle 2(HEAD 755e082d)
+
+- Date: 2026-10-12(JST 18:13〜18:15)
+- 目的: cycle 1 で見つけた後退(同時の `--detach` 8 本のすぐあとの `--stop` が効かず、別の見張りが残る)が fdfb5b23 で直ったかを、同じ手順で 3 回確かめる。対照に base dc41c4f5 のビルドで 1 回、手順がまだ後退を捕まえられることを示すために cycle 1 の HEAD ae349cc4 のビルドで 1 回打つ。あわせて、3fb0fd1b に関わる `--detach` の拒否の案内(明示の `--state-dir` が付くこと)と、`--detach` が返るまでの時間を見る。最後にどの台帳にも `--stop` を打ち、`pgrep` で何も残っていないことを確かめる
+- 環境: cycle 1 と同じ隔離(`env -i`、scratch の HOME と XDG、`osascript` を外した PATH、herdr と agmsg はない、`ralph.toml` のない git の外の cwd、台帳はすべて `--state-dir`)。HEAD は `go build -o <scratch>/c2/ralph ./cmd/ralph`、base は cycle 1 の `<scratch>/ralph-base`、cycle 1 の HEAD は `<scratch>/ralph`。利用者の herdr サーバーと `~/.config/herdr` には触れていない
+- 打ったときの load average は 15〜215(ほかのセッションの負荷)
+
+### 結果
+
+| 確認 | HEAD 755e082d(3 回) | base dc41c4f5(1 回) | cycle 1 の HEAD ae349cc4(1 回) |
+|---|---|---|---|
+| 8 本の `--detach` の rc | 3 回とも 8 本すべて 0。`started` は 1 本 | 0 が 6 本、1 が 2 本(`exited before it was running`) | 8 本すべて 0 |
+| 1 本ごとの返るまでの時間 | `started` と、子を起動しなかった本は 0.4〜0.5 s。子がロックの取り合いに負けた本は 2.3〜2.6 s(子のロックの待ち 2 秒が終わってから返る) | rc 0 の 6 本は 0.1〜0.2 s、rc 1 の 2 本は 2.2 s | 1.6〜1.7 s |
+| すべて返った時点の `ralph org watch --all --state-dir <台帳>` のプロセス | 3 回とも 1 | 1 | 7 |
+| すぐあとの `--stop` | 3 回とも rc 0(0.4〜1.2 s) | rc 0(0.7 s) | rc 1、30.1 s で時間切れ |
+| `--stop` のあとのプロセス | 3 回とも 0 | 0 | 1(終わりの手順 5 で止めた pid 37188) |
+| `watch.log` の banner | 3 回とも 1 行(ロックを取った見張りは 1 つ) | 3 行(base は banner をロックの前に出す) | 2 行(2 つの見張りが順にロックを取った) |
+
+cycle 1 の後退は HEAD では起きなかった。同じ手順は cycle 1 の HEAD のビルドでは今も後退を再現するので、手順が鈍ったわけではない。直しの代わりに、子がロックの取り合いに負けた `--detach` は、子のロックの待ちが終わるまでの約 2 秒、返るのが遅くなる(上の表の 2.3〜2.6 s)。
+
+| 確認 | 結果 |
+|---|---|
+| 新しい台帳の `--detach` と、動いている台帳への 2 回目の `--detach` | rc 0、0.3 s で `started`。2 回目は rc 0、0.1 s で `already running`(子を起動しないので待ちはない) |
+| 古い見張り(1 時間前の印)に `--detach --state-dir <台帳>` | rc 1、10.1 s。案内は `stop it with ralph org watch --stop --state-dir '<台帳>'`(3fb0fd1b で付いた) |
+| 同じ台帳を `RALPH_ORG_STATE_DIR` で指して `--detach` | rc 1、10.1 s。案内は `stop it with ralph org watch --stop` で、`--state-dir` は付かない |
+| 止まりかけの印(手で置いたもの)に `--detach --state-dir <台帳>` | rc 1、0.1 s。案内は `run ralph org watch --all --detach --state-dir '<台帳>' again once it has ended` |
+| 終わり | どの台帳にも `--stop` を打ったあと、3 つのバイナリのどれについても `pgrep -fl '<バイナリ> org watch'` は何も返さず rc 1 |
+
+### スクリプトと出力(cycle 2)
+
+以下のコードブロックは、スクリプトと出力のファイルを、そのまま byte 単位で貼ったもの。`holder.py` は cycle 1 の節のものを使った。
+
+#### live2.sh
+
+```bash
+#!/bin/bash
+# Live check of org-watch-gate, /test cycle 2 (HEAD 755e082d), with the built
+# binary <c2>/ralph and, for the control, base dc41c4f5's <owg-test>/ralph-base.
+# Same isolation as cycle 1's live.sh: env -i, a scratch HOME and XDG dirs,
+# PATH = a dir of symlinks to every /usr/bin and /bin entry except osascript
+# (no herdr, no agmsg), cwd with no ralph.toml outside any git repo, every
+# ledger a --state-dir under the scratch dir.
+set -u
+SC=$(cd "$(dirname "$0")" && pwd)
+HEADBIN=$SC/ralph
+BASEBIN=$(cd "$SC/.." && pwd)/ralph-base
+PREFIXBIN=$(cd "$SC/.." && pwd)/ralph
+L=$SC/live
+rm -rf "$L"
+mkdir -p "$L/home" "$L/bin" "$L/wd" "$L/xdg/config" "$L/xdg/data" "$L/xdg/state" "$L/xdg/cache" "$L/xdg/run"
+for d in /usr/bin /bin; do
+  for f in "$d"/*; do
+    n=${f##*/}
+    [ "$n" = osascript ] && continue
+    [ -e "$L/bin/$n" ] || ln -s "$f" "$L/bin/$n"
+  done
+done
+cd "$L/wd" || exit 1
+HOLDERS=()
+cleanup() {
+  for p in ${HOLDERS[@]+"${HOLDERS[@]}"}; do kill "$p" 2>/dev/null; done
+  pkill -9 -f "$HEADBIN org watch" 2>/dev/null
+  pkill -9 -f "$BASEBIN org watch" 2>/dev/null
+  pkill -9 -f "$PREFIXBIN org watch" 2>/dev/null
+}
+trap cleanup EXIT
+
+B=$HEADBIN
+r() {
+  env -i HOME="$L/home" PATH="$L/bin" SHELL=/bin/bash \
+    XDG_CONFIG_HOME="$L/xdg/config" XDG_DATA_HOME="$L/xdg/data" XDG_STATE_HOME="$L/xdg/state" \
+    XDG_CACHE_HOME="$L/xdg/cache" XDG_RUNTIME_DIR="$L/xdg/run" ${EXTRAENV:-} "$B" "$@"
+}
+now() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
+x() {
+  printf '\n$ ralph'; printf ' %q' "$@"; printf '\n'
+  local t0 t1 rc
+  t0=$(now); r "$@" 2>&1; rc=$?; t1=$(now)
+  printf '[rc=%d elapsed=%.1fs]\n' "$rc" "$(echo "$t1 - $t0" | bc)"
+}
+h() { printf '\n## %s\n' "$*"; }
+nwatch() { pgrep -f "$B org watch --all --state-dir $1" | wc -l | tr -d ' '; }
+holder() { # holder <dir> <state> <age>
+  local out=$SC/holder-$$-$RANDOM.out
+  python3 "$SC/../holder.py" "$1" "$2" "$3" > "$out" 2>&1 &
+  HOLDERS+=($!)
+  until grep -q holding "$out" 2>/dev/null; do sleep 0.05; done
+  echo "(holder pid $! holds $1/watch.lock, mark: $2, age ${3}s)"
+}
+# eight <ledger> <tag>: 8 x --detach at once, each with its own elapsed time,
+# then --stop at once, then what is left.
+eight() {
+  local E=$1 tag=$2 pids=() i t0
+  echo "\$ 8 x ralph org watch --all --detach --state-dir $E (at once)"
+  t0=$(now)
+  for i in 1 2 3 4 5 6 7 8; do
+    ( s=$(now); r org watch --all --detach --state-dir "$E" > "$L/$tag-$i.out" 2>&1; rc=$?
+      printf 'rc=%d returned after %.1fs\n' "$rc" "$(echo "$(now) - $s" | bc)" >> "$L/$tag-$i.out" ) &
+    pids+=($!)
+  done
+  wait "${pids[@]}"
+  printf '(all 8 returned %.1fs after the first was started)\n' "$(echo "$(now) - $t0" | bc)"
+  for i in 1 2 3 4 5 6 7 8; do printf '%d: %s\n' "$i" "$(tr '\n' ' ' < "$L/$tag-$i.out")"; done
+  echo "ralph org watch processes on the ledger once all 8 returned: $(nwatch "$E")"
+  x org watch --stop --state-dir "$E"
+  sleep 0.5
+  echo "ralph org watch processes on the ledger after the --stop: $(nwatch "$E")"
+  echo "\$ grep -c '^watching every org' watch.log"; grep -c '^watching every org' "$E/watch.log"
+  echo "\$ grep -v '^watching every org' watch.log"; grep -v '^watching every org' "$E/watch.log"
+}
+
+echo "HEAD binary: $HEADBIN (built from 755e082d)"
+echo "base binary: $BASEBIN (built from dc41c4f5)"
+echo "pre-fix binary: $PREFIXBIN (built from ae349cc4, /test cycle 1)"
+echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+h "1. the cycle 1 regression: 8 concurrent --detach, then --stop at once (HEAD, 3 rounds)"
+for round in 1 2 3; do
+  echo
+  echo "### round $round (HEAD)"
+  eight "$L/R$round" "r$round"
+done
+
+h "2. control: the same with base dc41c4f5 (1 round)"
+B=$BASEBIN
+echo
+echo "### base"
+eight "$L/BASE" base
+
+h "2b. the same with the pre-fix ae349cc4 build of /test cycle 1 (1 round, to show the check still reproduces it)"
+B=$PREFIXBIN
+echo
+echo "### ae349cc4"
+eight "$L/PREFIX" prefix
+B=$HEADBIN
+
+h "3. how long --detach takes to return (HEAD)"
+F=$L/F
+x org watch --all --detach --state-dir "$F"
+x org watch --all --detach --state-dir "$F"
+x org watch --stop --state-dir "$F"
+
+h "4. the --detach refusals name --state-dir when it was given (HEAD)"
+S1=$L/S1
+holder "$S1" running 3600
+x org watch --all --detach --state-dir "$S1"
+echo
+echo "(the same ledger named by RALPH_ORG_STATE_DIR instead of --state-dir)"
+EXTRAENV="RALPH_ORG_STATE_DIR=$S1" x org watch --all --detach
+S2=$L/S2
+holder "$S2" stopping 0
+x org watch --all --detach --state-dir "$S2"
+for p in "${HOLDERS[@]}"; do kill "$p" 2>/dev/null; done
+HOLDERS=()
+
+h "5. end: --stop on every ledger, then no ralph org watch process of either binary remains"
+for d in "$L"/R1 "$L"/R2 "$L"/R3 "$L"/BASE "$L"/PREFIX "$L"/F "$L"/S1 "$L"/S2; do
+  r org watch --stop --state-dir "$d" 2>&1 | grep -v 'is not running on' || true
+done
+sleep 0.5
+echo "\$ pgrep -fl '$HEADBIN org watch'"; pgrep -fl "$HEADBIN org watch"; echo "[pgrep rc=$?]"
+echo "\$ pgrep -fl '$BASEBIN org watch'"; pgrep -fl "$BASEBIN org watch"; echo "[pgrep rc=$?]"
+echo "\$ pgrep -fl '$PREFIXBIN org watch'"; pgrep -fl "$PREFIXBIN org watch"; echo "[pgrep rc=$?]"
+```
+
+#### live2.sh の出力(2026-10-12 18:13〜18:15 JST)
+
+```text
+HEAD binary: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph (built from 755e082d)
+base binary: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph-base (built from dc41c4f5)
+pre-fix binary: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph (built from ae349cc4, /test cycle 1)
+date: 2026-10-12T09:13:45Z
+
+## 1. the cycle 1 regression: 8 concurrent --detach, then --stop at once (HEAD, 3 rounds)
+
+### round 1 (HEAD)
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1 (at once)
+(all 8 returned 2.9s after the first was started)
+1: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.4s 
+2: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.5s 
+3: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.5s 
+4: started ralph org watch --all (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 0.5s 
+5: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.5s 
+6: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.6s 
+7: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.5s 
+8: ralph org watch --all is already running (pid 35099); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch.log rc=0 returned after 2.5s 
+ralph org watch processes on the ledger once all 8 returned: 1
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1
+stopped ralph org watch --all (pid 35099)
+[rc=0 elapsed=1.2s]
+ralph org watch processes on the ledger after the --stop: 0
+$ grep -c '^watching every org' watch.log
+1
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35099, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R1/watch-alive.json)
+
+### round 2 (HEAD)
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2 (at once)
+(all 8 returned 2.6s after the first was started)
+1: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.3s 
+2: started ralph org watch --all (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 0.4s 
+3: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.5s 
+4: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.3s 
+5: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.5s 
+6: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.5s 
+7: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.4s 
+8: ralph org watch --all is already running (pid 35647); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch.log rc=0 returned after 2.4s 
+ralph org watch processes on the ledger once all 8 returned: 1
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2
+stopped ralph org watch --all (pid 35647)
+[rc=0 elapsed=0.4s]
+ralph org watch processes on the ledger after the --stop: 0
+$ grep -c '^watching every org' watch.log
+1
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 35647, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R2/watch-alive.json)
+
+### round 3 (HEAD)
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3 (at once)
+(all 8 returned 2.6s after the first was started)
+1: started ralph org watch --all (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 0.5s 
+2: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 2.5s 
+3: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 2.5s 
+4: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 0.4s 
+5: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 2.4s 
+6: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 2.5s 
+7: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 2.5s 
+8: ralph org watch --all is already running (pid 36155); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch.log rc=0 returned after 0.4s 
+ralph org watch processes on the ledger once all 8 returned: 1
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3
+stopped ralph org watch --all (pid 36155)
+[rc=0 elapsed=0.6s]
+ralph org watch processes on the ledger after the --stop: 0
+$ grep -c '^watching every org' watch.log
+1
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 36155, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 36155, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 36155, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 36155, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 36155, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/R3/watch-alive.json)
+
+## 2. control: the same with base dc41c4f5 (1 round)
+
+### base
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE (at once)
+(all 8 returned 2.2s after the first was started)
+1: started ralph org watch --all (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.2s 
+2: org: watch --detach: the watch (pid 36538) exited before it was running; see /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=1 returned after 2.2s 
+3: ralph org watch --all is already running (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.1s 
+4: ralph org watch --all is already running (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.2s 
+5: org: watch --detach: the watch (pid 36535) exited before it was running; see /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=1 returned after 2.2s 
+6: ralph org watch --all is already running (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.2s 
+7: ralph org watch --all is already running (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.1s 
+8: ralph org watch --all is already running (pid 36533); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch.log rc=0 returned after 0.2s 
+ralph org watch processes on the ledger once all 8 returned: 1
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE
+stopped ralph org watch --all (pid 36533)
+[rc=0 elapsed=0.7s]
+ralph org watch processes on the ledger after the --stop: 0
+$ grep -c '^watching every org' watch.log
+3
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 36533, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 36533, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/BASE/watch-alive.json)
+
+## 2b. the same with the pre-fix ae349cc4 build of /test cycle 1 (1 round, to show the check still reproduces it)
+
+### ae349cc4
+$ 8 x ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX (at once)
+(all 8 returned 1.8s after the first was started)
+1: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.7s 
+2: started ralph org watch --all (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.7s 
+3: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.6s 
+4: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.6s 
+5: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.6s 
+6: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.7s 
+7: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.6s 
+8: ralph org watch --all is already running (pid 37147); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch.log rc=0 returned after 1.6s 
+ralph org watch processes on the ledger once all 8 returned: 7
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX
+org: watch --stop: the watch did not stop within 30s; the stop request stays in /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-stop.json, so it stops when its current cycle, or its wait for an in-flight on-demand watcher call, ends (a cycle takes longer while herdr calls time out); to stop it now, kill 37188 (the pid in /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json; check that it is still a ralph org watch first)
+[rc=1 elapsed=30.1s]
+ralph org watch processes on the ledger after the --stop: 1
+$ grep -c '^watching every org' watch.log
+2
+$ grep -v '^watching every org' watch.log
+org: watch: another ralph org watch --all is running on this state dir (pid 37188, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 37188, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 37188, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 37188, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json)
+org: watch: another ralph org watch --all is running on this state dir (pid 37188, from /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/PREFIX/watch-alive.json)
+
+## 3. how long --detach takes to return (HEAD)
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/F
+started ralph org watch --all (pid 40182); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/F/watch.log
+[rc=0 elapsed=0.3s]
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/F
+ralph org watch --all is already running (pid 40182); log: /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/F/watch.log
+[rc=0 elapsed=0.1s]
+
+$ ralph org watch --stop --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/F
+stopped ralph org watch --all (pid 40182)
+[rc=0 elapsed=0.8s]
+
+## 4. the --detach refusals name --state-dir when it was given (HEAD)
+(holder pid 40330 holds /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1/watch.lock, mark: running, age 3600s)
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1
+org: watch --detach: a watch holds /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1/watch.lock but its liveness mark is not fresh (pid 40330), so no new watch runs; stop it with ralph org watch --stop --state-dir '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1', or kill 40330 (the pid in /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1/watch-alive.json; check that it is still a ralph org watch first)
+[rc=1 elapsed=10.1s]
+
+(the same ledger named by RALPH_ORG_STATE_DIR instead of --state-dir)
+
+$ ralph org watch --all --detach
+org: watch --detach: a watch holds /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1/watch.lock but its liveness mark is not fresh (pid 40330), so no new watch runs; stop it with ralph org watch --stop, or kill 40330 (the pid in /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S1/watch-alive.json; check that it is still a ralph org watch first)
+[rc=1 elapsed=10.1s]
+(holder pid 42010 holds /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S2/watch.lock, mark: stopping, age 0s)
+
+$ ralph org watch --all --detach --state-dir /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S2
+org: watch --detach: the watch that holds /private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S2/watch.lock (pid 42010) is stopping, so no new watch runs; run ralph org watch --all --detach --state-dir '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/live/S2' again once it has ended
+[rc=1 elapsed=0.1s]
+
+## 5. end: --stop on every ledger, then no ralph org watch process of either binary remains
+stopped ralph org watch --all (pid 37188)
+$ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/c2/ralph org watch'
+[pgrep rc=1]
+$ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph-base org watch'
+[pgrep rc=1]
+$ pgrep -fl '/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/owg-test/ralph org watch'
+[pgrep rc=1]
 ```
