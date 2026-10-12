@@ -56,7 +56,7 @@ const (
 	EventScopeReserved = "scope_reserved"
 	// EventPlanApproved is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below) that only `ralph org approve` writes
-	// (Approve, approval.go): a human approved the plan a leader's inbox
+	// (Approve, approve.go): a human approved the plan a leader's inbox
 	// QUESTION named, one event per item, Details `plan=<path in the feature
 	// worktree> digest=<12 hex> content=<64 hex> inbox=<item ID> by=<USER or
 	// unknown> herdr_pane=<set|unset> cwd=<quoted directory>`. The approval
