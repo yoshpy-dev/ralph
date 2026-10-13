@@ -84,7 +84,7 @@
 
 ## Recommendation
 
-- Merge: yes(CRITICAL と HIGH はない。MEDIUM は 3 件、LOW は 9 件。コードの動きは計画の AC1〜AC13 の経路に沿い、gate の中断、ロック、記録の符号化、`run-verify.sh` の終了コードと掃除は、読んだ範囲と probe で欠陥を見つけなかった。M1 は雛形と SKILL の文、M3 はコメントとテストで直せるので、cross-review の前に直すことを勧める)
+- Merge: yes(cycle 2 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。LOW は cycle 2 の 6 件(下の「Cycle 2」の C2-1〜C2-6)で、どれも動きと記録の値を変えない。cycle 1 の MEDIUM 3 件と LOW 9 件は e0adb359・aeba07cb で直っていることを HEAD で確かめた(L8 の半分と M2 の SIGKILL は、前者が stage 7c、後者が tech-debt の行に載る)。cycle 1 の判定は「yes、MEDIUM 3、LOW 9」で、上の所見の表はその時点のまま残す)
 - Follow-ups:
   1. M1: 手順 12 の「断られたとき」と SKILL の手順 4 に、衝突した rebase のあとの archive の revert を足し、`prompts_test.go` の `TestRenderRolePrompt_Leader_FeatureOrgGate` の語句と順序の検査を合わせる
   2. M3: `run-verify.sh` のコメントを実際の動きに合わせ、`tests/test-run-verify-concurrency.sh` の Case 6 を、解放しないまま kill する形に直す(`/bin/sh` と dash の両方)。root と `templates/base/` の 2 つを同じに保つ
@@ -100,3 +100,91 @@
 - M3: `run-verify.sh` のコメントを実際の動きに直し、Case 6 をグループへの TERM と pid だけへの TERM の 2 つに分けた(`/bin/sh` と dash)
 - L1〜L8: 既定のブランチの決め方を 3 か所でそろえた(L1)。rebase の途中と origin がない repo の断りの次の手を直した(L2)。`gateGitMust` を `gateGitOutput` に改名した(L3)。スクリプトのパスと一覧の上限を org 層から export した(L4)。スクリプトが残したプロセスを止めて log に書くようにした(L5)。見張りのコメントを直した(L6)。tech-debt の既存の行に 1 文足した(L7)。スクリプトの実行を `gate_run.go` に分けた(L8)
 - レビューの Known gaps のうち、worktree のスクリプトをそのまま走らせることと、除く環境変数の範囲は、tech-debt の行にした
+
+## Cycle 2
+
+- Date: 2026-10-13
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2。`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 回の最後)
+- Scope: `git diff 789c8864..HEAD`(HEAD 423a9f47、2 コミット、4 ファイル、+259/-11)。b04289c1(`internal/org/gate.go` の `recordGate` と `Gate` の doc、`internal/org/lockfile.go` の `withManifestLockContext` と `withFileLockContext`、`internal/org/gate_test.go` の新しいテスト 2 つと補助 2 つ)と、計画の進捗に 1 行足した 423a9f47。加えて、cycle 1 の追記が頼っている e0adb359(18 ファイル、+897/-439、`gate_run.go` の新設を含む)と aeba07cb を、cycle 1 の各所見が HEAD で直っているかを確かめる範囲で読んだ。この 2 つは cycle 1 のレビュー(fbed9f05 まで)のあとに入り、/verify、/test、/cross-review(Codex、bf80094a)は通ったが、self-review は diff の品質を見ていない。テストの実行、静的解析、仕様適合、文書のずれの検査は行っていない
+
+### 読んだものと確かめたこと
+
+- 読んだ: `git diff 789c8864..HEAD` の全体、`lockfile.go` の全文、`gate.go` の `Gate`(245-306)・`gateInterrupted`(308-320)・`recordGate`(707-763)、`gate_run.go` の全文、`internal/cli/org_gate.go` の RunE、`manifest.go` の `appendJSONLine`、`gate_test.go` の fixture(`run`、`gateStub`、`stopRebaseOnAConflict`)と新しいテスト(884-1095)、e0adb359 の `leader.md`・`reviewer.md`・`org_gate.go`・`watch.go`・`run-verify.sh`・`tests/test-run-verify-concurrency.sh` の hunk、`docs/tech-debt/README.md` のこの PR の追加分(`git diff --numstat 1bddc871...HEAD` が 11 行追加・1 行削除で、新しい行 10 と書き換えた行 1)
+- `git diff --check 789c8864..HEAD` は空。追加行に TODO・FIXME・デバッグ出力・秘密情報はない
+- `git grep` で確かめた: `withManifestLock` の非テストの呼び出し元(`approve.go:147`、`verbs.go:1361`、`spawn.go:621`、`:796`)と `withFileLock`(`inbox.go:327`)は、`context.Background()` に委ねる形に変わっただけで挙動は同じ。`recordGate(` の呼び出しは `Gate` と新しいテストだけ。`gateGitMust`・`gateDirtyListLines`・小文字の `gateStaticScript`・`gateTestScript` は 0 件
+- 新しいテストが何を赤にするかは、変異を当てて読んで辿った(走らせていない)
+  - `recordGate` の先頭の `ctx.Err()` を消す: 「ctx done before the lock」の `clockReads != 0` で赤(ロックの中で `o.now()` が読まれる)
+  - ロックの中の `ctx.Err()` を消す: 「ctx done under the lock」で記録が残り赤
+  - `withManifestLockContext` を `withManifestLock` に戻す: 「while waiting」は 5 秒で timeout し、`took > 3s` と文言の検査で赤。`TestGate_InterruptAfterTheScriptsRecordsNothing` も `took` で赤
+  - `withFileLockContext` の `ctx.Err() != nil` の枝を消す: 文言に「timed out」が出て赤
+  - `recordGate` 末尾の `switch` の 1 つ目の枝を消す: 全部緑のまま(C2-4)
+- 確かめていないもの: テスト、`gofmt`、`-race`、skill の 4 面と `prompts_test.go` の e0adb359 の hunk(`check-skill-sync` と /test の受け持ち)
+
+### 所見(cycle 2)
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 6。cycle 1 の ID(M1〜L9)と取り違えないよう、ID に `C2-` を付ける。C2-5 と C2-6 は e0adb359 に由来し、b04289c1 の差分ではない。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | naming | 新しい 3 か所の comment が欠陥を「cross-review cycle 1 #1」とだけ指す。同じ字面が `internal/org` の別の PR の comment にあり、指す先の triage 報告は cycle ごとに書き換わる | `gate.go:714`、`gate_test.go:889`、`:940-941`。別の PR: `verbs.go:274` と `approval.go:477` は `of org-plan-approval` を添え、`watch.go:192` は triage のパスを添え、`internal/cli/org_watch.go:732` は添えない | `cross-review cycle 1 #1 of org-gate`(`verbs.go:274` の形)にする |
+| C2-2 | LOW | exception-handling | `gateInterrupted` は、スクリプトが 0 で終わったあとの中断でも「the scripts were stopped ... the output so far is in <log>」と言う。b04289c1 でこの文を使う経路が 1 つ増え、新しいテストが文を固定している | `gate.go:311-320`(文は `:318-319`)、呼び出し `:293`(元からある)と `:302`(新しい)、固定 `gate_test.go:924` | 呼び出し側が「スクリプトが走っていたか」を渡し、終わったあとの中断は「the gate was interrupted after the scripts finished and nothing was recorded; their output is in <log>」のように分ける。`internal/cli/org_gate_test.go:700` の固定はスクリプト実行中の中断なので、そのまま残る |
+| C2-3 | LOW | maintainability | `acquireFlock` の doc と文言は、ctx が自分の timeout だけだった時代のまま。呼び手の ctx が取り消されても「timed out after 5s」と言う | `lockfile.go:196-199`(「bounded strictly by ctx's own timeout」)、`:209`(`manifestLockTimeout` を決め打ち)。表に出ないのは `withFileLockContext` が `:94-96` で文を作り直すから | doc を「ctx が終わるまで」にし、`:209` から「timed out after」を外す(文は `withFileLockContext` が決める) |
+| C2-4 | LOW | maintainability | `recordGate` 末尾の `switch` の 1 つ目の枝は、観測できる効果がない。唯一の呼び元 `Gate` が、ctx が終わっていれば `err` を捨てて `gateInterrupted` の文に置き換える | `gate.go:755-761` と `:302`。枝を消して「; nothing was recorded, so run the gate again」を付けても、`errors.Is(err, context.Canceled)` は `%w` で通り、新しい 2 つのテスト(subtest は 4 つ)はどれも全文を固定しない(「while waiting」は「the wait was stopped: context canceled」を含むかだけ見る) | `switch` をやめて `if err != nil` の 1 つに戻す。枝を残すなら、`recordGate` の戻り値の文言を固定するテストを足す |
+| C2-5 | LOW | readability | watch の comment (c) の書き直しが途中までしか折り返されず、1 行だけ短い行が残った | `internal/org/watch.go:1219`(「pending alert whose baseline」だけで終わり、`:1220` は元の折り返し) | 1219-1221 を同じ幅に組み直す。動きには関係しない |
+| C2-6 | LOW | maintainability | `stopGateGroup` が `manifestLockPollInterval` で poll する。その定数の doc は使い手を列挙していて、gate の止め方は入っていない | `gate_run.go:236`、`lockfile.go:32-36` | gate 用の名前(`gatePollInterval`)を置くか、定数の doc の列挙に足す。今のままだと、lock の poll を変えると gate がグループを止める間隔も変わる |
+
+#### C2-1 の根拠
+
+- 3 か所とも、コメントの本文が欠陥の中身を文で書いているので、読む人が困るのは「#1」の出典を探すときだけ。`docs/reports/cross-review-triage-org-gate.md` は cycle 2 の `/cross-review` も書き換えるので、cycle 2 のあとは「#1」が cycle 1 の指摘を指すと言えなくなる
+
+#### C2-2 の根拠
+
+- `gateInterrupted` は ctx が終わっていれば、`logPath` が空でなければ常に「the scripts were stopped」と言う。`gateCheckAfter` の中断(`gate.go:293`)は b04289c1 より前からあり、同じ不正確さを持っていた。b04289c1 はロック待ちの経路(`:302`)を足し、その文を `gate_test.go:924` が一字一句固定した。ユーザーが見るのは Ctrl-C のあとの 1 行で、スクリプトが通っていたのか途中で止めたのかは、この文からは分からない。「何も記録していない」と log のパスは正しく、打ち直すという次の手も変わらないので、LOW にした
+
+#### C2-4 の根拠
+
+- `recordGate` の `err != nil && ctx.Err() != nil` の枝のコメントは「Interrupted: Gate says so (gateInterrupted)」で、枝自身が、文を `Gate` に任せると言っている。ctx の取り消しは戻らないので、`recordGate` の `switch` と `gateInterrupted` が別の時刻に `ctx.Err()` を読んでも、ユーザーに見える文は 1 つに決まる
+- ctx の状態で分類するので、本物の append 失敗(`appendJSONLine` は 1 回の `Write`。失敗したとき部分書きがありうる)と中断が重なると、中断として報告され、元のエラーが落ちる。`gateInterrupted` が cycle 1 から持つ作りと同じで、b04289c1 の新しい穴ではない
+
+### cycle 1 の所見を HEAD で見直した結果
+
+| ID | 状態 | 確かめた場所 |
+| --- | --- | --- |
+| M1 | 直った | `leader.md` の手順 10 の共通の規則と手順 12 の「断られたとき」の枝。skill の 4 面と `prompts_test.go` は読んでいない |
+| M2 | 直った(SIGHUP)・残りは tracked | `internal/cli/org_gate.go` の `signal.NotifyContext` に SIGHUP、`leader.md` 手順 12 の「前の gate のスクリプトが終わるのを待つ」、tech-debt 228 行目(SIGKILL の行。Related の「(M2)」は、この報告の ID を書き換えていないので今も解決する) |
+| M3 | 直った | `run-verify.sh` のコメントと、Case 6 のグループ TERM と pid だけの TERM の 2 分割。pid だけの検査は 1 秒の否定の待ちで、遅い machine では弱くなる向きに働き、赤にはならない |
+| L1 | 直った | `leader.md` 手順 9 と `reviewer.md` の `master` |
+| L2 | 直った | `gateCheckBranch`、`gateRebaseInProgress`、`gateNoBaseRefusal` と、その表のテスト(`stopRebaseOnAConflict` の `--apply` あり・なし) |
+| L3 | 直った | `gateGitMust` は `git grep` で 0 件 |
+| L4 | 直った | `org_gate.go` が `org.GateStaticScript`・`org.GateTestScript`・`org.GateDirtyListLines` を使う |
+| L5 | 直った | `gate_run.go` の `stopGateStrays`、`TestGate_StopsWhatAScriptLeftRunning`(4 通り) |
+| L6 | 直ったが C2-5 | `watch.go` の comment (c) |
+| L7 | 直った | tech-debt の FR-7 の行に 1 文(PR の diff の `-|` と `+|` の組) |
+| L8 | 半分 | `gate_run.go` への分離は済み。`gateRecordFromDetails`・`isGateReason` が 7c まで非テストの呼び元を持たない半分は、cycle 1 の推奨(「今すぐは要らない」)どおり手を入れておらず、comment が 7c を名指しする。7c が払うので、行は求めない |
+| L9 | 直った | `leader.md` 手順 12 の「バックグラウンドで走らせ、ファイルに書く」 |
+| Known gaps | tracked | tech-debt の「worktree のスクリプト」と「環境の接頭辞」の 2 行(PR の追加 10 行の中) |
+
+cycle 1 の「Positive notes」が頼っていた点は、b04289c1 のあとも成り立つ。ロックは `recordGate` の中だけで取り、スクリプトの間は持たない。記録の前に manifest を読み直して binding と命を比べる。待ちは上限つきの poll。新しいテストの `time.Sleep(300ms)`(`gate_test.go:909`)と 200 ms の否定の待ち(`:995`)は、結果の判定ではなく中断を置く位置を決めるために使っている。前者が外れても(割り込みが `gateCheckAfter` の git に当たっても)文言は同じで緑のままなので、弱くなる向きに働く。ロック待ちの分岐そのものは `recordGate` の 4 つの subtest が分けて固定している。後者は goroutine が 200 ms 以内にロック待ちに入る前提で、外れると赤になる向きだが、そこまでの処理は `MkdirAll` と `OpenFile` だけで余裕は大きい。待ちはすべて 10 秒の上限があり、`holdManifestLock` の cleanup がロックを放す。
+
+### b04289c1 で確かめて、所見にしなかったもの
+
+- cross-review の指摘(中断が記録されうる)は閉じている。窓は 3 つあった: ロックを取る前、ロックを待つ間、ロックの中の読みから追記まで。順に、先頭の `ctx.Err()`、`withManifestLockContext`、追記直前の `ctx.Err()` が塞ぐ。残る窓は、追記の直前の確認と `Write` の間だけで、`Gate` の doc が「up to the moment the event is appended」と書いている
+- `withManifestLockContext` の doc の「free なロックは ctx を見ず、fn は ctx が終わっていても走る」は `acquireFlock` の最初の試行が ctx を見る前に走ることと合う。呼び手が fn の中でも確かめる、という指示は `recordGate` が守っている
+- org が変わっていた断り(`refused`)は、ctx が終わっていても先に返る。どちらも何も記録しないので問題ない
+- 計画の 423a9f47 は日付つきの進捗の記録 1 行。「このあと回す」は書いた時点の話なので、所見にしない
+
+### Tech debt identified
+
+この回は報告だけをコミットする指示なので、`docs/tech-debt/README.md` には行を足していない。cycle 2 は上限の最後で、C2-1〜C2-6 は直すと 3 回目の pipeline が要る。どれも動きと記録の値を変えないので、次の 1 行にまとめて足すことを勧める(orchestrator が足す)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Six small diff-quality leftovers in the org-gate PR, found in self-review cycle 2 (all LOW): (1) comments cite "cross-review cycle 1 #1" without the plan slug (`gate.go`, `gate_test.go`), a token other PRs in `internal/org` also use; (2) `gateInterrupted` says "the scripts were stopped ... the output so far" also when the scripts had finished and the interrupt hit the re-read or the lock wait; (3) `acquireFlock`'s doc and "timed out after" text assume its ctx is only the timeout; (4) the first arm of `recordGate`'s closing `switch` has no observable effect, since `Gate` replaces the message; (5) `watch.go`'s comment (c) has one short orphan line from a partial reflow; (6) `stopGateGroup` polls at `manifestLockPollInterval`, whose doc lists other users | Misleading or redundant sentences and one redundant branch; none changes behavior or a recorded value. (2) is the only user-visible one: a Ctrl-C during the lock wait reports stopped scripts that had already passed | Found at the pipeline cap (2/2); fixing needs a third run, and each item is a few lines | The next edit to `internal/org/gate.go`, `gate_run.go`, or `lockfile.go`, or a report that the interrupt message misled someone | `docs/reports/self-review-2026-10-13-org-gate.md` (Cycle 2, C2-1 to C2-6) |
+
+### Recommendation
+
+- Merge: 上の「Recommendation」の Merge の行のとおり(yes)。cycle 2 の差分に CRITICAL・HIGH・MEDIUM はなく、cross-review の指摘は閉じ、cycle 1 の直しは HEAD で成り立つ
+- Follow-ups:
+  1. 上の tech-debt の 1 行を足す(上限なので、C2-1〜C2-6 は直さない)。3 回目を回す理由が別にあるなら、C2-2 と C2-4 と C2-1 を先に直す
+  2. cycle 2 の `/verify` と `/test` が書き直す報告に、b04289c1 で動いた `gate.go` の行を指す pointer が残っている(`verify-2026-10-13-org-gate.md` の AC5 の行は `gate.go:711-745`、`test-2026-10-13-org-gate.md` は `gate.go:723-724`。`recordGate` は今 713-763 で、`:723-724` は条件の枝ではなく `var refused` と lock の呼び出しに当たる)。関数名で書くか、HEAD で引き直す
+  3. `/cross-review` を回すなら、triage 報告の「#1」が cycle 2 の新しい指摘を指す。C2-1 の字面を直すなら、その前がよい
