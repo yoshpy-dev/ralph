@@ -53,7 +53,17 @@ const manifestLockPollInterval = 25 * time.Millisecond
 // minimal -- see Spawn's own doc comment for why only the read-validate-
 // append section is wrapped, not the subsequent herdr/agmsg round trip.
 func withManifestLock(dir string, fn func() error) error {
-	return withFileLock(dir, manifestLockFile, "manifest", fn)
+	return withManifestLockContext(context.Background(), dir, fn)
+}
+
+// withManifestLockContext is withManifestLock whose wait for the lock also
+// ends when ctx is done, with an error that wraps ctx's cause and does not
+// say the wait timed out (withFileLockContext). recordGate uses it, so an
+// interrupted `ralph org gate` stops waiting at once. Taking a free lock does
+// not look at ctx: fn runs even when ctx is already done, so a caller that
+// must not act once ctx is done checks ctx in fn as well.
+func withManifestLockContext(ctx context.Context, dir string, fn func() error) error {
+	return withFileLockContext(ctx, dir, manifestLockFile, "manifest", fn)
 }
 
 // withFileLock is the flock mechanism behind withManifestLock and the inbox
@@ -63,16 +73,27 @@ func withManifestLock(dir string, fn func() error) error {
 // messages ("manifest" gives withManifestLock's messages). Each lock file is
 // independent: holding one never blocks a caller of another.
 func withFileLock(dir, name, what string, fn func() error) error {
+	return withFileLockContext(context.Background(), dir, name, what, fn)
+}
+
+// withFileLockContext is withFileLock whose wait for the lock also ends when
+// ctx is done. The error then wraps context.Cause(ctx) instead of saying the
+// wait timed out, so a caller can tell its own interruption from a lock held
+// past manifestLockTimeout.
+func withFileLockContext(ctx context.Context, dir, name, what string, fn func() error) error {
 	f, lockPath, err := openLockFile(dir, name, what)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
 
-	ctx, cancel := context.WithTimeout(context.Background(), manifestLockTimeout)
+	waitCtx, cancel := context.WithTimeout(ctx, manifestLockTimeout)
 	defer cancel()
 
-	if err := acquireFlock(ctx, f); err != nil {
+	if err := acquireFlock(waitCtx, f); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("org: acquire %s lock %s: the wait was stopped: %w", what, lockPath, context.Cause(ctx))
+		}
 		return fmt.Errorf("org: acquire %s lock %s: %w", what, lockPath, err)
 	}
 	defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()

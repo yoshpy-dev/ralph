@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -880,6 +881,213 @@ func TestGate_InterruptedBeforeTheScripts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fx.stateDir, gateLogDir)); !errors.Is(err, os.ErrNotExist) || fx.calls(t) != nil {
 		t.Fatalf("an interrupted gate wrote a log (stat: %v) or ran %v", err, fx.calls(t))
+	}
+}
+
+// TestGate_InterruptAfterTheScriptsRecordsNothing covers AC5 for an
+// interrupt that lands after both scripts passed, while Gate waits for a
+// manifest lock someone else holds (cross-review cycle 1 #1): Gate stops
+// waiting at once, before the lock is released, records nothing, and
+// returns the interrupt error naming the log.
+func TestGate_InterruptAfterTheScriptsRecordsNothing(t *testing.T) {
+	fx := newGateFixture(t)
+	before := fileOrAbsent(t, fx.o.Manifest.Path())
+	release := holdManifestLock(t, fx.o)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := fx.run(ctx, "org-a", fx.worktree)
+		done <- err
+	}()
+	logPath := filepath.Join(fx.stateDir, gateLogDir, gateTestLog)
+	waitForFileContaining(t, logPath, "==> ralph org gate: ./"+GateTestScript+" exited 0\n")
+	// Give Gate the time to read the worktree again (two git commands) and
+	// start waiting for the lock. An interrupt that lands during the git
+	// commands gives the same error and records nothing either, so a slow
+	// machine makes the test weaker, not red.
+	time.Sleep(300 * time.Millisecond)
+	begin := time.Now()
+	cancel()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("gate did not return within 10s of the interrupt")
+	}
+	if took := time.Since(begin); took > 3*time.Second {
+		t.Errorf("gate took %s to return after the interrupt; want it to stop waiting for the lock at once (the lock times out after %s)",
+			took, manifestLockTimeout)
+	}
+	release()
+
+	want := "org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in " + logPath
+	if err == nil || err.Error() != want {
+		t.Fatalf("gate = %v\nwant     %s", err, want)
+	}
+	if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before {
+		t.Fatalf("a gate interrupted after its scripts changed the manifest:\nbefore %s\nafter  %s", before, after)
+	}
+	if calls := fx.calls(t); !slices.Equal(calls, []string{"static", "test"}) {
+		t.Fatalf("scripts run = %v; want static then test", calls)
+	}
+}
+
+// TestRecordGate_InterruptRecordsNothing: recordGate appends nothing and
+// returns ctx's cause when ctx is done before the lock is taken (it does not
+// go on under the lock), while it waits for a held lock (the wait ends at
+// once, with an error that does not say it timed out), or under the lock
+// right before the append; with ctx not done it records (cross-review cycle 1
+// #1).
+func TestRecordGate_InterruptRecordsNothing(t *testing.T) {
+	setup := func(t *testing.T) (*gateFixture, gateLife, gateRecord, string) {
+		t.Helper()
+		fx := newGateFixture(t)
+		life, refused := gateOrgLife(mustReadEvents(t, fx.o), "org-a")
+		if refused != "" {
+			t.Fatalf("gateOrgLife = %q; want org-a's binding", refused)
+		}
+		head, base := fx.head(t)
+		record := gateRecord{Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", By: "alice",
+			Log: filepath.Join(fx.stateDir, gateLogDir, gateTestLog)}
+		return fx, life, record, fileOrAbsent(t, fx.o.Manifest.Path())
+	}
+	assertNothingRecorded := func(t *testing.T, fx *gateFixture, before, refused string, err error) {
+		t.Helper()
+		if !errors.Is(err, context.Canceled) || refused != "" {
+			t.Fatalf("recordGate = %q, %v; want ctx's context.Canceled and no refusal", refused, err)
+		}
+		if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before {
+			t.Fatalf("an interrupted recordGate changed the manifest:\nbefore %s\nafter  %s", before, after)
+		}
+	}
+
+	t.Run("ctx done before the lock", func(t *testing.T) {
+		fx, life, record, before := setup(t)
+		clockReads := 0
+		fx.o.Now = func() time.Time { clockReads++; return gateTestClock }
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		refused, err := fx.o.recordGate(ctx, "org-a", life, record)
+		assertNothingRecorded(t, fx, before, refused, err)
+		if clockReads != 0 {
+			t.Fatalf("recordGate built the event under the lock (%d clock reads); want it stopped before the lock", clockReads)
+		}
+	})
+
+	t.Run("ctx done while waiting for the lock", func(t *testing.T) {
+		fx, life, record, before := setup(t)
+		release := holdManifestLock(t, fx.o)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		type outcome struct {
+			refused string
+			err     error
+		}
+		done := make(chan outcome, 1)
+		go func() {
+			refused, err := fx.o.recordGate(ctx, "org-a", life, record)
+			done <- outcome{refused, err}
+		}()
+		select {
+		case got := <-done:
+			t.Fatalf("recordGate = %+v while the lock was held; want it waiting", got)
+		case <-time.After(200 * time.Millisecond):
+		}
+		begin := time.Now()
+		cancel()
+		var got outcome
+		select {
+		case got = <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("recordGate did not return within 10s of the interrupt")
+		}
+		if took := time.Since(begin); took > 3*time.Second {
+			t.Errorf("recordGate took %s to return after the interrupt; want it to stop waiting for the lock at once", took)
+		}
+		release()
+		assertNothingRecorded(t, fx, before, got.refused, got.err)
+		if msg := got.err.Error(); !strings.Contains(msg, "the wait was stopped: context canceled") || strings.Contains(msg, "timed out") {
+			t.Fatalf("recordGate = %v; want the stopped wait, not a lock timeout", got.err)
+		}
+	})
+
+	t.Run("ctx done under the lock, right before the append", func(t *testing.T) {
+		fx, life, record, before := setup(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// recordGate reads the clock for the event's TS under the lock, after
+		// the check before the lock: the interrupt lands there.
+		fx.o.Now = func() time.Time { cancel(); return gateTestClock }
+		refused, err := fx.o.recordGate(ctx, "org-a", life, record)
+		assertNothingRecorded(t, fx, before, refused, err)
+	})
+
+	t.Run("ctx not done records", func(t *testing.T) {
+		fx, life, record, _ := setup(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		if refused, err := fx.o.recordGate(ctx, "org-a", life, record); refused != "" || err != nil {
+			t.Fatalf("recordGate = %q, %v; want the record", refused, err)
+		}
+		events := fx.gateEvents(t)
+		if len(events) != 1 || events[0].Event != EventGatePassed || events[0].Details != record.details() {
+			t.Fatalf("gate events = %+v; want one gate_passed with Details %q", events, record.details())
+		}
+	})
+}
+
+// holdManifestLock takes o's manifest lock in a goroutine, as another gate
+// or spawn would hold it, and returns once it is held. release drops it and
+// waits for the goroutine; a cleanup calls it when the test does not.
+func holdManifestLock(t *testing.T, o *Org) (release func()) {
+	t.Helper()
+	held, drop := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+			close(held)
+			<-drop
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case err := <-done:
+		t.Fatalf("hold the manifest lock: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the manifest lock was not taken within 10s")
+	}
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			close(drop)
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("manifest lock holder: %v", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Error("the manifest lock holder did not return within 10s")
+			}
+		})
+	}
+	t.Cleanup(release)
+	return release
+}
+
+// waitForFileContaining waits up to 10s for path to hold want.
+func waitForFileContaining(t *testing.T, path, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not hold %q within 10s", path, want)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

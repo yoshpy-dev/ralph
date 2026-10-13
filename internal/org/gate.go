@@ -239,7 +239,9 @@ func isGateReason(reason string) bool {
 // The error is for what is not a refusal: the manifest or a git command that
 // fails, a log that cannot be written, a record that cannot be appended, and
 // an interruption: when ctx is done, the running script's process group is
-// stopped and nothing is recorded.
+// stopped and nothing is recorded. ctx done after the scripts finished, while
+// Gate reads the worktree again or waits for the manifest lock, also records
+// nothing, up to the moment the event is appended (recordGate).
 func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	if err := ValidateIdentifier("org_id", p.OrgID); err != nil {
 		return GateResult{Refused: "org: gate: " + strings.TrimPrefix(err.Error(), "org: ")}, nil
@@ -296,8 +298,8 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		Reason: res.Reason, Head: res.Head, Base: res.Base, BaseRef: res.BaseRef, Branch: res.Branch,
 		By: approverName(gateEnvValue(env, "USER")), HerdrPane: gateEnvValue(env, herdrPaneIDEnv) != "", Log: logPath,
 	}
-	if res.Refused, err = o.recordGate(p.OrgID, life, record); err != nil {
-		return res, err
+	if res.Refused, err = o.recordGate(ctx, p.OrgID, life, record); err != nil {
+		return res, gateInterrupted(ctx, err, logPath)
 	}
 	res.Passed = res.Refused == "" && res.Reason == ""
 	return res, nil
@@ -706,11 +708,20 @@ func gateGitOutput(ctx context.Context, dir string, args ...string) (string, err
 // after it reads the manifest again: when the org's binding or life is no
 // longer life's (it was disbanded, started again, or bound to another
 // feature while the scripts ran), it records nothing and returns the
-// refusal. The error is a lock, read, or append that failed; nothing is
-// recorded then either.
-func (o *Org) recordGate(orgID string, life gateLife, record gateRecord) (string, error) {
+// refusal. The error is a lock, read, or append that failed, or ctx's cause
+// when ctx is done before the append; nothing is recorded then either.
+func (o *Org) recordGate(ctx context.Context, orgID string, life gateLife, record gateRecord) (string, error) {
+	// ctx is checked twice (cross-review cycle 1 #1), so an interrupt that
+	// lands after the scripts finished records nothing either: here, before
+	// the lock is taken, and under the lock right before the append. The wait
+	// for a held lock ends when ctx is done (withManifestLockContext), but
+	// taking a free lock does not look at ctx, and the interrupt can also land
+	// while the manifest is read under the lock.
+	if ctx.Err() != nil {
+		return "", context.Cause(ctx)
+	}
 	var refused string
-	err := withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
+	err := withManifestLockContext(ctx, filepath.Dir(o.Manifest.Path()), func() error {
 		rr, err := o.Manifest.Read()
 		if err != nil {
 			return fmt.Errorf("org: gate: read manifest: %w", err)
@@ -733,12 +744,19 @@ func (o *Org) recordGate(orgID string, life gateLife, record gateRecord) (string
 			return nil
 		}
 		ev := ManifestEvent{TS: o.now(), OrgID: orgID, SeatID: "", Event: record.event(), Details: record.details()}
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
 		if err := o.appendEvent(ev); err != nil {
 			return fmt.Errorf("org: gate: record %s: %w", ev.Event, err)
 		}
 		return nil
 	})
-	if err != nil {
+	switch {
+	case err != nil && ctx.Err() != nil:
+		// Interrupted: Gate says so (gateInterrupted).
+		return "", err
+	case err != nil:
 		return "", fmt.Errorf("%w; nothing was recorded, so run the gate again", err)
 	}
 	return refused, nil
