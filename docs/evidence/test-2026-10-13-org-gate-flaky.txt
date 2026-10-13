@@ -1672,3 +1672,1027 @@ real 116.86
 user 26.94
 sys 33.92
 RC=0
+
+
+################################################################################
+# Cycle 2 (HEAD 0bc87603, fix b04289c1): the two new tests and the existing gate interrupt and lock tests
+# -count=20 (org, then cli) and -race -count=5 (both), one after the other, nothing else of this session running.
+################################################################################
+
+## per-test pass counts and duration ranges (from the -v output below)
+## org-count20
+TestGate_ManifestLockNotHeldWhileScriptsRun                                                     PASS 20 FAIL 0  1.02-1.35s
+TestGate_InterruptStopsTheScriptsAndRecordsNothing                                              PASS 20 FAIL 0  1.60-1.88s
+  TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false                       PASS 20 FAIL 0  0.63-0.88s
+  TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true                        PASS 20 FAIL 0  0.94-1.08s
+TestGate_InterruptedBeforeTheScripts                                                            PASS 20 FAIL 0  0.22-0.28s
+TestGate_InterruptAfterTheScriptsRecordsNothing                                                 PASS 20 FAIL 0  1.15-1.44s
+TestRecordGate_InterruptRecordsNothing                                                          PASS 20 FAIL 0  1.23-1.81s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock                               PASS 20 FAIL 0  0.26-0.35s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock                    PASS 20 FAIL 0  0.45-0.65s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append       PASS 20 FAIL 0  0.25-0.41s
+  TestRecordGate_InterruptRecordsNothing/ctx_not_done_records                                   PASS 20 FAIL 0  0.24-0.46s
+TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites                                  PASS 20 FAIL 0  0.16-0.17s
+TestWithManifestLock_SerializesConcurrentCallers                                                PASS 20 FAIL 0  0.48-0.52s
+## cli-count20
+TestOrgGate_InterruptStopsTheScriptAndRecordsNothing                                            PASS 20 FAIL 0  2.60-13.50s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT                                   PASS 20 FAIL 0  0.64-5.68s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM                                  PASS 20 FAIL 0  0.63-1.11s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP                                   PASS 20 FAIL 0  0.64-5.71s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled       PASS 20 FAIL 0  0.64-1.05s
+## race-count5
+TestGate_ManifestLockNotHeldWhileScriptsRun                                                     PASS 5 FAIL 0  1.09-1.35s
+TestGate_InterruptStopsTheScriptsAndRecordsNothing                                              PASS 5 FAIL 0  1.64-2.22s
+  TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false                       PASS 5 FAIL 0  0.64-0.96s
+  TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true                        PASS 5 FAIL 0  0.98-1.26s
+TestGate_InterruptedBeforeTheScripts                                                            PASS 5 FAIL 0  0.22-0.28s
+TestGate_InterruptAfterTheScriptsRecordsNothing                                                 PASS 5 FAIL 0  1.15-1.24s
+TestRecordGate_InterruptRecordsNothing                                                          PASS 5 FAIL 0  1.29-1.35s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock                               PASS 5 FAIL 0  0.28-0.31s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock                    PASS 5 FAIL 0  0.46-0.49s
+  TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append       PASS 5 FAIL 0  0.26-0.31s
+  TestRecordGate_InterruptRecordsNothing/ctx_not_done_records                                   PASS 5 FAIL 0  0.25-0.26s
+TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites                                  PASS 5 FAIL 0  0.16-0.17s
+TestWithManifestLock_SerializesConcurrentCallers                                                PASS 5 FAIL 0  0.48-0.51s
+TestOrgGate_InterruptStopsTheScriptAndRecordsNothing                                            PASS 5 FAIL 0  2.77-3.43s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT                                   PASS 5 FAIL 0  0.66-0.84s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM                                  PASS 5 FAIL 0  0.69-0.95s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP                                   PASS 5 FAIL 0  0.67-0.95s
+  TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled       PASS 5 FAIL 0  0.66-0.87s
+
+## the five slow CLI subtests (iterations of -count=20; every other signal subtest took 0.63-1.11s)
+iteration 3: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.68s)
+iteration 6: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (5.68s)
+iteration 11: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.68s)
+iteration 13: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (5.68s)
+iteration 13: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.71s)
+
+## fork-race probe (scratchpad og2/forkrace/race.py, not committed): a script like the CLI test's static hook
+## (echo $$ > pid; touch started; sleep 30) in its own process group gets SIGTERM to the group as soon as
+## 'started' exists (or after a delay); a process still in the group 0.2s after the script exited counts as a survivor.
+---- race.py
+import os, sys, time, signal, subprocess
+d = sys.argv[1]; n = int(sys.argv[2]); delay = float(sys.argv[3])
+script = os.path.join(d, "s.sh")
+open(script, "w").write('#!/bin/sh\necho $$ > "$OUT/pid"\ntouch "$OUT/started"\nsleep 30\n')
+os.chmod(script, 0o755)
+surv = 0
+for i in range(n):
+    out = os.path.join(d, "o%d" % i); os.makedirs(out, exist_ok=True)
+    p = subprocess.Popen([script], env={"OUT": out, "PATH": "/usr/bin:/bin"}, preexec_fn=os.setpgrp,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    st = os.path.join(out, "started")
+    while not os.path.exists(st): time.sleep(0.005)
+    if delay: time.sleep(delay)
+    os.killpg(p.pid, signal.SIGTERM)
+    p.wait()
+    time.sleep(0.2)
+    try:
+        os.killpg(p.pid, 0); alive = True
+    except ProcessLookupError:
+        alive = False
+    if alive:
+        surv += 1
+        os.killpg(p.pid, signal.SIGKILL)
+print("n=%d delay=%.3f survivors=%d" % (n, delay, surv))
+---- results
+JST ~21:07 (python3 race.py <dir> 150 <delay>, delays 0, 0.001, 0.003):
+n=150 delay=0.000 survivors=7
+n=150 delay=0.001 survivors=0
+n=150 delay=0.003 survivors=0
+JST 21:10-21:13, load average 3.3-3.4 (3 runs of race2.py, the same probe that also prints the survivor's ps line, and 3 runs of race.py, delay 0):
+n=150 delay=0.000 survivors=0   (x6)
+
+## raw output
+start 2026-10-13T12:01:59Z
+21:01  up 8 days, 6 mins, 5 users, load averages: 3.01 21.40 30.07
+$ go test -count=20 -v ./internal/org/ -run '^(TestGate_InterruptAfterTheScriptsRecordsNothing|TestRecordGate_InterruptRecordsNothing|TestGate_InterruptStopsTheScriptsAndRecordsNothing|TestGate_InterruptedBeforeTheScripts|TestGate_ManifestLockNotHeldWhileScriptsRun|TestWithManifestLock_SerializesConcurrentCallers|TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites)$'
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.08s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.71s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.04s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.23s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.45s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.09s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.60s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.65s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.94s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.23s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.15s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.25s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.45s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.52s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.07s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.64s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.64s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.00s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.17s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.81s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.65s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.41s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.46s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.19s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.74s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.05s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.24s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.20s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.36s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.33s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.17s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.48s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.06s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.72s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.63s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.08s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.44s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.26s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.26s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.24s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.09s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.65s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.66s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.99s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.23s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.16s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.33s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.50s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.06s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.66s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.66s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.00s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.23s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.48s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.06s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.88s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.88s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.00s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.28s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.42s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.24s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.17s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.71s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.03s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.45s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.03s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.66s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.99s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.17s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.02s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.61s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.64s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.98s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.23s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.16s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.50s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.09s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.70s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.70s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.01s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.17s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.14s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.71s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.70s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.01s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.17s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.48s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.06s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.99s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.15s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.35s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.02s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.28s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.24s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.52s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.18s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.70s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.02s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.26s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.18s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.16s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.73s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.72s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.01s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.36s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.35s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.13s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.68s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.68s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.00s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.16s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.34s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.32s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.24s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.11s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.68s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.65s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.03s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.27s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.21s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.23s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.25s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.08s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.68s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.67s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.00s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.27s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.26s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.45s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.27s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	125.220s
+real 125.57
+user 11.60
+sys 19.32
+RC=0
+end 2026-10-13T12:04:04Z
+start 2026-10-13T12:04:04Z
+21:04  up 8 days, 8 mins, 5 users, load averages: 4.20 15.59 26.56
+$ go test -count=20 -v ./internal/cli/ -run '^(TestOrgGate_InterruptStopsTheScriptAndRecordsNothing)$'
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.21s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.89s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.96s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.75s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (7.74s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.72s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.67s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.68s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (7.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (5.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.77s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.67s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.80s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.74s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.67s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.74s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (7.73s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.67s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.82s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.65s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (13.50s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (5.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.06s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (5.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.05s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.60s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.62s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.67s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.70s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.96s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.11s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.92s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.68s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.65s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	81.870s
+real 82.33
+user 6.93
+sys 11.71
+RC=0
+end 2026-10-13T12:05:27Z
+start 2026-10-13T12:05:27Z
+21:05  up 8 days, 9 mins, 5 users, load averages: 4.63 12.98 24.52
+$ go test -race -count=5 -v ./internal/org/ ./internal/cli/ -run '^(TestGate_InterruptAfterTheScriptsRecordsNothing|TestRecordGate_InterruptRecordsNothing|TestGate_InterruptStopsTheScriptsAndRecordsNothing|TestGate_InterruptedBeforeTheScripts|TestGate_ManifestLockNotHeldWhileScriptsRun|TestWithManifestLock_SerializesConcurrentCallers|TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites)$|^(TestOrgGate_InterruptStopsTheScriptAndRecordsNothing)$'
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.13s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (2.22s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.96s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.26s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.28s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.15s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.28s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.46s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.29s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.48s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.10s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.68s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.98s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.20s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.49s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.26s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.09s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.66s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.64s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.02s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.22s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.21s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.34s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.25s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.16s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.15s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.64s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.65s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.98s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.26s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.19s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.35s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.47s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.31s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.17s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (1.35s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.88s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.69s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (1.19s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.27s)
+=== RUN   TestGate_InterruptAfterTheScriptsRecordsNothing
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.24s)
+=== RUN   TestRecordGate_InterruptRecordsNothing
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append
+=== RUN   TestRecordGate_InterruptRecordsNothing/ctx_not_done_records
+--- PASS: TestRecordGate_InterruptRecordsNothing (1.34s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.48s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.30s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.26s)
+=== RUN   TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites
+--- PASS: TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites (0.17s)
+=== RUN   TestWithManifestLock_SerializesConcurrentCallers
+--- PASS: TestWithManifestLock_SerializesConcurrentCallers (0.51s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	34.998s
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.43s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.95s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.95s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.87s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.75s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.95s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.84s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.72s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.71s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.77s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.84s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.71s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.72s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.72s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	18.118s
+real 35.47
+user 7.45
+sys 8.88
+RC=0
+end 2026-10-13T12:06:02Z

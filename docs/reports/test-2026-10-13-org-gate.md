@@ -161,7 +161,123 @@ coverage で通らなかった区間のうち、利用者に見える 2 つを�
 
 ## Verdict
 
-- Verdict: pass
+- Verdict: pass(ブランチ全体、cycle 2 の HEAD 0bc87603 まで。下の Pass・Fail・Blocked の 3 行は cycle 1 の HEAD eb5ffdac での結果で、cycle 2 の結果は下の「Cycle 2」節の「判断(cycle 2)」)
 - Pass: `./scripts/run-test.sh` は changed と full のどちらも rc 0(shell 41 本、PASS の行 4,118、Go 8 パッケージ)。`go test ./... -count=1` は top-level 1,538 本が PASS で 0 fail、足した 34 本もすべて PASS で、消えたテストはない。`-race`(org と cli)も 0 fail で、`DATA RACE` は 0 件。直接打った shell のテスト 6 本は 176 件すべて PASS。concurrency のテストは 5 回連続と負荷の下の 3 回で揺れず、gate のテストの `-count=3` も 0 fail。mutation は依頼の 3 つの動き(head_moved、環境の固定、終了コードのファイルがないとき)の 9 件を含む 15 件がすべて red
 - Fail: 0
 - Blocked: なし
+
+## Cycle 2
+
+- Date: 2026-10-13(JST 20:39〜21:25)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 の最後)。cross-review cycle 1 の ACTION_REQUIRED #1 を直した b04289c1、self-review cycle 2(bedc0ebc)、verify cycle 2(0bc87603、pass)のあとに走らせた
+- Scope: HEAD 0bc87603。cycle 1 の HEAD eb5ffdac から変わったコードとテストは b04289c1 の 3 ファイル(`internal/org/gate.go`、`internal/org/lockfile.go`、`internal/org/gate_test.go`)だけで、ほかは sync-docs の 6716a028 が直した文書(AGENTS.md、README.md、quality-gates の 2 面)、計画の Notes、各段の報告と evidence、insight event。behavioral test だけを実行した(静的解析は /verify の担当)。この節の行番号はすべて HEAD 0bc87603 のもの
+- Evidence(上書きしたものと、末尾に足したもの):
+  - `docs/evidence/test-2026-10-13-org-gate-run-test.txt`: 上書きした。`./scripts/run-test.sh`(changed)1 回の出力で、末尾に `RC=` がある。cycle 1 の 2 回分の出力は `git show 0bc87603:docs/evidence/test-2026-10-13-org-gate-run-test.txt` で読める
+  - `docs/evidence/test-2026-10-13-org-gate-go-test.txt`: 上書きした。`go test ./internal/org/... ./internal/cli/... -count=1 -timeout 30m -v` と、末尾に `internal/insights` の打ち直しと `internal/org` の coverage の要約
+  - `docs/evidence/test-2026-10-13-org-gate-race.txt`: 上書きした。`go test -race ./internal/org/ ./internal/cli/ -run 'Gate|Lock' -count=3 -timeout 30m -v`
+  - `docs/evidence/test-2026-10-13-org-gate-flaky.txt`: 末尾に「Cycle 2」を足した。テストごとの回数と時間の幅、遅かった 5 つの subtest、fork の probe、生の出力
+  - `docs/evidence/test-2026-10-13-org-gate-mutation.txt`: 末尾に「Cycle 2」を足した。mutant の overlay と差分、結果、落としたテストと最初の失敗の行、probe のテストの全文と結果
+  - `$HOME` は `~` に、scratchpad のパスは `<scratchpad>` に置き換えた。置き換えが要ったのは go-test の evidence の 4 行(doctor のテストが出す `~/.agents/skills/agmsg` と `~/.codex/models_cache.json`)と、mutation の evidence の overlay の JSON だけだった。どの evidence にも U+FFFD はない
+  - wrapper が書いた `docs/evidence/verify-2026-10-13-113922.log` は gitignore の対象なので、コミットしない
+  - insight event: `docs/insights/events/2026-10-13-org-gate.jsonl` に test の 1 行(`--cycle auto` で cycle 2、verdict pass)を足し、この報告と同じコミットに入れた。行は `./scripts/insights-append.sh --events-dir <scratchpad>` で作り、Edit で足した
+- 依頼の 2 つの `go test` には `-timeout 30m` を足した。混んだときに既定の 10 分で package が止まらないようにするためで、テストの選び方と回数は依頼のとおり
+- テストもコードも変えていない。mutant の写し、probe のテスト、fork の probe は scratchpad の `og2/` に置いた。テストの前後で `~/.config/herdr` の下に新しいファイルはなく、main のチェックアウトの `git status --short` は空のまま、worktree で変わったのはこの報告、上の evidence、insight event だけで、`$TMPDIR` に `ralph-verify-*` の一時ファイルは残っていない。osascript を呼んだかどうかは、この回では確かめていない(テストのコードは b04289c1 の 2 本のほかは cycle 1 と同じ)
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。cycle 1 と同じく `shared:scripts/run-verify.sh` で full に落ち、golang の pack を選んだ) | shell 41 本(PASS の行 4,118)、Go 8 パッケージ | すべて | 0 | shell 1 | 13 分 54 秒、rc 0 |
+| `go test ./internal/org/... ./internal/cli/... -count=1 -timeout 30m -v` | top-level 1,324、subtest 1,953 | top-level 1,323、subtest 1,953 | 0 | 1 | 3 分 15 秒(cli 194.1 s、org 99.3 s)、rc 0 |
+| `go test -race ./internal/org/ ./internal/cli/ -run 'Gate\|Lock' -count=3 -timeout 30m -v` | top-level 83 × 3 = 249、subtest 489 | すべて | 0 | 0 | 2 分 56 秒(org 173.9 s、cli 102.0 s)、rc 0。`DATA RACE` は 0 件 |
+| 揺れの確認(下の「Flakiness(cycle 2)」) | 8 本 × 20 回、8 本 × 5 回(`-race`) | すべて | 0 | 0 | 4 分 3 秒 |
+| mutation(Go 9 件) | 9 件 | red 7 件 | 生き残り 2 件(下の表) | - | 1 件 38〜50 s、並列 2 |
+
+- shell の PASS の行は cycle 1 と同じ数え方で 4,118 行。cycle 1 の changed の実行と比べると、違うのは `tests/test-pre-bash-guard.sh` の H の 3 行の経過時間の数字だけだった。Skipped は cycle 1 と同じ `tests/test-secret-scan-branch.sh` の 1 件(git 2.49.0)
+- `run-test.sh` の中の Go は `internal/cli`(159.7 s)と `internal/org`(68.6 s)を流し直し、ほかの 6 パッケージは `(cached)` だった。6 パッケージのうち `internal/insights` は org を import する。`(cached)` は org の中身まで同じときの結果しか使わないので、b04289c1 のあとに流した結果が残っていたことになる。キャッシュに頼らないよう `go test -count=1 ./internal/insights/` を打ち直し、rc 0(0.9 s)だった。残りの 5 パッケージは org を import しない(`go list -deps`)
+- 時間が cycle 1(9 分 23 秒)より長いのは、おそらくほかの作業の負荷のため。load average は開始時に 5.93 で、終わる 20:53 には 145.73 まで上がり、`go test` の開始時も 81.88 だった。その中で前に flake を起こした doctor のテストと `TestRunWatcher_TimeoutIndependentOfSmallInterval` は落ちなかった
+- `go test` の件数は、同じ 4 パッケージの cycle 1(cli 615、org 643 と skip 1、driver 48、protocol 15、subtest 1,949)より org の top-level が 2、subtest が 4 増えた。増えたのは `TestGate_InterruptAfterTheScriptsRecordsNothing` と `TestRecordGate_InterruptRecordsNothing`(subtest 4 本)で、ほかのパッケージと org のほかのテストの数は変わらない。Skipped は cycle 1 と同じ `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`
+- `-race` の `-run 'Gate|Lock'` に入る top-level は 83 本(org と cli)で、3 回とも 0 fail だった
+
+### Regression: `withManifestLock` と `withFileLock` の呼び元(cycle 2)
+
+b04289c1 で `withManifestLock` と `withFileLock` は `context.Background()` を渡して `withFileLockContext` を呼ぶ形になった。呼び元のテストは上の `go test` の実行でどれも PASS だった。
+
+| 呼び元 | 名前を挙げるテスト(すべて PASS) |
+| --- | --- |
+| `spawn.go:621`、`:796`(spawn と予約) | `TestWithManifestLock_SerializesConcurrentCallers`、`TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded`、`..._MaxOrgsNeverExceeded`、`..._MaxTotalSeatsNeverExceeded`、`TestOrgSpawn_ConcurrentReservations_OnlyOneOfOverlappingWins`。`TestOrgSpawn*` は 150 本すべて PASS |
+| `verbs.go:1361`(`compensateUnderLock`。`CloseDeferredSelfPane` と `CloseDeferredSelfWorkspace` が呼ぶ) | `TestOrgCloseDeferredSelf_NewerRecordsWhileClosing_Stay`(manifest のロックを持ったまま close を待たせる) |
+| `inbox.go:327`(inbox のロック) | `TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites`、`TestInboxStore_ReportsAnUnreadableInboxAndAnUnavailableLock`、`TestInboxConcurrentAcks_OnlyOneChangesTheItem`、`TestInboxConcurrentAckAndResolve_LeaveAValidState`、`TestInboxEscalate_ConcurrentCallsGetDistinctIDs`、`TestEscalate_ConcurrentEscalatesGetDistinctIDs`。`TestInbox*` 23 本、`TestEscalate*` 10 本 |
+| `approve.go:147` | `TestOrgApprove*` 24 本(`TestOrgApprove_AllOrNothing`、`..._AppendFailureRecordsNothing` を含む) |
+| watch のロック(`acquireHeldFileLock`。b04289c1 は変えていない) | `TestRunWatchAll_*Lock*` 6 本、`TestAcquireWatchLock_*` 2 本、`TestProbeWatch_*` 2 本、CLI の `TestOrgWatch*Lock*` 6 本 |
+| gate(manifest のロックを持たないこと) | `TestGate_ManifestLockNotHeldWhileScriptsRun` |
+
+send(`verbs.go:316`)は manifest のロックを取らない。`TestOrgSend*` の 53 本も PASS だった。
+
+ロックが 5 秒より長く持たれたときの文と待ちの長さは、コミットしたテストがどれも通らない(`lockfile.go:97` の文は coverage 0)。scratch の `_test.go` を `-overlay` で足した probe `TestProbe_LockTimeoutMessageOfExistingCallers` で HEAD のコードを確かめた。`withManifestLock` と inbox の `withFileLock` は、どちらも 5.00 秒待ち、fn を走らせず、base 1bddc871 の `withFileLock` と同じ文 `org: acquire manifest lock <path>: timed out after 5s: context deadline exceeded`(inbox は `inbox lock`)を返した(rc 0、10.8 s)。下の C2h を入れると、同じ probe は 2 つとも `the wait was stopped: %!w(<nil>)` を返して red になったので、この probe は文の変化を見分ける。
+
+### Flakiness(cycle 2)
+
+依頼の 2 本と、gate の中断・ロックの既存のテストを `-count=20`(org、続けて cli)と `-race -count=5`(両方)で流した(JST 21:01〜21:06、開始時の load average 3.0〜4.6、この session のほかの実行はなし)。どの回も rc 0 で、`DATA RACE` は 0 件。
+
+| テスト | `-count=20` | 時間の幅 | `-race -count=5` | 時間の幅 |
+| --- | --- | --- | --- | --- |
+| `TestGate_InterruptAfterTheScriptsRecordsNothing`(新規) | 20 / 20 | 1.15〜1.44 s | 5 / 5 | 1.15〜1.24 s |
+| `TestRecordGate_InterruptRecordsNothing`(新規、subtest 4 本はどれも 20 / 20 と 5 / 5) | 20 / 20 | 1.23〜1.81 s(ロックの待ちの subtest は 0.45〜0.65 s) | 5 / 5 | 1.29〜1.35 s |
+| `TestGate_InterruptStopsTheScriptsAndRecordsNothing` | 20 / 20 | 1.60〜1.88 s | 5 / 5 | 1.64〜2.22 s |
+| `TestGate_InterruptedBeforeTheScripts` | 20 / 20 | 0.22〜0.28 s | 5 / 5 | 0.22〜0.28 s |
+| `TestGate_ManifestLockNotHeldWhileScriptsRun` | 20 / 20 | 1.02〜1.35 s | 5 / 5 | 1.09〜1.35 s |
+| `TestWithManifestLock_SerializesConcurrentCallers` | 20 / 20 | 0.48〜0.52 s | 5 / 5 | 0.48〜0.51 s |
+| `TestInboxLock_IsSeparateFromTheManifestLockAndSerializesWrites` | 20 / 20 | 0.16〜0.17 s | 5 / 5 | 0.16〜0.17 s |
+| `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`(CLI、subtest 4 本はどれも 20 / 20 と 5 / 5) | 20 / 20 | 2.60〜13.50 s | 5 / 5 | 2.77〜3.43 s |
+
+- 新しい 2 本の「中断から 3 秒以内に返る」という assertion は、テスト全体の時間でも 1.81 秒以下なので、3 秒の上限まで 1.19 秒以上ある。load average 81.88 の中で走った `go test` の回でも、2 本は 1.29 s と 1.32 s で通った
+- CLI のテストの subtest 80 回(信号 3 種と ctx の取り消しを 20 回ずつ)のうち 5 回(SIGINT 2 回、SIGHUP 3 回)が 5.68〜5.71 s かかり、ほかは 0.63〜1.11 s だった。差の 5 秒は `gateKillGrace`(`internal/org/gate_run.go:54`)と同じで、スクリプトのグループに SIGTERM を送ったあと、グループに残ったプロセスが SIGKILL まで消えなかったときの長さに当たる。この道は b04289c1 が変えていない `runGateScript` の中で、中断がスクリプトの実行中に届く場合の動き。テストはどの回も通り(上限 15 秒、終わったあとのグループの検査も通った)、記録は残らなかった。cycle 1 の evidence にある実行には、5 秒台の subtest は 1 つもない
+- その原因として、スクリプトの `sleep` を fork している最中にグループへの SIGTERM が届くと、作られた子がその SIGTERM を受けずに残る場合を考え、同じ形のスクリプトに `started` ができた直後にグループへ SIGTERM を送る probe(`og2/forkrace/race.py`)を作った。最初の 150 回では 7 回、グループにプロセスが残った(1 ms か 3 ms 待ってから送った 150 回ずつは 0 回)。その後の 900 回(load average 3.3〜3.4)では 0 回だった。おそらく fork の途中に届いた信号の取りこぼしで、混み具合によって起きる。未確認です。この推測が正しければ、利用者がスクリプトの実行中に Ctrl-C を押したとき、まれに gate が返るまで 5 秒ほど余分にかかる
+
+揺れによる失敗は見つからなかった。
+
+### Mutation(cycle 2)
+
+どの mutant も、scratchpad に写したファイルの 1 か所を書き換え、tracked のファイルには触れていない。`go build -overlay <json> ./internal/org/` で 9 件ともコンパイルできることを確かめてから、`go test -count=1 -overlay <json> ./internal/org/ ./internal/cli/ -run 'Gate|Lock' -v` で流した(1 回 83 本、JST 21:14〜21:17、並列 2、load average 3.4〜6.9)。
+
+依頼の 5 件:
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| C2a | (a) `recordGate` のロックを取る前の ctx の検査を外す(`gate.go:720` を `if false && ...`) | red | `TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock`。ロックの中の検査が追記を止めるので manifest は変わらず、`gate_test.go:974` の「時計を 1 回読んだ(ロックの中に入った)」だけが落とした |
+| C2b | (b) ロックの中、追記の直前の検査を外す(`gate.go:747`) | red | `.../ctx_done_under_the_lock,_right_before_the_append`(`gate_test.go:1023`、`recordGate = "", <nil>` で記録した) |
+| C2c | (c) ロックの待ちの timeout を `context.Background()` から作る(`lockfile.go:90`) | red | `TestGate_InterruptAfterTheScriptsRecordsNothing`(`:919`、中断から 4.72 s)、`.../ctx_done_while_waiting_for_the_lock`(`:1006`、4.80 s)。待ちは 5 秒の timeout で終わり、文は「the wait was stopped」のまま、manifest も変わらないので、落としたのは 3 秒の時間の assertion だけ |
+| C2d | (d) `Gate` が `recordGate` の error を `gateInterrupted` を通さずに返す(`gate.go:302`) | red | `TestGate_InterruptAfterTheScriptsRecordsNothing`(`:926`、ロックの文 `... the wait was stopped: context canceled` がそのまま返った) |
+| C2e | (e) `withFileLockContext` の「the wait was stopped」の枝を外す(`lockfile.go:94`) | red | `.../ctx_done_while_waiting_for_the_lock`(`:1011`、`timed out after 5s: context canceled`) |
+
+足した 4 件(順序、呼び出しの場所、既存の呼び元への影響):
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| C2f | `recordGate` の最後の switch から中断の case を外す(中断の error にも「run the gate again」が付く、`gate.go:756`) | 生き残り(同値) | なし。`recordGate` の呼び元は `gate.go:301` の 1 か所だけで、ctx が終わっていれば `gateInterrupted` が error の文を使わずに中断の文を作るので、利用者に見える出力は変わらない |
+| C2g | ロックの中の検査を追記のあとに動かす | red | `.../ctx_done_under_the_lock,_right_before_the_append`(`:1023`、manifest が変わった) |
+| C2h | 「the wait was stopped」の枝の条件を `waitCtx.Err()` にする(本当の 5 秒の timeout も「the wait was stopped: %!w(<nil>)」と言う、`lockfile.go:94`) | 生き残り(コミットしたテスト)、probe で red | コミットしたテストはなし。上の Regression の probe が 2 つとも落とした |
+| C2i | `withManifestLockContext` が `withFileLockContext` に `context.Background()` を渡す(`lockfile.go:66`) | red | C2c と同じ 2 本(`:919` 4.73 s、`:1006` 4.80 s)と、`:1009`(error が `context.Canceled` でない) |
+
+CLI のテストは 9 件のどれでも落ちなかった。CLI の中断のテストはスクリプトの実行中に信号を送るので、スクリプトのあとの中断は org 層のテストだけが扱う。HEAD の binary でロックの待ちに SIGTERM と SIGHUP を送る確認は、/verify cycle 2 の probe(`docs/evidence/verify-2026-10-13-org-gate-probe.txt` の「Cycle 2: interrupt probe」)が行っている。
+
+### Coverage(cycle 2)
+
+`go test -count=1 -coverprofile ./internal/org/`(rc 0、85.6 s)で `internal/org` は 93.6%(cycle 1 は 93.5%)。`recordGate` は 81.8% から 85.2%、`Gate` は 77.5% から 80.0% に上がり、`withManifestLockContext` は 100%、`withFileLockContext` は 92.9%。通らない区間は、`withFileLockContext` では本当の timeout の文(`lockfile.go:97`、C2h が生き残った所)、`recordGate` では manifest の読み出しと追記の失敗(`gate.go:726-728`、`:750-752`)、中断でない error の文(`:759-760`)、cycle 1 からの結びつきが不完全になった枝(`:734-735`)、`Gate` では cycle 1 からの `Env` と `Dir` の既定(`:250-259`)、manifest の読み出しの失敗(`:263-265`)、ログを閉じるときの失敗(`:284-286`)と、スクリプトのあとの worktree の読み直しが ctx で切れた枝(`:292-294`)。
+
+### Test gaps(cycle 2)
+
+- 本当のロックの timeout(5 秒)の文と待ちの長さを固定するテストがない。b04289c1 は「withManifestLock と withFileLock は動きを変えない」と書くが、`withFileLockContext` の枝の条件を変える C2h はコミットしたテストでは生き残った。probe は HEAD が base と同じ文を返すことを確かめた。閉じるなら probe の 2 本(1 本 5 秒)をそのまま足すか、`manifestLockTimeout` をテストで縮められる変数にする
+- スクリプトのあと、worktree の読み直し(`gateCheckAfter` の git)の最中に届いた中断は、どのテストも狙っていない(`gate.go:292-294` は coverage 0)。/verify cycle 2 の Coverage gaps と同じ
+- CLI の層で、スクリプトのあとの中断を通すテストはない(上の Mutation)。HEAD の binary では /verify の probe が確かめた
+- 中断がスクリプトの実行中に届いたとき、まれにグループのプロセスが SIGTERM で消えず、`gateKillGrace` の 5 秒のあとの SIGKILL まで待つ(上の Flakiness)。原因は推測で、確かめていない
+- cycle 1 の Test gaps(org 層の fixture で HEAD と base が同じこと、`gateOutput` の改行のない出力、Linux と混んだ CI での `tests/test-run-verify-concurrency.sh`、本物の leader の座席)は、b04289c1 が関係しないので、そのまま残る
+
+### 判断(cycle 2)
+
+- Pass: `./scripts/run-test.sh`(changed、full に落ちた)は rc 0 で、shell 41 本、PASS の行 4,118、Go 8 パッケージ。`go test ./internal/org/... ./internal/cli/...` は top-level 1,323 本と subtest 1,953 本が PASS で 0 fail、足した 2 本(subtest 4 本)も PASS で、消えたテストはない。`-race -run 'Gate|Lock' -count=3` は 249 回すべて PASS で `DATA RACE` は 0 件。新しい 2 本と既存の中断・ロックのテストは `-count=20` と `-race -count=5` で 0 fail。mutation は依頼の 5 件(ロックの前の検査、ロックの中の検査、ロックの待ちの ctx、`gateInterrupted` を通すこと、「the wait was stopped」の枝)がすべて red で、足した 4 件のうち 2 件も red。既存のロックの呼び元のテストはすべて PASS
+- 生き残り: C2f は利用者に見える出力を変えない同値の mutant。C2h はテストの穴で、probe では HEAD の動きが base と同じことを確かめた
+- Fail: 0
+- Blocked: なし
+- 判断: pass(cycle 2)

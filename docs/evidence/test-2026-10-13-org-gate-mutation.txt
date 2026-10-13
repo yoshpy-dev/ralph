@@ -401,3 +401,232 @@ ok  	github.com/yoshpy-dev/ralph/internal/org	0.571s
 --- PASS: TestProbe_GateScriptThatCannotStart (0.41s)
 PASS
 ok  	github.com/yoshpy-dev/ralph/internal/org	0.705s
+
+
+################################################################################
+# Cycle 2 (HEAD 0bc87603, fix b04289c1). No tracked file was edited.
+# Go mutants of b04289c1: a changed copy of one file in the scratchpad (og2/mut/<ID>-<file>.go), read through
+#   go test -count=1 -overlay og2/mut/<ID>.json ./internal/org/ ./internal/cli/ -run 'Gate|Lock' -v
+# Each compiled first (go build -overlay og2/mut/<ID>.json ./internal/org/, rc 0). Two chains of mutants ran in parallel
+# (JST 21:14-21:17, load average 3.4-6.9). Every run had 83 top-level tests (org and cli).
+################################################################################
+
+======== Go mutant C2a (gate.go): (a) drop the ctx check before the lock in recordGate
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2a-gate.go"}}
+720c720
+< 	if ctx.Err() != nil {
+---
+> 	if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:14:49Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	41.782s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	23.737s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.81s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.16s)
+    gate_test.go:974: recordGate built the event under the lock (1 clock reads); want it stopped before the lock
+
+======== Go mutant C2b (gate.go): (b) drop the ctx check under the lock, right before the append
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2b-gate.go"}}
+747c747
+< 		if ctx.Err() != nil {
+---
+> 		if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:14:49Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	41.755s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	24.643s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.79s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.15s)
+    gate_test.go:1023: recordGate = "", <nil>; want ctx's context.Canceled and no refusal
+
+======== Go mutant C2c (lockfile.go): (c) the lock wait derives its timeout from context.Background() again (withFileLockContext)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2c-lockfile.go"}}
+90c90
+< 	waitCtx, cancel := context.WithTimeout(ctx, manifestLockTimeout)
+---
+> 	waitCtx, cancel := context.WithTimeout(context.Background(), manifestLockTimeout)
+-- result: RC=1 end 2026-10-13T12:15:40Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	50.193s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.212s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (5.60s)
+--- FAIL: TestRecordGate_InterruptRecordsNothing (5.62s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (5.16s)
+    gate_test.go:919: gate took 4.717123875s to return after the interrupt; want it to stop waiting for the lock at once (the lock times out after 5s)
+    gate_test.go:1006: recordGate took 4.798455125s to return after the interrupt; want it to stop waiting for the lock at once
+
+======== Go mutant C2d (gate.go): (d) Gate returns recordGate error as is, not through gateInterrupted
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2d-gate.go"}}
+302c302
+< 		return res, gateInterrupted(ctx, err, logPath)
+---
+> 		return res, err
+-- result: RC=1 end 2026-10-13T12:15:30Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	40.100s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	28.365s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (0.95s)
+    gate_test.go:926: gate = org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_InterruptAfterTheScriptsRecordsNothing2048094847/001/state/manifest.lock: the wait was stopped: context canceled
+
+======== Go mutant C2e (lockfile.go): (e) drop the "the wait was stopped" branch in withFileLockContext
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2e-lockfile.go"}}
+94c94
+< 		if ctx.Err() != nil {
+---
+> 		if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:16:22Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	39.558s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.669s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.84s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.36s)
+    gate_test.go:1011: recordGate = org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestRecordGate_InterruptRecordsNothingctx_done_while_waiting_fo3535940503/001/state/manifest.lock: timed out after 5s: context canceled; want the stopped wait, not a lock timeout
+
+======== Go mutant C2f (gate.go): (extra) recordGate: drop the interrupted case of the final switch (interrupted errors get the "run the gate again" suffix)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2f-gate.go"}}
+756c756
+< 	case err != nil && ctx.Err() != nil:
+---
+> 	case false && err != nil && ctx.Err() != nil:
+-- result: RC=0 end 2026-10-13T12:16:11Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	38.808s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.845s
+-- survivor: the two new tests passed:
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.12s)
+--- PASS: TestRecordGate_InterruptRecordsNothing (0.96s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.24s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.40s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.17s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.15s)
+
+======== Go mutant C2g (gate.go): (extra, order) the ctx check under the lock moves after the append
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2g-gate.go"}}
+747,749d746
+< 		if ctx.Err() != nil {
+< 			return context.Cause(ctx)
+< 		}
+752a750,752
+> 		if ctx.Err() != nil {
+> 			return context.Cause(ctx)
+> 		}
+-- result: RC=1 end 2026-10-13T12:17:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	37.631s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.690s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.82s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.16s)
+    gate_test.go:1023: an interrupted recordGate changed the manifest:
+
+======== Go mutant C2h (lockfile.go): (extra) withFileLockContext tests waitCtx.Err() instead of ctx.Err() (a real 5s timeout then says "the wait was stopped")
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2h-lockfile.go"}}
+94c94
+< 		if ctx.Err() != nil {
+---
+> 		if waitCtx.Err() != nil {
+-- result: RC=0 end 2026-10-13T12:16:53Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	39.656s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	23.434s
+-- survivor: the two new tests passed:
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (0.90s)
+--- PASS: TestRecordGate_InterruptRecordsNothing (0.78s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.14s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.35s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.13s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.15s)
+
+======== Go mutant C2i (lockfile.go): (extra, call site) withManifestLockContext passes context.Background() to withFileLockContext
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2i-lockfile.go"}}
+66c66
+< 	return withFileLockContext(ctx, dir, manifestLockFile, "manifest", fn)
+---
+> 	return withFileLockContext(context.Background(), dir, manifestLockFile, "manifest", fn)
+-- result: RC=1 end 2026-10-13T12:17:51Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	47.065s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	21.053s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (5.91s)
+--- FAIL: TestRecordGate_InterruptRecordsNothing (5.69s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (5.16s)
+    gate_test.go:919: gate took 4.729494541s to return after the interrupt; want it to stop waiting for the lock at once (the lock times out after 5s)
+    gate_test.go:1006: recordGate took 4.798861792s to return after the interrupt; want it to stop waiting for the lock at once
+    gate_test.go:1009: recordGate = "", org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestRecordGate_InterruptRecordsNothingctx_done_while_waiting_fo557189869/001/state/manifest.lock: timed out after 5s: context deadline exceeded; want ctx's context.Canceled and no refusal
+
+======== probe (not committed): og2/probe/probe_lock_timeout_test.go, added to internal/org through -overlay
+# go test -count=1 -overlay og2/probe/head.json ./internal/org/ -run TestProbe_LockTimeoutMessageOfExistingCallers -v   (HEAD)
+# go test -count=1 -overlay og2/probe/C2h.json  ./internal/org/ -run TestProbe_LockTimeoutMessageOfExistingCallers -v   (HEAD + C2h)
+---- probe_lock_timeout_test.go
+package org
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// TestProbe_LockTimeoutMessageOfExistingCallers (not committed, /test cycle 2):
+// withManifestLock and withFileLock (the callers that pass no ctx: approve,
+// spawn, close, inbox) still wait manifestLockTimeout for a held lock and
+// return the base 1bddc871 message, "org: acquire <what> lock <path>: timed
+// out after 5s: context deadline exceeded", never "the wait was stopped",
+// and do not run fn.
+func TestProbe_LockTimeoutMessageOfExistingCallers(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, what string
+		call             func(dir string, fn func() error) error
+	}{
+		{"withManifestLock", manifestLockFile, "manifest", withManifestLock},
+		{"withFileLock inbox", inboxLockFile, "inbox", func(dir string, fn func() error) error {
+			return withFileLock(dir, inboxLockFile, "inbox", fn)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			held, drop := make(chan struct{}), make(chan struct{})
+			holder := make(chan error, 1)
+			go func() {
+				holder <- withFileLock(dir, tc.file, tc.what, func() error { close(held); <-drop; return nil })
+			}()
+			<-held
+			ran := false
+			begin := time.Now()
+			err := tc.call(dir, func() error { ran = true; return nil })
+			took := time.Since(begin)
+			close(drop)
+			if herr := <-holder; herr != nil {
+				t.Fatalf("holder: %v", herr)
+			}
+			want := "org: acquire " + tc.what + " lock " + filepath.Join(dir, tc.file) + ": timed out after 5s: context deadline exceeded"
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v\nwant  %s", err, want)
+			}
+			if ran {
+				t.Fatal("fn ran although the lock was never taken")
+			}
+			if took < manifestLockTimeout || took > manifestLockTimeout+2*time.Second {
+				t.Fatalf("waited %s; want about %s", took, manifestLockTimeout)
+			}
+			t.Logf("waited %s, err = %v", took, err)
+		})
+	}
+}
+---- results
+### probe on HEAD
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock
+    probe_lock_timeout_test.go:51: waited 5.002061875s, err = org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock620231177/001/manifest.lock: timed out after 5s: context deadline exceeded
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox
+    probe_lock_timeout_test.go:51: waited 5.002060542s, err = org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox504997546/001/inbox.lock: timed out after 5s: context deadline exceeded
+--- PASS: TestProbe_LockTimeoutMessageOfExistingCallers (10.01s)
+    --- PASS: TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock (5.00s)
+    --- PASS: TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox (5.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	10.835s
+RC=0
+### probe on C2h
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock
+    probe_lock_timeout_test.go:43: err = org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock71752379/001/manifest.lock: the wait was stopped: %!w(<nil>)
+        want  org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock71752379/001/manifest.lock: timed out after 5s: context deadline exceeded
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox
+    probe_lock_timeout_test.go:43: err = org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox2535024258/001/inbox.lock: the wait was stopped: %!w(<nil>)
+        want  org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox2535024258/001/inbox.lock: timed out after 5s: context deadline exceeded
+--- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers (10.01s)
+    --- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock (5.00s)
+    --- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox (5.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	10.961s
+FAIL
+RC=1
