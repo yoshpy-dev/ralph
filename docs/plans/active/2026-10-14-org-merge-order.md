@@ -85,17 +85,17 @@ Critical forks: C1〜C4 は consult の判定で決めた(ユーザーの指示�
 
 ## Acceptance criteria
 
-- [ ] AC1 gate の記録が `gate_passed` で、gate の head がリモートのブランチの先頭と同じ、gate の base がリモートの既定のブランチの先頭と同じブランチは `ready` になる。gate のあとに main が進んだブランチは `rebase`、gate のあとに push したブランチは `regate` になる
-- [ ] AC2 最新の gate の記録が `gate_failed` のブランチは `failed`(reason つき)、gate の記録がない結びつきのブランチは `no_gate`、リモートにないブランチは `no_remote` になる。同じブランチで通ったあとに落ちたら、最新の記録(落ちたほう)を読む
-- [ ] AC3 disband 済みの org の結びつきのブランチも対象になる。同じ org_id を別の機能で立て直しても、前のブランチが対象から消えない
-- [ ] AC4 dry-run の記録と完全でない結びつきは数えない。`gate_passed` のあとの最新の gate の記録が読めない(`gateRecordFromDetails` が ok でない、event の名前と reason の有無が合わない)ブランチ、`gate_passed` のあとに manifest の壊れた行があるブランチは、前の `gate_passed` に戻らず `unreadable` になる。読めない記録は、打った org のその時点の結びつきのブランチに付く
-- [ ] AC5 `gh` があれば、PR の state が MERGED / CLOSED のブランチは既定で出さず、`--all` で `merged` / `closed` として出す。PR が複数あれば、同じ repo の番号が最大の PR を採る。`gh` がない、または打てないときは PR の欄を空にし、merged と closed と PR の統合先を見分けないことを注記し、終了コード 0 で終わる
-- [ ] AC6 出す順は `ready`(gate の時刻が古い順)、`rebase`、`wrong_base`、`regate`、`unreadable`、`failed`、`no_remote`、`no_gate`、(`--all`)`merged`、`closed`。テキストの出力は、`ready` を 1 本 merge するとほかの `ready` が `rebase` になることを注記する
-- [ ] AC7 `git ls-remote` が打てない(origin がない、失敗、timeout)とき、origin の `HEAD` の symref が出ないときは、何も分類せず、理由を言って終了コード 1。manifest が読めないときも終了コード 1
-- [ ] AC11 origin の既定のブランチを変えた(`HEAD` が `trunk` を指し、古い `main` も残る)とき、`main` で gate を通したブランチは、`main` の先頭と base が同じでも `rebase` になる。`gh` で分かる PR の統合先が今の既定のブランチと違うブランチは `wrong_base` になる
-- [ ] AC8 `--json` は分類・PR・gate の記録・リモートの先頭・結びつきの補足・注記を出し、テキストと同じ順に並べる
-- [ ] AC9 merge-order は台帳に何も書かない(manifest の行数とバイト、台帳のディレクトリの中身が打つ前と同じ)。ロックを取らず、見張りがなくても打てる
-- [ ] AC10 `/org` skill の 4 面、README、仕様 FR-8 の注、AGENTS.md、tech-debt が merge-order を説明する。skill の 4 面は同じ中身(`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`)
+- [x] AC1 gate の記録が `gate_passed` で、gate の head がリモートのブランチの先頭と同じ、gate の base がリモートの既定のブランチの先頭と同じブランチは `ready` になる。gate のあとに main が進んだブランチは `rebase`、gate のあとに push したブランチは `regate` になる
+- [x] AC2 最新の gate の記録が `gate_failed` のブランチは `failed`(reason つき)、gate の記録がない結びつきのブランチは `no_gate`、リモートにないブランチは `no_remote` になる。同じブランチで通ったあとに落ちたら、最新の記録(落ちたほう)を読む
+- [x] AC3 disband 済みの org の結びつきのブランチも対象になる。同じ org_id を別の機能で立て直しても、前のブランチが対象から消えない
+- [x] AC4 dry-run の記録と完全でない結びつきは数えない。`gate_passed` のあとの最新の gate の記録が読めない(`gateRecordFromDetails` が ok でない、event の名前と reason の有無が合わない)ブランチ、`gate_passed` のあとに manifest の壊れた行があるブランチは、前の `gate_passed` に戻らず `unreadable` になる。読めない記録は、打った org のその時点の結びつきのブランチに付く
+- [x] AC5 `gh` があれば、PR の state が MERGED / CLOSED のブランチは既定で出さず、`--all` で `merged` / `closed` として出す。PR が複数あれば、同じ repo の番号が最大の PR を採る。`gh` がない、または打てないときは PR の欄を空にし、merged と closed と PR の統合先を見分けないことを注記し、終了コード 0 で終わる
+- [x] AC6 出す順は `ready`(gate の時刻が古い順)、`rebase`、`wrong_base`、`regate`、`unreadable`、`failed`、`no_remote`、`no_gate`、(`--all`)`merged`、`closed`。テキストの出力は、`ready` を 1 本 merge するとほかの `ready` が `rebase` になることを注記する
+- [x] AC7 `git ls-remote` が打てない(origin がない、失敗、timeout)とき、origin の `HEAD` の symref が出ないときは、何も分類せず、理由を言って終了コード 1。manifest が読めないときも終了コード 1
+- [x] AC11 origin の既定のブランチを変えた(`HEAD` が `trunk` を指し、古い `main` も残る)とき、`main` で gate を通したブランチは、`main` の先頭と base が同じでも `rebase` になる。`gh` で分かる PR の統合先が今の既定のブランチと違うブランチは `wrong_base` になる
+- [x] AC8 `--json` は分類・PR・gate の記録・リモートの先頭・結びつきの補足・注記を出し、テキストと同じ順に並べる
+- [x] AC9 merge-order は台帳に何も書かない(manifest の行数とバイト、台帳のディレクトリの中身が打つ前と同じ)。ロックを取らず、見張りがなくても打てる
+- [x] AC10 `/org` skill の 4 面、README、仕様 FR-8 の注、AGENTS.md、tech-debt が merge-order を説明する。skill の 4 面は同じ中身(`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`)
 
 ## Implementation outline
 
@@ -155,7 +155,7 @@ Critical forks: C1〜C4 は consult の判定で決めた(ユーザーの指示�
   - S3 文書: 251b9234(`/org` skill の 4 面、README、仕様 FR-8 の注、AGENTS.md、tech-debt、`seat.go` の package doc、`org_legacy_ledger.go` の comment)。追いの 4277a295 で、ready が 2 本以上のときの注記の文言、tech-debt の gate なしの PR の行、skill の見張りなしで使える動詞の一覧を合わせた
   - 実装中に分かった穴: PR を出したあとの機能の org は disband 済みで、`ralph org gate` は走っている org でしか打てないので、`rebase`・`regate`・`unreadable` のブランチを `ready` に戻す決まった手がない(`start --plan` を打ち直すと worktree は使い回すが、新しい leader は計画から始める)。consult(consult-plan-regategap)の判定 A: この PR では埋めず、Details に「the gate runs only while the feature org runs」と足し、skill・README・仕様 FR-8 の注・tech-debt に穴と人の手の道(rebase して push、CI と GitHub の保護に頼る)と持ち主(8a、director)を書く。立て直しは勧めない。計画の非目標(rebase・gate をしない)の範囲で、本文は変えない
   - 決めたこと: 対象のブランチがなければ ls-remote を打たず、注記だけで終了コード 0
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
