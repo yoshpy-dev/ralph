@@ -145,8 +145,8 @@ func newGateFixtureWith(t *testing.T, opts gateFixtureOptions) *gateFixture {
 // writeGateStubs writes the two stub gate scripts (gateStub) in dir.
 func writeGateStubs(t *testing.T, dir string) {
 	t.Helper()
-	writeGateFile(t, dir, gateStaticScript, fmt.Sprintf(gateStub, "static"), 0o755)
-	writeGateFile(t, dir, gateTestScript, fmt.Sprintf(gateStub, "test"), 0o755)
+	writeGateFile(t, dir, GateStaticScript, fmt.Sprintf(gateStub, "static"), 0o755)
+	writeGateFile(t, dir, GateTestScript, fmt.Sprintf(gateStub, "test"), 0o755)
 }
 
 // writeGateFile writes content at rel in dir with mode, making the parents.
@@ -176,6 +176,35 @@ func (fx *gateFixture) advance(t *testing.T, ref string) {
 	t.Helper()
 	sha := gitOut(t, fx.worktree, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", ref, "-m", "moves on", ref+"^{tree}")
 	runGit(t, "-C", fx.worktree, "update-ref", ref, sha)
+}
+
+// stopRebaseOnAConflict leaves a rebase of feat/auth stopped on a conflict in
+// the fixture's worktree: feat/auth gets a commit that changes README.md, and
+// it is rebased onto another commit off its parent that changes README.md
+// differently. With apply set the rebase runs with --apply, so git keeps its
+// state in rebase-apply instead of rebase-merge. HEAD is detached afterwards.
+func (fx *gateFixture) stopRebaseOnAConflict(t *testing.T, apply bool) {
+	t.Helper()
+	writeGateFile(t, fx.worktree, "README.md", "the feature's readme\n", 0o644)
+	runGit(t, "-C", fx.worktree, "add", "README.md")
+	gateCommit(t, fx.worktree, "the feature's readme")
+	runGit(t, "-C", fx.worktree, "switch", "--quiet", "--detach", "HEAD~1")
+	writeGateFile(t, fx.worktree, "README.md", "another readme\n", 0o644)
+	runGit(t, "-C", fx.worktree, "add", "README.md")
+	gateCommit(t, fx.worktree, "another readme")
+	onto := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+	runGit(t, "-C", fx.worktree, "switch", "--quiet", "feat/auth")
+	args := []string{"-C", fx.worktree, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+		"rebase", "--quiet"}
+	if apply {
+		args = append(args, "--apply")
+	}
+	if out, err := exec.Command("git", append(args, onto)...).CombinedOutput(); err == nil {
+		t.Fatalf("git rebase %s succeeded; want it stopped on the conflict:\n%s", onto, out)
+	}
+	if branch := gitOut(t, fx.worktree, "branch", "--show-current"); branch != "" {
+		t.Fatalf("the branch during the rebase is %q; want a detached HEAD", branch)
+	}
 }
 
 // gitOut runs git -C dir args and returns its stdout, trimmed.
@@ -432,7 +461,23 @@ func TestGate_RefusedBeforeTheScripts(t *testing.T) {
 			setup: func(t *testing.T, fx *gateFixture) { runGit(t, "-C", fx.worktree, "switch", "--quiet", "--detach") },
 			want: func(_ *testing.T, fx *gateFixture) []string {
 				return []string{"HEAD is detached in " + fx.worktree + ", not on the feature branch feat/auth", "run git switch feat/auth"}
-			}},
+			},
+			notWant: []string{"rebase"}},
+		// During a rebase HEAD is detached and git switch fails, so the next
+		// step is to finish or undo the rebase.
+		{name: "a rebase stopped on a conflict",
+			setup: func(t *testing.T, fx *gateFixture) { fx.stopRebaseOnAConflict(t, false) },
+			want: func(_ *testing.T, fx *gateFixture) []string {
+				return []string{"a rebase is in progress in " + fx.worktree + ", so HEAD is detached and not on the feature branch feat/auth",
+					"finish it with git rebase --continue, or undo it with git rebase --abort, and run the gate again"}
+			},
+			notWant: []string{"git switch"}},
+		{name: "a rebase with --apply stopped on a conflict, in a linked worktree", linked: true,
+			setup: func(t *testing.T, fx *gateFixture) { fx.stopRebaseOnAConflict(t, true) },
+			want: func(_ *testing.T, fx *gateFixture) []string {
+				return []string{"a rebase is in progress in " + fx.worktree, "git rebase --continue", "git rebase --abort"}
+			},
+			notWant: []string{"git switch"}},
 		{name: "an untracked file",
 			setup: func(t *testing.T, fx *gateFixture) { writeGateFile(t, fx.worktree, "new.txt", "x\n", 0o644) },
 			want: func(_ *testing.T, fx *gateFixture) []string {
@@ -474,17 +519,34 @@ func TestGate_RefusedBeforeTheScripts(t *testing.T) {
 				return []string{"does not contain refs/heads/main's tip", "run `git rebase refs/heads/main`, then run the gate again"}
 			},
 			notWant: []string{"git fetch"}},
-		{name: "no default branch",
+		// With no origin remote there is nothing to fetch, so the next step is
+		// to create the default branch locally.
+		{name: "no default branch and no origin remote",
 			setup: func(t *testing.T, fx *gateFixture) {
 				runGit(t, "-C", fx.worktree, "remote", "remove", "origin")
 				runGit(t, "-C", fx.worktree, "branch", "--quiet", "-D", "main")
 			},
 			want: func(_ *testing.T, fx *gateFixture) []string {
-				return []string{"no default branch found in " + fx.worktree, "neither main nor master exists", "run git fetch origin"}
-			}},
+				return []string{"no default branch found in " + fx.worktree + ": the repository has no origin remote",
+					"neither main nor master exists as refs/heads/<name>",
+					"create the default branch locally as main or master (git branch main <commit>) and run the gate again"}
+			},
+			notWant: []string{"git fetch"}},
+		{name: "no default branch with an origin remote",
+			setup: func(t *testing.T, fx *gateFixture) {
+				runGit(t, "-C", fx.worktree, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+				runGit(t, "-C", fx.worktree, "update-ref", "-d", "refs/remotes/origin/main")
+				runGit(t, "-C", fx.worktree, "branch", "--quiet", "-D", "main")
+			},
+			want: func(_ *testing.T, fx *gateFixture) []string {
+				return []string{"no default branch found in " + fx.worktree + ": refs/remotes/origin/HEAD names none that exists",
+					"neither main nor master exists as refs/remotes/origin/<name> or refs/heads/<name>",
+					"run git fetch origin (and git remote set-head origin --auto) and run the gate again"}
+			},
+			notWant: []string{"no origin remote"}},
 		{name: "the static script is missing",
 			setup: func(t *testing.T, fx *gateFixture) {
-				runGit(t, "-C", fx.worktree, "rm", "--quiet", gateStaticScript)
+				runGit(t, "-C", fx.worktree, "rm", "--quiet", GateStaticScript)
 				gateCommit(t, fx.worktree, "drop the static script")
 			},
 			want: func(_ *testing.T, fx *gateFixture) []string {
@@ -492,7 +554,7 @@ func TestGate_RefusedBeforeTheScripts(t *testing.T) {
 			}},
 		{name: "the test script is missing",
 			setup: func(t *testing.T, fx *gateFixture) {
-				runGit(t, "-C", fx.worktree, "rm", "--quiet", gateTestScript)
+				runGit(t, "-C", fx.worktree, "rm", "--quiet", GateTestScript)
 				gateCommit(t, fx.worktree, "drop the test script")
 			},
 			want: func(_ *testing.T, fx *gateFixture) []string {
@@ -500,10 +562,10 @@ func TestGate_RefusedBeforeTheScripts(t *testing.T) {
 			}},
 		{name: "the static script is not executable",
 			setup: func(t *testing.T, fx *gateFixture) {
-				if err := os.Chmod(filepath.Join(fx.worktree, filepath.FromSlash(gateStaticScript)), 0o644); err != nil {
+				if err := os.Chmod(filepath.Join(fx.worktree, filepath.FromSlash(GateStaticScript)), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				runGit(t, "-C", fx.worktree, "add", gateStaticScript)
+				runGit(t, "-C", fx.worktree, "add", GateStaticScript)
 				gateCommit(t, fx.worktree, "the static script loses its x bit")
 			},
 			want: func(_ *testing.T, fx *gateFixture) []string {
@@ -512,8 +574,8 @@ func TestGate_RefusedBeforeTheScripts(t *testing.T) {
 			}},
 		{name: "the test script is a directory",
 			setup: func(t *testing.T, fx *gateFixture) {
-				runGit(t, "-C", fx.worktree, "rm", "--quiet", gateTestScript)
-				writeGateFile(t, fx.worktree, gateTestScript+"/keep", "x\n", 0o644)
+				runGit(t, "-C", fx.worktree, "rm", "--quiet", GateTestScript)
+				writeGateFile(t, fx.worktree, GateTestScript+"/keep", "x\n", 0o644)
 				runGit(t, "-C", fx.worktree, "add", ".")
 				gateCommit(t, fx.worktree, "the test script becomes a directory")
 			},
@@ -818,6 +880,62 @@ func TestGate_InterruptedBeforeTheScripts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fx.stateDir, gateLogDir)); !errors.Is(err, os.ErrNotExist) || fx.calls(t) != nil {
 		t.Fatalf("an interrupted gate wrote a log (stat: %v) or ran %v", err, fx.calls(t))
+	}
+}
+
+// TestGate_StopsWhatAScriptLeftRunning covers what a script leaves in its
+// process group when it exits on its own: Gate stops the group (SIGTERM, and
+// SIGKILL after the grace for a process that ignores SIGTERM), also when the
+// process held the script's output, writes one line about it to the log after
+// the script's exit status, and keeps the script's own result: a pass stays a
+// pass and a failure a failure. The script that left nothing gets no line.
+func TestGate_StopsWhatAScriptLeftRunning(t *testing.T) {
+	grace := gateKillGrace
+	gateKillGrace = 300 * time.Millisecond
+	t.Cleanup(func() { gateKillGrace = grace })
+	cases := []struct {
+		name   string
+		hook   string
+		exit   int
+		reason string
+		calls  []string
+	}{
+		{"a background process with its output closed", "sleep 300 >/dev/null 2>&1 &\n", 0, "", []string{"static", "test"}},
+		{"a background process that holds the output", "sleep 300 &\n", 0, "", []string{"static", "test"}},
+		{"a background process that ignores SIGTERM", "trap '' TERM\nsleep 300 >/dev/null 2>&1 &\n", 0, "", []string{"static", "test"}},
+		{"a failing script's background process", "sleep 300 >/dev/null 2>&1 &\n", 3, GateReasonStaticFailed, []string{"static"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newGateFixture(t)
+			fx.hook(t, "static", tc.hook+"echo $! > \"$GATE_TEST_OUT/child\"\n")
+			if tc.exit != 0 {
+				fx.setExit(t, "static", tc.exit)
+			}
+			res := fx.gate(t)
+			child := gatePID(t, fx, "child")
+			// The gate stopped it before it returned; the wait only gives init
+			// the time to reap it, and kills it when the gate did not.
+			waitProcessGone(t, child)
+			if res.Refused != "" || res.Passed != (tc.reason == "") || res.Reason != tc.reason {
+				t.Fatalf("gate = %+v; want passed=%v reason=%q, as with no process left", res, tc.reason == "", tc.reason)
+			}
+			if calls := fx.calls(t); !slices.Equal(calls, tc.calls) {
+				t.Fatalf("scripts run = %v; want %v", calls, tc.calls)
+			}
+			if events := fx.gateEvents(t); len(events) != 1 {
+				t.Fatalf("gate events = %+v; want one", events)
+			}
+			log := fileOrAbsent(t, res.LogPath)
+			want := fmt.Sprintf("==> ralph org gate: ./%s exited %d\n==> ralph org gate: stopped the processes ./%s left running after it exited\n",
+				GateStaticScript, tc.exit, GateStaticScript)
+			if !strings.Contains(log, want) {
+				t.Errorf("log does not have %q:\n%s", want, log)
+			}
+			if strings.Contains(log, "stopped the processes ./"+GateTestScript) {
+				t.Errorf("log says processes of ./%s were stopped, which left none:\n%s", GateTestScript, log)
+			}
+		})
 	}
 }
 

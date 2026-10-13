@@ -5,17 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
-	"syscall"
-	"time"
 )
 
 // The `ralph org gate` verb (Gate), stage 7b of plan
@@ -25,9 +22,9 @@ import (
 // worktree, on the head it pushes, before it opens the PR. The gate checks
 // the org's binding, the worktree, and that HEAD contains the default
 // branch's tip, runs scripts/run-static-verify.sh and then
-// scripts/run-test.sh there, and records the outcome with the head and base
-// SHAs as one org-level gate_passed or gate_failed event (gateRecord). Stage
-// 7c's merge order reads that record.
+// scripts/run-test.sh there (gate_run.go), and records the outcome with the
+// head and base SHAs as one org-level gate_passed or gate_failed event
+// (gateRecord). Stage 7c's merge order reads that record.
 //
 // A refusal before the scripts run records nothing and writes no log (B7).
 // The gate never fetches, pushes, or calls herdr or agmsg. Neither the watch
@@ -35,30 +32,13 @@ import (
 // since it starts no new autonomous work (AC7).
 
 const (
-	// gateStaticScript and gateTestScript are the scripts Gate runs, in this
+	// GateStaticScript and GateTestScript are the scripts Gate runs, in this
 	// order, relative to the feature worktree's root.
-	gateStaticScript = "scripts/run-static-verify.sh"
-	gateTestScript   = "scripts/run-test.sh"
-	// gateLogDir is the directory under the org state dir that holds the
-	// gate logs, <org_id>-<UTC time>.log (createGateLog).
-	gateLogDir = "gates"
-	// gateLogTimeLayout is the UTC time in a gate log's name.
-	gateLogTimeLayout = "20060102T150405Z"
-	// gateLogMaxSuffix bounds the -2, -3, ... suffixes createGateLog tries
-	// when a log of the same org and second exists.
-	gateLogMaxSuffix = 100
-	// gateTailLines is how many of the failing script's last output lines
-	// GateResult.Tail keeps.
-	gateTailLines = 20
-	// gateTailMaxLineBytes caps one line of the tail; a line without a line
-	// break grows no further.
-	gateTailMaxLineBytes = 4096
-	// gateRefusedListLines caps the porcelain lines a dirty-tree refusal
-	// lists.
-	gateRefusedListLines = 20
-	// gateScopeEnv is the one verification variable the scripts get (B9):
-	// the full language scope, never narrowed by a diff.
-	gateScopeEnv = "RALPH_VERIFY_SCOPE=full"
+	GateStaticScript = "scripts/run-static-verify.sh"
+	GateTestScript   = "scripts/run-test.sh"
+	// GateDirtyListLines caps the porcelain lines a dirty-tree refusal
+	// lists; the CLI caps its tree_changed list the same.
+	GateDirtyListLines = 20
 )
 
 // The reasons a gate_failed records, first in its Details.
@@ -75,17 +55,6 @@ const (
 	// worktree had changes or untracked files after them (B6).
 	GateReasonTreeChanged = "tree_changed"
 )
-
-// gateStrippedEnvPrefixes are the prefixes of the variable names Gate drops
-// from the caller's environment before it runs the scripts (B9): a
-// RALPH_VERIFY_BASE=HEAD or a RALPH_VERIFY_PROJECT_ROOTS could otherwise make
-// the language verifiers skip the change.
-var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
-
-// gateKillGrace is how long an interrupted gate waits for a script's process
-// group to exit after SIGTERM before it sends SIGKILL to the group. Tests
-// shorten it.
-var gateKillGrace = 5 * time.Second
 
 // gitObjectPattern is the shape of a commit SHA the gate records: 40
 // lowercase hex digits, or 64 in a SHA-256 repository.
@@ -247,7 +216,8 @@ func isGateReason(reason string) bool {
 //     (ActiveFeature) and the org is running (RunningOrgs);
 //   - p.Dir is in the binding's worktree (`git rev-parse --show-toplevel`,
 //     both sides with symlinks resolved), on the binding's branch (`git
-//     branch --show-current`; a detached HEAD is refused);
+//     branch --show-current`; a detached HEAD is refused, with its own next
+//     step when a rebase is in progress: gateCheckBranch);
 //   - the worktree is clean: `git status --porcelain --untracked-files=all`
 //     prints nothing (ignored files do not count);
 //   - a default branch is found and its base ref's tip is an ancestor of
@@ -257,7 +227,8 @@ func isGateReason(reason string) bool {
 // It then writes a log under <state-dir>/gates/ (createGateLog) and runs
 // ./scripts/run-static-verify.sh and, when that exits 0,
 // ./scripts/run-test.sh in the worktree's root, with the caller's
-// environment fixed by gateScriptEnv, each in its own process group
+// environment fixed by gateScriptEnv, each in its own process group, which
+// is stopped when the script exits and leaves processes in it
 // (runGateScript). The manifest lock is not held while they run (AC5). When
 // both pass it reads HEAD and the worktree again: another HEAD is
 // head_moved, a dirty worktree tree_changed. Under the manifest lock it
@@ -371,7 +342,7 @@ func gateOrgLife(events []ManifestEvent, orgID string) (gateLife, string) {
 	case f == nil && running:
 		return life, fmt.Sprintf("org: gate: org_id %q holds no split plan feature binding (ralph org start <task> or a promoted "+
 			"session's leader started it): the gate checks only an org that ralph org start --plan started, so run "+
-			"./%s and ./%s yourself", orgID, gateStaticScript, gateTestScript)
+			"./%s and ./%s yourself", orgID, GateStaticScript, GateTestScript)
 	case f == nil && life.lastDisband >= 0:
 		return life, fmt.Sprintf("org: gate: org_id %q was disbanded and has not started again: the gate checks a running "+
 			"feature org; start it with ralph org start --plan, or name a running org_id (ralph org status lists them)", orgID)
@@ -430,20 +401,11 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 		return gateTarget{}, fmt.Sprintf("org: gate: the gate ran in the git worktree %s, not in org_id %q's feature worktree %s: "+
 			"cd into %s and run the gate again", root, orgID, f.Worktree, f.Worktree), nil
 	}
-	t := gateTarget{root: root}
-
-	branch, err := gateGitMust(ctx, root, "branch", "--show-current")
-	if err != nil {
-		return gateTarget{}, "", err
+	branch, refused, err := gateCheckBranch(ctx, root, f)
+	if err != nil || refused != "" {
+		return gateTarget{}, refused, err
 	}
-	switch t.branch = strings.TrimSpace(branch); {
-	case t.branch == "":
-		return gateTarget{}, fmt.Sprintf("org: gate: HEAD is detached in %s, not on the feature branch %s: run git switch %s "+
-			"and run the gate again", root, f.Branch, f.Branch), nil
-	case t.branch != f.Branch:
-		return gateTarget{}, fmt.Sprintf("org: gate: %s has the branch %s checked out, not the feature branch %s: run git switch "+
-			"%s and run the gate again", root, t.branch, f.Branch, f.Branch), nil
-	}
+	t := gateTarget{root: root, branch: branch}
 
 	dirty, err := gateDirtyLines(ctx, root)
 	if err != nil {
@@ -461,20 +423,90 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 		return gateTarget{}, "", err
 	}
 	if !found {
-		return gateTarget{}, fmt.Sprintf("org: gate: no default branch found in %s: refs/remotes/origin/HEAD names none that "+
-			"exists, and neither main nor master exists as refs/remotes/origin/<name> or refs/heads/<name>: run git fetch "+
-			"origin (and git remote set-head origin --auto) and run the gate again", root), nil
-	}
-	t.base = base
-	if refused, err := gateCheckAncestor(ctx, t); err != nil || refused != "" {
+		refused, err = gateNoBaseRefusal(ctx, root)
 		return gateTarget{}, refused, err
 	}
-	for _, rel := range []string{gateStaticScript, gateTestScript} {
-		if refused := gateCheckScript(root, rel); refused != "" {
+	t.base = base
+	if refused, err = gateCheckAncestor(ctx, t); err != nil || refused != "" {
+		return gateTarget{}, refused, err
+	}
+	for _, rel := range []string{GateStaticScript, GateTestScript} {
+		if refused = gateCheckScript(root, rel); refused != "" {
 			return gateTarget{}, refused, nil
 		}
 	}
 	return t, "", nil
+}
+
+// gateCheckBranch returns the branch checked out in root, or the refusal of
+// a worktree that is not on f's branch: another branch, a detached HEAD, or
+// a rebase in progress (HEAD is detached then, and `git switch` fails until
+// the rebase is finished or undone, gateRebaseInProgress).
+func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding) (string, string, error) {
+	out, err := gateGitOutput(ctx, root, "branch", "--show-current")
+	if err != nil {
+		return "", "", err
+	}
+	switch branch := strings.TrimSpace(out); branch {
+	case f.Branch:
+		return branch, "", nil
+	case "":
+	default:
+		return "", fmt.Sprintf("org: gate: %s has the branch %s checked out, not the feature branch %s: run git switch "+
+			"%s and run the gate again", root, branch, f.Branch, f.Branch), nil
+	}
+	rebasing, err := gateRebaseInProgress(ctx, root)
+	if err != nil {
+		return "", "", err
+	}
+	if rebasing {
+		return "", fmt.Sprintf("org: gate: a rebase is in progress in %s, so HEAD is detached and not on the feature branch %s: "+
+			"finish it with git rebase --continue, or undo it with git rebase --abort, and run the gate again", root, f.Branch), nil
+	}
+	return "", fmt.Sprintf("org: gate: HEAD is detached in %s, not on the feature branch %s: run git switch %s "+
+		"and run the gate again", root, f.Branch, f.Branch), nil
+}
+
+// gateRebaseInProgress reports whether a rebase is stopped in root: git's
+// rebase-merge or rebase-apply directory for root's worktree exists (`git
+// rev-parse --git-path` prints each, relative to root unless it is absolute,
+// as it is in a linked worktree).
+func gateRebaseInProgress(ctx context.Context, root string) (bool, error) {
+	out, err := gateGitOutput(ctx, root, "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply")
+	if err != nil {
+		return false, err
+	}
+	for path := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		_, err := os.Stat(path)
+		switch {
+		case err == nil:
+			return true, nil
+		case !errors.Is(err, fs.ErrNotExist):
+			return false, fmt.Errorf("org: gate: check for a rebase in progress in %s: %w", root, err)
+		}
+	}
+	return false, nil
+}
+
+// gateNoBaseRefusal is the refusal of root's repository when resolveGateBase
+// found no default branch: with an origin remote, fetch it; with none, there
+// is nothing to fetch, so create the default branch locally.
+func gateNoBaseRefusal(ctx context.Context, root string) (string, error) {
+	remotes, err := gateGitOutput(ctx, root, "remote")
+	if err != nil {
+		return "", err
+	}
+	if slices.Contains(strings.Fields(remotes), "origin") {
+		return fmt.Sprintf("org: gate: no default branch found in %s: refs/remotes/origin/HEAD names none that exists, and "+
+			"neither main nor master exists as refs/remotes/origin/<name> or refs/heads/<name>: run git fetch origin (and git "+
+			"remote set-head origin --auto) and run the gate again", root), nil
+	}
+	return fmt.Sprintf("org: gate: no default branch found in %s: the repository has no origin remote, and neither main nor "+
+		"master exists as refs/heads/<name>: create the default branch locally as main or master (git branch main <commit>) "+
+		"and run the gate again", root), nil
 }
 
 // gateCheckAncestor refuses t when its base's tip is not an ancestor of
@@ -518,9 +550,9 @@ func gateCheckScript(root, rel string) string {
 }
 
 // gateDirtyRefusal is the refusal of a worktree with the porcelain lines
-// dirty, the first gateRefusedListLines of them listed.
+// dirty, the first GateDirtyListLines of them listed.
 func gateDirtyRefusal(root string, dirty []string) string {
-	shown := dirty[:min(len(dirty), gateRefusedListLines)]
+	shown := dirty[:min(len(dirty), GateDirtyListLines)]
 	list := "  " + strings.Join(shown, "\n  ")
 	if more := len(dirty) - len(shown); more > 0 {
 		list += fmt.Sprintf("\n  ... and %d more", more)
@@ -579,7 +611,7 @@ func resolveGateBase(ctx context.Context, root string) (gateBase, bool, error) {
 			if !exists {
 				continue
 			}
-			sha, err := gateGitMust(ctx, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+			sha, err := gateGitOutput(ctx, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 			if err != nil {
 				return gateBase{}, false, err
 			}
@@ -606,7 +638,7 @@ func gateRefExists(ctx context.Context, root, ref string) (bool, error) {
 
 // gateHead returns root's HEAD commit.
 func gateHead(ctx context.Context, root string) (string, error) {
-	out, err := gateGitMust(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+	out, err := gateGitOutput(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
 	return strings.TrimSpace(out), err
 }
 
@@ -614,7 +646,7 @@ func gateHead(ctx context.Context, root string) (string, error) {
 // root, one entry per line: nil for a clean worktree. Ignored files are not
 // listed.
 func gateDirtyLines(ctx context.Context, root string) ([]string, error) {
-	out, err := gateGitMust(ctx, root, "status", "--porcelain", "--untracked-files=all")
+	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
@@ -657,9 +689,9 @@ func gateGit(ctx context.Context, dir string, args ...string) (gitResult, error)
 	return r, nil
 }
 
-// gateGitMust is gateGit with a non-zero exit as an error naming git's
+// gateGitOutput is gateGit with a non-zero exit as an error naming git's
 // stderr, and returns stdout.
-func gateGitMust(ctx context.Context, dir string, args ...string) (string, error) {
+func gateGitOutput(ctx context.Context, dir string, args ...string) (string, error) {
 	r, err := gateGit(ctx, dir, args...)
 	if err != nil {
 		return "", err
@@ -668,224 +700,6 @@ func gateGitMust(ctx context.Context, dir string, args ...string) (string, error
 		return "", fmt.Errorf("org: gate: git %s in %s: exit %d: %s", strings.Join(args, " "), dir, r.code, r.stderr)
 	}
 	return r.stdout, nil
-}
-
-// gateScriptEnv is the environment the gate scripts get (B9): env without
-// every variable whose name starts with RALPH_VERIFY_ or HARNESS_VERIFY_,
-// then RALPH_VERIFY_SCOPE=full.
-func gateScriptEnv(env []string) []string {
-	out := make([]string, 0, len(env)+1)
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		stripped := false
-		for _, prefix := range gateStrippedEnvPrefixes {
-			stripped = stripped || strings.HasPrefix(name, prefix)
-		}
-		if !stripped {
-			out = append(out, kv)
-		}
-	}
-	return append(out, gateScopeEnv)
-}
-
-// gateEnvValue returns key's value in env, the last entry winning as it does
-// for a child process, and "" when env has none.
-func gateEnvValue(env []string, key string) string {
-	var value string
-	for _, kv := range env {
-		if name, v, ok := strings.Cut(kv, "="); ok && name == key {
-			value = v
-		}
-	}
-	return value
-}
-
-// createGateLog creates the log of a gate of orgID, empty, under
-// <state-dir>/gates/ (state-dir is the manifest's directory, made absolute):
-// <org_id>-<UTC time, gateLogTimeLayout>.log, or the same name with -2, -3,
-// ... before .log when one exists, created with O_EXCL so two gates never
-// share a log. It returns the log's absolute path and the open file.
-func (o *Org) createGateLog(orgID string) (string, *os.File, error) {
-	stateDir, err := absPath(filepath.Dir(o.Manifest.Path()))
-	if err != nil {
-		return "", nil, fmt.Errorf("org: gate: resolve the state dir for the gate log: %w", err)
-	}
-	dir := filepath.Join(stateDir, gateLogDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("org: gate: create the gate log dir %s: %w", dir, err)
-	}
-	name := orgID + "-" + o.nowTime().UTC().Format(gateLogTimeLayout)
-	for n := 1; n <= gateLogMaxSuffix; n++ {
-		path := filepath.Join(dir, name+".log")
-		if n > 1 {
-			path = filepath.Join(dir, name+"-"+strconv.Itoa(n)+".log")
-		}
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if err == nil {
-			return path, f, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return "", nil, fmt.Errorf("org: gate: create the gate log %s: %w", path, err)
-		}
-	}
-	return "", nil, fmt.Errorf("org: gate: create the gate log: %d logs named %s already exist in %s", gateLogMaxSuffix, name, dir)
-}
-
-// gateRun is what runGateScripts found.
-type gateRun struct {
-	failed string   // GateReasonStaticFailed or GateReasonTestFailed; "" when both passed
-	tail   []string // the failing script's last output lines
-}
-
-// runGateScripts runs the static script and, when it exits 0, the test
-// script in t.root (runGateScript), with env, writing a header line before
-// each and its exit status after it to log, and their output in between.
-// The error is ctx's when it is done, or a log write that failed.
-func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer) (gateRun, error) {
-	header := func(format string, args ...any) error {
-		if _, err := fmt.Fprintf(log, format, args...); err != nil {
-			return fmt.Errorf("org: gate: write the log: %w", err)
-		}
-		return nil
-	}
-	if err := header("# ralph org gate\n# worktree: %s\n# branch: %s\n# head: %s\n# base: %s %s\n",
-		t.root, t.branch, t.head, t.base.ref, t.base.sha); err != nil {
-		return gateRun{}, err
-	}
-	for _, s := range []struct{ rel, reason string }{
-		{gateStaticScript, GateReasonStaticFailed},
-		{gateTestScript, GateReasonTestFailed},
-	} {
-		if err := header("\n==> ralph org gate: running ./%s\n", s.rel); err != nil {
-			return gateRun{}, err
-		}
-		out := &gateOutput{log: log}
-		code, err := runGateScript(ctx, t.root, s.rel, env, out)
-		if err != nil {
-			_ = header("\n==> ralph org gate: ./%s interrupted\n", s.rel)
-			return gateRun{}, err
-		}
-		if out.err != nil {
-			return gateRun{}, fmt.Errorf("org: gate: write the log: %w", out.err)
-		}
-		if err := header("\n==> ralph org gate: ./%s exited %d\n", s.rel, code); err != nil {
-			return gateRun{}, err
-		}
-		if code != 0 {
-			return gateRun{failed: s.reason, tail: out.tail()}, nil
-		}
-	}
-	return gateRun{}, nil
-}
-
-// runGateScript runs ./rel in root with env and both output streams going
-// to out, its stdin empty, in a process group of its own, and returns its
-// exit code (-1 when a signal ended it or it could not start; the reason then
-// goes to out). When ctx is done the group gets SIGTERM, and whatever of it
-// is still there gateKillGrace later gets SIGKILL (stopGateGroup); the error
-// is then ctx's. Release builds target darwin and linux only, where
-// Setpgid and kill(-pgid) exist.
-func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer) (int, error) {
-	cmd := exec.CommandContext(ctx, filepath.Join(root, filepath.FromSlash(rel)))
-	cmd.Args[0] = "./" + rel
-	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = root, env, out, out
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// cancelledAt is when Cancel sent SIGTERM (UnixNano), set from the
-	// goroutine os/exec watches ctx in.
-	var cancelledAt atomic.Int64
-	cmd.Cancel = func() error {
-		cancelledAt.Store(time.Now().UnixNano())
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		return nil
-	}
-	cmd.WaitDelay = gateKillGrace
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		if cmd.Process != nil {
-			since := time.Now()
-			if at := cancelledAt.Load(); at != 0 {
-				since = time.Unix(0, at)
-			}
-			stopGateGroup(cmd.Process.Pid, since.Add(gateKillGrace))
-		}
-		return 0, context.Cause(ctx)
-	}
-	if cmd.ProcessState == nil {
-		_, _ = fmt.Fprintf(out, "ralph org gate: ./%s could not run: %v\n", rel, err)
-		return -1, nil
-	}
-	if errors.Is(err, exec.ErrWaitDelay) {
-		_, _ = fmt.Fprintf(out, "ralph org gate: a process ./%s started still held its output %s after it exited\n", rel, gateKillGrace)
-	}
-	return cmd.ProcessState.ExitCode(), nil
-}
-
-// stopGateGroup waits until deadline for process group pgid to have no
-// process left (kill(-pgid, 0) fails), then sends SIGKILL to the group. A
-// group whose processes are gone answers ESRCH and is left alone.
-func stopGateGroup(pgid int, deadline time.Time) {
-	for time.Now().Before(deadline) {
-		if syscall.Kill(-pgid, 0) != nil {
-			return
-		}
-		time.Sleep(manifestLockPollInterval)
-	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
-}
-
-// gateOutput is the writer a gate script's stdout and stderr both go to
-// (os/exec calls Write from one goroutine at a time for the two when they
-// are the same writer): every byte goes to log, and the last gateTailLines
-// lines are kept for the tail. The first log write error is kept in err and
-// later writes skip the log, so the script is not stopped by it.
-type gateOutput struct {
-	log     io.Writer
-	err     error
-	lines   []string
-	partial []byte
-}
-
-func (w *gateOutput) Write(b []byte) (int, error) {
-	if w.err == nil {
-		if _, err := w.log.Write(b); err != nil {
-			w.err = err
-		}
-	}
-	rest := b
-	for len(rest) > 0 {
-		i := bytes.IndexByte(rest, '\n')
-		if i < 0 {
-			w.partial = append(w.partial, rest[:min(len(rest), gateTailMaxLineBytes-len(w.partial))]...)
-			break
-		}
-		w.partial = append(w.partial, rest[:min(i, gateTailMaxLineBytes-len(w.partial))]...)
-		w.push(string(w.partial))
-		w.partial = w.partial[:0]
-		rest = rest[i+1:]
-	}
-	return len(b), nil
-}
-
-// push keeps line as the latest complete line, a trailing carriage return
-// dropped, and the oldest beyond gateTailLines dropped.
-func (w *gateOutput) push(line string) {
-	w.lines = append(w.lines, strings.TrimSuffix(line, "\r"))
-	if len(w.lines) > gateTailLines {
-		w.lines = w.lines[len(w.lines)-gateTailLines:]
-	}
-}
-
-// tail returns the last gateTailLines lines written, a last line with no
-// line break included.
-func (w *gateOutput) tail() []string {
-	lines := append([]string(nil), w.lines...)
-	if len(w.partial) > 0 {
-		lines = append(lines, strings.TrimSuffix(string(w.partial), "\r"))
-	}
-	if len(lines) > gateTailLines {
-		lines = lines[len(lines)-gateTailLines:]
-	}
-	return lines
 }
 
 // recordGate appends record as orgID's gate event under the manifest lock,

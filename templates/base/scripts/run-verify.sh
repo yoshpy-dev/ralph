@@ -33,8 +33,13 @@ scope_file=".harness/state/verify-scope"
 # a reviewer's run, say) must not see each other's exit code, scope, or
 # docs-only marker, so each run gets its own temp files instead of shared
 # paths under .harness/state/. The EXIT trap removes them; an EXIT trap does
-# not change the exit status (POSIX keeps $? across a trap action). HUP, INT,
-# and TERM exit with 128 + the signal number, which runs the EXIT trap.
+# not change the exit status (POSIX keeps $? across a trap action). The HUP,
+# INT, and TERM traps exit with 128 + the signal number, which runs the EXIT
+# trap, but sh runs a trap only after the foreground command it is waiting
+# for ends. A signal sent to the whole process group (what `ralph org gate`
+# and Ctrl-C in a terminal send) also ends the { } | tee pipeline below, so
+# the run exits at once. A signal sent to this script's pid alone runs the
+# trap only after that pipeline has finished, verifiers included.
 run_status_file=""
 run_scope_file=""
 run_non_docs_file=""

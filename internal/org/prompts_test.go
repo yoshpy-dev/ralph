@@ -739,14 +739,17 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 
 // TestRenderRolePrompt_Leader_FeatureOrgGate pins AC8 of plan
 // docs/plans/active/2026-10-13-org-gate.md: after the reviewer passes, the
-// 機能ごとの org section fetches and rebases on the default branch (a conflict
-// goes to the implementer as a TASK, with PLAN: under per-plan, and back to
-// review), commits the report and the reviewer's reports, then the plan's
-// archive as a separate commit, runs the secret scan, then `ralph org gate`
-// (with a long timeout or in the background, no commits after it), reverts
-// the archive commit on GATE: fail before the implementer's TASK (B11), stops
-// the seats after the gate, pushes only the gate's HEAD:, and copies the
-// gate's HEAD: and BASE: into the RESULT, whose example escalate accepts. The
+// 機能ごとの org section fetches and rebases on the default branch (read the
+// way the gate reads it; a conflict goes to the implementer as a TASK, with
+// PLAN: under per-plan, and back to review), commits the report and the
+// reviewer's reports, then the plan's archive as a separate commit, runs the
+// secret scan, then `ralph org gate` (in the background with its output in a
+// file under .harness/state/, or with a long timeout; no commits after it),
+// stops the seats after the gate, pushes only the gate's HEAD:, and copies the
+// gate's HEAD: and BASE: into the RESULT, whose example escalate accepts.
+// Every TASK to the implementer after the archive commit, on GATE: fail or
+// for a refusal whose fix needs the implementer (a rebase that conflicts),
+// first undoes a rebase in progress and reverts the archive commit (B11). The
 // steps the section refers to by number are the steps it means, and the
 // mission's report item says it runs before the seats stop and the gate.
 func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
@@ -769,9 +772,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		"report と reviewer のレポート(`docs/reports/` の下)をコミットする",
 		"./scripts/archive-plan.sh <機能の計画のパス>",
 		"report とは別のコミットにする",
+		"このあとの手順で implementer に TASK を送ることになったら",
+		"`git revert --no-edit <archive のコミット>`",
 		"./scripts/secret-scan-branch.sh --strict",
 		"ralph org gate --org-id org-a --state-dir <台帳>",
-		"`git revert --no-edit <archive のコミット>`",
+		"> .harness/state/gate-org-a.out 2>&1",
 		"implementer と reviewer を `ralph org stop` で止める",
 		"gate が出した `HEAD:` と同じことを確かめる",
 		"git push -u origin <ブランチ>",
@@ -792,6 +797,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 
 	for _, c := range []struct{ marker, want string }{
 		{"9. reviewer が通したら", "既定のブランチは `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先"},
+		{"9. reviewer が通したら", "(`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から `refs/remotes/origin/` を除いた名前)"},
 		{"9. reviewer が通したら", "なければ `main`、それもなければ `master` にする"},
 		{"9. reviewer が通したら", "HEAD が `origin/<既定のブランチ>` を含まなければ)、`git rebase origin/<既定のブランチ>` を打つ"},
 		{"9. reviewer が通したら", "衝突したら `git rebase --abort` で戻し、自分では直さない"},
@@ -800,15 +806,22 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		{"10. `ralph org report", "report と reviewer のレポート(`docs/reports/` の下)をコミットする"},
 		{"10. `ralph org report", "計画の移動(スクリプトが書き換えたほかのファイルを含む)を report とは別のコミットにする"},
 		{"10. `ralph org report", "このコミットを archive のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える"},
-		{"12. `ralph org gate", "数分かかるので、ツールの timeout を長くするか、バックグラウンドで走らせて終わりを待つ"},
-		{"12. `ralph org gate", "途中で切られた gate は何も記録しないので、打ち直す"},
+		{"10. `ralph org report", "このあとの手順で implementer に TASK を送ることになったら(手順 12 の `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき)"},
+		{"10. `ralph org report", "送る前に、rebase の途中なら `git rebase --abort` で戻し、archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す。そのあとで TASK を送る"},
+		{"10. `ralph org report", "per-plan では、承認の記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で断られる"},
+		{"12. `ralph org gate", "数分かかるので、バックグラウンドで走らせ、stdout と stderr を `.harness/state/` の下のファイルに書く"},
+		{"12. `ralph org gate", "`mkdir -p .harness/state` を打ってから `ralph org gate --org-id org-a --state-dir <台帳> > .harness/state/gate-org-a.out 2>&1` を打つ"},
+		{"12. `ralph org gate", "終わるのを待ってから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む"},
+		{"12. `ralph org gate", "前景で打つなら、ツールの timeout を gate にかかる時間より長くする"},
+		{"12. `ralph org gate", "ツールに切られた gate は何も記録しない。打ち直す前に、前の gate のスクリプトが終わるのを待つ"},
+		{"12. `ralph org gate", "gate が殺されたあとも動き続けることがある"},
 		{"12. `ralph org gate", "gate のあとにコミットを足さず、足したら gate を打ち直す"},
 		{"- 通ったとき", "`GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・`LOG: <パス>` の行が出て、終了コードは 0"},
-		{"- 断られたとき", "stdout に何も出ず終了コード 1"},
+		{"- 断られたとき", "stdout に何も出ず終了コード 1。ファイルに書いたときは `GATE:` の行がない"},
 		{"- 断られたとき", "stderr に書かれた次の手に従う"},
+		{"- 断られたとき", "次の手を打つうちに implementer の手が要ることになったら(HEAD が既定のブランチを含まないと断られ、その `git rebase` が衝突した、など)、手順 10 の終わりのとおり rebase を戻し、archive のコミットを revert してから、implementer に rebase と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る"},
 		{"- 断られたとき", "打ち直さず、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
-		{"- `GATE: fail` のとき", "手順 10 で archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す"},
-		{"- `GATE: fail` のとき", "per-plan では、承認の記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で断られる"},
+		{"- `GATE: fail` のとき", "手順 10 の終わりのとおり、archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す"},
 		{"- `GATE: fail` のとき", "stdout の `REASON:` と `LOG:` を本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に戻る"},
 		{"- `GATE: fail` のとき", "reviewer が通したら、手順 9 からやり直す"},
 		{"13. implementer と reviewer を", "`ralph org stop` で止める"},
@@ -821,13 +834,35 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		}
 	}
 
-	// GATE: fail puts the plan back before the implementer's TASK.
-	if item, ok := markdownItem(section, "- `GATE: fail` のとき"); ok {
-		s := squashSpace(item)
-		revertAt, taskAt := strings.Index(s, squashSpace("git revert --no-edit")), strings.Index(s, squashSpace("implementer に直しを TASK で頼み"))
-		if revertAt < 0 || taskAt < 0 || revertAt > taskAt {
-			t.Errorf("expected the GATE: fail item to revert the archive commit before the implementer's TASK, got item:\n%s", item)
+	// Every TASK to the implementer after the archive commit comes after the
+	// rebase is undone and the archive commit reverted: the rule of step 10,
+	// and the two items of step 12 that lead to such a TASK.
+	for _, c := range []struct {
+		marker, name string
+		order        []string
+	}{
+		{"10. `ralph org report", "step 10's rule", []string{"`git rebase --abort` で戻し", "`git revert --no-edit <archive のコミット>`", "そのあとで TASK を送る"}},
+		{"- 断られたとき", "the refusal item", []string{"rebase を戻し", "archive のコミットを revert してから", "解消を TASK で頼み"}},
+		{"- `GATE: fail` のとき", "the GATE: fail item", []string{"git revert --no-edit", "implementer に直しを TASK で頼み"}},
+	} {
+		item, ok := markdownItem(section, c.marker)
+		if !ok {
+			continue // reported by the item checks above
 		}
+		s, at := squashSpace(item), -1
+		for _, step := range c.order {
+			i := strings.Index(s, squashSpace(step))
+			if i < 0 || i < at {
+				t.Errorf("expected %s to say %q in this order, but %q is missing or out of order, got item:\n%s", c.name, c.order, step, item)
+				break
+			}
+			at = i
+		}
+	}
+	// The default branch is read with the full ref name, as the gate reads
+	// it, not with --short.
+	if item, _ := markdownItem(section, "9. reviewer が通したら"); strings.Contains(item, "--short") {
+		t.Errorf("expected step 9 to read refs/remotes/origin/HEAD without --short, got item:\n%s", item)
 	}
 
 	// The section's numbered references (手順 8, 9, 10, 12 and この節の 15)
@@ -910,7 +945,7 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	}
 	for _, want := range []string{
 		"検証した commit の `HEAD: <git rev-parse HEAD>` と base の `BASE: <git merge-base HEAD <既定のブランチ>>` を入れて leader に返す",
-		"既定のブランチは、leader の TASK に書いてあればそれ、なければ `refs/remotes/origin/HEAD` が指す先、それもなければ `main` にする",
+		"既定のブランチは、leader の TASK に書いてあればそれ、なければ `refs/remotes/origin/HEAD` が指す先、それもなければ `main`、それもなければ `master` にする",
 		"`origin/<名前>` があれば、それと merge-base を取る",
 		"ralph はこの 2 行を読まない",
 	} {

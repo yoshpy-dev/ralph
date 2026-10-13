@@ -9,6 +9,10 @@
 #   - .harness/state/verify-scope is still left behind at the end of a run;
 #   - the per-run temp files are gone after success, failure, a killed block,
 #     and a TERM signal;
+#   - a TERM to the run's whole process group ends it at once with 143, and a
+#     TERM to its pid alone ends it with 143 only after the running verifier
+#     finishes (sh runs the trap after the foreground pipeline), under /bin/sh
+#     and, when it is installed, dash;
 #   - plain passing and failing runs keep their exit codes 0 and 1, and the
 #     docs-only detection still tells a code change (exit 2) from a docs one.
 #
@@ -161,16 +165,67 @@ wait_bg() {
   set -e
 }
 
-# wait_for_file <path> -- waits up to about 10 s for <path> to appear.
-wait_for_file() {
+# poll_for_file <path> <polls> -- waits up to <polls> x 0.05 s for <path> to
+# appear; returns 1 when it does not.
+poll_for_file() {
   _n=0
   while [ ! -f "$1" ]; do
     _n=$((_n + 1))
-    if [ "$_n" -gt 200 ]; then
+    if [ "$_n" -gt "$2" ]; then
       return 1
     fi
     sleep 0.05
   done
+}
+
+# wait_for_file <path> -- waits up to about 10 s for <path> to appear.
+wait_for_file() {
+  poll_for_file "$1" 200
+}
+
+# start_signal_run <shell> <repo> <out> <done> [VAR=value ...] -- runs
+# <repo>'s run-verify.sh under <shell> in the background with the test's
+# TMPDIR and the given settings, in a process group of its own when
+# own_group is 1 (perl's setpgrp, so a signal to that group never reaches
+# this test). Writes run-verify.sh's pid to <done>.pid and, once it exits, its
+# exit code to <done>, each by a rename so a reader never sees half a file;
+# sets bg_pid to the pid of the wrapper that waits for it.
+start_signal_run() {
+  _shell="$1"
+  _repo="$2"
+  _out="$3"
+  _done="$4"
+  shift 4
+  rm -f "$_done" "$_done.pid"
+  (
+    set +e
+    (
+      cd "$_repo" || exit 1
+      if [ "$own_group" = "1" ]; then
+        # shellcheck disable=SC2016  # perl code: $! is perl's, not the shell's
+        exec env TMPDIR="$run_tmp" "$@" perl -e 'setpgrp(0, 0) or die "setpgrp: $!\n"; exec @ARGV or die "exec: $!\n"' \
+          "$_shell" ./scripts/run-verify.sh
+      fi
+      exec env TMPDIR="$run_tmp" "$@" "$_shell" ./scripts/run-verify.sh
+    ) > "$_out" 2>&1 &
+    _run_pid=$!
+    printf '%s\n' "$_run_pid" > "$_done.pid.tmp" && mv -f "$_done.pid.tmp" "$_done.pid"
+    wait "$_run_pid"
+    printf '%s\n' "$?" > "$_done.tmp" && mv -f "$_done.tmp" "$_done"
+  ) &
+  bg_pid=$!
+  bg_pids="$bg_pids $bg_pid"
+}
+
+# finish_signal_run <done> <wrapper-pid> -- waits for the wrapper
+# start_signal_run started and sets run_rc to the exit code of its
+# run-verify.sh (-1 when the wrapper wrote none).
+finish_signal_run() {
+  wait_bg "$2"
+  run_rc="$(cat "$1" 2>/dev/null || true)"
+  case "$run_rc" in
+    ''|*[!0-9]*) run_rc=-1 ;;
+  esac
 }
 
 assert_rc() {
@@ -355,23 +410,84 @@ assert_contains "docs-only change is reported as docs work" "This appears to be 
 assert_no_run_files "docs-only run leaves no per-run files" "$repo"
 
 # --- Case 6: TERM during a run ---
-printf 'Case 6: a TERM signal during a run exits 143 and removes the per-run files\n'
-repo="$(make_repo term)"
-out="$workdir/term.out"
-term_started="$workdir/term.started"
-term_release="$workdir/term.release"
-start_run_verify "$repo" "$out" STUB_EXIT=0 STUB_STARTED="$term_started" STUB_WAIT_FOR="$term_release"
-term_pid=$bg_pid
-if wait_for_file "$term_started"; then
-  record_pass "TERM run's verifier started"
-else
-  record_fail "TERM run's verifier started (no $term_started after 10 s)"
+# sh runs a trapped signal's action only after the foreground command it is
+# waiting for has ended. A TERM to the run's whole process group (what
+# `ralph org gate` sends) also ends the { } | tee pipeline, so the run exits
+# 143 at once, while the stub verifier is still waiting for its release. A
+# TERM to the run's pid alone exits 143 only once the pipeline has finished:
+# the run is still there 1 s after the signal, and ends after the release.
+# Both remove the per-run files. The group part needs perl to give the run a
+# group of its own; without perl the run stays in this test's group, so the
+# part is skipped and the pid part runs there.
+printf 'Case 6: a TERM during a run exits 143 and removes the per-run files\n'
+case6_shells="/bin/sh"
+if command -v dash >/dev/null 2>&1; then
+  case6_shells="$case6_shells $(command -v dash)"
 fi
-kill -TERM "$term_pid" 2>/dev/null || true
-: > "$term_release"
-wait_bg "$term_pid"
-assert_rc "TERM during a run exits 143" 143 "$out"
-assert_no_run_files "TERM run leaves no per-run files" "$repo"
+own_group=0
+if command -v perl >/dev/null 2>&1; then
+  own_group=1
+fi
+for case6_shell in $case6_shells; do
+  sh_name="$(basename "$case6_shell")"
+
+  if [ "$own_group" = "1" ]; then
+    repo="$(make_repo "term-group-$sh_name")"
+    out="$workdir/term-group-$sh_name.out"
+    started="$workdir/term-group-$sh_name.started"
+    release="$workdir/term-group-$sh_name.release"
+    done_file="$workdir/term-group-$sh_name.done"
+    start_signal_run "$case6_shell" "$repo" "$out" "$done_file" STUB_EXIT=0 STUB_STARTED="$started" STUB_WAIT_FOR="$release"
+    wrapper_pid=$bg_pid
+    if wait_for_file "$started" && wait_for_file "$done_file.pid"; then
+      run_pid="$(cat "$done_file.pid")"
+      kill -s TERM -- "-$run_pid" 2>/dev/null || true
+      if poll_for_file "$done_file" 40; then
+        record_pass "$sh_name: TERM to the run's process group ends it within 2 s, the verifier not released"
+      else
+        record_fail "$sh_name: TERM to the run's process group did not end it within 2 s"
+      fi
+    else
+      record_fail "$sh_name: the group TERM run's verifier did not start within 10 s"
+    fi
+    : > "$release"
+    finish_signal_run "$done_file" "$wrapper_pid"
+    assert_rc "$sh_name: TERM to the run's process group exits 143" 143 "$out"
+    assert_no_run_files "$sh_name: TERM to the run's process group leaves no per-run files" "$repo"
+    if [ -n "${run_pid:-}" ]; then
+      kill -s KILL -- "-$run_pid" 2>/dev/null || true
+    fi
+  else
+    printf '  SKIP: %s: TERM to the process group (perl is not installed)\n' "$sh_name"
+  fi
+
+  repo="$(make_repo "term-pid-$sh_name")"
+  out="$workdir/term-pid-$sh_name.out"
+  started="$workdir/term-pid-$sh_name.started"
+  release="$workdir/term-pid-$sh_name.release"
+  done_file="$workdir/term-pid-$sh_name.done"
+  run_pid=""
+  start_signal_run "$case6_shell" "$repo" "$out" "$done_file" STUB_EXIT=0 STUB_STARTED="$started" STUB_WAIT_FOR="$release"
+  wrapper_pid=$bg_pid
+  if wait_for_file "$started" && wait_for_file "$done_file.pid"; then
+    run_pid="$(cat "$done_file.pid")"
+    kill -s TERM "$run_pid" 2>/dev/null || true
+    if poll_for_file "$done_file" 20; then
+      record_fail "$sh_name: TERM to the run's pid alone ended it before the verifier was released"
+    else
+      record_pass "$sh_name: TERM to the run's pid alone leaves it waiting for the verifier (1 s)"
+    fi
+  else
+    record_fail "$sh_name: the pid TERM run's verifier did not start within 10 s"
+  fi
+  : > "$release"
+  finish_signal_run "$done_file" "$wrapper_pid"
+  assert_rc "$sh_name: TERM to the run's pid alone exits 143 after the verifier finishes" 143 "$out"
+  assert_no_run_files "$sh_name: TERM to the run's pid alone leaves no per-run files" "$repo"
+  if [ "$own_group" = "1" ] && [ -n "$run_pid" ]; then
+    kill -s KILL -- "-$run_pid" 2>/dev/null || true
+  fi
+done
 
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"

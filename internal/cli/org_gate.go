@@ -19,7 +19,8 @@ import (
 // (*org.Org).Gate checks the feature org and its worktree, runs the two
 // scripts, and records gate_passed or gate_failed; this command passes it the
 // current directory (Dir left empty) and the process environment, cancels its
-// context on SIGINT or SIGTERM, and prints the result (printGateResult).
+// context on SIGINT, SIGTERM, or SIGHUP, and prints the result
+// (printGateResult).
 func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "gate",
@@ -69,9 +70,10 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"REASON: <reason>, HEAD:, BASE: and LOG:, then the failing script's last\n" +
 			"20 lines of output, or the files the scripts left, and exits 1.\n" +
 			"\n" +
-			"An interrupt (SIGINT or SIGTERM) stops the running script and records\n" +
-			"nothing. gate starts no autonomous work, so it needs no running watch\n" +
-			"and no approved plan.",
+			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and\n" +
+			"records nothing. Processes a script leaves running when it exits are\n" +
+			"stopped too, and the log says so. gate starts no autonomous work, so it\n" +
+			"needs no running watch and no approved plan.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireOrgID(*orgID); err != nil {
@@ -85,11 +87,13 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if parent == nil {
 				parent = context.Background()
 			}
-			// The first SIGINT or SIGTERM cancels ctx, and Gate stops the
-			// running script's process group (SIGTERM, then SIGKILL after its
-			// grace). Later ones are caught too until stop runs, so a second
-			// Ctrl-C cannot end ralph before the group is stopped.
-			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+			// The first SIGINT, SIGTERM, or SIGHUP cancels ctx, and Gate stops
+			// the running script's process group (SIGTERM, then SIGKILL after
+			// its grace): the group is not ralph's, so a signal to ralph's
+			// group or a closed terminal does not reach it. Later ones are
+			// caught too until stop runs, so a second Ctrl-C cannot end ralph
+			// before the group is stopped.
+			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
 			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ()})
@@ -102,17 +106,12 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a
-// script's exit code, the script whose tail printGateResult shows: the paths
-// the org layer runs (internal/org/gate.go's gateStaticScript and
-// gateTestScript), as the log names them.
+// script's exit code, the script whose tail printGateResult shows, as the log
+// names it.
 var gateFailedScripts = map[string]string{
-	org.GateReasonStaticFailed: "./scripts/run-static-verify.sh",
-	org.GateReasonTestFailed:   "./scripts/run-test.sh",
+	org.GateReasonStaticFailed: "./" + org.GateStaticScript,
+	org.GateReasonTestFailed:   "./" + org.GateTestScript,
 }
-
-// gateDirtyListLines caps the porcelain lines printGateResult lists for
-// tree_changed, as the org layer caps a dirty-tree refusal's list.
-const gateDirtyListLines = 20
 
 // printGateResult prints res and returns the command's error.
 //
@@ -158,7 +157,7 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 		}
 		printIndented(w, res.Tail)
 	case org.GateReasonTreeChanged:
-		shown := res.Dirty[:min(len(res.Dirty), gateDirtyListLines)]
+		shown := res.Dirty[:min(len(res.Dirty), org.GateDirtyListLines)]
 		_, _ = fmt.Fprintf(w, "\nthe scripts left %d uncommitted change(s) or untracked file(s) in the feature worktree:\n", len(res.Dirty))
 		printIndented(w, shown)
 		if more := len(res.Dirty) - len(shown); more > 0 {

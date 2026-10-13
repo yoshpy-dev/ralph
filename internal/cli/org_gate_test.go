@@ -646,11 +646,12 @@ func signalSelf(sig syscall.Signal) func(t *testing.T, cancel context.CancelFunc
 	}
 }
 
-// AC5 through the CLI: SIGINT or SIGTERM to the ralph process, or the
-// command's context ending, while a script runs stops the script's process
-// group, runs no test script, prints nothing on stdout, records nothing, and
-// exits 1 with the org layer's interrupt error, which names the signal and
-// the log.
+// AC5 through the CLI: SIGINT, SIGTERM, or SIGHUP to the ralph process, or
+// the command's context ending, while a script runs stops the script's
+// process group, runs no test script, prints nothing on stdout, records
+// nothing, and exits 1 with the org layer's interrupt error, which names the
+// signal and the log. SIGHUP is what a closed terminal sends ralph; it does
+// not reach the script's group, which is not ralph's.
 func TestOrgGate_InterruptStopsTheScriptAndRecordsNothing(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -659,6 +660,7 @@ func TestOrgGate_InterruptStopsTheScriptAndRecordsNothing(t *testing.T) {
 	}{
 		{"SIGINT", "interrupt signal received", signalSelf(syscall.SIGINT)},
 		{"SIGTERM", "terminated signal received", signalSelf(syscall.SIGTERM)},
+		{"SIGHUP", "hangup signal received", signalSelf(syscall.SIGHUP)},
 		{"the command's context is cancelled", "context canceled", func(_ *testing.T, cancel context.CancelFunc) { cancel() }},
 	}
 	for _, tc := range cases {
@@ -807,7 +809,8 @@ func TestOrgGateHelp(t *testing.T) {
 		"Both records hold the head, the base, base_ref, the branch, who ran it (by=<USER>, and herdr_pane=set or unset",
 		"GATE: pass, HEAD: <sha>, BASE: <sha> and LOG: <path> on stdout and exits 0",
 		"GATE: fail, REASON: <reason>, HEAD:, BASE: and LOG:",
-		"An interrupt (SIGINT or SIGTERM) stops the running script and records nothing",
+		"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing",
+		"Processes a script leaves running when it exits are stopped too, and the log says so",
 		"it needs no running watch and no approved plan",
 	} {
 		if !strings.Contains(help, want) {

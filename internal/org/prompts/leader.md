@@ -163,9 +163,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 9. reviewer が通したら(`GATE: pass` の RESULT)、
    `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
    `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
-   (`git symbolic-ref --quiet --short refs/remotes/origin/HEAD` が出す
-   `origin/<名前>` の `<名前>`)、なければ `main`、それもなければ `master`
-   にする。`git merge-base --is-ancestor origin/<既定のブランチ> HEAD` が
+   (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+   `refs/remotes/origin/` を除いた名前)、なければ `main`、それもなければ
+   `master` にする。`git merge-base --is-ancestor origin/<既定のブランチ> HEAD` が
    終了コード 0 で終わらなければ(HEAD が `origin/<既定のブランチ>` を含まな
    ければ)、`git rebase origin/<既定のブランチ>` を打つ。衝突したら
    `git rebase --abort` で戻し、自分では直さない。implementer に rebase と
@@ -180,9 +180,16 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
     `docs/plans/archive/` に移し、計画の移動(スクリプトが書き換えたほかの
     ファイルを含む)を report とは別のコミットにする。このコミットを archive
-    のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える(手順 12 で
-    使う)。report をコミットせずに残すと、worktree に未追跡のファイルが残り、
-    手順 12 の gate に断られ、merge のあとの後始末(この節の 15)が止まる
+    のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える。report を
+    コミットせずに残すと、worktree に未追跡のファイルが残り、手順 12 の gate に
+    断られ、merge のあとの後始末(この節の 15)が止まる。
+    このあとの手順で implementer に TASK を送ることになったら(手順 12 の
+    `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき)、
+    送る前に、rebase の途中なら `git rebase --abort` で戻し、archive の
+    コミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を
+    `docs/plans/active/` に戻す。そのあとで TASK を送る。per-plan では、承認の
+    記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で
+    断られる(中身が承認した版と同じなら通る)
 11. `scripts/secret-scan-branch.sh` があれば
     `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
     なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
@@ -190,23 +197,33 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 12. `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。gate は
     worktree と rebase を確かめてから `./scripts/run-static-verify.sh` と
     `./scripts/run-test.sh` を走らせ、結果を台帳に記録する。数分かかるので、
-    ツールの timeout を長くするか、バックグラウンドで走らせて終わりを待つ
-    (途中で切られた gate は何も記録しないので、打ち直す)。gate のあとに
-    コミットを足さず、足したら gate を打ち直す。
+    バックグラウンドで走らせ、stdout と stderr を `.harness/state/` の下の
+    ファイルに書く(`mkdir -p .harness/state` を打ってから
+    `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳> > .harness/state/gate-{{ORG_ID}}.out 2>&1`
+    を打つ)。終わるのを待ってから、そのファイルの `GATE:`・`HEAD:`・`BASE:`
+    の行を読む。前景で打つなら、ツールの timeout を gate にかかる時間より
+    長くする。ツールに切られた gate は何も記録しない。打ち直す前に、前の gate の
+    スクリプトが終わるのを待つ(スクリプトは自分のプロセスグループで動くので、
+    gate が殺されたあとも動き続けることがある)。gate のあとにコミットを
+    足さず、足したら gate を打ち直す。
     - 通ったとき: stdout に `GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・
       `LOG: <パス>` の行が出て、終了コードは 0。`HEAD:` と `BASE:` の行を
       控える(手順 14 で使う)
-    - 断られたとき(stdout に何も出ず終了コード 1): stderr に書かれた次の手に
-      従う(作業ツリーが汚れている、rebase していない、など)。次の手のない
+    - 断られたとき(stdout に何も出ず終了コード 1。ファイルに書いたときは
+      `GATE:` の行がない): stderr に書かれた次の手に従う(作業ツリーが
+      汚れている、rebase していない、など)。次の手を打つうちに implementer の
+      手が要ることになったら(HEAD が既定のブランチを含まないと断られ、その
+      `git rebase` が衝突した、など)、手順 10 の終わりのとおり rebase を戻し、
+      archive のコミットを revert してから、implementer に rebase と衝突の
+      解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の
+      往復に戻る。reviewer が通したら、手順 9 からやり直す。次の手のない
       エラー(台帳や git の失敗)なら、打ち直さず、エラーを本文に書いて
       `ralph org escalate` で BLOCKED を上げる
-    - `GATE: fail` のとき(終了コード 1): まず、手順 10 で archive のコミットを
-      作っていれば `git revert --no-edit <archive のコミット>` で計画を
-      `docs/plans/active/` に戻す(per-plan では、承認の記録は元のパスを指す
-      ので、戻さないと implementer への TASK が承認の検査で断られる。中身が
-      承認した版と同じなら通る)。そのうえで、stdout の `REASON:` と `LOG:` を
-      本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に戻る。
-      reviewer が通したら、手順 9 からやり直す
+    - `GATE: fail` のとき(終了コード 1): まず、手順 10 の終わりのとおり、
+      archive のコミットを作っていれば `git revert --no-edit <archive のコミット>`
+      で計画を `docs/plans/active/` に戻す。そのうえで、stdout の `REASON:` と
+      `LOG:` を本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に
+      戻る。reviewer が通したら、手順 9 からやり直す
 13. implementer と reviewer を `ralph org stop` で止める
 14. HEAD(`git rev-parse HEAD`)が手順 12 の gate が出した `HEAD:` と同じ
     ことを確かめる。違えば push せず、gate を打ち直す(手順 12)。同じなら

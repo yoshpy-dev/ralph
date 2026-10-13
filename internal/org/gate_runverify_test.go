@@ -74,7 +74,7 @@ func TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier(t *testing.T) {
 	fx.env = append(fx.env, gateCallerVerifyEnv...)
 	fx.setExit(t, "golang", 1)
 
-	control := exec.Command("./" + gateStaticScript)
+	control := exec.Command("./" + GateStaticScript)
 	control.Dir, control.Env = fx.worktree, fx.env
 	if out, err := control.CombinedOutput(); err != nil || !strings.Contains(string(out), "==> Language packs selected: none") {
 		t.Fatalf("control: run-static-verify.sh with the caller's environment = %v; want it to pass with no language pack:\n%s", err, out)

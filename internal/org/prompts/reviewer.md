@@ -30,8 +30,9 @@
      `HEAD: <git rev-parse HEAD>` と base の
      `BASE: <git merge-base HEAD <既定のブランチ>>` を入れて leader に返す。
      既定のブランチは、leader の TASK に書いてあればそれ、なければ
-     `refs/remotes/origin/HEAD` が指す先、それもなければ `main` にする
-     (`origin/<名前>` があれば、それと merge-base を取る)。ralph はこの 2 行を
+     `refs/remotes/origin/HEAD` が指す先、それもなければ `main`、それも
+     なければ `master` にする(`origin/<名前>` があれば、それと merge-base を
+     取る)。ralph はこの 2 行を
      読まない(PR の head と base の記録は、leader が PR の前に打つ
      `ralph org gate` が台帳に残す)
 

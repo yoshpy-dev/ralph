@@ -1206,13 +1206,17 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    binary while that alert is pending then reads one higher and clears
 //	    it.
 //	(c) ev.Event is EventGatePassed or EventGateFailed. Only `ralph org
-//	    gate` writes them, and a feature org's leader runs it (the seats
-//	    cannot write the ledger), so a gate's record is the leader acting. A
-//	    gate records nothing while its scripts run, so it counts when it
-//	    ends. The watchdog exclusion of (b) does not apply: no gate record
-//	    is a watchdog write. ralph releases before `ralph org gate` never
-//	    write them, so the stop_failed exception above applies the same
-//	    way: an older `ralph org watch` saves a pending alert whose baseline
+//	    gate` writes them, and the leader template has a feature org's
+//	    leader run it, so a gate's record counts as the leader acting. A
+//	    codex seat other than the leader cannot write the ledger (it gets no
+//	    --add-dir), but a claude seat can (claude has no such sandbox,
+//	    permissions.go), so a seat that ran the gate would be counted as
+//	    leader activity too. A gate records nothing while its scripts run,
+//	    so it counts when it ends. The watchdog exclusion of (b) does not
+//	    apply: no gate record is a watchdog write. ralph releases before
+//	    `ralph org gate` never write them, so the stop_failed exception
+//	    above applies the same way: an older `ralph org watch` saves a
+//	    pending alert whose baseline
 //	    lacks a gate record a newer gate wrote, and restarting watch on the
 //	    newer binary while that alert is pending reads one higher and clears
 //	    it. An older watch that keeps running does not count them at all.
