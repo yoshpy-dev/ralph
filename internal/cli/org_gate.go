@@ -87,13 +87,14 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if parent == nil {
 				parent = context.Background()
 			}
-			// The first SIGINT, SIGTERM, or SIGHUP cancels ctx, and Gate stops
-			// the running script's process group (SIGTERM, then SIGKILL after
-			// its grace): the group is not ralph's, so a signal to ralph's
-			// group or a closed terminal does not reach it. Later ones are
-			// caught too until stop runs, so a second Ctrl-C cannot end ralph
-			// before the group is stopped.
-			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+			// The first SIGINT, SIGTERM, or SIGHUP cancels ctx with a cause
+			// that names it (gateSignalContext), and Gate stops the running
+			// script's process group (SIGTERM, then SIGKILL after its grace):
+			// the group is not ralph's, so a signal to ralph's group or a
+			// closed terminal does not reach it. Later ones are caught too
+			// until stop runs, so a second Ctrl-C cannot end ralph before the
+			// group is stopped.
+			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
 			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ()})
@@ -103,6 +104,43 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			return printGateResult(cmd.OutOrStdout(), res)
 		},
 	}
+}
+
+// gateSignalContext returns a copy of parent that the first of sigs cancels
+// with the cause "<signal> signal received" ("interrupt signal received" for
+// SIGINT, "terminated signal received" for SIGTERM, "hangup signal received"
+// for SIGHUP), and a stop that cancels it (cause context.Canceled) and
+// unregisters sigs. When parent ends first, the cause stays parent's
+// ("context canceled" for the command's context). Gate's interrupt error
+// prints the cause, so it names the signal.
+//
+// It does what signal.NotifyContext does from Go 1.26. NotifyContext itself
+// is not used: it sets that cause only from Go 1.26, and go.mod allows Go
+// 1.25.8, which the release build uses; there the cause is only "context
+// canceled" (PR #225's CI).
+//
+// The goroutine ends at the first signal or when ctx ends, but sigs stay
+// registered with signal.Notify until stop runs, so a later signal is caught
+// too (and dropped once the channel's one slot is full) and does not end
+// ralph.
+func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+	if ctx.Err() == nil {
+		go func() {
+			select {
+			case s := <-ch:
+				cancel(errors.New(s.String() + " signal received"))
+			case <-ctx.Done():
+			}
+		}()
+	}
+	stop := func() {
+		cancel(nil)
+		signal.Stop(ch)
+	}
+	return ctx, stop
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a

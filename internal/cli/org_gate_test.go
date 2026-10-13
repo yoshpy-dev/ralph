@@ -720,6 +720,83 @@ func TestOrgGate_InterruptStopsTheScriptAndRecordsNothing(t *testing.T) {
 	}
 }
 
+// gateSignalContext when no signal comes: a parent that ends first keeps its
+// own cause (the command's context gives "context canceled", as the last case
+// of TestOrgGate_InterruptStopsTheScriptAndRecordsNothing checks), and stop
+// cancels with context.Canceled. The signal side runs in
+// TestOrgGate_SignalContextKeepsLaterSignalsCaught and through the command in
+// TestOrgGate_InterruptStopsTheScriptAndRecordsNothing.
+func TestOrgGate_SignalContextParentCauseAndStop(t *testing.T) {
+	errParent := errors.New("the parent's cause")
+	parent, cancelParent := context.WithCancelCause(context.Background())
+	defer cancelParent(nil)
+	ctx, stop := gateSignalContext(parent, syscall.SIGHUP)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("ctx.Err() = %v before anything ended; want nil", err)
+	}
+	cancelParent(errParent)
+	if !errors.Is(ctx.Err(), context.Canceled) || context.Cause(ctx) != errParent {
+		t.Errorf("after the parent ended: ctx.Err() = %v, cause = %v; want context.Canceled and the parent's cause %q", ctx.Err(), context.Cause(ctx), errParent)
+	}
+
+	ctx, stop = gateSignalContext(context.Background(), syscall.SIGHUP)
+	stop()
+	if !errors.Is(ctx.Err(), context.Canceled) || context.Cause(ctx) != context.Canceled {
+		t.Errorf("after stop: ctx.Err() = %v, cause = %v; want context.Canceled for both", ctx.Err(), context.Cause(ctx))
+	}
+}
+
+// gateSignalChildEnv makes TestOrgGate_SignalContextKeepsLaterSignalsCaught
+// run its child side.
+const gateSignalChildEnv = "RALPH_TEST_GATE_SIGNAL_CHILD"
+
+// gateSignalContext with signals: the first one (SIGHUP) cancels the context
+// with the cause "hangup signal received" on every Go version go.mod allows
+// (signal.NotifyContext sets that cause only from Go 1.26), and a later one
+// (SIGTERM) neither changes the cause nor ends the process, as a second
+// Ctrl-C must not end ralph while Gate stops the script's group. The signals
+// go to a child copy of the test binary, because a signal nothing catches
+// ends the process that gets it; the child sends SIGTERM 100ms after SIGHUP
+// cancelled the context, and prints the cause and exits 0 when it is still
+// alive 200ms after that.
+func TestOrgGate_SignalContextKeepsLaterSignalsCaught(t *testing.T) {
+	if os.Getenv(gateSignalChildEnv) == "1" {
+		ctx, stop := gateSignalContext(context.Background(), syscall.SIGHUP, syscall.SIGTERM)
+		defer stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP to the child: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("SIGHUP did not cancel the context within 5s")
+		}
+		// The pause lets whatever the helper does after the first signal
+		// finish before the second one comes, as a second Ctrl-C would: a
+		// helper that unregisters right after the cancel is then caught.
+		time.Sleep(100 * time.Millisecond)
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			t.Fatalf("send SIGTERM to the child: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		fmt.Printf("cause: %v\n", context.Cause(ctx))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOrgGate_SignalContextKeepsLaterSignalsCaught$", "-test.count=1")
+	child.Env = append(os.Environ(), gateSignalChildEnv+"=1")
+	out, err := child.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "cause: hangup signal received\n") {
+		t.Errorf("the child printed:\n%s\nwant the line %q", out, "cause: hangup signal received")
+	}
+}
+
 // A refusal at the record: when the org is disbanded while the scripts run,
 // gate records nothing, prints nothing on stdout, and exits 1 with the org
 // layer's refusal followed by the log the scripts wrote.
