@@ -54,8 +54,90 @@
 
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM はなく、LOW は 8 件。計画が決めた穴(`rebase`・`regate`・`unreadable` を `ready` に戻す手がない)は、skill・README・仕様 FR-8 の注・tech-debt に書かれていて、`Detail` にも但し書きがある。L1 だけは、gate を勧める 7 つの `Detail` のうち 5 つにしか但し書きがない)
+- Merge: yes(cycle 2 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 2 の差分(`cab2fd50..HEAD`。gh の PR を origin のものだけ使う直しと、L1・L2・L7 の直し、テストの穴埋め)の LOW は 6 件(下の「Cycle 2」の C2-1〜C2-6)で、読む人に当たるのは C2-1 だけ(結びつきのない枝の `Detail` が `--org-id` なしの gate を勧める)。cross-review の ACTION_REQUIRED #1 は、gh が PR を返す経路で閉じ、残る経路(PR がない別の repository、host、owner/repo のない origin)は `docs/tech-debt/README.md:237` に書かれている。cycle 1 の L1 は直り、L2 は注記だけ直って entry 側の印は同 238 行にあり、L7 は 1 行の折り返しが残る(C2-5)。L3・L5・L6 は未着手で register にもない。cycle 2 は上限(2/2)なので、C2-1〜C2-6 と L3・L5・L6 は 1 行にまとめて register に足す(下の「Cycle 2」の Tech debt identified)。cycle 1 の判定も yes で、上の所見の表はその時点のまま残す)
 - Follow-ups:
   1. L1 を直す(`mergeorder.go` の 1 ファイル、定数 1 つと `no_gate`・`failed` の文言)。読んだ範囲のテストは `Detail` を部分一致で見るので文言を足しても通るが、完全一致で固める箇所があれば合わせる(残りのテストは読んでいない)
   2. L2 と L4 は、直さないなら上の 1 行を register に足す(orchestrator)。L5〜L8 は機械的な直しで、直すなら L7 は skill の 4 面を `scripts/sync-skills.sh` と `cmp` で合わせる
   3. 直すとコードか skill の 4 面に触るので、`/verify` から回し直しになる(cycle 2 が要る)。cycle 1 のまま進めるなら、L1〜L8 は PR の本文に known gaps として書く
+
+## Cycle 2
+
+- Date: 2026-10-14
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2。`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 回の最後)
+- Scope: `git diff cab2fd50..HEAD`(HEAD 7632bb53、3 コミット、12 ファイル、+890/-69)。15d4b947(gh の PR を origin のものだけ使う。`internal/org/mergeorder.go`、`internal/cli/org_merge_order.go` の help、テスト 3 ファイル)、ee302b06(skill 4 面、README、tech-debt の 2 行)、7632bb53(計画の進捗に 1 行)。cycle 1 の差分は読み直していない。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs が受け持つので行っていない。計画の進捗にある cycle 2 の決定(`--repo` を渡さない、`git remote get-url origin` を 1 回足す、host は比べない、ローカルのパスの origin は比べない)は、欠陥として数えていない
+
+### 読んだものと確かめたこと
+
+- 読んだ: `git diff cab2fd50..HEAD` の全体(Go 4 ファイル、skill の hunk、README の追加 1 文、tech-debt の追加 2 行、計画の 1 行)。`mergeorder.go` は `MergeOrder`(209-242)、`collectMergeTargets`(300-352)、`lookupMergePRs` から `mergeRepoFromPRURL` まで(460-677)、`lookupMergePR`・`pickMergePR`(679-714)、`classifyMergeTarget`・`mergeGateCommand`・`classifyGatePassed`(770-830)、`mergeOrderListNotes`(862 行付近)、`realMergeOrderExec`。周辺は `internal/cli/org_gate.go` の `requireOrgID`(79 行)、skill の 183・928-933・1104-1117 行
+- `git diff --check cab2fd50..HEAD` は空。追加行に TODO・FIXME・デバッグ出力・秘密情報はない。tech-debt の新しい 2 行は `|` が 6 個ずつで 5 列。skill の 3 面(`.agents/`、`templates/base/` の 2 つ)は root と `cmp` で同一
+- 確かめたこと(コードを読んで辿った。走らせていない)
+  - gate を勧める文の出どころは `mergeGateCommand` と、ready が複数のときの注記(864 行)だけ。`mergeGateRunsWhileOrgRuns` の定義は 101 行の 1 つで、`Detail` 7 つと注記 1 つがそれを使う(777・780・783・786・813・822・825・865 行)。`gate runs only` の直書きは `mergeorder.go` に 0 件
+  - gh の失敗をまとめるキーは `err.Error()`。`realMergeOrderExec` が足すのは stderr だけ、`lookupMergePR` が足すのは固定の文だけで、枝の名前は入らない。同じ失敗は 1 つにまとまる。注記の枝の名前・理由・`pr.URL` は、テキストでは `inboxField` を通り、`--json` では encode される。`%q` で URL を囲むので制御文字は注記の中でも escape される
+  - origin の URL の読み(`mergeRepoFromOriginURL`)を、テストの表にない形も含めて手で辿った。scp 形、`ssh://…:22/`、末尾の `/` のあとの `.git`、`file://`(ホストなし)、`git+ssh://`(スキームが一覧になく、読めない扱い)、`./a:b/app.git`(コロンの前に `/`)、空文字は、どれも想定どおり読める・読めないに分かれる
+  - ctx の扱い: `check` は外側の ctx が終わっていれば interrupted のエラー、`readMergeOriginRepo` の timeout は内側の `getCtx` だけが終わったときの別の分岐で、注記になる。stop の枝で全 target の `pr` を nil に戻すのは、最初の PR の URL が通ったあとで別の PR の URL の形が違うときにだけ効く防御で、通常は到達しない
+  - 新しいテストの fake: `moExec` は `git remote get-url origin` を `lsBlock` より先に見るので、ls-remote を止めるテストと干渉しない。CLI のテストの `mergeOrderGitWrapper` は `$#` と 3 つの引数を全部比べるので、`git remote get-url origin` 以外は本物の git に渡る。`t.Setenv("MERGE_ORDER_ORIGIN_URL", "")` を毎回入れるので、前のテストの値は残らない
+- 確かめていないもの: テスト、`gofmt`、`go vet`、`golangci-lint`、`-race`。本物の gh が fork の作業場所で upstream を引くこと(コメントとテストの前提)。`git remote get-url` が `insteadOf` を展開すること、ネットワークに触れないこと(git の doc の記述を知っているだけで、走らせてはいない)
+
+### 所見(cycle 2)
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 6。cycle 1 の ID(L1〜L8)と取り違えないよう、ID に `C2-` を付ける。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | maintainability | 結びつきがなく gate の記録だけが名指す枝の `Detail` は、`ralph org gate` だけを勧める。`ralph org gate` は `--org-id` なしだと `requireOrgID` で断るのに、その枝の gate の記録には org_id がある。結びつきのない target は gate の記録からしか生まれず、その記録は読めるので、`failed`・`regate`・`rebase`・壊れた行が後にある `unreadable` の 4 つで org_id を言えるのに言っていない。テストは「org がない」と書いて、`--org-id` を出さないことのほうを固定している | `mergeorder.go:793-798`(`t.binding == nil` で `"ralph org gate"`)、`:321`(`ev.OrgID == ""` の記録は読まない。通った記録の org_id は空でない)、`org_gate.go:79`。テストは `mergeorder_test.go:468`(「has no org to name」)と `:508-510`(`--org-id` が出ると赤) | `t.binding == nil` のときは `t.gate.ev.OrgID` を使う(結びつきがないとき `t.gate` は nil でない)。テストの期待は `--org-id org-x` を名指す形にする。結びつきと gate の記録の org が違うときは、今のまま最新の結びつきの org でよい |
+| C2-2 | LOW | maintainability | `GHTimeout` の doc は「each gh call」を縛ると言うが、`lookupMergePRs` の `timeout` は `git remote get-url origin` にも渡り、失敗の文も gh の秒数で「timed out after 15s」と言う。新しいテストは `p.GHTimeout = 20 * time.Millisecond` で get-url を止めて、この流用を固定している。また get-url に付ける `GIT_TERMINAL_PROMPT=0` は ls-remote の写しで、`git remote get-url` は設定から URL を出すだけでネットワークにもプロンプトにも触れないので効かない。doc とテストの期待がそれを固定している | `mergeorder.go:120-122`(doc)、`:473-475`(`timeout` は `p.GHTimeout`)、`:605-608`(get-url に `timeout` と env)、`:600-601`(doc の「with GIT_TERMINAL_PROMPT=0」)。テストは `TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository` の `getURL[0].env` の比べと `TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut` の `GHTimeout` | `GHTimeout` の doc を「each gh call and the `git remote get-url origin` read with them」にする(または専用の定数を持つ)。env は外し、doc とテストの期待も合わせる |
+| C2-3 | LOW | readability | 読む人に見える 3 面と Go のファイルの先頭の説明は、gh の PR を「origin のものだけ使う」と言い切るが、コードは origin の URL から owner/repo を読めない場合(ローカルのパス、`file://`、`git+ssh://` など)は確かめずに使い、host も比べない。この例外は `mergeOriginRepo.check` の doc と tech-debt の行にしかない | help `org_merge_order.go:47-50`、skill `.claude/skills/org/SKILL.md:183` と `:928-933`、README の追加の 1 文、`mergeorder.go:32-37`。コードは `:585`(`if !o.readable`)で素通しにする。例外を書くのは `:565-571` の doc と `docs/tech-debt/README.md:237` | 直すなら help の 1 句だけ(「origin が owner/repo を持たない URL のときは確かめない」)。skill 4 面と README は、tech-debt の行が例外を持つので、直さず known gaps に書く手もある |
+| C2-4 | LOW | readability | `lookupMergePRs` は `for _, t := range targets` の中で、また `for _, t := range targets` を書き、外側の `t` を隠す。`check` の戻り値 `stop string` は「空なら使ってよい、空でなければ注記の文」を 1 つの文字列で表し、名前は「止める」だが中身は注記で、呼び元はその文を `append` する | `mergeorder.go:479`(外側)、`:497-498`(内側)、`:492`(`stop, err := origin.check(...)`)、`:572`(戻り値の名前) | 内側を `clearMergePRs(targets)` のような小さい関数に出すか、変数名を変える。`check` の戻りは `note string` に改める(空なら使ってよい、と doc に書く) |
+| C2-5 | LOW | readability | L7 の折り返しの直しが途中までで、短い行が 1 本残った。直した段落は 64〜73 桁で組まれているが、その直後の 1 行だけ 48 桁で、次の行(元の折り返し)は 70 桁。4 面とも同じ | `.claude/skills/org/SKILL.md:1112`(「通知は typed `ALERT` として各 org の leader に」48 桁)、`:1111`(71 桁)、`:1113`(70 桁)。`.agents/` と `templates/base/` の 2 面は同じ行 | 1112-1113 を同じ幅に組み直す。動きには関係しない。直すなら `scripts/sync-skills.sh` で `.agents/` を作り直し、`templates/base/` の 2 面は root と `cmp` で確かめる |
+| C2-6 | LOW | readability | 新しいテストの読みにくさが 3 つ。(a) `t.Run(origin, ...)` の名前が URL そのもので `/` を含み、`go test -run` は名前の中の `/` も階層の区切りに数えるので、1 件だけを選びにくい。(b) `map[bool]string{true: repo.String(), false: ""}[ok]` という言い方が表の 2 か所にあり、`ok` が false でも `repo.String()` を評価する。(c) コメントが「the cross-review finding」「self-review L2」と、slug も cycle もなく報告の中の名前だけで指す。triage の報告は cycle ごとに書き換わる | (a)`mergeorder_test.go:911`、`:1023`、(b)`:1065`、`:1083`、(c)`mergeorder_test.go:943`、`:1241`、`org_merge_order_test.go:774` | (a)名前を `scp_like`、`https` のような短い名前にし、URL は期待の側の欄に持つ。(b)`if ok { got = repo.String() }` にする。(c)欠陥の中身を 1 文で書くか、`of org-merge-order` を添える(org-gate の cycle 2 の C2-1 と同じ形) |
+
+#### C2-1 の根拠
+
+- `collectMergeTargets` は `ev.DryRun || ev.OrgID == "" || ev.SeatID != ""` の事象を飛ばすので(`mergeorder.go:321`)、gate の事象が target に付くときは org_id が入っている。結びつきのない target は、読める gate の記録が `branch=` で名指したときにだけできる(読めない記録は、その org の最新の結びつきの枝に付くので、結びつきがある)。なので `t.binding == nil` なら `t.gate` は nil でなく、`t.gate.ev.OrgID` が使える
+- 起きるのは、gate が記録した枝の名前が、結びつきの枝の名前と違うとき(worktree で枝を作り直した、など)だと読んだ。おそらくまれ。実例は未確認です。当たると、`ralph org gate` を打った人は `--org-id` が要るという断りを 1 度受ける。次の手は 1 つに決まるので LOW にした。cycle 1 の L1 の推奨(「`Binding` があるときは `--org-id` を書く」)は、結びつきがない場合を書いておらず、直しはその字面どおりに入っている
+
+#### C2-3 の根拠
+
+- 「origin のものだけ」という言い方は、gh が PR を返した、origin の URL に owner/repo がある、の 2 つが成り立つときの話。成り立たない 2 つめの場合(`file://` の origin に GitHub の `upstream` remote が付いている fork の作業場所など)は、gh は upstream の PR を返し、それが確かめずに使われる。tech-debt の行は「skips the check and uses gh's PRs as they are」と書いていて、実害の見積もりはそちらにある
+- 4 つの skill の面を直すと `/verify` から回し直しになる(cycle の上限に当たる)ので、help の 1 句を除いて register の行に任せるのが妥当と読んだ
+
+### cycle 1 の所見を HEAD で見直した結果
+
+| ID | 状態 | 確かめた場所 |
+| --- | --- | --- |
+| L1 | 直った(1 件は C2-1) | `mergeGateRunsWhileOrgRuns` を 8 か所(`Detail` 7 つと注記 1 つ)が使う。`no_gate`・`failed` にも但し書きが付き、結びつきがあれば `--org-id` が付く。結びつきのない枝だけが C2-1 |
+| L2 | 半分 | 同じ失敗を 1 つの注記にまとめた(`mergeGHFailures`、10 本・3 つの理由のテスト)。entry 側の印(`pr_lookup_failed` のような欄)は `docs/tech-debt/README.md:238` の行に載った |
+| L3 | 未着手 | `readMergeLedger` は `Read` の復号を写したまま。register に行がない |
+| L4 | 行に載った | `docs/tech-debt/README.md:238`(実行関数の 3 つ目の写し) |
+| L5 | 未着手 | `shortMergeSHA`(`mergeorder.go:844`)と `mergeOrderShortSHA`(`org_merge_order.go:176`)。register に行がない |
+| L6 | 未着手 | `mo*` の名前と、CLI のテストの `short`(`org_merge_order_test.go:360`)。register に行がない |
+| L7 | 半分 | 折り返しは直ったが、1 行が短く残った(C2-5) |
+| L8 | 触れていない | cycle 1 の推奨どおり、直さない |
+
+### cross-review の ACTION_REQUIRED #1 は閉じているか
+
+- 閉じた経路: gh が PR を返し、その URL の owner/repo が origin のものと違う(大文字小文字は無視する)、URL が owner/repo を持たない、`git remote get-url origin` が失敗する、の 3 つ。どれも全 target の PR を捨て、注記を 1 つ出し、gh をそれ以上打たない。違いの注記は `gh repo set-default <origin の owner/repo>` を言う。fake の 5 通りのテストと、本物の git と fake の gh の往復(`TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut`)が、feat/a が merged として隠れないことと、origin の PR に戻すと隠れることの両側を固定している
+- 残る経路は `docs/tech-debt/README.md:237` が 3 つ書いている。gh が別の repository を読み、そこにその枝名の PR がない(空の結果は origin に PR がないのと区別できず、注記も出ない)、host の違い、origin の URL が owner/repo を持たない。読んだ範囲で、この行が言っていない経路は見つからなかった(fork だけの PR が返る場合は `pr == nil` で確かめに入らないが、「PR がない」と同じ結果なので 1 つめに含まれる)
+
+### 所見にしなかったもの
+
+- cycle 2 で足した 3 つの定数のうち `mergeGateRunsWhileOrgRuns` だけが、同じ const 群の `mergeOrder*` の接頭辞を持たない。`grep mergeOrder` で拾えないが、`grep mergeGateRuns` で 1 つに当たり、定義も 1 か所なので、名前の揺れとして数えない
+- `lookupMergePRs` が gh の失敗のまとめ、origin の確認、gh の有無の 3 つを 1 つの loop で持つ。約 40 行で、分岐は `switch` の 4 つ。コメントが各分岐の意味を言っているので、分けるほどではない
+- `mergeGHFailures` は添字の付け方が値と pointer の受け手の混在(`add` は pointer、`notes` は値)。slice の型で `add` が追加するので pointer が要り、`notes` は読むだけ。混在の理由は読み取れる
+- コードのコメントが計画の `active/` の置き場や記号を指す件は、cycle 1 の L8 と同じで、repo が許している形。再掲しない
+
+### Tech debt identified
+
+この回は報告だけをコミットする指示なので、`docs/tech-debt/README.md` には行を足していない。cycle 2 は上限の最後で、直すと 3 回目の pipeline が要る。C2-1〜C2-6 と、cycle 1 から残る L3・L5・L6 は、次の 1 行にまとめて足すことを勧める(orchestrator が足す)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Small diff-quality leftovers in the org-merge-order PR after self-review cycle 2 (all LOW): (1) a Detail for a branch only a gate record names says `ralph org gate` without the `--org-id` that record carries (C2-1, `mergeGateCommand`); (2) `GHTimeout`'s doc says "each gh call" but it also bounds `git remote get-url origin`, which also gets a no-op `GIT_TERMINAL_PROMPT=0` (C2-2); (3) the help, skill and README say gh's PRs are used "only when" they are origin's, without the local-path exemption (C2-3); (4) a shadowed `t` and a `stop string` result in `lookupMergePRs` / `mergeOriginRepo.check` (C2-4); (5) one 48-column orphan line in the skill's watch paragraph, four copies (C2-5); (6) test subtests named by URL, a `map[bool]string` idiom, bare review labels in test comments (C2-6); from cycle 1: `readMergeLedger` copies `ManifestStore.Read`'s decode closure (L3), two SHA-shortening helpers and a help text that hardcodes "30 s" (L5), `mo*` test names and a package-level test helper `short` (L6) | (1) is the only one a reader can hit: for a branch whose binding is not in the ledger, the Detail tells them to run a command the CLI refuses once (`--org-id` is required). The rest change no behavior or output | Found at the pipeline cap (2/2); fixing needs a third run, and each item is a few lines | The next edit to `internal/org/mergeorder.go` or `internal/cli/org_merge_order.go`, stage 8a's director reading merge-order, or a report that the Detail misled someone | `docs/reports/self-review-2026-10-14-org-merge-order.md` (Cycle 2, C2-1 to C2-6; L3, L5, L6) |
+
+### Recommendation
+
+- Merge: 上の「Recommendation」の Merge の行のとおり(yes)。cycle 2 の差分に CRITICAL・HIGH・MEDIUM はなく、cross-review の指摘は gh が PR を返す経路で閉じ、残る経路は tech-debt に書かれている
+- Follow-ups:
+  1. 上の tech-debt の 1 行を足す(上限なので、C2-1〜C2-6 は直さない)。3 回目を回す理由が別にあるなら、C2-1(`mergeGateCommand` の 1 関数とテストの期待 1 本)と C2-2(doc と env)を先に直す
+  2. cycle 2 の `/verify` と `/test` が書き直す報告に、cycle 1 の時点の `mergeorder.go` の行番号を指す pointer が残っていないか見る。`lookupMergePRs` から後ろは cycle 2 で 100 行以上動いた(例: `classifyMergeTarget` は 556 行から 763 行へ)。関数名で書くか、HEAD で引き直す
+  3. insight event(`./scripts/insights-append.sh --phase self_review --cycle auto`)は、報告だけをコミットする指示なので、この回では足していない。件数は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 6(cycle 2 の分)で、orchestrator が足す
