@@ -642,7 +642,8 @@ func mergeOrderListNotes(res MergeOrderResult, hidden int) []string {
 	}
 	if ready >= 2 {
 		notes = append(notes, fmt.Sprintf("%d branches are ready, but merging one moves origin/%s: the other ready ones then "+
-			"become rebase (rebase them on origin/%s and run ralph org gate again)", ready, res.DefaultBranch, res.DefaultBranch))
+			"become rebase (rebase them on origin/%s and run ralph org gate again; the gate runs only while the feature org "+
+			"runs)", ready, res.DefaultBranch, res.DefaultBranch))
 	}
 	return append(notes, fmt.Sprintf("the order is as of the ls-remote at %s and is not a guarantee: origin/%s can move "+
 		"before a merge", res.ListedAt, res.DefaultBranch))

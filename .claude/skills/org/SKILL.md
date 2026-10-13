@@ -1099,8 +1099,8 @@ agmsg の受信箱の確認は `/agmsg` skill の手順に従う(未導入環境
   見張りは herdr の外で動かす)。見張りの拒否で断られた leader は
   `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
   返事をする。`stop`・`disband`(どちらも `--all` を含む)・`escalate`・
-  `inbox` の動詞・`wait`・`read`・`status`・`report`・`merge-order`・`watch`
-  は、見張りがなくても使える。検査はその時点の判定なので、見張りが途中で
+  `inbox` の動詞・`approve`・`gate`・`wait`・`read`・`status`・`report`・
+  `merge-order`・`watch` は、見張りがなくても使える。検査はその時点の判定なので、見張りが途中で
   落ちても動いている座席は止まらず、次の `start`・`spawn`・TASK か `ralph status` まで
   誰も気づかない。watch の通知は typed `ALERT` として各 org の leader に
   届く。動いているかは `ralph status` の `org watch:` の行で確かめる。
