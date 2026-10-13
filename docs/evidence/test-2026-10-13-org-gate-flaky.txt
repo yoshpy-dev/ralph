@@ -3392,3 +3392,445 @@ user 2.59
 sys 3.74
 RC=0
 end 2026-10-13T14:27:07Z
+
+################################################################################
+# Cycle 4 (HEAD 1e4a2fa4, fix f1b0352e): the RenderRolePrompt tests (leader step 9/10 order is pinned in
+#   TestRenderRolePrompt_Leader_FeatureOrgGate and the intro in TestRenderRolePrompt_Leader_FeatureOrgProcedure)
+# go test ./internal/org/ -run 'RenderRolePrompt' -count=5 -v on go1.25.8 (GOTOOLCHAIN=go1.25.8), then on go1.26.0
+# (GOTOOLCHAIN=go1.26.0, the local default), one after another in the foreground (JST 01:13), while the first
+# run-test.sh of this cycle ran its shell suites. The tests have no subtests. Summary first
+# (toolchain, test, pass/fail, min..max), then the raw output.
+################################################################################
+go1.25.8	TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_DelegatesToImplementer	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_FeatureOrgGate	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_FeatureOrgPlanApproval	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_FeatureOrgProcedure	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_MissionRoutesGateBlocked	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_NamesWhichInbox	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_QA_NoTemplate	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged	pass=5	fail=0	0.00..0.00s
+go1.25.8	TestRenderRolePrompt_UnknownRole_NoTemplate	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_DelegatesToImplementer	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_FeatureOrgGate	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_FeatureOrgPlanApproval	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_FeatureOrgProcedure	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_MissionRoutesGateBlocked	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_NamesWhichInbox	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_QA_NoTemplate	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged	pass=5	fail=0	0.00..0.00s
+go1.26.0	TestRenderRolePrompt_UnknownRole_NoTemplate	pass=5	fail=0	0.00..0.00s
+-- raw output
+########## toolchain go1.25.8: go version go1.25.8 darwin/arm64
+start 2026-10-13T16:13:27Z
+ 1:13  up 8 days,  4:17, 5 users, load averages: 6.20 24.79 27.21
+$ GOTOOLCHAIN=go1.25.8 go test ./internal/org/ -run 'RenderRolePrompt' -count=5 -v
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.431s
+RC=0
+########## toolchain go1.26.0: go version go1.26.0 darwin/arm64
+start 2026-10-13T16:13:28Z
+ 1:13  up 8 days,  4:17, 5 users, load averages: 6.20 24.79 27.21
+$ GOTOOLCHAIN=go1.26.0 go test ./internal/org/ -run 'RenderRolePrompt' -count=5 -v
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_QA_NoTemplate
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_AllKnownVarsSubstituted
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_DelegatesToImplementer
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgProcedure
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgPlanApproval
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_NamesWhichInbox
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownRole_NoTemplate
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+=== RUN   TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+=== RUN   TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.375s
+RC=0

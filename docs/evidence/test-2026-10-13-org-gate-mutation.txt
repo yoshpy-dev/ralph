@@ -1115,3 +1115,1411 @@ RC=1
 ### probe-M_d2 x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay probe/probe-M_d2.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
   10     zz_probe_c3_test.go:33: child err = <nil>; want it ended by SIGHUP after stop
   10 --- FAIL: TestProbe_SignalContextStopUnregisters (durations removed by sed before uniq -c)
+
+################################################################################
+# Cycle 4 (HEAD 1e4a2fa4, fix f1b0352e: leader step 9 commits the reviewer's reports and checks
+#   `git status --porcelain` before fetch/rebase; step 10 commits only the report). No tracked file was edited.
+# Mutants of internal/org/prompts/leader.md: a changed copy in the scratchpad (og4/mut/<ID>-leader.md). The template
+#   is read through //go:embed prompts/*.md, and the overlay entry replaces the embedded bytes at build time
+#   (the control X0 passes and every mutant changes the rendered text, so the overlay reaches the embed).
+#   GOTOOLCHAIN=<tc> go test -count=1 -timeout 20m -overlay og4/mut/<ID>.json ./internal/org/ -v -run RenderRolePrompt
+# Each mutant ran on go1.26.0 (tag t26) and go1.25.8 (tag t25); the failing tests and failing lines were the same on both.
+# Runs: one at a time, JST 01:09-01:11 (go1.26.0) and 01:11-01:13 (go1.25.8), while the first run-test.sh of this cycle
+#   ran its shell suites (1-minute load average 51.4 at 01:08 from other sessions, 7.9 at 01:11, 6.2 at 01:13).
+# The failing assertions print the rendered section or item; only its first 3 lines are kept here, and trailing
+#   spaces are trimmed from every line (the blank lines of the dumped text are 8 spaces in the raw go test output).
+# Line numbers: prompts_test.go:526 intro (FeatureOrgProcedure); :796/:798 section order loop (missing / out of order);
+#   :845 item phrase table; :884 the new step 9 order loop; :891 the new step 10 negative assertion.
+################################################################################
+
+======== template mutant X0 (leader.md): control: unchanged copy
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/X0-leader.md"}}
+(no diff: control)
+-- run: go1.26.0
+# X0 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/X0.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.438s
+RC=0 elapsed=1.0s
+-- run: go1.25.8
+# X0 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/X0.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.464s
+RC=0 elapsed=3.3s
+
+======== template mutant M_a1 (leader.md): (a) step 9 back to rebase-before-commit: fetch/rebase first, the commit and clean check after the fetch-failure sentence
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a1-leader.md"}}
+164,174c164
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+<    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+<    `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+185c175,184
+<    書いて `ralph org escalate` で BLOCKED を上げる
+---
+>    書いて `ralph org escalate` で BLOCKED を上げる。rebase が終わったら、まず reviewer のレポート
+>    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+>    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+>    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+>    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+>    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+>    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+>    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+>    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+>    `ralph org escalate` で BLOCKED を上げる。
+-- run: go1.26.0
+# M_a1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase --abort`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.790s
+RC=1 elapsed=3.0s
+-- run: go1.25.8
+# M_a1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase --abort`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.857s
+RC=1 elapsed=2.8s
+
+======== template mutant M_a2 (leader.md): (a') whole-file revert: leader.md as of f1b0352e^ (pre-fix template: no step 9 commit, step 10 commits both)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a2-leader.md"}}
+(whole file = git show f1b0352e^:internal/org/prompts/leader.md; diff against HEAD below)
+64,66c64,65
+< 機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
+< 戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
+< かまいません。
+---
+> 機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
+> 予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
+164,173c163
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+<    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、
+187,188c177,178
+<     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+>     レポート(`docs/reports/` の下)をコミットする。続けて
+-- run: go1.26.0
+# M_a2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "まず reviewer のレポート", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.429s
+RC=1 elapsed=0.7s
+-- run: go1.25.8
+# M_a2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "まず reviewer のレポート", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.032s
+RC=1 elapsed=2.9s
+
+======== template mutant M_a3 (leader.md): (a'') order only: every phrase kept, but step 9 opens with fetch and rebase before the commit
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a3-leader.md"}}
+164c164
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+-- run: go1.26.0
+# M_a3 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a3.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "`git fetch origin <既定のブランチ>`" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.871s
+RC=1 elapsed=2.7s
+-- run: go1.25.8
+# M_a3 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a3.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "`git fetch origin <既定のブランチ>`" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.842s
+RC=1 elapsed=2.7s
+
+======== template mutant M_b1 (leader.md): (b) drop the `git status --porcelain` check (commit only)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_b1-leader.md"}}
+166c166
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+---
+>    コミットする。gate を
+-- run: go1.26.0
+# M_b1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.808s
+RC=1 elapsed=3.0s
+-- run: go1.25.8
+# M_b1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.971s
+RC=1 elapsed=3.0s
+
+======== template mutant M_b2 (leader.md): (b') check kept, but the fetch is no longer conditioned on it (drop 何も出なくなったら)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_b2-leader.md"}}
+173c173
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+>    `ralph org escalate` で BLOCKED を上げる。
+-- run: go1.26.0
+# M_b2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.797s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_b2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.916s
+RC=1 elapsed=2.8s
+
+======== template mutant M_c (leader.md): (c) drop the BLOCKED branch for non-implementer leftovers
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_c-leader.md"}}
+171,173c171
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+>    レビューを頼み直す(手順 8 の往復に戻る)。何も出なくなったら、
+-- run: go1.26.0
+# M_c toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.796s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_c toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.151s
+RC=1 elapsed=3.2s
+
+======== template mutant M_c2 (leader.md): (c') leader commits the other leftovers itself (自分ではコミットしない -> 自分でコミットする)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_c2-leader.md"}}
+168,169c168,169
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+---
+>    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分で
+>    コミットする。implementer の変更なら、implementer にコミットを TASK で
+-- run: go1.26.0
+# M_c2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.802s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_c2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.921s
+RC=1 elapsed=3.1s
+
+======== template mutant M_d1 (leader.md): (d) step 10 commits the report and the reviewer's reports again (pre-fix wording)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_d1-leader.md"}}
+187,188c187,188
+<     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+>     レポート(`docs/reports/` の下)をコミットする。続けて
+-- run: go1.26.0
+# M_d1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.798s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_d1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.793s
+RC=1 elapsed=3.1s
+
+======== template mutant M_d2 (leader.md): (d') step 10 keeps 'report だけ' and adds a second commit of the report and the reviewer's reports (negative assertion only)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_d2-leader.md"}}
+188c188
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+-- run: go1.26.0
+# M_d2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+            (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.797s
+RC=1 elapsed=2.6s
+-- run: go1.25.8
+# M_d2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+            (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.889s
+RC=1 elapsed=2.9s
+
+======== template mutant M_f (leader.md): (f) the implementer leftover branch loses the per-plan PLAN: header mention
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_f-leader.md"}}
+170c170
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+---
+>    頼み、終わったら reviewer に
+-- run: go1.26.0
+# M_f toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_f.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.794s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_f toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_f.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.789s
+RC=1 elapsed=2.8s
+
+======== template mutant M_g (leader.md): the implementer leftover branch loses the re-review (終わったら reviewer にレビューを頼み直す)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_g-leader.md"}}
+170,171c170
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+---
+>    頼む(per-plan では `PLAN:` のヘッダを付ける)。それ以外(reviewer のほかの
+-- run: go1.26.0
+# M_g toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_g.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.801s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_g toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_g.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.870s
+RC=1 elapsed=2.8s
+
+======== template mutant M_h (leader.md): intro back to the pre-fix list (no 'step 9 reviewer's reports' among the out-of-reservation writes)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_h-leader.md"}}
+64,66c64,65
+< 機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
+< 戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
+< かまいません。
+---
+> 機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
+> 予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
+-- run: go1.26.0
+# M_h toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_h.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.991s
+RC=1 elapsed=2.7s
+-- run: go1.25.8
+# M_h toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_h.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.905s
+RC=1 elapsed=2.9s
+
+======== template mutant M_i (leader.md): drop the retry rationale sentence (gate をやり直すときは ... 断られる)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_i-leader.md"}}
+166,168c166
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+---
+>    コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+-- run: go1.26.0
+# M_i toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_i.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.848s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_i toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_i.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.884s
+RC=1 elapsed=2.9s
+
+======== mutant E (skill copies): the 4 org SKILL.md copies replaced by their f1b0352e^ text (old order: rebase, then
+#   report + reviewer's reports in one commit). Runtime file reads do not see -overlay, so this one ran in a scratch
+#   clone (git clone of feat/org-gate at 1e4a2fa4 into og4/e-clone, origin/HEAD set to main) with the 4 files changed,
+#   the whole test gate: GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh. Summary below; the per-suite
+#   counts are compared with the worktree run (run-test evidence) in the report.
+# E: clone of feat/org-gate at 1e4a2fa4, the 4 org SKILL.md copies replaced by f1b0352e^ (old order)
+ M .agents/skills/org/SKILL.md
+ M .claude/skills/org/SKILL.md
+ M templates/base/.agents/skills/org/SKILL.md
+ M templates/base/.claude/skills/org/SKILL.md
+########## $ GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh
+start 2026-10-13T16:12:55Z
+ 1:12  up 8 days,  4:17, 5 users, load averages: 6.41 26.79 27.98
+# Verification run
+- Requested scope: full
+==> Language scope: full
+-- Go (GOFLAGS=-count=1, so no package was (cached)):
+?   	github.com/yoshpy-dev/ralph	[no test files]
+?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+ok  	github.com/yoshpy-dev/ralph/internal/cli	136.941s
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.843s
+ok  	github.com/yoshpy-dev/ralph/internal/insights	1.572s
+ok  	github.com/yoshpy-dev/ralph/internal/org	72.625s
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	2.290s
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	2.161s
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	3.380s
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	2.993s
+==> All verifiers passed.
+real 632.30
+RC=0
+end 2026-10-13T16:23:27Z
+-- per shell suite: PASS FAIL SKIP lines (summary lines excluded; owg-test/c3/suites.py), 41 suites, total 4114 0 3
+tests/test-agent-models.sh 47 0 0
+tests/test-agent-phase-boundaries.sh 44 0 0
+tests/test-archive-plan.sh 22 0 0
+tests/test-branch-name.sh 26 0 0
+tests/test-check-mojibake.sh 15 0 0
+tests/test-check-skill-sync.sh 13 0 0
+tests/test-check-template.sh 56 0 2
+tests/test-codex-exec-invocation.sh 144 0 0
+tests/test-detect-changed-languages.sh 83 0 0
+tests/test-detect-languages-terraform.sh 8 0 0
+tests/test-ensure-pr-ready.sh 7 0 0
+tests/test-ensure-pr-title-prefix.sh 13 0 0
+tests/test-gc-artifacts.sh 11 0 0
+tests/test-hook-wiring.sh 68 0 0
+tests/test-insights-append.sh 51 0 0
+tests/test-language-pack-monorepo-roots.sh 29 0 0
+tests/test-lib-json.sh 126 0 0
+tests/test-new-feature-plan.sh 21 0 0
+tests/test-no-loop-references.sh 1 0 0
+tests/test-plan-visual.sh 103 0 0
+tests/test-post-edit-verify.sh 24 0 0
+tests/test-pr-owner-lookup.sh 20 0 0
+tests/test-pre-bash-guard.sh 2227 0 0
+tests/test-ralph-config.sh 19 0 0
+tests/test-ralph-dispatch.sh 33 0 0
+tests/test-ralph-worktree.sh 143 0 0
+tests/test-run-verify-branch-secret-scan.sh 32 0 0
+tests/test-run-verify-concurrency.sh 37 0 0
+tests/test-run-verify-scope.sh 19 0 0
+tests/test-secret-scan-branch.sh 246 0 1
+tests/test-secret-scan.sh 123 0 0
+tests/test-self-review-scope.sh 64 0 0
+tests/test-skill-insight-cycle.sh 20 0 0
+tests/test-sync-skills.sh 22 0 0
+tests/test-template-purity.sh 10 0 0
+tests/test-terraform-gitignore.sh 47 0 0
+tests/test-terraform-pack-verify.sh 36 0 0
+tests/test-terraform-rule-frontmatter.sh 11 0 0
+tests/test-verify-local-hook-tests.sh 5 0 0
+tests/test-verify-mode-split.sh 59 0 0
+tests/test-xreview-helpers.sh 29 0 0
+-- diff against the same count of this cycle's first worktree run (also launched with nohup &): no difference
+-- the 2 SKIPs of tests/test-check-template.sh (I. dash INT/HUP) come from the nohup & launch (INT and HUP ignored), as in the first worktree run:
+  PASS: I. dash: TERM makes check-template.sh exit 143
+  PASS: I. dash: TERM leaves no check-template.* temp directory
+  SKIP: I. dash: INT cleanup check skipped (the script ran to completion; INT is ignored in this environment)
+  SKIP: I. dash: HUP cleanup check skipped (the script ran to completion; HUP is ignored in this environment)
+
+======== git probe (cycle 4): the git facts step 9 relies on, in a throwaway repo under the scratchpad (hermetic git config)
+-- source og4/rebase-probe4.sh (run: sh og4/rebase-probe4.sh og4/rbp4; sh -n passed; rc 0):
+#!/bin/sh
+# /test org-gate cycle 4: git facts behind leader step 9 (f1b0352e). Pure git in a
+# throwaway repo under the scratchpad; hermetic git config; no ralph, no network.
+# R1 = the verify probe's P2/P3 repeated (tracked report rewritten -> rebase refused,
+#      --abort rc 128, commit first -> rebase rc 0).
+# R2 = staged but not committed (git add only) -> rebase refused too.
+# R3 = untracked leftover only -> rebase starts (rc 0); only the porcelain check sees it.
+# R4 = tracked report rewritten under rebase.autoStash=true -> rebase rc 0, the
+#      rewrite is put back unstaged after it (still not committed).
+# R5 = nothing left to commit (the report was committed before): git commit rc 1,
+#      porcelain empty, rebase rc 0.
+set -u
+D=$1
+rm -rf "$D"
+mkdir -p "$D"
+cd "$D" || exit 1
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=p GIT_AUTHOR_EMAIL=p@example.invalid
+export GIT_COMMITTER_NAME=p GIT_COMMITTER_EMAIL=p@example.invalid
+git --version
+git init -q --bare -b main origin.git
+git clone -q origin.git work 2>/dev/null
+git clone -q origin.git other 2>/dev/null
+cd work || exit 1
+git switch -q -c main 2>/dev/null || true
+echo base > base.txt && git add base.txt && git commit -q -m base && git push -q origin main
+git switch -q -c feat/x
+echo feat > feat.txt && git add feat.txt && git commit -q -m feat
+mkdir -p docs/reports && echo "review 1" > docs/reports/review.md
+git add docs/reports/review.md && git commit -q -m "docs: review 1"
+
+advance() { ( cd ../other && git pull -q origin main && echo "$1" > "$1.txt" && git add "$1.txt" && git commit -q -m "$1" && git push -q origin main ); git fetch -q origin main; }
+
+echo "## R1 tracked report rewritten (gate retry), origin/main advanced"
+advance up1
+echo "review 2" > docs/reports/review.md
+echo "porcelain: [$(git status --porcelain)]"
+out=$(git rebase origin/main 2>&1); echo "rebase rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+git rebase --abort >/dev/null 2>&1; echo "rebase --abort rc=$? (no rebase in progress)"
+git add docs/reports/review.md && git commit -q -m "docs: review 2"
+echo "porcelain after commit: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+
+echo "## R2 report rewritten and staged, not committed"
+advance up2
+echo "review 3" > docs/reports/review.md && git add docs/reports/review.md
+echo "porcelain: [$(git status --porcelain)]"
+out=$(git rebase origin/main 2>&1); echo "rebase rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+git commit -q -m "docs: review 3"
+git rebase origin/main >/dev/null 2>&1; echo "after commit: rebase rc=$?"
+
+echo "## R3 untracked leftover only"
+advance up3
+echo "scratch" > leftover.txt
+echo "porcelain: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+echo "porcelain after rebase: [$(git status --porcelain)]"
+rm -f leftover.txt
+
+echo "## R4 tracked report rewritten, rebase.autoStash=true"
+advance up4
+echo "review 4" > docs/reports/review.md
+git -c rebase.autoStash=true rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+echo "porcelain after rebase: [$(git status --porcelain)]"
+git add docs/reports/review.md && git commit -q -m "docs: review 4"
+
+echo "## R5 the report is already committed (self-review C4-1): step 9's commit has nothing to commit"
+advance up5
+echo "porcelain: [$(git status --porcelain)]"
+git add docs/reports/review.md; echo "add rc=$?"
+out=$(git commit -m "docs: review again" 2>&1); echo "commit rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+echo "porcelain after the empty commit: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+git log --oneline --format=%s | head -12
+-- output:
+git version 2.49.0
+## R1 tracked report rewritten (gate retry), origin/main advanced
+porcelain: [ M docs/reports/review.md]
+rebase rc=1
+error: cannot rebase: You have unstaged changes.
+error: Please commit or stash them.
+rebase --abort rc=128 (no rebase in progress)
+porcelain after commit: []
+rebase rc=0
+is-ancestor rc=0
+## R2 report rewritten and staged, not committed
+porcelain: [M  docs/reports/review.md]
+rebase rc=1
+error: cannot rebase: Your index contains uncommitted changes.
+error: Please commit or stash them.
+after commit: rebase rc=0
+## R3 untracked leftover only
+porcelain: [?? leftover.txt]
+rebase rc=0
+is-ancestor rc=0
+porcelain after rebase: [?? leftover.txt]
+## R4 tracked report rewritten, rebase.autoStash=true
+rebase rc=0
+is-ancestor rc=0
+porcelain after rebase: [ M docs/reports/review.md]
+## R5 the report is already committed (self-review C4-1): step 9's commit has nothing to commit
+porcelain: []
+add rc=0
+commit rc=1
+On branch feat/x
+nothing to commit, working tree clean
+porcelain after the empty commit: []
+rebase rc=0
+is-ancestor rc=0
+docs: review 4
+docs: review 3
+docs: review 2
+docs: review 1
+feat
+up5
+up4
+up3
+up2
+up1
+base

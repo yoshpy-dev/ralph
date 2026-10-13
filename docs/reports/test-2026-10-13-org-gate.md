@@ -161,7 +161,7 @@ coverage で通らなかった区間のうち、利用者に見える 2 つを�
 
 ## Verdict
 
-- Verdict: pass(ブランチ全体、cycle 3 の HEAD 697e1577 まで。下の Pass・Fail・Blocked の 3 行は cycle 1 の HEAD eb5ffdac での結果で、cycle 2 と cycle 3 の結果は、下の「Cycle 2」節の「判断(cycle 2)」と「Cycle 3」節の「判断(cycle 3)」にある。cycle 3 は go1.25.8 と go1.26.0 の両方で走らせた)
+- Verdict: pass(ブランチ全体、cycle 4 の HEAD 1e4a2fa4 まで。下の Pass・Fail・Blocked の 3 行は cycle 1 の HEAD eb5ffdac での結果で、cycle 2〜4 の結果は、下の「Cycle 2」「Cycle 3」「Cycle 4」の各節の「判断(cycle N)」にある。cycle 3 と cycle 4 は go1.25.8 と go1.26.0 の両方で走らせた。cycle 4 で残った穴は、skill の 4 面の締めの順を読むテストがないこと(mutant E が生き残り)で、テストの失敗はない)
 - Pass: `./scripts/run-test.sh` は changed と full のどちらも rc 0(shell 41 本、PASS の行 4,118、Go 8 パッケージ)。`go test ./... -count=1` は top-level 1,538 本が PASS で 0 fail、足した 34 本もすべて PASS で、消えたテストはない。`-race`(org と cli)も 0 fail で、`DATA RACE` は 0 件。直接打った shell のテスト 6 本は 176 件すべて PASS。concurrency のテストは 5 回連続と負荷の下の 3 回で揺れず、gate のテストの `-count=3` も 0 fail。mutation は依頼の 3 つの動き(head_moved、環境の固定、終了コードのファイルがないとき)の 9 件を含む 15 件がすべて red
 - Fail: 0
 - Blocked: なし
@@ -404,3 +404,113 @@ go1.25.8 の `go test -count=1 -cover ./internal/cli/` で `internal/cli` は 86
 - Fail: 0
 - Blocked: なし
 - 判断: pass(cycle 3)
+
+## Cycle 4
+
+- Date: 2026-10-14(JST 01:07〜01:40)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 4 回目。cross-review cycle 3 の #1(gate をやり直すとき、reviewer がコミット済みのレポートを書き換えていて `git rebase` が断られる)を直すため、上限を 4 に上げて回した。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま。直しの f1b0352e、self-review cycle 4(31ae9f7d)、verify cycle 4(1e4a2fa4、pass)のあとに走らせた
+- Scope: HEAD 1e4a2fa4。cycle 3 の HEAD 697e1577 から変わったコードとテストは f1b0352e の 6 ファイルだけだった(`git diff --stat 697e1577..1e4a2fa4 -- '*.go' scripts tests templates internal go.mod go.sum .github .claude .agents .codex`)。leader の雛形 `internal/org/prompts/leader.md`(手順 9・10 と節の前置き)、`internal/org/prompts_test.go`(既存の 2 本の assertion の書き換えと、手順 9 の順と手順 10 の否定の assertion。`func Test` は増えていない)、org skill の 4 面。Go のコードは変わっていない。雛形は `//go:embed prompts/*.md`(`internal/org/prompts.go:18`)で `internal/org` に入るので、build が変わるのは `internal/org` と、それに依存する `internal/cli`、`internal/insights`、`cmd/ralph`(`go list -deps`)になる。behavioral test だけを実行した(静的解析は /verify の担当)。この節の行番号はすべて HEAD 1e4a2fa4 のもの
+- Toolchain: `./scripts/run-test.sh` は手元の既定の go1.26.0、全体の `go test` は go1.25.8(`GOTOOLCHAIN=go1.25.8`)、`RenderRolePrompt` の繰り返しと mutation は 2 つの toolchain の両方で走らせた
+- Evidence(上書きしたものと、末尾に足したもの):
+  - `docs/evidence/test-2026-10-13-org-gate-run-test.txt`: 上書きした。go1.26.0 での `./scripts/run-test.sh`(changed)の 2 回目の出力で、先頭に toolchain と 1 回目の要約、末尾に `RC=` がある(1 回目と 2 回目の違いは下の「Test execution(cycle 4)」)
+  - `docs/evidence/test-2026-10-13-org-gate-go-test.txt`: 上書きした。go1.25.8 の `go test ./... -count=1 -timeout 30m -v` の 2 回目。PASS の行を数えるため、依頼のコマンドに `-v` を足した
+  - `docs/evidence/test-2026-10-13-org-gate-flaky.txt`: 末尾に「Cycle 4」を足した。toolchain とテストごとの回数と時間の幅、生の出力
+  - `docs/evidence/test-2026-10-13-org-gate-mutation.txt`: 末尾に「Cycle 4」を足した。mutant ごとの overlay の JSON、差分、2 つの toolchain での結果、落ちた assertion の行(assertion が出す節や項目の全文は先頭の 3 行だけ残し、行末の空白は削った)、skill の mutant E の要約、git の probe の script と出力
+  - `docs/evidence/test-2026-10-13-org-gate-race.txt` と `-shell.txt` は、この回は走らせておらず、前の回のまま(f1b0352e は Go のコードも shell のスクリプトも変えていない)
+  - `$HOME` は `~` に、scratchpad のパスは `<scratchpad>` に置き換えた。置き換えが要ったのは、go-test の evidence の 4 行(doctor のテストが出す `~/.agents/skills/agmsg` と `~/.codex/models_cache.json`)と、mutation の evidence の overlay の JSON とコマンドの行だけだった。足した 2 つの evidence は、元の中身が新しい中身の先頭とバイト単位で一致する。どの evidence にも U+FFFD はない
+  - wrapper が書いた `docs/evidence/verify-2026-10-13-160809.log` と `verify-2026-10-13-162234.log` は gitignore の対象なので、コミットしない
+  - insight event: `docs/insights/events/2026-10-13-org-gate.jsonl` に test の 1 行(`--cycle 4`、verdict pass)を足し、この報告と同じコミットに入れた
+- テストもコードも変えていない。mutant の写し、skill を戻した clone、git の probe は scratchpad の `og4/` に置いた。テストのあと、`~/.config/herdr` の下に 01:05 より新しいファイルはなく、main のチェックアウトの `git status --short` は空のまま、`$TMPDIR` に `ralph-verify-*` は残っていない。worktree で変わったのは、この報告、上の 4 つの evidence、insight event だけ。osascript は cycle 3 と同じく、CLI の `TestMain` が通知を差し替え、org の `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` は darwin で skip した。プロセスとしては見張っていない
+
+### Test execution(cycle 4)
+
+| Suite / Command | Toolchain | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。cycle 1〜3 と同じく `shared:scripts/run-verify.sh` で full に落ち、golang の pack を選んだ)2 回目 | go1.26.0 | shell 41 本(PASS の行 4,118)、Go 8 パッケージ | すべて | 0 | shell 1 | 9 分 45 秒、rc 0 |
+| 同じコマンドの 1 回目(`nohup … &` で起動) | go1.26.0 | shell 41 本(PASS の行 4,114)、Go 8 パッケージ | すべて | 0 | shell 3 | 10 分 0 秒、rc 0 |
+| `go test ./... -count=1 -timeout 30m -v` 2 回目 | go1.25.8 | top-level 1,545、subtest 2,005 | top-level 1,542、subtest 2,005 | 0 | 3 | 3 分 46 秒(cli 224.9 s、org 135.8 s)、rc 0 |
+| 同じコマンドの 1 回目(`nohup … &` で起動) | go1.25.8 | 2 回目と同じ | 2 回目と同じ | 0 | 3 | 3 分 21 秒(cli 199.3 s、org 106.6 s)、rc 0 |
+| `go test ./internal/org/ -run 'RenderRolePrompt' -count=5 -v` | 両方 | 19 本 × 5 回 × 2 = 190 | 190 | 0 | 0 | 0.4 s ずつ、rc 0 |
+| mutation(雛形の 13 件と対照 1 件、`-overlay`) | 両方 | 13 件 | red 13 件 | 生き残り 0 | - | 1 件 0.7〜3.3 s |
+| mutation E(skill の 4 面を旧い順に戻した clone で `GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh`) | go1.26.0 | shell 41 本(PASS の行 4,114)、Go 8 パッケージ | すべて | 0 | shell 3 | 10 分 32 秒、rc 0(生き残り) |
+| git の probe(R1〜R5、下の表) | - | 5 場面 | 期待どおり | - | - | 1 秒未満 |
+
+- 1 回目の `run-test.sh` と `go test` は、zsh から `nohup <script> &` で起動したので、SIGINT と SIGHUP を無視した状態で始まった。同じ起動で python の `signal.getsignal` が 2 つとも `SIG_IGN` を返し、前景では返さないことを確かめた。`tests/test-check-template.sh` の I は、dash に INT と HUP を送り、信号が無視される環境ではその 2 つを SKIP にする(`tests/test-check-template.sh:712-713`)。1 回目はこの 4 件の PASS が 2 件の SKIP に変わり、ほかの 40 本の suite の数は cycle 3 と同じだった。同じ suite を前景で打ち直すと 60 passed、0 failed、0 skipped だった。そのあと信号を無視しない起動(Bash ツールのバックグラウンド実行)で 2 つとも打ち直し、evidence には 2 回目を残した。1 回目の 2 つの結果は scratchpad にだけある
+- shell の PASS の行は、cycle 1〜3 と同じ数え方で 2 回目が 4,118 行。suite ごとの PASS・FAIL・SKIP の数は cycle 3 の実行と 41 本すべて同じだった(`diff` が空)。Skipped は前と同じ `tests/test-secret-scan-branch.sh` の 1 件(git 2.49.0)
+- 2 回目の `run-test.sh` の中の Go は `internal/org`(68.0 s)だけを流し直し、ほかの 7 パッケージは `(cached)` だった。`internal/cli` は 1 回目の結果(124.0 s で流し直した回。`internal/org` は 67.6 s)を使った。`internal/insights` は 1 回目でも `(cached)` で、それより前に同じコードで流した結果を使っている。キャッシュなしの結果は go1.25.8 の `go test ./...` にある(どのパッケージも `-count=1`)
+- go1.25.8 の全体の件数は cycle 3 と同じで(top-level 1,542、subtest 2,005、skip 3)、テスト名を `comm` で比べても差はない。f1b0352e はテストを足さず、既存の `TestRenderRolePrompt_Leader_FeatureOrgGate` と `TestRenderRolePrompt_Leader_FeatureOrgProcedure` の中の assertion を変えた
+- load average は、1 回目の `run-test.sh` の開始時(01:08)が 51.42 で、ほかの session の負荷による。2 回目の開始時は 5.18、go1.25.8 の 2 回目は 5.78、繰り返しの回は 6.20、clone の回は 6.41 だった。前に flake を起こした doctor のテストと `TestRunWatcher_TimeoutIndependentOfSmallInterval` は、どの実行でも落ちなかった。`-v` を付けた 2 回の go1.25.8 の実行では、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` の subtest は 0.66〜1.81 s で、cycle 2・3 で見た 5 秒台は出なかった
+
+### Flakiness(cycle 4)
+
+`go test ./internal/org/ -run 'RenderRolePrompt' -count=5 -v` を go1.25.8、続けて go1.26.0 で前景から流した(JST 01:13、1 回目の `run-test.sh` の shell の suite と重なった)。19 本とも 2 つの toolchain で 5 / 5、0 fail で、どの回も 0.00 s だった。subtest はない。19 本は描いた雛形の文字列を読むだけで、時間や外のプロセスに頼らないので、揺れる要素はおそらくない。揺れによる失敗は見つからなかった。
+
+### Mutation(cycle 4)
+
+どの mutant も、scratchpad に写した `internal/org/prompts/leader.md` の 1 か所を書き換え、tracked のファイルには触れていない。雛形は `//go:embed` で読まれるので、overlay の JSON で `.md` を差し替えると build に入る。書き換えていない写し X0 は 2 つの toolchain で 19 本とも通り、各 mutant では描いた雛形が変わったので、overlay が embed に届くことも確かめられた。`go test -count=1 -overlay <json> ./internal/org/ -run RenderRolePrompt -v` を、go1.26.0(JST 01:09〜01:11)、go1.25.8(01:11〜01:13)の順に 1 件ずつ流した。13 件とも、2 つの toolchain で落ちたテストと行が同じだった。
+
+assertion の行は、`prompts_test.go:526` が節の前置き(`TestRenderRolePrompt_Leader_FeatureOrgProcedure`)、`:796` と `:798` が節全体の順のループ(語句がない、順が違う)、`:845` が項目ごとの語句の表、`:884` が f1b0352e で足した手順 9 の順のループ、`:891` が同じく足した手順 10 の否定。`:526` のほかはすべて `TestRenderRolePrompt_Leader_FeatureOrgGate` の中にある。
+
+依頼の 6 つ:
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| M_a1 | (a) 手順 9 を rebase が先の順に戻す: fetch と rebase を先に書き、レポートのコミットと `git status --porcelain` の確認を fetch の失敗の文のあとへ動かす | red | `:798`(fetch・rebase・`--abort` が前の手順より先)、`:845`(「何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ」がない)、`:884` |
+| M_b1 | (b) `git status --porcelain` の確認を外す(コミットだけにする) | red | `:796`、`:845`、`:884` |
+| M_c | (c) implementer のほかの残りを BLOCKED で上げる枝を外す | red | `:845` だけ |
+| M_d1 | (d) 手順 10 を旧い文「report と reviewer のレポート(`docs/reports/` の下)をコミットする」に戻す | red | `:796`、`:845`、`:891` |
+| E | (e) skill の 4 面を f1b0352e の前の文(旧い順)に戻す | 生き残り(予想どおり) | なし。下の説明 |
+| M_f | (f) implementer の残りの枝から「(per-plan では `PLAN:` のヘッダを付ける)」を外す(rebase の衝突の枝の同じ語句は残す) | red | `:845` だけ |
+
+足した 8 つ(全体の戻し、順だけの変更、各枝の語句、前置き):
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| M_a2 | (a) の変形: 雛形全体を f1b0352e の前の版に戻す(直しの revert) | red | 2 本。`TestRenderRolePrompt_Leader_FeatureOrgProcedure`(`:526`)と `..._FeatureOrgGate`(`:796` 3 件、`:845` 7 件、`:884`、`:891`) |
+| M_a3 | (a) の変形: 語句はすべて残し、手順 9 の頭に「先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、」を足す(順だけが変わる) | red | `:798`(fetch と rebase)、`:884` |
+| M_b2 | (b) の変形: 確認は残し、fetch の前の「何も出なくなったら、」を外す | red | `:845`、`:884` |
+| M_c2 | (c) の変形: 「自分ではコミットしない」を「自分でコミットする」にする | red | `:845` だけ |
+| M_d2 | (d) の変形: 手順 10 の「report だけをコミットする(…)」は残し、「念のため report と reviewer のレポートをもう一度コミットする。」を足す | red | `:891` だけ |
+| M_g | implementer の残りの枝から「終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)」を外す | red | `:845` だけ |
+| M_h | 節の前置きの一覧を旧い文(「10 の report と reviewer のレポートと計画の移動」)に戻す | red | `..._FeatureOrgProcedure` の `:526` だけ |
+| M_i | やり直しの理由の文(「gate をやり直すときは、… 断られる」)を外す | red | `:845` だけ |
+
+- f1b0352e で足した 2 つの assertion のうち、手順 10 の否定(`:891`)は M_d2 を単独で落とした。語句を足して矛盾させる変更は、否定の assertion がないと見分けられない
+- 手順 9 の順のループ(`:884`)が落とした 5 件(M_a1、M_a2、M_a3、M_b1、M_b2)は、どれもほかの行でも落ちた。順を変える M_a1 と M_a3 は節全体の順のループ(`:798`)が、語句を削る M_b1 と M_b2 は語句の表(`:845`)が落とす。語句の表は「何も出なくなったら、`git fetch …` を打つ」を続けて固定し、節全体の順のループはコミットと確認を fetch の前に並べているので、`:884` だけが見分ける変更は作れなかった。この 13 件では、`:884` を外しても red の数は変わらない
+- E: `-overlay` は build の中身だけを差し替え、テストが実行中に `os.ReadFile` で読むファイルには効かない。そこで worktree を scratchpad に `git clone` し(1e4a2fa4、`origin/HEAD` を main に設定)、4 面を `git show f1b0352e^:<path>` の中身に置き換えて、テストの段全体を `GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` で流した。rc 0 で、Go の 8 パッケージはキャッシュなしですべて ok、shell の suite ごとの数は、同じく `nohup` で起動した worktree の 1 回目と 41 本すべて同じだった(`tests/test-check-template.sh` の 2 件の SKIP は起動のしかたによるもの)。org の skill を読むテストは `internal/org/send_defaults_sync_test.go` があるが、読むのは既定の待ち時間の数字だけで、締めの順は見ない。4 面を同じ向きに変えたので、drift の検査も見分けないはず(verify cycle 4 の Coverage gaps と同じ。この回では静的な検査は流していない)
+
+### git の probe(cycle 4)
+
+verify cycle 4 の probe(P1〜P3、`docs/evidence/verify-2026-10-13-org-gate-probe.txt` の「Cycle 4」)を R1 で繰り返し、手順 9 の語句がかかわる場面を 4 つ足した。ralph の binary は使わず、git 2.49.0 だけで、scratchpad に bare の origin、`feat/x` の clone、origin/main を進める別の clone を作った。`GIT_CONFIG_GLOBAL` と `GIT_CONFIG_SYSTEM` は `/dev/null` にした。ネットワーク、herdr、agmsg は使っていない。script と出力は mutation の evidence の末尾にある。
+
+| # | 入力 | 結果 |
+| --- | --- | --- |
+| R1 | gate のやり直し。コミット済みのレポートを書き換え(` M docs/reports/review.md`)、origin/main が進んだ | `git rebase origin/main` は rc 1 で「error: cannot rebase: You have unstaged changes.」。始まっていない rebase への `git rebase --abort` は rc 128。レポートをコミットすると porcelain は空になり、rebase は rc 0、`--is-ancestor` も rc 0。verify の P2・P3 と同じ |
+| R2 | 書き換えたレポートを `git add` だけして、コミットしていない(`M  docs/reports/review.md`) | rebase は rc 1 で「Your index contains uncommitted changes.」。コミットすると rc 0 |
+| R3 | 未追跡のファイルだけが残っている(`?? leftover.txt`) | rebase は rc 0 で通り、未追跡のファイルは rebase のあとも残る。git は止めないので、残りに気づくのは手順 9 の `git status --porcelain` の確認だけ |
+| R4 | コミット済みのレポートを書き換え、`git -c rebase.autoStash=true rebase` | rebase は rc 0 で通り、書き換えはコミットされないまま rebase のあとに戻る(` M docs/reports/review.md`) |
+| R5 | レポートは前にコミット済みで、書き換えもない(self-review cycle 4 の C4-1) | `git add` は rc 0、`git commit` は rc 1 で「nothing to commit, working tree clean」。porcelain は空で、rebase は rc 0 |
+
+- R1 と R2 から、追跡しているファイルにコミットしていない変更が残れば、作業ツリーでも index でも rebase は断られる。手順 9 が求める「コミットしてから porcelain が空」は、この 2 つをどちらも満たす
+- R3 と R4 は、git が rebase を断らない場合を示す。R4 のように利用者の git の設定に `rebase.autoStash=true` があると、旧い順でも rebase は通り、書き換えたレポートは旧い手順 10 でコミットされるので、cross-review cycle 3 #1 の筋書きは起きない。新しい順は、設定によらず rebase の前にコミットする。R3 の未追跡の残りは、どちらの順でも rebase を止めない。新しい順では rebase の前の porcelain の確認で止まり、TASK か BLOCKED に回る。確認をすり抜けた残りは gate が断る。未追跡のファイルを gate が断ることは、既存の `TestGate_RefusedBeforeTheScripts` の「an untracked file」と CLI の `TestOrgGate_RefusalPrintsNothingAndRecordsNothing` の「an untracked file」が固定していて、この回の実行でも通った
+- R5: コミットするものがなければ `git commit` は rc 1 で終わるが、作業ツリーは空なので、手順 9 は先へ進める。雛形は、この rc 1 をどう扱うかを書いていない。leader がこれを失敗と読んで止まるかどうかは、本物の座席では確かめていない
+
+### Coverage(cycle 4)
+
+Go のコードは変わっていないので、statement coverage は測り直していない(cycle 3 の数字のまま)。雛形と skill の文は coverage の対象にならないので、上の mutation で代わりに確かめた。
+
+### Test gaps(cycle 4)
+
+- skill の 4 面の締めの順を固定するテストがない(E が生き残った)。足すなら、verify cycle 4 が書くとおり、`prompts_test.go` の `markdownItem` と同じやり方で `.claude/skills/org/SKILL.md` の「org の終わり方」の手順 1 と 2 を読み、「reviewer のレポート」が `git fetch` より前にあること、手順 2 に「report だけをコミットする」があることを見る Go のテスト 1 本が最小になる。残りの 3 面は drift の検査が 1 面と同じであることを見る
+- 手順 9 の順のループ(`:884`)は、この回の mutant ではほかの assertion と重なり、単独では何も落とさなかった。守りが重なっているだけで、穴ではない
+- 本物の leader の座席が手順 9 の枝(implementer の未コミットの変更を TASK で返す、それ以外を BLOCKED で上げる)を選べるか、`git commit` が空振り(R5)したときに止まらずに進むかは確かめていない。テストは雛形の語句まで(verify cycle 4 と self-review cycle 4 の Known gaps と同じ)
+- probe は git だけで打ち、手順 9 から gate までを ralph の binary で通してはいない。git の動き(R1〜R5)と、gate が汚れた作業ツリーを断ること(既存のテスト)は、それぞれ別に確かめた
+- cycle 1〜3 の Test gaps(org 層の fixture で HEAD と base が同じこと、`gateOutput` の改行のない出力、本当のロックの timeout の文、stop が信号の登録を外すこと、go1.26 の開発機では `signal.NotifyContext` への戻しを見分けないこと、中断のまれな 5 秒、Linux と混んだ CI での `tests/test-run-verify-concurrency.sh`)は、f1b0352e が関係しないので、そのまま残る
+
+### 判断(cycle 4)
+
+- Pass: `./scripts/run-test.sh`(go1.26.0、changed、full に落ちた)は 2 回とも rc 0 で、信号を無視しない 2 回目は shell 41 本、PASS の行 4,118、suite ごとの数が cycle 3 と同じ、Go 8 パッケージ。1 回目の 2 件の SKIP は `nohup` の起動による環境の違いで、その suite を前景で打ち直すと 60 / 60 だった。go1.25.8 の `go test ./... -count=1` は 2 回とも top-level 1,542 本と subtest 2,005 本が PASS で 0 fail、テスト名は cycle 3 と同じ。`RenderRolePrompt` の 19 本は 2 つの toolchain の `-count=5` で 190 回すべて PASS。mutation は、雛形の 13 件(依頼の (a)(b)(c)(d)(f) と、その変形・足した mutant)が 2 つの toolchain で red。git の probe は、レポートを先にコミットすれば rebase が通り、残りがあれば rebase か porcelain の確認のどちらかで止まることを示した
+- 生き残り: E(skill の 4 面を旧い順に戻す)は、依頼の予想どおり生き残った。skill の締めの順を読むテストがないための穴で、上の Test gaps に最小のテストを書いた
+- Fail: 0
+- Blocked: なし
+- 判断: pass(cycle 4)

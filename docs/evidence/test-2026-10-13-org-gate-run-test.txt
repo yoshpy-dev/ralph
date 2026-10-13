@@ -1,12 +1,16 @@
-# /test org-gate cycle 3: ./scripts/run-test.sh (HEAD 697e1577, base 1bddc871)
+# /test org-gate cycle 4: ./scripts/run-test.sh (HEAD 1e4a2fa4, base 1bddc871)
 # toolchain: go version go1.26.0 darwin/arm64 (default; GOTOOLCHAIN=auto, go.mod says go 1.25.8)
 # changed scope (default). The block ends with RC=<exit code> from the run.
+# This is the second run of the cycle (JST 01:22-01:32, SIGINT and SIGHUP not ignored). The first run (JST 01:08-01:18)
+#   was started with `nohup ... &`, so it began with SIGINT and SIGHUP ignored; it ended RC=0, and the only difference in
+#   the per-suite counts was tests/test-check-template.sh I. dash INT/HUP: 4 PASS became 2 SKIP ("INT is ignored in this
+#   environment"). That suite alone, rerun in the foreground, gave 60 passed, 0 failed, 0 skipped.
 
 ########## $ ./scripts/run-test.sh
-start 2026-10-13T14:04:40Z
-23:04  up 8 days,  2:08, 5 users, load averages: 4.08 3.69 4.31
+start 2026-10-13T16:22:34Z
+ 1:22  up 8 days,  4:26, 5 users, load averages: 5.18 8.79 17.15
 # Verification run
-- Timestamp: 2026-10-13T14:04:41Z
+- Timestamp: 2026-10-13T16:22:34Z
 - Mode: test
 - Requested scope: changed
 
@@ -963,7 +967,7 @@ insights-append tests: 51 passed, 0 failed
   PASS: '## Visual review' is the heading right after '## Affected areas'
   PASS: 'Plan approved' follows 'Plan reviewed'
 ==> plan-visual.sh digest on the created plan
-  PASS: digest prints 12 hex chars (0e5b2b58a021)
+  PASS: digest prints 12 hex chars (f2ca8b288c6e)
   PASS: approval edits change the file
   PASS: approval edits keep the digest
   PASS: a Visual review edit changes the digest
@@ -3367,9 +3371,9 @@ pr-owner-lookup tests: 20 passed, 0 failed, 20 total
   PASS  G. AC7 [jq]: every old deny that is none now is one of the 13 intentional fixes
   PASS  G. AC7 [no-jq]: every old deny that is none now is one of the 13 intentional fixes
   PASS  G. AC7: intentional_fixes equals the C (AC3) cases the old guard denies
-  PASS  H. AC8 [no-jq]: a 200,000-character single-quoted string (200154-byte payload) -> deny in 0.308 s (limit 10 s)
-  PASS  H. AC8 [no-jq]: 13,400 short commands (187736-byte payload) -> deny in 1.086 s (limit 10 s)
-  PASS  H. AC8 [no-jq]: 200,000 backslashes in backticks (400150-byte payload) -> deny in 0.601 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: a 200,000-character single-quoted string (200154-byte payload) -> deny in 0.280 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: 13,400 short commands (187736-byte payload) -> deny in 1.134 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: 200,000 backslashes in backticks (400150-byte payload) -> deny in 0.609 s (limit 10 s)
   PASS  I. lib_json.sh: tool_input.file_path [jq]
   PASS  I. lib_json.sh: tool_input.file_path [no-jq]
   PASS  I. lib_json.sh: tool_input.file_path with an escaped quote and backslash [jq]
@@ -3476,7 +3480,7 @@ Results: 19/19 passed
   PASS: clean main passes validation
 ==> ralph-worktree.sh ensure/resume
 Preparing worktree (new branch 'feat/worktree-first')
-HEAD is now at 7341ea5 chore: initial
+HEAD is now at cea1ea9 chore: initial
   PASS: ensure prints absolute worktree path
   PASS: created worktree is usable
   PASS: created worktree branch
@@ -4506,10 +4510,10 @@ verify-local-hook-tests tests: 5 passed, 0 failed, 5 total
 ==> Go project root: .
 ?   	github.com/yoshpy-dev/ralph	[no test files]
 ?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
-ok  	github.com/yoshpy-dev/ralph/internal/cli	139.483s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
-ok  	github.com/yoshpy-dev/ralph/internal/org	72.151s
+ok  	github.com/yoshpy-dev/ralph/internal/org	67.974s
 ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
@@ -4517,9 +4521,10 @@ ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
 
 ==> All verifiers passed.
 
-Evidence saved to: docs/evidence/verify-2026-10-13-140441.log
-real 595.90
-user 121.06
-sys 189.17
+Evidence saved to: docs/evidence/verify-2026-10-13-162234.log
+real 584.82
+user 105.78
+sys 159.54
 RC=0
-end 2026-10-13T14:14:36Z
+end 2026-10-13T16:32:19Z
+ 1:32  up 8 days,  4:36, 5 users, load averages: 4.51 5.50 11.15
