@@ -1,0 +1,59 @@
+# go build -o bin/ralph ./cmd/ralph at HEAD 8fe7ba73; bin/ is gitignored
+## ralph org spawn --help (description)
+ralph org spawn starts one seat of --org-id in a herdr tab and joins it
+to the org's agmsg team, recording each step in the manifest.
+
+Before a seat starts, `ralph org spawn` and `ralph org start` check
+[org].max_seats for the org and two limits every org_id in the ledger
+shares: [org].max_orgs (running orgs) and [org].max_total_seats (active
+seats across all orgs). Those two are read from the main worktree's
+ralph.toml (built-in defaults when it has none) when --config is not
+given and the ledger is the main worktree's .harness/state/org, whether
+found by default or named with --state-dir or RALPH_ORG_STATE_DIR (as a
+feature org's leader does), so every subdirectory and linked worktree
+gets the same limits. In every other case (--config, a --state-dir or
+RALPH_ORG_STATE_DIR naming another ledger, a ledger found from the git
+toplevel, no git repository) the --config file, else ./ralph.toml, is
+used. A refusal says how to free a slot with `ralph org disband`.
+
+--reserve claims paths of the repo for the org. Only the leader seat
+(--id leader) takes it, and an org keeps one reservation until it is
+disbanded: the same paths again pass, different ones are refused.
+
+A spawn, --dry-run included, is refused while no long-running
+`ralph org watch --all` (not stopping, not a --once run) runs on the
+ledger; the refusal says how to start one or stop a stale one.
+
+In an org started with `ralph org start --plan`, a spawn of any seat
+but the leader is refused while the org's leader seat is not running.
+When the org's approval mode (the [org.approval].mode recorded when
+the org was started) is per-plan, a spawn of a seat whose role is
+implementer is also refused until an approval recorded with
+`ralph org approve` since the org's last disband matches the plan
+file. Either refusal, --dry-run included, is recorded as `rejected`.
+
+Usage:
+## ralph org send --help (description)
+ralph org send validates --text against the typed message protocol
+(internal/org/protocol, see .claude/rules/ralph/agent-messaging.md) before
+sending: TYPE must be a known value, TASK_ID is required for
+TASK/RESULT/REVIEW/BLOCKED/CONTRACT, and the body must not exceed the
+size cap. Pass --raw to bypass validation entirely for free-form text.
+After typing the text, send waits briefly and presses Enter once, then
+tries to confirm the seat left idle/done. It never presses Enter a
+second time: if the submit cannot be confirmed, it prints a warning
+instead of guessing -- see --enter-delay-ms below.
+
+A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run
+included, is refused while no long-running `ralph org watch --all`
+(not stopping, not a --once run) runs on the ledger.
+
+In an org started with `ralph org start --plan` whose approval mode is
+per-plan, a TASK to a seat whose role is implementer, --raw and
+--dry-run included, is refused with nothing recorded unless its header
+has exactly one `PLAN: <path in the worktree> sha256:<digest>` line
+and that plan matches an approval recorded with `ralph org approve`.
+The refusal says what the check found, then
+`refused by the approval check` and the next step.
+
+Usage:
