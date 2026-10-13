@@ -37,7 +37,8 @@
    閉じるので、画面の出力が要るときは先に `ralph org read` で読む
 7. 座席の作業がすべて終わり座席を止めたら、最終責任として
    `ralph org report --org-id {{ORG_ID}}` で編成履歴を `docs/reports/` に残す
-   (機能ごとの org では PR の前に打ち、report を PR に入れる)
+   (機能ごとの org では、座席を止める前、`ralph org gate` の前に打ち、report を
+   PR に入れる。「機能ごとの org」の節の手順 10)
 8. 最後のコマンドとして `ralph org disband --org-id {{ORG_ID}}` を実行する。
    disband はこの org の herdr workspace を閉じる。あなた自身の pane もその
    workspace にあるので、このセッションはそこで終わる。ralph は台帳への記録と
@@ -60,11 +61,11 @@
 あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
 あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
 (予約の外は別の org が受け持っていることがあります)。この節の手順 1・4・6 の
-機能の計画、9 の report、10 の計画の移動は予約の外に書きますが、どれも手順の
-うちなので、予約に入っていなくてかまいません。
+機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
+予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
-stop・report・escalate・inbox notify・disband)には、どれにもタスクの
+stop・report・gate・escalate・inbox notify・disband)には、どれにもタスクの
 `- 台帳:` の行にある `--state-dir` をそのまま付けてください。ralph は start
 に渡した `--state-dir` や `RALPH_ORG_STATE_DIR` をこの pane に渡さず、pane の
 環境は start を打った環境と同じとは限らないので、付けないと start と別の
@@ -159,20 +160,57 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    implementer の spawn と TASK を打たずに待つ
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
-9. reviewer が通したら、implementer と reviewer を `ralph org stop` で止め、
-   `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打つ(report は
-   この worktree の `docs/reports/` に書かれる)
-10. `scripts/archive-plan.sh` があれば、
+9. reviewer が通したら(`GATE: pass` の RESULT)、
+   `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+   `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+   (`git symbolic-ref --quiet --short refs/remotes/origin/HEAD` が出す
+   `origin/<名前>` の `<名前>`)、なければ `main`、それもなければ `master`
+   にする。`git merge-base --is-ancestor origin/<既定のブランチ> HEAD` が
+   終了コード 0 で終わらなければ(HEAD が `origin/<既定のブランチ>` を含まな
+   ければ)、`git rebase origin/<既定のブランチ>` を打つ。衝突したら
+   `git rebase --abort` で戻し、自分では直さない。implementer に rebase と
+   衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
+   終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)。fetch が
+   失敗したら(ネットワークのない sandbox など)打ち直さず、エラーを本文に
+   書いて `ralph org escalate` で BLOCKED を上げる
+10. `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打ち(report
+    はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+    レポート(`docs/reports/` の下)をコミットする。続けて
+    `scripts/archive-plan.sh` があれば、
     `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
-    `docs/plans/archive/` に移す。report と、計画の移動(スクリプトが書き換えた
-    ほかのファイルを含む)をコミットする。report をコミットせずに残すと、
-    worktree に未追跡のファイルが残り、merge のあとの後始末(この節の 13)が
-    止まる
+    `docs/plans/archive/` に移し、計画の移動(スクリプトが書き換えたほかの
+    ファイルを含む)を report とは別のコミットにする。このコミットを archive
+    のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える(手順 12 で
+    使う)。report をコミットせずに残すと、worktree に未追跡のファイルが残り、
+    手順 12 の gate に断られ、merge のあとの後始末(この節の 15)が止まる
 11. `scripts/secret-scan-branch.sh` があれば
     `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
     なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
     (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
-12. `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
+12. `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。gate は
+    worktree と rebase を確かめてから `./scripts/run-static-verify.sh` と
+    `./scripts/run-test.sh` を走らせ、結果を台帳に記録する。数分かかるので、
+    ツールの timeout を長くするか、バックグラウンドで走らせて終わりを待つ
+    (途中で切られた gate は何も記録しないので、打ち直す)。gate のあとに
+    コミットを足さず、足したら gate を打ち直す。
+    - 通ったとき: stdout に `GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・
+      `LOG: <パス>` の行が出て、終了コードは 0。`HEAD:` と `BASE:` の行を
+      控える(手順 14 で使う)
+    - 断られたとき(stdout に何も出ず終了コード 1): stderr に書かれた次の手に
+      従う(作業ツリーが汚れている、rebase していない、など)。次の手のない
+      エラー(台帳や git の失敗)なら、打ち直さず、エラーを本文に書いて
+      `ralph org escalate` で BLOCKED を上げる
+    - `GATE: fail` のとき(終了コード 1): まず、手順 10 で archive のコミットを
+      作っていれば `git revert --no-edit <archive のコミット>` で計画を
+      `docs/plans/active/` に戻す(per-plan では、承認の記録は元のパスを指す
+      ので、戻さないと implementer への TASK が承認の検査で断られる。中身が
+      承認した版と同じなら通る)。そのうえで、stdout の `REASON:` と `LOG:` を
+      本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に戻る。
+      reviewer が通したら、手順 9 からやり直す
+13. implementer と reviewer を `ralph org stop` で止める
+14. HEAD(`git rev-parse HEAD`)が手順 12 の gate が出した `HEAD:` と同じ
+    ことを確かめる。違えば push せず、gate を打ち直す(手順 12)。同じなら
+    `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
     作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
     タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
     (`/pr` は PR を作ったあと task worktree と local branch を消すので、
@@ -181,10 +219,22 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
     `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
     EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は
-    `{{ORG_ID}}`)
-13. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
+    `{{ORG_ID}}`)。RESULT のヘッダには、gate が出した `HEAD:` と `BASE:` の
+    2 行をそのまま写す。たとえば次のメッセージにする。
+
+    ```
+    TYPE: RESULT
+    TASK_ID: {{ORG_ID}}
+    HEAD: <gate が出した HEAD: の SHA>
+    BASE: <gate が出した BASE: の SHA>
+
+    SUMMARY: 機能の PR を作った。gate は通り、push したのは gate の HEAD。
+    EVIDENCE: https://github.com/<owner>/<repo>/pull/<番号>
+    ```
+
+15. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
     から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
-14. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
+16. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
     最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
 
 ## タスク

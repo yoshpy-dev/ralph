@@ -462,10 +462,12 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // its steps' own writes outside it, has every ralph org command carry the
 // --state-dir of the task's ledger line, its seats are spawned as implementer and
 // reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
-// names its own step 13 for the cleanup (the per-plan approval steps of plan
-// 2026-10-12-org-plan-approval moved the numbers: the plan is written in steps
-// 1, 4 and 6, the report in 9, the plan moved in 10; see
-// TestRenderRolePrompt_Leader_FeatureOrgPlanApproval). A failed secret scan,
+// names its own step 15 for the cleanup (the per-plan approval steps of plan
+// 2026-10-12-org-plan-approval and the gate steps of plan 2026-10-13-org-gate
+// moved the numbers: the plan is written in steps 1, 4 and 6, the report, the
+// reviewer's reports and the plan's move in 10, the plan put back in 12; see
+// TestRenderRolePrompt_Leader_FeatureOrgPlanApproval and
+// TestRenderRolePrompt_Leader_FeatureOrgGate). A failed secret scan,
 // push, or gh pr create is escalated as a BLOCKED, and the opened PR as a
 // RESULT with the org_id for its TASK_ID (plan 2026-10-10-org-inbox-escalate,
 // AC8). The retired formation patterns are mentioned nowhere.
@@ -520,7 +522,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// writes (the feature plan, the report, the plan's move) are outside it.
 	if intro, _, ok := strings.Cut(section, "\n1. "); !ok ||
 		!containsPhrase(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
-		!containsPhrase(intro, "手順 1・4・6 の機能の計画、9 の report、10 の計画の移動は予約の外に書きますが") {
+		!containsPhrase(intro, "手順 1・4・6 の機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは予約の外に書きますが") {
 		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
 	}
 	// Every ralph org command of the leader carries the --state-dir of the
@@ -532,13 +534,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	}
 	intro, _, _ := strings.Cut(section, "\n1. ")
 	if !containsPhrase(intro,
-		"`ralph org` のコマンド(spawn・send・wait・read・status・stop・report・escalate・inbox notify・disband)には、どれにもタスクの `"+ledgerLine+"` の行にある `--state-dir` をそのまま付けて") ||
+		"`ralph org` のコマンド(spawn・send・wait・read・status・stop・report・gate・escalate・inbox notify・disband)には、どれにもタスクの `"+ledgerLine+"` の行にある `--state-dir` をそのまま付けて") ||
 		!containsPhrase(intro, "start と別の台帳を使うことがあります") {
 		t.Errorf("expected the 機能ごとの org intro to have every ralph org command carry the --state-dir of the task's `%s` line, and why, got section:\n%s", ledgerLine, section)
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"1 席ずつ spawn する", "`--id` は `implementer` と `reviewer` にする"},
-		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 13)が止まる"},
+		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 15)が止まる"},
 		{"secret-scan-branch.sh --strict", "push せずに止まり、`ralph org escalate` で BLOCKED を上げる"},
 		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
 		{"gh pr create` で PR", "エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
@@ -732,6 +734,223 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 		if strings.Contains(got, "--raw") != r.task {
 			t.Errorf("%s: refusal %q names --raw: %v, want %v (only a TASK can be sent with --raw)", r.name, got, !r.task, r.task)
 		}
+	}
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgGate pins AC8 of plan
+// docs/plans/active/2026-10-13-org-gate.md: after the reviewer passes, the
+// 機能ごとの org section fetches and rebases on the default branch (a conflict
+// goes to the implementer as a TASK, with PLAN: under per-plan, and back to
+// review), commits the report and the reviewer's reports, then the plan's
+// archive as a separate commit, runs the secret scan, then `ralph org gate`
+// (with a long timeout or in the background, no commits after it), reverts
+// the archive commit on GATE: fail before the implementer's TASK (B11), stops
+// the seats after the gate, pushes only the gate's HEAD:, and copies the
+// gate's HEAD: and BASE: into the RESULT, whose example escalate accepts. The
+// steps the section refers to by number are the steps it means, and the
+// mission's report item says it runs before the seats stop and the gate.
+func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+
+	// The closing steps come in this order: the gate after the archive
+	// commit, the seats stopped after the gate, the push after the stop.
+	squashed := squashSpace(section)
+	at := -1
+	for _, step := range []string{
+		"reviewer が通したら(`GATE: pass` の RESULT)",
+		"`git fetch origin <既定のブランチ>`",
+		"`git rebase origin/<既定のブランチ>`",
+		"`git rebase --abort`",
+		"ralph org report --org-id org-a --state-dir <台帳>",
+		"report と reviewer のレポート(`docs/reports/` の下)をコミットする",
+		"./scripts/archive-plan.sh <機能の計画のパス>",
+		"report とは別のコミットにする",
+		"./scripts/secret-scan-branch.sh --strict",
+		"ralph org gate --org-id org-a --state-dir <台帳>",
+		"`git revert --no-edit <archive のコミット>`",
+		"implementer と reviewer を `ralph org stop` で止める",
+		"gate が出した `HEAD:` と同じことを確かめる",
+		"git push -u origin <ブランチ>",
+		"gh pr create",
+		"RESULT のヘッダには、gate が出した `HEAD:` と `BASE:` の 2 行をそのまま写す",
+		"ralph org disband --org-id org-a --state-dir <台帳>",
+	} {
+		i := strings.Index(squashed, squashSpace(step))
+		switch {
+		case i < 0:
+			t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", step, section)
+		case i < at:
+			t.Errorf("expected %q to come after the steps before it in the 機能ごとの org section, got section:\n%s", step, section)
+		default:
+			at = i
+		}
+	}
+
+	for _, c := range []struct{ marker, want string }{
+		{"9. reviewer が通したら", "既定のブランチは `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先"},
+		{"9. reviewer が通したら", "なければ `main`、それもなければ `master` にする"},
+		{"9. reviewer が通したら", "HEAD が `origin/<既定のブランチ>` を含まなければ)、`git rebase origin/<既定のブランチ>` を打つ"},
+		{"9. reviewer が通したら", "衝突したら `git rebase --abort` で戻し、自分では直さない"},
+		{"9. reviewer が通したら", "implementer に rebase と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す"},
+		{"9. reviewer が通したら", "fetch が失敗したら(ネットワークのない sandbox など)打ち直さず、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
+		{"10. `ralph org report", "report と reviewer のレポート(`docs/reports/` の下)をコミットする"},
+		{"10. `ralph org report", "計画の移動(スクリプトが書き換えたほかのファイルを含む)を report とは別のコミットにする"},
+		{"10. `ralph org report", "このコミットを archive のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える"},
+		{"12. `ralph org gate", "数分かかるので、ツールの timeout を長くするか、バックグラウンドで走らせて終わりを待つ"},
+		{"12. `ralph org gate", "途中で切られた gate は何も記録しないので、打ち直す"},
+		{"12. `ralph org gate", "gate のあとにコミットを足さず、足したら gate を打ち直す"},
+		{"- 通ったとき", "`GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・`LOG: <パス>` の行が出て、終了コードは 0"},
+		{"- 断られたとき", "stdout に何も出ず終了コード 1"},
+		{"- 断られたとき", "stderr に書かれた次の手に従う"},
+		{"- 断られたとき", "打ち直さず、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
+		{"- `GATE: fail` のとき", "手順 10 で archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す"},
+		{"- `GATE: fail` のとき", "per-plan では、承認の記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で断られる"},
+		{"- `GATE: fail` のとき", "stdout の `REASON:` と `LOG:` を本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に戻る"},
+		{"- `GATE: fail` のとき", "reviewer が通したら、手順 9 からやり直す"},
+		{"13. implementer と reviewer を", "`ralph org stop` で止める"},
+		{"14. HEAD(", "HEAD(`git rev-parse HEAD`)が手順 12 の gate が出した `HEAD:` と同じことを確かめる"},
+		{"14. HEAD(", "違えば push せず、gate を打ち直す(手順 12)"},
+		{"14. HEAD(", "PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる"},
+	} {
+		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {
+			t.Errorf("expected the 機能ごとの org item naming %q to contain %q, got item:\n%s", c.marker, c.want, item)
+		}
+	}
+
+	// GATE: fail puts the plan back before the implementer's TASK.
+	if item, ok := markdownItem(section, "- `GATE: fail` のとき"); ok {
+		s := squashSpace(item)
+		revertAt, taskAt := strings.Index(s, squashSpace("git revert --no-edit")), strings.Index(s, squashSpace("implementer に直しを TASK で頼み"))
+		if revertAt < 0 || taskAt < 0 || revertAt > taskAt {
+			t.Errorf("expected the GATE: fail item to revert the archive commit before the implementer's TASK, got item:\n%s", item)
+		}
+	}
+
+	// The section's numbered references (手順 8, 9, 10, 12 and この節の 15)
+	// name the steps they mean.
+	for _, ref := range []struct{ start, marker string }{
+		{"8. ", "TASK・RESULT・レビューの往復"},
+		{"9. ", "reviewer が通したら"},
+		{"10. ", "`ralph org report --org-id org-a"},
+		{"12. ", "`ralph org gate --org-id org-a"},
+		{"14. ", "HEAD(`git rev-parse HEAD`)"},
+		{"15. ", "worktree とブランチは消さない"},
+	} {
+		found := false
+		for _, line := range strings.Split(section, "\n") {
+			if strings.HasPrefix(line, ref.start) {
+				found = strings.Contains(line, ref.marker)
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected step %q of the 機能ごとの org section to start with %q, got section:\n%s", ref.start, ref.marker, section)
+		}
+	}
+
+	// The example RESULT of step 14, indented in its list item, is one
+	// escalate accepts, with one HEAD: and one BASE: header and the PR's URL
+	// for its EVIDENCE.
+	item, _ := markdownItem(section, "14. HEAD(")
+	const fence = "\n    ```\n"
+	_, rest, ok := strings.Cut(item, fence)
+	block, _, closed := strings.Cut(rest, fence)
+	if !ok || !closed {
+		t.Fatalf("expected step 14 to show the example RESULT in an indented code block, got item:\n%s", item)
+	}
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(line, "    ")
+	}
+	msg := strings.Join(lines, "\n")
+	m, err := validateEscalation("org-a", msg)
+	if err != nil || m.Type != protocol.TypeResult || m.TaskID != "org-a" {
+		t.Errorf("expected escalate to accept the example as a RESULT with TASK_ID org-a, got TYPE %q TASK_ID %q, err %v; message:\n%s", m.Type, m.TaskID, err, msg)
+	}
+	for _, key := range []string{"HEAD", "BASE"} {
+		if got := protocol.HeaderValues(msg, key); len(got) != 1 {
+			t.Errorf("expected the example RESULT to carry one %s: header, got %q; message:\n%s", key, got, msg)
+		}
+	}
+	if !strings.Contains(m.Body, "\nEVIDENCE: https://github.com/") || !strings.Contains(m.Body, "/pull/") {
+		t.Errorf("expected the example RESULT's EVIDENCE to be the PR's URL, got body:\n%s", m.Body)
+	}
+
+	// The mission's report item says when a feature org runs it.
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	if item, ok := markdownItem(mission, "7. 座席の作業がすべて終わり"); !ok ||
+		!containsPhrase(item, "機能ごとの org では、座席を止める前、`ralph org gate` の前に打ち、report を PR に入れる") {
+		t.Errorf("expected the mission's report item to run the report before the seats stop and before the gate in a feature org, got item:\n%s", item)
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase pins the reviewer
+// side of AC8 of plan docs/plans/active/2026-10-13-org-gate.md: a passing
+// RESULT carries, as header lines, the HEAD: and BASE: the reviewer verified
+// (spec FR-7), says how to find the default branch, and says ralph does not
+// read the two lines; the example RESULT parses with one GATE: pass, one
+// HEAD: and one BASE: header, and the report contract names them.
+func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "RESULT のヘッダに `GATE: pass`"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the reviewer mission to have an item naming %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"検証した commit の `HEAD: <git rev-parse HEAD>` と base の `BASE: <git merge-base HEAD <既定のブランチ>>` を入れて leader に返す",
+		"既定のブランチは、leader の TASK に書いてあればそれ、なければ `refs/remotes/origin/HEAD` が指す先、それもなければ `main` にする",
+		"`origin/<名前>` があれば、それと merge-base を取る",
+		"ralph はこの 2 行を読まない",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the reviewer mission item naming %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	protocolSection, found := markdownSection(text, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## typed protocol' section, got:\n%s", text)
+	}
+	if !containsPhrase(protocolSection, "`GATE:`・`HEAD:`・`BASE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に書く") {
+		t.Errorf("expected the reviewer's typed protocol section to put GATE:, HEAD: and BASE: in the header block, got section:\n%s", protocolSection)
+	}
+	const exampleStart = "```\nTYPE: RESULT\n"
+	start := strings.Index(protocolSection, exampleStart)
+	if start < 0 {
+		t.Fatalf("expected the reviewer's typed protocol section to show an example RESULT, got section:\n%s", protocolSection)
+	}
+	msg, _, closed := strings.Cut(protocolSection[start+len("```\n"):], "\n```")
+	if !closed {
+		t.Fatalf("expected the example RESULT to end with a code fence, got section:\n%s", protocolSection)
+	}
+	m, err := protocol.Parse(msg)
+	if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != protocol.TypeResult {
+		t.Errorf("expected the example to be a valid RESULT, got %+v, err %v; message:\n%s", m, err, msg)
+	}
+	for key, want := range map[string]int{"GATE": 1, "HEAD": 1, "BASE": 1} {
+		if got := protocol.HeaderValues(msg, key); len(got) != want || (key == "GATE" && got[0] != "pass") {
+			t.Errorf("expected the example RESULT to carry one %s: header (GATE: pass), got %q; message:\n%s", key, got, msg)
+		}
+	}
+
+	contract, found := markdownSection(text, "## レポート契約")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## レポート契約' section, got:\n%s", text)
+	}
+	if item, ok := markdownItem(contract, "leader へは RESULT"); !ok || !containsPhrase(item, "`GATE: pass` と、検証した commit と base の `HEAD:`・`BASE:` のヘッダ") {
+		t.Errorf("expected the reviewer's report contract to name the HEAD: and BASE: headers of a passing RESULT, got item:\n%s", item)
 	}
 }
 
