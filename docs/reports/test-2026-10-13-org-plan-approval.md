@@ -1,5 +1,77 @@
 # Test report: org-plan-approval
 
+- Date: 2026-10-13(cycle 2 の 2 回目。JST 10:26〜10:44)
+- Plan: docs/plans/active/2026-10-12-org-plan-approval.md(承認済み、digest 951cf09bd7bc。前の /test から変わっていない)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 2 回目の中で、/test を回し直した(`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)。cycle 2 の 1 回目は「付録: cycle 2 の 1 回目」に、cycle 1 は末尾の「付録: cycle 1」に残した
+- Scope: HEAD 7839a71e(base 225dff27)。前の /test(1b4ac934)のあとにコードで変わったのは、6a7d35b0 の `internal/org/approval_enforce_test.go`(+86)だけである。cycle 2 の 1 回目の生き残り Q08 と Q07 を閉じるテストを 2 本足した(`TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain` と、subtest 2 つの `TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath`)。非テストのコードは 1b4ac934 と同じで、`git diff --name-only 1b4ac934 HEAD` に出る Go のファイルはこの 1 つだけ。ほかの 2 つのコミット(9ccc830c、7839a71e)は self-review と verify の報告。依頼のとおり軽く回した: `run-test.sh`、`go test ./...`、`-race`(org と cli)、Q07 と Q08 の mutant の 2 件。behavioral test だけを実行した(静的解析は /verify の担当)
+- Evidence(どれもコミットする。`git check-ignore` は rc 1):
+  - `docs/evidence/test-2026-10-13-org-plan-approval-c2r2-run-test.txt`(`./scripts/run-test.sh` の出力)
+  - `docs/evidence/test-2026-10-13-org-plan-approval-c2r2-go-test.txt`(`go test ./... -count=1 -v -cover`)
+  - `docs/evidence/test-2026-10-13-org-plan-approval-c2r2-go-race.txt`(`go test -race -count=1 -v ./internal/org/ ./internal/cli/`)
+  - `docs/evidence/test-2026-10-13-org-plan-approval-c2r2-mutation.txt`(overlay の中身、mutant の写しと HEAD のファイルの差分、`git diff --name-only 1b4ac934 HEAD`、2 件の出力)
+  - wrapper が書いた `docs/evidence/verify-2026-10-13-012629.log` は gitignore の対象なので、コミットしない
+  - insight event: `docs/insights/events/2026-10-13-org-plan-approval.jsonl` に test の 1 行(`--cycle auto`)を足し、この報告と同じコミットに入れた
+- テストもコードも変えていない。mutant の写しは cycle 2 の 1 回目に作った scratchpad の `opa/c2/mut/m/` のものを使い、overlay にはその 1 ファイルだけを入れた(probe のテストは入れていない)。worktree で書いたのは、このレポート、上の evidence、insight event だけ
+
+## Latest run: cycle 2 の 2 回目(HEAD 7839a71e)
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope。前と同じく `scripts/ralph-config.sh` が分類されないので full に落ちた) | shell 40 本(PASS の行 4,081)、Go 8 パッケージ | すべて | 0 | shell 1 | 7 分 1 秒、rc 0 |
+| `go test ./... -count=1 -v -cover` | top-level 1,507、subtest 1,925 | top-level 1,504、subtest 1,925 | 0 | 3 | 2 分 51 秒(cli 169.8 s、org 41.5 s)、rc 0 |
+| `go test -race -count=1 -v ./internal/org/ ./internal/cli/` | top-level 1,225、subtest 1,728 | top-level 1,224、subtest 1,728 | 0 | 1 | 2 分 53 秒(cli 169.1 s、org 42.1 s)、rc 0。`DATA RACE` は 0 件 |
+| mutation(`go test -overlay`、HEAD のテスト、`./internal/org/` の全体) | 2 件(Q07、Q08) | red 2 件 | 生き残り 0 | - | 1 件 34〜35 s、並列 2 |
+| 実機確認 | 行っていない(下の節) | - | - | - | - |
+
+- `run-test.sh` の Go は `internal/org` だけを流し直し(31.3 s)、ほかの 7 パッケージは `(cached)` だった。キャッシュを使わない結果は 2 行目にある
+- shell の PASS の行は、前と同じ数え方(`PASS` を含む行から、`PASS: <数>` だけの集計の行 24 本を除く)で 4,081。`PASS` を含む行を cycle 2 の 1 回目の出力と並べて比べると、違うのは `tests/test-pre-bash-guard.sh` の AC8 の 3 行の経過時間(たとえば 1.143 s が 1.068 s)だけで、suite の並びも同じだった。`FAIL` の行は集計の `FAIL: 0` が 24 本だけ。Skipped は前と同じ `tests/test-secret-scan-branch.sh` の 1 件(git 2.49.0 なので、2.41 より古い git の場合を飛ばす)
+- Go の件数は、cycle 2 の 1 回目(top-level 1,505、subtest 1,923)より top-level と subtest が 2 ずつ増えた。PASS か SKIP になったテストの名前を前の出力と比べると、消えたものは 0、増えたものは 4 で、6a7d35b0 の 2 本と `LatestApprovalIsPerPlanPath` の subtest 2 つだった。この 4 つは `-race` でも PASS で、`-race` の件数も前(1,223 と 1,726)から 2 ずつ増えた。Skipped は前と同じ 3 件(`-race` は 1 件)
+- load average は、`run-test.sh` の開始時に 2.31、`go test ./...` の開始時に 4.16、`-race` の開始時に 2.42 だった。前に flake を起こした doctor のテスト(`TestRunDoctor*`)と `TestRunWatcher_TimeoutIndependentOfSmallInterval` はどの実行でも落ちなかったので、単独での打ち直しはしていない
+- coverage(statement)は前と同じ値だった: `internal/org` 94.4%、`internal/cli` 86.6%、`internal/config` 93.3%、`internal/org/protocol` 100.0%、driver 93.1%、insights 86.1%、scaffold 75.7%、upgrade 91.2%。足したのはテストだけなので、関数ごとの数値は取り直していない
+
+### Mutation
+
+cycle 2 の 1 回目の mutant の写し(scratchpad の `opa/c2/mut/m/Q07/approval.go` と `m/Q08/verbs.go`)を、そのファイルだけを差し替える overlay(`overlay-only-Q07.json`、`overlay-only-Q08.json`)で読ませ、`go test -count=1 -overlay <overlay> ./internal/org/` を 2 件並べて流した(JST 10:26:54〜10:27:29、`run-test.sh` の shell の suite と同じ時間帯)。非テストのコードは 1b4ac934 から変わっていないので、写しと HEAD のファイルの差は mutant の行だけである(差分は evidence にある)。
+
+| ID | 何を壊したか | 結果 | 落としたテスト |
+| --- | --- | --- | --- |
+| Q07 | `latestApprovedDigest` がパスを見ない(`if true \|\| approvals[i].Plan == path`) | red(rc 1、34 s) | `TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath` の subtest 2 つ。(a) 承認し直した計画の古い digest の TASK が、改訂版への案内でなく「承認のあとに変わった」(`approved digest f05eab2b3a96, current digest fc9b51dd3eac`)で断られた。(b) 承認のない計画を名指す TASK の拒否に、別の計画の digest が `(its latest approval is of sha256:08f3c55e920b)` として入った |
+| Q08 | 待ったあとの 2 回目の検査が、待つ前に読んだ manifest を使い回す | red(rc 1、35 s) | `TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain`。最初の回(型付き)で、改訂版へ案内する拒否でなく「承認のあとに変わった」(`approved digest f05eab2b3a96, current digest fc9b51dd3eac`)が返った |
+
+どちらも、落ちたのは 6a7d35b0 で足したテストだけで、`./internal/org/` のほかのテストは通った。拒否の文は、cycle 2 の 1 回目の probe(`TestProbe_SendRecheckReadsTheManifestAfterTheWait`、`TestProbe_LatestApprovalIsPerPlanPath`)が mutant で落ちたときと同じ形である。cycle 2 の 1 回目の生き残り 2 件は、どちらも閉じた。
+
+### 実機確認
+
+この回では行っていない。cycle 2 の 1 回目の実機確認は HEAD ffd6b3ec のビルドを使った。ffd6b3ec から HEAD までに変わった Go のファイルは `internal/org/approval_enforce_test.go` だけで(`git diff --name-only ffd6b3ec 1b4ac934` は報告と evidence と insight event だけ、`1b4ac934 HEAD` は上の Scope のとおり)、ビルドされるバイナリのソースは前の実機確認のときと同じである。
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+テストの失敗はなかった。負荷による doctor のテストの flake も出なかった。
+
+### Test gaps
+
+- `TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain` は型付き、`--raw` の順に回し、Q08 では最初の型付きの回が `t.Fatalf` で止まる。そのため、コミットしたテストでは、`--raw` の回が Q08 を落とすことは示していない。2 回目の検査は型付きと `--raw` で同じ呼び出しを通り(`--raw` を外す Q05 は cycle 2 の 1 回目に `TestOrgSend_ApprovalCheck_AgainAfterTheWait` で落ちた)、cycle 2 の 1 回目の probe は両方で落ちたので、穴としては小さい
+- mutation はこの回、Q07 と Q08 の 2 件だけを流した。cycle 2 の 1 回目に red だった 14 件は、テストを足しただけで消していないので流し直していない
+- cycle 2 の 1 回目の Test gaps のうち、Q07・Q08 は閉じた。ほかの項目(`checkTaskPlanApproved` の `default: return err` と `checkSendApproval` の manifest の読み取りの失敗の枝、spawn と send の `--help` の文、本物のモデルの seat と Linux での実機確認、観察の 1 件、cycle 1 から持ち越したもの)は変わらない(付録を参照)
+- 実機確認はこの回では行っていない(上の節)
+
+## Verdict
+
+- Verdict: pass
+- Pass: `./scripts/run-test.sh` は rc 0(shell 40 本、PASS の行 4,081、Go 8 パッケージ)。`go test ./... -count=1` は top-level 1,504 本が PASS で 0 fail、足した 2 本も PASS で、前の実行から消えたテストはない。`-race`(org と cli)も 0 fail で、`DATA RACE` は 0 件。cycle 2 の 1 回目の生き残り Q07 と Q08 は、6a7d35b0 の 2 本でどちらも red になった
+- Fail: 0
+- Blocked: なし
+
+## 付録: cycle 2 の 1 回目(HEAD ffd6b3ec)
+
+cycle 2 の 1 回目の header と本文を、そのとき書いたまま残す。`## Latest run` の見出しを外し、本文の見出しに「(cycle 2 の 1 回目)」を付け、`## Verdict` は「cycle 2 の 1 回目の判定」に変えた。生き残りの Q07・Q08 が閉じたことは、上の cycle 2 の 2 回目で確かめた。
+
 - Date: 2026-10-13(cycle 2。JST 09:31〜10:00)
 - Plan: docs/plans/active/2026-10-12-org-plan-approval.md(承認済み、digest 951cf09bd7bc)
 - Tester: tester subagent (Claude Opus 5.5)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` は 2)。cycle 1 の結果は末尾の「付録: cycle 1」に残した
@@ -14,9 +86,7 @@
   - insight event: `docs/insights/events/2026-10-13-org-plan-approval.jsonl` に test の 1 行(`--cycle auto`)を足し、この報告と同じコミットに入れた
 - テストもコードも変えていない。mutant の写しと probe のテストは scratchpad の `opa/c2/mut/` に置き、`go test -overlay` で使った。worktree で書いたのは、このレポート、上の evidence、insight event だけ
 
-## Latest run: cycle 2(HEAD ffd6b3ec)
-
-### Test execution
+### Test execution(cycle 2 の 1 回目)
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- |
@@ -32,7 +102,7 @@
 - Go の Skipped は cycle 1 と同じ 3 件(`-race` は org と cli だけなので 1 件)
 - load average は、`run-test.sh` の開始時に 34.84(直前の 1 分は 55 前後)、`go test ./...` の開始時に 3.41、`-race` の開始時に 3.49 だった。前に flake を起こした doctor のテスト(`TestRunDoctor*`)と `TestRunWatcher_TimeoutIndependentOfSmallInterval` は、どの実行でも落ちなかった
 
-### Coverage
+### Coverage(cycle 2 の 1 回目)
 
 - Statement: `internal/org` 94.4%(cycle 1 は 94.3%)、`internal/cli` 86.6%、`internal/config` 93.3%、`internal/org/protocol` 100.0%。ほかの 4 パッケージ(driver 93.1%、insights 86.1%、scaffold 75.7%、upgrade 91.2%)は cycle 1 と同じ
 - Function(cycle 2 で変わった関数): `latestApprovedDigest`、`checkPlanApproved`、`checkAnyPlanApproved`、`sendApprovalErr` は 100%。100% でないもの:
@@ -43,7 +113,7 @@
 - Branch: Go の標準ツールには branch coverage がないので測っていない
 - Notes: 関数ごとの数値は `go test -count=1 -coverprofile ./internal/org/`(rc 0、35.2 s、94.4%)で取り直した。通らない行は、profile で回数が 0 の区間から抜いた
 
-### Mutation
+### Mutation(cycle 2 の 1 回目)
 
 各 mutant は、ソースの文字列(ファイルに 1 回だけ現れるもの。Q06 と Q08 は 2 か所)を置き換えた写しを `go test -overlay` で読ませた。worktree は書いていない。対象のテストは `./internal/org/` の全体で、16 件はどれもコンパイルできた(先に `go vet -overlay` で確かめた)。
 
@@ -68,7 +138,7 @@
 
 cycle 1 の生き残り 4 件(R03、R04、R05、R11)は、HEAD のテストで 1 回ずつ流し、どれも cycle 2 で足したテストだけで落ちた。
 
-#### 生き残りと probe
+#### 生き残りと probe(cycle 2 の 1 回目)
 
 | ID | 何が変わるか | probe のテスト(scratch のみ) | HEAD | mutant |
 | --- | --- | --- | --- | --- |
@@ -77,7 +147,7 @@ cycle 1 の生き残り 4 件(R03、R04、R05、R11)は、HEAD のテストで 1
 
 2 件とも HEAD の動きを変える mutant で、テストを 1 本ずつ足せば閉じられる(等価ではない)。probe はコミットしていない。依頼が「コードを変えない」だったため。全文は mutation の evidence にある。どちらも、断ることと何も打たないことは変わらず、変わるのは拒否の文と次の手だけである。Q07 は、計画が 1 つの org(`ralph org start --plan` の使い方)では出ない。
 
-### 実機確認
+### 実機確認(cycle 2 の 1 回目)
 
 cycle 1 と同じ隔離の仕方で、新しい一時の repo と台帳を使った。HEAD ffd6b3ec のビルド、隔離した herdr 0.7.5 の `herdr server`、repo の root からの相対の `HERDR_SOCKET_PATH`、`osascript` を外した PATH、`claude` という名前の Go の stub と stub の agmsg。stub には、フラグのファイルがあるあいだ OSC のタイトルを `⠂ ` で始める仕掛けを足した。herdr の claude の検出規則は、これを working と読む(ralph を通す前に、使い捨ての workspace で idle → working → idle の切り替えと、working のあいだ `herdr agent wait` が待つことを確かめた)。利用者の herdr サーバー、`~/.config/herdr`、本物の agmsg の home、osascript には触れていない。モデルのセッションは起動していない。詳細と出力は `docs/evidence/org-plan-approval-live-2026-10-13-c2.md`。
 
@@ -93,7 +163,7 @@ cycle 1 と同じ隔離の仕方で、新しい一時の repo と台帳を使っ
 | 見張りとの重なり | (i-1) で計画を書いてからコミットするまでのあいだに、見張りが implementer の worktree の変更を scope_change と見て、on-demand watcher が `claude -p --model haiku --output-format json` を起動した。起動したのは PATH の上の stub(pid 43355)で、依頼の 75 行を読んで終わり、判定は `malformed claude envelope` の誤りになった。見張りの既存の動きで、この変更とは関係がない |
 | 片づけ | org a を disband し、見張りを `--stop` で止め、herdr サーバーを止めた。cwd `/` から打った `pgrep -fl '<L>'` は rc 1、`pgrep -fl 'herdr server'` も rc 1。stub の 4 つ、herdr サーバー、見張りの pid を `ps -p` で引くと rc 1。cwd が `<L>` の下にあるプロセスは 0 個 |
 
-### Failure analysis
+### Failure analysis(cycle 2 の 1 回目)
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
@@ -101,7 +171,7 @@ cycle 1 と同じ隔離の仕方で、新しい一時の repo と台帳を使っ
 
 テストの失敗はなかった。負荷による doctor のテストの flake も、今回は出なかった。
 
-### Regression checks
+### Regression checks(cycle 2 の 1 回目)
 
 | Previously broken behavior | Status | Evidence |
 | --- | --- | --- |
@@ -114,7 +184,7 @@ cycle 1 と同じ隔離の仕方で、新しい一時の repo と台帳を使っ
 | 見張りの関門(PR #223)の TASK の拒否 | 通る(`TestOrgSend_WatchGate_RefusesATaskOnly`)。関門が承認の検査より先であることは `TestOrgSend_WatchGateBeforeApprovalCheck` が固定する | go-test の evidence |
 | shell の全 suite | 40 本とも rc 0。PASS の行は cycle 1 と同じ 4,081 | run-test の evidence |
 
-### Test gaps
+### Test gaps(cycle 2 の 1 回目)
 
 - mutation の生き残り 2 件。Q08(2 回目の検査が manifest を読み直すこと)は、待つ間に manifest が変わる場合のテストがないので残った。Q07(最新の承認をパスごとに選ぶこと)は、テストの org がどれも計画を 1 つしか持たないので残った。どちらも上の probe を足せば閉じる。断ること自体は変わらず、変わるのは拒否の文と次の手だけ
 - 100% でない枝: `checkTaskPlanApproved` の `default: return err`(2 回の読み取りのあいだにファイルが変わったときだけ通る)と、`checkSendApproval` の manifest の読み取りの失敗
@@ -123,9 +193,9 @@ cycle 1 と同じ隔離の仕方で、新しい一時の repo と台帳を使っ
 - 観察: 承認 B のあとでも、ファイルを A の版に戻せば、A を名指す TASK と implementer の spawn は通る。検査が見るのは「この命の承認のどれかと合うこと」(AC5、AC7)で、それが最新の承認かどうかは見ない。雛形の手順 5 は「最後に承認された digest」を使うよう言い、cycle 2 の直しは拒否の案内をそれに合わせた。A を名指す TASK そのものは断らない。計画の範囲のとおりなので、記録だけにする
 - cycle 1 の Test gaps のうち、`recordApprovals` の途中で追記が失敗する枝、`Approve` の 3 つのエラーの枝、本物のモデルの leader の手順、本物の agmsg での DECISION の受け渡し、別の herdr サーバーと pane の id が重なる場合、古い版の ralph で立てた org の更新の流れは、cycle 2 でも変わらない(付録を参照)
 
-## Verdict
+### cycle 2 の 1 回目の判定
 
-- Verdict: pass
+- cycle 2 の 1 回目の判定: pass
 - Pass: `./scripts/run-test.sh` は rc 0(shell 40 本、PASS の行 4,081、Go 8 パッケージ)。`go test ./... -count=1` は top-level 1,502 本が PASS で 0 fail、cycle 1 のテストは 1 本も消えていない。`-race`(org と cli)も 0 fail で、`DATA RACE` は 0 件。cycle 2 の mutant 16 件のうち 14 件が red で、cycle 1 の生き残り 4 件はどれも足したテストで落ちた。生き残った 2 件(Q07、Q08)はどちらも probe で閉じられる穴で、断ることは変わらない。実機では (f)〜(i) がすべて期待どおりで、片づけのあとに scratch のプロセスは残っていない
 - Fail: 0
 - Blocked: なし
