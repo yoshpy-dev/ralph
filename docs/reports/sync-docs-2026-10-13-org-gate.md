@@ -183,3 +183,66 @@ C3-1 と C3-2 は、self-review cycle 3 が cycle 2 の行(`:231`)の (j)・(k) 
 - walkthrough: 見出しの数の置き場所(`:5`、`:6`)に未置換の目印は残らない。32 commits は `git rev-list --count 1bddc871..HEAD` の 31 にこの commit の 1 を足した数、46 files、+36404/-214、報告・evidence・insight を除いた 29 files、+5535/-214 は、この report の最終版を含む作業ツリーと `1bddc871` の `git diff --shortstat`(この commit は新しいファイルを足さない)
 - `./scripts/run-verify.sh`(full): rc 0、`==> All verifiers passed.`。tech-debt の plan 参照の検査(`tech-debt README plan references`)は OK、`check-sync.sh` は `PASS: all files in sync.`、`check-skill-sync.sh` は 13 skill、shell の test は `FAIL: [1-9]` の行が 0 件、golang の pack は `gofmt: ok`、`0 issues.`、`go test` は 8 パッケージがすべて ok(`internal/cli` 133.4 s、`internal/org` 65.8 s、ほかは `(cached)`)、branch の secret scan は `scanned 1bddc871..b72ddcce against origin/main: clean`。この 1 行を埋める前の tree で打った。run のあとに変えたのは、この節の目印の置き換えだけ(行数は変わらない)。wrapper が書いた `docs/evidence/verify-2026-10-13-145601.log` は gitignore の対象で、コミットしていない
 - `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない
+
+## Cycle 4
+
+- Date: 2026-10-14(JST)
+- Plan: `docs/plans/archive/2026-10-13-org-gate.md`(archive 済みで、この run は編集していない。`./scripts/plan-visual.sh digest` は `69f088275e54` で、`- Approved:` の行と同じ)
+- Pipeline cycle: 4(cross-review cycle 3 の #1 を直すために、上限を 4 に上げて回した。`--cycle 4` を明示して付けた。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)。run 開始時の HEAD は `6f557f14`(run 開始時の値で、この cycle の commit の SHA ではない)。cycle 3 の sync-docs の内容は `09baf8eb`
+- cycle 3 の sync-docs のあとに入ったもの: `b9a95f05`(cross-review cycle 3 の triage、ACTION_REQUIRED 1 件)、`f1b0352e`(reviewer のレポートのコミットを rebase の前に動かした。`leader.md` の手順 9・10、`prompts_test.go`、`/org` skill の 4 面)、`31ae9f7d`(self-review cycle 4、LOW 3 件の C4-1 から C4-3)、`1e4a2fa4`(verify cycle 4、pass、C4-D1 から C4-D3)、`6f557f14`(test cycle 4、pass。skill の締めの順を読むテストがなく、mutant E が生き残った)
+- 項目の番号: C4-1 から C4-3 は self-review cycle 4、C4-D1 から C4-D3 は verify cycle 4 の「Documentation drift(cycle 4)」の表、E と R5 は test cycle 4 の「Mutation(cycle 4)」と「git の probe(cycle 4)」の番号
+
+### Summary
+
+f1b0352e は、reviewer が通したあとの順を「rebase → report と reviewer のレポートのコミット」から「reviewer のレポートのコミット → rebase → report だけのコミット」に変えた。この順を並べて書く文書のうち、合っていなかったのは README の gate の段落、walkthrough、tech-debt の行(C4-1 から C4-3 がない)の 3 つで、verify cycle 4 が挙げた C4-D1 から C4-D3 をこの run で閉じた。leader の雛形と skill の 4 面は f1b0352e 自身が同じ順に直していて、ほかの文書(quality-gates の 2 面、AGENTS.md、仕様の注、`--help`、skill の動詞の表)は順を書かないか、状態として書くので合っていた。
+
+変えたのは README の 1 文、walkthrough、tech-debt の 1 行、insight event の 1 行で、Go のコード、テスト、`--help` の文字列、leader と reviewer の雛形、skill、`scripts/`、AGENTS.md、quality-gates、仕様、計画、ほかの報告は触っていない。
+
+### Changes made
+
+| File | D | Change |
+|------|---|--------|
+| `README.md:260`(`ralph org gate` の段落の 2 文目) | C4-D2 | 「the leader fetches and rebases the branch on the default branch, commits everything, and runs it」を「the leader commits the reviewer's reports, fetches and rebases the branch on the default branch, commits the org report and the plan's archive, and runs it」にした。reviewer が通したあとの動作を順に並べる文なので、最初の動作を reviewer のレポートのコミットにし、「commits everything」を report と archive の 2 つに分けた。ほかの文は変えていない。`README.md:252` の要約(「The leader rebases the branch on the default branch, runs `ralph org gate` ...」)はコミットに触れないので、ずれに数えず、変えていない |
+| `docs/reports/walkthrough-2026-10-13-org-gate.md:5`・`:6` | C4-D1 | commit・file・行数を、cycle 4 の sync-docs の commit を含めた数に替えた(38 commits、46 files、+30459/-218。報告・evidence・insight を除くと 29 files、+5624/-218)。書いた時点の数(25 commits、45 files)は残し、増えた理由に cycle 4 の直し f1b0352e を足した。evidence の行数は「約 3 万行」から「約 2 万 3 千行」にした(`git diff --shortstat 1bddc871 -- docs/evidence` が 23034 行) |
+| 同 `:45`・`:47`・`:48`(節 6) | C4-D1 | 見出しの commit の列に f1b0352e を足した。`:47` は雛形の順を「reviewer のレポートのコミット(`git status --porcelain` が空かを確かめる。残りは implementer に TASK でコミットを頼むか BLOCKED)→ fetch と rebase → `ralph org report` を打って report だけをコミット → 計画の archive を別のコミット → ...」に替えた。`:48` に項目を 1 つ足した: 順を変えた理由(gate をやり直す通過で、コミット済みのレポートを reviewer に書き換えられると、`git rebase` が `cannot rebase: You have unstaged changes` で断られ、`git rebase --abort` も効かない)、計画の Scope と AC8 は逆の順で書いてあり、計画は archive 済みで書き換えないので意図したずれであること、skill の 4 面も同じ順にしたこと |
+| 同 `:51`・`:52` | C4-D1 | `:51` に、既存の assertion を書き換えた 3 本のうち、節の冒頭の文の 1 本を f1b0352e が書き直したこと、手順 9 の中の順序と手順 10 の否定の assertion が増えたこと、skill の締めの順を読むテストがないことを足した。`:52` の `/org` skill の行に「org の終わり方」の順を足した |
+| 同 `:57` と表(`:73`〜`:76`) | C4-D1 | 上限の経緯に、cycle 3 の cross-review が ACTION_REQUIRED 1 件を出して上限を 4 に上げた話を足した(`cycle-count.json` は 2 のまま)。cross-review cycle 4 は「このあとで、この表に結果はない」とした。表に 4 行足した: cross-review cycle 3(ACTION_REQUIRED 1 件、f1b0352e)、self-review cycle 4(LOW C4-1 から C4-3、tech-debt の (o) から (q))、verify cycle 4(C4-D1 から C4-D3)、test cycle 4(pass、mutant E が生き残り、tech-debt の (r)・(s))。cross-review cycle 4 の行は作っていない(結果がまだない) |
+| 同 `:80`(実機確認) | C4-D1 | cycle 4 の git だけの probe(verify の P1〜P3、test の R1〜R5)を足した。旧い順では `git rebase` が rc 1、始まっていない rebase への `git rebase --abort` が rc 128、先にレポートをコミットすれば rebase が rc 0 |
+| `docs/tech-debt/README.md:232` | C4-D3 | 「Small findings of org-gate cycle 3 ...」の行を伸ばし、題を「Small findings of org-gate cycles 3 and 4; none changes behavior (all LOW).」にした。(o) C4-1(手順 9 の最初の commit が空振りする場合と add の範囲)、(p) C4-2(skill の 2 か所の中途半端な折り返し)、(q) C4-3(テストの doc comment が AC8 を上書きしたと言わない。計画のパスが古い引用 8 か所の 1 つ)、(r) 締めの順を読むテストがない(mutant E)、(s) 手順 9 の `git commit` に commit するものがないときの扱いを雛形が書かず、本物の leader の動きは未確認(R5)を足した。(j) から (n) と、列ごとの区切りは変えていない。(o) から (q) の本文は self-review cycle 4 の「Tech debt identified」の表の文を元にし、行番号は使わず、関数名・テスト名・文言で指した |
+| `docs/insights/events/2026-10-13-org-gate.jsonl` | - | `sync_docs` の event を 1 行足した(`--slug org-gate`、`--cycle 4`、pass)。既存のファイルへの追記 |
+| この report | - | `## Cycle 4` を追記 |
+
+### Surfaces checked for drift
+
+締めの順を述べる文を、`git grep` で `rebase`、`reviewer のレポート`、`reviewer's report`、`commits everything`、`rebase → report` を探して突き合わせた(`docs/evidence/`、`docs/reports/` の過去の記録、archive の計画は除いた)。
+
+| Surface | 結果 |
+|---------|------|
+| leader の雛形(`internal/org/prompts/leader.md` の手順 9・10)と `/org` skill の 4 面(「org の終わり方」の手順 1・2、「Leader 運用 2 経路」の手順 7 の文、「タスク終了時は必ず」の行、完了条件のチェックリスト) | 合う。f1b0352e が同じ順に直した。変更なし。skill の 4 面の `shasum -a 256` は 1 種類で、`./scripts/check-skill-sync.sh` は rc 0(13 skill)。skill の動詞の表の `gate` の行(`:181`)の「既定のブランチに rebase してすべてをコミットしたあと」は、gate を打つ時点の状態(rebase 済みで、すべてコミット済み)を言う文で、新しい順でも成り立つので変えていない(変えるなら 4 面を一緒に) |
+| `ralph org gate --help`(`internal/cli/org_gate.go` の「after it rebases the feature branch on the default branch and commits everything」) | 合う(verify cycle 4 の情報と同じ判断)。状態の記述で、順を約束していない。文字列は変えていない |
+| `docs/quality/quality-gates.md` と `templates/base/docs/quality/quality-gates.md`(「Quality pipeline gate」の行)、`AGENTS.md` の `internal/org/` の行(`:90`) | 変更なし。「on the rebased head」「on a feature org's rebased head」と拒否の条件だけを書き、締めの順を書かない |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-7 の 7b の注、`:73`) | 変更なし。「review のあとに report と計画の archive のコミットが増える」「計画の archive は report のコミットと別のコミットにし」は、新しい順でも成り立つ(reviewer のレポートのコミットも review のあと)。順を並べた文はない |
+| `docs/recipes/`、`.claude/rules/ralph/`、`docs/architecture/repo-map.md`、`docs/quality/definition-of-done.md` | 変更なし。`git grep -n rebase` で、org の締めの順を述べる行は 0 件 |
+| Go のコメントの `docs/plans/active/2026-10-13-org-gate` | 8 か所のまま。tech-debt の (q) に記録した。Go のファイルは触らない |
+| `prompts_test.go` の「cross-review cycle 3 #1 of org-gate」の comment 2 か所 | 変更なし(verify cycle 4 の情報と同じ)。cross-review cycle 4 が triage 報告の先頭の表を書き換えるなら、cycle 3 の表を `## Cycle 3` の節に移して 1 段落を足す(self-review cycle 4 の Follow-ups 2)。これは `/cross-review` の範囲 |
+| 過去の報告 | 編集していない(この report と walkthrough を除く)。verify cycle 4 の C4-D1 から C4-D3 の行は、そのときの記録として残す |
+
+### Left open
+
+- cross-review cycle 4 はこの commit のあとに走る。walkthrough の表には結果を書いていない。結果が出たら `/pr` の前に 1 行足す。triage 報告の先頭の表を書き換えるときは、cycle 3 の表を `## Cycle 3` の節に移し、`prompts_test.go` の 2 か所の「cross-review cycle 3 #1」がその節を指すことを 1 段落で言う(self-review cycle 4 の Follow-ups 2)
+- PR #225 の本文は、雛形の順(23 行目)を旧い順で書き、各報告の要約は cycle 2 で止まる(verify cycle 4 の情報の項目)。更新は `/pr` の範囲
+- tech-debt の (o) から (s) は、cycle 4 が上限(4 回)の最後なので直さない。直すなら (o) を先に、`leader.md`、skill の 4 面、`prompts_test.go` の手順 9 の行の検査を一緒に直す。(r) は、skill の「org の終わり方」を読む Go のテスト 1 本で閉じる
+- (s) の本物の leader の動き(commit が rc 1 で終わったとき止まるか)、手順 9 の枝(implementer の未コミットの変更の TASK、BLOCKED)を本物の leader が選べるか、Linux と codex の sandbox での git は未確認(verify cycle 4 と test cycle 4 の Coverage gaps と同じ)
+
+### Verification
+
+コミットの前に、worktree のルートで打った。
+
+- `./scripts/check-sync.sh`: rc 0、`IDENTICAL: 167`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`。root と template の写しは触っていない(README は写しのない root のファイル)ので、数は cycle 3 と同じ
+- `./scripts/check-skill-sync.sh`: rc 0、`13 skill(s) in lock-step`。skill の 4 面の `shasum -a 256` は 1 種類
+- `./scripts/check-template-purity.sh`: rc 0、`PASS: no meta-repo-specific references found in templates.`
+- `./scripts/plan-visual.sh digest docs/plans/archive/2026-10-13-org-gate.md`: `69f088275e54`(変わっていない)
+- tech-debt の行: HEAD と比べて変わったのは `:232` の 1 行だけで、ほかの行は 1 字も変わらない。`:232` は 5 列(`|` で分けた 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、`docs/plans/active/` は 0 件、plan のパスは `docs/plans/archive/2026-10-13-org-gate.md` の 1 つ、U+FFFD は 0 件(Python。スクリプトは scratchpad)
+- walkthrough: 見出しの数の置き場所(`:5`、`:6`)に未置換の目印は残らない。38 commits は `git rev-list --count 1bddc871..HEAD` の 37 にこの commit の 1 を足した数、46 files、+30459/-218、報告・evidence・insight を除いた 29 files、+5624/-218 は、この report の最終版を含む作業ツリーと `1bddc871` の `git diff --shortstat`(この commit は新しいファイルを足さない)
+- `./scripts/run-verify.sh`(full): rc 0、`==> All verifiers passed.`。tech-debt の plan 参照の検査(`tech-debt README plan references`)は OK、`check-sync.sh` は `PASS: all files in sync.`、`check-skill-sync.sh` は 13 skill、shell の test は `tests/` の 41 本で `FAIL: [1-9]` の行が 0 件、golang の pack は `gofmt: ok`、`0 issues.`、`go test` は 8 パッケージがすべて ok(`internal/cli` 140.3 s、`internal/org` 62.9 s、ほかは `(cached)`)、branch の secret scan は `scanned 1bddc871..6f557f14 against origin/main: clean`。この 1 行を埋める前の tree で打った。run のあとに変えたのは、この 1 行の置き換えだけ(行数は変わらない)。wrapper が書いた `docs/evidence/verify-2026-10-13-164451.log` は gitignore の対象で、コミットしていない
+- `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない

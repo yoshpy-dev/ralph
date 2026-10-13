@@ -2,8 +2,8 @@
 
 - Date: 2026-10-13
 - Plan: docs/plans/archive/2026-10-13-org-gate.md(f001bd4f で active から移した)
-- Branch: feat/org-gate(base 1bddc871。cycle 3 の sync-docs の commit を含めて 32 commits、46 files、+36404/-214。この walkthrough を書いた時点は 25 commits、45 files、+25324/-214 で、増えたのは cycle 3 の直し 1 commit と各段の記録)
-- 読む範囲: 差分の大半(約 3 万行)は `docs/evidence/` のテストの出力で、読むのは結果の表だけでよい(test の報告の各節が要約している)。報告・evidence・insight を除くと 29 files、+5535/-214 で、そのうちテストが `internal/org/gate_test.go`(+1491)、`internal/cli/org_gate_test.go`(+909)、`tests/test-run-verify-concurrency.sh`(+498)など。ほかに `/org` skill の 4 面、leader と reviewer の雛形、`run-verify.sh` の 2 面、仕様の注、quality-gates、tech-debt
+- Branch: feat/org-gate(base 1bddc871。cycle 4 の sync-docs の commit を含めて 38 commits、46 files、+30459/-218。この walkthrough を書いた時点は 25 commits、45 files、+25324/-214 で、増えたのは cycle 3 と cycle 4 の直し 2 commit(8b681dc3、f1b0352e)と各段の記録)
+- 読む範囲: 差分の大半(約 2 万 3 千行)は `docs/evidence/` のテストの出力で、読むのは結果の表だけでよい(test の報告の各節が要約している)。報告・evidence・insight を除くと 29 files、+5624/-218 で、そのうちテストが `internal/org/gate_test.go`(+1491)、`internal/cli/org_gate_test.go`(+909)、`tests/test-run-verify-concurrency.sh`(+498)など。ほかに `/org` skill の 4 面、leader と reviewer の雛形、`run-verify.sh` の 2 面、仕様の注、quality-gates、tech-debt
 
 新しいファイルは `internal/org/gate.go`(gate の確認、base の決め方、記録)、`internal/org/gate_run.go`(スクリプトの実行、出力の buffer、環境)、`internal/cli/org_gate.go`(その CLI)と、それぞれのテスト。次の順に読むと、依存の向きに沿って追える。
 
@@ -42,18 +42,19 @@
 - `.harness/state/verify-scope` は最後に `.$$.tmp` から `mv` で写して残す(読む側のため)
 - テストは 37 件。古い `run-verify.sh` に当てると、kill されたブロックと重なった実行で終了コードが 0 になる 3 件が落ちる
 
-## 6. 雛形と文書(2e3e95e3、e0adb359、6716a028、a1590e44)
+## 6. 雛形と文書(2e3e95e3、e0adb359、6716a028、a1590e44、f1b0352e)
 
-- `internal/org/prompts/leader.md` の「機能ごとの org」: reviewer が通したあとの順を、fetch と rebase → `ralph org report` と reviewer の報告のコミット → 計画の archive を別のコミット(SHA を控える)→ secret scan → gate をバックグラウンドで走らせて `.harness/state/gate-{{ORG_ID}}.out` から読む → 座席を止める → HEAD が gate の `HEAD:` と同じことを確かめて push → PR → RESULT に `HEAD:` と `BASE:` → worktree を残す → disband にした。archive のあとに implementer へ TASK を送るときは、rebase の途中なら `git rebase --abort`、続けて `git revert --no-edit <archive>`(per-plan の承認の記録は元のパスを指すため。計画の B11)
+- `internal/org/prompts/leader.md` の「機能ごとの org」: reviewer が通したあとの順を、reviewer のレポートのコミット(`git status --porcelain` が空かを確かめる。残りは implementer に TASK でコミットを頼むか、BLOCKED)→ fetch と rebase → `ralph org report` を打って report だけをコミット → 計画の archive を別のコミット(SHA を控える)→ secret scan → gate をバックグラウンドで走らせて `.harness/state/gate-{{ORG_ID}}.out` から読む → 座席を止める → HEAD が gate の `HEAD:` と同じことを確かめて push → PR → RESULT に `HEAD:` と `BASE:` → worktree を残す → disband にした。archive のあとに implementer へ TASK を送るときは、rebase の途中なら `git rebase --abort`、続けて `git revert --no-edit <archive>`(per-plan の承認の記録は元のパスを指すため。計画の B11)
+- reviewer のレポートのコミットを rebase の前に置いたのは f1b0352e(cross-review cycle 3 の #1)。gate をやり直す通過では、reviewer がコミット済みのレポートを書き換えるので、既定のブランチが進んでいると `git rebase` が `cannot rebase: You have unstaged changes` で断られる。rebase は始まっていないので、雛形の衝突の手当て(`git rebase --abort`)も効かない(verify cycle 4 と test cycle 4 が git だけで再現し、先にコミットすれば rebase が通ることを確かめた)。計画の Scope と AC8 は fetch と rebase を先に書いていて、計画は archive 済みで書き換えないので、この順は計画からの意図したずれ。`/org` skill の 4 面(「org の終わり方」の手順 1・2、要約の文、順を書いた行、チェックリスト)も同じ順にした
 - `internal/org/approval_enforce_test.go` の `TestOrgSend_ApprovalCheck_PlanArchivedAndRestored` が、archive で断られ、revert で通ることを固定する
 - `internal/org/prompts/reviewer.md`: 通す RESULT に `HEAD:` と `BASE:`(既定のブランチは origin/HEAD、なければ main、master)。ralph は読まない
-- `TestRenderRolePrompt_Leader_FeatureOrgProcedure` ほか `internal/org/prompts_test.go` が手順を固定する。既存の assertion で書き換えたのは 3 本(手順の番号が変わった 2 本、`--state-dir` を付けるコマンドに `gate` を足した 1 本)
-- `/org` skill の 4 面(動詞表の `gate`、機能ごとの org の手順)、`docs/quality/quality-gates.md` と template の写し、仕様 FR-7 の「7 段目の後半(7b)で決めたこと」、AGENTS.md、README
+- `TestRenderRolePrompt_Leader_FeatureOrgProcedure` ほか `internal/org/prompts_test.go` が手順を固定する。既存の assertion で書き換えたのは 3 本(手順の番号が変わった 2 本、`--state-dir` を付けるコマンドに `gate` を足した 1 本。f1b0352e は、この 3 本のうち節の冒頭の文(予約の外に書く手順)の 1 本を、「9 の reviewer のレポート、10 の report と計画の移動、12 の計画の戻し」に書き直した)。f1b0352e は手順 9 の中の順序と手順 10 の否定の assertion も足した。skill の締めの順を読むテストはない(test cycle 4 の生き残り E)
+- `/org` skill の 4 面(動詞表の `gate`、機能ごとの org の手順、「org の終わり方」の順)、`docs/quality/quality-gates.md` と template の写し、仕様 FR-7 の「7 段目の後半(7b)で決めたこと」、AGENTS.md、README
 - `docs/tech-debt/README.md` に 11 行を足し、「FR-7 の品質のゲートは雛形の指示で、hook で強制していない」の行を書き換えた
 
 ## パイプラインの往復
 
-上限は既定の 2 で、cycle 2 の cross-review は指摘 0 だった。そのあと PR #225 の CI が落ちたので、上限を 3 に上げて cycle 3 を回した(`cycle-count.json` は 2 のまま)。cycle 3 の cross-review はこのあとで、この表に結果はない。
+上限は既定の 2 で、cycle 2 の cross-review は指摘 0 だった。そのあと PR #225 の CI が落ちたので、上限を 3 に上げて cycle 3 を回した。cycle 3 の cross-review が ACTION_REQUIRED 1 件を出したので、上限を 4 に上げて cycle 4 を回した(`cycle-count.json` は 2 のまま)。cycle 4 の cross-review はこのあとで、この表に結果はない。
 
 | 回 | 見つかったもの | 直した commit |
 |---|---|---|
@@ -69,7 +70,11 @@
 | self-review cycle 3 | LOW C3-1(`gateSignalContext` の doc に標準の関数へ戻す合図がない)、C3-2(テスト名が後の信号の半分しか言わない) | 直さない。tech-debt の行の (j)・(k) |
 | verify cycle 3 | 文書のずれ C3-D1〜C3-D4(この walkthrough 2 件、tech-debt 2 件) | cycle 3 の sync-docs |
 | test cycle 3 | なし(go1.25.8 と go1.26.0 で pass)。mutation の生き残り M_d2・M_j。M_a は go1.26.0 でだけ生き残る | 直さない。tech-debt の行の (l)〜(n) |
+| cross-review cycle 3 | ACTION_REQUIRED 1 件(gate をやり直すとき、reviewer がコミット済みのレポートを書き換え、既定のブランチが進んでいると `git rebase` が `cannot rebase: You have unstaged changes` で断られる。雛形の `git rebase --abort` も効かない) | f1b0352e(reviewer のレポートのコミットを手順 9 の先頭に動かし、rebase の前に作業ツリーを空にする。skill の 4 面と `prompts_test.go` も) |
+| self-review cycle 4 | LOW C4-1〜C4-3(手順 9 の最初のコミットが空振りする場合と add の範囲、skill の 2 か所の折り返し、テストの doc comment が AC8 を上書きしたと言わない) | 直さない。tech-debt の行の (o)〜(q) |
+| verify cycle 4 | 文書のずれ C4-D1〜C4-D3(この walkthrough、README の gate の段落の順、tech-debt に C4-1〜C4-3 がない) | cycle 4 の sync-docs |
+| test cycle 4 | なし(go1.25.8 と go1.26.0 で pass)。mutation は雛形 13 件が red で、skill の 4 面を旧い順に戻す E が生き残った(締めの順を読むテストがない) | 直さない。tech-debt の行の (r)・(s) |
 
 ## 実機確認
 
-一時の repo と台帳で、HEAD からビルドした binary を打った(verify の報告、`docs/evidence/verify-2026-10-13-org-gate-probe.txt`)。cycle 1 は拒否と通過と失敗の 9 通り、cycle 2 は manifest のロックを別のプロセスが持つ間の SIGTERM と SIGHUP(HEAD は 0.02 秒で rc 1、manifest は変わらない。修正前の 789c8864 は、ロックが空いたあとに `GATE: pass` と rc 0 で `gate_passed` を書いた)、cycle 3 は go1.25.8 で build した HEAD の binary への 7 通りの入力(ロックの待ちと走行中のスクリプトへの SIGINT・SIGTERM・SIGHUP、中断なしの通過、2 つ目の SIGINT)。中断はどれも rc 1 で信号の名前を出し、manifest は変わらず、2 つ目の SIGINT でも ralph は終わらない。修正前の f001bd4f の binary は「context canceled」を出した。herdr と本物のモデルの座席は起動していない。
+一時の repo と台帳で、HEAD からビルドした binary を打った(verify の報告、`docs/evidence/verify-2026-10-13-org-gate-probe.txt`)。cycle 1 は拒否と通過と失敗の 9 通り、cycle 2 は manifest のロックを別のプロセスが持つ間の SIGTERM と SIGHUP(HEAD は 0.02 秒で rc 1、manifest は変わらない。修正前の 789c8864 は、ロックが空いたあとに `GATE: pass` と rc 0 で `gate_passed` を書いた)、cycle 3 は go1.25.8 で build した HEAD の binary への 7 通りの入力(ロックの待ちと走行中のスクリプトへの SIGINT・SIGTERM・SIGHUP、中断なしの通過、2 つ目の SIGINT)。中断はどれも rc 1 で信号の名前を出し、manifest は変わらず、2 つ目の SIGINT でも ralph は終わらない。修正前の f001bd4f の binary は「context canceled」を出した。cycle 4 は ralph の binary を使わず、git 2.49.0 だけで手順 9 の順を打った(verify の P1〜P3、test の R1〜R5、`docs/evidence/verify-2026-10-13-org-gate-probe.txt` と `docs/evidence/test-2026-10-13-org-gate-mutation.txt` の「Cycle 4」)。gate をやり直す通過で旧い順だと `git rebase` が rc 1 で断られ、始まっていない rebase への `git rebase --abort` は rc 128。先にレポートをコミットすれば porcelain は空になり、rebase は rc 0。herdr と本物のモデルの座席は起動していない。
