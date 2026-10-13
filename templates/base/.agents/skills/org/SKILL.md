@@ -656,8 +656,11 @@ per-plan の org では、次の検査がかかる。
   `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行あり、その計画が下の
   照合を通るときだけ。そうでなければ終了コード 1 で断られ、manifest に何も
   書かず、pane にも何も送らない。`--raw` の TASK も同じようにヘッダを読み、
-  `--dry-run` も断る。reviewer への TASK と、TASK 以外の TYPE は承認なしで
-  送れる(承認の前に計画のレビューを頼める)。
+  `--dry-run` も断る。send は宛先の座席の手が空くのを待ち、待ったあと、
+  打つ前にもう一度照合する(`--dry-run` は待たないので 1 回だけ)。待つ間に
+  計画が変わっていれば、打たずに同じように断り、何も記録しない。
+  reviewer への TASK と、TASK 以外の TYPE は承認なしで送れる(承認の前に
+  計画のレビューを頼める)。
 - 照合: 台帳に、そのパスと digest の `plan_approved` がこの org の今の命に
   ある。今のファイルの digest(`scripts/plan-visual.sh digest` と同じ値)が
   その digest と一致する。最初の `## ` の見出しより前の、最初の `- Status:` が
@@ -680,11 +683,12 @@ per-plan の org では、次の検査がかかる。
     digest か打ち間違い)、今の digest がその計画の最新の承認で照合を通る:
     拒否の文がその digest を書くので、ヘッダを
     `PLAN: <path> sha256:<その digest>` に直して送り直す。
-  - TASK の `PLAN:` が承認し直す前の digest で、今の digest が最新の承認なのに
-    先頭の 2 行がまだ古い(Draft と TBD のまま、または前の digest のまま):
-    拒否の文は先頭の 2 行のものになり、今の digest を書くので、2 行をその
-    digest で書いてコミットする。同じ TASK を送り直すと前の項目の拒否になる
-    ので、`PLAN:` をその digest に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest か、承認が 1 回だけの計画に
+    打ち間違えた digest で、今の digest が最新の承認なのに先頭の 2 行がまだ
+    古い(Draft と TBD のまま、または前の digest のまま): 拒否の文は先頭の
+    2 行のものになり、今の digest を書くので、2 行をその digest で書いて
+    コミットする。同じ TASK を送り直すと前の項目の拒否になるので、`PLAN:` を
+    その digest に直して送り直す。
   - TASK の `PLAN:` が承認し直す前の digest か打ち間違いで、今のファイルは
     最新の承認の版だが、承認のあとに digest が読まない場所(Progress
     checklist のメモ、`- Branch:` の行など)が変わった: 拒否の文は今の digest

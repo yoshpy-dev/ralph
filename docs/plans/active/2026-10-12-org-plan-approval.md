@@ -94,20 +94,20 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 
 ## Acceptance criteria
 
-- [ ] AC1: `[org.approval].mode` は既定で `per-plan`、`split` も受け付け、それ以外の値と空文字は `Load()` のエラーになる。節がなければ既定のまま。`Default()`・`templates/base/ralph.toml`・`scripts/ralph-config.sh` の値が一致し、`defaults_sync_test.go` が固定する。設定を読むのは `start --plan` だけ(AC13)
-- [ ] AC2: `ralph org approve <ID>` は、PLAN のヘッダの digest が今のファイルの digest と一致する QUESTION の件について、manifest に `plan_approved`(パス、digest、件の ID、打った側の情報)を 1 行書き、件を resolve し、`approved <ID> (...)` と leader への DECISION の打ち方を出して終了コード 0 で終わる。計画のファイルは書き換えない
-- [ ] AC3: approve は、知らない ID、resolved の件、QUESTION でない件、`PLAN:` がない・2 行ある・形が違う件、結びつきのない・不完全な org の件、worktree の外のパス(絶対パス、`..`、worktree の外を指す symlink)、ない・普通のファイルでないパス、ヘッダの digest と今のファイルの digest が違う件を、理由を添えて断る。複数の ID の 1 つでも断られたら、どの件も記録せず resolve もせず終了コード 1
-- [ ] AC4: 環境の `HERDR_PANE_ID` が台帳の active な座席の pane と同じとき、approve は何も書かずに終了コード 1 で断る。`HERDR_PANE_ID` がないとき、どの座席の pane とも違うときは通る
-- [ ] AC5: per-plan で結びつきのある org の implementer への TASK は、`PLAN:` がない、承認の記録がない、承認のあとに計画が変わった(digest が違う)、ファイルの `- Status:` が Approved でない、`- Approved:` の digest が違う、のどれでも、何も記録せず herdr も呼ばずに終了コード 1 で断られる(`--raw` と `--dry-run` も)。すべて揃えば今までどおり送れる。承認し直したあとは、新しい digest の `PLAN:` で送れる
-- [ ] AC6: 同じ org の reviewer への TASK、TASK 以外の TYPE、結びつきのない org の TASK、split の org の implementer への TASK は、承認がなくても今までどおり送れる(仕様の受け入れ条件 108 行)
-- [ ] AC7: per-plan で結びつきのある org では、判定を通る承認がないと role `implementer` の spawn は `rejected` を書いて断られる(`--dry-run` も同じ答え)。承認があれば進む。split では承認なしで進む
-- [ ] AC8: 結びつきのある org で active な leader の座席がないとき、leader 以外の spawn は mode を問わず `rejected` を書いて断られる。leader の spawn(`start --plan`)と、結びつきのない org の spawn は今までどおり
-- [ ] AC9: 前の命の承認は効かない。org を disband して同じ org_id で立て直すと、前の `plan_approved` では TASK も spawn も通らない
-- [ ] AC10: `start --plan` が leader に渡すタスクに `- 承認方式:` の行があり、leader の雛形は per-plan の手順(計画のコミット、図解ページ、`PLAN:` と `VISUAL:` の QUESTION、DECISION 待ち、2 行のコミット、implementer の spawn、TASK の `PLAN:`)と split の手順、承認の検査で断られたときに BLOCKED を escalate することを書き、`prompts_test.go` がその語句を固定する。今の固定の語句は崩れない
-- [ ] AC11: org 層と CLI の既存のテストは、書き換えずに通る(承認の検査は結びつきのある per-plan の org だけに効くので、既存の機能の org のテストで implementer を spawn・TASK するものは、必要なら承認の記録を足す。書き換えた本数と理由を Progress checklist に書く)
-- [ ] AC12: 文書(skill の 4 面、agent-messaging の 2 面、README、仕様の注、AGENTS.md、tech-debt)が新しい動きに合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
-- [ ] AC13: `start --plan` は承認方式を結びつきの `approval=` に記録し、`--config` がなければ台帳の main worktree の `ralph.toml` の値を使う。per-plan で立てた org の未承認の TASK は、send を打つ側の `./ralph.toml`(feature worktree やサブディレクトリ)と `--config` が `split` でも断られる。split で立てた org は、打つ側の設定が `per-plan` でも承認なしで送れる。`approval=` のない古い記録の org は split として扱い、値の読めない記録(2 つある、知らない値)の org は承認を求める
-- [ ] AC14: approve のあとに計画の `## Progress checklist` の節に行を足す、`- Branch:` の行を変える、見出しの後ろに `- Status:` の行を足す、のどれでも、implementer への TASK と spawn は断られる(`PlanDigest` は変わらない)。先頭の 2 行を書く、checkbox に印を付ける、だけなら通る
+- [x] AC1: `[org.approval].mode` は既定で `per-plan`、`split` も受け付け、それ以外の値と空文字は `Load()` のエラーになる。節がなければ既定のまま。`Default()`・`templates/base/ralph.toml`・`scripts/ralph-config.sh` の値が一致し、`defaults_sync_test.go` が固定する。設定を読むのは `start --plan` だけ(AC13)
+- [x] AC2: `ralph org approve <ID>` は、PLAN のヘッダの digest が今のファイルの digest と一致する QUESTION の件について、manifest に `plan_approved`(パス、digest、件の ID、打った側の情報)を 1 行書き、件を resolve し、`approved <ID> (...)` と leader への DECISION の打ち方を出して終了コード 0 で終わる。計画のファイルは書き換えない
+- [x] AC3: approve は、知らない ID、resolved の件、QUESTION でない件、`PLAN:` がない・2 行ある・形が違う件、結びつきのない・不完全な org の件、worktree の外のパス(絶対パス、`..`、worktree の外を指す symlink)、ない・普通のファイルでないパス、ヘッダの digest と今のファイルの digest が違う件を、理由を添えて断る。複数の ID の 1 つでも断られたら、どの件も記録せず resolve もせず終了コード 1
+- [x] AC4: 環境の `HERDR_PANE_ID` が台帳の active な座席の pane と同じとき、approve は何も書かずに終了コード 1 で断る。`HERDR_PANE_ID` がないとき、どの座席の pane とも違うときは通る
+- [x] AC5: per-plan で結びつきのある org の implementer への TASK は、`PLAN:` がない、承認の記録がない、承認のあとに計画が変わった(digest が違う)、ファイルの `- Status:` が Approved でない、`- Approved:` の digest が違う、のどれでも、何も記録せず herdr も呼ばずに終了コード 1 で断られる(`--raw` と `--dry-run` も)。すべて揃えば今までどおり送れる。承認し直したあとは、新しい digest の `PLAN:` で送れる
+- [x] AC6: 同じ org の reviewer への TASK、TASK 以外の TYPE、結びつきのない org の TASK、split の org の implementer への TASK は、承認がなくても今までどおり送れる(仕様の受け入れ条件 108 行)
+- [x] AC7: per-plan で結びつきのある org では、判定を通る承認がないと role `implementer` の spawn は `rejected` を書いて断られる(`--dry-run` も同じ答え)。承認があれば進む。split では承認なしで進む
+- [x] AC8: 結びつきのある org で active な leader の座席がないとき、leader 以外の spawn は mode を問わず `rejected` を書いて断られる。leader の spawn(`start --plan`)と、結びつきのない org の spawn は今までどおり
+- [x] AC9: 前の命の承認は効かない。org を disband して同じ org_id で立て直すと、前の `plan_approved` では TASK も spawn も通らない
+- [x] AC10: `start --plan` が leader に渡すタスクに `- 承認方式:` の行があり、leader の雛形は per-plan の手順(計画のコミット、図解ページ、`PLAN:` と `VISUAL:` の QUESTION、DECISION 待ち、2 行のコミット、implementer の spawn、TASK の `PLAN:`)と split の手順、承認の検査で断られたときに BLOCKED を escalate することを書き、`prompts_test.go` がその語句を固定する。今の固定の語句は崩れない
+- [x] AC11: org 層と CLI の既存のテストは、書き換えずに通る(承認の検査は結びつきのある per-plan の org だけに効くので、既存の機能の org のテストで implementer を spawn・TASK するものは、必要なら承認の記録を足す。書き換えた本数と理由を Progress checklist に書く)
+- [x] AC12: 文書(skill の 4 面、agent-messaging の 2 面、README、仕様の注、AGENTS.md、tech-debt)が新しい動きに合い、`scripts/check-sync.sh` と `scripts/check-skill-sync.sh` が通る
+- [x] AC13: `start --plan` は承認方式を結びつきの `approval=` に記録し、`--config` がなければ台帳の main worktree の `ralph.toml` の値を使う。per-plan で立てた org の未承認の TASK は、send を打つ側の `./ralph.toml`(feature worktree やサブディレクトリ)と `--config` が `split` でも断られる。split で立てた org は、打つ側の設定が `per-plan` でも承認なしで送れる。`approval=` のない古い記録の org は split として扱い、値の読めない記録(2 つある、知らない値)の org は承認を求める
+- [x] AC14: approve のあとに計画の `## Progress checklist` の節に行を足す、`- Branch:` の行を変える、見出しの後ろに `- Status:` の行を足す、のどれでも、implementer への TASK と spawn は断られる(`PlanDigest` は変わらない)。先頭の 2 行を書く、checkbox に印を付ける、だけなら通る
 
 ## Implementation outline
 
@@ -161,9 +161,9 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
 
 ### Notes
@@ -192,3 +192,6 @@ critical forks は consult(consult-plan-stage7)に聞いて自分で選んだ(�
 - 2026-10-13: 3 回目の self-review では、止める条件を HIGH 以上にする(consult の判定)。MEDIUM 以下は tech-debt の行に書いて先へ進む
 - 2026-10-13: sync-docs の cycle 1(報告は `docs/reports/sync-docs-2026-10-13-org-plan-approval.md`)。verify の D1(`/org` skill の `approve` の行の括弧、4 面)と D3(仕様 FR-7 の注)を文書だけで直した。D2(`--help` の文字列)は cycle 2 の直しで扱い、D4・D5 は記録だけ。AC と checklist の印は cycle 2 で付ける
 - 2026-10-13: cross-review の cycle 1(`docs/reports/cross-review-triage-org-plan-approval.md`)は ACTION_REQUIRED 2 件。cycle 2 の直しは 3 コミット。3563129d は、send が宛先の手が空くのを待ったあと、打つ前に承認を確かめ直すようにした(#1)。古い `PLAN:` の案内は、ファイルの今の digest がその path の最新の承認のときだけ移すようにし(#2、N7)、今の digest の PlanChanged はその拒否を返す(N6)。tech-debt の 218 行と 219 行は消した。2d238702 は、/test の mutation で生き残った R03〜R05 と R11 を閉じるテスト 3 本を足した。5e809ac6 は、spawn と send の `--help` に承認の拒否を書いた(verify の D2)。計画の本文は変えていない(digest 951cf09bd7bc のまま)
+- 2026-10-13: cycle 2 の記録。edee787f は、self-review cycle 2 の 1 回目の LOW のうち C2-1(コメントの指し先に cycle を付ける)・C2-3・C2-4 を直し、C2-5 は tech-debt の N4 の行に 1 文足した(コードの動きは変えていない)。self-review cycle 2 は 3 回で、1 回目(48333f62、LOW 5)、2 回目(edee787f、LOW 4)、3 回目(6a7d35b0、LOW 6)とも CRITICAL・HIGH・MEDIUM は 0、Merge: yes。/test cycle 2 の 1 回目(ffd6b3ec、報告は 1b4ac934)は mutation 16 件のうち 14 件が red で、生き残りの Q07・Q08 は 6a7d35b0 のテスト 2 本(`TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain`、`TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath`)で閉じた。2 回目の /test(7839a71e の時点)は pass で、Q07・Q08 とも red、失敗は 0。/verify は cycle 2 で 2 回(8fe7ba73 と 9ccc830c の時点)、どちらも pass
+- 2026-10-13: Scope(40 行)の「断ったときは manifest に何も書かず、herdr も agmsg も呼ばない」と AC5 の「herdr も呼ばずに」は、呼んだ時点で拒否の理由がある TASK(1 回目の検査で断られるもの)について成り立つ、と読む。send が宛先の座席の手が空くのを待ったあとの 2 回目の検査(3563129d)で断られる TASK は、herdr の `agent wait` を 1 回呼んだあとになる。この場合も、打たず、記録しない(verify cycle 2 の D9)
+- 2026-10-13: sync-docs の cycle 2(報告は `docs/reports/sync-docs-2026-10-13-org-plan-approval.md`)。verify の D6〜D12 を文書だけで直した。D6 は template の quality-gates の句(C2-2)、D7 は `/org` skill の 4 面(古い `PLAN:` の案内の項目に、承認が 1 回だけの計画への打ち間違いを加え、send の項目に待ったあとの確かめ直しを足した)、D8 は仕様 FR-7 の注に 1 文、D10・D11 は tech-debt の README(N4 の行の 4 列への追記と、C2-6・C2-7・C2-10 の新しい 1 行)、D9・D12 はこのメモ。AC1〜AC14 と checklist の 3 項目(Review・Verification・Test の artifact)に印を付けた。PR created は付けない。計画の本文は変えていない(digest 951cf09bd7bc のまま)
