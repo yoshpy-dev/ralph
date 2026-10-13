@@ -6,7 +6,7 @@
 #   the test copies $PROJECT_ROOT/scripts/run-verify.sh, so running it from rv-<ID>/ tests the mutant. rv-X0 is the unchanged copy (control).
 
 ======== Go mutant H1 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/H1-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/H1-gate.go"}}
 572c572
 < 	if head != t.head {
 ---
@@ -22,7 +22,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	53.021s
     org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
 
 ======== Go mutant H2 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/H2-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/H2-gate.go"}}
 289c289
 < 	if res.Reason == "" {
 ---
@@ -42,7 +42,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	45.507s
     org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
 
 ======== Go mutant E1 (gate_run.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E1-gate_run.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E1-gate_run.go"}}
 49c49
 < var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
 ---
@@ -61,7 +61,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.530s
     org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
 
 ======== Go mutant E2 (gate_run.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E2-gate_run.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E2-gate_run.go"}}
 67c67
 < 		if !stripped {
 ---
@@ -78,7 +78,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	21.196s
     org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
 
 ======== Go mutant E3 (gate_run.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E3-gate_run.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E3-gate_run.go"}}
 71c71
 < 	return append(out, gateScopeEnv)
 ---
@@ -97,7 +97,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.332s
     org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
 
 ======== Go mutant E4 (gate_run.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E4-gate_run.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E4-gate_run.go"}}
 49c49
 < var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
 ---
@@ -112,7 +112,7 @@ ok  	github.com/yoshpy-dev/ralph/internal/cli	20.109s
     gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "HARNESS_VERIFY_MODE=test" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
 
 ======== Go mutant A1 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/A1-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/A1-gate.go"}}
 519c519
 < 	case r.code == 0:
 ---
@@ -132,7 +132,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.091s
     org_gate_test.go:590: gate after origin/main moved = <nil>; want the rebase refusal
 
 ======== Go mutant D1 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/D1-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/D1-gate.go"}}
 649c649
 < 	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=all")
 ---
@@ -156,7 +156,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.667s
     org_gate_test.go:453: gate = <nil>; want a refusal starting "org: gate: " (stdout: GATE: pass
 
 ======== Go mutant R1 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/R1-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/R1-gate.go"}}
 156c156
 < 		" " + gateRecordBaseKey + "=" + r.Base +
 ---
@@ -182,7 +182,7 @@ FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.508s
     org_gate_test.go:297: gate events = [{TS:2026-10-13T08:18:08Z OrgID:a SeatID: Event:gate_passed Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: DryRun:false Details:head=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base_ref=refs/remotes/origin/main branch=feat/a by=tester herdr_pane=unset log="/private/var/folders/fv/xxhc5f5n60q3d9jm6
 
 ======== Go mutant R2 (gate.go)
-{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/R2-gate.go"}}
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/R2-gate.go"}}
 280c280
 < 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
 ---

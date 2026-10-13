@@ -141,10 +141,10 @@ ralph doctor
   ✓ Go: pass
   ℹ herdr: info — herdr not installed — org runtime seats unavailable (solo execution unaffected)
   ✓ Shell aliases (codex/claude): pass — no shell rc file found to scan
-  ℹ agmsg: info — available at /Users/hiroki.yoshioka/.agents/skills/agmsg (version 1.5.1; tested against 1.1.13 — behavior differences are possible)
+  ℹ agmsg: info — available at ~/.agents/skills/agmsg (version 1.5.1; tested against 1.1.13 — behavior differences are possible)
   ℹ Org envelope: info — model_pool: 8 entries, max_seats: 5
   ✓ Org retired role keys: pass
-  ✓ Org codex model slugs: pass — 4 codex model_pool slug(s) present in /Users/hiroki.yoshioka/.codex/models_cache.json (cache written 2026-10-13T07:53:47Z, 0m ago)
+  ✓ Org codex model slugs: pass — 4 codex model_pool slug(s) present in ~/.codex/models_cache.json (cache written 2026-10-13T07:53:47Z, 0m ago)
   ✓ Codex sandbox (agmsg writable root): pass — not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded
   ✓ Scaffold: core file hashes: pass
   ⚠ Scaffold: managed blocks: warn — 2 block surface(s) unhealthy: AGENTS.md, .gitignore — AGENTS.md: managed block source (.ralph/core/AGENTS.core.md) is missing from the desired state; left untouched
@@ -696,10 +696,10 @@ ralph doctor
   ✓ Go: pass
   ℹ herdr: info — herdr not installed — org runtime seats unavailable (solo execution unaffected)
   ✓ Shell aliases (codex/claude): pass — no shell rc file found to scan
-  ℹ agmsg: info — available at /Users/hiroki.yoshioka/.agents/skills/agmsg (version 1.5.1; tested against 1.1.13 — behavior differences are possible)
+  ℹ agmsg: info — available at ~/.agents/skills/agmsg (version 1.5.1; tested against 1.1.13 — behavior differences are possible)
   ℹ Org envelope: info — model_pool: 8 entries, max_seats: 5
   ✓ Org retired role keys: pass
-  ✓ Org codex model slugs: pass — 4 codex model_pool slug(s) present in /Users/hiroki.yoshioka/.codex/models_cache.json (cache written 2026-10-13T07:53:47Z, 0m ago)
+  ✓ Org codex model slugs: pass — 4 codex model_pool slug(s) present in ~/.codex/models_cache.json (cache written 2026-10-13T07:53:47Z, 0m ago)
   ✓ Codex sandbox (agmsg writable root): pass — not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded
   ✓ Scaffold: core file hashes: pass
   ⚠ Scaffold: managed blocks: warn — 2 block surface(s) unhealthy: AGENTS.md, .gitignore — AGENTS.md: managed block source (.ralph/core/AGENTS.core.md) is missing from the desired state; left untouched
