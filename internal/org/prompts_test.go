@@ -464,8 +464,8 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
 // names its own step 15 for the cleanup (the per-plan approval steps of plan
 // 2026-10-12-org-plan-approval and the gate steps of plan 2026-10-13-org-gate
-// moved the numbers: the plan is written in steps 1, 4 and 6, the report, the
-// reviewer's reports and the plan's move in 10, the plan put back in 12; see
+// moved the numbers: the plan is written in steps 1, 4 and 6, the reviewer's
+// reports in 9, the report and the plan's move in 10, the plan put back in 12; see
 // TestRenderRolePrompt_Leader_FeatureOrgPlanApproval and
 // TestRenderRolePrompt_Leader_FeatureOrgGate). A failed secret scan,
 // push, or gh pr create is escalated as a BLOCKED, and the opened PR as a
@@ -522,7 +522,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// writes (the feature plan, the report, the plan's move) are outside it.
 	if intro, _, ok := strings.Cut(section, "\n1. "); !ok ||
 		!containsPhrase(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
-		!containsPhrase(intro, "手順 1・4・6 の機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは予約の外に書きますが") {
+		!containsPhrase(intro, "手順 1・4・6 の機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の戻しは予約の外に書きますが") {
 		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
 	}
 	// Every ralph org command of the leader carries the --state-dir of the
@@ -739,10 +739,14 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 
 // TestRenderRolePrompt_Leader_FeatureOrgGate pins AC8 of plan
 // docs/plans/active/2026-10-13-org-gate.md: after the reviewer passes, the
-// 機能ごとの org section fetches and rebases on the default branch (read the
-// way the gate reads it; a conflict goes to the implementer as a TASK, with
-// PLAN: under per-plan, and back to review), commits the report and the
-// reviewer's reports, then the plan's archive as a separate commit, runs the
+// 機能ごとの org section first commits the reviewer's reports and checks that
+// `git status --porcelain` is empty (on a gate retry the reviewer has
+// rewritten a committed report, and git rebase refuses to start over unstaged
+// changes: cross-review cycle 3 #1 of org-gate), leaving other changes to the
+// implementer as a TASK or to a BLOCKED, then fetches and rebases on the
+// default branch (read the way the gate reads it; a conflict goes to the
+// implementer as a TASK, with PLAN: under per-plan, and back to review),
+// commits only the report, then the plan's archive as a separate commit, runs the
 // secret scan, then `ralph org gate` (in the background with its output in a
 // file under .harness/state/, or with a long timeout; no commits after it),
 // stops the seats after the gate, pushes only the gate's HEAD:, and copies the
@@ -765,11 +769,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 	at := -1
 	for _, step := range []string{
 		"reviewer が通したら(`GATE: pass` の RESULT)",
+		"まず reviewer のレポート",
+		"`git status --porcelain` が何も出さないことを確かめる",
 		"`git fetch origin <既定のブランチ>`",
 		"`git rebase origin/<既定のブランチ>`",
 		"`git rebase --abort`",
 		"ralph org report --org-id org-a --state-dir <台帳>",
-		"report と reviewer のレポート(`docs/reports/` の下)をコミットする",
+		"report だけをコミットする",
 		"./scripts/archive-plan.sh <機能の計画のパス>",
 		"report とは別のコミットにする",
 		"このあとの手順で implementer に TASK を送ることになったら",
@@ -796,6 +802,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 	}
 
 	for _, c := range []struct{ marker, want string }{
+		{"9. reviewer が通したら", "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる"},
+		{"9. reviewer が通したら", "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる"},
+		{"9. reviewer が通したら", "ほかの変更が残っていれば、自分ではコミットしない"},
+		{"9. reviewer が通したら", "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)"},
+		{"9. reviewer が通したら", "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
+		{"9. reviewer が通したら", "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ"},
 		{"9. reviewer が通したら", "既定のブランチは `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先"},
 		{"9. reviewer が通したら", "(`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から `refs/remotes/origin/` を除いた名前)"},
 		{"9. reviewer が通したら", "なければ `main`、それもなければ `master` にする"},
@@ -803,7 +815,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		{"9. reviewer が通したら", "衝突したら `git rebase --abort` で戻し、自分では直さない"},
 		{"9. reviewer が通したら", "implementer に rebase と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す"},
 		{"9. reviewer が通したら", "fetch が失敗したら(ネットワークのない sandbox など)打ち直さず、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
-		{"10. `ralph org report", "report と reviewer のレポート(`docs/reports/` の下)をコミットする"},
+		{"10. `ralph org report", "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)"},
 		{"10. `ralph org report", "計画の移動(スクリプトが書き換えたほかのファイルを含む)を report とは別のコミットにする"},
 		{"10. `ralph org report", "このコミットを archive のコミットと呼び、その SHA(`git rev-parse HEAD`)を控える"},
 		{"10. `ralph org report", "このあとの手順で implementer に TASK を送ることになったら(手順 12 の `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき)"},
@@ -858,6 +870,25 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 			}
 			at = i
 		}
+	}
+	// Step 9 commits the reviewer's reports and checks a clean tree before it
+	// fetches and rebases, so a rewritten report never leaves git rebase to
+	// refuse over unstaged changes (cross-review cycle 3 #1 of org-gate); step
+	// 10 no longer commits the reviewer's reports with the report.
+	if item, ok := markdownItem(section, "9. reviewer が通したら"); ok {
+		s, at := squashSpace(item), -1
+		order := []string{"をコミットし、`git status --porcelain` が何も出さない", "何も出なくなったら", "`git fetch origin <既定のブランチ>`", "`git rebase origin/<既定のブランチ>`"}
+		for _, step := range order {
+			i := strings.Index(s, squashSpace(step))
+			if i < 0 || i < at {
+				t.Errorf("expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying %q in this order, but %q is missing or out of order, got item:\n%s", order, step, item)
+				break
+			}
+			at = i
+		}
+	}
+	if item, ok := markdownItem(section, "10. `ralph org report"); ok && containsPhrase(item, "report と reviewer のレポート") {
+		t.Errorf("expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:\n%s", item)
 	}
 	// The default branch is read with the full ref name, as the gate reads
 	// it, not with --short.

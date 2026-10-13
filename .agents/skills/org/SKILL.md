@@ -763,7 +763,15 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
 承認」)。下の `ralph org` のコマンドにも、タスクの `- 台帳:` の行の
 `--state-dir` を付ける。
 
-1. `git fetch origin <既定のブランチ>` を打ち、HEAD が
+1. reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、
+   `docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が
+   何も出さないことを確かめる。gate をやり直すときは、reviewer がコミット済みの
+   レポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる。
+   ほかの変更が残っていれば、leader は自分ではコミットしない。implementer の
+   変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` の
+   ヘッダを付ける)、reviewer にレビューを頼み直す。それ以外(reviewer の
+   ほかのファイル、誰が残したかわからない変更)なら、`BLOCKED` を escalate
+   する。何も出なくなったら、`git fetch origin <既定のブランチ>` を打ち、HEAD が
    `origin/<既定のブランチ>` を含まなければ `git rebase origin/<既定のブランチ>`
    を打つ(既定のブランチは `gate` と同じ決め方で、
    `git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
@@ -774,9 +782,10 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
    reviewer にレビューを頼み直す。fetch が失敗したら(ネットワークのない
    sandbox など)、打ち直さずに `BLOCKED` を escalate する。
 2. `ralph org report --org-id <org_id>` を打ち(report は worktree の
-   `docs/reports/` に書かれる)、report と reviewer のレポートをコミットする。
-   続けて `scripts/archive-plan.sh` があれば機能の計画を `docs/plans/archive/`
-   に移し、計画の移動を別のコミット(archive のコミット)にする。
+   `docs/reports/` に書かれる)、report だけをコミットする(reviewer の
+   レポートは 1 でコミットした)。続けて `scripts/archive-plan.sh` があれば
+   機能の計画を `docs/plans/archive/` に移し、計画の移動を別のコミット
+   (archive のコミット)にする。
 3. `scripts/secret-scan-branch.sh` があれば `--strict` を付けて打ち、終了
    コードが 0 でなければ push せずに止まり、`ralph org escalate` で
    `BLOCKED` を上げる(TASK_ID は org_id。「受信箱」節)。
@@ -948,7 +957,8 @@ receipts / 役割雛形)を使うため、手順は共通。
 6. 座席は作業が終わるたびに `stop` する。
 7. 座席の作業がすべて終わったら、`report` で編成履歴を `docs/reports/` に
    成果物化する(最終責任)。機能ごとの org では、reviewer が通したら先に
-   既定のブランチに rebase し、座席を止める前に report を打って、report の
+   reviewer のレポートをコミットして既定のブランチに rebase し、座席を止める
+   前に report を打って、report の
    コミット・計画の archive のコミット・secret scan・`gate` のあとに座席を
    止め、push・`gh pr create` で PR を作る(「org の終わり方」)。
 8. 最後に `disband` で組織を解散する。disband は org の herdr workspace を
@@ -1056,7 +1066,8 @@ agmsg の受信箱の確認は `/agmsg` skill の手順に従う(未導入環境
   2 つ目の `watch --all` を起動すると断られる。
 - タスク終了時は必ず: 各座席を `stop` → `ralph org report --org-id <id>`
   で成果物化 → 組織を `disband`、の順で締める。機能ごとの org では順が違い、
-  rebase → report → report と計画の移動のコミット → secret scan →
+  reviewer のレポートのコミット → rebase → report → report と計画の移動の
+  コミット → secret scan →
   `ralph org gate` → 座席の `stop` → push・`gh pr create` → `disband` の順に
   なる(「org の終わり方」)。disband は org の herdr
   workspace を閉じるので最後に打つ。止めた座席の pane と org の workspace は
@@ -1075,9 +1086,9 @@ agmsg の受信箱の確認は `/agmsg` skill の手順に従う(未導入環境
 
 - [ ] 全座席が `stop` または `disband` 済み
 - [ ] `ralph org report` が生成済み(`docs/reports/org-manifest-*.md`)
-- [ ] 機能ごとの org では、ブランチが既定のブランチに rebase 済みで、report と
-  reviewer のレポートのコミットと計画の移動のコミットがあり、worktree の
-  `git status --porcelain` が空
+- [ ] 機能ごとの org では、reviewer のレポートのコミットがあり、ブランチが
+  既定のブランチに rebase 済みで、report のコミットと計画の移動のコミットが
+  あり、worktree の `git status --porcelain` が空
 - [ ] 機能ごとの org では、secret scan(`scripts/secret-scan-branch.sh` が
   あれば `--strict`)が通り、`ralph org gate` が `gate_passed` を記録した
   あとに座席を止め、gate の `HEAD:` と同じ head を push し、`gh pr create` で

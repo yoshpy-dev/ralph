@@ -61,8 +61,9 @@
 あなたの cwd がその機能の worktree で、ブランチはタスクの `- ブランチ:` の行に
 あります。機能のコードと文書の変更は `- 予約したパス:` の中に収めてください
 (予約の外は別の org が受け持っていることがあります)。この節の手順 1・4・6 の
-機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
-予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
+機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
+戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
+かまいません。
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
 stop・report・gate・escalate・inbox notify・disband)には、どれにもタスクの
@@ -160,7 +161,16 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    implementer の spawn と TASK を打たずに待つ
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
-9. reviewer が通したら(`GATE: pass` の RESULT)、
+9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+   (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+   コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+   やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+   では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+   コミットしない。implementer の変更なら、implementer にコミットを TASK で
+   頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+   レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+   ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+   `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
    `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
    `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
    (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
@@ -174,8 +184,8 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    失敗したら(ネットワークのない sandbox など)打ち直さず、エラーを本文に
    書いて `ralph org escalate` で BLOCKED を上げる
 10. `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打ち(report
-    はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
-    レポート(`docs/reports/` の下)をコミットする。続けて
+    はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+    (reviewer のレポートは手順 9 でコミットした)。続けて
     `scripts/archive-plan.sh` があれば、
     `./scripts/archive-plan.sh <機能の計画のパス>` で計画を
     `docs/plans/archive/` に移し、計画の移動(スクリプトが書き換えたほかの
