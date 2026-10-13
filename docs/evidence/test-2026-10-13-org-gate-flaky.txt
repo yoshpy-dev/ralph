@@ -1,0 +1,1674 @@
+# /test org-gate: flakiness checks (HEAD eb5ffdac)
+
+## 1. tests/test-run-verify-concurrency.sh, 5 runs in a row, nothing else of this session running
+$ for i in 1 2 3 4 5; do sh tests/test-run-verify-concurrency.sh; done
+### run 1 (alone) 08:01:30Z load averages: 4.62 6.85 6.72
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=14.06s
+### run 2 (alone) 08:01:45Z load averages: 4.21 6.65 6.65
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=13.98s
+### run 3 (alone) 08:01:59Z load averages: 4.41 6.57 6.62
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=13.80s
+### run 4 (alone) 08:02:12Z load averages: 4.09 6.39 6.55
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=13.85s
+### run 5 (alone) 08:02:26Z load averages: 4.00 6.29 6.52
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=14.19s
+
+## 2. the same test under CPU load: a scratch copy (scratchpad og/rv-T/) whose poll_for_file prints how many 0.05 s polls it took, run 3 times while 24 `yes > /dev/null` processes ran (12 cores)
+# the copy's diff against tests/test-run-verify-concurrency.sh (scripts/run-verify.sh copied unchanged):
+175c175
+<       return 1
+---
+>       printf "    POLL timeout n=%s limit=%s %s\n" "$_n" "$2" "$(basename "$1")"; return 1
+178a179
+>   printf "    POLL ok n=%s limit=%s %s\n" "$_n" "$2" "$(basename "$1")"
+# Case 6 budgets: the group TERM must end the run within 40 polls (about 2 s); the pid TERM must leave it running for 20 polls (about 1 s).
+### loaded run 1 08:03:44Z load averages: 28.82 11.21 8.23
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+    POLL ok n=15 limit=200 concurrent-a.started
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+    POLL ok n=13 limit=200 term-group-sh.started
+    POLL ok n=0 limit=200 term-group-sh.done.pid
+    POLL ok n=1 limit=40 term-group-sh.done
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+    POLL ok n=11 limit=200 term-pid-sh.started
+    POLL ok n=0 limit=200 term-pid-sh.done.pid
+    POLL timeout n=21 limit=20 term-pid-sh.done
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+    POLL ok n=15 limit=200 term-group-dash.started
+    POLL ok n=0 limit=200 term-group-dash.done.pid
+    POLL ok n=1 limit=40 term-group-dash.done
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+    POLL ok n=14 limit=200 term-pid-dash.started
+    POLL ok n=0 limit=200 term-pid-dash.done.pid
+    POLL timeout n=21 limit=20 term-pid-dash.done
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=20.67s
+### loaded run 2 08:04:05Z load averages: 63.37 20.22 11.53
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+    POLL ok n=20 limit=200 concurrent-a.started
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+    POLL ok n=10 limit=200 term-group-sh.started
+    POLL ok n=0 limit=200 term-group-sh.done.pid
+    POLL ok n=1 limit=40 term-group-sh.done
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+    POLL ok n=9 limit=200 term-pid-sh.started
+    POLL ok n=0 limit=200 term-pid-sh.done.pid
+    POLL timeout n=21 limit=20 term-pid-sh.done
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+    POLL ok n=12 limit=200 term-group-dash.started
+    POLL ok n=0 limit=200 term-group-dash.done.pid
+    POLL ok n=1 limit=40 term-group-dash.done
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+    POLL ok n=11 limit=200 term-pid-dash.started
+    POLL ok n=0 limit=200 term-pid-dash.done.pid
+    POLL timeout n=21 limit=20 term-pid-dash.done
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=19.44s
+### loaded run 3 08:04:24Z load averages: 96.57 30.54 15.44
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+    POLL ok n=16 limit=200 concurrent-a.started
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+    POLL ok n=13 limit=200 term-group-sh.started
+    POLL ok n=0 limit=200 term-group-sh.done.pid
+    POLL ok n=2 limit=40 term-group-sh.done
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+    POLL ok n=15 limit=200 term-pid-sh.started
+    POLL ok n=0 limit=200 term-pid-sh.done.pid
+    POLL timeout n=21 limit=20 term-pid-sh.done
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+    POLL ok n=10 limit=200 term-group-dash.started
+    POLL ok n=0 limit=200 term-group-dash.done.pid
+    POLL ok n=1 limit=40 term-group-dash.done
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+    POLL ok n=11 limit=200 term-pid-dash.started
+    POLL ok n=0 limit=200 term-pid-dash.done.pid
+    POLL timeout n=21 limit=20 term-pid-dash.done
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+RC=0 elapsed=19.97s
+
+## 3. go test ./internal/org/ ./internal/cli/ -run 'Gate' -count=3 -v
+start 2026-10-13T08:07:15Z
+17:07  up 7 days, 20:11, 5 users, load averages: 15.32 27.99 17.75
+$ go test ./internal/org/ ./internal/cli/ -run 'Gate' -count=3 -v
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/typed
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestOrgSend_WatchGateBeforeApprovalCheck (0.02s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/typed (0.01s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw (0.00s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run (0.00s)
+=== RUN   TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier
+--- PASS: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (4.57s)
+=== RUN   TestGate_PassRecordsGatePassed
+--- PASS: TestGate_PassRecordsGatePassed (0.66s)
+=== RUN   TestGate_PassesFromASubdirectoryAndWithIgnoredFiles
+--- PASS: TestGate_PassesFromASubdirectoryAndWithIgnoredFiles (0.59s)
+=== RUN   TestGate_RefusedBeforeTheScripts
+=== RUN   TestGate_RefusedBeforeTheScripts/an_invalid_org_id
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan
+=== RUN   TestGate_RefusedBeforeTheScripts/an_incomplete_binding
+=== RUN   TestGate_RefusedBeforeTheScripts/a_disbanded_org
+=== RUN   TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone
+=== RUN   TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout
+=== RUN   TestGate_RefusedBeforeTheScripts/run_outside_git
+=== RUN   TestGate_RefusedBeforeTheScripts/another_branch_checked_out
+=== RUN   TestGate_RefusedBeforeTheScripts/a_detached_HEAD
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree
+=== RUN   TestGate_RefusedBeforeTheScripts/an_untracked_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_modified_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_staged_file
+=== RUN   TestGate_RefusedBeforeTheScripts/many_untracked_files
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory
+--- PASS: TestGate_RefusedBeforeTheScripts (5.04s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_invalid_org_id (0.12s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have (0.12s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_incomplete_binding (0.12s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_disbanded_org (0.12s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_outside_git (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/another_branch_checked_out (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_detached_HEAD (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict (0.31s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree (0.39s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_untracked_file (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_modified_file (0.30s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_staged_file (0.25s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/many_untracked_files (0.20s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main (0.29s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin (0.28s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote (0.24s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote (0.27s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_missing (0.24s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_missing (0.24s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable (0.24s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory (0.26s)
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree
+--- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed (4.17s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails (0.63s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails (1.04s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (0.88s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (1.62s)
+=== RUN   TestGate_PassThenFailOnTheSameHead
+--- PASS: TestGate_PassThenFailOnTheSameHead (0.86s)
+=== RUN   TestGate_BaseResolution
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main
+=== RUN   TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main
+=== RUN   TestGate_BaseResolution/only_master,_on_origin
+=== RUN   TestGate_BaseResolution/only_a_local_master
+=== RUN   TestGate_BaseResolution/main_only_locally
+=== RUN   TestGate_BaseResolution/no_origin_remote
+=== RUN   TestGate_BaseResolution/none
+--- PASS: TestGate_BaseResolution (7.65s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk (0.84s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists (0.87s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main (0.77s)
+    --- PASS: TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main (0.72s)
+    --- PASS: TestGate_BaseResolution/only_master,_on_origin (1.06s)
+    --- PASS: TestGate_BaseResolution/only_a_local_master (1.58s)
+    --- PASS: TestGate_BaseResolution/main_only_locally (0.92s)
+    --- PASS: TestGate_BaseResolution/no_origin_remote (0.69s)
+    --- PASS: TestGate_BaseResolution/none (0.19s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (0.68s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.26s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.42s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.84s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.48s)
+=== RUN   TestGate_StopsWhatAScriptLeftRunning
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process
+--- PASS: TestGate_StopsWhatAScriptLeftRunning (6.99s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed (1.21s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output (1.86s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM (2.22s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process (1.71s)
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature
+--- PASS: TestGate_OrgChangedWhileTheScriptsRan (3.85s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded (1.50s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding (1.27s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature (1.08s)
+=== RUN   TestGate_LogDirCannotBeMade
+--- PASS: TestGate_LogDirCannotBeMade (0.36s)
+=== RUN   TestGate_ScriptEnvironmentIsFixed
+--- PASS: TestGate_ScriptEnvironmentIsFixed (0.99s)
+=== RUN   TestGateScriptEnv
+--- PASS: TestGateScriptEnv (0.00s)
+=== RUN   TestGate_RecordsWhoRanIt
+=== RUN   TestGate_RecordsWhoRanIt/USER_and_no_pane
+=== RUN   TestGate_RecordsWhoRanIt/a_herdr_pane
+=== RUN   TestGate_RecordsWhoRanIt/an_empty_pane_id
+=== RUN   TestGate_RecordsWhoRanIt/USER_given_again
+=== RUN   TestGate_RecordsWhoRanIt/USER_with_a_space
+=== RUN   TestGate_RecordsWhoRanIt/USER_empty
+--- PASS: TestGate_RecordsWhoRanIt (3.00s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_and_no_pane (0.72s)
+    --- PASS: TestGate_RecordsWhoRanIt/a_herdr_pane (0.26s)
+    --- PASS: TestGate_RecordsWhoRanIt/an_empty_pane_id (0.46s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_given_again (0.27s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_with_a_space (0.74s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_empty (0.31s)
+=== RUN   TestGate_NoWatchGateNoApprovalCheck
+--- PASS: TestGate_NoWatchGateNoApprovalCheck (0.82s)
+=== RUN   TestGateRecordDetails_RoundTrip
+--- PASS: TestGateRecordDetails_RoundTrip (0.00s)
+=== RUN   TestGateEvents_AreNotASeat
+--- PASS: TestGateEvents_AreNotASeat (0.00s)
+=== RUN   TestLeaderActivityEventCount_GateEvents
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count
+--- PASS: TestLeaderActivityEventCount_GateEvents (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
+--- PASS: TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent
+--- PASS: TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded
+--- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate
+--- PASS: TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate (0.00s)
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true
+--- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead
+--- PASS: TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead (0.00s)
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too
+--- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree (0.01s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only (0.00s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too (0.00s)
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task
+--- PASS: TestOrgSend_WatchGate_RefusesATaskOnly (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task (0.00s)
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running
+--- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork (0.61s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running (0.00s)
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping
+--- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle (0.51s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running (0.20s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping (0.30s)
+=== RUN   TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow
+--- PASS: TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow (0.00s)
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/not_running
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stale
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stopping
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once
+--- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/not_running (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stale (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stopping (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once (0.00s)
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/typed
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestOrgSend_WatchGateBeforeApprovalCheck (0.01s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/typed (0.01s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw (0.00s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run (0.00s)
+=== RUN   TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier
+--- PASS: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (2.58s)
+=== RUN   TestGate_PassRecordsGatePassed
+--- PASS: TestGate_PassRecordsGatePassed (0.80s)
+=== RUN   TestGate_PassesFromASubdirectoryAndWithIgnoredFiles
+--- PASS: TestGate_PassesFromASubdirectoryAndWithIgnoredFiles (0.62s)
+=== RUN   TestGate_RefusedBeforeTheScripts
+=== RUN   TestGate_RefusedBeforeTheScripts/an_invalid_org_id
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan
+=== RUN   TestGate_RefusedBeforeTheScripts/an_incomplete_binding
+=== RUN   TestGate_RefusedBeforeTheScripts/a_disbanded_org
+=== RUN   TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone
+=== RUN   TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout
+=== RUN   TestGate_RefusedBeforeTheScripts/run_outside_git
+=== RUN   TestGate_RefusedBeforeTheScripts/another_branch_checked_out
+=== RUN   TestGate_RefusedBeforeTheScripts/a_detached_HEAD
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree
+=== RUN   TestGate_RefusedBeforeTheScripts/an_untracked_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_modified_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_staged_file
+=== RUN   TestGate_RefusedBeforeTheScripts/many_untracked_files
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory
+--- PASS: TestGate_RefusedBeforeTheScripts (7.75s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_invalid_org_id (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan (0.14s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_incomplete_binding (0.14s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_disbanded_org (0.13s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone (0.14s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_outside_git (0.14s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/another_branch_checked_out (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_detached_HEAD (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict (0.32s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree (0.39s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_untracked_file (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_modified_file (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_staged_file (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/many_untracked_files (0.29s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main (0.72s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin (1.22s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote (0.99s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote (0.75s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_missing (0.33s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_missing (0.28s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable (0.25s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory (0.26s)
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree
+--- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed (2.40s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails (0.41s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails (0.63s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (0.73s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (0.64s)
+=== RUN   TestGate_PassThenFailOnTheSameHead
+--- PASS: TestGate_PassThenFailOnTheSameHead (0.94s)
+=== RUN   TestGate_BaseResolution
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main
+=== RUN   TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main
+=== RUN   TestGate_BaseResolution/only_master,_on_origin
+=== RUN   TestGate_BaseResolution/only_a_local_master
+=== RUN   TestGate_BaseResolution/main_only_locally
+=== RUN   TestGate_BaseResolution/no_origin_remote
+=== RUN   TestGate_BaseResolution/none
+--- PASS: TestGate_BaseResolution (6.58s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk (0.76s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists (0.80s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main (0.77s)
+    --- PASS: TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main (0.73s)
+    --- PASS: TestGate_BaseResolution/only_master,_on_origin (0.87s)
+    --- PASS: TestGate_BaseResolution/only_a_local_master (0.85s)
+    --- PASS: TestGate_BaseResolution/main_only_locally (0.80s)
+    --- PASS: TestGate_BaseResolution/no_origin_remote (0.77s)
+    --- PASS: TestGate_BaseResolution/none (0.23s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (0.78s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.26s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.45s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.81s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.14s)
+=== RUN   TestGate_StopsWhatAScriptLeftRunning
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process
+--- PASS: TestGate_StopsWhatAScriptLeftRunning (3.41s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed (0.71s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output (1.03s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM (1.22s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process (0.44s)
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature
+--- PASS: TestGate_OrgChangedWhileTheScriptsRan (2.44s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded (0.71s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding (0.79s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature (0.93s)
+=== RUN   TestGate_LogDirCannotBeMade
+--- PASS: TestGate_LogDirCannotBeMade (0.24s)
+=== RUN   TestGate_ScriptEnvironmentIsFixed
+--- PASS: TestGate_ScriptEnvironmentIsFixed (0.85s)
+=== RUN   TestGateScriptEnv
+--- PASS: TestGateScriptEnv (0.00s)
+=== RUN   TestGate_RecordsWhoRanIt
+=== RUN   TestGate_RecordsWhoRanIt/USER_and_no_pane
+=== RUN   TestGate_RecordsWhoRanIt/a_herdr_pane
+=== RUN   TestGate_RecordsWhoRanIt/an_empty_pane_id
+=== RUN   TestGate_RecordsWhoRanIt/USER_given_again
+=== RUN   TestGate_RecordsWhoRanIt/USER_with_a_space
+=== RUN   TestGate_RecordsWhoRanIt/USER_empty
+--- PASS: TestGate_RecordsWhoRanIt (2.82s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_and_no_pane (0.94s)
+    --- PASS: TestGate_RecordsWhoRanIt/a_herdr_pane (0.72s)
+    --- PASS: TestGate_RecordsWhoRanIt/an_empty_pane_id (0.19s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_given_again (0.25s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_with_a_space (0.21s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_empty (0.14s)
+=== RUN   TestGate_NoWatchGateNoApprovalCheck
+--- PASS: TestGate_NoWatchGateNoApprovalCheck (0.69s)
+=== RUN   TestGateRecordDetails_RoundTrip
+--- PASS: TestGateRecordDetails_RoundTrip (0.00s)
+=== RUN   TestGateEvents_AreNotASeat
+--- PASS: TestGateEvents_AreNotASeat (0.00s)
+=== RUN   TestLeaderActivityEventCount_GateEvents
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count
+--- PASS: TestLeaderActivityEventCount_GateEvents (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
+--- PASS: TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent
+--- PASS: TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded
+--- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate
+--- PASS: TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate (0.00s)
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true
+--- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead
+--- PASS: TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead (0.00s)
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too
+--- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree (0.01s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only (0.00s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too (0.00s)
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task
+--- PASS: TestOrgSend_WatchGate_RefusesATaskOnly (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task (0.00s)
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running
+--- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork (0.61s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running (0.00s)
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping
+--- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle (0.61s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running (0.31s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping (0.30s)
+=== RUN   TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow
+--- PASS: TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow (0.00s)
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/not_running
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stale
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stopping
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once
+--- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/not_running (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stale (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stopping (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once (0.00s)
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/typed
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/dry-run
+=== RUN   TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run
+--- PASS: TestOrgSend_WatchGateBeforeApprovalCheck (0.02s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/typed (0.01s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw (0.01s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGateBeforeApprovalCheck/raw_dry-run (0.00s)
+=== RUN   TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier
+--- PASS: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (3.08s)
+=== RUN   TestGate_PassRecordsGatePassed
+--- PASS: TestGate_PassRecordsGatePassed (0.82s)
+=== RUN   TestGate_PassesFromASubdirectoryAndWithIgnoredFiles
+--- PASS: TestGate_PassesFromASubdirectoryAndWithIgnoredFiles (0.77s)
+=== RUN   TestGate_RefusedBeforeTheScripts
+=== RUN   TestGate_RefusedBeforeTheScripts/an_invalid_org_id
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have
+=== RUN   TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan
+=== RUN   TestGate_RefusedBeforeTheScripts/an_incomplete_binding
+=== RUN   TestGate_RefusedBeforeTheScripts/a_disbanded_org
+=== RUN   TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone
+=== RUN   TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout
+=== RUN   TestGate_RefusedBeforeTheScripts/run_outside_git
+=== RUN   TestGate_RefusedBeforeTheScripts/another_branch_checked_out
+=== RUN   TestGate_RefusedBeforeTheScripts/a_detached_HEAD
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict
+=== RUN   TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree
+=== RUN   TestGate_RefusedBeforeTheScripts/an_untracked_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_modified_file
+=== RUN   TestGate_RefusedBeforeTheScripts/a_staged_file
+=== RUN   TestGate_RefusedBeforeTheScripts/many_untracked_files
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main
+=== RUN   TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_missing
+=== RUN   TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable
+=== RUN   TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory
+--- PASS: TestGate_RefusedBeforeTheScripts (7.51s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_invalid_org_id (0.35s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_the_ledger_does_not_have (0.67s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_org_started_without_--plan (0.56s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_incomplete_binding (0.73s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_disbanded_org (0.50s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_feature_worktree_that_is_gone (0.26s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_from_the_main_checkout (0.31s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/run_outside_git (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/another_branch_checked_out (0.19s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_detached_HEAD (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_stopped_on_a_conflict (0.32s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_rebase_with_--apply_stopped_on_a_conflict,_in_a_linked_worktree (0.44s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/an_untracked_file (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_modified_file (0.16s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/a_staged_file (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/many_untracked_files (0.17s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main (0.28s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin (0.27s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_and_no_origin_remote (0.27s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/no_default_branch_with_an_origin_remote (0.26s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_missing (0.29s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_missing (0.26s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_static_script_is_not_executable (0.26s)
+    --- PASS: TestGate_RefusedBeforeTheScripts/the_test_script_is_a_directory (0.28s)
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts
+=== RUN   TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree
+--- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed (2.65s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_static_script_fails (0.48s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/the_test_script_fails (0.67s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (0.75s)
+    --- PASS: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (0.74s)
+=== RUN   TestGate_PassThenFailOnTheSameHead
+--- PASS: TestGate_PassThenFailOnTheSameHead (0.83s)
+=== RUN   TestGate_BaseResolution
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists
+=== RUN   TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main
+=== RUN   TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main
+=== RUN   TestGate_BaseResolution/only_master,_on_origin
+=== RUN   TestGate_BaseResolution/only_a_local_master
+=== RUN   TestGate_BaseResolution/main_only_locally
+=== RUN   TestGate_BaseResolution/no_origin_remote
+=== RUN   TestGate_BaseResolution/none
+--- PASS: TestGate_BaseResolution (6.88s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk (0.78s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_trunk_and_a_local_branch_origin/trunk_exists (0.80s)
+    --- PASS: TestGate_BaseResolution/origin/HEAD_names_a_missing_branch:_main (0.84s)
+    --- PASS: TestGate_BaseResolution/no_origin/HEAD,_main_and_master_on_origin:_main (0.78s)
+    --- PASS: TestGate_BaseResolution/only_master,_on_origin (0.83s)
+    --- PASS: TestGate_BaseResolution/only_a_local_master (0.88s)
+    --- PASS: TestGate_BaseResolution/main_only_locally (0.80s)
+    --- PASS: TestGate_BaseResolution/no_origin_remote (0.94s)
+    --- PASS: TestGate_BaseResolution/none (0.25s)
+=== RUN   TestGate_ManifestLockNotHeldWhileScriptsRun
+--- PASS: TestGate_ManifestLockNotHeldWhileScriptsRun (0.74s)
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false
+=== RUN   TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true
+--- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing (1.29s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=false (0.47s)
+    --- PASS: TestGate_InterruptStopsTheScriptsAndRecordsNothing/ignore_SIGTERM=true (0.83s)
+=== RUN   TestGate_InterruptedBeforeTheScripts
+--- PASS: TestGate_InterruptedBeforeTheScripts (0.16s)
+=== RUN   TestGate_StopsWhatAScriptLeftRunning
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM
+=== RUN   TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process
+--- PASS: TestGate_StopsWhatAScriptLeftRunning (3.33s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_with_its_output_closed (0.73s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_holds_the_output (1.03s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_background_process_that_ignores_SIGTERM (1.07s)
+    --- PASS: TestGate_StopsWhatAScriptLeftRunning/a_failing_script's_background_process (0.49s)
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding
+=== RUN   TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature
+--- PASS: TestGate_OrgChangedWhileTheScriptsRan (2.10s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded (0.73s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/disbanded_and_started_again_with_the_same_binding (0.69s)
+    --- PASS: TestGate_OrgChangedWhileTheScriptsRan/bound_to_another_feature (0.68s)
+=== RUN   TestGate_LogDirCannotBeMade
+--- PASS: TestGate_LogDirCannotBeMade (0.21s)
+=== RUN   TestGate_ScriptEnvironmentIsFixed
+--- PASS: TestGate_ScriptEnvironmentIsFixed (0.70s)
+=== RUN   TestGateScriptEnv
+--- PASS: TestGateScriptEnv (0.00s)
+=== RUN   TestGate_RecordsWhoRanIt
+=== RUN   TestGate_RecordsWhoRanIt/USER_and_no_pane
+=== RUN   TestGate_RecordsWhoRanIt/a_herdr_pane
+=== RUN   TestGate_RecordsWhoRanIt/an_empty_pane_id
+=== RUN   TestGate_RecordsWhoRanIt/USER_given_again
+=== RUN   TestGate_RecordsWhoRanIt/USER_with_a_space
+=== RUN   TestGate_RecordsWhoRanIt/USER_empty
+--- PASS: TestGate_RecordsWhoRanIt (2.24s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_and_no_pane (0.96s)
+    --- PASS: TestGate_RecordsWhoRanIt/a_herdr_pane (0.28s)
+    --- PASS: TestGate_RecordsWhoRanIt/an_empty_pane_id (0.23s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_given_again (0.22s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_with_a_space (0.20s)
+    --- PASS: TestGate_RecordsWhoRanIt/USER_empty (0.20s)
+=== RUN   TestGate_NoWatchGateNoApprovalCheck
+--- PASS: TestGate_NoWatchGateNoApprovalCheck (1.08s)
+=== RUN   TestGateRecordDetails_RoundTrip
+--- PASS: TestGateRecordDetails_RoundTrip (0.00s)
+=== RUN   TestGateEvents_AreNotASeat
+--- PASS: TestGateEvents_AreNotASeat (0.00s)
+=== RUN   TestLeaderActivityEventCount_GateEvents
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts
+=== RUN   TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count
+--- PASS: TestLeaderActivityEventCount_GateEvents (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_failed_in_the_watched_org_counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/a_gate_event_whose_Details_hold_reason=watchdog__counts (0.00s)
+    --- PASS: TestLeaderActivityEventCount_GateEvents/gate_passed_in_another_org_does_not_count (0.00s)
+=== RUN   TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_MissionRoutesGateBlocked
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+=== RUN   TestRenderRolePrompt_Leader_FeatureOrgGate
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+=== RUN   TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate
+--- PASS: TestOrgSpawn_DryRun_And_Real_AgreeOnRejectionCause_EnvelopeBeforeScopeGate (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent
+--- PASS: TestOrgSpawn_MinimumControlGate_Autonomous_EmptyScope_RejectedWithEvent (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits
+=== RUN   TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded
+--- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/edits (0.00s)
+    --- PASS: TestOrgSpawn_MinimumControlGate_EditsAndGuarded_EmptyScope_Proceeds/guarded (0.00s)
+=== RUN   TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate
+--- PASS: TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate (0.00s)
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false
+=== RUN   TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true
+--- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=false (0.00s)
+    --- PASS: TestOrgSpawn_Reserve_SatisfiesAutonomousScopeGate/dry-run=true (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real
+=== RUN   TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/real (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_ARefusalRecordsAndCallsNothing/dry-run (0.00s)
+=== RUN   TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead
+--- PASS: TestOrgSpawn_WatchGate_RunsAfterTheInputChecksAndBeforeTheManifestRead (0.00s)
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only
+=== RUN   TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too
+--- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree (0.01s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/watch_gate_only (0.00s)
+    --- PASS: TestStartFeature_WatchGate_ARefusalMakesNoWorktree/max_orgs_reached_too (0.00s)
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task
+--- PASS: TestOrgSend_WatchGate_RefusesATaskOnly (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_with_spaces_around_key_and_value (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_QUESTION (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/typed_RESULT,_dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_text_with_no_TYPE_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_TASK_after_a_blank_line (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_lowercase_type:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesATaskOnly/raw_TYPE:_task (0.00s)
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark
+=== RUN   TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running
+--- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork (0.61s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/running_--once (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stopping (0.00s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_an_old_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/stale_with_no_mark (0.30s)
+    --- PASS: TestNewWatchGate_PassesOnlyAWatchThatAcceptsWork/not_running (0.00s)
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running
+=== RUN   TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping
+--- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle (0.61s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/running (0.30s)
+    --- PASS: TestNewWatchGate_AStaleWatchThatWritesItsMarkWithinTheSettle/stopping (0.30s)
+=== RUN   TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow
+--- PASS: TestNewWatchGate_JudgesTheMarkAtTheTimeOfNow (0.00s)
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/not_running
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stale
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/stopping
+=== RUN   TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once
+--- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/not_running (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stale (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/stopping (0.00s)
+    --- PASS: TestWatchGateError_TheCommandsRepeatHintStateDir/running_--once (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	114.984s
+=== RUN   TestOrgGate_PassPrintsGateHeadBaseAndLog
+--- PASS: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.30s)
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts
+--- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1 (2.95s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.44s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.18s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (0.63s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (0.70s)
+=== RUN   TestOrgGate_PrintGateResultEdges
+=== RUN   TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing
+=== RUN   TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line
+=== RUN   TestOrgGate_PrintGateResultEdges/22_files_left
+--- PASS: TestOrgGate_PrintGateResultEdges (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/22_files_left (0.00s)
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main
+--- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (0.72s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file (0.17s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger (0.14s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree (0.17s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main (0.25s)
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/an_argument
+--- PASS: TestOrgGate_OrgIDRequiredAndNoArguments (0.55s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/an_argument (0.14s)
+=== RUN   TestOrgGate_StateDirPicksTheLedger
+--- PASS: TestOrgGate_StateDirPicksTheLedger (0.64s)
+=== RUN   TestOrgGate_StartPlanThenGateInTheFeatureWorktree
+--- PASS: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.68s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.04s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.59s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.44s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.49s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.52s)
+=== RUN   TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog
+--- PASS: TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog (0.99s)
+=== RUN   TestOrgGate_LegacyLedgerGuard
+--- PASS: TestOrgGate_LegacyLedgerGuard (0.77s)
+=== RUN   TestOrgGateHelp
+--- PASS: TestOrgGateHelp (0.00s)
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline
+--- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses (1.72s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping (0.08s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once (0.09s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline (0.41s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping (0.13s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once (0.29s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline (0.71s)
+=== RUN   TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes
+--- PASS: TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes (0.00s)
+=== RUN   TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded
+--- PASS: TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded (0.43s)
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run
+--- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork (0.80s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch (0.04s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run (0.04s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark (0.09s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run (0.10s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark (0.09s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run (0.10s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping (0.06s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run (0.06s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run (0.06s)
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/real
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses (0.37s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/real (0.34s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run (0.03s)
+=== RUN   TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses
+--- PASS: TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses (0.23s)
+=== RUN   TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds
+--- PASS: TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds (2.04s)
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10
+--- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes (0.12s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30 (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10 (0.05s)
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run
+--- PASS: TestOrgSend_WatchGate_RefusesOnlyATask (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run (0.00s)
+=== RUN   TestOrgSend_WatchGate_ATaskPassesARunningWatch
+--- PASS: TestOrgSend_WatchGate_ATaskPassesARunningWatch (0.00s)
+=== RUN   TestOrgStart_WatchGate_RefusesAStaleWatch
+--- PASS: TestOrgStart_WatchGate_RefusesAStaleWatch (0.33s)
+=== RUN   TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree
+--- PASS: TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree (0.44s)
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send
+--- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir (0.27s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn (0.17s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send (0.10s)
+=== RUN   TestOrgGate_PassPrintsGateHeadBaseAndLog
+--- PASS: TestOrgGate_PassPrintsGateHeadBaseAndLog (0.69s)
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts
+--- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1 (3.47s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.84s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.15s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (0.82s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (0.66s)
+=== RUN   TestOrgGate_PrintGateResultEdges
+=== RUN   TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing
+=== RUN   TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line
+=== RUN   TestOrgGate_PrintGateResultEdges/22_files_left
+--- PASS: TestOrgGate_PrintGateResultEdges (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/22_files_left (0.00s)
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main
+--- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (0.76s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file (0.18s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger (0.15s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree (0.17s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main (0.26s)
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/an_argument
+--- PASS: TestOrgGate_OrgIDRequiredAndNoArguments (0.57s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/an_argument (0.15s)
+=== RUN   TestOrgGate_StateDirPicksTheLedger
+--- PASS: TestOrgGate_StateDirPicksTheLedger (0.66s)
+=== RUN   TestOrgGate_StartPlanThenGateInTheFeatureWorktree
+--- PASS: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (3.38s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (5.74s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.23s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.33s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.58s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.60s)
+=== RUN   TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog
+--- PASS: TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog (1.36s)
+=== RUN   TestOrgGate_LegacyLedgerGuard
+--- PASS: TestOrgGate_LegacyLedgerGuard (0.56s)
+=== RUN   TestOrgGateHelp
+--- PASS: TestOrgGateHelp (0.00s)
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline
+--- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses (1.80s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping (0.20s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once (0.16s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline (0.48s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping (0.25s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once (0.23s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline (0.49s)
+=== RUN   TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes
+--- PASS: TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes (0.00s)
+=== RUN   TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded
+--- PASS: TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded (0.56s)
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run
+--- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork (0.78s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch (0.03s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark (0.09s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping (0.09s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run (0.10s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once (0.04s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run (0.04s)
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/real
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses (0.58s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/real (0.50s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run (0.07s)
+=== RUN   TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses
+--- PASS: TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses (0.26s)
+=== RUN   TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds
+--- PASS: TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds (2.04s)
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10
+--- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes (0.12s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30 (0.01s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10 (0.05s)
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run
+--- PASS: TestOrgSend_WatchGate_RefusesOnlyATask (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run (0.00s)
+=== RUN   TestOrgSend_WatchGate_ATaskPassesARunningWatch
+--- PASS: TestOrgSend_WatchGate_ATaskPassesARunningWatch (0.00s)
+=== RUN   TestOrgStart_WatchGate_RefusesAStaleWatch
+--- PASS: TestOrgStart_WatchGate_RefusesAStaleWatch (0.34s)
+=== RUN   TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree
+--- PASS: TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree (0.45s)
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send
+--- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir (0.31s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn (0.20s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send (0.11s)
+=== RUN   TestOrgGate_PassPrintsGateHeadBaseAndLog
+--- PASS: TestOrgGate_PassPrintsGateHeadBaseAndLog (0.88s)
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree
+=== RUN   TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts
+--- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1 (2.51s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.50s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (0.65s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (0.61s)
+    --- PASS: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (0.75s)
+=== RUN   TestOrgGate_PrintGateResultEdges
+=== RUN   TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing
+=== RUN   TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line
+=== RUN   TestOrgGate_PrintGateResultEdges/22_files_left
+--- PASS: TestOrgGate_PrintGateResultEdges (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_test_script_that_printed_nothing (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/a_static_script_that_printed_one_line (0.00s)
+    --- PASS: TestOrgGate_PrintGateResultEdges/22_files_left (0.00s)
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree
+=== RUN   TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main
+--- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (0.78s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file (0.17s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_org_with_no_binding_in_the_ledger (0.15s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/another_git_worktree (0.18s)
+    --- PASS: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main (0.27s)
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id
+=== RUN   TestOrgGate_OrgIDRequiredAndNoArguments/an_argument
+--- PASS: TestOrgGate_OrgIDRequiredAndNoArguments (0.60s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/no_--org-id (0.16s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_blank_--org-id (0.15s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/a_malformed_--org-id (0.14s)
+    --- PASS: TestOrgGate_OrgIDRequiredAndNoArguments/an_argument (0.14s)
+=== RUN   TestOrgGate_StateDirPicksTheLedger
+--- PASS: TestOrgGate_StateDirPicksTheLedger (0.65s)
+=== RUN   TestOrgGate_StartPlanThenGateInTheFeatureWorktree
+--- PASS: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.78s)
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.00s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.46s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.15s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.92s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.47s)
+=== RUN   TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog
+--- PASS: TestOrgGate_OrgDisbandedWhileTheScriptsRanNamesTheLog (0.71s)
+=== RUN   TestOrgGate_LegacyLedgerGuard
+--- PASS: TestOrgGate_LegacyLedgerGuard (0.39s)
+=== RUN   TestOrgGateHelp
+--- PASS: TestOrgGateHelp (0.00s)
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once
+=== RUN   TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline
+--- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses (1.15s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stopping (0.05s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_running_--once (0.05s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/<task>_stale_until_the_deadline (0.35s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stopping (0.13s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_running_--once (0.14s)
+    --- PASS: TestOrgStart_AChildThatExitsWhileAWatchThatAcceptsNoWorkHoldsTheLock_IsRefusedAsTheGateRefuses/--plan_stale_until_the_deadline (0.44s)
+=== RUN   TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes
+--- PASS: TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes (0.00s)
+=== RUN   TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded
+--- PASS: TestOrgSpawn_AllowUnscopedFlag_BypassesGateAndIsRecorded (0.28s)
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once
+=== RUN   TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run
+--- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork (0.51s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch (0.02s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/no_watch_--dry-run (0.02s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch (0.03s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/the_running_mark_of_a_killed_watch_--dry-run (0.02s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark (0.07s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_an_old_mark_--dry-run (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stale_with_no_mark_--dry-run (0.08s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping (0.03s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/stopping_--dry-run (0.02s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once (0.03s)
+    --- PASS: TestOrgSpawn_WatchGate_RefusesAWatchThatAcceptsNoWork/running_--once_--dry-run (0.03s)
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/real
+=== RUN   TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run
+--- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses (0.36s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/real (0.32s)
+    --- PASS: TestOrgSpawn_WatchGate_ARunningWatchPasses/--dry-run (0.03s)
+=== RUN   TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses
+--- PASS: TestOrgSpawn_WatchGate_AStaleWatchThatTurnsRunningWithinTheSettlePasses (0.23s)
+=== RUN   TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds
+--- PASS: TestOrgSpawn_WatchGate_TheProductionSettleIsTwoSeconds (2.03s)
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes
+=== RUN   TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10
+--- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes (0.12s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_30 (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_10,_watch_without_deadman_minutes (0.05s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_without_deadman_minutes (0.00s)
+    --- PASS: TestOrgSpawn_WatchGate_JudgesTheMarkByTheWatchsDeadmanMinutes/caller_30,_watch_10 (0.05s)
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run
+=== RUN   TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run
+--- PASS: TestOrgSend_WatchGate_RefusesOnlyATask (0.02s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/typed_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_TYPE:_TASK_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/QUESTION_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_without_a_TYPE_line_--dry-run (0.00s)
+    --- PASS: TestOrgSend_WatchGate_RefusesOnlyATask/--raw_lower-case_type:_task_--dry-run (0.00s)
+=== RUN   TestOrgSend_WatchGate_ATaskPassesARunningWatch
+--- PASS: TestOrgSend_WatchGate_ATaskPassesARunningWatch (0.00s)
+=== RUN   TestOrgStart_WatchGate_RefusesAStaleWatch
+--- PASS: TestOrgStart_WatchGate_RefusesAStaleWatch (0.33s)
+=== RUN   TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree
+--- PASS: TestOrgStartPlan_WatchGate_RefusesAStaleWatchBeforeTheWorktree (0.43s)
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn
+=== RUN   TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send
+--- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir (0.31s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/spawn (0.21s)
+    --- PASS: TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir/send (0.11s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	61.872s
+real 116.86
+user 26.94
+sys 33.92
+RC=0

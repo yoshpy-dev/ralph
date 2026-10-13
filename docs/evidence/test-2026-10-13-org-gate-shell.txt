@@ -1,0 +1,220 @@
+# /test org-gate: the six shell tests touched by the change, run directly with sh (HEAD eb5ffdac)
+start 2026-10-13T08:15:43Z
+17:15  up 7 days, 20:19, 5 users, load averages: 4.50 10.93 13.47
+### $ sh tests/test-run-verify-concurrency.sh
+Case 1: a block killed before it writes its exit code fails the run
+  PASS: killed block makes run-verify.sh fail (exit 1)
+  PASS: killed block says the exit code could not be read
+  PASS: killed block leaves no per-run files
+Case 2: concurrent failing and passing runs in one worktree keep their own exit codes
+  PASS: run A's verifier started
+  PASS: run B (passing) exits 0 while run A is still running (exit 0)
+  PASS: run A (failing) exits 1 after run B passed (exit 1)
+  PASS: run A read its own exit code
+  PASS: concurrent runs leave no per-run files
+Cases 3 and 4: plain runs keep exit codes 0 and 1 and leave verify-scope behind
+  PASS: plain passing run exits 0 (exit 0)
+  PASS: plain passing run reports success
+  PASS: passing run leaves .harness/state/verify-scope with the scope lines
+  PASS: passing run leaves no per-run files
+  PASS: passing run does not write the shared exit-code file
+  PASS: plain failing run exits 1 (exit 1)
+  PASS: plain failing run reports the failure
+  PASS: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: failing run leaves no per-run files
+  PASS: failing run does not write the shared exit-code file
+Case 5: with no verifier, a code change still fails and a docs change passes
+  PASS: code change with no verifier exits 2 (exit 2)
+  PASS: code change with no verifier says so
+  PASS: code change does not write the shared non-docs marker
+  PASS: code change run leaves no per-run files
+  PASS: docs-only change with no verifier exits 0 (exit 0)
+  PASS: docs-only change is reported as docs work
+  PASS: docs-only run leaves no per-run files
+Case 6: a TERM during a run exits 143 and removes the per-run files
+  PASS: sh: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: sh: TERM to the run's process group exits 143 (exit 143)
+  PASS: sh: TERM to the run's process group leaves no per-run files
+  PASS: sh: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: sh: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: sh: TERM to the run's pid alone leaves no per-run files
+  PASS: dash: TERM to the run's process group ends it within 2 s, the verifier not released
+  PASS: dash: TERM to the run's process group exits 143 (exit 143)
+  PASS: dash: TERM to the run's process group leaves no per-run files
+  PASS: dash: TERM to the run's pid alone leaves it waiting for the verifier (1 s)
+  PASS: dash: TERM to the run's pid alone exits 143 after the verifier finishes (exit 143)
+  PASS: dash: TERM to the run's pid alone leaves no per-run files
+
+-- Summary --
+  PASS: 37 / 37
+  FAIL: 0
+### RC=0 elapsed=14.20s
+### $ sh tests/test-run-verify-scope.sh
+  PASS: changed scope runs local static gate
+  PASS: changed scope runs changed language pack root
+  PASS: changed scope skips unrelated language pack
+  PASS: test wrapper defaults local gate to changed
+  PASS: test wrapper defaults language pack to changed root
+  PASS: test wrapper skips unrelated pack by default
+  PASS: test wrapper honors explicit full local gate
+  PASS: test wrapper honors explicit full golang pack
+  PASS: test wrapper honors explicit full python pack
+  PASS: full fallback runs local test gate
+  PASS: full fallback runs golang pack
+  PASS: full fallback runs python pack
+  PASS: pushed fixture has upstream equal to HEAD
+  PASS: pushed branch static wrapper runs local gate in changed scope
+  PASS: pushed branch static wrapper runs golang pack for committed change
+  PASS: pushed branch static wrapper skips unrelated python pack
+  PASS: central-only remote static wrapper runs local gate in changed scope
+  PASS: central-only remote static wrapper runs golang pack for unpushed commit
+  PASS: central-only remote static wrapper skips unrelated python pack
+
+-- Summary --
+  PASS: 19 / 19
+  FAIL: 0
+### RC=0 elapsed=9.12s
+### $ sh tests/test-verify-mode-split.sh
+  PASS: go mode=static (exit 0)
+  PASS: Go static runs gofmt
+  PASS: Go static runs vet
+  PASS: Go static runs golangci-lint
+  PASS: Go static runs staticcheck
+  PASS: Go static skips tests
+  PASS: go mode=test (exit 0)
+  PASS: Go test runs tests
+  PASS: Go test skips gofmt
+  PASS: Go test skips vet
+  PASS: Go test skips staticcheck
+  PASS: go mode=all (exit 0)
+  PASS: Go all runs gofmt
+  PASS: Go all runs tests
+  PASS: go mode=invalid (exit 2)
+  PASS: typescript mode=static (exit 0)
+  PASS: TypeScript static runs lint
+  PASS: TypeScript static runs typecheck
+  PASS: TypeScript static skips tests
+  PASS: typescript mode=test (exit 0)
+  PASS: TypeScript test runs tests
+  PASS: TypeScript test skips lint
+  PASS: TypeScript test skips typecheck
+  PASS: typescript mode=all (exit 0)
+  PASS: TypeScript all runs lint
+  PASS: TypeScript all runs tests
+  PASS: python mode=static (exit 0)
+  PASS: Python static runs ruff
+  PASS: Python static runs mypy
+  PASS: Python static skips pytest
+  PASS: python mode=test (exit 0)
+  PASS: Python test runs pytest
+  PASS: Python test skips ruff
+  PASS: Python test skips mypy
+  PASS: python mode=all (exit 0)
+  PASS: Python all runs ruff
+  PASS: Python all runs pytest
+  PASS: rust mode=static (exit 0)
+  PASS: Rust static runs fmt
+  PASS: Rust static runs clippy
+  PASS: Rust static skips tests
+  PASS: rust mode=test (exit 0)
+  PASS: Rust test runs tests
+  PASS: Rust test skips fmt
+  PASS: Rust test skips clippy
+  PASS: rust mode=all (exit 0)
+  PASS: Rust all runs fmt
+  PASS: Rust all runs tests
+  PASS: dart mode=static (exit 0)
+  PASS: Dart static runs format
+  PASS: Dart static runs analyze
+  PASS: Dart static skips tests
+  PASS: dart mode=test (exit 0)
+  PASS: Dart test runs tests
+  PASS: Dart test skips format
+  PASS: Dart test skips analyze
+  PASS: dart mode=all (exit 0)
+  PASS: Dart all runs format
+  PASS: Dart all runs tests
+
+-- Summary --
+  PASS: 59 / 59
+  FAIL: 0
+### RC=0 elapsed=5.61s
+### $ sh tests/test-run-verify-branch-secret-scan.sh
+  PASS: static mode, clean branch: exits 0 (exit 0)
+  PASS: static mode: runs branch secret scan
+  PASS: all mode, clean branch: exits 0 (exit 0)
+  PASS: all mode: runs branch secret scan
+  PASS: test mode, clean branch: exits 0 (exit 0)
+  PASS: test mode: does not run branch secret scan
+  PASS: test mode: does not even mention the branch secret scan
+  PASS: test mode, secret-carrying branch: still exits 0 (exit 0)
+  PASS: test mode+finding: does not run the branch scan
+  PASS: test mode+finding: no findings text leaks through
+  PASS: finding on a docs-only-looking run: still exits non-zero (exit 1)
+  PASS: finding: reports the branch scan ran
+  PASS: finding: reports findings
+  PASS: finding: the generic no-verifier-ran message still appears
+  PASS: finding: an explicit failure line appears despite the reassuring summary
+  PASS: finding with a passing language verifier: still exits non-zero (exit 1)
+  PASS: finding+ran_any=1: reports the branch scan ran
+  PASS: finding+ran_any=1: overall verdict says some verifiers failed
+  PASS: finding+ran_any=1: explicit failure line also appears
+  PASS: skip env var =1: exits 0 despite the secret commit (exit 0)
+  PASS: skip env var =1: reports the skip
+  PASS: skip env var =1: does not run the scan
+  PASS: skip env var =0: does NOT skip, still fails (exit 1)
+  PASS: skip env var =0: runs the scan
+  PASS: skip env var =0: does not report a skip
+  PASS: skip env var =true: does NOT skip, still fails (exit 1)
+  PASS: skip env var =true: runs the scan
+  PASS: skip env var =true: does not report a skip
+  PASS: docs-only clean run: exits 0 (exit 0)
+  PASS: docs-only clean run: still reports docs/scaffold-only
+  PASS: missing secret-scan-branch.sh: still exits 0 (exit 0)
+  PASS: missing secret-scan-branch.sh: reports the skip reason
+
+-- Summary --
+  PASS: 32
+  FAIL: 0
+### RC=0 elapsed=13.94s
+### $ sh tests/test-verify-local-hook-tests.sh
+==> run_hook_tests treats a test that would not run in CI as FAIL
+  PASS: not executable in the working tree (exit 1, file and fix named)
+  PASS: executable, index mode 100644 (exit 1, file and fix named)
+  PASS: executable, index mode 100755 (exit 0, tests/test-b.sh ran)
+  PASS: executable, untracked in a git repo (exit 0, tests/test-b.sh ran)
+  PASS: not executable, untracked in a git repo (exit 1, file and fix named)
+
+verify-local-hook-tests tests: 5 passed, 0 failed, 5 total
+### RC=0 elapsed=3.40s
+### $ sh tests/test-post-edit-verify.sh
+
+=== post_edit_verify.sh test results ===
+  PASS  A. file_path payload exits 0 (exit 0)
+  PASS  A. edited-files.log has one entry (1 lines)
+  PASS  A. edited-files.log contains the file_path
+  PASS  A. code-class message emitted
+  PASS  B. doc-class file_path payload exits 0 (exit 0)
+  PASS  B. doc-class message emitted
+  PASS  B. no code-class message
+  PASS  C. apply_patch payload exits 0 (exit 0)
+  PASS  C. edited-files.log has two entries (2 lines)
+  PASS  C. edited-files.log contains the Add File path
+  PASS  C. edited-files.log contains the Update File path
+  PASS  D. mixed-class apply_patch payload exits 0 (exit 0)
+  PASS  D. code-class message wins over doc-class
+  PASS  E. Delete-only apply_patch payload exits 0 (no crash) (exit 0)
+  PASS  E. deleted path still logged (1 lines)
+  PASS  E. edited-files.log contains the Delete File path
+  PASS  F. Bash tool payload exits 0 (exit 0)
+  PASS  F. no edited-files.log entries created
+  PASS  F. needs-verify still touched
+  PASS  F. no reminder message emitted
+  PASS  G. bare docs/... apply_patch payload exits 0 (exit 0)
+  PASS  G. bare docs/... path classified as doc-class
+  PASS  H. apply_patch payload with cwd exits 0 (exit 0)
+  PASS  H. edited-files.log carries the cwd-resolved, root-relative path
+
+  PASS: 24
+  FAIL: 0
+### RC=0 elapsed=1.03s

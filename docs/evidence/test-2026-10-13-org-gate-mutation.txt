@@ -1,0 +1,403 @@
+# /test org-gate: mutation spot checks (HEAD eb5ffdac). No tracked file was edited.
+# Go mutants: a changed copy of one file in the scratchpad (og/mut/<ID>-<file>.go), read through
+#   go test -count=1 -overlay og/mut/<ID>.json ./internal/org/ ./internal/cli/ -run 'Gate|LeaderActivityEventCount' -v
+# (cli imports org, so the overlay reaches the CLI tests too). Each compiled (go vet -overlay rc 0, used only as a compile check).
+# Shell mutants: og/mut/rv-<ID>/ holds tests/test-run-verify-concurrency.sh as committed and a changed scripts/run-verify.sh;
+#   the test copies $PROJECT_ROOT/scripts/run-verify.sh, so running it from rv-<ID>/ tests the mutant. rv-X0 is the unchanged copy (control).
+
+======== Go mutant H1 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/H1-gate.go"}}
+572c572
+< 	if head != t.head {
+---
+> 	if false && head != t.head {
+-- result: RC=1 end 08:11:15Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	82.221s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	53.021s
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (8.97s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (2.48s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (8.88s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.63s)
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", Base:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFailedHEAD_moves_dur1816002349/001/state/gates/org-a-2026
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
+
+======== Go mutant H2 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/H2-gate.go"}}
+289c289
+< 	if res.Reason == "" {
+---
+> 	if false && res.Reason == "" {
+-- result: RC=1 end 08:11:14Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	80.566s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	45.507s
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (9.54s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (2.94s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (2.11s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (9.11s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (2.13s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.40s)
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"c11918f9fed8a6f4264ff2ec599abeae82700f2f", Base:"c11918f9fed8a6f4264ff2ec599abeae82700f2f", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFailedHEAD_moves_dur1890025755/001/state/gates/org-a-2026
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", Base:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFaileda_script_leave2167458320/001/state/gates/org-a-2026
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=tree_changed); nothing to push until the gate passes" (stdout: GATE: pass
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
+
+======== Go mutant E1 (gate_run.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E1-gate_run.go"}}
+49c49
+< var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
+---
+> var gateStrippedEnvPrefixes = []string{}
+-- result: RC=1 end 08:11:54Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	35.839s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.530s
+--- FAIL: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (2.29s)
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.69s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.21s)
+    gate_runverify_test.go:95: calls = ["golang:mode=static:scope=full:roots=nowhere"]; want ["golang:mode=static:scope=full:roots=" "secret-scan"]
+    gate_test.go:1077: static got the verify variables [RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD HARNESS_VERIFY_MODE=all RALPH_VERIFY_PROJECT_ROOTS=nowhere]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD HARNESS_VERIFY_MODE=all RALPH_VERIFY_PROJECT_ROOTS=nowhere]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "RALPH_VERIFY_BASE=HEAD" "X=RALPH_VERIFY_BASE=1" "HARNESS_VERIFY_MODE=test" "RALPH_VERIFY_=x" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=changed" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E2 (gate_run.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E2-gate_run.go"}}
+67c67
+< 		if !stripped {
+---
+> 		if !stripped || name == "RALPH_VERIFY_BASE" {
+-- result: RC=1 end 08:11:55Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.551s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	21.196s
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.80s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.30s)
+    gate_test.go:1077: static got the verify variables [RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "RALPH_VERIFY_BASE=HEAD" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E3 (gate_run.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E3-gate_run.go"}}
+71c71
+< 	return append(out, gateScopeEnv)
+---
+> 	return out
+-- result: RC=1 end 08:12:35Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.077s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.332s
+--- FAIL: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (3.13s)
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.86s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.20s)
+    gate_runverify_test.go:91: gate with a failing Go verifier = {Refused: Passed:true Reason: Head:6f89b919180cefc3f56b37f7c5a31abf8e77d48a Base:6f89b919180cefc3f56b37f7c5a31abf8e77d48a BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier1768495413/001/state/gates/org-a-20261013T1
+    gate_test.go:1077: static got the verify variables []; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables []; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E4 (gate_run.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/E4-gate_run.go"}}
+49c49
+< var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
+---
+> var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_"}
+-- result: RC=1 end 08:12:37Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.800s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	20.109s
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.65s)
+--- FAIL: TestGateScriptEnv (0.00s)
+    gate_test.go:1077: static got the verify variables [HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE=all]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE=all]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "HARNESS_VERIFY_MODE=test" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+
+======== Go mutant A1 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/A1-gate.go"}}
+519c519
+< 	case r.code == 0:
+---
+> 	case r.code == 0 || r.code == 1:
+-- result: RC=1 end 08:18:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	39.856s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.091s
+--- FAIL: TestGate_RefusedBeforeTheScripts (8.44s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main (1.21s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin (1.19s)
+--- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (1.67s)
+    --- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main (1.00s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (2.05s)
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 Base:d3addff2a8a69e7212b82fd7355bfbe5a1cbe450 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsHEAD_does_not_contain_originma3695237769/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]};
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:c05f98d16e1e9635e62fec716b96803bab9735e4 Base:a75408ceffe62b7cab7bce7723edd5c24143b156 BaseRef:refs/heads/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsHEAD_does_not_contain_local_mai792330973/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a r
+    org_gate_test.go:453: gate = <nil>; want a refusal starting "org: gate: " (stdout: GATE: pass
+    org_gate_test.go:590: gate after origin/main moved = <nil>; want the rebase refusal
+
+======== Go mutant D1 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/D1-gate.go"}}
+649c649
+< 	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=all")
+---
+> 	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=no")
+-- result: RC=1 end 08:18:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	40.159s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.667s
+--- FAIL: TestGate_RefusedBeforeTheScripts (8.08s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/an_untracked_file (0.85s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/many_untracked_files (0.93s)
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (3.02s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (0.78s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (4.71s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.38s)
+--- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (2.02s)
+    --- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file (1.19s)
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 Base:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsan_untracked_file2612850718/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a refus
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:c05f98d16e1e9635e62fec716b96803bab9735e4 Base:c05f98d16e1e9635e62fec716b96803bab9735e4 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsmany_untracked_files1566702138/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a re
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"3a519b58a464238c75d2a8dc2a5be86f0d8f0cf5", Base:"3a519b58a464238c75d2a8dc2a5be86f0d8f0cf5", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFaileda_script_leave727739192/001/state/gates/org-a-20261
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=tree_changed); nothing to push until the gate passes" (stdout: GATE: pass
+    org_gate_test.go:453: gate = <nil>; want a refusal starting "org: gate: " (stdout: GATE: pass
+
+======== Go mutant R1 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/R1-gate.go"}}
+156c156
+< 		" " + gateRecordBaseKey + "=" + r.Base +
+---
+> 		" " + gateRecordBaseKey + "=" + r.Head +
+-- result: RC=1 end 08:18:44Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	37.886s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.508s
+--- FAIL: TestGateRecordDetails_RoundTrip (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.26s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (4.29s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.84s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.08s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.27s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.11s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.68s)
+    gate_test.go:1178: details "head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason: Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/origin/main Branch:feat/auth By:
+    gate_test.go:1178: details "head=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc base=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc base_ref=refs/heads/main branch=fix/a=b by=unknown herdr_pane=set log=\"/my state/a \\\"quoted\\\" log=x.log\"" read back as {Reason: Head:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc Base:ccccccccccccccccccc
+    gate_test.go:1178: details "reason=static_failed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:static_failed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remote
+    gate_test.go:1178: details "reason=test_failed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:test_failed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/or
+    gate_test.go:1178: details "reason=head_moved head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:head_moved Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/orig
+    gate_test.go:1178: details "reason=tree_changed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:tree_changed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/
+    gate_test.go:1201: an upper-case base: "head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read as {Reason: Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/origin/main Branch:feat/a
+    org_gate_test.go:297: gate events = [{TS:2026-10-13T08:18:08Z OrgID:a SeatID: Event:gate_passed Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: DryRun:false Details:head=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base_ref=refs/remotes/origin/main branch=feat/a by=tester herdr_pane=unset log="/private/var/folders/fv/xxhc5f5n60q3d9jm6
+
+======== Go mutant R2 (gate.go)
+{"Replace":{"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/og/mut/R2-gate.go"}}
+280c280
+< 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
+---
+> 	res := GateResult{Head: target.head, Base: target.head, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
+-- result: RC=1 end 08:18:44Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	37.991s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.539s
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.22s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (3.99s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.77s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.34s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.02s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (0.86s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.55s)
+    org_gate_test.go:283: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:576: stdout =
+
+======== shell mutant X0 (scripts/run-verify.sh)
+(no diff: control)
+$ (cd og/mut/rv-X0 && sh tests/test-run-verify-concurrency.sh)
+  PASS: 37 / 37
+  FAIL: 0
+RC=0
+
+======== shell mutant X1 (scripts/run-verify.sh)
+333c333
+<     verify_status=1
+---
+>     verify_status=0
+$ (cd og/mut/rv-X1 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block makes run-verify.sh fail (exit 0, want non-zero)
+  PASS: 36 / 37
+  FAIL: 1
+RC=1
+
+======== shell mutant X2 (scripts/run-verify.sh)
+328a329
+> verify_status="${verify_status:-0}"
+$ (cd og/mut/rv-X2 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block makes run-verify.sh fail (exit 0, want non-zero)
+  FAIL: killed block says the exit code could not be read (missing: could not read this run's exit code; treating it as a failure)
+  PASS: 35 / 37
+  FAIL: 2
+RC=1
+
+======== shell mutant X3 (scripts/run-verify.sh)
+289c289
+<   printf '%s' "$status" > "$run_status_file"
+---
+>   printf "%s" "$status" > .harness/state/verify-exit-code
+326,327c326,327
+< if [ -r "$run_status_file" ]; then
+<   verify_status="$(cat "$run_status_file" 2>/dev/null || true)"
+---
+> if [ -r .harness/state/verify-exit-code ]; then
+>   verify_status="$(cat .harness/state/verify-exit-code 2>/dev/null || true)"
+$ (cd og/mut/rv-X3 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: run A (failing) exits 1 after run B passed (exit 0, want 1)
+  FAIL: passing run does not write the shared exit-code file (/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.XiOuoQ/plain/.harness/state/verify-exit-code exists)
+  FAIL: failing run does not write the shared exit-code file (/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.XiOuoQ/plain/.harness/state/verify-exit-code exists)
+  PASS: 34 / 37
+  FAIL: 3
+RC=1
+
+======== shell mutant X4 (scripts/run-verify.sh)
+314c314
+< if [ -s "$run_scope_file" ]; then
+---
+> if false && [ -s "$run_scope_file" ]; then
+$ (cd og/mut/rv-X4 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: passing run leaves .harness/state/verify-scope with the scope lines
+  FAIL: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: 35 / 37
+  FAIL: 2
+RC=1
+
+======== shell mutant X5 (scripts/run-verify.sh)
+55c55
+< trap cleanup_run_files EXIT
+---
+> trap : EXIT
+$ (cd og/mut/rv-X5 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.igKYHq
+  FAIL: concurrent runs leave no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.ULxYcT
+  FAIL: passing run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: failing run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: code change run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: docs-only run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: sh: TERM to the run's process group leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: sh: TERM to the run's pid alone leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  FAIL: dash: TERM to the run's process group leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  FAIL: dash: TERM to the run's pid alone leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  PASS: 27 / 37
+  FAIL: 10
+RC=1
+
+======== probe tests (scratch only, added through -overlay; not committed)
+---- zz_probe_gate_tail_test.go
+package org
+
+import (
+	"bytes"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// Scratch probe (not committed): the gateOutput paths the committed tests
+// never reach (a chunk with no line break, a last line with no line break,
+// a line longer than gateTailMaxLineBytes, 20 lines plus a partial one).
+func TestProbe_GateOutputPartialAndLongLines(t *testing.T) {
+	var log bytes.Buffer
+	w := &gateOutput{log: &log}
+	// a line split over three writes, then a CRLF line
+	for _, chunk := range []string{"par", "tial ", "line\n", "crlf\r\n"} {
+		if n, err := w.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("Write(%q) = %d, %v", chunk, n, err)
+		}
+	}
+	if got := w.tail(); !slices.Equal(got, []string{"partial line", "crlf"}) {
+		t.Fatalf("tail = %q", got)
+	}
+	// a last line with no line break is in the tail
+	_, _ = w.Write([]byte("no newline at the end"))
+	if got := w.tail(); !slices.Equal(got, []string{"partial line", "crlf", "no newline at the end"}) {
+		t.Fatalf("tail with a partial last line = %q", got)
+	}
+	if log.String() != "partial line\ncrlf\r\nno newline at the end" {
+		t.Fatalf("log = %q", log.String())
+	}
+
+	// a line longer than the cap, written in two chunks, is cut at the cap
+	w = &gateOutput{log: &log}
+	long := strings.Repeat("x", gateTailMaxLineBytes+500)
+	_, _ = w.Write([]byte(long[:3000]))
+	_, _ = w.Write([]byte(long[3000:] + "\nafter\n"))
+	got := w.tail()
+	if len(got) != 2 || len(got[0]) != gateTailMaxLineBytes || got[1] != "after" {
+		t.Fatalf("long line tail: %d lines, first %d bytes, %q", len(got), len(got[0]), got[len(got)-1])
+	}
+	// the same long line with no line break at all
+	w = &gateOutput{log: &log}
+	_, _ = w.Write([]byte(long))
+	if got := w.tail(); len(got) != 1 || len(got[0]) != gateTailMaxLineBytes {
+		t.Fatalf("long partial: %d lines", len(got))
+	}
+
+	// 25 complete lines then a partial one: the last 20 include the partial one
+	w = &gateOutput{log: &log}
+	for i := 1; i <= 25; i++ {
+		_, _ = fmt.Fprintf(w, "line %d\n", i)
+	}
+	_, _ = w.Write([]byte("partial"))
+	got = w.tail()
+	if len(got) != gateTailLines || got[0] != "line 7" || got[len(got)-1] != "partial" {
+		t.Fatalf("20+partial tail = %q", got)
+	}
+}
+---- zz_probe_gate_couldnotrun_test.go
+package org
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// Scratch probe (not committed): runGateScript's "could not run" branch
+// (cmd.ProcessState == nil). The static script is executable but its
+// interpreter does not exist, so exec fails before the script starts.
+func TestProbe_GateScriptThatCannotStart(t *testing.T) {
+	fx := newGateFixtureWith(t, gateFixtureOptions{populate: func(t *testing.T, dir string) {
+		writeGateFile(t, dir, GateStaticScript, "#!/nonexistent/interpreter\necho never\n", 0o755)
+		writeGateFile(t, dir, GateTestScript, fmt.Sprintf(gateStub, "test"), 0o755)
+	}})
+	res := fx.gate(t)
+	t.Logf("result: %+v", res)
+	if res.Passed || res.Reason != GateReasonStaticFailed {
+		t.Fatalf("gate = %+v; want static_failed", res)
+	}
+	if len(res.Tail) == 0 || !strings.Contains(strings.Join(res.Tail, "\n"), "could not run") {
+		t.Fatalf("tail = %q; want the could-not-run line", res.Tail)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Fatalf("calls = %v; want none (test script must not run)", calls)
+	}
+	events := fx.gateEvents(t)
+	if len(events) != 1 || events[0].Event != EventGateFailed || !strings.HasPrefix(events[0].Details, "reason=static_failed ") {
+		t.Fatalf("events = %+v", events)
+	}
+	t.Logf("log:\n%s", fileOrAbsent(t, res.LogPath))
+}
+---- results
+=== RUN   TestProbe_GateOutputPartialAndLongLines
+--- PASS: TestProbe_GateOutputPartialAndLongLines (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.571s
+=== RUN   TestProbe_GateScriptThatCannotStart
+    zz_probe_gate_couldnotrun_test.go:18: result: {Refused: Passed:false Reason:static_failed Head:72a3c93e42aadcb154df0d85e6a3af1e0687fc69 Base:72a3c93e42aadcb154df0d85e6a3af1e0687fc69 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/state/gates/org-a-20261013T120000Z.log Tail:[ralph org gate: ./scripts/run-static-verify.sh could not run: fork/exec /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo/scripts/run-static-verify.sh: no such file or directory] Dirty:[]}
+    zz_probe_gate_couldnotrun_test.go:32: log:
+        # ralph org gate
+        # worktree: /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo
+        # branch: feat/auth
+        # head: 72a3c93e42aadcb154df0d85e6a3af1e0687fc69
+        # base: refs/remotes/origin/main 72a3c93e42aadcb154df0d85e6a3af1e0687fc69
+        
+        ==> ralph org gate: running ./scripts/run-static-verify.sh
+        ralph org gate: ./scripts/run-static-verify.sh could not run: fork/exec /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo/scripts/run-static-verify.sh: no such file or directory
+        
+        ==> ralph org gate: ./scripts/run-static-verify.sh exited -1
+--- PASS: TestProbe_GateScriptThatCannotStart (0.41s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.705s
