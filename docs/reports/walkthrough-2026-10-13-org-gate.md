@@ -54,7 +54,7 @@
 
 ## パイプラインの往復
 
-上限は既定の 2 で、cycle 2 の cross-review は指摘 0 だった。そのあと PR #225 の CI が落ちたので、上限を 3 に上げて cycle 3 を回した。cycle 3 の cross-review が ACTION_REQUIRED 1 件を出したので、上限を 4 に上げて cycle 4 を回した(`cycle-count.json` は 2 のまま)。cycle 4 の cross-review はこのあとで、この表に結果はない。
+上限は既定の 2 で、cycle 2 の cross-review は指摘 0 だった。そのあと PR #225 の CI が落ちたので、上限を 3 に上げて cycle 3 を回した。cycle 3 の cross-review が ACTION_REQUIRED 1 件を出したので、上限を 4 に上げて cycle 4 を回した(`cycle-count.json` は 2 のまま)。cycle 4 の cross-review は指摘 0 だった(表の最後の行)。
 
 | 回 | 見つかったもの | 直した commit |
 |---|---|---|
@@ -74,6 +74,7 @@
 | self-review cycle 4 | LOW C4-1〜C4-3(手順 9 の最初のコミットが空振りする場合と add の範囲、skill の 2 か所の折り返し、テストの doc comment が AC8 を上書きしたと言わない) | 直さない。tech-debt の行の (o)〜(q) |
 | verify cycle 4 | 文書のずれ C4-D1〜C4-D3(この walkthrough、README の gate の段落の順、tech-debt に C4-1〜C4-3 がない) | cycle 4 の sync-docs |
 | test cycle 4 | なし(go1.25.8 と go1.26.0 で pass)。mutation は雛形 13 件が red で、skill の 4 面を旧い順に戻す E が生き残った(締めの順を読むテストがない) | 直さない。tech-debt の行の (r)・(s) |
+| cross-review cycle 4 | なし | - |
 
 ## 実機確認
 
