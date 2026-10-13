@@ -63,3 +63,60 @@ verify の D1〜D3 を文書だけで直した。D4(計画の Progress checklist
 - skill の 4 面の `shasum -a 256`: 1 種類
 - 2 つの quality-gates の「Quality pipeline gate」の行: root の行から `(see docs/tech-debt)` を除くと template の行に一致する(Python で確認)
 - `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない
+
+## Cycle 2
+
+- Date: 2026-10-13(JST)
+- Plan: `docs/plans/active/2026-10-13-org-gate.md`(承認済み。digest は `69f088275e54` で、`- Approved:` の行と同じ。AC の checkbox を付けたあとも変わらない)
+- Pipeline cycle: 2(`--cycle auto`。`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 回の最後)。run 開始時の HEAD は `7f99385e`(run 開始時の値で、この cycle の commit の SHA ではない)。cycle 1 の sync-docs の内容は `6716a028`
+- cycle 1 のあとに入ったもの: `b04289c1`(スクリプトが終わったあと、記録の前に届いた中断も何も記録しない。`recordGate(ctx, ...)`、`withManifestLockContext`、`withFileLockContext`)、cross-review cycle 1 の triage(`789c8864`)、self-review cycle 2(`bedc0ebc`、LOW 6、C2-1 から C2-6)、verify cycle 2(`0bc87603`、pass、C2-D1 と C2-D2)、test cycle 2(`7f99385e`、pass、C2h が生き残り)
+- 項目の番号: C2-1 から C2-6 は self-review cycle 2、C2-D1 と C2-D2 は verify cycle 2 の「Documentation drift(cycle 2)」の表、C2h は test cycle 2 の「Mutation(cycle 2)」の番号
+
+### Summary
+
+b04289c1 が変えた動きを書いた文書は、すべて合っていた。直した文書のずれは 0 件。変えたのは、tech-debt の 1 行、計画の AC の checkbox 13 個、insight event の 1 行で、Go のコード、テスト、`--help` の文字列、leader と reviewer の雛形、skill、`scripts/`、README、AGENTS.md、quality-gates、仕様は触っていない。
+
+verify cycle 2 が挙げた C2-D1(tech-debt に C2-1 から C2-6 の行がない)と C2-D2(計画の AC の checkbox が未チェック)は、この run で閉じた。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md:231`(org-gate の行の末尾、「The gate strips only the variables ...」の行の次) | 新しい 1 行「Small findings of org-gate cycle 2; none changes behavior (all LOW).」を足した。5 列で、既存の「Small findings of org-plan-approval ...」の行と同じ形(Debt に (a) から (i)、Impact、Why deferred、Trigger、Related)。(a) から (f) は self-review cycle 2 の C2-1 から C2-6、(g) は verify cycle 2 の `lockfile.go` の doc の古い記述(情報)、(h) は test cycle 2 の C2h(本物の 5 秒の `manifestLockTimeout` に届くテストがなく、`withFileLockContext` の「timed out after」の枝が未カバー)、(i) は CLI のテスト `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` が 80 回のうち 5 回、5.7 秒前後かかった件(5 秒は `gateKillGrace` と同じ。原因の推測は未確認と書いた)。Related は計画のパス(`docs/plans/active/` のまま。`archive-plan.sh` が `/pr` で書き直す)と、3 つの cycle 2 の report |
+| `docs/plans/active/2026-10-13-org-gate.md:100-112`(`## Acceptance criteria`) | AC1 から AC13 の `- [ ]` を `- [x]` にした(13 行、`git diff --numstat` が 13 / 13)。verify の「Spec compliance」の表は AC1 から AC13 のすべてを「満たす」とし(cycle 2 は b04289c1 を受けて AC5 を見直し、満たすと判断)、test の cycle 1 と cycle 2 の判断は pass で失敗 0 件。AC9 で書き換えた既存の assertion の 3 本は、計画の Notes(177 行)の記録と合っている。これらの checkbox は `## Progress checklist` の外にあるが、依頼が AC の checkbox を付けるよう言ったので付けた。ほかの文は 1 字も変えていない |
+| `docs/insights/events/2026-10-13-org-gate.jsonl` | `sync_docs` の event を 1 行足した(`--slug org-gate`、`--cycle auto`、cycle 2、pass)。既存のファイルへの追記で、新しいファイルは増えていない |
+| この report | `## Cycle 2` を追記 |
+
+tech-debt の行は、コードを `file:line` ではなく関数名・テスト名で指す(依頼は `lockfile.go` の 28-29、34、69 行と書いたが、対応する doc を `manifestLockTimeout`、`manifestLockPollInterval`、`withFileLock` の doc と名前で書いた。この PR の直しで行がずれるため)。
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `internal/cli/org_gate.go` の `--help`(73 行からの「An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing」) | 合う。b04289c1 のあとは、スクリプトが終わってからの中断も何も記録しないので、cycle 1 の時点で文が破れていた窓が閉じた。スクリプトが走っていなければ「stops the running script」は空振りするだけで、誤りではない(verify cycle 2 と同じ判断)。文字列は変えていない |
+| `/org` skill の 4 面(動詞の表の `gate` の行の末尾「SIGINT・SIGTERM・SIGHUP では走っているスクリプトを止め、何も記録しない」、「org の終わり方」の手順 4 の「ツールに切られた gate は何も記録しない」、「gate の記録」の「中断された gate は何も記録しない」) | 合う。変更なし。4 面の sha256 は 1 種類、`./scripts/check-skill-sync.sh` は rc 0(13 skill) |
+| `internal/org/prompts/leader.md`(go:embed。手順 12 の「ツールに切られた gate は何も記録しない」) | 合う。触らない |
+| `docs/quality/quality-gates.md` と `templates/base/docs/quality/quality-gates.md`(「Quality pipeline gate」「Cross-org watch gate」の行)、README の `ralph org gate` の段落、`AGENTS.md:90`、`docs/specs/2026-10-07-org-multi-org-director.md:73`(FR-7 の「7 段目の後半(7b)で決めたこと」) | 変更なし。この 5 か所は中断も manifest のロックの待ちも書いていない(`git grep -i` で `interrupt`・`中断`・`SIGINT`・`SIGTERM`・`SIGHUP`・`ctrl-c` を探して 0 件)ので、b04289c1 が変えたものを記述していない。README に「中断は何も記録しない」を足す案は、help と skill が書いているので採らなかった。7c に残したもの(doctor、status、merge してよい順)と FR-7 の checkbox の扱いは cycle 1 のまま |
+| `docs/tech-debt/README.md` の既存の org-gate の行(`:221` から `:230`)と `:155` | 変更なし。中断に触れるのは SIGKILL で残るスクリプトの行(`ralph org gate` が SIGKILL で切られたときの行)で、「SIGINT、SIGTERM、SIGHUP か command の context の終わりで止まる」は b04289c1 のあとも合う。ロックの 5 秒の timeout の文を引く行はない。コードの指し方はどの行も関数名とテスト名で、行番号は使っていない |
+| `internal/org/lockfile.go` の doc(`manifestLockTimeout`、`manifestLockPollInterval`、`withFileLock`) | ずれあり(Go のコメント。情報)。b04289c1 のあと `withManifestLock` は `withManifestLockContext` から `withFileLockContext` を通り、`withFileLock` は inbox のロック(`inbox.go`)だけが使う。3 つの doc は「`withFileLock` が両方のロックを担う」と書く。cycle 2 は上限の最後で、`.go` の編集は 3 回目の pipeline が要るので、tech-debt の行の (g) に記録し、直していない |
+| `docs/architecture/repo-map.md`、`.claude/rules/ralph/`、`docs/recipes/`、`docs/quality/definition-of-done.md` | 変更なし。cycle 1 の表のとおり。b04289c1 は `gate.go`、`lockfile.go`、`gate_test.go` の 3 ファイルだけで、コマンド、スクリプト、skill、雛形、設定の名前は増えも減りもしていない |
+| `docs/reports/`、`docs/evidence/` | 編集していない(この report を除く)。cycle 1 の「Left open」にあった evidence のホームの絶対パスは、`bf80094a` と test cycle 2 が `~` に直しており、`grep '/Users/[a-z]'` が `docs/evidence/` の org-gate の 10 ファイルで 0 件 |
+
+### Left open
+
+- Go のコメント・文言・テストの直し(C2-1 から C2-6、`lockfile.go` の doc、C2h のテスト、遅い CLI のテスト)は、tech-debt の `:231` に記録した。3 回目の pipeline が要るので、上限の最後のこの run では直さない。直すなら C2-2(中断の文言)、C2-4(`recordGate` の `switch`)、C2-1(コメントの出典)を先にし、C2h は 5 秒のテストか、テストで縮められる `manifestLockTimeout` を選ぶ
+- verify cycle 2 の AC10 の LOW のずれ 2 件(C2-D1、C2-D2)は閉じた
+- 本物の herdr の pane の中の leader が、gate をバックグラウンドで打って信号を送る形は未確認(verify の Coverage gaps。cycle 1 と同じ)
+- cross-review cycle 2 の triage と、release のノート、PR の本文は、この run の範囲に含めていない(`/cross-review`、`/pr`)
+
+### Verification
+
+コミットの前に、worktree のルートで打った。
+
+- `./scripts/check-sync.sh`: rc 0、`IDENTICAL: 167`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `./scripts/check-skill-sync.sh`: rc 0、`13 skill(s) in lock-step`。skill の 4 面の `shasum -a 256` は 1 種類
+- `./scripts/check-template-purity.sh`: rc 0、`PASS: no meta-repo-specific references found in templates.`
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-13-org-gate.md`: `69f088275e54`(AC の checkbox を付けたあとも同じ)
+- tech-debt の新しい行: HEAD の README と比べて既存の 230 行は 1 字も変わらず(先頭からの一致)、新しい行は 5 列(`|` で分けた 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、計画のパスは `docs/plans/active/2026-10-13-org-gate.md` の 1 つ、U+FFFD は 0 件(Python。スクリプトは scratchpad)
+- `./scripts/run-verify.sh`(full): rc 0、`==> All verifiers passed.`。tech-debt の plan 参照の検査(`tech-debt README plan references`)は OK、`check-sync.sh` は `PASS: all files in sync.`、`check-skill-sync.sh` は 13 skill、shell の test は `tests/` の 41 本が通り(FAIL の行 0)、golang の pack は `gofmt: ok`、`0 issues.`、`go test` は test のある 8 パッケージがすべて ok(`internal/cli` 138.8 s、`internal/org` 68.6 s、ほかは `(cached)`)、branch の secret scan は `scanned 1bddc871..7f99385e against origin/main: clean`。この 1 行を足す前の tree で打った。run のあとに変えたのは、この行だけ。wrapper が書いた `docs/evidence/verify-2026-10-13-123656.log` は gitignore の対象で、コミットしていない
+- `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない
