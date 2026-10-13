@@ -423,6 +423,101 @@ func TestOrgStartPlan_DefaultLedgerFromSubdirectory(t *testing.T) {
 	}
 }
 
+// TestOrgStartPlan_ApprovalModeFromMainWorktree is the recording half of
+// AC13 of plan docs/plans/active/2026-10-12-org-plan-approval.md through the
+// CLI: without --config and with the main worktree's ledger, start --plan
+// records the [org.approval].mode of the main checkout's ralph.toml in the
+// binding (`approval=<mode>` after the branch token) and names it in the
+// leader's task, also when it runs from a subdirectory whose own ralph.toml
+// says the other mode, and a main checkout ralph.toml without the section
+// gives the default per-plan. With --config, the --config file's mode is
+// recorded. Both ralph.toml files are committed, so the main checkout stays
+// clean for ralph-worktree.sh.
+func TestOrgStartPlan_ApprovalModeFromMainWorktree(t *testing.T) {
+	approvalToml := func(mode string) string {
+		if mode == "" {
+			return "[org]\nmax_seats = 5\n"
+		}
+		return "[org.approval]\nmode = \"" + mode + "\"\n"
+	}
+	cases := []struct {
+		name                       string
+		mainMode, subMode, cfgMode string // "" for subMode: no ralph.toml there; for cfgMode: no --config
+		want                       string
+	}{
+		{"main checkout split, subdirectory per-plan", "split", "per-plan", "", "split"},
+		{"main checkout per-plan, subdirectory split", "per-plan", "split", "", "per-plan"},
+		{"main checkout without [org.approval], subdirectory split", "", "split", "", "per-plan"},
+		{"--config split, main checkout per-plan", "per-plan", "", "split", "split"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupOrgStubPATH(t)
+			root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
+			sub := filepath.Join(root, "pkg", "sub")
+			if err := os.MkdirAll(sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(root, "ralph.toml"), approvalToml(tc.mainMode))
+			if tc.subMode != "" {
+				writeTestFile(t, filepath.Join(sub, "ralph.toml"), approvalToml(tc.subMode))
+			}
+			runLedgerTestGit(t, "-C", root, "add", ".")
+			runLedgerTestGit(t, "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+				"commit", "--quiet", "-m", "ralph.toml")
+			var extra []string
+			if tc.cfgMode != "" {
+				path := filepath.Join(t.TempDir(), "ralph.toml")
+				writeTestFile(t, path, approvalToml(tc.cfgMode))
+				extra = []string{"--config", path}
+			}
+			t.Chdir(sub)
+			stateDir := filepath.Join(root, ".harness", "state", "org")
+			plan := writeFeatureSplitPlan(t, stateDir, approvedFeatureSplitPlan(t))
+
+			stdout, stderr, err := startOrgFeature(t, plan, "b", extra...)
+			if err != nil {
+				t.Fatalf("start --plan --feature b: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			var reserved *org.ManifestEvent
+			for _, ev := range readManifestEvents(t, org.ManifestPathIn(stateDir)) {
+				if ev.OrgID == "b" && ev.SeatID == "" && ev.Event == org.EventScopeReserved && !ev.DryRun {
+					reserved = &ev
+				}
+			}
+			if reserved == nil || !strings.HasSuffix(reserved.Details, " branch=fix/b approval="+tc.want) {
+				t.Fatalf("expected b's scope_reserved to end with approval=%s after the branch, got %+v", tc.want, reserved)
+			}
+			prompt, err := os.ReadFile(codexPromptPathFor(stateDir, "b", org.LeaderIdentity))
+			if err != nil {
+				t.Fatalf("read the leader's prompt: %v", err)
+			}
+			if line := "\n- 承認方式: " + tc.want + "\n"; !strings.Contains(string(prompt), line) {
+				t.Errorf("expected the leader's task to have %q, got:\n%s", line, prompt)
+			}
+		})
+	}
+}
+
+// TestOrgStartHelp_ApprovalModeSource: `ralph org start --help` says where
+// the approval mode comes from and that it is recorded with the org.
+func TestOrgStartHelp_ApprovalModeSource(t *testing.T) {
+	out, err := runOrgCmd(t, "start", "--help")
+	if err != nil {
+		t.Fatalf("start --help: %v", err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"The org's approval mode, [org.approval].mode (per-plan by default, or split), is read from the same ralph.toml as max_orgs and max_total_seats below",
+		"recorded with the org's binding to the feature and named in the leader's task",
+		"starting a running feature org again with another mode is refused",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("start --help does not say %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestOrgStatus_FeatureLineOnlyForBoundReservation covers AC11's edges: a
 // bound reservation record shows the feature line and the JSON feature
 // object, also when the org has no seat left, while a plain --reserve

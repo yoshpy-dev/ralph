@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // `ralph org start --plan` at the org layer (plan
@@ -258,12 +260,12 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	events := mustReadEvents(t, st.o)
-	wantDetails := "paths=docs/auth.md,internal/auth/ split=auth-split feature=auth-core digest=" + digest + " branch=fix/auth-core"
+	wantDetails := "paths=docs/auth.md,internal/auth/ split=auth-split feature=auth-core digest=" + digest + " branch=fix/auth-core approval=per-plan"
 	if ev := events[0]; ev.Event != EventScopeReserved || ev.OrgID != "auth-core" || ev.Details != wantDetails || ev.Worktree != wt {
 		t.Fatalf("expected the bound scope_reserved first (Details %q, Worktree %q), got %+v", wantDetails, wt, ev)
 	}
 	assertActiveFeature(t, st.o, "auth-core", &FeatureBinding{
-		Split: "auth-split", Feature: "auth-core", Digest: digest, Branch: "fix/auth-core", Worktree: wt,
+		Split: "auth-split", Feature: "auth-core", Digest: digest, Branch: "fix/auth-core", Worktree: wt, Approval: config.ApprovalModePerPlan,
 	})
 	spawned := eventOf(t, st.o, "auth-core", LeaderIdentity, EventSpawned)
 	if spawned.Worktree != wt || spawned.Role != LeaderIdentity || spawned.Driver != "claude" || spawned.Model != "sonnet" ||
@@ -275,7 +277,7 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	}
 
 	feature, _ := res.Split.Feature("auth-core")
-	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core")
+	task := featureLeaderTask(res.Split, feature, st.stateDir, wt, "fix/auth-core", config.ApprovalModePerPlan)
 	if !strings.HasSuffix(task, "\n\nObjective: add the token store.\n\n- [ ] AC1: tokens persist") {
 		t.Fatalf("expected the task to end with the feature's body, got %q", task)
 	}
@@ -295,6 +297,86 @@ func TestStartFeature_StartsLeaderInFeatureWorktree(t *testing.T) {
 	if ledger := "\n- 台帳: " + st.stateDir + "(ralph org のコマンドには必ず --state-dir '" + st.stateDir + "' を付ける)\n"; !strings.Contains(string(prompt), ledger) {
 		t.Fatalf("expected the leader's task to name the ledger with %q, got:\n%s", ledger, prompt)
 	}
+	// st.o's config has no [org.approval] (a zero mode), which start takes
+	// as the default per-plan, in the task as in the binding.
+	if st.o.Config.Approval.Mode != "" || !strings.Contains(string(prompt), "\n- 承認方式: per-plan\n") {
+		t.Fatalf("expected a zero approval mode and the leader's task to say 承認方式: per-plan, got mode %q and:\n%s", st.o.Config.Approval.Mode, prompt)
+	}
+}
+
+// TestStartFeature_RecordsApprovalMode covers AC13's recording at the org
+// layer: start records the approval mode of o.Config in the binding
+// (`approval=<mode>` after the branch token) and names the same mode in the
+// leader's task; a zero mode is per-plan. Starting the running feature org
+// again with another mode is another binding and is refused before the
+// worktree is looked up, with nothing recorded, while the same mode passes
+// as before. A mode that is neither per-plan nor split is refused before
+// anything is recorded.
+func TestStartFeature_RecordsApprovalMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, want string
+	}{
+		{"zero config", "", config.ApprovalModePerPlan},
+		{"per-plan", config.ApprovalModePerPlan, config.ApprovalModePerPlan},
+		{"split", config.ApprovalModeSplit, config.ApprovalModeSplit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			st.o.Config.Approval.Mode = tc.mode
+			st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+
+			reserved := eventOf(t, st.o, "auth-core", "", EventScopeReserved)
+			if !strings.HasSuffix(reserved.Details, " branch=fix/auth-core approval="+tc.want) {
+				t.Fatalf("expected the scope_reserved to end with approval=%s after the branch, got %q", tc.want, reserved.Details)
+			}
+			got := ActiveFeature(mustReadEvents(t, st.o), "auth-core")
+			if got == nil || got.Approval != tc.want || got.RequiresApproval() != (tc.want == config.ApprovalModePerPlan) {
+				t.Fatalf("ActiveFeature = %+v, want approval %s", got, tc.want)
+			}
+			promptPath, err := st.o.promptFilePath("auth-core", LeaderIdentity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt, err := os.ReadFile(promptPath)
+			if err != nil {
+				t.Fatalf("read the leader's prompt: %v", err)
+			}
+			if line := "\n- 承認方式: " + tc.want + "\n- 進め方: "; !strings.Contains(string(prompt), line) {
+				t.Fatalf("expected the leader's task to have %q, got:\n%s", line, prompt)
+			}
+
+			other := config.ApprovalModeSplit
+			if tc.want == config.ApprovalModeSplit {
+				other = config.ApprovalModePerPlan
+			}
+			st.o.Config.Approval.Mode = other
+			before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+			calls := len(st.wt.calls)
+			res := st.o.StartFeature(st.params("auth-core"))
+			assertStartRefused(t, res, `org_id "auth-core" is bound to feature "auth-core" of split plan "auth-split"`,
+				`approval "`+tc.want+`") and reserves`, `approval "`+other+`")`, "ralph org disband --org-id auth-core first")
+			if len(st.wt.calls) != calls {
+				t.Fatalf("expected no worktree call for another mode, got %q", st.wt.calls[calls:])
+			}
+			if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+				t.Fatalf("expected nothing recorded or called for another mode, %+v -> %+v", before, after)
+			}
+
+			st.o.Config.Approval.Mode = tc.mode
+			st.mustStart(t, st.params("auth-core"), SpawnOutcomeIdempotent)
+		})
+	}
+
+	t.Run("an unknown mode", func(t *testing.T) {
+		st := newFeatureStart(t)
+		st.o.Config.Approval.Mode = "auto"
+		res := st.o.StartFeature(st.params("auth-core"))
+		assertStartRefused(t, res, `the split plan feature's approval mode "auto" is not "per-plan" or "split"`)
+		st.wantCalls(t)
+		if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != (spawnSnapshot{}) {
+			t.Fatalf("expected nothing recorded or called, got %+v", after)
+		}
+	})
 }
 
 // TestStartFeature_OrgIDAndTypeDefault: --org-id names the org, the state id
@@ -320,7 +402,7 @@ func TestStartFeature_OrgIDAndTypeDefault(t *testing.T) {
 		t.Fatalf("unexpected ensure %+v", e)
 	}
 	assertActiveFeature(t, st.o, "docs-x", &FeatureBinding{
-		Split: "auth-split", Feature: "auth-docs", Digest: res.Split.Digest, Branch: "feat/auth-docs", Worktree: wt,
+		Split: "auth-split", Feature: "auth-docs", Digest: res.Split.Digest, Branch: "feat/auth-docs", Worktree: wt, Approval: config.ApprovalModePerPlan,
 	})
 }
 
@@ -355,7 +437,8 @@ func TestStartFeature_CanonicalRefIsTheResolvedPlanPath(t *testing.T) {
 // TestStartFeature_OrgIDAtTheLengthLimit pins maxFeatureOrgIDLen at 20,
 // herdr's 32-character agent name less the `_` and "implementer": a feature
 // org with an --org-id of 20 characters starts its leader, and the leader
-// can then spawn the implementer seat in it. One character more is refused
+// can then spawn the implementer seat in it (once its plan is approved, the
+// default per-plan mode). One character more is refused
 // (TestStartFeature_RefusedBeforeAnyRecord).
 func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 	if maxFeatureOrgIDLen != 20 || implementerSeatID != "implementer" {
@@ -367,6 +450,7 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 	if res := st.mustStart(t, p, SpawnOutcomeSpawned); res.OrgID != p.OrgID || res.Worktree != st.worktree(p.OrgID) {
 		t.Fatalf("unexpected result: org %q worktree %q", res.OrgID, res.Worktree)
 	}
+	approveFeaturePlan(t, st.o, p.OrgID, st.worktree(p.OrgID))
 	st.h.paneID = "pane-2"
 	impl := mustSpawnParams(p.OrgID, implementerSeatID)
 	impl.Role = implementerSeatID
@@ -378,7 +462,8 @@ func TestStartFeature_OrgIDAtTheLengthLimit(t *testing.T) {
 // TestStartFeature_SlugAtTheLengthLimit is the default org_id's side of
 // maxFeatureOrgIDLen: without --org-id, a feature whose slug has 20
 // characters starts its leader in the org named by the slug, and the leader
-// can then spawn the implementer seat in it. A slug of 21 characters is
+// can then spawn the implementer seat in it (once its plan is approved, the
+// default per-plan mode). A slug of 21 characters is
 // refused when the split plan is read, before the worktree record is looked
 // up, with nothing recorded.
 func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
@@ -394,6 +479,7 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 		if res.OrgID != slug || res.Worktree != st.worktree(slug) || res.Branch != "feat/"+slug {
 			t.Fatalf("unexpected result: org %q worktree %q branch %q", res.OrgID, res.Worktree, res.Branch)
 		}
+		approveFeaturePlan(t, st.o, slug, st.worktree(slug))
 		st.h.paneID = "pane-2"
 		impl := mustSpawnParams(slug, implementerSeatID)
 		impl.Role = implementerSeatID
@@ -419,19 +505,20 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
 // split plan, feature, worktree, branch, reserved paths, dependencies,
-// procedure and ledger, then the feature's body after a blank line; no
-// dependency reads なし, and an empty body adds nothing. The ledger line's
-// --state-dir is one POSIX shell word, also for a path with a space or a
-// single quote.
+// approval mode, procedure and ledger, then the feature's body after a blank
+// line; no dependency reads なし, and an empty body adds nothing. The ledger
+// line's --state-dir is one POSIX shell word, also for a path with a space
+// or a single quote.
 func TestFeatureLeaderTask(t *testing.T) {
 	plan := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
-	head := func(slug, worktree, branch, reserve, deps, ledger string) string {
+	head := func(slug, worktree, branch, reserve, deps, approval, ledger string) string {
 		return "- 分割計画: auth-split(/state/splits/auth-split.md、承認の digest 0123456789ab)\n" +
 			"- 機能: " + slug + "\n" +
 			"- worktree: " + worktree + "(leader の cwd)\n" +
 			"- ブランチ: " + branch + "\n" +
 			"- 予約したパス: " + reserve + "\n" +
 			"- 依存する機能: " + deps + "\n" +
+			"- 承認方式: " + approval + "\n" +
 			"- 進め方: `/org` skill の「機能ごとの org」の手順に従う\n" +
 			"- 台帳: " + ledger
 	}
@@ -439,19 +526,19 @@ func TestFeatureLeaderTask(t *testing.T) {
 		Slug: "auth-docs", Type: "feat", Reserve: []string{"docs/auth/", "docs/x.md"},
 		DependsOn: []string{"auth-core", "auth-api"}, Body: "Objective: document it.\n\n- [ ] AC1",
 	}
-	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs")
-	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", "docs/auth/, docs/x.md", "auth-core, auth-api",
+	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan)
+	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", "docs/auth/, docs/x.md", "auth-core, auth-api", "per-plan",
 		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)") +
 		"\n\nObjective: document it.\n\n- [ ] AC1"
 	if got != want {
 		t.Errorf("task =\n%s\nwant\n%s", got, want)
 	}
 	bare := SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"internal/auth/"}}
-	for _, c := range []struct{ stateDir, ledger string }{
-		{"/my ledgers/org", "/my ledgers/org(ralph org のコマンドには必ず --state-dir '/my ledgers/org' を付ける)"},
-		{"/it's/org", `/it's/org(ralph org のコマンドには必ず --state-dir '/it'\''s/org' を付ける)`},
+	for _, c := range []struct{ stateDir, approval, ledger string }{
+		{"/my ledgers/org", config.ApprovalModeSplit, "/my ledgers/org(ralph org のコマンドには必ず --state-dir '/my ledgers/org' を付ける)"},
+		{"/it's/org", config.ApprovalModePerPlan, `/it's/org(ralph org のコマンドには必ず --state-dir '/it'\''s/org' を付ける)`},
 	} {
-		if got, want := featureLeaderTask(plan, bare, c.stateDir, "/wt", "fix/auth-core"), head("auth-core", "/wt", "fix/auth-core", "internal/auth/", "なし", c.ledger); got != want {
+		if got, want := featureLeaderTask(plan, bare, c.stateDir, "/wt", "fix/auth-core", c.approval), head("auth-core", "/wt", "fix/auth-core", "internal/auth/", "なし", c.approval, c.ledger); got != want {
 			t.Errorf("task =\n%s\nwant\n%s", got, want)
 		}
 	}
@@ -464,7 +551,7 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
 	f := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
 	for _, dir := range []string{"/plain/org", "/my ledgers/org", "/it's/org", "/a'b'/c", `/$HOME/*/"q"/\x/` + "`id`"} {
-		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a")
+		task := featureLeaderTask(plan, f, dir, "/wt", "feat/a", config.ApprovalModePerPlan)
 		_, rest, ok := strings.Cut(task, "--state-dir ")
 		word, _, ok2 := strings.Cut(rest, " を付ける)")
 		if !ok || !ok2 {
@@ -827,6 +914,7 @@ func TestStartFeature_AfterDisband(t *testing.T) {
 		wantRecord(t, st)
 		assertActiveFeature(t, st.o, "auth-core", &FeatureBinding{
 			Split: "auth-split", Feature: "auth-core", Digest: planDigestOf(t, st.plan), Branch: "fix/auth-core", Worktree: wt,
+			Approval: config.ApprovalModePerPlan,
 		})
 	})
 }
@@ -1152,7 +1240,9 @@ func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 // goes on (spawned or idempotent), and otherwise Spawn's own refusal. The
 // cases cover each check of Spawn's locked sections and each path into them:
 // a new seat, the idempotent return (active, and legacy inactive), and a
-// stale in-flight seat, which Spawn compensates before it counts seats.
+// stale in-flight seat, which Spawn compensates before it counts seats. The
+// feature org's checks (its leader and its approval) are among them, for a
+// new seat, an active one and a stale one.
 func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 	f := testFeature("split-1", "auth", "0123456789ab")
 	bound := featureLeaderParams("org-a", f, "internal/auth/")
@@ -1223,6 +1313,52 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 		{"an unverified codex leader", nil, with(bound, func(p *SpawnParams) { p.Driver, p.Model = "codex", "gpt-5-codex" }), "requires [org.permissions].codex_verified=true"},
 		{"an autonomous worker without scope", nil, with(mustSpawnParams("org-a", "seat-1"), func(p *SpawnParams) { p.Scope = "" }),
 			"autonomous permission mode requires --scope or --reserve"},
+		// The feature org's checks (spawnFeatureSeatErr), after the capacity
+		// check: its leader, then, in per-plan mode, its approval.
+		{"a feature org's implementer before any approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+		}, implementerParams("org-a"), `no plan of org_id "org-a" has been approved since its last disband`},
+		{"a feature org's implementer, approved", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Worktree = t.TempDir()
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			approveFeaturePlan(t, o, "org-a", g.Worktree)
+			h.paneID = "pane-2"
+		}, implementerParams("org-a"), ""},
+		{"a feature org's reviewer before any approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			h.paneID = "pane-2"
+		}, reviewerParams("org-a"), ""},
+		{"a split feature org's implementer", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Approval = config.ApprovalModeSplit
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			h.paneID = "pane-2"
+		}, implementerParams("org-a"), ""},
+		{"a feature org's reviewer, leader stopped", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			if r := o.Stop(StopParams{OrgID: "org-a", Seat: LeaderIdentity}); r.Err != nil {
+				t.Fatalf("stop: %v", r.Err)
+			}
+		}, reviewerParams("org-a"), `org_id "org-a" was started with ralph org start --plan and its leader seat is not running`},
+		{"a feature org's active implementer, plan changed since", func(t *testing.T, o *Org, h *fakeHerdr) {
+			g := *f
+			g.Worktree = t.TempDir()
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", &g, "internal/auth/")
+			approveFeaturePlan(t, o, "org-a", g.Worktree)
+			h.paneID = "pane-2"
+			if r := o.Spawn(implementerParams("org-a")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn the implementer: %+v", r)
+			}
+			writePlan(t, g.Worktree, testPlanRel, testPlanDraft)
+		}, implementerParams("org-a"), ""},
+		{"a stale implementer of a feature org with no approval", func(t *testing.T, o *Org, h *fakeHerdr) {
+			spawnFeatureLeaderIn(t, o, h, "org-a", "ws-a", "pane-1", f, "internal/auth/")
+			if err := o.Manifest.Append(ManifestEvent{OrgID: "org-a", SeatID: implementerSeatID, Event: EventSpawnStarted,
+				Role: implementerRole, Driver: "claude", Model: "sonnet"}); err != nil {
+				t.Fatal(err)
+			}
+		}, implementerParams("org-a"), `no plan of org_id "org-a" has been approved since its last disband`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, h, _ := testOrg(t)

@@ -36,10 +36,12 @@ func newOrgCmd() *cobra.Command {
 			"disbanding an entire org_id. Every verb records its outcome to an\n" +
 			"append-only manifest so `ralph org status` works even with herdr/agmsg\n" +
 			"absent or stopped. `ralph org escalate` and `ralph org inbox` keep the\n" +
-			"org inbox, which every org in the ledger shares, next to the manifest.",
+			"org inbox, which every org in the ledger shares, next to the manifest,\n" +
+			"and `ralph org approve` records a human's approval of the plan a feature\n" +
+			"org's leader asked for there.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, approve, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
 
@@ -56,6 +58,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgWatchCmd(&orgID, &stateDir, &configPath),
 		newOrgEscalateCmd(&orgID, &stateDir, &configPath),
 		newOrgInboxCmd(&stateDir, &configPath),
+		newOrgApproveCmd(&stateDir, &configPath),
 	)
 
 	return cmd
@@ -138,20 +141,24 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	return rt, nil
 }
 
-// withMainWorktreeOrgLimits returns cfg with MaxOrgs and MaxTotalSeats taken
-// from <main worktree root>/ralph.toml (built-in defaults when that file does
-// not exist, as config.Load reads it) when configPath is empty and the ledger
-// is the main worktree's (org.LedgerMainWorktreeRoot): org.ResolveOrgStateDir
-// placed it there (source "git-main-worktree"), or --state-dir or
-// RALPH_ORG_STATE_DIR names the .harness/state/org of the main worktree of the
-// repository spawn runs in, as a feature org's leader does. Every org_id in
-// that ledger then gets the same org-wide limits, whichever subdirectory or
-// linked worktree (with its own ./ralph.toml) spawn runs in (plan
-// 2026-10-08-org-limits-reserve, Codex plan advisory 2). With --config, a
-// state dir from --state-dir or RALPH_ORG_STATE_DIR naming another
-// directory, or any other source, cfg is returned unchanged. No other setting
-// is read from the main worktree. A main worktree ralph.toml that fails to
-// load is an error, not a fallback.
+// withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
+// Approval taken from <main worktree root>/ralph.toml (built-in defaults when
+// that file does not exist, as config.Load reads it) when configPath is empty
+// and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
+// org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
+// --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
+// worktree of the repository spawn runs in, as a feature org's leader does.
+// Every org_id in that ledger then gets the same org-wide limits, whichever
+// subdirectory or linked worktree (with its own ./ralph.toml) spawn runs in
+// (plan 2026-10-08-org-limits-reserve, Codex plan advisory 2). Approval
+// ([org.approval]) is read only by `ralph org start --plan`, which records it
+// in the org's feature binding, by the same rule, so a feature worktree's
+// copy of ralph.toml, which its leader can change, does not choose the mode
+// (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
+// --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
+// another directory, or any other source, cfg is returned unchanged. No
+// other setting is read from the main worktree. A main worktree ralph.toml
+// that fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	if configPath != "" {
 		return cfg, nil
@@ -163,9 +170,10 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 	path := filepath.Join(root, "ralph.toml")
 	mainCfg, err := config.Load(path)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs and max_total_seats from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs, max_total_seats and [org.approval].mode from the main worktree's %s: %w", path, err)
 	}
 	cfg.MaxOrgs, cfg.MaxTotalSeats = mainCfg.Org.MaxOrgs, mainCfg.Org.MaxTotalSeats
+	cfg.Approval = mainCfg.Org.Approval
 	return cfg, nil
 }
 
@@ -518,7 +526,15 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"A spawn, --dry-run included, is refused while no long-running\n" +
 			"`ralph org watch --all` (not stopping, not a --once run) runs on the\n" +
-			"ledger; the refusal says how to start one or stop a stale one.",
+			"ledger; the refusal says how to start one or stop a stale one.\n" +
+			"\n" +
+			"In an org started with `ralph org start --plan`, a spawn of any seat\n" +
+			"but the leader is refused while the org's leader seat is not running.\n" +
+			"When the org's approval mode (the [org.approval].mode recorded when\n" +
+			"the org was started) is per-plan, a spawn of a seat whose role is\n" +
+			"implementer is also refused until an approval recorded with\n" +
+			"`ralph org approve` since the org's last disband matches the plan\n" +
+			"file. Either refusal, --dry-run included, is recorded as `rejected`.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -679,7 +695,12 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"worktree; a start into a running org that was not started for that\n" +
 			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
 			"branch; `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes\n" +
-			"them.\n" +
+			"them. The org's approval mode, [org.approval].mode (per-plan by\n" +
+			"default, or split), is read from the same ralph.toml as max_orgs and\n" +
+			"max_total_seats below, recorded with the org's binding to the feature\n" +
+			"and named in the leader's task, so a change to the setting applies to\n" +
+			"orgs started after it; starting a running feature org again with\n" +
+			"another mode is refused.\n" +
 			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
@@ -872,7 +893,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
 			"included, is refused while no long-running `ralph org watch --all`\n" +
-			"(not stopping, not a --once run) runs on the ledger.",
+			"(not stopping, not a --once run) runs on the ledger.\n" +
+			"\n" +
+			"In an org started with `ralph org start --plan` whose approval mode is\n" +
+			"per-plan, a TASK to a seat whose role is implementer, --raw and\n" +
+			"--dry-run included, is refused with nothing recorded unless its header\n" +
+			"has exactly one `PLAN: <path in the worktree> sha256:<digest>` line\n" +
+			"and that plan matches an approval recorded with `ralph org approve`.\n" +
+			"The refusal says what the check found, then\n" +
+			"`refused by the approval check` and the next step.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if enterDelayMS < 0 {
 				return fmt.Errorf("org: --enter-delay-ms must be >= 0")

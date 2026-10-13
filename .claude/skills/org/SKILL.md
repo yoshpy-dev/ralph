@@ -165,8 +165,8 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 
 | 動詞 | 用途 | 代表例 |
 |---|---|---|
-| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--cwd`(座席の作業ディレクトリ。相対パスはコマンドを打った場所を基準に絶対パスにしてから herdr に渡し、台帳にも絶対パスで記録する)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。台帳で長時間動く `ralph org watch --all`(止まりかけでも `--once` でもないもの)が running でなければ、`--dry-run` も含めて終了コード 1 で断られる(stdout に `rejected: ...`。台帳にも receipt にも何も書かず、herdr と agmsg も呼ばない)。見張りが stale(ロックはあるが印が古いか、まだない)のときは最大 2 秒待ち、その間に running になれば通る。エラーは見張りの状態ごとに次の手を示す(「permission 作法」節の長時間運用の項)。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
-| `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。TYPE が `TASK` のメッセージは、宛先の役割を問わず、`spawn` と同じ見張りの検査に通らなければ `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない。`--raw` のメッセージも 1 行目の `TYPE:` で読み(値の前後の空白を除き、大文字小文字はそのままで `TASK` と一致すれば TASK)、1 行目が `TYPE:` でなければ TASK とみなさない。TASK 以外の TYPE は見張りがなくても送れる。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
+| `spawn` | 座席を起動。`--role`(役割別プロンプト雛形を自動展開)、`--scope`(担当範囲の説明。autonomous では必須)、`--driver`(claude\|codex)、`--model`(運用上必須。省略時はプール先頭へ警告付きフォールバック)、`--cwd`(座席の作業ディレクトリ。相対パスはコマンドを打った場所を基準に絶対パスにしてから herdr に渡し、台帳にも絶対パスで記録する)、`--dry-run`(実起動せず検証・記録のみ)、`--allow-unscoped`(--scope 省略を明示的に許可。使用は manifest に記録される)、`--leader-driver`(leader 識別子の agmsg type 導出元)、`--reserve`(org の担当範囲を repo ルート相対のパスで予約。末尾 `/` はディレクトリ、`.` は repo 全体。走っている他の org の予約と重なれば拒否、`disband` で解放。leader 座席のみ。`--scope` の要件も満たす。「全 org の上限と予約」節)。autonomous モードの座席は `--scope` 必須、省略時は fail-closed。台帳で長時間動く `ralph org watch --all`(止まりかけでも `--once` でもないもの)が running でなければ、`--dry-run` も含めて終了コード 1 で断られる(stdout に `rejected: ...`。台帳にも receipt にも何も書かず、herdr と agmsg も呼ばない)。見張りが stale(ロックはあるが印が古いか、まだない)のときは最大 2 秒待ち、その間に running になれば通る。エラーは見張りの状態ごとに次の手を示す(「permission 作法」節の長時間運用の項)。`start --plan` で立てた org では、leader の座席が動いていないと leader 以外の座席は承認方式を問わず断られ、承認方式が `per-plan` なら、人が承認した計画がない間は role が `implementer` の座席も断られる(どちらも上限の拒否と同じく `rejected` と receipt を書き、`--dry-run` も同じ答えを返す。「機能の計画の承認」節)。 | `ralph org spawn --org-id X --id reviewer-1 --role reviewer --scope "internal/org/**" --driver claude --model sonnet --cwd .` |
+| `send` | 座席へ typed protocol メッセージを送る。既定で `.claude/rules/ralph/agent-messaging.md` のプロトコルを検証(TYPE 列挙・TASK_ID 必須チェック・本文 2,000 文字上限)。`--raw` で検証をバイパス(bypass は manifest に `raw=true` で記録される。デバッグ用途以外は使わない)。TYPE が `TASK` のメッセージは、宛先の役割を問わず、`spawn` と同じ見張りの検査に通らなければ `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない。`--raw` のメッセージも 1 行目の `TYPE:` で読み(値の前後の空白を除き、大文字小文字はそのままで `TASK` と一致すれば TASK)、1 行目が `TYPE:` でなければ TASK とみなさない。TASK 以外の TYPE は見張りがなくても送れる。承認方式が `per-plan` の `start --plan` の org では、role が `implementer` の座席への TASK は、人が承認した計画を指す `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行なければ、`--raw` と `--dry-run` も含めて終了コード 1 で断られ、何も記録せず pane にも何も送らない(reviewer への TASK と TASK 以外の TYPE は承認なしで送れる。「機能の計画の承認」節)。本文を入力してから 750ms 待って Enter を 1 回送り(`--enter-delay-ms` で変更可。待ちがないと idle の codex 座席で本文が入力欄に残ることがある)、herdr の状態が working / blocked に変わったかで submit を確認する。確認できなければ manifest に `submit_unconfirmed=true` を記録して stderr に注意を出す(exit code は 0)。その場合は `read` で pane を確認し、本文が入力欄に残っているときだけ `herdr pane send-keys <pane> Enter` を送る。ralph は Enter を再送しない(submit 済みの座席が承認ダイアログを出していると、盲目的な Enter がそれを承認してしまうため)。`--timeout-ms` の残りが Enter 前の待ちを賄えないときは何も入力せずエラーで終わる。エラーで終了して stderr に note が出た場合はそれに従う(pane に何も送る前の失敗、たとえば検証エラー・座席なし・`--timeout-ms` の不足では note は出ず、そのまま送り直せる)。note は pane への操作がどこまで進んだかで変わり、どれも先に `read` で pane を確認するよう求める(`--state-dir` を明示していれば、note の `ralph org read` にも付く)。herdr の呼び出しが `--timeout-ms` で打ち切られると、本文や Enter が届いていてもエラーになるため、ralph は推測せず「届いたか分からない」まま note に書く。次に何をすべきかは note の指示に従う。 | `ralph org send --org-id X --to reviewer-1 --text "$(cat task.txt)"` |
 | `wait` | 座席が指定状態(idle/done/blocked など)になるまでブロックして待つ。`--until` 既定は `idle,done`(herdr は入力待ちで休止中の対話エージェントを `idle` ではなく `done` と報告するため、両方を既定で待つ)。`--timeout-ms` 既定は 60000(有界)。無期限待機したい場合のみ明示的に `--timeout-ms 0` を渡す。`--inbox` は座席ではなく受信箱を待つ(「受信箱」節)。`--org-id` と `--seat` は要らず、`--org-id` / `--seat` / `--until` との併用は拒否される。open の件があればすぐ返り、なければ 1 秒ごとに読み直して open の件が届いた時点で返り、open の件を 1 行ずつ(ID、org、TYPE、本文の 1 行目)出す。acked の件では返らない。`--timeout-ms` の扱いは同じ(届かなければ終了コード 1、`0` で無期限)。 | `ralph org wait --org-id X --seat reviewer-1`、`ralph org wait --inbox --timeout-ms 0` |
 | `read` | 座席の直近 pane 出力を読む。 | `ralph org read --org-id X --seat reviewer-1 --lines 100` |
 | `status` | 座席台帳(roster)を表示。`--all` で dry-run 座席も含める。org に予約があれば `reserved:` の行も出す(`--json` は `reservation`)。`start --plan` で立てた org には、その次に `feature: <split>/<slug> branch <branch> worktree <path>` の行も出す(`--json` は `feature`。キーは `split`・`feature`・`digest`・`branch`・`worktree`)。壊れた記録から読んだ結びつきは、行の末尾に `(incomplete record)` が付き、`--json` に `"incomplete": true` が足される。 | `ralph org status --org-id X --all` |
@@ -174,9 +174,10 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 | `disband` | org を解散する。active な座席を `stop` と同じ手順で止めたあと、台帳に記録した org の herdr workspace を閉じて `org_workspace_closed` を記録し、すべて閉じられたときだけ `disbanded` を書く。止められなかった座席か閉じられなかった workspace があれば `disbanded` を書かず、それを stderr に並べて終了コード 1(座席が 1 つでも止まらなければ workspace は閉じない)。打ち直すと残りを片付ける。`--all` は `--org-id` なしで、まだ解散していない全 org を解散する(`--org-id` とは併用不可。解散できなかった org は次の `--all` でまた対象になる。古い ralph の `disband` が workspace を閉じずに残した org も対象になる)。`--force` は閉じられなかった座席にも `stopped`、workspace にも `org_workspace_closed` を書いて `disbanded` まで記録し、失敗を警告にして終了コード 0。`--force` でも、label で org のものと確かめた workspace は閉じるので、tab の確認に落ちた座席の pane も workspace と一緒に終わる。コマンドを打った pane とそれを含む workspace(`HERDR_PANE_ID` / `HERDR_WORKSPACE_ID`)は、ほかがすべて閉じたときだけ、記録と出力を済ませてから最後に閉じる(コマンドもそこで終わる)。ほかに閉じられなかったものがあれば手を付けずに残すので、打ったセッションは失敗の一覧を見られる。最後の close が失敗したときは、その pane の座席を active に、後回しにした workspace を open に、予約があればそれも戻して終了コード 1 にする(打ち直すか別の pane の `--all` で閉じ直せる。台帳に新しい記録があるとき、台帳を読み書きできないときは戻さず、エラーが手で閉じる herdr のコマンドを示す。`--force` は戻さず警告で終了コード 0)。閉じるのは台帳に記録した pane と workspace だけで、workspace も label が org_id でなければ閉じずに終了コード 1 にする。解散した org_id でまた `spawn` すると新しい workspace を作る(最後の close の失敗で開き直した workspace は再利用する)。 | `ralph org disband --org-id X`、`ralph org disband --all` |
 | `report` | manifest + receipts から編成履歴を `docs/reports/org-manifest-<org_id>-<date>.md` に書き出す。 | `ralph org report --org-id X` |
 | `watch` | 台帳のすべての org を 1 つのプロセスで見張る。`--all` が必須で、`--org-id` は拒否される(1 org ごとの watch は廃止した)。`--interval-seconds`(既定は `[org.watchdog].interval_seconds` の 30 秒)ごとの 1 サイクルで、まず受信箱の期限が切れた件を人へ送り(「受信箱」節)、次に走っている org ごとにパルス層の決定論監視(stall/生存/スコープ変更の ALERT を leader へ送る・デッドマン時の人間エスカレーション)を回し、最後に生存の印 `<台帳>/watch-alive.json` を書く(印には見張り自身の `deadman_minutes` と、`--once` の見張りなら `once` も入る)。herdr・agmsg・git の呼び出しは 1 回 10 秒で打ち切り、1 つの org の失敗は stderr に 1 行書いてその org だけ飛ばす。台帳の下の `watch.lock` を持ち続けるので、同じ台帳に 2 つ目の `watch --all` を起動すると、1 つ目の pid を添えて終了コード 1 で断られる。起動の行(`watching every org ...`)はロックを取ってから出すので、断られた 2 つ目は出さない。SIGINT と SIGTERM では、そのサイクルを終えてから止まる。`--once` は 1 サイクルで終わり、動いている間も新しい作業を受け付けない(`spawn` と TASK の `send` は断られる)。`--detach` は見張りを切り離したプロセスで起動し(stdout と stderr は `<台帳>/watch.log` に追記)、その印が running になったら `started`・pid・`watch.log` のパスを出して終了コード 0 で返る。起動したプロセスは台帳の main worktree のルート(求められなければ打った場所)で動き、`--config` を絶対パスで受け取り、環境から `HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_ENV` を外される。main worktree のルートで動くときは、相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)は、打った場所から絶対パスにして渡される。`--config` を渡さなければ main worktree のルートの `ralph.toml` を読む。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1。長時間動く見張りがすでに動いていれば、何も起動せず `already running (pid N)` を出して終了コード 0。同時に打った別の `--detach` か start の見張りが先にロックを取った場合は、自分の子を起動したうえで、その子がロックを断られて終わるのを待ち(最大で約 3 秒)、同じく `already running (pid N)` を出して終了コード 0 で返る。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ終了コード 1。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せず終了コード 1(終わってから打ち直す)。`--stop` はシグナルを送らず、`<台帳>/watch-stop.json` に止める頼みを書いて、見張りが止まるまで最大 30 秒待つ(動いていなければ終了コード 0)。見張りが止まるのは、そのサイクルを終え、実行中のオンデマンド watcher の呼び出しの待ちも終えてから。その待ちの間は印が `stopping` になり(ロックは持ったまま。新しい作業は受け付けない)、終えてから `stopped` を書いてロックを放す。長時間動かしている見張りはその呼び出しを取り消すので待ちはすぐ終わり、`--once` の見張りは取り消さずに待つので、最大でおよそ 70 秒(呼び出し 60 秒 + ALERT の送信 10 秒)かかる。意味判定はトリガー時のみオンデマンド LLM(watcher_model。全 org で同時に 1 つまで)。 | `ralph org watch --all --detach`、`ralph org watch --stop` |
-| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。形は 2 つ。`start --plan <分割計画> --feature <slug>` は、分割計画の 1 つの機能のための org を立てる(「機能ごとの org」節)。org_id は既定で slug で、`--org-id` で変えられる。worktree・予約・機能との結びつき・タスクを分割計画から作るので、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / 位置引数の task との併用、`--plan` と `--feature` の片方だけ、空白の値は拒否される。`start <task>` は `--cwd` の場所に leader を立て、`<task>` をタスクにする。分割計画には結びつかず、worktree も作らない。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。どちらの形も、leader を立てる前に横断の見張りを確かめる。長時間動く見張りが running ならそのまま進む。動いていなければ、`watch --all --detach` と同じ方法で見張りを起動し(start に渡した `--config` は絶対パスにして渡す。相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)も、打った場所から絶対パスにして渡す。間隔は設定の値)、その印が running になるまで最大 10 秒待ってから進み、stderr に pid と `watch.log` のパスを 1 行出す。同時に打った別の start か `--detach` の見張りが先にロックを取っても、running になれば進む(start が起動した子はロックを断られて終わるので、その終わりを最大で約 3 秒待ってから進む)。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1(leader は立てない)。起動した見張りは start が終わっても動き続ける(止めるのは `watch --stop`)。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ断る。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せずにすぐ断る(終わってから打ち直す)。見張りを確かめるのは、フラグ・分割計画・座席の入力(id の形、予約のパス)の検査のあとなので、それらで断られる start は見張りを起動しない。それより後の検査(エンベロープ、`--scope`、上限、予約の重なり、worktree)で断られた start でも、起動した見張りは動き続ける。 | `ralph org start --plan .harness/state/org/splits/auth.md --feature auth-token --driver claude --model opus`、`ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
+| `start` | headless leader 座席を spawn する糖衣(`spawn --role leader` 相当。`leader.md` 雛形にタスクを展開)。形は 2 つ。`start --plan <分割計画> --feature <slug>` は、分割計画の 1 つの機能のための org を立てる(「機能ごとの org」節)。org_id は既定で slug で、`--org-id` で変えられる。worktree・予約・機能との結びつき・タスクを分割計画から作るので、`--cwd` / `--scope` / `--reserve` / `--allow-unscoped` / 位置引数の task との併用、`--plan` と `--feature` の片方だけ、空白の値は拒否される。`[org.approval].mode` を機能との結びつきに記録し、leader のタスクに `- 承認方式:` の行を入れる(`--config` がなく台帳が main worktree のものなら、main worktree のルートの `ralph.toml` から読む。「機能の計画の承認」節)。`start <task>` は `--cwd` の場所に leader を立て、`<task>` をタスクにする。分割計画には結びつかず、worktree も作らない。leader も他の座席と同じ AC-2b ゲートの対象(autonomous 既定では `--scope` 必須)。`--reserve <path>`(`spawn` と同じ。繰り返し可)で org の担当範囲を予約でき、渡せば `--scope` の代わりになる。どちらの形も、leader を立てる前に横断の見張りを確かめる。長時間動く見張りが running ならそのまま進む。動いていなければ、`watch --all --detach` と同じ方法で見張りを起動し(start に渡した `--config` は絶対パスにして渡す。相対の `RALPH_ORG_AGMSG_HOME`(空か未設定なら、渡した `--config` の相対の `agmsg_home`)も、打った場所から絶対パスにして渡す。間隔は設定の値)、その印が running になるまで最大 10 秒待ってから進み、stderr に pid と `watch.log` のパスを 1 行出す。同時に打った別の start か `--detach` の見張りが先にロックを取っても、running になれば進む(start が起動した子はロックを断られて終わるので、その終わりを最大で約 3 秒待ってから進む)。10 秒で running にならなければ、起動したプロセスを止めて終了コード 1(leader は立てない)。起動した見張りは start が終わっても動き続ける(止めるのは `watch --stop`)。ロックを持つ見張りが stale なら、起動せず最大 10 秒 running になるのを待ち、ならなければ断る。待つ間に持ち主が終われば、見張りを起動して進む。止まりかけ(stopping)か `--once` の見張りなら、起動せずにすぐ断る(終わってから打ち直す)。見張りを確かめるのは、フラグ・分割計画・座席の入力(id の形、予約のパス)の検査のあとなので、それらで断られる start は見張りを起動しない。それより後の検査(エンベロープ、`--scope`、上限、予約の重なり、worktree)で断られた start でも、起動した見張りは動き続ける。 | `ralph org start --plan .harness/state/org/splits/auth.md --feature auth-token --driver claude --model opus`、`ralph org start --org-id X --cwd . --scope "org-a 全体の編成・統括" "<task>"` |
 | `escalate` | leader が受信箱に件を上げる(「受信箱」節)。`--text` は typed message で、TYPE は `QUESTION`(判断がほしい)・`BLOCKED`(進めない)・`RESULT`(終わった)のどれか。`BLOCKED` と `RESULT` は TASK_ID が必須で、org 全体の件には org_id を入れる。本文は 2,000 文字まで。検査に通らなければ終了コード 1 で、何も書かない。通れば件を記録して stdout に `escalated <id> (org=<org_id> type=<TYPE>)` を出し(ID は `e1`、`e2`、…)、続けて人に知らせる。記録はできたが通知が終わらなかったときは、ID を出したうえで終了コード 1 になる。そのときは `inbox notify <id>` で送り直す(escalate を打ち直すと別の件が増える)。受信箱に書けなかったときも、`ralph.toml` を読めなかったときも、stderr の表示とデスクトップ通知を出してから終了コード 1 になる(ID は出ない)。メッセージのファイルの置き場所と書き方は「受信箱」節。 | `ralph org escalate --org-id X --text "$(cat .harness/state/escalate-X.txt)"` |
 | `inbox` | 受信箱の件を一覧する。既定は open と acked、`--all` で resolved も、`--json` で機械向けの形。列は `ID` / `STATE` / `ORG` / `TYPE` / `TASK_ID` / `ESCALATED_AT` / `NOTIFIED` / `SUMMARY`(本文の 1 行目)。読めない行と無視したイベントは数を stderr に出す。`inbox show <id>` は件の欄・本文・履歴を出す(`--json` も可)。一覧と `show` のテキストの出力は、制御文字を `\x1b` のようにエスケープする。`inbox ack <id>` は open を acked にする(acked にもう一度打つと何もせず終了コード 0)。`inbox resolve <id> --note <ポインタ>` は open か acked を resolved にする。note は必須で、report のパスや PR の URL のようなポインタを 1 行、500 文字まで、制御文字なしで書く。`inbox notify <id>` は人への通知を同じ ID のまま送り直す。`show` は知らない ID で、`ack` / `resolve` / `notify` は知らない ID と resolved の件で、終了コード 1 になる。受信箱は台帳の全 org が共有するので、`inbox` の動詞は `--org-id` を拒否する。 | `ralph org inbox`、`ralph org inbox show e3`、`ralph org inbox resolve e3 --note docs/reports/org-manifest-X-<date>.md` |
+| `approve` | 機能の org の leader が計画の承認を求めて受信箱に上げた QUESTION について、人の承認を台帳に記録する(「機能の計画の承認」節)。引数は受信箱の件の ID で、1 つ以上。件ごとに、件があって resolved でない QUESTION であること、`PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行あること、件の org が `start --plan` の結びつきを持ち、そのあと disband されていないこと、パスが機能の worktree の中の普通のファイルであること(絶対パス、`..`、worktree の外を指す symlink は断る)、今のファイルの digest がヘッダの digest と一致することを確かめる。1 つでも通らなければ、どの件も記録も resolve もせず、通らなかった件と理由を並べて終了コード 1。すべて通れば、件ごとに manifest に `plan_approved`(パス、digest、ファイルの全文のハッシュ、件の ID と、打った人の `USER`、`HERDR_PANE_ID` の有無、cwd)を書いて件を resolve し、`approved <ID> (org=<org> plan=<path> sha256:<digest>)` の行と、leader に知らせる `ralph org send` の DECISION のコマンドを出す。approve は leader に送らず、計画のファイルも書き換えない。resolve に失敗したときは記録を残し、`ralph org inbox resolve` の打ち方を示して終了コード 1(approve が受信箱を読んだあとにほかの誰かが件を resolve していたときは、打ち方は示さず、承認は記録してあると言い、その人が直しを求めたかもしれないので、leader への承認の DECISION はまだ送らず、先に `ralph org inbox show <ID>` で resolve の note を読むよう言う)。`HERDR_PANE_ID` が動いている座席の pane と同じなら、何も読まずに断る(座席の pane から打った approve を止める仕掛けで、境界ではない)。org は件から決まるので `--org-id` は断る(`--state-dir` と `--config` は使える)。承認方式が `split` の org の件も記録し、stderr にそう出す。 | `ralph org approve e3 e5` |
 
 ## 全 org の上限と予約
 
@@ -227,7 +228,9 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 使う。`--config` を渡したとき、`--state-dir` か `RALPH_ORG_STATE_DIR` でほかの
 場所の台帳を指したとき、台帳を git の toplevel から決めたとき(main worktree を
 決められない bare リポジトリの linked worktree)、git の外のときがこれに
-当たる。`max_seats` とほかの設定の読み方は変わらない。
+当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode` も同じ
+規則で読む(「機能の計画の承認」)。`max_seats` とほかの設定の読み方は
+変わらない。
 
 ### 担当範囲の予約(`--reserve`)
 
@@ -258,7 +261,8 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
   で知らせる。
 - `ralph org start --plan` で立てた org の予約は、`--reserve` ではなく分割計画
   の機能の `- Reserve:` から作る(パスの規則は同じ)。その予約の記録には機能
-  との結びつき(分割計画の id、slug、digest、ブランチ、worktree)が入る。
+  との結びつき(分割計画の id、slug、digest、ブランチ、worktree、承認方式)が
+  入る。
   結びつきのある org に、別の結びつきか結びつきのない予約を渡すと、パスが
   同じでも拒否される(「機能ごとの org」節)。
 - `ralph org status --org-id <id>` が `reserved: <path>, ...` の行を出す
@@ -300,6 +304,9 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
   見張りが ack の期限で送る)。
 - 件を読み、ack と resolve を打つのは人(今後入る director も打つ)。
   `ralph org wait --inbox` で open の件が届くのを待てる。
+- 機能の計画の承認を求める QUESTION(ヘッダに `PLAN:` がある件)は、
+  `ralph org approve <ID>` が承認を記録し、件を resolve する(「機能の計画の
+  承認」)。
 - 今は director を登録できないので、escalate した件は記録と同時に人にも
   届く。`<台帳>/escalations.jsonl` に件の ID・org_id・理由
   (`inbox_no_director`)の 1 行を足し、escalate を打った側の stderr に
@@ -445,6 +452,12 @@ slug と `none` の併記も)、同じフィールドの 2 行目、最初の `#
 前のフィールドの行、ファイル名が `<id>.md` の形でない、のどれでも読み込みは
 拒否する。
 
+この節は分割計画の承認で、人がファイルに 2 行を書き、start が読む。機能ごとの
+org の中で leader が書く機能の計画は、承認方式が `per-plan` のとき、人が
+`ralph org approve` で台帳に承認を記録し、spawn と send が読む(下の「機能の
+計画の承認」)。機能の計画は leader が書くので、ファイルの 2 行だけでは承認と
+みなさない。
+
 ### `ralph org start --plan`
 
 ```sh
@@ -476,10 +489,10 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
    org_id の記録を作っていれば、ここで分かる(下の「start が拒否するもの」)。
 6. その worktree を cwd にして leader を spawn する。予約は機能の
    `- Reserve:` で、予約の記録に機能との結びつき(分割計画の id、slug、
-   digest、ブランチ、worktree)が入る。scope の説明は
+   digest、ブランチ、worktree、承認方式)が入る。scope の説明は
    `split <id> feature <slug> (reserve: <paths>)`、タスクは分割計画・機能・
-   worktree・ブランチ・予約・依存・台帳の行と機能の本文になる。spawn は
-   ロックの下で 2 の判定をやり直す。
+   worktree・ブランチ・予約・依存・承認方式・台帳の行と機能の本文になる。
+   spawn はロックの下で 2 の判定をやり直す。
 
 タスクの `- 台帳:` の行には、start が使った台帳の絶対パスと、それを指す
 `--state-dir`(シェルの単一引用符で囲んだもの)が入る。leader は
@@ -509,9 +522,11 @@ leader が動いている間は台帳に何も足さない。disband のあと�
   ない `--plan`、20 文字を超える `--org-id`(slug と同じ上限。「分割計画」)。
 - その org_id で、その機能のために立てたのではない org が走っているとき。
   昇格したセッションの leader の org、`start <task>` の org、`--reserve` だけで
-  予約した org がこれに当たる。disband の前の同じ org_id が、別の機能か、承認
-  し直した(digest が違う)同じ機能に結びついているときも拒否する。どちらも、
-  別の `--org-id` を使うか、`ralph org disband --org-id <id>` してから立て直す。
+  予約した org がこれに当たる。disband の前の同じ org_id が、別の機能、承認
+  し直した(digest が違う)同じ機能、承認方式の違う同じ機能(`ralph.toml` の
+  `[org.approval].mode` を変えてから打ち直した場合など)に結びついているときも
+  拒否する。どれも、別の `--org-id` を使うか、`ralph org disband --org-id <id>`
+  してから立て直す。
 - `ralph-worktree.sh` の記録 `org-<org_id>` が今回と合わないとき。別の分割
   計画が残した worktree(`canonical_ref` が今回の
   `split:<分割計画の絶対パス>#<slug>` でない)、パス・ブランチ・種類の違い、
@@ -593,16 +608,166 @@ leader が動いている間は台帳に何も足さない。disband のあと�
 同じ start を打ち直せば同じ worktree を使い、要らなければ
 `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消せる。
 
+### 機能の計画の承認
+
+`ralph.toml` の `[org.approval].mode` は、`start --plan` で立てた org の中で
+leader が書く機能の計画(worktree の `docs/plans/active/`)を、人が承認するか
+どうかを決める。
+
+- `"per-plan"`(既定): 人が機能の計画を承認するまで、その org の implementer
+  は動けない。ralph は、承認された計画がない間、role が `implementer` の座席の
+  spawn と、その座席への TASK を断る。
+- `"split"`: 人が承認するのは分割計画(上の「承認」)だけで、機能の計画は
+  leader に任せる。この設定が入る前と同じ動き。
+- ほかの値と空文字は設定の検証エラーになる。節がなければ既定の `per-plan`。
+
+上の「承認」との違いは、承認を誰がどこに書き、誰が読むかにある。分割計画は、
+人がファイルに 2 行を書き、start が読む。機能の計画は leader が書くので、
+ファイルの 2 行だけでは承認とみなさず、人が `ralph org approve` で台帳に記録
+したものを spawn と send が読む。
+
+方式は org を立てたときに決まる。
+
+- 方式を読むのは `ralph org start --plan` だけで、全 org の上限と同じ規則で
+  読む(`--config` がなく、台帳が main worktree のものなら、main worktree の
+  ルートの `ralph.toml`。「全 org の上限と予約」節)。読んだ値は機能との
+  結びつきに `approval=<mode>` として記録し、leader のタスクに
+  `- 承認方式: per-plan` か `- 承認方式: split` の行を入れる。spawn・send・
+  approve は、打った側の `ralph.toml` ではなくこの記録を読むので、feature
+  worktree の `ralph.toml` を `split` に書き換えても検査は消えない。
+- 走っている org には、設定の変更は効かない(次に立てる org から効く)。
+  走っている org の方式を変えるときは、disband して立て直す。同じ機能に別の
+  方式で start を打ち直すと、結びつきが違うとして拒否される(「start が拒否
+  するもの」)。
+- この版より前の ralph で立てた org(記録に `approval=` がない)は、承認なしで
+  進む。その leader の雛形には承認の手順がないので、split として扱う。
+  `approval=` が 2 つある記録と、値が `per-plan` でも `split` でもない記録の
+  org は、承認を求める。
+- `start <task>` の org と昇格した leader の org には結びつきがないので、方式を
+  問わず検査しない。
+
+per-plan の org では、次の検査がかかる。
+
+- spawn: role が `implementer` の座席は、この org の今の命(最後の
+  `disbanded` より後)の承認のうち、下の照合を通るものが 1 つもなければ
+  断られる。上限の拒否と同じく `rejected` と receipt を書き、`--dry-run` も
+  同じ答えを返す。
+- send: role が `implementer` の座席への TASK を送れるのは、
+  `PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行あり、その計画が下の
+  照合を通るときだけ。そうでなければ終了コード 1 で断られ、manifest に何も
+  書かず、pane にも何も送らない。`--raw` の TASK も同じようにヘッダを読み、
+  `--dry-run` も断る。send は宛先の座席の手が空くのを待ち、待ったあと、
+  打つ前にもう一度照合する(`--dry-run` は待たないので 1 回だけ)。待つ間に
+  計画が変わっていれば、打たずに同じように断り、何も記録しない。
+  reviewer への TASK と、TASK 以外の TYPE は承認なしで送れる(承認の前に
+  計画のレビューを頼める)。
+- 照合: 台帳に、そのパスと digest の `plan_approved` がこの org の今の命に
+  ある。今のファイルの digest(`scripts/plan-visual.sh digest` と同じ値)が
+  その digest と一致する。最初の `## ` の見出しより前の、最初の `- Status:` が
+  `Approved` で、最初の `- Approved:` の値が `<YYYY-MM-DD> sha256:<digest>` の
+  2 語だけで(日付は実在する日、ほかの語は足せない)、その digest を書いている。
+  ファイルの全文のハッシュが、approve が記録したものと一致する。
+- どの方式でも、`start --plan` の org で leader の座席が動いていなければ、
+  leader 以外の座席の spawn は断られる(`rejected` と receipt を書く)。
+- 承認の検査の拒否の文は、見つけた状態のあとに `refused by the approval check`
+  と、理由ごとの次の手を 1 つだけ続ける。
+  - 承認の記録がない: 承認の DECISION をまだ受けていなければ QUESTION の返事を
+    待ち、受けていれば(記録のない DECISION なので)BLOCKED を escalate する。
+  - 記録はあるが、計画の先頭の 2 行がないか違う: 2 行を書いてコミットし、打ち
+    直す。
+  - 承認のあとに計画が変わった: 変更を戻すか、計画を Draft に戻して新しい
+    QUESTION で承認を頼み直す。
+  - TASK の `PLAN:` のヘッダがない、2 行ある、形が違う: `TASK_ID:` の次の行に
+    1 行付けて送り直す。
+  - TASK の `PLAN:` の digest が今のファイルのものと違い(承認し直す前の
+    digest か打ち間違い)、今の digest がその計画の最新の承認で照合を通る:
+    拒否の文がその digest を書くので、ヘッダを
+    `PLAN: <path> sha256:<その digest>` に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest か、承認が 1 回だけの計画に
+    打ち間違えた digest で、今の digest が最新の承認なのに先頭の 2 行がまだ
+    古い(Draft と TBD のまま、または前の digest のまま): 拒否の文は先頭の
+    2 行のものになり、今の digest を書くので、2 行をその digest で書いて
+    コミットする。同じ TASK を送り直すと前の項目の拒否になるので、`PLAN:` を
+    その digest に直して送り直す。
+  - TASK の `PLAN:` が承認し直す前の digest か打ち間違いで、今のファイルは
+    最新の承認の版だが、承認のあとに digest が読まない場所(Progress
+    checklist のメモ、`- Branch:` の行など)が変わった: 拒否の文は今の digest
+    の「承認のあとに計画が変わった」になるので、その変更だけを戻す。
+  - 今のファイルの digest が最新の承認でなければ(TASK が最新の承認を書き、
+    ファイルが変わったか、前に承認した版に戻った、など)、拒否の文は TASK の
+    digest についてのもののままで、ほかの digest へは案内しない。
+  - そのほか(結びつきが不完全、計画のファイルがない、worktree の外を
+    指す): BLOCKED を escalate する。
+
+  断られた leader はその次の手に従い、原因を直す前に同じコマンドを打ち直さず、
+  `--raw` にもせず、自分で approve も打たない(leader の雛形)。spawn の拒否は
+  `--raw` に触れない(spawn に `--raw` はない)。
+
+人の側では、次の順で承認する。
+
+1. leader が承認を求める QUESTION を上げる。ヘッダには `PLAN:` と `VISUAL:`
+   (図解ページのパス)がある。ほかの escalate と同じく、`escalations.jsonl` の
+   1 行、escalate の stderr、macOS のデスクトップ通知で届く。
+   `ralph org inbox` で一覧し、`ralph org inbox show <ID>` で本文を読む。
+2. 機能の worktree(`.claude/worktrees/org-<org_id>`)で
+   `./scripts/plan-visual.sh open <VISUAL のパス>` を打って図解ページを開き、
+   `PLAN:` の計画を読む。
+3. 承認するなら、座席の herdr の pane の外の端末で
+   `ralph org approve <ID>...` を打つ。準備のできた件はまとめて渡せる(1 つでも
+   通らなければ何も記録しない)。herdr の pane の中から打つと、別の herdr
+   サーバーの座席と pane の id が重なって断られることがある。そのときは herdr の
+   外の端末で打つ。
+4. approve は leader に知らせない。出力に出た `ralph org send` のコマンドを
+   打って、DECISION(`PLAN:` は QUESTION と同じで、本文は `approved`)を
+   leader に送る。leader は計画の先頭の 2 行を書いてコミットし、implementer を
+   spawn する。
+5. 直してほしいときは approve を打たず、同じ `PLAN:` のヘッダを付けて、直す
+   ところを本文に書いた DECISION を `ralph org send --to leader` で送る(本文を
+   `approved` で始めない)。件は `ralph org inbox resolve <ID> --note <ポインタ>`
+   で閉じる。leader は計画を直し、新しい digest で新しい QUESTION を上げる。
+
+```sh
+ralph org approve e3 e5
+```
+
+approve について、次のことに気をつける。
+
+- approve は、その時点のファイルを記録する(全文のハッシュ)。approve の
+  あとに leader が変えてよいのは、先頭の `- Status:` と `- Approved:` の 2 行
+  と checkbox の印だけになる。`## Progress checklist` の節にメモを足す、
+  `- Branch:` の行を変える、のように digest が読まない場所を変えても、spawn と
+  TASK は断られる(承認し直す)。QUESTION が上がってから approve を打つまでの
+  間に、digest が読まない場所が書き換えられていれば、approve はそれも含めて
+  記録するので、approve の前にファイルを読む。
+- approve は計画のファイルを書き換えない。ファイルの 2 行は、DECISION を
+  受けた leader が書いてコミットする。
+- 座席の pane で打たれた approve を断る仕掛け(`HERDR_PANE_ID` が動いている
+  座席の pane と同じなら断る)は、境界ではない。`HERDR_PANE_ID` を外せば
+  通るし、leader は台帳に直接書ける。承認の記録には、打った人(`USER`)、
+  `HERDR_PANE_ID` の有無、cwd が残るので、`ralph org report` の event
+  timeline で事後に追える。
+- 承認が効くのは org の今の命だけ。disband して同じ org_id で立て直すと、前の
+  承認は数えない。disband が自分の workspace を最後に閉じる close に失敗し、
+  補償で予約を戻したとき(「全 org の上限と予約」節の例外)も、戻した予約は
+  `disbanded` より後にあるので、それより前の承認は前の命のものになる。その
+  ときは承認し直す(leader に新しい QUESTION を上げさせ、approve する)。
+- 承認方式が `split` の org の件を approve しても、記録はする(検査は読まない)。
+  stderr にその旨が出る。
+
 ### org の終わり方
 
 leader は reviewer が通したら、次の順で締める(leader の雛形の「機能ごとの
-org」と同じ)。下の `ralph org` のコマンドにも、タスクの `- 台帳:` の行の
+org」の手順 9〜14 と同じ。その前の手順は、計画を書いてコミットし、per-plan
+なら人の承認を受けてから座席を立て、TASK と RESULT を往復する。「機能の計画の
+承認」)。下の `ralph org` のコマンドにも、タスクの `- 台帳:` の行の
 `--state-dir` を付ける。
 
 1. implementer と reviewer を `stop` し、`ralph org report --org-id <org_id>`
    を打つ(report は worktree の `docs/reports/` に書かれる)。
 2. `scripts/archive-plan.sh` があれば機能の計画を `docs/plans/archive/` に
-   移し、report と計画の移動をコミットする。
+   移し、report と計画の移動をコミットする。計画を移すのは implementer を
+   止めたあとにする。per-plan の org では、移したあとの implementer への TASK は
+   `PLAN:` のパスにファイルがないので断られる。
 3. `scripts/secret-scan-branch.sh` があれば `--strict` を付けて打ち、終了
    コードが 0 でなければ push せずに止まり、`ralph org escalate` で
    `BLOCKED` を上げる(TASK_ID は org_id。「受信箱」節)。
@@ -700,10 +865,16 @@ receipts / 役割雛形)を使うため、手順は共通。
 いずれの経路でも、Leader は以下のサイクルで座席を統括する:
 
 1. タスクを読む。分割計画の機能のタスク(`start --plan` の leader)なら、機能の
-   計画を worktree の `docs/plans/active/` に書いてコミットする。
+   計画を worktree の `docs/plans/active/` に書いてコミットする。タスクの
+   `- 承認方式:` が `per-plan` なら、図解ページを書き、`PLAN:` と `VISUAL:` の
+   ヘッダを付けた QUESTION を `escalate` で上げ、人の承認の DECISION を受けて
+   から計画の先頭の 2 行を書いてコミットする(「機能の計画の承認」)。
 2. 座席を `spawn` する(役割別プロンプト雛形が自動展開される)。既定は
-   implementer 1 席と reviewer 1 席。`--model` を明示する。
-3. `send` で TASK を委譲する。
+   implementer 1 席と reviewer 1 席。`--model` を明示する。per-plan の機能の
+   org では、implementer は承認のあとに立てる(reviewer は承認の前に立てて
+   計画のレビューを頼んでよい)。
+3. `send` で TASK を委譲する。per-plan の機能の org では、implementer への TASK に
+   承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
 4. `wait` / `status` / `read` で座席の状態を観察する。
 5. 座席からの RESULT / BLOCKED / QUESTION に対して DECISION を送り裁定する。
    自分で裁定できない件や進めない件は、`escalate` で受信箱に上げる

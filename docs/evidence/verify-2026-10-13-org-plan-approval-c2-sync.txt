@@ -1,0 +1,52 @@
+# cycle 2 explicit checks at HEAD 8fe7ba73, 2026-10-13T00:21:01Z
+## gofmt -l internal cmd
+rc=0
+## go vet ./...
+rc=0
+## ./scripts/check-sync.sh (summary)
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+  IDENTICAL:      167
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+PASS: all files in sync.
+rc=0
+## ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+rc=0
+## ./scripts/plan-visual.sh digest docs/plans/active/2026-10-12-org-plan-approval.md
+951cf09bd7bc
+rc=0
+## plan Approved line
+4:- Approved: 2026-10-12 sha256:951cf09bd7bc
+## plan body unchanged since b1f934c9 except Progress notes
+ docs/plans/active/2026-10-12-org-plan-approval.md | 1 +
+ 1 file changed, 1 insertion(+)
+## shasum -a 256 of the four /org SKILL.md
+e9e4b1d5469c1606acb6505a3a0c87fa53aec2735710362e8e4cd9691ac54555  .claude/skills/org/SKILL.md
+e9e4b1d5469c1606acb6505a3a0c87fa53aec2735710362e8e4cd9691ac54555  .agents/skills/org/SKILL.md
+e9e4b1d5469c1606acb6505a3a0c87fa53aec2735710362e8e4cd9691ac54555  templates/base/.claude/skills/org/SKILL.md
+e9e4b1d5469c1606acb6505a3a0c87fa53aec2735710362e8e4cd9691ac54555  templates/base/.agents/skills/org/SKILL.md
+## cmp agent-messaging root vs template
+rc=0
+## cmp ralph-config.sh root vs template
+rc=0
+## quality-gates Feature plan approval row: root vs template
+docs/quality/quality-gates.md:81:| Feature plan approval | In an org `ralph org start --plan` started in approval mode `per-plan` (`[org.approval].mode`, the default, recorded in the org's feature binding at start), `ralph org spawn` of a seat whose role is `implementer`, and a `TASK` to such a seat (typed or `--raw`), need a plan a human approved with `ralph org approve`: a `plan_approved` record in the org's current life (after its last `disbanded`) for the path and digest of the TASK's one `PLAN: <path> sha256:<digest>` header (for a spawn, any approval of the org), the file's digest and whole-content hash unchanged since, and the plan's `- Status: Approved` line and an `- Approved:` line that is exactly `<YYYY-MM-DD> sha256:<digest>` with that digest. In every org `start --plan` started, any seat but the leader is also refused while the org's leader seat is not running | A `TASK` is refused with exit 1 and nothing recorded, `--dry-run` included; a spawn is refused with a `rejected` event and a receipt, as the envelope checks are. The error says what the check found, then `refused by the approval check` and the one next step for that reason (wait for the human's answer, or escalate a BLOCKED when an approving `DECISION` came without the record; write and commit the plan's two header lines; undo the change or ask for a new approval; for the `TASK`'s `PLAN:` header, put one right after `TASK_ID:` when there is none, two, or a malformed one, or change its digest to the current one when it names an old or mistyped digest of a plan whose current version is its latest approval and passes the check, never to an earlier approved version; escalate a BLOCKED for anything else), and tells the leader never to run `ralph org approve` itself and, for a `TASK`, never to send it with `--raw`. approve's check of the caller's herdr pane (`HERDR_PANE_ID`) is a tripwire, not a boundary; the record keeps who ran it, for audit |
+templates/base/docs/quality/quality-gates.md:80:| Feature plan approval | In an org `ralph org start --plan` started in approval mode `per-plan` (`[org.approval].mode`, the default, recorded in the org's feature binding at start), `ralph org spawn` of a seat whose role is `implementer`, and a `TASK` to such a seat (typed or `--raw`), need a plan a human approved with `ralph org approve`: a `plan_approved` record in the org's current life (after its last `disbanded`) for the path and digest of the TASK's one `PLAN: <path> sha256:<digest>` header (for a spawn, any approval of the org), the file's digest and whole-content hash unchanged since, and the plan's `- Status: Approved` line and an `- Approved:` line that is exactly `<YYYY-MM-DD> sha256:<digest>` with that digest. In every org `start --plan` started, any seat but the leader is also refused while the org's leader seat is not running | A `TASK` is refused with exit 1 and nothing recorded, `--dry-run` included; a spawn is refused with a `rejected` event and a receipt, as the envelope checks are. The error says what the check found, then `refused by the approval check` and the one next step for that reason (wait for the human's answer, or escalate a BLOCKED when an approving `DECISION` came without the record; write and commit the plan's two header lines; undo the change or ask for a new approval; for the `TASK`'s `PLAN:` header, put one right after `TASK_ID:` when there is none, two, or a malformed one, or change its digest to the current one when it names an old or mistyped digest of a plan whose current version is approved; escalate a BLOCKED for anything else), and tells the leader never to run `ralph org approve` itself and, for a `TASK`, never to send it with `--raw`. approve's check of the caller's herdr pane (`HERDR_PANE_ID`) is a tripwire, not a boundary; the record keeps who ran it, for audit |

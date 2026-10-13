@@ -54,6 +54,18 @@ const (
 	// after the org's latest `disbanded` is the org's reservation and
 	// binding, and it makes the org count as running for max_orgs.
 	EventScopeReserved = "scope_reserved"
+	// EventPlanApproved is an org-level, non-state event (SeatID empty,
+	// absent from stateEvents below) that only `ralph org approve` writes
+	// (Approve, approve.go): a human approved the plan a leader's inbox
+	// QUESTION named, one event per item, Details `plan=<path in the feature
+	// worktree> digest=<12 hex> content=<64 hex> inbox=<item ID> by=<USER or
+	// unknown> herdr_pane=<set|unset> cwd=<quoted directory>`. The approval
+	// check of an org started for a split plan feature in per-plan mode
+	// (checkPlanApproved) reads the ones after the org's latest `disbanded`,
+	// so an approval from an earlier life of the same org_id never counts.
+	// Roster skips it like every org-level event, and it does not make an
+	// org count as running.
+	EventPlanApproved = "plan_approved"
 )
 
 // stateEvents are the event types that drive seat status derivation

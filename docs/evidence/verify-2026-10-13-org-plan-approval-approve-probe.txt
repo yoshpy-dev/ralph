@@ -1,0 +1,203 @@
+# Observational probe of ralph org approve (built bin/ralph at HEAD 78b3e873, go build ./cmd/ralph)
+# Scratch ledger and feature worktree under the task worktree's gitignored .harness/state/verify-probe/; paths below show the task worktree as <worktree>.
+# approve calls neither herdr nor agmsg; the inbox items are seeded, so no escalate or notification ran.
+
+## probe.sh
+
+#!/bin/sh
+# Verify probe for org-plan-approval: drives the built bin/ralph's
+# `ralph org approve` against a seeded scratch ledger. approve never calls
+# herdr or agmsg, and no escalate is run (the inbox item is seeded), so no
+# notification and no herdr server is involved.
+set -u
+cd "$(dirname "$0")/../../.." || exit 2
+ROOT=$(pwd -P)
+P="$ROOT/.harness/state/verify-probe"
+L="$P/ledger"
+WT="$P/wt"
+RALPH="$ROOT/bin/ralph"
+rm -rf "$L" "$WT"
+mkdir -p "$L" "$WT/docs/plans/active"
+PLAN_REL=docs/plans/active/2026-10-13-a.md
+cat > "$WT/$PLAN_REL" <<'PLAN'
+# a
+
+- Status: Draft
+- Approved: TBD
+- Branch: feat/a
+
+## Objective
+
+Build a.
+
+## Progress checklist
+
+- [ ] Implementation started
+PLAN
+DIGEST=$(./scripts/plan-visual.sh digest "$WT/$PLAN_REL")
+echo "plan digest: $DIGEST"
+TS=2026-10-13T00:00:00Z
+cat > "$L/manifest.jsonl" <<EOF
+{"ts":"$TS","org_id":"a","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/a/ split=demo feature=a digest=0123456789ab branch=feat/a approval=per-plan"}
+{"ts":"$TS","org_id":"a","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-probe-leader","worktree":"$WT"}
+EOF
+BODY="TYPE: QUESTION\\nPLAN: $PLAN_REL sha256:$DIGEST\\nVISUAL: .harness/state/plan-visual/a.html\\n\\nplease approve"
+cat > "$L/inbox.jsonl" <<EOF
+{"ts":"$TS","id":"e1","event":"escalated","org_id":"a","type":"QUESTION","body":"$BODY"}
+{"ts":"$TS","id":"e2","event":"escalated","org_id":"a","type":"BLOCKED","task_id":"a","body":"TYPE: BLOCKED\\nTASK_ID: a\\n\\nstuck"}
+EOF
+
+run() {
+  echo
+  echo "\$ $*"
+  "$@"
+  echo "rc=$?"
+}
+snap() { cat "$L/manifest.jsonl" "$L/inbox.jsonl" | shasum -a 256 | cut -c1-16; }
+
+echo "ledger snapshot before: $(snap)"
+run env -u HERDR_PANE_ID USER=verifier "$RALPH" org approve e1 --org-id a --state-dir "$L"
+echo "ledger snapshot: $(snap)"
+run env HERDR_PANE_ID=pane-probe-leader USER=verifier "$RALPH" org approve e1 --state-dir "$L"
+echo "ledger snapshot: $(snap)"
+run env -u HERDR_PANE_ID USER=verifier "$RALPH" org approve e1 e2 e9 --state-dir "$L"
+echo "ledger snapshot: $(snap)"
+cp "$WT/$PLAN_REL" "$P/plan.bak"
+cat > "$WT/$PLAN_REL" <<'PLAN'
+# a
+
+- Status: Draft
+- Approved: TBD
+- Branch: feat/a
+
+## Objective
+
+Build a.
+Also build b.
+
+## Progress checklist
+
+- [ ] Implementation started
+PLAN
+echo "digest after an Objective edit: $(./scripts/plan-visual.sh digest "$WT/$PLAN_REL")"
+run env -u HERDR_PANE_ID USER=verifier "$RALPH" org approve e1 --state-dir "$L"
+echo "ledger snapshot: $(snap)"
+cp "$P/plan.bak" "$WT/$PLAN_REL"
+PLAN_SHA_BEFORE=$(shasum -a 256 "$WT/$PLAN_REL" | cut -c1-16)
+run env HERDR_PANE_ID=pane-human-other USER=verifier "$RALPH" org approve e1 --state-dir "$L"
+echo "ledger snapshot after: $(snap)"
+echo "plan file sha256 before/after approve: $PLAN_SHA_BEFORE / $(shasum -a 256 "$WT/$PLAN_REL" | cut -c1-16)"
+echo
+echo "manifest plan_approved line(s):"
+grep plan_approved "$L/manifest.jsonl" | sed "s#$ROOT#<worktree>#g"
+echo
+echo "inbox lines for e1:"
+grep '"id":"e1"' "$L/inbox.jsonl" | sed "s#$ROOT#<worktree>#g"
+run env -u HERDR_PANE_ID USER=verifier "$RALPH" org approve e1 --state-dir "$L"
+echo
+echo "content hash of the plan as approved (shell recomputation: the file less its first - Status: and - Approved: lines):"
+grep -v -e '^- Status: Draft$' -e '^- Approved: TBD$' "$WT/$PLAN_REL" | shasum -a 256 | cut -d' ' -f1
+
+echo
+echo "A9 note: a Progress checklist line added between the QUESTION and approve"
+printf -- '- a note added before approve\n' >> "$WT/$PLAN_REL"
+echo "digest now: $(./scripts/plan-visual.sh digest "$WT/$PLAN_REL") (unchanged: the digest skips the Progress checklist)"
+printf '%s\n' "{\"ts\":\"$TS\",\"id\":\"e3\",\"event\":\"escalated\",\"org_id\":\"a\",\"type\":\"QUESTION\",\"body\":\"$BODY\"}" >> "$L/inbox.jsonl"
+run env -u HERDR_PANE_ID USER=verifier "$RALPH" org approve e3 --state-dir "$L"
+echo "recorded content= of e3:"
+grep '"plan_approved"' "$L/manifest.jsonl" | grep 'inbox=e3' | sed 's/.*content=\([0-9a-f]*\).*/\1/'
+echo "shell recomputation of the content hash with the note line:"
+grep -v -e '^- Status: Draft$' -e '^- Approved: TBD$' "$WT/$PLAN_REL" | shasum -a 256 | cut -d' ' -f1
+
+echo
+echo "\$ ralph org approve --help (first 12 lines)"
+"$RALPH" org approve --help | head -12
+
+## output (sh probe.sh, rc=0)
+
+plan digest: 03e15b9b55e1
+ledger snapshot before: 05c0bd3791a5f320
+
+$ env -u HERDR_PANE_ID USER=verifier <worktree>/bin/ralph org approve e1 --org-id a --state-dir <worktree>/.harness/state/verify-probe/ledger
+org: approve: --org-id does not apply: the inbox holds the items of every org in the ledger
+rc=1
+ledger snapshot: 05c0bd3791a5f320
+
+$ env HERDR_PANE_ID=pane-probe-leader USER=verifier <worktree>/bin/ralph org approve e1 --state-dir <worktree>/.harness/state/verify-probe/ledger
+org: approve: refused, since HERDR_PANE_ID "pane-probe-leader" is the pane of the active seat "leader" of org_id "a": ralph org approve records a human's approval of a plan, so a human runs it from a terminal outside the seats' panes (a human in a herdr pane that only shares its id with a seat of another herdr server runs it from a terminal outside herdr)
+rc=1
+ledger snapshot: 05c0bd3791a5f320
+
+$ env -u HERDR_PANE_ID USER=verifier <worktree>/bin/ralph org approve e1 e2 e9 --state-dir <worktree>/.harness/state/verify-probe/ledger
+org: approve: nothing recorded, since 2 of the 3 inbox items cannot be approved
+org: approve e2: the item is a BLOCKED, not a QUESTION: a leader asks for a plan's approval with a QUESTION whose header has PLAN: <path> sha256:<digest>
+org: approve e9: no such inbox item
+rc=1
+ledger snapshot: 05c0bd3791a5f320
+digest after an Objective edit: 7b9b4ffdf28d
+
+$ env -u HERDR_PANE_ID USER=verifier <worktree>/bin/ralph org approve e1 --state-dir <worktree>/.harness/state/verify-probe/ledger
+org: approve: nothing recorded, since 1 of the 1 inbox items cannot be approved
+org: approve e1: plan docs/plans/active/2026-10-13-a.md of org_id "a" has digest 7b9b4ffdf28d now, not the sha256:03e15b9b55e1 the QUESTION names: the plan changed after the leader asked, so the leader asks again with the current digest
+rc=1
+ledger snapshot: 05c0bd3791a5f320
+
+$ env HERDR_PANE_ID=pane-human-other USER=verifier <worktree>/bin/ralph org approve e1 --state-dir <worktree>/.harness/state/verify-probe/ledger
+approved e1 (org=a plan=docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1)
+approve sends no message; tell the leader of org a with:
+ralph org send --org-id a --to leader --state-dir '<worktree>/.harness/state/verify-probe/ledger' --text 'TYPE: DECISION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1
+
+approved'
+
+note: approve recorded each plan file as it is now. From here on the leader may change only the plan's - Status: and - Approved: lines and its checkbox marks: any other change makes a per-plan org refuse its implementer's spawn and TASKs until the plan is approved again.
+rc=0
+ledger snapshot after: 0e3a05918256f31b
+plan file sha256 before/after approve: f2100a881d25ff80 / f2100a881d25ff80
+
+manifest plan_approved line(s):
+{"ts":"2026-10-12T21:16:22Z","org_id":"a","seat_id":"","event":"plan_approved","details":"plan=docs/plans/active/2026-10-13-a.md digest=03e15b9b55e1 content=03ffceb9b1f447836fd725cdee0a0684469196b1e913ab5f7e3cd1e02c99ad67 inbox=e1 by=verifier herdr_pane=set cwd=\"<worktree>\""}
+
+inbox lines for e1:
+{"ts":"2026-10-13T00:00:00Z","id":"e1","event":"escalated","org_id":"a","type":"QUESTION","body":"TYPE: QUESTION\nPLAN: docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1\nVISUAL: .harness/state/plan-visual/a.html\n\nplease approve"}
+{"ts":"2026-10-12T21:16:22Z","id":"e1","event":"resolved","note":"approved docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1"}
+
+$ env -u HERDR_PANE_ID USER=verifier <worktree>/bin/ralph org approve e1 --state-dir <worktree>/.harness/state/verify-probe/ledger
+org: approve: nothing recorded, since 1 of the 1 inbox items cannot be approved
+org: approve e1: the item is already resolved
+rc=1
+
+content hash of the plan as approved (shell recomputation: the file less its first - Status: and - Approved: lines):
+03ffceb9b1f447836fd725cdee0a0684469196b1e913ab5f7e3cd1e02c99ad67
+
+A9 note: a Progress checklist line added between the QUESTION and approve
+digest now: 03e15b9b55e1 (unchanged: the digest skips the Progress checklist)
+
+$ env -u HERDR_PANE_ID USER=verifier <worktree>/bin/ralph org approve e3 --state-dir <worktree>/.harness/state/verify-probe/ledger
+approved e3 (org=a plan=docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1)
+approve sends no message; tell the leader of org a with:
+ralph org send --org-id a --to leader --state-dir '<worktree>/.harness/state/verify-probe/ledger' --text 'TYPE: DECISION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:03e15b9b55e1
+
+approved'
+
+note: approve recorded each plan file as it is now. From here on the leader may change only the plan's - Status: and - Approved: lines and its checkbox marks: any other change makes a per-plan org refuse its implementer's spawn and TASKs until the plan is approved again.
+rc=0
+recorded content= of e3:
+6e641dc1e6055b42ac69fc2b67c21a717ec8dcf5192bbf633e974d680711ced1
+shell recomputation of the content hash with the note line:
+6e641dc1e6055b42ac69fc2b67c21a717ec8dcf5192bbf633e974d680711ced1
+
+$ ralph org approve --help (first 12 lines)
+ralph org approve records a human's approval of a feature plan. The leader
+of an org started with `ralph org start --plan` writes the plan in the
+org's feature worktree and asks for the approval with an inbox QUESTION
+(`ralph org escalate`) whose header names the plan as
+PLAN: <path in the feature worktree> sha256:<digest>. Pass the IDs of
+those inbox items (e1, e2, ...).
+
+For each item, approve checks that it is an open or acked QUESTION with
+exactly one PLAN: header of that shape; that its org holds the binding
+`ralph org start --plan` recorded and was not disbanded since; that the
+path is relative, stays inside the org's feature worktree (symlinks
+resolved), and is a regular file; and that the digest equals the plan

@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // `ralph org start --plan <split plan> --feature <slug>` (plan
@@ -166,13 +168,16 @@ func featureWorktreeCleanup(orgID string) string {
 // worktree `.claude/worktrees/org-<org_id>` under the main worktree (its
 // symlinks resolved, as git prints it). The leader is spawned with the
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
-// plan id, slug, approval digest, branch, worktree), a one-line scope, and a
-// task made of what the org was started for, the ledger p.StateDir included,
-// and the feature's body (featureLeaderTask). Running the same start again
-// reuses the worktree and, while the leader is active, records nothing. A
-// worktree whose record was made for another split plan's feature is not
-// used, whether it was there before ensure (checkFeatureWorktreeReuse) or
-// another start made it while this one ran (checkEnsuredFeatureWorktree).
+// plan id, slug, approval digest, branch, worktree, and the approval mode of
+// o.Config, featureApprovalMode), a one-line scope, and a task made of what
+// the org was started for, the ledger p.StateDir and the approval mode
+// included, and the feature's body (featureLeaderTask). Running the same
+// start again reuses the worktree and, while the leader is active, records
+// nothing; with another approval mode it is another binding, which the
+// spawn refuses (reservationDecision). A worktree whose record was made for
+// another split plan's feature is not used, whether it was there before
+// ensure (checkFeatureWorktreeReuse) or another start made it while this one
+// ran (checkEnsuredFeatureWorktree).
 func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	var res StartFeatureResult
 	refuse := func(err error) StartFeatureResult {
@@ -189,7 +194,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	root := resolvedOrClean(mustAbs(p.RepoRoot))
 	worktree := filepath.Join(root, filepath.FromSlash(featureWorktreeRelPath(orgID)))
 	branch := feature.Type + "/" + feature.Slug
-	leader := startFeatureLeaderParams(p, plan, feature, orgID, worktree, branch)
+	leader := startFeatureLeaderParams(p, plan, feature, orgID, worktree, branch, featureApprovalMode(o.Config))
 
 	checked, err := checkSpawnInput(leader)
 	if err != nil {
@@ -332,32 +337,45 @@ func readStartFeature(p StartFeatureParams) (plan *SplitPlan, feature SplitFeatu
 	return plan, feature, orgID, nil
 }
 
+// featureApprovalMode is the approval mode StartFeature records in the
+// binding: cfg.Approval.Mode, with "" taken as config.ApprovalModePerPlan, so
+// a hand-built config without [org.approval] (config.Load always fills it)
+// asks for the approval rather than skipping it. Any other value is passed
+// on as it is, and validateFeatureBinding refuses it.
+func featureApprovalMode(cfg config.OrgConfig) string {
+	if cfg.Approval.Mode == "" {
+		return config.ApprovalModePerPlan
+	}
+	return cfg.Approval.Mode
+}
+
 // startFeatureLeaderParams is the leader spawn StartFeature asks for feature
-// f of plan in orgID (see StartFeature).
-func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeature, orgID, worktree, branch string) SpawnParams {
+// f of plan in orgID with the approval mode approval (see StartFeature).
+func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeature, orgID, worktree, branch, approval string) SpawnParams {
 	return SpawnParams{
 		OrgID: orgID, SeatID: LeaderIdentity, Role: LeaderIdentity,
 		Driver: p.Driver, Model: p.Model, LeaderDriver: p.LeaderDriver, TimeoutMS: p.TimeoutMS,
 		Cwd:     worktree,
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
-		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree},
-		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch),
+		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval},
+		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval),
 	}
 }
 
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
-// the branch, the reserved paths, the features it depends on, the procedure
-// to follow, and the ledger stateDir with the --state-dir to pass to every
-// `ralph org` command, then a blank line and f's body as the plan has it.
+// the branch, the reserved paths, the features it depends on, the approval
+// mode recorded in the binding (approval), the procedure to follow, and the
+// ledger stateDir with the --state-dir to pass to every `ralph org`
+// command, then a blank line and f's body as the plan has it.
 // The leader's pane has the herdr server's environment, which is not
 // necessarily the one start ran in, and ralph passes neither the --state-dir
 // nor the RALPH_ORG_STATE_DIR given to start to the pane, so the leader's own
 // commands cannot count on either; the line names the ledger always, the
 // default one too, so that a pane whose ralph resolves the default ledger
 // otherwise (an older release) stays on start's ledger as well.
-func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch string) string {
+func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval string) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
 		deps = strings.Join(f.DependsOn, ", ")
@@ -369,6 +387,7 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		"- ブランチ: " + branch,
 		"- 予約したパス: " + strings.Join(f.Reserve, ", "),
 		"- 依存する機能: " + deps,
+		"- 承認方式: " + approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
 		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
 	}, "\n")

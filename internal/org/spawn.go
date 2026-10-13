@@ -433,15 +433,26 @@ type SpawnResult struct {
 //     with Reserve, the reservation (reservationDecision), all from the same
 //     locked read (spawnCapacityErr). A reservation to record is appended as
 //     EventScopeReserved right before spawn_started.
+//  7. The checks of a seat in an org started for a split plan feature
+//     (spawnFeatureSeatErr; plan 2026-10-12-org-plan-approval, AC7 and AC8),
+//     from the same locked read, after step 6 and before the reservation and
+//     spawn_started are appended: a seat other than the leader is refused
+//     while the org has no active leader seat, and, in an org whose binding
+//     RequiresApproval, an implementer while no approval of the org passes
+//     checkAnyPlanApproved. Both read only the manifest (the mode is the one
+//     start recorded, never o.Config) and go through reject() like steps 3,
+//     4 and 6 (A6); a seat already spawned never reaches them, since step 1
+//     returns it first.
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
 // spawned|spawn_failed manifest trail and a tri-state model receipt.
 //
-// The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, and
-// 6 in the exact same order as the real path above: the input-only checks,
-// retiredRoleConfigErr, ValidateSpawnEnvelope, then permissionArgsForDriver,
-// then the AC-2b gate, then spawnCapacityErr against the real events.
+// The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, 6,
+// and 7 in the exact same order as the real path above: the input-only
+// checks, retiredRoleConfigErr, ValidateSpawnEnvelope, then
+// permissionArgsForDriver, then the AC-2b gate, then spawnCapacityErr and
+// spawnFeatureSeatErr against the real events.
 // Steps 1 and 5 have no dry-run analogue -- dry-run events are excluded
 // from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
 // case to short-circuit and no stale-in-flight saga to detect or
@@ -454,8 +465,8 @@ type SpawnResult struct {
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
 // worktree for a spawn this would refuse, so it first runs checkSpawnInput
 // and the watch gate (step 0) and spawnPrecheckErr, which repeats steps 1
-// to 6 on an unlocked read without writing anything. A change to the order
-// or to a check of steps 1 to 6 must be made in spawnPrecheckErr too.
+// to 7 on an unlocked read without writing anything. A change to the order
+// or to a check of steps 1 to 7 must be made in spawnPrecheckErr too.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// The input-only checks (step 0 above) run first, before any manifest
 	// read or write; see checkSpawnInput. From here on p holds the
@@ -495,7 +506,8 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// Cycle-2 M-1 fix): retiredRoleConfigErr, then
 		// ValidateSpawnEnvelope, then permissionArgsForDriver, then the
 		// AC-2b gate, then spawnCapacityErr (max_seats, the org-wide limits,
-		// the reservation) -- the same first-cause-wins order the real
+		// the reservation), then spawnFeatureSeatErr (the feature org's
+		// leader and approval) -- the same first-cause-wins order the real
 		// path's locked closure uses below, minus the two steps that have no
 		// dry-run analogue (the idempotent early return and stale-in-flight
 		// compensation; dry-run events are excluded from ActiveSeatCount/
@@ -531,6 +543,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		if err != nil {
 			return o.reject(p, err)
 		}
+		if err := spawnFeatureSeatErr(p, events); err != nil {
+			return o.reject(p, err)
+		}
 		return o.dryRunSpawn(p, resolvedPermMode, reserve)
 	}
 
@@ -538,16 +553,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	defer cancel()
 
 	// The idempotent/retired-key/envelope/permission/AC-2b-gate checks,
-	// stale-in-flight detection, the capacity check, and the spawn_started
-	// append all run inside withManifestLock: this is the exact "read
-	// manifest -> ActiveSeatCount -> ValidateSpawn -> appendEvent" window
-	// docs/tech-debt/README.md
-	// flagged as an unlocked TOCTOU race ("max_seats is enforced across an
-	// unlocked read-then-append window"). Two concurrent Spawn calls used to
-	// be able to both observe the same activeSeats snapshot and both pass
-	// ValidateSpawnCapacity, exceeding [org].max_seats; the flock in
-	// withManifestLock (lockfile.go) now serializes this section across
-	// goroutines and processes on the same host.
+	// stale-in-flight detection, the capacity check, the feature org's
+	// checks, and the spawn_started append all run inside withManifestLock:
+	// this is the exact "read manifest -> ActiveSeatCount -> ValidateSpawn ->
+	// appendEvent" window docs/tech-debt/README.md flagged as an unlocked
+	// TOCTOU race ("max_seats is enforced across an unlocked read-then-append
+	// window"). Two concurrent Spawn calls used to be able to both observe
+	// the same activeSeats snapshot and both pass ValidateSpawnCapacity,
+	// exceeding [org].max_seats; the flock in withManifestLock (lockfile.go)
+	// now serializes this section across goroutines and processes on the
+	// same host.
 	//
 	// Final locking shape (fixed self-review MEDIUM-3: the lock used to also
 	// wrap compensateStale's herdr PaneSendKeys round trip, contradicting
@@ -1137,11 +1152,12 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // before it makes a worktree, so a start that Spawn would refuse makes none.
 // p must already have passed checkSpawnInput.
 //
-// It runs the checks of Spawn's locked sections (steps 1 to 6 of Spawn's doc
+// It runs the checks of Spawn's locked sections (steps 1 to 7 of Spawn's doc
 // comment) in their order: for a seat that is already spawned only
 // idempotentRespawnDecision, the decision of the idempotent return;
 // otherwise retiredRoleConfigErr, ValidateSpawnEnvelope,
-// permissionArgsForDriver, autonomousScopeGateErr and spawnCapacityErr. A
+// permissionArgsForDriver, autonomousScopeGateErr, spawnCapacityErr and
+// spawnFeatureSeatErr (which passes the leader seat StartFeature spawns). A
 // stale in-flight seat is counted as compensateStale leaves it (one more
 // `spawn_failed`), since Spawn decides capacity on its read after that
 // compensation. Spawn decides again under the lock, so the two can differ
@@ -1170,8 +1186,10 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 	if found && (seat.Event == EventSpawnStarted || seat.Event == EventSpawnStep) {
 		events = append(slices.Clip(events), ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed})
 	}
-	_, err := spawnCapacityErr(cfg, p, req, events)
-	return err
+	if _, err := spawnCapacityErr(cfg, p, req, events); err != nil {
+		return err
+	}
+	return spawnFeatureSeatErr(p, events)
 }
 
 // checkCapacityAndStart runs the capacity check + spawn_started append
@@ -1193,14 +1211,20 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 // trip that follows in Spawn.
 //
 // The capacity check is spawnCapacityErr (max_seats, then the org-wide
-// limits, then the reservation). When it says the reservation is to be
-// recorded, the EventScopeReserved (with p.Feature's binding when set) is
+// limits, then the reservation), and the feature org's checks
+// (spawnFeatureSeatErr: its leader, then its approval) follow it; a refusal
+// of either is a reject(). When the capacity check says the reservation is to
+// be recorded, the EventScopeReserved (with p.Feature's binding when set) is
 // appended here, before spawn_started, so it is in the manifest before the
 // lock is released and a racing spawn of another org sees it; it stays when
 // the saga fails later.
 func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) (*SpawnResult, time.Time) {
 	reserve, err := spawnCapacityErr(o.Config, p, req, events)
 	if err != nil {
+		r := o.reject(p, err)
+		return &r, time.Time{}
+	}
+	if err := spawnFeatureSeatErr(p, events); err != nil {
 		r := o.reject(p, err)
 		return &r, time.Time{}
 	}
@@ -1241,6 +1265,36 @@ func spawnCapacityErr(cfg config.OrgConfig, p SpawnParams, req SpawnRequest, eve
 		return false, nil
 	}
 	return reservationDecision(events, p.OrgID, p.reservation())
+}
+
+// spawnFeatureSeatErr runs, against events, the checks of a new seat in an
+// org started for a split plan feature (ActiveFeature; plan
+// 2026-10-12-org-plan-approval, AC7 and AC8), right after spawnCapacityErr
+// and on the same events. An org with no binding passes, as does the leader
+// seat as `ralph org start` spawns it (seat id and role LeaderIdentity).
+// Any other seat is refused while the org has no active leader seat, in
+// either approval mode: the leader spawns the org's seats, and a seat
+// started without it has no one to report to. Then, when the binding
+// RequiresApproval (the mode start recorded, never the config of whoever
+// runs spawn: A8), a seat whose role is implementerRole is refused unless an
+// approval of the org's current life passes checkAnyPlanApproved; that
+// refusal is a planNotApprovedError. Every refusal is for reject() (A6).
+func spawnFeatureSeatErr(p SpawnParams, events []ManifestEvent) error {
+	f := ActiveFeature(events, p.OrgID)
+	if f == nil || (p.SeatID == LeaderIdentity && p.Role == LeaderIdentity) {
+		return nil
+	}
+	if leader, ok := seatFromEvents(events, p.OrgID, LeaderIdentity); !ok || !leader.Active {
+		return fmt.Errorf("org: org_id %q was started with ralph org start --plan and its %s seat is not running, "+
+			"so seat_id %q is not spawned: start the org again with ralph org start --plan, which spawns the %s",
+			p.OrgID, LeaderIdentity, p.SeatID, LeaderIdentity)
+	}
+	if f.RequiresApproval() && p.Role == implementerRole {
+		if err := checkAnyPlanApproved(events, p.OrgID, f); err != nil {
+			return planNotApprovedError{reason: err}
+		}
+	}
+	return nil
 }
 
 // reservation is the Reservation p asks for: its normalized Reserve paths

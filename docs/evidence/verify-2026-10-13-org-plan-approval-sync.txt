@@ -1,0 +1,58 @@
+# ./scripts/check-sync.sh at HEAD 78b3e873
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      167
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+rc=0
+
+# ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+rc=0
+
+# sha256 of the 4 org SKILL.md faces
+34e90d19d554d08b73faea17423c9dd2582de8a6a953e2439f388e27f2cc6d71  .claude/skills/org/SKILL.md
+34e90d19d554d08b73faea17423c9dd2582de8a6a953e2439f388e27f2cc6d71  .agents/skills/org/SKILL.md
+34e90d19d554d08b73faea17423c9dd2582de8a6a953e2439f388e27f2cc6d71  templates/base/.claude/skills/org/SKILL.md
+34e90d19d554d08b73faea17423c9dd2582de8a6a953e2439f388e27f2cc6d71  templates/base/.agents/skills/org/SKILL.md
+
+# cmp agent-messaging root vs template
+rc=0
+# cmp quality-gates root vs template
+docs/quality/quality-gates.md templates/base/docs/quality/quality-gates.md differ: char 3376, line 54
+rc=1
+# cmp ralph-config.sh root vs template
+rc=0
+
+# plan-visual.sh digest
+951cf09bd7bc
+rc=0

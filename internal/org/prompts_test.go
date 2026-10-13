@@ -1,11 +1,13 @@
 package org
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 func testRolePromptVars() RolePromptVars {
@@ -460,10 +462,13 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // its steps' own writes outside it, has every ralph org command carry the
 // --state-dir of the task's ledger line, its seats are spawned as implementer and
 // reviewer (maxFeatureOrgIDLen counts on the first), and the archive step
-// names its own step 8 for the cleanup. A failed secret scan, push, or gh pr
-// create is escalated as a BLOCKED, and the opened PR as a RESULT with the
-// org_id for its TASK_ID (plan 2026-10-10-org-inbox-escalate, AC8). The
-// retired formation patterns are mentioned nowhere.
+// names its own step 13 for the cleanup (the per-plan approval steps of plan
+// 2026-10-12-org-plan-approval moved the numbers: the plan is written in steps
+// 1, 4 and 6, the report in 9, the plan moved in 10; see
+// TestRenderRolePrompt_Leader_FeatureOrgPlanApproval). A failed secret scan,
+// push, or gh pr create is escalated as a BLOCKED, and the opened PR as a
+// RESULT with the org_id for its TASK_ID (plan 2026-10-10-org-inbox-escalate,
+// AC8). The retired formation patterns are mentioned nowhere.
 func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 
@@ -478,7 +483,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// The template routes on the first line of the task start --plan builds.
 	const routeLine = "- 分割計画:"
 	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
-		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a")
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", "per-plan")
 	if !strings.HasPrefix(task, routeLine) {
 		t.Fatalf("featureLeaderTask no longer starts with %q, which the leader template routes on; got:\n%s", routeLine, task)
 	}
@@ -515,7 +520,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	// writes (the feature plan, the report, the plan's move) are outside it.
 	if intro, _, ok := strings.Cut(section, "\n1. "); !ok ||
 		!containsPhrase(intro, "機能のコードと文書の変更は `- 予約したパス:` の中に収めて") ||
-		!containsPhrase(intro, "手順 1 の機能の計画、4 の report、5 の計画の移動は予約の外に書きますが") {
+		!containsPhrase(intro, "手順 1・4・6 の機能の計画、9 の report、10 の計画の移動は予約の外に書きますが") {
 		t.Errorf("expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:\n%s", section)
 	}
 	// Every ralph org command of the leader carries the --state-dir of the
@@ -533,7 +538,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"1 席ずつ spawn する", "`--id` は `implementer` と `reviewer` にする"},
-		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 8)が止まる"},
+		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 13)が止まる"},
 		{"secret-scan-branch.sh --strict", "push せずに止まり、`ralph org escalate` で BLOCKED を上げる"},
 		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
 		{"gh pr create` で PR", "エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
@@ -552,6 +557,186 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderRolePrompt_Leader_FeatureOrgPlanApproval pins AC10 of plan
+// docs/plans/active/2026-10-12-org-plan-approval.md. featureLeaderTask writes
+// the `- 承認方式:` line for both modes, and the 機能ごとの org section routes on
+// it: per-plan runs steps 2 to 4, 6 and 7, split skips them and may put PLAN:
+// on an implementer TASK. The per-plan steps come in order (the plan with its
+// Draft header lines, the visual page, the QUESTION with PLAN: and VISUAL:,
+// the approving DECISION and the two header lines, the implementer spawn with
+// PLAN: on every implementer TASK, no plan edits after the approval, the one
+// next step a refusal of the approval check names) and before the report.
+// The example QUESTION is one escalate accepts, whose PLAN: header
+// ParsePlanHeader reads and whose VISUAL: page follows the slug rule of step
+// 2; the DECISION `ralph org approve` prints is one step 4 reads as the
+// approval; and every refusal of the approval check, as spawnFeatureSeatErr
+// and sendApprovalErr return it, carries the marker step 7 tells it by and
+// the ralph org approve it forbids, and names --raw only for a TASK (ralph
+// org spawn has none), so a reworded refusal cannot leave the step pointing
+// at text ralph no longer prints.
+func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+
+	const modeLine = "- 承認方式:"
+	for _, mode := range []string{config.ApprovalModePerPlan, config.ApprovalModeSplit} {
+		task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"},
+			SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", mode)
+		if !strings.Contains(task, "\n"+modeLine+" "+mode+"\n") {
+			t.Errorf("featureLeaderTask(%q) does not write the %q line the leader template routes on; got:\n%s", mode, modeLine+" "+mode, task)
+		}
+	}
+	intro, _, _ := strings.Cut(section, "\n1. ")
+	for _, want := range []string{
+		"タスクの `" + modeLine + "` の行は、機能の計画を人が承認するかどうかを決めます",
+		"`per-plan` なら、手順 2〜4 で人の承認を受けてから implementer を spawn し、手順 6 と 7 も守ります",
+		"implementer の spawn と implementer への TASK を断ります(reviewer への TASK と、TASK 以外のメッセージは断りません)",
+		"`split` なら、手順 2〜4・6・7 を飛ばします",
+		"implementer への TASK に `PLAN:` のヘッダを付けても付けなくてもかまいません",
+	} {
+		if !containsPhrase(intro, want) {
+			t.Errorf("expected the 機能ごとの org intro to say %q, got intro:\n%s", want, intro)
+		}
+	}
+
+	squashed := squashSpace(section)
+	at := -1
+	for _, step := range []string{
+		"`- Status: Draft` と `- Approved: TBD`",
+		".harness/state/plan-visual/<slug>.html",
+		"./scripts/plan-visual.sh digest <計画のパス>",
+		"本文が `approved` で始まる",
+		"1 席ずつ spawn する",
+		"承認のあとは、計画の先頭の 2 行と checkbox の印のほかを変えない",
+		"承認の検査で断られたら",
+		"ralph org report --org-id org-a",
+	} {
+		i := strings.Index(squashed, squashSpace(step))
+		switch {
+		case i < 0:
+			t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", step, section)
+		case i < at:
+			t.Errorf("expected %q to come after the steps before it in the 機能ごとの org section, got section:\n%s", step, section)
+		default:
+			at = i
+		}
+	}
+
+	for _, c := range []struct{ marker, want string }{
+		{"1. 機能の計画を", "計画の先頭(最初の `## ` の見出しより前)には `- Status: Draft` と `- Approved: TBD` の行を 1 つずつ置く"},
+		{"1. 機能の計画を", "`/plan` skill は使わない"},
+		{"1. 機能の計画を", "per-plan の承認は手順 3 の QUESTION で求める"},
+		{"2. (per-plan)", "`/plan` skill の `diagrams.md` と `visual-template.html`"},
+		{"2. (per-plan)", "worktree の `.harness/state/plan-visual/<slug>.html` に書く"},
+		{"2. (per-plan)", "`<slug>` は計画のファイル名から日付と `.md` を除いたもの"},
+		{"2. (per-plan)", "`./scripts/plan-visual.sh shot <ページ> <png>` が使えれば、ページを撮って読み"},
+		{"2. (per-plan)", "そのことを手順 3 の QUESTION の本文に書く"},
+		{"3. (per-plan)", "承認を求める QUESTION を `ralph org escalate` で上げる"},
+		{"3. (per-plan)", "「件を上げる」の節のとおりファイルに書いて渡す"},
+		{"3. (per-plan)", "`PLAN: <worktree からの計画の相対パス> sha256:<digest>` と `VISUAL: <worktree からの図解ページの相対パス>` を 1 行ずつ書く"},
+		{"3. (per-plan)", "上げたら返事を待つ。返事が来るまで implementer は spawn しない"},
+		{"3. (per-plan)", "reviewer は承認の前に spawn してよく、計画のレビューを TASK で頼める"},
+		{"4. (per-plan)", "`PLAN:` のヘッダが手順 3 で上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす"},
+		{"4. (per-plan)", "計画の先頭の 2 行を `- Status: Approved` と `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え"},
+		{"4. (per-plan)", "digest が変わっていないことを確かめ、コミットする"},
+		{"4. (per-plan)", "それ以外の DECISION(直しの依頼)なら、計画を直してコミットし、図解ページを描き直し、新しい digest で新しい QUESTION を上げる"},
+		{"5. implementer と reviewer を", "implementer への TASK にいつも `PLAN: <計画のパス> sha256:<digest>` のヘッダ(最後に承認された digest。計画の `- Approved:` の行の digest)を 1 行付ける"},
+		{"5. implementer と reviewer を", "ヘッダは `TASK_ID:` の次の行に書く(空行のあとの本文に書いたものはヘッダとして読まれない)"},
+		{"5. implementer と reviewer を", "leader 以外の spawn はどの承認方式でも断られる"},
+		{"6. (per-plan)", "`## Progress checklist` の節にメモを足すことも、ここでいう変更に入る"},
+		{"6. (per-plan)", "進み具合のメモは計画に書かず"},
+		{"6. (per-plan)", "`- Status: Draft` と `- Approved: TBD` に戻して計画を変え、コミットし、手順 2 からやり直す"},
+		{"7. (per-plan)", "エラーの文に `refused by the approval check` が入る"},
+		{"7. (per-plan)", "その後ろに書かれた次の手(断られた理由ごとに 1 つ)に従う"},
+		{"7. (per-plan)", "どの場合も、原因を直す前に同じコマンドを打ち直さず、`--raw` にせず、自分で `ralph org approve` を打たない"},
+		{"7. (per-plan)", "承認は人が記録するもので、あなたが打つと人の承認ではなくなる"},
+		{"7. (per-plan)", "次の手が BLOCKED を上げることなら、エラーを本文に書き、BLOCKED(TASK_ID は org_id の `org-a`)を `ralph org escalate` で上げ"},
+		{"7. (per-plan)", "返事が来るまで implementer の spawn と TASK を打たずに待つ"},
+	} {
+		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {
+			t.Errorf("expected the 機能ごとの org item naming %q to contain %q, got item:\n%s", c.marker, c.want, item)
+		}
+	}
+
+	// The example QUESTION of step 3, indented in its list item, is one
+	// escalate accepts, and approve reads its PLAN: header.
+	item, _ := markdownItem(section, "3. (per-plan)")
+	const fence = "\n   ```\n"
+	_, rest, ok := strings.Cut(item, fence)
+	block, _, closed := strings.Cut(rest, fence)
+	if !ok || !closed {
+		t.Fatalf("expected step 3 to show the example QUESTION in an indented code block, got item:\n%s", item)
+	}
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(line, "   ")
+	}
+	msg := strings.Join(lines, "\n")
+	if m, err := validateEscalation("org-a", msg); err != nil || m.Type != protocol.TypeQuestion {
+		t.Errorf("expected escalate to accept the example as a QUESTION, got TYPE %q, err %v; message:\n%s", m.Type, err, msg)
+	}
+	ref, err := ParsePlanHeader(msg)
+	if err != nil {
+		t.Fatalf("ParsePlanHeader(example QUESTION) = %v; message:\n%s", err, msg)
+	}
+	slug := datePrefix.ReplaceAllString(strings.TrimSuffix(ref.Path[strings.LastIndex(ref.Path, "/")+1:], ".md"), "")
+	if visual := protocol.HeaderValues(msg, "VISUAL"); len(visual) != 1 || visual[0] != ".harness/state/plan-visual/"+slug+".html" {
+		t.Errorf("expected the example's one VISUAL: header to name the page step 2 writes for plan %s, got %q", ref.Path, visual)
+	}
+
+	// The DECISION `ralph org approve` prints for that QUESTION is one step 4
+	// reads as the approval: its PLAN: header is the QUESTION's, its body
+	// starts with approved.
+	decision := ApprovalDecisionText(ref)
+	if m, err := protocol.Parse(decision); err != nil || m.Type != protocol.TypeDecision || !strings.HasPrefix(m.Body, "approved") {
+		t.Errorf("expected ApprovalDecisionText to be a DECISION whose body starts with approved, got %+v, err %v:\n%s", m, err, decision)
+	}
+	if got, err := ParsePlanHeader(decision); err != nil || got != ref {
+		t.Errorf("expected the DECISION's PLAN: header to be the QUESTION's %s, got %s, err %v", ref, got, err)
+	}
+
+	// Every refusal of the approval check, as Spawn (spawnFeatureSeatErr) and
+	// Send (sendApprovalErr) return it, carries the marker step 7 tells it by
+	// and the ralph org approve step 7 forbids; only a TASK's names --raw.
+	binding := &FeatureBinding{Split: "s", Feature: "a", Digest: "0123456789ab", Branch: "feat/a", Worktree: t.TempDir(), Approval: config.ApprovalModePerPlan}
+	events := []ManifestEvent{
+		boundReserveEvent("org-a", binding, "a/"),
+		{OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned, Role: LeaderIdentity, PaneID: "pane-1"},
+		{OrgID: "org-a", SeatID: implementerSeatID, Event: EventSpawned, Role: implementerRole, PaneID: "pane-2"},
+	}
+	sendTo := func(text string) error {
+		return sendApprovalErr(events, SendParams{OrgID: "org-a", To: implementerSeatID, Text: text})
+	}
+	for _, r := range []struct {
+		name string
+		err  error
+		task bool
+	}{
+		{"an implementer spawn with no approval", spawnFeatureSeatErr(implementerParams("org-a"), events), false},
+		{"a TASK with no approval", sendTo("TYPE: TASK\nTASK_ID: t-1\nPLAN: " + ref.String() + "\n\nimplement the plan"), true},
+		{"a TASK with no PLAN: header", sendTo("TYPE: TASK\nTASK_ID: t-1\n\nimplement the plan"), true},
+	} {
+		if !errors.Is(r.err, ErrPlanNotApproved) {
+			t.Fatalf("%s: got %v, want a refusal of the approval check", r.name, r.err)
+		}
+		got := r.err.Error()
+		for _, want := range []string{"refused by the approval check", "ralph org approve"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: refusal %q does not contain %q, which step 7 of the leader template reads", r.name, got, want)
+			}
+		}
+		if strings.Contains(got, "--raw") != r.task {
+			t.Errorf("%s: refusal %q names --raw: %v, want %v (only a TASK can be sent with --raw)", r.name, got, !r.task, r.task)
+		}
+	}
+}
+
+// datePrefix is the `<date>-` a plan's file name starts with.
+var datePrefix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-`)
 
 // TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate pins AC8 of
 // plan 2026-10-10-org-inbox-escalate: the leader template no longer says

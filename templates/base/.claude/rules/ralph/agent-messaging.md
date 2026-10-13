@@ -99,6 +99,15 @@ nothing recorded, while no long-running cross-org watch
 `TASK` when its first line reads `TYPE: TASK`. Every other TYPE is sent with
 no watch running.
 
+In an org started with `ralph org start --plan` under approval mode
+`per-plan` (`[org.approval].mode`, recorded when the org starts), a `TASK` to
+a seat whose role is `implementer` must also carry exactly one
+`PLAN: <path> sha256:<digest>` header naming a plan a human approved with
+`ralph org approve`; otherwise `ralph org send` refuses it, with nothing
+recorded. A `--raw` message that counts as a `TASK` is checked the same way,
+its `PLAN:` header read by the same header rules. A `TASK` to any other seat,
+and every other TYPE, needs no approval.
+
 ## Escalation to the org inbox
 
 `ralph org escalate --text` raises an item in the org inbox instead of

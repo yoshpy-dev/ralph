@@ -1,0 +1,52 @@
+# mutation: org-plan-approval cycle 2 run 2 (HEAD 7839a71e)
+# date: 2026-10-13 JST 10:26:54-10:27:29, load average at start 2.63
+# command (per mutant, both in parallel): go test -count=1 -overlay <overlay-only-QNN.json> ./internal/org/
+# the overlay replaces one non-test source file with the mutant copy; no probe or extra _test.go file is in it
+
+## overlay-only-Q07.json
+{"Replace": {"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-plan-approval/internal/org/approval.go": "/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/opa/c2/mut/m/Q07/approval.go"}}
+## overlay-only-Q08.json
+{"Replace": {"/Users/hiroki.yoshioka/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-plan-approval/internal/org/verbs.go": "/private/tmp/claude-502/-Users-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/opa/c2/mut/m/Q08/verbs.go"}}
+
+## mutant diffs against HEAD (worktree file vs mutant copy)
+### Q07: diff internal/org/approval.go m/Q07/approval.go
+577c577
+< 		if approvals[i].Plan == path {
+---
+> 		if true || approvals[i].Plan == path {
+### Q08: diff internal/org/verbs.go m/Q08/verbs.go
+337a338
+> 	stale, _ := o.Manifest.Read()
+394c395
+< 		if err := o.checkSendApproval(p); err != nil {
+---
+> 		if err := sendApprovalErr(stale.Events, p); err != nil {
+
+## non-test source unchanged since 1b4ac934 (the cycle 2 run 1 /test commit):
+$ git diff --name-only 1b4ac934 HEAD
+docs/evidence/verify-2026-10-13-org-plan-approval-c2r2-static.txt
+docs/insights/events/2026-10-13-org-plan-approval.jsonl
+docs/reports/self-review-2026-10-13-org-plan-approval.md
+docs/reports/verify-2026-10-13-org-plan-approval.md
+internal/org/approval_enforce_test.go
+(the only Go file listed is internal/org/approval_enforce_test.go)
+
+## Q07 output
+--- FAIL: TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath (0.01s)
+    --- FAIL: TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again (0.00s)
+        approval_enforce_test.go:585: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does
+    --- FAIL: TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval (0.00s)
+        approval_enforce_test.go:592: send = "org: send: TASK not sent: org_id \"org-a\" has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband (its latest approval is of sha256:08f3c55e920b); refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband; " and the marker, and end with what a leader never does
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	33.654s
+FAIL
+rc=1 elapsed=34s
+
+## Q08 output
+--- FAIL: TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain (0.00s)
+    approval_enforce_test.go:544: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	33.889s
+FAIL
+rc=1 elapsed=35s
+

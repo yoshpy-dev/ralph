@@ -3360,7 +3360,7 @@ func TestOrgCloseDeferredSelf_CloseFails_BindingRestored(t *testing.T) {
 			if got := eventNames(t, o)[before:]; !slices.Equal(got, tc.wantEvents) {
 				t.Fatalf("expected %v, got %v", tc.wantEvents, got)
 			}
-			want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth restored: " + tc.why
+			want := "paths=internal/auth/ split=split-1 feature=auth digest=0123456789ab branch=feat/auth approval=per-plan restored: " + tc.why
 			if ev := lastEvent(t, o); ev.Event != EventScopeReserved || ev.OrgID != "org-a" || ev.SeatID != "" || ev.DryRun ||
 				ev.Details != want || ev.Worktree != f.Worktree {
 				t.Fatalf("expected the reservation restored with its binding (Details %q, Worktree %q), got %+v", want, f.Worktree, ev)
