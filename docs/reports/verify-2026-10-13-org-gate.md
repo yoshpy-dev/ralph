@@ -100,7 +100,7 @@
 - Verified: 静的解析はすべて rc 0(changed と full の `run-static-verify.sh`、`check-sync.sh`、`check-skill-sync.sh`、2 つの script の shellcheck、`go build`、`go vet`)。AC1〜AC13 は、コードと文書の経路と、それを固定するテストの名前で対応がつく。AC9 で書き換えた既存の assertion は計画の記録どおり 3 本。写しの 2 組は同一。FR-7 の 7b の 2 項目は満たし、7c の 3 項目は主張していない。HEAD の binary を一時の台帳で打った 9 通りは、AC1・AC2・AC3・AC7・AC11 の文のとおりに動いた
 - Partially verified: AC10 の文書は合うが、LOW のずれが 4 件ある(D1 AGENTS.md の `gate_run.go`、D2 README の gate の段、D3 quality-gates の列挙、D4 計画の Progress と Notes)。どれも動きの誤りではなく、/sync-docs で直せる
 - Not verified: テストが通ること(/test)、本物の leader の座席での手順(herdr、codex の sandbox、ツールの timeout)
-- Verdict: pass(ブランチ全体、cycle 2 の HEAD e1bd6b81 まで。上の 3 行は cycle 1 の HEAD c84d8e19 での判断で、cycle 2 の判断は下の「Cycle 2」節の「判断(cycle 2)」)
+- Verdict: pass(ブランチ全体、cycle 3 の HEAD a538c899 まで。上の 3 行は cycle 1 の HEAD c84d8e19 での判断で、cycle 2 と cycle 3 の判断は下の「Cycle 2」節の「判断(cycle 2)」と「Cycle 3」節の「判断(cycle 3)」)
 
 ## Cycle 2
 
@@ -228,3 +228,120 @@ b04289c1 が変えた動きを、文書の文と突き合わせた結果は次�
 - Partially verified: AC10 の記録の 2 件(C2-D1 tech-debt の行がない、C2-D2 計画の AC の checkbox)。どちらも動きの誤りではなく、/sync-docs か /pr の前に記録を足せば閉じる
 - Not verified: テストの実行(新しい 2 本を含む)、`gateCheckAfter` の最中の中断、Linux、本物の leader の座席での中断
 - 判断: pass(cycle 2)
+
+## Cycle 3
+
+- Date: 2026-10-13
+- Verifier: verifier subagent (Claude)。パイプラインの 3 回目(cycle 3)。PR #225 の CI(go.mod の `go 1.25.8`)で `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` が落ちたので、上限を 3 に上げて回した。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま(self-review cycle 3 と同じ)。その直しの 8b681dc3 と、self-review cycle 3(a538c899、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 2、Merge: yes)のあとに走らせた
+- Plan: `docs/plans/archive/2026-10-13-org-gate.md`(f001bd4f で archive に移った。この報告の 4 行目の active のパスは cycle 1 の時点のもの)。`./scripts/plan-visual.sh digest` は 69f088275e54 で、`- Approved:` 行(4 行目)と一致する
+- Scope: cycle 2 の verify(0bc87603)からの差分 `git diff 0bc87603..HEAD`(HEAD a538c899)。コードの変更は 8b681dc3 の 2 ファイル(`internal/cli/org_gate.go` +45/-7、`internal/cli/org_gate_test.go` +77/-0)だけで、残りは test cycle 2、sync-docs cycle 2(a1590e44)、cross-review cycle 2、walkthrough(2d6567b9)、archive(f001bd4f)、self-review cycle 3 の記録である。AC5 と中断を述べる文書を詳しく見て、ほかの AC が変わっていないことを確かめた。テストは走らせていない(/test の担当)。この節の行番号はすべて HEAD a538c899 のもの
+- Evidence:
+  - `docs/evidence/verify-2026-10-13-org-gate-static.txt`: 上書きした。中身は HEAD a538c899 での `./scripts/run-static-verify.sh`(changed scope)の出力と、その下の見出し「CI/release toolchain」に続く go1.25.8 の `go version`・`go build ./...`・`go vet ./internal/...`・`gofmt -l`。出力に `$HOME` と scratchpad のパスは 0 件で、伏せる箇所はなかった。cycle 2 の中身は `git show 0bc87603:docs/evidence/verify-2026-10-13-org-gate-static.txt` で読める
+  - `docs/evidence/verify-2026-10-13-org-gate-probe.txt`: 末尾に「Cycle 3: interrupt probe on the CI/release toolchain」を足した(script と、3 つの binary の出力)。HEAD の版は新しい版の先頭とバイト単位で一致するので、前の部分は変えていない。scratchpad のパスは前の部分と同じく `$SP` に置き換えた
+  - wrapper が書いた `docs/evidence/verify-2026-10-13-134531.log` は gitignore の対象なので、コミットしない
+  - CI のログは `gh run view` で読んだだけで、コミットしない。run 38401704870(84bbf4fb)と 38401983445(f001bd4f)が失敗、38407441217(a538c899)が成功。下で引く行番号は `--log-failed` と `--log` の出力の行
+  - insight event: `docs/insights/events/2026-10-13-org-gate.jsonl` に verify の 1 行(`--cycle 3`、verdict pass、low 4 は C3-D1〜C3-D4)を足し、この報告と同じコミットに入れた
+
+### Static analysis(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | rc 0 | ブランチの差分に `scripts/run-verify.sh` があるので、cycle 1・2 と同じく full fallback(`shared:scripts/run-verify.sh`)で golang の pack を選んだ。`gofmt: ok`、golangci-lint(2.9.0、go1.26.0 で build)は `0 issues.`。shellcheck、hook の `sh -n`、guard の awk、settings の `jq -e`、Codex の guard 3 つ、`check-sync.sh`(IDENTICAL 167、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(13 skill)、`check-template-purity.sh`、tech-debt の plan 参照、branch の secret scan(1bddc871..a538c899、clean)も通った |
+| `GOTOOLCHAIN=go1.25.8 go version` | `go version go1.25.8 darwin/arm64` | toolchain は module cache の `~/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.8.darwin-arm64` にあった。手元の既定は go1.26.0 |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` | rc 0、出力なし | go.mod の版で全体が build できる |
+| `GOTOOLCHAIN=go1.25.8 go vet ./internal/...` | rc 0、出力なし | |
+| go1.25.8 と go1.26.0 の `gofmt -l internal/cli/org_gate.go internal/cli/org_gate_test.go` | 出力なし | |
+| `git diff --check 0bc87603..HEAD` | 出力なし(rc 0) | cycle 2 で指摘した `docs/evidence/test-*.txt` の行末の空白は、test cycle 2 の書き直しでなくなった |
+| `cmp` で org の SKILL.md の 4 面 | 同一 | 8b681dc3 は skill に触れていない |
+| `./scripts/plan-visual.sh digest docs/plans/archive/2026-10-13-org-gate.md` | 69f088275e54 | `- Approved:` 行と一致。a1590e44 が付けた AC の checkbox は digest が `- [ ]` として読み、f001bd4f の `PR created` は digest が飛ばす `## Progress checklist` の中にある(`scripts/plan-visual.sh:25-31`) |
+
+### Spec compliance(cycle 3)
+
+#### AC5 と 8b681dc3
+
+AC5 の文は「中断されたら子のスクリプトを止め、何も記録しない」で、中断のエラーが信号の名前を言うことまでは求めていない。CI が落ちたのは、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`(`internal/cli/org_gate_test.go:655`)が cause の文(`:661-663`)まで比べているためである。run 38401983445 の失敗文(5970〜5976 行、3 つの subtest)は「gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; ...」で、止めることと記録しないことは go1.25.8 でも成り立ち、信号の名前だけが抜けていた。
+
+- 原因: go1.25.8 の `os/signal/signal.go:278-297` の `NotifyContext` は `context.WithCancel` で ctx を作り、信号で `c.cancel()` を呼ぶので、cause は `context.Canceled` のままになる。go1.26.0 の同じ関数は `context.WithCancelCause`(`signal.go:282`)と `signalError(s.String() + " signal received")`(`:294`)を使う。self-review cycle 3 が「1.25 のソースは読んでいない」と残した点は、module cache の go1.25.8 の GOROOT で読んで確かめた
+- 直し: `gateSignalContext`(`internal/cli/org_gate.go:109-145`、関数は 126 行から)が `context.WithCancelCause` と `signal.Notify` を使い、最初の信号で `"<信号> signal received"` を cause にする。RunE の呼び出しは `org_gate.go:97`。gate の経路で cause を文にするのは `internal/org/gate.go:316`・`:319`・`:684`・`:721`・`:748`、`internal/org/gate_run.go:203`、`internal/org/lockfile.go:95` で、どれも CLI から渡る ctx を読むだけ(`git grep 'context.Cause'`)。`signal.NotifyContext` が残る呼び出しは `internal/cli/org_watch.go:153` で、cause を読まない
+- 実機: 下の「Observational checks(cycle 3)」。go1.25.8 で build した HEAD の binary は 7 通りすべての中断で信号の名前を出し、修正前(f001bd4f)の binary は「context canceled」を出した。どちらも rc 1 で、manifest は変わらず、スクリプトの子は消えた。2 つ目の SIGINT は、どちらの binary も終わらせなかった
+- CI: a538c899 の run 38407441217 は成功し、`ok github.com/yoshpy-dev/ralph/internal/cli 34.511s`(5126 行)。CI の Go の版はログに出ない。`.github/workflows/verify.yml` は `setup-go` を使わず runner の Go に任せる。f001bd4f の失敗文が「context canceled」なので 1.26 より前だとはわかるが、1.25.8 そのものかは確かめていない。`release.yml:19-21` は `go-version-file: go.mod` なので、release の build は `go.mod:3` の 1.25.8 を使う
+- テスト: 新しい `TestOrgGate_SignalContextParentCauseAndStop`(`org_gate_test.go:729`)と `TestOrgGate_SignalContextKeepsLaterSignalsCaught`(`:763`、子プロセスで SIGHUP の cause と 2 つ目の信号での生存を見る)。通るかと、go1.25.8 で赤から緑に変わるかは /test が確かめる
+- 判定: 満たす(go1.25.8 と go1.26.0 の実機でも確認)。中断のエラーが信号の名前を言うことは、HEAD では go1.25.8 でも成り立つ
+
+#### 中断を述べる文書
+
+| Doc | 文 | 判定 |
+| --- | --- | --- |
+| `ralph org gate --help`(`internal/cli/org_gate.go:73-76`) | 「An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing」 | 合う。エラーの文面は約束していない |
+| `/org` skill の動詞の表(`.claude/skills/org/SKILL.md:181`) | 「SIGINT・SIGTERM・SIGHUP では走っているスクリプトを止め、何も記録しない」 | 合う。4 面は `cmp` で同一 |
+| skill の `:786`・`:849`、leader の雛形(`internal/org/prompts/leader.md:205`) | 「ツールに切られた gate は何も記録しない」「中断された gate は何も記録しない」 | 合う |
+| RunE のコメント(`org_gate.go:90-96`)と helper の doc(`:109-125`) | 「Later ones are caught too until stop runs, so a second Ctrl-C cannot end ralph before the group is stopped」「go.mod allows Go 1.25.8, which the release build uses」 | 合う。Q7 で、2 つ目の SIGINT のあとも ralph は動き続けた。go.mod と release.yml は上の CI の項のとおり |
+| README、AGENTS.md、quality-gates の 2 面、仕様の注 | 中断の cause の文を書いていない | 該当なし。`git grep 'signal received'` は、報告のほかでは `org_gate.go` と `org_gate_test.go` だけ |
+
+8b681dc3 のあとで、動きより多くを主張している文書はない。中断の文面を固定しているのはテスト(`org_gate_test.go:661-663`、`:795-796`)だけである。
+
+#### ほかの AC
+
+8b681dc3 が変えたのは `internal/cli/org_gate.go`(RunE のコメントと呼び出し、`gateSignalContext` の追加)と `internal/cli/org_gate_test.go`(723 行から 2 つのテストの追加)だけ。`internal/org/`、`cmd/`、`templates/`、`scripts/`、`tests/`、`.claude/`、`.agents/`、`.codex/`、README、AGENTS.md、quality-gates、仕様は 0bc87603 から変わっていない(`git diff --stat 0bc87603..HEAD -- <それらのパス>` が空)。
+
+- AC1・AC3: `printGateResult` は中身が変わらず、38 行下がっただけ(下の引き直しの表)。probe の Q3 で pass の 4 行と `gate_passed` の記録を見た
+- AC9: 8b681dc3 は `org_gate_test.go`(このブランチで作ったファイル)に足しただけで、消した行は 0(numstat 77/0)
+- AC10: cycle 2 の C2-D1(tech-debt の行がない)と C2-D2(AC の checkbox)は a1590e44 で閉じた。`docs/tech-debt/README.md:231` に「Small findings of org-gate cycle 2」の行があり、計画の AC1〜AC13 は `- [x]` になった。cycle 3 の記録のずれは下の C3-D1〜C3-D4
+- AC2・AC4・AC6・AC7・AC8・AC11・AC12・AC13: 該当するファイルは変わっていない
+
+### Documentation drift(cycle 3)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| C3-D1 PR の walkthrough(`docs/reports/walkthrough-2026-10-13-org-gate.md`)が 8b681dc3 より古い | いいえ(LOW) | `:33` は「`signal.NotifyContext` で SIGINT、SIGTERM、SIGHUP を ctx の取り消しにする」のままで、今は `gateSignalContext`。節の見出し(`:31`)の commit の列に 8b681dc3 がない。`:55` は「上限は既定の 2 のまま」で、往復の表(`:57-66`)は cross-review cycle 2 で終わり、CI の失敗、8b681dc3、self-review cycle 3 の C3-1・C3-2 の行がない。walkthrough は 8b681dc3 より前の 2d6567b9 で書いた。slug の名前の記録なので、/sync-docs か /pr の前に直せる |
+| C3-D2 walkthrough の AC の番号 | いいえ(LOW) | `:13` は `leaderActivityEventCount` の項目に「(AC13)」と書くが、計画では AC6(`docs/plans/archive/2026-10-13-org-gate.md:105`)。AC13 は archive した計画の TASK の検査(`:112`)である。8b681dc3 とは関係なく、2d6567b9 からある |
+| C3-D3 `docs/tech-debt/README.md:228`(SIGKILL の行) | いいえ(LOW) | Related plan/report の列が `` `internal/cli/org_gate.go` (`signal.NotifyContext`) `` を指す。今の信号の処理は `gateSignalContext`。行の本文(「only a SIGINT, SIGTERM, or SIGHUP to ralph」)は動きと合っていて、古いのは関数名だけ |
+| C3-D4 tech-debt に C3-1・C3-2 がない | いいえ(LOW) | self-review cycle 3 の「Tech debt identified」は (j) C3-1 と (k) C3-2 を `docs/tech-debt/README.md:231` の行に足すよう勧め、orchestrator が足すと書く。HEAD の行の項目は (a)〜(i) で、`gateSignalContext` と `C3-` は 0 件。cycle 2 の C2-D1 と同じ形で、/pr の前に足す |
+| Go のコメントの計画のパス | 情報 | `git grep -n 'docs/plans/active/2026-10-13-org-gate'` は、報告のほかに Go のコメント 8 か所を返す(`internal/cli/org_gate.go:18`、`internal/cli/org_gate_test.go:23`、`internal/org/approval_enforce_test.go:1011`、`internal/org/gate.go:19`、`internal/org/gate_runverify_test.go:12`、`internal/org/gate_test.go:24`、`internal/org/prompts_test.go:741`・`:930`)。`scripts/archive-plan.sh` が書き換えるのは `docs/tech-debt/README.md` だけで(`:54-65`)、f001bd4f はそこの 12 か所を archive のパスに替え、active のパスは 0 件残る(static の「tech-debt README plan references」も OK)。archive 済みのほかの計画も Go のコメントに active のパスで残っている(`2026-10-12-org-plan-approval` は 9 か所、`2026-08-02-org-runtime-seats` は 8 か所)。この repo の慣例どおりなので、ずれに数えない |
+| 報告の計画のパス | 情報 | self-review、test、sync-docs、cross-review triage、この報告の見出しの `docs/plans/active/...` は、それぞれを書いた時点の記録で、計画は当時 active にあった |
+| PR #225 の本文 | 情報 | `gh pr view 225` の本文は cycle 1・2 の結果だけを挙げ、cycle 3 と 8b681dc3 を書いていない。中断の行(本文の 19 行目と 79 行目)は「止めて何も記録しない」で、動きと合う。cycle 3 を書き足すのは PR の更新のとき |
+| この報告の cycle 1 の AC5 の行(`signal.NotifyContext`、`org_gate.go:96`) | 情報 | cycle 1 の表は書き換えず、下の引き直しの表に記録する |
+
+### cycle 1・cycle 2 の表の行番号の引き直し
+
+8b681dc3 で動いた参照は次の 3 つ。`org_gate.go` は元の 89 行目までが同じで、元の 96〜107 行目が 1 行、元の 108 行目から後ろが 38 行下がった。`org_gate_test.go` の新しいテストは 723 行目から入ったので、この報告が引く `org_gate_test.go:260`・`:316`・`:378`・`:421`・`:541`・`:655`・`:661-663` は同じ行を指したまま。cycle 2 の help の `org_gate.go:73-74` も変わらない。`internal/org/` と雛形、skill、`run-verify.sh`、`tests/` の参照は、cycle 2 の引き直しの表(HEAD e1bd6b81)のまま。計画の行の参照は、a1590e44 の AC の checkbox 13 行と f001bd4f の `PR created` の 1 行がどれも行の中の置き換えで行数を変えないので(numstat 14/14)、archive のパスでも同じ行を指す。
+
+| 参照(c84d8e19、e1bd6b81 でも同じ) | HEAD a538c899 | 中身 |
+| --- | --- | --- |
+| `org_gate.go:141-143` | `org_gate.go:179-181` | pass の 4 行の出力(AC1) |
+| `org_gate.go:134-171` | `org_gate.go:172-209` | `printGateResult`(AC3) |
+| `org_gate.go:96`(`signal.NotifyContext`) | `org_gate.go:97`(`gateSignalContext` の呼び出し)。helper は `:109-145`(関数は 126 行から) | 中断の信号(AC5) |
+
+### Observational checks(cycle 3)
+
+`docs/evidence/verify-2026-10-13-org-gate-probe.txt` の「Cycle 3」に script と出力を残した。3 つの binary を用意した。HEAD の worktree から `GOTOOLCHAIN=go1.25.8` で build したもの、同じく go1.26.0 で build したもの、`git archive f001bd4f`(8b681dc3 の親。`internal/`・`cmd/`・`scripts/` の差は `org_gate.go` と `org_gate_test.go` だけ)を scratchpad に展開して go1.25.8 で build した修正前のものである。`go version <binary>` はそれぞれ go1.25.8、go1.26.0、go1.25.8 を返した。repo と台帳は cycle 2 と同じ形(結びつきのある `scope_reserved` と leader の `spawned` の 2 行)で、Q1〜Q4 は cycle 2 と同じ手順、Q5〜Q7 は新しく足した。cycle 2 との違いとして、`HOME` と `XDG_CONFIG_HOME` を scratch の下に向けた。スクリプトは stub で、`go test` と `run-test.sh` は走らせていない。herdr、`~/.config/herdr`、agmsg、osascript、ネットワークは使っていない。走らせたあと、`pgrep` で probe のプロセスが残っていないことを確かめた。
+
+| # | 入力 | HEAD(go1.25.8) | 修正前 f001bd4f(go1.25.8) | HEAD(go1.26.0) |
+| --- | --- | --- | --- | --- |
+| Q1 | 2 つのスクリプトが通り、ロックを 3 秒持たれている間に SIGTERM | rc 1、0.02 秒。「interrupted (terminated signal received)」。manifest は 2 行のまま | rc 1、0.03 秒。「interrupted (context canceled)」。manifest は変わらない | rc 1、0.02 秒。「terminated signal received」 |
+| Q2 | Q1 と同じで SIGHUP | rc 1、0.02 秒。「hangup signal received」 | rc 1、0.02 秒。「context canceled」 | rc 1、0.02 秒。「hangup signal received」 |
+| Q3 | 中断なしで、ロックを 2 秒持たれる | 待ってから `gate_passed` を記録し rc 0(2.02 秒) | 同じ(2.01 秒) | 同じ(2.03 秒) |
+| Q4 | `run-test.sh` の子が `sleep 30` している間に SIGINT | rc 1、0.05 秒。「interrupt signal received」。子の `sleep` は消えた | rc 1、0.02 秒。「context canceled」。子は消えた | rc 1、0.01 秒。「interrupt signal received」 |
+| Q5 | Q4 と同じで SIGTERM | rc 1、0.01 秒。「terminated signal received」 | rc 1、0.01 秒。「context canceled」 | rc 1、0.01 秒。「terminated signal received」 |
+| Q6 | Q4 と同じで SIGHUP | rc 1、0.03 秒。「hangup signal received」 | rc 1、0.01 秒。「context canceled」 | rc 1、0.02 秒。「hangup signal received」 |
+| Q7 | SIGINT の 0.3 秒後に 2 つ目の SIGINT。スクリプトは TERM を trap し、1 秒かけて終わる | 2 つ目を送った時点で gate は動いていた。rc 1、1.06 秒。「interrupt signal received」。log に trap の 2 行 | 同じ動きで rc 1、1.09 秒。「context canceled」 | 同じ動きで rc 1、1.07 秒。「interrupt signal received」 |
+
+- 中断のどの場合も manifest は変わらず、最後の manifest は 3 行(`scope_reserved`、`spawned`、Q3 の `gate_passed`)だった
+- Q7 で 2 つ目の SIGINT が ralph を終わらせていれば、rc は 130 になり、gate のエラーの行も出ない。rc 1 でエラーの行が出たので、2 つ目の信号は捕まえられている。返るまでの 1.06 秒は、スクリプトが TERM の trap で 1 秒眠ってから終わるのを gate が待った時間である。修正前でも同じなのは、go1.25.8 の `NotifyContext` も stop まで `Notify` を外さないため(`signal.go:286`、`:307-310`)
+- 修正前の binary だけが「context canceled」を出したので、この probe は 8b681dc3 が直した欠陥を見分ける
+
+### Coverage gaps(cycle 3)
+
+- テストは走らせていない(/test の担当)。self-review cycle 3 の follow-up 2 のとおり、`GOTOOLCHAIN=go1.25.8 go test ./internal/cli -run 'TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)'` を /test で回すのが、CI の失敗を手元で再現できるいちばん安い確認になる。CI は a538c899 で `internal/cli` が ok だったが、その Go の版はログに出ない
+- golangci-lint は手元の 2.9.0(go1.26.0 で build)でしか回していない。go1.25.8 で回したのは `go build`、`go vet`、`gofmt -l` だけ
+- `run-static-verify.sh` の golang pack は手元の `go` を使い、go.mod の `go` 行の版では回らない。今回の欠陥は Go 1.26 の標準ライブラリの動きに頼ったもので、型は同じなので go1.25.8 の `go vet` でも捕まらない。捕まえるには go.mod の版で `go test` を回す必要があり、決定論の検査を足すなら /test の側(手元の `go env GOVERSION` が go.mod の `go` 行より新しいときに、`GOTOOLCHAIN=go<go 行>` で gate の CLI のテストを 1 回回す)になる。toolchain の download が要るので、ネットワークがないときは飛ばす形になる
+- Linux での probe は打っていない。CI(ubuntu-latest)で `internal/cli` が通ったことは、信号の文字列(`interrupt`・`terminated`・`hangup`)が Linux でも同じであることの間接の証拠にとどまる
+- `gateSignalContext` の「親が先に終わると親の cause を残す」と「stop の cause は `context.Canceled`」は、テスト(`org_gate_test.go:729`)の assertion を読んだだけで、probe では打っていない
+- 本物の leader の座席(herdr の pane、codex の sandbox、ツールの timeout が送る信号)での中断は、cycle 1・2 と同じく未確認
+
+### 判断(cycle 3)
+
+- Verified: 8b681dc3 のあと、go1.25.8 で build した binary の中断のエラーは信号の名前を言う(7 通りすべて)。同じ probe で修正前の binary は「context canceled」を出したので、probe は直した欠陥を見分ける。原因(go1.25.8 の `NotifyContext` は cause を付けない)は go1.25.8 のソースで確かめた。止めることと記録しないことは修正の前後で同じで、2 つ目の SIGINT も ralph を終わらせない。help、skill の 4 面、leader の雛形の中断の文は、動きより多くを主張していない。static は既定の toolchain で rc 0、go1.25.8 では `go build ./...`・`go vet ./internal/...`・`gofmt -l` が rc 0。計画の digest は 69f088275e54 のまま一致する。CI は a538c899 で成功した
+- Partially verified: 記録のずれが 4 件(C3-D1・C3-D2 walkthrough、C3-D3・C3-D4 tech-debt)。どれも LOW で、動きの誤りではない
+- Not verified: テストの実行(go1.25.8 を含む)、CI の Go の正確な版、Linux での probe、本物の leader の座席での中断
+- 判断: pass(cycle 3)

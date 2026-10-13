@@ -463,3 +463,387 @@ manifest lines before=5 after=5
 "event":"gate_passed"
 "event":"gate_passed"
 ```
+
+# Cycle 3: interrupt probe on the CI/release toolchain (8b681dc3: gateSignalContext replaces signal.NotifyContext)
+# $SP = the verifier's scratchpad directory, as above
+# HEAD binary, go1.25.8:    GOTOOLCHAIN=go1.25.8 go build -o $SP/ralph-c3-head-go1258 ./cmd/ralph   (worktree at a538c899d4f07bb8f8c9011f44aaccdbf6a9f237)
+# HEAD binary, go1.26.0:    go build -o $SP/ralph-c3-head-go1260 ./cmd/ralph
+# pre-fix binary, go1.25.8: git archive f001bd4f | tar -x -C $SP/src-c3-prefix; (cd $SP/src-c3-prefix && GOTOOLCHAIN=go1.25.8 go build -o $SP/ralph-c3-prefix-go1258 ./cmd/ralph)
+#                           (f001bd4f = 8b681dc3^; git diff --stat f001bd4f a538c899 -- internal cmd scripts lists only internal/cli/org_gate.go and org_gate_test.go)
+# go version <binary>: go1.25.8, go1.26.0, go1.25.8
+# run: SP=$SP RALPH=$SP/ralph-c3-<tag> TAG=<tag> sh $SP/gate-probe-c3.sh   (sh -n passed; no leftover probe processes afterwards: pgrep found none)
+
+## probe script (cycle 3)
+```sh
+#!/bin/sh
+# Scratch-ledger probe of `ralph org gate` interrupts (cycle 3, 8b681dc3: the
+# interrupt error names the signal on Go 1.25.8). Same repo, ledger, and Q1-Q4
+# as the cycle 2 probe; Q5-Q7 are new. RALPH = the binary under test, TAG = a
+# name for the scratch dir. HOME and XDG_CONFIG_HOME point into the scratch
+# dir. No herdr, agmsg, osascript, or network.
+set -u
+SP="$SP"
+RALPH="${RALPH:?}"
+W="$SP/gate-probe-c3-${TAG:?}"
+rm -rf "$W"
+mkdir -p "$W/home/.config"
+W="$(cd "$W" && pwd -P)"
+export HOME="$W/home" XDG_CONFIG_HOME="$W/home/.config"
+printf '[user]\n\tname = probe\n\temail = probe@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1
+unset HERDR_PANE_ID RALPH_ORG_STATE_DIR
+export USER=probe
+
+git init --quiet --bare "$W/origin.git"
+git init --quiet -b main "$W/main"
+cd "$W/main" || exit 1
+mkdir -p scripts
+printf '.harness/\ndocs/evidence/*.log\n' > .gitignore
+cat > scripts/run-static-verify.sh <<'EOF'
+#!/bin/sh
+echo "static: ok"
+exit 0
+EOF
+cat > scripts/run-test.sh <<'EOF'
+#!/bin/sh
+echo "test: start"
+if [ -f "$PROBE_OUT/sleep-test" ]; then
+  if [ -f "$PROBE_OUT/slow-term" ]; then
+    trap 'echo "test: got TERM, exiting in 1s"; sleep 1; echo "test: exiting"; exit 143' TERM
+  fi
+  sleep 30 &
+  echo "$!" > "$PROBE_OUT/sleep-pid"
+  wait
+fi
+echo "test: done"
+exit 0
+EOF
+chmod +x scripts/*.sh
+git add . && git commit --quiet -m init
+git remote add origin "$W/origin.git"
+git push --quiet -u origin main
+git remote set-head origin main
+git worktree add --quiet -b feat/probe "$W/wt-probe"
+
+STATE="$W/state"
+mkdir -p "$STATE" "$W/out"
+export PROBE_OUT="$W/out"
+WT="$W/wt-probe"
+cat > "$STATE/manifest.jsonl" <<EOF
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+EOF
+
+section() { printf '\n######## %s\n' "$1"; }
+lines() { wc -l < "$STATE/manifest.jsonl" | tr -d ' '; }
+now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
+elapsed() { perl -e 'printf "%.2fs\n", $ARGV[1] - $ARGV[0]' "$1" "$2"; }
+# hold_lock SECONDS: take $STATE/manifest.lock (flock LOCK_EX, as another gate or spawn would) for SECONDS.
+hold_lock() {
+  rm -f "$PROBE_OUT/lock-held"
+  perl -MFcntl=:flock -e '$|=1; open(my $f, ">>", $ARGV[0]) or die "open: $!"; flock($f, LOCK_EX) or die "flock: $!"; print "held\n"; sleep $ARGV[1];' \
+    "$STATE/manifest.lock" "$1" > "$PROBE_OUT/lock-held" &
+  LOCKPID=$!
+  i=0
+  until grep -q held "$PROBE_OUT/lock-held" 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "lock not held"; exit 1; }
+    sleep 0.05
+  done
+}
+# wait_for_log TEXT: wait up to 10s for the newest gate log to hold TEXT.
+wait_for_log() {
+  i=0
+  while :; do
+    log=$(ls -t "$STATE"/gates/*.log 2>/dev/null | head -n 1)
+    [ -n "$log" ] && grep -qF "$1" "$log" && return 0
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "log never held: $1"; return 1; }
+    sleep 0.05
+  done
+}
+# lock_wait_case SIGNAL: scripts pass, the manifest lock is held for 3s, SIGNAL lands 0.5s after run-test.sh exits.
+lock_wait_case() {
+  before=$(lines)
+  hold_lock 3
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+  GP=$!
+  wait_for_log "==> ralph org gate: ./scripts/run-test.sh exited 0"
+  sleep 0.5
+  t0=$(now)
+  kill "-$1" "$GP"
+  wait "$GP"; rc=$?
+  t1=$(now)
+  echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIG$1"
+  echo "stdout:"; cat "$PROBE_OUT/stdout"
+  echo "stderr:"; cat "$PROBE_OUT/stderr"
+  wait "$LOCKPID" 2>/dev/null
+  echo "manifest lines before=$before after=$(lines) (after the lock holder ended)"
+}
+# script_case SIGNAL [SECOND_SIGNAL]: SIGNAL lands while run-test.sh's child sleeps 30s.
+# With SECOND_SIGNAL, run-test.sh traps TERM and takes 1s to exit, and
+# SECOND_SIGNAL lands 0.3s after SIGNAL, while gate still waits for the group.
+script_case() {
+  before=$(lines)
+  : > "$PROBE_OUT/sleep-test"
+  rm -f "$PROBE_OUT/sleep-pid" "$PROBE_OUT/slow-term"
+  [ -n "${2:-}" ] && : > "$PROBE_OUT/slow-term"
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+  GP=$!
+  i=0; until [ -s "$PROBE_OUT/sleep-pid" ]; do i=$((i + 1)); [ "$i" -gt 200 ] && break; sleep 0.05; done
+  SLEEPPID=$(cat "$PROBE_OUT/sleep-pid")
+  t0=$(now)
+  kill "-$1" "$GP"
+  if [ -n "${2:-}" ]; then
+    sleep 0.3
+    if kill "-$2" "$GP" 2>/dev/null; then echo "SIG$2 sent 0.3s after SIG$1 (gate still running)"; else echo "SIG$2 not sent: gate had already exited"; fi
+  fi
+  wait "$GP"; rc=$?
+  t1=$(now)
+  echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIG$1"
+  echo "stdout:"; cat "$PROBE_OUT/stdout"
+  echo "stderr:"; cat "$PROBE_OUT/stderr"
+  if kill -0 "$SLEEPPID" 2>/dev/null; then echo "script's child sleep: still running"; kill "$SLEEPPID"; else echo "script's child sleep: gone"; fi
+  if [ -n "${2:-}" ]; then
+    log=$(ls -t "$STATE"/gates/*.log | head -n 1)
+    echo "log lines from the script's TERM trap:"; grep -E '^test: (got TERM|exiting)' "$log"
+  fi
+  rm -f "$PROBE_OUT/sleep-test" "$PROBE_OUT/slow-term"
+  echo "manifest lines before=$before after=$(lines)"
+}
+
+cd "$WT" || exit 1
+
+section "Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case TERM
+
+section "Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case HUP
+
+section "Q3 control: no interrupt, lock held for 2s: gate waits, then records"
+before=$(lines)
+hold_lock 2
+t0=$(now)
+"$RALPH" org gate --org-id probe --state-dir "$STATE"; rc=$?
+t1=$(now)
+echo "exit=$rc, took $(elapsed "$t0" "$t1")"
+wait "$LOCKPID" 2>/dev/null
+echo "manifest lines before=$before after=$(lines)"; tail -n 1 "$STATE/manifest.jsonl" | cut -c1-120
+
+section "Q4 SIGINT while run-test.sh runs (its child sleeps 30s)"
+script_case INT
+
+section "Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)"
+script_case TERM
+
+section "Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)"
+script_case HUP
+
+section "Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM"
+script_case INT INT
+
+section "manifest events"
+cut -d, -f4 "$STATE/manifest.jsonl"
+```
+
+## output, HEAD binary built with go1.25.8 (TAG=head-go1258, rc=0)
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135128Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135130Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 5904c5bec49952a6d073ef8a31430e0807d9fd38
+BASE: 5904c5bec49952a6d073ef8a31430e0807d9fd38
+LOG: $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135133Z.log
+exit=0, took 2.02s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:51:35Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5904c5bec49952a6d073ef8
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.05s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135135Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135136Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.03s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135137Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.06s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135138Z.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+## output, pre-fix binary f001bd4f built with go1.25.8 (TAG=prefix-go1258, rc=0): the negative control
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.03s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135142Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135143Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 58f18d3cb7037d9936dc06b5960eecbfe7144209
+BASE: 58f18d3cb7037d9936dc06b5960eecbfe7144209
+LOG: $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135147Z.log
+exit=0, took 2.01s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:51:48Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=58f18d3cb7037d9936dc06b
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.02s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135149Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135149Z-2.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135150Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.09s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135150Z-2.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+## output, HEAD binary built with go1.26.0 (TAG=head-go1260, rc=0)
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135154Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135156Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: fc8ab9c32bf9d77d843f756cb0e57e725a9433ed
+BASE: fc8ab9c32bf9d77d843f756cb0e57e725a9433ed
+LOG: $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135159Z.log
+exit=0, took 2.03s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:52:01Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=fc8ab9c32bf9d77d843f756
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135201Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135201Z-2.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135202Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.07s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135203Z.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
