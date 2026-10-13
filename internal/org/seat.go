@@ -4,9 +4,10 @@
 // manifest, and tri-state model receipts. It has no cobra wiring, which
 // lives in internal/cli/org.go, and reaches herdr and agmsg only through
 // the adapters in internal/org/driver. It runs a few other commands itself
-// with exec.Command: git (statedir.go, watch.go, feature.go),
-// scripts/ralph-worktree.sh (feature.go), osascript (watch.go) and
-// `claude -p` (watcher.go).
+// with exec.Command: git (statedir.go, watch.go, feature.go, gate.go),
+// scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
+// scripts/run-test.sh of a feature worktree (gate.go), osascript (watch.go)
+// and `claude -p` (watcher.go).
 package org
 
 // Saga/event name constants recorded in ManifestEvent.Event.
@@ -66,6 +67,19 @@ const (
 	// Roster skips it like every org-level event, and it does not make an
 	// org count as running.
 	EventPlanApproved = "plan_approved"
+	// EventGatePassed and EventGateFailed are org-level, non-state events
+	// (SeatID empty, absent from stateEvents below) that only `ralph org
+	// gate` writes (Gate, gate.go): the gate scripts passed, or failed, on
+	// the feature worktree's HEAD. Details are `head=<sha> base=<sha>
+	// base_ref=<ref> branch=<branch> by=<USER or unknown>
+	// herdr_pane=<set|unset> log=<quoted path>`, with `reason=<static_failed,
+	// test_failed, head_moved or tree_changed>` first on gate_failed
+	// (gateRecord). A refusal before the scripts run records neither. The
+	// watch counts both as leader activity (leaderActivityEventCount); Roster
+	// skips them like every org-level event, and they do not make an org
+	// count as running.
+	EventGatePassed = "gate_passed"
+	EventGateFailed = "gate_failed"
 )
 
 // stateEvents are the event types that drive seat status derivation

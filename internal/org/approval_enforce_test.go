@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1003,4 +1005,56 @@ func TestOrgSpawn_ApprovalCheck_IdempotentRespawn(t *testing.T) {
 		t.Fatalf("stop the leader: %v", r.Err)
 	}
 	respawn("after the leader stopped")
+}
+
+// TestOrgSend_ApprovalCheck_PlanArchivedAndRestored covers AC13 of plan
+// docs/plans/active/2026-10-13-org-gate.md (B11): once the leader archives
+// an approved plan (docs/plans/archive/, same name), an implementer TASK
+// naming it is refused with nothing recorded or sent, and so is one naming
+// the archived path, which no approval names; after the plan is moved back
+// to its path with the same bytes, as `git revert` of the archive commit
+// leaves it, the same TASK is sent.
+func TestOrgSend_ApprovalCheck_PlanArchivedAndRestored(t *testing.T) {
+	fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+	seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+	ref := approveFeaturePlan(t, fx.o, "org-a", fx.worktree)
+	send := func(ref PlanRef) SendResult {
+		return fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(ref)})
+	}
+	if r := send(ref); r.Err != nil {
+		t.Fatalf("send before the archive = %v; want it sent", r.Err)
+	}
+
+	active := filepath.Join(fx.worktree, filepath.FromSlash(testPlanRel))
+	archivedRel := "docs/plans/archive/" + filepath.Base(testPlanRel)
+	archived := filepath.Join(fx.worktree, filepath.FromSlash(archivedRel))
+	approvedBytes, err := os.ReadFile(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(active, archived); err != nil {
+		t.Fatal(err)
+	}
+	before := takeLedgerSnapshot(t, fx.o, fx.h, fx.a)
+	assertTaskRefused(t, send(ref), "plan "+testPlanRel+" in the feature worktree "+fx.worktree+": no such file or directory")
+	assertTaskRefused(t, send(PlanRef{Path: archivedRel, Digest: ref.Digest}), `org_id "org-a" has no approval recorded for plan `+archivedRel)
+	if after := takeLedgerSnapshot(t, fx.o, fx.h, fx.a); after != before {
+		t.Fatalf("a refused TASK changed the ledger or called a driver:\nbefore %+v\nafter  %+v", before, after)
+	}
+
+	if err := os.Rename(archived, active); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := os.ReadFile(active); err != nil || string(restored) != string(approvedBytes) {
+		t.Fatalf("restored plan = %q, %v; want the approved bytes", restored, err)
+	}
+	if r := send(ref); r.Err != nil {
+		t.Fatalf("send after the plan is back = %v; want it sent", r.Err)
+	}
+	if last := lastEvent(t, fx.o); last.Event != EventSent || last.SeatID != implementerSeatID || last.DryRun {
+		t.Fatalf("last event = %+v; want the TASK sent to the implementer", last)
+	}
 }
