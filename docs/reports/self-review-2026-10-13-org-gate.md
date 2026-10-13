@@ -90,3 +90,13 @@
   2. M3: `run-verify.sh` のコメントを実際の動きに合わせ、`tests/test-run-verify-concurrency.sh` の Case 6 を、解放しないまま kill する形に直す(`/bin/sh` と dash の両方)。root と `templates/base/` の 2 つを同じに保つ
   3. M2: `signal.NotifyContext` に SIGHUP を足す。ツールの timeout で残る群れへの手を雛形に書くかどうかは、実機での確認(leader のツールが何を送るか)のあとに決める
   4. L1〜L9: 直せるものは 1 と同じ修正にまとめる。次の回で残る分は、tech-debt に 1 行にして、L7 の既存の行の文もそのとき直す
+
+## このレビューのあとの修正(orchestrator が追記)
+
+このレビューのあと、/verify の前に、所見を e0adb359(`fix: address org-gate self-review findings`)と aeba07cb(パッケージの doc の 1 行)で直した。上の所見の表と判定は、レビューした fbed9f05 の時点のまま残す。
+
+- M1: archive のコミットのあとに implementer へ TASK を送るときは、rebase の途中なら `git rebase --abort`、続けて archive のコミットを revert してから送る、を手順 10 の共通の規則にした(`GATE: fail` と、直すのに implementer の手が要る断りの両方)。skill の 4 面と `prompts_test.go` も合わせた
+- M2・L9: CLI が SIGHUP も捕まえる。雛形は gate をバックグラウンドで走らせ、出力を `.harness/state/gate-<org_id>.out` に書いてから読む形にし、打ち直す前に前の gate のスクリプトが終わるのを待つと書いた。SIGKILL で残るスクリプトの群れには仕掛けを足さず、tech-debt の行にした
+- M3: `run-verify.sh` のコメントを実際の動きに直し、Case 6 をグループへの TERM と pid だけへの TERM の 2 つに分けた(`/bin/sh` と dash)
+- L1〜L8: 既定のブランチの決め方を 3 か所でそろえた(L1)。rebase の途中と origin がない repo の断りの次の手を直した(L2)。`gateGitMust` を `gateGitOutput` に改名した(L3)。スクリプトのパスと一覧の上限を org 層から export した(L4)。スクリプトが残したプロセスを止めて log に書くようにした(L5)。見張りのコメントを直した(L6)。tech-debt の既存の行に 1 文足した(L7)。スクリプトの実行を `gate_run.go` に分けた(L8)
+- レビューの Known gaps のうち、worktree のスクリプトをそのまま走らせることと、除く環境変数の範囲は、tech-debt の行にした
