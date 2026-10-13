@@ -1,0 +1,223 @@
+# /test org-merge-order cycle 2: the org and cli Go tests on both toolchains
+# Worktree HEAD e346083d. go.mod names go 1.25.8; the local default is go1.26.0.
+#   GOTOOLCHAIN=go1.25.8 go test ./internal/org/... ./internal/cli/... -count=1 -v -coverprofile=<scratch>/cover-1258.out   rc=0, 241 s
+#   go test ./internal/org/... ./internal/cli/... -count=1 -v                                                              rc=0, 243 s
+# Both runs had a canary gh first on the inherited PATH (<scratch>/canary-bin/gh: logs its call to
+# <scratch>/canary-gh.log and exits 97). Canary log after both runs and every mutation run: absent (0 calls).
+# Counts: lines '--- PASS|SKIP|FAIL' (top level) and indented '--- ...' (subtests, every depth), per package.
+
+## go1.25.8: per package
+github.com/yoshpy-dev/ralph/internal/org      top PASS  679 SKIP 1 FAIL 0 | subtests PASS 1361 SKIP 0 FAIL 0 | ok 111.196s	coverage: 94.0% of statements
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 2.307s	coverage: 93.1% of statements
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.553s	coverage: 100.0% of statements
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  632 SKIP 0 FAIL 0 | subtests PASS  519 SKIP 0 FAIL 0 | ok 237.238s	coverage: 86.8% of statements
+
+## go1.26.0: per package
+github.com/yoshpy-dev/ralph/internal/org      top PASS  679 SKIP 1 FAIL 0 | subtests PASS 1361 SKIP 0 FAIL 0 | ok 108.863s
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 1.523s
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.122s
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  632 SKIP 0 FAIL 0 | subtests PASS  519 SKIP 0 FAIL 0 | ok 241.703s
+
+## SKIP and FAIL lines (go1.25.8, then go1.26.0)
+--- SKIP: TestEscalate_NoDesktopNotificationOffDarwinIsSkipped (0.00s)
+--- SKIP: TestEscalate_NoDesktopNotificationOffDarwinIsSkipped (0.00s)
+
+## The 12 tests cycle 2 added (git diff cab2fd50..HEAD -- '*_test.go' | grep '^+func Test'), and the 2 legacy-ledger rows
+### go1.25.8
+--- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg (0.01s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/unreadable:_a_record_that_cannot_be_read (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/unreadable:_a_corrupt_line_after_the_record (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/no_gate (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/failed (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/regate (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/rebase:_the_gate_checked_another_branch (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/rebase:_origin/main_moved (0.00s)
+--- PASS: TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+--- PASS: TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead (0.00s)
+--- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository (0.01s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git@github.com:acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/https://github.com/acme/app (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/ssh://git@github.com/acme/app.git/ (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git@github.com.emu:Acme/App.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/github.com:acme/app (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/http://github.com/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git://github.com/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/ssh://git@github.com:22/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/https://user@github.example.com/team/acme/app.git (0.00s)
+--- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (0.01s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_merged_PR_of_upstream_does_not_hide_origin's_ready_branch (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_upstream_into_another_branch_is_not_wrong_base (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_the_same_name_under_another_owner (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_another_repository_after_one_of_origin's_drops_both (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_url_that_names_no_repository (0.00s)
+--- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck (0.01s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck//srv/git/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/../origin.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/origin.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/./a:b/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/file:///srv/git/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/ftp://github.com/acme/app.git (0.00s)
+--- PASS: TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs (0.00s)
+--- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_returns_no_PR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_returns_only_a_fork's_PR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_fails (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_is_missing (0.00s)
+--- PASS: TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut (0.03s)
+--- PASS: TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote (0.00s)
+--- PASS: TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine (2.11s)
+--- PASS: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (1.89s)
+    --- PASS: TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue/org_merge_order (0.12s)
+    --- PASS: TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue/org_merge_order_json (0.10s)
+### go1.26.0
+--- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg (0.01s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/unreadable:_a_record_that_cannot_be_read (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/unreadable:_a_corrupt_line_after_the_record (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/no_gate (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/failed (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/regate (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/rebase:_the_gate_checked_another_branch (0.00s)
+    --- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg/rebase:_origin/main_moved (0.00s)
+--- PASS: TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+--- PASS: TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead (0.00s)
+--- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository (0.01s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git@github.com:acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/https://github.com/acme/app (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/ssh://git@github.com/acme/app.git/ (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git@github.com.emu:Acme/App.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/github.com:acme/app (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/http://github.com/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/git://github.com/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/ssh://git@github.com:22/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository/https://user@github.example.com/team/acme/app.git (0.00s)
+--- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_merged_PR_of_upstream_does_not_hide_origin's_ready_branch (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_upstream_into_another_branch_is_not_wrong_base (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_the_same_name_under_another_owner (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_of_another_repository_after_one_of_origin's_drops_both (0.00s)
+    --- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut/a_PR_url_that_names_no_repository (0.00s)
+--- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck (0.01s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck//srv/git/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/../origin.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/origin.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/./a:b/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/file:///srv/git/acme/app.git (0.00s)
+    --- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck/ftp://github.com/acme/app.git (0.00s)
+--- PASS: TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs (0.00s)
+--- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_returns_no_PR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_returns_only_a_fork's_PR (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_fails (0.00s)
+    --- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR/gh_is_missing (0.00s)
+--- PASS: TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut (0.02s)
+--- PASS: TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote (0.00s)
+--- PASS: TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine (1.88s)
+--- PASS: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (2.14s)
+    --- PASS: TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue/org_merge_order (0.09s)
+    --- PASS: TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue/org_merge_order_json (0.08s)
+
+## Every merge-order top-level test (go1.25.8): TestMergeOrder_* 34, TestOrgMergeOrder_* 15
+--- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin (0.01s)
+--- PASS: TestMergeOrder_DefaultBranchComesFromOriginsHEAD (0.00s)
+--- PASS: TestMergeOrder_FailedNoGateAndNoRemote (0.00s)
+--- PASS: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg (0.01s)
+--- PASS: TestMergeOrder_LatestGateRecordWins (0.01s)
+--- PASS: TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt (0.00s)
+--- PASS: TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+--- PASS: TestMergeOrder_TargetsAreTheBranchesOfEveryBinding (0.00s)
+--- PASS: TestMergeOrder_SameBranchBoundTwiceShowsTheLatestBinding (0.00s)
+--- PASS: TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount (0.00s)
+--- PASS: TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead (0.00s)
+--- PASS: TestMergeOrder_OrdersByClassThenGatePosition (0.00s)
+--- PASS: TestMergeOrder_MergedOrClosedComesFirst (0.00s)
+--- PASS: TestMergeOrder_PicksTheHighestSameRepoPR (0.00s)
+--- PASS: TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository (0.01s)
+--- PASS: TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (0.01s)
+--- PASS: TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck (0.01s)
+--- PASS: TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs (0.00s)
+--- PASS: TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR (0.00s)
+--- PASS: TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut (0.03s)
+--- PASS: TestMergeOrder_GHMissingNotesAndIsNotRunAgain (0.00s)
+--- PASS: TestMergeOrder_GHFailureForOneBranchLeavesItsPROut (0.02s)
+--- PASS: TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote (0.00s)
+--- PASS: TestMergeOrder_ReadsTheLsRemoteListing (0.00s)
+--- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing (0.03s)
+--- PASS: TestMergeOrder_InterruptedWhileGHRunsIsAnError (0.00s)
+--- PASS: TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv (0.00s)
+--- PASS: TestMergeOrder_NoTargetsRunsNoGit (0.00s)
+--- PASS: TestMergeOrder_TrailingLineWithoutNewlineIsCorrupt (0.00s)
+--- PASS: TestMergeOrder_ManifestThatCannotBeReadIsAnError (0.00s)
+--- PASS: TestMergeOrder_WritesNothing (0.00s)
+--- PASS: TestMergeOrder_ResultJSONShape (0.00s)
+--- PASS: TestMergeOrder_RealExecRunsInDirWithEnvAndStderr (0.10s)
+--- PASS: TestMergeOrder_RealExecIsNotHeldByAChildHoldingThePipe (4.27s)
+--- PASS: TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes (4.25s)
+--- PASS: TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText (3.90s)
+--- PASS: TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut (2.60s)
+--- PASS: TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList (1.26s)
+--- PASS: TestOrgMergeOrder_PRIntoAnotherBranchThanTheDefaultIsWrongBase (1.67s)
+--- PASS: TestOrgMergeOrder_GateOnTheOldDefaultBranchIsRebaseAfterOriginHEADMoves (1.72s)
+--- PASS: TestOrgMergeOrder_BranchNameWithTwoSlashesIsListedWhole (1.83s)
+--- PASS: TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped (1.72s)
+--- PASS: TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine (2.11s)
+--- PASS: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut (1.89s)
+--- PASS: TestOrgMergeOrder_OriginStateUnknownExitsOneWithTheReason (3.58s)
+--- PASS: TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit (0.00s)
+--- PASS: TestOrgMergeOrder_OrgIDIsRefusedBeforeAnythingIsRead (0.00s)
+--- PASS: TestOrgMergeOrder_StateDirFlagPicksTheLedger (0.96s)
+--- PASS: TestOrgMergeOrder_WritesNothingAndTakesNoLock (5.02s)
+
+## Tests that flaked in earlier cycles (go1.25.8, then go1.26.0)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.37s)
+--- PASS: TestRunDoctor_Passes (2.03s)
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.86s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.58s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.30s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.59s)
+--- PASS: TestRunDoctor_Passes (1.06s)
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.68s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.62s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.08s)
+
+## Coverage of the two merge-order files (go1.25.8 profile, each package's own tests)
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:25:			newOrgMergeOrderCmd			87.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:144:		printMergeOrder				100.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:176:		mergeOrderShortSHA			66.7%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:209:			MergeOrder				96.2%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:255:			readMergeLedger				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:291:			pos					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:308:			collectMergeTargets			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:361:			mergeLedgerNotes			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:387:			listOriginBranches			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:433:			parseLsRemote				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:472:			lookupMergePRs				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:516:			add					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:528:			notes					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:549:			String					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:553:			same					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:572:			check					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:605:			readMergeOriginRepo			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:632:			mergeRepoFromOriginURL			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:664:			mergeRepoFromPRURL			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:682:			lookupMergePR				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:703:			pickMergePR				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:720:			orderMergeEntries			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:747:			mergeEntryFor				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:763:			classifyMergeTarget			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:793:			mergeGateCommand			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:804:			classifyGatePassed			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:834:			gateBaseBranchName			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:844:			shortMergeSHA				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:851:			mergeOrderListNotes			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:872:			mergeOrderInterrupted			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:882:			realMergeOrderExec			100.0%
+# By statement: mergeorder.go 296/297 (the one left is `run = realMergeOrderExec` when Exec is nil,
+# mergeorder.go:224-226); org_merge_order.go 39/43 (95-97 guard error, 99-101 runtime error,
+# 103-105 nil cmd.Context, 180 mergeOrderShortSHA's short input), the same four as cycle 1.
+# Package totals: internal/org 94.0%, internal/cli 86.8%, internal/org/driver 93.1%, internal/org/protocol 100.0%.
+
+## The merge-order tests under the race detector (go1.26.0, canary gh on PATH)
+$ go test -race ./internal/org/ -run 'MergeOrder' -count=3
+ok  	github.com/yoshpy-dev/ralph/internal/org	15.787s
+$ go test -race ./internal/cli/ -run 'OrgMergeOrder' -count=1
+ok  	github.com/yoshpy-dev/ralph/internal/cli	35.419s

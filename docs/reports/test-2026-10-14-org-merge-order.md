@@ -128,7 +128,143 @@ AC との対応: AC1・AC11 は上の 1 行目、AC2 は 2 行目と「最新の
 
 ## Verdict
 
-- Verdict: pass
-- Pass: `./scripts/run-test.sh`(changed)は rc 0(shell 41 本すべて OK、Go 8 パッケージすべて ok)。go1.25.8 の org と cli は top-level 1,299 本、subtest 1,846 本が PASS で 0 fail、足した 37 本もすべて PASS で、消えたテストはない。`(cached)` だった 6 パッケージも打ち直して ok。mutation は 66 件のうち 58 件が red で、生き残り 8 件のうち 6 件は probe の行で落ちることを確かめ、2 件は本物の入力では動きが変わらない。テストは本物の `gh` に届かない(canary 0 件)
+- Verdict: pass(ブランチ全体、cycle 2 の HEAD e346083d の時点)
+- Pass: `./scripts/run-test.sh`(changed)は rc 0 で、shell 41 本すべて OK、Go 8 パッケージすべて ok、shell の集計の行は cycle 1 と同じ。`./internal/org/... ./internal/cli/...` は go1.25.8 と go1.26.0 のどちらでも、top-level 1,375 本(PASS 1,374、前からの skip 1)と subtest 2,025 本(すべて PASS)で、fail は 0 だった。merge-order のテスト 49 本(cycle 2 で足した 12 本を含む)もすべて PASS で、消えたテストはない。`-race` も ok。`(cached)` だった 6 パッケージも打ち直して ok
+- Pass(mutation): cycle 2 のコードの mutant 87 件のうち 72 件が red。生き残り 15 件のうち 10 件は probe の行で落ちることを確かめ、5 件は本物の入力では動きが変わらない。cycle 1 の穴 6 件(M03、M05、M09、C06、C07、C12)は cycle 2 のテストで red になった。cycle 1 の mutant も HEAD のテストで 67 件のうち 65 件が red で、残りは cycle 1 と同じ M13・M36
+- Pass(本物の origin と `gh`): テストは本物の `gh` に届かない(canary 0 件)。読むだけの確認で、この worktree では PR #225 が merged と出た。fork を模した repo では upstream の PR を捨てて set-default を勧め、修正前の binary は同じ PR を使った
+- 数の内訳: cycle 1 の時点の数は上の各節、cycle 2 の数は下の `## Cycle 2` にある
 - Fail: 0
 - Blocked: なし
+
+## Cycle 2
+
+- Date: 2026-10-14(JST 07:55〜09:00)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 の最後)。self-review の cycle 2(LOW 6 件、Merge: yes)と verify の cycle 2(pass、LOW 2 件)のあとに走らせた
+- Scope: HEAD e346083d(base ac34ccf3)。cycle 2 でコードとテストを変えたコミットは 15d4b947 だけで、`git diff cab2fd50..HEAD -- internal/` は 5 ファイル、+842/-52。中身は、gh の PR を origin の repository と突き合わせる直し、L1 の `--org-id` と但し書き、L2 の gh の失敗の注記のまとめ、help の文、テスト 12 本と legacy-ledger の表の 2 行。ee302b06 から e346083d までは文書と報告だけ。behavioral test だけを実行した(静的解析は /verify の担当)。環境は cycle 1 と同じで(macOS arm64、go1.26.0 と go1.25.8、git 2.49.0、`/bin/sh` は bash 3.2.57)、gh は 2.102.0
+- Evidence(どれもコミットする。wrapper が書いた `docs/evidence/verify-2026-10-13-225615.log` は gitignore の対象なのでコミットしない):
+  - `docs/evidence/test-2026-10-14-org-merge-order-c2-run-test.txt`: `./scripts/run-test.sh`(changed)の出力を cycle 1 と同じ方法で抜いたもの、`(cached)` だった 6 パッケージの打ち直し、cycle 1 の行との diff
+  - `docs/evidence/test-2026-10-14-org-merge-order-c2-go.txt`: go1.25.8 と go1.26.0 での `./internal/org/... ./internal/cli/...` の結果。パッケージごとの数、SKIP の行、足した 12 本と legacy-ledger の 2 行の `--- PASS` の行、merge-order のテスト 49 本の行、前に揺れたテストの行、merge-order の 2 ファイルの関数ごとの coverage、`-race` の結果
+  - `docs/evidence/test-2026-10-14-org-merge-order-c2-mutation.txt`: cycle 2 のコードの mutant(build できたもの 94 件)、cycle 1 の mutant を HEAD のテストで打ち直した 67 件、生き残りの分類、probe の行 PB1〜PB8 の結果とその source
+  - `docs/evidence/test-2026-10-14-org-merge-order-c2-real-origin.txt`: 本物の GitHub の origin と本物の `gh` に対する読むだけの確認(この worktree、fork を模した一時の repo、修正前の binary)
+  - insight event: lead の指示(報告と evidence だけをコミット)と、self-review と verify の cycle 2 の行を orchestrator が別のコミットで足した流れに合わせ、`docs/insights/events/2026-10-13-org-merge-order.jsonl` には書いていない。`./scripts/insights-append.sh --slug org-merge-order --flow standard --phase test --verdict pass --cycle auto --source skill --events-dir <scratch>` で作った行は `"phase":"test","cycle":2,"verdict":"pass"` で、`--cycle auto` は 2 を読んだ
+- テストもコードも変えていない。mutant の写し、probe のテスト、偽の `gh`、git と gh の呼び出しを記録する wrapper は scratchpad に置き、`go test -overlay` と PATH で読ませた。worktree に書いたのは、この報告の追記と上の evidence 4 本だけで、mutation のあとも `git status --porcelain` は空、`git diff --quiet` は rc 0 だった。テストの前後で `~/.config/herdr` の下に 07:56 より新しいファイルはなく、main のチェックアウトの `git status --short` は空のまま、`$TMPDIR` に `ralph-verify-*` は残っていない。herdr の server も osascript も起こしていない
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed、go1.26.0) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(cycle 1 と同じ) | 10 分 48 秒、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test ./internal/org/... ./internal/cli/... -count=1 -v -coverprofile` | org: top-level 680、subtest 1,361。org/driver: 48、89。org/protocol: 15、56。cli: 632、519 | org の top-level 679 本、ほかはすべて | 0 | org 1 | 241 s(org 111.2 s、cli 237.2 s)、rc 0 |
+| `go test ./internal/org/... ./internal/cli/... -count=1 -v`(go1.26.0) | 上と同じ | 上と同じ | 0 | org 1 | 243 s(org 108.9 s、cli 241.7 s)、rc 0 |
+| うち merge-order のテスト(`TestMergeOrder_*` 34 本、`TestOrgMergeOrder_*` 15 本) | top-level 49、subtest 69 | 両方の toolchain で 49、69 | 0 | 0 | - |
+| `-race`(go1.26.0): `./internal/org/ -run MergeOrder -count=3`、`./internal/cli/ -run OrgMergeOrder` | - | 2 つとも ok | 0 | - | 15.8 s、35.4 s |
+| `(cached)` だった 6 パッケージを `-count=1`(go1.26.0) | config、insights、org/driver、org/protocol、scaffold、upgrade | 6 パッケージすべて ok | 0 | - | 合わせて約 8 s |
+| mutation: cycle 2 のコード(`go test -overlay`、go1.26.0) | build できた mutant 94 件 | red 79 件 | 生き残り 15 件(下の「Mutation(cycle 2)」) | build できない 2 件は書き直して 2 件とも red | 1,599 s |
+| mutation: cycle 1 の mutant を HEAD のテストで打ち直し | build できた 67 件 | red 65 件 | 生き残り 2 件(cycle 1 と同じ M13、M36) | build できない 3 件は書き直した形で red | 約 19 分 |
+| probe(overlay だけの 8 本、コミットしない) | HEAD と生き残り 15 件 | HEAD では 8 本すべて通る。閉じられる生き残り 10 件は、どれも狙った probe で落ちる | - | - | - |
+| 本物の origin と `gh` の確認(読むだけ) | ls-remote 1 回、HEAD の binary 6 回、修正前の binary 1 回 | すべて期待どおり | 0 | - | - |
+
+- shell は 41 本すべてが `OK` で終わり、集計の `FAIL:` の行はどれも `FAIL: 0` だった。抜き出した行から行番号を外して cycle 1 の evidence と diff を取ると、違うのは時刻、Go の 2 つの所要時間、末尾の行だけで、suite ごとの集計の行はすべて同じ。Skipped は cycle 1 と同じ `tests/test-secret-scan-branch.sh` の 1 件
+- cycle 1 は `./internal/org/ ./internal/cli/` だけを数えた。その 2 パッケージで比べると、top-level は org 670 → 680(+10)、cli 630 → 632(+2)で、cycle 2 で足した `func Test` 12 本と合う。subtest は org 1,329 → 1,361(+32)、cli 517 → 519(+2、legacy-ledger の 2 行)。`git diff ac34ccf3...HEAD -- '*_test.go'` で消えた `func Test` は 0。2 つの toolchain で数は同じだった
+- `run-test.sh` の中の Go は `internal/cli`(182.4 s)と `internal/org`(97.2 s)を流し直し、ほかの 6 パッケージは `(cached)` だった。`internal/org` を import するのは `internal/insights` だけ(`go list -deps`)で、6 つとも `-count=1` で打ち直して ok
+- 前に揺れたテスト(`TestRunDoctor*`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どちらの toolchain でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` は 3.30 s と 3.08 s で、+5 s の subtest は出なかった。load average は 3〜9 だった
+- 本物の `gh` に届かないこと: 呼ばれたら記録して exit 97 で終わる偽の `gh`(canary)を、受け継ぐ PATH の先頭に置いて、2 回の全体の実行、`-race`、mutation のすべての実行を走らせた。canary の記録は 0 件。足した legacy-ledger の 2 行は開発者の PATH を受け継ぐ(`setupOrgStubPATH`)が、共有の台帳に結びつきがないので merge-order は git も gh も打たない。canary の 0 件はこの 2 行も含む
+
+### Coverage(cycle 2)
+
+- Statement(go1.25.8、各パッケージ自身のテストの profile): `internal/org` 94.0%(cycle 1 は 93.9%)、`internal/cli` 86.8%(同じ)、`internal/org/driver` 93.1%、`internal/org/protocol` 100.0%
+- `internal/org/mergeorder.go` は 296/297 文(99.7%、cycle 1 は 212/213)、`internal/cli/org_merge_order.go` は 39/43 文(90.7%、同じ)。通らない文は cycle 1 と同じ 5 つ(`Exec` が nil のときの `run = realMergeOrderExec`、CLI の 4 つ)
+- cycle 2 で足したか書き直した関数(`lookupMergePRs`、`mergeGHFailures` の `add` と `notes`、`mergeRepo` の `String` と `same`、`mergeOriginRepo.check`、`readMergeOriginRepo`、`mergeRepoFromOriginURL`、`mergeRepoFromPRURL`、`mergeGateCommand`)は、どれも 100%。それでも下の mutant が 15 件生き残った。穴は通らない行ではなく、テストの入力が区別しない値にある
+- Branch: 測っていない(cycle 1 と同じ)。代わりに mutation で分岐ごとの判定を確かめた
+
+### cycle 1 の穴は閉じたか
+
+| cycle 1 の穴 | 閉じたテスト | mutant(HEAD のテスト) |
+| --- | --- | --- |
+| M05: 読めない記録を、その org の最初の結びつきに付ける | `TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings`(cycle 1 の P2 と同じ並び) | red |
+| M03: 壊れた行の位置を最初の行で比べる | `TestMergeOrder_LatestGateRecordWins` に足した「of corrupt lines before and after the only gate record, the last one decides」(P1)。注記の壊れた行の数も数えるようになった | red |
+| M09: `org_id` のない行を数える | `TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead`(P3) | red |
+| C06・C07: 古い worktree の台帳の守り | `TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue` に足した `org_merge_order` と `org_merge_order_json` の行(P4) | 2 件とも red |
+| C12: 注記を `inboxField` に通さない | `TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine`(P5) | red |
+
+- cycle 1 の mutant を HEAD のテストで打ち直した。cycle 1 で red だったものは全部 red のままで、生き残りは cycle 1 が「本物の入力では同じ動き」と分けた M13・M36 だけだった。cycle 2 で行が動いた 4 件(M20、M23、M24、M38)と、cycle 1 で build できる形に直した 4 件(M17b、M23b、M39b、M51b)は HEAD に合わせて書き直し、8 件とも red
+
+### Mutation(cycle 2)
+
+- cycle 2 のコードに 87 件の mutant を作った(build できなかった K06・K07 は、同じ変更を build できる形にした K06b・K07b で数える)。ほかに、cycle 1 の穴の 6 件と、self-review C2-1 の推奨の直しを入れた H01 を 1 件、同じ方法で読ませた。cycle 2 のコードの 87 件は 72 件が red、15 件が生き残った
+
+| 対象 | mutant | red | 生き残り |
+| --- | --- | --- | --- |
+| `mergeOriginRepo.check`(K01〜K11) | 11 | 11 | なし |
+| `lookupMergePRs`(L01〜L08: PR を捨てる、gh を止める、`gh_available`、注記) | 8 | 6 | L04、L05 |
+| `mergeGHFailures`(G01〜G07: L2 のまとめ) | 7 | 6 | G04 |
+| `mergeRepo.same`(S01〜S05) | 5 | 4 | S04 |
+| `mergeRepoFromOriginURL`(O01〜O19) | 19 | 14 | O03、O04、O06、O16、O19 |
+| `readMergeOriginRepo`(U01〜U06、O20、O21) | 8 | 5 | U02、O20、O21 |
+| `mergeRepoFromPRURL`(P01〜P10) | 10 | 8 | P04、P05 |
+| L1 の Detail と注記(D01〜D03、`--org-id` を外す D04a〜g、但し書きを外す E04a〜h) | 18 | 17 | D02 |
+| 注記の定数 `mergeOrderNoPRs`(D06) | 1 | 1 | なし |
+
+- gh を打ち止める経路は、3 つの壊し方のどれも落ちた: 不一致のあとも gh を打ち続ける(L02)、先に付けた PR を残す(L01)、`gh_available` を false にする(L03)。get-url を毎回打つ(K01、K02)、get-url が失敗したら確かめずに使う(K04)、get-url の timeout を外す(U05。90 s の `-timeout` で落ちた)も red
+- L1 は、`--org-id` を外す mutant 7 件と但し書きを外す mutant 8 件を、Detail と注記の場所ごとに 1 件ずつ作った。15 件とも `TestMergeOrder_DetailsNameTheGateCommandWithTheOrg` が落とした。このテストは分類ごとに 1 行を持つ
+- H01(結びつきのない枝に、gate の記録の org_id を `--org-id` として付ける。self-review C2-1 の推奨)も同じテストで red になった。テストは今の「`--org-id` を出さない」を固定しているので、C2-1 を直すときはその assertion も書き換えることになる
+
+生き残り 15 件のうち 10 件は、HEAD で通る probe の行が落とす(evidence の PB1〜PB8)。確信が増える順に挙げる。
+
+- S04(PB4): owner だけを比べる。owner が同じで repository が違う PR の行がない。今のテストで「別の repository」とする行は、どれも owner が違う(upstream-org/app、someone/app)。`gh repo set-default` が同じ owner の別の repository(acme/app に対する acme/app-docs など)を指していると、その PR の state で枝が隠れる。足す行は PB4 で、`TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut` の表に 1 行で入る
+- O03・O04(PB5、PB5b): `mergeOriginURLSchemes` から `http` か `git` を外す。`TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository` には `http://` と `git://` の origin の行があるが、その PR は acme/app のものなので、確かめが通っても飛ばされても PR は使われる。この 2 行は「読めて一致した」と「読めなかった」を区別しない。URL を読む関数の表には `http://` と `git://` の行がない。足す行は、その表の 2 行(PB5)か、別の repository の PR が捨てられることを見る行(PB5b)
+- D02(PB7): Detail の `--org-id` を、最新の結びつきではなく gate の記録の org から取る。fixture では結びつきの org と gate の記録の org がいつも同じ(org-a)なので、取り違えても分からない。PB7 は同じ枝を org-a、org-b の順に結び、その前に org-a の gate_failed を置き、`--org-id org-b` を期待する
+- L04(PB1): 先の枝で gh が失敗し、後の枝で別の repository の PR が返ると、先の失敗の注記が消える。足す行は PB1
+- G04(PB3): 同じ理由の失敗がちょうど 5 本のとき「and 0 more」が付く。テストの本数は 7、2、1 で、5 がない。足す行は PB3
+- P04・P05(PB8)と O16(PB5_PB6): owner や repository が空の URL(`https://github.com//app/pull/7`、`git@github.com:acme//`)を読む。P04・P05 でも PR を全部捨てるのは同じで、注記の文が「gh reads /app」に変わるだけ。本物の gh はこの形の url を返さないので、足しても確信はあまり増えない
+- L05(PB2): gh が失敗したあとで見つからなくなると、先の失敗の注記が消える。実行の途中で gh が PATH から消えた場合だけで、現実にはまず起きない
+
+残りの 5 件は、本物の入力では動きが変わらない。
+
+- O06(`!scp` の判定を外す): コロンのない文字列は残りが空になり、path の要素が 1 つなので、どのみち読めない
+- O19(最初の `@` で切る): host は空かどうかしか見ない。違いが出るのは host の部分が `@` で終わる URL だけ
+- O20・O21(get-url の出力の 1 行目だけを読む、前後の空白を落とす): `git remote get-url origin` は LF で終わる 1 行しか出さない
+- U02(外側の ctx が終わったときも timeout と書く): 呼び元の `check` が先に `ctx.Err()` を見て interrupted を返す
+
+### 本物の origin と `gh`(読むだけ)
+
+verify の cycle 2 が「足すと確信がいちばん増える確認」に挙げた run を打った。加えて、fork を模した一時の repo で、cycle 2 の直しの前提(fork の作業場所では gh が upstream を読む)を確かめた。GitHub には何も書いていない(`gh repo set-default` が書いたのは一時の repo の `.git/config` だけ)。
+
+- この worktree(remote は origin の `ssh://git@github.com/yoshpy-dev/ralph.git` だけ)で、feat/org-gate(PR #225)とこの枝を名指す一時の台帳を作り、HEAD の binary を打った。`--all` の PR の列は `#225 https://github.com/yoshpy-dev/ralph/pull/225` で、分類は merged。`--json` では feat/org-gate が隠れて、注記が隠した数を言う。`--all --json` では `pr` に number 225、state MERGED が入る。get-url は gh が最初の PR を返したあとに 1 回だけ打たれた。この repo では突き合わせが通り、結果は cycle 1 と同じになる
+- fork を模した一時の repo(origin が yoshpy-dev/ralph、upstream が cli/cli)で、cli/cli の merge 済み PR #14650 の枝名を台帳に置いた
+  - HEAD: 本物の gh は upstream(cli/cli)を読んだ。merge-order は PR #14650 を使わず、注記は「gh reads cli/cli, not origin's yoshpy-dev/ralph: ... run gh repo set-default yoshpy-dev/ralph in this repository」で、gh は 1 回で止まった
+  - 修正前の binary(cab2fd50): 同じ台帳で cli/cli の PR #14650 を使い、その枝を merged にした(`--all` がなければ隠れる)。cross-review の指摘を本物の gh で再現した
+  - 注記のとおり `gh repo set-default yoshpy-dev/ralph` を打つと、gh は origin を読み、PR #225 が merged に戻った
+  - origin を `git+ssh://` に書き換え、set-default を外すと、`mergeRepoFromOriginURL` が読めないので確かめを飛ばし、cli/cli の PR #14650 をまた使った。verify の K12 と tech-debt の `mergeOriginRepo.check` の行が書く既知の穴で、本物の gh でも起きる。このとき feat/org-gate は、cli/cli にその名前の PR がないので no_remote になった(verify の D3 (c))
+- gh は PR を引くたびに `git remote -v` と `git config --get-regexp ^remote\..*\.gh-resolved$` を自分で打った(記録用の wrapper に残った)。gh が remote と set-default から読む repository を選ぶ、という `mergeorder.go` の先頭の説明と合う
+
+### Failure analysis(cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+### Regression checks(cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| gh が origin でない repository の PR を返すと、それで枝を隠す(cross-review cycle 1 の ACTION_REQUIRED #1) | 直った(偽の gh と本物の gh の両方) | mutation の K01〜K11 と L01〜L03 がすべて red。real-origin の 2 節では HEAD が upstream の PR を捨て、修正前の binary は同じ台帳で使う |
+| cycle 1 の穴 M03・M05・M09・C06・C07・C12 | 6 件とも red | 上の「cycle 1 の穴は閉じたか」 |
+| cycle 1 の mutant で red だったもの | HEAD のテストでも red | 67 件のうち 65 件。生き残りは同じ M13・M36 |
+| gate の記録の読み方(`gateRecordFromDetails`)を変えない | 変わっていない | `git diff ac34ccf3...HEAD -- internal/org/gate.go internal/org/gate_run.go internal/org/reserve.go internal/org/manifest.go` は空 |
+| Go 1.25 だけで起きる違い | 差はない | go1.25.8 と go1.26.0 で数と結果が同じ |
+| 前に揺れたテスト | 揺れなかった | 2 回の全体の実行のどちらでも PASS |
+
+### Test gaps(cycle 2)
+
+覆われていない場合を、確信が増える順に挙げる。どれもテストの失敗ではない。
+
+- S04: owner が同じで repository が違う PR。足す行は PB4
+- O03・O04: `http://` と `git://` の origin を読むこと。今の 2 行は区別しないので、足す行は PB5 か PB5b
+- D02: 結びつきの org と gate の記録の org が違う枝の Detail。足す行は PB7。self-review C2-1 を直すときに、結びつきのない枝の場合と一緒に固めるのがよい
+- L04: gh の失敗の注記と repository の注記が並ぶ場合。足す行は PB1
+- G04: ちょうど 5 本の失敗。足す行は PB3
+- P04・P05・O16・L05: 本物の gh や git が作らない入力。足しても確信はあまり増えない
+- 既知の穴(テストではなく設計の範囲): origin の URL が owner/repo を持たないときは確かめない(verify の K11・K12、本物の gh で再現)、別の repository にその名前の PR がないときは注記が出ない(D3 (c))、host を比べない。どれも `docs/tech-debt/README.md` の `mergeOriginRepo.check` の行にある
+- get-url の timeout は `GHTimeout`(既定 15 s)を流用する(self-review C2-2)。20 ms で止まることはテストが確かめるが、既定の値そのものは固めていない。cycle 1 の ls-remote と gh の既定の値と同じ扱い
+- verify の cycle 2 が「binary で打っていない」とした `--json` の PR の欄は、real-origin の 1 節で本物の PR #225 を出した。偽の gh を使う binary の run では、まだ打っていない

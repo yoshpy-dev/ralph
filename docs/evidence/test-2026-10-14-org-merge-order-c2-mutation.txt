@@ -1,0 +1,391 @@
+# /test org-merge-order cycle 2: mutation of the cycle-2 code and a rerun of cycle 1's mutants at HEAD
+# Worktree HEAD e346083d, go1.26.0. No worktree file was changed: every mutant and probe is a
+# go test -overlay file under the session scratchpad (<scratch>/mut, mutsupp, mutc1, mutc1b, probe).
+# git status --porcelain was empty and git diff --quiet rc 0 after the sweeps.
+#
+# Method (per mutant): exact string replacements in internal/org/mergeorder.go (each old string must
+# occur once) or internal/cli/org_merge_order.go, then (<scratch>/run2.sh, canary gh first on PATH)
+#   org mutants: go test ./internal/org/ -run 'MergeOrder' -count=1 -vet=off -timeout 90s -overlay <mutant>;
+#                if it passes, go test ./internal/cli/ -run 'OrgMergeOrder|OrgLegacyLedger' -count=1 -vet=off -timeout 300s -overlay <mutant>
+#   cli mutants: only the cli run
+# Columns: id, verdict, package whose tests killed it, how (assert / panic / timeout), mutation, failing top-level tests.
+# Baseline (no overlay): ok internal/org 4.954s, ok internal/cli 44.749s.
+#
+# Totals, cycle-2 set (<scratch>/mut2.py): 94 written. K06 and K07 did not build (declared and not
+# used); K06b and K07b are the same mutations written so they build, both KILLED. Of the 94 that build:
+# 79 KILLED (76 by the org tests, 3 by the CLI tests; 2 by a panic, 1 by the 90 s timeout), 15 SURVIVED.
+# The 79 include the six cycle-1 gaps (M03 M05 M09 C06 C07 C12), all KILLED now, and H01, a
+# hypothetical fix (see below). The 87 mutants of the cycle-2 code: 72 KILLED, 15 SURVIVED.
+# Sweep wall time 1,599 s, at load average 3-7.
+
+## Cycle-2 set
+K01     KILLED     org  assert   get-url read on every check                                        TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+K02     KILLED     org  assert   read flag never set                                                TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+K03     KILLED     org  assert   interrupt during get-url not told apart                            TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+K04     KILLED     org  assert   get-url failure: PRs used unchecked                                TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+K05     KILLED     org  assert   local-path origin checked anyway                                   TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+K06     BUILD_FAIL org  -        readable forced true
+K07     BUILD_FAIL org  -        PR url naming no repo falls to the owner/repo compare
+K08     KILLED     org  assert   PR url naming no repo accepted                                     TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+K09     KILLED     org  assert   repository mismatch accepted                                       TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+K10     KILLED     org  assert   set-default names gh's repo                                        TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+K11     KILLED     org  assert   note swaps gh's and origin's repo                                  TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+L01     KILLED     org  assert   PRs set before the mismatch kept                                   TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+L02     KILLED     org  assert   gh asked again after the mismatch (note kept)                      TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+L03     KILLED     org  assert   mismatch reports gh unavailable                                    TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+L04     SURVIVED   -    -        mismatch drops earlier gh-failure notes
+L05     SURVIVED   -    -        gh missing drops earlier gh-failure notes
+L06     KILLED     org  panic    no PR still checked (get-url, nil pr)                              TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+L07     KILLED     org  assert   check's ctx error swallowed                                        TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+L08     KILLED     org  assert   failures never grouped (key per branch)                            TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G01     KILLED     org  assert   add never groups                                                   TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G02     KILLED     org  assert   one-branch note shape never used                                   TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G03     KILLED     org  assert   all branches named                                                 TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G04     SURVIVED   -    -        'and 0 more' at exactly the cap
+G05     KILLED     org  assert   cap 6                                                              TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G06     KILLED     org  assert   groups in reverse order                                            TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+G07     KILLED     org  assert   count capped at the named ones                                     TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+S01     KILLED     org  assert   owner case-sensitive                                               TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+S02     KILLED     org  assert   repo name case-sensitive                                           TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+S03     KILLED     org  assert   owner OR name                                                      TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+S04     SURVIVED   -    -        owner only
+S05     KILLED     org  assert   name only                                                          TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+O01     KILLED     org  assert   scheme URL without host read                                       TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O02     KILLED     org  assert   any scheme read                                                    TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O03     SURVIVED   -    -        http:// not read
+O04     SURVIVED   -    -        git:// not read
+O05     KILLED     org  assert   ssh:// not read                                                    TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O06     SURVIVED   -    -        no-colon check dropped
+O07     KILLED     org  assert   slash-before-colon read as scp                                     TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+O08     KILLED     org  assert   user@ not stripped                                                 TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O09     KILLED     org  assert   empty scp host read                                                TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O10     KILLED     org  assert   trailing / kept                                                    TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O11     KILLED     org  assert   .git kept                                                          TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+O12     KILLED     org  assert   trims swapped                                                      TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O13     KILLED     org  assert   first two components                                               TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O14     KILLED     org  assert   empty owner/name accepted                                          TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O15     KILLED     org  assert   empty owner accepted                                               TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O16     SURVIVED   -    -        empty name accepted
+O17     KILLED     org  panic    one component read                                                 TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O18     KILLED     org  assert   only https:// parsed as a URL                                      TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+O19     SURVIVED   -    -        first @ instead of last
+O20     SURVIVED   -    -        whole get-url output, not first line
+O21     SURVIVED   -    -        get-url line not trimmed
+U01     KILLED     org  assert   get-url timeout not named                                          TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+U02     SURVIVED   -    -        outer ctx done reported as timeout
+U03     KILLED     org  assert   get-url env dropped                                                TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+U04     KILLED     org  assert   get-url dir ignored                                                TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+U05     KILLED     org  timeout  get-url unbounded
+U06     KILLED     org  assert   get-url --push                                                     TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+P01     KILLED     org  assert   PR url any scheme                                                  TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P02     KILLED     org  assert   PR url without host                                                TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P03     KILLED     org  assert   PR url longer path                                                 TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P04     SURVIVED   -    -        PR url empty owner
+P05     SURVIVED   -    -        PR url empty repo
+P06     KILLED     org  assert   PR url not /pull/                                                  TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P07     KILLED     org  assert   PR number not checked                                              TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P08     KILLED     org  assert   PR number 0 accepted                                               TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+P09     KILLED     org  assert   PR owner/repo swapped                                              TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+P10     KILLED     org  assert   PR path leading / kept                                             TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+D01     KILLED     org  assert   never --org-id                                                     TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D02     SURVIVED   -    -        gate record's org preferred over the binding's
+H01     KILLED     org  assert   hypothetical C2-1 fix: unbound branch named with the gate record's org TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D03     KILLED     org  assert   clause text                                                        TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04a    KILLED     org  assert   unreadable: no --org-id                                            TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04b    KILLED     org  assert   corrupt-after: no --org-id                                         TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04c    KILLED     org  assert   no_gate: no --org-id                                               TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04d    KILLED     org  assert   failed: no --org-id                                                TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04e    KILLED     org  assert   regate: no --org-id                                                TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04f    KILLED     org  assert   rebase (other base): no --org-id                                   TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D04g    KILLED     org  assert   rebase (main moved): no --org-id                                   TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04a    KILLED     org  assert   unreadable: clause dropped                                         TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04b    KILLED     org  assert   corrupt-after: clause dropped                                      TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04c    KILLED     org  assert   no_gate: clause dropped                                            TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04d    KILLED     org  assert   failed: clause dropped                                             TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04e    KILLED     org  assert   regate: clause dropped                                             TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04f    KILLED     org  assert   rebase (other base): clause dropped                                TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04g    KILLED     org  assert   rebase (main moved): clause dropped                                TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+E04h    KILLED     org  assert   several-ready note: clause dropped                                 TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+D06     KILLED     org  assert   no-PR note text                                                    TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+M03     KILLED     org  assert   c1 gap: first corrupt line instead of last                         TestMergeOrder_LatestGateRecordWins
+M05     KILLED     org  assert   c1 gap: unreadable record attaches to the org's first binding      TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings
+M09     KILLED     org  assert   c1 gap: org_id-less records counted                                TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead
+C06     KILLED     cli  assert   c1 gap: legacy guard as a mutating verb                            TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+C07     KILLED     cli  assert   c1 gap: legacy guard dropped                                       TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+C12     KILLED     cli  assert   c1 gap: note not escaped                                           TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine
+
+## Rebuilt K06/K07
+K06b    KILLED     org  assert   readable forced true (builds)                                      TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+K07b    KILLED     org  assert   PR url naming no repo falls to the owner/repo compare (builds)     TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+
+## The 15 survivors
+# Closable (10): each is killed by a probe that passes on HEAD (overlay-only test file, below).
+#   L04  PB1  a gh failure note is dropped when the repository check stops the run
+#   L05  PB2  same, when gh goes missing after a failure (needs gh removed mid-run: not realistic)
+#   G04  PB3  exactly 5 branches with the same error print " and 0 more" (the test has 7, 2 and 1)
+#   S04  PB4  owner-only compare: a PR of origin's owner but another repository (acme/app-docs) is used
+#   O03  PB5, PB5b  http:// left out of mergeOriginURLSchemes: such an origin skips the check
+#   O04  PB5, PB5b  git:// the same
+#        (TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository has http:// and git:// rows, but their
+#        PRs name acme/app, so they are used whether the check passes or is skipped: those rows cannot
+#        tell "read and matched" from "not read". The reader table has no http:// or git:// row.)
+#   O16  PB5_PB6  an origin path whose last component is empty (git@github.com:acme//) reads as acme/
+#   P04  PB8  a PR url with an empty owner reads as a repository (the note then says "gh reads /app")
+#   P05  PB8  the same for an empty repository
+#   D02  PB7  the Detail names the gate record's org instead of the latest binding's (same branch bound
+#             by org-a, then org-b, gate failed under org-a)
+# Equivalent for real input (5):
+#   O06  dropping `!scp`: a string with no colon has rest "", so its path has one component and is refused anyway
+#   O19  first '@' instead of last: the host is only checked for being empty; differs only for a host part ending in '@'
+#   O20  whole get-url output instead of its first line: `git remote get-url origin` prints one line
+#   O21  no TrimSpace: after cutting at "\n" only a CR would remain, which git on darwin/linux does not print
+#   U02  outer ctx done reported as a timeout: check() tests ctx.Err() first and returns interrupted either way
+# H01 (KILLED) is not a defect: it is self-review C2-1's suggested fix (a branch only a gate record
+#   names gets that record's --org-id). TestMergeOrder_DetailsNameTheGateCommandWithTheOrg asserts
+#   the current "no --org-id" and goes red, so fixing C2-1 needs that assertion changed too.
+
+## Probes: HEAD and each survivor (go test ./internal/org/ -run ZZProbe -overlay <mutant + probe>)
+# PB names in "failed:" are cut at the first '_' (PB5 there is TestZZProbe_PB5_PB6_OriginURLReader).
+HEAD	rc=0	pass=8	failed:
+L04	rc=1	pass=7	failed: PB1
+L05	rc=1	pass=7	failed: PB2
+G04	rc=1	pass=7	failed: PB3
+S04	rc=1	pass=7	failed: PB4
+O03	rc=1	pass=6	failed: PB5 PB5b
+O04	rc=1	pass=6	failed: PB5 PB5b
+O06	rc=0	pass=8	failed:
+O16	rc=1	pass=7	failed: PB5
+O19	rc=0	pass=8	failed:
+O20	rc=0	pass=8	failed:
+O21	rc=0	pass=8	failed:
+U02	rc=0	pass=8	failed:
+P04	rc=1	pass=7	failed: PB8
+P05	rc=1	pass=7	failed: PB8
+D02	rc=1	pass=7	failed: PB7
+
+## Probe source (overlay-only, not committed): <worktree>/internal/org/zz_probe_c2_test.go -> <scratch>/probe/zz_probe_c2_test.go
+package org
+
+// /test org-merge-order cycle 2: overlay-only probes for the mutants the
+// committed tests let survive. Not committed; read with go test -overlay.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+	"testing"
+)
+
+// PB1 (L04): a gh failure for feat/a, then a PR of another repository for
+// feat/b: the note about feat/a's failure is kept next to the repository note.
+func TestZZProbe_PB1_FailureNoteKeptWhenRepositoryCheckStops(t *testing.T) {
+	fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+	fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+	fx.exec.setPR("feat/b", moPRs(moRepoPR(8, "MERGED", "main", "upstream-org", "app")))
+	res := fx.run(t, false)
+	if moNoteWith(res, "gh pr list --head feat/a failed (exit status 1: HTTP 502)") == "" {
+		t.Errorf("notes = %q, want feat/a's failure note kept", res.Notes)
+	}
+	if moNoteWith(res, "gh reads upstream-org/app, not origin's acme/app") == "" {
+		t.Errorf("notes = %q, want the repository note", res.Notes)
+	}
+}
+
+// PB2 (L05): gh fails for feat/a, then is not found for feat/b: the failure
+// note is kept next to the gh-missing note.
+func TestZZProbe_PB2_FailureNoteKeptWhenGHGoesMissing(t *testing.T) {
+	fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+	p := fx.params(false)
+	gh := 0
+	p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+		if name == "gh" {
+			gh++
+			if gh == 1 {
+				return "", errors.New("exit status 1: HTTP 502")
+			}
+			return "", &exec.Error{Name: "gh", Err: exec.ErrNotFound}
+		}
+		return fx.exec.run(c, dir, env, name, args...)
+	}
+	res, err := fx.o.MergeOrder(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moNoteWith(res, "gh pr list --head feat/a failed (exit status 1: HTTP 502)") == "" || moNoteWith(res, "gh was not found") == "" {
+		t.Errorf("notes = %q, want feat/a's failure note and the gh-missing note", res.Notes)
+	}
+}
+
+// PB3 (G04): exactly mergeOrderMaxNamed (5) branches failing the same way are
+// all named, with no " and 0 more".
+func TestZZProbe_PB3_FiveSameFailuresNameAllWithoutAndMore(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.exec.lsOut = moListing("main", "main", moMain)
+	fx.exec.ghErr = map[string]error{}
+	for i := 1; i <= 5; i++ {
+		b := fmt.Sprintf("feat/b%02d", i)
+		fx.add(t, moBind(fmt.Sprintf("org-%02d", i), fmt.Sprintf("b%02d", i)))
+		fx.exec.ghErr[b] = errors.New("exit status 1: HTTP 401: Bad credentials")
+	}
+	res := fx.run(t, false)
+	note := moNoteWith(res, "gh pr list failed for 5 branches")
+	if !strings.Contains(note, "(feat/b01, feat/b02, feat/b03, feat/b04, feat/b05) with the same error") || strings.Contains(note, "more") {
+		t.Errorf("note = %q, want all five named and no \"and N more\"", note)
+	}
+}
+
+// PB4 (S04): a PR of origin's owner but another repository is not origin's.
+func TestZZProbe_PB4_SameOwnerOtherRepositoryIsLeftOut(t *testing.T) {
+	fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+	fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", "acme", "app-docs")))
+	res := fx.run(t, false)
+	if e := moEntry(t, res, "feat/a"); e.PR != nil || e.Class != MergeClassReady {
+		t.Errorf("feat/a = %+v, want ready with no PR", e)
+	}
+	if moNoteWith(res, "gh reads acme/app-docs, not origin's acme/app") == "" {
+		t.Errorf("notes = %q, want the repository note", res.Notes)
+	}
+}
+
+// PB5 (O03, O04) and PB6 (O16): origin URLs of the http and git schemes are
+// read, and a path whose last component is empty names no repository.
+func TestZZProbe_PB5_PB6_OriginURLReader(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://github.com/acme/app.git": "acme/app", // PB5, O03
+		"git://github.com/acme/app.git":  "acme/app", // PB5, O04
+		"git@github.com:acme//":          "",         // PB6, O16
+		"https://github.com/acme//":      "",         // PB6, O16
+	} {
+		repo, ok := mergeRepoFromOriginURL(in)
+		got := ""
+		if ok {
+			got = repo.String()
+		}
+		if got != want {
+			t.Errorf("origin %q = %q (%v), want %q", in, repo, ok, want)
+		}
+	}
+}
+
+// PB7 (D02): a branch bound by org-a, then by org-b, with a failed gate
+// recorded by org-a before org-b's binding: the Detail names the latest
+// binding's org, org-b, not the gate record's.
+func TestZZProbe_PB7_DetailNamesTheLatestBindingsOrgNotTheGateRecords(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t,
+		moBindTo("org-a", "split-1", "auth", "feat/auth"),
+		moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed),
+		moDisbanded("org-a"),
+		moBindTo("org-b", "split-2", "auth2", "feat/auth"),
+	)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/auth", moHeadA)
+	e := moEntry(t, fx.run(t, false), "feat/auth")
+	if e.Class != MergeClassFailed || !strings.Contains(e.Detail, "run ralph org gate --org-id org-b ") {
+		t.Errorf("feat/auth = %s (%q), want failed naming --org-id org-b", e.Class, e.Detail)
+	}
+}
+
+// PB8 (P04, P05): a PR url with an empty owner or repository names no
+// repository.
+func TestZZProbe_PB8_PRURLWithAnEmptyOwnerOrRepo(t *testing.T) {
+	for _, in := range []string{"https://github.com//app/pull/7", "https://github.com/acme//pull/7"} {
+		if repo, ok := mergeRepoFromPRURL(in); ok {
+			t.Errorf("PR url %q = %q, want none", in, repo)
+		}
+	}
+}
+
+// PB5b (O03, O04) at the MergeOrder level: with an http:// or git:// origin, a
+// PR of another repository is left out.
+func TestZZProbe_PB5b_HTTPAndGitSchemeOriginsAreChecked(t *testing.T) {
+	for _, origin := range []string{"http://github.com/acme/app.git", "git://github.com/acme/app.git"} {
+		t.Run(strings.SplitN(origin, ":", 2)[0], func(t *testing.T) {
+			fx := moRepoCheckFixture(t, origin)
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", "upstream-org", "app")))
+			res := fx.run(t, false)
+			if e := moEntry(t, res, "feat/a"); e.PR != nil || e.Class != MergeClassReady {
+				t.Errorf("feat/a = %+v, want ready with no PR", e)
+			}
+		})
+	}
+}
+
+## Cycle 1's mutants rerun at HEAD (<scratchpad>/mutants.py, ids prefixed R-)
+# 62 of cycle 1's 66+4 whose old string still occurs once at HEAD (M20, M23, M24, M38 moved; written
+# again below as R-M20b, R-M23c, R-M24b, R-M38b). R-M17, R-M39 and R-M51 do not build, as in cycle 1;
+# their rebuilt forms are below. Wall time 1,027 s.
+# Result: 59 build, 57 KILLED, 2 SURVIVED (M13 and M36, the two cycle 1 classed as equivalent).
+R-M01   KILLED     org  assert   event name vs reason agreement dropped                             TestMergeOrder_LatestGateRecordWins
+R-M02   KILLED     org  assert   corrupt-after-gate off by one                                      TestMergeOrder_LatestGateRecordWins
+R-M03   KILLED     org  assert   first corrupt line instead of last                                 TestMergeOrder_LatestGateRecordWins
+R-M04   KILLED     org  assert   unreadable record never attaches                                   TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_LatestGateRecordWins TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt
+R-M05   KILLED     org  assert   unreadable record attaches to the org's first binding              TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings
+R-M06   KILLED     org  assert   incomplete binding counted                                         TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount
+R-M07   KILLED     org  assert   dry-run counted                                                    TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount
+R-M08   KILLED     org  assert   seat-carried records counted                                       TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount
+R-M09   KILLED     org  assert   org_id-less records counted                                        TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead
+R-M10   KILLED     org  assert   bindingPos never set                                               TestMergeOrder_MergedOrClosedComesFirst
+R-M11   KILLED     org  assert   corrupt position off by one                                        TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_LatestGateRecordWins TestMergeOrder_TrailingLineWithoutNewlineIsCorrupt
+R-M12   KILLED     org  assert   any ref ending in HEAD read as origin's HEAD                       TestMergeOrder_ReadsTheLsRemoteListing TestMergeOrder_LsRemoteProblemsClassifyNothing
+R-M13   SURVIVED   -    -        last HEAD symref wins
+R-M14   KILLED     org  assert   symbolic branch ref: line stored as a tip                          TestMergeOrder_ReadsTheLsRemoteListing
+R-M15   KILLED     org  assert   CR not trimmed                                                     TestMergeOrder_ReadsTheLsRemoteListing
+R-M16   KILLED     org  assert   unlisted default branch accepted                                   TestMergeOrder_LsRemoteProblemsClassifyNothing
+R-M17   BUILD_FAIL org  -        non-branch HEAD symref accepted
+R-M18   KILLED     org  assert   zero ls-remote timeout not defaulted                               TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_DefaultBranchComesFromOriginsHEAD TestMergeOrder_FailedNoGateAndNoRemote
+R-M19   KILLED     org  assert   ls-remote interrupt not told apart                                 TestMergeOrder_LsRemoteProblemsClassifyNothing
+R-M21   KILLED     org  assert   ls-remote timeout reported as a plain failure                      TestMergeOrder_LsRemoteProblemsClassifyNothing
+R-M22   KILLED     org  assert   zero gh timeout not defaulted                                      TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R-M25   KILLED     org  assert   gh timeout not named                                               TestMergeOrder_GHFailureForOneBranchLeavesItsPROut
+R-M26   KILLED     org  assert   lowest PR number picked                                            TestMergeOrder_PicksTheHighestSameRepoPR
+R-M27   KILLED     org  assert   fork PRs not excluded                                              TestMergeOrder_PicksTheHighestSameRepoPR TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR
+R-M28   KILLED     org  assert   GH_PROMPT_DISABLED=1 dropped                                       TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R-M29   KILLED     org  assert   gh interrupt swallowed                                             TestMergeOrder_InterruptedWhileGHRunsIsAnError
+R-M30   KILLED     org  assert   within a class newest first                                        TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R-M31   KILLED     org  assert   position always the binding's                                      TestMergeOrder_OrdersByClassThenGatePosition
+R-M32   KILLED     org  assert   --all ignored                                                      TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R-M33   KILLED     org  assert   closed before merged                                               TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R-M34   KILLED     org  assert   failed before unreadable in the list                               TestMergeOrder_OrdersByClassThenGatePosition
+R-M35   KILLED     org  assert   closed PR not hidden                                               TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R-M36   SURVIVED   -    -        PR state case-sensitive
+R-M37   KILLED     org  assert   corrupt line after gate ignored                                    TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_LatestGateRecordWins TestMergeOrder_TrailingLineWithoutNewlineIsCorrupt
+R-M39   BUILD_FAIL org  -        no_remote folded into regate
+R-M40   KILLED     org  assert   regate never                                                       TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_OrdersByClassThenGatePosition
+R-M41   KILLED     org  assert   wrong_base never                                                   TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+R-M42   KILLED     org  assert   unknown base_ref falls through to the SHA compare                  TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+R-M43   KILLED     org  assert   main moving ignored                                                TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R-M44   KILLED     org  assert   refs/heads base_ref not read                                       TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+R-M45   KILLED     org  assert   unreadable record read as a pass/fail                              TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_LatestGateRecordWins TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt
+R-M46   KILLED     org  assert   wrong_base only when nothing else applies                          TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+R-M47   KILLED     org  assert   several-ready note for one                                         TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+R-M48   KILLED     org  assert   no early return without targets                                    TestMergeOrder_NoTargetsRunsNoGit TestMergeOrder_ResultJSONShape
+R-M49   KILLED     org  assert   hidden count note needs two                                        TestMergeOrder_GHFailureForOneBranchLeavesItsPROut
+R-M50   KILLED     org  assert   corrupt-line note needs two                                        TestMergeOrder_LatestGateRecordWins TestMergeOrder_NoTargetsRunsNoGit TestMergeOrder_TrailingLineWithoutNewlineIsCorrupt
+R-M51   BUILD_FAIL org  -        environment not inherited
+R-M52   KILLED     org  assert   exit 0 with a held pipe is an error                                TestMergeOrder_RealExecIsNotHeldByAChildHoldingThePipe
+R-M53   KILLED     org  assert   dir ignored                                                        TestMergeOrder_RealExecRunsInDirWithEnvAndStderr
+R-M54   KILLED     org  assert   stderr not in the error                                            TestMergeOrder_RealExecRunsInDirWithEnvAndStderr
+R-C01   KILLED     cli  assert   --org-id accepted                                                  TestOrgMergeOrder_OrgIDIsRefusedBeforeAnythingIsRead
+R-C02   KILLED     cli  assert   no 'no branch to list'                                             TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList
+R-C03   KILLED     cli  assert   PR URL not escaped                                                 TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped
+R-C04   KILLED     cli  assert   branch not escaped                                                 TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped
+R-C05   KILLED     cli  assert   header without a default branch                                    TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit
+R-C06   KILLED     cli  assert   legacy guard as a mutating verb                                    TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+R-C07   KILLED     cli  assert   legacy guard dropped                                               TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+R-C08   KILLED     cli  assert   --all not passed                                                   TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+R-C09   KILLED     cli  assert   short SHA length                                                   TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList
+R-C10   KILLED     cli  assert   --json ignored                                                     TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+R-C11   KILLED     cli  assert   feature missing from ORG                                           TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut TestOrgMergeOrder_PRIntoAnotherBranchThanTheDefaultIsWrongBase
+R-C12   KILLED     cli  assert   note not escaped                                                   TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine
+
+## Cycle 1's moved and rebuilt mutants, written against HEAD (all KILLED)
+R-M17b  KILLED     org  assert   non-branch HEAD symref accepted                                    TestMergeOrder_LsRemoteProblemsClassifyNothing
+R-M20b  KILLED     org  assert   ls-remote GIT_TERMINAL_PROMPT=0 dropped                            TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R-M23b  KILLED     org  assert   gh missing treated as a per-branch failure                         TestMergeOrder_GHMissingNotesAndIsNotRunAgain
+R-M23c  KILLED     org  assert   gh missing: keeps asking                                           TestMergeOrder_GHMissingNotesAndIsNotRunAgain
+R-M24b  KILLED     org  assert   gh failure fails the run                                           TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R-M38b  KILLED     org  assert   no_remote before failed                                            TestMergeOrder_FailedNoGateAndNoRemote
+R-M39b  KILLED     org  assert   no_remote folded into regate                                       TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_FailedNoGateAndNoRemote TestMergeOrder_OrdersByClassThenGatePosition
+R-M51b  KILLED     cli  assert   environment not inherited                                          TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList TestOrgMergeOrder_PRIntoAnotherBranchThanTheDefaultIsWrongBase
