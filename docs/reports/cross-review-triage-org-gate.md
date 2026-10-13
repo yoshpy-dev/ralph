@@ -1,29 +1,31 @@
 # Cross-review triage report: org-gate
 
-- Date: 2026-10-13
-- Plan: docs/plans/active/2026-10-13-org-gate.md
+- Date: 2026-10-14
+- Plan: docs/plans/archive/2026-10-13-org-gate.md(PR #225 の作成で archive 済み)
 - Base branch: main(merge-base 1bddc871)
 - Driver: claude
 - Reviewer: codex
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 2/2 (cap reached)
-- Total reviewer findings: 0
-- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 3/3 (cap reached; PR #225 の CI が Go 1.25 で落ちたので上限を 3 に上げた。cycle-count.json は 2 のまま)
+- Total reviewer findings: 1
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Active plan: docs/plans/active/2026-10-13-org-gate.md(承認済み、digest 69f088275e54。変わっていない。AC1〜AC13 は sync-docs の a1590e44 で印を付けた)
-- Self-review report: docs/reports/self-review-2026-10-13-org-gate.md(cycle 2 は bedc0ebc で Merge: yes、CRITICAL・HIGH・MEDIUM なし、LOW C2-1〜C2-6。どれも動きと記録の値を変えない。sync-docs の a1590e44 で tech-debt の 231 行にまとめた)
-- Verify report: docs/reports/verify-2026-10-13-org-gate.md(cycle 2 は 0bc87603 で pass。修正前の 789c8864 の binary では、manifest のロックを待つ間の SIGTERM のあとに `gate_passed` が書かれ、HEAD の binary では rc 1 で何も書かれないことを実機で確かめた。ずれ C2-D1・C2-D2 は a1590e44 で直した)
-- Test report: docs/reports/test-2026-10-13-org-gate.md(cycle 2 は 7f99385e で pass。mutation 9 件のうち 7 件が red、C2f は同値、C2h は 5 秒のロック timeout に届くテストがない穴で、tech-debt の 231 行の (h) にした)
-- Implementation context summary: `codex exec review --base main` を a1590e44 で実行した(モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で `-o` のファイルは 224 バイト)。Codex の答えは「No actionable regressions were identified. Go formatting, shell syntax, ShellCheck, and changed script/skill mirror checks passed. Go tests could not run because the read-only sandbox blocked creation of the build directory.」で、指摘はない。cycle 1 の 1 件の直しは b04289c1 で、コードのコメントとテスト(`internal/org/gate.go` の `recordGate`、`internal/org/gate_test.go`)は下の「Cycle 1」の節の番号を「cross-review cycle 1 #1」として指す
+- Active plan: docs/plans/archive/2026-10-13-org-gate.md(承認済み、digest 69f088275e54。変わっていない。PR #225 の作成のときに f001bd4f で archive した)
+- 3 周目の理由: PR #225 の CI(`.github/workflows/verify.yml`、setup-go なしで go.mod の `go 1.25.8` に従う)で `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` のシグナルの 3 件が落ちた。Go 1.25 の `signal.NotifyContext` は取り消しの cause にシグナル名を入れない(1.26 から入れる)。8b681dc3 で `gateSignalContext` に替え、CI は 8b681dc3 で通った
+- Self-review report: docs/reports/self-review-2026-10-13-org-gate.md(cycle 3 は a538c899 で Merge: yes、LOW C3-1・C3-2。09baf8eb で tech-debt の 232 行にした)
+- Verify report: docs/reports/verify-2026-10-13-org-gate.md(cycle 3 は 697e1577 で pass。go1.25.8 で build した binary の中断の probe 7 通り。ずれ C3-D1〜C3-D4 は 09baf8eb で直した)
+- Test report: docs/reports/test-2026-10-13-org-gate.md(cycle 3 は b72ddcce で pass。go1.25.8 と go1.26.0 の両方。mutation 14 件のうち 11 件が red、生き残りは tech-debt の 232 行の (l)〜(n))
+- Implementation context summary: `codex exec review --base main` を 09baf8eb で実行した(モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で `-o` のファイルは 1005 バイト)。Go のテストは sandbox で走らせていない。指摘は 1 件(P2)で、3 周目の差分(8b681dc3)ではなく、cycle 1 から変えていない leader の雛形の締めの順(2e3e95e3、e0adb359)についての指摘
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
+| 1 | [P2] reviewer のレポートをコミットしてから rebase する。gate をやり直すとき(`GATE: fail` のあとの直しと再レビュー)は、すでにコミットした reviewer のレポートを reviewer が書き換える。既定のブランチが進んでいると、手順 10 でレポートをコミットする前に手順 9 の `git rebase` が走り、git は `cannot rebase: You have unstaged changes` で断る。rebase は始まっていないので、雛形の衝突の手当て(`git rebase --abort`)は効かない。rebase の前に reviewer の成果物をコミットし、`/org` の写しも直す(`.claude/rules/ralph/git-commit-strategy.md` の「手順の間に未コミットの変更を残さない」) | 本物の問題で、直すのも小さい。雛形の手順 9(`internal/org/prompts/leader.md:163-175`)は fetch と rebase を打ち、手順 10 で report と reviewer のレポートをコミットする。1 回目は reviewer のレポートが未追跡の新しいファイルなので rebase は通るが、やり直しでは追跡済みのファイルが変わっているので rebase が断られ、雛形はこの断りの次の手を言わない(衝突と fetch の失敗だけを言う)。leader が止まるか、手探りで直すことになる。手順 9 の先頭で reviewer のレポートをコミットし、`git status --porcelain` が空になってから fetch と rebase を打つ順にする。手順 10 は report だけをコミットする。`/org` skill の 4 面の「org の終わり方」の手順 1・2 と、順を書いた要約の行(「rebase → report → …」)も同じ順にする | internal/org/prompts/leader.md(手順 9・10)、internal/org/prompts_test.go(手順の順の assertion)、`.claude/skills/org/SKILL.md` と写しの 3 面(「org の終わり方」の手順 1・2、要約の行) |
 
 ## WORTH_CONSIDERING
 
@@ -36,6 +38,25 @@
 |---|-------------------|------------------|----------|
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 2
+
+- Date: 2026-10-13
+- Cycle: 2/2 (cap reached)
+- Total reviewer findings: 0
+- Cycle 2 counts: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+
+### Triage context(cycle 2)
+
+- Active plan: docs/plans/active/2026-10-13-org-gate.md(承認済み、digest 69f088275e54。変わっていない。AC1〜AC13 は sync-docs の a1590e44 で印を付けた)
+- Self-review report: docs/reports/self-review-2026-10-13-org-gate.md(cycle 2 は bedc0ebc で Merge: yes、CRITICAL・HIGH・MEDIUM なし、LOW C2-1〜C2-6。どれも動きと記録の値を変えない。sync-docs の a1590e44 で tech-debt の 231 行にまとめた)
+- Verify report: docs/reports/verify-2026-10-13-org-gate.md(cycle 2 は 0bc87603 で pass。修正前の 789c8864 の binary では、manifest のロックを待つ間の SIGTERM のあとに `gate_passed` が書かれ、HEAD の binary では rc 1 で何も書かれないことを実機で確かめた。ずれ C2-D1・C2-D2 は a1590e44 で直した)
+- Test report: docs/reports/test-2026-10-13-org-gate.md(cycle 2 は 7f99385e で pass。mutation 9 件のうち 7 件が red、C2f は同値、C2h は 5 秒のロック timeout に届くテストがない穴で、tech-debt の 231 行の (h) にした)
+- Implementation context summary: `codex exec review --base main` を a1590e44 で実行した(モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で `-o` のファイルは 224 バイト)。Codex の答えは「No actionable regressions were identified. Go formatting, shell syntax, ShellCheck, and changed script/skill mirror checks passed. Go tests could not run because the read-only sandbox blocked creation of the build directory.」で、指摘はない。cycle 1 の 1 件の直しは b04289c1 で、コードのコメントとテスト(`internal/org/gate.go` の `recordGate`、`internal/org/gate_test.go`)は下の「Cycle 1」の節の番号を「cross-review cycle 1 #1」として指す
+
+### 分類(cycle 2)
+
+ACTION_REQUIRED、WORTH_CONSIDERING、DISMISSED のどれもなし。
 
 ## Cycle 1
 
