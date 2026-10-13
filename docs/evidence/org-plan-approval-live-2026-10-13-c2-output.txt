@@ -1,0 +1,1482 @@
+# Live check of org-plan-approval (/test cycle 2), full transcript
+# ralph built from HEAD ffd6b3ec (go build -ldflags "-X main.version=c2-ffd6b3ec" -o <scratch>/opa/c2/ralph ./cmd/ralph).
+# <L> = <scratch>/opa/c2/live; <scratch> = the session scratchpad under /private/tmp/claude-502/.
+# Every command ran through env.sh (env -i, scratch HOME/XDG, stub PATH without osascript) with cwd <L>/repo.
+# Redactions: the two paths above; in the pane tail the watcher typed into a stub, the pane shell's host name is <host> and the login name <user>.
+
+==================== script: env.sh
+#!/bin/sh
+# Run a command in the isolated live-check environment: env -i, scratch HOME
+# and XDG dirs, a private herdr socket, SHELL=/bin/bash, a PATH that is the
+# stub dir plus /usr/bin and /bin entries except osascript, and a stub agmsg
+# home. Nothing here points at the user's herdr server, ~/.config/herdr, or
+# the real agmsg home.
+exec env -i HOME=<L>/home PATH=<L>/stub:<L>/bin SHELL=/bin/bash TERM=xterm-256color USER=tester LANG=en_US.UTF-8 \
+  XDG_CONFIG_HOME=<L>/xdg/config XDG_STATE_HOME=<L>/xdg/state XDG_DATA_HOME=<L>/xdg/data \
+  XDG_CACHE_HOME=<L>/xdg/cache XDG_RUNTIME_DIR=<L>/xdg/run HERDR_SOCKET_PATH=.harness/state/herdr.sock \
+  RALPH_ORG_AGMSG_HOME=<L>/agmsg "$@"
+
+==================== script: lib.sh
+#!/bin/bash
+# Shared helpers of the live check. Every command runs through env.sh (the
+# isolated environment) with cwd = the temp repo's root, so the relative
+# herdr socket resolves the same for ralph, its herdr calls and the watch.
+L=<L>
+R=$L/repo
+LED=$R/.harness/state/org
+WT=$R/.claude/worktrees/org-a
+WTB=$R/.claude/worktrees/org-b
+PLAN=docs/plans/active/2026-10-13-a.md
+E=$L/env.sh
+cd "$R" || exit 2
+red() { sed -e "s#$L#<L>#g"; }
+# run CMD...: print the command, its stdout, its stderr (prefixed), and rc.
+run() {
+  printf '\n$ %s\n' "$*" | red
+  "$E" "$@" >"$L/.o" 2>"$L/.e"; rc=$?
+  red <"$L/.o"; sed -e 's/^/stderr: /' <"$L/.e" | red
+  echo "rc=$rc"
+  return $rc
+}
+# runenv VAR=VAL... -- CMD...: run with extra env vars.
+runenv() {
+  local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
+  printf '\n$ %s %s\n' "${envs[*]}" "$*" | red
+  "$E" env "${envs[@]}" "$@" >"$L/.o" 2>"$L/.e"; rc=$?
+  red <"$L/.o"; sed -e 's/^/stderr: /' <"$L/.e" | red
+  echo "rc=$rc"
+  return $rc
+}
+snap() {
+  echo "ledger: manifest $(wc -l <"$LED/manifest.jsonl" | tr -d ' ') lines, inbox $(cat "$LED/inbox.jsonl" 2>/dev/null | wc -l | tr -d ' ') lines, receipts $(cat "$LED/model-receipts.jsonl" 2>/dev/null | wc -l | tr -d ' ') lines, sha256 $(cat "$LED/manifest.jsonl" "$LED/inbox.jsonl" "$LED/model-receipts.jsonl" 2>/dev/null | shasum -a 256 | cut -c1-16)"
+}
+typed() { cat "$L"/stublog/*.txt 2>/dev/null | grep -c ' typed '; }
+wscount() { "$E" herdr workspace list 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["result"]["workspaces"]))'; }
+digest() { "$E" bash "$1/scripts/plan-visual.sh" digest "$1/$PLAN"; }
+gitc() {
+  "$E" git -C "$1" add -A >/dev/null && "$E" git -C "$1" commit --quiet -m "$2" && "$E" git -C "$1" log --oneline -1
+}
+lastev() { tail -n "${1:-1}" "$LED/manifest.jsonl" | red; }
+
+# --- cycle 2 helpers
+# task <digest> <task_id>: a TASK to the implementer naming plan $PLAN at <digest>.
+task() { printf 'TYPE: TASK\nTASK_ID: %s\nPLAN: %s sha256:%s\n\nimplement the plan' "$2" "$PLAN" "$1"; }
+# setlines <file> <digest>: - Status: Approved and - Approved: 2026-10-13 sha256:<digest>.
+setlines() {
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+p, d = sys.argv[1], sys.argv[2]
+s = open(p).read()
+s = re.sub(r"- Status: .*\n", "- Status: Approved\n", s, count=1)
+s = re.sub(r"- Approved: .*\n", "- Approved: 2026-10-13 sha256:" + d + "\n", s, count=1)
+open(p, "w").write(s)
+PY
+}
+# setdraft <file>: - Status: Draft and - Approved: TBD.
+setdraft() {
+  python3 - "$1" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+s = re.sub(r"- Status: .*\n", "- Status: Draft\n", s, count=1)
+s = re.sub(r"- Approved: .*\n", "- Approved: TBD\n", s, count=1)
+open(p, "w").write(s)
+PY
+}
+# judge: inspect the last run's stderr; print the next step (the text after
+# the marker) and say whether each given word appears in the whole message
+# and in the next step.
+judge() {
+  local msg next w
+  msg=$(cat "$L/.e")
+  case "$msg" in
+    *"refused by the approval check: "*) next=${msg#*refused by the approval check: } ;;
+    *) next="" ;;
+  esac
+  echo "check: marker 'refused by the approval check' present: $([ -n "$next" ] && echo yes || echo no)"
+  for w in "$@"; do
+    echo "check: '$w' in the whole message: $(printf %s "$msg" | grep -c -F -- "$w") line(s); in the next step: $(printf %s "$next" | grep -c -F -- "$w") line(s)"
+  done
+}
+pane_of() { grep "\"seat_id\":\"$1\"" "$LED/manifest.jsonl" | grep '"event":"spawned"' | grep -v '"dry_run":true' | python3 -c 'import json,sys; print([json.loads(l) for l in sys.stdin][-1]["pane_id"])'; }
+pstatus() { "$E" herdr pane get "$1" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin)["result"]; p=d.get("pane",d); print(p.get("agent_status"), repr(p.get("terminal_title","")))'; }
+
+==================== script: stubsrc/main.go
+// Stub agent CLI for the live check (/test cycle 2): no model, no network.
+// It records its argv and every line typed into it under the stublog dir
+// next to the binary, sets an OSC title starting with U+2733 and a space
+// (herdr's claude manifest reads that as idle), prints a prompt marker, and
+// then only reads stdin; it exits when stdin closes or it is killed.
+//
+// Cycle 2 addition: while a file busy/<pane> (HERDR_PANE_ID with ':' as
+// '_') or busy/pid-<pid> exists next to the stublog dir, the title starts
+// with U+2802 and a space instead, which herdr's claude manifest reads as
+// working (rule osc_title_working, priority 1100). The stub polls for the
+// file every 200 ms and logs each change.
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Println("0.0.0 (stub, no model)")
+		return
+	}
+	exe, _ := os.Executable()
+	root := filepath.Join(filepath.Dir(exe), "..")
+	dir := filepath.Join(root, "stublog")
+	_ = os.MkdirAll(dir, 0o755)
+	name := filepath.Base(os.Args[0])
+	logPath := filepath.Join(dir, fmt.Sprintf("%s-%d.txt", name, os.Getpid()))
+	f, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	cwd, _ := os.Getwd()
+	pane := os.Getenv("HERDR_PANE_ID")
+	var mu sync.Mutex
+	logf := func(format string, a ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(f, "%s "+format+"\n", append([]any{time.Now().UTC().Format(time.RFC3339Nano)}, a...)...)
+		f.Sync()
+	}
+	logf("start pid=%d cwd=%s pane=%q argv=%q", os.Getpid(), cwd, pane, os.Args)
+	busyFiles := []string{filepath.Join(root, "busy", fmt.Sprintf("pid-%d", os.Getpid()))}
+	if pane != "" {
+		busyFiles = append(busyFiles, filepath.Join(root, "busy", strings.ReplaceAll(pane, ":", "_")))
+	}
+	busy := false
+	title := func() {
+		if busy {
+			fmt.Print("\x1b]0;⠂ stub " + name + "\x07")
+		} else {
+			fmt.Print("\x1b]0;✳ stub " + name + "\x07")
+		}
+	}
+	title()
+	fmt.Println("stub " + name + ": no model; typed lines are logged")
+	fmt.Print("❯ ")
+	go func() {
+		for {
+			now := false
+			for _, b := range busyFiles {
+				if _, err := os.Stat(b); err == nil {
+					now = true
+				}
+			}
+			mu.Lock()
+			changed := now != busy
+			busy = now
+			if changed {
+				title()
+			}
+			mu.Unlock()
+			if changed {
+				logf("busy=%v", now)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}()
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	for sc.Scan() {
+		logf("typed %q", sc.Text())
+		mu.Lock()
+		title()
+		mu.Unlock()
+		fmt.Print("❯ ")
+	}
+	logf("stdin closed: %s", strings.TrimSpace(fmt.Sprint(sc.Err())))
+	f.Close()
+}
+
+==================== script: p0.sh
+#!/bin/bash
+# Phase 0: the split plan (features a and b, both independent), its digest on
+# the - Approved: line, then the cross-org watch on the temp ledger.
+. "$(dirname "$0")/lib.sh"
+mkdir -p "$LED/splits"
+cat >"$LED/splits/demo.md" <<'PLAN'
+# demo split
+
+- Status: Approved
+- Approved: 2026-10-13 sha256:000000000000
+
+## Features
+
+### a
+
+- Reserve: internal/a/
+- Depends on: none
+
+Objective: build a.
+
+### b
+
+- Reserve: internal/b/
+- Depends on: none
+
+Objective: build b.
+PLAN
+d=$("$E" bash "$R/scripts/plan-visual.sh" digest "$LED/splits/demo.md")
+python3 - "$LED/splits/demo.md" "$d" <<'PY'
+import sys
+p, d = sys.argv[1], sys.argv[2]
+s = open(p).read().replace("sha256:000000000000", "sha256:" + d, 1)
+open(p, "w").write(s)
+PY
+echo "split plan digest: $d"
+sed -n 1,5p "$LED/splits/demo.md"
+echo "herdr workspaces: $(wscount)"
+run ralph org watch --all --detach --state-dir "$LED"
+sleep 1
+run ralph status
+
+==================== script: p1.sh
+#!/bin/bash
+# Phase 1: start the per-plan feature org a (mode from the main checkout's
+# ralph.toml, the scaffold default per-plan). The leader is the stub claude.
+. "$(dirname "$0")/lib.sh"
+run ralph org start --plan "$LED/splits/demo.md" --feature a --driver claude --model sonnet
+run ralph org status --org-id a
+echo
+echo "# scope_reserved of org a:"
+grep '"event":"scope_reserved"' "$LED/manifest.jsonl" | grep '"org_id":"a"' | python3 -c 'import json,sys
+for l in sys.stdin: print("details:", json.loads(l)["details"])'
+echo
+echo "# the leader task's approval-mode line (stub argv / prompt file):"
+grep -h -o -- '- 承認方式: [a-z-]*' "$L"/stublog/*.txt "$LED"/prompts/* 2>/dev/null | sort -u
+ls "$LED" | red
+echo "herdr workspaces: $(wscount)"
+snap
+
+==================== script: ps.sh
+#!/bin/bash
+# Setup of (f)-(i): approval A, then approval B (the plan changed and approved
+# again, the two lines written with B and committed). The implementer is
+# spawned after A. Saves the A and B versions of the file for (f) and (h).
+. "$(dirname "$0")/lib.sh"
+mkdir -p "$WT/docs/plans/active" "$WT/.harness/state/plan-visual"
+VIS=.harness/state/plan-visual/2026-10-13-a.html
+printf '<!doctype html><title>a</title><p>stub visual page for plan a (approve does not read it)</p>\n' >"$WT/$VIS"
+cat >"$WT/$PLAN" <<'PLAN'
+# a
+
+- Status: Draft
+- Approved: TBD
+- Branch: feat/a
+
+## Objective
+
+Build a: add internal/a/a.go with func A() string returning "a".
+
+## Acceptance criteria
+
+- [ ] AC1: A() returns "a"
+
+## Progress checklist
+
+- [ ] Implementation started
+PLAN
+gitc "$WT" "docs: add plan for a"
+DA=$(digest "$WT"); echo "$DA" >"$L/DA"; echo "digest A: $DA"
+
+echo; echo "## (s-1) QUESTION for A, approve e1, the two lines with A"
+run ralph org escalate --org-id a --text "$(printf 'TYPE: QUESTION\nPLAN: %s sha256:%s\nVISUAL: %s\n\nplease review the plan of a and approve it' "$PLAN" "$DA" "$VIS")"
+run ralph org approve e1
+setlines "$WT/$PLAN" "$DA"
+gitc "$WT" "docs: mark plan for a approved (A)"
+echo "digest now: $(digest "$WT")"
+cp "$WT/$PLAN" "$L/out/plan-A.md"
+sed -n 1,6p "$L/out/plan-A.md"
+
+echo; echo "## (s-2) implementer spawn, real"
+run ralph org spawn --org-id a --id implementer --role implementer --driver claude --model sonnet --cwd "$WT" --scope "build a per the approved plan"
+run ralph org send --org-id a --to implementer --text "$(task "$DA" t-a)" --dry-run
+
+echo; echo "## (s-3) the plan changes (B), Draft/TBD, new QUESTION, approve e2, the two lines with B"
+python3 - "$WT/$PLAN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('returning "a".', 'returning "a", and a test for it.', 1)
+open(p, "w").write(s)
+PY
+setdraft "$WT/$PLAN"
+gitc "$WT" "docs: extend plan for a and set it back to draft"
+DB=$(digest "$WT"); echo "$DB" >"$L/DB"; echo "digest B: $DB"
+run ralph org escalate --org-id a --text "$(printf 'TYPE: QUESTION\nPLAN: %s sha256:%s\nVISUAL: %s\n\nthe plan of a changed (a test added); please approve it again' "$PLAN" "$DB" "$VIS")"
+run ralph org approve e2
+setlines "$WT/$PLAN" "$DB"
+gitc "$WT" "docs: mark plan for a approved (B)"
+echo "digest now: $(digest "$WT")"
+cp "$WT/$PLAN" "$L/out/plan-B.md"
+sed -n 1,6p "$L/out/plan-B.md"
+echo "# plan_approved records (file order):"
+grep '"event":"plan_approved"' "$LED/manifest.jsonl" | python3 -c 'import json,sys
+for l in sys.stdin: e=json.loads(l); print(e["ts"], e["details"].split(" content=")[0], "inbox=" + e["details"].split("inbox=")[1].split()[0])'
+
+echo; echo "## (s-4) controls: TASK naming B, typed and --raw, --dry-run"
+run ralph org send --org-id a --to implementer --text "$(task "$DB" t-b)" --dry-run
+run ralph org send --org-id a --to implementer --raw --text "$(task "$DB" t-b)" --dry-run
+run ralph org status --org-id a
+snap
+
+==================== script: pfgh.sh
+#!/bin/bash
+# (f), (g), (h): after approval A then approval B.
+# (f) the file set back to the A version (committed); a TASK naming B gets the
+#     plan-changed refusal of its own digest, whose next step does not name A.
+# (g) same state; a TASK with a mistyped digest gets its own no-approval
+#     refusal, which names no A.
+# (h) the file set back to the B version plus one Progress checklist line
+#     (committed); a TASK naming the old A digest gets the plan-changed
+#     refusal of the current digest B (a change its digest does not show).
+. "$(dirname "$0")/lib.sh"
+DA=$(cat "$L/DA"); DB=$(cat "$L/DB")
+# a mistyped digest: A with its last hex digit changed
+last=${DA: -1}; if [ "$last" = 0 ]; then rep=1; else rep=0; fi
+DT="${DA%?}$rep"
+echo "digest A: $DA  digest B (latest approval): $DB  mistyped: $DT"
+IMPL_PANE=$(pane_of implementer)
+
+echo; echo "======== (f) the file set back to the A version, a TASK naming B"
+cp "$L/out/plan-A.md" "$WT/$PLAN"
+gitc "$WT" "docs: set plan for a back to the A version"
+echo "digest now: $(digest "$WT") (A: $DA)"
+sed -n 1,6p "$WT/$PLAN"
+for v in "typed --dry-run" "--raw --dry-run" "typed (real send)" "--raw (real send)"; do
+  echo; echo "## (f) TASK naming B, $v"
+  before=$(snap); t0=$(typed)
+  case "$v" in
+    "typed --dry-run") run ralph org send --org-id a --to implementer --text "$(task "$DB" t-f)" --dry-run ;;
+    "--raw --dry-run") run ralph org send --org-id a --to implementer --raw --text "$(task "$DB" t-f)" --dry-run ;;
+    "typed (real send)") run ralph org send --org-id a --to implementer --text "$(task "$DB" t-f)" ;;
+    "--raw (real send)") run ralph org send --org-id a --to implementer --raw --text "$(task "$DB" t-f)" ;;
+  esac
+  judge "changed after its approval: approved digest $DB, current digest $DA" "sha256:$DA" "$DA" "the TASK's PLAN: header names" "changes the TASK's PLAN: header"
+  after=$(snap); [ "$before" = "$after" ] && echo "check: ledger unchanged ($after)" || echo "check: LEDGER CHANGED: $before -> $after"
+  echo "check: lines typed into stub panes: before $t0, after $(typed)"
+done
+echo; echo "## (f) observation: the same state, a TASK naming A and an implementer spawn (both --dry-run)"
+run ralph org send --org-id a --to implementer --text "$(task "$DA" t-f-a)" --dry-run
+run ralph org spawn --org-id a --id implementer-f --role implementer --driver claude --model sonnet --cwd "$WT" --scope "build a" --dry-run
+
+echo; echo "======== (g) the same state (the A version), a TASK with a mistyped digest"
+for v in "typed --dry-run" "typed (real send)"; do
+  echo; echo "## (g) TASK naming sha256:$DT, $v"
+  before=$(snap); t0=$(typed)
+  case "$v" in
+    "typed --dry-run") run ralph org send --org-id a --to implementer --text "$(task "$DT" t-g)" --dry-run ;;
+    "typed (real send)") run ralph org send --org-id a --to implementer --text "$(task "$DT" t-g)" ;;
+  esac
+  judge "has no approval recorded for plan $PLAN sha256:$DT since its last disband (its latest approval is of sha256:$DB)" "$DA" "the TASK's PLAN: header names" "changes the TASK's PLAN: header"
+  after=$(snap); [ "$before" = "$after" ] && echo "check: ledger unchanged ($after)" || echo "check: LEDGER CHANGED: $before -> $after"
+  echo "check: lines typed into stub panes: before $t0, after $(typed)"
+done
+
+echo; echo "======== (h) the B version plus one Progress checklist line, a TASK naming the old A digest"
+cp "$L/out/plan-B.md" "$WT/$PLAN"
+python3 - "$WT/$PLAN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n", 1)
+open(p, "w").write(s)
+PY
+gitc "$WT" "docs: set plan for a back to the B version and add a progress note"
+echo "digest now: $(digest "$WT") (B: $DB)"
+sed -n '/## Progress checklist/,$p' "$WT/$PLAN"
+for v in "A typed --dry-run" "A typed (real send)" "A --raw --dry-run" "mistyped typed --dry-run" "B typed --dry-run"; do
+  echo; echo "## (h) TASK naming $v"
+  before=$(snap); t0=$(typed)
+  case "$v" in
+    "A typed --dry-run") run ralph org send --org-id a --to implementer --text "$(task "$DA" t-h)" --dry-run ;;
+    "A typed (real send)") run ralph org send --org-id a --to implementer --text "$(task "$DA" t-h)" ;;
+    "A --raw --dry-run") run ralph org send --org-id a --to implementer --raw --text "$(task "$DA" t-h)" --dry-run ;;
+    "mistyped typed --dry-run") run ralph org send --org-id a --to implementer --text "$(task "$DT" t-h)" --dry-run ;;
+    "B typed --dry-run") run ralph org send --org-id a --to implementer --text "$(task "$DB" t-h)" --dry-run ;;
+  esac
+  judge "changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest $DB does not show" "approved digest $DA" "has no approval recorded" "the TASK's PLAN: header names" "$DA"
+  after=$(snap); [ "$before" = "$after" ] && echo "check: ledger unchanged ($after)" || echo "check: LEDGER CHANGED: $before -> $after"
+  echo "check: lines typed into stub panes: before $t0, after $(typed)"
+done
+
+echo; echo "======== (h) controls: the note removed (the B version as approved)"
+cp "$L/out/plan-B.md" "$WT/$PLAN"
+gitc "$WT" "docs: remove the progress note"
+echo "digest now: $(digest "$WT")"
+run ralph org send --org-id a --to implementer --text "$(task "$DA" t-h2)" --dry-run
+judge "the plan's current approved digest is sha256:$DB" "PLAN: $PLAN sha256:$DB" "$DA"
+run ralph org send --org-id a --to implementer --text "$(task "$DB" t-h2)" --dry-run
+snap
+
+==================== script: pi.sh
+#!/bin/bash
+# (i) the approval check again after the wait: the implementer stub shows a
+# working title (busy flag), a real `ralph org send` of a correct TASK
+# (naming B) waits for it; while it waits, the plan changes; then the stub
+# goes idle. The send must refuse without typing or recording anything.
+# Cases: (i-1) typed, the plan's digest changes during the wait; (i-2) --raw,
+# a Progress checklist line added during the wait; (i-3) control: typed, no
+# change during the wait (sent).
+. "$(dirname "$0")/lib.sh"
+DB=$(cat "$L/DB")
+IMPL_PANE=$(pane_of implementer)
+BUSY="$L/busy/$(printf %s "$IMPL_PANE" | tr ':' '_')"
+echo "implementer pane: $IMPL_PANE  busy flag: ${BUSY#$L/}" | red
+cp "$L/out/plan-B.md" "$WT/$PLAN"
+if [ -n "$("$E" git -C "$WT" status --porcelain -- "$PLAN")" ]; then gitc "$WT" "docs: plan for a as approved (B)"; fi
+echo "digest now: $(digest "$WT") (B: $DB)"
+
+# case <label> <raw:0|1> <edit:body|note|none>
+one() {
+  local label=$1 raw=$2 edit=$3 n=0 before after t0 t1 spid
+  echo; echo "======== ($label) raw=$raw edit during the wait: $edit"
+  cp "$L/out/plan-B.md" "$WT/$PLAN"
+  if [ -n "$("$E" git -C "$WT" status --porcelain -- "$PLAN")" ]; then gitc "$WT" "docs: plan for a as approved (B)"; fi
+  "$E" ralph org send --org-id a --to implementer --text "$(task "$DB" "t-$label")" --dry-run >/dev/null 2>&1 \
+    && echo "pre: the TASK naming B passes the check now (dry-run rc 0)" || echo "pre: DRY-RUN REFUSED"
+  # the dry-run appended one sent(dry_run) event; take the baseline after it
+  touch "$BUSY"
+  for _ in $(seq 1 25); do case "$(pstatus "$IMPL_PANE")" in working*) break ;; esac; sleep 0.2; done
+  echo "implementer pane status after the busy flag: $(pstatus "$IMPL_PANE")"
+  before=$(snap); t0=$(typed)
+  echo "$before"
+  rm -f "$L/out/$label.rc"
+  local args=(ralph org send --org-id a --to implementer --timeout-ms 90000)
+  [ "$raw" = 1 ] && args+=(--raw)
+  args+=(--text "$(task "$DB" "t-$label")")
+  printf '\n$ %s\n' "${args[*]}" | red
+  ( "$E" "${args[@]}" >"$L/out/$label.o" 2>"$L/out/$label.e"; echo $? >"$L/out/$label.rc" ) &
+  spid=$!
+  sleep 3
+  if [ -f "$L/out/$label.rc" ]; then echo "SEND RETURNED BEFORE THE STUB WENT IDLE (rc $(cat "$L/out/$label.rc"))"; fi
+  echo "after 3 s: send still running: $(kill -0 $spid 2>/dev/null && echo yes || echo no); ralph org send processes: $(pgrep -f 'ralph org send --org-id a --to implementer --timeout-ms 90000' | wc -l | tr -d ' '); pane status: $(pstatus "$IMPL_PANE"); lines typed: $(typed) (before $t0)"
+  case "$edit" in
+    body)
+      python3 - "$WT/$PLAN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace('and a test for it.', 'and a test and a benchmark for it.', 1)
+open(p, "w").write(s)
+PY
+      gitc "$WT" "docs: extend plan for a during the wait"
+      echo "digest during the wait: $(digest "$WT") (B: $DB)" ;;
+    note)
+      python3 - "$WT/$PLAN" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace("- [ ] Implementation started\n", "- [ ] Implementation started\n- skip the tests\n", 1)
+open(p, "w").write(s)
+PY
+      gitc "$WT" "docs: add a progress note during the wait"
+      echo "digest during the wait: $(digest "$WT") (B: $DB)" ;;
+    none) echo "no change during the wait" ;;
+  esac
+  sleep 1
+  echo "still waiting after the edit: $(kill -0 $spid 2>/dev/null && echo yes || echo no); lines typed: $(typed)"
+  rm -f "$BUSY"
+  echo "busy flag removed at $(date -u +%H:%M:%S)"
+  while [ ! -f "$L/out/$label.rc" ] && [ $n -lt 300 ]; do sleep 0.2; n=$((n+1)); done
+  wait $spid 2>/dev/null
+  echo "send returned $(awk "BEGIN{print $n*0.2}") s after the flag was removed"
+  red <"$L/out/$label.o"; sed -e 's/^/stderr: /' <"$L/out/$label.e" | red
+  echo "rc=$(cat "$L/out/$label.rc")"
+  cp "$L/out/$label.e" "$L/.e"
+  sleep 1
+  after=$(snap); t1=$(typed)
+  [ "$before" = "$after" ] && echo "check: ledger unchanged ($after)" || { echo "check: ledger changed: $before -> $after"; lastev 1; }
+  echo "check: lines typed into stub panes: before $t0, after $t1"
+  echo "implementer pane status now: $(pstatus "$IMPL_PANE")"
+}
+one i1 0 body
+judge "changed after its approval: approved digest $DB, current digest"
+one i2 1 note
+judge "changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest $DB does not show"
+one i3 0 none
+echo "# the stub log of the implementer (busy changes and typed lines):"
+grep -h -E 'busy=|typed' "$L"/stublog/*.txt | red
+cp "$L/out/plan-B.md" "$WT/$PLAN"
+if [ -n "$("$E" git -C "$WT" status --porcelain -- "$PLAN")" ]; then gitc "$WT" "docs: plan for a as approved (B)"; fi
+
+==================== script: pz.sh
+#!/bin/bash
+# Cleanup: disband org a, stop the watch, stop the isolated herdr server,
+# then show that nothing is left.
+. "$(dirname "$0")/lib.sh"
+STUB_PIDS=$(grep -h -o 'start pid=[0-9]*' "$L"/stublog/*.txt | cut -d= -f2 | sort -n | tr '\n' ' ')
+HERDR_PID=$(cat "$L/herdr.pid")
+echo "stub agent pids: $STUB_PIDS"
+echo "isolated herdr server pid: $HERDR_PID ($(ps -o command= -p "$HERDR_PID"))"
+run ralph org disband --org-id a
+echo "herdr workspaces: $(wscount)"
+run ralph org watch --stop --state-dir "$LED"
+run ralph status
+run herdr server stop
+sleep 2
+echo "$STUB_PIDS $HERDR_PID" >"$L/pids.txt"
+
+==================== setup: ralph init --yes (init.out) and the isolated herdr server (herdr-server.out)
+
+Scaffolding "repo" into <L>/repo ...
+
+  ✓ base (155 files: 155 created, 0 updated, 0 skipped)
+  ✓ pack/dart (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ pack/golang (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ pack/python (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ pack/rust (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ pack/terraform (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ pack/typescript (3 files: 3 created, 0 updated, 0 skipped)
+  ✓ .ralph/manifest.toml
+  ✓ .git exists (skipped)
+  ✓ pre-commit hook installed
+  ✓ commit-msg hook installed
+  ✓ prepare-commit-msg hook installed
+  ✓ pre-merge-commit hook installed
+
+Done. Next steps:
+  cd <L>/repo
+  Edit AGENTS.md to describe your project
+  ralph doctor to verify setup
+---
+herdr server running; you can use any herdr CLI command in another terminal.
+api socket: .harness/state/herdr.sock
+client socket: .harness/state/herdr-client.sock
+logs: <L>/xdg/config/herdr/herdr-server.log
+did you mean to open the Herdr TUI? run `herdr`; you do not need `herdr server`.
+isolated herdr server pid: 96472
+
+==================== stub probe
+# stub probe before ralph (JST 09:37-09:38), in a throwaway workspace of the
+# isolated herdr server. Commands ran through env.sh with cwd <L>/repo.
+$ herdr workspace create --label probe
+  -> root pane w1:p1 (agent_status unknown)
+$ herdr agent start probe --kind claude --pane w1:p1
+  -> agent_status: idle, interactive_ready: true, name: probe, pane_id: w1:p1
+  stub log: start pid=6779 cwd=<L>/home pane="w1:p1" argv=["claude"]   (HERDR_PANE_ID is set in the pane)
+$ herdr agent get probe                      -> idle    title '✳ stub claude'
+$ touch <L>/busy/w1_p1; sleep 1.5; herdr agent get probe
+                                             -> working title '⠂ stub claude'
+$ rm <L>/busy/w1_p1; sleep 1.5; herdr agent get probe
+                                             -> idle    title '✳ stub claude'
+$ touch <L>/busy/w1_p1; herdr agent wait probe --until idle --until done --timeout 3000
+  -> rc=1 after 4 s: {"error":{"code":"timeout","message":"timed out waiting for agent status"},"id":"cli:agent:wait"}
+$ rm <L>/busy/w1_p1; herdr agent wait probe --until idle --until done --timeout 5000
+  -> rc=0 after 0 s: {"id":"cli:agent:wait","result":{"agent":{"agent":"claude","agent_status":"idle",...
+$ herdr workspace close w1                   -> rc=0; ps -p 6779 rc=1 (the stub exited: "stdin closed: <nil>")
+herdr's claude detection manifest (remote 2026.09.11.1, <L>/xdg/state/herdr/agent-detection/remote/claude.toml):
+  rule osc_title_working: state working, priority 1100, region osc_title, regex '^[\x{2800}-\x{28FF}\x{25D0}-\x{25D3}] '
+  rule osc_title_idle:    state idle,    priority 250,  region osc_title, regex '^\x{2733} '
+
+==================== output: p0.sh
+2026-10-13 09:41:38 JST
+split plan digest: b624ce5d96c2
+# demo split
+
+- Status: Approved
+- Approved: 2026-10-13 sha256:b624ce5d96c2
+
+herdr workspaces: 0
+
+$ ralph org watch --all --detach --state-dir <L>/repo/.harness/state/org
+started ralph org watch --all (pid 33391); log: <L>/repo/.harness/state/org/watch.log
+rc=0
+
+$ ralph status
+Scaffold ownership: 173 path(s) tracked (core: 137, fork: 0, seed: 34, block: 2)
+  .codex/AGENTS.override.md: seed
+  .github/workflows/verify.yml: seed
+  .gitignore: block
+  .ralph/local/hooks/.gitkeep: seed
+  .ralph/local/test.d/.gitkeep: seed
+  .ralph/local/verify.d/.gitkeep: seed
+  AGENTS.md: block
+  CLAUDE.md: seed
+  docs/architecture/.gitkeep: seed
+  docs/evidence/.gitkeep: seed
+  docs/insights/README.md: seed
+  docs/insights/events/.gitkeep: seed
+  docs/plans/active/.gitkeep: seed
+  docs/plans/archive/.gitkeep: seed
+  docs/plans/templates/feature-plan.md: seed
+  docs/quality/definition-of-done.md: seed
+  docs/quality/quality-gates.md: seed
+  docs/recipes/.gitkeep: seed
+  docs/recipes/adding-a-language-pack.md: seed
+  docs/recipes/agent-teams.md: seed
+  docs/recipes/codex-seat-permissions.md: seed
+  docs/recipes/codex-setup.md: seed
+  docs/recipes/worktrees.md: seed
+  docs/references/.gitkeep: seed
+  docs/reports/.gitkeep: seed
+  docs/reports/README.md: seed
+  docs/reports/templates/cross-review-triage-report.md: seed
+  docs/reports/templates/review-report.md: seed
+  docs/reports/templates/test-report.md: seed
+  docs/reports/templates/verify-report.md: seed
+  docs/reports/templates/walkthrough.md: seed
+  docs/research/.gitkeep: seed
+  docs/roadmap/.gitkeep: seed
+  docs/specs/.gitkeep: seed
+  docs/tech-debt/.gitkeep: seed
+  ralph.toml: seed
+Unresolved drift: none
+
+no org runtime state found (state-dir=<L>/repo/.harness/state/org (source: git-main-worktree)) — run `ralph org spawn` to start one.
+org watch: running (pid 33391, mark updated 2026-10-13T00:41:39Z)
+Run `ralph doctor` to check environment readiness.
+rc=0
+script rc=0
+
+==================== output: p1.sh
+2026-10-13 09:41:47 JST
+
+$ ralph org start --plan <L>/repo/.harness/state/org/splits/demo.md --feature a --driver claude --model sonnet
+spawned seat "leader" (org_id=a driver=claude model=sonnet pane_id=w2:p2 dry_run=false)
+worktree: <L>/repo/.claude/worktrees/org-a
+branch: feat/a
+hint: ralph org status --org-id a ; attach with herdr to observe the leader pane
+rc=0
+
+$ ralph org status --org-id a
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+leader	leader	claude	sonnet	spawned (active)	w2:p2
+reserved: internal/a/
+feature: demo/a branch feat/a worktree <L>/repo/.claude/worktrees/org-a
+rc=0
+
+# scope_reserved of org a:
+details: paths=internal/a/ split=demo feature=a digest=b624ce5d96c2 branch=feat/a approval=per-plan
+
+# the leader task's approval-mode line (stub argv / prompt file):
+- 承認方式: per-plan
+manifest.jsonl
+manifest.lock
+model-receipts.jsonl
+prompts
+splits
+watch-alive.json
+watch.lock
+watch.log
+herdr workspaces: 1
+ledger: manifest 7 lines, inbox 0 lines, receipts 1 lines, sha256 8964105fc6ed0a36
+script rc=0
+
+==================== output: ps.sh
+2026-10-13 09:41:58 JST
+9741e49 docs: add plan for a
+digest A: 8e7b0c143bb6
+
+## (s-1) QUESTION for A, approve e1, the two lines with A
+
+$ ralph org escalate --org-id a --text TYPE: QUESTION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+VISUAL: .harness/state/plan-visual/2026-10-13-a.html
+
+please review the plan of a and approve it
+escalated e1 (org=a type=QUESTION)
+stderr: ORG ESCALATION: org=a item=e1 type=QUESTION -- recorded in <L>/repo/.harness/state/org/inbox.jsonl; read it with: ralph org inbox show e1
+rc=0
+
+$ ralph org approve e1
+approved e1 (org=a plan=docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6)
+approve sends no message; tell the leader of org a with:
+ralph org send --org-id a --to leader --text 'TYPE: DECISION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+approved'
+
+note: approve recorded each plan file as it is now. From here on the leader may change only the plan's - Status: and - Approved: lines and its checkbox marks: any other change makes a per-plan org refuse its implementer's spawn and TASKs until the plan is approved again.
+rc=0
+fef157e docs: mark plan for a approved (A)
+digest now: 8e7b0c143bb6
+# a
+
+- Status: Approved
+- Approved: 2026-10-13 sha256:8e7b0c143bb6
+- Branch: feat/a
+
+
+## (s-2) implementer spawn, real
+
+$ ralph org spawn --org-id a --id implementer --role implementer --driver claude --model sonnet --cwd <L>/repo/.claude/worktrees/org-a --scope build a per the approved plan
+spawned seat "implementer" (org_id=a driver=claude model=sonnet pane_id=w2:p3 dry_run=false)
+rc=0
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-a
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan --dry-run
+sent message to seat "implementer"
+rc=0
+
+## (s-3) the plan changes (B), Draft/TBD, new QUESTION, approve e2, the two lines with B
+937727a docs: extend plan for a and set it back to draft
+digest B: 3a36fa20e7a1
+
+$ ralph org escalate --org-id a --text TYPE: QUESTION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+VISUAL: .harness/state/plan-visual/2026-10-13-a.html
+
+the plan of a changed (a test added); please approve it again
+escalated e2 (org=a type=QUESTION)
+stderr: ORG ESCALATION: org=a item=e2 type=QUESTION -- recorded in <L>/repo/.harness/state/org/inbox.jsonl; read it with: ralph org inbox show e2
+rc=0
+
+$ ralph org approve e2
+approved e2 (org=a plan=docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1)
+approve sends no message; tell the leader of org a with:
+ralph org send --org-id a --to leader --text 'TYPE: DECISION
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+approved'
+
+note: approve recorded each plan file as it is now. From here on the leader may change only the plan's - Status: and - Approved: lines and its checkbox marks: any other change makes a per-plan org refuse its implementer's spawn and TASKs until the plan is approved again.
+rc=0
+14677e5 docs: mark plan for a approved (B)
+digest now: 3a36fa20e7a1
+# a
+
+- Status: Approved
+- Approved: 2026-10-13 sha256:3a36fa20e7a1
+- Branch: feat/a
+
+# plan_approved records (file order):
+2026-10-13T00:41:59Z plan=docs/plans/active/2026-10-13-a.md digest=8e7b0c143bb6 inbox=e1
+2026-10-13T00:42:07Z plan=docs/plans/active/2026-10-13-a.md digest=3a36fa20e7a1 inbox=e2
+
+## (s-4) controls: TASK naming B, typed and --raw, --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-b
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+sent message to seat "implementer"
+rc=0
+
+$ ralph org send --org-id a --to implementer --raw --text TYPE: TASK
+TASK_ID: t-b
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+sent message to seat "implementer"
+rc=0
+
+$ ralph org status --org-id a
+SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+implementer	implementer	claude	sonnet	spawned (active)	w2:p3
+leader	leader	claude	sonnet	spawned (active)	w2:p2
+reserved: internal/a/
+feature: demo/a branch feat/a worktree <L>/repo/.claude/worktrees/org-a
+rc=0
+ledger: manifest 19 lines, inbox 6 lines, receipts 2 lines, sha256 9ee169b83d053322
+script rc=0
+
+==================== output: pfgh.sh
+2026-10-13 09:42:16 JST
+digest A: 8e7b0c143bb6  digest B (latest approval): 3a36fa20e7a1  mistyped: 8e7b0c143bb0
+
+======== (f) the file set back to the A version, a TASK naming B
+981e338 docs: set plan for a back to the A version
+digest now: 8e7b0c143bb6 (A: 8e7b0c143bb6)
+# a
+
+- Status: Approved
+- Approved: 2026-10-13 sha256:8e7b0c143bb6
+- Branch: feat/a
+
+
+## (f) TASK naming B, typed --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-f
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'sha256:8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 19 lines, inbox 6 lines, receipts 2 lines, sha256 9ee169b83d053322)
+check: lines typed into stub panes: before 0, after 0
+
+## (f) TASK naming B, --raw --dry-run
+
+$ ralph org send --org-id a --to implementer --raw --text TYPE: TASK
+TASK_ID: t-f
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'sha256:8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 19 lines, inbox 6 lines, receipts 2 lines, sha256 9ee169b83d053322)
+check: lines typed into stub panes: before 0, after 0
+
+## (f) TASK naming B, typed (real send)
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-f
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'sha256:8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 19 lines, inbox 6 lines, receipts 2 lines, sha256 9ee169b83d053322)
+check: lines typed into stub panes: before 0, after 0
+
+## (f) TASK naming B, --raw (real send)
+
+$ ralph org send --org-id a --to implementer --raw --text TYPE: TASK
+TASK_ID: t-f
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval: approved digest 3a36fa20e7a1, current digest 8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'sha256:8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 19 lines, inbox 6 lines, receipts 2 lines, sha256 9ee169b83d053322)
+check: lines typed into stub panes: before 0, after 0
+
+## (f) observation: the same state, a TASK naming A and an implementer spawn (both --dry-run)
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-f-a
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan --dry-run
+sent message to seat "implementer"
+rc=0
+
+$ ralph org spawn --org-id a --id implementer-f --role implementer --driver claude --model sonnet --cwd <L>/repo/.claude/worktrees/org-a --scope build a --dry-run
+spawned seat "implementer-f" (org_id=a driver=claude model=sonnet pane_id= dry_run=true)
+rc=0
+
+======== (g) the same state (the A version), a TASK with a mistyped digest
+
+## (g) TASK naming sha256:8e7b0c143bb0, typed --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-g
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: org_id "a" has no approval recorded for plan docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0 since its last disband (its latest approval is of sha256:3a36fa20e7a1); refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'has no approval recorded for plan docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0 since its last disband (its latest approval is of sha256:3a36fa20e7a1)' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+## (g) TASK naming sha256:8e7b0c143bb0, typed (real send)
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-g
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0
+
+implement the plan
+stderr: org: send: TASK not sent: org_id "a" has no approval recorded for plan docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0 since its last disband (its latest approval is of sha256:3a36fa20e7a1); refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'has no approval recorded for plan docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0 since its last disband (its latest approval is of sha256:3a36fa20e7a1)' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'changes the TASK's PLAN: header' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+======== (h) the B version plus one Progress checklist line, a TASK naming the old A digest
+e0f8292 docs: set plan for a back to the B version and add a progress note
+digest now: 3a36fa20e7a1 (B: 3a36fa20e7a1)
+## Progress checklist
+
+- [ ] Implementation started
+- skip the tests
+
+## (h) TASK naming A typed --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'approved digest 8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'has no approval recorded' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+## (h) TASK naming A typed (real send)
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'approved digest 8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'has no approval recorded' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+## (h) TASK naming A --raw --dry-run
+
+$ ralph org send --org-id a --to implementer --raw --text TYPE: TASK
+TASK_ID: t-h
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'approved digest 8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'has no approval recorded' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+## (h) TASK naming mistyped typed --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb0
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'approved digest 8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'has no approval recorded' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+## (h) TASK naming B typed --dry-run
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'approved digest 8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'has no approval recorded' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: 'the TASK's PLAN: header names' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: '8e7b0c143bb6' in the whole message: 0 line(s); in the next step: 0 line(s)
+check: ledger unchanged (ledger: manifest 27 lines, inbox 6 lines, receipts 3 lines, sha256 f30e8d01e4af2b87)
+check: lines typed into stub panes: before 0, after 0
+
+======== (h) controls: the note removed (the B version as approved)
+47d2039 docs: remove the progress note
+digest now: 3a36fa20e7a1
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h2
+PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6
+
+implement the plan --dry-run
+stderr: org: send: TASK not sent: the TASK's PLAN: header names sha256:8e7b0c143bb6 of plan docs/plans/active/2026-10-13-a.md of org_id "a", and the plan's current approved digest is sha256:3a36fa20e7a1; refused by the approval check: the leader changes the TASK's PLAN: header to PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1 and sends the TASK again; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: marker 'refused by the approval check' present: yes
+check: 'the plan's current approved digest is sha256:3a36fa20e7a1' in the whole message: 1 line(s); in the next step: 0 line(s)
+check: 'PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1' in the whole message: 1 line(s); in the next step: 1 line(s)
+check: '8e7b0c143bb6' in the whole message: 1 line(s); in the next step: 0 line(s)
+
+$ ralph org send --org-id a --to implementer --text TYPE: TASK
+TASK_ID: t-h2
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan --dry-run
+sent message to seat "implementer"
+rc=0
+ledger: manifest 28 lines, inbox 6 lines, receipts 3 lines, sha256 72fd795e5caba1aa
+script rc=0
+
+==================== output: pi.sh
+2026-10-13 09:43:01 JST
+implementer pane: w2:p3  busy flag: busy/w2_p3
+digest now: 3a36fa20e7a1 (B: 3a36fa20e7a1)
+
+======== (i1) raw=0 edit during the wait: body
+pre: the TASK naming B passes the check now (dry-run rc 0)
+implementer pane status after the busy flag: working '⠂ stub claude'
+ledger: manifest 29 lines, inbox 6 lines, receipts 3 lines, sha256 a96aa2d6667c3a37
+
+$ ralph org send --org-id a --to implementer --timeout-ms 90000 --text TYPE: TASK
+TASK_ID: t-i1
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan
+after 3 s: send still running: yes; ralph org send processes: 1; pane status: working '⠂ stub claude'; lines typed: 0 (before 0)
+0cb78a7 docs: extend plan for a during the wait
+digest during the wait: 42388be72cb4 (B: 3a36fa20e7a1)
+still waiting after the edit: yes; lines typed: 0
+busy flag removed at 00:43:07
+send returned 0.4 s after the flag was removed
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval: approved digest 3a36fa20e7a1, current digest 42388be72cb4; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: ledger unchanged (ledger: manifest 29 lines, inbox 6 lines, receipts 3 lines, sha256 a96aa2d6667c3a37)
+check: lines typed into stub panes: before 0, after 0
+implementer pane status now: done '✳ stub claude'
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval: approved digest 3a36fa20e7a1, current digest' in the whole message: 1 line(s); in the next step: 0 line(s)
+
+======== (i2) raw=1 edit during the wait: note
+6511ccf docs: plan for a as approved (B)
+pre: the TASK naming B passes the check now (dry-run rc 0)
+implementer pane status after the busy flag: working '⠂ stub claude'
+ledger: manifest 30 lines, inbox 6 lines, receipts 4 lines, sha256 968cae0327ab446a
+
+$ ralph org send --org-id a --to implementer --timeout-ms 90000 --raw --text TYPE: TASK
+TASK_ID: t-i2
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan
+after 3 s: send still running: yes; ralph org send processes: 1; pane status: working '⠂ stub claude'; lines typed: 75 (before 75)
+b1bb411 docs: add a progress note during the wait
+digest during the wait: 3a36fa20e7a1 (B: 3a36fa20e7a1)
+still waiting after the edit: yes; lines typed: 75
+busy flag removed at 00:43:16
+send returned 0.2 s after the flag was removed
+stderr: org: send: TASK not sent: plan docs/plans/active/2026-10-13-a.md of org_id "a" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show (the digest skips the ## Progress checklist section and every - Status:, - Approved: and - Branch: line); refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw
+rc=1
+check: ledger unchanged (ledger: manifest 30 lines, inbox 6 lines, receipts 4 lines, sha256 968cae0327ab446a)
+check: lines typed into stub panes: before 75, after 75
+implementer pane status now: done '✳ stub claude'
+check: marker 'refused by the approval check' present: yes
+check: 'changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its digest 3a36fa20e7a1 does not show' in the whole message: 1 line(s); in the next step: 0 line(s)
+
+======== (i3) raw=0 edit during the wait: none
+a68e0bf docs: plan for a as approved (B)
+pre: the TASK naming B passes the check now (dry-run rc 0)
+implementer pane status after the busy flag: working '⠂ stub claude'
+ledger: manifest 31 lines, inbox 6 lines, receipts 4 lines, sha256 05277372e58ac751
+
+$ ralph org send --org-id a --to implementer --timeout-ms 90000 --text TYPE: TASK
+TASK_ID: t-i3
+PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1
+
+implement the plan
+after 3 s: send still running: yes; ralph org send processes: 1; pane status: working '⠂ stub claude'; lines typed: 75 (before 75)
+no change during the wait
+still waiting after the edit: yes; lines typed: 75
+busy flag removed at 00:43:24
+send returned 3.8 s after the flag was removed
+sent message to seat "implementer"
+stderr: warning: could not confirm that seat "implementer" started working after Enter. Check its pane with 'ralph org read --org-id a --seat implementer'. If the message is still sitting in the input box, submit it with 'herdr pane send-keys w2:p3 Enter'. If the pane shows anything else (the seat is working, or it shows a dialog), do not press Enter. ralph does not resend Enter on its own: a blind keystroke could confirm an approval dialog.
+rc=0
+check: ledger changed: ledger: manifest 31 lines, inbox 6 lines, receipts 4 lines, sha256 05277372e58ac751 -> ledger: manifest 32 lines, inbox 6 lines, receipts 4 lines, sha256 02da63ed32eabd91
+{"ts":"2026-10-13T00:43:28Z","org_id":"a","seat_id":"implementer","event":"sent","pane_id":"w2:p3","details":"submit_unconfirmed=true TYPE: TASK\nTASK_ID: t-i3\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+check: lines typed into stub panes: before 75, after 80
+implementer pane status now: done '✳ stub claude'
+# the stub log of the implementer (busy changes and typed lines):
+2026-10-13T00:43:02.429919Z busy=true
+2026-10-13T00:43:08.089177Z busy=false
+2026-10-13T00:43:11.321394Z busy=true
+2026-10-13T00:43:16.975196Z busy=false
+2026-10-13T00:43:20.009234Z busy=true
+2026-10-13T00:43:24.654365Z busy=false
+2026-10-13T00:43:24.844801Z typed "TYPE: TASK"
+2026-10-13T00:43:24.849172Z typed "TASK_ID: t-i3"
+2026-10-13T00:43:24.854078Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:24.868117Z typed ""
+2026-10-13T00:43:25.617371Z typed "implement the plan"
+2026-10-13T00:43:10.097655Z typed "You are the on-demand semantic-judgment watcher for an autonomous multi-agent org runtime (`ralph org watch`)."
+2026-10-13T00:43:10.106779Z typed "A deterministic pulse layer flagged one seat's condition below as worth judgment. You cannot stop or instruct the seat -- you only classify what you observe."
+2026-10-13T00:43:10.110552Z typed ""
+2026-10-13T00:43:10.116582Z typed "ORG_ID: a"
+2026-10-13T00:43:10.120533Z typed "SEAT_ID: implementer"
+2026-10-13T00:43:10.12667Z typed "CONDITION_TYPE: scope_change"
+2026-10-13T00:43:10.130576Z typed ""
+2026-10-13T00:43:10.13455Z typed "EVIDENCE (the pulse layer's own finding):"
+2026-10-13T00:43:10.138582Z typed "TYPE: ALERT"
+2026-10-13T00:43:10.142581Z typed "ORG_ID: a"
+2026-10-13T00:43:10.146514Z typed "SEAT: implementer"
+2026-10-13T00:43:10.150531Z typed "CONDITION: scope_change"
+2026-10-13T00:43:10.154546Z typed ""
+2026-10-13T00:43:10.15853Z typed "seat implementer worktree scope changed:"
+2026-10-13T00:43:10.162502Z typed " M docs/plans/active/2026-10-13-a.md"
+2026-10-13T00:43:10.166517Z typed ""
+2026-10-13T00:43:10.17057Z typed "RECENT MANIFEST EVENTS FOR THIS SEAT (oldest first):"
+2026-10-13T00:43:10.174571Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_leader_joined ok"
+2026-10-13T00:43:10.178526Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_joined"
+2026-10-13T00:43:10.182505Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_announced"
+2026-10-13T00:43:10.186546Z typed "- 2026-10-13T00:42:05Z spawned scope=build a per the approved plan permission_mode=autonomous"
+2026-10-13T00:43:10.191556Z typed "- 2026-10-13T00:42:05Z sent TYPE: TASK"
+2026-10-13T00:43:10.19551Z typed "TASK_ID: t-a"
+2026-10-13T00:43:10.199552Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6"
+2026-10-13T00:43:10.203496Z typed ""
+2026-10-13T00:43:10.207523Z typed "implement the plan"
+2026-10-13T00:43:10.211608Z typed "- 2026-10-13T00:42:08Z sent TYPE: TASK"
+2026-10-13T00:43:10.215515Z typed "TASK_ID: t-b"
+2026-10-13T00:43:10.219546Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.223515Z typed ""
+2026-10-13T00:43:10.227521Z typed "implement the plan"
+2026-10-13T00:43:10.231523Z typed "- 2026-10-13T00:42:08Z sent raw=true TYPE: TASK"
+2026-10-13T00:43:10.235549Z typed "TASK_ID: t-b"
+2026-10-13T00:43:10.239615Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.24349Z typed ""
+2026-10-13T00:43:10.247531Z typed "implement the plan"
+2026-10-13T00:43:10.251535Z typed "- 2026-10-13T00:42:19Z sent TYPE: TASK"
+2026-10-13T00:43:10.255524Z typed "TASK_ID: t-f-a"
+2026-10-13T00:43:10.259522Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6"
+2026-10-13T00:43:10.263527Z typed ""
+2026-10-13T00:43:10.267499Z typed "implement the plan"
+2026-10-13T00:43:10.271538Z typed "- 2026-10-13T00:42:25Z sent TYPE: TASK"
+2026-10-13T00:43:10.275511Z typed "TASK_ID: t-h2"
+2026-10-13T00:43:10.279542Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.283516Z typed ""
+2026-10-13T00:43:10.287585Z typed "implement the plan"
+2026-10-13T00:43:10.291564Z typed "- 2026-10-13T00:43:02Z sent TYPE: TASK"
+2026-10-13T00:43:10.295532Z typed "TASK_ID: t-i1"
+2026-10-13T00:43:10.299568Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.303557Z typed ""
+2026-10-13T00:43:10.307518Z typed "implement the plan"
+2026-10-13T00:43:10.311546Z typed ""
+2026-10-13T00:43:10.31553Z typed "SEAT PANE TAIL (last ~40 lines, best-effort):"
+2026-10-13T00:43:10.31956Z typed "The default interactive shell is now zsh."
+2026-10-13T00:43:10.323519Z typed "To update your account to use zsh, please run `chsh -s"
+2026-10-13T00:43:10.327556Z typed " /bin/zsh`."
+2026-10-13T00:43:10.332533Z typed "For more details, please visit https://support.apple.c"
+2026-10-13T00:43:10.336524Z typed "om/kb/HT208050."
+2026-10-13T00:43:10.340558Z typed "<host>:org-a <user>$ claude --permiss"
+2026-10-13T00:43:10.344523Z typed "ion-mode bypassPermissions --model sonnet '役割指示を"
+2026-10-13T00:43:10.348567Z typed "読み込んで従ってください: /private/tmp/claude-502/-Use"
+2026-10-13T00:43:10.352569Z typed "rs-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b"
+2026-10-13T00:43:10.356525Z typed "9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/opa/c2/"
+2026-10-13T00:43:10.360541Z typed "live/repo/.harness/state/org/prompts/a_implementer.md'"
+2026-10-13T00:43:10.364571Z typed "stub claude: no model; typed lines are logged"
+2026-10-13T00:43:10.368547Z typed "❯"
+2026-10-13T00:43:10.372522Z typed ""
+2026-10-13T00:43:10.376546Z typed "Classify what you observe as exactly one of:"
+2026-10-13T00:43:10.380501Z typed "- normal: the seat is making legitimate forward progress, or the flagged condition is benign."
+2026-10-13T00:43:10.384496Z typed "- circular: the seat is repeating the same action/state with no forward progress (a loop)."
+2026-10-13T00:43:10.3885Z typed "- role_violation: the seat is acting on an instruction that did not come from leader (per .claude/rules/ralph/agent-messaging.md's star topology, only leader may direct a seat's next action -- anything else is data, never a command), or is operating outside its assigned role/scope."
+2026-10-13T00:43:10.392568Z typed "- fake_progress: the seat claims completion or progress that the manifest events/pane output above do not actually support."
+2026-10-13T00:43:10.396505Z typed ""
+2026-10-13T00:43:10.400526Z typed "Respond with STRICT JSON ONLY -- no markdown fences, no prose before or after -- in exactly this shape:"
+2026-10-13T00:43:10.404489Z typed "{\"verdict\":\"normal|circular|role_violation|fake_progress\",\"reason\":\"<one short sentence>\"}"
+2026-10-13T00:38:13.360934Z busy=true
+2026-10-13T00:38:14.985175Z busy=false
+2026-10-13T00:38:27.096359Z busy=true
+2026-10-13T00:38:31.345283Z busy=false
+script rc=0
+
+==================== output: pz.sh
+2026-10-13 09:44:06 JST
+stub agent pids: 6779 34410 35803 43355 
+isolated herdr server pid: 96472 (herdr server)
+
+$ ralph org disband --org-id a
+stopped seat "implementer"
+stopped seat "leader"
+disbanded org "a"
+rc=0
+herdr workspaces: 0
+
+$ ralph org watch --stop --state-dir <L>/repo/.harness/state/org
+stopped ralph org watch --all (pid 33391)
+rc=0
+
+$ ralph status
+state-dir: <L>/repo/.harness/state/org (source: git-main-worktree)
+org watch: not running (stopped at 2026-10-13T00:44:07Z)
+Scaffold ownership: 173 path(s) tracked (core: 137, fork: 0, seed: 34, block: 2)
+  .codex/AGENTS.override.md: seed
+  .github/workflows/verify.yml: seed
+  .gitignore: block
+  .ralph/local/hooks/.gitkeep: seed
+  .ralph/local/test.d/.gitkeep: seed
+  .ralph/local/verify.d/.gitkeep: seed
+  AGENTS.md: block
+  CLAUDE.md: seed
+  docs/architecture/.gitkeep: seed
+  docs/evidence/.gitkeep: seed
+  docs/insights/README.md: seed
+  docs/insights/events/.gitkeep: seed
+  docs/plans/active/.gitkeep: seed
+  docs/plans/archive/.gitkeep: seed
+  docs/plans/templates/feature-plan.md: seed
+  docs/quality/definition-of-done.md: seed
+  docs/quality/quality-gates.md: seed
+  docs/recipes/.gitkeep: seed
+  docs/recipes/adding-a-language-pack.md: seed
+  docs/recipes/agent-teams.md: seed
+  docs/recipes/codex-seat-permissions.md: seed
+  docs/recipes/codex-setup.md: seed
+  docs/recipes/worktrees.md: seed
+  docs/references/.gitkeep: seed
+  docs/reports/.gitkeep: seed
+  docs/reports/README.md: seed
+  docs/reports/templates/cross-review-triage-report.md: seed
+  docs/reports/templates/review-report.md: seed
+  docs/reports/templates/test-report.md: seed
+  docs/reports/templates/verify-report.md: seed
+  docs/reports/templates/walkthrough.md: seed
+  docs/research/.gitkeep: seed
+  docs/roadmap/.gitkeep: seed
+  docs/specs/.gitkeep: seed
+  docs/tech-debt/.gitkeep: seed
+  ralph.toml: seed
+Unresolved drift: none
+
+org_id: a (active 0/2)
+  SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+  implementer	implementer	claude	sonnet	stopped	w2:p3
+  implementer-f	implementer	claude	sonnet	spawned (active) [dry-run]	
+  leader	leader	claude	sonnet	stopped	w2:p2
+  watch: last heartbeat 2026-10-13T00:43:40Z (cycle 4), pending alerts: 0
+rc=0
+
+$ herdr server stop
+rc=0
+script rc=0
+
+==================== cleanup checks (JST 09:44-09:46, cwd /, no pipe on pgrep)
+$ pgrep -fl <L>                                   -> rc=1 (nothing)
+$ ps -o pid=,command= -p 6779,34410,35803,43355,96472,33391   (4 stubs, the isolated herdr server, the watch) -> rc=1
+$ pgrep -fl "herdr server"                        -> rc=1
+$ lsof -d cwd | grep -c "scratchpad/opa/c2/live"  -> 0
+$ find ~/.config/herdr ~/.agents/skills/agmsg -newermt "2026-10-13 09:30"   -> nothing (rc 0)
+
+==================== stub logs (<L>/stublog/)
+---- claude-34410.txt
+2026-10-13T00:41:48.285502Z start pid=34410 cwd=<L>/repo/.claude/worktrees/org-a pane="w2:p2" argv=["claude" "--permission-mode" "bypassPermissions" "--model" "sonnet" "役割指示を読み込んで従ってください: <L>/repo/.harness/state/org/prompts/a_leader.md"]
+---- claude-35803.txt
+2026-10-13T00:42:01.908191Z start pid=35803 cwd=<L>/repo/.claude/worktrees/org-a pane="w2:p3" argv=["claude" "--permission-mode" "bypassPermissions" "--model" "sonnet" "役割指示を読み込んで従ってください: <L>/repo/.harness/state/org/prompts/a_implementer.md"]
+2026-10-13T00:43:02.429919Z busy=true
+2026-10-13T00:43:08.089177Z busy=false
+2026-10-13T00:43:11.321394Z busy=true
+2026-10-13T00:43:16.975196Z busy=false
+2026-10-13T00:43:20.009234Z busy=true
+2026-10-13T00:43:24.654365Z busy=false
+2026-10-13T00:43:24.844801Z typed "TYPE: TASK"
+2026-10-13T00:43:24.849172Z typed "TASK_ID: t-i3"
+2026-10-13T00:43:24.854078Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:24.868117Z typed ""
+2026-10-13T00:43:25.617371Z typed "implement the plan"
+---- claude-43355.txt
+2026-10-13T00:43:10.091184Z start pid=43355 cwd=<L>/repo pane="" argv=["claude" "-p" "--model" "haiku" "--output-format" "json"]
+2026-10-13T00:43:10.097655Z typed "You are the on-demand semantic-judgment watcher for an autonomous multi-agent org runtime (`ralph org watch`)."
+2026-10-13T00:43:10.106779Z typed "A deterministic pulse layer flagged one seat's condition below as worth judgment. You cannot stop or instruct the seat -- you only classify what you observe."
+2026-10-13T00:43:10.110552Z typed ""
+2026-10-13T00:43:10.116582Z typed "ORG_ID: a"
+2026-10-13T00:43:10.120533Z typed "SEAT_ID: implementer"
+2026-10-13T00:43:10.12667Z typed "CONDITION_TYPE: scope_change"
+2026-10-13T00:43:10.130576Z typed ""
+2026-10-13T00:43:10.13455Z typed "EVIDENCE (the pulse layer's own finding):"
+2026-10-13T00:43:10.138582Z typed "TYPE: ALERT"
+2026-10-13T00:43:10.142581Z typed "ORG_ID: a"
+2026-10-13T00:43:10.146514Z typed "SEAT: implementer"
+2026-10-13T00:43:10.150531Z typed "CONDITION: scope_change"
+2026-10-13T00:43:10.154546Z typed ""
+2026-10-13T00:43:10.15853Z typed "seat implementer worktree scope changed:"
+2026-10-13T00:43:10.162502Z typed " M docs/plans/active/2026-10-13-a.md"
+2026-10-13T00:43:10.166517Z typed ""
+2026-10-13T00:43:10.17057Z typed "RECENT MANIFEST EVENTS FOR THIS SEAT (oldest first):"
+2026-10-13T00:43:10.174571Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_leader_joined ok"
+2026-10-13T00:43:10.178526Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_joined"
+2026-10-13T00:43:10.182505Z typed "- 2026-10-13T00:42:05Z spawn_step agmsg_announced"
+2026-10-13T00:43:10.186546Z typed "- 2026-10-13T00:42:05Z spawned scope=build a per the approved plan permission_mode=autonomous"
+2026-10-13T00:43:10.191556Z typed "- 2026-10-13T00:42:05Z sent TYPE: TASK"
+2026-10-13T00:43:10.19551Z typed "TASK_ID: t-a"
+2026-10-13T00:43:10.199552Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6"
+2026-10-13T00:43:10.203496Z typed ""
+2026-10-13T00:43:10.207523Z typed "implement the plan"
+2026-10-13T00:43:10.211608Z typed "- 2026-10-13T00:42:08Z sent TYPE: TASK"
+2026-10-13T00:43:10.215515Z typed "TASK_ID: t-b"
+2026-10-13T00:43:10.219546Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.223515Z typed ""
+2026-10-13T00:43:10.227521Z typed "implement the plan"
+2026-10-13T00:43:10.231523Z typed "- 2026-10-13T00:42:08Z sent raw=true TYPE: TASK"
+2026-10-13T00:43:10.235549Z typed "TASK_ID: t-b"
+2026-10-13T00:43:10.239615Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.24349Z typed ""
+2026-10-13T00:43:10.247531Z typed "implement the plan"
+2026-10-13T00:43:10.251535Z typed "- 2026-10-13T00:42:19Z sent TYPE: TASK"
+2026-10-13T00:43:10.255524Z typed "TASK_ID: t-f-a"
+2026-10-13T00:43:10.259522Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6"
+2026-10-13T00:43:10.263527Z typed ""
+2026-10-13T00:43:10.267499Z typed "implement the plan"
+2026-10-13T00:43:10.271538Z typed "- 2026-10-13T00:42:25Z sent TYPE: TASK"
+2026-10-13T00:43:10.275511Z typed "TASK_ID: t-h2"
+2026-10-13T00:43:10.279542Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.283516Z typed ""
+2026-10-13T00:43:10.287585Z typed "implement the plan"
+2026-10-13T00:43:10.291564Z typed "- 2026-10-13T00:43:02Z sent TYPE: TASK"
+2026-10-13T00:43:10.295532Z typed "TASK_ID: t-i1"
+2026-10-13T00:43:10.299568Z typed "PLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"
+2026-10-13T00:43:10.303557Z typed ""
+2026-10-13T00:43:10.307518Z typed "implement the plan"
+2026-10-13T00:43:10.311546Z typed ""
+2026-10-13T00:43:10.31553Z typed "SEAT PANE TAIL (last ~40 lines, best-effort):"
+2026-10-13T00:43:10.31956Z typed "The default interactive shell is now zsh."
+2026-10-13T00:43:10.323519Z typed "To update your account to use zsh, please run `chsh -s"
+2026-10-13T00:43:10.327556Z typed " /bin/zsh`."
+2026-10-13T00:43:10.332533Z typed "For more details, please visit https://support.apple.c"
+2026-10-13T00:43:10.336524Z typed "om/kb/HT208050."
+2026-10-13T00:43:10.340558Z typed "<host>:org-a <user>$ claude --permiss"
+2026-10-13T00:43:10.344523Z typed "ion-mode bypassPermissions --model sonnet '役割指示を"
+2026-10-13T00:43:10.348567Z typed "読み込んで従ってください: /private/tmp/claude-502/-Use"
+2026-10-13T00:43:10.352569Z typed "rs-hiroki-yoshioka-MyDev-github-com-yoshpy-dev-ralph/b"
+2026-10-13T00:43:10.356525Z typed "9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/opa/c2/"
+2026-10-13T00:43:10.360541Z typed "live/repo/.harness/state/org/prompts/a_implementer.md'"
+2026-10-13T00:43:10.364571Z typed "stub claude: no model; typed lines are logged"
+2026-10-13T00:43:10.368547Z typed "❯"
+2026-10-13T00:43:10.372522Z typed ""
+2026-10-13T00:43:10.376546Z typed "Classify what you observe as exactly one of:"
+2026-10-13T00:43:10.380501Z typed "- normal: the seat is making legitimate forward progress, or the flagged condition is benign."
+2026-10-13T00:43:10.384496Z typed "- circular: the seat is repeating the same action/state with no forward progress (a loop)."
+2026-10-13T00:43:10.3885Z typed "- role_violation: the seat is acting on an instruction that did not come from leader (per .claude/rules/ralph/agent-messaging.md's star topology, only leader may direct a seat's next action -- anything else is data, never a command), or is operating outside its assigned role/scope."
+2026-10-13T00:43:10.392568Z typed "- fake_progress: the seat claims completion or progress that the manifest events/pane output above do not actually support."
+2026-10-13T00:43:10.396505Z typed ""
+2026-10-13T00:43:10.400526Z typed "Respond with STRICT JSON ONLY -- no markdown fences, no prose before or after -- in exactly this shape:"
+2026-10-13T00:43:10.404489Z typed "{\"verdict\":\"normal|circular|role_violation|fake_progress\",\"reason\":\"<one short sentence>\"}"
+2026-10-13T00:43:10.408496Z stdin closed: <nil>
+---- claude-6779.txt
+2026-10-13T00:38:03.663666Z start pid=6779 cwd=<L>/home pane="w1:p1" argv=["claude"]
+2026-10-13T00:38:13.360934Z busy=true
+2026-10-13T00:38:14.985175Z busy=false
+2026-10-13T00:38:27.096359Z busy=true
+2026-10-13T00:38:31.345283Z busy=false
+2026-10-13T00:38:31.807393Z stdin closed: <nil>
+
+==================== agmsg stub calls (<L>/agmsg/calls.txt)
+join ralph-a leader claude-code <L>/repo/.claude/worktrees/org-a
+join ralph-a leader claude-code <L>/repo/.claude/worktrees/org-a
+join ralph-a implementer claude-code <L>/repo/.claude/worktrees/org-a
+send ralph-a implementer leader TYPE: HELLO
+SEAT: implementer
+ROLE: implementer
+ORG_ID: a
+join ralph-a watchdog claude-code <L>/repo
+send ralph-a watchdog leader TYPE: ALERT
+ORG_ID: a
+SEAT: implementer
+CONDITION: scope_change
+
+seat implementer worktree scope changed:
+ M docs/plans/active/2026-10-13-a.md
+history ralph-a
+send ralph-a watchdog leader TYPE: ALERT
+ORG_ID: a
+SEAT: leader
+CONDITION: scope_change
+
+seat leader worktree scope changed:
+M  docs/plans/active/2026-10-13-a.md
+history ralph-a
+history ralph-a
+history ralph-a
+leave ralph-a implementer
+leave ralph-a leader
+
+==================== final ledger: manifest.jsonl
+{"ts":"2026-10-13T00:41:48Z","org_id":"a","seat_id":"","event":"scope_reserved","worktree":"<L>/repo/.claude/worktrees/org-a","details":"paths=internal/a/ split=demo feature=a digest=b624ce5d96c2 branch=feat/a approval=per-plan"}
+{"ts":"2026-10-13T00:41:48Z","org_id":"a","seat_id":"leader","event":"spawn_started","role":"leader","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a"}
+{"ts":"2026-10-13T00:41:48Z","org_id":"a","seat_id":"","event":"org_workspace_created","worktree":"<L>/repo/.claude/worktrees/org-a","pane_id":"w2"}
+{"ts":"2026-10-13T00:41:48Z","org_id":"a","seat_id":"leader","event":"spawn_step","pane_id":"w2:p2","details":"tab_created"}
+{"ts":"2026-10-13T00:41:51Z","org_id":"a","seat_id":"leader","event":"spawn_step","pane_id":"w2:p2","details":"agent_started prompt_file=<L>/repo/.harness/state/org/prompts/a_leader.md"}
+{"ts":"2026-10-13T00:41:51Z","org_id":"a","seat_id":"leader","event":"spawn_step","pane_id":"w2:p2","agmsg_team":"ralph-a","details":"agmsg_joined leader_self=true"}
+{"ts":"2026-10-13T00:41:51Z","org_id":"a","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","pane_id":"w2:p2","agmsg_team":"ralph-a","herdr_agent_name":"a_leader","details":"scope=split demo feature a (reserve: internal/a/) permission_mode=autonomous"}
+{"ts":"2026-10-13T00:41:59Z","org_id":"a","seat_id":"","event":"plan_approved","details":"plan=docs/plans/active/2026-10-13-a.md digest=8e7b0c143bb6 content=f657692403640e58dadee89a3ae090b0d2c9e7dfb1de44c3cc9b3ecd2ef8ec0c inbox=e1 by=tester herdr_pane=unset cwd=\"<L>/repo\""}
+{"ts":"2026-10-13T00:42:01Z","org_id":"a","seat_id":"implementer","event":"spawn_started","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a"}
+{"ts":"2026-10-13T00:42:01Z","org_id":"a","seat_id":"implementer","event":"spawn_step","pane_id":"w2:p3","details":"tab_created"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"spawn_step","pane_id":"w2:p3","details":"agent_started prompt_file=<L>/repo/.harness/state/org/prompts/a_implementer.md agent_start_retries=1"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"spawn_step","pane_id":"w2:p3","agmsg_team":"ralph-a","details":"agmsg_leader_joined ok"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"spawn_step","pane_id":"w2:p3","agmsg_team":"ralph-a","details":"agmsg_joined"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"spawn_step","pane_id":"w2:p3","agmsg_team":"ralph-a","details":"agmsg_announced"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"spawned","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","pane_id":"w2:p3","agmsg_team":"ralph-a","herdr_agent_name":"a_implementer","details":"scope=build a per the approved plan permission_mode=autonomous"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-a\nPLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6\n\nimplement the plan"}
+{"ts":"2026-10-13T00:42:07Z","org_id":"a","seat_id":"","event":"plan_approved","details":"plan=docs/plans/active/2026-10-13-a.md digest=3a36fa20e7a1 content=de4552d1a01728ac2773814acbb49a42c3ad11c2ea12fe92f10fc54b4ccc82cd inbox=e2 by=tester herdr_pane=unset cwd=\"<L>/repo\""}
+{"ts":"2026-10-13T00:42:08Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-b\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:42:08Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"raw=true TYPE: TASK\nTASK_ID: t-b\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-f-a\nPLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6\n\nimplement the plan"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_started","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","dry_run":true}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_step","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","dry_run":true,"details":"tab_created"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_step","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","dry_run":true,"details":"agent_started prompt_file=<L>/repo/.harness/state/org/prompts/a_implementer-f.md"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_step","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","agmsg_team":"ralph-a","dry_run":true,"details":"agmsg_leader_joined ok"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_step","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","agmsg_team":"ralph-a","dry_run":true,"details":"agmsg_joined"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawn_step","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","agmsg_team":"ralph-a","dry_run":true,"details":"agmsg_announced"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","event":"spawned","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","agmsg_team":"ralph-a","dry_run":true,"details":"scope=build a permission_mode=autonomous"}
+{"ts":"2026-10-13T00:42:25Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-h2\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:43:02Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-i1\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:43:11Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-i2\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:43:19Z","org_id":"a","seat_id":"implementer","event":"sent","dry_run":true,"details":"TYPE: TASK\nTASK_ID: t-i3\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:43:28Z","org_id":"a","seat_id":"implementer","event":"sent","pane_id":"w2:p3","details":"submit_unconfirmed=true TYPE: TASK\nTASK_ID: t-i3\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\n\nimplement the plan"}
+{"ts":"2026-10-13T00:44:06Z","org_id":"a","seat_id":"implementer","event":"stopped","role":"implementer","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","pane_id":"w2:p3","agmsg_team":"ralph-a","details":"ctrl_c=ok pane=closed leave=ok"}
+{"ts":"2026-10-13T00:44:07Z","org_id":"a","seat_id":"leader","event":"stopped","role":"leader","driver":"claude","model":"sonnet","worktree":"<L>/repo/.claude/worktrees/org-a","pane_id":"w2:p2","agmsg_team":"ralph-a","details":"ctrl_c=ok pane=closed leave=ok"}
+{"ts":"2026-10-13T00:44:07Z","org_id":"a","seat_id":"","event":"org_workspace_closed","pane_id":"w2","details":"workspace=closed"}
+{"ts":"2026-10-13T00:44:07Z","org_id":"a","seat_id":"","event":"disbanded"}
+
+==================== final ledger: inbox.jsonl
+{"ts":"2026-10-13T00:41:59Z","id":"e1","event":"escalated","org_id":"a","type":"QUESTION","body":"TYPE: QUESTION\nPLAN: docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6\nVISUAL: .harness/state/plan-visual/2026-10-13-a.html\n\nplease review the plan of a and approve it"}
+{"ts":"2026-10-13T00:41:59Z","id":"e1","event":"notified","reason":"inbox_no_director","osascript":"failed: exec: \"osascript\": executable file not found in $PATH"}
+{"ts":"2026-10-13T00:41:59Z","id":"e1","event":"resolved","note":"approved docs/plans/active/2026-10-13-a.md sha256:8e7b0c143bb6"}
+{"ts":"2026-10-13T00:42:06Z","id":"e2","event":"escalated","org_id":"a","type":"QUESTION","body":"TYPE: QUESTION\nPLAN: docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1\nVISUAL: .harness/state/plan-visual/2026-10-13-a.html\n\nthe plan of a changed (a test added); please approve it again"}
+{"ts":"2026-10-13T00:42:06Z","id":"e2","event":"notified","reason":"inbox_no_director","osascript":"failed: exec: \"osascript\": executable file not found in $PATH"}
+{"ts":"2026-10-13T00:42:07Z","id":"e2","event":"resolved","note":"approved docs/plans/active/2026-10-13-a.md sha256:3a36fa20e7a1"}
+
+==================== final ledger: model-receipts.jsonl
+{"ts":"2026-10-13T00:41:51Z","org_id":"a","seat_id":"leader","role":"leader","driver":"claude","commanded_model":"sonnet","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-13T00:42:05Z","org_id":"a","seat_id":"implementer","role":"implementer","driver":"claude","commanded_model":"sonnet","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-13T00:42:19Z","org_id":"a","seat_id":"implementer-f","role":"implementer","driver":"claude","commanded_model":"sonnet","honored":"unknown","reason":"dry-run"}
+{"ts":"2026-10-13T00:43:10Z","org_id":"a","seat_id":"implementer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+
+==================== escalations.jsonl
+{"ts":"2026-10-13T00:41:59Z","org_id":"a","inbox_id":"e1","subject":"leader","reason":"inbox_no_director"}
+{"ts":"2026-10-13T00:42:06Z","org_id":"a","inbox_id":"e2","subject":"leader","reason":"inbox_no_director"}
+{"ts":"2026-10-13T00:43:09Z","org_id":"a","alert_id":"a/leader/scope_change@1791852189792124000","subject":"leader","reason":"leader_is_anomaly_subject"}
+
+==================== watch.log
+watching every org (interval=30s once=false state-dir=<L>/repo/.harness/state/org (source: flag))
+watchdog: watcher already in flight, skipping semantic trigger for org "a" seat "leader" condition "scope_change"
+WATCHDOG ESCALATION: org=a alert=a/leader/scope_change@1791852189792124000 subject=leader reason=leader_is_anomaly_subject -- see <L>/repo/.harness/state/org/escalations.jsonl
+watchdog: watcher error for org "a" seat "implementer" condition "scope_change": org: watcher: malformed claude envelope: invalid character '\x1b' looking for beginning of value

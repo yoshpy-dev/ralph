@@ -1,0 +1,386 @@
+# Mutation testing of org-plan-approval, /test cycle 2 (HEAD ffd6b3ec)
+# Each mutant replaces exact snippets of one source file (each must occur exactly once) in a copy read by
+# 'go test -overlay'; the worktree is never written. Target: the whole ./internal/org/ package, -count=1, 2 in parallel.
+# <scratch> = the session scratchpad; <W> = the task worktree. JST 09:45:37-09:52:21.
+
+==================== what each mutant breaks
+Q01 verbs.go     Send: drop the second approval check (after the wait for the seat to go idle)
+Q05 verbs.go     Send: run the second check for a typed TASK only (not for --raw)
+Q06 verbs.go     Send: move the second check after PaneSendText (the text typed, then checked before Enter)
+Q08 verbs.go     Send: the second check reuses the manifest read before the wait (no fresh read)
+Q02 approval.go  checkTaskPlanApproved: drop "the current digest is the path's latest approval" (back to the cycle 1 rule)
+Q03 approval.go  checkTaskPlanApproved: drop the PlanChanged case of the current digest (N6)
+Q10 approval.go  checkTaskPlanApproved: drop the PlanHeader case of the current digest
+Q09 approval.go  checkTaskPlanApproved: never return the TaskHeader refusal when the current digest passes
+Q04 approval.go  latestApprovedDigest: return the first approval of the path, not the last
+Q07 approval.go  latestApprovedDigest: ignore the path (the last approval of any plan)
+Q11 approval.go  checkAnyPlanApproved: walk the approvals oldest first (cycle 1 R02, rewritten for the cycle 2 code)
+Q12 approval.go  checkPlanApproved: match an approval by digest only, not by path (cycle 1 R12, rewritten)
+R03 verbs.go     Send: the approval check before the watch gate (cycle 1 survivor, rewritten for checkSendApproval)
+R04 spawn.go     dry-run spawn: the feature org's checks before the capacity check (cycle 1 survivor, unchanged)
+R05 spawn.go     real spawn: the same swap in spawnPrecheckErr (cycle 1 survivor, unchanged)
+R11 approve.go   approve: drop the up-front refusal of an item whose resolve note is too long (cycle 1 survivor, unchanged)
+
+==================== results (res.tsv: id, verdict, duration and the top-level tests that failed)
+Q01	killed	49s TestOrgSend_ApprovalCheck_AgainAfterTheWait
+Q05	killed	49s TestOrgSend_ApprovalCheck_AgainAfterTheWait
+Q06	killed	45s TestOrgSend_ApprovalCheck_AgainAfterTheWait
+Q08	SURVIVED	45s
+Q02	killed	46s TestCheckTaskPlanApproved_StaleOrMistypedDigest
+Q03	killed	47s TestCheckTaskPlanApproved_StaleOrMistypedDigest
+Q10	killed	48s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest
+Q09	killed	48s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+Q04	killed	42s TestCheckTaskPlanApproved_StaleOrMistypedDigest,TestOrgSend_ApprovalCheck_PassesAndApprovedAgain,TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest,TestPlanNotApprovedError_OneNextStepPerKind
+Q07	SURVIVED	43s
+Q11	killed	44s TestCheckAnyPlanApproved
+Q12	killed	44s TestCheckPlanApproved
+R03	killed	86s TestOrgSend_WatchGateBeforeApprovalCheck
+R04	killed	85s TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks
+R05	killed	44s TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks
+R11	killed	43s TestOrgApprove_RefusesAnItemItCannotResolve
+
+==================== the first failure line of each killed mutant (from logs/<id>.txt)
+-- Q01
+        approval_enforce_test.go:361: send = <nil>; want a refusal that is ErrPlanNotApproved
+        approval_enforce_test.go:361: send = <nil>; want a refusal that is ErrPlanNotApproved
+        approval_enforce_test.go:361: send = <nil>; want a refusal that is ErrPlanNotApproved
+-- Q05
+        approval_enforce_test.go:361: send = <nil>; want a refusal that is ErrPlanNotApproved
+        approval_enforce_test.go:361: send = <nil>; want a refusal that is ErrPlanNotApproved
+-- Q06
+        approval_enforce_test.go:364: herdr calls [workspace_create tab_create agent_start agent_wait pane_send_text]; want nothing typed after the second approval check refused
+        approval_enforce_test.go:364: herdr calls [workspace_create tab_create agent_start agent_wait pane_send_text]; want nothing typed after the second approval check refused
+        approval_enforce_test.go:364: herdr calls [workspace_create tab_create agent_start agent_wait pane_send_text]; want nothing typed after the second approval check refused
+-- Q02
+        approval_test.go:1126: reason "org: the TASK's PLAN: header names sha256:fc9b51dd3eac of plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\", and the plan's current approved digest is sha256:f05eab2b3a96" of kind 4, digest "f05eab2b3a96"; want checkPlanApproved's "org: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest fc9b51
+        approval_test.go:1131: reason "org: the TASK's PLAN: header names sha256:0f0f0f0f0f0f of plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\", and the plan's current approved digest is sha256:f05eab2b3a96" of kind 4, digest "f05eab2b3a96"; want checkPlanApproved's "org: org_id \"org-a\" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:0f0f0f0f0f0f sinc
+-- Q03
+        approval_test.go:1163: reason "org: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac" of kind 3; want checkPlanApproved's "org: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval outside its - Status: and - Approved: lines and checkbox marks, which its di
+        approval_test.go:1163: reason "org: org_id \"org-a\" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:0f0f0f0f0f0f since its last disband (its latest approval is of sha256:f05eab2b3a96)" of kind 1; want checkPlanApproved's "org: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval outside its - Status: and - Approved: lines a
+-- Q10
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+-- Q09
+    approval_enforce_test.go:286: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader n
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+-- Q04
+    approval_enforce_test.go:286: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader n
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+        approval_enforce_test.go:471: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the lead
+-- Q11
+        approval_test.go:736: checkAnyPlanApproved = org: none of the 2 plan approvals of org_id "org-a" since its last disband passes the check; the latest: plan docs/plans/active/2026-10-12-auth.md of org_id "org-a" is not marked approved: its - Status: is "Draft", want Approved, want the latest approval's reason
+-- Q12
+        approval_test.go:672: checkPlanApproved = <nil>, want an org: error containing "has no approval recorded for plan"
+-- R03
+        approval_enforce_test.go:529: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so
+        approval_enforce_test.go:529: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so
+        approval_enforce_test.go:529: send = org: send: TASK not sent: org_id "org-a" has no approval recorded for plan docs/plans/active/2026-10-12-auth.md sha256:f05eab2b3a96 since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so
+-- R04
+    approval_enforce_test.go:551: dry_run=true: spawn = {Outcome:rejected Seat:{OrgID: SeatID: Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: Event: Active:false DryRun:false Details: TS:} Err:org: no plan of org_id "org-a" has been approved since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for 
+-- R05
+    approval_enforce_test.go:551: dry_run=false: spawn = {Outcome:rejected Seat:{OrgID: SeatID: Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: Event: Active:false DryRun:false Details: TS:} Err:org: no plan of org_id "org-a" has been approved since its last disband; refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for
+-- R11
+    approve_test.go:312: Approve = {Approved:[{ID:e1 OrgID:org-a Plan:docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+==================== survivors Q07 and Q08: the overlay-only probe at HEAD and on each mutant (probe-run.txt)
+HEAD rc=0 --- PASS: TestProbe_SendRecheckReadsTheManifestAfterTheWait (0.95s); --- PASS: TestProbe_LatestApprovalIsPerPlanPath (0.01s)
+Q08 rc=1 zz_probe_c2_test.go:40: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does; --- FAIL: TestProbe_SendRecheckReadsTheManifestAfterTheWait (1.14s); --- PASS: TestProbe_LatestApprovalIsPerPlanPath (0.24s)
+Q07 rc=1 --- PASS: TestProbe_SendRecheckReadsTheManifestAfterTheWait (1.75s); zz_probe_c2_test.go:81: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does; zz_probe_c2_test.go:88: send = "org: send: TASK not sent: org_id \"org-a\" has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband (its latest approval is of sha256:08f3c55e920b); refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband; " and the marker, and end with what a leader nev
+
+==================== probe test: <scratch>/opa/c2/mut/probe/zz_probe_c2_test.go (overlaid as internal/org/zz_probe_c2_test.go)
+package org
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
+)
+
+// TestProbe_SendRecheckReadsTheManifestAfterTheWait (/test cycle 2 probe of
+// org-plan-approval, scratch only): while Send waits for the implementer, the
+// plan is revised and a human approves the revision (a plan_approved for it
+// is appended and the leader writes the two lines naming it). Send's second
+// approval check reads the manifest afresh, so the TASK naming the first
+// approval gets the refusal that moves it to the revision a human approved
+// last (the TaskHeader step naming the revision's digest), typed and raw
+// alike. A second check that reuses the manifest read before the wait
+// (mutant Q08) sees no approval of the revision and returns the plan-changed
+// refusal, whose next step undoes the revision a human approved.
+func TestProbe_SendRecheckReadsTheManifestAfterTheWait(t *testing.T) {
+	for _, raw := range []bool{false, true} {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+		fx.record(t)
+		fx.mark(t, nil)
+		revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+		newRef := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(revised))}
+		waited := false
+		fx.o.Herdr = &planEditingHerdr{fakeHerdr: fx.h, onWait: func() {
+			waited = true
+			if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", newRef, PlanContentHash([]byte(revised)))); err != nil {
+				t.Fatal(err)
+			}
+			writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, newRef.Digest))
+		}}
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), Raw: raw})
+		if !waited {
+			t.Fatalf("raw=%v: send = %+v without the wait", raw, r)
+		}
+		assertTaskRefused(t, r, "the plan's current approved digest is sha256:"+newRef.Digest)
+		assertTaskRefused(t, r, "the leader changes the TASK's PLAN: header to PLAN: "+newRef.String())
+		for _, call := range fx.h.calls {
+			if call == "pane_send_text" || call == "pane_send_keys" {
+				t.Fatalf("raw=%v: herdr calls %v; want nothing typed", raw, fx.h.calls)
+			}
+		}
+	}
+}
+
+// TestProbe_LatestApprovalIsPerPlanPath (/test cycle 2 probe of
+// org-plan-approval, scratch only): the latest approval the refusals use is
+// that of the TASK's plan path, not the org's last approval of any plan
+// (mutant Q07). The org has a second plan whose approval is recorded last.
+// (a) The auth plan approved, revised and approved again (the two lines
+// naming the revision): a TASK naming the first approval gets the TaskHeader
+// refusal naming the revision. (b) A TASK naming a plan path with no
+// approval gets the no-approval refusal without "(its latest approval is of
+// ...)", which would name the other plan's digest.
+func TestProbe_LatestApprovalIsPerPlanPath(t *testing.T) {
+	const otherRel = "docs/plans/active/2026-10-12-audit.md"
+	setup := func(t *testing.T) (*enforceFixture, PlanRef, PlanRef) {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+		fx.record(t)
+		revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+		newRef := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(revised))}
+		if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", newRef, PlanContentHash([]byte(revised)))); err != nil {
+			t.Fatal(err)
+		}
+		writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, newRef.Digest))
+		other := replaceOnce("Add the login form.", "Add the audit log.")(testPlanDraft)
+		otherRef := PlanRef{Path: otherRel, Digest: PlanDigest(writePlan(t, fx.worktree, otherRel, other))}
+		if err := fx.o.Manifest.Append(approvedEvent("org-a", "e3", otherRef, PlanContentHash([]byte(other)))); err != nil {
+			t.Fatal(err)
+		}
+		return fx, newRef, otherRef
+	}
+	t.Run("(a) stale digest of a plan approved again", func(t *testing.T) {
+		fx, newRef, _ := setup(t)
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), DryRun: true})
+		assertTaskRefused(t, r, "the plan's current approved digest is sha256:"+newRef.Digest)
+	})
+	t.Run("(b) a plan path with no approval", func(t *testing.T) {
+		fx, _, otherRef := setup(t)
+		const noneRel = "docs/plans/active/2026-10-12-none.md"
+		none := PlanRef{Path: noneRel, Digest: PlanDigest(writePlan(t, fx.worktree, noneRel, testPlanDraft))}
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(none), DryRun: true})
+		assertTaskRefused(t, r, "has no approval recorded for plan "+none.String()+" since its last disband; ")
+		if msg := r.Err.Error(); strings.Contains(msg, "its latest approval is of") || strings.Contains(msg, otherRef.Digest) {
+			t.Fatalf("send = %q; want no latest approval of another plan", msg)
+		}
+	})
+}
+
+==================== probe outputs (go test -v -run '^TestProbe_')
+-- HEAD
+=== RUN   TestProbe_SendRecheckReadsTheManifestAfterTheWait
+--- PASS: TestProbe_SendRecheckReadsTheManifestAfterTheWait (0.95s)
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval
+--- PASS: TestProbe_LatestApprovalIsPerPlanPath (0.01s)
+    --- PASS: TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again (0.00s)
+    --- PASS: TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	1.786s
+-- Q08
+=== RUN   TestProbe_SendRecheckReadsTheManifestAfterTheWait
+    zz_probe_c2_test.go:40: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does
+--- FAIL: TestProbe_SendRecheckReadsTheManifestAfterTheWait (1.14s)
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval
+--- PASS: TestProbe_LatestApprovalIsPerPlanPath (0.24s)
+    --- PASS: TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again (0.23s)
+    --- PASS: TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	2.283s
+FAIL
+-- Q07
+=== RUN   TestProbe_SendRecheckReadsTheManifestAfterTheWait
+--- PASS: TestProbe_SendRecheckReadsTheManifestAfterTheWait (1.75s)
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again
+    zz_probe_c2_test.go:81: send = "org: send: TASK not sent: plan docs/plans/active/2026-10-12-auth.md of org_id \"org-a\" changed after its approval: approved digest f05eab2b3a96, current digest fc9b51dd3eac; refused by the approval check: the leader undoes the change, or sets the plan back to - Status: Draft and - Approved: TBD and asks for a new approval with a new QUESTION; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "the plan's current approved digest is sha256:fc9b51dd3eac" and the marker, and end with what a leader never does
+=== RUN   TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval
+    zz_probe_c2_test.go:88: send = "org: send: TASK not sent: org_id \"org-a\" has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband (its latest approval is of sha256:08f3c55e920b); refused by the approval check: if the leader has not received an approving DECISION for its plan yet, it waits for the answer to its QUESTION, and if it has, that DECISION came without the record, so it escalates BLOCKED with ralph org escalate; the leader never runs ralph org approve itself and never sends the TASK with --raw"; want it to start with "org: send: TASK not sent: ", contain "has no approval recorded for plan docs/plans/active/2026-10-12-none.md sha256:f05eab2b3a96 since its last disband; " and the marker, and end with what a leader never does
+--- FAIL: TestProbe_LatestApprovalIsPerPlanPath (0.01s)
+    --- FAIL: TestProbe_LatestApprovalIsPerPlanPath/(a)_stale_digest_of_a_plan_approved_again (0.01s)
+    --- FAIL: TestProbe_LatestApprovalIsPerPlanPath/(b)_a_plan_path_with_no_approval (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	2.589s
+FAIL
+
+==================== mutant harness: <scratch>/opa/c2/mut/mut2.py
+#!/usr/bin/env python3
+"""Overlay mutants for org-plan-approval /test cycle 2 (HEAD ffd6b3ec).
+
+Each mutant is a list of (old, new) replacements in one source file; every
+old snippet must occur exactly once in the file as it is when that
+replacement runs. The mutant file is read by `go test -overlay`, so the
+worktree is never written. "killed" = the tests fail, "SURVIVED" = they pass,
+"build" = the mutant does not compile (fix the mutant).
+"""
+import concurrent.futures as cf
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+W = "<W>"
+D = os.path.dirname(os.path.abspath(__file__))
+ORG = ["./internal/org/"]
+
+AP = "internal/org/approval.go"
+AV = "internal/org/approve.go"
+SP = "internal/org/spawn.go"
+VB = "internal/org/verbs.go"
+
+SECOND_CHECK = ("\tif isTask {\n\t\tif err := o.checkSendApproval(p); err != nil {\n"
+                "\t\t\treturn SendResult{Err: err}\n\t\t}\n\t}\n")
+
+M = [
+    # --- cycle 2: the second approval check in Send (cross-review cycle 1 #1)
+    ("Q01", VB, [(SECOND_CHECK, "")], ORG),
+    ("Q05", VB, [("\tif isTask {\n\t\tif err := o.checkSendApproval(p); err != nil {",
+                  "\tif isTask && !p.Raw {\n\t\tif err := o.checkSendApproval(p); err != nil {")], ORG),
+    # the second check moved after the text is typed (before Enter)
+    ("Q06", VB, [(SECOND_CHECK, ""),
+                 ("\tif err := o.Herdr.PaneSendKeys(ctx, seat.PaneID, \"Enter\"); err != nil {",
+                  SECOND_CHECK + "\tif err := o.Herdr.PaneSendKeys(ctx, seat.PaneID, \"Enter\"); err != nil {")], ORG),
+    # the second check reuses the manifest read before the wait (no fresh read)
+    ("Q08", VB, [("\t\tif err := o.checkSendApproval(p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n\t}\n\n\trawPrefix",
+                  "\t\tif err := o.checkSendApproval(p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n\t}\n\tstale, _ := o.Manifest.Read()\n\n\trawPrefix"),
+                 ("\tif isTask {\n\t\tif err := o.checkSendApproval(p); err != nil {",
+                  "\tif isTask {\n\t\tif err := sendApprovalErr(stale.Events, p); err != nil {")], ORG),
+    # --- cycle 2: checkTaskPlanApproved's routing (cross-review cycle 1 #2, N7, N6)
+    ("Q02", AP, [("\tif !ok || current.Digest != latestApprovedDigest(currentPlanApprovals(events, orgID), ref.Path) {",
+                  "\tif !ok {")], ORG),
+    ("Q03", AP, [("\tcase approvalRefusalPlanHeader, approvalRefusalPlanChanged:",
+                  "\tcase approvalRefusalPlanHeader:")], ORG),
+    ("Q10", AP, [("\tcase approvalRefusalPlanHeader, approvalRefusalPlanChanged:",
+                  "\tcase approvalRefusalPlanChanged:")], ORG),
+    ("Q09", AP, [("\tif currentErr == nil {\n\t\treturn approvalCheckError{kind: approvalRefusalTaskHeader",
+                  "\tif false {\n\t\treturn approvalCheckError{kind: approvalRefusalTaskHeader")], ORG),
+    # --- cycle 2: latestApprovedDigest
+    ("Q04", AP, [("\tfor i := len(approvals) - 1; i >= 0; i-- {\n\t\tif approvals[i].Plan == path {",
+                  "\tfor i := 0; i < len(approvals); i++ {\n\t\tif approvals[i].Plan == path {")], ORG),
+    ("Q07", AP, [("\t\tif approvals[i].Plan == path {", "\t\tif true || approvals[i].Plan == path {")], ORG),
+    # --- cycle 1's R02 and R12, rewritten for the cycle 2 code
+    ("Q11", AP, [("\tvar latestErr error\n\tfor i := len(approvals) - 1; i >= 0; i-- {",
+                  "\tvar latestErr error\n\tfor i := 0; i < len(approvals); i++ {")], ORG),
+    ("Q12", AP, [("\t\tif a.Plan == ref.Path && a.Digest == ref.Digest {",
+                  "\t\tif a.Digest == ref.Digest {")], ORG),
+    # --- cycle 1's survivors, at HEAD (R03 rewritten for checkSendApproval)
+    ("R03", VB, [("\t\tif err := o.checkWatchGate(); err != nil {\n\t\t\treturn SendResult{Err: taskNotSentError{refusal: err}}\n\t\t}\n"
+                  "\t\t// The approval check runs next, before the dry-run branch, so a\n\t\t// refusal records nothing and dry-run predicts it.\n"
+                  "\t\tif err := o.checkSendApproval(p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n",
+                  "\t\tif err := o.checkSendApproval(p); err != nil {\n\t\t\treturn SendResult{Err: err}\n\t\t}\n"
+                  "\t\tif err := o.checkWatchGate(); err != nil {\n\t\t\treturn SendResult{Err: taskNotSentError{refusal: err}}\n\t\t}\n")], ORG),
+    ("R04", SP, [("\t\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\t\tif err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n"
+                  "\t\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n",
+                  "\t\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n"
+                  "\t\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\t\tif err != nil {\n\t\t\treturn o.reject(p, err)\n\t\t}\n")], ORG),
+    ("R05", SP, [("\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\tif err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n"
+                  "\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n",
+                  "\tif err := spawnFeatureSeatErr(p, events); err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n"
+                  "\treserve, err := spawnCapacityErr(o.Config, p, req, events)\n\tif err != nil {\n\t\tr := o.reject(p, err)\n\t\treturn &r, time.Time{}\n\t}\n")], ORG),
+    ("R11", AV, [("\t\tif err := ValidateInboxNote(approveNote(ref)); err != nil {",
+                  "\t\tif err := ValidateInboxNote(approveNote(ref)); false && err != nil {")], ORG),
+]
+
+
+def build(m):
+    mid, rel, reps, _ = m
+    src = os.path.join(W, rel)
+    text = open(src, encoding="utf-8").read()
+    for old, new in reps:
+        n = text.count(old)
+        if n != 1:
+            return None, f"snippet occurs {n} times: {old[:60]!r}"
+        text = text.replace(old, new, 1)
+    mdir = os.path.join(D, "m", mid)
+    os.makedirs(mdir, exist_ok=True)
+    mfile = os.path.join(mdir, os.path.basename(rel))
+    open(mfile, "w", encoding="utf-8").write(text)
+    return mfile, None
+
+
+def run(m, extra=None, tag=""):
+    mid, rel, reps, args = m
+    mfile, err = build(m)
+    if err:
+        return mid + tag, "snippet", err
+    src = os.path.join(W, rel)
+    ov = os.path.join(D, "m", mid, "overlay.json")
+    json.dump({"Replace": {src: mfile}}, open(ov, "w"))
+    cmd = ["go", "test", "-overlay", ov, "-count=1", "-timeout", "8m"] + (extra or args)
+    t0 = time.time()
+    p = subprocess.run(cmd, cwd=W, capture_output=True, text=True)
+    dt = time.time() - t0
+    out = p.stdout + p.stderr
+    os.makedirs(os.path.join(D, "logs"), exist_ok=True)
+    open(os.path.join(D, "logs", mid + tag + ".txt"), "w").write(" ".join(cmd) + "\n" + out)
+    if p.returncode == 0:
+        return mid + tag, "SURVIVED", f"{dt:.0f}s"
+    if "[build failed]" in out or "[setup failed]" in out or re.search(r"\.go:\d+:\d+: ", out) and "--- FAIL" not in out:
+        return mid + tag, "build", out.strip().splitlines()[-3:]
+    fails = sorted(set(re.findall(r"^\s*--- FAIL: (\S+)", out, re.M)))
+    top = [f for f in fails if "/" not in f]
+    if "panic: test timed out" in out:
+        top.append("TIMEOUT")
+    return mid + tag, "killed", f"{dt:.0f}s " + ",".join(top)
+
+
+def main():
+    ids = sys.argv[1:]
+    todo = [m for m in M if not ids or m[0] in ids]
+    jobs = int(os.environ.get("JOBS", "2"))
+    with open(os.path.join(D, "res.tsv"), "a") as res, cf.ThreadPoolExecutor(jobs) as ex:
+        for mid, verdict, info in ex.map(run, todo):
+            line = f"{mid}\t{verdict}\t{info}"
+            print(line, flush=True)
+            res.write(line + "\n")
+            res.flush()
+
+
+if __name__ == "__main__":
+    main()
+
+==================== probe runner: <scratch>/opa/c2/mut/probe2.py
+# Run the overlay-only probe test(s) at HEAD and on each given mutant
+# (/test cycle 2 of org-plan-approval). The probe file is added to
+# internal/org/ through -overlay only; the worktree is never written.
+import json, os, subprocess, sys, mut2
+D = mut2.D
+probe_src = os.path.join(D, "probe", "zz_probe_c2_test.go")
+probe_dst = os.path.join(mut2.W, "internal/org/zz_probe_c2_test.go")
+def go(mid, replace):
+    ov = os.path.join(D, "probe", f"overlay-{mid}.json")
+    json.dump({"Replace": replace}, open(ov, "w"))
+    p = subprocess.run(["go", "test", "-overlay", ov, "-count=1", "-run", "^TestProbe_", "-v", "./internal/org/"],
+                       cwd=mut2.W, capture_output=True, text=True)
+    out = p.stdout + p.stderr
+    open(os.path.join(D, "probe", f"{mid}.txt"), "w").write(out)
+    res = [l.strip() for l in out.splitlines() if l.startswith("--- ") or "approval_enforce_test.go" in l or "zz_probe" in l]
+    print(mid, "rc=%d" % p.returncode, "; ".join(res)[:1500], flush=True)
+go("HEAD", {probe_dst: probe_src})
+for m in mut2.M:
+    if m[0] in sys.argv[1:]:
+        mfile, err = mut2.build(m)
+        go(m[0], {probe_dst: probe_src, os.path.join(mut2.W, m[1]): mfile})
