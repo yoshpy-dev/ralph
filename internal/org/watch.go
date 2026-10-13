@@ -1147,7 +1147,7 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 // attribution model itself was corrected by self-review cycle-3 H3-1 --
 // see below): a genuinely unresponsive leader must not have its deadman
 // escalation silently cleared by an unrelated seat's own manifest traffic,
-// so an event only counts here when either (a) or (b) holds:
+// so an event only counts here when (a), (b) or (c) holds:
 //
 //	(a) ev.Event == EventSent. A `sent` event is leader-authored BY
 //	    CONSTRUCTION, regardless of ev.SeatID: ev.SeatID on a `sent` event
@@ -1205,6 +1205,21 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    has a baseline without that event. Restarting watch on the newer
 //	    binary while that alert is pending then reads one higher and clears
 //	    it.
+//	(c) ev.Event is EventGatePassed or EventGateFailed. Only `ralph org
+//	    gate` writes them, and the leader template has a feature org's
+//	    leader run it, so a gate's record counts as the leader acting. A
+//	    codex seat other than the leader cannot write the ledger (it gets no
+//	    --add-dir), but a claude seat can (claude has no such sandbox,
+//	    permissions.go), so a seat that ran the gate would be counted as
+//	    leader activity too. A gate records nothing while its scripts run,
+//	    so it counts when it ends. The watchdog exclusion of (b) does not
+//	    apply: no gate record is a watchdog write. ralph releases before
+//	    `ralph org gate` never write them, so the stop_failed exception
+//	    above applies the same way: an older `ralph org watch` saves a
+//	    pending alert whose baseline
+//	    lacks a gate record a newer gate wrote, and restarting watch on the
+//	    newer binary while that alert is pending reads one higher and clears
+//	    it. An older watch that keeps running does not count them at all.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear
@@ -1225,6 +1240,8 @@ func leaderActivityEventCount(events []ManifestEvent, orgID string) int {
 			if !strings.Contains(ev.Details, "reason=watchdog_") {
 				n++
 			}
+		case EventGatePassed, EventGateFailed:
+			n++
 		}
 	}
 	return n

@@ -87,7 +87,8 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // send/wait/read/stop verbs need. Defined here (consumption side, per
 // .claude/rules/ralph/architecture.md) rather than in internal/org/driver, so
 // internal/org reaches herdr only through this interface and never runs the
-// herdr CLI with exec.Command itself (it does run git, ralph-worktree.sh,
+// herdr CLI with exec.Command itself (it does run git, ralph-worktree.sh, a
+// feature worktree's run-static-verify.sh and run-test.sh for the gate,
 // osascript and `claude -p`; see the package comment in seat.go) --
 // driver.Herdr satisfies this interface structurally. Wiring lives in internal/cli/org.go:
 // driver.Herdr{R: driver.ExecRunner{}} is assigned directly to Org.Herdr.

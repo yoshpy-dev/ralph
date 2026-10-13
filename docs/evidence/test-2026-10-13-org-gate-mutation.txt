@@ -1,0 +1,2525 @@
+# /test org-gate: mutation spot checks (HEAD eb5ffdac). No tracked file was edited.
+# Go mutants: a changed copy of one file in the scratchpad (og/mut/<ID>-<file>.go), read through
+#   go test -count=1 -overlay og/mut/<ID>.json ./internal/org/ ./internal/cli/ -run 'Gate|LeaderActivityEventCount' -v
+# (cli imports org, so the overlay reaches the CLI tests too). Each compiled (go vet -overlay rc 0, used only as a compile check).
+# Shell mutants: og/mut/rv-<ID>/ holds tests/test-run-verify-concurrency.sh as committed and a changed scripts/run-verify.sh;
+#   the test copies $PROJECT_ROOT/scripts/run-verify.sh, so running it from rv-<ID>/ tests the mutant. rv-X0 is the unchanged copy (control).
+
+======== Go mutant H1 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/H1-gate.go"}}
+572c572
+< 	if head != t.head {
+---
+> 	if false && head != t.head {
+-- result: RC=1 end 08:11:15Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	82.221s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	53.021s
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (8.97s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (2.48s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (8.88s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.63s)
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", Base:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFailedHEAD_moves_dur1816002349/001/state/gates/org-a-2026
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
+
+======== Go mutant H2 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/H2-gate.go"}}
+289c289
+< 	if res.Reason == "" {
+---
+> 	if false && res.Reason == "" {
+-- result: RC=1 end 08:11:14Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	80.566s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	45.507s
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (9.54s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/HEAD_moves_during_the_scripts (2.94s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (2.11s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (9.11s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (2.13s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.40s)
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"c11918f9fed8a6f4264ff2ec599abeae82700f2f", Base:"c11918f9fed8a6f4264ff2ec599abeae82700f2f", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFailedHEAD_moves_dur1890025755/001/state/gates/org-a-2026
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", Base:"b21a4e2eac8774ef6a9df37297a8b92100d3ad82", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFaileda_script_leave2167458320/001/state/gates/org-a-2026
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=tree_changed); nothing to push until the gate passes" (stdout: GATE: pass
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=head_moved); nothing to push until the gate passes" (stdout: GATE: pass
+
+======== Go mutant E1 (gate_run.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E1-gate_run.go"}}
+49c49
+< var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
+---
+> var gateStrippedEnvPrefixes = []string{}
+-- result: RC=1 end 08:11:54Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	35.839s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.530s
+--- FAIL: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (2.29s)
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.69s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.21s)
+    gate_runverify_test.go:95: calls = ["golang:mode=static:scope=full:roots=nowhere"]; want ["golang:mode=static:scope=full:roots=" "secret-scan"]
+    gate_test.go:1077: static got the verify variables [RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD HARNESS_VERIFY_MODE=all RALPH_VERIFY_PROJECT_ROOTS=nowhere]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1 HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD HARNESS_VERIFY_MODE=all RALPH_VERIFY_PROJECT_ROOTS=nowhere]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "RALPH_VERIFY_BASE=HEAD" "X=RALPH_VERIFY_BASE=1" "HARNESS_VERIFY_MODE=test" "RALPH_VERIFY_=x" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=changed" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E2 (gate_run.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E2-gate_run.go"}}
+67c67
+< 		if !stripped {
+---
+> 		if !stripped || name == "RALPH_VERIFY_BASE" {
+-- result: RC=1 end 08:11:55Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.551s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	21.196s
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.80s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.30s)
+    gate_test.go:1077: static got the verify variables [RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=HEAD]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "RALPH_VERIFY_BASE=HEAD" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E3 (gate_run.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E3-gate_run.go"}}
+71c71
+< 	return append(out, gateScopeEnv)
+---
+> 	return out
+-- result: RC=1 end 08:12:35Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.077s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.332s
+--- FAIL: TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier (3.13s)
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.86s)
+--- FAIL: TestGateScriptEnv (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.20s)
+    gate_runverify_test.go:91: gate with a failing Go verifier = {Refused: Passed:true Reason: Head:6f89b919180cefc3f56b37f7c5a31abf8e77d48a Base:6f89b919180cefc3f56b37f7c5a31abf8e77d48a BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RealRunVerify_FullScopeRunsTheLanguageVerifier1768495413/001/state/gates/org-a-20261013T1
+    gate_test.go:1077: static got the verify variables []; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables []; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+    org_gate_test.go:292: the static script's environment has the caller's RALPH_VERIFY_* or lacks RALPH_VERIFY_SCOPE=full:
+
+======== Go mutant E4 (gate_run.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate_run.go":"<scratchpad>/og/mut/E4-gate_run.go"}}
+49c49
+< var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
+---
+> var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_"}
+-- result: RC=1 end 08:12:37Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	38.800s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	20.109s
+--- FAIL: TestGate_ScriptEnvironmentIsFixed (0.65s)
+--- FAIL: TestGateScriptEnv (0.00s)
+    gate_test.go:1077: static got the verify variables [HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE=all]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1077: test got the verify variables [HARNESS_VERIFY_EXTRA=1 RALPH_VERIFY_SCOPE=full HARNESS_VERIFY_MODE=all]; want only RALPH_VERIFY_SCOPE=full
+    gate_test.go:1095: gateScriptEnv = ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "HARNESS_VERIFY_MODE=test" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]; want ["PATH=/bin" "X=RALPH_VERIFY_BASE=1" "RALPH_VERIFYX=1" "NOEQUALS" "RALPH_VERIFY_SCOPE=full"]
+
+======== Go mutant A1 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/A1-gate.go"}}
+519c519
+< 	case r.code == 0:
+---
+> 	case r.code == 0 || r.code == 1:
+-- result: RC=1 end 08:18:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	39.856s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.091s
+--- FAIL: TestGate_RefusedBeforeTheScripts (8.44s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_origin/main (1.21s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/HEAD_does_not_contain_local_main,_with_no_origin (1.19s)
+--- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (1.67s)
+    --- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/a_HEAD_that_does_not_contain_origin/main (1.00s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (2.05s)
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 Base:d3addff2a8a69e7212b82fd7355bfbe5a1cbe450 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsHEAD_does_not_contain_originma3695237769/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]};
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:c05f98d16e1e9635e62fec716b96803bab9735e4 Base:a75408ceffe62b7cab7bce7723edd5c24143b156 BaseRef:refs/heads/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsHEAD_does_not_contain_local_mai792330973/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a r
+    org_gate_test.go:453: gate = <nil>; want a refusal starting "org: gate: " (stdout: GATE: pass
+    org_gate_test.go:590: gate after origin/main moved = <nil>; want the rebase refusal
+
+======== Go mutant D1 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/D1-gate.go"}}
+649c649
+< 	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=all")
+---
+> 	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=no")
+-- result: RC=1 end 08:18:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	40.159s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	23.667s
+--- FAIL: TestGate_RefusedBeforeTheScripts (8.08s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/an_untracked_file (0.85s)
+    --- FAIL: TestGate_RefusedBeforeTheScripts/many_untracked_files (0.93s)
+--- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed (3.02s)
+    --- FAIL: TestGate_ScriptFailuresAndChangesRecordGateFailed/a_script_leaves_a_file_in_the_worktree (0.78s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (4.71s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.38s)
+--- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing (2.02s)
+    --- FAIL: TestOrgGate_RefusalPrintsNothingAndRecordsNothing/an_untracked_file (1.19s)
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 Base:9fd031ce45338e5bbbbc0deeb5ba7197a6017b27 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsan_untracked_file2612850718/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a refus
+    gate_test.go:602: gate = {Refused: Passed:true Reason: Head:c05f98d16e1e9635e62fec716b96803bab9735e4 Base:c05f98d16e1e9635e62fec716b96803bab9735e4 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_RefusedBeforeTheScriptsmany_untracked_files1566702138/001/state/gates/org-a-20261013T120000Z.log Tail:[] Dirty:[]}; want a re
+    gate_test.go:648: gate = org.GateResult{Refused:"", Passed:true, Reason:"", Head:"3a519b58a464238c75d2a8dc2a5be86f0d8f0cf5", Base:"3a519b58a464238c75d2a8dc2a5be86f0d8f0cf5", BaseRef:"refs/remotes/origin/main", Branch:"feat/auth", LogPath:"/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_ScriptFailuresAndChangesRecordGateFaileda_script_leave727739192/001/state/gates/org-a-20261
+    org_gate_test.go:349: gate = <nil>; want the error "org: gate: recorded gate_failed (reason=tree_changed); nothing to push until the gate passes" (stdout: GATE: pass
+    org_gate_test.go:453: gate = <nil>; want a refusal starting "org: gate: " (stdout: GATE: pass
+
+======== Go mutant R1 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/R1-gate.go"}}
+156c156
+< 		" " + gateRecordBaseKey + "=" + r.Base +
+---
+> 		" " + gateRecordBaseKey + "=" + r.Head +
+-- result: RC=1 end 08:18:44Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	37.886s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.508s
+--- FAIL: TestGateRecordDetails_RoundTrip (0.00s)
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.26s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (4.29s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.84s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.08s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.27s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (1.11s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.68s)
+    gate_test.go:1178: details "head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason: Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/origin/main Branch:feat/auth By:
+    gate_test.go:1178: details "head=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc base=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc base_ref=refs/heads/main branch=fix/a=b by=unknown herdr_pane=set log=\"/my state/a \\\"quoted\\\" log=x.log\"" read back as {Reason: Head:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc Base:ccccccccccccccccccc
+    gate_test.go:1178: details "reason=static_failed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:static_failed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remote
+    gate_test.go:1178: details "reason=test_failed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:test_failed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/or
+    gate_test.go:1178: details "reason=head_moved head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:head_moved Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/orig
+    gate_test.go:1178: details "reason=tree_changed head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read back as {Reason:tree_changed Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/
+    gate_test.go:1201: an upper-case base: "head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset log=\"/state/gates/org-a.log\"" read as {Reason: Head:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Base:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BaseRef:refs/remotes/origin/main Branch:feat/a
+    org_gate_test.go:297: gate events = [{TS:2026-10-13T08:18:08Z OrgID:a SeatID: Event:gate_passed Role: Driver: Model: Worktree: PaneID: AgmsgTeam: HerdrAgentName: DryRun:false Details:head=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base=cbdc5d7c401ad8bb35df5dd32cf5905f6a12a349 base_ref=refs/remotes/origin/main branch=feat/a by=tester herdr_pane=unset log="/private/var/folders/fv/xxhc5f5n60q3d9jm6
+
+======== Go mutant R2 (gate.go)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og/mut/R2-gate.go"}}
+280c280
+< 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
+---
+> 	res := GateResult{Head: target.head, Base: target.head, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
+-- result: RC=1 end 08:18:44Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	37.991s
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.539s
+--- FAIL: TestOrgGate_PassPrintsGateHeadBaseAndLog (1.22s)
+--- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1 (3.99s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_static_script_fails (0.77s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/the_test_script_fails (1.34s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/a_script_leaves_a_file_in_the_worktree (1.02s)
+    --- FAIL: TestOrgGate_FailurePrintsTheReasonAndExits1/HEAD_moves_during_the_scripts (0.86s)
+--- FAIL: TestOrgGate_StartPlanThenGateInTheFeatureWorktree (1.55s)
+    org_gate_test.go:283: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:361: stdout =
+    org_gate_test.go:576: stdout =
+
+======== shell mutant X0 (scripts/run-verify.sh)
+(no diff: control)
+$ (cd og/mut/rv-X0 && sh tests/test-run-verify-concurrency.sh)
+  PASS: 37 / 37
+  FAIL: 0
+RC=0
+
+======== shell mutant X1 (scripts/run-verify.sh)
+333c333
+<     verify_status=1
+---
+>     verify_status=0
+$ (cd og/mut/rv-X1 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block makes run-verify.sh fail (exit 0, want non-zero)
+  PASS: 36 / 37
+  FAIL: 1
+RC=1
+
+======== shell mutant X2 (scripts/run-verify.sh)
+328a329
+> verify_status="${verify_status:-0}"
+$ (cd og/mut/rv-X2 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block makes run-verify.sh fail (exit 0, want non-zero)
+  FAIL: killed block says the exit code could not be read (missing: could not read this run's exit code; treating it as a failure)
+  PASS: 35 / 37
+  FAIL: 2
+RC=1
+
+======== shell mutant X3 (scripts/run-verify.sh)
+289c289
+<   printf '%s' "$status" > "$run_status_file"
+---
+>   printf "%s" "$status" > .harness/state/verify-exit-code
+326,327c326,327
+< if [ -r "$run_status_file" ]; then
+<   verify_status="$(cat "$run_status_file" 2>/dev/null || true)"
+---
+> if [ -r .harness/state/verify-exit-code ]; then
+>   verify_status="$(cat .harness/state/verify-exit-code 2>/dev/null || true)"
+$ (cd og/mut/rv-X3 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: run A (failing) exits 1 after run B passed (exit 0, want 1)
+  FAIL: passing run does not write the shared exit-code file (/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.XiOuoQ/plain/.harness/state/verify-exit-code exists)
+  FAIL: failing run does not write the shared exit-code file (/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.XiOuoQ/plain/.harness/state/verify-exit-code exists)
+  PASS: 34 / 37
+  FAIL: 3
+RC=1
+
+======== shell mutant X4 (scripts/run-verify.sh)
+314c314
+< if [ -s "$run_scope_file" ]; then
+---
+> if false && [ -s "$run_scope_file" ]; then
+$ (cd og/mut/rv-X4 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: passing run leaves .harness/state/verify-scope with the scope lines
+  FAIL: failing run leaves .harness/state/verify-scope with the scope lines
+  PASS: 35 / 37
+  FAIL: 2
+RC=1
+
+======== shell mutant X5 (scripts/run-verify.sh)
+55c55
+< trap cleanup_run_files EXIT
+---
+> trap : EXIT
+$ (cd og/mut/rv-X5 && sh tests/test-run-verify-concurrency.sh)
+  FAIL: killed block leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.igKYHq
+  FAIL: concurrent runs leave no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.ULxYcT
+  FAIL: passing run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: failing run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: code change run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: docs-only run leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: sh: TERM to the run's process group leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-non-docs.98WZKz
+  FAIL: sh: TERM to the run's pid alone leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  FAIL: dash: TERM to the run's process group leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  FAIL: dash: TERM to the run's pid alone leaves no per-run files (left behind: /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T//run-verify-concurrency.RJhBIB/tmp/ralph-verify-scope.Lu05y5
+  PASS: 27 / 37
+  FAIL: 10
+RC=1
+
+======== probe tests (scratch only, added through -overlay; not committed)
+---- zz_probe_gate_tail_test.go
+package org
+
+import (
+	"bytes"
+	"fmt"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// Scratch probe (not committed): the gateOutput paths the committed tests
+// never reach (a chunk with no line break, a last line with no line break,
+// a line longer than gateTailMaxLineBytes, 20 lines plus a partial one).
+func TestProbe_GateOutputPartialAndLongLines(t *testing.T) {
+	var log bytes.Buffer
+	w := &gateOutput{log: &log}
+	// a line split over three writes, then a CRLF line
+	for _, chunk := range []string{"par", "tial ", "line\n", "crlf\r\n"} {
+		if n, err := w.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("Write(%q) = %d, %v", chunk, n, err)
+		}
+	}
+	if got := w.tail(); !slices.Equal(got, []string{"partial line", "crlf"}) {
+		t.Fatalf("tail = %q", got)
+	}
+	// a last line with no line break is in the tail
+	_, _ = w.Write([]byte("no newline at the end"))
+	if got := w.tail(); !slices.Equal(got, []string{"partial line", "crlf", "no newline at the end"}) {
+		t.Fatalf("tail with a partial last line = %q", got)
+	}
+	if log.String() != "partial line\ncrlf\r\nno newline at the end" {
+		t.Fatalf("log = %q", log.String())
+	}
+
+	// a line longer than the cap, written in two chunks, is cut at the cap
+	w = &gateOutput{log: &log}
+	long := strings.Repeat("x", gateTailMaxLineBytes+500)
+	_, _ = w.Write([]byte(long[:3000]))
+	_, _ = w.Write([]byte(long[3000:] + "\nafter\n"))
+	got := w.tail()
+	if len(got) != 2 || len(got[0]) != gateTailMaxLineBytes || got[1] != "after" {
+		t.Fatalf("long line tail: %d lines, first %d bytes, %q", len(got), len(got[0]), got[len(got)-1])
+	}
+	// the same long line with no line break at all
+	w = &gateOutput{log: &log}
+	_, _ = w.Write([]byte(long))
+	if got := w.tail(); len(got) != 1 || len(got[0]) != gateTailMaxLineBytes {
+		t.Fatalf("long partial: %d lines", len(got))
+	}
+
+	// 25 complete lines then a partial one: the last 20 include the partial one
+	w = &gateOutput{log: &log}
+	for i := 1; i <= 25; i++ {
+		_, _ = fmt.Fprintf(w, "line %d\n", i)
+	}
+	_, _ = w.Write([]byte("partial"))
+	got = w.tail()
+	if len(got) != gateTailLines || got[0] != "line 7" || got[len(got)-1] != "partial" {
+		t.Fatalf("20+partial tail = %q", got)
+	}
+}
+---- zz_probe_gate_couldnotrun_test.go
+package org
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// Scratch probe (not committed): runGateScript's "could not run" branch
+// (cmd.ProcessState == nil). The static script is executable but its
+// interpreter does not exist, so exec fails before the script starts.
+func TestProbe_GateScriptThatCannotStart(t *testing.T) {
+	fx := newGateFixtureWith(t, gateFixtureOptions{populate: func(t *testing.T, dir string) {
+		writeGateFile(t, dir, GateStaticScript, "#!/nonexistent/interpreter\necho never\n", 0o755)
+		writeGateFile(t, dir, GateTestScript, fmt.Sprintf(gateStub, "test"), 0o755)
+	}})
+	res := fx.gate(t)
+	t.Logf("result: %+v", res)
+	if res.Passed || res.Reason != GateReasonStaticFailed {
+		t.Fatalf("gate = %+v; want static_failed", res)
+	}
+	if len(res.Tail) == 0 || !strings.Contains(strings.Join(res.Tail, "\n"), "could not run") {
+		t.Fatalf("tail = %q; want the could-not-run line", res.Tail)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Fatalf("calls = %v; want none (test script must not run)", calls)
+	}
+	events := fx.gateEvents(t)
+	if len(events) != 1 || events[0].Event != EventGateFailed || !strings.HasPrefix(events[0].Details, "reason=static_failed ") {
+		t.Fatalf("events = %+v", events)
+	}
+	t.Logf("log:\n%s", fileOrAbsent(t, res.LogPath))
+}
+---- results
+=== RUN   TestProbe_GateOutputPartialAndLongLines
+--- PASS: TestProbe_GateOutputPartialAndLongLines (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.571s
+=== RUN   TestProbe_GateScriptThatCannotStart
+    zz_probe_gate_couldnotrun_test.go:18: result: {Refused: Passed:false Reason:static_failed Head:72a3c93e42aadcb154df0d85e6a3af1e0687fc69 Base:72a3c93e42aadcb154df0d85e6a3af1e0687fc69 BaseRef:refs/remotes/origin/main Branch:feat/auth LogPath:/private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/state/gates/org-a-20261013T120000Z.log Tail:[ralph org gate: ./scripts/run-static-verify.sh could not run: fork/exec /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo/scripts/run-static-verify.sh: no such file or directory] Dirty:[]}
+    zz_probe_gate_couldnotrun_test.go:32: log:
+        # ralph org gate
+        # worktree: /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo
+        # branch: feat/auth
+        # head: 72a3c93e42aadcb154df0d85e6a3af1e0687fc69
+        # base: refs/remotes/origin/main 72a3c93e42aadcb154df0d85e6a3af1e0687fc69
+        
+        ==> ralph org gate: running ./scripts/run-static-verify.sh
+        ralph org gate: ./scripts/run-static-verify.sh could not run: fork/exec /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_GateScriptThatCannotStart1265797252/001/repo/scripts/run-static-verify.sh: no such file or directory
+        
+        ==> ralph org gate: ./scripts/run-static-verify.sh exited -1
+--- PASS: TestProbe_GateScriptThatCannotStart (0.41s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.705s
+
+
+################################################################################
+# Cycle 2 (HEAD 0bc87603, fix b04289c1). No tracked file was edited.
+# Go mutants of b04289c1: a changed copy of one file in the scratchpad (og2/mut/<ID>-<file>.go), read through
+#   go test -count=1 -overlay og2/mut/<ID>.json ./internal/org/ ./internal/cli/ -run 'Gate|Lock' -v
+# Each compiled first (go build -overlay og2/mut/<ID>.json ./internal/org/, rc 0). Two chains of mutants ran in parallel
+# (JST 21:14-21:17, load average 3.4-6.9). Every run had 83 top-level tests (org and cli).
+################################################################################
+
+======== Go mutant C2a (gate.go): (a) drop the ctx check before the lock in recordGate
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2a-gate.go"}}
+720c720
+< 	if ctx.Err() != nil {
+---
+> 	if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:14:49Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	41.782s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	23.737s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.81s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.16s)
+    gate_test.go:974: recordGate built the event under the lock (1 clock reads); want it stopped before the lock
+
+======== Go mutant C2b (gate.go): (b) drop the ctx check under the lock, right before the append
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2b-gate.go"}}
+747c747
+< 		if ctx.Err() != nil {
+---
+> 		if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:14:49Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	41.755s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	24.643s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.79s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.15s)
+    gate_test.go:1023: recordGate = "", <nil>; want ctx's context.Canceled and no refusal
+
+======== Go mutant C2c (lockfile.go): (c) the lock wait derives its timeout from context.Background() again (withFileLockContext)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2c-lockfile.go"}}
+90c90
+< 	waitCtx, cancel := context.WithTimeout(ctx, manifestLockTimeout)
+---
+> 	waitCtx, cancel := context.WithTimeout(context.Background(), manifestLockTimeout)
+-- result: RC=1 end 2026-10-13T12:15:40Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	50.193s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.212s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (5.60s)
+--- FAIL: TestRecordGate_InterruptRecordsNothing (5.62s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (5.16s)
+    gate_test.go:919: gate took 4.717123875s to return after the interrupt; want it to stop waiting for the lock at once (the lock times out after 5s)
+    gate_test.go:1006: recordGate took 4.798455125s to return after the interrupt; want it to stop waiting for the lock at once
+
+======== Go mutant C2d (gate.go): (d) Gate returns recordGate error as is, not through gateInterrupted
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2d-gate.go"}}
+302c302
+< 		return res, gateInterrupted(ctx, err, logPath)
+---
+> 		return res, err
+-- result: RC=1 end 2026-10-13T12:15:30Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	40.100s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	28.365s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (0.95s)
+    gate_test.go:926: gate = org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestGate_InterruptAfterTheScriptsRecordsNothing2048094847/001/state/manifest.lock: the wait was stopped: context canceled
+
+======== Go mutant C2e (lockfile.go): (e) drop the "the wait was stopped" branch in withFileLockContext
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2e-lockfile.go"}}
+94c94
+< 		if ctx.Err() != nil {
+---
+> 		if false && ctx.Err() != nil {
+-- result: RC=1 end 2026-10-13T12:16:22Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	39.558s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.669s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.84s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.36s)
+    gate_test.go:1011: recordGate = org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestRecordGate_InterruptRecordsNothingctx_done_while_waiting_fo3535940503/001/state/manifest.lock: timed out after 5s: context canceled; want the stopped wait, not a lock timeout
+
+======== Go mutant C2f (gate.go): (extra) recordGate: drop the interrupted case of the final switch (interrupted errors get the "run the gate again" suffix)
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2f-gate.go"}}
+756c756
+< 	case err != nil && ctx.Err() != nil:
+---
+> 	case false && err != nil && ctx.Err() != nil:
+-- result: RC=0 end 2026-10-13T12:16:11Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	38.808s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.845s
+-- survivor: the two new tests passed:
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (1.12s)
+--- PASS: TestRecordGate_InterruptRecordsNothing (0.96s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.24s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.40s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.17s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.15s)
+
+======== Go mutant C2g (gate.go): (extra, order) the ctx check under the lock moves after the append
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/gate.go":"<scratchpad>/og2/mut/C2g-gate.go"}}
+747,749d746
+< 		if ctx.Err() != nil {
+< 			return context.Cause(ctx)
+< 		}
+752a750,752
+> 		if ctx.Err() != nil {
+> 			return context.Cause(ctx)
+> 		}
+-- result: RC=1 end 2026-10-13T12:17:02Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	37.631s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	22.690s
+--- FAIL: TestRecordGate_InterruptRecordsNothing (0.82s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.16s)
+    gate_test.go:1023: an interrupted recordGate changed the manifest:
+
+======== Go mutant C2h (lockfile.go): (extra) withFileLockContext tests waitCtx.Err() instead of ctx.Err() (a real 5s timeout then says "the wait was stopped")
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2h-lockfile.go"}}
+94c94
+< 		if ctx.Err() != nil {
+---
+> 		if waitCtx.Err() != nil {
+-- result: RC=0 end 2026-10-13T12:16:53Z
+ok  	github.com/yoshpy-dev/ralph/internal/org	39.656s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	23.434s
+-- survivor: the two new tests passed:
+--- PASS: TestGate_InterruptAfterTheScriptsRecordsNothing (0.90s)
+--- PASS: TestRecordGate_InterruptRecordsNothing (0.78s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_before_the_lock (0.14s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (0.35s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_done_under_the_lock,_right_before_the_append (0.13s)
+    --- PASS: TestRecordGate_InterruptRecordsNothing/ctx_not_done_records (0.15s)
+
+======== Go mutant C2i (lockfile.go): (extra, call site) withManifestLockContext passes context.Background() to withFileLockContext
+{"Replace":{"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/lockfile.go":"<scratchpad>/og2/mut/C2i-lockfile.go"}}
+66c66
+< 	return withFileLockContext(ctx, dir, manifestLockFile, "manifest", fn)
+---
+> 	return withFileLockContext(context.Background(), dir, manifestLockFile, "manifest", fn)
+-- result: RC=1 end 2026-10-13T12:17:51Z
+FAIL	github.com/yoshpy-dev/ralph/internal/org	47.065s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	21.053s
+--- FAIL: TestGate_InterruptAfterTheScriptsRecordsNothing (5.91s)
+--- FAIL: TestRecordGate_InterruptRecordsNothing (5.69s)
+    --- FAIL: TestRecordGate_InterruptRecordsNothing/ctx_done_while_waiting_for_the_lock (5.16s)
+    gate_test.go:919: gate took 4.729494541s to return after the interrupt; want it to stop waiting for the lock at once (the lock times out after 5s)
+    gate_test.go:1006: recordGate took 4.798861792s to return after the interrupt; want it to stop waiting for the lock at once
+    gate_test.go:1009: recordGate = "", org: acquire manifest lock /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestRecordGate_InterruptRecordsNothingctx_done_while_waiting_fo557189869/001/state/manifest.lock: timed out after 5s: context deadline exceeded; want ctx's context.Canceled and no refusal
+
+======== probe (not committed): og2/probe/probe_lock_timeout_test.go, added to internal/org through -overlay
+# go test -count=1 -overlay og2/probe/head.json ./internal/org/ -run TestProbe_LockTimeoutMessageOfExistingCallers -v   (HEAD)
+# go test -count=1 -overlay og2/probe/C2h.json  ./internal/org/ -run TestProbe_LockTimeoutMessageOfExistingCallers -v   (HEAD + C2h)
+---- probe_lock_timeout_test.go
+package org
+
+import (
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// TestProbe_LockTimeoutMessageOfExistingCallers (not committed, /test cycle 2):
+// withManifestLock and withFileLock (the callers that pass no ctx: approve,
+// spawn, close, inbox) still wait manifestLockTimeout for a held lock and
+// return the base 1bddc871 message, "org: acquire <what> lock <path>: timed
+// out after 5s: context deadline exceeded", never "the wait was stopped",
+// and do not run fn.
+func TestProbe_LockTimeoutMessageOfExistingCallers(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, what string
+		call             func(dir string, fn func() error) error
+	}{
+		{"withManifestLock", manifestLockFile, "manifest", withManifestLock},
+		{"withFileLock inbox", inboxLockFile, "inbox", func(dir string, fn func() error) error {
+			return withFileLock(dir, inboxLockFile, "inbox", fn)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			held, drop := make(chan struct{}), make(chan struct{})
+			holder := make(chan error, 1)
+			go func() {
+				holder <- withFileLock(dir, tc.file, tc.what, func() error { close(held); <-drop; return nil })
+			}()
+			<-held
+			ran := false
+			begin := time.Now()
+			err := tc.call(dir, func() error { ran = true; return nil })
+			took := time.Since(begin)
+			close(drop)
+			if herr := <-holder; herr != nil {
+				t.Fatalf("holder: %v", herr)
+			}
+			want := "org: acquire " + tc.what + " lock " + filepath.Join(dir, tc.file) + ": timed out after 5s: context deadline exceeded"
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v\nwant  %s", err, want)
+			}
+			if ran {
+				t.Fatal("fn ran although the lock was never taken")
+			}
+			if took < manifestLockTimeout || took > manifestLockTimeout+2*time.Second {
+				t.Fatalf("waited %s; want about %s", took, manifestLockTimeout)
+			}
+			t.Logf("waited %s, err = %v", took, err)
+		})
+	}
+}
+---- results
+### probe on HEAD
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock
+    probe_lock_timeout_test.go:51: waited 5.002061875s, err = org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock620231177/001/manifest.lock: timed out after 5s: context deadline exceeded
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox
+    probe_lock_timeout_test.go:51: waited 5.002060542s, err = org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox504997546/001/inbox.lock: timed out after 5s: context deadline exceeded
+--- PASS: TestProbe_LockTimeoutMessageOfExistingCallers (10.01s)
+    --- PASS: TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock (5.00s)
+    --- PASS: TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox (5.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	10.835s
+RC=0
+### probe on C2h
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock
+    probe_lock_timeout_test.go:43: err = org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock71752379/001/manifest.lock: the wait was stopped: %!w(<nil>)
+        want  org: acquire manifest lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithManifestLock71752379/001/manifest.lock: timed out after 5s: context deadline exceeded
+=== RUN   TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox
+    probe_lock_timeout_test.go:43: err = org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox2535024258/001/inbox.lock: the wait was stopped: %!w(<nil>)
+        want  org: acquire inbox lock /var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestProbe_LockTimeoutMessageOfExistingCallerswithFileLock_inbox2535024258/001/inbox.lock: timed out after 5s: context deadline exceeded
+--- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers (10.01s)
+    --- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers/withManifestLock (5.00s)
+    --- FAIL: TestProbe_LockTimeoutMessageOfExistingCallers/withFileLock_inbox (5.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	10.961s
+FAIL
+RC=1
+
+################################################################################
+# Cycle 3 (HEAD 697e1577, fix 8b681dc3: gateSignalContext replaces signal.NotifyContext). No tracked file was edited.
+# Go mutants of internal/cli/org_gate.go: a changed copy in the scratchpad (og3/mut/<ID>-org_gate.go), read through
+#   GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay og3/mut/<ID>.json ./internal/cli/ -v \
+#     -run '^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)'
+# Toolchain for every run below is go1.25.8 (go version go1.25.8 darwin/arm64) unless the block says go1.26.0.
+# Each compiled first (GOTOOLCHAIN=go1.25.8 go build -overlay og3/mut/<ID>.json ./internal/cli/, rc 0).
+# Targeted runs: one at a time, JST 23:06-23:09 (load average 4.1-7.4), while run-test.sh ran its shell suites.
+# Survivors of the targeted run were run again on the whole internal/cli package (go1.25.8, JST 23:27-23:36).
+################################################################################
+
+======== Go mutant X0 (org_gate.go): control: unchanged copy
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/X0-org_gate.go"}}
+(no diff: control)
+-- run: targeted, go1.25.8
+# X0 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/X0.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.13s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.06s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.931s
+RC=0 elapsed=4.7s
+-- run: targeted, go1.26.0
+# X0 toolchain=go1.26.0 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/X0.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.91s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.84s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.72s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.728s
+RC=0 elapsed=4.2s
+
+======== Go mutant M_a (org_gate.go): (a) helper is signal.NotifyContext
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_a-org_gate.go"}}
+126a127
+> 	return signal.NotifyContext(parent, sigs...)
+-- run: targeted, go1.25.8
+# M_a toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_a.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT4220623225/001/state/gates/a-20261013T140613Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM355301793/001/state/gates/a-20261013T140614Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP3609038652/001/state/gates/a-20261013T140614Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.58s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: context canceled
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.34s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.928s
+RC=1 elapsed=5.7s
+-- run: targeted, go1.26.0
+# M_a toolchain=go1.26.0 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_a.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.65s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.899s
+RC=0 elapsed=5.5s
+
+======== Go mutant M_b (org_gate.go): (b) cancel(nil) at the signal instead of the signal cause
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_b-org_gate.go"}}
+133,134c133,134
+< 			case s := <-ch:
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 			case <-ch:
+> 				cancel(nil)
+-- run: targeted, go1.25.8
+# M_b toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_b.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT835981905/001/state/gates/a-20261013T140619Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM3934928814/001/state/gates/a-20261013T140620Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP4057763704/001/state/gates/a-20261013T140621Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.26s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.84s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: context canceled
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	4.452s
+RC=1 elapsed=6.5s
+
+======== Go mutant M_c (org_gate.go): (c) signal.Stop right after the first signal's cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_c-org_gate.go"}}
+134a135
+> 				signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_c toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_c.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.44s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.81s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.00s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.38s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.26s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.078s
+RC=1 elapsed=5.6s
+
+======== Go mutant M_c2 (org_gate.go): (c') signal.Stop before the first signal's cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_c2-org_gate.go"}}
+133a134
+> 				signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_c2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_c2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.15s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.80s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.78s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.12s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	4.265s
+RC=1 elapsed=6.4s
+
+======== Go mutant M_d (org_gate.go): (d) stop does not cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d-org_gate.go"}}
+140d139
+< 		cancel(nil)
+-- run: targeted, go1.25.8
+# M_d toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.09s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.76s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.12s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.42s)
+    org_gate_test.go:746: after stop: ctx.Err() = <nil>, cause = <nil>; want context.Canceled for both
+--- FAIL: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.35s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.282s
+RC=1 elapsed=7.2s
+
+======== Go mutant M_d2 (org_gate.go): (d') stop does not unregister (no signal.Stop)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d2-org_gate.go"}}
+141d140
+< 		signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_d2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.14s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.76s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.76s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	4.295s
+RC=0 elapsed=6.3s
+-- run: whole internal/cli package, go1.25.8
+# M_d2 toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d2.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	180.942s
+RC=0 elapsed=181.4s
+
+======== Go mutant M_e1 (org_gate.go): (e) goroutine also started when parent is already done (guard removed)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_e1-org_gate.go"}}
+130c130
+< 	if ctx.Err() == nil {
+---
+> 	if true {
+-- run: targeted, go1.25.8
+# M_e1 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e1.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.01s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.35s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.14s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.29s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	6.006s
+RC=0 elapsed=8.0s
+-- run: whole internal/cli package, go1.25.8
+# M_e1 toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e1.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	183.338s
+RC=0 elapsed=183.8s
+
+======== Go mutant M_e2 (org_gate.go): (e') guard inverted: goroutine started only when parent is already done
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_e2-org_gate.go"}}
+130c130
+< 	if ctx.Err() == nil {
+---
+> 	if ctx.Err() != nil {
+-- run: targeted, go1.25.8
+# M_e2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (48.24s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (15.89s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (15.82s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (15.90s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.63s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: exit status 1
+        --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (5.00s)
+            org_gate_test.go:773: SIGHUP did not cancel the context within 5s
+        FAIL
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (5.03s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	54.090s
+RC=1 elapsed=56.0s
+
+======== Go mutant M_f1 (org_gate.go): (f) cause text without " signal received"
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_f1-org_gate.go"}}
+134c134
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 				cancel(errors.New(s.String()))
+-- run: targeted, go1.25.8
+# M_f1 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_f1.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT1691419564/001/state/gates/a-20261013T140755Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (terminated): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM261585530/001/state/gates/a-20261013T140755Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (hangup): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP1584918454/001/state/gates/a-20261013T140756Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.56s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: hangup
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.710s
+RC=1 elapsed=5.5s
+
+======== Go mutant M_f2 (org_gate.go): (f') cause text fixed to "interrupt signal received" whatever the signal
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_f2-org_gate.go"}}
+133,134c133,134
+< 			case s := <-ch:
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 			case <-ch:
+> 				cancel(errors.New("interrupt signal received"))
+-- run: targeted, go1.25.8
+# M_f2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_f2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM1440543449/001/state/gates/a-20261013T140802Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP2263056258/001/state/gates/a-20261013T140803Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.85s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.55s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.04s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: interrupt signal received
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.059s
+RC=1 elapsed=7.2s
+
+======== Go mutant M_h (org_gate.go): derived from context.Background() instead of parent
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_h-org_gate.go"}}
+127c127
+< 	ctx, cancel := context.WithCancelCause(parent)
+---
+> 	ctx, cancel := context.WithCancelCause(context.Background())
+-- run: targeted, go1.25.8
+# M_h toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_h.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (17.57s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (15.64s)
+    org_gate_test.go:740: after the parent ended: ctx.Err() = <nil>, cause = <nil>; want context.Canceled and the parent's cause "the parent's cause"
+--- FAIL: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.34s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	18.754s
+RC=1 elapsed=20.6s
+
+======== Go mutant M_i (org_gate.go): call site drops SIGHUP
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_i-org_gate.go"}}
+97c97
+< 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+---
+> 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM)
+-- run: targeted, go1.25.8
+# M_i toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_i.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (19.01s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (15.82s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.84s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.38s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.398s
+RC=1 elapsed=22.2s
+
+======== Go mutant M_i2 (org_gate.go): call site passes context.Background() instead of the command's context
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_i2-org_gate.go"}}
+97c97
+< 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+---
+> 			ctx, stop := gateSignalContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+-- run: targeted, go1.25.8
+# M_i2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_i2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (17.75s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.73s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (15.67s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	19.532s
+RC=1 elapsed=21.7s
+
+======== Go mutant M_j (org_gate.go): unbuffered signal channel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_j-org_gate.go"}}
+128c128
+< 	ch := make(chan os.Signal, 1)
+---
+> 	ch := make(chan os.Signal)
+-- run: targeted, go1.25.8
+# M_j toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_j.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.63s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.854s
+RC=0 elapsed=5.6s
+-- run: whole internal/cli package, go1.25.8
+# M_j toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_j.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	176.922s
+RC=0 elapsed=177.4s
+
+======== pre-fix code: f001bd4f internal/cli/org_gate.go + org_gate_test.go through one overlay (the CI failure of PR #225)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/pre/org_gate.go", "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate_test.go": "<scratchpad>/og3/pre/org_gate_test.go"}}
+-- run: toolchain go1.25.8, full -v output
+# pre-fix f001bd4f internal/cli/org_gate.go + org_gate_test.go via overlay, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay pre/pre.json ./internal/cli/ -run '^TestOrgGate_InterruptStopsTheScriptAndRecordsNothing$' -v
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT2338840179/001/state/gates/a-20261013T143621Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM2744385446/001/state/gates/a-20261013T143622Z.log; want the interrupt error with the cause "terminated signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP2929382359/001/state/gates/a-20261013T143623Z.log; want the interrupt error with the cause "hangup signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.82s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.80s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.68s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.311s
+FAIL
+RC=1
+-- run: toolchain go1.26.0, full -v output
+# pre-fix f001bd4f internal/cli/org_gate.go + org_gate_test.go via overlay, toolchain go1.26.0 (go version go1.26.0 darwin/arm64)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -overlay pre/pre.json ./internal/cli/ -run '^TestOrgGate_InterruptStopsTheScriptAndRecordsNothing$' -v
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.13s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.94s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.82s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.68s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.629s
+RC=0
+
+======== probe test (scratch only, added through -overlay as internal/cli/zz_probe_c3_test.go; not committed)
+-- source og3/probe/zz_probe_c3_test.go:
+package cli
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// Probe (scratch only, added through -overlay): after stop, the signals are
+// no longer caught, so a SIGHUP ends the process as it would without the gate.
+// The child calls stop, then sends itself SIGHUP; it prints "survived" only
+// when the signal was swallowed.
+func TestProbe_SignalContextStopUnregisters(t *testing.T) {
+	if os.Getenv("RALPH_PROBE_C3_CHILD") == "1" {
+		_, stop := gateSignalContext(context.Background(), syscall.SIGHUP)
+		stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP: %v", err)
+		}
+		time.Sleep(300 * time.Millisecond)
+		os.Stdout.WriteString("survived\n")
+		return
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestProbe_SignalContextStopUnregisters$", "-test.count=1")
+	child.Env = append(os.Environ(), "RALPH_PROBE_C3_CHILD=1")
+	out, err := child.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("child err = %v; want it ended by SIGHUP after stop\n%s", err, out)
+	}
+	ws, ok := ee.Sys().(syscall.WaitStatus)
+	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
+		t.Fatalf("child status = %v; want ended by SIGHUP after stop\n%s", ee, out)
+	}
+}
+-- overlay probe.json: {"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/zz_probe_c3_test.go": "<scratchpad>/og3/probe/zz_probe_c3_test.go"}}
+# overlay probe.json, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay probe/probe.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+=== RUN   TestProbe_SignalContextStopUnregisters
+--- PASS: TestProbe_SignalContextStopUnregisters (0.03s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	1.141s
+RC=0
+-- overlay probe-M_d2.json: {"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/zz_probe_c3_test.go": "<scratchpad>/og3/probe/zz_probe_c3_test.go", "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d2-org_gate.go"}}
+# overlay probe-M_d2.json, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay probe/probe-M_d2.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+=== RUN   TestProbe_SignalContextStopUnregisters
+    zz_probe_c3_test.go:33: child err = <nil>; want it ended by SIGHUP after stop
+        survived
+        PASS
+--- FAIL: TestProbe_SignalContextStopUnregisters (0.33s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	1.462s
+FAIL
+RC=1
+
+======== repeats (go1.25.8): the kills that depend on the child's 100 ms pause, and the probe, -count=10 each (uniq -c of the result lines)
+### M_c x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay mut/M_c.json ./internal/cli/ -run '^TestOrgGate_SignalContextKeepsLaterSignalsCaught$' -v
+  10     org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.13s)
+   1 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.14s)
+   6 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+   1 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.16s)
+### M_c2 x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay mut/M_c2.json ./internal/cli/ -run '^TestOrgGate_SignalContextKeepsLaterSignalsCaught$' -v
+  10     org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.13s)
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.14s)
+   6 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+### probe x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay probe/probe.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+  10 --- PASS: TestProbe_SignalContextStopUnregisters (durations removed by sed before uniq -c)
+### probe-M_d2 x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay probe/probe-M_d2.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+  10     zz_probe_c3_test.go:33: child err = <nil>; want it ended by SIGHUP after stop
+  10 --- FAIL: TestProbe_SignalContextStopUnregisters (durations removed by sed before uniq -c)
+
+################################################################################
+# Cycle 4 (HEAD 1e4a2fa4, fix f1b0352e: leader step 9 commits the reviewer's reports and checks
+#   `git status --porcelain` before fetch/rebase; step 10 commits only the report). No tracked file was edited.
+# Mutants of internal/org/prompts/leader.md: a changed copy in the scratchpad (og4/mut/<ID>-leader.md). The template
+#   is read through //go:embed prompts/*.md, and the overlay entry replaces the embedded bytes at build time
+#   (the control X0 passes and every mutant changes the rendered text, so the overlay reaches the embed).
+#   GOTOOLCHAIN=<tc> go test -count=1 -timeout 20m -overlay og4/mut/<ID>.json ./internal/org/ -v -run RenderRolePrompt
+# Each mutant ran on go1.26.0 (tag t26) and go1.25.8 (tag t25); the failing tests and failing lines were the same on both.
+# Runs: one at a time, JST 01:09-01:11 (go1.26.0) and 01:11-01:13 (go1.25.8), while the first run-test.sh of this cycle
+#   ran its shell suites (1-minute load average 51.4 at 01:08 from other sessions, 7.9 at 01:11, 6.2 at 01:13).
+# The failing assertions print the rendered section or item; only its first 3 lines are kept here, and trailing
+#   spaces are trimmed from every line (the blank lines of the dumped text are 8 spaces in the raw go test output).
+# Line numbers: prompts_test.go:526 intro (FeatureOrgProcedure); :796/:798 section order loop (missing / out of order);
+#   :845 item phrase table; :884 the new step 9 order loop; :891 the new step 10 negative assertion.
+################################################################################
+
+======== template mutant X0 (leader.md): control: unchanged copy
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/X0-leader.md"}}
+(no diff: control)
+-- run: go1.26.0
+# X0 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/X0.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.438s
+RC=0 elapsed=1.0s
+-- run: go1.25.8
+# X0 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/X0.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.464s
+RC=0 elapsed=3.3s
+
+======== template mutant M_a1 (leader.md): (a) step 9 back to rebase-before-commit: fetch/rebase first, the commit and clean check after the fetch-failure sentence
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a1-leader.md"}}
+164,174c164
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+<    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+<    `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+185c175,184
+<    書いて `ralph org escalate` で BLOCKED を上げる
+---
+>    書いて `ralph org escalate` で BLOCKED を上げる。rebase が終わったら、まず reviewer のレポート
+>    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+>    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+>    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+>    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+>    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+>    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+>    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+>    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+>    `ralph org escalate` で BLOCKED を上げる。
+-- run: go1.26.0
+# M_a1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase --abort`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.790s
+RC=1 elapsed=3.0s
+-- run: go1.25.8
+# M_a1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase --abort`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、`git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+           (`git symbolic-ref --quiet refs/remotes/origin/HEAD` の出力から
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.857s
+RC=1 elapsed=2.8s
+
+======== template mutant M_a2 (leader.md): (a') whole-file revert: leader.md as of f1b0352e^ (pre-fix template: no step 9 commit, step 10 commits both)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a2-leader.md"}}
+(whole file = git show f1b0352e^:internal/org/prompts/leader.md; diff against HEAD below)
+64,66c64,65
+< 機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
+< 戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
+< かまいません。
+---
+> 機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
+> 予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
+164,173c163
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+<    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、
+187,188c177,178
+<     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+>     レポート(`docs/reports/` の下)をコミットする。続けて
+-- run: go1.26.0
+# M_a2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "まず reviewer のレポート", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.429s
+RC=1 elapsed=0.7s
+-- run: go1.25.8
+# M_a2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "まず reviewer のレポート", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 196 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、
+           `git fetch origin <既定のブランチ>` を打つ。既定のブランチは
+           `ralph org gate` と同じ決め方で、`refs/remotes/origin/HEAD` が指す先
+        (... 10 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.032s
+RC=1 elapsed=2.9s
+
+======== template mutant M_a3 (leader.md): (a'') order only: every phrase kept, but step 9 opens with fetch and rebase before the commit
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_a3-leader.md"}}
+164c164
+< 9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+---
+> 9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+-- run: go1.26.0
+# M_a3 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a3.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "`git fetch origin <既定のブランチ>`" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.871s
+RC=1 elapsed=2.7s
+-- run: go1.25.8
+# M_a3 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_a3.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:798: expected "`git fetch origin <既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:798: expected "`git rebase origin/<既定のブランチ>`" to come after the steps before it in the 機能ごとの org section, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "`git fetch origin <既定のブランチ>`" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、先に `git fetch origin <既定のブランチ>` と `git rebase origin/<既定のブランチ>` を打ち、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.842s
+RC=1 elapsed=2.7s
+
+======== template mutant M_b1 (leader.md): (b) drop the `git status --porcelain` check (commit only)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_b1-leader.md"}}
+166c166
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+---
+>    コミットする。gate を
+-- run: go1.26.0
+# M_b1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.808s
+RC=1 elapsed=3.0s
+-- run: go1.25.8
+# M_b1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "`git status --porcelain` が何も出さないことを確かめる", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "まず reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が何も出さないことを確かめる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "をコミットし、`git status --porcelain` が何も出さない" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットする。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.971s
+RC=1 elapsed=3.0s
+
+======== template mutant M_b2 (leader.md): (b') check kept, but the fetch is no longer conditioned on it (drop 何も出なくなったら)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_b2-leader.md"}}
+173c173
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+>    `ralph org escalate` で BLOCKED を上げる。
+-- run: go1.26.0
+# M_b2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.797s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_b2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_b2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "何も出なくなったら、`git fetch origin <既定のブランチ>` を打つ", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+    prompts_test.go:884: expected step 9 to commit the reviewer's reports and check a clean tree before git rebase, saying ["をコミットし、`git status --porcelain` が何も出さない" "何も出なくなったら" "`git fetch origin <既定のブランチ>`" "`git rebase origin/<既定のブランチ>`"] in this order, but "何も出なくなったら" is missing or out of order, got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.916s
+RC=1 elapsed=2.8s
+
+======== template mutant M_c (leader.md): (c) drop the BLOCKED branch for non-implementer leftovers
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_c-leader.md"}}
+171,173c171
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+<    ファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+<    `ralph org escalate` で BLOCKED を上げる。何も出なくなったら、
+---
+>    レビューを頼み直す(手順 8 の往復に戻る)。何も出なくなったら、
+-- run: go1.26.0
+# M_c toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.796s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_c toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.151s
+RC=1 elapsed=3.2s
+
+======== template mutant M_c2 (leader.md): (c') leader commits the other leftovers itself (自分ではコミットしない -> 自分でコミットする)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_c2-leader.md"}}
+168,169c168,169
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+<    コミットしない。implementer の変更なら、implementer にコミットを TASK で
+---
+>    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分で
+>    コミットする。implementer の変更なら、implementer にコミットを TASK で
+-- run: go1.26.0
+# M_c2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.802s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_c2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_c2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "ほかの変更が残っていれば、自分ではコミットしない", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.921s
+RC=1 elapsed=3.1s
+
+======== template mutant M_d1 (leader.md): (d) step 10 commits the report and the reviewer's reports again (pre-fix wording)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_d1-leader.md"}}
+187,188c187,188
+<     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+>     レポート(`docs/reports/` の下)をコミットする。続けて
+-- run: go1.26.0
+# M_d1 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.798s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_d1 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d1.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:796: expected the 機能ごとの org section to contain "report だけをコミットする", got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 206 more lines of the dumped text omitted)
+    prompts_test.go:845: expected the 機能ごとの org item naming "10. `ralph org report" to contain "report だけをコミットする(reviewer のレポートは手順 9 でコミットした)", got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report と reviewer の
+            レポート(`docs/reports/` の下)をコミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.793s
+RC=1 elapsed=3.1s
+
+======== template mutant M_d2 (leader.md): (d') step 10 keeps 'report だけ' and adds a second commit of the report and the reviewer's reports (negative assertion only)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_d2-leader.md"}}
+188c188
+<     (reviewer のレポートは手順 9 でコミットした)。続けて
+---
+>     (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+-- run: go1.26.0
+# M_d2 toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+            (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.797s
+RC=1 elapsed=2.6s
+-- run: go1.25.8
+# M_d2 toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_d2.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:891: expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:
+        10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report
+            はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
+            (reviewer のレポートは手順 9 でコミットした)。念のため report と reviewer のレポートをもう一度コミットする。続けて
+        (... 14 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.889s
+RC=1 elapsed=2.9s
+
+======== template mutant M_f (leader.md): (f) the implementer leftover branch loses the per-plan PLAN: header mention
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_f-leader.md"}}
+170c170
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+---
+>    頼み、終わったら reviewer に
+-- run: go1.26.0
+# M_f toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_f.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.794s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_f toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_f.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 19 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.789s
+RC=1 elapsed=2.8s
+
+======== template mutant M_g (leader.md): the implementer leftover branch loses the re-review (終わったら reviewer にレビューを頼み直す)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_g-leader.md"}}
+170,171c170
+<    頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer に
+<    レビューを頼み直す(手順 8 の往復に戻る)。それ以外(reviewer のほかの
+---
+>    頼む(per-plan では `PLAN:` のヘッダを付ける)。それ以外(reviewer のほかの
+-- run: go1.26.0
+# M_g toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_g.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.801s
+RC=1 elapsed=2.4s
+-- run: go1.25.8
+# M_g toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_g.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "implementer の変更なら、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+        (... 18 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.870s
+RC=1 elapsed=2.8s
+
+======== template mutant M_h (leader.md): intro back to the pre-fix list (no 'step 9 reviewer's reports' among the out-of-reservation writes)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_h-leader.md"}}
+64,66c64,65
+< 機能の計画、9 の reviewer のレポート、10 の report と計画の移動、12 の計画の
+< 戻しは予約の外に書きますが、どれも手順のうちなので、予約に入っていなくて
+< かまいません。
+---
+> 機能の計画、10 の report と reviewer のレポートと計画の移動、12 の計画の戻しは
+> 予約の外に書きますが、どれも手順のうちなので、予約に入っていなくてかまいません。
+-- run: go1.26.0
+# M_h toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_h.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.991s
+RC=1 elapsed=2.7s
+-- run: go1.25.8
+# M_h toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_h.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+    prompts_test.go:526: expected the 機能ごとの org intro to keep the feature's changes in the reservation and the steps' own writes outside it, got section:
+
+
+        タスクが `- 分割計画:` の行で始まるとき、この org は承認済みの分割計画の 1 つの
+        (... 205 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.905s
+RC=1 elapsed=2.9s
+
+======== template mutant M_i (leader.md): drop the retry rationale sentence (gate をやり直すときは ... 断られる)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/org/prompts/leader.md": "<scratchpad>/og4/mut/M_i-leader.md"}}
+166,168c166
+<    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
+<    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
+<    では `git rebase` が始まらずに断られる。ほかの変更が残っていれば、自分では
+---
+>    コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+-- run: go1.26.0
+# M_i toolchain=go1.26.0 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_i.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.848s
+RC=1 elapsed=2.5s
+-- run: go1.25.8
+# M_i toolchain=go1.25.8 pkgs=./internal/org/ run=RenderRolePrompt
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og4/mut/M_i.json ./internal/org/ -v -run RenderRolePrompt
+--- PASS: TestRenderRolePrompt_Reviewer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_QA_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_AllKnownVarsSubstituted (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EmptyTaskAndEnvelope_NoLeftoverPlaceholders (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_DelegatesToImplementer (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_MissionRoutesGateBlocked (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgProcedure (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_FeatureOrgPlanApproval (0.00s)
+    prompts_test.go:845: expected the 機能ごとの org item naming "9. reviewer が通したら" to contain "gate をやり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのままでは `git rebase` が始まらずに断られる", got item:
+        9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+           (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
+           コミットし、`git status --porcelain` が何も出さないことを確かめる。ほかの変更が残っていれば、自分では
+        (... 17 more lines of the dumped text omitted)
+--- FAIL: TestRenderRolePrompt_Leader_FeatureOrgGate (0.00s)
+--- PASS: TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_NamesWhichInbox (0.00s)
+--- PASS: TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownRole_NoTemplate (0.00s)
+--- PASS: TestRenderRolePrompt_UnknownPlaceholder_PassesThroughUnchanged (0.00s)
+--- PASS: TestRenderRolePrompt_EmptyScope_SubstitutesDefaultText (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.884s
+RC=1 elapsed=2.9s
+
+======== mutant E (skill copies): the 4 org SKILL.md copies replaced by their f1b0352e^ text (old order: rebase, then
+#   report + reviewer's reports in one commit). Runtime file reads do not see -overlay, so this one ran in a scratch
+#   clone (git clone of feat/org-gate at 1e4a2fa4 into og4/e-clone, origin/HEAD set to main) with the 4 files changed,
+#   the whole test gate: GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh. Summary below; the per-suite
+#   counts are compared with the worktree run (run-test evidence) in the report.
+# E: clone of feat/org-gate at 1e4a2fa4, the 4 org SKILL.md copies replaced by f1b0352e^ (old order)
+ M .agents/skills/org/SKILL.md
+ M .claude/skills/org/SKILL.md
+ M templates/base/.agents/skills/org/SKILL.md
+ M templates/base/.claude/skills/org/SKILL.md
+########## $ GOFLAGS=-count=1 RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh
+start 2026-10-13T16:12:55Z
+ 1:12  up 8 days,  4:17, 5 users, load averages: 6.41 26.79 27.98
+# Verification run
+- Requested scope: full
+==> Language scope: full
+-- Go (GOFLAGS=-count=1, so no package was (cached)):
+?   	github.com/yoshpy-dev/ralph	[no test files]
+?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+ok  	github.com/yoshpy-dev/ralph/internal/cli	136.941s
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.843s
+ok  	github.com/yoshpy-dev/ralph/internal/insights	1.572s
+ok  	github.com/yoshpy-dev/ralph/internal/org	72.625s
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	2.290s
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	2.161s
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	3.380s
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	2.993s
+==> All verifiers passed.
+real 632.30
+RC=0
+end 2026-10-13T16:23:27Z
+-- per shell suite: PASS FAIL SKIP lines (summary lines excluded; owg-test/c3/suites.py), 41 suites, total 4114 0 3
+tests/test-agent-models.sh 47 0 0
+tests/test-agent-phase-boundaries.sh 44 0 0
+tests/test-archive-plan.sh 22 0 0
+tests/test-branch-name.sh 26 0 0
+tests/test-check-mojibake.sh 15 0 0
+tests/test-check-skill-sync.sh 13 0 0
+tests/test-check-template.sh 56 0 2
+tests/test-codex-exec-invocation.sh 144 0 0
+tests/test-detect-changed-languages.sh 83 0 0
+tests/test-detect-languages-terraform.sh 8 0 0
+tests/test-ensure-pr-ready.sh 7 0 0
+tests/test-ensure-pr-title-prefix.sh 13 0 0
+tests/test-gc-artifacts.sh 11 0 0
+tests/test-hook-wiring.sh 68 0 0
+tests/test-insights-append.sh 51 0 0
+tests/test-language-pack-monorepo-roots.sh 29 0 0
+tests/test-lib-json.sh 126 0 0
+tests/test-new-feature-plan.sh 21 0 0
+tests/test-no-loop-references.sh 1 0 0
+tests/test-plan-visual.sh 103 0 0
+tests/test-post-edit-verify.sh 24 0 0
+tests/test-pr-owner-lookup.sh 20 0 0
+tests/test-pre-bash-guard.sh 2227 0 0
+tests/test-ralph-config.sh 19 0 0
+tests/test-ralph-dispatch.sh 33 0 0
+tests/test-ralph-worktree.sh 143 0 0
+tests/test-run-verify-branch-secret-scan.sh 32 0 0
+tests/test-run-verify-concurrency.sh 37 0 0
+tests/test-run-verify-scope.sh 19 0 0
+tests/test-secret-scan-branch.sh 246 0 1
+tests/test-secret-scan.sh 123 0 0
+tests/test-self-review-scope.sh 64 0 0
+tests/test-skill-insight-cycle.sh 20 0 0
+tests/test-sync-skills.sh 22 0 0
+tests/test-template-purity.sh 10 0 0
+tests/test-terraform-gitignore.sh 47 0 0
+tests/test-terraform-pack-verify.sh 36 0 0
+tests/test-terraform-rule-frontmatter.sh 11 0 0
+tests/test-verify-local-hook-tests.sh 5 0 0
+tests/test-verify-mode-split.sh 59 0 0
+tests/test-xreview-helpers.sh 29 0 0
+-- diff against the same count of this cycle's first worktree run (also launched with nohup &): no difference
+-- the 2 SKIPs of tests/test-check-template.sh (I. dash INT/HUP) come from the nohup & launch (INT and HUP ignored), as in the first worktree run:
+  PASS: I. dash: TERM makes check-template.sh exit 143
+  PASS: I. dash: TERM leaves no check-template.* temp directory
+  SKIP: I. dash: INT cleanup check skipped (the script ran to completion; INT is ignored in this environment)
+  SKIP: I. dash: HUP cleanup check skipped (the script ran to completion; HUP is ignored in this environment)
+
+======== git probe (cycle 4): the git facts step 9 relies on, in a throwaway repo under the scratchpad (hermetic git config)
+-- source og4/rebase-probe4.sh (run: sh og4/rebase-probe4.sh og4/rbp4; sh -n passed; rc 0):
+#!/bin/sh
+# /test org-gate cycle 4: git facts behind leader step 9 (f1b0352e). Pure git in a
+# throwaway repo under the scratchpad; hermetic git config; no ralph, no network.
+# R1 = the verify probe's P2/P3 repeated (tracked report rewritten -> rebase refused,
+#      --abort rc 128, commit first -> rebase rc 0).
+# R2 = staged but not committed (git add only) -> rebase refused too.
+# R3 = untracked leftover only -> rebase starts (rc 0); only the porcelain check sees it.
+# R4 = tracked report rewritten under rebase.autoStash=true -> rebase rc 0, the
+#      rewrite is put back unstaged after it (still not committed).
+# R5 = nothing left to commit (the report was committed before): git commit rc 1,
+#      porcelain empty, rebase rc 0.
+set -u
+D=$1
+rm -rf "$D"
+mkdir -p "$D"
+cd "$D" || exit 1
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=p GIT_AUTHOR_EMAIL=p@example.invalid
+export GIT_COMMITTER_NAME=p GIT_COMMITTER_EMAIL=p@example.invalid
+git --version
+git init -q --bare -b main origin.git
+git clone -q origin.git work 2>/dev/null
+git clone -q origin.git other 2>/dev/null
+cd work || exit 1
+git switch -q -c main 2>/dev/null || true
+echo base > base.txt && git add base.txt && git commit -q -m base && git push -q origin main
+git switch -q -c feat/x
+echo feat > feat.txt && git add feat.txt && git commit -q -m feat
+mkdir -p docs/reports && echo "review 1" > docs/reports/review.md
+git add docs/reports/review.md && git commit -q -m "docs: review 1"
+
+advance() { ( cd ../other && git pull -q origin main && echo "$1" > "$1.txt" && git add "$1.txt" && git commit -q -m "$1" && git push -q origin main ); git fetch -q origin main; }
+
+echo "## R1 tracked report rewritten (gate retry), origin/main advanced"
+advance up1
+echo "review 2" > docs/reports/review.md
+echo "porcelain: [$(git status --porcelain)]"
+out=$(git rebase origin/main 2>&1); echo "rebase rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+git rebase --abort >/dev/null 2>&1; echo "rebase --abort rc=$? (no rebase in progress)"
+git add docs/reports/review.md && git commit -q -m "docs: review 2"
+echo "porcelain after commit: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+
+echo "## R2 report rewritten and staged, not committed"
+advance up2
+echo "review 3" > docs/reports/review.md && git add docs/reports/review.md
+echo "porcelain: [$(git status --porcelain)]"
+out=$(git rebase origin/main 2>&1); echo "rebase rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+git commit -q -m "docs: review 3"
+git rebase origin/main >/dev/null 2>&1; echo "after commit: rebase rc=$?"
+
+echo "## R3 untracked leftover only"
+advance up3
+echo "scratch" > leftover.txt
+echo "porcelain: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+echo "porcelain after rebase: [$(git status --porcelain)]"
+rm -f leftover.txt
+
+echo "## R4 tracked report rewritten, rebase.autoStash=true"
+advance up4
+echo "review 4" > docs/reports/review.md
+git -c rebase.autoStash=true rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+echo "porcelain after rebase: [$(git status --porcelain)]"
+git add docs/reports/review.md && git commit -q -m "docs: review 4"
+
+echo "## R5 the report is already committed (self-review C4-1): step 9's commit has nothing to commit"
+advance up5
+echo "porcelain: [$(git status --porcelain)]"
+git add docs/reports/review.md; echo "add rc=$?"
+out=$(git commit -m "docs: review again" 2>&1); echo "commit rc=$?"; printf '%s\n' "$out" | sed -n 1,2p
+echo "porcelain after the empty commit: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+git log --oneline --format=%s | head -12
+-- output:
+git version 2.49.0
+## R1 tracked report rewritten (gate retry), origin/main advanced
+porcelain: [ M docs/reports/review.md]
+rebase rc=1
+error: cannot rebase: You have unstaged changes.
+error: Please commit or stash them.
+rebase --abort rc=128 (no rebase in progress)
+porcelain after commit: []
+rebase rc=0
+is-ancestor rc=0
+## R2 report rewritten and staged, not committed
+porcelain: [M  docs/reports/review.md]
+rebase rc=1
+error: cannot rebase: Your index contains uncommitted changes.
+error: Please commit or stash them.
+after commit: rebase rc=0
+## R3 untracked leftover only
+porcelain: [?? leftover.txt]
+rebase rc=0
+is-ancestor rc=0
+porcelain after rebase: [?? leftover.txt]
+## R4 tracked report rewritten, rebase.autoStash=true
+rebase rc=0
+is-ancestor rc=0
+porcelain after rebase: [ M docs/reports/review.md]
+## R5 the report is already committed (self-review C4-1): step 9's commit has nothing to commit
+porcelain: []
+add rc=0
+commit rc=1
+On branch feat/x
+nothing to commit, working tree clean
+porcelain after the empty commit: []
+rebase rc=0
+is-ancestor rc=0
+docs: review 4
+docs: review 3
+docs: review 2
+docs: review 1
+feat
+up5
+up4
+up3
+up2
+up1
+base

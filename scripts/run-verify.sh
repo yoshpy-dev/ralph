@@ -26,15 +26,53 @@ mkdir -p .harness/state .harness/logs docs/evidence
 
 ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 evidence_file="docs/evidence/verify-$(date -u '+%Y-%m-%d-%H%M%S').log"
-status_file=".harness/state/verify-exit-code"
+# Left behind at the end of the run for readers; the run itself never reads it.
 scope_file=".harness/state/verify-scope"
+
+# Per-run handoff files. Two runs in the same worktree (a background gate and
+# a reviewer's run, say) must not see each other's exit code, scope, or
+# docs-only marker, so each run gets its own temp files instead of shared
+# paths under .harness/state/. The EXIT trap removes them; an EXIT trap does
+# not change the exit status (POSIX keeps $? across a trap action). The HUP,
+# INT, and TERM traps exit with 128 + the signal number, which runs the EXIT
+# trap, but sh runs a trap only after the foreground command it is waiting
+# for ends. A signal sent to the whole process group (what `ralph org gate`
+# and Ctrl-C in a terminal send) also ends the { } | tee pipeline below, so
+# the run exits at once. A signal sent to this script's pid alone runs the
+# trap only after that pipeline has finished, verifiers included.
+run_status_file=""
+run_scope_file=""
+run_non_docs_file=""
+scope_publish_tmp=""
+# shellcheck disable=SC2329  # run by the EXIT trap; shellcheck 0.11 misses it when a script ends in exit
+cleanup_run_files() {
+  for run_file in "$run_status_file" "$run_scope_file" "$run_non_docs_file" "$scope_publish_tmp"; do
+    if [ -n "$run_file" ]; then
+      rm -f "$run_file" 2>/dev/null || true
+    fi
+  done
+}
+trap cleanup_run_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+run_status_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-status.XXXXXX")"
+run_scope_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-scope.XXXXXX")"
+run_non_docs_file="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-non-docs.XXXXXX")"
 
 # NOTE: The { } | tee pipeline runs the block in a subshell (POSIX sh).
 # Variables set inside (ran_any, status, docs_only) do NOT propagate to the
-# outer shell. We use a status_file to pass the exit code back out.
+# outer shell. The block writes its exit code to this run's $run_status_file
+# as its last step, and the outer shell reads it back; a missing, empty, or
+# non-numeric value counts as a failure, never as success. The scope goes to
+# this run's $run_scope_file (the block reads ${lang}_roots back from it) and
+# is copied to .harness/state/verify-scope after the block.
 # The while-read loop inside also runs in a sub-subshell, so docs_only is
-# communicated via the .harness/state/non_docs_change marker file.
-# Do not refactor these to rely on variable propagation across pipes.
+# communicated via this run's $run_non_docs_file marker (non-empty = a
+# non-docs change).
+# Do not refactor these to rely on variable propagation across pipes, or back
+# to shared paths under .harness/state/: a second run in the same worktree
+# would overwrite or delete this run's files.
 {
   ran_any=0
   status=0
@@ -56,16 +94,12 @@ scope_file=".harness/state/verify-scope"
   scope_docs_only=""
   if [ "$RALPH_VERIFY_SCOPE" = "changed" ]; then
     if [ -x ./scripts/detect-changed-languages.sh ]; then
-      scope_tmp="$(mktemp "${TMPDIR:-/tmp}/ralph-verify-scope.XXXXXX")"
-      if ./scripts/detect-changed-languages.sh > "$scope_tmp"; then
-        cp "$scope_tmp" "$scope_file"
-        selected_scope="$(sed -n 's/^scope=//p' "$scope_tmp" | sed -n '1p')"
-        scope_reason="$(sed -n 's/^reason=//p' "$scope_tmp" | sed -n '1p')"
-        scope_docs_only="$(sed -n 's/^docs_only=//p' "$scope_tmp" | sed -n '1p')"
-        languages="$(sed -n 's/^languages=//p' "$scope_tmp" | sed -n '1p')"
-        rm -f "$scope_tmp"
+      if ./scripts/detect-changed-languages.sh > "$run_scope_file"; then
+        selected_scope="$(sed -n 's/^scope=//p' "$run_scope_file" | sed -n '1p')"
+        scope_reason="$(sed -n 's/^reason=//p' "$run_scope_file" | sed -n '1p')"
+        scope_docs_only="$(sed -n 's/^docs_only=//p' "$run_scope_file" | sed -n '1p')"
+        languages="$(sed -n 's/^languages=//p' "$run_scope_file" | sed -n '1p')"
       else
-        rm -f "$scope_tmp"
         selected_scope="full"
         scope_reason="changed_detector_failed"
         scope_docs_only="false"
@@ -75,7 +109,7 @@ scope_file=".harness/state/verify-scope"
           echo "reason=$scope_reason"
           echo "docs_only=false"
           echo "languages="
-        } > "$scope_file"
+        } > "$run_scope_file"
       fi
     else
       selected_scope="full"
@@ -87,7 +121,7 @@ scope_file=".harness/state/verify-scope"
         echo "reason=$scope_reason"
         echo "docs_only=false"
         echo "languages="
-      } > "$scope_file"
+      } > "$run_scope_file"
     fi
 
     case "$selected_scope" in
@@ -102,7 +136,7 @@ scope_file=".harness/state/verify-scope"
           echo "reason=$scope_reason"
           echo "docs_only=$scope_docs_only"
           echo "languages=$languages"
-        } > "$scope_file"
+        } > "$run_scope_file"
         ;;
       *)
         echo "==> Language scope: full fallback (invalid_detector_output)"
@@ -114,7 +148,7 @@ scope_file=".harness/state/verify-scope"
           echo "reason=$scope_reason"
           echo "docs_only=false"
           echo "languages=$languages"
-        } > "$scope_file"
+        } > "$run_scope_file"
         ;;
     esac
   else
@@ -125,7 +159,7 @@ scope_file=".harness/state/verify-scope"
       echo "reason=requested_full"
       echo "docs_only=false"
       echo "languages=$languages"
-    } > "$scope_file"
+    } > "$run_scope_file"
   fi
 
   if [ -n "$languages" ]; then
@@ -140,8 +174,8 @@ scope_file=".harness/state/verify-scope"
       echo "==> Running $lang verifier"
       ran_any=1
       lang_roots=""
-      if [ -f "$scope_file" ]; then
-        lang_roots="$(sed -n "s/^${lang}_roots=//p" "$scope_file" | sed -n '1p')"
+      if [ -f "$run_scope_file" ]; then
+        lang_roots="$(sed -n "s/^${lang}_roots=//p" "$run_scope_file" | sed -n '1p')"
       fi
       if [ -n "$lang_roots" ]; then
         echo "==> ${lang} project roots selected: $lang_roots"
@@ -194,13 +228,12 @@ scope_file=".harness/state/verify-scope"
         ""|docs/*|README.md|AGENTS.md|CLAUDE.md|.claude/*)
           ;;
         *)
-          echo "$file" > .harness/state/non_docs_change
+          echo "$file" > "$run_non_docs_file"
           ;;
       esac
     done
-    if [ -f .harness/state/non_docs_change ]; then
+    if [ -s "$run_non_docs_file" ]; then
       docs_only=0
-      rm -f .harness/state/non_docs_change
     fi
   fi
 
@@ -253,7 +286,7 @@ scope_file=".harness/state/verify-scope"
     echo "==> Branch secret scan failed: see \"secret-scan-branch:\" above."
   fi
 
-  printf '%s' "$status" > "$status_file"
+  printf '%s' "$status" > "$run_status_file"
 } 2>&1 | tee "$evidence_file"
 
 echo ""
@@ -274,12 +307,32 @@ if [ -d "docs/evidence" ]; then
   rm -f "$ev_list_tmp"
 fi
 
-# Read exit code from status file
-verify_status=0
-if [ -f "$status_file" ]; then
-  verify_status="$(cat "$status_file")"
-  rm -f "$status_file"
+# Leave this run's scope behind for readers of .harness/state/verify-scope.
+# Write it under a per-run name in .harness/state/ and rename it into place,
+# so a reader never sees a half-written file. A block that died before
+# writing the scope leaves the previous file as it was.
+if [ -s "$run_scope_file" ]; then
+  scope_publish_tmp=".harness/state/verify-scope.$$.tmp"
+  cat "$run_scope_file" > "$scope_publish_tmp"
+  mv -f "$scope_publish_tmp" "$scope_file"
+  scope_publish_tmp=""
 fi
+
+# Read this run's exit code from its status file. The block writes it last,
+# so a missing, unreadable, empty, or non-numeric value means the block did
+# not finish (killed, or a command failed under set -e): a failure, never a
+# success. Only a plain exit status 0-255 is taken as is.
+verify_status=""
+if [ -r "$run_status_file" ]; then
+  verify_status="$(cat "$run_status_file" 2>/dev/null || true)"
+fi
+case "$verify_status" in
+  0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+  *)
+    echo "run-verify.sh: could not read this run's exit code; treating it as a failure" >&2
+    verify_status=1
+    ;;
+esac
 
 # Clear needs-verify marker on success
 if [ "$verify_status" = "0" ] && [ -f .harness/state/needs-verify ]; then

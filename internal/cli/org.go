@@ -38,7 +38,9 @@ func newOrgCmd() *cobra.Command {
 			"absent or stopped. `ralph org escalate` and `ralph org inbox` keep the\n" +
 			"org inbox, which every org in the ledger shares, next to the manifest,\n" +
 			"and `ralph org approve` records a human's approval of the plan a feature\n" +
-			"org's leader asked for there.",
+			"org's leader asked for there. `ralph org gate` runs the verification\n" +
+			"scripts on the head a feature org's leader pushes and records which head\n" +
+			"passed on which base.",
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, approve, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
@@ -59,6 +61,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgEscalateCmd(&orgID, &stateDir, &configPath),
 		newOrgInboxCmd(&stateDir, &configPath),
 		newOrgApproveCmd(&stateDir, &configPath),
+		newOrgGateCmd(&orgID, &stateDir, &configPath),
 	)
 
 	return cmd

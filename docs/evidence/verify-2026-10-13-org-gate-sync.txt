@@ -1,0 +1,54 @@
+### HEAD: 31ae9f7ded4db6187bda45e065c9681b456772d0
+### cmd: ./scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      167
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+### exit=0
+
+### cmd: ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+### exit=0
+
+### cmd: cmp .claude/skills/org/SKILL.md <each of the other 3 copies>
+.agents/skills/org/SKILL.md exit=0
+templates/base/.claude/skills/org/SKILL.md exit=0
+templates/base/.agents/skills/org/SKILL.md exit=0
+### cmd: cmp scripts/run-verify.sh templates/base/scripts/run-verify.sh
+### exit=0
+### cmd: git diff --check 697e1577..HEAD (since verify cycle 3)
+### exit=0
+### cmd: git diff --check 1bddc871...HEAD (whole branch), findings per file
+   2 docs/evidence/test-2026-10-13-org-gate-mutation.txt
+  14 docs/evidence/test-2026-10-13-org-gate-run-test.txt
+### exit=2

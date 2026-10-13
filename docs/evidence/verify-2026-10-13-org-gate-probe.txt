@@ -1,0 +1,926 @@
+# Scratch-ledger probe of ralph org gate (built from HEAD c84d8e190cc526c02ed60f8a8a6e8a12d8182cc0)
+# $SP = the verifier's scratchpad directory (outside every repository)
+# binary: go build -o $SP/ralph-org-gate ./cmd/ralph
+
+## probe script
+```sh
+#!/bin/sh
+# Scratch-ledger probe of `ralph org gate` (built binary), plan org-gate
+# Verify plan "Evidence to capture". No herdr, agmsg, or network.
+set -u
+SP="$SP"
+RALPH="$SP/ralph-org-gate"
+W="$SP/gate-probe"
+rm -rf "$W"
+mkdir -p "$W"
+W="$(cd "$W" && pwd -P)"
+printf '[user]\n\tname = probe\n\temail = probe@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1
+unset HERDR_PANE_ID RALPH_ORG_STATE_DIR
+export USER=probe
+
+git init --quiet --bare "$W/origin.git"
+git init --quiet -b main "$W/main"
+cd "$W/main" || exit 1
+mkdir -p scripts
+printf '.harness/\ndocs/evidence/*.log\n' > .gitignore
+cat > scripts/run-static-verify.sh <<'EOF'
+#!/bin/sh
+echo "static: RALPH_VERIFY_SCOPE=${RALPH_VERIFY_SCOPE:-} RALPH_VERIFY_BASE=${RALPH_VERIFY_BASE:-<unset>} HARNESS_VERIFY_X=${HARNESS_VERIFY_X:-<unset>}"
+exit "$(cat "$PROBE_OUT/exit-static" 2>/dev/null || echo 0)"
+EOF
+cat > scripts/run-test.sh <<'EOF'
+#!/bin/sh
+i=1; while [ "$i" -le 30 ]; do echo "test line $i"; i=$((i + 1)); done
+exit "$(cat "$PROBE_OUT/exit-test" 2>/dev/null || echo 0)"
+EOF
+chmod +x scripts/*.sh
+git add . && git commit --quiet -m init
+git remote add origin "$W/origin.git"
+git push --quiet -u origin main
+git remote set-head origin main
+git worktree add --quiet -b feat/probe "$W/wt-probe"
+
+STATE="$W/state"
+mkdir -p "$STATE" "$W/out"
+export PROBE_OUT="$W/out"
+WT="$W/wt-probe"
+cat > "$STATE/manifest.jsonl" <<EOF
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+EOF
+
+gate() {
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" "$@"
+}
+section() { printf '\n######## %s\n' "$1"; }
+lines() { wc -l < "$STATE/manifest.jsonl" | tr -d ' '; }
+
+section "P1 clean worktree, HEAD contains origin/main, caller env with RALPH_VERIFY_BASE=HEAD"
+cd "$WT" || exit 1
+RALPH_VERIFY_BASE=HEAD RALPH_VERIFY_SCOPE=changed HARNESS_VERIFY_X=1 gate; echo "exit=$?"
+echo "manifest lines=$(lines)"; tail -n 1 "$STATE/manifest.jsonl"
+echo "git status --porcelain --ignored (worktree):"; git status --porcelain --untracked-files=all --ignored; echo "(end)"
+ls "$STATE/gates"
+grep -n "static:" "$STATE"/gates/*.log
+
+section "P2 untracked file: refused, nothing recorded"
+before=$(lines)
+echo x > untracked.txt
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+rm -f untracked.txt
+
+section "P3 origin/main moved ahead (HEAD does not contain it): refused"
+cd "$W/main" || exit 1
+git commit --quiet --allow-empty -m ahead && git push --quiet origin main
+cd "$WT" || exit 1
+git fetch --quiet origin main
+before=$(lines)
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+git rebase --quiet origin/main && echo "rebased: $(git rev-parse --short HEAD)"
+
+section "P4 run from a subdirectory, test script fails: gate_failed test_failed"
+echo 1 > "$PROBE_OUT/exit-test"
+cd "$WT/scripts" || exit 1
+gate; echo "exit=$?"
+echo "manifest lines=$(lines)"; tail -n 1 "$STATE/manifest.jsonl"
+rm -f "$PROBE_OUT/exit-test"
+
+section "P5 static script fails: gate_failed static_failed, run-test.sh not run"
+echo 2 > "$PROBE_OUT/exit-static"
+cd "$WT" || exit 1
+gate; echo "exit=$?"
+tail -n 1 "$STATE/manifest.jsonl"
+rm -f "$PROBE_OUT/exit-static"
+echo "last log has run-test.sh header? $(grep -c 'running ./scripts/run-test.sh' "$(ls -t "$STATE"/gates/*.log | head -n 1)")"
+
+section "P6 detached HEAD: refused"
+git switch --quiet --detach
+before=$(lines)
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+git switch --quiet feat/probe
+
+section "P7 main checkout (outside the feature worktree): refused"
+cd "$W/main" || exit 1
+gate; echo "exit=$?"
+
+section "P8 unknown org: refused"
+cd "$WT" || exit 1
+"$RALPH" org gate --org-id nosuch --state-dir "$STATE"; echo "exit=$?"
+
+section "P9 pass again after the failures, then the full manifest"
+gate; echo "exit=$?"
+cat "$STATE/manifest.jsonl"
+```
+
+## output (sh $SP/gate-probe.sh, rc=0)
+```
+
+######## P1 clean worktree, HEAD contains origin/main, caller env with RALPH_VERIFY_BASE=HEAD
+GATE: pass
+HEAD: 5e8cee816bc78c4171e943b3ea4682154474925f
+BASE: 5e8cee816bc78c4171e943b3ea4682154474925f
+LOG: $SP/gate-probe/state/gates/probe-20261013T072733Z.log
+exit=0
+manifest lines=3
+{"ts":"2026-10-13T07:27:34Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5e8cee816bc78c4171e943b3ea4682154474925f base=5e8cee816bc78c4171e943b3ea4682154474925f base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072733Z.log\""}
+git status --porcelain --ignored (worktree):
+(end)
+probe-20261013T072733Z.log
+8:static: RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=<unset> HARNESS_VERIFY_X=<unset>
+
+######## P2 untracked file: refused, nothing recorded
+org: gate: the feature worktree $SP/gate-probe/wt-probe has 1 uncommitted change(s) or untracked file(s): commit or remove them (a file the scripts write belongs in .gitignore) and run the gate again:
+  ?? untracked.txt
+exit=1
+manifest lines before=3 after=3
+
+######## P3 origin/main moved ahead (HEAD does not contain it): refused
+org: gate: HEAD 5e8cee816bc78c4171e943b3ea4682154474925f of feat/probe does not contain refs/remotes/origin/main's tip 3138a0eb07bbf6d57fd89e8d6db38f783da3df66: run `git fetch origin main` and `git rebase refs/remotes/origin/main`, then run the gate again
+exit=1
+manifest lines before=3 after=3
+rebased: 3138a0e
+
+######## P4 run from a subdirectory, test script fails: gate_failed test_failed
+GATE: fail
+REASON: test_failed
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072735Z.log
+
+last 20 lines of ./scripts/run-test.sh:
+  test line 11
+  test line 12
+  test line 13
+  test line 14
+  test line 15
+  test line 16
+  test line 17
+  test line 18
+  test line 19
+  test line 20
+  test line 21
+  test line 22
+  test line 23
+  test line 24
+  test line 25
+  test line 26
+  test line 27
+  test line 28
+  test line 29
+  test line 30
+org: gate: recorded gate_failed (reason=test_failed); nothing to push until the gate passes
+exit=1
+manifest lines=4
+{"ts":"2026-10-13T07:27:35Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=test_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072735Z.log\""}
+
+######## P5 static script fails: gate_failed static_failed, run-test.sh not run
+GATE: fail
+REASON: static_failed
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072736Z.log
+
+last line of ./scripts/run-static-verify.sh:
+  static: RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=<unset> HARNESS_VERIFY_X=<unset>
+org: gate: recorded gate_failed (reason=static_failed); nothing to push until the gate passes
+exit=1
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=static_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z.log\""}
+last log has run-test.sh header? 0
+
+######## P6 detached HEAD: refused
+org: gate: HEAD is detached in $SP/gate-probe/wt-probe, not on the feature branch feat/probe: run git switch feat/probe and run the gate again
+exit=1
+manifest lines before=5 after=5
+
+######## P7 main checkout (outside the feature worktree): refused
+org: gate: the gate ran in the git worktree $SP/gate-probe/main, not in org_id "probe"'s feature worktree $SP/gate-probe/wt-probe: cd into $SP/gate-probe/wt-probe and run the gate again
+exit=1
+
+######## P8 unknown org: refused
+org: gate: org_id "nosuch" is not running and holds no split plan feature binding: name the org_id of a feature org that ralph org start --plan started (ralph org status lists them)
+exit=1
+
+######## P9 pass again after the failures, then the full manifest
+GATE: pass
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072736Z-2.log
+exit=0
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$SP/gate-probe/wt-probe","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+{"ts":"2026-10-13T07:27:34Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5e8cee816bc78c4171e943b3ea4682154474925f base=5e8cee816bc78c4171e943b3ea4682154474925f base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072733Z.log\""}
+{"ts":"2026-10-13T07:27:35Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=test_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072735Z.log\""}
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=static_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z.log\""}
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z-2.log\""}
+```
+
+## shellcheck 0.11.0 without the SC2329 disable line of scripts/run-verify.sh
+```
+
+In $SP/rv-nodisable.sh line 47:
+cleanup_run_files() {
+^-- SC2329 (info): This function is never invoked. Check usage (or ignored if invoked indirectly).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2329 -- This function is never invoked. C...
+```
+
+# Cycle 2: interrupt probe (cross-review cycle 1 #1, fixed in b04289c1)
+# $SP = the verifier's scratchpad directory, as above
+# HEAD binary:    go build -o $SP/ralph-c2-head ./cmd/ralph   (worktree at e1bd6b81160ebcd324eb4a095509b20e6ac560ab)
+# pre-fix binary: git archive 789c8864 | tar -x -C $SP/src-prefix; (cd $SP/src-prefix && go build -o $SP/ralph-c2-prefix ./cmd/ralph)
+#                 (789c8864 = b04289c1^; its internal/, cmd/, scripts/ equal those of c84d8e19, the cycle 1 probe's HEAD)
+# run: SP=$SP RALPH=$SP/ralph-c2-<head|prefix> TAG=<head|prefix> sh $SP/gate-probe-c2.sh
+
+## probe script (cycle 2)
+```sh
+#!/bin/sh
+# Scratch-ledger probe of `ralph org gate` interrupts (cycle 2, cross-review cycle 1 #1).
+# RALPH = the binary under test, TAG = a name for the scratch dir. No herdr, agmsg, or network.
+set -u
+SP="$SP"
+RALPH="${RALPH:?}"
+W="$SP/gate-probe-c2-${TAG:?}"
+rm -rf "$W"
+mkdir -p "$W"
+W="$(cd "$W" && pwd -P)"
+printf '[user]\n\tname = probe\n\temail = probe@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1
+unset HERDR_PANE_ID RALPH_ORG_STATE_DIR
+export USER=probe
+
+git init --quiet --bare "$W/origin.git"
+git init --quiet -b main "$W/main"
+cd "$W/main" || exit 1
+mkdir -p scripts
+printf '.harness/\ndocs/evidence/*.log\n' > .gitignore
+cat > scripts/run-static-verify.sh <<'EOF'
+#!/bin/sh
+echo "static: ok"
+exit 0
+EOF
+cat > scripts/run-test.sh <<'EOF'
+#!/bin/sh
+echo "test: start"
+if [ -f "$PROBE_OUT/sleep-test" ]; then
+  sleep 30 &
+  echo "$!" > "$PROBE_OUT/sleep-pid"
+  wait
+fi
+echo "test: done"
+exit 0
+EOF
+chmod +x scripts/*.sh
+git add . && git commit --quiet -m init
+git remote add origin "$W/origin.git"
+git push --quiet -u origin main
+git remote set-head origin main
+git worktree add --quiet -b feat/probe "$W/wt-probe"
+
+STATE="$W/state"
+mkdir -p "$STATE" "$W/out"
+export PROBE_OUT="$W/out"
+WT="$W/wt-probe"
+cat > "$STATE/manifest.jsonl" <<EOF
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+EOF
+
+section() { printf '\n######## %s\n' "$1"; }
+lines() { wc -l < "$STATE/manifest.jsonl" | tr -d ' '; }
+now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
+elapsed() { perl -e 'printf "%.2fs\n", $ARGV[1] - $ARGV[0]' "$1" "$2"; }
+# hold_lock SECONDS: take $STATE/manifest.lock (flock LOCK_EX, as another gate or spawn would) for SECONDS.
+hold_lock() {
+  rm -f "$PROBE_OUT/lock-held"
+  perl -MFcntl=:flock -e '$|=1; open(my $f, ">>", $ARGV[0]) or die "open: $!"; flock($f, LOCK_EX) or die "flock: $!"; print "held\n"; sleep $ARGV[1];' \
+    "$STATE/manifest.lock" "$1" > "$PROBE_OUT/lock-held" &
+  LOCKPID=$!
+  i=0
+  until grep -q held "$PROBE_OUT/lock-held" 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "lock not held"; exit 1; }
+    sleep 0.05
+  done
+}
+# wait_for_log TEXT: wait up to 10s for the newest gate log to hold TEXT.
+wait_for_log() {
+  i=0
+  while :; do
+    log=$(ls -t "$STATE"/gates/*.log 2>/dev/null | head -n 1)
+    [ -n "$log" ] && grep -qF "$1" "$log" && return 0
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "log never held: $1"; return 1; }
+    sleep 0.05
+  done
+}
+# lock_wait_case SIGNAL: scripts pass, the manifest lock is held for 3s, SIGNAL lands 0.5s after run-test.sh exits.
+lock_wait_case() {
+  before=$(lines)
+  hold_lock 3
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+  GP=$!
+  wait_for_log "==> ralph org gate: ./scripts/run-test.sh exited 0"
+  sleep 0.5
+  t0=$(now)
+  kill "-$1" "$GP"
+  wait "$GP"; rc=$?
+  t1=$(now)
+  echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIG$1"
+  echo "stdout:"; cat "$PROBE_OUT/stdout"
+  echo "stderr:"; cat "$PROBE_OUT/stderr"
+  wait "$LOCKPID" 2>/dev/null
+  echo "manifest lines before=$before after=$(lines) (after the lock holder ended)"
+}
+
+cd "$WT" || exit 1
+
+section "Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case TERM
+
+section "Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case HUP
+
+section "Q3 control: no interrupt, lock held for 2s: gate waits, then records"
+before=$(lines)
+hold_lock 2
+t0=$(now)
+"$RALPH" org gate --org-id probe --state-dir "$STATE"; rc=$?
+t1=$(now)
+echo "exit=$rc, took $(elapsed "$t0" "$t1")"
+wait "$LOCKPID" 2>/dev/null
+echo "manifest lines before=$before after=$(lines)"; tail -n 1 "$STATE/manifest.jsonl" | cut -c1-120
+
+section "Q4 SIGINT while run-test.sh runs (its child sleeps 30s)"
+before=$(lines)
+: > "$PROBE_OUT/sleep-test"
+rm -f "$PROBE_OUT/sleep-pid"
+"$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+GP=$!
+i=0; until [ -s "$PROBE_OUT/sleep-pid" ]; do i=$((i + 1)); [ "$i" -gt 200 ] && break; sleep 0.05; done
+SLEEPPID=$(cat "$PROBE_OUT/sleep-pid")
+t0=$(now)
+kill -INT "$GP"
+wait "$GP"; rc=$?
+t1=$(now)
+echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIGINT"
+echo "stdout:"; cat "$PROBE_OUT/stdout"
+echo "stderr:"; cat "$PROBE_OUT/stderr"
+if kill -0 "$SLEEPPID" 2>/dev/null; then echo "script's child sleep: still running"; kill "$SLEEPPID"; else echo "script's child sleep: gone"; fi
+rm -f "$PROBE_OUT/sleep-test"
+echo "manifest lines before=$before after=$(lines)"
+
+section "manifest events"
+cut -d, -f4 "$STATE/manifest.jsonl"
+```
+
+## output, HEAD binary (TAG=head, rc=0)
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c2-head/state/gates/probe-20261013T112752Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c2-head/state/gates/probe-20261013T112754Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 21446666a851e15217bbc0a8fabec22e0dcce0a3
+BASE: 21446666a851e15217bbc0a8fabec22e0dcce0a3
+LOG: $SP/gate-probe-c2-head/state/gates/probe-20261013T112757Z.log
+exit=0, took 2.02s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T11:27:59Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=21446666a851e15217bbc0a
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.02s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c2-head/state/gates/probe-20261013T112759Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+## output, pre-fix binary 789c8864 (TAG=prefix, rc=0): the negative control
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=0, returned 0.77s after SIGTERM
+stdout:
+GATE: pass
+HEAD: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+BASE: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+LOG: $SP/gate-probe-c2-prefix/state/gates/probe-20261013T112809Z.log
+stderr:
+manifest lines before=2 after=3 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=0, returned 2.40s after SIGHUP
+stdout:
+GATE: pass
+HEAD: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+BASE: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+LOG: $SP/gate-probe-c2-prefix/state/gates/probe-20261013T112811Z.log
+stderr:
+manifest lines before=3 after=4 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+BASE: 210f18065ff96f8a8ece7f9860409c20ed02f54e
+LOG: $SP/gate-probe-c2-prefix/state/gates/probe-20261013T112814Z.log
+exit=0, took 2.02s
+manifest lines before=4 after=5
+{"ts":"2026-10-13T11:28:16Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=210f18065ff96f8a8ece7f9
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c2-prefix/state/gates/probe-20261013T112817Z.log
+script's child sleep: gone
+manifest lines before=5 after=5
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+"event":"gate_passed"
+"event":"gate_passed"
+```
+
+# Cycle 3: interrupt probe on the CI/release toolchain (8b681dc3: gateSignalContext replaces signal.NotifyContext)
+# $SP = the verifier's scratchpad directory, as above
+# HEAD binary, go1.25.8:    GOTOOLCHAIN=go1.25.8 go build -o $SP/ralph-c3-head-go1258 ./cmd/ralph   (worktree at a538c899d4f07bb8f8c9011f44aaccdbf6a9f237)
+# HEAD binary, go1.26.0:    go build -o $SP/ralph-c3-head-go1260 ./cmd/ralph
+# pre-fix binary, go1.25.8: git archive f001bd4f | tar -x -C $SP/src-c3-prefix; (cd $SP/src-c3-prefix && GOTOOLCHAIN=go1.25.8 go build -o $SP/ralph-c3-prefix-go1258 ./cmd/ralph)
+#                           (f001bd4f = 8b681dc3^; git diff --stat f001bd4f a538c899 -- internal cmd scripts lists only internal/cli/org_gate.go and org_gate_test.go)
+# go version <binary>: go1.25.8, go1.26.0, go1.25.8
+# run: SP=$SP RALPH=$SP/ralph-c3-<tag> TAG=<tag> sh $SP/gate-probe-c3.sh   (sh -n passed; no leftover probe processes afterwards: pgrep found none)
+
+## probe script (cycle 3)
+```sh
+#!/bin/sh
+# Scratch-ledger probe of `ralph org gate` interrupts (cycle 3, 8b681dc3: the
+# interrupt error names the signal on Go 1.25.8). Same repo, ledger, and Q1-Q4
+# as the cycle 2 probe; Q5-Q7 are new. RALPH = the binary under test, TAG = a
+# name for the scratch dir. HOME and XDG_CONFIG_HOME point into the scratch
+# dir. No herdr, agmsg, osascript, or network.
+set -u
+SP="$SP"
+RALPH="${RALPH:?}"
+W="$SP/gate-probe-c3-${TAG:?}"
+rm -rf "$W"
+mkdir -p "$W/home/.config"
+W="$(cd "$W" && pwd -P)"
+export HOME="$W/home" XDG_CONFIG_HOME="$W/home/.config"
+printf '[user]\n\tname = probe\n\temail = probe@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1
+unset HERDR_PANE_ID RALPH_ORG_STATE_DIR
+export USER=probe
+
+git init --quiet --bare "$W/origin.git"
+git init --quiet -b main "$W/main"
+cd "$W/main" || exit 1
+mkdir -p scripts
+printf '.harness/\ndocs/evidence/*.log\n' > .gitignore
+cat > scripts/run-static-verify.sh <<'EOF'
+#!/bin/sh
+echo "static: ok"
+exit 0
+EOF
+cat > scripts/run-test.sh <<'EOF'
+#!/bin/sh
+echo "test: start"
+if [ -f "$PROBE_OUT/sleep-test" ]; then
+  if [ -f "$PROBE_OUT/slow-term" ]; then
+    trap 'echo "test: got TERM, exiting in 1s"; sleep 1; echo "test: exiting"; exit 143' TERM
+  fi
+  sleep 30 &
+  echo "$!" > "$PROBE_OUT/sleep-pid"
+  wait
+fi
+echo "test: done"
+exit 0
+EOF
+chmod +x scripts/*.sh
+git add . && git commit --quiet -m init
+git remote add origin "$W/origin.git"
+git push --quiet -u origin main
+git remote set-head origin main
+git worktree add --quiet -b feat/probe "$W/wt-probe"
+
+STATE="$W/state"
+mkdir -p "$STATE" "$W/out"
+export PROBE_OUT="$W/out"
+WT="$W/wt-probe"
+cat > "$STATE/manifest.jsonl" <<EOF
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+EOF
+
+section() { printf '\n######## %s\n' "$1"; }
+lines() { wc -l < "$STATE/manifest.jsonl" | tr -d ' '; }
+now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
+elapsed() { perl -e 'printf "%.2fs\n", $ARGV[1] - $ARGV[0]' "$1" "$2"; }
+# hold_lock SECONDS: take $STATE/manifest.lock (flock LOCK_EX, as another gate or spawn would) for SECONDS.
+hold_lock() {
+  rm -f "$PROBE_OUT/lock-held"
+  perl -MFcntl=:flock -e '$|=1; open(my $f, ">>", $ARGV[0]) or die "open: $!"; flock($f, LOCK_EX) or die "flock: $!"; print "held\n"; sleep $ARGV[1];' \
+    "$STATE/manifest.lock" "$1" > "$PROBE_OUT/lock-held" &
+  LOCKPID=$!
+  i=0
+  until grep -q held "$PROBE_OUT/lock-held" 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "lock not held"; exit 1; }
+    sleep 0.05
+  done
+}
+# wait_for_log TEXT: wait up to 10s for the newest gate log to hold TEXT.
+wait_for_log() {
+  i=0
+  while :; do
+    log=$(ls -t "$STATE"/gates/*.log 2>/dev/null | head -n 1)
+    [ -n "$log" ] && grep -qF "$1" "$log" && return 0
+    i=$((i + 1)); [ "$i" -gt 200 ] && { echo "log never held: $1"; return 1; }
+    sleep 0.05
+  done
+}
+# lock_wait_case SIGNAL: scripts pass, the manifest lock is held for 3s, SIGNAL lands 0.5s after run-test.sh exits.
+lock_wait_case() {
+  before=$(lines)
+  hold_lock 3
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+  GP=$!
+  wait_for_log "==> ralph org gate: ./scripts/run-test.sh exited 0"
+  sleep 0.5
+  t0=$(now)
+  kill "-$1" "$GP"
+  wait "$GP"; rc=$?
+  t1=$(now)
+  echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIG$1"
+  echo "stdout:"; cat "$PROBE_OUT/stdout"
+  echo "stderr:"; cat "$PROBE_OUT/stderr"
+  wait "$LOCKPID" 2>/dev/null
+  echo "manifest lines before=$before after=$(lines) (after the lock holder ended)"
+}
+# script_case SIGNAL [SECOND_SIGNAL]: SIGNAL lands while run-test.sh's child sleeps 30s.
+# With SECOND_SIGNAL, run-test.sh traps TERM and takes 1s to exit, and
+# SECOND_SIGNAL lands 0.3s after SIGNAL, while gate still waits for the group.
+script_case() {
+  before=$(lines)
+  : > "$PROBE_OUT/sleep-test"
+  rm -f "$PROBE_OUT/sleep-pid" "$PROBE_OUT/slow-term"
+  [ -n "${2:-}" ] && : > "$PROBE_OUT/slow-term"
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" > "$PROBE_OUT/stdout" 2> "$PROBE_OUT/stderr" &
+  GP=$!
+  i=0; until [ -s "$PROBE_OUT/sleep-pid" ]; do i=$((i + 1)); [ "$i" -gt 200 ] && break; sleep 0.05; done
+  SLEEPPID=$(cat "$PROBE_OUT/sleep-pid")
+  t0=$(now)
+  kill "-$1" "$GP"
+  if [ -n "${2:-}" ]; then
+    sleep 0.3
+    if kill "-$2" "$GP" 2>/dev/null; then echo "SIG$2 sent 0.3s after SIG$1 (gate still running)"; else echo "SIG$2 not sent: gate had already exited"; fi
+  fi
+  wait "$GP"; rc=$?
+  t1=$(now)
+  echo "exit=$rc, returned $(elapsed "$t0" "$t1") after SIG$1"
+  echo "stdout:"; cat "$PROBE_OUT/stdout"
+  echo "stderr:"; cat "$PROBE_OUT/stderr"
+  if kill -0 "$SLEEPPID" 2>/dev/null; then echo "script's child sleep: still running"; kill "$SLEEPPID"; else echo "script's child sleep: gone"; fi
+  if [ -n "${2:-}" ]; then
+    log=$(ls -t "$STATE"/gates/*.log | head -n 1)
+    echo "log lines from the script's TERM trap:"; grep -E '^test: (got TERM|exiting)' "$log"
+  fi
+  rm -f "$PROBE_OUT/sleep-test" "$PROBE_OUT/slow-term"
+  echo "manifest lines before=$before after=$(lines)"
+}
+
+cd "$WT" || exit 1
+
+section "Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case TERM
+
+section "Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)"
+lock_wait_case HUP
+
+section "Q3 control: no interrupt, lock held for 2s: gate waits, then records"
+before=$(lines)
+hold_lock 2
+t0=$(now)
+"$RALPH" org gate --org-id probe --state-dir "$STATE"; rc=$?
+t1=$(now)
+echo "exit=$rc, took $(elapsed "$t0" "$t1")"
+wait "$LOCKPID" 2>/dev/null
+echo "manifest lines before=$before after=$(lines)"; tail -n 1 "$STATE/manifest.jsonl" | cut -c1-120
+
+section "Q4 SIGINT while run-test.sh runs (its child sleeps 30s)"
+script_case INT
+
+section "Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)"
+script_case TERM
+
+section "Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)"
+script_case HUP
+
+section "Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM"
+script_case INT INT
+
+section "manifest events"
+cut -d, -f4 "$STATE/manifest.jsonl"
+```
+
+## output, HEAD binary built with go1.25.8 (TAG=head-go1258, rc=0)
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135128Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135130Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 5904c5bec49952a6d073ef8a31430e0807d9fd38
+BASE: 5904c5bec49952a6d073ef8a31430e0807d9fd38
+LOG: $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135133Z.log
+exit=0, took 2.02s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:51:35Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5904c5bec49952a6d073ef8
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.05s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135135Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135136Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.03s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135137Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.06s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1258/state/gates/probe-20261013T135138Z.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+## output, pre-fix binary f001bd4f built with go1.25.8 (TAG=prefix-go1258, rc=0): the negative control
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.03s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135142Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135143Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: 58f18d3cb7037d9936dc06b5960eecbfe7144209
+BASE: 58f18d3cb7037d9936dc06b5960eecbfe7144209
+LOG: $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135147Z.log
+exit=0, took 2.01s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:51:48Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=58f18d3cb7037d9936dc06b
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.02s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135149Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135149Z-2.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135150Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.09s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-prefix-go1258/state/gates/probe-20261013T135150Z-2.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+## output, HEAD binary built with go1.26.0 (TAG=head-go1260, rc=0)
+```
+
+######## Q1 SIGTERM while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135154Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q2 SIGHUP while gate waits for a held manifest lock (scripts passed)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135156Z.log
+manifest lines before=2 after=2 (after the lock holder ended)
+
+######## Q3 control: no interrupt, lock held for 2s: gate waits, then records
+GATE: pass
+HEAD: fc8ab9c32bf9d77d843f756cb0e57e725a9433ed
+BASE: fc8ab9c32bf9d77d843f756cb0e57e725a9433ed
+LOG: $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135159Z.log
+exit=0, took 2.03s
+manifest lines before=2 after=3
+{"ts":"2026-10-13T13:52:01Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=fc8ab9c32bf9d77d843f756
+
+######## Q4 SIGINT while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135201Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q5 SIGTERM while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.01s after SIGTERM
+stdout:
+stderr:
+org: gate: interrupted (terminated signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135201Z-2.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q6 SIGHUP while run-test.sh runs (its child sleeps 30s)
+exit=1, returned 0.02s after SIGHUP
+stdout:
+stderr:
+org: gate: interrupted (hangup signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135202Z.log
+script's child sleep: gone
+manifest lines before=3 after=3
+
+######## Q7 SIGINT, then a second SIGINT 0.3s later while run-test.sh takes 1s to exit on TERM
+SIGINT sent 0.3s after SIGINT (gate still running)
+exit=1, returned 1.07s after SIGINT
+stdout:
+stderr:
+org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $SP/gate-probe-c3-head-go1260/state/gates/probe-20261013T135203Z.log
+script's child sleep: gone
+log lines from the script's TERM trap:
+test: got TERM, exiting in 1s
+test: exiting
+manifest lines before=3 after=3
+
+######## manifest events
+"event":"scope_reserved"
+"event":"spawned"
+"event":"gate_passed"
+```
+
+# Cycle 4: git-level probe of the leader's step 9 order (f1b0352e, cross-review cycle 3 #1)
+# $SP = the verifier's scratchpad directory, as above
+# Pure git (git version 2.49.0), no ralph binary, no network: a bare origin, a clone on feat/x,
+# a second clone that advances origin/main. GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM are /dev/null.
+# run: sh $SP/rebase-probe.sh $SP   (sh -n passed)
+
+## probe script (cycle 4)
+```sh
+#!/bin/sh
+# Probe for cross-review cycle 3 #1 of org-gate: does git rebase start over a
+# rewritten (tracked, unstaged) reviewer report, and does committing it first
+# (the new step 9) let the rebase run? Pure git, no ralph, no network.
+set -u
+SP=$1
+rm -rf "$SP/rbp"
+mkdir -p "$SP/rbp"
+cd "$SP/rbp" || exit 1
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME=p GIT_AUTHOR_EMAIL=p@example.invalid
+export GIT_COMMITTER_NAME=p GIT_COMMITTER_EMAIL=p@example.invalid
+git init -q --bare -b main origin.git
+git clone -q origin.git work 2>/dev/null
+cd work || exit 1
+git switch -q -c main 2>/dev/null || true
+echo base > base.txt && git add base.txt && git commit -q -m base && git push -q origin main
+git switch -q -c feat/x
+echo feat > feat.txt && git add feat.txt && git commit -q -m feat
+
+echo "## P1 first pass: reviewer report is a new untracked file, origin/main advanced"
+( cd .. && git clone -q origin.git other && cd other && echo up1 > up1.txt && git add up1.txt && git commit -q -m up1 && git push -q origin main )
+mkdir -p docs/reports && echo "review 1" > docs/reports/review.md
+git fetch -q origin main
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$? (untracked report left in place: $(git status --porcelain))"
+git add docs/reports/review.md && git commit -q -m "docs: review 1"
+
+echo "## P2 gate retry, old order: reviewer rewrites the committed report, origin/main advanced again"
+( cd ../other && echo up2 > up2.txt && git add up2.txt && git commit -q -m up2 && git push -q origin main )
+echo "review 2" > docs/reports/review.md
+git fetch -q origin main
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+out=$(git rebase origin/main 2>&1); rc=$?
+echo "rebase rc=$rc"
+printf '%s\n' "$out" | sed -n 1,3p
+echo "rebase in progress: $(test -d .git/rebase-merge -o -d .git/rebase-apply && echo yes || echo no)"
+git rebase --abort >/dev/null 2>&1; echo "rebase --abort rc=$?"
+
+echo "## P3 gate retry, new order (step 9): commit the reviewer report, check porcelain, then rebase"
+git add docs/reports/review.md && git commit -q -m "docs: review 2"
+echo "porcelain: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor after rc=$?"
+git log --oneline --format=%s | head -6
+```
+
+## output (cycle 4)
+```
+## P1 first pass: reviewer report is a new untracked file, origin/main advanced
+rebase rc=0 (untracked report left in place: ?? docs/)
+## P2 gate retry, old order: reviewer rewrites the committed report, origin/main advanced again
+is-ancestor rc=1
+rebase rc=1
+error: cannot rebase: You have unstaged changes.
+error: Please commit or stash them.
+rebase in progress: no
+rebase --abort rc=128
+## P3 gate retry, new order (step 9): commit the reviewer report, check porcelain, then rebase
+porcelain: []
+rebase rc=0
+is-ancestor after rc=0
+docs: review 2
+docs: review 1
+feat
+up2
+up1
+base
+```

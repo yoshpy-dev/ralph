@@ -1,0 +1,440 @@
+### HEAD: 31ae9f7ded4db6187bda45e065c9681b456772d0
+### date: 2026-10-13T15:50:24Z
+### cmd: ./scripts/run-static-verify.sh (default changed scope)
+# Verification run
+- Timestamp: 2026-10-13T15:50:24Z
+- Mode: static
+- Requested scope: changed
+
+==> Running local verifier
+==> shellcheck hook + verify scripts
+    OK
+==> sh -n .claude/hooks/check_mojibake.sh
+    OK
+==> sh -n .claude/hooks/lib_json.sh
+    OK
+==> sh -n .claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n .claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n .claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n .claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n .claude/hooks/prompt_gate.sh
+    OK
+==> sh -n .claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n .claude/hooks/session_end_summary.sh
+    OK
+==> sh -n .claude/hooks/session_start_context.sh
+    OK
+==> sh -n templates/base/.claude/hooks/check_mojibake.sh
+    OK
+==> sh -n templates/base/.claude/hooks/lib_json.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n templates/base/.claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n templates/base/.claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n templates/base/.claude/hooks/prompt_gate.sh
+    OK
+==> sh -n templates/base/.claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_end_summary.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_start_context.sh
+    OK
+==> awk parse of the guard in .claude/hooks
+    OK
+==> awk parse of the guard in templates/base/.claude/hooks
+    OK
+==> jq -e . .claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git worktree:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git config:*)",
+      "Bash(git remote get-url:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh api:*)",
+      "Bash(codex exec:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(sort:*)",
+      "Bash(sed:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(sh -n:*)",
+      "Bash(bash -n:*)",
+      "Bash(claude:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go run:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(go install:*)",
+      "Bash(go tool:*)",
+      "Bash(go generate:*)",
+      "Bash(go list:*)",
+      "Bash(go env:*)",
+      "Bash(go fmt:*)",
+      "Bash(go version)",
+      "Bash(go clean:*)",
+      "Bash(go doc:*)",
+      "Bash(gofmt:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(staticcheck:*)",
+      "Bash(goimports:*)",
+      "Bash(shellcheck:*)",
+      "Bash(./ralph:*)",
+      "Bash(./bin/ralph:*)",
+      "Bash(bin/ralph:*)",
+      "Bash(./tests/*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUseFailure"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PreCompact"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionEnd"
+          }
+        ]
+      }
+    ]
+  }
+}
+    OK
+==> jq -e . templates/base/.claude/settings.json
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git worktree:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git config:*)",
+      "Bash(git remote get-url:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh api:*)",
+      "Bash(codex exec:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(sort:*)",
+      "Bash(sed:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(sh -n:*)",
+      "Bash(bash -n:*)",
+      "Bash(claude:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go run:*)",
+      "Bash(go mod:*)",
+      "Bash(go get:*)",
+      "Bash(go install:*)",
+      "Bash(go tool:*)",
+      "Bash(go generate:*)",
+      "Bash(go list:*)",
+      "Bash(go env:*)",
+      "Bash(go fmt:*)",
+      "Bash(go version)",
+      "Bash(go clean:*)",
+      "Bash(go doc:*)",
+      "Bash(gofmt:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(staticcheck:*)",
+      "Bash(goimports:*)",
+      "Bash(shellcheck:*)",
+      "Bash(./ralph:*)",
+      "Bash(./bin/ralph:*)",
+      "Bash(bin/ralph:*)",
+      "Bash(./tests/*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PostToolUseFailure"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh PreCompact"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/ralph-dispatch.sh SessionEnd"
+          }
+        ]
+      }
+    ]
+  }
+}
+    OK
+==> Codex hook single-source guard
+    OK
+==> Codex inline hook detector smoke test
+    OK
+==> Codex PR provenance policy guard
+    OK
+==> scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      167
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+    OK
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid
+[ok] .claude/skills/implement/SKILL.md: all pipeline steps referenced
+[ok] .claude/skills/cross-review/SKILL.md: all pipeline steps referenced
+[ok] .claude/rules/ralph/subagent-policy.md: all pipeline steps referenced
+[ok] docs/quality/definition-of-done.md: all pipeline steps referenced
+[ok] README.md: all pipeline steps referenced
+[ok] AGENTS.md: all pipeline steps referenced
+    OK
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+    OK
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> tech-debt README plan references
+    OK
+==> Language scope: full fallback (shared:scripts/run-verify.sh)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned 1bddc871..31ae9f7d against origin/main: clean
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-13-155024.log
+### exit=0
+
+### cmd: CI/release toolchain (go.mod `go 1.25.8`; release.yml uses go-version-file: go.mod), HEAD 31ae9f7d
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go build ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./internal/...
+rc=0
+$ "$(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt" -l internal/org/prompts_test.go
+rc=0

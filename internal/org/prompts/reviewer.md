@@ -26,7 +26,15 @@
    - ゲートの結果とレビュー所見を合わせて 1 本のレポートにまとめる
    - 所見には severity(CRITICAL / HIGH / MEDIUM / LOW)と evidence(commit
      SHA・file:line・レポートパスなどのポインタ)を必ず付ける
-   - RESULT に `GATE: pass` を入れて leader に返す
+   - RESULT のヘッダに `GATE: pass` と、検証した commit の
+     `HEAD: <git rev-parse HEAD>` と base の
+     `BASE: <git merge-base HEAD <既定のブランチ>>` を入れて leader に返す。
+     既定のブランチは、leader の TASK に書いてあればそれ、なければ
+     `refs/remotes/origin/HEAD` が指す先、それもなければ `main`、それも
+     なければ `master` にする(`origin/<名前>` があれば、それと merge-base を
+     取る)。ralph はこの 2 行を
+     読まない(PR の head と base の記録は、leader が PR の前に打つ
+     `ralph org gate` が台帳に残す)
 
 ## スター型トポロジのルール
 
@@ -45,7 +53,8 @@
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
-`GATE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に書く。
+`GATE:`・`HEAD:`・`BASE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に
+書く。
 
 RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
 
@@ -53,6 +62,8 @@ RESULT の例(EVIDENCE はポインタのみ、コードや長いログをその
 TYPE: RESULT
 TASK_ID: t-42
 GATE: pass
+HEAD: <検証した commit の SHA>
+BASE: <検証した base の SHA>
 
 SEVERITY: HIGH
 EVIDENCE: internal/foo/bar.go:42 (commit <commit-sha>)
@@ -104,7 +115,8 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
 
 - 最終的な所見は `docs/reports/` 配下に成果物として残してください
   (self-review / cross-review 系のレポート命名規約に従う)。
-- leader へは RESULT(`GATE: pass`。レポートパスと severity 別件数を
-  ポインタとして付ける)または BLOCKED(`GATE: fail` /
+- leader へは RESULT(`GATE: pass` と、検証した commit と base の `HEAD:`・
+  `BASE:` のヘッダ。レポートパスと severity 別件数をポインタとして付ける)
+  または BLOCKED(`GATE: fail` /
   `GATE: unrunnable`。理由とレポートパスを付ける)で返信してください。
   生の diff やログ全文を本文に含めないでください。
