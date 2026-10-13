@@ -630,3 +630,488 @@ FAIL
 FAIL	github.com/yoshpy-dev/ralph/internal/org	10.961s
 FAIL
 RC=1
+
+################################################################################
+# Cycle 3 (HEAD 697e1577, fix 8b681dc3: gateSignalContext replaces signal.NotifyContext). No tracked file was edited.
+# Go mutants of internal/cli/org_gate.go: a changed copy in the scratchpad (og3/mut/<ID>-org_gate.go), read through
+#   GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay og3/mut/<ID>.json ./internal/cli/ -v \
+#     -run '^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)'
+# Toolchain for every run below is go1.25.8 (go version go1.25.8 darwin/arm64) unless the block says go1.26.0.
+# Each compiled first (GOTOOLCHAIN=go1.25.8 go build -overlay og3/mut/<ID>.json ./internal/cli/, rc 0).
+# Targeted runs: one at a time, JST 23:06-23:09 (load average 4.1-7.4), while run-test.sh ran its shell suites.
+# Survivors of the targeted run were run again on the whole internal/cli package (go1.25.8, JST 23:27-23:36).
+################################################################################
+
+======== Go mutant X0 (org_gate.go): control: unchanged copy
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/X0-org_gate.go"}}
+(no diff: control)
+-- run: targeted, go1.25.8
+# X0 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/X0.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.13s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.06s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.931s
+RC=0 elapsed=4.7s
+-- run: targeted, go1.26.0
+# X0 toolchain=go1.26.0 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/X0.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.91s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.84s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.72s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.728s
+RC=0 elapsed=4.2s
+
+======== Go mutant M_a (org_gate.go): (a) helper is signal.NotifyContext
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_a-org_gate.go"}}
+126a127
+> 	return signal.NotifyContext(parent, sigs...)
+-- run: targeted, go1.25.8
+# M_a toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_a.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT4220623225/001/state/gates/a-20261013T140613Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM355301793/001/state/gates/a-20261013T140614Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP3609038652/001/state/gates/a-20261013T140614Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.58s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.66s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: context canceled
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.34s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.928s
+RC=1 elapsed=5.7s
+-- run: targeted, go1.26.0
+# M_a toolchain=go1.26.0 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_a.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.70s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.69s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.65s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.899s
+RC=0 elapsed=5.5s
+
+======== Go mutant M_b (org_gate.go): (b) cancel(nil) at the signal instead of the signal cause
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_b-org_gate.go"}}
+133,134c133,134
+< 			case s := <-ch:
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 			case <-ch:
+> 				cancel(nil)
+-- run: targeted, go1.25.8
+# M_b toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_b.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT835981905/001/state/gates/a-20261013T140619Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM3934928814/001/state/gates/a-20261013T140620Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP4057763704/001/state/gates/a-20261013T140621Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.26s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.84s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: context canceled
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	4.452s
+RC=1 elapsed=6.5s
+
+======== Go mutant M_c (org_gate.go): (c) signal.Stop right after the first signal's cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_c-org_gate.go"}}
+134a135
+> 				signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_c toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_c.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.44s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.81s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.00s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.38s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.26s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.078s
+RC=1 elapsed=5.6s
+
+======== Go mutant M_c2 (org_gate.go): (c') signal.Stop before the first signal's cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_c2-org_gate.go"}}
+133a134
+> 				signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_c2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_c2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.15s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.80s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.78s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.12s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	4.265s
+RC=1 elapsed=6.4s
+
+======== Go mutant M_d (org_gate.go): (d) stop does not cancel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d-org_gate.go"}}
+140d139
+< 		cancel(nil)
+-- run: targeted, go1.25.8
+# M_d toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.09s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.76s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.12s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.42s)
+    org_gate_test.go:746: after stop: ctx.Err() = <nil>, cause = <nil>; want context.Canceled for both
+--- FAIL: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.35s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.282s
+RC=1 elapsed=7.2s
+
+======== Go mutant M_d2 (org_gate.go): (d') stop does not unregister (no signal.Stop)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d2-org_gate.go"}}
+141d140
+< 		signal.Stop(ch)
+-- run: targeted, go1.25.8
+# M_d2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.14s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.79s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.76s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.83s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.76s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	4.295s
+RC=0 elapsed=6.3s
+-- run: whole internal/cli package, go1.25.8
+# M_d2 toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_d2.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	180.942s
+RC=0 elapsed=181.4s
+
+======== Go mutant M_e1 (org_gate.go): (e) goroutine also started when parent is already done (guard removed)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_e1-org_gate.go"}}
+130c130
+< 	if ctx.Err() == nil {
+---
+> 	if true {
+-- run: targeted, go1.25.8
+# M_e1 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e1.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.01s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.35s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.14s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.29s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	6.006s
+RC=0 elapsed=8.0s
+-- run: whole internal/cli package, go1.25.8
+# M_e1 toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e1.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	183.338s
+RC=0 elapsed=183.8s
+
+======== Go mutant M_e2 (org_gate.go): (e') guard inverted: goroutine started only when parent is already done
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_e2-org_gate.go"}}
+130c130
+< 	if ctx.Err() == nil {
+---
+> 	if ctx.Err() != nil {
+-- run: targeted, go1.25.8
+# M_e2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_e2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (48.24s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (15.89s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (15.82s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (15.90s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.63s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: exit status 1
+        --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (5.00s)
+            org_gate_test.go:773: SIGHUP did not cancel the context within 5s
+        FAIL
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (5.03s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	54.090s
+RC=1 elapsed=56.0s
+
+======== Go mutant M_f1 (org_gate.go): (f) cause text without " signal received"
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_f1-org_gate.go"}}
+134c134
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 				cancel(errors.New(s.String()))
+-- run: targeted, go1.25.8
+# M_f1 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_f1.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT1691419564/001/state/gates/a-20261013T140755Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (terminated): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM261585530/001/state/gates/a-20261013T140755Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (hangup): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP1584918454/001/state/gates/a-20261013T140756Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.56s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: hangup
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.710s
+RC=1 elapsed=5.5s
+
+======== Go mutant M_f2 (org_gate.go): (f') cause text fixed to "interrupt signal received" whatever the signal
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_f2-org_gate.go"}}
+133,134c133,134
+< 			case s := <-ch:
+< 				cancel(errors.New(s.String() + " signal received"))
+---
+> 			case <-ch:
+> 				cancel(errors.New("interrupt signal received"))
+-- run: targeted, go1.25.8
+# M_f2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_f2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM1440543449/001/state/gates/a-20261013T140802Z.log; want the interrupt error with the cause "terminated signal received" and the log
+    org_gate_test.go:701: gate = org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP2263056258/001/state/gates/a-20261013T140803Z.log; want the interrupt error with the cause "hangup signal received" and the log
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.85s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (1.55s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (1.04s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.64s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+    org_gate_test.go:796: the child printed:
+        cause: interrupt signal received
+        PASS
+--- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.32s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	5.059s
+RC=1 elapsed=7.2s
+
+======== Go mutant M_h (org_gate.go): derived from context.Background() instead of parent
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_h-org_gate.go"}}
+127c127
+< 	ctx, cancel := context.WithCancelCause(parent)
+---
+> 	ctx, cancel := context.WithCancelCause(context.Background())
+-- run: targeted, go1.25.8
+# M_h toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_h.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (17.57s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.64s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (15.64s)
+    org_gate_test.go:740: after the parent ended: ctx.Err() = <nil>, cause = <nil>; want context.Canceled and the parent's cause "the parent's cause"
+--- FAIL: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.34s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	18.754s
+RC=1 elapsed=20.6s
+
+======== Go mutant M_i (org_gate.go): call site drops SIGHUP
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_i-org_gate.go"}}
+97c97
+< 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+---
+> 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM)
+-- run: targeted, go1.25.8
+# M_i toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_i.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (19.01s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.67s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.67s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (15.82s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.84s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.38s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	20.398s
+RC=1 elapsed=22.2s
+
+======== Go mutant M_i2 (org_gate.go): call site passes context.Background() instead of the command's context
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_i2-org_gate.go"}}
+97c97
+< 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+---
+> 			ctx, stop := gateSignalContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+-- run: targeted, go1.25.8
+# M_i2 toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_i2.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+    org_gate_test.go:698: gate did not return within 15s of the interrupt
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (17.75s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.66s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.73s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (15.67s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	19.532s
+RC=1 elapsed=21.7s
+
+======== Go mutant M_j (org_gate.go): unbuffered signal channel
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_j-org_gate.go"}}
+128c128
+< 	ch := make(chan os.Signal, 1)
+---
+> 	ch := make(chan os.Signal)
+-- run: targeted, go1.25.8
+# M_j toolchain=go1.25.8 run=^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_j.json ./internal/cli/ -v -run ^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.78s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.63s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.63s)
+--- PASS: TestOrgGate_SignalContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.33s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.854s
+RC=0 elapsed=5.6s
+-- run: whole internal/cli package, go1.25.8
+# M_j toolchain=go1.25.8 run=(whole package)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 20m -overlay <scratchpad>/og3/mut/M_j.json ./internal/cli/ -v
+(counted) top-level PASS 617, FAIL 0, SKIP 0; subtest PASS 517, FAIL 0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	176.922s
+RC=0 elapsed=177.4s
+
+======== pre-fix code: f001bd4f internal/cli/org_gate.go + org_gate_test.go through one overlay (the CI failure of PR #225)
+{"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/pre/org_gate.go", "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate_test.go": "<scratchpad>/og3/pre/org_gate_test.go"}}
+-- run: toolchain go1.25.8, full -v output
+# pre-fix f001bd4f internal/cli/org_gate.go + org_gate_test.go via overlay, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay pre/pre.json ./internal/cli/ -run '^TestOrgGate_InterruptStopsTheScriptAndRecordsNothing$' -v
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGINT2338840179/001/state/gates/a-20261013T143621Z.log; want the interrupt error with the cause "interrupt signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGTERM2744385446/001/state/gates/a-20261013T143622Z.log; want the interrupt error with the cause "terminated signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+    org_gate_test.go:701: gate = org: gate: interrupted (context canceled): the scripts were stopped and nothing was recorded; the output so far is in /private/var/folders/fv/xxhc5f5n60q3d9jm658xybs40000gp/T/TestOrgGate_InterruptStopsTheScriptAndRecordsNothingSIGHUP2929382359/001/state/gates/a-20261013T143623Z.log; want the interrupt error with the cause "hangup signal received" and the log
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.82s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.80s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.68s)
+    --- FAIL: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.65s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.69s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.311s
+FAIL
+RC=1
+-- run: toolchain go1.26.0, full -v output
+# pre-fix f001bd4f internal/cli/org_gate.go + org_gate_test.go via overlay, toolchain go1.26.0 (go version go1.26.0 darwin/arm64)
+$ GOTOOLCHAIN=go1.26.0 go test -count=1 -overlay pre/pre.json ./internal/cli/ -run '^TestOrgGate_InterruptStopsTheScriptAndRecordsNothing$' -v
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP
+=== RUN   TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.13s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.94s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.82s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (0.68s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (0.68s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.629s
+RC=0
+
+======== probe test (scratch only, added through -overlay as internal/cli/zz_probe_c3_test.go; not committed)
+-- source og3/probe/zz_probe_c3_test.go:
+package cli
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// Probe (scratch only, added through -overlay): after stop, the signals are
+// no longer caught, so a SIGHUP ends the process as it would without the gate.
+// The child calls stop, then sends itself SIGHUP; it prints "survived" only
+// when the signal was swallowed.
+func TestProbe_SignalContextStopUnregisters(t *testing.T) {
+	if os.Getenv("RALPH_PROBE_C3_CHILD") == "1" {
+		_, stop := gateSignalContext(context.Background(), syscall.SIGHUP)
+		stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP: %v", err)
+		}
+		time.Sleep(300 * time.Millisecond)
+		os.Stdout.WriteString("survived\n")
+		return
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestProbe_SignalContextStopUnregisters$", "-test.count=1")
+	child.Env = append(os.Environ(), "RALPH_PROBE_C3_CHILD=1")
+	out, err := child.CombinedOutput()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("child err = %v; want it ended by SIGHUP after stop\n%s", err, out)
+	}
+	ws, ok := ee.Sys().(syscall.WaitStatus)
+	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
+		t.Fatalf("child status = %v; want ended by SIGHUP after stop\n%s", ee, out)
+	}
+}
+-- overlay probe.json: {"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/zz_probe_c3_test.go": "<scratchpad>/og3/probe/zz_probe_c3_test.go"}}
+# overlay probe.json, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay probe/probe.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+=== RUN   TestProbe_SignalContextStopUnregisters
+--- PASS: TestProbe_SignalContextStopUnregisters (0.03s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	1.141s
+RC=0
+-- overlay probe-M_d2.json: {"Replace": {"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/zz_probe_c3_test.go": "<scratchpad>/og3/probe/zz_probe_c3_test.go", "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-gate/internal/cli/org_gate.go": "<scratchpad>/og3/mut/M_d2-org_gate.go"}}
+# overlay probe-M_d2.json, toolchain go1.25.8 (go version go1.25.8 darwin/arm64)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -overlay probe/probe-M_d2.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+=== RUN   TestProbe_SignalContextStopUnregisters
+    zz_probe_c3_test.go:33: child err = <nil>; want it ended by SIGHUP after stop
+        survived
+        PASS
+--- FAIL: TestProbe_SignalContextStopUnregisters (0.33s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	1.462s
+FAIL
+RC=1
+
+======== repeats (go1.25.8): the kills that depend on the child's 100 ms pause, and the probe, -count=10 each (uniq -c of the result lines)
+### M_c x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay mut/M_c.json ./internal/cli/ -run '^TestOrgGate_SignalContextKeepsLaterSignalsCaught$' -v
+  10     org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.13s)
+   1 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.14s)
+   6 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+   1 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.16s)
+### M_c2 x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay mut/M_c2.json ./internal/cli/ -run '^TestOrgGate_SignalContextKeepsLaterSignalsCaught$' -v
+  10     org_gate_test.go:793: the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: signal: terminated
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.13s)
+   2 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.14s)
+   6 --- FAIL: TestOrgGate_SignalContextKeepsLaterSignalsCaught (0.15s)
+### probe x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay probe/probe.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+  10 --- PASS: TestProbe_SignalContextStopUnregisters (durations removed by sed before uniq -c)
+### probe-M_d2 x10, go1.25.8: GOTOOLCHAIN=go1.25.8 go test -count=10 -overlay probe/probe-M_d2.json ./internal/cli/ -run '^TestProbe_SignalContextStopUnregisters$' -v
+  10     zz_probe_c3_test.go:33: child err = <nil>; want it ended by SIGHUP after stop
+  10 --- FAIL: TestProbe_SignalContextStopUnregisters (durations removed by sed before uniq -c)

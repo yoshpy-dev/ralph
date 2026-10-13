@@ -161,7 +161,7 @@ coverage で通らなかった区間のうち、利用者に見える 2 つを�
 
 ## Verdict
 
-- Verdict: pass(ブランチ全体、cycle 2 の HEAD 0bc87603 まで。下の Pass・Fail・Blocked の 3 行は cycle 1 の HEAD eb5ffdac での結果で、cycle 2 の結果は下の「Cycle 2」節の「判断(cycle 2)」)
+- Verdict: pass(ブランチ全体、cycle 3 の HEAD 697e1577 まで。下の Pass・Fail・Blocked の 3 行は cycle 1 の HEAD eb5ffdac での結果で、cycle 2 と cycle 3 の結果は、下の「Cycle 2」節の「判断(cycle 2)」と「Cycle 3」節の「判断(cycle 3)」にある。cycle 3 は go1.25.8 と go1.26.0 の両方で走らせた)
 - Pass: `./scripts/run-test.sh` は changed と full のどちらも rc 0(shell 41 本、PASS の行 4,118、Go 8 パッケージ)。`go test ./... -count=1` は top-level 1,538 本が PASS で 0 fail、足した 34 本もすべて PASS で、消えたテストはない。`-race`(org と cli)も 0 fail で、`DATA RACE` は 0 件。直接打った shell のテスト 6 本は 176 件すべて PASS。concurrency のテストは 5 回連続と負荷の下の 3 回で揺れず、gate のテストの `-count=3` も 0 fail。mutation は依頼の 3 つの動き(head_moved、環境の固定、終了コードのファイルがないとき)の 9 件を含む 15 件がすべて red
 - Fail: 0
 - Blocked: なし
@@ -281,3 +281,126 @@ CLI のテストは 9 件のどれでも落ちなかった。CLI の中断のテ
 - Fail: 0
 - Blocked: なし
 - 判断: pass(cycle 2)
+
+## Cycle 3
+
+- Date: 2026-10-13(JST 23:03〜23:50)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 3 回目。PR #225 の CI で `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` の SIGINT・SIGTERM・SIGHUP の 3 subtest が落ちたので、上限を 3 に上げて回した。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま(self-review と verify の cycle 3 と同じ)。直しの 8b681dc3、self-review cycle 3(a538c899)、verify cycle 3(697e1577、pass)のあとに走らせた
+- Scope: HEAD 697e1577。cycle 2 の HEAD 0bc87603 から変わったコードとテストは、8b681dc3 の 2 ファイル(`internal/cli/org_gate.go` と `internal/cli/org_gate_test.go`、+122/-7)だけだった(`git diff --stat 0bc87603..697e1577 -- '*.go' scripts tests templates go.mod go.sum .github`)。ほかは各段の報告、evidence、walkthrough、計画の archive。behavioral test だけを実行した(静的解析は /verify の担当)。この節の行番号はすべて HEAD 697e1577 のもの
+- Toolchain: 8b681dc3 の効果は Go 1.25 でしか見えないので、Go のテストを go1.25.8(`GOTOOLCHAIN=go1.25.8`。`go.mod:3` の版で、release の build もこれを使う)と go1.26.0(手元の既定)の 2 つで走らせた。下の表と evidence の各 block に、どちらで走らせたかを書いた。`./scripts/run-test.sh` は手元の既定の go1.26.0 で走る
+- Evidence(上書きしたものと、末尾に足したもの):
+  - `docs/evidence/test-2026-10-13-org-gate-run-test.txt`: 上書きした。go1.26.0 での `./scripts/run-test.sh`(changed)1 回の出力で、先頭に toolchain、末尾に `RC=` がある
+  - `docs/evidence/test-2026-10-13-org-gate-go-test.txt`: 上書きした。Block 1 は go1.25.8 の `go test ./... -count=1 -timeout 30m -v`、Block 2 は go1.26.0 の `go test ./internal/org/... ./internal/cli/... -count=1 -timeout 30m -v`、Block 3 は go1.25.8 の coverage。PASS の行を数えるため、依頼の 2 つのコマンドに `-v` を足した。テストの選び方と回数は依頼のとおり
+  - `docs/evidence/test-2026-10-13-org-gate-race.txt`: 上書きした。go1.25.8 の `go test -race ./internal/cli/ ./internal/org/ -run 'Gate|Lock|SignalContext' -count=3 -timeout 30m -v`
+  - `docs/evidence/test-2026-10-13-org-gate-flaky.txt`: 末尾に「Cycle 3」を足した。テストと subtest ごとの回数と時間の幅、生の出力
+  - `docs/evidence/test-2026-10-13-org-gate-mutation.txt`: 末尾に「Cycle 3」を足した。mutant ごとの overlay の JSON、差分、toolchain、結果、落としたテストと失敗の行、修正前のコードの再現、probe のテストの全文と結果、`-count=10` の繰り返し
+  - `$HOME` は `~` に、scratchpad のパスは `<scratchpad>` に置き換えた。置き換えが要ったのは、go-test の evidence の 8 行(doctor のテストが出す `~/.agents/skills/agmsg` と `~/.codex/models_cache.json`。Block 1 と 2 に 4 行ずつ)と Block 3 の profile のパス、mutation の evidence の overlay の JSON とコマンドの行だけだった。足した 2 つの evidence は、元の中身が新しい中身の先頭とバイト単位で一致する。どの evidence にも U+FFFD はない
+  - wrapper が書いた `docs/evidence/verify-2026-10-13-140441.log` は gitignore の対象なので、コミットしない
+  - insight event: `docs/insights/events/2026-10-13-org-gate.jsonl` に test の 1 行(`--cycle 3`、verdict pass)を足し、この報告と同じコミットに入れた
+- テストもコードも変えていない。mutant の写し、probe のテスト、修正前のファイルの写しは scratchpad の `og3/` に置いた。テストのあと、`~/.config/herdr` の下に 23:00 より新しいファイルはなく、main のチェックアウトと worktree の `git status --short` は(この報告を書く前に)空で、`$TMPDIR` に `ralph-verify-*` は残らず、テストのスクリプトの `sleep 30` も残っていない。osascript は、CLI の `TestMain` が通知を差し替え(`internal/cli/main_test.go:63`)、org で本物を呼びうる唯一のテスト `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` は darwin で skip する(go-test の evidence の SKIP)。プロセスとしては見張っていない
+- mutant を絞って流した回(JST 23:06〜23:09)は、`run-test.sh` の shell の suite と重なった。`run-test.sh` の Go の段(cli が 139.5 s で、23:14:36 に終わった)とは重なっていない。ほかの実行は 1 つずつ順に走らせた
+
+### Test execution(cycle 3)
+
+| Suite / Command | Toolchain | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。cycle 1・2 と同じく `shared:scripts/run-verify.sh` で full に落ち、golang の pack を選んだ) | go1.26.0 | shell 41 本(PASS の行 4,118)、Go 8 パッケージ | すべて | 0 | shell 1 | 9 分 56 秒、rc 0 |
+| `go test ./... -count=1 -timeout 30m -v` | go1.25.8 | top-level 1,545、subtest 2,005 | top-level 1,542、subtest 2,005 | 0 | 3 | 3 分 10 秒(cli 189.0 s、org 101.4 s)、rc 0 |
+| `go test ./internal/org/... ./internal/cli/... -count=1 -timeout 30m -v` | go1.26.0 | top-level 1,326、subtest 1,953 | top-level 1,325、subtest 1,953 | 0 | 1 | 3 分 20 秒(cli 198.9 s、org 103.5 s)、rc 0 |
+| `go test -race ./internal/cli/ ./internal/org/ -run 'Gate\|Lock\|SignalContext' -count=3 -timeout 30m -v` | go1.25.8 | top-level 85 × 3 = 255、subtest 489 | すべて | 0 | 0 | 2 分 56 秒(org 164.4 s、cli 94.4 s)、rc 0。`DATA RACE` は 0 件 |
+| 揺れの確認(下の「Flakiness(cycle 3)」) | 両方 | 3 本 × 20 回を 2 つの toolchain で、3 本 × 5 回(`-race`、go1.25.8) | すべて | 0 | 0 | 3 分 3 秒 |
+| 修正前のコードの再現(f001bd4f の `org_gate.go` と `org_gate_test.go` を overlay で読ませ、中断のテストだけ) | 両方 | 1 本(subtest 4 本) | go1.26.0 で 4 本、go1.25.8 で 1 本 | go1.25.8 で 3 本 | - | 3.3〜3.6 s |
+| mutation(Go 14 件と対照 1 件) | go1.25.8(M_a と対照は go1.26.0 でも) | 14 件 | red 11 件 | 生き残り 3 件(下の表) | - | 絞った回は 1 件 4〜56 s、cli 全体は 1 件 177〜184 s |
+
+- shell の PASS の行は cycle 1・2 と同じ数え方で 4,118 行。suite ごとの PASS・FAIL・SKIP の数は cycle 2 の実行と 41 本すべて同じだった(`diff` が空)。Skipped は前と同じ `tests/test-secret-scan-branch.sh` の 1 件(git 2.49.0)
+- `run-test.sh` の中の Go は `internal/cli`(139.5 s)と `internal/org`(72.2 s)を流し直し、ほかの 6 パッケージは `(cached)` だった。8b681dc3 が変えたのは `internal/cli` だけで、6 パッケージはどれも `internal/cli` を import しない(`go list -deps`)。Block 1 は 8 パッケージすべてをキャッシュなしで流した
+- go1.25.8 の全体の件数は、cycle 1(top-level 1,538、subtest 2,001)に cycle 2 の 2 本(subtest 4 本)と 8b681dc3 の 2 本を足した数とちょうど合う。go1.26.0 の org と cli は cycle 2(top-level 1,323、subtest 1,953)より top-level が 2 本増えた。cycle 2 の go-test の evidence とテスト名を `comm` で比べると、増えたのは `TestOrgGate_SignalContextParentCauseAndStop` と `TestOrgGate_SignalContextKeepsLaterSignalsCaught` だけで、消えたテストはない。Skipped は全体で cycle 1 と同じ 3 件、org と cli で cycle 2 と同じ 1 件
+- `-race` の `-run` に入る top-level は 85 本で、cycle 2 の 83 本に新しい 2 本が加わった。85 本とも 3 回ずつ PASS した
+- load average は、`run-test.sh` の開始時に 4.08、go1.25.8 の `go test` の開始時に 4.77、go1.26.0 で 5.24、`-race` で 4.21、揺れの確認で 4.19〜5.51 だった。前に flake を起こした doctor のテストと `TestRunWatcher_TimeoutIndependentOfSmallInterval` は、どの実行でも落ちなかった
+
+### 2 つの toolchain での違い(cycle 3)
+
+修正前のコード(f001bd4f の 2 ファイル)で `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` を走らせた結果:
+
+- go1.25.8: SIGINT、SIGTERM、SIGHUP の 3 subtest が `org_gate_test.go:701` で落ちた(`gate = org: gate: interrupted (context canceled): ...`)。ctx の取り消しの subtest は通った。PR #225 の CI の失敗(verify cycle 3 が引く run 38401983445 の 5970〜5976 行)と、落ちた subtest も文も同じ
+- go1.26.0: 4 subtest とも通った
+
+HEAD では、2 つの toolchain のどちらでも 4 subtest と新しい 2 本が通った(上の表)。8b681dc3 で go1.25.8 の結果は赤から緑に変わり、go1.26.0 では前から緑だった。helper を `signal.NotifyContext` に戻す mutant M_a も同じで、go1.25.8 では中断のテストの 3 subtest と `TestOrgGate_SignalContextKeepsLaterSignalsCaught`(子が `cause: context canceled` を出した)が落ち、go1.26.0 では 3 本とも通った。self-review cycle 3 の C3-1(手元が 1.26 だと、元に戻しても緑のまま)は、この実行で確かめた。
+
+CI の verify は、8b681dc3、a538c899、697e1577 の 3 つとも success だった(`gh run list --branch feat/org-gate`)。697e1577 の run 38410029660 のログには `ok github.com/yoshpy-dev/ralph/internal/cli 34.718s` がある。CI の Go の版はログに出ないので、確かめていない(verify cycle 3 と同じ)。
+
+### Flakiness(cycle 3)
+
+依頼の 3 本を、go1.25.8 と go1.26.0 で `-count=20` ずつ、go1.25.8 で `-race -count=5` 流した(JST 23:24〜23:27、開始時の load average 4.19〜5.51、この session のほかの実行はなし)。どの回も rc 0 で、`DATA RACE` は 0 件。
+
+| テスト | go1.25.8 `-count=20` | 時間の幅 | go1.26.0 `-count=20` | 時間の幅 | go1.25.8 `-race -count=5` | 時間の幅 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` | 20 / 20 | 2.61〜7.95 s | 20 / 20 | 2.70〜12.90 s | 5 / 5 | 2.79〜7.83 s |
+| 上の subtest `SIGINT` | 20 / 20 | 0.65〜5.84 s | 20 / 20 | 0.66〜5.76 s | 5 / 5 | 0.71〜0.82 s |
+| 上の subtest `SIGTERM` | 20 / 20 | 0.63〜0.78 s | 20 / 20 | 0.64〜1.02 s | 5 / 5 | 0.66〜0.71 s |
+| 上の subtest `SIGHUP` | 20 / 20 | 0.64〜5.79 s | 20 / 20 | 0.66〜5.72 s | 5 / 5 | 0.66〜0.73 s |
+| 上の subtest `the_command's_context_is_cancelled` | 20 / 20 | 0.65〜0.78 s | 20 / 20 | 0.65〜0.76 s | 5 / 5 | 0.69〜5.70 s |
+| `TestOrgGate_SignalContextParentCauseAndStop`(新規) | 20 / 20 | 0.00 s | 20 / 20 | 0.00 s | 5 / 5 | 0.00 s |
+| `TestOrgGate_SignalContextKeepsLaterSignalsCaught`(新規) | 20 / 20 | 0.32〜0.34 s | 20 / 20 | 0.32〜0.34 s | 5 / 5 | 1.34〜1.35 s |
+
+- cycle 2 で見た 5.7 s 前後の subtest は、この回も出た。go1.25.8 で 80 回中 2 回(SIGINT 5.84 s、SIGHUP 5.79 s)、go1.26.0 で 80 回中 3 回(SIGINT 5.76 s、SIGHUP 5.72 s と 5.69 s)、`-race` で 20 回中 1 回(ctx の取り消し 5.70 s)。ほかの subtest は 0.63〜1.02 s だった。差の 5 秒は cycle 2 と同じく `gateKillGrace`(`internal/org/gate_run.go:54`)に当たる
+- `-race` の 1 回は信号ではなく ctx の取り消しの subtest で起きた。ctx の取り消しでも、gate はスクリプトのグループを同じ道で止める。そのため 5 秒の遅れは ralph が信号をどう受けるかではなく、グループを止める側(`runGateScript`)で起きている。どちらの toolchain でも、8b681dc3 より前のコード(cycle 2 の 5/80)でも起きるので、8b681dc3 が持ち込んだものではない。原因は cycle 2 と同じく推測で、確かめていない
+- どの subtest も上限の 15 秒までには届かなかった(最大 5.84 s)。新しい子プロセスのテストは、子の中の 100 ms と 200 ms の待ちに起動の分を足して 0.32〜0.34 s、`-race` で build した子は起動が遅く 1.34〜1.35 s。子の中の「5 秒以内に cancel される」の上限には届いていない
+
+揺れによる失敗は見つからなかった。
+
+### Mutation(cycle 3)
+
+どの mutant も、scratchpad に写した `internal/cli/org_gate.go` の 1 か所を書き換え、tracked のファイルには触れていない。`GOTOOLCHAIN=go1.25.8 go build -overlay <json> ./internal/cli/` で 14 件ともコンパイルできることを確かめてから、go1.25.8 で `go test -count=1 -overlay <json> ./internal/cli/ -run '^TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)' -v` を 1 件ずつ流した(top-level 3 本、JST 23:06〜23:09)。書き換えていない写し X0 は、go1.25.8 でも go1.26.0 でも 3 本とも通った。この回で生き残った 3 件は、cli パッケージ全体(top-level 617 本)を go1.25.8 で流し直した。
+
+依頼の 6 つ:
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| M_a | (a) helper の中身を `signal.NotifyContext(parent, sigs...)` にする(`org_gate.go:127` の前で return) | go1.25.8 で red、go1.26.0 では生き残り | go1.25.8: 中断のテストの SIGINT・SIGTERM・SIGHUP(`org_gate_test.go:701`、`interrupted (context canceled)`)、`TestOrgGate_SignalContextKeepsLaterSignalsCaught`(`:796`、子が `cause: context canceled` を出した)。go1.26.0 では 3 本とも通った |
+| M_b | (b) 最初の信号で `cancel(nil)` を呼ぶ(`:134`) | red | M_a の go1.25.8 と同じ 4 か所 |
+| M_c | (c) 最初の信号の cancel の直後に `signal.Stop(ch)` を呼ぶ | red | `TestOrgGate_SignalContextKeepsLaterSignalsCaught` だけ(`:793`、子が 2 つ目の SIGTERM で `signal: terminated` で終わった)。`-count=10` で 10 回とも red |
+| M_c2 | (c) の変形: `signal.Stop(ch)` を cancel の前に呼ぶ | red | M_c と同じ。`-count=10` で 10 回とも red |
+| M_d | (d) stop が cancel しない(`:140` を外す) | red | `TestOrgGate_SignalContextParentCauseAndStop` だけ(`:746`、`after stop: ctx.Err() = <nil>`) |
+| M_e1 | (e) 親が終わっていても goroutine を起こす(`:130` を `if true`) | 生き残り(同値) | 絞った回でも cli 全体でも 0 fail。親が終わっていれば goroutine は `<-ctx.Done()` ですぐ抜け、cause は親のもののまま残る(`WithCancelCause` の 2 回目からの cancel は何もしない) |
+| M_e2 | (e) の変形: 条件を逆にして、親が生きているときに goroutine を起こさない | red | 中断のテストの信号の 3 subtest(`:698`、15 秒以内に返らない)、`TestOrgGate_SignalContextKeepsLaterSignalsCaught`(子の `:773`、5 秒以内に cancel されない) |
+| M_f1 | (f) cause を `s.String()` だけにする(` signal received` を外す) | red | 中断のテストの信号の 3 subtest(`interrupted (interrupt)` など)、`TestOrgGate_SignalContextKeepsLaterSignalsCaught`(`:796`) |
+
+足した 6 つ(信号ごとの文、親、呼び出しの場所、channel):
+
+| ID | 何を壊したか | 結果 | 落としたテストと失敗の行 |
+| --- | --- | --- | --- |
+| M_f2 | cause をどの信号でも `interrupt signal received` にする | red | 中断のテストの SIGTERM と SIGHUP(SIGINT は通る)、`TestOrgGate_SignalContextKeepsLaterSignalsCaught`(`:796`) |
+| M_h | `context.WithCancelCause(context.Background())` で作る(`:127`。親が終わっても届かない) | red | `TestOrgGate_SignalContextParentCauseAndStop`(`:740`)、中断のテストの ctx の取り消し(`:698`、15 秒) |
+| M_i | 呼び出し(`:97`)から SIGHUP を外す | red | 中断のテストの SIGHUP(`:698`、15 秒) |
+| M_i2 | 呼び出しに `context.Background()` を渡す | red | 中断のテストの ctx の取り消し(`:698`、15 秒) |
+| M_d2 | stop が `signal.Stop(ch)` を呼ばない(`:141` を外す) | 生き残り(コミットしたテスト)、probe で red | cli 全体でも 0 fail。下の probe が落とした |
+| M_j | 信号の channel を buffer なしにする(`:128`) | 生き残り | cli 全体でも 0 fail |
+
+M_c と M_c2 を落とすのは子プロセスのテストだけで、CLI の中断のテストは通った。`signalSelf`(`org_gate_test.go:637-646`)がテストの側でも同じ信号を受けるので、後の信号が ralph を終わらせるかどうかは、中断のテストからは見えない。
+
+生き残りの 3 件:
+
+- M_e1 は同値の mutant
+- M_d2: stop のあとも信号を受け取って捨て続ける。CLI では stop は RunE の `defer`(`org_gate.go:98`)で走り、そのあとはすぐにプロセスが終わる。利用者に見える違いは「gate が返ってから ralph が終わるまでの短い間の Ctrl-C が捨てられる」ことだけで、おそらく実害はない。未確認です。helper の doc(`:109-125`)は stop が sigs の登録を外すと書くが、それを固定するテストはない。scratch の `_test.go` を `-overlay` で足した probe `TestProbe_SignalContextStopUnregisters` は、子プロセスで stop を呼んでから自分に SIGHUP を送り、子が SIGHUP で終わることを見る。HEAD では 10 回とも PASS、M_d2 では 10 回とも FAIL だった(`child err = <nil>`、子が `survived` を出した)。テストを足すなら、この probe がそのまま使える。全文は mutation の evidence にある
+- M_j: buffer のない channel には、`signal.Notify` は受け手が待っていないときに送らず、信号を捨てる。goroutine が select で待っている間に来た信号は届くので、スクリプトが起動してから送るテストの信号は届く。捨てられるのは、`gateSignalContext` が登録してから goroutine が select に入るまでの短い間に来た信号で、そのとき gate は中断されない(登録は済んでいるので ralph も終わらない)。この間を狙うテストは作りにくい。この形は staticcheck の SA1017 と go vet の sigchanyzer が指摘する検査の対象だが、静的解析は /verify の担当なので、この回では流していない。指摘されるかは未確認です
+
+### Coverage(cycle 3)
+
+go1.25.8 の `go test -count=1 -cover ./internal/cli/` で `internal/cli` は 86.8%(cycle 1 は 86.7%)。`-run 'OrgGate'` の profile で、`org_gate.go` は 51 文のうち 50 文を通り、`gateSignalContext` は 100%、`newOrgGateCmd` は 93.3%。通らない 1 文は cycle 1 と同じ、`cmd.Context()` が nil のときの `context.Background()`(`org_gate.go:87-89`)。子プロセスの中の実行は profile に入らないが、goroutine の信号の case は親のプロセスで CLI の中断のテストが通す。ほかのパッケージは cycle 2 からコードが変わっていないので、この回では測っていない。
+
+### Test gaps(cycle 3)
+
+- 手元の go1.26.0 では、helper を `signal.NotifyContext` に戻しても(M_a)どのテストも落ちない。go.mod の 1.25.8 で走る環境だけが見分ける。`./scripts/run-test.sh` は手元の Go で走るので、1.26 の開発機では見分けない。CI の verify は `setup-go` を使わず runner の Go で走り、版はログに出ない。runner の Go が 1.26 以上になると、CI でも見分けなくなる。self-review cycle 3 の C3-1 を実行で確かめた形になる。閉じるなら、CI の verify でも release.yml と同じく `go-version-file: go.mod` で版を固定する
+- stop が信号の登録を外すこと(M_d2)を固定するテストがない。probe で閉じられることは確かめた
+- buffer のない channel(M_j)で信号が捨てられる間は、テストでは狙いにくい
+- 中断がスクリプトの実行中に届いたとき、まれに 5 秒余分にかかる(上の Flakiness)。2 つの toolchain で、180 回中 6 回起きた。原因は推測で、確かめていない
+- cycle 1・cycle 2 の Test gaps(org 層の fixture で HEAD と base が同じこと、`gateOutput` の改行のない出力、本当のロックの timeout の文、Linux と混んだ CI での `tests/test-run-verify-concurrency.sh`、本物の leader の座席)は、8b681dc3 が関係しないので、そのまま残る
+
+### 判断(cycle 3)
+
+- Pass: `./scripts/run-test.sh`(go1.26.0、changed、full に落ちた)は rc 0 で、shell 41 本、PASS の行 4,118、Go 8 パッケージ。go1.25.8 の `go test ./...` は top-level 1,542 本と subtest 2,005 本が PASS で 0 fail、go1.26.0 の org と cli も top-level 1,325 本と subtest 1,953 本が PASS で 0 fail。足した 2 本はどちらの toolchain でも PASS で、消えたテストはない。go1.25.8 の `-race -run 'Gate|Lock|SignalContext' -count=3` は 255 回すべて PASS で、`DATA RACE` は 0 件。依頼の 3 本は、2 つの toolchain の `-count=20` と go1.25.8 の `-race -count=5` で 0 fail。修正前のコードは go1.25.8 で CI と同じ 3 subtest が落ち、HEAD では通る。mutation は依頼の 6 つのうち同値の (e) を除く 5 つと、その変形・足した mutant を合わせた 11 件が red
+- 生き残り: M_e1 は同値。M_d2 はテストの穴で、probe で閉じられることを確かめた(コミットしていない)。M_j は、テストで狙いにくい短い間だけに効く
+- Fail: 0
+- Blocked: なし
+- 判断: pass(cycle 3)

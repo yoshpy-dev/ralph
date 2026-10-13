@@ -1,11 +1,12 @@
-# /test org-gate cycle 2: ./scripts/run-test.sh (HEAD 0bc87603, base 1bddc871)
+# /test org-gate cycle 3: ./scripts/run-test.sh (HEAD 697e1577, base 1bddc871)
+# toolchain: go version go1.26.0 darwin/arm64 (default; GOTOOLCHAIN=auto, go.mod says go 1.25.8)
 # changed scope (default). The block ends with RC=<exit code> from the run.
 
 ########## $ ./scripts/run-test.sh
-start 2026-10-13T11:39:21Z
-20:39  up 7 days, 23:43, 5 users, load averages: 5.93 5.11 5.11
+start 2026-10-13T14:04:40Z
+23:04  up 8 days,  2:08, 5 users, load averages: 4.08 3.69 4.31
 # Verification run
-- Timestamp: 2026-10-13T11:39:22Z
+- Timestamp: 2026-10-13T14:04:41Z
 - Mode: test
 - Requested scope: changed
 
@@ -3366,9 +3367,9 @@ pr-owner-lookup tests: 20 passed, 0 failed, 20 total
   PASS  G. AC7 [jq]: every old deny that is none now is one of the 13 intentional fixes
   PASS  G. AC7 [no-jq]: every old deny that is none now is one of the 13 intentional fixes
   PASS  G. AC7: intentional_fixes equals the C (AC3) cases the old guard denies
-  PASS  H. AC8 [no-jq]: a 200,000-character single-quoted string (200154-byte payload) -> deny in 0.260 s (limit 10 s)
-  PASS  H. AC8 [no-jq]: 13,400 short commands (187736-byte payload) -> deny in 1.091 s (limit 10 s)
-  PASS  H. AC8 [no-jq]: 200,000 backslashes in backticks (400150-byte payload) -> deny in 0.568 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: a 200,000-character single-quoted string (200154-byte payload) -> deny in 0.308 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: 13,400 short commands (187736-byte payload) -> deny in 1.086 s (limit 10 s)
+  PASS  H. AC8 [no-jq]: 200,000 backslashes in backticks (400150-byte payload) -> deny in 0.601 s (limit 10 s)
   PASS  I. lib_json.sh: tool_input.file_path [jq]
   PASS  I. lib_json.sh: tool_input.file_path [no-jq]
   PASS  I. lib_json.sh: tool_input.file_path with an escaped quote and backslash [jq]
@@ -3475,7 +3476,7 @@ Results: 19/19 passed
   PASS: clean main passes validation
 ==> ralph-worktree.sh ensure/resume
 Preparing worktree (new branch 'feat/worktree-first')
-HEAD is now at 951e8d3 chore: initial
+HEAD is now at 7341ea5 chore: initial
   PASS: ensure prints absolute worktree path
   PASS: created worktree is usable
   PASS: created worktree branch
@@ -4505,10 +4506,10 @@ verify-local-hook-tests tests: 5 passed, 0 failed, 5 total
 ==> Go project root: .
 ?   	github.com/yoshpy-dev/ralph	[no test files]
 ?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
-ok  	github.com/yoshpy-dev/ralph/internal/cli	159.682s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	139.483s
 ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
-ok  	github.com/yoshpy-dev/ralph/internal/org	68.592s
+ok  	github.com/yoshpy-dev/ralph/internal/org	72.151s
 ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
 ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
@@ -4516,9 +4517,9 @@ ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
 
 ==> All verifiers passed.
 
-Evidence saved to: docs/evidence/verify-2026-10-13-113922.log
-real 833.58
-user 135.16
-sys 228.10
+Evidence saved to: docs/evidence/verify-2026-10-13-140441.log
+real 595.90
+user 121.06
+sys 189.17
 RC=0
-end 2026-10-13T11:53:15Z
+end 2026-10-13T14:14:36Z
