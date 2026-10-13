@@ -510,6 +510,92 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 	}
 }
 
+// TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain pins that
+// Send's second approval check reads the manifest afresh (cross-review cycle
+// 1 #1 of org-plan-approval asked for a check against fresh state; the
+// mutation survivor Q08 of /test cycle 2 reused the manifest read before the
+// wait). While Send waits for the implementer, the plan is revised and a
+// human approves the revision (a plan_approved for it is appended and the
+// leader writes the two lines naming it). The TASK naming the first
+// approval then gets the refusal that moves it to the revision a human
+// approved last, typed and raw alike, and nothing is typed. A check on the
+// manifest read before the wait sees no approval of the revision and
+// returns the plan-changed refusal, whose next step undoes that revision.
+func TestOrgSend_ApprovalCheck_AfterTheWaitReadsTheManifestAgain(t *testing.T) {
+	for _, raw := range []bool{false, true} {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+		fx.record(t)
+		fx.mark(t, nil)
+		revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+		newRef := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(revised))}
+		waited := false
+		fx.o.Herdr = &planEditingHerdr{fakeHerdr: fx.h, onWait: func() {
+			waited = true
+			if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", newRef, PlanContentHash([]byte(revised)))); err != nil {
+				t.Fatal(err)
+			}
+			writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, newRef.Digest))
+		}}
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), Raw: raw})
+		if !waited {
+			t.Fatalf("raw=%v: send = %+v without the wait", raw, r)
+		}
+		assertTaskRefused(t, r, "the plan's current approved digest is sha256:"+newRef.Digest)
+		assertTaskRefused(t, r, "the leader changes the TASK's PLAN: header to PLAN: "+newRef.String())
+		for _, call := range fx.h.calls {
+			if call == "pane_send_text" || call == "pane_send_keys" {
+				t.Fatalf("raw=%v: herdr calls %v; want nothing typed", raw, fx.h.calls)
+			}
+		}
+	}
+}
+
+// TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath pins that the latest
+// approval the refusals use is that of the TASK's plan path, not the org's
+// last approval of any plan (the mutation survivor Q07 of /test cycle 2 of
+// org-plan-approval). The org has a second plan whose approval is recorded
+// last. (a) The auth plan approved, revised and approved again (the two
+// lines naming the revision): a TASK naming the first approval gets the
+// refusal naming the revision. (b) A TASK naming a plan path with no
+// approval gets the no-approval refusal without "(its latest approval is of
+// ...)", which would name the other plan's digest.
+func TestOrgSend_ApprovalCheck_LatestApprovalIsPerPlanPath(t *testing.T) {
+	const otherRel = "docs/plans/active/2026-10-12-audit.md"
+	setup := func(t *testing.T) (*enforceFixture, PlanRef, PlanRef) {
+		fx := newEnforceFixture(t, config.ApprovalModePerPlan)
+		seedSeat(t, fx.o, "org-a", implementerSeatID, implementerRole, "pane-2")
+		fx.record(t)
+		revised := replaceOnce("Add the login form.", "Add the signup form.")(testPlanDraft)
+		newRef := PlanRef{Path: testPlanRel, Digest: PlanDigest([]byte(revised))}
+		if err := fx.o.Manifest.Append(approvedEvent("org-a", "e2", newRef, PlanContentHash([]byte(revised)))); err != nil {
+			t.Fatal(err)
+		}
+		writePlan(t, fx.worktree, testPlanRel, approvedPlanText(revised, newRef.Digest))
+		other := replaceOnce("Add the login form.", "Add the audit log.")(testPlanDraft)
+		otherRef := PlanRef{Path: otherRel, Digest: PlanDigest(writePlan(t, fx.worktree, otherRel, other))}
+		if err := fx.o.Manifest.Append(approvedEvent("org-a", "e3", otherRef, PlanContentHash([]byte(other)))); err != nil {
+			t.Fatal(err)
+		}
+		return fx, newRef, otherRef
+	}
+	t.Run("(a) stale digest of a plan approved again", func(t *testing.T) {
+		fx, newRef, _ := setup(t)
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(fx.ref), DryRun: true})
+		assertTaskRefused(t, r, "the plan's current approved digest is sha256:"+newRef.Digest)
+	})
+	t.Run("(b) a plan path with no approval", func(t *testing.T) {
+		fx, _, otherRef := setup(t)
+		const noneRel = "docs/plans/active/2026-10-12-none.md"
+		none := PlanRef{Path: noneRel, Digest: PlanDigest(writePlan(t, fx.worktree, noneRel, testPlanDraft))}
+		r := fx.o.Send(SendParams{OrgID: "org-a", To: implementerSeatID, Text: planTask(none), DryRun: true})
+		assertTaskRefused(t, r, "has no approval recorded for plan "+none.String()+" since its last disband; ")
+		if msg := r.Err.Error(); strings.Contains(msg, "its latest approval is of") || strings.Contains(msg, otherRef.Digest) {
+			t.Fatalf("send = %q; want no latest approval of another plan", msg)
+		}
+	})
+}
+
 // TestOrgSend_WatchGateBeforeApprovalCheck pins the order the plan's Scope
 // sets for Send: the approval check comes after the watch gate. With no
 // watch that accepts work and no approval of the plan, a TASK to the
