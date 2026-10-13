@@ -847,3 +847,80 @@ manifest lines before=3 after=3
 "event":"spawned"
 "event":"gate_passed"
 ```
+
+# Cycle 4: git-level probe of the leader's step 9 order (f1b0352e, cross-review cycle 3 #1)
+# $SP = the verifier's scratchpad directory, as above
+# Pure git (git version 2.49.0), no ralph binary, no network: a bare origin, a clone on feat/x,
+# a second clone that advances origin/main. GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM are /dev/null.
+# run: sh $SP/rebase-probe.sh $SP   (sh -n passed)
+
+## probe script (cycle 4)
+```sh
+#!/bin/sh
+# Probe for cross-review cycle 3 #1 of org-gate: does git rebase start over a
+# rewritten (tracked, unstaged) reviewer report, and does committing it first
+# (the new step 9) let the rebase run? Pure git, no ralph, no network.
+set -u
+SP=$1
+rm -rf "$SP/rbp"
+mkdir -p "$SP/rbp"
+cd "$SP/rbp" || exit 1
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME=p GIT_AUTHOR_EMAIL=p@example.invalid
+export GIT_COMMITTER_NAME=p GIT_COMMITTER_EMAIL=p@example.invalid
+git init -q --bare -b main origin.git
+git clone -q origin.git work 2>/dev/null
+cd work || exit 1
+git switch -q -c main 2>/dev/null || true
+echo base > base.txt && git add base.txt && git commit -q -m base && git push -q origin main
+git switch -q -c feat/x
+echo feat > feat.txt && git add feat.txt && git commit -q -m feat
+
+echo "## P1 first pass: reviewer report is a new untracked file, origin/main advanced"
+( cd .. && git clone -q origin.git other && cd other && echo up1 > up1.txt && git add up1.txt && git commit -q -m up1 && git push -q origin main )
+mkdir -p docs/reports && echo "review 1" > docs/reports/review.md
+git fetch -q origin main
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$? (untracked report left in place: $(git status --porcelain))"
+git add docs/reports/review.md && git commit -q -m "docs: review 1"
+
+echo "## P2 gate retry, old order: reviewer rewrites the committed report, origin/main advanced again"
+( cd ../other && echo up2 > up2.txt && git add up2.txt && git commit -q -m up2 && git push -q origin main )
+echo "review 2" > docs/reports/review.md
+git fetch -q origin main
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor rc=$?"
+out=$(git rebase origin/main 2>&1); rc=$?
+echo "rebase rc=$rc"
+printf '%s\n' "$out" | sed -n 1,3p
+echo "rebase in progress: $(test -d .git/rebase-merge -o -d .git/rebase-apply && echo yes || echo no)"
+git rebase --abort >/dev/null 2>&1; echo "rebase --abort rc=$?"
+
+echo "## P3 gate retry, new order (step 9): commit the reviewer report, check porcelain, then rebase"
+git add docs/reports/review.md && git commit -q -m "docs: review 2"
+echo "porcelain: [$(git status --porcelain)]"
+git rebase origin/main >/dev/null 2>&1; echo "rebase rc=$?"
+git merge-base --is-ancestor origin/main HEAD; echo "is-ancestor after rc=$?"
+git log --oneline --format=%s | head -6
+```
+
+## output (cycle 4)
+```
+## P1 first pass: reviewer report is a new untracked file, origin/main advanced
+rebase rc=0 (untracked report left in place: ?? docs/)
+## P2 gate retry, old order: reviewer rewrites the committed report, origin/main advanced again
+is-ancestor rc=1
+rebase rc=1
+error: cannot rebase: You have unstaged changes.
+error: Please commit or stash them.
+rebase in progress: no
+rebase --abort rc=128
+## P3 gate retry, new order (step 9): commit the reviewer report, check porcelain, then rebase
+porcelain: []
+rebase rc=0
+is-ancestor after rc=0
+docs: review 2
+docs: review 1
+feat
+up2
+up1
+base
+```

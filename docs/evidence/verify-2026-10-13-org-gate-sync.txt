@@ -1,4 +1,4 @@
-### HEAD: c84d8e190cc526c02ed60f8a8a6e8a12d8182cc0
+### HEAD: 31ae9f7ded4db6187bda45e065c9681b456772d0
 ### cmd: ./scripts/check-sync.sh
 === Checking templates/base/ <-> root ===
   TEMPLATE_ONLY  .agents/skills/.gitkeep
@@ -40,29 +40,15 @@ PASS: all files in sync.
 [ok] check-skill-sync: 13 skill(s) in lock-step
 ### exit=0
 
-### cmd: shellcheck --version
-ShellCheck - shell script analysis tool
-version: 0.11.0
-license: GNU General Public License, version 3
-website: https://www.shellcheck.net
-### cmd: shellcheck scripts/run-verify.sh tests/test-run-verify-concurrency.sh templates/base/scripts/run-verify.sh
-### exit=0
-### cmd: shellcheck -s sh scripts/run-verify.sh
-### exit=0
-### cmd: sh -n / dash -n
-sh -n scripts/run-verify.sh exit=0
-dash -n scripts/run-verify.sh exit=0
-sh -n tests/test-run-verify-concurrency.sh exit=0
-dash -n tests/test-run-verify-concurrency.sh exit=0
-### cmd: cmp root vs template run-verify.sh
-### exit=0
-### cmd: cmp org SKILL.md x4
+### cmd: cmp .claude/skills/org/SKILL.md <each of the other 3 copies>
 .agents/skills/org/SKILL.md exit=0
 templates/base/.claude/skills/org/SKILL.md exit=0
 templates/base/.agents/skills/org/SKILL.md exit=0
-### cmd: git diff --check 1bddc871...HEAD
+### cmd: cmp scripts/run-verify.sh templates/base/scripts/run-verify.sh
 ### exit=0
-### cmd: go build ./...
+### cmd: git diff --check 697e1577..HEAD (since verify cycle 3)
 ### exit=0
-### cmd: go vet ./internal/org/ ./internal/cli/
-### exit=0
+### cmd: git diff --check 1bddc871...HEAD (whole branch), findings per file
+   2 docs/evidence/test-2026-10-13-org-gate-mutation.txt
+  14 docs/evidence/test-2026-10-13-org-gate-run-test.txt
+### exit=2

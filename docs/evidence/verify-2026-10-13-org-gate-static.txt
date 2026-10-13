@@ -1,8 +1,8 @@
-### HEAD: a538c899d4f07bb8f8c9011f44aaccdbf6a9f237
-### date: 2026-10-13T13:45:30Z
+### HEAD: 31ae9f7ded4db6187bda45e065c9681b456772d0
+### date: 2026-10-13T15:50:24Z
 ### cmd: ./scripts/run-static-verify.sh (default changed scope)
 # Verification run
-- Timestamp: 2026-10-13T13:45:30Z
+- Timestamp: 2026-10-13T15:50:24Z
 - Mode: static
 - Requested scope: changed
 
@@ -421,14 +421,14 @@ PASS: no meta-repo-specific references found in templates.
 gofmt: ok
 0 issues.
 ==> Running branch secret scan
-secret-scan-branch: scanned 1bddc871..a538c899 against origin/main: clean
+secret-scan-branch: scanned 1bddc871..31ae9f7d against origin/main: clean
 
 ==> All verifiers passed.
 
-Evidence saved to: docs/evidence/verify-2026-10-13-134531.log
+Evidence saved to: docs/evidence/verify-2026-10-13-155024.log
 ### exit=0
 
-### cmd: CI/release toolchain (go.mod `go 1.25.8`; release.yml uses go-version-file: go.mod), HEAD a538c899
+### cmd: CI/release toolchain (go.mod `go 1.25.8`; release.yml uses go-version-file: go.mod), HEAD 31ae9f7d
 $ GOTOOLCHAIN=go1.25.8 go version
 go version go1.25.8 darwin/arm64
 rc=0
@@ -436,5 +436,5 @@ $ GOTOOLCHAIN=go1.25.8 go build ./...
 rc=0
 $ GOTOOLCHAIN=go1.25.8 go vet ./internal/...
 rc=0
-$ "$(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt" -l internal/cli/org_gate.go internal/cli/org_gate_test.go
+$ "$(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt" -l internal/org/prompts_test.go
 rc=0
