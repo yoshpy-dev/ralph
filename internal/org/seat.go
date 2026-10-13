@@ -6,7 +6,7 @@
 // the adapters in internal/org/driver. It runs a few other commands itself
 // with exec.Command: git (statedir.go, watch.go, feature.go, gate.go),
 // scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
-// scripts/run-test.sh of a feature worktree (gate.go), osascript (watch.go)
+// scripts/run-test.sh of a feature worktree (gate_run.go), osascript (watch.go)
 // and `claude -p` (watcher.go).
 package org
 
