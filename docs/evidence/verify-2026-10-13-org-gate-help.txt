@@ -1,0 +1,72 @@
+### HEAD: c84d8e190cc526c02ed60f8a8a6e8a12d8182cc0
+### cmd: go run ./cmd/ralph org gate --help
+ralph org gate records which head of a feature org passed the
+verification scripts on which base. The leader of an org started with
+`ralph org start --plan` runs it in the org's feature worktree (or a
+directory under it), on the head it pushes: after it rebases the
+feature branch on the default branch and commits everything, and
+before it pushes and opens the PR.
+
+First, gate checks that the org holds a complete feature binding and
+is running. It checks that the current directory is in the binding's
+worktree, on the binding's branch (a detached HEAD is refused). It
+checks that the worktree is clean: git status --porcelain
+--untracked-files=all prints nothing (ignored files do not count). It
+finds the default branch (the one refs/remotes/origin/HEAD names, else
+main, else master) and its base ref (refs/remotes/origin/<branch>, else
+refs/heads/<branch>), and checks that HEAD contains the base ref's tip.
+gate never fetches: run git fetch and git rebase before it. Last, it
+checks that ./scripts/run-static-verify.sh and ./scripts/run-test.sh
+are executable files in the worktree's root. When a check fails, gate
+runs nothing and records nothing, says why and what to do next on
+stderr, and exits 1.
+
+Then gate runs ./scripts/run-static-verify.sh and, when it passes,
+./scripts/run-test.sh, in the worktree's root. The scripts get the
+caller's environment without the RALPH_VERIFY_* and HARNESS_VERIFY_*
+variables and with RALPH_VERIFY_SCOPE=full, so no diff narrows what
+they check. Their output goes to a log under <state dir>/gates/, not
+to the worktree. They can take minutes: give the command a long
+timeout, or run it in the background and wait for it.
+
+When both scripts pass and HEAD and the worktree are as before, gate
+records gate_passed in the manifest. Otherwise it records gate_failed
+with a reason: static_failed, test_failed, head_moved (HEAD moved while
+the scripts ran), or tree_changed (the scripts left files in the
+worktree). Both records hold the head, the base, base_ref, the branch,
+who ran it (by=<USER>, and herdr_pane=set or unset for whether
+HERDR_PANE_ID was set), and the log. When the org was disbanded or
+started again while the scripts ran, gate records nothing and is
+refused.
+
+On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha> and
+LOG: <path> on stdout and exits 0. The leader copies the HEAD: and
+BASE: lines into its RESULT. On a failure, it prints GATE: fail,
+REASON: <reason>, HEAD:, BASE: and LOG:, then the failing script's last
+20 lines of output, or the files the scripts left, and exits 1.
+
+An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and
+records nothing. Processes a script leaves running when it exits are
+stopped too, and the log says so. gate starts no autonomous work, so it
+needs no running watch and no approved plan.
+
+Usage:
+  ralph org gate [flags]
+
+Flags:
+  -h, --help   help for gate
+
+Global Flags:
+      --config string      path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)
+      --org-id string      org execution namespace (required by every verb except stop --all, disband --all, wait --inbox, watch, approve, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)
+      --state-dir string   org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)
+### exit=0
+
+### cmd: go run ./cmd/ralph org gate (no --org-id)
+org: --org-id is required
+exit status 1
+### exit=1
+
+### cmd: go run ./cmd/ralph org --help | grep -n gate
+9:org's leader asked for there. `ralph org gate` runs the verification
+20:  gate        Run the verification scripts on a feature org's head and record gate_passed or gate_failed

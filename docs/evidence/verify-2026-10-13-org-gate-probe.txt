@@ -1,0 +1,230 @@
+# Scratch-ledger probe of ralph org gate (built from HEAD c84d8e190cc526c02ed60f8a8a6e8a12d8182cc0)
+# $SP = the verifier's scratchpad directory (outside every repository)
+# binary: go build -o $SP/ralph-org-gate ./cmd/ralph
+
+## probe script
+```sh
+#!/bin/sh
+# Scratch-ledger probe of `ralph org gate` (built binary), plan org-gate
+# Verify plan "Evidence to capture". No herdr, agmsg, or network.
+set -u
+SP="$SP"
+RALPH="$SP/ralph-org-gate"
+W="$SP/gate-probe"
+rm -rf "$W"
+mkdir -p "$W"
+W="$(cd "$W" && pwd -P)"
+printf '[user]\n\tname = probe\n\temail = probe@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$W/gitconfig"
+export GIT_CONFIG_GLOBAL="$W/gitconfig" GIT_CONFIG_NOSYSTEM=1
+unset HERDR_PANE_ID RALPH_ORG_STATE_DIR
+export USER=probe
+
+git init --quiet --bare "$W/origin.git"
+git init --quiet -b main "$W/main"
+cd "$W/main" || exit 1
+mkdir -p scripts
+printf '.harness/\ndocs/evidence/*.log\n' > .gitignore
+cat > scripts/run-static-verify.sh <<'EOF'
+#!/bin/sh
+echo "static: RALPH_VERIFY_SCOPE=${RALPH_VERIFY_SCOPE:-} RALPH_VERIFY_BASE=${RALPH_VERIFY_BASE:-<unset>} HARNESS_VERIFY_X=${HARNESS_VERIFY_X:-<unset>}"
+exit "$(cat "$PROBE_OUT/exit-static" 2>/dev/null || echo 0)"
+EOF
+cat > scripts/run-test.sh <<'EOF'
+#!/bin/sh
+i=1; while [ "$i" -le 30 ]; do echo "test line $i"; i=$((i + 1)); done
+exit "$(cat "$PROBE_OUT/exit-test" 2>/dev/null || echo 0)"
+EOF
+chmod +x scripts/*.sh
+git add . && git commit --quiet -m init
+git remote add origin "$W/origin.git"
+git push --quiet -u origin main
+git remote set-head origin main
+git worktree add --quiet -b feat/probe "$W/wt-probe"
+
+STATE="$W/state"
+mkdir -p "$STATE" "$W/out"
+export PROBE_OUT="$W/out"
+WT="$W/wt-probe"
+cat > "$STATE/manifest.jsonl" <<EOF
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$WT","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+EOF
+
+gate() {
+  "$RALPH" org gate --org-id probe --state-dir "$STATE" "$@"
+}
+section() { printf '\n######## %s\n' "$1"; }
+lines() { wc -l < "$STATE/manifest.jsonl" | tr -d ' '; }
+
+section "P1 clean worktree, HEAD contains origin/main, caller env with RALPH_VERIFY_BASE=HEAD"
+cd "$WT" || exit 1
+RALPH_VERIFY_BASE=HEAD RALPH_VERIFY_SCOPE=changed HARNESS_VERIFY_X=1 gate; echo "exit=$?"
+echo "manifest lines=$(lines)"; tail -n 1 "$STATE/manifest.jsonl"
+echo "git status --porcelain --ignored (worktree):"; git status --porcelain --untracked-files=all --ignored; echo "(end)"
+ls "$STATE/gates"
+grep -n "static:" "$STATE"/gates/*.log
+
+section "P2 untracked file: refused, nothing recorded"
+before=$(lines)
+echo x > untracked.txt
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+rm -f untracked.txt
+
+section "P3 origin/main moved ahead (HEAD does not contain it): refused"
+cd "$W/main" || exit 1
+git commit --quiet --allow-empty -m ahead && git push --quiet origin main
+cd "$WT" || exit 1
+git fetch --quiet origin main
+before=$(lines)
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+git rebase --quiet origin/main && echo "rebased: $(git rev-parse --short HEAD)"
+
+section "P4 run from a subdirectory, test script fails: gate_failed test_failed"
+echo 1 > "$PROBE_OUT/exit-test"
+cd "$WT/scripts" || exit 1
+gate; echo "exit=$?"
+echo "manifest lines=$(lines)"; tail -n 1 "$STATE/manifest.jsonl"
+rm -f "$PROBE_OUT/exit-test"
+
+section "P5 static script fails: gate_failed static_failed, run-test.sh not run"
+echo 2 > "$PROBE_OUT/exit-static"
+cd "$WT" || exit 1
+gate; echo "exit=$?"
+tail -n 1 "$STATE/manifest.jsonl"
+rm -f "$PROBE_OUT/exit-static"
+echo "last log has run-test.sh header? $(grep -c 'running ./scripts/run-test.sh' "$(ls -t "$STATE"/gates/*.log | head -n 1)")"
+
+section "P6 detached HEAD: refused"
+git switch --quiet --detach
+before=$(lines)
+gate; echo "exit=$?"
+echo "manifest lines before=$before after=$(lines)"
+git switch --quiet feat/probe
+
+section "P7 main checkout (outside the feature worktree): refused"
+cd "$W/main" || exit 1
+gate; echo "exit=$?"
+
+section "P8 unknown org: refused"
+cd "$WT" || exit 1
+"$RALPH" org gate --org-id nosuch --state-dir "$STATE"; echo "exit=$?"
+
+section "P9 pass again after the failures, then the full manifest"
+gate; echo "exit=$?"
+cat "$STATE/manifest.jsonl"
+```
+
+## output (sh $SP/gate-probe.sh, rc=0)
+```
+
+######## P1 clean worktree, HEAD contains origin/main, caller env with RALPH_VERIFY_BASE=HEAD
+GATE: pass
+HEAD: 5e8cee816bc78c4171e943b3ea4682154474925f
+BASE: 5e8cee816bc78c4171e943b3ea4682154474925f
+LOG: $SP/gate-probe/state/gates/probe-20261013T072733Z.log
+exit=0
+manifest lines=3
+{"ts":"2026-10-13T07:27:34Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5e8cee816bc78c4171e943b3ea4682154474925f base=5e8cee816bc78c4171e943b3ea4682154474925f base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072733Z.log\""}
+git status --porcelain --ignored (worktree):
+(end)
+probe-20261013T072733Z.log
+8:static: RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=<unset> HARNESS_VERIFY_X=<unset>
+
+######## P2 untracked file: refused, nothing recorded
+org: gate: the feature worktree $SP/gate-probe/wt-probe has 1 uncommitted change(s) or untracked file(s): commit or remove them (a file the scripts write belongs in .gitignore) and run the gate again:
+  ?? untracked.txt
+exit=1
+manifest lines before=3 after=3
+
+######## P3 origin/main moved ahead (HEAD does not contain it): refused
+org: gate: HEAD 5e8cee816bc78c4171e943b3ea4682154474925f of feat/probe does not contain refs/remotes/origin/main's tip 3138a0eb07bbf6d57fd89e8d6db38f783da3df66: run `git fetch origin main` and `git rebase refs/remotes/origin/main`, then run the gate again
+exit=1
+manifest lines before=3 after=3
+rebased: 3138a0e
+
+######## P4 run from a subdirectory, test script fails: gate_failed test_failed
+GATE: fail
+REASON: test_failed
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072735Z.log
+
+last 20 lines of ./scripts/run-test.sh:
+  test line 11
+  test line 12
+  test line 13
+  test line 14
+  test line 15
+  test line 16
+  test line 17
+  test line 18
+  test line 19
+  test line 20
+  test line 21
+  test line 22
+  test line 23
+  test line 24
+  test line 25
+  test line 26
+  test line 27
+  test line 28
+  test line 29
+  test line 30
+org: gate: recorded gate_failed (reason=test_failed); nothing to push until the gate passes
+exit=1
+manifest lines=4
+{"ts":"2026-10-13T07:27:35Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=test_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072735Z.log\""}
+
+######## P5 static script fails: gate_failed static_failed, run-test.sh not run
+GATE: fail
+REASON: static_failed
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072736Z.log
+
+last line of ./scripts/run-static-verify.sh:
+  static: RALPH_VERIFY_SCOPE=full RALPH_VERIFY_BASE=<unset> HARNESS_VERIFY_X=<unset>
+org: gate: recorded gate_failed (reason=static_failed); nothing to push until the gate passes
+exit=1
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=static_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z.log\""}
+last log has run-test.sh header? 0
+
+######## P6 detached HEAD: refused
+org: gate: HEAD is detached in $SP/gate-probe/wt-probe, not on the feature branch feat/probe: run git switch feat/probe and run the gate again
+exit=1
+manifest lines before=5 after=5
+
+######## P7 main checkout (outside the feature worktree): refused
+org: gate: the gate ran in the git worktree $SP/gate-probe/main, not in org_id "probe"'s feature worktree $SP/gate-probe/wt-probe: cd into $SP/gate-probe/wt-probe and run the gate again
+exit=1
+
+######## P8 unknown org: refused
+org: gate: org_id "nosuch" is not running and holds no split plan feature binding: name the org_id of a feature org that ralph org start --plan started (ralph org status lists them)
+exit=1
+
+######## P9 pass again after the failures, then the full manifest
+GATE: pass
+HEAD: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+BASE: 3138a0eb07bbf6d57fd89e8d6db38f783da3df66
+LOG: $SP/gate-probe/state/gates/probe-20261013T072736Z-2.log
+exit=0
+{"ts":"2026-10-13T00:00:00Z","org_id":"probe","seat_id":"","event":"scope_reserved","worktree":"$SP/gate-probe/wt-probe","details":"paths=internal/probe/ split=split-1 feature=probe digest=0123456789ab branch=feat/probe approval=per-plan"}
+{"ts":"2026-10-13T00:00:01Z","org_id":"probe","seat_id":"leader","event":"spawned","role":"leader","driver":"claude","model":"sonnet","pane_id":"pane-1","herdr_agent_name":"probe-leader"}
+{"ts":"2026-10-13T07:27:34Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=5e8cee816bc78c4171e943b3ea4682154474925f base=5e8cee816bc78c4171e943b3ea4682154474925f base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072733Z.log\""}
+{"ts":"2026-10-13T07:27:35Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=test_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072735Z.log\""}
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_failed","details":"reason=static_failed head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z.log\""}
+{"ts":"2026-10-13T07:27:36Z","org_id":"probe","seat_id":"","event":"gate_passed","details":"head=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base=3138a0eb07bbf6d57fd89e8d6db38f783da3df66 base_ref=refs/remotes/origin/main branch=feat/probe by=probe herdr_pane=unset log=\"$SP/gate-probe/state/gates/probe-20261013T072736Z-2.log\""}
+```
+
+## shellcheck 0.11.0 without the SC2329 disable line of scripts/run-verify.sh
+```
+
+In $SP/rv-nodisable.sh line 47:
+cleanup_run_files() {
+^-- SC2329 (info): This function is never invoked. Check usage (or ignored if invoked indirectly).
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2329 -- This function is never invoked. C...
+```

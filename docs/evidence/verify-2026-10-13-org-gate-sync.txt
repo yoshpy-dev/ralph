@@ -1,0 +1,68 @@
+### HEAD: c84d8e190cc526c02ed60f8a8a6e8a12d8182cc0
+### cmd: ./scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      167
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+### exit=0
+
+### cmd: ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 13 skill(s) in lock-step
+### exit=0
+
+### cmd: shellcheck --version
+ShellCheck - shell script analysis tool
+version: 0.11.0
+license: GNU General Public License, version 3
+website: https://www.shellcheck.net
+### cmd: shellcheck scripts/run-verify.sh tests/test-run-verify-concurrency.sh templates/base/scripts/run-verify.sh
+### exit=0
+### cmd: shellcheck -s sh scripts/run-verify.sh
+### exit=0
+### cmd: sh -n / dash -n
+sh -n scripts/run-verify.sh exit=0
+dash -n scripts/run-verify.sh exit=0
+sh -n tests/test-run-verify-concurrency.sh exit=0
+dash -n tests/test-run-verify-concurrency.sh exit=0
+### cmd: cmp root vs template run-verify.sh
+### exit=0
+### cmd: cmp org SKILL.md x4
+.agents/skills/org/SKILL.md exit=0
+templates/base/.claude/skills/org/SKILL.md exit=0
+templates/base/.agents/skills/org/SKILL.md exit=0
+### cmd: git diff --check 1bddc871...HEAD
+### exit=0
+### cmd: go build ./...
+### exit=0
+### cmd: go vet ./internal/org/ ./internal/cli/
+### exit=0
