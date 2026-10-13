@@ -84,7 +84,7 @@
 
 ## Recommendation
 
-- Merge: yes(cycle 3 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 3 の差分(8b681dc3)の LOW は 2 件(下の「Cycle 3」の C3-1・C3-2)で、動きと記録の値を変えない。`gateSignalContext` は cause の文、親が先に終わるときの cause、stop の順、goroutine の終わり、後の信号の扱いが Go 1.26.0 の `signal.NotifyContext` と同じで、子プロセスのテストは env guard と上限があり、プロセスもユーザーの状態も残さない。cycle 2 の LOW 6 件(C2-1〜C2-6)は tech-debt の `docs/tech-debt/README.md:231` の行にあり、cycle 3 は触れていない。cycle 1 の MEDIUM 3 件と LOW 9 件は cycle 2 で直っていることを確かめた(L8 の半分と M2 の SIGKILL は、前者が stage 7c、後者が tech-debt の行に載る)。cycle 1 と cycle 2 の判定は「yes」で、上の所見の表はその時点のまま残す)
+- Merge: yes(cycle 4 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 4 の差分(f1b0352e の leader の雛形の手順 9・10 と skill 4 面の「org の終わり方」の順の直し。b9a95f05 は記録だけ)の LOW は 3 件(下の「Cycle 4」の C4-1〜C4-3)で、動きと記録の値を変えない。cycle 3 の差分(8b681dc3)の LOW 2 件(C3-1・C3-2)は tech-debt の `docs/tech-debt/README.md:232` の行にあり、cycle 4 は触れていない。`gateSignalContext` は cause の文、親が先に終わるときの cause、stop の順、goroutine の終わり、後の信号の扱いが Go 1.26.0 の `signal.NotifyContext` と同じで、子プロセスのテストは env guard と上限があり、プロセスもユーザーの状態も残さない。cycle 2 の LOW 6 件(C2-1〜C2-6)は tech-debt の `docs/tech-debt/README.md:231` の行にあり、cycle 3 は触れていない。cycle 1 の MEDIUM 3 件と LOW 9 件は cycle 2 で直っていることを確かめた(L8 の半分と M2 の SIGKILL は、前者が stage 7c、後者が tech-debt の行に載る)。cycle 1 と cycle 2 の判定は「yes」で、上の所見の表はその時点のまま残す)
 - Follow-ups:
   1. M1: 手順 12 の「断られたとき」と SKILL の手順 4 に、衝突した rebase のあとの archive の revert を足し、`prompts_test.go` の `TestRenderRolePrompt_Leader_FeatureOrgGate` の語句と順序の検査を合わせる
   2. M3: `run-verify.sh` のコメントを実際の動きに合わせ、`tests/test-run-verify-concurrency.sh` の Case 6 を、解放しないまま kill する形に直す(`/bin/sh` と dash の両方)。root と `templates/base/` の 2 つを同じに保つ
@@ -265,3 +265,86 @@ cycle 1 の「Positive notes」が頼っていた点は、b04289c1 のあとも�
   1. C3-1・C3-2 は上限の最後なので直さず、上の tech-debt の (j)・(k) として `README.md:231` の行に足す(orchestrator)
   2. /test cycle 3 で、`GOTOOLCHAIN=go1.25.8` を付けて `go test ./internal/cli -run 'TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)'` を 1 回走らせ、CI と同じ toolchain で緑になることを確かめる。手元の Go は 1.26.0 で、1.25 側の欠陥は既定の toolchain では再現しない。ここでは走らせていない
   3. cycle 3 の `/verify`・`/test` が書き直す報告に、`org_gate_test.go` の行を指す pointer が残る場合は、この commit で行がずれた(新しいテストが 723-798 行に入った)ので、関数名で書くか HEAD で引き直す
+
+## Cycle 4
+
+- Date: 2026-10-14
+- Reviewer: reviewer subagent (Claude)。パイプライン 4 回目(cycle 4)。cross-review cycle 3 の ACTION_REQUIRED #1 を直すために上限を 4 に上げた。`.harness/state/standard-pipeline/cycle-count.json` は skill の規則で 2 のまま
+- Scope: `git diff 09baf8eb..HEAD`(HEAD f1b0352e、2 コミット、8 ファイル、+167/-60)。b9a95f05 は cross-review cycle 3 の triage 報告と insight event 1 行の記録だけで、コードと文書の本文には触れない。f1b0352e が対象で、`internal/org/prompts/leader.md` の手順 9・10 と冒頭の 1 文、`internal/org/prompts_test.go` の順序の assertion、`/org` skill 4 面の「org の終わり方」の手順 1・2、要約の文、順を書いた行、チェックリスト。cycle 3 までに見た差分は読み直していない。テストの実行、静的解析、仕様適合、文書のずれの検査は行っていない
+- コミットの背景: cross-review cycle 3 の指摘 #1(`docs/reports/cross-review-triage-org-gate.md` の先頭の表)。gate をやり直すとき、reviewer がコミット済みのレポートを書き換えるので、既定のブランチが進んでいると手順 9 の `git rebase` が `cannot rebase: You have unstaged changes` で断られる。直しは、reviewer のレポートのコミットと `git status --porcelain` の確認を手順 9 の先頭に移し、手順 10 は report だけをコミットする形
+
+### 読んだものと確かめたこと
+
+- 読んだ: `git diff 09baf8eb..HEAD` の `leader.md` と `prompts_test.go` の全体、`leader.md` の 120-260 行(手順 3〜14 の全文)、skill の「org の終わり方」(745-860 行)と、要約の文(955-965 行)・順の行(1064-1074 行)、`prompts_test.go` の `markdownItem`・`squashSpace`・`containsPhrase` と `TestRenderRolePrompt_Leader_FeatureOrgGate` の全体(759-900 行)、`reviewer.md` のミッションとレポート契約、`.claude/hooks/session_end_summary.sh`、`.gitignore` の `docs/evidence` と `.harness` の行、triage 報告の先頭、`docs/insights/events/2026-10-13-org-gate.jsonl` の追加行
+- `git diff --check 09baf8eb..HEAD` は空。追加行に TODO・FIXME・デバッグ出力・秘密情報はない
+- skill の 4 面: `cmp .claude/skills/org/SKILL.md` を残り 3 面(`.agents/skills/org`、`templates/base/.claude/skills/org`、`templates/base/.agents/skills/org`)に当てて差がない。デルタの hunk も 4 面で同じ(`diff` の差はファイル名の行だけ)
+- `git grep` で旧い順の文を掃いた(`report と reviewer`、`reviewer のレポート`、`rebase → report`、`先に.*rebase`、英語の `reviewer's report(s)`)。旧い順が残るのは archive 済みの計画(`docs/plans/archive/2026-10-13-org-gate.md:39` と `:107`)と、過去の実機記録(`docs/evidence/`)だけ。`internal/` の非テストの Go、`scripts/`、`tests/` には順を書いた comment がない。skill の締めの順を読む `*_test.go`・`tests/*` は 0 件(`org の終わり方` で確かめた)
+- 手順の番号の参照は動いていない。手順 9 と 10 の番号は変わらず、手順 12 の「reviewer が通したら、手順 9 からやり直す」、手順 10 の末尾の「手順 12 の `GATE: fail` のとき」、手順 9 の新しい「手順 8 の往復に戻る」はどれも指す先が合う。skill は 1〜7 で、手順 4 の「1 からやり直す」が新しい手順 1 を指す。skill の冒頭の「雛形の手順 9〜16 と同じ」も成り立つ
+- 新しい assertion が何で赤になるかを、変異を当てて読んで辿った(走らせていない)
+  - 手順 10 に reviewer のレポートのコミットを戻す: `report と reviewer のレポート` の否定の検査(`:890`)と、手順 10 の行(`:818`)で赤
+  - 手順 9 でコミットを fetch の後ろに動かす: 手順 9 の中の順序の検査(`:874-889`)と、節全体の順序(`:770-800`)で赤
+  - `git status --porcelain` の確認だけを消す: `:805` の行と節全体の順序で赤
+  - 「それ以外は BLOCKED」の枝を消す、または「自分ではコミットしない」を消す: `:809` と `:807` の行で赤
+  - skill の 4 面を同じ向きに旧い順へ戻す: 赤にならない(テストがない)。下の Known gaps
+- 確かめていないもの: テスト、`gofmt`、`check-skill-sync.sh`、`check-sync.sh`。README の「commits everything」(`README.md:260`)と `docs/quality/` の文が新しい順と合うか(`/sync-docs` の受け持ち)
+
+### 所見(cycle 4)
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。cycle 1〜3 の ID と取り違えないよう、ID に `C4-` を付ける。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C4-1 | LOW | maintainability | 手順 9 の最初の「コミットし」は、コミットするものがない場合と、何を add するかを言わない。この repo の hook は seat の変更を自分でコミットする(`session_end_summary.sh` は `git add -A` のあと `wip: checkpoint before session end` を打つ)ので、reviewer のレポートが先に入っていることがあり、そのとき `git commit` は何も入れずに 1 で終わる。また、次の文は「ほかの変更は自分ではコミットしない」と言うが、add の範囲は言わない。旧い手順 10 は「`docs/reports/` の下」と書いており、ディレクトリ単位や `-A` の add を許す読みが残る | `leader.md:164-167`(最初の文)、`:167-175`(理由と枝)、`.claude/hooks/session_end_summary.sh:36-38`、`docs/evidence/org-feature-worktree-live-2026-10-09.md:106` と `:115`(reviewer のレポートが `wip:` コミットで入った記録)、skill の `:766-768`(4 面)、`prompts_test.go:805` | 「まだコミットされていない reviewer のレポートがあれば、パスを名指しして `git add` し、コミットする(なければそのまま次へ)。そのあと `git status --porcelain` を確かめる」。`leader.md`、skill 4 面、`prompts_test.go:805` の語句を一緒に直す |
+| C4-2 | LOW | readability | skill の 2 か所の段落の組み直しが途中までで、短い行が 1 本ずつ残った。4 面とも同じ | `.claude/skills/org/SKILL.md:961`(`前に report を打って、report の`)と `:1070`(`コミット → secret scan →`)。前後の行は 70 桁前後で、この 2 行だけ 25 桁前後。ほかの 3 面も同じ行番号で同じ | `:959-963` と `:1068-1072` を同じ幅に組み直す。Markdown の改行なので表示には効かない。4 面を同じに直し、`check-skill-sync.sh` の対象 |
+| C4-3 | LOW | naming | `TestRenderRolePrompt_Leader_FeatureOrgGate` の doc comment は「pins AC8 of plan ...」で始まり、続く順(reviewer のレポートのコミットが rebase の前)は AC8 と逆。AC8 は「fetch と rebase、…、report と reviewer のレポートのコミット」の順で、plan は archive 済みなので AC8 のほうは直せない。この差分で comment を書き直したときに、AC8 からの変更を 1 句で言うところまでは来ていない(括弧の中で cross-review cycle 3 #1 を理由に挙げるだけ) | `prompts_test.go:740-759`、`docs/plans/archive/2026-10-13-org-gate.md:107`。同じ comment の plan のパスは `docs/plans/active/...` のままで、PR の作成で archive した f001bd4f から指す先がない。同じ旧パスは 7 ファイル 8 か所にある(`org_gate.go:18`、`org_gate_test.go:23`、`approval_enforce_test.go:1011`、`gate.go:19`、`gate_runverify_test.go:12`、`gate_test.go:24`、`prompts_test.go:741` と `:961`)で、このデルタが足したものではない | 「AC8 of plan docs/plans/archive/2026-10-13-org-gate.md, with the commit of the reviewer's reports moved ahead of the rebase (cross-review cycle 3 #1 of org-gate)」のように、AC8 からの変更を言う。旧パス 8 か所は別の機会にまとめて直す |
+
+#### C4-1 の根拠
+
+- 手順 9 の枝は「何も出なくなったら」で fetch に進む。つまり gate の前提(きれいな作業ツリー)を守るのは `git status --porcelain` で、最初の commit ではない。commit が空振りしても、次の確認が空なら進める。LLM の leader は多分そのまま進むが、`git commit` の失敗を error として読んで止まる可能性は残る(未確認)
+- 空振りが起きるのは、reviewer の session が手順 9 より前に終わっていて、`session_end_summary.sh` が `git add -A` でレポートを入れた場合。実機記録の Run 3 と Run 6 は、座席を止めてから report をコミットする古い順で、2 回とも reviewer のレポートが `wip:` コミットで入っていた。座席の stop は今の順では手順 13 なので、座席が途中で再起動されるなどしない限り起きにくい。頻度は未確認で、LOW の根拠はこれ
+- add の範囲は、旧い文面「report と reviewer のレポート(`docs/reports/` の下)をコミットする」が、1 つの commit に report と reviewer のレポートを入れる前提だった。新しい手順 9 は、その commit のあとの `git status --porcelain` が「ほかの変更」の検出になる。`git add docs/reports` のようにディレクトリで add すると、implementer が `docs/reports/` に置いた未コミットのファイルが「reviewer のレポート」と一緒に入り、続く「implementer の変更なら TASK で頼む」の枝を通らない。最初の文が「reviewer が RESULT や BLOCKED に書いた」ファイルと言っているので、名指しで add すれば起きないが、手順 9 は add の仕方を書いていない
+
+#### C4-2 の根拠
+
+- 直前の cycle 2 の C2-5 と同じ形(中途半端な折り返し)。cycle 4 の差分は skill の 4 面で同じ文を直すので、直すなら 4 面を同時に直す
+
+#### C4-3 の根拠
+
+- doc comment は括弧の中(`:745`)で cross-review cycle 3 #1 を理由に挙げるので、順が意図した変更だとは読める。足りないのは、AC8 を上書きしたと言う 1 句だけ。plan は archive 済みで直せないので、上書きを言える場所は test の comment になる
+
+### 問いごとの確認(委任の指示への答え)
+
+- 手順 9 は、最初の通過でも gate をやり直す通過でも、`git rebase` を打つ前にきれいな作業ツリーから始まる。最初の通過では reviewer のレポートが未追跡の新しいファイルで、コミットされて空になる。やり直しでは追跡済みのレポートの変更が同じようにコミットされる。reviewer の再レビューが衝突の枝(手順 9 の中)から戻ってきた通過でも、先頭のコミットが入れたレポートを reviewer が書き換えることがあり、同じ状況になるので、先頭のコミットが効く。手順 9 の理由の文は「gate をやり直すとき」しか挙げないが、指示はすべての通過に効く。C4-1 の空振りと add の範囲を除けば、きれいにならずに rebase へ進む道は読み取れなかった
+- 「ほかの変更」の枝は、手順 9 の既存の衝突の枝(`git rebase --abort` のあと implementer に TASK で頼み、reviewer に頼み直す)と同じ形で、leader から implementer への TASK、`PLAN:` のヘッダ(per-plan)、手順 8 の往復、受信箱への BLOCKED だけを使う。seat 同士の通信はなく、星型は崩れない。BLOCKED は `ralph org escalate` で、agmsg のメッセージではない。ループは、reviewer が通すたびに手順 9 の先頭に戻る形で、implementer が毎回何かを残さない限り終わる。上限はないが、既存の衝突の枝と手順 12 の `GATE: fail` の枝も同じ作りで、新しい種類のループではない
+- archive と revert の規則(手順 10 の末尾、手順 12): 手順 9 の新しい TASK は、最初の通過(archive の前)か、手順 12 が archive を revert した後の通過にしか来ない。手順 10 の末尾の列挙「手順 12 の `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき」は、手順 9 の TASK が archive のコミットの後に来る道がないので、足りないものがない
+- skill の 4 面は、`cmp` で全文が同じで、雛形との差は 2 点だけ。skill は「残ったファイルを本文に書いて」を省き、「手順 8 の往復に戻る」を書かない(skill は別の番号の列)。skill の他の BLOCKED の文(「打ち直さずに `BLOCKED` を escalate する」)も同じ略記で、揃っている
+- assertion は弱くなっていない。行の検査は旧い 1 本(`report と reviewer のレポート(...)をコミットする`)を新しい 7 本(手順 9 が 6 本、手順 10 が 1 本)に置き換え、節全体の順序の検査には 2 項目を足し、手順 10 の否定の検査 1 本を加えた。手順 9 に絞った順序の検査(`:874-889`)は節全体の順序の検査(`:770-800`)と重なるが、「何も出なくなったら」が fetch の前にあることまで見る点が増えている。節の中の項目が見つからないときは `ok` を見て黙って抜けるが、見つからない失敗は上の行の検査(`:805-817`)が報告する(同じ検査の書き方が `:862` の `continue` にある)
+- 冒頭の 1 文は、`leader.md:62-66` と `prompts_test.go:525` が一致する。手順 9 の書き込み(reviewer のレポートは reviewer が書き、leader は束ねるだけ)を「予約の外に書きます」の列に入れる言い方は旧い文面と同じで、意味は変わらない
+
+### 所見にしなかったもの
+
+- 手順 9 の理由の文「そのままでは `git rebase` が始まらずに断られる」は、rebase を打つのが `git merge-base --is-ancestor` が 0 で終わらないときだけという条件を言わない。既定のブランチが進んでいなければ rebase は打たず、汚れたレポートは手順 10 のコミットに入る(旧い順でも通った道)。指示は「いつも先にコミットする」なので、動きは変わらない。cross-review の指摘文は「既定のブランチが進んでいると」と条件を書く
+- 手順 9 は 24 行(旧 15 行)の 1 段落に、3 つの枝(未コミットの変更、rebase の衝突、fetch の失敗)が入る。手順 12 は 3 本の箇条書きで枝を分ける。箇条書きにすると `markdownItem` が `- ` で項目を切るので、手順 9 の行の検査を組み直す必要がある。読みにくさが実害になった証拠はなく、今は直さない
+- 手順 9 の「ほかの変更」の枝は、leader 自身の未コミットの変更(手順 1・4・6 の計画の編集のあとのコミット忘れ)をどう扱うかを、雛形も skill も書かない。「誰が残したかわからない変更」の BLOCKED に入るので止まりはするが、leader が自分の変更に BLOCKED を上げる形になる。旧い順でも gate が汚れた作業ツリーで断るので、新しい穴ではない
+- b9a95f05(triage 報告と insight event): 記録で、cycle 3 の表と `## Cycle 2`・`## Cycle 1` の節の移し替え。`Cycle 1` の節の頭にある「cross-review cycle 1 #1」の指す先の 1 段落は残っている
+
+### Known gaps
+
+- skill の締めの順(4 面)を固定するテストがない。`prompts_test.go` は雛形だけを固定する。4 面を同じ向きに旧い順へ戻す変更は、`check-skill-sync.sh` も `check-sync.sh` も(4 面が同じなので)通る。`/test` の受け持ちで、cycle 1〜3 から変わらない
+- 手順 9 の枝(implementer の未コミットの変更、BLOCKED)を、実機の leader が選べるかは見ていない。雛形の語句までの確認
+
+### Tech debt identified
+
+この回は報告だけをコミットする指示なので、`docs/tech-debt/README.md` には行を足していない。cycle 4 は上限(4 回)の最後で、C4-1〜C4-3 は `.md`・`.go` の文面の変更なので、直すと 5 回目の pipeline が要る。動きと記録の値は変わらないので、cycle 3 の LOW と test のすり抜けをまとめた既存の行(`README.md:232`、`Small findings of org-gate cycle 3`)に (o)〜(q) として足すことを勧める(orchestrator が足す)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| 既存の行 `README.md:232` に足す。(o) C4-1: step 9 of the leader template (`internal/org/prompts/leader.md`) and step 1 of "org の終わり方" in the four `/org` skill copies tell the leader to commit the reviewer's reports without saying to skip the commit when they are already committed (the SessionEnd hook, `git add -A` plus `wip: checkpoint before session end`, can have done it) or to stage the named paths only (a `git add docs/reports` would sweep an implementer's stray file past the "other changes" branch). (p) C4-2: two paragraphs of the same skill copies are re-wrapped only halfway (`.claude/skills/org/SKILL.md:961` and `:1070` are short lines between ~70-column lines). (q) C4-3: the doc comment of `TestRenderRolePrompt_Leader_FeatureOrgGate` (`internal/org/prompts_test.go:740`) says it pins AC8 of the plan, whose order (fetch and rebase before the reviewer's reports are committed) it now reverses; the comment does not say it overrides AC8, and its plan path (`docs/plans/active/...`, now `docs/plans/archive/...`) is one of 8 stale citations in 7 files | (o) a no-op `git commit` may be read as an error, and a directory-level add could commit an implementer's file without the TASK; neither seen in a live run. (p) cosmetic. (q) a reader who follows the AC finds the opposite order | Found at the pipeline cap (cycle 4 of 4); each is a few lines, and the template and skill edits restart the pipeline from `/self-review` | The next edit of step 9 or 10 of the leader template or of "org の終わり方" in the skill ((o), (p): fix all four skill copies and `prompts_test.go:805` together); the next edit of `TestRenderRolePrompt_Leader_FeatureOrgGate` ((q): and sweep the 8 stale plan paths with `git grep 'plans/active/2026-10-13-org-gate'`) | `docs/reports/self-review-2026-10-13-org-gate.md` (`## Cycle 4`, C4-1 to C4-3); `internal/org/prompts/leader.md`; `internal/org/prompts_test.go`; commit f1b0352e |
+
+### Recommendation
+
+- Merge: 上の「Recommendation」の Merge の行のとおり(yes)。cycle 4 の差分に CRITICAL・HIGH・MEDIUM はなく、cross-review cycle 3 の指摘 #1(reviewer のレポートをコミットしてから rebase する)は手順 9 の先頭の確認で塞がり、skill の 4 面と雛形は同じ順で合う。cycle 3 までの判定は変わらない
+- Follow-ups:
+  1. C4-1〜C4-3 は上限の最後なので直さず、上の tech-debt の (o)〜(q) として `README.md:232` の行に足す(orchestrator)。直すなら C4-1 を先に、`leader.md`、skill 4 面、`prompts_test.go:805` を一緒に
+  2. `/cross-review` を回すなら、triage 報告の「#1」は新しい指摘の番号で書き換わり、今の「cycle 3 の #1」は `## Cycle 3` の節に移る。`prompts_test.go` の 2 か所の comment(`:745` と `:876`)が「cross-review cycle 3 #1 of org-gate」と書くので、`## Cycle 1` の節の頭(`docs/reports/cross-review-triage-org-gate.md:63`)と同じ形の 1 段落(「cross-review cycle 3 #1」はこの節の番号を指す)を `## Cycle 3` の節に足す
+  3. cycle 4 の `/verify`・`/test` が書き直す報告に、`leader.md` や `prompts_test.go` の行を指す pointer が残る場合は、この commit で行がずれた(`leader.md` の手順 9 は 164-187 行、手順 10 は 186 行から。`prompts_test.go` は 740-759、805-、874-895)ので、関数名や手順の番号で書くか HEAD で引き直す
