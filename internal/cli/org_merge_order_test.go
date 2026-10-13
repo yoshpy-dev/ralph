@@ -115,9 +115,22 @@ func mergeOrderTempDir(t *testing.T) string {
 	return dir
 }
 
+// mergeOrderGitWrapper is the git of the tests' bin dir (fmt verb: the real
+// git's path, shell-quoted): it execs the real git, except that, when
+// $MERGE_ORDER_ORIGIN_URL is set, it prints that for `git remote get-url
+// origin`, so a test can give origin a GitHub URL while the ls-remote still
+// reads the bare origin. It uses only shell builtins.
+const mergeOrderGitWrapper = `#!/bin/sh
+if [ -n "$MERGE_ORDER_ORIGIN_URL" ] && [ "$#" -eq 3 ] && [ "$1" = remote ] && [ "$2" = get-url ] && [ "$3" = origin ]; then
+  printf '%%s\n' "$MERGE_ORDER_ORIGIN_URL"
+  exit 0
+fi
+exec %s "$@"
+`
+
 // setMergeOrderPATH writes, in bin, a git that execs the real git (looked up
-// on the PATH before this call) and, with withGH, the fake gh, and sets PATH
-// to bin alone.
+// on the PATH before this call; mergeOrderGitWrapper) and, with withGH, the
+// fake gh, sets PATH to bin alone, and clears MERGE_ORDER_ORIGIN_URL.
 func setMergeOrderPATH(t *testing.T, bin string, withGH bool) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -130,10 +143,11 @@ func setMergeOrderPATH(t *testing.T, bin string, withGH bool) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeStubScript(t, filepath.Join(bin, "git"), "#!/bin/sh\nexec "+shellQuoteIfNeeded(realGit)+" \"$@\"\n")
+	writeStubScript(t, filepath.Join(bin, "git"), fmt.Sprintf(mergeOrderGitWrapper, shellQuoteIfNeeded(realGit)))
 	if withGH {
 		writeStubScript(t, filepath.Join(bin, "gh"), mergeOrderFakeGH)
 	}
+	t.Setenv("MERGE_ORDER_ORIGIN_URL", "")
 	t.Setenv("PATH", bin)
 }
 
@@ -732,6 +746,80 @@ func TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped(t *testing
 	}
 	if strings.Contains(stdout, "\x1b") {
 		t.Errorf("stdout holds a raw ESC:\n%q", stdout)
+	}
+}
+
+// A gh whose stderr has two lines cannot forge a note line: the failure note
+// is printed on one line, its newline escaped, before the as-of note.
+func TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine(t *testing.T) {
+	fx := newMergeOrderFixture(t, false)
+	writeStubScript(t, filepath.Join(fx.bin, "gh"), "#!/bin/sh\nprintf 'HTTP 401: Bad credentials\\nnote: forged\\n' >&2\nexit 1\n")
+	main := fx.tip(t, "main")
+	head := fx.branch(t, "feat/a")
+	fx.push(t, "feat/a")
+	fx.bind(t, "a", "a", "feat/a")
+	fx.gate(t, "a", "feat/a", "", head, main)
+
+	stdout, stderr, err := fx.run(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	out := parseMergeOrderText(t, stdout)
+	if len(out.notes) != 2 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/a failed (") ||
+		!strings.Contains(out.notes[0], `Bad credentials\nnote: forged`) || !strings.HasPrefix(out.notes[1], "the order is as of the ls-remote") {
+		t.Fatalf("notes = %q; want the gh failure on one escaped line, then the as-of note", out.notes)
+	}
+}
+
+// The cross-review finding through the CLI, with the real git and the fake
+// gh: origin's URL names acme/app (the git wrapper answers git remote
+// get-url origin), and gh returns a merged PR of upstream-org/app for
+// feat/a, as gh does in a fork's checkout whose upstream remote it picks.
+// The PR is not used: feat/a stays ready with no PR instead of being hidden
+// as merged, gh is not asked about feat/b, and the first note says to run
+// gh repo set-default acme/app. With the PR's url naming acme/app, the same
+// run hides feat/a and shows feat/b's PR.
+func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
+	fx := newMergeOrderFixture(t, true)
+	main := fx.tip(t, "main")
+	a, b := fx.branch(t, "feat/a"), fx.branch(t, "feat/b")
+	fx.push(t, "feat/a", "feat/b")
+	fx.bind(t, "a", "a", "feat/a")
+	fx.gate(t, "a", "feat/a", "", a, main)
+	fx.bind(t, "b", "b", "feat/b")
+	fx.gate(t, "b", "feat/b", "", b, main)
+	t.Setenv("MERGE_ORDER_ORIGIN_URL", "git@github.com:acme/app.git")
+	fx.prs(t, "feat/a", mergeOrderGHPR{Number: 7, State: "MERGED", URL: "https://github.com/upstream-org/app/pull/7", HeadRefOid: a, BaseRefName: "main"})
+	fx.prs(t, "feat/b", mergeOrderGHPR{Number: 8, State: "OPEN", URL: "https://github.com/acme/app/pull/8", HeadRefOid: b, BaseRefName: "main"})
+
+	stdout, stderr, err := fx.run(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	out := parseMergeOrderText(t, stdout)
+	checkMergeOrderRows(t, out.rows, []mergeOrderRow{
+		{"ready", "feat/a", "-", short(a), short(main), "a/a", "the gate passed"},
+		{"ready", "feat/b", "-", short(b), short(main), "b/b", "the gate passed"},
+	})
+	if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], "gh reads upstream-org/app, not origin's acme/app: no PR is used") ||
+		!strings.Contains(out.notes[0], "run gh repo set-default acme/app") {
+		t.Errorf("notes = %q; want the repository note first", out.notes)
+	}
+	if calls := fx.ghCalls(t); !slices.Equal(calls, []string{mergeOrderGHCall("feat/a")}) {
+		t.Errorf("gh calls = %q; want feat/a only", calls)
+	}
+
+	fx.prs(t, "feat/a", mergeOrderGHPR{Number: 7, State: "MERGED", URL: "https://github.com/Acme/App/pull/7", HeadRefOid: a, BaseRefName: "main"})
+	stdout, stderr, err = fx.run(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge-order with origin's PRs: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	out = parseMergeOrderText(t, stdout)
+	checkMergeOrderRows(t, out.rows, []mergeOrderRow{
+		{"ready", "feat/b", "#8 https://github.com/acme/app/pull/8", short(b), short(main), "b/b", "the gate passed"},
+	})
+	if len(out.notes) != 2 || !strings.HasPrefix(out.notes[0], "1 branch(es) whose PR is merged or closed are not shown") {
+		t.Errorf("notes with origin's PRs = %q; want feat/a counted as left out, then the as-of note", out.notes)
 	}
 }
 

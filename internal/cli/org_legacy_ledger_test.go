@@ -286,6 +286,10 @@ func TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue(t *testing.T) {
 		{"org_read", []string{"org", "read", "--org-id", "org-a", "--seat", "seat-1"}, false, stateDirHint},
 		{"org_wait", []string{"org", "wait", "--org-id", "org-a", "--seat", "seat-1"}, false, stateDirHint},
 		{"org_report", []string{"org", "report", "--org-id", "org-a", "--out", t.TempDir()}, false, stateDirHint},
+		// The shared ledger holds no feature binding, so merge-order runs
+		// neither git nor gh (setupOrgStubPATH keeps the developer's PATH).
+		{"org_merge_order", []string{"org", "merge-order"}, false, stateDirHint},
+		{"org_merge_order_json", []string{"org", "merge-order", "--json"}, true, stateDirHint},
 		// insights has no --state-dir flag; the note names the env var.
 		{"insights_json", []string{"insights", "--json", "--events-dir", t.TempDir()}, true,
 			org.EnvOrgStateDir + "=" + shellQuoteIfNeeded(r.legacyDir)},

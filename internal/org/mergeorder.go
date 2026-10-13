@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,8 +29,12 @@ import (
 // of the manifest, disbanded orgs included, and every branch a readable gate
 // record names. origin's state comes from one `git ls-remote --symref origin
 // HEAD 'refs/heads/*'` (C2, C7), each branch's PR from `gh pr list` when gh is
-// there (C5), and both run through MergeOrderExec (C6). Evidence that cannot
-// be read never makes a branch ready (C8).
+// there (C5). gh picks the repository it reads itself (`gh repo set-default`,
+// else a remote by its name, upstream before origin), so a PR is used only
+// when its url names origin's owner/repo, which one `git remote get-url
+// origin` reads the first time gh returns a PR. All three commands run
+// through MergeOrderExec (C6). Evidence that cannot be read never makes a
+// branch ready (C8).
 //
 // MergeOrder writes nothing, to the ledger or anywhere else, takes no lock,
 // and never fetches. Neither the watch gate (watchgate.go) nor the approval
@@ -84,6 +90,15 @@ const (
 	mergeOrderLsRemoteCommand = "git ls-remote --symref origin HEAD 'refs/heads/*'"
 	// mergeOrderGHFields are the PR fields MergeOrder asks gh for.
 	mergeOrderGHFields = "number,state,url,headRefOid,baseRefName,isCrossRepository"
+	// mergeOrderNoPRs ends every note that says no PR is used: what is then
+	// not told apart.
+	mergeOrderNoPRs = "merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR " +
+		"bases are not checked"
+	// mergeOrderMaxNamed is how many branches a note about gh failures names.
+	mergeOrderMaxNamed = 5
+	// mergeGateRunsWhileOrgRuns ends every Detail and note that says to run
+	// ralph org gate.
+	mergeGateRunsWhileOrgRuns = "(the gate runs only while the feature org runs)"
 )
 
 // MergeOrderExec runs the command name with args in dir, with env (NAME=value
@@ -138,7 +153,8 @@ type MergeOrderEntry struct {
 	// do next.
 	Detail string `json:"detail"`
 	// PR is the branch's PR (pickMergePR), nil when gh was not there,
-	// failed, or found none from this repository.
+	// failed, found none from this repository, or read another repository
+	// than origin's.
 	PR *MergeOrderPR `json:"pr,omitempty"`
 	// Gate is the branch's latest gate record, nil when it has none.
 	Gate *MergeOrderGate `json:"gate,omitempty"`
@@ -180,13 +196,16 @@ type MergeOrderBinding struct {
 // (readMergeLedger) and collects the target branches with their latest
 // binding and gate record (collectMergeTargets). With no target it returns
 // at once, with a note and no git call. Otherwise it reads origin with one
-// ls-remote in p.Dir (listOriginBranches), asks gh for each branch's PR
-// (lookupMergePRs), classifies each branch (classifyMergeTarget) and orders
-// them (orderMergeEntries).
+// ls-remote in p.Dir (listOriginBranches), asks gh for each branch's PR and
+// keeps it only when it is from origin's repository (lookupMergePRs, which
+// runs `git remote get-url origin` once, when gh first returns a PR),
+// classifies each branch (classifyMergeTarget) and orders them
+// (orderMergeEntries).
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified
-// then. A gh that is missing or fails only leaves PRs out, with a note.
+// then. A gh that is missing, fails, or reads another repository than
+// origin's only leaves PRs out, with a note.
 func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderResult, error) {
 	ledger, err := readMergeLedger(o.Manifest.Path())
 	if err != nil {
@@ -441,32 +460,220 @@ type ghPullRequest struct {
 }
 
 // lookupMergePRs asks gh for each target's PR, in target order, and sets
-// target.pr (C5). available is false when gh is not installed: it is not run
-// again for the other branches, and the note says what is not told apart. A
-// gh that fails for one branch (an exit, a timeout, output that is not a PR
-// list) leaves that branch's PR nil with a note naming it. The error is for
-// ctx done.
+// target.pr (C5) when the PR is from origin's repository (mergeOriginRepo).
+// available is false when gh is not installed: it is not run again for the
+// other branches, and the note says what is not told apart. A gh that fails
+// for a branch (an exit, a timeout, output that is not a PR list) leaves that
+// branch's PR nil, with one note per reason naming the branches
+// (mergeGHFailures). When the check of a PR's repository fails (gh read
+// another repository, the PR's url names none, or origin's URL cannot be
+// read), every target's PR is left nil, gh is not run again, and one note
+// says why. The error is for ctx done.
 func lookupMergePRs(ctx context.Context, p MergeOrderParams, run MergeOrderExec, targets []*mergeTarget) (available bool, notes []string, _ error) {
 	timeout := p.GHTimeout
 	if timeout <= 0 {
 		timeout = defaultMergeOrderGHTimeout
 	}
+	var failed mergeGHFailures
+	var origin mergeOriginRepo
 	for _, t := range targets {
 		pr, err := lookupMergePR(ctx, p.Dir, run, timeout, t.branch)
 		switch {
 		case ctx.Err() != nil:
 			return false, nil, mergeOrderInterrupted(ctx, "gh ran")
 		case errors.Is(err, exec.ErrNotFound):
-			return false, append(notes, "gh was not found, so no PR was read: merged and closed PRs are not told apart (a branch "+
-				"deleted after its merge shows as no_remote) and PR bases are not checked"), nil
+			return false, append(failed.notes(), "gh was not found, so no PR was read: "+mergeOrderNoPRs), nil
 		case err != nil:
-			notes = append(notes, fmt.Sprintf("gh pr list --head %s failed (%v): its PR is unknown, so merged, closed and the PR "+
-				"base are not told apart for it", t.branch, err))
-		default:
-			t.pr = pr
+			failed.add(err.Error(), t.branch)
+			continue
+		case pr == nil:
+			continue
+		}
+		stop, err := origin.check(ctx, p.Dir, run, timeout, t.branch, pr)
+		if err != nil {
+			return false, nil, err
+		}
+		if stop != "" {
+			for _, t := range targets {
+				t.pr = nil
+			}
+			return true, append(failed.notes(), stop), nil
+		}
+		t.pr = pr
+	}
+	return true, failed.notes(), nil
+}
+
+// mergeGHFailures are the branches gh failed for, grouped by the error's
+// text in the order each first came.
+type mergeGHFailures []mergeGHFailure
+
+type mergeGHFailure struct {
+	reason   string
+	branches []string
+}
+
+func (f *mergeGHFailures) add(reason, branch string) {
+	for i := range *f {
+		if (*f)[i].reason == reason {
+			(*f)[i].branches = append((*f)[i].branches, branch)
+			return
 		}
 	}
-	return true, notes, nil
+	*f = append(*f, mergeGHFailure{reason: reason, branches: []string{branch}})
+}
+
+// notes is one note per reason: for one branch it names the branch, for
+// several it gives their count and names the first mergeOrderMaxNamed.
+func (f mergeGHFailures) notes() []string {
+	var notes []string
+	for _, g := range f {
+		if len(g.branches) == 1 {
+			notes = append(notes, fmt.Sprintf("gh pr list --head %s failed (%s): its PR is unknown, so merged, closed and the PR "+
+				"base are not told apart for it", g.branches[0], g.reason))
+			continue
+		}
+		named := strings.Join(g.branches[:min(len(g.branches), mergeOrderMaxNamed)], ", ")
+		if more := len(g.branches) - mergeOrderMaxNamed; more > 0 {
+			named += fmt.Sprintf(" and %d more", more)
+		}
+		notes = append(notes, fmt.Sprintf("gh pr list failed for %d branches (%s) with the same error (%s): their PRs are "+
+			"unknown, so merged, closed and the PR base are not told apart for them", len(g.branches), named, g.reason))
+	}
+	return notes
+}
+
+// mergeRepo is a GitHub repository, owner/name.
+type mergeRepo struct{ owner, name string }
+
+func (r mergeRepo) String() string { return r.owner + "/" + r.name }
+
+// same reports whether r and o are the same repository: GitHub compares
+// owner and repository names without case.
+func (r mergeRepo) same(o mergeRepo) bool {
+	return strings.EqualFold(r.owner, o.owner) && strings.EqualFold(r.name, o.name)
+}
+
+// mergeOriginRepo is origin's repository while lookupMergePRs checks gh's
+// PRs against it: read the first time check runs.
+type mergeOriginRepo struct {
+	read     bool
+	readable bool // origin's URL names an owner and a repository
+	repo     mergeRepo
+}
+
+// check returns "" when pr, the PR gh returned for branch, may be used: it
+// is from origin's repository, or origin's URL names none (a local path,
+// which no PR can be from), so there is nothing to check it against.
+// Otherwise it returns the note that leaves the PRs out: gh read another
+// repository, pr's url names none, or `git remote get-url origin` failed.
+// Hosts are not compared, since origin's may be an ssh alias. The error is
+// for ctx done.
+func (o *mergeOriginRepo) check(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, branch string, pr *MergeOrderPR) (stop string, _ error) {
+	if !o.read {
+		o.read = true
+		repo, readable, err := readMergeOriginRepo(ctx, dir, run, timeout)
+		switch {
+		case ctx.Err() != nil:
+			return "", mergeOrderInterrupted(ctx, "git remote get-url origin ran")
+		case err != nil:
+			return fmt.Sprintf("git remote get-url origin failed (%v), so the repository gh read cannot be checked against "+
+				"origin's: no PR is used, so %s", err, mergeOrderNoPRs), nil
+		}
+		o.repo, o.readable = repo, readable
+	}
+	if !o.readable {
+		return "", nil
+	}
+	prRepo, ok := mergeRepoFromPRURL(pr.URL)
+	switch {
+	case !ok:
+		return fmt.Sprintf("gh returned PR #%d for %s with the url %q, which names no repository to check against origin's "+
+			"%s: no PR is used, so %s", pr.Number, branch, pr.URL, o.repo, mergeOrderNoPRs), nil
+	case !prRepo.same(o.repo):
+		return fmt.Sprintf("gh reads %s, not origin's %s: no PR is used, so %s; run gh repo set-default %s in this "+
+			"repository", prRepo, o.repo, mergeOrderNoPRs, o.repo), nil
+	}
+	return "", nil
+}
+
+// readMergeOriginRepo runs `git remote get-url origin` in dir with
+// GIT_TERMINAL_PROMPT=0 and timeout, and reads origin's repository from the
+// URL on the first line it prints (mergeRepoFromOriginURL); readable is false
+// when the URL names none. The error is for a command that failed or timed
+// out.
+func readMergeOriginRepo(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration) (repo mergeRepo, readable bool, _ error) {
+	getCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := run(getCtx, dir, []string{"GIT_TERMINAL_PROMPT=0"}, "git", "remote", "get-url", "origin")
+	switch {
+	case err != nil && getCtx.Err() != nil && ctx.Err() == nil:
+		return mergeRepo{}, false, fmt.Errorf("timed out after %s: %w", timeout, err)
+	case err != nil:
+		return mergeRepo{}, false, err
+	}
+	line, _, _ := strings.Cut(out, "\n")
+	repo, readable = mergeRepoFromOriginURL(strings.TrimSpace(line))
+	return repo, readable, nil
+}
+
+// mergeOriginURLSchemes are the URL schemes whose host and path
+// mergeRepoFromOriginURL reads.
+var mergeOriginURLSchemes = []string{"https", "http", "ssh", "git"}
+
+// mergeRepoFromOriginURL reads the owner and repository from origin's URL,
+// only from one with a host: `scheme://[user@]host[:port]/<path>` for the
+// schemes in mergeOriginURLSchemes, or the scp-like `[user@]host:<path>`
+// (a colon with no slash before it, as git reads it). A trailing "/", then a
+// trailing ".git", is cut from the path, whose last two components are the
+// owner and the repository. ok is false for anything else: a local path
+// (absolute, relative, or file://), another scheme, or a path with fewer than
+// two components.
+func mergeRepoFromOriginURL(s string) (repo mergeRepo, ok bool) {
+	var path string
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil || u.Hostname() == "" || !slices.Contains(mergeOriginURLSchemes, u.Scheme) {
+			return mergeRepo{}, false
+		}
+		path = u.Path
+	} else {
+		host, rest, scp := strings.Cut(s, ":")
+		if !scp || strings.Contains(host, "/") {
+			return mergeRepo{}, false
+		}
+		if at := strings.LastIndexByte(host, '@'); at >= 0 {
+			host = host[at+1:]
+		}
+		if host == "" {
+			return mergeRepo{}, false
+		}
+		path = rest
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git"), "/")
+	if len(parts) < 2 {
+		return mergeRepo{}, false
+	}
+	repo = mergeRepo{owner: parts[len(parts)-2], name: parts[len(parts)-1]}
+	return repo, repo.owner != "" && repo.name != ""
+}
+
+// mergeRepoFromPRURL reads the owner and repository from a PR's url,
+// `https://<host>/<owner>/<repo>/pull/<number>`; ok is false for any other
+// shape.
+func mergeRepoFromPRURL(s string) (repo mergeRepo, ok bool) {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return mergeRepo{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" {
+		return mergeRepo{}, false
+	}
+	if n, err := strconv.Atoi(parts[3]); err != nil || n <= 0 {
+		return mergeRepo{}, false
+	}
+	return mergeRepo{owner: parts[0], name: parts[1]}, true
 }
 
 // lookupMergePR runs `gh pr list --head <branch> --state all --json ...` in
@@ -563,20 +770,31 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 		}
 	}
 	g := t.gate
+	gate := mergeGateCommand(t)
 	switch {
 	case g != nil && !g.readable:
-		return MergeClassUnreadable, fmt.Sprintf("the latest gate record (%s at %s) cannot be read: run ralph org gate again "+
-			"in the feature worktree (the gate runs only while the feature org runs)", g.ev.Event, g.ev.TS)
+		return MergeClassUnreadable, fmt.Sprintf("the latest gate record (%s at %s) cannot be read: run %s again in the feature "+
+			"worktree %s", g.ev.Event, g.ev.TS, gate, mergeGateRunsWhileOrgRuns)
 	case g != nil && t.corruptAfterGate:
 		return MergeClassUnreadable, fmt.Sprintf("a corrupt manifest line follows the latest gate record (%s at %s) and may "+
-			"be a newer one: run ralph org gate again in the feature worktree (the gate runs only while the feature org runs)",
-			g.ev.Event, g.ev.TS)
+			"be a newer one: run %s again in the feature worktree %s", g.ev.Event, g.ev.TS, gate, mergeGateRunsWhileOrgRuns)
 	case g == nil:
-		return MergeClassNoGate, "no gate record: run ralph org gate in the feature worktree before the PR is merged"
+		return MergeClassNoGate, fmt.Sprintf("no gate record: run %s in the feature worktree before the PR is merged %s",
+			gate, mergeGateRunsWhileOrgRuns)
 	case g.record.Reason != "":
-		return MergeClassFailed, fmt.Sprintf("the gate failed (%s): fix it and run ralph org gate again", g.record.Reason)
+		return MergeClassFailed, fmt.Sprintf("the gate failed (%s): fix it and run %s again %s", g.record.Reason, gate,
+			mergeGateRunsWhileOrgRuns)
 	}
 	return classifyGatePassed(t, g.record, remote)
+}
+
+// mergeGateCommand is the ralph org gate command a Detail tells the reader
+// to run for t: with the --org-id of its latest binding when it has one.
+func mergeGateCommand(t *mergeTarget) string {
+	if t.binding == nil {
+		return "ralph org gate"
+	}
+	return "ralph org gate --org-id " + t.binding.OrgID
 }
 
 // classifyGatePassed is classifyMergeTarget for a branch whose latest gate
@@ -586,12 +804,13 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class, detail string) {
 	def := remote.defaultBranch
 	tip, onOrigin := remote.heads[t.branch]
+	gate := mergeGateCommand(t)
 	switch {
 	case !onOrigin:
 		return MergeClassNoRemote, fmt.Sprintf("origin has no branch %s: it was not pushed, or was deleted after a merge", t.branch)
 	case tip != r.Head:
-		return MergeClassRegate, fmt.Sprintf("pushed after the gate: origin has %s, the gate checked %s: run ralph org gate again "+
-			"(the gate runs only while the feature org runs)", shortMergeSHA(tip), shortMergeSHA(r.Head))
+		return MergeClassRegate, fmt.Sprintf("pushed after the gate: origin has %s, the gate checked %s: run %s again %s",
+			shortMergeSHA(tip), shortMergeSHA(r.Head), gate, mergeGateRunsWhileOrgRuns)
 	case t.pr != nil && t.pr.BaseRefName != def:
 		return MergeClassWrongBase, fmt.Sprintf("PR #%d merges into %s, not origin's default branch %s: change the PR's base to %s",
 			t.pr.Number, t.pr.BaseRefName, def, def)
@@ -600,10 +819,10 @@ func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class
 	switch {
 	case !named || name != def:
 		return MergeClassRebase, fmt.Sprintf("the gate checked against %s, but origin's default branch is now %s: rebase on "+
-			"origin/%s and run ralph org gate again (the gate runs only while the feature org runs)", r.BaseRef, def, def)
+			"origin/%s and run %s again %s", r.BaseRef, def, def, gate, mergeGateRunsWhileOrgRuns)
 	case r.Base != remote.defaultHead:
-		return MergeClassRebase, fmt.Sprintf("origin/%s moved: gate base %s, now %s: rebase on origin/%s and run ralph org gate again "+
-			"(the gate runs only while the feature org runs)", def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead), def)
+		return MergeClassRebase, fmt.Sprintf("origin/%s moved: gate base %s, now %s: rebase on origin/%s and run %s again %s",
+			def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead), def, gate, mergeGateRunsWhileOrgRuns)
 	}
 	return MergeClassReady, fmt.Sprintf("the gate passed on %s, origin's tip of the branch, with base %s, origin/%s's tip",
 		shortMergeSHA(r.Head), shortMergeSHA(r.Base), def)
@@ -642,8 +861,8 @@ func mergeOrderListNotes(res MergeOrderResult, hidden int) []string {
 	}
 	if ready >= 2 {
 		notes = append(notes, fmt.Sprintf("%d branches are ready, but merging one moves origin/%s: the other ready ones then "+
-			"become rebase (rebase them on origin/%s and run ralph org gate again; the gate runs only while the feature org "+
-			"runs)", ready, res.DefaultBranch, res.DefaultBranch))
+			"become rebase, so rebase them on origin/%s and run ralph org gate again %s", ready, res.DefaultBranch,
+			res.DefaultBranch, mergeGateRunsWhileOrgRuns))
 	}
 	return append(notes, fmt.Sprintf("the order is as of the ls-remote at %s and is not a guarantee: origin/%s can move "+
 		"before a merge", res.ListedAt, res.DefaultBranch))

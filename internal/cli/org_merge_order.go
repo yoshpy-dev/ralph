@@ -15,13 +15,13 @@ import (
 // newOrgMergeOrderCmd wires `ralph org merge-order` (plan
 // docs/plans/active/2026-10-14-org-merge-order.md, the CLI half of AC1, AC2,
 // AC5 to AC9 and AC11): (*org.Org).MergeOrder reads the ledger, runs the
-// ls-remote and gh in the current directory (Dir left empty, Exec nil, so
-// the real commands) and classifies and orders the branches; this command
-// prints the result as text (printMergeOrder) or, with --json, as it is. It
-// exits 0 whatever the classes, and 1 on MergeOrder's error, with nothing on
-// stdout then. The list holds every org's branches, so --org-id is refused
-// before anything is read, as the inbox verbs refuse it
-// (newOrgInboxRuntime).
+// ls-remote, gh, and `git remote get-url origin` in the current directory
+// (Dir left empty, Exec nil, so the real commands) and classifies and orders
+// the branches; this command prints the result as text (printMergeOrder) or,
+// with --json, as it is. It exits 0 whatever the classes, and 1 on
+// MergeOrder's error, with nothing on stdout then. The list holds every
+// org's branches, so --org-id is refused before anything is read, as the
+// inbox verbs refuse it (newOrgInboxRuntime).
 func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 	var all, jsonOut bool
 
@@ -44,7 +44,10 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"HEAD names, and the output gives its tip and each branch's tip. When gh\n" +
 			"is on PATH, it runs gh pr list --head <branch> --state all for each\n" +
 			"branch, in the same directory, and takes the highest-numbered PR that\n" +
-			"is not from a fork.\n" +
+			"is not from a fork. gh's PRs are used only when their repository is\n" +
+			"origin's (git remote get-url origin): when gh reads another one, such\n" +
+			"as upstream in a fork's checkout, no PR is used and a note says to run\n" +
+			"gh repo set-default.\n" +
 			"\n" +
 			"A branch gets the first of these classes that applies:\n" +
 			"  merged, closed  its PR is merged, or closed without a merge (listed\n" +

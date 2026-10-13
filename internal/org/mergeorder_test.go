@@ -1,6 +1,7 @@
 package org
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -111,21 +112,28 @@ func (fx *moFixture) run(t *testing.T, all bool) MergeOrderResult {
 	return res
 }
 
-// moExec is a fake MergeOrderExec. git answers lsOut and lsErr (lsBlock:
-// it waits for ctx instead). gh answers, per branch (`--head <branch>`), the
-// error in ghErr, else the output in gh, else "[]"; with ghBlock it waits for
-// ctx, and with ghMissing every gh call fails as a binary not on PATH.
+// moExec is a fake MergeOrderExec. `git ls-remote` answers lsOut and lsErr
+// (lsBlock: it waits for ctx instead), and `git remote get-url origin`
+// answers originErr, else origin's URL in origin, else moOriginURL. gh
+// answers, per branch (`--head <branch>`), the error in ghErr, else the
+// output in gh, else "[]"; with ghBlock it waits for ctx, and with ghMissing
+// every gh call fails as a binary not on PATH.
 type moExec struct {
 	mu        sync.Mutex
 	calls     []moCall
 	lsOut     string
 	lsErr     error
 	lsBlock   bool
+	origin    string
+	originErr error
 	ghMissing bool
 	gh        map[string]string
 	ghErr     map[string]error
 	ghBlock   map[string]bool
 }
+
+// moOriginURL is origin's URL by default: the repository moPR's urls name.
+const moOriginURL = "git@github.com:o/r.git"
 
 type moCall struct {
 	dir  string
@@ -143,6 +151,12 @@ func (e *moExec) run(ctx context.Context, dir string, env []string, name string,
 	}
 	switch name {
 	case "git":
+		if slices.Equal(args, []string{"remote", "get-url", "origin"}) {
+			if e.originErr != nil {
+				return "", e.originErr
+			}
+			return cmp.Or(e.origin, moOriginURL) + "\n", nil
+		}
 		if e.lsBlock {
 			<-ctx.Done()
 			return "", ctx.Err()
@@ -444,13 +458,69 @@ func TestMergeOrder_FailedNoGateAndNoRemote(t *testing.T) {
 	}
 }
 
+// moGateClause is how every Detail and note that says to run the gate ends.
+const moGateClause = " (the gate runs only while the feature org runs)"
+
+// TestMergeOrder_DetailsNameTheGateCommandWithTheOrg: every Detail that
+// tells the reader to run the gate (unreadable, no_gate, failed, regate,
+// rebase) names it with the --org-id of the branch's latest binding and ends
+// with the clause that the gate runs only while the feature org runs; a
+// branch only a gate record names has no org to name; and the note about
+// several ready branches ends with the same clause.
+func TestMergeOrder_DetailsNameTheGateCommandWithTheOrg(t *testing.T) {
+	bind := moBind("org-a", "auth")
+	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
+	for _, tc := range []struct {
+		name    string
+		lines   []any
+		listing string
+		want    string
+	}{
+		{"unreadable: a record that cannot be read", []any{bind, moGarbled("org-a", EventGatePassed)}, onMain, MergeClassUnreadable},
+		{"unreadable: a corrupt line after the record", []any{bind, moPassed("org-a", "feat/auth", moHeadA, moMain), moCorruptLine},
+			onMain, MergeClassUnreadable},
+		{"no_gate", []any{bind}, onMain, MergeClassNoGate},
+		{"failed", []any{bind, moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)}, onMain, MergeClassFailed},
+		{"regate", []any{bind, moPassed("org-a", "feat/auth", moHeadA, moMain)},
+			moListing("main", "main", moMain, "feat/auth", moHeadB), MergeClassRegate},
+		{"rebase: the gate checked another branch", []any{bind, moGate("org-a", "feat/auth", moHeadA, moMain, "refs/remotes/origin/develop", "")},
+			onMain, MergeClassRebase},
+		{"rebase: origin/main moved", []any{bind, moPassed("org-a", "feat/auth", moHeadA, moMain)},
+			moListing("main", "main", moMain2, "feat/auth", moHeadA), MergeClassRebase},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, tc.lines...)
+			fx.exec.lsOut = tc.listing
+			e := moEntry(t, fx.run(t, false), "feat/auth")
+			if e.Class != tc.want || !strings.Contains(e.Detail, "run ralph org gate --org-id org-a ") || !strings.HasSuffix(e.Detail, moGateClause) {
+				t.Fatalf("feat/auth = %s (%q), want %s naming ralph org gate --org-id org-a and ending with %q", e.Class, e.Detail, tc.want, moGateClause)
+			}
+		})
+	}
+
+	fx := newMOFixture(t)
+	fx.add(t, moFailed("org-x", "feat/orphan", moHeadA, moMain, GateReasonTestFailed),
+		moBind("org-r", "r1"), moPassed("org-r", "feat/r1", moHeadA, moMain),
+		moBind("org-s", "r2"), moPassed("org-s", "feat/r2", moHeadA, moMain))
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/orphan", moHeadA, "feat/r1", moHeadA, "feat/r2", moHeadA)
+	res := fx.run(t, false)
+	if e := moEntry(t, res, "feat/orphan"); e.Class != MergeClassFailed || !strings.Contains(e.Detail, "run ralph org gate again") ||
+		strings.Contains(e.Detail, "--org-id") || !strings.HasSuffix(e.Detail, moGateClause) {
+		t.Errorf("feat/orphan = %s (%q), want failed naming ralph org gate with no --org-id", e.Class, e.Detail)
+	}
+	if note := moNoteWith(res, "2 branches are ready"); !strings.HasSuffix(note, "run ralph org gate again"+moGateClause) {
+		t.Errorf("notes = %q, want the several-ready note to end with the gate and its clause", res.Notes)
+	}
+}
+
 // TestMergeOrder_LatestGateRecordWins covers AC2 and AC4 (C8): a branch's
 // class reads its latest gate record. One that cannot be read (Details
 // gateRecordFromDetails refuses, or an event name that disagrees with the
 // reason), or a corrupt manifest line after the latest readable one, makes
 // the branch unreadable and never falls back to an earlier gate_passed. A
-// corrupt line before the latest record does not matter, and a readable
-// record after it clears it.
+// corrupt line before the latest record does not matter, a readable record
+// after it clears it, and of several corrupt lines the last one decides.
 func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 	pass := moPassed("org-a", "feat/auth", moHeadA, moMain)
 	fail := moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)
@@ -484,6 +554,8 @@ func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 			MergeClassReady, "", true},
 		{"a newer fail after a corrupt line is failed", []any{pass, moCorruptLine, fail},
 			MergeClassFailed, GateReasonTestFailed, true},
+		{"of corrupt lines before and after the only gate record, the last one decides", []any{moCorruptLine, pass, moCorruptLine},
+			MergeClassUnreadable, "corrupt manifest line follows", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -502,9 +574,17 @@ func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 			if !tc.readable && (e.Gate.Head != "" || e.Gate.Base != "" || e.Gate.Reason != "") {
 				t.Errorf("gate = %+v, want nothing read from a record that cannot be read", e.Gate)
 			}
-			corrupt := slices.Contains(tc.lines, any(moCorruptLine))
-			if note := moNoteWith(res, "the manifest has 1 corrupt line(s)"); corrupt != (note != "") {
-				t.Errorf("notes = %q, want the corrupt-line note only when a corrupt line is there (%v)", res.Notes, corrupt)
+			corrupt := 0
+			for _, line := range tc.lines {
+				if s, isRaw := line.(string); isRaw && s == moCorruptLine {
+					corrupt++
+				}
+			}
+			switch note := moNoteWith(res, "corrupt line(s)"); {
+			case corrupt == 0 && note != "":
+				t.Errorf("notes = %q, want no corrupt-line note without a corrupt line", res.Notes)
+			case corrupt > 0 && !strings.Contains(note, fmt.Sprintf("the manifest has %d corrupt line(s)", corrupt)):
+				t.Errorf("notes = %q, want the corrupt-line note counting %d", res.Notes, corrupt)
 			}
 		})
 	}
@@ -541,6 +621,29 @@ func TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt(t *testing.T) {
 	}
 	if moNoteWith(res, "2 gate record(s) cannot be read") == "" {
 		t.Fatalf("notes = %q, want org-b's and org-c's records counted as attached to no branch", res.Notes)
+	}
+}
+
+// TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings
+// covers C8 when one org_id was bound twice before a gate record that cannot
+// be read: org-a is bound to x, gated, disbanded, bound to y and gated, and
+// the record after that attaches to y, the latest binding, so y does not fall
+// back to its pass and x keeps its own.
+func TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t,
+		moBind("org-a", "x"), moPassed("org-a", "feat/x", moHeadA, moMain), moDisbanded("org-a"),
+		moBind("org-a", "y"), moPassed("org-a", "feat/y", moHeadA, moMain),
+		moGarbled("org-a", EventGateFailed),
+	)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/x", moHeadA, "feat/y", moHeadA)
+	res := fx.run(t, false)
+	got := map[string]string{}
+	for _, e := range res.Entries {
+		got[e.Branch] = e.Class
+	}
+	if want := map[string]string{"feat/x": MergeClassReady, "feat/y": MergeClassUnreadable}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("classes = %v, want %v", got, want)
 	}
 }
 
@@ -633,6 +736,22 @@ func TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount(t *testing.T) {
 	res := fx.run(t, false)
 	if got := moOrder(res); !slices.Equal(got, []string{"1 failed feat/auth"}) {
 		t.Fatalf("entries = %q, want only feat/auth, still failed", got)
+	}
+}
+
+// TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead: a complete binding and a
+// readable gate record whose org_id is empty name no branch, as reserve.go
+// does not read such a binding either.
+func TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead(t *testing.T) {
+	noOrgBind := moBind("org-z", "noorg")
+	noOrgBind.OrgID = ""
+	noOrgGate := moPassed("", "feat/gateonly", moHeadA, moMain)
+	fx := newMOFixture(t)
+	fx.add(t, moBind("org-a", "auth"), noOrgBind, noOrgGate)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/gateonly", moHeadA)
+	res := fx.run(t, false)
+	if got := moOrder(res); !slices.Equal(got, []string{"1 no_gate feat/auth"}) {
+		t.Fatalf("order = %q, want only feat/auth", got)
 	}
 }
 
@@ -740,6 +859,313 @@ func TestMergeOrder_PicksTheHighestSameRepoPR(t *testing.T) {
 	}
 }
 
+// moRepoPR is moPR whose url names owner/repo.
+func moRepoPR(n int, state, base, owner, repo string) ghPullRequest {
+	pr := moPR(n, state, base)
+	pr.URL = fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, n)
+	return pr
+}
+
+// moRepoCheckFixture is three branches, feat/a, feat/b and feat/c, each
+// bound and gated on origin's tips, so each is ready on origin's evidence,
+// with origin's URL origin.
+func moRepoCheckFixture(t *testing.T, origin string) *moFixture {
+	t.Helper()
+	fx := newMOFixture(t)
+	for _, b := range []string{"a", "b", "c"} {
+		fx.add(t, moBind("org-"+b, b), moPassed("org-"+b, "feat/"+b, moHeadA, moMain))
+	}
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/a", moHeadA, "feat/b", moHeadA, "feat/c", moHeadA)
+	fx.exec.origin = origin
+	return fx
+}
+
+// moGHBranches is the --head value of each gh call fx's exec saw.
+func moGHBranches(fx *moFixture) []string {
+	var out []string
+	for _, c := range fx.exec.callsOf("gh") {
+		out = append(out, c.args[3])
+	}
+	return out
+}
+
+// TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository covers the
+// repository check's match: origin's owner/repo read from an scp-like, an
+// https, an ssh URL with a trailing ".git/", an ssh host alias with another
+// case, and the other URL shapes all match a PR url of github.com/acme/app,
+// so the PRs are used: feat/a's open PR stays on its ready row and feat/b's
+// merged PR hides it. `git remote get-url origin` runs once, in p.Dir with
+// GIT_TERMINAL_PROMPT=0, however many PRs gh returns.
+func TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository(t *testing.T) {
+	for _, origin := range []string{
+		"git@github.com:acme/app.git",
+		"https://github.com/acme/app",
+		"ssh://git@github.com/acme/app.git/",
+		"git@github.com.emu:Acme/App.git",
+		"github.com:acme/app",
+		"http://github.com/acme/app.git",
+		"git://github.com/acme/app.git",
+		"ssh://git@github.com:22/acme/app.git",
+		"https://user@github.example.com/team/acme/app.git",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			fx := moRepoCheckFixture(t, origin)
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+			fx.exec.setPR("feat/b", moPRs(moRepoPR(8, "MERGED", "main", "acme", "app")))
+			res := fx.run(t, false)
+			if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/c"}; !slices.Equal(got, want) {
+				t.Fatalf("order = %q, want %q (feat/b hidden as merged)", got, want)
+			}
+			if e := moEntry(t, res, "feat/a"); e.PR == nil || e.PR.Number != 7 {
+				t.Errorf("feat/a PR = %+v, want #7", e.PR)
+			}
+			if moNoteWith(res, "gh reads") != "" || moNoteWith(res, "no PR is used") != "" {
+				t.Errorf("notes = %q, want no repository note", res.Notes)
+			}
+			var getURL []moCall
+			for _, c := range fx.exec.callsOf("git") {
+				if c.args[0] == "remote" {
+					getURL = append(getURL, c)
+				}
+			}
+			if len(getURL) != 1 || !slices.Equal(getURL[0].args, []string{"remote", "get-url", "origin"}) || getURL[0].dir != "/repo" ||
+				!slices.Equal(getURL[0].env, []string{"GIT_TERMINAL_PROMPT=0"}) {
+				t.Errorf("get-url calls = %+v, want one git remote get-url origin in /repo with GIT_TERMINAL_PROMPT=0", getURL)
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+				t.Errorf("gh asked about %q, want every branch", got)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut covers the
+// cross-review finding: gh reads the repository `gh repo set-default` (or the
+// remotes' names) picks, which in a fork checkout is upstream, not origin. A
+// PR whose url names another owner/repo than origin's, or that names none,
+// leaves every PR out: a merged PR of the same branch name in upstream does
+// not hide origin's ready branch, a PR into another branch does not make it
+// wrong_base, and a PR of origin's found before is dropped too. One note says
+// why (the set-default to run for another repository), gh is not asked about
+// the branches after it, and the run succeeds with gh available.
+func TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
+	upstream := func(n int, state, base string) string {
+		return moPRs(moRepoPR(n, state, base, "upstream-org", "app"))
+	}
+	unparsable := moPR(7, "MERGED", "main")
+	unparsable.URL = "https://github.example.com/pull/7"
+	for _, tc := range []struct {
+		name    string
+		prs     map[string]string
+		ghCalls []string
+		note    []string
+	}{
+		{"a merged PR of upstream does not hide origin's ready branch", map[string]string{"feat/a": upstream(7, "MERGED", "main")},
+			[]string{"feat/a"}, []string{"gh reads upstream-org/app, not origin's acme/app: no PR is used", "run gh repo set-default acme/app"}},
+		{"a PR of upstream into another branch is not wrong_base", map[string]string{"feat/a": upstream(7, "OPEN", "develop")},
+			[]string{"feat/a"}, []string{"gh reads upstream-org/app, not origin's acme/app"}},
+		{"a PR of the same name under another owner", map[string]string{"feat/a": moPRs(moRepoPR(7, "CLOSED", "main", "someone", "app"))},
+			[]string{"feat/a"}, []string{"gh reads someone/app, not origin's acme/app"}},
+		{"a PR of another repository after one of origin's drops both", map[string]string{
+			"feat/a": moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")), "feat/b": upstream(8, "MERGED", "main")},
+			[]string{"feat/a", "feat/b"}, []string{"gh reads upstream-org/app, not origin's acme/app"}},
+		{"a PR url that names no repository", map[string]string{"feat/a": moPRs(unparsable)},
+			[]string{"feat/a"}, []string{`gh returned PR #7 for feat/a with the url "https://github.example.com/pull/7", which names no ` +
+				"repository to check against origin's acme/app: no PR is used"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+			for branch, out := range tc.prs {
+				fx.exec.setPR(branch, out)
+			}
+			res := fx.run(t, false)
+			if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+				t.Fatalf("order = %q, want %q on origin's evidence alone", got, want)
+			}
+			for _, e := range res.Entries {
+				if e.PR != nil {
+					t.Errorf("%s PR = %+v, want none", e.Branch, e.PR)
+				}
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, tc.ghCalls) {
+				t.Errorf("gh asked about %q, want %q and no branch after", got, tc.ghCalls)
+			}
+			var repoNotes []string
+			for _, n := range res.Notes {
+				if strings.Contains(n, "no PR is used") {
+					repoNotes = append(repoNotes, n)
+				}
+			}
+			if len(repoNotes) != 1 {
+				t.Fatalf("notes = %q, want one note that no PR is used", res.Notes)
+			}
+			for _, want := range append(tc.note, "merged and closed PRs are not told apart") {
+				if !strings.Contains(repoNotes[0], want) {
+					t.Errorf("note %q does not say %q", repoNotes[0], want)
+				}
+			}
+			if !res.GHAvailable {
+				t.Errorf("GHAvailable = false, want true: gh was there")
+			}
+		})
+	}
+}
+
+// TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck: an origin that is a
+// local path (absolute, relative, file://) or a URL of another scheme names
+// no GitHub repository to check against, so gh's PRs are used as they are,
+// a url that names no repository included.
+func TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck(t *testing.T) {
+	unparsable := moPR(8, "MERGED", "main")
+	unparsable.URL = "https://example.test/pull/8"
+	for _, origin := range []string{"/srv/git/app.git", "../origin.git", "origin.git", "./a:b/app.git", "file:///srv/git/acme/app.git",
+		"ftp://github.com/acme/app.git"} {
+		t.Run(origin, func(t *testing.T) {
+			fx := moRepoCheckFixture(t, origin)
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "develop", "upstream-org", "app")))
+			fx.exec.setPR("feat/b", moPRs(unparsable))
+			res := fx.run(t, false)
+			if got, want := moOrder(res), []string{"1 ready feat/c", "2 wrong_base feat/a"}; !slices.Equal(got, want) {
+				t.Fatalf("order = %q, want %q (feat/b hidden as merged)", got, want)
+			}
+			if moNoteWith(res, "no PR is used") != "" {
+				t.Errorf("notes = %q, want no repository note", res.Notes)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs covers the two URL
+// readers: origin's owner/repo only from a URL with a host, and a PR's only
+// from https://<host>/<owner>/<repo>/pull/<number>.
+func TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:acme/app.git":               "acme/app",
+		"ssh://git@github.com/acme/app.git/":        "acme/app",
+		"https://github.com/acme/app.git.git":       "acme/app.git",
+		"git@github.com:/acme/app":                  "acme/app",
+		"https://github.com/acme":                   "",
+		"https://github.com/acme/":                  "",
+		"https://github.com//app":                   "",
+		"https:///acme/app":                         "",
+		":acme/app":                                 "",
+		"git@:acme/app":                             "",
+		"/abs/acme/app.git":                         "",
+		"rel/acme/app":                              "",
+		"file:///acme/app":                          "",
+		"":                                          "",
+		"git@github.com:app.git":                    "",
+		"https://github.com/acme/app\x7f/../x":      "",
+		"HTTPS://github.com/acme/app":               "acme/app",
+		"ssh://[::1]:22/acme/app.git":               "acme/app",
+		"git+ssh://git@github.com/acme/app.git":     "",
+		"https://github.com/acme/app?tab=readme#go": "acme/app",
+	} {
+		repo, ok := mergeRepoFromOriginURL(in)
+		if got := map[bool]string{true: repo.String(), false: ""}[ok]; got != want {
+			t.Errorf("origin %q = %q (%v), want %q", in, repo, ok, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"https://github.com/acme/app/pull/7":       "acme/app",
+		"https://ghe.example.com/Acme/App/pull/12": "Acme/App",
+		"http://github.com/acme/app/pull/7":        "",
+		"https://github.com/acme/app/pull/x":       "",
+		"https://github.com/acme/app/pull/0":       "",
+		"https://github.com/acme/app/issues/7":     "",
+		"https://github.com/acme/app/pull/7/files": "",
+		"https://github.com/pull/7":                "",
+		"https:///acme/app/pull/7":                 "",
+		"https://example.test/pull/1\tINJECT":      "",
+		"":                                         "",
+	} {
+		repo, ok := mergeRepoFromPRURL(in)
+		if got := map[bool]string{true: repo.String(), false: ""}[ok]; got != want {
+			t.Errorf("PR url %q = %q (%v), want %q", in, repo, ok, want)
+		}
+	}
+}
+
+// TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR: `git remote get-url origin`
+// does not run when gh returns no PR for any branch (none at all, only a
+// fork's, or a failure), nor when gh is missing; only the ls-remote runs.
+func TestMergeOrder_GetURLRunsOnlyOnceGHReturnsAPR(t *testing.T) {
+	fork := moRepoPR(9, "MERGED", "main", "fork", "app")
+	fork.IsCrossRepository = true
+	for _, tc := range []struct {
+		name  string
+		setup func(e *moExec)
+	}{
+		{"gh returns no PR", func(*moExec) {}},
+		{"gh returns only a fork's PR", func(e *moExec) { e.setPR("feat/a", moPRs(fork)) }},
+		{"gh fails", func(e *moExec) {
+			e.ghErr = map[string]error{"feat/a": errors.New("exit status 1"), "feat/b": errors.New("exit status 1"), "feat/c": errors.New("exit status 4")}
+		}},
+		{"gh is missing", func(e *moExec) { e.ghMissing = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+			tc.setup(fx.exec)
+			fx.run(t, false)
+			if git := fx.exec.callsOf("git"); len(git) != 1 || git[0].args[0] != "ls-remote" {
+				t.Fatalf("git calls = %+v, want the ls-remote only", git)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut: a `git remote get-url
+// origin` that fails or times out leaves every PR out with one note naming
+// the failure, and gh is not asked again; ctx done while it runs is an error.
+func TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut(t *testing.T) {
+	fx := moRepoCheckFixture(t, "")
+	fx.exec.originErr = errors.New("exit status 2: error: No such remote 'origin'")
+	fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", "acme", "app")))
+	res := fx.run(t, false)
+	if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+		t.Fatalf("order = %q, want %q with no PR", got, want)
+	}
+	if note := moNoteWith(res, "git remote get-url origin failed (exit status 2: error: No such remote 'origin')"); !strings.Contains(note, "no PR is used") {
+		t.Errorf("notes = %q, want the get-url failure noted with no PR used", res.Notes)
+	}
+	if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a"}) {
+		t.Errorf("gh asked about %q, want feat/a only", got)
+	}
+
+	timeout := moRepoCheckFixture(t, "")
+	timeout.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", "acme", "app")))
+	p := timeout.params(false)
+	p.GHTimeout = 20 * time.Millisecond
+	p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+		if name == "git" && args[0] == "remote" {
+			<-c.Done()
+			return "", c.Err()
+		}
+		return timeout.exec.run(c, dir, env, name, args...)
+	}
+	res, err := timeout.o.MergeOrder(context.Background(), p)
+	if err != nil || moNoteWith(res, "git remote get-url origin failed (timed out after 20ms") == "" {
+		t.Fatalf("MergeOrder = %q, %v; want the get-url timeout noted", res.Notes, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancelled := moRepoCheckFixture(t, "")
+	cancelled.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", "acme", "app")))
+	p = cancelled.params(false)
+	p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+		if name == "git" && args[0] == "remote" {
+			cancel()
+			return "", c.Err()
+		}
+		return cancelled.exec.run(c, dir, env, name, args...)
+	}
+	if res, err := cancelled.o.MergeOrder(ctx, p); err == nil || !strings.Contains(err.Error(), "interrupted") ||
+		!strings.Contains(err.Error(), "while git remote get-url origin ran") || len(res.Entries) != 0 {
+		t.Fatalf("MergeOrder = %+v, %v; want an interrupted error and nothing classified", res, err)
+	}
+}
+
 // TestMergeOrder_GHMissingNotesAndIsNotRunAgain covers AC5's gh half: with
 // no gh, PRs stay empty, one note says merged, closed and PR bases are not
 // told apart, gh is tried once only, and the run succeeds.
@@ -808,6 +1234,56 @@ func TestMergeOrder_GHFailureForOneBranchLeavesItsPROut(t *testing.T) {
 	}
 	if got := moOrder(res); len(got) != 3 || moNoteWith(res, "1 branch(es) whose PR is merged or closed") == "" {
 		t.Errorf("order %q, notes %q; want feat/d hidden as merged", got, res.Notes)
+	}
+}
+
+// TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote covers
+// self-review L2: gh failing with the same error for several branches (an
+// unauthenticated gh fails for all) is one note giving their count and naming
+// at most five, a reason met once keeps the one-branch note, and gh is still
+// asked about every branch.
+func TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote(t *testing.T) {
+	const auth, network = "exit status 1: HTTP 401: Bad credentials", "exit status 1: error connecting to api.github.com"
+	fx := newMOFixture(t)
+	fx.exec.lsOut = moListing("main", "main", moMain)
+	fx.exec.ghErr = map[string]error{}
+	var branches []string
+	for i := 1; i <= 10; i++ {
+		b := fmt.Sprintf("feat/b%02d", i)
+		branches = append(branches, b)
+		fx.add(t, moBind(fmt.Sprintf("org-%02d", i), fmt.Sprintf("b%02d", i)))
+		switch {
+		case i <= 7:
+			fx.exec.ghErr[b] = errors.New(auth)
+		case i <= 9:
+			fx.exec.ghErr[b] = errors.New(network)
+		default:
+			fx.exec.ghErr[b] = errors.New("exit status 2: something else")
+		}
+	}
+	res := fx.run(t, false)
+	if got := moGHBranches(fx); !slices.Equal(got, branches) {
+		t.Fatalf("gh asked about %q, want every branch", got)
+	}
+	want := []string{
+		"gh pr list failed for 7 branches (feat/b01, feat/b02, feat/b03, feat/b04, feat/b05 and 2 more) with the same error (" + auth +
+			"): their PRs are unknown, so merged, closed and the PR base are not told apart for them",
+		"gh pr list failed for 2 branches (feat/b08, feat/b09) with the same error (" + network + "): their PRs are unknown",
+		"gh pr list --head feat/b10 failed (exit status 2: something else): its PR is unknown",
+	}
+	var ghNotes []string
+	for _, n := range res.Notes {
+		if strings.HasPrefix(n, "gh pr list") {
+			ghNotes = append(ghNotes, n)
+		}
+	}
+	if len(ghNotes) != len(want) {
+		t.Fatalf("gh notes = %q, want %d", ghNotes, len(want))
+	}
+	for i, w := range want {
+		if !strings.HasPrefix(ghNotes[i], w) {
+			t.Errorf("gh note %d = %q, want it to start with %q", i+1, ghNotes[i], w)
+		}
 	}
 }
 
