@@ -120,3 +120,66 @@ tech-debt の行は、コードを `file:line` ではなく関数名・テスト
 - tech-debt の新しい行: HEAD の README と比べて既存の 230 行は 1 字も変わらず(先頭からの一致)、新しい行は 5 列(`|` で分けた 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、計画のパスは `docs/plans/active/2026-10-13-org-gate.md` の 1 つ、U+FFFD は 0 件(Python。スクリプトは scratchpad)
 - `./scripts/run-verify.sh`(full): rc 0、`==> All verifiers passed.`。tech-debt の plan 参照の検査(`tech-debt README plan references`)は OK、`check-sync.sh` は `PASS: all files in sync.`、`check-skill-sync.sh` は 13 skill、shell の test は `tests/` の 41 本が通り(FAIL の行 0)、golang の pack は `gofmt: ok`、`0 issues.`、`go test` は test のある 8 パッケージがすべて ok(`internal/cli` 138.8 s、`internal/org` 68.6 s、ほかは `(cached)`)、branch の secret scan は `scanned 1bddc871..7f99385e against origin/main: clean`。この 1 行を足す前の tree で打った。run のあとに変えたのは、この行だけ。wrapper が書いた `docs/evidence/verify-2026-10-13-123656.log` は gitignore の対象で、コミットしていない
 - `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない
+
+## Cycle 3
+
+- Date: 2026-10-13(JST)
+- Plan: `docs/plans/archive/2026-10-13-org-gate.md`(f001bd4f で archive に移した。`./scripts/plan-visual.sh digest` は `69f088275e54` で、`- Approved:` の行と同じ。この run は計画を編集していない)
+- Pipeline cycle: 3(PR #225 の CI が落ちたので、上限を 3 に上げて回した。`--cycle 3` を明示して付けた。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)。run 開始時の HEAD は `b72ddcce`(run 開始時の値で、この cycle の commit の SHA ではない)。cycle 2 の sync-docs の内容は `a1590e44`
+- cycle 2 の sync-docs のあとに入ったもの: `84bbf4fb`(cross-review cycle 2 の triage、指摘 0)、`2d6567b9`(walkthrough)、`f001bd4f`(計画の archive と tech-debt の参照の書き換え)、`8b681dc3`(`gateSignalContext`。中断のエラーが信号の名前を言う)、`a538c899`(self-review cycle 3、LOW 2 件の C3-1 と C3-2)、`697e1577`(verify cycle 3、pass、C3-D1 から C3-D4)、`b72ddcce`(test cycle 3、pass。mutation の M_d2 と M_j が生き残り、M_a は go1.26.0 でだけ生き残る)
+- 項目の番号: C3-1・C3-2 は self-review cycle 3、C3-D1 から C3-D4 は verify cycle 3 の「Documentation drift(cycle 3)」の表、M_a・M_d2・M_j は test cycle 3 の「Mutation(cycle 3)」の番号
+
+### Summary
+
+8b681dc3 は中断のエラーの文面(信号の名前)を変えたが、その文面を書いた文書(`--help`、skill の 4 面、雛形、README、AGENTS.md、quality-gates、仕様)はなく、動きより多くを主張する文もなかった。直したのは verify cycle 3 の記録のずれ 4 件(C3-D1 から C3-D4)で、変えたのは walkthrough 1 つ、tech-debt の 2 か所(古い名前の直しと新しい 1 行)、insight event の 1 行。Go のコード、テスト、`--help` の文字列、leader と reviewer の雛形、skill、`scripts/`、README、AGENTS.md、quality-gates、仕様、計画、ほかの報告は触っていない。
+
+### Changes made
+
+| File | D | Change |
+|------|---|--------|
+| `docs/reports/walkthrough-2026-10-13-org-gate.md:31-34`(節 4) | C3-D1 | 見出し(`:31`)の commit の列に 8b681dc3 を足した。`signal.NotifyContext` と書いていた行(`:33`)を `gateSignalContext` に替え、その項目を 1 つ足した(`:34`): 最初の信号で `<信号> signal received` を cause にして取り消す。`signal.NotifyContext` が信号を cause に付けるのは Go 1.26 からで、go.mod は 1.25.8(release の build も同じ)なので使わない。きっかけは PR #225 の CI の失敗。後の信号も stop が呼ばれるまで捕まえる。`signal.NotifyContext` は `org_watch.go` に 1 か所残る(cause を読まない) |
+| 同 `:56` と表(`:68-71`) | C3-D1 | 「上限は既定の 2 のまま」を、CI の失敗のあとで上限を 3 に上げた経緯に替えた(`cycle-count.json` は 2 のまま、cycle 3 の cross-review はこのあとで結果は書かない)。表に 4 行足した: PR #225 の CI(run 38401704870 と 38401983445)、self-review cycle 3、verify cycle 3、test cycle 3。cross-review cycle 3 の行は作っていない(結果がまだない) |
+| 同 `:75`(実機確認) | C3-D1 | cycle 3 の probe を足した。go1.25.8 で build した HEAD の binary への 7 通りの入力で、中断はどれも rc 1 で信号の名前を出し、修正前の f001bd4f の binary は「context canceled」を出した |
+| 同 `:13` | C3-D2 | `leaderActivityEventCount` の項目の「(AC13)」を「(AC6)」にした。計画の AC6 が `leaderActivityEventCount` の項目で(`docs/plans/archive/2026-10-13-org-gate.md:105`)、AC13 は archive した計画の TASK の検査(同 `:112`)。2d6567b9 からあった誤り |
+| 同 `:4-6`(見出しの 3 行) | C3-D1 | Plan の行を「PR 作成時に active から移す」から「f001bd4f で active から移した」にした。Branch の行を、この commit を含めた commits と files の数と、書いた時点の数(25 commits、45 files、+25324/-214)にした。読む範囲の行を、evidence の増加(約 2 万行から約 3 万行)、`internal/cli/org_gate_test.go` の +832 から +909、報告・evidence・insight を除いた数に合わせた。数は `git diff --shortstat 1bddc871` と `git rev-list --count 1bddc871..HEAD` で数えた(元の「報告と計画を除く」は、実際には計画を含めて報告・evidence・insight を除いた数だった) |
+| `docs/tech-debt/README.md:228`(SIGKILL の行) | C3-D3 | Related の列の `signal.NotifyContext` を `gateSignalContext` にした。行の本文は動きと合っていたので変えていない |
+| `docs/tech-debt/README.md:232`(新しい行) | C3-D4 | 「Small findings of org-gate cycle 3 ...」を足した。(j) C3-1(`gateSignalContext` の doc に、標準の関数へ戻す合図がない。go.mod の `go` 行が 1.26 以上になったとき)、(k) C3-2(テスト名が後の信号の半分しか言わない)、(l) M_d2(`stop` が `signal.Stop` を呼ばなくても落ちるテストがない。test cycle 3 の probe がそのまま使える)、(m) M_j(信号の channel に buffer がない mutant が生き残る。狙いにくい窓)、(n) toolchain の差(手元の Go 1.26 が Go 1.25 だけの退行を隠す。`verify.yml` に `setup-go` がなく、CI は go.mod の版ではなく runner の Go で走る。`setup-go` を足す chore PR は PR #225 のすぐあとの予定)。5 列で cycle 2 の行(`:231`)と同じ形。記号は cycle 2 の (a) から (i) の続き。コードは関数名とテスト名で指し、`file:line` は使っていない。計画のパスは archive のパスで書いた。Related は cycle 3 の報告 3 つ、mutation の evidence、コード、`verify.yml`、8b681dc3 |
+| `docs/insights/events/2026-10-13-org-gate.jsonl` | - | `sync_docs` の event を 1 行足した(`--slug org-gate`、`--cycle 3`、pass)。既存のファイルへの追記 |
+| この report | - | `## Cycle 3` を追記 |
+
+C3-1 と C3-2 は、self-review cycle 3 が cycle 2 の行(`:231`)の (j)・(k) に足すよう勧めていた。cycle 2 の行は 6 KB を超え、(a) から (i) が cycle 2 の上限と結びついているので、同じ形の兄弟の行に分けた。記号は続けたので、(j)・(k) の呼び名は変わらない。
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `ralph org gate --help`(`internal/cli/org_gate.go:73-76`) | 合う。「An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing」は 8b681dc3 のあとも成り立ち、エラーの文面は約束していない。文字列は変えていない |
+| `/org` skill の 4 面 | 変更なし。8b681dc3 は skill に触れておらず、4 面の sha256 は 1 種類で、`./scripts/check-skill-sync.sh` は rc 0(13 skill)。中断を述べる 3 か所(動詞の表の `gate` の行、手順の「ツールに切られた gate は何も記録しない」、「gate の記録」の「中断された gate は何も記録しない」)は動きと合う |
+| `internal/org/prompts/leader.md`(go:embed) | 変更なし。中断を述べる「ツールに切られた gate は何も記録しない」は動きと合う |
+| README、AGENTS.md、`docs/quality/quality-gates.md` と template の写し、`docs/specs/2026-10-07-org-multi-org-director.md`(FR-7)、`docs/architecture/repo-map.md`、`docs/recipes/`、`.claude/rules/ralph/` | 変更なし。`git diff --stat 0bc87603..HEAD` で、これらと `scripts/`、`tests/`、`internal/org/`、`templates/`、`.claude/`、`.agents/`、`.codex/` の差分は空。`git grep -i` で SIGINT・SIGHUP・interrupted・ctrl-c を探して、中断の動きを述べる行は skill の `gate` の行だけで(ほかは `watch` の行と、別の話の recipe の 2 行)、cause の文(`signal received`)を書く文書は 0 件 |
+| `docs/tech-debt/README.md` の既存の org-gate の行 | `signal.NotifyContext` を名指していたのは `:228` の 1 行だけ(`git grep` で確認し、直した)。コードは関数名とテスト名で指し、`org_gate.go` の行番号で引く行はない。`:231`(cycle 2 の行)は変更なし |
+| ほかの文書の中の `org_gate.go` と `org_gate_test.go` の行番号 | 8b681dc3 で `org_gate.go` の 96 行目より後ろが 38 行下がったが、`git grep 'org_gate\(_test\)\?\.go:[0-9]'` が reports・evidence・archive の計画の外で 0 件。報告の中の行は、verify cycle 3 の引き直しの表が現在の行を示す |
+| 過去の報告 | 編集していない(この report と walkthrough を除く)。verify cycle 1・2 の表の `signal.NotifyContext`(`org_gate.go:96`)は、そのときの記録として残す |
+| `.github/workflows/verify.yml` と `release.yml` | 変更なし。`verify.yml` に `setup-go` がないことは tech-debt の (n) に記録した。`release.yml:21` は `go-version-file: go.mod` |
+| Go のコメントの計画のパス | verify cycle 3 の情報の項目と同じで、8 か所が `docs/plans/active/2026-10-13-org-gate` のまま。archive 済みのほかの計画も同じ慣例なので、ずれに数えず、Go のファイルは触らない |
+
+### Left open
+
+- cross-review cycle 3 はこの commit のあとに走る。walkthrough のパイプラインの表には結果を書いていない。結果が出たら `/pr` の前に 1 行足す
+- PR #225 の本文は cycle 1・2 の結果だけを挙げ、cycle 3 と 8b681dc3 を書いていない(verify cycle 3 の情報の項目)。更新は `/pr` の範囲
+- tech-debt の (j) から (n) は、cycle 3 が上限の最後なので `.go` の直しを含めて今は直さない。(n) の `setup-go` は、PR #225 のあとの chore PR で足す予定
+- 本物の leader の座席での中断(herdr の pane、codex の sandbox、ツールの timeout が送る信号)は未確認で、cycle 1・2 と同じ
+- CI の Go の正確な版はログに出ないので未確認(verify cycle 3 と同じ)
+
+### Verification
+
+コミットの前に、worktree のルートで打った。
+
+- `./scripts/check-sync.sh`: rc 0、`IDENTICAL: 167`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`。root と template の写しは触っていないので、数は cycle 2 と同じ
+- `./scripts/check-skill-sync.sh`: rc 0、`13 skill(s) in lock-step`。skill の 4 面の `shasum -a 256` は 1 種類
+- `./scripts/check-template-purity.sh`: rc 0、`PASS: no meta-repo-specific references found in templates.`
+- `./scripts/plan-visual.sh digest docs/plans/archive/2026-10-13-org-gate.md`: `69f088275e54`(変わっていない)
+- tech-debt の行: 変わったのは HEAD と比べて `:228` と `:232` の 2 行だけで、ほかの行は 1 字も変わらない。`:232` は 5 列(`|` で分けた 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、`docs/plans/active/` は 0 件、archive の計画のパスは 1 つ、U+FFFD は 0 件。`:228` に `signal.NotifyContext` は残らない(Python。スクリプトは scratchpad)
+- walkthrough: 見出しの数の置き場所(`:5`、`:6`)に未置換の目印は残らない。32 commits は `git rev-list --count 1bddc871..HEAD` の 31 にこの commit の 1 を足した数、46 files、+36404/-214、報告・evidence・insight を除いた 29 files、+5535/-214 は、この report の最終版を含む作業ツリーと `1bddc871` の `git diff --shortstat`(この commit は新しいファイルを足さない)
+- `./scripts/run-verify.sh`(full): rc 0、`==> All verifiers passed.`。tech-debt の plan 参照の検査(`tech-debt README plan references`)は OK、`check-sync.sh` は `PASS: all files in sync.`、`check-skill-sync.sh` は 13 skill、shell の test は `FAIL: [1-9]` の行が 0 件、golang の pack は `gofmt: ok`、`0 issues.`、`go test` は 8 パッケージがすべて ok(`internal/cli` 133.4 s、`internal/org` 65.8 s、ほかは `(cached)`)、branch の secret scan は `scanned 1bddc871..b72ddcce against origin/main: clean`。この 1 行を埋める前の tree で打った。run のあとに変えたのは、この節の目印の置き換えだけ(行数は変わらない)。wrapper が書いた `docs/evidence/verify-2026-10-13-145601.log` は gitignore の対象で、コミットしていない
+- `./scripts/insights-append.sh --slug org-gate ...` のあとの `git status --short`: 既存の `docs/insights/events/2026-10-13-org-gate.jsonl` が `M` で、新しい `??` のファイルはない
