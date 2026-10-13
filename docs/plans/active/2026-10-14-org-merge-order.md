@@ -149,7 +149,12 @@ Critical forks: C1〜C4 は consult の判定で決めた(ユーザーの指示�
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 org の層: d27892f9(`internal/org/mergeorder.go` と test)
+  - S2 CLI: 65a0d404(`internal/cli/org_merge_order.go` と test、`internal/cli/org.go` に登録)
+  - S3 文書: 251b9234(`/org` skill の 4 面、README、仕様 FR-8 の注、AGENTS.md、tech-debt、`seat.go` の package doc、`org_legacy_ledger.go` の comment)。追いの 4277a295 で、ready が 2 本以上のときの注記の文言、tech-debt の gate なしの PR の行、skill の見張りなしで使える動詞の一覧を合わせた
+  - 実装中に分かった穴: PR を出したあとの機能の org は disband 済みで、`ralph org gate` は走っている org でしか打てないので、`rebase`・`regate`・`unreadable` のブランチを `ready` に戻す決まった手がない(`start --plan` を打ち直すと worktree は使い回すが、新しい leader は計画から始める)。consult(consult-plan-regategap)の判定 A: この PR では埋めず、Details に「the gate runs only while the feature org runs」と足し、skill・README・仕様 FR-8 の注・tech-debt に穴と人の手の道(rebase して push、CI と GitHub の保護に頼る)と持ち主(8a、director)を書く。立て直しは勧めない。計画の非目標(rebase・gate をしない)の範囲で、本文は変えない
+  - 決めたこと: 対象のブランチがなければ ls-remote を打たず、注記だけで終了コード 0
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
