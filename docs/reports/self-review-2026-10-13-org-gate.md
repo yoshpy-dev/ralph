@@ -84,7 +84,7 @@
 
 ## Recommendation
 
-- Merge: yes(cycle 2 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。LOW は cycle 2 の 6 件(下の「Cycle 2」の C2-1〜C2-6)で、どれも動きと記録の値を変えない。cycle 1 の MEDIUM 3 件と LOW 9 件は e0adb359・aeba07cb で直っていることを HEAD で確かめた(L8 の半分と M2 の SIGKILL は、前者が stage 7c、後者が tech-debt の行に載る)。cycle 1 の判定は「yes、MEDIUM 3、LOW 9」で、上の所見の表はその時点のまま残す)
+- Merge: yes(cycle 3 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 3 の差分(8b681dc3)の LOW は 2 件(下の「Cycle 3」の C3-1・C3-2)で、動きと記録の値を変えない。`gateSignalContext` は cause の文、親が先に終わるときの cause、stop の順、goroutine の終わり、後の信号の扱いが Go 1.26.0 の `signal.NotifyContext` と同じで、子プロセスのテストは env guard と上限があり、プロセスもユーザーの状態も残さない。cycle 2 の LOW 6 件(C2-1〜C2-6)は tech-debt の `docs/tech-debt/README.md:231` の行にあり、cycle 3 は触れていない。cycle 1 の MEDIUM 3 件と LOW 9 件は cycle 2 で直っていることを確かめた(L8 の半分と M2 の SIGKILL は、前者が stage 7c、後者が tech-debt の行に載る)。cycle 1 と cycle 2 の判定は「yes」で、上の所見の表はその時点のまま残す)
 - Follow-ups:
   1. M1: 手順 12 の「断られたとき」と SKILL の手順 4 に、衝突した rebase のあとの archive の revert を足し、`prompts_test.go` の `TestRenderRolePrompt_Leader_FeatureOrgGate` の語句と順序の検査を合わせる
   2. M3: `run-verify.sh` のコメントを実際の動きに合わせ、`tests/test-run-verify-concurrency.sh` の Case 6 を、解放しないまま kill する形に直す(`/bin/sh` と dash の両方)。root と `templates/base/` の 2 つを同じに保つ
@@ -188,3 +188,80 @@ cycle 1 の「Positive notes」が頼っていた点は、b04289c1 のあとも�
   1. 上の tech-debt の 1 行を足す(上限なので、C2-1〜C2-6 は直さない)。3 回目を回す理由が別にあるなら、C2-2 と C2-4 と C2-1 を先に直す
   2. cycle 2 の `/verify` と `/test` が書き直す報告に、b04289c1 で動いた `gate.go` の行を指す pointer が残っている(`verify-2026-10-13-org-gate.md` の AC5 の行は `gate.go:711-745`、`test-2026-10-13-org-gate.md` は `gate.go:723-724`。`recordGate` は今 713-763 で、`:723-724` は条件の枝ではなく `var refused` と lock の呼び出しに当たる)。関数名で書くか、HEAD で引き直す
   3. `/cross-review` を回すなら、triage 報告の「#1」が cycle 2 の新しい指摘を指す。C2-1 の字面を直すなら、その前がよい
+
+## Cycle 3
+
+- Date: 2026-10-13
+- Reviewer: reviewer subagent (Claude)。パイプライン 3 回目(cycle 3)。PR #225 の CI の失敗を直すために上限を 3 に上げた。`.harness/state/standard-pipeline/cycle-count.json` は skill の規則で 2 のまま
+- Scope: `git diff f001bd4f..HEAD`(HEAD 8b681dc3、1 コミット、2 ファイル、+122/-7)。`internal/cli/org_gate.go` の `gateSignalContext`(`signal.NotifyContext` の置き換え)と、`internal/cli/org_gate_test.go` の新しいテスト 2 つ(`TestOrgGate_SignalContextParentCauseAndStop` と、子プロセスを使う `TestOrgGate_SignalContextKeepsLaterSignalsCaught`)。cycle 2 までに見た差分は読み直していない。テストの実行、静的解析、仕様適合、文書のずれの検査は行っていない
+- コミットの背景: PR #225 の CI(go.mod の `go 1.25.8`)で `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` が落ちた。Go 1.25 の `signal.NotifyContext` は cancel の cause を付けず、Go 1.26 が `"<信号> signal received"` を付ける。release.yml は `go-version-file: go.mod` で 1.25.8 を使って build する
+
+### 読んだものと確かめたこと
+
+- 読んだ: `git diff f001bd4f..HEAD` の全体、`org_gate.go` の import と RunE の周り、`org_gate_test.go` の既存の中断テスト(610-721 行)と新しいテスト(723-798 行)、`internal/cli/main_test.go` の `TestMain`、`internal/cli/org_watch.go` の `NotifyContext` の 1 か所と `org_watch_test.go` の対応するテスト、`go.mod`、`.github/workflows/release.yml`、`verify.yml`
+- Go 1.26.0 の `os/signal/signal.go` の `NotifyContext` と `signalCtx.stop` を読んだ(`/opt/homebrew/Cellar/go/1.26.0/libexec/src/os/signal/signal.go`)。手元の Go は 1.26.0 だけで、1.25 のソースは読んでいない。「1.25 は cause を付けない」は、CI の失敗と 1.26 の doc(`signal.go:275-276`「If a signal causes the returned context to be canceled, calling context.Cause on it will return an error describing the signal」)による
+- `git diff --check f001bd4f..HEAD` は空。追加行に TODO・FIXME・デバッグ出力・秘密情報はない
+- helper と 1.26 の `NotifyContext` の対応(コードを読んで突き合わせた)
+
+| 観点 | Go 1.26.0 の `NotifyContext` | `gateSignalContext` | 一致 |
+| --- | --- | --- | --- |
+| cause の文 | `signalError(s.String() + " signal received")` | `errors.New(s.String() + " signal received")` | 同じ文。型は文字列型と `*errorString` で違うが、gate は `%v` で出すだけ |
+| 子の作り方 | `context.WithCancelCause(parent)` | 同じ | 親が先に終わると、親の cause をそのまま引き継ぐ |
+| goroutine | `ctx.Err() == nil` のときだけ起動。最初の信号か ctx の終わりで抜ける | 同じ | 抜けたあとに残る goroutine はない(stop が ctx を終わらせる) |
+| 後の信号 | `Notify(ch)` を stop まで外さない。ch の容量は 1 | 同じ | 2 つ目は ch に入り、3 つ目からは捨てられる。ralph は終わらない |
+| stop | `cancel(nil)` のあと `Stop(ch)` | 同じ順 | stop の cause は `context.Canceled`。最初の信号の cause は、あとの `cancel(nil)` で上書きされない |
+| 違い | 戻りの stop の型は `context.CancelFunc`、`String()` あり | `func()`、`String()` なし | gate は `defer stop()` と `ctx` しか使わないので影響しない |
+
+- 横断(`git grep`): `signal.NotifyContext` の他の使い手は `org_watch.go:153` の 1 か所で、cause を読まない(2 つ目の信号の扱いも別で、`context.AfterFunc(ctx, stopSignals)` で既定の動きに戻す)。gate の経路で cause を文にするのは `internal/org/gate.go` の `context.Cause(ctx)`(316、319、684、721、748 行)と `gate_run.go:203` で、どれも CLI から渡る ctx を読むだけ。`signal received` の文を期待する report 以外の箇所は `org_gate_test.go:661-663` だけで、skill・雛形・docs には書かれていない
+- 子プロセスのテストを、変異を当てて読んで辿った(走らせていない)
+  - helper を `signal.NotifyContext` に戻す: Go 1.25 では子が `cause: context canceled` を出して赤。Go 1.26 では緑のまま(C3-1)
+  - 最初の信号のあとに goroutine で `signal.Stop(ch)` を呼ぶ: 100 ms の間に登録が外れ、2 つ目の SIGTERM が既定の動きで子を終わらせるので、`CombinedOutput` が非ゼロの終了を返して赤
+  - `cancel(nil)` と `signal.Stop` の順を逆にする: 観測できる違いがなく緑。標準も同じ順だが、順を固定する意図の文は comment にない(動きに関係しないので所見にしない)
+- 確かめていないもの: テスト、`gofmt`、`go vet`、`-race`、`go test -cover` の下で子の再実行が何を書くか(子には `-test.coverprofile` を渡さないので何も書かないはずだが、読んだだけ)、`GOTOOLCHAIN=go1.25.8` での実行
+
+### 所見(cycle 3)
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。cycle 1・cycle 2 の ID と取り違えないよう、ID に `C3-` を付ける。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-1 | LOW | maintainability | `gateSignalContext` は Go 1.26 の `NotifyContext` を写したもので、いつ捨てるかが書かれていない。手元の Go が 1.26 だと、helper を `signal.NotifyContext` に戻しても 2 つの新しいテストと既存の中断テストは緑のままで、赤になるのは go.mod の 1.25.8 で動く CI だけ | `org_gate.go:117-120`(comment は「1.26 から同じことをする」「cause は 1.26 から」と言うが、置き換える合図は書かない)、`go.mod:3`、`release.yml:19-21`、`org_watch.go:153`(標準の関数を使う別の呼び出しが残る) | doc に 1 文足す。「go.mod の go 行が 1.26 以上になったら `signal.NotifyContext` に置き換え、`TestOrgGate_SignalContext*` の 2 つを消す。それまで、元に戻した変更が赤になるのは Go 1.25 だけ」。または tech-debt の行に足す |
+| C3-2 | LOW | naming | `TestOrgGate_SignalContextKeepsLaterSignalsCaught` の名前は後半(後の信号)しか言わないが、このテストは最初の信号の cause の文(`hangup signal received`)も固定する。この commit が直した欠陥は cause のほうで、そこが赤になると見出しは「後の信号」を指す。子の comment の最後の文の「caught」は、同じファイルで「信号を捕まえる」の意味に使う語と重なる | `org_gate_test.go:763`(名前)、`:754-762`(doc は両方を述べる)、`:775-777`(「a helper that unregisters right after the cancel is then caught」)、`:795-797`(cause の assertion)。名前の参照は `:723-728` と `:750-751` にもある | 名前に cause を入れる(`TestOrgGate_SignalContextNamesTheSignalAndKeepsLaterOnesCaught` など)。名前を変えたら `:726-728` と `:750-751` の参照も直す。comment の最後は「a helper that unregisters right after the cancel makes the second signal end the child」のように、検出の意味を言い切る |
+
+#### C3-1 の根拠
+
+- cause の文は 1.26 の実装の細部で、doc は「信号を説明するエラー」としか言わない。helper が文を自分で持つので、将来 Go が文を変えても gate の出力は変わらない。これは置き換えの利点だが、標準の関数に戻すときには gate の CLI テスト(`org_gate_test.go:661-663`)が文を固定しているので、文が変わると赤になる。戻すときの確認項目になる
+- 手元で緑のままになるのは、helper を戻したあとの 3 つのテストの動きを 1.26 のソースから辿った結果で、走らせてはいない。1.25 側は CI の失敗が証拠。`GOTOOLCHAIN=go1.25.8` で `go test` を回せば手元でも同じ赤が出るはずで、/test cycle 3 で 1 回回す価値がある(follow-up 2)
+
+#### C3-2 の根拠
+
+- 親のテストの失敗文は `the child printed:\n...\nwant the line "cause: hangup signal received"`(`:796`)で、原因は文から読める。それでも名前は `go test` の出力の見出しになり、ここで読み違える人がいる
+- 子は 1 回の起動で cause の行と生存(終了コード 0)の両方を出す作りなので、分けるなら子を 2 回起動せず、親の assertion を `t.Run` の 2 つにするのが安い。名前の変更だけでも足りる
+
+### 所見にしなかったもの
+
+- 子プロセスのテストの安全(読んで辿った)
+  - guard: `RALPH_TEST_GATE_SIGNAL_CHILD=1` は子の `Env` にだけ付く(`:790`)。親でこの変数が付いていた場合は、親が自分に SIGHUP と SIGTERM を送るが、helper が両方を捕まえるので終わらない
+  - 上限: 子の中は SIGHUP を待つのが 5 秒、あとの sleep が 100 ms と 200 ms。親は 30 秒の `exec.CommandContext`(SIGKILL)。孫プロセスはなく、`CombinedOutput` は子が終われば返る。親が強制終了されても、子は最長でおよそ 5.3 秒で自分で終わる
+  - ユーザーの状態: 子は同じ test binary を `-test.run=^...$` の完全一致で 1 つに絞って動かす。走るのは package の init と `TestMain`(存在しない home に向ける設定)だけで、ファイル・git・herdr・osascript には触れない。`TestMain` の `orgWatchLaunch` は panic する fake なので、子が誤って常駐の watch を起こすこともない
+  - 否定の待ち(2 つ目の信号のあと 200 ms 生きているか)の誤りの向きは、遅い machine で終了を見逃す側(緑になる側)で、赤の flake にならない。helper が登録を外す変異では、SIGTERM が子を終わらせるのでその待ちを待たずに赤になる
+- `TestOrgGate_SignalContextParentCauseAndStop`: 親の cancel は同期で子に伝わるので(`WithCancelCause(parent)` の子は親の children に入る)、`cancelParent(errParent)` の直後の検査に待ちは要らない。最初の `defer stop()` は defer の時点の関数値を保存するので、2 つ目の helper を `stop` に代入し直しても、deferred の呼び出しは最初の stop のまま。2 つ目は直後に `stop()` を明示で呼ぶので漏れない
+- `os.Args[0]`: `go test` は絶対パスで渡す。この package の chdir は `t.Chdir` で、テストの終わりに戻る(`org_gate_test.go:107`、`:437`、`org_reserve_test.go`)。`./cli.test` を直接動かしても同じ cwd から読める。`-test.count=1` は子の既定と同じで不要だが害はない
+- RunE の comment の書き直しは helper の導入に合わせた最小の変更で、動きの説明(後の信号を stop まで捕まえる)は元のまま残っている。helper 以外の無関係な変更はない
+- comment の「PR #225's CI」は履歴への言及だが、理由(1.25.8 に cause がない)を本文が書いているので、番号は補足にとどまる
+
+### Tech debt identified
+
+この回は報告だけをコミットする指示なので、`docs/tech-debt/README.md` には行を足していない。cycle 3 は上限(3 回)の最後で、C3-1・C3-2 は `.go` の comment とテスト名の変更なので、直すと 4 回目の pipeline が要る。動きと記録の値は変わらないので、cycle 2 の LOW をまとめた既存の行(`README.md:231`、`Small findings of org-gate cycle 2`)に (j)・(k) として足すことを勧める(orchestrator が足す)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| 既存の行 `README.md:231` に足す。(j) C3-1: the doc of `gateSignalContext` (`internal/cli/org_gate.go`) says it does what `signal.NotifyContext` does from Go 1.26 but not when to replace it; once go.mod's `go` line is 1.26 or later it and `TestOrgGate_SignalContextParentCauseAndStop` / `TestOrgGate_SignalContextKeepsLaterSignalsCaught` can go. On a local Go 1.26 a revert to `signal.NotifyContext` stays green; only Go 1.25.8 (go.mod, CI, release) goes red. (k) C3-2: `TestOrgGate_SignalContextKeepsLaterSignalsCaught` is named for its second half only, though it also pins the first signal's cause text, and the last sentence of the child's comment uses "caught" in a second sense | (j) a reader of the helper cannot tell when to delete it, and a local run on Go 1.26 cannot catch a revert. (k) a failing cause line shows under a name about later signals | Found at the pipeline cap (cycle 3 of 3); a `.go` edit needs a full re-run, and neither changes behavior or a recorded value | (j) the go.mod `go` line moving to 1.26 or later, or the next edit to `gateSignalContext`. (k) the next edit to that test | `docs/reports/self-review-2026-10-13-org-gate.md` (`## Cycle 3`, C3-1 and C3-2); `internal/cli/org_gate.go`; `internal/cli/org_gate_test.go`; commit 8b681dc3 |
+
+### Recommendation
+
+- Merge: 上の「Recommendation」の Merge の行のとおり(yes)。cycle 3 の差分に CRITICAL・HIGH・MEDIUM はなく、CI の失敗の原因(1.25 の `NotifyContext` に cause がない)は helper が塞ぎ、cycle 2 までの判定は変わらない
+- Follow-ups:
+  1. C3-1・C3-2 は上限の最後なので直さず、上の tech-debt の (j)・(k) として `README.md:231` の行に足す(orchestrator)
+  2. /test cycle 3 で、`GOTOOLCHAIN=go1.25.8` を付けて `go test ./internal/cli -run 'TestOrgGate_(InterruptStopsTheScriptAndRecordsNothing|SignalContext)'` を 1 回走らせ、CI と同じ toolchain で緑になることを確かめる。手元の Go は 1.26.0 で、1.25 側の欠陥は既定の toolchain では再現しない。ここでは走らせていない
+  3. cycle 3 の `/verify`・`/test` が書き直す報告に、`org_gate_test.go` の行を指す pointer が残る場合は、この commit で行がずれた(新しいテストが 723-798 行に入った)ので、関数名で書くか HEAD で引き直す
