@@ -271,9 +271,10 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // go idle and before it types anything: while Send waits, a seat at work
 // (the implementer the TASK is for, among others) can rewrite the plan in
 // the same feature worktree, so the check before the wait no longer says
-// what the TASK would start (cross-review #1 of org-plan-approval). That
-// refusal is the same as the first one, with nothing typed, nothing
-// recorded, and Progress left at SendProgressNothingSent. The watch gate is
+// what the TASK would start (cross-review cycle 1 #1 of
+// org-plan-approval). That refusal is the same as the first one, with
+// nothing typed, nothing recorded, and Progress left at
+// SendProgressNothingSent. The watch gate is
 // not run again: it is a check at the time of the call (plan
 // 2026-10-12-org-watch-gate).
 //
@@ -308,9 +309,10 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 //     press Enter.
 //
 // A --timeout-ms budget too small to even fund the pre-Enter wait is
-// instead caught before PaneSendText is ever called (see the check right
-// after the idle/done wait below), so that case never types anything and
-// leaves Progress at its SendProgressNothingSent zero value.
+// instead caught before PaneSendText is ever called (see the budget check
+// after the idle/done wait and the second approval check below), so that
+// case never types anything and leaves Progress at its
+// SendProgressNothingSent zero value.
 func (o *Org) Send(p SendParams) SendResult {
 	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {

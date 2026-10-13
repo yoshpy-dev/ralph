@@ -462,8 +462,9 @@ func approvalCheckErrorOf(err error) approvalCheckError {
 // ask again. When the current digest passes, the refusal is of kind
 // approvalRefusalTaskHeader with the current digest, whose next step tells
 // the leader to name it. When the current digest is refused for the plan's
-// two header lines (approvalRefusalPlanHeader), the plan was approved again
-// and the leader has not written the lines since, and that refusal, whose
+// two header lines (approvalRefusalPlanHeader), the leader has not written
+// the lines naming the current digest yet (the plan was approved again, or
+// approved once and the TASK names a mistyped digest), and that refusal, whose
 // next step writes the lines naming the current digest, is returned; sent
 // again with the same PLAN: once they are written, the TASK gets the
 // approvalRefusalTaskHeader refusal. When the current digest is refused as a
@@ -473,13 +474,14 @@ func approvalCheckErrorOf(err error) approvalCheckError {
 // leaves the TASK's own refusal.
 //
 // The refusal moves the TASK only to the latest approval (self-review N7 and
-// cross-review #2 of org-plan-approval). When the TASK names the latest
-// approval, as the leader template has it do, the file's digest is another
-// one: the plan was changed after that approval or set back to an earlier
-// approved version, and the TASK's own refusal, whose next step undoes the
-// change, is returned. When the file's digest is an earlier approval, or no
-// approval, moving the TASK to it would have the leader implement a version
-// a human replaced, so the TASK's own refusal is returned as well.
+// cross-review cycle 1 #2 of org-plan-approval). When the TASK names the
+// latest approval, as the leader template has it do, the file's digest is
+// another one: the plan was changed after that approval or set back to an
+// earlier approved version, and the TASK's own refusal, whose next step
+// undoes the change, is returned. When the file's digest is an earlier
+// approval, or no approval, moving the TASK to it would have the leader
+// implement a version a human replaced, so the TASK's own refusal is
+// returned as well.
 // checkPlanApproved itself is left as it is: checkAnyPlanApproved runs it for
 // a spawn, which names no plan.
 func checkTaskPlanApproved(events []ManifestEvent, orgID string, f *FeatureBinding, text string) error {

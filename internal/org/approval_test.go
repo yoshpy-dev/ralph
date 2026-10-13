@@ -940,8 +940,9 @@ func TestPlanNotApprovedError_OneNextStepPerKind(t *testing.T) {
 // writes the lines naming it; (e2) once they are written, the same TASK gets
 // the step to change its PLAN: header to the current digest, and a TASK
 // naming it passes. Only the plan's latest approval is moved to (self-review
-// N7 and cross-review #2): with the plan approved again and its file set back
-// to the first approval's version, (f) a TASK naming the latest approval gets
+// N7 and cross-review cycle 1 #2): with the plan approved again and its file
+// set back to the first approval's version, (f) a TASK naming the latest
+// approval gets
 // the plan-changed refusal of its own digest, and (g) a TASK with a mistyped
 // digest gets its own no-approval refusal, neither naming the first
 // approval's digest in its next step, although that version passes the check.

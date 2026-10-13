@@ -307,8 +307,8 @@ func (h *planEditingHerdr) AgentWait(ctx context.Context, target string, until [
 	return out, err
 }
 
-// TestOrgSend_ApprovalCheck_AgainAfterTheWait covers cross-review #1 of
-// org-plan-approval: Send runs the approval check again after it waits for
+// TestOrgSend_ApprovalCheck_AgainAfterTheWait covers cross-review cycle 1 #1
+// of org-plan-approval: Send runs the approval check again after it waits for
 // the seat to go idle, so a TASK whose plan changed while Send waited (in
 // its digest, or only where the digest does not show) is refused, typed and
 // raw alike, with nothing typed (no PaneSendText, no PaneSendKeys) and the
@@ -514,7 +514,7 @@ func TestOrgSend_ApprovalCheck_StaleOrMistypedPlanDigest(t *testing.T) {
 // sets for Send: the approval check comes after the watch gate. With no
 // watch that accepts work and no approval of the plan, a TASK to the
 // implementer, typed, raw and dry-run alike, gets the watch gate's refusal,
-// not the approval check's (the mutation survivor R03 of the test report of
+// not the approval check's (the mutation survivor R03 of /test cycle 1 of
 // org-plan-approval).
 func TestOrgSend_WatchGateBeforeApprovalCheck(t *testing.T) {
 	for _, v := range sendVariants {
@@ -537,8 +537,9 @@ func TestOrgSend_WatchGateBeforeApprovalCheck(t *testing.T) {
 // approval) come after the capacity check (spawnCapacityErr), in the dry run
 // and on the real path alike. With max_seats reached and no approval, an
 // implementer spawn gets the max_seats refusal, not the approval check's
-// (the mutation survivors R04 and R05 of the test report of
-// org-plan-approval).
+// (the mutation survivors R04 and R05 of /test cycle 1 of
+// org-plan-approval). The fixture's leader runs, so the test sees the
+// approval half of the feature org's checks only.
 func TestOrgSpawn_CapacityCheckBeforeFeatureOrgChecks(t *testing.T) {
 	for _, dryRun := range []bool{true, false} {
 		fx := newEnforceFixture(t, config.ApprovalModePerPlan)

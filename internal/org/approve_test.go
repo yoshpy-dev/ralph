@@ -295,7 +295,7 @@ func TestOrgApprove_AllOrNothing(t *testing.T) {
 // resolve note ("approved <path> sha256:<digest>") would be longer than the
 // inbox accepts (InboxNoteMaxRunes), here for a plan path of about 490
 // characters, so no plan_approved is left behind by a resolve that fails
-// (the mutation survivor R11 of the test report of org-plan-approval).
+// (the mutation survivor R11 of /test cycle 1 of org-plan-approval).
 func TestOrgApprove_RefusesAnItemItCannotResolve(t *testing.T) {
 	fx := newApprovalFixture(t)
 	worktree := t.TempDir()
