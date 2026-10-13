@@ -566,10 +566,11 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 	switch {
 	case g != nil && !g.readable:
 		return MergeClassUnreadable, fmt.Sprintf("the latest gate record (%s at %s) cannot be read: run ralph org gate again "+
-			"in the feature worktree", g.ev.Event, g.ev.TS)
+			"in the feature worktree (the gate runs only while the feature org runs)", g.ev.Event, g.ev.TS)
 	case g != nil && t.corruptAfterGate:
 		return MergeClassUnreadable, fmt.Sprintf("a corrupt manifest line follows the latest gate record (%s at %s) and may "+
-			"be a newer one: run ralph org gate again in the feature worktree", g.ev.Event, g.ev.TS)
+			"be a newer one: run ralph org gate again in the feature worktree (the gate runs only while the feature org runs)",
+			g.ev.Event, g.ev.TS)
 	case g == nil:
 		return MergeClassNoGate, "no gate record: run ralph org gate in the feature worktree before the PR is merged"
 	case g.record.Reason != "":
@@ -589,8 +590,8 @@ func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class
 	case !onOrigin:
 		return MergeClassNoRemote, fmt.Sprintf("origin has no branch %s: it was not pushed, or was deleted after a merge", t.branch)
 	case tip != r.Head:
-		return MergeClassRegate, fmt.Sprintf("pushed after the gate: origin has %s, the gate checked %s: run ralph org gate again",
-			shortMergeSHA(tip), shortMergeSHA(r.Head))
+		return MergeClassRegate, fmt.Sprintf("pushed after the gate: origin has %s, the gate checked %s: run ralph org gate again "+
+			"(the gate runs only while the feature org runs)", shortMergeSHA(tip), shortMergeSHA(r.Head))
 	case t.pr != nil && t.pr.BaseRefName != def:
 		return MergeClassWrongBase, fmt.Sprintf("PR #%d merges into %s, not origin's default branch %s: change the PR's base to %s",
 			t.pr.Number, t.pr.BaseRefName, def, def)
@@ -599,10 +600,10 @@ func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class
 	switch {
 	case !named || name != def:
 		return MergeClassRebase, fmt.Sprintf("the gate checked against %s, but origin's default branch is now %s: rebase on "+
-			"origin/%s and run ralph org gate again", r.BaseRef, def, def)
+			"origin/%s and run ralph org gate again (the gate runs only while the feature org runs)", r.BaseRef, def, def)
 	case r.Base != remote.defaultHead:
-		return MergeClassRebase, fmt.Sprintf("origin/%s moved: gate base %s, now %s: rebase on origin/%s and run ralph org gate again",
-			def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead), def)
+		return MergeClassRebase, fmt.Sprintf("origin/%s moved: gate base %s, now %s: rebase on origin/%s and run ralph org gate again "+
+			"(the gate runs only while the feature org runs)", def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead), def)
 	}
 	return MergeClassReady, fmt.Sprintf("the gate passed on %s, origin's tip of the branch, with base %s, origin/%s's tip",
 		shortMergeSHA(r.Head), shortMergeSHA(r.Base), def)
