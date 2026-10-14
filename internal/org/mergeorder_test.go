@@ -1288,6 +1288,132 @@ func TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote(t *testing.T)
 	}
 }
 
+// moForkPRs is n merged PRs from forks of the branch name, newest first as
+// gh lists them, numbered down to first. A fork's PR has the url of the
+// repository it merges into, here acme/app.
+func moForkPRs(first, n int) []ghPullRequest {
+	prs := make([]ghPullRequest, 0, n)
+	for i := range n {
+		pr := moRepoPR(first+n-1-i, "MERGED", "main", "acme", "app")
+		pr.IsCrossRepository = true
+		prs = append(prs, pr)
+	}
+	return prs
+}
+
+// moLimitNotes are the notes of res that say gh returned its limit.
+func moLimitNotes(res MergeOrderResult) []string {
+	var out []string
+	for _, n := range res.Notes {
+		if strings.Contains(n, "its limit") {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// TestMergeOrder_GHLimitFullOfForksLeavesThePROut covers cross-review cycle 2
+// of org-merge-order: gh returns a branch's PRs newest first up to --limit,
+// so newer fork PRs of the same branch name can fill the limit and push the
+// branch's own PR out of the result. When gh returns mergeOrderGHLimit PRs,
+// all from forks, the branch gets no PR and is classified on the gate and
+// origin alone, and a note says why (one note for several branches); one PR
+// fewer is no PR with no note; and a same-repository PR among the limit's
+// PRs is used, its repository checked as any other.
+func TestMergeOrder_GHLimitFullOfForksLeavesThePROut(t *testing.T) {
+	limit := strconv.Itoa(mergeOrderGHLimit)
+	full := moForkPRs(100, mergeOrderGHLimit)
+	ownAmongFull := func(own ghPullRequest) string {
+		prs := slices.Clone(full)
+		prs[len(prs)/2] = own
+		return moPRs(prs...)
+	}
+	noGetURL := func(t *testing.T, fx *moFixture) {
+		t.Helper()
+		if git := fx.exec.callsOf("git"); len(git) != 1 || git[0].args[0] != "ls-remote" {
+			t.Errorf("git calls = %+v, want the ls-remote only: no PR was returned to check", git)
+		}
+	}
+
+	t.Run("one branch full of forks", func(t *testing.T) {
+		fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+		fx.exec.setPR("feat/a", moPRs(full...))
+		fx.exec.setPR("feat/b", moPRs(moForkPRs(100, mergeOrderGHLimit-1)...))
+		res := fx.run(t, false)
+		if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+			t.Fatalf("order = %q, want %q", got, want)
+		}
+		for _, e := range res.Entries {
+			if e.PR != nil {
+				t.Errorf("%s PR = %+v, want none: only forks' PRs", e.Branch, e.PR)
+			}
+		}
+		want := "gh returned " + limit + " PRs for feat/a, its limit, all from forks, and the branch's own PR may be past them: " +
+			"no PR is used for it, so " + mergeOrderNoPRs
+		if got := moLimitNotes(res); !slices.Equal(got, []string{want}) {
+			t.Errorf("limit notes = %q, want only %q", got, want)
+		}
+		if note := moNoteWith(res, "feat/b"); note != "" {
+			t.Errorf("note %q names feat/b, want none: gh returned fewer PRs than its limit", note)
+		}
+		noGetURL(t, fx)
+	})
+
+	t.Run("several branches full of forks are one note", func(t *testing.T) {
+		fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+		fx.exec.setPR("feat/a", moPRs(full...))
+		fx.exec.setPR("feat/c", moPRs(full...))
+		res := fx.run(t, false)
+		if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+			t.Fatalf("order = %q, want %q", got, want)
+		}
+		want := "gh returned " + limit + " PRs, its limit, for each of 2 branches (feat/a, feat/c), all from forks, and their own " +
+			"PRs may be past them: no PR is used for them, so " + mergeOrderNoPRs
+		if got := moLimitNotes(res); !slices.Equal(got, []string{want}) {
+			t.Errorf("limit notes = %q, want only %q", got, want)
+		}
+		if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+			t.Errorf("gh asked about %q, want every branch", got)
+		}
+		noGetURL(t, fx)
+	})
+
+	t.Run("a same-repository PR among the limit's is used", func(t *testing.T) {
+		fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+		fx.exec.setPR("feat/a", ownAmongFull(moRepoPR(5, "MERGED", "main", "acme", "app")))
+		fx.exec.setPR("feat/b", ownAmongFull(moRepoPR(6, "OPEN", "develop", "acme", "app")))
+		res := fx.run(t, false)
+		if got, want := moOrder(res), []string{"1 ready feat/c", "2 wrong_base feat/b"}; !slices.Equal(got, want) {
+			t.Fatalf("order = %q, want %q (feat/a hidden as merged)", got, want)
+		}
+		if e := moEntry(t, res, "feat/b"); e.PR == nil || e.PR.Number != 6 {
+			t.Errorf("feat/b PR = %+v, want #6, the one PR not from a fork", e.PR)
+		}
+		if got := moLimitNotes(res); len(got) != 0 {
+			t.Errorf("limit notes = %q, want none: a PR not from a fork was found", got)
+		}
+		if moNoteWith(res, "1 branch(es) whose PR is merged or closed") == "" {
+			t.Errorf("notes = %q, want feat/a counted as hidden", res.Notes)
+		}
+	})
+
+	t.Run("the repository check runs on the PR picked among the limit's", func(t *testing.T) {
+		fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+		fx.exec.setPR("feat/a", ownAmongFull(moRepoPR(5, "MERGED", "main", "upstream-org", "app")))
+		fx.exec.setPR("feat/b", moPRs(moRepoPR(6, "MERGED", "main", "acme", "app")))
+		res := fx.run(t, false)
+		if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+			t.Fatalf("order = %q, want %q with no PR", got, want)
+		}
+		if moNoteWith(res, "gh reads upstream-org/app, not origin's acme/app: no PR is used") == "" {
+			t.Errorf("notes = %q, want the repository note", res.Notes)
+		}
+		if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a"}) {
+			t.Errorf("gh asked about %q, want feat/a only", got)
+		}
+	})
+}
+
 // TestMergeOrder_ReadsTheLsRemoteListing covers the ls-remote half of C7:
 // branch names with several slashes, a branch called HEAD
 // (refs/heads/HEAD, which the pattern HEAD matches too) that is not taken
@@ -1420,7 +1546,8 @@ func TestMergeOrder_InterruptedWhileGHRunsIsAnError(t *testing.T) {
 
 // TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv covers C2, C5 and C6:
 // one ls-remote with the pattern as one argument and GIT_TERMINAL_PROMPT=0,
-// then one gh pr list per branch with GH_PROMPT_DISABLED=1, all in p.Dir.
+// then one gh pr list per branch with --limit 1000 (gh's default is 30) and
+// GH_PROMPT_DISABLED=1, all in p.Dir.
 func TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.add(t, moBind("org-a", "a"), moBind("org-b", "b"), moPassed("org-a", "feat/a", moHeadA, moMain))
@@ -1439,7 +1566,8 @@ func TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv(t *testing.T) {
 		t.Fatalf("gh ran %d times, want once per branch", len(gh))
 	}
 	for i, branch := range []string{"feat/a", "feat/b"} {
-		want := []string{"pr", "list", "--head", branch, "--state", "all", "--json", "number,state,url,headRefOid,baseRefName,isCrossRepository"}
+		want := []string{"pr", "list", "--head", branch, "--state", "all", "--limit", "1000", "--json",
+			"number,state,url,headRefOid,baseRefName,isCrossRepository"}
 		if c := gh[i]; !slices.Equal(c.args, want) || c.dir != "/repo" || !slices.Equal(c.env, []string{"GH_PROMPT_DISABLED=1"}) {
 			t.Errorf("gh call %d = %+v, want %q in /repo with GH_PROMPT_DISABLED=1", i, c, want)
 		}

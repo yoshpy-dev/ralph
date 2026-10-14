@@ -78,7 +78,7 @@ const mergeOrderTableHeader = "RANK\tCLASS\tBRANCH\tPR\tGATE_HEAD\tGATE_BASE\tOR
 // mergeOrderGHCall is the fake gh's log line for merge-order's PR lookup of
 // branch.
 func mergeOrderGHCall(branch string) string {
-	return "GH_PROMPT_DISABLED=1 pr list --head " + branch + " --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository"
+	return "GH_PROMPT_DISABLED=1 pr list --head " + branch + " --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository"
 }
 
 // mergeOrderFixture is a repository whose origin is a bare repository in the

@@ -42,9 +42,10 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"git ls-remote --symref origin HEAD 'refs/heads/*' in the current\n" +
 			"directory's repository: origin's default branch is the branch origin's\n" +
 			"HEAD names, and the output gives its tip and each branch's tip. When gh\n" +
-			"is on PATH, it runs gh pr list --head <branch> --state all for each\n" +
-			"branch, in the same directory, and takes the highest-numbered PR that\n" +
-			"is not from a fork. gh's PRs are used only when their repository is\n" +
+			"is on PATH, it runs gh pr list --head <branch> --state all --limit 1000\n" +
+			"for each branch, in the same directory, and takes the highest-numbered\n" +
+			"PR that is not from a fork; when all 1000 are from forks, it takes none\n" +
+			"and a note says so. gh's PRs are used only when their repository is\n" +
 			"origin's (git remote get-url origin): when gh reads another one, such\n" +
 			"as upstream in a fork's checkout, no PR is used and a note says to run\n" +
 			"gh repo set-default. The check has three gaps: when origin's URL names\n" +
