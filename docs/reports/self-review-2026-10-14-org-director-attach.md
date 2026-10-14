@@ -106,3 +106,70 @@ _(登録簿には追記していない。M2 は新しい debt ではなく既存
 | L10 | 直していない。登録簿の末尾に行を足した(Trigger は 8b の push と、座席が登録を書き換えた報告) |
 
 確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./...` は通過、`go test ./internal/org/... ./internal/cli/...` は go1.26 と `GOTOOLCHAIN=go1.25.8 -count=1` の両方で ok、`go build ./...`、`check-skill-sync.sh`、`check-sync.sh` も通過。オーケストレーターは `go test ./internal/org/ ./internal/cli/ -run 'Director|StatusCmd|Escalate|InboxFold|Delivery' -count=1` を打ち直して ok を確かめた
+
+## Cycle 2
+
+- Date: 2026-10-15
+- Plan: docs/plans/active/2026-10-14-org-director-attach.md(承認済み、digest 27414f27525b。変わっていない)
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2)。`RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定 2 のうち最後の回
+- Scope: diff の品質だけ。cross-review cycle 1 の ACTION_REQUIRED 1 件の直し 634b019a(`git diff 90fe4e06..HEAD`、`internal/org/director.go` +74/-15、`director_test.go` +216)を、全体の `git diff ef575748...HEAD` の中で読んだ。cycle 1 の指摘(M1、L1 など)と取り違えないよう、この節の ID には `C2-` を付ける。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs が受け持つので行っていない
+
+### Evidence reviewed
+
+- 読んだ差分: 634b019a の全 hunk(`director.go` の 6 か所、`director_test.go` の追加 216 行すべて)
+- 読んだ周辺: `director.go` の store 部分(150〜420 行)と畳み込み(437〜517 行)、`internal/cli/org_director.go` の attach・detach・status の RunE と `rt.command`・`attachedError`・`readOrgDirectorReport`・`warnDirectorDamage`、`InboxStore.appendLocked`(`inbox.go:389-410`)、`taskNotSentError`(`verbs.go:219-235`)、cross-review の triage report 全体、test report の D5 の 2 か所(78 行、102 行)、plan の Progress checklist、登録簿の 243〜247 行
+- 確かめたこと
+  - restore の位置と大きさ: `appendLocked` の呼び出しは `Attach`(`director.go:244`)と `Detach`(`:304`)だけで、どちらも `withLock` の中。`raw` は同じロックの中で `readRaw` したものなので、`len(raw)` は追記前の大きさそのもの。ファイルがなかったときは `O_CREATE` が空のファイルを作り、`Truncate(0)` で空に戻る。test は `readDirectorFile` が読めないと Fatal になるので、「消さずに空」を固定している。open の失敗と marshal の失敗は何も書かないので戻さない
+  - close の失敗: write の seam が `f` を閉じてから `appendLocked` の `Close` を失敗させる作りで、HEAD の `Close` の分岐をそのまま通る
+  - エラーの包み方: `restoreLocked` の `%w, and %w (%w)` が 3 つを包み、`directorAppendFailed` がさらに包む。test が sentinel、ENOSPC、truncate のエラーに `errors.Is` を打ち、restored の側では sentinel でないことも確かめる。文言は全文を等号で固定している
+  - seam: nil なら `(*os.File).Write` と `os.Truncate`(型が同じ)。非 test のコードで代入する所はなく、`DirectorStore` を作るのは `NewDirectorStore` だけ。production の動きは変わらない
+  - 修正前のコードで新しい test が落ちるか(読んで判断した。実行はしていない): 修正前は部分書き込みがそのまま残るので、restored の 3 本は `got != before`(missing file の 1 本は `got != ""`)で、close の 1 本は 2 行が残って赤くなる。`restoreLocked(len(raw), …)` の `len(raw)` を `0` にする変異は、replace と detach の test が赤くする
+  - D5 の test: ファイルは `attached d1` と `detached d2` の 2 行だけで、畳み込みの `ev.ID != f.current.ID`(`director.go:485`)に当たって `IgnoredEvents == 1`。この分岐を外す変異では current が nil になり赤くなる。コメントの「既存の test では 2 行が打ち消し合う」は test report の 78 行と合う
+  - `git diff --check` は空。追加行に TODO・debug 出力・`/Users/`・秘密らしい文字列はない
+  - cycle 1 の直し(57c551ff)のうち、この変更に触れるのは L5 と L7。L5: replace は 1 回の write のままで、`Attach` の doc の「two lines of one write」は今も正しい。既存の `AReplaceThatCannotWriteRecordsNothing` は open 失敗の経路で、コメントの「neither the detached nor the new attached is in the file」も今の動きに合う。L7: store の `ErrDirectorAttached` の文言は変わらず、`director_test.go:207` が固定している。ただし新しい store のエラーがコマンドを名指す(C2-L1)。L6 と L9 は触れていない
+- 確かめていないもの: テスト、`gofmt`、`go vet`、go1.25.8 でのビルド。実際のディスクフルでの出方。CLI を通したときのエラーの出方(この変更に CLI の test がない)
+
+### Findings
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-L1 | LOW | hint / convention | `ErrDirectorWriteNotRestored` を包むエラー文が `ralph org director status` を名指すが、`--state-dir` がない。CLI は `rt.command(...)` で、`--state-dir` を渡した呼び出しにだけ `--state-dir` を足す(`attachedError` も同じ作り)。cycle 1 の L7 は「store の文言は登録の説明で終わり、コマンドは CLI だけが出す」と決めたのに、新しい store の文言がコマンドを持った。attach と detach の RunE は `ErrDirectorAttached` 以外のエラーを `return err` で素通しするので、`--state-dir` を付けて打った人にも既定の台帳を読ませる文言が出る。重さは LOW と判断した。起きるのは write と truncate の両方が失敗したときだけで(縮める truncate は空きを要らないので、ENOSPC なら普通は戻せる)、`status` は読むだけの動詞で、エラー文の `append to <path>` がファイルを名指す。`/director` skill は `--state-dir` を一度も使わない(grep で 0 件)ので、既定の台帳を読むのが普通の使い方になる | `internal/org/director.go:407`(`directorAppendFailed` の文言)、`director_test.go:369-370`(その全文を固定)、`internal/cli/org_director.go:121`・`:183`(attach と detach の `return err`)、`:288`(`command`)、`:298`(`attachedError`)、`director_test.go:207`(L7 の約束を固定する test) | store の文言は「…so it may hold part of the write」で止める。CLI の 2 か所で `errors.Is(err, org.ErrDirectorWriteNotRestored)` のとき `rt.command("ralph org director status")` を足す(`attachedError` と同じ形)。`--state-dir` つきの CLI の test を 1 本。直さないなら C2-L5 の行に入れる |
+| C2-L2 | LOW | readability | not-restored の文言は `org: director: attach: org: director: append to <path>: no space left on device, and director.jsonl could not be restored …` と、`org: director:` が続けて 2 回出る。restored の文言(`…is still the current registration: org: director: append to …`)にも 2 回目はあるが、間に説明の句があるので目立たない。repo は `org:` を 1 回にする書き方を取っている(`taskNotSentError` の doc、org-watch-gate の L3)。`appendLocked` の open・marshal・append・close のエラーは、`directorAppendFailed` を通る 2 つの呼び出しからしか返らない | `director_test.go:369-370`(want の全文)、`director.go:369-380`、`:407`、`internal/org/verbs.go:219-235` | `appendLocked` の内側のエラーから `org: director: ` を外し、`directorAppendFailed` が 1 回だけ足す。3 つの文言と test の want が変わる。直さないなら C2-L5 の行に入れる |
+| C2-L3 | LOW | stale pointer | 「cross-review finding 1 of org-director-attach」が 4 か所(Go のコメント 3、test のコメント 1)にある。指す先の triage report は `/cross-review` が cycle ごとに書き換え(ヘッダは `Cycle: 1/2`、表の番号は 1 から振り直される)、cycle 2 の triage が終わると「finding 1」は別の指摘を指しうる。同じ package の書き方は、追記だけの self-review の ID(`self-review L5 of org-director-attach`)か、段階を書いた「Codex plan advisory finding 1」。`director_test.go:850` の「mutant D5 of the org-director-attach test report」も、mutation の番号が test report の run ごとのもので、cycle 2 の `/test` が表を作り直したときに同じ ID が残る保証はない。この cycle の cross-review がまだ走っていない今は、指す先がまだ 1 つしかない | `director.go:69`・`:209`・`:353`、`director_test.go:305`・`:850`、`docs/reports/cross-review-triage-org-director-attach.md`(`Cycle: 1/2`) | 欠陥を言葉で書く(「a write that stops partway, after the detached line」)か、「cycle 1 cross-review」と段階を足す。コメントの変更で pipeline をもう 1 回回すことになるなら、C2-L5 の行に回す |
+| C2-L4 | LOW | doc accuracy | `ErrDirectorWriteNotRestored` の doc の「Every other append failure is restored and means nothing was recorded」は、open の失敗と marshal の失敗が何も書かないので、戻すものがない。戻すのは write と close の失敗だけで、`appendLocked` の doc はそう書いている。`Attach` の doc の「A plain attach fails the same two ways」は、「two ways」の指す先が前の文にない(戻せた、戻せなかった、の 2 つ)。`Detach` の doc は同じ内容を「cut back as Attach's is」と書き、言い方が揃っていない | `director.go:70-71`、`:209-210`、`:265-268` | 「Every other append failure left nothing in the file」、「A plain attach ends the same two ways」程度に直し、`Detach` も同じ言い方にする |
+| C2-L5 | LOW | tech-debt register | cycle 1 の L8(status の出力関数 3 つの引数が 10〜12 個)は、直さず、登録簿の行も作らないまま、最後の cycle(cap 2 のうち 2)に届いた。cycle 1 の報告は「L2・L5〜L9 は、直さずに最後の cycle に届いたら 1 つの行にまとめる」と書いていて、L2・L5〜L7・L9 は 57c551ff で直った。L8 だけが残り、`grep -n 'orgDirectorReport\|printStatusTableAllOrgs' docs/tech-debt/README.md` に当たる行がない(`:18` と `:213` にある `printStatus…` は別の話の行)。L10 の行は `:247` にある。この cycle の C2-L1〜C2-L4 も、直さなければ同じ扱いになる | cycle 1 の表の L8 の行と「Fixes after this review」の L8 の行、`internal/cli/status.go:401`・`:586`・`:622`(今も引数 10〜12 個) | 1 つの行にまとめて、L8 と、残った C2 の指摘を入れる(Trigger は「次に status の出力関数へ引数を足すとき」と「director の store のエラー文に触るとき」)。登録簿の編集は記録だけの例外に入らないので、通常の経路(次の `/sync-docs` か、cap を上げた re-run)で入れる |
+
+### Positive notes
+
+- restore がロックの中にあり、大きさの根拠が `readRaw` と同じロックの保持で取った `raw` なので、「追記前の大きさ」を別に数え直さない。作ったファイルは消さずに空へ戻すので、`Detach` の「ファイルがなければロックも作らない」の分岐と、空のファイルの読みが食い違わない(空は登録なし、`ErrDirectorNotAttached`。test が force の detach で確かめている)
+- 直しが triage の推奨の字面ではなく意図に届いている。plain な attach と detach も同じ経路に入れ、restored と not-restored で文言を分け、D5 の test も同じ commit に入れた。not-restored の test は truncate の呼び出しの引数(path と大きさ)まで固定している
+- close の失敗を、実際の `Close` を失敗させて通す(seam が先に閉じる)ので、`Close` の分岐の restore が test で赤くなる。mock の error を返すだけの作りより強い
+- 受信箱の `appendLocked`(`inbox.go:389-410`)には同じ restore がないが、1 回の write は 1 行で、途中で切れた行は壊れた 1 行になるだけで状態を変えない。director で restore が要ったのは、replace の 2 行 write で `detached` が完全な行として残るからで、受信箱に広げる必要はない(指摘にしない)
+- D5 の test は、既存の test と打ち消し合わないよう 2 行のファイルだけにして、コメントで理由を書いている。test report の 78 行の説明と合う
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| cycle 1 の L8(status の出力関数 3 つが引数 10〜12 個)と、直さずに残った C2-L1〜C2-L4(store のエラー文が `--state-dir` のないコマンドを名指す、`org: director:` の重複、「cross-review finding 1」の指す先、2 つの doc の言い回し) | どれも挙動を変えない。C2-L1 は、write と truncate が両方失敗し、`--state-dir` を付けて打ったときだけ、既定の台帳を読ませる | cap 2 の最後の cycle で、文言とコメントの変更に pipeline をもう 1 回回す価値がない | 次に status の出力関数へ引数を足すとき(L8)。director の store のエラー文か、attach・detach の RunE に触るとき(C2-L1〜C2-L4) | `docs/reports/self-review-2026-10-14-org-director-attach.md`(cycle 1 の L8、cycle 2 の C2-L1〜C2-L4) |
+
+_(登録簿には追記していない。上の行は、C2-L1〜C2-L4 を直さずに進めるときに 1 行で足す形。)_
+
+### Coverage gaps
+
+- not-restored の test は replace の 1 本だけ。plain な attach と detach の not-restored は同じ `directorAppendFailed` の分岐を通るので、分岐は 1 つで、文言は同じ
+- 末尾に改行がない `raw` への追記が失敗した場合(先頭に足した `\n` ごと戻す)の test はない。式は `len(raw)` 1 つで、追記前の大きさそのものなので、穴は小さい
+- `os.Truncate` は、ファイルが `len(raw)` より短くなっていると NUL で伸ばす。ロックを持つ ralph の書き手だけなら起きない。人が読んだ直後に手で縮めたときだけの話で、指摘にはしない
+- CLI を通したエラーの出方に test がない(C2-L1 の直しを入れるなら足す)
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM はなし。LOW 5 件は文言、コメント、登録簿で、restore の動きに欠陥はない)
+- Follow-ups:
+  1. C2-L5: L8 と、残った C2 の指摘を 1 つの行にまとめて登録簿に足す。cap 2 の最後の cycle なので、直さない LOW はこの行が唯一の受け皿になる
+  2. C2-L1: 直すなら CLI の 2 か所(`org_director.go:121`・`:183`)で `rt.command` を使う形が、コードで一番小さい。直さないなら C2-L5 の行
+  3. C2-L3: コメントを直す機会があるなら、cycle 2 の `/cross-review` が triage を書き換える前に直す。そのあとでは「finding 1」が 2 つの cycle の指摘を指す
+  4. plan の Progress checklist に、cross-review cycle 1 と 634b019a の行がない。`/pr` が plan を archive するので、`/sync-docs` で足すとよい(diff の品質の外なので、指摘には数えない)
+- Known gaps: テスト、`gofmt`、`go vet`、go1.25.8 でのビルドは確かめていない。実際のディスクフルでの出方と、CLI を通したエラーの出方は見ていない。restore の「新しい test が修正前で赤くなる」は読んで判断したもので、実行はしていない
