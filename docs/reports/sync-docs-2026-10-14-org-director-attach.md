@@ -146,3 +146,73 @@ commit の前に、worktree のルートで打った。
 ### Verdict
 
 Verdict: complete。依頼の項目 1〜4 を直し、項目 5 は直すずれがなかった。静的検査(`run-verify.sh`、`check-skill-sync.sh`、`check-sync.sh`、`git diff --check`)はすべて通り、計画の digest は変わっていない。Go は触っていないので、verify と test の結果は変わらない。確かめていないのは、`/director` skill の 1 句を読んだ director の実際の動きだけ(skill は文書で、テストがない)。
+
+## Cycle 3
+
+- Date: 2026-10-15(JST)
+- Plan: `docs/plans/active/2026-10-14-org-director-attach.md`(承認済み。`./scripts/plan-visual.sh digest` は `27414f27525b` で、この run の前後で変わらない。編集したのは `## Progress checklist` だけ)
+- Pipeline cycle: 3(cross-review cycle 2 の ACTION_REQUIRED を直すために上限 `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げた回。`.harness/state/standard-pipeline/cycle-count.json` は意図して 2 のまま。触っていない)。差分の base は `ef575748`。run 開始時の HEAD は `5162c5e4`(run 開始時の値で、この節を含む commit の SHA ではない)
+- 先行 report: `docs/reports/self-review-2026-10-14-org-director-attach.md` の `## Cycle 3`(CRITICAL・HIGH・MEDIUM 0、LOW 3、Merge: yes。直しは 8ac59595)、`docs/reports/verify-2026-10-14-org-director-attach.md` の `## Cycle 3`(pass。LOW 1 と情報 3。直しは c953d4f2)、`docs/reports/test-2026-10-14-org-director-attach.md` の `## Cycle 3`(15e26cfc。pass、失敗 0、mutant 19 件のうち red 13 件)、`docs/reports/cross-review-triage-org-director-attach.md`(cycle 2 の ACTION_REQUIRED 1 件。直しは c8a9227b)
+- 項目の番号: C3-L1〜C3-L3 は self-review cycle 3 の、C3-V1〜C3-V4 は verify cycle 3 の指摘の ID。S4、S5、S5r、T1、T2 は test cycle 3 の Mutation の表の ID。「項目 1〜3」は依頼の項目
+- 内容の commit: この節、計画の Progress、tech-debt の登録簿の 1 行を含む 1 つの commit(`docs: sync docs for org-director-attach (cycle 3)`)。insight event は、依頼の指示どおり記録していない
+
+### Summary
+
+依頼の 3 項目のうち、項目 1(計画の Progress)と項目 2(tech-debt)を足した。項目 3(c8a9227b、8ac59595、c953d4f2 に対する文書のずれの確認)は、直すずれがなかった。Go と skill は触っていない(`scripts/sync-skills.sh` も打っていない)。
+
+- 項目 1(C3-V4): 計画の Progress checklist に 4 項目を足した。cross-review cycle 2 の ACTION_REQUIRED と c8a9227b と上限の引き上げ、pipeline 3 回目の self-review・verify とその直し(8ac59595、c953d4f2)、test cycle 3、この sync-docs
+- 項目 2: test cycle 3 の Test gaps 1〜3 を、tech-debt の登録簿の新しい 1 行にした。既存の「Two test gaps」の行(R11、H4、H5)には足さなかった。その行の Trigger は `director.go` の追記の経路と attach・detach の `RunE` で、今回の 3 件の Trigger(skill の受信箱の節、`WaitInbox`、見張りの期限の経路)と合わず、1 行にすると Trigger の欄が読めなくなるため
+- 項目 3: 下の「Surfaces checked」のとおり。3 つのコミットが変えたのは `/director` skill の受信箱の節(4 面)、`internal/org/escalate.go` の const とコメント、テスト 3 本(うち 1 本は新規)で、その主張を言う文書の面はどれも今のコードと合っている
+- self-review cycle 3 の Tech debt の欄は「C3-L1〜C3-L3 を直さず進めるなら sync-docs で 1 行にまとめて足す」と書いていた。3 件とも 8ac59595 で直したので、この行は足していない
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `docs/plans/active/2026-10-14-org-director-attach.md`(`## Progress checklist`) | 1(C3-V4) | `/sync-docs`(cycle 2)の行の次、`- [ ] PR created` の前に、日付つきの note を 4 項目足した。(a) cross-review cycle 2 の ACTION_REQUIRED 1 件(skill が終了コード 1 をすべて時間切れとして打ち直し、設定や受信箱が読めない失敗でも同じ wait を打ち直し続けうる)と、c8a9227b の直し(Codex の項は終了コード 1 で stderr が `no open inbox item arrived within` を含むときだけ打ち直す。CLI の終了コードは分けない)、上限を 3 に上げたこと、`cycle-count.json` が 2 のままなこと。(b) pipeline の 3 回目: self-review(LOW 3、8ac59595)と verify(pass、LOW 1 と情報 3、c953d4f2。時間切れの文を const `inboxWaitTimeoutPhrase` にし、`TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` で skill の 4 面との一致を見る)。(c) test cycle 3(15e26cfc、pass、mutant 19 件のうち red 13 件)と、穴 3 件を tech-debt に回したこと。(d) この sync-docs。ほかの節は触っていない。digest は `27414f27525b` のまま |
+| `docs/tech-debt/README.md`(新しい行。「Two test gaps」の行の次、ファイルの末尾) | 2 | 「Three test gaps of the org-director-attach PR (stage 8a-1)」で始まる 1 行を足した。(1) `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` は skill の面のファイルが読めないと `t.Skipf` で終わり(終了コード 0、`ok`)、skill の改名や移動で黙って検査が止まる。4 面は同一のままなので `check-skill-sync.sh` も黙る(mutant S5、S5r、T1、T2)。(2) ファイル全体で backquote つきの文を探すので、skill の別の場所に同じ文があると Codex の項の条件を変えても通る(S4)。(3) 受信箱が読めないとき見張りが期限の知らせを送らない、という skill の文を固定する Go のテストがない。`TestRunWatchAll_AnInboxThatCannotBeSweptDoesNotStopThePulse` は受信箱の store がない経路で、read が失敗する経路とは別。Impact に、(1) は検査が止まっても `run-test.sh` と CI が `ok` を出すこと(ずれると Codex の director が時間切れのたびに止まる。self-review C3-L1)、(2) は今は各面に文が 1 回しかなく実害がないこと、(3) は見張りの期限の掃き出し(`SweepInboxDeadlines`)が読めない受信箱でも送るようになっても落ちるテストがなく、cycle 3 の `/verify` と `/test` は HEAD の binary の `watch --all --once` で見たこと(読める受信箱を対照に、mode 000 の受信箱とディレクトリ)を書いた。Why deferred は、test cycle 3 が穴として数え PR は通ったこと、(1) と (2) は同じ PR が足したテストの直しで、(3) は読めない `inbox.jsonl` を使う見張りのテストが要ること、3 件とも動きは変えないこと。cap や「最後の run」には頼らない書き方にした(cycle 2 の C2-V3 と同じ理由)。Trigger は、skill の受信箱の節(`受信箱の処理`)か `WaitInbox` か見張りの受信箱の期限の経路(`SweepInboxDeadlines`、`RunWatchAll`)を次に変えるとき。(1) は `.claude/skills` 自体がないときだけ skip する形(`internal/config/defaults_sync_test.go` が、その関門のあとのファイルの欠けを誤りにしている)、(2) は受信箱の節を切り出してから探す形、(3) は見張りのテストを足す。Related に計画、test report の `## Cycle 3`(Mutation の S4、S5、S5r、T1、T2、Test gaps 1〜3)、関数名。列は 5。ファイル行番号は書いていない |
+| `docs/reports/sync-docs-2026-10-14-org-director-attach.md` | - | この節を足した。前の節は変えていない |
+
+### Surfaces checked for drift
+
+3 つのコミットが変えたのは、`/director` skill の受信箱の節(4 面。root と template の `.claude/` と `.agents/`)、`internal/org/escalate.go`(const `inboxWaitTimeoutPhrase` と、`WaitInbox` の時間切れの文の前のコメント)、`internal/org/director_skill_sync_test.go`(新規)、`escalate_test.go` と `internal/cli/org_inbox_test.go` のコメント。`wait --inbox`、`arrived within`、`inboxWaitTimeoutPhrase`、`打ち直` を Go、md、toml から grep し(history の `docs/reports/`、`docs/evidence/`、`docs/plans/` と `.agents/` の写し、`_test.go` を除く)、当たった文を読んだ。
+
+| Surface | 結果 |
+|---------|------|
+| `README.md`(動詞の表 124 行、director の段落 258 行) | 変更なし。124 行は「`wait --inbox` waits for an open item」、258 行は「waits on the inbox with `ralph org wait --inbox`」とだけ言い、打ち直しの条件も時間切れの文も持たない。director の動き(attach、ack、send-then-resolve、detach)は今の skill と合う |
+| `AGENTS.md` の repo map | 変更なし。`internal/org/` の項に `director_skill_sync_test.go` は足さない。この map は `internal/org/` のテストファイルを 1 つも挙げず(`_test` の grep が 0 件)、`defaults_sync_test.go` や `send_defaults_sync_test.go` のような同種のテストも載せていないため、足すと基準が変わる |
+| `docs/architecture/repo-map.md` | 変更なし。テストファイルを挙げる面ではない(`_test` の grep が 0 件) |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-9 の 8a-1 の注 84 行、FR-10 の 87 行・206 行) | 変更なし。8a-1 の注は `wait --inbox` を「resolve した件は出ない」の話でしか言わない。FR-10 の「Claude Code は Monitor で待ち、codex は timeout 付きの wait を繰り返す」は、今の skill(Codex の項は時間切れのときだけ打ち直す)と合う。注は決めたことの記録で、打ち直しの条件は skill の受信箱の節が持つので、cycle 2 の切り戻しと同じ扱いで足さない |
+| `docs/quality/quality-gates.md` と template | 変更なし。director の動詞が見張りなしで使える一覧にあることだけを言い、`wait` の終了コードは扱わない(cycle 1 で足した部分から変わらない) |
+| `/org` skill(4 面)の `wait` の行(173 行)と受信箱の節(313〜318 行) | 変更なし。「届かなければ終了コード 1」は時間切れの説明で正しい。ほかの失敗も 1 で終わることは書いていないが、director が読むのは `/director` skill の節。「呼び出し側は stderr の文で時間切れを見分ける」を足すと、skill の 4 面と const を結ぶテストが届かない面が 1 つ増えるので、新しい主張は足さない |
+| `internal/cli/org.go` の `ralph org wait` の help(`--inbox` の段) | 変更なし。「exit 1 when no open item arrives in time, 0 waits unbounded」は時間切れの説明で正しい。文を呼び出し側が照合する契約だとは言っていない。cross-review cycle 2 の triage が「終了コードを分ける CLI の変更は、座席の wait も含めた契約の変更になるので、この PR ではしない」と決めたので、help にも契約として足さない |
+| `internal/org/prompts/leader.md` | 変更なし。`wait --inbox` に触れない(`ralph org wait` は座席の状態の話) |
+| `.claude/rules/ralph/`(workflow、agent-messaging)と template | 変更なし。director の受信箱の wait の打ち直しを言う文がない |
+| `docs/tech-debt/README.md` の director の行(209、245、247、249 行) | 変更なし。209 行の「8a-1 の director は `ralph org wait --inbox` で待ち、見張りを確かめない」は今も正しい。245・247 行(生存の印、seat の pane の tripwire)と 249 行(R11、H4、H5)は skill の受信箱の節の打ち直しの条件を言わない |
+| `/director` skill の 4 面 | 変更なし。md5 は 4 面とも `03c3083db6a8049c627fd8ef9ae1b1a2`。受信箱の節の中身(Claude Code の項の `--timeout-ms 0 2>&1`、終了コード 0 と 1、`note:` の行、Codex の項の時間切れの文、失敗なら打ち直さず人に伝えて止まる、受信箱が読めない失敗では見張りの期限の知らせも止まる)を、`WaitInbox` と `runOrgWaitInbox` の動き、const `inboxWaitTimeoutPhrase`(`no open inbox item arrived within`)と突き合わせて、合うことを確かめた。skill は触っていないので `sync-skills.sh` は打っていない |
+| 計画の Progress checklist | 直した(上の項目 1)。verify cycle 3 の C3-V4 はこれで解消 |
+| tech-debt の表の列の数 | 新しい行を含む 244〜250 行がすべて 5 列(backtick の外の `|` を数える script を scratchpad に置いた。backtick は偶数) |
+
+### Left open
+
+- test cycle 3 の Test gaps 4〜6 は登録簿に足していない。4(実際の Claude Code の Monitor と `2>&1`、Codex の shell tool の時間の上限での skill の文の動き)と 5(Go の panic の終了コード 2 と signal での終わり)は、次の変更で直せるテストの穴ではなく、実機の session でしか確かめられない未確認事項で、self-review・verify・test の cycle 3 に Coverage gaps として残っている。6(cycle 2 の Test gaps 1〜6 が残っていること)のうち、1 と 2(H4、H5、R11)は cycle 2 の sync-docs が登録済み。3〜6(`chflags` 以外の truncate の失敗、途中の状態の観察、ralph のプロセスが書き込みと切り戻しの間で死んだ場合)は実機での未確認事項で、4・5 と同じ種類なので足していない
+- skill の受信箱の節が、時間切れのときだけ打ち直すと言うのに対し、CLI の終了コードを分ける(時間切れだけ別の終了コードにする)案は採っていない。cross-review cycle 2 の triage が、座席の wait を含む契約の変更になるので、この PR ではしないと決めた。8b(起こし口、仕様 FR-10)で pull の wait を扱うときに、この規則を使うか CLI を変えるかを決め直す余地がある。文書にはまだ書いていない
+- 計画の `PR created` は `/pr` が付ける。release のノートは計画の Rollout に書いてあり、`/pr` と release の担当
+- cross-review の triage の先頭は `Cycle: 2/2 (cap reached)` のまま。cycle 3 の pipeline のあとの cross-review をどう扱うかは lead の判断で、この run では触っていない
+- insight event は、依頼の指示でこの run は記録しない
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-14-org-director-attach.md`: `27414f27525b`(run の前も後も同じ)
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `IDENTICAL: 169`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `./scripts/run-verify.sh`: rc 0、`==> All verifiers passed.`。`check-sync`、`check-pipeline-sync`(6 面とも `[ok]`)、`check-skill-sync`、`check-template-purity`(`PASS`)、`tech-debt README plan references`(`OK`)、`tests/test-agent-models.sh`、shell のテストはすべて OK(`FAIL` で始まる行は 0)。Go は `gofmt: ok`、`0 issues.`、`go test` は cli(198.4 s)と org(80.7 s)が `ok`、ほかのパッケージは `(cached)` の `ok`。`secret-scan-branch: scanned ef575748..5162c5e4 against origin/main: clean`(commit の前に打ったので、範囲は run 開始時の HEAD まで)。出力 4,923 行は scratchpad に落として、要点だけ読んだ。wrapper が書いたログ(`docs/evidence/verify-2026-10-14-233242.log`)は gitignore の対象で、コミットしていない
+- `git diff --check`: 出力なし
+- 変えた 3 ファイルの U+FFFD は 0 件
+- 編集は Edit だけで、`sed -i` と `cat >>` は使っていない
+
+### Verdict
+
+Verdict: complete。依頼の項目 1 と 2 を足し、項目 3 は直すずれがなかった。静的検査(`run-verify.sh`、`check-skill-sync.sh`、`check-sync.sh`、`git diff --check`)はすべて通り、計画の digest は変わっていない。Go と skill は触っていないので、verify と test の cycle 3 の結果は変わらない。確かめていないのは、実際の Claude Code と Codex の session で skill の受信箱の節を読んだ director の動き(skill は文書で、その検査は文の一致までしかない)。
