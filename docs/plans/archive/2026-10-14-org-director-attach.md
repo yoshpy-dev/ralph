@@ -179,4 +179,5 @@ Critical forks: D1〜D4 は consult(consult-plan-director)、D7 と D8 は consu
 - 2026-10-15: pipeline の 3 回目。self-review(cycle 3)は CRITICAL・HIGH・MEDIUM が 0、LOW が 3(C3-L1〜C3-L3)で、8ac59595 で直した(`WaitInbox` の時間切れの文を skill が照合することのコメント、Claude Code の項を `--timeout-ms 0 2>&1` にして件の行なしの終了コード 1 を失敗にする、失敗で止まるときの扱い)。verify(cycle 3)は pass(LOW 1、情報 3)で、c953d4f2 で直した(受信箱が読めない失敗では見張りの期限の知らせも止まることを skill に書く。時間切れの文を const `inboxWaitTimeoutPhrase` にし、`TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` で skill の 4 面との一致を見る)。残る情報 1 件(この Progress の遅れ)は下の sync-docs で足した
 - 2026-10-15: test(cycle 3、15e26cfc)は pass(失敗 0、mutant 19 件のうち red 13 件)。新しいテストの穴 3 件(面のファイルが読めないと黙って skip する、ファイル全体で文を探す、受信箱が読めないとき見張りが期限の知らせを送らないことを固定するテストがない)は tech-debt に回した
 - 2026-10-15: /sync-docs(cycle 3)。この Progress と tech-debt の 1 行(上の穴 3 件)を足した。skill、README、AGENTS.md、仕様、quality-gates、`/org` skill、leader の雛形、`ralph org wait` の help は、3 つのコミットと合っていたので変えていない。Go は触っていない。報告は `docs/reports/sync-docs-2026-10-14-org-director-attach.md` の `## Cycle 3`
-- [ ] PR created
+- [x] PR created
+- 2026-10-15: PR #229(https://github.com/yoshpy-dev/ralph/pull/229)を作った。consult(consult-done-director)の判定は「進めてよい」で、release ノートの項目に、記録だけの件が期限で送られるまで `escalations.jsonl` に出ないことと、`inbox_no_director` が新しくは書かれなくなることを足した
