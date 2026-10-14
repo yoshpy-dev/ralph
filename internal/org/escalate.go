@@ -77,6 +77,13 @@ const (
 // when Org.InboxPollInterval is unset.
 const defaultInboxPollInterval = time.Second
 
+// inboxWaitTimeoutPhrase is the part of WaitInbox's timeout error that the
+// /director skill's inbox section matches in stderr to tell the timeout from
+// a failure; it reruns the wait only on a match.
+// TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+// (director_skill_sync_test.go) fails when the skill and this text differ.
+const inboxWaitTimeoutPhrase = "no open inbox item arrived within"
+
 // inboxNotifyInvalid stands for an org_id or a TYPE in the desktop
 // notification that Escalate would have refused, which only a hand-edited
 // inbox.jsonl line can hold: the notification text is built into an
@@ -292,12 +299,7 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 			return open, nil
 		}
 		if expired {
-			// The /director skill matches "no open inbox item arrived within"
-			// in stderr to tell this timeout from a failure, and reruns the
-			// wait only on a match. Changing this text must update the
-			// skill's inbox section (.claude/skills/director/SKILL.md and its
-			// 3 mirrors) as well.
-			return nil, fmt.Errorf("org: wait --inbox: no open inbox item arrived within %d ms", timeout.Milliseconds())
+			return nil, fmt.Errorf("org: wait --inbox: %s %d ms", inboxWaitTimeoutPhrase, timeout.Milliseconds())
 		}
 		select {
 		case <-deadline:

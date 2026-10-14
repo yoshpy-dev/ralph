@@ -1213,7 +1213,7 @@ func TestWaitInbox_TimesOutWithoutAnOpenItem(t *testing.T) {
 			if out.err == nil {
 				t.Fatalf("WaitInbox = %v; want a timeout error", waitInboxItemIDs(out.items))
 			}
-			// The /director skill (.claude/skills/director/SKILL.md, inbox section) matches this text.
+			// The printed text; the /director skill matches its inboxWaitTimeoutPhrase part (director_skill_sync_test.go).
 			if want := "no open inbox item arrived within 300 ms"; !strings.Contains(out.err.Error(), want) {
 				t.Errorf("error %q does not contain %q", out.err, want)
 			}
