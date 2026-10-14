@@ -99,11 +99,16 @@ skill はその節を指し、写さない。
 open の件が届くのを `ralph org wait --inbox` で待つ。
 
 - Claude Code: `ralph org wait --inbox --timeout-ms 0` を Monitor で
-  見張るか、Bash の `run_in_background` で走らせる。返ったら件を処理し、
-  また待つ。
+  見張るか、Bash の `run_in_background` で走らせる。件の行を出して
+  返ったら件を処理し、また待つ。
 - Codex: `ralph org wait --inbox --timeout-ms 300000` のように時間を
-  区切った wait を繰り返す。終了コード 1 は時間内に件が来なかっただけ
-  なので、もう一度打つ。
+  区切った wait を繰り返す。終了コード 1 で、stderr が
+  `no open inbox item arrived within` を含むときは、時間内に件が
+  来なかっただけなので、もう一度打つ。
+
+終了コード 1 には、`ralph.toml` や受信箱(`inbox.jsonl`)が読めない
+失敗もある。この失敗はすぐ返り、打ち直しても同じ失敗が続く。stderr が
+時間切れの文でなければ打ち直さず、エラーの文を人に伝えて止まる。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。件ごとに次の順で進める。
