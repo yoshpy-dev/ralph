@@ -63,6 +63,14 @@ var ErrDirectorNotAttached = errors.New("no director is attached")
 // has already ended, and the current one belongs to someone else (D8).
 var ErrDirectorIDMismatch = errors.New("the id is not the current registration's")
 
+// ErrDirectorWriteNotRestored is returned (wrapped) by Attach and Detach when
+// an append to director.jsonl failed and the file could not be cut back to
+// its size before the append: it may hold part of the write, so the caller
+// cannot say that nothing was recorded (cross-review finding 1 of
+// org-director-attach). Every other append failure is restored and means
+// nothing was recorded.
+var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
+
 // directorRawIDPattern finds an "id":"d<N>" in the raw text of
 // director.jsonl, including lines that do not parse, so the next id is never
 // one a damaged line already holds (D8; inboxRawIDPattern does the same for
@@ -151,6 +159,10 @@ type DirectorStore struct {
 	path string
 	// Now is the clock for event timestamps; nil means time.Now.
 	Now func() time.Time
+	// write and truncate are test-only seams for appendLocked's write and
+	// its restore after a failure; nil means f.Write and os.Truncate.
+	write    func(f *os.File, b []byte) (int, error)
+	truncate func(path string, size int64) error
 }
 
 // DirectorPathIn returns the director.jsonl path within an already-resolved
@@ -188,11 +200,16 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 // appends the current registration's detached and the new attached as two
 // lines of one write (appendLocked), and returns the ended registration as
 // replaced. A reader without the lock (Read) thus finds no moment with no
-// registration between the two lines, as it could when they were two
-// writes, and a failed write leaves the old one current with nothing
-// recorded (self-review L5 of org-director-attach). The new id is one more than the largest d<N>
-// anywhere in the file, damaged lines included. A driver other than claude
-// and codex is refused before anything is read or written.
+// registration between the two lines, as it could when they were two writes
+// (self-review L5 of org-director-attach). A write that fails, even after the
+// detached line, is cut back under the same lock (appendLocked), so the old
+// registration stays current and the error says nothing was recorded; only
+// a Read between the failed write and the cut can see part of it. When the
+// cut fails too, the error wraps ErrDirectorWriteNotRestored and says to read
+// the registration again (cross-review finding 1 of org-director-attach). A
+// plain attach fails the same two ways. The new id is one more than the
+// largest d<N> anywhere in the file, damaged lines included. A driver other
+// than claude and codex is refused before anything is read or written.
 func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, replaced *DirectorRegistration, err error) {
 	if a.Driver != DirectorDriverClaude && a.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: unknown driver %q: use %s or %s", a.Driver, DirectorDriverClaude, DirectorDriverCodex)
@@ -225,10 +242,7 @@ func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, repl
 			User: a.User, Cwd: a.Cwd, HerdrPane: a.HerdrPane,
 		}
 		if err := s.appendLocked(raw, append(events, ev)...); err != nil {
-			if cur != nil {
-				return fmt.Errorf("org: director: attach: nothing was recorded, so %s is still the current registration: %w", cur.describe(), err)
-			}
-			return err
+			return directorAppendFailed("attach", cur, err)
 		}
 		reg = registrationOf(ev)
 		replaced = cur
@@ -248,7 +262,10 @@ func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, repl
 // Giving neither or both, or an id not of the form d<N>, is refused before
 // anything is read. With no current registration it returns
 // ErrDirectorNotAttached; a missing director.jsonl returns it without
-// creating the state dir or the lock.
+// creating the state dir or the lock. A failed write is cut back as
+// Attach's is: the error says nothing was recorded and the registration is
+// still current, or, when the cut fails too, wraps
+// ErrDirectorWriteNotRestored.
 func (s *DirectorStore) Detach(d DirectorDetach) (DirectorRegistration, error) {
 	verb := "detach " + d.ID
 	switch {
@@ -285,7 +302,7 @@ func (s *DirectorStore) Detach(d DirectorDetach) (DirectorRegistration, error) {
 			User: d.User, Cwd: d.Cwd, HerdrPane: d.HerdrPane, Force: d.Force,
 		}
 		if err := s.appendLocked(raw, ev); err != nil {
-			return err
+			return directorAppendFailed(verb, cur, err)
 		}
 		ended = *cur
 		return nil
@@ -326,7 +343,15 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 // same lock hold. When raw does not end with a newline (a write cut off
 // mid-line), the write starts with one, so the cut line stays a separate
 // corrupt line and evs stay readable. An event that does not marshal fails
-// it before anything is written.
+// it before anything is written. When the write or the close fails, part of
+// the lines may be in the file (a full disk can stop a write after the
+// detached line), so it cuts the file back to len(raw) before returning
+// (restoreLocked); every writer takes the lock, so that is the file's size
+// before the append. A file this call created is cut to empty, not removed:
+// an empty director.jsonl reads as no registration, as a missing one does.
+// Only when the cut fails does the error wrap ErrDirectorWriteNotRestored;
+// any other error means nothing was recorded (cross-review finding 1 of
+// org-director-attach).
 func (s *DirectorStore) appendLocked(raw []byte, evs ...DirectorEvent) error {
 	var lines []byte
 	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
@@ -343,14 +368,48 @@ func (s *DirectorStore) appendLocked(raw []byte, evs ...DirectorEvent) error {
 	if err != nil {
 		return fmt.Errorf("org: director: open %s: %w", s.path, err)
 	}
-	if _, err := f.Write(lines); err != nil {
+	write := (*os.File).Write
+	if s.write != nil {
+		write = s.write
+	}
+	if _, err := write(f, lines); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("org: director: append to %s: %w", s.path, err)
+		return s.restoreLocked(len(raw), fmt.Errorf("org: director: append to %s: %w", s.path, err))
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("org: director: close %s: %w", s.path, err)
+		return s.restoreLocked(len(raw), fmt.Errorf("org: director: close %s: %w", s.path, err))
 	}
 	return nil
+}
+
+// restoreLocked cuts director.jsonl back to size, its length before the
+// append that failed with failed, under the same lock hold, and returns
+// failed. When the cut fails, the error it returns also wraps
+// ErrDirectorWriteNotRestored and the cut's error.
+func (s *DirectorStore) restoreLocked(size int, failed error) error {
+	truncate := os.Truncate
+	if s.truncate != nil {
+		truncate = s.truncate
+	}
+	if err := truncate(s.path, int64(size)); err != nil {
+		return fmt.Errorf("%w, and %w (%w), so it may hold part of the write", failed, ErrDirectorWriteNotRestored, err)
+	}
+	return failed
+}
+
+// directorAppendFailed is the error Attach and Detach (verb, as in their
+// other errors) return when appendLocked fails while cur is the current
+// registration (nil when none). When the file may hold part of the write,
+// it says to read the registration instead of saying nothing was recorded.
+func directorAppendFailed(verb string, cur *DirectorRegistration, err error) error {
+	switch {
+	case errors.Is(err, ErrDirectorWriteNotRestored):
+		return fmt.Errorf("org: director: %s: %w: read the registration with ralph org director status", verb, err)
+	case cur != nil:
+		return fmt.Errorf("org: director: %s: nothing was recorded, so %s is still the current registration: %w", verb, cur.describe(), err)
+	default:
+		return fmt.Errorf("org: director: %s: nothing was recorded: %w", verb, err)
+	}
 }
 
 // registrationOf returns the registration an attached event records.

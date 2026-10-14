@@ -1,6 +1,7 @@
 package org
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -85,6 +87,26 @@ func directorAttachedLine(id, driver string) string {
 
 func directorDetachedLine(id string) string {
 	return fmt.Sprintf(`{"ts":"2026-10-15T00:00:01Z","id":%q,"event":"detached","user":"u","cwd":"/w","herdr_pane":false}`, id)
+}
+
+// directorPartialWrite is a write seam that writes b to the real file up to
+// half of its last line, as a full disk can stop a write, and then fails with
+// ENOSPC. *onDisk gets the file as that partial write left it, before
+// appendLocked cuts it back.
+func directorPartialWrite(t *testing.T, s *DirectorStore, onDisk *string) func(*os.File, []byte) (int, error) {
+	return func(f *os.File, b []byte) (int, error) {
+		last := bytes.LastIndexByte(b[:len(b)-1], '\n') + 1
+		n, err := f.Write(b[:last+(len(b)-last)/2])
+		if err != nil {
+			t.Errorf("partial write: %v", err)
+		}
+		raw, err := os.ReadFile(s.Path())
+		if err != nil {
+			t.Errorf("read after the partial write: %v", err)
+		}
+		*onDisk = string(raw)
+		return n, syscall.ENOSPC
+	}
 }
 
 func dirEntryNames(t *testing.T, dir string) []string {
@@ -273,6 +295,186 @@ func TestDirectorAttach_AReplaceThatCannotWriteRecordsNothing(t *testing.T) {
 	}
 	if got := readDirectorFile(t, s); got != before {
 		t.Fatalf("director.jsonl changed to %q", got)
+	}
+	if id := currentDirectorID(mustReadDirector(t, s)); id != "d1" {
+		t.Fatalf("current = %q, want d1", id)
+	}
+}
+
+// A replace whose write stops after the detached line and half of the new
+// attached (a full disk) is cut back (cross-review finding 1 of
+// org-director-attach). Left in place, the detached would end d1 and the cut
+// attached would be a corrupt line, so no registration would be current
+// while the error said d1 still was.
+func TestDirectorAttach_AReplaceCutOffPartwayIsRestored(t *testing.T) {
+	s, _, clock := newTestDirectorStore(t)
+	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
+	before := readDirectorFile(t, s)
+	*clock = clock.Add(time.Minute)
+	var onDisk string
+	s.write = directorPartialWrite(t, s, &onDisk)
+
+	reg, replaced, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: append to " + s.Path() + ": no space left on device"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Attach with replace err = %v, want %q", err, want)
+	}
+	if !errors.Is(err, syscall.ENOSPC) || errors.Is(err, ErrDirectorWriteNotRestored) {
+		t.Errorf("err = %v: want ENOSPC wrapped and not ErrDirectorWriteNotRestored", err)
+	}
+	if reg.ID != "" || replaced != nil {
+		t.Errorf("failed Attach returned %+v, %v", reg, replaced)
+	}
+	// The write did reach the file: the whole detached and part of the
+	// attached, which holds d2.
+	detached := `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"detached","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n"
+	cut, ok := strings.CutPrefix(onDisk, before+detached)
+	if !ok || !strings.Contains(cut, `"id":"d2","event":"attached"`) || strings.HasSuffix(cut, "\n") {
+		t.Fatalf("the file after the partial write = %q, want the old lines, the whole detached, and part of the attached", onDisk)
+	}
+	if got := readDirectorFile(t, s); got != before {
+		t.Fatalf("director.jsonl = %q, want it cut back to %q", got, before)
+	}
+	if res := mustReadDirector(t, s); currentDirectorID(res) != "d1" || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want d1 current and nothing skipped", res, res.Current)
+	}
+	// The cut text that held d2 is gone with the rest, so the next replace
+	// gets d2.
+	s.write = nil
+	reg, replaced, err = s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
+	if err != nil || reg.ID != "d2" || replaced == nil || replaced.ID != "d1" {
+		t.Fatalf("Attach with replace after the failure = %+v, %+v, %v; want d2 replacing d1", reg, replaced, err)
+	}
+}
+
+// When the cut back fails too, the error does not say nothing was recorded:
+// the file holds the detached and the cut attached, so no registration is
+// current. It wraps ErrDirectorWriteNotRestored and names the command that
+// reads the registration.
+func TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo(t *testing.T) {
+	s, _, clock := newTestDirectorStore(t)
+	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
+	before := readDirectorFile(t, s)
+	*clock = clock.Add(time.Minute)
+	var onDisk string
+	s.write = directorPartialWrite(t, s, &onDisk)
+	errTruncate := errors.New("truncate refused")
+	var cuts []string
+	s.truncate = func(path string, size int64) error {
+		cuts = append(cuts, fmt.Sprintf("%s %d", path, size))
+		return errTruncate
+	}
+
+	_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
+	want := "org: director: attach: org: director: append to " + s.Path() + ": no space left on device, and director.jsonl could not be restored to its size before the append (truncate refused), " +
+		"so it may hold part of the write: read the registration with ralph org director status"
+	if err == nil || err.Error() != want {
+		t.Fatalf("Attach with replace err = %v, want %q", err, want)
+	}
+	if !errors.Is(err, ErrDirectorWriteNotRestored) || !errors.Is(err, syscall.ENOSPC) || !errors.Is(err, errTruncate) {
+		t.Errorf("err = %v: want ErrDirectorWriteNotRestored, ENOSPC, and the truncate error wrapped", err)
+	}
+	if want := fmt.Sprintf("%s %d", s.Path(), len(before)); len(cuts) != 1 || cuts[0] != want {
+		t.Errorf("truncate calls = %q, want one to %q", cuts, want)
+	}
+	if got := readDirectorFile(t, s); got != onDisk || got == before {
+		t.Fatalf("director.jsonl = %q, want the partial write left in place %q", got, onDisk)
+	}
+	if res := mustReadDirector(t, s); res.Current != nil || res.CorruptLines != 1 {
+		t.Fatalf("Read = %+v (current %+v), want no registration and the cut attached corrupt", res, res.Current)
+	}
+}
+
+// Plain attach and detach fail the same way: a write cut off partway is cut
+// back, the registration is as it was, and the error says nothing was
+// recorded. An attach that created director.jsonl leaves it empty, which
+// reads as no registration.
+func TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored(t *testing.T) {
+	t.Run("attach into a missing file", func(t *testing.T) {
+		s, _, _ := newTestDirectorStore(t)
+		var onDisk string
+		s.write = directorPartialWrite(t, s, &onDisk)
+
+		_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverClaude})
+		want := "org: director: attach: nothing was recorded: org: director: append to " + s.Path() + ": no space left on device"
+		if err == nil || err.Error() != want {
+			t.Fatalf("Attach err = %v, want %q", err, want)
+		}
+		if !strings.HasPrefix(onDisk, `{"ts":"2026-10-15T09:00:00Z","id":"d1",`) || strings.HasSuffix(onDisk, "\n") {
+			t.Fatalf("the file after the partial write = %q, want part of the attached", onDisk)
+		}
+		if got := readDirectorFile(t, s); got != "" {
+			t.Fatalf("director.jsonl = %q, want it cut back to empty", got)
+		}
+		if res := mustReadDirector(t, s); res.Current != nil || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+			t.Fatalf("Read = %+v (current %+v), want no registration and nothing skipped", res, res.Current)
+		}
+		s.write = nil
+		if _, err := s.Detach(DirectorDetach{Force: true}); !errors.Is(err, ErrDirectorNotAttached) {
+			t.Errorf("force Detach of the empty file err = %v, want ErrDirectorNotAttached", err)
+		}
+		if reg := mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude}); reg.ID != "d1" {
+			t.Fatalf("Attach after the failure = %s, want d1", reg.ID)
+		}
+	})
+	t.Run("detach", func(t *testing.T) {
+		s, _, clock := newTestDirectorStore(t)
+		mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+		before := readDirectorFile(t, s)
+		*clock = clock.Add(time.Minute)
+		var onDisk string
+		s.write = directorPartialWrite(t, s, &onDisk)
+
+		_, err := s.Detach(DirectorDetach{ID: "d1"})
+		want := "org: director: detach d1: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: append to " + s.Path() + ": no space left on device"
+		if err == nil || err.Error() != want {
+			t.Fatalf("Detach err = %v, want %q", err, want)
+		}
+		if cut, ok := strings.CutPrefix(onDisk, before); !ok || !strings.HasPrefix(cut, `{"ts":"2026-10-15T09:01:00Z","id":"d1",`) || strings.HasSuffix(cut, "\n") {
+			t.Fatalf("the file after the partial write = %q, want the attached and part of the detached", onDisk)
+		}
+		if got := readDirectorFile(t, s); got != before {
+			t.Fatalf("director.jsonl = %q, want it cut back to %q", got, before)
+		}
+		if id := currentDirectorID(mustReadDirector(t, s)); id != "d1" {
+			t.Fatalf("current = %q, want d1", id)
+		}
+		s.write = nil
+		if _, err := s.Detach(DirectorDetach{ID: "d1"}); err != nil {
+			t.Fatalf("Detach d1 after the failure: %v", err)
+		}
+	})
+}
+
+// A close that fails after a full write is cut back the same way. The write
+// seam writes every line and closes the file itself, so appendLocked's own
+// Close fails (os.ErrClosed) with both lines on disk.
+func TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored(t *testing.T) {
+	s, _, clock := newTestDirectorStore(t)
+	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
+	before := readDirectorFile(t, s)
+	*clock = clock.Add(time.Minute)
+	var onDisk string
+	s.write = func(f *os.File, b []byte) (int, error) {
+		n, err := f.Write(b)
+		if cerr := f.Close(); cerr != nil {
+			t.Errorf("close in the write seam: %v", cerr)
+		}
+		raw, _ := os.ReadFile(s.Path())
+		onDisk = string(raw)
+		return n, err
+	}
+
+	_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: close " + s.Path() + ": "
+	if err == nil || !strings.HasPrefix(err.Error(), want) || !errors.Is(err, os.ErrClosed) || errors.Is(err, ErrDirectorWriteNotRestored) {
+		t.Fatalf("Attach with replace err = %v, want it to start with %q and wrap os.ErrClosed", err, want)
+	}
+	if cut, ok := strings.CutPrefix(onDisk, before); !ok || strings.Count(cut, "\n") != 2 || !strings.Contains(cut, `"id":"d2","event":"attached"`) {
+		t.Fatalf("the file after the write = %q, want the detached and the attached in full", onDisk)
+	}
+	if got := readDirectorFile(t, s); got != before {
+		t.Fatalf("director.jsonl = %q, want it cut back to %q", got, before)
 	}
 	if id := currentDirectorID(mustReadDirector(t, s)); id != "d1" {
 		t.Fatalf("current = %q, want d1", id)
@@ -639,6 +841,20 @@ func TestDirectorRead_SkipsAndCountsLinesItCannotUse(t *testing.T) {
 	reg, replaced, err := s.Attach(DirectorAttach{Driver: DirectorDriverClaude, Replace: true})
 	if err != nil || reg.ID != "d7" || replaced == nil || replaced.ID != "d4" {
 		t.Fatalf("Attach with replace = %+v, %+v, %v; want d7 replacing d4", reg, replaced, err)
+	}
+}
+
+// A detached for an id that is not the current registration's is ignored and
+// leaves that registration current. TestDirectorRead_SkipsAndCountsLinesItCannotUse
+// has such a line, but a fold that let it end d1 would ignore the later
+// detached d1 instead, and the two cancel out there (mutant D5 of the
+// org-director-attach test report), so this file holds only the two lines.
+func TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	writeDirectorFile(t, s, directorAttachedLine("d1", "claude")+"\n"+directorDetachedLine("d2")+"\n")
+	res := mustReadDirector(t, s)
+	if currentDirectorID(res) != "d1" || res.CorruptLines != 0 || res.IgnoredEvents != 1 {
+		t.Fatalf("Read = %+v (current %+v), want d1 current and the detached d2 ignored", res, res.Current)
 	}
 }
 
