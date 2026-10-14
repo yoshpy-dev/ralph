@@ -173,3 +173,17 @@ _(登録簿には追記していない。上の行は、C2-L1〜C2-L4 を直さ�
   3. C2-L3: コメントを直す機会があるなら、cycle 2 の `/cross-review` が triage を書き換える前に直す。そのあとでは「finding 1」が 2 つの cycle の指摘を指す
   4. plan の Progress checklist に、cross-review cycle 1 と 634b019a の行がない。`/pr` が plan を archive するので、`/sync-docs` で足すとよい(diff の品質の外なので、指摘には数えない)
 - Known gaps: テスト、`gofmt`、`go vet`、go1.25.8 でのビルドは確かめていない。実際のディスクフルでの出方と、CLI を通したエラーの出方は見ていない。restore の「新しい test が修正前で赤くなる」は読んで判断したもので、実行はしていない
+
+### Fixes after the cycle-2 review (before /verify)
+
+この節はオーケストレーターが足した。直しはコミット f4c1a394(`fix: address the cycle-2 self-review findings for org-director-attach`、5 ファイル)。上の重大度と `Merge:` の行は変えていない。
+
+| ID | 対応 |
+| --- | --- |
+| C2-L1 | store の not-restored のエラー文はコマンドを持たず「so it may hold part of the write」で終わる。CLI の `notRestoredError` が `errors.Is(err, org.ErrDirectorWriteNotRestored)` のときだけ、`rt.command` で `--state-dir` 付きの `ralph org director status` を足す。helper を直接テストした。attach と detach の RunE がこの helper を通ることにはテストがない(store の seam が unexported のため。known gap) |
+| C2-L2 | `appendLocked` のエラーから `org: director:` を外し、`directorAppendFailed` だけが付ける。3 つの文言で 1 回になった |
+| C2-L3 | 「cross-review finding 1」と「mutant D5」のコメントを、起きることを言葉で書く形にした |
+| C2-L4 | `ErrDirectorWriteNotRestored`、`Attach`、`Detach` の doc を、open と marshal の失敗は何も書かず、write と close の失敗は切り戻す、という書き方に直した |
+| C2-L5 | 登録簿の末尾に、cycle 1 の L8(status の出力関数の引数が 10〜11 個)の行を足した。Trigger は `ralph status` のヘッダに次の行を足すとき。C2-L1〜L4 はすべて直したので、行には L8 だけを入れた |
+
+確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./...` は通過、`go test ./internal/org/... ./internal/cli/...` は go1.26 と `GOTOOLCHAIN=go1.25.8 -count=1` の両方で ok、`go build ./...` も通過。オーケストレーターは `go test -count=1 ./internal/org/ ./internal/cli/ -run 'Director'` を打ち直して ok を確かめた
