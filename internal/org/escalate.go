@@ -136,7 +136,10 @@ type EscalateResult struct {
 	// InboxDeliveryDeadline, and left to the director and to the ack
 	// deadline of `ralph org watch --all`: no escalations.jsonl line, no
 	// notified event, and no desktop notification were written or sent.
-	// Err is nil then.
+	// Err is nil then. It is for a caller that needs to tell this case from
+	// a recorded item sent at once (Notified); the CLI does not: it prints
+	// the same stdout line for both, and the banner says which. Tests read
+	// it.
 	Deferred bool
 	Err      error
 }
@@ -317,12 +320,16 @@ func (o *Org) escalateDelivery() (delivery, reason string) {
 // inboxDeferredBanner is the banner line (without its newline) of an item
 // Escalate left to the director and the ack deadline. orgID and typ have
 // passed validateEscalation; they are escaped like the other banners'. The
-// `inbox show` command repeats Org.InboxHintStateDir.
+// `inbox show` command repeats Org.InboxHintStateDir. The banner names the
+// ack deadline by its key, not its minutes: the watch reads ack_minutes from
+// the ralph.toml it runs with (the main worktree's), and the escalating
+// process's Config, for a feature org's leader its worktree's ralph.toml,
+// can hold another value (self-review L3 of org-director-attach).
 func (o *Org) inboxDeferredBanner(orgID, id, typ string) string {
 	return fmt.Sprintf("ORG ESCALATION RECORDED: org=%s item=%s type=%s -- left in %s for the director; "+
-		"if it is still open after the ack deadline (%dm), ralph org watch --all sends it to the human; read it with: %s",
+		"if it is still open after the ack deadline of ralph org watch --all ([org.director].ack_minutes), the watch sends it to the human; read it with: %s",
 		PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(),
-		o.Config.Director.AckMinutes, InboxCommand("show", id, o.InboxHintStateDir))
+		InboxCommand("show", id, o.InboxHintStateDir))
 }
 
 // validateEscalation checks orgID and text before Escalate writes anything

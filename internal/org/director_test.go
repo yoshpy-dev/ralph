@@ -181,10 +181,10 @@ func TestDirectorAttach_RefusesASecondAttachWithoutReplace(t *testing.T) {
 		if !errors.Is(err, ErrDirectorAttached) {
 			t.Fatalf("second Attach (%s) err = %v, want ErrDirectorAttached", driver, err)
 		}
-		for _, want := range []string{"d1", "driver claude", "attached " + directorTestNow, "detach it first, or attach with replace"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("err %q does not name %q", err, want)
-			}
+		// The message names the registration and ends there: the way out
+		// is the caller's to say (self-review L7 of org-director-attach).
+		if want := "org: director: attach: a director is already attached: d1 (driver claude, attached " + directorTestNow + ")"; err.Error() != want {
+			t.Errorf("err = %q, want %q", err, want)
 		}
 		if reg.ID != "" || replaced != nil {
 			t.Errorf("refused Attach returned %+v, %v", reg, replaced)
@@ -242,6 +242,40 @@ func TestDirectorAttach_ReplaceWritesTheDetachedAndANewAttached(t *testing.T) {
 	res := mustReadDirector(t, s)
 	if currentDirectorID(res) != "d2" || res.Current.Driver != DirectorDriverCodex || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
 		t.Fatalf("Read = %+v (current %+v), want d2 codex and nothing skipped", res, res.Current)
+	}
+}
+
+// The replace is one write (self-review L5 of org-director-attach): when
+// it fails, neither the detached nor the new attached is in the file, the
+// old registration is still current, and the error says nothing was
+// recorded. A read-only director.jsonl makes the write fail after the read
+// under the lock succeeds.
+func TestDirectorAttach_AReplaceThatCannotWriteRecordsNothing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read-only file")
+	}
+	s, _, clock := newTestDirectorStore(t)
+	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
+	before := readDirectorFile(t, s)
+	if err := os.Chmod(s.Path(), 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(s.Path(), 0o644) })
+	*clock = clock.Add(time.Minute)
+
+	reg, replaced, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: open " + s.Path() + ": "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("Attach with replace on a read-only file err = %v, want it to start with %q", err, want)
+	}
+	if reg.ID != "" || replaced != nil {
+		t.Errorf("failed Attach returned %+v, %v", reg, replaced)
+	}
+	if got := readDirectorFile(t, s); got != before {
+		t.Fatalf("director.jsonl changed to %q", got)
+	}
+	if id := currentDirectorID(mustReadDirector(t, s)); id != "d1" {
+		t.Fatalf("current = %q, want d1", id)
 	}
 }
 

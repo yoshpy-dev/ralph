@@ -49,7 +49,9 @@ const DirectorWakePull = "pull"
 const directorLockFile = "director.lock"
 
 // ErrDirectorAttached is returned (wrapped) by Attach without Replace while
-// a registration is current.
+// a registration is current. The message names that registration and no
+// way out of it; the caller says how to end or replace it (the CLI's
+// attachedError).
 var ErrDirectorAttached = errors.New("a director is already attached")
 
 // ErrDirectorNotAttached is returned (wrapped) by Detach when no
@@ -181,12 +183,16 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 
 // Attach records a new registration with driver a.Driver and wake pull, and
 // returns it. Under the director lock it reads the file again; while a
-// registration is current it returns ErrDirectorAttached and writes nothing,
-// unless a.Replace is set: then it appends the current registration's
-// detached and then the new attached in the same lock hold, and returns the
-// ended registration as replaced. The new id is one more than the largest
-// d<N> anywhere in the file, damaged lines included. A driver other than
-// claude and codex is refused before anything is read or written.
+// registration is current it returns ErrDirectorAttached, naming that
+// registration, and writes nothing, unless a.Replace is set: then it
+// appends the current registration's detached and the new attached as two
+// lines of one write (appendLocked), and returns the ended registration as
+// replaced. A reader without the lock (Read) thus finds no moment with no
+// registration between the two lines, as it could when they were two
+// writes, and a failed write leaves the old one current with nothing
+// recorded (self-review L5 of org-director-attach). The new id is one more than the largest d<N>
+// anywhere in the file, damaged lines included. A driver other than claude
+// and codex is refused before anything is read or written.
 func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, replaced *DirectorRegistration, err error) {
 	if a.Driver != DirectorDriverClaude && a.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: unknown driver %q: use %s or %s", a.Driver, DirectorDriverClaude, DirectorDriverCodex)
@@ -199,33 +205,28 @@ func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, repl
 		fold := foldDirector(raw)
 		cur := fold.current
 		if cur != nil && !a.Replace {
-			return fmt.Errorf("org: director: attach: %w: %s; detach it first, or attach with replace", ErrDirectorAttached, cur.describe())
+			return fmt.Errorf("org: director: attach: %w: %s", ErrDirectorAttached, cur.describe())
 		}
 		next, err := fold.nextID()
 		if err != nil {
 			return err
 		}
 		ts := s.now()
+		var events []DirectorEvent
 		if cur != nil {
-			ended := DirectorEvent{
+			events = append(events, DirectorEvent{
 				TS: ts, ID: cur.ID, Event: DirectorEventDetached,
 				User: a.User, Cwd: a.Cwd, HerdrPane: a.HerdrPane,
-			}
-			if err := s.appendLocked(raw, ended); err != nil {
-				return err
-			}
-			// The detached line ended with a newline, so the attached line
-			// needs none in front.
-			raw = nil
+			})
 		}
 		ev := DirectorEvent{
 			TS: ts, ID: next, Event: DirectorEventAttached,
 			Driver: a.Driver, Wake: []string{DirectorWakePull},
 			User: a.User, Cwd: a.Cwd, HerdrPane: a.HerdrPane,
 		}
-		if err := s.appendLocked(raw, ev); err != nil {
+		if err := s.appendLocked(raw, append(events, ev)...); err != nil {
 			if cur != nil {
-				return fmt.Errorf("org: director: attach: %s was detached, but the new registration was not recorded: %w", cur.describe(), err)
+				return fmt.Errorf("org: director: attach: nothing was recorded, so %s is still the current registration: %w", cur.describe(), err)
 			}
 			return err
 		}
@@ -319,25 +320,30 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 	return raw, nil
 }
 
-// appendLocked appends ev as one line in a single write, as the inbox's
-// appendLocked does. raw is the file as read under the same lock hold. When
-// raw does not end with a newline (a write cut off mid-line), the write
-// starts with one, so the cut line stays a separate corrupt line and ev
-// stays readable.
-func (s *DirectorStore) appendLocked(raw []byte, ev DirectorEvent) error {
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return fmt.Errorf("org: director: marshal the %s event: %w", ev.Event, err)
-	}
+// appendLocked appends evs, one line each, in a single write, as the inbox's
+// appendLocked does for its one event: Attach with replace passes the
+// detached and the attached together. raw is the file as read under the
+// same lock hold. When raw does not end with a newline (a write cut off
+// mid-line), the write starts with one, so the cut line stays a separate
+// corrupt line and evs stay readable. An event that does not marshal fails
+// it before anything is written.
+func (s *DirectorStore) appendLocked(raw []byte, evs ...DirectorEvent) error {
+	var lines []byte
 	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
-		line = append([]byte{'\n'}, line...)
+		lines = append(lines, '\n')
 	}
-	line = append(line, '\n')
+	for _, ev := range evs {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			return fmt.Errorf("org: director: marshal the %s event: %w", ev.Event, err)
+		}
+		lines = append(append(lines, line...), '\n')
+	}
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("org: director: open %s: %w", s.path, err)
 	}
-	if _, err := f.Write(line); err != nil {
+	if _, err := f.Write(lines); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("org: director: append to %s: %w", s.path, err)
 	}

@@ -331,14 +331,24 @@ printf '%s\n' "$*" >> "$STATUS_MG_GH_LOG"
 exit 1
 `
 
+// statusMGMaxRevParsePerRun is the most `git rev-parse` calls one `ralph
+// status --state-dir` run of TestStatusCmd_MergeGuaranteeRunsNoGH may make.
+// It is the number one run makes today: the two of gitMainWorktree in a
+// main checkout (rev-parse --git-dir --git-common-dir, then rev-parse
+// --show-toplevel), run once, when withMainWorktreeDirectorEnabled tells
+// whether --state-dir names the main worktree's ledger. A second read of
+// the switch, or a loop around it, goes over it (the bound the self-review
+// of org-director-attach asked for, Test intent changes (1)).
+const statusMGMaxRevParsePerRun = 2
+
 // AC6 and AC8: status never runs gh, and with a fresh cache its git calls are
 // local: the `git remote get-url origin` of the guarantee, once a run, and
 // the `git rev-parse` calls by which the director: line tells whether
 // --state-dir names the main worktree's ledger, whose ralph.toml then holds
 // [org.director].enabled (withMainWorktreeDirectorEnabled, plan
-// 2026-10-14-org-director-attach), on both text and --json, with orgs and
-// without. PATH holds only a bin dir whose gh and git log their calls (the
-// git then runs the real one).
+// 2026-10-14-org-director-attach), at most statusMGMaxRevParsePerRun a run,
+// on both text and --json, with orgs and without. PATH holds only a bin dir
+// whose gh and git log their calls (the git then runs the real one).
 func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 	statusMGRepo(t, "https://github.com/acme/app.git")
 	realGit, err := exec.LookPath("git")
@@ -369,11 +379,21 @@ func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 	runs := 0
 	for _, dir := range []string{emptyDir, populatedDir} {
 		for _, extra := range [][]string{nil, {"--json"}} {
+			before := len(readLogLines(t, gitLog))
 			out, err := runStatusCmd(t, append([]string{"--state-dir", dir}, extra...)...)
 			if err != nil {
 				t.Fatalf("status %v: %v (output: %s)", extra, err, out)
 			}
 			runs++
+			revParse := 0
+			for _, call := range readLogLines(t, gitLog)[before:] {
+				if strings.HasPrefix(call, "rev-parse ") {
+					revParse++
+				}
+			}
+			if revParse > statusMGMaxRevParsePerRun {
+				t.Errorf("status %v ran git rev-parse %d times in one run; want at most %d", extra, revParse, statusMGMaxRevParsePerRun)
+			}
 			if extra == nil && statusMergeGuaranteeLine(t, out) != "merge guarantee: "+cachedMergeGuaranteeText(c) {
 				t.Errorf("status read no cached kind with the logging git:\n%s", out)
 			}

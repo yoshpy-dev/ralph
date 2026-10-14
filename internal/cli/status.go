@@ -68,12 +68,19 @@ func newStatusCmd() *cobra.Command {
 			"has a merge queue, with a required check), pr_checks_only (only the gate and\n" +
 			"the CI that ran when the PR was made), or unknown -- with the branch, origin's\n" +
 			"repository and when doctor checked it. It reads the cache doctor writes in the\n" +
-			"state directory (merge-guarantee.json) and never runs gh; git runs only for\n" +
-			"the local `git remote get-url origin` in the current directory, and only when\n" +
-			"the cache is fresh. It is unknown, with the reason, when the state directory or\n" +
-			"the cache does not exist, the cache cannot be read or is more than 24 hours\n" +
-			"old, or origin's host or owner/repo is not the one doctor checked or cannot\n" +
-			"be read here.\n\n" +
+			"state directory (merge-guarantee.json) and never runs gh; for this line git\n" +
+			"runs only the local `git remote get-url origin` in the current directory, and\n" +
+			"only when the cache is fresh. It is unknown, with the reason, when the state\n" +
+			"directory or the cache does not exist, the cache cannot be read or is more\n" +
+			"than 24 hours old, or origin's host or owner/repo is not the one doctor\n" +
+			"checked or cannot be read here.\n\n" +
+			"status runs no gh and does not use the network. Besides that get-url, the\n" +
+			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
+			"a linked worktree) that finds the main worktree: to resolve the state\n" +
+			"directory when neither --state-dir nor RALPH_ORG_STATE_DIR names it, and,\n" +
+			"when one of them does, to tell whether it names the main worktree's ledger,\n" +
+			"whose ralph.toml then holds [org.director].enabled, whether or not the\n" +
+			"cache is fresh.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -152,21 +159,27 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	groups := groupSeatsByOrg(seats)
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
+	// ./ralph.toml is read once, for the watch's deadman_minutes and the
+	// director switch below, so one that does not load warns once.
+	orgCfg, orgCfgLoaded := statusOrgConfig(cmd.ErrOrStderr())
+
 	// The cross-org watch (`ralph org watch --all`) runs per state dir, not
 	// per org, so it is probed once here and shown on both paths below,
 	// the empty roster included: a watch can run before any org starts.
-	watch := org.ProbeWatch(stateDir, time.Now(), statusDeadmanMinutes(cmd.ErrOrStderr()))
+	watch := org.ProbeWatch(stateDir, time.Now(), orgCfg.DeadmanMinutes)
 
 	// The director registration belongs to the state dir too, so it is
 	// read once here (no lock) and shown on both paths, with the switch
-	// read as `ralph org escalate` reads it.
-	director := readOrgDirectorReport(stateDir, statusDirectorEnabled(cmd.ErrOrStderr(), stateDir, stateDirSource))
+	// read as `ralph org escalate` reads it. Reading the switch runs the
+	// local git rev-parse calls of withMainWorktreeDirectorEnabled when
+	// --state-dir or RALPH_ORG_STATE_DIR names the ledger.
+	director := readOrgDirectorReport(stateDir, statusDirectorEnabled(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
 	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
 	// The merge guarantee is likewise read once, from the cache `ralph
 	// doctor` writes in the state dir, and shown on both paths. The read
-	// runs no gh; git runs only for the local `git remote get-url origin` in
-	// the current directory, and only when the cache is fresh.
+	// runs no gh, and its only git is the local `git remote get-url origin`
+	// in the current directory, run only when the cache is fresh.
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -191,38 +204,42 @@ func mergeGuaranteeLine(g org.MergeGuarantee) string {
 	return "merge guarantee: " + inboxField(g.Text())
 }
 
-// statusDeadmanMinutes returns the deadman_minutes `ralph status` judges the
-// watch's liveness mark by (org.ProbeWatch) when the mark does not carry the
-// watch's own deadman_minutes (a mark of an older version): the [org] table
-// of ./ralph.toml when present, read as the ralph org verbs read it without
-// --config (resolveOrgConfig), else the built-in default. status only reads,
-// so a ralph.toml that does not load falls back to the default with a
-// warning on stderr instead of failing the command.
-func statusDeadmanMinutes(stderr io.Writer) int {
+// statusOrgConfig loads the [org] config `ralph status` reads: the [org]
+// table of ./ralph.toml when present, read as the ralph org verbs read it
+// without --config (resolveOrgConfig), else the built-in defaults. Its
+// DeadmanMinutes is what the watch's liveness mark is judged by
+// (org.ProbeWatch) when the mark does not carry the watch's own
+// deadman_minutes (a mark of an older version), and statusDirectorEnabled
+// starts from it. status only reads, so a ralph.toml that does not load
+// falls back to the built-in defaults with one warning on stderr instead of
+// failing the command; loaded is false then.
+func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 	cfg, err := resolveOrgConfig("")
 	if err != nil {
-		fallback := config.Default().Org.DeadmanMinutes
-		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d)\n", err, fallback)
-		return fallback
+		fallback := config.Default().Org
+		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d) "+
+			"and showing the director by the default [org.director].enabled (%t)\n", err, fallback.DeadmanMinutes, fallback.Director.Enabled)
+		return fallback, false
 	}
-	return cfg.DeadmanMinutes
+	return cfg, true
 }
 
 // statusDirectorEnabled returns the [org.director].enabled that the
 // director: line of `ralph status` shows, read as `ralph org escalate` reads
-// it without --config: ./ralph.toml when present (resolveOrgConfig), with
-// withMainWorktreeDirectorEnabled's main worktree rule for the ledger at
-// stateDir. status only reads, so a ralph.toml that does not load (either
-// one) falls back to the built-in default with a warning on stderr, as
-// statusDeadmanMinutes does, instead of failing the command.
-func statusDirectorEnabled(stderr io.Writer, stateDir, stateDirSource string) bool {
-	fallback := config.Default().Org.Director.Enabled
-	cfg, err := resolveOrgConfig("")
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; showing the director by the default [org.director].enabled (%t)\n", err, fallback)
-		return fallback
+// it without --config: cfg, the config statusOrgConfig loaded from
+// ./ralph.toml, with withMainWorktreeDirectorEnabled's main worktree rule for
+// the ledger at stateDir. When ./ralph.toml did not load (loaded false, and
+// statusOrgConfig has warned), it is the built-in default and the main
+// worktree's ralph.toml is not read, so the same broken file is not reported
+// twice. status only reads, so a main worktree ralph.toml that does not load
+// falls back to the built-in default too, with its own warning on stderr,
+// instead of failing the command.
+func statusDirectorEnabled(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) bool {
+	if !loaded {
+		return cfg.Director.Enabled
 	}
-	cfg, err = withMainWorktreeDirectorEnabled(cfg, "", stateDir, stateDirSource)
+	fallback := config.Default().Org.Director.Enabled
+	cfg, err := withMainWorktreeDirectorEnabled(cfg, "", stateDir, stateDirSource)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t)\n", err, fallback)
 		return fallback

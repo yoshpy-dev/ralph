@@ -617,18 +617,22 @@ func TestEscalate_DeliveryFollowsTheDirectorSwitchAndTheWatch(t *testing.T) {
 }
 
 // AC3: the recorded-only banner names the inbox, the ack deadline, and the
-// `inbox show` command, which repeats Org.InboxHintStateDir.
+// `inbox show` command, which repeats Org.InboxHintStateDir. It names the
+// deadline by its key and not by the escalating process's ack_minutes (25
+// here), which the watch need not share (self-review L3 of
+// org-director-attach).
 func TestEscalate_DeferredBanner(t *testing.T) {
 	for _, hint := range []string{"", "/repo/.harness/state/org"} {
 		t.Run("hint="+hint, func(t *testing.T) {
 			f := newEscalateFixture(t)
 			f.useWatch(acceptingWatch())
 			f.o.InboxHintStateDir = hint
+			f.o.Config.Director.AckMinutes = 25
 			if res := f.escalate("org-a", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck"); res.Err != nil || !res.Deferred {
 				t.Fatalf("Escalate = %+v; want deferred", res)
 			}
 			want := "ORG ESCALATION RECORDED: org=org-a item=e1 type=BLOCKED -- left in " + f.o.Inbox.Path() + " for the director; " +
-				"if it is still open after the ack deadline (10m), ralph org watch --all sends it to the human; read it with: " +
+				"if it is still open after the ack deadline of ralph org watch --all ([org.director].ack_minutes), the watch sends it to the human; read it with: " +
 				InboxCommand("show", "e1", hint) + "\n"
 			if got := f.banner.String(); got != want {
 				t.Errorf("banner = %q; want %q", got, want)

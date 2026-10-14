@@ -185,7 +185,10 @@ func TestInboxRead_FoldsEventsIntoItemsInIDOrder(t *testing.T) {
 
 // AC11: the escalated event carries the delivery the caller gave, now when
 // it gave none, and the fold reads it back; a line with no delivery (written
-// before stage 8a) folds as now, also in the item's JSON.
+// before stage 8a) folds as now, also in the item's JSON. So does a
+// hand-edited delivery that is neither constant (self-review L9 of
+// org-director-attach): the item, and --json, carry only the two values,
+// the event keeps what was written, and nothing is counted as ignored.
 func TestInboxEscalate_WritesAndFoldsTheDelivery(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	for _, delivery := range []string{"", InboxDeliveryNow, InboxDeliveryDeadline} {
@@ -194,7 +197,12 @@ func TestInboxEscalate_WritesAndFoldsTheDelivery(t *testing.T) {
 		}
 	}
 	raw := readInboxFile(t, s)
-	writeInboxFile(t, s, raw+escalatedLine("e4", "a")+"\n")
+	handEdited := map[string]string{"e5": "deadline ", "e6": "x", "e7": "DEADLINE"}
+	extra := escalatedLine("e4", "a") + "\n"
+	for _, id := range []string{"e5", "e6", "e7"} {
+		extra += strings.TrimSuffix(escalatedLine(id, "a"), "}") + fmt.Sprintf(`,"delivery":%q}`, handEdited[id]) + "\n"
+	}
+	writeInboxFile(t, s, raw+extra)
 
 	lines := strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
 	for i, want := range []string{`"delivery":"now"}`, `"delivery":"now"}`, `"delivery":"deadline"}`} {
@@ -203,17 +211,30 @@ func TestInboxEscalate_WritesAndFoldsTheDelivery(t *testing.T) {
 		}
 	}
 	res := mustReadInbox(t, s)
-	for id, want := range map[string]string{"e1": InboxDeliveryNow, "e2": InboxDeliveryNow, "e3": InboxDeliveryDeadline, "e4": InboxDeliveryNow} {
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	for id, want := range map[string]string{
+		"e1": InboxDeliveryNow, "e2": InboxDeliveryNow, "e3": InboxDeliveryDeadline, "e4": InboxDeliveryNow,
+		"e5": InboxDeliveryNow, "e6": InboxDeliveryNow, "e7": InboxDeliveryNow,
+	} {
 		if got := inboxItemByID(t, res, id).Delivery; got != want {
 			t.Errorf("%s Delivery = %q; want %q", id, got, want)
 		}
 	}
-	data, err := json.Marshal(inboxItemByID(t, res, "e4"))
-	if err != nil {
-		t.Fatal(err)
+	for id, written := range handEdited {
+		if got := inboxItemByID(t, res, id).Events[0].Delivery; got != written {
+			t.Errorf("%s escalated event delivery = %q; want %q as written", id, got, written)
+		}
 	}
-	if !strings.Contains(string(data), `"delivery":"now"`) {
-		t.Errorf("e4 JSON = %s; want delivery now", data)
+	for _, id := range []string{"e4", "e6"} {
+		data, err := json.Marshal(inboxItemByID(t, res, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"delivery":"now","state"`) {
+			t.Errorf("%s JSON = %s; want the item's delivery now", id, data)
+		}
 	}
 }
 

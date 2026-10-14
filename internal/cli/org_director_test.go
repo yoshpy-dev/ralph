@@ -152,14 +152,19 @@ func TestOrgDirector_AttachReplaceAndDetachByID(t *testing.T) {
 		t.Fatalf("second attach error = %v; want ErrDirectorAttached", err)
 	}
 	for _, want := range []string{
-		"a director is already attached: d1 (driver claude, attached " + ev.TS + ")",
-		"end it with ralph org director detach --id d1" + suffix + " from the session that attached it",
+		// The store's message ends at the registration, and the two ways
+		// out follow it once (self-review L7 of org-director-attach).
+		"a director is already attached: d1 (driver claude, attached " + ev.TS + "): end it with ralph org director detach --id d1" + suffix +
+			" from the session that attached it",
 		"--force in place of --id",
 		"replace it with ralph org director attach --driver codex --replace" + suffix,
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("second attach error %q does not contain %q", err, want)
 		}
+	}
+	if n := strings.Count(err.Error(), "replace"); n != 2 {
+		t.Errorf("second attach error %q says replace %d times; want 2 (the clause and its --replace command)", err, n)
 	}
 	if stdout != "" {
 		t.Errorf("refused attach stdout = %q; want nothing", stdout)
@@ -468,6 +473,65 @@ func TestOrgDirector_MainWorktreeRalphTomlLoadError(t *testing.T) {
 	}
 }
 
+// detach reads no ralph.toml (self-review L4 of org-director-attach): a
+// --config file, a ./ralph.toml, or a main worktree ralph.toml that does not
+// parse blocks neither detach --id nor detach --force, so a broken config
+// cannot keep a registration from being cleaned up, while attach is still
+// refused on it.
+func TestOrgDirector_DetachReadsNoConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) (args []string, brokenPath string)
+	}{
+		{"the --config file", func(t *testing.T) ([]string, string) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			return []string{"--state-dir", t.TempDir(), "--config", path}, path
+		}},
+		{"./ralph.toml", func(t *testing.T) ([]string, string) {
+			t.Chdir(t.TempDir())
+			return []string{"--state-dir", t.TempDir()}, "ralph.toml"
+		}},
+		{"the main worktree's ralph.toml", func(t *testing.T) ([]string, string) {
+			r := newLegacyLedgerRepo(t)
+			return nil, filepath.Join(r.mainRoot, "ralph.toml")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setEscalateWatch(t, acceptingWatchLiveness())
+			args, brokenPath := tc.setup(t)
+			run := func(verb ...string) (string, error) {
+				stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director"}, verb...), args...)...)
+				return stdout, err
+			}
+			for _, detach := range []struct {
+				args []string
+				want string
+			}{
+				{[]string{"detach", "--id", "d1"}, "detached d1\n"},
+				{[]string{"detach", "--force"}, "detached d2 (forced; driver=claude, attached at "},
+			} {
+				if err := os.Remove(brokenPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+				if _, err := run("attach", "--driver", "claude"); err != nil {
+					t.Fatalf("attach with no ralph.toml: %v", err)
+				}
+				writeTestFile(t, brokenPath, "[org\n")
+				if _, err := run("attach", "--driver", "codex", "--replace"); err == nil || !strings.Contains(err.Error(), "load") {
+					t.Errorf("attach --replace with a broken %s: error = %v; want the load error", tc.name, err)
+				}
+				stdout, err := run(detach.args...)
+				if err != nil {
+					t.Fatalf("%v with a broken %s: %v", detach.args, tc.name, err)
+				}
+				if !strings.HasPrefix(stdout, detach.want) {
+					t.Errorf("%v stdout = %q; want it to start with %q", detach.args, stdout, detach.want)
+				}
+			}
+		})
+	}
+}
+
 // AC2: attach probes the watch of its ledger as escalate does. While no
 // watch accepts work it still records the registration, exits 0, and warns
 // on stderr that escalate sends items to the human at once, naming why and
@@ -714,6 +778,7 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"director", "detach", "--help"}, []string{
 			"Give --id, the id attach printed", "it need not detach", "--force ends the current registration whatever its id",
 			"it cannot be combined with --id",
+			"detach reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
 		}},
 		{[]string{"director", "status", "--help"}, []string{
 			"attached, not attached, disabled, or unreadable", "--json", "The registration does not tell whether its session is still running",

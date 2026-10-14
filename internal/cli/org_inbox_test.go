@@ -514,7 +514,8 @@ func TestOrgEscalate_WatchAcceptsWork_RecordsTheItemOnly(t *testing.T) {
 		t.Errorf("stdout = %q; want %q", stdout, want)
 	}
 	wantBanner := "ORG ESCALATION RECORDED: org=org-a item=e1 type=QUESTION -- left in " + org.InboxPathIn(stateDir) + " for the director; " +
-		"if it is still open after the ack deadline (10m), ralph org watch --all sends it to the human; read it with: ralph org inbox show e1" + suffix + "\n"
+		"if it is still open after the ack deadline of ralph org watch --all ([org.director].ack_minutes), the watch sends it to the human; " +
+		"read it with: ralph org inbox show e1" + suffix + "\n"
 	if stderr != wantBanner {
 		t.Errorf("stderr = %q; want %q", stderr, wantBanner)
 	}

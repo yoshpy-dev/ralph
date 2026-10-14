@@ -853,20 +853,48 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 }
 
 // status only reads, so a ./ralph.toml that does not load warns and shows
-// the built-in default of the switch instead of failing.
+// the built-in default of the switch instead of failing. status reads the
+// file once, for the watch's deadman_minutes and the switch, so stderr holds
+// exactly one warning line about it (self-review L1 of
+// org-director-attach), also in a main checkout, where ./ralph.toml is the
+// main worktree's file the switch would be read from, and with --json.
 func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *testing.T) {
-	stateDir := t.TempDir()
-	t.Chdir(t.TempDir())
-	writeTestFile(t, "ralph.toml", "[org\n")
-	stdout, stderr, err := runRootCmdSplit(t, "status", "--state-dir", stateDir)
-	if err != nil {
-		t.Fatalf("status: %v (stderr %s)", err, stderr)
-	}
-	if got := statusDirectorLine(t, stdout); got != directorNotAttachedLine {
-		t.Errorf("director line = %q; want %q", got, directorNotAttachedLine)
-	}
-	if want := "showing the director by the default [org.director].enabled (true)"; !strings.Contains(stderr, "warning: status: load ralph.toml: ") || !strings.Contains(stderr, want) {
-		t.Errorf("stderr = %q; want the load warning and %q", stderr, want)
+	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true)\n"
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) []string // chdirs and returns status's extra args
+	}{
+		{"a --state-dir outside git", func(t *testing.T) []string {
+			stateDir := t.TempDir()
+			t.Chdir(t.TempDir())
+			return []string{"--state-dir", stateDir}
+		}},
+		{"the main checkout's own ralph.toml", func(t *testing.T) []string {
+			r := newLegacyLedgerRepo(t)
+			t.Chdir(r.mainRoot)
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"status"}, tc.setup(t)...)
+			writeTestFile(t, "ralph.toml", "[org\n")
+			for _, extra := range [][]string{nil, {"--json"}} {
+				stdout, stderr, err := runRootCmdSplit(t, append(args, extra...)...)
+				if err != nil {
+					t.Fatalf("status %v: %v (stderr %s)", extra, err, stderr)
+				}
+				if extra == nil {
+					if got := statusDirectorLine(t, stdout); got != directorNotAttachedLine {
+						t.Errorf("director line = %q; want %q", got, directorNotAttachedLine)
+					}
+				} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled {
+					t.Errorf("director = %+v; want enabled, not_attached", got)
+				}
+				if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
+					t.Errorf("status %v stderr = %q; want exactly one load warning ending %q", extra, stderr, wantSuffix)
+				}
+			}
+		})
 	}
 }
 
@@ -888,7 +916,9 @@ func TestStatusCmd_DirectorDamageWarnsOnStderr(t *testing.T) {
 }
 
 // The status help says what the director: line shows and that a
-// registration does not mean its session is alive.
+// registration does not mean its session is alive, and names the git that
+// finds the main worktree for the switch besides the guarantee's get-url
+// (self-review M1 of org-director-attach).
 func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 	out, err := runStatusCmd(t, "--help")
 	if err != nil {
@@ -900,6 +930,10 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		"It is attached,", "not attached;", "disabled (enabled = false: escalate sends every item to the human at once)",
 		"or unreadable, when director.jsonl cannot be read", "A registration does not tell whether its session is still running",
 		"A `merge guarantee:` line follows it",
+		"for this line git runs only the local `git remote get-url origin` in the current directory, and only when the cache is fresh",
+		"status runs no gh and does not use the network.",
+		"the local git rev-parse (and git worktree list --porcelain in a linked worktree) that finds the main worktree",
+		"when one of them does, to tell whether it names the main worktree's ledger, whose ralph.toml then holds [org.director].enabled, whether or not the cache is fresh",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("status --help does not say %q:\n%s", want, out)

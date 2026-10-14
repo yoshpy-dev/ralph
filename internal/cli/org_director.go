@@ -80,8 +80,8 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"One director is attached at a time: while one is, attach is refused\n" +
 			"unless --replace is given, which ends the current registration and\n" +
-			"records the new one under one lock. The replaced session's detach is\n" +
-			"then refused, and it need not detach.\n" +
+			"records the new one in one write, under one lock. The replaced\n" +
+			"session's detach is then refused, and it need not detach.\n" +
 			"\n" +
 			"attach is refused, and writes nothing, when [org.director].enabled is\n" +
 			"false: escalate then sends every item to the human at once. Without\n" +
@@ -101,7 +101,7 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			default:
 				return fmt.Errorf("org: director attach: --driver %q is not %s or %s", driver, org.DirectorDriverClaude, org.DirectorDriverCodex)
 			}
-			rt, err := newOrgDirectorRuntime(cmd, "director attach", *stateDir, *configPath, orgLedgerMutating)
+			rt, err := newOrgDirectorRuntime(cmd, "director attach", *stateDir, *configPath, orgLedgerMutating, true)
 			if err != nil {
 				return err
 			}
@@ -161,7 +161,8 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 			"ended), and it need not detach. --force ends the current registration\n" +
 			"whatever its id, for a human cleaning up after a session that is gone,\n" +
 			"and is recorded as forced; it cannot be combined with --id. With no\n" +
-			"registration, detach exits 1.",
+			"registration, detach exits 1. detach reads no ralph.toml (nor the main\n" +
+			"worktree's), so one that does not load does not block it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -170,7 +171,7 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 			case id != "" && force:
 				return errors.New("org: director detach: --id and --force cannot be used together")
 			}
-			rt, err := newOrgDirectorRuntime(cmd, "director detach", *stateDir, *configPath, orgLedgerMutating)
+			rt, err := newOrgDirectorRuntime(cmd, "director detach", *stateDir, *configPath, orgLedgerMutating, false)
 			if err != nil {
 				return err
 			}
@@ -211,7 +212,7 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"The registration does not tell whether its session is still running.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rt, err := newOrgDirectorRuntime(cmd, "director status", *stateDir, *configPath, orgLedgerReadOnly)
+			rt, err := newOrgDirectorRuntime(cmd, "director status", *stateDir, *configPath, orgLedgerReadOnly, true)
 			if err != nil {
 				return err
 			}
@@ -234,7 +235,8 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 // store of the ledger, the state dir org.ResolveOrgStateDir resolved with its
 // source, the --state-dir the printed commands repeat
 // (orgInboxHintStateDir), and the [org] config with Director.Enabled read by
-// withMainWorktreeDirectorEnabled.
+// withMainWorktreeDirectorEnabled (the zero value for detach, which reads
+// none).
 type orgDirectorRuntime struct {
 	store          *org.DirectorStore
 	stateDir       string
@@ -246,10 +248,13 @@ type orgDirectorRuntime struct {
 // newOrgDirectorRuntime builds the orgDirectorRuntime of a director verb. The
 // registration belongs to the whole ledger, so an --org-id is refused rather
 // than ignored, as the inbox verbs refuse it (newOrgInboxRuntime). access
-// is the verb's orgLedgerAccess for guardLegacyOrgStateDir. A ralph.toml
-// that does not load, or a main worktree ralph.toml that does not, is an
-// error.
-func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string, access orgLedgerAccess) (*orgDirectorRuntime, error) {
+// is the verb's orgLedgerAccess for guardLegacyOrgStateDir. loadConfig is
+// set for attach and status, which read [org.director].enabled: for them a
+// ralph.toml that does not load, or a main worktree ralph.toml that does
+// not, is an error. detach passes false and reads neither, so a config that
+// does not load does not block ending a registration (self-review L4 of
+// org-director-attach).
+func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string, access orgLedgerAccess, loadConfig bool) (*orgDirectorRuntime, error) {
 	if cmd.Flags().Changed("org-id") {
 		return nil, fmt.Errorf("org: %s: --org-id does not apply: the director registration belongs to the whole ledger, not to one org", verb)
 	}
@@ -257,13 +262,15 @@ func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
 		return nil, err
 	}
-	cfg, err := resolveOrgConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("org: load config: %w", err)
-	}
-	cfg, err = withMainWorktreeDirectorEnabled(cfg, configPath, resolvedStateDir, stateDirSource)
-	if err != nil {
-		return nil, err
+	var cfg config.OrgConfig
+	if loadConfig {
+		var err error
+		if cfg, err = resolveOrgConfig(configPath); err != nil {
+			return nil, fmt.Errorf("org: load config: %w", err)
+		}
+		if cfg, err = withMainWorktreeDirectorEnabled(cfg, configPath, resolvedStateDir, stateDirSource); err != nil {
+			return nil, err
+		}
 	}
 	return &orgDirectorRuntime{
 		store:          org.NewDirectorStore(resolvedStateDir),
@@ -282,9 +289,10 @@ func (rt *orgDirectorRuntime) command(command string) string {
 
 // attachedError is the store's ErrDirectorAttached refusal err followed by
 // the commands that end or replace the current registration. The store's
-// message names the registration; its id for the detach command is read
-// again here, without the lock, so it can be newer than the one the store
-// refused on.
+// message names the registration and ends there, so the two ways out are
+// said once, here (self-review L7 of org-director-attach). The id for the
+// detach command is read again here, without the lock, so it can be newer
+// than the one the store refused on.
 func (rt *orgDirectorRuntime) attachedError(err error, driver string) error {
 	detach := "ralph org director detach --id <its id>"
 	if res, readErr := rt.store.Read(); readErr == nil && res.Current != nil {

@@ -46,8 +46,9 @@ const (
 // item escalate also sent to the human path at once; InboxDeliveryDeadline
 // is one it only recorded, for the director and for the ack deadline of
 // `ralph org watch --all`. An escalated event written before stage 8a has
-// no delivery and folds as InboxDeliveryNow. The inbox deadlines
-// (InboxDeadlineDue) do not read it.
+// no delivery and folds as InboxDeliveryNow, as does one whose delivery is
+// neither constant (a hand edit). The inbox deadlines (InboxDeadlineDue) do
+// not read it.
 const (
 	InboxDeliveryNow      = "now"
 	InboxDeliveryDeadline = "deadline"
@@ -77,11 +78,11 @@ var inboxRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"e([0-9]+)`)
 
 // InboxEvent is one line of inbox.jsonl. Every line carries ts, id, and
 // event; the other fields belong to one kind each. escalated carries
-// org_id, type, task_id (when the message has one), body, and delivery (one
-// of the InboxDelivery* constants; lines written before stage 8a have none);
-// notified carries reason and osascript (the result of the macOS
-// notification, e.g. "ok", "failed: ...", "skipped"); resolved carries note;
-// acked carries nothing more.
+// org_id, type, task_id (when the message has one), body, and delivery
+// (written as one of the InboxDelivery* constants; lines written before
+// stage 8a have none); notified carries reason and osascript (the result of
+// the macOS notification, e.g. "ok", "failed: ...", "skipped"); resolved
+// carries note; acked carries nothing more.
 type InboxEvent struct {
 	TS        string `json:"ts"`    // UTC RFC3339
 	ID        string `json:"id"`    // e<N>
@@ -112,8 +113,11 @@ type InboxEscalation struct {
 
 // InboxItem is one item folded from its events. Events holds the events
 // that were applied to it, in file order, for `ralph org inbox show`.
-// Delivery is its escalated event's delivery (InboxDeliveryNow when that
-// event has none). NotifiedAt is the time of the latest notified event.
+// Delivery is its escalated event's delivery when that is one of the
+// InboxDelivery* constants, and InboxDeliveryNow otherwise (none, or a
+// hand-edited value), so it is always one of the two; Events keep the
+// escalated event as written. NotifiedAt is the time of the latest notified
+// event.
 type InboxItem struct {
 	ID          string       `json:"id"`
 	OrgID       string       `json:"org_id"`
@@ -459,8 +463,12 @@ func (f *inboxFold) apply(ev InboxEvent) {
 			f.ignored++
 			return
 		}
+		// Escalate writes only the two deliveries; any other value (none, in
+		// a line written before stage 8a, or a hand edit) folds as now, so
+		// the item carries one of the two (self-review L9 of
+		// org-director-attach).
 		delivery := ev.Delivery
-		if delivery == "" {
+		if delivery != InboxDeliveryDeadline {
 			delivery = InboxDeliveryNow
 		}
 		f.items[ev.ID] = &InboxItem{
