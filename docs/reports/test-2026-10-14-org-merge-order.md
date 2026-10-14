@@ -128,11 +128,11 @@ AC との対応: AC1・AC11 は上の 1 行目、AC2 は 2 行目と「最新の
 
 ## Verdict
 
-- Verdict: pass(ブランチ全体、cycle 3 の HEAD 7a8cac1e の時点)
-- Pass: `./scripts/run-test.sh`(changed)は rc 0 で、shell 41 本すべて OK、Go 8 パッケージすべて ok、shell の集計の行は cycle 1・2 と同じ。`./internal/org/... ./internal/cli/...` は go1.25.8 と go1.26.0 のどちらでも、top-level 1,376 本(PASS 1,375、前からの skip 1)と subtest 2,029 本(すべて PASS)で、fail は 0 だった。`-race` を付けた同じ範囲の実行も ok で、race の報告は 0 件。merge-order のテスト 50 本(cycle 3 で足した 1 本と、その subtest 4 本を含む)もすべて PASS で、消えたテストはない。`(cached)` だった 5 パッケージも打ち直して ok
-- Pass(mutation): cycle 3 のコードの mutant 44 件のうち 35 件が red。生き残り 9 件のうち 7 件は probe の行で落ちることを確かめた。残る N11 は本物の gh では動きが変わらず、N70 は help の文の変更。cycle 2 の mutant を HEAD のテストで打ち直すと 87 件のうち 73 件が red で、cycle 2 の生き残り 15 件のうち D02 が red になった。cycle 1 の穴 6 件も red のまま
-- Pass(本物の origin と `gh`): テストは本物の `gh` に届かない(canary 0 件)。読むだけの確認で、この worktree では gh の argv に `--limit 1000` が付き、PR #225 が merged と出た。同じ名前の fork の PR が 1009 本ある microsoft/vscode の patch-1 では、HEAD は PR を使わずに上限の注記を出し、修正前の binary は注記を出さずに PR なしにした
-- 数の内訳: cycle 1 の時点の数は上の各節、cycle 2 と cycle 3 の数は下の `## Cycle 2` と `## Cycle 3` にある
+- Verdict: pass(ブランチ全体、cycle 4 の HEAD 6d64e96a の時点)
+- Pass: `./scripts/run-test.sh`(changed)は rc 0 で、shell 41 本すべて OK、Go 8 パッケージすべて ok、shell の集計の行は cycle 1〜3 と同じ。`./internal/org/... ./internal/cli/...` は go1.25.8 と go1.26.0 のどちらでも、top-level 1,379 本(PASS 1,378、前からの skip 1)と subtest 2,033 本(すべて PASS)で、fail は 0 だった。`-race` を付けた同じ範囲の実行も ok で、race の報告は 0 件。merge-order のテスト 53 本(cycle 4 で足した 3 本と、その subtest 4 本を含む)もすべて PASS で、消えたテストはない。`(cached)` だった 5 パッケージも打ち直して ok
+- Pass(mutation): cycle 4 のコードの mutant 29 件のうち 25 件が red。生き残り 4 件のうち 3 件(G04、G05、U05)は probe の行で落ちることを確かめた。どれも手で書いた台帳か注記の文の末尾だけの違いで、残る P09 は help の文の変更。cycle 3 の mutant を HEAD のテストで打ち直すと 44 件のうち 35 件が red で、生き残りは cycle 3 と同じ 9 件。N30・N31・N33、N34、N43・N44、N51 は red になっておらず、それぞれ cycle 3 の probe で落ちることは変わらない
+- Pass(本物の origin と `gh`): テストは本物の `gh` に届かない(canary 0 件)。読むだけの確認で、GitHub で改名した vuejs/vue-next(今は vuejs/core)を origin の古い URL のまま打つと、gh の PR の url は新しい名前になり、HEAD は PR を使わずに 2 つの直し方を並べた注記を出した。1 つめの `git remote set-url origin` を打つと PR が使われた。修正前の binary が勧める `gh repo set-default vuejs/vue-next` は、gh が「does not correspond to any git remotes」で断った。cycle 3 までの確認(`--limit 1000`、fork の PR が上限を埋める vscode の patch-1)は下の `## Cycle 3` にある
+- 数の内訳: cycle 1 の時点の数は上の各節、cycle 2〜4 の数は下の `## Cycle 2`、`## Cycle 3`、`## Cycle 4` にある
 - Fail: 0
 - Blocked: なし
 
@@ -406,3 +406,127 @@ GitHub には何も書いていない。gh は `gh pr list` だけ、git は ls-
 - help と skill の `--limit 1000` は手で書いた数で、どのテストも読まない(N70、self-review C3-3)
 - 1000 本を取る時間: 本物の gh で 9〜10 s かかり、`GHTimeout` の 15 s に近い。テストの偽の gh は 1000 本を一度に返すので、時間は見ない。timed out になっても、結果は PR なしで注記が付く
 - 既知の穴(設計の範囲で、cycle 2 と同じ): origin の URL が owner/repo を持たないときは確かめない、別の repository にその名前の PR がないときは注記が出ない、host を比べない。上限で PR を使わなかったブランチは `--json` の entry に印がなく、`notes` の文だけが知らせる(verify の D6、`docs/tech-debt/README.md` の 238 行)
+
+## Cycle 4
+
+- Date: 2026-10-14(JST 12:46〜13:30)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 4 回目で最後(cross-review cycle 3 の ACTION_REQUIRED 1 件と WORTH_CONSIDERING 1 件を直すために上限を 3 から 4 に上げた回。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)。self-review の cycle 4(LOW 4 件、C4-1〜C4-4、Merge: yes)と verify の cycle 4(pass、D8・D9)のあとに走らせた
+- Scope: HEAD 6d64e96a(base ac34ccf3)。cycle 4 でコードとテストを変えたのは 813d6d2d と 1052a12a で、`git diff 999e0394..HEAD -- internal/` は 4 ファイル、+158/-22。中身は、gh が読む repository と origin のものが違うときの注記に 2 つの直し方(改名なら `git remote set-url origin <its URL>`、そうでなければ `gh repo set-default <origin の owner/repo>`)を並べること、読めない gate の記録を、結びつきの枝、なければその org の最新の読める記録の枝(`gatedBranch`)、の順に付けること、付け先のない記録の注記の文、help の文、テスト 3 本(subtest 4 本)、期待と doc の書き換え 3 か所。ほかのコミットは計画、報告、insight event だけ。behavioral test だけを実行した(静的解析は /verify の担当)。環境は cycle 3 と同じで(macOS arm64、go1.26.0 と go1.25.8、git 2.49.0、`/bin/sh` は bash 3.2.57)、gh は 2.102.0
+- Evidence(どれもコミットする。wrapper が書いた `docs/evidence/verify-2026-10-14-034645.log` は gitignore の対象なのでコミットしない):
+  - `docs/evidence/test-2026-10-14-org-merge-order-c4-run-test.txt`: `./scripts/run-test.sh`(changed)の出力を cycle 1〜3 と同じ方法で抜いたもの、`(cached)` だった 5 パッケージの打ち直し、cycle 3 の行との diff
+  - `docs/evidence/test-2026-10-14-org-merge-order-c4-go.txt`: go1.25.8 と go1.26.0 での `./internal/org/... ./internal/cli/...` のパッケージごとの数、`-race` の結果、SKIP の行、2 つの toolchain の間と cycle 3 との間のテスト名の diff、足した 3 本と書き換えた 3 本の行、merge-order のテスト 53 本の行、前に揺れたテストの行、merge-order の 2 ファイルの関数ごとの coverage
+  - `docs/evidence/test-2026-10-14-org-merge-order-c4-mutation.txt`: cycle 4 のコードの mutant 29 件と対照の X0、順の mutant を subtest ごとに打った結果、CLI のテストだけで打った結果、probe の行の結果とその source、cycle 3 の mutant 44 件と probe 12 本を HEAD で打ち直した結果、mutant を作る script と打つ script
+  - `docs/evidence/test-2026-10-14-org-merge-order-c4-rename.txt`: GitHub で改名した repository(vuejs/vue-next から vuejs/core)を、origin の古い URL のまま本物の gh で打った、読むだけの確認
+  - insight event: lead の指示どおり書いていない
+- テストもコードも変えていない。mutant の写し、probe のテスト、偽の `gh`(canary)、git と gh の呼び出しを記録する wrapper、一時の台帳と repo は scratchpad に置き、`go test -overlay` と PATH で読ませた。worktree に書いたのは、この報告の追記と `## Verdict` の書き換え、上の evidence 4 本だけで、mutation と probe を終えて evidence を置く前の `git status --porcelain` は空だった。テストの前後で `~/.config/herdr` の下に 12:46 より新しいファイルはなく、main のチェックアウトの `git status --short` は空のまま、`$TMPDIR` に `ralph-verify-*` は残っていない。herdr の server も osascript も起こしていない
+
+### Test execution(cycle 4)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed、go1.26.0) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(cycle 1〜3 と同じ) | 882 s、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test ./internal/org/... ./internal/cli/... -count=1 -v -coverprofile` | org: top-level 684、subtest 1,369。org/driver: 48、89。org/protocol: 15、56。cli: 632、519 | org の top-level 683 本、ほかはすべて | 0 | org 1 | 297 s(org 130.6 s、cli 293.6 s)、rc 0 |
+| `go test ./internal/org/... ./internal/cli/... -count=1 -v`(go1.26.0) | 上と同じ | 上と同じ | 0 | org 1 | 314 s(org 152.8 s、cli 312.5 s)、rc 0 |
+| うち merge-order のテスト(`TestMergeOrder_*` 38 本、`TestOrgMergeOrder_*` 15 本) | top-level 53、subtest 77 | 両方の toolchain で 53、77 | 0 | 0 | - |
+| `go test -race ./internal/org/... ./internal/cli/... -count=1`(go1.26.0) | 4 パッケージ | 4 パッケージすべて ok、`DATA RACE` は 0 件 | 0 | - | 281 s |
+| `(cached)` だった 5 パッケージを `-count=1`(go1.26.0) | config、insights、org/protocol、scaffold、upgrade | 5 パッケージすべて ok | 0 | - | 合わせて約 7 s |
+| mutation: cycle 4 のコード(`go test -overlay`、go1.26.0) | 29 件(どれも build できた)と対照の X0 | red 25 件 | 生き残り 4 件(下の「Mutation(cycle 4)」) | - | 566 s |
+| mutation: cycle 3 の mutant を HEAD のテストで打ち直し | 44 件 | red 35 件 | 生き残り 9 件(cycle 3 と同じ) | - | 847 s |
+| probe(overlay だけ。cycle 4 の 3 本、cycle 3 の 12 本。コミットしない) | HEAD と生き残り 11 件 | HEAD では 15 本すべて通る。閉じられる生き残り 10 件は、どれも狙った probe で落ちる | - | - | - |
+| 改名した本物の repository の確認(読むだけ) | HEAD の binary 5 回、修正前の binary 1 回、`gh repo set-default` 2 回、`git remote set-url` 2 回(一時の repo) | すべて期待どおり | 0 | - | - |
+
+- shell は 41 本すべてが `OK` で終わり、集計の `FAIL:` の行はどれも `FAIL: 0` だった。抜き出した行から行番号を外して cycle 3 の evidence と diff を取ると、違うのは時刻、Go の所要時間、末尾の行だけで、suite ごとの集計の行はすべて同じ。Skipped は cycle 1〜3 と同じ `tests/test-secret-scan-branch.sh` の 1 件
+- cycle 3 と比べると、top-level は org 681 → 684(+3)、subtest は org 1,365 → 1,369(+4)で、cycle 4 で足した 3 本(`TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch`、`TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch`、`TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository`)と、その subtest 2 本ずつの数と合う。cli は 632 と 519 で変わらない。テスト名の一覧(PASS・SKIP の行から所要時間を外して並べ替えたもの)を cycle 3 の go1.25.8 の一覧と比べると、違いはこの 7 行の追加だけで、消えた名前はない。go1.25.8 と go1.26.0 の一覧は同じ
+- 期待か doc を書き換えた 3 本(`TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt`、org と CLI の `PRFromAnotherRepositoryThanOriginsIsLeftOut`)は、両方の toolchain で PASS
+- `run-test.sh` の中の Go は `internal/cli`(204.0 s)、`internal/org`(92.3 s)、`internal/org/driver`(0.723 s)を流し直し、残りの 5 パッケージは `(cached)` だった。`internal/org` を import するのは `internal/insights` だけ(`go list -deps`)で、5 つとも `-count=1` で打ち直して ok
+- `-race` は org と cli の全体に 1 回付けて、race の報告は 0 件
+- 前に揺れたテスト(`TestRunDoctor*`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どちらの toolchain でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` は 2.81 s と 3.80 s で、+5 s の subtest は出なかった。load average は 5.6〜7.5 だった
+- 本物の `gh` に届かないこと: 呼ばれたら記録して exit 97 で終わる偽の `gh`(canary)を受け継ぐ PATH の先頭に置き、`run-test.sh`、2 回の全体の実行、`-race`、mutation と probe のすべての実行を走らせた。canary の記録は 0 件。下の改名の確認だけは、テストではなく HEAD の binary を、記録用の wrapper を通して本物の gh で打った
+
+### Coverage(cycle 4)
+
+- Statement(go1.25.8、各パッケージ自身のテストの profile): `internal/org` 94.1%(cycle 3 と同じ)、`internal/cli` 86.8%(同じ)、`internal/org/driver` 93.1%、`internal/org/protocol` 100.0%
+- `internal/org/mergeorder.go` は 309/310 文(99.7%、cycle 3 は 308/309)、`internal/cli/org_merge_order.go` は 39/43 文(90.7%、同じ)。通らない文は cycle 1〜3 と同じ 5 つ(`Exec` が nil のときの `run = realMergeOrderExec`、CLI の 4 つ)
+- cycle 4 で書き直した関数(`collectMergeTargets`、`mergeLedgerNotes`、`mergeOriginRepo.check`)は、どれも 100%。それでも下の 3 件が生き残った。穴は通らない行ではなく、テストの読めない記録がどれも `branch=` を持たないことと、注記を前の部分だけで比べることにある
+- Branch: 測っていない(cycle 1〜3 と同じ)。代わりに mutation で分岐ごとの判定を確かめた
+
+### Mutation(cycle 4)
+
+cycle 4 のコードに 29 件の mutant を作った。どれも build でき、25 件が red、4 件が生き残った。対照として、変えていないファイルを overlay で読ませる X0 を同じ runner で打ち、org と CLI のテストは通った(runner が mutant でない写しを落とさないことの確認)。
+
+| 対象 | mutant | red | 生き残り |
+| --- | --- | --- | --- |
+| repository の注記の直し方と順(P01〜P08b: cycle 3 の文に戻す、set-default を外す、改名の手を外す、順を入れ替える、`renamed to` の 2 つを入れ替える、set-default に gh の repository を書く、set-url の remote を変える、owner で場合を推し量る 2 通り) | 9 | 9 | なし |
+| help の文(P09) | 1 | 0 | P09 |
+| `gatedBranch` の代入(G01〜G06: 代入しない、最初の読める記録を残す、読めない記録でも自分の `branch=` で上書きする、`branch=` を持つ読めない記録も代入する、読めない記録の自分の `branch=` を先に使う、org ごとでなく 1 つにする) | 6 | 4 | G04、G05 |
+| `cmp.Or` の順(O01〜O05: 入れ替える、結びつきだけ(cycle 3 の付け先)、読める記録だけ、後に来た方を使う、読める記録が org の結びつきを動かす) | 5 | 5 | なし |
+| 付け先のない記録の数と注記(U01〜U06: 数えない、2 つずつ数える、cycle 3 の文に戻す、0 でも出す、文の末尾を落とす、`gatedBranch` で付けた記録も数える) | 6 | 5 | U05 |
+| ファイルごと戻す(R0: 999e0394 の `mergeorder.go`、R1052: 813d6d2d の `mergeorder.go`) | 2 | 2 | なし |
+
+- 注記の 9 件は、どれも org の `TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository` が落とした。このテストは注記の全文を比べるので、直し方の順を入れ替える P04 と、`renamed to` の前後の repository を入れ替える P05 は、このテストだけが落とした(元からある `TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut` は部分一致で見る)。owner が同じかどうかで改名か別の repository かを推し量る P08a(owner が違えば set-default だけ)と P08b(同じなら set-url だけ)は、同じ owner の改名と別の owner の 2 つの subtest がそれぞれ落とした。どちらの場合でも 2 つを並べる、という計画の決定がテストで固まっている。CLI の `TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut` だけで P01〜P07 を打っても 7 件とも落ちたので、CLI の部分一致は org のテストとは別にこの文を固めている
+- `gatedBranch` の代入を外す G01、最初の読める記録を残す G02、読めない記録でも自分の `branch=`(`moGarbled` では空)で上書きする G03、org ごとでなく 1 つの値にする G06 は、`TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch` が落とした(G06 は `TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt` も)。G02 は org-e の 2 本(feat/e と feat/e2)の行が、G06 は org-d の「付け先なし」の数が見分ける
+- `cmp.Or` の 2 つを入れ替える O01 は、`TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch` の 2 つの subtest が両方落とした。指示にあった「その org の最新の読める記録が、別の枝への結びつきのあとに来た」場合を壊す 2 件、後に来た方を使う O04 と、読める記録が org の結びつきを動かす O05 は、subtest「the binding before the gate record」だけが落とし、「the gate record before the binding」では通った(evidence の B)。2 つの並びを両方持つことが効いている。結びつきだけを見る O02(cycle 3 の付け先)は新しいテストが、読める記録だけを見る O03 は既存のテスト 2 本も落とした
+- 数えない U01、2 つずつ数える U02、0 でも注記を出す U04、`gatedBranch` で付けた記録も数える U06、cycle 3 の文に戻す U03 は red。U03 を落としたのは、新しいテストの `HasPrefix` だけだった
+- ファイルごと戻す 2 件も red。R0 は新しい 2 本と元からある repository のテストが、R1052 は `TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch` が落とした
+
+生き残り 4 件のうち 3 件は、HEAD で通る probe の行が落とす(evidence の C の PD1、PD1b、PD2)。足すと確信が増える順に挙げる。
+
+- G05(PD1、PD1b)と G04(PD1): `branch=` を持つ読めない記録の付け先。G05 は読めない記録の自分の `branch=` を結びつきと読める記録より先に使い、G04 は event の名前と reason が合わない記録(details は読めて `branch=` を持つが readable ではない)で `gatedBranch` を上書きする。コミットされたテストの読めない記録は、どれも `moGarbled`(details は `head=not-a-sha garbled`)で `branch=` を持たないので、自分で別の枝を名指す読めない記録の行がない。PD1 は、結びつきのない org-g が feat/g で読める記録を書いたあと、feat/g2 を名指す食い違った記録を書く台帳で、HEAD は feat/g を unreadable にし、feat/g2 を対象にしない。G04 と G05 では feat/g が古い pass で ready に戻り、feat/g2 が unreadable になる。C8 が防ぐ動きそのものだが、食い違った記録は `ralph org gate` が書かない(記録の event は reason から作る)ので、手で書いた台帳にしか出ない。PD1b は結びつきのある org で同じ並びを作り、G05 だけを落とす。PD1b は 999e0394 の `mergeorder.go`(R0)でも通るので、結びつきのある側の規則は cycle 1 からあり、cycle 4 の前から固められていなかった
+- U05(PD2): 付け先のない記録の注記の末尾「, so they are attached to no branch」を落とす。テストは `HasPrefix` と `Contains` で前の部分だけを見る。PD2 は全文を比べる。文だけの違い
+- P09(probe なし): help から改名の文を落とす。help の文を読むテストはない(cycle 3 の N70 と同じ)
+
+### cycle 3 の生き残りは HEAD で red か
+
+cycle 3 の mutant の一覧(44 件。build できない N20 は N20b で数える)を HEAD のテストで打ち直した。cycle 4 は `lookupMergePRs`、`withNotes`、`mergeGHLimitNotes`、`mergeNamedBranches` に触れておらず、どの置き換えの文字列も HEAD で 1 回だけ一致したので、書き直しは要らなかった。35 件が red で、生き残りは cycle 3 と同じ 9 件。指示にあった N30・N31・N33、N34、N43・N44、N51 は、どれも生き残ったままで、red になったものはない。cycle 3 で red だったものは、全部 red のまま。
+
+| cycle 3 の生き残り | HEAD で | 落とす probe(コミットしない) |
+| --- | --- | --- |
+| N30・N31: 注記の並び | 生き残り | PC1、PC2 |
+| N33: 不一致で止まるときに上限の注記を捨てる | 生き残り | PC1 |
+| N34: gh がないときに上限の注記を捨てる | 生き残り | PC2 |
+| N43・N44: 6 本以上の枝が上限になるときの注記 | 生き残り | PC3 |
+| N51: ちょうど 5 本で「and 0 more」が付く | 生き残り | PB3、PC4 |
+| N11(`>=` を `==`)、N70(help) | 生き残り(本物の gh では同じ動き、文だけ) | なし |
+
+- cycle 3 の probe 12 本(cycle 2 の PB1〜PB8、cycle 3 の PC1〜PC4)を写しのまま HEAD で打つと 12 本とも通り、生き残り 7 件はそれぞれ cycle 3 と同じ probe で落ちた(evidence の E)。cycle 4 の注記の文の変更は、これらの probe の期待に触れない
+- cycle 4 で足した 3 本は、注記の並びも上限になる枝の本数も扱わないので、これらを落とさないのは予想どおり
+
+### 改名した本物の repository(読むだけ)
+
+verify の cycle 4 が「足すと確信がいちばん増える確認」に挙げ、self-review の cycle 4 の follow-up 4 が勧めた確認を、改名の分かっている公開の repository で打った。GitHub には何も書いていない。gh は `pr list`、`api`(GET)、`repo set-default`(一時の repo の `.git/config` だけを書く。今回は断られて何も書かなかった)だけを打った。gh のアカウントは切り替えていない。
+
+- vuejs/vue-next は vuejs/core に改名されている。`gh api repos/vuejs/vue-next` は vuejs/core を返し、`git ls-remote --symref https://github.com/vuejs/vue-next.git HEAD` は GitHub の転送を通って `ref: refs/heads/main	HEAD` を返した
+- 一時の repo(`git init` と `git remote add origin https://github.com/vuejs/vue-next.git` だけで、コミットはない)と、vuejs/core の 2 本の枝を名指す一時の台帳を作った。edison/transition-comment-root(PR #15853、main に merge 済みで枝は消えた)と、edison/refactor/slot-provider-owned-t06(PR #15858、minor への open)。どちらの PR も vuejs/core 自身の枝から出ている
+- HEAD の binary(go1.25.8 で作った)を `--all` で打つと、gh が返した PR #15853 の url は `https://github.com/vuejs/core/pull/15853` で、新しい名前だった。merge-order は PR を使わず、注記は「gh reads vuejs/core, not origin's vuejs/vue-next: no PR is used, so …; if vuejs/vue-next was renamed to vuejs/core, point origin at it (git remote set-url origin <its URL>); otherwise run gh repo set-default vuejs/vue-next in this repository」だった。gh は 1 本目で止まり、get-url は 1 回。分類は t06 が ready(PR なし)、transition-comment-root が no_remote。`--json` の `notes` も同じ文で、終了コードはどれも 0
+- 修正前(999e0394)の binary は、同じ台帳で同じ分類を出し、注記の終わりは「run gh repo set-default vuejs/vue-next in this repository」だけだった。その手を打つと、gh は「vuejs/vue-next does not correspond to any git remotes」と言って rc 1 で終わり、何も書かなかった。そのあと HEAD を打っても注記は変わらない。cross-review cycle 3 の指摘(改名した repository では、古い名前での set-default が効かない)を本物の gh で再現した
+- 注記の 1 つめの直し方のとおり `git remote set-url origin https://github.com/vuejs/core.git` を打つと(一時の repo の `.git/config` だけを書く)、HEAD は PR を使った。t06 は PR #15858 が minor に向くので wrong_base、transition-comment-root は PR #15853 で merged になり、`--all` を付けないと隠れて「1 branch(es) whose PR is merged or closed are not shown」と出た。gh は 2 本とも打たれた
+- 最後に origin を古い URL に戻した。台帳の sha256 は前後で同じ。gh は PR を引くたびに `git remote -v` と `git config --get-regexp ^remote\..*\.gh-resolved$` を自分で打った(cycle 2 と同じ)
+
+### Failure analysis(cycle 4)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+### Regression checks(cycle 4)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| GitHub で改名した repository では、注記が勧める `gh repo set-default <origin の古い名前>` が効かない(cross-review cycle 3 の ACTION_REQUIRED #1) | 直った(偽の gh と本物の gh の両方) | P01〜P08b が red で、P01〜P07 は CLI のテストだけでも red。本物の vuejs/vue-next で、HEAD は 2 つの直し方を出し、1 つめを打つと PR が使われた。修正前の注記の手は gh が断った |
+| gate の記録だけが名指すブランチが、読めない新しい記録のあとに古い gate_passed で ready になる(cross-review cycle 3 の WORTH_CONSIDERING #2) | 直った | G01〜G03、G06、O01〜O05、U01〜U04、U06、R0、R1052 が red。verify の V5・V7 は binary で同じことを見た |
+| cycle 3 の mutant で red だったもの | HEAD のテストでも red | 44 件のうち 35 件が red。生き残り 9 件は cycle 3 と同じ |
+| Go 1.25 だけで起きる違い | 差はない | go1.25.8 と go1.26.0 で、数もテスト名も同じ |
+| 前に揺れたテスト | 揺れなかった | 2 回の全体の実行と `-race` の実行のどれでも PASS |
+| テストが本物の `gh` に届かない | 届かない | canary の記録は `run-test.sh` を含めて 0 件 |
+
+### Test gaps(cycle 4)
+
+覆われていない場合を、足すと確信が増える順に挙げる。どれもテストの失敗ではない。
+
+- G04・G05: 自分で別の枝を名指す読めない記録(event の名前と reason が合わない記録)の付け先。足す行は PD1(結びつきのない org)と PD1b(結びつきのある org)。手で書いた台帳にしか出ない
+- U05: 付け先のない記録の注記の全文。足す行は PD2
+- cycle 3 から残る N30・N31・N33、N34、N43・N44、N51 と、cycle 2 から残る S04、O03・O04、P04・P05・O16。cycle 4 はこの部分のテストを変えていない。足す行は cycle 3 と cycle 2 の Test gaps のとおり
+- P09: help の改名の文はどのテストも読まない(N70 と同じ)
+- self-review の C4-1(結びつきのない org の Detail が、断られる `ralph org gate --org-id` を勧める)は、テストが今の文を固めている(`TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch` の feat/c の Detail)。直すときはその期待も書き換える
+- 改名の確認は vuejs/vue-next の 1 件だけで、origin は https の URL だった。ssh の古い URL と、owner が変わる移管は打っていない。merge-order の側は owner と repository の名前を文字で比べるだけなので同じ注記になるはず。未確認です
+- 改名と別の repository は今も見分けない(計画の決定)。注記は 2 つの直し方を並べるだけで、`--json` の entry に印はない(cycle 3 の D6 と同じ形)
