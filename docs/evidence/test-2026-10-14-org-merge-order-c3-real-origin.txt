@@ -1,0 +1,274 @@
+# /test org-merge-order cycle 3: the real origin and the real gh, read-only (2026-10-14, gh 2.102.0, git 2.49.0)
+# Nothing was written to GitHub: every gh call is `gh pr list` (a read), every git call is ls-remote, remote -v,
+# config --get-regexp or remote get-url. The temp repos' .git/config is unchanged after the runs.
+# Binaries: <scratch>/ralph-head = GOTOOLCHAIN=go1.25.8 go build ./cmd/ralph at HEAD 7a8cac1e;
+#           <scratch>/ralph-prefix = the same at e463eb9d (before d7599d82 and c885fcab), built from git archive.
+# PATH first entry <scratch>/real-bin: logging wrappers that append their argv to a log and exec /opt/homebrew/bin/{git,gh}.
+
+## 1. This worktree (only remote: origin ssh://git@github.com/yoshpy-dev/ralph.git), temp ledger naming feat/org-gate
+##    (PR #225, merged, branch deleted). Ledger (sha256 f5b90449... before and after every run):
+{"ts":"2026-10-13T00:00:00Z","org_id":"gate225","seat_id":"","event":"scope_reserved","worktree":"/wt/org-gate","details":"paths=internal/org/ split=demo feature=org-gate digest=0123456789ab branch=feat/org-gate approval=per-plan"}
+{"ts":"2026-10-13T00:01:00Z","org_id":"gate225","seat_id":"","event":"gate_passed","details":"head=69141291b45799080ffc6e30dc06e2f3fde438f6 base=b20e70df00000000000000000000000000000000 base_ref=refs/remotes/origin/main branch=feat/org-gate by=tester herdr_pane=unset log=\"/state/gates/x.log\""}
+
+## Script: <scratch>/run-real.sh
+#!/bin/bash
+# /test org-merge-order cycle 3: HEAD (7a8cac1e) and pre-fix (e463eb9d)
+# binaries against the real origin and the real gh, read-only. Logging
+# wrappers in real-bin exec /opt/homebrew/bin/{git,gh}.
+set -u
+C3=<scratch>
+WT=<worktree>
+cd "$WT" || exit 2
+OUT=$C3/real-runs.txt
+: > "$OUT"
+: > "$C3/real-calls.log"
+run() {
+  bin=$1
+  shift
+  echo "### $bin: ralph org merge-order --state-dir <tmp-ledger> $*" >> "$OUT"
+  echo "### $bin: $*" >> "$C3/real-calls.log"
+  s=$(python3 -c 'import time;print(time.time())')
+  PATH="$C3/real-bin:$PATH" "$C3/ralph-$bin" org merge-order --state-dir "$C3/real-ledger" "$@" > "$C3/o.txt" 2> "$C3/e.txt"
+  rc=$?
+  e=$(python3 -c "import time;print(round(time.time()-$s,2))")
+  cat "$C3/o.txt" >> "$OUT"
+  echo "exit=$rc elapsed=${e}s" >> "$OUT"
+  echo "stderr: $(cat "$C3/e.txt")" >> "$OUT"
+  echo >> "$OUT"
+}
+run head --all --json
+run head --all
+run head
+run prefix --all
+
+## Output
+### head: ralph org merge-order --state-dir <tmp-ledger> --all --json
+{
+  "default_branch": "main",
+  "default_head": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+  "listed_at": "2026-10-14T01:59:48Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "merged",
+      "branch": "feat/org-gate",
+      "remote_head": "",
+      "detail": "PR #225 is merged",
+      "pr": {
+        "number": 225,
+        "state": "MERGED",
+        "url": "https://github.com/yoshpy-dev/ralph/pull/225",
+        "head_ref_oid": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base_ref_name": "main"
+      },
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base": "b20e70df00000000000000000000000000000000",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-13T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "gate225",
+        "feature": "org-gate",
+        "split": "demo",
+        "ts": "2026-10-13T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "the order is as of the ls-remote at 2026-10-14T01:59:48Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0 elapsed=3.14s
+stderr:
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-14T01:59:51Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	merged	feat/org-gate	#225 https://github.com/yoshpy-dev/ralph/pull/225	69141291b457	b20e70df0000	gate225/org-gate	PR #225 is merged
+note: the order is as of the ls-remote at 2026-10-14T01:59:51Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=2.87s
+stderr:
+
+### head: ralph org merge-order --state-dir <tmp-ledger>
+origin/main ac34ccf38742 (listed 2026-10-14T01:59:54Z)
+no branch to list
+note: 1 branch(es) whose PR is merged or closed are not shown (--all shows them)
+note: the order is as of the ls-remote at 2026-10-14T01:59:54Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=3.14s
+stderr:
+
+### prefix: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-14T01:59:57Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	merged	feat/org-gate	#225 https://github.com/yoshpy-dev/ralph/pull/225	69141291b457	b20e70df0000	gate225/org-gate	PR #225 is merged
+note: the order is as of the ls-remote at 2026-10-14T01:59:57Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=3.16s
+stderr:
+
+## Commands the wrappers saw (gh's own `git remote -v` and `git config` are gh resolving the repository)
+### head: --all --json
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head feat/org-gate --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### head: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head feat/org-gate --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### head:
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head feat/org-gate --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### prefix: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+
+## 2. Direct read-only gh calls: does gh return a branch name's PRs newest first and stop at --limit, and how long
+##    do 1000 PRs take (merge-order's GHTimeout default is 15 s)? Elapsed measured around each call.
+$ GH_PROMPT_DISABLED=1 gh pr list -R torvalds/linux --head master --state all --limit 1000 --json number,state,isCrossRepository,createdAt
+  rc=0 elapsed=0.57s count=0 from_forks=0 same_repo=0
+$ GH_PROMPT_DISABLED=1 gh pr list -R cli/cli --head patch-1 --state all --limit 1000 --json number,state,isCrossRepository,createdAt
+  rc=0 elapsed=2.87s count=302 from_forks=302 same_repo=0
+  first numbers [14664, 14575, 14515] last [395, 363, 304]; numbers strictly descending: True
+  createdAt non-increasing: True (2026-10-13T16:32:04Z .. 2020-02-05T00:09:25Z)
+$ GH_PROMPT_DISABLED=1 gh pr list -R microsoft/vscode --head patch-1 --state all --limit 1000 --json number,state,isCrossRepository,createdAt
+  rc=0 elapsed=9.64s count=1000 from_forks=1000 same_repo=0
+  first numbers [340919, 338254, 336974] last [3070, 2844, 2561]; numbers strictly descending: True
+  createdAt non-increasing: True (2026-10-11T14:50:58Z .. 2016-01-30T12:11:26Z)
+$ GH_PROMPT_DISABLED=1 gh pr list -R microsoft/vscode --head patch-1 --state all --limit 1100 --json number,isCrossRepository
+  rc=0 elapsed=7.62s count=1009 from_forks=1009 same_repo=0
+  first numbers [340919, 338254, 336974] last [403, 336, 70]; numbers strictly descending: True
+limit-1000 list == first 1000 of the limit-1100 list: True the 9 past the limit: [2148, 2137, 1613, 1446, 975, 425, 403, 336, 70]
+$ GH_PROMPT_DISABLED=1 gh pr list -R microsoft/vscode --head patch-1 --state all --json number,isCrossRepository   (no --limit: gh's default, what the pre-fix binary asks for)
+  rc=0 count=30 from_forks=30 first [340919, 338254, 336974] last [321125, 321106, 320946]; numbers strictly descending: True
+
+## 3. HEAD and pre-fix binaries in a temp repo whose only remote is origin https://github.com/microsoft/vscode.git
+##    (git init + git remote add, no commits), ledger naming patch-1: gh returns 1000 PRs, all from forks.
+##    origin has no branch patch-1, so the class is no_remote either way; the note is the difference.
+{"ts":"2026-10-14T00:00:00Z","org_id":"vs","seat_id":"","event":"scope_reserved","worktree":"/wt/patch-1","details":"paths=src/ split=demo feature=patch digest=0123456789ab branch=patch-1 approval=per-plan"}
+{"ts":"2026-10-14T00:01:00Z","org_id":"vs","seat_id":"","event":"gate_passed","details":"head=1111111111111111111111111111111111111111 base=363286d1375ebfc10b9f04820a36fbaedb1a9062 base_ref=refs/remotes/origin/main branch=patch-1 by=tester herdr_pane=unset log=\"/state/gates/vs.log\""}
+
+## Script: <scratch>/run-vscode.sh
+#!/bin/bash
+# HEAD and pre-fix binaries in a temp repo whose only remote is
+# microsoft/vscode (public, read-only), ledger naming patch-1 (1009 fork PRs).
+set -u
+C3=<scratch>
+cd "$C3/vscode-repo" || exit 2
+OUT=$C3/vscode-runs.txt
+: > "$OUT"
+: > "$C3/real-calls.log"
+run() {
+  bin=$1
+  shift
+  echo "### $bin: ralph org merge-order --state-dir <tmp-ledger> $*" >> "$OUT"
+  echo "### $bin: $*" >> "$C3/real-calls.log"
+  s=$(python3 -c 'import time;print(time.time())')
+  PATH="$C3/real-bin:$PATH" "$C3/ralph-$bin" org merge-order --state-dir "$C3/vscode-ledger" "$@" > "$C3/o.txt" 2> "$C3/e.txt"
+  rc=$?
+  e=$(python3 -c "import time;print(round(time.time()-$s,2))")
+  cat "$C3/o.txt" >> "$OUT"
+  echo "exit=$rc elapsed=${e}s" >> "$OUT"
+  echo "stderr: $(cat "$C3/e.txt")" >> "$OUT"
+  echo >> "$OUT"
+}
+run head --all
+run head --json
+run prefix --all
+
+## Output
+### head: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main 363286d1375e (listed 2026-10-14T01:33:32Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	no_remote	patch-1	-	111111111111	363286d1375e	vs/patch	origin has no branch patch-1: it was not pushed, or was deleted after a merge
+note: gh returned 1000 PRs for patch-1, its limit, all from forks, and the branch's own PR may be past them: no PR is used for it, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked
+note: the order is as of the ls-remote at 2026-10-14T01:33:32Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=9.47s
+stderr:
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --json
+{
+  "default_branch": "main",
+  "default_head": "363286d1375ebfc10b9f04820a36fbaedb1a9062",
+  "listed_at": "2026-10-14T01:33:42Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "no_remote",
+      "branch": "patch-1",
+      "remote_head": "",
+      "detail": "origin has no branch patch-1: it was not pushed, or was deleted after a merge",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "1111111111111111111111111111111111111111",
+        "base": "363286d1375ebfc10b9f04820a36fbaedb1a9062",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "vs",
+        "feature": "patch",
+        "split": "demo",
+        "ts": "2026-10-14T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "gh returned 1000 PRs for patch-1, its limit, all from forks, and the branch's own PR may be past them: no PR is used for it, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked",
+    "the order is as of the ls-remote at 2026-10-14T01:33:42Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0 elapsed=9.11s
+stderr:
+
+### prefix: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main 363286d1375e (listed 2026-10-14T01:33:51Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	no_remote	patch-1	-	111111111111	363286d1375e	vs/patch	origin has no branch patch-1: it was not pushed, or was deleted after a merge
+note: the order is as of the ls-remote at 2026-10-14T01:33:51Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=1.98s
+stderr:
+
+## Commands the wrappers saw (no `git remote get-url origin`: the limit case skips the repository check)
+### head: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head patch-1 --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### head: --json
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head patch-1 --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### prefix: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head patch-1 --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+
+## The temp repo's .git/config after the runs (no gh-resolved key written)
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+[remote "origin"]
+	url = https://github.com/microsoft/vscode.git
+	fetch = +refs/heads/*:refs/remotes/origin/*

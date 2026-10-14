@@ -1,0 +1,136 @@
+# /test org-merge-order cycle 1: internal/org and internal/cli on the go.mod toolchain
+# Worktree HEAD a8882d6d (go.mod: go 1.25.8; local go is 1.26.0).
+# Command (a canary gh first on the inherited PATH, see the canary section):
+#   GOTOOLCHAIN=go1.25.8 PATH=<scratch>/canary-bin:$PATH \
+#     go test ./internal/org/ ./internal/cli/ -count=1 -v -coverprofile=<scratch>/cover-1258.out
+# rc=0, 246 s wall. The raw -v output is 8,091 lines (575 KB); this file keeps the
+# package result lines, every FAIL/SKIP line, and every --- PASS line of the 37
+# merge-order tests (grep -E 'Test(MergeOrder|OrgMergeOrder)_' | grep -v '=== RUN').
+#
+# Per-package counts from the raw output (top-level --- lines / indented subtest --- lines):
+#   internal/org: 669 top-level PASS, 0 FAIL, 1 SKIP | 1329 subtest PASS, 0 FAIL
+#   internal/cli: 630 top-level PASS, 0 FAIL, 0 SKIP | 517 subtest PASS, 0 FAIL
+#   merge-order tests: 24 TestMergeOrder_* (org) + 13 TestOrgMergeOrder_* (cli) = 37 top-level,
+#   37 subtests; 74 "=== RUN" and 74 "--- PASS" lines, no FAIL.
+
+## package result lines
+PASS
+coverage: 93.9% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org	109.937s	coverage: 93.9% of statements
+PASS
+coverage: 86.8% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/cli	242.768s	coverage: 86.8% of statements
+rc=0 elapsed=246s
+
+## FAIL and SKIP lines (any depth)
+--- SKIP: TestEscalate_NoDesktopNotificationOffDarwinIsSkipped (0.00s)
+
+## canary: no test reached a gh outside its own PATH
+# <scratch>/canary-bin/gh appends one line to <scratch>/canary-gh.log and exits 97.
+# After the run above: <scratch>/canary-gh.log does not exist (0 calls).
+# Only internal/org/mergeorder.go runs "gh" in the Go code (grep '"gh"' over non-test .go files).
+
+## merge-order tests: every --- PASS line
+--- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin (0.01s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/ready:_the_head_and_the_base_are_origin's_tips (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/ready:_a_base_ref_under_refs/heads,_from_a_gate_run_with_no_origin (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/ready:_an_open_PR_into_the_default_branch (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/rebase:_origin/main_moved_after_the_gate (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/rebase:_origin's_default_branch_is_now_trunk_and_the_old_main_is_still_at_the_gate's_base_(AC11) (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/rebase:_trunk_is_at_the_gate's_base_too,_but_the_gate_checked_main (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/rebase:_a_base_ref_that_is_neither_origin's_nor_a_local_branch (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/wrong_base:_the_PR_merges_into_another_branch (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/wrong_base:_the_PR_still_merges_into_main_after_the_default_became_trunk_(AC11) (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/regate:_pushed_after_the_gate (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/regate_comes_before_wrong_base_and_rebase (0.00s)
+    --- PASS: TestMergeOrder_ClassifiesAGatePassedAgainstOrigin/no_remote:_origin_has_no_such_branch (0.00s)
+--- PASS: TestMergeOrder_DefaultBranchComesFromOriginsHEAD (0.00s)
+--- PASS: TestMergeOrder_FailedNoGateAndNoRemote (0.00s)
+--- PASS: TestMergeOrder_LatestGateRecordWins (0.01s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass_then_a_fail_is_failed (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_fail_then_a_pass_is_ready (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass_then_a_record_that_cannot_be_read_is_unreadable (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass_then_a_gate_passed_holding_a_reason_is_unreadable (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass_then_a_gate_failed_without_a_reason_is_unreadable (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_record_that_cannot_be_read_then_a_pass_is_ready (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass_then_a_corrupt_line_is_unreadable (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_pass,_a_corrupt_line_and_another_org's_binding_is_still_unreadable (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_corrupt_line_before_the_only_gate_record_does_not_matter (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_newer_pass_after_a_corrupt_line_clears_it (0.00s)
+    --- PASS: TestMergeOrder_LatestGateRecordWins/a_newer_fail_after_a_corrupt_line_is_failed (0.00s)
+--- PASS: TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt (0.00s)
+--- PASS: TestMergeOrder_TargetsAreTheBranchesOfEveryBinding (0.00s)
+--- PASS: TestMergeOrder_SameBranchBoundTwiceShowsTheLatestBinding (0.00s)
+--- PASS: TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount (0.00s)
+--- PASS: TestMergeOrder_OrdersByClassThenGatePosition (0.00s)
+--- PASS: TestMergeOrder_MergedOrClosedComesFirst (0.00s)
+--- PASS: TestMergeOrder_PicksTheHighestSameRepoPR (0.00s)
+--- PASS: TestMergeOrder_GHMissingNotesAndIsNotRunAgain (0.00s)
+--- PASS: TestMergeOrder_GHFailureForOneBranchLeavesItsPROut (0.02s)
+--- PASS: TestMergeOrder_ReadsTheLsRemoteListing (0.00s)
+--- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing (0.03s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/the_command_fails (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/the_command_times_out (0.02s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/empty_output (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/no_HEAD_symref,_as_an_old_protocol_prints (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/only_refs/heads/HEAD_is_a_symref (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/HEAD_names_a_tag (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/HEAD_names_a_branch_the_listing_lacks (0.00s)
+    --- PASS: TestMergeOrder_LsRemoteProblemsClassifyNothing/ctx_is_done (0.00s)
+--- PASS: TestMergeOrder_InterruptedWhileGHRunsIsAnError (0.00s)
+--- PASS: TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv (0.00s)
+--- PASS: TestMergeOrder_NoTargetsRunsNoGit (0.00s)
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/no_manifest (0.00s)
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/an_empty_manifest (0.00s)
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/a_plain_reservation_and_a_seat (0.00s)
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/a_corrupt_line_and_a_record_attached_to_no_branch (0.00s)
+--- PASS: TestMergeOrder_TrailingLineWithoutNewlineIsCorrupt (0.00s)
+--- PASS: TestMergeOrder_ManifestThatCannotBeReadIsAnError (0.00s)
+--- PASS: TestMergeOrder_WritesNothing (0.00s)
+--- PASS: TestMergeOrder_ResultJSONShape (0.00s)
+--- PASS: TestMergeOrder_RealExecRunsInDirWithEnvAndStderr (0.10s)
+--- PASS: TestMergeOrder_RealExecIsNotHeldByAChildHoldingThePipe (4.25s)
+--- PASS: TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes (5.55s)
+--- PASS: TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText (4.50s)
+--- PASS: TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut (2.93s)
+--- PASS: TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList (1.51s)
+--- PASS: TestOrgMergeOrder_PRIntoAnotherBranchThanTheDefaultIsWrongBase (1.79s)
+--- PASS: TestOrgMergeOrder_GateOnTheOldDefaultBranchIsRebaseAfterOriginHEADMoves (1.91s)
+--- PASS: TestOrgMergeOrder_BranchNameWithTwoSlashesIsListedWhole (1.82s)
+--- PASS: TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped (1.85s)
+--- PASS: TestOrgMergeOrder_OriginStateUnknownExitsOneWithTheReason (3.29s)
+    --- PASS: TestOrgMergeOrder_OriginStateUnknownExitsOneWithTheReason/no_origin_remote (1.57s)
+    --- PASS: TestOrgMergeOrder_OriginStateUnknownExitsOneWithTheReason/origin_HEAD_names_no_listed_branch (1.72s)
+--- PASS: TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit (0.00s)
+--- PASS: TestOrgMergeOrder_OrgIDIsRefusedBeforeAnythingIsRead (0.00s)
+--- PASS: TestOrgMergeOrder_StateDirFlagPicksTheLedger (1.10s)
+--- PASS: TestOrgMergeOrder_WritesNothingAndTakesNoLock (6.79s)
+
+## coverage (GOTOOLCHAIN=go1.25.8 go tool cover -func, the new files)
+# Per-file statements: mergeorder.go 212/213 (99.5%), org_merge_order.go 39/43 (90.7%).
+# The one uncovered org statement is `run = realMergeOrderExec` (mergeorder.go:205-207): the org
+# tests always pass a fake Exec; the CLI tests reach it, but -coverprofile counts only each
+# package's own tests. Uncovered CLI blocks: the guardLegacyOrgStateDir error return (92-94), the
+# newOrgRuntimeAt error return (96-98), ctx == nil (100-102), mergeOrderShortSHA's short-input return (177).
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:25:			newOrgMergeOrderCmd			87.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:141:		printMergeOrder				100.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_merge_order.go:173:		mergeOrderShortSHA			66.7%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:190:			MergeOrder				96.2%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:236:			readMergeLedger				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:272:			pos					100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:289:			collectMergeTargets			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:342:			mergeLedgerNotes			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:368:			listOriginBranches			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:414:			parseLsRemote				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:449:			lookupMergePRs				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:475:			lookupMergePR				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:496:			pickMergePR				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:513:			orderMergeEntries			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:540:			mergeEntryFor				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:556:			classifyMergeTarget			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:586:			classifyGatePassed			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:615:			gateBaseBranchName			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:625:			shortMergeSHA				100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:632:			mergeOrderListNotes			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:653:			mergeOrderInterrupted			100.0%
+github.com/yoshpy-dev/ralph/internal/org/mergeorder.go:663:			realMergeOrderExec			100.0%

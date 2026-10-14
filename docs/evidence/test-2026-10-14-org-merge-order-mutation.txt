@@ -1,0 +1,181 @@
+# /test org-merge-order cycle 1: mutation sweep of mergeorder.go and org_merge_order.go
+# Worktree HEAD a8882d6d, go1.26.0. No file in the worktree was changed: every mutant and probe is a
+# go test -overlay file under the session scratchpad (<scratch>/mut, <scratch>/mut2, <scratch>/probe).
+#
+# Method (per mutant): an exact one-place string replacement in internal/org/mergeorder.go (M*) or
+# internal/cli/org_merge_order.go (C*), then
+#   M*: go test ./internal/org/ -run 'MergeOrder' -count=1 -overlay <mutant>; if it passes, also
+#       go test ./internal/cli/ -run 'OrgMergeOrder' -count=1 -overlay <mutant>
+#   C*: go test ./internal/cli/ -run 'OrgMergeOrder' -count=1 -overlay <mutant>
+# KILLED = a test failed; column 3 says which package's tests killed it, column 5 the first failing test.
+# Baseline (no overlay): ok internal/org 4.804s, ok internal/cli 39.367s.
+#
+# Totals: 66 mutants that build. 58 KILLED (48 by the org tests, 10 by the CLI tests), 8 SURVIVED.
+# M17, M23, M39 and M51 did not build (an unused variable or import, a value-count mismatch); M17b,
+# M23b, M39b and M51b are the same mutations written so they build, and all four are KILLED.
+# Sweep wall time 920 s, plus about 4 min for the four rebuilt mutants.
+
+id    verdict    by   mutation                                             first failing test
+M01   KILLED     org  event name vs reason agreement dropped               TestMergeOrder_LatestGateRecordWins
+M02   KILLED     org  corrupt-after-gate off by one                        TestMergeOrder_LatestGateRecordWins
+M03   SURVIVED   -    first corrupt line instead of last                   -
+M04   KILLED     org  unreadable record never attaches                     TestMergeOrder_LatestGateRecordWins
+M05   SURVIVED   -    unreadable record attaches to the org's first binding -
+M06   KILLED     org  incomplete binding counted                           TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt
+M07   KILLED     org  dry-run counted                                      TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount
+M08   KILLED     org  seat-carried records counted                         TestMergeOrder_DryRunSeatAndIncompleteRecordsDoNotCount
+M09   SURVIVED   -    org_id-less records counted                          -
+M10   KILLED     org  bindingPos never set                                 TestMergeOrder_MergedOrClosedComesFirst
+M11   KILLED     org  corrupt position off by one                          TestMergeOrder_LatestGateRecordWins
+M12   KILLED     org  any ref ending in HEAD read as origin's HEAD         TestMergeOrder_ReadsTheLsRemoteListing
+M13   SURVIVED   -    last HEAD symref wins                                -
+M14   KILLED     org  symbolic branch ref: line stored as a tip            TestMergeOrder_ReadsTheLsRemoteListing
+M15   KILLED     org  CR not trimmed                                       TestMergeOrder_ReadsTheLsRemoteListing
+M16   KILLED     org  unlisted default branch accepted                     TestMergeOrder_LsRemoteProblemsClassifyNothing
+M17   BUILD_FAIL org  non-branch HEAD symref accepted                      -
+M18   KILLED     org  zero ls-remote timeout not defaulted                 TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M19   KILLED     org  ls-remote interrupt not told apart                   TestMergeOrder_LsRemoteProblemsClassifyNothing
+M20   KILLED     org  GIT_TERMINAL_PROMPT=0 dropped                        TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+M21   KILLED     org  ls-remote timeout reported as a plain failure        TestMergeOrder_LsRemoteProblemsClassifyNothing
+M22   KILLED     org  zero gh timeout not defaulted                        TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M23   BUILD_FAIL org  gh missing: keeps asking                             -
+M24   KILLED     org  gh failure fails the run                             TestMergeOrder_GHFailureForOneBranchLeavesItsPROut
+M25   KILLED     org  gh timeout not named                                 TestMergeOrder_GHFailureForOneBranchLeavesItsPROut
+M26   KILLED     org  lowest PR number picked                              TestMergeOrder_PicksTheHighestSameRepoPR
+M27   KILLED     org  fork PRs not excluded                                TestMergeOrder_PicksTheHighestSameRepoPR
+M28   KILLED     org  GH_PROMPT_DISABLED=1 dropped                         TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+M29   KILLED     org  gh interrupt swallowed                               TestMergeOrder_InterruptedWhileGHRunsIsAnError
+M30   KILLED     org  within a class newest first                          TestMergeOrder_OrdersByClassThenGatePosition
+M31   KILLED     org  position always the binding's                        TestMergeOrder_OrdersByClassThenGatePosition
+M32   KILLED     org  --all ignored                                        TestMergeOrder_OrdersByClassThenGatePosition
+M33   KILLED     org  closed before merged                                 TestMergeOrder_OrdersByClassThenGatePosition
+M34   KILLED     org  failed before unreadable in the list                 TestMergeOrder_OrdersByClassThenGatePosition
+M35   KILLED     org  closed PR not hidden                                 TestMergeOrder_OrdersByClassThenGatePosition
+M36   SURVIVED   -    PR state case-sensitive                              -
+M37   KILLED     org  corrupt line after gate ignored                      TestMergeOrder_LatestGateRecordWins
+M38   KILLED     org  no_remote before failed                              TestMergeOrder_FailedNoGateAndNoRemote
+M39   BUILD_FAIL org  no_remote folded into regate                         -
+M40   KILLED     org  regate never                                         TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M41   KILLED     org  wrong_base never                                     TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M42   KILLED     org  unknown base_ref falls through to the SHA compare    TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M43   KILLED     org  main moving ignored                                  TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M44   KILLED     org  refs/heads base_ref not read                         TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M45   KILLED     org  unreadable record read as a pass/fail                TestMergeOrder_LatestGateRecordWins
+M46   KILLED     org  wrong_base only when nothing else applies            TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M47   KILLED     org  several-ready note for one                           TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M48   KILLED     org  no early return without targets                      TestMergeOrder_NoTargetsRunsNoGit
+M49   KILLED     org  hidden count note needs two                          TestMergeOrder_GHFailureForOneBranchLeavesItsPROut
+M50   KILLED     org  corrupt-line note needs two                          TestMergeOrder_LatestGateRecordWins
+M51   BUILD_FAIL org  environment not inherited                            -
+M52   KILLED     org  exit 0 with a held pipe is an error                  TestMergeOrder_RealExecIsNotHeldByAChildHoldingThePipe
+M53   KILLED     org  dir ignored                                          TestMergeOrder_RealExecRunsInDirWithEnvAndStderr
+M54   KILLED     org  stderr not in the error                              TestMergeOrder_RealExecRunsInDirWithEnvAndStderr
+C01   KILLED     cli  --org-id accepted                                    TestOrgMergeOrder_OrgIDIsRefusedBeforeAnythingIsRead
+C02   KILLED     cli  no 'no branch to list'                               TestOrgMergeOrder_OnlyMergedPRsPrintsNoBranchToList
+C03   KILLED     cli  PR URL not escaped                                   TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped
+C04   KILLED     cli  branch not escaped                                   TestOrgMergeOrder_ControlCharactersInLedgerAndGHValuesAreEscaped
+C05   KILLED     cli  header without a default branch                      TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit
+C06   SURVIVED   -    legacy guard as a mutating verb                      -
+C07   SURVIVED   -    legacy guard dropped                                 -
+C08   KILLED     cli  --all not passed                                     TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+C09   KILLED     cli  short SHA length                                     TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes
+C10   KILLED     cli  --json ignored                                       TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText
+C11   KILLED     cli  feature missing from ORG                             TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes
+C12   SURVIVED   -    note not escaped                                     -
+M17b  KILLED     org  non-branch HEAD symref accepted                      TestMergeOrder_LsRemoteProblemsClassifyNothing
+M23b  KILLED     org  gh missing treated as a per-branch failure           TestMergeOrder_GHMissingNotesAndIsNotRunAgain
+M39b  KILLED     org  no_remote folded into regate                         TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+M51b  KILLED     cli  environment not inherited                            TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+
+## The 8 survivors
+# Equivalent for real input (2):
+#   M13 (parseLsRemote keeps the last `ref: ...<TAB>HEAD` line, not the first): git ls-remote prints
+#       at most one HEAD symref line.
+#   M36 (no strings.ToUpper on the PR state): the real gh prints MERGED/CLOSED/OPEN in upper case
+#       (see the real-origin evidence: "state":"MERGED").
+# Closable gaps (6), each closed by a probe row below that passes at HEAD and fails on the mutant:
+#   M03 -> P1, M05 -> P2, M09 -> P3, C06 and C07 -> P4, C12 -> P5.
+#
+# M03: collectMergeTargets compares the gate record with the first corrupt line instead of the last.
+#      No test has two corrupt lines, one before and one after the only gate record.
+# M05: an unreadable gate record attaches to its org's FIRST complete binding instead of the latest one
+#      before it. TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt has one binding before the
+#      record (x) and one after (y), so first and latest-before are the same binding.
+# M09: the `ev.OrgID == ""` filter removed. No fixture has an event without org_id.
+# C06: merge-order passes orgLedgerMutating to guardLegacyOrgStateDir. C07: the guard call removed.
+#      No test runs merge-order from a linked worktree that has an older ledger
+#      (TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue has no merge-order row).
+# C12: printMergeOrder prints notes without inboxField. No test puts a control character into a note.
+
+## Probe rows (throwaway _test.go files added with -overlay, never written to the worktree)
+# org: <scratch>/probe/zz_probe_mergeorder_test.go as internal/org/zz_probe_mergeorder_test.go
+#   P1 TestProbeMergeOrder_LastOfSeveralCorruptLinesDecides: bind, corrupt, pass, corrupt -> unreadable
+#   P2 TestProbeMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings:
+#      org-a bound x, pass x, disband, bound y, pass y, garbled -> x ready, y unreadable
+#   P3 TestProbeMergeOrder_BindingWithoutOrgIDDoesNotCount: a complete binding with org_id "" is not listed
+== HEAD
+--- PASS: TestProbeMergeOrder_LastOfSeveralCorruptLinesDecides (0.00s)
+--- PASS: TestProbeMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+--- PASS: TestProbeMergeOrder_BindingWithoutOrgIDDoesNotCount (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	5.284s
+== M03
+    zz_probe_mergeorder_test.go:21: order = ["1 ready feat/auth"], want feat/auth unreadable
+--- FAIL: TestProbeMergeOrder_LastOfSeveralCorruptLinesDecides (0.00s)
+--- PASS: TestProbeMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.01s)
+--- PASS: TestProbeMergeOrder_BindingWithoutOrgIDDoesNotCount (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	5.301s
+== M05
+--- PASS: TestProbeMergeOrder_LastOfSeveralCorruptLinesDecides (0.00s)
+    zz_probe_mergeorder_test.go:43: classes = map[feat/x:unreadable feat/y:ready], want map[feat/x:ready feat/y:unreadable]
+--- FAIL: TestProbeMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+--- PASS: TestProbeMergeOrder_BindingWithoutOrgIDDoesNotCount (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	5.238s
+== M09
+--- PASS: TestProbeMergeOrder_LastOfSeveralCorruptLinesDecides (0.00s)
+--- PASS: TestProbeMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings (0.00s)
+    zz_probe_mergeorder_test.go:56: order = ["1 no_gate feat/auth" "2 no_gate feat/noorg"], want only feat/auth
+--- FAIL: TestProbeMergeOrder_BindingWithoutOrgIDDoesNotCount (0.00s)
+FAIL	github.com/yoshpy-dev/ralph/internal/org	5.317s
+
+# cli: <scratch>/probe/zz_probe_org_merge_order_test.go as internal/cli/zz_probe_org_merge_order_test.go
+#   P4 TestProbeOrgMergeOrder_LegacyLedgerIsANoteNotARefusal: setupOrgStubPATH, newLegacyLedgerRepo,
+#      spawnLedgerSeat in the older ledger, `ralph org merge-order` -> exit 0, the note once on stderr
+#   P5 TestProbeOrgMergeOrder_MultiLineGHStderrStaysOneNote: a gh stub that prints
+#      'HTTP 401: Bad credentials\nnote: forged' on stderr and exits 1 -> 2 notes, the first holding
+#      the escaped `Bad credentials\nnote: forged`
+== HEAD
+--- PASS: TestProbeOrgMergeOrder_LegacyLedgerIsANoteNotARefusal (0.92s)
+--- PASS: TestProbeOrgMergeOrder_MultiLineGHStderrStaysOneNote (1.73s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.571s
+== C06
+    zz_probe_org_merge_order_test.go:22: merge-order from a linked worktree with a legacy ledger: org: refusing to change the org ledger: this linked worktree still has an older ledger at <tmp>/TestProbeOrgMer[cut at 260 characters]
+--- FAIL: TestProbeOrgMergeOrder_LegacyLedgerIsANoteNotARefusal (0.75s)
+--- PASS: TestProbeOrgMergeOrder_MultiLineGHStderrStaysOneNote (1.47s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.105s
+== C07
+    zz_probe_org_merge_order_test.go:25: legacy-ledger note 0 time(s) on stderr, want 1:
+--- FAIL: TestProbeOrgMergeOrder_LegacyLedgerIsANoteNotARefusal (0.70s)
+--- PASS: TestProbeOrgMergeOrder_MultiLineGHStderrStaysOneNote (1.56s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	4.710s
+== C12
+--- PASS: TestProbeOrgMergeOrder_LegacyLedgerIsANoteNotARefusal (0.74s)
+    zz_probe_org_merge_order_test.go:48: notes = ["gh pr list --head feat/a failed (exit status 1: HTTP 401: Bad credentials" "forged): its PR is unknown, so merged, closed and the PR base are not told apart for it" "the order is as of the ls-remote at 2026-10[cut at 260 characters]
+--- FAIL: TestProbeOrgMergeOrder_MultiLineGHStderrStaysOneNote (1.60s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.349s
+# After the probes: neither zz_probe_*_test.go exists in the worktree (ls: No such file or directory).
+
+## PATH isolation probe (the CLI tests never reach a gh outside their own temp bin dir)
+# <scratch>/canary-bin/gh logs each call and exits 97. Both runs put it first on the inherited PATH.
+# 1. HEAD tests:   PATH=<scratch>/canary-bin:$PATH go test ./internal/cli/ -run 'OrgMergeOrder' -count=1
+ok  	github.com/yoshpy-dev/ralph/internal/cli	27.835s
+canary calls:        0
+# 2. Leak probe: setMergeOrderPATH overlaid to set PATH=bin:<inherited PATH> instead of PATH=bin
+#    (<scratch>/leak/org_merge_order_test.go; one-line change at internal/cli/org_merge_order_test.go:137)
+--- FAIL: TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes (4.71s)
+--- FAIL: TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText (4.68s)
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	31.296s
+canary calls:       25
+#    The calls came from the four withGH=false tests (Text, JSON, GateOnTheOldDefaultBranch...,
+#    StateDirFlagPicksTheLedger). Only Text and JSON failed: the other two do not look at gh notes,
+#    so without PATH=bin they would reach a real gh without failing. The isolation rests on
+#    setMergeOrderPATH alone, and run 1 shows it holds.

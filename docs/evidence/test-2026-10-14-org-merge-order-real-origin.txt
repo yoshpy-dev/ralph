@@ -1,0 +1,119 @@
+# /test org-merge-order cycle 1: read-only run against the real GitHub origin and the real gh
+# Purpose: the verify report left two assumptions unconfirmed (GitHub returns origin's HEAD symref
+# to `git ls-remote --symref`, and `gh pr list --json` has the six fields merge-order asks for).
+# Everything below only reads: ls-remote, gh pr list, and merge-order on a temp ledger.
+# Nothing was fetched or pushed; no gh account was switched. Run in the task worktree
+# (origin ssh://git@github.com/yoshpy-dev/ralph.git), HEAD a8882d6d, on 2026-10-14 (JST).
+
+## 1. git ls-remote, as merge-order runs it
+$ GIT_TERMINAL_PROMPT=0 git ls-remote --symref origin HEAD 'refs/heads/*' </dev/null
+rc=0
+ref: refs/heads/main	HEAD
+ac34ccf38742deabd093242fabf38fefa9a6be37	HEAD
+06462bcd6069b2ea4c77e2d0ce0ec670cc7aef7e	refs/heads/feat/org-merge-order
+ac34ccf38742deabd093242fabf38fefa9a6be37	refs/heads/main
+
+## 2. gh pr list, as merge-order runs it (for a merged branch and for this branch)
+$ GH_PROMPT_DISABLED=1 gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository </dev/null
+[{"baseRefName":"main","headRefOid":"69141291b45799080ffc6e30dc06e2f3fde438f6","isCrossRepository":false,"number":225,"state":"MERGED","url":"https://github.com/yoshpy-dev/ralph/pull/225"}]
+rc=0
+$ GH_PROMPT_DISABLED=1 gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository </dev/null
+[]
+rc=0
+
+## 3. The HEAD binary on a temp ledger naming two real branches
+# go build -o <scratch>/ralph-head ./cmd/ralph (worktree HEAD a8882d6d)
+# <scratch>/real-ledger/manifest.jsonl, written by hand (sha256 e837b06d...901f34 before and after):
+#   gate225: bound to feat/org-gate (merged as PR #225, deleted from origin), gate_passed on its PR head
+#   mo:      bound to feat/org-merge-order, gate_passed on origin's tip 06462bcd with base origin/main ac34ccf3
+{"ts":"2026-10-13T00:00:00Z","org_id":"gate225","seat_id":"","event":"scope_reserved","worktree":"/wt/org-gate","details":"paths=internal/org/ split=demo feature=org-gate digest=0123456789ab branch=feat/org-gate approval=per-plan"}
+{"ts":"2026-10-13T00:01:00Z","org_id":"gate225","seat_id":"","event":"gate_passed","details":"head=69141291b45799080ffc6e30dc06e2f3fde438f6 base=b20e70df00000000000000000000000000000000 base_ref=refs/remotes/origin/main branch=feat/org-gate by=tester herdr_pane=unset log=\"/state/gates/x.log\""}
+{"ts":"2026-10-14T00:00:00Z","org_id":"mo","seat_id":"","event":"scope_reserved","worktree":"/wt/org-merge-order","details":"paths=internal/cli/ split=demo feature=org-merge-order digest=0123456789ab branch=feat/org-merge-order approval=per-plan"}
+{"ts":"2026-10-14T00:01:00Z","org_id":"mo","seat_id":"","event":"gate_passed","details":"head=06462bcd6069b2ea4c77e2d0ce0ec670cc7aef7e base=ac34ccf38742deabd093242fabf38fefa9a6be37 base_ref=refs/remotes/origin/main branch=feat/org-merge-order by=tester herdr_pane=unset log=\"/state/gates/y.log\""}
+
+$ ralph org merge-order --state-dir <tmp-ledger>
+origin/main ac34ccf38742 (listed 2026-10-13T20:50:01Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	06462bcd6069	ac34ccf38742	mo/org-merge-order	the gate passed on 06462bcd6069, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+note: 1 branch(es) whose PR is merged or closed are not shown (--all shows them)
+note: the order is as of the ls-remote at 2026-10-13T20:50:01Z and is not a guarantee: origin/main can move before a merge
+exit=0
+
+$ ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T20:50:04Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	06462bcd6069	ac34ccf38742	mo/org-merge-order	the gate passed on 06462bcd6069, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	merged	feat/org-gate	#225 https://github.com/yoshpy-dev/ralph/pull/225	69141291b457	b20e70df0000	gate225/org-gate	PR #225 is merged
+note: the order is as of the ls-remote at 2026-10-13T20:50:04Z and is not a guarantee: origin/main can move before a merge
+exit=0
+
+$ ralph org merge-order --state-dir <tmp-ledger> --all --json
+{
+  "default_branch": "main",
+  "default_head": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+  "listed_at": "2026-10-13T20:50:07Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "ready",
+      "branch": "feat/org-merge-order",
+      "remote_head": "06462bcd6069b2ea4c77e2d0ce0ec670cc7aef7e",
+      "detail": "the gate passed on 06462bcd6069, origin's tip of the branch, with base ac34ccf38742, origin/main's tip",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "06462bcd6069b2ea4c77e2d0ce0ec670cc7aef7e",
+        "base": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "mo",
+        "feature": "org-merge-order",
+        "split": "demo",
+        "ts": "2026-10-14T00:00:00Z"
+      }
+    },
+    {
+      "rank": 2,
+      "class": "merged",
+      "branch": "feat/org-gate",
+      "remote_head": "",
+      "detail": "PR #225 is merged",
+      "pr": {
+        "number": 225,
+        "state": "MERGED",
+        "url": "https://github.com/yoshpy-dev/ralph/pull/225",
+        "head_ref_oid": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base_ref_name": "main"
+      },
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base": "b20e70df00000000000000000000000000000000",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-13T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "gate225",
+        "feature": "org-gate",
+        "split": "demo",
+        "ts": "2026-10-13T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "the order is as of the ls-remote at 2026-10-13T20:50:07Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0
+
+# After the three runs: the temp ledger dir holds only manifest.jsonl, sha256 unchanged
+# (e837b06dceaacab4cb8f3fff43ccb7ef9a2a9b360e28ecadee9acf6d82901f34).
+# Reading: GitHub answers the HEAD symref (`ref: refs/heads/main<TAB>HEAD`), gh returns all six fields
+# with upper-case states, a merged PR whose branch origin deleted is hidden by default and listed as
+# merged with --all (not no_remote, because gh is there), and a branch gated on origin's tips is ready.

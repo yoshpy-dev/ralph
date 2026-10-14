@@ -1,0 +1,272 @@
+# /test org-merge-order cycle 4: a repository renamed on GitHub, the real gh, read-only (2026-10-14 JST 12:53, gh 2.102.0, git 2.49.0)
+# Repository: vuejs/vue-next was renamed to vuejs/core. `gh api repos/vuejs/vue-next --jq .full_name` (a GET) printed
+# "vuejs/core fork=false default=main", and `git ls-remote --symref https://github.com/vuejs/vue-next.git HEAD` printed
+# "ref: refs/heads/main	HEAD" / "bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c	HEAD" through GitHub's redirect.
+# Branches named: edison/transition-comment-root (PR #15853, merged into main, branch deleted) and
+# edison/refactor/slot-provider-owned-t06 (PR #15858, open into minor, tip c810965f...). Both PRs are vuejs/core's own
+# (isCrossRepository false), read with `gh pr list -R vuejs/core --state all --limit 100 --json ...`.
+# Nothing was written to GitHub. gh ran `pr list` and `repo set-default` (the latter writes only the temp repo's
+# .git/config, and here refused); git ran ls-remote, remote -v / get-url / set-url and config --get-regexp.
+# Temp repo: <scratch>/rename-repo (git init + git remote add origin https://github.com/vuejs/vue-next.git, no commits,
+# GIT_CONFIG_GLOBAL=/dev/null). Its .git/config is back to the old URL at the end (printed below).
+# Binaries: <scratch>/ralph-head = GOTOOLCHAIN=go1.25.8 go build ./cmd/ralph at HEAD 6d64e96a;
+#           <scratch>/ralph-prefix = the same at 999e0394 (before 813d6d2d and 1052a12a), built from git archive.
+# PATH first entry <scratch>/real-bin: logging wrappers that append their argv to a log and exec /opt/homebrew/bin/{git,gh}.
+# Ledger sha256 754c226a3eeb5989f01a64d3166c49b368e7a59e0c3b02781c7c8b778f967b5c before and after every run.
+
+## Ledger: <scratch>/rename-ledger/manifest.jsonl
+{"ts":"2026-10-14T00:00:00Z","org_id":"vr","seat_id":"","event":"scope_reserved","worktree":"/wt/tcr","details":"paths=packages/runtime-core/ split=demo feature=tcr digest=0123456789ab branch=edison/transition-comment-root approval=per-plan"}
+{"ts":"2026-10-14T00:01:00Z","org_id":"vr","seat_id":"","event":"gate_passed","details":"head=1111111111111111111111111111111111111111 base=bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c base_ref=refs/remotes/origin/main branch=edison/transition-comment-root by=tester herdr_pane=unset log=\"/state/gates/vr.log\""}
+{"ts":"2026-10-14T00:02:00Z","org_id":"vs","seat_id":"","event":"scope_reserved","worktree":"/wt/t06","details":"paths=packages/runtime-vapor/ split=demo feature=t06 digest=0123456789ab branch=edison/refactor/slot-provider-owned-t06 approval=per-plan"}
+{"ts":"2026-10-14T00:03:00Z","org_id":"vs","seat_id":"","event":"gate_passed","details":"head=c810965fed097a7287ccea418eb0f1053a61724a base=bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c base_ref=refs/remotes/origin/main branch=edison/refactor/slot-provider-owned-t06 by=tester herdr_pane=unset log=\"/state/gates/vs.log\""}
+
+## Script: <scratch>/run-rename.sh
+#!/bin/bash
+# HEAD and pre-fix binaries in a temp repo (git init + remote add, no
+# commits) whose origin is the OLD url of a renamed public repository
+# (vuejs/vue-next -> vuejs/core). Real gh and git behind logging wrappers.
+# Writes nothing to GitHub: gh runs pr list / repo set-default (local
+# .git/config only); git runs ls-remote, remote -v/get-url/set-url, config.
+set -u
+C4=<scratch>
+cd "$C4/rename-repo" || exit 2
+OUT=$C4/rename-runs.txt
+: > "$OUT"
+: > "$C4/real-calls.log"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+run() {
+  bin=$1
+  shift
+  echo "### $bin: ralph org merge-order --state-dir <tmp-ledger> $*" >> "$OUT"
+  echo "### $bin: $*" >> "$C4/real-calls.log"
+  s=$(python3 -c 'import time;print(time.time())')
+  PATH="$C4/real-bin:$PATH" "$C4/ralph-$bin" org merge-order --state-dir "$C4/rename-ledger" "$@" > "$C4/o.txt" 2> "$C4/e.txt"
+  rc=$?
+  e=$(python3 -c "import time;print(round(time.time()-$s,2))")
+  cat "$C4/o.txt" >> "$OUT"
+  echo "exit=$rc elapsed=${e}s" >> "$OUT"
+  echo "stderr: $(cat "$C4/e.txt")" >> "$OUT"
+  echo >> "$OUT"
+}
+step() {
+  echo "### step: $*" >> "$OUT"
+  echo "### step: $*" >> "$C4/real-calls.log"
+  PATH="$C4/real-bin:$PATH" "$@" >> "$OUT" 2>&1
+  echo "rc=$?" >> "$OUT"
+  echo "origin=$(/opt/homebrew/bin/git remote get-url origin) gh-resolved=$(/opt/homebrew/bin/git config --get remote.origin.gh-resolved || echo '<unset>')" >> "$OUT"
+  echo >> "$OUT"
+}
+echo "origin=$(/opt/homebrew/bin/git remote get-url origin)" >> "$OUT"
+echo >> "$OUT"
+run head --all
+run head --json
+run prefix --all
+step gh repo set-default vuejs/vue-next
+run head --all
+step gh repo set-default --unset
+step git remote set-url origin https://github.com/vuejs/core.git
+run head --all
+run head
+step git remote set-url origin https://github.com/vuejs/vue-next.git
+echo "final .git/config:" >> "$OUT"
+/bin/cat .git/config >> "$OUT"
+echo RENAMEDONE >> "$OUT"
+
+## Output
+origin=https://github.com/vuejs/vue-next.git
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main bf5f0dd877dd (listed 2026-10-14T03:53:40Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	edison/refactor/slot-provider-owned-t06	-	c810965fed09	bf5f0dd877dd	vs/t06	the gate passed on c810965fed09, origin's tip of the branch, with base bf5f0dd877dd, origin/main's tip
+2	no_remote	edison/transition-comment-root	-	111111111111	bf5f0dd877dd	vr/tcr	origin has no branch edison/transition-comment-root: it was not pushed, or was deleted after a merge
+note: gh reads vuejs/core, not origin's vuejs/vue-next: no PR is used, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked; if vuejs/vue-next was renamed to vuejs/core, point origin at it (git remote set-url origin <its URL>); otherwise run gh repo set-default vuejs/vue-next in this repository
+note: the order is as of the ls-remote at 2026-10-14T03:53:40Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=5.98s
+stderr:
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --json
+{
+  "default_branch": "main",
+  "default_head": "bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c",
+  "listed_at": "2026-10-14T03:53:44Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "ready",
+      "branch": "edison/refactor/slot-provider-owned-t06",
+      "remote_head": "c810965fed097a7287ccea418eb0f1053a61724a",
+      "detail": "the gate passed on c810965fed09, origin's tip of the branch, with base bf5f0dd877dd, origin/main's tip",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "c810965fed097a7287ccea418eb0f1053a61724a",
+        "base": "bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:03:00Z"
+      },
+      "binding": {
+        "org_id": "vs",
+        "feature": "t06",
+        "split": "demo",
+        "ts": "2026-10-14T00:02:00Z"
+      }
+    },
+    {
+      "rank": 2,
+      "class": "no_remote",
+      "branch": "edison/transition-comment-root",
+      "remote_head": "",
+      "detail": "origin has no branch edison/transition-comment-root: it was not pushed, or was deleted after a merge",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "1111111111111111111111111111111111111111",
+        "base": "bf5f0dd877dd3c23ce85c2cbc1dd771567e84c8c",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "vr",
+        "feature": "tcr",
+        "split": "demo",
+        "ts": "2026-10-14T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "gh reads vuejs/core, not origin's vuejs/vue-next: no PR is used, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked; if vuejs/vue-next was renamed to vuejs/core, point origin at it (git remote set-url origin \u003cits URL\u003e); otherwise run gh repo set-default vuejs/vue-next in this repository",
+    "the order is as of the ls-remote at 2026-10-14T03:53:44Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0 elapsed=4.58s
+stderr:
+
+### prefix: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main bf5f0dd877dd (listed 2026-10-14T03:53:50Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	edison/refactor/slot-provider-owned-t06	-	c810965fed09	bf5f0dd877dd	vs/t06	the gate passed on c810965fed09, origin's tip of the branch, with base bf5f0dd877dd, origin/main's tip
+2	no_remote	edison/transition-comment-root	-	111111111111	bf5f0dd877dd	vr/tcr	origin has no branch edison/transition-comment-root: it was not pushed, or was deleted after a merge
+note: gh reads vuejs/core, not origin's vuejs/vue-next: no PR is used, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked; run gh repo set-default vuejs/vue-next in this repository
+note: the order is as of the ls-remote at 2026-10-14T03:53:50Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=6.46s
+stderr:
+
+### step: gh repo set-default vuejs/vue-next
+vuejs/vue-next does not correspond to any git remotes
+rc=1
+origin=https://github.com/vuejs/vue-next.git gh-resolved=<unset>
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main bf5f0dd877dd (listed 2026-10-14T03:53:58Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	edison/refactor/slot-provider-owned-t06	-	c810965fed09	bf5f0dd877dd	vs/t06	the gate passed on c810965fed09, origin's tip of the branch, with base bf5f0dd877dd, origin/main's tip
+2	no_remote	edison/transition-comment-root	-	111111111111	bf5f0dd877dd	vr/tcr	origin has no branch edison/transition-comment-root: it was not pushed, or was deleted after a merge
+note: gh reads vuejs/core, not origin's vuejs/vue-next: no PR is used, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked; if vuejs/vue-next was renamed to vuejs/core, point origin at it (git remote set-url origin <its URL>); otherwise run gh repo set-default vuejs/vue-next in this repository
+note: the order is as of the ls-remote at 2026-10-14T03:53:58Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=3.64s
+stderr:
+
+### step: gh repo set-default --unset
+rc=0
+origin=https://github.com/vuejs/vue-next.git gh-resolved=<unset>
+
+### step: git remote set-url origin https://github.com/vuejs/core.git
+rc=0
+origin=https://github.com/vuejs/core.git gh-resolved=<unset>
+
+### head: ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main bf5f0dd877dd (listed 2026-10-14T03:54:02Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	wrong_base	edison/refactor/slot-provider-owned-t06	#15858 https://github.com/vuejs/core/pull/15858	c810965fed09	bf5f0dd877dd	vs/t06	PR #15858 merges into minor, not origin's default branch main: change the PR's base to main
+2	merged	edison/transition-comment-root	#15853 https://github.com/vuejs/core/pull/15853	111111111111	bf5f0dd877dd	vr/tcr	PR #15853 is merged
+note: the order is as of the ls-remote at 2026-10-14T03:54:02Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=2.87s
+stderr:
+
+### head: ralph org merge-order --state-dir <tmp-ledger>
+origin/main bf5f0dd877dd (listed 2026-10-14T03:54:05Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	wrong_base	edison/refactor/slot-provider-owned-t06	#15858 https://github.com/vuejs/core/pull/15858	c810965fed09	bf5f0dd877dd	vs/t06	PR #15858 merges into minor, not origin's default branch main: change the PR's base to main
+note: 1 branch(es) whose PR is merged or closed are not shown (--all shows them)
+note: the order is as of the ls-remote at 2026-10-14T03:54:05Z and is not a guarantee: origin/main can move before a merge
+exit=0 elapsed=3.68s
+stderr:
+
+### step: git remote set-url origin https://github.com/vuejs/vue-next.git
+rc=0
+origin=https://github.com/vuejs/vue-next.git gh-resolved=<unset>
+
+final .git/config:
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+[remote "origin"]
+	url = https://github.com/vuejs/vue-next.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+RENAMEDONE
+
+## Commands the wrappers saw (gh's own `git remote -v` and `git config` are gh resolving the repository)
+### head: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### head: --json
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### prefix: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### step: gh repo set-default vuejs/vue-next
+gh repo set-default vuejs/vue-next
+git rev-parse --git-dir
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### head: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+### step: gh repo set-default --unset
+gh repo set-default --unset
+git rev-parse --git-dir
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### step: git remote set-url origin https://github.com/vuejs/core.git
+git remote set-url origin https://github.com/vuejs/core.git
+### head: --all
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+gh pr list --head edison/refactor/slot-provider-owned-t06 --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### head:
+git ls-remote --symref origin HEAD refs/heads/*
+gh pr list --head edison/transition-comment-root --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+git remote get-url origin
+gh pr list --head edison/refactor/slot-provider-owned-t06 --state all --limit 1000 --json number,state,url,headRefOid,baseRefName,isCrossRepository
+git remote -v
+git config --get-regexp ^remote\..*\.gh-resolved$
+### step: git remote set-url origin https://github.com/vuejs/vue-next.git
+git remote set-url origin https://github.com/vuejs/vue-next.git

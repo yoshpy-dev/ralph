@@ -1,0 +1,408 @@
+# /test org-merge-order cycle 4: go test -overlay mutants (go1.26.0, HEAD 6d64e96a)
+# Nothing in the worktree was written: every mutant is a scratch copy of the file, read through -overlay.
+# Runner (run4.sh = cycle 3's run3.sh with the cycle-4 canary): org mutants run go test ./internal/org/ -run MergeOrder
+# -timeout 90s; a survivor also runs go test ./internal/cli/ -run 'OrgMergeOrder|OrgLegacyLedger' -timeout 300s;
+# cli mutants run only the cli step. Columns: id, verdict, package that killed it, how (assert/panic/timeout), note,
+# first failing tests. A canary gh (logs + exit 97) was first on PATH for every run: 0 calls.
+
+## A. Cycle 4's code (mut4.py mode c4): X0 (the unchanged file through the overlay, a control that must survive)
+##    and 29 mutants, all built. 25 red, 4 survive (P09, G04, G05, U05).
+X0	SURVIVED	-	-	control: the unchanged file through the overlay
+P01	KILLED	org	assert	note reverted to cycle 3's (set-default only)	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P02	KILLED	org	assert	set-default remedy dropped (rename only)	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P03	KILLED	org	assert	rename remedy dropped, 'otherwise' kept	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P04	KILLED	org	assert	remedies in the other order	TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P05	KILLED	org	assert	'renamed to' arguments swapped	TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P06	KILLED	org	assert	set-default names gh's repository	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P07	KILLED	org	assert	set-url names another remote	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P08a	KILLED	org	assert	owner differs -> set-default only (guesses the case)	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P08b	KILLED	org	assert	same owner -> rename only (guesses the case)	TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+P09	SURVIVED	-	-	help: rename sentence dropped (doc only)
+G01	KILLED	org	assert	gatedBranch never assigned	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+G02	KILLED	org	assert	the org's first readable record kept, not the latest	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+G03	KILLED	org	assert	every gate record (readable or not) sets gatedBranch to its own branch= before the lookup	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+G04	SURVIVED	-	-	an unreadable record whose details name a branch (event/reason mismatch) sets gatedBranch
+G05	SURVIVED	-	-	an unreadable record's own branch= first
+G06	KILLED	org	assert	gatedBranch not per org (any org's latest)	TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+O01	KILLED	org	assert	readable record before the binding	TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch
+O02	KILLED	org	assert	binding only (lookup of cycle 3)	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+O03	KILLED	org	assert	readable record only	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch TestMergeOrder_OrdersByClassThenGatePosition
+O04	KILLED	org	assert	the later of the binding and the readable record wins	TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch
+O05	KILLED	org	assert	a readable record on another branch moves the org's binding	TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch
+U01	KILLED	org	assert	unattached not counted	TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch TestMergeOrder_NoTargetsRunsNoGit
+U02	KILLED	org	assert	unattached counted twice	TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch TestMergeOrder_NoTargetsRunsNoGit
+U03	KILLED	org	assert	note text reverted to cycle 3's	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+U04	KILLED	org	assert	note even for 0	TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch TestMergeOrder_NoTargetsRunsNoGit
+U05	SURVIVED	-	-	note tail ', so they are attached to no branch' dropped
+U06	KILLED	org	assert	a record attached via gatedBranch also counted as unattached	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+R0	KILLED	org	assert	mergeorder.go of 999e0394 (both cycle-4 fixes reverted)	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+R1052	KILLED	org	assert	mergeorder.go of 813d6d2d (gatedBranch fix reverted, note fix kept)	TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+elapsed=566
+
+## B. Which subtest of TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch kills the precedence mutants
+##    go test ./internal/org/ -run 'TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch/<subtest>' -overlay <mut>/<id>/overlay.json
+##    rc=1 = the subtest fails on the mutant. O04/O05 are "an unreadable record when the org's latest readable record
+##    came after a binding to another branch": only the binding-before-the-gate-record subtest sees them.
+O04	the_gate_record_before_the_binding	rc=0
+O04	the_binding_before_the_gate_record	rc=1
+O05	the_gate_record_before_the_binding	rc=0
+O05	the_binding_before_the_gate_record	rc=1
+O01	the_gate_record_before_the_binding	rc=1
+O01	the_binding_before_the_gate_record	rc=1
+
+## B2. The CLI tests alone against the note mutants (the CLI test pins the two remedies independently of the org test)
+##    go test ./internal/cli/ -run OrgMergeOrder -overlay <mut>/<id>/overlay.json
+P01 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P02 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P03 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P04 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P05 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P06 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+P07 cli rc=1: TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+
+## C. Overlay-only probes for the cycle-4 survivors (source in F), on X0 (= HEAD) and on each survivor, plus G01 and
+##    O02 (cycle 3's lookup) as a sensitivity check. go test ./internal/org/ -run ZZProbeC4 -overlay <mutant + probe>
+X0	rc=0	--- PASS: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- PASS: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- PASS: PD2_UnattachedNoteWholeText
+G04	rc=1	--- FAIL: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- PASS: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- PASS: PD2_UnattachedNoteWholeText
+G05	rc=1	--- FAIL: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- FAIL: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- PASS: PD2_UnattachedNoteWholeText
+U05	rc=1	--- PASS: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- PASS: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- FAIL: PD2_UnattachedNoteWholeText
+G01	rc=1	--- FAIL: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- PASS: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- PASS: PD2_UnattachedNoteWholeText
+O02	rc=1	--- FAIL: PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch --- PASS: PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding --- PASS: PD2_UnattachedNoteWholeText
+
+# PD1b on R0 (999e0394's mergeorder.go): it passes there too, so the rule it pins (a record that does not read
+# attaches to its bound org's binding, not to its own branch=) is older than cycle 4.
+R0 PD1b: --- PASS: TestZZProbeC4_PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding (0.00s)
+R0 PD1b: ok  	github.com/yoshpy-dev/ralph/internal/org	1.125s
+
+## D. Cycle 3's mutant list rerun at HEAD (mut4.py mode c3 imports <scratch-c3>/mut3.py; N20 dropped, N20b kept):
+##    44 mutants, 35 red, the same 9 survive as in cycle 3 (N11, N30, N31, N33, N34, N43, N44, N51, N70).
+R3-N01	KILLED	org	assert	no --limit (gh's default 30)	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N02	KILLED	org	assert	--limit 100 literal, constant unchanged	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N03	KILLED	org	assert	constant 30 (arg and condition follow)	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N04	KILLED	org	assert	constant off by one	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N05	KILLED	org	assert	--limit after --json	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N06	KILLED	org	assert	arg one less than the condition's limit	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+R3-N10	KILLED	org	assert	>= -> >	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N11	SURVIVED	-	-	>= -> == (gh never returns more than --limit)
+R3-N12	KILLED	org	assert	limit-1 counts as full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N13	KILLED	org	assert	pr == nil dropped	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N14	KILLED	org	assert	len check dropped: every no-PR branch is full	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N15	KILLED	org	assert	never full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N16	KILLED	org	assert	any fork-only list counts as full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N21	KILLED	org	assert	limit case after pr == nil (never reached)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N22	KILLED	org	assert	only the last full branch kept	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N23	KILLED	org	assert	gh stops after the first full branch	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N30	SURVIVED	-	-	limit note before gh-failure notes
+R3-N31	SURVIVED	-	-	set-default / gh-missing note first
+R3-N32	KILLED	org	assert	limit note never given (every path)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N33	SURVIVED	-	-	repository stop drops the limit note
+R3-N34	SURVIVED	-	-	gh missing drops the limit note
+R3-N35	KILLED	org	assert	final return drops the limit note	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N36	KILLED	org	assert	gh-failure notes never given (every path)	TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R3-N40	KILLED	org	assert	one branch uses the plural form	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N41	KILLED	org	assert	no branch: plural note for 0 branches	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+R3-N42	KILLED	org	assert	singular: count of branches as the PR count	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N43	SURVIVED	-	-	plural: count capped at the named ones
+R3-N44	SURVIVED	-	-	plural: every branch named (no and N more)
+R3-N45	KILLED	org	assert	plural: only the first branch named	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N46	KILLED	org	assert	plural: mergeOrderNoPRs dropped	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N50	KILLED	org	assert	every branch named	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R3-N51	SURVIVED	-	-	'and 0 more' at exactly the cap (= cycle 2 G04)
+R3-N52	KILLED	org	assert	'and N more' counts all	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R3-N53	KILLED	org	assert	separator	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R3-N54	KILLED	org	assert	gh-failure note stops using mergeNamedBranches	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R3-N55	KILLED	org	assert	'and N more' one short	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R3-N60	KILLED	org	assert	gate record's org before the binding's (= cycle 2 D02)	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R3-N61	KILLED	org	assert	gate case dropped (revert of c885fcab)	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+R3-N62	KILLED	org	assert	gate case without the org_id check	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R3-N63	KILLED	org	assert	bare command not bare	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R3-N64	KILLED	org	assert	bound branch with a gate record named by the gate's org	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R3-N65	KILLED	org	assert	gate case names the event, not the org	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+R3-N70	SURVIVED	-	-	help names --limit 30
+R3-N20b	KILLED	org	assert	limit case dropped (builds)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+elapsed=847
+# diff of (id, verdict) against cycle 3's sweep (<scratch-c3>/sweep-c3.out, ids prefixed R3-): only N20 (BUILD_FAIL
+# there, dropped here) and N20b (cycle 3 ran it separately) and the trailer differ.
+
+## E. Cycle 3's probes (PB1-PB8 of cycle 2, PC1-PC4 of cycle 3, copied unchanged) at HEAD and on the rerun survivors
+##    (run-probe3.sh with the cycle-4 paths): the same kills as in cycle 3
+HEAD	rc=0	pass=12	failed:
+R3-N11	rc=0	pass=12	failed:
+R3-N30	rc=1	pass=10	failed: PC1 PC2
+R3-N31	rc=1	pass=10	failed: PC1 PC2
+R3-N33	rc=1	pass=11	failed: PC1
+R3-N34	rc=1	pass=11	failed: PC2
+R3-N43	rc=1	pass=11	failed: PC3
+R3-N44	rc=1	pass=11	failed: PC3
+R3-N51	rc=1	pass=10	failed: PB3 PC4
+
+## F. Survivor classification
+# Cycle 4, closable (each killed by a probe that passes on HEAD):
+#   G04 a gate record that does not read (its event disagrees with its reason) but names a branch= sets gatedBranch
+#       -> PD1 (org-g: readable feat/g, then such a record naming feat/g2: HEAD feat/g unreadable; G04 feat/g ready,
+#          feat/g2 unreadable)
+#   G05 an unreadable record's own branch= comes before the binding and the gated branch -> PD1 and PD1b (the same
+#       with a bound org; PD1b is the cycle-1 rule, so G05's bound half was open before cycle 4 too)
+#   U05 the unattached note's tail ", so they are attached to no branch" dropped -> PD2 (whole-text equality);
+#       the committed tests check the note with HasPrefix and Contains only
+# Cycle 4, not behaviour:
+#   P09 the CLI help's rename sentence dropped: no test reads the help text (same as cycle 3's N70)
+
+## G. The cycle-4 probe source (not committed): <scratch>/probe/zz_probe_c4_test.go
+package org
+
+// Overlay-only probes for org-merge-order /test cycle 4 (not committed).
+
+import (
+	"fmt"
+	"testing"
+)
+
+func zzClasses(res MergeOrderResult) string {
+	got := map[string]string{}
+	for _, e := range res.Entries {
+		got[e.Branch] = e.Class
+	}
+	return fmt.Sprint(got)
+}
+
+// PD1: a gate record whose details read but whose event disagrees with its
+// reason (readable=false) names feat/g2; its org has no binding and its
+// latest readable record is on feat/g. The record attaches to feat/g (not to
+// its own branch=), and does not make feat/g2 a target.
+func TestZZProbeC4_PD1_MismatchedRecordOfUnboundOrgAttachesToItsGatedBranch(t *testing.T) {
+	fx := newMOFixture(t)
+	mism := moGate("org-g", "feat/g2", moHeadA, moMain, "refs/remotes/origin/main", "")
+	mism.Event = EventGateFailed // details say passed (no reason=): not readable
+	fx.add(t, moPassed("org-g", "feat/g", moHeadA, moMain), mism)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/g", moHeadA, "feat/g2", moHeadA)
+	res := fx.run(t, false)
+	if got, want := zzClasses(res), fmt.Sprint(map[string]string{"feat/g": MergeClassUnreadable}); got != want {
+		t.Fatalf("classes = %v, want %v", got, want)
+	}
+}
+
+// PD1b: the same with a bound org (pre-cycle-4 rule): the mismatched record
+// naming feat/h2 attaches to the binding's feat/h.
+func TestZZProbeC4_PD1b_MismatchedRecordOfBoundOrgAttachesToTheBinding(t *testing.T) {
+	fx := newMOFixture(t)
+	mism := moGate("org-h", "feat/h2", moHeadA, moMain, "refs/remotes/origin/main", "")
+	mism.Event = EventGateFailed
+	fx.add(t, moBind("org-h", "h"), moPassed("org-h", "feat/h", moHeadA, moMain), mism)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/h", moHeadA, "feat/h2", moHeadA)
+	res := fx.run(t, false)
+	if got, want := zzClasses(res), fmt.Sprint(map[string]string{"feat/h": MergeClassUnreadable}); got != want {
+		t.Fatalf("classes = %v, want %v", got, want)
+	}
+}
+
+// PD2: the whole text of the note that counts records attached to no branch.
+func TestZZProbeC4_PD2_UnattachedNoteWholeText(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t, moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain), moGarbled("org-d", EventGatePassed))
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/a", moHeadA)
+	res := fx.run(t, false)
+	want := "1 gate record(s) cannot be read and their org had neither a feature binding nor a readable gate record before them, " +
+		"so they are attached to no branch"
+	if note := moNoteWith(res, "gate record(s) cannot be read"); note != want {
+		t.Fatalf("note = %q,\nwant %q", note, want)
+	}
+}
+
+## H. The mutant runner: <scratch>/run4.sh
+#!/bin/bash
+# Run each go -overlay mutant of org-merge-order (/test cycle 4).
+# org mutants: internal/org -run MergeOrder first; survivors also run
+# internal/cli -run 'OrgMergeOrder|OrgLegacyLedger'. cli mutants: only the cli run.
+# A canary gh (logs + exit 97) is first on the inherited PATH.
+# Usage: run2.sh <mutdir> [id ...]
+set -u
+WT=<worktree>
+C4=<scratch>
+export PATH="$C4/canary-bin:$PATH"
+MUT=$1
+shift
+cd "$WT" || exit 2
+RES="$MUT/results.tsv"
+: > "$RES.tmp"
+while IFS=$'\t' read -r id pkg note; do
+  if [ "$#" -gt 0 ]; then
+    want=0
+    for x in "$@"; do [ "$x" = "$id" ] && want=1; done
+    [ "$want" = 1 ] || continue
+  fi
+  ov="$MUT/$id/overlay.json"
+  log="$MUT/$id/test.log"
+  : > "$log"
+  verdict=SURVIVED
+  by=-
+  if [ "$pkg" = org ]; then
+    go test ./internal/org/ -run 'MergeOrder' -count=1 -vet=off -timeout 90s -overlay "$ov" >> "$log" 2>&1
+    if [ "$?" -ne 0 ]; then verdict=KILLED; by=org; fi
+  fi
+  if [ "$verdict" = SURVIVED ]; then
+    go test ./internal/cli/ -run 'OrgMergeOrder|OrgLegacyLedger' -count=1 -vet=off -timeout 300s -overlay "$ov" >> "$log" 2>&1
+    if [ "$?" -ne 0 ]; then verdict=KILLED; by=cli; fi
+  fi
+  if grep -q '\[build failed\]\|setup failed' "$log"; then verdict=BUILD_FAIL; fi
+  how=assert
+  grep -q 'panic: test timed out' "$log" && how=timeout
+  grep -q '^panic: ' "$log" && ! grep -q 'panic: test timed out' "$log" && how=panic
+  [ "$verdict" = KILLED ] || how=-
+  failed=$(grep -E '^\s*--- FAIL' "$log" | sed 's/^ *--- FAIL: //; s/ (.*//' | grep -v / | head -3 | tr '\n' ' ')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$verdict" "$by" "$how" "$note" "$failed" | tee -a "$RES.tmp"
+done < "$MUT/list.tsv"
+mv "$RES.tmp" "$RES"
+echo ALLDONE
+
+## I. The mutant generator: <scratch>/mut4.py
+#!/usr/bin/env python3
+"""go -overlay mutants for org-merge-order /test cycle 4 (HEAD 6d64e96a).
+
+Each mutant is (id, file, [(old, new), ...], note). Every old must occur
+exactly once in the file (after the earlier edits of the same mutant).
+A mutant whose edits list is ("FILE", <git rev>) replaces the whole file
+with `git show <rev>:<path>`.
+Writes <out>/<id>/<basename>, <out>/<id>/overlay.json and <out>/list.tsv.
+
+Modes (argv[2]):
+  c4   cycle 4's mutants (the default)
+  c3   cycle 3's mutants (omo-c3/mut3.py M + SUPP) rerun at HEAD, ids R3-
+"""
+import json
+import os
+import subprocess
+import sys
+
+WT = "<worktree>"
+ORG = WT + "/internal/org/mergeorder.go"
+CLI = WT + "/internal/cli/org_merge_order.go"
+C3DIR = "<scratch-c3>"
+
+# --- the repository note (813d6d2d) ---
+NOTE = ('\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; if %s was renamed to %s, point origin at it "+\n'
+        '\t\t\t"(git remote set-url origin <its URL>); otherwise run gh repo set-default %s in this repository",\n'
+        '\t\t\tprRepo, o.repo, mergeOrderNoPRs, o.repo, prRepo, o.repo), nil\n')
+NOTE_OLD = ('\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; run gh repo set-default %s in this "+\n'
+            '\t\t\t"repository", prRepo, o.repo, mergeOrderNoPRs, o.repo), nil\n')
+NOTE_ARGS = "\t\t\tprRepo, o.repo, mergeOrderNoPRs, o.repo, prRepo, o.repo), nil\n"
+SAME_CASE = "\tcase !prRepo.same(o.repo):\n"
+SETDEFAULT_ONLY = ('\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; run gh repo set-default %s in this repository", '
+                   'prRepo, o.repo, mergeOrderNoPRs, o.repo), nil\n')
+RENAME_ONLY = ('\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; if %s was renamed to %s, point origin at it '
+               '(git remote set-url origin <its URL>)", prRepo, o.repo, mergeOrderNoPRs, o.repo, prRepo), nil\n')
+
+# --- collectMergeTargets (1052a12a) ---
+GATED_SET = "\t\t\tif g.readable {\n\t\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\t} else {\n"
+LOOKUP = "cmp.Or(boundBranch[ev.OrgID], gatedBranch[ev.OrgID])"
+GATED_DECL = "\tgatedBranch := make(map[string]string) // org_id -> its latest readable gate record's branch so far\n"
+BOUND_SET = "\t\t\tboundBranch[ev.OrgID] = f.Branch\n"
+UNATT = "\t\t\t\t\tunattached++\n"
+LOOKUP_IF = "\t\t\t\tif branch = cmp.Or(boundBranch[ev.OrgID], gatedBranch[ev.OrgID]); branch == \"\" {\n\t\t\t\t\tunattached++\n\t\t\t\t\tcontinue\n\t\t\t\t}\n"
+UNNOTE = ('\t\tnotes = append(notes, fmt.Sprintf("%d gate record(s) cannot be read and their org had neither a feature binding nor a "+\n'
+          '\t\t\t"readable gate record before them, so they are attached to no branch", unattached))\n')
+UNNOTE_OLD = ('\t\tnotes = append(notes, fmt.Sprintf("%d gate record(s) cannot be read and their org had no feature binding before them, "+\n'
+              '\t\t\t"so they are attached to no branch", unattached))\n')
+
+HELP = ('\t\t\t"gh repo set-default. A repository renamed on GitHub while origin keeps\\n" +\n'
+        '\t\t\t"the old URL looks the same (git reaches it through GitHub\'s redirect,\\n" +\n'
+        '\t\t\t"gh\'s PR urls carry the new name), so the note also says to point\\n" +\n'
+        '\t\t\t"origin at the new name with git remote set-url origin if it was\\n" +\n'
+        '\t\t\t"renamed. The check has three gaps: when origin\'s URL names\\n" +\n')
+HELP_OLD = '\t\t\t"gh repo set-default. The check has three gaps: when origin\'s URL names\\n" +\n'
+
+M = [
+    ("X0", ORG, [], "control: the unchanged file through the overlay"),
+    # --- the note's two remedies and their order ---
+    ("P01", ORG, [(NOTE, NOTE_OLD)], "note reverted to cycle 3's (set-default only)"),
+    ("P02", ORG, [(NOTE, RENAME_ONLY)], "set-default remedy dropped (rename only)"),
+    ("P03", ORG, [(NOTE, '\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; otherwise run gh repo set-default %s in this repository", '
+                         'prRepo, o.repo, mergeOrderNoPRs, o.repo), nil\n')], "rename remedy dropped, 'otherwise' kept"),
+    ("P04", ORG, [(NOTE, '\t\treturn fmt.Sprintf("gh reads %s, not origin\'s %s: no PR is used, so %s; run gh repo set-default %s in this repository, '
+                         'or if %s was renamed to %s, point origin at it (git remote set-url origin <its URL>)", '
+                         'prRepo, o.repo, mergeOrderNoPRs, o.repo, o.repo, prRepo), nil\n')], "remedies in the other order"),
+    ("P05", ORG, [(NOTE_ARGS, "\t\t\tprRepo, o.repo, mergeOrderNoPRs, prRepo, o.repo, o.repo), nil\n")], "'renamed to' arguments swapped"),
+    ("P06", ORG, [(NOTE_ARGS, "\t\t\tprRepo, o.repo, mergeOrderNoPRs, o.repo, prRepo, prRepo), nil\n")], "set-default names gh's repository"),
+    ("P07", ORG, [("(git remote set-url origin <its URL>)", "(git remote set-url upstream <its URL>)")], "set-url names another remote"),
+    ("P08a", ORG, [(SAME_CASE, "\tcase !prRepo.same(o.repo) && !strings.EqualFold(prRepo.owner, o.repo.owner):\n" + SETDEFAULT_ONLY + SAME_CASE)],
+     "owner differs -> set-default only (guesses the case)"),
+    ("P08b", ORG, [(SAME_CASE, "\tcase !prRepo.same(o.repo) && strings.EqualFold(prRepo.owner, o.repo.owner):\n" + RENAME_ONLY + SAME_CASE)],
+     "same owner -> rename only (guesses the case)"),
+    ("P09", CLI, [(HELP, HELP_OLD)], "help: rename sentence dropped (doc only)"),
+    # --- gatedBranch assignment ---
+    ("G01", ORG, [(GATED_SET, "\t\t\tif g.readable {\n\t\t\t} else {\n")], "gatedBranch never assigned"),
+    ("G02", ORG, [(GATED_SET, "\t\t\tif g.readable {\n\t\t\t\tif _, ok := gatedBranch[ev.OrgID]; !ok {\n\t\t\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\t\t}\n\t\t\t} else {\n")],
+     "the org's first readable record kept, not the latest"),
+    ("G03", ORG, [(GATED_SET, "\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\tif g.readable {\n\t\t\t} else {\n")],
+     "every gate record (readable or not) sets gatedBranch to its own branch= before the lookup"),
+    ("G04", ORG, [(GATED_SET, "\t\t\tif branch != \"\" {\n\t\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\t}\n\t\t\tif g.readable {\n\t\t\t} else {\n")],
+     "an unreadable record whose details name a branch (event/reason mismatch) sets gatedBranch"),
+    ("G05", ORG, [(LOOKUP, "cmp.Or(branch, boundBranch[ev.OrgID], gatedBranch[ev.OrgID])")], "an unreadable record's own branch= first"),
+    ("G06", ORG, [(GATED_SET, "\t\t\tif g.readable {\n\t\t\t\tgatedBranch[\"\"] = branch\n\t\t\t} else {\n"),
+                  (LOOKUP, 'cmp.Or(boundBranch[ev.OrgID], gatedBranch[""])')], "gatedBranch not per org (any org's latest)"),
+    # --- cmp.Or precedence ---
+    ("O01", ORG, [(LOOKUP, "cmp.Or(gatedBranch[ev.OrgID], boundBranch[ev.OrgID])")], "readable record before the binding"),
+    ("O02", ORG, [(LOOKUP, "cmp.Or(boundBranch[ev.OrgID])")], "binding only (lookup of cycle 3)"),
+    ("O03", ORG, [(LOOKUP, "cmp.Or(gatedBranch[ev.OrgID])")], "readable record only"),
+    ("O04", ORG, [(GATED_DECL, GATED_DECL + "\tgatedAt, boundAt := map[string]int{}, map[string]int{}\n"),
+                  (BOUND_SET, BOUND_SET + "\t\t\tboundAt[ev.OrgID] = i\n"),
+                  ("\t\t\t\tgatedBranch[ev.OrgID] = branch\n", "\t\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\t\tgatedAt[ev.OrgID] = i\n"),
+                  (LOOKUP, "func() string {\n\t\t\t\t\tif gb, ok := gatedBranch[ev.OrgID]; ok && (boundBranch[ev.OrgID] == \"\" || gatedAt[ev.OrgID] > boundAt[ev.OrgID]) {\n"
+                           "\t\t\t\t\t\treturn gb\n\t\t\t\t\t}\n\t\t\t\t\treturn boundBranch[ev.OrgID]\n\t\t\t\t}()")],
+     "the later of the binding and the readable record wins"),
+    ("O05", ORG, [("\t\t\t\tgatedBranch[ev.OrgID] = branch\n", "\t\t\t\tgatedBranch[ev.OrgID] = branch\n\t\t\t\tif _, ok := boundBranch[ev.OrgID]; ok {\n\t\t\t\t\tboundBranch[ev.OrgID] = branch\n\t\t\t\t}\n")],
+     "a readable record on another branch moves the org's binding"),
+    # --- unattached count and note ---
+    ("U01", ORG, [(UNATT, "")], "unattached not counted"),
+    ("U02", ORG, [(UNATT, "\t\t\t\t\tunattached += 2\n")], "unattached counted twice"),
+    ("U03", ORG, [(UNNOTE, UNNOTE_OLD)], "note text reverted to cycle 3's"),
+    ("U04", ORG, [("\tif unattached > 0 {\n", "\tif unattached >= 0 {\n")], "note even for 0"),
+    ("U05", ORG, [('"readable gate record before them, so they are attached to no branch", unattached))', '"readable gate record before them", unattached))')],
+     "note tail ', so they are attached to no branch' dropped"),
+    ("U06", ORG, [(LOOKUP_IF, LOOKUP_IF + "\t\t\t\tif boundBranch[ev.OrgID] == \"\" {\n\t\t\t\t\tunattached++\n\t\t\t\t}\n")],
+     "a record attached via gatedBranch also counted as unattached"),
+    # --- whole-file reverts ---
+    ("R0", ORG, ("FILE", "999e0394"), "mergeorder.go of 999e0394 (both cycle-4 fixes reverted)"),
+    ("R1052", ORG, ("FILE", "813d6d2d"), "mergeorder.go of 813d6d2d (gatedBranch fix reverted, note fix kept)"),
+]
+
+def c3_mutants():
+    sys.path.insert(0, C3DIR)
+    import mut3  # cycle 3's harness
+    return [("R3-" + mid, path, edits, note) for mid, path, edits, note in mut3.M + mut3.SUPP if mid != "N20"]
+
+def main():
+    out = sys.argv[1]
+    mode = sys.argv[2] if len(sys.argv) > 2 else "c4"
+    muts = M if mode == "c4" else c3_mutants()
+    os.makedirs(out, exist_ok=True)
+    srcs = {}
+    with open(os.path.join(out, "list.tsv"), "w") as lst:
+        for mid, path, edits, note in muts:
+            if isinstance(edits, tuple) and edits[0] == "FILE":
+                rel = os.path.relpath(path, WT)
+                src = subprocess.run(["git", "-C", WT, "show", f"{edits[1]}:{rel}"], check=True, capture_output=True, text=True).stdout
+            else:
+                if path not in srcs:
+                    with open(path) as f:
+                        srcs[path] = f.read()
+                src = srcs[path]
+                for old, new in edits:
+                    n = src.count(old)
+                    if n != 1:
+                        print(f"{mid}: old string occurs {n} times: {old!r}", file=sys.stderr)
+                        sys.exit(1)
+                    src = src.replace(old, new)
+            d = os.path.join(out, mid)
+            os.makedirs(d, exist_ok=True)
+            mpath = os.path.join(d, os.path.basename(path))
+            with open(mpath, "w") as f:
+                f.write(src)
+            with open(os.path.join(d, "overlay.json"), "w") as f:
+                json.dump({"Replace": {path: mpath}}, f)
+            pkg = "org" if path == ORG else "cli"
+            lst.write(f"{mid}\t{pkg}\t{note}\n")
+    print(f"{len(muts)} mutants written to {out}")
+
+if __name__ == "__main__":
+    main()

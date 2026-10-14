@@ -1,0 +1,297 @@
+# /test org-merge-order cycle 2: read-only runs against the real GitHub origin and the real gh
+# HEAD binary: GOTOOLCHAIN=go1.25.8 go build -o <scratch>/ralph-head ./cmd/ralph (worktree HEAD e346083d).
+# Pre-fix binary: git archive cab2fd50 (cycle 1's last commit before 15d4b947) built the same way, <scratch>/ralph-prefix.
+# PATH for every run: <scratch>/real-bin (logging wrappers that record their arguments and exec
+# /opt/homebrew/bin/git and /opt/homebrew/bin/gh), then /usr/bin:/bin. Nothing was fetched or pushed,
+# nothing was written to GitHub, and no gh account was switched. gh 2.102.0, git 2.49.0.
+
+## 1. The task worktree (origin ssh://git@github.com/yoshpy-dev/ralph.git, the only remote, no gh-resolved)
+$ git remote get-url origin
+ssh://git@github.com/yoshpy-dev/ralph.git
+$ GIT_TERMINAL_PROMPT=0 git ls-remote --symref origin HEAD 'refs/heads/*' </dev/null
+ref: refs/heads/main	HEAD
+ac34ccf38742deabd093242fabf38fefa9a6be37	HEAD
+e346083d777f3877d4902a2108bf6383944ae615	refs/heads/feat/org-merge-order
+ac34ccf38742deabd093242fabf38fefa9a6be37	refs/heads/main
+rc=0
+
+# <tmp-ledger>/manifest.jsonl, written by hand (sha256 025a9fb0...726b38d before and after the runs):
+#   gate225: bound to feat/org-gate (merged as PR #225, deleted from origin), gate_passed on its PR head
+#   mo:      bound to feat/org-merge-order, gate_passed on origin's tip e346083d with base origin/main ac34ccf3
+{"ts":"2026-10-13T00:00:00Z","org_id":"gate225","seat_id":"","event":"scope_reserved","worktree":"/wt/org-gate","details":"paths=internal/org/ split=demo feature=org-gate digest=0123456789ab branch=feat/org-gate approval=per-plan"}
+{"ts":"2026-10-13T00:01:00Z","org_id":"gate225","seat_id":"","event":"gate_passed","details":"head=69141291b45799080ffc6e30dc06e2f3fde438f6 base=b20e70df00000000000000000000000000000000 base_ref=refs/remotes/origin/main branch=feat/org-gate by=tester herdr_pane=unset log=\"/state/gates/x.log\""}
+{"ts":"2026-10-14T00:00:00Z","org_id":"mo","seat_id":"","event":"scope_reserved","worktree":"/wt/org-merge-order","details":"paths=internal/cli/ split=demo feature=org-merge-order digest=0123456789ab branch=feat/org-merge-order approval=per-plan"}
+{"ts":"2026-10-14T00:01:00Z","org_id":"mo","seat_id":"","event":"gate_passed","details":"head=e346083d777f3877d4902a2108bf6383944ae615 base=ac34ccf38742deabd093242fabf38fefa9a6be37 base_ref=refs/remotes/origin/main branch=feat/org-merge-order by=tester herdr_pane=unset log=\"/state/gates/y.log\""}
+
+$ ralph org merge-order --state-dir <tmp-ledger> --json
+{
+  "default_branch": "main",
+  "default_head": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+  "listed_at": "2026-10-13T23:03:07Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "ready",
+      "branch": "feat/org-merge-order",
+      "remote_head": "e346083d777f3877d4902a2108bf6383944ae615",
+      "detail": "the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "e346083d777f3877d4902a2108bf6383944ae615",
+        "base": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "mo",
+        "feature": "org-merge-order",
+        "split": "demo",
+        "ts": "2026-10-14T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "1 branch(es) whose PR is merged or closed are not shown (--all shows them)",
+    "the order is as of the ls-remote at 2026-10-13T23:03:07Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0
+stderr:
+# commands run (logging wrappers that exec /opt/homebrew/bin/{git,gh}):
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+$ ralph org merge-order --state-dir <tmp-ledger> --all --json
+{
+  "default_branch": "main",
+  "default_head": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+  "listed_at": "2026-10-13T23:03:11Z",
+  "gh_available": true,
+  "entries": [
+    {
+      "rank": 1,
+      "class": "ready",
+      "branch": "feat/org-merge-order",
+      "remote_head": "e346083d777f3877d4902a2108bf6383944ae615",
+      "detail": "the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip",
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "e346083d777f3877d4902a2108bf6383944ae615",
+        "base": "ac34ccf38742deabd093242fabf38fefa9a6be37",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-14T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "mo",
+        "feature": "org-merge-order",
+        "split": "demo",
+        "ts": "2026-10-14T00:00:00Z"
+      }
+    },
+    {
+      "rank": 2,
+      "class": "merged",
+      "branch": "feat/org-gate",
+      "remote_head": "",
+      "detail": "PR #225 is merged",
+      "pr": {
+        "number": 225,
+        "state": "MERGED",
+        "url": "https://github.com/yoshpy-dev/ralph/pull/225",
+        "head_ref_oid": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base_ref_name": "main"
+      },
+      "gate": {
+        "event": "gate_passed",
+        "readable": true,
+        "head": "69141291b45799080ffc6e30dc06e2f3fde438f6",
+        "base": "b20e70df00000000000000000000000000000000",
+        "base_ref": "refs/remotes/origin/main",
+        "reason": "",
+        "ts": "2026-10-13T00:01:00Z"
+      },
+      "binding": {
+        "org_id": "gate225",
+        "feature": "org-gate",
+        "split": "demo",
+        "ts": "2026-10-13T00:00:00Z"
+      }
+    }
+  ],
+  "notes": [
+    "the order is as of the ls-remote at 2026-10-13T23:03:11Z and is not a guarantee: origin/main can move before a merge"
+  ]
+}
+exit=0
+stderr:
+# commands run (logging wrappers that exec /opt/homebrew/bin/{git,gh}):
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+$ ralph org merge-order --state-dir <tmp-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T23:03:15Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	e346083d777f	ac34ccf38742	mo/org-merge-order	the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	merged	feat/org-gate	#225 https://github.com/yoshpy-dev/ralph/pull/225	69141291b457	b20e70df0000	gate225/org-gate	PR #225 is merged
+note: the order is as of the ls-remote at 2026-10-13T23:03:15Z and is not a guarantee: origin/main can move before a merge
+exit=0
+stderr:
+# commands run (logging wrappers that exec /opt/homebrew/bin/{git,gh}):
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+
+# Reading: origin's URL reads as yoshpy-dev/ralph and PR #225's url names yoshpy-dev/ralph, so the
+# check passes and the PR is used: feat/org-gate is hidden as merged by default, and --all lists it as
+# merged with "#225 https://github.com/yoshpy-dev/ralph/pull/225" in the PR column. get-url ran once,
+# after gh returned the first PR. The two `git remote -v` and `git config --get-regexp
+# ^remote\..*\.gh-resolved$` lines after each gh call are gh's own (how gh picks its repository).
+
+## 2. A fork-like temp repo: origin = yoshpy-dev/ralph, upstream = cli/cli (git init, two remotes, no commits)
+# <fork-ledger>/manifest.jsonl (sha256 b53f93d9...6c668a before and after every run):
+#   up:      bound to bdehamer-attestation-verify-bundle-help, a branch of cli/cli's merged PR #14650
+#            (found with a read-only gh pr list -R cli/cli --state merged --limit 3), not on origin
+#   gate225 and mo as in section 1
+{"ts":"2026-10-12T00:00:00Z","org_id":"up","seat_id":"","event":"scope_reserved","worktree":"/wt/up","details":"paths=internal/up/ split=demo feature=up digest=0123456789ab branch=bdehamer-attestation-verify-bundle-help approval=per-plan"}
+{"ts":"2026-10-12T00:01:00Z","org_id":"up","seat_id":"","event":"gate_passed","details":"head=1111111111111111111111111111111111111111 base=ac34ccf38742deabd093242fabf38fefa9a6be37 base_ref=refs/remotes/origin/main branch=bdehamer-attestation-verify-bundle-help by=tester herdr_pane=unset log=\"/state/gates/u.log\""}
+{"ts":"2026-10-13T00:00:00Z","org_id":"gate225","seat_id":"","event":"scope_reserved","worktree":"/wt/org-gate","details":"paths=internal/org/ split=demo feature=org-gate digest=0123456789ab branch=feat/org-gate approval=per-plan"}
+{"ts":"2026-10-13T00:01:00Z","org_id":"gate225","seat_id":"","event":"gate_passed","details":"head=69141291b45799080ffc6e30dc06e2f3fde438f6 base=b20e70df00000000000000000000000000000000 base_ref=refs/remotes/origin/main branch=feat/org-gate by=tester herdr_pane=unset log=\"/state/gates/x.log\""}
+{"ts":"2026-10-14T00:00:00Z","org_id":"mo","seat_id":"","event":"scope_reserved","worktree":"/wt/org-merge-order","details":"paths=internal/cli/ split=demo feature=org-merge-order digest=0123456789ab branch=feat/org-merge-order approval=per-plan"}
+{"ts":"2026-10-14T00:01:00Z","org_id":"mo","seat_id":"","event":"gate_passed","details":"head=e346083d777f3877d4902a2108bf6383944ae615 base=ac34ccf38742deabd093242fabf38fefa9a6be37 base_ref=refs/remotes/origin/main branch=feat/org-merge-order by=tester herdr_pane=unset log=\"/state/gates/y.log\""}
+
+$ cd <fork-repo>; git remote -v
+origin	ssh://git@github.com/yoshpy-dev/ralph.git (fetch)
+origin	ssh://git@github.com/yoshpy-dev/ralph.git (push)
+upstream	https://github.com/cli/cli.git (fetch)
+upstream	https://github.com/cli/cli.git (push)
+
+$ ralph org merge-order --state-dir <fork-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T23:04:09Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	e346083d777f	ac34ccf38742	mo/org-merge-order	the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	no_remote	bdehamer-attestation-verify-bundle-help	-	111111111111	ac34ccf38742	up/up	origin has no branch bdehamer-attestation-verify-bundle-help: it was not pushed, or was deleted after a merge
+3	no_remote	feat/org-gate	-	69141291b457	b20e70df0000	gate225/org-gate	origin has no branch feat/org-gate: it was not pushed, or was deleted after a merge
+note: gh reads cli/cli, not origin's yoshpy-dev/ralph: no PR is used, so merged and closed PRs are not told apart (a branch deleted after its merge shows as no_remote) and PR bases are not checked; run gh repo set-default yoshpy-dev/ralph in this repository
+note: the order is as of the ls-remote at 2026-10-13T23:04:09Z and is not a guarantee: origin/main can move before a merge
+exit=0
+stderr:
+# commands run:
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head bdehamer-attestation-verify-bundle-help --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+
+$ ralph-prefix(cab2fd50) org merge-order --state-dir <fork-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T23:04:28Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	e346083d777f	ac34ccf38742	mo/org-merge-order	the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	no_remote	feat/org-gate	-	69141291b457	b20e70df0000	gate225/org-gate	origin has no branch feat/org-gate: it was not pushed, or was deleted after a merge
+3	merged	bdehamer-attestation-verify-bundle-help	#14650 https://github.com/cli/cli/pull/14650	111111111111	ac34ccf38742	up/up	PR #14650 is merged
+note: the order is as of the ls-remote at 2026-10-13T23:04:28Z and is not a guarantee: origin/main can move before a merge
+exit=0
+stderr:
+# commands run:
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head bdehamer-attestation-verify-bundle-help --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+$ gh repo set-default yoshpy-dev/ralph   (in the temp repo; writes only its .git/config)
+exit=0
+$ git config --get-regexp gh-resolved
+remote.origin.gh-resolved base
+
+$ ralph org merge-order --state-dir <fork-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T23:04:46Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	e346083d777f	ac34ccf38742	mo/org-merge-order	the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	no_remote	bdehamer-attestation-verify-bundle-help	-	111111111111	ac34ccf38742	up/up	origin has no branch bdehamer-attestation-verify-bundle-help: it was not pushed, or was deleted after a merge
+3	merged	feat/org-gate	#225 https://github.com/yoshpy-dev/ralph/pull/225	69141291b457	b20e70df0000	gate225/org-gate	PR #225 is merged
+note: the order is as of the ls-remote at 2026-10-13T23:04:46Z and is not a guarantee: origin/main can move before a merge
+exit=0
+stderr:
+# commands run:
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head bdehamer-attestation-verify-bundle-help --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+
+# Known gap (verify K12, tech-debt row): an origin URL that names no owner/repo for mergeRepoFromOriginURL.
+$ git config --unset remote.origin.gh-resolved; git remote set-url origin git+ssh://git@github.com/yoshpy-dev/ralph.git
+origin	git+ssh://git@github.com/yoshpy-dev/ralph.git (fetch)
+origin	git+ssh://git@github.com/yoshpy-dev/ralph.git (push)
+upstream	https://github.com/cli/cli.git (fetch)
+upstream	https://github.com/cli/cli.git (push)
+$ ralph org merge-order --state-dir <fork-ledger> --all
+origin/main ac34ccf38742 (listed 2026-10-13T23:31:36Z)
+RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
+1	ready	feat/org-merge-order	-	e346083d777f	ac34ccf38742	mo/org-merge-order	the gate passed on e346083d777f, origin's tip of the branch, with base ac34ccf38742, origin/main's tip
+2	no_remote	feat/org-gate	-	69141291b457	b20e70df0000	gate225/org-gate	origin has no branch feat/org-gate: it was not pushed, or was deleted after a merge
+3	merged	bdehamer-attestation-verify-bundle-help	#14650 https://github.com/cli/cli/pull/14650	111111111111	ac34ccf38742	up/up	PR #14650 is merged
+note: the order is as of the ls-remote at 2026-10-13T23:31:36Z and is not a guarantee: origin/main can move before a merge
+exit=0
+stderr:
+# commands run:
+#   git ls-remote --symref origin HEAD refs/heads/*
+#   gh pr list --head bdehamer-attestation-verify-bundle-help --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   git remote get-url origin
+#   gh pr list --head feat/org-gate --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+#   gh pr list --head feat/org-merge-order --state all --json number,state,url,headRefOid,baseRefName,isCrossRepository
+#   git remote -v
+#   git config --get-regexp ^remote\..*\.gh-resolved$
+
+# Reading:
+# - The real gh in a checkout with an upstream remote reads upstream (cli/cli), the premise of the
+#   cycle-2 fix that self-review and verify left unobserved. HEAD refuses its PR, says
+#   "gh reads cli/cli, not origin's yoshpy-dev/ralph ... run gh repo set-default yoshpy-dev/ralph",
+#   and runs gh once. The pre-fix binary (cab2fd50) uses cli/cli's PR #14650 and lists the branch as
+#   merged (hidden without --all): the cross-review finding, reproduced.
+# - Running the command the note names (gh repo set-default yoshpy-dev/ralph, which wrote only
+#   remote.origin.gh-resolved=base to the temp repo's .git/config) makes gh read origin: PR #225 is
+#   used and feat/org-gate is merged again.
+# - With origin rewritten to git+ssh://, which mergeRepoFromOriginURL does not read, and gh-resolved
+#   unset, the check is skipped and cli/cli's PR #14650 is used again (verify K12, the tech-debt row on
+#   mergeOriginRepo.check). feat/org-gate shows as no_remote there because cli/cli has no PR for that
+#   branch name (verify D3 (c): an empty result from another repository looks like "no PR").
