@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // The merge guarantee, stage 7c-2 of plan
@@ -94,7 +93,7 @@ const (
 	// get-url origin` when MergeGuaranteeReadParams leaves GitTimeout zero.
 	defaultMergeGuaranteeGitTimeout = 10 * time.Second
 	// mergeGuaranteeMaxErrText is how many bytes of a command's error a
-	// Detail quotes.
+	// Detail quotes, counted after escaping (mergeGuaranteeErrText).
 	mergeGuaranteeMaxErrText = 300
 	// mergeGuaranteeFix ends every pr_checks_only Detail: what to set. It names
 	// only what the check reads: a merge queue counts from a ruleset only, never
@@ -430,8 +429,12 @@ var mergeClassicNotStrict = []string{"Branch not protected", "Required status ch
 
 // readMergeClassicStrict is step 6, for a branch protection that requires
 // checks. The endpoint needs admin access: GitHub answers others with a 404
-// Not Found (or a 403), and the strict is then unknown. The failure's JSON
-// body, which gh prints on stdout, gives the message.
+// Not Found, and the strict is then unknown, with a Detail that says it
+// needs admin access. A 403 leaves it unknown too, with a Detail that names
+// admin access as only one possible cause: GitHub answers 403 without admin
+// access and for other causes, such as a rate limit or an SSO authorization
+// the token lacks. The failure's JSON body, which gh prints on stdout, gives
+// the message and the status.
 func (g *mergeGuaranteeRun) readMergeClassicStrict(checks int) (strict bool, why string) {
 	path := g.repoPath("branches", url.PathEscape(g.c.DefaultBranch), "protection", "required_status_checks")
 	out, err := g.gh(false, path)
@@ -457,9 +460,14 @@ func (g *mergeGuaranteeRun) readMergeClassicStrict(checks int) (strict bool, why
 	switch {
 	case slices.Contains(mergeClassicNotStrict, body.Message):
 		return false, ""
-	case body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):
+	case body.Message == "Not Found":
 		return false, fmt.Sprintf("the branch protection of %s, requires %s, but whether it requires branches to be up to date "+
 			"before merging can be read only with admin access to the repository (%s failed: %s)", g.subject(),
+			mergeChecksText(checks), cmd, mergeGuaranteeErrText(err))
+	case fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):
+		return false, fmt.Sprintf("the branch protection of %s, requires %s, but whether it requires branches to be up to date "+
+			"before merging is unknown: GitHub answered 403, which can come from missing admin access to the repository or "+
+			"from another cause, such as a rate limit or an SSO authorization the token lacks (%s failed: %s)", g.subject(),
 			mergeChecksText(checks), cmd, mergeGuaranteeErrText(err))
 	}
 	return false, fmt.Sprintf("%s failed (%s), so whether the branch protection of %s, requires branches to be up to date "+
@@ -597,18 +605,24 @@ func getMergeOriginURL(ctx context.Context, dir string, run MergeOrderExec) (str
 	return strings.TrimSpace(line), nil
 }
 
-// mergeGuaranteeErrText is err's text on one line, cut to
-// mergeGuaranteeMaxErrText bytes, for a Detail.
+// mergeGuaranteeErrText is err's text for a Detail: each run of white space
+// (newlines included) becomes one space, then each control character left,
+// such as ESC, is written as its Go escape (\x1b) by PrintableInboxText,
+// and then the text is cut to mergeGuaranteeMaxErrText bytes with "..."
+// after it. The cut comes after the escaping, so the escapes count toward
+// the limit and none is cut in two. doctor prints a Detail as it is, and
+// status and merge-order pass it through PrintableInboxText again, which
+// leaves an escaped text as it is.
 func mergeGuaranteeErrText(err error) string {
-	s := strings.Join(strings.Fields(err.Error()), " ")
-	if len(s) <= mergeGuaranteeMaxErrText {
-		return s
+	var b strings.Builder
+	for _, r := range strings.Join(strings.Fields(err.Error()), " ") {
+		printable := PrintableInboxText(string(r), false)
+		if b.Len()+len(printable) > mergeGuaranteeMaxErrText {
+			return b.String() + "..."
+		}
+		b.WriteString(printable)
 	}
-	cut := mergeGuaranteeMaxErrText
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "..."
+	return b.String()
 }
 
 // MergeGuaranteeSave is what SaveMergeGuarantee did.

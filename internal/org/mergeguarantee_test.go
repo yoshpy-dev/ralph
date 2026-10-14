@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -319,10 +320,11 @@ func TestMergeGuarantee_RulesetsDecideTheKind(t *testing.T) {
 // TestMergeGuarantee_ClassicProtectionDecidesTheKind: the branch
 // protection's required checks with strict true are github_protection, with
 // strict false or off pr_checks_only; a strict that needs admin access (404
-// Not Found, 403) is unknown, a 404 that says the branch or its checks are
-// not protected is strict false, any other failure unknown; strict is read
-// only when the branch protection requires a check and nothing decided
-// before it (AC2, AC3).
+// Not Found) is unknown and says so, a 403 is unknown and names admin
+// access as one cause among others, a 404 that says the branch or its
+// checks are not protected is strict false, any other failure (another 404
+// included) unknown; strict is read only when the branch protection
+// requires a check and nothing decided before it (AC2, AC3).
 func TestMergeGuarantee_ClassicProtectionDecidesTheKind(t *testing.T) {
 	all := []string{mgRepoEP, mgRulesEP, mgBranchEP, mgStrictEP}
 	three := []string{mgRepoEP, mgRulesEP, mgBranchEP}
@@ -330,6 +332,12 @@ func TestMergeGuarantee_ClassicProtectionDecidesTheKind(t *testing.T) {
 		return "the branch protection of " + mgSubject + ", requires 1 required status check, but whether it requires " +
 			"branches to be up to date before merging can be read only with admin access to the repository (gh api " +
 			"--hostname github.com " + mgStrictEP + " failed: " + answer + ")"
+	}
+	forbidden := func(answer string) string {
+		return "the branch protection of " + mgSubject + ", requires 1 required status check, but whether it requires " +
+			"branches to be up to date before merging is unknown: GitHub answered 403, which can come from missing admin " +
+			"access to the repository or from another cause, such as a rate limit or an SSO authorization the token " +
+			"lacks (gh api --hostname github.com " + mgStrictEP + " failed: " + answer + ")"
 	}
 	for _, tc := range []struct {
 		name      string
@@ -357,12 +365,15 @@ func TestMergeGuarantee_ClassicProtectionDecidesTheKind(t *testing.T) {
 			"no status check is required", true, three},
 		{"strict needs admin access: 404 Not Found", "", mgClassicRequires("ci"), mgAPIErrorReply("Not Found", "404"),
 			MergeGuaranteeUnknown, admin("exit status 1: gh: Not Found (HTTP 404)"), false, all},
-		{"strict needs admin access: 403 in the body", "", mgClassicRequires("ci"),
+		{"strict answers 403: in the body", "", mgClassicRequires("ci"),
 			mgAPIErrorReply("Must have admin rights to Repository.", "403"), MergeGuaranteeUnknown,
-			admin("exit status 1: gh: Must have admin rights to Repository. (HTTP 403)"), false, all},
-		{"strict needs admin access: 403 on stderr only", "", mgClassicRequires("ci"),
+			forbidden("exit status 1: gh: Must have admin rights to Repository. (HTTP 403)"), false, all},
+		{"strict answers 403: on stderr only", "", mgClassicRequires("ci"),
 			&mgReply{err: errors.New("exit status 1: gh: Forbidden (HTTP 403)")}, MergeGuaranteeUnknown,
-			admin("exit status 1: gh: Forbidden (HTTP 403)"), false, all},
+			forbidden("exit status 1: gh: Forbidden (HTTP 403)"), false, all},
+		{"strict answers 403: in the body only", "", mgClassicRequires("ci"),
+			&mgReply{out: mgAPIError("Resource not accessible", "403").out, err: errors.New("exit status 1")},
+			MergeGuaranteeUnknown, forbidden("exit status 1"), false, all},
 		{"strict answers Branch not protected", "", mgClassicRequires("ci"), mgAPIErrorReply("Branch not protected", "404"),
 			MergeGuaranteePRChecksOnly, "the branch protection requires 1 required status check, but nothing requires", true, all},
 		{"strict answers Required status checks not enabled", "", mgClassicRequires("ci"),
@@ -372,6 +383,10 @@ func TestMergeGuarantee_ClassicProtectionDecidesTheKind(t *testing.T) {
 			"gh api --hostname github.com " + mgStrictEP + " failed (exit status 1: gh: Server Error (HTTP 500)), so whether " +
 				"the branch protection of " + mgSubject + ", requires branches to be up to date before merging is unknown",
 			false, all},
+		{"strict answers a 404 with another message", "", mgClassicRequires("ci"), mgAPIErrorReply("Branch not found", "404"),
+			MergeGuaranteeUnknown, "gh api --hostname github.com " + mgStrictEP + " failed (exit status 1: gh: Branch not " +
+				"found (HTTP 404)), so whether the branch protection of " + mgSubject + ", requires branches to be up to date " +
+				"before merging is unknown", false, all},
 		{"strict answer with no strict", "", mgClassicRequires("ci"), &mgReply{out: `{"url":"x","contexts":["ci"]}`},
 			MergeGuaranteeUnknown, "printed output with no strict, so whether the branch protection of " + mgSubject +
 				", requires branches to be up to date before merging is unknown", true, all},
@@ -534,6 +549,49 @@ func TestMergeGuarantee_LongErrorIsCutToOneLine(t *testing.T) {
 	}
 	if got := mergeGuaranteeErrText(errors.New("  a\tb  ")); got != "a b" {
 		t.Errorf("short text = %q, want %q", got, "a b")
+	}
+}
+
+// TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped: an escape
+// sequence or another control character in gh's error reaches the Detail
+// written as its Go escape, never raw, since doctor prints the Detail as it
+// is; the cache keeps that Detail, and the PrintableInboxText that status
+// and merge-order apply again (inboxField) leaves their line as it is.
+func TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped(t *testing.T) {
+	stateDir := mgStateDir(t)
+	e := newMGExec()
+	e.replies[mgRepoEP] = mgReply{err: errors.New("exit status 1: gh: \x1b[31mBad credentials\x1b[0m\a\x00\x7f\u009b2J (HTTP 401)")}
+	c := mgCheck(e)
+	want := "gh api --hostname github.com repos/acme/app failed (exit status 1: gh: " +
+		`\x1b[31mBad credentials\x1b[0m\a\x00\x7f\u009b2J` + " (HTTP 401)): check that gh can reach github.com and is " +
+		"logged in to it (gh auth status --hostname github.com)"
+	if c.Kind != MergeGuaranteeUnknown || c.Detail != want {
+		t.Fatalf("check = %s %q\nwant unknown with %q", c.Kind, c.Detail, want)
+	}
+	for _, r := range c.Detail {
+		if unicode.IsControl(r) {
+			t.Errorf("detail %q holds the raw control character %U", c.Detail, r)
+		}
+	}
+	mgSave(t, stateDir, c)
+	g := ReadMergeGuarantee(context.Background(), stateDir, mgReadParams(newMGExec(), mgClock))
+	if g.Detail != want {
+		t.Errorf("cached detail = %q, want %q", g.Detail, want)
+	}
+	if text := g.Text(); PrintableInboxText(text, false) != text {
+		t.Errorf("status and merge-order would change the line %q into %q", text, PrintableInboxText(text, false))
+	}
+}
+
+// TestMergeGuarantee_ErrorIsCutAfterEscaping: the limit counts the escapes,
+// and the cut never splits one.
+func TestMergeGuarantee_ErrorIsCutAfterEscaping(t *testing.T) {
+	got := mergeGuaranteeErrText(errors.New("a" + strings.Repeat("\x1b", 100)))
+	if want := "a" + strings.Repeat(`\x1b`, 74) + "..."; got != want {
+		t.Errorf("text = %q (%d bytes)\nwant %q", got, len(got), want)
+	}
+	if got := mergeGuaranteeErrText(errors.New(strings.Repeat("\x1b", 75))); got != strings.Repeat(`\x1b`, 75) {
+		t.Errorf("text of exactly the limit = %q, want it whole", got)
 	}
 }
 
