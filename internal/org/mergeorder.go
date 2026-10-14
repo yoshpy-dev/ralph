@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,11 @@ import (
 // it runs only on a PR gh returns, so another repository with no PR for the
 // branch gives no note. All three commands run through MergeOrderExec (C6).
 // Evidence that cannot be read never makes a branch ready (C8).
+//
+// The result also carries the merge guarantee of origin's default branch
+// (stage 7c-2, docs/plans/active/2026-10-14-org-merge-guarantee.md): the
+// cache `ralph doctor` writes in the ledger's state dir, read with
+// ReadMergeGuarantee (mergeguarantee.go), never with gh.
 //
 // MergeOrder writes nothing, to the ledger or anywhere else, takes no lock,
 // and never fetches. Neither the watch gate (watchgate.go) nor the approval
@@ -146,6 +152,12 @@ type MergeOrderResult struct {
 	// GHAvailable reports that gh was found. False when it was not, and when
 	// there was no branch to ask it about.
 	GHAvailable bool `json:"gh_available"`
+	// MergeGuarantee is the merge guarantee of origin's default branch as the
+	// ledger's cache tells it (ReadMergeGuarantee), unknown
+	// (default_branch_changed) when the cache was checked for another branch
+	// than DefaultBranch (ForDefaultBranch). With no target branch no
+	// ls-remote runs, so it is the cache's alone.
+	MergeGuarantee MergeGuarantee `json:"merge_guarantee"`
 	// Entries are the branches shown, in merge order.
 	Entries []MergeOrderEntry `json:"entries"`
 	// Notes are what the reader should know about the whole list, one
@@ -208,13 +220,17 @@ type MergeOrderBinding struct {
 
 // MergeOrder runs `ralph org merge-order`. It reads the manifest line by line
 // (readMergeLedger) and collects the target branches with their latest
-// binding and gate record (collectMergeTargets). With no target it returns
-// at once, with a note and no git call. Otherwise it reads origin with one
-// ls-remote in p.Dir (listOriginBranches), asks gh for each branch's PR and
-// keeps it only when it is from origin's repository (lookupMergePRs, which
-// runs `git remote get-url origin` once, when gh first returns a PR),
-// classifies each branch (classifyMergeTarget) and orders them
-// (orderMergeEntries).
+// binding and gate record (collectMergeTargets). It reads the merge guarantee
+// from the cache in the manifest's state dir (ReadMergeGuarantee, with p.Dir,
+// the same exec and o.Now), which runs no gh and, only when the cache is
+// fresh, the local `git remote get-url origin`. With no target it returns at
+// once, with a note, the guarantee, and no ls-remote or gh call. Otherwise it
+// reads origin with one ls-remote in p.Dir (listOriginBranches), makes the
+// guarantee unknown when the cache was checked for another default branch
+// (ForDefaultBranch), asks gh for each branch's PR and keeps it only when it
+// is from origin's repository (lookupMergePRs, which runs `git remote get-url
+// origin` once, when gh first returns a PR), classifies each branch
+// (classifyMergeTarget) and orders them (orderMergeEntries).
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
 // times out or names no default branch, and ctx done: nothing is classified
@@ -227,16 +243,19 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	}
 	targets, unattached := collectMergeTargets(ledger)
 	ledgerNotes := mergeLedgerNotes(len(ledger.corruptAt), unattached)
+	run := p.Exec
+	if run == nil {
+		run = realMergeOrderExec
+	}
+	guaranteeDir := filepath.Dir(o.Manifest.Path())
+	guaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run, Now: o.Now}
 	res := MergeOrderResult{Entries: []MergeOrderEntry{}, Notes: []string{}}
 	if len(targets) == 0 {
+		res.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams)
 		res.Notes = append(res.Notes, "no feature branches in the ledger: a branch is listed once ralph org start --plan "+
 			"binds an org to it or ralph org gate records a gate on it")
 		res.Notes = append(res.Notes, ledgerNotes...)
 		return res, nil
-	}
-	run := p.Exec
-	if run == nil {
-		run = realMergeOrderExec
 	}
 	res.ListedAt = o.now()
 	remote, err := listOriginBranches(ctx, p, run)
@@ -244,6 +263,7 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 		return MergeOrderResult{}, err
 	}
 	res.DefaultBranch, res.DefaultHead = remote.defaultBranch, remote.defaultHead
+	res.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams).ForDefaultBranch(res.DefaultBranch)
 	var ghNotes []string
 	if res.GHAvailable, ghNotes, err = lookupMergePRs(ctx, p, run, targets); err != nil {
 		return MergeOrderResult{}, err

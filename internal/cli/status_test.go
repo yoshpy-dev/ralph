@@ -620,7 +620,8 @@ func TestStatusCmd_OrgWatchLineAndJSONPerWatchState(t *testing.T) {
 }
 
 // TestStatusCmd_OrgWatchLineFollowsTheStateDirLine pins where the line goes
-// on the populated path: right below the state-dir line, above the rosters,
+// on the populated path: right below the state-dir line, above the merge
+// guarantee line (not checked: the state dir has no cache) and the rosters,
 // whose per-org watch heartbeat stays as it was.
 func TestStatusCmd_OrgWatchLineFollowsTheStateDirLine(t *testing.T) {
 	dir := t.TempDir()
@@ -631,8 +632,9 @@ func TestStatusCmd_OrgWatchLineFollowsTheStateDirLine(t *testing.T) {
 		t.Fatalf("status: %v (output: %s)", err, out)
 	}
 	lines := strings.Split(out, "\n")
-	if len(lines) < 3 || !strings.HasPrefix(lines[0], "state-dir: ") || lines[1] != "org watch: not running" || !strings.HasPrefix(lines[2], "org_id: ") {
-		t.Errorf("want the state-dir line, then the org watch line, then the first roster, got:\n%s", out)
+	if len(lines) < 4 || !strings.HasPrefix(lines[0], "state-dir: ") || lines[1] != "org watch: not running" ||
+		lines[2] != "merge guarantee: unknown (not checked: run ralph doctor)" || !strings.HasPrefix(lines[3], "org_id: ") {
+		t.Errorf("want the state-dir line, the org watch line, the merge guarantee line, then the first roster, got:\n%s", out)
 	}
 }
 

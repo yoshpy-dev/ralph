@@ -1713,7 +1713,8 @@ func TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv(t *testing.T) {
 
 // TestMergeOrder_NoTargetsRunsNoGit covers C2's early return: with no
 // feature branch in the ledger (no manifest, an empty one, or only records
-// that do not count) the result is empty with a note, and no git or gh runs.
+// that do not count) and no merge-guarantee cache, the result is empty with
+// a note and the guarantee not_checked, and no git or gh runs.
 func TestMergeOrder_NoTargetsRunsNoGit(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -1737,6 +1738,9 @@ func TestMergeOrder_NoTargetsRunsNoGit(t *testing.T) {
 			if res.Entries == nil || len(res.Entries) != 0 || res.DefaultBranch != "" || res.ListedAt != "" || res.GHAvailable {
 				t.Fatalf("result = %+v, want an empty one", res)
 			}
+			if g := res.MergeGuarantee; g.Kind != MergeGuaranteeUnknown || g.Reason != MergeGuaranteeReasonNotChecked {
+				t.Fatalf("merge guarantee = %+v, want unknown (not_checked) with no cache", g)
+			}
 			if len(res.Notes) != 1+len(tc.notes) || !strings.Contains(res.Notes[0], "no feature branches in the ledger") {
 				t.Fatalf("notes = %q, want the no-branch note and %q", res.Notes, tc.notes)
 			}
@@ -1746,6 +1750,134 @@ func TestMergeOrder_NoTargetsRunsNoGit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// moGuarantee is a github_protection cache of moOriginURL's repository o/r,
+// for its default branch branch, checked an hour before mergeOrderTestClock.
+func moGuarantee(branch string) MergeGuaranteeCheck {
+	return MergeGuaranteeCheck{
+		Kind: MergeGuaranteeGitHubProtection, Detail: "a ruleset requires up-to-date branches with 1 required check",
+		Host: "github.com", Repo: "o/r", APIRepo: "o/r", DefaultBranch: branch,
+		CheckedAt: mergeOrderTestClock.Add(-time.Hour).Format(time.RFC3339),
+	}
+}
+
+// saveGuarantee writes c as the merge-guarantee cache in fx's state dir.
+func (fx *moFixture) saveGuarantee(t *testing.T, c MergeGuaranteeCheck) {
+	t.Helper()
+	if s := SaveMergeGuarantee(fx.stateDir, c); !s.Written || s.WriteErr != nil {
+		t.Fatalf("save = %+v", s)
+	}
+}
+
+// moGitArgs is each git call of e as its arguments joined by spaces.
+func moGitArgs(e *moExec) []string {
+	var out []string
+	for _, c := range e.callsOf("git") {
+		out = append(out, strings.Join(c.args, " "))
+	}
+	return out
+}
+
+// TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache covers AC7 and
+// AC10 at the org layer: MergeOrder reads the cache in the manifest's state
+// dir with its own exec in p.Dir and o.Now, after the ls-remote. A fresh
+// cache of origin's repository and default branch gives its kind after one
+// `git remote get-url origin`; no cache is not_checked with no git call but
+// the ls-remote; a cache of another default branch than the ls-remote names
+// is default_branch_changed; another origin is origin_changed; and a cache
+// stale by o.Now is stale with no get-url, while one fresh by o.Now is used
+// even though it is years old by the wall clock.
+func TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache(t *testing.T) {
+	const lsRemote, getURL = "ls-remote --symref origin HEAD refs/heads/*", "remote get-url origin"
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		setup   func(fx *moFixture, c *MergeGuaranteeCheck)
+		save    bool
+		listing string
+		kind    string
+		reason  string
+		text    string
+		git     []string
+	}{
+		{name: "fresh cache of origin's default branch", save: true, kind: MergeGuaranteeGitHubProtection,
+			text: "github_protection (main of github.com/o/r, checked 2026-10-14T08:00:00Z): a ruleset requires up-to-date " +
+				"branches with 1 required check", git: []string{lsRemote, getURL}},
+		{name: "no cache", kind: MergeGuaranteeUnknown, reason: MergeGuaranteeReasonNotChecked,
+			text: "unknown (not checked: run ralph doctor)", git: []string{lsRemote}},
+		{name: "cache of another default branch", save: true, listing: moListing("trunk", "trunk", moMain, "feat/a", moHeadA),
+			kind: MergeGuaranteeUnknown, reason: MergeGuaranteeReasonDefaultBranchChanged,
+			text: "unknown (doctor checked main; origin's default branch is now trunk)", git: []string{lsRemote, getURL}},
+		{name: "origin points to another repository", save: true,
+			setup: func(fx *moFixture, _ *MergeGuaranteeCheck) { fx.exec.origin = "git@github.com:o/other.git" },
+			kind:  MergeGuaranteeUnknown, reason: MergeGuaranteeReasonOriginChanged,
+			text: "unknown (doctor checked github.com/o/r; origin is now github.com/o/other)", git: []string{lsRemote, getURL}},
+		{name: "stale by the org's clock", save: true,
+			setup: func(_ *moFixture, c *MergeGuaranteeCheck) {
+				c.CheckedAt = mergeOrderTestClock.Add(-25 * time.Hour).Format(time.RFC3339)
+			},
+			kind: MergeGuaranteeUnknown, reason: MergeGuaranteeReasonStale,
+			text: "unknown (stale: last github_protection at 2026-10-13T08:00:00Z; run ralph doctor)", git: []string{lsRemote}},
+		{name: "fresh by the org's clock, years old by the wall clock", save: true,
+			setup: func(fx *moFixture, c *MergeGuaranteeCheck) {
+				fx.o.Now = func() time.Time { return old }
+				c.CheckedAt = old.Add(-time.Hour).Format(time.RFC3339)
+			},
+			kind: MergeGuaranteeGitHubProtection,
+			text: "github_protection (main of github.com/o/r, checked 2019-12-31T23:00:00Z): a ruleset requires up-to-date " +
+				"branches with 1 required check", git: []string{lsRemote, getURL}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain))
+			fx.exec.lsOut = cmp.Or(tc.listing, moListing("main", "main", moMain, "feat/a", moHeadA))
+			c := moGuarantee("main")
+			if tc.setup != nil {
+				tc.setup(fx, &c)
+			}
+			if tc.save {
+				fx.saveGuarantee(t, c)
+			}
+			g := fx.run(t, false).MergeGuarantee
+			if g.Kind != tc.kind || g.Reason != tc.reason || g.Text() != tc.text {
+				t.Errorf("merge guarantee = %+v\ntext %q\nwant kind %s, reason %q, text %q", g, g.Text(), tc.kind, tc.reason, tc.text)
+			}
+			if tc.save && (g.Host != "github.com" || g.Repo != "o/r" || g.DefaultBranch != "main" || g.CheckedAt != c.CheckedAt) {
+				t.Errorf("merge guarantee = %+v, want the cache's host, repo, branch and checked_at", g)
+			}
+			if tc.reason != "" && tc.save && g.LastKind != MergeGuaranteeGitHubProtection {
+				t.Errorf("last kind = %q, want the cache's github_protection", g.LastKind)
+			}
+			if got := moGitArgs(fx.exec); !slices.Equal(got, tc.git) {
+				t.Errorf("git calls = %q, want %q", got, tc.git)
+			}
+			for _, call := range fx.exec.callsOf("git") {
+				if call.dir != "/repo" || !slices.Equal(call.env, []string{"GIT_TERMINAL_PROMPT=0"}) {
+					t.Errorf("git call %+v, want it in /repo with GIT_TERMINAL_PROMPT=0", call)
+				}
+			}
+		})
+	}
+}
+
+// TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote: with no
+// feature branch, a fresh cache still gives its kind after the one local
+// `git remote get-url origin`, with no ls-remote and no gh, and the cache's
+// branch is kept as it is, since no ls-remote read the default branch.
+func TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.saveGuarantee(t, moGuarantee("main"))
+	res := fx.run(t, false)
+	if g := res.MergeGuarantee; g.Kind != MergeGuaranteeGitHubProtection || g.Reason != "" || g.DefaultBranch != "main" {
+		t.Fatalf("merge guarantee = %+v, want the cache's github_protection for main", g)
+	}
+	if got := moGitArgs(fx.exec); !slices.Equal(got, []string{"remote get-url origin"}) || len(fx.exec.calls) != 1 {
+		t.Fatalf("calls = %+v, want the get-url only", fx.exec.calls)
+	}
+	if res.DefaultBranch != "" || len(res.Entries) != 0 || !strings.Contains(res.Notes[0], "no feature branches in the ledger") {
+		t.Fatalf("result = %+v, want the empty one with the no-branch note", res)
 	}
 }
 
@@ -1782,7 +1914,8 @@ func TestMergeOrder_ManifestThatCannotBeReadIsAnError(t *testing.T) {
 
 // TestMergeOrder_WritesNothing covers AC9: MergeOrder leaves the manifest's
 // bytes and every file and directory under the state dir's parent as they
-// were (no lock file, no log, no cache), and needs no watch.
+// were (no lock file, no log, no cache), and needs no watch. The
+// merge-guarantee cache it reads stays as it was too.
 func TestMergeOrder_WritesNothing(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.add(t,
@@ -1790,6 +1923,7 @@ func TestMergeOrder_WritesNothing(t *testing.T) {
 		moBind("org-b", "b"), moGarbled("org-b", EventGateFailed), moCorruptLine,
 		moBind("org-c", "c"),
 	)
+	fx.saveGuarantee(t, moGuarantee("main"))
 	fx.exec.lsOut = moListing("main", "main", moMain, "feat/a", moHeadA)
 	fx.exec.setPR("feat/a", moPRs(moPR(1, "OPEN", "main")))
 	before := moSnapshot(t, fx.root)
@@ -1797,7 +1931,9 @@ func TestMergeOrder_WritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fx.run(t, false)
+	if g := fx.run(t, false).MergeGuarantee; g.Kind != MergeGuaranteeGitHubProtection {
+		t.Fatalf("merge guarantee = %+v, want the cache read", g)
+	}
 	fx.run(t, true)
 	if after := moSnapshot(t, fx.root); !slices.Equal(after, before) {
 		t.Fatalf("the temp dir changed:\nbefore %q\nafter  %q", before, after)
@@ -1839,8 +1975,8 @@ func moSnapshot(t *testing.T, root string) []string {
 }
 
 // TestMergeOrder_ResultJSONShape: the result marshals with snake_case keys,
-// empty lists as [] and the absent PR, gate and binding left out, so the
-// CLI can print it as it is for --json.
+// empty lists as [] and the absent PR, gate and binding left out, and the
+// merge guarantee as an object, so the CLI can print it as it is for --json.
 func TestMergeOrder_ResultJSONShape(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.add(t, moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain), moPassed("org-x", "feat/x", moHeadA, moMain))
@@ -1880,7 +2016,9 @@ func TestMergeOrder_ResultJSONShape(t *testing.T) {
 		got  []string
 		want []string
 	}{
-		{"result", keys(got.Top), []string{"default_branch", "default_head", "entries", "gh_available", "listed_at", "notes"}},
+		{"result", keys(got.Top), []string{"default_branch", "default_head", "entries", "gh_available", "listed_at",
+			"merge_guarantee", "notes"}},
+		{"merge guarantee without a cache", keys(sub(got.Top["merge_guarantee"])), []string{"detail", "kind", "reason"}},
 		{"full entry", keys(got.Entries[0]), []string{"binding", "branch", "class", "detail", "gate", "pr", "rank", "remote_head"}},
 		{"pr", keys(sub(got.Entries[0]["pr"])), []string{"base_ref_name", "head_ref_oid", "number", "state", "url"}},
 		{"gate", keys(sub(got.Entries[0]["gate"])), []string{"base", "base_ref", "event", "head", "readable", "reason", "ts"}},
