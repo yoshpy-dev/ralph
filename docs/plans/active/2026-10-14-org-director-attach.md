@@ -170,5 +170,5 @@ Critical forks: D1〜D4 は consult(consult-plan-director)、D7 と D8 は consu
 - 2026-10-15: 計画からのずれ。(1) S3 で `ralph status` が `enabled` を main worktree の規則で読むようになり、`--state-dir` を渡すと手元で `git rev-parse` を打つ。そのため `TestStatusCmd_MergeGuaranteeRunsNoGH` の検査を「origin の読み出しは 1 回、ほかは `rev-parse` だけ、gh は打たない」に緩めた(7c-2 の AC6 の「gh を打たず、ネットワークに出ない」は保つ)。(2) S2c で `ApprovedPlan.Resolved` の代わりに `ResolvedElsewhere` を足した。ほかの誰かが resolve した件には、打っても失敗する resolve の打ち方を出さない。(3) 7a のテストのうち、approve が件を resolve することを確かめていたものは、resolve しないことを確かめる形に書き換えた(D7 による契約の変更)
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
