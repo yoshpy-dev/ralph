@@ -158,6 +158,10 @@ Critical forks: C1〜C7 は consult(consult-plan-guarantee)の判定で決めた
   - S1 f6bbd49c(`internal/org/mergeguarantee.go`: 判定、キャッシュの読み書き。implementer の変異 13 件はすべてテストで落ちた)
   - S2 e3f3403b(doctor の Check 11c `Merge guarantee`、seam `doctorMergeGuaranteeEnv` を TestMain で固定。台帳のない repo では書かないことを実機の doctor で確認)
   - S3 の決めごと: merge-order は分岐がなく ls-remote を打たないときも保証の行を出す(既定のブランチの行がないので先頭に出す)。キャッシュがなければ git は打たない
+  - S3 0e3813dc(status と merge-order の `merge guarantee:` の行と `merge_guarantee`。MergeOrder は 24 時間の判定に org の時計 `o.Now` を使う。変異 10 件はすべてテストで落ちた)
+  - S4 d7da3441(README、`/org` skill の 4 面、仕様 FR-7 の 7c-2 の注、AGENTS.md、tech-debt 6 行)
+  - 計画からのずれ: Scope と AC3 の pr_checks_only の勧め「Require branches ... と必須の検査、または merge queue」は、判定が merge queue を ruleset の `merge_queue` の規則からしか読まないので、「merge queue は ruleset に足す」と言うようにした(89b981d8 で detail と help、c56c1f11 で skill と tech-debt。classic の保護の merge queue を読まないことは tech-debt に書いた)
+  - 実機の証跡: `docs/evidence/merge-guarantee-livefire-2026-10-14.md`(この repo は warn、github/docs は pass、cli/cli と ssh の別名は unknown、台帳がなければ書かない)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
