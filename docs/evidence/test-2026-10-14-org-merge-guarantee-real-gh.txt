@@ -1,0 +1,86 @@
+# /test org-merge-guarantee cycle 1: the merge-queue path with the real gh, read-only (2026-10-14)
+# The verifier's gap: the github_protection decided by a merge queue was seen only through the fake seam
+# (github/docs in docs/evidence/merge-guarantee-livefire-2026-10-14.md is decided earlier, by its strict rule).
+# Binary: go build -o <scratch>/ralph-head ./cmd/ralph at HEAD 38ac8953. gh version 2.102.0 (2026-09-30); the active
+# account is not an admin of any repository below. Every call is a GET on a public repository; nothing is written
+# on GitHub. Each repository is a 'git init' repo with only 'git remote add origin https://github.com/<o>/<r>.git'
+# (doctor reads origin's URL and gh api only), with RALPH_ORG_STATE_DIR naming an existing scratch ledger dir.
+
+## 1. What the API returns (gh api; the rules filtered to merge_queue and required_status_checks)
+$ gh api --paginate repos/zed-industries/zed/rules/branches/main --jq '[.[] | select(.type=="merge_queue" or .type=="required_status_checks") | {type, strict: .parameters.strict_required_status_checks_policy, n: (.parameters.required_status_checks // [] | length)}]'
+[{"n":0,"strict":null,"type":"merge_queue"},{"n":2,"strict":false,"type":"required_status_checks"}]
+$ gh api repos/zed-industries/zed/branches/main --jq '{protected, enabled: .protection.enabled, level: .protection.required_status_checks.enforcement_level}'
+{"enabled":false,"level":"off","protected":true}
+$ gh api --paginate repos/Homebrew/homebrew-core/rules/branches/main --jq '[.[] | select(.type=="merge_queue" or .type=="required_status_checks") | {type, strict: .parameters.strict_required_status_checks_policy, n: (.parameters.required_status_checks // [] | length)}]'
+[{"n":0,"strict":null,"type":"merge_queue"},{"n":4,"strict":false,"type":"required_status_checks"}]
+$ gh api repos/Homebrew/homebrew-core/branches/main --jq '{protected, enabled: .protection.enabled, level: .protection.required_status_checks.enforcement_level}'
+{"enabled":false,"level":"off","protected":true}
+$ gh api --paginate repos/astral-sh/uv/rules/branches/main --jq '[.[] | select(.type=="merge_queue" or .type=="required_status_checks") | {type, strict: .parameters.strict_required_status_checks_policy, n: (.parameters.required_status_checks // [] | length)}]'
+[{"n":1,"strict":false,"type":"required_status_checks"}]
+$ gh api repos/astral-sh/uv/branches/main --jq '{protected, enabled: .protection.enabled, level: .protection.required_status_checks.enforcement_level}'
+{"enabled":false,"level":"off","protected":true}
+
+## 2. HEAD's doctor, status and merge-order in each repository
+### zed-industries/zed
+$ RALPH_ORG_STATE_DIR=<ledger> ralph doctor | grep -i "merge guarantee"
+  ✓ Merge guarantee: pass — github_protection: main, the default branch of origin's repository zed-industries/zed, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks; cached in <scratch>/real/zed-industries-zed/ledger/merge-guarantee.json
+$ RALPH_ORG_STATE_DIR=<ledger> ralph status | grep "merge guarantee"
+merge guarantee: github_protection (main of github.com/zed-industries/zed, checked 2026-10-14T10:22:37Z): main, the default branch of origin's repository zed-industries/zed, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks
+$ RALPH_ORG_STATE_DIR=<ledger> ralph org merge-order
+merge guarantee: github_protection (main of github.com/zed-industries/zed, checked 2026-10-14T10:22:37Z): main, the default branch of origin's repository zed-industries/zed, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks
+note: no feature branches in the ledger: a branch is listed once ralph org start --plan binds an org to it or ralph org gate records a gate on it
+(rc=0)
+$ cat <ledger>/merge-guarantee.json
+{
+  "version": 1,
+  "kind": "github_protection",
+  "detail": "main, the default branch of origin's repository zed-industries/zed, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks",
+  "host": "github.com",
+  "repo": "zed-industries/zed",
+  "api_repo": "zed-industries/zed",
+  "default_branch": "main",
+  "checked_at": "2026-10-14T10:22:37Z"
+}
+
+### Homebrew/homebrew-core
+$ RALPH_ORG_STATE_DIR=<ledger> ralph doctor | grep -i "merge guarantee"
+  ✓ Merge guarantee: pass — github_protection: main, the default branch of origin's repository Homebrew/homebrew-core, requires its 4 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks; cached in <scratch>/real/Homebrew-homebrew-core/ledger/merge-guarantee.json
+$ RALPH_ORG_STATE_DIR=<ledger> ralph status | grep "merge guarantee"
+merge guarantee: github_protection (main of github.com/Homebrew/homebrew-core, checked 2026-10-14T10:22:38Z): main, the default branch of origin's repository Homebrew/homebrew-core, requires its 4 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks
+$ RALPH_ORG_STATE_DIR=<ledger> ralph org merge-order
+merge guarantee: github_protection (main of github.com/Homebrew/homebrew-core, checked 2026-10-14T10:22:38Z): main, the default branch of origin's repository Homebrew/homebrew-core, requires its 4 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks
+note: no feature branches in the ledger: a branch is listed once ralph org start --plan binds an org to it or ralph org gate records a gate on it
+(rc=0)
+$ cat <ledger>/merge-guarantee.json
+{
+  "version": 1,
+  "kind": "github_protection",
+  "detail": "main, the default branch of origin's repository Homebrew/homebrew-core, requires its 4 required status checks to pass on a head with the latest main before a PR merges: a ruleset has a merge queue, and rulesets require the checks",
+  "host": "github.com",
+  "repo": "Homebrew/homebrew-core",
+  "api_repo": "Homebrew/homebrew-core",
+  "default_branch": "main",
+  "checked_at": "2026-10-14T10:22:38Z"
+}
+
+### astral-sh/uv
+$ RALPH_ORG_STATE_DIR=<ledger> ralph doctor | grep -i "merge guarantee"
+  ⚠ Merge guarantee: warn — pr_checks_only: main, the default branch of origin's repository astral-sh/uv, does not make a PR's required status checks pass on a head with the latest main before it merges: rulesets require 1 required status check, but nothing requires branches to be up to date before merging with them; set Require branches to be up to date before merging with at least one required status check, in a ruleset or the branch protection of the branch, or add a merge queue with at least one required status check to a ruleset; cached in <scratch>/real/astral-sh-uv/ledger/merge-guarantee.json
+$ RALPH_ORG_STATE_DIR=<ledger> ralph status | grep "merge guarantee"
+merge guarantee: pr_checks_only (main of github.com/astral-sh/uv, checked 2026-10-14T10:22:40Z): main, the default branch of origin's repository astral-sh/uv, does not make a PR's required status checks pass on a head with the latest main before it merges: rulesets require 1 required status check, but nothing requires branches to be up to date before merging with them; set Require branches to be up to date before merging with at least one required status check, in a ruleset or the branch protection of the branch, or add a merge queue with at least one required status check to a ruleset
+$ RALPH_ORG_STATE_DIR=<ledger> ralph org merge-order
+merge guarantee: pr_checks_only (main of github.com/astral-sh/uv, checked 2026-10-14T10:22:40Z): main, the default branch of origin's repository astral-sh/uv, does not make a PR's required status checks pass on a head with the latest main before it merges: rulesets require 1 required status check, but nothing requires branches to be up to date before merging with them; set Require branches to be up to date before merging with at least one required status check, in a ruleset or the branch protection of the branch, or add a merge queue with at least one required status check to a ruleset
+note: no feature branches in the ledger: a branch is listed once ralph org start --plan binds an org to it or ralph org gate records a gate on it
+(rc=0)
+$ cat <ledger>/merge-guarantee.json
+{
+  "version": 1,
+  "kind": "pr_checks_only",
+  "detail": "main, the default branch of origin's repository astral-sh/uv, does not make a PR's required status checks pass on a head with the latest main before it merges: rulesets require 1 required status check, but nothing requires branches to be up to date before merging with them; set Require branches to be up to date before merging with at least one required status check, in a ruleset or the branch protection of the branch, or add a merge queue with at least one required status check to a ruleset",
+  "host": "github.com",
+  "repo": "astral-sh/uv",
+  "api_repo": "astral-sh/uv",
+  "default_branch": "main",
+  "checked_at": "2026-10-14T10:22:40Z"
+}
+

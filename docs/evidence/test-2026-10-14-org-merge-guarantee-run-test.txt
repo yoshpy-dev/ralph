@@ -1,0 +1,239 @@
+# /test org-merge-guarantee cycle 1: ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed, go1.26.0)
+# Worktree HEAD 38ac8953 (base a16d7c4f). Command: ./scripts/run-test.sh > run-test.out 2>&1; rc=0, 701 s wall.
+# Filtered from the 4,517-line raw output (304,932 bytes) with the same command as the org-merge-order cycles:
+#   sed -n 1,6p; grep -nE '^==> |tests: [0-9]+ passed|Results?: [0-9]+/[0-9]+|^\s*PASS: [0-9]+( / [0-9]+)?$|^\s*FAIL: [0-9]+$|^\s*SKIP|passed, [0-9]+ failed|^    OK$|^    FAIL|^ok |^\? |^FAIL|^rc=|^elapsed=|Evidence saved'
+# Numbers before ':' are line numbers in the raw output. 41 suites, 41 "OK", every "FAIL:" line is 0.
+# The two "SKIP: 0" lines are suite summaries; the one real SKIP is tests/test-secret-scan-branch.sh's (git 2.49.0).
+# The wrapper's own full log is docs/evidence/verify-2026-10-14-091749.log (gitignored, not committed).
+
+start 18:17:49
+# Verification run
+- Timestamp: 2026-10-14T09:17:49Z
+- Mode: test
+- Requested scope: changed
+
+7:==> Running local verifier
+8:==> tests/test-agent-models.sh
+61:  PASS: 47 / 47
+62:  FAIL: 0
+63:    OK
+64:==> tests/test-agent-phase-boundaries.sh
+111:  PASS: 44 / 44
+112:  FAIL: 0
+113:    OK
+114:==> tests/test-archive-plan.sh
+115:==> archive-plan.sh rewrites tech-debt README links before moving the plan
+134:==> verify.local.sh checks the plan links in docs/tech-debt/README.md
+141:archive-plan tests: 22 passed, 0 failed, 22 total
+142:    OK
+143:==> tests/test-branch-name.sh
+144:==> branch-name.sh generation
+151:==> branch-name.sh validation
+169:==> plan creation type metadata
+174:branch-name tests: 26 passed, 0 failed, 26 total
+175:    OK
+176:==> tests/test-check-mojibake.sh
+195:  PASS: 15
+196:  FAIL: 0
+197:    OK
+198:==> tests/test-check-skill-sync.sh
+213:  PASS: 13
+214:  FAIL: 0
+215:    OK
+216:==> tests/test-check-template.sh
+278:test-check-template: 60 passed, 0 failed, 0 skipped
+279:    OK
+280:==> tests/test-codex-exec-invocation.sh
+447:Results: 144/144 passed
+449:    OK
+450:==> tests/test-detect-changed-languages.sh
+536:  PASS: 83 / 83
+537:  FAIL: 0
+538:    OK
+539:==> tests/test-detect-languages-terraform.sh
+550:  PASS: 8 / 8
+551:  FAIL: 0
+552:    OK
+553:==> tests/test-ensure-pr-ready.sh
+554:==> ensure-pr-ready.sh
+563:ensure-pr-ready tests: 7 passed, 0 failed, 7 total
+564:    OK
+565:==> tests/test-ensure-pr-title-prefix.sh
+566:==> ensure-pr-title-prefix.sh
+581:ensure-pr-title-prefix tests: 13 passed, 0 failed, 13 total
+582:    OK
+583:==> tests/test-gc-artifacts.sh
+584:==> gc-artifacts: dry-run mode
+593:==> gc-artifacts: --apply with date-based reports
+599:==> gc-artifacts: README.md is always preserved
+605:==> gc-artifacts: evidence keep-newest-20
+614:==> gc-artifacts: dry-run output contains candidates
+617:==> gc-artifacts: exit 0 when nothing to do
+619:==> gc-artifacts: --help
+622:gc-artifacts tests: 11 passed, 0 failed, 11 total
+623:    OK
+624:==> tests/test-hook-wiring.sh
+696:  PASS: 68
+697:  FAIL: 0
+698:    OK
+699:==> tests/test-insights-append.sh
+701:==> Case 1: valid append — single line, all required fields
+718:==> Case 2: second append to same slug → 2 lines in file
+723:==> Case 3: missing required flag → exit 1, no file
+728:==> Case 4: invalid enum values → exit 1
+735:==> Case 5: counts land in findings and triage objects
+744:==> Case 6: --events-dir override
+749:==> Case 7: optional fields absent when not provided
+754:==> Case 8: --cycle auto reads the pipeline cycle from the state dir
+768:insights-append tests: 51 passed, 0 failed
+769:    OK
+770:==> tests/test-language-pack-monorepo-roots.sh
+802:  PASS: 29 / 29
+803:  FAIL: 0
+804:    OK
+805:==> tests/test-lib-json.sh
+935:  PASS: 126
+936:  FAIL: 0
+937:  SKIP: 0
+938:    OK
+939:==> tests/test-new-feature-plan.sh
+940:==> plan templates stay identical
+942:==> new-feature-plan.sh output
+959:==> plan-visual.sh digest on the created plan
+965:new-feature-plan tests: 21 passed, 0 failed, 21 total
+966:    OK
+967:==> tests/test-no-loop-references.sh
+969:    OK
+970:==> tests/test-plan-visual.sh
+971:==> usage
+985:==> open
+1009:==> shot
+1055:==> digest
+1079:plan-visual tests: 103 passed, 0 failed, 103 total
+1080:    OK
+1081:==> tests/test-post-edit-verify.sh
+1109:  PASS: 24
+1110:  FAIL: 0
+1111:    OK
+1112:==> tests/test-pr-owner-lookup.sh
+1113:==> expressions found in .claude/skills/pr/SKILL.md
+1119:==> the four faces carry the same expressions
+1123:==> owner from origin URL
+1131:==> lookup into the intended base (--base <base>)
+1135:==> lookup into any base (no --base)
+1139:pr-owner-lookup tests: 20 passed, 0 failed, 20 total
+1140:    OK
+1141:==> tests/test-pre-bash-guard.sh
+3387:  PASS: 2227
+3388:  FAIL: 0
+3389:  SKIP: 0
+3390:    OK
+3391:==> tests/test-ralph-config.sh
+3422:Results: 19/19 passed
+3424:    OK
+3425:==> tests/test-ralph-dispatch.sh
+3462:  PASS: 33
+3463:  FAIL: 0
+3464:    OK
+3465:==> tests/test-ralph-worktree.sh
+3466:==> ralph-worktree.sh state paths
+3471:==> ralph-worktree.sh ensure/resume
+3481:==> ralph-worktree.sh collision and dirty-base checks
+3484:==> ralph-worktree.sh cleanup
+3489:==> ralph-worktree.sh gc
+3502:==> ralph-worktree.sh codex config external-rewrite detection
+3618:ralph-worktree tests: 143 passed, 0 failed, 143 total
+3619:    OK
+3620:==> tests/test-run-verify-branch-secret-scan.sh
+3655:  PASS: 32
+3656:  FAIL: 0
+3657:    OK
+3658:==> tests/test-run-verify-concurrency.sh
+3703:  PASS: 37 / 37
+3704:  FAIL: 0
+3705:    OK
+3706:==> tests/test-run-verify-scope.sh
+3728:  PASS: 19 / 19
+3729:  FAIL: 0
+3730:    OK
+3731:==> tests/test-secret-scan-branch.sh
+3925:  SKIP: the real git older than 2.41 case (git 2.49.0 is 2.41 or later; the stubbed old git covers it)
+3981:  PASS: 246
+3982:  FAIL: 0
+3983:    OK
+3984:==> tests/test-secret-scan.sh
+4110:  PASS: 123
+4111:  FAIL: 0
+4112:    OK
+4113:==> tests/test-self-review-scope.sh
+4180:  PASS: 64 / 64
+4181:  FAIL: 0
+4182:    OK
+4183:==> tests/test-skill-insight-cycle.sh
+4184:==> insight-event command passes --cycle auto
+4206:skill-insight-cycle tests: 20 passed, 0 failed, 20 total
+4207:    OK
+4208:==> tests/test-sync-skills.sh
+4232:  PASS: 22
+4233:  FAIL: 0
+4234:    OK
+4235:==> tests/test-template-purity.sh
+4247:  PASS: 10
+4248:  FAIL: 0
+4249:    OK
+4250:==> tests/test-terraform-gitignore.sh
+4306:  PASS: 47
+4307:  FAIL: 0
+4309:    OK
+4310:==> tests/test-terraform-pack-verify.sh
+4349:  PASS: 36 / 36
+4350:  FAIL: 0
+4351:    OK
+4352:==> tests/test-terraform-rule-frontmatter.sh
+4366:  PASS: 11 / 11
+4367:  FAIL: 0
+4368:    OK
+4369:==> tests/test-verify-local-hook-tests.sh
+4370:==> run_hook_tests treats a test that would not run in CI as FAIL
+4377:verify-local-hook-tests tests: 5 passed, 0 failed, 5 total
+4378:    OK
+4379:==> tests/test-verify-mode-split.sh
+4441:  PASS: 59 / 59
+4442:  FAIL: 0
+4443:    OK
+4444:==> tests/test-xreview-helpers.sh
+4494:  PASS: 29
+4495:  FAIL: 0
+4496:    OK
+4497:==> Language scope: changed (changed_languages)
+4498:==> Language packs selected: golang
+4499:==> Running golang verifier
+4500:==> golang project roots selected: .
+4501:==> Go project root: .
+4502:?   	github.com/yoshpy-dev/ralph	[no test files]
+4503:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4504:ok  	github.com/yoshpy-dev/ralph/internal/cli	166.883s
+4505:ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+4506:ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+4507:ok  	github.com/yoshpy-dev/ralph/internal/org	81.993s
+4508:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+4509:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4510:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4511:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4513:==> All verifiers passed.
+4515:Evidence saved to: docs/evidence/verify-2026-10-14-091749.log
+4516:elapsed=701
+4517:rc=0
+
+# The four packages run-test.sh reported "(cached)" besides org/driver and org/protocol (those two ran uncached in
+# the org/... runs of test-2026-10-14-org-merge-guarantee-go.txt), rerun uncached afterwards (go1.26.0):
+#   go test ./internal/config/... ./internal/insights/... ./internal/scaffold/... ./internal/upgrade/... -count=1
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.967s
+ok  	github.com/yoshpy-dev/ralph/internal/insights	1.225s
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	1.530s
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	2.220s
+rc=0 elapsed=4
+
+# Comparison with org-merge-order cycle 4 (docs/evidence/test-2026-10-14-org-merge-order-c4-run-test.txt), line
+# numbers, timestamps, Go durations and the trailer stripped from both: diff <c4 lines> <these lines>
+(empty: every shell suite line is identical)

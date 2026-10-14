@@ -1,0 +1,311 @@
+# /test org-merge-guarantee cycle 1: go test ./internal/cli/... ./internal/org/... (HEAD 38ac8953)
+# Both runs had <scratch>/canary-bin first on PATH (a gh that logs its argv and exits 97): 0 calls in both, and in
+# every later run (mutants, probes, -race).
+#
+# 1. GOTOOLCHAIN=go1.25.8 go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile=<scratch>/cover-go1.25.8.out
+go version go1.25.8 darwin/arm64
+rc=0 elapsed=344
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  651 SKIP 0 FAIL 0 | subtests PASS  556 SKIP 0 FAIL 0 | ok 340.668s	coverage: 86.9% of statements
+github.com/yoshpy-dev/ralph/internal/org      top PASS  708 SKIP 1 FAIL 0 | subtests PASS 1461 SKIP 0 FAIL 0 | ok 148.032s	coverage: 94.3% of statements
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 2.242s	coverage: 93.1% of statements
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.443s	coverage: 100.0% of statements
+
+# 2. go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile=...   (local go1.26.0)
+go version go1.26.0 darwin/arm64
+rc=0 elapsed=429
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  651 SKIP 0 FAIL 0 | subtests PASS  556 SKIP 0 FAIL 0 | ok 421.233s	coverage: 86.9% of statements
+github.com/yoshpy-dev/ralph/internal/org      top PASS  708 SKIP 1 FAIL 0 | subtests PASS 1461 SKIP 0 FAIL 0 | ok 175.758s	coverage: 94.3% of statements
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 2.271s	coverage: 93.1% of statements
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.873s	coverage: 100.0% of statements
+
+# 3. -race on the merge-guarantee, merge-order and status tests (go1.26.0)
+#   go test -race ./internal/org/ -run 'MergeGuarantee|MergeOrder' -count=1
+#   go test -race ./internal/cli/ -run 'MergeGuarantee|OrgMergeOrder|TestStatusCmd' -count=1
+ok  	github.com/yoshpy-dev/ralph/internal/org	7.162s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	55.361s
+race elapsed=74
+
+# SKIP and FAIL lines (go1.25.8; go1.26.0 is the same)
+--- SKIP: TestEscalate_NoDesktopNotificationOffDarwinIsSkipped (0.00s)
+
+# Test names (PASS/SKIP/FAIL lines, durations stripped, sorted; 3,585 lines each), go1.25.8 vs go1.26.0
+(empty: identical)
+
+# The 44 tests this branch adds (git diff a16d7c4f...HEAD -- '*_test.go': 44 "+func Test", 0 "-func Test"),
+# with their subtests (go1.25.8; the same lines are in the go1.26.0 run): 44 top-level, 128 subtests
+    --- PASS: TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns/github_protection
+    --- PASS: TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns/pr_checks_only
+    --- PASS: TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns/unknown
+    --- PASS: TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached/github_protection
+    --- PASS: TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached/pr_checks_only
+    --- PASS: TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached/unknown_without_gh
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/contexts_and_checks_count_once_each
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/merge_queue_with_the_branch_protection's_checks
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/not_strict
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/protection_not_enabled
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/protection_with_no_required_check
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/required_checks_off
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/ruleset_and_branch_protection_checks,_neither_up_to_date
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/ruleset_checks_and_a_strict_that_needs_admin_access
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answer_that_is_not_JSON
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answer_with_no_strict
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_Branch_not_protected
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_Required_status_checks_not_enabled
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_fails_another_way
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_403_in_the_body
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_403_on_stderr_only
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_404_Not_Found
+    --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_with_a_required_check
+    --- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown/git
+    --- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown/repos/acme/app
+    --- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown/repos/acme/app/branches/main
+    --- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown/repos/acme/app/branches/main/protection/required_status_checks
+    --- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown/repos/acme/app/rules/branches/main
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/branch_answer_is_not_JSON
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/branch_call_fails
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/get-url_prints_nothing
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/gh_fails_on_an_ssh_alias_host
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/gh_fails_on_github.com
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/gh_is_not_on_PATH
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/origin_is_a_file_URL
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/origin_is_a_local_path
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/origin_is_missing
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/origin_names_no_owner/repo
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/repository_answer_has_no_default_branch
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/repository_answer_is_not_JSON
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/rules_answer_is_empty
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/rules_answer_is_not_a_list
+    --- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason/rules_call_fails
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/git://example.org/acme/app.git
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/git@ghe.example.com:acme/app.git
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/git@SSH.GitHub.com:acme/app.git
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/https://GitHub.com/acme/app.git
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/https://token:x-oauth-basic@GHE.example.com:8443/acme/app
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/ssh://git@ghe.example.com:2222/acme/app.git
+    --- PASS: TestMergeGuarantee_HostComesFromOriginsURL/ssh://git@ssh.github.com:443/acme/app.git
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/a_cut_page
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/a_later_page_that_is_not_a_list
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/an_empty_page_first
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/merge_queue_and_checks_on_two_pages
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/one_array
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/one_array_per_page
+    --- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead/pages_on_their_own_lines
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/another_host
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/another_owner
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/another_repository_with_the_same_branch
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/caller's_ctx_done
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/get-url_fails
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/get-url_times_out
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/origin_is_a_local_path
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/same_origin_in_another_case
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/same_origin_over_https
+    --- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache/ssh.github.com_is_another_host_as_written
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/at_the_max_age
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/checked_at_does_not_parse
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/checked_over_the_max_age_after_now
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/days_later
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/just_over_the_max_age
+    --- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale/just_under_the_max_age
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/another_kind
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/another_version
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/cache_is_a_directory
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/corrupt_cache
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/no_cache
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/no_state_dir
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/no_version
+    --- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown/state_dir_is_a_file
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/an_up-to-date_rule_with_no_check_beside_another_rule's_checks
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/merge_queue_alone
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/merge_queue_with_ruleset_checks
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/no_rule
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/other_rule_types_only
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/required_checks_with_no_up-to-date_rule
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/the_up-to-date_rule_with_the_most_checks_counts
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/up-to-date_rule_and_merge_queue_with_no_check
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/up-to-date_rule_with_checks
+    --- PASS: TestMergeGuarantee_RulesetsDecideTheKind/up-to-date_rule_with_no_check
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_ledger/github_protection
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_ledger/pr_checks_only
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_ledger/unknown
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_old_cache/github_protection
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_old_cache/pr_checks_only
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/no_old_cache/unknown
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_remains/github_protection
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_remains/pr_checks_only
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_remains/unknown
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_removed/github_protection
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_removed/pr_checks_only
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/old_cache_removed/unknown
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/written/github_protection
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/written/pr_checks_only
+    --- PASS: TestMergeGuaranteeResult_EverySaveOutcome/written/unknown
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/cache_of_another_default_branch
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/fresh_by_the_org's_clock,_years_old_by_the_wall_clock
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/fresh_cache_of_origin's_default_branch
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/no_cache
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/origin_points_to_another_repository
+    --- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache/stale_by_the_org's_clock
+    --- PASS: TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine/another_default_branch
+    --- PASS: TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine/origin_pointed_to_another_repository
+    --- PASS: TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine/origin's_repository_and_default_branch
+    --- PASS: TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine/origin's_repository_in_another_case
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/info
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/pass
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/warn
+    --- PASS: TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine/no_org
+    --- PASS: TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine/two_orgs
+    --- PASS: TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin/git@github.com:acme/app.git
+    --- PASS: TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin/https://github.com/acme/app.git
+    --- PASS: TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin/https://github.com/ACME/App.git
+    --- PASS: TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown/cache_checked_25_hours_ago
+    --- PASS: TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown/corrupt_cache
+    --- PASS: TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown/no_cache
+    --- PASS: TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown/no_state_dir
+--- PASS: TestCheckMergeGuarantee_FailedWriteRemovesTheOldCache
+--- PASS: TestCheckMergeGuarantee_NoLedgerDirIsNotCreated
+--- PASS: TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns
+--- PASS: TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached
+--- PASS: TestMergeGuarantee_CallerContextDoneIsUnknown
+--- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind
+--- PASS: TestMergeGuarantee_DeadlineExceededIsUnknown
+--- PASS: TestMergeGuarantee_DisplayJSONShape
+--- PASS: TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+--- PASS: TestMergeGuarantee_FailuresAreUnknownWithAReason
+--- PASS: TestMergeGuarantee_ForDefaultBranch
+--- PASS: TestMergeGuarantee_HostComesFromOriginsURL
+--- PASS: TestMergeGuarantee_LongErrorIsCutToOneLine
+--- PASS: TestMergeGuarantee_OneDeadlineCoversEveryCall
+--- PASS: TestMergeGuarantee_PaginatedRulesAreAllRead
+--- PASS: TestMergeGuarantee_ReadBoundsGitWithItsTimeout
+--- PASS: TestMergeGuarantee_ReadComparesOriginWithTheCache
+--- PASS: TestMergeGuarantee_ReadMakesAnOldCacheStale
+--- PASS: TestMergeGuarantee_ReadsTheHostWithTheOwnerAndRepo
+--- PASS: TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+--- PASS: TestMergeGuarantee_RemovalFailureIsReported
+--- PASS: TestMergeGuarantee_RenamedRepositoryStillDecides
+--- PASS: TestMergeGuarantee_RulesetsDecideTheKind
+--- PASS: TestMergeGuarantee_SaveThenReadRoundTrips
+--- PASS: TestMergeGuarantee_SaveWithoutALedgerDirCreatesNothing
+--- PASS: TestMergeGuarantee_SaveWritesAnUnknownToo
+--- PASS: TestMergeGuarantee_WriteFailureRemovesTheOldCache
+--- PASS: TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir
+--- PASS: TestMergeGuaranteeResult_EverySaveOutcome
+--- PASS: TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+--- PASS: TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote
+--- PASS: TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine
+--- PASS: TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine
+--- PASS: TestOrgMergeOrder_NoBranchPrintsTheGuaranteeLineFirst
+--- PASS: TestRunDoctor_TestMainPinRunsNoGitOrGh
+--- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee
+--- PASS: TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine
+--- PASS: TestStatusCmd_MergeGuaranteeIsUnknownOnceOriginPointsToAnotherRepository
+--- PASS: TestStatusCmd_MergeGuaranteeJSONOnBothPaths
+--- PASS: TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine
+--- PASS: TestStatusCmd_MergeGuaranteeOutsideARepositoryIsOriginUnreadable
+--- PASS: TestStatusCmd_MergeGuaranteeRunsNoGH
+--- PASS: TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin
+--- PASS: TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown
+
+# Existing tests whose expectations this branch changed (go1.25.8)
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/a_corrupt_line_and_a_record_attached_to_no_branch
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/a_plain_reservation_and_a_seat
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/an_empty_manifest
+    --- PASS: TestMergeOrder_NoTargetsRunsNoGit/no_manifest
+--- PASS: TestMergeOrder_NoTargetsRunsNoGit
+--- PASS: TestMergeOrder_ResultJSONShape
+--- PASS: TestMergeOrder_WritesNothing
+--- PASS: TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText
+--- PASS: TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit
+--- PASS: TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes
+--- PASS: TestOrgMergeOrder_WritesNothingAndTakesNoLock
+--- PASS: TestStatusCmd_OrgWatchLineFollowsTheStateDirLine
+
+# Tests that were flaky before
+# go1.25.8
+--- PASS: TestRunDoctor_Passes (0.84s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault (1.25s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam (0.58s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_StoreInsideProjectThroughTheSeam (0.64s)
+--- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee (1.06s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/pass (0.39s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/warn (0.26s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/info (0.24s)
+--- PASS: TestRunDoctor_TestMainPinRunsNoGitOrGh (0.58s)
+--- PASS: TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected (0.56s)
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.71s)
+--- PASS: TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing (0.76s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.62s)
+--- PASS: TestRunDoctorOpts_ShellAliasesCheck_HermeticByDefault (0.56s)
+--- PASS: TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam (0.73s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.59s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (0.92s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.84s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.56s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.26s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.24s)
+# go1.26.0
+--- PASS: TestRunDoctor_Passes (1.02s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault (1.51s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam (1.17s)
+--- PASS: TestRunDoctorOpts_CodexSandboxCheck_StoreInsideProjectThroughTheSeam (0.85s)
+--- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee (0.80s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/pass (0.44s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/warn (0.09s)
+    --- PASS: TestRunDoctorFull_PrintsTheMergeGuarantee/info (0.12s)
+--- PASS: TestRunDoctor_TestMainPinRunsNoGitOrGh (0.61s)
+--- PASS: TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected (0.61s)
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.76s)
+--- PASS: TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing (1.02s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.91s)
+--- PASS: TestRunDoctorOpts_ShellAliasesCheck_HermeticByDefault (0.55s)
+--- PASS: TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam (0.59s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (9.00s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGINT (6.05s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGTERM (0.85s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/SIGHUP (1.02s)
+    --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing/the_command's_context_is_cancelled (1.08s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.78s)
+
+# go tool cover -func (go1.25.8 profile) for the functions this branch adds or changes
+internal/cli/doctor.go:92:				runDoctorFull				93.5%
+internal/cli/doctor_merge_guarantee.go:30:		mergeGuaranteeEnvFromOS			100.0%
+internal/cli/doctor_merge_guarantee.go:52:		checkMergeGuarantee			100.0%
+internal/cli/doctor_merge_guarantee.go:65:		mergeGuaranteeResult			100.0%
+internal/cli/org_merge_order.go:174:		printMergeOrder				100.0%
+internal/cli/status.go:94:				runStatus				92.6%
+internal/cli/status.go:173:				mergeGuaranteeLine			100.0%
+internal/cli/status.go:345:				printStatusEmpty			93.8%
+internal/cli/status.go:524:				printStatusJSONAllOrgs			100.0%
+internal/cli/status.go:560:				printStatusTableAllOrgs			95.8%
+internal/org/mergeguarantee.go:110:			MergeGuaranteePathIn			100.0%
+internal/org/mergeguarantee.go:174:			CheckMergeGuarantee			81.2%
+internal/org/mergeguarantee.go:213:			decide					100.0%
+internal/org/mergeguarantee.go:256:			readOrigin				100.0%
+internal/org/mergeguarantee.go:277:			mergeGuaranteeAPIHost			100.0%
+internal/org/mergeguarantee.go:288:			readRepository				100.0%
+internal/org/mergeguarantee.go:346:			readMergeRules				100.0%
+internal/org/mergeguarantee.go:395:			readMergeClassic			100.0%
+internal/org/mergeguarantee.go:435:			readMergeClassicStrict			100.0%
+internal/org/mergeguarantee.go:471:			protected				100.0%
+internal/org/mergeguarantee.go:480:			checksOnly				100.0%
+internal/org/mergeguarantee.go:514:			subject					100.0%
+internal/org/mergeguarantee.go:524:			mergeChecksText				100.0%
+internal/org/mergeguarantee.go:534:			repoPath				100.0%
+internal/org/mergeguarantee.go:539:			ghArgs					100.0%
+internal/org/mergeguarantee.go:549:			gh					100.0%
+internal/org/mergeguarantee.go:554:			command					100.0%
+internal/org/mergeguarantee.go:560:			ghJSON					100.0%
+internal/org/mergeguarantee.go:577:			stopped					100.0%
+internal/org/mergeguarantee.go:591:			getMergeOriginURL			100.0%
+internal/org/mergeguarantee.go:602:			mergeGuaranteeErrText			100.0%
+internal/org/mergeguarantee.go:634:			SaveMergeGuarantee			100.0%
+internal/org/mergeguarantee.go:640:			saveMergeGuarantee			93.3%
+internal/org/mergeguarantee.go:712:			ReadMergeGuarantee			92.3%
+internal/org/mergeguarantee.go:762:			readMergeGuaranteeOrigin		94.1%
+internal/org/mergeguarantee.go:791:			mergeOriginName				100.0%
+internal/org/mergeguarantee.go:800:			unknownFor				100.0%
+internal/org/mergeguarantee.go:810:			ForDefaultBranch			100.0%
+internal/org/mergeguarantee.go:822:			Text					100.0%
+internal/org/mergeorder.go:239:			MergeOrder				96.7%
+internal/org/mergeorder.go:705:			mergeRepoFromOriginURL			100.0%
+internal/org/mergeorder.go:719:			mergeOriginFromURL			100.0%
