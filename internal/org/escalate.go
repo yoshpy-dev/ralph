@@ -292,6 +292,11 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 			return open, nil
 		}
 		if expired {
+			// The /director skill matches "no open inbox item arrived within"
+			// in stderr to tell this timeout from a failure, and reruns the
+			// wait only on a match. Changing this text must update the
+			// skill's inbox section (.claude/skills/director/SKILL.md and its
+			// 3 mirrors) as well.
 			return nil, fmt.Errorf("org: wait --inbox: no open inbox item arrived within %d ms", timeout.Milliseconds())
 		}
 		select {

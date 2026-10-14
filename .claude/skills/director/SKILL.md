@@ -98,9 +98,12 @@ skill はその節を指し、写さない。
 
 open の件が届くのを `ralph org wait --inbox` で待つ。
 
-- Claude Code: `ralph org wait --inbox --timeout-ms 0` を Monitor で
-  見張るか、Bash の `run_in_background` で走らせる。件の行を出して
-  返ったら件を処理し、また待つ。
+- Claude Code: `ralph org wait --inbox --timeout-ms 0 2>&1` を Monitor で
+  見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、エラーの
+  文も件の行と同じ出力に出る。件の行を出して返ったら件を処理し、また
+  待つ。`--timeout-ms 0` には時間切れがないので、件の行を出さずに返った
+  とき(終了コード 1)はいつも失敗で、打ち直さない。扱いは下の段落の
+  とおり。
 - Codex: `ralph org wait --inbox --timeout-ms 300000` のように時間を
   区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
@@ -108,7 +111,9 @@ open の件が届くのを `ralph org wait --inbox` で待つ。
 
 終了コード 1 には、`ralph.toml` や受信箱(`inbox.jsonl`)が読めない
 失敗もある。この失敗はすぐ返り、打ち直しても同じ失敗が続く。stderr が
-時間切れの文でなければ打ち直さず、エラーの文を人に伝えて止まる。
+時間切れの文でなければ打ち直さない。受信箱を待つのをやめ、エラーの文を
+人に伝えて、人の指示を待つ。detach は打たないので、登録は残る。見張り
+(`ralph org watch --all`)が動いていれば、件は期限で人に届く。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。件ごとに次の順で進める。

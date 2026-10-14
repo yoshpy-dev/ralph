@@ -1219,6 +1219,7 @@ func TestOrgWaitInbox_TimesOut(t *testing.T) {
 			tc.seed(t, stateDir)
 
 			stdout, _, elapsed, err := runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--timeout-ms", "300", "--state-dir", stateDir)
+			// The /director skill (.claude/skills/director/SKILL.md, inbox section) matches this text.
 			if err == nil || !strings.Contains(err.Error(), "no open inbox item arrived within 300 ms") {
 				t.Fatalf("error = %v; want a timeout after 300 ms", err)
 			}
