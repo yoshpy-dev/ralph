@@ -791,3 +791,383 @@ With enabled false the state is disabled whether or not a registration is
 recorded; one that is still recorded is named and its fields are shown.
 The registration does not tell whether its session is still running.
 ```
+
+## Cycle 3 (HEAD d2eaa665)
+
+- Date: 2026-10-15 (UTC timestamps in the output read 2026-10-14T22:xx)
+- Scope: the cross-review cycle-2 fix c8a9227b and the self-review cycle-3 fix 8ac59595 (`git diff a094c93b..HEAD`), read against `git diff ef575748...HEAD`
+- Redaction as in cycles 1 and 2: the session scratch directory is `$SCRATCH`, the home directory `~`, and the login name `$USER`. The two `jq -e .` dumps of settings.json are elided. The full wrapper log is `docs/evidence/verify-2026-10-14-222813.log` (gitignored, not committed).
+
+### C3-1. ./scripts/run-static-verify.sh (changed scope)
+
+```text
+# Verification run
+- Timestamp: 2026-10-14T22:28:13Z
+- Mode: static
+- Requested scope: changed
+
+==> Running local verifier
+==> shellcheck hook + verify scripts
+    OK
+==> sh -n .claude/hooks/check_mojibake.sh
+    OK
+==> sh -n .claude/hooks/lib_json.sh
+    OK
+==> sh -n .claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n .claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n .claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n .claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n .claude/hooks/prompt_gate.sh
+    OK
+==> sh -n .claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n .claude/hooks/session_end_summary.sh
+    OK
+==> sh -n .claude/hooks/session_start_context.sh
+    OK
+==> sh -n templates/base/.claude/hooks/check_mojibake.sh
+    OK
+==> sh -n templates/base/.claude/hooks/lib_json.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n templates/base/.claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n templates/base/.claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n templates/base/.claude/hooks/prompt_gate.sh
+    OK
+==> sh -n templates/base/.claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_end_summary.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_start_context.sh
+    OK
+==> awk parse of the guard in .claude/hooks
+    OK
+==> awk parse of the guard in templates/base/.claude/hooks
+    OK
+==> jq -e . .claude/settings.json
+    (settings.json dump elided)
+    OK
+==> jq -e . templates/base/.claude/settings.json
+    (settings.json dump elided)
+    OK
+==> Codex hook single-source guard
+    OK
+==> Codex inline hook detector smoke test
+    OK
+==> Codex PR provenance policy guard
+    OK
+==> scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+    OK
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid
+[ok] .claude/skills/implement/SKILL.md: all pipeline steps referenced
+[ok] .claude/skills/cross-review/SKILL.md: all pipeline steps referenced
+[ok] .claude/rules/ralph/subagent-policy.md: all pipeline steps referenced
+[ok] docs/quality/definition-of-done.md: all pipeline steps referenced
+[ok] README.md: all pipeline steps referenced
+[ok] AGENTS.md: all pipeline steps referenced
+    OK
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+    OK
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> tech-debt README plan references
+    OK
+==> Language scope: full fallback (unclassified:scripts/ralph-config.sh)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned ef575748..d2eaa665 against origin/main: clean
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-14-222813.log
+rc=0
+```
+
+### C3-2. Go and sync checks
+
+```text
+$ go version
+go version go1.26.0 darwin/arm64
+rc=0
+$ gofmt -l internal
+rc=0
+$ go vet ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go build ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./...
+rc=0
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+rc=0
+$ ./scripts/check-sync.sh | tail -9
+
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+rc=0
+$ git diff --check ef575748...HEAD
+rc=0
+$ git diff --check 9548a8cd..HEAD
+rc=0
+$ md5 -q .claude/skills/director/SKILL.md .agents/skills/director/SKILL.md templates/base/.claude/skills/director/SKILL.md templates/base/.agents/skills/director/SKILL.md
+98aa4417031ee20463a94d3594a91b48
+98aa4417031ee20463a94d3594a91b48
+98aa4417031ee20463a94d3594a91b48
+98aa4417031ee20463a94d3594a91b48
+rc=0
+$ git diff --name-only ef575748...HEAD | while IFS= read -r f; do [ -f "$f" ] && grep -c $(printf '\357\277\275') "$f" | grep -v '^0$' | sed "s|^|$f: |"; done; echo 'U+FFFD scan of the branch files: done'
+U+FFFD scan of the branch files: done
+rc=0
+$ ./scripts/plan-visual.sh digest docs/plans/active/2026-10-14-org-director-attach.md
+27414f27525b
+rc=0
+$ grep -n 'Approved:' docs/plans/active/2026-10-14-org-director-attach.md
+4:- Approved: 2026-10-15 sha256:27414f27525b
+rc=0
+```
+
+### C3-3. HEAD binary probe: exit code and stderr of `ralph org wait --inbox`
+
+Script `c3-probe.sh` (scratch): the HEAD binary built from d2eaa665, `env -i` with HOME in the scratch dir and a PATH that holds only git, a scratch cwd (no `ralph.toml` unless the case says so), and a scratch `--state-dir` per case. `skill_text_in_stderr` is `grep -F` of the skill's text `no open inbox item arrived within` in the captured stderr. The first run of this script, the first exec of the freshly built binary, took 1654 ms for P1; this second run and the three reruns below show 339 to 357 ms. Every failure that is not a timeout returns in under 70 ms, also with `--timeout-ms 300000`.
+
+```text
+### P1 timeout (empty ledger, --timeout-ms 300)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300
+rc=1 elapsed_ms=351 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=yes
+--- stdout
+--- stderr
+org: wait --inbox: no open inbox item arrived within 300 ms
+
+### P2a inbox.jsonl is a directory (--timeout-ms 300)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300
+rc=1 elapsed_ms=66 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/c3probe/sd2/inbox.jsonl: read $SCRATCH/c3probe/sd2/inbox.jsonl: is a directory
+
+### P2b inbox.jsonl is a directory (--timeout-ms 300000)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=54 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/c3probe/sd2/inbox.jsonl: read $SCRATCH/c3probe/sd2/inbox.jsonl: is a directory
+
+### P2c inbox.jsonl is a directory (--timeout-ms 0, the Claude Code form)
+args: org wait --inbox --state-dir <sd> --timeout-ms 0
+rc=1 elapsed_ms=29 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/c3probe/sd2/inbox.jsonl: read $SCRATCH/c3probe/sd2/inbox.jsonl: is a directory
+
+### P3 inbox.jsonl mode 000 (--timeout-ms 300000)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=38 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/c3probe/sd3/inbox.jsonl: open $SCRATCH/c3probe/sd3/inbox.jsonl: permission denied
+
+### P4a broken --config (--timeout-ms 300000)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300000 --config $SCRATCH/c3probe/bad.toml
+rc=1 elapsed_ms=35 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: load config: toml: expected character ]
+
+### P4b broken ./ralph.toml in the cwd, no --config (--timeout-ms 300000)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=41 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: load config: toml: expected character ]
+
+### P5a --inbox --org-id x
+args: org wait --inbox --state-dir <sd> --org-id x
+rc=1 elapsed_ms=44 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait: --inbox cannot be combined with --org-id
+
+### P5b --inbox --seat leader
+args: org wait --inbox --state-dir <sd> --seat leader
+rc=1 elapsed_ms=32 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait: --inbox cannot be combined with --seat
+
+### P5c --inbox --until idle
+args: org wait --inbox --state-dir <sd> --until idle
+rc=1 elapsed_ms=46 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+org: wait: --inbox cannot be combined with --until
+
+### P6 --timeout-ms abc
+args: org wait --inbox --state-dir <sd> --timeout-ms abc
+rc=1 elapsed_ms=41 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=no
+--- stdout
+--- stderr
+invalid argument "abc" for "--timeout-ms" flag: strconv.ParseInt: parsing "abc": invalid syntax
+
+### P7 one open item (--timeout-ms 0)
+args: org wait --inbox --state-dir <sd> --timeout-ms 0
+rc=0 elapsed_ms=39 stdout_lines=1 stderr_lines=0 skill_text_in_stderr=no
+--- stdout
+e1	o1	QUESTION	probe
+--- stderr
+
+### P8 one acked item only (--timeout-ms 300)
+args: org wait --inbox --state-dir <sd> --timeout-ms 300
+rc=1 elapsed_ms=375 stdout_lines=0 stderr_lines=1 skill_text_in_stderr=yes
+--- stdout
+--- stderr
+org: wait --inbox: no open inbox item arrived within 300 ms
+
+### P9 state dirs after the probes
+$SCRATCH/c3probe/sd1
+$SCRATCH/c3probe/sd2
+$SCRATCH/c3probe/sd2/inbox.jsonl
+$SCRATCH/c3probe/sd3
+$SCRATCH/c3probe/sd3/inbox.jsonl
+$SCRATCH/c3probe/sd7
+$SCRATCH/c3probe/sd7/inbox.jsonl
+$SCRATCH/c3probe/sd8
+$SCRATCH/c3probe/sd8/inbox.jsonl
+### P1 reruns (timing)
+rerun 1: rc=1 elapsed_ms=339 stdout_lines=0 stderr=org: wait --inbox: no open inbox item arrived within 300 ms
+rerun 2: rc=1 elapsed_ms=354 stdout_lines=0 stderr=org: wait --inbox: no open inbox item arrived within 300 ms
+rerun 3: rc=1 elapsed_ms=357 stdout_lines=0 stderr=org: wait --inbox: no open inbox item arrived within 300 ms
+```
+
+### C3-4. One watch cycle against an unreadable inbox (`ralph org watch --all --once`, same scratch setup)
+
+The scratch ledger `sd3` of C3-3 with inbox.jsonl at mode 000 and no org. Nothing reaches the human path: the sweep stops at the read, and no escalations.jsonl is written.
+
+```text
+$ ls -l sd3/inbox.jsonl
+---------- $SCRATCH/c3probe/sd3/inbox.jsonl
+$ ralph org watch --all --once --state-dir $SCRATCH/c3probe/sd3
+[exit 0]
+--- stdout
+watching every org (interval=30s once=true state-dir=$SCRATCH/c3probe/sd3 (source: flag))
+--- stderr
+watchdog: inbox deadlines skipped this cycle: org: inbox deadlines: org: inbox: read $SCRATCH/c3probe/sd3/inbox.jsonl: open $SCRATCH/c3probe/sd3/inbox.jsonl: permission denied
+$ ls sd3 (after)
+inbox.jsonl
+watch-alive.json
+watch.lock
+$ test -e sd3/escalations.jsonl
+escalations.jsonl does not exist
+```
+
+### C3-5. Exit codes: the only exit-3 path, and the error sources of wait --inbox
+
+```text
+$ grep -n 'os.Exit\|Fprintln(os.Stderr, err)' cmd/ralph/main.go
+21:		fmt.Fprintln(os.Stderr, err)
+29:			os.Exit(3)
+31:		os.Exit(1)
+rc=0
+$ grep -rn 'ErrUpgradeDriftRemaining' --include='*.go' internal cmd | grep -v _test.go
+internal/cli/upgrade_v2.go:18:// ErrUpgradeDriftRemaining is returned by runUpgradeV2 when the upgrade
+internal/cli/upgrade_v2.go:26:var ErrUpgradeDriftRemaining = errors.New("upgrade completed with one or more paths left in unresolved drift")
+internal/cli/upgrade_v2.go:226:		return fmt.Errorf("%w (%d path(s)); see %s", ErrUpgradeDriftRemaining, len(plan.Drift), reportRelPath)
+internal/cli/upgrade_v2.go:288:// ErrUpgradeDriftRemaining sentinel when drift remains — but without a
+internal/cli/upgrade_v2.go:302:	return fmt.Errorf("%w (%d path(s))", ErrUpgradeDriftRemaining, len(plan.Drift))
+internal/cli/migrate.go:980:	// path. ErrUpgradeDriftRemaining is the one exception: it is not a
+internal/cli/migrate.go:989:		if errors.Is(err, ErrUpgradeDriftRemaining) {
+cmd/ralph/main.go:28:		if errors.Is(err, cli.ErrUpgradeDriftRemaining) {
+rc=0
+$ grep -n 'cannot be combined with --%s\|newOrgRuntime(cmd, stateDir, configPath, orgLedgerReadOnly)\|rt.WaitInbox' internal/cli/org.go | sed -n '2,4p'
+1176:			return fmt.Errorf("org: wait: --inbox cannot be combined with --%s", flag)
+1179:	rt, err := newOrgRuntime(cmd, stateDir, configPath, orgLedgerReadOnly)
+1183:	items, err := rt.WaitInbox(time.Duration(timeoutMS) * time.Millisecond)
+rc=0
+$ grep -n 'org: load config: %w' internal/cli/org.go
+246:		return nil, fmt.Errorf("org: load config: %w", err)
+rc=0
+$ grep -n 'access == orgLedgerMutating' internal/cli/org_legacy_ledger.go
+48:		if access == orgLedgerMutating {
+61:	if access == orgLedgerMutating && activeSeats > 0 {
+rc=0
+$ grep -n 'wait --inbox: no inbox store\|wait --inbox: %w\|arrived within %d ms\|if timeout > 0' internal/org/escalate.go
+263:		return nil, errors.New("org: wait --inbox: no inbox store is configured")
+270:	if timeout > 0 {
+283:			return nil, fmt.Errorf("org: wait --inbox: %w", err)
+300:			return nil, fmt.Errorf("org: wait --inbox: no open inbox item arrived within %d ms", timeout.Milliseconds())
+rc=0
+$ grep -n 'inbox, err := o.Inbox.Read()' internal/org/deadline.go
+177:	inbox, err := o.Inbox.Read()
+rc=0
+$ grep -n 'inbox deadlines skipped this cycle' internal/org/watch.go
+629:		_, _ = fmt.Fprintf(w.stderr, "watchdog: inbox deadlines skipped this cycle: %v\n", sweep.Err)
+rc=0
+$ grep -n 'config.Load\|resolveOrgConfig' internal/org/watch.go internal/cli/org_watch.go
+rc=1
+$ grep -n 'alertUnrecordedEscalation(p.OrgID, m.Type, err, banner)' internal/org/escalate.go
+185:		o.alertUnrecordedEscalation(p.OrgID, m.Type, err, banner)
+rc=0
+$ git diff a094c93b..HEAD -- .claude/skills/director/SKILL.md | grep '^@@'
+@@ -98,12 +98,22 @@ skill はその節を指し、写さない。
+rc=0
+```

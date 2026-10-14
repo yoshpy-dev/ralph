@@ -175,3 +175,86 @@ FR-5・FR-9 の文、受け入れ条件、安全の不変条件は、escalate �
 - Partially verified: 途中まで書けた追記の切り戻しと、切り戻しの失敗(テストのコードを読んだだけ。binary では再現できなかった)。CLI の `notRestoredError` の配線(helper のテストと、コードを読んだ範囲)
 - Not verified: テストの実行(/test)、本物の ENOSPC、RunE の配線の mutant
 - Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。情報は 4 つ(C2-V1〜C2-V4)
+
+## Cycle 3
+
+- Date: 2026-10-15
+- Verifier: verifier subagent (Claude)。パイプラインの 3 回目。cross-review cycle 2 の ACTION_REQUIRED 1 件(受信箱の wait の失敗を時間切れと見分けずに打ち直す)を直すために上限 `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げた回で、`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま(意図どおり。触っていない)。直し c8a9227b と、self-review cycle 3(a16b5c21、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 3、Merge: yes)の LOW の直し 8ac59595 のあとに走らせた
+- Scope: `git diff a094c93b..HEAD`(HEAD d2eaa665、5 コミット、9 ファイル、+144/-20)。Go の変更は `internal/org/escalate.go` のコメント 5 行と、テスト 2 ファイルのコメント 1 行ずつで、動きは変わらない。残りは `/director` skill の 4 面の受信箱の節(1 hunk)と、self-review の記録と insight の 1 行。AC の確かめ直しには `git diff ef575748...HEAD` も読んだ。テストは走らせていない(/test の担当)。この節の行番号は HEAD d2eaa665 のもの。self-review cycle 3 が引く `escalate.go:295` の時間切れの文は、8ac59595 がコメントを足したので 300 行に動いた
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は 27414f27525b で、`- Approved:` の digest と同じ
+- Evidence: `docs/evidence/verify-2026-10-14-org-director-attach.md` の `## Cycle 3 (HEAD d2eaa665)`。C3-1 は run-static-verify の出力、C3-2 は Go と同期の検査、C3-3 は HEAD の binary で `ralph org wait --inbox` の時間切れ 2 通り、件のある 1 通り、時間切れでない失敗 10 回(8 通りの失敗。受信箱がディレクトリの場合は `--timeout-ms` を変えて 3 回)の終了コードと stderr、C3-4 は読めない受信箱での `ralph org watch --all --once` 1 回、C3-5 は終了コードを決める行の grep。wrapper の全ログは `docs/evidence/verify-2026-10-14-222813.log`(gitignore の対象)
+- Insight event: 指示どおり記録していない。値は cycle 3、verdict pass、findings は LOW 1(下の C3-V1)。情報 3 件は数えない
+
+### cycle 3 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 2 #1: Codex の項は、終了コード 1 で stderr が `no open inbox item arrived within` を含むときだけ打ち直す(c8a9227b) | 満たす(binary でも確認) | skill の 107〜110 行。照合する文は `WaitInbox` の時間切れのエラー `org: wait --inbox: no open inbox item arrived within %d ms`(`internal/org/escalate.go:300`)の部分文字列。root が `SilenceErrors`(`internal/cli/root.go:23`)なので cobra は出さず、`cmd/ralph/main.go:21` の `Fprintln(os.Stderr, err)` が 1 行だけ出し、`:31` で終了コード 1 になる。C3-3 の P1(空の台帳、300 ms)と P8(acked の件だけ)は、どちらも rc 1、stdout 0 行、stderr 1 行で、stderr が skill の文を含む。P1 は 339〜357 ms で返った(新しく作った binary の最初の 1 回だけ 1654 ms) |
+| 時間切れでない終了コード 1 はどれも skill の文を含まず、打ち直されない | 満たす(binary で 10 回) | 終了コード 1 の元は 4 つ。(a) cobra の flag の解析(P6 `invalid argument "abc" for "--timeout-ms" flag`)。(b) `--inbox` と `--org-id`・`--seat`・`--until` の併用の拒否(`internal/cli/org.go:1174-1178`、P5a〜P5c)。(c) `newOrgRuntime`(`org.go:1179`)。旧台帳の guard は `orgLedgerMutating` のときだけエラーを返し(`internal/cli/org_legacy_ledger.go:48`、`:61`)、read-only の `wait` には stderr に `note:` を書いて nil を返すので、残るのは `resolveOrgConfig` の失敗(`org.go:246` の `org: load config: %w`)。`--config` の壊れた TOML(P4a)と cwd の壊れた `ralph.toml`(P4b)で確かめた。(d) `WaitInbox` の read の失敗(`escalate.go:283`)。inbox.jsonl がディレクトリ(P2a〜P2c)と mode 000(P3)で確かめた。`escalate.go:263` の `no inbox store is configured` は、`newOrgRuntimeAt` が必ず `wireOrgInbox` を呼ぶ(`org.go:270`)ので CLI からは届かない。10 回とも rc 1、stdout 0 行、stderr 1 行で、どれも skill の文を含まない。`--timeout-ms 300000` を付けても 70 ms 未満で返った(P2b、P3、P4a、P4b)ので、skill の「すぐ返り」と合う |
+| 終了コード 3 は `wait --inbox` から届かない | 満たす | `main.go:28-29` が 3 で終わるのは `errors.Is(err, cli.ErrUpgradeDriftRemaining)` のときだけ。この sentinel を包むのは `internal/cli/upgrade_v2.go:226` と `:302` だけで、`migrate.go:989` は upgrade の経路でそれをそのまま返す(C3-5)。上の (a)〜(d) のエラーは cobra、`internal/cli/org.go`、`internal/config`、`internal/org` で作られる。`internal/config` と `internal/org` は `internal/cli` に import される側なので、cli の sentinel を作れない。Go の panic の終了コード 2 と signal での終わりは下の C3-V3 |
+| Claude Code の項: `--timeout-ms 0 2>&1`、件の行を出さずに返ったら失敗で打ち直さない(8ac59595、self-review C3-L2) | 満たす(binary でも確認) | skill の 101〜106 行。`WaitInbox` は `timeout > 0` のときだけ期限を作る(`escalate.go:270`)ので、`--timeout-ms 0` の run は時間切れの文を出さない。`WaitInbox` は `(open, nil)`(`:292`)か `(nil, err)`(`:263`、`:283`、`:300`)を返し、`runOrgWaitInbox` は件があるときだけ件の行を書く(`org.go:1183-1187`)ので、件の行が出るのは終了コード 0 のときだけ。P7(open の件 1 つ)は rc 0 で、タブで区切った `e1`、`o1`、`QUESTION`、`probe` の 1 行、P2c(読めない受信箱)は rc 1、件の行なしで 29 ms で返った。`2>&1` の副作用は C3-V2 |
+| Go のコメント(self-review C3-L1) | 満たす | `escalate.go:295-299` のコメントは、skill が stderr のこの文で時間切れと失敗を見分けること、一致したときだけ打ち直すこと、文を変えたら skill の受信箱の節とその 3 つの写しも直すことを書く。写しは `.agents/skills/director/`、`templates/base/.claude/skills/director/`、`templates/base/.agents/skills/director/` の 3 つで、数が合う。文を固定するテスト 2 本(`internal/org/escalate_test.go:1216`、`internal/cli/org_inbox_test.go:1222`)の期待値の上に、skill を指す 1 行がある。期待値 `no open inbox item arrived within 300 ms` は skill の文を含む。skill の文を読む機械の検査はない(Coverage gaps) |
+| 失敗のときに止まる先(self-review C3-L3) | 満たす(最後の 1 文を除く) | skill の 112〜116 行。打ち直さない、受信箱を待つのをやめる、エラーの文を人に伝える、人の指示を待つ、detach しない(登録は残る)。昇格の 5(68〜74 行、ack と resolve と send と start をしない、detach も打たない)と同じ扱いで、終わりの節(215〜226 行、detach は終わるときに打つ)とも食い違わない。最後の文「見張り(`ralph org watch --all`)が動いていれば、件は期限で人に届く」は、`ralph.toml` の失敗では正しいが、受信箱が読めない失敗では正しくない(C3-V1) |
+| skill の 4 面 | 満たす | md5 は 4 面とも `98aa4417031ee20463a94d3594a91b48`。`check-skill-sync.sh`(14 skill)と `check-sync.sh`(DRIFTED 0)が通る。cycle 3 の skill の差分は 1 hunk(`@@ -98,12 +98,22 @@`)だけ |
+
+### AC の確かめ直し(HEAD d2eaa665)
+
+cycle 3 の変更は、skill の受信箱の節と Go のコメントだけだった。Go の動き、AC8 の一覧の文書、計画は変わっていない(`git diff 9548a8cd..HEAD --stat` を README、AGENTS.md、`docs/specs`、`docs/quality`、`templates/base/docs`、`internal/org/prompts`、`/org` skill、`.claude/rules` に絞ると空)。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1〜AC6、AC9〜AC11 | 満たす(cycle 2 のまま) | 8ac59595 の Go の差分はコメント 7 行だけで、動く行はない |
+| AC7 | 満たす | 4 面の md5 が同じ。`check-skill-sync.sh` と `check-sync.sh` が通る。`ralph-workflow.md` の 2 面の 10 行目と 28 行目に `/director` がある |
+| AC8 | 満たす | AC8 の一覧の文書は cycle 3 で変わっていない。`wait --inbox` を書くほかの場所(`/org` skill の 173 行と 313 行、README の 124 行と 258 行、仕様の 52 行・87 行・206 行、`wait` と `escalate` の help)は、どれも director に終了コード 1 のたびに打ち直せとは書いていない。`/org` skill の 173 行と `wait` の help の「届かなければ終了コード 1」は時間切れの説明で、正しい |
+| AC12 | 満たす | cycle 3 の skill の差分は受信箱の節の 1 hunk で、「答える順」(136〜166 行)と「計画の承認」(168〜192 行)は変わっていない。新しい段落は resolve に触れない。`/org` skill は変わっていない |
+
+### 静的解析(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK。check-sync PASS、check-pipeline-sync ok、`check-skill-sync: 14 skill(s) in lock-step`、check-template-purity PASS、tech-debt の計画の参照 OK、`gofmt: ok`、golangci-lint `0 issues.`、`secret-scan-branch: scanned ef575748..d2eaa665 against origin/main: clean`。branch の差分に `scripts/ralph-config.sh` があるので、言語の範囲は cycle 1・2 と同じく full に広がった |
+| `gofmt -l internal` | pass | 出力なし |
+| `go vet ./...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` と `go vet ./...` | pass | 出力なし |
+| `./scripts/check-skill-sync.sh` | pass | 14 skill が lock-step |
+| `./scripts/check-sync.sh` | pass | IDENTICAL 169、DRIFTED 0、KNOWN_DIFF 5 |
+| `git diff --check ef575748...HEAD` と `git diff --check 9548a8cd..HEAD` | pass | 出力なし |
+| branch の 58 ファイルの U+FFFD、cycle 3 の追加行の TODO・FIXME・`fmt.Print`・`/Users/` | pass | 0 件。U+FFFD の grep は、U+FFFD を 1 つ入れた scratch のファイルで 1 件を返すことを先に確かめた |
+
+### 文書のずれ(cycle 3)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `/director` skill の受信箱の節(4 面、97〜119 行) | 一部(C3-V1) | 打ち直しの条件、Claude Code の項、止まる先は上の表のとおりコードと binary の動きに合う。最後の 1 文だけが、受信箱が読めない失敗のときに合わない |
+| `WaitInbox` のコメント(`escalate.go:295-299`)とテスト 2 本のコメント | yes | 上の表の「Go のコメント」の行 |
+| README、AGENTS.md、仕様 FR-9 の 8a-1 の注、quality-gates の 2 面、`/org` skill の 4 面、leader の雛形 | yes | cycle 3 で変わっておらず、director の受信箱の wait の打ち直しについて書いた文はない。仕様の 87 行の「Claude Code は Monitor で待ち、codex は timeout 付きの wait を繰り返す」は今の skill と合う。leader の雛形は `wait --inbox` に触れない |
+| 計画の Progress checklist | 一部遅れ(C3-V4) | 下の表 |
+
+| ID | Severity | Where | Finding |
+| --- | --- | --- | --- |
+| C3-V1 | LOW | `.claude/skills/director/SKILL.md:115-116` と 3 つの写し | 「見張り(`ralph org watch --all`)が動いていれば、件は期限で人に届く」は、同じ段落の 112 行が挙げる 2 つの失敗のうち、受信箱(`inbox.jsonl`)が読めない失敗では成り立たない。見張りの期限の処理も同じファイルを同じ `InboxStore.Read` で読み(`internal/org/deadline.go:177`)、読めなければ `Err` を返す。見張りは `watchdog: inbox deadlines skipped this cycle: …` を stderr(`--detach` なら `watch.log`)に 1 行書くだけで、件を送らない(`internal/org/watch.go:627-629`)。C3-4 で mode 000 の受信箱に `watch --all --once` を 1 回回すと、終了コード 0 でこの 1 行が出て、`escalations.jsonl` は作られなかった。受信箱が読めるようになるまで、open と acked の件はどちらの期限でも人に届かない。新しい escalate は記録できず、その場で人に知らせる(`escalate.go:184-186` の `alertUnrecordedEscalation`)ので、新しい件は期限を待たずに届く。`ralph.toml` の失敗では文は正しい。見張りは起動時に組み立てた設定で動き(`internal/cli/org_watch.go:90`)、周回ごとに読み直さない。8ac59595 の commit message も同じ言い方をしている。director がする手順(打ち直さない、人に伝える、detach しない)は変わらないが、この文をもとに「件は期限で届く」と人に伝えると、受信箱が読めない場合に人の判断を誤らせる。直し方の例: 最後の文を「`ralph.toml` の失敗なら、見張りが動いていれば件は期限で人に届く。受信箱が読めない失敗では見張りも期限を見られないので、そのことも人に伝える」にする。skill の 4 面を直すので、記録だけの例外には入らない |
+| C3-V2 | INFO | `.claude/skills/director/SKILL.md:101-106` | `2>&1` で、件の行とエラーの文のほかに、stderr の `note:` の行も同じ出力に入る。旧台帳の guard は read-only の動詞では断らずに `note:` を 1 行書く(`org_legacy_ledger.go:53-55`、`:73-75`。古い台帳を持つ linked worktree で打ったとき)ので、Claude Code の形では終了コード 0 の出力にも件でない行が混ざりうる。件の行の中身(ID、org、TYPE、本文の 1 行目)は `/org` skill の `wait` の行(173 行)にあり、`note:` で始まる行と取り違えにくい。Codex の形は stderr を「含む」で見るので影響しない |
+| C3-V3 | INFO | `.claude/skills/director/SKILL.md:101-116` | 終了コード 0 と 1 のほかの終わり方(Go の runtime の panic の 2、signal での終わり)を skill は名指ししない。Codex の項の打ち直しの条件は終了コード 1 と時間切れの文の両方なので、どちらの終わり方でも打ち直されず、止まる側に倒れる。止まってからの扱いは終了コード 1 の段落として書かれているが、そのまま当てはめて読める。self-review cycle 3 の Coverage gaps(外からの kill)と同じ穴で、cycle 3 が持ち込んだものではない |
+| C3-V4 | INFO | 計画の `## Progress checklist` | 最後の行は /sync-docs cycle 2 で、cross-review cycle 2 の ACTION_REQUIRED #1、その直し c8a9227b、self-review cycle 3 とその直し 8ac59595 の行がない。この cycle の /sync-docs で足すとオーケストレーターから聞いている。オーケストレーターが更新する欄なので失敗とはしない |
+
+### 観察
+
+- C3-3 と C3-4 は `env -i` で HOME を scratch にし、PATH を git だけにして打った。osascript、herdr、agmsg は動いておらず、台帳と cwd はどれも scratch。C3-4 の受信箱は読めないので、見張りは期限の処理の手前で止まり、人への経路には何も送っていない
+- P1 の最初の 1 回だけ 1654 ms かかった。新しく作った binary を初めて実行したときの macOS の検査の分とみられる(おそらく。未確認)。同じ case をあと 4 回打つと 339〜357 ms だった
+- 受信箱が読めないときのエラーは path を 2 回出す(`read <path>: read <path>: is a directory`)。cycle 2 の C2-V2 と同じ包み方で、`inbox.go` に前からある。設定の失敗のエラー(`org: load config: toml: expected character ]`)はファイル名を出さないので、director がこの文をそのまま人に伝えても、cwd の `ralph.toml` と `--config` のどちらが壊れているかは文からは分からない。どちらも cycle 3 より前からある形で、skill の指示(エラーの文を人に伝える)とは食い違わない
+
+### Coverage gaps(cycle 3)
+
+- テストの実行(/test の担当)。8ac59595 はテストにコメントを足しただけなので、期待値は変わっていない
+- skill の文と Go のエラーの文が一致することを機械で見る検査はない。self-review C3-L1 の推奨のうち、テストを足す部分は採られず、コメントだけが入った。文を変える人がコメントを読まなければ、skill はずれる
+- skill の文を、実際の Claude Code(Monitor、`run_in_background`)と Codex の session で動かしていない。Monitor が `2>&1` の出力をどう渡すか、Codex の shell tool が 300000 ms の wait を許すかは未確認(self-review cycle 3 と同じ)
+- C3-4 は `--once` の 1 回だけ。長く動く見張りが周回ごとに同じ read をすることはコードで確かめた(`watch.go:627-629`、`deadline.go:177`)が、binary で何周も回してはいない
+- 足すと確信がいちばん増える確認: `/director` skill の受信箱の節から backtick の中の時間切れの文を読み、`WaitInbox` の時間切れのエラーに含まれることを見るテストを 1 本足す(C3-L1 の残り)。C3-V1 は skill の 1 文を直せば閉じる
+
+### 判定(cycle 3)
+
+- Verdict: pass(C3-V1 は skill の 1 文の言い過ぎで、director のする手順は変わらない。merge を止めるものではない)
+- Verified: cross-review cycle 2 #1 の直し(Codex は時間切れの文があるときだけ打ち直す、それ以外の終了コード 1 は打ち直さずに人に伝える)と、self-review cycle 3 の C3-L1〜C3-L3 の直しを、コードと HEAD d2eaa665 の binary で辿った。binary では、時間切れ 2 通りの stderr が skill の文を含むこと、時間切れでない失敗 10 回(flag の解析、flag の併用 3 つ、`--config` と cwd の壊れた TOML、ディレクトリの受信箱を 3 つの `--timeout-ms` で、mode 000 の受信箱)が終了コード 1 で skill の文を含まずにすぐ返ること、`--timeout-ms 0` の失敗が件の行なしで返ること、件があれば終了コード 0 で件の行が出ることを確かめた。終了コード 3 が `wait --inbox` から届かないことはコードで確かめた。AC7・AC8・AC12 を確かめ直し、ほかの AC は経路が変わっていないことを diff で確かめた。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build と vet、skill と template の同期、`git diff --check`、U+FFFD)。計画の digest は承認時と同じ
+- Partially verified: 受信箱が読めないときの見張りの動き(`--once` の 1 回と、コードを読んだ範囲)
+- Not verified: テストの実行(/test)、実際の Claude Code と Codex の session での skill の文の動き、Monitor の出力の渡し方、Codex の shell tool の時間の上限
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 1(C3-V1)。情報は 3 つ(C3-V2〜C3-V4)
