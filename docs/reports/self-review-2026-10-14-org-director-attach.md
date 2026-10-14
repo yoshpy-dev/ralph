@@ -251,3 +251,15 @@ _(登録簿には追記していない。登録簿の編集は記録だけの例
   2. 直すなら、C3-L2 と C3-L3 は skill の同じ節の数行で、C3-L1 は Go のコメント 1 行。skill は 4 面を揃える(`.agents` 側は `scripts/sync-skills.sh`)。pipeline をもう 1 回回すことになるので、cap をもう一度上げるかどうかは人が決める
   3. plan の Progress checklist に、cross-review cycle 2 の ACTION_REQUIRED と c8a9227b の行がない(cycle 2 の節の follow-up 4 と同じ種類)。`/pr` が plan を archive するので、`/sync-docs` で足すとよい(diff の品質の外なので、指摘には数えない)
 - Known gaps: テスト、`gofmt`、`go vet` は実行していない。skill の文を実際の Codex と Claude Code の session で動かしていない。Monitor の stderr の扱いと Codex の shell tool の timeout は未確認
+
+### Fixes after the cycle-3 review (before /verify)
+
+この節はオーケストレーターが足した。直しはコミット 8ac59595(`fix: address the cycle-3 self-review findings for org-director-attach`、7 ファイル)。上の重大度と `Merge:` の行は変えていない。
+
+| ID | 対応 |
+| --- | --- |
+| C3-L1 | `WaitInbox` の時間切れの文の直前に、`/director` skill がこの文を照合して時間切れと失敗を見分けること、文を変えるなら skill の受信箱の節も直すことをコメントで書いた。文を固定する 2 つのテスト(`internal/org/escalate_test.go`、`internal/cli/org_inbox_test.go`)にも skill を指す 1 行のコメントを足した。文そのものは変えていない |
+| C3-L2 | Claude Code の項を `ralph org wait --inbox --timeout-ms 0 2>&1` にし、`--timeout-ms 0` には時間切れがないので、件の行を出さずに返ったとき(終了コード 1)はいつも失敗で打ち直さない、と書いた。Monitor が stderr をどう扱うかは書いていない(未確認) |
+| C3-L3 | 共通の段落の「止まる」を、受信箱を待つのをやめ、エラーの文を人に伝えて人の指示を待つ、detach は打たないので登録は残り、見張りが動いていれば件は期限で人に届く、と書き直した。昇格の 5(detach を打たない)と同じ扱い。「ack の期限」でなく「期限」と書いたのは、ack 済みの件が届くのは resolve の期限のため |
+
+確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./internal/org/ ./internal/cli/` は通過、`go test -count=1 ./internal/org/ ./internal/cli/ -run 'WaitInbox|Inbox'` は ok、`check-skill-sync.sh` と `check-sync.sh` は通過、skill の 4 面は md5 が同じ
