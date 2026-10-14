@@ -40,8 +40,9 @@ const (
 )
 
 // mgFix is the end of every pr_checks_only Detail.
-const mgFix = "; set Require branches to be up to date before merging with at least one required status check, or a merge " +
-	"queue, in a ruleset or the branch protection of the branch"
+const mgFix = "; set Require branches to be up to date before merging with at least one required status check, " +
+	"in a ruleset or the branch protection of the branch, or add a merge queue with at least one required " +
+	"status check to a ruleset"
 
 // mgSubject names main of acme/app in a Detail.
 const mgSubject = "main, the default branch of origin's repository acme/app"

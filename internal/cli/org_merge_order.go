@@ -93,12 +93,12 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"with the latest default branch, as ralph doctor last found it and\n" +
 			"cached it in the ledger's state directory (merge-guarantee.json):\n" +
 			"github_protection (a ruleset or the branch protection requires\n" +
-			"up-to-date branches or a merge queue, with a required check),\n" +
-			"pr_checks_only (only the gate and the CI that ran when the PR was\n" +
-			"made), or unknown with the reason: no ledger or no cache, a cache that\n" +
-			"cannot be read or is more than 24 hours old, an origin whose host or\n" +
-			"owner/repo is not the one doctor checked or cannot be read here, or a\n" +
-			"default branch other than the one the ls-remote names. merge-order\n" +
+			"up-to-date branches, or a ruleset has a merge queue, with a required\n" +
+			"check), pr_checks_only (only the gate and the CI that ran when the PR\n" +
+			"was made), or unknown with the reason: no ledger or no cache, a cache\n" +
+			"that cannot be read or is more than 24 hours old, an origin whose host\n" +
+			"or owner/repo is not the one doctor checked or cannot be read here, or\n" +
+			"a default branch other than the one the ls-remote names. merge-order\n" +
 			"runs no gh for it, and runs git remote get-url origin (local) for it\n" +
 			"only when the cache is fresh. With no branch in the ledger, no\n" +
 			"ls-remote runs and the guarantee line comes first.\n" +

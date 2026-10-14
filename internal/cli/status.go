@@ -53,13 +53,13 @@ func newStatusCmd() *cobra.Command {
 			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head with the\n" +
 			"latest default branch, as `ralph doctor` last found it -- github_protection\n" +
-			"(a ruleset or the branch protection requires up-to-date branches or a merge\n" +
-			"queue, with a required check), pr_checks_only (only the gate and the CI that\n" +
-			"ran when the PR was made), or unknown -- with the branch, origin's repository\n" +
-			"and when doctor checked it. It reads the cache doctor writes in the state\n" +
-			"directory (merge-guarantee.json) and never runs gh; git runs only for the\n" +
-			"local `git remote get-url origin` in the current directory, and only when the\n" +
-			"cache is fresh. It is unknown, with the reason, when the state directory or\n" +
+			"(a ruleset or the branch protection requires up-to-date branches, or a ruleset\n" +
+			"has a merge queue, with a required check), pr_checks_only (only the gate and\n" +
+			"the CI that ran when the PR was made), or unknown -- with the branch, origin's\n" +
+			"repository and when doctor checked it. It reads the cache doctor writes in the\n" +
+			"state directory (merge-guarantee.json) and never runs gh; git runs only for\n" +
+			"the local `git remote get-url origin` in the current directory, and only when\n" +
+			"the cache is fresh. It is unknown, with the reason, when the state directory or\n" +
 			"the cache does not exist, the cache cannot be read or is more than 24 hours\n" +
 			"old, or origin's host or owner/repo is not the one doctor checked or cannot\n" +
 			"be read here.\n\n" +

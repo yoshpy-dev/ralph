@@ -96,9 +96,12 @@ const (
 	// mergeGuaranteeMaxErrText is how many bytes of a command's error a
 	// Detail quotes.
 	mergeGuaranteeMaxErrText = 300
-	// mergeGuaranteeFix ends every pr_checks_only Detail: what to set.
-	mergeGuaranteeFix = "set Require branches to be up to date before merging with at least one required status check, or " +
-		"a merge queue, in a ruleset or the branch protection of the branch"
+	// mergeGuaranteeFix ends every pr_checks_only Detail: what to set. It names
+	// only what the check reads: a merge queue counts from a ruleset only, never
+	// from the branch protection (decide).
+	mergeGuaranteeFix = "set Require branches to be up to date before merging with at least one required status check, " +
+		"in a ruleset or the branch protection of the branch, or add a merge queue with at least one required " +
+		"status check to a ruleset"
 	// mergeGuaranteeGetURL names the git command in Details.
 	mergeGuaranteeGetURL = "git remote get-url origin"
 )

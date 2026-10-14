@@ -168,7 +168,9 @@ func TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached(t *testing
 		{
 			name: "pr_checks_only", fixture: org.MergeGuaranteePRChecksOnly, ghFound: true,
 			wantKind: org.MergeGuaranteePRChecksOnly, wantStatus: "warn", wantNames: []string{"git", "gh", "gh", "gh"},
-			wantDetail: "set Require branches to be up to date before merging with at least one required status check, or a merge queue",
+			wantDetail: "set Require branches to be up to date before merging with at least one required status check, " +
+				"in a ruleset or the branch protection of the branch, or add a merge queue with at least one required " +
+				"status check to a ruleset",
 		},
 		{
 			name: "unknown without gh", fixture: org.MergeGuaranteeGitHubProtection, ghFound: false,
