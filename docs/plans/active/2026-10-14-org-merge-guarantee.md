@@ -165,4 +165,5 @@ Critical forks: C1〜C7 は consult(consult-plan-guarantee)の判定で決めた
 - [x] Review artifact created(`docs/reports/self-review-2026-10-14-org-merge-guarantee.md`、cycle 1。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 6)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-14-org-merge-guarantee.md`、cycle 1。pass)
 - [x] Test artifact created(`docs/reports/test-2026-10-14-org-merge-guarantee.md`、cycle 1。pass)
+- cycle 1 の cross-review(Codex)は指摘 0 件(fb954403)。self-review は LOW L2〜L6 を「次の fix の回で直す」前提で登録簿に載せておらず、その回がなくなったので、cycle 2 を回す(consult-done-prguarantee の判定「進めてよい、案 B」)。cycle 2 の fix で直すのは L3(doctor の Detail の gh の stderr の制御文字をエスケープ)、L4(strict の 403 の文を 404 `Not Found` と分ける)、test の Gap 1(404 で message が想定外のときの行)。L2・L5・L6 と test の Gap 4 は tech-debt の「Small leftovers」の行に足す。cycle 2 は上限 2 の 2 回目なので、cycle 2 で新しく出た LOW は直さず同じ行に足す
 - [ ] PR created
