@@ -781,7 +781,9 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"detach reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
 		}},
 		{[]string{"director", "status", "--help"}, []string{
-			"attached, not attached, disabled, or unreadable", "--json", "The registration does not tell whether its session is still running",
+			"attached, not attached, disabled, or unreadable", "--json",
+			"With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown",
+			"The registration does not tell whether its session is still running",
 		}},
 		{[]string{"--help"}, []string{
 			"`ralph org director` registers the interactive session the human talks to as the director of the ledger",

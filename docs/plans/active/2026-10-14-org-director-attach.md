@@ -171,4 +171,5 @@ Critical forks: D1〜D4 は consult(consult-plan-director)、D7 と D8 は consu
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+- 2026-10-15: /sync-docs(cycle 1)。文書の直しは 3 件。AGENTS.md の `internal/org/` の項で escalate を「interim」と呼んでいたのを今の動きに合わせた(verify V1)。仕様 FR-9 の 8a-1 の注に、`ralph status` が `enabled` を読むために打つ git(`rev-parse`、連結した worktree からは `worktree list` も)を 1 文足した(S6。7c-2 の注は origin の照合の話なので変えない)。`docs/quality/quality-gates.md` とその template の「見張りなしで使える動詞」に `director` の動詞を足した。Go は 1 か所だけ触った: `ralph org director status --help` に、`enabled = false` のときの state(`disabled`)と、残っている登録の欄も出すことを 1 文足し、help を固定するテストの期待値を 1 つ足した(動きは変えていない。verify V4)。報告は `docs/reports/sync-docs-2026-10-14-org-director-attach.md`
 - [ ] PR created

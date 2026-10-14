@@ -209,6 +209,8 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"the ledger: the director: line of `ralph status` (attached, not\n" +
 			"attached, disabled, or unreadable), then enabled and, when a director is\n" +
 			"attached, the registration's fields, or all of it as JSON with --json.\n" +
+			"With enabled false the state is disabled whether or not a registration is\n" +
+			"recorded; one that is still recorded is named and its fields are shown.\n" +
 			"The registration does not tell whether its session is still running.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
