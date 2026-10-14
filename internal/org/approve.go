@@ -12,9 +12,15 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// The `ralph org approve` verb (Approve). The PLAN: header, the plan path and
-// hashes, the plan_approved record and the approval check it feeds are in
-// approval.go.
+// The `ralph org approve` verb (Approve). It records approvals only: the
+// inbox item stays open or acked until the leader has been told, so the item
+// is finished by the two commands approve prints, the `ralph org send`
+// DECISION (ApprovalDecisionCommand) and then, once that send succeeded, the
+// resolve (ApprovalResolveCommand). An approve whose DECISION is never sent
+// is then still reached by the ack and resolve deadlines of `ralph org watch
+// --all` (plan 2026-10-14-org-director-attach, D7). The PLAN: header, the
+// plan path and hashes, the plan_approved record and the approval check it
+// feeds are in approval.go.
 
 // ApproveParams describes one `ralph org approve` call.
 type ApproveParams struct {
@@ -36,12 +42,13 @@ type ApprovedPlan struct {
 	// the org was started in split mode or by an older start: the approval
 	// is recorded, but the org's check does not read it, so the CLI says so.
 	RequiresApproval bool
-	// Resolved reports that Approve resolved the inbox item after the
-	// record, with the note `approved <path> sha256:<digest>`. It is false
-	// for an item it could not resolve, one resolved by someone else in the
-	// meantime included (Err says which). The CLI prints Approved and Err
-	// only; Resolved is for tests and callers that want the result per item.
-	Resolved bool
+	// ResolvedElsewhere reports that the inbox item was resolved by someone
+	// else after Approve read the inbox, as Approve's second read after the
+	// record found it (checkResolvedMeanwhile; Err says so). The approval is
+	// recorded all the same, but nothing is left to resolve and whoever
+	// resolved the item may have asked for changes, so the CLI prints no
+	// resolve command for it.
+	ResolvedElsewhere bool
 }
 
 // ApproveRefusal is one inbox item Approve refused, with the reason.
@@ -52,13 +59,15 @@ type ApproveRefusal struct {
 
 // ApproveResult is Approve's return value. Err is set on every refusal and
 // failure and is the one error to print: on a refusal it lists every refused
-// item, one per line, and then Refused has them too and Approved is empty,
-// since nothing was recorded. Approved holds, in argument order, the items
-// whose approval is in the manifest, which may be fewer than asked when an
-// append failed midway (Err then names the items not recorded and the
-// command to run again), and an item there with Resolved false is named in
-// Err (resolveApproved). The CLI prints Approved and Err only; Refused is
-// for tests and callers that want the refusals one by one.
+// item, each starting a line (the refusal of an item already approved spans
+// several, since it repeats the send command), and then Refused has them too
+// and Approved is empty, since nothing was recorded. Approved holds, in
+// argument order, the items whose approval is in the manifest, which may be
+// fewer than asked when an append failed midway (Err then names the items
+// not recorded and the command to run again), and an item there with
+// ResolvedElsewhere set is named in Err (checkResolvedMeanwhile). The CLI
+// prints Approved and Err only; Refused is for tests and callers that want
+// the refusals one by one.
 type ApproveResult struct {
 	Approved []ApprovedPlan
 	Refused  []ApproveRefusal
@@ -81,18 +90,25 @@ type approveCandidate struct {
 // twice. When HERDR_PANE_ID is the pane of an active seat (approveTripwire),
 // it refuses before it reads the inbox or a plan. Every item is then checked
 // before anything is written: it is in the inbox and not resolved, a
-// QUESTION whose header names a plan (ParsePlanHeader), its org holds a
-// complete split plan feature binding (ActiveFeature), the plan resolves to a
-// regular file in that binding's worktree (resolvePlanFile), and the file's
+// QUESTION whose header names a plan (ParsePlanHeader), its approval is not
+// recorded yet in its org's current life (checkNotApprovedYet), its org holds
+// a complete split plan feature binding (ActiveFeature), the plan resolves to
+// a regular file in that binding's worktree (resolvePlanFile), and the file's
 // PlanDigest equals the header's digest. The part that reads the manifest and
 // the plan is done under the manifest lock, and the plan_approved records are
 // appended under the same lock hold, so what is recorded, the
 // PlanContentHash included, is what was checked. If one item fails, nothing
-// is recorded or resolved and every failure comes back. After the lock each
-// recorded item is resolved; a resolve that fails keeps the record. An org
-// whose binding does not require an approval (split mode, or an older start)
-// is recorded too, and marked. Approve never calls herdr or agmsg and never
-// writes the plan file (A3).
+// is recorded and every failure comes back. An org whose binding does not
+// require an approval (split mode, or an older start) is recorded too, and
+// marked.
+//
+// Approve never resolves an item (D7 of plan
+// 2026-10-14-org-director-attach): it stays open or acked until the leader
+// has been told with the DECISION (ApprovalDecisionCommand) and the item is
+// then resolved (ApprovalResolveCommand). After the lock the inbox is read
+// once more, and an item someone else resolved in the meantime is named in
+// Err (checkResolvedMeanwhile). Approve never calls herdr or agmsg, never
+// writes the inbox, and never writes the plan file (A3).
 func (o *Org) Approve(p ApproveParams) ApproveResult {
 	if err := checkApproveIDs(p.IDs); err != nil {
 		return ApproveResult{Err: err}
@@ -133,16 +149,17 @@ func (o *Org) Approve(p ApproveParams) ApproveResult {
 	if refused, ok := approveRefusals(candidates); ok {
 		return refused
 	}
-	res.Err = errors.Join(res.Err, o.resolveApproved(res.Approved))
+	res.Err = errors.Join(res.Err, o.checkResolvedMeanwhile(res.Approved))
 	return res
 }
 
 // recordUnderLock takes the manifest lock, reads the manifest, and runs
-// checkApproveCandidate on every candidate that passed the inbox checks; when
-// every candidate passes, it appends their records under the same lock hold
-// (recordApprovals) and returns the items recorded and the error of a failed
-// append. lockErr is set when the lock could not be taken or the manifest
-// could not be read; nothing was checked or recorded then.
+// checkNotApprovedYet and checkApproveCandidate on every candidate that
+// passed the inbox checks; when every candidate passes, it appends their
+// records under the same lock hold (recordApprovals) and returns the items
+// recorded and the error of a failed append. lockErr is set when the lock
+// could not be taken or the manifest could not be read; nothing was checked
+// or recorded then.
 func (o *Org) recordUnderLock(candidates []*approveCandidate, record planApproval) (recorded []ApprovedPlan, appendErr, lockErr error) {
 	lockErr = withManifestLock(filepath.Dir(o.Manifest.Path()), func() error {
 		rr, err := o.Manifest.Read()
@@ -150,6 +167,9 @@ func (o *Org) recordUnderLock(candidates []*approveCandidate, record planApprova
 			return fmt.Errorf("org: approve: read manifest: %w", err)
 		}
 		for _, c := range candidates {
+			if c.err == nil {
+				c.err = checkNotApprovedYet(rr.Events, c, o.InboxHintStateDir)
+			}
 			if c.err == nil {
 				c.binding, c.content, c.err = checkApproveCandidate(rr.Events, c)
 			}
@@ -232,8 +252,8 @@ func approveNote(ref PlanRef) string {
 // approveCandidates runs the checks that read only the inbox, in argument
 // order: the item exists and is not resolved (open or acked), is a QUESTION,
 // names one plan in its header (planRefFromText), and its resolve note
-// (approveNote) passes ValidateInboxNote, so the resolve after the record
-// does not fail on it.
+// (approveNote) passes ValidateInboxNote, so the resolve command approve
+// prints (ApprovalResolveCommand) does not fail on it.
 func approveCandidates(items []InboxItem, ids []string) []*approveCandidate {
 	candidates := make([]*approveCandidate, 0, len(ids))
 	for _, id := range ids {
@@ -261,13 +281,38 @@ func approveCandidates(items []InboxItem, ids []string) []*approveCandidate {
 			continue
 		}
 		if err := ValidateInboxNote(approveNote(ref)); err != nil {
-			c.err = fmt.Errorf("org: approve %s: the item could not be resolved with the note %q: %s",
+			c.err = fmt.Errorf("org: approve %s: the resolve command approve prints for the item would fail on its note %q: %s",
 				id, approveNote(ref), strings.TrimPrefix(err.Error(), "org: inbox: "))
 			continue
 		}
 		c.ref = ref
 	}
 	return candidates
+}
+
+// ErrPlanAlreadyApproved is returned (wrapped) by Approve for an inbox item
+// whose approval is already recorded (checkNotApprovedYet).
+var ErrPlanAlreadyApproved = errors.New("the approval of this inbox item is already recorded")
+
+// checkNotApprovedYet refuses c when its org's current life already holds a
+// plan_approved for this inbox item (currentPlanApprovals of events, read
+// under the manifest lock): approve records an item once, and the item is
+// finished by the send and the resolve, not by a second approve (D7 of plan
+// 2026-10-14-org-director-attach). The error repeats both commands for the
+// recorded approval's plan and digest, with --state-dir stateDir when it is
+// set: the `ralph org send` DECISION (ApprovalDecisionCommand) and the
+// resolve to run once that send succeeded (ApprovalResolveCommand), each on
+// its own line.
+func checkNotApprovedYet(events []ManifestEvent, c *approveCandidate, stateDir string) error {
+	approvals := currentPlanApprovals(events, c.item.OrgID)
+	i := slices.IndexFunc(approvals, func(a planApproval) bool { return a.InboxID == c.id })
+	if i < 0 {
+		return nil
+	}
+	ref := PlanRef{Path: approvals[i].Plan, Digest: approvals[i].Digest}
+	return fmt.Errorf("org: approve %s: %w (org_id %q, plan %s), so approve records nothing more for it; "+
+		"tell the leader with:\n%s\nand once that send succeeded, resolve the item with:\n%s",
+		c.id, ErrPlanAlreadyApproved, c.item.OrgID, ref, ApprovalDecisionCommand(c.item.OrgID, ref, stateDir), ApprovalResolveCommand(c.id, ref, stateDir))
 }
 
 // checkApproveCandidate runs Approve's checks that read the manifest (events,
@@ -372,44 +417,59 @@ func ApprovalDecisionCommand(orgID string, ref PlanRef, stateDir string) string 
 	return command + " --text " + shellQuote(ApprovalDecisionText(ref))
 }
 
-// resolveApproved resolves each recorded item with its approveNote and sets
-// Resolved on it. A resolve that fails keeps the approval record. An item
-// someone else resolved after Approve read the inbox (ErrInboxResolved) has
-// nothing left to resolve, so the error names it and says the approval is
-// recorded all the same, with no resolve command. Whoever resolved it may
-// have done so to ask for changes, so the error also says not to send the
-// leader the approval DECISION yet, and names the `ralph org inbox show`
-// command (InboxCommand) that shows the note the item was resolved with
-// (self-review N3 of org-plan-approval). For any other failure the error
-// names the items and the `ralph org inbox resolve` command (InboxCommand
-// with --note) that finishes each.
-func (o *Org) resolveApproved(approved []ApprovedPlan) error {
-	var elsewhere, shows, failed, commands []string
+// ApprovalResolveCommand is the one POSIX shell command, `ralph org inbox
+// resolve`, that resolves the inbox item id of the plan approval ref with the
+// note `approved <path> sha256:<digest>`, with --state-dir stateDir when it
+// is set (the rule of InboxCommand). `ralph org approve` prints it after
+// ApprovalDecisionCommand, to be run once that send succeeded: the item stays
+// under the inbox deadlines until the leader has been told (D7 of plan
+// 2026-10-14-org-director-attach).
+func ApprovalResolveCommand(id string, ref PlanRef, stateDir string) string {
+	return InboxCommand("resolve", id, stateDir) + " --note " + shellQuote(approveNote(ref))
+}
+
+// checkResolvedMeanwhile reads the inbox once more after the records and
+// sets ResolvedElsewhere on each recorded item that someone else resolved
+// after Approve's first read (self-review L3 and N3 of org-plan-approval).
+// The approval stays recorded, but whoever resolved the item may have done
+// so to ask for changes, so the error names the items, says the approval is
+// recorded all the same and not to send the leader the approval DECISION
+// yet, and names the `ralph org inbox show` command (InboxCommand) that
+// shows the note each was resolved with. An inbox that cannot be read again
+// is an error too, naming that command for every recorded item. Items still
+// open or acked give no error, and so does an item the second read does not
+// find, which only a hand-edited inbox.jsonl can lose.
+func (o *Org) checkResolvedMeanwhile(approved []ApprovedPlan) error {
+	if len(approved) == 0 {
+		return nil
+	}
+	showCommand := func(id string) string { return "`" + InboxCommand("show", id, o.InboxHintStateDir) + "`" }
+	inbox, err := o.Inbox.Read()
+	if err != nil {
+		shows := make([]string, 0, len(approved))
+		for _, a := range approved {
+			shows = append(shows, showCommand(a.ID))
+		}
+		return fmt.Errorf("org: approve: the approval is recorded, but the inbox could not be read again to see whether someone "+
+			"else resolved the item in the meantime (%w): before you send the leader the approval DECISION, run %s",
+			err, strings.Join(shows, " and "))
+	}
+	var elsewhere, shows []string
 	for i := range approved {
 		a := &approved[i]
-		note := approveNote(PlanRef{Path: a.Plan, Digest: a.Digest})
-		err := o.Inbox.Resolve(a.ID, note)
-		switch {
-		case err == nil:
-			a.Resolved = true
-		case errors.Is(err, ErrInboxResolved):
-			elsewhere = append(elsewhere, a.ID)
-			shows = append(shows, "`"+InboxCommand("show", a.ID, o.InboxHintStateDir)+"`")
-		default:
-			failed = append(failed, fmt.Sprintf("%s (%v)", a.ID, err))
-			commands = append(commands, "`"+InboxCommand("resolve", a.ID, o.InboxHintStateDir)+" --note "+shellQuote(note)+"`")
+		j := slices.IndexFunc(inbox.Items, func(item InboxItem) bool { return item.ID == a.ID })
+		if j < 0 || inbox.Items[j].State != InboxStateResolved {
+			continue
 		}
+		a.ResolvedElsewhere = true
+		elsewhere = append(elsewhere, a.ID)
+		shows = append(shows, showCommand(a.ID))
 	}
-	var errs []error
-	if len(elsewhere) > 0 {
-		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded all the same, but the inbox item was already "+
-			"resolved by someone else after approve read the inbox, so nothing is left to resolve: %s; whoever resolved it "+
-			"may have asked for changes, so do not send the leader the approval DECISION yet: first run %s to read the note "+
-			"it was resolved with", strings.Join(elsewhere, ", "), strings.Join(shows, " and ")))
+	if len(elsewhere) == 0 {
+		return nil
 	}
-	if len(failed) > 0 {
-		errs = append(errs, fmt.Errorf("org: approve: the approval is recorded, but the inbox item could not be resolved: %s; run %s to finish",
-			strings.Join(failed, ", "), strings.Join(commands, " and ")))
-	}
-	return errors.Join(errs...)
+	return fmt.Errorf("org: approve: the approval is recorded all the same, but the inbox item was resolved by someone else "+
+		"after approve read the inbox, so nothing is left to resolve: %s; whoever resolved it may have asked for changes, "+
+		"so do not send the leader the approval DECISION yet: first run %s to read the note it was resolved with",
+		strings.Join(elsewhere, ", "), strings.Join(shows, " and "))
 }

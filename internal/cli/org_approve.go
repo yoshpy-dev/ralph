@@ -11,13 +11,17 @@ import (
 
 // newOrgApproveCmd wires `ralph org approve <inbox ID>...` (plan
 // docs/plans/active/2026-10-12-org-plan-approval.md, A2, A3, A4 and A9):
-// (*org.Org).Approve checks every item, records the approvals all or
-// nothing, and resolves the items; this command prints, for each approved
-// item, its line and the `ralph org send` DECISION that tells the item's
-// org's leader (org.ApprovalDecisionCommand), which approve never sends
-// itself. Each item names its org, so --org-id is refused as the inbox verbs
-// refuse it (newOrgInboxRuntime), which also sets InboxHintStateDir for the
-// printed commands.
+// (*org.Org).Approve checks every item and records the approvals all or
+// nothing, and refuses an item whose approval is already recorded. It
+// records only and resolves no item (D7 of plan
+// 2026-10-14-org-director-attach), so an item stays open or acked, and under
+// the inbox deadlines, until the leader has been told. This command prints,
+// for each approved item, its line, the `ralph org send` DECISION that tells
+// the item's org's leader (org.ApprovalDecisionCommand), which approve never
+// sends itself, and then the resolve to run once that send succeeded
+// (org.ApprovalResolveCommand). Each item names its org, so --org-id is
+// refused as the inbox verbs refuse it (newOrgInboxRuntime), which also sets
+// InboxHintStateDir for the printed commands.
 func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "approve <inbox ID>...",
@@ -35,18 +39,24 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			"path is relative, stays inside the org's feature worktree (symlinks\n" +
 			"resolved), and is a regular file; and that the digest equals the plan\n" +
 			"file's digest now. Several IDs are all or nothing: when one item fails,\n" +
-			"nothing is recorded or resolved, every failure is listed, and approve\n" +
-			"exits 1.\n" +
+			"nothing is recorded, every failure is listed, and approve exits 1.\n" +
 			"\n" +
 			"When every item passes, approve records a plan_approved event per item\n" +
 			"in the manifest, with who ran it (USER, whether HERDR_PANE_ID was set,\n" +
-			"and the current directory), and resolves the item. It records the plan\n" +
-			"file as it is now: from then on, the leader may change only the\n" +
-			"plan's - Status: and - Approved: lines and its checkbox marks, and any\n" +
-			"other change refuses the implementer's spawn and TASKs until the plan\n" +
-			"is approved again. approve never edits the plan file and never messages\n" +
-			"the leader: for each item it prints the `ralph org send` command whose\n" +
-			"DECISION tells that org's leader, for you to run.\n" +
+			"and the current directory). It records the plan file as it is now:\n" +
+			"from then on, the leader may change only the plan's - Status: and\n" +
+			"- Approved: lines and its checkbox marks, and any other change refuses\n" +
+			"the implementer's spawn and TASKs until the plan is approved again.\n" +
+			"\n" +
+			"approve only records: it never edits the plan file, never messages the\n" +
+			"leader, and never resolves the inbox item. For each item it prints the\n" +
+			"`ralph org send` command whose DECISION tells that org's leader, and\n" +
+			"then the `ralph org inbox resolve` command to run once that send\n" +
+			"succeeded. Run them in that order: until the item is resolved, the ack\n" +
+			"and resolve deadlines of `ralph org watch --all` can still bring it to\n" +
+			"a human, so an approval whose DECISION was never sent does not leave\n" +
+			"the leader waiting unseen. A second approve of an item whose approval\n" +
+			"is recorded is refused, with the two commands printed again.\n" +
 			"\n" +
 			"approve is refused when HERDR_PANE_ID is the pane of an active seat, as\n" +
 			"when a seat runs it from its own herdr pane: a human runs it from a\n" +
@@ -65,14 +75,16 @@ func newOrgApproveCmd(stateDir, configPath *string) *cobra.Command {
 			// that fails (the directory is for an audit only).
 			res := rt.Approve(org.ApproveParams{IDs: args})
 			// res.Approved is what the manifest holds, also when res.Err is
-			// set (a resolve or an append that failed after a record), so
-			// those items are printed before the error. A refusal records
-			// nothing and prints nothing on stdout. An item someone else
-			// resolved in the meantime is printed with its DECISION command
-			// too, since its approval is recorded; res.Err, which goes to
+			// set (an append that failed after a record, or the inbox read
+			// again after the records), so those items are printed before
+			// the error. A refusal records nothing and prints nothing on
+			// stdout. An item someone else resolved in the meantime is
+			// printed with its DECISION command too, since its approval is
+			// recorded, but with no resolve command; res.Err, which goes to
 			// stderr after it, says not to send that DECISION before reading
 			// the note the item was resolved with, and names the
-			// `ralph org inbox show` command for it (org's resolveApproved).
+			// `ralph org inbox show` command for it (org's
+			// checkResolvedMeanwhile).
 			printApprovedPlans(cmd.OutOrStdout(), cmd.ErrOrStderr(), res.Approved, rt.InboxHintStateDir)
 			return res.Err
 		},
@@ -91,12 +103,17 @@ const approveRecordedNote = "note: approve recorded each plan file as it is now.
 
 // printApprovedPlans prints, for each approved item, a block on stdout: the
 // line `approved <ID> (org=<org> plan=<path> sha256:<digest>)`, a line that
-// says approve sends no message, and the `ralph org send` command whose
-// DECISION tells the org's leader (org.ApprovalDecisionCommand, repeating
-// --state-dir hintStateDir when it is set). The command starts its own line
-// and its --text spans several, so blocks are separated by a blank line and
-// each starts with its approved line. approveRecordedNote follows the last
-// block. An item whose org does not wait for the approval
+// says approve sends no message and resolves nothing, the `ralph org send`
+// command whose DECISION tells the org's leader
+// (org.ApprovalDecisionCommand), a line that says to resolve the item once
+// that send succeeded, and the `ralph org inbox resolve` command that does
+// (org.ApprovalResolveCommand), both commands repeating --state-dir
+// hintStateDir when it is set. Each command starts its own line and the
+// send's --text spans several, so blocks are separated by a blank line and
+// each starts with its approved line. An item someone else resolved in the
+// meantime (ResolvedElsewhere) gets no resolve lines: nothing is left to
+// resolve, and the error after the block says what to do. approveRecordedNote
+// follows the last block. An item whose org does not wait for the approval
 // (RequiresApproval false) also gets a note on stderr. With no item, it
 // prints nothing.
 func printApprovedPlans(stdout, stderr io.Writer, approved []org.ApprovedPlan, hintStateDir string) {
@@ -107,8 +124,12 @@ func printApprovedPlans(stdout, stderr io.Writer, approved []org.ApprovedPlan, h
 		ref := org.PlanRef{Path: a.Plan, Digest: a.Digest}
 		id, orgID := inboxField(a.ID), inboxField(a.OrgID)
 		_, _ = fmt.Fprintf(stdout, "approved %s (org=%s plan=%s)\n", id, orgID, ref)
-		_, _ = fmt.Fprintf(stdout, "approve sends no message; tell the leader of org %s with:\n%s\n",
+		_, _ = fmt.Fprintf(stdout, "approve sends no message and resolves nothing; tell the leader of org %s with:\n%s\n",
 			orgID, org.ApprovalDecisionCommand(a.OrgID, ref, hintStateDir))
+		if !a.ResolvedElsewhere {
+			_, _ = fmt.Fprintf(stdout, "once that send succeeded, resolve the item with:\n%s\n",
+				org.ApprovalResolveCommand(a.ID, ref, hintStateDir))
+		}
 		if !a.RequiresApproval {
 			_, _ = fmt.Fprintf(stderr, "note: org %s was started with approval mode split (or by a ralph from before approval modes), "+
 				"so its implementer does not wait for the approval of %s; it is recorded all the same\n", orgID, id)

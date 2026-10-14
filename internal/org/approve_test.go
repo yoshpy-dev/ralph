@@ -1,9 +1,13 @@
 package org
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +16,11 @@ import (
 )
 
 // Approve at the org layer (plan
-// docs/plans/active/2026-10-12-org-plan-approval.md, AC2, AC3 and AC4). The
-// fixtures it shares with the tests of the check (approvalFixture, writePlan,
-// planQuestion, ...) are in approval_test.go.
+// docs/plans/active/2026-10-12-org-plan-approval.md, AC2, AC3 and AC4, and
+// AC10 of plan 2026-10-14-org-director-attach, which makes approve record
+// only: the tests that checked the resolve of 7a now check that the item
+// stays open or acked). The fixtures it shares with the tests of the check
+// (approvalFixture, writePlan, planQuestion, ...) are in approval_test.go.
 
 // approveSetup is an approval fixture with org-a bound in per-plan mode to a
 // worktree holding the draft plan, and the leader's QUESTION for it.
@@ -36,14 +42,16 @@ func newApproveSetup(t *testing.T) *approveSetup {
 	return s
 }
 
-// TestOrgApprove_RecordsResolvesAndLeavesThePlan covers AC2 at the org
-// layer: one plan_approved line with every Details key, the item resolved
-// with its note, the plan file untouched, and the check passing once the
-// leader writes the two header lines.
-func TestOrgApprove_RecordsResolvesAndLeavesThePlan(t *testing.T) {
+// TestOrgApprove_RecordsAndLeavesTheItemAndThePlan covers AC2 at the org
+// layer and AC10's record only: one plan_approved line with every Details
+// key, the inbox file untouched (the item stays open, with no note), the
+// plan file untouched, and the check passing once the leader writes the two
+// header lines.
+func TestOrgApprove_RecordsAndLeavesTheItemAndThePlan(t *testing.T) {
 	s := newApproveSetup(t)
 	planPath := filepath.Join(s.worktree, filepath.FromSlash(testPlanRel))
 	before := fileOrAbsent(t, planPath)
+	inboxBefore := fileOrAbsent(t, s.o.Inbox.Path())
 	eventsBefore := len(mustReadEvents(t, s.o))
 	s.env[herdrPaneIDEnv] = "p-human"
 
@@ -51,7 +59,7 @@ func TestOrgApprove_RecordsResolvesAndLeavesThePlan(t *testing.T) {
 	if res.Err != nil || len(res.Refused) != 0 {
 		t.Fatalf("Approve: %+v", res)
 	}
-	want := ApprovedPlan{ID: s.id, OrgID: "org-a", Plan: testPlanRel, Digest: s.ref.Digest, RequiresApproval: true, Resolved: true}
+	want := ApprovedPlan{ID: s.id, OrgID: "org-a", Plan: testPlanRel, Digest: s.ref.Digest, RequiresApproval: true}
 	if len(res.Approved) != 1 || res.Approved[0] != want {
 		t.Fatalf("Approved = %+v, want [%+v]", res.Approved, want)
 	}
@@ -66,9 +74,11 @@ func TestOrgApprove_RecordsResolvesAndLeavesThePlan(t *testing.T) {
 		ev.TS != "2026-10-12T12:00:00Z" {
 		t.Fatalf("plan_approved = %+v, want Details %q", ev, wantDetails)
 	}
-	item := s.item(t, s.id)
-	if item.State != InboxStateResolved || item.Note != "approved "+testPlanRel+" sha256:"+s.ref.Digest {
-		t.Fatalf("inbox item = %+v, want resolved with the approval note", item)
+	if item := s.item(t, s.id); item.State != InboxStateOpen || item.Note != "" {
+		t.Fatalf("inbox item = %+v, want it still open with no note", item)
+	}
+	if after := fileOrAbsent(t, s.o.Inbox.Path()); after != inboxBefore {
+		t.Fatalf("Approve wrote to the inbox:\n%s", after)
 	}
 	if after := fileOrAbsent(t, planPath); after != before {
 		t.Fatalf("Approve changed the plan file:\n%s", after)
@@ -89,7 +99,7 @@ func TestOrgApprove_RecordsResolvesAndLeavesThePlan(t *testing.T) {
 
 // TestOrgApprove_Batch records every item of a batch, in argument order, an
 // item of an org in split mode or started by an older start included and
-// marked, and an acked item too.
+// marked, and an acked item too; each item stays in the state it was in.
 func TestOrgApprove_Batch(t *testing.T) {
 	s := newApproveSetup(t)
 	ids := []string{s.id}
@@ -114,8 +124,15 @@ func TestOrgApprove_Batch(t *testing.T) {
 	}
 	for i, wantOrg := range []string{"org-c", "org-b", "org-a"} {
 		a := res.Approved[i]
-		if a.ID != ids[i] || a.OrgID != wantOrg || !a.Resolved || a.RequiresApproval != (wantOrg == "org-a") {
-			t.Fatalf("Approved[%d] = %+v, want item %s of %s resolved, RequiresApproval only for org-a", i, a, ids[i], wantOrg)
+		if a.ID != ids[i] || a.OrgID != wantOrg || a.ResolvedElsewhere || a.RequiresApproval != (wantOrg == "org-a") {
+			t.Fatalf("Approved[%d] = %+v, want item %s of %s, RequiresApproval only for org-a", i, a, ids[i], wantOrg)
+		}
+		wantState := InboxStateOpen
+		if wantOrg == "org-b" {
+			wantState = InboxStateAcked
+		}
+		if item := s.item(t, ids[i]); item.State != wantState {
+			t.Fatalf("item %s = %+v, want it still %s", ids[i], item, wantState)
 		}
 	}
 	got := planApprovedEvents(t, s.o)
@@ -254,8 +271,7 @@ func TestOrgApprove_Refusals(t *testing.T) {
 }
 
 // TestOrgApprove_AllOrNothing covers A4: when some items of a batch fail,
-// none is recorded or resolved, and every failure is listed in argument
-// order.
+// none is recorded, and every failure is listed in argument order.
 func TestOrgApprove_AllOrNothing(t *testing.T) {
 	s := newApproveSetup(t)
 	wt := t.TempDir()
@@ -290,13 +306,14 @@ func TestOrgApprove_AllOrNothing(t *testing.T) {
 	})
 }
 
-// TestOrgApprove_RefusesAnItemItCannotResolve pins the edge of AC3's all or
-// nothing: approve refuses, before it records anything, a QUESTION whose
-// resolve note ("approved <path> sha256:<digest>") would be longer than the
-// inbox accepts (InboxNoteMaxRunes), here for a plan path of about 490
-// characters, so no plan_approved is left behind by a resolve that fails
-// (the mutation survivor R11 of /test cycle 1 of org-plan-approval).
-func TestOrgApprove_RefusesAnItemItCannotResolve(t *testing.T) {
+// TestOrgApprove_RefusesAnItemWhoseResolveNoteIsTooLong pins the edge of
+// AC3's all or nothing: approve refuses, before it records anything, a
+// QUESTION whose resolve note ("approved <path> sha256:<digest>") would be
+// longer than the inbox accepts (InboxNoteMaxRunes), here for a plan path of
+// about 490 characters, so no plan_approved is left behind whose printed
+// resolve command fails (the mutation survivor R11 of /test cycle 1 of
+// org-plan-approval).
+func TestOrgApprove_RefusesAnItemWhoseResolveNoteIsTooLong(t *testing.T) {
 	fx := newApprovalFixture(t)
 	worktree := t.TempDir()
 	fx.bind(t, "org-a", worktree, config.ApprovalModePerPlan)
@@ -311,7 +328,7 @@ func TestOrgApprove_RefusesAnItemItCannotResolve(t *testing.T) {
 	if res.Err == nil || len(res.Refused) != 1 || len(res.Approved) != 0 {
 		t.Fatalf("Approve = %+v; want the item refused", res)
 	}
-	if !strings.Contains(res.Err.Error(), "could not be resolved with the note") {
+	if !strings.Contains(res.Err.Error(), "the resolve command approve prints for the item would fail on its note") {
 		t.Fatalf("Approve error = %v; want the note refusal", res.Err)
 	}
 	if after := fx.ledgerBytes(t); after != before {
@@ -418,13 +435,13 @@ func TestOrgApprove_ByFromUser(t *testing.T) {
 	}
 }
 
-// TestOrgApprove_ResolveFailureKeepsTheRecord: when the inbox item cannot be
-// resolved after the record, the record stays and the error names the item
-// and the resolve command that finishes it, with --state-dir when the ledger
-// was named with it.
-func TestOrgApprove_ResolveFailureKeepsTheRecord(t *testing.T) {
+// TestOrgApprove_TakesNoInboxLock: approve writes nothing to the inbox, so
+// with the inbox lock blocked (a directory where the lock file goes), which
+// fails every inbox write, it records the approval with no error and the
+// item stays open. 7a's approve resolved the item here and failed on the
+// lock.
+func TestOrgApprove_TakesNoInboxLock(t *testing.T) {
 	s := newApproveSetup(t)
-	s.o.InboxHintStateDir = s.stateDir
 	lock := filepath.Join(s.stateDir, inboxLockFile)
 	if err := os.Remove(lock); err != nil {
 		t.Fatal(err)
@@ -432,35 +449,153 @@ func TestOrgApprove_ResolveFailureKeepsTheRecord(t *testing.T) {
 	if err := os.Mkdir(lock, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.o.Inbox.Resolve(s.id, "check the lock blocks writes"); err == nil {
+		t.Fatal("the blocked lock let a resolve through, so it proves nothing")
+	}
 
 	res := s.o.Approve(ApproveParams{IDs: []string{s.id}, Cwd: "/w"})
-	if len(res.Approved) != 1 || res.Approved[0].Resolved || res.Err == nil {
-		t.Fatalf("Approve = %+v, want the item recorded, not resolved, and an error", res)
-	}
-	wantCmd := "`ralph org inbox resolve " + s.id + " --state-dir " + shellQuote(s.stateDir) +
-		" --note 'approved " + testPlanRel + " sha256:" + s.ref.Digest + "'`"
-	if msg := res.Err.Error(); !strings.Contains(msg, "the approval is recorded, but the inbox item could not be resolved: "+s.id+" (") ||
-		!strings.Contains(msg, "run "+wantCmd+" to finish") {
-		t.Fatalf("Err = %q, want the item and %s", msg, wantCmd)
+	if res.Err != nil || len(res.Approved) != 1 || res.Approved[0].ResolvedElsewhere {
+		t.Fatalf("Approve = %+v, want the item recorded with no error", res)
 	}
 	if got := planApprovedEvents(t, s.o); len(got) != 1 {
-		t.Fatalf("expected the record to stay, got %+v", got)
+		t.Fatalf("expected one record, got %+v", got)
 	}
 	if item := s.item(t, s.id); item.State != InboxStateOpen {
 		t.Fatalf("item = %+v, want it still open", item)
 	}
 }
 
+// TestOrgApprove_RefusesAnItemAlreadyApproved covers AC10's second approve:
+// once an item's approval is recorded, approving it again is refused
+// (ErrPlanAlreadyApproved), all or nothing with a fresh item in the same
+// call, with nothing written, and the error repeats, for the recorded
+// approval and with the state-dir hint, the send command and then the
+// resolve command. The check keys on the item in the org's current life:
+// another QUESTION for the same plan is approved as usual, and so is the
+// same item once the org was disbanded and started again.
+func TestOrgApprove_RefusesAnItemAlreadyApproved(t *testing.T) {
+	s := newApproveSetup(t)
+	s.o.InboxHintStateDir = s.stateDir
+	if res := s.o.Approve(ApproveParams{IDs: []string{s.id}, Cwd: "/w"}); res.Err != nil {
+		t.Fatalf("the first Approve: %v", res.Err)
+	}
+	wt := t.TempDir()
+	s.bind(t, "org-b", wt, config.ApprovalModePerPlan)
+	fresh := s.ask(t, "org-b", "QUESTION", planQuestion(PlanRef{"plan.md", PlanDigest(writePlan(t, wt, "plan.md", "# b\n"))}))
+	before := s.ledgerBytes(t)
+
+	res := s.o.Approve(ApproveParams{IDs: []string{fresh, s.id}, Cwd: "/w"})
+	if len(res.Approved) != 0 || len(res.Refused) != 1 || res.Refused[0].ID != s.id || !errors.Is(res.Err, ErrPlanAlreadyApproved) ||
+		!errors.Is(res.Refused[0].Err, ErrPlanAlreadyApproved) {
+		t.Fatalf("the second Approve = %+v, want only %s refused as already approved", res, s.id)
+	}
+	send, resolve := ApprovalDecisionCommand("org-a", s.ref, s.stateDir), ApprovalResolveCommand(s.id, s.ref, s.stateDir)
+	if want := "ralph org inbox resolve " + s.id + " --state-dir " + shellQuote(s.stateDir) + " --note 'approved " + testPlanRel +
+		" sha256:" + s.ref.Digest + "'"; resolve != want {
+		t.Fatalf("ApprovalResolveCommand = %q, want %q", resolve, want)
+	}
+	msg := res.Err.Error()
+	if want := "org: approve: nothing recorded, since 1 of the 2 inbox items cannot be approved\n" +
+		"org: approve " + s.id + `: the approval of this inbox item is already recorded (org_id "org-a", plan ` + s.ref.String() + "), " +
+		"so approve records nothing more for it; tell the leader with:\n" + send + "\n" +
+		"and once that send succeeded, resolve the item with:\n" + resolve; msg != want {
+		t.Fatalf("Err =\n%s\nwant\n%s", msg, want)
+	}
+	if s.ledgerBytes(t) != before {
+		t.Fatal("the refused approve wrote to the manifest or the inbox")
+	}
+
+	again := s.ask(t, "org-a", "QUESTION", planQuestion(s.ref))
+	if res := s.o.Approve(ApproveParams{IDs: []string{again}, Cwd: "/w"}); res.Err != nil || len(res.Approved) != 1 {
+		t.Fatalf("Approve of another QUESTION for the same plan = %+v, want it recorded", res)
+	}
+	s.appendEvents(t, ManifestEvent{OrgID: "org-a", Event: EventDisbanded})
+	s.bind(t, "org-a", s.worktree, config.ApprovalModePerPlan)
+	if res := s.o.Approve(ApproveParams{IDs: []string{s.id}, Cwd: "/w"}); res.Err != nil || len(res.Approved) != 1 {
+		t.Fatalf("Approve of the item in the org's next life = %+v, want it recorded", res)
+	}
+	if got := planApprovedEvents(t, s.o); len(got) != 3 {
+		t.Fatalf("expected 3 plan_approved lines, got %+v", got)
+	}
+}
+
+// TestOrgApprove_AnApproveThatStopsBeforeTheSendReachesAHumanAtADeadline
+// covers AC10's interruption: approve records the approval of a QUESTION
+// that was never sent to the human (as escalate leaves it to the deadlines),
+// and then neither the DECISION is sent nor the item resolved. Since approve
+// leaves the item open, the ack deadline of SweepInboxDeadlines sends it to
+// the human (inbox_ack_deadline) once ack_minutes have passed, and not
+// before; an item the director acked before the approve is sent at the
+// resolve deadline (inbox_resolve_deadline) instead. The desktop
+// notification is a stub.
+func TestOrgApprove_AnApproveThatStopsBeforeTheSendReachesAHumanAtADeadline(t *testing.T) {
+	escalatedAt := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC) // newApprovalFixture's clock
+	for _, tc := range []struct {
+		name    string
+		acked   bool
+		quiet   []time.Duration // sweeps that send nothing
+		due     time.Duration   // the sweep that sends the item
+		reason  string
+		desktop string
+	}{
+		{"an open item", false, []time.Duration{0, 10 * time.Minute}, 10*time.Minute + time.Second,
+			InboxReasonAckDeadline, "not acked within 10 min"},
+		{"an acked item", true, []time.Duration{11 * time.Minute, 60 * time.Minute}, 60*time.Minute + time.Second,
+			InboxReasonResolveDeadline, "not resolved within 60 min"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newApproveSetup(t)
+			s.o.Config.Director = config.OrgDirectorConfig{AckMinutes: 10, ResolveMinutes: 60}
+			s.o.EscalationsPath = EscalationsPathIn(s.stateDir)
+			var notified []string
+			s.o.DesktopNotify = func(_ context.Context, message string) error {
+				notified = append(notified, message)
+				return nil
+			}
+			if tc.acked {
+				if _, err := s.o.Inbox.Ack(s.id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if res := s.o.Approve(ApproveParams{IDs: []string{s.id}, Cwd: "/w"}); res.Err != nil || len(res.Approved) != 1 {
+				t.Fatalf("Approve = %+v, want it recorded", res)
+			}
+
+			var banner bytes.Buffer
+			mem := &InboxDeadlineMemory{}
+			for _, at := range tc.quiet {
+				assertSweep(t, fmt.Sprintf("%v after the escalate", at), s.o.SweepInboxDeadlines(escalatedAt.Add(at), mem, &banner), nil, nil, nil)
+			}
+			assertSweep(t, "past the deadline", s.o.SweepInboxDeadlines(escalatedAt.Add(tc.due), mem, &banner),
+				[]string{s.id + " " + tc.reason}, nil, nil)
+			if want := "org org-a: " + s.id + " (QUESTION) " + tc.desktop; !slices.Equal(notified, []string{want}) {
+				t.Errorf("desktop notifications = %q; want [%q]", notified, want)
+			}
+			if got, want := escalationReasons(t, s.o.EscalationsPath), []string{s.id + " " + tc.reason}; !slices.Equal(got, want) {
+				t.Errorf("escalations.jsonl = %v; want %v", got, want)
+			}
+			if !strings.Contains(banner.String(), "ORG INBOX DEADLINE: org=org-a item="+s.id+" ") {
+				t.Errorf("banner = %q; want the deadline line for %s", banner.String(), s.id)
+			}
+			if got := planApprovedEvents(t, s.o); len(got) != 1 {
+				t.Errorf("expected the record to stay, got %+v", got)
+			}
+		})
+	}
+}
+
 // TestOrgApprove_ResolvedBySomeoneElse covers self-review L3 and N3 of
-// org-plan-approval: when someone else resolves an item between approve's
-// read of the inbox and its own resolve (Inbox.Resolve wraps
-// ErrInboxResolved), the record stays, the error says the item was already
-// resolved by someone else and the approval is recorded all the same, and it
-// prints no `ralph org inbox resolve` command, which would fail. Since the
-// other resolve may have asked for changes, the error says not to send the
-// leader the approval DECISION yet, and names the `ralph org inbox show`
+// org-plan-approval with approve recording only: when someone else resolves
+// an item between approve's read of the inbox and its record, approve's
+// second read of the inbox finds it (checkResolvedMeanwhile). The record
+// stays and the item is marked ResolvedElsewhere; the error says the item
+// was resolved by someone else and the approval is recorded all the same,
+// and it has no `ralph org inbox resolve` command, which would fail. Since
+// the other resolve may have asked for changes, the error says not to send
+// the leader the approval DECISION yet, and names the `ralph org inbox show`
 // command, with the state-dir hint, that shows the note the item was
-// resolved with. The other item of the batch is resolved as usual.
+// resolved with. approve resolves neither item: the other item of the batch
+// stays open, with no word of it in the error.
 func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 	s := newApproveSetup(t)
 	s.o.InboxHintStateDir = s.stateDir
@@ -470,8 +605,8 @@ func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 	secondRef := PlanRef{"plan.md", PlanDigest(data)}
 	second := s.ask(t, "org-b", "QUESTION", planQuestion(secondRef))
 	// Org.Now is first read for the first record's TS: after approve read
-	// the inbox, before it resolves. A human's `ralph org inbox resolve`
-	// lands there.
+	// the inbox, before its second read. A human's `ralph org inbox
+	// resolve` lands there.
 	clock, raced := s.o.Now, false
 	s.o.Now = func() time.Time {
 		if !raced {
@@ -485,23 +620,17 @@ func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 
 	res := s.o.Approve(ApproveParams{IDs: []string{s.id, second}, Cwd: "/w"})
 	if !raced {
-		t.Fatal("Org.Now was never read between the inbox read and the resolve, so nothing raced approve")
+		t.Fatal("Org.Now was never read between the two inbox reads, so nothing raced approve")
 	}
-	if len(res.Approved) != 2 || res.Approved[0].Resolved || !res.Approved[1].Resolved || res.Err == nil {
-		t.Fatalf("Approve = %+v, want both recorded, only %s resolved by approve, and an error", res, second)
+	if len(res.Approved) != 2 || !res.Approved[0].ResolvedElsewhere || res.Approved[1].ResolvedElsewhere || res.Err == nil {
+		t.Fatalf("Approve = %+v, want both recorded, only %s resolved elsewhere, and an error", res, s.id)
 	}
 	msg := res.Err.Error()
 	show := "`ralph org inbox show " + s.id + " --state-dir " + shellQuote(s.stateDir) + "`"
-	if want := "the approval is recorded all the same, but the inbox item was already resolved by someone else " +
+	if want := "org: approve: the approval is recorded all the same, but the inbox item was resolved by someone else " +
 		"after approve read the inbox, so nothing is left to resolve: " + s.id + "; whoever resolved it may have asked for " +
-		"changes, so do not send the leader the approval DECISION yet: first run " + show + " to read the note it was resolved with"; !strings.Contains(msg, want) {
-		t.Fatalf("Err = %q, want it to contain %q", msg, want)
-	}
-	// The state dir is a temp dir whose name can hold the other item's ID
-	// ("...Else2..." holds e2), so it is left out of that check.
-	if rest := strings.ReplaceAll(msg, show, ""); strings.Contains(rest, "ralph org inbox resolve") || strings.Contains(rest, "--note") ||
-		strings.Contains(rest, second) {
-		t.Fatalf("Err = %q, want no resolve command and no word of the item approve resolved", msg)
+		"changes, so do not send the leader the approval DECISION yet: first run " + show + " to read the note it was resolved with"; msg != want {
+		t.Fatalf("Err =\n%s\nwant\n%s", msg, want)
 	}
 	if got := planApprovedEvents(t, s.o); len(got) != 2 {
 		t.Fatalf("expected both records to stay, got %+v", got)
@@ -509,14 +638,68 @@ func TestOrgApprove_ResolvedBySomeoneElse(t *testing.T) {
 	if item := s.item(t, s.id); item.State != InboxStateResolved || item.Note != "handled by hand" {
 		t.Fatalf("item %s = %+v, want it resolved with the other resolve's note", s.id, item)
 	}
-	if item := s.item(t, second); item.State != InboxStateResolved || item.Note != approveNote(secondRef) {
-		t.Fatalf("item %s = %+v, want it resolved with approve's note", second, item)
+	if item := s.item(t, second); item.State != InboxStateOpen || item.Note != "" {
+		t.Fatalf("item %s = %+v, want it still open: approve resolves nothing", second, item)
+	}
+	if a := res.Approved[1]; a.Plan != secondRef.Path || a.Digest != secondRef.Digest {
+		t.Fatalf("Approved[1] = %+v, want the plan %s", a, secondRef)
+	}
+}
+
+// TestOrgApprove_AnInboxItCannotReadAgainKeepsTheRecords: when the inbox
+// cannot be read again after the records, the records stay, no item is
+// marked ResolvedElsewhere, and the error says the approval is recorded and
+// names the `ralph org inbox show` command of every recorded item, to run
+// before the DECISION is sent.
+func TestOrgApprove_AnInboxItCannotReadAgainKeepsTheRecords(t *testing.T) {
+	s := newApproveSetup(t)
+	s.o.InboxHintStateDir = s.stateDir
+	wt := t.TempDir()
+	s.bind(t, "org-b", wt, config.ApprovalModePerPlan)
+	second := s.ask(t, "org-b", "QUESTION", planQuestion(PlanRef{"plan.md", PlanDigest(writePlan(t, wt, "plan.md", "# b\n"))}))
+	// As in TestOrgApprove_ResolvedBySomeoneElse, the first record's TS is
+	// read between the two inbox reads; the inbox file becomes a directory
+	// there.
+	inboxPath := s.o.Inbox.Path()
+	clock, broken := s.o.Now, false
+	s.o.Now = func() time.Time {
+		if !broken {
+			broken = true
+			if err := os.Rename(inboxPath, inboxPath+".bak"); err != nil {
+				t.Errorf("move the inbox away: %v", err)
+			}
+			if err := os.Mkdir(inboxPath, 0o755); err != nil {
+				t.Errorf("put a directory in its place: %v", err)
+			}
+		}
+		return clock()
+	}
+
+	res := s.o.Approve(ApproveParams{IDs: []string{s.id, second}, Cwd: "/w"})
+	if !broken {
+		t.Fatal("Org.Now was never read between the two inbox reads")
+	}
+	if len(res.Approved) != 2 || res.Approved[0].ResolvedElsewhere || res.Approved[1].ResolvedElsewhere || res.Err == nil {
+		t.Fatalf("Approve = %+v, want both recorded, neither resolved elsewhere, and an error", res)
+	}
+	msg := res.Err.Error()
+	for _, want := range []string{
+		"org: approve: the approval is recorded, but the inbox could not be read again to see whether someone else resolved the item in the meantime (",
+		"before you send the leader the approval DECISION, run `ralph org inbox show " + s.id + " --state-dir " + shellQuote(s.stateDir) +
+			"` and `ralph org inbox show " + second + " --state-dir " + shellQuote(s.stateDir) + "`",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("Err = %q, want it to contain %q", msg, want)
+		}
+	}
+	if got := planApprovedEvents(t, s.o); len(got) != 2 {
+		t.Fatalf("expected both records to stay, got %+v", got)
 	}
 }
 
 // TestOrgApprove_AppendFailureRecordsNothing: when the first plan_approved
-// cannot be appended, nothing is recorded or resolved, and the error names
-// every item and the approve command to run again.
+// cannot be appended, nothing is recorded, the items stay open, and the
+// error names every item and the approve command to run again.
 func TestOrgApprove_AppendFailureRecordsNothing(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes a read-only file")
