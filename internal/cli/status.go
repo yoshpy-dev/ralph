@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,9 +24,10 @@ import (
 // status` (which requires --org-id and shows one org's roster), this command
 // summarizes every org found in the manifest at the resolved state
 // directory (or a single org via --org-id), plus the latest `ralph org
-// watch` heartbeat and pending-alert count for each org when available, and
+// watch` heartbeat and pending-alert count for each org when available,
 // whether the cross-org watch (`ralph org watch --all`) is running on that
-// state directory. It reads org.ManifestStore/org.Roster directly
+// state directory, and the merge guarantee `ralph doctor` cached there
+// (org.ReadMergeGuarantee). It reads org.ManifestStore/org.Roster directly
 // (read-only, no herdr/agmsg process required) -- the same derivation
 // `ralph org status` uses, just grouped across every org_id instead of
 // filtered to exactly one.
@@ -48,6 +50,19 @@ func newStatusCmd() *cobra.Command {
 			"has run its last cycle and holds the lock until its in-flight work ends),\n" +
 			"stale (it holds the lock but its liveness mark is not fresh), or not running,\n" +
 			"with the pid and the time that mark was last updated.\n\n" +
+			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
+			"origin's default branch, that its required checks passed on a head with the\n" +
+			"latest default branch, as `ralph doctor` last found it -- github_protection\n" +
+			"(a ruleset or the branch protection requires up-to-date branches, or a ruleset\n" +
+			"has a merge queue, with a required check), pr_checks_only (only the gate and\n" +
+			"the CI that ran when the PR was made), or unknown -- with the branch, origin's\n" +
+			"repository and when doctor checked it. It reads the cache doctor writes in the\n" +
+			"state directory (merge-guarantee.json) and never runs gh; git runs only for\n" +
+			"the local `git remote get-url origin` in the current directory, and only when\n" +
+			"the cache is fresh. It is unknown, with the reason, when the state directory or\n" +
+			"the cache does not exist, the cache cannot be read or is more than 24 hours\n" +
+			"old, or origin's host or owner/repo is not the one doctor checked or cannot\n" +
+			"be read here.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -131,15 +146,32 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	// the empty roster included: a watch can run before any org starts.
 	watch := org.ProbeWatch(stateDir, time.Now(), statusDeadmanMinutes(cmd.ErrOrStderr()))
 
+	// The merge guarantee is likewise read once, from the cache `ralph
+	// doctor` writes in the state dir, and shown on both paths. The read
+	// runs no gh; git runs only for the local `git remote get-url origin` in
+	// the current directory, and only when the cache is fresh.
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	guarantee := org.ReadMergeGuarantee(ctx, stateDir, org.MergeGuaranteeReadParams{Dir: "."})
+
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch, guarantee)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, guarantee)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, guarantee)
 	return nil
+}
+
+// mergeGuaranteeLine is the one `merge guarantee:` line `ralph status` and
+// `ralph org merge-order` print for g: its Text, with control characters
+// (a newline or tab from the cache too) escaped so it stays one line.
+func mergeGuaranteeLine(g org.MergeGuarantee) string {
+	return "merge guarantee: " + inboxField(g.Text())
 }
 
 // statusDeadmanMinutes returns the deadman_minutes `ralph status` judges the
@@ -310,10 +342,10 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
@@ -334,6 +366,7 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", stateDir, stateDirSource)
 	}
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
+	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
 	}
@@ -387,7 +420,7 @@ type statusOrgJSON struct {
 // consumer never has to branch on which shape it received: `org_id` is only
 // present when --org-id filtered the roster, `corrupt_lines` only when the
 // manifest actually had corrupt lines, `orgs` is always an array (empty
-// or populated), and `org_watch` is always an object.
+// or populated), and `org_watch` and `merge_guarantee` are always objects.
 type statusJSON struct {
 	StateDir       string          `json:"state_dir"`
 	StateDirSource string          `json:"state_dir_source,omitempty"`
@@ -397,6 +430,10 @@ type statusJSON struct {
 	// OrgWatch is the cross-org watch of the state dir (see
 	// statusOrgWatchJSON), distinct from each org's `watch` heartbeat.
 	OrgWatch statusOrgWatchJSON `json:"org_watch"`
+	// MergeGuarantee is the merge guarantee of origin's default branch as
+	// the state dir's cache tells it, as org.ReadMergeGuarantee returns it:
+	// the cache's kind, or unknown with its reason.
+	MergeGuarantee org.MergeGuarantee `json:"merge_guarantee"`
 	// Scaffold is the FR-12 scaffold-ownership section (see
 	// buildStatusScaffoldJSON). Additive to the pre-FR-12 schema above: nil
 	// (omitted) when the current working directory has no
@@ -484,12 +521,12 @@ func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -520,17 +557,18 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
 	// "watchdog deferred LOW (1)") -- the empty-roster path
 	// (printStatusEmpty) folds the same "(source: ...)" annotation into its
 	// existing state-dir=... message instead of a separate line, since that
-	// path has no table to put a header line above. The org watch line
-	// follows it, as it does that message.
+	// path has no table to put a header line above. The org watch line and
+	// the merge guarantee line follow it, as they do that message.
 	printStateDirLine(out, stateDir, stateDirSource)
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
+	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	printScaffoldSection(out, scaffoldStat)
 
 	// Deterministic org order for readability, matching Roster's own

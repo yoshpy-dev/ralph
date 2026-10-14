@@ -14,7 +14,9 @@ import (
 
 // newOrgMergeOrderCmd wires `ralph org merge-order` (plan
 // docs/plans/active/2026-10-14-org-merge-order.md, the CLI half of AC1, AC2,
-// AC5 to AC9 and AC11): (*org.Org).MergeOrder reads the ledger, runs the
+// AC5 to AC9 and AC11): (*org.Org).MergeOrder reads the ledger and the merge
+// guarantee `ralph doctor` cached in it (plan
+// docs/plans/active/2026-10-14-org-merge-guarantee.md, AC7), runs the
 // ls-remote, gh, and `git remote get-url origin` in the current directory
 // (Dir left empty, Exec nil, so the real commands) and classifies and orders
 // the branches; this command prints the result as text (printMergeOrder) or,
@@ -81,9 +83,25 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"closed. Within a class, the oldest gate record comes first, and a\n" +
 			"branch with no gate record goes by its binding. Merging one ready\n" +
 			"branch moves the default branch, so the other ready ones become\n" +
-			"rebase. The text starts with origin's default branch and its tip, and\n" +
-			"ends with notes; --json prints the same list, in the same order, as\n" +
-			"JSON.\n" +
+			"rebase. The text starts with origin's default branch and its tip, then\n" +
+			"the merge guarantee line, and ends with notes; --json prints the same\n" +
+			"list, in the same order, as JSON, with the guarantee as\n" +
+			"merge_guarantee.\n" +
+			"\n" +
+			"The merge guarantee line says what makes sure, when a PR merges into\n" +
+			"origin's default branch, that its required checks passed on a head\n" +
+			"with the latest default branch, as ralph doctor last found it and\n" +
+			"cached it in the ledger's state directory (merge-guarantee.json):\n" +
+			"github_protection (a ruleset or the branch protection requires\n" +
+			"up-to-date branches, or a ruleset has a merge queue, with a required\n" +
+			"check), pr_checks_only (only the gate and the CI that ran when the PR\n" +
+			"was made), or unknown with the reason: no ledger or no cache, a cache\n" +
+			"that cannot be read or is more than 24 hours old, an origin whose host\n" +
+			"or owner/repo is not the one doctor checked or cannot be read here, or\n" +
+			"a default branch other than the one the ls-remote names. merge-order\n" +
+			"runs no gh for it, and runs git remote get-url origin (local) for it\n" +
+			"only when the cache is fresh. With no branch in the ledger, no\n" +
+			"ls-remote runs and the guarantee line comes first.\n" +
 			"\n" +
 			"merge-order fetches, rebases, gates and merges nothing, and writes\n" +
 			"nothing, to the ledger or anywhere else. It takes no lock and needs no\n" +
@@ -139,24 +157,28 @@ const mergeOrderSHALen = 12
 // printMergeOrder prints res as `ralph org merge-order`'s text:
 //
 //	origin/<default branch> <its tip, 12 characters> (listed <ListedAt>)
+//	merge guarantee: <res.MergeGuarantee.Text()>
 //	RANK	CLASS	BRANCH	PR	GATE_HEAD	GATE_BASE	ORG	DETAIL
 //	<one tab-separated row per entry>
 //	note: <one line per note>
 //
 // The first line is left out when there is no default branch (no target
-// branch, so no ls-remote ran), and the table when there is no entry; with a
+// branch, so no ls-remote ran), so the merge guarantee line, always printed,
+// comes first then. The table is left out when there is no entry; with a
 // default branch and no entry, the line `no branch to list` takes its place.
 // A row's PR is `#<number> <url>`, its gate head and base 12 characters, its
 // ORG `<org_id>/<feature>` of the latest binding, "-" for each one the entry
-// lacks. Every value from the ledger, git or gh goes through inboxField, so a
-// crafted branch name, URL or detail cannot break a line or a column.
+// lacks. Every value from the ledger, the guarantee's cache, git or gh goes
+// through inboxField, so a crafted branch name, URL or detail cannot break a
+// line or a column.
 func printMergeOrder(w io.Writer, res org.MergeOrderResult) {
 	if res.DefaultBranch != "" {
 		_, _ = fmt.Fprintf(w, "origin/%s %s (listed %s)\n",
 			inboxField(res.DefaultBranch), inboxField(mergeOrderShortSHA(res.DefaultHead)), inboxField(res.ListedAt))
-		if len(res.Entries) == 0 {
-			_, _ = fmt.Fprintln(w, "no branch to list")
-		}
+	}
+	_, _ = fmt.Fprintln(w, mergeGuaranteeLine(res.MergeGuarantee))
+	if res.DefaultBranch != "" && len(res.Entries) == 0 {
+		_, _ = fmt.Fprintln(w, "no branch to list")
 	}
 	if len(res.Entries) > 0 {
 		_, _ = fmt.Fprintln(w, "RANK\tCLASS\tBRANCH\tPR\tGATE_HEAD\tGATE_BASE\tORG\tDETAIL")

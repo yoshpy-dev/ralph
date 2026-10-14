@@ -1,0 +1,506 @@
+# /test org-merge-guarantee cycle 2: go test -overlay mutants (go1.26.0, HEAD 034dec6f)
+# Nothing in the worktree was written: every mutant is a scratch copy of internal/org/mergeguarantee.go, read
+# through -overlay. Runner <scratch>/run2.sh (cycle 1's run.sh with the cycle-2 canary): a mutant runs
+# go test ./internal/org/ -run 'MergeGuarantee|MergeOrder' -timeout 120s; a survivor also runs go test ./internal/cli/
+# -run 'MergeGuarantee|OrgMergeOrder|TestStatusCmd|TestRunDoctor|TestOrgLegacyLedger' -timeout 400s. Columns: id,
+# verdict, package that killed it, how (assert/panic/timeout), note, first failing tests. The canary gh was first on
+# PATH: 0 calls.
+
+## A. Cycle-2 mutants (<scratch>/mut2.py c2): X0 (the unchanged file, a control that must survive) and 31 mutants.
+##    G*: cycle 1's Gap 1 survivors S03, S03b, S04, S07 and D09 (Gap 4) rewritten for HEAD's switch.
+##    F*: the 403/404 split. E*: mergeGuaranteeErrText. P*: one call site's Detail built from err.Error().
+##    19 red, 12 survive: G09 (Gap 4, not in the fix), F01, F05, E06 (equivalent, see C), F08, F08b and the six
+##    P* call sites other than :296 (each killed by a probe row in B). elapsed 1217 s.
+X0	SURVIVED	-	-	control: the unchanged file through the overlay
+G03	KILLED	org	assert	cycle 1 S03: a 404 with an unexpected message is strict false (pr_checks_only)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+G03b	KILLED	org	assert	cycle 1 S03b: same, via stderr's (HTTP 404)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+G04	KILLED	org	assert	cycle 1 S04: any 404 is the admin-only unknown	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+G07	KILLED	org	assert	cycle 1 S07: the body's status 403 not read	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+G09	SURVIVED	-	-	cycle 1 D09 (Gap 4, not in the fix): a ruleset check with an empty context counts
+F01	SURVIVED	-	-	the 403 case before the Not Found case (equivalent unless a 'Not Found' body says 403)
+F02	KILLED	org	assert	revert L4: a 403 gets the admin-only wording again (the 403 case is unreachable)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+F04	KILLED	org	assert	stderr's (HTTP 403) not read (cycle 1 S06's rewrite)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+F05	SURVIVED	-	-	the body's status compared as a string only (a numeric status would not match)
+F06	KILLED	org	assert	404 Not Found falls to the generic unknown (cycle 1 S02's rewrite)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+F07	KILLED	org	assert	a 403 is read as strict false (pr_checks_only)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+F08	SURVIVED	-	-	the 403 Detail names 1 check whatever the count
+F08b	SURVIVED	-	-	the Not Found Detail names 1 check whatever the count
+F09	KILLED	org	assert	the 403 Detail names the repository without the branch	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+E01	KILLED	org	assert	the pre-fix order: cut the raw text, then escape	TestMergeGuarantee_ErrorIsCutAfterEscaping
+E02	KILLED	org	assert	escape before folding white space (a newline becomes \n)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_LongErrorIsCutToOneLine TestMergeGuarantee_ErrorIsCutAfterEscaping
+E03	KILLED	org	assert	> becomes >= (a text of exactly the limit is cut)	TestMergeGuarantee_ErrorIsCutAfterEscaping
+E04	KILLED	org	assert	no ... after the cut	TestMergeGuarantee_LongErrorIsCutToOneLine TestMergeGuarantee_ErrorIsCutAfterEscaping
+E05	KILLED	org	assert	no escaping (the L3 fix reverted)	TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped TestMergeGuarantee_ErrorIsCutAfterEscaping
+E06	SURVIVED	-	-	keepLineBreaks true (equivalent: Fields has already removed every \n and \t)
+E07	KILLED	org	assert	write, then cut at 300 bytes (an escape or a rune can be cut in two)	TestMergeGuarantee_LongErrorIsCutToOneLine TestMergeGuarantee_ErrorIsCutAfterEscaping
+E08	KILLED	org	assert	the limit counts each character as one byte (escapes undercounted)	TestMergeGuarantee_LongErrorIsCutToOneLine TestMergeGuarantee_ErrorIsCutAfterEscaping
+E09	KILLED	org	assert	white space not folded (a newline becomes \n)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_LongErrorIsCutToOneLine
+E10	KILLED	org	assert	only C0 controls escaped (DEL and C1 such as \u009b raw)	TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped
+P296	KILLED	org	assert	call site :296 (repository read failed) raw; the new test's call site, expected red	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped
+P466	SURVIVED	-	-	call site :466 (strict 404 Not Found) raw
+P471	SURVIVED	-	-	call site :471 (strict 403) raw
+P474	SURVIVED	-	-	call site :474 (strict, any other failure) raw
+P353	SURVIVED	-	-	call site :353 (rules read failed) raw
+P575	SURVIVED	-	-	call site :575 (branch protection read failed) raw
+P794	SURVIVED	-	-	call site :794 (cache read: get-url failed) raw
+
+## B. Overlay-only probe rows (scratch <scratch>/probe/zz_mgprobe_c2_test.go, source in F), added through -overlay
+##    next to each survivor: go test ./internal/org/ -run ProbeMGC2 -overlay <mutant + probe>. On X0 (= HEAD) every
+##    probe passes. G09 is killed by cycle 1's PB3 (<scratch-c1>/probe/mergeguarantee_probe_test.go):
+##    X0 PASS, G09 FAIL TestProbeMG_PB3_StrictRuleWithAnEmptyContextRequiresNoCheck.
+## probes on X0 and the survivors
+X0	rc=0	failing probes: none
+G09	rc=0	failing probes: none
+F01	rc=0	failing probes: none
+F05	rc=0	failing probes: none
+F08	rc=1	failing probes: TestProbeMGC2_PC2_ForbiddenNamesTheCheckCount
+F08b	rc=1	failing probes: TestProbeMGC2_PC1_NotFoundNamesTheCheckCount
+E06	rc=0	failing probes: none
+P466	rc=1	failing probes: TestProbeMGC2_PC3_EveryStepEscapesItsErrorText TestProbeMGC2_PC3_EveryStepEscapesItsErrorText/strict:_404_Not_Found
+P471	rc=1	failing probes: TestProbeMGC2_PC3_EveryStepEscapesItsErrorText TestProbeMGC2_PC3_EveryStepEscapesItsErrorText/strict:_403
+P474	rc=1	failing probes: TestProbeMGC2_PC3_EveryStepEscapesItsErrorText TestProbeMGC2_PC3_EveryStepEscapesItsErrorText/strict:_other_failure
+P353	rc=1	failing probes: TestProbeMGC2_PC3_EveryStepEscapesItsErrorText TestProbeMGC2_PC3_EveryStepEscapesItsErrorText/rules
+P575	rc=1	failing probes: TestProbeMGC2_PC3_EveryStepEscapesItsErrorText TestProbeMGC2_PC3_EveryStepEscapesItsErrorText/branch_protection_(ghJSON)
+P794	rc=1	failing probes: TestProbeMGC2_PC4_ReadSideGetURLEscapes
+
+## C. The equivalent survivors
+##  F01 (the 403 case before the Not Found case): differs only for a body whose message is "Not Found" while its
+##      status or gh's stderr says 403. GitHub's 404 bodies carry "status":"404" (D below).
+##  F05 (status compared as the string "403" only): differs only for a numeric status. GitHub writes it as a string
+##      (D below; the 403 fixtures of the tests and of the verify probe use the string form too).
+##  E06 (keepLineBreaks true): strings.Fields has already removed every \n and \t before PrintableInboxText runs.
+
+## D. GitHub's real answers on the strict endpoint (read-only, gh 2.102.0, not an admin of cli/cli)
+##   gh api --hostname github.com repos/cli/cli/branches/trunk/protection/required_status_checks
+##   rc=1  stdout: {"message":"Not Found","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-status-checks-protection","status":"404"}
+##         stderr: gh: Not Found (HTTP 404)
+##   gh api --hostname github.com repos/cli/cli/branches/no-such-branch-xyz-c2/protection/required_status_checks
+##   rc=1  stdout: {"message":"Not Found","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-status-checks-protection","status":"404"}
+##         stderr: gh: Not Found (HTTP 404)
+##   A branch that does not exist gets the same "Not Found" as a non-admin read; "Branch not found" (the committed
+##   row "strict answers a 404 with another message") was not seen on this endpoint without admin access.
+
+## E. Cycle 1's whole list (<scratch-c1>/mut.py M, 70 of its 74 mutants) rerun at HEAD (<scratch>/mut2.py r1).
+##    Skipped because their old line no longer exists (rewritten as G04, G07, F04, F06 in A):
+S02	old string occurs 0 times: '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains('
+S04	old string occurs 0 times: '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains('
+S06	old string occurs 0 times: '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains('
+S07	old string occurs 0 times: '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains('
+##    Results (elapsed 1366 s):
+D01	KILLED	org	assert	an up-to-date rule with no check is github_protection	TestMergeGuarantee_RulesetsDecideTheKind
+D02	KILLED	org	assert	a merge queue with no ruleset check is github_protection	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind
+D03	KILLED	org	assert	classic checks alone (no merge queue) are github_protection	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_OneDeadlineCoversEveryCall
+D04	KILLED	org	assert	classic strict inverted	TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_OneDeadlineCoversEveryCall TestMergeGuarantee_HostComesFromOriginsURL
+D05	KILLED	org	assert	an unreadable classic strict is guessed github_protection (C4)	TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_DeadlineExceededIsUnknown
+D06	KILLED	org	assert	an up-to-date rule counts the checks of rules read before it	TestMergeGuarantee_RulesetsDecideTheKind
+D06b	KILLED	org	assert	an up-to-date rule with no check takes the other rules' checks (any order)	TestMergeGuarantee_RulesetsDecideTheKind
+D07	KILLED	org	assert	strictNoChecks never set	TestMergeGuarantee_RulesetsDecideTheKind
+D08	KILLED	org	assert	merge_queue rule not recognised	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_PaginatedRulesAreAllRead
+D09	SURVIVED	-	-	a ruleset check with an empty context counts
+D10	KILLED	org	assert	empty --paginate output is no rule	TestMergeGuarantee_FailuresAreUnknownWithAReason
+D11	KILLED	org	assert	only the first page is read	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+O01	KILLED	org	assert	the branch protection is read even when a ruleset decided	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_RenamedRepositoryStillDecides
+O02	KILLED	org	assert	the strict endpoint is read with no classic check	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_SaveThenReadRoundTrips
+C01	KILLED	org	assert	protection.enabled ignored	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C02	KILLED	org	assert	enforcement_level off ignored	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C03	KILLED	org	assert	an empty classic context counts	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C04	KILLED	org	assert	classic checks[] ignored (contexts only)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S01	KILLED	org	assert	'Required status checks not enabled' not read as strict false	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S03	KILLED	org	assert	GAP probe: a 404 with an unexpected message is strict false (pr_checks_only)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S03b	KILLED	org	assert	GAP probe: same, via stderr's (HTTP 404)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S05	KILLED	org	panic	a success with no strict is strict false	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S08	KILLED	org	assert	any strict answer is true	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+H01	KILLED	org	assert	ssh.github.com not read as github.com	TestMergeGuarantee_HostComesFromOriginsURL
+H02	KILLED	org	assert	no --hostname	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+H03	KILLED	org	assert	host not lowercased	TestMergeGuarantee_HostComesFromOriginsURL TestMergeGuarantee_ReadsTheHostWithTheOwnerAndRepo
+H04	KILLED	org	assert	no GH_PROMPT_DISABLED=1	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+H05	KILLED	org	assert	rules path does not escape the branch	TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H06	KILLED	org	assert	owner/repo not escaped	TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H07	KILLED	org	assert	every gh reads github.com (GHES ignored)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_HostComesFromOriginsURL TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H08	KILLED	org	assert	ssh-alias hint on the wrong hosts	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped
+H09	KILLED	org	assert	gh not on PATH is not checked (gh runs anyway)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_SaveWritesAnUnknownToo
+T01	KILLED	org	assert	20 s -> 30 s	TestMergeGuarantee_OneDeadlineCoversEveryCall
+T02	KILLED	org	assert	each gh call gets its own deadline (no single 20 s)	TestMergeGuarantee_OneDeadlineCoversEveryCall TestMergeGuarantee_DeadlineExceededIsUnknown
+T03	KILLED	org	assert	a caller cancel reads as a timeout	TestMergeGuarantee_CallerContextDoneIsUnknown
+T04	KILLED	org	assert	a negative timeout is used as is	TestMergeGuarantee_OneDeadlineCoversEveryCall
+V01	KILLED	org	assert	a missing state dir is created (C2)	TestMergeGuarantee_SaveWithoutALedgerDirCreatesNothing
+V02	KILLED	org	assert	the old cache is not removed on a failed write	TestMergeGuarantee_WriteFailureRemovesTheOldCache TestMergeGuarantee_RemovalFailureIsReported
+V03	KILLED	org	assert	Version not stamped on save	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote TestMergeOrder_WritesNothing
+V04	KILLED	org	assert	a removal failure is not reported	TestMergeGuarantee_RemovalFailureIsReported
+V05	KILLED	org	assert	Removed not set	TestMergeGuarantee_WriteFailureRemovesTheOldCache
+R01	KILLED	org	assert	max age 25 h	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+R02	KILLED	org	assert	a future checked_at is never stale	TestMergeGuarantee_ReadMakesAnOldCacheStale
+R03	KILLED	org	assert	stale at exactly 24 h	TestMergeGuarantee_ReadMakesAnOldCacheStale
+R04	KILLED	org	assert	origin compared with case	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R05	KILLED	org	assert	host not compared (C7)	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R06	KILLED	org	assert	owner/repo not compared	TestMergeGuarantee_ReadComparesOriginWithTheCache TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+R07	KILLED	org	assert	any kind accepted	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+R08	KILLED	org	assert	any version accepted	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+R09	KILLED	org	assert	an unreadable origin keeps the cached kind	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R10	KILLED	org	assert	ForDefaultBranch rewrites an unknown with a reason	TestMergeGuarantee_ForDefaultBranch
+R11	KILLED	org	assert	read git timeout 10 -> 20 s	TestMergeGuarantee_ReadBoundsGitWithItsTimeout
+R13	KILLED	org	assert	LastKind not kept	TestMergeGuarantee_ReadMakesAnOldCacheStale TestMergeGuarantee_ReadComparesOriginWithTheCache TestMergeGuarantee_ForDefaultBranch
+R14	KILLED	org	assert	a state dir that is a file is not no_ledger	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+MO1	KILLED	org	assert	the default branch is not compared	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO2	KILLED	org	assert	wall clock, not o.Now	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO3	KILLED	org	assert	git not run in p.Dir	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO4	KILLED	org	assert	no guarantee with no target	TestMergeOrder_NoTargetsRunsNoGit TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote
+K01	KILLED	cli	assert	unknown is warn (C3)	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestMergeGuaranteeResult_EverySaveOutcome TestRunDoctorFull_PrintsTheMergeGuarantee
+K02	KILLED	cli	assert	a stale cache that remains is not warn	TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns TestMergeGuaranteeResult_EverySaveOutcome
+K03	KILLED	cli	assert	doctor does not run the check	TestRunDoctorFull_PrintsTheMergeGuarantee TestRunDoctor_TestMainPinRunsNoGitOrGh
+K04	KILLED	cli	assert	doctor never writes the cache	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestCheckMergeGuarantee_FailedWriteRemovesTheOldCache TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns
+K05	KILLED	cli	assert	pr_checks_only is info	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestMergeGuaranteeResult_EverySaveOutcome TestRunDoctorFull_PrintsTheMergeGuarantee
+K06	KILLED	cli	assert	the check runs in . instead of targetDir	TestRunDoctorFull_PrintsTheMergeGuarantee
+K10	KILLED	cli	assert	line not escaped	TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine
+K11	KILLED	cli	assert	no line on the empty-roster path	TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin TestStatusCmd_MergeGuaranteeIsUnknownOnceOriginPointsToAnotherRepository
+K12	KILLED	cli	assert	no merge_guarantee in --json with orgs	TestStatusCmd_MergeGuaranteeJSONOnBothPaths
+K13	KILLED	cli	assert	git runs in the state dir, not the current directory	TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin TestStatusCmd_MergeGuaranteeIsUnknownOnceOriginPointsToAnotherRepository TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine
+K20	KILLED	cli	assert	no guarantee line	TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+K21	KILLED	cli	assert	guarantee line before the default branch line	TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+
+## F. Sources: the cycle-2 mutant list (mut2.py), the probe rows, and the canary sensitivity probe
+#!/usr/bin/env python3
+"""go -overlay mutants for org-merge-guarantee /test cycle 2 (HEAD 034dec6f).
+
+Usage: mut2.py c2 <out>   cycle-2 mutants (the escape/cut and the 403/404 split)
+       mut2.py r1 <out>   cycle 1's whole list (omg/mut.py M) rerun at HEAD;
+                          ids whose old strings no longer occur once are
+                          listed as SKIPPED (their cycle-2 rewrite is in c2)
+Each mutant is (id, file, [(old, new), ...], note). Every old must occur
+exactly once in the file (after the earlier edits of the same mutant).
+Writes <out>/<id>/<basename>, <out>/<id>/overlay.json and <out>/list.tsv.
+"""
+import json
+import os
+import sys
+
+WT = "<worktree>"
+MG = WT + "/internal/org/mergeguarantee.go"
+
+STRICT_CASE = "\tcase slices.Contains(mergeClassicNotStrict, body.Message):\n"
+NOTFOUND_CASE = '\tcase body.Message == "Not Found":\n'
+FORBIDDEN_CASE = '\tcase fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n'
+ADMIN_TAIL = ('"before merging can be read only with admin access to the repository (%s failed: %s)", g.subject(),\n'
+              '\t\t\tmergeChecksText(checks), cmd, mergeGuaranteeErrText(err))\n')
+FORBID_TAIL = ('"from another cause, such as a rate limit or an SSO authorization the token lacks (%s failed: %s)", g.subject(),\n'
+               '\t\t\tmergeChecksText(checks), cmd, mergeGuaranteeErrText(err))\n')
+GENERIC_TAIL = '\t\t"before merging is unknown", cmd, mergeGuaranteeErrText(err), g.subject())\n'
+
+ERRTEXT_BODY = '''	var b strings.Builder
+	for _, r := range strings.Join(strings.Fields(err.Error()), " ") {
+		printable := PrintableInboxText(string(r), false)
+		if b.Len()+len(printable) > mergeGuaranteeMaxErrText {
+			return b.String() + "..."
+		}
+		b.WriteString(printable)
+	}
+	return b.String()
+'''
+# the pre-fix order: cut the raw text, then escape it
+CUT_THEN_ESCAPE = '''	s := strings.Join(strings.Fields(err.Error()), " ")
+	if len(s) <= mergeGuaranteeMaxErrText {
+		return PrintableInboxText(s, false)
+	}
+	cut := mergeGuaranteeMaxErrText
+	for cut > 0 && s[cut]&0xC0 == 0x80 {
+		cut--
+	}
+	return PrintableInboxText(s[:cut], false) + "..."
+'''
+
+C2 = [
+    ("X0", MG, [], "control: the unchanged file through the overlay"),
+    # --- cycle 1's Gap 1 survivors (S03, S03b, S04, S07) and D09 (Gap 4), rewritten for HEAD ---
+    ("G03", MG, [(STRICT_CASE, '\tcase slices.Contains(mergeClassicNotStrict, body.Message) || fmt.Sprint(body.Status) == "404" && body.Message != "Not Found":\n')],
+     "cycle 1 S03: a 404 with an unexpected message is strict false (pr_checks_only)"),
+    ("G03b", MG, [(STRICT_CASE, '\tcase slices.Contains(mergeClassicNotStrict, body.Message) || strings.Contains(err.Error(), "(HTTP 404)") && body.Message != "Not Found":\n')],
+     "cycle 1 S03b: same, via stderr's (HTTP 404)"),
+    ("G04", MG, [(NOTFOUND_CASE, '\tcase strings.Contains(err.Error(), "(HTTP 404)"):\n')],
+     "cycle 1 S04: any 404 is the admin-only unknown"),
+    ("G07", MG, [(FORBIDDEN_CASE, '\tcase strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "cycle 1 S07: the body's status 403 not read"),
+    ("G09", MG, [("\t\t\t\tif c.Context != \"\" {\n\t\t\t\t\town[c.Context], required[c.Context] = true, true\n\t\t\t\t}\n",
+                  "\t\t\t\town[c.Context], required[c.Context] = true, true\n")],
+     "cycle 1 D09 (Gap 4, not in the fix): a ruleset check with an empty context counts"),
+    # --- the 403/404 split ---
+    ("F01", MG, [(NOTFOUND_CASE + ADMIN_TAIL, "@@NF@@"),
+                 (FORBIDDEN_CASE + "\t\treturn false, fmt.Sprintf(\"the branch protection of %s, requires %s, but whether it requires branches to be up to date \"+\n"
+                  "\t\t\t\"before merging is unknown: GitHub answered 403, which can come from missing admin access to the repository or \"+\n"
+                  "\t\t\t" + FORBID_TAIL,
+                  "@@FB@@"),
+                 ("@@NF@@", "@@TMP@@"),
+                 ],
+     "PLACEHOLDER (rewritten below)"),
+    ("F02", MG, [(NOTFOUND_CASE, '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "revert L4: a 403 gets the admin-only wording again (the 403 case is unreachable)"),
+    ("F04", MG, [(FORBIDDEN_CASE, '\tcase fmt.Sprint(body.Status) == "403":\n')],
+     "stderr's (HTTP 403) not read (cycle 1 S06's rewrite)"),
+    ("F05", MG, [(FORBIDDEN_CASE, '\tcase body.Status == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "the body's status compared as a string only (a numeric status would not match)"),
+    ("F06", MG, [(NOTFOUND_CASE, "\tcase false:\n")],
+     "404 Not Found falls to the generic unknown (cycle 1 S02's rewrite)"),
+    ("F07", MG, [(STRICT_CASE, '\tcase slices.Contains(mergeClassicNotStrict, body.Message) || fmt.Sprint(body.Status) == "403":\n')],
+     "a 403 is read as strict false (pr_checks_only)"),
+    ("F08", MG, [(FORBID_TAIL, FORBID_TAIL.replace("mergeChecksText(checks)", "mergeChecksText(1)"))],
+     "the 403 Detail names 1 check whatever the count"),
+    ("F08b", MG, [(ADMIN_TAIL, ADMIN_TAIL.replace("mergeChecksText(checks)", "mergeChecksText(1)"))],
+     "the Not Found Detail names 1 check whatever the count"),
+    ("F09", MG, [(FORBID_TAIL, FORBID_TAIL.replace("g.subject(),", "g.repo,"))],
+     "the 403 Detail names the repository without the branch"),
+    # --- mergeGuaranteeErrText (escape, then cut) ---
+    ("E01", MG, [(ERRTEXT_BODY, CUT_THEN_ESCAPE)], "the pre-fix order: cut the raw text, then escape"),
+    ("E02", MG, [('strings.Join(strings.Fields(err.Error()), " ")', 'strings.Join(strings.Fields(PrintableInboxText(err.Error(), false)), " ")')],
+     "escape before folding white space (a newline becomes \\n)"),
+    ("E03", MG, [("\t\tif b.Len()+len(printable) > mergeGuaranteeMaxErrText {\n", "\t\tif b.Len()+len(printable) >= mergeGuaranteeMaxErrText {\n")],
+     "> becomes >= (a text of exactly the limit is cut)"),
+    ("E04", MG, [('\t\t\treturn b.String() + "..."\n', "\t\t\treturn b.String()\n")], "no ... after the cut"),
+    ("E05", MG, [("\t\tprintable := PrintableInboxText(string(r), false)\n", "\t\tprintable := string(r)\n")],
+     "no escaping (the L3 fix reverted)"),
+    ("E06", MG, [("\t\tprintable := PrintableInboxText(string(r), false)\n", "\t\tprintable := PrintableInboxText(string(r), true)\n")],
+     "keepLineBreaks true (equivalent: Fields has already removed every \\n and \\t)"),
+    ("E07", MG, [("\t\tif b.Len()+len(printable) > mergeGuaranteeMaxErrText {\n\t\t\treturn b.String() + \"...\"\n\t\t}\n\t\tb.WriteString(printable)\n",
+                  "\t\tb.WriteString(printable)\n\t\tif b.Len() > mergeGuaranteeMaxErrText {\n\t\t\treturn b.String()[:mergeGuaranteeMaxErrText] + \"...\"\n\t\t}\n")],
+     "write, then cut at 300 bytes (an escape or a rune can be cut in two)"),
+    ("E08", MG, [("\t\tif b.Len()+len(printable) > mergeGuaranteeMaxErrText {\n", "\t\tif b.Len()+1 > mergeGuaranteeMaxErrText {\n")],
+     "the limit counts each character as one byte (escapes undercounted)"),
+    ("E09", MG, [('strings.Join(strings.Fields(err.Error()), " ")', "err.Error()")],
+     "white space not folded (a newline becomes \\n)"),
+    ("E10", MG, [("\t\tprintable := PrintableInboxText(string(r), false)\n",
+                  "\t\tprintable := string(r)\n\t\tif r < 0x20 {\n\t\t\tprintable = PrintableInboxText(printable, false)\n\t\t}\n")],
+     "only C0 controls escaped (DEL and C1 such as \\u009b raw)"),
+    # --- per call site: one Detail built from err.Error() instead of mergeGuaranteeErrText ---
+    ("P296", MG, [("\t\t\tcmd, mergeGuaranteeErrText(err), g.apiHost, g.apiHost)\n", "\t\t\tcmd, err.Error(), g.apiHost, g.apiHost)\n")],
+     "call site :296 (repository read failed) raw; the new test's call site, expected red"),
+    ("P466", MG, [(ADMIN_TAIL, ADMIN_TAIL.replace("mergeGuaranteeErrText(err)", "err.Error()"))],
+     "call site :466 (strict 404 Not Found) raw"),
+    ("P471", MG, [(FORBID_TAIL, FORBID_TAIL.replace("mergeGuaranteeErrText(err)", "err.Error()"))],
+     "call site :471 (strict 403) raw"),
+    ("P474", MG, [(GENERIC_TAIL, GENERIC_TAIL.replace("mergeGuaranteeErrText(err)", "err.Error()"))],
+     "call site :474 (strict, any other failure) raw"),
+    ("P353", MG, [('fmt.Sprintf("%s failed (%s), so the rulesets of %s, are unknown", cmd, mergeGuaranteeErrText(err), g.subject())',
+                   'fmt.Sprintf("%s failed (%s), so the rulesets of %s, are unknown", cmd, err.Error(), g.subject())')],
+     "call site :353 (rules read failed) raw"),
+    ("P575", MG, [('fmt.Sprintf("%s failed (%s), so the protection of %s, is unknown", cmd, mergeGuaranteeErrText(err), g.subject())',
+                   'fmt.Sprintf("%s failed (%s), so the protection of %s, is unknown", cmd, err.Error(), g.subject())')],
+     "call site :575 (branch protection read failed) raw"),
+    ("P794", MG, [('fmt.Sprintf("%s failed: %s", mergeGuaranteeGetURL, mergeGuaranteeErrText(err))',
+                   'fmt.Sprintf("%s failed: %s", mergeGuaranteeGetURL, err.Error())')],
+     "call site :794 (cache read: get-url failed) raw"),
+]
+
+# F01: the Not Found and the 403 cases swapped (403 first). Built by text surgery below.
+
+def build_f01(src):
+    nf_start = src.index(NOTFOUND_CASE)
+    fb_start = src.index(FORBIDDEN_CASE)
+    fb_end = src.index(FORBID_TAIL, fb_start) + len(FORBID_TAIL)
+    nf_block = src[nf_start:fb_start]
+    fb_block = src[fb_start:fb_end]
+    assert nf_block.endswith(ADMIN_TAIL), "F01: the Not Found block does not end where expected"
+    return src[:nf_start] + fb_block + nf_block + src[fb_end:]
+
+def write(out, mutants):
+    os.makedirs(out, exist_ok=True)
+    srcs = {}
+    n = 0
+    with open(os.path.join(out, "list.tsv"), "w") as lst, open(os.path.join(out, "skipped.tsv"), "w") as skp:
+        for mid, path, edits, note in mutants:
+            if path not in srcs:
+                with open(path) as f:
+                    srcs[path] = f.read()
+            src = srcs[path]
+            if mid == "F01":
+                src = build_f01(src)
+                note = "the 403 case before the Not Found case (equivalent unless a 'Not Found' body says 403)"
+            else:
+                bad = None
+                for old, new in edits:
+                    c = src.count(old)
+                    if c != 1:
+                        bad = f"old string occurs {c} times: {old[:90]!r}"
+                        break
+                    src = src.replace(old, new)
+                if bad:
+                    skp.write(f"{mid}\t{bad}\n")
+                    continue
+            if src == srcs[path] and mid != "X0":
+                skp.write(f"{mid}\tno change\n")
+                continue
+            d = os.path.join(out, mid)
+            os.makedirs(d, exist_ok=True)
+            mpath = os.path.join(d, os.path.basename(path))
+            with open(mpath, "w") as f:
+                f.write(src)
+            with open(os.path.join(d, "overlay.json"), "w") as f:
+                json.dump({"Replace": {path: mpath}}, f)
+            pkg = "org" if "/internal/org/" in path else "cli"
+            lst.write(f"{mid}\t{pkg}\t{note}\n")
+            n += 1
+    print(f"{n} mutants written to {out}")
+
+def main():
+    which, out = sys.argv[1], sys.argv[2]
+    if which == "c2":
+        write(out, C2)
+    elif which == "r1":
+        sys.path.insert(0, "<tmp>/"
+                           "b9879111-7368-4e90-bbc8-067a69a8c6d8/scratchpad/omg")
+        import mut  # cycle 1's list
+        write(out, [m for m in mut.M if m[0] not in ("X0", "D12")])
+    else:
+        sys.exit("usage: mut2.py c2|r1 <out>")
+
+if __name__ == "__main__":
+    main()
+
+--- <scratch>/probe/zz_mgprobe_c2_test.go ---
+package org
+
+// Scratch probe rows for /test cycle 2 of org-merge-guarantee (not committed).
+// Each row pins HEAD's behavior on an input the committed tests do not give.
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"unicode"
+)
+
+// PC1: the strict endpoint's 404 Not Found with two classic checks names
+// both checks (the committed admin rows all have one).
+func TestProbeMGC2_PC1_NotFoundNamesTheCheckCount(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci", "lint")}
+	e.replies[mgStrictEP] = mgAPIError("Not Found", "404")
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteeUnknown || !strings.Contains(c.Detail, "requires 2 required status checks, but whether it requires "+
+		"branches to be up to date before merging can be read only with admin access") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
+
+// PC2: the strict endpoint's 403 with two classic checks names both checks.
+func TestProbeMGC2_PC2_ForbiddenNamesTheCheckCount(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci", "lint")}
+	e.replies[mgStrictEP] = mgAPIError("Must have admin rights to Repository.", "403")
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteeUnknown || !strings.Contains(c.Detail, "requires 2 required status checks, but whether it requires "+
+		"branches to be up to date before merging is unknown: GitHub answered 403") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
+
+// mgProbeCtl is an error text with an escape sequence, a bell and a
+// newline: the Detail must hold none of them raw, and must hold the escape
+// written as \x1b.
+const mgProbeCtl = "exit status 1: gh: \x1b[31mboom\x1b[0m\a\nsecond line"
+
+func mgProbeAssertEscaped(t *testing.T, detail string) {
+	t.Helper()
+	for _, r := range detail {
+		if unicode.IsControl(r) {
+			t.Errorf("detail %q holds the raw control character %U", detail, r)
+			return
+		}
+	}
+	if !strings.Contains(detail, `\x1b[31mboom\x1b[0m\a second line`) {
+		t.Errorf("detail %q does not hold the escaped, folded error text", detail)
+	}
+}
+
+// PC3: every gh and git step whose error text reaches a Detail escapes it,
+// not only the repository read the committed test covers.
+func TestProbeMGC2_PC3_EveryStepEscapesItsErrorText(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(e *mgExec)
+	}{
+		{"get-url (readOrigin)", func(e *mgExec) { e.originErr = errors.New(mgProbeCtl) }},
+		{"repository", func(e *mgExec) { e.replies[mgRepoEP] = mgReply{err: errors.New(mgProbeCtl)} }},
+		{"rules", func(e *mgExec) { e.replies[mgRulesEP] = mgReply{err: errors.New(mgProbeCtl)} }},
+		{"branch protection (ghJSON)", func(e *mgExec) { e.replies[mgBranchEP] = mgReply{err: errors.New(mgProbeCtl)} }},
+		{"strict: 404 Not Found", func(e *mgExec) {
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+			e.replies[mgStrictEP] = mgReply{out: mgAPIError("Not Found", "404").out, err: errors.New(mgProbeCtl)}
+		}},
+		{"strict: 403", func(e *mgExec) {
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+			e.replies[mgStrictEP] = mgReply{out: mgAPIError("Forbidden", "403").out, err: errors.New(mgProbeCtl)}
+		}},
+		{"strict: other failure", func(e *mgExec) {
+			e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+			e.replies[mgStrictEP] = mgReply{err: errors.New(mgProbeCtl)}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMGExec()
+			tc.set(e)
+			c := mgCheck(e)
+			if c.Kind != MergeGuaranteeUnknown {
+				t.Fatalf("kind = %s (%q), want unknown", c.Kind, c.Detail)
+			}
+			mgProbeAssertEscaped(t, c.Detail)
+		})
+	}
+}
+
+// PC4: the read side's get-url failure escapes its error text too.
+func TestProbeMGC2_PC4_ReadSideGetURLEscapes(t *testing.T) {
+	stateDir := mgStateDir(t)
+	mgSave(t, stateDir, mgProtected())
+	e := newMGExec()
+	e.originErr = errors.New(mgProbeCtl)
+	g := ReadMergeGuarantee(context.Background(), stateDir, mgReadParams(e, mgClock))
+	if g.Kind != MergeGuaranteeUnknown || g.Reason != MergeGuaranteeReasonOriginUnreadable {
+		t.Fatalf("read = %+v", g)
+	}
+	mgProbeAssertEscaped(t, g.Detail)
+}
+
+// PC5: the escaping is idempotent and stable: an already escaped text goes
+// through unchanged, invalid UTF-8 becomes U+FFFD (as the cache's JSON would
+// make it), and a NEL (U+0085, both white space and a control) folds into a
+// space instead of being escaped.
+func TestProbeMGC2_PC5_EscapeEdges(t *testing.T) {
+	esc := mergeGuaranteeErrText(errors.New(`already \x1b escaped`))
+	if esc != `already \x1b escaped` {
+		t.Errorf("escaped text changed: %q", esc)
+	}
+	if got := mergeGuaranteeErrText(errors.New("a\xffb")); got != "a\xef\xbf\xbdb" {
+		t.Errorf("invalid UTF-8 = %q, want a\\uFFFDb", got)
+	}
+	if got := mergeGuaranteeErrText(errors.New("a\u0085b")); got != "a b" {
+		t.Errorf("NEL = %q, want %q", got, "a b")
+	}
+	once := mergeGuaranteeErrText(errors.New("\x1b\x00\u009b​ x"))
+	if PrintableInboxText(once, false) != once {
+		t.Errorf("PrintableInboxText changes %q into %q", once, PrintableInboxText(once, false))
+	}
+}
+
+--- <scratch>/canary-probe/zz_mgcanary_c2_test.go ---
+package org
+
+// Scratch sensitivity probe for /test cycle 2 of org-merge-guarantee (not
+// committed): CheckMergeGuarantee with its real defaults (Exec and LookPath
+// nil) on the inherited PATH. With the canary gh first on PATH, this must
+// log calls; it shows that a test reaching the real gh through the
+// inherited PATH would show up in the canary's log.
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+)
+
+func TestProbeMGC2_CanarySensitivity(t *testing.T) {
+	dir := os.Getenv("MGC2_REPO_DIR")
+	if dir == "" {
+		t.Skip("MGC2_REPO_DIR not set")
+	}
+	c := CheckMergeGuarantee(context.Background(), MergeGuaranteeParams{Dir: dir, Timeout: 20 * time.Second})
+	t.Logf("kind=%s detail=%q", c.Kind, c.Detail)
+}

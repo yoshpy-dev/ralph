@@ -1,0 +1,51 @@
+# /test org-merge-guarantee cycle 2: AC8 (tests run no real gh and write no merge-guarantee.json into the repo's ledger)
+# HEAD 034dec6f. Commands run from <worktree>.
+
+## 1. Canary gh (<scratch>/canary-bin/gh: appends 'CANARY gh pwd=... args=...' to <scratch>/canary-gh.log, exit 97)
+##    first on the inherited PATH for run-test.sh, both Go runs, -race, every mutant and probe run, the cached-package
+##    rerun and the pin-removal check below.
+canary-gh.log lines after all of them: 0
+
+## 2. Sensitivity of the canary: a scratch test (<scratch>/canary-probe/zz_mgcanary_c2_test.go, added only through
+##    -overlay) calls CheckMergeGuarantee with its real defaults (Exec and LookPath nil) on <worktree>, with a copy of
+##    the canary (<scratch>/canary-sens-bin/gh, its own log) first on PATH:
+##    MGC2_REPO_DIR=<worktree> go test ./internal/org/ -run ProbeMGC2_CanarySensitivity -count=1 -v -overlay <scratch>/canary-probe/overlay.json
+    zz_mgcanary_c2_test.go:22: kind=unknown detail="gh api --hostname github.com repos/yoshpy-dev/ralph failed (exit status 97): check that gh can reach github.com and is logged in to it (gh auth status --hostname github.com)"
+--- PASS: TestProbeMGC2_CanarySensitivity
+canary-sens.log lines: 1
+CANARY gh pwd=<worktree> args=api --hostname github.com repos/yoshpy-dev/ralph
+##    A test that reached the real gh through the inherited PATH would have left lines in canary-gh.log (1 above: 0).
+
+## 3. Ledgers after every run (the main checkout's org ledger and the worktree's)
+~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org: no such dir
+<worktree>/.harness/state/org: no such dir
+find <main checkout>/.harness <worktree>/.harness -name 'merge-guarantee*': 0 files
+git -C <worktree> status --porcelain: ''
+git -C <main checkout> status --porcelain: ''
+##    The ledger dir does not exist (as in cycle 1), and doctor writes only into an existing dir (C2), so the
+##    absence alone does not show that TestMain's pin works; 4 does.
+
+## 4. Sensitivity of TestMain's doctorMergeGuaranteeEnv pin (internal/cli/main_test.go is unchanged since cycle 1:
+##    git diff 38ac8953 HEAD -- internal/cli/main_test.go is empty). Cycle 1's overlay <scratch-c1>/pinleak/main_test.go
+##    removes the pin; RALPH_ORG_STATE_DIR names an existing scratch dir:
+##    go test ./internal/cli/ -run 'TestRunDoctor|TestCheckMergeGuarantee|TestMergeGuaranteeEnvFromOS' -count=1 -vet=off -overlay <scratch-c1>/pinleak/overlay.json
+rc=1
+--- FAIL: TestRunDoctor_TestMainPinRunsNoGitOrGh
+ledger after the run:
+  merge-guarantee.json
+{
+  "version": 1,
+  "kind": "unknown",
+  "detail": "git remote get-url origin failed (exec: \"git\": executable file not found in $PATH), so origin's repository is unknown",
+  "host": "",
+  "repo": "",
+  "api_repo": "",
+  "default_branch": "",
+  "checked_at": "2026-10-14T13:20:54Z"
+}
+## the same with the pin in place (control)
+rc=0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	9.284s
+ledger after the run:
+  (empty)
+canary calls so far: 0

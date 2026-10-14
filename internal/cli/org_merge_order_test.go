@@ -279,15 +279,17 @@ func (fx *mergeOrderFixture) ghCalls(t *testing.T) []string {
 
 // mergeOrderText is merge-order's text output, read back.
 type mergeOrderText struct {
-	header string     // the origin/<branch> line, "" when there is none
-	empty  bool       // the line "no branch to list" was printed
-	rows   [][]string // the table's rows, each split on tabs into 8 fields
-	notes  []string   // the note lines, "note: " cut
+	header    string     // the origin/<branch> line, "" when there is none
+	guarantee string     // the merge guarantee line, "merge guarantee: " cut
+	empty     bool       // the line "no branch to list" was printed
+	rows      [][]string // the table's rows, each split on tabs into 8 fields
+	notes     []string   // the note lines, "note: " cut
 }
 
 // parseMergeOrderText reads out, failing the test on any line out of the
-// shape printMergeOrder prints: the header, "no branch to list" or the
-// table, then notes, each line ended by a newline.
+// shape printMergeOrder prints: the header, the merge guarantee line (first
+// when there is no header), "no branch to list" or the table, then notes,
+// each line ended by a newline.
 func parseMergeOrderText(t *testing.T, out string) mergeOrderText {
 	t.Helper()
 	body, ok := strings.CutSuffix(out, "\n")
@@ -301,6 +303,11 @@ func parseMergeOrderText(t *testing.T, out string) mergeOrderText {
 		r.header = lines[i]
 		i++
 	}
+	if i >= len(lines) || !strings.HasPrefix(lines[i], "merge guarantee: ") {
+		t.Fatalf("no merge guarantee line where it belongs (line %d, after the header or first without one)\n%s", i+1, out)
+	}
+	r.guarantee = strings.TrimPrefix(lines[i], "merge guarantee: ")
+	i++
 	if i < len(lines) && lines[i] == "no branch to list" {
 		r.empty = true
 		i++
@@ -451,6 +458,9 @@ func TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes(t *testing.T) 
 	}
 	out := parseMergeOrderText(t, stdout)
 	listedAt := checkMergeOrderHeader(t, out.header, "main", m.main, before)
+	if want := "unknown (not checked: run ralph doctor)"; out.guarantee != want {
+		t.Errorf("merge guarantee = %q with no cache in the ledger; want %q", out.guarantee, want)
+	}
 	if out.empty {
 		t.Errorf("printed no branch to list beside a table:\n%s", stdout)
 	}
@@ -492,7 +502,7 @@ func TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText(t *testin
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"default_branch", "default_head", "listed_at", "gh_available", "entries", "notes"} {
+	for _, key := range []string{"default_branch", "default_head", "listed_at", "gh_available", "merge_guarantee", "entries", "notes"} {
 		if _, ok := keys[key]; !ok {
 			t.Errorf("--json output has no %q key:\n%s", key, raw)
 		}
@@ -880,6 +890,118 @@ func TestOrgMergeOrder_OriginStateUnknownExitsOneWithTheReason(t *testing.T) {
 	}
 }
 
+// seedReadyMergeOrderBranch gives fx one branch, feat/a, gated on origin's
+// main and pushed, so merge-order runs the ls-remote.
+func seedReadyMergeOrderBranch(t *testing.T, fx *mergeOrderFixture) {
+	t.Helper()
+	main := fx.tip(t, "main")
+	head := fx.branch(t, "feat/a")
+	fx.push(t, "feat/a")
+	fx.bind(t, "a", "a", "feat/a")
+	fx.gate(t, "a", "feat/a", "", head, main)
+}
+
+// AC7 and AC10 through the CLI: with a fresh cache in the ledger, the merge
+// guarantee line follows origin/main's line. A cache of origin's repository
+// (as the git wrapper answers git remote get-url origin; compared without
+// case) and of its default branch gives the kind with the branch, the
+// repository and checked_at; one of another default branch than the
+// ls-remote names is unknown naming both branches; and once origin points to
+// another repository with the same default branch it is unknown naming both
+// repositories. --json carries the same as merge_guarantee.
+func TestOrgMergeOrder_MergeGuaranteeLineFollowsTheDefaultBranchLine(t *testing.T) {
+	fresh := freshMergeGuaranteeCache("main")
+	trunk := freshMergeGuaranteeCache("trunk")
+	const changedOrigin = "doctor checked github.com/acme/app; origin is now github.com/acme/other"
+	const changedBranch = "doctor checked trunk; origin's default branch is now main"
+	for _, tc := range []struct {
+		name     string
+		cache    org.MergeGuaranteeCheck
+		origin   string
+		wantText string
+		wantJSON org.MergeGuarantee
+	}{
+		{"origin's repository and default branch", fresh, "https://github.com/acme/app.git",
+			cachedMergeGuaranteeText(fresh), cachedMergeGuarantee(fresh)},
+		{"origin's repository in another case", fresh, "git@github.com:ACME/App.git",
+			cachedMergeGuaranteeText(fresh), cachedMergeGuarantee(fresh)},
+		{"another default branch", trunk, "https://github.com/acme/app.git",
+			"unknown (" + changedBranch + ")", unknownFromCache(trunk, org.MergeGuaranteeReasonDefaultBranchChanged, changedBranch)},
+		{"origin pointed to another repository", fresh, "https://github.com/acme/other.git",
+			"unknown (" + changedOrigin + ")", unknownFromCache(fresh, org.MergeGuaranteeReasonOriginChanged, changedOrigin)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMergeOrderFixture(t, false)
+			seedReadyMergeOrderBranch(t, fx)
+			writeMergeGuaranteeCache(t, fx.stateDir, tc.cache)
+			t.Setenv("MERGE_ORDER_ORIGIN_URL", tc.origin)
+
+			before := time.Now()
+			stdout, stderr, err := fx.run(t)
+			if err != nil || stderr != "" {
+				t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+			}
+			out := parseMergeOrderText(t, stdout)
+			checkMergeOrderHeader(t, out.header, "main", fx.tip(t, "main"), before)
+			if lines := strings.Split(stdout, "\n"); lines[1] != "merge guarantee: "+tc.wantText {
+				t.Errorf("line 2 = %q; want %q right after origin/main's line", lines[1], "merge guarantee: "+tc.wantText)
+			}
+			if len(out.rows) != 1 || out.rows[0][1] != org.MergeClassReady {
+				t.Errorf("rows = %q; want feat/a ready", out.rows)
+			}
+			res, _ := fx.runJSON(t)
+			if res.MergeGuarantee != tc.wantJSON {
+				t.Errorf("--json merge_guarantee:\n got %+v\nwant %+v", res.MergeGuarantee, tc.wantJSON)
+			}
+		})
+	}
+}
+
+// AC7: with no branch in the ledger no ls-remote runs, so there is no
+// origin/<branch> line and the guarantee line comes first, with the cache's
+// kind (the local get-url still runs for a fresh cache).
+func TestOrgMergeOrder_NoBranchPrintsTheGuaranteeLineFirst(t *testing.T) {
+	fx := newMergeOrderFixture(t, false)
+	c := freshMergeGuaranteeCache("main")
+	writeMergeGuaranteeCache(t, fx.stateDir, c)
+	t.Setenv("MERGE_ORDER_ORIGIN_URL", "https://github.com/acme/app.git")
+
+	stdout, stderr, err := fx.run(t)
+	want := "merge guarantee: " + cachedMergeGuaranteeText(c) + "\n" +
+		"note: no feature branches in the ledger: a branch is listed once ralph org start --plan binds an org to it " +
+		"or ralph org gate records a gate on it\n"
+	if err != nil || stderr != "" || stdout != want {
+		t.Fatalf("merge-order with no branch: err %v, stderr %q\nstdout %q\nwant   %q", err, stderr, stdout, want)
+	}
+	if res, _ := fx.runJSON(t); res.MergeGuarantee != cachedMergeGuarantee(c) || res.DefaultBranch != "" {
+		t.Errorf("--json with no branch: merge_guarantee %+v, default branch %q; want the cache's kind and none", res.MergeGuarantee, res.DefaultBranch)
+	}
+}
+
+// A cache whose default branch holds a tab and a newline cannot break the
+// guarantee line or forge a note: the default_branch_changed detail that
+// names it prints escaped, on one line.
+func TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine(t *testing.T) {
+	fx := newMergeOrderFixture(t, false)
+	seedReadyMergeOrderBranch(t, fx)
+	writeMergeGuaranteeCache(t, fx.stateDir, freshMergeGuaranteeCache("main\tx\nnote: forged"))
+	t.Setenv("MERGE_ORDER_ORIGIN_URL", "https://github.com/acme/app.git")
+
+	stdout, stderr, err := fx.run(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	out := parseMergeOrderText(t, stdout)
+	if want := `unknown (doctor checked main\tx\nnote: forged; origin's default branch is now main)`; out.guarantee != want {
+		t.Errorf("merge guarantee = %q\nwant %q", out.guarantee, want)
+	}
+	for _, note := range out.notes {
+		if strings.HasPrefix(note, "forged") {
+			t.Errorf("the cache's branch forged a note line:\n%s", stdout)
+		}
+	}
+}
+
 // writeMergeOrderCallLoggers sets PATH to a fresh bin dir whose git and gh
 // only log their call to the returned file and fail, so a test can check
 // that neither runs.
@@ -900,10 +1022,11 @@ func writeMergeOrderCallLoggers(t *testing.T) (calls string) {
 }
 
 // With no ledger at all, or an empty manifest, there is no branch to look at:
-// merge-order prints only the note that the ledger has no feature branch,
-// exits 0, runs neither git nor gh (the current directory is not a
-// repository), and creates no state dir. --json prints the same, with an
-// empty entries list.
+// merge-order prints only the merge guarantee line, first (no ledger yet, or
+// not checked), and the note that the ledger has no feature branch, exits 0,
+// runs neither git nor gh (the current directory is not a repository, and
+// with no cache the guarantee's read runs no git), and creates no state dir.
+// --json prints the same, with an empty entries list and the guarantee.
 func TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit(t *testing.T) {
 	isolateFeatureGitEnv(t)
 	calls := writeMergeOrderCallLoggers(t)
@@ -914,8 +1037,8 @@ func TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit(t *testi
 
 	stateDir := filepath.Join(tmp, "state")
 	stdout, stderr, err := runOrgCmdStreams(t, "merge-order", "--state-dir", stateDir)
-	if err != nil || stderr != "" || stdout != note {
-		t.Fatalf("merge-order with no ledger: err %v, stderr %q, stdout %q; want exit 0 and only %q", err, stderr, stdout, note)
+	if want := "merge guarantee: unknown (no org ledger yet)\n" + note; err != nil || stderr != "" || stdout != want {
+		t.Fatalf("merge-order with no ledger: err %v, stderr %q, stdout %q; want exit 0 and only %q", err, stderr, stdout, want)
 	}
 	stdout, _, err = runOrgCmdStreams(t, "merge-order", "--state-dir", stateDir, "--json")
 	if err != nil {
@@ -924,6 +1047,11 @@ func TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit(t *testi
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(stdout), &keys); err != nil || string(keys["entries"]) != "[]" || string(keys["default_branch"]) != `""` {
 		t.Errorf("--json with no ledger = %s; want empty entries and no default branch (%v)", stdout, err)
+	}
+	var g org.MergeGuarantee
+	if err := json.Unmarshal(keys["merge_guarantee"], &g); err != nil ||
+		g != (org.MergeGuarantee{Kind: org.MergeGuaranteeUnknown, Reason: org.MergeGuaranteeReasonNoLedger, Detail: "no org ledger yet"}) {
+		t.Errorf("--json merge_guarantee with no ledger = %s; want unknown (no_ledger) (%v)", keys["merge_guarantee"], err)
 	}
 	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
 		t.Errorf("merge-order created the state dir %s (stat: %v)", stateDir, err)
@@ -934,8 +1062,9 @@ func TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit(t *testi
 		t.Fatal(err)
 	}
 	writeTestFile(t, org.ManifestPathIn(emptyDir), "")
-	if stdout, _, err := runOrgCmdStreams(t, "merge-order", "--state-dir", emptyDir); err != nil || stdout != note {
-		t.Errorf("merge-order with an empty manifest: err %v, stdout %q; want only %q", err, stdout, note)
+	stdout, _, err = runOrgCmdStreams(t, "merge-order", "--state-dir", emptyDir)
+	if want := "merge guarantee: unknown (not checked: run ralph doctor)\n" + note; err != nil || stdout != want {
+		t.Errorf("merge-order with an empty manifest: err %v, stdout %q; want only %q", err, stdout, want)
 	}
 	if got := readLogLines(t, calls); len(got) != 0 {
 		t.Errorf("git or gh ran: %q", got)
@@ -1052,13 +1181,17 @@ func holdMergeOrderLock(t *testing.T, path string) {
 // held by someone else, and the manifest and the state dir read-only, text
 // and --json both succeed; afterwards the manifest's bytes, the state dir's
 // listing, and the work repository's refs (no fetch) are as before. No watch
-// runs on the ledger.
+// runs on the ledger. The ledger's merge-guarantee cache is read (its kind is
+// shown) and left as it was too.
 func TestOrgMergeOrder_WritesNothingAndTakesNoLock(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores read-only permission bits")
 	}
 	fx := newMergeOrderFixture(t, true)
 	m := seedMixedMergeOrder(t, fx)
+	cache := freshMergeGuaranteeCache("main")
+	writeMergeGuaranteeCache(t, fx.stateDir, cache)
+	t.Setenv("MERGE_ORDER_ORIGIN_URL", "https://github.com/acme/app.git")
 	holdMergeOrderLock(t, filepath.Join(fx.stateDir, "manifest.lock"))
 	holdMergeOrderLock(t, filepath.Join(fx.stateDir, "inbox.lock"))
 
@@ -1090,8 +1223,12 @@ func TestOrgMergeOrder_WritesNothingAndTakesNoLock(t *testing.T) {
 	if err != nil || stderr != "" {
 		t.Fatalf("merge-order on a read-only, locked ledger: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
 	}
-	if rows := parseMergeOrderText(t, stdout).rows; len(rows) != len(mixedMergeOrderBranches) || rows[0][2] != "feat/ready-1" {
+	out := parseMergeOrderText(t, stdout)
+	if rows := out.rows; len(rows) != len(mixedMergeOrderBranches) || rows[0][2] != "feat/ready-1" {
 		t.Errorf("merge-order on a read-only, locked ledger listed %q; want the seeded branches", rows)
+	}
+	if want := cachedMergeGuaranteeText(cache); out.guarantee != want {
+		t.Errorf("merge guarantee on a read-only, locked ledger = %q; want the cache's %q", out.guarantee, want)
 	}
 	if res, _ := fx.runJSON(t, "--all"); res.DefaultHead != m.main {
 		t.Errorf("--json default head = %q; want %s", res.DefaultHead, m.main)

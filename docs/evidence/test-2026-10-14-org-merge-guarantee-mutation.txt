@@ -1,0 +1,418 @@
+# /test org-merge-guarantee cycle 1: go test -overlay mutants (go1.26.0, HEAD 38ac8953)
+# Nothing in the worktree was written: every mutant is a scratch copy of one file, read through -overlay.
+# Runner <scratch>/run.sh: an org mutant runs go test ./internal/org/ -run 'MergeGuarantee|MergeOrder' -timeout 120s;
+# a survivor also runs go test ./internal/cli/ -run 'MergeGuarantee|OrgMergeOrder|TestStatusCmd|TestRunDoctor|TestOrgLegacyLedger'
+# -timeout 400s; a cli mutant runs only the cli step. Columns: id, verdict, package that killed it, how
+# (assert/panic/timeout), note, first failing tests. A canary gh (logs + exit 97) was first on PATH: 0 calls.
+
+## A. X0 (the unchanged file through the overlay, a control that must survive) and 74 mutants
+##    (mergeguarantee.go 57, mergeorder.go 5, doctor_merge_guarantee.go 4, doctor.go 2, status.go 4, org_merge_order.go 2).
+##    R14 did not build the first time (info unused) and was rebuilt (B). 69 red, 5 survive (D09, S03, S03b, S04, S07).
+X0	SURVIVED	-	-	control: the unchanged file through the overlay
+D01	KILLED	org	assert	an up-to-date rule with no check is github_protection	TestMergeGuarantee_RulesetsDecideTheKind
+D02	KILLED	org	assert	a merge queue with no ruleset check is github_protection	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind
+D03	KILLED	org	assert	classic checks alone (no merge queue) are github_protection	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_OneDeadlineCoversEveryCall
+D04	KILLED	org	assert	classic strict inverted	TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_OneDeadlineCoversEveryCall TestMergeGuarantee_HostComesFromOriginsURL
+D05	KILLED	org	assert	an unreadable classic strict is guessed github_protection (C4)	TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_DeadlineExceededIsUnknown
+D06	KILLED	org	assert	an up-to-date rule counts the checks of rules read before it	TestMergeGuarantee_RulesetsDecideTheKind
+D06b	KILLED	org	assert	an up-to-date rule with no check takes the other rules' checks (any order)	TestMergeGuarantee_RulesetsDecideTheKind
+D07	KILLED	org	assert	strictNoChecks never set	TestMergeGuarantee_RulesetsDecideTheKind
+D08	KILLED	org	assert	merge_queue rule not recognised	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_PaginatedRulesAreAllRead
+D09	SURVIVED	-	-	a ruleset check with an empty context counts
+D10	KILLED	org	assert	empty --paginate output is no rule	TestMergeGuarantee_FailuresAreUnknownWithAReason
+D11	KILLED	org	assert	only the first page is read	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+O01	KILLED	org	assert	the branch protection is read even when a ruleset decided	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_RenamedRepositoryStillDecides
+O02	KILLED	org	assert	the strict endpoint is read with no classic check	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_SaveThenReadRoundTrips
+C01	KILLED	org	assert	protection.enabled ignored	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C02	KILLED	org	assert	enforcement_level off ignored	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C03	KILLED	org	assert	an empty classic context counts	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+C04	KILLED	org	assert	classic checks[] ignored (contexts only)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S01	KILLED	org	assert	'Required status checks not enabled' not read as strict false	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S02	KILLED	org	assert	404 Not Found not read as admin-only (falls to the generic unknown)	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S03	SURVIVED	-	-	GAP probe: a 404 with an unexpected message is strict false (pr_checks_only)
+S03b	SURVIVED	-	-	GAP probe: same, via stderr's (HTTP 404)
+S04	SURVIVED	-	-	GAP probe: any other 404 is the admin-only unknown (kind same, detail differs)
+S05	KILLED	org	panic	a success with no strict is strict false	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S06	KILLED	org	assert	403 on stderr only not read as admin-only	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+S07	SURVIVED	-	-	403 in the body (status) not read; stderr still says (HTTP 403)
+S08	KILLED	org	assert	any strict answer is true	TestMergeGuarantee_ClassicProtectionDecidesTheKind
+H01	KILLED	org	assert	ssh.github.com not read as github.com	TestMergeGuarantee_HostComesFromOriginsURL
+H02	KILLED	org	assert	no --hostname	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+H03	KILLED	org	assert	host not lowercased	TestMergeGuarantee_HostComesFromOriginsURL TestMergeGuarantee_ReadsTheHostWithTheOwnerAndRepo
+H04	KILLED	org	assert	no GH_PROMPT_DISABLED=1	TestMergeGuarantee_RulesetsDecideTheKind TestMergeGuarantee_ClassicProtectionDecidesTheKind TestMergeGuarantee_FailuresAreUnknownWithAReason
+H05	KILLED	org	assert	rules path does not escape the branch	TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H06	KILLED	org	assert	owner/repo not escaped	TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H07	KILLED	org	assert	every gh reads github.com (GHES ignored)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_HostComesFromOriginsURL TestMergeGuarantee_EscapesTheBranchAndRepositoryInAPIPaths
+H08	KILLED	org	assert	ssh-alias hint on the wrong hosts	TestMergeGuarantee_FailuresAreUnknownWithAReason
+H09	KILLED	org	assert	gh not on PATH is not checked (gh runs anyway)	TestMergeGuarantee_FailuresAreUnknownWithAReason TestMergeGuarantee_SaveWritesAnUnknownToo
+T01	KILLED	org	assert	20 s -> 30 s	TestMergeGuarantee_OneDeadlineCoversEveryCall
+T02	KILLED	org	assert	each gh call gets its own deadline (no single 20 s)	TestMergeGuarantee_OneDeadlineCoversEveryCall TestMergeGuarantee_DeadlineExceededIsUnknown
+T03	KILLED	org	assert	a caller cancel reads as a timeout	TestMergeGuarantee_CallerContextDoneIsUnknown
+T04	KILLED	org	assert	a negative timeout is used as is	TestMergeGuarantee_OneDeadlineCoversEveryCall
+V01	KILLED	org	assert	a missing state dir is created (C2)	TestMergeGuarantee_SaveWithoutALedgerDirCreatesNothing
+V02	KILLED	org	assert	the old cache is not removed on a failed write	TestMergeGuarantee_WriteFailureRemovesTheOldCache TestMergeGuarantee_RemovalFailureIsReported
+V03	KILLED	org	assert	Version not stamped on save	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote TestMergeOrder_WritesNothing
+V04	KILLED	org	assert	a removal failure is not reported	TestMergeGuarantee_RemovalFailureIsReported
+V05	KILLED	org	assert	Removed not set	TestMergeGuarantee_WriteFailureRemovesTheOldCache
+R01	KILLED	org	assert	max age 25 h	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+R02	KILLED	org	assert	a future checked_at is never stale	TestMergeGuarantee_ReadMakesAnOldCacheStale
+R03	KILLED	org	assert	stale at exactly 24 h	TestMergeGuarantee_ReadMakesAnOldCacheStale
+R04	KILLED	org	assert	origin compared with case	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R05	KILLED	org	assert	host not compared (C7)	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R06	KILLED	org	assert	owner/repo not compared	TestMergeGuarantee_ReadComparesOriginWithTheCache TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+R07	KILLED	org	assert	any kind accepted	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+R08	KILLED	org	assert	any version accepted	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+R09	KILLED	org	assert	an unreadable origin keeps the cached kind	TestMergeGuarantee_ReadComparesOriginWithTheCache
+R10	KILLED	org	assert	ForDefaultBranch rewrites an unknown with a reason	TestMergeGuarantee_ForDefaultBranch
+R11	KILLED	org	assert	read git timeout 10 -> 20 s	TestMergeGuarantee_ReadBoundsGitWithItsTimeout
+R13	KILLED	org	assert	LastKind not kept	TestMergeGuarantee_ReadMakesAnOldCacheStale TestMergeGuarantee_ReadComparesOriginWithTheCache TestMergeGuarantee_ForDefaultBranch
+R14	BUILD_FAIL	org	-	a state dir that is a file is not no_ledger
+MO1	KILLED	org	assert	the default branch is not compared	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO2	KILLED	org	assert	wall clock, not o.Now	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO3	KILLED	org	assert	git not run in p.Dir	TestMergeOrder_FillsTheMergeGuaranteeFromTheLedgersCache
+MO4	KILLED	org	assert	no guarantee with no target	TestMergeOrder_NoTargetsRunsNoGit TestMergeOrder_NoTargetsReadsTheGuaranteeWithoutTheLsRemote
+K01	KILLED	cli	assert	unknown is warn (C3)	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestMergeGuaranteeResult_EverySaveOutcome TestRunDoctorFull_PrintsTheMergeGuarantee
+K02	KILLED	cli	assert	a stale cache that remains is not warn	TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns TestMergeGuaranteeResult_EverySaveOutcome
+K03	KILLED	cli	assert	doctor does not run the check	TestRunDoctorFull_PrintsTheMergeGuarantee TestRunDoctor_TestMainPinRunsNoGitOrGh
+K04	KILLED	cli	assert	doctor never writes the cache	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestCheckMergeGuarantee_FailedWriteRemovesTheOldCache TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns
+K05	KILLED	cli	assert	pr_checks_only is info	TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached TestMergeGuaranteeResult_EverySaveOutcome TestRunDoctorFull_PrintsTheMergeGuarantee
+K06	KILLED	cli	assert	the check runs in . instead of targetDir	TestRunDoctorFull_PrintsTheMergeGuarantee
+K10	KILLED	cli	assert	line not escaped	TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine
+K11	KILLED	cli	assert	no line on the empty-roster path	TestStatusCmd_MergeGuaranteeWithoutAUsableCacheIsUnknown TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin TestStatusCmd_MergeGuaranteeIsUnknownOnceOriginPointsToAnotherRepository
+K12	KILLED	cli	assert	no merge_guarantee in --json with orgs	TestStatusCmd_MergeGuaranteeJSONOnBothPaths
+K13	KILLED	cli	assert	git runs in the state dir, not the current directory	TestStatusCmd_MergeGuaranteeShowsTheCachedKindForTheSameOrigin TestStatusCmd_MergeGuaranteeIsUnknownOnceOriginPointsToAnotherRepository TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine
+K20	KILLED	cli	assert	no guarantee line	TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+K21	KILLED	cli	assert	guarantee line before the default branch line	TestOrgMergeOrder_TextListsEachClassInMergeOrderWithTheNotes TestOrgMergeOrder_JSONListsTheSameBranchesInTheSameOrderAsTheText TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut
+elapsed=1993
+
+## B. R14 rebuilt (the IsDir check made dead with "&& false" so info stays used)
+R14	KILLED	org	assert	a state dir that is a file is not no_ledger	TestMergeGuarantee_ReadWithoutAUsableCacheIsUnknown
+
+## C. Overlay-only probe rows (scratch <scratch>/probe/mergeguarantee_probe_test.go, source in E), added through
+##    -overlay next to each survivor: go test ./internal/org/ -run ProbeMG -overlay <mutant + probe>
+##    On X0 (= HEAD) every probe passes: HEAD already gives the generic unknown for a 404 with an unexpected
+##    message (PB1, the plan's edge case), and pr_checks_only for a strict rule whose only check has an empty context.
+X0	rc=0	failing probes: none
+D09	rc=1	failing probes: TestProbeMG_PB3_StrictRuleWithAnEmptyContextRequiresNoCheck
+S03	rc=1	failing probes: TestProbeMG_PB1_404WithAnUnexpectedMessageIsTheGenericUnknown
+S03b	rc=1	failing probes: TestProbeMG_PB1_404WithAnUnexpectedMessageIsTheGenericUnknown TestProbeMG_PB2_404WithNoBodyIsTheGenericUnknown
+S04	rc=1	failing probes: TestProbeMG_PB1_404WithAnUnexpectedMessageIsTheGenericUnknown TestProbeMG_PB2_404WithNoBodyIsTheGenericUnknown
+S07	rc=1	failing probes: TestProbeMG_PB4_403InTheBodyOnly
+
+## D. Sensitivity of "tests write no ledger cache" (AC8): TestMain's doctorMergeGuaranteeEnv pin removed through an
+##    overlay of internal/cli/main_test.go (<scratch>/pinleak/main_test.go), RALPH_ORG_STATE_DIR naming an existing
+##    scratch dir: go test ./internal/cli/ -run 'TestRunDoctor|TestCheckMergeGuarantee|TestMergeGuaranteeEnvFromOS'
+##    Without the pin the doctor tests write merge-guarantee.json into the ledger the environment names and
+##    TestRunDoctor_TestMainPinRunsNoGitOrGh fails; with the pin (control) nothing is written. The repository's own
+##    ledger dir (<main checkout>/.harness/state/org) does not exist, so a missing pin could not have written there in
+##    this run either (C2: doctor writes only into an existing dir).
+## pin removed (TestMain's doctorMergeGuaranteeEnv), RALPH_ORG_STATE_DIR=<scratch>/pinleak/ledger (exists)
+rc=1
+--- FAIL: TestRunDoctor_TestMainPinRunsNoGitOrGh
+ledger after the run:
+drwxr-xr-x@ 3 hiroki.yoshioka  wheel   96 Oct 14 19:19 .
+drwxr-xr-x@ 6 hiroki.yoshioka  wheel  192 Oct 14 19:19 ..
+-rw-r--r--@ 1 hiroki.yoshioka  wheel  285 Oct 14 19:19 merge-guarantee.json
+{
+  "version": 1,
+  "kind": "unknown",
+  "detail": "git remote get-url origin failed (exec: \"git\": executable file not found in $PATH), so origin's repository is unknown",
+  "host": "",
+  "repo": "",
+  "api_repo": "",
+  "default_branch": "",
+  "checked_at": "2026-10-14T10:19:15Z"
+}
+## the same with the pin in place (control)
+rc=0
+ledger after the run:
+
+## E. Sources: the mutant list (mut.py) and the probe rows
+#!/usr/bin/env python3
+"""go -overlay mutants for org-merge-guarantee /test cycle 1 (HEAD 38ac8953).
+
+Each mutant is (id, file, [(old, new), ...], note). Every old must occur
+exactly once in the file (after the earlier edits of the same mutant).
+Writes <out>/<id>/<basename>, <out>/<id>/overlay.json and <out>/list.tsv.
+"""
+import json
+import os
+import sys
+
+WT = "<worktree>"
+MG = WT + "/internal/org/mergeguarantee.go"
+MO = WT + "/internal/org/mergeorder.go"
+DR = WT + "/internal/cli/doctor_merge_guarantee.go"
+DOC = WT + "/internal/cli/doctor.go"
+ST = WT + "/internal/cli/status.go"
+CMO = WT + "/internal/cli/org_merge_order.go"
+
+STRICT_CASE = "\tcase slices.Contains(mergeClassicNotStrict, body.Message):\n"
+ADMIN_CASE = '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n'
+
+M = [
+    ("X0", MG, [], "control: the unchanged file through the overlay"),
+    # --- decide (C4) ---
+    ("D01", MG, [("\tcase rules.strictChecks > 0:\n", "\tcase rules.strictChecks > 0 || rules.strictNoChecks:\n")],
+     "an up-to-date rule with no check is github_protection"),
+    ("D02", MG, [("\tcase rules.mergeQueue && rules.checks > 0:\n", "\tcase rules.mergeQueue:\n")],
+     "a merge queue with no ruleset check is github_protection"),
+    ("D03", MG, [("\tcase rules.mergeQueue && classic > 0:\n", "\tcase rules.mergeQueue || classic > 0:\n")],
+     "classic checks alone (no merge queue) are github_protection"),
+    ("D04", MG, [("\t\tcase strict:\n", "\t\tcase !strict:\n")], "classic strict inverted"),
+    ("D05", MG, [("\t\tstrict, why := g.readMergeClassicStrict(classic)\n\t\tswitch {\n\t\tcase why != \"\":\n\t\t\treturn MergeGuaranteeUnknown, why\n",
+                  "\t\tstrict, why := g.readMergeClassicStrict(classic)\n\t\tswitch {\n\t\tcase why != \"\":\n\t\t\treturn MergeGuaranteeGitHubProtection, why\n")],
+     "an unreadable classic strict is guessed github_protection (C4)"),
+    ("D06", MG, [("\t\t\t\trules.strictChecks = max(rules.strictChecks, len(own))\n",
+                  "\t\t\t\trules.strictChecks = max(rules.strictChecks, len(required))\n")],
+     "an up-to-date rule counts the checks of rules read before it"),
+    ("D06b", MG, [("\trules.checks = len(required)\n",
+                   "\trules.checks = len(required)\n\tif rules.strictNoChecks && rules.checks > 0 {\n\t\trules.strictChecks = rules.checks\n\t}\n")],
+     "an up-to-date rule with no check takes the other rules' checks (any order)"),
+    ("D07", MG, [("\t\t\t\trules.strictNoChecks = rules.strictNoChecks || len(own) == 0\n", "")],
+     "strictNoChecks never set"),
+    ("D08", MG, [('\t\tcase "merge_queue":\n', '\t\tcase "merge-queue":\n')], "merge_queue rule not recognised"),
+    ("D09", MG, [("\t\t\t\tif c.Context != \"\" {\n\t\t\t\t\town[c.Context], required[c.Context] = true, true\n\t\t\t\t}\n",
+                  "\t\t\t\town[c.Context], required[c.Context] = true, true\n")],
+     "a ruleset check with an empty context counts"),
+    ("D10", MG, [("\tif pages == 0 {\n", "\tif pages < 0 {\n")], "empty --paginate output is no rule"),
+    ("D11", MG, [("\t\tall = append(all, page...)\n", "\t\tall = append(all, page...)\n\t\tbreak\n")],
+     "only the first page is read"),
+    ("D12", MG, [("\t\tcase rules.strictChecks > 0:\n\t\treturn", "XX")], "placeholder (not used)"),
+    # --- the order of calls ---
+    ("O01", MG, [("\tclassic, why := g.readMergeClassic()\n\tswitch {\n",
+                  "\tclassic, why := g.readMergeClassic()\n\tif rules.strictChecks > 0 {\n\t\treturn MergeGuaranteeGitHubProtection, g.protected(rules.strictChecks, \"a ruleset requires branches to be up to date before merging\")\n\t}\n\tswitch {\n"),
+                 ("\tcase rules.strictChecks > 0:\n\t\treturn MergeGuaranteeGitHubProtection, g.protected(rules.strictChecks,\n\t\t\t\"a ruleset requires branches to be up to date before merging\")\n", "")],
+     "the branch protection is read even when a ruleset decided"),
+    ("O02", MG, [("\tcase classic > 0:\n\t\tstrict, why := g.readMergeClassicStrict(classic)\n",
+                  "\tcase classic >= 0:\n\t\tstrict, why := g.readMergeClassicStrict(classic)\n")],
+     "the strict endpoint is read with no classic check"),
+    # --- classic ---
+    ("C01", MG, [("\tif !p.Enabled || p.RequiredStatusChecks.EnforcementLevel == \"off\" {\n",
+                  "\tif p.RequiredStatusChecks.EnforcementLevel == \"off\" {\n")], "protection.enabled ignored"),
+    ("C02", MG, [("\tif !p.Enabled || p.RequiredStatusChecks.EnforcementLevel == \"off\" {\n", "\tif !p.Enabled {\n")],
+     "enforcement_level off ignored"),
+    ("C03", MG, [("\tdelete(required, \"\")\n", "")], "an empty classic context counts"),
+    ("C04", MG, [("\tfor _, c := range p.RequiredStatusChecks.Checks {\n\t\trequired[c.Context] = true\n\t}\n", "")],
+     "classic checks[] ignored (contexts only)"),
+    # --- classic strict endpoint ---
+    ("S01", MG, [('var mergeClassicNotStrict = []string{"Branch not protected", "Required status checks not enabled"}',
+                  'var mergeClassicNotStrict = []string{"Branch not protected"}')], "'Required status checks not enabled' not read as strict false"),
+    ("S02", MG, [(ADMIN_CASE, '\tcase fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "404 Not Found not read as admin-only (falls to the generic unknown)"),
+    ("S03", MG, [(STRICT_CASE, '\tcase slices.Contains(mergeClassicNotStrict, body.Message) || fmt.Sprint(body.Status) == "404" && body.Message != "Not Found":\n')],
+     "GAP probe: a 404 with an unexpected message is strict false (pr_checks_only)"),
+    ("S03b", MG, [(STRICT_CASE, '\tcase slices.Contains(mergeClassicNotStrict, body.Message) || strings.Contains(err.Error(), "(HTTP 404)") && body.Message != "Not Found":\n')],
+     "GAP probe: same, via stderr's (HTTP 404)"),
+    ("S04", MG, [(ADMIN_CASE, '\tcase strings.Contains(err.Error(), "(HTTP 404)") || fmt.Sprint(body.Status) == "403" || strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "GAP probe: any other 404 is the admin-only unknown (kind same, detail differs)"),
+    ("S05", MG, [("\t\tif err := json.Unmarshal([]byte(out), &body); err != nil || body.Strict == nil {\n",
+                  "\t\tif err := json.Unmarshal([]byte(out), &body); err != nil {\n")], "a success with no strict is strict false"),
+    ("S06", MG, [(ADMIN_CASE, '\tcase body.Message == "Not Found" || fmt.Sprint(body.Status) == "403":\n')],
+     "403 on stderr only not read as admin-only"),
+    ("S07", MG, [(ADMIN_CASE, '\tcase body.Message == "Not Found" || strings.Contains(err.Error(), "(HTTP 403)"):\n')],
+     "403 in the body (status) not read; stderr still says (HTTP 403)"),
+    ("S08", MG, [("\t\treturn *body.Strict, \"\"\n", "\t\treturn true, \"\"\n")], "any strict answer is true"),
+    # --- host and arguments (C7) ---
+    ("H01", MG, [('\tif host == "ssh.github.com" {\n', '\tif host == "ssh.github.com.x" {\n')], "ssh.github.com not read as github.com"),
+    ("H02", MG, [('\targs := []string{"api", "--hostname", g.apiHost}\n', '\targs := []string{"api"}\n')], "no --hostname"),
+    ("H03", MO, [("\treturn strings.ToLower(host), repo, true\n", "\treturn host, repo, true\n")], "host not lowercased"),
+    ("H04", MG, [('\treturn g.run(g.ctx, g.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", g.ghArgs(paginate, path)...)\n',
+                  '\treturn g.run(g.ctx, g.dir, nil, "gh", g.ghArgs(paginate, path)...)\n')], "no GH_PROMPT_DISABLED=1"),
+    ("H05", MG, [('\tpath := g.repoPath("rules", "branches", url.PathEscape(g.c.DefaultBranch))\n',
+                  '\tpath := g.repoPath("rules", "branches", g.c.DefaultBranch)\n')], "rules path does not escape the branch"),
+    ("H06", MG, [('\treturn strings.Join(append([]string{"repos", url.PathEscape(g.repo.owner), url.PathEscape(g.repo.name)}, rest...), "/")\n',
+                  '\treturn strings.Join(append([]string{"repos", g.repo.owner, g.repo.name}, rest...), "/")\n')], "owner/repo not escaped"),
+    ("H07", MG, [("\tg.apiHost = mergeGuaranteeAPIHost(host)\n", '\tg.apiHost = "github.com"\n')], "every gh reads github.com (GHES ignored)"),
+    ("H08", MG, [("\t\tif g.apiHost != \"github.com\" {\n", "\t\tif g.apiHost == \"github.com\" {\n")], "ssh-alias hint on the wrong hosts"),
+    ("H09", MG, [("\tif _, err := g.lookPath(\"gh\"); err != nil {\n", "\tif _, err := g.lookPath(\"gh\"); err != nil && false {\n")],
+     "gh not on PATH is not checked (gh runs anyway)"),
+    # --- timeout (C1) ---
+    ("T01", MG, [("\tdefaultMergeGuaranteeTimeout = 20 * time.Second\n", "\tdefaultMergeGuaranteeTimeout = 30 * time.Second\n")], "20 s -> 30 s"),
+    ("T02", MG, [('\treturn g.run(g.ctx, g.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", g.ghArgs(paginate, path)...)\n',
+                  '\tctx, cancel := context.WithTimeout(g.parent, g.timeout)\n\tdefer cancel()\n\treturn g.run(ctx, g.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", g.ghArgs(paginate, path)...)\n')],
+     "each gh call gets its own deadline (no single 20 s)"),
+    ("T03", MG, [("\tcase g.parent.Err() != nil:\n", "\tcase g.parent.Err() != nil && g.ctx.Err() == nil:\n")],
+     "a caller cancel reads as a timeout"),
+    ("T04", MG, [("\tif timeout <= 0 {\n\t\ttimeout = defaultMergeGuaranteeTimeout\n", "\tif timeout == 0 {\n\t\ttimeout = defaultMergeGuaranteeTimeout\n")],
+     "a negative timeout is used as is"),
+    # --- save (C2, C5) ---
+    ("V01", MG, [("\t\ts.NoLedger = true\n\t\treturn s\n", "\t\tif err := os.MkdirAll(stateDir, 0o755); err != nil {\n\t\t\ts.NoLedger = true\n\t\t\treturn s\n\t\t}\n\t\tc.Version = MergeGuaranteeVersion\n\t\ts.WriteErr = write(s.Path, c)\n")],
+     "a missing state dir is created (C2)"),
+    ("V02", MG, [("\tswitch err := os.Remove(s.Path); {\n", "\tswitch err := error(nil); {\n")], "the old cache is not removed on a failed write"),
+    ("V03", MG, [("\t\tc.Version = MergeGuaranteeVersion\n\t\ts.WriteErr = write(s.Path, c)\n", "\t\ts.WriteErr = write(s.Path, c)\n")],
+     "Version not stamped on save"),
+    ("V04", MG, [("\tcase !errors.Is(err, fs.ErrNotExist):\n\t\ts.RemoveErr", "\tcase false:\n\t\ts.RemoveErr")],
+     "a removal failure is not reported"),
+    ("V05", MG, [("\tcase err == nil:\n\t\ts.Removed = true\n", "\tcase err == nil:\n")], "Removed not set"),
+    # --- read (C5, C7) ---
+    ("R01", MG, [("\tMergeGuaranteeMaxAge = 24 * time.Hour\n", "\tMergeGuaranteeMaxAge = 25 * time.Hour\n")], "max age 25 h"),
+    ("R02", MG, [("now().Sub(at).Abs() > MergeGuaranteeMaxAge", "now().Sub(at) > MergeGuaranteeMaxAge")], "a future checked_at is never stale"),
+    ("R03", MG, [("now().Sub(at).Abs() > MergeGuaranteeMaxAge", "now().Sub(at).Abs() >= MergeGuaranteeMaxAge")], "stale at exactly 24 h"),
+    ("R04", MG, [("\tcase !strings.EqualFold(host, c.Host) || !strings.EqualFold(repo, c.Repo):\n", "\tcase host != c.Host || repo != c.Repo:\n")],
+     "origin compared with case"),
+    ("R05", MG, [("\tcase !strings.EqualFold(host, c.Host) || !strings.EqualFold(repo, c.Repo):\n", "\tcase !strings.EqualFold(repo, c.Repo):\n")],
+     "host not compared (C7)"),
+    ("R06", MG, [("\tcase !strings.EqualFold(host, c.Host) || !strings.EqualFold(repo, c.Repo):\n", "\tcase !strings.EqualFold(host, c.Host):\n")],
+     "owner/repo not compared"),
+    ("R07", MG, [("\t\t!slices.Contains([]string{MergeGuaranteeGitHubProtection, MergeGuaranteePRChecksOnly, MergeGuaranteeUnknown}, c.Kind) {\n",
+                  "\t\tfalse {\n")], "any kind accepted"),
+    ("R08", MG, [("err != nil || c.Version != MergeGuaranteeVersion ||\n", "err != nil ||\n")], "any version accepted"),
+    ("R09", MG, [("\tcase why != \"\":\n\t\treturn g.unknownFor(MergeGuaranteeReasonOriginUnreadable", "\tcase why != \"\" && false:\n\t\treturn g.unknownFor(MergeGuaranteeReasonOriginUnreadable")],
+     "an unreadable origin keeps the cached kind"),
+    ("R10", MG, [("\tif g.Reason != \"\" || g.DefaultBranch == \"\" || branch == \"\" || g.DefaultBranch == branch {\n",
+                  "\tif g.DefaultBranch == \"\" || branch == \"\" || g.DefaultBranch == branch {\n")],
+     "ForDefaultBranch rewrites an unknown with a reason"),
+    ("R11", MG, [("\tdefaultMergeGuaranteeGitTimeout = 10 * time.Second\n", "\tdefaultMergeGuaranteeGitTimeout = 20 * time.Second\n")], "read git timeout 10 -> 20 s"),
+    ("R12", MG, [("\t\tif at, err := time.Parse(time.RFC3339, c.CheckedAt); err != nil || now()", "\t\tif at, err := time.Parse(time.RFC3339, c.CheckedAt); err == nil && now()")],
+     "placeholder (not used)"),
+    ("R13", MG, [("\tg.LastKind, g.Kind, g.Reason, g.Detail = g.Kind, MergeGuaranteeUnknown, reason, detail\n",
+                  "\tg.Kind, g.Reason, g.Detail = MergeGuaranteeUnknown, reason, detail\n")], "LastKind not kept"),
+    ("R14", MG, [("\tcase errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir():\n\t\treturn unknown(MergeGuaranteeReasonNoLedger",
+                  "\tcase errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir() && false:\n\t\treturn unknown(MergeGuaranteeReasonNoLedger")],
+     "a state dir that is a file is not no_ledger"),
+    # --- merge-order (org layer) ---
+    ("MO1", MO, [("\tres.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams).ForDefaultBranch(res.DefaultBranch)\n",
+                  "\tres.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams)\n")], "the default branch is not compared"),
+    ("MO2", MO, [("\tguaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run, Now: o.Now}\n",
+                  "\tguaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run}\n")], "wall clock, not o.Now"),
+    ("MO3", MO, [("\tguaranteeParams := MergeGuaranteeReadParams{Dir: p.Dir, Exec: run, Now: o.Now}\n",
+                  "\tguaranteeParams := MergeGuaranteeReadParams{Exec: run, Now: o.Now}\n")], "git not run in p.Dir"),
+    ("MO4", MO, [("\t\tres.MergeGuarantee = ReadMergeGuarantee(ctx, guaranteeDir, guaranteeParams)\n\t\tres.Notes", "\t\tres.Notes")],
+     "no guarantee with no target"),
+    # --- doctor (CLI) ---
+    ("K01", DR, [("\tdefault:\n\t\tr.Status = \"info\"\n", "\tdefault:\n\t\tr.Status = \"warn\"\n")], "unknown is warn (C3)"),
+    ("K02", DR, [("\tcase s.RemoveErr != nil:\n\t\tr.Status = \"warn\"\n", "\tcase s.RemoveErr != nil:\n")], "a stale cache that remains is not warn"),
+    ("K03", DOC, [("\tresults = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv))\n", "")],
+     "doctor does not run the check"),
+    ("K04", DR, [("\treturn mergeGuaranteeResult(c, org.SaveMergeGuarantee(stateDir, c))\n", "\treturn mergeGuaranteeResult(c, org.MergeGuaranteeSave{NoLedger: true, Path: org.MergeGuaranteePathIn(stateDir)})\n")],
+     "doctor never writes the cache"),
+    ("K05", DR, [("\tcase org.MergeGuaranteePRChecksOnly:\n\t\tr.Status = \"warn\"\n", "\tcase org.MergeGuaranteePRChecksOnly:\n\t\tr.Status = \"info\"\n")],
+     "pr_checks_only is info"),
+    ("K06", DOC, [("\tresults = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv))\n",
+                   "\tresults = append(results, checkMergeGuarantee(context.Background(), \".\", doctorMergeGuaranteeEnv))\n")],
+     "the check runs in . instead of targetDir"),
+    # --- status (CLI) ---
+    ("K10", ST, [("\treturn \"merge guarantee: \" + inboxField(g.Text())\n", "\treturn \"merge guarantee: \" + g.Text()\n")], "line not escaped"),
+    ("K11", ST, [("\t_, _ = fmt.Fprintln(out, orgWatchLine(watch))\n\t_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))\n\tif corruptLines > 0 {\n",
+                  "\t_, _ = fmt.Fprintln(out, orgWatchLine(watch))\n\tif corruptLines > 0 {\n")], "no line on the empty-roster path"),
+    ("K12", ST, [("OrgWatch: buildStatusOrgWatchJSON(watch), MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}\n\tenc := json.NewEncoder(cmd.OutOrStdout())",
+                  "OrgWatch: buildStatusOrgWatchJSON(watch), Scaffold: buildStatusScaffoldJSON(scaffoldStat)}\n\tenc := json.NewEncoder(cmd.OutOrStdout())")],
+     "no merge_guarantee in --json with orgs"),
+    ("K13", ST, [("\tguarantee := org.ReadMergeGuarantee(ctx, stateDir, org.MergeGuaranteeReadParams{Dir: \".\"})\n",
+                  "\tguarantee := org.ReadMergeGuarantee(ctx, stateDir, org.MergeGuaranteeReadParams{Dir: stateDir})\n")],
+     "git runs in the state dir, not the current directory"),
+    # --- merge-order (CLI) ---
+    ("K20", CMO, [("\t_, _ = fmt.Fprintln(w, mergeGuaranteeLine(res.MergeGuarantee))\n", "")], "no guarantee line"),
+    ("K21", CMO, [("\tif res.DefaultBranch != \"\" {\n\t\t_, _ = fmt.Fprintf(w, \"origin/%s %s (listed %s)\\n\",",
+                   "\t_, _ = fmt.Fprintln(w, mergeGuaranteeLine(res.MergeGuarantee))\n\tif res.DefaultBranch != \"\" {\n\t\t_, _ = fmt.Fprintf(w, \"origin/%s %s (listed %s)\\n\","),
+                  ("\t}\n\t_, _ = fmt.Fprintln(w, mergeGuaranteeLine(res.MergeGuarantee))\n", "\t}\n")],
+     "guarantee line before the default branch line"),
+]
+
+M = [m for m in M if m[0] not in ("D12", "R12")]
+
+def main():
+    out = sys.argv[1]
+    os.makedirs(out, exist_ok=True)
+    srcs = {}
+    with open(os.path.join(out, "list.tsv"), "w") as lst:
+        for mid, path, edits, note in M:
+            if path not in srcs:
+                with open(path) as f:
+                    srcs[path] = f.read()
+            src = srcs[path]
+            for old, new in edits:
+                n = src.count(old)
+                if n != 1:
+                    print(f"{mid}: old string occurs {n} times: {old!r}", file=sys.stderr)
+                    sys.exit(1)
+                src = src.replace(old, new)
+            d = os.path.join(out, mid)
+            os.makedirs(d, exist_ok=True)
+            mpath = os.path.join(d, os.path.basename(path))
+            with open(mpath, "w") as f:
+                f.write(src)
+            with open(os.path.join(d, "overlay.json"), "w") as f:
+                json.dump({"Replace": {path: mpath}}, f)
+            pkg = "org" if "/internal/org/" in path else "cli"
+            lst.write(f"{mid}\t{pkg}\t{note}\n")
+    print(f"{len(M)} mutants written to {out}")
+
+if __name__ == "__main__":
+    main()
+
+--- <scratch>/probe/mergeguarantee_probe_test.go ---
+package org
+
+// Scratch probe rows for /test cycle 1 of org-merge-guarantee (not committed).
+// Each row pins HEAD's behavior on an input the committed tests do not give.
+
+import (
+	"errors"
+	"strings"
+	"testing"
+)
+
+// PB1: the strict endpoint answers a 404 whose message is neither Not Found
+// nor a not-protected message: generic unknown (plan edge case "gh api の 404
+// の本文の message が想定外(unknown)").
+func TestProbeMG_PB1_404WithAnUnexpectedMessageIsTheGenericUnknown(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+	e.replies[mgStrictEP] = mgAPIError("Branch not found", "404")
+	c := mgCheck(e)
+	want := "gh api --hostname github.com " + mgStrictEP + " failed (exit status 1: gh: Branch not found (HTTP 404)), so whether " +
+		"the branch protection of " + mgSubject + ", requires branches to be up to date before merging is unknown"
+	if c.Kind != MergeGuaranteeUnknown || c.Detail != want {
+		t.Errorf("check = %s %q\nwant unknown %q", c.Kind, c.Detail, want)
+	}
+}
+
+// PB2: a 404 with no JSON body on stdout (only gh's stderr line): the message
+// is read from nothing, so even "Not Found" on stderr is the generic unknown.
+func TestProbeMG_PB2_404WithNoBodyIsTheGenericUnknown(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+	e.replies[mgStrictEP] = mgReply{err: errors.New("exit status 1: gh: Not Found (HTTP 404)")}
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteeUnknown || !strings.Contains(c.Detail, "failed (exit status 1: gh: Not Found (HTTP 404)), so whether") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
+
+// PB3: an up-to-date ruleset rule whose only check has an empty context
+// requires no check (pr_checks_only, the no-check wording).
+func TestProbeMG_PB3_StrictRuleWithAnEmptyContextRequiresNoCheck(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgRulesEP] = mgReply{out: mgRules(mgChecksRule(true, ""))}
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteePRChecksOnly || !strings.Contains(c.Detail, "but no status check is required") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
+
+// PB4: a 403 told only by the body's status (gh's stderr carries no "(HTTP
+// 403)") is still the admin-only unknown.
+func TestProbeMG_PB4_403InTheBodyOnly(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgBranchEP] = mgReply{out: mgClassicRequires("ci")}
+	r := mgAPIError("Must have admin rights to Repository.", "403")
+	r.err = errors.New("exit status 1")
+	e.replies[mgStrictEP] = r
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteeUnknown || !strings.Contains(c.Detail, "can be read only with admin access") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
+
+// PB5: the strict rule with no check comes AFTER the rule with checks (the
+// committed row has it first).
+func TestProbeMG_PB5_StrictNoCheckRuleAfterTheChecksRule(t *testing.T) {
+	e := newMGExec()
+	e.replies[mgRulesEP] = mgReply{out: mgRules(mgChecksRule(false, "ci"), mgChecksRule(true))}
+	c := mgCheck(e)
+	if c.Kind != MergeGuaranteePRChecksOnly || !strings.Contains(c.Detail, "(the ruleset that requires branches to be up to date requires no status check itself)") {
+		t.Errorf("check = %s %q", c.Kind, c.Detail)
+	}
+}
