@@ -965,8 +965,10 @@ func TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository(t *testing.T) {
 // leaves every PR out: a merged PR of the same branch name in upstream does
 // not hide origin's ready branch, a PR into another branch does not make it
 // wrong_base, and a PR of origin's found before is dropped too. One note says
-// why (the set-default to run for another repository), gh is not asked about
-// the branches after it, and the run succeeds with gh available.
+// why (for another repository, the two fixes that
+// TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+// pins), gh is not asked about the branches after it, and the run succeeds
+// with gh available.
 func TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 	upstream := func(n int, state, base string) string {
 		return moPRs(moRepoPR(n, state, base, "upstream-org", "app"))
@@ -980,7 +982,8 @@ func TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 		note    []string
 	}{
 		{"a merged PR of upstream does not hide origin's ready branch", map[string]string{"feat/a": upstream(7, "MERGED", "main")},
-			[]string{"feat/a"}, []string{"gh reads upstream-org/app, not origin's acme/app: no PR is used", "run gh repo set-default acme/app"}},
+			[]string{"feat/a"}, []string{"gh reads upstream-org/app, not origin's acme/app: no PR is used", "git remote set-url origin",
+				"run gh repo set-default acme/app"}},
 		{"a PR of upstream into another branch is not wrong_base", map[string]string{"feat/a": upstream(7, "OPEN", "develop")},
 			[]string{"feat/a"}, []string{"gh reads upstream-org/app, not origin's acme/app"}},
 		{"a PR of the same name under another owner", map[string]string{"feat/a": moPRs(moRepoPR(7, "CLOSED", "main", "someone", "app"))},
@@ -1025,6 +1028,45 @@ func TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 			}
 			if !res.GHAvailable {
 				t.Errorf("GHAvailable = false, want true: gh was there")
+			}
+		})
+	}
+}
+
+// TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
+// covers cross-review cycle 3's finding: after origin's repository is renamed
+// on GitHub, git still reaches it at origin's old URL through GitHub's
+// redirect and gh returns PR urls with the new name, so the check leaves the
+// PRs out, and gh repo set-default with origin's old name would not help.
+// merge-order cannot tell a rename from another repository, so the note names
+// both fixes, git remote set-url origin for a rename and gh repo set-default
+// with origin's owner/repo otherwise, whichever case it is. The PRs are still
+// left out and gh is not asked again.
+func TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository(t *testing.T) {
+	for _, tc := range []struct {
+		name, owner, repo string
+	}{
+		{"origin's repository renamed on GitHub", "acme", "app-v2"},
+		{"gh reads another repository", "upstream-org", "app"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := moRepoCheckFixture(t, "https://github.com/acme/app.git")
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "MERGED", "main", tc.owner, tc.repo)))
+			res := fx.run(t, false)
+			if got, want := moOrder(res), []string{"1 ready feat/a", "2 ready feat/b", "3 ready feat/c"}; !slices.Equal(got, want) {
+				t.Fatalf("order = %q, want %q with no PR used", got, want)
+			}
+			if e := moEntry(t, res, "feat/a"); e.PR != nil {
+				t.Errorf("feat/a PR = %+v, want none", e.PR)
+			}
+			ghRepo := tc.owner + "/" + tc.repo
+			want := "gh reads " + ghRepo + ", not origin's acme/app: no PR is used, so " + mergeOrderNoPRs + "; if acme/app was renamed to " +
+				ghRepo + ", point origin at it (git remote set-url origin <its URL>); otherwise run gh repo set-default acme/app in this repository"
+			if note := moNoteWith(res, "no PR is used"); note != want {
+				t.Fatalf("note = %q,\nwant %q", note, want)
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a"}) {
+				t.Errorf("gh asked about %q, want feat/a only", got)
 			}
 		})
 	}

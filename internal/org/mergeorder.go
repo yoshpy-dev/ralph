@@ -613,8 +613,12 @@ type mergeOriginRepo struct {
 // which no PR can be from), so there is nothing to check it against.
 // Otherwise it returns the note that leaves the PRs out: gh read another
 // repository, pr's url names none, or `git remote get-url origin` failed.
-// Hosts are not compared, since origin's may be an ssh alias. The error is
-// for ctx done.
+// When gh read another repository, the note names two fixes, since check
+// cannot tell it from origin's repository renamed on GitHub (git still
+// reaches it at origin's old URL through GitHub's redirect, and gh's PR urls
+// carry the new name): point origin at the new name with git remote set-url
+// origin for a rename, else run gh repo set-default. Hosts are not compared,
+// since origin's may be an ssh alias. The error is for ctx done.
 func (o *mergeOriginRepo) check(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, branch string, pr *MergeOrderPR) (stop string, _ error) {
 	if !o.read {
 		o.read = true
@@ -637,8 +641,9 @@ func (o *mergeOriginRepo) check(ctx context.Context, dir string, run MergeOrderE
 		return fmt.Sprintf("gh returned PR #%d for %s with the url %q, which names no repository to check against origin's "+
 			"%s: no PR is used, so %s", pr.Number, branch, pr.URL, o.repo, mergeOrderNoPRs), nil
 	case !prRepo.same(o.repo):
-		return fmt.Sprintf("gh reads %s, not origin's %s: no PR is used, so %s; run gh repo set-default %s in this "+
-			"repository", prRepo, o.repo, mergeOrderNoPRs, o.repo), nil
+		return fmt.Sprintf("gh reads %s, not origin's %s: no PR is used, so %s; if %s was renamed to %s, point origin at it "+
+			"(git remote set-url origin <its URL>); otherwise run gh repo set-default %s in this repository",
+			prRepo, o.repo, mergeOrderNoPRs, o.repo, prRepo, o.repo), nil
 	}
 	return "", nil
 }

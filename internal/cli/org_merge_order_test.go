@@ -784,9 +784,10 @@ func TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine(t *testing.T) {
 // get-url origin), and gh returns a merged PR of upstream-org/app for
 // feat/a, as gh does in a fork's checkout whose upstream remote it picks.
 // The PR is not used: feat/a stays ready with no PR instead of being hidden
-// as merged, gh is not asked about feat/b, and the first note says to run
-// gh repo set-default acme/app. With the PR's url naming acme/app, the same
-// run hides feat/a and shows feat/b's PR.
+// as merged, gh is not asked about feat/b, and the first note names both
+// fixes: git remote set-url origin when acme/app was renamed, else gh repo
+// set-default acme/app. With the PR's url naming acme/app, the same run hides
+// feat/a and shows feat/b's PR.
 func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 	fx := newMergeOrderFixture(t, true)
 	main := fx.tip(t, "main")
@@ -810,7 +811,8 @@ func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T)
 		{"ready", "feat/b", "-", short(b), short(main), "b/b", "the gate passed"},
 	})
 	if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], "gh reads upstream-org/app, not origin's acme/app: no PR is used") ||
-		!strings.Contains(out.notes[0], "run gh repo set-default acme/app") {
+		!strings.Contains(out.notes[0], "if acme/app was renamed to upstream-org/app, point origin at it (git remote set-url origin") ||
+		!strings.Contains(out.notes[0], "otherwise run gh repo set-default acme/app in this repository") {
 		t.Errorf("notes = %q; want the repository note first", out.notes)
 	}
 	if calls := fx.ghCalls(t); !slices.Equal(calls, []string{mergeOrderGHCall("feat/a")}) {

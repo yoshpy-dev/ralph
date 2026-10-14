@@ -48,7 +48,11 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"and a note says so. gh's PRs are used only when their repository is\n" +
 			"origin's (git remote get-url origin): when gh reads another one, such\n" +
 			"as upstream in a fork's checkout, no PR is used and a note says to run\n" +
-			"gh repo set-default. The check has three gaps: when origin's URL names\n" +
+			"gh repo set-default. A repository renamed on GitHub while origin keeps\n" +
+			"the old URL looks the same (git reaches it through GitHub's redirect,\n" +
+			"gh's PR urls carry the new name), so the note also says to point\n" +
+			"origin at the new name with git remote set-url origin if it was\n" +
+			"renamed. The check has three gaps: when origin's URL names\n" +
 			"no owner/repo (a local path, file://, a scheme such as git+ssh://),\n" +
 			"gh's PRs are used as they are; the host is not compared; and the check\n" +
 			"runs only on a PR gh returns, so no note appears when the repository\n" +
