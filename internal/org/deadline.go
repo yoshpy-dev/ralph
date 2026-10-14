@@ -8,17 +8,17 @@ import (
 	"time"
 )
 
-// The inbox deadlines are the second net of the inbox's human path (FR-6 of
-// docs/specs/2026-10-07-org-multi-org-director.md). Escalate still sends
-// every item to the human at once (escalate.go); `ralph org watch --all`
-// runs SweepInboxDeadlines once per cycle and sends an item again when one
-// of its deadlines has passed:
+// The inbox deadlines are the human path of the items escalate leaves to
+// the director, and the second net of those it sends at once (FR-6 of
+// docs/specs/2026-10-07-org-multi-org-director.md; escalate.go says which
+// is which). `ralph org watch --all` runs SweepInboxDeadlines once per cycle
+// and sends an item when one of its deadlines has passed:
 //
 //   - ack deadline: the item is open, Config.Director.AckMinutes have passed
-//     since it was escalated, and it has no notified event yet (its
-//     escalate could not complete the notification). An item can go from
-//     open straight to resolved, so the rule reads the open state, not "not
-//     acked".
+//     since it was escalated, and it has no notified event yet (escalate
+//     left it to the director, or could not complete its notification). An
+//     item can go from open straight to resolved, so the rule reads the
+//     open state, not "not acked".
 //   - resolve deadline: the item is not resolved,
 //     Config.Director.ResolveMinutes have passed since it was escalated,
 //     and it has no notified event with InboxReasonResolveDeadline.
@@ -38,8 +38,9 @@ const (
 // InboxDeadlineDue returns the deadline item has passed at now and is not
 // yet sent for: InboxReasonResolveDeadline, InboxReasonAckDeadline, or ""
 // when nothing is due. It reads only the item's state, its escalated_at,
-// and its notified events, so stage 8a's escalate can use it as it is. The
-// rules, in this order:
+// and its notified events, never its Delivery, so an item escalate left to
+// the director (InboxDeliveryDeadline) is due exactly as one whose send at
+// once was not completed. The rules, in this order:
 //
 //   - a resolved item has nothing due;
 //   - the resolve deadline is due when more than resolveMinutes have passed

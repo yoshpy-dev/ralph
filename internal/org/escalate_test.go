@@ -20,7 +20,8 @@ import (
 
 // escalateFixture is an Org with an inbox and an escalations.jsonl in a
 // scratch state dir and a stub desktop notification that records its
-// messages and returns notifyErr.
+// messages and returns notifyErr. Its Config is the zero value, so the
+// director switch is off until useWatch turns it on.
 type escalateFixture struct {
 	o        *Org
 	stateDir string
@@ -31,6 +32,33 @@ type escalateFixture struct {
 	notifyErr   error
 	// onNotify, when set, runs inside the stub before it returns.
 	onNotify func()
+	// watchCalls counts the calls of the EscalateWatch useWatch sets.
+	watchCalls int
+}
+
+// useWatch turns the director switch on, with ack_minutes 10 and
+// resolve_minutes 60, and sets EscalateWatch to report l, counting its
+// calls in watchCalls.
+func (f *escalateFixture) useWatch(l WatchLiveness) {
+	f.o.Config.Director.Enabled = true
+	f.o.Config.Director.AckMinutes, f.o.Config.Director.ResolveMinutes = 10, 60
+	f.o.EscalateWatch = func() WatchLiveness {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.watchCalls++
+		return l
+	}
+}
+
+func (f *escalateFixture) watchCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.watchCalls
+}
+
+// acceptingWatch is the liveness of a long-running watch that accepts work.
+func acceptingWatch() WatchLiveness {
+	return WatchLiveness{State: WatchLivenessRunning, Mark: &WatchAlive{State: WatchAliveRunning, PID: 4242, TS: inboxTestNow}}
 }
 
 func newEscalateFixture(t *testing.T) *escalateFixture {
@@ -147,8 +175,8 @@ func TestEscalate_RefusalsWriteNothingAndNotifyNoOne(t *testing.T) {
 				if tc.wantSub != "" && !strings.Contains(res.Err.Error(), tc.wantSub) {
 					t.Errorf("error %q does not contain %q", res.Err, tc.wantSub)
 				}
-				if res.ID != "" || res.Type != "" || res.Recorded || res.Notified {
-					t.Errorf("a refusal reported %+v; want no ID or TYPE, not recorded, not notified", res)
+				if res.ID != "" || res.Type != "" || res.Recorded || res.Notified || res.Deferred {
+					t.Errorf("a refusal reported %+v; want no ID or TYPE, not recorded, not notified, not deferred", res)
 				}
 				if got := fileOrAbsent(t, inboxPath); got != inboxBefore {
 					t.Errorf("inbox.jsonl changed on a refusal:\nbefore: %s\nafter:  %s", inboxBefore, got)
@@ -218,7 +246,7 @@ func TestEscalate_RecordsSendsToTheHumanPathAndMarksNotified(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("escalations.jsonl has %d lines; want 2: %v", len(lines), lines)
 	}
-	want := map[string]any{"ts": inboxTestNow, "org_id": "org-a", "inbox_id": "e1", "subject": "leader", "reason": "inbox_no_director"}
+	want := map[string]any{"ts": inboxTestNow, "org_id": "org-a", "inbox_id": "e1", "subject": "leader", "reason": "inbox_director_disabled"}
 	for k, v := range want {
 		if lines[0][k] != v {
 			t.Errorf("escalations line 1 %s = %v; want %v (line %v)", k, lines[0][k], v, lines[0])
@@ -258,14 +286,14 @@ func TestEscalate_RecordsSendsToTheHumanPathAndMarksNotified(t *testing.T) {
 	}
 
 	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
-	if item.State != InboxStateOpen || !item.Notified || item.NotifiedAt != inboxTestNow {
-		t.Errorf("e1 = %+v; want open and notified at %s", item, inboxTestNow)
+	if item.State != InboxStateOpen || !item.Notified || item.NotifiedAt != inboxTestNow || item.Delivery != InboxDeliveryNow {
+		t.Errorf("e1 = %+v; want open, delivery now, and notified at %s", item, inboxTestNow)
 	}
 	if got := inboxEventKinds(item); !slices.Equal(got, []string{InboxEventEscalated, InboxEventNotified}) {
 		t.Fatalf("e1 events = %v", got)
 	}
-	if ev := item.Events[1]; ev.Reason != "inbox_no_director" || ev.Osascript != "ok" {
-		t.Errorf("notified event = %+v; want reason inbox_no_director, osascript ok", ev)
+	if ev := item.Events[1]; ev.Reason != "inbox_director_disabled" || ev.Osascript != "ok" {
+		t.Errorf("notified event = %+v; want reason inbox_director_disabled, osascript ok", ev)
 	}
 }
 
@@ -372,8 +400,11 @@ func TestEscalate_EscalationsUnwritable_ReportsTheIDAndInboxNotifyCompletesIt(t 
 		t.Errorf("e1 is not notified after inbox notify: %+v", inbox.Items[0])
 	}
 	lines := escalationLines(t, f.o.EscalationsPath)
-	if len(lines) != 1 || lines[0]["inbox_id"] != "e1" {
-		t.Errorf("escalations.jsonl = %v; want one line for e1", lines)
+	if len(lines) != 1 || lines[0]["inbox_id"] != "e1" || lines[0]["reason"] != InboxReasonManualNotify {
+		t.Errorf("escalations.jsonl = %v; want one inbox_manual_notify line for e1", lines)
+	}
+	if ev := inbox.Items[0].Events[len(inbox.Items[0].Events)-1]; ev.Event != InboxEventNotified || ev.Reason != InboxReasonManualNotify {
+		t.Errorf("last e1 event = %+v; want notified with inbox_manual_notify", ev)
 	}
 	if !strings.Contains(banner.String(), "item=e1") {
 		t.Errorf("inbox notify banner = %q", banner.String())
@@ -455,12 +486,259 @@ func TestEscalate_InboxUnwritable_AlertsTheHumanAndFails(t *testing.T) {
 		res := f.escalate("org-a", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck")
 		assertUnrecordedEscalation(t, f, res)
 	})
+	// An item that is not recorded cannot be left to the director: the human
+	// is told even while a watch accepts work.
+	t.Run("a watch that accepts work", func(t *testing.T) {
+		f := newEscalateFixture(t)
+		f.useWatch(acceptingWatch())
+		if err := os.Mkdir(f.o.Inbox.Path(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		res := f.escalate("org-a", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck")
+		assertUnrecordedEscalation(t, f, res)
+		if strings.Contains(f.banner.String(), "ORG ESCALATION RECORDED") {
+			t.Errorf("banner %q says the item was left to the director", f.banner.String())
+		}
+	})
+}
+
+// AC3, AC4: how Escalate delivers an item, by the director switch and by
+// what EscalateWatch reports. A watch that accepts work leaves the item to
+// the director and the ack deadline (recorded only, delivery deadline);
+// anything else sends it at once (delivery now) with a reason that says
+// why, and the switch off does not even probe. A director attached in the
+// same state dir changes none of it, and escalate does not write
+// director.jsonl.
+func TestEscalate_DeliveryFollowsTheDirectorSwitchAndTheWatch(t *testing.T) {
+	accepting := acceptingWatch()
+	once := acceptingWatch()
+	once.Mark.Once = true
+	notRunning := WatchLiveness{State: WatchLivenessNotRunning, Mark: acceptingWatch().Mark}
+	stale := WatchLiveness{State: WatchLivenessStale, Mark: acceptingWatch().Mark}
+	stopping := WatchLiveness{State: WatchLivenessStopping, Mark: &WatchAlive{State: WatchAliveStopping, PID: 4242, TS: inboxTestNow}}
+	noMark := WatchLiveness{State: WatchLivenessRunning}
+	cases := []struct {
+		name    string
+		enabled bool
+		watch   *WatchLiveness // nil leaves EscalateWatch nil
+		// wantReason is the reason of the send at once; "" means deferred.
+		wantReason string
+		wantProbes int
+	}{
+		{"disabled, a watch that accepts work", false, &accepting, InboxReasonDirectorDisabled, 0},
+		{"disabled, no EscalateWatch", false, nil, InboxReasonDirectorDisabled, 0},
+		{"enabled, no EscalateWatch", true, nil, InboxReasonNoWatch, 0},
+		{"enabled, not running", true, &notRunning, InboxReasonNoWatch, 1},
+		{"enabled, stale", true, &stale, InboxReasonNoWatch, 1},
+		{"enabled, stopping", true, &stopping, InboxReasonNoWatch, 1},
+		{"enabled, a --once run", true, &once, InboxReasonNoWatch, 1},
+		{"enabled, running with no mark", true, &noMark, InboxReasonNoWatch, 1},
+		{"enabled, a watch that accepts work", true, &accepting, "", 1},
+	}
+	for _, tc := range cases {
+		for _, attached := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, director attached %v", tc.name, attached), func(t *testing.T) {
+				f := newEscalateFixture(t)
+				if tc.watch != nil {
+					f.useWatch(*tc.watch)
+				} else {
+					f.o.Config.Director.AckMinutes, f.o.Config.Director.ResolveMinutes = 10, 60
+				}
+				f.o.Config.Director.Enabled = tc.enabled
+				directorPath := DirectorPathIn(f.stateDir)
+				if attached {
+					if _, _, err := NewDirectorStore(f.stateDir).Attach(DirectorAttach{Driver: "claude", User: "u", Cwd: f.stateDir}); err != nil {
+						t.Fatalf("attach a director: %v", err)
+					}
+				}
+				directorBefore := fileOrAbsent(t, directorPath)
+
+				const secret = "plan A or plan B?"
+				res := f.escalate("org-a", "TYPE: QUESTION\n\n"+secret)
+
+				if res.Err != nil || res.ID != "e1" || res.Type != "QUESTION" || !res.Recorded {
+					t.Fatalf("Escalate = %+v; want e1 (QUESTION) recorded with no error", res)
+				}
+				if got := f.watchCallCount(); got != tc.wantProbes {
+					t.Errorf("EscalateWatch called %d times; want %d", got, tc.wantProbes)
+				}
+				if got := fileOrAbsent(t, directorPath); got != directorBefore {
+					t.Errorf("escalate changed director.jsonl:\nbefore: %s\nafter:  %s", directorBefore, got)
+				}
+				item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
+				raw := fileOrAbsent(t, f.o.Inbox.Path())
+				banner := f.banner.String()
+				if strings.Count(banner, "\n") != 1 || strings.Contains(banner, secret) {
+					t.Errorf("banner = %q; want one line without the body", banner)
+				}
+
+				if tc.wantReason == "" {
+					if !res.Deferred || res.Notified {
+						t.Errorf("Escalate = %+v; want deferred, not notified", res)
+					}
+					if got := fileOrAbsent(t, f.o.EscalationsPath); got != "<absent>" {
+						t.Errorf("escalations.jsonl = %q; want absent for a deferred item", got)
+					}
+					if item.Delivery != InboxDeliveryDeadline || item.Notified || !slices.Equal(inboxEventKinds(item), []string{InboxEventEscalated}) {
+						t.Errorf("e1 = %+v; want delivery deadline, not notified, the escalated event only", item)
+					}
+					if !strings.Contains(raw, `"delivery":"deadline"`) {
+						t.Errorf("inbox.jsonl = %s; want the escalated event to carry delivery deadline", raw)
+					}
+					if calls := f.notifications(); len(calls) != 0 {
+						t.Errorf("desktop notifications = %q; want none for a deferred item", calls)
+					}
+					if !strings.HasPrefix(banner, "ORG ESCALATION RECORDED: org=org-a item=e1 type=QUESTION -- ") {
+						t.Errorf("banner = %q; want the recorded-only banner", banner)
+					}
+					return
+				}
+				if res.Deferred || !res.Notified {
+					t.Errorf("Escalate = %+v; want notified, not deferred", res)
+				}
+				if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + tc.wantReason}; !slices.Equal(got, want) {
+					t.Errorf("escalations.jsonl = %v; want %v", got, want)
+				}
+				if item.Delivery != InboxDeliveryNow || !item.Notified || len(item.Events) != 2 || item.Events[1].Reason != tc.wantReason {
+					t.Errorf("e1 = %+v; want delivery now, notified with %s", item, tc.wantReason)
+				}
+				if !strings.Contains(raw, `"delivery":"now"`) {
+					t.Errorf("inbox.jsonl = %s; want the escalated event to carry delivery now", raw)
+				}
+				if calls := f.notifications(); len(calls) != 1 {
+					t.Errorf("desktop notifications = %q; want one", calls)
+				}
+				if !strings.HasPrefix(banner, "ORG ESCALATION: org=org-a item=e1 type=QUESTION -- ") {
+					t.Errorf("banner = %q; want the escalation banner", banner)
+				}
+			})
+		}
+	}
+}
+
+// AC3: the recorded-only banner names the inbox, the ack deadline, and the
+// `inbox show` command, which repeats Org.InboxHintStateDir.
+func TestEscalate_DeferredBanner(t *testing.T) {
+	for _, hint := range []string{"", "/repo/.harness/state/org"} {
+		t.Run("hint="+hint, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			f.useWatch(acceptingWatch())
+			f.o.InboxHintStateDir = hint
+			if res := f.escalate("org-a", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck"); res.Err != nil || !res.Deferred {
+				t.Fatalf("Escalate = %+v; want deferred", res)
+			}
+			want := "ORG ESCALATION RECORDED: org=org-a item=e1 type=BLOCKED -- left in " + f.o.Inbox.Path() + " for the director; " +
+				"if it is still open after the ack deadline (10m), ralph org watch --all sends it to the human; read it with: " +
+				InboxCommand("show", "e1", hint) + "\n"
+			if got := f.banner.String(); got != want {
+				t.Errorf("banner = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+// A refused message calls no EscalateWatch.
+func TestEscalate_RefusalProbesNoWatch(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.useWatch(acceptingWatch())
+	for _, text := range []string{"TYPE: TASK\nTASK_ID: org-a\n\ndo it", "TYPE: BLOCKED\n\nno task id", "no header"} {
+		if res := f.escalate("org-a", text); res.Err == nil {
+			t.Fatalf("Escalate(%q) = %+v; want a refusal", text, res)
+		}
+	}
+	if res := f.escalate("Org A", "TYPE: QUESTION\n\nwhich?"); res.Err == nil {
+		t.Fatalf("Escalate with a bad org_id = %+v; want a refusal", res)
+	}
+	if got := f.watchCallCount(); got != 0 {
+		t.Errorf("EscalateWatch called %d times for refused messages; want 0", got)
+	}
+	if fileOrAbsent(t, f.o.Inbox.Path()) != "<absent>" || f.banner.Len() != 0 {
+		t.Errorf("a refusal wrote the inbox or a banner: %q", f.banner.String())
+	}
+}
+
+// AC4: a send at once whose escalations.jsonl line cannot be written is
+// handled the same way for both reasons: the ID is reported with `ralph org
+// inbox notify <id>`, the item stays unnotified, and inbox notify completes
+// it with inbox_manual_notify.
+func TestEscalate_SendAtOnceFailureIsHandledAlikeForEitherReason(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(f *escalateFixture)
+		reason string
+	}{
+		{"director disabled", func(*escalateFixture) {}, InboxReasonDirectorDisabled},
+		{"no watch", func(f *escalateFixture) { f.useWatch(WatchLiveness{State: WatchLivenessNotRunning}) }, InboxReasonNoWatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			tc.setup(f)
+			if err := os.Mkdir(f.o.EscalationsPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			res := f.escalate("org-a", "TYPE: QUESTION\n\nwhich?")
+			if res.Err == nil || res.ID != "e1" || !res.Recorded || res.Notified || res.Deferred {
+				t.Fatalf("Escalate = %+v; want e1 recorded, not notified, not deferred, with an error", res)
+			}
+			for _, sub := range []string{"recorded as e1", "notification was not completed", "ralph org inbox notify e1", "not escalate"} {
+				if !strings.Contains(res.Err.Error(), sub) {
+					t.Errorf("error %q does not contain %q", res.Err, sub)
+				}
+			}
+			if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); item.Notified || item.Delivery != InboxDeliveryNow {
+				t.Fatalf("e1 = %+v; want delivery now, not notified", item)
+			}
+			if !strings.Contains(f.banner.String(), "ORG ESCALATION: ") {
+				t.Errorf("banner = %q; want the escalation banner although the line was not written", f.banner.String())
+			}
+
+			if err := os.Remove(f.o.EscalationsPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.o.NotifyInboxItem("e1", &bytes.Buffer{}); err != nil {
+				t.Fatalf("NotifyInboxItem: %v", err)
+			}
+			if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonManualNotify}; !slices.Equal(got, want) {
+				t.Errorf("escalations.jsonl = %v; want %v", got, want)
+			}
+			if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); !item.Notified {
+				t.Errorf("e1 = %+v; want notified after inbox notify", item)
+			}
+		})
+	}
+}
+
+// AC4: inbox notify sends a deferred item to the human now, with
+// inbox_manual_notify; the item keeps its delivery.
+func TestNotifyInboxItem_SendsADeferredItemNow(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.useWatch(acceptingWatch())
+	if res := f.escalate("org-a", "TYPE: QUESTION\n\nwhich?"); res.Err != nil || !res.Deferred {
+		t.Fatalf("Escalate = %+v; want deferred", res)
+	}
+	f.banner.Reset()
+	if err := f.o.NotifyInboxItem("e1", &f.banner); err != nil {
+		t.Fatalf("NotifyInboxItem on a deferred item: %v", err)
+	}
+	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonManualNotify}; !slices.Equal(got, want) {
+		t.Errorf("escalations.jsonl = %v; want %v", got, want)
+	}
+	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
+	if !item.Notified || item.Delivery != InboxDeliveryDeadline || item.State != InboxStateOpen {
+		t.Errorf("e1 = %+v; want open, notified, delivery still deadline", item)
+	}
+	if ev := item.Events[len(item.Events)-1]; ev.Reason != InboxReasonManualNotify {
+		t.Errorf("notified event = %+v; want inbox_manual_notify", ev)
+	}
+	if calls := f.notifications(); len(calls) != 1 || !strings.HasPrefix(f.banner.String(), "ORG ESCALATION: org=org-a item=e1 ") {
+		t.Errorf("notifications %q, banner %q; want one notification and the escalation banner", calls, f.banner.String())
+	}
 }
 
 func assertUnrecordedEscalation(t *testing.T, f *escalateFixture, res EscalateResult) {
 	t.Helper()
-	if res.Err == nil || res.ID != "" || res.Recorded || res.Notified {
-		t.Fatalf("Escalate = %+v; want an error, no ID, not recorded", res)
+	if res.Err == nil || res.ID != "" || res.Recorded || res.Notified || res.Deferred {
+		t.Fatalf("Escalate = %+v; want an error, no ID, not recorded, not deferred", res)
 	}
 	if !strings.Contains(res.Err.Error(), "could not be recorded") {
 		t.Errorf("error %q does not say the item was not recorded", res.Err)
@@ -543,8 +821,11 @@ func TestNotifyInboxItem_SendsAnAckedItemAgain(t *testing.T) {
 	if got := inboxEventKinds(item); !slices.Equal(got, []string{InboxEventEscalated, InboxEventNotified, InboxEventAcked, InboxEventNotified}) {
 		t.Errorf("e1 events = %v", got)
 	}
-	if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 2 {
-		t.Errorf("escalations.jsonl has %d lines; want 2 (escalate, inbox notify)", len(lines))
+	if got, want := []string{item.Events[1].Reason, item.Events[3].Reason}, []string{InboxReasonDirectorDisabled, InboxReasonManualNotify}; !slices.Equal(got, want) {
+		t.Errorf("notified reasons = %v; want %v (escalate, inbox notify)", got, want)
+	}
+	if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 2 || lines[1]["reason"] != InboxReasonManualNotify {
+		t.Errorf("escalations.jsonl = %v; want 2 lines (escalate, inbox notify with inbox_manual_notify)", lines)
 	}
 }
 
@@ -728,11 +1009,11 @@ func TestEscalationRecord_WatchAndInboxLinesKeepTheirOwnID(t *testing.T) {
 	if want := `{"ts":"2026-10-10T12:00:00Z","org_id":"org-a","alert_id":"org-a/seat-1/stall@1","subject":"seat-1","reason":"deadman_timeout"}`; string(watchLine) != want {
 		t.Errorf("watch line = %s; want %s", watchLine, want)
 	}
-	inboxLine, err := json.Marshal(escalationRecord{TS: inboxTestNow, OrgID: "org-a", InboxID: "e1", Subject: "leader", Reason: "inbox_no_director"})
+	inboxLine, err := json.Marshal(escalationRecord{TS: inboxTestNow, OrgID: "org-a", InboxID: "e1", Subject: "leader", Reason: InboxReasonNoWatch})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"ts":"2026-10-10T12:00:00Z","org_id":"org-a","inbox_id":"e1","subject":"leader","reason":"inbox_no_director"}`; string(inboxLine) != want {
+	if want := `{"ts":"2026-10-10T12:00:00Z","org_id":"org-a","inbox_id":"e1","subject":"leader","reason":"inbox_no_watch"}`; string(inboxLine) != want {
 		t.Errorf("inbox line = %s; want %s", inboxLine, want)
 	}
 }

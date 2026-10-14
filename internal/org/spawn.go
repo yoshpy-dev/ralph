@@ -265,6 +265,15 @@ type Org struct {
 	// for spawn, start, and send only, so the other verbs work with no watch
 	// running.
 	WatchGate func() error
+	// EscalateWatch is what Escalate (escalate.go) probes, when
+	// Config.Director.Enabled is set, to decide whether a cross-org watch
+	// will check the ack deadline of a new item: when it reports a watch
+	// that accepts work (WatchAcceptsWork), the item is only recorded and
+	// left to the director and that deadline; otherwise it is sent to the
+	// human at once. nil (the field's default) means no watch, so every
+	// item is sent at once. The CLI sets it to ProbeWatch on the ledger's
+	// state dir for `ralph org escalate` only.
+	EscalateWatch func() WatchLiveness
 }
 
 func (o *Org) now() string {

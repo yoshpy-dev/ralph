@@ -41,6 +41,18 @@ const (
 	InboxStateResolved = "resolved"
 )
 
+// Deliveries of an escalated item: the "delivery" field of its escalated
+// event (plan 2026-10-14-org-director-attach, D9). InboxDeliveryNow is an
+// item escalate also sent to the human path at once; InboxDeliveryDeadline
+// is one it only recorded, for the director and for the ack deadline of
+// `ralph org watch --all`. An escalated event written before stage 8a has
+// no delivery and folds as InboxDeliveryNow. The inbox deadlines
+// (InboxDeadlineDue) do not read it.
+const (
+	InboxDeliveryNow      = "now"
+	InboxDeliveryDeadline = "deadline"
+)
+
 // InboxNoteMaxRunes is the longest resolve note ValidateInboxNote accepts,
 // in characters (runes).
 const InboxNoteMaxRunes = 500
@@ -65,10 +77,11 @@ var inboxRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"e([0-9]+)`)
 
 // InboxEvent is one line of inbox.jsonl. Every line carries ts, id, and
 // event; the other fields belong to one kind each. escalated carries
-// org_id, type, task_id (when the message has one), and body; notified
-// carries reason and osascript (the result of the macOS notification, e.g.
-// "ok", "failed: ...", "skipped"); resolved carries note; acked carries
-// nothing more.
+// org_id, type, task_id (when the message has one), body, and delivery (one
+// of the InboxDelivery* constants; lines written before stage 8a have none);
+// notified carries reason and osascript (the result of the macOS
+// notification, e.g. "ok", "failed: ...", "skipped"); resolved carries note;
+// acked carries nothing more.
 type InboxEvent struct {
 	TS        string `json:"ts"`    // UTC RFC3339
 	ID        string `json:"id"`    // e<N>
@@ -77,31 +90,37 @@ type InboxEvent struct {
 	Type      string `json:"type,omitempty"`
 	TaskID    string `json:"task_id,omitempty"`
 	Body      string `json:"body,omitempty"`
+	Delivery  string `json:"delivery,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	Osascript string `json:"osascript,omitempty"`
 	Note      string `json:"note,omitempty"`
 }
 
 // InboxEscalation is what Escalate records: the org that raised the item,
-// the message's TYPE and TASK_ID (empty when it has none), and the whole
-// message text as Body. Escalate does not check the message against
-// internal/org/protocol; its caller does.
+// the message's TYPE and TASK_ID (empty when it has none), the whole
+// message text as Body, and how the caller delivers the item as Delivery
+// (one of the InboxDelivery* constants; empty means InboxDeliveryNow).
+// Escalate does not check the message against internal/org/protocol; its
+// caller does.
 type InboxEscalation struct {
-	OrgID  string
-	Type   string
-	TaskID string
-	Body   string
+	OrgID    string
+	Type     string
+	TaskID   string
+	Body     string
+	Delivery string
 }
 
 // InboxItem is one item folded from its events. Events holds the events
 // that were applied to it, in file order, for `ralph org inbox show`.
-// NotifiedAt is the time of the latest notified event.
+// Delivery is its escalated event's delivery (InboxDeliveryNow when that
+// event has none). NotifiedAt is the time of the latest notified event.
 type InboxItem struct {
 	ID          string       `json:"id"`
 	OrgID       string       `json:"org_id"`
 	Type        string       `json:"type"`
 	TaskID      string       `json:"task_id,omitempty"`
 	Body        string       `json:"body"`
+	Delivery    string       `json:"delivery"`
 	State       string       `json:"state"`
 	EscalatedAt string       `json:"escalated_at"`
 	AckedAt     string       `json:"acked_at,omitempty"`
@@ -184,12 +203,23 @@ func (s *InboxStore) Read() (InboxReadResult, error) {
 
 // Escalate records a new item: under the inbox lock it allocates the next
 // ID (one more than the largest e<N> anywhere in the file, damaged lines
-// included) and appends the escalated event. It returns the new ID.
+// included) and appends the escalated event, with in.Delivery as its
+// delivery (InboxDeliveryNow when in.Delivery is empty). A delivery that is
+// not one of the InboxDelivery* constants is refused before anything is
+// read. It returns the new ID.
 func (s *InboxStore) Escalate(in InboxEscalation) (string, error) {
 	for _, field := range []struct{ name, value string }{{"org_id", in.OrgID}, {"type", in.Type}, {"body", in.Body}} {
 		if strings.TrimSpace(field.value) == "" {
 			return "", fmt.Errorf("org: inbox: escalate needs a non-empty %s", field.name)
 		}
+	}
+	delivery := in.Delivery
+	switch delivery {
+	case "":
+		delivery = InboxDeliveryNow
+	case InboxDeliveryNow, InboxDeliveryDeadline:
+	default:
+		return "", fmt.Errorf("org: inbox: escalate: delivery %q is not %s or %s", in.Delivery, InboxDeliveryNow, InboxDeliveryDeadline)
 	}
 	var id string
 	err := s.withLock(func() error {
@@ -203,7 +233,7 @@ func (s *InboxStore) Escalate(in InboxEscalation) (string, error) {
 		}
 		ev := InboxEvent{
 			TS: s.now(), ID: next, Event: InboxEventEscalated,
-			OrgID: in.OrgID, Type: in.Type, TaskID: in.TaskID, Body: in.Body,
+			OrgID: in.OrgID, Type: in.Type, TaskID: in.TaskID, Body: in.Body, Delivery: delivery,
 		}
 		if err := s.appendLocked(raw, ev); err != nil {
 			return err
@@ -429,8 +459,12 @@ func (f *inboxFold) apply(ev InboxEvent) {
 			f.ignored++
 			return
 		}
+		delivery := ev.Delivery
+		if delivery == "" {
+			delivery = InboxDeliveryNow
+		}
 		f.items[ev.ID] = &InboxItem{
-			ID: ev.ID, OrgID: ev.OrgID, Type: ev.Type, TaskID: ev.TaskID, Body: ev.Body,
+			ID: ev.ID, OrgID: ev.OrgID, Type: ev.Type, TaskID: ev.TaskID, Body: ev.Body, Delivery: delivery,
 			State: InboxStateOpen, EscalatedAt: ev.TS, Events: []InboxEvent{ev},
 		}
 		return

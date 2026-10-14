@@ -16,14 +16,19 @@ import (
 )
 
 // Escalate, NotifyInboxItem, and WaitInbox are the org layer of `ralph org
-// escalate`, `ralph org inbox notify`, and `ralph org wait --inbox` (FR-5 of
-// docs/specs/2026-10-07-org-multi-org-director.md). There is no way to
-// register a director yet, so every escalated item is also sent at once to
-// the human path, the way the spec treats an org whose director is
-// disabled: one line in escalations.jsonl, a banner on the caller's stderr,
-// and a best-effort desktop notification. The notified event in the inbox
-// records that the item was sent, so the ack deadline that `ralph org watch
-// --all` checks (deadline.go) does not send it again.
+// escalate`, `ralph org inbox notify`, and `ralph org wait --inbox` (FR-5 and
+// FR-9 of docs/specs/2026-10-07-org-multi-org-director.md). With the
+// director switch on (Config.Director.Enabled) and a cross-org watch that
+// accepts work (Org.EscalateWatch), an escalated item is only recorded, with
+// delivery InboxDeliveryDeadline: the director reads it from the inbox, and
+// when it is still open after the ack deadline, `ralph org watch --all`
+// sends it to the human (deadline.go). Otherwise it is also sent to the
+// human path at once (delivery InboxDeliveryNow): one line in
+// escalations.jsonl, a banner on the caller's stderr, and a best-effort
+// desktop notification. The notified event in the inbox records that the
+// item was sent, so the ack deadline does not send it again. Whether a
+// director is registered (director.go) changes none of this (plan
+// 2026-10-14-org-director-attach, D2).
 
 // escalateTypes are the TYPEs Escalate accepts: a leader raises an item
 // when it needs a decision (QUESTION), cannot proceed (BLOCKED), or has
@@ -31,14 +36,24 @@ import (
 // TASK_ID; protocol.Validate enforces that.
 var escalateTypes = []string{protocol.TypeQuestion, protocol.TypeBlocked, protocol.TypeResult}
 
-// Reasons of the human-path records. inboxReasonNoDirector is written to
-// the escalations.jsonl line and the notified event of an item escalate or
-// inbox notify sent to the human path; inboxReasonNotRecorded to the
+// Reasons of the human-path records, written to the escalations.jsonl line
+// and the notified event of a send. Escalate writes
+// InboxReasonDirectorDisabled when Config.Director.Enabled is false and
+// InboxReasonNoWatch when it is true but no cross-org watch accepts work, so
+// no one would check the ack deadline; NotifyInboxItem writes
+// InboxReasonManualNotify. inboxReasonNotRecorded goes only on the
 // best-effort escalations.jsonl line of an escalate the inbox could not
 // record (it has no inbox_id). The deadline reasons are in deadline.go.
+//
+// Ledgers written before stage 8a hold inbox_no_director on the notified
+// events and the escalations.jsonl lines of escalate and inbox notify.
+// Readers treat every notified reason alike (InboxItem.Notified); the only
+// reason looked up is InboxReasonResolveDeadline, by inboxNotifiedFor.
 const (
-	inboxReasonNoDirector  = "inbox_no_director"
-	inboxReasonNotRecorded = "inbox_not_recorded"
+	InboxReasonDirectorDisabled = "inbox_director_disabled"
+	InboxReasonNoWatch          = "inbox_no_watch"
+	InboxReasonManualNotify     = "inbox_manual_notify"
+	inboxReasonNotRecorded      = "inbox_not_recorded"
 )
 
 // Osascript results recorded in a notified event besides "failed: <err>".
@@ -115,20 +130,43 @@ type EscalateResult struct {
 	// Notified reports that the human path was completed: the
 	// escalations.jsonl line and the notified event were both written. The
 	// desktop notification's own result does not count; it is recorded in
-	// the notified event.
+	// the notified event. It is false when Deferred.
 	Notified bool
+	// Deferred reports that the item was recorded only, with delivery
+	// InboxDeliveryDeadline, and left to the director and to the ack
+	// deadline of `ralph org watch --all`: no escalations.jsonl line, no
+	// notified event, and no desktop notification were written or sent.
+	// Err is nil then.
+	Deferred bool
 	Err      error
 }
 
-// Escalate records p.Text as a new inbox item and sends it to the human
-// path. A refused message (an org_id that is not an identifier, a message
-// protocol.Validate rejects, a TYPE other than QUESTION, BLOCKED, or
-// RESULT) writes nothing and notifies no one. When the inbox cannot record
-// the item, Escalate still writes the banner (marked not recorded) and
-// sends the desktop notification, so the item reaches the human even from
-// a broken ledger, then returns an error. When the item is recorded but the
-// human path is not completed, the error names the ID and `ralph org inbox
-// notify <id>`, not another escalate, which would record a second item.
+// Escalate records p.Text as a new inbox item. A refused message (an org_id
+// that is not an identifier, a message protocol.Validate rejects, a TYPE
+// other than QUESTION, BLOCKED, or RESULT) writes nothing, notifies no one,
+// and calls no EscalateWatch. Before it records the item, Escalate decides
+// how the item reaches a person (escalateDelivery):
+//
+//   - Config.Director.Enabled is false: the item is also sent to the human
+//     path at once, with InboxReasonDirectorDisabled. EscalateWatch is not
+//     called.
+//   - Enabled, and EscalateWatch is nil or reports a watch that does not
+//     accept work (WatchAcceptsWork: not running, stale, stopping, or a
+//     --once run): no one would check the ack deadline, so the item is sent
+//     at once, with InboxReasonNoWatch. A stale watch is not waited for; the
+//     human gets the item at once.
+//   - Enabled, and the watch accepts work: the item is only recorded, with
+//     delivery InboxDeliveryDeadline, and one banner line on p.Banner says
+//     that it was left to the director and that `ralph org watch --all`
+//     sends it to the human after the ack deadline. The result is Deferred.
+//
+// Whether a director is registered does not change these cases (FR-9 of
+// the spec). When the inbox cannot record the item, Escalate still writes
+// the banner (marked not recorded) and sends the desktop notification, so
+// the item reaches the human even from a broken ledger, then returns an
+// error. When the item is recorded but a send at once is not completed, the
+// error names the ID and `ralph org inbox notify <id>`, not another
+// escalate, which would record a second item.
 func (o *Org) Escalate(p EscalateParams) EscalateResult {
 	m, err := validateEscalation(p.OrgID, p.Text)
 	if err != nil {
@@ -138,13 +176,19 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		return EscalateResult{Err: errors.New("org: escalate: no inbox store is configured")}
 	}
 	banner := bannerOrStderr(p.Banner)
-	id, err := o.Inbox.Escalate(InboxEscalation{OrgID: p.OrgID, Type: m.Type, TaskID: m.TaskID, Body: p.Text})
+	delivery, reason := o.escalateDelivery()
+	id, err := o.Inbox.Escalate(InboxEscalation{OrgID: p.OrgID, Type: m.Type, TaskID: m.TaskID, Body: p.Text, Delivery: delivery})
 	if err != nil {
 		o.alertUnrecordedEscalation(p.OrgID, m.Type, err, banner)
 		return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded in the inbox: %w", err)}
 	}
 	res := EscalateResult{ID: id, Type: m.Type, Recorded: true}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, inboxReasonNoDirector, banner); err != nil {
+	if delivery == InboxDeliveryDeadline {
+		_, _ = fmt.Fprintln(banner, o.inboxDeferredBanner(p.OrgID, id, m.Type))
+		res.Deferred = true
+		return res
+	}
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, reason, banner); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
@@ -172,12 +216,15 @@ func (o *Org) EscalateNotRecorded(p EscalateParams, cause error) EscalateResult 
 	return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded: %w", cause)}
 }
 
-// NotifyInboxItem sends inbox item id to the human path again and records
-// another notified event (`ralph org inbox notify`), for an item whose
-// escalate could not complete its notification. The commands the banner and
-// the error name repeat Org.InboxHintStateDir, as Escalate's do. It returns
-// ErrInboxUnknownID (wrapped) for an unknown ID and refuses a resolved item,
-// which has nothing left to notify.
+// NotifyInboxItem sends inbox item id to the human path now and records
+// another notified event, with InboxReasonManualNotify (`ralph org inbox
+// notify`): for an item whose escalate could not complete its
+// notification, and for one escalate left to the director and the ack
+// deadline (delivery InboxDeliveryDeadline) that should reach the human
+// without waiting. The commands the banner and the error name repeat
+// Org.InboxHintStateDir, as Escalate's do. It returns ErrInboxUnknownID
+// (wrapped) for an unknown ID and refuses a resolved item, which has
+// nothing left to notify.
 func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if o.Inbox == nil {
 		return errors.New("org: inbox notify: no inbox store is configured")
@@ -194,7 +241,7 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, inboxReasonNoDirector, bannerOrStderr(banner)); err != nil {
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, InboxReasonManualNotify, bannerOrStderr(banner)); err != nil {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
@@ -250,6 +297,32 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// escalateDelivery decides how Escalate delivers a new item (the cases in
+// Escalate's doc): InboxDeliveryDeadline with no reason when
+// Config.Director.Enabled is set and EscalateWatch reports a watch that
+// accepts work, and InboxDeliveryNow with the reason of the send at once
+// otherwise. EscalateWatch is called only when Enabled is set.
+func (o *Org) escalateDelivery() (delivery, reason string) {
+	if !o.Config.Director.Enabled {
+		return InboxDeliveryNow, InboxReasonDirectorDisabled
+	}
+	if o.EscalateWatch == nil || !WatchAcceptsWork(o.EscalateWatch()) {
+		return InboxDeliveryNow, InboxReasonNoWatch
+	}
+	return InboxDeliveryDeadline, ""
+}
+
+// inboxDeferredBanner is the banner line (without its newline) of an item
+// Escalate left to the director and the ack deadline. orgID and typ have
+// passed validateEscalation; they are escaped like the other banners'. The
+// `inbox show` command repeats Org.InboxHintStateDir.
+func (o *Org) inboxDeferredBanner(orgID, id, typ string) string {
+	return fmt.Sprintf("ORG ESCALATION RECORDED: org=%s item=%s type=%s -- left in %s for the director; "+
+		"if it is still open after the ack deadline (%dm), ralph org watch --all sends it to the human; read it with: %s",
+		PrintableInboxText(orgID, false), id, PrintableInboxText(typ, false), o.Inbox.Path(),
+		o.Config.Director.AckMinutes, InboxCommand("show", id, o.InboxHintStateDir))
 }
 
 // validateEscalation checks orgID and text before Escalate writes anything

@@ -163,24 +163,68 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
 // --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
 // another directory, or any other source, cfg is returned unchanged. No
-// other setting is read from the main worktree. A main worktree ralph.toml
-// that fails to load is an error, not a fallback.
+// other setting is taken from the main worktree here; escalate takes
+// Director.Enabled by the same rule (withMainWorktreeDirectorEnabled). A
+// main worktree ralph.toml that fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
-	if configPath != "" {
-		return cfg, nil
-	}
-	root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource)
-	if !ok {
-		return cfg, nil
-	}
-	path := filepath.Join(root, "ralph.toml")
-	mainCfg, err := config.Load(path)
+	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
 		return config.OrgConfig{}, fmt.Errorf("org: load max_orgs, max_total_seats and [org.approval].mode from the main worktree's %s: %w", path, err)
 	}
-	cfg.MaxOrgs, cfg.MaxTotalSeats = mainCfg.Org.MaxOrgs, mainCfg.Org.MaxTotalSeats
-	cfg.Approval = mainCfg.Org.Approval
+	if !ok {
+		return cfg, nil
+	}
+	cfg.MaxOrgs, cfg.MaxTotalSeats = mainCfg.MaxOrgs, mainCfg.MaxTotalSeats
+	cfg.Approval = mainCfg.Approval
 	return cfg, nil
+}
+
+// withMainWorktreeDirectorEnabled returns cfg with Director.Enabled (the
+// director switch, [org.director].enabled) taken from <main worktree
+// root>/ralph.toml, by the rule withMainWorktreeOrgLimits follows: only when
+// configPath is empty and the ledger is the main worktree's
+// (org.LedgerMainWorktreeRoot), with the built-in default (true) when that
+// file does not exist. A feature org's leader escalates from its feature
+// worktree, whose ralph.toml it can change, so that copy does not choose
+// whether its items are left to the director (plan
+// 2026-10-14-org-director-attach, D6). With --config, or a ledger that is
+// not the main worktree's, cfg is returned unchanged. No other setting is
+// taken. A main worktree ralph.toml that fails to load is an error, which
+// `ralph org escalate` handles like a ralph.toml that does not load. A verb
+// that reports or acts on the switch reads it through this function, so it
+// sees the value escalate goes by.
+func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
+	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled from the main worktree's %s: %w", path, err)
+	}
+	if !ok {
+		return cfg, nil
+	}
+	cfg.Director.Enabled = mainCfg.Director.Enabled
+	return cfg, nil
+}
+
+// loadMainWorktreeOrgConfig loads the [org] config of <main worktree
+// root>/ralph.toml (config.Load: built-in defaults when the file does not
+// exist) for withMainWorktreeOrgLimits and withMainWorktreeDirectorEnabled.
+// ok is false, with nothing loaded, when configPath is set or the ledger is
+// not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
+// loaded, also when err (the load error, unwrapped) is set.
+func loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource string) (mainCfg config.OrgConfig, path string, ok bool, err error) {
+	if configPath != "" {
+		return config.OrgConfig{}, "", false, nil
+	}
+	root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource)
+	if !ok {
+		return config.OrgConfig{}, "", false, nil
+	}
+	path = filepath.Join(root, "ralph.toml")
+	cfg, err := config.Load(path)
+	if err != nil {
+		return config.OrgConfig{}, path, true, err
+	}
+	return cfg.Org, path, true, nil
 }
 
 // newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
@@ -345,6 +389,30 @@ var orgWatchGateOverride func() error
 // production, which means org.DefaultWatchGateSettle (2 s); TestMain
 // shortens it so a test of a stale refusal does not wait 2 s.
 var orgWatchGateSettleOverride time.Duration
+
+// wireOrgEscalateWatch sets rt.EscalateWatch for `ralph org escalate`: a
+// probe (org.ProbeWatch at the time of the call) of the cross-org watch on
+// the ledger at resolvedStateDir, judging a liveness mark that carries no
+// deadman_minutes by rt.Config's. Unlike the watch gate it does not wait out
+// a stale watch: escalate then sends the item to the human at once.
+func wireOrgEscalateWatch(rt *org.Org, resolvedStateDir string) {
+	if orgEscalateWatchOverride != nil {
+		rt.EscalateWatch = orgEscalateWatchOverride
+		return
+	}
+	deadmanMinutes := rt.Config.DeadmanMinutes
+	rt.EscalateWatch = func() org.WatchLiveness {
+		return org.ProbeWatch(resolvedStateDir, time.Now(), deadmanMinutes)
+	}
+}
+
+// orgEscalateWatchOverride, when not nil, is the Org.EscalateWatch that
+// wireOrgEscalateWatch sets in place of the probe. nil in production. TestMain
+// leaves it nil, so a test's escalate probes its own ledger, where no watch
+// runs, and sends the item at once (inbox_no_watch) as before the director
+// switch; a test of the recorded-only path sets it, or holds watch.lock with
+// a running mark.
+var orgEscalateWatchOverride func() org.WatchLiveness
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed
 // in send's post-failure notes and its unconfirmed-submit warning (AR-2,
