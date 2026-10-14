@@ -891,8 +891,8 @@ ralph org merge-order --all --json
 - その設定があるかは、`ralph doctor` の `Merge guarantee` で確かめる。
   doctor は origin の repository の既定のブランチの保護(ruleset と、classic
   の保護ブランチ)を `gh` で読み、種類を 3 つに分ける。`github_protection`
-  (最新でないと merge できない設定か merge queue があり、必須の検査が 1 件
-  以上ある)は `pass`、`pr_checks_only`(保証は PR を作った時点の gate と
+  (最新でないと merge できない設定か ruleset の merge queue があり、必須の
+  検査が 1 件以上ある)は `pass`、`pr_checks_only`(保証は PR を作った時点の gate と
   CI だけ)は `warn`、`unknown`(読めない、決められない)は `info` で、
   doctor の終了コードは変えない。台帳のディレクトリがあれば、結果を
   `unknown` でも台帳の `merge-guarantee.json` に書く。merge-order の
