@@ -47,7 +47,11 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"is not from a fork. gh's PRs are used only when their repository is\n" +
 			"origin's (git remote get-url origin): when gh reads another one, such\n" +
 			"as upstream in a fork's checkout, no PR is used and a note says to run\n" +
-			"gh repo set-default.\n" +
+			"gh repo set-default. The check has three gaps: when origin's URL names\n" +
+			"no owner/repo (a local path, file://, a scheme such as git+ssh://),\n" +
+			"gh's PRs are used as they are; the host is not compared; and the check\n" +
+			"runs only on a PR gh returns, so no note appears when the repository\n" +
+			"gh reads has no PR for the branch.\n" +
 			"\n" +
 			"A branch gets the first of these classes that applies:\n" +
 			"  merged, closed  its PR is merged, or closed without a merge (listed\n" +

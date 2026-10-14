@@ -32,9 +32,12 @@ import (
 // there (C5). gh picks the repository it reads itself (`gh repo set-default`,
 // else a remote by its name, upstream before origin), so a PR is used only
 // when its url names origin's owner/repo, which one `git remote get-url
-// origin` reads the first time gh returns a PR. All three commands run
-// through MergeOrderExec (C6). Evidence that cannot be read never makes a
-// branch ready (C8).
+// origin` reads the first time gh returns a PR. The check has three gaps
+// (mergeOriginRepo.check): an origin URL with no owner/repo (a local path,
+// file://, a scheme it does not read) skips it, hosts are not compared, and
+// it runs only on a PR gh returns, so another repository with no PR for the
+// branch gives no note. All three commands run through MergeOrderExec (C6).
+// Evidence that cannot be read never makes a branch ready (C8).
 //
 // MergeOrder writes nothing, to the ledger or anywhere else, takes no lock,
 // and never fetches. Neither the watch gate (watchgate.go) nor the approval

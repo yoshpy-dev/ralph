@@ -21,17 +21,25 @@ import (
 // Tests for `ralph org merge-order` (plan
 // docs/plans/active/2026-10-14-org-merge-order.md, the CLI half of AC1, AC2,
 // AC5 to AC9 and AC11, and the Integration line of its test plan). The org
-// layer's classes, order and PR choice are covered by
-// internal/org/mergeorder_test.go with a fake seam; these run the command
-// with the real git against a bare origin in a temp dir, and with a fake gh
-// or none, and check what it prints, its exit (the error Execute returns),
-// the ledger it picks, and that it writes nothing.
+// layer's classes, order, PR choice, repository check of gh's PRs (C5) and
+// grouping of gh failures are covered by internal/org/mergeorder_test.go
+// with a fake seam; these run the command with the real git against a bare
+// origin in a temp dir, and with a fake gh or none, and check what it prints
+// (the notes for a gh that fails and for a PR from another repository than
+// origin's included), its exit (the error Execute returns), the ledger it
+// picks, and that it writes nothing.
 //
 // Every test sets PATH itself to a temp bin dir: a git wrapper that execs the
-// real git by its absolute path, and the fake gh (mergeOrderFakeGH) when the
-// test wants one. No directory of the developer's PATH is on it, so no test
-// can reach a real gh (Homebrew puts gh next to git). None runs in parallel:
-// they set PATH and chdir.
+// real git by its absolute path, except that it answers `git remote get-url
+// origin` with $MERGE_ORDER_ORIGIN_URL when that is set
+// (mergeOrderGitWrapper), and the fake gh (mergeOrderFakeGH) when the test
+// wants one. No directory of the developer's PATH is on it, so no test can
+// reach a real gh (Homebrew puts gh next to git). None runs in parallel: they
+// set PATH and chdir.
+//
+// Origin is a local path unless a test sets $MERGE_ORDER_ORIGIN_URL. A local
+// path names no owner/repo, so the repository check is skipped and gh's PRs
+// are used as they are.
 
 // mergeOrderFakeGH is the fake gh: it appends one line per call to
 // $MERGE_ORDER_GH_LOG (GH_PROMPT_DISABLED's value, then its arguments), and

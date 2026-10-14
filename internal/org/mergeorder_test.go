@@ -24,8 +24,9 @@ import (
 // `ralph org merge-order` at the org layer (plan
 // docs/plans/active/2026-10-14-org-merge-order.md, the org-layer half of AC1
 // to AC7, AC9 and AC11): MergeOrder on manifest fixtures, with a fake
-// MergeOrderExec standing in for git ls-remote and gh, so no test reaches a
-// network. realMergeOrderExec runs real local processes only.
+// MergeOrderExec standing in for git ls-remote, git remote get-url origin and
+// gh, so no test reaches a network. realMergeOrderExec runs real local
+// processes only.
 
 // mergeOrderTestClock is the fixtures' clock: ListedAt reads it.
 var mergeOrderTestClock = time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
