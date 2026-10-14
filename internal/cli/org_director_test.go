@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -230,6 +231,42 @@ func TestOrgDirector_AttachReplaceAndDetachByID(t *testing.T) {
 	}
 	if after := directorFileOrAbsent(t, stateDir); after != before {
 		t.Errorf("refused detach changed director.jsonl")
+	}
+}
+
+// A write the store could not cut back is followed by the command that reads
+// the registration again, with the --state-dir of the call when one was
+// given, as the other commands the director verbs print are (self-review
+// C2-L1 of org-director-attach). The store's write seam is unexported, so
+// this tests the helper that attach and detach both return through. Any
+// other error, ErrDirectorAttached included, is returned as it is.
+func TestOrgDirector_NotRestoredErrorNamesTheStatusCommand(t *testing.T) {
+	notRestored := fmt.Errorf("org: director: attach: append to /work/ledger/director.jsonl: no space left on device, "+
+		"and %w (truncate refused), so it may hold part of the write", org.ErrDirectorWriteNotRestored)
+	for _, tc := range []struct {
+		name, hintStateDir, want string
+	}{
+		{"without --state-dir", "", notRestored.Error() + ": read the registration with ralph org director status"},
+		{"with --state-dir", "/work/the ledger", notRestored.Error() + ": read the registration with ralph org director status --state-dir '/work/the ledger'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &orgDirectorRuntime{hintStateDir: tc.hintStateDir}
+			err := rt.notRestoredError(notRestored)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("notRestoredError = %v; want %q", err, tc.want)
+			}
+			if !errors.Is(err, org.ErrDirectorWriteNotRestored) {
+				t.Errorf("notRestoredError = %v; want it to still wrap ErrDirectorWriteNotRestored", err)
+			}
+			for _, other := range []error{
+				fmt.Errorf("org: director: attach: nothing was recorded: append to /work/ledger/director.jsonl: %w", os.ErrPermission),
+				fmt.Errorf("org: director: attach: %w: d1 (driver claude, attached 2026-10-15T09:00:00Z)", org.ErrDirectorAttached),
+			} {
+				if got := rt.notRestoredError(other); got != other {
+					t.Errorf("notRestoredError(%q) = %v; want the error returned as it is", other, got)
+				}
+			}
+		})
 	}
 }
 

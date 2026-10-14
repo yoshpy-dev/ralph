@@ -286,7 +286,7 @@ func TestDirectorAttach_AReplaceThatCannotWriteRecordsNothing(t *testing.T) {
 	*clock = clock.Add(time.Minute)
 
 	reg, replaced, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
-	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: open " + s.Path() + ": "
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: open " + s.Path() + ": "
 	if err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Fatalf("Attach with replace on a read-only file err = %v, want it to start with %q", err, want)
 	}
@@ -302,10 +302,9 @@ func TestDirectorAttach_AReplaceThatCannotWriteRecordsNothing(t *testing.T) {
 }
 
 // A replace whose write stops after the detached line and half of the new
-// attached (a full disk) is cut back (cross-review finding 1 of
-// org-director-attach). Left in place, the detached would end d1 and the cut
-// attached would be a corrupt line, so no registration would be current
-// while the error said d1 still was.
+// attached (a full disk) is cut back. Left in place, the detached would end
+// d1 and the cut attached would be a corrupt line, so no registration would
+// be current while the error said d1 still was.
 func TestDirectorAttach_AReplaceCutOffPartwayIsRestored(t *testing.T) {
 	s, _, clock := newTestDirectorStore(t)
 	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
@@ -315,7 +314,7 @@ func TestDirectorAttach_AReplaceCutOffPartwayIsRestored(t *testing.T) {
 	s.write = directorPartialWrite(t, s, &onDisk)
 
 	reg, replaced, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
-	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: append to " + s.Path() + ": no space left on device"
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: append to " + s.Path() + ": no space left on device"
 	if err == nil || err.Error() != want {
 		t.Fatalf("Attach with replace err = %v, want %q", err, want)
 	}
@@ -349,8 +348,10 @@ func TestDirectorAttach_AReplaceCutOffPartwayIsRestored(t *testing.T) {
 
 // When the cut back fails too, the error does not say nothing was recorded:
 // the file holds the detached and the cut attached, so no registration is
-// current. It wraps ErrDirectorWriteNotRestored and names the command that
-// reads the registration.
+// current. It wraps ErrDirectorWriteNotRestored, says "org: director:" once,
+// and names no command: the store does not know the --state-dir of the call,
+// so the CLI adds the command that reads the registration (notRestoredError,
+// self-review C2-L1 and C2-L2 of org-director-attach).
 func TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo(t *testing.T) {
 	s, _, clock := newTestDirectorStore(t)
 	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a"})
@@ -366,8 +367,8 @@ func TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo(t *testing.T) {
 	}
 
 	_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
-	want := "org: director: attach: org: director: append to " + s.Path() + ": no space left on device, and director.jsonl could not be restored to its size before the append (truncate refused), " +
-		"so it may hold part of the write: read the registration with ralph org director status"
+	want := "org: director: attach: append to " + s.Path() + ": no space left on device, and director.jsonl could not be restored to its size before the append (truncate refused), " +
+		"so it may hold part of the write"
 	if err == nil || err.Error() != want {
 		t.Fatalf("Attach with replace err = %v, want %q", err, want)
 	}
@@ -396,7 +397,7 @@ func TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored(t *testing.T
 		s.write = directorPartialWrite(t, s, &onDisk)
 
 		_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverClaude})
-		want := "org: director: attach: nothing was recorded: org: director: append to " + s.Path() + ": no space left on device"
+		want := "org: director: attach: nothing was recorded: append to " + s.Path() + ": no space left on device"
 		if err == nil || err.Error() != want {
 			t.Fatalf("Attach err = %v, want %q", err, want)
 		}
@@ -426,7 +427,7 @@ func TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored(t *testing.T
 		s.write = directorPartialWrite(t, s, &onDisk)
 
 		_, err := s.Detach(DirectorDetach{ID: "d1"})
-		want := "org: director: detach d1: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: append to " + s.Path() + ": no space left on device"
+		want := "org: director: detach d1: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: append to " + s.Path() + ": no space left on device"
 		if err == nil || err.Error() != want {
 			t.Fatalf("Detach err = %v, want %q", err, want)
 		}
@@ -466,7 +467,7 @@ func TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored(t *testing.T) {
 	}
 
 	_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true, User: "bob", Cwd: "/work/b"})
-	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: org: director: close " + s.Path() + ": "
+	want := "org: director: attach: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ") is still the current registration: close " + s.Path() + ": "
 	if err == nil || !strings.HasPrefix(err.Error(), want) || !errors.Is(err, os.ErrClosed) || errors.Is(err, ErrDirectorWriteNotRestored) {
 		t.Fatalf("Attach with replace err = %v, want it to start with %q and wrap os.ErrClosed", err, want)
 	}
@@ -847,8 +848,9 @@ func TestDirectorRead_SkipsAndCountsLinesItCannotUse(t *testing.T) {
 // A detached for an id that is not the current registration's is ignored and
 // leaves that registration current. TestDirectorRead_SkipsAndCountsLinesItCannotUse
 // has such a line, but a fold that let it end d1 would ignore the later
-// detached d1 instead, and the two cancel out there (mutant D5 of the
-// org-director-attach test report), so this file holds only the two lines.
+// detached d1 instead, and the two cancel out there: that test stays green
+// when the fold's id check on a detached is dropped. So this file holds only
+// the two lines.
 func TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration(t *testing.T) {
 	s, _, _ := newTestDirectorStore(t)
 	writeDirectorFile(t, s, directorAttachedLine("d1", "claude")+"\n"+directorDetachedLine("d2")+"\n")

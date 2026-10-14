@@ -118,7 +118,7 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 				if errors.Is(err, org.ErrDirectorAttached) {
 					return rt.attachedError(err, driver)
 				}
-				return err
+				return rt.notRestoredError(err)
 			}
 			line := fmt.Sprintf("attached %s (driver=%s)", reg.ID, reg.Driver)
 			if replaced != nil {
@@ -180,7 +180,7 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 				ID: id, Force: force, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane,
 			})
 			if err != nil {
-				return err
+				return rt.notRestoredError(err)
 			}
 			if force {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "detached %s (forced; driver=%s, attached at %s)\n",
@@ -302,6 +302,20 @@ func (rt *orgDirectorRuntime) attachedError(err error, driver string) error {
 	}
 	return fmt.Errorf("%w: end it with %s from the session that attached it (or with --force in place of --id, when that session is gone), "+
 		"or replace it with %s", err, rt.command(detach), rt.command("ralph org director attach --driver "+driver+" --replace"))
+}
+
+// notRestoredError is a store error err of attach or detach followed, when
+// it wraps org.ErrDirectorWriteNotRestored, by the command that reads the
+// registration again: director.jsonl may hold part of the failed write, so
+// the store does not say that nothing was recorded. The store does not know
+// the --state-dir of this invocation, so the command is said here, as
+// attachedError says its two (self-review C2-L1 of org-director-attach).
+// Any other err is returned as it is.
+func (rt *orgDirectorRuntime) notRestoredError(err error) error {
+	if !errors.Is(err, org.ErrDirectorWriteNotRestored) {
+		return err
+	}
+	return fmt.Errorf("%w: read the registration with %s", err, rt.command("ralph org director status"))
 }
 
 // orgDirectorEnabledFile names the file [org.director].enabled was read from
