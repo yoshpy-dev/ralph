@@ -170,6 +170,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.FormatBool(tomlCfg.Org.Watchdog.WatcherEnabled), strconv.FormatBool(goCfg.Org.Watchdog.WatcherEnabled))
 	check("org.watchdog.watcher_model", "RALPH_ORG_WATCHDOG_WATCHER_MODEL",
 		tomlCfg.Org.Watchdog.WatcherModel, goCfg.Org.Watchdog.WatcherModel)
+	check("org.director.enabled", "RALPH_ORG_DIRECTOR_ENABLED",
+		strconv.FormatBool(tomlCfg.Org.Director.Enabled), strconv.FormatBool(goCfg.Org.Director.Enabled))
 	check("org.director.ack_minutes", "RALPH_ORG_DIRECTOR_ACK_MINUTES",
 		strconv.Itoa(tomlCfg.Org.Director.AckMinutes), strconv.Itoa(goCfg.Org.Director.AckMinutes))
 	check("org.director.resolve_minutes", "RALPH_ORG_DIRECTOR_RESOLVE_MINUTES",

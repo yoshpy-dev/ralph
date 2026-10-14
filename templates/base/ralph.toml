@@ -8,11 +8,11 @@ require_claude_cli = true
 require_codex_cli = false
 require_go = false
 
-# [org] — envelope config for the `ralph org` verb set (spawn / send / wait /
-# read / stop / status / disband) and for `ralph doctor`'s org checks. The
-# fields are validated so downstream PRs (seat-ification, Leader autonomy,
-# Watchdog) build on a stable foundation. Absent [org] is fully compatible —
-# Load() backfills these exact defaults with no warnings.
+# [org] — the envelope and settings of the `ralph org` verbs (spawn, send,
+# start, watch, escalate, and the rest) and of `ralph doctor`'s org checks:
+# which drivers and models seats may run, how many seats and orgs may run,
+# and the tables below. An invalid value fails the load. Absent [org] is
+# fully compatible — Load() backfills these exact defaults with no warnings.
 [org]
 # Overriding only driver_pool (leaving model_pool unset) narrows the
 # inherited default model_pool to entries whose driver is in this list —
@@ -107,13 +107,22 @@ stall_minutes = 15
 watcher_enabled = true
 watcher_model = "haiku"
 
-# [org.director] sets the inbox deadlines that `ralph org watch --all` checks.
+# [org.director] sets the director switch and the inbox deadlines that
+# `ralph org watch --all` checks.
+# enabled = true (default): `ralph org escalate` records the item in the org
+# inbox, and the director, or the ack deadline below, takes it, while a
+# `ralph org watch --all` accepts work; with no such watch, escalate sends
+# the item to the human at once. enabled = false: escalate sends every item
+# to the human at once, as before this setting existed. An absent enabled,
+# or an absent [org.director], loads as true. It is read from the same
+# ralph.toml as max_orgs.
 # ack_minutes: an open inbox item not yet sent to the human is sent this many
 # minutes after it was escalated. resolve_minutes: an item still unresolved
 # this many minutes after it was escalated is sent to the human once more.
 # Both must be >= 1. Absent [org.director] is fully compatible -- Load()
 # backfills these exact defaults.
 [org.director]
+enabled = true
 ack_minutes = 10
 resolve_minutes = 60
 

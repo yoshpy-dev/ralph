@@ -790,10 +790,14 @@ watcher_model = ""
 	}
 }
 
-// TestDefault_OrgDirector verifies the [org.director] inbox deadline
-// defaults: ack_minutes 10 and resolve_minutes 60.
+// TestDefault_OrgDirector verifies the [org.director] defaults: the director
+// switch enabled is true, and the inbox deadlines are ack_minutes 10 and
+// resolve_minutes 60.
 func TestDefault_OrgDirector(t *testing.T) {
 	d := Default().Org.Director
+	if !d.Enabled {
+		t.Error("director.enabled = false, want true")
+	}
 	if d.AckMinutes != 10 {
 		t.Errorf("director.ack_minutes = %d, want 10", d.AckMinutes)
 	}
@@ -804,7 +808,7 @@ func TestDefault_OrgDirector(t *testing.T) {
 
 // TestLoad_OrgDirectorMissingSectionBackfillsDefault verifies a ralph.toml
 // without [org.director] (but with other [org] tables) loads with the full
-// Director defaults and no error.
+// Director defaults and no error, enabled = true included.
 func TestLoad_OrgDirectorMissingSectionBackfillsDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -824,17 +828,22 @@ stall_minutes = 20
 	if cfg.Org.Director != Default().Org.Director {
 		t.Errorf("director = %+v, want %+v", cfg.Org.Director, Default().Org.Director)
 	}
+	if !cfg.Org.Director.Enabled {
+		t.Error("director.enabled = false, want true for an absent [org.director]")
+	}
 }
 
 // TestLoad_OrgDirectorRoundTrip verifies explicit [org.director] values
 // round-trip through Load() unchanged, including a resolve_minutes shorter
-// than ack_minutes (the two deadlines are independent), and that setting one
-// key leaves the other at its default.
+// than ack_minutes (the two deadlines are independent) and enabled = false,
+// and that setting one key leaves the others at their defaults (a section
+// without enabled loads as true).
 func TestLoad_OrgDirectorRoundTrip(t *testing.T) {
-	t.Run("both keys", func(t *testing.T) {
+	t.Run("all keys", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "ralph.toml")
 		content := `[org.director]
+enabled = false
 ack_minutes = 25
 resolve_minutes = 5
 `
@@ -844,6 +853,9 @@ resolve_minutes = 5
 		cfg, err := Load(path)
 		if err != nil {
 			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Org.Director.Enabled {
+			t.Error("director.enabled = true, want false")
 		}
 		if cfg.Org.Director.AckMinutes != 25 {
 			t.Errorf("director.ack_minutes = %d, want 25", cfg.Org.Director.AckMinutes)
@@ -872,7 +884,39 @@ ack_minutes = 1
 		if want := Default().Org.Director.ResolveMinutes; cfg.Org.Director.ResolveMinutes != want {
 			t.Errorf("director.resolve_minutes = %d, want default %d", cfg.Org.Director.ResolveMinutes, want)
 		}
+		if !cfg.Org.Director.Enabled {
+			t.Error("director.enabled = false, want true for a section without enabled")
+		}
 	})
+
+	tests := []struct {
+		name        string
+		content     string
+		wantEnabled bool
+	}{
+		{"enabled = true", "[org.director]\nenabled = true\n", true},
+		{"enabled = false alone", "[org.director]\nenabled = false\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Org.Director.Enabled != tt.wantEnabled {
+				t.Errorf("director.enabled = %v, want %v", cfg.Org.Director.Enabled, tt.wantEnabled)
+			}
+			def := Default().Org.Director
+			if cfg.Org.Director.AckMinutes != def.AckMinutes || cfg.Org.Director.ResolveMinutes != def.ResolveMinutes {
+				t.Errorf("director deadlines = %d, %d, want defaults %d, %d",
+					cfg.Org.Director.AckMinutes, cfg.Org.Director.ResolveMinutes, def.AckMinutes, def.ResolveMinutes)
+			}
+		})
+	}
 }
 
 // TestLoad_OrgDirectorRejects verifies an explicit 0 or negative
