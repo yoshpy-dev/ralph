@@ -187,3 +187,67 @@ _(登録簿には追記していない。上の行は、C2-L1〜C2-L4 を直さ�
 | C2-L5 | 登録簿の末尾に、cycle 1 の L8(status の出力関数の引数が 10〜11 個)の行を足した。Trigger は `ralph status` のヘッダに次の行を足すとき。C2-L1〜L4 はすべて直したので、行には L8 だけを入れた |
 
 確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./...` は通過、`go test ./internal/org/... ./internal/cli/...` は go1.26 と `GOTOOLCHAIN=go1.25.8 -count=1` の両方で ok、`go build ./...` も通過。オーケストレーターは `go test -count=1 ./internal/org/ ./internal/cli/ -run 'Director'` を打ち直して ok を確かめた
+
+## Cycle 3
+
+- Date: 2026-10-15
+- Plan: docs/plans/active/2026-10-14-org-director-attach.md(承認済み、digest 27414f27525b。変わっていない)
+- Reviewer: reviewer subagent (Claude)。パイプライン 3 回目(cycle 3)。cross-review cycle 2 の ACTION_REQUIRED を直すために `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 2 から 3 に上げた回で、`cycle-count.json` は 2 のまま(意図どおり)
+- Scope: diff の品質だけ。cross-review cycle 2 の直し c8a9227b(`/director` skill の受信箱の節、4 面で +36/-16)を、全体の `git diff ef575748...HEAD` の中で読んだ。cycle 1・2 の ID と取り違えないよう、この節の ID には `C3-` を付ける。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs が受け持つので行っていない
+
+### Evidence reviewed
+
+- 読んだ差分: c8a9227b の全 hunk(4 面とも同じ 13 行の変更)
+- 読んだ周辺: `internal/org/escalate.go` の `WaitInbox`(253〜302 行)、`internal/cli/org.go` の `newOrgWaitCmd` と `runOrgWaitInbox`(1108〜1190 行)、`internal/cli/root.go` の `SilenceErrors`、`cmd/ralph/main.go` の終了コード、`/director` skill の全文、`/org` skill の `wait` の行(173 行)、cross-review の triage の cycle 2 の指摘、plan の Progress checklist、登録簿の director の行
+- 確かめたこと
+  - 文言とコード: 時間切れの文は `org: wait --inbox: no open inbox item arrived within %d ms`(`escalate.go:295`)で、skill が引く `no open inbox item arrived within` はその部分文字列。`root.go` が `SilenceErrors` なので、エラーは `main.go` の `fmt.Fprintln(os.Stderr, err)` が 1 回だけ stderr に出す
+  - 終了コード 3 には届かない: `main.go` が 3 で終わるのは `errors.Is(err, cli.ErrUpgradeDriftRemaining)` のときだけで、その sentinel を作るのは `runUpgradeV2`(`upgrade_v2.go:226`・`:302`)だけで、`migrate.go:989` はそれを `ralph upgrade` の移行の経路でそのまま返す。`wait --inbox` は 0 か 1 で終わる(外から kill されたときを除く)ので、skill が「終了コード 1」と書いて足りる
+  - 時間切れでない失敗: `--inbox` と `--org-id`・`--seat`・`--until` の併用(`org.go:1176`)、`newOrgRuntime` の失敗(旧台帳の guard、`ralph.toml` の load)、受信箱の read の失敗(`escalate.go:283`、`TestWaitInbox_ReadFailureReturnsAtOnce`)は、どれも時間切れの文を含まず、すぐ返る。skill の「stderr が時間切れの文でなければ」はこれらをすべて含む
+  - Claude Code の `--timeout-ms 0`: `WaitInbox` は `timeout > 0` のときだけ `deadline` を作る(`escalate.go:268-273`)ので、この run は時間切れの文を出さない。終了コード 0 で返るのは件の行が 1 行以上あるときだけ(`runOrgWaitInbox` は `err == nil` なら `items` が空でない)
+  - 4 面: `md5` が 4 面で同じ(`ac5b10a3…`)。`.claude` と `.agents` の `diff` は空
+  - 新しい文に ID の引用、行番号、`AR#` はない。commit message は「cross-review cycle 2」と回で書いている
+  - `git diff --check ef575748...HEAD` は空。追加行に TODO、debug 出力、`/Users/`、秘密らしい文字列はない
+  - 登録簿: この PR が足した director の行 5 件に、cap の数字や「最後の run」を理由にした書き方は残っていない
+- 確かめていないもの: テスト、`gofmt`、`go vet`。skill の文を実際の Codex と Claude Code の session で動かしたときの挙動
+
+### Findings
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C3-L1 | LOW | cross-file coupling | skill が「打ち直すか止まるか」の分かれ目を、エラー文の部分文字列 `no open inbox item arrived within` に置いた。この文を作る `WaitInbox` のエラーにも `WaitInbox` の doc にも、skill が照合していることを示す記述がない。文を固定する 2 本の test は、ふつうのエラー文の確認として書かれている。文言を直した人は test の期待値を書き換えれば通り、skill に気づく手がかりがない。そのとき Codex の director は、毎回の時間切れを失敗として扱い、5 分待った最初の wait で人に伝えて止まる(打ち直しの loop にはならず、人に伝えるので黙った停止でもないが、動きは壊れる) | `internal/org/escalate.go:295`(コメントなし)と `:253-260`(doc)、`escalate_test.go:1216`、`internal/cli/org_inbox_test.go:1222`、`.claude/skills/director/SKILL.md:105-107`。skill の文を読む test は見つからなかった(`grep -rn 'arrived within'` は上の 4 か所と report だけ) | `escalate.go:295` の上に 1 行(`/director` skill が打ち直す条件としてこの文を照合する)。2 本の test の期待値の横にも同じ 1 行。機械で守るなら、skill の引用が実際の時間切れのエラーに含まれることを見る test を 1 本 |
+| C3-L2 | LOW | skill instruction | cross-review の指摘は「2 つの driver の両方に書く」だった。直しは Codex の項に条件を書き、Claude Code の項は「件の行を出して返ったら件を処理し」に変えただけで、件の行を出さずに返ったとき(エラー)の扱いは共通の段落に任せた。その段落は「終了コード 1」と「時間切れの文」で書かれているが、`--timeout-ms 0` の run は時間切れの文を出さない。Claude Code の director には「時間切れでなければ」が常に真で、段落が分ける相手がない。また Monitor で見張る形では、director に届くのが stdout の行だけだと(未確認)、エラーの文が見えず、「エラーの文を人に伝える」に届かない | `.claude/skills/director/SKILL.md:101-103`(Claude Code の項)と `:109-111`(共通の段落)、`escalate.go:268-273`、triage の cycle 2 の指摘「2 つの driver の両方に書く」 | Claude Code の項に「件の行が出ずに返ったら、`--timeout-ms 0` に時間切れはないのでエラー。stderr の文を人に伝えて止まる」を足す。Monitor で見張るなら stderr を読む手段(`2>&1`、または出力ファイル)も 1 句足す |
+| C3-L3 | LOW | skill instruction | 新しい段落の「エラーの文を人に伝えて止まる」は、止まったあとの登録と受信箱をどうするかを言わない。同じ skill の別の止まり方(昇格の 5)は「受信箱の ack と resolve、leader への send、start をしない」「detach も打たない」と書き、終わりの節は件の残りを人に伝えてから detach を打つ。新しい止まり方がどちらに当たるのか読み取れない。detach しないまま止まると、登録が `attached` のまま残り、次の `/director` の attach が断られて人の `detach --force` が要る。件は登録の有無によらず期限で人に届くので、実害は小さい | `.claude/skills/director/SKILL.md:109-111`(新しい段落)、`:68-74`(昇格 5)、`:210-218`(終わり) | 「止まる」を「director として動くのをやめ、人に伝える。detach するかは人に聞く」か「終わりの手順に進む」のどちらかに決めて、1 句足す |
+
+### Positive notes
+
+- 直し方が triage の推奨と合う。CLI の終了コードを分けず(「座席の wait も含めた契約の変更になる」)、skill の側で打ち直す条件を決めた。照合する文は CLI が 1 回だけ出す文で、`SilenceErrors` と `main.go` の出し方に合う
+- 打ち直す条件が閉じた形(時間切れの文があるときだけ打ち直す)なので、想定していない失敗は止まる側に倒れる。新しい loop は増えず、止まるときは人に伝える
+- 終了コード 3 の経路を skill に持ち込んでいない。`wait --inbox` から届かないので、「終了コード 1」の一言で足りる
+- 4 面が同一で、新しい文に ID、行番号、`AR#` の引用がない。cycle 2 の triage が回ごとに書き換わっても、skill の文は指す先を失わない
+- Codex の `--timeout-ms 300000` と Claude Code の `--timeout-ms 0` の run の形は、前の文のまま残した
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C3-L1〜C3-L3(skill が時間切れの文を部分一致で照合していることがコードに書かれていない、Claude Code の項に件の行がないときの扱いがない、「止まる」の先が決まっていない) | どれも CLI の動きを変えない。C3-L1 は文言が変わると Codex の director が最初の時間切れで止まる。C3-L2 は Monitor でエラーの文が見えないと、Claude Code の director が失敗に気づくのが遅れる | cap 3 の最後の pipeline で、skill の数行と Go のコメント 1 行のために run をもう 1 回回す価値がない | `WaitInbox` の時間切れの文を変えるとき、`/director` skill の受信箱の節を直すとき、8b で director の起こし口を足すとき | `docs/reports/self-review-2026-10-14-org-director-attach.md`(cycle 3 の C3-L1〜C3-L3) |
+
+_(登録簿には追記していない。登録簿の編集は記録だけの例外に入らないので、直さずに進めるときは、この cycle の `/sync-docs` で 1 行にまとめて足す。)_
+
+### Coverage gaps
+
+- skill の文を読んで実際のエラーと突き合わせる test はない(C3-L1)。skill の本文を固定している test が repo にあるかは調べていない
+- 終了コード 1 以外の終わり方(外からの kill、Codex の shell tool 自体の timeout)には、skill のどの文も指示を持たない。この直しの前からの穴で、300000 ms の wait が Codex の tool の制限に収まるかも書かれていない。Codex の既定は未確認
+- Monitor が stderr を director に渡すかは未確認(C3-L2)
+- `/org` skill の `wait` の行(173 行)と `wait` の help は「届かなければ終了コード 1」と書く。時間切れの説明としては正しく、ほかの失敗も 1 で終わることは書かない。director が読むのは `/director` skill の節なので、指摘にしない
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM はなし。LOW 3 件は skill の文と Go のコメントで、c8a9227b の動きに欠陥はない)
+- Follow-ups:
+  1. C3-L1〜C3-L3 を直さず進めるなら、この cycle の `/sync-docs` で登録簿に 1 行にまとめて足す。cap 3 の最後の pipeline なので、この行が唯一の受け皿になる
+  2. 直すなら、C3-L2 と C3-L3 は skill の同じ節の数行で、C3-L1 は Go のコメント 1 行。skill は 4 面を揃える(`.agents` 側は `scripts/sync-skills.sh`)。pipeline をもう 1 回回すことになるので、cap をもう一度上げるかどうかは人が決める
+  3. plan の Progress checklist に、cross-review cycle 2 の ACTION_REQUIRED と c8a9227b の行がない(cycle 2 の節の follow-up 4 と同じ種類)。`/pr` が plan を archive するので、`/sync-docs` で足すとよい(diff の品質の外なので、指摘には数えない)
+- Known gaps: テスト、`gofmt`、`go vet` は実行していない。skill の文を実際の Codex と Claude Code の session で動かしていない。Monitor の stderr の扱いと Codex の shell tool の timeout は未確認
