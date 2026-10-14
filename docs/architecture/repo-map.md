@@ -45,6 +45,7 @@
 - `.claude/skills/plan/`: create plans, build the visual review page (`diagrams.md`, `visual-template.html`), and gate on user approval (auto)
 - `.claude/skills/implement/`: create branch and execute plans interactively (auto)
 - `.claude/skills/org/`: autonomous multi-seat execution via `ralph org` verbs (auto)
+- `.claude/skills/director/`: promote the current session to the director of every feature org; it registers with `ralph org director attach`, handles the org inbox, and reports progress (auto)
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)
