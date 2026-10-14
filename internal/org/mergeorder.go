@@ -677,44 +677,55 @@ func readMergeOriginRepo(ctx context.Context, dir string, run MergeOrderExec, ti
 }
 
 // mergeOriginURLSchemes are the URL schemes whose host and path
-// mergeRepoFromOriginURL reads.
+// mergeOriginFromURL reads.
 var mergeOriginURLSchemes = []string{"https", "http", "ssh", "git"}
 
-// mergeRepoFromOriginURL reads the owner and repository from origin's URL,
-// only from one with a host: `scheme://[user@]host[:port]/<path>` for the
-// schemes in mergeOriginURLSchemes, or the scp-like `[user@]host:<path>`
-// (a colon with no slash before it, as git reads it). A trailing "/", then a
-// trailing ".git", is cut from the path, whose last two components are the
-// owner and the repository. ok is false for anything else: a local path
-// (absolute, relative, or file://), another scheme, or a path with fewer than
-// two components.
+// mergeRepoFromOriginURL reads the owner and repository from origin's URL
+// (mergeOriginFromURL).
 func mergeRepoFromOriginURL(s string) (repo mergeRepo, ok bool) {
+	_, repo, ok = mergeOriginFromURL(s)
+	return repo, ok
+}
+
+// mergeOriginFromURL reads the host, and the owner and repository, from
+// origin's URL, only from one with a host: `scheme://[user@]host[:port]/<path>`
+// for the schemes in mergeOriginURLSchemes, or the scp-like
+// `[user@]host:<path>` (a colon with no slash before it, as git reads it).
+// host is the host as written, lowercased, without the user and the port. A
+// trailing "/", then a trailing ".git", is cut from the path, whose last two
+// components are the owner and the repository. ok is false for anything
+// else: a local path (absolute, relative, or file://), another scheme, or a
+// path with fewer than two components.
+func mergeOriginFromURL(s string) (host string, repo mergeRepo, ok bool) {
 	var path string
 	if strings.Contains(s, "://") {
 		u, err := url.Parse(s)
 		if err != nil || u.Hostname() == "" || !slices.Contains(mergeOriginURLSchemes, u.Scheme) {
-			return mergeRepo{}, false
+			return "", mergeRepo{}, false
 		}
-		path = u.Path
+		host, path = u.Hostname(), u.Path
 	} else {
-		host, rest, scp := strings.Cut(s, ":")
+		var scp bool
+		host, path, scp = strings.Cut(s, ":")
 		if !scp || strings.Contains(host, "/") {
-			return mergeRepo{}, false
+			return "", mergeRepo{}, false
 		}
 		if at := strings.LastIndexByte(host, '@'); at >= 0 {
 			host = host[at+1:]
 		}
 		if host == "" {
-			return mergeRepo{}, false
+			return "", mergeRepo{}, false
 		}
-		path = rest
 	}
 	parts := strings.Split(strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git"), "/")
 	if len(parts) < 2 {
-		return mergeRepo{}, false
+		return "", mergeRepo{}, false
 	}
 	repo = mergeRepo{owner: parts[len(parts)-2], name: parts[len(parts)-1]}
-	return repo, repo.owner != "" && repo.name != ""
+	if repo.owner == "" || repo.name == "" {
+		return "", mergeRepo{}, false
+	}
+	return strings.ToLower(host), repo, true
 }
 
 // mergeRepoFromPRURL reads the owner and repository from a PR's url,
