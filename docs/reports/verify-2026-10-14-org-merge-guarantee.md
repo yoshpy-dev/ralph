@@ -80,3 +80,96 @@
 - Verified: AC1〜AC10 と FR-7 の 2 文がコードとテストのコードに対応している(テストは読んだだけ)。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build と vet、skill と template の同期)。文書は tech-debt の 226 行目を除いてコードと合う。`%2F` の branch 名は `branches/` と `rules/branches/` で通る
 - Partially verified: AC2 の classic の strict true と、merge queue で決まる経路(テストのコードだけで、実機では見ていない)
 - Not verified: テストの実行結果(/test)、`protection/required_status_checks` での `%2F`、gh の stderr の制御文字
+
+## Cycle 2
+
+- Date: 2026-10-14
+- Verifier: verifier subagent (Claude)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 の最後)。self-review の cycle 2(432e5912、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 4、Merge: yes)のあとに走らせた
+- Scope: `git diff fb954403 HEAD`(HEAD 95e97635、4 コミット、6 ファイル、+182/-24)。8d6499c4(計画の Progress に cycle 2 の決定の 1 行)、59abeaec(`mergeGuaranteeErrText` のエスケープ、`readMergeClassicStrict` の 403 と 404 の分け方、そのテスト、`docs/tech-debt/README.md` の 244 行目)、432e5912(self-review の cycle 2)、95e97635(その insight event)。AC の確かめ直しに要るところは cycle 1 の差分も読んだ。テストは走らせていない(/test の担当)。この節の行番号は HEAD 95e97635 のもの。上の cycle 1 の節の行番号は 1e71cadb のままで、`readMergeClassicStrict` の分岐は 460 行から 463〜471 行に、`mergeGuaranteeErrText` は 600 行台から 616 行に動いた
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は d2923a8bf359 で、`- Approved:` の digest と同じ。cycle 2 の決定は `## Progress checklist` の 168 行に書かれている
+- Evidence: `docs/evidence/verify-2026-10-14-org-merge-guarantee-c2.md`。本物の gh で cli/cli を打った doctor と status の行、偽の gh(ネットワークに出ない)を PATH に置いた HEAD の binary の P1〜P5 と、fix の前の fb954403 の binary の対照、その probe の script、静的解析の結果を入れた。コードブロックは scratch のファイルと突き合わせて同じことを確かめた(U+FFFD と生の ESC は 0 件)。`./scripts/run-static-verify.sh` が自分で書いた生の出力は `docs/evidence/verify-2026-10-14-124031.log`(gitignore の対象、名前の時刻は UTC)
+- insight event: この回の verify の 1 行を、別のコミットで `docs/insights/events/2026-10-14-org-merge-guarantee.jsonl` に足す(`--cycle auto` は 2 を読む。`--low 2` は下の D1 と D2)
+
+### cycle 2 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| L3: gh と git の error text の制御文字を Detail に生で入れない。空白をまとめ、1 文字ずつ `PrintableInboxText` に通し、そのあとで 300 バイトに切る | 満たす(binary でも確認) | `mergeGuaranteeErrText`(`internal/org/mergeguarantee.go:616`、doc は `:608-615`、定数の注は `:96-97`)。呼ぶ非 test の行は 12 か所で、gh と git の error text を Detail に入れる箇所はすべてこの関数を通る(grep で確かめた)。テスト: `TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped`(`mergeguarantee_test.go:560`、cache の往復と `PrintableInboxText(Text()) == Text()`)、`TestMergeGuarantee_ErrorIsCutAfterEscaping`(`:588`、切る位置と 300 バイトちょうど)。binary(偽の gh の `esc`、P5): stderr の `ESC[31m…ESC[0m BEL` は、doctor の行でも status の行でも `\x1b[31m…\x1b[0m\a` と出て、生の ESC と BEL は 0 バイト。同じ偽の gh で fb954403 の binary は doctor の行に生の ESC と BEL を 3 バイト出した(対照)。cycle 1 の L3 の勧め(`mergeGuaranteeErrText` の中で `PrintableInboxText` を通す)のとおり。doctor が Detail を生で出す行(`internal/cli/doctor.go:208`)は変わらないので、Detail の error text 以外の出どころ(`mergeGuaranteeResult` の `s.WriteErr`・`s.RemoveErr`・`s.Path`、`doctor_merge_guarantee.go:78-88`、origin の URL から来る owner/repo)は今も生のまま。self-review の C2-1 のとおりで、binary では打っていない(読んで確かめた) |
+| L4: strict の endpoint の 404 `Not Found` は admin の文のまま、403 は「admin がない、または rate limit や SSO など別の原因」と言う。種類はどちらも `unknown` | 満たす(binary でも確認) | `readMergeClassicStrict` の `switch`(`mergeguarantee.go:460-472`)。`Not Found`(`:463`)と 403(`:467`、本文の `status` か stderr の `(HTTP 403)`)は別の case になった。テスト: `ClassicProtectionDecidesTheKind`(`mergeguarantee_test.go:328`)の `strict answers 403:` の 3 行(`:368`、`:371`、`:374`)。binary: P2(`f403`)は `info — unknown: ... is unknown: GitHub answered 403, which can come from missing admin access to the repository or from another cause, such as a rate limit or an SSO authorization the token lacks (...)`、P3(`f404nf`)は fix の前と同じ admin の文。同じ `f403` を fb954403 の binary に打つと admin の文が出た(対照)。cycle 1 の L4 の勧めのとおり |
+| test 報告の Gap 1: strict の endpoint の、想定外の message の 404 | 満たす(binary でも確認) | `strict answers a 404 with another message`(`mergeguarantee_test.go:386`、`Branch not found`)。最後の `return`(`mergeguarantee.go:473-474`)の一般の文で `unknown`。binary の P4(`f404bnf`)も同じ文で `info` |
+| 登録簿 244 行目に (d)〜(g) を足し、(a) を約 850 行に | 満たす(中身は下の D2 を除いて HEAD と合う) | 5 列(code span の外の `|` は 6 個)。(a) は HEAD の 848 行と合う。(d) の `getMergeOriginURL` と `readMergeOriginRepo`、`defaultMergeGuaranteeGitTimeout`(`mergeguarantee.go:94`、`:783` で使う)、(e) の `MergeGuarantee.Text`(`:836`)と `subject`、(f) の 4 関数(`readRepository`、`readMergeRules`、`readMergeClassicStrict`、`ghJSON` はどれも `g.gh(`・`g.command(`・`g.stopped(` を 1 回ずつ持つ)は HEAD にある。計画の Progress 168 行は「L2・L5・L6 と test の Gap 4 を Small leftovers の行に」と書き、行はそれに Gap 6 と Gap 8 の前半(`%2F`)も足した。足した分は決定を超えるが、逆向きのずれではない |
+
+### AC の確かめ直し(HEAD 95e97635)
+
+cycle 2 の Go の差分は `readMergeClassicStrict`(doc と `switch`)、`mergeGuaranteeErrText`(doc と本体)、定数の注、`unicode/utf8` の import の削除だけで(`git show 59abeaec -- internal/org/mergeguarantee.go`)、`decide`、`readMergeRules`、`readRepository`、`ghJSON`、キャッシュの読み書き、`mergeGuaranteeResult`、status、merge-order は変わっていない。`mergeGuaranteeErrText` の変更は Detail と `origin_unreadable` の理由(`:794`)の文だけを変え、種類と doctor の状態を変えない。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(cycle 1 の実機確認のまま) | 判定の経路は変わっていない。cycle 1 の github/docs の `pass` のまま |
+| AC2 | 満たす(binary でも確認。本文の言い過ぎは下の注) | classic の strict true: P1(`strict`)で `pass — github_protection ... the branch protection requires branches to be up to date before merging`。cycle 1 では偽の seam のテストだけだったが、今回は binary を偽の gh で通した(本物の GitHub ではない)。strict を読めないとき: P3(404 `Not Found`)と P2(403)はどちらも `info` で `unknown`。本物の gh の cli/cli(404 `Not Found`)も `info` で、行は `docs/evidence/merge-guarantee-livefire-2026-10-14.md` の 63 行目と `cmp` で同じ |
+| AC3 | 満たす(cycle 1 の実機確認のまま) | `checksOnly` と `mergeGuaranteeFix` は変わっていない。`mergeClassicNotStrict` の case(`:461-462`)は `switch` の 1 つめのまま |
+| AC4 | 満たす(binary でも確認) | gh の失敗: P5(`esc`、HTTP 401)は `info` で `unknown`。doctor の終了コード: 本物の gh の cli/cli は rc 0。偽の gh の P1〜P5 の rc 1 は、絞った PATH に claude がないための `✗ Claude Code CLI: fail` だけによる(doctor の出力で確かめた)。`--hostname`: P1〜P4 の gh の 4 回と P5 の 1 回は、どれも `gh api --hostname github.com` で始まる |
+| AC5 | 満たす(binary でも確認) | `SaveMergeGuarantee` は変わっていない。P2〜P5 の `unknown` も `cached in <scratch>/.../merge-guarantee.json` と出て、cli/cli の台帳には `merge-guarantee.json` だけができた |
+| AC6 | 満たす(binary でも確認) | P1〜P5 の status の行は doctor の Detail と同じ文で、P5 は `\x1b` の形のまま生の ESC が 0 バイト。`inboxField` の二度目の `PrintableInboxText` が文を変えないことは、`ControlCharactersInAnErrorAreEscaped` の最後の assertion が固める |
+| AC7 | 満たす(コードとテストで確認。binary では打っていない) | merge-order は status と同じ `ReadMergeGuarantee` と `inboxField` を通す。cycle 2 で merge-order の経路は変わっていない |
+| AC10 | 満たす(cycle 1 の確認のまま) | 向け直し、書き込みの失敗、24 時間の経路は変わっていない |
+| AC8 | 満たす | 新しいテストの行と 2 本は偽の `mgExec` を使い、キャッシュは `mgStateDir`(`mergeguarantee_test.go:839`、`t.TempDir()` の下)に書く |
+| AC9 | 一部(D1、LOW) | skill の 4 面、README、AGENTS.md、help は cycle 2 で変わっておらず、403 を admin と結ぶ文はない(下の grep)。仕様 FR-7 の 7c-2 の注の 403 の書き方が D1 |
+
+AC2 の本文と fix の関係: AC2 は「classic の保護に必須の検査があり、admin でなく strict を読めない(404 `Not Found` か 403)とき `unknown`(`info`)」と書き、403 を admin のない人の答えとして並べる。fix は 403 の Detail の文を「admin がない、または別の原因(rate limit、SSO)」に変えたが、AC2 が求める結果(種類が `unknown`、状態が `info`)は 404 `Not Found` でも 403 でも変わらず、AC2 は Detail の原因の書き方を求めていない。計画の Scope の 30 行は「404 で message が `Not Found`(admin の権限がない)、403 なら strict は分からない」と書き、fix はこちらの書き方と同じになった。Assumptions の 64 行が観測したのは admin でない人への 404 `Not Found`(cli/cli)だけで、403 を返す実例は repo にない。そのため、これは計画とのずれではなく、AC2 の本文の括弧が 403 を admin のない人の答えと言い過ぎている、と判定した。動きは計画の Scope・C3・C4 と合うので、Progress checklist への記録は必須ではない。記録するなら、候補は次の 1 文: 「cycle 2 の 59abeaec で、strict の 403 は種類を `unknown` のまま、Detail は admin のないことを原因の 1 つとだけ言う形にした(Scope 30 行の書き方。AC2 の括弧の 403 は admin のない人の答えとしては観測していない)」。
+
+計画の C1〜C7: C3(`unknown` は `info`)は P2〜P5 で、C4(strict を読めなければ推測で `github_protection` にしない)は P2・P3・P4 で、C2 と C5(台帳があれば `unknown` も書く)は P2〜P5 の `cached in` で、C7(どの gh にも `--hostname`)は gh の呼び出しの記録で、HEAD の binary でも保たれている。C1(gh が PATH になければ打たない、全体の期限)と C6 は、差分が触れていない。
+
+### 静的解析(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope、golang の pack) | pass(rc 0) | local verifier の全項目が OK、`check-sync.sh` PASS(IDENTICAL 167、DRIFTED 0)、`check-pipeline-sync.sh` ok、`check-skill-sync: 13 skill(s) in lock-step`、`check-template-purity.sh` PASS、tech-debt の plan の参照 OK、`gofmt: ok`、`go vet` と staticcheck は出力なし、golangci-lint `0 issues.`、`secret-scan-branch: scanned a16d7c4f..95e97635 against origin/main: clean` |
+| `gofmt -l internal/ cmd/` | pass | 出力なし |
+| `go vet ./internal/org/... ./internal/cli/...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go vet ./...`、`GOTOOLCHAIN=go1.25.8 go build ./...` | pass | 出力なし。go.mod は `go 1.25.8`。fix が `unicode/utf8` を外し `unicode` をテストで使い始めたが、どちらも 1.25.8 で通る |
+| `./scripts/check-skill-sync.sh` | pass | `13 skill(s) in lock-step` |
+| `./scripts/check-sync.sh` | pass | IDENTICAL 167、DRIFTED 0、KNOWN_DIFF 5 |
+| `git diff --check fb954403 HEAD` | pass | 出力なし |
+| 変更したファイルの U+FFFD の grep | pass | 0 件 |
+
+### 文書のずれ(cycle 2)
+
+`403` を含む非 test の行を README.md、AGENTS.md、仕様、tech-debt、skill の 4 面、`internal/cli`、`internal/org` で grep すると、`mergeguarantee.go` の 4 行(433、434、467、469)のほかは、仕様の 74 行目と tech-debt の 244 行目だけだった。
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| 仕様 FR-7 の 7c-2 の注(`docs/specs/2026-10-07-org-multi-org-director.md:74`) | 一部ずれ(D1、LOW) | 「classic の保護に必須の検査があり、その strict を読めない(admin でない人への 404 `Not Found`、403)ときは、推測で `github_protection` にせず `unknown` にした」。結果の `unknown` はコードと合う。括弧は「admin でない人への」が 403 にも掛かるように読め、そう読むと、403 では admin のないことを原因の 1 つとしか言わない Detail と食い違う。self-review の C2-3 と同じ判定で、文書のずれと見る。この回の /sync-docs が 1 句を「admin でない人への 404 `Not Found`、または 403(admin のないことは原因の 1 つ)」の形に直すのが一番小さい。直らなければ PR の known gaps に挙げる |
+| `docs/tech-debt/README.md:244` の Related の `docs/reports/test-2026-10-14-org-merge-guarantee.md (Test gaps 4 and 6)` | 一部ずれ(D2、LOW) | 今は正しく指す: test 報告の Test gaps の 4 は空の context、6 は `os.Stat` のエラー。前例の org-merge-order の test 報告は cycle 2 以降を `## Cycle N` の節と `### Test gaps(cycle N)` で書き足し、cycle 1 の番号を変えていないので、self-review の C2-4 (b) の「番号が動く見込みが高い」とは違い、番号はおそらく動かない(未確認)。ただし (g) の 3 つめの `%2F` は Gap 8 の前半で、「4 and 6」に入っていない。cycle 2 の /test が節を足すと Test gaps の一覧が 2 つになり、どちらの番号かも曖昧になる。中身(empty context、`os.Stat`、`%2F`)で指すか、「4, 6 and 8」にする |
+| `docs/tech-debt/README.md:244` の Why deferred の「cycle 2 of the pipeline, capped at 2」 | yes(情報) | HEAD では正しい(`cycle-count.json` は 2、上限は既定の 2)。上限を上げて 3 回目を回し、(d)〜(f) を直すと偽になる(self-review の C2-4 (a)。同じ形の文が上限の引き上げで偽になった前例は 119 行目)。今のずれではない |
+| `readMergeClassicStrict` の doc(`mergeguarantee.go:430-437`) | yes(情報) | 404 `Not Found` は admin の文、403 は原因の 1 つ、という説明はコードと合う。「GitHub answers 403 without admin access」という GitHub の動きの主張は観測されていない(self-review の C2-2)。コードとの食い違いではないので文書のずれには数えず、self-review が勧めた登録簿の (i) に回す |
+| `mergeGuaranteeErrText` の doc と定数の注(`:96-97`、`:608-615`) | yes | 空白をまとめる、1 文字ずつエスケープ、そのあとで切る、doctor は Detail をそのまま出す、status と merge-order の二度目のエスケープは文を変えない、の 5 点が P5 と fb954403 の対照の出力に合う。doc は「Detail 全体をエスケープする」とは言っていない。fix の commit message の「so no raw control character reaches the terminal」は error text の部分についての文で、Detail のほかの出どころ(C2-1)を含めると広すぎるが、commit message は文書ではないので情報にとどめる |
+| README の doctor の行(`README.md:127`) | yes | 「its `strict`, which needs admin access」は endpoint の要件で、403 の原因を言っていない。cycle 2 で変わっていない |
+| skill の 4 面、AGENTS.md、`ralph status` と `ralph org merge-order` の help | yes | cycle 2 で変わっていない。403 と admin を結ぶ文はない(grep)。`check-skill-sync.sh` と `check-sync.sh` が通る |
+| 実機の証跡 `docs/evidence/merge-guarantee-livefire-2026-10-14.md` の cli/cli の行(63 行目) | yes | HEAD の binary を本物の gh で打った doctor の行は、scratch の path を `<scratch>` にすると 63 行目と `cmp` で同じ。404 `Not Found` の文は fix で変わっていない。証跡は c56c1f11 の binary のものだが、この行に限っては HEAD でも正しい |
+| self-review の cycle 2 が勧めた登録簿の (h)(i) と C2-4 の 2 点の直し | 未追加(情報) | 計画の Progress 168 行は「cycle 2 で新しく出た LOW は直さず同じ行に足す」と決めている。244 行目にはまだない。/sync-docs が足す前提 |
+| 計画の AC の checkbox と Progress | yes | AC1〜AC10 は `[x]`、cycle 2 の決定は 168 行にあり、`[ ]` は「PR created」だけ。cycle 1 の節の「checkbox が遅れている」の情報は解消した。Affected areas に新しいテストのファイルがない件は本文なので直さない(cycle 1 のまま) |
+
+### 観察
+
+- 本物の gh 2.102.0 で、origin を `https://github.com/cli/cli.git` にした空の repo に HEAD の binary の doctor を打った(読み取りの GET だけ、台帳は scratch)。`info — unknown`、rc 0、キャッシュは `kind: unknown`、`default_branch: trunk`、`api_repo: cli/cli`。status の行は `unknown (trunk of github.com/cli/cli, checked 2026-10-14T12:40:52Z): ...`
+- 偽の gh の P1〜P5 は、cycle 1 の verify が「実機では見ていない」とした classic の strict true(P1)を、binary を通して初めて `pass` で見た。本物の GitHub での確認ではない
+- P2 の 403 の本文の message(`Resource not accessible by personal access token`)は、偽の gh に私が書いたもので、GitHub がこの endpoint でそれを返すかは確かめていない
+- doctor は herdr を `exec.LookPath` で探すだけで(`driver.checkAvailable`)、herdr のサーバーには触れない。打つ前に読んで確かめた
+
+### Coverage gaps(cycle 2)
+
+- テストは走らせていない(/test の担当)。新しい 4 行と 2 本、`unicode` の import を go1.26 と `GOTOOLCHAIN=go1.25.8` の両方で走らせるのは /test
+- strict の endpoint が本物の GitHub で 403 を返す実例は、今回も見ていない(self-review の C2-2)。P2 は偽の gh
+- `ralph org merge-order` の保証の行は、cycle 2 では binary で打っていない(経路は変わらず、テストが受け持つ)
+- C2-1 の、Detail の error text 以外の出どころ(cache の OS のエラー、state dir の path、scp 形の origin の owner/repo)が doctor の行に生で出ることは、コードを読んで確かめただけ
+- `protection/required_status_checks` が `%2F` を含む名前を受け付けるかは、cycle 1 のまま未確認(admin の権限が要る)
+- 足すと確信がいちばん増える確認: この回の /sync-docs のあとに、仕様 74 行目の 403 の句と登録簿 244 行目((h)(i) の追記、Related の Gap の指し方)を grep し直す。D1 と D2 が閉じたかが分かる。打つのは grep 2 回で、ネットワークに出ない
+
+### 判定(cycle 2)
+
+- Verdict: pass
+- Verified: cycle 2 の 3 つの直し(L3、L4、Gap 1)をコードとテストの名前で辿り、HEAD 95e97635 の binary で P1〜P5 として再現し、fb954403 の binary で直す前の動きと見比べた。本物の gh の cli/cli の行は実機の証跡と同じ。AC1〜AC10 は満たしたまま(AC2・AC4〜AC6 は binary で確かめ直し、AC1・AC3・AC7・AC10 は経路が変わっていないことを diff で確かめた)。計画の C1〜C7 は保たれている。静的解析はすべて通った(go1.25.8 の build と vet を含む)。計画の digest は承認時と同じ
+- Partially verified: AC9(D1)。登録簿 244 行目の指し方(D2)。AC2 の本文の括弧は 403 を admin のない人の答えと言い過ぎているが、計画とのずれではない(上の注)
+- Not verified: テストの実行(/test)、本物の GitHub の 403、merge-order の binary の行、C2-1 の出どころの binary での再現、`%2F`
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2(D1、D2)。情報は 5 つ(244 行目の cap の数字、`readMergeClassicStrict` の doc の未観測の主張、fix の commit message の範囲、(h)(i) の未追加、AC2 の本文の言い過ぎ)
