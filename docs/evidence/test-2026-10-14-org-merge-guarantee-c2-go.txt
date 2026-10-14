@@ -1,0 +1,131 @@
+# /test org-merge-guarantee cycle 2: go test ./internal/cli/... ./internal/org/... (HEAD 034dec6f)
+# Both runs had <scratch>/canary-bin first on PATH (a gh that logs its argv and exits 97): 0 calls in both, and in
+# every later run (mutants, probes, -race, the pin-removal check). Runner: <scratch>/go2.sh.
+#
+# 1. GOTOOLCHAIN=go1.25.8 go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile=<scratch>/cover-go1.25.8.out
+go version go1.25.8 darwin/arm64
+rc=0 elapsed=310
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  651 SKIP 0 FAIL 0 | subtests PASS  556 SKIP 0 FAIL 0 | ok 306.545s	coverage: 86.9% of statements
+github.com/yoshpy-dev/ralph/internal/org      top PASS  710 SKIP 1 FAIL 0 | subtests PASS 1463 SKIP 0 FAIL 0 | ok 142.410s	coverage: 94.3% of statements
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 1.994s	coverage: 93.1% of statements
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.562s	coverage: 100.0% of statements
+
+# 2. go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile=...   (local go1.26.0)
+go version go1.26.0 darwin/arm64
+rc=0 elapsed=274
+github.com/yoshpy-dev/ralph/internal/cli      top PASS  651 SKIP 0 FAIL 0 | subtests PASS  556 SKIP 0 FAIL 0 | ok 270.262s	coverage: 86.9% of statements
+github.com/yoshpy-dev/ralph/internal/org      top PASS  710 SKIP 1 FAIL 0 | subtests PASS 1463 SKIP 0 FAIL 0 | ok 121.833s	coverage: 94.3% of statements
+github.com/yoshpy-dev/ralph/internal/org/driver top PASS   48 SKIP 0 FAIL 0 | subtests PASS   89 SKIP 0 FAIL 0 | ok 1.649s	coverage: 93.1% of statements
+github.com/yoshpy-dev/ralph/internal/org/protocol top PASS   15 SKIP 0 FAIL 0 | subtests PASS   56 SKIP 0 FAIL 0 | ok 1.540s	coverage: 100.0% of statements
+
+# 3. -race on the merge-guarantee, merge-order and status tests (go1.26.0)
+#   go test -race ./internal/org/ -run 'MergeGuarantee|MergeOrder' -count=1
+#   go test -race ./internal/cli/ -run 'MergeGuarantee|OrgMergeOrder|TestStatusCmd' -count=1
+## -race (go1.26.0)
+ok  	github.com/yoshpy-dev/ralph/internal/org	6.933s
+rc=0
+ok  	github.com/yoshpy-dev/ralph/internal/cli	48.895s
+rc=0
+race elapsed=66
+
+# SKIP and FAIL lines (go1.25.8; go1.26.0 is the same)
+--- SKIP: TestEscalate_NoDesktopNotificationOffDarwinIsSkipped (0.00s)
+
+# Test names (PASS/SKIP/FAIL lines, durations stripped, LC_ALL=C sorted; 3,589 lines each), go1.25.8 vs go1.26.0
+(empty: identical)
+
+# Test names, cycle 1 (go1.25.8, re-sorted with LC_ALL=C) vs cycle 2 (go1.25.8): diff <cycle 1> <cycle 2>
+# Exactly the cycle-2 test edits of 59abeaec: two 403 rows renamed ("strict needs admin access: 403 ..." ->
+# "strict answers 403: ..."), two rows added ("in the body only", "a 404 with another message"), two tests added.
+607a608,610
+>     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body
+>     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body_only
+>     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_on_stderr_only
+609a613
+>     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_a_404_with_another_message
+611,612d614
+<     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_403_in_the_body
+<     --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_403_on_stderr_only
+2597a2600
+> --- PASS: TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped
+2599a2603
+> --- PASS: TestMergeGuarantee_ErrorIsCutAfterEscaping
+
+# The tests cycle 2 added or changed, and the existing escape tests of status and merge-order, on both toolchains
+# go1.25.8
+--- PASS: TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine (1.66s)
+--- PASS: TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine (0.08s)
+--- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_404_Not_Found (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_on_stderr_only (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body_only (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_a_404_with_another_message (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/ruleset_checks_and_a_strict_that_needs_admin_access (0.00s)
+--- PASS: TestMergeGuarantee_LongErrorIsCutToOneLine (0.00s)
+--- PASS: TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped (0.00s)
+--- PASS: TestMergeGuarantee_ErrorIsCutAfterEscaping (0.00s)
+# go1.26.0
+--- PASS: TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine (1.73s)
+--- PASS: TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine (0.08s)
+--- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_needs_admin_access:_404_Not_Found (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_on_stderr_only (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_403:_in_the_body_only (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/strict_answers_a_404_with_another_message (0.00s)
+  --- PASS: TestMergeGuarantee_ClassicProtectionDecidesTheKind/ruleset_checks_and_a_strict_that_needs_admin_access (0.00s)
+--- PASS: TestMergeGuarantee_LongErrorIsCutToOneLine (0.00s)
+--- PASS: TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped (0.00s)
+--- PASS: TestMergeGuarantee_ErrorIsCutAfterEscaping (0.00s)
+
+# Tests that were flaky before
+# go1.25.8
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.81s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.69s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.87s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.40s)
+OrgGate interrupt subtests >= 5 s: 0
+# go1.26.0
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.69s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.72s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.51s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.42s)
+OrgGate interrupt subtests >= 5 s: 0
+
+# go tool cover -func (go1.25.8 profile) for internal/org/mergeguarantee.go and internal/cli/doctor_merge_guarantee.go
+# mergeguarantee.go: 254/261 statements (97.3%; cycle 1 253/260). The 7 uncovered statements are the same as cycle 1's:
+# the real defaults of Now, Exec and LookPath (lines 175, 186, 189, 755, 778) and the os.Stat errors other than
+# "does not exist" in the save (661) and the read (735).
+internal/cli/doctor_merge_guarantee.go:30:		mergeGuaranteeEnvFromOS			100.0%
+internal/cli/doctor_merge_guarantee.go:52:		checkMergeGuarantee			100.0%
+internal/cli/doctor_merge_guarantee.go:65:		mergeGuaranteeResult			100.0%
+internal/org/mergeguarantee.go:109:			MergeGuaranteePathIn			100.0%
+internal/org/mergeguarantee.go:173:			CheckMergeGuarantee			81.2%
+internal/org/mergeguarantee.go:212:			decide					100.0%
+internal/org/mergeguarantee.go:255:			readOrigin				100.0%
+internal/org/mergeguarantee.go:276:			mergeGuaranteeAPIHost			100.0%
+internal/org/mergeguarantee.go:287:			readRepository				100.0%
+internal/org/mergeguarantee.go:345:			readMergeRules				100.0%
+internal/org/mergeguarantee.go:394:			readMergeClassic			100.0%
+internal/org/mergeguarantee.go:438:			readMergeClassicStrict			100.0%
+internal/org/mergeguarantee.go:479:			protected				100.0%
+internal/org/mergeguarantee.go:488:			checksOnly				100.0%
+internal/org/mergeguarantee.go:522:			subject					100.0%
+internal/org/mergeguarantee.go:532:			mergeChecksText				100.0%
+internal/org/mergeguarantee.go:542:			repoPath				100.0%
+internal/org/mergeguarantee.go:547:			ghArgs					100.0%
+internal/org/mergeguarantee.go:557:			gh					100.0%
+internal/org/mergeguarantee.go:562:			command					100.0%
+internal/org/mergeguarantee.go:568:			ghJSON					100.0%
+internal/org/mergeguarantee.go:585:			stopped					100.0%
+internal/org/mergeguarantee.go:599:			getMergeOriginURL			100.0%
+internal/org/mergeguarantee.go:616:			mergeGuaranteeErrText			100.0%
+internal/org/mergeguarantee.go:648:			SaveMergeGuarantee			100.0%
+internal/org/mergeguarantee.go:654:			saveMergeGuarantee			93.3%
+internal/org/mergeguarantee.go:726:			ReadMergeGuarantee			92.3%
+internal/org/mergeguarantee.go:776:			readMergeGuaranteeOrigin		94.1%
+internal/org/mergeguarantee.go:805:			mergeOriginName				100.0%
+internal/org/mergeguarantee.go:814:			unknownFor				100.0%
+internal/org/mergeguarantee.go:824:			ForDefaultBranch			100.0%
+internal/org/mergeguarantee.go:836:			Text					100.0%

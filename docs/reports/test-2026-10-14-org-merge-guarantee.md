@@ -119,3 +119,175 @@ verifier の gap「merge queue で決まる経路は偽の seam だけ」のた�
 - Blocked: なし
 - Verified: 計画の Test plan の Unit、Integration、Regression の項目と、Edge case の 3 つのうち 2 つ(上の対応表)。mutant 74 件のうち 69 件が red。merge queue と ruleset の検査で決まる `github_protection` を本物の gh で確かめた
 - Not verified: Test gaps の 1〜8。どれも PR を止めるものではない。1 は計画の Edge case の 1 行が欠けたもので、HEAD の挙動は probe で正しいと確かめた
+
+## Cycle 2
+
+- Date: 2026-10-14(JST 21:53〜22:50)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` は 2 で、既定の上限 2 の最後)。self-review の cycle 2(432e5912、LOW 4 件、Merge: yes)と verify の cycle 2(a99faa87、pass、LOW 2 件)のあとに走らせた
+- Scope: HEAD 034dec6f(base a16d7c4f)。cycle 2 でコードとテストを変えたコミットは 59abeaec だけで、`git diff fb954403 HEAD -- internal/` は `internal/org/mergeguarantee.go` と `internal/org/mergeguarantee_test.go` の 2 ファイル(+95/-23)。中身は、`mergeGuaranteeErrText` のエスケープ(空白類を畳み、1 文字ずつ `PrintableInboxText` に通し、そのあとで 300 バイトに切る)、`readMergeClassicStrict` の 404 `Not Found` と 403 を別の case に分けたこと、テストの 4 行と 2 本。ほかのコミットは計画の 1 行、登録簿の 244 行目、報告と insight event だけ。behavioral test だけを実行した(静的解析は /verify の担当)。環境は cycle 1 と同じ(macOS arm64、go1.26.0 と go1.25.8、git 2.49.0、gh 2.102.0)。load average は 5〜29
+- Evidence(どれもコミットする。wrapper が書いた `docs/evidence/verify-2026-10-14-125414.log` は gitignore の対象なのでコミットしない):
+  - `docs/evidence/test-2026-10-14-org-merge-guarantee-c2-run-test.txt`: `./scripts/run-test.sh`(changed)の出力を cycle 1 と同じ方法で抜いたもの、`(cached)` だった 4 パッケージの打ち直し、cycle 1 の行との diff
+  - `docs/evidence/test-2026-10-14-org-merge-guarantee-c2-go.txt`: go1.25.8 と go1.26.0 での `./internal/cli/... ./internal/org/...` の結果。パッケージごとの数、`-race`、SKIP の行、両方の版と cycle 1 との名前の diff、cycle 2 で足した・変えたテストの行、前に揺れたテストの行、関数ごとの coverage
+  - `docs/evidence/test-2026-10-14-org-merge-guarantee-c2-mutation.txt`: cycle 2 のコードの mutant 31 件と対照 X0、生き残りに当てた probe の行 PC1〜PC5、同じ動きの生き残りの理由、本物の GitHub の答え、cycle 1 の一覧 70 件を HEAD で流し直した結果、mutant の一覧と probe の source
+  - `docs/evidence/test-2026-10-14-org-merge-guarantee-c2-ac8.txt`: 本物の gh に届かないこと(canary とその感度)、台帳に `merge-guarantee.json` がないこと、TestMain の固定を外したときの感度
+- テストもコードも変えていない。mutant の写し、probe のテスト、偽の `gh`(canary)は scratchpad に置き、`go test -overlay` と PATH で読ませた。worktree に書いたのは、この節と上の evidence 4 本と insight event だけ。evidence は cycle 1 と同じく scratch の script が組み立てた生の出力で、`git diff --check` は空、U+FFFD は 0 個だった。mutation を終えて evidence を置く前の `git status --porcelain` は空で、main のチェックアウトの `git status --porcelain` も空。`~/.config/herdr` の下に 21:50 より新しいファイルはなく、`$TMPDIR` に `ralph-verify-*` は残っていない。herdr の server も osascript も起こしていない
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed、go1.26.0) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(cycle 1 と同じ) | 717 秒、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile` | cli: top-level 651、subtest 556。org: 710、1,463。org/driver: 48、89。org/protocol: 15、56 | 同じ数から org の skip 1 を引いた数 | 0 | org 1 | 310 秒(cli 306.5 s、org 142.4 s)、rc 0 |
+| `go test ./internal/cli/... ./internal/org/... -count=1 -v -coverprofile`(go1.26.0) | go1.25.8 と同じ | go1.25.8 と同じ | 0 | org 1 | 274 秒(cli 270.3 s、org 121.8 s)、rc 0 |
+| うち cycle 2 で足した・変えたテスト(下の一覧) | top-level 2(新)、subtest 4(新 2、改名 2) | 両方の版ですべて | 0 | 0 | - |
+| `(cached)` だった config、insights、scaffold、upgrade を `-count=1`(go1.26.0) | 4 パッケージ | 4 | 0 | - | 約 4 秒 |
+| `go test -race`(org は `-run 'MergeGuarantee\|MergeOrder'`、cli は `-run 'MergeGuarantee\|OrgMergeOrder\|TestStatusCmd'`、go1.26.0) | 2 パッケージ | 2 | 0 | - | 66 秒(org 6.9 s、cli 48.9 s)、DATA RACE なし |
+| mutation: cycle 2 のコード(`go test -overlay`、go1.26.0) | mutant 31 件と対照 X0 | red 19 件 | 生き残り 12 件(下の「Mutation(cycle 2)」) | build できないものはなし | 1,217 秒 |
+| mutation: cycle 1 の一覧を HEAD で流し直し | 70 件(74 件のうち、元の行がなくなった S02、S04、S06、S07 を除く) | red 69 件 | 生き残り 1 件(D09、cycle 1 と同じ) | - | 1,366 秒 |
+| probe(overlay だけの 5 本、コミットしない) | HEAD と生き残り 12 件 | HEAD ではすべて通る。閉じられる生き残り 8 件は、どれも狙った行で落ちる | - | - | - |
+| 本物の gh(読むだけ) | strict の endpoint に 2 回 | 下の「本物の GitHub の答え」 | 0 | - | - |
+
+- shell は 41 本すべてが `OK` で終わり、集計の `FAIL:` の行はどれも 0。抜き出した行から行番号、時刻、Go の `ok` の行、末尾の行を外して cycle 1 の evidence と diff を取ると空で、suite ごとの集計の行は 1 行も違わない。Skipped は cycle 1 と同じ `tests/test-secret-scan-branch.sh` の 1 件
+- `run-test.sh` の中の Go は `internal/cli`(189.0 s)、`internal/org`(84.9 s)、`internal/org/driver` を流し直し、config、insights、org/protocol、scaffold、upgrade は `(cached)` だった。`internal/insights` は `internal/org` を import する(`go list -deps`)ので、cached の結果に頼らず 4 つを `-count=1` で打ち直して ok。org/protocol は上の org/... の実行で uncached に通った
+- cycle 1 と比べた数: org の top-level は 708 から 710(+2)、subtest は 1,461 から 1,463(+2)。cli、org/driver、org/protocol は同じ。名前の行(時間を除き `LC_ALL=C` で並べた 3,589 行)を cycle 1 と diff すると、違いは 59abeaec のテストの直しそのものだった: 403 の 2 行の改名(`strict needs admin access: 403 in the body`、`... on stderr only` から `strict answers 403: ...` へ)、足した 2 行(`strict answers 403: in the body only`、`strict answers a 404 with another message`)、足した 2 本。消えたテストはない
+- go1.25.8 と go1.26.0 で、名前の行 3,589 行は同じだった
+- 前に揺れたテスト(`TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`、`TestRunDoctorFull_StrictFlipsExitCode_DriftedCore`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どちらの版でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` は 3.87 s と 4.51 s で、+5 s の subtest は出なかった
+- org の Skipped は cycle 1 と同じ `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`
+
+### cycle 2 で足した・変えたテスト
+
+次のテストは、go1.25.8 と go1.26.0 の両方で PASS だった(evidence の go の「The tests cycle 2 added or changed」)。org の `-race` の実行は `-run 'MergeGuarantee|MergeOrder'` なので、どれも race detector の下でも通っている。
+
+- 403 の 3 行(`TestMergeGuarantee_ClassicProtectionDecidesTheKind` の表): `strict answers 403: in the body`(本文の status と stderr の両方が 403)、`strict answers 403: on stderr only`(stdout が空)、`strict answers 403: in the body only`(新しい行。stderr は `exit status 1` だけ)。最初の 2 行は cycle 1 の行の改名で、期待の Detail を 403 の文(admin のないことを原因の 1 つとしか言わない文)に変えた
+- 404 の行: `strict answers a 404 with another message`(新しい行。`Branch not found` の 404 は最後の `return` の一般の `unknown`)
+- エスケープと切る順: `TestMergeGuarantee_ErrorIsCutAfterEscaping`(新しい本。`a` と ESC 100 個は 297 バイトで切って `...`、ESC 75 個のちょうど 300 バイトは切らない)
+- 制御文字のエスケープ: `TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped`(新しい本。ESC、BEL、NUL、DEL、C1 の `\u009b` を Go の escape で書く。最後の確かめが、キャッシュから読んだ行を `PrintableInboxText` にもう一度通しても同じ文になること)
+- 関数が変わったので見直した既存の行: `TestMergeGuarantee_LongErrorIsCutToOneLine`、`strict needs admin access: 404 Not Found`、`ruleset checks and a strict that needs admin access`、CLI の `TestOrgMergeOrder_MergeGuaranteeWithControlCharactersStaysOneLine` と `TestStatusCmd_MergeGuaranteeFromACacheWithControlCharactersStaysOneLine`。どれも PASS
+
+### Coverage(cycle 2)
+
+- Statement(go1.25.8、各パッケージ自身のテストの profile): `internal/org` 94.3%、`internal/cli` 86.9%、`internal/org/driver` 93.1%、`internal/org/protocol` 100.0%。どれも cycle 1 と同じ
+- `internal/org/mergeguarantee.go` は 254/261 文(97.3%、cycle 1 は 253/260)。増えた 1 文は 403 の case の `return` で、通っている。通らない 7 文は cycle 1 と同じもので、`Now`、`Exec`、`LookPath` が nil のときの本物の既定値(175、186、189、755、778 行)と、state dir の `os.Stat` が「ない」以外のエラーを返したときの save(661 行)と read(735 行)
+- cycle 2 で変えた `readMergeClassicStrict` と `mergeGuaranteeErrText` は、どちらも 100%。それでも下の mutant が 8 件、閉じられる形で生き残った。穴は通らない行ではなく、呼び出し箇所ごとの入力と、テストの値が区別しない数にある
+- Branch: 測っていない(cycle 1 と同じ)。代わりに mutation で分岐ごとの判定を確かめた
+
+### cycle 1 の Gap 1 は閉じたか
+
+cycle 1 で生き残った S03、S03b、S04、S07 は、`readMergeClassicStrict` の `switch` が変わったので、同じ変更を HEAD の行に書き直して打った。4 件とも red になり、どれも cycle 2 で足した行だけが落とした。
+
+| cycle 1 の mutant | 変更 | HEAD での id | 落とした行 |
+| --- | --- | --- | --- |
+| S03 | strict の endpoint の、message が想定外の 404(本文の status)を strict false と読む(`unknown` が `pr_checks_only` になる) | G03 | `strict answers a 404 with another message` |
+| S03b | 同じ変更を stderr の `(HTTP 404)` で | G03b | 同じ行 |
+| S04 | どの 404 も admin の文の `unknown` にする | G04 | 同じ行 |
+| S07 | 本文の status の 403 を読まない | G07 | `strict answers 403: in the body only` |
+
+- cycle 1 の一覧を HEAD で流し直すと、元の行がまだある S03 と S03b はそのまま red になった。元の行がなくなった S02、S04、S06、S07 は、上の G04、G07 と下の F06、F04 として書き直し、4 件とも red
+- cycle 1 で red だった 69 件(R14 は cycle 1 で書き直した形)は、HEAD のテストでも全部 red のままだった。生き残りは cycle 1 と同じ D09 だけで、cycle 2 の fix の範囲外(Gap 4)。HEAD の行に書き直した G09 も生き残り、cycle 1 の probe PB3 で落ちることは変わらない
+
+### Mutation(cycle 2)
+
+cycle 2 の差分の周りに 31 件の mutant を作った(`mergeguarantee.go` だけ)。19 件が red、12 件が生き残った。対照の X0(手を加えないファイルを overlay で読ませたもの)は生き残った。
+
+| 対象 | mutant | red | 生き残り |
+| --- | --- | --- | --- |
+| cycle 1 の Gap の書き直し(G03、G03b、G04、G07、G09) | 5 | 4 | G09 |
+| 403 と 404 の分け方(F01、F02、F04〜F09、F08b) | 9 | 5 | F01、F05、F08、F08b |
+| `mergeGuaranteeErrText`(E01〜E10) | 10 | 9 | E06 |
+| 呼び出し箇所ごとに、Detail に `mergeGuaranteeErrText(err)` でなく `err.Error()` を入れる(P296、P353、P466、P471、P474、P575、P794) | 7 | 1(P296) | 6 |
+
+- `mergeGuaranteeErrText` の壊し方は、同じ動きの E06 を除いてすべて red だった。直す前の順(生で切ってから escape、E01)と、`>` を `>=` にするもの(E03)、escape して書いてから 300 バイトで切るもの(E07)、escape の長さを 1 バイトと数えるもの(E08)は `TestMergeGuarantee_ErrorIsCutAfterEscaping` が落とした。escape を外すもの(E05、L3 を戻す)と C0 だけを escape するもの(E10、DEL と `\u009b` が生で残る)は `TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped` が落とした。空白を畳まないもの(E02、E09)は `TestMergeGuarantee_LongErrorIsCutToOneLine` と `TestMergeGuarantee_FailuresAreUnknownWithAReason` が落とした
+- 403 と 404 の分け方は、L4 を戻すもの(F02、403 にまた admin の文を出す)が 403 の 3 行で、stderr の `(HTTP 403)` を読まないもの(F04)が `on stderr only` で、`Not Found` の case を外すもの(F06)が `404 Not Found` の行で、403 を strict false と読むもの(F07)と 403 の Detail から branch を外すもの(F09)が 403 の行で、それぞれ red になった
+
+生き残り 12 件のうち 8 件は、HEAD で通る probe の行が落とす(evidence の mutation の B)。確信が増える順に挙げる。
+
+- P353、P466、P471、P474、P575、P794(PC3 の 5 行と PC4): 呼び出し箇所 1 つの Detail を `err.Error()` で作る。`mergeGuaranteeErrText` を呼ぶ非 test の行は 12 か所あるが、制御文字や改行を持つエラーを渡すテストは repository の読み(296 行。P296 は red で、E02・E09 を落とした `gh fails on an ssh alias host` の行もここ)の 1 か所だけだった。mutant を作った 6 か所(353、466、471、474、575、794 行)は、生の `err.Error()` にしてもどのテストも変わらない。残りの 5 か所(218、261、308、362、578 行)には mutant を作っていない。今は 12 か所すべてがこの関数を通る(verify の grep)。テストが止めないのは、次に誰かが 1 か所を生の `err.Error()` に戻したときや、新しい gh の手順を足したとき。PC3 は gh と git の各手順(get-url、repository、rules、branch protection、strict の 404 `Not Found`・403・ほかの失敗)に ESC と BEL と改行を持つエラーを渡して、Detail に生の制御文字がなく `\x1b[31m...\a second line` があることを確かめる表で、PC4 は cache を読む側の get-url の失敗(794 行)を同じように確かめる
+- F08、F08b(PC2、PC1): 403 の Detail と 404 `Not Found` の Detail が、必須の検査の数を 1 と書く。admin と 403 の行はどれも必須の検査が 1 つ(`mgClassicRequires("ci")`)なので、`mergeChecksText(checks)` を `mergeChecksText(1)` にしても分からない。PC1 と PC2 は検査を 2 つ(`ci`、`lint`)にして「requires 2 required status checks」を確かめる。表に 1 行ずつ足せば閉じる
+
+残りの 4 件のうち 3 件は、本物の入力では動きが変わらない。
+
+- F01(403 の case を `Not Found` の case より前に置く): 違いが出るのは、本文の message が `Not Found` で、本文の status か stderr が 403 を言う答えだけ。GitHub の 404 の本文は `"status":"404"` だった(下)
+- F05(本文の status を文字列の `"403"` とだけ比べる): 違いが出るのは status が数の答えだけ。GitHub は status を文字列で書いた(下)
+- E06(`PrintableInboxText` の `keepLineBreaks` を true にする): `strings.Fields` が先に `\n` と `\t` をすべて外しているので、渡る文字に改行もタブもない
+
+最後の G09 は cycle 1 の D09 で、Gap 4 のまま残る(下の Test gaps)。
+
+PC5 は mutant を落とすためでなく、HEAD の動きを記録するための行で、HEAD で通った: escape 済みの文(`already \x1b escaped`)は変わらない、不正な UTF-8 のバイトは U+FFFD になる(キャッシュの JSON が作る文字と同じ)、NEL(U+0085、空白でも制御文字でもある)は escape されずに 1 つの空白に畳まれる、ESC・NUL・`\u009b`・U+200B・U+2028 を escape した文は `PrintableInboxText` にもう一度通しても変わらない。
+
+### 本物の gh に届かないこと、台帳に書かないこと(AC8)
+
+- 呼ばれたら記録して exit 97 で終わる偽の `gh`(canary)を、受け継ぐ PATH の先頭に置いて、`run-test.sh`、2 回の全体の実行、`-race`、mutant と probe のすべての実行、`(cached)` の打ち直し、下の固定を外す確認を走らせた。canary の記録は 0 件
+- canary の感度: scratch のテスト 1 本(overlay で足しただけ)で、`CheckMergeGuarantee` を本物の既定値(`Exec` と `LookPath` が nil)のまま worktree に向けて呼んだ。canary の写しを PATH の先頭に置くと、canary は 1 回呼ばれ(`api --hostname github.com repos/yoshpy-dev/ralph`)、Detail は `exit status 97` を言った。受け継ぐ PATH を通って本物の gh に届くテストがあれば、上の記録に残る。cycle 1 の固定を外す確認では、doctor のテストが `PATH` を自分の stub のディレクトリだけにする(`doctorMGProject` の `t.Setenv("PATH", binDir)`)ので git も見つからず、canary の感度はそこからは分からなかった。この計画で canary が実際に呼ばれることを示したのは、この回が初めて
+- repo の台帳(main のチェックアウトの `.harness/state/org`)と worktree の台帳はどちらもなく、`.harness` の下に `merge-guarantee*` は 0 個。cycle 1 と同じく、ディレクトリがないのでこれだけでは固定の効き目は分からない
+- 固定の感度(`internal/cli/main_test.go` は cycle 1 から変わっていない): cycle 1 の overlay で TestMain の `doctorMergeGuaranteeEnv` の固定を外し、`RALPH_ORG_STATE_DIR` に既にある scratch のディレクトリを渡すと、`TestRunDoctor_TestMainPinRunsNoGitOrGh` が落ち、そのディレクトリに `merge-guarantee.json`(kind `unknown`)が書かれた。固定があると rc 0 で、何も書かれない。cycle 1 と同じ結果
+
+### 本物の GitHub の答え(読むだけ)
+
+F01 と F05 が同じ動きかどうかを決めるために、admin でない token で strict の endpoint を 2 回読んだ(GitHub には何も書いていない)。
+
+- `gh api --hostname github.com repos/cli/cli/branches/trunk/protection/required_status_checks` は rc 1 で、stdout は `{"message":"Not Found","documentation_url":"...","status":"404"}`、stderr は `gh: Not Found (HTTP 404)`。status は文字列だった
+- ないブランチ(`no-such-branch-xyz-c2`)の同じ endpoint も、同じ `Not Found` の 404 を返した。admin でない読みでは、cycle 2 で足した行の `Branch not found` の 404 は返らなかった。admin のある読みで返るかと、この endpoint の 403 は見ていない(self-review C2-2 と verify が挙げたとおり)
+
+### Failure analysis(cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+落ちたテストはない。
+
+### Regression checks(cycle 2)
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cycle 1 の Gap 1(S03、S03b、S04、S07) | 4 件とも red | 上の「cycle 1 の Gap 1 は閉じたか」 |
+| cycle 1 で red だった mutant | HEAD のテストでも red | 70 件のうち 69 件。生き残りは cycle 1 と同じ D09 |
+| 403 と 404 を分けても種類は変わらない(どちらも `unknown`、`Branch not protected` などは strict false) | 変わっていない | 表の 404 `Not Found`、403 の 3 行、`Branch not protected`、`Required status checks not enabled` が PASS。F07(403 を strict false と読む)が red |
+| 長いエラーを rune の途中で切らない(cycle 1 の `utf8.RuneStart` の処理を 1 文字ずつの読みに替えた) | 保たれている | `TestMergeGuarantee_LongErrorIsCutToOneLine`(`é` 400 個)が PASS。E07(書いてから 300 バイトで切る)が red |
+| shell の suite | 変わっていない | cycle 1 の行との diff が空 |
+| Go 1.25 だけで起きる違い | 差はない | go1.25.8 と go1.26.0 で数と名前が同じ |
+| 前に揺れたテスト | 揺れなかった | 2 回の全体の実行のどちらでも PASS |
+
+### Test gaps(cycle 2)
+
+cycle 1 の Test gaps の番号のまま、今の状態を書く。
+
+| cycle 1 の Gap | 今 | 根拠 |
+| --- | --- | --- |
+| 1. strict の endpoint の、message が想定外の 404(と mutation の S07) | 閉じた | `strict answers a 404 with another message` と `strict answers 403: in the body only`。G03、G03b、G04、G07 が red |
+| 2. classic の strict true は偽の seam だけ | 残る | endpoint に admin の権限が要る |
+| 3. merge queue と classic の必須の検査の組み合わせは偽の seam だけ | 残る | 例になる公開の repository がない |
+| 4. ruleset の必須の検査で context が空のもの(D09) | 残る(登録簿 244 行目の (g)) | G09 が生き残り、cycle 1 の PB3 で落ちる |
+| 5. 台帳のない doctor を `runDoctorFull` で通した件がない | 残る | cycle 2 は doctor を変えていない |
+| 6. state dir の `os.Stat` が「ない」以外のエラーを返すとき | 残る(登録簿 244 行目の (g)) | coverage の 661 行と 735 行 |
+| 7. 本物の git と gh を使う既定値 | 残る(AC8 のとおりテストでは打たない) | canary の感度の確認で 1 回だけ通した(canary の gh、コミットしない) |
+| 8. `%2F` と gh の stderr の制御文字 | 制御文字は閉じた。`%2F` は残る(登録簿 244 行目の (g)) | `TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped`。verify の cycle 2 は HEAD の binary と偽の gh で doctor と status の行が `\x1b[31m...` になることを確かめた(verify の c2 の evidence の mode=esc) |
+
+cycle 2 で新しく見つけた穴。どれもテストの失敗ではない。確信が増える順に挙げる。
+
+9. 呼び出し箇所ごとのエスケープ: mutant で確かめた 7 か所のうち、制御文字や改行を持つエラーでテストを通るのは repository の読み(296 行)だけで、rules(353 行)、branch protection(575 行)、strict の 404 `Not Found`・403・ほかの失敗(466、471、474 行)、cache を読む側の get-url(794 行)は、`err.Error()` に戻しても落ちるテストがない(P353〜P794)。閉じる足し方は PC3 の表(7 行)と PC4 の 1 本で、どちらも HEAD で通る
+10. 403 と 404 `Not Found` の Detail の検査の数: admin と 403 の行の必須の検査はどれも 1 つなので、数を 1 に決め打ちしても分からない(F08、F08b)。表の 2 行の検査を 2 つにすれば閉じる(PC1、PC2)
+11. 本物の GitHub の strict の endpoint の答えのうち、cycle 2 で足した 2 行の入力(403 と `Branch not found` の 404)は見ていない。admin でない読みでは、ないブランチでも `Not Found` だった(上)
+12. PC5 の動き(不正な UTF-8 が U+FFFD になる、NEL が空白に畳まれる、2 回目の escape で変わらない)にテストがない。害はない(self-review の cycle 2 も不正な UTF-8 について同じ判断)
+13. self-review C2-1 の出どころ(cache の書き込みと削除の OS のエラー、state dir の path、scp 形の origin の URL)は、doctor の Detail に escape されずに入りうる。テストもない。直すかどうかは C2-1 の扱いに従う
+
+### Tech debt(登録簿 244 行目に足す候補)
+
+足すかどうかと文は /sync-docs が決める。244 行目の (g) は「cases with no test」を並べているので、そこへ足すのが近い。
+
+- 9 の呼び出し箇所ごとのエスケープ(gh と git の各手順に制御文字のエラーを渡す表がない)。閉じる足し方: PC3 と PC4(`docs/evidence/test-2026-10-14-org-merge-guarantee-c2-mutation.txt` の F に source)
+- 10 の 403 と 404 `Not Found` の Detail の検査の数。閉じる足し方: 表の 2 行の検査を 2 つにする(PC1、PC2)
+- 2 と 3(classic の strict true と、merge queue と classic の必須の検査の組み合わせ)は偽の seam でしか確かめていない、という記録。今の登録簿にない
+- 11(strict の endpoint の 403 と `Branch not found` の 404 は実物を見ていない)。self-review C2-2 と同じ件なので、C2-2 を足すならその行に合わせてよい
+- 5 と 12 は小さく、足さなくてよい
+
+### Verdict(cycle 2)
+
+- Verdict: pass(cycle 2 の HEAD 034dec6f の時点)
+- Pass: `./scripts/run-test.sh`(changed)は rc 0 で、shell 41 本すべて OK、Go 8 パッケージすべて ok、shell の集計の行は cycle 1 と同じ。`go test ./internal/cli/... ./internal/org/... -count=1` は go1.25.8 と go1.26.0 の両方で rc 0(cli 651/556、org 710/1,463 と skip 1、org/driver 48/89、org/protocol 15/56、名前は両方の版で同じ)。cycle 2 で足した・変えたテスト(403 の 3 行、`Branch not found` の 404 の行、`TestMergeGuarantee_ErrorIsCutAfterEscaping`、`TestMergeGuarantee_ControlCharactersInAnErrorAreEscaped`)はどちらの版でも PASS。`-race` も ok。`(cached)` だった 4 パッケージも打ち直して ok
+- Pass(mutation): cycle 1 の Gap 1 の生き残り S03、S03b、S04、S07 は HEAD で 4 件とも red。cycle 2 の差分の周りの mutant 31 件のうち 19 件が red で、生き残り 12 件のうち 8 件は probe の行で落ちることを確かめ、3 件は本物の入力では動きが変わらず、1 件(G09)は fix の範囲外の Gap 4。cycle 1 の一覧も HEAD のテストで 70 件のうち 69 件が red
+- Pass(AC8): テストは本物の gh を打たない(canary 0 件、本物の既定値で呼ぶと canary が 1 回呼ばれる感度も確かめた)。repo の台帳にも worktree の台帳にも `merge-guarantee.json` はなく、TestMain の固定を外すとキャッシュが書かれてテストが落ちる
+- Fail: 0
+- Blocked: なし
+- Verified: 上の Test execution の全行、cycle 1 の Gap 1 と Gap 8 の前半が閉じたこと、cycle 1 の mutant の殺す力が落ちていないこと、本物の GitHub の strict の endpoint が status を文字列で返すこと
+- Not verified: Test gaps の 2〜7、8 の `%2F`、9〜13。どれも PR を止めるものではない
