@@ -42,12 +42,13 @@ func newOrgCmd() *cobra.Command {
 			"scripts on the head a feature org's leader pushes and records which head\n" +
 			"passed on which base. `ralph org merge-order` lists the feature branches\n" +
 			"in the order their PRs may be merged, from those records and origin's\n" +
-			"branches.",
+			"branches. `ralph org director` registers the interactive session the\n" +
+			"human talks to as the director of the ledger.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; for where spawn and start read the org-wide limits, see ralph org spawn --help)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), and escalate, director attach, and director status read [org.director].enabled, from the main worktree's ralph.toml when the ledger is the main worktree's)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -63,6 +64,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgEscalateCmd(&orgID, &stateDir, &configPath),
 		newOrgInboxCmd(&stateDir, &configPath),
 		newOrgApproveCmd(&stateDir, &configPath),
+		newOrgDirectorCmd(&stateDir, &configPath),
 		newOrgGateCmd(&orgID, &stateDir, &configPath),
 		newOrgMergeOrderCmd(&stateDir, &configPath),
 	)
@@ -163,9 +165,10 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
 // --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
 // another directory, or any other source, cfg is returned unchanged. No
-// other setting is taken from the main worktree here; escalate takes
-// Director.Enabled by the same rule (withMainWorktreeDirectorEnabled). A
-// main worktree ralph.toml that fails to load is an error, not a fallback.
+// other setting is taken from the main worktree here; escalate, director
+// attach and status, and `ralph status` take Director.Enabled by the same
+// rule (withMainWorktreeDirectorEnabled). A main worktree ralph.toml that
+// fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -190,9 +193,11 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // 2026-10-14-org-director-attach, D6). With --config, or a ledger that is
 // not the main worktree's, cfg is returned unchanged. No other setting is
 // taken. A main worktree ralph.toml that fails to load is an error, which
-// `ralph org escalate` handles like a ralph.toml that does not load. A verb
-// that reports or acts on the switch reads it through this function, so it
-// sees the value escalate goes by.
+// `ralph org escalate` handles like a ralph.toml that does not load, `ralph
+// org director attach` and `status` return, and `ralph status` warns about
+// before it shows the built-in default (statusDirectorEnabled). A verb that
+// reports or acts on the switch reads it through this function, so it sees
+// the value escalate goes by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -390,28 +395,37 @@ var orgWatchGateOverride func() error
 // shortens it so a test of a stale refusal does not wait 2 s.
 var orgWatchGateSettleOverride time.Duration
 
-// wireOrgEscalateWatch sets rt.EscalateWatch for `ralph org escalate`: a
-// probe (org.ProbeWatch at the time of the call) of the cross-org watch on
-// the ledger at resolvedStateDir, judging a liveness mark that carries no
-// deadman_minutes by rt.Config's. Unlike the watch gate it does not wait out
-// a stale watch: escalate then sends the item to the human at once.
+// wireOrgEscalateWatch sets rt.EscalateWatch for `ralph org escalate` to
+// orgEscalateWatchProbe's probe of the ledger at resolvedStateDir, judging a
+// liveness mark that carries no deadman_minutes by rt.Config's. Unlike the
+// watch gate it does not wait out a stale watch: escalate then sends the
+// item to the human at once.
 func wireOrgEscalateWatch(rt *org.Org, resolvedStateDir string) {
+	rt.EscalateWatch = orgEscalateWatchProbe(resolvedStateDir, rt.Config.DeadmanMinutes)
+}
+
+// orgEscalateWatchProbe returns a probe (org.ProbeWatch at the time of the
+// call) of the cross-org watch on the ledger at resolvedStateDir, judging a
+// liveness mark that carries no deadman_minutes by deadmanMinutes: the probe
+// `ralph org escalate` decides by (wireOrgEscalateWatch) and `ralph org
+// director attach` warns by, so the warning says what escalate would do.
+// orgEscalateWatchOverride, when set, is returned instead.
+func orgEscalateWatchProbe(resolvedStateDir string, deadmanMinutes int) func() org.WatchLiveness {
 	if orgEscalateWatchOverride != nil {
-		rt.EscalateWatch = orgEscalateWatchOverride
-		return
+		return orgEscalateWatchOverride
 	}
-	deadmanMinutes := rt.Config.DeadmanMinutes
-	rt.EscalateWatch = func() org.WatchLiveness {
+	return func() org.WatchLiveness {
 		return org.ProbeWatch(resolvedStateDir, time.Now(), deadmanMinutes)
 	}
 }
 
-// orgEscalateWatchOverride, when not nil, is the Org.EscalateWatch that
-// wireOrgEscalateWatch sets in place of the probe. nil in production. TestMain
-// leaves it nil, so a test's escalate probes its own ledger, where no watch
-// runs, and sends the item at once (inbox_no_watch) as before the director
-// switch; a test of the recorded-only path sets it, or holds watch.lock with
-// a running mark.
+// orgEscalateWatchOverride, when not nil, is the probe orgEscalateWatchProbe
+// returns, for escalate's Org.EscalateWatch and director attach's warning.
+// nil in production. TestMain leaves it nil, so a test's escalate probes its
+// own ledger, where no watch runs, and sends the item at once
+// (inbox_no_watch) as before the director switch, and a test's attach warns;
+// a test of the recorded-only path, or of an attach with no warning, sets
+// it, or holds watch.lock with a running mark.
 var orgEscalateWatchOverride func() org.WatchLiveness
 
 // orgReadCommandHint builds the `ralph org read` recovery command printed

@@ -15,13 +15,14 @@ type orgLedgerAccess int
 const (
 	// orgLedgerReadOnly verbs (`ralph status`, `ralph org status` / `read`
 	// / `wait` (with or without --inbox) / `report` / `inbox` /
-	// `inbox show` / `merge-order`, `ralph insights`) only print a note
-	// about a legacy ledger.
+	// `inbox show` / `merge-order` / `director status`, `ralph insights`)
+	// only print a note about a legacy ledger.
 	orgLedgerReadOnly orgLedgerAccess = iota
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
 	// `stop` / `disband` / `watch` / `escalate` / `approve` / `gate` /
-	// `inbox ack` / `inbox resolve` / `inbox notify`) are refused while a
-	// legacy ledger still has active seats.
+	// `inbox ack` / `inbox resolve` / `inbox notify` / `director attach` /
+	// `director detach`) are refused while a legacy ledger still has active
+	// seats.
 	orgLedgerMutating
 )
 

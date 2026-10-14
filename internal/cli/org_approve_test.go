@@ -650,7 +650,7 @@ func TestOrgApproveHelp(t *testing.T) {
 	help = strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"`ralph org approve` records a human's approval of the plan a feature org's leader asked for there",
-		"wait --inbox, watch, approve, and the inbox verbs, which refuse it",
+		"wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("org --help does not say %q:\n%s", want, out)
