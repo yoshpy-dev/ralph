@@ -54,7 +54,7 @@
 
 ## Recommendation
 
-- Merge: yes(cycle 3 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 3 の差分(`e463eb9d..HEAD`。gh の `--limit 1000` と、上限ぶんの fork の PR だけが返ったときの注記、C2-1・C2-2 の直し)の LOW は 5 件(下の「Cycle 3」の C3-1〜C3-5)で、読む人に当たるのは C3-2 だけ(ready が複数のときの注記が `--org-id` なしの gate を勧める)。cross-review cycle 2 の ACTION_REQUIRED #1(gh の既定の上限 30 を同じ名前の fork の PR が埋めると、本物の PR が落ちる)は、`--limit 1000` と注記で閉じた。cycle 2 の C2-1 は直り、C2-2 は doc だけで env が残る(C3-1)。`docs/tech-debt/README.md:239` の行は、この cycle の直しで古くなった(C3-5)。cycle 3 は最後なので、C3-1〜C3-4 と C2-4〜C2-6・L3・L5・L6 は直さず、その行に載せる(下の「Cycle 3」の Tech debt identified)。cycle 1・2 の判定も yes で、cycle 1 の所見の表と「Cycle 2」の節はその時点のまま残す)
+- Merge: yes(cycle 4 の時点、branch 全体。CRITICAL・HIGH・MEDIUM はない。cycle 4 の差分(`999e0394..HEAD`。gh が読む repository が origin のものと違うときの注記に改名の直し方を並べる直しと、結びつきのない org の読めない gate の記録をその org の前の読める記録の枝に付ける直し)の LOW は 4 件(下の「Cycle 4」の C4-1〜C4-4)で、読む人に当たるのは C4-1 だけ(結びつきのない org の枝の Detail が、`ralph org gate` の断る手を勧める)。cross-review cycle 3 の ACTION_REQUIRED #1(改名した repository で注記の `gh repo set-default` が効かない)は、注記が改名の直し方と `gh repo set-default` を並べて閉じた(改名した repository の PR は、origin の URL を直すまで使わない)。WORTH_CONSIDERING #2(gate の記録だけが名指すブランチで、読めない新しい記録のあとに古い pass で `ready` になる)は、結びつきのない org でもその org の前の読める記録の枝に付けて閉じた。C4-3 のとおり `docs/tech-debt/README.md:239` の上限の言い回しは cycle 4 で偽になり、C4-4 のとおり 237 行の triage への指し方は次の cross-review で古くなる。cycle 4 は最後なので、C4-1・C4-2 と、cycle 3 の C3-1〜C3-4、C2-4〜C2-6・L3・L5・L6 は直さず、239 行に載せる(下の「Cycle 4」の Tech debt identified)。cycle 1〜3 の判定も yes で、cycle 1 の所見の表と「Cycle 2」「Cycle 3」の節はその時点のまま残す)
 - Follow-ups:
   1. L1 を直す(`mergeorder.go` の 1 ファイル、定数 1 つと `no_gate`・`failed` の文言)。読んだ範囲のテストは `Detail` を部分一致で見るので文言を足しても通るが、完全一致で固める箇所があれば合わせる(残りのテストは読んでいない)
   2. L2 と L4 は、直さないなら上の 1 行を register に足す(orchestrator)。L5〜L8 は機械的な直しで、直すなら L7 は skill の 4 面を `scripts/sync-skills.sh` と `cmp` で合わせる
@@ -234,3 +234,95 @@
   1. `/sync-docs` が 239 行と 238 行を上の表のとおり直す。C3-1〜C3-4 は最後の cycle なので直さず、その行に載せる
   2. 4 回目を回す理由が別にあるなら、C3-2(文 1 つとテストの期待 1 か所)と C3-1(env、doc、テストの比べの 3 か所)を先に直す。どちらも skill には触れない
   3. insight event(`./scripts/insights-append.sh --phase self_review --cycle auto`)は、報告だけをコミットする指示なので、この回では足していない。件数は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5(cycle 3 の分)で、orchestrator が足す
+
+## Cycle 4
+
+- Date: 2026-10-14
+- Reviewer: reviewer subagent (Claude)。パイプライン 4 回目(cycle 4。cross-review cycle 3 の ACTION_REQUIRED 1 件と WORTH_CONSIDERING 1 件を直すために上限を 3 から 4 に上げた回で、最後。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)
+- Scope: `git diff 999e0394..HEAD`(HEAD 1052a12a、4 コミット、13 ファイル、+244/-58)。546e9f66(cross-review cycle 3 の triage と、その insight event の 1 行)、fd1f3f30(計画の進捗に 1 行)、813d6d2d(`mergeOriginRepo.check` の注記に `git remote set-url origin` を並べる。help、skill 4 面、README、tech-debt の 237 行、テスト)、1052a12a(`collectMergeTargets` に `gatedBranch` を足し、読めない記録を結びつきの枝、なければその org の前の読める記録の枝に付ける。注記の文、テスト)。cycle 1〜3 の差分は読み直していない。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs が受け持つので行っていない。計画の進捗にある cycle 4 の決定(改名と別の repository を見分けず、注記に 2 つの直し方を並べる。正規の名前を gh で引かない。読めない記録は、結びつき、その org の前の読める記録、の順に付け、どちらもなければ付けない。後半は計画の Scope と C8 を広げる逸脱)は、欠陥として数えていない
+
+### 読んだものと確かめたこと
+
+- 読んだ: `git diff 999e0394..HEAD` の Go 4 ファイル(`internal/org/mergeorder.go`、`mergeorder_test.go`、`internal/cli/org_merge_order.go`、`org_merge_order_test.go`)の全体、skill の hunk 2 か所(表の 183 行と「見張りがなくても使える」の段落)、README の 262 行、tech-debt の 237 行、計画の進捗の 1 行、triage の差分(上の section の全文)、insight event の 1 行。周辺は `collectMergeTargets` 全体(`mergeorder.go:325-378`)、`mergeLedgerNotes`、`mergeOriginRepo.check`、`classifyMergeTarget`・`mergeGateCommand`、`gateRecordFromDetails`(`gate.go:172-200`)、`FeatureBinding.Complete`(`reserve.go:108-110`)、`gateOrgLife`(`gate.go:333-364`)、テストの helper(`moGarbled`・`moBind`・`moRepoCheckFixture`)、`mergeOrderNoPRs` の定義、register の 232〜239 行
+- 確かめたこと(コードを読んで辿った。走らせていない)
+  - `git diff 999e0394..HEAD --check` は空。追加行に TODO・FIXME・デバッグ出力・秘密情報はない。HEAD は 1052a12a のまま、`git status --porcelain` は読み始めに空で、コミットの直前にもう一度確かめる
+  - skill 4 面(root、`.agents/`、`templates/base/` の 2 面)は `cmp` で同一。追加した行の幅は East Asian Width で 66〜72 桁(段落の最後の行を除く)で、同じ段落の既存の行(68〜75)と合い、cycle 1 の L7 の形ではない。help の追加行は 67〜79 文字(タブと引用符を含む)で、1 行だけ 67 と短いが、次の語を足すと 72 桁になり既存の最長 71 を超えるので、折り直しは要らない
+  - `collectMergeTargets` の「どちらの map も "" を持たない」というコメントは本当。結びつきは `f.Complete()` を通ったものだけが `boundBranch` に入り(`Complete` は `Branch != ""` を要る)、読める記録は `gateRecordFromDetails` が `r.Branch == ""` を断る。なので `cmp.Or` が「なし」を空文字で見分けてよい。`gatedBranch` は読める記録のときだけ更新し、読めない記録が付いた先では更新しない
+  - 新しい 2 つのテストは、次の変更でそれぞれ赤くなる並びに読めた。`gatedBranch` の代入を外す(org-c の feat/c が ready に戻る)、「最新の読める記録」を「最初の」に替える(feat/e が unreadable、feat/e2 が ready になる)、`cmp.Or` の引数を入れ替える(「結びつきが先」「結びつきが後」のどちらの subtest も feat/x に付く)。注記の件数は org-d の 1 件だけを `HasPrefix` で固定する
+  - 改名の注記は、org 層が全文一致(`TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository` の 2 subtest)、CLI が 2 つの部分一致で固定する。`renamed to` の 2 つの repository を入れ替えると赤くなる。subtest の名前に `/` はない
+  - `set-default` を勧める場所を `grep` で数えた(`docs/evidence/` と過去の報告は記録なので除く)。Go 非テストは `mergeorder.go` の先頭コメント(勧めない)・`check` の doc と本文・help、skill は 4 面の各 2 か所(表と段落)、README 1 か所、register 237 行。直していない場所はない
+  - 注記の文と help・skill・README・register は、同じ向きで言っている(改名なら `git remote set-url origin`、そうでなければ `gh repo set-default <origin の owner/repo>`)
+  - cycle 3 の所見のうちこの cycle が触ったのは C3-5 の 237 行だけで、C3-1〜C3-4 は未着手(下の表)
+- 確かめていないもの: テスト、`gofmt`、`go vet`、`golangci-lint`、`-race` は走らせていない。改名した本物の repository での挙動(GitHub の転送で git が古い URL から届くこと、`gh pr list` の PR の URL が新しい名前になること)は確かめていない。triage と consult の前提を読んだだけで、/test が本物の repository で確かめるとよい
+
+### 所見(cycle 4)
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4。計画の設計決定 C1〜C8 や cycle 3 の `C3-n` と取り違えないよう、ID に `C4-` を付ける(計画の「C4」は ID の形が違う)。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C4-1 | LOW | maintainability | cycle 4 で、結びつきのない org の読めない記録が、その org の前の読める記録の枝に付くようになった。その枝は `unreadable` になり、Detail は「run ralph org gate --org-id org-c again in the feature worktree (the gate runs only while the feature org runs)」と言う。この道に来るのは org が完全な結びつきを持たないときだけで、そのとき `ralph org gate` は `gateOrgLife` で断る(結びつきなしは「holds no split plan feature binding」、不完全なら「disband it and start it again」)。org が走っていても通らず、但し書きの「while the feature org runs」は disband 済みの穴だけを言う。新しいテストはこのコマンドの文言を固定する。gate の記録だけが名指す枝の `failed`・`regate`・`rebase` の Detail(`mergeGateCommand` の 2 つめの枝、C2-1 で足した)と、壊れた行のあとの `unreadable` の Detail も同じで、cycle 4 が足したのは、読めない記録そのものがこの枝を `unreadable` にする道。起きるのは結びつきの行を失った台帳か手で書いた台帳だけで、枝は `unreadable` のままになる(安全な向き) | `internal/org/mergeorder.go:839-840`(unreadable の Detail)、`:859-867`(`mergeGateCommand`)、`:113`(`mergeGateRunsWhileOrgRuns`)、`internal/org/gate.go:344-355`(`gateOrgLife` の断り)、`internal/org/mergeorder_test.go:700`(`run ralph org gate --org-id org-c again` を固定) | `t.binding == nil` の枝の Detail は、org が完全な結びつきを持たないので `ralph org gate` は断られる、と言う(次の手は台帳を直すか、検証のスクリプトを自分で走らせる)。最後の cycle なので直さず、239 行に載せる(下の Tech debt identified の (s)) |
+| C4-2 | LOW | readability | 新しいテスト 2 つの doc が「covers cross-review cycle 3's finding」と、slug を付けずに triage の指摘を指す。cycle 3 のテストは「covers cross-review cycle 2 of org-merge-order」と slug を添えていて、cycle 3 の報告はそれを数えなかった。239 行の (e) は、slug のない「the cross-review finding」「self-review L2」の引用を残りとして挙げており、cycle 4 の 2 件はその形が増えた。欠陥の中身は同じ段落で言っているので、読めないわけではない | `internal/org/mergeorder_test.go:671`(`covers cross-review cycle 3's finding (C8): ...`)、`:1112`(`covers cross-review cycle 3's finding: after origin's repository is renamed ...`)。slug 付きの形は `:1450-1451` | 2 か所に「of org-merge-order」を足す(数語)。直さないなら (e) に 2 件足す |
+| C4-3 | LOW | maintainability | `docs/tech-debt/README.md` の 239 行が、cycle 4 が走ったことで偽になった。(a) 先頭の「Cycle 3 was the last pipeline run (the cap was raised from 2 to 3 ...)」、(b) Why deferred の「Found at the last pipeline run (cycle 3 of 3, after the cap was raised from 2): fixing any of them needs a fourth pipeline run」は、上限を 4 に上げて 4 回目が走った。残りは cycle 4 でも直さず、直すと 5 回目が要る。(c) Related の報告の節が cycle 3 までで、cycle 4 の節がない。(d) C4-1 と C4-2 を足す場所がない(C3-1〜C3-4 は (b)・(o)・(g)・(p) に載っていて、cycle 4 は触っていない)。cycle 3 の C3-5 と同じ形 | `docs/tech-debt/README.md:239`(先頭のセルと Why deferred のセル、Related のセル)。cap 4/4 は計画の進捗の cycle 4 の項目 | `/sync-docs` が下の「register の古くなった所」の表のとおり直す(この回は直さない) |
+| C4-4 | LOW | maintainability | 237 行の Related が triage を「(the cycle 3 section at the top, ACTION_REQUIRED #1)」と位置で指す。triage は `/cross-review` が毎回その場で書き換え、最新の cycle を先頭に置き、前の cycle の見出しに `(cycle N)` を付けて下へ移す(546e9f66 で cycle 2 の節がそうなった)。次の cross-review(cycle 4)のあと、cycle 3 は先頭でなくなり、「ACTION_REQUIRED #1」は cycle 4 の表の行も指しうる。指摘の中身は Debt のセルが「(cross-review cycle 3 of this plan)」と言葉で言っているので、指し先だけが古くなる | `docs/tech-debt/README.md:237`(Related のセル)。`docs/reports/cross-review-triage-org-merge-order.md` の見出し(15 行目 `## Triage context` が先頭の cycle 3、40 行目 `## Cycle 2`、70 行目 `## Cycle 1`)。`git show 546e9f66` の見出しの付け替え(`## ACTION_REQUIRED` が `### ACTION_REQUIRED(cycle 2)` に) | 位置を言わず、「cross-review cycle 3 of this plan, the renamed-repository finding」のように、cycle と中身で指す。cross-review の前に `/sync-docs` が直せる |
+
+#### C4-1 の根拠
+
+- 結びつきのない org で `ralph org gate --org-id org-c` を打つと、`gateOrgLife` が `ActiveFeature` を引けず、走っている org には「holds no split plan feature binding ... run ./scripts/run-static-verify.sh and ./scripts/run-test.sh yourself」、走っていない org には「is not running and holds no split plan feature binding」と返す(`gate.go:344-355`)。どちらも gate の記録は書かない。なので `unreadable` は、台帳を直さない限り消えない。merge-order の側では `ready` にならないので、誤って merge に進む向きではない
+- cycle 4 の前から、gate の記録だけが名指す枝の `failed`・`regate`・`rebase` の Detail と、最後の読める記録のあとに壊れた行がある枝の `unreadable` の Detail は、同じ「ralph org gate --org-id <org> again」を言い、結びつきがなければ同じ断りになる。cycle 4 が増やしたのは、読めない記録そのものがその枝を `unreadable` にする道と、それを固定するテストで、行き止まりの種類は増えていない(`no_gate` は gate の記録のない枝の分類なので、この枝には来ない)
+- 実例は未確認です。結びつきの行を失った台帳か手で書いた台帳が前提で、この repo の `ralph org start --plan` が書く台帳には出ないと読んだ
+
+### cycle 3 の所見を HEAD で見直した結果
+
+| ID | 状態 | 確かめた場所 |
+| --- | --- | --- |
+| C3-1 | 未着手 | get-url の `[]string{"GIT_TERMINAL_PROMPT=0"}` が `mergeorder.go:667` にあり、doc(`:660`)とテストの期待も残る。239 行の (b) |
+| C3-2 | 未着手 | `mergeOrderListNotes` の「run ralph org gate again」は `--org-id` なしのまま(`mergeorder.go:933`、テストの `HasSuffix` は `mergeorder_test.go:515`)。239 行の (o) |
+| C3-3 | 未着手 | 上限の `1000` は help(`org_merge_order.go:45`・`:47`)と skill の表の行(4 面)に手書きのまま。cycle 4 は同じ表の行の別の文を直したが `1000` は触っていない。239 行の (g) |
+| C3-4 | 未着手 | 定数の説明、`mergeGHLimitNotes`(`:577`)、`withNotes`(`:503`)は変わらない。239 行の (p) |
+| C3-5 | 半分 | 237 行の書き足しは cycle 4 の直しに合っている。239 行は古いまま(C4-3) |
+| 行番号 | ずれた | cycle 3 の節が引く `mergeorder.go:653`(get-url の env)は `:667`、`:918-920`(`mergeOrderListNotes`)は `:933` に動いた。register は `file.go:NNN` を使わず関数名で引いているので影響しない(`grep` で 0 件) |
+
+### cross-review cycle 3 の ACTION_REQUIRED #1 と WORTH_CONSIDERING #2 は閉じているか
+
+- ACTION_REQUIRED #1(改名した repository で、注記の `gh repo set-default` が効かない)は、計画の決定どおりに閉じた。注記は「if acme/app was renamed to upstream-org/app, point origin at it (git remote set-url origin <its URL>); otherwise run gh repo set-default acme/app in this repository」と 2 つの直し方を並べる。Codex が勧めた「正規の repository を割り出してから捨てる」ことはせず、PR は引き続き使わない(分類は gh がないときと同じ)。改名した repository の PR は、origin の URL が新しい名前を指すまで使われず、その間は merged・closed を見分けず、別の base の PR は `wrong_base` にならない。237 行の Impact がこれを言っている。entry 側に印がなく注記だけで知らせる点は 238 行の既知の穴と同じ形
+- WORTH_CONSIDERING #2(gate の記録だけが名指すブランチで、読めない新しい記録のあとに古い pass で `ready` になる)は、指摘の形で閉じた。読めない記録は、結びつきがあればその枝、なければその org の前の読める記録の最新の枝に付き、どちらもなければ付けず注記で数える。注記と doc とテストの言い方が合っている(`mergeorder.go:390-391`、`:312-324`、`mergeorder_test.go:704-705`)。残る経路は、その org に結びつきも前の読める記録もないときで、枝を決められないので付かず、注記の数だけになる(計画の C8 が元から決めた形)。その org の読めない記録が最初の記録なら、あとの読める記録が新しいので結果は変わらない
+- 2 つの直しは別のファイルの別の関数で、互いの前提を変えない(注記の文と、記録の付け先)
+
+### register の古くなった所
+
+| 場所 | 今の状態 | 直し方 |
+| --- | --- | --- |
+| 239 行 先頭「Cycle 3 was the last pipeline run (the cap was raised from 2 to 3 for cross-review cycle 2's ACTION_REQUIRED)」 | 上限は 4 に上がり、cycle 4 が最後。cycle 4 は 239 行の項目を直していない(237 行の書き足しと記録の付け先だけ) | 「Cycle 4 was the last pipeline run (the cap was raised to 3 and then to 4 for cross-review cycles 2 and 3)」とし、cycle 4 で直した項目はないと書く |
+| 239 行 Why deferred「Found at the last pipeline run (cycle 3 of 3 ...): fixing any of them needs a fourth pipeline run」 | 4 回目は走った。残りを cycle 4 でも直さなかったので、直すと 5 回目 | 「cycle 4 of 4 ... a fifth pipeline run」に |
+| 239 行 Related の報告の節 | cycle 3 までで、cycle 4 の節がない | `self-review ... (section Cycle 4: C4-1 to C4-4)` を足す。`/verify`・`/test` が cycle 4 の節を足すなら、それも |
+| 239 行 項目 | C4-1、C4-2 を載せる場所がない | 下の Tech debt identified のとおり (s) を足し、(e) に 2 件足す |
+| 237 行 Related「(the cycle 3 section at the top, ACTION_REQUIRED #1)」 | 次の cross-review で位置が変わる(C4-4) | 「cross-review cycle 3 of this plan, the renamed-repository finding」に |
+| 236 行・238 行 | 変わらない。236 行は未終端の最後の行の話、238 行の「gh の結果の欠け」の 3 つの形に、改名の場合が増えても entry 側に印がない点は同じ | そのまま |
+
+### 所見にしなかったもの
+
+- 計画の Scope(23 行)と C8(82 行)は「前に結びつきがなければどのブランチにも付けない」のまま。cycle 4 の逸脱は進捗の最後の項目に書いてあり、cycle 2・3 の逸脱も同じ置き方で、承認の digest を変えずに済む。AC4(91 行)は「打った org のその時点の結びつきのブランチに付く」で、今も正しい
+- 結びつきと「前の読める記録」が別のブランチを名指すとき、結びつきを先にする決定。テストが両方の並びで固定している。実際の台帳では、gate は結びつきのブランチでしか打てないので両者は一致し、食い違うのは手書きの台帳だけ
+- 読める形だが event の名前と reason が合わない記録(`readable` が false)は、自分の `branch=` を使わず、結びつき、前の読める記録の順で付く。cycle 4 の前からそうで、手で書かない限り起きない
+- 注記の「renamed」は、owner が変わる移管を言わない。移管も GitHub が転送し、PR の URL は新しい owner になる。直し方は同じで、「renamed to X」と読んで足りるので、文は直さない
+- `mergeorder.go` は 969 行(cycle 1 は 681 行)。この repo では `spawn.go`(2215)、`verbs.go`(2156)、`watch.go`(1524)がもっと大きく、ファイルの大きさを守る規則は repo にない。分けるなら gh の lookup と repository の確認の一式が自然な継ぎ目だが、報告が行番号を引いているので別の PR で
+- `check` の `fmt.Sprintf` が `%s` を 6 個並べ、引数の順で埋める。テストが全文を固定するので、順の間違いは赤くなる
+- `mergeOrderNoPRs` の定数の説明は「ends every note that says no PR is used」だが、`!prRepo.same` の枝は cycle 2 から定数のあとに文が続く。cycle 4 は続く文を長くしただけで、この差は前からある
+
+### Tech debt identified
+
+この回は報告だけをコミットする指示なので、`docs/tech-debt/README.md` には行を足していない。cycle 4 は最後(上限 4/4 で、直すと 5 回目が要る)なので、C4-1 と C4-2 は直さない。新しい行は作らず、239 行を上の「register の古くなった所」の表のとおり直して、そこに次の項目を足すことを勧める(`/sync-docs` が行う。237 行の Related は C4-4 のとおり)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Add to the org-merge-order leftovers row (line 239): (s) a branch that only gate records name (its org holds no complete feature binding) gets Details (`failed`, `regate`, `rebase`, and `unreadable` after a corrupt manifest line) that tell the reader to run `ralph org gate --org-id <org>` again, and `ralph org gate` refuses an org with no complete binding (`gateOrgLife` in `internal/org/gate.go`: "holds no split plan feature binding", "disband it and start it again"); cycle 4 added a record that cannot be read, attached to the org's latest readable gate record's branch, as another way to reach that `unreadable` Detail, `TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch` pins the command, and `mergeGateRunsWhileOrgRuns` says only "while the feature org runs" (C4-1); and extend (e): the two cycle 4 tests cite "cross-review cycle 3's finding" with no slug (C4-2) | (s) is the only one a reader can hit, and only on a ledger that lost a binding line or was written by hand: the branch stays `unreadable` (it is never `ready`) and the next step the Detail names is refused. (e) changes no behavior | Cycle 4 is the last cycle (4/4): fixing either needs a fifth pipeline run, and each is a few lines | The next edit to `internal/org/mergeorder.go` (`classifyMergeTarget`, `mergeGateCommand`), stage 8a's director reading merge-order, or a report that a Detail sent someone to a refused `ralph org gate` | `docs/reports/self-review-2026-10-14-org-merge-order.md` (Cycle 4, C4-1 to C4-4) |
+
+### Recommendation
+
+- cycle 4 の判定: 上の「Recommendation」の Merge の行のとおり(yes)。cycle 4 の差分に CRITICAL・HIGH・MEDIUM はなく、cross-review cycle 3 の指摘 2 件は閉じた
+- Follow-ups:
+  1. `/sync-docs` が 239 行と 237 行を上の表のとおり直す。C4-1 と C4-2 は最後の cycle なので直さず、239 行に載せる。237 行の指し方は、次の cross-review が triage を書き換える前に直す
+  2. 5 回目を回す理由が別にあるなら、C4-2(数語)と C4-1(Detail の文 1 つとテストの期待 1 か所)を先に直す。skill には触れない
+  3. insight event(`./scripts/insights-append.sh --phase self_review`)は、報告だけをコミットする指示なので、この回では足していない。`cycle-count.json` は 2 のままで `--cycle auto` は 2 を入れるので、`--cycle 4` を明示する。件数は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4(cycle 4 の分)で、orchestrator が足す
+  4. `/test` で、改名した本物の repository(origin が古い URL、`gh pr list` の PR の URL が新しい名前)で注記が出ること、`git remote set-url origin` で PR が使われることを確かめるとよい。今は fake の gh と git だけで固定している
