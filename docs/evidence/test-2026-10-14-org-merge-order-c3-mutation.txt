@@ -1,0 +1,600 @@
+# /test org-merge-order cycle 3: go test -overlay mutants (go1.26.0, HEAD 7a8cac1e)
+# Nothing in the worktree was written: every mutant is a scratch copy of the file, read through -overlay.
+# Runner (run3.sh): org mutants run go test ./internal/org/ -run MergeOrder -timeout 90s; a survivor also runs
+# go test ./internal/cli/ -run 'OrgMergeOrder|OrgLegacyLedger' -timeout 300s; cli mutants run only the cli step.
+# Columns: id, verdict, package that killed it, how (assert/panic/timeout), note, first failing tests.
+# A canary gh (logs + exit 97) was first on PATH for every run: 0 calls.
+
+## A. Cycle 3's code (mut3.py mode c3): 44 mutants, 43 built; N20 did not build (limitFullOfForks unused),
+##    N20b is the same mutation written so it builds. 44 counted: 35 red, 9 survive.
+N01	KILLED	org	assert	no --limit (gh's default 30)	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N02	KILLED	org	assert	--limit 100 literal, constant unchanged	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N03	KILLED	org	assert	constant 30 (arg and condition follow)	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N04	KILLED	org	assert	constant off by one	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N05	KILLED	org	assert	--limit after --json	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N06	KILLED	org	assert	arg one less than the condition's limit	TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv
+N10	KILLED	org	assert	>= -> >	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N11	SURVIVED	-	-	>= -> == (gh never returns more than --limit)
+N12	KILLED	org	assert	limit-1 counts as full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N13	KILLED	org	assert	pr == nil dropped	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N14	KILLED	org	assert	len check dropped: every no-PR branch is full	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N15	KILLED	org	assert	never full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N16	KILLED	org	assert	any fork-only list counts as full	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N20	BUILD_FAIL	org	-	limit case dropped (falls to pr == nil: no note)
+N21	KILLED	org	assert	limit case after pr == nil (never reached)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N22	KILLED	org	assert	only the last full branch kept	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N23	KILLED	org	assert	gh stops after the first full branch	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N30	SURVIVED	-	-	limit note before gh-failure notes
+N31	SURVIVED	-	-	set-default / gh-missing note first
+N32	KILLED	org	assert	limit note never given (every path)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N33	SURVIVED	-	-	repository stop drops the limit note
+N34	SURVIVED	-	-	gh missing drops the limit note
+N35	KILLED	org	assert	final return drops the limit note	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N36	KILLED	org	assert	gh-failure notes never given (every path)	TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+N40	KILLED	org	assert	one branch uses the plural form	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N41	KILLED	org	assert	no branch: plural note for 0 branches	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+N42	KILLED	org	assert	singular: count of branches as the PR count	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N43	SURVIVED	-	-	plural: count capped at the named ones
+N44	SURVIVED	-	-	plural: every branch named (no and N more)
+N45	KILLED	org	assert	plural: only the first branch named	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N46	KILLED	org	assert	plural: mergeOrderNoPRs dropped	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N50	KILLED	org	assert	every branch named	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+N51	SURVIVED	-	-	'and 0 more' at exactly the cap (= cycle 2 G04)
+N52	KILLED	org	assert	'and N more' counts all	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+N53	KILLED	org	assert	separator	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+N54	KILLED	org	assert	gh-failure note stops using mergeNamedBranches	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+N55	KILLED	org	assert	'and N more' one short	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+N60	KILLED	org	assert	gate record's org before the binding's (= cycle 2 D02)	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N61	KILLED	org	assert	gate case dropped (revert of c885fcab)	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N62	KILLED	org	assert	gate case without the org_id check	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N63	KILLED	org	assert	bare command not bare	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N64	KILLED	org	assert	bound branch with a gate record named by the gate's org	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N65	KILLED	org	assert	gate case names the event, not the org	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+N70	SURVIVED	-	-	help names --limit 30
+rc=0 elapsed=812s
+N20b	KILLED	org	assert	limit case dropped (builds)	TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+
+## B. The CLI tests alone against the --limit argv mutants (both pin the argv independently of the org test)
+##    go test ./internal/cli/ -run OrgMergeOrder -overlay <mut>/<id>/overlay.json
+N01 cli rc=1: TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut TestOrgMergeOrder_BranchNameWithTwoSlashesIsListedWhole TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+N03 cli rc=1: TestOrgMergeOrder_AllListsMergedAndClosedPRsTheDefaultLeavesOut TestOrgMergeOrder_BranchNameWithTwoSlashesIsListedWhole TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+
+## C. Cycle 2's mutant list rerun at HEAD (mut3.py mode c2): 87 cycle-2 mutants as 88 rows (D02's old string
+##    still occurs once inside the new switch, so R2-D02 is the old edit and R2-D02b the rewrite; both red).
+##    Seven whose old string moved in cycle 3 (L02-L05, G03, G07, D01) are rewritten as R2-*b. 74 rows red, 14 survive.
+R2-K01	KILLED	org	assert	get-url read on every check	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-K02	KILLED	org	assert	read flag never set	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-K03	KILLED	org	assert	interrupt during get-url not told apart	TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+R2-K04	KILLED	org	assert	get-url failure: PRs used unchecked	TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+R2-K05	KILLED	org	assert	local-path origin checked anyway	TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+R2-K08	KILLED	org	assert	PR url naming no repo accepted	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-K09	KILLED	org	assert	repository mismatch accepted	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R2-K10	KILLED	org	assert	set-default names gh's repo	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-K11	KILLED	org	assert	note swaps gh's and origin's repo	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R2-L01	KILLED	org	assert	PRs set before the mismatch kept	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-L06	KILLED	org	panic	no PR still checked (get-url, nil pr)	TestMergeOrder_ClassifiesAGatePassedAgainstOrigin
+R2-L07	KILLED	org	assert	check's ctx error swallowed	TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+R2-L08	KILLED	org	assert	failures never grouped (key per branch)	TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-G01	KILLED	org	assert	add never groups	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-G02	KILLED	org	assert	one-branch note shape never used	TestMergeOrder_GHFailureForOneBranchLeavesItsPROut TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-G04	SURVIVED	-	-	'and 0 more' at exactly the cap
+R2-G05	KILLED	org	assert	cap 6	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-G06	KILLED	org	assert	groups in reverse order	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-S01	KILLED	org	assert	owner case-sensitive	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-S02	KILLED	org	assert	repo name case-sensitive	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-S03	KILLED	org	assert	owner OR name	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R2-S04	SURVIVED	-	-	owner only
+R2-S05	KILLED	org	assert	name only	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R2-O01	KILLED	org	assert	scheme URL without host read	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O02	KILLED	org	assert	any scheme read	TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O03	SURVIVED	-	-	http:// not read
+R2-O04	SURVIVED	-	-	git:// not read
+R2-O05	KILLED	org	assert	ssh:// not read	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O06	SURVIVED	-	-	no-colon check dropped
+R2-O07	KILLED	org	assert	slash-before-colon read as scp	TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+R2-O08	KILLED	org	assert	user@ not stripped	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O09	KILLED	org	assert	empty scp host read	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O10	KILLED	org	assert	trailing / kept	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O11	KILLED	org	assert	.git kept	TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R2-O12	KILLED	org	assert	trims swapped	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O13	KILLED	org	assert	first two components	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O14	KILLED	org	assert	empty owner/name accepted	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O15	KILLED	org	assert	empty owner accepted	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O16	SURVIVED	-	-	empty name accepted
+R2-O17	KILLED	org	panic	one component read	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O18	KILLED	org	assert	only https:// parsed as a URL	TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-O19	SURVIVED	-	-	first @ instead of last
+R2-O20	SURVIVED	-	-	whole get-url output, not first line
+R2-O21	SURVIVED	-	-	get-url line not trimmed
+R2-U01	KILLED	org	assert	get-url timeout not named	TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut
+R2-U02	SURVIVED	-	-	outer ctx done reported as timeout
+R2-U03	KILLED	org	assert	get-url env dropped	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-U04	KILLED	org	assert	get-url dir ignored	TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository
+R2-U05	KILLED	org	timeout	get-url unbounded
+R2-U06	KILLED	org	assert	get-url --push	TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R2-P01	KILLED	org	assert	PR url any scheme	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P02	KILLED	org	assert	PR url without host	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P03	KILLED	org	assert	PR url longer path	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P04	SURVIVED	-	-	PR url empty owner
+R2-P05	SURVIVED	-	-	PR url empty repo
+R2-P06	KILLED	org	assert	PR url not /pull/	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P07	KILLED	org	assert	PR number not checked	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P08	KILLED	org	assert	PR number 0 accepted	TestMergeOrder_ReadsOwnerAndRepoFromOriginAndPRURLs
+R2-P09	KILLED	org	assert	PR owner/repo swapped	TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R2-P10	KILLED	org	assert	PR path leading / kept	TestMergeOrder_ClassifiesAGatePassedAgainstOrigin TestMergeOrder_OrdersByClassThenGatePosition TestMergeOrder_MergedOrClosedComesFirst
+R2-D02	KILLED	org	assert	gate record's org preferred over the binding's	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D03	KILLED	org	assert	clause text	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04a	KILLED	org	assert	unreadable: no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04b	KILLED	org	assert	corrupt-after: no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04c	KILLED	org	assert	no_gate: no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04d	KILLED	org	assert	failed: no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04e	KILLED	org	assert	regate: no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04f	KILLED	org	assert	rebase (other base): no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D04g	KILLED	org	assert	rebase (main moved): no --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04a	KILLED	org	assert	unreadable: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04b	KILLED	org	assert	corrupt-after: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04c	KILLED	org	assert	no_gate: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04d	KILLED	org	assert	failed: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04e	KILLED	org	assert	regate: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04f	KILLED	org	assert	rebase (other base): clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04g	KILLED	org	assert	rebase (main moved): clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-E04h	KILLED	org	assert	several-ready note: clause dropped	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D06	KILLED	org	assert	no-PR note text	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-K06b	KILLED	org	assert	readable forced true (builds)	TestMergeOrder_LocalPathOriginSkipsTheRepositoryCheck
+R2-K07b	KILLED	org	assert	PR url naming no repo falls to the owner/repo compare (builds)	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-L02b	KILLED	org	assert	gh asked again after the mismatch (note kept)	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut TestMergeOrder_OriginURLThatCannotBeReadLeavesPRsOut TestMergeOrder_GHLimitFullOfForksLeavesThePROut
+R2-L03b	KILLED	org	assert	mismatch reports gh unavailable	TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut
+R2-L04b	SURVIVED	-	-	mismatch drops earlier gh-failure (and limit) notes
+R2-L05b	SURVIVED	-	-	gh missing drops earlier gh-failure (and limit) notes
+R2-G03b	KILLED	org	assert	all branches named	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-G07b	KILLED	org	assert	count capped at the named ones	TestMergeOrder_GHFailingTheSameWayForSeveralBranchesIsOneNote
+R2-D01b	KILLED	org	assert	never --org-id	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+R2-D02b	KILLED	org	assert	gate record's org preferred over the binding's	TestMergeOrder_DetailsNameTheGateCommandWithTheOrg
+rc=0 elapsed=1473s
+
+## C2. Cycle 1's six gaps (closed by cycle 2's tests), rerun at HEAD with cycle 2's edits: 6 red
+R2-M03	KILLED	org	assert	c1 gap: first corrupt line instead of last	TestMergeOrder_LatestGateRecordWins
+R2-M05	KILLED	org	assert	c1 gap: unreadable record attaches to the org's first binding	TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings
+R2-M09	KILLED	org	assert	c1 gap: org_id-less records counted	TestMergeOrder_RecordsWithoutAnOrgIDAreNotRead
+R2-C06	KILLED	cli	assert	c1 gap: legacy guard as a mutating verb	TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+R2-C07	KILLED	cli	assert	c1 gap: legacy guard dropped	TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue
+R2-C12	KILLED	cli	assert	c1 gap: note not escaped	TestOrgMergeOrder_MultiLineGHStderrStaysOneNoteLine
+
+## D. Overlay-only probes (cycle 2's PB1-PB8 copied unchanged, cycle 3's PC1-PC4 below), on HEAD and on each survivor
+##    run-probe3.sh: go test ./internal/org/ -run ZZProbe -overlay <mutant + both probe files>; "failed:" lists probe ids
+HEAD	rc=0	pass=12	failed:
+N11	rc=0	pass=12	failed:
+N30	rc=1	pass=10	failed: PC1 PC2
+N31	rc=1	pass=10	failed: PC1 PC2
+N33	rc=1	pass=11	failed: PC1
+N34	rc=1	pass=11	failed: PC2
+N43	rc=1	pass=11	failed: PC3
+N44	rc=1	pass=11	failed: PC3
+N51	rc=1	pass=10	failed: PB3 PC4
+N20b	rc=1	pass=8	failed: PC1 PC2 PC3 PC4
+
+R2-S04	rc=1	pass=11	failed: PB4
+R2-O03	rc=1	pass=10	failed: PB5_PB6 PB5b_HTTPAndGitSchemeOriginsAreChecked (0.00s)
+R2-O04	rc=1	pass=10	failed: PB5_PB6 PB5b_HTTPAndGitSchemeOriginsAreChecked (0.00s)
+R2-O16	rc=1	pass=11	failed: PB5_PB6
+R2-P04	rc=1	pass=11	failed: PB8_PRURLWithAnEmptyOwnerOrRepo (0.00s)
+R2-P05	rc=1	pass=11	failed: PB8_PRURLWithAnEmptyOwnerOrRepo (0.00s)
+R2-L04b	rc=1	pass=10	failed: PB1 PC1
+R2-L05b	rc=1	pass=10	failed: PB2 PC2
+R2-G04	rc=1	pass=10	failed: PB3 PC4
+R2-O06	rc=0	pass=12	failed:
+R2-O19	rc=0	pass=12	failed:
+R2-O20	rc=0	pass=12	failed:
+R2-O21	rc=0	pass=12	failed:
+R2-U02	rc=0	pass=12	failed:
+
+## E. Survivor classification
+# Cycle 3, closable (each killed by a probe that passes on HEAD):
+#   N30 limit note before the gh-failure notes       -> PC1, PC2 (order of failure / limit / repository-or-missing notes)
+#   N31 set-default or gh-missing note first           -> PC1, PC2
+#   N33 repository stop drops the limit note           -> PC1
+#   N34 gh missing drops the limit note                -> PC2
+#   N43 plural limit note counts at most 5             -> PC3 (seven full branches)
+#   N44 plural limit note names every branch           -> PC3
+#   N51 " and 0 more" at exactly 5 (= cycle 2 G04)     -> PB3 (gh failures), PC4 (limit note)
+# Cycle 3, equivalent for real input:
+#   N11 ">=" -> "==": gh returns at most --limit PRs (real gh: limit 1000 gave 1000 of vscode's 1009 patch-1 PRs,
+#       limit 1100 gave 1009; real-origin evidence), so len(prs) never exceeds mergeOrderGHLimit
+# Cycle 3, not behaviour:
+#   N70 the CLI help names --limit 30: no test reads the help text (self-review C3-3: the 1000 is written by hand)
+# Cycle 2 survivors at HEAD:
+#   D02 (both forms) red: TestMergeOrder_DetailsNameTheGateCommandWithTheOrg's new "twice" row
+#   still closable, each still killed by its cycle-2 probe: S04 (PB4), O03/O04 (PB5_PB6, PB5b), O16 (PB5_PB6),
+#   P04/P05 (PB8), L04 as R2-L04b (PB1, PC1), L05 as R2-L05b (PB2, PC2), G04 (PB3, PC4)
+#   still equivalent (no probe kills them): O06, O19, O20, O21, U02
+
+## F. The cycle-3 probe source (not committed): <scratch>/probe/zz_probe_c3_test.go
+package org
+
+// /test org-merge-order cycle 3: overlay-only probes for the cycle-3 mutants
+// the committed tests let survive. Not committed; read with go test -overlay.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// moC3Prefixes is, for each note of res that starts with one of prefixes,
+// the prefix it starts with, in note order.
+func moC3Prefixes(res MergeOrderResult, prefixes ...string) []string {
+	var out []string
+	for _, n := range res.Notes {
+		for _, p := range prefixes {
+			if strings.HasPrefix(n, p) {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
+const (
+	pcFail  = "gh pr list --head feat/a failed"
+	pcLimit = "gh returned "
+	pcStop  = "gh reads upstream-org/app"
+	pcMiss  = "gh was not found"
+)
+
+// PC1 (N30, N31, N33): gh fails for feat/a, returns its limit of fork PRs for
+// feat/b, then a PR of another repository for feat/c: the notes are the
+// failure, the limit note and the repository note, in that order.
+func TestZZProbe_PC1_FailureLimitAndRepositoryNotesInOrder(t *testing.T) {
+	fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+	fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+	fx.exec.setPR("feat/b", moPRs(moForkPRs(100, mergeOrderGHLimit)...))
+	fx.exec.setPR("feat/c", moPRs(moRepoPR(8, "MERGED", "main", "upstream-org", "app")))
+	res := fx.run(t, false)
+	if got, want := moC3Prefixes(res, pcFail, pcLimit, pcStop), []string{pcFail, pcLimit, pcStop}; !slices.Equal(got, want) {
+		t.Errorf("notes = %q, want the failure, limit and repository notes in that order", res.Notes)
+	}
+}
+
+// PC2 (N34): gh fails for feat/a, returns its limit of fork PRs for feat/b,
+// then is not found for feat/c: the failure, limit and gh-missing notes, in
+// that order.
+func TestZZProbe_PC2_FailureLimitAndMissingNotesInOrder(t *testing.T) {
+	fx := moRepoCheckFixture(t, "git@github.com:acme/app.git")
+	full := moPRs(moForkPRs(100, mergeOrderGHLimit)...)
+	p := fx.params(false)
+	gh := 0
+	p.Exec = func(c context.Context, dir string, env []string, name string, args ...string) (string, error) {
+		if name == "gh" {
+			gh++
+			switch gh {
+			case 1:
+				return "", errors.New("exit status 1: HTTP 502")
+			case 2:
+				return full, nil
+			}
+			return "", &exec.Error{Name: "gh", Err: exec.ErrNotFound}
+		}
+		return fx.exec.run(c, dir, env, name, args...)
+	}
+	res, err := fx.o.MergeOrder(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := moC3Prefixes(res, pcFail, pcLimit, pcMiss), []string{pcFail, pcLimit, pcMiss}; !slices.Equal(got, want) {
+		t.Errorf("notes = %q, want the failure, limit and gh-missing notes in that order", res.Notes)
+	}
+}
+
+// moC3LimitFixture is n branches feat/b01.. bound and gated on origin's
+// tips, each answered by gh with its limit of fork PRs.
+func moC3LimitFixture(t *testing.T, n int) *moFixture {
+	t.Helper()
+	fx := newMOFixture(t)
+	full := moPRs(moForkPRs(100, mergeOrderGHLimit)...)
+	pairs := []string{"main", moMain}
+	for i := 1; i <= n; i++ {
+		b := fmt.Sprintf("feat/b%02d", i)
+		fx.add(t, moBind(fmt.Sprintf("org-%02d", i), fmt.Sprintf("b%02d", i)), moPassed(fmt.Sprintf("org-%02d", i), b, moHeadA, moMain))
+		fx.exec.setPR(b, full)
+		pairs = append(pairs, b, moHeadA)
+	}
+	fx.exec.lsOut = moListing("main", pairs...)
+	return fx
+}
+
+// PC3 (N43, N44): seven branches full of forks: the note counts 7 and names
+// the first five and 2 more.
+func TestZZProbe_PC3_SevenFullBranchesCountAllNameFive(t *testing.T) {
+	res := moC3LimitFixture(t, 7).run(t, false)
+	want := fmt.Sprintf("gh returned %d PRs, its limit, for each of 7 branches (feat/b01, feat/b02, feat/b03, feat/b04, feat/b05 and 2 more), all from forks",
+		mergeOrderGHLimit)
+	if got := moLimitNotes(res); len(got) != 1 || !strings.HasPrefix(got[0], want) {
+		t.Errorf("limit notes = %q, want one starting %q", got, want)
+	}
+}
+
+// PC4 (N51 = cycle 2 G04): exactly five branches full of forks are all
+// named, with no " and 0 more".
+func TestZZProbe_PC4_FiveFullBranchesNameAllWithoutAndMore(t *testing.T) {
+	res := moC3LimitFixture(t, 5).run(t, false)
+	got := moLimitNotes(res)
+	if len(got) != 1 || !strings.Contains(got[0], "(feat/b01, feat/b02, feat/b03, feat/b04, feat/b05), all from forks") || strings.Contains(got[0], "more") {
+		t.Errorf("limit notes = %q, want all five named and no \"and N more\"", got)
+	}
+}
+
+## G. The probe runner: <scratch>/probe/run-probe3.sh
+#!/bin/bash
+# Run the overlay-only probes (cycle 2's PB* and cycle 3's PC*) on HEAD and
+# on each named mutant. Usage: run-probe3.sh <mutdir> HEAD|<id> ...
+set -u
+WT=<worktree>
+C3=<scratch>
+P=$C3/probe
+export PATH="$C3/canary-bin:$PATH"
+MUT=$1
+shift
+cd "$WT" || exit 2
+for id in "$@"; do
+  ov="$P/ov-$(basename "$MUT")-$id.json"
+  base="{}"
+  [ "$id" = HEAD ] || base="$MUT/$id/overlay.json"
+  python3 - "$base" "$ov" "$WT/internal/org" "$P" <<'PY'
+import json, sys
+base, ov, org, p = sys.argv[1:]
+d = {"Replace": {}} if base == "{}" else json.load(open(base))
+for f in ("zz_probe_c2_test.go", "zz_probe_c3_test.go"):
+    d["Replace"][org + "/" + f] = p + "/" + f
+json.dump(d, open(ov, "w"))
+PY
+  out=$(go test ./internal/org/ -run 'ZZProbe' -count=1 -vet=off -v -overlay "$ov" 2>&1)
+  rc=$?
+  failed=$(printf '%s\n' "$out" | grep -E '^--- FAIL' | sed 's/^--- FAIL: TestZZProbe_//; s/_[A-Z][a-z].*//' | tr '\n' ' ')
+  passed=$(printf '%s\n' "$out" | grep -cE '^--- PASS')
+  build=$(printf '%s\n' "$out" | grep -m1 -E 'build failed|cannot|undefined' )
+  printf '%s\trc=%s\tpass=%s\tfailed: %s%s\n' "$id" "$rc" "$passed" "$failed" "${build:+ BUILD: $build}"
+done
+
+## H. The mutant runner: <scratch>/run3.sh
+#!/bin/bash
+# Run each go -overlay mutant of org-merge-order (/test cycle 3).
+# org mutants: internal/org -run MergeOrder first; survivors also run
+# internal/cli -run 'OrgMergeOrder|OrgLegacyLedger'. cli mutants: only the cli run.
+# A canary gh (logs + exit 97) is first on the inherited PATH.
+# Usage: run2.sh <mutdir> [id ...]
+set -u
+WT=<worktree>
+C3=<scratch>
+export PATH="$C3/canary-bin:$PATH"
+MUT=$1
+shift
+cd "$WT" || exit 2
+RES="$MUT/results.tsv"
+: > "$RES.tmp"
+while IFS=$'\t' read -r id pkg note; do
+  if [ "$#" -gt 0 ]; then
+    want=0
+    for x in "$@"; do [ "$x" = "$id" ] && want=1; done
+    [ "$want" = 1 ] || continue
+  fi
+  ov="$MUT/$id/overlay.json"
+  log="$MUT/$id/test.log"
+  : > "$log"
+  verdict=SURVIVED
+  by=-
+  if [ "$pkg" = org ]; then
+    go test ./internal/org/ -run 'MergeOrder' -count=1 -vet=off -timeout 90s -overlay "$ov" >> "$log" 2>&1
+    if [ "$?" -ne 0 ]; then verdict=KILLED; by=org; fi
+  fi
+  if [ "$verdict" = SURVIVED ]; then
+    go test ./internal/cli/ -run 'OrgMergeOrder|OrgLegacyLedger' -count=1 -vet=off -timeout 300s -overlay "$ov" >> "$log" 2>&1
+    if [ "$?" -ne 0 ]; then verdict=KILLED; by=cli; fi
+  fi
+  if grep -q '\[build failed\]\|setup failed' "$log"; then verdict=BUILD_FAIL; fi
+  how=assert
+  grep -q 'panic: test timed out' "$log" && how=timeout
+  grep -q '^panic: ' "$log" && ! grep -q 'panic: test timed out' "$log" && how=panic
+  [ "$verdict" = KILLED ] || how=-
+  failed=$(grep -E '^\s*--- FAIL' "$log" | sed 's/^ *--- FAIL: //; s/ (.*//' | grep -v / | head -3 | tr '\n' ' ')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$verdict" "$by" "$how" "$note" "$failed" | tee -a "$RES.tmp"
+done < "$MUT/list.tsv"
+mv "$RES.tmp" "$RES"
+echo ALLDONE
+
+## I. The mutant generator: <scratch>/mut3.py (cycle 2's list is imported from <scratch-c2>/mut2.py)
+#!/usr/bin/env python3
+"""go -overlay mutants for org-merge-order /test cycle 3 (HEAD 7a8cac1e).
+
+Each mutant is (id, file, [(old, new), ...], note). Every old must occur
+exactly once in the file (after the earlier edits of the same mutant).
+Writes <out>/<id>/<basename>, <out>/<id>/overlay.json and <out>/list.tsv.
+
+Modes (argv[2]):
+  c3   cycle 3's mutants (N..), the default
+  c2   cycle 2's mutants (omo-c2/mut2.py M + SUPP) whose old string still
+       occurs once at HEAD, under ids prefixed R2-, plus the moved ones
+       rewritten against HEAD (C2B)
+"""
+import json
+import os
+import sys
+
+WT = "<worktree>"
+ORG = WT + "/internal/org/mergeorder.go"
+CLI = WT + "/internal/cli/org_merge_order.go"
+C2DIR = "<scratch-c2>"
+
+LIMARG = '"--limit", strconv.Itoa(mergeOrderGHLimit), '
+COND = "return pr, pr == nil && len(prs) >= mergeOrderGHLimit, nil"
+WITH = "return append(append(failed.notes(), mergeGHLimitNotes(limitFull)...), more...)"
+LIMCASE = "\t\tcase limitFullOfForks:\n\t\t\tlimitFull = append(limitFull, t.branch)\n\t\t\tcontinue\n"
+NILCASE = "\t\tcase pr == nil:\n\t\t\tcontinue\n"
+ONE = 'past them: no PR is used for it, so %s", mergeOrderGHLimit, branches[0], mergeOrderNoPRs)}'
+MANY = 'PRs may be past them: no PR is used for them, so %s", mergeOrderGHLimit, len(branches), mergeNamedBranches(branches), mergeOrderNoPRs)}'
+CMD_BIND = '\tcase t.binding != nil:\n\t\treturn "ralph org gate --org-id " + t.binding.OrgID\n'
+CMD_GATE = '\tcase t.gate != nil && t.gate.ev.OrgID != "":\n\t\treturn "ralph org gate --org-id " + t.gate.ev.OrgID\n'
+
+M = [
+    # --- the --limit argument ---
+    ("N01", ORG, [(LIMARG, "")], "no --limit (gh's default 30)"),
+    ("N02", ORG, [(LIMARG, '"--limit", "100", ')], "--limit 100 literal, constant unchanged"),
+    ("N03", ORG, [("mergeOrderGHLimit = 1000", "mergeOrderGHLimit = 30")], "constant 30 (arg and condition follow)"),
+    ("N04", ORG, [("mergeOrderGHLimit = 1000", "mergeOrderGHLimit = 1001")], "constant off by one"),
+    ("N05", ORG, [(LIMARG, ""), ('"--json", mergeOrderGHFields)', '"--json", mergeOrderGHFields, "--limit", strconv.Itoa(mergeOrderGHLimit))')],
+     "--limit after --json"),
+    ("N06", ORG, [(LIMARG, '"--limit", strconv.Itoa(mergeOrderGHLimit-1), ')], "arg one less than the condition's limit"),
+    # --- the limit condition ---
+    ("N10", ORG, [(COND, "return pr, pr == nil && len(prs) > mergeOrderGHLimit, nil")], ">= -> >"),
+    ("N11", ORG, [(COND, "return pr, pr == nil && len(prs) == mergeOrderGHLimit, nil")], ">= -> == (gh never returns more than --limit)"),
+    ("N12", ORG, [(COND, "return pr, pr == nil && len(prs) >= mergeOrderGHLimit-1, nil")], "limit-1 counts as full"),
+    ("N13", ORG, [(COND, "return pr, len(prs) >= mergeOrderGHLimit, nil")], "pr == nil dropped"),
+    ("N14", ORG, [(COND, "return pr, pr == nil, nil")], "len check dropped: every no-PR branch is full"),
+    ("N15", ORG, [(COND, "return pr, false, nil")], "never full"),
+    ("N16", ORG, [(COND, "return pr, pr == nil && len(prs) > 0, nil")], "any fork-only list counts as full"),
+    # --- lookupMergePRs' limit case ---
+    ("N20", ORG, [(LIMCASE, "")], "limit case dropped (falls to pr == nil: no note)"),
+    ("N21", ORG, [(LIMCASE, ""), (NILCASE, NILCASE + LIMCASE)], "limit case after pr == nil (never reached)"),
+    ("N22", ORG, [("\t\t\tlimitFull = append(limitFull, t.branch)\n", "\t\t\tlimitFull = []string{t.branch}\n")], "only the last full branch kept"),
+    ("N23", ORG, [("\t\t\tlimitFull = append(limitFull, t.branch)\n\t\t\tcontinue\n", "\t\t\tlimitFull = append(limitFull, t.branch)\n\t\t\treturn true, withNotes(), nil\n")],
+     "gh stops after the first full branch"),
+    # --- withNotes: which notes, in which order ---
+    ("N30", ORG, [(WITH, "return append(append(mergeGHLimitNotes(limitFull), failed.notes()...), more...)")], "limit note before gh-failure notes"),
+    ("N31", ORG, [(WITH, "return append(append(append([]string(nil), more...), failed.notes()...), mergeGHLimitNotes(limitFull)...)")],
+     "set-default / gh-missing note first"),
+    ("N32", ORG, [(WITH, "return append(failed.notes(), more...)")], "limit note never given (every path)"),
+    ("N33", ORG, [("\t\t\treturn true, withNotes(stop), nil", "\t\t\treturn true, append(failed.notes(), stop), nil")],
+     "repository stop drops the limit note"),
+    ("N34", ORG, [('return false, withNotes("gh was not found', 'return false, append(failed.notes(), "gh was not found')],
+     "gh missing drops the limit note"),
+    ("N35", ORG, [("\treturn true, withNotes(), nil\n}", "\treturn true, failed.notes(), nil\n}")], "final return drops the limit note"),
+    ("N36", ORG, [(WITH, "return append(mergeGHLimitNotes(limitFull), more...)")], "gh-failure notes never given (every path)"),
+    # --- mergeGHLimitNotes ---
+    ("N40", ORG, [("\tcase 1:\n\t\treturn []string{fmt.Sprintf(\"gh returned %d PRs for %s", "\tcase -1:\n\t\treturn []string{fmt.Sprintf(\"gh returned %d PRs for %s")],
+     "one branch uses the plural form"),
+    ("N41", ORG, [("\tswitch len(branches) {\n\tcase 0:\n\t\treturn nil\n", "\tswitch len(branches) {\n\tcase -1:\n\t\treturn nil\n")],
+     "no branch: plural note for 0 branches"),
+    ("N42", ORG, [(ONE, 'past them: no PR is used for it, so %s", len(branches), branches[0], mergeOrderNoPRs)}')], "singular: count of branches as the PR count"),
+    ("N43", ORG, [(MANY, 'PRs may be past them: no PR is used for them, so %s", mergeOrderGHLimit, min(len(branches), mergeOrderMaxNamed), mergeNamedBranches(branches), mergeOrderNoPRs)}')],
+     "plural: count capped at the named ones"),
+    ("N44", ORG, [(MANY, 'PRs may be past them: no PR is used for them, so %s", mergeOrderGHLimit, len(branches), strings.Join(branches, ", "), mergeOrderNoPRs)}')],
+     "plural: every branch named (no and N more)"),
+    ("N45", ORG, [(MANY, 'PRs may be past them: no PR is used for them, so %s", mergeOrderGHLimit, len(branches), branches[0], mergeOrderNoPRs)}')],
+     "plural: only the first branch named"),
+    ("N46", ORG, [(MANY, 'PRs may be past them: no PR is used for them, so %s", mergeOrderGHLimit, len(branches), mergeNamedBranches(branches), "")}')],
+     "plural: mergeOrderNoPRs dropped"),
+    # --- mergeNamedBranches (shared with the gh-failure note) ---
+    ("N50", ORG, [("strings.Join(branches[:min(len(branches), mergeOrderMaxNamed)], \", \")", "strings.Join(branches, \", \")")], "every branch named"),
+    ("N51", ORG, [("more > 0 {", "more >= 0 {")], "'and 0 more' at exactly the cap (= cycle 2 G04)"),
+    ("N52", ORG, [("named += fmt.Sprintf(\" and %d more\", more)", "named += fmt.Sprintf(\" and %d more\", len(branches))")], "'and N more' counts all"),
+    ("N53", ORG, [("strings.Join(branches[:min(len(branches), mergeOrderMaxNamed)], \", \")", "strings.Join(branches[:min(len(branches), mergeOrderMaxNamed)], \" \")")],
+     "separator"),
+    ("N54", ORG, [("len(g.branches), mergeNamedBranches(g.branches), g.reason))", "len(g.branches), strings.Join(g.branches, \", \"), g.reason))")],
+     "gh-failure note stops using mergeNamedBranches"),
+    ("N55", ORG, [("if more := len(branches) - mergeOrderMaxNamed; more > 0 {", "if more := len(branches) - mergeOrderMaxNamed - 1; more > 0 {")],
+     "'and N more' one short"),
+    # --- mergeGateCommand ---
+    ("N60", ORG, [(CMD_BIND + CMD_GATE, CMD_GATE + CMD_BIND)], "gate record's org before the binding's (= cycle 2 D02)"),
+    ("N61", ORG, [(CMD_GATE, "")], "gate case dropped (revert of c885fcab)"),
+    ("N62", ORG, [(CMD_GATE, '\tcase t.gate != nil:\n\t\treturn "ralph org gate --org-id " + t.gate.ev.OrgID\n')], "gate case without the org_id check"),
+    ("N63", ORG, [('\t}\n\treturn "ralph org gate"\n}', '\t}\n\treturn "ralph org gate --org-id"\n}')], "bare command not bare"),
+    ("N64", ORG, [("\tcase t.binding != nil:\n", "\tcase t.binding != nil && t.gate == nil:\n")], "bound branch with a gate record named by the gate's org"),
+    ("N65", ORG, [(CMD_GATE, '\tcase t.gate != nil && t.gate.ev.OrgID != "":\n\t\treturn "ralph org gate --org-id " + t.gate.ev.Event\n')],
+     "gate case names the event, not the org"),
+    # --- the CLI help (doc only; no test reads it) ---
+    ("N70", CLI, [("gh pr list --head <branch> --state all --limit 1000\\n", "gh pr list --head <branch> --state all --limit 30\\n")],
+     "help names --limit 30"),
+]
+
+# N20 did not build (limitFullOfForks declared and not used); the same
+# mutation written so it builds.
+SUPP = [
+    ("N20b", ORG, [("\t\tcase limitFullOfForks:\n", "\t\tcase false && limitFullOfForks:\n")], "limit case dropped (builds)"),
+]
+
+# Cycle 2's mutants whose old string moved in cycle 3 (lookupMergePRs'
+# returns now go through withNotes; the named-branches lines moved into
+# mergeNamedBranches; mergeGateCommand became a switch), rewritten against
+# HEAD with the same intent.
+C2B = [
+    ("R2-L02b", ORG, [("\t\t\treturn true, withNotes(stop), nil", "\t\t\tnotes = append(notes, stop)\n\t\t\tcontinue"),
+                      ("\treturn true, withNotes(), nil\n}", "\treturn true, withNotes(notes...), nil\n}")],
+     "gh asked again after the mismatch (note kept)"),
+    ("R2-L03b", ORG, [("\t\t\treturn true, withNotes(stop), nil", "\t\t\treturn false, withNotes(stop), nil")], "mismatch reports gh unavailable"),
+    ("R2-L04b", ORG, [("\t\t\treturn true, withNotes(stop), nil", "\t\t\treturn true, []string{stop}, nil")],
+     "mismatch drops earlier gh-failure (and limit) notes"),
+    ("R2-L05b", ORG, [('return false, withNotes("gh was not found', 'return false, append([]string(nil), "gh was not found')],
+     "gh missing drops earlier gh-failure (and limit) notes"),
+    ("R2-G03b", ORG, [("strings.Join(branches[:min(len(branches), mergeOrderMaxNamed)], \", \")", "strings.Join(branches, \", \")")], "all branches named"),
+    ("R2-G07b", ORG, [("len(g.branches), mergeNamedBranches(g.branches), g.reason))", "min(len(g.branches), mergeOrderMaxNamed), mergeNamedBranches(g.branches), g.reason))")],
+     "count capped at the named ones"),
+    ("R2-D01b", ORG, [("func mergeGateCommand(t *mergeTarget) string {\n\tswitch {", "func mergeGateCommand(t *mergeTarget) string {\n\tif true {\n\t\treturn \"ralph org gate\"\n\t}\n\tswitch {")],
+     "never --org-id"),
+    ("R2-D02b", ORG, [(CMD_BIND + CMD_GATE, CMD_GATE + CMD_BIND)], "gate record's org preferred over the binding's"),
+]
+
+def c2_mutants():
+    sys.path.insert(0, C2DIR)
+    import mut2  # cycle 2's harness
+    out, skipped = [], []
+    srcs = {}
+    for mid, path, edits, note in mut2.M + mut2.SUPP:
+        if mid in ("K06", "K07", "H01", "M03", "M05", "M09", "C06", "C07", "C12"):
+            # K06/K07 did not build (K06b/K07b replace them); H01 is the fix
+            # c885fcab made; M03..C12 are cycle 1's gaps (cycle 2 reran them).
+            continue
+        if path not in srcs:
+            with open(path) as f:
+                srcs[path] = f.read()
+        src = srcs[path]
+        ok = True
+        for old, _ in edits:
+            if src.count(old) != 1:
+                ok = False
+                break
+        if not ok:
+            skipped.append(mid)
+            continue
+        out.append(("R2-" + mid, path, edits, note))
+    return out + C2B, skipped
+
+def main():
+    out = sys.argv[1]
+    mode = sys.argv[2] if len(sys.argv) > 2 else "c3"
+    muts = M
+    if mode == "supp":
+        muts = SUPP
+    if mode == "c2":
+        muts, skipped = c2_mutants()
+        print("cycle-2 mutants whose old string no longer occurs once at HEAD (rewritten in C2B where they still apply): " + " ".join(skipped))
+    os.makedirs(out, exist_ok=True)
+    srcs = {}
+    with open(os.path.join(out, "list.tsv"), "w") as lst:
+        for mid, path, edits, note in muts:
+            if path not in srcs:
+                with open(path) as f:
+                    srcs[path] = f.read()
+            src = srcs[path]
+            for old, new in edits:
+                n = src.count(old)
+                if n != 1:
+                    print(f"{mid}: old string occurs {n} times: {old!r}", file=sys.stderr)
+                    sys.exit(1)
+                src = src.replace(old, new)
+            d = os.path.join(out, mid)
+            os.makedirs(d, exist_ok=True)
+            mpath = os.path.join(d, os.path.basename(path))
+            with open(mpath, "w") as f:
+                f.write(src)
+            with open(os.path.join(d, "overlay.json"), "w") as f:
+                json.dump({"Replace": {path: mpath}}, f)
+            pkg = "org" if path == ORG else "cli"
+            lst.write(f"{mid}\t{pkg}\t{note}\n")
+    print(f"{len(muts)} mutants written to {out}")
+
+if __name__ == "__main__":
+    main()
