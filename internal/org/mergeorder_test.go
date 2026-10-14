@@ -612,8 +612,9 @@ func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 // TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt covers AC4's
 // last sentence (C8): a gate record that cannot be read attaches to the
 // branch of its org's latest complete binding before it, even when the org
-// was bound to another feature later, and one with no complete binding of
-// its org before it attaches to no branch and is only counted in a note.
+// was bound to another feature later, and one whose org has neither a
+// complete binding nor a readable gate record before it attaches to no
+// branch and is only counted in a note.
 func TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt(t *testing.T) {
 	fx := newMOFixture(t)
 	half := testFeature("split-1", "half", "0123456789ab")
@@ -663,6 +664,80 @@ func TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings(t *t
 	}
 	if want := map[string]string{"feat/x": MergeClassReady, "feat/y": MergeClassUnreadable}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("classes = %v, want %v", got, want)
+	}
+}
+
+// TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
+// covers cross-review cycle 3's finding (C8): an org with no complete binding
+// (a ledger whose binding line was lost or written by hand) gates a branch
+// only its gate records name. A gate_failed of that org that cannot be read
+// attaches to the branch of the org's latest readable gate record before it,
+// so feat/c is unreadable instead of falling back to its older gate_passed,
+// and of org-e's two gated branches only the later one, feat/e2, takes it.
+// The note counts only org-d's record, whose org has neither a binding nor a
+// readable gate record before it.
+func TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t,
+		moPassed("org-c", "feat/c", moHeadA, moMain), moGarbled("org-c", EventGateFailed),
+		moGarbled("org-d", EventGatePassed),
+		moPassed("org-e", "feat/e", moHeadA, moMain), moPassed("org-e", "feat/e2", moHeadA, moMain), moGarbled("org-e", EventGateFailed),
+	)
+	fx.exec.lsOut = moListing("main", "main", moMain, "feat/c", moHeadA, "feat/e", moHeadA, "feat/e2", moHeadA)
+	res := fx.run(t, false)
+	got := map[string]string{}
+	for _, e := range res.Entries {
+		got[e.Branch] = e.Class
+	}
+	want := map[string]string{"feat/c": MergeClassUnreadable, "feat/e": MergeClassReady, "feat/e2": MergeClassUnreadable}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("classes = %v, want %v", got, want)
+	}
+	e := moEntry(t, res, "feat/c")
+	if e.Gate == nil || e.Gate.Readable || e.Gate.Event != EventGateFailed || e.Binding != nil {
+		t.Fatalf("feat/c = %+v, want the gate_failed that cannot be read and no binding", e)
+	}
+	if !strings.Contains(e.Detail, "(gate_failed at ") || !strings.Contains(e.Detail, "run ralph org gate --org-id org-c again") {
+		t.Errorf("feat/c detail = %q, want the unreadable gate_failed and the gate command for org-c", e.Detail)
+	}
+	note := moNoteWith(res, "gate record(s) cannot be read")
+	if !strings.HasPrefix(note, "1 gate record(s) cannot be read and their org had neither a feature binding nor a readable gate record "+
+		"before them") {
+		t.Errorf("notes = %q, want only org-d's record counted as attached to no branch", res.Notes)
+	}
+}
+
+// TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch covers the
+// order of C8's two places for a gate record that cannot be read: the branch
+// of its org's latest complete binding comes before the branch of its latest
+// readable gate record, whichever of the two came first. org-b's readable
+// record names feat/x, its binding feat/b, and the record that cannot be read
+// goes to feat/b, so feat/x keeps its pass.
+func TestMergeOrder_UnreadableRecordPrefersTheBindingToAGatedBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []any
+	}{
+		{"the gate record before the binding", []any{moPassed("org-b", "feat/x", moHeadA, moMain), moBind("org-b", "b")}},
+		{"the binding before the gate record", []any{moBind("org-b", "b"), moPassed("org-b", "feat/x", moHeadA, moMain)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, tc.lines...)
+			fx.add(t, moGarbled("org-b", EventGateFailed))
+			fx.exec.lsOut = moListing("main", "main", moMain, "feat/b", moHeadA, "feat/x", moHeadA)
+			res := fx.run(t, false)
+			got := map[string]string{}
+			for _, e := range res.Entries {
+				got[e.Branch] = e.Class
+			}
+			if want := map[string]string{"feat/b": MergeClassUnreadable, "feat/x": MergeClassReady}; fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Fatalf("classes = %v, want %v", got, want)
+			}
+			if note := moNoteWith(res, "gate record(s) cannot be read"); note != "" {
+				t.Errorf("notes = %q, want no record counted as attached to no branch", res.Notes)
+			}
+		})
 	}
 }
 

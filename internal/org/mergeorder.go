@@ -315,9 +315,12 @@ func (t *mergeTarget) pos() int {
 // branch a target and becomes the branch's binding and its org's latest one.
 // A gate record is readable when gateRecordFromDetails reads it and its event
 // name agrees with its reason; it attaches to its branch= branch, which it
-// makes a target. One that is not attaches to the branch of its org's latest
-// complete binding before it, since the gate runs only on that branch; with
-// no such binding it attaches nowhere and counts in unattached. A branch's
+// makes a target, and becomes its org's latest readable one. One that is not
+// attaches to the branch of its org's latest complete binding before it,
+// since the gate runs only on that branch. With no such binding it attaches
+// to the branch of its org's latest readable gate record before it, so that a
+// branch only gate records name does not fall back to an older gate_passed
+// (C8). With neither it attaches nowhere and counts in unattached. A branch's
 // gate is the latest record attached to it.
 func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int) {
 	byBranch := make(map[string]*mergeTarget)
@@ -331,6 +334,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 		return t
 	}
 	boundBranch := make(map[string]string) // org_id -> its latest complete binding's branch so far
+	gatedBranch := make(map[string]string) // org_id -> its latest readable gate record's branch so far
 	for i, ev := range l.events {
 		if ev.DryRun || ev.OrgID == "" || ev.SeatID != "" {
 			continue
@@ -350,10 +354,14 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 			g.record, g.readable = gateRecordFromDetails(ev.Details)
 			g.readable = g.readable && g.record.event() == ev.Event
 			branch := g.record.Branch
-			if !g.readable {
+			if g.readable {
+				gatedBranch[ev.OrgID] = branch
+			} else {
 				g.record = gateRecord{}
-				var bound bool
-				if branch, bound = boundBranch[ev.OrgID]; !bound {
+				// The binding first, then the readable gate record. Neither
+				// map holds "": a complete binding and a readable record
+				// both name a branch.
+				if branch = cmp.Or(boundBranch[ev.OrgID], gatedBranch[ev.OrgID]); branch == "" {
 					unattached++
 					continue
 				}
@@ -379,8 +387,8 @@ func mergeLedgerNotes(corrupt, unattached int) []string {
 			"record comes before one is unreadable until ralph org gate records a new one", corrupt))
 	}
 	if unattached > 0 {
-		notes = append(notes, fmt.Sprintf("%d gate record(s) cannot be read and their org had no feature binding before them, "+
-			"so they are attached to no branch", unattached))
+		notes = append(notes, fmt.Sprintf("%d gate record(s) cannot be read and their org had neither a feature binding nor a "+
+			"readable gate record before them, so they are attached to no branch", unattached))
 	}
 	return notes
 }
