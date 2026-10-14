@@ -97,18 +97,18 @@ Critical forks: D1〜D4 は consult(consult-plan-director)、D7 と D8 は consu
 
 ## Acceptance criteria
 
-- [ ] AC1 `[org.director].enabled` は bool で既定 true。`Default()`、`templates/base/ralph.toml`、`scripts/ralph-config.sh` の 2 面が同じ値で、`defaults_sync_test.go` が比べる。`[org.director]` のない `ralph.toml` は true として読む
-- [ ] AC2 `ralph org director attach --driver claude` は `director.jsonl` に `id` 付きの `attached` を 1 行書いて stdout にその `id` を出し、`ralph org director status` と `ralph status` が attached とその `id` を出す。attached のままもう 1 度 attach すると断られ(終了コード 1、何も書かない)、`--replace` なら今の登録の `detached` と新しい `id` の `attached` を書く。`detach --id <今の id>` は `detached` を書く。登録がない、`--id` がない、`id` が違うときは断られ、何も書かない。`detach --force` は `id` を見ずに外す。A が attach(`d1`)、B が `--replace`(`d2`)、A が `detach --id d1` の順では、A の detach が断られて B が登録されたまま残る。`id` は壊れた行の中の `d<N>` とも重ならない。`--driver` が `claude` と `codex` 以外なら断られる。`enabled = false` なら attach は断られる。`--org-id` は断られる
-- [ ] AC3 `enabled = true` で見張りが仕事を受け付けているとき、escalate は受信箱に記録し、`escalations.jsonl` にも `notified` にも書かず、終了コード 0 で終わる。そのあと `ralph org watch --all` の受信箱の期限が、ack の期限を過ぎた時点で、理由 `inbox_ack_deadline` で人に届ける(偽の時計で確かめる)。director が attached でも同じ
-- [ ] AC4 `enabled = true` で見張りが仕事を受け付けていない(not_running、stale、stopping、`--once`)とき、escalate は記録と同時に人へ送り、理由は `inbox_no_watch`。`enabled = false` なら、記録と同時に人へ送り、理由は `inbox_director_disabled`。どちらも今までの通知の失敗の扱い(`ralph org inbox notify <id>` で送り直す)は変わらない。`inbox notify` の理由は `inbox_manual_notify`
-- [ ] AC5 `enabled` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む。feature worktree の `ralph.toml` の `enabled` は、そこで打った escalate と attach の動きを変えない
-- [ ] AC6 `ralph status` は `director:` の行を出し(org があってもなくても)、`--json` に `director` を出す。attached、not attached、disabled、`director.jsonl` が読めないときを言い分ける
-- [ ] AC7 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。`ralph-workflow.md` の 2 面の skill の一覧に `/director` がある
-- [ ] AC8 escalate の help、leader の雛形、`/org` skill の 4 面、README、quality-gates の 2 面、仕様 FR-9 の注、AGENTS.md、tech-debt が 8a-1 の動きを説明する。「director を登録できない」と書いた箇所が残っていない
-- [ ] AC9 テストは repo の台帳に `director.jsonl` を書かず、本物の osascript と herdr を打たない
-- [ ] AC10 `ralph org approve <id>` は `plan_approved` を記録し、件を resolve せず(件は open か acked のまま)、件ごとに DECISION を送る `ralph org send` の打ち方と、そのあとに打つ `ralph org inbox resolve <id> --note 'approved <path> sha256:<digest>'` の打ち方を、この順に出して終了コード 0 で終わる。承認を記録済みの件の approve は断られ(終了コード 1、何も記録しない)、2 つの打ち方をもう一度出す。approve のあと send の前に止まった状態(件が resolve されていない)から、偽の時計で `SweepInboxDeadlines` が ack の期限か resolve の期限で件を人に届ける
-- [ ] AC11 記録だけにした件の `escalated` は `delivery: deadline` を持ち、`ralph org inbox` の NOTIFIED は `deferred`、`inbox show` は「director か ack の期限が受け取る」と出す。すぐ送った件は `delivery: now`、`delivery` のない古い行は `now` として読む。期限の計算の結果は `delivery` によって変わらない
-- [ ] AC12 `/director` skill と `/org` skill は、答えの DECISION を送って終了コード 0 を確かめてから resolve する順を書き、approve の出力の send と resolve をこの順に打つと書く。resolve を send より先に書いた手順がない(文書の検査で確かめる)
+- [x] AC1 `[org.director].enabled` は bool で既定 true。`Default()`、`templates/base/ralph.toml`、`scripts/ralph-config.sh` の 2 面が同じ値で、`defaults_sync_test.go` が比べる。`[org.director]` のない `ralph.toml` は true として読む
+- [x] AC2 `ralph org director attach --driver claude` は `director.jsonl` に `id` 付きの `attached` を 1 行書いて stdout にその `id` を出し、`ralph org director status` と `ralph status` が attached とその `id` を出す。attached のままもう 1 度 attach すると断られ(終了コード 1、何も書かない)、`--replace` なら今の登録の `detached` と新しい `id` の `attached` を書く。`detach --id <今の id>` は `detached` を書く。登録がない、`--id` がない、`id` が違うときは断られ、何も書かない。`detach --force` は `id` を見ずに外す。A が attach(`d1`)、B が `--replace`(`d2`)、A が `detach --id d1` の順では、A の detach が断られて B が登録されたまま残る。`id` は壊れた行の中の `d<N>` とも重ならない。`--driver` が `claude` と `codex` 以外なら断られる。`enabled = false` なら attach は断られる。`--org-id` は断られる
+- [x] AC3 `enabled = true` で見張りが仕事を受け付けているとき、escalate は受信箱に記録し、`escalations.jsonl` にも `notified` にも書かず、終了コード 0 で終わる。そのあと `ralph org watch --all` の受信箱の期限が、ack の期限を過ぎた時点で、理由 `inbox_ack_deadline` で人に届ける(偽の時計で確かめる)。director が attached でも同じ
+- [x] AC4 `enabled = true` で見張りが仕事を受け付けていない(not_running、stale、stopping、`--once`)とき、escalate は記録と同時に人へ送り、理由は `inbox_no_watch`。`enabled = false` なら、記録と同時に人へ送り、理由は `inbox_director_disabled`。どちらも今までの通知の失敗の扱い(`ralph org inbox notify <id>` で送り直す)は変わらない。`inbox notify` の理由は `inbox_manual_notify`
+- [x] AC5 `enabled` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む。feature worktree の `ralph.toml` の `enabled` は、そこで打った escalate と attach の動きを変えない
+- [x] AC6 `ralph status` は `director:` の行を出し(org があってもなくても)、`--json` に `director` を出す。attached、not attached、disabled、`director.jsonl` が読めないときを言い分ける
+- [x] AC7 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。`ralph-workflow.md` の 2 面の skill の一覧に `/director` がある
+- [x] AC8 escalate の help、leader の雛形、`/org` skill の 4 面、README、quality-gates の 2 面、仕様 FR-9 の注、AGENTS.md、tech-debt が 8a-1 の動きを説明する。「director を登録できない」と書いた箇所が残っていない
+- [x] AC9 テストは repo の台帳に `director.jsonl` を書かず、本物の osascript と herdr を打たない
+- [x] AC10 `ralph org approve <id>` は `plan_approved` を記録し、件を resolve せず(件は open か acked のまま)、件ごとに DECISION を送る `ralph org send` の打ち方と、そのあとに打つ `ralph org inbox resolve <id> --note 'approved <path> sha256:<digest>'` の打ち方を、この順に出して終了コード 0 で終わる。承認を記録済みの件の approve は断られ(終了コード 1、何も記録しない)、2 つの打ち方をもう一度出す。approve のあと send の前に止まった状態(件が resolve されていない)から、偽の時計で `SweepInboxDeadlines` が ack の期限か resolve の期限で件を人に届ける
+- [x] AC11 記録だけにした件の `escalated` は `delivery: deadline` を持ち、`ralph org inbox` の NOTIFIED は `deferred`、`inbox show` は「director か ack の期限が受け取る」と出す。すぐ送った件は `delivery: now`、`delivery` のない古い行は `now` として読む。期限の計算の結果は `delivery` によって変わらない
+- [x] AC12 `/director` skill と `/org` skill は、答えの DECISION を送って終了コード 0 を確かめてから resolve する順を書き、approve の出力の send と resolve をこの順に打つと書く。resolve を send より先に書いた手順がない(文書の検査で確かめる)
 
 ## Implementation outline
 
@@ -165,7 +165,9 @@ Critical forks: D1〜D4 は consult(consult-plan-director)、D7 と D8 は consu
 - [x] Plan approved
 - [x] Branch created
 - 2026-10-15: Codex の計画助言は 2 件(1 HIGH: resolve のあとで DECISION が届かないと leader が止まる、2 MEDIUM: 入れ替えられた古い director が新しい登録を外す)。どちらも直した(D7、D8、AC10〜AC12)。直し方は consult(consult-plan-advisory8a1)の判定で、指摘 1 は approve を記録だけにする案にした。計画はユーザーの指示どおり自動で承認した
-- [ ] Implementation started
+- [x] Implementation started
+- 2026-10-15: スライスの切り方を実装の前に変えた。計画の S2(escalate、approve、director の store)を、機能ごとに 3 本(S2a director の store、S2b escalate の切り替え、S2c approve)に分けた。各スライスで CLI のテストが通ったままになるようにするため。スライスとコミット: S1 0aecab13(設定)、S2a 8b2effab(`internal/org/director.go`)、S2b 6dc02d4a(escalate の 3 つの場合、`delivery`、理由、main worktree の規則)、S2c 41e135cd(approve は記録だけ)、S3 8d0090fd(`ralph org director` の動詞と `ralph status` の行)、e14c6273(director のエラー文の attach の時刻を escape する。S3 の報告で見つけた)、S4 15ec1fb7(`/director` skill)、S5 3092a5cd(文書)。S1〜S5 は implementer に任せ、e14c6273 だけは 2 ファイルの小さな直しなのでその場で入れた
+- 2026-10-15: 計画からのずれ。(1) S3 で `ralph status` が `enabled` を main worktree の規則で読むようになり、`--state-dir` を渡すと手元で `git rev-parse` を打つ。そのため `TestStatusCmd_MergeGuaranteeRunsNoGH` の検査を「origin の読み出しは 1 回、ほかは `rev-parse` だけ、gh は打たない」に緩めた(7c-2 の AC6 の「gh を打たず、ネットワークに出ない」は保つ)。(2) S2c で `ApprovedPlan.Resolved` の代わりに `ResolvedElsewhere` を足した。ほかの誰かが resolve した件には、打っても失敗する resolve の打ち方を出さない。(3) 7a のテストのうち、approve が件を resolve することを確かめていたものは、resolve しないことを確かめる形に書き換えた(D7 による契約の変更)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
