@@ -84,8 +84,8 @@
 
 ## Verdict
 
-- Verdict: pass(cycle 2 の HEAD fdb457a8 で確かめ直した。cycle 1 も pass)
-- Verified: ブランチ全体(HEAD fdb457a8)で、AC1〜AC9 と AC11 の経路をコードで確かめた。binary では、cycle 1 が AC1〜AC7・AC11・AC8(PR の欄のほか)・AC9 を R1〜R13(346304fc)で、cycle 2 が gh の PR を origin の owner/repo と突き合わせる直しと AC1・AC2・AC5〜AC9・AC11 を K1〜K18(fdb457a8)で再現した。静的解析はすべて通った(go1.25.8 の build と vet を含む)。skill の 4 面は同一。仕様 FR-8 の読み方、7c-2 と 8a への送り、B2 との一致を確かめた。cycle 1 の D1・D2 は 93af1f87 で直った。下の Partially verified と Not verified の 2 行は cycle 1 の時点のもので、cycle 2 の分は `## Cycle 2` の「判定(cycle 2)」にある(D3・D4、LOW)
+- Verdict: pass(cycle 3 の HEAD 48f0aed7 で確かめ直した。cycle 1・2 も pass)
+- Verified: ブランチ全体(HEAD 48f0aed7)で、AC1〜AC9 と AC11 の経路をコードで確かめた。binary では、cycle 1 が AC1〜AC7・AC11・AC8(PR の欄のほか)・AC9 を R1〜R13(346304fc)で、cycle 2 が gh の PR を origin の owner/repo と突き合わせる直しと AC1・AC2・AC5〜AC9・AC11 を K1〜K18(fdb457a8)で、cycle 3 が gh の `--limit 1000`、上限ぶんの fork の PR だけが返ったブランチの注記、Detail の gate の記録の org_id と、AC1・AC2・AC5・AC6・AC8(PR の欄を含む)・AC9・AC11 を Q1〜Q7(48f0aed7)で再現した。Q8 は直す前の e463eb9d の binary で、fork の PR 30 本に埋もれた PR を注記なしで落とすことを示した。静的解析はすべて通った(go1.25.8 の build と vet を含む)。skill の 4 面は同一。仕様 FR-8 の読み方、7c-2 と 8a への送り、B2 との一致を確かめた。cycle 1 の D1・D2 は 93af1f87、cycle 2 の D3・D4 は f1a05bc7 で直った。下の Partially verified と Not verified の 2 行は cycle 1 の時点のもので、cycle 2 と cycle 3 の分はそれぞれ `## Cycle 2` の「判定(cycle 2)」と `## Cycle 3` の「判定(cycle 3)」にある(cycle 3 は D5〜D7、LOW)
 - Partially verified: AC10。README 262 行目の 1 文が分類の判定の順を言わない(D1、LOW)。tech-debt 231 行目の Trigger が発火したが記録がない(D2、LOW)。どちらも /sync-docs で直せる文書の直しで、動きは変わらない
 - Not verified: テストの実行(/test)、ls-remote の timeout と ssh の prompt、本物の GitHub と `gh`、他者がロックを握る台帳
 
@@ -174,3 +174,101 @@
 - Partially verified: AC10。読む人に見える 4 か所が gh の PR の突き合わせを例外なしに言い切る(D3、LOW)。`seat.go` の package doc が get-url を挙げない(D4、LOW)。どちらも動きは変わらず、D3 の例外は tech-debt の 237 行に書いてある
 - Not verified: テストの実行(/test)、本物の GitHub と gh、get-url の timeout と中断(テストだけ)、D3 の (c)
 - Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2(D3、D4)。情報は 4 つ(仕様の注、self-review の tech-debt の行が未追加、cycle 1 の evidence の文言、K16 で再現した C2-1)
+
+## Cycle 3
+
+- Date: 2026-10-14
+- Verifier: verifier subagent (Claude)。パイプラインの 3 回目で最後(cross-review cycle 2 の ACTION_REQUIRED を直すために上限を 2 から 3 に上げた回。`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま)。self-review の cycle 3(a8fd9992、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 5、Merge: yes)のあとに走らせた
+- Scope: `git diff e463eb9d..HEAD`(HEAD 48f0aed7、5 コミット、11 ファイル、+340/-46)。984a163e(計画の Progress の 1 行)、d7599d82(`gh pr list` に `--limit 1000`、上限ぶんの fork の PR だけが返ったブランチは PR を使わずに注記、help と skill の 4 面、テスト)、c885fcab(self-review の C2-1 の `mergeGateCommand`、C2-2 の `GHTimeout` の doc)、a8fd9992(self-review の cycle 3)、48f0aed7(その insight event)。AC の確かめ直しに要るところは前の cycle の差分も読んだ。テストは走らせていない(/test の担当)。この節の行番号は HEAD 48f0aed7 のもの
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は c0b1e9230999 で、`- Approved:` の digest と同じ。cycle 3 の決定は `## Progress checklist` の最後の項目(計画の 159 行)に書かれている
+- Evidence: `docs/evidence/verify-2026-10-14-org-merge-order-c3.md`。静的解析の出力、手元の gh の binary から読んだ `PullRequestList` の query、HEAD から go1.25.8 で作った binary を一時の bare origin・repo・台帳で打った Q1〜Q8 と、その probe の script を入れた。Q8 は直す前の e463eb9d から作った binary で同じ台帳を打った対照。PATH は一時のディレクトリで、git の wrapper(`git remote get-url origin` の答えだけを差し替える)と偽の `gh`(`--limit` を読み、なければ gh の既定の 30 で切る。fork の PR を新しい順に並べ、その後ろに本物の PR を置く)しか置いていないので、本物の `gh` にも GitHub にも届かない。scratch で組み立てたものを cp し、`cmp` で同じことを確かめた(U+FFFD は 0 件)。手で書いたのは先頭の説明だけ。`./scripts/run-static-verify.sh` が自分で書いた生の出力は `docs/evidence/verify-2026-10-14-011142.log`(gitignore の対象、名前の日付は UTC)
+- insight event: lead の指示どおり書いていない。`insights-append.sh --events-dir <scratch>` で作った行は `"phase":"verify","cycle":3,"verdict":"pass"`、`"low":3`(D5〜D7)。`--cycle auto` は `cycle-count.json` の 2 を読むので、`--cycle 3` を渡した
+
+### cycle 3 の変更の確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| `gh pr list` に `--limit 1000` を渡す(cross-review cycle 2 の ACTION_REQUIRED #1) | 満たす(実機でも確認) | `mergeOrderGHLimit`(`internal/org/mergeorder.go:103`)、`lookupMergePR` の argv(`:734`)。テスト: `TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv`(`internal/org/mergeorder_test.go:1569`、期待は `:1587`)、CLI の `mergeOrderGHCall`(`internal/cli/org_merge_order_test.go:80`)。Q1〜Q5 の gh の argv(各 9 本)と Q6 の 3 本は、どれも `--limit 1000` を含む。Q8(e463eb9d)の 9 本には `--limit` がない。Q1 で、本物の PR #23 より新しい fork の PR が 30 本ある feat/w は、HEAD では #23(統合先 release)を読んで `wrong_base`、e463eb9d では 30 本の fork だけを受けて PR なしの `ready` になり、注記も出ない。fork の PR 40 本のあとに閉じた #20 がある feat/c は、HEAD では隠れて「1 branch(es) whose PR is merged or closed are not shown」に数えられ、`--all`(Q3)の末尾に `closed` で出る。e463eb9d では `ready` |
+| 上限ぶん返った PR がすべて fork のブランチは、PR を使わずに注記 1 行で名指す | 満たす(実機でも確認) | `lookupMergePR` の戻り(`mergeorder.go:746`、`pr == nil && len(prs) >= mergeOrderGHLimit`)、`lookupMergePRs` の上限の枝(`:508-510`)と `withNotes`(`:494-496`)、`mergeGHLimitNotes`(`:568`)、`mergeNamedBranches`(`:583`)。テスト: `TestMergeOrder_GHLimitFullOfForksLeavesThePROut`(`mergeorder_test.go:1341`)。Q1 で、fork の PR が 1000 本返り本物の PR が上限の外にある feat/m と feat/k は PR なしで、注記は「gh returned 1000 PRs, its limit, for each of 2 branches (feat/m, feat/k), all from forks, ...」の 1 行。fork 999 本と本物の #24 で計 1000 本が返る feat/j は #24 を使い、注記に出ない(上限ちょうどでも本物が 1 本混じれば使う境界)。Q4(feat/m だけが上限)は単数の文「gh returned 1000 PRs for feat/m, its limit, ...」。Q5(feat/j で gh が exit 4)は、gh の失敗の注記、上限の注記の順。Q6(本物の PR の url が upstream-org/app)は、上限の 2 本のあと feat/r の PR で突き合わせが外れて gh は 3 回で止まり、上限の注記と set-default の注記の 2 行が残る。上限のブランチは PR なしとして分類するので、push 済みの feat/k は PR の欄が `-` の `ready` と出る。計画の Progress 159 行の決定どおりで、注記が名指すので黙ってはいない |
+| Detail の `ralph org gate` に、結びつきがなければ gate の記録の org_id を付ける(self-review の C2-1) | 満たす(実機でも確認) | `mergeGateCommand`(`mergeorder.go:845`)。テスト: `TestMergeOrder_DetailsNameTheGateCommandWithTheOrg`(`mergeorder_test.go:473`)の feat/orphan と、結びつきの org と gate の記録の org が違う `twice`(`:519-526`)。Q1 で、結びつきがなく org-q の gate の記録だけが名指す feat/x の Detail は `run ralph org gate --org-id org-q again`。同じ台帳で Q8(e463eb9d)は `run ralph org gate again` で、cycle 2 の K16 で CLI が断った形 |
+| `GHTimeout` の doc が get-url にも使うことを言う(self-review の C2-2 の半分) | 満たす(読んで確認) | 定数の説明(`mergeorder.go:84-86`)と `MergeOrderParams` の doc(`:132-134`)。get-url の `GIT_TERMINAL_PROMPT=0`(`:653`)は残る(self-review の C3-1)。動きは変わらない |
+
+### AC の確かめ直し(HEAD 48f0aed7)
+
+cycle 3 の `mergeorder.go` の hunk は、定数、`MergeOrderParams`・`MergeOrder` の doc、`lookupMergePRs`、`mergeGHFailures.notes`、新しい 2 関数、`lookupMergePR`、`mergeGateCommand` だけで(evidence の `git diff -U0` の hunk の一覧)、`collectMergeTargets`(`:321`)、`listOriginBranches`(`:400`)、`classifyMergeTarget`(`:812`)の本体、`classifyGatePassed`、`orderMergeEntries`、`readMergeLedger` は変わっていない。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(実機でも確認) | Q1 で feat/k・feat/r・feat/j が ready、gate のあとに push した feat/x が regate。main が進んだ rebase は cycle 2 の K17 のまま(分類の経路は変わっていない) |
+| AC2 | 満たす(実機でも確認) | Q1 で push していない feat/m が no_remote、feat/n と feat/q が no_gate で、Detail はどちらも `--org-id` を付ける。failed は cycle 2 の K1 のまま |
+| AC3 | 満たす(cycle 1 の実機確認のまま) | `collectMergeTargets` は cycle 3 で変わっていない |
+| AC4 | 満たす(cycle 1 の実機確認のまま) | 分類の経路は変わっていない |
+| AC5 | 満たす(実機でも確認) | 上の 1 行目と 2 行目のとおり。Q1 は閉じた PR の feat/c を隠して数を注記し、Q3(`--all`)は末尾に `closed` を出す。fork でない PR のうち番号が最大のものを採ることは feat/w(#23)・feat/j(#24)で見えた。Q5(1 本で gh が失敗)、Q6(PR が origin の repository のものでない)、Q7(gh なし)は、どれも PR の欄を空にして注記し、終了コード 0。Q8 で、直す前の binary は、本物の PR が fork の PR 30 本の後ろにあった 3 本(feat/w・feat/c・feat/j)を、注記なしで PR なしにしていた(feat/m・feat/k も注記なし) |
+| AC6 | 満たす(実機でも確認) | Q1 の並びは ready(gate の時刻の 01:00:12 の feat/k、:13 の feat/r、:16 の feat/j)、wrong_base、regate、no_remote、no_gate(結びつきの順に feat/n、feat/q)で、`mergeClassOrder` のとおり。ready が 3 本なので「3 branches are ready, but merging one moves origin/main ...」の注記が出る |
+| AC7 | 満たす(cycle 2 の実機確認のまま) | `listOriginBranches` は cycle 3 で変わっていない。ls-remote は gh より前に打つので、gh の引数を変えても AC7 の経路に触れない(cycle 2 の K15) |
+| AC11 | 満たす(実機でも確認) | wrong_base は Q1 の feat/w(統合先が release の PR #23)。既定のブランチを変えた rebase は cycle 2 の K18 のまま |
+| AC8 | 満たす(実機でも確認、PR の欄も) | Q2(`--json`)は Q1 のテキストと同じ 8 本を同じ順で出す。feat/r・feat/j・feat/w の entry に `pr`(`number`・`state`・`url`・`head_ref_oid`・`base_ref_name`)が出る。cycle 1・2 で binary では見ていなかった PR の欄を、ここで初めて見た。上限で PR を使わなかった feat/k と feat/m の entry には `pr` がなく、それを知らせるのは `notes` の先頭の文だけ(D6)。`gh_available` は true |
+| AC9 | 満たす(実機でも確認) | Q1〜Q8 の前後で、manifest の sha256(f9f7a96f…)・行数・バイト数(15 行、3697 バイト)・台帳のディレクトリの中身(`manifest.jsonl` だけ)が同じ。work と origin の refs の digest も同じで、state・work・origin・HOME の下に marker より新しいファイルは 0 件 |
+| AC10 | 一部(D5〜D7、LOW) | skill の 4 面は `cmp` で同一、`check-skill-sync.sh`(13 skill in lock-step)と `check-sync.sh`(DRIFTED 0)が通る。中身のずれは下の表の D5〜D7 |
+
+計画の逸脱の記録: Progress の 159 行は、`--limit 1000` を定数で渡すこと、gh が `--head` だけのときは作成の新しい順に 1 ページ 100 件で辿ること(consult が gh の source で確かめたと triage にある)、返った数が上限と同じで fork でない PR が 1 本もないときはそのブランチの PR を使わずに注記すること、別のコミットで C2-1 と C2-2 を直すことを書いている。d7599d82 と c885fcab、Q1〜Q8 の結果はこの記述と合う。Scope の 26 行の gh の argv には `--limit` がないが、承認したあとの計画の本文は変えない決まり(digest が承認時と同じことと合う)で、逸脱は Progress にある。
+
+仕様: FR-8 の「merge してよい順」の読み方と `ready` の定義は cycle 3 で変わらない。変わったのは PR の候補を読む数と、読み切れないときの扱いだけで、gate の head・base・base_ref を origin と比べる部分には触れていない。
+
+### gh の並び順(任意の確認)
+
+- 確かめたこと: 手元の gh 2.102.0(`/opt/homebrew/Cellar/gh/2.102.0/bin/gh`)の binary の文字列に、`query PullRequestList(` が 1 つあり、`pullRequests(states: $state, baseRefName: $baseBranch, headRefName: $headBranch, first: $limit, after: $endCursor, orderBy: {field: CREATED_AT, direction: DESC})` と `pageInfo { hasNextPage endCursor }` を持つ(evidence の「gh」の節、`strings` で読んだだけでネットワークは使っていない)。ブランチの名前で絞る `gh pr list` の GraphQL の query は、作成の新しい順に `$limit` まで、cursor でページを辿る。PR の番号は作られた順に振られるので、新しい順は番号の大きい順と同じで、本物の PR より番号の大きい fork の PR が 1000 本を超えない限り、本物の最新の PR は返る 1000 本に入る
+- `gh pr list --help` で、`--limit` の既定が 30、`--head` が `<owner>:<branch>` を受けないことを見た(self-review と同じ)
+- 確かめていないこと: `--head` だけ(`--search`・`--author`・`--label` などなし)のときに gh がこの query を使い、検索の API を使わないこと、1 ページが 100 件であること。binary の文字列からは分岐とページの大きさは読めない。どちらも triage が consult の source の読みとして書いている。おそらく正しいが、未確認です
+
+### 静的解析(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK、`check-sync.sh` PASS(IDENTICAL 167、DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の plan 参照、golang(`gofmt: ok`、`go vet ./...` と `staticcheck ./...` は出力なし、`golangci-lint run ./...` 0 issues)、`secret-scan-branch: scanned ac34ccf3..48f0aed7 against origin/main: clean` |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` | pass | go.mod は `go 1.25.8`、手元は go1.26.0 |
+| `GOTOOLCHAIN=go1.25.8 go vet ./...` | pass | 出力なし |
+| `go vet ./...`(go1.26.0)、`gofmt -l internal/ cmd/` | pass | 出力なし |
+| `scripts/check-skill-sync.sh`、`scripts/check-sync.sh`(単独で) | pass | 13 skill(s) in lock-step。DRIFTED 0 |
+| `/org` skill の 4 面の `cmp` | pass | 同一 |
+| `git diff --check ac34ccf3...HEAD`、`git diff --check e463eb9d..HEAD` | pass | どちらも rc 0 |
+
+### 文書のずれ(cycle 3)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| help(`internal/cli/org_merge_order.go:45-48`) | yes | `--limit 1000` と「when all 1000 are from forks, it takes none and a note says so」は、Q1 の argv、Q1・Q4 の注記と合う |
+| skill の `merge-order` の行(`.claude/skills/org/SKILL.md:183`、4 面とも同じ) | yes | `--limit 1000` と「返った 1000 本がすべて fork の PR なら、PR を使わずに注記で言う」は、コードと Q1・Q4 に合う |
+| skill の「merge してよい順」節(`.claude/skills/org/SKILL.md:871` 以下、gh の項目は `:924-937`) | yes(情報) | gh があるときとないとき、repository の突き合わせの 3 つの穴を挙げるが、上限の場合は挙げない。183 行が書いているので、食い違う記述はない |
+| README の org の節(`README.md:262`) | yes(情報) | gh については「looks up each branch's PR」と repository の突き合わせだけを書き、fork を外すことも上限も書かない。食い違う記述はない |
+| 仕様 FR-8 の 7c-1 の注(`docs/specs/2026-10-07-org-multi-org-director.md:75`) | yes(情報) | 「fork でない PR のうち番号が最大のもの」は、返った候補の中の話として今も正しい。上限の場合は書かないが、注は「詳細は ... 計画に書いた」で終わり、計画の Progress 159 行にその決定がある |
+| `MergeOrderEntry.PR` の doc(`internal/org/mergeorder.go:168-170`) | ずれ(D7、LOW) | PR が nil になる場合を「gh was not there, failed, found none from this repository, or read another repository than origin's」と並べるが、上限ぶんの fork の PR で使わなかった場合を言わない。Q2 の feat/k・feat/m がその場合で、`--json` の `pr` の欄の契約の説明が 1 つ欠ける。self-review の C3-4 の (d) と同じ所見。直すなら 1 句足す |
+| tech-debt の merge-order の残りの行(`docs/tech-debt/README.md:239`) | ずれ(D5、LOW) | cycle 3 の直しで古くなった。(a)(gate の記録だけが名指すブランチの Detail に `--org-id` がない)は c885fcab で直った(Q1 と Q8 の feat/x の比較)。(k)(Detail の org を gate の記録から読む mutant が通る)は `twice`(`mergeorder_test.go:519-526`)で閉じた。(b) は doc が直り、get-url の env だけが残る。先頭の「at the pipeline cap (2/2)」と Why deferred の「Found at the pipeline cap (2/2): fixing any of them needs a third pipeline run」は、3 回目が走ったので偽。Impact の「Only (a) reaches a reader」は、読む人に当たるものが ready が 2 本以上のときの注記(self-review の C3-2、Q1 で再現)に替わった。self-review の C3-5 と同じで、直し方はその報告の「register の 239 行の古くなった所」の表にある。/sync-docs が直す |
+| tech-debt の `--json` の lookup の結果の行(`docs/tech-debt/README.md:238`) | ずれ(D6、LOW) | 「gh failed for this branch (or gh's PRs were left out for the run) ... both leave out the entry's `pr`」は、run 全体で PR を捨てる場合までを書き、ブランチ 1 本だけ上限で PR を使わない場合を書かない。Q2 で feat/k と feat/m の entry には `pr` がなく、それを知らせるのは `notes` の文だけだった。8a の director が JSON を読むとき、上限で読めなかったブランチは PR のないブランチに見え、feat/k なら `ready` と読める。self-review の C3-5 が 238 行に足すよう勧めている。/sync-docs が直す |
+| `internal/org/mergeorder.go` の先頭の説明(`:31-39`) | yes | 「each branch's PR from `gh pr list` when gh is there」とだけ書き、引数や上限を言い切らない |
+| `internal/org/seat.go:7-11` の package doc | yes | cycle 2 の D4 は f1a05bc7 で直った(`git ls-remote`, plus `git remote get-url origin` once gh returned a PR)。cycle 3 で新しい外のコマンドはない |
+| cycle 2 のずれ D3(gh の突き合わせの例外) | 直った | f1a05bc7。help、skill の 183 行と 928 行以下、README 262 行、`mergeorder.go` の先頭の説明が 3 つの穴を書く |
+| 計画の AC の checkbox と Progress | yes | AC1〜AC11 は `[x]`、「PR created」だけが `[ ]`。Progress の最後の項目が cycle 3 の決定を書く |
+
+### 観察
+
+- self-review の C3-2 を binary で再現した。Q1 で ready が 3 本のときの注記は「3 branches are ready, but merging one moves origin/main: the other ready ones then become rebase, so rebase them on origin/main and run ralph org gate again (the gate runs only while the feature org runs)」で、`--org-id` を付けない。同じ出力の Detail は、結びつきのあるブランチも gate の記録だけのブランチ(feat/x)も、どれも `--org-id` を付ける。`ralph org gate` を裸で勧める文は、この注記の 1 つだけになった(`mergeorder.go:917-920`、テストの期待は `mergeorder_test.go:515`)。help と skill はこの文を引用していない
+- 上限で PR を使わなかったブランチは、PR がないブランチと同じに分類される。Q1 の feat/k は `ready` で、本物の PR が閉じていても merge 済みでも、それは分からない。テキストでは注記が名指し、JSON では `notes` の文だけが知らせる(D6)。計画の決定どおりで、cross-review の指摘の「黙って `ready` に寄る」のうち、「黙って」が直った
+- Q6 で、上限の注記(「no PR is used for them」)と set-default の注記(「no PR is used」)が両方出る。repository の突き合わせが外れると全部の PR を捨てるので、前の注記は結果の説明として重なるが、どちらも正しい。self-review の「所見にしなかったもの」に同じ判断がある
+- 偽の gh は 1000 本の JSON を 1 回で返す。本物の gh が 1000 本を 100 件ずつ 10 回の GraphQL で取ること、それが 15 秒(`GHTimeout`)に収まることは見ていない。収まらなければ、そのブランチは timed out の注記になり、結果は PR なしと同じ(self-review の読みのとおり)。通常は PR が 1 本で、1 回で終わる
+
+### Coverage gaps(cycle 3)
+
+- テストは走らせていない(/test の担当)
+- 本物の GitHub と本物の gh は使っていない。本物の gh が `--head` と `--limit 1000` を一緒に受けること、`--head` だけのときに作成の新しい順の query を使うこと(上の「gh の並び順」の未確認の 2 点)、1000 本を 15 秒で取り切れることは見ていない
+- rebase(main が進んだ、既定のブランチを変えた)、failed、unreadable、AC7 の終了コード 1 は cycle 3 では打っていない。経路が変わっていないことを hunk の一覧で確かめ、cycle 1・2 の R と K の結果を引いた
+- `withNotes` が、gh が途中で見つからなくなったときにそれまでの上限の注記を残すことは、binary では打てない(PATH の gh が run の途中で消える場合)。読んで確かめただけ
+- 足すと確信がいちばん増える確認: この worktree で、merge 済みの本物のブランチ(feat/org-gate、PR #225)を名指す一時の台帳を使い、HEAD の binary で `ralph org merge-order --json` を 1 回打つ。本物の gh が `--limit 1000` つきで 1 回で返り、PR #225 が merged として隠れることが分かる。読むだけだが GitHub に出るので、この verify では打っていない
+
+### 判定(cycle 3)
+
+- Verdict: pass
+- Verified: cycle 3 の 2 つの直し(gh の `--limit 1000` と上限ぶんの fork の PR の扱い、Detail の gate の記録の org_id)をコードとテストの名前で辿り、HEAD 48f0aed7 の binary で Q1〜Q7 として再現した。直す前の e463eb9d の binary(Q8)は同じ台帳で、fork の PR 30 本に埋もれた PR を注記なしで落とし、feat/w と feat/c を `ready` と出した。AC1・AC2・AC5・AC6・AC8(PR の欄を含む)・AC9・AC11 を同じ binary で確かめ直し、AC3・AC4・AC7 は経路が変わっていないことを diff で確かめた。静的解析はすべて通った(go1.25.8 の build と vet を含む)。cycle 3 の決定は計画の Progress に記録されている。gh の PR の一覧の query が作成の新しい順であることは、手元の gh の binary で確かめた
+- Partially verified: AC10。tech-debt の 239 行が cycle 3 の直しで古くなった(D5、LOW)。238 行が上限で PR を使わない場合を書かない(D6、LOW)。`MergeOrderEntry.PR` の doc が同じ場合を書かない(D7、LOW)。D5 と D6 は /sync-docs が直す文書の直しで、D7 は doc の 1 句。どれも動きは変わらない
+- Not verified: テストの実行(/test)、本物の GitHub と gh(`--head` だけのときの query の選び方、1 ページの件数、1000 本の取得時間)、gh が run の途中で消えたときの注記
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(D5、D6、D7。D5 は self-review の C3-5、D7 は C3-4 の (d) と同じ所見)。情報は 5 つ(skill の節・README・仕様の注が上限を書かないこと、計画の Scope の argv、C3-2 の再現、Q6 の注記の重なり、1000 本の取得時間)
