@@ -458,3 +458,336 @@ Flags:
 
 Global Flags:
 ```
+
+## Cycle 2 (HEAD 35a453aa)
+
+- Date: 2026-10-15 (UTC timestamps in the output read 2026-10-14T20:xx)
+- Scope: `git diff 7cd73066..HEAD` (the restore of 634b019a, the self-review fixes of f4c1a394, and the sync-docs of 624f603b), read against `git diff ef575748...HEAD`
+- Redaction as in cycle 1: the session scratch directory is `$SCRATCH`, the home directory `~`, and the login name `$USER`. The two `jq -e .` dumps of settings.json are elided. The full wrapper log is `docs/evidence/verify-2026-10-14-204359.log` (gitignored, not committed).
+
+### C2-1. ./scripts/run-static-verify.sh (changed scope)
+
+```text
+# Verification run
+- Timestamp: 2026-10-14T20:43:59Z
+- Mode: static
+- Requested scope: changed
+
+==> Running local verifier
+==> shellcheck hook + verify scripts
+    OK
+==> sh -n .claude/hooks/check_mojibake.sh
+    OK
+==> sh -n .claude/hooks/lib_json.sh
+    OK
+==> sh -n .claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n .claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n .claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n .claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n .claude/hooks/prompt_gate.sh
+    OK
+==> sh -n .claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n .claude/hooks/session_end_summary.sh
+    OK
+==> sh -n .claude/hooks/session_start_context.sh
+    OK
+==> sh -n templates/base/.claude/hooks/check_mojibake.sh
+    OK
+==> sh -n templates/base/.claude/hooks/lib_json.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n templates/base/.claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n templates/base/.claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n templates/base/.claude/hooks/prompt_gate.sh
+    OK
+==> sh -n templates/base/.claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_end_summary.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_start_context.sh
+    OK
+==> awk parse of the guard in .claude/hooks
+    OK
+==> awk parse of the guard in templates/base/.claude/hooks
+    OK
+==> jq -e . .claude/settings.json
+    (settings.json dump elided)
+    OK
+==> jq -e . templates/base/.claude/settings.json
+    (settings.json dump elided)
+    OK
+==> Codex hook single-source guard
+    OK
+==> Codex inline hook detector smoke test
+    OK
+==> Codex PR provenance policy guard
+    OK
+==> scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+    OK
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid
+[ok] .claude/skills/implement/SKILL.md: all pipeline steps referenced
+[ok] .claude/skills/cross-review/SKILL.md: all pipeline steps referenced
+[ok] .claude/rules/ralph/subagent-policy.md: all pipeline steps referenced
+[ok] docs/quality/definition-of-done.md: all pipeline steps referenced
+[ok] README.md: all pipeline steps referenced
+[ok] AGENTS.md: all pipeline steps referenced
+    OK
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+    OK
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> tech-debt README plan references
+    OK
+==> Language scope: full fallback (unclassified:scripts/ralph-config.sh)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned ef575748..35a453aa against origin/main: clean
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-14-204359.log
+rc=0
+```
+
+### C2-2. Go and sync checks
+
+```text
+$ go version
+go version go1.26.0 darwin/arm64
+$ gofmt -l .
+rc=0
+$ go vet ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+$ GOTOOLCHAIN=go1.25.8 go build ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./...
+rc=0
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+rc=0
+$ ./scripts/check-sync.sh | tail -9
+
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+rc=0
+$ git diff --check ef575748...HEAD
+rc=0
+$ git diff --check 7cd73066..HEAD
+rc=0
+```
+
+### C2-3. HEAD binary probe: AC2 refusals and failed writes leave director.jsonl as it was
+
+Script `ac2-probe.sh` (scratch): PATH holds only git, the ledger and the cwd are scratch dirs. Each `cmp` line compares director.jsonl with a copy taken just before the command. The failed writes make director.jsonl read-only (`chmod 444`), so the open fails; a write that fails partway is not reproduced here (C2-4).
+
+```text
+## refusals before any registration
+$ ralph org director detach --id d1 --state-dir $SCRATCH/c2/ac2/ledger
+org: director: detach d1: no director is attached
+[exit 1]
+cmp (detach, none attached): director.jsonl still missing
+
+$ ralph org director attach --driver gpt --state-dir $SCRATCH/c2/ac2/ledger
+org: director attach: --driver "gpt" is not claude or codex
+[exit 1]
+cmp (bad driver): director.jsonl still missing
+
+$ ralph org director attach --driver claude --org-id org-a --state-dir $SCRATCH/c2/ac2/ledger
+org: director attach: --org-id does not apply: the director registration belongs to the whole ledger, not to one org
+[exit 1]
+cmp (--org-id): director.jsonl still missing
+
+$ ralph org director attach --driver claude --config $SCRATCH/c2/ac2/disabled.toml --state-dir $SCRATCH/c2/ac2/ledger
+org: director attach: [org.director].enabled is false in the --config file $SCRATCH/c2/ac2/disabled.toml, so ralph org escalate already sends every item to the human at once and leaves nothing to a director; to use one, set [org.director].enabled = true there
+[exit 1]
+cmp (enabled = false): director.jsonl still missing
+
+## attach d1, then refusals
+$ ralph org director attach --driver claude --state-dir $SCRATCH/c2/ac2/ledger
+attached d1 (driver=claude)
+detach it with: ralph org director detach --id d1 --state-dir '$SCRATCH/c2/ac2/ledger'
+warning: director attach: d1 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/c2/ac2/ledger (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/c2/ac2/ledger'
+[exit 0]
+
+$ ralph org director attach --driver codex --state-dir $SCRATCH/c2/ac2/ledger
+org: director: attach: a director is already attached: d1 (driver claude, attached 2026-10-14T20:50:00Z): end it with ralph org director detach --id d1 --state-dir '$SCRATCH/c2/ac2/ledger' from the session that attached it (or with --force in place of --id, when that session is gone), or replace it with ralph org director attach --driver codex --replace --state-dir '$SCRATCH/c2/ac2/ledger'
+[exit 1]
+cmp (second attach): director.jsonl byte-identical
+
+$ ralph org director detach --state-dir $SCRATCH/c2/ac2/ledger
+org: director detach: give --id <id>, the id attach printed, or --force
+[exit 1]
+cmp (detach, no --id): director.jsonl byte-identical
+
+$ ralph org director detach --id d1 --force --state-dir $SCRATCH/c2/ac2/ledger
+org: director detach: --id and --force cannot be used together
+[exit 1]
+cmp (detach, --id and --force): director.jsonl byte-identical
+
+$ ralph org director detach --id x1 --state-dir $SCRATCH/c2/ac2/ledger
+org: director: detach: "x1" is not a registration id (d<N>, such as d1)
+[exit 1]
+cmp (detach, bad id): director.jsonl byte-identical
+
+$ ralph org director detach --id d7 --state-dir $SCRATCH/c2/ac2/ledger
+org: director: detach d7: the id is not the current registration's: the current registration is d1 (driver claude, attached 2026-10-14T20:50:00Z), so the session that attached d7 was replaced (or d7 has already been detached) and does not need to detach
+[exit 1]
+cmp (detach, other id): director.jsonl byte-identical
+
+## failed writes: director.jsonl read-only (open fails)
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/c2/ac2/ledger
+org: director: attach: nothing was recorded, so d1 (driver claude, attached 2026-10-14T20:50:00Z) is still the current registration: open $SCRATCH/c2/ac2/ledger/director.jsonl: open $SCRATCH/c2/ac2/ledger/director.jsonl: permission denied
+[exit 1]
+cmp (replace, read-only): director.jsonl byte-identical
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/c2/ac2/ledger
+org: director: detach d1: nothing was recorded, so d1 (driver claude, attached 2026-10-14T20:50:00Z) is still the current registration: open $SCRATCH/c2/ac2/ledger/director.jsonl: open $SCRATCH/c2/ac2/ledger/director.jsonl: permission denied
+[exit 1]
+cmp (detach, read-only): director.jsonl byte-identical
+
+$ ralph org director detach --force --state-dir $SCRATCH/c2/ac2/ledger
+org: director: force detach: nothing was recorded, so d1 (driver claude, attached 2026-10-14T20:50:00Z) is still the current registration: open $SCRATCH/c2/ac2/ledger/director.jsonl: open $SCRATCH/c2/ac2/ledger/director.jsonl: permission denied
+[exit 1]
+cmp (force detach, read-only): director.jsonl byte-identical
+
+## replace d1 with d2, then the replaced session's detach
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/c2/ac2/ledger
+attached d2 (driver=codex), replacing d1 (driver=claude, attached at 2026-10-14T20:50:00Z)
+detach it with: ralph org director detach --id d2 --state-dir '$SCRATCH/c2/ac2/ledger'
+warning: director attach: d2 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/c2/ac2/ledger (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/c2/ac2/ledger'
+[exit 0]
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/c2/ac2/ledger
+org: director: detach d1: the id is not the current registration's: the current registration is d2 (driver codex, attached 2026-10-14T20:50:01Z), so the session that attached d1 was replaced (or d1 has already been detached) and does not need to detach
+[exit 1]
+cmp (replaced id detach): director.jsonl byte-identical
+
+$ ralph org director status --state-dir $SCRATCH/c2/ac2/ledger
+director: attached d2 (driver=codex, attached at 2026-10-14T20:50:01Z, by $USER) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d2
+driver: codex
+wake: pull
+attached_at: 2026-10-14T20:50:01Z
+user: $USER
+cwd: $SCRATCH/c2/ac2/cwd
+herdr_pane: no
+[exit 0]
+
+$ ralph org director detach --id d2 --state-dir $SCRATCH/c2/ac2/ledger
+detached d2
+[exit 0]
+
+--- director.jsonl (event and id per line)
+attached d1
+detached d1
+attached d2
+detached d2
+```
+
+### C2-4. Attempt at a real partial write with RLIMIT_FSIZE (not reproduced)
+
+Scripts `fsize-try.sh` and `fsize-over.sh` (scratch, `/bin/bash`, `ulimit -f 1` in a subshell around one `attach --replace`). In the first, the cwd is padded with 150 characters so that the old line and the detached fit under the limit and the attached does not; in the second, director.jsonl is already past the limit before the write. Both writes went through whole, so on this macOS the limit does not stop this append, and the cut back after a write that fails partway is covered only by the write seam of the Go tests.
+
+```text
+ulimit -f 1; size before:      435
+subshell rc=0
+[exit 0]
+--- stdout
+attached d2 (driver=codex), replacing d1 (driver=claude, attached at 2026-10-14T20:52:12Z)
+detach it with: ralph org director detach --id d2 --state-dir '$SCRATCH/c2/try/ledger'
+--- stderr
+warning: director attach: d2 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/c2/try/ledger (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/c2/try/ledger'
+size after:     1270
+--- director.jsonl (per line: bytes, last char)
+435 bytes: {"ts":"2026-10-14T20:52:12Z","id":"d1","event":"attached","d
+401 bytes: {"ts":"2026-10-14T20:52:12Z","id":"d1","event":"detached","u
+434 bytes: {"ts":"2026-10-14T20:52:12Z","id":"d2","event":"attached","d
+0000000   \n
+
+size before:     1898 (ulimit -f 1 = 1024 bytes in bash)
+subshell rc=0
+[exit 0]
+--- stdout
+attached d5 (driver=codex), replacing d4 (driver=codex, attached at 2026-10-14T20:52:12Z)
+detach it with: ralph org director detach --id d5 --state-dir '$SCRATCH/c2/over/ledger'
+--- stderr
+warning: director attach: d5 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/c2/over/ledger (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/c2/over/ledger'
+size after:     2435
+cmp: director.jsonl changed
+director: attached d5 (driver=codex, attached at 2026-10-14T20:52:12Z, by $USER) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+```
+
+### C2-5. ralph org director status --help of the HEAD binary (cycle-1 V4; the description only, usage and flags dropped)
+
+```text
+ralph org director status shows [org.director].enabled, read as
+`ralph org escalate` reads it, and the current director registration of
+the ledger: the director: line of `ralph status` (attached, not
+attached, disabled, or unreadable), then enabled and, when a director is
+attached, the registration's fields, or all of it as JSON with --json.
+With enabled false the state is disabled whether or not a registration is
+recorded; one that is still recorded is named and its fields are shown.
+The registration does not tell whether its session is still running.
+```

@@ -83,3 +83,95 @@
 - Partially verified: AC8(V1)。AC9(コードを読んだ範囲。実行は /test)
 - Not verified: テストの実行、連結した worktree からの `git worktree list` の分岐、approve の 2 process の同時実行、binary での ack の期限の送信、`ralph init` の実行
 - Insight event: オーケストレーターが前の計画と同じく別のコミットで記録する前提で、この commit には jsonl を入れていない。`--events-dir` を一時の場所にして作った正規の 1 行は次のとおり: `{"schema":1,"ts":"2026-10-14T19:02:53Z","slug":"org-director-attach","flow":"standard","phase":"verify","cycle":1,"verdict":"pass","findings":{"critical":0,"high":0,"medium":0,"low":1},"triage":{"action_required":0,"worth_considering":0,"dismissed":0},"source":"skill"}`
+
+## Cycle 2
+
+- Date: 2026-10-15
+- Verifier: verifier subagent (Claude)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` の cycle は 2 で、既定の上限 2 の最後)。cross-review cycle 1 の ACTION_REQUIRED 1 件(`docs/reports/cross-review-triage-org-director-attach.md`)の直し 634b019a と、self-review cycle 2(71dac14e、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 5、Merge: yes)の LOW の直し f4c1a394 のあとに走らせた
+- Scope: `git diff 7cd73066..HEAD`(HEAD 35a453aa、10 コミット、16 ファイル、+2451/-28)。Go の変更は `internal/org/director.go`、`internal/org/director_test.go`、`internal/cli/org_director.go`、`internal/cli/org_director_test.go` の 4 ファイルだけ。残りは self-review・test・sync-docs・cross-review の記録、sync-docs 624f603b の文書(AGENTS.md、仕様の 8a-1 の注、quality-gates の 2 面、計画の Progress)、f4c1a394 の tech-debt の 1 行。AC の確かめ直しに要るところは `git diff ef575748...HEAD` も読んだ。テストは走らせていない(/test の担当)。この節の行番号は HEAD 35a453aa のもの。上の cycle 1 の節の行番号は 676e7f98 のままで、たとえば `Attach` は 196 行から 216 行に、`Detach` は 252 行から 272 行に動いた
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は 27414f27525b で、`- Approved:` の digest と同じ
+- Evidence: `docs/evidence/verify-2026-10-14-org-director-attach.md` の `## Cycle 2 (HEAD 35a453aa)`。C2-1 は run-static-verify の出力、C2-2 は Go と同期の検査、C2-3 は HEAD の binary で拒否と失敗のたびに director.jsonl を直前の写しと `cmp` した probe、C2-4 は RLIMIT_FSIZE で本物の途中までの書き込みを作ろうとした試み、C2-5 は `director status --help`。wrapper の全ログは `docs/evidence/verify-2026-10-14-204359.log`(gitignore の対象)
+- Insight event: 指示どおり記録していない(オーケストレーターが別のコミットで記録する)。値は cycle 2、verdict pass、findings はすべて 0(下の情報 4 件は数えない)
+
+### cycle 2 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| cross-review #1: write か close が失敗したら、同じロックの中で追記前の大きさに切り戻す | 満たす(コードとテストのコードで確認。本物の途中までの書き込みは binary で再現できなかった。C2-4) | `appendLocked`(`internal/org/director.go:359`)は write の失敗(`:379-381`)と close の失敗(`:383-384`)で `restoreLocked(len(raw), …)`(`:393`)を呼ぶ。`raw` は `Attach`(`:216`)と `Detach`(`:272`)が同じ `withLock` の中で `readRaw`(ファイル全体を読む)したもので、`appendLocked` を呼ぶのはこの 2 か所(`:247`、`:307`)だけ。open と marshal の失敗は何も書かないので戻さない。テスト(読んだだけ): `TestDirectorAttach_AReplaceCutOffPartwayIsRestored`(`director_test.go:308`。detached の行を書き終えて attached の途中で ENOSPC、元の bytes に戻り、次の replace は d2 を得る)、`TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored`(`:393`。ファイルがなかった attach は空のファイルに戻る。detach も同じ)、`TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored`(`:453`。seam が先に閉じ、本物の `Close` を失敗させる)。seam の `write` と `truncate`(`:166-167`)は unexported で、本番では nil のまま `(*os.File).Write` と `os.Truncate` になる |
+| 戻せたときだけ「nothing was recorded」と言い、戻せなかったときは言わない | 満たす | `directorAppendFailed`(`director.go:412`)の `switch`。`ErrDirectorWriteNotRestored` を包むエラーには `org: director: <verb>: ` だけを足し、`appendLocked` の文で終える(`:414-415`)。そうでなく今の登録があれば「nothing was recorded, so <登録> is still the current registration」(`:416-417`)、登録がなければ「nothing was recorded」(`:418-419`)。`restoreLocked` は truncate が失敗したときだけ、元のエラー・sentinel・truncate のエラーの 3 つを `%w, and %w (%w), so it may hold part of the write` で包む(`:398-399`)。テスト: `TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo`(`:355`。文全体を等号で比べ、3 つの `errors.Is`、truncate の引数が path と `len(before)` であること、ファイルが途中までの書き込みのままで Read が登録なしと壊れた 1 行を返すことを見る)。戻せた側の 3 本は `ErrDirectorWriteNotRestored` を包まないことも見る |
+| 戻せなかったときの確かめ方(self-review C2-L1) | 満たす(helper のテストだけ) | store の文はコマンドを持たない。CLI の `notRestoredError`(`internal/cli/org_director.go:314`)が sentinel のときだけ `rt.command("ralph org director status")` を足すので、`--state-dir` を渡した呼び出しには `--state-dir` が付く。attach(`:121`)と detach(`:183`)の RunE がこれを通る。テスト `TestOrgDirector_NotRestoredErrorNamesTheStatusCommand`(`org_director_test.go:243`)は `--state-dir` のありとなし、ほかのエラー(`ErrDirectorAttached` を含む)がそのまま返ることを見る。RunE の 2 か所がこの helper を通ることにはテストがない(self-review の「Fixes after the cycle-2 review」が known gap と書いている)。2 か所とも通ることはコードを読んで確かめた |
+| `org: director:` を 1 回にする(C2-L2) | 満たす(binary でも確認) | `appendLocked` の 4 つのエラー(`:367`、`:373`、`:381`、`:384`)は接頭辞を持たず、`directorAppendFailed` が 1 回だけ足す。C2-3 の読み取り専用の 3 行でも `org: director:` は 1 回。path が 2 回出る別の重なりは下の C2-V2 |
+| コメントの指す先(C2-L3) | 満たす | 「cross-review finding」「finding 1」「mutant D5」は Go の 4 ファイルにない(grep 0 件)。コメントは起きることを書く形になった(`director.go:66-73`、`director_test.go:848-853`) |
+| doc の言い回し(C2-L4) | 満たす | `ErrDirectorWriteNotRestored`(`:66-73`)は「a failed open or marshal writes nothing, and a failed write or close is cut back」、`Attach`(`:198-215`)と `Detach`(`:260-271`)はどちらも「ends one of two ways」と書く。中身がコードと合うことは下の「文書のずれ(cycle 2)」 |
+| tech-debt の 1 行(C2-L5) | 満たす | `docs/tech-debt/README.md:248`、列は 5。引数の数(`printStatusEmpty` 10、`printStatusJSONAllOrgs` 11、`printStatusTableAllOrgs` 10。`internal/cli/status.go:401`、`:586`、`:622`)は HEAD と合い、self-review C2-L5 の「10〜12」より正確。Related の計画の path は active のもので、`/pr` の archive が書き換える |
+| test 報告の生き残った mutant(ほかの id の detached が今の登録を終わらせる) | 満たす(テストのコードで確認) | `TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration`(`director_test.go:854`)。attached d1 と detached d2 の 2 行だけのファイルで、current が d1、IgnoredEvents が 1。畳み込みの id の検査を外すと current が nil になり赤くなる(読んで判断した。実行は /test) |
+| cycle 1 の verify の V1・V4(sync-docs 624f603b) | 直った | V1: AGENTS.md に「interim」はなく(`grep -c interim AGENTS.md` は 0)、escalate の項は「with `[org.director].enabled` and a cross-org watch accepting work it only records the item, for the director and the ack deadline; otherwise it also sends it to the human at once」になった。`escalateDelivery`(`internal/org/escalate.go:305` の doc)の分岐と合う。V4: `director status --help` に「With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown」が入った(`org_director.go:212-213`、C2-5)。`readOrgDirectorReport` は enabled が false なら登録によらず `disabled` にし、`printOrgDirectorReport` は登録があれば欄を出すので合う。V3(計画の checkbox)も 624f603b で `[x]` になった |
+
+### AC の確かめ直し(HEAD 35a453aa)
+
+cycle 2 の Go の差分は、director の store の書き込みが失敗したときの経路、CLI の attach と detach のエラーの返し方、`director status` の help の 1 文だけだった。escalate、inbox、deadline、approve、config、`ralph status` の Go と skill の 4 面は変わっていない(`git diff --stat 7cd73066..HEAD -- '*.go'` は上の 4 ファイル)。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(cycle 1 のまま) | 設定の 4 面は差分の外 |
+| AC2 | 満たす(binary でも確認) | 拒否: HEAD の binary(C2-3)で、登録がないときの detach、`--driver gpt`、`--org-id`、`--config` の `enabled = false` の attach は、どれも終了コード 1 で director.jsonl を作らない。d1 を attach したあとの 2 つ目の attach、`--id` のない detach、`--id` と `--force` の併用、`x1`、違う `id`(`d7`)、`--replace` で入れ替えられた `d1` の detach は、どれも終了コード 1 で、director.jsonl は直前の写しと `cmp` で同じ。失敗: 読み取り専用にした director.jsonl への `--replace`、`detach --id d1`、`detach --force` は open で失敗して「nothing was recorded, so d1 … is still the current registration」と出し、ファイルは `cmp` で同じ。途中まで書けた失敗が元の bytes に戻ることは、テストの seam で読んで確かめた(上の表の 1 行目)。元の bytes に戻らない場合は 2 つあり、どちらも doc に書いてある。ファイルがなかった attach の失敗は空のファイルを残す(`appendLocked` の doc。空は登録なしと読まれ、次の attach は d1 を得る)。切り戻し自体が失敗したときはファイルが途中までの書き込みを持ちうるが、エラーはそう言い、「nothing was recorded」と言わない。A(d1)→ B の `--replace`(d2)→ A の `detach --id d1` の順では A が断られ、d2 が残る(C2-3) |
+| AC3〜AC5 | 満たす(cycle 1 のまま) | `escalate.go`、`inbox.go`、`deadline.go`、`org_inbox.go`、`org.go` は差分の外。attach の見張りの警告(C2-3 の stderr)は cycle 1 と同じ文 |
+| AC6 | 満たす | `orgDirectorLine` と `status.go` は差分の外。C2-3 の `director status` は attached d2 とその欄を出す |
+| AC7 | 満たす | skill の 4 面と `ralph-workflow.md` の 2 面は差分の外。`check-skill-sync.sh`(14 skill)と `check-sync.sh`(DRIFTED 0)が通る |
+| AC8 | 満たす | cycle 1 の V1 が直った(上の表の最後の行)。cycle 2 で足された文書が書き込みの失敗について誤ったことを言っていないことは下の「文書のずれ(cycle 2)」 |
+| AC9 | 満たす(コードを読んだ範囲) | 新しい store のテストは `newTestDirectorStore`(`director_test.go:23`、`t.TempDir()`)を使い、CLI のテストはファイルに触れない `orgDirectorRuntime` の値(`org_director_test.go:253`)だけを使う。osascript と herdr を打つ経路はない |
+| AC10〜AC12 | 満たす(cycle 1 のまま) | `approve.go`、`org_approve.go`、skill の 4 面は差分の外 |
+
+FR-5・FR-9 の文、受け入れ条件、安全の不変条件は、escalate と期限の経路が変わっていないので cycle 1 の判定のまま。
+
+### 静的解析(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK。check-sync PASS、check-pipeline-sync ok、`check-skill-sync: 14 skill(s) in lock-step`、check-template-purity PASS、tech-debt の計画の参照 OK、`gofmt: ok`、golangci-lint `0 issues.`、`secret-scan-branch: scanned ef575748..35a453aa against origin/main: clean`。branch の差分に `scripts/ralph-config.sh` があるので、言語の範囲は cycle 1 と同じく full に広がった |
+| `gofmt -l .` | pass | 出力なし |
+| `go vet ./...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` と `go vet ./...` | pass | 出力なし。`%w` を 3 つ持つ `fmt.Errorf`(`director.go:399`)は Go 1.20 から使える |
+| `./scripts/check-skill-sync.sh` | pass | 14 skill が lock-step |
+| `./scripts/check-sync.sh` | pass | IDENTICAL 169、DRIFTED 0、KNOWN_DIFF 5 |
+| `git diff --check ef575748...HEAD` と `git diff --check 7cd73066..HEAD` | pass | 出力なし |
+| cycle 2 で変わったファイルの U+FFFD、追加行の TODO・FIXME・`fmt.Print`・`/Users/` | pass | 0 件 |
+
+### 文書のずれ(cycle 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ErrDirectorWriteNotRestored`、`Attach`、`Detach`、`appendLocked`、`restoreLocked`、`directorAppendFailed` の doc(`director.go:66-73`、`:198-215`、`:260-271`、`:343-358`、`:389-392`、`:404-411`) | yes | 「戻せたら nothing was recorded、戻せなければ sentinel を包んでそう言わない」「open と marshal の失敗は何も書かない」「作ったファイルは消さずに空に戻す」「appendLocked のエラーは `org: director: ` で始まらず、呼ぶのは Attach と Detach だけ」「ロックなしの Read だけが失敗と切り戻しの間に途中の行を見うる」は、どれも上のコードと合う |
+| `notRestoredError` の doc(`org_director.go:307-313`) | yes | sentinel のときだけ status の打ち方を足し、ほかは素通しする。`attachedError` と同じ作り |
+| README の director の段落(`README.md:258`)、AGENTS.md の `director.go` の項、`/director` skill、`/org` skill の `director` の行(`.claude/skills/org/SKILL.md:186`)、仕様の 8a-1 の注(`docs/specs/2026-10-07-org-multi-org-director.md:84`)、quality-gates の 2 面 | yes | 書き込みの失敗について言う文はない。「何も書かずに断られる」「writes nothing」は `enabled = false` と違う `id` の拒否についての文で、拒否は書く前に起きるので切り戻しと関係しない。仕様の「1 つのロックの下で書く」、AGENTS.md の「under `director.lock`」、attach の help の「in one write, under one lock」は今も正しい。切り戻しが失敗しても何も残らないと言う文書はない |
+| `docs/tech-debt/README.md:248` | yes(情報 C2-V3) | 引数の数と Trigger は HEAD と合う |
+| 計画の Progress checklist | 一部遅れ(情報 C2-V1) | 下の表 |
+
+| ID | Severity | Where | Finding |
+| --- | --- | --- | --- |
+| C2-V1 | INFO | 計画の `## Progress checklist` | 最後の行は sync-docs cycle 1(624f603b)で、cross-review cycle 1 の ACTION_REQUIRED #1、その直し 634b019a、self-review cycle 2 の直し f4c1a394 の行がない。self-review cycle 2 の Follow-ups 4 が /sync-docs で足すよう勧めている。オーケストレーターが更新する欄なので失敗とはしない |
+| C2-V2 | INFO | `director.go:373`、`:381`、`:384` | `os.OpenFile`、`(*os.File).Write`、`Close` のエラーは path を含む `*PathError` なので、`open %s: %w` と包むと path が 2 回出る。C2-3 の binary では `open $SCRATCH/…/director.jsonl: open $SCRATCH/…/director.jsonl: permission denied` になった。本物の write の失敗は `append to <path>: write <path>: no space left on device` になるはずで、seam が素の `syscall.ENOSPC` を返すテストの期待値(`append to <path>: no space left on device`)とは形が違う(おそらく。本物の ENOSPC は未確認)。cycle 1 の 8b2effab からあり、受信箱の `inbox.go:400` も同じ書き方なので、cycle 2 が持ち込んだものではない。動きは変わらない |
+| C2-V3 | INFO | `docs/tech-debt/README.md:248` の Why deferred | 「the last pipeline run (cycle 2 of the default 2)」は HEAD では正しいが、上限を上げて 3 回目を回すと偽になる。今のずれではない |
+| C2-V4 | INFO | `/director` skill の「昇格」の 5 | 「`ralph org director status` に出る `id` が覚えている `id` と違えば入れ替えられた」と書くが、登録がない(`not attached`)場合は名指ししていない。人の `detach --force` と、cycle 2 で起こりうると doc に書かれた「切り戻せなかった replace」(detached の行が残り、attached が壊れた行になる)がこの状態を作る。「違う」に含めて読めるので誤りではない。8a-2 か次に skill に触れるときに 1 句足すとよい |
+
+### 観察
+
+- C2-3 は PATH を git だけにして打ったので、osascript、herdr、agmsg は動いていない。台帳と cwd は scratch。cycle 1 の probe と同じく見張りなしの attach の警告が出る
+- C2-4: `ulimit -f 1` の下で `attach --replace` を 2 通り打った。cwd を 150 文字伸ばして detached までが上限に収まる形にしたものと、director.jsonl が初めから上限を超えているもの。どちらも追記がそのまま通り、ファイルは上限を超えた(435 から 1270 bytes、1898 から 2435 bytes)。この macOS ではこの追記を上限で止められず、途中までの書き込みの切り戻しは Go のテストの seam でしか確かめていない。止まらない理由はおそらく `O_APPEND` の書き込みに上限の検査が効いていないこと(未確認)
+- ralph のプロセスが write と切り戻しの間で死ぬと(SIGKILL、電源断)、途中までの書き込みが残り、エラーも出ない。doc の「A write that fails ends one of two ways」はエラーを返す失敗についての文で、この場合を否定していない。cycle 1 の前からある性質で、読み手は `ralph org director status`(登録なし、または壊れた行の警告)で気づける
+
+### Coverage gaps(cycle 2)
+
+- テストの実行(/test の担当)。新しい store のテスト 5 本と CLI の helper のテストを、go1.26 と `GOTOOLCHAIN=go1.25.8` の両方で走らせるのは /test
+- 本物の ENOSPC で途中まで書けた追記を binary で再現していない(C2-4)。truncate の失敗も binary では起こしていない
+- attach と detach の RunE が `notRestoredError` を通ることのテストがない。2 か所のどちらかを `return err` に戻しても赤くならない(読んで判断した。mutant は走らせていない)
+- 末尾に改行のない raw への追記が失敗した場合(先頭の `\n` ごと切り戻す)のテストがない(self-review cycle 2 の Coverage gaps と同じ)
+- 足すと確信がいちばん増える確認: 小さなディスクイメージ(`hdiutil` の 1 MB の HFS+ など)を一杯にし、その上の台帳で `attach --replace` を打って、ENOSPC で途中まで書けた追記が元の bytes に戻ることを binary で見る。CLI の 2 か所の配線は、store の seam を CLI のテストから差せるようにすれば 1 本で固定できる
+
+### 判定(cycle 2)
+
+- Verdict: pass
+- Verified: cross-review #1 の直し(write と close の失敗の切り戻し、戻せたときと戻せなかったときの文の分け方)と self-review cycle 2 の C2-L1〜C2-L5 の直しを、コードとテストの名前で辿った。AC2 は HEAD 35a453aa の binary で、拒否 10 通りと open の失敗 3 通りのどれもが director.jsonl を変えないこと(`cmp`)、入れ替えられた `id` の detach が断られることを確かめた。ほかの AC は経路が変わっていないことを diff で確かめた。cycle 1 の V1・V3・V4 は 624f603b で直った。文書は、切り戻しが失敗しても何も残らないとは言っていない。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build と vet、skill と template の同期、`git diff --check`)。計画の digest は承認時と同じ
+- Partially verified: 途中まで書けた追記の切り戻しと、切り戻しの失敗(テストのコードを読んだだけ。binary では再現できなかった)。CLI の `notRestoredError` の配線(helper のテストと、コードを読んだ範囲)
+- Not verified: テストの実行(/test)、本物の ENOSPC、RunE の配線の mutant
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。情報は 4 つ(C2-V1〜C2-V4)
