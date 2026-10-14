@@ -68,9 +68,13 @@ func runDoctor(targetDir string) error {
 
 // runDoctorOpts is runDoctor plus the --probe-models opt-in: when true, every
 // [org].model_pool entry is probed via internal/org/driver.ProbeModel (Check
-// 12). Model probes are the only check in this function that spawn CLI
-// subprocesses beyond the pre-existing --version probes, so they stay
-// opt-in and off by default.
+// 12). Model probes launch one CLI invocation per pool entry, so they stay
+// opt-in and off by default. Beyond them, the checks that spawn subprocesses
+// are the --version probes (Checks 1 and 2) and the merge guarantee (Check
+// 11c): `git rev-parse` to find the org state dir (unless
+// RALPH_ORG_STATE_DIR names it), then `git remote get-url origin` and up to
+// four `gh api` calls under one 20 s deadline, with no gh call when gh is
+// not on PATH.
 //
 // Signature/behavior preserved exactly (never runs under --strict, always
 // strict=false) so pre-existing callers/tests that predate FR-9 doctor
@@ -159,6 +163,16 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 		projectDir = ""
 	}
 	results = append(results, checkCodexAgmsgWritableRoot(cfg.Org, driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), projectDir, doctorCodexSandboxEnv))
+
+	// Check 11c: the merge guarantee of origin's default branch (FR-7):
+	// whether GitHub makes a PR's required checks pass on the latest default
+	// branch before it merges, read with git and gh under one 20 s deadline
+	// (no gh call when gh is not on PATH). pass for github_protection, warn
+	// for pr_checks_only, info for unknown, never fail. The result is cached
+	// in the org state dir, only when that dir already exists, for `ralph
+	// status` and `ralph org merge-order`; a stale cache that can be neither
+	// replaced nor removed is warn too -- see checkMergeGuarantee.
+	results = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv))
 
 	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {

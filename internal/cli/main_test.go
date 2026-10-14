@@ -2,11 +2,15 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
 // TestMain pins the shell-alias check's environment resolver
@@ -20,6 +24,15 @@ import (
 // (doctorCodexSandboxEnv) to a config path that does not exist, for the same
 // reason: without this seam, every runDoctor*-based test would silently
 // start reading the developer's real ~/.codex/config.toml.
+//
+// It also pins the merge-guarantee check's resolver (doctorMergeGuaranteeEnv)
+// to an Exec that runs nothing and fails, a gh lookup that always fails, and
+// a state dir that does not exist, for the same reason: without this seam,
+// every runDoctor*-based test would silently start running the real `git
+// remote get-url origin` and `gh api` against GitHub, and writing
+// merge-guarantee.json into the repository's own org ledger whenever that
+// ledger exists. A test of the check sets its own resolver and restores
+// this one.
 //
 // It also pins org.go's codex model-observation overrides
 // (orgCodexSessionsDirOverride/orgCodexModelObserveTimeoutOverride/
@@ -56,6 +69,15 @@ func TestMain(m *testing.M) {
 	doctorCodexSandboxEnv = func() (codexSandboxEnv, error) {
 		noSuchHome := filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")
 		return codexSandboxEnv{Home: noSuchHome, ConfigPath: filepath.Join(noSuchHome, ".codex", "config.toml")}, nil
+	}
+	doctorMergeGuaranteeEnv = func(targetDir string) (org.MergeGuaranteeParams, string) {
+		return org.MergeGuaranteeParams{
+			Dir: targetDir,
+			Exec: func(_ context.Context, _ string, _ []string, name string, args ...string) (string, error) {
+				return "", fmt.Errorf("%s %s not run: commands are disabled in tests", name, strings.Join(args, " "))
+			},
+			LookPath: func(string) (string, error) { return "", errors.New("gh lookup disabled in tests") },
+		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist")
 	}
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
