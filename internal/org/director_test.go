@@ -198,6 +198,22 @@ func TestDirectorAttach_RefusesASecondAttachWithoutReplace(t *testing.T) {
 	}
 }
 
+func TestDirectorAttach_EscapesAHandEditedAttachTimeInItsError(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	writeDirectorFile(t, s, `{"ts":"2026-10-15\u001b[2J","id":"d1","event":"attached","driver":"claude","wake":["pull"],"user":"u","cwd":"/w","herdr_pane":false}`+"\n")
+
+	_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex})
+	if !errors.Is(err, ErrDirectorAttached) {
+		t.Fatalf("Attach err = %v, want ErrDirectorAttached", err)
+	}
+	if strings.ContainsRune(err.Error(), '\x1b') {
+		t.Fatalf("err %q carries a raw escape character", err)
+	}
+	if want := `attached 2026-10-15\x1b[2J`; !strings.Contains(err.Error(), want) {
+		t.Errorf("err %q does not show the escaped attach time %q", err, want)
+	}
+}
+
 func TestDirectorAttach_ReplaceWritesTheDetachedAndANewAttached(t *testing.T) {
 	s, _, clock := newTestDirectorStore(t)
 	first := mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, User: "alice", Cwd: "/work/a", HerdrPane: true})

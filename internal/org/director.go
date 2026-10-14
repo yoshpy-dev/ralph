@@ -102,9 +102,11 @@ type DirectorRegistration struct {
 }
 
 // describe names the registration in an error: its id, driver, and attach
-// time.
+// time. The fold checks the id and the driver, but the attach time is the
+// event's ts as written, which a hand edit can fill with control characters,
+// so it is escaped like inbox text before it reaches a terminal.
 func (r DirectorRegistration) describe() string {
-	return fmt.Sprintf("%s (driver %s, attached %s)", r.ID, r.Driver, r.AttachedAt)
+	return fmt.Sprintf("%s (driver %s, attached %s)", r.ID, r.Driver, PrintableInboxText(r.AttachedAt, false))
 }
 
 // DirectorReadResult is the folded director.jsonl: the current registration
