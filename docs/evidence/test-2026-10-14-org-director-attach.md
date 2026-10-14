@@ -1762,3 +1762,885 @@ with open(os.path.join(T, "summary.txt"), "a") as f:
     for r in results:
         f.write("\t".join(r) + "\n")
 ```
+
+## Cycle 2
+
+- Date: 2026-10-15 (JST 06:02-06:32; the UTC timestamps in the output read 2026-10-14T21:xx)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach, HEAD 9548a8cd (base ef575748; cycle 1 tested a5f5353b)
+- Environment: macOS arm64, go1.26.0 (default) and go1.25.8 (`GOTOOLCHAIN=go1.25.8`), git 2.49.0. Load average was 2.76 / 4.53 / 15.37 when the runs began; other sessions pushed the 1-minute figure to about 40 during run-test.sh's shell phase
+- Redaction: as in cycle 1, the session scratch directory is `$SCRATCH` (a path cut off inside it reads `$SCRATCH…`) and the home directory `~`. The probes ran with `USER=u`. Runs of padding `p` in the disk-image probe are shortened to `p…p`. The wrapper's full log `docs/evidence/verify-2026-10-14-210346.log` is gitignored and not committed
+- Trailing spaces at the ends of output lines were stripped; nothing else in the raw output was changed apart from the redaction
+- Nothing in the worktree was edited for the tests. Mutants and the probe test lived in `$SCRATCH` and reached the build only through `go test -overlay`. The disk image lived in `$SCRATCH/img`, was mounted at `$SCRATCH/mnt` with `-nobrowse`, and was detached afterwards
+- Order: run-test.sh, then the two full Go runs, the focused run, and `-race`, one after another (`runall.sh`). The narrowed mutation runs (C2-3.1) ran 06:04-06:07, during run-test.sh's shell phase; the whole-package survivor runs and the coverage runs ran after `-race`
+
+### C2-1. ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed; scripts/ralph-config.sh widened it to full)
+
+Command: `./scripts/run-test.sh > runtest.out 2>&1` (06:03:46-06:15:05, rc 0, 679 s wall, 4,513 lines). Filtered with the same command as cycle 1's section 1 (`sed -n 1,6p` plus the same `grep -nE` and the same dropped step lines), which gives 215 lines. With the line numbers, the durations, `(cached)`, the `ok`/`?` lines, the timestamp, and the evidence-path line removed from both, that excerpt equals cycle 1's section 1 line for line; the only difference is the two lines cycle 1 appended by hand (`rc=0`, `real 676.56`):
+
+```text
+$ diff <(norm < cycle1-section1.txt) <(norm < runtest.excerpt)
+204,205d203
+< real 676.56
+< rc=0
+```
+
+The lines that carry the verdict:
+
+```text
+# Verification run
+- Timestamp: 2026-10-14T21:03:46Z
+- Mode: test
+- Requested scope: changed
+
+$ grep -c '^    OK$' runtest.out
+41
+$ grep -cE '^==> tests/' runtest.out
+41
+$ grep -nE '^\s*FAIL: [1-9]|^    FAIL|^FAIL' runtest.out
+(no output)
+$ grep -n 'SKIP: the' runtest.out
+3924:  SKIP: the real git older than 2.41 case (git 2.49.0 is 2.41 or later; the stubbed old git covers it)
+
+4496:==> Language scope: full fallback (unclassified:scripts/ralph-config.sh)
+4497:==> Language packs selected: golang
+4498:==> Running golang verifier
+4499:==> Go project root: .
+4500:?   	github.com/yoshpy-dev/ralph	[no test files]
+4501:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4502:ok  	github.com/yoshpy-dev/ralph/internal/cli	199.412s
+4503:ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+4504:ok  	github.com/yoshpy-dev/ralph/internal/insights	1.071s
+4505:ok  	github.com/yoshpy-dev/ralph/internal/org	81.407s
+4506:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+4507:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4508:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4509:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4511:==> All verifiers passed.
+4513:Evidence saved to: docs/evidence/verify-2026-10-14-210346.log
+```
+
+### C2-2. Go tests
+
+#### C2-2.1 Per package (`go test -count=1 -v ./internal/...`)
+
+Both runs had `$SCRATCH/canary` first on PATH (C2-2.5). Counted with cycle 1's `count.awk` ("top" counts top-level `--- PASS/FAIL/SKIP` lines, "sub" every indented one).
+
+go1.26.0 (06:15:05-06:18:24, rc 0, 199 s):
+```text
+internal/cli           top PASS 679 FAIL 0 SKIP 0 | sub PASS 601 FAIL 0 SKIP 0 | 198.864s
+internal/config        top PASS 37 FAIL 0 SKIP 0 | sub PASS 34 FAIL 0 SKIP 0 | 0.544s
+internal/insights      top PASS 36 FAIL 0 SKIP 0 | sub PASS 7 FAIL 0 SKIP 0 | 1.132s
+internal/org           top PASS 751 FAIL 0 SKIP 1 | sub PASS 1525 FAIL 0 SKIP 0 | 78.430s
+internal/org/driver    top PASS 48 FAIL 0 SKIP 0 | sub PASS 89 FAIL 0 SKIP 0 | 3.310s
+internal/org/protocol  top PASS 15 FAIL 0 SKIP 0 | sub PASS 56 FAIL 0 SKIP 0 | 3.266s
+internal/scaffold      top PASS 30 FAIL 0 SKIP 2 | sub PASS 0 FAIL 0 SKIP 0 | 2.308s
+internal/upgrade       top PASS 114 FAIL 0 SKIP 0 | sub PASS 13 FAIL 0 SKIP 0 | 2.320s
+```
+
+go1.25.8 (06:18:24-06:21:50, rc 0, 206 s):
+```text
+internal/cli           top PASS 679 FAIL 0 SKIP 0 | sub PASS 601 FAIL 0 SKIP 0 | 205.080s
+internal/config        top PASS 37 FAIL 0 SKIP 0 | sub PASS 34 FAIL 0 SKIP 0 | 5.435s
+internal/insights      top PASS 36 FAIL 0 SKIP 0 | sub PASS 7 FAIL 0 SKIP 0 | 5.118s
+internal/org           top PASS 751 FAIL 0 SKIP 1 | sub PASS 1525 FAIL 0 SKIP 0 | 85.732s
+internal/org/driver    top PASS 48 FAIL 0 SKIP 0 | sub PASS 89 FAIL 0 SKIP 0 | 3.818s
+internal/org/protocol  top PASS 15 FAIL 0 SKIP 0 | sub PASS 56 FAIL 0 SKIP 0 | 3.637s
+internal/scaffold      top PASS 30 FAIL 0 SKIP 2 | sub PASS 0 FAIL 0 SKIP 0 | 4.845s
+internal/upgrade       top PASS 114 FAIL 0 SKIP 0 | sub PASS 13 FAIL 0 SKIP 0 | 5.914s
+```
+
+- The 4,038 result lines (name and verdict, durations removed, sorted) are identical across the two versions: `diff names126.txt names125.txt` is empty
+- SKIP lines (both versions): `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` (org), `TestBaseFS_WithMockFS` and `TestAvailablePacks_WithMockFS` (scaffold), as in cycle 1
+- Tests that were flaky before (tester memory):
+
+```text
+go126:
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.80s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.66s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.59s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.31s)
+go125:
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.80s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.35s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.69s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.64s)
+```
+
+#### C2-2.2 Tests added since cycle 1
+
+```text
+$ git diff a5f5353b..HEAD -- '*_test.go' | grep -E '^[+-]func Test'
++func TestOrgDirector_NotRestoredErrorNamesTheStatusCommand(t *testing.T) {
++func TestDirectorAttach_AReplaceCutOffPartwayIsRestored(t *testing.T) {
++func TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo(t *testing.T) {
++func TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored(t *testing.T) {
++func TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored(t *testing.T) {
++func TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration(t *testing.T) {
+```
+
+The sorted result lines of cycle 1's go1.25.8 run against this one (go1.25.8): ten added, none removed.
+
+```text
+$ diff <(sort cycle1/names125.txt) <(sort names125.txt)
+258a259,260
+>     --- PASS: TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/attach_into_a_missing_file
+>     --- PASS: TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach
+1029a1032,1033
+>     --- PASS: TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/with_--state-dir
+>     --- PASS: TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/without_--state-dir
+2652a2657,2659
+> --- PASS: TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored
+> --- PASS: TestDirectorAttach_AReplaceCutOffPartwayIsRestored
+> --- PASS: TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo
+2670a2678
+> --- PASS: TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration
+2675a2684
+> --- PASS: TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored
+3063a3073
+> --- PASS: TestOrgDirector_NotRestoredErrorNamesTheStatusCommand
+```
+
+#### C2-2.3 Focused run (go1.26.0)
+
+```text
+$ go test -count=1 -run 'Director|NotRestored' -v ./internal/org/ ./internal/cli/    (06:21:50-06:22:01, rc 0)
+internal/org           top PASS 37 FAIL 0 SKIP 0 | sub PASS 44 FAIL 0 SKIP 0 | 1.165s
+internal/cli           top PASS 28 FAIL 0 SKIP 0 | sub PASS 43 FAIL 0 SKIP 0 | 9.497s
+$ grep -E '^--- PASS' focused.out | grep -E 'CutOff|CutBack|CloseFailure|ADetachedForAnother|NotRestored'
+--- PASS: TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s)
+--- PASS: TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s)
+--- PASS: TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s)
+--- PASS: TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+--- PASS: TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration (0.00s)
+--- PASS: TestOrgDirector_NotRestoredErrorNamesTheStatusCommand (0.00s)
+```
+
+#### C2-2.4 Race detector (go1.26.0)
+
+```text
+$ go test -count=1 -race ./internal/org/ ./internal/cli/ -run 'Director'    (06:22:01-06:22:18, rc 0)
+ok  	github.com/yoshpy-dev/ralph/internal/org	2.958s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	10.841s
+DATA RACE lines: 0
+$ go test -count=1 -race -run 'Director' -list 'Director' ./internal/org/ ./internal/cli/ | grep -c '^Test'
+65
+```
+
+#### C2-2.5 AC9: no real osascript or herdr, no director.jsonl in the repo's ledger
+
+Every Go run in C2-2.1 to C2-2.4, every mutation run of C2-3, the probe test, and the coverage runs had `$SCRATCH/canary` first on PATH. The canary `osascript` logs its call and exits 0; the canary `herdr` logs its call, passes `--version` to the real `/opt/homebrew/bin/herdr`, and exits 97 otherwise. Sensitivity, run by hand through the same PATH before the runs:
+
+```text
+$ $SCRATCH/canary/osascript -e x; PATH=$SCRATCH/canary:$PATH herdr pane list; echo "herdr rc=$?"; cat canary.log
+herdr rc=97
+osascript ppid=53347 args=-e x
+/bin/zsh
+herdr ppid=53347 args=pane list
+/bin/zsh
+(the log was emptied before the runs)
+```
+
+After the runs:
+
+```text
+canary log lines after go1.26.0: 0
+canary log lines after every run (go1.25.8, focused, -race, mutation, probe test, coverage): 0
+$ ls ~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach/.harness/state/org
+both: No such file or directory (os error 2)
+$ find ~/MyDev/github.com/yoshpy-dev/ralph -name director.jsonl
+(no output)
+$ git status --porcelain   (worktree and main checkout)
+(no output, both)
+```
+
+#### C2-2.6 Coverage (go1.25.8, each package's own tests, 06:27:07-06:31:43)
+
+```text
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -coverprofile=cover-org.out ./internal/org/
+ok  	github.com/yoshpy-dev/ralph/internal/org	79.117s	coverage: 94.6% of statements
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -coverprofile=cover-cli.out ./internal/cli/
+ok  	github.com/yoshpy-dev/ralph/internal/cli	191.925s	coverage: 87.3% of statements
+
+$ go tool cover -func=cover-org.out | grep org/director.go   (functions not at 100.0%)
+github.com/yoshpy-dev/ralph/internal/org/director.go:359:		appendLocked				95.0%
+(the other 19 functions of director.go, restoreLocked and directorAppendFailed included: 100.0%)
+$ go tool cover -func=cover-cli.out | grep cli/org_director.go   (functions not at 100.0%)
+github.com/yoshpy-dev/ralph/internal/cli/org_director.go:63:			newOrgDirectorAttachCmd			96.6%
+github.com/yoshpy-dev/ralph/internal/cli/org_director.go:325:			orgDirectorEnabledFile			85.7%
+github.com/yoshpy-dev/ralph/internal/cli/org_director.go:348:			orgDirectorCaller			75.0%
+(the other 12 functions, notRestoredError included: 100.0%)
+
+statements per file (blocks not reached):
+internal/org/director.go 145/146 99.3% [('366.17,368.4', 1)]
+internal/cli/org_director.go 138/141 97.9% [('121.5,121.36', 1), ('335.2,335.23', 1), ('350.16,352.3', 1)]
+```
+
+`director.go:366-368` is the marshal failure in `appendLocked`. `org_director.go:121` is attach's `return rt.notRestoredError(err)`; `:335` and `:350-352` are the `filepath.Abs` and `os.Getwd` failures (as in cycle 1). detach's `return rt.notRestoredError(err)` (`:183`) is reached, by refusals such as "no director is attached".
+
+### C2-3. Mutation (go1.26.0, `go test -overlay`)
+
+#### C2-3.1 mutate2.py (narrowed runs: `-run Director` for org, `-run OrgDirector` for cli)
+
+```text
+X0 SURVIVED 2s control: unchanged director.go through the overlay |
+X0c SURVIVED 6s control: unchanged org_director.go through the overlay |
+R1 RED 4s skip the truncate on a write failure | TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s); TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/attach_into_a_missing_file (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach (0.00s)
+R2 RED 5s truncate to 0 instead of len(raw) (both branches) | TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s); TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach (0.00s); TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R2w RED 5s truncate to 0 instead of len(raw) on a write failure only | TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s); TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach (0.00s)
+R2c RED 4s truncate to 0 instead of len(raw) on a close failure only | TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R3 RED 4s return the restored error (no sentinel) when the truncate fails | TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s)
+R3b RED 5s same text, but the sentinel is not wrapped (%v) | TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s)
+R4 RED 4s treat a close failure as success | TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R5 RED 4s skip the truncate on a close failure (error still returned) | TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R6 RED 4s production truncate is a no-op that reports success | TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/attach_into_a_missing_file (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach (0.00s); TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R7 RED 4s directorAppendFailed says nothing was recorded even when not restored | TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s)
+R8 RED 4s off by one: keep one byte of the failed write | TestDirectorAttach_AReplaceCutOffPartwayIsRestored (0.00s); TestDirectorAttach_AReplaceThatCannotBeCutBackSaysSo (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/attach_into_a_missing_file (0.00s); TestDirectorStore_PlainAttachAndDetachCutOffPartwayAreRestored/detach (0.00s); TestDirectorAttach_ACloseFailureAfterAFullWriteIsRestored (0.00s)
+R11 SURVIVED 4s restore keeps the newline added before a torn last line |
+D5 RED 4s cycle-1 survivor: a detached of any id ends the current registration | TestDirectorRead_ADetachedForAnotherIDLeavesTheCurrentRegistration (0.00s)
+H1 RED 8s drop the not-restored hint in notRestoredError | TestOrgDirector_NotRestoredErrorNamesTheStatusCommand (0.00s); TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/without_--state-dir (0.00s); TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/with_--state-dir (0.00s)
+H2 RED 6s drop the --state-dir part of the hint | TestOrgDirector_NotRestoredErrorNamesTheStatusCommand (0.00s); TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/with_--state-dir (0.00s)
+H3 RED 8s add the hint to every store error | TestOrgDirector_NotRestoredErrorNamesTheStatusCommand (0.00s); TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/without_--state-dir (0.00s); TestOrgDirector_NotRestoredErrorNamesTheStatusCommand/with_--state-dir (0.00s)
+H4 SURVIVED 9s attach RunE returns the store error without the helper |
+H5 SURVIVED 8s detach RunE returns the store error without the helper |
+```
+
+"SURVIVED" on X0 and X0c means the control passed. Every old string was found exactly once (the harness skips a mutant otherwise; none was skipped).
+
+#### C2-3.2 The survivors against the whole package (`--wide`: `-run .`)
+
+```text
+R11-wide SURVIVED 84s restore keeps the newline added before a torn last line |      (06:22:19-06:23:43, all of internal/org)
+H4-wide SURVIVED 203s attach RunE returns the store error without the helper |       (06:23:43-06:27:07, all of internal/cli; H4 and H5 in parallel)
+H5-wide SURVIVED 203s detach RunE returns the store error without the helper |
+```
+
+#### C2-3.3 Probe test PT for R11 (overlay only, never committed)
+
+`$SCRATCH/probe-go/probe_director_torn_test.go`, added to `internal/org` through the overlay:
+
+```go
+package org
+
+import "testing"
+
+// Probe (cycle-2 /test, never committed): an append that fails after a torn
+// last line is cut back to the bytes before it, the newline appendLocked put
+// in front of its lines included.
+func TestProbeDirector_AFailedAppendAfterATornLineIsCutBackExactly(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	before := directorAttachedLine("d1", "claude") + "\n" + `{"ts":"2026-10-15T00:00:02Z","id":"d2","ev`
+	writeDirectorFile(t, s, before)
+	var onDisk string
+	s.write = directorPartialWrite(t, s, &onDisk)
+	if _, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverCodex, Replace: true}); err == nil {
+		t.Fatal("Attach with replace succeeded; want the partial write to fail it")
+	}
+	if len(onDisk) <= len(before) || onDisk[len(before)] != '\n' {
+		t.Fatalf("the partial write = %q, want the old bytes, a newline, and part of the lines", onDisk)
+	}
+	if got := readDirectorFile(t, s); got != before {
+		t.Fatalf("director.jsonl = %q, want it cut back to %q", got, before)
+	}
+}
+```
+
+```text
+$ go test -count=1 -overlay=head.json -run TestProbeDirector_ -v ./internal/org/   # HEAD
+=== RUN   TestProbeDirector_AFailedAppendAfterATornLineIsCutBackExactly
+--- PASS: TestProbeDirector_AFailedAppendAfterATornLineIsCutBackExactly (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	1.100s
+rc=0
+
+$ go test -count=1 -overlay=r11.json -run TestProbeDirector_ -v ./internal/org/   # R11
+=== RUN   TestProbeDirector_AFailedAppendAfterATornLineIsCutBackExactly
+    probe_director_torn_test.go:21: director.jsonl = "{\"ts\":\"2026-10-15T00:00:00Z\",\"id\":\"d1\",\"event\":\"attached\",\"driver\":\"claude\",\"wake\":[\"pull\"],\"user\":\"u\",\"cwd\":\"/w\",\"herdr_pane\":false}\n{\"ts\":\"2026-10-15T00:00:02Z\",\"id\":\"d2\",\"ev\n", want it cut back to "{\"ts\":\"2026-10-15T00:00:00Z\",\"id\":\"d1\",\"event\":\"attached\",\"driver\":\"claude\",\"wake\":[\"pull\"],\"user\":\"u\",\"cwd\":\"/w\",\"herdr_pane\":false}\n{\"ts\":\"2026-10-15T00:00:02Z\",\"id\":\"d2\",\"ev"
+--- FAIL: TestProbeDirector_AFailedAppendAfterATornLineIsCutBackExactly (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.086s
+FAIL
+rc=1
+```
+
+After the runs, `ls internal/org/probe*` in the worktree matched nothing.
+
+#### C2-3.4 mutate2.py
+
+```python
+#!/usr/bin/env python3
+"""Cycle-2 overlay mutants for org-director-attach (restore path + CLI hint). Never edits the worktree."""
+import json, os, subprocess, sys, time
+
+W = "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach"
+T = "$SCRATCH/mut"
+os.makedirs(T, exist_ok=True)
+ORG = "internal/org/director.go"
+CLI = "internal/cli/org_director.go"
+ORG_RUN = "Director"
+CLI_RUN = "OrgDirector"
+WB = 'return s.restoreLocked(len(raw), fmt.Errorf("append to %s: %w", s.path, err))'
+CB = 'return s.restoreLocked(len(raw), fmt.Errorf("close %s: %w", s.path, err))'
+
+# id, package, file, [(old, new), ...], run-regex, intent
+M = [
+    ("X0", "org", ORG, [], ORG_RUN, "control: unchanged director.go through the overlay"),
+    ("X0c", "cli", CLI, [], CLI_RUN, "control: unchanged org_director.go through the overlay"),
+    ("R1", "org", ORG, [(WB, 'return fmt.Errorf("append to %s: %w", s.path, err)')], ORG_RUN,
+     "skip the truncate on a write failure"),
+    ("R2", "org", ORG, [("truncate(s.path, int64(size))", "truncate(s.path, 0)")], ORG_RUN,
+     "truncate to 0 instead of len(raw) (both branches)"),
+    ("R2w", "org", ORG, [(WB, WB.replace("len(raw)", "0"))], ORG_RUN,
+     "truncate to 0 instead of len(raw) on a write failure only"),
+    ("R2c", "org", ORG, [(CB, CB.replace("len(raw)", "0"))], ORG_RUN,
+     "truncate to 0 instead of len(raw) on a close failure only"),
+    ("R3", "org", ORG, [('return fmt.Errorf("%w, and %w (%w), so it may hold part of the write", failed, ErrDirectorWriteNotRestored, err)',
+                         "_ = err\n\t\treturn failed")], ORG_RUN,
+     "return the restored error (no sentinel) when the truncate fails"),
+    ("R3b", "org", ORG, [('"%w, and %w (%w), so it may hold part of the write"', '"%w, and %v (%w), so it may hold part of the write"')], ORG_RUN,
+     "same text, but the sentinel is not wrapped (%v)"),
+    ("R4", "org", ORG, [("\tif err := f.Close(); err != nil {\n\t\t" + CB + "\n\t}", "\t_ = f.Close()")], ORG_RUN,
+     "treat a close failure as success"),
+    ("R5", "org", ORG, [(CB, 'return fmt.Errorf("close %s: %w", s.path, err)')], ORG_RUN,
+     "skip the truncate on a close failure (error still returned)"),
+    ("R6", "org", ORG, [("truncate := os.Truncate", "truncate := func(string, int64) error { return nil }")], ORG_RUN,
+     "production truncate is a no-op that reports success"),
+    ("R7", "org", ORG, [("\tcase errors.Is(err, ErrDirectorWriteNotRestored):\n\t\treturn fmt.Errorf(\"org: director: %s: %w\", verb, err)\n", "")], ORG_RUN,
+     "directorAppendFailed says nothing was recorded even when not restored"),
+    ("R8", "org", ORG, [("truncate(s.path, int64(size))", "truncate(s.path, int64(size)+1)")], ORG_RUN,
+     "off by one: keep one byte of the failed write"),
+    ("R11", "org", ORG, [("\tif len(raw) > 0 && raw[len(raw)-1] != '\\n' {\n\t\tlines = append(lines, '\\n')\n\t}",
+                          "\tsize := len(raw)\n\tif len(raw) > 0 && raw[len(raw)-1] != '\\n' {\n\t\tlines = append(lines, '\\n')\n\t\tsize++\n\t}"),
+                         (WB, WB.replace("len(raw)", "size")), (CB, CB.replace("len(raw)", "size"))], ORG_RUN,
+     "restore keeps the newline added before a torn last line"),
+    ("D5", "org", ORG, [("if f.current == nil || ev.ID != f.current.ID {", "if f.current == nil {")], ORG_RUN,
+     "cycle-1 survivor: a detached of any id ends the current registration"),
+    ("H1", "cli", CLI, [("\tif !errors.Is(err, org.ErrDirectorWriteNotRestored) {\n\t\treturn err\n\t}", "\tif true {\n\t\treturn err\n\t}")], CLI_RUN,
+     "drop the not-restored hint in notRestoredError"),
+    ("H2", "cli", CLI, [('rt.command("ralph org director status")', '"ralph org director status"')], CLI_RUN,
+     "drop the --state-dir part of the hint"),
+    ("H3", "cli", CLI, [("\tif !errors.Is(err, org.ErrDirectorWriteNotRestored) {\n\t\treturn err\n\t}", "")], CLI_RUN,
+     "add the hint to every store error"),
+    ("H4", "cli", CLI, [("\t\t\t\treturn rt.notRestoredError(err)\n\t\t\t}\n\t\t\tline :=", "\t\t\t\treturn err\n\t\t\t}\n\t\t\tline :=")], CLI_RUN,
+     "attach RunE returns the store error without the helper"),
+    ("H5", "cli", CLI, [("\t\t\t\treturn rt.notRestoredError(err)\n\t\t\t}\n\t\t\tif force {", "\t\t\t\treturn err\n\t\t\t}\n\t\t\tif force {")], CLI_RUN,
+     "detach RunE returns the store error without the helper"),
+]
+
+args = sys.argv[1:]
+wide = "--wide" in args
+only = set(a for a in args if a != "--wide")
+results = []
+for mid, pkg, rel, reps, run, intent in M:
+    if only and mid not in only:
+        continue
+    if wide:
+        run = "."
+    src = os.path.join(W, rel)
+    text = open(src).read()
+    bad = None
+    for old, new in reps:
+        n = text.count(old)
+        if n != 1:
+            bad = f"old string found {n} times: {old[:60]!r}"
+            break
+        text = text.replace(old, new)
+    if bad:
+        results.append((mid, "SKIP", bad))
+        print(mid, "SKIP", bad, flush=True)
+        continue
+    tag = mid + ("-wide" if wide else "")
+    mpath = os.path.join(T, f"{mid}.go")
+    open(mpath, "w").write(text)
+    ov = os.path.join(T, f"{mid}.json")
+    json.dump({"Replace": {src: mpath}}, open(ov, "w"))
+    cmd = ["go", "test", "-count=1", f"-overlay={ov}", "-run", run, f"./internal/{pkg}/"]
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, cwd=W, capture_output=True, text=True, timeout=1200)
+        out, rc = p.stdout + p.stderr, p.returncode
+    except subprocess.TimeoutExpired:
+        out, rc = "TIMEOUT", -1
+    dt = time.time() - t0
+    open(os.path.join(T, f"{tag}.out"), "w").write(out)
+    if "[build failed]" in out or "setup failed" in out:
+        verdict = "BUILD"
+    elif rc == 0:
+        verdict = "SURVIVED"
+    else:
+        verdict = "RED"
+    fails = [l.strip().replace("--- FAIL: ", "") for l in out.splitlines() if l.strip().startswith("--- FAIL")][:8]
+    results.append((tag, verdict, f"{dt:.0f}s", intent, ", ".join(fails)))
+    print(tag, verdict, f"{dt:.0f}s", intent, "|", "; ".join(fails), flush=True)
+
+with open(os.path.join(T, "summary.txt"), "a") as f:
+    for r in results:
+        f.write("\t".join(r) + "\n")
+```
+
+### C2-4. HEAD binary probe (temp `--state-dir`; PATH holds only git, ralph, and a stub osascript)
+
+`GOTOOLCHAIN=go1.25.8 go build -o $SCRATCH/bin/ralph ./cmd/ralph` at HEAD 9548a8cd (`ralph version`: `ralph dev (unknown unknown)`). Every call ran under `env -i` with `HOME`, `PATH`, and `TMPDIR` in `$SCRATCH/probe`, `USER=u`, from a scratch git repo with no `ralph.toml` (so `[org.director]` has its default `enabled = true`), and every call passed a temp `--state-dir`. herdr, agmsg, and the real osascript did not run (the stub's log has 0 lines).
+
+#### C2-4.1 probe3.sh (normal disk)
+
+```bash
+#!/bin/bash
+# Cycle-2 binary probe of ralph org director with the HEAD binary.
+# Temp --state-dir only; PATH holds git, ralph, and a stub osascript that logs.
+set -u
+T=$SCRATCH
+P=$T/probe; rm -rf "$P"; mkdir -p "$P/home" "$P/pbin" "$P/tmp" "$P/work"
+ln -s /opt/homebrew/bin/git "$P/pbin/git"; ln -s "$T/bin/ralph" "$P/pbin/ralph"
+printf '#!/bin/sh\nprintf "%%s\\n" "osascript $*" >> "%s/osascript.log"\nexit 0\n' "$P" > "$P/pbin/osascript"; chmod +x "$P/pbin/osascript"; : > "$P/osascript.log"
+SD=$P/state
+E() { env -i HOME="$P/home" PATH="$P/pbin" TMPDIR="$P/tmp" USER=u GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "$@"; }
+r() {
+  printf '\n$ ralph'; printf ' %q' "$@"; printf '\n'
+  E ralph "$@" > "$P/o" 2> "$P/e"; rc=$?
+  if [ -s "$P/o" ]; then echo "[stdout]"; cat "$P/o"; fi
+  if [ -s "$P/e" ]; then echo "[stderr]"; cat "$P/e"; fi
+  echo "[exit $rc]"
+}
+showf() { echo "--- director.jsonl ($(wc -c < "$1" | tr -d ' ') bytes)"; cat "$1"; }
+cd "$P/work" && E git init -q -b main   # no ralph.toml: [org.director] defaults (enabled = true)
+
+echo "## A1. attach, status, status --json"
+r org director attach --driver claude --state-dir "$SD"
+r org director status --state-dir "$SD"
+r org director status --json --state-dir "$SD"
+showf "$SD/director.jsonl"
+
+echo; echo "## A2. attach --replace, the replaced id's detach is refused, detach --id of the current one"
+r org director attach --driver codex --replace --state-dir "$SD"
+cp "$SD/director.jsonl" "$P/before"
+r org director detach --id d1 --state-dir "$SD"
+cmp "$P/before" "$SD/director.jsonl" && echo "cmp: director.jsonl unchanged by the refused detach"
+r org director detach --id d2 --state-dir "$SD"
+r org director status --state-dir "$SD"
+showf "$SD/director.jsonl"
+
+echo; echo "## A3. director.jsonl read-only (mode 0444): attach, attach --replace, detach"
+r org director attach --driver claude --state-dir "$SD"
+chmod 0444 "$SD/director.jsonl"; ls -l "$SD/director.jsonl" | awk '{print $1}'
+cp "$SD/director.jsonl" "$P/before"
+r org director attach --driver codex --replace --state-dir "$SD"
+r org director detach --id d3 --state-dir "$SD"
+r org director detach --force --state-dir "$SD"
+cmp "$P/before" "$SD/director.jsonl" && echo "cmp: director.jsonl unchanged by the three failed appends"
+chmod 0644 "$SD/director.jsonl"
+r org director status --state-dir "$SD"
+r org director detach --id d3 --state-dir "$SD"
+echo "--- osascript.log ($(wc -l < "$P/osascript.log" | tr -d ' ') lines)"; cat "$P/osascript.log"
+```
+
+Output (06:07, rc 0):
+
+```text
+## A1. attach, status, status --json
+
+$ ralph org director attach --driver claude --state-dir $SCRATCH/probe/state
+[stdout]
+attached d1 (driver=claude)
+detach it with: ralph org director detach --id d1 --state-dir '$SCRATCH/probe/state'
+[stderr]
+warning: director attach: d1 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/probe/state (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/probe/state'
+[exit 0]
+
+$ ralph org director status --state-dir $SCRATCH/probe/state
+[stdout]
+director: attached d1 (driver=claude, attached at 2026-10-14T21:07:00Z, by u) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+driver: claude
+wake: pull
+attached_at: 2026-10-14T21:07:00Z
+user: u
+cwd: $SCRATCH/probe/work
+herdr_pane: no
+[exit 0]
+
+$ ralph org director status --json --state-dir $SCRATCH/probe/state
+[stdout]
+{
+  "enabled": true,
+  "state": "attached",
+  "registration": {
+    "id": "d1",
+    "driver": "claude",
+    "wake": [
+      "pull"
+    ],
+    "attached_at": "2026-10-14T21:07:00Z",
+    "user": "u",
+    "cwd": "$SCRATCH/probe/work",
+    "herdr_pane": false
+  },
+  "corrupt_lines": 0,
+  "ignored_events": 0
+}
+[exit 0]
+--- director.jsonl (278 bytes)
+{"ts":"2026-10-14T21:07:00Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+
+## A2. attach --replace, the replaced id's detach is refused, detach --id of the current one
+
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/probe/state
+[stdout]
+attached d2 (driver=codex), replacing d1 (driver=claude, attached at 2026-10-14T21:07:00Z)
+detach it with: ralph org director detach --id d2 --state-dir '$SCRATCH/probe/state'
+[stderr]
+warning: director attach: d2 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/probe/state (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/probe/state'
+[exit 0]
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/probe/state
+[stderr]
+org: director: detach d1: the id is not the current registration's: the current registration is d2 (driver codex, attached 2026-10-14T21:07:01Z), so the session that attached d1 was replaced (or d1 has already been detached) and does not need to detach
+[exit 1]
+cmp: director.jsonl unchanged by the refused detach
+
+$ ralph org director detach --id d2 --state-dir $SCRATCH/probe/state
+[stdout]
+detached d2
+[exit 0]
+
+$ ralph org director status --state-dir $SCRATCH/probe/state
+[stdout]
+director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work
+enabled: true
+[exit 0]
+--- director.jsonl (1043 bytes)
+{"ts":"2026-10-14T21:07:00Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+{"ts":"2026-10-14T21:07:01Z","id":"d1","event":"detached","user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+{"ts":"2026-10-14T21:07:01Z","id":"d2","event":"attached","driver":"codex","wake":["pull"],"user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+{"ts":"2026-10-14T21:07:01Z","id":"d2","event":"detached","user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+
+## A3. director.jsonl read-only (mode 0444): attach, attach --replace, detach
+
+$ ralph org director attach --driver claude --state-dir $SCRATCH/probe/state
+[stdout]
+attached d3 (driver=claude)
+detach it with: ralph org director detach --id d3 --state-dir '$SCRATCH/probe/state'
+[stderr]
+warning: director attach: d3 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/probe/state (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/probe/state'
+[exit 0]
+-r--r--r--@
+
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/probe/state
+[stderr]
+org: director: attach: nothing was recorded, so d3 (driver claude, attached 2026-10-14T21:07:01Z) is still the current registration: open $SCRATCH/probe/state/director.jsonl: open $SCRATCH/probe/state/director.jsonl: permission denied
+[exit 1]
+
+$ ralph org director detach --id d3 --state-dir $SCRATCH/probe/state
+[stderr]
+org: director: detach d3: nothing was recorded, so d3 (driver claude, attached 2026-10-14T21:07:01Z) is still the current registration: open $SCRATCH/probe/state/director.jsonl: open $SCRATCH/probe/state/director.jsonl: permission denied
+[exit 1]
+
+$ ralph org director detach --force --state-dir $SCRATCH/probe/state
+[stderr]
+org: director: force detach: nothing was recorded, so d3 (driver claude, attached 2026-10-14T21:07:01Z) is still the current registration: open $SCRATCH/probe/state/director.jsonl: open $SCRATCH/probe/state/director.jsonl: permission denied
+[exit 1]
+cmp: director.jsonl unchanged by the three failed appends
+
+$ ralph org director status --state-dir $SCRATCH/probe/state
+[stdout]
+director: attached d3 (driver=claude, attached at 2026-10-14T21:07:01Z, by u) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d3
+driver: claude
+wake: pull
+attached_at: 2026-10-14T21:07:01Z
+user: u
+cwd: $SCRATCH/probe/work
+herdr_pane: no
+[exit 0]
+
+$ ralph org director detach --id d3 --state-dir $SCRATCH/probe/state
+[stdout]
+detached d3
+[exit 0]
+--- osascript.log (0 lines)
+```
+
+#### C2-4.2 The disk image
+
+```text
+$ hdiutil create -size 1m -fs HFS+ -layout NONE -volname d8a1c2 $SCRATCH/img/v.dmg
+created: $SCRATCH/img/v.dmg
+$ hdiutil attach -nobrowse -noautoopen -mountpoint $SCRATCH/mnt $SCRATCH/img/v.dmg
+/dev/disk14         	                               	$SCRATCH/mnt
+$ diskutil info $SCRATCH/mnt | grep -iE 'block size|File System Personality|Volume Free'
+   File System Personality:   HFS+
+   Device Block Size:         512 Bytes
+   Volume Free Space:         905.2 KB (905216 Bytes) (exactly 1768 512-Byte-Units) (86.3%)
+   Allocation Block Size:     4096 Bytes
+... (probe4.sh and probe5.sh) ...
+$ hdiutil detach $SCRATCH/mnt
+"disk14" ejected.
+$ mount | grep -c "$SCRATCH/mnt"
+0
+```
+
+#### C2-4.3 probe4.sh (a real ENOSPC; then the truncate refused with `chflags uappnd`)
+
+```bash
+#!/bin/bash
+# Cycle-2 probe B: a real ENOSPC on a full 1 MB HFS+ image mounted in scratch.
+set -u
+T=$SCRATCH
+P=$T/probe; M=$T/mnt; SD=$M/state; SDN=$P/state-measure
+E() { env -i HOME="$P/home" PATH="$P/pbin" TMPDIR="$P/tmp" USER=u GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "$@"; }
+r() {
+  printf '\n$ ralph'; printf ' %q' "$@"; printf '\n'
+  E ralph "$@" > "$P/o" 2> "$P/e"; rc=$?
+  if [ -s "$P/o" ]; then echo "[stdout]"; cat "$P/o"; fi
+  if [ -s "$P/e" ]; then echo "[stderr]"; cat "$P/e"; fi
+  echo "[exit $rc]"
+}
+sz() { wc -c < "$1" | tr -d ' '; }
+cd "$P/work"
+echo "## B0. measure the two lines of an attach --replace on the normal disk (same cwd and USER)"
+rm -rf "$SDN"
+E ralph org director attach --driver claude --state-dir "$SDN" >/dev/null 2>&1
+s0=$(sz "$SDN/director.jsonl")
+E ralph org director attach --driver codex --replace --state-dir "$SDN" >/dev/null 2>&1
+s1=$(sz "$SDN/director.jsonl")
+LD=$(sed -n 2p "$SDN/director.jsonl" | wc -c | tr -d ' '); LA=$(sed -n 3p "$SDN/director.jsonl" | wc -c | tr -d ' ')
+echo "replace appended $((s1-s0)) bytes: detached line $LD, attached line $LA (with newlines)"
+
+echo; echo "## B1. ledger on the image; d1's attached line padded so the file ends $((LD + LA/2)) bytes before a 4096-byte block boundary"
+rm -rf "$SD"
+r org director attach --driver claude --state-dir "$SD"
+python3 - "$SD/director.jsonl" $((4096 - LD - LA/2)) <<'PY'
+import json, sys
+path, target = sys.argv[1], int(sys.argv[2])
+ev = json.loads(open(path).read())
+base = len(json.dumps(ev, separators=(",", ":"))) + 1
+ev["cwd"] = ev["cwd"] + "/" + "p" * (target - base - 1)
+line = json.dumps(ev, separators=(",", ":")) + "\n"
+assert len(line) == target, (len(line), target)
+open(path, "w").write(line)
+PY
+echo "director.jsonl: $(sz "$SD/director.jsonl") bytes"
+r org director status --state-dir "$SD"
+echo "--- fill the volume"
+dd if=/dev/zero of="$M/fill" bs=4096 2>&1 | tail -1
+dd if=/dev/zero of="$M/fill2" bs=512 2>&1 | tail -1
+df -k "$M" | tail -1 | awk '{print "df: used " $3 " KiB, available " $4 " KiB"}'
+cp "$SD/director.jsonl" "$P/before"
+
+echo; echo "## B2. attach --replace on the full volume (the truncate can work)"
+r org director attach --driver codex --replace --state-dir "$SD"
+echo "director.jsonl after: $(sz "$SD/director.jsonl") bytes (before: $(sz "$P/before"))"
+cmp "$P/before" "$SD/director.jsonl" && echo "cmp: director.jsonl is byte-identical to before the attempt"
+r org director status --state-dir "$SD"
+
+echo; echo "## B3. the same with director.jsonl append-only (chflags uappnd): the write fails on the full volume and the truncate is refused"
+chflags uappnd "$SD/director.jsonl"; ls -lO "$SD/director.jsonl" | awk '{print $1, $5}'
+r org director attach --driver codex --replace --state-dir "$SD"
+echo "director.jsonl after: $(sz "$SD/director.jsonl") bytes (before: $(sz "$P/before"))"
+cmp "$P/before" "$SD/director.jsonl" && echo "cmp: director.jsonl is byte-identical to before the attempt"
+echo "--- the bytes past the old end:"; tail -c +$(( $(sz "$P/before") + 1 )) "$SD/director.jsonl" | sed "s/pppp*/p…p/"; echo
+r org director status --state-dir "$SD"
+r org director detach --id d1 --state-dir "$SD"
+echo "director.jsonl after the detach: $(sz "$SD/director.jsonl") bytes"
+
+echo; echo "## B4. cleanup"
+chflags nouappnd "$SD/director.jsonl"
+rm -f "$M/fill" "$M/fill2"
+df -k "$M" | tail -1 | awk '{print "df: used " $3 " KiB, available " $4 " KiB"}'
+```
+
+Output (06:08, rc 0):
+
+```text
+## B0. measure the two lines of an attach --replace on the normal disk (same cwd and USER)
+replace appended 521 bytes: detached line 244, attached line 277 (with newlines)
+
+## B1. ledger on the image; d1's attached line padded so the file ends 382 bytes before a 4096-byte block boundary
+
+$ ralph org director attach --driver claude --state-dir $SCRATCH/mnt/state
+[stdout]
+attached d1 (driver=claude)
+detach it with: ralph org director detach --id d1 --state-dir '$SCRATCH/mnt/state'
+[stderr]
+warning: director attach: d1 is recorded, but no ralph org watch --all accepts work on the ledger $SCRATCH/mnt/state (none runs), so ralph org escalate sends items to the human at once instead of leaving them to the director; start one with ralph org watch --all --detach --state-dir '$SCRATCH/mnt/state'
+[exit 0]
+director.jsonl: 3714 bytes
+
+$ ralph org director status --state-dir $SCRATCH/mnt/state
+[stdout]
+director: attached d1 (driver=claude, attached at 2026-10-14T21:08:03Z, by u) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+driver: claude
+wake: pull
+attached_at: 2026-10-14T21:08:03Z
+user: u
+cwd: $SCRATCH/probe/work/p…p
+herdr_pane: no
+[exit 0]
+--- fill the volume
+901120 bytes transferred in 0.000820 secs (1098926829 bytes/sec)
+dd: $SCRATCH/mnt/fill2: No space left on device
+df: used 1024 KiB, available 0 KiB
+
+## B2. attach --replace on the full volume (the truncate can work)
+
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: attach: nothing was recorded, so d1 (driver claude, attached 2026-10-14T21:08:03Z) is still the current registration: append to $SCRATCH/mnt/state/director.jsonl: write $SCRATCH/mnt/state/director.jsonl: no space left on device
+[exit 1]
+director.jsonl after: 3714 bytes (before: 3714)
+cmp: director.jsonl is byte-identical to before the attempt
+
+$ ralph org director status --state-dir $SCRATCH/mnt/state
+[stdout]
+director: attached d1 (driver=claude, attached at 2026-10-14T21:08:03Z, by u) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+driver: claude
+wake: pull
+attached_at: 2026-10-14T21:08:03Z
+user: u
+cwd: $SCRATCH/probe/work/p…p
+herdr_pane: no
+[exit 0]
+
+## B3. the same with director.jsonl append-only (chflags uappnd): the write fails on the full volume and the truncate is refused
+-rw-r--r--@ uappnd
+
+$ ralph org director attach --driver codex --replace --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: attach: append to $SCRATCH/mnt/state/director.jsonl: write $SCRATCH/mnt/state/director.jsonl: no space left on device, and director.jsonl could not be restored to its size before the append (truncate $SCRATCH/mnt/state/director.jsonl: operation not permitted), so it may hold part of the write: read the registration with ralph org director status --state-dir '$SCRATCH/mnt/state'
+[exit 1]
+director.jsonl after: 4096 bytes (before: 3714)
+cmp: EOF on $SCRATCH/probe/before
+--- the bytes past the old end:
+{"ts":"2026-10-14T21:08:03Z","id":"d1","event":"detached","user":"u","cwd":"$SCRATCH/probe/work","herdr_pane":false}
+{"ts":"2026-10-14T21:08:03Z","id":"d2","event":"attached","driver":"codex","wake":["pull"],"user":"u","cwd":"$SCRATCH…
+
+$ ralph org director status --state-dir $SCRATCH/mnt/state
+[stdout]
+director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work
+enabled: true
+[stderr]
+warning: 1 unreadable director line(s) skipped in $SCRATCH/mnt/state/director.jsonl
+[exit 0]
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: detach d1: no director is attached
+[exit 1]
+director.jsonl after the detach: 4096 bytes
+
+## B4. cleanup
+df: used 144 KiB, available 880 KiB
+```
+
+#### C2-4.4 probe5.sh (detach's two endings on the full image)
+
+```bash
+#!/bin/bash
+# Cycle-2 probe B5: detach's not-restored path on the full image (append-only director.jsonl).
+set -u
+T=$SCRATCH
+P=$T/probe; M=$T/mnt; SD=$M/state
+E() { env -i HOME="$P/home" PATH="$P/pbin" TMPDIR="$P/tmp" USER=u GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null "$@"; }
+r() {
+  printf '\n$ ralph'; printf ' %q' "$@"; printf '\n'
+  E ralph "$@" > "$P/o" 2> "$P/e"; rc=$?
+  if [ -s "$P/o" ]; then echo "[stdout]"; cat "$P/o"; fi
+  if [ -s "$P/e" ]; then echo "[stderr]"; cat "$P/e"; fi
+  echo "[exit $rc]"
+}
+sz() { wc -c < "$1" | tr -d ' '; }
+cd "$P/work"
+echo "## B5. detach --id d1 and detach --force: the detached line (244 bytes) is cut at the block boundary, 122 bytes in"
+chflags nouappnd "$SD/director.jsonl" 2>/dev/null
+python3 - "$SD/director.jsonl" "$P/before" $((4096 - 122)) <<'PY'
+import json, sys
+path, src, target = sys.argv[1], sys.argv[2], int(sys.argv[3])
+ev = json.loads(open(src).read())
+ev["cwd"] = ev["cwd"].rstrip("p").rstrip("/")
+base = len(json.dumps(ev, separators=(",", ":"))) + 1
+ev["cwd"] = ev["cwd"] + "/" + "p" * (target - base - 1)
+line = json.dumps(ev, separators=(",", ":")) + "\n"
+assert len(line) == target, (len(line), target)
+open(path, "w").write(line)
+PY
+echo "director.jsonl: $(sz "$SD/director.jsonl") bytes"
+cp "$SD/director.jsonl" "$P/before5"
+dd if=/dev/zero of="$M/fill" bs=4096 2>&1 | tail -1
+dd if=/dev/zero of="$M/fill2" bs=512 2>&1 | tail -1
+df -k "$M" | tail -1 | awk '{print "df: used " $3 " KiB, available " $4 " KiB"}'
+
+echo; echo "--- B5a. truncate allowed"
+r org director detach --id d1 --state-dir "$SD"
+cmp "$P/before5" "$SD/director.jsonl" && echo "cmp: director.jsonl is byte-identical to before the attempt"
+r org director detach --force --state-dir "$SD"
+cmp "$P/before5" "$SD/director.jsonl" && echo "cmp: director.jsonl is byte-identical to before the attempt"
+
+echo; echo "--- B5b. append-only (truncate refused)"
+chflags uappnd "$SD/director.jsonl"
+r org director detach --id d1 --state-dir "$SD"
+echo "director.jsonl after: $(sz "$SD/director.jsonl") bytes (before: $(sz "$P/before5"))"
+echo "--- the bytes past the old end:"; tail -c +$(( $(sz "$P/before5") + 1 )) "$SD/director.jsonl"; echo
+r org director status --state-dir "$SD"
+
+echo; echo "## B6. cleanup"
+chflags nouappnd "$SD/director.jsonl"
+rm -f "$M/fill" "$M/fill2"
+df -k "$M" | tail -1 | awk '{print "df: used " $3 " KiB, available " $4 " KiB"}'
+```
+
+Output (06:08, rc 0):
+
+```text
+## B5. detach --id d1 and detach --force: the detached line (244 bytes) is cut at the block boundary, 122 bytes in
+director.jsonl: 3974 bytes
+901120 bytes transferred in 0.000534 secs (1687490637 bytes/sec)
+dd: $SCRATCH/mnt/fill2: No space left on device
+df: used 1024 KiB, available 0 KiB
+
+--- B5a. truncate allowed
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: detach d1: nothing was recorded, so d1 (driver claude, attached 2026-10-14T21:08:03Z) is still the current registration: append to $SCRATCH/mnt/state/director.jsonl: write $SCRATCH/mnt/state/director.jsonl: no space left on device
+[exit 1]
+cmp: director.jsonl is byte-identical to before the attempt
+
+$ ralph org director detach --force --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: force detach: nothing was recorded, so d1 (driver claude, attached 2026-10-14T21:08:03Z) is still the current registration: append to $SCRATCH/mnt/state/director.jsonl: write $SCRATCH/mnt/state/director.jsonl: no space left on device
+[exit 1]
+cmp: director.jsonl is byte-identical to before the attempt
+
+--- B5b. append-only (truncate refused)
+
+$ ralph org director detach --id d1 --state-dir $SCRATCH/mnt/state
+[stderr]
+org: director: detach d1: append to $SCRATCH/mnt/state/director.jsonl: write $SCRATCH/mnt/state/director.jsonl: no space left on device, and director.jsonl could not be restored to its size before the append (truncate $SCRATCH/mnt/state/director.jsonl: operation not permitted), so it may hold part of the write: read the registration with ralph org director status --state-dir '$SCRATCH/mnt/state'
+[exit 1]
+director.jsonl after: 4096 bytes (before: 3974)
+--- the bytes past the old end:
+{"ts":"2026-10-14T21:08:35Z","id":"d1","event":"detached","user":"u","cwd":"$SCRATCH…
+
+$ ralph org director status --state-dir $SCRATCH/mnt/state
+[stdout]
+director: attached d1 (driver=claude, attached at 2026-10-14T21:08:03Z, by u) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+driver: claude
+wake: pull
+attached_at: 2026-10-14T21:08:03Z
+user: u
+cwd: $SCRATCH/probe/work/p…p
+herdr_pane: no
+[stderr]
+warning: 1 unreadable director line(s) skipped in $SCRATCH/mnt/state/director.jsonl
+[exit 0]
+
+## B6. cleanup
+df: used 144 KiB, available 880 KiB
+```
