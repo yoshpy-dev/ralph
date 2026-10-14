@@ -166,8 +166,9 @@ type MergeOrderEntry struct {
 	// do next.
 	Detail string `json:"detail"`
 	// PR is the branch's PR (pickMergePR), nil when gh was not there,
-	// failed, found none from this repository, or read another repository
-	// than origin's.
+	// failed, found none from this repository, read another repository
+	// than origin's, or returned mergeOrderGHLimit PRs, all from forks, so
+	// that none is used (a note says so).
 	PR *MergeOrderPR `json:"pr,omitempty"`
 	// Gate is the branch's latest gate record, nil when it has none.
 	Gate *MergeOrderGate `json:"gate,omitempty"`

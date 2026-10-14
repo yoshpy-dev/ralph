@@ -129,3 +129,79 @@ commit の前に、worktree のルートで打った。
 - `./scripts/plan-visual.sh digest docs/plans/active/2026-10-14-org-merge-order.md`: `c0b1e9230999`(計画は触っていない)
 - tech-debt の行: HEAD と比べて、既存の 239 行は 1 字も変わらず、末尾に 1 行だけ増えた。5 列(`|` で分けると 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、U+FFFD は 0 件、計画のパスは `docs/plans/active/2026-10-14-org-merge-order.md` の 1 つ(Python。スクリプトは scratchpad)
 - `git diff --check`: 出力なし
+
+## Cycle 3
+
+- Date: 2026-10-14(JST)
+- Pipeline cycle: 3(cross-review cycle 2 の ACTION_REQUIRED を直すために上限を 2 から 3 に上げた回で、最後。`.harness/state/standard-pipeline/cycle-count.json` は 2 のままなので、`--cycle auto` ではなく 3 を明示して記録する)。差分の base は `ac34ccf3`、branch は `feat/org-merge-order`。run 開始時の HEAD は `2de9c9ea`(run 開始時の値で、この cycle の commit の SHA ではない)
+- 先行 report の `Cycle 3`: self-review(C3-1 から C3-5、LOW 5、Merge: yes)、verify(pass、LOW 3 件の D5 から D7)、test(pass、生き残った mutant 9 件。本物の gh で microsoft/vscode の `--head patch-1` を読むと、`--limit 1000` で 1000 本、9〜10 s)
+- 項目の番号: C3-n は self-review の `Cycle 3` の所見の表、D5 から D7 は verify の `Cycle 3` の「文書のずれ(cycle 3)」の表、N30 などは test の `Cycle 3` の「Mutation(cycle 3)」の番号、PB・PC は probe の行、(a) から (r) は tech-debt の 239 行の項目の記号
+- 内容の commit: この節、tech-debt の 2 行(238 行と 239 行)、`internal/org/mergeorder.go` のコメント 1 か所を含む 1 つの commit(`docs: sync docs for org-merge-order (cycle 3)`)。指示どおり、`docs/insights/`、`docs/reports/cross-review-triage-org-merge-order.md`、計画の本文には触れていない。sync_docs の cycle 3 の insight event は足していないので、orchestrator が `--cycle 3` で足す
+
+### Summary
+
+verify の D5(239 行が古くなった)、D6(238 行が上限の場合を書かない)、D7(`MergeOrderEntry.PR` の doc が上限の場合を書かない)を直した。D7 と、同じ所見の self-review C3-4 の (d) は Go のコメント 1 か所だけで、動きは変えていない。
+
+239 行は、直った (a)、(k)、(b) の doc の半分を外し、残りに cycle 3 の所見(C3-1 から C3-4、test の N30 から N51)を足した。「上限(2/2)で、直すと 3 回目」は「cycle 3 が最後で、直すと 4 回目」にした。
+
+項目の記号は、cycle 2 の sync-docs が付けた (a) から (n) を詰めずに残した。self-review・verify・test の報告が (b)、(g) などの記号で 239 行を指すので、詰めるとそれらが読めなくなる。(a) と (k) の記号は空け、使い回さない。cycle 3 の所見は次のように載せた。
+
+- C3-1 は (b) を env だけに狭めた。self-review の「Tech debt identified」は (b) を狭める案と、別の (p) にする案を両方挙げている。同じ内容が 2 つになるので、狭める案にした
+- C3-2 は新しい (o)(読む人に当たるのはこれだけ)
+- C3-3 は (g) の延長
+- C3-4 は新しい (p)。4 点のうち (d)(`MergeOrderEntry.PR` の doc)はこの commit で直したので、(p) は残る 3 点だけを書く
+- test の N43・N44 は新しい (q)、N30・N31・N33・N34 は (l) の延長、N51(cycle 2 の G04)は (m) の延長
+- 1000 本を取る時間(本物の gh で 9〜10 s、`GHTimeout` の既定は 15 s)は新しい (r)
+
+test の cycle 3 の生き残り 9 件は、N11 を除いてすべていずれかの項目に入った(N30・N31・N33・N34 は (l)、N43・N44 は (q)、N51 は (m)、N70(help が `--limit 30` と書く)は (g))。N11(`>=` を `==` にする)は、本物の gh が `--limit` より多くを返さない(`--limit 1100` で 1009 本、`--limit 1000` で 1000 本)ので動きが変わらず、「項目なし」の一文に足した。cycle 2 から残る生き残り(S04、O03、O04、L04、L05、G04、P04、P05、O16)は、(i) から (n) のままで、対応する probe の行は変えていない。
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `docs/tech-debt/README.md` の 239 行(Debt の列) | D5、C3-5 | 見出しを「found by self-review and test cycles 2 and 3 and left in place」にし、cycle 3 が最後の run だったこと、(a)(C2-1)と (k)(D02)と (b) の doc の半分が直ったこと、記号を使い回さないことを書いた。(a) と (k) の本文を外した。(b) は env だけ(`readMergeOriginRepo` の `GIT_TERMINAL_PROMPT=0`、その doc の一句、`TestMergeOrder_PRIsUsedWhenItsURLNamesOriginsRepository` の期待)にした。(g) に gh の `--limit` の値 1000 の手書き(help の 2 か所、skill の表の行 4 面、CLI の `mergeOrderGHCall` と org 層の `TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv`)を足した。(o)(C3-2)、(p)(C3-4 の 3 点)を足した。(l)、(m) を cycle 3 の mutant と probe に合わせて延ばし、(q)(N43・N44)と (r)(1000 本を取る時間)を足した。名前は関数・test・定数で書き、`file:line` は 0 件 |
+| 同(Impact の列) | D5、C3-5 | 「Only (a) reaches a reader」を (o) に替えた。ready が 2 本以上のときの注記が `--org-id` なしの `ralph org gate` を名指し、CLI が 1 度断るが、行の ORG 列の org で打ち直せる。(k) の文を (l)・(m)・(q) の文にし、(r) に「良い回線で 9〜10 s なので、遅い回線では gh の呼び出しが timeout し、上限のブランチは上限の注記でなく gh の失敗の注記(timed out)になる。どちらも PR なしで注記が付く」を書いた |
+| 同(Why deferred の列) | D5、C3-5 | 「Found at the pipeline cap (2/2): ... needs a third pipeline run」を「Found at the last pipeline run (cycle 3 of 3, after the cap was raised from 2): ... needs a fourth pipeline run」にした。(o) は文 1 つとテストの期待 1 か所、(g) は skill 4 面に触れるので /verify から回し直しになることを書いた。cycle 3 の sync-docs が `MergeOrderEntry.PR` の doc とこの行を直したこと、probe は PB1 から PB8 と PC1 から PC4 でコミットしていないこと、N11 が「項目なし」であることを足した |
+| 同(Trigger の列) | D5、C3-5 | `mergeGateCommand` を `mergeOrderListNotes` と `lookupMergePRs` に替え、「a report that the several-ready note sent someone to a refused command, or that a branch the gh limit left without a PR was taken for one with none」にした |
+| 同(Related の列) | D5、C3-5 | self-review の Cycle 2 から C2-1 を外し(直った)、Cycle 3 の C3-1 から C3-5 を足した。test の Cycle 3 と生き残り(N30、N31、N33、N34、N43、N44、N51。D02 は外した)、evidence の `c3-mutation.txt`(PB と PC の probe)と `c3-real-origin.txt`(1000 本の取得時間)、verify の Cycle 3(D5 から D7)を足した。`verify-2026-10-14-org-merge-order-c2.md`(K16)の参照は、K16 が (a) の再現で (a) が直ったので外した。足した参照はどれも存在するパス |
+| `docs/tech-debt/README.md` の 238 行(Debt、Impact、Related の列) | D6、C3-5 | 「cannot tell ... "gh failed for this branch" ... from "gh found no PR": both leave out the entry's `pr`」に、3 つめの場合「gh returned its limit of PRs for this branch, all from forks, and none is used」(`mergeOrderGHLimit`、1000)を足し、「all three leave out the entry's `pr`」にした。Impact は、director が lookup の失敗か上限ぶんの fork の PR の枝を「PR なしの枝」と読み、merge 済みの枝を `no_remote`、`rebase`、`ready` と読む、とした(verify の Q2 で feat/k は `ready`)。Related に self-review の Cycle 3(C3-5)と verify の Cycle 3(D6)を足した。Trigger と Why deferred の列は変えていない |
+| `internal/org/mergeorder.go`(`MergeOrderEntry.PR` の doc) | D7、C3-4 (d) | 「nil when gh was not there, failed, found none from this repository, or read another repository than origin's」に「or returned mergeOrderGHLimit PRs, all from forks, so that none is used (a note says so)」を足した。コメントだけで、`gofmt -l internal/` は空 |
+| この節 | - | 追記。cycle 1・2 の節は変えていない |
+
+239 行は 5.4 KB から 9.2 KB になった(5 列、`|` で分けると 7 片。HEAD と比べて変わった行は 238 行と 239 行だけ)。
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `ralph org merge-order --help`(`internal/cli/org_merge_order.go` の `Long`)、`/org` skill の 4 面(`merge-order` の行) | 変更なし。help の 2 か所と skill の 183 行の `1000`(`--limit 1000` と「全部 fork なら使わない」)は、`mergeOrderGHLimit` と `lookupMergePR` の判定と合う(verify の Q1・Q4 が binary で見ている)。4 面の `shasum -a 256` は 1 種類。1000 の手書きは (g) に載せた |
+| `README.md:262`(`merge-order` の段落)、`README.md:124` | 変更なし。gh の PR を引くことと repository の確かめの 3 つの穴は書いてあるが、fork の PR を外すことも `--limit` も書いていない(cycle 1 から同じで、verify の情報の項目と同じ判断)。食い違う記述はない |
+| `AGENTS.md`、`docs/architecture/repo-map.md`、`docs/quality/quality-gates.md`、`docs/specs/2026-10-07-org-multi-org-director.md`、`internal/org/seat.go` の package doc | 変更なし。どれも `--limit 1000` を書かず(`grep` で 0 件)、cycle 3 は動詞、script、hook、rule、外のコマンドの種類を足していない。`seat.go` の「`git remote get-url origin` once gh returned a PR」は、上限のブランチが get-url を打たないことと矛盾しない |
+| `docs/tech-debt/README.md` の 233 行から 237 行 | 変更なし。237 行(`mergeOriginRepo.check` の行)は repository の確かめの穴を書き、上限の枝は確かめの前で抜ける(self-review)ので食い違わない |
+| 計画 `docs/plans/active/2026-10-14-org-merge-order.md` | 変更なし(本文も checkbox も)。`./scripts/plan-visual.sh digest` は `c0b1e9230999` で、`- Approved:` の行と同じ。cycle 3 の決定は Progress の最後の項目にある |
+| `.claude/rules/ralph/`、`docs/recipes/`、`docs/quality/definition-of-done.md` | 変更なし。cycle 3 は rule や recipe が前提にするものを変えていない |
+| `docs/reports/`(この report を除く)、`docs/evidence/`、`docs/insights/` | 編集していない |
+
+### Left open
+
+- 239 行の項目のうち、(b) から (h)、(o)、(p) とテストの穴の (i) から (n)、(q) は直していない。cycle 3 が最後の run で、直すと 4 回目の pipeline(上限をもう 1 つ上げる)が要る。読む人に当たるのは (o) だけで、行の ORG 列の org を付けて打ち直せば通る。(g) の 1000 は skill 4 面に触れるので、直すなら /verify から回し直しになる
+- (p) の最初の点(`defaultMergeOrderLsRemoteTimeout` と `defaultMergeOrderGHTimeout` の定数のコメント)は、D7 と同じコメントだけの直しだが、handoff が挙げたのは D7 だけなので直していない。残りの 2 点は名前の変更を含む
+- この commit は Go のファイルを 1 つ(`internal/org/mergeorder.go`)触る。変えたのはコメント 1 か所で、動きは変えていない。pipeline を回し直すかどうかは lead の判断
+- (r) は、遅い回線で上限のブランチが「timed out の注記」になりうることの記録で、直す案(`GHTimeout` の既定を上げる、上限を下げる)は選んでいない。本物の gh で 1000 本は 9〜10 s、既定の timeout は 15 s
+- sync_docs の cycle 3 の insight event は、指示で `docs/insights/` に触れないので足していない(`--cycle 3` を明示する)
+- release のノートと PR の本文は `/pr` の担当。PR の本文の known gaps には、239 行(特に (o))と 238 行の上限の場合、(r) の取得時間を挙げるとよい
+- 計画の `PR created` は `/pr` が付ける
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `gofmt -l internal/`: 出力なし(`gofmt -w` は使っていない)
+- `go test ./internal/org/ ./internal/cli/ -run 'MergeOrder|LegacyLedger' -count=1`(go1.26.0): `ok internal/org 5.250s`、`ok internal/cli 31.209s`、rc 0
+- `GOTOOLCHAIN=go1.25.8 go test ./internal/org/ ./internal/cli/ -run 'MergeOrder|LegacyLedger' -count=1`: `ok internal/org 5.344s`、`ok internal/cli 30.079s`、rc 0
+- `./scripts/run-static-verify.sh`(changed の範囲): rc 0、`==> All verifiers passed.`。`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`(`13 skill(s) in lock-step`)、`check-template-purity.sh`(`PASS`)、`tech-debt README plan references`(OK)、`gofmt: ok`、`0 issues.`、`secret-scan-branch: scanned ac34ccf3..2de9c9ea against origin/main: clean`。wrapper が書いたログ(`docs/evidence/verify-2026-10-14-022620.log`)は gitignore の対象で、コミットしていない
+- `./scripts/check-sync.sh`: `IDENTICAL: 167`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`、rc 0
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 13 skill(s) in lock-step`。skill は触っておらず、4 面の `shasum -a 256` は 1 種類
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-14-org-merge-order.md`: `c0b1e9230999`(計画は触っていない。`- Approved:` の行と同じ)
+- tech-debt の行: HEAD と比べて変わったのは 238 行と 239 行だけ(行数は 240 のまま)。どちらも 5 列(`|` で分けると 7 片)、列ごとの backtick は偶数、`file:line` の形は 0 件、U+FFFD は 0 件、計画のパスは `docs/plans/active/2026-10-14-org-merge-order.md` の 1 つ、行が挙げる `docs/`・`internal/` のパスはすべて存在する(Python。スクリプトは scratchpad)。`git diff --numstat` は README が 2 / 2、`mergeorder.go` が 3 / 2
+- `git diff --check`: 出力なし
