@@ -89,16 +89,16 @@ Critical forks: C1〜C7 は consult(consult-plan-guarantee)の判定で決めた
 
 ## Acceptance criteria
 
-- [ ] AC1 ruleset の `required_status_checks` が strict で必須の検査が 1 件以上のとき、または ruleset に `merge_queue` があり必須の検査が 1 件以上あるとき、doctor の `Merge guarantee` は `pass` で、種類は `github_protection`
-- [ ] AC2 classic の保護の必須の検査(1 件以上)が `strict: true` のとき `github_protection`。classic の保護に必須の検査があり、admin でなく strict を読めない(404 `Not Found` か 403)とき `unknown`(`info`)
-- [ ] AC3 「最新でないと merge できない」設定か merge queue がない、または必須の検査が 0 件のとき(保護がない、必須の検査がない、strict が false、strict や merge queue だけ)、doctor は `warn` で、何を設定すればよいかを言う。種類は `pr_checks_only`。必須の検査が 0 件の strict は、最新にはなるが検査は走らないと言う
-- [ ] AC4 origin がない、origin の URL が host か owner/repo を名指さない、gh が PATH にない(gh を打たない)、gh が失敗する(ssh の別名の host を含む)、全体の期限を過ぎる、JSON が読めないとき、doctor は `info` で理由を言い、種類は `unknown`。どれでも doctor の終了コードは変わらない。どの gh にも `--hostname <origin の host>` を渡す(`ssh.github.com` は `github.com`)
-- [ ] AC5 doctor は、台帳のディレクトリがあるときだけ `merge-guarantee.json` を、読んだ結果が `unknown` でも書く。ないときは作らない。書けなければ古いキャッシュを消し、detail にそう書く。消せもしなければ検査は `warn`
-- [ ] AC6 `ralph status` はキャッシュの種類・既定のブランチ・`checked_at` を `merge guarantee:` の 1 行で出し(org があってもなくても)、`--json` に `merge_guarantee` を出す。台帳のディレクトリがない、キャッシュがない、読めない、24 時間を過ぎた、今の origin の host か owner/repo がキャッシュと違う、origin を読めないときは `unknown` と、それぞれの理由を言う。gh を打たず、git もネットワークに出ない
-- [ ] AC7 `ralph org merge-order` は、テキストの先頭の既定のブランチの行のあとに保証の行を、`--json` に `merge_guarantee` を出す。AC6 と同じ条件のほか、キャッシュの既定のブランチが今の既定のブランチと違えば `unknown`
-- [ ] AC10 保護のある repository で `github_protection` を書いたあと、origin を同じ既定のブランチの名前を持つ別の repository に向け直すと、status と merge-order は `unknown` を出す。古い `github_protection` のキャッシュがあるまま doctor の書き込みが失敗すると、古いキャッシュは消える。時計を 24 時間進めると `unknown` になる
-- [ ] AC8 テストは本物の gh を打たない(TestMain で seam を固め、テストが偽物の呼ばれ方を確かめる)。テストは repo の台帳にキャッシュを書かない
-- [ ] AC9 README、`/org` skill の 4 面、仕様 FR-7 の注、AGENTS.md、tech-debt が保証の判定と表示を説明する。skill の 4 面は同じ中身
+- [x] AC1 ruleset の `required_status_checks` が strict で必須の検査が 1 件以上のとき、または ruleset に `merge_queue` があり必須の検査が 1 件以上あるとき、doctor の `Merge guarantee` は `pass` で、種類は `github_protection`
+- [x] AC2 classic の保護の必須の検査(1 件以上)が `strict: true` のとき `github_protection`。classic の保護に必須の検査があり、admin でなく strict を読めない(404 `Not Found` か 403)とき `unknown`(`info`)
+- [x] AC3 「最新でないと merge できない」設定か merge queue がない、または必須の検査が 0 件のとき(保護がない、必須の検査がない、strict が false、strict や merge queue だけ)、doctor は `warn` で、何を設定すればよいかを言う。種類は `pr_checks_only`。必須の検査が 0 件の strict は、最新にはなるが検査は走らないと言う
+- [x] AC4 origin がない、origin の URL が host か owner/repo を名指さない、gh が PATH にない(gh を打たない)、gh が失敗する(ssh の別名の host を含む)、全体の期限を過ぎる、JSON が読めないとき、doctor は `info` で理由を言い、種類は `unknown`。どれでも doctor の終了コードは変わらない。どの gh にも `--hostname <origin の host>` を渡す(`ssh.github.com` は `github.com`)
+- [x] AC5 doctor は、台帳のディレクトリがあるときだけ `merge-guarantee.json` を、読んだ結果が `unknown` でも書く。ないときは作らない。書けなければ古いキャッシュを消し、detail にそう書く。消せもしなければ検査は `warn`
+- [x] AC6 `ralph status` はキャッシュの種類・既定のブランチ・`checked_at` を `merge guarantee:` の 1 行で出し(org があってもなくても)、`--json` に `merge_guarantee` を出す。台帳のディレクトリがない、キャッシュがない、読めない、24 時間を過ぎた、今の origin の host か owner/repo がキャッシュと違う、origin を読めないときは `unknown` と、それぞれの理由を言う。gh を打たず、git もネットワークに出ない
+- [x] AC7 `ralph org merge-order` は、テキストの先頭の既定のブランチの行のあとに保証の行を、`--json` に `merge_guarantee` を出す。AC6 と同じ条件のほか、キャッシュの既定のブランチが今の既定のブランチと違えば `unknown`
+- [x] AC10 保護のある repository で `github_protection` を書いたあと、origin を同じ既定のブランチの名前を持つ別の repository に向け直すと、status と merge-order は `unknown` を出す。古い `github_protection` のキャッシュがあるまま doctor の書き込みが失敗すると、古いキャッシュは消える。時計を 24 時間進めると `unknown` になる
+- [x] AC8 テストは本物の gh を打たない(TestMain で seam を固め、テストが偽物の呼ばれ方を確かめる)。テストは repo の台帳にキャッシュを書かない
+- [x] AC9 README、`/org` skill の 4 面、仕様 FR-7 の注、AGENTS.md、tech-debt が保証の判定と表示を説明する。skill の 4 面は同じ中身
 
 ## Implementation outline
 
@@ -162,7 +162,7 @@ Critical forks: C1〜C7 は consult(consult-plan-guarantee)の判定で決めた
   - S4 d7da3441(README、`/org` skill の 4 面、仕様 FR-7 の 7c-2 の注、AGENTS.md、tech-debt 6 行)
   - 計画からのずれ: Scope と AC3 の pr_checks_only の勧め「Require branches ... と必須の検査、または merge queue」は、判定が merge queue を ruleset の `merge_queue` の規則からしか読まないので、「merge queue は ruleset に足す」と言うようにした(89b981d8 で detail と help、c56c1f11 で skill と tech-debt。classic の保護の merge queue を読まないことは tech-debt に書いた)
   - 実機の証跡: `docs/evidence/merge-guarantee-livefire-2026-10-14.md`(この repo は warn、github/docs は pass、cli/cli と ssh の別名は unknown、台帳がなければ書かない)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-14-org-merge-guarantee.md`、cycle 1。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 6)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-14-org-merge-guarantee.md`、cycle 1。pass)
+- [x] Test artifact created(`docs/reports/test-2026-10-14-org-merge-guarantee.md`、cycle 1。pass)
 - [ ] PR created

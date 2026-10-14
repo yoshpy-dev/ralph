@@ -786,8 +786,8 @@ func readMergeGuaranteeOrigin(ctx context.Context, p MergeGuaranteeReadParams) (
 	return h, r.String(), ""
 }
 
-// mergeOriginName is host/owner/repo, for a cache whose check could not
-// read origin "no readable origin".
+// mergeOriginName is host/owner/repo, or "no readable origin" for a cache
+// whose check could not read origin (host and repo both empty).
 func mergeOriginName(host, repo string) string {
 	if host == "" && repo == "" {
 		return "no readable origin"
