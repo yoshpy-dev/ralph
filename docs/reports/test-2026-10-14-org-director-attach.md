@@ -249,3 +249,128 @@ HEAD を go1.25.8 で build した binary を、`env -i` で PATH に git、ralp
 - Blocked: なし
 - Verified: cross-review cycle 1 #1 の直し(write と close の失敗の切り戻し、戻せたときと戻せなかったときの文の分け方)と self-review cycle 2 の C2-L1、C2-L2 の直しを、テストと mutant 18 件(red 15 件)で確かめた。handoff が名指した 6 つの mutant はどれも red。cycle 1 の生き残り D5 は新しいテストが落とす。HEAD の binary で、本物の ENOSPC の途中までの書き込みが元の bytes に戻ること(`attach --replace`、`detach --id`、`detach --force`)、切り戻せないときに attach と detach の両方が「nothing was recorded」と言わず `--state-dir` つきの `ralph org director status` を足すこと、読み取り専用のファイルでは open で断られてファイルが変わらないことを確かめた
 - Not verified: Test gaps の 1〜6。どれも PR を止めるものではない
+
+## Cycle 3
+
+- Date: 2026-10-15(JST 08:00〜08:20)
+- Plan: docs/plans/active/2026-10-14-org-director-attach.md(`Status: Approved`、Approved sha256:27414f27525b。digest が承認時と同じことは verify cycle 3 が確かめた)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 3 回目。cross-review cycle 2 の ACTION_REQUIRED を直すために `RALPH_STANDARD_MAX_PIPELINE_CYCLES` を 3 に上げた回で、`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま(触っていない)
+- Scope: HEAD e5d896e8(base ef575748)。cycle 2 の 9548a8cd から Go が変わったのは 4 ファイル(+76/-1)。`internal/org/escalate.go` は時間切れのエラーの文を unexported の const `inboxWaitTimeoutPhrase` から組み立てるようにした(出る文は同じ)。`internal/org/director_skill_sync_test.go` は新しいテスト `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` で、ほかの 2 ファイルはテストのコメント 1 行ずつ。残りは `/director` skill の 4 面の受信箱の節(c8a9227b、8ac59595、c953d4f2)と記録。behavioral test だけを実行した(静的解析と同期の検査は /verify の担当)。環境は macOS(arm64)、go1.26.0 と go1.25.8(`GOTOOLCHAIN`)、git 2.49.0。開始時の load average は 84(5 分平均 98)で、別のセッションの負荷だった。08:06 には 1 分平均が 10 を切った
+- Evidence: `docs/evidence/test-2026-10-14-org-director-attach.md` の `## Cycle 3`(C3-1 run-test.sh の抜粋、C3-2 Go の結果と数・canary、C3-3 mutation、C3-4 HEAD の binary の実機確認)。wrapper が書いた `docs/evidence/verify-2026-10-14-230004.log` は gitignore の対象なのでコミットしない
+- テストもコードも変えていない。新しいテストは skill を `os.ReadFile` で読むので、mutant は scratchpad に作った木の写し(`git archive e5d896e8`)で動かした。skill の mutant は写しのファイルを書き換えて回ごとに戻し(最後に 6 ファイルの md5 が元と同じことを確かめた)、Go の mutant は `go test -overlay` で読ませた。worktree に書いたのは、この節と evidence の `## Cycle 3` だけ
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。`scripts/ralph-config.sh` の変更で full に広がった。go1.26.0) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(下) | 742 秒、rc 0 |
+| `go test -count=1 -v ./internal/...`(go1.26.0) | PASS の数(top-level、subtest)は cli 679、601。org 752、1,525。org/driver 48、89。org/protocol 15、56。config 37、34。insights 36、7。scaffold 30、0。upgrade 114、13 | 左のとおり | 0 | org 1、scaffold 2 | 194 秒(cli 193.5 s、org 80.7 s)、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test -count=1 -v ./internal/...` | go1.26.0 と同じ | go1.26.0 と同じ | 0 | org 1、scaffold 2 | 201 秒(cli 198.9 s、org 82.7 s)、rc 0 |
+| うち cycle 2 のあとで足したテスト | top-level 1(org) | 両方の版で PASS | 0 | 0 | 0.02 s |
+| `go test -count=1 -v -run 'DirectorSkill\|WaitInbox\|OrgWaitInbox' ./internal/org/ ./internal/cli/`(go1.26.0 と go1.25.8) | org: top-level 7、subtest 3。cli: 4、2 | 両方の版ですべて | 0 | 0 | 3 秒と 2 秒、rc 0 |
+| mutation(木の写しと `go test -overlay`、go1.26.0) | mutant 19 件と対照 4 件 | red 13 件 | 生き残り 2 件(S4、等価の G2a)、skip 4 件(rc 0) | - | 1 件 2〜7 秒 |
+| HEAD の binary の実機確認(一時の `--state-dir`、下の「実機の確認」) | `wait --inbox` 9 回、`watch --all --once` 3 回 | すべて期待どおり | 0 | - | 時間を計った wait 8 回は 42〜381 ms |
+
+- shell は 41 本すべてが `OK` で終わり、`FAIL:` の行はどれも 0。Skipped は前からある `tests/test-secret-scan-branch.sh` の 1 件(git が 2.49.0 なので、2.41 より古い git の場合を飛ばす)。cycle 1 と同じ形で抜き出した 215 行は、行番号、時間、`(cached)`、`ok` と `?` の行、時刻、evidence の path を除くと cycle 2 と行ごとに同じだった(同じ抜き出し方を cycle 2 の生の出力に当てると、cycle 2 の抜粋と byte まで一致する)
+- `run-test.sh` の中の Go は cli(201.4 s)と org(84.6 s)を流し直し、config、insights、org/driver、org/protocol、scaffold、upgrade は `(cached)` だった。この 6 つは上の 2 回の `-count=1` の実行で ok を確かめた
+- go1.25.8 と go1.26.0 で、テストの名前と結果の行(時間を除いて並べた 4,039 行)は同じだった。cycle 2 の 4,038 行との差は、どちらの版でも `--- PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` の 1 行だけで、消えた行はない。`git diff 9548a8cd..HEAD -- '*_test.go'` が足した `func Test` もこの 1 本だけ
+- Skipped は cycle 1・2 と同じ 3 本(`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`、scaffold の `TestBaseFS_WithMockFS` と `TestAvailablePacks_WithMockFS`)
+- 前に揺れたテスト(`TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`、`TestRunDoctorFull_StrictFlipsExitCode_DriftedCore`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どの実行でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` は 2.49 s と 2.41 s で、+5 s の場合には当たらなかった
+- AC9: Go の全体の 2 回、絞った 2 回、mutation のすべての回は、PATH の先頭に cycle 2 と同じ canary の `osascript` と `herdr` を置いて走らせた。呼ばれた回数は 0 回。手で同じ PATH から打つと 2 つとも記録されたので、PATH の検索は canary に届く。テストのあと、main のチェックアウトにも worktree にも `.harness/state/org` はなく、repo の下に `director.jsonl` は 1 つもない
+
+### cycle 3 の変更とテストの対応
+
+「mutant」の列の id は下の Mutation の表と evidence の C3-3 のもの。
+
+| 変更 | テスト | mutant |
+| --- | --- | --- |
+| `WaitInbox` の時間切れの文を const から組み立てる(出る文は同じ) | `TestWaitInbox_TimesOutWithoutAnOpenItem`(subtest 3 つ)と cli の `TestOrgWaitInbox_TimesOut`(subtest 2 つ)が全文 `no open inbox item arrived within 300 ms` を固定し、新しいテストがエラーに const が入ることを見る。実機の W1、W2 | G1、G2b red。G2a(同じ文を literal で書く)は等価で生き残り |
+| skill の 4 面が const の文を backquote つきで持つ | `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` | S1a〜S1d、S1all、S2a、S2all red。S4 は生き残り、S5 と S5r は skip |
+| 文を変えて、古いテスト 2 本の期待値も合わせて書き換えた場合(self-review cycle 3 の C3-L1 が挙げた形) | 新しいテストだけ | G1u、G2bu red。落ちたのは新しいテストだけで、cli は通った |
+| skill の受信箱の節が書く CLI の動き(時間切れは終了コード 1 と時間切れの文、時間切れでない失敗は文なしですぐ返る、`--timeout-ms 0` の終了コード 0 は件の行を出す、受信箱が読めないと見張りも期限の知らせを送らない) | Go のテストが固定するのは時間切れの文と read の失敗の早さまで。残りは実機の C3-4 | - |
+
+### 実機の確認(HEAD の binary)
+
+HEAD e5d896e8 を go1.25.8 で build した binary を、`env -i` で HOME を scratch にし、PATH には git と、呼ばれると記録して exit 0 で終わる canary の `osascript` と `herdr` だけを置いて打った。cwd は scratch(`ralph.toml` なし)で、台帳はどの回も一時の `--state-dir`。本物の台帳、herdr、agmsg、本物の osascript は動いていない。evidence の C3-4 に script と出力がある。
+
+1. W1、W2(時間を区切った wait の時間切れ): 空の台帳と、acked の件だけの台帳で `--timeout-ms 300` を打った。どちらも終了コード 1、stdout 0 行、stderr 1 行 `org: wait --inbox: no open inbox item arrived within 300 ms` で、381 ms と 370 ms で返った。stderr は skill の文を含む。const にしたあとも文は変わっていない
+2. F1〜F4(時間切れでない失敗): mode 000 の inbox.jsonl、ディレクトリの inbox.jsonl、壊れた `--config`、cwd の壊れた `ralph.toml` では、`--timeout-ms 300000` を付けても終了コード 1、stdout 0 行、stderr 1 行で、42〜118 ms で返った。どの stderr も skill の文を含まない。Claude Code の形(F1c、`--timeout-ms 0 2>&1`)も、mode 000 の受信箱で終了コード 1、出力はエラーの 1 行だけで、73 ms で返った
+3. O1(`--timeout-ms 0` と open の件): open の件 2 つと acked の件 1 つを置いた受信箱で、終了コード 0、stdout 2 行、stderr 0 行で 66 ms で返った。`sed -n l` で区切りがタブであることを見て(`e1\torg-a\tQUESTION\twhich base?`、`e2\torg-b\tBLOCKED\tgate failed`)、`awk -F'\t'` で各行が 4 欄(ID、org、TYPE、本文の 1 行目)に分かれることを確かめた。acked の e3 は出ない。wait は inbox.jsonl を変えなかった(`cmp` で同じ)
+4. D0〜D2(`ralph org watch --all --once`): 対照の D0 では、2026-10-14T00:00:00Z に escalate した件を読める受信箱に置いた。見張りは resolve の期限の知らせを送った(stderr に `ORG INBOX DEADLINE: ... not resolved within 60m (inbox_resolve_deadline)`、canary の osascript が 1 回、`escalations.jsonl` に 1 行、inbox.jsonl に notified の 1 行)。同じ件の inbox.jsonl を mode 000 にした D1 と、inbox.jsonl をディレクトリにした D2 では、終了コード 0 で stderr に `watchdog: inbox deadlines skipped this cycle: ...` が 1 行出ただけだった。canary の呼び出しは 0 回、`escalations.jsonl` はできず、D1 の inbox.jsonl は `cmp` で元と同じ。skill の「受信箱が読めない失敗では見張りも受信箱を読めず、期限の知らせも止まる」と合う
+
+- verify cycle 3 の binary の確認(C3-3、C3-4)は const にする前の d2eaa665 だった。今回は c953d4f2 のあとの e5d896e8 で、時間切れの文が変わっていないこと(W1、W2)と、D0 を対照に置いて「送らない」が送れる状態との差であること(D1、D2)を確かめた
+- 時間切れでない失敗 5 回の 42〜118 ms は、`--timeout-ms 300000` の 0.04% 以下にあたる
+
+### Coverage
+
+- Statement coverage は測り直していない。Go の変更は const 1 つと、`escalate.go:302` の時間切れの return の 1 行で、文の数は変わらない。この行は `TestWaitInbox_TimesOutWithoutAnOpenItem` の 3 つの subtest と新しいテストが通る(どちらも、この行だけが返すエラーを確かめて通った)。cycle 2 の値(`internal/org` 94.6%、`internal/cli` 87.3%)から動かないとみている(未計測)
+- Branch: Go の標準ツールには branch coverage がないので測っていない。新しいテストの分岐(文の一致、ファイルがないときの skip)は mutation で確かめた(下)
+
+### Mutation
+
+- 対象は新しいテスト `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` と、それが結ぶ 2 つの側(skill の 4 面と `escalate.go` の const とエラー)。org は `-run 'DirectorSkill|WaitInbox'`、Go の mutant は cli も `-run 'OrgWaitInbox|WaitInbox'` で流した。対照の X0(写しのまま)、X1(手を加えないテストを overlay で読ませたもの)、X2(手を加えない `escalate.go` を overlay で)は通った。X1 が skip にならないので、overlay で差し替えたテストでも `runtime.Caller(0)` は写しの path を返し、T の mutant は狙った木を読んでいる。X3(古いテスト 2 本の期待値だけを書き換えたもの)は両方のパッケージで落ちたので、G1u と G2bu で古いテストが通るのは、書き換えた期待値が mutant の文と合うためと分かる。どの差し替えも元の文字列がちょうど 1 か所にあり、飛ばした mutant はない
+
+| ID | 変異 | 結果 | 落としたテスト |
+| --- | --- | --- | --- |
+| S1a | `.claude`(root)の面だけ、skill の文を `no open inbox item came within` に変える | red | `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` |
+| S1b | 同じ変異を `.agents`(root)の面だけに | red | 同上 |
+| S1c | 同じ変異を `templates/base/.claude` の面だけに | red | 同上 |
+| S1d | 同じ変異を `templates/base/.agents` の面だけに | red | 同上 |
+| S1all | 4 面とも同じに変える(面どうしは同じまま) | red | 同上 |
+| S2a | `.claude` の面だけ、文の backquote を外す | red | 同上 |
+| S2all | 4 面とも backquote を外す | red | 同上 |
+| S3 | 4 面とも、code span を文の途中で折り返す(表示は変わらない) | red | 同上(4 面すべてを名指す) |
+| S4 | 4 面とも、Codex の項の文を変え、元の文を backquote つきでファイルの末尾に書く | 生き残り | - |
+| S5 | `templates/base/.agents` の面のファイルを消す | skip(rc 0) | - |
+| S5r | `.claude` の面のファイルを消す | skip(rc 0) | - |
+| G1 | const を `no open inbox item came within` に変える(エラーと const が一緒に動く) | red | 新しいテスト、`TestWaitInbox_TimesOutWithoutAnOpenItem` と subtest 3 つ、cli の `TestOrgWaitInbox_TimesOut` と subtest 2 つ |
+| G1u | G1 に加えて、古いテスト 2 本の期待値も新しい文に書き換える | red | 新しいテストだけ(cli は通る) |
+| G2a | `WaitInbox` が const を使わず、同じ文を literal で書く | 生き残り(等価) | - |
+| G2b | `WaitInbox` が const を使わず、別の文を literal で書く(const は元のまま) | red | 新しいテスト(エラーに const が入るかの確認)、G1 と同じ古いテスト |
+| G2bu | G2b に加えて、古いテスト 2 本の期待値も書き換える | red | 新しいテストだけ(cli は通る) |
+| T1 | テストが読む `.agents` の path を `.agent` にする | skip(rc 0) | - |
+| T2 | テストの repo root を 2 段上でなく 1 段上にする | skip(rc 0) | - |
+| T3 | `templates/base/.agents` の path を誤らせ、`.claude` の面の文も変える | red | 新しいテスト(先の `t.Errorf` があると、あとの `t.Skipf` でも FAIL になる) |
+
+- handoff が名指した 5 つの結果: 1 つの面の文を変える(S1a〜S1d)と backquote を外す(S2a、S2all)は red。const を変える(G1)も red。`WaitInbox` が const を使わなくなる形は、別の文なら red(G2b)、同じ文なら等価なので生き残る(G2a)。テストが誤った path を読む形(T1、T2)は skip になった
+- 19 件のうち red 13 件、生き残り 2 件、skip 4 件。生き残りの G2a は出る文が同じ等価な変異で、テストが守るのは文であって const を使うことではないので、穴に数えない
+- skip は黙って起きる。4 つの path のどれかでファイルが読めないと、テストは `t.Skipf` で終わり、終了コードは 0。golang pack は `go test ./...` を `-v` なしで流す(`packs/languages/golang/verify.sh:109`)ので、CI でも run-test.sh でも `ok` としか出ない。`t.Skipf` は最初に読めなかった面で止まり、残りの面は読まない(T2 の文は 1 面目しか名指さない)。前の面で `t.Errorf` がすでに出ていれば FAIL になる(T3)。これは穴として下の Test gaps 1 に挙げた
+- G1u と G2bu: 文を変えた人が古いテスト 2 本の期待値も書き換えると、新しいテストだけが赤くなる。c953d4f2 の前は skill を読むテストがなかった(verify cycle 3 の Coverage gaps)ので、この形はどのテストでも赤くならなかった
+- S3 は表示の変わらない折り返しでも赤くなる。落ちたときの文はファイルと文を名指し、テストの doc comment が直し方を書いているので、黙った失敗にはならない。穴には数えない
+- S4 はテストがファイル全体で文を探すため生き残った。Test gaps 2 に挙げた
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+落ちたテストはない。
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cycle 2 までのテスト | すべて PASS。名前の並びは cycle 2 から 1 行増えただけで、消えた行はない | evidence の C3-2.2 |
+| 時間切れの文(`no open inbox item arrived within 300 ms`) | 変わっていない | `TestWaitInbox_TimesOutWithoutAnOpenItem`、`TestOrgWaitInbox_TimesOut`、実機の W1、W2 |
+| read の失敗はすぐ返る | 保たれている | `TestWaitInbox_ReadFailureReturnsAtOnce`、実機の F1、F1c、F2 |
+| 件の行の形(タブで区切った 4 欄、open の件だけ) | 保たれている | `TestOrgWaitInbox_ReturnsAnOpenItemAtOnce`、実機の O1 |
+| 読める受信箱では、見張りが期限の知らせを送る | 保たれている | 実機の D0 |
+| 前に揺れた doctor、watcher、gate のテスト | 落ちていない | evidence の C3-2.1 |
+
+### Test gaps
+
+1. 新しいテストは、skill の面のファイルが読めないと黙って skip する(S5、S5r、T1、T2)。この repo では 4 面が必ずあるので、skip が起きるのは path の書き間違いか、skill の改名や移動のとき。たとえば `/director` を改名して `scripts/sync-skills.sh` を流すと、4 面は同じまま揃うので同期の検査では見えず(おそらく。同期の検査は /verify の担当なので今回は走らせていない)、このテストは skip して `ok` になる。`internal/org/send_defaults_sync_test.go:84` と同じ書き方で、前例に合わせたもの。閉じるには、`internal/config/defaults_sync_test.go:200` のように `.claude/skills` 自体がないときだけ skip し、`.claude/skills` があるのに director の面が読めないときは落とす
+2. 新しいテストはファイル全体で文を探し、受信箱の節や Codex の項に絞らない(S4)。今は文が各面に 1 回しかない(`grep -c` が 1)ので実害はない。別の節が同じ文を backquote つきで引くようになると、Codex の項の文だけが変わっても通る。閉じるには、`## 受信箱の処理` の節(次の `## ` まで)を切り出してその中で探す
+3. 受信箱が読めないと見張りが期限の知らせを送らない、という skill の文を固定する Go のテストはない。`TestRunWatchAll_AnInboxThatCannotBeSweptDoesNotStopThePulse` は `Inbox = nil`(`no inbox store is configured`)で、ファイルの read の失敗とは別の経路を通る。今回は実機の D1、D2(対照 D0)の `--once` の 1 回ずつで確かめただけで、長く動く見張りの何周もは見ていない
+4. skill の文を実際の Claude Code(Monitor と `2>&1`)と Codex(shell tool の時間の上限)の session で動かしていない(self-review と verify の cycle 3 と同じ)
+5. Go の panic(終了コード 2)と signal での終わりは binary で起こしていない。skill はどちらも失敗として扱うと書くが、確かめたのは文の上だけ
+6. cycle 2 の Test gaps 1〜6(H4、H5、R11 など)は、今回の変更の外でそのまま残る
+
+### Verdict
+
+- Pass: yes。`./scripts/run-test.sh`(changed、full に広がった)は rc 0(shell 41 本すべて OK、Go 8 パッケージすべて ok)。`go test -count=1 ./internal/...` は go1.26.0 と go1.25.8 の両方で rc 0(cli 679/601、org 752/1,525 と skip 1、ほか 6 パッケージ。名前は両方の版で同じ)。cycle 2 のあとで足した 1 本は両方の版で PASS で、消えたテストはない。`-run 'DirectorSkill|WaitInbox|OrgWaitInbox'` の回も両方の版で通った。テストは本物の osascript と herdr を打たず(canary は 0 回)、repo の台帳に `director.jsonl` はない
+- Fail: なし
+- Blocked: なし
+- Verified: verify cycle 3 の直し c953d4f2 の一致の検査を、mutant 19 件(red 13 件)で確かめた。skill の 4 面のどれか 1 つの文を変える、backquote を外す、const を変える、`WaitInbox` が const と違う文を出す、のどれでも新しいテストが落ちる。文を変えて古いテストの期待値を書き換えた場合も、新しいテストだけが落とす。HEAD の binary で、時間切れの stderr が skill の文を含んで終了コード 1 になること、読めない受信箱と壊れた設定が文なしの終了コード 1 で 118 ms 以内に返ること、`--timeout-ms 0` で open の件があれば終了コード 0 でタブ区切りの件の行が出ること、読めない受信箱では `watch --all --once` が何も送らないこと(読める受信箱を対照に置いた)を確かめた
+- Not verified: Test gaps の 1〜6。1 と 2 は新しいテストの守りの範囲の穴で、ふだんの変更の経路(文の書き換え、面のずれ)は red で確かめた。どれも PR を止めるものではない

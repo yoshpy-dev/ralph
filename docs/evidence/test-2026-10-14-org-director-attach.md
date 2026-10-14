@@ -2644,3 +2644,582 @@ warning: 1 unreadable director line(s) skipped in $SCRATCH/mnt/state/director.js
 ## B6. cleanup
 df: used 144 KiB, available 880 KiB
 ```
+
+## Cycle 3
+
+- Date: 2026-10-15 (JST 08:00-08:20; the UTC timestamps in the output read 2026-10-14T23:xx)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach, HEAD e5d896e8 (base ef575748; cycle 2 tested 9548a8cd)
+- Environment: macOS arm64, go1.26.0 (default) and go1.25.8 (`GOTOOLCHAIN=go1.25.8`), git 2.49.0. Load average (other sessions): 84.18 / 98.35 / 50.18 at 07:59, 9.65 / 56.41 / 50.85 at 08:06, 6.10 / 14.08 / 29.43 at 08:15
+- Redaction: as in cycles 1 and 2, the session scratch directory is `$SCRATCH` and the home directory `~`. The wrapper's full log `docs/evidence/verify-2026-10-14-230004.log` is gitignored and not committed
+- Trailing blanks at the ends of output lines were stripped; nothing else in the raw output was changed apart from the redaction
+- Nothing in the worktree was edited for the tests. The mutants ran in `$SCRATCH/t8a1c3/tree`, a copy made with `git archive e5d896e8 | tar -x`, because the new test reads the skill with `os.ReadFile`: a skill mutant rewrote the copy's files and restored them after its run, and a Go mutant reached the build only through `go test -overlay`
+- Order: `runall.sh` ran run-test.sh (08:00:04-08:12:26), the go1.26.0 run (08:12:27-08:15:41), the go1.25.8 run (08:15:41-08:19:02), and the two focused runs (08:19:02-08:19:07), one after another. The mutation runs (C3-3) and the binary probe (C3-4) ran 08:01-08:06, during run-test.sh's shell phase
+
+### C3-1. ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed; scripts/ralph-config.sh widened it to full)
+
+Command: `./scripts/run-test.sh > runtest.out 2>&1` (08:00:04-08:12:26, rc 0, 742 s wall, 4,513 lines). Filtered with cycle 1's command (section 1), which gives 215 lines; the filter run on cycle 2's raw output reproduces cycle 2's excerpt byte for byte. With the line numbers, the durations, `(cached)`, the `ok`/`?` lines, the timestamp, and the evidence-path line removed from both, this excerpt equals cycle 2's:
+
+```text
+$ diff <(norm < c2/runtest.excerpt) <(norm < c3/runtest.excerpt)
+(no output)
+```
+
+The lines that carry the verdict:
+
+```text
+# Verification run
+- Timestamp: 2026-10-14T23:00:04Z
+- Mode: test
+- Requested scope: changed
+
+$ grep -c '^    OK$' runtest.out
+41
+$ grep -cE '^==> tests/' runtest.out
+41
+$ grep -nE '^\s*FAIL: [1-9]|^    FAIL|^FAIL' runtest.out
+(no output)
+$ grep -n 'SKIP: the' runtest.out
+3924:  SKIP: the real git older than 2.41 case (git 2.49.0 is 2.41 or later; the stubbed old git covers it)
+
+4496:==> Language scope: full fallback (unclassified:scripts/ralph-config.sh)
+4497:==> Language packs selected: golang
+4498:==> Running golang verifier
+4499:==> Go project root: .
+4500:?   	github.com/yoshpy-dev/ralph	[no test files]
+4501:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4502:ok  	github.com/yoshpy-dev/ralph/internal/cli	201.448s
+4503:ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+4504:ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+4505:ok  	github.com/yoshpy-dev/ralph/internal/org	84.574s
+4506:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+4507:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4508:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4509:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4511:==> All verifiers passed.
+4513:Evidence saved to: docs/evidence/verify-2026-10-14-230004.log
+```
+
+### C3-2. Go tests
+
+#### C3-2.1 Per package (`go test -count=1 -v ./internal/...`)
+
+Both runs had `$SCRATCH/t8a1c3/canary` first on PATH (C3-2.4). Counted with cycle 1's `count.awk`.
+
+go1.26.0 (08:12:27-08:15:41, rc 0, 194 s):
+```text
+internal/cli           top PASS 679 FAIL 0 SKIP 0 | sub PASS 601 FAIL 0 SKIP 0 | 193.510s
+internal/config        top PASS 37 FAIL 0 SKIP 0 | sub PASS 34 FAIL 0 SKIP 0 | 1.610s
+internal/insights      top PASS 36 FAIL 0 SKIP 0 | sub PASS 7 FAIL 0 SKIP 0 | 3.026s
+internal/org           top PASS 752 FAIL 0 SKIP 1 | sub PASS 1525 FAIL 0 SKIP 0 | 80.707s
+internal/org/driver    top PASS 48 FAIL 0 SKIP 0 | sub PASS 89 FAIL 0 SKIP 0 | 1.465s
+internal/org/protocol  top PASS 15 FAIL 0 SKIP 0 | sub PASS 56 FAIL 0 SKIP 0 | 3.423s
+internal/scaffold      top PASS 30 FAIL 0 SKIP 2 | sub PASS 0 FAIL 0 SKIP 0 | 2.908s
+internal/upgrade       top PASS 114 FAIL 0 SKIP 0 | sub PASS 13 FAIL 0 SKIP 0 | 4.727s
+```
+
+go1.25.8 (08:15:41-08:19:02, rc 0, 201 s):
+```text
+internal/cli           top PASS 679 FAIL 0 SKIP 0 | sub PASS 601 FAIL 0 SKIP 0 | 198.889s
+internal/config        top PASS 37 FAIL 0 SKIP 0 | sub PASS 34 FAIL 0 SKIP 0 | 1.048s
+internal/insights      top PASS 36 FAIL 0 SKIP 0 | sub PASS 7 FAIL 0 SKIP 0 | 2.004s
+internal/org           top PASS 752 FAIL 0 SKIP 1 | sub PASS 1525 FAIL 0 SKIP 0 | 82.705s
+internal/org/driver    top PASS 48 FAIL 0 SKIP 0 | sub PASS 89 FAIL 0 SKIP 0 | 2.449s
+internal/org/protocol  top PASS 15 FAIL 0 SKIP 0 | sub PASS 56 FAIL 0 SKIP 0 | 2.491s
+internal/scaffold      top PASS 30 FAIL 0 SKIP 2 | sub PASS 0 FAIL 0 SKIP 0 | 3.388s
+internal/upgrade       top PASS 114 FAIL 0 SKIP 0 | sub PASS 13 FAIL 0 SKIP 0 | 3.407s
+```
+
+- The 4,039 result lines (name and verdict, durations removed, sorted) are identical across the two versions: `diff names126.txt names125.txt` is empty
+- SKIP lines (both versions): `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` (org), `TestBaseFS_WithMockFS` and `TestAvailablePacks_WithMockFS` (scaffold), as in cycles 1 and 2
+- Tests that were flaky before (tester memory):
+
+```text
+go126:
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.78s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.64s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.49s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.51s)
+go125:
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.77s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.08s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.41s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.48s)
+```
+
+#### C3-2.2 Tests added and removed since cycle 2
+
+```text
+$ git diff --stat 9548a8cd..HEAD -- '*.go'
+ internal/cli/org_inbox_test.go           |  1 +
+ internal/org/director_skill_sync_test.go | 66 ++++++++++++++++++++++++++++++++
+ internal/org/escalate.go                 |  9 ++++-
+ internal/org/escalate_test.go            |  1 +
+ 4 files changed, 76 insertions(+), 1 deletion(-)
+$ git diff 9548a8cd..HEAD -- '*_test.go' | grep -E '^[+-]func Test'
++func TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase(t *testing.T) {
+```
+
+The sorted result lines of cycle 2 against this cycle, for each version: one added, none removed.
+
+```text
+$ diff <(sort c2/names125.txt) c3/names125.txt
+2682a2683
+> --- PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+$ diff <(sort c2/names126.txt) c3/names126.txt
+2682a2683
+> --- PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+```
+
+#### C3-2.3 Focused run
+
+```text
+$ go test -count=1 -v -run 'DirectorSkill|WaitInbox|OrgWaitInbox' ./internal/org/ ./internal/cli/    (go1.26.0, 08:19:02-08:19:05, rc 0)
+internal/org           top PASS 7 FAIL 0 SKIP 0 | sub PASS 3 FAIL 0 SKIP 0 | 2.146s
+internal/cli           top PASS 4 FAIL 0 SKIP 0 | sub PASS 2 FAIL 0 SKIP 0 | 2.010s
+--- PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+--- PASS: TestWaitInbox_ReturnsTheOpenItemsAtOnce (0.01s)
+--- PASS: TestWaitInbox_ReturnsAnItemThatArrivesWhileWaiting (0.21s)
+--- PASS: TestWaitInbox_NoTimeoutReturnsAnItemThatArrivesLater (0.11s)
+--- PASS: TestWaitInbox_ReadsOnceMoreAtTheDeadline (0.30s)
+--- PASS: TestWaitInbox_TimesOutWithoutAnOpenItem (0.91s)
+    --- PASS: TestWaitInbox_TimesOutWithoutAnOpenItem/no_inbox_file (0.30s)
+    --- PASS: TestWaitInbox_TimesOutWithoutAnOpenItem/acked_item_only (0.31s)
+    --- PASS: TestWaitInbox_TimesOutWithoutAnOpenItem/resolved_item_only (0.30s)
+--- PASS: TestWaitInbox_ReadFailureReturnsAtOnce (0.00s)
+--- PASS: TestOrgWaitInbox_ReturnsAnOpenItemAtOnce (0.06s)
+--- PASS: TestOrgWaitInbox_ReturnsAnItemEscalatedWhileWaiting (0.22s)
+--- PASS: TestOrgWaitInbox_TimesOut (0.64s)
+    --- PASS: TestOrgWaitInbox_TimesOut/empty_inbox (0.31s)
+    --- PASS: TestOrgWaitInbox_TimesOut/acked_item_only (0.34s)
+--- PASS: TestOrgWaitInbox_RefusesSeatFlags (0.00s)
+$ GOTOOLCHAIN=go1.25.8 go test -count=1 -v -run 'DirectorSkill|WaitInbox|OrgWaitInbox' ./internal/org/ ./internal/cli/    (08:19:05-08:19:07, rc 0)
+internal/org           top PASS 7 FAIL 0 SKIP 0 | sub PASS 3 FAIL 0 SKIP 0 | 2.000s
+internal/cli           top PASS 4 FAIL 0 SKIP 0 | sub PASS 2 FAIL 0 SKIP 0 | 1.704s
+```
+
+#### C3-2.4 AC9: no real osascript or herdr, no director.jsonl in the repo's ledger
+
+The canaries are cycle 2's, pointed at a new log. Sensitivity, run by hand through the same PATH before the runs:
+
+```text
+$ $SCRATCH/t8a1c3/canary/osascript -e x; PATH=$SCRATCH/t8a1c3/canary:$PATH herdr pane list; echo "herdr rc=$?"; cat canary.log
+herdr rc=97
+osascript ppid=29202 args=-e x
+/bin/zsh
+herdr ppid=29202 args=pane list
+/bin/zsh
+(the log was emptied before the runs)
+```
+
+After the runs (the two full Go runs, the two focused runs, and every mutation run had the canary first on PATH):
+
+```text
+canary log lines after go1.26.0: 0
+canary log lines after go1.25.8: 0
+canary log lines after every run: 0
+$ ls ~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach/.harness/state/org
+both: No such file or directory (os error 2)
+$ find ~/MyDev/github.com/yoshpy-dev/ralph -name director.jsonl
+(no output)
+$ git status --porcelain   (worktree and main checkout)
+(no output, both)
+$ cat .harness/state/standard-pipeline/cycle-count.json
+{"plan_path": "~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-attach/docs/plans/active/2026-10-14-org-director-attach.md", "cycle": 2}
+```
+
+### C3-3. Mutation of the lock-step test (go1.26.0)
+
+#### C3-3.1 Setup
+
+`$SCRATCH/t8a1c3/tree` is `git archive e5d896e8 | tar -x`; apart from the gitignored files (`.harness/cache`, `.harness/state`, the wrapper logs) it equals the worktree (`diff -rq`). `mutate3.py` runs each mutant there with `go test -count=1 -v -run 'DirectorSkill|WaitInbox' ./internal/org/` (and `-run 'OrgWaitInbox|WaitInbox' ./internal/cli/` for the Go mutants). Every old string had to occur exactly once (the harness stops otherwise; none stopped). It sorts a run as RED (rc != 0), SKIP (rc 0 and `--- SKIP: TestDirectorSkill_...`), or SURVIVED (rc 0, no skip). `pass=` counts top-level and subtest PASS lines together. The replacement strings:
+
+- the skill's phrase: `no open inbox item arrived within` -> `no open inbox item came within`
+- S2: `` `no open inbox item arrived within` `` -> the phrase without the backquotes
+- S3: the code span -> `` `no open inbox item `` + newline + two spaces + `` arrived within` ``
+- S4: the phrase -> `no open inbox item came within` in the Codex bullet, plus `(old wording: `` `no open inbox item arrived within` ``)` appended at the end of the file
+- G1: `const inboxWaitTimeoutPhrase = "no open inbox item arrived within"` -> `... = "no open inbox item came within"`
+- G2a/G2b: `fmt.Errorf("org: wait --inbox: %s %d ms", inboxWaitTimeoutPhrase, timeout.Milliseconds())` -> `fmt.Errorf("org: wait --inbox: <arrived|came> within %d ms", timeout.Milliseconds())`
+- T1: `filepath.Join(".agents", "skills", "director", "SKILL.md")` -> `filepath.Join(".agent", ...)`; T2: `filepath.Join(filepath.Dir(thisFile), "..", "..")` -> `filepath.Join(filepath.Dir(thisFile), "..")`; T3: the `templates/base/.agents` path -> `.agent`, plus S1a
+- G1u, G2bu (`mutate3b.py`): G1 or G2b, plus `no open inbox item arrived within 300 ms` -> `no open inbox item came within 300 ms` in `internal/org/escalate_test.go` and `internal/cli/org_inbox_test.go` (one overlay of three files). X3 is the two test rewrites alone
+
+#### C3-3.2 mutate3.py (08:01-08:04)
+
+```text
+X0 SURVIVED control: the copy as committed
+    org: rc=0 SURVIVED 7s pass=10 fail=0 skip=0
+X1 SURVIVED control: unchanged director_skill_sync_test.go through the overlay
+    org: rc=0 SURVIVED 3s pass=10 fail=0 skip=0
+X2 SURVIVED control: unchanged escalate.go through the overlay
+    org: rc=0 SURVIVED 3s pass=10 fail=0 skip=0
+S1a RED skill: change the phrase in .claude (root) only
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S1b RED skill: change the phrase in .agents (root) only
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S1c RED skill: change the phrase in templates/base/.claude only
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S1d RED skill: change the phrase in templates/base/.agents only
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S1all RED skill: change the phrase in all four faces alike (faces stay identical)
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S2a RED skill: drop the backquotes around the phrase in .claude (root) only
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S2all RED skill: drop the backquotes in all four faces alike
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S3 RED skill: re-wrap the code span across a line break (all four faces; renders the same)
+    org: rc=1 RED 3s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S4 SURVIVED skill: change the Codex bullet's phrase, but quote the old phrase in another section (all four faces)
+    org: rc=0 SURVIVED 2s pass=10 fail=0 skip=0
+S5 SKIP skill: templates/base/.agents face missing (file removed)
+    org: rc=0 SKIP 3s pass=9 fail=0 skip=1 | SKIP TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+S5r SKIP skill: .claude (root) face missing (file removed)
+    org: rc=0 SKIP 3s pass=9 fail=0 skip=1 | SKIP TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+G1 RED const: inboxWaitTimeoutPhrase changed (error and const move together)
+    org: rc=1 RED 7s pass=5 fail=5 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase; TestWaitInbox_TimesOutWithoutAnOpenItem; TestWaitInbox_TimesOutWithoutAnOpenItem/no_inbox_file; TestWaitInbox_TimesOutWithoutAnOpenItem/acked_item_only; TestWaitInbox_TimesOutWithoutAnOpenItem/resolved_item_only
+    cli: rc=1 RED 6s pass=3 fail=3 skip=0 | FAIL TestOrgWaitInbox_TimesOut; TestOrgWaitInbox_TimesOut/empty_inbox; TestOrgWaitInbox_TimesOut/acked_item_only
+G2a SURVIVED WaitInbox: the same text as a literal, not the const (equivalent)
+    org: rc=0 SURVIVED 6s pass=10 fail=0 skip=0
+    cli: rc=0 SURVIVED 5s pass=6 fail=0 skip=0
+G2b RED WaitInbox: a different literal, not the const (const unchanged)
+    org: rc=1 RED 6s pass=5 fail=5 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase; TestWaitInbox_TimesOutWithoutAnOpenItem; TestWaitInbox_TimesOutWithoutAnOpenItem/no_inbox_file; TestWaitInbox_TimesOutWithoutAnOpenItem/acked_item_only; TestWaitInbox_TimesOutWithoutAnOpenItem/resolved_item_only
+    cli: rc=1 RED 5s pass=3 fail=3 skip=0 | FAIL TestOrgWaitInbox_TimesOut; TestOrgWaitInbox_TimesOut/empty_inbox; TestOrgWaitInbox_TimesOut/acked_item_only
+T1 SKIP test: wrong path for one face (.agents -> .agent, root)
+    org: rc=0 SKIP 6s pass=9 fail=0 skip=1 | SKIP TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+T2 SKIP test: wrong repo root (one level up instead of two)
+    org: rc=0 SKIP 5s pass=9 fail=0 skip=1 | SKIP TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+T3 RED test: wrong path for one face plus a phrase change in an earlier face (Errorf then Skipf)
+    org: rc=1 RED 6s pass=9 fail=1 skip=0 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+tree restored: yes
+rc=0
+```
+
+"tree restored: yes" compares the md5 of the four faces, `escalate.go`, and `director_skill_sync_test.go` in the copy with their values before the first mutant. X1 passing (not skipping) shows that under `-overlay` `runtime.Caller(0)` still reports the copy's path for the overlaid test file, so the T mutants read the tree they meant to.
+
+#### C3-3.3 mutate3b.py (08:05-08:06)
+
+```text
+G1u const changed; the two older tests' expected literals rewritten to match
+    ./internal/org/: rc=1 RED 6s pass=9 fail=1 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+    ./internal/cli/: rc=0 SURVIVED 4s pass=6 fail=0
+G2bu WaitInbox prints a different literal, not the const; the two older tests rewritten to match
+    ./internal/org/: rc=1 RED 6s pass=9 fail=1 | FAIL TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase
+    ./internal/cli/: rc=0 SURVIVED 4s pass=6 fail=0
+X3 control: the two older tests rewritten only (the binary still prints the old text)
+    ./internal/org/: rc=1 RED 5s pass=6 fail=4 | FAIL TestWaitInbox_TimesOutWithoutAnOpenItem; TestWaitInbox_TimesOutWithoutAnOpenItem/no_inbox_file; TestWaitInbox_TimesOutWithoutAnOpenItem/acked_item_only; TestWaitInbox_TimesOutWithoutAnOpenItem/resolved_item_only
+    ./internal/cli/: rc=1 RED 4s pass=3 fail=3 | FAIL TestOrgWaitInbox_TimesOut; TestOrgWaitInbox_TimesOut/empty_inbox; TestOrgWaitInbox_TimesOut/acked_item_only
+```
+
+X3 shows that the rewritten literals are really checked, so the two older tests pass under G1u and G2bu because the mutated text satisfies them.
+
+#### C3-3.4 What the test printed
+
+```text
+== S1a
+    director_skill_sync_test.go:63: .claude/skills/director/SKILL.md does not contain `no open inbox item arrived within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+--- FAIL: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== S4
+--- PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== S5
+    director_skill_sync_test.go:60: templates/base/.agents/skills/director/SKILL.md not found (open $SCRATCH/t8a1c3/tree/templates/base/.agents/skills/director/SKILL.md: no such file or directory) -- skipping the skill/error lock-step check (vendored repo?)
+--- SKIP: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== T1
+    director_skill_sync_test.go:60: .agent/skills/director/SKILL.md not found (open $SCRATCH/t8a1c3/tree/.agent/skills/director/SKILL.md: no such file or directory) -- skipping the skill/error lock-step check (vendored repo?)
+--- SKIP: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== T2
+    director_skill_sync_test.go:60: .claude/skills/director/SKILL.md not found (open $SCRATCH/t8a1c3/tree/internal/.claude/skills/director/SKILL.md: no such file or directory) -- skipping the skill/error lock-step check (vendored repo?)
+--- SKIP: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== T3
+    director_skill_sync_test.go:63: .claude/skills/director/SKILL.md does not contain `no open inbox item arrived within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+    director_skill_sync_test.go:60: templates/base/.agent/skills/director/SKILL.md not found (open $SCRATCH/t8a1c3/tree/templates/base/.agent/skills/director/SKILL.md: no such file or directory) -- skipping the skill/error lock-step check (vendored repo?)
+--- FAIL: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== G2b
+    director_skill_sync_test.go:45: WaitInbox timeout error = org: wait --inbox: no open inbox item came within 20 ms; want it to contain inboxWaitTimeoutPhrase "no open inbox item arrived within"
+--- FAIL: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+== G1u
+    director_skill_sync_test.go:63: .claude/skills/director/SKILL.md does not contain `no open inbox item came within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+    director_skill_sync_test.go:63: .agents/skills/director/SKILL.md does not contain `no open inbox item came within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+    director_skill_sync_test.go:63: templates/base/.claude/skills/director/SKILL.md does not contain `no open inbox item came within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+    director_skill_sync_test.go:63: templates/base/.agents/skills/director/SKILL.md does not contain `no open inbox item came within`, the phrase of WaitInbox's timeout error -- see this test's doc comment for what to update
+--- FAIL: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase (0.02s)
+```
+
+T2 names only the first face: `t.Skipf` ends the test at the first missing file. The golang pack runs `go test ./...` without `-v` (`packs/languages/golang/verify.sh:109`), so S5, S5r, T1, and T2 show there as a plain `ok`.
+
+### C3-4. HEAD binary probe (temp `--state-dir`; PATH holds only git and canary osascript and herdr)
+
+`GOTOOLCHAIN=go1.25.8 go build -o $SCRATCH/t8a1c3/bin/ralph ./cmd/ralph` at HEAD e5d896e8 (`ralph version`: `ralph dev (unknown unknown)`). The canaries in the probe's PATH log their arguments and exit 0.
+
+#### C3-4.1 probe.sh
+
+```sh
+#!/bin/sh
+# Cycle-3 /test probe of the /director skill's inbox-section claims with the
+# HEAD binary (e5d896e8, built with go1.25.8). Every run: env -i, HOME in
+# scratch, PATH = a dir holding only git plus canary osascript and herdr,
+# cwd in scratch, a temp --state-dir. The real state dir and herdr are never
+# touched.
+T=$SCRATCH/t8a1c3
+BIN=$T/bin/ralph
+W=$T/probe
+PHRASE='no open inbox item arrived within'
+/bin/rm -rf "$W"
+/bin/mkdir -p "$W/path" "$W/cwd" "$W/home"
+/bin/ln -s /opt/homebrew/bin/git "$W/path/git"
+for c in osascript herdr; do
+	cat >"$W/path/$c" <<EOF
+#!/bin/sh
+printf '$c args=%s\n' "\$*" >> "$W/canary.log"
+exit 0
+EOF
+	/bin/chmod +x "$W/path/$c"
+done
+: >"$W/canary.log"
+cd "$W/cwd" || exit 1
+
+now_ms() { /usr/bin/perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'; }
+R() { /usr/bin/env -i HOME="$W/home" PATH="$W/path" "$BIN" "$@"; }
+
+# wait_run <label> <state-dir> <args...>
+wait_run() {
+	label=$1; shift
+	sd=$1; shift
+	t0=$(now_ms)
+	R org wait --inbox --state-dir "$sd" "$@" >"$W/out" 2>"$W/err"
+	rc=$?
+	t1=$(now_ms)
+	if /usr/bin/grep -qF "$PHRASE" "$W/err"; then m=yes; else m=no; fi
+	printf '### %s\n$ ralph org wait --inbox --state-dir <sd> %s\n' "$label" "$*"
+	printf 'rc=%s elapsed_ms=%s stdout_lines=%s stderr_lines=%s phrase_in_stderr=%s\n' "$rc" $((t1 - t0)) \
+		"$(/usr/bin/wc -l <"$W/out" | /usr/bin/tr -d ' ')" "$(/usr/bin/wc -l <"$W/err" | /usr/bin/tr -d ' ')" "$m"
+	printf -- '--- stdout (sed -n l: a tab shows as \\t, a line end as $)\n'; /usr/bin/sed -n l "$W/out"
+	printf -- '--- stderr\n'; /bin/cat "$W/err"
+	printf '\n'
+}
+
+ev() { printf '{"ts":"%s","id":"%s","event":"escalated","org_id":"%s","type":"%s","body":"TYPE: %s\\n\\n%s"}\n' "$1" "$2" "$3" "$4" "$4" "$5"; }
+
+# W1: bounded wait on an empty ledger times out
+/bin/mkdir -p "$W/sd-empty"
+wait_run "W1 timeout, empty ledger (--timeout-ms 300)" "$W/sd-empty" --timeout-ms 300
+
+# W2: an acked item only: still a timeout
+/bin/mkdir -p "$W/sd-acked"
+ev 2026-10-14T00:00:00Z e1 o1 QUESTION probe >"$W/sd-acked/inbox.jsonl"
+printf '%s\n' '{"ts":"2026-10-14T00:00:01Z","id":"e1","event":"acked"}' >>"$W/sd-acked/inbox.jsonl"
+wait_run "W2 timeout, one acked item only (--timeout-ms 300)" "$W/sd-acked" --timeout-ms 300
+
+# F1: unreadable inbox (mode 000), the Codex form
+/bin/mkdir -p "$W/sd-000"
+ev 2026-10-14T00:00:00Z e1 o1 QUESTION probe >"$W/sd-000/inbox.jsonl"
+/bin/chmod 000 "$W/sd-000/inbox.jsonl"
+wait_run "F1 inbox.jsonl mode 000 (--timeout-ms 300000)" "$W/sd-000" --timeout-ms 300000
+# F1c: the same with the Claude Code form (2>&1 merges the error into the output)
+t0=$(now_ms)
+R org wait --inbox --state-dir "$W/sd-000" --timeout-ms 0 >"$W/merged" 2>&1
+rc=$?
+t1=$(now_ms)
+printf '### F1c inbox.jsonl mode 000, Claude Code form\n$ ralph org wait --inbox --state-dir <sd> --timeout-ms 0 2>&1\nrc=%s elapsed_ms=%s merged_lines=%s phrase=%s\n--- merged output\n' \
+	"$rc" $((t1 - t0)) "$(/usr/bin/wc -l <"$W/merged" | /usr/bin/tr -d ' ')" \
+	"$(/usr/bin/grep -qF "$PHRASE" "$W/merged" && echo yes || echo no)"
+/bin/cat "$W/merged"; printf '\n'
+/bin/chmod 600 "$W/sd-000/inbox.jsonl"
+
+# F2: inbox.jsonl is a directory
+/bin/mkdir -p "$W/sd-dir/inbox.jsonl"
+wait_run "F2 inbox.jsonl is a directory (--timeout-ms 300000)" "$W/sd-dir" --timeout-ms 300000
+
+# F3: a broken --config
+printf '[org\nmax_seats = \n' >"$W/bad.toml"
+wait_run "F3 broken --config (--timeout-ms 300000)" "$W/sd-empty" --timeout-ms 300000 --config "$W/bad.toml"
+
+# F4: a broken ralph.toml in the cwd, no --config
+/bin/mkdir -p "$W/cwd-bad"
+/bin/cp "$W/bad.toml" "$W/cwd-bad/ralph.toml"
+cd "$W/cwd-bad" || exit 1
+wait_run "F4 broken ./ralph.toml in the cwd (--timeout-ms 300000)" "$W/sd-empty" --timeout-ms 300000
+cd "$W/cwd" || exit 1
+
+# O1: --timeout-ms 0 with two open items and one acked: exit 0, one tab-separated line per open item
+/bin/mkdir -p "$W/sd-open"
+{
+	ev 2026-10-14T00:00:00Z e1 org-a QUESTION 'which base?'
+	ev 2026-10-14T00:00:05Z e2 org-b BLOCKED 'gate failed'
+	ev 2026-10-14T00:00:09Z e3 org-a QUESTION 'already read'
+	printf '%s\n' '{"ts":"2026-10-14T00:00:10Z","id":"e3","event":"acked"}'
+} >"$W/sd-open/inbox.jsonl"
+/bin/cp "$W/sd-open/inbox.jsonl" "$W/sd-open.before"
+wait_run "O1 two open items and one acked (--timeout-ms 0)" "$W/sd-open" --timeout-ms 0
+printf '$ cmp sd-open/inbox.jsonl (before, after)\n'; /usr/bin/cmp "$W/sd-open.before" "$W/sd-open/inbox.jsonl" && echo same; printf '\n'
+printf '$ ralph org wait --inbox --state-dir <sd> --timeout-ms 0 2>&1 | awk -F"\\t" (fields per line)\n'
+R org wait --inbox --state-dir "$W/sd-open" --timeout-ms 0 2>&1 | /usr/bin/awk -F'\t' '{print NF " fields: id=" $1 " org=" $2 " type=" $3 " body1=" $4}'
+printf 'rc of the pipeline source: see O1 above\n\n'
+
+# D: ralph org watch --all --once and the deadline notice
+# D0 (sensitivity): the same item, readable: the watch sends it at its deadline
+watch_once() {
+	label=$1; sd=$2
+	: >"$W/canary.log"
+	R org watch --all --once --state-dir "$sd" >"$W/wout" 2>"$W/werr"
+	rc=$?
+	printf '### %s\n$ ralph org watch --all --once --state-dir <sd>\n[exit %s]\n--- stdout\n' "$label" "$rc"
+	/bin/cat "$W/wout"
+	printf -- '--- stderr\n'; /bin/cat "$W/werr"
+	printf -- '--- canary calls (osascript, herdr): %s\n' "$(/usr/bin/wc -l <"$W/canary.log" | /usr/bin/tr -d ' ')"
+	/bin/cat "$W/canary.log"
+}
+/bin/mkdir -p "$W/sd-d0" "$W/sd-d1"
+ev 2026-10-14T00:00:00Z e1 org-a QUESTION 'which base?' >"$W/sd-d0/inbox.jsonl"
+/bin/cp "$W/sd-d0/inbox.jsonl" "$W/sd-d1/inbox.jsonl"
+watch_once "D0 (sensitivity) the inbox is readable: escalated 2026-10-14T00:00:00Z, past both deadlines" "$W/sd-d0"
+printf -- '--- ls sd (after)\n'; /bin/ls -1 "$W/sd-d0"
+printf -- '--- escalations.jsonl\n'; /bin/cat "$W/sd-d0/escalations.jsonl" 2>&1
+printf -- '--- inbox.jsonl lines after: %s\n' "$(/usr/bin/wc -l <"$W/sd-d0/inbox.jsonl" | /usr/bin/tr -d ' ')"
+/usr/bin/tail -n +2 "$W/sd-d0/inbox.jsonl"
+printf '\n'
+
+# D1: the same item, inbox mode 000: nothing is sent
+/bin/cp "$W/sd-d1/inbox.jsonl" "$W/sd-d1.before"
+/bin/chmod 000 "$W/sd-d1/inbox.jsonl"
+watch_once "D1 the same item, inbox.jsonl mode 000" "$W/sd-d1"
+/bin/chmod 600 "$W/sd-d1/inbox.jsonl"
+printf -- '--- ls sd (after)\n'; /bin/ls -1 "$W/sd-d1"
+if [ -e "$W/sd-d1/escalations.jsonl" ]; then echo 'escalations.jsonl exists'; else echo 'escalations.jsonl does not exist'; fi
+printf '$ cmp inbox.jsonl (before, after)\n'; /usr/bin/cmp "$W/sd-d1.before" "$W/sd-d1/inbox.jsonl" && echo same
+printf '\n'
+
+# D2: inbox.jsonl a directory: nothing is sent either
+/bin/mkdir -p "$W/sd-d2/inbox.jsonl"
+watch_once "D2 inbox.jsonl is a directory" "$W/sd-d2"
+printf -- '--- ls sd (after)\n'; /bin/ls -1 "$W/sd-d2"
+printf '\n'
+
+printf '### state dirs after the probes (wait never wrote)\n'
+/usr/bin/find "$W/sd-empty" "$W/sd-acked" "$W/sd-000" "$W/sd-dir" "$W/sd-open" -print | /usr/bin/sed "s|$W|<W>|" | /usr/bin/sort
+```
+
+#### C3-4.2 Output (08:04, rc 0)
+
+```text
+### W1 timeout, empty ledger (--timeout-ms 300)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300
+rc=1 elapsed_ms=381 stdout_lines=0 stderr_lines=1 phrase_in_stderr=yes
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: wait --inbox: no open inbox item arrived within 300 ms
+
+### W2 timeout, one acked item only (--timeout-ms 300)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300
+rc=1 elapsed_ms=370 stdout_lines=0 stderr_lines=1 phrase_in_stderr=yes
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: wait --inbox: no open inbox item arrived within 300 ms
+
+### F1 inbox.jsonl mode 000 (--timeout-ms 300000)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=44 stdout_lines=0 stderr_lines=1 phrase_in_stderr=no
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/t8a1c3/probe/sd-000/inbox.jsonl: open $SCRATCH/t8a1c3/probe/sd-000/inbox.jsonl: permission denied
+
+### F1c inbox.jsonl mode 000, Claude Code form
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 0 2>&1
+rc=1 elapsed_ms=73 merged_lines=1 phrase=no
+--- merged output
+org: wait --inbox: org: inbox: read $SCRATCH/t8a1c3/probe/sd-000/inbox.jsonl: open $SCRATCH/t8a1c3/probe/sd-000/inbox.jsonl: permission denied
+
+### F2 inbox.jsonl is a directory (--timeout-ms 300000)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=42 stdout_lines=0 stderr_lines=1 phrase_in_stderr=no
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: wait --inbox: org: inbox: read $SCRATCH/t8a1c3/probe/sd-dir/inbox.jsonl: read $SCRATCH/t8a1c3/probe/sd-dir/inbox.jsonl: is a directory
+
+### F3 broken --config (--timeout-ms 300000)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300000 --config $SCRATCH/t8a1c3/probe/bad.toml
+rc=1 elapsed_ms=59 stdout_lines=0 stderr_lines=1 phrase_in_stderr=no
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: load config: toml: expected character ]
+
+### F4 broken ./ralph.toml in the cwd (--timeout-ms 300000)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 300000
+rc=1 elapsed_ms=118 stdout_lines=0 stderr_lines=1 phrase_in_stderr=no
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+--- stderr
+org: load config: toml: expected character ]
+
+### O1 two open items and one acked (--timeout-ms 0)
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 0
+rc=0 elapsed_ms=66 stdout_lines=2 stderr_lines=0 phrase_in_stderr=no
+--- stdout (sed -n l: a tab shows as \t, a line end as $)
+e1\torg-a\tQUESTION\twhich base?$
+e2\torg-b\tBLOCKED\tgate failed$
+--- stderr
+
+$ cmp sd-open/inbox.jsonl (before, after)
+same
+
+$ ralph org wait --inbox --state-dir <sd> --timeout-ms 0 2>&1 | awk -F"\t" (fields per line)
+4 fields: id=e1 org=org-a type=QUESTION body1=which base?
+4 fields: id=e2 org=org-b type=BLOCKED body1=gate failed
+rc of the pipeline source: see O1 above
+
+### D0 (sensitivity) the inbox is readable: escalated 2026-10-14T00:00:00Z, past both deadlines
+$ ralph org watch --all --once --state-dir <sd>
+[exit 0]
+--- stdout
+watching every org (interval=30s once=true state-dir=$SCRATCH/t8a1c3/probe/sd-d0 (source: flag))
+--- stderr
+ORG INBOX DEADLINE: org=org-a item=e1 type=QUESTION -- not resolved within 60m (inbox_resolve_deadline); read it with: ralph org inbox show e1 --state-dir '$SCRATCH/t8a1c3/probe/sd-d0'
+--- canary calls (osascript, herdr): 1
+osascript args=-e display notification "org org-a: e1 (QUESTION) not resolved within 60 min" with title "ralph org watch"
+--- ls sd (after)
+escalations.jsonl
+inbox.jsonl
+inbox.lock
+watch-alive.json
+watch.lock
+--- escalations.jsonl
+{"ts":"2026-10-14T23:04:20Z","org_id":"org-a","inbox_id":"e1","subject":"leader","reason":"inbox_resolve_deadline"}
+--- inbox.jsonl lines after: 2
+{"ts":"2026-10-14T23:04:20Z","id":"e1","event":"notified","reason":"inbox_resolve_deadline","osascript":"ok"}
+
+### D1 the same item, inbox.jsonl mode 000
+$ ralph org watch --all --once --state-dir <sd>
+[exit 0]
+--- stdout
+watching every org (interval=30s once=true state-dir=$SCRATCH/t8a1c3/probe/sd-d1 (source: flag))
+--- stderr
+watchdog: inbox deadlines skipped this cycle: org: inbox deadlines: org: inbox: read $SCRATCH/t8a1c3/probe/sd-d1/inbox.jsonl: open $SCRATCH/t8a1c3/probe/sd-d1/inbox.jsonl: permission denied
+--- canary calls (osascript, herdr): 0
+--- ls sd (after)
+inbox.jsonl
+watch-alive.json
+watch.lock
+escalations.jsonl does not exist
+$ cmp inbox.jsonl (before, after)
+same
+
+### D2 inbox.jsonl is a directory
+$ ralph org watch --all --once --state-dir <sd>
+[exit 0]
+--- stdout
+watching every org (interval=30s once=true state-dir=$SCRATCH/t8a1c3/probe/sd-d2 (source: flag))
+--- stderr
+watchdog: inbox deadlines skipped this cycle: org: inbox deadlines: org: inbox: read $SCRATCH/t8a1c3/probe/sd-d2/inbox.jsonl: read $SCRATCH/t8a1c3/probe/sd-d2/inbox.jsonl: is a directory
+--- canary calls (osascript, herdr): 0
+--- ls sd (after)
+inbox.jsonl
+watch-alive.json
+watch.lock
+
+### state dirs after the probes (wait never wrote)
+<W>/sd-000
+<W>/sd-000/inbox.jsonl
+<W>/sd-acked
+<W>/sd-acked/inbox.jsonl
+<W>/sd-dir
+<W>/sd-dir/inbox.jsonl
+<W>/sd-empty
+<W>/sd-open
+<W>/sd-open/inbox.jsonl
+```
