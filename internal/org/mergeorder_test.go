@@ -466,7 +466,9 @@ const moGateClause = " (the gate runs only while the feature org runs)"
 // tells the reader to run the gate (unreadable, no_gate, failed, regate,
 // rebase) names it with the --org-id of the branch's latest binding and ends
 // with the clause that the gate runs only while the feature org runs; a
-// branch only a gate record names has no org to name; and the note about
+// branch only a gate record names gets the --org-id of that record, which
+// ralph org gate requires; a branch bound by two orgs gets the latest
+// binding's org even when its gate record is the other's; and the note about
 // several ready branches ends with the same clause.
 func TestMergeOrder_DetailsNameTheGateCommandWithTheOrg(t *testing.T) {
 	bind := moBind("org-a", "auth")
@@ -506,12 +508,28 @@ func TestMergeOrder_DetailsNameTheGateCommandWithTheOrg(t *testing.T) {
 		moBind("org-s", "r2"), moPassed("org-s", "feat/r2", moHeadA, moMain))
 	fx.exec.lsOut = moListing("main", "main", moMain, "feat/orphan", moHeadA, "feat/r1", moHeadA, "feat/r2", moHeadA)
 	res := fx.run(t, false)
-	if e := moEntry(t, res, "feat/orphan"); e.Class != MergeClassFailed || !strings.Contains(e.Detail, "run ralph org gate again") ||
-		strings.Contains(e.Detail, "--org-id") || !strings.HasSuffix(e.Detail, moGateClause) {
-		t.Errorf("feat/orphan = %s (%q), want failed naming ralph org gate with no --org-id", e.Class, e.Detail)
+	if e := moEntry(t, res, "feat/orphan"); e.Class != MergeClassFailed || e.Binding != nil ||
+		!strings.Contains(e.Detail, "run ralph org gate --org-id org-x again") || !strings.HasSuffix(e.Detail, moGateClause) {
+		t.Errorf("feat/orphan = %s (%q), want failed with no binding, naming ralph org gate --org-id org-x of its gate record", e.Class, e.Detail)
 	}
 	if note := moNoteWith(res, "2 branches are ready"); !strings.HasSuffix(note, "run ralph org gate again"+moGateClause) {
 		t.Errorf("notes = %q, want the several-ready note to end with the gate and its clause", res.Notes)
+	}
+
+	twice := newMOFixture(t)
+	twice.add(t, bind, moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed),
+		moBindTo("org-b", "split-2", "auth2", "feat/auth"))
+	twice.exec.lsOut = onMain
+	if e := moEntry(t, twice.run(t, false), "feat/auth"); e.Class != MergeClassFailed ||
+		!strings.Contains(e.Detail, "run ralph org gate --org-id org-b again") {
+		t.Errorf("feat/auth = %s (%q), want failed naming org-b, its latest binding's org, not org-a of its gate record", e.Class, e.Detail)
+	}
+
+	// collectMergeTargets attaches no record without an org_id, so only a
+	// target built by hand has no org to name: the command is then bare.
+	noOrg := &mergeTarget{branch: "feat/x", gate: &mergeGateRecord{ev: ManifestEvent{Event: EventGateFailed}}}
+	if got := mergeGateCommand(noOrg); got != "ralph org gate" {
+		t.Errorf("gate command for a gate record with no org_id = %q, want the bare ralph org gate", got)
 	}
 }
 

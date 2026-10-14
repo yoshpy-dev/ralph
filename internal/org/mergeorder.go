@@ -82,7 +82,8 @@ var mergeClassOrder = []string{
 
 const (
 	// defaultMergeOrderLsRemoteTimeout and defaultMergeOrderGHTimeout bound the
-	// ls-remote and each gh call when MergeOrderParams leaves them zero.
+	// ls-remote, and each gh call and the get-url, when MergeOrderParams
+	// leaves them zero.
 	defaultMergeOrderLsRemoteTimeout = 30 * time.Second
 	defaultMergeOrderGHTimeout       = 15 * time.Second
 	// mergeOrderWaitDelay is realMergeOrderExec's exec.Cmd.WaitDelay: how
@@ -128,7 +129,8 @@ type MergeOrderParams struct {
 	All bool
 	// Exec runs git and gh; nil means realMergeOrderExec.
 	Exec MergeOrderExec
-	// LsRemoteTimeout bounds the ls-remote, GHTimeout each gh call; zero or
+	// LsRemoteTimeout bounds the ls-remote; GHTimeout bounds each gh call and
+	// the `git remote get-url origin` lookupMergePRs runs with them. Zero or
 	// less means 30 s and 15 s.
 	LsRemoteTimeout, GHTimeout time.Duration
 }
@@ -836,12 +838,18 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 }
 
 // mergeGateCommand is the ralph org gate command a Detail tells the reader
-// to run for t: with the --org-id of its latest binding when it has one.
+// to run for t, with the --org-id ralph org gate requires: the org of t's
+// latest binding when it has one, else the org of its latest gate record (a
+// branch only a gate record names). With neither org (collectMergeTargets
+// attaches no record without an org_id), it is the bare command.
 func mergeGateCommand(t *mergeTarget) string {
-	if t.binding == nil {
-		return "ralph org gate"
+	switch {
+	case t.binding != nil:
+		return "ralph org gate --org-id " + t.binding.OrgID
+	case t.gate != nil && t.gate.ev.OrgID != "":
+		return "ralph org gate --org-id " + t.gate.ev.OrgID
 	}
-	return "ralph org gate --org-id " + t.binding.OrgID
+	return "ralph org gate"
 }
 
 // classifyGatePassed is classifyMergeTarget for a branch whose latest gate
