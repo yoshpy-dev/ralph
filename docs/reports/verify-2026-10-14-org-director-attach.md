@@ -258,3 +258,17 @@ cycle 3 の変更は、skill の受信箱の節と Go のコメントだけだ�
 - Partially verified: 受信箱が読めないときの見張りの動き(`--once` の 1 回と、コードを読んだ範囲)
 - Not verified: テストの実行(/test)、実際の Claude Code と Codex の session での skill の文の動き、Monitor の出力の渡し方、Codex の shell tool の時間の上限
 - Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 1(C3-V1)。情報は 3 つ(C3-V2〜C3-V4)
+
+### Fixes after the cycle-3 verify (before /test)
+
+この節はオーケストレーターが足した。直しはコミット c953d4f2(`fix: address the cycle-3 verify findings for org-director-attach`、8 ファイル)。上の判定の行は変えていない。
+
+| ID | 対応 |
+| --- | --- |
+| C3-V1 | skill の段落の終わりを、見張りが動いていて受信箱を読めるあいだは件が期限で人に届き、受信箱が読めない失敗では見張りも読めず期限の知らせも止まるので、そのことも人に伝える、と書き直した |
+| C3-V2 | Claude Code の項を終了コードで分けた。終了コード 0 なら件の行(ID、org、TYPE、本文の 1 行目をタブで区切る)を処理し、`note:` の行は件ではない。終了コード 1 はいつも失敗 |
+| C3-V3 | 共通の段落の頭に、終了コード 0 と、時間を区切った wait の時間切れのほかは、Go の panic(終了コード 2)や signal も含めてすべて失敗として扱う、と書いた |
+| C3-V4 | /sync-docs に回す(計画の Progress checklist) |
+| 一致の検査 | `internal/org/escalate.go` の時間切れの文を unexported の const `inboxWaitTimeoutPhrase` にし(出る文は同じ)、`internal/org/director_skill_sync_test.go` の `TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` が、`WaitInbox` の時間切れのエラーがこの const を含むことと、skill の 4 面が同じ文を backquote つきで含むことを確かめる。implementer が skill の写しの木と `-overlay` で、skill の文、`.agents` の 1 面、const、const を使わないエラーのどれを変えても赤になることを確かめた |
+
+確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./internal/org/ ./internal/cli/` は通過、`go test -count=1 ./internal/org/ ./internal/cli/ -run 'WaitInbox|Inbox|SkillSync|DirectorSkill'` と go1.25.8 の `./internal/org/` は ok、`check-skill-sync.sh` と `check-sync.sh` は通過、skill の 4 面は md5 が同じ。オーケストレーターは `go test -count=1 ./internal/org/ -run 'DirectorSkill|WaitInbox'` を打ち直して ok を確かめた
