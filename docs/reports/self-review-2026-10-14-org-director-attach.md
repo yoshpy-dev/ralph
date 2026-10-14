@@ -84,3 +84,25 @@ _(登録簿には追記していない。M2 は新しい debt ではなく既存
   4. test の緩和(1)は、`rev-parse` の回数を縛る(任意)
   5. Go のコメントの `docs/plans/active/2026-10-14-org-director-attach.md`(`director.go:20`、`org_director.go:19` など)は、`/pr` の archive で古くなる。`mergeguarantee.go`・`mergeorder.go` が同じ形で、登録簿もこの形を許してきたので、指摘としては数えない
 - Known gaps: テスト、`gofmt`、`go vet`、go1.25.8 でのビルドは確かめていない。`ralph org director` の実機の出力は見ていない。`git worktree list` の分岐は動かしていない。approve の同時実行の test は 2 process のものを読んでいない
+
+## Fixes after this review (cycle 1, before /verify)
+
+この節はオーケストレーターが足した。直しはコミット 57c551ff(`fix: address the org-director-attach self-review findings`、15 ファイル)。上の重大度と `Merge:` の行は変えていない。
+
+| ID | 対応 |
+| --- | --- |
+| M1 | `ralph status` の help に、gh を打たずネットワークも使わないこと、origin の get-url は cache が新しいときだけ打つこと、main worktree を探す `rev-parse`(連結した worktree では `worktree list --porcelain` も)は cache によらず打つことを書いた。`runStatus` のコメントと `README.md` の `ralph status` の行も同じ内容に直した。help の文は test で固定した |
+| test (1) | `TestStatusCmd_MergeGuaranteeRunsNoGH` に、1 回の実行ごとの `rev-parse` の上限 2(`statusMGMaxRevParsePerRun`、今の 1 回分)を足した。`withMainWorktreeDirectorEnabled` を 2 回呼ぶ変異で落ちることを確かめた |
+| M2 | 登録簿の 234・239・240 に、8a-1 の director は人が動かす対話の速さで status と merge-order を読み、merge は人が決める、と 1 文ずつ足し、Trigger を 8a-2 と 8a-3 に移した。235〜238・241・171 には、8a-1 では満たされないと書いた |
+| L1 | `statusOrgConfig` で `./ralph.toml` を 1 回だけ読む。読めないときの warning は 1 行になった |
+| L2 | `Deferred` の doc に、2 つの記録の場合を見分けたい呼び出し元のための field で、CLI は banner で区別し、test が読むと書いた |
+| L3 | 記録だけの件の banner から分の値を外し、`ralph org watch --all` の ack の期限(`[org.director].ack_minutes`)とだけ書く |
+| L4 | `detach`(`--id` と `--force`)は設定を読まない。壊れた設定でも detach が通る test を足した |
+| L5 | replace の `detached` と `attached` を 1 回の write で書く。失敗したときは何も記録されず、前の登録が残る |
+| L6 | `withFileLock`、`manifestLockTimeout`、`pollInterval` の doc に `director.lock` を足した |
+| L7 | store のエラーは登録の説明で終わり、detach と `--replace` の打ち方は CLI だけが出す |
+| L8 | 直していない(次に引数を足すときにまとめる) |
+| L9 | 受信箱の畳み込みは `deadline` 以外の `delivery` を `now` に寄せる |
+| L10 | 直していない。登録簿の末尾に行を足した(Trigger は 8b の push と、座席が登録を書き換えた報告) |
+
+確かめたこと(implementer の報告): `gofmt -l internal` は出力なし、`go vet ./...` は通過、`go test ./internal/org/... ./internal/cli/...` は go1.26 と `GOTOOLCHAIN=go1.25.8 -count=1` の両方で ok、`go build ./...`、`check-skill-sync.sh`、`check-sync.sh` も通過。オーケストレーターは `go test ./internal/org/ ./internal/cli/ -run 'Director|StatusCmd|Escalate|InboxFold|Delivery' -count=1` を打ち直して ok を確かめた
