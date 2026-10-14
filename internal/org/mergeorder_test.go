@@ -668,14 +668,15 @@ func TestMergeOrder_UnreadableRecordAttachesToTheLatestOfTwoEarlierBindings(t *t
 }
 
 // TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch
-// covers cross-review cycle 3's finding (C8): an org with no complete binding
-// (a ledger whose binding line was lost or written by hand) gates a branch
-// only its gate records name. A gate_failed of that org that cannot be read
-// attaches to the branch of the org's latest readable gate record before it,
-// so feat/c is unreadable instead of falling back to its older gate_passed,
-// and of org-e's two gated branches only the later one, feat/e2, takes it.
-// The note counts only org-d's record, whose org has neither a binding nor a
-// readable gate record before it.
+// covers cross-review cycle 3's finding (C8) of org-merge-order (triage:
+// docs/reports/cross-review-triage-org-merge-order.md): an org with no
+// complete binding (a ledger whose binding line was lost or written by hand)
+// gates a branch only its gate records name. A gate_failed of that org that
+// cannot be read attaches to the branch of the org's latest readable gate
+// record before it, so feat/c is unreadable instead of falling back to its
+// older gate_passed, and of org-e's two gated branches only the later one,
+// feat/e2, takes it. The note counts only org-d's record, whose org has
+// neither a binding nor a readable gate record before it.
 func TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.add(t,
@@ -1109,14 +1110,15 @@ func TestMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T) {
 }
 
 // TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository
-// covers cross-review cycle 3's finding: after origin's repository is renamed
-// on GitHub, git still reaches it at origin's old URL through GitHub's
-// redirect and gh returns PR urls with the new name, so the check leaves the
-// PRs out, and gh repo set-default with origin's old name would not help.
-// merge-order cannot tell a rename from another repository, so the note names
-// both fixes, git remote set-url origin for a rename and gh repo set-default
-// with origin's owner/repo otherwise, whichever case it is. The PRs are still
-// left out and gh is not asked again.
+// covers cross-review cycle 3's finding of org-merge-order (triage:
+// docs/reports/cross-review-triage-org-merge-order.md): after origin's
+// repository is renamed on GitHub, git still reaches it at origin's old URL
+// through GitHub's redirect and gh returns PR urls with the new name, so the
+// check leaves the PRs out, and gh repo set-default with origin's old name
+// would not help. merge-order cannot tell a rename from another repository,
+// so the note names both fixes, git remote set-url origin for a rename and gh
+// repo set-default with origin's owner/repo otherwise, whichever case it is.
+// The PRs are still left out and gh is not asked again.
 func TestMergeOrder_RepositoryNoteNamesTheFixForARenameAndForAnotherRepository(t *testing.T) {
 	for _, tc := range []struct {
 		name, owner, repo string
