@@ -154,7 +154,10 @@ Critical forks: C1〜C7 は consult(consult-plan-guarantee)の判定で決めた
 - [x] Plan reviewed(consult-plan-guarantee、Codex の計画助言の HIGH 2 件を C5・C7 として取り込んだ)
 - [x] Plan approved(ユーザーの「作成したプランは自動承認します」(2026-10-11)により自動承認)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 f6bbd49c(`internal/org/mergeguarantee.go`: 判定、キャッシュの読み書き。implementer の変異 13 件はすべてテストで落ちた)
+  - S2 e3f3403b(doctor の Check 11c `Merge guarantee`、seam `doctorMergeGuaranteeEnv` を TestMain で固定。台帳のない repo では書かないことを実機の doctor で確認)
+  - S3 の決めごと: merge-order は分岐がなく ls-remote を打たないときも保証の行を出す(既定のブランチの行がないので先頭に出す)。キャッシュがなければ git は打たない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
