@@ -67,9 +67,11 @@ skill はその節を指し、写さない。
    人が入れ替えるとはっきり言ったときだけ打つ。
 5. 会話の要約のあとは、`ralph org director status` で今の登録を読み直す。
    そこに出る `id` が覚えている `id` と違えば、ほかのセッションが
-   `--replace` で入れ替えた。そのときは director として動くのをやめ
-   (受信箱の ack と resolve、leader への send、start をしない)、そのことを
-   人に言う。detach も打たない。
+   `--replace` で入れ替えた。登録がなく `not attached` と出たときは、人の
+   `detach --force` か、切り戻せなかった `--replace` で外れている。
+   どちらのときも director として動くのをやめ(受信箱の ack と resolve、
+   leader への send、start をしない)、そのことを人に言う。detach も
+   打たない。
 
 ## 分割計画と機能ごとの org
 

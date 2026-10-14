@@ -76,3 +76,73 @@ commit の前に、worktree のルートで打った。
 ## Verdict
 
 Verdict: complete。文書と help のずれは、依頼の項目 1 から 3 で直した。項目 4 と 5 は、理由を書いて残した。静的検査(`run-static-verify.sh`、`check-skill-sync.sh`、`check-sync.sh`、`gofmt -l`、`git diff --check`)はすべて通り、help のテストは go1.26.0 と go1.25.8 で通った。計画の digest は変わっていない。確かめていないのは、cli と org のテスト全体の打ち直しと、Go を触ったあとの `/verify`・`/test`(Left open の 1 つ目)。
+
+## Cycle 2
+
+- Date: 2026-10-15(JST)
+- Plan: `docs/plans/active/2026-10-14-org-director-attach.md`(承認済み。`./scripts/plan-visual.sh digest` は `27414f27525b` で、この run の前後で変わらない。編集したのは `## Progress checklist` だけ)
+- Pipeline cycle: 2(既定の上限 2 の 2 回目)。差分の base は `ef575748`。run 開始時の HEAD は `48da7a5a`(run 開始時の値で、この節を含む commit の SHA ではない)
+- 先行 report: `docs/reports/self-review-2026-10-14-org-director-attach.md` の `## Cycle 2`(71dac14e。Merge: yes、CRITICAL・HIGH・MEDIUM 0、LOW 5。直しは f4c1a394)、`docs/reports/verify-2026-10-14-org-director-attach.md` の `## Cycle 2`(cd518ba1。pass、情報 C2-V1〜C2-V4)、`docs/reports/test-2026-10-14-org-director-attach.md` の `## Cycle 2`(a76902b5。pass、失敗 0、生き残った mutant 3 件)、`docs/reports/cross-review-triage-org-director-attach.md`(ACTION_REQUIRED 1 件。直しは 634b019a)
+- 項目の番号: C2-V1〜C2-V4 は verify cycle 2 の「文書のずれ(cycle 2)」の表の番号。R11、H4、H5 は test cycle 2 の Mutation の表の ID。「項目 1〜5」は依頼の項目
+- 内容の commit: この節、`/director` skill の 4 面、tech-debt の登録簿、計画の Progress を含む 1 つの commit(`docs: sync docs for org-director-attach (cycle 2)`)。insight event は、依頼に指示がないので記録していない
+
+### Summary
+
+依頼の 5 項目のうち、項目 1〜4 は書き直しか追記で済ませた。項目 5(634b019a と f4c1a394 に対する cycle 1 と同じ面のずれの確認)は、直すずれがなかった。Go は触っていない。
+
+- 項目 1(C2-V1): 計画の Progress checklist に、cross-review cycle 1 の ACTION_REQUIRED と 634b019a、2 回目の pipeline の self-review・f4c1a394・verify・test、この sync-docs の 3 項目を足した
+- 項目 2(C2-V3): status の出力関数の tech-debt の行で、Why deferred の「最後の pipeline run(既定 2 回のうちの 2 回目)」を、self-review の cycle と ID で書く形にした。上限を上げて 3 回目を回しても偽にならない
+- 項目 3(C2-V4): `/director` skill の昇格 5 に、登録がなく `not attached` と出たときの 1 句を足した。root と template の `.claude/skills/director/SKILL.md` を Edit で直し、`.agents/` の 2 面は `sync-skills.sh` で作った
+- 項目 4: test cycle 2 の生き残り mutant R11、H4、H5 を、tech-debt の登録簿の新しい 1 行にした
+- 項目 5: 下の「Surfaces checked」のとおり。2 つのコミットが変えた文書の主張(書き込みの失敗、attach と detach のエラー文)を言う面は、どれも今のコードと合っている
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `docs/plans/active/2026-10-14-org-director-attach.md`(`## Progress checklist`) | 1(C2-V1) | 最後の `- [ ] PR created` の前に、日付つきの note を 3 項目足した。(a) cross-review cycle 1 の ACTION_REQUIRED 1 件(replace の write が途中で止まると detached だけが残り、「何も記録されていない」が事実と違った)と、634b019a の直し(write か close の失敗で追記前の大きさに切り戻す。戻せなければ `ErrDirectorWriteNotRestored`)。(b) pipeline の 2 回目: self-review cycle 2(CRITICAL・HIGH・MEDIUM 0、LOW 5)と f4c1a394、verify cycle 2(pass)、test cycle 2(a76902b5、pass、生き残り mutant 3 件を tech-debt へ)。(c) この sync-docs。ほかの節は触っていない。digest は `27414f27525b` のまま |
+| `docs/tech-debt/README.md`(status の出力関数の行、`The self-review LOW that the org-director-attach PR (stage 8a-1) leaves unfixed` で始まる行)の Why deferred 欄 | 2(C2-V3) | 「The self-review left it for the next addition (cycle 1, L8), and the last pipeline run (cycle 2 of the default 2) fixed only its own findings C2-L1 to C2-L4」を、「Self-review cycle 1 of the plan left it for the next addition (L8); self-review cycle 2 listed it as C2-L5 (no register row yet), which is why this row exists, and its other findings C2-L1 to C2-L4 were fixed in the PR」に直した。「最後の run」と「既定の 2」への依存を外した。行の他の欄と、列の数(5)は変えていない |
+| `.claude/skills/director/SKILL.md`、`templates/base/.claude/skills/director/SKILL.md`、`.agents/skills/director/SKILL.md`、`templates/base/.agents/skills/director/SKILL.md`(「昇格」の 5) | 3(C2-V4) | 「違えば、ほかのセッションが `--replace` で入れ替えた」の次に、「登録がなく `not attached` と出たときは、人の `detach --force` か、切り戻せなかった `--replace` で外れている」を足し、「どちらのときも director として動くのをやめ」と続けて、動作(ack、resolve、send、start をしない。そのことを人に言う。detach も打たない)を 1 つにした。`not attached` は `ralph org director status` の `director:` の行の字面(`orgDirectorLine`)。2 つの原因は、verify C2-V4 が挙げたもの(人の `detach --force`、cycle 2 で起こりうると doc に書かれた「切り戻せなかった replace」)。行の折り返しは、この節の他の行と同じ表示幅 74 以内にした。4 面は `cmp` で同一。`.agents/` は `./scripts/sync-skills.sh` が作り、template 側は `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で作った |
+| `docs/tech-debt/README.md`(新しい行。status の出力関数の行の次、ファイルの末尾) | 4 | 「Two test gaps of the org-director-attach PR (stage 8a-1)」で始まる 1 行を足した。R11(末尾に改行のない `director.jsonl` への追記が失敗したとき、足した改行ごと切り戻すことを止めるテストがない)と、H4・H5(attach と detach の `RunE` が `notRestoredError` を通ることを止めるテストがない。store の `write` と `truncate` の seam が unexported で、CLI のテストから届かない)。Impact に、R11 は文書の「cuts the file back to len(raw)」だけが偽になり登録の読みは変わらないこと、H4・H5 は error が `ralph org director status` の打ち方を失いうること、実機の B3・B5b で配線は確かめたことを書いた。Trigger は `director.go` の追記の経路(`appendLocked`、`restoreLocked`)か `org_director.go` の `attach`・`detach` の `RunE` を次に変えるとき。Related に計画、test report の `## Cycle 2`(Mutation の R11、H4、H5 と Test gaps 1・2)、関数名。status の出力関数の行(self-review の C2-L5)は話が別で、Trigger も違うので、そこには足さず別の行にした。列は 5。ファイル行番号は書いていない |
+
+### Surfaces checked for drift
+
+2 つのコミットが変えたのは、`internal/org/director.go` の追記の失敗の経路と doc、`internal/cli/org_director.go` の `notRestoredError` と attach・detach の `RunE`、その 2 つのテスト、tech-debt の 1 行。`README.md`、`AGENTS.md`、`docs/specs/`、`docs/quality/`、`/org` と `/director` の skill、`.claude/rules/ralph/` に「何も記録されない」「書き込みの失敗」「切り戻し」「途中まで書けた」を言う文があるかを grep で探し(`nothing was recorded`、`writes nothing`、`one write`、`restor`、`cut back`、`partway`、`part of the write`)、当たった文を読んだ。
+
+| Surface | 結果 |
+|---------|------|
+| `README.md`(動詞の表 124 行、`ralph status` の行 125、director の段落 258 行) | 変更なし。書き込みの失敗を言う文はない。258 行の「`attach --replace` takes over, after which the replaced session's `detach` is refused」と「`detach --force` is for a human cleaning up」は今のコードと合う。`writes nothing` は 264 行の merge-order の話で、無関係 |
+| `AGENTS.md` の `internal/org/` の項(`director.go`) | 変更なし。「keep one registration per ledger in `director.jsonl` under `director.lock`」は今も正しい。切り戻しは、map に書く大きさの話ではない |
+| `docs/specs/2026-10-07-org-multi-org-director.md:84`(FR-9 の 8a-1 の注) | 変更なし。「`--replace` なら今の登録の `detached` と新しい登録の `attached` を 1 つのロックの下で書く」は、切り戻しのあとも 1 回の write・1 つのロックのままで正しい。注は何を決めたかの記録で、書き込み失敗時の動きの説明を持たない。切り戻しは `appendLocked` の doc と tech-debt の行が持つので、足していない |
+| `docs/quality/quality-gates.md` と template | 変更なし。director の動詞が見張りなしで使える一覧にあることだけを言う(cycle 1 で足した部分)。登録の書き込みの失敗は関門の表の対象ではない |
+| `/org` skill の `director` の行(186 行、4 面) | 変更なし。「書き込みは `director.lock` のロックの下で行う」「`enabled = false` なら何も書かずに断られる」「`id` が今の登録と違えば何も書かずに断られる」は、どれも今のコードと合う。切り戻しは扱わない |
+| `/director` skill の全文(4 面) | 昇格 5 だけ直した(上)。「終わり」の 3(`detach` が別の `id` だと断られたら、入れ替えられている)は、登録がないときの `detach`(`no director is attached`、終了コード 1)を名指さないが、書いてあることは今も正しい。verify が指摘した場所ではなく、依頼の範囲でもないので、触っていない(Left open) |
+| `internal/cli/org_director.go` の help(`director`、`attach`、`detach`、`status`)と上の文書の突き合わせ | 変更なし。attach の「records the new one in one write, under one lock」は、切り戻しのあとも正しい。「a session that finds another id there was replaced」は、`not attached` を名指さないが、言っていることは正しい。detach の「refused and writes nothing」は id の不一致の話で、切り戻しと関係しない。Go は触っていない |
+| `docs/architecture/repo-map.md`、`.claude/rules/ralph/`(workflow、agent-messaging)とその template、`internal/org/prompts/leader.md`、`templates/base/ralph.toml`、`docs/recipes/` | 変更なし。2 つのコミットが変えた主張と重なる記述がない |
+| `docs/tech-debt/README.md` の director の 3 行(生存の印、期限を使い切った approve、seat の pane の tripwire) | 変更なし。tripwire の行の「`/director` skill(昇格 5)は、id が今のものでなくなった director に director の仕事をやめさせる」は、`not attached` を足したあとも、「登録を書き換えられる」ことの影響として正しい |
+| tech-debt の表の列の数 | 変更した 2 行と、新しい行は 5 列(backtick の外の `|` を数える script を scratchpad に置いた。245〜249 行がすべて 5 列、backtick は偶数) |
+
+### Left open
+
+- `/director` skill の「終わり」の 3 は、`detach --id` が `no director is attached` で断られる場合を名指さない。昇格 5 の C2-V4 と同じ形の欠けで、誤りではない。足すなら昇格 5 と同じ 1 句を 4 面に足す。`ralph org director attach` の help の「a session that finds another id there was replaced」も同じ形(Go なので、直すなら verify と test が要る)。どちらも触っていない
+- 8a-1 の spec の注に、書き込み失敗時の切り戻し(634b019a)は載せていない。上の表のとおり、注は決めたことの記録で、動きは `appendLocked` の doc に書いてあるため
+- R11、H4、H5 のテストは足していない(登録簿の行にした)。Go のテストを足すと verify と test を回し直すことになる
+- 計画の `PR created` は `/pr` が付ける。tech-debt の行の Related が指す計画の path は `docs/plans/active/` のままで、`/pr` の `archive-plan.sh` が書き換える
+- insight event は、依頼に指示がないので記録していない
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-14-org-director-attach.md`: `27414f27525b`(run の前も後も同じ)
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `IDENTICAL: 169`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `cmp`: `.claude/skills/director/SKILL.md` と、template と `.agents/` の 3 面が同一
+- `./scripts/run-verify.sh`: rc 0、`==> All verifiers passed.`。`check-sync`、`check-pipeline-sync`、`check-skill-sync`、`check-template-purity`(`PASS`)、`tech-debt README plan references`、shell のテストはすべて OK。Go は `gofmt: ok`、`0 issues.`、`go test` は cli(196.3 s)と org(79.3 s)が `ok`、ほかのパッケージは `(cached)` の `ok`。`secret-scan-branch: scanned ef575748..48da7a5a against origin/main: clean`(commit の前に打ったので、範囲は run 開始時の HEAD まで)。出力 4,910 行は scratchpad に落として、要点だけ読んだ。wrapper が書いたログ(`docs/evidence/verify-2026-10-14-214512.log`)は gitignore の対象で、コミットしていない
+- `git diff --check`: 出力なし
+- 変えた 6 ファイルの U+FFFD は 0 件
+- 編集は Edit、Write と `sync-skills.sh` だけで、`sed -i` は使っていない
+
+### Verdict
+
+Verdict: complete。依頼の項目 1〜4 を直し、項目 5 は直すずれがなかった。静的検査(`run-verify.sh`、`check-skill-sync.sh`、`check-sync.sh`、`git diff --check`)はすべて通り、計画の digest は変わっていない。Go は触っていないので、verify と test の結果は変わらない。確かめていないのは、`/director` skill の 1 句を読んだ director の実際の動きだけ(skill は文書で、テストがない)。
