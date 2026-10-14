@@ -29,8 +29,15 @@ import (
 //	PLAN: docs/plans/active/<date>-<slug>.md sha256:<what scripts/plan-visual.sh digest prints>
 //
 // The human runs `ralph org approve <inbox ID>...` (Approve). It records one
-// org-level EventPlanApproved per item in the manifest, resolves the items,
-// and never writes the plan file (A3): the leader writes `- Status:
+// org-level EventPlanApproved per item in the manifest and nothing else: it
+// leaves the items open or acked, so they stay under the inbox deadlines
+// until the leader has been told, and it never writes the plan file (A3).
+// For each item it gives the `ralph org send` DECISION to run
+// (ApprovalDecisionCommand) and then the resolve to run once that send
+// succeeded (ApprovalResolveCommand), except for an item someone else
+// resolved in the meantime (ApprovedPlan.ResolvedElsewhere); a second approve
+// of an item is refused with ErrPlanAlreadyApproved (plan
+// 2026-10-14-org-director-attach, D7). The leader writes `- Status:
 // Approved` and `- Approved: <date> sha256:<digest>` in the plan's header
 // and commits them. The check reads both the record and the file
 // (checkPlanApproved for a TASK to an implementer, which names the plan with
