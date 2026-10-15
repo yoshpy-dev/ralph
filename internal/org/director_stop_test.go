@@ -639,8 +639,10 @@ func TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce(t *testing
 // wantChangedDuringStop asserts err is stop's refusal of a registration that
 // a start recorded more for after stop read it (plan D14): a
 // *DirectorCleanupError wrapping ErrDirectorChangedDuringStop with no herdr
-// command and the stop to run again, whose text is want.
-func wantChangedDuringStop(t *testing.T, err error, want string) {
+// command and the stop to run again, whose text is want. notes are what
+// this stop did to the pane and the workspace: res carries them, and the
+// text does not repeat them (the CLI prints them on stderr).
+func wantChangedDuringStop(t *testing.T, res DirectorStopResult, err error, want, notes string) {
 	t.Helper()
 	var ce *DirectorCleanupError
 	if !errors.As(err, &ce) || !errors.Is(err, ErrDirectorChangedDuringStop) || ce.Verb != "stop" || ce.Detached || ce.Unconfirmed ||
@@ -650,13 +652,17 @@ func wantChangedDuringStop(t *testing.T, err error, want string) {
 	if err.Error() != want {
 		t.Fatalf("err =\n%v\nwant\n%v", err, want)
 	}
+	if got := res.CtrlCNote + ", " + res.PaneNote + ", " + res.WorkspaceNote; got != notes {
+		t.Fatalf("stop result notes = %q, want %q", got, notes)
+	}
 }
 
 // changedDuringStopText is the text of stop's refusal of d1 (plan D14), with
-// what the ids were when stop read d1 and are now, and this stop's notes.
-func changedDuringStopText(then, now, notes string) string {
-	return "org: director: stop d1: record d1 stopped: org: director: stop d1: a start in progress recorded a workspace or pane after stop read the registration: " +
-		"d1 had " + then + " when stop read it, and has " + now + " now; this stop closed only what it had read (" + notes + "); " +
+// what the ids were when stop read d1 and are now: "org: director: stop d1:"
+// once, and none of this stop's notes.
+func changedDuringStopText(then, now string) string {
+	return "org: director: stop d1: record d1 stopped: a start in progress recorded a workspace or pane after stop read the registration: " +
+		"d1 had " + then + " when stop read it, and has " + now + " now; this stop closed only what it had read; " +
 		"nothing was recorded; run ralph org director stop --id d1 again to close what start recorded"
 }
 
@@ -697,8 +703,8 @@ func TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns(t *testing.T) {
 			p.Force = force
 			res, err := f.o.StopDirector(p)
 
-			wantChangedDuringStop(t, err, changedDuringStopText(`workspace "ws-7" and no pane`, `workspace "ws-7" and pane "pane-1"`,
-				"ctrl_c=skipped, pane=none recorded, workspace=closed"))
+			wantChangedDuringStop(t, res, err, changedDuringStopText(`workspace "ws-7" and no pane`, `workspace "ws-7" and pane "pane-1"`),
+				"ctrl_c=skipped, pane=none recorded, workspace=closed")
 			if res.Registration.PaneID != "" || res.WorkspaceNote != "workspace=closed" || res.WasCurrent || res.Forced {
 				t.Fatalf("stop result = %+v, want the registration as read and the workspace closed", res)
 			}
@@ -754,8 +760,8 @@ func TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns(t *testing.T) {
 		}
 		res, err := f.stop("d1")
 
-		wantChangedDuringStop(t, err, changedDuringStopText("no workspace and no pane", `workspace "ws-1" and pane "pane-1"`,
-			"ctrl_c=skipped, pane=none recorded, workspace=none recorded"))
+		wantChangedDuringStop(t, res, err, changedDuringStopText("no workspace and no pane", `workspace "ws-1" and pane "pane-1"`),
+			"ctrl_c=skipped, pane=none recorded, workspace=none recorded")
 		if res.UnrecordedWorkspaceLabel != DirectorWorkspaceLabel(directorTestToken) || res.WasCurrent {
 			t.Fatalf("stop result = %+v, want nothing recorded at the read", res)
 		}

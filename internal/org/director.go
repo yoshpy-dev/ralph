@@ -93,10 +93,10 @@ const directorLockFile = "director.lock"
 var ErrDirectorAttached = errors.New("a director is already attached")
 
 // ErrDirectorNoOpenHeadless is returned (wrapped) by RecordWorkspace,
-// RecordPane, MarkStopped, and MarkForceStopped when no open headless
-// registration has the id: no registration has it, a promoted session
-// attached it (no launch herdr), or it was already stopped, when the error
-// wraps ErrDirectorStopped too.
+// RecordPane, MarkStopped, MarkStoppedIfUnchanged, and MarkForceStopped when
+// no open headless registration has the id: no registration has it, a
+// promoted session attached it (no launch herdr), or it was already stopped,
+// when the error wraps ErrDirectorStopped too.
 var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has the id")
 
 // ErrDirectorStopped is wrapped together with ErrDirectorNoOpenHeadless when
@@ -114,14 +114,14 @@ var ErrDirectorIDMismatch = errors.New("the id is not the current registration's
 
 // ErrDirectorWriteNotRestored is returned (wrapped) by every DirectorStore
 // writer (Attach, Detach, AttachHeadless, RecordWorkspace, RecordPane,
-// MarkLaunched, MarkStopped, and MarkForceStopped) when a write to
-// director.jsonl failed and the file could not be cut back to its size
-// before the write: it may hold part of the write (a replace cut off after
-// the detached line leaves no registration current), so the error cannot say
-// that nothing was recorded, and the caller says how to read the
-// registration again (the CLI names `ralph org director status`). Every
-// other failed append left nothing in the file: a failed open or marshal
-// writes nothing, and a failed write or close is cut back.
+// MarkLaunched, MarkStopped, MarkStoppedIfUnchanged, and MarkForceStopped)
+// when a write to director.jsonl failed and the file could not be cut back
+// to its size before the write: it may hold part of the write (a replace
+// cut off after the detached line leaves no registration current), so the
+// error cannot say that nothing was recorded, and the caller says how to
+// read the registration again (the CLI names `ralph org director status`).
+// Every other failed append left nothing in the file: a failed open or
+// marshal writes nothing, and a failed write or close is cut back.
 var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
 
 // directorRawIDPattern finds an "id":"d<N>" in the raw text of
@@ -455,11 +455,12 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 
 // appendLocked appends evs, one line each, in a single write, as the inbox's
 // appendLocked does for its one event: Attach with replace passes the
-// detached and the attached together, and MarkStopped of the current
-// registration the detached and the stopped. raw is the file as read under the
-// same lock hold. When raw does not end with a newline (a write cut off
-// mid-line), the write starts with one, so the cut line stays a separate
-// corrupt line and evs stay readable. An event that does not marshal fails
+// detached and the attached together, and MarkStopped,
+// MarkStoppedIfUnchanged, and MarkForceStopped of the current registration
+// the detached and the stopped. raw is the file as read under the same lock
+// hold. When raw does not end with a newline (a write cut off mid-line), the
+// write starts with one, so the cut line stays a separate corrupt line and
+// evs stay readable. An event that does not marshal fails
 // it before anything is written. When the write or the close fails, part of
 // the lines may be in the file (a full disk can stop a write after the
 // detached line), so it cuts the file back to len(raw) before returning

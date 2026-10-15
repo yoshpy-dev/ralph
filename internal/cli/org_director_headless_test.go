@@ -1118,14 +1118,16 @@ func TestOrgDirectorStop_ACloseThatFailsNamesForce(t *testing.T) {
 // AC9's last sentence (plan D14) in the CLI's words: a stop that found a
 // workspace or pane a start recorded after stop read the registration writes
 // what it closed on stderr, as for the other stops that record nothing, and
-// its error names the stop to run again with the call's --state-dir and no
-// --force, with or without --force given. A CLI run would need a start that
-// records while stop runs, so this tests the helper with the error
-// StopDirector returns (internal/org's TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns
-// pins how that error is made). The stop help says so too.
+// only there: its error says what changed, that nothing was recorded, and
+// names the stop to run again with the call's --state-dir and no --force,
+// with or without --force given, with "org: director: " once and none of the
+// notes. A CLI run would need a start that records while stop runs, so this
+// tests the helper with the error StopDirector returns (internal/org's
+// TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns pins how that
+// error is made). The stop help says so too.
 func TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain(t *testing.T) {
 	const notes = "ctrl_c=skipped, pane=none recorded, workspace=closed"
-	refusal := fmt.Errorf("org: director: stop d1: %w: d1 had workspace \"ws-7\" and no pane when stop read it, and has workspace \"ws-7\" and pane \"pane-1\" now",
+	refusal := fmt.Errorf("%w: d1 had workspace \"ws-7\" and no pane when stop read it, and has workspace \"ws-7\" and pane \"pane-1\" now",
 		org.ErrDirectorChangedDuringStop)
 	res := org.DirectorStopResult{
 		Registration: org.DirectorRegistration{ID: "d1", WorkspaceID: "ws-7"},
@@ -1135,13 +1137,13 @@ func TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain(t *testing
 		t.Run(fmt.Sprintf("force %v", force), func(t *testing.T) {
 			cleanup := &org.DirectorCleanupError{
 				Verb: "stop", ID: "d1", WorkspaceID: "ws-7",
-				CleanupErr:  fmt.Errorf("record d1 stopped: %w; this stop closed only what it had read (%s)", refusal, notes),
+				CleanupErr:  fmt.Errorf("record d1 stopped: %w; this stop closed only what it had read", refusal),
 				StopCommand: "ralph org director stop --id d1",
 			}
 			rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
 			var stderr strings.Builder
 			err := rt.stopError(&stderr, "d1", force, res, cleanup)
-			want := "org: director: stop d1: record d1 stopped: " + refusal.Error() + "; this stop closed only what it had read (" + notes + "); " +
+			want := "org: director: stop d1: record d1 stopped: " + refusal.Error() + "; this stop closed only what it had read; " +
 				"nothing was recorded; run ralph org director stop --id d1 --state-dir '/work/the ledger' again to close what start recorded"
 			if err == nil || err.Error() != want {
 				t.Fatalf("stopError =\n%v\nwant\n%s", err, want)
@@ -1151,6 +1153,9 @@ func TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain(t *testing
 			}
 			if got := stderr.String(); got != "stop d1: "+notes+"\n" {
 				t.Errorf("stderr = %q; want the notes", got)
+			}
+			if n := strings.Count(stderr.String()+err.Error(), notes); n != 1 {
+				t.Errorf("the notes appear %d times in stderr and the error; want once, on stderr", n)
 			}
 		})
 	}

@@ -105,9 +105,10 @@ type DirectorStopResult struct {
 // The read takes no lock, so a start still running can record its workspace
 // or pane after it, and this stop did not close that one: then nothing is
 // written, and the *DirectorCleanupError wraps ErrDirectorChangedDuringStop,
-// says what this stop closed, and names the stop to run again, which closes
-// what start recorded. On a *DirectorCleanupError the result still carries
-// Registration and the notes.
+// says that this stop closed only what it had read, and names the stop to
+// run again, which closes what start recorded. On a *DirectorCleanupError
+// the result still carries Registration and the notes; the error's text
+// does not repeat the notes (the CLI prints them).
 //
 // With p.Force (plan D11), a label that is not this launch's, a get that
 // fails or times out, and a close that fails do not end the stop: it sends
@@ -166,8 +167,11 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 // is a *DirectorCleanupError; after a forced stop its StopCommand carries
 // --force, since the retry meets what this one met. For a start that
 // recorded an id after the read (ErrDirectorChangedDuringStop), its
-// CleanupErr says what this stop closed, and its StopCommand is the stop to
-// run again.
+// CleanupErr holds the store's refusal without its prefix
+// (directorChangedError), so the error's text has
+// "org: director: stop <id>: " once, and says that this stop closed only
+// what it had read (what that was is in the result's notes, not in the
+// text), and its StopCommand is the stop to run again.
 func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed directorClose) (DirectorStopResult, error) {
 	reg := res.Registration
 	forced := closed.err != nil
@@ -181,14 +185,15 @@ func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed dir
 	} else {
 		wasCurrent, err = p.Store.MarkStoppedIfUnchanged(reg, p.Who)
 	}
+	var changed *directorChangedError
 	switch {
 	case err != nil && forced:
 		e := newDirectorCleanupError("stop", reg, closed, nil, errors.Join(closed.err, fmt.Errorf("record %s stopped: %w", p.ID, err)), false)
 		e.StopCommand = directorStopCommand(reg.ID, true)
 		return res, e
-	case errors.Is(err, ErrDirectorChangedDuringStop):
+	case errors.As(err, &changed):
 		return res, newDirectorCleanupError("stop", reg, closed, nil,
-			fmt.Errorf("record %s stopped: %w; this stop closed only what it had read (%s, %s, %s)", p.ID, err, closed.ctrlC, closed.pane, closed.workspace), false)
+			fmt.Errorf("record %s stopped: %w; this stop closed only what it had read", p.ID, changed), false)
 	case err != nil:
 		return res, newDirectorCleanupError("stop", reg, closed, nil, fmt.Errorf("record %s stopped: %w", p.ID, err), false)
 	}
@@ -201,7 +206,8 @@ func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed dir
 }
 
 // openHeadlessRegistration returns the open headless registration id, read
-// without the lock (MarkStopped decides again under it), or verb's refusal:
+// without the lock (StopDirector's MarkStoppedIfUnchanged or
+// MarkForceStopped decides again under it), or verb's refusal:
 // a registration a session promoted wraps ErrDirectorNotHeadless as well as
 // ErrDirectorNoOpenHeadless; an unknown or already stopped id is
 // openHeadless's error. A missing director.jsonl reads as no registration.
