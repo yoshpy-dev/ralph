@@ -480,32 +480,53 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 
 // AC7 through the CLI (D5), with TestMain's gate that always passes set back
 // to nil: start refuses a watch that holds the lock and is stopping or a
-// --once run at once, launching nothing, writing nothing, and running no
-// herdr; with no watch it launches one as `ralph org start` does, says so on
-// stderr with its own verb, and starts the director; a launch that fails is
-// refused with start's prefix, which says no director was started.
+// --once run at once, and one whose liveness mark is an hour old once it has
+// stayed stale for the whole wait of ensureOrgWatch (shortened), as `ralph
+// org start` refuses it (TestOrgStart_WatchGate_RefusesAStaleWatch); each
+// time it launches nothing, writes nothing (director.jsonl, a prompt file, or
+// a watch file), and runs no herdr. With no watch it launches one as `ralph
+// org start` does, says so on stderr with its own verb, and starts the
+// director; a launch that fails is refused with start's prefix, which says
+// no director was started.
 func TestOrgDirectorStart_WatchGate(t *testing.T) {
 	for _, w := range []struct {
-		name string
-		mark func() *org.WatchAlive
-		want string
+		name  string
+		mark  func() *org.WatchAlive
+		want  []string
+		stale bool // stale for the whole wait, which start waits out before it refuses
 	}{
-		{"stopping", func() *org.WatchAlive { return stoppingWatchMark(4601, time.Now()) }, "(pid 4601) is stopping"},
-		{"running --once", func() *org.WatchAlive { return onceWatchMark(4602, time.Now()) }, "(pid 4602) is a --once run"},
+		{"stopping", func() *org.WatchAlive { return stoppingWatchMark(4601, time.Now()) },
+			[]string{"(pid 4601) is stopping", "run this again once it has ended"}, false},
+		{"running --once", func() *org.WatchAlive { return onceWatchMark(4602, time.Now()) },
+			[]string{"(pid 4602) is a --once run", "run this again once it has ended"}, false},
+		{"stale with an old mark", func() *org.WatchAlive { return runningMark(4604, time.Now().Add(-time.Hour)) },
+			[]string{"has not refreshed its liveness mark (pid 4604)", "stop it with ralph org watch --stop"}, true},
 	} {
 		t.Run(w.name, func(t *testing.T) {
 			useRealOrgWatchGate(t)
 			refuseOrgWatchLaunch(t)
+			if w.stale {
+				shortenOrgWatchDeadline(t)
+			}
 			stateDir, herdrLog, _ := directorStartLedger(t)
 			holdWatchLock(t, stateDir, w.mark())
+			entries := dirNames(t, stateDir)
 
+			start := time.Now()
 			stdout, _, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir)
-			checkGateRefusal(t, err, stateDir, w.want, "run this again once it has ended")
+			elapsed := time.Since(start)
+			checkGateRefusal(t, err, stateDir, w.want...)
+			if w.stale && elapsed < 300*time.Millisecond {
+				t.Errorf("start refused the stale watch after %v; want it to wait the 300ms deadline first", elapsed)
+			}
 			if stdout != "" {
 				t.Errorf("stdout = %q; want nothing", stdout)
 			}
 			if got := directorFileOrAbsent(t, stateDir); got != "<absent>" {
 				t.Errorf("director.jsonl = %s; want nothing written", got)
+			}
+			if got := dirNames(t, stateDir); !slices.Equal(got, entries) {
+				t.Errorf("ledger entries = %v; want %v as before (nothing written)", got, entries)
 			}
 			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
 				t.Errorf("herdr calls = %v; want none", lines)
