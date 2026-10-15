@@ -327,29 +327,36 @@ func TestOrgDirector_DetachForce(t *testing.T) {
 
 // AC2: a --driver other than claude and codex, or none, is refused before
 // anything is read: not even a ralph.toml that does not load is reported,
-// and the state dir is not created.
+// and the state dir is not created. director start refuses it the same way
+// (plan 2026-10-15-org-director-start, AC2), and runs no herdr.
 func TestOrgDirector_AttachRefusesABadDriverBeforeReadingAnything(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	broken := filepath.Join(t.TempDir(), "ralph.toml")
 	writeTestFile(t, broken, "[org\n")
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"--driver", "gemini"}, `org: director attach: --driver "gemini" is not claude or codex`},
-		{nil, "org: director attach: --driver is required: claude or codex"},
-		{[]string{"--driver", "Claude"}, `--driver "Claude" is not claude or codex`},
-	} {
-		stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director", "attach"}, tc.args...), "--state-dir", stateDir, "--config", broken)...)
-		if err == nil || !strings.HasPrefix(err.Error(), "org: director attach: ") || !strings.HasSuffix(err.Error(), tc.want) || strings.Contains(err.Error(), "config") {
-			t.Errorf("attach %v error = %v; want %q, with nothing about the config", tc.args, err, tc.want)
-		}
-		if stdout != "" {
-			t.Errorf("attach %v stdout = %q; want nothing", tc.args, stdout)
+	for _, verb := range []string{"attach", "start"} {
+		for _, tc := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"--driver", "gemini"}, `org: director ` + verb + `: --driver "gemini" is not claude or codex`},
+			{nil, "org: director " + verb + ": --driver is required: claude or codex"},
+			{[]string{"--driver", "Claude"}, `--driver "Claude" is not claude or codex`},
+		} {
+			stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director", verb}, tc.args...), "--state-dir", stateDir, "--config", broken)...)
+			if err == nil || !strings.HasPrefix(err.Error(), "org: director "+verb+": ") || !strings.HasSuffix(err.Error(), tc.want) || strings.Contains(err.Error(), "config") {
+				t.Errorf("%s %v error = %v; want %q, with nothing about the config", verb, tc.args, err, tc.want)
+			}
+			if stdout != "" {
+				t.Errorf("%s %v stdout = %q; want nothing", verb, tc.args, stdout)
+			}
 		}
 	}
 	if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("a refused attach created the state dir (stat: %v)", err)
+		t.Errorf("a refused attach or start created the state dir (stat: %v)", err)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
 	}
 }
 
@@ -362,6 +369,9 @@ func TestOrgDirector_RefusesOrgID(t *testing.T) {
 		{"director", "attach", "--driver", "codex", "--replace"},
 		{"director", "detach", "--id", "d1"},
 		{"director", "detach", "--force"},
+		{"director", "start", "--driver", "claude", "--model", "opus"},
+		{"director", "stop", "--id", "d1"},
+		{"director", "stop", "--id", "d1", "--force"},
 		{"director", "status"},
 		{"director", "status", "--json"},
 	} {
@@ -619,22 +629,27 @@ func TestOrgDirector_AttachWarnsWhileNoWatchAcceptsWork(t *testing.T) {
 	}
 }
 
-// attach and detach change the ledger, so a legacy worktree ledger with
-// active seats refuses them and they write nothing; director status only
-// reads it and prints the note once.
+// attach, detach, start, and stop change the ledger, so a legacy worktree
+// ledger with active seats refuses them and they write nothing (start and
+// stop run no herdr either); director status only reads it and prints the
+// note once.
 func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
-	setupOrgStubPATH(t)
+	herdrLog, _ := setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
 	if _, _, err := org.NewDirectorStore(r.sharedDir).Attach(org.DirectorAttach{Driver: "claude", User: "alice"}); err != nil {
 		t.Fatalf("seed the registration: %v", err)
 	}
 	spawnLedgerSeat(t, r.legacyDir, "seat-1")
 	before := directorFileOrAbsent(t, r.sharedDir)
+	herdrBefore := len(readLogLines(t, herdrLog))
 
 	for _, args := range [][]string{
 		{"director", "attach", "--driver", "codex", "--replace"},
 		{"director", "detach", "--id", "d1"},
 		{"director", "detach", "--force"},
+		{"director", "start", "--driver", "claude", "--model", "opus"},
+		{"director", "stop", "--id", "d1"},
+		{"director", "stop", "--id", "d1", "--force"},
 	} {
 		stdout, _, err := runOrgCmdStreams(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") {
@@ -649,6 +664,9 @@ func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
 	}
 	if got := directorFileOrAbsent(t, r.legacyDir); got != "<absent>" {
 		t.Errorf("a verb wrote the legacy ledger's director.jsonl: %s", got)
+	}
+	if got := len(readLogLines(t, herdrLog)); got != herdrBefore {
+		t.Errorf("herdr was called %d time(s) after the refusals, want 0", got-herdrBefore)
 	}
 
 	stdout, stderr, err := runOrgCmdStreams(t, "director", "status")
@@ -793,7 +811,11 @@ func TestOrgDirector_StatusDisabledNamesALeftRegistration(t *testing.T) {
 
 // AC2 for the Go help: the director group and its verbs say what the
 // registration is and is not, and `ralph org --help` names the group and
-// the --config rule for enabled.
+// the --config rule for enabled. Stage 8a-2 (plan
+// 2026-10-15-org-director-start, AC12) replaced the group's "(ralph org
+// director start) is not available yet" with the two ways to have a
+// director, and added start and stop: a wording update, the pins of
+// stage 8a-1 that still apply are kept.
 func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 	for _, tc := range []struct {
 		args  []string
@@ -803,29 +825,62 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"<state-dir>/director.jsonl", "promoted with the /director skill", "One director is registered at a time for every org in the ledger",
 			"unless --replace is given", "so a session that was replaced is refused and need not detach", "--force ends the current registration whatever its id",
 			"The registration does not change what `ralph org escalate` does", "Nor does it mean the session is still running",
-			"(ralph org director start) is not available yet", "attach", "detach", "status",
+			"There are two ways to have one.",
+			"`ralph org director start` launches a headless director in a herdr workspace of its own and registers it, and `ralph org director stop --id <id>` closes it again",
+			"status shows the registration, the headless directors that are still open, and [org.director].enabled",
+			"attach", "detach", "start", "stop", "status",
 		}},
 		{[]string{"director", "attach", "--help"}, []string{
 			"attached d1 (driver=claude)", "Keep the id: `ralph org director detach --id <id>` needs it", "claude or codex",
 			"whether HERDR_PANE_ID was set (not its value)", "attach is refused unless --replace is given",
 			"The replaced session's detach is then refused, and it need not detach",
+			"A headless director that `ralph org director start` launched counts too, starting or running: the refusal then names `ralph org director stop --id`",
 			"attach is refused, and writes nothing, when [org.director].enabled is false",
 			"Without --config, enabled is read from the main worktree's ralph.toml", "Start one with `ralph org watch --all --detach`",
+		}},
+		{[]string{"director", "start", "--help"}, []string{
+			"labelled ralph_director_<token>, in one tab labelled director_<token>, where <token> is 12 hex digits new for every start",
+			"started d1 (driver=codex, model=..., permission=..., pane=..., workspace=...)",
+			"Open herdr and talk to the director in that pane",
+			"and nothing to the manifest: the director is not an org seat, so max_orgs and max_total_seats do not count it and `ralph org stop --all` does not stop it",
+			"is written before any herdr call, so the registration is decided first; workspace_created and pane_created follow as herdr hands out the ids, and launched once the agent has started",
+			"[org.permissions.roles].director, else [org.permissions].default",
+			"with --model, which [org.roles].director must allow",
+			"Without --config, those settings and [org.director].enabled are read from the main worktree's ralph.toml when the ledger is the main worktree's",
+			"inside a herdr pane (HERDR_PANE_ID is set): run start from a terminal outside herdr. start has no --replace.",
+			"it launches one when none runs, and is refused when a watch holds the lock but is stale, stopping, or a --once run",
+		}},
+		{[]string{"director", "stop", "--help"}, []string{
+			"a stopped event in <state-dir>/director.jsonl and, when it is the current registration, a detached in the same write",
+			"Nothing is written to the manifest.",
+			"running, still starting (it closes what was recorded), or detached",
+			"stop checks that herdr has the pane in a tab labelled director_<token> inside a workspace labelled ralph_director_<token>",
+			"so a director whose pane a human closed in herdr is cleaned up with stop too",
+			"(a promoted session's registration is ended with `ralph org director detach --id`)",
+			"run it from a terminal outside the director's workspace",
+			"--force, a human's cleanup, then records the director stopped anyway, closing nothing more",
+			"(herdr workspace list, the workspace labelled ralph_director_<token>)",
+			"stop reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
 		}},
 		{[]string{"director", "detach", "--help"}, []string{
 			"Give --id, the id attach printed", "it need not detach", "--force ends the current registration whatever its id",
 			"it cannot be combined with --id",
 			"detach reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
+			"detach only records: when it ends a headless director's registration (`ralph org director start`), the director's herdr pane and workspace stay open, " +
+				"and detach prints the `ralph org director stop --id <id>` that closes them",
 		}},
 		{[]string{"director", "status", "--help"}, []string{
 			"attached, not attached, disabled, or unreadable", "--json",
+			"For a headless director (ralph org director start) the fields add its state (starting or running), model, permission mode, token, workspace, and pane",
+			"still open are listed (open_headless), to be closed with `ralph org director stop --id <id>`",
 			"With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown",
 			"The registration does not tell whether its session is still running",
 		}},
 		{[]string{"--help"}, []string{
-			"`ralph org director` registers the interactive session the human talks to as the director of the ledger",
+			"`ralph org director` registers the interactive session the human talks to as the director of the ledger, or launches a headless director in herdr (ralph org director start)",
 			"approve, the director verbs, and the inbox verbs, which refuse it",
-			"and escalate, director attach, and director status read [org.director].enabled, from the main worktree's ralph.toml when the ledger is the main worktree's",
+			"escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles] and model_pool, " +
+				"from the main worktree's ralph.toml when the ledger is the main worktree's",
 		}},
 	} {
 		out, err := runOrgCmd(t, tc.args...)
@@ -838,6 +893,13 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 				t.Errorf("%v does not say %q:\n%s", tc.args, want, out)
 			}
 		}
+	}
+	out, err := runOrgCmd(t, "director", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "not available yet") {
+		t.Errorf("director --help still says start is not available yet:\n%s", out)
 	}
 }
 

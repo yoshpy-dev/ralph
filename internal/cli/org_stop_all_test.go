@@ -898,3 +898,114 @@ func TestOrgStopAll_CLI_CodexModelMismatch_PrintsWarning(t *testing.T) {
 		t.Errorf("expected %q on stderr, got: %s", want, stderr)
 	}
 }
+
+// AC10 and D10 of plan 2026-10-15-org-director-start: stop --all leaves the
+// headless directors of the ledger open (no C-c, no close, nothing written
+// to director.jsonl) and prints one note: line on stderr after the seats,
+// naming each open one with its state and the stop command with this
+// invocation's --state-dir, and nothing when none is open (a promoted
+// session's registration, a headless one already stopped). A director.jsonl
+// that cannot be read is one warning. None of these changes the exit code:
+// 0 when every seat stopped, 1 when one did not.
+func TestOrgStopAll_NamesTheOpenHeadlessDirectors(t *testing.T) {
+	cases := []struct {
+		name     string
+		setup    func(t *testing.T, stateDir string)
+		failSeat bool
+		wantNote func(stateDir string) string // "" for no line
+	}{
+		{"one running, current", func(t *testing.T, stateDir string) {
+			seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-d1", "p-d1", true)
+		}, false, func(stateDir string) string {
+			return "note: stop --all stops org seats only, so the headless director d1 (running) is still open: " +
+				"stop it with ralph org director stop --id d1 --state-dir '" + stateDir + "'\n"
+		}},
+		{"one detached and one starting, with a seat that fails", func(t *testing.T, stateDir string) {
+			seedHeadless(t, stateDir, "claude", "opus", "w-d1", "p-d1", true)
+			if _, err := org.NewDirectorStore(stateDir).Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+			seedHeadless(t, stateDir, "claude", "opus", "", "", false)
+		}, true, func(stateDir string) string {
+			return "note: stop --all stops org seats only, so the headless directors d1 (running), d2 (starting) are still open: " +
+				"stop each with ralph org director stop --id <id> --state-dir '" + stateDir + "'\n"
+		}},
+		{"a promoted session's registration", func(t *testing.T, stateDir string) {
+			if _, _, err := org.NewDirectorStore(stateDir).Attach(org.DirectorAttach{Driver: org.DirectorDriverClaude, User: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+		}, false, func(string) string { return "" }},
+		{"a headless director already stopped", func(t *testing.T, stateDir string) {
+			seedHeadless(t, stateDir, "claude", "opus", "", "", false)
+			if _, err := (&org.Org{}).StopDirector(org.DirectorStopParams{Store: org.NewDirectorStore(stateDir), ID: "d1"}); err != nil {
+				t.Fatal(err)
+			}
+		}, false, func(string) string { return "" }},
+		{"director.jsonl that cannot be read", func(t *testing.T, stateDir string) {
+			if err := os.MkdirAll(org.DirectorPathIn(stateDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, true, func(stateDir string) string {
+			return "warning: stop --all: the headless directors of the ledger could not be listed: org: director: read " + org.DirectorPathIn(stateDir) + ": "
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			seedSeat(t, stateDir, "org-a", "seat-1", "p-a1")
+			if tc.failSeat {
+				t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "p-a1")
+			}
+			tc.setup(t, stateDir)
+			snapshot := func() string {
+				if fi, err := os.Stat(org.DirectorPathIn(stateDir)); err == nil && fi.IsDir() {
+					return "<a directory>"
+				}
+				return directorFileOrAbsent(t, stateDir)
+			}
+			before := snapshot()
+			calls := len(readLogLines(t, herdrLog))
+
+			stdout, stderr, err := runOrgCmdStreams(t, "stop", "--all", "--state-dir", stateDir)
+			if tc.failSeat {
+				if want := "org: stop --all: 1 error(s), listed above"; err == nil || err.Error() != want {
+					t.Errorf("stop --all with a seat that fails = %v; want %q", err, want)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("stop --all: %v (stderr: %s)", err, stderr)
+				}
+				if got := outputLines(stdout); !slices.Equal(got, []string{"stopped seat org-a/seat-1"}) {
+					t.Errorf("stdout lines = %q; want org-a/seat-1 stopped", got)
+				}
+			}
+			note := tc.wantNote(stateDir)
+			switch {
+			case note == "":
+				if stderr != "" {
+					t.Errorf("stderr = %q; want nothing", stderr)
+				}
+			case strings.HasPrefix(note, "warning:"):
+				if !strings.Contains(stderr, note) || strings.Contains(stderr, "note: stop --all") || !strings.HasSuffix(stderr, "\n") {
+					t.Errorf("stderr = %q; want the warning starting %q and no note", stderr, note)
+				}
+			default:
+				if !strings.HasSuffix(stderr, note) || strings.Count(stderr, "note: stop --all") != 1 {
+					t.Errorf("stderr = %q; want it to end with the one note %q", stderr, note)
+				}
+				if tc.failSeat && !strings.Contains(stderr, "seat org-a/seat-1 not stopped: ") {
+					t.Errorf("stderr = %q; want the seat failure before the note", stderr)
+				}
+			}
+			if after := snapshot(); after != before {
+				t.Errorf("stop --all changed director.jsonl:\nbefore: %s\nafter:  %s", before, after)
+			}
+			for _, line := range readLogLines(t, herdrLog)[calls:] {
+				if strings.Contains(line, "p-d1") || strings.Contains(line, "w-d1") {
+					t.Errorf("stop --all ran %q on a headless director's pane or workspace", line)
+				}
+			}
+		})
+	}
+}

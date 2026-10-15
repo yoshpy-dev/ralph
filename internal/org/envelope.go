@@ -56,7 +56,7 @@ func ValidateSpawnEnvelope(cfg config.OrgConfig, req SpawnRequest) error {
 	if !modelInPool(cfg, req.Driver, req.Model) {
 		return fmt.Errorf("org: model %q not in [org].model_pool for driver %q", req.Model, req.Driver)
 	}
-	if !modelAllowedForRole(cfg, req.Role, req.Model) {
+	if !ModelAllowedForRole(cfg, req.Role, req.Model) {
 		return fmt.Errorf("org: model %q not permitted for role %q", req.Model, req.Role)
 	}
 	return nil
@@ -130,12 +130,15 @@ func modelInPool(cfg config.OrgConfig, driver, model string) bool {
 	return false
 }
 
-// modelAllowedForRole reports whether model is permitted for role. A role
+// ModelAllowedForRole reports whether model is permitted for role. A role
 // absent from cfg.Roles, or mapped to an empty list, means "no restriction"
 // -- the full model_pool is allowed for that role. This mirrors the
 // [org].roles Load() semantics in internal/config: only an explicit,
-// non-empty allowlist narrows things.
-func modelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
+// non-empty allowlist narrows things. ValidateSpawnEnvelope checks a seat's
+// model with it, and `ralph org director start` in the CLI checks the
+// headless director's: the director is not a seat, so its --model never
+// reaches ValidateSpawnEnvelope, and only [org.roles].director narrows it.
+func ModelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
 	if len(cfg.Roles) == 0 {
 		return true
 	}

@@ -59,17 +59,20 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   `workspace-write` and no writable root covers the agmsg store. That is
   the case when `codex_verified = true` and a role resolves to edits or
   autonomous, or when your codex config sets `sandbox_mode =
-  "workspace-write"` and a role resolves to guarded. Only roles that may
-  use a codex model count, and with codex missing from `[org].driver_pool`
-  or `[org].model_pool` nothing is needed. `/tmp` and `$TMPDIR` count as
-  writable unless `exclude_slash_tmp` / `exclude_tmpdir_env_var` is set.
-  The check reads only the user-level `config.toml`; profiles,
-  project-level config, and `-c` overrides are not evaluated. When the
-  agmsg store itself lives inside this project (and not under its `.git`,
-  `.agents`, or `.codex` directory), a seat whose working directory
-  contains it can already write there and the warn says so; a seat whose
-  working directory does not contain it (a task worktree, for example)
-  still needs the writable root.
+  "workspace-write"` and a role resolves to guarded. A `director` entry in
+  `[org.permissions.roles]` counts only when it is guarded, because
+  `ralph org director start` refuses a codex director in edits and
+  autonomous (see "The org ledger and `--add-dir`" below). Only roles that
+  may use a codex model count, and with codex missing from
+  `[org].driver_pool` or `[org].model_pool` nothing is needed. `/tmp` and
+  `$TMPDIR` count as writable unless `exclude_slash_tmp` /
+  `exclude_tmpdir_env_var` is set. The check reads only the user-level
+  `config.toml`; profiles, project-level config, and `-c` overrides are not
+  evaluated. When the agmsg store itself lives inside this project (and not
+  under its `.git`, `.agents`, or `.codex` directory), a seat whose working
+  directory contains it can already write there and the warn says so; a
+  seat whose working directory does not contain it (a task worktree, for
+  example) still needs the writable root.
 - **Keep the scratch working directory out of `/tmp`.** `/tmp` is itself a
   writable root, so a target under it does not test the sandbox boundary.
   Use a throwaway directory under `$HOME` (`git init` it) for the seat's cwd
@@ -90,11 +93,16 @@ Only the leader gets it: seats of every other role (implementer, reviewer,
 or a role with no template that runs from `--prompt`) report to the leader
 over agmsg and do not write the ledger, and the flag would let them rewrite
 the manifest, the receipts, and other seats' prompt files. Guarded codex
-seats and claude seats get no `--add-dir` either. The flag covers only the
-state directory; the agmsg database still needs the writable root above.
-The procedure below spawns reviewer seats, so their child process arguments
-carry no `--add-dir` even when the scratch `--state-dir` lies outside
-`<scratch-cwd>`.
+seats and claude seats get no `--add-dir` either. The headless director
+that `ralph org director start` launches writes the ledger too, but gets no
+`--add-dir`: start refuses a codex director in edits and autonomous,
+whatever `codex_verified` says, because under `workspace-write` codex keeps
+`.git` read-only and the director could not run `git worktree add` to start
+a feature org, so a codex director runs guarded only. The flag covers only
+the state directory; the agmsg database still needs the writable root
+above. The procedure below spawns reviewer seats, so their child process
+arguments carry no `--add-dir` even when the scratch `--state-dir` lies
+outside `<scratch-cwd>`.
 
 Checked on 2026-10-07 with codex-cli 0.160.0 on macOS, with the cwd and
 the target directory both outside `/tmp`, `$TMPDIR`, and the repository:

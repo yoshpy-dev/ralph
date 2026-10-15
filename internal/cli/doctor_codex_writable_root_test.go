@@ -902,7 +902,7 @@ func TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass(t *testing.T) {
 // reviewer's exact scenario: a guarded default, an autonomous override for
 // one role, and an [org.roles] restriction that excludes every codex model
 // for that role. ValidateSpawnEnvelope would reject every codex model for
-// this role (modelAllowedForRole), so the autonomous override must not
+// this role (ModelAllowedForRole), so the autonomous override must not
 // count -- reason (a) stays absent and the check reports "not needed", not
 // a warn about a codex seat that could never actually spawn.
 func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent(t *testing.T) {
@@ -964,6 +964,53 @@ func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionIncludesCodex_ReasonAPr
 	}
 	if !strings.Contains(r.Detail, "a role that can use a codex model resolves to edits or autonomous") {
 		t.Errorf("expected reason (a) in the needed-because clause, got: %s", r.Detail)
+	}
+}
+
+// TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted:
+// with codex_verified = true, a guarded default, a codex model in the pool,
+// and no writable root covering the store, a [org.permissions.roles] entry
+// that sets only role director to edits or autonomous makes no warn, because
+// `ralph org director start` refuses a codex director in those modes (plan
+// 2026-10-15-org-director-start, D12). The same entry for a seat role still
+// warns (the control). A guarded director still counts for reason (b): with
+// codex_verified false, an autonomous default, and sandbox_mode =
+// "workspace-write", it alone makes the check warn. Each wantDetail is the
+// whole Detail for a pass and a part of it for a warn, with <cfg> for the
+// config path.
+func TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted(t *testing.T) {
+	const notNeeded = "not needed: no role that can use a codex model resolves to edits or autonomous and <cfg> does not set sandbox_mode = \"workspace-write\""
+	for _, tc := range []struct {
+		name          string
+		codexVerified bool
+		defaultMode   string
+		roles         map[string]string
+		codexConfig   string
+		wantStatus    string
+		wantDetail    string
+	}{
+		{"a director in edits", true, "guarded", map[string]string{"director": "edits"}, "", "pass", notNeeded},
+		{"a director in autonomous", true, "guarded", map[string]string{"director": "autonomous"}, "", "pass", notNeeded},
+		{"control: a seat role in edits", true, "guarded", map[string]string{"implementer": "edits"}, "", "warn",
+			"; needed because [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous " +
+				"(ralph passes --sandbox workspace-write to those codex seats); add "},
+		{"a guarded director under an autonomous default", false, "autonomous", map[string]string{"director": "guarded"}, "sandbox_mode = \"workspace-write\"\n", "warn",
+			"; needed because sandbox_mode = \"workspace-write\" in <cfg> and a role that can use a codex model resolves to guarded (guarded codex seats inherit it); add "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agmsgHome := t.TempDir()
+			writeAgmsgHome(t, agmsgHome, "")
+			cfgPath := writeCodexConfig(t, t.TempDir(), tc.codexConfig)
+
+			r := checkCodexAgmsgWritableRoot(codexOrgConfig(tc.codexVerified, tc.defaultMode, tc.roles), agmsgHome, "", codexSandboxTestEnv(cfgPath, ""))
+			want := strings.ReplaceAll(tc.wantDetail, "<cfg>", cfgPath)
+			if r.Status != tc.wantStatus {
+				t.Fatalf("Status = %s (%s), want %s", r.Status, r.Detail, tc.wantStatus)
+			}
+			if (tc.wantStatus == "pass" && r.Detail != want) || !strings.Contains(r.Detail, want) {
+				t.Errorf("Detail = %q, want it to be or contain %q", r.Detail, want)
+			}
+		})
 	}
 }
 
@@ -1451,7 +1498,7 @@ func TestCodexImplicitWritableRoots(t *testing.T) {
 }
 
 // TestCodexModelPermittedForRole is cross-review WC-2's pure unit test,
-// mirroring internal/org/envelope.go's modelAllowedForRole table shape.
+// mirroring internal/org/envelope.go's ModelAllowedForRole table shape.
 func TestCodexModelPermittedForRole(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -1611,6 +1658,32 @@ func TestCodexSeatModesPossible(t *testing.T) {
 			"no codex model in the pool suppresses both, even with a guarded default and an autonomous role",
 			config.OrgConfig{Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"implementer": "autonomous"}}},
 			false, false,
+		},
+		{
+			// director start refuses a codex director in edits and
+			// autonomous (plan 2026-10-15-org-director-start, D12).
+			"a director in edits under a guarded default is not counted",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"director": "edits"}},
+			},
+			false, true,
+		},
+		{
+			"a director in autonomous under a guarded default is not counted",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "guarded", Roles: map[string]string{"director": "autonomous"}},
+			},
+			false, true,
+		},
+		{
+			"a guarded director under an autonomous default still counts as guarded",
+			config.OrgConfig{
+				ModelPool:   codexModelPoolWithCodex,
+				Permissions: config.OrgPermissionsConfig{Default: "autonomous", Roles: map[string]string{"director": "guarded"}},
+			},
+			true, true,
 		},
 	}
 	for _, tc := range cases {

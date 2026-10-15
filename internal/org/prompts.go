@@ -2,6 +2,8 @@ package org
 
 import (
 	"embed"
+	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -61,10 +63,18 @@ type RolePromptVars struct {
 // back to whatever --prompt was given verbatim, with no error: an unknown
 // role is not a failure, just "no template available".
 //
+// DirectorRole is not a seat role: its template, prompts/director.md, is
+// rendered only by RenderDirectorPrompt, so for it RenderRolePrompt returns
+// ("", false, nil) as for a role with no template. Spawn refuses the role
+// before it gets here (DirectorRoleInputErr, spawn.go).
+//
 // Placeholders that are not among the known {{...}} substitutions listed
 // below are left in the rendered text unchanged (documented, not an error)
 // -- the template author is expected to only use the known variable names.
 func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
+	if role == DirectorRole {
+		return "", false, nil
+	}
 	data, err := promptFS.ReadFile("prompts/" + role + ".md")
 	if err != nil {
 		return "", false, nil
@@ -88,6 +98,97 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{ENVELOPE}}", vars.Envelope,
 	)
 	return replacer.Replace(text), true, nil
+}
+
+// DirectorRole is the role name of the director: the key of its
+// [org.roles] and [org.permissions.roles] entries and the name of its
+// template, prompts/director.md. The director is not an org seat (plan
+// docs/plans/active/2026-10-15-org-director-start.md, D2 and D7): `ralph org
+// director start` launches it and RenderDirectorPrompt renders its template,
+// and `ralph org spawn --role director` is refused.
+const DirectorRole = "director"
+
+// DirectorPromptVars holds the values substituted into prompts/director.md
+// for the headless director `ralph org director start` launches: ID, its
+// registration's d<N>; Driver, claude or codex; StateDir, the org state
+// directory of the ledger, which the ralph org commands the director runs,
+// and the stop command it asks the human to run, are given with --state-dir;
+// ConfigPath, the absolute path of the ralph.toml start was given with
+// --config ("" when start had none), which the ralph org commands the
+// director runs are given with --config too, so they read the settings start
+// read (the stop command is not: stop reads no ralph.toml); and Cwd, the
+// directory the director runs in.
+type DirectorPromptVars struct {
+	ID         string
+	Driver     string
+	StateDir   string
+	ConfigPath string
+	Cwd        string
+}
+
+// directorPromptNoConfigText substitutes for {{CONFIG_LINE}} when
+// DirectorPromptVars.ConfigPath is empty: the file the director's ralph org
+// commands read without --config. The director runs in the main worktree root
+// when the ledger is the main worktree's, so both the 8a-1 rule
+// (withMainWorktreeDirectorEnabled in internal/cli) and ./ralph.toml name
+// that file; otherwise it runs where start ran, and ./ralph.toml is the one
+// start read.
+const directorPromptNoConfigText = "main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)"
+
+// RenderDirectorPrompt returns prompts/director.md with vars substituted:
+// {{ID}}, {{DRIVER}}, {{CWD}}; {{STATE_DIR}}, which is vars.StateDir as one
+// shell word (shellQuote) so the commands in the template run as written;
+// {{ORG_FLAGS}}, the flags of the ralph org commands the template has the
+// director run: --state-dir with {{STATE_DIR}}, followed by --config with
+// vars.ConfigPath as one shell word when it is set (the template's stop
+// command, which the director asks the human to run, has --state-dir
+// {{STATE_DIR}} alone, as stop reads no ralph.toml); and {{CONFIG_LINE}},
+// the text of the header's 設定 line, not a value to put in a command:
+// vars.ConfigPath as one shell word followed by "(start の --config)", else
+// directorPromptNoConfigText. Without ConfigPath the text holds no
+// "--config". Unlike RenderRolePrompt it refuses to leave a placeholder: an
+// id not of the form d<N>, a driver other than claude and codex, an empty
+// StateDir or Cwd, a ConfigPath that is not absolute (the director runs in
+// another directory, where a relative path names another file), and a
+// rendered text that still holds "{{" (a placeholder it does not know, or a
+// value that holds one) are errors.
+func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
+	if _, ok := directorIDNumber(vars.ID); !ok {
+		return "", fmt.Errorf("org: director prompt: %q is not a registration id (d<N>, such as d1)", vars.ID)
+	}
+	if vars.Driver != DirectorDriverClaude && vars.Driver != DirectorDriverCodex {
+		return "", fmt.Errorf("org: director prompt: unknown driver %q: use %s or %s", vars.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	if vars.StateDir == "" || vars.Cwd == "" {
+		return "", fmt.Errorf("org: director prompt: the state dir (%q) and the cwd (%q) must both be set", vars.StateDir, vars.Cwd)
+	}
+	if vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {
+		return "", fmt.Errorf("org: director prompt: the config path %q is not absolute (the director runs in another directory, where it would name another file)", vars.ConfigPath)
+	}
+	data, err := promptFS.ReadFile("prompts/" + DirectorRole + ".md")
+	if err != nil {
+		return "", fmt.Errorf("org: director prompt: read the embedded template: %w", err)
+	}
+	stateDir := shellQuote(vars.StateDir)
+	orgFlags, configLine := "--state-dir "+stateDir, directorPromptNoConfigText
+	if vars.ConfigPath != "" {
+		config := shellQuote(vars.ConfigPath)
+		orgFlags += " --config " + config
+		configLine = config + "(start の --config)"
+	}
+	text := strings.NewReplacer(
+		"{{ID}}", vars.ID,
+		"{{DRIVER}}", vars.Driver,
+		"{{STATE_DIR}}", stateDir,
+		"{{ORG_FLAGS}}", orgFlags,
+		"{{CONFIG_LINE}}", configLine,
+		"{{CWD}}", vars.Cwd,
+	).Replace(string(data))
+	if i := strings.Index(text, "{{"); i >= 0 {
+		rest, _, _ := strings.Cut(text[i:], "\n")
+		return "", fmt.Errorf("org: director prompt: a placeholder is left after substitution: %q", rest)
+	}
+	return text, nil
 }
 
 // retiredRoleKind says how a retired role name left the vocabulary.

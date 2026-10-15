@@ -2,6 +2,7 @@ package org
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 )
 
@@ -68,6 +69,17 @@ type StopAllResult struct {
 	// Forced is false, prefixed with `<org_id>/<seat_id>: `. Empty when every
 	// active seat was recorded `stopped`.
 	Errs []error
+	// OpenHeadlessDirectors are the open headless director registrations of
+	// the ledger (DirectorReadResult.OpenHeadless of the director.jsonl next
+	// to the manifest), current or detached, ordered by id. StopAll leaves
+	// them alone: the director is not an org seat, and `ralph org director
+	// stop --id` closes it (plan 2026-10-15-org-director-start, D10). The
+	// CLI prints how.
+	OpenHeadlessDirectors []DirectorRegistration
+	// DirectorReadErr is why director.jsonl could not be read for
+	// OpenHeadlessDirectors. It is not in Errs and changes nothing else
+	// StopAll does.
+	DirectorReadErr error
 }
 
 func (r *StopAllResult) recordStop(seat OrgSeat, res StopResult) {
@@ -113,8 +125,14 @@ func (r *StopAllResult) failSeat(seat OrgSeat, err error) {
 // (the same rule Disband uses).
 //
 // A manifest read failure stops nothing and is the only error.
+//
+// Whatever happens to the seats, StopAll also reports the ledger's open
+// headless directors (OpenHeadlessDirectors), read once, best effort, before
+// the manifest; it never stops one, and a failed read is only recorded in
+// DirectorReadErr.
 func (o *Org) StopAll(p StopAllParams) StopAllResult {
 	var result StopAllResult
+	result.OpenHeadlessDirectors, result.DirectorReadErr = o.openHeadlessDirectors()
 	rr, err := o.Manifest.Read()
 	if err != nil {
 		result.Errs = append(result.Errs, fmt.Errorf("org: stop all: read manifest: %w", err))
@@ -145,6 +163,16 @@ func (o *Org) StopAll(p StopAllParams) StopAllResult {
 		result.recordStop(seat, o.Stop(StopParams{OrgID: seat.OrgID, Seat: seat.SeatID, Force: p.Force}))
 	}
 	return result
+}
+
+// openHeadlessDirectors reads the open headless director registrations of
+// the director.jsonl next to the manifest, for StopAll.
+func (o *Org) openHeadlessDirectors() ([]DirectorRegistration, error) {
+	res, err := NewDirectorStore(filepath.Dir(o.Manifest.Path())).Read()
+	if err != nil {
+		return nil, err
+	}
+	return res.OpenHeadless, nil
 }
 
 // DisbandAllParams describes one `ralph org disband --all` invocation.

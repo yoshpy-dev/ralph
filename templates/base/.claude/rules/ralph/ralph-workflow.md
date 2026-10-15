@@ -28,6 +28,8 @@ workflow guidance formerly in CLAUDE.md.
 - `/director` promotes the current interactive session to the director, the
   one session the human talks to for every feature org: it registers with
   `ralph org director attach`, handles the org inbox, and reports progress.
+  A human can instead launch a headless director with
+  `ralph org director start` (same skill, ended with `director stop`).
 - After `/implement`, the post-implementation pipeline runs via subagents
   (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review`
   (optional, inline), then `/pr`.

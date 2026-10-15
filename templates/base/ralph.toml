@@ -92,10 +92,26 @@ codex_verified = false
 # Example:
 # [org.permissions.roles]
 # reviewer = "guarded"
+# director = "guarded"
 # Note: the reviewer re-runs run-static-verify.sh / run-test.sh, so a
 # guarded claude reviewer stops at the permission prompt. A guarded codex
 # reviewer follows codex's own approval settings instead (whether it stops
 # there is unverified).
+# director sets the mode of the headless director that
+# `ralph org director start` launches in herdr (it is not a seat). A codex
+# director runs only in "guarded": start refuses autonomous and edits
+# whatever codex_verified says, because they run codex under
+# --sandbox workspace-write, which keeps .git read-only, so the director
+# could not start a feature org. A guarded codex director follows
+# ~/.codex/config.toml, so that config must let it write .git and reach the
+# network; under sandbox_mode = "workspace-write" it meets the same wall.
+# Without a director entry the director runs with default: with
+# "autonomous", a claude director runs with bypassPermissions, and only its
+# role prompt and the /director skill keep it from changing code. A guarded
+# director gets no permission flag, so it follows the agent's own approval
+# settings (the human's Claude Code or ~/.codex/config.toml; for example
+# claude with permissions.defaultMode = "bypassPermissions" runs with no
+# prompt).
 
 # [org.watchdog] configures `ralph org watch`'s two layers: a deterministic
 # pulse-layer timer (interval_seconds, stall_minutes) and an on-demand

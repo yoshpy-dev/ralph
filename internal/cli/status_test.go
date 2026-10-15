@@ -812,6 +812,128 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 	}
 }
 
+// AC10 of plan 2026-10-15-org-director-start for `ralph status`, with no
+// orgs and with two: a current headless registration shows headless, its
+// state, model, and the herdr ids recorded on the director: line, and an
+// open headless registration that is not current is named at the end of it
+// with the stop command, attached, disabled, and not attached; --json carries
+// the headless fields and director.open_headless.
+func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	for _, seed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("orgs %v", seed), func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			stateDir := t.TempDir()
+			if seed {
+				seedTwoOrgManifest(t, stateDir)
+			}
+			store := org.NewDirectorStore(stateDir)
+			seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+			if _, err := store.Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+			d2 := seedHeadless(t, stateDir, "claude", "opus", "w-2", "", false)
+			suffix := " --state-dir '" + stateDir + "'"
+			d1Note := "; the headless director d1 (running, pane p-1, workspace w-1) is still open but not attached: stop it with ralph org director stop --id d1" + suffix
+			line := func() string {
+				t.Helper()
+				out, err := runStatusCmd(t, "--state-dir", stateDir)
+				if err != nil {
+					t.Fatalf("status: %v (output: %s)", err, out)
+				}
+				return statusDirectorLine(t, out)
+			}
+
+			want := "director: attached d2 (driver=claude, headless starting, model=opus, workspace w-2, attached at " + d2.AttachedAt + ", by alice)" + tail + d1Note
+			if got := line(); got != want {
+				t.Errorf("director line:\n got %q\nwant %q", got, want)
+			}
+			jsonOut, err := runStatusCmd(t, "--state-dir", stateDir, "--json")
+			if err != nil {
+				t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+			}
+			got := statusDirectorJSONOf(t, jsonOut)
+			if reg := got.Registration; got.State != "attached" || reg == nil || reg.ID != "d2" || reg.Launch != org.DirectorLaunchHerdr ||
+				reg.State != org.DirectorStateStarting || reg.Model != "opus" || reg.WorkspaceID != "w-2" || reg.PaneID != "" || reg.Token != d2.Token ||
+				len(got.OpenHeadless) != 1 || got.OpenHeadless[0].ID != "d1" || got.OpenHeadless[0].State != org.DirectorStateRunning ||
+				got.OpenHeadless[0].PaneID != "p-1" || got.OpenHeadless[0].WorkspaceID != "w-1" {
+				t.Errorf("director = %+v; want d2 headless starting with w-2, and d1 running in open_headless", got)
+			}
+			for _, key := range []string{`"launch": "herdr"`, `"state": "starting"`, `"model": "opus"`, `"workspace_id": "w-2"`, `"open_headless": [`, `"pane_id": "p-1"`} {
+				if !strings.Contains(jsonOut, key) {
+					t.Errorf("status --json does not carry %s:\n%s", key, jsonOut)
+				}
+			}
+
+			writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
+			want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless starting, workspace w-2: " +
+				"stop it with ralph org director stop --id d2" + suffix + ") -- ralph org escalate sends every item to the human at once" + d1Note
+			if got := line(); got != want {
+				t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
+			}
+
+			if err := os.Remove("ralph.toml"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Detach(org.DirectorDetach{ID: "d2", User: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+			want = directorNotAttachedLine + "; the headless directors d1 (running, pane p-1, workspace w-1), d2 (starting, workspace w-2) are still open but not attached: " +
+				"stop each with ralph org director stop --id <id>" + suffix
+			if got := line(); got != want {
+				t.Errorf("director line with no registration current:\n got %q\nwant %q", got, want)
+			}
+		})
+	}
+}
+
+// Self-review L3 of org-director-start: the stop command on the director:
+// line repeats --state-dir exactly when it was given, through `ralph status`
+// and `ralph org director status` alike, shell-quoted so a state dir with a
+// space stays one argument, and names none when RALPH_ORG_STATE_DIR names
+// the ledger instead, as the other director commands do
+// (org.CommandWithStateDir).
+func TestStatusCmd_DirectorStopCommandRepeatsTheStateDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	stateDir := filepath.Join(t.TempDir(), "a ledger")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+	if _, err := org.NewDirectorStore(stateDir).Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	const stop = ": stop it with ralph org director stop --id d1"
+	statusLine := func(args ...string) string {
+		t.Helper()
+		out, err := runStatusCmd(t, args...)
+		if err != nil {
+			t.Fatalf("status %q: %v (output: %s)", args, err, out)
+		}
+		return statusDirectorLine(t, out)
+	}
+
+	withFlag := stop + " --state-dir '" + stateDir + "'"
+	for name, line := range map[string]string{
+		"ralph status --state-dir":              statusLine("--state-dir", stateDir),
+		"ralph org director status --state-dir": directorStatusLine(t, "--state-dir", stateDir),
+	} {
+		if !strings.HasSuffix(line, withFlag) {
+			t.Errorf("%s: director line %q does not end with %q", name, line, withFlag)
+		}
+	}
+
+	t.Setenv("RALPH_ORG_STATE_DIR", stateDir)
+	for name, line := range map[string]string{
+		"ralph status":              statusLine(),
+		"ralph org director status": directorStatusLine(t),
+	} {
+		if !strings.HasSuffix(line, stop) || strings.Contains(line, "--state-dir") {
+			t.Errorf("%s with RALPH_ORG_STATE_DIR: director line %q; want it to end with %q and name no --state-dir", name, line, stop)
+		}
+	}
+}
+
 // AC5, AC6: with no --state-dir in a linked worktree, `ralph status` reads
 // the switch from the main worktree's ralph.toml, as escalate does, whatever
 // the worktree's ralph.toml says. A main worktree ralph.toml that does not

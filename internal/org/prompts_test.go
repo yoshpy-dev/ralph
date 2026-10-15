@@ -3,6 +3,7 @@ package org
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1430,5 +1431,253 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// testDirectorPromptVars are the vars of a headless director whose ledger
+// path holds a space, so the rendered commands show the quoting.
+func testDirectorPromptVars() DirectorPromptVars {
+	return DirectorPromptVars{ID: "d3", Driver: DirectorDriverCodex, StateDir: "/repo a/.harness/state/org", Cwd: "/repo a"}
+}
+
+// testDirectorStateDirArg is testDirectorPromptVars' StateDir as one shell
+// word, the way the template's commands carry it.
+const testDirectorStateDirArg = "'/repo a/.harness/state/org'"
+
+func mustRenderDirectorPrompt(t *testing.T, vars DirectorPromptVars) string {
+	t.Helper()
+	text, err := RenderDirectorPrompt(vars)
+	if err != nil {
+		t.Fatalf("RenderDirectorPrompt(%+v): %v", vars, err)
+	}
+	return text
+}
+
+func TestRenderDirectorPrompt_SubstitutesEveryPlaceholder(t *testing.T) {
+	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
+	if strings.Contains(text, "{{") || strings.Contains(text, "}}") {
+		t.Fatalf("rendered director prompt still holds a placeholder:\n%s", text)
+	}
+	for _, want := range []string{"- id: d3 / driver: codex", "- 台帳: " + testDirectorStateDirArg, "- cwd: /repo a"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("rendered director prompt has no line %q:\n%s", want, text)
+		}
+	}
+	// A single quote in the path is closed, escaped, and opened again, so
+	// every command in the template stays one shell word for it.
+	vars := testDirectorPromptVars()
+	vars.StateDir = "/it's/org"
+	if text := mustRenderDirectorPrompt(t, vars); !strings.Contains(text, `ralph org director status --state-dir '/it'\''s/org'`) {
+		t.Errorf("rendered director prompt does not quote a state dir with a single quote:\n%s", text)
+	}
+}
+
+// TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure pins AC4 and
+// AC11 of plan docs/plans/active/2026-10-15-org-director-start.md (D3 and
+// D7): the first step reads the registration and does nothing else unless
+// it is this director's; the procedure is the /director skill's, minus the
+// watch check and the attach that start did; every ralph org command gets
+// --state-dir; the human is talked to in this pane; the director does not
+// implement; and at the end it asks the human to stop it from outside herdr
+// instead of detaching.
+func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
+	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
+	section := func(header string) string {
+		t.Helper()
+		body, found := markdownSection(text, header)
+		if !found {
+			t.Fatalf("rendered director prompt has no %q section:\n%s", header, text)
+		}
+		return body
+	}
+	for _, tc := range []struct {
+		header  string
+		phrases []string
+	}{
+		{"## 最初の手順", []string{
+			"ほかの何よりも先に、次のコマンドを打つ。",
+			"ralph org director status --state-dir " + testDirectorStateDirArg,
+			"今の登録の `id` が `d3` であることを確かめてから動く。",
+			"`id` が `d3` と違うとき、または登録がなく `not attached` と出たときは、ほかに何もしない",
+			"そのことをこの pane に書いて止まる。detach も打たない。",
+		}},
+		{"## ミッション", []string{
+			"あなたは `ralph org director start` が立てた headless の director です。",
+			"手順の全体は `/director` skill に従ってください。",
+			"見張りの確かめ(`ralph status` の `org watch:` の行と `ralph org watch --all --detach`)と attach は start が済ませたので、打たない。",
+			"会話の要約のあとに `ralph org director status --state-dir " + testDirectorStateDirArg + "` で今の登録を読み直す手順は守る。",
+			"あなたが打つ `ralph org` のコマンドには、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
+			"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
+			"人とはこの pane で話す。",
+			"実装しない。",
+		}},
+		{"## 終わり", []string{
+			"`ralph org director detach` は打たない。",
+			"人に、herdr の外の端末から次のコマンドを打つよう頼む。",
+			"ralph org director stop --id d3 --state-dir " + testDirectorStateDirArg,
+			"stop は自分で打たない。",
+		}},
+	} {
+		body := section(tc.header)
+		for _, phrase := range tc.phrases {
+			if !containsPhrase(body, phrase) {
+				t.Errorf("%s section does not say %q:\n%s", tc.header, phrase, body)
+			}
+		}
+	}
+	// The first step comes before anything else the director is told.
+	if first, mission := strings.Index(text, "## 最初の手順"), strings.Index(text, "## ミッション"); first < 0 || mission < first {
+		t.Errorf("the first step (at %d) is not before the mission (at %d)", first, mission)
+	}
+}
+
+// markdownCodeSpan is one inline code span of a markdown text: its content
+// is the submatch.
+var markdownCodeSpan = regexp.MustCompile("`([^`]+)`")
+
+// directorPromptCommands returns the ralph org commands of a rendered
+// director prompt in the order they appear: each line of a fenced code block
+// that begins with "ralph org", and each inline code span that does, read
+// with the paragraph's line breaks and indentation folded to one space so a
+// span wrapped over two lines is still found.
+func directorPromptCommands(text string) []string {
+	var commands, paragraph []string
+	flush := func() {
+		for _, m := range markdownCodeSpan.FindAllStringSubmatch(strings.Join(paragraph, " "), -1) {
+			if strings.HasPrefix(m[1], "ralph org") {
+				commands = append(commands, m[1])
+			}
+		}
+		paragraph = nil
+	}
+	inBlock := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "```"):
+			flush()
+			inBlock = !inBlock
+		case inBlock:
+			if strings.HasPrefix(trimmed, "ralph org") {
+				commands = append(commands, trimmed)
+			}
+		default:
+			paragraph = append(paragraph, trimmed)
+		}
+	}
+	flush()
+	return commands
+}
+
+// TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig pins AC11's
+// --config sentence: with a ConfigPath, every ralph org command the template
+// has the director run ends with --state-dir and --config, each one shell
+// word (a path with a space and a single quote included), the instruction
+// says so, and the header names the file. Without one, the text holds no
+// --config at all and the header names the main worktree's ralph.toml.
+// ralph status has no --config, and stop, which the director asks the human
+// to run, reads no ralph.toml, so both get --state-dir only, with a
+// ConfigPath too (the stop command the CLI prints after start has no
+// --config either). The other ralph org mentions are ones the director does
+// not run.
+func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
+	const configArg = `'/cfg dir/it'\''s ralph.toml'`
+	stateDirFlag := "--state-dir " + testDirectorStateDirArg
+	notRun := []string{"ralph org", "ralph org director start", "ralph org watch --all --detach", "ralph org director detach"}
+	for _, tc := range []struct {
+		name, configPath, flags, header string
+	}{
+		{"with --config", "/cfg dir/it's ralph.toml", "--state-dir " + testDirectorStateDirArg + " --config " + configArg,
+			"- 設定: " + configArg + "(start の --config)\n"},
+		{"without --config", "", "--state-dir " + testDirectorStateDirArg,
+			"- 設定: main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			vars.ConfigPath = tc.configPath
+			text := mustRenderDirectorPrompt(t, vars)
+
+			commands := directorPromptCommands(text)
+			if got := strings.Count(text, "ralph org"); got != len(commands) {
+				t.Fatalf("the prompt says ralph org %d times, but only %d are commands in code: %q", got, len(commands), commands)
+			}
+			var run []string
+			for _, c := range commands {
+				if !slices.Contains(notRun, c) {
+					run = append(run, c)
+				}
+			}
+			// Each ends with its flags and has no other: status, which the
+			// director runs, gets the config, and stop, which the human
+			// runs, gets the ledger alone.
+			want := []string{
+				"ralph org director status " + tc.flags,
+				"ralph org director status " + tc.flags,
+				"ralph org director stop --id d3 " + stateDirFlag,
+			}
+			if !slices.Equal(run, want) {
+				t.Errorf("ralph org commands the director runs or asks the human to run = %q, want %q", run, want)
+			}
+			for _, phrase := range []string{
+				"あなたが打つ `ralph org` のコマンドには、どれも `" + tc.flags + "` を付ける。",
+				"`ralph status` には `" + stateDirFlag + "` だけを付ける。",
+				"終わりに人に頼む stop は ralph.toml を読まないので、`" + stateDirFlag + "` だけを持つ。",
+			} {
+				if !containsPhrase(text, phrase) {
+					t.Errorf("rendered director prompt does not say %q:\n%s", phrase, text)
+				}
+			}
+			if !strings.Contains(text, "\n- 台帳: "+testDirectorStateDirArg+"\n"+tc.header) {
+				t.Errorf("rendered director prompt has no header line %q after the ledger's:\n%s", tc.header, text)
+			}
+			if tc.configPath == "" && strings.Contains(text, "--config") {
+				t.Errorf("rendered director prompt says --config with no ConfigPath:\n%s", text)
+			}
+		})
+	}
+}
+
+func TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(v *DirectorPromptVars)
+		want   string
+	}{
+		{"an id not of the form d<N>", func(v *DirectorPromptVars) { v.ID = "d01" }, `"d01" is not a registration id`},
+		{"an empty id", func(v *DirectorPromptVars) { v.ID = "" }, `"" is not a registration id`},
+		{"an unknown driver", func(v *DirectorPromptVars) { v.Driver = "gemini" }, `unknown driver "gemini"`},
+		{"an empty state dir", func(v *DirectorPromptVars) { v.StateDir = "" }, "must both be set"},
+		{"an empty cwd", func(v *DirectorPromptVars) { v.Cwd = "" }, "must both be set"},
+		{"a value that holds a placeholder", func(v *DirectorPromptVars) { v.Cwd = "/x/{{ID}}" }, "a placeholder is left after substitution"},
+		{"a state dir that holds braces", func(v *DirectorPromptVars) { v.StateDir = "/x/{{" }, "a placeholder is left after substitution"},
+		{"a relative config path", func(v *DirectorPromptVars) { v.ConfigPath = "ralph.toml" }, `the config path "ralph.toml" is not absolute`},
+		{"a config path that holds a placeholder", func(v *DirectorPromptVars) { v.ConfigPath = "/x/{{ID}}.toml" }, "a placeholder is left after substitution"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			tc.mutate(&vars)
+			text, err := RenderDirectorPrompt(vars)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "org: director prompt: ") {
+				t.Fatalf("RenderDirectorPrompt(%+v) err = %v, want one with %q", vars, err, tc.want)
+			}
+			if text != "" {
+				t.Errorf("refused render returned text %q", text)
+			}
+		})
+	}
+}
+
+// The director's template is embedded with the seat templates, but it is
+// not a seat role: RenderRolePrompt answers it as a role with no template,
+// so nothing renders it with seat vars.
+func TestRenderRolePrompt_DirectorIsNotASeatTemplate(t *testing.T) {
+	if _, err := promptFS.ReadFile("prompts/" + DirectorRole + ".md"); err != nil {
+		t.Fatalf("the director template is not embedded: %v", err)
+	}
+	vars := testRolePromptVars()
+	vars.Role, vars.SeatID = DirectorRole, DirectorRole
+	text, ok, err := RenderRolePrompt(DirectorRole, vars)
+	if err != nil || ok || text != "" {
+		t.Fatalf("RenderRolePrompt(%q) = (%q, %v, %v), want (\"\", false, nil)", DirectorRole, text, ok, err)
 	}
 }

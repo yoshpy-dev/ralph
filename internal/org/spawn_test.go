@@ -3305,6 +3305,90 @@ func TestOrgSpawn_RetiredLeaderName_RejectedBeforeAnyManifestWrite(t *testing.T)
 	}
 }
 
+// TestOrgSpawn_DirectorRole_RejectedBeforeAnyManifestWrite pins AC11 of plan
+// docs/plans/active/2026-10-15-org-director-start.md (D7): the director is
+// not a seat, so `ralph org spawn --role director` is refused, with or
+// without a --prompt, and whatever [org.roles] and [org.permissions.roles]
+// say for the role. As with a retired name, the refusal is a plain
+// rejection in dry-run and real mode alike: no herdr or agmsg call, no
+// manifest event, and no receipt. The error names `ralph org director
+// start`, the way to launch one.
+func TestOrgSpawn_DirectorRole_RejectedBeforeAnyManifestWrite(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(p *SpawnParams, cfg *config.OrgConfig)
+	}{
+		{"role", func(p *SpawnParams, _ *config.OrgConfig) { p.Role = DirectorRole }},
+		{"role with --prompt", func(p *SpawnParams, _ *config.OrgConfig) {
+			p.Role = DirectorRole
+			p.Prompt = "act as the director"
+		}},
+		{"role configured in ralph.toml", func(p *SpawnParams, cfg *config.OrgConfig) {
+			p.Role = DirectorRole
+			cfg.Roles[DirectorRole] = []string{"sonnet"}
+			cfg.Permissions.Roles = map[string]string{DirectorRole: PermissionModeGuarded}
+		}},
+		{"leader seat id with role director", func(p *SpawnParams, _ *config.OrgConfig) {
+			p.SeatID = LeaderIdentity
+			p.Role = DirectorRole
+		}},
+	}
+	for _, tc := range cases {
+		for _, dryRun := range []bool{false, true} {
+			mode := "real"
+			if dryRun {
+				mode = "dry-run"
+			}
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				o, h, a := testOrg(t)
+				p := mustSpawnParams("org-a", "seat-1")
+				p.DryRun = dryRun
+				tc.mutate(&p, &o.Config)
+
+				result := o.Spawn(p)
+
+				if result.Outcome != SpawnOutcomeRejected || result.Err == nil {
+					t.Fatalf("Outcome = %v, Err = %v; want SpawnOutcomeRejected with an error", result.Outcome, result.Err)
+				}
+				for _, want := range []string{`role "director" is not a seat role`, "the director is not an org seat", "ralph org director start"} {
+					if !strings.Contains(result.Err.Error(), want) {
+						t.Errorf("error %q should contain %q", result.Err.Error(), want)
+					}
+				}
+				if len(h.calls) != 0 || len(a.calls) != 0 {
+					t.Errorf("expected no driver calls, got herdr=%v agmsg=%v", h.calls, a.calls)
+				}
+				if got := eventNames(t, o); len(got) != 0 {
+					t.Errorf("expected no manifest event for the director role, got %v", got)
+				}
+				if _, err := os.Stat(o.Manifest.Path()); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("the refusal created the manifest (stat err = %v)", err)
+				}
+				rr, err := o.Receipts.Read()
+				if err != nil {
+					t.Fatalf("read receipts: %v", err)
+				}
+				if len(rr.Receipts) != 0 || result.ModelReceipt != (Receipt{}) {
+					t.Errorf("expected no receipt for the director role, got %+v and %+v", rr.Receipts, result.ModelReceipt)
+				}
+			})
+		}
+	}
+}
+
+// The director role check matches exactly, like the rest of the role
+// handling: another spelling is an ordinary custom role name.
+func TestDirectorRoleInputErr_IsExactAndCaseSensitive(t *testing.T) {
+	for _, role := range []string{"Director", "directors", " director", "", "leader", "reviewer"} {
+		if err := DirectorRoleInputErr(role); err != nil {
+			t.Errorf("DirectorRoleInputErr(%q) = %v, want nil", role, err)
+		}
+	}
+	if err := DirectorRoleInputErr(DirectorRole); err == nil {
+		t.Errorf("DirectorRoleInputErr(%q) = nil, want the refusal", DirectorRole)
+	}
+}
+
 // TestOrgSpawn_RetiredLeaderName_ConfigKeyErrorNamesEveryOffendingKey pins
 // that a ralph.toml with the old key in both tables lists both, so the
 // operator renames them in one pass instead of one rejection per table.

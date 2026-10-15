@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -1031,4 +1032,1064 @@ func TestDirectorStore_ReportsAnUnreadableFileAndAnUnavailableLock(t *testing.T)
 			t.Errorf("Attach wrote director.jsonl without the lock (stat err = %v)", err)
 		}
 	})
+}
+
+// The headless registration of `ralph org director start` (plan
+// docs/plans/active/2026-10-15-org-director-start.md, D2, D3, D4, and D9).
+
+// directorTestToken is the launch token a newTestHeadlessStore hands out
+// when the test names none.
+const directorTestToken = "0123456789ab"
+
+// newTestHeadlessStore is newTestDirectorStore whose AttachHeadless gets the
+// given launch tokens in order (directorTestToken when none is given), so a
+// test can name the lines it writes. It is for one goroutine only.
+func newTestHeadlessStore(t *testing.T, tokens ...string) (*DirectorStore, string, *time.Time) {
+	t.Helper()
+	s, dir, clock := newTestDirectorStore(t)
+	if len(tokens) == 0 {
+		tokens = []string{directorTestToken}
+	}
+	s.token = func() (string, error) {
+		if len(tokens) == 0 {
+			t.Fatal("AttachHeadless asked for more launch tokens than the test gave")
+		}
+		token := tokens[0]
+		tokens = tokens[1:]
+		return token, nil
+	}
+	return s, dir, clock
+}
+
+func testHeadlessAttach() DirectorHeadlessAttach {
+	return DirectorHeadlessAttach{
+		Driver: DirectorDriverCodex, Model: "gpt-x", PermissionMode: PermissionModeAutonomous,
+		User: "alice", Cwd: "/work/a",
+	}
+}
+
+func mustAttachHeadless(t *testing.T, s *DirectorStore) DirectorRegistration {
+	t.Helper()
+	reg, err := s.AttachHeadless(testHeadlessAttach())
+	if err != nil {
+		t.Fatalf("AttachHeadless: %v", err)
+	}
+	return reg
+}
+
+// testDirectorWho is who writes the later events of a headless registration
+// in these tests.
+var testDirectorWho = DirectorWho{User: "bob", Cwd: "/work/b"}
+
+// directorHeadlessAttachedLine is the attached line of a headless
+// registration as a test fixture.
+func directorHeadlessAttachedLine(id, token string) string {
+	return fmt.Sprintf(`{"ts":"2026-10-15T00:00:00Z","id":%q,"event":"attached","driver":"codex","wake":["pull"],"launch":"herdr","token":%q,"model":"m","permission_mode":"guarded","user":"u","cwd":"/w","herdr_pane":false}`, id, token)
+}
+
+// directorEventLine is a director.jsonl line of kind event for id as a test
+// fixture, with fields (`"key":"value",` pairs, each with its comma) after
+// the event.
+func directorEventLine(id, event, fields string) string {
+	return fmt.Sprintf(`{"ts":"2026-10-15T00:00:02Z","id":%q,"event":%q,%s"user":"u","cwd":"/w","herdr_pane":false}`, id, event, fields)
+}
+
+func directorWorkspaceLine(id, workspaceID string) string {
+	return directorEventLine(id, DirectorEventWorkspaceCreated, fmt.Sprintf(`"workspace_id":%q,`, workspaceID))
+}
+
+func directorPaneLine(id, paneID string) string {
+	return directorEventLine(id, DirectorEventPaneCreated, fmt.Sprintf(`"pane_id":%q,`, paneID))
+}
+
+// directorRegSummary names r by its id, state, workspace, and pane.
+func directorRegSummary(r DirectorRegistration) string {
+	return fmt.Sprintf("%s %s ws=%s pane=%s", r.ID, r.State, r.WorkspaceID, r.PaneID)
+}
+
+func openHeadlessSummary(res DirectorReadResult) []string {
+	var out []string
+	for _, r := range res.OpenHeadless {
+		out = append(out, directorRegSummary(r))
+	}
+	return out
+}
+
+func TestDirectorAttachHeadless_RecordsTheLaunchAndItsEvents(t *testing.T) {
+	s, _, clock := newTestHeadlessStore(t)
+	reg, err := s.AttachHeadless(testHeadlessAttach())
+	if err != nil {
+		t.Fatalf("AttachHeadless: %v", err)
+	}
+	want := DirectorRegistration{
+		ID: "d1", Driver: DirectorDriverCodex, Wake: []string{DirectorWakePull},
+		Launch: DirectorLaunchHerdr, State: DirectorStateStarting, Token: directorTestToken,
+		Model: "gpt-x", PermissionMode: PermissionModeAutonomous,
+		AttachedAt: directorTestNow, User: "alice", Cwd: "/work/a",
+	}
+	if !reflect.DeepEqual(reg, want) {
+		t.Fatalf("AttachHeadless = %+v, want %+v", reg, want)
+	}
+	*clock = clock.Add(time.Second)
+	if err := s.RecordWorkspace("d1", "w7", testDirectorWho); err != nil {
+		t.Fatalf("RecordWorkspace: %v", err)
+	}
+	if err := s.RecordPane("d1", "w7:p1", DirectorWho{User: "bob", Cwd: "/work/b", HerdrPane: true}); err != nil {
+		t.Fatalf("RecordPane: %v", err)
+	}
+	if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || !still {
+		t.Fatalf("MarkLaunched = %v, %v; want true, nil", still, err)
+	}
+
+	wantLines := []string{
+		`{"ts":"2026-10-15T09:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"herdr","token":"0123456789ab","model":"gpt-x","permission_mode":"autonomous","user":"alice","cwd":"/work/a","herdr_pane":false}`,
+		`{"ts":"2026-10-15T09:00:01Z","id":"d1","event":"workspace_created","workspace_id":"w7","user":"bob","cwd":"/work/b","herdr_pane":false}`,
+		`{"ts":"2026-10-15T09:00:01Z","id":"d1","event":"pane_created","pane_id":"w7:p1","user":"bob","cwd":"/work/b","herdr_pane":true}`,
+		`{"ts":"2026-10-15T09:00:01Z","id":"d1","event":"launched","user":"bob","cwd":"/work/b","herdr_pane":false}`,
+	}
+	if got := directorFileLines(t, s); strings.Join(got, "\n") != strings.Join(wantLines, "\n") {
+		t.Fatalf("director.jsonl =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(wantLines, "\n"))
+	}
+	res := mustReadDirector(t, s)
+	want.State, want.WorkspaceID, want.PaneID = DirectorStateRunning, "w7", "w7:p1"
+	if res.Current == nil || !reflect.DeepEqual(*res.Current, want) || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want %+v", res, res.Current, want)
+	}
+	if len(res.OpenHeadless) != 1 || !reflect.DeepEqual(res.OpenHeadless[0], want) {
+		t.Fatalf("OpenHeadless = %+v, want only %+v", res.OpenHeadless, want)
+	}
+	raw, err := json.Marshal(*res.Current)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	wantJSON := `{"id":"d1","driver":"codex","wake":["pull"],"pane_id":"w7:p1","launch":"herdr","state":"running","token":"0123456789ab","model":"gpt-x",` +
+		`"permission_mode":"autonomous","workspace_id":"w7","attached_at":"2026-10-15T09:00:00Z","user":"alice","cwd":"/work/a","herdr_pane":false}`
+	if string(raw) != wantJSON {
+		t.Fatalf("JSON = %s, want %s", raw, wantJSON)
+	}
+}
+
+// A director.jsonl of stage 8a-1 (no new field, no new event) folds as it
+// did: the same current registration, nothing ignored, and no open headless
+// registration.
+func TestDirectorRead_AStage8a1FileReadsAsBefore(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	writeDirectorFile(t, s, strings.Join([]string{
+		directorAttachedLine("d1", "claude"),
+		directorDetachedLine("d1"),
+		`{"ts":"2026-10-15T08:00:00Z","id":"d2","event":"attached","driver":"codex","wake":["pull"],"pane_id":"w1:p2","user":"carol","cwd":"/work/c","herdr_pane":true}`,
+	}, "\n")+"\n")
+	res := mustReadDirector(t, s)
+	want := DirectorRegistration{
+		ID: "d2", Driver: DirectorDriverCodex, Wake: []string{DirectorWakePull}, PaneID: "w1:p2",
+		AttachedAt: "2026-10-15T08:00:00Z", User: "carol", Cwd: "/work/c", HerdrPane: true,
+	}
+	if res.Current == nil || !reflect.DeepEqual(*res.Current, want) || res.OpenHeadless != nil || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want %+v and no open headless registration", res, res.Current, want)
+	}
+	if res.Current.Headless() {
+		t.Fatalf("a promoted registration reads as headless: %+v", res.Current)
+	}
+}
+
+func TestDirectorRead_FoldsHeadlessRegistrations(t *testing.T) {
+	att := directorHeadlessAttachedLine
+	ev := func(id, event string) string { return directorEventLine(id, event, "") }
+	tok := directorTestToken
+	for _, tc := range []struct {
+		name        string
+		lines       []string
+		wantCurrent string // directorRegSummary of the current registration, "" for none
+		wantOpen    []string
+		wantIgnored int
+		wantCorrupt int
+	}{
+		{
+			name:        "starting",
+			lines:       []string{att("d1", tok)},
+			wantCurrent: "d1 starting ws= pane=",
+			wantOpen:    []string{"d1 starting ws= pane="},
+		},
+		{
+			name:        "running with its workspace and pane",
+			lines:       []string{att("d1", tok), directorWorkspaceLine("d1", "w1"), directorPaneLine("d1", "p1"), ev("d1", DirectorEventLaunched)},
+			wantCurrent: "d1 running ws=w1 pane=p1",
+			wantOpen:    []string{"d1 running ws=w1 pane=p1"},
+		},
+		{
+			name:     "detached but not stopped stays open",
+			lines:    []string{att("d1", tok), directorWorkspaceLine("d1", "w1"), directorDetachedLine("d1")},
+			wantOpen: []string{"d1 starting ws=w1 pane="},
+		},
+		{
+			name:  "stopped while current, as MarkStopped writes it",
+			lines: []string{att("d1", tok), directorPaneLine("d1", "p1"), ev("d1", DirectorEventLaunched), directorDetachedLine("d1"), ev("d1", DirectorEventStopped)},
+		},
+		{
+			name:  "stopped after a detach",
+			lines: []string{att("d1", tok), directorDetachedLine("d1"), ev("d1", DirectorEventStopped)},
+		},
+		{
+			// A stopped with no detached is a hand edit: the registration
+			// stays current, so attach and start refuse, but it is not open.
+			name:        "stopped while current without a detached",
+			lines:       []string{att("d1", tok), ev("d1", DirectorEventStopped)},
+			wantCurrent: "d1 stopped ws= pane=",
+		},
+		{
+			name: "the ids of a replaced registration are still recorded",
+			lines: []string{
+				att("d1", tok), directorDetachedLine("d1"), directorAttachedLine("d2", "claude"),
+				directorWorkspaceLine("d1", "w1"), directorPaneLine("d1", "p1"),
+			},
+			wantCurrent: "d2  ws= pane=",
+			wantOpen:    []string{"d1 starting ws=w1 pane=p1"},
+		},
+		{
+			name:        "a launched for a registration that is not current is ignored",
+			lines:       []string{att("d1", tok), directorDetachedLine("d1"), directorAttachedLine("d2", "claude"), ev("d1", DirectorEventLaunched)},
+			wantCurrent: "d2  ws= pane=",
+			wantOpen:    []string{"d1 starting ws= pane="},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a second launched is ignored",
+			lines:       []string{att("d1", tok), ev("d1", DirectorEventLaunched), ev("d1", DirectorEventLaunched)},
+			wantCurrent: "d1 running ws= pane=",
+			wantOpen:    []string{"d1 running ws= pane="},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a second stopped is ignored",
+			lines:       []string{att("d1", tok), directorDetachedLine("d1"), ev("d1", DirectorEventStopped), ev("d1", DirectorEventStopped)},
+			wantIgnored: 1,
+		},
+		{
+			name: "events after the stopped are ignored",
+			lines: []string{
+				att("d1", tok), directorDetachedLine("d1"), ev("d1", DirectorEventStopped),
+				directorWorkspaceLine("d1", "w1"), directorPaneLine("d1", "p1"), ev("d1", DirectorEventLaunched),
+			},
+			wantIgnored: 3,
+		},
+		{
+			name: "a headless attached with a malformed token is ignored",
+			lines: []string{
+				att("d1", "0123456789AB"), att("d2", ""), att("d3", "0123456789abc"), att("d4", "0123456789a"), att("d5", "0123456789ag"),
+				att("d6", tok),
+			},
+			wantCurrent: "d6 starting ws= pane=",
+			wantOpen:    []string{"d6 starting ws= pane="},
+			wantIgnored: 5,
+		},
+		{
+			name: "events for an id no registration has are ignored",
+			lines: []string{
+				att("d1", tok), directorWorkspaceLine("d9", "w9"), directorPaneLine("d9", "p9"),
+				ev("d9", DirectorEventLaunched), ev("d9", DirectorEventStopped),
+			},
+			wantCurrent: "d1 starting ws= pane=",
+			wantOpen:    []string{"d1 starting ws= pane="},
+			wantIgnored: 4,
+		},
+		{
+			name: "events for a promoted registration are ignored",
+			lines: []string{
+				directorAttachedLine("d1", "claude"), directorWorkspaceLine("d1", "w1"), directorPaneLine("d1", "p1"),
+				ev("d1", DirectorEventLaunched), ev("d1", DirectorEventStopped),
+			},
+			wantCurrent: "d1  ws= pane=",
+			wantIgnored: 4,
+		},
+		{
+			name: "a second workspace or pane keeps the first",
+			lines: []string{
+				att("d1", tok), directorWorkspaceLine("d1", "w1"), directorWorkspaceLine("d1", "w2"),
+				directorPaneLine("d1", "p1"), directorPaneLine("d1", "p2"),
+			},
+			wantCurrent: "d1 starting ws=w1 pane=p1",
+			wantOpen:    []string{"d1 starting ws=w1 pane=p1"},
+			wantIgnored: 2,
+		},
+		{
+			name:        "a workspace_created or pane_created with no id is ignored",
+			lines:       []string{att("d1", tok), ev("d1", DirectorEventWorkspaceCreated), ev("d1", DirectorEventPaneCreated)},
+			wantCurrent: "d1 starting ws= pane=",
+			wantOpen:    []string{"d1 starting ws= pane="},
+			wantIgnored: 2,
+		},
+		{
+			name: "the pane_id of a headless attached is not read",
+			lines: []string{
+				`{"ts":"2026-10-15T00:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"pane_id":"p0","launch":"herdr","token":"0123456789ab","user":"u","cwd":"/w","herdr_pane":false}`,
+				directorPaneLine("d1", "p1"),
+			},
+			wantCurrent: "d1 starting ws= pane=p1",
+			wantOpen:    []string{"d1 starting ws= pane=p1"},
+		},
+		{
+			// A launch this binary does not know is still a registration, so
+			// attach and start refuse on it; it is not headless.
+			name: "an attached with an unknown launch is a registration but not headless",
+			lines: []string{
+				`{"ts":"2026-10-15T00:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"terminal","token":"zz","user":"u","cwd":"/w","herdr_pane":false}`,
+				ev("d1", DirectorEventStopped),
+			},
+			wantCurrent: "d1  ws= pane=",
+			wantIgnored: 1,
+		},
+		{
+			name: "open headless registrations are ordered by their number",
+			lines: []string{
+				att("d10", tok), directorDetachedLine("d10"), att("d2", tok), directorDetachedLine("d2"), att("d3", tok),
+			},
+			wantCurrent: "d3 starting ws= pane=",
+			wantOpen:    []string{"d2 starting ws= pane=", "d3 starting ws= pane=", "d10 starting ws= pane="},
+		},
+		{
+			name:        "a damaged line between the events is counted and skipped",
+			lines:       []string{att("d1", tok), `{"ts":"t","id":"d1","event":"pane_cre`, directorPaneLine("d1", "p1")},
+			wantCurrent: "d1 starting ws= pane=p1",
+			wantOpen:    []string{"d1 starting ws= pane=p1"},
+			wantCorrupt: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestDirectorStore(t)
+			writeDirectorFile(t, s, strings.Join(tc.lines, "\n")+"\n")
+			res := mustReadDirector(t, s)
+			current := ""
+			if res.Current != nil {
+				current = directorRegSummary(*res.Current)
+			}
+			if current != tc.wantCurrent {
+				t.Errorf("current = %q, want %q", current, tc.wantCurrent)
+			}
+			if got := openHeadlessSummary(res); !reflect.DeepEqual(got, tc.wantOpen) {
+				t.Errorf("OpenHeadless = %q, want %q", got, tc.wantOpen)
+			}
+			if res.IgnoredEvents != tc.wantIgnored || res.CorruptLines != tc.wantCorrupt {
+				t.Errorf("ignored %d, corrupt %d; want %d and %d", res.IgnoredEvents, res.CorruptLines, tc.wantIgnored, tc.wantCorrupt)
+			}
+		})
+	}
+}
+
+// Attach and AttachHeadless refuse on each other: any current registration,
+// a headless one starting included, refuses both without a replace. The
+// message names the registration, and a headless one by its state.
+func TestDirectorAttachHeadless_RefusesWhileARegistrationIsCurrent(t *testing.T) {
+	const unknownLaunch = `{"ts":"2026-10-15T00:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"terminal","user":"u","cwd":"/w","herdr_pane":false}`
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, s *DirectorStore)
+		named string
+	}{
+		{"a promoted session", func(t *testing.T, s *DirectorStore) {
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+		}, "d1 (driver claude, attached " + directorTestNow + ")"},
+		{"a headless director starting", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+		}, "d1 (driver codex, attached " + directorTestNow + ", headless starting)"},
+		{"a headless director running", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || !still {
+				t.Fatalf("MarkLaunched = %v, %v", still, err)
+			}
+		}, "d1 (driver codex, attached " + directorTestNow + ", headless running)"},
+		{"a registration with a launch this binary does not know", func(t *testing.T, s *DirectorStore) {
+			writeDirectorFile(t, s, unknownLaunch+"\n")
+		}, "d1 (driver codex, attached 2026-10-15T00:00:00Z, launch terminal)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t, directorTestToken, "aaaaaaaaaaaa")
+			tc.setup(t, s)
+			before := readDirectorFile(t, s)
+
+			reg, err := s.AttachHeadless(testHeadlessAttach())
+			if !errors.Is(err, ErrDirectorAttached) || err.Error() != "org: director: start: a director is already attached: "+tc.named {
+				t.Errorf("AttachHeadless err = %v, want ErrDirectorAttached naming %s", err, tc.named)
+			}
+			if reg.ID != "" {
+				t.Errorf("refused AttachHeadless returned %+v", reg)
+			}
+			_, _, err = s.Attach(DirectorAttach{Driver: DirectorDriverClaude})
+			if !errors.Is(err, ErrDirectorAttached) || err.Error() != "org: director: attach: a director is already attached: "+tc.named {
+				t.Errorf("Attach err = %v, want ErrDirectorAttached naming %s", err, tc.named)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl changed to %q", got)
+			}
+		})
+	}
+}
+
+// A headless registration ended by a detach (or replaced) no longer blocks a
+// new start, and stays open next to the new one until it is stopped.
+func TestDirectorAttachHeadless_AfterADetachTheOldOneStaysOpen(t *testing.T) {
+	s, _, _ := newTestHeadlessStore(t, directorTestToken, "bbbbbbbbbbbb")
+	mustAttachHeadless(t, s)
+	if _, err := s.Detach(DirectorDetach{ID: "d1"}); err != nil {
+		t.Fatalf("Detach d1: %v", err)
+	}
+	reg := mustAttachHeadless(t, s)
+	if reg.ID != "d2" || reg.Token != "bbbbbbbbbbbb" {
+		t.Fatalf("second AttachHeadless = %+v, want d2 with the second token", reg)
+	}
+	res := mustReadDirector(t, s)
+	if currentDirectorID(res) != "d2" || !reflect.DeepEqual(openHeadlessSummary(res), []string{"d1 starting ws= pane=", "d2 starting ws= pane="}) {
+		t.Fatalf("Read = current %+v, open %q; want d2 current and d1, d2 open", res.Current, openHeadlessSummary(res))
+	}
+}
+
+// Every launch gets a token of its own from crypto/rand, and the names built
+// from it fit herdr's agent-name rule and cannot be an org's or a seat's.
+func TestDirectorAttachHeadless_TokensAndTheNamesBuiltFromThem(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	first := mustAttachHeadless(t, s)
+	if _, err := s.Detach(DirectorDetach{ID: first.ID}); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	second := mustAttachHeadless(t, s)
+	if first.Token == second.Token {
+		t.Fatalf("two launches share the token %q", first.Token)
+	}
+	herdrAgentNameRule := regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	for _, token := range []string{first.Token, second.Token} {
+		if !regexp.MustCompile(`^[0-9a-f]{12}$`).MatchString(token) {
+			t.Errorf("token %q is not 12 lowercase hex digits", token)
+		}
+		agent, tab, workspace := DirectorAgentName(token), DirectorTabLabel(token), DirectorWorkspaceLabel(token)
+		if agent != "director_"+token || tab != agent || workspace != "ralph_director_"+token {
+			t.Errorf("names of %q = agent %q, tab %q, workspace %q", token, agent, tab, workspace)
+		}
+		if len(agent) != 21 || len(agent) > maxHerdrAgentNameLen || !herdrAgentNameRule.MatchString(agent) {
+			t.Errorf("agent name %q (%d characters) does not fit herdr's rule", agent, len(agent))
+		}
+		// An org's workspace label is its org_id and a seat's tab label its
+		// seat_id, and neither may hold "_".
+		if identifierPattern.MatchString(tab) || identifierPattern.MatchString(workspace) {
+			t.Errorf("label %q or %q could be an org's or a seat's", tab, workspace)
+		}
+	}
+}
+
+func TestDirectorAttachHeadless_RefusesBadInputBeforeReadingAnything(t *testing.T) {
+	errToken := errors.New("no randomness")
+	for _, tc := range []struct {
+		name   string
+		mutate func(h *DirectorHeadlessAttach)
+		token  func() (string, error)
+		want   string
+	}{
+		{name: "no driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "" }, want: `start: unknown driver "": use claude or codex`},
+		{name: "an unknown driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "gemini" }, want: `start: unknown driver "gemini"`},
+		{name: "no model", mutate: func(h *DirectorHeadlessAttach) { h.Model = "" }, want: "start: the model is empty"},
+		{name: "no permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "" }, want: `start: unknown permission mode "": use autonomous, edits, or guarded`},
+		{name: "an unknown permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "bypass" }, want: `unknown permission mode "bypass"`},
+		{name: "no token", token: func() (string, error) { return "", errToken }, want: "start: no randomness"},
+		{name: "a malformed token", token: func() (string, error) { return "0123456789AB", nil }, want: `launch token "0123456789AB" is not 12 lowercase hex digits`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := filepath.Join(t.TempDir(), "absent", "org")
+			s := NewDirectorStore(state)
+			s.token = tc.token
+			h := testHeadlessAttach()
+			if tc.mutate != nil {
+				tc.mutate(&h)
+			}
+			reg, err := s.AttachHeadless(h)
+			if err == nil || !strings.HasPrefix(err.Error(), "org: director: start: ") || !strings.Contains(err.Error(), tc.want) || reg.ID != "" {
+				t.Fatalf("AttachHeadless(%+v) = %+v, %v; want an error with %q", h, reg, err, tc.want)
+			}
+			if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("AttachHeadless with bad input created the state dir (stat err = %v)", err)
+			}
+		})
+	}
+}
+
+// MarkLaunched writes launched only while the registration is still the
+// current one and starting (AC4): after a human's attach --replace or
+// detach --force it writes nothing and returns false, so start closes its
+// own pane.
+func TestDirectorMarkLaunched_OnlyWhileTheRegistrationIsStillCurrent(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		setup     func(t *testing.T, s *DirectorStore)
+		id        string
+		wantStill bool
+	}{
+		{"after an attach --replace", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Replace: true})
+		}, "d1", false},
+		{"after a detach --force", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			if _, err := s.Detach(DirectorDetach{Force: true}); err != nil {
+				t.Fatalf("force Detach: %v", err)
+			}
+		}, "d1", false},
+		{"a promoted registration", func(t *testing.T, s *DirectorStore) {
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+		}, "d1", false},
+		{"a current registration with a stopped and no detached", func(t *testing.T, s *DirectorStore) {
+			writeDirectorFile(t, s, directorHeadlessAttachedLine("d1", directorTestToken)+"\n"+directorEventLine("d1", DirectorEventStopped, "")+"\n")
+		}, "d1", false},
+		{"an id no registration has", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+		}, "d2", false},
+		{"already running", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || !still {
+				t.Fatalf("first MarkLaunched = %v, %v", still, err)
+			}
+		}, "d1", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			tc.setup(t, s)
+			before := readDirectorFile(t, s)
+			still, err := s.MarkLaunched(tc.id, testDirectorWho)
+			if err != nil || still != tc.wantStill {
+				t.Fatalf("MarkLaunched(%s) = %v, %v; want %v, nil", tc.id, still, err, tc.wantStill)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("MarkLaunched wrote %q", strings.TrimPrefix(got, before))
+			}
+		})
+	}
+	t.Run("a missing state dir", func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "absent", "org")
+		if still, err := NewDirectorStore(state).MarkLaunched("d1", testDirectorWho); err != nil || still {
+			t.Fatalf("MarkLaunched = %v, %v; want false, nil", still, err)
+		}
+		if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("MarkLaunched created the state dir (stat err = %v)", err)
+		}
+	})
+	t.Run("an id not of the form d<N>", func(t *testing.T) {
+		s, _, _ := newTestHeadlessStore(t)
+		if still, err := s.MarkLaunched("d0", testDirectorWho); err == nil || still || !strings.Contains(err.Error(), `"d0" is not a registration id`) {
+			t.Fatalf("MarkLaunched(d0) = %v, %v; want the id error", still, err)
+		}
+	})
+}
+
+// MarkStopped of the current registration writes its detached and its
+// stopped as two lines of one write (AC8), detached first.
+func TestDirectorMarkStopped_TheCurrentRegistrationGetsDetachedAndStoppedInOneWrite(t *testing.T) {
+	s, _, clock := newTestHeadlessStore(t, directorTestToken, "cccccccccccc")
+	mustAttachHeadless(t, s)
+	if err := s.RecordPane("d1", "p1", testDirectorWho); err != nil {
+		t.Fatalf("RecordPane: %v", err)
+	}
+	if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || !still {
+		t.Fatalf("MarkLaunched = %v, %v", still, err)
+	}
+	before := readDirectorFile(t, s)
+	*clock = clock.Add(time.Minute)
+	var writes []string
+	s.write = func(f *os.File, b []byte) (int, error) {
+		writes = append(writes, string(b))
+		return f.Write(b)
+	}
+
+	wasCurrent, err := s.MarkStopped("d1", testDirectorWho)
+	if err != nil || !wasCurrent {
+		t.Fatalf("MarkStopped = %v, %v; want true, nil", wasCurrent, err)
+	}
+	want := `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"detached","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n" +
+		`{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"stopped","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n"
+	if len(writes) != 1 || writes[0] != want {
+		t.Fatalf("writes = %q, want one write of %q", writes, want)
+	}
+	if got := readDirectorFile(t, s); got != before+want {
+		t.Fatalf("director.jsonl = %q, want %q", got, before+want)
+	}
+	res := mustReadDirector(t, s)
+	if res.Current != nil || res.OpenHeadless != nil || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want no registration, nothing open, nothing skipped", res, res.Current)
+	}
+	// The stopped id is not handed out again.
+	s.write = nil
+	if reg := mustAttachHeadless(t, s); reg.ID != "d2" {
+		t.Fatalf("AttachHeadless after the stop = %s, want d2", reg.ID)
+	}
+}
+
+// A headless registration that a replace ended still takes its pane and its
+// stop; the stop writes stopped only and leaves the new registration current.
+func TestDirectorMarkStopped_ARegistrationNoLongerCurrentGetsStoppedOnly(t *testing.T) {
+	s, _, clock := newTestHeadlessStore(t)
+	mustAttachHeadless(t, s)
+	if err := s.RecordWorkspace("d1", "w1", testDirectorWho); err != nil {
+		t.Fatalf("RecordWorkspace: %v", err)
+	}
+	mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Replace: true, User: "carol"})
+	if err := s.RecordPane("d1", "p1", testDirectorWho); err != nil {
+		t.Fatalf("RecordPane of the replaced registration: %v", err)
+	}
+	if res := mustReadDirector(t, s); currentDirectorID(res) != "d2" || !reflect.DeepEqual(openHeadlessSummary(res), []string{"d1 starting ws=w1 pane=p1"}) {
+		t.Fatalf("Read = current %+v, open %q; want d2 current and d1 open with w1 and p1", res.Current, openHeadlessSummary(res))
+	}
+	before := readDirectorFile(t, s)
+	*clock = clock.Add(time.Minute)
+
+	wasCurrent, err := s.MarkStopped("d1", testDirectorWho)
+	if err != nil || wasCurrent {
+		t.Fatalf("MarkStopped = %v, %v; want false, nil", wasCurrent, err)
+	}
+	want := `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"stopped","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n"
+	if got := readDirectorFile(t, s); got != before+want {
+		t.Fatalf("director.jsonl = %q, want %q", got, before+want)
+	}
+	res := mustReadDirector(t, s)
+	if currentDirectorID(res) != "d2" || res.Current.User != "carol" || res.OpenHeadless != nil || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want carol's d2 current and nothing open", res, res.Current)
+	}
+}
+
+// MarkForceStopped (plan D11) writes what MarkStopped writes with force on
+// the stopped line only: the detached written first for the current
+// registration names its id, so it carries no force. The fold reads the
+// forced stopped as any stopped, and a second stop is refused as already
+// stopped.
+func TestDirectorMarkForceStopped_OnlyTheStoppedLineCarriesForce(t *testing.T) {
+	const stoppedForce = `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"stopped","user":"bob","cwd":"/work/b","herdr_pane":false,"force":true}` + "\n"
+	t.Run("current", func(t *testing.T) {
+		s, _, clock := newTestHeadlessStore(t)
+		mustAttachHeadless(t, s)
+		if err := s.RecordPane("d1", "p1", testDirectorWho); err != nil {
+			t.Fatalf("RecordPane: %v", err)
+		}
+		before := readDirectorFile(t, s)
+		*clock = clock.Add(time.Minute)
+		var writes []string
+		s.write = func(f *os.File, b []byte) (int, error) {
+			writes = append(writes, string(b))
+			return f.Write(b)
+		}
+
+		wasCurrent, err := s.MarkForceStopped("d1", testDirectorWho)
+		if err != nil || !wasCurrent {
+			t.Fatalf("MarkForceStopped = %v, %v; want true, nil", wasCurrent, err)
+		}
+		want := `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"detached","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n" + stoppedForce
+		if len(writes) != 1 || writes[0] != want {
+			t.Fatalf("writes = %q, want one write of %q", writes, want)
+		}
+		if got := readDirectorFile(t, s); got != before+want {
+			t.Fatalf("director.jsonl = %q, want %q", got, before+want)
+		}
+		res := mustReadDirector(t, s)
+		if res.Current != nil || res.OpenHeadless != nil || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+			t.Fatalf("Read = %+v (current %+v), want no registration, nothing open, nothing skipped", res, res.Current)
+		}
+		if _, err := s.MarkForceStopped("d1", testDirectorWho); !errors.Is(err, ErrDirectorNoOpenHeadless) || !errors.Is(err, ErrDirectorStopped) {
+			t.Fatalf("second MarkForceStopped err = %v, want ErrDirectorNoOpenHeadless with ErrDirectorStopped", err)
+		}
+	})
+	t.Run("no longer current", func(t *testing.T) {
+		s, _, clock := newTestHeadlessStore(t)
+		mustAttachHeadless(t, s)
+		mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Replace: true, User: "carol"})
+		before := readDirectorFile(t, s)
+		*clock = clock.Add(time.Minute)
+
+		wasCurrent, err := s.MarkForceStopped("d1", testDirectorWho)
+		if err != nil || wasCurrent {
+			t.Fatalf("MarkForceStopped = %v, %v; want false, nil", wasCurrent, err)
+		}
+		if got := readDirectorFile(t, s); got != before+stoppedForce {
+			t.Fatalf("director.jsonl = %q, want %q", got, before+stoppedForce)
+		}
+		res := mustReadDirector(t, s)
+		if currentDirectorID(res) != "d2" || res.OpenHeadless != nil || res.IgnoredEvents != 0 {
+			t.Fatalf("Read = %+v (current %+v), want d2 current and nothing open", res, res.Current)
+		}
+	})
+	t.Run("not an id", func(t *testing.T) {
+		s, _, _ := newTestHeadlessStore(t)
+		if _, err := s.MarkForceStopped("e1", testDirectorWho); err == nil || !strings.Contains(err.Error(), "not a registration id") {
+			t.Fatalf("MarkForceStopped(e1) err = %v, want the id error", err)
+		}
+		if _, err := os.Stat(s.Path()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("MarkForceStopped(e1) wrote director.jsonl (stat err %v)", err)
+		}
+	})
+}
+
+// recordForTest records, for d1, each step in order as start records it:
+// "workspace" (w1), "pane" (p1), or "launched".
+func recordForTest(t *testing.T, s *DirectorStore, steps ...string) {
+	t.Helper()
+	for _, step := range steps {
+		var err error
+		switch step {
+		case "workspace":
+			err = s.RecordWorkspace("d1", "w1", testDirectorWho)
+		case "pane":
+			err = s.RecordPane("d1", "p1", testDirectorWho)
+		case "launched":
+			var still bool
+			if still, err = s.MarkLaunched("d1", testDirectorWho); err == nil && !still {
+				err = errors.New("d1 is no longer the current registration")
+			}
+		default:
+			t.Fatalf("unknown step %q", step)
+		}
+		if err != nil {
+			t.Fatalf("record %s: %v", step, err)
+		}
+	}
+}
+
+// MarkStoppedIfUnchanged (plan D14) refuses, writing nothing, when the
+// workspace or the pane recorded now is not the one in the registration as
+// stop read it: a start still running recorded it after the read, so stop did
+// not close it. Either id alone refuses, and the registration stays current
+// and open. With the ids stop read it writes what MarkStopped writes, also
+// when launched came after the read (launched changes nothing stop closes);
+// after a refusal, a stop that reads again is recorded.
+func TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead(t *testing.T) {
+	const refusal = "org: director: stop d1: a start in progress recorded a workspace or pane after stop read the registration: "
+	cases := []struct {
+		name              string
+		atRead, afterRead []string
+		wantErr           string // "" when the stop is recorded
+		wantOpen          string // the open registration after a refusal
+	}{
+		{"nothing at the read, then the workspace, the pane, and launched", nil, []string{"workspace", "pane", "launched"},
+			refusal + `d1 had no workspace and no pane when stop read it, and has workspace "w1" and pane "p1" now`, "d1 running ws=w1 pane=p1"},
+		{"the workspace at the read, then the pane and launched", []string{"workspace"}, []string{"pane", "launched"},
+			refusal + `d1 had workspace "w1" and no pane when stop read it, and has workspace "w1" and pane "p1" now`, "d1 running ws=w1 pane=p1"},
+		{"the pane at the read, then the workspace", []string{"pane"}, []string{"workspace"},
+			refusal + `d1 had no workspace and pane "p1" when stop read it, and has workspace "w1" and pane "p1" now`, "d1 starting ws=w1 pane=p1"},
+		{"both at the read, then launched", []string{"workspace", "pane"}, []string{"launched"}, "", ""},
+		{"nothing at the read and nothing after", nil, nil, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			mustAttachHeadless(t, s)
+			recordForTest(t, s, tc.atRead...)
+			read := *mustReadDirector(t, s).Current
+			recordForTest(t, s, tc.afterRead...)
+			trail := directorTrail(t, s)
+			before := readDirectorFile(t, s)
+
+			wasCurrent, err := s.MarkStoppedIfUnchanged(read, testDirectorWho)
+			if tc.wantErr == "" {
+				if err != nil || !wasCurrent {
+					t.Fatalf("MarkStoppedIfUnchanged = %v, %v; want true, nil", wasCurrent, err)
+				}
+				wantTrail(t, s, append(trail, "detached d1", "stopped d1")...)
+				if res := mustReadDirector(t, s); res.Current != nil || res.OpenHeadless != nil {
+					t.Fatalf("Read = current %+v, open %q; want nothing current or open", res.Current, openHeadlessSummary(res))
+				}
+				return
+			}
+			if !errors.Is(err, ErrDirectorChangedDuringStop) || errors.Is(err, ErrDirectorNoOpenHeadless) || err.Error() != tc.wantErr || wasCurrent {
+				t.Fatalf("MarkStoppedIfUnchanged = %v, %v;\nwant false and %q", wasCurrent, err, tc.wantErr)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl changed to %q", got)
+			}
+			res := mustReadDirector(t, s)
+			if currentDirectorID(res) != "d1" || !reflect.DeepEqual(openHeadlessSummary(res), []string{tc.wantOpen}) {
+				t.Fatalf("Read = current %+v, open %q; want d1 current and %q open", res.Current, openHeadlessSummary(res), tc.wantOpen)
+			}
+
+			// A stop that reads again finds the ids recorded now and is recorded.
+			if wasCurrent, err := s.MarkStoppedIfUnchanged(*res.Current, testDirectorWho); err != nil || !wasCurrent {
+				t.Fatalf("MarkStoppedIfUnchanged after a new read = %v, %v; want true, nil", wasCurrent, err)
+			}
+			wantTrail(t, s, append(trail, "detached d1", "stopped d1")...)
+		})
+	}
+}
+
+func TestDirectorMarkStopped_RefusesWithNoOpenHeadlessRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		setup       func(t *testing.T, s *DirectorStore)
+		id          string
+		want        string
+		wantStopped bool
+	}{
+		{"an id no registration has", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+			"d5", "org: director: stop d5: no open headless registration has the id: no registration d5 is recorded", false},
+		{"a promoted registration", func(t *testing.T, s *DirectorStore) {
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+		}, "d1", "org: director: stop d1: no open headless registration has the id: d1 (driver claude, attached " + directorTestNow +
+			") was not started in herdr by ralph org director start", false},
+		{"a registration with a launch this binary does not know", func(t *testing.T, s *DirectorStore) {
+			writeDirectorFile(t, s, `{"ts":"2026-10-15T00:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"terminal","user":"u","cwd":"/w","herdr_pane":false}`+"\n")
+		}, "d1", "was not started in herdr by ralph org director start", false},
+		{"an already stopped registration", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			if _, err := s.MarkStopped("d1", testDirectorWho); err != nil {
+				t.Fatalf("first MarkStopped: %v", err)
+			}
+		}, "d1", "org: director: stop d1: no open headless registration has the id: the headless registration was already stopped: d1 (driver codex, attached " +
+			directorTestNow + ", headless stopped)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			tc.setup(t, s)
+			before := readDirectorFile(t, s)
+			wasCurrent, err := s.MarkStopped(tc.id, testDirectorWho)
+			if !errors.Is(err, ErrDirectorNoOpenHeadless) || errors.Is(err, ErrDirectorStopped) != tc.wantStopped || !strings.Contains(err.Error(), tc.want) || wasCurrent {
+				t.Fatalf("MarkStopped(%s) = %v, %v; want ErrDirectorNoOpenHeadless (stopped %v) with %q", tc.id, wasCurrent, err, tc.wantStopped, tc.want)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl changed to %q", got)
+			}
+		})
+	}
+	t.Run("a missing state dir", func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "absent", "org")
+		if _, err := NewDirectorStore(state).MarkStopped("d1", testDirectorWho); !errors.Is(err, ErrDirectorNoOpenHeadless) {
+			t.Fatalf("MarkStopped err = %v, want ErrDirectorNoOpenHeadless", err)
+		}
+		if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("MarkStopped created the state dir (stat err = %v)", err)
+		}
+	})
+	t.Run("an id not of the form d<N>", func(t *testing.T) {
+		s, _, _ := newTestHeadlessStore(t)
+		_, err := s.MarkStopped("e1", testDirectorWho)
+		if err == nil || errors.Is(err, ErrDirectorNoOpenHeadless) || !strings.Contains(err.Error(), `"e1" is not a registration id`) {
+			t.Fatalf("MarkStopped(e1) err = %v, want the id error", err)
+		}
+	})
+}
+
+// RecordWorkspace and RecordPane refuse, writing nothing, when no open
+// headless registration has the id or when the id is already recorded.
+func TestDirectorRecordHerdrIDs_Refusals(t *testing.T) {
+	record := map[string]func(s *DirectorStore, id, value string) error{
+		"workspace": func(s *DirectorStore, id, value string) error { return s.RecordWorkspace(id, value, testDirectorWho) },
+		"pane":      func(s *DirectorStore, id, value string) error { return s.RecordPane(id, value, testDirectorWho) },
+	}
+	for _, what := range []string{"workspace", "pane"} {
+		for _, tc := range []struct {
+			name        string
+			setup       func(t *testing.T, s *DirectorStore)
+			id, value   string
+			want        string
+			wantOpen    bool // the error wraps ErrDirectorNoOpenHeadless
+			wantStopped bool
+		}{
+			{"an id no registration has", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+				"d4", "x1", "no registration d4 is recorded", true, false},
+			{"a promoted registration", func(t *testing.T, s *DirectorStore) {
+				mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+			}, "d1", "x1", "was not started in herdr", true, false},
+			{"a stopped registration", func(t *testing.T, s *DirectorStore) {
+				mustAttachHeadless(t, s)
+				if _, err := s.MarkStopped("d1", testDirectorWho); err != nil {
+					t.Fatalf("MarkStopped: %v", err)
+				}
+			}, "d1", "x1", "already stopped", true, true},
+			{"an id already recorded", func(t *testing.T, s *DirectorStore) {
+				mustAttachHeadless(t, s)
+				if err := record[what](s, "d1", "x1"); err != nil {
+					t.Fatalf("first record: %v", err)
+				}
+			}, "d1", "x2", "record the " + what + " of d1: d1 already has " + what + " x1 recorded", false, false},
+			{"an empty value", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+				"d1", "", "record the " + what + " of d1: the " + what + " id is empty", false, false},
+			{"an id not of the form d<N>", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+				"d1x", "x1", `record the ` + what + `: "d1x" is not a registration id`, false, false},
+		} {
+			t.Run(what+"/"+tc.name, func(t *testing.T) {
+				s, _, _ := newTestHeadlessStore(t)
+				tc.setup(t, s)
+				before := readDirectorFile(t, s)
+				err := record[what](s, tc.id, tc.value)
+				if err == nil || !strings.HasPrefix(err.Error(), "org: director: ") || !strings.Contains(err.Error(), tc.want) ||
+					errors.Is(err, ErrDirectorNoOpenHeadless) != tc.wantOpen || errors.Is(err, ErrDirectorStopped) != tc.wantStopped {
+					t.Fatalf("record %s(%s, %q) err = %v; want %q (no open headless %v, stopped %v)", what, tc.id, tc.value, err, tc.want, tc.wantOpen, tc.wantStopped)
+				}
+				if got := readDirectorFile(t, s); got != before {
+					t.Fatalf("director.jsonl changed to %q", got)
+				}
+			})
+		}
+		t.Run(what+"/a missing state dir", func(t *testing.T) {
+			state := filepath.Join(t.TempDir(), "absent", "org")
+			if err := record[what](NewDirectorStore(state), "d1", "x1"); !errors.Is(err, ErrDirectorNoOpenHeadless) {
+				t.Fatalf("record err = %v, want ErrDirectorNoOpenHeadless", err)
+			}
+			if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("record created the state dir (stat err = %v)", err)
+			}
+		})
+	}
+}
+
+// Every new writer goes through appendLocked: a write that a full disk cut
+// off is cut back, the file and its fold are as they were, and the error
+// says nothing was recorded (naming the current registration when the write
+// would have ended it).
+func TestDirectorHeadlessWriters_ACutOffWriteIsRestored(t *testing.T) {
+	headless := func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) }
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, s *DirectorStore)
+		call  func(s *DirectorStore) error
+		want  string // the error up to appendLocked's
+	}{
+		{"AttachHeadless into a missing file", func(*testing.T, *DirectorStore) {},
+			func(s *DirectorStore) error { _, err := s.AttachHeadless(testHeadlessAttach()); return err },
+			"org: director: start: nothing was recorded: "},
+		{"AttachHeadless after an ended registration", func(t *testing.T, s *DirectorStore) {
+			writeDirectorFile(t, s, directorAttachedLine("d1", "claude")+"\n"+directorDetachedLine("d1")+"\n")
+		}, func(s *DirectorStore) error { _, err := s.AttachHeadless(testHeadlessAttach()); return err },
+			"org: director: start: nothing was recorded: "},
+		{"RecordWorkspace", headless,
+			func(s *DirectorStore) error { return s.RecordWorkspace("d1", "w1", testDirectorWho) },
+			"org: director: record the workspace of d1: nothing was recorded: "},
+		{"RecordPane", headless,
+			func(s *DirectorStore) error { return s.RecordPane("d1", "p1", testDirectorWho) },
+			"org: director: record the pane of d1: nothing was recorded: "},
+		{"MarkLaunched", headless,
+			func(s *DirectorStore) error {
+				still, err := s.MarkLaunched("d1", testDirectorWho)
+				if still {
+					return errors.New("MarkLaunched returned true for a write that failed")
+				}
+				return err
+			},
+			"org: director: mark d1 launched: nothing was recorded: "},
+		{"MarkStopped of the current registration", headless,
+			func(s *DirectorStore) error { _, err := s.MarkStopped("d1", testDirectorWho); return err },
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
+		{"MarkStopped of a detached registration", func(t *testing.T, s *DirectorStore) {
+			mustAttachHeadless(t, s)
+			if _, err := s.Detach(DirectorDetach{ID: "d1"}); err != nil {
+				t.Fatalf("Detach: %v", err)
+			}
+		}, func(s *DirectorStore) error { _, err := s.MarkStopped("d1", testDirectorWho); return err },
+			"org: director: stop d1: nothing was recorded: "},
+		{"MarkStoppedIfUnchanged of the current registration", headless,
+			func(s *DirectorStore) error {
+				read, err := s.openHeadlessRegistration("stop d1", "d1")
+				if err != nil {
+					return err
+				}
+				_, err = s.MarkStoppedIfUnchanged(read, testDirectorWho)
+				return err
+			},
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
+		{"MarkForceStopped of the current registration", headless,
+			func(s *DirectorStore) error { _, err := s.MarkForceStopped("d1", testDirectorWho); return err },
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, clock := newTestHeadlessStore(t, directorTestToken, "dddddddddddd")
+			tc.setup(t, s)
+			var before string
+			if raw, err := os.ReadFile(s.Path()); err == nil {
+				before = string(raw)
+			}
+			beforeRead := mustReadDirector(t, s)
+			*clock = clock.Add(time.Minute)
+			var onDisk string
+			s.write = directorPartialWrite(t, s, &onDisk)
+
+			err := tc.call(s)
+			want := tc.want + "append to " + s.Path() + ": no space left on device"
+			if err == nil || err.Error() != want || !errors.Is(err, syscall.ENOSPC) || errors.Is(err, ErrDirectorWriteNotRestored) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+			if cut, ok := strings.CutPrefix(onDisk, before); !ok || cut == "" || strings.HasSuffix(cut, "\n") {
+				t.Fatalf("the file after the partial write = %q, want the old text and part of a line", onDisk)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl = %q, want it cut back to %q", got, before)
+			}
+			if after := mustReadDirector(t, s); !reflect.DeepEqual(after, beforeRead) {
+				t.Fatalf("Read after the failure = %+v, want %+v", after, beforeRead)
+			}
+		})
+	}
+}
+
+// The order of MarkStopped's two lines: when the write stops after the
+// detached and its cut back fails too, the file holds the detached alone.
+// That leaves nothing current and the registration open, so the next stop
+// finds it and records its stopped; with the stopped first, the registration
+// would stay current and refuse every later stop as already stopped.
+func TestDirectorMarkStopped_DetachedFirstSoAWriteThatCannotBeCutBackStaysRecoverable(t *testing.T) {
+	s, _, clock := newTestHeadlessStore(t)
+	mustAttachHeadless(t, s)
+	if err := s.RecordPane("d1", "p1", testDirectorWho); err != nil {
+		t.Fatalf("RecordPane: %v", err)
+	}
+	*clock = clock.Add(time.Minute)
+	var onDisk string
+	s.write = directorPartialWrite(t, s, &onDisk)
+	s.truncate = func(string, int64) error { return errors.New("truncate refused") }
+
+	if _, err := s.MarkStopped("d1", testDirectorWho); !errors.Is(err, ErrDirectorWriteNotRestored) {
+		t.Fatalf("MarkStopped err = %v, want ErrDirectorWriteNotRestored", err)
+	}
+	if !strings.Contains(onDisk, `"id":"d1","event":"detached"`) || strings.Contains(onDisk, `"event":"stopped","user"`) {
+		t.Fatalf("the file after the partial write = %q, want the whole detached and part of the stopped", onDisk)
+	}
+	res := mustReadDirector(t, s)
+	if res.Current != nil || !reflect.DeepEqual(openHeadlessSummary(res), []string{"d1 starting ws= pane=p1"}) || res.CorruptLines != 1 {
+		t.Fatalf("Read = %+v (current %+v), want nothing current, d1 open, the cut stopped corrupt", res, res.Current)
+	}
+
+	s.write, s.truncate = nil, nil
+	wasCurrent, err := s.MarkStopped("d1", testDirectorWho)
+	if err != nil || wasCurrent {
+		t.Fatalf("MarkStopped again = %v, %v; want false, nil", wasCurrent, err)
+	}
+	if res := mustReadDirector(t, s); res.Current != nil || res.OpenHeadless != nil || res.CorruptLines != 1 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want d1 stopped and only the cut line skipped", res, res.Current)
+	}
+}
+
+// Attach and AttachHeadless decide under the same lock: of many at once,
+// one registers and the others are refused.
+func TestDirectorAttachAndAttachHeadless_ConcurrentlyOnlyOneRegisters(t *testing.T) {
+	s, _, _ := newTestDirectorStore(t)
+	const n = 10
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if i%2 == 0 {
+				_, errs[i] = s.AttachHeadless(testHeadlessAttach())
+			} else {
+				_, _, errs[i] = s.Attach(DirectorAttach{Driver: DirectorDriverClaude})
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	winners := 0
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			winners++
+		case !errors.Is(err, ErrDirectorAttached):
+			t.Fatalf("call %d err = %v, want ErrDirectorAttached", i, err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("%d calls registered, want 1", winners)
+	}
+	if lines := directorFileLines(t, s); len(lines) != 1 {
+		t.Fatalf("director.jsonl has %d lines, want 1: %q", len(lines), lines)
+	}
 }
