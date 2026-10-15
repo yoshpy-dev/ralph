@@ -139,8 +139,8 @@ Critical forks: ユーザーが 2026-10-15 に決めた 3 点(Related request �
 - [x] Plan approved
 - [x] Branch created
 - [x] Implementation started
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
 
