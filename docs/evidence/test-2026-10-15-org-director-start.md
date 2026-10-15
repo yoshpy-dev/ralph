@@ -2489,3 +2489,562 @@ R2-K16	SURVIVED	5s
 ```
 
 Calls to the canary during all mutation and probe runs: 0 (the 2 lines in `calls.log` are C3-2.2's typed-by-hand check).
+
+## Cycle 4
+
+- Date: 2026-10-16 (JST 04:28-05:30; the UTC timestamps in the output read 2026-10-15T19:xx and 20:xx)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start, HEAD 905fc0a7 at the start (cycle 3 ran at 3504ee30, its report is b0adfc63), then 10efa82c, the tests this cycle added (C4-5). Go changed since cycle 3 in 3 commits: b888d637 (D14: `MarkStoppedIfUnchanged` and `ErrDirectorChangedDuringStop`, stop's record compares the workspace and pane ids under the lock; D15: the `/director` skill's description and `internal/config/skill_frontmatter_test.go`), 5097b67e (doc lists, the refusal's notes once, on the CLI's stderr; the frontmatter test renamed with its limits in the doc and the failure text), and 44b80391 (`DirectorStopResult.AlreadyStopped`: a stop whose record finds the registration already stopped succeeds; `directorRecordStopError`, so "org: director: " appears once; writer rows for `MarkStoppedIfUnchanged` and `MarkForceStopped`)
+- Environment: macOS arm64, go1.26.0 (default) and go1.25.8 (`GOTOOLCHAIN=go1.25.8`), git 2.49.0, Ruby 3.4.10 (Psych) for the YAML check of C4-3. No real herdr, codex, claude, or osascript ran. Load average 4-14 during the runs (other sessions)
+- Redaction: as in cycles 1-3 (`$SCRATCH`, `~`, `$TMPDIR/`). Cycle 4's scratch files are under `$SCRATCH/ods4`. The wrapper's full logs `docs/evidence/verify-2026-10-15-192839.log` and `docs/evidence/verify-2026-10-15-195306.log` and the raw outputs appended to `docs/evidence/test-2026-10-15-org-director-start.log` (from the line `===== /test cycle 4`) are gitignored and not committed
+- Trailing blanks at the ends of output lines were stripped; nothing else in the output was changed apart from the redaction, and in C4-3.2 the fixed tail of the failure message, which the probe cut at 260 characters, is written out from the format string at `skill_frontmatter_test.go:197`
+- The only worktree edit for the tests is commit 10efa82c (two tests, C4-5). Mutants and probe tests lived in `$SCRATCH/ods4` and reached the build only through `go test -overlay`
+
+### C4-1 ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed; templates/base/ralph.toml widened it to full)
+
+Run 1 at 905fc0a7 (`PATH=$SCRATCH/ods4/canary/bin:$PATH ./scripts/run-test.sh`, rc 0, 665 s wall, 4,654 lines) is not counted as HEAD's: its Go part started about 04:36 and the first test of C4-5 was written into `internal/org/director_stop_test.go` at 04:38:24, while it ran. Its org binary was most likely built before that (org ran 81.966 s from the start of the Go part); that is an estimate, not checked. Run 2 at 10efa82c is the gate: the same command, rc 0, 511 s wall, 4,654 lines. Filtered with the command of section 1 (168 lines each). Against C3-1's 168 lines, with the line numbers, the `N.NNs` timings, and the timestamp dropped, `diff` gives for run 2:
+
+```text
+159,160c159,160
+< ok  	github.com/yoshpy-dev/ralph/internal/cli	N.NNs
+< ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+---
+> ok  	github.com/yoshpy-dev/ralph/internal/cli	(cached)
+> ok  	github.com/yoshpy-dev/ralph/internal/config	N.NNs
+163c163
+< ok  	github.com/yoshpy-dev/ralph/internal/org/driver	N.NNs
+---
+> ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+168c168
+< Evidence saved to: docs/evidence/verify-2026-10-15-154510.log
+---
+> Evidence saved to: docs/evidence/verify-2026-10-15-195306.log
+```
+
+and run 1 against run 2:
+
+```text
+159c159
+< ok  	github.com/yoshpy-dev/ralph/internal/cli	N.NNs
+---
+> ok  	github.com/yoshpy-dev/ralph/internal/cli	(cached)
+163c163
+< ok  	github.com/yoshpy-dev/ralph/internal/org/driver	N.NNs
+---
+> ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+168c168
+< Evidence saved to: docs/evidence/verify-2026-10-15-192839.log
+---
+> Evidence saved to: docs/evidence/verify-2026-10-15-195306.log
+```
+
+41 suites, 41 "OK", every "FAIL:" line is 0 (25 of them, no other FAIL line). 4,283 lines start with PASS after leading blanks (cycle 3: 4,283). The one real SKIP is tests/test-secret-scan-branch.sh's (git 2.49.0). The Go part of run 2:
+
+```text
+4637:==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+4641:?   	github.com/yoshpy-dev/ralph	[no test files]
+4642:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4643:ok  	github.com/yoshpy-dev/ralph/internal/cli	(cached)
+4644:ok  	github.com/yoshpy-dev/ralph/internal/config	1.027s
+4645:ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+4646:ok  	github.com/yoshpy-dev/ralph/internal/org	81.134s
+4647:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+4648:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4649:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4650:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4652:==> All verifiers passed.
+4654:Evidence saved to: docs/evidence/verify-2026-10-15-195306.log
+```
+
+`internal/cli (cached)` in run 2 is run 1's go1.26.0 result (212.147 s) for the same inputs: between the two runs only `_test.go` files of `internal/org` changed, which are not in cli's build. The other `(cached)` packages are cached the same way; `internal/insights` imports `internal/org`, whose non-test code did not change. Every package ran with `-count=1` on both toolchains in C4-2.1, cli and org with the race detector too.
+
+### C4-2 Go tests
+
+Every Go run below had `$SCRATCH/ods4/canary/bin` first on PATH (C4-2.4).
+
+#### C4-2.1 Per package, `-count=1 -v`
+
+Counts are from the `--- PASS/FAIL/SKIP` lines (top-level tests, then subtests).
+
+go1.25.8 at 905fc0a7 (`GOTOOLCHAIN=go1.25.8 go test ./... -count=1 -v -coverprofile=cover125.out`, rc 0, 234 s wall; it ran 04:29:58-04:33:52, before any edit):
+
+```text
+internal/cli	ok	230.898s	top 708 (pass 708 fail 0 skip 0)	sub 662 (pass 662 fail 0 skip 0)
+internal/config	ok	1.931s	top 39 (pass 39 fail 0 skip 0)	sub 53 (pass 53 fail 0 skip 0)
+internal/insights	ok	1.485s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org	ok	96.713s	top 810 (pass 809 fail 0 skip 1)	sub 1710 (pass 1710 fail 0 skip 0)
+internal/org/driver	ok	2.523s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	1.677s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	2.583s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	3.525s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+go1.25.8 at 10efa82c (the same command into `cover125b.out`, rc 0, 218 s wall):
+
+```text
+internal/cli	ok	217.091s	top 708 (pass 708 fail 0 skip 0)	sub 662 (pass 662 fail 0 skip 0)
+internal/config	ok	0.538s	top 39 (pass 39 fail 0 skip 0)	sub 53 (pass 53 fail 0 skip 0)
+internal/insights	ok	0.956s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org	ok	81.949s	top 812 (pass 811 fail 0 skip 1)	sub 1712 (pass 1712 fail 0 skip 0)
+internal/org/driver	ok	1.780s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	1.824s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	2.730s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	2.756s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+go1.26.0 at 10efa82c, org and cli with the race detector (`go test -race -count=1 -v ./internal/org/ ./internal/cli/`, rc 0, 232 s wall, 0 `DATA RACE` lines):
+
+```text
+internal/org	ok	86.892s	top 812 (pass 811 fail 0 skip 1)	sub 1712 (pass 1712 fail 0 skip 0)
+internal/cli	ok	224.675s	top 708 (pass 708 fail 0 skip 0)	sub 662 (pass 662 fail 0 skip 0)
+```
+
+go1.25.8 at 10efa82c, org and cli with the race detector (`GOTOOLCHAIN=go1.25.8 go test -race -count=1 -v ./internal/org/ ./internal/cli/`, rc 0, 225 s wall, 0 `DATA RACE` lines):
+
+```text
+internal/org	ok	85.168s	top 812 (pass 811 fail 0 skip 1)	sub 1712 (pass 1712 fail 0 skip 0)
+internal/cli	ok	218.353s	top 708 (pass 708 fail 0 skip 0)	sub 662 (pass 662 fail 0 skip 0)
+```
+
+go1.26.0 at 10efa82c, the other six packages (`go test -count=1 -v ./internal/config/ ./internal/insights/ ./internal/org/driver/ ./internal/org/protocol/ ./internal/scaffold/ ./internal/upgrade/`, rc 0):
+
+```text
+internal/config	ok	1.610s	top 39 (pass 39 fail 0 skip 0)	sub 53 (pass 53 fail 0 skip 0)
+internal/insights	ok	0.653s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org/driver	ok	1.915s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	2.410s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	1.983s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	3.344s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+At 10efa82c the sorted `<package> <name> <result>` lines of the go1.25.8 run (4,396) and of the two go1.26.0 runs together (4,396) are identical (`LC_ALL=C sort` on both sides), and so are the org and cli lines of the two race runs (3,894 each). The three SKIPs are cycle 3's (`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`, scaffold's `TestBaseFS_WithMockFS` and `TestAvailablePacks_WithMockFS`).
+
+Earlier flaky tests (go1.25.8 at 905fc0a7 and 10efa82c, then the go1.26.0 and go1.25.8 race runs):
+
+```text
+go125.out:--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.78s)
+go125.out:--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.64s)
+go125.out:--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (4.99s)
+go125.out:--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.45s)
+go125b.out:--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.78s)
+go125b.out:--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.66s)
+go125b.out:--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.17s)
+go125b.out:--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.36s)
+race.out:--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.34s)
+race.out:--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.83s)
+race.out:--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.75s)
+race.out:--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.63s)
+race125.out:--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.49s)
+race125.out:--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.82s)
+race125.out:--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.70s)
+race125.out:--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.17s)
+```
+
+The slowest `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` subtest was SIGHUP at 2.49 s (go1.25.8 at 905fc0a7), under the 5 s `gateKillGrace` and the 15 s budget.
+
+#### C4-2.2 Tests added since cycle 3
+
+Against cycle 3's 4,345 lines (C3-2.1), go1.25.8 at 905fc0a7 adds 47 lines and removes none:
+
+```text
+515a516,518
+> internal/cli TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain PASS
+> internal/cli TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain/force_false PASS
+> internal/cli TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain/force_true PASS
+516a520,522
+> internal/cli TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun PASS
+> internal/cli TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/a_forced_stop_whose_workspace_close_failed PASS
+> internal/cli TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/the_workspace_closed PASS
+1435a1442,1462
+> internal/config TestPlainFrontmatterFindings PASS
+> internal/config TestPlainFrontmatterFindings/CRLF_line_ends PASS
+> internal/config TestPlainFrontmatterFindings/a_colon_followed_by_a_tab PASS
+> internal/config TestPlainFrontmatterFindings/a_colon_or_a_#_with_no_whitespace PASS
+> internal/config TestPlainFrontmatterFindings/a_colon_that_ends_the_value PASS
+> internal/config TestPlainFrontmatterFindings/a_column_counted_in_characters PASS
+> internal/config TestPlainFrontmatterFindings/a_comment_line PASS
+> internal/config TestPlainFrontmatterFindings/a_frontmatter_never_closed PASS
+> internal/config TestPlainFrontmatterFindings/a_space_and_a_# PASS
+> internal/config TestPlainFrontmatterFindings/a_tab_and_a_# PASS
+> internal/config TestPlainFrontmatterFindings/a_value_that_starts_with_a_backquote,_which_it_does_not_check PASS
+> internal/config TestPlainFrontmatterFindings/an_empty_value,_and_a_nested_value_it_does_not_check PASS
+> internal/config TestPlainFrontmatterFindings/block_scalars_and_their_lines PASS
+> internal/config TestPlainFrontmatterFindings/no_frontmatter PASS
+> internal/config TestPlainFrontmatterFindings/one_finding_per_line,_every_line PASS
+> internal/config TestPlainFrontmatterFindings/quoted_values PASS
+> internal/config TestPlainFrontmatterFindings/the_/director_description_after_the_fix PASS
+> internal/config TestPlainFrontmatterFindings/the_/director_description_before_the_fix PASS
+> internal/config TestPlainFrontmatterFindings/the_body PASS
+> internal/config TestPlainFrontmatterFindings/the_first_of_two_shapes_on_a_line PASS
+> internal/config TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash PASS
+1675a1703
+> internal/org TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkForceStopped_of_the_current_registration PASS
+1676a1705
+> internal/org TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkStoppedIfUnchanged_of_the_current_registration PASS
+1694a1724,1729
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead PASS
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/both_at_the_read,_then_launched PASS
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/nothing_at_the_read,_then_the_workspace,_the_pane,_and_launched PASS
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/nothing_at_the_read_and_nothing_after PASS
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/the_pane_at_the_read,_then_the_workspace PASS
+> internal/org TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/the_workspace_at_the_read,_then_the_pane_and_launched PASS
+3670a3706
+> internal/org TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce PASS
+3802a3839
+> internal/org TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile PASS
+3809a3847
+> internal/org TestStopDirector_ARecordThatFailsSaysItsPrefixOnce PASS
+3838a3877,3885
+> internal/org TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns PASS
+> internal/org TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/everything,_before_stop_asks_herdr_anything PASS
+> internal/org TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/the_pane,_while_stop_closes_the_workspace PASS
+> internal/org TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/the_pane,_while_stop_closes_the_workspace,_with_force PASS
+> internal/org TestStopDirector_SucceedsWhenTheStopWasRecordedFirst PASS
+> internal/org TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/another_stop_recorded_it_first PASS
+> internal/org TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it PASS
+> internal/org TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it,_with_force PASS
+> internal/org TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it_while_a_forced_stop's_workspace_close_failed PASS
+```
+
+That is 10 top-level tests (cli 2, config 2, org 6) and 37 subtests (cli 4, config 19, org 14). 10efa82c adds 4 more (C4-5):
+
+```text
+3722a3723
+> internal/org TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord PASS
+3846a3848,3850
+> internal/org TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt PASS
+> internal/org TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt/start's_cleanup PASS
+> internal/org TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt/stop PASS
+```
+
+#### C4-2.3 The new tests by name, `-v`
+
+The tests the handoff named and the D14 tests (`grep -n ErrDirectorChangedDuringStop` in the `_test.go` files finds `wantChangedDuringStop` in `internal/org/director_stop_test.go`, `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead` in `internal/org/director_test.go`, and `TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain` in `internal/cli/org_director_headless_test.go`; `wantChangedDuringStop` is the helper of `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns`), with the two existing tests 44b80391 and b888d637 changed (`TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce`, `TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade`), run by name at 905fc0a7 on go1.26.0 (`go test -count=1 -v -run '<names>'` per package, rc 0 for org, cli, and config). None is skipped, and all of them pass again in the go1.25.8 run at 10efa82c (C4-2.2 lists no name that went away):
+
+```text
+--- PASS: TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade (0.00s)
+    --- PASS: TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade/workspace_created (0.00s)
+    --- PASS: TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade/pane_created (0.00s)
+--- PASS: TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce (0.00s)
+--- PASS: TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce (0.00s)
+    --- PASS: TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce/a_label_that_is_another_launch's (0.00s)
+    --- PASS: TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce/a_pane_close_that_fails (0.00s)
+--- PASS: TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns (0.01s)
+    --- PASS: TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/the_pane,_while_stop_closes_the_workspace (0.00s)
+    --- PASS: TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/the_pane,_while_stop_closes_the_workspace,_with_force (0.00s)
+    --- PASS: TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns/everything,_before_stop_asks_herdr_anything (0.00s)
+--- PASS: TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile (0.00s)
+--- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst (0.01s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/another_stop_recorded_it_first (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it,_with_force (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it_while_a_forced_stop's_workspace_close_failed (0.00s)
+--- PASS: TestStopDirector_ARecordThatFailsSaysItsPrefixOnce (0.00s)
+--- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead (0.01s)
+    --- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/nothing_at_the_read,_then_the_workspace,_the_pane,_and_launched (0.00s)
+    --- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/the_workspace_at_the_read,_then_the_pane_and_launched (0.00s)
+    --- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/the_pane_at_the_read,_then_the_workspace (0.00s)
+    --- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/both_at_the_read,_then_launched (0.00s)
+    --- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead/nothing_at_the_read_and_nothing_after (0.00s)
+--- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored (0.01s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/AttachHeadless_into_a_missing_file (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/AttachHeadless_after_an_ended_registration (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/RecordWorkspace (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/RecordPane (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkLaunched (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkStopped_of_the_current_registration (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkStopped_of_a_detached_registration (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkStoppedIfUnchanged_of_the_current_registration (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkForceStopped_of_the_current_registration (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.636s
+--- PASS: TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain (0.00s)
+    --- PASS: TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain/force_false (0.00s)
+    --- PASS: TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain/force_true (0.00s)
+--- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun (0.00s)
+    --- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/the_workspace_closed (0.00s)
+    --- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/a_forced_stop_whose_workspace_close_failed (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	0.572s
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- PASS: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+--- PASS: TestPlainFrontmatterFindings (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/the_/director_description_before_the_fix (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/the_/director_description_after_the_fix (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_colon_followed_by_a_tab (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_colon_that_ends_the_value (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_space_and_a_# (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_tab_and_a_# (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/the_first_of_two_shapes_on_a_line (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/one_finding_per_line,_every_line (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_column_counted_in_characters (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/CRLF_line_ends (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/quoted_values (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/block_scalars_and_their_lines (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_colon_or_a_#_with_no_whitespace (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/an_empty_value,_and_a_nested_value_it_does_not_check (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_value_that_starts_with_a_backquote,_which_it_does_not_check (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_comment_line (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/the_body (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/no_frontmatter (0.00s)
+    --- PASS: TestPlainFrontmatterFindings/a_frontmatter_never_closed (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.496s
+```
+
+The two tests of C4-5, on go1.25.8 before the commit (the same content as 10efa82c):
+
+```text
+--- PASS: TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord (0.00s)
+--- PASS: TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt (0.00s)
+    --- PASS: TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt/stop (0.00s)
+    --- PASS: TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt/start's_cleanup (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.412s
+```
+
+#### C4-2.4 AC13: no real herdr or osascript, nothing in the repo's ledger
+
+- `$SCRATCH/ods4/canary/bin/{herdr,osascript}` log their argv to `$SCRATCH/ods4/canary/calls.log` and exit 97 (no pass-through). They were first on PATH for both run-test.sh runs, the Go runs above, every mutation run, and the probe tests. `calls.log` had 0 lines after all of them. Typed by hand afterwards from the same PATH, both log and exit 97:
+
+```text
+$ wc -l < calls.log   # after every run of C4-1, C4-2, C4-3, C4-4
+0
+$ PATH=$SCRATCH/ods4/canary/bin:$PATH sh -c 'herdr --version; echo "herdr rc=$?"; osascript -e 1; echo "osascript rc=$?"'
+herdr rc=97
+osascript rc=97
+$ cat calls.log
+1792095364 herdr --version
+1792095365 osascript -e 1
+$ ls -d ~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org .../.claude/worktrees/org-director-start/.harness/state/org
+"~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org": No such file or directory (os error 2)
+"~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start/.harness/state/org": No such file or directory (os error 2)
+$ find ~/MyDev/github.com/yoshpy-dev/ralph -name director.jsonl | wc -l
+0
+$ stat -f '%m %Sm %z' ~/.codex/config.toml; shasum -a 256 ~/.codex/config.toml
+1792054288 Oct 15 17:51:28 2026 33673
+ac1a4821574050d3630118510c7dd591bf1839b947f2bb35fe4106e41b61796f  ~/.codex/config.toml
+```
+
+#### C4-2.5 Coverage (go1.25.8 at 10efa82c, each package's own tests)
+
+```text
+ok  	github.com/yoshpy-dev/ralph/internal/cli	217.091s	coverage: 87.8% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.538s	coverage: 93.3% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/insights	0.956s	coverage: 86.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org	81.949s	coverage: 94.7% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	1.780s	coverage: 93.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	1.824s	coverage: 100.0% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	2.730s	coverage: 75.7% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	2.756s	coverage: 91.2% of statements
+```
+
+Statements of the changed files, from `cover125b.out` (each block counted once):
+
+```text
+internal/org/director_start.go: 226/241 (93.8%); uncovered blocks (lines): 60-62, 130-132, 138-140, 205-207, 250-252, 346-348, 545-546, 590-593, 607-609, 610-612, 614-616, 676-678, 705-706, 734-735, 736-737
+internal/org/director_stop.go: 146/149 (98.0%); uncovered blocks (lines): 263-265, 334-334, 456-458, 552-552
+internal/org/director.go: 193/194 (99.5%); uncovered blocks (lines): 481-483
+internal/cli/org_director_headless.go: 105/108 (97.2%); uncovered blocks (lines): 195-197, 210-212, 220-222
+```
+
+At 905fc0a7 (`cover125.out`) `director_stop.go` was 145/149 (97.3%) with blocks 319-320 uncovered as well: the not-restored case of `DirectorCleanupError.Error`, which the first test of C4-5 reaches. In the changed functions nothing else is uncovered: `markStopped`'s D14 check (`director_start.go` 354-357), `directorRecordedIDs` (380-389), `recordDirectorStop` (`director_stop.go` 198-230), `directorRecordStopError` (247-253), `DirectorCleanupError.Error`'s changed case (335-336), and `printOrgDirectorStop`'s AlreadyStopped branch (`org_director_headless.go` 400-402) are covered. `director_stop.go` 334 is the empty `case e.StopCommand == "":` of the new switch: `newDirectorCleanupError` always sets StopCommand, so only an error built by hand reaches it, as before the switch. `director_start.go` 346-348 is the read error under the lock in `markStopped` and 734-737 abort's detach failures (both S1b); the rest are cycle 3's.
+
+### C4-3 AC16 with a YAML parser, and the frontmatter test against broken copies
+
+#### C4-3.1 Ruby's `YAML.safe_load` on every tracked SKILL.md
+
+`$SCRATCH/ods4/yamlcheck.rb` cuts each file's frontmatter (the lines between the first `---` and the next) and loads it with `YAML.safe_load`, failing on an error or a value that is not a mapping. `ruby yamlcheck.rb $(git ls-files '*SKILL.md')` (54 files), at 905fc0a7 and again at 10efa82c with the same output, rc 0 (10efa82c changes no SKILL.md and nothing under `internal/config`):
+
+```text
+.agents/skills/director/SKILL.md: ok name=director description=672 chars
+.claude/skills/director/SKILL.md: ok name=director description=672 chars
+templates/base/.agents/skills/director/SKILL.md: ok name=director description=672 chars
+templates/base/.claude/skills/director/SKILL.md: ok name=director description=672 chars
+ok=54 bad=0
+```
+
+The four `/director` copies before the fix (`git show b888d637^:<path>`):
+
+```text
+.claude/skills/director/SKILL.md: YAML ERROR Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 2 column 155
+.agents/skills/director/SKILL.md: YAML ERROR Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 2 column 155
+templates/base/.claude/skills/director/SKILL.md: YAML ERROR Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 2 column 155
+templates/base/.agents/skills/director/SKILL.md: YAML ERROR Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 2 column 155
+ok=0 bad=4
+```
+
+The column Psych names (line 2 of the frontmatter, column 155) is the finding of `TestPlainFrontmatterFindings`' first row (line 3 of the file, column 155).
+
+#### C4-3.2 The frontmatter test against broken copies of the skills
+
+`go test -overlay` does not reach the SKILL.md files the test reads at run time, so `$SCRATCH/ods4/fm/probe.sh` runs the test in `git archive HEAD` (905fc0a7; 10efa82c changes neither the skills nor this test) unpacked under `$SCRATCH/ods4/fm/base`, breaks one file at a time, and restores it. `repoRoot` is the test file's directory two levels up, so the copy's own skills are read.
+
+```sh
+#!/bin/bash
+# Frontmatter-test sensitivity probes on a git-archive copy of HEAD (scratch only).
+B=$SCRATCH/ods4/fm/base
+PRE=$SCRATCH/ods4/prefix
+run() { (cd $B && go test -count=1 -v -run 'TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash' ./internal/config/ 2>&1) | grep -E -- '--- (PASS|FAIL|SKIP)|skill_frontmatter_test.go:[0-9]+:|^(ok|FAIL)\s' | sed "s|$B/||g" | cut -c1-260; }
+save() { cp "$B/$1" "$S_TMP/$(echo $1 | tr / _)"; }
+S_TMP=$(mktemp -d "$SCRATCH/ods4/fm/tmp.XXXX")
+echo "### F0 control: the copy as archived"; run
+f=templates/base/.agents/skills/director/SKILL.md
+echo "### F1 pre-fix description in $f only"; cp "$B/$f" "$S_TMP/f1"; cp "$PRE/$f" "$B/$f"; run; cp "$S_TMP/f1" "$B/$f"
+f=.claude/skills/director/SKILL.md
+echo "### F2 pre-fix description in $f only"; cp "$B/$f" "$S_TMP/f2"; cp "$PRE/$f" "$B/$f"; run; cp "$S_TMP/f2" "$B/$f"
+f=.agents/skills/test/SKILL.md
+echo "### F3 ' see #2' appended to the plain description of $f"; cp "$B/$f" "$S_TMP/f3"; perl -0pi -e 's/^(description: [^\n]*)/$1 see #2/m' "$B/$f"; grep -c ' see #2' "$B/$f"; run; cp "$S_TMP/f3" "$B/$f"
+f=.claude/skills/director/SKILL.md
+echo "### F4 pre-fix description double-quoted in $f (no finding expected)"; cp "$B/$f" "$S_TMP/f4"; cp "$PRE/$f" "$B/$f"; perl -0pi -e 's/^description: ([^\n]*)/description: "$1"/m' "$B/$f"; grep -c '^description: "' "$B/$f"; ruby $SCRATCH/ods4/yamlcheck.rb "$B/$f" | sed "s|$B/||"; run; cp "$S_TMP/f4" "$B/$f"
+echo "### F5 templates/base/.agents/skills moved away"; mv "$B/templates/base/.agents/skills" "$S_TMP/skills5"; run; mv "$S_TMP/skills5" "$B/templates/base/.agents/skills"
+echo "### F6 control after restore"; run
+rm -rf "$S_TMP"
+```
+
+Output (the probe's ids F0-F6 are called Y0-Y6 here, apart from the mutants F1-F10 of C4-4):
+
+```text
+### Y0 control: the copy as archived
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- PASS: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.02s)
+ok  	github.com/yoshpy-dev/ralph/internal/config	1.004s
+### Y1 pre-fix description in templates/base/.agents/skills/director/SKILL.md only
+    skill_frontmatter_test.go:197: templates/base/.agents/skills/director/SKILL.md:3:155: rule colon-space: the unquoted value of description holds ": ", which YAML reads as a mapping and rejects; quote it (or write it as a > block) or reword it -- see this test's doc comment
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- FAIL: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+FAIL	github.com/yoshpy-dev/ralph/internal/config	0.572s
+### Y2 pre-fix description in .claude/skills/director/SKILL.md only
+    skill_frontmatter_test.go:197: .claude/skills/director/SKILL.md:3:155: rule colon-space: the unquoted value of description holds ": ", which YAML reads as a mapping and rejects; quote it (or write it as a > block) or reword it -- see this test's doc comment
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- FAIL: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+FAIL	github.com/yoshpy-dev/ralph/internal/config	0.450s
+### Y3 ' see #2' appended to the plain description of .agents/skills/test/SKILL.md
+1
+    skill_frontmatter_test.go:197: .agents/skills/test/SKILL.md:3:180: rule space-hash: the unquoted value of description holds " #", where YAML starts a comment and drops the rest of the value; quote it (or write it as a > block) or reword it -- see this test's doc comment
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- FAIL: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+FAIL	github.com/yoshpy-dev/ralph/internal/config	0.306s
+### Y4 pre-fix description double-quoted in .claude/skills/director/SKILL.md (no finding expected)
+1
+.claude/skills/director/SKILL.md: ok name=director description=665 chars
+ok=1 bad=0
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- PASS: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.651s
+### Y5 templates/base/.agents/skills moved away
+    skill_frontmatter_test.go:172: walk templates/base/.agents/skills: lstat templates/base/.agents/skills: no such file or directory
+    skill_frontmatter_test.go:202: checked the frontmatter of 41 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- FAIL: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+FAIL	github.com/yoshpy-dev/ralph/internal/config	0.494s
+### Y6 control after restore
+    skill_frontmatter_test.go:202: checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills
+--- PASS: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+ok  	github.com/yoshpy-dev/ralph/internal/config	0.466s
+```
+
+Each root is walked (Y1 breaks only the template's Codex copy, Y2 only the root Claude copy), the space-hash rule fires on a real skill (Y3), a quoted value of the same text passes and Psych reads it (Y4), and a root that is gone fails the test rather than leaving it silent (Y5).
+
+### C4-4 Mutation (go1.26.0, `go test -overlay`)
+
+#### C4-4.1 Harness
+
+`$SCRATCH/ods4/mut/mutate.py` is cycle 3's harness with its paths moved to `ods4`: each mutant is a list of literal `(old, new)` edits, refused unless `old` occurs exactly once; the mutated copies and an overlay JSON go under `$SCRATCH/ods4/mut/out/<id>/`, and the tests run with `-run` (org: `Director|StopAll|Spawn_DirectorRole|RenderRolePrompt|CodexWritableRoot|PermissionArgs|ResolvePermissionMode`; cli: `OrgDirector|StatusCmd_Director|OrgStopAll|OrgSpawn_RoleDirector|OrgLegacyLedger|CodexAgmsgWritableRoot|CodexSeatModesPossible|ARelativeAgmsgHome`; config: `SkillFrontmatter|PlainFrontmatter`), or with `--full` against whole packages. The list is `$SCRATCH/ods4/mut/mutants.py` (and `mutants_h7.py`). F1-F10 mutate the helper inside the test file `skill_frontmatter_test.go`. The batch ran 04:40-04:49 against 905fc0a7 with the first test of C4-5 already in `director_stop_test.go` (written at 04:38:24) and before the second (04:50:07), so P1-P4 and P6 also list that test; the "h" variants cut it out again. H7 ran after the second test was written. Every edit applied exactly once and every mutant built (F4 and F6 needed a second form: the first ones left `i` and `unicode/utf8` unused).
+
+#### C4-4.2 Results (filtered runs)
+
+| ID | Mutation | Result | Time | Failing tests |
+| --- | --- | --- | --- | --- |
+| X0 | org: director_start.go unchanged through -overlay | SURVIVED | 2s | - |
+| X0s | org: director_stop.go unchanged through -overlay | SURVIVED | 45s | - |
+| X0c | cli: org_director_headless.go unchanged through -overlay | SURVIVED | 42s | - |
+| X0f | config: skill_frontmatter_test.go unchanged through -overlay | SURVIVED | 1s | - |
+| G1 | D14 check removed | red | 46s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G2 | D14 compares the workspace only | red | 48s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G3 | D14 compares the pane only | red | 48s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead` |
+| G4 | D14 compares the state too (launched refuses) | red | 47s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead` |
+| G5 | MarkStoppedIfUnchanged passes no read (no check) | red | 49s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G6 | stop's unforced record calls MarkStopped (no check) | red | 47s | `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G7 | the forced record checks the ids too | red | 46s | `TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile` |
+| G8 | start's cleanup (abort) records with MarkStoppedIfUnchanged against r.reg | red | 50s | `TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade` |
+| G9 | D14 refusal does not wrap ErrDirectorChangedDuringStop (%w -> %v) | red | 50s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G10 | D14 refusal names the two reads the other way round | red | 49s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G11 | directorRecordedIDs: no workspace / no pane words swapped | red | 49s | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| H1 | AlreadyStopped branch removed (the stopped refusal is a cleanup error again) | red | 50s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H2 | AlreadyStopped only without force | red | 50s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H3 | AlreadyStopped only with force | red | 50s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H4 | AlreadyStopped not set (returns nil with the plain result) | red | 51s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H5 | AlreadyStopped also sets Forced for a forced stop | red | 50s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H6 | AlreadyStopped also sets WasCurrent | red | 49s | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| P1 | directorRecordStopError trims nothing | red | 48s | `TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`, `TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce`, `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`, `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P2 | directorRecordStopError trims org: director: only | red | 49s | `TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`, `TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce`, `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`, `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P3 | directorRecordStopError.Unwrap returns nil | red | 51s | `TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`, `TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce`, `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`, `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P4 | start's cleanup (abort) back to fmt.Errorf(record %s stopped: %w) | red | 48s | `TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`, `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt` |
+| P5 | stop's forced branch back to fmt.Errorf(record %s stopped: %w) | red | 49s | `TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce` |
+| P6 | stop's general branch back to fmt.Errorf(record %s stopped: %w) | red | 49s | `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`, `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce` |
+| P7 | the changed branch drops '; this stop closed only what it had read' | red | 50s | `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P8 | DirectorCleanupError.Error drops the changed case (says 'record the stop with') | red | 49s | `TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain`, `TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| C1 | printOrgDirectorStop ignores AlreadyStopped | red | 43s | `TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun` |
+| C2 | printOrgDirectorStop drops the second AlreadyStopped line | red | 42s | `TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun` |
+| C3 | stop help drops the D14 sentence | red | 42s | `TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain` |
+| C4 | stop help drops the AC8 sentence | red | 46s | `TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun` |
+| F1 | the frontmatter check always skips | SURVIVED | 1s | - |
+| F2 | a double-quoted value is checked | red | 1s | `TestPlainFrontmatterFindings` |
+| F3 | a > or | value is checked | SURVIVED | 1s | - |
+| F4 | CR not trimmed | red | 1s | `TestPlainFrontmatterFindings` |
+| F5 | colon-end check removed | red | 1s | `TestPlainFrontmatterFindings` |
+| F6 | column in bytes | red | 1s | `TestPlainFrontmatterFindings` |
+| F7 | the last shape on a line wins, not the first | SURVIVED | 1s | - |
+| F8 | colon-space needle removed | red | 1s | `TestPlainFrontmatterFindings` |
+| F9 | space-hash points at the space (at 0) | red | 1s | `TestPlainFrontmatterFindings` |
+| F10 | indented lines are checked too (key regexp allows leading blanks) | red | 1s | `TestPlainFrontmatterFindings` |
+| X0t | control: the new test cut out, nothing else | SURVIVED | 5s | - |
+| P9 | DirectorCleanupError.Error drops the not-restored case (says nothing was recorded) | red | 47s | `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt` |
+| P9h | P9 with HEAD's tests only | SURVIVED | 45s | - |
+| P11 | DirectorCleanupError.Error checks e.Err (after Detached) before not-restored (start's cleanup says nothing more was recorded) | red | 46s | `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt` |
+| P11h | P11 with HEAD's tests only | SURVIVED | 46s | - |
+| H7org | abort treats a stop recorded first (ErrDirectorStopped) as a failed record (internal/org only, before the new start test existed) | SURVIVED | 5s | - |
+| X0t2 | control: the new start test cut out, nothing else | SURVIVED | 7s | - |
+| H7 | abort treats a stop recorded first (ErrDirectorStopped) as a failed record | red | 42s | `TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord` |
+| H7h | H7 with the new start test cut out (HEAD's tests and the first new test) | SURVIVED | 42s | - |
+
+#### C4-4.3 The survivors against whole packages (`-run` dropped, `--full`)
+
+| ID | Mutation | Result | Time | Failing tests |
+| --- | --- | --- | --- | --- |
+| F1 | the frontmatter check always skips | SURVIVED | 1s | - |
+| F3 | a > or | value is checked | SURVIVED | 2s | - |
+| F7 | the last shape on a line wins, not the first | SURVIVED | 2s | - |
+| P9h | P9 with HEAD's tests only | SURVIVED | 307s | - |
+| P11h | P11 with HEAD's tests only | SURVIVED | 307s | - |
+| H7h | H7 with the new start test cut out (HEAD's tests and the first new test) | SURVIVED | 312s | - |
+
+#### C4-4.4 Why the survivors survive
+
+- F1 (the test always skips): the skip for a repo without `.claude/skills` is by design (the vendored-repo case). Nothing fails when it skips; the `checked the frontmatter of 54 SKILL.md files` log line shows that it ran (C4-2.3)
+- F3 (a value starting with `>` or `|` is checked too): no row and no SKILL.md has a block-scalar header followed by `: ` or ` #` on the key's line (`a: > # note` is valid YAML), so the two only differ there, and in the direction of a false finding
+- F7 (the last shape listed wins instead of the first on the line): the row "the first of two shapes on a line" (`x #y: z`) has the earlier shape listed later, so both pick it. Only the rule named in the failure differs (`x: y #z` would tell them apart); the line fails either way
+- P9h and P11h (the not-restored case of `DirectorCleanupError.Error` dropped, or put after `e.Err != nil`): no test of HEAD records a stop, or start's cleanup, whose write cannot be cut back, so they survive HEAD's tests in both packages; the first test of C4-5 kills both (P9, P11)
+- H7 (start's cleanup takes a stop recorded first, `ErrDirectorStopped`, as a failed record): AC4's rows end start with an attach --replace or a detach --force, which leave the registration open, so start's `MarkStopped` succeeds; no test lets a stop record first. H7org survived internal/org's tests before the second test of C4-5 existed, H7h survives both packages with that test cut out, and the test kills H7
+
+#### C4-4.5 The texts of the not-restored record
+
+`$SCRATCH/ods4/probe/zz_probe_test.go` (added through the overlay only) prints the two errors the first test of C4-5 checks by parts:
+
+```text
+    zz_probe_test.go:17: STOP: org: director: stop d1: record d1 stopped: append to $TMPDIR/TestProbe_C4_NotRestoredTexts4165139069/001/director.jsonl: no space left on device, and director.jsonl could not be restored to its size before the append (truncate refused), so it may hold part of the write; director.jsonl may hold part of the write; record the stop with ralph org director stop --id d1
+    zz_probe_test.go:33: START: org: director: start d1: herdr agent start director_0123456789ab (agent_start_retries=0): agent start: exited; its cleanup did not finish: record d1 stopped: append to $TMPDIR/TestProbe_C4_NotRestoredTexts4165139069/003/director.jsonl: no space left on device, and director.jsonl could not be restored to its size before the append (truncate refused), so it may hold part of the write; director.jsonl may hold part of the write; record the stop with ralph org director stop --id d1
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.416s
+```
+
+Both say "may hold part of the write" twice (the store's text, then `DirectorCleanupError.Error`'s note), the same shape as the doubled "nothing was recorded" that S12 handed to /sync-docs. The text comes from S1b; directorRecordStopError only cut the doubled prefix. The test checks the parts and does not pin the doubled phrase.
+
+### C4-5 The tests this cycle added (10efa82c)
+
+`git show --stat 10efa82c`:
+
+```text
+10efa82c test: pin the director stop records that cannot be cut back or that a stop made first
+
+ internal/org/director_start_test.go | 46 +++++++++++++++++++
+ internal/org/director_stop_test.go  | 92 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 138 insertions(+)
+```
+
+- `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt` (`internal/org/director_stop_test.go`), two subtests: a stop of a running d1, and start's cleanup after a failed agent start, whose record's write stops halfway (`directorPartialWrite`) and whose cut back fails. The error is a `*DirectorCleanupError` that wraps `ErrDirectorWriteNotRestored`, ENOSPC, and the truncate error, starts with the prefix once, says `; director.jsonl may hold part of the write` and not that nothing (more) was recorded, names the stop and no herdr command. The file holds the whole detached and part of the stopped (one corrupt line): nothing is current and d1 is open. Then the stop it names, run with the write working and herdr no longer knowing the pane and the workspace, records the stopped and leaves nothing open. Kills P9 and P11
+- `TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord` (`internal/org/director_start_test.go`): a stop runs inside the fake agent start, closes ws-1 and pane-1, and records detached and stopped; start's `MarkLaunched` then finds no current registration, its cleanup finds that herdr no longer knows what it made and its `MarkStopped` gets `ErrDirectorStopped`. Start returns `ErrDirectorReplacedDuringStart` ending in `; start closed what it had made in herdr, and d1 is recorded stopped`, not a `*DirectorCleanupError`, sends no C-c and no close after the agent start, and the trail is attached, workspace_created, pane_created, detached, stopped. Kills H7

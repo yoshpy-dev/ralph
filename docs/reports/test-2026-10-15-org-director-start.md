@@ -427,3 +427,189 @@ D12 と D13 の拒否は、verify の cycle 3 が HEAD と直す前の binary �
 - Blocked: なし
 - Verified: D12(codex の director の autonomous と edits を codex_verified によらず、`permissionArgsForDriver` より前に断る、`codexWritableRootArgs` は leader だけ)、D13(`--config` の相対の `agmsg_home` を、2 つの場所が同じでも断る、`RALPH_ORG_AGMSG_HOME` の警告)、doctor が role director の edits と autonomous を数えないことを、テストと mutant 30 件(red 24 件、生き残りのうち等価 4 件)で確かめた。handoff が名指した 9 つの mutant のうち、等価の `Changed("config")` を除く 8 つは red。HEAD の binary の `ralph doctor` で、director の edits と autonomous が pass になり、直す前の binary では warn になることを見た
 - Not verified: Test gaps の 1〜6。どれも PR を止めるものではない
+
+## Cycle 4
+
+- Date: 2026-10-16(JST 04:28〜05:30)
+- Plan: docs/plans/active/2026-10-15-org-director-start.md(`Status: Approved`。`./scripts/plan-visual.sh digest` は 58be042da6fd で、`- Approved:` の digest と同じ)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 4 回目。`.harness/state/standard-pipeline/cycle-count.json` は 2 のままで、この回も書き換えていない
+- Scope: 905fc0a7 で始め、この回のテストを足した 10efa82c で終えた(10efa82c で `git diff origin/main...HEAD` は 60 ファイル、+15,580/-476)。cycle 3 の報告 b0adfc63 からのコミットのうち、Go を変えたのは 3 つ。b888d637 は D14(lock の下で、stop が読んだときの workspace と pane の id と記録を比べる `MarkStoppedIfUnchanged`。違えば `ErrDirectorChangedDuringStop` を返して何も書かない)と D15(`/director` skill の description を YAML として読める形にし、`internal/config/skill_frontmatter_test.go` を足す)。5097b67e は self-review cycle 4 の LOW(文書の一覧、拒否の注記を CLI の stderr に 1 回だけ出す、frontmatter のテストの名前と doc)。44b80391 は S12(記録のときに登録がすでに stopped なら stop を成功にする `DirectorStopResult.AlreadyStopped`、`org: director: ` を 1 回にする `directorRecordStopError`、`MarkStoppedIfUnchanged` と `MarkForceStopped` の writer の行)。残りは計画と記録。behavioral test だけを実行した(静的解析は /verify の担当)。環境は macOS(arm64)、go1.26.0 と go1.25.8(`GOTOOLCHAIN`)、git 2.49.0、YAML の確認に Ruby 3.4.10(Psych)。実行中の load average は 4〜14(別のセッション)
+- Evidence: `docs/evidence/test-2026-10-15-org-director-start.md` の `## Cycle 4`(C4-1 run-test.sh の抜粋、C4-2 Go の結果と数・`-race`・新しいテストの PASS の行・canary・coverage、C4-3 YAML の確認と frontmatter のテストの感度、C4-4 mutation、C4-5 足したテスト)。生の出力は `docs/evidence/test-2026-10-15-org-director-start.log` の末尾(`===== /test cycle 4` の行から)、wrapper の全ログは `docs/evidence/verify-2026-10-15-192839.log` と `docs/evidence/verify-2026-10-15-195306.log` で、どれも gitignore の対象なのでコミットしない
+- コードは変えていない。テストを 2 本足した(10efa82c、下の「この回で足したテスト」)。mutant と probe のテストは scratchpad に置き、`go test -overlay` で読ませた。ほかに worktree に書いたのは、この節、evidence の `## Cycle 4`、insight event の 1 行だけ
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。`templates/base/ralph.toml` の変更で full に広がった。go1.26.0。10efa82c) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(前の回と同じ) | 511 秒、rc 0 |
+| 同じコマンドを 905fc0a7 で(1 回目。下の理由で HEAD の結果に数えない) | 同じ | 同じ | 0 | 同じ | 665 秒、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test ./... -count=1 -v -coverprofile`(10efa82c) | cli: top-level 708、subtest 662。org: 812、1,712。org/driver: 48、89。org/protocol: 15、56。config: 39、53。insights: 36、7。scaffold: 32、0。upgrade: 114、13 | 同じ数から skip を引いた数 | 0 | org 1、scaffold 2 | 218 秒(cli 217.1 s、org 81.9 s)、rc 0 |
+| 同じコマンドを 905fc0a7 で | org だけ 810、1,710。ほかは上と同じ | 同じ | 0 | 同じ | 234 秒、rc 0 |
+| `go test -race -count=1 -v ./internal/org/ ./internal/cli/`(go1.26.0、10efa82c) | org 812/1,712、cli 708/662 | 同じ数から skip を引いた数 | 0 | org 1 | 232 秒(org 86.9 s、cli 224.7 s)、rc 0、DATA RACE なし |
+| `GOTOOLCHAIN=go1.25.8 go test -race -count=1 -v ./internal/org/ ./internal/cli/`(10efa82c) | 同じ | 同じ | 0 | org 1 | 225 秒(org 85.2 s、cli 218.4 s)、rc 0、DATA RACE なし |
+| `go test -count=1 -v` で残りの 6 パッケージ(go1.26.0、10efa82c) | go1.25.8 と同じ数 | 同じ | 0 | scaffold 2 | 1 パッケージ 1〜3 秒、rc 0 |
+| うち cycle 3 のあとで足したテスト | top-level 12(cli 2、config 2、org 8)、subtest 39(cli 4、config 19、org 16)。この回で足した 2 本(subtest 2)を含む | Go のすべての実行で | 0 | 0 | - |
+| Ruby の `YAML.safe_load` で、追跡している SKILL.md をすべて読む | 54 本 | 905fc0a7 と 10efa82c のどちらでも 54 本 ok | 直す前の `/director` の 4 本は 4 本とも `Psych::SyntaxError` | - | 1 秒未満 |
+| frontmatter のテストを、`git archive` の写しの skill を 1 本ずつ壊して流す(Y0〜Y6) | 7 回 | 対照 2 回と、値を引用符で囲んだ Y4 は PASS | 壊した Y1、Y2、Y3、Y5 は狙いどおり FAIL | - | 1 回 1 秒前後 |
+| mutation(`go test -overlay`、go1.26.0、`-run` で絞った回) | mutant 42 件、対照 6 件 | red 39 件 | 生き残り 3 件(F1、F3、F7) | - | 1 件 1〜51 秒 |
+| 生き残りをパッケージ全体で | F1、F3、F7 は config。この回のテストを外した P9h、P11h、H7h は org と cli | - | 6 件とも生き残り | - | F は 1〜2 秒、ほかは 307〜312 秒 |
+
+- shell は 41 本すべてが `OK` で終わり、`FAIL:` の行 25 本はどれも 0 だった。cycle 3 と同じ形で抜き出した 168 行は、行番号と時間を除くと、Go の行の `(cached)` と wrapper のログの名前だけが違った。PASS で始まる行は 4,283 本で cycle 3 と同じ。Skipped は前からある `tests/test-secret-scan-branch.sh` の 1 件(git が 2.49.0 なので、2.41 より古い git の場合を飛ばす)
+- 1 回目の `run-test.sh` は 905fc0a7 で走らせたが、Go の部分が走っている間(04:38:24)に 1 本目のテストを worktree に書いた。org の binary はその前に build されていたとみている(org は Go の部分の始めから 81.966 s かかっている。推測で、未確認です)。そのため 1 回目は HEAD の結果に数えず、10efa82c で打ち直した 2 回目を gate にした
+- 2 回目の Go は config と org を流し直し、ほかの 6 パッケージは `(cached)` だった。cli の `(cached)` は 1 回目の go1.26.0 の結果(212.1 s)で、2 回の間に変わったのは `internal/org` の `_test.go` だけで、cli の build には入らない。insights は org を import するが、org のテストでないコードは変わっていない。8 パッケージとも、go1.25.8 と go1.26.0 の両方の `-count=1` で ok を確かめた
+- go1.25.8 の名前と結果の行 4,396 本と、go1.26.0 の 2 回(`-race` の org と cli、残り 6 パッケージ)を合わせた 4,396 本は同じだった(両方を `LC_ALL=C sort`)。2 つの `-race` の回の org と cli の行(3,894 本ずつ)も同じ。cycle 3 の 4,345 本との差は 51 本の追加だけで、消えた行はない
+- Skipped は cycle 3 と同じ 3 本(`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`、scaffold の `TestBaseFS_WithMockFS` と `TestAvailablePacks_WithMockFS`)
+- 前に揺れたテスト(`TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`、`TestRunDoctorFull_StrictFlipsExitCode_DriftedCore`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どの実行でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` の subtest でいちばん遅かったのは 905fc0a7 の go1.25.8 の SIGHUP の 2.49 s で、`gateKillGrace` の 5 s にも 15 s の予算にも届いていない
+- AC13: run-test.sh の 2 回、Go のすべての実行、mutation のすべての回、probe のテストは、PATH の先頭に canary の `herdr` と `osascript` を置いて走らせた(呼ばれたら argv を記録して exit 97)。呼ばれた回数は 0 回。最後に手で同じ PATH から打つと 2 つとも記録されたので、PATH の検索は canary に届く。テストのあと、main のチェックアウトにも worktree にも `.harness/state/org` はなく、main のチェックアウトの下に `director.jsonl` は 1 つもない。`~/.codex/config.toml` は更新時刻(Oct 15 17:51:28 2026)、大きさ(33,673)、sha256(ac1a4821…)が cycle 3 と同じだった
+
+handoff が名指したテストと D14 のテストは、`-run` で名前を指定し、`-v` で走らせた(905fc0a7、go1.26.0)。どれも skip されていない。主な PASS の行は次のとおり。全体の行は evidence の C4-2.3 にある。10efa82c の go1.25.8 の全体の実行でも、どれも PASS だった。
+
+```text
+--- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst (0.01s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/another_stop_recorded_it_first (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it,_with_force (0.00s)
+    --- PASS: TestStopDirector_SucceedsWhenTheStopWasRecordedFirst/start's_cleanup_recorded_it_while_a_forced_stop's_workspace_close_failed (0.00s)
+--- PASS: TestStopDirector_ARecordThatFailsSaysItsPrefixOnce (0.00s)
+--- PASS: TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce (0.00s)
+--- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun (0.00s)
+    --- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/the_workspace_closed (0.00s)
+    --- PASS: TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun/a_forced_stop_whose_workspace_close_failed (0.00s)
+--- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored (0.01s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkStoppedIfUnchanged_of_the_current_registration (0.00s)
+    --- PASS: TestDirectorHeadlessWriters_ACutOffWriteIsRestored/MarkForceStopped_of_the_current_registration (0.00s)
+--- PASS: TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash (0.01s)
+--- PASS: TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead (0.01s)
+--- PASS: TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns (0.01s)
+--- PASS: TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile (0.00s)
+--- PASS: TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain (0.00s)
+```
+
+`TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash` は `checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills` を log に出す。4 つの根のどれも読んでいる。D14 のテストは、`_test.go` で `ErrDirectorChangedDuringStop` を grep して見つけた(`internal/org/director_test.go`、`internal/org/director_stop_test.go` の helper `wantChangedDuringStop`、`internal/cli/org_director_headless_test.go`)。
+
+### cycle 4 の変更とテストの対応
+
+「mutant」の列は、その変更の判定を壊した mutant が落ちたかどうか(id は下の Mutation の表と evidence の C4-4)。
+
+| 変更 | テスト | mutant |
+| --- | --- | --- |
+| D14: 強制でない stop の記録(`MarkStoppedIfUnchanged`)は、lock の下で workspace と pane の id を stop が読んだときと比べ、違えば `ErrDirectorChangedDuringStop` を返して何も書かない | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`(5 行)、`TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns`(3 行) | G1(外す)、G2(workspace だけ比べる)、G3(pane だけ)、G4(state も比べる)、G5(読んだ値を渡さない)、G6(`MarkStopped` で書く)、G9(sentinel を包まない)、G10(2 つの読みを逆に書く)、G11(no workspace と no pane の語を入れ替える)red |
+| D14: 強制の stop(`MarkForceStopped`)と start の後始末(abort の `MarkStopped`)は比べない | `TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile`、`TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade` | G7(強制でも比べる)、G8(abort が `r.reg` と比べる)red |
+| D14 の拒否の文(「this stop closed only what it had read」と、打ち直す stop) | `RefusesWhenAStartRecordsMoreWhileItRuns`、`TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain`(2 行) | P7、P8 red |
+| AC8 の最後の文(S12): 記録のときに登録がすでに stopped(`ErrDirectorStopped`)なら stop を成功にし、`AlreadyStopped` を立てる。CLI は打つ stop を示さない | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst`(4 行)、`TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun`(2 行) | H1〜H6、C1、C2 red |
+| 同じ文の start の側: start の後始末の `MarkStopped` が `ErrDirectorStopped` を受けたら記録済みとする | この回で足した `TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord` | H7 red。905fc0a7 のテストだけでは、org と cli の全体でも生き残った(H7org、H7h) |
+| `directorRecordStopError`: `org: director: ` と `stop <id>: ` を 1 回にし、`Unwrap` で中の error を返す | `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce`、`TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`、`TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce` など | P1〜P6 red |
+| 書き戻せない記録(`ErrDirectorWriteNotRestored`)のときの `DirectorCleanupError.Error` の文 | この回で足した `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`(2 行) | P9、P11 red。905fc0a7 のテストだけでは全体でも生き残った(P9h、P11h) |
+| writer の行に `MarkStoppedIfUnchanged` と `MarkForceStopped` を足す | `TestDirectorHeadlessWriters_ACutOffWriteIsRestored` の 2 行 | この回は mutant を作っていない(行が走って PASS することは上の PASS の行で見た) |
+| `ralph org director stop` の help の D14 と AC8 の文 | `AStartThatRecordedMeanwhileNamesTheStopAgain`、`AStopRecordedFirstNamesNoStopToRun` | C3、C4 red |
+| D15: `/director` の description を YAML として読める形にし、plain な値の `: `、`:` で終わる値、` #` をテストで見つける | `TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash`(54 本)、`TestPlainFrontmatterFindings`(19 行)。Psych で 54 本 ok | F2、F4、F5、F6、F8、F9、F10 red。F1、F3、F7 は生き残り(下)。壊した写しの Y1、Y2、Y3、Y5 は FAIL |
+
+### Coverage
+
+- Statement(go1.25.8、10efa82c、各パッケージ自身のテストの profile): `internal/org` 94.7%、`internal/cli` 87.8%、`internal/config` 93.3%、`internal/org/driver` 93.1%、`internal/org/protocol` 100.0%、`internal/insights` 86.1%、`internal/scaffold` 75.7%、`internal/upgrade` 91.2%(cycle 3 は org 94.6%、cli 87.7%、ほかは同じ)
+- 変わった関数はすべて通る: `markStopped` の D14 の比較(`director_start.go` 354〜357)、`directorRecordedIDs`(380〜389)、`recordDirectorStop`(`director_stop.go` 198〜230)、`directorRecordStopError`(247〜253)、`DirectorCleanupError.Error` の変わった case(335〜336)、`printOrgDirectorStop` の AlreadyStopped の分岐(`org_director_headless.go` 400〜402)
+- `internal/org/director_stop.go` は 146/149 文(98.0%)。905fc0a7 では 145/149 で、`DirectorCleanupError.Error` の書き戻せない場合(319〜320)が通らなかった。この回で足した 1 本目のテストがそこを通す。残る 334 は新しい switch の空の `case e.StopCommand == "":` で、`newDirectorCleanupError` は StopCommand を必ず入れるので、手で作った error しか届かない(switch の前と同じ)
+- `internal/org/director_start.go` は 226/241 文(93.8%)。新しく通らないのは、`markStopped` の lock の下の読みの失敗(346〜348)と、abort の detach の失敗(734〜737)で、どちらも S1b から。残りは cycle 3 と同じ
+- `internal/org/director.go` は 193/194 文(99.5%。通らないのは `json.Marshal` の失敗の 481〜483)。`internal/cli/org_director_headless.go` は 105/108 文(97.2%)で、通らない 3 文は cycle 3 と同じ(設定と model の解決の失敗、`os.Getwd` の失敗)
+- Branch: Go の標準ツールには branch coverage がないので測っていない。代わりに mutation で分岐ごとの判定を確かめた(下)
+
+### Mutation
+
+- 対象は D14、AC8 の最後の文、接頭辞の直し、frontmatter のテストの helper。ファイルを overlay で差し替え、`-run` で流した(org、cli は cycle 3 と同じ `-run`、config は `SkillFrontmatter|PlainFrontmatter`)。生き残りはパッケージ全体でも流した。手を加えないファイルを overlay で読ませた対照の X0(`director_start.go`)、X0s(`director_stop.go`)、X0c(`org_director_headless.go`)、X0f(`skill_frontmatter_test.go`)と、足したテストだけを外した X0t、X0t2 は通った。どの差し替えも元の文字列がちょうど 1 か所にあり、すべての mutant が build できた(F4 と F6 は 1 回目の形で変数と import が使われずに build できなかったので、使う形に直した)
+- batch は 04:40〜04:49 に 905fc0a7 に対して流した。1 本目のテストはその時点で worktree にあり、2 本目(04:50:07)はまだなかった。そのため P1〜P4 と P6 の「落としたテスト」に 1 本目のテストも並ぶが、どれも 905fc0a7 からあるテストでも落ちている。H7 は 2 本目を書いたあとに流した。「h」の付く回は、足したテストを外して流し直したもの
+- 42 件のうち 39 件が red、3 件(F1、F3、F7)が生き残った。905fc0a7 のテストだけでは、さらに P9、P11、H7 が両パッケージの全体でも生き残った。この 3 件は、足した 2 本のテストが閉じた穴
+
+| ID | 変異 | 結果 | 落としたテスト |
+| --- | --- | --- | --- |
+| G1 | D14 の比較を外す | red | `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`、`TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G2 | D14 が workspace だけ比べる | red | 同上 |
+| G3 | D14 が pane だけ比べる | red | `RefusesAnIDRecordedAfterTheRead` |
+| G4 | D14 が state も比べる(launched で断る) | red | 同上 |
+| G5 | `MarkStoppedIfUnchanged` が読んだ値を渡さない(比べない) | red | G1 と同じ 2 本 |
+| G6 | stop の強制でない記録が `MarkStopped` を呼ぶ | red | `RefusesWhenAStartRecordsMoreWhileItRuns` |
+| G7 | 強制の記録も id を比べる | red | `TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile` |
+| G8 | start の後始末(abort)が `r.reg` と比べて記録する | red | `TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade` |
+| G9 | D14 の拒否が `ErrDirectorChangedDuringStop` を `%w` で包まない | red | G1 と同じ 2 本 |
+| G10 | D14 の拒否が 2 つの読みを逆に書く | red | 同上 |
+| G11 | `directorRecordedIDs` の no workspace と no pane の語を入れ替える | red | 同上 |
+| H1 | AlreadyStopped の分岐を外す(stopped の拒否がまた cleanup error になる) | red | `TestStopDirector_SucceedsWhenTheStopWasRecordedFirst` |
+| H2 | AlreadyStopped を強制でないときだけにする | red | 同上 |
+| H3 | AlreadyStopped を強制のときだけにする | red | 同上 |
+| H4 | AlreadyStopped を立てない(nil の error と素の結果を返す) | red | 同上 |
+| H5 | 強制の stop で AlreadyStopped と一緒に Forced も立てる | red | 同上 |
+| H6 | AlreadyStopped と一緒に WasCurrent も立てる | red | 同上 |
+| H7 | abort が、先に記録された stop(`ErrDirectorStopped`)を記録の失敗とする | red(足したテストで) | `TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord`。H7org と H7h は生き残り |
+| P1 | `directorRecordStopError` が何も削らない | red | `TestStopDirector_ARecordThatFailsSaysItsPrefixOnce`、`TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce`、`AForcedStopThatCannotRecordSaysToRetryWithForce`、`RefusesWhenAStartRecordsMoreWhileItRuns` ほか |
+| P2 | 同じく `org: director: ` だけを削る | red | 同上 |
+| P3 | `directorRecordStopError.Unwrap` が nil を返す | red | 同上 |
+| P4 | start の後始末を `fmt.Errorf("record %s stopped: %w")` に戻す | red | `ACleanupWhoseRecordFailsSaysThePrefixOnce` ほか |
+| P5 | stop の強制の分岐を同じ形に戻す | red | `AForcedStopThatCannotRecordSaysToRetryWithForce` |
+| P6 | stop の一般の分岐を同じ形に戻す | red | `ARecordThatFailsSaysItsPrefixOnce` ほか |
+| P7 | D14 の分岐から「; this stop closed only what it had read」を外す | red | `RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P8 | `DirectorCleanupError.Error` から D14 の case を外す(「record the stop with」と言う) | red | `AStartThatRecordedMeanwhileNamesTheStopAgain`、`RefusesWhenAStartRecordsMoreWhileItRuns` |
+| P9 | `DirectorCleanupError.Error` から書き戻せない場合の case を外す(「nothing was recorded」と言う) | red(足したテストで) | `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`。P9h は生き残り |
+| P11 | 書き戻せない場合より先に `e.Err` を見る(start の後始末が「nothing more was recorded」と言う) | red(足したテストで) | 同上。P11h は生き残り |
+| C1 | `printOrgDirectorStop` が AlreadyStopped を見ない | red | `TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun` |
+| C2 | 同じく AlreadyStopped の 2 行目を出さない | red | 同上 |
+| C3 | stop の help から D14 の文を外す | red | `AStartThatRecordedMeanwhileNamesTheStopAgain` |
+| C4 | stop の help から AC8 の文を外す | red | `AStopRecordedFirstNamesNoStopToRun` |
+| F1 | frontmatter の検査がいつも skip する | 生き残り(全体でも) | - |
+| F2 | 二重引用符の値も検査する | red | `TestPlainFrontmatterFindings` |
+| F3 | `>` か `\|` で始まる値も検査する | 生き残り(全体でも) | - |
+| F4 | CR を削らない | red | `TestPlainFrontmatterFindings` |
+| F5 | `:` で終わる値の検査を外す | red | 同上 |
+| F6 | 桁を byte で数える | red | 同上 |
+| F7 | 1 行に 2 つの形があるとき、一覧の後ろの形を選ぶ | 生き残り(全体でも) | - |
+| F8 | `: ` の検査を外す | red | `TestPlainFrontmatterFindings` |
+| F9 | ` #` の桁を空白に置く | red | 同上 |
+| F10 | 字下げした行も検査する | red | 同上 |
+
+- F1: `.claude/skills` のない repo(vendored の repo)で skip するのは設計どおりで、skip しても何も落ちない。走ったことは log の行(54 本)で分かる
+- F3: `>` や `|` のあとの同じ行に `: ` や ` #` がある値(`a: > # note` は正しい YAML)は、行にも SKILL.md にもない。違いが出るのはそこだけで、向きは誤検出のほう
+- F7: 「the first of two shapes on a line」の行(`x #y: z`)は、行の中で先に来る形が一覧では後ろにあるので、どちらでも同じ形を選ぶ。違うのは失敗の文に出る規則の名前だけで、行はどちらでも落ちる(`x: y #z` の行なら見分けられる)
+- P9h、P11h: 905fc0a7 には、書き戻せない記録の stop や start の後始末を試すテストがなかった
+- H7h: AC4 の行は start を attach --replace か detach --force で終わらせ、どちらも登録を開いたままにするので、start の `MarkStopped` は成功する。先に stop が記録する行はなかった
+
+### この回で足したテスト(10efa82c)
+
+- `TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`(`internal/org/director_stop_test.go`、subtest 2 本)。動いている d1 の stop と、agent の start が失敗したあとの start の後始末で、記録の書き込みを途中で止め(`directorPartialWrite`)、切り戻しも失敗させる。error は `*DirectorCleanupError` で、`ErrDirectorWriteNotRestored`、ENOSPC、truncate の error を包み、接頭辞は 1 回、`; director.jsonl may hold part of the write` と言い、何も(それ以上)記録していないとは言わず、stop の打ち方を示して herdr の打ち方は示さない。ファイルには detached が丸ごとと stopped の一部(壊れた行 1 本)が残り、current はなく d1 は開いたまま。そのあと示された stop を、書き込みを直し、herdr が pane も workspace も知らない状態で打つと、stopped を記録して開いた登録は残らない。P9 と P11 を落とす
+- `TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord`(`internal/org/director_start_test.go`)。fake の agent の start の中で stop を走らせ、ws-1 と pane-1 を閉じ、detached と stopped を記録させる。start の `MarkLaunched` は current の登録を見つけられず、後始末は herdr がもう作ったものを知らないと分かり、`MarkStopped` は `ErrDirectorStopped` を受ける。start は `ErrDirectorReplacedDuringStart` を返し、文は `; start closed what it had made in herdr, and d1 is recorded stopped` で終わる。`*DirectorCleanupError` ではない。agent の start のあとに C-c も close も送らず、記録は attached、workspace_created、pane_created、detached、stopped。H7 を落とす
+- 2 本とも、overlay で外した対照(X0t、X0t2)で通ることと、狙った mutant だけで落ちることを確かめた。Go のすべての実行で PASS
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+落ちたテストはない。
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 3 の指摘(D14): stop が読んだあとで start が記録した pane や workspace を、stop は閉じないまま stopped と記録する | 直っている。lock の下で比べ、違えば何も書かずに断る | G1〜G11 red |
+| cross-review cycle 3 の指摘(D15): `/director` の description が YAML として読めない | 直っている | Psych で 54 本 ok、直す前の 4 本は SyntaxError。壊した写しの Y1、Y2 は FAIL |
+| verify cycle 4 の指摘(S12): start の後始末が先に stopped を記録した d1 の stop が、成功にならず cleanup error で終わる | 直っている | H1〜H6、C1、C2 red |
+| 記録の失敗の文で `org: director: ` が 2 回出る | 直っている | P1〜P6 red |
+| cycle 1〜3 のテストと既存のテスト | すべて PASS。名前の並びは cycle 3 から 51 行増え、消えた行はない | evidence の C4-2.2 |
+| 前に揺れた doctor、watcher、gate のテスト | 落ちていない | evidence の C4-2.1 |
+
+### Test gaps
+
+1. F1: frontmatter のテストは `.claude/skills` がないと skip し、skip しても何も落ちない。vendored の repo のための設計で、走ったかどうかは log の行で分かる
+2. F3: `>` か `|` のあとの同じ行に `: ` や ` #` を持つ値の行がない。違いが出るのは誤検出の向きだけ
+3. F7: 1 行に 2 つの形があるとき、失敗の文がどちらの規則を名指すかを固定していない。`x: y #z` の行を足せば固定できる
+4. D14 と AC8 の競合は、fake の herdr を使う org のテストで見ただけで、build した binary を CLI から打つ形では走らせていない。CLI のテストが使う stub の herdr は、close の途中で台帳に書けない
+5. 本物の herdr で、start の agent の start の途中に stop が pane と workspace を閉じたときの順と結果は見ていない
+6. 書き戻せない記録の文は「may hold part of the write」を 2 回言う(store の文と `DirectorCleanupError.Error` の注記)。S1b からある形で、`directorRecordStopError` は接頭辞の重なりだけを削った。足したテストは文を部分ごとに確かめ、重なった句は固定していない(evidence の C4-4.5)
+7. writer の行の `MarkStoppedIfUnchanged` と `MarkForceStopped` には、この回は mutant を作っていない
+8. cycle 3 の Test gaps 1〜6 は、cycle 4 の変更の外で、そのまま残る
+
+### Verdict
+
+- Pass: yes。`./scripts/run-test.sh`(changed、full に広がった)は 10efa82c で rc 0(shell 41 本すべて OK、Go 8 パッケージすべて ok)。go1.25.8 の `go test ./... -count=1` は 10efa82c で rc 0(cli 708/662、org 812/1,712 と skip 1、config 39/53、insights 36/7、org/driver 48/89、org/protocol 15/56、scaffold 32/0 と skip 2、upgrade 114/13。fail はどれも 0)。org と cli の `-race` は go1.26.0 と go1.25.8 のどちらでも rc 0 で DATA RACE もなく、go1.26.0 の残り 6 パッケージも rc 0。テストの名前は両方の版で同じ。cycle 3 のあとで足したテスト 12 本(subtest 39)はどれも PASS。テストは本物の herdr と osascript を打たず(canary は 0 回)、repo の台帳に書いていない。`~/.codex/config.toml` は変わっていない
+- Fail: なし
+- Blocked: なし
+- Verified: D14(強制でない stop は lock の下で workspace と pane の id を比べ、違えば何も書かずに断る。強制の stop と start の後始末は比べない)、AC8 の最後の文(stop の側の AlreadyStopped と、start の後始末の側の記録済みの扱い)、接頭辞を 1 回にする直し、D15(`/director` の description、54 本の SKILL.md を Psych で読めること、frontmatter のテストの 4 つの根と規則)を、テストと mutant 42 件(red 39 件)で確かめた。足した 2 本のテストで、905fc0a7 のテストでは生き残った P9、P11、H7 を落とした
+- Not verified: Test gaps の 1〜8。どれも PR を止めるものではない
