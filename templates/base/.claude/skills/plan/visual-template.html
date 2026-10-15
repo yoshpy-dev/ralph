@@ -5,6 +5,10 @@
   and replace the example figures. Keep the page self-contained: inline CSS and
   inline SVG only (no external scripts, fonts, images, or CDNs). Escape & < >
   in page text as &amp; &lt; &gt;: a raw <slug> is parsed as a tag.
+  Order: header, easy figures (overview first), the "Before you approve" box,
+  then the closed fold with the detail figures. Write page text in the user's
+  language and translate the English headings. Check the page with
+  scripts/plan-visual.sh lint <page>.
 -->
 <html lang="__LANG__">
 <head>
@@ -29,9 +33,57 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.7; }
   main { max-width: 1120px; margin: 0 auto; padding: 40px 16px 80px; }
-  h1 { font-size: 28px; line-height: 1.3; margin: 0 0 6px; }
+  h1 { font-size: 30px; line-height: 1.3; margin: 0 0 6px; }
   .meta { color: var(--muted); font-size: 13px; font-family: var(--mono); }
-  .summary { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin: 28px 0 20px; }
+  .lead { font-size: 18px; margin: 18px 0 36px; max-width: 52em; }
+
+  /* Easy figures: one conclusion per figure, big type, two box colors. */
+  .easy { margin: 0 0 28px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 28px 20px; }
+  .easy h2 { margin: 0 0 18px; font-size: 23px; line-height: 1.45; }
+  .easy h2 .no { display: inline-block; width: 34px; height: 34px; margin-right: 10px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 18px; line-height: 34px; text-align: center; vertical-align: 2px; }
+  .easy .foot { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; margin: 14px 0 0; color: var(--muted); font-size: 14px; }
+  .easy .foot .made { color: var(--blue); font-weight: 600; white-space: nowrap; }
+  .easy .words { margin: 0; }
+  .easy .words b { color: var(--ink); }
+  /* SVG of an easy figure: text inherits ink, sans, and 18px. */
+  .easy svg { width: 100%; height: auto; display: block; fill: var(--ink); font-family: var(--sans); font-size: 18px; }
+  .easy svg .n-new { fill: var(--blue-bg); stroke: var(--blue); stroke-width: 2; }
+  .easy svg .n-old { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  .easy svg .n-fail { fill: var(--card); stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .easy svg .area { fill: var(--group); }
+  .easy svg .t-sub { fill: var(--muted); font-size: 14px; }
+  .easy svg .t-row { font-size: 17px; font-weight: 700; fill: var(--muted); }
+  .easy svg .t-row.now { fill: var(--blue); }
+  .easy svg .t-ok { fill: var(--blue); font-weight: 700; font-size: 17px; }
+  .easy svg .t-no { fill: var(--muted); font-weight: 700; font-size: 17px; }
+  .easy svg .line { fill: none; stroke: var(--ink); stroke-width: 2; }
+  .easy svg .line.off { stroke: var(--line); stroke-width: 2; }
+  .easy svg .head { fill: var(--ink); }
+  .easy svg .person { fill: var(--ink); }
+  .easy svg .rule { stroke: var(--line); stroke-width: 1; }
+
+  /* Before you approve */
+  .before { margin: 40px 0 44px; background: var(--card); border: 2px solid var(--ink); border-radius: 16px; padding: 24px 28px; }
+  .before h2 { margin: 0 0 14px; font-size: 22px; }
+  .before .cols { display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 24px; }
+  .before h3 { margin: 0 0 6px; font-size: 15px; }
+  .before ul { margin: 0; padding-left: 1.2em; font-size: 15px; }
+  .before li { margin: 0 0 6px; }
+  .before .warn h3 { color: var(--orange); }
+
+  /* The fold: closed by default; the detail figures live inside it. */
+  details.deep { margin: 0; }
+  details.deep > summary { cursor: pointer; list-style: none; padding: 16px 20px; border: 1.5px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 15px; }
+  details.deep > summary::-webkit-details-marker { display: none; }
+  details.deep > summary b { color: var(--ink); }
+  details.deep > summary::before { content: "▶"; display: inline-block; margin-right: 10px; font-size: 11px; transition: transform .15s; }
+  details.deep[open] > summary::before { transform: rotate(90deg); }
+  details.deep > summary:hover { border-color: var(--muted); color: var(--ink); }
+  details.deep > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  details.deep[open] > summary { margin-bottom: 24px; }
+
+  /* Detail figures: summary, legend, and figure frame. */
+  .summary { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin: 0 0 20px; }
   .summary section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
   .summary h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
   .summary ul { margin: 0; padding-left: 1.2em; }
@@ -52,121 +104,216 @@
   figure .note { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
   .out { color: var(--muted); font-size: 14px; }
   .out b { color: var(--ink); }
-  /* SVG: text inherits ink, sans, and 13px; the classes below carry the
-     visual vocabulary from diagrams.md. */
-  svg { width: 100%; height: auto; display: block; fill: var(--ink); font-family: var(--sans); font-size: 13px; }
-  svg .mono { font-family: var(--mono); }
-  svg .sub { fill: var(--muted); font-size: 12px; }
-  svg .group { fill: var(--group); }
-  svg .node { stroke-width: 1.5; }
-  svg .keep { fill: var(--card); stroke: var(--line); }
-  svg .add { fill: var(--blue-bg); stroke: var(--blue); stroke-width: 2; }
-  svg .mod { fill: var(--orange-bg); stroke: var(--orange); stroke-width: 2; }
-  svg .del { fill: var(--card); stroke: var(--muted); stroke-dasharray: 5 4; }
-  svg .edge { fill: none; stroke: var(--ink); stroke-width: 1.5; }
-  svg .edge.copy { stroke: var(--muted); stroke-dasharray: 4 4; }
-  svg .edge.uses { stroke: var(--blue); stroke-dasharray: 4 4; }
-  svg .arrowhead { fill: var(--ink); }
-  svg .arrowhead.blue { fill: var(--blue); }
-  svg .arrowhead.muted { fill: var(--muted); }
-  svg .badge { fill: var(--blue); }
-  svg .badge-text { fill: #fff; font-size: 11px; font-weight: 700; }
-  svg .label-bg { fill: var(--card); }
-  /* <page>#overview (or any #<figure-id>): show only that figure. */
+  /* SVG of a detail figure: text inherits ink, sans, and 13px; the classes
+     below carry the visual vocabulary from diagrams.md. */
+  figure svg { width: 100%; height: auto; display: block; fill: var(--ink); font-family: var(--sans); font-size: 13px; }
+  figure svg .mono { font-family: var(--mono); }
+  figure svg .sub { fill: var(--muted); font-size: 12px; }
+  figure svg .group { fill: var(--group); }
+  figure svg .node { stroke-width: 1.5; }
+  figure svg .keep { fill: var(--card); stroke: var(--line); }
+  figure svg .add { fill: var(--blue-bg); stroke: var(--blue); stroke-width: 2; }
+  figure svg .mod { fill: var(--orange-bg); stroke: var(--orange); stroke-width: 2; }
+  figure svg .del { fill: var(--card); stroke: var(--muted); stroke-dasharray: 5 4; }
+  figure svg .edge { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+  figure svg .edge.copy { stroke: var(--muted); stroke-dasharray: 4 4; }
+  figure svg .edge.uses { stroke: var(--blue); stroke-dasharray: 4 4; }
+  figure svg .arrowhead { fill: var(--ink); }
+  figure svg .arrowhead.blue { fill: var(--blue); }
+  figure svg .arrowhead.muted { fill: var(--muted); }
+  figure svg .badge { fill: var(--blue); }
+  figure svg .badge-text { fill: #fff; font-size: 11px; font-weight: 700; }
+  figure svg .label-bg { fill: var(--card); }
+
+  /* <page>#overview (or any #<figure-id>): show only that figure. A target
+     inside the closed fold opens it (Chrome); the fold's summary line and a
+     fold without the target are hidden. */
   body:has(figure:target) .chrome,
+  body:has(figure:target) details.deep:not(:has(:target)),
+  body:has(figure:target) details.deep > summary,
   body:has(figure:target) figure:not(:target) { display: none; }
   body:has(figure:target) main { padding: 16px; }
   body:has(figure:target) figure { margin: 0; }
-  @media (max-width: 720px) { .summary { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) {
+    .summary, .before .cols { grid-template-columns: 1fr; }
+    .easy { padding: 20px 16px 16px; }
+  }
 </style>
 </head>
 <body>
 <main>
   <div class="chrome">
-    <!-- Header: plan title, plan path, branch -->
-    <h1>__TITLE__</h1>
+    <!-- Header: h1 is a sentence saying what changes for the reader (not the
+         plan slug); then plan path · branch; then the lead, two sentences:
+         how it works today, then how it works after this plan. -->
+    <h1>__HEADLINE__</h1>
     <div class="meta">__PLAN_PATH__ · __BRANCH__</div>
-
-    <!-- Summary: a few bullets each, tagged with slice ids. Translate the
-         headings into the page language. -->
-    <div class="summary">
-      <section>
-        <h2>What changes</h2>
-        <ul>
-          <li>__CHANGE__ (S1)</li>
-        </ul>
-      </section>
-      <section>
-        <h2>What stays</h2>
-        <ul>
-          <li>__UNCHANGED__</li>
-        </ul>
-      </section>
-    </div>
-
-    <!-- Legend: always present; drop entries no figure uses. -->
-    <div class="legend">
-      <span><i class="sw add"></i>Added</span>
-      <span><i class="sw mod"></i>Changed</span>
-      <span><i class="sw keep"></i>Existing (unchanged)</span>
-      <span><i class="sw del">✕</i>Removed</span>
-      <span><i class="sw copy"></i>Copy / generated</span>
-      <span><i class="sw uses"></i>Uses this part</span>
-      <span><i class="pill">S1</i>Slice</span>
-    </div>
+    <p class="lead">__TODAY__ __AFTER_THIS_PLAN__</p>
   </div>
 
-  <!-- Overview: always first. Every feature or slice on one canvas, each part
-       labeled with its slice or AC id. The example below shows the vocabulary;
-       replace it. -->
-  <figure id="overview">
-    <h3>Figure 1 · Overview</h3>
-    <p class="q"><b>What to check:</b> __QUESTION__</p>
-    <svg viewBox="0 0 1080 200" role="img" aria-label="__OVERVIEW_ALT__">
+  <!-- Easy figure 1: always first, id="overview"; /pr pastes this figure into
+       the PR. The h2 is the conclusion as a sentence. Draw people and roles
+       (the human with the person icon); no paths, function names, event names,
+       config keys, or mono text (a command the human types may appear). At
+       most 5 boxes: n-new added for the reader, n-old stays, n-fail (dashed)
+       what happens on failure. One arrow kind (line; "line off" plus a t-no ✕
+       for what does not happen). No legend. The example is the default form,
+       today then after in two rows; replace it. -->
+  <figure class="easy" id="overview">
+    <h2><span class="no">1</span>__CONCLUSION__</h2>
+    <svg viewBox="0 0 1080 330" role="img" aria-label="__OVERVIEW_ALT__">
       <defs>
-        <marker id="ov-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        <marker id="e1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="head"/></marker>
+        <g id="e1-person"><circle cx="0" cy="-14" r="11" class="person"/><path d="M-17,22 C-17,2 17,2 17,22 z" class="person"/></g>
       </defs>
-      <rect x="20" y="20" width="1040" height="160" rx="14" class="group"/>
-      <text x="40" y="48" font-size="15" font-weight="700">area (group)</text>
 
-      <rect x="60" y="80" width="260" height="56" rx="8" class="node keep"/>
-      <text x="74" y="104" class="mono">path/to/existing</text>
-      <text x="74" y="124" class="sub">existing, unchanged</text>
+      <text x="20" y="92" class="t-row">Today</text>
+      <use href="#e1-person" x="128" y="88"/>
+      <rect x="180" y="40" width="400" height="96" rx="12" class="n-old"/>
+      <text x="204" y="80">What you do today</text>
+      <text x="204" y="110" class="t-sub">stays as it is: n-old</text>
+      <line x1="580" y1="88" x2="638" y2="88" class="line" marker-end="url(#e1-arrow)"/>
+      <rect x="640" y="40" width="420" height="96" rx="12" class="n-old"/>
+      <text x="664" y="80">What happens today</text>
+      <text x="664" y="110" class="t-sub">one arrow kind: line</text>
 
-      <rect x="410" y="80" width="260" height="56" rx="8" class="node add"/>
-      <text x="424" y="104" class="mono">path/to/new-part</text>
-      <text x="424" y="124" class="sub">added</text>
-      <rect x="638" y="71" width="32" height="17" rx="8.5" class="badge"/>
-      <text x="654" y="83.5" text-anchor="middle" class="badge-text">S1</text>
+      <line x1="20" y1="168" x2="1060" y2="168" class="rule"/>
 
-      <rect x="760" y="80" width="260" height="56" rx="8" class="node mod"/>
-      <text x="774" y="104" class="mono">path/to/changed</text>
-      <text x="774" y="124" class="sub">changed</text>
-      <rect x="988" y="71" width="32" height="17" rx="8.5" class="badge"/>
-      <text x="1004" y="83.5" text-anchor="middle" class="badge-text">S2</text>
-
-      <line x1="320" y1="108" x2="408" y2="108" class="edge" marker-end="url(#ov-arrow)"/>
-      <text x="365" y="100" font-size="12" text-anchor="middle">calls</text>
-      <line x1="670" y1="108" x2="758" y2="108" class="edge" marker-end="url(#ov-arrow)"/>
-      <text x="715" y="100" font-size="12" text-anchor="middle">updates</text>
+      <text x="20" y="252" class="t-row now">After</text>
+      <use href="#e1-person" x="128" y="248"/>
+      <rect x="180" y="200" width="400" height="96" rx="12" class="n-new"/>
+      <text x="204" y="240">What you do after this plan</text>
+      <text x="204" y="270" class="t-sub">added for you: n-new</text>
+      <line x1="580" y1="248" x2="638" y2="248" class="line" marker-end="url(#e1-arrow)"/>
+      <rect x="640" y="200" width="420" height="96" rx="12" class="n-new"/>
+      <text x="664" y="240">What happens after this plan</text>
+      <text x="664" y="270" class="t-sub">at most 5 boxes in one figure</text>
     </svg>
-    <!-- Optional: <p class="note">one line of context the figure cannot show</p> -->
+    <!-- Foot: a one-line meaning for each term the reader cannot avoid (the
+         first time it appears), and the slices that build this figure. -->
+    <div class="foot">
+      <p class="words"><b>__TERM__</b>: __ONE_LINE_MEANING__</p>
+      <span class="made">Built in S1 · S2</span>
+    </div>
   </figure>
 
-  <!-- Detail figures: one per question the approver needs answered (at most 4).
-       Pick the type from diagrams.md; give each figure its own id and its own
-       <defs> with markers prefixed by that id. -->
-  <figure id="detail-1">
-    <h3>Figure 2 · __DETAIL_TITLE__</h3>
-    <p class="q"><b>What to check:</b> __QUESTION__</p>
-    <svg viewBox="0 0 1080 140" role="img" aria-label="__DETAIL_ALT__">
-      <rect x="20" y="20" width="1040" height="100" rx="10" fill="none" stroke="#c9c4b8" stroke-width="1.5" stroke-dasharray="6 6"/>
-      <text x="540" y="75" text-anchor="middle" class="sub">Replace with one figure type from diagrams.md: sequence, state, structure, before/after, or file map</text>
-    </svg>
-  </figure>
+  <!-- Easy figures 2 and 3 (optional, at most 3 easy figures in all) go here:
+       the same parts as figure 1, with id="easy-<topic>", their own <defs>, and
+       markers prefixed e2-, e3-. -->
 
-  <!-- Not in this page: the plan's non-goals. -->
-  <p class="out chrome"><b>Not in this page:</b> __NON_GOALS__</p>
+  <!-- Before you approve: always present, outside the fold, in plain words.
+       Approving starts: the slices. What to watch: what the approver should
+       know from Design decisions and Risks. Not in this plan: the non-goals. -->
+  <section class="before chrome">
+    <h2>Before you approve</h2>
+    <div class="cols">
+      <div>
+        <h3>Approving starts</h3>
+        <ul>
+          <li>S1: __SLICE_IN_PLAIN_WORDS__</li>
+        </ul>
+      </div>
+      <div class="warn">
+        <h3>What to watch</h3>
+        <ul>
+          <li>__WHAT_TO_WATCH__</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Not in this plan</h3>
+        <ul>
+          <li>__NOT_IN_PLAN__</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- The fold: closed. It keeps the figures drawn with paths and names, for
+       checking the mechanism and for /pr's diff match. -->
+  <details class="deep">
+    <summary><b>Details</b> (for checking the mechanism): __DETAIL_TOPICS__</summary>
+    <div class="chrome">
+      <!-- Summary: a few bullets each, tagged with slice ids. -->
+      <div class="summary">
+        <section>
+          <h2>What changes</h2>
+          <ul>
+            <li>__CHANGE__ (S1)</li>
+          </ul>
+        </section>
+        <section>
+          <h2>What stays</h2>
+          <ul>
+            <li>__UNCHANGED__</li>
+          </ul>
+        </section>
+      </div>
+
+      <!-- Legend: always present; drop entries no detail figure uses. -->
+      <div class="legend">
+        <span><i class="sw add"></i>Added</span>
+        <span><i class="sw mod"></i>Changed</span>
+        <span><i class="sw keep"></i>Existing (unchanged)</span>
+        <span><i class="sw del">✕</i>Removed</span>
+        <span><i class="sw copy"></i>Copy / generated</span>
+        <span><i class="sw uses"></i>Uses this part</span>
+        <span><i class="pill">S1</i>Slice</span>
+      </div>
+    </div>
+
+    <!-- Detail overview: always first in the fold. Every feature or slice on
+         one canvas, each part labeled with its slice or AC id. The example
+         below shows the vocabulary; replace it. -->
+    <figure id="detail-overview">
+      <h3>Detail 1 · Overview</h3>
+      <p class="q"><b>What to check:</b> __QUESTION__</p>
+      <svg viewBox="0 0 1080 200" role="img" aria-label="__DETAIL_OVERVIEW_ALT__">
+        <defs>
+          <marker id="do-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker>
+        </defs>
+        <rect x="20" y="20" width="1040" height="160" rx="14" class="group"/>
+        <text x="40" y="48" font-size="15" font-weight="700">area (group)</text>
+
+        <rect x="60" y="80" width="260" height="56" rx="8" class="node keep"/>
+        <text x="74" y="104" class="mono">path/to/existing</text>
+        <text x="74" y="124" class="sub">existing, unchanged</text>
+
+        <rect x="410" y="80" width="260" height="56" rx="8" class="node add"/>
+        <text x="424" y="104" class="mono">path/to/new-part</text>
+        <text x="424" y="124" class="sub">added</text>
+        <rect x="638" y="71" width="32" height="17" rx="8.5" class="badge"/>
+        <text x="654" y="83.5" text-anchor="middle" class="badge-text">S1</text>
+
+        <rect x="760" y="80" width="260" height="56" rx="8" class="node mod"/>
+        <text x="774" y="104" class="mono">path/to/changed</text>
+        <text x="774" y="124" class="sub">changed</text>
+        <rect x="988" y="71" width="32" height="17" rx="8.5" class="badge"/>
+        <text x="1004" y="83.5" text-anchor="middle" class="badge-text">S2</text>
+
+        <line x1="320" y1="108" x2="408" y2="108" class="edge" marker-end="url(#do-arrow)"/>
+        <text x="365" y="100" font-size="12" text-anchor="middle">calls</text>
+        <line x1="670" y1="108" x2="758" y2="108" class="edge" marker-end="url(#do-arrow)"/>
+        <text x="715" y="100" font-size="12" text-anchor="middle">updates</text>
+      </svg>
+      <!-- Optional: <p class="note">one line of context the figure cannot show</p> -->
+    </figure>
+
+    <!-- Detail figures: one per question about the mechanism (at most 4 after
+         the detail overview). Pick the type from diagrams.md; rename the id to
+         detail-<topic>, and give each figure its own <defs> with markers
+         prefixed by that id. -->
+    <figure id="detail-1">
+      <h3>Detail 2 · __DETAIL_TITLE__</h3>
+      <p class="q"><b>What to check:</b> __QUESTION__</p>
+      <svg viewBox="0 0 1080 140" role="img" aria-label="__DETAIL_ALT__">
+        <rect x="20" y="20" width="1040" height="100" rx="10" fill="none" stroke="#c9c4b8" stroke-width="1.5" stroke-dasharray="6 6"/>
+        <text x="540" y="75" text-anchor="middle" class="sub">Replace with one figure type from diagrams.md: sequence, state, structure, before/after, or file map</text>
+      </svg>
+    </figure>
+
+    <!-- Not in this page: the plan's non-goals. -->
+    <p class="out chrome"><b>Not in this page:</b> __NOT_IN_PAGE__</p>
+  </details>
 </main>
 </body>
 </html>

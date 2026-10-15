@@ -99,6 +99,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    ファイル名から日付と `.md` を除いたもの(`2026-10-12-auth-token.md` なら
    `auth-token`)。書く前に `mkdir -p .harness/state/plan-visual` を打つ。
    `.harness/state/` は git が無視する場所なので、ページはコミットされない。
+   ページを書いたら、撮る前に `./scripts/plan-visual.sh lint <ページ>` を
+   打ち、終了コードが 0 になるまで直す(守れていない決まりが 1 行に 1 件
+   ずつ出る)。`./scripts/plan-visual.sh --help` に
+   `scripts/plan-visual.sh lint <html>` の行がなければ(lint より前の版の
+   `scripts/plan-visual.sh`)、lint を飛ばし、lint を打てなかったことを
+   手順 3 の QUESTION の本文に書く。
    `./scripts/plan-visual.sh shot <ページ> <png>` が使えれば、ページを撮って
    読み、崩れや誤りを直して撮り直す(png も `.harness/state/plan-visual/` に
    置く)。使えなければ(終了コード 2 でブラウザがない、あなたが画像を
