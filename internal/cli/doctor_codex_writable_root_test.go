@@ -902,7 +902,7 @@ func TestCheckCodexAgmsgWritableRoot_NoCodexModelInPool_Pass(t *testing.T) {
 // reviewer's exact scenario: a guarded default, an autonomous override for
 // one role, and an [org.roles] restriction that excludes every codex model
 // for that role. ValidateSpawnEnvelope would reject every codex model for
-// this role (modelAllowedForRole), so the autonomous override must not
+// this role (ModelAllowedForRole), so the autonomous override must not
 // count -- reason (a) stays absent and the check reports "not needed", not
 // a warn about a codex seat that could never actually spawn.
 func TestCheckCodexAgmsgWritableRoot_RoleModelRestrictionExcludesCodex_ReasonAAbsent(t *testing.T) {
@@ -1451,7 +1451,7 @@ func TestCodexImplicitWritableRoots(t *testing.T) {
 }
 
 // TestCodexModelPermittedForRole is cross-review WC-2's pure unit test,
-// mirroring internal/org/envelope.go's modelAllowedForRole table shape.
+// mirroring internal/org/envelope.go's ModelAllowedForRole table shape.
 func TestCodexModelPermittedForRole(t *testing.T) {
 	cases := []struct {
 		name        string

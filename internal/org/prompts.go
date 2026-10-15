@@ -65,7 +65,7 @@ type RolePromptVars struct {
 // DirectorRole is not a seat role: its template, prompts/director.md, is
 // rendered only by RenderDirectorPrompt, so for it RenderRolePrompt returns
 // ("", false, nil) as for a role with no template. Spawn refuses the role
-// before it gets here (directorRoleSpawnErr, spawn.go).
+// before it gets here (DirectorRoleInputErr, spawn.go).
 //
 // Placeholders that are not among the known {{...}} substitutions listed
 // below are left in the rendered text unchanged (documented, not an error)

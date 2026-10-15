@@ -284,7 +284,7 @@ func codexModelPoolModels(orgCfg config.OrgConfig) []string {
 }
 
 // codexModelPermittedForRole mirrors internal/org/envelope.go's
-// modelAllowedForRole -- the actual gate ValidateSpawnEnvelope applies at
+// ModelAllowedForRole -- the actual gate ValidateSpawnEnvelope applies at
 // spawn time -- so this check's role-mode gating agrees with what could
 // really be spawned (cross-review WC-2: without this, a permission-mode
 // override for a role whose [org.roles] entry excludes every codex model
