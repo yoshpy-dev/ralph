@@ -29,12 +29,15 @@ set -eu
 #           <figure class="easy">; L2 1 to 3 easy figures, none inside the
 #           fold; L3 no mono class, <code>, path, file name, or snake_case
 #           word in an easy figure (its text, class names, and <code> tags;
-#           other attribute values such as aria-label are not read); L4 per
-#           easy figure at most 5 n-* boxes, an <h2>, and an <svg> with an
-#           aria-label; L5 one <section class="before"> outside the fold; L6
-#           one fold (<details class="deep">) holding #detail-overview and
-#           every figure that is not easy. Prints nothing when every rule
-#           holds; otherwise prints one finding per line on stdout as
+#           other attribute values such as aria-label are not read; inline
+#           tags such as <tspan> and <span> do not split a word, a <tspan>
+#           with x or y does); L4 per easy figure at most 5 n-* boxes, an
+#           <h2>, and an <svg> with an aria-label; L5 one
+#           <section class="before"> outside the fold; L6 one fold
+#           (<details class="deep">) holding #detail-overview and every
+#           figure that is not easy, and no figure starting inside another
+#           figure. Prints nothing when every rule holds; otherwise prints
+#           one finding per line on stdout as
 #           "<figure id or page>: <rule>: <detail>" and exits 1.
 #   digest  Print the first 12 hex characters of the SHA-256 of <plan.md>
 #           without the `- Status:`, `- Approved:`, and `- Branch:` lines and
@@ -301,6 +304,8 @@ lint_page() {
       doc = ""
       NFIG = 0; NEASY = 0; NOPEN = 0; NPEND = 0
       OV_COUNT = 0; NBEFORE = 0; NFOLD = 0; FOLD_DEPTH = 0; DETAIL_IN_FOLD = 0
+      n = split("tspan a b i em strong span small sub sup", INLINE_NAMES, " ")
+      for (i = 1; i <= n; i++) INLINE[INLINE_NAMES[i]] = 1
     }
 
     { doc = doc $0 "\n" }
@@ -328,11 +333,13 @@ lint_page() {
     }
 
     # parse_attrs(t) — read the id, class, and aria-label of a start tag
-    # (t is the text after the element name) into A_ID, A_CLASS, A_ARIA.
-    # Values may be double-quoted, single-quoted, or bare; the first of a
-    # repeated attribute wins.
+    # (t is the text after the element name) into A_ID, A_CLASS, A_ARIA, and
+    # set HAS_XY when it has an x or y attribute. Values may be
+    # double-quoted, single-quoted, or bare; the first of a repeated
+    # attribute wins.
     function parse_attrs(t,    name, v, q, k) {
       A_ID = ""; A_CLASS = ""; A_ARIA = ""; HAS_ID = 0; HAS_CLASS = 0; HAS_ARIA = 0
+      HAS_XY = 0
       while (match(t, /[^ \t\r\n\/]/)) {
         t = substr(t, RSTART)
         if (!match(t, ATTR_NAME_RE)) { t = substr(t, 2); continue }
@@ -355,6 +362,7 @@ lint_page() {
         if (name == "id" && !HAS_ID) { A_ID = v; HAS_ID = 1 }
         else if (name == "class" && !HAS_CLASS) { A_CLASS = v; HAS_CLASS = 1 }
         else if (name == "aria-label" && !HAS_ARIA) { A_ARIA = v; HAS_ARIA = 1 }
+        else if (name == "x" || name == "y") HAS_XY = 1
       }
     }
 
@@ -381,19 +389,35 @@ lint_page() {
       return e
     }
 
-    # Every tag, comment, and skipped style or script body is a space in the
-    # text of the easy figures that are open.
+    # Every tag that splits a word (see tag_splits), comment, and skipped
+    # style or script body is a space in the text of the easy figures that
+    # are open.
     function tag_space(    k) {
       for (k = 1; k <= NOPEN; k++) TEXT[OPEN[k]] = TEXT[OPEN[k]] " "
+    }
+
+    # tag_splits(name, start) — whether a start tag (start set, after
+    # parse_attrs) or an end tag splits the words on its two sides. An inline
+    # tag does not: internal/<tspan>org</tspan> reads as internal/org. A tspan
+    # start tag with an x or y attribute starts a new line, so it does.
+    function tag_splits(name, start) {
+      if (!(name in INLINE)) return 1
+      return (start && name == "tspan" && HAS_XY)
     }
 
     function text(t,    k) {
       for (k = 1; k <= NOPEN; k++) TEXT[OPEN[k]] = TEXT[OPEN[k]] t
     }
 
+    # close_figures() — check and close every figure still open.
+    function close_figures(    k) {
+      for (k = 1; k <= NOPEN; k++) check_easy(OPEN[k])
+      NOPEN = 0; NPEND = 0
+    }
+
     function start_tag(name, attrs,    infold, f, k, deep) {
-      tag_space()
       parse_attrs(attrs)
+      if (tag_splits(name, 1)) tag_space()
       infold = (FOLD_DEPTH > 0)
       if (HAS_ID && A_ID == "overview") {
         OV_COUNT++
@@ -402,6 +426,13 @@ lint_page() {
       if (name == "figure") {
         f = ++NFIG
         LABEL[f] = (A_ID != "") ? A_ID : ("figure#" f)
+        # A figure that starts while another is open means a missing
+        # </figure>: report it and close the open ones here, so that their
+        # text and boxes do not run on into this figure.
+        if (NPEND > 0) {
+          add(6, LABEL[f], "figure starts inside figure " LABEL[PEND[NPEND]] " (missing </figure>?)")
+          close_figures()
+        }
         PEND[++NPEND] = f
         if (A_ID == "detail-overview" && infold) DETAIL_IN_FOLD = 1
         if (class_has(A_CLASS, "easy")) {
@@ -432,13 +463,11 @@ lint_page() {
       }
     }
 
-    # A </figure> ends every figure still open (figures do not nest).
-    function end_tag(name,    k) {
-      tag_space()
-      if (name == "figure") {
-        for (k = 1; k <= NOPEN; k++) check_easy(OPEN[k])
-        NOPEN = 0; NPEND = 0
-      }
+    # A </figure> ends every figure still open (figures do not nest: see
+    # start_tag).
+    function end_tag(name) {
+      if (tag_splits(name, 0)) tag_space()
+      if (name == "figure") close_figures()
       if (name == "details" && FOLD_DEPTH > 0) FOLD_DEPTH--
     }
 

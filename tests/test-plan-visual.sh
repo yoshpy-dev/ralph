@@ -553,6 +553,48 @@ assert_has_line "a snake_case word is reported" 'easy-2: L3: snake_case identifi
 assert_eq "code-like text gives exactly these 7 findings" 7 "$(wc -l < "$_out" | tr -d ' ')"
 assert_only_rule "code-like text breaks only L3" L3 "$_out"
 
+# Words that inline tags split: easy-2 opened up to its svg, then the lines
+# under test.
+_easy2_open='  <figure class="easy" id="easy-2">
+    <h2>決まりは機械で確かめる</h2>
+    <svg viewBox="0 0 1080 180" role="img" aria-label="書く">
+      <rect class="n-old"/>'
+lint_case l3-inline "$_pg_overview" "$_easy2_open" \
+  '      <text x="20" y="40">internal/<tspan>org</tspan> を直す</text>' \
+  '      <text x="20" y="60">workspace<tspan class="x">_created</tspan> を出す</text>' \
+  '      <text x="20" y="80">docs<tspan dy="2">/plans</tspan> と scripts<tspan font-weight="700" dx='"'4'"'>/foo</tspan></text>' \
+  '      <text x="20" y="100"><tspan x="20" y="100">lib</tspan>/util</text>' \
+  '    </svg>' '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "words split by inline tspan tags exit 1" 1 "$_rc"
+assert_has_line "a path split by a tspan is reported whole" 'easy-2: L3: path-like text: internal/org' "$_out"
+assert_has_line "a snake_case word split by a tspan (class x is not an x attribute) is reported" 'easy-2: L3: snake_case identifier: workspace_created' "$_out"
+assert_has_line "a tspan with dy continues the path" 'easy-2: L3: path-like text: docs/plans' "$_out"
+assert_has_line "a tspan with a single-quoted dx after another attribute continues the path" 'easy-2: L3: path-like text: scripts/foo' "$_out"
+assert_has_line "the end of a tspan with x and y does not split the word after it" 'easy-2: L3: path-like text: lib/util' "$_out"
+assert_eq "split words give exactly these 5 findings" 5 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "split words break only L3" L3 "$_out"
+
+# Each inline tag joins the words at its start and at its end.
+_inline_ps=""
+for _t in tspan a b i em strong span small sub sup; do
+  _inline_ps="$_inline_ps
+    <p>in<$_t>/$_t</$_t>/end と</p>"
+done
+lint_case l3-inline-each "$_pg_overview" "$_easy2_open" '    </svg>' "$_inline_ps" '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "a path split by each inline tag exits 1" 1 "$_rc"
+for _t in tspan a b i em strong span small sub sup; do
+  assert_has_line "<$_t> and </$_t> do not split a word" "easy-2: L3: path-like text: in/$_t/end" "$_out"
+done
+assert_eq "each inline tag gives exactly one finding" 10 "$(wc -l < "$_out" | tr -d ' ')"
+
+lint_case l3-split "$_pg_overview" "$_easy2_open" \
+  '      <text x="20" y="40">run</text><text x="80" y="40">/director</text>' \
+  '      <text x="20" y="60">foo<tspan x="40" dy="20">/bar</tspan></text>' \
+  '      <text x="20" y="120">baz<tspan class="t" y='"'140'"'>/qux</tspan></text>' \
+  '    </svg>' '    <p class="words">a<br>/director</p>' '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "separate <text> elements, a tspan with x or y, and <br> split words (exit 0)" 0 "$_rc"
+assert_empty_file "separate <text> elements, a tspan with x or y, and <br> print no finding" "$_out"
+
 # L4
 _easy2_l4='  <figure class="easy" id="easy-2">
     <h3>見出しが h3</h3>
@@ -618,6 +660,37 @@ lint_case l6-open-figure "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_o
 assert_eq "a figure without </figure> exits 1" 1 "$_rc"
 assert_has_line "a figure without </figure> is reported" 'figure#5: L6: no </figure> after this figure' "$_out"
 assert_only_rule "a figure without </figure> breaks only L6" L6 "$_out"
+
+# A </figure> missing mid-page: the next figure starts inside the open one.
+_details_nested="$(printf '%s\n' "$_pg_details" | sed '/^    <\/figure>$/d')"
+lint_case l6-nested "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_details_nested" "$_pg_fold_close"
+assert_eq "the nested fixture really drops one </figure>" 4 "$(grep -c '</figure>' "$_case_page")"
+assert_eq "a figure starting inside detail-overview exits 1" 1 "$_rc"
+assert_has_line "a figure starting inside detail-overview is reported" 'detail-2: L6: figure starts inside figure detail-overview (missing </figure>?)' "$_out"
+assert_eq "a figure starting inside detail-overview gives exactly 1 finding" 1 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "a figure starting inside detail-overview breaks only L6" L6 "$_out"
+
+_details_nested5="$(printf '%s\n' "$_pg_details" | sed 's|</details></figure>|</details>|')"
+lint_case l6-nested-noid "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_details_nested5" "$_pg_fold_close"
+assert_eq "a figure without an id starting inside detail-2 exits 1" 1 "$_rc"
+assert_has_line "a figure without an id starting inside a figure is labelled by its order" 'figure#5: L6: figure starts inside figure detail-2 (missing </figure>?)' "$_out"
+assert_only_rule "a figure without an id starting inside a figure breaks only L6" L6 "$_out"
+
+_ov_nested="$(printf '%s\n' "$_pg_overview" | sed '/^  <\/figure>$/d')"
+lint_case l6-nested-easy "$_ov_nested" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "an easy figure starting inside the overview exits 1" 1 "$_rc"
+assert_has_line "an easy figure starting inside the overview is reported" 'easy-2: L6: figure starts inside figure overview (missing </figure>?)' "$_out"
+assert_eq "an easy figure starting inside the overview gives exactly 1 finding (no box count over both)" 1 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "an easy figure starting inside the overview breaks only L6" L6 "$_out"
+
+# The /plan page skeleton without the </figure> of detail-overview: detail-1
+# would sit inside it in the browser.
+awk '/id="detail-overview"/ { d = 1 } d && /<\/figure>/ { d = 0; next } { print }' \
+  "$PROJECT_ROOT/.claude/skills/plan/visual-template.html" > "$_tmp/lint-template-nested.html"
+run_pv "$PLAN_VISUAL" lint "$_tmp/lint-template-nested.html"
+assert_eq "the template without the detail-overview </figure> exits 1" 1 "$_rc"
+assert_has_line "the template without the detail-overview </figure> reports detail-1" 'detail-1: L6: figure starts inside figure detail-overview (missing </figure>?)' "$_out"
+assert_eq "the template without the detail-overview </figure> gives exactly 1 finding" 1 "$(wc -l < "$_out" | tr -d ' ')"
 
 # The page skeleton of /plan, on each of its four faces, passes as shipped.
 for _face in .claude .agents templates/base/.claude templates/base/.agents; do
