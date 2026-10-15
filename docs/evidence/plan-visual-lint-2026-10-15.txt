@@ -1,0 +1,196 @@
+# plan-visual.sh lint の出力 (plan-visual-easy, /test cycle 1, 2026-10-15)
+
+HEAD c93c16aa の scripts/plan-visual.sh で打った。fixture は scratchpad に作り、名前だけを出している。
+L1〜L6 の fixture は、どれも .claude/skills/plan/visual-template.html (HEAD) を 1 か所だけ変えたもの。
+
+- clean-template.html: 雛形そのまま
+- this-plan-page.html: この計画の図解ページ (.harness/state/plan-visual/plan-visual-easy.html の写し)
+- L1-no-overview.html: <figure class="easy" id="overview"> の id を easy-1 に変えた
+- L2-four-easy-figures.html: かんたん版の図 1 を id easy-2〜4 で 3 つ足した (かんたん版の図が 4 枚)
+- L3-code-words.html: 図 1 の下に「internal/org を直す。workspace_created を出す。README.md も。<code>ralph</code>」の段落を足した
+- L4-six-boxes.html: 図 1 の svg に n-new と n-fail の箱を 1 つずつ足した (箱が 6 個)
+- L5-no-before.html: <section class="before chrome"> を <section class="chrome"> にした
+- L6-no-fold.html: <details class="deep"> を <details> にした
+- old-form-template-origin-main.html: この変更より前の雛形 (git show origin/main:.claude/skills/plan/visual-template.html)
+- old-form-org-director-start.html: 作業中の計画 org-director-start のページ (前の形。.claude/worktrees/org-director-start/.harness/state/plan-visual/ から読むだけで写した)
+- edge-empty.html: 空のファイル
+- edge-cut-in-overview.html: 雛形の先頭 180 行 (図 1 の svg の途中で切れる)
+
+macOS の awk (version 20200816) の結果:
+
+## clean-template.html
+$ scripts/plan-visual.sh lint clean-template.html
+rc=0
+
+## this-plan-page.html
+$ scripts/plan-visual.sh lint this-plan-page.html
+rc=0
+
+## L1-no-overview.html (vs the template: +1 -1 lines)
+$ scripts/plan-visual.sh lint L1-no-overview.html
+page: L1: no element has id="overview"
+rc=1
+
+## L2-four-easy-figures.html (vs the template: +111 -0 lines)
+$ scripts/plan-visual.sh lint L2-four-easy-figures.html
+page: L2: 4 easy figures (<figure class="easy">), expected 1 to 3
+rc=1
+
+## L3-code-words.html (vs the template: +1 -0 lines)
+$ scripts/plan-visual.sh lint L3-code-words.html
+overview: L3: <code> element
+overview: L3: path-like text: internal/org
+overview: L3: file extension: README.md
+overview: L3: snake_case identifier: workspace_created
+rc=1
+
+## L4-six-boxes.html (vs the template: +1 -0 lines)
+$ scripts/plan-visual.sh lint L4-six-boxes.html
+overview: L4: 6 boxes (class n-*), at most 5
+rc=1
+
+## L5-no-before.html (vs the template: +1 -1 lines)
+$ scripts/plan-visual.sh lint L5-no-before.html
+page: L5: no <section class="before">
+rc=1
+
+## L6-no-fold.html (vs the template: +1 -1 lines)
+$ scripts/plan-visual.sh lint L6-no-fold.html
+page: L6: no fold (<details class="deep">)
+page: L6: no <figure id="detail-overview"> inside the fold
+detail-overview: L6: figure without class easy is outside the fold
+detail-1: L6: figure without class easy is outside the fold
+rc=1
+
+## old-form-template-origin-main.html
+$ scripts/plan-visual.sh lint old-form-template-origin-main.html
+overview: L1: the id="overview" figure lacks class easy
+page: L2: 0 easy figures (<figure class="easy">), expected 1 to 3
+page: L5: no <section class="before">
+page: L6: no fold (<details class="deep">)
+page: L6: no <figure id="detail-overview"> inside the fold
+overview: L6: figure without class easy is outside the fold
+detail-1: L6: figure without class easy is outside the fold
+rc=1
+
+## old-form-org-director-start.html
+$ scripts/plan-visual.sh lint old-form-org-director-start.html
+overview: L1: the id="overview" figure lacks class easy
+page: L2: 0 easy figures (<figure class="easy">), expected 1 to 3
+page: L5: no <section class="before">
+page: L6: no fold (<details class="deep">)
+page: L6: no <figure id="detail-overview"> inside the fold
+overview: L6: figure without class easy is outside the fold
+start-seq: L6: figure without class easy is outside the fold
+states: L6: figure without class easy is outside the fold
+rc=1
+
+## edge-empty.html
+$ scripts/plan-visual.sh lint edge-empty.html
+page: L1: no element has id="overview"
+page: L2: 0 easy figures (<figure class="easy">), expected 1 to 3
+page: L5: no <section class="before">
+page: L6: no fold (<details class="deep">)
+page: L6: no <figure id="detail-overview"> inside the fold
+rc=1
+
+## edge-cut-in-overview.html
+$ scripts/plan-visual.sh lint edge-cut-in-overview.html
+page: L5: no <section class="before">
+page: L6: no fold (<details class="deep">)
+page: L6: no <figure id="detail-overview"> inside the fold
+overview: L6: no </figure> after this figure
+rc=1
+
+## missing file
+$ scripts/plan-visual.sh lint missing.html
+stderr: plan-visual: html file not found or not readable: missing.html
+rc=1
+
+## no argument
+$ scripts/plan-visual.sh lint
+stderr: Usage:
+stderr:   scripts/plan-visual.sh open <html>
+stderr:   scripts/plan-visual.sh shot <html> <png> [--fragment <id>] [--width <px>] [--height <px>] [--scale <n>]
+stderr:   scripts/plan-visual.sh lint <html>
+stderr:   scripts/plan-visual.sh digest <plan.md>
+stderr:   scripts/plan-visual.sh --help
+stderr: Lint:
+stderr:   Checks the page layout rules L1-L6 in the HTML text (no browser).
+stderr:   Prints one finding per line on stdout ("<figure id or page>: <rule>: <detail>") and exits 1 when any rule fails.
+stderr: Digest:
+stderr:   Skips the "- Status:", "- Approved:", and "- Branch:" lines and the "## Progress checklist" section.
+stderr:   Reads a "- [x]" or "- [X]" box at the start of a list item as "- [ ]", so ticking checkboxes keeps the digest.
+stderr: Environment:
+stderr:   RALPH_PLAN_VISUAL_OPENER   command used to open a file (overrides OS default). The value "none" disables opening.
+stderr:   RALPH_PLAN_VISUAL_BROWSER  path to a Chrome/Chromium executable (overrides detection). The value "none" means no browser.
+rc=1
+
+## awk の方言
+
+同じ fixture (missing file と no argument を除く 12 個) を名前の順に lint した出力 (stdout と stderr をまとめたもの) は、
+macOS の awk、ubuntu:24.04 の mawk 1.3.4 20240123、ralph-guard-awk:test の GNU Awk 5.2.1 の 3 つで byte 単位で同じだった
+(md5 f81066f9d8e6123cc2f10325e9c6ed1d、docker は --network none)。
+
+## mutation (scripts/plan-visual.sh の lint の部分、scratch の写しで 1 か所ずつ変え、tests/test-plan-visual.sh を打った)
+
+基準 (変えない写し): plan-visual tests: 201 passed, 0 failed, 201 total
+列: id、結果、落ちた assertion の数、変えた内容
+
+L1a  KILLED  fails=2  no-overview check off
+L1b  KILLED  fails=3  two-overview check off
+L1c  KILLED  fails=1  overview-not-figure check off
+L1d  KILLED  fails=1  overview-not-easy check off
+L1e  SURVIVED  fails=0  comment branch off (comment cut at first >)
+L2a  KILLED  fails=3  upper bound 3 -> 4
+L2b  SURVIVED  fails=0  upper bound 3 -> 2
+L2c  SURVIVED  fails=0  lower bound 1 -> 0
+L2d  KILLED  fails=3  easy-in-fold check off
+L3a  KILLED  fails=2  mono check off
+L3b  KILLED  fails=2  code check off
+L3c  KILLED  fails=3  path scan off
+L3d  KILLED  fails=3  extension scan off
+L3e  KILLED  fails=2  snake_case scan off
+L3f  KILLED  fails=24  path start may be a digit (1/3 flagged)
+L3g  KILLED  fails=24  path start may be / (/director flagged)
+L3h  KILLED  fails=2  semicolon dropped from extension lead class
+L3i  KILLED  fails=22  style/script body read as text
+L3j  KILLED  fails=2  path token not widened right
+L3k  KILLED  fails=6  scan_text skipped
+L3l  KILLED  fails=2  extension list drops md
+L3m  KILLED  fails=2  extension list drops html
+L4a  KILLED  fails=1  box limit 5 -> 6
+L4b  KILLED  fails=22  box limit 5 -> 4
+L4c  KILLED  fails=1  h2 check off
+L4d  KILLED  fails=6  svg aria check off
+L4e  KILLED  fails=3  blank aria counts as set
+L4f  SURVIVED  fails=0  aria on any element counts
+L4g  KILLED  fails=1  n- prefix -> exact class n-new
+L5a  KILLED  fails=3  no-before check off
+L5b  SURVIVED  fails=0  two-before check off
+L5c  KILLED  fails=3  before-in-fold check off
+L6a  KILLED  fails=1  no-fold check off
+L6b  KILLED  fails=3  two-fold check off
+L6c  KILLED  fails=2  detail-overview-in-fold check off
+L6d  KILLED  fails=2  non-easy figure outside fold off
+L6e  KILLED  fails=4  unclosed figure check off
+L6f  KILLED  fails=3  unclosed fold check off
+L6g  KILLED  fails=25  nested details not counted
+L6h  KILLED  fails=2  detail-overview anywhere counts
+O1  KILLED  fails=2  quoted > ends the tag
+O10  KILLED  fails=40  </figure> leaves easy figure open
+O11  SURVIVED  fails=0  awk crash rc passed through as 0
+O2  KILLED  fails=2  page read as awk operand
+O3  KILLED  fails=2  single quotes not read
+O4  KILLED  fails=19  lint awk exit always 0
+O5  KILLED  fails=19  cmd_lint passes rc 1 as 0
+O6  SURVIVED  fails=0  SEEN dedupe off
+O7  SURVIVED  fails=0  repeated id: last wins
+O8  KILLED  fails=2  cmd_lint takes extra args
+O9  SURVIVED  fails=0  directory accepted
+R1  KILLED  fails=11  whole rule L1 off
+R2  KILLED  fails=6  whole rule L2 off
+R3  KILLED  fails=10  whole rule L3 off
+R4  KILLED  fails=10  whole rule L4 off
+R5  KILLED  fails=6  whole rule L5 off
+R6  KILLED  fails=19  whole rule L6 off
