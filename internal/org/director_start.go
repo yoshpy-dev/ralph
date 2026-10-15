@@ -22,7 +22,10 @@ import (
 // closes it again, and the closing that start's cleanup shares with it are
 // in director_stop.go. Neither verb writes a manifest line or a model
 // receipt (D2, D8): director.jsonl is the only record. The fold that reads
-// these events back is in director.go.
+// these events back is in director.go. With [org.director].launch_cmd
+// (plan docs/plans/active/2026-10-16-org-director-launch-cmd.md) StartDirector
+// opens the human's terminal instead of herdr; that path (startCmd) and its
+// cleanup are in director_cmd.go.
 
 // DirectorHeadlessAttach is what AttachHeadless records: the launch
 // (DirectorLaunchHerdr, or DirectorLaunchCmd for a start with
@@ -448,6 +451,9 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read
 	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
 		return false, directorNoRegistration(verb, id)
 	}
+	if s.beforeMarkStopped != nil {
+		s.beforeMarkStopped()
+	}
 	err = s.withLock(func() error {
 		raw, err := s.readRaw()
 		if err != nil {
@@ -529,8 +535,15 @@ var (
 	// ErrDirectorReplacedDuringStart: by the time start's agent was up, its
 	// registration was no longer the current one (a human's attach
 	// --replace, detach --force, or stop came in while start ran), so start
-	// closed what it made and wrote no launched (D3).
+	// closed what it made and wrote no launched (D3). On the launch_cmd path
+	// it is the same while start waits for the launch script's check-in, and
+	// start stops what checked in instead of closing herdr.
 	ErrDirectorReplacedDuringStart = errors.New("the registration stopped being the current one while start ran")
+	// ErrDirectorNoCheckIn: on the launch_cmd path, launch_cmd returned but
+	// no launch script checked in before the timeout (no terminal ran it, or
+	// its check-in was refused or failed), so start recorded the stop (plan
+	// 2026-10-16-org-director-launch-cmd, D5 and D6).
+	ErrDirectorNoCheckIn = errors.New("the launch script did not check in before the timeout")
 )
 
 // DirectorStartParams describes one StartDirector call. Store is the
@@ -543,8 +556,12 @@ var (
 // prompt, whose ralph org commands for the director to run carry it as
 // --config (its stop command, for the human, does not: stop reads no
 // ralph.toml), so the director, which runs in Cwd, reads the settings start
-// read. TimeoutMS bounds the herdr agent start; 0 or less means
-// defaultSpawnTimeoutMS. Who is who writes the events.
+// read. TimeoutMS bounds the herdr agent start, and on the launch_cmd path
+// the wait for the launch script's check-in; 0 or less means
+// defaultSpawnTimeoutMS. AgmsgHome is used on the launch_cmd path only:
+// when it is not empty (the CLI gives start's RALPH_ORG_AGMSG_HOME), the
+// launch script exports it as RALPH_ORG_AGMSG_HOME (plan
+// 2026-10-16-org-director-launch-cmd, D3). Who is who writes the events.
 type DirectorStartParams struct {
 	Store      *DirectorStore
 	Driver     string
@@ -552,20 +569,28 @@ type DirectorStartParams struct {
 	Cwd        string
 	ConfigPath string
 	TimeoutMS  int
+	AgmsgHome  string
 	Who        DirectorWho
 }
 
 // DirectorStartResult is what StartDirector launched: the registration
-// (state running, with its workspace and pane), the prompt file, the herdr
-// agent name, the labels of its workspace and tab, and how many
-// agent_pane_busy retries the agent start took.
+// (state running, with its workspace and pane, or, for a launch cmd, with
+// the pid and start time its launch script checked in with), its Launch
+// (DirectorLaunchHerdr or DirectorLaunchCmd), and the prompt file. For a
+// launch herdr: the herdr agent name, the labels of its workspace and tab,
+// and how many agent_pane_busy retries the agent start took. For a launch
+// cmd: TerminalName, director_<token>, which launch_cmd's {name} gave the
+// terminal, and LaunchScriptPath, the script that terminal ran.
 type DirectorStartResult struct {
 	Registration      DirectorRegistration
+	Launch            string
 	PromptPath        string
 	AgentName         string
 	WorkspaceLabel    string
 	TabLabel          string
 	AgentStartRetries int
+	TerminalName      string
+	LaunchScriptPath  string
 }
 
 // DirectorAttachedError is StartDirector's refusal while a registration is
@@ -633,13 +658,27 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // detached while it is current), and returns the step's error. When it
 // cannot close them, it writes detached only, and only while the
 // registration is current (Detach), and returns a *DirectorCleanupError.
+//
+// With [org.director].launch_cmd set (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D2), start makes
+// no herdr call at all: it records the registration with launch cmd and
+// opens the human's terminal with launch_cmd instead (startCmd, in
+// director_cmd.go). HERDR_PANE_ID does not refuse it (D9), and it also
+// refuses, before anything is written and with the refusals above in their
+// order, a launch_cmd that config.ValidateDirectorLaunchCmd refuses, a
+// driver's agent that is not on PATH, and a ralph executable it cannot find
+// (checkDirectorLaunchCmd).
 func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) {
-	stateDir, permArgs, mode, err := o.checkDirectorStart(&p)
+	c, err := o.checkDirectorStart(&p)
 	if err != nil {
 		return DirectorStartResult{}, err
 	}
+	launch := DirectorLaunchHerdr
+	if c.cmdLaunch {
+		launch = DirectorLaunchCmd
+	}
 	reg, err := p.Store.AttachHeadless(DirectorHeadlessAttach{
-		Driver: p.Driver, Model: p.Model, PermissionMode: mode,
+		Launch: launch, Driver: p.Driver, Model: p.Model, PermissionMode: c.mode,
 		User: p.Who.User, Cwd: p.Who.Cwd, HerdrPane: p.Who.HerdrPane,
 	})
 	if errors.Is(err, ErrDirectorAttached) {
@@ -648,7 +687,10 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	if err != nil {
 		return DirectorStartResult{}, err
 	}
-	r := &directorStartRun{o: o, p: p, stateDir: stateDir, reg: reg}
+	r := &directorStartRun{o: o, p: p, stateDir: c.stateDir, reg: reg}
+	if c.cmdLaunch {
+		return r.startCmd(c)
+	}
 	if err := r.createWorkspaceAndTab(); err != nil {
 		return DirectorStartResult{}, r.abort(err)
 	}
@@ -656,7 +698,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
 	}
-	agentArgs := append(append([]string{}, permArgs...), "--model", p.Model, PromptFilePointer(promptPath))
+	agentArgs := append(append([]string{}, c.permArgs...), "--model", p.Model, PromptFilePointer(promptPath))
 	retries, err := r.startAgent(agentArgs)
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
@@ -670,76 +712,101 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	}
 	r.reg.State = DirectorStateRunning
 	return DirectorStartResult{
-		Registration: r.reg, PromptPath: promptPath, AgentName: DirectorAgentName(reg.Token),
+		Registration: r.reg, Launch: DirectorLaunchHerdr, PromptPath: promptPath, AgentName: DirectorAgentName(reg.Token),
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		AgentStartRetries: retries,
 	}, nil
 }
 
+// directorStartChecks is what checkDirectorStart resolved: the absolute
+// state dir, the permission flags and mode of role director, whether
+// [org.director].launch_cmd is set, and, when it is, the absolute paths of
+// the driver's agent and of the ralph the launch script runs.
+type directorStartChecks struct {
+	stateDir             string
+	permArgs             []string
+	mode                 string
+	cmdLaunch            bool
+	agentPath, ralphPath string
+}
+
 // checkDirectorStart runs StartDirector's refusals that need no write and
 // no herdr call, in the order its doc comment lists them. Its look at a
 // current registration reads without the lock and only refuses early;
-// AttachHeadless decides again under the lock. It returns the absolute
-// state dir, the permission flags, and the permission mode, and leaves p
-// with Cwd and a non-empty ConfigPath made absolute and TimeoutMS defaulted.
-func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permArgs []string, mode string, err error) {
+// AttachHeadless decides again under the lock. It returns what it resolved
+// (directorStartChecks), and leaves p with Cwd and a non-empty ConfigPath
+// made absolute and TimeoutMS defaulted.
+func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, error) {
+	c := directorStartChecks{cmdLaunch: len(o.Config.Director.LaunchCmd) > 0}
 	switch {
 	case p.Store == nil:
-		return "", nil, "", errors.New("org: director: start: no director store was given")
+		return c, errors.New("org: director: start: no director store was given")
 	case p.Cwd == "":
-		return "", nil, "", errors.New("org: director: start: the cwd is empty")
+		return c, errors.New("org: director: start: the cwd is empty")
 	case !o.Config.Director.Enabled:
-		return "", nil, "", fmt.Errorf("org: director: start: %w, so no director is started", ErrDirectorDisabled)
-	case o.getenv(herdrPaneIDEnv) != "":
-		return "", nil, "", fmt.Errorf("org: director: start: HERDR_PANE_ID is set, so this runs inside a herdr pane: %w", ErrDirectorStartInsideHerdr)
+		return c, fmt.Errorf("org: director: start: %w, so no director is started", ErrDirectorDisabled)
+	// The launch_cmd path runs no herdr, so a herdr pane is no reason to
+	// refuse it (plan 2026-10-16-org-director-launch-cmd, D9).
+	case !c.cmdLaunch && o.getenv(herdrPaneIDEnv) != "":
+		return c, fmt.Errorf("org: director: start: HERDR_PANE_ID is set, so this runs inside a herdr pane: %w", ErrDirectorStartInsideHerdr)
 	case p.Driver != DirectorDriverClaude && p.Driver != DirectorDriverCodex:
-		return "", nil, "", fmt.Errorf("org: director: start: unknown driver %q: use %s or %s", p.Driver, DirectorDriverClaude, DirectorDriverCodex)
+		return c, fmt.Errorf("org: director: start: unknown driver %q: use %s or %s", p.Driver, DirectorDriverClaude, DirectorDriverCodex)
 	case p.Model == "":
-		return "", nil, "", errors.New("org: director: start: the model is empty")
+		return c, errors.New("org: director: start: the model is empty")
 	}
-	mode = ResolvePermissionMode(o.Config, DirectorRole)
+	mode := ResolvePermissionMode(o.Config, DirectorRole)
+	c.mode = mode
 	// Before permissionArgsForDriver, so with codex_verified false this
 	// refusal, not the codex_verified one, says why (plan D12).
 	if p.Driver == DirectorDriverCodex && CodexModeRunsUnderWorkspaceWrite(mode) {
-		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): "+
+		return c, fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): "+
 			"%w, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, "+
 			"so the director could not start a feature org (ralph org start --plan runs git worktree add); "+
 			"set [org.permissions.roles].%s = %q and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, "+
 			"or start a claude director (--driver %s); a guarded codex director follows that config, so under sandbox_mode = \"workspace-write\" it meets the same wall",
 			mode, DirectorRole, DirectorRole, ErrDirectorCodexWorkspaceWrite, DirectorRole, PermissionModeGuarded, DirectorDriverClaude)
 	}
-	if permArgs, err = permissionArgsForDriver(o.Config, p.Driver, mode); err != nil {
-		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): %w",
+	var err error
+	if c.permArgs, err = permissionArgsForDriver(o.Config, p.Driver, mode); err != nil {
+		return c, fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): %w",
 			mode, DirectorRole, DirectorRole, err)
+	}
+	// Before the first look and the watch gate, like the input checks
+	// above: a launch_cmd that cannot run its agent writes nothing and
+	// launches no watch (plan 2026-10-16-org-director-launch-cmd, AC5).
+	if c.cmdLaunch {
+		if c.agentPath, c.ralphPath, err = o.checkDirectorLaunchCmd(p.Driver); err != nil {
+			return c, err
+		}
 	}
 	// Before the watch gate, which may launch a watch, so a start refused
 	// while a director is attached starts nothing (self-review L1 of
 	// org-director-start).
 	res, err := p.Store.Read()
 	if err != nil {
-		return "", nil, "", err
+		return c, err
 	}
 	if cur := res.Current; cur != nil {
-		return "", nil, "", &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
+		return c, &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
 	}
 	if err := o.checkWatchGate(); err != nil {
-		return "", nil, "", err
+		return c, err
 	}
-	if stateDir, err = absPath(filepath.Dir(p.Store.Path())); err != nil {
-		return "", nil, "", fmt.Errorf("org: director: start: resolve the state dir: %w", err)
+	if c.stateDir, err = absPath(filepath.Dir(p.Store.Path())); err != nil {
+		return c, fmt.Errorf("org: director: start: resolve the state dir: %w", err)
 	}
 	if p.Cwd, err = absPath(p.Cwd); err != nil {
-		return "", nil, "", fmt.Errorf("org: director: start: resolve the cwd: %w", err)
+		return c, fmt.Errorf("org: director: start: resolve the cwd: %w", err)
 	}
 	if p.ConfigPath != "" {
 		if p.ConfigPath, err = absPath(p.ConfigPath); err != nil {
-			return "", nil, "", fmt.Errorf("org: director: start: resolve the --config path: %w", err)
+			return c, fmt.Errorf("org: director: start: resolve the --config path: %w", err)
 		}
 	}
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
 	}
-	return stateDir, permArgs, mode, nil
+	return c, nil
 }
 
 // newDirectorAttachedError is the *DirectorAttachedError for AttachHeadless's
@@ -791,9 +858,13 @@ func (r *directorStartRun) createWorkspaceAndTab() error {
 	return p.Store.RecordPane(r.reg.ID, r.reg.PaneID, p.Who)
 }
 
-// writePrompt is step 4 of StartDirector: it returns the prompt file's path.
+// writePrompt is step 4 of StartDirector, and the first step of startCmd:
+// it renders the prompt for the registration's launch and returns the
+// prompt file's path.
 func (r *directorStartRun) writePrompt() (string, error) {
-	text, err := RenderDirectorPrompt(DirectorPromptVars{ID: r.reg.ID, Driver: r.p.Driver, StateDir: r.stateDir, ConfigPath: r.p.ConfigPath, Cwd: r.p.Cwd})
+	text, err := RenderDirectorPrompt(DirectorPromptVars{
+		ID: r.reg.ID, Driver: r.p.Driver, StateDir: r.stateDir, ConfigPath: r.p.ConfigPath, Cwd: r.p.Cwd, Launch: r.reg.Launch,
+	})
 	if err != nil {
 		return "", fmt.Errorf("org: director: start %s: %w", r.reg.ID, err)
 	}

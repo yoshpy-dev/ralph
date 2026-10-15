@@ -309,13 +309,26 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // ErrDirectorChangedDuringStop, plan D14) has nothing left open of what it
 // read, so HerdrCommands is empty, and StopCommand is the stop to run again,
 // which closes what start recorded.
+//
+// Launch is the registration's launch. For a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd, D6) there is no herdr pane or
+// workspace: the error is start's cleanup that could not confirm that the
+// process its launch script checked in with, PID, ended (ps could not read
+// it, or it did not end in time after its SIGTERM), so it wrote no stopped,
+// or that could not record the stop. TerminalName is director_<token>, the
+// name launch_cmd's {name} gave the terminal, which is left open. The
+// workspace, pane, and label fields are empty, HerdrCommands is empty, and
+// StopCommand is the stop without --force.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
+	Launch         string
 	WorkspaceID    string
 	PaneID         string
 	WorkspaceLabel string
 	TabLabel       string
+	TerminalName   string
+	PID            int
 	Err            error
 	CleanupErr     error
 	Unconfirmed    bool
@@ -515,7 +528,7 @@ func (o *Org) closeDirectorWorkspace(c *directorClose, workspaceID string, gone 
 // open.
 func newDirectorCleanupError(verb string, reg DirectorRegistration, closed directorClose, cause, cleanupErr error, detached bool) *DirectorCleanupError {
 	e := &DirectorCleanupError{
-		Verb: verb, ID: reg.ID, WorkspaceID: reg.WorkspaceID, PaneID: reg.PaneID,
+		Verb: verb, ID: reg.ID, Launch: reg.Launch, WorkspaceID: reg.WorkspaceID, PaneID: reg.PaneID,
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		Err: cause, CleanupErr: cleanupErr, Unconfirmed: closed.unconfirmed, Detached: detached,
 		StopCommand: directorStopCommand(reg.ID, closed.unconfirmed),

@@ -1531,6 +1531,78 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 	}
 }
 
+// TestRenderDirectorPrompt_LaunchCmdTalksInTheTerminal pins the prompt of a
+// director started with [org.director].launch_cmd (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC2): the human is
+// talked to in the terminal launch_cmd opened, the stop is asked for from
+// another terminal and ends the process but leaves the terminal for the
+// human to close, and the director does not run stop itself, which
+// RALPH_DIRECTOR_TOKEN refuses. No pane, workspace, or herdr is named, no
+// line of the herdr launch is left, and the ralph org commands are the herdr
+// prompt's, every one of them in code.
+func TestRenderDirectorPrompt_LaunchCmdTalksInTheTerminal(t *testing.T) {
+	vars := testDirectorPromptVars()
+	vars.Launch = DirectorLaunchCmd
+	text := mustRenderDirectorPrompt(t, vars)
+	for _, tc := range []struct {
+		header  string
+		phrases []string
+	}{
+		{"## 最初の手順", []string{"そのことをこの端末に書いて止まる。detach も打たない。"}},
+		{"## ミッション", []string{
+			"director として動くのをやめ、そのことをこの端末に書く。",
+			"人とはこの端末で話す。この端末は、人が `[org.director].launch_cmd` に書いたコマンドで開いたもの。",
+			"実装しない。",
+		}},
+		{"## 終わり", []string{
+			"`ralph org director detach` は打たない。detach は登録を外すだけで、あなたのプロセスは動いたまま残る。",
+			"人に、この端末とは別の端末から次のコマンドを打つよう頼む。",
+			"stop があなたのプロセスを止め、止めたことを台帳に記録する。この端末は閉じないので、人が閉じる。",
+			"ralph org director stop --id d3 --state-dir " + testDirectorStateDirArg,
+			"stop は自分で打たない。あなたが打った stop は断られる",
+			"env の `RALPH_DIRECTOR_TOKEN` で、打ったのがあなただと見分ける",
+		}},
+	} {
+		body, found := markdownSection(text, tc.header)
+		if !found {
+			t.Fatalf("rendered launch cmd prompt has no %q section:\n%s", tc.header, text)
+		}
+		for _, phrase := range tc.phrases {
+			if !containsPhrase(body, phrase) {
+				t.Errorf("%s section does not say %q:\n%s", tc.header, phrase, body)
+			}
+		}
+	}
+	for _, word := range []string{"pane", "workspace", "herdr", "{{"} {
+		if strings.Contains(text, word) {
+			t.Errorf("rendered launch cmd prompt says %q:\n%s", word, text)
+		}
+	}
+	commands := directorPromptCommands(text)
+	if got := strings.Count(text, "ralph org"); got != len(commands) {
+		t.Errorf("the prompt says ralph org %d times, but only %d are commands in code: %q", got, len(commands), commands)
+	}
+	if herdr := directorPromptCommands(mustRenderDirectorPrompt(t, testDirectorPromptVars())); !slices.Equal(commands, herdr) {
+		t.Errorf("launch cmd prompt's ralph org commands = %q, want the herdr prompt's %q", commands, herdr)
+	}
+}
+
+// A director prompt with no Launch is the herdr one (a registration of stage
+// 8a-2 has none), and the herdr prompt holds none of the launch cmd's lines.
+func TestRenderDirectorPrompt_NoLaunchIsTheHerdrPrompt(t *testing.T) {
+	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
+	vars := testDirectorPromptVars()
+	vars.Launch = DirectorLaunchHerdr
+	if herdr := mustRenderDirectorPrompt(t, vars); herdr != text {
+		t.Errorf("the prompt with launch herdr differs from the one with no launch:\n%s\n---\n%s", herdr, text)
+	}
+	for _, word := range []string{"端末で話す", "launch_cmd", "RALPH_DIRECTOR_TOKEN", "{{"} {
+		if strings.Contains(text, word) {
+			t.Errorf("rendered herdr prompt says %q:\n%s", word, text)
+		}
+	}
+}
+
 // markdownCodeSpan is one inline code span of a markdown text: its content
 // is the submatch.
 var markdownCodeSpan = regexp.MustCompile("`([^`]+)`")
@@ -1646,6 +1718,7 @@ func TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders(t *testing.T
 		{"an id not of the form d<N>", func(v *DirectorPromptVars) { v.ID = "d01" }, `"d01" is not a registration id`},
 		{"an empty id", func(v *DirectorPromptVars) { v.ID = "" }, `"" is not a registration id`},
 		{"an unknown driver", func(v *DirectorPromptVars) { v.Driver = "gemini" }, `unknown driver "gemini"`},
+		{"an unknown launch", func(v *DirectorPromptVars) { v.Launch = "tmux" }, `unknown launch "tmux": use herdr or cmd`},
 		{"an empty state dir", func(v *DirectorPromptVars) { v.StateDir = "" }, "must both be set"},
 		{"an empty cwd", func(v *DirectorPromptVars) { v.Cwd = "" }, "must both be set"},
 		{"a value that holds a placeholder", func(v *DirectorPromptVars) { v.Cwd = "/x/{{ID}}" }, "a placeholder is left after substitution"},

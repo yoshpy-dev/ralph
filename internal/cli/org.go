@@ -215,27 +215,29 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // withMainWorktreeDirectorStartConfig returns cfg with the settings `ralph
 // org director start` launches the headless director by taken from <main
 // worktree root>/ralph.toml, by the rule withMainWorktreeDirectorEnabled
-// follows: Director.Enabled, Permissions ([org.permissions]: default, roles,
-// and codex_verified), Roles ([org.roles]), and ModelPool. Only when
-// configPath is empty and the ledger is the main worktree's
-// (org.LedgerMainWorktreeRoot), with the built-in defaults when that file
-// does not exist. The director acts for every org of the ledger, and a
-// feature worktree's ralph.toml, which the leader running there can change,
-// must not choose its permission mode or its model (plan
+// follows: Director.Enabled, Director.LaunchCmd ([org.director].launch_cmd),
+// Permissions ([org.permissions]: default, roles, and codex_verified), Roles
+// ([org.roles]), and ModelPool. Only when configPath is empty and the ledger
+// is the main worktree's (org.LedgerMainWorktreeRoot), with the built-in
+// defaults when that file does not exist. The director acts for every org of
+// the ledger, and a feature worktree's ralph.toml, which the leader running
+// there can change, must not choose its permission mode or its model (plan
 // 2026-10-15-org-director-start, D6 and Scope), any more than whether a
-// director is used at all. With --config, or a ledger that is not the main
-// worktree's, cfg is returned unchanged. No other setting is taken. A main
-// worktree ralph.toml that fails to load is an error, which director start
-// returns.
+// director is used at all, nor the command start runs to open its terminal
+// (plan 2026-10-16-org-director-launch-cmd, D10). With --config, or a ledger
+// that is not the main worktree's, cfg is returned unchanged. No other
+// setting is taken. A main worktree ralph.toml that fails to load is an
+// error, which director start returns.
 func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled and launch_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
 	}
 	cfg.Director.Enabled = mainCfg.Director.Enabled
+	cfg.Director.LaunchCmd = mainCfg.Director.LaunchCmd
 	cfg.Permissions = mainCfg.Permissions
 	cfg.Roles = mainCfg.Roles
 	cfg.ModelPool = mainCfg.ModelPool

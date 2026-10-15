@@ -116,14 +116,52 @@ const DirectorRole = "director"
 // ConfigPath, the absolute path of the ralph.toml start was given with
 // --config ("" when start had none), which the ralph org commands the
 // director runs are given with --config too, so they read the settings start
-// read (the stop command is not: stop reads no ralph.toml); and Cwd, the
-// directory the director runs in.
+// read (the stop command is not: stop reads no ralph.toml); Cwd, the
+// directory the director runs in; and Launch, the registration's launch
+// (DirectorLaunchHerdr, or DirectorLaunchCmd for a start with
+// [org.director].launch_cmd; empty means herdr), which picks the lines the
+// template keeps for that launch only (directorPromptLaunchPrefixes).
 type DirectorPromptVars struct {
 	ID         string
 	Driver     string
 	StateDir   string
 	ConfigPath string
 	Cwd        string
+	Launch     string
+}
+
+// directorPromptLaunchPrefixes are the line prefixes of prompts/director.md
+// that keep a line for one launch only (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md): a director in a
+// herdr pane is talked to in that pane and stopped by closing it, and one in
+// the terminal launch_cmd opened is talked to there and stopped by its pid,
+// with the terminal left for the human to close. RenderDirectorPrompt keeps
+// a line with its launch's prefix, the prefix cut off, and drops a line with
+// the other's, before it substitutes the placeholders. A prefix anywhere but
+// at the start of a line is left in the text, where the placeholder check
+// refuses it.
+var directorPromptLaunchPrefixes = []struct{ launch, prefix string }{
+	{DirectorLaunchHerdr, "{{IF_HERDR}}"},
+	{DirectorLaunchCmd, "{{IF_CMD}}"},
+}
+
+// selectDirectorPromptLaunch is text, the director template, with the lines
+// of directorPromptLaunchPrefixes kept for launch only.
+func selectDirectorPromptLaunch(text, launch string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(text, "\n") {
+		keep := true
+		for _, p := range directorPromptLaunchPrefixes {
+			if rest, ok := strings.CutPrefix(line, p.prefix); ok {
+				line, keep = rest, p.launch == launch
+				break
+			}
+		}
+		if keep {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
 }
 
 // directorPromptNoConfigText substitutes for {{CONFIG_LINE}} when
@@ -146,18 +184,27 @@ const directorPromptNoConfigText = "main worktree の ralph.toml(台帳が main 
 // the text of the header's 設定 line, not a value to put in a command:
 // vars.ConfigPath as one shell word followed by "(start の --config)", else
 // directorPromptNoConfigText. Without ConfigPath the text holds no
-// "--config". Unlike RenderRolePrompt it refuses to leave a placeholder: an
-// id not of the form d<N>, a driver other than claude and codex, an empty
-// StateDir or Cwd, a ConfigPath that is not absolute (the director runs in
-// another directory, where a relative path names another file), and a
-// rendered text that still holds "{{" (a placeholder it does not know, or a
-// value that holds one) are errors.
+// "--config". The lines kept for one launch only are vars.Launch's
+// (selectDirectorPromptLaunch). Unlike RenderRolePrompt it refuses to leave
+// a placeholder: an id not of the form d<N>, a driver other than claude and
+// codex, a launch other than herdr and cmd, an empty StateDir or Cwd, a
+// ConfigPath that is not absolute (the director runs in another directory,
+// where a relative path names another file), and a rendered text that still
+// holds "{{" (a placeholder it does not know, or a value that holds one) are
+// errors.
 func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
 	if _, ok := directorIDNumber(vars.ID); !ok {
 		return "", fmt.Errorf("org: director prompt: %q is not a registration id (d<N>, such as d1)", vars.ID)
 	}
 	if vars.Driver != DirectorDriverClaude && vars.Driver != DirectorDriverCodex {
 		return "", fmt.Errorf("org: director prompt: unknown driver %q: use %s or %s", vars.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	launch := vars.Launch
+	if launch == "" {
+		launch = DirectorLaunchHerdr
+	}
+	if launch != DirectorLaunchHerdr && launch != DirectorLaunchCmd {
+		return "", fmt.Errorf("org: director prompt: unknown launch %q: use %s or %s", vars.Launch, DirectorLaunchHerdr, DirectorLaunchCmd)
 	}
 	if vars.StateDir == "" || vars.Cwd == "" {
 		return "", fmt.Errorf("org: director prompt: the state dir (%q) and the cwd (%q) must both be set", vars.StateDir, vars.Cwd)
@@ -183,7 +230,7 @@ func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
 		"{{ORG_FLAGS}}", orgFlags,
 		"{{CONFIG_LINE}}", configLine,
 		"{{CWD}}", vars.Cwd,
-	).Replace(string(data))
+	).Replace(selectDirectorPromptLaunch(string(data), launch))
 	if i := strings.Index(text, "{{"); i >= 0 {
 		rest, _, _ := strings.Cut(text[i:], "\n")
 		return "", fmt.Errorf("org: director prompt: a placeholder is left after substitution: %q", rest)

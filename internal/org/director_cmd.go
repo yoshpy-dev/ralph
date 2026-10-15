@@ -27,8 +27,9 @@ import (
 // SIGTERM to the recorded pid only while ps still reads the same start time
 // for it, so a later process that got the pid is never signalled. This file
 // holds those pieces: the process reader, the stop of the recorded process,
-// the launch script, and the launch_cmd argv and its runner. The records are
-// in director.go and director_start.go.
+// the launch script, the launch_cmd argv and its runner, and StartDirector's
+// launch_cmd path (startCmd: its checks, the wait for the check-in, and its
+// cleanup, abortCmd). The records are in director.go and director_start.go.
 
 // The states of a process as ReadDirectorProcess reads it
 // (DirectorProcess.State).
@@ -456,3 +457,252 @@ func runDirectorLaunchCmd(ctx context.Context, argv []string, dir string, waitDe
 	}
 	return fmt.Errorf("launch_cmd %s failed: %w%s", name, err, output)
 }
+
+// checkDirectorLaunchCmd is StartDirector's check of the launch_cmd path
+// before anything is written (plan D1, D3, and AC5). [org.director].launch_cmd
+// must pass config.ValidateDirectorLaunchCmd, since an Org can be built
+// without config.Load. The driver's agent must be on start's PATH: the
+// binary herdr's agent start runs for that kind, named as the driver is
+// ("claude" or "codex"), found with o.DirectorAgentLookPath (nil:
+// exec.LookPath). And the ralph that runs start must be found with
+// o.DirectorRalphExecutable (nil: os.Executable). It returns both paths made
+// absolute, which the launch script runs.
+func (o *Org) checkDirectorLaunchCmd(driver string) (agentPath, ralphPath string, err error) {
+	if err := config.ValidateDirectorLaunchCmd(o.Config.Director.LaunchCmd); err != nil {
+		return "", "", fmt.Errorf("org: director: start: %w", err)
+	}
+	lookPath := exec.LookPath
+	if o.DirectorAgentLookPath != nil {
+		lookPath = o.DirectorAgentLookPath
+	}
+	found, err := lookPath(driver)
+	if err != nil {
+		return "", "", fmt.Errorf("org: director: start: the %s agent is not on PATH, so the launch script could not run it: %w", driver, err)
+	}
+	if agentPath, err = absPath(found); err != nil {
+		return "", "", fmt.Errorf("org: director: start: resolve the path of the %s agent %q: %w", driver, found, err)
+	}
+	executable := os.Executable
+	if o.DirectorRalphExecutable != nil {
+		executable = o.DirectorRalphExecutable
+	}
+	exe, err := executable()
+	if err != nil {
+		return "", "", fmt.Errorf("org: director: start: find the ralph executable the launch script checks in with: %w", err)
+	}
+	if ralphPath, err = absPath(exe); err != nil {
+		return "", "", fmt.Errorf("org: director: start: resolve the path of the ralph executable %q: %w", exe, err)
+	}
+	return agentPath, ralphPath, nil
+}
+
+// defaultDirectorCheckInPollInterval is how often startCmd reads
+// director.jsonl again while it waits for the launch script's check-in, when
+// Org.DirectorCheckInPollInterval is unset.
+const defaultDirectorCheckInPollInterval = 200 * time.Millisecond
+
+func (o *Org) directorCheckInPollInterval() time.Duration {
+	if o.DirectorCheckInPollInterval > 0 {
+		return o.DirectorCheckInPollInterval
+	}
+	return defaultDirectorCheckInPollInterval
+}
+
+// startCmd is StartDirector past AttachHeadless when [org.director].launch_cmd
+// is set (plan D3, D5, and D6), with c from checkDirectorStart. It makes no
+// herdr call. In this order:
+//  1. writePrompt: the prompt file, rendered for launch cmd, at
+//     <state dir>/prompts/director_<token>.md, as for herdr
+//  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN and, when
+//     p.AgmsgHome is set, RALPH_ORG_AGMSG_HOME, the check-in with
+//     c.ralphPath, and the exec of c.agentPath with the permission flags,
+//     --model, and the prompt file's PromptFilePointer, in the order herdr's
+//     agent start gets them
+//  3. directorLaunchArgv: launch_cmd with its placeholders replaced
+//  4. runDirectorLaunchCmd in p.Cwd, under driverCallTimeout (the bound
+//     callWithTimeout gives each herdr call)
+//  5. waitForCheckIn, under p.TimeoutMS
+//
+// It returns the registration as the check-in left it (running, with its
+// pid and start time). When a step fails, or the registration stops being
+// the current one while it waits, abortCmd cleans up and returns the error.
+func (r *directorStartRun) startCmd(c directorStartChecks) (DirectorStartResult, error) {
+	id, token := r.reg.ID, r.reg.Token
+	promptPath, err := r.writePrompt()
+	if err != nil {
+		return DirectorStartResult{}, r.abortCmd(err)
+	}
+	scriptPath, err := writeDirectorLaunchScript(directorLaunchScript{
+		ID: id, Token: token, StateDir: r.stateDir, Cwd: r.p.Cwd, AgmsgHome: r.p.AgmsgHome,
+		RalphPath: c.ralphPath, AgentPath: c.agentPath, PermArgs: c.permArgs, Model: r.p.Model, PromptPointer: PromptFilePointer(promptPath),
+	})
+	if err != nil {
+		return DirectorStartResult{}, r.abortCmd(fmt.Errorf("org: director: start %s: %w", id, err))
+	}
+	argv, err := directorLaunchArgv(r.o.Config.Director.LaunchCmd, scriptPath, token, r.p.Cwd)
+	if err != nil {
+		return DirectorStartResult{}, r.abortCmd(fmt.Errorf("org: director: start %s: %w", id, err))
+	}
+	if err := r.o.callWithTimeout(func(ctx context.Context) error {
+		return runDirectorLaunchCmd(ctx, argv, r.p.Cwd, 0)
+	}); err != nil {
+		return DirectorStartResult{}, r.abortCmd(fmt.Errorf("org: director: start %s: %w", id, err))
+	}
+	reg, err := r.waitForCheckIn(scriptPath)
+	if err != nil {
+		return DirectorStartResult{}, r.abortCmd(err)
+	}
+	r.reg = reg
+	return DirectorStartResult{
+		Registration: reg, Launch: DirectorLaunchCmd, PromptPath: promptPath,
+		TerminalName: DirectorAgentName(token), LaunchScriptPath: scriptPath,
+	}, nil
+}
+
+// waitForCheckIn is startCmd's wait for the check-in of the launch script at
+// scriptPath (plan D5): it reads director.jsonl, without the lock, every
+// directorCheckInPollInterval. It returns the registration once it is the
+// current one and running, which for a launch cmd only its check-in
+// (MarkCmdLaunched) makes it, with its pid and start time. Once the
+// registration is no longer the current one, or is stopped, it returns
+// ErrDirectorReplacedDuringStart (replacedError); after p.TimeoutMS with the
+// registration still starting, an error that wraps ErrDirectorNoCheckIn; and
+// a read that fails, its error.
+func (r *directorStartRun) waitForCheckIn(scriptPath string) (DirectorRegistration, error) {
+	timeout := time.Duration(r.p.TimeoutMS) * time.Millisecond
+	deadline := time.Now().Add(timeout)
+	interval := r.o.directorCheckInPollInterval()
+	for {
+		res, err := r.p.Store.Read()
+		if err != nil {
+			return DirectorRegistration{}, err
+		}
+		switch cur := res.Current; {
+		case cur == nil || cur.ID != r.reg.ID || cur.State == DirectorStateStopped:
+			return DirectorRegistration{}, r.replacedError()
+		case cur.State == DirectorStateRunning:
+			return *cur, nil
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return DirectorRegistration{}, fmt.Errorf("org: director: start %s: %w: launch_cmd returned, but the launch script %s did not check in within %s (--timeout-ms %d): "+
+				"no terminal ran it, or its check-in was refused or failed", r.reg.ID, ErrDirectorNoCheckIn, scriptPath, timeout, r.p.TimeoutMS)
+		}
+		time.Sleep(min(interval, left))
+	}
+}
+
+// abortCmd is startCmd's cleanup after cause (plan D6), the sibling of abort
+// for a launch cmd: it stops what may have checked in, as a stop of a launch
+// cmd does, and then records the stop. It reads the registration again,
+// without the lock. With no pid recorded, nothing has checked in and there is
+// nothing to stop. With one, stopDirectorProcess sends SIGTERM to that pid
+// only while ps reads for it the start time the check-in recorded, which
+// holds for the launch script before its exec and for the agent after it,
+// and waits for it to end. Once the end is confirmed, MarkStoppedIfUnchanged
+// records stopped (with detached while the registration is current) against
+// what it read. A check-in that lands between the read and that record
+// (ErrDirectorCheckedInDuringStop) makes it read once more and stop the pid
+// that check-in recorded; a pid only goes from none to a value, so once is
+// enough. A registration that a stop recorded stopped first
+// (ErrDirectorStopped) counts as recorded. Either way it returns a
+// *DirectorLaunchCmdStoppedError.
+//
+// When the end is not confirmed (ps cannot be read, or the process did not
+// end within directorStopWait of its SIGTERM), it writes no stopped, so the
+// record never says more than it knows: it writes detached only, and only
+// while the registration is current (detachCmdOnly), as abort does when it
+// cannot close herdr, and returns a *DirectorCleanupError that names the stop
+// to run. A read or a record that fails otherwise is a *DirectorCleanupError
+// whose CleanupErr is directorRecordStopError.
+func (r *directorStartRun) abortCmd(cause error) error {
+	verb := "start " + r.reg.ID
+	reg, err := r.p.Store.openHeadlessRegistration(verb, r.reg.ID)
+	for reread := false; ; reread = true {
+		switch {
+		case errors.Is(err, ErrDirectorStopped):
+			return newDirectorLaunchCmdStoppedError(r.reg, cause, directorProcessStop{})
+		case err != nil:
+			return newDirectorCmdCleanupError(r.reg, cause, &directorRecordStopError{id: r.reg.ID, err: err}, false)
+		}
+		stop := r.o.stopDirectorProcess(reg)
+		if stop.outcome != directorProcessStopEnded {
+			return r.detachCmdOnly(cause, reg, stop)
+		}
+		_, err = r.p.Store.MarkStoppedIfUnchanged(reg, r.p.Who)
+		switch {
+		case err == nil, errors.Is(err, ErrDirectorStopped):
+			return newDirectorLaunchCmdStoppedError(reg, cause, stop)
+		case errors.Is(err, ErrDirectorCheckedInDuringStop) && !reread:
+			reg, err = r.p.Store.openHeadlessRegistration(verb, r.reg.ID)
+			continue
+		}
+		return newDirectorCmdCleanupError(reg, cause, &directorRecordStopError{id: reg.ID, err: err}, false)
+	}
+}
+
+// detachCmdOnly is abortCmd's way out when stop did not confirm that the
+// process reg checked in with ended: it writes detached for reg while it is
+// the current registration (Detach by its id), so start and attach go on,
+// and leaves reg open for `ralph org director stop --id`, and returns the
+// *DirectorCleanupError that says so.
+func (r *directorStartRun) detachCmdOnly(cause error, reg DirectorRegistration, stop directorProcessStop) error {
+	notEnded := fmt.Errorf("%s is not recorded stopped, since the end of the process that checked in is not confirmed: %w", reg.ID, stop.err)
+	w := r.p.Who
+	_, err := r.p.Store.Detach(DirectorDetach{ID: reg.ID, User: w.User, Cwd: w.Cwd, HerdrPane: w.HerdrPane})
+	switch {
+	case err == nil:
+		return newDirectorCmdCleanupError(reg, cause, notEnded, true)
+	case errors.Is(err, ErrDirectorIDMismatch), errors.Is(err, ErrDirectorNotAttached):
+		return newDirectorCmdCleanupError(reg, cause, notEnded, false)
+	}
+	return newDirectorCmdCleanupError(reg, cause, errors.Join(notEnded, fmt.Errorf("detach %s: %w", reg.ID, err)), false)
+}
+
+// newDirectorCmdCleanupError is the *DirectorCleanupError of start's
+// cleanup for reg, a launch cmd: no herdr ids, labels, or commands, and the
+// stop without --force, which stops the process once it can confirm it and
+// records the stop.
+func newDirectorCmdCleanupError(reg DirectorRegistration, cause, cleanupErr error, detached bool) *DirectorCleanupError {
+	return &DirectorCleanupError{
+		Verb: "start", ID: reg.ID, Launch: DirectorLaunchCmd, TerminalName: DirectorAgentName(reg.Token), PID: reg.PID,
+		Err: cause, CleanupErr: cleanupErr, Detached: detached, StopCommand: directorStopCommand(reg.ID, false),
+	}
+}
+
+// DirectorLaunchCmdStoppedError is StartDirector's failure on the launch_cmd
+// path once its cleanup (abortCmd) recorded registration ID stopped, or found
+// a stop had recorded it first (plan D6). Err is why start failed. PID is
+// the pid the launch script checked in with (0 when none had), and
+// Signalled says the cleanup sent it SIGTERM and saw it end; with a PID and
+// no Signalled it had already ended. TerminalName is director_<token>, the
+// name launch_cmd's {name} gave the terminal, which is left open: a launch
+// script that checks in from it after the stop is refused and ends without
+// starting the agent. The CLI tells the human to close that terminal.
+type DirectorLaunchCmdStoppedError struct {
+	ID           string
+	TerminalName string
+	PID          int
+	Signalled    bool
+	Err          error
+}
+
+// newDirectorLaunchCmdStoppedError is the *DirectorLaunchCmdStoppedError of
+// reg after cause, with what stop did to the pid reg checked in with.
+func newDirectorLaunchCmdStoppedError(reg DirectorRegistration, cause error, stop directorProcessStop) *DirectorLaunchCmdStoppedError {
+	return &DirectorLaunchCmdStoppedError{
+		ID: reg.ID, TerminalName: DirectorAgentName(reg.Token), PID: reg.PID, Signalled: stop.signalled, Err: cause,
+	}
+}
+
+func (e *DirectorLaunchCmdStoppedError) Error() string {
+	switch {
+	case e.Signalled:
+		return fmt.Sprintf("%v; start sent SIGTERM to the launch script or agent that checked in (pid %d), which ended, and %s is recorded stopped", e.Err, e.PID, e.ID)
+	case e.PID > 0:
+		return fmt.Sprintf("%v; the launch script or agent that checked in (pid %d) had already ended, and %s is recorded stopped", e.Err, e.PID, e.ID)
+	}
+	return fmt.Sprintf("%v; %s is recorded stopped", e.Err, e.ID)
+}
+
+func (e *DirectorLaunchCmdStoppedError) Unwrap() error { return e.Err }

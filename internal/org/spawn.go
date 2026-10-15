@@ -285,6 +285,23 @@ type Org struct {
 	// field's default) means "use defaultDirectorStopWait" (10s) -- tests
 	// set a short one so a process that ignores SIGTERM is reported fast.
 	DirectorStopWait time.Duration
+	// DirectorAgentLookPath overrides how StartDirector with
+	// [org.director].launch_cmd finds the driver's agent, the binary herdr's
+	// agent start runs for that kind ("claude" or "codex"), whose absolute
+	// path the launch script execs. nil (the field's default) means
+	// exec.LookPath in start's environment; tests set a fake agent.
+	DirectorAgentLookPath func(file string) (string, error)
+	// DirectorRalphExecutable overrides how that start finds the ralph whose
+	// absolute path the launch script's check-in runs. nil (the field's
+	// default) means os.Executable; tests point it at a wrapper that runs the
+	// test binary as the check-in.
+	DirectorRalphExecutable func() (string, error)
+	// DirectorCheckInPollInterval overrides how often that start reads
+	// director.jsonl again while it waits for the launch script's check-in.
+	// Zero (the field's default) means "use
+	// defaultDirectorCheckInPollInterval" (200ms) -- tests set a tiny value
+	// so a check-in is seen fast.
+	DirectorCheckInPollInterval time.Duration
 }
 
 func (o *Org) now() string {

@@ -2,7 +2,9 @@ package org
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,14 +15,18 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // Tests for director_cmd.go (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D1, D3, and D7):
-// the process reader, the stop of a recorded process, the launch script, and
-// the launch_cmd argv and its runner. Every process they signal is one the
-// test started itself, and every process a test starts is killed and waited
-// for in its cleanup; none runs herdr, a terminal, or a tmux of the user's.
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D1, D3, D6, and
+// D7): the process reader, the stop of a recorded process, the launch
+// script, the launch_cmd argv and its runner, and StartDirector's launch_cmd
+// path (its checks, the wait for the check-in, and its cleanup). Every
+// process they signal is one the test started itself, and every process a
+// test starts is killed and waited for in its cleanup; none runs herdr, a
+// terminal, or a tmux of the user's.
 
 // testProcess is a process a test started (startTestProcess).
 type testProcess struct {
@@ -828,5 +834,748 @@ func TestRunDirectorLaunchCmd_ABackgroundChildHoldingTheOutputDoesNotHang(t *tes
 	}
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("the call took %s: the child's output held it", took)
+	}
+}
+
+// The tests of StartDirector's launch_cmd path (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC2, AC4, and AC5)
+// run real processes under t.TempDir(): a fake launch_cmd (sh), the launch
+// script start writes, a check-in that is this test binary
+// (TestDirectorCheckInHelperProcess) run through a ralph wrapper, and a fake
+// agent that records what it got and then becomes a sleep. The fake herdr
+// must see no call. Each test kills, in its cleanup, the processes its
+// launch scripts checked in with, and only while ps reads the start time
+// the check-in recorded for them (killCheckedInProcesses), so it never
+// signals a process it did not start.
+
+// The variables the ralph wrapper of a cmdStartFixture exports to the
+// check-in helper: directorCheckInHelperEnv makes this test binary the
+// check-in, and directorCheckInPauseEnv, when set, names a directory where
+// the helper writes "checked-in" once it recorded the check-in, then waits
+// for "release" and exits with the code that file holds, after it writes
+// "done".
+const (
+	directorCheckInHelperEnv = "RALPH_ORG_TEST_CHECKIN_HELPER"
+	directorCheckInPauseEnv  = "RALPH_ORG_TEST_CHECKIN_PAUSE"
+)
+
+// TestDirectorCheckInHelperProcess is not a test of its own: it is the
+// check-in of the launch scripts these tests make start write. The ralph
+// wrapper execs this test binary with directorCheckInHelperEnv set and the
+// script's arguments after "--" (`org director launched --id <id> --token
+// <token> --pid <pid> --state-dir <dir>`), so the check-in's parent is the
+// script's shell, as for the real `ralph org director launched`. It runs
+// that verb's checks (the pid is its parent, ps reads the pid alive, and
+// MarkCmdLaunched) and exits 0 only when the check-in is recorded, so a
+// refused one starts no agent. Without the variable it does nothing.
+func TestDirectorCheckInHelperProcess(t *testing.T) {
+	if os.Getenv(directorCheckInHelperEnv) != "1" {
+		return
+	}
+	os.Exit(runDirectorCheckInHelper(flag.Args()))
+}
+
+func runDirectorCheckInHelper(args []string) int {
+	fail := func(format string, a ...any) int {
+		fmt.Fprintf(os.Stderr, "check-in helper: "+format+"\n", a...)
+		return 1
+	}
+	if len(args) < 3 || !slices.Equal(args[:3], []string{"org", "director", "launched"}) {
+		return fail("args %q are not org director launched ...", args)
+	}
+	fs := flag.NewFlagSet("launched", flag.ContinueOnError)
+	id, token, stateDir := fs.String("id", "", ""), fs.String("token", "", ""), fs.String("state-dir", "", "")
+	pid := fs.Int("pid", 0, "")
+	if err := fs.Parse(args[3:]); err != nil {
+		return fail("%v", err)
+	}
+	if parent := os.Getppid(); *pid != parent {
+		return fail("--pid %d is not the parent %d", *pid, parent)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	proc, err := ReadDirectorProcess(ctx, *pid)
+	if err != nil || proc.State != DirectorProcessAlive {
+		return fail("pid %d reads %+v, %v", *pid, proc, err)
+	}
+	cwd, _ := os.Getwd()
+	if err := NewDirectorStore(*stateDir).MarkCmdLaunched(DirectorCmdCheckIn{
+		ID: *id, Token: *token, PID: *pid, StartTime: proc.StartTime, Who: DirectorWho{User: "launch-script", Cwd: cwd},
+	}); err != nil {
+		return fail("%v", err)
+	}
+	pause := os.Getenv(directorCheckInPauseEnv)
+	if pause == "" {
+		return 0
+	}
+	if err := os.WriteFile(filepath.Join(pause, "checked-in"), nil, 0o644); err != nil {
+		return fail("%v", err)
+	}
+	code := 1
+	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if raw, err := os.ReadFile(filepath.Join(pause, "release")); err == nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+				code = n
+			}
+			break
+		}
+	}
+	_ = os.WriteFile(filepath.Join(pause, "done"), nil, 0o644)
+	return code
+}
+
+// cmdStartFixture is a dirStartFixture whose StartDirector takes the
+// launch_cmd path: launch_cmd is set, the agent lookup names a fake agent
+// (recording which binary it was asked for), the ralph executable is a
+// wrapper that runs TestDirectorCheckInHelperProcess as the check-in, the
+// check-in is looked for every 10ms, and a stop waits 2s for the process.
+type cmdStartFixture struct {
+	*dirStartFixture
+	base        string   // the directory of the fakes
+	agentPath   string   // the fake agent
+	agentMarker string   // what the fake agent wrote, once it ran
+	lookedUp    []string // the names the agent lookup was asked for
+	pause       string   // the check-in helper's pause directory ("" when none)
+}
+
+// cmdStartOptions shape a cmdStartFixture: pause makes the check-in wait
+// after it recorded the check-in (directorCheckInPauseEnv), and ignoreTerm
+// makes the fake agent ignore SIGTERM.
+type cmdStartOptions struct {
+	pause, ignoreTerm bool
+}
+
+func newCmdStartFixture(t *testing.T, launchCmd []string, opts cmdStartOptions) *cmdStartFixture {
+	t.Helper()
+	f := &cmdStartFixture{dirStartFixture: newDirStartFixture(t, directorTestToken), base: t.TempDir()}
+	f.agentPath = filepath.Join(f.base, "bin", "agent")
+	f.agentMarker = filepath.Join(f.base, "agent.out")
+	trap := ""
+	if opts.ignoreTerm {
+		// An ignored signal stays ignored across exec, so the sleep it
+		// becomes ignores SIGTERM too.
+		trap = "trap '' TERM\n"
+	}
+	writeTestExecutable(t, f.agentPath, "#!/bin/sh\n"+trap+"{\nprintf 'pid=%s\\n' \"$$\"\n"+
+		"printf 'pwd=%s\\n' \"$(pwd -P)\"\n"+
+		"printf 'token=%s\\n' \"${RALPH_DIRECTOR_TOKEN-<unset>}\"\nprintf 'agmsg=%s\\n' \"${RALPH_ORG_AGMSG_HOME-<unset>}\"\n"+
+		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+shellQuote(f.agentMarker+".tmp")+
+		" && mv "+shellQuote(f.agentMarker+".tmp")+" "+shellQuote(f.agentMarker)+"\nexec "+shellQuote(sleepPath(t))+" 600\n")
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("find the test binary: %v", err)
+	}
+	wrapper := "#!/bin/sh\n" + directorCheckInHelperEnv + "=1\nexport " + directorCheckInHelperEnv + "\n"
+	if opts.pause {
+		f.pause = filepath.Join(f.base, "pause")
+		if err := os.Mkdir(f.pause, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		wrapper += directorCheckInPauseEnv + "=" + shellQuote(f.pause) + "\nexport " + directorCheckInPauseEnv + "\n"
+	}
+	wrapper += "exec " + shellQuote(testBinary) + " -test.run='^TestDirectorCheckInHelperProcess$' -- \"$@\"\n"
+	ralph := filepath.Join(f.base, "bin", "ralph")
+	writeTestExecutable(t, ralph, wrapper)
+
+	f.o.Config.Director.LaunchCmd = launchCmd
+	f.o.DirectorAgentLookPath = func(file string) (string, error) {
+		f.lookedUp = append(f.lookedUp, file)
+		return f.agentPath, nil
+	}
+	f.o.DirectorRalphExecutable = func() (string, error) { return ralph, nil }
+	f.o.DirectorCheckInPollInterval = 10 * time.Millisecond
+	f.o.DirectorStopWait = 2 * time.Second
+	killCheckedInProcesses(t, f.store)
+	if f.pause != "" {
+		// A paused check-in that the test did not release is released with
+		// exit 1, so its launch script starts no agent.
+		t.Cleanup(func() { f.release(t, 1) })
+	}
+	return f
+}
+
+// release lets the paused check-in exit with code, once, and waits (up to
+// 10s) for it to have exited.
+func (f *cmdStartFixture) release(t *testing.T, code int) {
+	t.Helper()
+	path := filepath.Join(f.pause, "release")
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	if err := os.WriteFile(path, []byte(strconv.Itoa(code)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.pause, "checked-in")); err != nil {
+		return
+	}
+	waitForFileWithin(t, filepath.Join(f.pause, "done"), 10*time.Second)
+}
+
+// killCheckedInProcesses is t's cleanup for every process a launch script
+// of store's ledger checked in with: each pid of a launched event that ps
+// still reads alive with the start time that event recorded gets SIGKILL,
+// and the cleanup waits (up to 5s) for it to be gone. Its parent is init by
+// then (nohup's shell has exited), which reaps it.
+func killCheckedInProcesses(t *testing.T, store *DirectorStore) {
+	t.Cleanup(func() {
+		raw, err := os.ReadFile(store.Path())
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			var ev DirectorEvent
+			if json.Unmarshal([]byte(line), &ev) != nil || ev.Event != DirectorEventLaunched || ev.PID <= 0 {
+				continue
+			}
+			same := func() bool {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				proc, err := ReadDirectorProcess(ctx, ev.PID)
+				return err == nil && proc.State == DirectorProcessAlive && proc.StartTime == ev.StartTime
+			}
+			if !same() {
+				continue
+			}
+			_ = syscall.Kill(ev.PID, syscall.SIGKILL)
+			for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && same(); time.Sleep(20 * time.Millisecond) {
+			}
+		}
+	})
+}
+
+// waitForFileWithin waits up to limit for path to exist (waitForFile, of the
+// gate tests, waits 10s).
+func waitForFileWithin(t *testing.T, path string, limit time.Duration) {
+	t.Helper()
+	for deadline := time.Now().Add(limit); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not appear within %s", path, limit)
+		}
+	}
+}
+
+// wantNoFile fails t when path exists.
+func wantNoFile(t *testing.T, path, what string) {
+	t.Helper()
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s exists (stat %v): %s", path, err, what)
+	}
+}
+
+// launchCmdInBackground is a launch_cmd that runs the launch script in the
+// background, as a terminal would, and returns at once. Like a terminal,
+// which has its own environment, the script does not get
+// RALPH_ORG_AGMSG_HOME from the test's, so the agent has it only when the
+// script exports it.
+var launchCmdInBackground = []string{"sh", "-c", `env -u RALPH_ORG_AGMSG_HOME nohup sh "$1" >/dev/null 2>&1 &`, "sh", "{script}"}
+
+// launchCmdFailingOnceExists is a launch_cmd that runs the launch script in
+// the background, waits (up to 20s) for path to exist, and then exits 1: a
+// terminal command that fails after its terminal ran the script.
+func launchCmdFailingOnceExists(path string) []string {
+	return []string{"sh", "-c", `env -u RALPH_ORG_AGMSG_HOME nohup sh "$1" >/dev/null 2>&1 & i=0; while [ ! -e "$2" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done; exit 1`,
+		"sh", "{script}", path}
+}
+
+// launchCmdTouching is a launch_cmd that never runs the launch script: it
+// creates path (so a test sees that it ran) and exits with code.
+func launchCmdTouching(path string, code int) []string {
+	return []string{"sh", "-c", `: > "$2"; exit ` + strconv.Itoa(code), "sh", "{script}", path}
+}
+
+// agentMarkerLines is what the fake agent wrote, once it has run (up to 30s).
+func (f *cmdStartFixture) agentMarkerLines(t *testing.T) []string {
+	t.Helper()
+	waitForFileWithin(t, f.agentMarker, 30*time.Second)
+	return readLines(t, f.agentMarker)
+}
+
+// launchedEvent is the launched event of director.jsonl, which a launch cmd
+// writes at its check-in only.
+func launchedEvent(t *testing.T, s *DirectorStore) DirectorEvent {
+	t.Helper()
+	for _, line := range directorFileLines(t, s) {
+		var ev DirectorEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("director.jsonl line %q: %v", line, err)
+		}
+		if ev.Event == DirectorEventLaunched {
+			return ev
+		}
+	}
+	t.Fatalf("director.jsonl has no launched event: %q", directorTrail(t, s))
+	return DirectorEvent{}
+}
+
+// AC2: with launch_cmd, start records attached (launch cmd, the token, the
+// model, and the permission mode) before anything else, writes the prompt
+// and the launch script (0700), runs launch_cmd, and waits for the check-in,
+// which records launched with the pid of the script and its start time. The
+// agent then runs in its place (same pid) with the permission flags,
+// --model, and the prompt pointer, the token exported, and
+// RALPH_ORG_AGMSG_HOME exported only when start was given one. start asks
+// for the driver's binary by its name, calls no herdr (HERDR_PANE_ID set
+// does not refuse it, D9), and writes no manifest or receipt.
+func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
+	cases := []struct {
+		name, driver, model string
+		perms               config.OrgPermissionsConfig
+		agmsgHome           string
+		inHerdr             bool
+		wantMode            string
+		wantPerm            []string
+	}{
+		{"claude autonomous", DirectorDriverClaude, "opus", config.OrgPermissionsConfig{}, "", false, PermissionModeAutonomous,
+			[]string{"--permission-mode", "bypassPermissions"}},
+		{"codex guarded, with an agmsg home, inside herdr", DirectorDriverCodex, "gpt-5-codex",
+			config.OrgPermissionsConfig{Roles: map[string]string{DirectorRole: PermissionModeGuarded}}, "/agmsg home/it's", true, PermissionModeGuarded, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStartFixture(t, launchCmdInBackground, cmdStartOptions{})
+			f.o.Config.Permissions = tc.perms
+			if tc.inHerdr {
+				f.env[herdrPaneIDEnv] = "pane-9"
+			}
+			p := f.params(tc.driver, tc.model)
+			p.TimeoutMS = 30000
+			p.AgmsgHome = tc.agmsgHome
+			res, err := f.o.StartDirector(p)
+			if err != nil {
+				t.Fatalf("StartDirector: %v", err)
+			}
+			const token = directorTestToken
+			wantPrompt := filepath.Join(f.dir, "prompts", "director_"+token+".md")
+			wantScript := filepath.Join(f.dir, "launch", "director_"+token+".sh")
+			reg := res.Registration
+			if reg.ID != "d1" || reg.State != DirectorStateRunning || !reg.CmdLaunch() || reg.Token != token || reg.Driver != tc.driver ||
+				reg.Model != tc.model || reg.PermissionMode != tc.wantMode || reg.PID <= 0 || reg.StartTime == "" || reg.WorkspaceID != "" || reg.PaneID != "" {
+				t.Fatalf("Registration = %+v, want d1 running with launch cmd, a pid and its start time, no herdr ids", reg)
+			}
+			if res.Launch != DirectorLaunchCmd || res.TerminalName != "director_"+token || res.LaunchScriptPath != wantScript ||
+				res.PromptPath != wantPrompt || res.AgentName != "" || res.WorkspaceLabel != "" || res.TabLabel != "" {
+				t.Fatalf("result = %+v, want launch cmd, director_%s, the script %s, and the prompt %s", res, token, wantScript, wantPrompt)
+			}
+			wantTrail(t, f.store, "attached d1", "launched d1")
+			var attached DirectorEvent
+			if err := json.Unmarshal([]byte(directorFileLines(t, f.store)[0]), &attached); err != nil || attached.Launch != DirectorLaunchCmd ||
+				attached.Token != token || attached.Model != tc.model || attached.PermissionMode != tc.wantMode || attached.Driver != tc.driver {
+				t.Fatalf("attached = %+v (%v), want launch cmd, the token, %s, and %s", attached, err, tc.model, tc.wantMode)
+			}
+			if launched := launchedEvent(t, f.store); launched.PID != reg.PID || launched.StartTime != reg.StartTime {
+				t.Fatalf("launched = %+v, want the registration's pid %d and start time %q", launched, reg.PID, reg.StartTime)
+			}
+			if proc := mustReadProcess(t, reg.PID); proc.State != DirectorProcessAlive || proc.StartTime != reg.StartTime {
+				t.Fatalf("pid %d reads %+v, want alive with the recorded start time", reg.PID, proc)
+			}
+
+			cwd, err := filepath.EvalSymlinks(f.cwd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agmsg := tc.agmsgHome
+			if agmsg == "" {
+				agmsg = "<unset>"
+			}
+			want := []string{"pid=" + strconv.Itoa(reg.PID), "pwd=" + cwd, "token=" + token, "agmsg=" + agmsg}
+			for _, arg := range append(slices.Clone(tc.wantPerm), "--model", tc.model, PromptFilePointer(wantPrompt)) {
+				want = append(want, "arg="+arg)
+			}
+			if got := f.agentMarkerLines(t); !slices.Equal(got, want) {
+				t.Fatalf("the agent recorded\n%q\nwant\n%q", got, want)
+			}
+			if !slices.Equal(f.lookedUp, []string{tc.driver}) {
+				t.Fatalf("the agent lookup was asked for %q, want [%s]", f.lookedUp, tc.driver)
+			}
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %v, want none on the launch_cmd path", f.h.calls)
+			}
+			fi, err := os.Stat(wantScript)
+			if err != nil || fi.Mode().Perm() != 0o700 {
+				t.Fatalf("launch script %s: %v, mode %v, want 0700", wantScript, err, fi.Mode())
+			}
+			script, err := os.ReadFile(wantScript)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(script), "export RALPH_ORG_AGMSG_HOME"); got != (tc.agmsgHome != "") {
+				t.Fatalf("the launch script exports RALPH_ORG_AGMSG_HOME: %v, want %v:\n%s", got, tc.agmsgHome != "", script)
+			}
+			prompt, err := os.ReadFile(wantPrompt)
+			if err != nil || !strings.Contains(string(prompt), "人とはこの端末で話す。") || strings.Contains(string(prompt), "pane") {
+				t.Fatalf("prompt file %s (%v) is not the launch cmd prompt:\n%s", wantPrompt, err, prompt)
+			}
+			if got := dirEntryNames(t, f.dir); !slices.Equal(got, []string{"director.jsonl", "director.lock", "launch", "prompts"}) {
+				t.Fatalf("ledger entries = %v, want director.jsonl, director.lock, launch, and prompts only (no manifest, no receipts)", got)
+			}
+		})
+	}
+}
+
+// AC5: before anything is written, start on the launch_cmd path refuses a
+// launch_cmd that config.Load would refuse (an Org built without it), a
+// driver's agent that is not on PATH, and a ralph executable it cannot find.
+// It writes no director.jsonl, prompt, or launch script, and does not run
+// launch_cmd.
+func TestStartDirector_LaunchCmdRefusesWhatCannotRunTheAgent(t *testing.T) {
+	cases := []struct {
+		name      string
+		launchCmd func(ran string) []string
+		setup     func(f *cmdStartFixture)
+		want      string
+		wantErrIs error
+	}{
+		{"no {script} or {script_sh}", func(ran string) []string { return []string{"sh", "-c", `: > "$1"`, "sh", ran} }, nil,
+			"[org.director].launch_cmd: no element has {script} or {script_sh}", nil},
+		{"an unknown placeholder", func(ran string) []string { return append(launchCmdTouching(ran, 0), "{bogus}") }, nil,
+			"has the unknown placeholder {bogus}", nil},
+		{"the agent is not on PATH", func(ran string) []string { return launchCmdTouching(ran, 0) }, func(f *cmdStartFixture) {
+			f.o.DirectorAgentLookPath = func(file string) (string, error) {
+				return "", &exec.Error{Name: file, Err: exec.ErrNotFound}
+			}
+		}, "the claude agent is not on PATH, so the launch script could not run it", exec.ErrNotFound},
+		{"the ralph executable cannot be found", func(ran string) []string { return launchCmdTouching(ran, 0) }, func(f *cmdStartFixture) {
+			f.o.DirectorRalphExecutable = func() (string, error) { return "", errors.New("no executable") }
+		}, "find the ralph executable the launch script checks in with: no executable", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+			f := newCmdStartFixture(t, tc.launchCmd(ran), cmdStartOptions{})
+			if tc.setup != nil {
+				tc.setup(f)
+			}
+			_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "org: director: start: ") {
+				t.Fatalf("err = %v, want a refusal saying %q", err, tc.want)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("err = %v, want it to wrap %v", err, tc.wantErrIs)
+			}
+			if state := directorFileState(t, f.store); state != "<missing>" {
+				t.Fatalf("director.jsonl = %q, want none written", state)
+			}
+			if got := dirEntryNames(t, f.dir); len(got) != 0 {
+				t.Fatalf("ledger entries = %v, want none", got)
+			}
+			wantNoFile(t, ran, "a refused start ran launch_cmd")
+		})
+	}
+}
+
+// AC5: the refusals of a herdr start hold on the launch_cmd path too, in
+// their order and with nothing written: launch_cmd does not run, and no
+// herdr is called. (HERDR_PANE_ID is the exception, D9: see
+// TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn.)
+func TestStartDirector_LaunchCmdKeepsTheOtherRefusals(t *testing.T) {
+	cases := []struct {
+		name      string
+		setup     func(t *testing.T, f *cmdStartFixture, p *DirectorStartParams)
+		wantErrIs error
+	}{
+		{"enabled is false", func(_ *testing.T, f *cmdStartFixture, _ *DirectorStartParams) { f.o.Config.Director.Enabled = false }, ErrDirectorDisabled},
+		{"codex autonomous", func(_ *testing.T, f *cmdStartFixture, p *DirectorStartParams) {
+			p.Driver, f.o.Config.Permissions.Default = DirectorDriverCodex, PermissionModeAutonomous
+		}, ErrDirectorCodexWorkspaceWrite},
+		{"codex edits with codex_verified", func(_ *testing.T, f *cmdStartFixture, p *DirectorStartParams) {
+			p.Driver, f.o.Config.Permissions.Default, f.o.Config.Permissions.CodexVerified = DirectorDriverCodex, PermissionModeEdits, true
+		}, ErrDirectorCodexWorkspaceWrite},
+		{"a promoted session is attached", func(t *testing.T, f *cmdStartFixture, _ *DirectorStartParams) {
+			mustAttachDirector(t, f.store, DirectorAttach{Driver: DirectorDriverClaude, User: "u", Cwd: "/w"})
+		}, ErrDirectorAttached},
+		{"a launch cmd registration is still starting", func(t *testing.T, f *cmdStartFixture, _ *DirectorStartParams) {
+			h := testHeadlessAttach()
+			h.Launch = DirectorLaunchCmd
+			if _, err := f.store.AttachHeadless(h); err != nil {
+				t.Fatalf("AttachHeadless: %v", err)
+			}
+		}, ErrDirectorAttached},
+		{"the watch gate", func(_ *testing.T, f *cmdStartFixture, _ *DirectorStartParams) {
+			f.o.WatchGate = func() error {
+				return &WatchGateError{StateDir: f.dir, Liveness: WatchLiveness{State: WatchLivenessNotRunning}}
+			}
+		}, ErrNoRunningWatch},
+		{"director.jsonl unreadable", func(t *testing.T, f *cmdStartFixture, _ *DirectorStartParams) {
+			if err := os.Mkdir(f.store.Path(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, syscall.EISDIR},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+			f := newCmdStartFixture(t, launchCmdTouching(ran, 0), cmdStartOptions{})
+			f.store.token = func() (string, error) { return "ba0000000000", nil }
+			p := f.params(DirectorDriverClaude, "opus")
+			tc.setup(t, f, &p)
+			before := directorFileState(t, f.store)
+			_, err := f.o.StartDirector(p)
+			if !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("err = %v, want it to wrap %v", err, tc.wantErrIs)
+			}
+			if after := directorFileState(t, f.store); after != before {
+				t.Fatalf("director.jsonl changed from %q to %q", before, after)
+			}
+			for _, sub := range []string{"prompts", "launch"} {
+				wantNoFile(t, filepath.Join(f.dir, sub), "a refusal wrote the "+sub+" dir")
+			}
+			wantNoFile(t, ran, "a refused start ran launch_cmd")
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %v, want none", f.h.calls)
+			}
+		})
+	}
+}
+
+// AC4: a launch_cmd that exits non-zero, one that does not return within
+// DriverCallTimeout, and one that returns but whose terminal never runs the
+// script (no check-in within TimeoutMS) each end start with exit 1 and the
+// registration recorded stopped (detached first, as it is current), with
+// nothing to stop: no check-in came. The error is a
+// *DirectorLaunchCmdStoppedError that wraps the cause. The launch script stays
+// on disk, and a terminal that runs it after that (here the test, by hand)
+// is refused at its check-in, so the agent never runs. The ledger is free
+// for the next start.
+func TestStartDirector_ALaunchCmdThatFailsBeforeACheckInIsRecordedStopped(t *testing.T) {
+	cases := []struct {
+		name      string
+		launchCmd []string
+		setup     func(f *cmdStartFixture, p *DirectorStartParams)
+		want      string
+		wantErrIs error
+	}{
+		{"launch_cmd exits non-zero", []string{"sh", "-c", "echo no terminal >&2; exit 3", "sh", "{script}"}, nil,
+			"launch_cmd sh failed: exit status 3; its output ended with: no terminal", nil},
+		{"launch_cmd does not return", []string{"sh", "-c", "exec sleep 30", "sh", "{script}"},
+			func(f *cmdStartFixture, _ *DirectorStartParams) { f.o.DriverCallTimeout = 300 * time.Millisecond },
+			"launch_cmd sh did not return in time and was killed", nil},
+		{"no check-in within the timeout", []string{"sh", "-c", ":", "sh", "{script}"},
+			func(_ *cmdStartFixture, p *DirectorStartParams) { p.TimeoutMS = 300 },
+			"did not check in within 300ms (--timeout-ms 300): no terminal ran it, or its check-in was refused or failed", ErrDirectorNoCheckIn},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStartFixture(t, tc.launchCmd, cmdStartOptions{})
+			f.store.token = func() (string, error) { return directorTestToken, nil }
+			p := f.params(DirectorDriverClaude, "opus")
+			p.TimeoutMS = 30000
+			if tc.setup != nil {
+				tc.setup(f, &p)
+			}
+			_, err := f.o.StartDirector(p)
+			var stopped *DirectorLaunchCmdStoppedError
+			if !errors.As(err, &stopped) || stopped.ID != "d1" || stopped.PID != 0 || stopped.Signalled ||
+				stopped.TerminalName != "director_"+directorTestToken || !strings.Contains(err.Error(), tc.want) ||
+				!strings.HasSuffix(err.Error(), "; d1 is recorded stopped") || !strings.HasPrefix(err.Error(), "org: director: start d1: ") {
+				t.Fatalf("err = %#v (%v), want a *DirectorLaunchCmdStoppedError saying %q and that d1 is recorded stopped", err, err, tc.want)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("err = %v, want it to wrap %v", err, tc.wantErrIs)
+			}
+			wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+			wantNoDirectorOpen(t, f.store)
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %v, want none", f.h.calls)
+			}
+
+			script := DirectorLaunchScriptPath(f.dir, directorTestToken)
+			cmd := exec.Command(script)
+			var exitErr *exec.ExitError
+			if out, err := cmd.CombinedOutput(); !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 ||
+				!strings.Contains(string(out), "is already recorded stopped") {
+				t.Fatalf("the launch script run late = %v (%s), want exit 1 with the refused check-in", err, out)
+			}
+			wantNoFile(t, f.agentMarker, "the agent ran after a refused check-in")
+			wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+
+			f.store.token = func() (string, error) { return "ba0000000000", nil }
+			f.o.Config.Director.LaunchCmd = nil
+			if next := f.mustStart(t, DirectorDriverClaude, "opus"); next.Registration.ID != "d2" {
+				t.Fatalf("the next start registered %s, want d2", next.Registration.ID)
+			}
+		})
+	}
+}
+
+// AC4: an attach --replace that lands while start waits for the check-in
+// makes start clean up its own launch: it records it stopped (not detached,
+// as d2 is current now) and fails with ErrDirectorReplacedDuringStart; d2
+// stays current.
+func TestStartDirector_AReplaceWhileWaitingForTheCheckInEndsItsOwnLaunch(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+	f := newCmdStartFixture(t, launchCmdTouching(ran, 0), cmdStartOptions{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(ran); err == nil {
+				if _, _, err := f.store.Attach(DirectorAttach{Driver: DirectorDriverClaude, Replace: true, User: "carol", Cwd: "/c"}); err != nil {
+					t.Errorf("Attach --replace: %v", err)
+				}
+				return
+			}
+		}
+		t.Error("launch_cmd did not run within 20s")
+	}()
+	p := f.params(DirectorDriverClaude, "opus")
+	p.TimeoutMS = 20000
+	_, err := f.o.StartDirector(p)
+	<-done
+	var stopped *DirectorLaunchCmdStoppedError
+	if !errors.As(err, &stopped) || !errors.Is(err, ErrDirectorReplacedDuringStart) || !strings.Contains(err.Error(), "the current registration is d2") ||
+		!strings.HasSuffix(err.Error(), "; d1 is recorded stopped") {
+		t.Fatalf("err = %v, want ErrDirectorReplacedDuringStart naming d2 and a cleanup that recorded d1 stopped", err)
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "attached d2", "stopped d1")
+	if res := mustReadDirector(t, f.store); currentDirectorID(res) != "d2" || len(res.OpenHeadless) != 0 {
+		t.Fatalf("current %q, open %q, want d2 current and nothing open", currentDirectorID(res), openHeadlessSummary(res))
+	}
+}
+
+// AC4 and D6: a check-in that lands after the cleanup read the registration
+// (no pid then) and before it records the stop makes that record refuse
+// (ErrDirectorCheckedInDuringStop). The cleanup reads once more, finds the
+// pid, sends SIGTERM to that process, which the test started (identity by
+// its start time), sees it end, and then records the stop.
+func TestStartDirector_ACheckInDuringTheCleanupIsReadAgainAndStopped(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+	f := newCmdStartFixture(t, launchCmdTouching(ran, 1), cmdStartOptions{})
+	agent := startTestProcess(t, sleepPath(t), "600")
+	hooks := 0
+	f.store.beforeMarkStopped = func() {
+		hooks++
+		if hooks > 1 {
+			return
+		}
+		proc := mustReadProcess(t, agent.pid())
+		if err := f.store.MarkCmdLaunched(DirectorCmdCheckIn{
+			ID: "d1", Token: directorTestToken, PID: agent.pid(), StartTime: proc.StartTime, Who: testDirectorWho,
+		}); err != nil {
+			t.Errorf("the check-in during the cleanup: %v", err)
+		}
+	}
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	var stopped *DirectorLaunchCmdStoppedError
+	if !errors.As(err, &stopped) || !stopped.Signalled || stopped.PID != agent.pid() ||
+		!strings.Contains(err.Error(), fmt.Sprintf("start sent SIGTERM to the launch script or agent that checked in (pid %d), which ended, and d1 is recorded stopped", agent.pid())) {
+		t.Fatalf("err = %v, want a cleanup that read the check-in again, stopped pid %d, and recorded d1 stopped", err, agent.pid())
+	}
+	if hooks != 2 {
+		t.Fatalf("the stop was recorded after %d tries, want 2 (refused once, then recorded)", hooks)
+	}
+	if !agent.signalledBy(t, syscall.SIGTERM) {
+		t.Fatalf("the process that checked in was not ended by SIGTERM: %v", agent.cmd.ProcessState)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+	wantNoDirectorOpen(t, f.store)
+}
+
+// AC4 and D6: a launch_cmd that fails after its terminal ran the script,
+// while the check-in has recorded the pid of the script's shell and has not
+// yet let it exec the agent (the helper pauses there): the cleanup reads
+// that pid alive with the recorded start time, sends it SIGTERM, sees it
+// end, and records the stop. Released then with success, the check-in's
+// parent is gone, so the agent never runs.
+func TestStartDirector_TheCleanupStopsALaunchScriptPausedAfterItsCheckIn(t *testing.T) {
+	f := newCmdStartFixture(t, nil, cmdStartOptions{pause: true})
+	f.o.Config.Director.LaunchCmd = launchCmdFailingOnceExists(filepath.Join(f.pause, "checked-in"))
+	f.o.DriverCallTimeout = 30 * time.Second
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	var stopped *DirectorLaunchCmdStoppedError
+	if !errors.As(err, &stopped) || !stopped.Signalled || stopped.PID <= 0 || !strings.Contains(err.Error(), "launch_cmd sh failed: exit status 1") ||
+		!strings.Contains(err.Error(), "start sent SIGTERM to the launch script or agent that checked in") {
+		t.Fatalf("err = %v, want launch_cmd's failure and a cleanup that sent SIGTERM to the script", err)
+	}
+	launched := launchedEvent(t, f.store)
+	if launched.PID != stopped.PID {
+		t.Fatalf("the cleanup stopped pid %d, want the checked-in %d", stopped.PID, launched.PID)
+	}
+	if proc := mustReadProcess(t, launched.PID); proc.State == DirectorProcessAlive && proc.StartTime == launched.StartTime {
+		t.Fatalf("the script's shell, pid %d, reads %+v after the cleanup, want it ended", launched.PID, proc)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+
+	f.release(t, 0)
+	time.Sleep(300 * time.Millisecond)
+	wantNoFile(t, f.agentMarker, "the agent ran although its launch script was stopped before its exec")
+}
+
+// AC4 and D6: when the cleanup cannot confirm that the process that checked
+// in ended, it records no stopped. It writes detached only (the registration
+// was current), leaving it open, and returns a *DirectorCleanupError of a
+// launch cmd that names the stop to run and no herdr. Either the process
+// ignores SIGTERM and outlives DirectorStopWait, or ps cannot be read, in
+// which case nothing is sent at all.
+func TestStartDirector_ACleanupThatCannotConfirmTheEndLeavesItDetachedOnly(t *testing.T) {
+	cases := []struct {
+		name       string
+		ignoreTerm bool
+		readerErr  bool
+		want       string
+	}{
+		{"the agent ignores SIGTERM", true, false, "did not end within 300ms of its SIGTERM"},
+		{"ps cannot be read", false, true, "ps is broken"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStartFixture(t, nil, cmdStartOptions{ignoreTerm: tc.ignoreTerm})
+			f.o.Config.Director.LaunchCmd = launchCmdFailingOnceExists(f.agentMarker)
+			f.o.DriverCallTimeout = 30 * time.Second
+			f.o.DirectorStopWait = 300 * time.Millisecond
+			if tc.readerErr {
+				f.o.DirectorProcessReader = func(context.Context, int) (DirectorProcess, error) {
+					return DirectorProcess{}, errors.New("ps is broken")
+				}
+			}
+			_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+			var ce *DirectorCleanupError
+			if !errors.As(err, &ce) || ce.Verb != "start" || ce.ID != "d1" || ce.Launch != DirectorLaunchCmd || !ce.Detached ||
+				ce.PID <= 0 || ce.TerminalName != "director_"+directorTestToken || ce.StopCommand != "ralph org director stop --id d1" ||
+				len(ce.HerdrCommands) != 0 || ce.WorkspaceLabel != "" || ce.TabLabel != "" {
+				t.Fatalf("err = %#v, want a *DirectorCleanupError of a launch cmd, detached only, with the stop command", err)
+			}
+			for _, want := range []string{"launch_cmd sh failed: exit status 1", "its cleanup did not finish: d1 is not recorded stopped, since the end of the process that checked in is not confirmed",
+				tc.want, "d1 was recorded detached only", "record the stop with ralph org director stop --id d1"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to say %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "herdr") || strings.Contains(err.Error(), "--force") {
+				t.Errorf("err = %v names herdr or --force for a launch cmd", err)
+			}
+			wantTrail(t, f.store, "attached d1", "launched d1", "detached d1")
+			res := mustReadDirector(t, f.store)
+			if res.Current != nil || len(res.OpenHeadless) != 1 || res.OpenHeadless[0].ID != "d1" || res.OpenHeadless[0].PID != ce.PID {
+				t.Fatalf("current %+v, open %q, want none current and d1 open with pid %d", res.Current, openHeadlessSummary(res), ce.PID)
+			}
+			if proc := mustReadProcess(t, ce.PID); proc.State != DirectorProcessAlive || proc.StartTime != res.OpenHeadless[0].StartTime {
+				t.Fatalf("pid %d reads %+v, want the agent still running", ce.PID, proc)
+			}
+		})
+	}
+}
+
+// The text of a *DirectorLaunchCmdStoppedError says what the cleanup did to
+// the pid that checked in, and unwraps to the cause.
+func TestDirectorLaunchCmdStoppedError_Text(t *testing.T) {
+	cause := fmt.Errorf("org: director: start d4: %w", ErrDirectorNoCheckIn)
+	for _, tc := range []struct {
+		e    DirectorLaunchCmdStoppedError
+		want string
+	}{
+		{DirectorLaunchCmdStoppedError{ID: "d4", Err: cause}, "; d4 is recorded stopped"},
+		{DirectorLaunchCmdStoppedError{ID: "d4", PID: 77, Err: cause}, "; the launch script or agent that checked in (pid 77) had already ended, and d4 is recorded stopped"},
+		{DirectorLaunchCmdStoppedError{ID: "d4", PID: 77, Signalled: true, Err: cause},
+			"; start sent SIGTERM to the launch script or agent that checked in (pid 77), which ended, and d4 is recorded stopped"},
+	} {
+		if got := tc.e.Error(); got != cause.Error()+tc.want {
+			t.Errorf("Error() = %q, want %q", got, cause.Error()+tc.want)
+		}
+		if !errors.Is(&tc.e, ErrDirectorNoCheckIn) {
+			t.Errorf("%+v does not unwrap to its cause", tc.e)
+		}
 	}
 }

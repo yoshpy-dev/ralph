@@ -181,20 +181,35 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 	return cmd
 }
 
+// orgDirectorAgentLookPath and orgDirectorRalphExecutable are the
+// (*org.Org).DirectorAgentLookPath and DirectorRalphExecutable of director
+// start with [org.director].launch_cmd: nil means exec.LookPath and
+// os.Executable. They are variables so the tests can give a fake agent and
+// a check-in that runs the test binary; TestMain points both at a failure,
+// since PATH may hold a real claude or codex and os.Executable is the test
+// binary.
+var (
+	orgDirectorAgentLookPath   func(file string) (string, error)
+	orgDirectorRalphExecutable func() (string, error)
+)
+
 // startDirector is `ralph org director start` on rt (plan
 // 2026-10-15-org-director-start, D5 and D6): it loads the config by
 // withMainWorktreeDirectorStartConfig's rule, refuses a switched-off director,
 // a relative [org].agmsg_home of a --config (checkStartAgmsgHome, which also
-// warns when RALPH_ORG_AGMSG_HOME is set), and a model [org.roles].director
-// does not allow (resolveModelOrWarn's default is one it allows), wires
-// start's watch gate, and runs (*org.Org).StartDirector in the ledger's main
-// worktree root, else in the current directory, with configPath, which
-// StartDirector makes absolute and gives as --config to the ralph org
-// commands the director's prompt has it run (not to the prompt's stop
-// command, which the human runs). A refusal or failure is returned (exit 1)
-// in the words of startError; on success it prints the registration, the
-// pane to talk to the director in, and the stop command, which, like the
-// prompt's, has no --config (stop reads no ralph.toml).
+// warns when RALPH_ORG_AGMSG_HOME is set and start uses herdr), and a model
+// [org.roles].director does not allow (resolveModelOrWarn's default is one
+// it allows), wires start's watch gate, and runs (*org.Org).StartDirector in
+// the ledger's main worktree root, else in the current directory, with
+// configPath, which StartDirector makes absolute and gives as --config to the
+// ralph org commands the director's prompt has it run (not to the prompt's
+// stop command, which the human runs). With [org.director].launch_cmd set
+// (plan 2026-10-16-org-director-launch-cmd), it also gives StartDirector
+// RALPH_ORG_AGMSG_HOME as set here, which the launch script exports. A
+// refusal or failure is returned (exit 1) in the words of startError; on
+// success it prints the registration, where to talk to the director (the
+// herdr pane, or the terminal launch_cmd opened), and the stop command,
+// which, like the prompt's, has no --config (stop reads no ralph.toml).
 func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driverName, model string, timeoutMS int) error {
 	cfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -208,7 +223,8 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 			"and leaves nothing to a director, and no director is started; to use one, set [org.director].enabled = true there",
 			orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource))
 	}
-	if err := rt.checkStartAgmsgHome(cmd, configPath, cfg.AgmsgHome); err != nil {
+	cmdLaunch := len(cfg.Director.LaunchCmd) > 0
+	if err := rt.checkStartAgmsgHome(cmd, configPath, cfg.AgmsgHome, cmdLaunch); err != nil {
 		return err
 	}
 	resolvedModel, err := resolveModelOrWarn(cfg, driverName, org.DirectorRole, model, cmd.ErrOrStderr())
@@ -227,19 +243,31 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 		}
 	}
 	o := newOrgDirectorHerdrRuntime(cfg)
+	o.DirectorAgentLookPath, o.DirectorRalphExecutable = orgDirectorAgentLookPath, orgDirectorRalphExecutable
 	wireOrgStartWatchGate(cmd, o, rt.stateDir, rt.stateDirSource, configPath, "director start", "director")
+	agmsgHome := ""
+	if cmdLaunch {
+		agmsgHome = os.Getenv(orgAgmsgHomeEnv)
+	}
 	res, err := o.StartDirector(org.DirectorStartParams{
-		Store: rt.store, Driver: driverName, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS, Who: orgDirectorCaller(),
+		Store: rt.store, Driver: driverName, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
+		AgmsgHome: agmsgHome, Who: orgDirectorCaller(),
 	})
 	if err != nil {
 		return rt.startError(err)
 	}
 	reg := res.Registration
 	out := cmd.OutOrStdout()
-	_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, pane=%s, workspace=%s)\n", inboxField(reg.ID), inboxField(reg.Driver),
-		inboxField(reg.Model), inboxField(reg.PermissionMode), inboxField(reg.PaneID), inboxField(reg.WorkspaceID))
-	_, _ = fmt.Fprintf(out, "talk to the director in herdr: pane %s, in the tab %s of the workspace labelled %s\n",
-		inboxField(reg.PaneID), res.TabLabel, res.WorkspaceLabel)
+	if res.Launch == org.DirectorLaunchCmd {
+		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, launch=%s, name=%s, pid=%d)\n", inboxField(reg.ID), inboxField(reg.Driver),
+			inboxField(reg.Model), inboxField(reg.PermissionMode), org.DirectorLaunchCmd, res.TerminalName, reg.PID)
+		_, _ = fmt.Fprintf(out, "talk to the director in the terminal that [org.director].launch_cmd opened (name %s)\n", res.TerminalName)
+	} else {
+		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, pane=%s, workspace=%s)\n", inboxField(reg.ID), inboxField(reg.Driver),
+			inboxField(reg.Model), inboxField(reg.PermissionMode), inboxField(reg.PaneID), inboxField(reg.WorkspaceID))
+		_, _ = fmt.Fprintf(out, "talk to the director in herdr: pane %s, in the tab %s of the workspace labelled %s\n",
+			inboxField(reg.PaneID), res.TabLabel, res.WorkspaceLabel)
+	}
 	_, _ = fmt.Fprintf(out, "stop it with: %s\n", rt.command("ralph org director stop --id "+inboxField(reg.ID)))
 	return nil
 }
@@ -258,17 +286,21 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 // directories, so it also refuses in the main worktree root and on a ledger
 // with no main worktree, where they are the same (plan D13 chose the simple
 // rule). Without --config both read the main worktree root's ralph.toml and
-// resolve it from that root, so nothing is refused. When
-// RALPH_ORG_AGMSG_HOME is set here, it writes one warning line on stderr and
-// goes on: the director's pane does not get the variable.
-func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string) error {
+// resolve it from that root, so nothing is refused. The refusal holds with
+// [org.director].launch_cmd too (cmdLaunch; plan
+// 2026-10-16-org-director-launch-cmd, D10: one rule for both). When
+// RALPH_ORG_AGMSG_HOME is set here and start uses herdr, it writes one
+// warning line on stderr and goes on: the director's pane does not get the
+// variable. With launch_cmd it warns about nothing, since the launch script
+// exports the variable as set here (D3).
+func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string, cmdLaunch bool) error {
 	if cmd.Flags().Changed("config") && configPath != "" && agmsgHomeIsRelative(cfgAgmsgHome) {
 		return fmt.Errorf("org: director start: [org].agmsg_home %q in %s is a relative path: the director and the watch may resolve it from different directories "+
 			"and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it "+
 			"from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)",
 			cfgAgmsgHome, orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource))
 	}
-	if os.Getenv(orgAgmsgHomeEnv) != "" {
+	if !cmdLaunch && os.Getenv(orgAgmsgHomeEnv) != "" {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: director start: %s is set here, but the director's herdr pane has the herdr server's environment, "+
 			"so the director does not get it from here; [org].agmsg_home in the ralph.toml the director reads (the --config file, when given) reaches it\n", orgAgmsgHomeEnv)
 	}
@@ -285,26 +317,52 @@ func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath
 // closed, the permission mode, a codex director in autonomous or edits, the
 // watch gate) already says what happened
 // and is returned as it is.
+//
+// With [org.director].launch_cmd (plan 2026-10-16-org-director-launch-cmd,
+// D6) ralph cannot close the terminal launch_cmd may have opened, so a
+// cleanup that recorded the stop (*org.DirectorLaunchCmdStoppedError) also
+// says that the terminal is left for the human to close and that its launch
+// script, whose check-in is now refused, ends without the agent; and a
+// cleanup that did not finish (a *org.DirectorCleanupError of a launch cmd,
+// whose text names no herdr pane or command) also says to close the
+// terminal once the stop it names is recorded.
 func (rt *orgDirectorRuntime) startError(err error) error {
 	var attached *org.DirectorAttachedError
 	if errors.As(err, &attached) {
 		return rt.startAttachedError(attached)
 	}
-	return rt.notRestoredError(rt.withStateDirInStopCommand(err))
+	var stopped *org.DirectorLaunchCmdStoppedError
+	if errors.As(err, &stopped) {
+		return fmt.Errorf("%w; the terminal that [org.director].launch_cmd may have opened (name %s) is left open for you to close, "+
+			"and a launch script that checks in from it now is refused and ends without starting the agent", err, stopped.TerminalName)
+	}
+	err = rt.withStateDirInStopCommand(err)
+	var cleanup *org.DirectorCleanupError
+	if errors.As(err, &cleanup) && cleanup.Launch == org.DirectorLaunchCmd {
+		err = fmt.Errorf("%w; the terminal that [org.director].launch_cmd may have opened (name %s) is left open: close it once the stop is recorded",
+			err, cleanup.TerminalName)
+	}
+	return rt.notRestoredError(err)
 }
 
 // startAttachedError is start's refusal e while a registration is current,
-// followed by the way to end it: `ralph org director stop --id` from outside
-// herdr for a headless one, else attach's detach commands for a promoted
-// session. start has no --replace (plan 2026-10-15-org-director-start,
-// Non-goals). e.Current was read again after the refusal; when it is nil
-// (none is current by then, or the read failed), status reads it.
+// followed by the way to end it: `ralph org director stop --id` for a
+// headless one, run from outside herdr for a launch herdr and from a
+// terminal other than the director's for a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd), else attach's detach commands for a
+// promoted session. start has no --replace (plan
+// 2026-10-15-org-director-start, Non-goals). e.Current was read again after
+// the refusal; when it is nil (none is current by then, or the read failed),
+// status reads it.
 func (rt *orgDirectorRuntime) startAttachedError(e *org.DirectorAttachedError) error {
 	cur := e.Current
 	switch {
 	case cur == nil:
 		return fmt.Errorf("%w: read the current registration with %s, and run start again once none is attached (start has no --replace)",
 			e, rt.command("ralph org director status"))
+	case cur.CmdLaunch():
+		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, then run start again (start has no --replace)",
+			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)))
 	case cur.Headless():
 		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, then run start again (start has no --replace)",
 			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)))

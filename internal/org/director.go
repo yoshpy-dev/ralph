@@ -347,6 +347,10 @@ type DirectorStore struct {
 	// token is a test-only seam for AttachHeadless's launch token; nil means
 	// newDirectorToken.
 	token func() (string, error)
+	// beforeMarkStopped is a test-only seam that markStopped runs before it
+	// takes the lock, so a test can land a check-in between a caller's read
+	// and its record of the stop; nil means none.
+	beforeMarkStopped func()
 }
 
 // DirectorPathIn returns the director.jsonl path within an already-resolved
