@@ -1220,3 +1220,760 @@ ok  	github.com/yoshpy-dev/ralph/internal/cli	219.100s
 ```
 
 The conflict in `docs/tech-debt/README.md` is a docs-only merge for /pr; the shell suites were not run on the merged tree.
+
+## Cycle 2
+
+- Date: 2026-10-15 (JST 21:38-22:20; the UTC timestamps in the output read 2026-10-15T12:xx)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start, HEAD 5dce71de (origin/main f21df66c merged in at 1cdddbbb; cycle 1 ran at b6c86188). Go changed since cycle 1 in 3 commits: 3243c499 and a539a765 (the --config carried into the director prompt), 4ef33195 (tests for cycle 1's survivors D4, E1, E12, E13, P2)
+- Environment: macOS arm64, go1.26.0 (default) and go1.25.8 (`GOTOOLCHAIN=go1.25.8`), git 2.49.0. No real herdr ran in this cycle. Load average 4-17 during the runs (other sessions)
+- Redaction: as in cycle 1 (`$SCRATCH`, `~`, `$TMPDIR/`, `<run>`). Cycle 2's scratch files are under `$SCRATCH/tds2`. The wrapper's full log `docs/evidence/verify-2026-10-15-123924.log` and the raw outputs appended to `docs/evidence/test-2026-10-15-org-director-start.log` (from the line `===== /test cycle 2`) are gitignored and not committed
+- Trailing blanks at the ends of output lines were stripped; nothing else in the output was changed apart from the redaction and the field-line filter named in C2-3.2
+- Nothing in the worktree was edited for the tests. Mutants and probe tests lived in `$SCRATCH/tds2` and reached the build only through `go test -overlay`
+
+### C2-1 ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed; templates/base/ralph.toml widened it to full)
+
+Command: `PATH=$SCRATCH/tds2/canary/bin:$PATH ./scripts/run-test.sh > runtest.out 2>&1` (rc 0, 701 s wall, 4,654 lines). Filtered with the same command as section 1 (168 lines). Against section 1's 168 lines, with the line numbers, the `N.NNs` timings, and the timestamp dropped, `diff` gives:
+
+```text
+73c73
+< plan-visual tests: 103 passed, 0 failed, 103 total
+---
+> plan-visual tests: 243 passed, 0 failed, 243 total
+168c168
+< Evidence saved to: docs/evidence/verify-2026-10-15-092359.log
+---
+> Evidence saved to: docs/evidence/verify-2026-10-15-123924.log
+```
+
+PR #230 (merged in at 1cdddbbb) added the 140 plan-visual cases. 41 suites, 41 "OK", every "FAIL:" line is 0 (25 of them, no other FAIL line). 4,283 lines start with PASS after leading blanks (cycle 1: 4,143; the 140 plan-visual cases are the difference). The one real SKIP is tests/test-secret-scan-branch.sh's (git 2.49.0). The Go part:
+
+```text
+4637:==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+4641:?   	github.com/yoshpy-dev/ralph	[no test files]
+4642:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4643:ok  	github.com/yoshpy-dev/ralph/internal/cli	213.707s
+4644:ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+4645:ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+4646:ok  	github.com/yoshpy-dev/ralph/internal/org	82.725s
+4647:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	0.895s
+4648:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4649:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4650:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4652:==> All verifiers passed.
+4654:Evidence saved to: docs/evidence/verify-2026-10-15-123924.log
+```
+
+The five `(cached)` packages ran with `-count=1` in C2-2.1 on both toolchains.
+
+### C2-2 Go tests
+
+Every Go run below had `$SCRATCH/tds2/canary/bin` first on PATH (C2-2.3).
+
+#### C2-2.1 Per package, `-count=1 -v`
+
+Counts are from the `--- PASS/FAIL/SKIP` lines (top-level tests, then subtests).
+
+go1.25.8 (`GOTOOLCHAIN=go1.25.8 go test -count=1 -v -coverprofile=cover125.out ./internal/...`, rc 0, 250 s wall):
+
+```text
+internal/cli	ok	245.612s	top 700 (pass 700 fail 0 skip 0)	sub 641 (pass 641 fail 0 skip 0)
+internal/config	ok	4.147s	top 37 (pass 37 fail 0 skip 0)	sub 34 (pass 34 fail 0 skip 0)
+internal/insights	ok	4.080s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org	ok	95.866s	top 804 (pass 803 fail 0 skip 1)	sub 1692 (pass 1692 fail 0 skip 0)
+internal/org/driver	ok	6.767s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	5.262s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	5.665s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	8.597s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+go1.26.0, org and cli with the race detector (`go test -race -count=1 -v ./internal/org/ ./internal/cli/`, rc 0, 249 s wall, 0 `DATA RACE` lines):
+
+```text
+internal/org	ok	102.012s	top 804 (pass 803 fail 0 skip 1)	sub 1692 (pass 1692 fail 0 skip 0)
+internal/cli	ok	241.835s	top 700 (pass 700 fail 0 skip 0)	sub 641 (pass 641 fail 0 skip 0)
+```
+
+go1.26.0, the other six packages (`go test -count=1 -v ./internal/config/ ./internal/insights/ ./internal/org/driver/ ./internal/org/protocol/ ./internal/scaffold/ ./internal/upgrade/`, rc 0):
+
+```text
+internal/config	ok	0.643s	top 37 (pass 37 fail 0 skip 0)	sub 34 (pass 34 fail 0 skip 0)
+internal/insights	ok	1.426s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org/driver	ok	2.061s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	2.115s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	0.957s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	3.022s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+The sorted `<package> <name> <result>` lines of the go1.25.8 run (4,318) and of the two go1.26.0 runs together (4,318) are identical. Against cycle 1's 4,301 lines (section 2.1), 17 lines were added and none removed:
+
+```text
+TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus PASS
+TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus/with_--state-dir PASS
+TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus/without_--state-dir PASS
+TestPlanDigest_MatchesScript/archive/2026-10-15-plan-visual-easy.md PASS
+TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig PASS
+TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig/with_--config PASS
+TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig/without_--config PASS
+TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders/a_config_path_that_holds_a_placeholder PASS
+TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders/a_relative_config_path PASS
+TestStartDirector_AFailedCreatesOutputIsNotAnID PASS
+TestStartDirector_AFailedCreatesOutputIsNotAnID/tab_create PASS
+TestStartDirector_AFailedCreatesOutputIsNotAnID/workspace_create PASS
+TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr PASS
+TestStartDirector_CarriesTheConfigIntoThePrompt PASS
+TestStartDirector_CarriesTheConfigIntoThePrompt/a_relative_config_path PASS
+TestStartDirector_CarriesTheConfigIntoThePrompt/no_config_path PASS
+TestStartDirector_RefusesBeforeWritingOrCallingHerdr/director.jsonl_unreadable PASS
+```
+
+16 of them are the tests cycle 2 added (5 top-level, 11 subtests: org 4 and 9, cli 1 and 2). `TestPlanDigest_MatchesScript/archive/2026-10-15-plan-visual-easy.md` is the plan PR #230 archived, which the merge brought in. Removed lines: none. The three SKIPs are the same as cycle 1's.
+
+Earlier flaky tests (go1.25.8, then go1.26.0 with -race):
+
+```text
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (1.54s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.31s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.51s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.62s)
+--- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.61s)
+--- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.89s)
+--- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.17s)
+--- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (2.76s)
+```
+
+#### C2-2.2 Race detector (go1.26.0)
+
+The org and cli run above, rc 0, 249 s wall (the two packages ran in parallel), 0 `DATA RACE` lines:
+
+```text
+ok  	github.com/yoshpy-dev/ralph/internal/org	102.012s
+ok  	github.com/yoshpy-dev/ralph/internal/cli	241.835s
+```
+
+#### C2-2.3 AC13: no real herdr or osascript, nothing in the repo's ledger
+
+- `$SCRATCH/tds2/canary/bin/{herdr,osascript}` log their argv to `$SCRATCH/tds2/canary/calls.log` and exit 97 (unlike cycle 1's canary, the herdr one has no `--version` pass-through). They were first on PATH for run-test.sh, the three Go runs above, every mutation run, and the probe tests. `calls.log` had 0 lines after all of them. Typed by hand afterwards from the same PATH, both log and exit 97:
+
+```text
+$ PATH=$SCRATCH/tds2/canary/bin:$PATH sh -c 'herdr --version; echo "herdr rc=$?"; osascript -e 1; echo "osascript rc=$?"'
+herdr rc=97
+osascript rc=97
+$ cat calls.log
+1792069323 herdr --version
+1792069324 osascript -e 1
+```
+
+- After the runs: `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` and `.../.claude/worktrees/org-director-start/.harness/state/org` do not exist; `find ~/MyDev/github.com/yoshpy-dev/ralph -name director.jsonl` finds none
+
+#### C2-2.4 Coverage (go1.25.8, each package's own tests)
+
+From the go1.25.8 run (`go tool cover -func` total 91.2%):
+
+```text
+ok  	github.com/yoshpy-dev/ralph/internal/cli	245.612s	coverage: 87.8% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/config	4.147s	coverage: 93.3% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/insights	4.080s	coverage: 86.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org	95.866s	coverage: 94.6% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	6.767s	coverage: 93.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	5.262s	coverage: 100.0% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	5.665s	coverage: 75.7% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	8.597s	coverage: 91.2% of statements
+```
+
+Statements of the changed files, from `cover125.out` (each block counted once):
+
+```text
+internal/org/director_start.go: 216/231 (93.5%); uncovered blocks (lines): 59-61, 129-131, 137-139, 204-206, 249-251, 322-324, 497-498, 549-551, 552-554, 556-558, 618-620, 647-648, 665-665, 672-673, 674-675
+internal/org/prompts.go: 45/46 (97.8%); uncovered blocks (lines): 169-171
+internal/cli/org_director_headless.go: 95/98 (96.9%); uncovered blocks (lines): 170-172, 182-184, 192-194
+internal/org/director_stop.go: 132/138 (95.7%); uncovered blocks (lines): 169-170, 187-189, 239-240, 243-244, 372-374, 468-468
+```
+
+`director_start.go` 556-558 is the `return` of the `--config` path's `absPath` failure (mutant K15). The other uncovered blocks are cycle 1's (the report's Coverage section), less the two cycle 1's tests now reach: the first `Store.Read` failure (D4) and the failed write of attached (E1); `org_director_headless.go`'s `startAttachedError` with `cur == nil` (P2) is now reached too. `prompts.go` 169-171 is the embedded template's read failure.
+
+### C2-3 HEAD binary against a stub herdr
+
+`GOTOOLCHAIN=go1.25.8 go build -o $SCRATCH/tds2/bin/ralph ./cmd/ralph  # at 5dce71de; bin/ralph version: ralph dev (unknown unknown)`. `$SCRATCH/tds2/live/bin` holds `ralph` (a symlink to that binary), cycle 1's stateful stub `herdr` (section 3, copied unchanged), and an `osascript` that logs and exits 0. The script runs every ralph under `env -i` with that directory, `/usr/bin`, and `/bin` on PATH; the ledger is `<run>/ledger` (`--state-dir`), start's cwd `<run>/cwd` (no ralph.toml), and the rendered lines run with `sh -c` from `<run>/elsewhere/sub`.
+
+#### C2-3.1 Script (`$SCRATCH/tds2/live/probe.sh`)
+
+```bash
+#!/bin/bash
+# /test cycle 2 of org-director-start: HEAD-binary check of the director
+# prompt that `ralph org director start` renders, without and with --config,
+# against the CLI tests' stateful stub herdr. env -i, no real herdr or
+# osascript on PATH, scratch --state-dir; the repo's .harness/state/org is
+# never named. The rendered status and stop lines are run as written with
+# sh -c from a directory other than start's.
+set -u
+T=$SCRATCH/tds2
+B=$T/live/bin
+R=$T/live/run
+rm -rf "$R"
+mkdir -p "$R/home" "$R/herdr" "$R/ledger" "$R/cwd" "$R/elsewhere/sub" "$R/cfg dir"
+L=$R/ledger
+C="$R/cfg dir/it's ralph.toml"
+cat > "$C" <<'EOF'
+[org.director]
+enabled = true
+
+[org.permissions]
+default = "autonomous"
+
+[org.permissions.roles]
+director = "guarded"
+EOF
+: > "$T/live/osascript.log"
+: > "$R/herdr.log"
+cd "$R/cwd" || exit 1
+E=(env -i HOME="$R/home" PATH="$B:/usr/bin:/bin" ORG_HERDR_LOG="$R/herdr.log" ORG_STUB_HERDR_STATE="$R/herdr")
+red() { sed -e "s#$R#<run>#g" -e "s#$HOME#~#g"; }
+step() { printf '\n### %s\n' "$*"; }
+run() { # run [VAR=val ...] -- ralph args...
+  local pre=()
+  while [ "$1" != "--" ]; do pre+=("$1"); shift; done
+  shift
+  printf '$ (cwd %s) %s ralph %s\n' "$(pwd)" "${pre[*]+${pre[*]}}" "$*" | red
+  "${E[@]}" ${pre[@]+"${pre[@]}"} ralph "$@" > "$R/o" 2> "$R/e"
+  local rc=$?
+  sed 's/^/  out: /' "$R/o" | red
+  sed 's/^/  err: /' "$R/e" | red
+  echo "  rc=$rc"
+}
+sh_line() { # sh_line <line> [dir]: run a line copied from the prompt with sh -c, from $R/elsewhere/sub (or dir)
+  local d=${2:-$R/elsewhere/sub}
+  printf '$ (cwd %s) sh -c %s\n' "$d" "$1" | red
+  (cd "$d" && "${E[@]}" sh -c "$1") > "$R/o" 2> "$R/e"
+  local rc=$?
+  sed 's/^/  out: /' "$R/o" | red
+  sed 's/^/  err: /' "$R/e" | red
+  echo "  rc=$rc"
+}
+latest_prompt() { ls -t "$L"/prompts/director_*.md | head -1; }
+show_prompt() { # the header lines, every line naming a ralph command, and the --config count
+  local p=$1
+  echo "  prompt file: $(printf '%s' "$p" | red)"
+  sed -n '1,7p' "$p" | sed 's/^/  | /' | red
+  echo "  lines naming ralph (line number: text):"
+  grep -n 'ralph org\|ralph status' "$p" | sed 's/^/  | /' | red
+  echo "  lines holding --config: $(grep -c -- '--config' "$p")"
+  echo "  occurrences of --config: $(grep -o -- '--config' "$p" | wc -l | tr -d ' ')"
+}
+first_status_line() { awk 'prev=="```sh" && /^ralph org director status/ {print; exit} {prev=$0}' "$1"; }
+stop_line() { sed -n 's/^  \(ralph org director stop --id .*\)$/\1/p' "$1"; }
+
+step "W0 the long-running watch"
+run -- org watch --all --detach --state-dir "$L"
+sleep 2
+run -- status --state-dir "$L"
+
+step "W1 start without --config"
+run -- org director start --driver claude --model haiku --state-dir "$L"
+P1=$(latest_prompt)
+show_prompt "$P1"
+step "W1a the first-step status line, run as written from another directory"
+sh_line "$(first_status_line "$P1")"
+step "W1b the stop line, run as written from another directory"
+sh_line "$(stop_line "$P1")"
+
+step "W2 start with a relative --config (a path with a space and a single quote)"
+run -- org director start --driver claude --model haiku --state-dir "$L" --config "../cfg dir/it's ralph.toml"
+P2=$(latest_prompt)
+show_prompt "$P2"
+echo "  the status lines' --config word equals the file start was given, made absolute:"
+printf '    %s\n' "$(cd "$R/cwd" && python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "../cfg dir/it's ralph.toml")" | red
+step "W2a the first-step status line, run as written from another directory"
+sh_line "$(first_status_line "$P2")"
+step "W2b control: the same status with the relative --config as start was given it, from that other directory (where it names <run>/elsewhere/cfg dir/it's ralph.toml, which does not exist)"
+sh_line "ralph org director status --state-dir '$L' --config \"../cfg dir/it's ralph.toml\""
+step "W2d the rendered status reads start's file: flip its [org.director].enabled to false; the rendered line says false, a status without --config in start's cwd (no ralph.toml) says true"
+cp "$C" "$R/cfg.bak"
+printf '[org.director]\nenabled = false\n' > "$C"
+sh_line "$(first_status_line "$P2")"
+run -- org director status --state-dir "$L"
+cp "$R/cfg.bak" "$C"
+echo "  restored the --config file: $(cmp -s "$C" "$R/cfg.bak" && echo same bytes as before)"
+step "W2c the stop line, run as written from another directory"
+sh_line "$(stop_line "$P2")"
+
+step "W3 start with an absolute --config"
+run -- org director start --driver claude --model haiku --state-dir "$L" --config "$C"
+P3=$(latest_prompt)
+show_prompt "$P3"
+echo "  W2 and W3 prompts differ only in id, token, and prompt-file name lines:"
+diff <(sed -e 's/d[0-9]\{1,\}/dN/g' "$P2") <(sed -e 's/d[0-9]\{1,\}/dN/g' "$P3") > "$R/d23" && echo "    no difference after d<N> is normalised" || sed 's/^/    /' "$R/d23" | red
+run -- org director stop --id d3 --state-dir "$L"
+
+step "W9 herdr calls, events, cleanup"
+echo "  herdr calls (stub log):"; sed 's/^/  herdr: /' "$R/herdr.log" | red
+printf '  director.jsonl: '; python3 -c '
+import json,sys
+print(", ".join(e["event"]+" "+e["id"] for e in map(json.loads, open(sys.argv[1]))))' "$L/director.jsonl"
+run -- org watch --stop --state-dir "$L"
+sleep 1
+echo "  processes naming the run dir left: $(pgrep -f "$R" | wc -l | tr -d ' ')"
+echo "  osascript calls: $(wc -l < "$T/live/osascript.log" | tr -d ' ')"
+echo "  ledger: $(ls "$L" | tr '\n' ' ')"
+```
+
+#### C2-3.2 Output
+
+`$` lines are what the script ran, `out:` and `err:` lines its stdout and stderr. Outside W1a, the eleven per-registration field lines of `director status` (`driver:` through `pane_id:`) are dropped; they match W1a's apart from the id's values.
+
+```text
+### W0 the long-running watch
+$ (cwd <run>/cwd)  ralph org watch --all --detach --state-dir <run>/ledger
+  out: started ralph org watch --all (pid 44016); log: <run>/ledger/watch.log
+  rc=0
+$ (cwd <run>/cwd)  ralph status --state-dir <run>/ledger
+  out: no org runtime state found (state-dir=<run>/ledger (source: flag)) — run `ralph org spawn` to start one.
+  out: org watch: running (pid 44016, mark updated 2026-10-15T12:44:04Z)
+  out: director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work
+  out: merge guarantee: unknown (not checked: run ralph doctor)
+  out: Run `ralph doctor` to check environment readiness.
+  rc=0
+
+### W1 start without --config
+$ (cwd <run>/cwd)  ralph org director start --driver claude --model haiku --state-dir <run>/ledger
+  out: started d1 (driver=claude, model=haiku, permission=autonomous, pane=pane-stub-1, workspace=ws-stub-1)
+  out: talk to the director in herdr: pane pane-stub-1, in the tab director_032eed3a3b69 of the workspace labelled ralph_director_032eed3a3b69
+  out: stop it with: ralph org director stop --id d1 --state-dir '<run>/ledger'
+  rc=0
+  prompt file: <run>/ledger/prompts/director_032eed3a3b69.md
+  | # 役割: director(headless)
+  |
+  | - id: d1 / driver: claude
+  | - 台帳: '<run>/ledger'
+  | - 設定: main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)
+  | - cwd: <run>/cwd
+  |
+  lines naming ralph (line number: text):
+  | 13:ralph org director status --state-dir '<run>/ledger'
+  | 23:あなたは `ralph org director start` が立てた headless の director です。
+  | 27:- skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
+  | 28:  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+  | 30:- 会話の要約のあとに `ralph org director status --state-dir '<run>/ledger'` で
+  | 33:- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '<run>/ledger'` を付ける。
+  | 34:  `ralph status` には `--state-dir '<run>/ledger'` だけを付ける。cwd が
+  | 44:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+  | 51:  ralph org director stop --id d1 --state-dir '<run>/ledger'
+  lines holding --config: 0
+  occurrences of --config: 0
+
+### W1a the first-step status line, run as written from another directory
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director status --state-dir '<run>/ledger'
+  out: director: attached d1 (driver=claude, headless running, model=haiku, pane pane-stub-1, workspace ws-stub-1, attached at 2026-10-15T12:44:06Z) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+  out: enabled: true
+  out: id: d1
+  out: driver: claude
+  out: wake: pull
+  out: attached_at: 2026-10-15T12:44:06Z
+  out: user: -
+  out: cwd: <run>/cwd
+  out: herdr_pane: no
+  out: launch: herdr
+  out: state: running
+  out: model: haiku
+  out: permission_mode: autonomous
+  out: token: 032eed3a3b69
+  out: workspace_id: ws-stub-1
+  out: pane_id: pane-stub-1
+  rc=0
+
+### W1b the stop line, run as written from another directory
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director stop --id d1 --state-dir '<run>/ledger'
+  out: stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+  out: the director is no longer attached
+  rc=0
+
+### W2 start with a relative --config (a path with a space and a single quote)
+$ (cwd <run>/cwd)  ralph org director start --driver claude --model haiku --state-dir <run>/ledger --config ../cfg dir/it's ralph.toml
+  out: started d2 (driver=claude, model=haiku, permission=guarded, pane=pane-stub-2, workspace=ws-stub-2)
+  out: talk to the director in herdr: pane pane-stub-2, in the tab director_6212d182a9aa of the workspace labelled ralph_director_6212d182a9aa
+  out: stop it with: ralph org director stop --id d2 --state-dir '<run>/ledger'
+  rc=0
+  prompt file: <run>/ledger/prompts/director_6212d182a9aa.md
+  | # 役割: director(headless)
+  |
+  | - id: d2 / driver: claude
+  | - 台帳: '<run>/ledger'
+  | - 設定: '<run>/cfg dir/it'\''s ralph.toml'(start の --config)
+  | - cwd: <run>/cwd
+  |
+  lines naming ralph (line number: text):
+  | 13:ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'
+  | 23:あなたは `ralph org director start` が立てた headless の director です。
+  | 27:- skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
+  | 28:  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+  | 30:- 会話の要約のあとに `ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'` で
+  | 33:- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'` を付ける。
+  | 34:  `ralph status` には `--state-dir '<run>/ledger'` だけを付ける。cwd が
+  | 44:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+  | 51:  ralph org director stop --id d2 --state-dir '<run>/ledger'
+  lines holding --config: 4
+  occurrences of --config: 4
+  the status lines' --config word equals the file start was given, made absolute:
+    <run>/cfg dir/it's ralph.toml
+
+### W2a the first-step status line, run as written from another directory
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'
+  out: director: attached d2 (driver=claude, headless running, model=haiku, pane pane-stub-2, workspace ws-stub-2, attached at 2026-10-15T12:44:06Z) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+  out: enabled: true
+  out: id: d2
+  out: state: running
+  out: permission_mode: guarded
+  rc=0
+
+### W2b control: the same status with the relative --config as start was given it, from that other directory (where it names <run>/elsewhere/cfg dir/it's ralph.toml, which does not exist)
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director status --state-dir '<run>/ledger' --config "../cfg dir/it's ralph.toml"
+  out: director: attached d2 (driver=claude, headless running, model=haiku, pane pane-stub-2, workspace ws-stub-2, attached at 2026-10-15T12:44:06Z) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+  out: enabled: true
+  out: id: d2
+  out: state: running
+  out: permission_mode: guarded
+  rc=0
+
+### W2d the rendered status reads start's file: flip its [org.director].enabled to false; the rendered line says false, a status without --config in start's cwd (no ralph.toml) says true
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'
+  out: director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless running, pane pane-stub-2, workspace ws-stub-2: stop it with ralph org director stop --id d2 --state-dir '<run>/ledger') -- ralph org escalate sends every item to the human at once
+  out: enabled: false
+  out: id: d2
+  out: state: running
+  out: permission_mode: guarded
+  rc=0
+$ (cwd <run>/cwd)  ralph org director status --state-dir <run>/ledger
+  out: director: attached d2 (driver=claude, headless running, model=haiku, pane pane-stub-2, workspace ws-stub-2, attached at 2026-10-15T12:44:06Z) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+  out: enabled: true
+  out: id: d2
+  out: state: running
+  out: permission_mode: guarded
+  rc=0
+  restored the --config file: same bytes as before
+
+### W2c the stop line, run as written from another directory
+$ (cwd <run>/elsewhere/sub) sh -c ralph org director stop --id d2 --state-dir '<run>/ledger'
+  out: stopped d2 (ctrl_c=ok, pane=closed, workspace=closed)
+  out: the director is no longer attached
+  rc=0
+
+### W3 start with an absolute --config
+$ (cwd <run>/cwd)  ralph org director start --driver claude --model haiku --state-dir <run>/ledger --config <run>/cfg dir/it's ralph.toml
+  out: started d3 (driver=claude, model=haiku, permission=guarded, pane=pane-stub-3, workspace=ws-stub-3)
+  out: talk to the director in herdr: pane pane-stub-3, in the tab director_7320fb2b1ef0 of the workspace labelled ralph_director_7320fb2b1ef0
+  out: stop it with: ralph org director stop --id d3 --state-dir '<run>/ledger'
+  rc=0
+  prompt file: <run>/ledger/prompts/director_7320fb2b1ef0.md
+  | # 役割: director(headless)
+  |
+  | - id: d3 / driver: claude
+  | - 台帳: '<run>/ledger'
+  | - 設定: '<run>/cfg dir/it'\''s ralph.toml'(start の --config)
+  | - cwd: <run>/cwd
+  |
+  lines naming ralph (line number: text):
+  | 13:ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'
+  | 23:あなたは `ralph org director start` が立てた headless の director です。
+  | 27:- skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
+  | 28:  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+  | 30:- 会話の要約のあとに `ralph org director status --state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'` で
+  | 33:- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '<run>/ledger' --config '<run>/cfg dir/it'\''s ralph.toml'` を付ける。
+  | 34:  `ralph status` には `--state-dir '<run>/ledger'` だけを付ける。cwd が
+  | 44:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+  | 51:  ralph org director stop --id d3 --state-dir '<run>/ledger'
+  lines holding --config: 4
+  occurrences of --config: 4
+  W2 and W3 prompts differ only in id, token, and prompt-file name lines:
+    no difference after d<N> is normalised
+$ (cwd <run>/cwd)  ralph org director stop --id d3 --state-dir <run>/ledger
+  out: stopped d3 (ctrl_c=ok, pane=closed, workspace=closed)
+  out: the director is no longer attached
+  rc=0
+
+### W9 herdr calls, events, cleanup
+  herdr calls (stub log):
+  herdr: workspace create --cwd <run>/cwd --label ralph_director_032eed3a3b69
+  herdr: tab create --workspace ws-stub-1 --cwd <run>/cwd --label director_032eed3a3b69
+  herdr: agent start director_032eed3a3b69 --kind claude --pane pane-stub-1 --timeout 60000 -- --permission-mode bypassPermissions --model haiku 役割指示を読み込んで従ってください: <run>/ledger/prompts/director_032eed3a3b69.md
+  herdr: pane get pane-stub-1
+  herdr: tab get tab-stub-1
+  herdr: workspace get ws-stub-1
+  herdr: workspace get ws-stub-1
+  herdr: pane send-keys pane-stub-1 C-c
+  herdr: pane close pane-stub-1
+  herdr: workspace close ws-stub-1
+  herdr: workspace create --cwd <run>/cwd --label ralph_director_6212d182a9aa
+  herdr: tab create --workspace ws-stub-2 --cwd <run>/cwd --label director_6212d182a9aa
+  herdr: agent start director_6212d182a9aa --kind claude --pane pane-stub-2 --timeout 60000 -- --model haiku 役割指示を読み込んで従ってください: <run>/ledger/prompts/director_6212d182a9aa.md
+  herdr: pane get pane-stub-2
+  herdr: tab get tab-stub-2
+  herdr: workspace get ws-stub-2
+  herdr: workspace get ws-stub-2
+  herdr: pane send-keys pane-stub-2 C-c
+  herdr: pane close pane-stub-2
+  herdr: workspace close ws-stub-2
+  herdr: workspace create --cwd <run>/cwd --label ralph_director_7320fb2b1ef0
+  herdr: tab create --workspace ws-stub-3 --cwd <run>/cwd --label director_7320fb2b1ef0
+  herdr: agent start director_7320fb2b1ef0 --kind claude --pane pane-stub-3 --timeout 60000 -- --model haiku 役割指示を読み込んで従ってください: <run>/ledger/prompts/director_7320fb2b1ef0.md
+  herdr: pane get pane-stub-3
+  herdr: tab get tab-stub-3
+  herdr: workspace get ws-stub-3
+  herdr: workspace get ws-stub-3
+  herdr: pane send-keys pane-stub-3 C-c
+  herdr: pane close pane-stub-3
+  herdr: workspace close ws-stub-3
+  director.jsonl: attached d1, workspace_created d1, pane_created d1, launched d1, detached d1, stopped d1, attached d2, workspace_created d2, pane_created d2, launched d2, detached d2, stopped d2, attached d3, workspace_created d3, pane_created d3, launched d3, detached d3, stopped d3
+$ (cwd <run>/cwd)  ralph org watch --stop --state-dir <run>/ledger
+  out: stopped ralph org watch --all (pid 44016)
+  rc=0
+  processes naming the run dir left: 0
+  osascript calls: 0
+  ledger: director.jsonl director.lock prompts watch-alive.json watch.lock watch.log
+```
+
+### C2-4 Mutation (go1.26.0, `go test -overlay`)
+
+#### C2-4.1 Harness
+
+`$SCRATCH/tds2/mut/mutate.py` is cycle 1's harness (section 5.1) with its output under `$SCRATCH/tds2/mut/out/` and the cycle 2 canary; `mutants.py` holds the edits below. An edit is refused unless `old` occurs exactly once in the file. `-run` regexes are cycle 1's (org: `Director|StopAll|Spawn_DirectorRole|RenderRolePrompt|CodexWritableRoot`; cli: `OrgDirector|StatusCmd_Director|OrgStopAll|OrgSpawn_RoleDirector|OrgLegacyLedger`). `prompts/director.md` is go:embed'ed; the overlay replaces it in the embed as well (K3, K8-K11, K14 are red through it). X0, X0t, and X0c pass an unchanged file through the overlay as controls. K1c, K3c, K2cc, and K15c are K1, K3, K2c, and K15's edits run against `./internal/cli`, whose tests read the prompt file the org package renders. All edits applied (no BADEDIT, no BUILD failure).
+
+#### C2-4.2 Results
+
+26 mutants: 24 red, 2 survived (K15, K16); the 3 cross-package reruns of red mutants are red; the 3 controls pass. "failing top-level tests" drops the `Test` prefix.
+
+| ID | pkg | file | mutation | result (filtered) | failing top-level tests |
+| --- | --- | --- | --- | --- | --- |
+| X0 | org | director_start.go | org: director_start.go unchanged through -overlay | SURVIVED 2s |  |
+| X0t | org | prompts/director.md | org: prompts/director.md unchanged through -overlay | SURVIVED 3s |  |
+| X0c | cli | org_director_headless.go | cli: org_director_headless.go unchanged through -overlay | SURVIVED 41s |  |
+| K1 | org | director_start.go | writePrompt drops ConfigPath from the prompt vars | red 7s | StartDirector_CarriesTheConfigIntoThePrompt |
+| L1 | cli | org_director_headless.go | the CLI does not pass --config to StartDirector | red 41s | OrgDirectorStart_ReadsTheMainWorktreeRalphToml |
+| K2 | org | director_start.go | checkDirectorStart does not make ConfigPath absolute (render refuses the relative path) | red 6s | StartDirector_CarriesTheConfigIntoThePrompt |
+| K2b | org | director_start.go, prompts.go | K2 and K4 together: a relative ConfigPath reaches the prompt as given | red 6s | RenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders, StartDirector_CarriesTheConfigIntoThePrompt |
+| K2c | org | director_start.go | a relative ConfigPath is made absolute against the director's Cwd, not the caller's directory | red 5s | StartDirector_CarriesTheConfigIntoThePrompt |
+| L3 | cli | org_director_headless.go | the CLI joins a relative --config to the director's cwd (the main worktree root) before StartDirector | red 39s | OrgDirectorStart_ReadsTheMainWorktreeRalphToml |
+| K3 | org | prompts/director.md | the template's stop line renders {{ORG_FLAGS}} (gets --config) | red 3s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig, StartDirector_CarriesTheConfigIntoThePrompt |
+| K4 | org | prompts.go | RenderDirectorPrompt accepts a relative ConfigPath | red 6s | RenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders |
+| K5 | org | prompts.go | the config path is not shell-quoted | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig, StartDirector_CarriesTheConfigIntoThePrompt |
+| K6 | org | prompts.go | --config before --state-dir in {{ORG_FLAGS}} | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig, StartDirector_CarriesTheConfigIntoThePrompt |
+| K7 | org | prompts.go | the header keeps the no-config text with a ConfigPath | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig |
+| K8 | org | prompts/director.md | the status after a summary keeps --state-dir only | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig |
+| K9 | org | prompts/director.md | the first-step status keeps --state-dir only | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig, StartDirector_CarriesTheConfigIntoThePrompt |
+| K10 | org | prompts/director.md | the instruction sentence says --state-dir only | red 7s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig |
+| K11 | org | prompts/director.md | ralph status is told to carry {{ORG_FLAGS}} | red 7s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig |
+| K12 | org | director_start.go | an empty ConfigPath is made absolute too (becomes the cwd) | red 8s | StartDirector_CarriesTheConfigIntoThePrompt |
+| K13 | org | prompts.go | RenderDirectorPrompt takes the --config branch for an empty ConfigPath | red 5s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig, RenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure, StartDirector_CarriesTheConfigIntoThePrompt |
+| K14 | org | prompts/director.md | the template's 設定 header line is removed | red 6s | RenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig |
+| D4 | org | director_start.go | an unreadable director.jsonl at the early look is ignored (the gate runs) | red 6s | StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| E1 | org | director_start.go | a failed attached write does not stop start (herdr is called) | red 7s | StartDirector_AFailedWriteOfAttachedCallsNoHerdr |
+| E12 | org | director_start.go | a failed workspace create keeps herdr's output as the workspace id | red 7s | StartDirector_AFailedCreatesOutputIsNotAnID |
+| E13 | org | director_start.go | a failed tab create keeps herdr's output as the pane id | red 6s | StartDirector_AFailedCreatesOutputIsNotAnID |
+| P2 | cli | org_director_headless.go | start refused, current read failed or none: status without --state-dir | red 31s | OrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus |
+| K1c | cli | director_start.go | writePrompt drops ConfigPath from the prompt vars (cli package) | red 70s | OrgDirectorStart_ReadsTheMainWorktreeRalphToml |
+| K3c | cli | prompts/director.md | the template's stop line renders {{ORG_FLAGS}} (gets --config) (cli package) | red 65s | OrgDirectorStart_ReadsTheMainWorktreeRalphToml |
+| K2cc | cli | director_start.go | a relative ConfigPath is made absolute against the director's Cwd, not the caller's directory (cli package) | red 71s | OrgDirectorStart_ReadsTheMainWorktreeRalphToml |
+| K15 | org | director_start.go | a --config path that cannot be made absolute does not stop start | SURVIVED 7s |  |
+| K15c | cli | director_start.go | a --config path that cannot be made absolute does not stop start (cli package) | SURVIVED 266s, whole package only |  |
+| L4 | cli | org_director_headless.go | the stop command start prints gets --config when start had one | red 69s | OrgDirectorStart_LaunchesRegistersAndStops |
+| K16 | org | prompts.go, prompts_test.go | the 設定 line's marker renamed in prompts.go and prompts_test.go together (the skills keep the old one) | SURVIVED 6s |  |
+
+Survivors against whole packages (`-run` dropped):
+
+| run | result | time |
+| --- | --- | --- |
+| K15 org | SURVIVED | 115s |
+| K15c cli | SURVIVED | 266s |
+| K16 org | SURVIVED | 80s |
+
+K16 was not run against cli: no cli test reads the prompt's 設定 line (`grep 設定 internal/cli/*_test.go` finds none), and no shell test or script names the marker (`grep -rl 'start の --config\|設定:' tests/ scripts/` finds none).
+
+#### C2-4.3 Edits
+
+- K1 (./internal/org): writePrompt drops ConfigPath from the prompt vars
+  - `internal/org/director_start.go`: `'StateDir: r.stateDir, ConfigPath: r.p.ConfigPath, Cwd: r.p.Cwd})'` -> `'StateDir: r.stateDir, Cwd: r.p.Cwd})'`
+- L1 (./internal/cli): the CLI does not pass --config to StartDirector
+  - `internal/cli/org_director_headless.go`: `'Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS'` -> `'Cwd: cwd, TimeoutMS: timeoutMS'`
+- K2 (./internal/org): checkDirectorStart does not make ConfigPath absolute (render refuses the relative path)
+  - `internal/org/director_start.go`: `'\tif p.ConfigPath != "" {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'` -> `'\tif p.ConfigPath != "" && false {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'`
+- K2b (./internal/org): K2 and K4 together: a relative ConfigPath reaches the prompt as given
+  - `internal/org/director_start.go`: `'\tif p.ConfigPath != "" {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'` -> `'\tif p.ConfigPath != "" && false {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'`
+  - `internal/org/prompts.go`: `'\tif vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {'` -> `'\tif false && vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {'`
+- K2c (./internal/org): a relative ConfigPath is made absolute against the director's Cwd, not the caller's directory
+  - `internal/org/director_start.go`: `'\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'` -> `'\t\tif p.ConfigPath, err = func() (string, error) {\n\t\t\tif filepath.IsAbs(p.ConfigPath) {\n\t\t\t\treturn p.ConfigPath, nil\n\t\t\t}\n\t\t\treturn filepath.Join(p.Cwd, p.ConfigPath), nil\n\t\t}(); err != nil {'`
+- L3 (./internal/cli): the CLI joins a relative --config to the director's cwd (the main worktree root) before StartDirector
+  - `internal/cli/org_director_headless.go`: `'Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS'` -> `'Cwd: cwd, ConfigPath: func() string {\n\t\t\tif configPath == "" || strings.HasPrefix(configPath, "/") {\n\t\t\t\treturn configPath\n\t\t\t}\n\t\t\treturn cwd + "/" + configPath\n\t\t}(), TimeoutMS: timeoutMS'`
+- K3 (./internal/org): the template's stop line renders {{ORG_FLAGS}} (gets --config)
+  - `internal/org/prompts/director.md`: `'  ralph org director stop --id {{ID}} --state-dir {{STATE_DIR}}\n'` -> `'  ralph org director stop --id {{ID}} {{ORG_FLAGS}}\n'`
+- K4 (./internal/org): RenderDirectorPrompt accepts a relative ConfigPath
+  - `internal/org/prompts.go`: `'\tif vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {'` -> `'\tif false && vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {'`
+- K5 (./internal/org): the config path is not shell-quoted
+  - `internal/org/prompts.go`: `'\t\tconfig := shellQuote(vars.ConfigPath)'` -> `'\t\tconfig := vars.ConfigPath'`
+- K6 (./internal/org): --config before --state-dir in {{ORG_FLAGS}}
+  - `internal/org/prompts.go`: `'\t\torgFlags += " --config " + config'` -> `'\t\torgFlags = "--config " + config + " " + orgFlags'`
+- K7 (./internal/org): the header keeps the no-config text with a ConfigPath
+  - `internal/org/prompts.go`: `'\t\tconfigLine = config + "(start の --config)"\n'` -> `''`
+- K8 (./internal/org): the status after a summary keeps --state-dir only
+  - `internal/org/prompts/director.md`: `` '会話の要約のあとに `ralph org director status {{ORG_FLAGS}}` で' `` -> `` '会話の要約のあとに `ralph org director status --state-dir {{STATE_DIR}}` で' ``
+- K9 (./internal/org): the first-step status keeps --state-dir only
+  - `internal/org/prompts/director.md`: `` '```sh\nralph org director status {{ORG_FLAGS}}\n```' `` -> `` '```sh\nralph org director status --state-dir {{STATE_DIR}}\n```' ``
+- K10 (./internal/org): the instruction sentence says --state-dir only
+  - `internal/org/prompts/director.md`: `` 'どれも `{{ORG_FLAGS}}` を付ける。' `` -> `` 'どれも `--state-dir {{STATE_DIR}}` を付ける。' ``
+- K11 (./internal/org): ralph status is told to carry {{ORG_FLAGS}}
+  - `internal/org/prompts/director.md`: `` '`ralph status` には `--state-dir {{STATE_DIR}}` だけを付ける。' `` -> `` '`ralph status` には `{{ORG_FLAGS}}` だけを付ける。' ``
+- K12 (./internal/org): an empty ConfigPath is made absolute too (becomes the cwd)
+  - `internal/org/director_start.go`: `'\tif p.ConfigPath != "" {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'` -> `'\tif true {\n\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'`
+- K13 (./internal/org): RenderDirectorPrompt takes the --config branch for an empty ConfigPath
+  - `internal/org/prompts.go`: `'\tif vars.ConfigPath != "" {\n\t\tconfig := shellQuote(vars.ConfigPath)'` -> `'\tif true {\n\t\tconfig := shellQuote(vars.ConfigPath)'`
+- K14 (./internal/org): the template's 設定 header line is removed
+  - `internal/org/prompts/director.md`: `'- 設定: {{CONFIG_LINE}}\n'` -> `''`
+- D4 (./internal/org): an unreadable director.jsonl at the early look is ignored (the gate runs)
+  - `internal/org/director_start.go`: `'\tres, err := p.Store.Read()\n\tif err != nil {\n'` -> `'\tres, err := p.Store.Read()\n\tif err != nil && false {\n'`
+- E1 (./internal/org): a failed attached write does not stop start (herdr is called)
+  - `internal/org/director_start.go`: `'\tif err != nil {\n\t\treturn DirectorStartResult{}, err\n\t}\n\tr := &directorStartRun{'` -> `'\tif err != nil && false {\n\t\treturn DirectorStartResult{}, err\n\t}\n\tr := &directorStartRun{'`
+- E12 (./internal/org): a failed workspace create keeps herdr's output as the workspace id
+  - `internal/org/director_start.go`: `'\t\tr.reg.WorkspaceID = ""\n'` -> `''`
+- E13 (./internal/org): a failed tab create keeps herdr's output as the pane id
+  - `internal/org/director_start.go`: `'\t\tr.reg.PaneID = ""\n'` -> `''`
+- P2 (./internal/cli): start refused, current read failed or none: status without --state-dir
+  - `internal/cli/org_director_headless.go`: `'e, rt.command("ralph org director status"))'` -> `'e, "ralph org director status")'`
+- K15 (./internal/org): a --config path that cannot be made absolute does not stop start
+  - `internal/org/director_start.go`: `'\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil {'` -> `'\t\tif p.ConfigPath, err = absPath(p.ConfigPath); err != nil && false {'`
+- L4 (./internal/cli): the stop command start prints gets --config when start had one
+  - `internal/cli/org_director_headless.go`: `'rt.command("ralph org director stop --id "+inboxField(reg.ID)))'` -> `'rt.command("ralph org director stop --id "+inboxField(reg.ID)+map[bool]string{true: " --config " + configPath}[configPath != ""]))'`
+- K16 (./internal/org): the 設定 line's marker renamed in prompts.go and prompts_test.go together (the skills keep the old one)
+  - `internal/org/prompts.go`: `'configLine = config + "(start の --config)"'` -> `'configLine = config + "(--config of start)"'`
+  - `internal/org/prompts_test.go`: `'"- 設定: " + configArg + "(start の --config)\\n"'` -> `'"- 設定: " + configArg + "(--config of start)\\n"'`
+
+#### C2-4.4 Probe tests for the 2 survivors
+
+`$SCRATCH/tds2/probe/zz_probe_c2_test.go`, read through the overlay as `internal/org/zz_probe_c2_test.go`, run with `-run 'TestProbe_C2_|TestRenderDirectorPrompt_' -v ./internal/org/` at HEAD, under K15, and under K16 (each mutant is the other probe's control), plus K7 for the first probe:
+
+```go
+package org
+
+// Probe test for a /test cycle 2 gap of org-director-start. It is read
+// through go test -overlay only and is never committed.
+
+import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// A --config path that cannot be made absolute ends start before anything
+// is written or herdr is called, with the resolve error.
+func TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	p := f.params(DirectorDriverClaude, "opus")
+	p.ConfigPath = "my ralph.toml"
+	orig := absPath
+	absPath = func(s string) (string, error) {
+		if s == "my ralph.toml" {
+			return "", errors.New("stub: abs failed")
+		}
+		return orig(s)
+	}
+	defer func() { absPath = orig }()
+	_, err := f.o.StartDirector(p)
+	if err == nil || !strings.HasPrefix(err.Error(), "org: director: start: resolve the --config path: ") || !strings.Contains(err.Error(), "stub: abs failed") {
+		t.Fatalf("err = %v, want the --config resolve error", err)
+	}
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
+	}
+	if got := directorFileState(t, f.store); got != "<missing>" {
+		t.Fatalf("director.jsonl = %q, want it missing", got)
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "prompts")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a refused start made the prompts dir (stat err %v)", err)
+	}
+}
+
+// The /director skill tells a session to read the prompt's 設定 line and to
+// carry its path as --config when the line ends with the marker
+// RenderDirectorPrompt writes after the path. Each of the four SKILL.md
+// copies must name that marker as the prompt writes it.
+func TestProbe_C2_DirectorSkillNamesTheConfigLineMarker(t *testing.T) {
+	vars := testDirectorPromptVars()
+	vars.ConfigPath = "/x/ralph.toml"
+	text := mustRenderDirectorPrompt(t, vars)
+	prefix := "\n- 設定: " + shellQuote(vars.ConfigPath)
+	i := strings.Index(text, prefix)
+	if i < 0 {
+		t.Fatalf("rendered prompt has no 設定 line naming %s:\n%s", shellQuote(vars.ConfigPath), text)
+	}
+	rest := text[i+len(prefix):]
+	marker := rest[:strings.Index(rest, "\n")]
+	if marker == "" {
+		t.Fatalf("the 設定 line ends with no marker after the path:\n%s", text)
+	}
+	root := directorSkillRepoRoot(t)
+	for _, rel := range []string{
+		filepath.Join(".claude", "skills", "director", "SKILL.md"),
+		filepath.Join(".agents", "skills", "director", "SKILL.md"),
+		filepath.Join("templates", "base", ".claude", "skills", "director", "SKILL.md"),
+		filepath.Join("templates", "base", ".agents", "skills", "director", "SKILL.md"),
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v)", rel, err)
+		}
+		if !strings.Contains(string(data), "`"+marker+"`") {
+			t.Errorf("%s does not name the 設定 line's marker `%s`", rel, marker)
+		}
+	}
+}
+```
+
+Results (`--- ` lines, the probe file's log lines, and the package line):
+
+```text
+== head
+--- PASS: TestRenderDirectorPrompt_SubstitutesEveryPlaceholder (0.00s)
+--- PASS: TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure (0.00s)
+--- PASS: TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig (0.00s)
+--- PASS: TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders (0.00s)
+--- PASS: TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused (0.00s)
+--- PASS: TestProbe_C2_DirectorSkillNamesTheConfigLineMarker (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/org	0.724s
+== K15
+--- PASS: TestRenderDirectorPrompt_SubstitutesEveryPlaceholder (0.00s)
+--- PASS: TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure (0.00s)
+--- PASS: TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig (0.00s)
+--- PASS: TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders (0.00s)
+    zz_probe_c2_test.go:31: err = <nil>, want the --config resolve error
+--- FAIL: TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused (0.00s)
+--- PASS: TestProbe_C2_DirectorSkillNamesTheConfigLineMarker (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.666s
+FAIL
+== K16
+--- PASS: TestRenderDirectorPrompt_SubstitutesEveryPlaceholder (0.00s)
+--- PASS: TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure (0.00s)
+--- PASS: TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig (0.00s)
+--- PASS: TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders (0.00s)
+--- PASS: TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused (0.00s)
+    zz_probe_c2_test.go:74: .claude/skills/director/SKILL.md does not name the 設定 line's marker `(--config of start)`
+    zz_probe_c2_test.go:74: .agents/skills/director/SKILL.md does not name the 設定 line's marker `(--config of start)`
+    zz_probe_c2_test.go:74: templates/base/.claude/skills/director/SKILL.md does not name the 設定 line's marker `(--config of start)`
+    zz_probe_c2_test.go:74: templates/base/.agents/skills/director/SKILL.md does not name the 設定 line's marker `(--config of start)`
+--- FAIL: TestProbe_C2_DirectorSkillNamesTheConfigLineMarker (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	0.732s
+FAIL
+== K7
+--- PASS: TestRenderDirectorPrompt_SubstitutesEveryPlaceholder (0.00s)
+--- PASS: TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure (0.00s)
+--- FAIL: TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig (0.00s)
+--- PASS: TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders (0.00s)
+--- PASS: TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused (0.00s)
+    zz_probe_c2_test.go:55: rendered prompt has no 設定 line naming '/x/ralph.toml':
+--- FAIL: TestProbe_C2_DirectorSkillNamesTheConfigLineMarker (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/org	1.169s
+FAIL
+```
+
+The first probe fails only under K15 (`err = <nil>`: K15's start succeeds with the ConfigPath emptied). The second fails under K16 for all four SKILL.md copies, while every existing `TestRenderDirectorPrompt_*` test passes under K16; under K7 it fails too, as K7's header has no path (K7 is red without it). Each passes under the other's mutant. Calls to the canary during the probe runs: 0 (the 2 lines in `calls.log` are C2-2.3's typed-by-hand check).
