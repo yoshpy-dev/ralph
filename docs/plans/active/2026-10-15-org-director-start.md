@@ -181,6 +181,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] Implementation started
   - S1a b9861932(登録の拡張、雛形 `prompts/director.md` は他の役割と同じく日本語、spawn の role director の拒否)。S1b 8528515f(StartDirector と StopDirector、`codexWritableRootArgs` の director、StopAll の閉じていない headless の登録)。S1b の報告の 2 つの穴を consult(consult-plan-dirstop)に聞き、D11 と AC14 を足して計画を承認し直した(2026-10-15)
   - S1c b5ce8dea(stop を director_stop.go へ移すだけ)と a2d5fc01(stop の `--force`、director の workspace の中からの stop の拒否)。S2 d4da1c45(CLI の start・stop・status、stop --all の案内、main worktree の ralph.toml の読み方)。S2b 725fff10(org_director.go が 914 行になったので、start と stop の CLI を `internal/cli/org_director_headless.go` へ移すだけ)。新しいファイルを Affected areas に書き足し、承認し直した(digest d59311f57d8e、図は CLI のファイル名を描いていないので変えていない)
+  - S3 9fb4f635(`/director` skill の 4 面、README、仕様 FR-9 の注、AGENTS.md、template の ralph.toml の注、tech-debt 5 行)。S3 の報告にあった範囲外の文書のずれ(`/org` skill の director の動詞の行、`ralph-workflow.md` の `/director` の項目が headless に触れない)は /sync-docs に渡す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
