@@ -3,6 +3,7 @@ package org
 import (
 	"embed"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -111,21 +112,41 @@ const DirectorRole = "director"
 // for the headless director `ralph org director start` launches: ID, its
 // registration's d<N>; Driver, claude or codex; StateDir, the org state
 // directory of the ledger, which every ralph org command it runs is given
-// with --state-dir; and Cwd, the directory it runs in.
+// with --state-dir; ConfigPath, the absolute path of the ralph.toml start was
+// given with --config, which every ralph org command it runs is given with
+// --config too, so it reads the settings start read ("" when start had no
+// --config); and Cwd, the directory it runs in.
 type DirectorPromptVars struct {
-	ID       string
-	Driver   string
-	StateDir string
-	Cwd      string
+	ID         string
+	Driver     string
+	StateDir   string
+	ConfigPath string
+	Cwd        string
 }
 
+// directorPromptNoConfigText substitutes for {{CONFIG}} when
+// DirectorPromptVars.ConfigPath is empty: the file the director's ralph org
+// commands read without --config. The director runs in the main worktree root
+// when the ledger is the main worktree's, so both the 8a-1 rule
+// (withMainWorktreeDirectorEnabled in internal/cli) and ./ralph.toml name
+// that file; otherwise it runs where start ran, and ./ralph.toml is the one
+// start read.
+const directorPromptNoConfigText = "main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)"
+
 // RenderDirectorPrompt returns prompts/director.md with vars substituted:
-// {{ID}}, {{DRIVER}}, {{CWD}}, and {{STATE_DIR}}, which is vars.StateDir as
-// one shell word (shellQuote) so the commands in the template run as
-// written. Unlike RenderRolePrompt it refuses to leave a placeholder: an id
-// not of the form d<N>, a driver other than claude and codex, an empty
-// StateDir or Cwd, and a rendered text that still holds "{{" (a placeholder
-// it does not know, or a value that holds one) are errors.
+// {{ID}}, {{DRIVER}}, {{CWD}}; {{STATE_DIR}}, which is vars.StateDir as one
+// shell word (shellQuote) so the commands in the template run as written;
+// {{ORG_FLAGS}}, the flags of every ralph org command in the template:
+// --state-dir with {{STATE_DIR}}, followed by --config with vars.ConfigPath
+// as one shell word when it is set; and {{CONFIG}}, the header's name of the
+// config: vars.ConfigPath as one shell word, else
+// directorPromptNoConfigText. Without ConfigPath the text holds no
+// "--config". Unlike RenderRolePrompt it refuses to leave a placeholder: an
+// id not of the form d<N>, a driver other than claude and codex, an empty
+// StateDir or Cwd, a ConfigPath that is not absolute (the director runs in
+// another directory, where a relative path names another file), and a
+// rendered text that still holds "{{" (a placeholder it does not know, or a
+// value that holds one) are errors.
 func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
 	if _, ok := directorIDNumber(vars.ID); !ok {
 		return "", fmt.Errorf("org: director prompt: %q is not a registration id (d<N>, such as d1)", vars.ID)
@@ -136,14 +157,26 @@ func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
 	if vars.StateDir == "" || vars.Cwd == "" {
 		return "", fmt.Errorf("org: director prompt: the state dir (%q) and the cwd (%q) must both be set", vars.StateDir, vars.Cwd)
 	}
+	if vars.ConfigPath != "" && !filepath.IsAbs(vars.ConfigPath) {
+		return "", fmt.Errorf("org: director prompt: the config path %q is not absolute (the director runs in another directory, where it would name another file)", vars.ConfigPath)
+	}
 	data, err := promptFS.ReadFile("prompts/" + DirectorRole + ".md")
 	if err != nil {
 		return "", fmt.Errorf("org: director prompt: read the embedded template: %w", err)
 	}
+	stateDir := shellQuote(vars.StateDir)
+	orgFlags, config := "--state-dir "+stateDir, directorPromptNoConfigText
+	if vars.ConfigPath != "" {
+		config = shellQuote(vars.ConfigPath)
+		orgFlags += " --config " + config
+		config += "(start の --config)"
+	}
 	text := strings.NewReplacer(
 		"{{ID}}", vars.ID,
 		"{{DRIVER}}", vars.Driver,
-		"{{STATE_DIR}}", shellQuote(vars.StateDir),
+		"{{STATE_DIR}}", stateDir,
+		"{{ORG_FLAGS}}", orgFlags,
+		"{{CONFIG}}", config,
 		"{{CWD}}", vars.Cwd,
 	).Replace(string(data))
 	if i := strings.Index(text, "{{"); i >= 0 {

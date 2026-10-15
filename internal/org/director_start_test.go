@@ -253,6 +253,52 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 	}
 }
 
+// TestStartDirector_CarriesTheConfigIntoThePrompt pins AC11's --config
+// sentence at the org layer (cross-review cycle 1 finding 1): a ConfigPath
+// relative to the caller's directory reaches the prompt file made absolute,
+// on the ralph org commands with --state-dir, since the director runs in
+// another directory; with none, the prompt file says no --config. (The
+// check looks for " --config", with the space, as the t.TempDir paths in the
+// prompt hold the test's name.)
+func TestStartDirector_CarriesTheConfigIntoThePrompt(t *testing.T) {
+	for _, tc := range []struct{ name, configPath string }{
+		{"a relative config path", "my ralph.toml"},
+		{"no config path", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			t.Chdir(t.TempDir())
+			flags := "--state-dir " + shellQuote(f.dir)
+			if tc.configPath != "" {
+				abs, err := filepath.Abs(tc.configPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				flags += " --config " + shellQuote(abs)
+			}
+			p := f.params(DirectorDriverClaude, "opus")
+			p.ConfigPath = tc.configPath
+			res, err := f.o.StartDirector(p)
+			if err != nil {
+				t.Fatalf("StartDirector: %v", err)
+			}
+			data, err := os.ReadFile(res.PromptPath)
+			if err != nil {
+				t.Fatalf("read the prompt file: %v", err)
+			}
+			prompt := string(data)
+			for _, want := range []string{"\nralph org director status " + flags + "\n", "\n  ralph org director stop --id d1 " + flags + "\n"} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("prompt file lacks %q:\n%s", want, prompt)
+				}
+			}
+			if tc.configPath == "" && strings.Contains(prompt, " --config") {
+				t.Errorf("prompt file says --config with no ConfigPath:\n%s", prompt)
+			}
+		})
+	}
+}
+
 // TestStartDirector_PermissionModeOfRoleDirector pins AC6: roles.director
 // wins over the default, each mode maps to the driver's flags as for a seat,
 // and codex refuses autonomous and edits until codex_verified, with nothing

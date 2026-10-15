@@ -369,15 +369,20 @@ var (
 // state dir the director is given (--state-dir in its prompt, and codex's
 // --add-dir), and the prompt file goes under <state dir>/prompts/. Model is
 // resolved by the caller. Cwd is the pane's directory, made absolute against
-// the caller's. TimeoutMS bounds the herdr agent start; 0 or less means
-// defaultSpawnTimeoutMS. Who is who writes the events.
+// the caller's. ConfigPath is the ralph.toml the caller was given with
+// --config, "" when none was: made absolute against the caller's directory,
+// it goes into the prompt, whose ralph org commands carry it as --config, so
+// the director, which runs in Cwd, reads the settings start read. TimeoutMS
+// bounds the herdr agent start; 0 or less means defaultSpawnTimeoutMS. Who
+// is who writes the events.
 type DirectorStartParams struct {
-	Store     *DirectorStore
-	Driver    string
-	Model     string
-	Cwd       string
-	TimeoutMS int
-	Who       DirectorWho
+	Store      *DirectorStore
+	Driver     string
+	Model      string
+	Cwd        string
+	ConfigPath string
+	TimeoutMS  int
+	Who        DirectorWho
 }
 
 // DirectorStartResult is what StartDirector launched: the registration
@@ -437,7 +442,9 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //  2. WorkspaceCreate labelled DirectorWorkspaceLabel(token), then
 //     RecordWorkspace
 //  3. TabCreate labelled DirectorTabLabel(token), then RecordPane
-//  4. RenderDirectorPrompt, written to <state dir>/prompts/director_<token>.md
+//  4. RenderDirectorPrompt, with p.ConfigPath (when set) as the --config
+//     of its ralph org commands, written to
+//     <state dir>/prompts/director_<token>.md
 //  5. the agent start of DirectorAgentName(token) on that pane with the
 //     permission flags, codexWritableRootArgs, --model, and the prompt
 //     file's PromptFilePointer, in this order
@@ -504,7 +511,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 // current registration reads without the lock and only refuses early;
 // AttachHeadless decides again under the lock. It returns the absolute
 // state dir, the permission flags, and the permission mode, and leaves p
-// with Cwd made absolute and TimeoutMS defaulted.
+// with Cwd and a non-empty ConfigPath made absolute and TimeoutMS defaulted.
 func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permArgs []string, mode string, err error) {
 	switch {
 	case p.Store == nil:
@@ -543,6 +550,11 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permA
 	}
 	if p.Cwd, err = absPath(p.Cwd); err != nil {
 		return "", nil, "", fmt.Errorf("org: director: start: resolve the cwd: %w", err)
+	}
+	if p.ConfigPath != "" {
+		if p.ConfigPath, err = absPath(p.ConfigPath); err != nil {
+			return "", nil, "", fmt.Errorf("org: director: start: resolve the --config path: %w", err)
+		}
 	}
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
@@ -601,7 +613,7 @@ func (r *directorStartRun) createWorkspaceAndTab() error {
 
 // writePrompt is step 4 of StartDirector: it returns the prompt file's path.
 func (r *directorStartRun) writePrompt() (string, error) {
-	text, err := RenderDirectorPrompt(DirectorPromptVars{ID: r.reg.ID, Driver: r.p.Driver, StateDir: r.stateDir, Cwd: r.p.Cwd})
+	text, err := RenderDirectorPrompt(DirectorPromptVars{ID: r.reg.ID, Driver: r.p.Driver, StateDir: r.stateDir, ConfigPath: r.p.ConfigPath, Cwd: r.p.Cwd})
 	if err != nil {
 		return "", fmt.Errorf("org: director: start %s: %w", r.reg.ID, err)
 	}

@@ -2,6 +2,7 @@
 
 - id: {{ID}} / driver: {{DRIVER}}
 - 台帳: {{STATE_DIR}}
+- 設定: {{CONFIG}}
 - cwd: {{CWD}}
 
 ## 最初の手順
@@ -9,7 +10,7 @@
 ほかの何よりも先に、次のコマンドを打つ。
 
 ```sh
-ralph org director status --state-dir {{STATE_DIR}}
+ralph org director status {{ORG_FLAGS}}
 ```
 
 今の登録の `id` が `{{ID}}` であることを確かめてから動く。`id` が `{{ID}}` と
@@ -26,12 +27,12 @@ ralph org director status --state-dir {{STATE_DIR}}
 - skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
   `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
   済ませたので、打たない。
-- 会話の要約のあとに `ralph org director status --state-dir {{STATE_DIR}}` で
+- 会話の要約のあとに `ralph org director status {{ORG_FLAGS}}` で
   今の登録を読み直す手順は守る。`id` が `{{ID}}` でなくなっていたら、
   director として動くのをやめ、そのことをこの pane に書く。
-- 打つ `ralph org` のコマンドと `ralph status` には、どれも
-  `--state-dir {{STATE_DIR}}` を付ける。cwd がどこでも、この台帳を読み書き
-  するため。
+- 打つ `ralph org` のコマンドには、どれも `{{ORG_FLAGS}}` を付ける。
+  `ralph status` には `--state-dir {{STATE_DIR}}` だけを付ける。cwd が
+  どこでも、この台帳と、start が読んだ設定を使うため。
 - 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
 - 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
   こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準
@@ -46,7 +47,7 @@ ralph org director status --state-dir {{STATE_DIR}}
   止めたことを台帳に記録する。
 
   ```sh
-  ralph org director stop --id {{ID}} --state-dir {{STATE_DIR}}
+  ralph org director stop --id {{ID}} {{ORG_FLAGS}}
   ```
 
 - stop は自分で打たない。この pane の中からは断られる(pane を閉じると、

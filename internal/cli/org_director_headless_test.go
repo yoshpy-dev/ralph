@@ -386,7 +386,10 @@ func dirNames(t *testing.T, dir string) []string {
 // [org.permissions], [org.roles], and model_pool from the main worktree's
 // ralph.toml, not the linked worktree's, and the director runs in the main
 // worktree root; --config names the file to read instead. A main worktree
-// ralph.toml that does not load is an error.
+// ralph.toml that does not load is an error. The prompt file's ralph org
+// commands carry a relative --config made absolute (in the main worktree
+// root, where the director runs, it would name the main worktree's file),
+// and without --config carry none (AC11).
 func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 	const mainToml = "[org]\nmodel_pool = [{ driver = \"claude\", model = \"haiku\" }, { driver = \"claude\", model = \"opus\" }]\n\n" +
 		"[org.permissions]\ndefault = \"guarded\"\n\n[org.roles]\ndirector = [\"haiku\"]\n"
@@ -399,6 +402,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 		wantStderr         string
 		wantPerm, wantArgs string // the started line's permission, and agent start's flags before the pointer
 		wantModel          string
+		wantConfig         func(r legacyLedgerRepo) string // the --config of the prompt's ralph org commands (nil: none)
 	}{
 		{name: "no --config: the main worktree's settings", mainToml: mainToml, wtToml: worktreeToml,
 			args:       []string{"--driver", "claude"},
@@ -412,7 +416,8 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 			}},
 		{name: "--config names the worktree's ralph.toml", mainToml: mainToml, wtToml: worktreeToml,
 			args:     []string{"--driver", "claude", "--model", "opus", "--config", "ralph.toml"},
-			wantPerm: "autonomous", wantArgs: "--permission-mode bypassPermissions --model opus", wantModel: "opus"},
+			wantPerm: "autonomous", wantArgs: "--permission-mode bypassPermissions --model opus", wantModel: "opus",
+			wantConfig: func(r legacyLedgerRepo) string { return filepath.Join(r.worktree, "ralph.toml") }},
 		{name: "the main worktree says enabled false, the worktree true", mainToml: "[org.director]\nenabled = false\n", wtToml: "[org.director]\nenabled = true\n",
 			args: []string{"--driver", "claude", "--model", "opus"},
 			wantErr: func(r legacyLedgerRepo) []string {
@@ -473,6 +478,24 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 			prompt := filepath.Join(r.sharedDir, "prompts", "director_"+tok+".md")
 			if want := " -- " + tc.wantArgs + " " + org.PromptFilePointer(prompt); !strings.HasSuffix(herdrLines[2], want) {
 				t.Errorf("agent start = %q; want it to end with %q", herdrLines[2], want)
+			}
+			data, err := os.ReadFile(prompt)
+			if err != nil {
+				t.Fatalf("read the prompt file: %v", err)
+			}
+			flags := " --state-dir '" + r.sharedDir + "'"
+			if tc.wantConfig != nil {
+				flags += " --config '" + tc.wantConfig(r) + "'"
+			}
+			for _, want := range []string{"\nralph org director status" + flags + "\n", "\n  ralph org director stop --id d1" + flags + "\n"} {
+				if !strings.Contains(string(data), want) {
+					t.Errorf("prompt file %s lacks %q:\n%s", prompt, want, data)
+				}
+			}
+			// " --config", with the space: the t.TempDir paths in the prompt
+			// hold the subtest's name, which can say --config.
+			if tc.wantConfig == nil && strings.Contains(string(data), " --config") {
+				t.Errorf("prompt file %s says --config for a start without one:\n%s", prompt, data)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package org
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1505,7 +1506,8 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 			"手順の全体は `/director` skill に従ってください。",
 			"見張りの確かめ(`ralph status` の `org watch:` の行と `ralph org watch --all --detach`)と attach は start が済ませたので、打たない。",
 			"会話の要約のあとに `ralph org director status --state-dir " + testDirectorStateDirArg + "` で今の登録を読み直す手順は守る。",
-			"打つ `ralph org` のコマンドと `ralph status` には、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
+			"打つ `ralph org` のコマンドには、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
+			"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
 			"人とはこの pane で話す。",
 			"実装しない。",
 		}},
@@ -1529,6 +1531,106 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 	}
 }
 
+// markdownCodeSpan is one inline code span of a markdown text: its content
+// is the submatch.
+var markdownCodeSpan = regexp.MustCompile("`([^`]+)`")
+
+// directorPromptCommands returns the ralph org commands of a rendered
+// director prompt in the order they appear: each line of a fenced code block
+// that begins with "ralph org", and each inline code span that does, read
+// with the paragraph's line breaks and indentation folded to one space so a
+// span wrapped over two lines is still found.
+func directorPromptCommands(text string) []string {
+	var commands, paragraph []string
+	flush := func() {
+		for _, m := range markdownCodeSpan.FindAllStringSubmatch(strings.Join(paragraph, " "), -1) {
+			if strings.HasPrefix(m[1], "ralph org") {
+				commands = append(commands, m[1])
+			}
+		}
+		paragraph = nil
+	}
+	inBlock := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "```"):
+			flush()
+			inBlock = !inBlock
+		case inBlock:
+			if strings.HasPrefix(trimmed, "ralph org") {
+				commands = append(commands, trimmed)
+			}
+		default:
+			paragraph = append(paragraph, trimmed)
+		}
+	}
+	flush()
+	return commands
+}
+
+// TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig pins AC11's
+// --config sentence (cross-review cycle 1 finding 1 of org-director-start):
+// with a ConfigPath, every ralph org command the template has the director
+// run ends with --state-dir and --config, each one shell word (a path with a
+// space and a single quote included), the instruction says so, and the header
+// names the file. Without one, the text holds no --config at all and the
+// header names the main worktree's ralph.toml. ralph status has no --config,
+// so it gets --state-dir only. The other ralph org mentions are ones the
+// director does not run.
+func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
+	const configArg = `'/cfg dir/it'\''s ralph.toml'`
+	notRun := []string{"ralph org", "ralph org director start", "ralph org watch --all --detach", "ralph org director detach"}
+	for _, tc := range []struct {
+		name, configPath, flags, header string
+	}{
+		{"with --config", "/cfg dir/it's ralph.toml", "--state-dir " + testDirectorStateDirArg + " --config " + configArg,
+			"- 設定: " + configArg + "(start の --config)\n"},
+		{"without --config", "", "--state-dir " + testDirectorStateDirArg,
+			"- 設定: main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			vars.ConfigPath = tc.configPath
+			text := mustRenderDirectorPrompt(t, vars)
+
+			commands := directorPromptCommands(text)
+			if got := strings.Count(text, "ralph org"); got != len(commands) {
+				t.Fatalf("the prompt says ralph org %d times, but only %d are commands in code: %q", got, len(commands), commands)
+			}
+			var run []string
+			for _, c := range commands {
+				if slices.Contains(notRun, c) {
+					continue
+				}
+				head, ok := strings.CutSuffix(c, " "+tc.flags)
+				if !ok || strings.Contains(head, "--state-dir") || strings.Contains(head, "--config") {
+					t.Errorf("ralph org command %q does not end with %q", c, tc.flags)
+					continue
+				}
+				run = append(run, head)
+			}
+			if want := []string{"ralph org director status", "ralph org director status", "ralph org director stop --id d3"}; !slices.Equal(run, want) {
+				t.Errorf("ralph org commands with the flags = %q, want %q", run, want)
+			}
+			for _, phrase := range []string{
+				"打つ `ralph org` のコマンドには、どれも `" + tc.flags + "` を付ける。",
+				"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
+			} {
+				if !containsPhrase(text, phrase) {
+					t.Errorf("rendered director prompt does not say %q:\n%s", phrase, text)
+				}
+			}
+			if !strings.Contains(text, "\n- 台帳: "+testDirectorStateDirArg+"\n"+tc.header) {
+				t.Errorf("rendered director prompt has no header line %q after the ledger's:\n%s", tc.header, text)
+			}
+			if tc.configPath == "" && strings.Contains(text, "--config") {
+				t.Errorf("rendered director prompt says --config with no ConfigPath:\n%s", text)
+			}
+		})
+	}
+}
+
 func TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -1542,6 +1644,8 @@ func TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders(t *testing.T
 		{"an empty cwd", func(v *DirectorPromptVars) { v.Cwd = "" }, "must both be set"},
 		{"a value that holds a placeholder", func(v *DirectorPromptVars) { v.Cwd = "/x/{{ID}}" }, "a placeholder is left after substitution"},
 		{"a state dir that holds braces", func(v *DirectorPromptVars) { v.StateDir = "/x/{{" }, "a placeholder is left after substitution"},
+		{"a relative config path", func(v *DirectorPromptVars) { v.ConfigPath = "ralph.toml" }, `the config path "ralph.toml" is not absolute`},
+		{"a config path that holds a placeholder", func(v *DirectorPromptVars) { v.ConfigPath = "/x/{{ID}}.toml" }, "a placeholder is left after substitution"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			vars := testDirectorPromptVars()
