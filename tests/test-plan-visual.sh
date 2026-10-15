@@ -683,6 +683,16 @@ assert_has_line "an easy figure starting inside the overview is reported" 'easy-
 assert_eq "an easy figure starting inside the overview gives exactly 1 finding (no box count over both)" 1 "$(wc -l < "$_out" | tr -d ' ')"
 assert_only_rule "an easy figure starting inside the overview breaks only L6" L6 "$_out"
 
+# The figure that a nested start closes is still checked: easy-2 carries a
+# path and no </figure>, and easy-3 starts inside it.
+_easy2_path_open="$(printf '%s\n' "$_pg_easy2" | sed 's|^  </figure>$|    <p>internal/org を直す</p>|')"
+lint_case l6-nested-checked "$_pg_overview" "$_easy2_path_open" "$_easy3" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "the nested-checked fixture really drops the easy-2 </figure>" 5 "$(grep -c '</figure>' "$_case_page")"
+assert_eq "an easy figure closed by a nested start exits 1" 1 "$_rc"
+assert_has_line "easy-3 starting inside easy-2 is reported" 'easy-3: L6: figure starts inside figure easy-2 (missing </figure>?)' "$_out"
+assert_has_line "easy-2, closed by the nested start, is still checked for L3" 'easy-2: L3: path-like text: internal/org' "$_out"
+assert_eq "an easy figure closed by a nested start gives exactly 2 findings" 2 "$(wc -l < "$_out" | tr -d ' ')"
+
 # The /plan page skeleton without the </figure> of detail-overview: detail-1
 # would sit inside it in the browser.
 awk '/id="detail-overview"/ { d = 1 } d && /<\/figure>/ { d = 0; next } { print }' \

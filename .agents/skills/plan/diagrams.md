@@ -228,11 +228,11 @@ What `lint` checks, from the HTML text alone:
   or `.sh`, or snake_case word; slash commands (`/director`) and flags
   (`--all`) pass. It reads the figure's text (the words between tags), its
   `class` names, and its `<code>` tags, not other attribute values such as
-  `aria-label`. The inline tags `tspan`, `a`, `b`, `i`, `em`, `strong`,
-  `span`, `small`, `sub`, and `sup` do not split a word, so
+  `aria-label`; write the `aria-label` in the same plain words as the
+  figure. The inline tags `tspan`, `a`, `b`, `i`, `em`, `strong`, `span`,
+  `small`, `sub`, and `sup` do not split a word, so
   `internal/<tspan>org</tspan>` is still a path; to break a line, use a
-  `tspan` with `x` or `y`, a separate `<text>`, or `<br>`. Write the
-  `aria-label` in the same plain words as the figure
+  `tspan` with `x` or `y`, a separate `<text>`, or `<br>`
 - L4: in each easy figure, at most 5 `n-*` boxes, an `<h2>`, and an `<svg>`
   with a non-empty `aria-label`
 - L5: one `<section class="before">`, outside the fold
