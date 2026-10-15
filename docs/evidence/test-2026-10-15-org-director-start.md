@@ -1977,3 +1977,515 @@ FAIL
 ```
 
 The first probe fails only under K15 (`err = <nil>`: K15's start succeeds with the ConfigPath emptied). The second fails under K16 for all four SKILL.md copies, while every existing `TestRenderDirectorPrompt_*` test passes under K16; under K7 it fails too, as K7's header has no path (K7 is red without it). Each passes under the other's mutant. Calls to the canary during the probe runs: 0 (the 2 lines in `calls.log` are C2-2.3's typed-by-hand check).
+
+## Cycle 3
+
+- Date: 2026-10-16 (JST 00:44-01:25; the UTC timestamps in the output read 2026-10-15T15:xx)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start, HEAD 3504ee30 (cycle 2 ran at 5dce71de, its report is 6556bce5). Go changed since cycle 2 in 2 commits: caf1d025 (D12: `ErrDirectorCodexWorkspaceWrite` in `checkDirectorStart`, `codexWritableRootArgs` leader-only again; D13: `checkStartAgmsgHome`, `agmsgHomeIsRelative` shared with `orgWatchChildAgmsgHome`, the `RALPH_ORG_AGMSG_HOME` warning) and 83287d39 (`CodexModeRunsUnderWorkspaceWrite`, doctor's `codexSeatModesPossible` no longer counts role director's edits/autonomous, the D13 refusal pinned in three places, help and wording)
+- Environment: macOS arm64, go1.26.0 (default) and go1.25.8 (`GOTOOLCHAIN=go1.25.8`), git 2.49.0. No real herdr, codex, claude, or osascript ran. Load average 4-11 during the runs (other sessions)
+- Redaction: as in cycles 1 and 2 (`$SCRATCH`, `~`, `$TMPDIR/`, `<run>`). Cycle 3's scratch files are under `$SCRATCH/ods3`. The wrapper's full log `docs/evidence/verify-2026-10-15-154510.log` and the raw outputs appended to `docs/evidence/test-2026-10-15-org-director-start.log` (from the line `===== /test cycle 3`) are gitignored and not committed
+- Trailing blanks at the ends of output lines were stripped; nothing else in the output was changed apart from the redaction
+- Nothing in the worktree was edited for the tests. Mutants and probe tests lived in `$SCRATCH/ods3` and reached the build only through `go test -overlay`
+
+### C3-1 ./scripts/run-test.sh (RALPH_VERIFY_SCOPE unset = changed; templates/base/ralph.toml widened it to full)
+
+Command: `PATH=$SCRATCH/ods3/canary/bin:$PATH ./scripts/run-test.sh > runtest.out 2>&1` (rc 0, 818 s wall, 4,654 lines). Filtered with the same command as section 1 (168 lines). Against C2-1's 168 lines, with the line numbers, the `N.NNs` timings, and the timestamp dropped, `diff` gives:
+
+```text
+168c168
+< Evidence saved to: docs/evidence/verify-2026-10-15-123924.log
+---
+> Evidence saved to: docs/evidence/verify-2026-10-15-154510.log
+```
+
+41 suites, 41 "OK", every "FAIL:" line is 0 (25 of them, no other FAIL line). 4,283 lines start with PASS after leading blanks (cycle 2: 4,283). The one real SKIP is tests/test-secret-scan-branch.sh's (git 2.49.0); the other two `SKIP` matches are `SKIP: 0` summary lines. The Go part:
+
+```text
+4637:==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+4641:?   	github.com/yoshpy-dev/ralph	[no test files]
+4642:?   	github.com/yoshpy-dev/ralph/cmd/ralph	[no test files]
+4643:ok  	github.com/yoshpy-dev/ralph/internal/cli	317.283s
+4644:ok  	github.com/yoshpy-dev/ralph/internal/config	(cached)
+4645:ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+4646:ok  	github.com/yoshpy-dev/ralph/internal/org	128.213s
+4647:ok  	github.com/yoshpy-dev/ralph/internal/org/driver	0.896s
+4648:ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+4649:ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+4650:ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+4652:==> All verifiers passed.
+4654:Evidence saved to: docs/evidence/verify-2026-10-15-154510.log
+```
+
+`internal/insights` imports `internal/org`, so its `(cached)` is a result for the same org code from an earlier run, not proof that it is unaffected. All five `(cached)` packages ran with `-count=1` in C3-2.1 on both toolchains.
+
+### C3-2 Go tests
+
+Every Go run below had `$SCRATCH/ods3/canary/bin` first on PATH (C3-2.3).
+
+#### C3-2.1 Per package, `-count=1 -v`
+
+Counts are from the `--- PASS/FAIL/SKIP` lines (top-level tests, then subtests).
+
+go1.25.8 (`GOTOOLCHAIN=go1.25.8 go test -count=1 -v -coverprofile=cover125.out ./internal/...`, rc 0, 230 s wall):
+
+```text
+internal/cli	ok	226.077s	top 706 (pass 706 fail 0 skip 0)	sub 658 (pass 658 fail 0 skip 0)
+internal/config	ok	1.221s	top 37 (pass 37 fail 0 skip 0)	sub 34 (pass 34 fail 0 skip 0)
+internal/insights	ok	2.082s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org	ok	100.828s	top 804 (pass 803 fail 0 skip 1)	sub 1696 (pass 1696 fail 0 skip 0)
+internal/org/driver	ok	1.850s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	2.813s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	3.304s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	2.856s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+go1.26.0, org and cli with the race detector (`go test -race -count=1 -v ./internal/org/ ./internal/cli/`, rc 0, 365 s wall, 0 `DATA RACE` lines):
+
+```text
+internal/org	ok	133.399s	top 804 (pass 803 fail 0 skip 1)	sub 1696 (pass 1696 fail 0 skip 0)
+internal/cli	ok	355.563s	top 706 (pass 706 fail 0 skip 0)	sub 658 (pass 658 fail 0 skip 0)
+```
+
+go1.26.0, the other six packages (`go test -count=1 -v ./internal/config/ ./internal/insights/ ./internal/org/driver/ ./internal/org/protocol/ ./internal/scaffold/ ./internal/upgrade/`, rc 0):
+
+```text
+internal/config	ok	0.510s	top 37 (pass 37 fail 0 skip 0)	sub 34 (pass 34 fail 0 skip 0)
+internal/insights	ok	1.480s	top 36 (pass 36 fail 0 skip 0)	sub 7 (pass 7 fail 0 skip 0)
+internal/org/driver	ok	2.189s	top 48 (pass 48 fail 0 skip 0)	sub 89 (pass 89 fail 0 skip 0)
+internal/org/protocol	ok	2.235s	top 15 (pass 15 fail 0 skip 0)	sub 56 (pass 56 fail 0 skip 0)
+internal/scaffold	ok	2.698s	top 32 (pass 30 fail 0 skip 2)	sub 0 (pass 0 fail 0 skip 0)
+internal/upgrade	ok	1.774s	top 114 (pass 114 fail 0 skip 0)	sub 13 (pass 13 fail 0 skip 0)
+```
+
+go1.25.8, org and cli with the race detector (`GOTOOLCHAIN=go1.25.8 go test -race -count=1 -v ./internal/org/ ./internal/cli/`, rc 0, 323 s wall, 0 `DATA RACE` lines; it overlapped with the mutation runs of C3-4):
+
+```text
+internal/org	ok	119.029s	top 804 (pass 803 fail 0 skip 1)	sub 1696 (pass 1696 fail 0 skip 0)
+internal/cli	ok	316.002s	top 706 (pass 706 fail 0 skip 0)	sub 658 (pass 658 fail 0 skip 0)
+```
+
+The sorted `<package> <name> <result>` lines of the go1.25.8 run (4,345) and of the two go1.26.0 runs together (4,345) are identical, and so are the org and cli lines of the two race runs (3,864 each). Against cycle 2's 4,318 lines (C2-2.1), 29 lines were added and 2 removed:
+
+```text
+24a25,29
+> internal/cli TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted PASS
+> internal/cli TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted/a_director_in_autonomous PASS
+> internal/cli TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted/a_director_in_edits PASS
+> internal/cli TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted/a_guarded_director_under_an_autonomous_default PASS
+> internal/cli TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted/control:_a_seat_role_in_edits PASS
+353a359,361
+> internal/cli TestCodexSeatModesPossible/a_director_in_autonomous_under_a_guarded_default_is_not_counted PASS
+> internal/cli TestCodexSeatModesPossible/a_director_in_edits_under_a_guarded_default_is_not_counted PASS
+> internal/cli TestCodexSeatModesPossible/a_guarded_director_under_an_autonomous_default_still_counts_as_guarded PASS
+461a470,481
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/a_./_path PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/a_bare_~ PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/a_relative_path PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/a_~/_path PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/an_absolute_path PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused/empty PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns/in_a_linked_worktree PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns/in_the_main_worktree_root PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns/on_a_ledger_with_no_main_worktree PASS
+> internal/cli TestOrgDirectorStart_ARelativeAgmsgHomeWithoutConfigIsNotRefused PASS
+467a488
+> internal/cli TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules PASS
+481a503
+> internal/cli TestOrgDirectorStart_RefusedWithNothingWritten/codex_edits_with_codex_verified PASS
+483a506
+> internal/cli TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector PASS
+3676d3698
+< internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_autonomous,_ledger_inside_the_cwd PASS
+3678c3700,3701
+< internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_edits,_ledger_outside_the_cwd PASS
+---
+> internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_autonomous_with_codex_verified PASS
+> internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_autonomous_with_codex_verified,_ledger_inside_the_cwd PASS
+3679a3703
+> internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_edits_with_codex_verified,_ledger_outside_the_cwd PASS
+3680a3705,3706
+> internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_guarded_with_codex_verified,_ledger_inside_the_cwd PASS
+> internal/org TestStartDirector_PermissionModeOfRoleDirector/codex_guarded_with_codex_verified,_ledger_outside_the_cwd PASS
+3692a3719
+> internal/org TestStartDirector_RefusesBeforeWritingOrCallingHerdr/permission_rule_with_codex_verified PASS
+```
+
+The 2 removed lines are the two codex rows of `TestStartDirector_PermissionModeOfRoleDirector` that caf1d025 renamed (they expected a start that D12 now refuses). Added: 6 top-level tests (cli 6) and 23 subtests (cli 17, org 6). The three SKIPs are cycle 2's.
+
+Earlier flaky tests (go1.25.8, go1.26.0 -race, go1.25.8 -race):
+
+```text
+go125.out: --- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (0.92s)
+go125.out: --- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (0.86s)
+go125.out: --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (3.27s)
+go125.out: --- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (1.69s)
+race.out: --- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (2.64s)
+race.out: --- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (1.84s)
+race.out: --- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.95s)
+race.out: --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (7.04s)
+race125.out: --- PASS: TestRunWatcher_TimeoutIndependentOfSmallInterval (2.49s)
+race125.out: --- PASS: TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess (2.18s)
+race125.out: --- PASS: TestRunDoctorFull_StrictFlipsExitCode_DriftedCore (1.70s)
+race125.out: --- PASS: TestOrgGate_InterruptStopsTheScriptAndRecordsNothing (7.07s)
+```
+
+The slowest `TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` subtest was SIGTERM at 4.64 s (go1.25.8, -race), under the 5 s `gateKillGrace` and the 15 s budget.
+
+#### C3-2.2 AC13: no real herdr or osascript, nothing in the repo's ledger
+
+- `$SCRATCH/ods3/canary/bin/{herdr,osascript}` log their argv to `$SCRATCH/ods3/canary/calls.log` and exit 97 (no pass-through). They were first on PATH for run-test.sh, the four Go runs above, every mutation run, and the probe tests. `calls.log` had 0 lines after all of them. Typed by hand afterwards from the same PATH, both log and exit 97:
+
+```text
+$ PATH=$SCRATCH/ods3/canary/bin:$PATH sh -c 'herdr --version; echo "herdr rc=$?"; osascript -e 1; echo "osascript rc=$?"'
+herdr rc=97
+osascript rc=97
+$ cat calls.log
+1792081283 herdr --version
+1792081284 osascript -e 1
+```
+
+- After the runs: `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` and `.../.claude/worktrees/org-director-start/.harness/state/org` do not exist; `find ~/MyDev/github.com/yoshpy-dev/ralph -name director.jsonl` finds none
+- `~/.codex/config.toml` before the first run and after the last: mtime 1792054288 (Oct 15 17:51:28 2026), 33,673 bytes, sha256 `ac1a4821574050d3630118510c7dd591bf1839b947f2bb35fe4106e41b61796f` both times
+
+#### C3-2.3 Coverage (go1.25.8, each package's own tests)
+
+```text
+ok  	github.com/yoshpy-dev/ralph/internal/cli	226.077s	coverage: 87.7% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/config	1.221s	coverage: 93.3% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/insights	2.082s	coverage: 86.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org	100.828s	coverage: 94.6% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	1.850s	coverage: 93.1% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	2.813s	coverage: 100.0% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	3.304s	coverage: 75.7% of statements
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	2.856s	coverage: 91.2% of statements
+```
+
+Statements of the changed files, from `cover125.out` (each block counted once):
+
+```text
+internal/org/director_start.go: 216/232 (93.1%); uncovered blocks (lines): 59-61, 129-131, 137-139, 204-206, 249-251, 322-324, 504-505, 549-552, 566-568, 569-571, 573-575, 635-637, 664-665, 682-682, 689-690, 691-692
+internal/org/permissions.go: 29/32 (90.6%); uncovered blocks (lines): 130-131, 150-151, 203-205
+internal/cli/org_director_headless.go: 102/105 (97.1%); uncovered blocks (lines): 189-191, 204-206, 214-216
+internal/cli/org_watch.go: 223/240 (92.9%); uncovered blocks (lines): 91-93, 287-289, 327-329, 336-338, 381-383, 401-403, 403-405, 406-406, 417-419, 421-423, 426-428, 435-437, 542-544, 677-679, 685-687, 788-791
+internal/cli/doctor_codex_writable_root.go: 271/276 (98.2%); uncovered blocks (lines): 140-140, 199-199, 212-214, 483-485, 571-573
+```
+
+The D12 block (`director_start.go` 541-548), `CodexModeRunsUnderWorkspaceWrite` (`permissions.go` 85-87), `checkStartAgmsgHome` (`org_director_headless.go` 253-265), `agmsgHomeIsRelative` (`org_watch.go` 395-397), and `codexSeatModesPossible` (`doctor_codex_writable_root.go` 344-368) are fully covered. `director_start.go` 549-552 is the error return of `permissionArgsForDriver` in `checkDirectorStart`: cycle 2's tests reached it with a codex director before codex_verified, which D12 now refuses first, so after caf1d025 only a mode outside autonomous, edits, and guarded could reach it, and `config.Load` refuses such a mode. The other uncovered blocks of these files are cycle 2's (shifted line numbers) or outside the diff (`launchOrgWatch` and the other production launchers in `org_watch.go`).
+
+### C3-3 HEAD binary: `ralph doctor` and role director's modes
+
+`GOTOOLCHAIN=go1.25.8 go build -o $SCRATCH/ods3/bin/ralph ./cmd/ralph` at 3504ee30, and the same from `git archive 83287d39^ | tar -x` (0bfbb054: caf1d025's Go, before doctor stopped counting role director) into `$SCRATCH/ods3/pre/bin/ralph`. Each case is a `git init` directory with its own `ralph.toml` (codex and claude in the pool, an absolute agmsg home holding `scripts/send.sh`). `ralph doctor` runs under `env -i` with a scratch HOME, CODEX_HOME, and TMPDIR, and PATH = the binary dir, `/usr/bin`, `/bin`. The codex configs exclude `/tmp` and `$TMPDIR` as writable roots, since `$SCRATCH` is under `/private/tmp` and would otherwise cover the agmsg store in every case.
+
+#### C3-3.1 Script (`$SCRATCH/ods3/doctor/probe.sh`)
+
+```bash
+#!/bin/bash
+# /test cycle 3 probe: `ralph doctor`'s "Codex sandbox (agmsg writable root)"
+# check on the HEAD binary, for role director's edits/autonomous (not counted,
+# C3-L4 of 83287d39) against a seat role's edits (counted) and a guarded
+# director under an autonomous default with sandbox_mode = "workspace-write"
+# (counted as guarded, reason (b)). Every ralph runs under env -i with a
+# scratch HOME and CODEX_HOME, PATH = the binary dir + /usr/bin + /bin (no
+# claude, codex, gh, herdr, osascript). The codex config excludes the two
+# implicit writable roots (/tmp, $TMPDIR), since the scratchpad lives under
+# /private/tmp and would otherwise cover the agmsg store in every case.
+set -u
+S=$SCRATCH/ods3
+P=${PROBE_RUN:-$S/doctor/run}
+B=${PROBE_BIN:-$S/bin}
+echo "binary: $B/ralph"
+rm -rf "$P"
+mkdir -p "$P/home" "$P/tmp" "$P/agmsg/scripts" "$P/codex-plain" "$P/codex-ww"
+printf '#!/bin/sh\n' > "$P/agmsg/scripts/send.sh"
+chmod +x "$P/agmsg/scripts/send.sh"
+printf '[sandbox_workspace_write]\nexclude_slash_tmp = true\nexclude_tmpdir_env_var = true\n' > "$P/codex-plain/config.toml"
+printf 'sandbox_mode = "workspace-write"\n[sandbox_workspace_write]\nexclude_slash_tmp = true\nexclude_tmpdir_env_var = true\n' > "$P/codex-ww/config.toml"
+
+run_case() { # name codex_dir verified default roles_toml
+  local name=$1 codex=$2 verified=$3 def=$4 roles=$5 d="$P/$1"
+  mkdir -p "$d"
+  git -C "$d" init -q
+  cat > "$d/ralph.toml" <<EOF
+[org]
+agmsg_home = "$P/agmsg"
+driver_pool = ["claude", "codex"]
+model_pool = [
+  { driver = "codex", model = "gpt-6-astra" },
+  { driver = "claude", model = "opus" },
+]
+
+[org.permissions]
+codex_verified = $verified
+default = "$def"
+
+[org.permissions.roles]
+$roles
+EOF
+  echo "### $name (codex config: ${codex##*/}, codex_verified = $verified, default = $def, roles: $roles)"
+  (cd "$d" && env -i HOME="$P/home" CODEX_HOME="$P/$codex" TMPDIR="$P/tmp" PATH="$B:/usr/bin:/bin" ralph doctor > "$d/doctor.out" 2>&1; echo "doctor rc=$?")
+  grep -n 'agmsg writable root' "$d/doctor.out" | sed "s#$P#<run>#g"
+  grep -n '✗' "$d/doctor.out" | sed "s#$P#<run>#g"
+  echo
+}
+
+run_case D1-director-edits codex-plain true guarded 'director = "edits"'
+run_case D2-director-autonomous codex-plain true guarded 'director = "autonomous"'
+run_case D3-control-implementer-edits codex-plain true guarded 'implementer = "edits"'
+run_case D4-guarded-director-autonomous-default codex-ww false autonomous 'director = "guarded"'
+run_case D5-control-no-roles-guarded codex-plain true guarded ''
+run_case D6-control-autonomous-default-no-roles codex-ww false autonomous ''
+ls -A "$P/home"
+```
+
+The pre-fix run is the same script with `PROBE_RUN=$SCRATCH/ods3/doctor/run-pre PROBE_BIN=$SCRATCH/ods3/pre/bin`.
+
+#### C3-3.2 Output, HEAD binary
+
+```text
+binary: $SCRATCH/ods3/bin/ralph
+### D1-director-edits (codex config: codex-plain, codex_verified = true, default = guarded, roles: director = "edits")
+doctor rc=1
+21:  ✓ Codex sandbox (agmsg writable root): pass — not needed: no role that can use a codex model resolves to edits or autonomous and <run>/codex-plain/config.toml does not set sandbox_mode = "workspace-write"
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D2-director-autonomous (codex config: codex-plain, codex_verified = true, default = guarded, roles: director = "autonomous")
+doctor rc=1
+21:  ✓ Codex sandbox (agmsg writable root): pass — not needed: no role that can use a codex model resolves to edits or autonomous and <run>/codex-plain/config.toml does not set sandbox_mode = "workspace-write"
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D3-control-implementer-edits (codex config: codex-plain, codex_verified = true, default = guarded, roles: implementer = "edits")
+doctor rc=1
+21:  ⚠ Codex sandbox (agmsg writable root): warn — no writable root in <run>/codex-plain/config.toml covers the agmsg store <run>/agmsg/db, so a codex seat under workspace-write cannot send RESULT to leader ("attempt to write a readonly database"); needed because [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous (ralph passes --sandbox workspace-write to those codex seats); add <run>/agmsg/db to [sandbox_workspace_write].writable_roots (docs/recipes/codex-seat-permissions.md)
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D4-guarded-director-autonomous-default (codex config: codex-ww, codex_verified = false, default = autonomous, roles: director = "guarded")
+doctor rc=1
+21:  ⚠ Codex sandbox (agmsg writable root): warn — no writable root in <run>/codex-ww/config.toml covers the agmsg store <run>/agmsg/db, so a codex seat under workspace-write cannot send RESULT to leader ("attempt to write a readonly database"); needed because sandbox_mode = "workspace-write" in <run>/codex-ww/config.toml and a role that can use a codex model resolves to guarded (guarded codex seats inherit it); add <run>/agmsg/db to [sandbox_workspace_write].writable_roots (docs/recipes/codex-seat-permissions.md)
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D5-control-no-roles-guarded (codex config: codex-plain, codex_verified = true, default = guarded, roles: )
+doctor rc=1
+21:  ✓ Codex sandbox (agmsg writable root): pass — not needed: no role that can use a codex model resolves to edits or autonomous and <run>/codex-plain/config.toml does not set sandbox_mode = "workspace-write"
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D6-control-autonomous-default-no-roles (codex config: codex-ww, codex_verified = false, default = autonomous, roles: )
+doctor rc=1
+21:  ✓ Codex sandbox (agmsg writable root): pass — not needed: [org.permissions].codex_verified is false and no role that can use a codex model resolves to guarded
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+```
+
+`doctor rc=1` comes from the one failing check, `Claude Code CLI` (no claude on PATH); `ls -A` of the scratch HOME printed nothing.
+
+#### C3-3.3 Output, pre-fix binary (0bfbb054)
+
+D1 and D2 differ from HEAD; D3 to D6 are byte-identical to C3-3.2:
+
+```text
+binary: $SCRATCH/ods3/pre/bin/ralph
+### D1-director-edits (codex config: codex-plain, codex_verified = true, default = guarded, roles: director = "edits")
+doctor rc=1
+21:  ⚠ Codex sandbox (agmsg writable root): warn — no writable root in <run>/codex-plain/config.toml covers the agmsg store <run>/agmsg/db, so a codex seat under workspace-write cannot send RESULT to leader ("attempt to write a readonly database"); needed because [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous (ralph passes --sandbox workspace-write to those codex seats); add <run>/agmsg/db to [sandbox_workspace_write].writable_roots (docs/recipes/codex-seat-permissions.md)
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+
+### D2-director-autonomous (codex config: codex-plain, codex_verified = true, default = guarded, roles: director = "autonomous")
+doctor rc=1
+21:  ⚠ Codex sandbox (agmsg writable root): warn — no writable root in <run>/codex-plain/config.toml covers the agmsg store <run>/agmsg/db, so a codex seat under workspace-write cannot send RESULT to leader ("attempt to write a readonly database"); needed because [org.permissions].codex_verified = true and a role that can use a codex model resolves to edits or autonomous (ralph passes --sandbox workspace-write to those codex seats); add <run>/agmsg/db to [sandbox_workspace_write].writable_roots (docs/recipes/codex-seat-permissions.md)
+3:  ✗ Claude Code CLI: fail — claude unusable: claude not found in PATH: exec: "claude": executable file not found in $PATH
+```
+
+### C3-4 Mutation (go1.26.0, `go test -overlay`)
+
+#### C3-4.1 Harness
+
+`$SCRATCH/ods3/mut/mutate.py` is cycle 2's harness (C2-4.1) with its output under `$SCRATCH/ods3/mut/out/`, the cycle 3 canary, a 20 m `-timeout`, multi-package mutants, and the mutant module picked by `MUTANTS_MODULE`. `-run` regexes are cycle 2's plus the changed code's tests (org: `Director|StopAll|Spawn_DirectorRole|RenderRolePrompt|CodexWritableRoot|PermissionArgs|ResolvePermissionMode`; cli: `OrgDirector|StatusCmd_Director|OrgStopAll|OrgSpawn_RoleDirector|OrgLegacyLedger|CodexAgmsgWritableRoot|CodexSeatModesPossible|ARelativeAgmsgHome`). `mutants.py` holds the edits below; A2, D7, and D8 move whole blocks that the module cuts out of the HEAD files and asserts once each. Every mutant compiled (`go build -overlay`) before the runs; no BADEDIT, no BUILD failure. X0, X0p, X0c, and X0d pass an unchanged file through the overlay as controls. Phase 1 ran with `-run` and 2 jobs; the survivors then ran against whole packages (`--full`, 3 jobs).
+
+#### C3-4.2 Results (filtered runs)
+
+30 mutants: 24 red, 6 survived (B2, C3, D3, D3b, D8, E2); the 4 controls pass. "failing top-level tests" drops the `Test` prefix.
+
+| ID | pkg | file | mutation | result (filtered) | failing top-level tests |
+| --- | --- | --- | --- | --- | --- |
+| X0 | org | director_start.go | org: director_start.go unchanged through -overlay | SURVIVED 7s |  |
+| X0p | org+cli | permissions.go | org: permissions.go unchanged through -overlay | SURVIVED 63s |  |
+| X0c | cli | org_director_headless.go | cli: org_director_headless.go unchanged through -overlay | SURVIVED 55s |  |
+| X0d | cli | doctor_codex_writable_root.go | cli: doctor_codex_writable_root.go unchanged through -overlay | SURVIVED 60s |  |
+| A1 | org+cli | director_start.go | D12 removed | red 68s | OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| A2 | org+cli | director_start.go | D12 moved after permissionArgsForDriver | red 73s | OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| A3 | org+cli | director_start.go | D12 refuses autonomous only (edits passes) | red 70s | OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| A4 | org+cli | director_start.go | D12 for any driver (claude refused too) | red 57s | 41 top-level tests, among them Director_AStartThatDiedAfterItsAttachedLeavesAStartingRegistration, Director_TwoLedgersOnOneHerdrServerNeverCloseEachOther, OrgDirectorStart_AFailedAgentStartIsCleanedUp (all in $SCRATCH/ods3/mut/out/A4/out.txt) |
+| A5 | org+cli | director_start.go | D12 does not wrap ErrDirectorCodexWorkspaceWrite (%w -> %v) | red 71s | OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| A6 | org+cli | director_start.go | D12 only while codex_verified is false (verified unlocks again) | red 59s | OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| B1 | org+cli | permissions.go | director branch restored in codexWritableRootArgs | red 57s | CodexWritableRootArgs |
+| B2 | org+cli | director_start.go | StartDirector calls codexWritableRootArgs again (branch not restored) | SURVIVED 57s |  |
+| B3 | org+cli | director_start.go, permissions.go | B1 + B2: cycle 2's director --add-dir wiring back, D12 kept | red 55s | CodexWritableRootArgs |
+| C1 | org+cli | permissions.go | CodexModeRunsUnderWorkspaceWrite true for guarded | red 49s | 13 top-level tests, among them CheckCodexAgmsgWritableRoot_BothReasons_WarnDetailNumbersEachReason, CheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted, CheckCodexAgmsgWritableRoot_EmptyStringRoleKeyDoesNotSuppressWarn (all in $SCRATCH/ods3/mut/out/C1/out.txt) |
+| C2 | org+cli | permissions.go | CodexModeRunsUnderWorkspaceWrite false for edits | red 50s | CheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted, CodexSeatModesPossible, CodexWritableRootArgs, OrgDirectorStart_RefusedWithNothingWritten, StartDirector_PermissionModeOfRoleDirector, StartDirector_RefusesBeforeWritingOrCallingHerdr |
+| C3 | org+cli | permissions.go | CodexModeRunsUnderWorkspaceWrite = mode != guarded (differs only for an unknown/empty mode) | SURVIVED 44s |  |
+| D1 | cli | org_director_headless.go | D13 removed | red 43s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused, OrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns |
+| D2 | cli | org_director_headless.go | D13 only when the director's cwd differs from start's (unresolved paths) | red 51s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused, OrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns |
+| D2b | cli | org_director_headless.go | D2 comparing symlink-resolved paths | red 54s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused, OrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns |
+| D3 | cli | org_director_headless.go | D13 without the Changed("config") condition | SURVIVED 61s |  |
+| D3b | cli | org_director_headless.go | D13 without configPath != "" (matters for --config "" only) | SURVIVED 56s |  |
+| D4 | cli | org_director_headless.go | RALPH_ORG_AGMSG_HOME warning removed | red 64s | OrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector |
+| D5 | cli | org_director_headless.go | the warning goes to stdout | red 60s | OrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector |
+| D6 | cli | org_director_headless.go | the warning only with --config | red 60s | OrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector |
+| D7 | cli | org_director_headless.go | checkStartAgmsgHome after resolveModelOrWarn (the --model fallback warns first) | red 65s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused |
+| D8 | cli | org_director_headless.go | checkStartAgmsgHome before the enabled check | SURVIVED 54s |  |
+| D9 | cli | org_director_headless.go | D13 uses !filepath.IsAbs instead of the shared predicate (~/ refused) | red 49s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused, OrgDirectorStart_LaunchesRegistersAndStops, OrgDirectorStart_ReadsTheMainWorktreeRalphToml, OrgDirectorStart_RefusedWithNothingWritten, OrgDirectorStop_RenumberedHerdrIDsAreRefusedThenForced |
+| E1 | cli | org_watch.go | agmsgHomeIsRelative: a bare ~ counts as not relative | red 40s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused |
+| E2 | cli | org_watch.go | agmsgHomeIsRelative: empty counts as relative | SURVIVED 40s |  |
+| E3 | cli | org_watch.go | agmsgHomeIsRelative: ~/ counts as relative | red 39s | OrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused, OrgDirectorStart_LaunchesRegistersAndStops, OrgDirectorStart_ReadsTheMainWorktreeRalphToml, OrgDirectorStart_RefusedWithNothingWritten, OrgDirectorStop_RenumberedHerdrIDsAreRefusedThenForced, OrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild |
+| F1 | cli | doctor_codex_writable_root.go | doctor counts role director's edits/autonomous again | red 42s | CheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted, CodexSeatModesPossible |
+| F2 | cli | doctor_codex_writable_root.go | doctor skips role director entirely (a guarded director no longer counts) | red 43s | CheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted, CodexSeatModesPossible |
+| F3 | cli | doctor_codex_writable_root.go | doctor applies the defaults as role director | red 43s | 30 top-level tests, among them CheckCodexAgmsgWritableRoot_AgmsgVersionMismatch_StillGraded, CheckCodexAgmsgWritableRoot_BlockedAncestorAndExplicitStoreBothListed_PassNamingExplicit, CheckCodexAgmsgWritableRoot_CodexVerifiedNoRoots_Warn (all in $SCRATCH/ods3/mut/out/F3/out.txt) |
+| H1 | cli | org_director_headless.go | help drops 'wherever it runs' | red 48s | OrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules |
+
+Subtests behind the kills the handoff named: A1 and A2 fail `PermissionModeOfRoleDirector`'s `codex autonomous before codex_verified` and `codex edits before codex_verified` (A2 gives the codex_verified error instead of `ErrDirectorCodexWorkspaceWrite`); A6 fails the three `with codex_verified` rows; B1 fails `CodexWritableRootArgs/director_codex_autonomous,_state_dir_outside_cwd` and `director_codex_edits,_state_dir_outside_cwd`; D2 and D2b fail `ARelativeAgmsgHomeInTheConfigIsRefused`'s three refused rows and `ARelativeAgmsgHomeIsRefusedWhereverStartRuns/in_the_main_worktree_root` and `on_a_ledger_with_no_main_worktree`, not `in_a_linked_worktree`; F1 fails `a_director_in_edits` and `a_director_in_autonomous` of both doctor tests; C1 fails, among others, the three codex guarded rows of `PermissionModeOfRoleDirector` and `CodexWritableRootArgs/leader_codex_guarded,_state_dir_outside_cwd`.
+
+#### C3-4.3 The 6 survivors against whole packages (`-run` dropped, `--full`)
+
+```text
+B2	SURVIVED	315s
+C3	SURVIVED	313s
+D3	SURVIVED	313s
+D3b	SURVIVED	264s
+D8	SURVIVED	265s
+E2	SURVIVED	265s
+```
+
+Why each survives:
+
+- B2: at HEAD `codexWritableRootArgs` returns nil for role director, so calling it again adds nothing to the agent args (equivalent by construction; B3, which also restores the branch, is red)
+- C3: `config.Load` accepts only autonomous, edits, and guarded for `[org.permissions].default` and every `[org.permissions.roles]` value (`internal/config/config.go` 405-412), and `ResolvePermissionMode` returns one of them, so `mode != guarded` equals "autonomous or edits" for every loaded config (equivalent for loaded configs)
+- D3: `--config` defaults to "" (`internal/cli/org.go` 52), so `Changed("config")` false implies `configPath == ""` (equivalent, like cycle 3 of org-watch-gate's A8a)
+- E2: neither caller passes "": `config.Load` backfills an empty `agmsg_home` with the default (`config.go` 392-394), and `orgWatchChildAgmsgHome` returns before the predicate when the variable is empty and no `--config` was given (equivalent)
+- D3b: differs only for `--config ""` (the flag given, empty). No test passes it. Probe PD3b below
+- D8: no test gives a `--config` with both `[org.director].enabled = false` and a relative agmsg_home, so the order of the two refusals is unpinned. The plan does not rank them. Probe PD8 below
+
+#### C3-4.4 Probe tests for D3b and D8 (overlay only, not committed)
+
+`$SCRATCH/ods3/probe/zz_probe_c3_test.go`, mapped to `internal/cli/zz_probe_c3_test.go` and merged with each mutant's overlay:
+
+```go
+package cli
+
+// Scratch-only probe tests for /test cycle 3 of org-director-start, read
+// through go test -overlay; never committed. Each targets one surviving
+// mutant of the cycle-3 change (mutants.py).
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// D3b: `--config ""` (the flag given, empty) reads ./ralph.toml like no
+// --config; a relative [org].agmsg_home there is not refused, since the
+// director and the watch both resolve it as without --config.
+func TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome(t *testing.T) {
+	stateDir, herdrLog, cwd := directorStartLedger(t)
+	writeTestFile(t, filepath.Join(cwd, "ralph.toml"), "[org]\nagmsg_home = \"agmsg/home\"\n")
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", "")
+	if err != nil {
+		t.Fatalf("director start --config '': %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if got := directorEventKinds(directorEventsIn(t, stateDir)); len(got) != 4 || got[3] != "launched d1" {
+		t.Errorf("director.jsonl = %v; want d1 launched", got)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) == 0 {
+		t.Errorf("no herdr call; want the director started")
+	}
+}
+
+// D8: with [org.director].enabled = false and a relative [org].agmsg_home
+// in the --config, the enabled refusal is the one start gives (records
+// HEAD's order; the plan does not rank the two refusals).
+func TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome(t *testing.T) {
+	stateDir, _, _ := directorStartLedger(t)
+	cfg := writeDirectorConfig(t, "[org]\nagmsg_home = \"agmsg/home\"\n\n[org.director]\nenabled = false\n")
+
+	_, _, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", cfg)
+	if want := "org: director start: [org.director].enabled is false in the --config file "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("director start = %v; want the enabled refusal (%q...)", err, want)
+	}
+}
+```
+
+Runs (`go test -overlay=<ov> -count=1 -v -run '^TestProbe_C3_' ./internal/cli/` on HEAD, D3b, D8, and the controls D3 and D1):
+
+```text
+=== head
+--- PASS: TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome (1.67s)
+--- PASS: TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.852s
+=== D3b
+    zz_probe_c3_test.go:22: director start --config '': org: director start: [org].agmsg_home "agmsg/home" in $TMPDIR/TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome2594459915/004/ralph.toml is a relative path: the director and the watch may resolve it from different directories and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/) (stdout:  stderr: )
+--- FAIL: TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome (0.02s)
+--- PASS: TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	1.831s
+FAIL
+=== D8
+--- PASS: TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome (1.28s)
+    zz_probe_c3_test.go:41: director start = org: director start: [org].agmsg_home "agmsg/home" in the --config file $TMPDIR/TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome4073561308/006/ralph.toml is a relative path: the director and the watch may resolve it from different directories and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/); want the enabled refusal ("org: director start: [org.director].enabled is false in the --config file "...)
+--- FAIL: TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	3.331s
+FAIL
+=== D3
+--- PASS: TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome (1.61s)
+--- PASS: TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.415s
+=== D1
+--- PASS: TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome (0.59s)
+--- PASS: TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome (0.00s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	3.088s
+```
+
+Each probe passes on HEAD, fails under its target mutant, and passes under the other target and under the controls D3 (the equivalent survivor) and D1 (D13 removed: neither probe's start reaches a D13 refusal at HEAD).
+
+#### C3-4.5 Cycle 2's mutant list at HEAD
+
+Cycle 2's `mutants.py` (C2-4.2), copied as `mutants_c2.py` and rerun at HEAD with ids prefixed `R2-` (`MUTANTS_MODULE=mutants_r2`, `-run` as in C3-4.1, 3 jobs, 186 s). Every `old` string still occurs exactly once in the HEAD files. The verdicts equal cycle 2's: the 3 controls pass, 27 are red (incl. the cross-package reruns K1c, K3c, K2cc and L4, which caf1d025's rewrite of `LaunchesRegistersAndStops`'s codex row to guarded still kills), and K15, K15c, K16 survive:
+
+```text
+R2-X0	SURVIVED	3s
+R2-X0t	SURVIVED	3s
+R2-X0c	SURVIVED	49s
+R2-K1	red	6s	TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-L1	red	49s	TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml
+R2-K2	red	5s	TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K2b	red	5s	TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K2c	red	8s	TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-L3	red	53s	TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml
+R2-K3	red	5s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K4	red	5s	TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders
+R2-K5	red	5s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K6	red	7s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K7	red	6s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
+R2-K8	red	6s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
+R2-K9	red	7s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K10	red	5s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
+R2-K11	red	5s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
+R2-K12	red	6s	TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K13	red	7s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig,TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure,TestStartDirector_CarriesTheConfigIntoThePrompt
+R2-K14	red	6s	TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig
+R2-D4	red	6s	TestStartDirector_RefusesBeforeWritingOrCallingHerdr
+R2-E1	red	7s	TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr
+R2-E12	red	5s	TestStartDirector_AFailedCreatesOutputIsNotAnID
+R2-E13	red	5s	TestStartDirector_AFailedCreatesOutputIsNotAnID
+R2-P2	red	45s	TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus
+R2-K1c	red	45s	TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml
+R2-K3c	red	45s	TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml
+R2-K2cc	red	45s	TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml
+R2-K15	SURVIVED	5s
+R2-K15c	SURVIVED	45s
+R2-L4	red	44s	TestOrgDirectorStart_LaunchesRegistersAndStops
+R2-K16	SURVIVED	5s
+```
+
+Calls to the canary during all mutation and probe runs: 0 (the 2 lines in `calls.log` are C3-2.2's typed-by-hand check).

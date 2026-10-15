@@ -271,3 +271,159 @@ HEAD を go1.25.8 で build した binary を、`env -i` で PATH に ralph、cy
 - Blocked: なし
 - Verified: start の `--config` が、start を打った場所に対する絶対パスになって、雛形の中で director が打つ `ralph org` のコマンドに 1 語で付くこと、stop の行と `ralph status` と start が出す stop の打ち方には付かないこと、`--config` がなければ雛形に `--config` が出ないことを、テストと mutant 26 件(red 24 件)で確かめた。handoff が名指した 4 つの mutant と cycle 1 の生き残り 5 件はどれも red。HEAD の binary では、描かれた status の行を別の場所から打つと start の読んだファイルを読むこと(中身を変えて確かめた)、描かれた stop の行で director を止められることを stub の herdr で見た
 - Not verified: Test gaps の 1〜6。どれも PR を止めるものではない
+
+## Cycle 3
+
+- Date: 2026-10-16(JST 00:44〜01:30)
+- Plan: docs/plans/active/2026-10-15-org-director-start.md(`Status: Approved`。`./scripts/plan-visual.sh digest` は 96796452ceae で、`- Approved:` の digest と同じ)
+- Tester: tester subagent (Claude Opus 5.5)。パイプラインの 3 回目で、上限を 3 に上げた最後の回。`.harness/state/standard-pipeline/cycle-count.json` は計画どおり 2 のままにした
+- Scope: HEAD 3504ee30(`git diff origin/main...HEAD` は 59 ファイル、+13,110/-457)。cycle 2 の報告 6556bce5 からの 10 コミットのうち、Go を変えたのは 2 つ。caf1d025 は D12(codex の director の autonomous と edits を `codex_verified` によらず `ErrDirectorCodexWorkspaceWrite` で断り、`codexWritableRootArgs` を leader だけに戻す)と D13(`--config` の相対の `[org].agmsg_home` を `checkStartAgmsgHome` で断る。判定 `agmsgHomeIsRelative` は見張りの子と共有し、`RALPH_ORG_AGMSG_HOME` があれば警告する)。83287d39 は `CodexModeRunsUnderWorkspaceWrite` の追加、doctor の `codexSeatModesPossible` が role director の edits と autonomous を数えないこと、D13 の拒否を 3 つの場所で確かめるテスト、help と文の直し。残りは計画、記録、文書。behavioral test だけを実行した(静的解析は /verify の担当)。環境は macOS(arm64)、go1.26.0 と go1.25.8(`GOTOOLCHAIN`)、git 2.49.0。実行中の load average は 4〜11(別のセッション)
+- Evidence: `docs/evidence/test-2026-10-15-org-director-start.md` の `## Cycle 3`(C3-1 run-test.sh の抜粋、C3-2 Go の結果と数・`-race`・canary・coverage、C3-3 HEAD と直す前の binary の `ralph doctor`、C3-4 mutation と probe のテスト)。生の出力は `docs/evidence/test-2026-10-15-org-director-start.log` の末尾(`===== /test cycle 3` の行から)、wrapper の全ログは `docs/evidence/verify-2026-10-15-154510.log` で、どちらも gitignore の対象なのでコミットしない
+- テストもコードも変えていない。mutant と probe のテストは scratchpad に置き、`go test -overlay` で読ませた。worktree に書いたのは、この節、evidence の `## Cycle 3`、insight event の 1 行だけ
+
+### Test execution
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed。`templates/base/ralph.toml` の変更で full に広がった。go1.26.0) | shell 41 本、Go 8 パッケージ | shell 41 本すべて OK、Go 8 パッケージすべて ok | 0 | shell 1(cycle 2 と同じ) | 818 秒、rc 0 |
+| `GOTOOLCHAIN=go1.25.8 go test -count=1 -v -coverprofile ./internal/...` | cli: top-level 706、subtest 658。org: 804、1,696。org/driver: 48、89。org/protocol: 15、56。config: 37、34。insights: 36、7。scaffold: 32、0。upgrade: 114、13 | 同じ数から skip を引いた数 | 0 | org 1、scaffold 2 | 230 秒(cli 226.1 s、org 100.8 s)、rc 0 |
+| `go test -race -count=1 -v ./internal/org/ ./internal/cli/`(go1.26.0) | org 804/1,696、cli 706/658 | 同じ数から skip を引いた数 | 0 | org 1 | 365 秒(org 133.4 s、cli 355.6 s)、rc 0、DATA RACE なし |
+| `GOTOOLCHAIN=go1.25.8 go test -race -count=1 -v ./internal/org/ ./internal/cli/` | org 804/1,696、cli 706/658 | 同じ | 0 | org 1 | 323 秒(org 119.0 s、cli 316.0 s)、rc 0、DATA RACE なし |
+| `go test -count=1 -v` で残りの 6 パッケージ(go1.26.0) | go1.25.8 と同じ数 | 同じ | 0 | scaffold 2 | 1 パッケージ 1〜3 秒、rc 0 |
+| うち cycle 2 のあとで足したテスト | top-level 6(cli)、subtest 23(cli 17、org 6)。名前を変えた org の subtest 2 本は消えた | 4 回の Go の実行のすべてで | 0 | 0 | - |
+| mutation(`go test -overlay`、go1.26.0、`-run` で絞った回) | mutant 30 件、対照 4 件 | red 24 件 | 生き残り 6 件 | - | 1 件 39〜73 秒 |
+| 生き残りをパッケージ全体で | B2 と C3 は org と cli、D3、D3b、D8、E2 は cli | - | 6 件とも生き残り | - | 264〜315 秒 |
+| probe のテスト(overlay だけ、コミットしない) | cli 2 本 | HEAD で通る | 狙った mutant(D3b、D8)のもとでそれぞれ落ちる。もう一方の mutant と、対照の D3、D1 では通る | - | 1 回 2〜4 秒 |
+| cycle 2 の mutant の一覧を HEAD で流し直す | 33 件(対照 3 件を含む) | 判定は cycle 2 と同じ(red 27 件) | 生き残りは cycle 2 と同じ K15、K15c、K16 | - | 186 秒 |
+| HEAD と直す前の binary の `ralph doctor`(下の「実機の確認」) | 6 通り × 2 | すべて期待どおり | 0 | - | 数秒 |
+
+- shell は 41 本すべてが `OK` で終わり、`FAIL:` の行 25 本はどれも 0 だった。cycle 2 と同じ形で抜き出した 168 行は、行番号と時間を除くと wrapper のログの名前の 1 行だけ違った。PASS で始まる行は 4,283 本で cycle 2 と同じ。Skipped は前からある `tests/test-secret-scan-branch.sh` の 1 件(git が 2.49.0 なので、2.41 より古い git の場合を飛ばす)
+- `run-test.sh` の中の Go は cli(317.3 s)、org(128.2 s)、org/driver を流し直し、config、insights、org/protocol、scaffold、upgrade は `(cached)` だった。insights は org を import するので、`(cached)` は同じ org のコードでの前の実行の結果で、影響がない証拠ではない。この 5 つは go1.25.8 と go1.26.0 の両方の `-count=1` で ok を確かめた
+- go1.25.8 の名前と結果の行 4,345 本と、go1.26.0 の 2 回(`-race` の org と cli、残り 6 パッケージ)を合わせた 4,345 本は同じだった。2 つの `-race` の回の org と cli の行(3,864 本ずつ)も同じだった。cycle 2 の 4,318 本との差は、29 本の追加と 2 本の削除。消えた 2 本は、caf1d025 が名前を変えた `TestStartDirector_PermissionModeOfRoleDirector` の codex の 2 行(D12 が断る start を通ると期待していた行)
+- Skipped は cycle 2 と同じ 3 本(`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped`、scaffold の `TestBaseFS_WithMockFS` と `TestAvailablePacks_WithMockFS`)
+- 前に揺れたテスト(`TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess`、`TestRunDoctorFull_StrictFlipsExitCode_DriftedCore`、`TestRunWatcher_TimeoutIndependentOfSmallInterval`、`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing`)は、どの実行でも落ちなかった。`TestOrgGate_InterruptStopsTheScriptAndRecordsNothing` の subtest でいちばん遅かったのは go1.25.8 の `-race` の SIGTERM の 4.64 s で、`gateKillGrace` の 5 s にも 15 s の予算にも届いていない
+- AC13: run-test.sh、Go の 4 回、mutation のすべての回、probe のテストは、PATH の先頭に canary の `herdr` と `osascript` を置いて走らせた(呼ばれたら argv を記録して exit 97)。呼ばれた回数は 0 回。最後に手で同じ PATH から打つと 2 つとも記録されたので、PATH の検索は canary に届く。テストのあと、main のチェックアウトにも worktree にも `.harness/state/org` はなく、main のチェックアウトの下に `director.jsonl` は 1 つもない
+- `~/.codex/config.toml` は最初の実行の前と最後の実行のあとで、更新時刻(Oct 15 17:51:28 2026)、大きさ(33,673)、sha256(ac1a4821…)が同じだった。本物の codex は起動していない
+
+### cycle 3 の変更とテストの対応
+
+「mutant」の列は、その変更の判定を壊した mutant が落ちたかどうか(id は下の Mutation の表と evidence の C3-4)。
+
+| 変更 | テスト | mutant |
+| --- | --- | --- |
+| D12: codex の director は、解決した mode が autonomous か edits なら `codex_verified` によらず断る(`ErrDirectorCodexWorkspaceWrite`、何も書かず、herdr を打たない) | `TestStartDirector_PermissionModeOfRoleDirector` の codex の 5 行、`TestStartDirector_RefusesBeforeWritingOrCallingHerdr` の `permission rule` と `permission rule with codex_verified`、`TestOrgDirectorStart_RefusedWithNothingWritten` の codex の 2 行 | A1(外す)、A3(autonomous だけ断る)、A4(claude も断る)、A5(sentinel を包まない)、A6(codex_verified で通す) red |
+| D12 の検査は `permissionArgsForDriver` より前(codex_verified が false でも D12 の文で断る) | 上の `before codex_verified` の行が、codex_verified の文が出ないことも確かめる | A2(後ろへ移す)red。codex_verified の文で断るようになり、`errors.Is` が外れる |
+| D12: `codexWritableRootArgs` は leader だけ。codex の director の引数に `--add-dir` は入らない | `TestCodexWritableRootArgs` の director の行、`PermissionModeOfRoleDirector` の codex guarded の 3 行(引数を全体で比べる) | B1(director の分岐を戻す)と B3(分岐と `StartDirector` の呼び出しを戻す)red。呼び出しだけを戻す B2 は、関数が director に nil を返すので同じ動き(生き残り、等価) |
+| `CodexModeRunsUnderWorkspaceWrite`(autonomous と edits) | 上のテスト、doctor の 2 本、leader の `--add-dir` の行 | C1(guarded も true)と C2(edits を false)red。C3(guarded 以外を true)は読み込んだ設定では等価(生き残り) |
+| D13: `--config` の相対の `agmsg_home` を、どこで打っても断る(絶対、`~/`、空は通す) | `TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused`(6 行)、`ARelativeAgmsgHomeIsRefusedWhereverStartRuns`(3 行)、`ARelativeAgmsgHomeWithoutConfigIsNotRefused` | D1(外す)、D2 と D2b(2 つの場所が違うときだけ断る)、D7(model の既定の警告のあとで断る)、D9(`~/` も断る)red。D2 と D2b を落としたのは、同じ場所から解く 2 行(main worktree のルート、main worktree のない台帳)で、linked worktree の行ではない |
+| D13 の条件の `Changed("config")` | - | D3(外す)は `--config` の既定値が "" なので等価(生き残り)。`configPath != ""` を外す D3b は `--config ""` のときだけ違い、どのテストも渡さない(生き残り、Test gaps 1) |
+| `RALPH_ORG_AGMSG_HOME` があれば stderr に警告を 1 行出して続ける | `TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector` | D4(外す)、D5(stdout に出す)、D6(`--config` のときだけ出す)red |
+| 共通の判定 `agmsgHomeIsRelative`(裸の `~` は相対、`~/` は相対でない) | 上の D13 のテスト、`TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild` | E1(裸の `~` を相対でないとする)と E3(`~/` を相対とする)red。E2(空を相対とする)は、どちらの呼び出し元も空を渡さないので等価(生き残り) |
+| doctor の `codexSeatModesPossible` は role director の edits と autonomous を数えず、guarded の director は数える | `TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted`(4 行)、`TestCodexSeatModesPossible` の 3 行。実機の D1〜D6 | F1(director を数え直す)、F2(guarded の director も数えない)、F3(既定を role director として当てる)red |
+| help の D12 と D13 の段落 | `TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules` | H1(「wherever it runs」を消す)red |
+| enabled の検査を D13 より先にする | なし | D8(順を入れ替える)生き残り(Test gaps 2) |
+
+### 実機の確認(HEAD の binary)
+
+HEAD と、直す前の 0bfbb054(caf1d025 と同じ Go。doctor が role director を数えていたころ)を go1.25.8 で build し、`ralph doctor` を `env -i` で打った(evidence の C3-3)。HOME、CODEX_HOME、TMPDIR は scratch のディレクトリで、PATH は binary のディレクトリ、`/usr/bin`、`/bin` だけ。各回は `git init` したディレクトリに、codex と claude を pool に持ち、`scripts/send.sh` を置いた絶対パスの agmsg_home を名指す `ralph.toml` を置いた。scratchpad は `/private/tmp` の下にあり、そのままでは `/tmp` が暗黙の writable root として agmsg の保存先を覆って全部の回が pass になるので、codex の設定で `/tmp` と `$TMPDIR` を外した。本物の `~/.codex` には触れていない。
+
+1. D1(codex_verified = true、default guarded、`director = "edits"`)と D2(同じで `director = "autonomous"`): HEAD は「Codex sandbox (agmsg writable root)」を pass(`not needed: no role that can use a codex model resolves to edits or autonomous ...`)にした。直す前の binary は同じ設定で warn を出した。83287d39 の直しを binary で確かめた。pass の文が role director の edits の設定では文字どおりに正しくない点は、verify の C3-V3 が挙げている
+2. D3(対照。`implementer = "edits"`): 両方の binary で warn。seat の role の edits は数える
+3. D4(codex_verified = false、default autonomous、`director = "guarded"`、`sandbox_mode = "workspace-write"`): 両方で warn(理由 (b)、guarded の codex は人の設定を継ぐ)。guarded の director は数える
+4. D5(対照。roles なし、default guarded)と D6(対照。roles なし、default autonomous、codex_verified = false、`sandbox_mode = "workspace-write"`): 両方で pass。D4 の warn は director の行から来る
+- どの回も `doctor rc=1` で、落ちた検査は claude が PATH にない `Claude Code CLI` の 1 つだけ。scratch の HOME には何も書かれなかった
+
+D12 と D13 の拒否は、verify の cycle 3 が HEAD と直す前の binary で確かめている(verify の evidence の C3-3、Q1〜Q11)ので、この回では binary で打ち直していない。
+
+### Coverage
+
+- Statement(go1.25.8、各パッケージ自身のテストの profile): `internal/org` 94.6%、`internal/cli` 87.7%、`internal/config` 93.3%、`internal/org/driver` 93.1%、`internal/org/protocol` 100.0%、`internal/insights` 86.1%、`internal/scaffold` 75.7%、`internal/upgrade` 91.2%(cycle 2 は cli 87.8%、ほかは同じ)
+- 変わった関数はすべて通る: D12 の検査(`director_start.go` 541〜548)、`CodexModeRunsUnderWorkspaceWrite`(`permissions.go` 85〜87)、`checkStartAgmsgHome`(`org_director_headless.go` 253〜265)、`agmsgHomeIsRelative`(`org_watch.go` 395〜397)、`codexSeatModesPossible`(`doctor_codex_writable_root.go` 344〜368)
+- `internal/org/director_start.go` は 216/232 文(93.1%。cycle 2 は 216/231)。cycle 3 で新しく通らなくなったのは、`checkDirectorStart` の中の `permissionArgsForDriver` の error の return(549〜552)。cycle 2 までは codex_verified の前の codex の director がここを通ったが、今は D12 が先に断る。今ここに届くのは autonomous、edits、guarded のどれでもない mode だけで、`config.Load` はそういう mode を断る。テストを足しても届かない分岐とみている(コードを読んだ推測で、未確認です)。残りの通らない文は cycle 2 の Coverage の項と同じ(行番号がずれただけ)
+- `internal/cli/org_director_headless.go` は 102/105 文(97.1%。cycle 2 は 95/98)。通らない 3 文は cycle 2 と同じ(設定と model の解決の失敗、`os.Getwd` の失敗)
+- `internal/org/permissions.go` は 29/32 文(90.6%)、`internal/cli/doctor_codex_writable_root.go` は 271/276 文(98.2%)。どちらも通らない文は差分の外
+- Branch: Go の標準ツールには branch coverage がないので測っていない。代わりに mutation で分岐ごとの判定を確かめた(下)
+
+### Mutation
+
+- 対象は cycle 3 の 2 つの直し(caf1d025、83287d39)。ファイルを overlay で差し替え、org と cli とも `-run` で流した。`-run` は cycle 2 のものに、変わったコードのテスト(permission、doctor の 2 つの検査、agmsg_home)を足した。生き残りはパッケージ全体でも流した。手を加えないファイルを overlay で読ませた対照の X0(`director_start.go`)、X0p(`permissions.go`)、X0c(`org_director_headless.go`)、X0d(`doctor_codex_writable_root.go`)は通った。どの差し替えも元の文字列がちょうど 1 か所にあり、すべての mutant が build できた
+- handoff が名指した 9 つの mutant の結果は次のとおり。D12 を外す(A1)、D12 を `permissionArgsForDriver` の後ろへ移す(A2)、`codexWritableRootArgs` に director の分岐を戻す(B1)、D13 を外す(D1)、D13 を 2 つの場所が違うときだけにする(D2、パスを解決して比べる D2b も)、env の警告を外す(D4)、doctor が role director を数え直す(F1)、`CodexModeRunsUnderWorkspaceWrite` が guarded にも true を返す(C1)は red。`Changed("config")` の条件を外す(D3)は生き残り、等価
+- 30 件のうち 24 件が red、6 件(B2、C3、D3、D3b、D8、E2)が生き残った。そのうち 4 件(B2、C3、D3、E2)は等価で、2 件(D3b、D8)は閉じられる穴
+
+| ID | 変異 | 結果 | 落としたテスト |
+| --- | --- | --- | --- |
+| A1 | D12 を外す | red | `TestStartDirector_PermissionModeOfRoleDirector`、`TestStartDirector_RefusesBeforeWritingOrCallingHerdr`、`TestOrgDirectorStart_RefusedWithNothingWritten` |
+| A2 | D12 を `permissionArgsForDriver` の後ろへ移す | red | 同上(`before codex_verified` の行が codex_verified の文で断られる) |
+| A3 | D12 が autonomous だけを断る | red | 同上 |
+| A4 | D12 が driver を見ない(claude も断る) | red | director の start を通すテスト 41 本 |
+| A5 | D12 が `ErrDirectorCodexWorkspaceWrite` を `%w` で包まない | red | A1 と同じ 3 本 |
+| A6 | D12 が codex_verified のあるときは通す | red | 同上(`with codex_verified` の行) |
+| B1 | `codexWritableRootArgs` に director の分岐を戻す | red | `TestCodexWritableRootArgs`(director の 2 行) |
+| B2 | `StartDirector` が `codexWritableRootArgs` をまた呼ぶ(分岐は戻さない) | 生き残り(全体でも)、等価 | - |
+| B3 | B1 と B2 を合わせる(cycle 2 の配線を戻し、D12 は残す) | red | `TestCodexWritableRootArgs` |
+| C1 | `CodexModeRunsUnderWorkspaceWrite` が guarded にも true | red | `PermissionModeOfRoleDirector` の codex guarded の 3 行、`CodexWritableRootArgs` の leader guarded、doctor のテストなど 13 本 |
+| C2 | 同じく edits に false | red | `PermissionModeOfRoleDirector`、`CodexWritableRootArgs`、doctor の 2 本など 6 本 |
+| C3 | 同じく guarded 以外に true | 生き残り(全体でも)、読み込んだ設定では等価 | - |
+| D1 | D13 を外す | red | `ARelativeAgmsgHomeInTheConfigIsRefused`、`ARelativeAgmsgHomeIsRefusedWhereverStartRuns` |
+| D2 | D13 を director と見張りの場所が違うときだけにする | red | 同上(同じ場所から解く行) |
+| D2b | D2 で、パスを symlink まで解いて比べる | red | 同上 |
+| D3 | D13 の `Changed("config")` を外す | 生き残り(全体でも)、等価 | - |
+| D3b | D13 の `configPath != ""` を外す | 生き残り(全体でも) | -(probe PD3b が落とす) |
+| D4 | `RALPH_ORG_AGMSG_HOME` の警告を外す | red | `WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector` |
+| D5 | 警告を stdout に出す | red | 同上 |
+| D6 | 警告を `--config` のときだけ出す | red | 同上 |
+| D7 | D13 を model の既定の解決のあとにする | red | `ARelativeAgmsgHomeInTheConfigIsRefused`(stderr が空であること) |
+| D8 | D13 を enabled の検査より前にする | 生き残り(全体でも) | -(probe PD8 が落とす) |
+| D9 | D13 が共通の判定でなく「`/` で始まらない」で断る | red | `ARelativeAgmsgHomeInTheConfigIsRefused` の `~/` と空の行、`LaunchesRegistersAndStops` など 5 本 |
+| E1 | `agmsgHomeIsRelative` が裸の `~` を相対でないとする | red | `ARelativeAgmsgHomeInTheConfigIsRefused` の `a bare ~` |
+| E2 | 同じく空を相対とする | 生き残り(全体でも)、等価 | - |
+| E3 | 同じく `~/` を相対とする | red | D9 と同じ 5 本と `TestOrgWatchDetach_ARelativeAgmsgHomeIsPassedAbsoluteToTheRelocatedChild` |
+| F1 | doctor が role director の edits と autonomous を数え直す | red | `DirectorWorkspaceWriteModeIsNotCounted`、`TestCodexSeatModesPossible` |
+| F2 | doctor が role director を guarded も含めて数えない | red | 同上(guarded の director の行) |
+| F3 | doctor が既定の mode を role director として当てる | red | doctor のテスト 30 本 |
+| H1 | help から「wherever it runs」を消す | red | `TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules` |
+
+- B2: HEAD の `codexWritableRootArgs` は role director に nil を返すので、呼んでも引数は変わらない。分岐も戻す B3 は red
+- C3: `config.Load` は `[org.permissions].default` と `[org.permissions.roles]` の値に autonomous、edits、guarded だけを許し(`internal/config/config.go` 405〜411 行)、`ResolvePermissionMode` はそのどれかを返す。読み込んだ設定では「guarded 以外」と「autonomous か edits」は同じになる
+- D3: `--config` の既定値は ""(`internal/cli/org.go` 52 行)なので、`Changed("config")` が false なら `configPath` も ""。org-watch-gate の cycle 3 の A8a と同じ形
+- E2: `config.Load` は空の `agmsg_home` を既定値で埋め(`config.go` 392〜394 行)、見張りの子の `orgWatchChildAgmsgHome` は、変数が空で `--config` がないとき判定の前に返る。どちらの呼び出し元も空を渡さない
+- D3b: `--config ""`(flag を空で渡す)のときだけ違う。HEAD はそのとき cwd の `./ralph.toml` を読み、相対の `agmsg_home` でも断らない。director も見張りも `--config` なしと同じに解くので、HEAD の動きは D13 の理由と合う。この形を固定するテストはない(Test gaps 1)
+- D8: `enabled = false` と相対の `agmsg_home` を両方持つ `--config` を渡すテストがなく、2 つの拒否の順は固定されていない。計画も順を決めていない(Test gaps 2)
+- probe のテスト 2 本(evidence の C3-4.4)は、HEAD で通り、狙った mutant のもとで落ち、もう一方の mutant と、対照の D3 と D1 のもとでは通る
+- cycle 2 の mutant の一覧 33 件を HEAD で流し直すと、判定は cycle 2 と同じだった(evidence の C3-4.5)。caf1d025 は `TestOrgDirectorStart_LaunchesRegistersAndStops` の codex の行を guarded に書き直したが、その行で落ちていた L4(start が出す stop の打ち方に `--config` を足す)は今も red。テストの書き直しで cycle 2 の mutant を落とす力は減っていない
+
+### Failure analysis
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| なし | - | - | - |
+
+落ちたテストはない。
+
+### Regression checks
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| cross-review cycle 2 の指摘 1: codex の director が autonomous か edits で立ち、workspace-write のため `ralph org start --plan` を通せない | 直っている。start が `codex_verified` によらず断る | A1〜A6 red。verify の binary の Q1〜Q3(直す前の binary は Q8 で立てた) |
+| cross-review cycle 2 の指摘 2: `--config` の相対の `agmsg_home` を director と見張りが別の場所から解く | 直っている。start がどこで打っても断る | D1、D2、D2b、D7、D9 red。verify の binary の Q4、Q5 |
+| self-review cycle 3 の C3-L4: doctor が、start の断る codex の director の mode を workspace-write の role として数える | 直っている | F1〜F3 red。実機の D1、D2(直す前の binary は warn) |
+| cycle 1 と cycle 2 のテストと既存のテスト | すべて PASS。名前の並びは cycle 2 から 29 行増え、名前を変えた 2 行が消えた | evidence の C3-2.1 |
+| cycle 2 の mutant の判定 | 同じ(red 27 件、生き残り K15、K15c、K16) | evidence の C3-4.5 |
+| 前に揺れた doctor、watcher、gate のテスト | 落ちていない | evidence の C3-2.1 |
+
+### Test gaps
+
+1. D3b: `--config ""`(flag を空で渡す)の start を固定するテストがない。HEAD は cwd の `./ralph.toml` の相対の `agmsg_home` を断らず、`configPath != ""` を外す mutant でも全テストが通る。影響は小さいとみている(`--config ""` を打つ人は少ないという推測で、未確認です)。一番小さい足し方は probe の `TestProbe_C3_AnEmptyConfigFlagIsNotRefusedForARelativeAgmsgHome`(evidence の C3-4.4)。`directorStartLedger` の cwd に相対の `agmsg_home` の `ralph.toml` を置き、`--config ""` で start が d1 を launched まで書くことを確かめる
+2. D8: `enabled = false` と相対の `agmsg_home` を両方持つ `--config` で、どちらの拒否が出るかを固定するテストがない。計画は順を決めていないので、今の順を固定するかどうかは判断による。固定するなら probe の `TestProbe_C3_EnabledFalseIsRefusedBeforeARelativeAgmsgHome`
+3. `checkDirectorStart` の `permissionArgsForDriver` の error の return(549〜552)は、D12 のあとは読み込んだ設定では届かない。テストで届かせるには、`config.Load` を通らない mode を `o.Config` に直接入れるしかない
+4. guarded の codex の director が、人の codex の設定(`sandbox_mode = "danger-full-access"` など)の下で `ralph org start --plan` の `git worktree add` を通せるかは、本物の codex で見ていない(verify の cycle 3 の Coverage gaps と同じ。D12 の案内はこれを前提にする)
+5. `RALPH_ORG_AGMSG_HOME` が director の pane に届かないことは、本物の herdr server の pane の環境で見ていない。cycle 1 の実機の確認(evidence の 4.2)で pane に渡る変数は `HERDR_` で始まるものだけを抜き出したので、この変数の有無は記録にない
+6. cycle 2 の Test gaps 1〜2(K15、K16)は、cycle 3 でもテストが足されておらず、そのまま残る(C3-4.5 で K15、K15c、K16 が生き残り)。3〜6 も今回の変更の外で、そのまま残る
+
+### Verdict
+
+- Pass: yes。`./scripts/run-test.sh`(changed、full に広がった)は rc 0(shell 41 本すべて OK、Go 8 パッケージすべて ok)。go1.25.8 の `go test -count=1 ./internal/...` は rc 0(cli 706/658、org 804/1,696 と skip 1、ほか 6 パッケージ)。org と cli の `-race` は go1.26.0 と go1.25.8 のどちらでも rc 0 で DATA RACE もなく、go1.26.0 の残り 6 パッケージも rc 0。テストの名前は両方の版で同じ。cycle 2 のあとで足したテスト 6 本(subtest 23)はどれも PASS。テストは本物の herdr と osascript を打たず(canary は 0 回)、repo の台帳に書いていない。`~/.codex/config.toml` は変わっていない
+- Fail: なし
+- Blocked: なし
+- Verified: D12(codex の director の autonomous と edits を codex_verified によらず、`permissionArgsForDriver` より前に断る、`codexWritableRootArgs` は leader だけ)、D13(`--config` の相対の `agmsg_home` を、2 つの場所が同じでも断る、`RALPH_ORG_AGMSG_HOME` の警告)、doctor が role director の edits と autonomous を数えないことを、テストと mutant 30 件(red 24 件、生き残りのうち等価 4 件)で確かめた。handoff が名指した 9 つの mutant のうち、等価の `Changed("config")` を除く 8 つは red。HEAD の binary の `ralph doctor` で、director の edits と autonomous が pass になり、直す前の binary では warn になることを見た
+- Not verified: Test gaps の 1〜6。どれも PR を止めるものではない
