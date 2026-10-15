@@ -1,15 +1,18 @@
 ---
 name: director
-description: Director's operating manual for the org runtime. Use it to promote the current interactive session to the director, the one session the human talks to for every feature org; it registers with `ralph org director attach`, drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once.
+description: Director's operating manual for the org runtime. The director is the one session the human talks to for every feature org, in one of two ways: the current interactive session, promoted with this skill and registered with `ralph org director attach`, or a headless director that `ralph org director start` launches in a herdr workspace of its own. It drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once, or when the headless director (`ralph org director start`) needs its operating procedure.
 ---
-この skill は、対話セッションを director に昇格させ、director として人と
-機能ごとの org の間に立つための手順を書く。動詞の詳しい使い方、分割計画の
+この skill は、director として人と機能ごとの org の間に立つための手順を書く。
+director の立て方は 2 つある。対話セッションを `/director` で昇格させる方法
+(「昇格」節)と、人が `ralph org director start` で headless の director を
+立てる方法(「headless の director」節)。動詞の詳しい使い方、分割計画の
 書き方、機能ごとの org の立て方と終わり方は `/org` skill にあるので、この
 skill はその節を指し、写さない。
 
 ## Goals
 
-- 対話セッションを director に昇格させ、台帳に登録する手順を示す。
+- director の 2 つの立て方(昇格と `ralph org director start`)と、それぞれの
+  始め方と終わり方を示す。
 - 分割計画の下書きから、機能ごとの org の start、受信箱の処理、進捗の報告、
   登録の終わりまでを 1 つの流れにする。
 - 受信箱の件に答える順(DECISION を送ってから resolve する)を決める。
@@ -17,14 +20,21 @@ skill はその節を指し、写さない。
 
 ## director とは
 
-- director は、人が `/director` で昇格させた対話セッション。人と話し、人と
-  分割計画を書き、機能ごとの org を立て、org の受信箱の件を処理し、進捗を
-  人に報告する。
+- director は、人と話し、人と分割計画を書き、機能ごとの org を立て、org の
+  受信箱の件を処理し、進捗を人に報告するセッション。人が `/director` で
+  昇格させた対話セッションか、人が `ralph org director start` で立てた
+  headless の director のどちらかで、どちらもこの skill の手順で動く。
+  headless の director の始め方と終わり方は「headless の director」節に書く。
 - 台帳(`/org` skill の「前提」節)ごとに 1 体で、台帳のすべての org を
   受け持つ。そのため `ralph org director` の動詞は `--org-id` を断る。
-- `ralph org director attach` が台帳の `director.jsonl` に書く登録は、誰が
-  director かの記録で、そのセッションが動いていることは表さない。登録が
-  あるかどうかで escalate の動きは変わらない。
+- director は org の座席ではない。manifest に書かれず、`max_orgs` と
+  `max_total_seats` に数えられない。`ralph org spawn --role director` は
+  断られる。
+- `ralph org director attach` と `ralph org director start` が台帳の
+  `director.jsonl` に書く登録は、誰が director かの記録で、そのセッションが
+  動いていることは表さない。headless の登録の状態(`starting` か `running`)は、
+  start が agent を起動し終えたかどうかで決まり、セッションが今も動いて
+  いるかは表さない。登録があるかどうかで escalate の動きは変わらない。
 - leader が escalate した件が人にどう届くかは、`[org.director].enabled`
   (既定 true)と横断の見張り(`ralph org watch --all`)で決まる。
   - enabled で、見張りが仕事を受け付けている: escalate は件を記録する
@@ -38,10 +48,15 @@ skill はその節を指し、写さない。
     止まりかけ、`--once` の見張り): 期限を見る者がいないので、escalate は
     件を記録すると同時に人にも送る。
   - `enabled = false`: escalate はどの件もすぐ人に送り、
-    `ralph org director attach` は断られる。director は置かず、人が `/org`
-    skill の「受信箱」節のとおりに件を処理する。
+    `ralph org director attach` と `ralph org director start` は断られる。
+    director は置かず、人が `/org` skill の「受信箱」節のとおりに件を処理する。
 
 ## 昇格
+
+対話セッションを director にする手順。人が `ralph org director start` で
+立てた headless の director では、2(見張りの確かめ)と 3(attach)を start が
+済ませているので打たない。5(会話の要約のあとの読み直し)は、どちらの
+director も守る(「headless の director」節)。
 
 1. repo の中(main のチェックアウトか、その linked worktree)で動く。台帳は
    main worktree のルートの `.harness/state/org/` に決まる。herdr と agmsg の
@@ -63,8 +78,12 @@ skill はその節を指し、写さない。
    見張りが仕事を受け付けていない。登録はできていて終了コードは 0 なので、
    2 に戻って見張りを起動する。
 4. ほかの director が登録されていると attach は断られ、エラーがその登録を
-   外す detach と、入れ替える `--replace` の打ち方を示す。`--replace` は、
-   人が入れ替えるとはっきり言ったときだけ打つ。
+   終える打ち方と、入れ替える `--replace` の打ち方を示す。終える打ち方は、
+   昇格したセッションの登録なら detach、headless の director の登録
+   (`starting` も含む)なら `ralph org director stop --id <id>` になる。
+   `--replace` は、人が入れ替えるとはっきり言ったときだけ打つ。headless の
+   director を `--replace` で入れ替えても、その pane と workspace は開いた
+   まま残るので、人に `ralph org director stop --id <id>` で閉じてもらう。
 5. 会話の要約のあとは、`ralph org director status` で今の登録を読み直す。
    そこに出る `id` が覚えている `id` と違えば、ほかのセッションが
    `--replace` で入れ替えた。登録がなく `not attached` と出たときは、人の
@@ -72,6 +91,101 @@ skill はその節を指し、写さない。
    どちらのときも director として動くのをやめ(受信箱の ack と resolve、
    leader への send、start をしない)、そのことを人に言う。detach も
    打たない。
+
+## headless の director
+
+`ralph org director start` は、herdr の中に director 専用の workspace を作り、
+そこで claude か codex を director として起動して、台帳に登録する。人が
+対話セッションを昇格させなくても director を置ける。
+
+### 立てる(人がすること)
+
+1. 人が、herdr の外の端末で、repo の中から start を打つ。herdr の pane の中
+   (`HERDR_PANE_ID` がある)で打つと断られる。
+
+   ```sh
+   ralph org director start --driver codex --model <slug>
+   ```
+
+   `--driver` は claude か codex。`[org.roles].director` が許さない
+   `--model` は断られる。省略すると、`ralph org spawn` と同じく `model_pool`
+   のうち `--driver` で使えて `[org.roles].director` が許す最初のものを使い、
+   stderr に警告を出す。
+2. start は、最初に台帳の `director.jsonl` に登録を書く。次に herdr に label
+   `ralph_director_<token>` の workspace と label `director_<token>` の tab を
+   作り、その pane で `--driver` のエージェントを役割の雛形付きで起動する。
+   `<token>` は start ごとに新しい 12 桁の hex。
+3. 長く動く見張り(`ralph org watch --all`)がなければ、start は先に見張りを
+   起動し、stderr に `ralph org director start: started the cross-org watch`
+   で始まる行を出す。見張りを起動できないとき、見張りが止まりかけ、印が
+   古い、`--once` の見張りのときは、何も立てずに断られる。
+4. stdout に `started d1 (driver=codex, model=..., permission=..., pane=..., workspace=...)`、
+   話しかける pane、止める打ち方(`ralph org director stop --id d1`)が出る。
+   人は herdr でその pane に入り、director と話す。
+5. ほかの director が登録されている(`starting` も含む)とき、
+   `[org.director].enabled = false` のときは、start は何も書かず、herdr も
+   打たずに断られる。start に `--replace` はない。
+6. 登録のあとの段で失敗すると、start は作った pane と workspace を閉じ、
+   止めたことを記録して終了コード 1 で終わる。閉じられなかったものがあれば、
+   閉じる herdr の打ち方と `ralph org director stop --id <id>` が出る。
+
+start の設定と、director が動く場所は次のとおり。
+
+- `--config` がなく、台帳が main worktree のものなら、
+  `[org.director].enabled`、`[org.permissions]`、`[org.roles]`、`model_pool` を
+  main worktree の `ralph.toml` から読む。feature worktree の `ralph.toml` では
+  選べない。読めない `ralph.toml` はエラーになる。
+- permission mode は `[org.permissions.roles].director`、なければ
+  `[org.permissions].default`。template の既定は `autonomous` なので、claude の
+  director は `--permission-mode bypassPermissions` で動く。codex の
+  `autonomous` と `edits` には、座席と同じく `[org.permissions].codex_verified`
+  が要る。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
+  この skill の指示だけで、permission では止まらない。
+- director は台帳の main worktree のルートで動く。台帳が main worktree の
+  ものでなければ、start を打った場所で動く。
+
+### 始める(headless の director がすること)
+
+1. ほかの何よりも先に `ralph org director status --state-dir <台帳>` を打ち、
+   今の登録の `id` が雛形に書かれた自分の `id` であることを確かめる。違う
+   とき、または登録がなく `not attached` と出たときは、ほかに何もしない
+   (受信箱の ack と resolve、leader への send、start をしない)。そのことを
+   pane に書いて止まる。detach も打たない。
+2. 「昇格」節の 2(見張りの確かめ)と 3(attach)は start が済ませたので
+   打たない。5(会話の要約のあとの読み直し)は守る。
+3. 打つ `ralph org` のコマンドと `ralph status` には、どれも雛形に書かれた
+   `--state-dir <台帳>` を付ける。cwd がどこでも、同じ台帳を読み書きする
+   ため。
+4. 人とはこの pane で話す。そのあとの仕事(分割計画、受信箱、進捗の報告)は、
+   昇格した director と同じ手順で進める。
+
+### 終える
+
+1. headless の director は detach を打たない。detach は登録を外すだけで、
+   pane と workspace は開いたまま残る。
+2. open か acked の件が残っていれば人に伝え、人に、herdr の外の端末から
+   `ralph org director stop --id <id>` を打つよう頼む。director 自身は stop を
+   打たない。director の pane か workspace の中で打った stop は、`--force` が
+   あっても断られる(閉じると打ったセッションが終わり、記録を書けないため)。
+3. stop は、記録した pane の tab の label が `director_<token>` で、workspace
+   の label が `ralph_director_<token>` であることを確かめてから、pane に C-c を
+   送り、pane と workspace を閉じて、`stopped` を記録する。今の登録なら、
+   同じ書き込みで登録も外れる。
+4. 人が herdr で閉じた pane も、同じ stop で片付く(herdr が知らない pane と
+   workspace は閉じ済みとして扱う)。detach か `--replace` で外れたあとの
+   headless の director と、start の途中で残った `starting` の登録も、stop で
+   片付ける。
+5. label が合わないとき(herdr が状態を失って id を振り直したときなど)、
+   label を確かめられないとき、close が失敗したときは、stop は理由と、人が
+   閉じるための herdr の打ち方を出して断る。label が合わない pane と
+   workspace には C-c も close も打たない。それでも記録を片付けるときは、
+   人が `ralph org director stop --id <id> --force` を打つ。`--force` は、まだ
+   閉じていないものを閉じずに止めたことを記録し、開いたまま残りうるものを
+   出す。人は `herdr workspace list` で label `ralph_director_<token>` の
+   workspace を探して閉じる。label が合えば、`--force` でもふつうに閉じる。
+6. `ralph org stop --all` と `ralph org disband --all` は headless の director
+   を止めない。stop --all は、閉じていない headless の director があれば、
+   `note:` の 1 行で `ralph org director stop --id <id>` を示す。
 
 ## 分割計画と機能ごとの org
 
@@ -203,7 +317,8 @@ resolve してから send が失敗すると、件は期限から外れ、leader
 短くまとめて人に伝える。
 
 - `ralph status`: 全 org の座席と、`org watch:`(見張り)、`director:`
-  (登録)、`merge guarantee:`(merge の時点の保証)の行。
+  (登録。headless の director なら `starting` か `running`、model、pane、
+  workspace も出る)、`merge guarantee:`(merge の時点の保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
   「merge してよい順」)。先頭に `merge guarantee:` の行が出る。
@@ -219,6 +334,9 @@ merge するかどうかは人が決める。人がはっきり頼んだとき�
 を打ち直す。
 
 ## 終わり
+
+昇格した director の終わり方。headless の director は detach を打たず、
+「headless の director」節の「終える」に従う。
 
 1. open か acked の件が残っていれば、人に伝える。見張りが動いていれば、
    detach のあとも件は期限で人に届く。
@@ -244,8 +362,9 @@ send が断られる。
 
 ## まだないもの
 
-- ralph が自分で立てる headless の director(`ralph org director start`)。
-  今の director は、人が `/director` で昇格させた対話セッションだけ。
+- herdr の外の端末で headless の director を起動すること
+  (`[org.director].launch_cmd`)。今の `ralph org director start` は、herdr の
+  中の専用の workspace にだけ立てる。
 - PR の自動の merge。
 - 受信箱に件が来たときに director を起こす仕組み(push)。director は
   `ralph org wait --inbox` で待って件を拾う。
