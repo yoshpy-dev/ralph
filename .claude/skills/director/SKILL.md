@@ -1,6 +1,6 @@
 ---
 name: director
-description: Director's operating manual for the org runtime. The director is the one session the human talks to for every feature org, in one of two ways: the current interactive session, promoted with this skill and registered with `ralph org director attach`, or a headless director that `ralph org director start` launches in a herdr workspace of its own. It drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once, or when the headless director (`ralph org director start`) needs its operating procedure.
+description: Director's operating manual for the org runtime. The director is the one session the human talks to for every feature org, in one of two ways, either the current interactive session, promoted with this skill and registered with `ralph org director attach`, or a headless director that `ralph org director start` launches in a herdr workspace of its own. It drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once, or when the headless director (`ralph org director start`) needs its operating procedure.
 ---
 この skill は、director として人と機能ごとの org の間に立つための手順を書く。
 director の立て方は 2 つある。対話セッションを `/director` で昇格させる方法

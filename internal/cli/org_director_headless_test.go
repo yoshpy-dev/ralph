@@ -1115,6 +1115,56 @@ func TestOrgDirectorStop_ACloseThatFailsNamesForce(t *testing.T) {
 	}
 }
 
+// AC9's last sentence (plan D14) in the CLI's words: a stop that found a
+// workspace or pane a start recorded after stop read the registration writes
+// what it closed on stderr, as for the other stops that record nothing, and
+// its error names the stop to run again with the call's --state-dir and no
+// --force, with or without --force given. A CLI run would need a start that
+// records while stop runs, so this tests the helper with the error
+// StopDirector returns (internal/org's TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns
+// pins how that error is made). The stop help says so too.
+func TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain(t *testing.T) {
+	const notes = "ctrl_c=skipped, pane=none recorded, workspace=closed"
+	refusal := fmt.Errorf("org: director: stop d1: %w: d1 had workspace \"ws-7\" and no pane when stop read it, and has workspace \"ws-7\" and pane \"pane-1\" now",
+		org.ErrDirectorChangedDuringStop)
+	res := org.DirectorStopResult{
+		Registration: org.DirectorRegistration{ID: "d1", WorkspaceID: "ws-7"},
+		CtrlCNote:    "ctrl_c=skipped", PaneNote: "pane=none recorded", WorkspaceNote: "workspace=closed",
+	}
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force %v", force), func(t *testing.T) {
+			cleanup := &org.DirectorCleanupError{
+				Verb: "stop", ID: "d1", WorkspaceID: "ws-7",
+				CleanupErr:  fmt.Errorf("record d1 stopped: %w; this stop closed only what it had read (%s)", refusal, notes),
+				StopCommand: "ralph org director stop --id d1",
+			}
+			rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
+			var stderr strings.Builder
+			err := rt.stopError(&stderr, "d1", force, res, cleanup)
+			want := "org: director: stop d1: record d1 stopped: " + refusal.Error() + "; this stop closed only what it had read (" + notes + "); " +
+				"nothing was recorded; run ralph org director stop --id d1 --state-dir '/work/the ledger' again to close what start recorded"
+			if err == nil || err.Error() != want {
+				t.Fatalf("stopError =\n%v\nwant\n%s", err, want)
+			}
+			if !errors.Is(err, org.ErrDirectorChangedDuringStop) {
+				t.Errorf("stopError = %v; want it to still wrap ErrDirectorChangedDuringStop", err)
+			}
+			if got := stderr.String(); got != "stop d1: "+notes+"\n" {
+				t.Errorf("stderr = %q; want the notes", got)
+			}
+		})
+	}
+
+	out, err := runOrgCmd(t, "director", "stop", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "When a start that is still running records a workspace or pane after stop read the registration, stop has not closed it, " +
+		"so it records nothing and exits 1 with what it closed: run it again to close what start recorded."; !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
+		t.Errorf("director stop --help does not say %q:\n%s", want, out)
+	}
+}
+
 // AC9 through the CLI: stop refuses, writing nothing and running no herdr,
 // without --id, for an id no registration has (naming status, which lists
 // the open headless directors), for a registration a promoted session

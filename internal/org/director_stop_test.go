@@ -635,3 +635,192 @@ func TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce(t *testing
 		})
 	}
 }
+
+// wantChangedDuringStop asserts err is stop's refusal of a registration that
+// a start recorded more for after stop read it (plan D14): a
+// *DirectorCleanupError wrapping ErrDirectorChangedDuringStop with no herdr
+// command and the stop to run again, whose text is want.
+func wantChangedDuringStop(t *testing.T, err error, want string) {
+	t.Helper()
+	var ce *DirectorCleanupError
+	if !errors.As(err, &ce) || !errors.Is(err, ErrDirectorChangedDuringStop) || ce.Verb != "stop" || ce.Detached || ce.Unconfirmed ||
+		ce.HerdrCommands != nil || ce.StopCommand != "ralph org director stop --id d1" {
+		t.Fatalf("err = %#v, want a stop refused with ErrDirectorChangedDuringStop that names the stop to run again", err)
+	}
+	if err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%v", err, want)
+	}
+}
+
+// changedDuringStopText is the text of stop's refusal of d1 (plan D14), with
+// what the ids were when stop read d1 and are now, and this stop's notes.
+func changedDuringStopText(then, now, notes string) string {
+	return "org: director: stop d1: record d1 stopped: org: director: stop d1: a start in progress recorded a workspace or pane after stop read the registration: " +
+		"d1 had " + then + " when stop read it, and has " + now + " now; this stop closed only what it had read (" + notes + "); " +
+		"nothing was recorded; run ralph org director stop --id d1 again to close what start recorded"
+}
+
+// TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns pins AC9's last
+// sentence (plan D14): when a start still running records a workspace or
+// pane of the registration after stop read it, stop closes only what it read,
+// writes neither stopped nor detached, leaves the director running and
+// current, and its error says what it closed and to run stop again. Force
+// changes nothing when the labels match. The stop run again is recorded.
+func TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		name := "the pane, while stop closes the workspace"
+		if force {
+			name += ", with force"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
+				t.Fatalf("AttachHeadless: %v", err)
+			}
+			if err := f.store.RecordWorkspace("d1", "ws-7", testDirectorWho); err != nil {
+				t.Fatalf("RecordWorkspace: %v", err)
+			}
+			setLabel(&f.h.workspaceLabels, "ws-7", DirectorWorkspaceLabel(directorTestToken))
+			var paneID string
+			f.h.workspaceCloseHook = func() {
+				f.h.workspaceCloseHook = nil
+				// Start's step 3 (its tab and pane) and step 6 (launched),
+				// its agent start left out.
+				var err error
+				if paneID, err = f.h.TabCreate(context.Background(), "ws-7", f.cwd, DirectorTabLabel(directorTestToken)); err != nil {
+					t.Errorf("TabCreate: %v", err)
+					return
+				}
+				recordPaneAndLaunched(t, f.store, paneID)
+			}
+			p := f.stopParams("d1")
+			p.Force = force
+			res, err := f.o.StopDirector(p)
+
+			wantChangedDuringStop(t, err, changedDuringStopText(`workspace "ws-7" and no pane`, `workspace "ws-7" and pane "pane-1"`,
+				"ctrl_c=skipped, pane=none recorded, workspace=closed"))
+			if res.Registration.PaneID != "" || res.WorkspaceNote != "workspace=closed" || res.WasCurrent || res.Forced {
+				t.Fatalf("stop result = %+v, want the registration as read and the workspace closed", res)
+			}
+			if !slices.Equal(f.h.calls, []string{"workspace_get", "workspace_close", "tab_create"}) || !slices.Equal(f.h.workspaceCloseCalls, []string{"ws-7"}) {
+				t.Fatalf("herdr calls = %v (workspace closes %v), want the check and the close of ws-7, then start's tab", f.h.calls, f.h.workspaceCloseCalls)
+			}
+			wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1")
+			if got := mustReadDirector(t, f.store); currentDirectorID(got) != "d1" ||
+				!slices.Equal(openHeadlessSummary(got), []string{"d1 running ws=ws-7 pane=" + paneID}) {
+				t.Fatalf("Read = current %+v, open %q; want d1 running and current with ws-7 and %s", got.Current, openHeadlessSummary(got), paneID)
+			}
+
+			// herdr closed the new tab with its workspace; the stop run again
+			// finds both gone and records the stop.
+			delete(f.h.workspaceLabels, "ws-7")
+			delete(f.h.paneTabs, paneID)
+			again, err := f.stop("d1")
+			if err != nil || !again.WasCurrent || again.PaneNote != "pane=already closed" || again.WorkspaceNote != "workspace=already closed" {
+				t.Fatalf("stop again = %+v, %v; want the stop of d1 recorded", again, err)
+			}
+			wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1")
+		})
+	}
+	t.Run("everything, before stop asks herdr anything", func(t *testing.T) {
+		// With nothing recorded at the read, stop calls no herdr, so the
+		// start lands in its only other look outside the store: its read of
+		// HERDR_PANE_ID, right after the registration's.
+		f := newDirStartFixture(t, directorTestToken)
+		if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
+			t.Fatalf("AttachHeadless: %v", err)
+		}
+		landed := false
+		f.o.Getenv = func(key string) string {
+			if key == herdrPaneIDEnv && !landed {
+				landed = true
+				// Start's steps 2, 3, and 6, its agent start left out.
+				ctx := context.Background()
+				ws, err := f.h.WorkspaceCreate(ctx, f.cwd, DirectorWorkspaceLabel(directorTestToken))
+				if err == nil {
+					err = f.store.RecordWorkspace("d1", ws, testDirectorWho)
+				}
+				var pane string
+				if err == nil {
+					pane, err = f.h.TabCreate(ctx, ws, f.cwd, DirectorTabLabel(directorTestToken))
+				}
+				if err != nil {
+					t.Errorf("start's steps: %v", err)
+					return ""
+				}
+				recordPaneAndLaunched(t, f.store, pane)
+			}
+			return f.env[key]
+		}
+		res, err := f.stop("d1")
+
+		wantChangedDuringStop(t, err, changedDuringStopText("no workspace and no pane", `workspace "ws-1" and pane "pane-1"`,
+			"ctrl_c=skipped, pane=none recorded, workspace=none recorded"))
+		if res.UnrecordedWorkspaceLabel != DirectorWorkspaceLabel(directorTestToken) || res.WasCurrent {
+			t.Fatalf("stop result = %+v, want nothing recorded at the read", res)
+		}
+		if !slices.Equal(f.h.calls, []string{"workspace_create", "tab_create"}) {
+			t.Fatalf("herdr calls = %v, want start's two creates only", f.h.calls)
+		}
+		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1")
+
+		// The stop run again closes what start recorded.
+		n := len(f.h.calls)
+		again, err := f.stop("d1")
+		if err != nil || !again.WasCurrent || again.PaneNote != "pane=closed" || again.WorkspaceNote != "workspace=closed" {
+			t.Fatalf("stop again = %+v, %v; want start's pane and workspace closed", again, err)
+		}
+		if got := herdrCallsSince(f.h, n); !slices.Equal(got, directorCloseCalls) {
+			t.Fatalf("herdr calls = %v, want %v", got, directorCloseCalls)
+		}
+		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1")
+		wantNoDirectorOpen(t, f.store)
+	})
+}
+
+// recordPaneAndLaunched records paneID and launched for d1, as start does
+// once herdr made its tab and its agent started.
+func recordPaneAndLaunched(t *testing.T, s *DirectorStore, paneID string) {
+	t.Helper()
+	if err := s.RecordPane("d1", paneID, testDirectorWho); err != nil {
+		t.Errorf("RecordPane: %v", err)
+		return
+	}
+	if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || !still {
+		t.Errorf("MarkLaunched = %v, %v; want true, nil", still, err)
+	}
+}
+
+// TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile pins that
+// D14's check leaves the forced stop alone: its stopped says nothing more was
+// closed, which stays true when a start records a pane after stop's read, so
+// a forced stop over a workspace whose label is not this launch's still
+// records stopped with force (and detached), sending nothing.
+func TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
+		t.Fatalf("AttachHeadless: %v", err)
+	}
+	if err := f.store.RecordWorkspace("d1", "ws-7", testDirectorWho); err != nil {
+		t.Fatalf("RecordWorkspace: %v", err)
+	}
+	setLabel(&f.h.workspaceLabels, "ws-7", "org-a")
+	landed := false
+	f.o.Getenv = func(key string) string {
+		if key == herdrPaneIDEnv && !landed {
+			landed = true
+			recordPaneAndLaunched(t, f.store, "pane-9")
+		}
+		return f.env[key]
+	}
+	res, err := stopWithForce(f, "d1")
+	if err != nil || !res.Forced || !res.WasCurrent || res.Registration.PaneID != "" {
+		t.Fatalf("stop --force = %+v, %v; want a forced stop of the registration as read", res, err)
+	}
+	if !slices.Equal(f.h.calls, []string{"workspace_get"}) {
+		t.Fatalf("herdr calls = %v, want the workspace check only", f.h.calls)
+	}
+	wantNothingSent(t, f.h)
+	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
+	wantNoDirectorOpen(t, f.store)
+}

@@ -20,10 +20,13 @@ import (
 // directorHerdr is a fakeHerdr whose AgentStart also records the kind, the
 // pane, herdr's timeout, and the time left on its context, and runs
 // agentStartHook (when set) before it answers, so a test can change
-// director.jsonl while start waits on herdr (AC4). When failedCreateOutput is
-// set, a WorkspaceCreate or TabCreate that fails returns it along with the
-// error, as driver.Herdr returns the command's stdout with its error; the
-// double itself returns "" (the seats' tests keep that).
+// director.jsonl while start waits on herdr (AC4). workspaceCloseHook (when
+// set) runs before a WorkspaceClose answers, so a test can record what a
+// start still running records while stop closes (D14). When
+// failedCreateOutput is set, a WorkspaceCreate or TabCreate that fails
+// returns it along with the error, as driver.Herdr returns the command's
+// stdout with its error; the double itself returns "" (the seats' tests keep
+// that).
 type directorHerdr struct {
 	*fakeHerdr
 	agentStartKinds    []string
@@ -31,7 +34,16 @@ type directorHerdr struct {
 	agentStartTimeouts []int
 	agentStartLeft     []time.Duration // -1 when the context had no deadline
 	agentStartHook     func()
+	workspaceCloseHook func()
 	failedCreateOutput string
+}
+
+func (h *directorHerdr) WorkspaceClose(ctx context.Context, workspaceID string) error {
+	err := h.fakeHerdr.WorkspaceClose(ctx, workspaceID)
+	if h.workspaceCloseHook != nil {
+		h.workspaceCloseHook()
+	}
+	return err
 }
 
 func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string) (string, error) {
@@ -692,7 +704,10 @@ func TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr(t *testing.T) {
 
 // TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade pins the
 // cleanup of an id herdr handed out that start could not record: it closes
-// the workspace (and the pane) by the id it holds and records the stop.
+// the workspace (and the pane) by the id it holds and records the stop. The
+// id start holds is then not the recorded one, so this also pins that
+// start's cleanup records the stop with MarkStopped, which compares no ids,
+// and not with stop's MarkStoppedIfUnchanged (plan D14).
 func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 	cases := []struct {
 		name      string

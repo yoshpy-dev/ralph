@@ -271,9 +271,13 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 }
 
 // MarkStopped records that the pane and workspace of the open headless
-// registration id are closed, which `ralph org director stop` and start's
-// cleanup do once herdr has closed them (or never made them, or no longer
-// knows them), and returns whether id was the current registration. For the
+// registration id are closed, which start's cleanup does once herdr has
+// closed them (or never made them, or no longer knows them), and returns
+// whether id was the current registration. It compares no recorded id:
+// start's cleanup closes by the ids herdr handed it, which can include one
+// it failed to record, and only start itself records ids for its
+// registration. `ralph org director stop`, which read the registration
+// before it closed anything, calls MarkStoppedIfUnchanged instead. For the
 // current registration it appends detached and stopped as two lines of one
 // write (appendLocked), so the registration ends with its stop; for one that
 // is no longer current it appends stopped only. With no open headless
@@ -295,7 +299,22 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 // stopped: start and attach would refuse on it, stop would refuse it as
 // already stopped, and only a detach the human must think of would end it.
 func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
-	return s.markStopped(id, who, false)
+	return s.markStopped(id, who, false, nil)
+}
+
+// MarkStoppedIfUnchanged is MarkStopped for `ralph org director stop` (plan
+// D14): read is the registration as stop read it, without the lock, before
+// it closed anything, and read.ID is the id to stop. Under the lock, before
+// anything is written, it compares the workspace and pane ids recorded now
+// with read's. When either differs, a start still running recorded it after
+// stop's read, so stop did not close it, and recording the stop would mark a
+// live director stopped: it writes nothing and returns an error that wraps
+// ErrDirectorChangedDuringStop and names both reads. An id only goes from
+// empty to a value (recordHerdrID refuses one already recorded), so equal
+// ids mean nothing was recorded since. launched is not compared: it changes
+// nothing stop closes. Every other refusal is MarkStopped's.
+func (s *DirectorStore) MarkStoppedIfUnchanged(read DirectorRegistration, who DirectorWho) (wasCurrent bool, err error) {
+	return s.markStopped(read.ID, who, false, &read)
 }
 
 // MarkForceStopped is MarkStopped for `ralph org director stop --force`
@@ -303,13 +322,17 @@ func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool
 // workspace were not closed but left as they were, since herdr's labels did
 // not confirm them as this launch's or a close failed. The detached it
 // writes first for the current registration carries no force: unlike detach
-// --force's, it names the id it ends.
+// --force's, it names the id it ends. Like MarkStopped it compares no
+// recorded id (plan D14): a forced stop records that nothing more was
+// closed, which stays true when a start recorded an id meanwhile.
 func (s *DirectorStore) MarkForceStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
-	return s.markStopped(id, who, true)
+	return s.markStopped(id, who, true, nil)
 }
 
-// markStopped is MarkStopped, and with force MarkForceStopped.
-func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool) (wasCurrent bool, err error) {
+// markStopped is MarkStopped, with force MarkForceStopped, and with a
+// non-nil read MarkStoppedIfUnchanged: read is the registration as stop read
+// it, whose workspace and pane ids must still be the recorded ones.
+func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read *DirectorRegistration) (wasCurrent bool, err error) {
 	if _, ok := directorIDNumber(id); !ok {
 		return false, fmt.Errorf("org: director: stop: %q is not a registration id (d<N>, such as d1)", id)
 	}
@@ -326,6 +349,10 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool) (was
 		reg, err := fold.openHeadless(verb, id)
 		if err != nil {
 			return err
+		}
+		if read != nil && (reg.WorkspaceID != read.WorkspaceID || reg.PaneID != read.PaneID) {
+			return fmt.Errorf("org: director: %s: %w: %s had %s when stop read it, and has %s now",
+				verb, ErrDirectorChangedDuringStop, id, directorRecordedIDs(*read), directorRecordedIDs(*reg))
 		}
 		ts := s.now()
 		var events []DirectorEvent
@@ -345,6 +372,19 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool) (was
 		return false, err
 	}
 	return wasCurrent, nil
+}
+
+// directorRecordedIDs names the workspace and pane ids recorded for reg in
+// an error, "no workspace" and "no pane" for one not recorded.
+func directorRecordedIDs(reg DirectorRegistration) string {
+	ws, pane := "no workspace", "no pane"
+	if reg.WorkspaceID != "" {
+		ws = fmt.Sprintf("workspace %q", reg.WorkspaceID)
+	}
+	if reg.PaneID != "" {
+		pane = fmt.Sprintf("pane %q", reg.PaneID)
+	}
+	return ws + " and " + pane
 }
 
 // The refusals and failures of StartDirector that the CLI tells apart, each

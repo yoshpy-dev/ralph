@@ -33,6 +33,11 @@ var (
 	// label confirmed as this launch's), and closing it would end the command
 	// before it records the stop.
 	ErrDirectorStopSelfWorkspace = errors.New("run ralph org director stop from a terminal outside the director's workspace")
+	// ErrDirectorChangedDuringStop: a start still running recorded a
+	// workspace or pane of the registration after stop read it, so stop did
+	// not close it and recorded nothing (plan D14,
+	// MarkStoppedIfUnchanged). Running stop again closes what start recorded.
+	ErrDirectorChangedDuringStop = errors.New("a start in progress recorded a workspace or pane after stop read the registration")
 )
 
 // DirectorStopParams describes one StopDirector call: Store is the
@@ -94,15 +99,22 @@ type DirectorStopResult struct {
 // (closeConfirmedDirectorResources); a pane or workspace herdr no longer
 // knows counts as closed, and one not recorded is skipped. When any of that
 // does not finish, it returns a *DirectorCleanupError and writes nothing.
-// Otherwise MarkStopped writes stopped, with detached when the registration
-// is current. On a *DirectorCleanupError the result still carries
+// Otherwise MarkStoppedIfUnchanged writes stopped, with detached when the
+// registration is current, after it checks under the lock that the
+// workspace and pane ids recorded now are the ones read above (plan D14).
+// The read takes no lock, so a start still running can record its workspace
+// or pane after it, and this stop did not close that one: then nothing is
+// written, and the *DirectorCleanupError wraps ErrDirectorChangedDuringStop,
+// says what this stop closed, and names the stop to run again, which closes
+// what start recorded. On a *DirectorCleanupError the result still carries
 // Registration and the notes.
 //
 // With p.Force (plan D11), a label that is not this launch's, a get that
 // fails or times out, and a close that fails do not end the stop: it sends
 // no C-c and no close that it has not sent yet (a pane it closed stays
 // closed), records the stop with MarkForceStopped (stopped with force, and
-// detached first while the registration is current), and returns Forced.
+// detached first while the registration is current; it compares no ids),
+// and returns Forced.
 // That is the way out after herdr lost its state and renumbered its ids:
 // the recorded ids can name another launch's pane and workspace (AC5), and
 // without Force every stop refuses on them while the registration stays
@@ -147,25 +159,36 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 // to the pane and the workspace of res.Registration: it records the stop,
 // with force when closed did not finish and p.Force is set, and fills in
 // WasCurrent and, for a forced stop, Forced, CloseErr, and HerdrCommands.
-// Without p.Force a close that did not finish records nothing. A record that
-// fails is a *DirectorCleanupError; after a forced stop its StopCommand
-// carries --force, since the retry meets what this one met.
+// Without p.Force a close that did not finish records nothing. A stop whose
+// closes finished is recorded by MarkStoppedIfUnchanged against
+// res.Registration, the registration as StopDirector read it (plan D14); a
+// forced one by MarkForceStopped, which compares no ids. A record that fails
+// is a *DirectorCleanupError; after a forced stop its StopCommand carries
+// --force, since the retry meets what this one met. For a start that
+// recorded an id after the read (ErrDirectorChangedDuringStop), its
+// CleanupErr says what this stop closed, and its StopCommand is the stop to
+// run again.
 func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed directorClose) (DirectorStopResult, error) {
 	reg := res.Registration
 	forced := closed.err != nil
 	if forced && !p.Force {
 		return res, newDirectorCleanupError("stop", reg, closed, nil, closed.err, false)
 	}
-	mark := p.Store.MarkStopped
+	var wasCurrent bool
+	var err error
 	if forced {
-		mark = p.Store.MarkForceStopped
+		wasCurrent, err = p.Store.MarkForceStopped(p.ID, p.Who)
+	} else {
+		wasCurrent, err = p.Store.MarkStoppedIfUnchanged(reg, p.Who)
 	}
-	wasCurrent, err := mark(p.ID, p.Who)
 	switch {
 	case err != nil && forced:
 		e := newDirectorCleanupError("stop", reg, closed, nil, errors.Join(closed.err, fmt.Errorf("record %s stopped: %w", p.ID, err)), false)
 		e.StopCommand = directorStopCommand(reg.ID, true)
 		return res, e
+	case errors.Is(err, ErrDirectorChangedDuringStop):
+		return res, newDirectorCleanupError("stop", reg, closed, nil,
+			fmt.Errorf("record %s stopped: %w; this stop closed only what it had read (%s, %s, %s)", p.ID, err, closed.ctrlC, closed.pane, closed.workspace), false)
 	case err != nil:
 		return res, newDirectorCleanupError("stop", reg, closed, nil, fmt.Errorf("record %s stopped: %w", p.ID, err), false)
 	}
@@ -212,7 +235,11 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // records the stop afterwards; the CLI adds its --state-dir to it. For
 // Unconfirmed it carries --force (plan D11): the recorded ids may go on
 // naming another launch's pane and workspace, and a stop without it would
-// refuse on them again.
+// refuse on them again. A stop that closed what it read and then found that a
+// start recorded a workspace or pane meanwhile (CleanupErr wraps
+// ErrDirectorChangedDuringStop, plan D14) has nothing left open of what it
+// read, so HerdrCommands is empty, and StopCommand is the stop to run again,
+// which closes what start recorded.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
@@ -250,7 +277,11 @@ func (e *DirectorCleanupError) Error() string {
 		fmt.Fprintf(&b, "; close it by hand: %s", strings.Join(e.HerdrCommands, ", then "))
 		then = "afterwards record the stop with "
 	}
-	if e.StopCommand != "" {
+	switch {
+	case e.StopCommand == "":
+	case errors.Is(e.CleanupErr, ErrDirectorChangedDuringStop):
+		b.WriteString("; run " + e.StopCommand + " again to close what start recorded")
+	default:
 		b.WriteString("; " + then + e.StopCommand)
 	}
 	return b.String()

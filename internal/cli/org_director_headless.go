@@ -149,7 +149,10 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 			"records the director stopped anyway, closing nothing more, and prints\n" +
 			"what was left open and how to find it (herdr workspace list, the\n" +
 			"workspace labelled ralph_director_<token>); when the labels match,\n" +
-			"--force closes as usual. stop reads no ralph.toml (nor the main\n" +
+			"--force closes as usual. When a start that is still running records a\n" +
+			"workspace or pane after stop read the registration, stop has not closed\n" +
+			"it, so it records nothing and exits 1 with what it closed: run it again\n" +
+			"to close what start recorded. stop reads no ralph.toml (nor the main\n" +
 			"worktree's), so one that does not load does not block it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -334,10 +337,15 @@ func (rt *orgDirectorRuntime) stopDirector(cmd *cobra.Command, id string, force 
 // first writes what was done to them on w (stderr), and its stop command
 // gets this invocation's --state-dir; without --force, a close that failed
 // also names stop --force, which records the stop with what is still open
-// (an unconfirmed label's stop command carries --force already). A promoted
-// session's registration says how to detach it (notHeadlessError). An id
-// with no open headless registration names status, which lists them. A
-// write that may hold part of itself names status (notRestoredError).
+// (an unconfirmed label's stop command carries --force already). A stop
+// that found a workspace or pane a start recorded after stop read the
+// registration (org.ErrDirectorChangedDuringStop, plan D14) comes as a
+// *org.DirectorCleanupError too and is written the same way: it left nothing
+// open of what it read, so it names no --force, and its stop command is the
+// stop to run again. A promoted session's registration says how to detach
+// it (notHeadlessError). An id with no open headless registration names
+// status, which lists them. A write that may hold part of itself names
+// status (notRestoredError).
 func (rt *orgDirectorRuntime) stopError(w io.Writer, id string, force bool, res org.DirectorStopResult, err error) error {
 	var cleanup *org.DirectorCleanupError
 	switch {

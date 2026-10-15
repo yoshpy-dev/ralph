@@ -1720,6 +1720,96 @@ func TestDirectorMarkForceStopped_OnlyTheStoppedLineCarriesForce(t *testing.T) {
 	})
 }
 
+// recordForTest records, for d1, each step in order as start records it:
+// "workspace" (w1), "pane" (p1), or "launched".
+func recordForTest(t *testing.T, s *DirectorStore, steps ...string) {
+	t.Helper()
+	for _, step := range steps {
+		var err error
+		switch step {
+		case "workspace":
+			err = s.RecordWorkspace("d1", "w1", testDirectorWho)
+		case "pane":
+			err = s.RecordPane("d1", "p1", testDirectorWho)
+		case "launched":
+			var still bool
+			if still, err = s.MarkLaunched("d1", testDirectorWho); err == nil && !still {
+				err = errors.New("d1 is no longer the current registration")
+			}
+		default:
+			t.Fatalf("unknown step %q", step)
+		}
+		if err != nil {
+			t.Fatalf("record %s: %v", step, err)
+		}
+	}
+}
+
+// MarkStoppedIfUnchanged (plan D14) refuses, writing nothing, when the
+// workspace or the pane recorded now is not the one in the registration as
+// stop read it: a start still running recorded it after the read, so stop did
+// not close it. Either id alone refuses, and the registration stays current
+// and open. With the ids stop read it writes what MarkStopped writes, also
+// when launched came after the read (launched changes nothing stop closes);
+// after a refusal, a stop that reads again is recorded.
+func TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead(t *testing.T) {
+	const refusal = "org: director: stop d1: a start in progress recorded a workspace or pane after stop read the registration: "
+	cases := []struct {
+		name              string
+		atRead, afterRead []string
+		wantErr           string // "" when the stop is recorded
+		wantOpen          string // the open registration after a refusal
+	}{
+		{"nothing at the read, then the workspace, the pane, and launched", nil, []string{"workspace", "pane", "launched"},
+			refusal + `d1 had no workspace and no pane when stop read it, and has workspace "w1" and pane "p1" now`, "d1 running ws=w1 pane=p1"},
+		{"the workspace at the read, then the pane and launched", []string{"workspace"}, []string{"pane", "launched"},
+			refusal + `d1 had workspace "w1" and no pane when stop read it, and has workspace "w1" and pane "p1" now`, "d1 running ws=w1 pane=p1"},
+		{"the pane at the read, then the workspace", []string{"pane"}, []string{"workspace"},
+			refusal + `d1 had no workspace and pane "p1" when stop read it, and has workspace "w1" and pane "p1" now`, "d1 starting ws=w1 pane=p1"},
+		{"both at the read, then launched", []string{"workspace", "pane"}, []string{"launched"}, "", ""},
+		{"nothing at the read and nothing after", nil, nil, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			mustAttachHeadless(t, s)
+			recordForTest(t, s, tc.atRead...)
+			read := *mustReadDirector(t, s).Current
+			recordForTest(t, s, tc.afterRead...)
+			trail := directorTrail(t, s)
+			before := readDirectorFile(t, s)
+
+			wasCurrent, err := s.MarkStoppedIfUnchanged(read, testDirectorWho)
+			if tc.wantErr == "" {
+				if err != nil || !wasCurrent {
+					t.Fatalf("MarkStoppedIfUnchanged = %v, %v; want true, nil", wasCurrent, err)
+				}
+				wantTrail(t, s, append(trail, "detached d1", "stopped d1")...)
+				if res := mustReadDirector(t, s); res.Current != nil || res.OpenHeadless != nil {
+					t.Fatalf("Read = current %+v, open %q; want nothing current or open", res.Current, openHeadlessSummary(res))
+				}
+				return
+			}
+			if !errors.Is(err, ErrDirectorChangedDuringStop) || errors.Is(err, ErrDirectorNoOpenHeadless) || err.Error() != tc.wantErr || wasCurrent {
+				t.Fatalf("MarkStoppedIfUnchanged = %v, %v;\nwant false and %q", wasCurrent, err, tc.wantErr)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl changed to %q", got)
+			}
+			res := mustReadDirector(t, s)
+			if currentDirectorID(res) != "d1" || !reflect.DeepEqual(openHeadlessSummary(res), []string{tc.wantOpen}) {
+				t.Fatalf("Read = current %+v, open %q; want d1 current and %q open", res.Current, openHeadlessSummary(res), tc.wantOpen)
+			}
+
+			// A stop that reads again finds the ids recorded now and is recorded.
+			if wasCurrent, err := s.MarkStoppedIfUnchanged(*res.Current, testDirectorWho); err != nil || !wasCurrent {
+				t.Fatalf("MarkStoppedIfUnchanged after a new read = %v, %v; want true, nil", wasCurrent, err)
+			}
+			wantTrail(t, s, append(trail, "detached d1", "stopped d1")...)
+		})
+	}
+}
+
 func TestDirectorMarkStopped_RefusesWithNoOpenHeadlessRegistration(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
