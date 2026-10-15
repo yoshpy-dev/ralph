@@ -24,16 +24,27 @@ import (
 // the stub herdr on PATH and a working directory of its own with no
 // ralph.toml, which the director runs in (the ledger is not a main
 // worktree's). It returns the state dir, the herdr stub's log, and that
-// directory as os.Getwd spells it.
+// directory as os.Getwd spells it. RALPH_ORG_AGMSG_HOME is unset
+// (unsetOrgAgmsgHomeEnv).
 func directorStartLedger(t *testing.T) (stateDir, herdrLog, cwd string) {
 	t.Helper()
 	herdrLog, _ = setupOrgStubPATH(t)
+	unsetOrgAgmsgHomeEnv(t)
 	t.Chdir(t.TempDir())
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return t.TempDir(), herdrLog, cwd
+}
+
+// unsetOrgAgmsgHomeEnv unsets RALPH_ORG_AGMSG_HOME, which setupOrgStubPATH
+// points at the stub agmsg: director start runs no agmsg and warns on
+// stderr while the variable is set (D13), so its tests run without it
+// unless they test that warning.
+func unsetOrgAgmsgHomeEnv(t *testing.T) {
+	t.Helper()
+	setOrUnsetEnv(t, orgAgmsgHomeEnv, "", true)
 }
 
 // writeDirectorConfig writes content as a ralph.toml under t.TempDir() and
@@ -129,23 +140,22 @@ func resetStubHerdrState(t *testing.T) {
 // records attached (launch herdr, a token, the model, the permission mode,
 // and who ran it), workspace_created, pane_created, and launched, runs
 // herdr's workspace create, tab create, and agent start with the token's
-// names, the permission flags (and codex's --add-dir for a ledger outside
-// the cwd), --model, and the prompt pointer in that order, writes the
-// prompt file, and prints the registration, the pane, and the stop command
-// with --state-dir. Nothing goes to the manifest or the model receipts.
-// director status then shows it running with its pane, workspace, and
-// model, and stop closes the pane and the workspace and ends the
-// registration.
+// names, the permission flags, --model, and the prompt pointer in that
+// order, writes the prompt file, and prints the registration, the pane, and
+// the stop command with --state-dir. A codex director runs guarded only
+// (D12): no permission flag and no --add-dir, though the ledger is outside
+// the cwd. Nothing goes to the manifest or the model receipts. director
+// status then shows it running with its pane, workspace, and model, and
+// stop closes the pane and the workspace and ends the registration.
 func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 	for _, tc := range []struct {
 		driver, model string
 		config        string // the ralph.toml --config names ("" for none)
-		permArgs      func(stateDir string) string
+		mode          string
+		permArgs      string // the permission flags, each followed by a space
 	}{
-		{"claude", "opus", "", func(string) string { return "--permission-mode bypassPermissions" }},
-		{"codex", "gpt-6-astra", "[org.permissions]\ncodex_verified = true\n", func(stateDir string) string {
-			return "--sandbox workspace-write --ask-for-approval never --add-dir " + stateDir
-		}},
+		{"claude", "opus", "", org.PermissionModeAutonomous, "--permission-mode bypassPermissions "},
+		{"codex", "gpt-6-astra", "[org.permissions]\ncodex_verified = true\n\n[org.permissions.roles]\ndirector = \"guarded\"\n", org.PermissionModeGuarded, ""},
 	} {
 		t.Run(tc.driver, func(t *testing.T) {
 			stateDir, herdrLog, cwd := directorStartLedger(t)
@@ -163,16 +173,16 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 				t.Fatalf("director.jsonl = %v; want %v", got, want)
 			}
 			att := events[0]
-			if att.Launch != org.DirectorLaunchHerdr || len(att.Token) != 12 || att.Model != tc.model || att.PermissionMode != org.PermissionModeAutonomous ||
+			if att.Launch != org.DirectorLaunchHerdr || len(att.Token) != 12 || att.Model != tc.model || att.PermissionMode != tc.mode ||
 				att.Driver != tc.driver || att.User != "alice" || att.Cwd != cwd || att.HerdrPane || att.PaneID != "" {
-				t.Errorf("attached = %+v; want launch herdr, a token, %s, autonomous, by alice in %s, no pane", att, tc.model, cwd)
+				t.Errorf("attached = %+v; want launch herdr, a token, %s, %s, by alice in %s, no pane", att, tc.model, tc.mode, cwd)
 			}
 			if events[1].WorkspaceID != "ws-stub-1" || events[2].PaneID != "pane-stub-1" {
 				t.Errorf("workspace_created and pane_created = %+v, %+v; want ws-stub-1 and pane-stub-1", events[1], events[2])
 			}
 			tok := att.Token
 			suffix := " --state-dir '" + stateDir + "'"
-			wantOut := "started d1 (driver=" + tc.driver + ", model=" + tc.model + ", permission=autonomous, pane=pane-stub-1, workspace=ws-stub-1)\n" +
+			wantOut := "started d1 (driver=" + tc.driver + ", model=" + tc.model + ", permission=" + tc.mode + ", pane=pane-stub-1, workspace=ws-stub-1)\n" +
 				"talk to the director in herdr: pane pane-stub-1, in the tab director_" + tok + " of the workspace labelled ralph_director_" + tok + "\n" +
 				"stop it with: ralph org director stop --id d1" + suffix + "\n"
 			if stdout != wantOut {
@@ -188,8 +198,8 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 			wantHerdr := []string{
 				"workspace create --cwd " + cwd + " --label ralph_director_" + tok,
 				"tab create --workspace ws-stub-1 --cwd " + cwd + " --label director_" + tok,
-				"agent start director_" + tok + " --kind " + tc.driver + " --pane pane-stub-1 --timeout 60000 -- " + tc.permArgs(stateDir) +
-					" --model " + tc.model + " " + org.PromptFilePointer(prompt),
+				"agent start director_" + tok + " --kind " + tc.driver + " --pane pane-stub-1 --timeout 60000 -- " + tc.permArgs +
+					"--model " + tc.model + " " + org.PromptFilePointer(prompt),
 			}
 			if got := readLogLines(t, herdrLog); !slices.Equal(got, wantHerdr) {
 				t.Errorf("herdr calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(wantHerdr, "\n"))
@@ -204,7 +214,7 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 			report := directorReportOf(t, jsonOut)
 			if reg := report.Registration; report.State != "attached" || reg == nil || reg.ID != "d1" || reg.Launch != org.DirectorLaunchHerdr ||
 				reg.State != org.DirectorStateRunning || reg.PaneID != "pane-stub-1" || reg.WorkspaceID != "ws-stub-1" || reg.Model != tc.model ||
-				reg.Token != tok || reg.PermissionMode != org.PermissionModeAutonomous || len(report.OpenHeadless) != 0 {
+				reg.Token != tok || reg.PermissionMode != tc.mode || len(report.OpenHeadless) != 0 {
 				t.Errorf("director status --json = %s; want d1 running in pane-stub-1 and ws-stub-1 with %s", jsonOut, tc.model)
 			}
 
@@ -228,10 +238,10 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 // AC2 and AC6 through the CLI: director start refuses, with exit 1, nothing
 // on stdout, director.jsonl as it was, and no herdr call, when
 // [org.director].enabled is false (naming the file), for a --model
-// [org.roles].director does not allow, for codex autonomous before
-// codex_verified, while a promoted session is attached (naming detach), while
-// a headless registration is still starting (naming stop), and inside a
-// herdr pane.
+// [org.roles].director does not allow, for codex autonomous and edits
+// whatever codex_verified says (D12), while a promoted session is attached
+// (naming detach), while a headless registration is still starting (naming
+// stop), and inside a herdr pane.
 func TestOrgDirectorStart_RefusedWithNothingWritten(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -253,9 +263,20 @@ func TestOrgDirectorStart_RefusedWithNothingWritten(t *testing.T) {
 		}},
 		{"codex autonomous before codex_verified", func(*testing.T, string) []string {
 			return []string{"--driver", "codex", "--model", "gpt-6-astra"}
-		}, nil, func(string) []string {
+		}, org.ErrDirectorCodexWorkspaceWrite, func(string) []string {
 			return []string{`org: director: start: permission mode "autonomous" of role director ([org.permissions.roles].director, else [org.permissions].default): ` +
-				`org: codex seat permission mode "autonomous" requires [org.permissions].codex_verified=true`}
+				"a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: " +
+				"autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, " +
+				"so the director could not start a feature org (ralph org start --plan runs git worktree add); " +
+				`set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, ` +
+				`or start a claude director (--driver claude); a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall`}
+		}},
+		{"codex edits with codex_verified", func(t *testing.T, _ string) []string {
+			return []string{"--driver", "codex", "--model", "gpt-6-astra", "--config",
+				writeDirectorConfig(t, "[org.permissions]\ndefault = \"edits\"\ncodex_verified = true\n")}
+		}, org.ErrDirectorCodexWorkspaceWrite, func(string) []string {
+			return []string{`org: director: start: permission mode "edits" of role director ([org.permissions.roles].director, else [org.permissions].default): ` +
+				"a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: "}
 		}},
 		{"a promoted session is attached", func(t *testing.T, stateDir string) []string {
 			setEscalateWatch(t, acceptingWatchLiveness())
@@ -463,6 +484,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			herdrLog, _ := setupOrgStubPATH(t)
+			unsetOrgAgmsgHomeEnv(t)
 			r := newLegacyLedgerRepo(t)
 			writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), tc.mainToml)
 			if tc.wtToml != "" {
@@ -529,6 +551,140 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 				t.Errorf("prompt file %s says --config for a start without one:\n%s", prompt, data)
 			}
 		})
+	}
+}
+
+// AC15 through the CLI (D13): a --config whose [org].agmsg_home is a
+// relative path (a bare "~" included: only "~/" is expanded) is refused with
+// exit 1, naming the value and the file, before the --model fallback and the
+// watch gate, which is the real one here: nothing on stdout or stderr, no
+// director.jsonl, no prompt file, no herdr call, and no watch launched. An
+// absolute value, one that starts with "~/", and an empty one (config.Load
+// gives it the default) pass.
+func TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name, home string // home is agmsg_home's value; "<abs>" is an absolute path
+		refused    bool
+	}{
+		{"a relative path", "agmsg/home", true},
+		{"a ./ path", "./agmsg", true},
+		{"a bare ~", "~", true},
+		{"an absolute path", "<abs>", false},
+		{"a ~/ path", "~/.agents/skills/agmsg", false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.refused {
+				useRealOrgWatchGate(t)
+			}
+			launches := 0
+			setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+				launches++
+				return nil, errors.New("no launch in this test")
+			})
+			stateDir, herdrLog, _ := directorStartLedger(t)
+			home := tc.home
+			if home == "<abs>" {
+				home = filepath.Join(t.TempDir(), "agmsg")
+			}
+			configPath := writeDirectorConfig(t, fmt.Sprintf("[org]\nagmsg_home = %q\n", home))
+
+			stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--state-dir", stateDir, "--config", configPath)
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("director start with agmsg_home %q: %v (stdout: %s stderr: %s)", home, err, stdout, stderr)
+				}
+				if got := directorEventKinds(directorEventsIn(t, stateDir)); len(got) != 4 || got[3] != "launched d1" {
+					t.Errorf("director.jsonl = %v; want d1 launched", got)
+				}
+				return
+			}
+			want := fmt.Sprintf("org: director start: [org].agmsg_home %q in the --config file %s is a relative path: the director runs in the ledger's main worktree root "+
+				"(when the ledger has one) and resolves it from there, while the watch resolves it from this directory, so the two would use different agmsg installs; "+
+				"give an absolute path (or one that starts with ~/)", home, configPath)
+			if err == nil || err.Error() != want {
+				t.Fatalf("director start with agmsg_home %q = %v; want %q", home, err, want)
+			}
+			if stdout != "" || stderr != "" {
+				t.Errorf("stdout = %q, stderr = %q; want nothing (no --model fallback warning)", stdout, stderr)
+			}
+			if launches != 0 {
+				t.Errorf("the watch launcher was called %d times; want none", launches)
+			}
+			if got := dirNames(t, stateDir); len(got) != 0 {
+				t.Errorf("ledger entries = %v; want none (no director.jsonl, prompt file, or watch file)", got)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("herdr calls = %v; want none", lines)
+			}
+		})
+	}
+}
+
+// AC15 through the CLI (D13): without --config, a relative [org].agmsg_home
+// in the main worktree's ralph.toml is not refused, since the director and
+// the watch both read that file and resolve it from that root.
+func TestOrgDirectorStart_ARelativeAgmsgHomeWithoutConfigIsNotRefused(t *testing.T) {
+	setupOrgStubPATH(t)
+	unsetOrgAgmsgHomeEnv(t)
+	r := newLegacyLedgerRepo(t)
+	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), "[org]\nagmsg_home = \"agmsg/home\"\n")
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus")
+	if err != nil {
+		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	if !strings.HasPrefix(stdout, "started d1 (driver=claude, ") || stderr != "" {
+		t.Errorf("stdout = %q, stderr = %q; want d1 started and nothing on stderr", stdout, stderr)
+	}
+}
+
+// AC15 through the CLI (D13): with RALPH_ORG_AGMSG_HOME set, start warns
+// once on stderr that the director's herdr pane does not get it and names
+// [org].agmsg_home, then starts the director.
+func TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector(t *testing.T) {
+	stateDir, _, _ := directorStartLedger(t)
+	t.Setenv(orgAgmsgHomeEnv, filepath.Join(t.TempDir(), "agmsg"))
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	want := "warning: director start: RALPH_ORG_AGMSG_HOME is set here, but the director's herdr pane has the herdr server's environment, " +
+		"so the director does not get it from here; [org].agmsg_home in the ralph.toml the director reads (the --config file, when given) reaches it\n"
+	if stderr != want {
+		t.Errorf("stderr = %q; want %q", stderr, want)
+	}
+	if !strings.HasPrefix(stdout, "started d1 (driver=claude, ") {
+		t.Errorf("stdout = %q; want d1 started", stdout)
+	}
+}
+
+// The help of director start states D12 (a codex director runs guarded
+// only, why, the two ways out, and the guarded caveat) and D13 (the
+// relative agmsg_home refusal and the RALPH_ORG_AGMSG_HOME note), and no
+// longer says that codex_verified unlocks autonomous and edits.
+func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
+	out, err := runOrgCmd(t, "director", "start", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"A codex director runs only in guarded: start refuses autonomous and edits whatever [org.permissions].codex_verified says, " +
+			"because they run codex under --sandbox workspace-write, which keeps .git read-only, so the director could not start a feature org " +
+			"(ralph org start --plan runs git worktree add).",
+		`Set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) write .git and reach the network, or use --driver claude;`,
+		`a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall.`,
+		"RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
+		"for a codex director in autonomous or edits, when the --config file's [org].agmsg_home is a relative path (neither absolute nor starting with ~/",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("director start --help does not say %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(help, "need [org.permissions].codex_verified") {
+		t.Errorf("director start --help still says codex_verified unlocks autonomous and edits:\n%s", out)
 	}
 }
 
@@ -742,7 +898,7 @@ func TestOrgDirectorStop_RenumberedHerdrIDsAreRefusedThenForced(t *testing.T) {
 	stateB := t.TempDir()
 	tokA := startDirectorOK(t, stateA, "--driver", "claude", "--model", "opus")
 	resetStubHerdrState(t)
-	tokB := startDirectorOK(t, stateB, "--driver", "codex", "--model", "gpt-6-astra", "--config", writeDirectorConfig(t, "[org.permissions]\ncodex_verified = true\n"))
+	tokB := startDirectorOK(t, stateB, "--driver", "codex", "--model", "gpt-6-astra", "--config", writeDirectorConfig(t, "[org.permissions.roles]\ndirector = \"guarded\"\n"))
 	if tokA == tokB {
 		t.Fatalf("both starts have token %s; want one per start", tokA)
 	}

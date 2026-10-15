@@ -52,7 +52,11 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
   meta-repo run used an absolute path; a `~` prefix was not tested. List
   the `db` directory itself: a broader root such as your home directory
   does not help, because codex keeps `.git`, `.agents`, and `.codex`
-  directories under a writable root read-only, recursively. If
+  directories under a writable root read-only, recursively. For the same
+  reason `ralph org director start` refuses a codex headless director in
+  edits and autonomous, whatever `codex_verified` says: under
+  `workspace-write` it could not run `git worktree add` to start a feature
+  org, so a codex director runs guarded only. If
   `AGMSG_STORAGE_PATH` is set, agmsg keeps its database there instead, so
   list that directory. `ralph doctor`'s "Codex sandbox (agmsg writable
   root)" check warns when a codex seat of this project could run under

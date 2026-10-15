@@ -173,9 +173,10 @@ func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
 // a workspace-write codex leader seat (autonomous or edits) gets --add-dir
 // <state dir> only when the state dir is outside its cwd, compared with
 // symlinks resolved; implementer, reviewer, and unknown roles, guarded codex
-// seats, and claude seats never get it. The headless director (plan
-// 2026-10-15-org-director-start, AC6) follows the leader's rule: it runs
-// ralph org verbs and writes the ledger too.
+// seats, and claude seats never get it. Role director never gets it either,
+// in any mode (plan 2026-10-15-org-director-start, D12 and AC6):
+// StartDirector refuses a codex director in autonomous and edits, so it
+// never runs under workspace-write.
 func TestCodexWritableRootArgs(t *testing.T) {
 	root := t.TempDir()
 	mainWT := filepath.Join(root, "main")
@@ -229,8 +230,8 @@ func TestCodexWritableRootArgs(t *testing.T) {
 		{"reviewer codex edits, state dir outside cwd", "reviewer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
 		{"unknown role codex autonomous, state dir outside cwd", "worker", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
 		{"empty role codex autonomous, state dir outside cwd", "", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
-		{"director codex autonomous, state dir outside cwd", DirectorRole, "codex", PermissionModeAutonomous, linkedWT, stateDir, addDir},
-		{"director codex edits, state dir outside cwd", DirectorRole, "codex", PermissionModeEdits, linkedWT, stateDir, addDir},
+		{"director codex autonomous, state dir outside cwd", DirectorRole, "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"director codex edits, state dir outside cwd", DirectorRole, "codex", PermissionModeEdits, linkedWT, stateDir, nil},
 		{"director codex edits, state dir under cwd", DirectorRole, "codex", PermissionModeEdits, mainWT, stateDir, nil},
 		{"director codex autonomous, cwd spelled through a symlink", DirectorRole, "codex", PermissionModeAutonomous, mainLink, stateDir, nil},
 		{"director codex guarded, state dir outside cwd", DirectorRole, "codex", PermissionModeGuarded, linkedWT, stateDir, nil},

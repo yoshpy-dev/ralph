@@ -137,10 +137,23 @@ start の設定と、director が動く場所は次のとおり。
   選べない。読めない `ralph.toml` はエラーになる。
 - permission mode は `[org.permissions.roles].director`、なければ
   `[org.permissions].default`。template の既定は `autonomous` なので、claude の
-  director は `--permission-mode bypassPermissions` で動く。codex の
-  `autonomous` と `edits` には、座席と同じく `[org.permissions].codex_verified`
-  が要る。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
+  director は `--permission-mode bypassPermissions` で動く。codex の director は
+  `guarded` でしか動かない。`autonomous` と `edits` では codex が
+  `--sandbox workspace-write` で動き、その sandbox は `.git` を読むだけにする。
+  director が `ralph org start --plan`(`git worktree add` を打つ)で機能の org
+  を立てられないので、start は `codex_verified` によらず断る。道は 2 つある。
+  `[org.permissions.roles].director = "guarded"` にして、人の codex の設定
+  (`~/.codex/config.toml`)で `.git` への書き込みと network を許すか、claude の
+  director(`--driver claude`)を使う。guarded の codex の director は人の codex
+  の設定に従うので、そこが `sandbox_mode = "workspace-write"` なら同じ壁に
+  当たる。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
   この skill の指示だけで、permission では止まらない。
+- `--config` の設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでも
+  なければ、start は断る。director は main worktree のルートからその値を解き、
+  見張りは start を打った場所から解くので、別の agmsg を使ってしまう。絶対パス
+  で書く。人の shell の `RALPH_ORG_AGMSG_HOME` は director に届かない(herdr の
+  pane の環境は herdr server のもの)。設定されていれば start は警告を 1 行出して
+  続ける。director に届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 

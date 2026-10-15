@@ -374,7 +374,7 @@ func orgWatchChildAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string)
 		}
 		home = cfgAgmsgHome
 	}
-	if home == "" || filepath.IsAbs(home) || strings.HasPrefix(home, "~/") {
+	if !agmsgHomeIsRelative(home) {
 		return "", nil
 	}
 	abs, err := filepath.Abs(home)
@@ -382,6 +382,18 @@ func orgWatchChildAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string)
 		return "", fmt.Errorf("make the agmsg home %s absolute: %w", home, err)
 	}
 	return abs, nil
+}
+
+// agmsgHomeIsRelative reports whether home, an agmsg home as
+// RALPH_ORG_AGMSG_HOME or [org].agmsg_home spells it, names a directory
+// relative to the working directory of the process that reads it: it is
+// not empty, not absolute, and does not start with "~/", which
+// driver.ResolveAgmsgHome expands against the user's home (a bare "~" is
+// not expanded, so it counts as relative). orgWatchChildAgmsgHome makes such
+// a value absolute for a watch that runs in another directory, and director
+// start refuses one in a --config (plan 2026-10-15-org-director-start, D13).
+func agmsgHomeIsRelative(home string) bool {
+	return home != "" && !filepath.IsAbs(home) && !strings.HasPrefix(home, "~/")
 }
 
 // launchOrgWatch is orgWatchLaunch in production: the running ralph binary

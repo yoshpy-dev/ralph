@@ -357,6 +357,13 @@ var (
 	// ErrDirectorStartInsideHerdr: start ran inside a herdr pane
 	// (HERDR_PANE_ID is set).
 	ErrDirectorStartInsideHerdr = errors.New("run ralph org director start from a terminal outside herdr")
+	// ErrDirectorCodexWorkspaceWrite: the driver is codex and role
+	// director's permission mode is autonomous or edits, refused whatever
+	// [org.permissions].codex_verified says (plan D12). Both modes run codex
+	// under --sandbox workspace-write, which keeps .git read-only, so the
+	// director could not start a feature org (ralph org start --plan runs
+	// git worktree add).
+	ErrDirectorCodexWorkspaceWrite = errors.New("a codex director runs only in permission mode guarded")
 	// ErrDirectorReplacedDuringStart: by the time start's agent was up, its
 	// registration was no longer the current one (a human's attach
 	// --replace, detach --force, or stop came in while start ran), so start
@@ -366,8 +373,8 @@ var (
 
 // DirectorStartParams describes one StartDirector call. Store is the
 // director.jsonl of the ledger: its directory, made absolute, is the org
-// state dir the director is given (--state-dir in its prompt, and codex's
-// --add-dir), and the prompt file goes under <state dir>/prompts/. Model is
+// state dir the director is given (--state-dir in its prompt), and the
+// prompt file goes under <state dir>/prompts/. Model is
 // resolved by the caller. Cwd is the pane's directory, made absolute against
 // the caller's. ConfigPath is the ralph.toml the caller was given with
 // --config, "" when none was: made absolute against the caller's directory,
@@ -425,10 +432,11 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // It refuses, before anything is written and before any herdr call, when
 // [org.director].enabled is false (ErrDirectorDisabled), when HERDR_PANE_ID
 // is set (ErrDirectorStartInsideHerdr), for a driver other than claude and
-// codex or an empty model, when the permission mode of role director
-// ([org.permissions.roles].director, else [org.permissions].default) does not
-// map to the driver's flags (permissionArgsForDriver: codex is fail-closed
-// until codex_verified), while a registration is current
+// codex or an empty model, for codex when the permission mode of role
+// director ([org.permissions.roles].director, else
+// [org.permissions].default) is autonomous or edits, whatever codex_verified
+// says (ErrDirectorCodexWorkspaceWrite, D12), when that mode does not map to
+// the driver's flags (permissionArgsForDriver), while a registration is current
 // (*DirectorAttachedError), and when o.WatchGate refuses. The current
 // registration is checked twice: first by a read without the lock before
 // the watch gate, so a start it refuses launches no watch (the gate the CLI
@@ -447,8 +455,8 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //     of its ralph org commands, written to
 //     <state dir>/prompts/director_<token>.md
 //  5. the agent start of DirectorAgentName(token) on that pane with the
-//     permission flags, codexWritableRootArgs, --model, and the prompt
-//     file's PromptFilePointer, in this order
+//     permission flags, --model, and the prompt file's PromptFilePointer,
+//     in this order (no --add-dir: a codex director runs guarded only)
 //  6. MarkLaunched
 //
 // WorkspaceCreate and TabCreate each run under driverCallTimeout. The agent
@@ -486,8 +494,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
 	}
-	agentArgs := append(append([]string{}, permArgs...), codexWritableRootArgs(DirectorRole, p.Driver, mode, p.Cwd, stateDir)...)
-	agentArgs = append(agentArgs, "--model", p.Model, PromptFilePointer(promptPath))
+	agentArgs := append(append([]string{}, permArgs...), "--model", p.Model, PromptFilePointer(promptPath))
 	retries, err := r.startAgent(agentArgs)
 	if err != nil {
 		return DirectorStartResult{}, r.abort(err)
@@ -529,6 +536,16 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permA
 		return "", nil, "", errors.New("org: director: start: the model is empty")
 	}
 	mode = ResolvePermissionMode(o.Config, DirectorRole)
+	// Before permissionArgsForDriver, so with codex_verified false this
+	// refusal, not the codex_verified one, says why (plan D12).
+	if p.Driver == DirectorDriverCodex && (mode == PermissionModeAutonomous || mode == PermissionModeEdits) {
+		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): "+
+			"%w, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, "+
+			"so the director could not start a feature org (ralph org start --plan runs git worktree add); "+
+			"set [org.permissions.roles].%s = %q and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, "+
+			"or start a claude director (--driver %s); a guarded codex director follows that config, so under sandbox_mode = \"workspace-write\" it meets the same wall",
+			mode, DirectorRole, DirectorRole, ErrDirectorCodexWorkspaceWrite, DirectorRole, PermissionModeGuarded, DirectorDriverClaude)
+	}
 	if permArgs, err = permissionArgsForDriver(o.Config, p.Driver, mode); err != nil {
 		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): %w",
 			mode, DirectorRole, DirectorRole, err)

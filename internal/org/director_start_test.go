@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -193,32 +194,33 @@ var directorCloseCalls = []string{"pane_get", "tab_get", "workspace_get", "works
 // TestStartDirector_LaunchesInAWorkspaceOfItsOwn pins AC1 for both drivers:
 // the registration comes first, then the workspace and the tab labelled with
 // the launch token, each recorded as herdr hands it out, then the agent
-// start with the permission flags, codex's --add-dir for a ledger outside
-// the cwd, --model, and the prompt file's pointer in that order, then
-// launched. Nothing but director.jsonl, its lock, and the prompt file is
+// start with the permission flags, --model, and the prompt file's pointer in
+// that order, then launched. A codex director runs guarded only (D12), so it
+// gets no permission flag and no --add-dir, though the ledger is outside
+// the cwd. Nothing but director.jsonl, its lock, and the prompt file is
 // written: no manifest, no model receipt.
 func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 	const token = directorTestToken
 	cases := []struct {
 		driver, model string
-		verified      bool
-		wantPerm      func(f *dirStartFixture) []string
+		perms         config.OrgPermissionsConfig
+		wantMode      string
+		wantPerm      []string
 	}{
-		{DirectorDriverClaude, "opus", false, func(*dirStartFixture) []string { return []string{"--permission-mode", "bypassPermissions"} }},
-		{DirectorDriverCodex, "gpt-5-codex", true, func(f *dirStartFixture) []string {
-			return append(slices.Clone(codexAutonomousArgs), "--add-dir", f.dir)
-		}},
+		{DirectorDriverClaude, "opus", config.OrgPermissionsConfig{}, PermissionModeAutonomous, []string{"--permission-mode", "bypassPermissions"}},
+		{DirectorDriverCodex, "gpt-5-codex", config.OrgPermissionsConfig{CodexVerified: true, Roles: map[string]string{DirectorRole: PermissionModeGuarded}},
+			PermissionModeGuarded, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.driver, func(t *testing.T) {
 			f := newDirStartFixture(t, token)
-			f.o.Config.Permissions.CodexVerified = tc.verified
+			f.o.Config.Permissions = tc.perms
 			res := f.mustStart(t, tc.driver, tc.model)
 
 			reg := res.Registration
 			if reg.ID != "d1" || reg.State != DirectorStateRunning || reg.Token != token || reg.Driver != tc.driver || reg.Model != tc.model ||
-				reg.PermissionMode != PermissionModeAutonomous || reg.WorkspaceID != "ws-1" || reg.PaneID != "pane-1" || !reg.Headless() {
-				t.Fatalf("Registration = %+v, want d1 running with ws-1, pane-1, the token, model, and autonomous", reg)
+				reg.PermissionMode != tc.wantMode || reg.WorkspaceID != "ws-1" || reg.PaneID != "pane-1" || !reg.Headless() {
+				t.Fatalf("Registration = %+v, want d1 running with ws-1, pane-1, the token, model, and %s", reg, tc.wantMode)
 			}
 			wantPrompt := filepath.Join(f.dir, "prompts", "director_"+token+".md")
 			if res.AgentName != "director_"+token || res.TabLabel != "director_"+token || res.WorkspaceLabel != "ralph_director_"+token ||
@@ -247,7 +249,7 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 			if left := h.agentStartLeft[0]; left <= 0 || left > 5*time.Second {
 				t.Fatalf("agent start context had %v left, want a deadline within the 5s timeout", left)
 			}
-			wantArgs := append(tc.wantPerm(f), "--model", tc.model, PromptFilePointer(wantPrompt))
+			wantArgs := append(slices.Clone(tc.wantPerm), "--model", tc.model, PromptFilePointer(wantPrompt))
 			if !slices.Equal(h.agentStartArgs[0], wantArgs) {
 				t.Fatalf("agent args = %q, want %q", h.agentStartArgs[0], wantArgs)
 			}
@@ -267,7 +269,7 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 			var attached DirectorEvent
 			if err := json.Unmarshal([]byte(directorFileLines(t, f.store)[0]), &attached); err != nil ||
 				attached.Launch != DirectorLaunchHerdr || attached.Token != token || attached.Model != tc.model ||
-				attached.PermissionMode != PermissionModeAutonomous || attached.PaneID != "" || attached.User != testDirectorWho.User {
+				attached.PermissionMode != tc.wantMode || attached.PaneID != "" || attached.User != testDirectorWho.User {
 				t.Fatalf("attached = %+v (%v), want launch herdr, the token, model, permission mode, and no pane", attached, err)
 			}
 			if got := dirEntryNames(t, f.dir); !slices.Equal(got, []string{"director.jsonl", "director.lock", "prompts"}) {
@@ -325,20 +327,22 @@ func TestStartDirector_CarriesTheConfigIntoThePrompt(t *testing.T) {
 	}
 }
 
-// TestStartDirector_PermissionModeOfRoleDirector pins AC6: roles.director
-// wins over the default, each mode maps to the driver's flags as for a seat,
-// and codex refuses autonomous and edits until codex_verified, with nothing
-// written and no herdr call. A codex director gets --add-dir only when the
-// ledger is outside its cwd.
+// TestStartDirector_PermissionModeOfRoleDirector pins AC6 and D12:
+// roles.director wins over the default, and claude maps each mode to its
+// flags as for a seat. codex is refused in autonomous and edits whatever
+// codex_verified says, with ErrDirectorCodexWorkspaceWrite (before the
+// codex_verified refusal, which it replaces), nothing written, and no herdr
+// call; codex guarded passes with no permission flag and no --add-dir,
+// whether or not the cwd holds the ledger.
 func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 	type perms = config.OrgPermissionsConfig
 	cases := []struct {
 		name     string
 		driver   string
 		perms    perms
-		inside   bool // the cwd holds the ledger
-		wantMode string
-		wantPerm []string // with --add-dir; nil and refused for a refusal
+		inside   bool   // the cwd holds the ledger
+		wantMode string // the mode recorded, or the one a refusal names
+		wantPerm []string
 		refused  bool
 	}{
 		{"roles.director wins over the default", DirectorDriverClaude, perms{Default: PermissionModeGuarded, Roles: map[string]string{DirectorRole: PermissionModeEdits}}, false,
@@ -348,13 +352,19 @@ func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 		{"claude autonomous", DirectorDriverClaude, perms{Default: PermissionModeAutonomous}, false, PermissionModeAutonomous, []string{"--permission-mode", "bypassPermissions"}, false},
 		{"claude edits", DirectorDriverClaude, perms{Roles: map[string]string{DirectorRole: PermissionModeEdits}}, false, PermissionModeEdits, []string{"--permission-mode", "acceptEdits"}, false},
 		{"claude guarded", DirectorDriverClaude, perms{Default: PermissionModeGuarded}, false, PermissionModeGuarded, nil, false},
-		{"codex autonomous before codex_verified", DirectorDriverCodex, perms{Default: PermissionModeAutonomous}, false, "", nil, true},
-		{"codex edits before codex_verified", DirectorDriverCodex, perms{Roles: map[string]string{DirectorRole: PermissionModeEdits}}, false, "", nil, true},
+		{"codex autonomous before codex_verified", DirectorDriverCodex, perms{Default: PermissionModeAutonomous}, false, PermissionModeAutonomous, nil, true},
+		{"codex edits before codex_verified", DirectorDriverCodex, perms{Roles: map[string]string{DirectorRole: PermissionModeEdits}}, false, PermissionModeEdits, nil, true},
+		{"codex autonomous with codex_verified", DirectorDriverCodex, perms{Default: PermissionModeAutonomous, CodexVerified: true}, false,
+			PermissionModeAutonomous, nil, true},
+		{"codex edits with codex_verified, ledger outside the cwd", DirectorDriverCodex, perms{Default: PermissionModeEdits, CodexVerified: true}, false,
+			PermissionModeEdits, nil, true},
+		{"codex autonomous with codex_verified, ledger inside the cwd", DirectorDriverCodex, perms{Default: PermissionModeAutonomous, CodexVerified: true}, true,
+			PermissionModeAutonomous, nil, true},
 		{"codex guarded before codex_verified", DirectorDriverCodex, perms{Default: PermissionModeGuarded}, false, PermissionModeGuarded, nil, false},
-		{"codex edits, ledger outside the cwd", DirectorDriverCodex, perms{Default: PermissionModeEdits, CodexVerified: true}, false,
-			PermissionModeEdits, append(slices.Clone(codexEditsArgs), "--add-dir", "<ledger>"), false},
-		{"codex autonomous, ledger inside the cwd", DirectorDriverCodex, perms{Default: PermissionModeAutonomous, CodexVerified: true}, true,
-			PermissionModeAutonomous, slices.Clone(codexAutonomousArgs), false},
+		{"codex guarded with codex_verified, ledger outside the cwd", DirectorDriverCodex,
+			perms{Default: PermissionModeAutonomous, Roles: map[string]string{DirectorRole: PermissionModeGuarded}, CodexVerified: true}, false, PermissionModeGuarded, nil, false},
+		{"codex guarded with codex_verified, ledger inside the cwd", DirectorDriverCodex, perms{Default: PermissionModeGuarded, CodexVerified: true}, true,
+			PermissionModeGuarded, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -365,8 +375,21 @@ func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 			}
 			res, err := f.o.StartDirector(f.params(tc.driver, "m1"))
 			if tc.refused {
-				if err == nil || !strings.Contains(err.Error(), "codex_verified") || !strings.Contains(err.Error(), "role director") {
-					t.Fatalf("err = %v, want the codex_verified refusal for role director", err)
+				if !errors.Is(err, ErrDirectorCodexWorkspaceWrite) {
+					t.Fatalf("err = %v, want it to wrap ErrDirectorCodexWorkspaceWrite", err)
+				}
+				for _, want := range []string{
+					fmt.Sprintf("permission mode %q of role director", tc.wantMode), "whatever [org.permissions].codex_verified says",
+					"--sandbox workspace-write, which keeps .git read-only", "ralph org start --plan runs git worktree add",
+					`set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network`,
+					"or start a claude director (--driver claude)", `under sandbox_mode = "workspace-write" it meets the same wall`,
+				} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("err = %v, want it to say %q", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "requires [org.permissions].codex_verified=true") {
+					t.Errorf("err = %v, want the D12 refusal, not the codex_verified one", err)
 				}
 				if len(f.h.calls) != 0 || directorFileState(t, f.store) != "<missing>" {
 					t.Fatalf("a refusal called herdr %v or wrote director.jsonl", f.h.calls)
@@ -379,13 +402,7 @@ func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 			if res.Registration.PermissionMode != tc.wantMode {
 				t.Fatalf("permission mode = %q, want %q", res.Registration.PermissionMode, tc.wantMode)
 			}
-			want := slices.Clone(tc.wantPerm)
-			for i, a := range want {
-				if a == "<ledger>" {
-					want[i] = f.dir
-				}
-			}
-			want = append(want, "--model", "m1", PromptFilePointer(res.PromptPath))
+			want := append(slices.Clone(tc.wantPerm), "--model", "m1", PromptFilePointer(res.PromptPath))
 			if got := f.h.agentStartArgs[0]; !slices.Equal(got, want) {
 				t.Fatalf("agent args = %q, want %q", got, want)
 			}
@@ -423,7 +440,10 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 		{"no store", func(_ *testing.T, _ *dirStartFixture, p *DirectorStartParams) { p.Store = nil }, false, nil, nil},
 		{"permission rule", func(_ *testing.T, f *dirStartFixture, p *DirectorStartParams) {
 			p.Driver, f.o.Config.Permissions.Default = DirectorDriverCodex, PermissionModeAutonomous
-		}, false, nil, nil},
+		}, false, ErrDirectorCodexWorkspaceWrite, nil},
+		{"permission rule with codex_verified", func(_ *testing.T, f *dirStartFixture, p *DirectorStartParams) {
+			p.Driver, f.o.Config.Permissions.Default, f.o.Config.Permissions.CodexVerified = DirectorDriverCodex, PermissionModeEdits, true
+		}, false, ErrDirectorCodexWorkspaceWrite, nil},
 		{"watch gate", func(_ *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
 			f.o.WatchGate = func() error {
 				return &WatchGateError{StateDir: f.dir, Liveness: WatchLiveness{State: WatchLivenessNotRunning}}
