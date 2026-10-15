@@ -63,6 +63,8 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 		newOrgDirectorStartCmd(stateDir, configPath),
 		newOrgDirectorStopCmd(stateDir, configPath),
 		newOrgDirectorStatusCmd(stateDir, configPath),
+		// Hidden: only the launch script of a launch_cmd start runs it.
+		newOrgDirectorLaunchedCmd(stateDir, configPath),
 	)
 
 	return cmd

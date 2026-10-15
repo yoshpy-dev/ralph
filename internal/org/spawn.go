@@ -274,6 +274,17 @@ type Org struct {
 	// item is sent at once. The CLI sets it to ProbeWatch on the ledger's
 	// state dir for `ralph org escalate` only.
 	EscalateWatch func() WatchLiveness
+	// DirectorProcessReader overrides how the director of a launch cmd
+	// (director_cmd.go) reads a process by its pid before it signals it and
+	// while it waits for it to end. nil (the field's default) means
+	// ReadDirectorProcess, which runs ps; tests set it to simulate a ps that
+	// cannot be read.
+	DirectorProcessReader func(ctx context.Context, pid int) (DirectorProcess, error)
+	// DirectorStopWait bounds how long stopDirectorProcess waits, after its
+	// SIGTERM, for the director process of a launch cmd to end. Zero (the
+	// field's default) means "use defaultDirectorStopWait" (10s) -- tests
+	// set a short one so a process that ignores SIGTERM is reported fast.
+	DirectorStopWait time.Duration
 }
 
 func (o *Org) now() string {

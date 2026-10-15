@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1541,4 +1543,273 @@ func TestOrgSpawn_RoleDirectorIsRefusedBeforeTheModelFallback(t *testing.T) {
 		t.Errorf("stderr = %q; want no --model fallback warning", stderr)
 	}
 	checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+}
+
+// The check-in `ralph org director launched` of a launch cmd's script (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC3 through the
+// CLI). The tests run no launch script: the check-in's parent is the test
+// binary's own, or a process the test started and gives through
+// orgDirectorCheckInParentPID.
+
+// seedCmdHeadless records a launch cmd registration in the ledger stateDir
+// through the store, as start does before it runs launch_cmd, and returns it
+// (with its token).
+func seedCmdHeadless(t *testing.T, stateDir string) org.DirectorRegistration {
+	t.Helper()
+	reg, err := org.NewDirectorStore(stateDir).AttachHeadless(org.DirectorHeadlessAttach{
+		Launch: org.DirectorLaunchCmd, Driver: "claude", Model: "opus", PermissionMode: org.PermissionModeAutonomous, User: "alice", Cwd: "/work",
+	})
+	if err != nil {
+		t.Fatalf("seed the launch cmd registration: %v", err)
+	}
+	return reg
+}
+
+// setCheckInSeams points the check-in at parent as its parent pid and, when
+// read is non-nil, at read for the start time, until the test ends.
+func setCheckInSeams(t *testing.T, parent int, read func(context.Context, int) (org.DirectorProcess, error)) {
+	t.Helper()
+	oldParent, oldRead := orgDirectorCheckInParentPID, orgDirectorCheckInReadProcess
+	t.Cleanup(func() { orgDirectorCheckInParentPID, orgDirectorCheckInReadProcess = oldParent, oldRead })
+	orgDirectorCheckInParentPID = func() int { return parent }
+	if read != nil {
+		orgDirectorCheckInReadProcess = read
+	}
+}
+
+// launchedOf returns the launched events in stateDir's director.jsonl.
+func launchedOf(t *testing.T, stateDir string) []org.DirectorEvent {
+	t.Helper()
+	var launched []org.DirectorEvent
+	for _, ev := range directorEventsIn(t, stateDir) {
+		if ev.Event == org.DirectorEventLaunched {
+			launched = append(launched, ev)
+		}
+	}
+	return launched
+}
+
+// The check-in is for the launch script alone, so neither `ralph org
+// director --help` nor `ralph org --help` lists it; its own help still
+// says what it does.
+func TestOrgDirectorLaunched_IsHidden(t *testing.T) {
+	for _, args := range [][]string{{"director", "--help"}, {"--help"}, {"director"}} {
+		out, err := runOrgCmd(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "launched" {
+				t.Errorf("%v lists the hidden check-in: %q", args, line)
+			}
+		}
+		if strings.Contains(out, "Check in the launch script") {
+			t.Errorf("%v shows the check-in's short help:\n%s", args, out)
+		}
+	}
+	out, err := runOrgCmd(t, "director", "launched", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"the launch script that `ralph org director start` writes when [org.director].launch_cmd is set",
+		`(--pid "$$") before it execs the agent, and execs the agent only when it exits 0`,
+		"It is refused, writes nothing, and exits 1 with the reason on stderr, so the agent does not start",
+		"It reads no ralph.toml.", "--id", "--token", "--pid",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("director launched --help does not say %q:\n%s", want, out)
+		}
+	}
+}
+
+// AC3: the check-in records launched with --pid, the pid of the process
+// that ran it (here the test binary's parent, read with the real os.Getppid
+// and ps), and that pid's start time as org.ReadDirectorProcess reads it,
+// and prints nothing. It reads no ralph.toml, so a ./ralph.toml and a
+// --config that do not load do not block it.
+func TestOrgDirectorLaunched_RecordsThePIDAndItsStartTime(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "ralph.toml")
+	writeTestFile(t, broken, "[org\n")
+	t.Chdir(dir)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	reg := seedCmdHeadless(t, stateDir)
+	ppid := os.Getppid()
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "launched", "--id", reg.ID, "--token", reg.Token, "--pid", fmt.Sprint(ppid),
+		"--state-dir", stateDir, "--config", broken)
+	if err != nil || stdout != "" || stderr != "" {
+		t.Fatalf("director launched = %v, stdout %q, stderr %q; want nil and nothing printed", err, stdout, stderr)
+	}
+	proc, err := org.ReadDirectorProcess(context.Background(), ppid)
+	if err != nil || proc.State != org.DirectorProcessAlive || proc.StartTime == "" {
+		t.Fatalf("ReadDirectorProcess(%d) = %+v, %v", ppid, proc, err)
+	}
+	launched := launchedOf(t, stateDir)
+	if len(launched) != 1 || launched[0].ID != reg.ID || launched[0].PID != ppid || launched[0].StartTime != proc.StartTime ||
+		launched[0].User != os.Getenv("USER") || launched[0].Cwd != cwd {
+		t.Fatalf("launched = %+v; want one for %s with pid %d, start time %q, user %q, cwd %q", launched, reg.ID, ppid, proc.StartTime, os.Getenv("USER"), cwd)
+	}
+	res, err := org.NewDirectorStore(stateDir).Read()
+	if err != nil || res.Current == nil || res.Current.State != org.DirectorStateRunning || res.Current.PID != ppid {
+		t.Fatalf("Read = %+v, %v; want %s running with pid %d", res, err, reg.ID, ppid)
+	}
+}
+
+// The start time recorded is --pid's, not the check-in's own parent's: a
+// process the test started, given as the parent through the seam.
+func TestOrgDirectorLaunched_RecordsTheStartTimeOfTheGivenPID(t *testing.T) {
+	sleep := exec.Command("sleep", "30")
+	if err := sleep.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = sleep.Process.Kill()
+		_ = sleep.Wait()
+	})
+	pid := sleep.Process.Pid
+	setCheckInSeams(t, pid, nil)
+	stateDir := t.TempDir()
+	reg := seedCmdHeadless(t, stateDir)
+	runInboxOK(t, "director", "launched", "--id", reg.ID, "--token", reg.Token, "--pid", fmt.Sprint(pid), "--state-dir", stateDir)
+	proc, err := org.ReadDirectorProcess(context.Background(), pid)
+	if err != nil || proc.State != org.DirectorProcessAlive {
+		t.Fatalf("ReadDirectorProcess(%d) = %+v, %v", pid, proc, err)
+	}
+	if launched := launchedOf(t, stateDir); len(launched) != 1 || launched[0].PID != pid || launched[0].StartTime != proc.StartTime {
+		t.Fatalf("launched = %+v; want pid %d started %q", launched, pid, proc.StartTime)
+	}
+}
+
+// AC3: every other check-in is refused with one line, writes nothing, and
+// prints nothing on stdout, so the script exits without its agent: missing
+// flags (before the state dir is made), a --pid that is not the parent, a
+// pid whose start time ps does not read or that is not running, and what
+// the store refuses (another token, a stopped, herdr, or unknown
+// registration, a second check-in).
+func TestOrgDirectorLaunched_Refusals(t *testing.T) {
+	t.Run("missing flags", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "state")
+		const want = "org: director launched: give --id, --token, and --pid; the launch script that ralph org director start writes runs this check-in itself"
+		for _, args := range [][]string{
+			{"--token", "0123456789ab", "--pid", "1"},
+			{"--id", "d1", "--pid", "1"},
+			{"--id", "d1", "--token", "0123456789ab"},
+			{},
+		} {
+			stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director", "launched"}, args...), "--state-dir", stateDir)...)
+			if err == nil || err.Error() != want || stdout != "" {
+				t.Errorf("launched %v = %v, stdout %q; want %q", args, err, stdout, want)
+			}
+		}
+		if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a refused check-in created the state dir (stat: %v)", err)
+		}
+	})
+
+	gone := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessGone}, nil
+	}
+	zombie := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessZombie, StartTime: "Thu Oct 15 21:51:09 2026"}, nil
+	}
+	unreadable := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{}, errors.New("read process 4242: ps: exit status 2: bad\nline")
+	}
+	alive := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessAlive, StartTime: "Thu Oct 15 21:51:09 2026"}, nil
+	}
+	for _, tc := range []struct {
+		name   string
+		seed   func(t *testing.T, stateDir string) (id, token string)
+		parent int // 0 for the real os.Getppid
+		pid    int // 0 for the parent
+		read   func(context.Context, int) (org.DirectorProcess, error)
+		want   string // the whole error, with %s for the registration's attached ts
+	}{
+		{name: "a --pid that is not the parent", pid: os.Getpid(),
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: --pid " + fmt.Sprint(os.Getpid()) +
+				" is not the pid of the process that ran this check-in (" + fmt.Sprint(os.Getppid()) + `); the launch script passes its own ("$$")`},
+		{name: "a ps that cannot be read", parent: 4242, read: unreadable,
+			want: `org: director launched d1: the check-in of the launch script is refused, so its agent must not start: the start time of pid 4242 cannot be read: read process 4242: ps: exit status 2: bad\nline`},
+		{name: "a pid that is gone", parent: 4242, read: gone,
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: pid 4242 is gone, not a running process"},
+		{name: "a zombie", parent: 4242, read: zombie,
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: pid 4242 is zombie, not a running process"},
+		{name: "another token", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				return reg.ID, "aaaaaaaaaaaa"
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: the token is not the one d1 was started with"},
+		{name: "a stopped registration", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				if _, err := org.NewDirectorStore(stateDir).MarkStopped(reg.ID, org.DirectorWho{User: "alice"}); err != nil {
+					t.Fatal(err)
+				}
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless stopped, launch cmd) is already recorded stopped (start's cleanup or a stop came first)"},
+		{name: "a launch herdr registration", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedHeadless(t, stateDir, "claude", "opus", "", "", false)
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless starting) was not started with [org.director].launch_cmd"},
+		{name: "a second check-in", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				if err := org.NewDirectorStore(stateDir).MarkCmdLaunched(org.DirectorCmdCheckIn{ID: reg.ID, Token: reg.Token, PID: 99, StartTime: "Wed Oct 14 00:00:00 2026"}); err != nil {
+					t.Fatal(err)
+				}
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless running, launch cmd, pid 99) has already checked in"},
+		{name: "an unknown registration", parent: 4242, read: alive,
+			seed: func(*testing.T, string) (string, string) { return "d9", "0123456789ab" },
+			want: "org: director: check in d9: the check-in of the launch script is refused, so its agent must not start: no registration d9 is recorded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			seed := tc.seed
+			if seed == nil {
+				seed = func(t *testing.T, stateDir string) (string, string) {
+					reg := seedCmdHeadless(t, stateDir)
+					return reg.ID, reg.Token
+				}
+			}
+			id, token := seed(t, stateDir)
+			if tc.parent != 0 {
+				setCheckInSeams(t, tc.parent, tc.read)
+			}
+			pid := tc.pid
+			if pid == 0 {
+				pid = orgDirectorCheckInParentPID()
+			}
+			before := directorFileOrAbsent(t, stateDir)
+			want := tc.want
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, directorEventsIn(t, stateDir)[0].TS)
+			}
+			stdout, _, err := runOrgCmdStreams(t, "director", "launched", "--id", id, "--token", token, "--pid", fmt.Sprint(pid), "--state-dir", stateDir)
+			if !errors.Is(err, org.ErrDirectorCheckInRefused) || err.Error() != want || strings.Contains(err.Error(), "\n") {
+				t.Fatalf("director launched err =\n%v\nwant\n%s", err, want)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want nothing", stdout)
+			}
+			if after := directorFileOrAbsent(t, stateDir); after != before {
+				t.Errorf("a refused check-in changed director.jsonl from %q to %q", before, after)
+			}
+		})
+	}
 }

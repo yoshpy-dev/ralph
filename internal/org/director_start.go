@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -23,11 +24,14 @@ import (
 // receipt (D2, D8): director.jsonl is the only record. The fold that reads
 // these events back is in director.go.
 
-// DirectorHeadlessAttach is what AttachHeadless records: the driver, model,
-// and permission mode (autonomous, edits, or guarded) of the headless
-// director `ralph org director start` launches. User, Cwd, and HerdrPane
-// describe the caller.
+// DirectorHeadlessAttach is what AttachHeadless records: the launch
+// (DirectorLaunchHerdr, or DirectorLaunchCmd for a start with
+// [org.director].launch_cmd; empty means herdr), driver, model, and
+// permission mode (autonomous, edits, or guarded) of the headless director
+// `ralph org director start` launches. User, Cwd, and HerdrPane describe the
+// caller.
 type DirectorHeadlessAttach struct {
+	Launch         string
 	Driver         string
 	Model          string
 	PermissionMode string
@@ -37,7 +41,7 @@ type DirectorHeadlessAttach struct {
 }
 
 // DirectorWho is who writes a headless registration's later events
-// (RecordWorkspace, RecordPane, MarkLaunched, MarkStopped,
+// (RecordWorkspace, RecordPane, MarkLaunched, MarkCmdLaunched, MarkStopped,
 // MarkStoppedIfUnchanged, MarkForceStopped): USER, the current directory,
 // and whether HERDR_PANE_ID is set. The store does not read the
 // environment.
@@ -94,13 +98,21 @@ func DirectorWorkspaceLabel(token string) string {
 // promoted session's, or a headless one in any state) it returns
 // ErrDirectorAttached, naming that registration, and writes nothing. It has
 // no replace: start never ends another registration. Otherwise it appends
-// one attached with launch herdr, the token, h.Model, h.PermissionMode, and
-// wake pull. The new id is chosen as Attach chooses it, and a failed write
-// ends one of the two ways Attach's does. A driver other than claude and
-// codex, an empty model, and a permission mode other than autonomous, edits,
-// and guarded are refused before anything is read or written.
+// one attached with h.Launch (herdr when empty), the token, h.Model,
+// h.PermissionMode, and wake pull. The new id is chosen as Attach chooses
+// it, and a failed write ends one of the two ways Attach's does. A launch
+// other than herdr and cmd, a driver other than claude and codex, an empty
+// model, and a permission mode other than autonomous, edits, and guarded are
+// refused before anything is read or written.
 func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegistration, error) {
 	const verb = "start"
+	launch := h.Launch
+	if launch == "" {
+		launch = DirectorLaunchHerdr
+	}
+	if launch != DirectorLaunchHerdr && launch != DirectorLaunchCmd {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown launch %q: use %s or %s", verb, h.Launch, DirectorLaunchHerdr, DirectorLaunchCmd)
+	}
 	if h.Driver != DirectorDriverClaude && h.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown driver %q: use %s or %s", verb, h.Driver, DirectorDriverClaude, DirectorDriverCodex)
 	}
@@ -141,7 +153,7 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 		ev := DirectorEvent{
 			TS: s.now(), ID: next, Event: DirectorEventAttached,
 			Driver: h.Driver, Wake: []string{DirectorWakePull},
-			Launch: DirectorLaunchHerdr, Token: token, Model: h.Model, PermissionMode: h.PermissionMode,
+			Launch: launch, Token: token, Model: h.Model, PermissionMode: h.PermissionMode,
 			User: h.User, Cwd: h.Cwd, HerdrPane: h.HerdrPane,
 		}
 		if err := s.appendLocked(raw, ev); err != nil {
@@ -167,9 +179,11 @@ func directorStartAttachedErr(cur *DirectorRegistration) error {
 // workspace `ralph org director start` made, for the open headless
 // registration id, whether it is still current or was detached meanwhile (a
 // human's attach --replace or detach --force while start runs). With no
-// open headless registration id it returns ErrDirectorNoOpenHeadless; when
-// id already has a workspace recorded it refuses too, since the fold keeps
-// the first one. Neither writes anything. An id not of the form d<N> and an
+// open headless registration id it returns ErrDirectorNoOpenHeadless, and
+// for one with launch cmd, which has no herdr workspace,
+// ErrDirectorNotHerdrLaunch; when id already has a workspace recorded it
+// refuses too, since the fold keeps the first one. None of them writes
+// anything. An id not of the form d<N> and an
 // empty workspaceID are refused before anything is read, and a missing
 // director.jsonl is refused without creating the state dir or the lock. A
 // failed write ends one of the two ways Attach's does.
@@ -205,7 +219,7 @@ func (s *DirectorStore) recordHerdrID(id, kind, value string, who DirectorWho) e
 		if err != nil {
 			return err
 		}
-		reg, err := foldDirector(raw).openHeadless(verb, id)
+		reg, err := foldDirector(raw).openHerdrHeadless(verb, id)
 		if err != nil {
 			return err
 		}
@@ -227,16 +241,17 @@ func (s *DirectorStore) recordHerdrID(id, kind, value string, who DirectorWho) e
 }
 
 // MarkLaunched appends launched for id and returns true when id is still the
-// current registration, a headless one in state starting; `ralph org
-// director start` calls it once its agent start went through. When the
-// current registration is another one, or none (a human's attach --replace
-// or detach --force came in while start ran), or id is not headless or
-// already stopped, it writes nothing and returns false with a nil error, and
-// start closes its own pane and workspace (D3). A current id already running
-// returns true and writes nothing. An id not of the form d<N> is refused
-// before anything is read; a missing director.jsonl returns false without
-// creating the state dir or the lock. A failed write ends one of the two ways
-// Attach's does.
+// current registration, a headless one with launch herdr in state starting;
+// `ralph org director start` calls it once its herdr agent start went
+// through. When the current registration is another one, or none (a human's
+// attach --replace or detach --force came in while start ran), or id is not
+// a launch herdr (a promoted session, or a launch cmd, whose launched is the
+// check-in of its launch script, MarkCmdLaunched) or already stopped, it
+// writes nothing and returns false with a nil error, and start closes its
+// own pane and workspace (D3). A current id already running returns true and
+// writes nothing. An id not of the form d<N> is refused before anything is
+// read; a missing director.jsonl returns false without creating the state
+// dir or the lock. A failed write ends one of the two ways Attach's does.
 func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent bool, err error) {
 	if _, ok := directorIDNumber(id); !ok {
 		return false, fmt.Errorf("org: director: mark launched: %q is not a registration id (d<N>, such as d1)", id)
@@ -251,7 +266,7 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 			return err
 		}
 		cur := foldDirector(raw).current
-		if cur == nil || cur.ID != id || !cur.Headless() || cur.State == DirectorStateStopped {
+		if cur == nil || cur.ID != id || !cur.HerdrLaunch() || cur.State == DirectorStateStopped {
 			return nil
 		}
 		stillCurrent = true
@@ -269,6 +284,90 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 		return false, err
 	}
 	return stillCurrent, nil
+}
+
+// DirectorCmdCheckIn is what MarkCmdLaunched records: the registration ID
+// and launch Token the launch script was written with, the PID it gives as
+// its own ($$, which stays the agent's pid across its exec), the StartTime
+// of that pid as ReadDirectorProcess read it, and Who runs the check-in.
+type DirectorCmdCheckIn struct {
+	ID        string
+	Token     string
+	PID       int
+	StartTime string
+	Who       DirectorWho
+}
+
+// MarkCmdLaunched is the check-in of a launch script (`ralph org director
+// launched`, plan 2026-10-16-org-director-launch-cmd, D4): it appends
+// launched with c.PID and c.StartTime (trimmed) for registration c.ID only
+// when, under the director lock, c.ID is the current registration, has
+// launch cmd, is still starting, and has the launch token c.Token. Then the
+// script execs the agent. Every other case writes nothing and returns an
+// error that wraps ErrDirectorCheckInRefused and says why, so the script
+// exits without starting the agent: no registration has c.ID, it has
+// another launch, c.Token is not its token, it is already stopped (start's
+// cleanup or `ralph org director stop` came first, so the terminal opened
+// too late), it is no longer the current registration (an attach --replace
+// or a detach came in), or it is already running (a check-in came first).
+// An id not of the form d<N>, a token not of 12 lowercase hex digits, a pid
+// that is not positive, and an empty start time are refused the same way
+// before anything is read, and a missing director.jsonl without creating the
+// state dir or the lock. Whether c.PID is the caller's parent and alive is
+// the CLI's check, not the store's. A failed write ends one of the two ways
+// Attach's does.
+func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
+	verb := "check in " + c.ID
+	refuse := func(format string, args ...any) error {
+		return fmt.Errorf("org: director: %s: %w: %s", verb, ErrDirectorCheckInRefused, fmt.Sprintf(format, args...))
+	}
+	startTime := strings.TrimSpace(c.StartTime)
+	switch _, ok := directorIDNumber(c.ID); {
+	case !ok:
+		verb = "check in"
+		return refuse("%q is not a registration id (d<N>, such as d1)", c.ID)
+	case !directorTokenPattern.MatchString(c.Token):
+		return refuse("the token %q is not 12 lowercase hex digits", c.Token)
+	case c.PID <= 0:
+		return refuse("the pid %d is not a positive number", c.PID)
+	case startTime == "":
+		return refuse("the start time of pid %d is empty", c.PID)
+	}
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return refuse("no registration %s is recorded", c.ID)
+	}
+	return s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		fold := foldDirector(raw)
+		reg := fold.regs[c.ID]
+		// The token comes before the state, so a caller without the token
+		// learns nothing more of the registration.
+		switch {
+		case reg == nil:
+			return refuse("no registration %s is recorded", c.ID)
+		case !reg.CmdLaunch():
+			return refuse("%s was not started with [org.director].launch_cmd", reg.describe())
+		case reg.Token != c.Token:
+			return refuse("the token is not the one %s was started with", c.ID)
+		case reg.State == DirectorStateStopped:
+			return refuse("%s is already recorded stopped (start's cleanup or a stop came first)", reg.describe())
+		case reg != fold.current:
+			return refuse("%s is no longer the current registration (an attach --replace or a detach came in)", reg.describe())
+		case reg.State != DirectorStateStarting:
+			return refuse("%s has already checked in", reg.describe())
+		}
+		ev := DirectorEvent{
+			TS: s.now(), ID: c.ID, Event: DirectorEventLaunched, PID: c.PID, StartTime: startTime,
+			User: c.Who.User, Cwd: c.Who.Cwd, HerdrPane: c.Who.HerdrPane,
+		}
+		if err := s.appendLocked(raw, ev); err != nil {
+			return directorAppendFailed(verb, nil, err)
+		}
+		return nil
+	})
 }
 
 // MarkStopped records that the pane and workspace of the open headless
@@ -312,8 +411,15 @@ func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool
 // live director stopped: it writes nothing and returns an error that wraps
 // ErrDirectorChangedDuringStop and names both reads. An id only goes from
 // empty to a value (recordHerdrID refuses one already recorded), so equal
-// ids mean nothing was recorded since. launched is not compared: it changes
-// nothing stop closes. Every other refusal is MarkStopped's.
+// ids mean nothing was recorded since. launched of a launch herdr is not
+// compared: it changes nothing stop closes. For a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd, D7) it also compares the pid and the
+// start time the check-in recorded: when they differ, the launch script
+// checked in after stop's read, so stop did not stop that process, and it
+// writes nothing and returns an error that wraps
+// ErrDirectorCheckedInDuringStop and names both reads. A pid too only goes
+// from none to a value (MarkCmdLaunched records one while starting only).
+// Every other refusal is MarkStopped's.
 func (s *DirectorStore) MarkStoppedIfUnchanged(read DirectorRegistration, who DirectorWho) (wasCurrent bool, err error) {
 	return s.markStopped(read.ID, who, false, &read)
 }
@@ -332,7 +438,8 @@ func (s *DirectorStore) MarkForceStopped(id string, who DirectorWho) (wasCurrent
 
 // markStopped is MarkStopped, with force MarkForceStopped, and with a
 // non-nil read MarkStoppedIfUnchanged: read is the registration as stop read
-// it, whose workspace and pane ids must still be the recorded ones.
+// it, whose workspace and pane ids, pid, and start time must still be the
+// recorded ones.
 func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read *DirectorRegistration) (wasCurrent bool, err error) {
 	if _, ok := directorIDNumber(id); !ok {
 		return false, fmt.Errorf("org: director: stop: %q is not a registration id (d<N>, such as d1)", id)
@@ -351,9 +458,14 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read
 		if err != nil {
 			return err
 		}
-		if read != nil && (reg.WorkspaceID != read.WorkspaceID || reg.PaneID != read.PaneID) {
+		switch {
+		case read == nil:
+		case reg.WorkspaceID != read.WorkspaceID || reg.PaneID != read.PaneID:
 			return fmt.Errorf("org: director: %s: %w: %s had %s when stop read it, and has %s now", verb,
 				ErrDirectorChangedDuringStop, id, directorRecordedIDs(*read), directorRecordedIDs(*reg))
+		case reg.PID != read.PID || reg.StartTime != read.StartTime:
+			return fmt.Errorf("org: director: %s: %w: %s had %s when stop read it, and has %s now", verb,
+				ErrDirectorCheckedInDuringStop, id, directorRecordedProcess(*read), directorRecordedProcess(*reg))
 		}
 		ts := s.now()
 		var events []DirectorEvent
@@ -386,6 +498,15 @@ func directorRecordedIDs(reg DirectorRegistration) string {
 		pane = fmt.Sprintf("pane %q", reg.PaneID)
 	}
 	return ws + " and " + pane
+}
+
+// directorRecordedProcess names the pid and start time recorded for reg, a
+// launch cmd, in an error: "no pid" before its check-in.
+func directorRecordedProcess(reg DirectorRegistration) string {
+	if reg.PID == 0 && reg.StartTime == "" {
+		return "no pid"
+	}
+	return fmt.Sprintf("pid %d started %q", reg.PID, reg.StartTime)
 }
 
 // The refusals and failures of StartDirector that the CLI tells apart, each

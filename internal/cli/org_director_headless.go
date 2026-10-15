@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,8 +19,11 @@ import (
 // The headless director of `ralph org director start` and `stop` (plan
 // docs/plans/active/2026-10-15-org-director-start.md): the two verbs, the
 // orgDirectorRuntime methods only they use, and the *org.Org they run on.
-// newOrgDirectorCmd, which wires them, and the runtime and helpers that the
-// director verbs share are in org_director.go.
+// The hidden verb `ralph org director launched`, the check-in of the launch
+// script of a start with [org.director].launch_cmd (plan
+// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D4), is here
+// too. newOrgDirectorCmd, which wires them, and the runtime and helpers that
+// the director verbs share are in org_director.go.
 
 func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 	var (
@@ -425,6 +430,89 @@ func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 // error text).
 func orgDirectorStopNotes(res org.DirectorStopResult) string {
 	return inboxField(res.CtrlCNote) + ", " + inboxField(res.PaneNote) + ", " + inboxField(res.WorkspaceNote)
+}
+
+// orgDirectorCheckInParentPID and orgDirectorCheckInReadProcess are how
+// `ralph org director launched` reads the pid of the process that ran it and
+// that pid's start time: os.Getppid and org.ReadDirectorProcess. They are
+// variables so the tests can give another parent or a ps that cannot be read.
+var (
+	orgDirectorCheckInParentPID   = os.Getppid
+	orgDirectorCheckInReadProcess = org.ReadDirectorProcess
+)
+
+// orgDirectorCheckInPSTimeout bounds the ps that `ralph org director
+// launched` runs, as defaultDriverCallTimeout bounds each driver call.
+const orgDirectorCheckInPSTimeout = 10 * time.Second
+
+func newOrgDirectorLaunchedCmd(stateDir, configPath *string) *cobra.Command {
+	var (
+		id, token string
+		pid       int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "launched",
+		Short: "Check in the launch script of a headless director started with launch_cmd (run by that script only)",
+		Long: "ralph org director launched is the check-in of the launch script that\n" +
+			"`ralph org director start` writes when [org.director].launch_cmd is set.\n" +
+			"The script runs it with its own pid (--pid \"$$\") before it execs the\n" +
+			"agent, and execs the agent only when it exits 0. It records launched,\n" +
+			"with the pid and the pid's start time as ps reads it, in\n" +
+			"<state-dir>/director.jsonl, and prints nothing.\n" +
+			"\n" +
+			"It is refused, writes nothing, and exits 1 with the reason on stderr,\n" +
+			"so the agent does not start, when --pid is not the pid of the process\n" +
+			"that ran it, when ps cannot read that pid's start time, or when the\n" +
+			"registration --id is not the current one, was not started with\n" +
+			"launch_cmd, is no longer starting (stopped, or already checked in), or\n" +
+			"has another launch token than --token. It reads no ralph.toml.",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if id == "" || token == "" || !cmd.Flags().Changed("pid") {
+				return errors.New("org: director launched: give --id, --token, and --pid; the launch script that ralph org director start writes runs this check-in itself")
+			}
+			rt, err := newOrgDirectorRuntime(cmd, "director launched", *stateDir, *configPath, orgLedgerMutating, false)
+			if err != nil {
+				return err
+			}
+			return rt.directorLaunched(id, token, pid)
+		},
+	}
+
+	cmd.Flags().StringVar(&id, "id", "", "the id of the registration start wrote (d1, d2, ...)")
+	cmd.Flags().StringVar(&token, "token", "", "the launch token of that registration")
+	cmd.Flags().IntVar(&pid, "pid", 0, "the pid of the launch script, which the agent keeps across the exec")
+
+	return cmd
+}
+
+// directorLaunched is `ralph org director launched` on rt (plan
+// 2026-10-16-org-director-launch-cmd, D4): it refuses a pid that is not this
+// process's parent, the launch script that ran it, and a pid whose start
+// time ps does not read (org.ReadDirectorProcess, alive), and then records
+// the check-in with the store's MarkCmdLaunched, which refuses the rest
+// under the lock. Every refusal writes nothing and is returned (one line on
+// stderr, exit 1), and the script then exits without the agent.
+func (rt *orgDirectorRuntime) directorLaunched(id, token string, pid int) error {
+	verb := "org: director launched " + inboxField(id)
+	if parent := orgDirectorCheckInParentPID(); pid != parent {
+		return fmt.Errorf("%s: %w: --pid %d is not the pid of the process that ran this check-in (%d); the launch script passes its own (\"$$\")",
+			verb, org.ErrDirectorCheckInRefused, pid, parent)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), orgDirectorCheckInPSTimeout)
+	defer cancel()
+	proc, err := orgDirectorCheckInReadProcess(ctx, pid)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s: %w: the start time of pid %d cannot be read: %s", verb, org.ErrDirectorCheckInRefused, pid, inboxField(err.Error()))
+	case proc.State != org.DirectorProcessAlive:
+		return fmt.Errorf("%s: %w: pid %d is %s, not a running process", verb, org.ErrDirectorCheckInRefused, pid, proc.State)
+	}
+	return rt.notRestoredError(rt.store.MarkCmdLaunched(org.DirectorCmdCheckIn{
+		ID: id, Token: token, PID: pid, StartTime: proc.StartTime, Who: orgDirectorCaller(),
+	}))
 }
 
 // newOrgDirectorHerdrRuntime is the *org.Org of director start and stop:

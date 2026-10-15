@@ -234,6 +234,29 @@ func TestStopDirector_Refusals(t *testing.T) {
 			f.env[herdrPaneIDEnv] = "pane-1"
 			return DirectorStopParams{Store: f.store, ID: "d1", Force: true}
 		}, []error{ErrDirectorStopSelfPane}, "outside the director's pane"},
+		// Until stage 8a-2b's S3 (plan 2026-10-16-org-director-launch-cmd)
+		// teaches stop to end a launch cmd's process, it refuses one whether
+		// or not its script checked in, with force too.
+		{"a launch cmd starting", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+			mustAttachCmdHeadless(t, f.store)
+			return f.stopParams("d1")
+		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
+		{"a launch cmd checked in", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+			mustAttachCmdHeadless(t, f.store)
+			if err := f.store.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+				t.Fatal(err)
+			}
+			return f.stopParams("d1")
+		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
+		{"a launch cmd checked in, with force", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+			mustAttachCmdHeadless(t, f.store)
+			if err := f.store.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+				t.Fatal(err)
+			}
+			p := f.stopParams("d1")
+			p.Force = true
+			return p
+		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -38,6 +38,13 @@ var (
 	// not close it and recorded nothing (plan D14,
 	// MarkStoppedIfUnchanged). Running stop again closes what start recorded.
 	ErrDirectorChangedDuringStop = errors.New("a start in progress recorded a workspace or pane after stop read the registration")
+	// ErrDirectorCheckedInDuringStop: the launch script of a launch cmd
+	// checked in after stop read the registration, so the pid and start time
+	// recorded now are not the ones stop read, stop did not stop that
+	// process, and it recorded nothing (plan
+	// 2026-10-16-org-director-launch-cmd, D7, MarkStoppedIfUnchanged).
+	// Running stop again reads the pid the check-in recorded.
+	ErrDirectorCheckedInDuringStop = errors.New("the launch script checked in after stop read the registration")
 )
 
 // DirectorStopParams describes one StopDirector call: Store is the
@@ -140,6 +147,11 @@ type DirectorStopResult struct {
 // Force changes nothing: the stop is recorded without force and Forced is
 // false. The refusals above, the pane and the workspace ones included, hold
 // with Force too.
+//
+// A registration with launch cmd (plan 2026-10-16-org-director-launch-cmd)
+// has no herdr pane or workspace, and its stop by pid and start time (D7)
+// is not wired in yet: for now StopDirector refuses it, Force or not, with
+// ErrDirectorNotHerdrLaunch, writing nothing and calling no herdr.
 func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	switch _, ok := directorIDNumber(p.ID); {
 	case p.Store == nil:
@@ -152,6 +164,10 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	reg, err := p.Store.openHeadlessRegistration("stop "+p.ID, p.ID)
 	if err != nil {
 		return DirectorStopResult{}, err
+	}
+	if !reg.HerdrLaunch() {
+		return DirectorStopResult{}, fmt.Errorf("%w; this ralph cannot stop a director started with [org.director].launch_cmd yet",
+			directorNotHerdrLaunchErr("stop "+p.ID, reg))
 	}
 	if own := o.getenv(herdrPaneIDEnv); own != "" && own == reg.PaneID {
 		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_PANE_ID is its pane %q, and closing that pane would end this command before it records the stop: %w",

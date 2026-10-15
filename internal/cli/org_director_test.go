@@ -372,6 +372,7 @@ func TestOrgDirector_RefusesOrgID(t *testing.T) {
 		{"director", "start", "--driver", "claude", "--model", "opus"},
 		{"director", "stop", "--id", "d1"},
 		{"director", "stop", "--id", "d1", "--force"},
+		{"director", "launched", "--id", "d1", "--token", "0123456789ab", "--pid", "1"},
 		{"director", "status"},
 		{"director", "status", "--json"},
 	} {
@@ -629,10 +630,10 @@ func TestOrgDirector_AttachWarnsWhileNoWatchAcceptsWork(t *testing.T) {
 	}
 }
 
-// attach, detach, start, and stop change the ledger, so a legacy worktree
-// ledger with active seats refuses them and they write nothing (start and
-// stop run no herdr either); director status only reads it and prints the
-// note once.
+// attach, detach, start, stop, and the launch script's check-in (launched)
+// change the ledger, so a legacy worktree ledger with active seats refuses
+// them and they write nothing (start and stop run no herdr either); director
+// status only reads it and prints the note once.
 func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
@@ -650,6 +651,7 @@ func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
 		{"director", "start", "--driver", "claude", "--model", "opus"},
 		{"director", "stop", "--id", "d1"},
 		{"director", "stop", "--id", "d1", "--force"},
+		{"director", "launched", "--id", "d1", "--token", "0123456789ab", "--pid", fmt.Sprint(os.Getppid())},
 	} {
 		stdout, _, err := runOrgCmdStreams(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") {

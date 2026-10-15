@@ -44,9 +44,24 @@ import (
 // writers of a headless registration, its token and names, and the verb
 // StartDirector are in director_start.go; StopDirector is in
 // director_stop.go.
+//
+// Stage 8a-2b (plan docs/plans/active/2026-10-16-org-director-launch-cmd.md,
+// D3, D4, D7, and D11) adds the headless director that start opens in a
+// terminal of the human's with [org.director].launch_cmd instead of herdr.
+// Its attached carries launch cmd with the same token, model, and permission
+// mode, and is written first too. It has no workspace or pane: its launched
+// is the check-in of the launch script (`ralph org director launched`,
+// MarkCmdLaunched) and carries the pid of that script, which execs the agent
+// and so keeps its pid, and the pid's start time as ps reads it
+// (ReadDirectorProcess), which together tell this launch's process from a
+// later one that got the same pid. Both launches are headless (Headless);
+// what only herdr has, the workspace and the pane, is for launch herdr only
+// (HerdrLaunch). The launch script, the launch_cmd runner, and the process
+// checks are in director_cmd.go.
 
 // Director event kinds: the "event" field of a director.jsonl line. The last
-// four are written only for a headless registration (launch herdr).
+// four are written only for a headless registration (launch herdr or cmd;
+// workspace_created and pane_created for launch herdr only).
 const (
 	DirectorEventAttached         = "attached"
 	DirectorEventDetached         = "detached"
@@ -56,11 +71,17 @@ const (
 	DirectorEventStopped          = "stopped"
 )
 
-// DirectorLaunchHerdr is the launch of a registration that `ralph org
-// director start` wrote: a headless director in a herdr workspace of its
-// own. A promoted session's attached (`ralph org director attach`) has no
-// launch.
-const DirectorLaunchHerdr = "herdr"
+// The launches of a registration that `ralph org director start` wrote. A
+// promoted session's attached (`ralph org director attach`) has no launch.
+const (
+	// DirectorLaunchHerdr is a headless director in a herdr workspace of its
+	// own.
+	DirectorLaunchHerdr = "herdr"
+	// DirectorLaunchCmd is a headless director in a terminal that
+	// [org.director].launch_cmd opened, which runs the launch script
+	// (stage 8a-2b).
+	DirectorLaunchCmd = "cmd"
+)
 
 // The states of a headless registration (DirectorRegistration.State):
 // starting until its launched event, running after it, and stopped after
@@ -95,9 +116,24 @@ var ErrDirectorAttached = errors.New("a director is already attached")
 // ErrDirectorNoOpenHeadless is returned (wrapped) by RecordWorkspace,
 // RecordPane, MarkStopped, MarkStoppedIfUnchanged, and MarkForceStopped when
 // no open headless registration has the id: no registration has it, a
-// promoted session attached it (no launch herdr), or it was already stopped,
-// when the error wraps ErrDirectorStopped too.
+// promoted session attached it (no launch herdr or cmd), or it was already
+// stopped, when the error wraps ErrDirectorStopped too.
 var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has the id")
+
+// ErrDirectorNotHerdrLaunch is returned (wrapped) by RecordWorkspace and
+// RecordPane for an open headless registration with launch cmd, which has no
+// herdr workspace or pane, and for now by StopDirector for one: it closes
+// herdr panes and workspaces only, and the stop of a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd, D7) is not wired in yet.
+var ErrDirectorNotHerdrLaunch = errors.New("the headless registration was started with [org.director].launch_cmd, not in herdr")
+
+// ErrDirectorCheckInRefused is returned (wrapped) by MarkCmdLaunched, the
+// check-in of a launch script, whenever it writes nothing: the id is not a
+// registration with launch cmd, the token is not that launch's, the
+// registration is stopped, no longer current, or no longer starting, or the
+// pid or its start time is not usable. The message says which. The launch
+// script then exits without starting the agent.
+var ErrDirectorCheckInRefused = errors.New("the check-in of the launch script is refused, so its agent must not start")
 
 // ErrDirectorStopped is wrapped together with ErrDirectorNoOpenHeadless when
 // the headless registration the id names already has its stopped event.
@@ -114,12 +150,13 @@ var ErrDirectorIDMismatch = errors.New("the id is not the current registration's
 
 // ErrDirectorWriteNotRestored is returned (wrapped) by every DirectorStore
 // writer (Attach, Detach, AttachHeadless, RecordWorkspace, RecordPane,
-// MarkLaunched, MarkStopped, MarkStoppedIfUnchanged, and MarkForceStopped)
-// when a write to director.jsonl failed and the file could not be cut back
-// to its size before the write: it may hold part of the write (a replace
-// cut off after the detached line leaves no registration current), so the
-// error cannot say that nothing was recorded, and the caller says how to
-// read the registration again (the CLI names `ralph org director status`).
+// MarkLaunched, MarkCmdLaunched, MarkStopped, MarkStoppedIfUnchanged, and
+// MarkForceStopped) when a write to director.jsonl failed and the file could
+// not be cut back to its size before the write: it may hold part of the
+// write (a replace cut off after the detached line leaves no registration
+// current), so the error cannot say that nothing was recorded, and the
+// caller says how to read the registration again (the CLI names `ralph org
+// director status`).
 // Every other failed append left nothing in the file: a failed open or
 // marshal writes nothing, and a failed write or close is cut back.
 var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
@@ -146,6 +183,13 @@ var directorRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"d([0-9]+)`)
 // registration it ends, and force when it was removed without that id being
 // given. A line of stage 8a-1 has none of the new fields and reads as it
 // did.
+//
+// Stage 8a-2b (plan 2026-10-16-org-director-launch-cmd): the attached of a
+// start with [org.director].launch_cmd carries launch cmd and the same
+// token, model, and permission mode; its launched, the launch script's
+// check-in (MarkCmdLaunched), adds pid and start_time, the pid's start time
+// as ReadDirectorProcess reads it. No other event carries them, so every
+// line of stage 8a-2 reads as it did.
 type DirectorEvent struct {
 	TS             string   `json:"ts"`    // UTC RFC3339
 	ID             string   `json:"id"`    // d<N>
@@ -153,11 +197,13 @@ type DirectorEvent struct {
 	Driver         string   `json:"driver,omitempty"`
 	Wake           []string `json:"wake,omitempty"`
 	PaneID         string   `json:"pane_id,omitempty"`
-	Launch         string   `json:"launch,omitempty"` // DirectorLaunchHerdr, or empty
+	Launch         string   `json:"launch,omitempty"` // DirectorLaunchHerdr, DirectorLaunchCmd, or empty
 	Token          string   `json:"token,omitempty"`  // 12 lowercase hex digits
 	Model          string   `json:"model,omitempty"`
 	PermissionMode string   `json:"permission_mode,omitempty"`
 	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	PID            int      `json:"pid,omitempty"`        // launched of a launch cmd only
+	StartTime      string   `json:"start_time,omitempty"` // launched of a launch cmd only
 	User           string   `json:"user"`
 	Cwd            string   `json:"cwd"`
 	HerdrPane      bool     `json:"herdr_pane"`
@@ -170,9 +216,12 @@ type DirectorEvent struct {
 // Token, Model, and PermissionMode come from the attached of a headless
 // registration (`ralph org director start`); WorkspaceID and PaneID from its
 // workspace_created and pane_created (a promoted session's PaneID from its
-// attached); State is starting, running, or stopped (DirectorState*). A
-// promoted session's registration has none of the fields after PaneID, so
-// its JSON is the shape of stage 8a-1.
+// attached), for launch herdr only; PID and StartTime from the launched of a
+// launch cmd, the check-in of its launch script; State is starting, running,
+// or stopped (DirectorState*). A promoted session's registration has none of
+// the fields after PaneID, so its JSON is the shape of stage 8a-1, and a
+// launch herdr's has no PID or StartTime, so its JSON is the shape of stage
+// 8a-2.
 type DirectorRegistration struct {
 	ID             string   `json:"id"`
 	Driver         string   `json:"driver"`
@@ -184,6 +233,8 @@ type DirectorRegistration struct {
 	Model          string   `json:"model,omitempty"`
 	PermissionMode string   `json:"permission_mode,omitempty"`
 	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	PID            int      `json:"pid,omitempty"`
+	StartTime      string   `json:"start_time,omitempty"`
 	AttachedAt     string   `json:"attached_at"`
 	User           string   `json:"user"`
 	Cwd            string   `json:"cwd"`
@@ -191,23 +242,46 @@ type DirectorRegistration struct {
 }
 
 // Headless reports whether `ralph org director start` wrote the
-// registration (launch herdr), not a promoted session.
+// registration (launch herdr or cmd), not a promoted session (plan
+// 2026-10-16-org-director-launch-cmd, D11): stop, the note of `ralph org
+// stop --all`, and status handle both launches. What only herdr has, the
+// workspace and the pane, is for HerdrLaunch.
 func (r DirectorRegistration) Headless() bool {
+	return r.HerdrLaunch() || r.CmdLaunch()
+}
+
+// HerdrLaunch reports whether the registration is a headless director in a
+// herdr workspace (launch herdr): only it has a workspace and a pane that
+// start records and stop checks by their labels and closes.
+func (r DirectorRegistration) HerdrLaunch() bool {
 	return r.Launch == DirectorLaunchHerdr
+}
+
+// CmdLaunch reports whether the registration is a headless director in a
+// terminal that [org.director].launch_cmd opened (launch cmd): only it has a
+// pid and a start time, from its launch script's check-in.
+func (r DirectorRegistration) CmdLaunch() bool {
+	return r.Launch == DirectorLaunchCmd
 }
 
 // describe names the registration in an error: its id, driver, and attach
 // time, and for a headless registration its state, so a refusal names a
-// registration still starting as such. The fold checks the id, the driver,
-// and the launch herdr, but the attach time is the event's ts as written,
-// which a hand edit can fill with control characters, so it is escaped like
-// inbox text before it reaches a terminal, and so is a launch other than
-// herdr.
+// registration still starting as such, and for a launch cmd that launch and
+// the pid its check-in recorded. The fold checks the id, the driver, and the
+// launch, but the attach time is the event's ts as written, which a hand
+// edit can fill with control characters, so it is escaped like inbox text
+// before it reaches a terminal, and so is a launch this binary does not
+// know.
 func (r DirectorRegistration) describe() string {
 	details := "driver " + r.Driver + ", attached " + PrintableInboxText(r.AttachedAt, false)
 	switch {
-	case r.Headless():
+	case r.HerdrLaunch():
 		details += ", headless " + r.State
+	case r.CmdLaunch():
+		details += ", headless " + r.State + ", launch " + DirectorLaunchCmd
+		if r.PID > 0 {
+			details += ", pid " + strconv.Itoa(r.PID)
+		}
 	case r.Launch != "":
 		details += ", launch " + PrintableInboxText(r.Launch, false)
 	}
@@ -216,19 +290,22 @@ func (r DirectorRegistration) describe() string {
 
 // DirectorReadResult is the folded director.jsonl: the current registration
 // (nil when none); every open headless registration, that is, every one with
-// launch herdr and no stopped, current or detached, ordered by its d<N>
-// (nil when none), which `ralph org director stop` can still close; the
+// launch herdr or cmd and no stopped, current or detached, ordered by its
+// d<N> (nil when none), which `ralph org director stop` can still close; the
 // number of lines that did not parse (skipped, like the inbox's corrupt
 // lines); and the number of parsed events the fold ignored: an unknown kind,
 // an id not of the form d<N>, an attached with a driver other than claude
-// and codex, an attached with launch herdr whose token is not 12 lowercase
-// hex digits, an attached whose id an earlier attached already used, an
-// attached while another registration is current, a detached for an id that
-// is not the current registration's, a workspace_created or pane_created
-// that names no open headless registration, carries no id, or comes after
-// one already recorded (the first one is kept), a launched for an id that is
-// not the current registration's or not starting, and a stopped for an id
-// that names no open headless registration.
+// and codex, an attached with launch herdr or cmd whose token is not 12
+// lowercase hex digits, an attached whose id an earlier attached already
+// used, an attached while another registration is current, a detached for an
+// id that is not the current registration's, a workspace_created or
+// pane_created that names no open headless registration with launch herdr,
+// carries no id, or comes after one already recorded (the first one is
+// kept), a launched for an id that is not the current registration's or not
+// starting, a launched of a launch herdr that carries a pid or a start time
+// (herdr's never does), a launched of a launch cmd without a positive pid
+// and a start time, and a stopped for an id that names no open headless
+// registration.
 type DirectorReadResult struct {
 	Current       *DirectorRegistration
 	OpenHeadless  []DirectorRegistration
@@ -537,11 +614,13 @@ func directorAppendFailed(verb string, cur *DirectorRegistration, err error) err
 }
 
 // registrationOf returns the registration an attached event records. A
-// headless attached (launch herdr) starts in state starting; its pane and
-// workspace come only from its pane_created and workspace_created, so a
-// pane_id in that attached (start never writes one) is not read. An attached
-// with another launch keeps it, with its token, model, and permission mode,
-// so a later binary's registration still counts as one.
+// headless attached (launch herdr or cmd) starts in state starting; a launch
+// herdr's pane and workspace come only from its pane_created and
+// workspace_created, and a launch cmd has none, so a pane_id in that attached
+// (start never writes one) is not read, nor is a pid or a start time (only a
+// launch cmd's launched carries them). An attached with another launch keeps
+// it, with its token, model, and permission mode, so a later binary's
+// registration still counts as one.
 func registrationOf(ev DirectorEvent) DirectorRegistration {
 	reg := DirectorRegistration{
 		ID: ev.ID, Driver: ev.Driver, Wake: ev.Wake, PaneID: ev.PaneID, AttachedAt: ev.TS,
@@ -615,8 +694,9 @@ func (f *directorFold) apply(ev DirectorEvent) {
 	reg := f.regs[ev.ID]
 	switch ev.Event {
 	case DirectorEventAttached:
+		headless := ev.Launch == DirectorLaunchHerdr || ev.Launch == DirectorLaunchCmd
 		if (ev.Driver != DirectorDriverClaude && ev.Driver != DirectorDriverCodex) || reg != nil || f.current != nil ||
-			(ev.Launch == DirectorLaunchHerdr && !directorTokenPattern.MatchString(ev.Token)) {
+			(headless && !directorTokenPattern.MatchString(ev.Token)) {
 			f.ignored++
 			return
 		}
@@ -630,7 +710,9 @@ func (f *directorFold) apply(ev DirectorEvent) {
 		}
 		f.current = nil
 	case DirectorEventWorkspaceCreated, DirectorEventPaneCreated:
-		if !isOpenHeadless(reg) {
+		// A launch cmd has no herdr workspace or pane: start never records
+		// one for it (recordHerdrID refuses), and stop must not close one.
+		if !isOpenHeadless(reg) || !reg.HerdrLaunch() {
 			f.ignored++
 			return
 		}
@@ -647,13 +729,21 @@ func (f *directorFold) apply(ev DirectorEvent) {
 		}
 		*field = value
 	case DirectorEventLaunched:
-		// Start writes launched under the lock only while its registration
-		// is the current one and starting.
+		// Start (MarkLaunched) and the check-in of a launch script
+		// (MarkCmdLaunched) write launched under the lock only while its
+		// registration is the current one and starting. Only the check-in's
+		// carries a pid and its start time, and it always carries both.
 		if reg == nil || reg != f.current || reg.State != DirectorStateStarting {
 			f.ignored++
 			return
 		}
-		reg.State = DirectorStateRunning
+		switch {
+		case reg.CmdLaunch() && (ev.PID <= 0 || ev.StartTime == ""),
+			!reg.CmdLaunch() && (ev.PID != 0 || ev.StartTime != ""):
+			f.ignored++
+			return
+		}
+		reg.State, reg.PID, reg.StartTime = DirectorStateRunning, ev.PID, ev.StartTime
 	case DirectorEventStopped:
 		if !isOpenHeadless(reg) {
 			f.ignored++
@@ -686,6 +776,26 @@ func (f *directorFold) openHeadless(verb, id string) (*DirectorRegistration, err
 		return nil, fmt.Errorf("org: director: %s: %w: %w: %s", verb, ErrDirectorNoOpenHeadless, ErrDirectorStopped, reg.describe())
 	}
 	return reg, nil
+}
+
+// openHerdrHeadless is openHeadless for what only a launch herdr has (its
+// workspace and pane): an open headless registration with launch cmd is
+// refused too, with ErrDirectorNotHerdrLaunch.
+func (f *directorFold) openHerdrHeadless(verb, id string) (*DirectorRegistration, error) {
+	reg, err := f.openHeadless(verb, id)
+	if err != nil {
+		return nil, err
+	}
+	if !reg.HerdrLaunch() {
+		return nil, directorNotHerdrLaunchErr(verb, *reg)
+	}
+	return reg, nil
+}
+
+// directorNotHerdrLaunchErr is verb's ErrDirectorNotHerdrLaunch refusal of
+// reg, an open headless registration with launch cmd.
+func directorNotHerdrLaunchErr(verb string, reg DirectorRegistration) error {
+	return fmt.Errorf("org: director: %s: %w: %s has no herdr workspace or pane", verb, ErrDirectorNotHerdrLaunch, reg.describe())
 }
 
 func (f *directorFold) nextID() (string, error) {
