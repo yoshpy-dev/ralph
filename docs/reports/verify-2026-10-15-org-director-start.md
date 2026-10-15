@@ -289,3 +289,104 @@ codex の director に codex_verified が要る、または `--add-dir` が付�
 - Partially verified: AC10(`starting` は実機で見ていない)、AC13(テストの側はコードを読んだ範囲)
 - Not verified: テストの実行、本物の herdr と codex の上で guarded の codex の director が機能の org を立てられること、本物の herdr の pane の環境
 - Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(C3-V1〜C3-V3)。情報は 2 つ(C3-V4、C3-V5)
+
+## Cycle 4
+
+- Date: 2026-10-16(JST。出力の UTC の時刻は 2026-10-15T18:xx)
+- Verifier: verifier subagent (Claude)。パイプラインの 4 回目で、上限を 4 に上げた回。`.harness/state/standard-pipeline/cycle-count.json` は計画どおり 2 のままにした。cross-review cycle 3 の ACTION_REQUIRED 2 件(6eef89e8)を受けた D14・D15 の直し b888d637(計画 8a0356de)と、self-review cycle 4(0b7c56d3、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 4、Merge: yes)の C4-L1〜C4-L3 の直し 5097b67e のあとに走らせた。C4-L4 は計画の Progress の文で、14057e79 で直った
+- Scope: `git diff 3504ee30..HEAD`(HEAD d0776dab)。Go の変更は b888d637 と 5097b67e の `internal/org/director.go`・`director_start.go`・`director_stop.go`、`internal/cli/org_director_headless.go`、新しい `internal/config/skill_frontmatter_test.go` と、それぞれのテスト。ほかは skill の 4 面の description、cycle 3 の sync-docs(49cee058。仕様、`/org` skill の 4 面、tech-debt)、計画、後工程の記録。テストは走らせていない(/test の担当)。テストはコードを読み、どの AC をどう固定するかを確かめた。この節の行番号は HEAD d0776dab のもの
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は ace92dd0aaa7 で、`- Approved:` の digest と同じ。D14・D15・AC16・S10 と AC9 の最後の 1 文は cycle 4 のために足された。AC9 は 8a0356de でその文が足されたときも `[x]` のままで、その文を満たすのは b888d637(下の表)
+- Evidence: `docs/evidence/verify-2026-10-15-org-director-start.md` の `## Cycle 4 (HEAD d0776dab)`。C4-1 は run-static-verify、C4-2 は Go・同期・frontmatter の検査、C4-3 は HEAD と直す前の 8a0356de の binary を偽の herdr で打った probe(P1〜P3)、C4-4 は stop の help、C4-5 は文書のずれの grep、C4-6 は後片付けと `~/.codex/config.toml` の前後。wrapper の全ログは `docs/evidence/verify-2026-10-15-183402.log`、生の出力は `docs/evidence/verify-2026-10-15-org-director-start.log` の末尾(どちらも gitignore の対象)
+- Insight event: `./scripts/insights-append.sh --slug org-director-start --flow standard --phase verify --verdict pass --cycle 4 --low 3 --source skill` で 1 行足し、この報告と同じコミットに入れた。LOW 3 は下の C4-V1〜C4-V3
+
+### cycle 4 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| D14: stop はロックの下で workspace と pane の id を最初の読みと比べ、違えば何も書かずに断る(b888d637) | 満たす(binary でも確認) | `markStopped`(`internal/org/director_start.go:336`)は、`read` を受けたときだけ、ロックの下の `openHeadless` のあとで workspace と pane の id を比べ(354)、違えば `ErrDirectorChangedDuringStop`(`internal/org/director_stop.go:40`)を包む `directorChangedError`(`director_start.go:399`)を返して何も書かない。`read` を渡すのは `MarkStoppedIfUnchanged`(317)だけで、呼ぶのは `recordDirectorStop`(`director_stop.go:175`)の、閉じ終えた stop の枝(186)だけ。forced の記録は `MarkForceStopped`(184)、start の後始末は `MarkStopped`(`director_start.go:737`)のままで、どちらも比べない。changed の枝(`director_stop.go:194`)は `HerdrCommands` が空の `*DirectorCleanupError` を返し、その `Error`(288)は「run <stop> again to close what start recorded」で終わる。CLI の `stopError`(`internal/cli/org_director_headless.go:349`)は notes を stderr に 1 行出し、stop の打ち方に `--state-dir` を足す。`HerdrCommands` が空なので `--force` の案内は出ない。help(152〜155 行)は D14 の文を持つ。テスト(読んだだけ): store の `TestDirectorMarkStoppedIfUnchanged_RefusesAnIDRecordedAfterTheRead`(`director_test.go:1755`。読みのあとに workspace・pane が記録された 3 行で断り、`launched` だけが来た行と何も来ない行では記録し、断ったあとに読み直せば記録する)、`TestStopDirector_RefusesWhenAStartRecordsMoreWhileItRuns`(`director_stop_test.go:675`)、`AForcedStopRecordsWhatStartRecordedMeanwhile`(805)、CLI の `TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain`(`org_director_headless_test.go:1128`)。binary: C4-3 の P1 は本物の start と stop を重ね、stop は終了コード 1 で何も書かず、d1 は今の登録で `running` のまま残り、2 回目の stop が記録した。P2 は cross-review の指摘の形(読んだときに何も記録がない)で、HEAD は断り、直す前の 8a0356de は動いている d1 に `detached` と `stopped` を書き、偽の herdr の w8 は開いたまま、2 回目の stop は already stopped で断られた。指摘が 8a0356de で再現し、HEAD で起きないことを確かめた |
+| D15: `/director` skill の description の言い換えと frontmatter の検査のテスト(b888d637、5097b67e で改名) | 満たす(frontmatter は Ruby でも確認) | 4 面の md5 は d6c990cdf5ef5d015af78867f59ec7be で同じ。Ruby の `YAML.safe_load` は tracked の SKILL.md 54 個をすべて読み、8a0356de の 4 面はどれも 3 行目 155 桁目の `mapping values are not allowed` で失敗した(C4-2)。HEAD の description は読んだ値が `description: ` のあとの文字列と同じで、` #` で切れていない。テスト `TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash`(`internal/config/skill_frontmatter_test.go:154`)は `skillRoots`(23)の 4 つを歩き、`plainFrontmatterFindings`(83)が、`"`・`'`・`>`・`|` で始まらない値の「コロンと空白(タブ、値の末尾のコロンも)」と「空白(タブ)と `#`」を見る。`TestPlainFrontmatterFindings`(214)は直す前の description を 3:155 の colon-space として固定する。tracked の 54 個はどれも 4 つの root の下にある。同じ形を awk で探しても HEAD には 0 件。Go のテストは走らせていない |
+| C4-L1: 書き手を並べた doc に `MarkStoppedIfUnchanged`(5097b67e) | 満たす | `ErrDirectorNoOpenHeadless`(`internal/org/director.go:100` の doc)、`ErrDirectorWriteNotRestored`(125 の doc)、`appendLocked`(456)、`DirectorWho`(`director_start.go:39`)、`openHeadlessRegistration`(`director_stop.go:208`)の doc が名前を持つ。`MarkStopped` か `MarkForceStopped` を stop の書き手として並べ、`MarkStoppedIfUnchanged` を落とした doc は grep で残っていない |
+| C4-L2: 断りの文の前置きを 1 回にし、notes は CLI の stderr の行だけ(5097b67e) | 満たす(binary でも確認) | P1 と P2 のエラーの文は `org: director: stop d1:` を 1 回だけ持ち、notes を含まない。notes は stderr の `stop d1: ctrl_c=..., pane=..., workspace=...` の行にだけ出る。CLI のテストは notes が stderr とエラーの文を合わせて 1 回であることを数える |
+| C4-L3: frontmatter のテストの改名、doc、失敗の文(5097b67e) | 満たす | 関数の doc が 2 つの形、限界(値の先頭の backquote・`[`・`{`・`*` など、入れ子の行、block の行は見ない)、直し方(`.claude` の写しを直して `scripts/sync-skills.sh`)を書く。失敗の文は `rule <name>` と直し方を言う |
+| C4-L4: Progress の行番号(14057e79) | 満たす | 計画の 208 行と 210 行は「仕様の FR-9 の 8a-2 の注」「README の director の段落」と書き、行番号を持たない |
+| cycle 3 の C3-V1〜C3-V3 | 直った | C3-V1: 仕様 85 行は「別の場所から解きうるので、start はどこで打っても断る」になった(49cee058)。C3-V2: `/org` skill の 4 面の `director` の行が D12・D13 を書き、permission の項が codex の director は guarded だけと書き、doctor の対象から role director の edits と autonomous を外し、台帳を書く座席の文に headless の director を足した。C3-V3: doctor の pass の文は tech-debt の新しい行(「Two small Go leftovers of the org-director-start PR's D12 refusal」の (a))に入った |
+
+### AC の確かめ直し(HEAD d0776dab)
+
+cycle 4 の Go の差分は、stop の記録の検査(D14)、skill の frontmatter のテスト(D15)、doc とエラーの文だけだった。start の順序と拒否、permission、見張りの関門、雛形、spawn、表示のコード(`checkDirectorStart`、`AttachHeadless`、`recordHerdrID`、`MarkLaunched`、`prompts.go`、`spawn.go`、`internal/cli/org_director.go`、`status.go`)は差分の外。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(binary でも確認) | 差分の外。P1 の start でも、イベントは attached(launch・token・model・permission_mode)→ workspace_created → pane_created → launched の順で、label は `ralph_director_<token>` と `director_<token>`、claude の guarded の agent start は `-- --model haiku <雛形を指す 1 文>` だった。P3 は pane_created までが同じ順で、そのあとは後始末の detached と stopped |
+| AC2 | 満たす(cycle 3 のまま) | 差分の外 |
+| AC3 | 満たす(binary でも確認) | `abort`(`director_start.go:734`)は変わらず、比べない `MarkStopped`(737)で記録し、`ErrDirectorStopped` を成功に扱う。5097b67e は `MarkStopped` の doc に、start の後始末が比べない理由(記録に失敗した id を start だけが持つ)を書き、`TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade`(`director_start_test.go:711`)のコメントがそれを固定すると書く。P3 では agent start の失敗のあと、start が label を確かめて pane と workspace を閉じ、`detached` と `stopped` を書いて終了コード 1(「start closed what it had made in herdr, and d1 is recorded stopped」)。閉じられない分岐は cycle 1 からテストのコードだけ |
+| AC4 | 満たす(cycle 3 のまま) | `replacedError` と `MarkLaunched` は差分の外 |
+| AC5 | 満たす(cycle 3 のまま) | label の検査は差分の外。C4-3 で start が作った 3 つの token(P1 の 2 回と P3)はどれも違う |
+| AC6 | 満たす(cycle 3 のまま) | 差分の外。P1 の stdout の `permission=guarded` と、P3 の attached の `permission_mode` は、`ralph.toml` の `roles.director` から来た |
+| AC7 | 満たす(cycle 3 のまま) | 差分の外。P1 と P3 は見張りがなく、start が起動した |
+| AC8 | 満たす(binary でも確認) | 閉じ終えた stop は `MarkStoppedIfUnchanged` で記録するようになった。id が読みと同じなら `MarkStopped` と同じものを書く。P2 の 2 回目の stop は label を確かめ(pane get、tab get、workspace get)、C-c を送り、pane と workspace を閉じて、`detached` と `stopped` を同じ write で書いた。P1 の 2 回目の stop は herdr が知らない pane と workspace を閉じ済みとして記録した。`starting` で記録のない登録は store のテストの「nothing at the read and nothing after」の行が記録まで見る。detach で外れた登録は、読みもロックの下も同じ畳み込みから id を取るので、比べても変わらない |
+| AC9 | 満たす(binary でも確認) | 最後の 1 文は b888d637 が満たす(上の D14 の行)。stop は終了コード 1 で何も書かず、閉じたものは stderr の notes の行に、もう一度打つ stop はエラーの文に出る。テストは偽の herdr の `WorkspaceClose` の中で `RecordPane` と `MarkLaunched` を、`HERDR_PANE_ID` の読みの中で `RecordWorkspace`・`RecordPane`・`MarkLaunched` を差し込み、d1 が `running` のまま今の登録であることを確かめる(差し込む場所は C4-V5)。ほかの拒否の経路は差分の外 |
+| AC10 | 満たす(cycle 3 のまま、`starting` は実機で見ていない) | 差分の外。P1 と P2 の `director status` は `headless running`、pane、workspace、model を出した |
+| AC11 | 満たす(cycle 3 のまま) | 差分の外 |
+| AC12 | 満たす(AC の外の文書のずれは C4-V1・C4-V2・C4-V4) | skill の 4 面は同じ(`/director` は d6c990cd、`/org` は 7439019e)。`check-skill-sync.sh`(14 skill)と `check-sync.sh`(DRIFTED 0)が通る。「not available yet」「start はまだ」「headless の director はまだ」は、ないことを確かめるテスト(`internal/cli/org_director_test.go:816`、901〜902)にだけある。D14 の断りを書くのは今は stop の help だけ |
+| AC13 | 満たす(テストの側はコードを読んだ範囲) | 新しいテストは `newDirStartFixture` の偽の herdr と `t.TempDir` の台帳を使う。frontmatter のテストは repo の SKILL.md を読むだけで何も書かない。probe は `env -i` と、ralph・git・偽の herdr だけの PATH で打った。repo と worktree の `.harness/state/org` はない |
+| AC14 | 満たす(cycle 3 のまま、D14 の当て方も確認) | `MarkForceStopped` は比べない。`AForcedStopRecordsWhatStartRecordedMeanwhile` は、label が違う workspace の forced の stop が、読みのあとに pane が記録されても `force` 付きの `stopped` を書くことを固定する。label が合う `--force` の stop は閉じ終えた通常の stop なので比べる(C4-V7)。pane と workspace の中からの拒否は差分の外 |
+| AC15 | 満たす(cycle 3 のまま) | 差分の外 |
+| AC16 | 満たす(Ruby でも確認) | 上の D15 の行 |
+
+### 静的解析(cycle 4)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK(shellcheck、hook の `sh -n`、guard の awk、settings.json の jq、Codex の 3 つの guard、check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の計画の参照)、`gofmt: ok`、golangci-lint `0 issues.`、`secret-scan-branch: scanned f21df66c..d0776dab against origin/main: clean`。`templates/base/ralph.toml` が branch の差分にあるので、言語の範囲は full に広がった |
+| `gofmt -l internal/ cmd/`、`go vet ./...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` と `go vet ./...` | pass | go.mod は `go 1.25.8`。go1.25.8 の GOROOT の `gofmt -l ./cmd ./internal` も出力なし |
+| `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` | pass | 14 skill が lock-step。IDENTICAL 169、DRIFTED 0、KNOWN_DIFF 5 |
+| Ruby `YAML.safe_load`(tracked の SKILL.md の frontmatter) | pass | 54 個すべて読めた。8a0356de の `/director` の 4 面は失敗した |
+| `git diff --check origin/main...HEAD` と `git diff --check 3504ee30..HEAD` | pass | 出力なし |
+| 計画の digest | 一致 | ace92dd0aaa7 |
+
+### 文書のずれ(cycle 4)
+
+計画の Progress(S10 の行)は、`/director` skill の「終える」、README の director の段落、仕様の FR-9 の 8a-2 の注に D14 の断りを足す仕事を /sync-docs に渡している。確かめた結果、要るのは skill の 2 つで、`/org` skill の `director` の行が申し送りから漏れている。README と仕様は要約の粒度で、足さなくても誤りはない。
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org director stop --help`(`org_director_headless.go:152-155`) | yes | 「When a start that is still running records a workspace or pane after stop read the registration, stop has not closed it, so it records nothing and exits 1 with what it closed: run it again to close what start recorded.」は P1 と P2 の動きと合う(C4-4)。CLI のテストが固定する |
+| `/director` skill の 4 面(「終える」、186〜214 行) | No(C4-V1) | 下の表 |
+| `/org` skill の 4 面(187 行の `director` の行) | No(C4-V2) | 下の表 |
+| README:258、仕様 FR-9 の 8a-2 の注(85 行) | 要約として yes(C4-V4) | 下の表 |
+| `docs/tech-debt/README.md` | 申し送りの 2 点が未記入(C4-V3 に含めた) | S11 の Progress が /sync-docs に渡した 2 点(記録に失敗したほかの枝の前置きの重なり、`TestDirectorHeadlessWriters_ACutOffWriteIsRestored` に `MarkStoppedIfUnchanged` と `MarkForceStopped` の行がないこと)はまだ行がない(C4-5 の grep は 0 件)。/sync-docs の受け持ちで、ずれとは数えない |
+| AGENTS.md の repo map | yes | `director_start.go` と `director_stop.go` の説明は D14 の粒度に触れない |
+
+| ID | Severity | Where | Finding |
+| --- | --- | --- | --- |
+| C4-V1 | LOW | `/director` skill の 4 面、「終える」の 5 | 5 は stop が断るときを「label が合わない、確かめられない、close が失敗した」の 3 つで挙げ、`--force` の使い方まで書くが、D14 の断り(start がまだ動いていて、stop が読んだあとに workspace か pane を記録した)がない。headless の director は人に stop を頼むので、人が「run ... again to close what start recorded」を見たときに読む手順に入っていない。申し送りのとおりで、5 の終わりに「start の途中で stop を打ち、stop が読んだあとに start が workspace か pane を記録したときも、stop は何も書かずに断る。閉じたものと、もう一度打つ stop が出るので、それを打つ」の 1 文を足せば足りる。`--force` には効かない言い方にしない(label が合う `--force` の stop も断られる。C4-V7) |
+| C4-V2 | LOW | `/org` skill の 4 面、187 行の `director` の行 | stop の断りを「label が合わない・確かめられない・閉じられないときは断られ、`--force` ならそのまま `stopped` を記録する」「pane か workspace の中からの stop は `--force` でも断られる」と並べるが、D14 の断りがない。S10 の Progress の申し送り(skill の「終える」、README、仕様)に入っていない。C4-V1 と同じ 1 句を足す |
+| C4-V3 | LOW | `recordDirectorStop` の一般のエラーの枝(`director_stop.go:197-198`)と `DirectorCleanupError.Error`(281、291) | stop の閉じる途中で start の後始末が先に `stopped` を書くと(C4-3 の P3。stop の workspace close が終わる前に start の agent start が失敗した形)、stop の `MarkStoppedIfUnchanged` は already stopped を返し、一般の枝がそれを「nothing was recorded; record the stop with ralph org director stop --id d1 --state-dir ...」と書く。名指した stop を打つと already stopped で断られる。記録は事実と合う(start が閉じて記録した)ので害は小さいが、案内の文が誤る。文の前半は `org: director: stop d1: record d1 stopped: org: director: stop d1: ...` と前置きが 2 回続く(S11 の Progress が tech-debt に渡した「ほかの枝の前置きの重なり」と同じ枝)。この枝は S1b からあり、cycle 4 の差分が入れたものではない。D14 の文は start の後始末が `ErrDirectorStopped` を成功に扱うことだけを決め、逆の順の stop の出力は決めていない。Go の直しになり、上限 4 の最後の回なので、/sync-docs が S11 の 2 点と同じ tech-debt の行に足すのがいちばん安い。直すときは、`MarkStoppedIfUnchanged` が `ErrDirectorStopped` を返したら、start の後始末がその登録を記録したと言い、打ち方を出さない |
+| C4-V4 | INFO | README:258、仕様 85 行 | どちらも stop を「label を確かめて閉じ、stopped を書く」の粒度で書く。仕様は D11 の `--force` も pane と workspace の中からの拒否も書かず、README も拒否を一覧にしない。D14 の断りは重なったときだけ起きるので、書かなくても誤りではない。申し送りの 3 つのうちこの 2 つは任意で、足すなら 1 句にする |
+| C4-V5 | INFO | 計画の AC9 の括弧(「偽の herdr の確かめか close の中で `RecordWorkspace`・`RecordPane`・`MarkLaunched` を差し込み」) | stop は workspace の記録がないと herdr を 1 回も打たないので、`RecordWorkspace` が stop の herdr の呼び出しの中に入ることはない。テストの「everything, before stop asks herdr anything」の行は `HERDR_PANE_ID` の読みの中で差し込み、コメントで理由を書く。binary の P2 は `director.lock` を外から持って同じ形を作った。AC の文の場所は読まれる形を言い過ぎているが、AC の意図(読みのあとに記録された id で断る)は満たす |
+| C4-V6 | INFO | D14 の「失敗しなければ director は running のまま残り」 | P1 では、偽の herdr が start の agent start に先に答えたあとで stop の workspace close を終えたので、stop が断ったあとの記録は `running` で、その workspace はもう閉じている(herdr は workspace と一緒に tab を閉じる)。2 回目の stop は閉じ済みとして記録した。記録が遅れる向き(閉じたのに開いていると書く)で、事実と違う `stopped` は書かない。計画の Risks の「人が herdr で pane を閉じたときは attached のまま残る」と同じ扱いで、ずれではない |
+| C4-V7 | INFO | Scope の 52 行と D14 の「`--force` には当てない」、AC16 の「tracked のすべての」 | (a) 実装は、比べないのを forced の記録(`MarkForceStopped`)だけにし、`--force` を渡しても label が合って閉じ終えた stop は比べる(`RefusesWhenAStartRecordsMoreWhileItRuns` の with force の行)。D14 の理由(「`--force` は閉じていないことを記録するので」)に合う読み方で、Scope の短い言い方とは食い違わないと読んだ。(b) テストは git を使わず 4 つの root を歩くので、root の外に SKILL.md が置かれると見ない。今は tracked の 54 個がすべて root の下で、テストのコメントもそう書く |
+
+### 観察
+
+- C4-3 の probe は、呼び出しを記録する偽の herdr を使い、本物の herdr server も agent も動かしていない。重なりは sleep ではなく印のファイルで作った。P1 と P3 は本物の start と stop で、start を `tab create` で止め、stop の `workspace close` で放した。P2 は start を手で書いた行と、`director.lock` を持つ perl で代わりにし、`lsof` で stop がロックを待っていることを見てから行を足した
+- `~/.codex/config.toml` は probe の前後で、更新時刻(Oct 15 17:51:28 2026)、大きさ(33673)、sha256 が同じだった。codex は起動していない。人の herdr server と `~/.config/herdr` には触れていない
+- 直す前の binary は `git archive 8a0356de` から作った。P2 の形で cross-review cycle 3 の指摘 2 が再現した(動いている d1 を stopped と書き、偽の herdr の w8 は開いたまま、2 回目の stop は断られる)
+- start が起動した見張り 3 つは `ralph org watch --stop` で止め、あとの `pgrep` は空だった。repo と worktree の台帳はない
+
+### Coverage gaps(cycle 4)
+
+- テストの実行(/test の担当)。cycle 4 で足されたテスト(store・stop・CLI の D14 のテスト、frontmatter の 2 つのテスト)を go1.26 と `GOTOOLCHAIN=go1.25.8` で走らせ、`markStopped` の比較を外すと赤くなるかを見るのは /test
+- 本物の herdr で、stop の workspace close と start の tab create・agent start が重なったときの順(herdr がどちらを先に処理するか)は見ていない。P1 と P3 の順は偽の herdr が決めた
+- C4-V3 の出力(stop が already stopped で断る形)を固定するテストはない
+- 足すと確信がいちばん増える確認: C4-V3 の形のテスト 1 つ。偽の herdr の `WorkspaceClose` の中で start の後始末と同じ `MarkStopped` を打ち、stop の終了コード、記録が増えないこと、エラーの文が打ち方を出さないことを見る。今の文を固定するだけでも、直すときの赤の起点になる
+
+### Verdict(cycle 4)
+
+- Verdict: pass(cycle 4、HEAD d0776dab。LOW 3 件(C4-V1〜C4-V3)は文書と案内の文のずれで、merge を止めない)
+- Verified: D14(stop がロックの下で workspace と pane の id を比べ、違えば何も書かずに断る。forced の記録と start の後始末は比べない)を、コードとテストの名前で辿り、HEAD の binary と偽の herdr で、本物の start と stop の重なり(P1)、cross-review の指摘の形(P2)、start の後始末との重なり(P3)を打って確かめた。直す前の 8a0356de の binary で指摘が再現し、HEAD で起きないことを確かめた。D15 は Ruby の `YAML.safe_load` で 54 個の SKILL.md が読めること、直す前の 4 面が読めないこと、テストの形の値が HEAD にないことを確かめた。self-review cycle 4 の C4-L1〜C4-L4 と、cycle 3 の C3-V1〜C3-V3 が閉じたことを辿った。AC1・AC3・AC8・AC9 は binary でも見た。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build・vet・gofmt、skill と template の同期、`git diff --check`)。計画の digest は承認時と同じ
+- Partially verified: AC10(`starting` は実機で見ていない)、AC13(テストの側はコードを読んだ範囲)
+- Not verified: テストの実行、本物の herdr での stop と start の重なりの順、C4-V3 の出力を固定するテスト
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(C4-V1〜C4-V3)。情報は 4 つ(C4-V4〜C4-V7)

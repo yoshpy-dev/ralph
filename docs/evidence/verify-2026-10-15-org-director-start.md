@@ -1766,3 +1766,315 @@ The `/org` skill's line 187 is its `director` row, and lines 1152 to 1185 are th
 - `~/.codex/config.toml` before and after the probe: mtime `Oct 15 17:51:28 2026` (epoch 1792054288), size 33673, sha256 `ac1a4821574050d3630118510c7dd591bf1839b947f2bb35fe4106e41b61796f`, the same both times. No codex ran (none was on the probe's PATH).
 - The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists.
 - The scratch ledgers, the two binaries, the stub, and the probe script stay in the session scratch directory.
+
+## Cycle 4 (HEAD d0776dab)
+
+Scope: the cross-review cycle-3 fixes D14 and D15 (plan 8a0356de, code b888d637) and the cycle-4 self-review LOW fixes (5097b67e), read against cycle 3's verify (3504ee30). The raw output of this section is appended to `docs/evidence/verify-2026-10-15-org-director-start.log`, and the wrapper's own log is `docs/evidence/verify-2026-10-15-183402.log` (both gitignored).
+
+### C4-1. ./scripts/run-static-verify.sh (changed scope)
+
+```text
+# Verification run
+- Timestamp: 2026-10-15T18:34:02Z
+- Mode: static
+- Requested scope: changed
+==> Running local verifier
+==> shellcheck hook + verify scripts                        OK
+==> sh -n of the 10 hooks, root and templates/base          OK (20)
+==> awk parse of the guard in .claude/hooks and the template OK (2)
+==> jq -e . .claude/settings.json and the template           OK (2)
+==> Codex hook single-source guard                           OK
+==> Codex inline hook detector smoke test                    OK
+==> Codex PR provenance policy guard                         OK
+==> scripts/check-sync.sh                                    OK (IDENTICAL 169, DRIFTED 0, ROOT_ONLY 0, TEMPLATE_ONLY 11, KNOWN_DIFF 5)
+==> scripts/check-pipeline-sync.sh                           OK
+==> scripts/check-skill-sync.sh                              OK ([ok] check-skill-sync: 14 skill(s) in lock-step)
+==> scripts/check-template-purity.sh                         OK
+==> tech-debt README plan references                         OK
+==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned f21df66c..d0776dab against origin/main: clean
+==> All verifiers passed.
+Evidence saved to: docs/evidence/verify-2026-10-15-183402.log
+rc=0
+```
+
+(The `==>` lines are folded one per check; the jq checks also print the two settings files, left out here. The full output is in the raw log.)
+
+### C4-2. Go, sync, and frontmatter checks
+
+```text
+$ go version
+go version go1.26.0 darwin/arm64
+$ gofmt -l internal/ cmd/        -> no output, rc=0
+$ go vet ./...                   -> no output, rc=0
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+$ GOTOOLCHAIN=go1.25.8 go build ./...   -> rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./...     -> rc=0
+$ "$(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt" -l ./cmd ./internal   -> no output, rc=0
+$ grep -n '^go ' go.mod
+3:go 1.25.8
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step          (rc=0)
+$ ./scripts/check-sync.sh
+IDENTICAL 169, DRIFTED 0, ROOT_ONLY 0, TEMPLATE_ONLY 11, KNOWN_DIFF 5; PASS: all files in sync.   (rc=0)
+$ git diff --check origin/main...HEAD   -> no output, rc=0
+$ git diff --check 3504ee30..HEAD       -> no output, rc=0
+$ ./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md
+ace92dd0aaa7
+$ md5 -q of the four /director SKILL.md copies
+d6c990cdf5ef5d015af78867f59ec7be (all four)
+$ md5 -q of the four /org SKILL.md copies
+7439019e58b88ed23394c829dd00cbb7 (all four)
+
+$ ruby -v
+ruby 3.4.10 (2026-06-30 revision 2b0b7728dc) +PRISM [arm64-darwin25]
+$ for f in $(git ls-files '*SKILL.md'); do ruby -ryaml -e 'YAML.safe_load(File.read(ARGV[0]).split(/^---$/)[1])' "$f"; done
+ok=54 fail=0
+$ git ls-files '*SKILL.md' | wc -l              -> 54
+$ git ls-files '*SKILL.md' outside the four skillRoots of skill_frontmatter_test.go   -> none (grep rc=1)
+$ find the four skillRoots -name SKILL.md | wc -l   -> 54
+
+# the four /director copies at 8a0356de (before b888d637) and at HEAD
+== .claude/skills/director/SKILL.md
+old: Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 3 column 155
+head: keys=["name", "description"] desc_equals_raw=true len=672
+== .agents/skills/director/SKILL.md
+old: Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 3 column 155
+head: keys=["name", "description"] desc_equals_raw=true len=672
+== templates/base/.claude/skills/director/SKILL.md
+old: Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 3 column 155
+head: keys=["name", "description"] desc_equals_raw=true len=672
+== templates/base/.agents/skills/director/SKILL.md
+old: Psych::SyntaxError: (<unknown>): mapping values are not allowed in this context at line 3 column 155
+head: keys=["name", "description"] desc_equals_raw=true len=672
+```
+
+`desc_equals_raw=true` means the parsed description equals the raw text after `description: `, so no ` #` cut it. A separate awk scan of every tracked SKILL.md frontmatter for a top-level plain value (not starting with `"`, `'`, `>`, or `|`) holding a colon followed by a space or a tab, a colon at the end, or a space or a tab before `#` printed nothing: the shapes `TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash` looks for are absent at HEAD. The Go test itself was not run (that is /test).
+
+### C4-3. Stub herdr probe: D14 with the HEAD binary and the pre-fix binary
+
+Setup:
+
+- HEAD binary: `go build -o $PROBE/bin/ralph ./cmd/ralph` from the clean worktree at d0776dab. Pre-fix binary: `git archive 8a0356de` (the plan commit right before b888d637) built into `$PROBE/prebin/ralph`. Each bin directory holds only ralph, a symlink to git, and the same stub `herdr`: a POSIX sh script that logs every call to `$PROBE/hstate/calls.log`, keeps the workspace and tab labels in files there, and answers in the envelope shapes of `internal/org/driver/herdr.go`. The stub never talks to a herdr server.
+- Every ralph command ran under `env -i HOME=$PROBE/home USER=probe LOGNAME=probe PATH=<bin dir> TMPDIR=$PROBE/tmp/ LANG=en_US.UTF-8`, so no real herdr, codex, claude, agmsg, or osascript could be found. The cwd `$PROBE/work/p1` (or `p2`) is outside any git repo, with a `ralph.toml` of `[org.permissions.roles] director = "guarded"`; the ledger is an explicit `--state-dir`.
+- The overlap is staged with markers, not with sleeps:
+  - P1 and P3: a real start and a real stop. With `hold_tab`, the stub's `tab create` (start's step 3, after start recorded `workspace_created`) writes `tab_waiting` and waits for `release_tab`. The probe runs stop once `tab_waiting` exists. With `hold_close`, the stub's `workspace close` (stop's close) writes `release_tab` and waits until the ledger has a `launched` line (P1). With `hold_close_until_stopped` (one-shot) and `fail_agent`, start's agent start fails, and stop's close waits until the ledger has a `stopped` line (P3).
+  - P2: the cross-review cycle-3 shape, where stop reads a registration with nothing recorded and so calls no herdr. The ledger holds one `attached` line written by hand in the format P1's start wrote. A perl script (`flock(2)` LOCK_EX on `director.lock`, the lock `internal/org/lockfile.go` polls with LOCK_EX|LOCK_NB) holds the lock; the probe starts stop in the background and, once `lsof -p <stop pid>` shows `director.lock` open (stop is in `withFileLock`, past its read), lets the holder append `workspace_created`, `pane_created`, and `launched` (the lines a start writes, in P1's format) and drop the lock. The start is emulated; the stop is the real binary.
+
+```text
+## P1 (HEAD d0776dab): stop reads the workspace only; start records the pane and launched while stop closes the workspace
+$ (cd work/p1 && ralph org director start --driver claude --model haiku --state-dir $L) &
+[start is waiting in herdr tab create; director.jsonl now:]
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"launch":"herdr","token":"3dd3b2c9950f","model":"haiku","permission_mode":"guarded","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"workspace_created","workspace_id":"w1","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+
+$ (cd work/p1 && ralph org director stop --id d1 --state-dir $L)
+[stop exit 1]
+[stop stdout]
+[stop stderr]
+stop d1: ctrl_c=skipped, pane=none recorded, workspace=closed
+org: director: stop d1: record d1 stopped: a start in progress recorded a workspace or pane after stop read the registration: d1 had workspace "w1" and no pane when stop read it, and has workspace "w1" and pane "w1:p1" now; this stop closed only what it had read; nothing was recorded; run ralph org director stop --id d1 --state-dir '$PROBE/state-p1-bin' again to close what start recorded
+[start exit 0]
+[start stdout]
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w1:p1, workspace=w1)
+talk to the director in herdr: pane w1:p1, in the tab director_3dd3b2c9950f of the workspace labelled ralph_director_3dd3b2c9950f
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state-p1-bin'
+[start stderr]
+ralph org director start: started the cross-org watch (pid 33033); log: $PROBE/state-p1-bin/watch.log
+[stub herdr calls from start's launch to here: 5, stop's share starts at line 3]
+herdr [workspace] [create] [--cwd] [$PROBE/work/p1] [--label] [ralph_director_3dd3b2c9950f]
+herdr [tab] [create] [--workspace] [w1] [--cwd] [$PROBE/work/p1] [--label] [director_3dd3b2c9950f]
+herdr [workspace] [get] [w1]
+herdr [workspace] [close] [w1]
+herdr [agent] [start] [director_3dd3b2c9950f] [--kind] [claude] [--pane] [w1:p1] [--timeout] [60000] [--] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state-p1-bin/prompts/director_3dd3b2c9950f.md]
+
+$ cat director.jsonl
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"launch":"herdr","token":"3dd3b2c9950f","model":"haiku","permission_mode":"guarded","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"workspace_created","workspace_id":"w1","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"pane_created","pane_id":"w1:p1","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"launched","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+
+$ ralph org director status --state-dir $L
+director: attached d1 (driver=claude, headless running, model=haiku, pane w1:p1, workspace w1, attached at 2026-10-15T18:39:52Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+(...)
+state: running
+token: 3dd3b2c9950f
+workspace_id: w1
+pane_id: w1:p1
+[exit 0]
+
+$ ralph org director stop --id d1 --state-dir $L   (run again)
+stopped d1 (ctrl_c=skipped, pane=already closed, workspace=already closed)
+the director is no longer attached
+[exit 0]
+[stub herdr calls: 2]
+herdr [pane] [get] [w1:p1]
+herdr [workspace] [get] [w1]
+$ tail -n 2 director.jsonl
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:39:52Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+$ ralph org director status --state-dir $L
+director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work
+enabled: true
+[exit 0]
+$ ralph org watch --stop --state-dir $L
+stopped ralph org watch --all (pid 33033)
+[exit 0]
+
+## P1 (pre-fix 8a0356de), the same staging
+$ (cd work/p1 && ralph org director stop --id d1 --state-dir $L)
+[stop exit 0]
+[stop stdout]
+stopped d1 (ctrl_c=skipped, pane=none recorded, workspace=closed)
+the director is no longer attached
+$ cat director.jsonl
+(attached, workspace_created w2, pane_created w2:p1, launched, then:)
+{"ts":"2026-10-15T18:40:04Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:40:04Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+[start exit 0: started d1 (... pane=w2:p1, workspace=w2)]
+
+## P2 (HEAD d0776dab): stop reads nothing recorded; the emulated start records the workspace, the pane, and launched while stop waits on director.lock
+$ cat director.jsonl   (before stop)
+{"ts":"2026-10-16T00:00:00Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"launch":"herdr","token":"0123456789ab","model":"haiku","permission_mode":"guarded","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+[director.lock is held by the emulated start (pid 35560)]
+[lsof: stop (pid 35595) has director.lock open: yes]
+[lock holder exit 0; appended: yes]
+[stop exit 1]
+[stop stdout]
+[stop stderr]
+stop d1: ctrl_c=skipped, pane=none recorded, workspace=none recorded
+org: director: stop d1: record d1 stopped: a start in progress recorded a workspace or pane after stop read the registration: d1 had no workspace and no pane when stop read it, and has workspace "w9" and pane "w9:p1" now; this stop closed only what it had read; nothing was recorded; run ralph org director stop --id d1 --state-dir '$PROBE/state-p2-bin' again to close what start recorded
+[stub herdr calls during stop: 0]
+$ cat director.jsonl
+{"ts":"2026-10-16T00:00:00Z","id":"d1","event":"attached",...,"token":"0123456789ab",...}
+{"ts":"2026-10-16T00:00:00Z","id":"d1","event":"workspace_created","workspace_id":"w9","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+{"ts":"2026-10-16T00:00:00Z","id":"d1","event":"pane_created","pane_id":"w9:p1","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+{"ts":"2026-10-16T00:00:00Z","id":"d1","event":"launched","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+$ ralph org director status --state-dir $L
+director: attached d1 (driver=claude, headless running, model=haiku, pane w9:p1, workspace w9, attached at 2026-10-16T00:00:00Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+[exit 0]
+$ ralph org director stop --id d1 --state-dir $L   (run again)
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+[stub herdr calls: 7]
+herdr [pane] [get] [w9:p1]
+herdr [tab] [get] [w9:t1]
+herdr [workspace] [get] [w9]
+herdr [workspace] [get] [w9]
+herdr [pane] [send-keys] [w9:p1] [C-c]
+herdr [pane] [close] [w9:p1]
+herdr [workspace] [close] [w9]
+$ tail -n 2 director.jsonl
+{"ts":"2026-10-15T18:40:33Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+{"ts":"2026-10-15T18:40:33Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+[stub state left for w9: 0]
+
+## P2 (pre-fix 8a0356de), the same staging (token fedcba987654, w8)
+[lsof: stop (pid 36167) has director.lock open: yes]
+[lock holder exit 0; appended: yes]
+[stop exit 0]
+[stop stdout]
+stopped d1 (ctrl_c=skipped, pane=none recorded, workspace=none recorded)
+the director is no longer attached
+no workspace id was recorded for d1: herdr may still have a workspace labelled ralph_director_fedcba987654 that start made before it could record it; look for it with herdr workspace list
+[stop stderr]
+[stub herdr calls during stop: 0]
+$ cat director.jsonl
+(attached, then the emulated start's workspace_created w8, pane_created w8:p1, launched, then:)
+{"ts":"2026-10-15T18:40:40Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+{"ts":"2026-10-15T18:40:40Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work/p2","herdr_pane":false}
+$ ralph org director status --state-dir $L
+director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work
+$ ralph org director stop --id d1 --state-dir $L   (run again)
+org: director: stop d1: no open headless registration has the id: the headless registration was already stopped: d1 (driver claude, attached 2026-10-16T00:00:00Z, headless stopped)
+[exit 1]
+[stub herdr calls: 0]
+[stub state left for w8: 3]   (the workspace, tab, and pane stay open in the stub, recorded stopped)
+
+## P3 (HEAD d0776dab): as P1, but start's agent start fails, and start's cleanup records the stop while stop's workspace close is still in flight
+$ (cd work/p1 && ralph org director stop --id d1 --state-dir $L)
+[stop exit 1]
+[stop stderr]
+stop d1: ctrl_c=skipped, pane=none recorded, workspace=closed
+org: director: stop d1: record d1 stopped: org: director: stop d1: no open headless registration has the id: the headless registration was already stopped: d1 (driver claude, attached 2026-10-15T18:42:29Z, headless stopped); nothing was recorded; record the stop with ralph org director stop --id d1 --state-dir '$PROBE/state-p3-bin'
+[start exit 1]
+[start stderr]
+ralph org director start: started the cross-org watch (pid 42316); log: $PROBE/state-p3-bin/watch.log
+org: director: start d1: herdr agent start director_3d8b252f5eb7 (agent_start_retries=0): herdr: exit status 1 (herdr: stub_failure: stub: agent start fails); start closed what it had made in herdr, and d1 is recorded stopped
+[stub herdr calls from start's launch to here: 12]
+herdr [workspace] [create] [--cwd] [$PROBE/work/p1] [--label] [ralph_director_3d8b252f5eb7]
+herdr [tab] [create] [--workspace] [w3] [--cwd] [$PROBE/work/p1] [--label] [director_3d8b252f5eb7]
+herdr [workspace] [get] [w3]
+herdr [workspace] [close] [w3]
+herdr [agent] [start] [director_3d8b252f5eb7] [--kind] [claude] [--pane] [w3:p1] [--timeout] [60000] [--] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state-p3-bin/prompts/director_3d8b252f5eb7.md]
+herdr [pane] [get] [w3:p1]
+herdr [tab] [get] [w3:t1]
+herdr [workspace] [get] [w3]
+herdr [workspace] [get] [w3]
+herdr [pane] [send-keys] [w3:p1] [C-c]
+herdr [pane] [close] [w3:p1]
+herdr [workspace] [close] [w3]
+$ cat director.jsonl
+(attached, workspace_created w3, pane_created w3:p1, then:)
+{"ts":"2026-10-15T18:42:30Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+{"ts":"2026-10-15T18:42:30Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work/p1","herdr_pane":false}
+$ ralph org director stop --id d1 --state-dir $L   (run again, as the first stop's error says)
+org: director: stop d1: no open headless registration has the id: the headless registration was already stopped: d1 (driver claude, attached 2026-10-15T18:42:29Z, headless stopped)
+[exit 1]
+[stub herdr calls: 0]
+$ ralph org watch --stop --state-dir $L
+stopped ralph org watch --all (pid 42316)
+[exit 0]
+```
+
+In P1 the stub lets start's agent start answer before stop's `workspace close` lands, so the HEAD record says `running` for a workspace stop has already closed until the second stop finds both gone. In P3 the first stop's error says "record the stop with ralph org director stop --id d1 ...", but start's cleanup had already recorded d1 stopped, and the stop it names is refused as already stopped (the report's C4-V3).
+
+### C4-4. ralph org director stop --help of the HEAD binary (the D14 sentence)
+
+```text
+(...) --force, a human's cleanup, then
+records the director stopped anyway, closing nothing more, and prints
+what was left open and how to find it (herdr workspace list, the
+workspace labelled ralph_director_<token>); when the labels match,
+--force closes as usual. When a start that is still running records a
+workspace or pane after stop read the registration, stop has not closed
+it, so it records nothing and exits 1 with what it closed: run it again
+to close what start recorded. stop reads no ralph.toml (nor the main
+worktree's), so one that does not load does not block it.
+```
+
+### C4-5. Documentation drift greps
+
+```text
+$ sed -n 186,214p .claude/skills/director/SKILL.md   (### 終える, items 1-6)
+item 5 names three refusals (a label that does not match, a label that cannot be checked, a close that fails) and --force; no item names the stop refused because a start recorded more meanwhile
+$ grep -n 'director stop' .claude/skills/org/SKILL.md
+59:  `director start` / `director stop`)は
+187:| `director` | ... `director stop --id <id> [--force]` は、... label が合わない・確かめられない・閉じられないときは断られ、`--force` ならそのまま `stopped` を記録する(閉じていないものを出す)。director の pane か workspace の中からの stop は、`--force` でも断られる。... |
+$ README.md:258 (the director paragraph)
+"... is ended with `ralph org director stop --id <id>`, run from outside its workspace, which checks the labels, closes the pane and the workspace, and records it stopped (`--force` records a stop it cannot check or close, ...)"
+$ docs/specs/2026-10-07-org-multi-org-director.md:85 (the 8a-2 note)
+"stop は pane と workspace の label がその起動の token の名前 ... であることを確かめてから閉じ、`stopped` を書く。" (no --force, no refusal)
+$ grep -c 'MarkStoppedIfUnchanged\|ACutOffWriteIsRestored\|D14\|D15' docs/tech-debt/README.md
+0
+$ grep -rn -i 'not available yet\|start はまだ\|headless の director はまだ' --include='*.md' --include='*.go' . (outside docs/reports, docs/evidence, docs/plans)
+./internal/cli/org_director_test.go:816, 901, 902 (the test that checks the phrase is gone)
+```
+
+### C4-6. Cleanup and the files outside the scratch directory
+
+- The three watches the starts launched were stopped with `ralph org watch --stop` (pids 33033, 33756, 42316). Afterwards `pgrep -fl "$PROBE/"`, `pgrep -fl 'herdr server'`, and `pgrep -fl osascript` printed nothing (exit 1 each).
+- `$PROBE/hstate` holds `calls.log`, the workspace counter, the ledger pointer, and the stub's w8 workspace, tab, and pane: the pre-fix P2 left them open while it recorded d1 stopped (that is the finding). Every other stub workspace and pane was closed. `$PROBE/home` and `$PROBE/tmp` are empty.
+- `~/.codex/config.toml` before and after the probe: mtime `Oct 15 17:51:28 2026` (epoch 1792054288), size 33673, sha256 `ac1a4821574050d3630118510c7dd591bf1839b947f2bb35fe4106e41b61796f`, the same both times. No codex ran (none was on the probe's PATH). The user's herdr server and `~/.config/herdr` were not touched (the stub is the only herdr on the probe's PATH).
+- The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists.
+- The scratch ledgers, the two binaries, the stub, the lock holder, and the probe scripts stay in the session scratch directory.
