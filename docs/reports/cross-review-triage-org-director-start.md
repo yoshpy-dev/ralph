@@ -8,27 +8,24 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 3/3 (cap reached)
-- Total reviewer findings: 2
-- After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
+- Cycle: 4/4 (cap reached)
+- Total reviewer findings: 0
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Active plan: docs/plans/active/2026-10-15-org-director-start.md(承認済み、digest 96796452ceae)。下の「Cycle 2」の ACTION_REQUIRED 2 件は、caf1d025(D12 と D13)と 83287d39 で直した
-- Self-review report: docs/reports/self-review-2026-10-15-org-director-start.md(cycle 3 は e62df32e で Merge: yes。LOW 4 件は 83287d39 で直した)
-- Verify report: docs/reports/verify-2026-10-15-org-director-start.md(cycle 3 は 3504ee30 で pass。直す前の binary で cycle 2 の 2 件が再現し、HEAD で直ったことを確かめた)
-- Test report: docs/reports/test-2026-10-15-org-director-start.md(cycle 3 は b0adfc63 で pass。mutant 30 個のうち 24 個が red。生き残りの 6 個のうち 4 個は等価で、穴の 2 個は sync-docs の 49cee058 で tech-debt に記録した)
+- Active plan: docs/plans/active/2026-10-15-org-director-start.md(承認済み、digest 58be042da6fd)。下の「Cycle 3」の ACTION_REQUIRED 2 件は b888d637 で直した(D14 と D15)
+- Self-review report: docs/reports/self-review-2026-10-15-org-director-start.md(cycle 4 は 0b7c56d3 で Merge: yes。LOW は 4 件で、C4-L4 は 14057e79、C4-L1〜C4-L3 は 5097b67e で直した)
+- Verify report: docs/reports/verify-2026-10-15-org-director-start.md(cycle 4 は 2440a199 で pass。LOW は 3 件。C4-V3 は AC8 に 1 文足して 44b80391 で直し、C4-V1 と C4-V2 は sync-docs の 490a5e4c で直した)
+- Test report: docs/reports/test-2026-10-15-org-director-start.md(cycle 4 は 80947235 で pass。mutant 42 個のうち 39 個が red。穴を埋めるテストを 10efa82c で 2 本足した)
 - Implementation context summary:
-  - `codex exec review --base main` を 49cee058 で実行した。モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で、`-o` のファイルは 1,754 バイト。
-  - Codex は read-only の sandbox で Go のテストを回せていない。
-  - 2 件とも、主張をコードと parse で確かめた。直し方は consult(consult-plan-xreviewc3)に聞き、判定は「進めてよい」だった。P1 は言い換えと検査のテスト(B1)、P2 は stop がロックの下で記録を比べて断る形(C)。
+  - `codex exec review --base main` を 490a5e4c で実行した。モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で、`-o` のファイルは 203 バイト。
+  - Codex の結論は「No actionable regressions were identified」。空白、Go の書式、skill の YAML は確かめていて、Go のテストは read-only の sandbox でビルド用のディレクトリを作れず回せていない。
+  - Go のテストは cycle 4 の /test が回し、go1.26.0 と go1.25.8 の両方で通っている。
 
 ## ACTION_REQUIRED
 
-| # | Reviewer finding | Triage rationale | Affected file(s) |
-|---|-------------------|------------------|-------------------|
-| 1 | [P1] `/director` skill の `description:` は引用符のない YAML の値で、`ways: the` のところで「コロンと空白」を含む。そのため 4 面とも YAML として読めない(`mapping values are not allowed in this context`)。base の版は読める。YAML で skill を読む loader は、interactive と headless の director が要る手順を読み込めない。値を引用符で囲むか `description: >` にして、写しを作り直すべき | 実際の問題で、直す価値もある。Ruby の `YAML.safe_load` で、4 面とも 3 行目 155 桁目で失敗することを確かめた。base(f21df66c)の版と、ほかの skill の SKILL.md はすべて読める。入れたのはこのブランチの 9fb4f635(S3)である。`scripts/check-skill-sync.sh` は frontmatter を YAML として読まず、値の引用符も剥がすので、4 回の検証で誰も気づかなかった。直し方は 2 つ。description を「コロンと空白」のない文に言い換え、sync-skills で 4 面を作り直す。あわせて、tracked のすべての SKILL.md の frontmatter について、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があれば落とす Go のテストを足す。Codex や Claude Code の loader が YAML をどこまで厳しく読むかは確かめていない | `.claude/skills/director/SKILL.md` と写しの 3 面、新しい frontmatter の検査のテスト、計画 |
-| 2 | [P2] stop が start と重なると、動いている director を stopped と記録しうる。stop は、workspace と pane の id がどちらも記録される前に登録を読むことがある。その後、start が両方の id と `launched` を書いてから stop が再開しても、stop は元の読みに従って何も閉じない。`MarkStopped` は登録が開いていることしか確かめないので、動いている director を stopped と書く。その資源は閉じていない headless の登録から消え、次の stop は already stopped で断る。閉じる前に start の進みを止めるか、閉じた資源の記録をロックの下で比べ、変わっていたら片付け直すべき | 実際の問題で、直す価値もある。`StopDirector`(`internal/org/director_stop.go`)はロックなしで登録を読み、`markStopped`(`internal/org/director_start.go`)はロックの下で `openHeadless(id)` だけを確かめる。`recordHerdrID` は、開いた登録になら workspace と pane の id を書く。そのため「読んだときに workspace の記録がない → start が記録する → stop が stopped を書く」の順で、記録が事実と違う。D11 は、閉じ損ねたときに事実と違う記録を残す案を退けている。直し方は、`markStopped` に stop が読んだときの workspace と pane の id を渡し、ロックの下で今の記録と違えば何も書かずに断ること。新しい sentinel を使い、stop の出力では、start が途中で記録を足したのでもう一度 stop を打つよう案内する。`recordHerdrID` は記録済みの id を断るので、id は「空から値」にしか変わらない。等しいかを比べれば、新しく記録されたかが分かる。`launched` は閉じるものに影響しないので比べない。`--force` は閉じていないことを記録するので当てない。stop が workspace を閉じたあとで start の次の段が失敗すれば、start の後始末が stopped を書く。失敗しなければ director は running のまま残り、2 回目の stop が閉じる。どちらでも記録は事実と一致する | `internal/org/director_start.go`(`markStopped`)、`internal/org/director_stop.go`(`StopDirector`、`recordDirectorStop`)、CLI の stop の出力、そのテスト、計画(D14、AC9) |
+なし。
 
 ## WORTH_CONSIDERING
 
@@ -39,6 +36,39 @@
 なし。
 
 Categories: false-positive, already-addressed, style-preference, out-of-scope, context-aware-safe
+
+## Cycle 3
+
+- Date: 2026-10-16
+- Cycle: 3/3 (cap reached)
+- Total reviewer findings: 2
+- 仕分けの結果: ACTION_REQUIRED 2 件、WORTH_CONSIDERING 0 件、DISMISSED 0 件(cycle 3 のときの数。この報告の数の行は先頭の 1 行だけにしている)
+
+### Triage context(cycle 3)
+
+- Active plan: docs/plans/active/2026-10-15-org-director-start.md(承認済み、digest 96796452ceae)。下の「Cycle 2」の ACTION_REQUIRED 2 件は、caf1d025(D12 と D13)と 83287d39 で直した
+- Self-review report: docs/reports/self-review-2026-10-15-org-director-start.md(cycle 3 は e62df32e で Merge: yes。LOW 4 件は 83287d39 で直した)
+- Verify report: docs/reports/verify-2026-10-15-org-director-start.md(cycle 3 は 3504ee30 で pass。直す前の binary で cycle 2 の 2 件が再現し、HEAD で直ったことを確かめた)
+- Test report: docs/reports/test-2026-10-15-org-director-start.md(cycle 3 は b0adfc63 で pass。mutant 30 個のうち 24 個が red。生き残りの 6 個のうち 4 個は等価で、穴の 2 個は sync-docs の 49cee058 で tech-debt に記録した)
+- Implementation context summary:
+  - `codex exec review --base main` を 49cee058 で実行した。モデルは gpt-6-astra、effort は xhigh、sandbox は read-only。`codex rc=0` で、`-o` のファイルは 1,754 バイト。
+  - Codex は read-only の sandbox で Go のテストを回せていない。
+  - 2 件とも、主張をコードと parse で確かめた。直し方は consult(consult-plan-xreviewc3)に聞き、判定は「進めてよい」だった。P1 は言い換えと検査のテスト(B1)、P2 は stop がロックの下で記録を比べて断る形(C)。
+
+### ACTION_REQUIRED(cycle 3)
+
+| # | Reviewer finding | Triage rationale | Affected file(s) |
+|---|-------------------|------------------|-------------------|
+| C3-1 | [P1] `/director` skill の `description:` は引用符のない YAML の値で、`ways: the` のところで「コロンと空白」を含む。そのため 4 面とも YAML として読めない(`mapping values are not allowed in this context`)。base の版は読める。YAML で skill を読む loader は、interactive と headless の director が要る手順を読み込めない。値を引用符で囲むか `description: >` にして、写しを作り直すべき | 実際の問題で、直す価値もある。Ruby の `YAML.safe_load` で、4 面とも 3 行目 155 桁目で失敗することを確かめた。base(f21df66c)の版と、ほかの skill の SKILL.md はすべて読める。入れたのはこのブランチの 9fb4f635(S3)である。`scripts/check-skill-sync.sh` は frontmatter を YAML として読まず、値の引用符も剥がすので、4 回の検証で誰も気づかなかった。直し方は 2 つ。description を「コロンと空白」のない文に言い換え、sync-skills で 4 面を作り直す。あわせて、tracked のすべての SKILL.md の frontmatter について、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があれば落とす Go のテストを足す。Codex や Claude Code の loader が YAML をどこまで厳しく読むかは確かめていない | `.claude/skills/director/SKILL.md` と写しの 3 面、新しい frontmatter の検査のテスト、計画 |
+| C3-2 | [P2] stop が start と重なると、動いている director を stopped と記録しうる。stop は、workspace と pane の id がどちらも記録される前に登録を読むことがある。その後、start が両方の id と `launched` を書いてから stop が再開しても、stop は元の読みに従って何も閉じない。`MarkStopped` は登録が開いていることしか確かめないので、動いている director を stopped と書く。その資源は閉じていない headless の登録から消え、次の stop は already stopped で断る。閉じる前に start の進みを止めるか、閉じた資源の記録をロックの下で比べ、変わっていたら片付け直すべき | 実際の問題で、直す価値もある。`StopDirector`(`internal/org/director_stop.go`)はロックなしで登録を読み、`markStopped`(`internal/org/director_start.go`)はロックの下で `openHeadless(id)` だけを確かめる。`recordHerdrID` は、開いた登録になら workspace と pane の id を書く。そのため「読んだときに workspace の記録がない → start が記録する → stop が stopped を書く」の順で、記録が事実と違う。D11 は、閉じ損ねたときに事実と違う記録を残す案を退けている。直し方は、`markStopped` に stop が読んだときの workspace と pane の id を渡し、ロックの下で今の記録と違えば何も書かずに断ること。新しい sentinel を使い、stop の出力では、start が途中で記録を足したのでもう一度 stop を打つよう案内する。`recordHerdrID` は記録済みの id を断るので、id は「空から値」にしか変わらない。等しいかを比べれば、新しく記録されたかが分かる。`launched` は閉じるものに影響しないので比べない。`--force` は閉じていないことを記録するので当てない。stop が workspace を閉じたあとで start の次の段が失敗すれば、start の後始末が stopped を書く。失敗しなければ director は running のまま残り、2 回目の stop が閉じる。どちらでも記録は事実と一致する | `internal/org/director_start.go`(`markStopped`)、`internal/org/director_stop.go`(`StopDirector`、`recordDirectorStop`)、CLI の stop の出力、そのテスト、計画(D14、AC9) |
+
+### WORTH_CONSIDERING(cycle 3)
+
+なし。
+
+### DISMISSED(cycle 3)
+
+なし。
 
 ## Cycle 2
 
