@@ -619,6 +619,13 @@ assert_eq "a figure without </figure> exits 1" 1 "$_rc"
 assert_has_line "a figure without </figure> is reported" 'figure#5: L6: no </figure> after this figure' "$_out"
 assert_only_rule "a figure without </figure> breaks only L6" L6 "$_out"
 
+# The page skeleton of /plan, on each of its four faces, passes as shipped.
+for _face in .claude .agents templates/base/.claude templates/base/.agents; do
+  run_pv "$PLAN_VISUAL" lint "$PROJECT_ROOT/$_face/skills/plan/visual-template.html"
+  assert_eq "$_face visual-template.html passes lint (exit 0)" 0 "$_rc"
+  assert_empty_file "$_face visual-template.html prints no finding" "$_out"
+done
+
 : > "$_tmp/lint-empty.html"
 run_pv "$PLAN_VISUAL" lint "$_tmp/lint-empty.html"
 assert_eq "empty file exits 1" 1 "$_rc"
