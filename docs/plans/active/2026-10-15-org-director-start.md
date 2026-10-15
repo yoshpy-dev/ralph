@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:5ca6e9a01b63
+- Approved: 2026-10-15 sha256:d59311f57d8e
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -25,7 +25,7 @@
   - どのイベントにも打った側の `ts`・`user`・`cwd`・`herdr_pane` を付ける(8a-1 と同じ)
   - 畳み込みは、今の登録に加えて、`launch = herdr` で `stopped` のない登録(今の登録でも、detach で外れたものでも)を「閉じていない headless の登録」として出す。それぞれの状態は `starting`(`launched` がない)か `running`(`launched` がある)で、記録した `workspace_id`・`pane_id`・`token`・`model`・`permission_mode` を持つ。`director stop` の対象はこれ
   - 古い binary の畳み込みは知らないイベントを数えて飛ばす(`directorFold.apply` の `default`)ので、新しいイベントの行が残っても 8a-1 の読み方は壊れない
-- `ralph org director start --driver <claude|codex> [--model <model>] [--timeout-ms <ms>]`(org の層 `StartDirector`、CLI `internal/cli/org_director.go`)
+- `ralph org director start --driver <claude|codex> [--model <model>] [--timeout-ms <ms>]`(org の層 `StartDirector`、CLI `internal/cli/org_director_headless.go`)
   - 断るとき(終了コード 1、何も書かない、herdr を打たない): `enabled = false`、attached の登録がある(headless なら `director stop --id`、そうでなければ `detach --id` の打ち方を出す。start に `--replace` は付けない)、`--org-id`、`--driver` が claude と codex 以外、model が `[org.roles].director` で許されない(spawn と同じ `resolveModelOrWarn`、省略時は警告付きの既定)、permission の規則で通らない(codex で `codex_verified = false` かつ autonomous か edits)、古い worktree の台帳(書き換えの動詞として扱う)、herdr の pane の中(`HERDR_PANE_ID` がある)から打たれたとき(出力で herdr の外の端末から打つよう言う)
   - 見張り: `ralph org start` と同じく、見張りが動いていなければ `ralph org watch --all --detach` と同じ形で起動して待つ。止まりかけ・印が古い・`--once` の見張りには断られる(D5)
   - 起動の順(D3、図 2)
@@ -86,7 +86,7 @@
 ## Affected areas
 
 - 変えるファイル: `internal/org/director.go`、`internal/org/director_test.go`、`internal/org/prompts.go`、`internal/org/prompts_test.go`、`internal/org/spawn.go`(role director の拒否)、`internal/org/verbs_all.go`(stop --all の案内の 1 行)、`internal/cli/org_director.go`、`internal/cli/org_director_test.go`、`internal/cli/org.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/status.go`、`internal/cli/status_test.go`、`internal/cli/org_stop_all_test.go`、`templates/base/ralph.toml`、`/director` skill の 4 面、README、仕様、AGENTS.md、`docs/tech-debt/README.md`
-- 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go`、`internal/org/director_stop.go` とそれぞれのテスト。S1b のあとで director_start.go が 949 行になり、800 行の目安を超えたので stop を分けた)
+- 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go`、`internal/org/director_stop.go` とそれぞれのテスト。S1b のあとで director_start.go が 949 行になり、800 行の目安を超えたので stop を分けた)、start と stop の CLI のファイル(`internal/cli/org_director_headless.go` とそのテスト。S2 のあとで org_director.go が 914 行になったので分けた)
 
 ## Visual review
 
@@ -180,6 +180,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] Branch created
 - [x] Implementation started
   - S1a b9861932(登録の拡張、雛形 `prompts/director.md` は他の役割と同じく日本語、spawn の role director の拒否)。S1b 8528515f(StartDirector と StopDirector、`codexWritableRootArgs` の director、StopAll の閉じていない headless の登録)。S1b の報告の 2 つの穴を consult(consult-plan-dirstop)に聞き、D11 と AC14 を足して計画を承認し直した(2026-10-15)
+  - S1c b5ce8dea(stop を director_stop.go へ移すだけ)と a2d5fc01(stop の `--force`、director の workspace の中からの stop の拒否)。S2 d4da1c45(CLI の start・stop・status、stop --all の案内、main worktree の ralph.toml の読み方)。S2b 725fff10(org_director.go が 914 行になったので、start と stop の CLI を `internal/cli/org_director_headless.go` へ移すだけ)。新しいファイルを Affected areas に書き足し、承認し直した(digest d59311f57d8e、図は CLI のファイル名を描いていないので変えていない)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
