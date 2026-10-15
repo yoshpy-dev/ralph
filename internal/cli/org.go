@@ -43,12 +43,13 @@ func newOrgCmd() *cobra.Command {
 			"passed on which base. `ralph org merge-order` lists the feature branches\n" +
 			"in the order their PRs may be merged, from those records and origin's\n" +
 			"branches. `ralph org director` registers the interactive session the\n" +
-			"human talks to as the director of the ledger.",
+			"human talks to as the director of the ledger, or launches a headless\n" +
+			"director in herdr (ralph org director start).",
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), and escalate, director attach, and director status read [org.director].enabled, from the main worktree's ralph.toml when the ledger is the main worktree's)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles] and model_pool, from the main worktree's ralph.toml when the ledger is the main worktree's)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -167,8 +168,9 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // another directory, or any other source, cfg is returned unchanged. No
 // other setting is taken from the main worktree here; escalate, director
 // attach and status, and `ralph status` take Director.Enabled by the same
-// rule (withMainWorktreeDirectorEnabled). A main worktree ralph.toml that
-// fails to load is an error, not a fallback.
+// rule (withMainWorktreeDirectorEnabled), and director start the settings
+// of the headless director (withMainWorktreeDirectorStartConfig). A main
+// worktree ralph.toml that fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -210,9 +212,40 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 	return cfg, nil
 }
 
+// withMainWorktreeDirectorStartConfig returns cfg with the settings `ralph
+// org director start` launches the headless director by taken from <main
+// worktree root>/ralph.toml, by the rule withMainWorktreeDirectorEnabled
+// follows: Director.Enabled, Permissions ([org.permissions]: default, roles,
+// and codex_verified), Roles ([org.roles]), and ModelPool. Only when
+// configPath is empty and the ledger is the main worktree's
+// (org.LedgerMainWorktreeRoot), with the built-in defaults when that file
+// does not exist. The director acts for every org of the ledger, and a
+// feature worktree's ralph.toml, which the leader running there can change,
+// must not choose its permission mode or its model (plan
+// 2026-10-15-org-director-start, D6 and Scope), any more than whether a
+// director is used at all. With --config, or a ledger that is not the main
+// worktree's, cfg is returned unchanged. No other setting is taken. A main
+// worktree ralph.toml that fails to load is an error, which director start
+// returns.
+func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
+	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
+	}
+	if !ok {
+		return cfg, nil
+	}
+	cfg.Director.Enabled = mainCfg.Director.Enabled
+	cfg.Permissions = mainCfg.Permissions
+	cfg.Roles = mainCfg.Roles
+	cfg.ModelPool = mainCfg.ModelPool
+	return cfg, nil
+}
+
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
 // root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist) for withMainWorktreeOrgLimits and withMainWorktreeDirectorEnabled.
+// exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled, and
+// withMainWorktreeDirectorStartConfig.
 // ok is false, with nothing loaded, when configPath is set or the ledger is
 // not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
 // loaded, also when err (the load error, unwrapped) is set.
@@ -318,10 +351,10 @@ var orgDesktopNotifyOverride org.EscalateFunc
 var orgInboxPollIntervalOverride time.Duration
 
 // wireOrgWatchGate sets rt.WatchGate, the watch gate of plan
-// 2026-10-12-org-watch-gate: spawn, both forms of start, and send call it
-// right after they build their runtime, and no other verb does, so stop,
-// disband, escalate, the inbox verbs, wait, read, status, report, and watch
-// work with no watch running. The gate (org.NewWatchGate) probes the ledger
+// 2026-10-12-org-watch-gate: spawn, both forms of start, director start, and
+// send call it right after they build their runtime, and no other verb does,
+// so stop, disband, escalate, the inbox verbs, wait, read, status, report,
+// and watch work with no watch running. The gate (org.NewWatchGate) probes the ledger
 // at resolvedStateDir and judges a liveness mark that carries no
 // deadman_minutes by rt.Config's. Its refusal repeats --state-dir in the
 // commands it names when --state-dir was given, by orgInboxHintStateDir's
@@ -350,7 +383,15 @@ func wireOrgWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir string) 
 // is refused as the gate refuses it (*org.WatchGateError). The launched
 // watch keeps running after start returns. With orgWatchGateOverride set
 // (TestMain), only that gate runs.
-func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirSource, configPath string) {
+//
+// `ralph org director start` wires the same gate (plan
+// 2026-10-15-org-director-start, D5), which StartDirector calls after its
+// own input checks and before it writes anything. verb is the verb after
+// "ralph org" ("start", "director start") and starts what it starts
+// ("leader", "director"): they name the verb in the stderr line of a
+// launched watch and in a failed launch's error, which says that no leader
+// (no director) was started.
+func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirSource, configPath, verb, starts string) {
 	wireOrgWatchGate(cmd, rt, resolvedStateDir)
 	if orgWatchGateOverride != nil {
 		return
@@ -362,7 +403,7 @@ func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, st
 		child: func() (orgWatchLaunchRequest, error) {
 			return orgWatchChild(cmd, resolvedStateDir, stateDirSource, configPath, rt.Config.AgmsgHome, 0)
 		},
-		errPrefix:    "org: start: the cross-org watch did not start, so no leader was started",
+		errPrefix:    "org: " + verb + ": the cross-org watch did not start, so no " + starts + " was started",
 		hintStateDir: hintStateDir,
 		refuse: func(probe org.WatchLiveness) error {
 			return &org.WatchGateError{StateDir: resolvedStateDir, HintStateDir: hintStateDir, Liveness: probe}
@@ -374,8 +415,8 @@ func wireOrgStartWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir, st
 			return err
 		}
 		if got.launched {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "ralph org start: started the cross-org watch (pid %d); log: %s\n",
-				got.pid, filepath.Join(resolvedStateDir, org.WatchLogFileName))
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "ralph org %s: started the cross-org watch (pid %d); log: %s\n",
+				verb, got.pid, filepath.Join(resolvedStateDir, org.WatchLogFileName))
 		}
 		return check()
 	}
@@ -642,9 +683,15 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// the same check again. The ralph.toml retired-key check stays
 			// in Spawn only: it must run after Spawn's idempotent return.
 			// The refusal is printed the same way as a Spawn rejection.
-			if err := org.RetiredRoleInputErr(role, seatID, prompt); err != nil {
-				printSpawnResult(cmd, org.SpawnResult{Outcome: org.SpawnOutcomeRejected, Err: err})
-				return err
+			// --role director is refused here too, for the same reason: the
+			// director is not a seat (plan 2026-10-15-org-director-start, D7).
+			inputErr := org.RetiredRoleInputErr(role, seatID, prompt)
+			if inputErr == nil {
+				inputErr = org.DirectorRoleInputErr(role)
+			}
+			if inputErr != nil {
+				printSpawnResult(cmd, org.SpawnResult{Outcome: org.SpawnOutcomeRejected, Err: inputErr})
+				return inputErr
 			}
 			effectiveLeaderDriver, err := resolveLeaderDriver(cmd, leaderDriver, deprecatedDriver)
 			if err != nil {
@@ -837,7 +884,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath)
+			wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, *configPath, "start", "leader")
 			resolvedModel, err := resolveModelOrWarn(rt.Config, driverName, org.LeaderIdentity, model, cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -934,7 +981,7 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
-	wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath)
+	wireOrgStartWatchGate(cmd, rt, resolvedStateDir, stateDirSource, p.configPath, "start", "leader")
 	repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return err
@@ -1254,7 +1301,11 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"last, after all output, which ends the command. If that last close fails,\n" +
 			"the seat is recorded active again and the command exits 1, so running it\n" +
 			"again (or stop --all from another pane) retries the close; with --force\n" +
-			"the seat stays recorded stopped and the failure is only a warning.",
+			"the seat stays recorded stopped and the failure is only a warning.\n" +
+			"A headless director (`ralph org director start`) is not an org seat, so\n" +
+			"--all leaves it open: when the ledger has one, a note: line on stderr names\n" +
+			"`ralph org director stop --id`, which closes it, and the exit code does not\n" +
+			"change.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
 				if err := rejectFlagsWithAll(cmd, "stop", "org-id", "seat"); err != nil {
@@ -1266,6 +1317,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				}
 				result := rt.StopAll(org.StopAllParams{DryRun: dryRun, Force: force})
 				runErr := printStopAllResult(cmd, result)
+				printStopAllDirectorNote(cmd.ErrOrStderr(), result, orgInboxHintStateDir(cmd, filepath.Dir(rt.Manifest.Path())))
 				return closeDeferredSelf(cmd, rt, "", result.DeferredSelfPaneID, force, runErr)
 			}
 			if err := requireOrgID(*orgID); err != nil {
@@ -1384,6 +1436,35 @@ func printStopAllResult(cmd *cobra.Command, r org.StopAllResult) error {
 		return nil
 	}
 	return fmt.Errorf("org: stop --all: %d error(s), listed above", len(r.Errs))
+}
+
+// printStopAllDirectorNote writes to w (stderr) the one line `ralph org stop
+// --all` adds about the open headless directors of the ledger
+// (StopAllResult.OpenHeadlessDirectors): stop --all leaves them alone,
+// since the director is not an org seat, and the line names them and how to
+// stop them, repeating hintStateDir as --state-dir (plan
+// 2026-10-15-org-director-start, D10). With none it writes nothing; when
+// director.jsonl could not be read it writes a warning instead. Neither
+// changes the exit code.
+func printStopAllDirectorNote(w io.Writer, r org.StopAllResult, hintStateDir string) {
+	if r.DirectorReadErr != nil {
+		_, _ = fmt.Fprintf(w, "warning: stop --all: the headless directors of the ledger could not be listed: %s\n", inboxField(r.DirectorReadErr.Error()))
+		return
+	}
+	open := r.OpenHeadlessDirectors
+	if len(open) == 0 {
+		return
+	}
+	names := make([]string, 0, len(open))
+	for _, reg := range open {
+		names = append(names, inboxField(reg.ID)+" ("+inboxField(reg.State)+")")
+	}
+	what, id := "directors "+strings.Join(names, ", ")+" are still open: stop each", "<id>"
+	if len(open) == 1 {
+		what, id = "director "+names[0]+" is still open: stop it", inboxField(open[0].ID)
+	}
+	_, _ = fmt.Fprintf(w, "note: stop --all stops org seats only, so the headless %s with %s\n",
+		what, org.CommandWithStateDir("ralph org director stop --id "+id, hintStateDir))
 }
 
 // closeDeferredSelf is stop's and disband's very last action: when the

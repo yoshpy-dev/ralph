@@ -145,3 +145,10 @@ func modelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
 	}
 	return slices.Contains(allowed, model)
 }
+
+// ModelAllowedForRole is modelAllowedForRole for `ralph org director start`
+// in the CLI: the headless director is not a seat, so its --model never
+// reaches ValidateSpawnEnvelope, and only [org.roles].director narrows it.
+func ModelAllowedForRole(cfg config.OrgConfig, role, model string) bool {
+	return modelAllowedForRole(cfg, role, model)
+}

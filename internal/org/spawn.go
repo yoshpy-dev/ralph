@@ -1433,6 +1433,14 @@ func directorRoleSpawnErr(role string) error {
 		"launch a headless director with ralph org director start, or promote an interactive session with ralph org director attach", role)
 }
 
+// DirectorRoleInputErr is directorRoleSpawnErr for `ralph org spawn` in the
+// CLI, which calls it next to RetiredRoleInputErr, before it resolves
+// --model: --role director is then refused before the --model fallback
+// prints its warning. Spawn runs the same check again (checkSpawnInput).
+func DirectorRoleInputErr(role string) error {
+	return directorRoleSpawnErr(role)
+}
+
 // retiredRoleConfigErr is the ralph.toml half of Spawn's guard for the
 // names in retiredRoles: it returns an error naming every key in cfg that
 // still uses a renamed role's old name (RetiredRoleConfigKeys) and the key

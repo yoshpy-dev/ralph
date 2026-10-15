@@ -51,14 +51,20 @@ func newStatusCmd() *cobra.Command {
 			"stale (it holds the lock but its liveness mark is not fresh), or not running,\n" +
 			"with the pid and the time that mark was last updated.\n\n" +
 			"A `director:` line follows it: the director registration of the state\n" +
-			"directory (director.jsonl, which `ralph org director attach` and `detach`\n" +
-			"write) and [org.director].enabled, read as `ralph org escalate` reads it\n" +
-			"without --config (the main worktree's ralph.toml when the state directory\n" +
-			"is the main worktree's ledger, else ./ralph.toml). It is attached, with\n" +
-			"the registration's id, driver, attach time, who attached it, and its pane\n" +
-			"when one is recorded; not attached; disabled (enabled = false: escalate\n" +
-			"sends every item to the human at once); or unreadable, when director.jsonl\n" +
-			"cannot be read. A registration does not tell whether its session is still\n" +
+			"directory (director.jsonl, which `ralph org director attach`, `detach`,\n" +
+			"`start`, and `stop` write) and [org.director].enabled, read as `ralph org\n" +
+			"escalate` reads it without --config (the main worktree's ralph.toml when\n" +
+			"the state directory is the main worktree's ledger, else ./ralph.toml). It\n" +
+			"is attached, with the registration's id, driver, attach time, who attached\n" +
+			"it, and its pane when one is recorded, and for a headless director that\n" +
+			"`ralph org director start` launched, `headless` with its state (starting or\n" +
+			"running), model, pane, and workspace; not attached; disabled (enabled =\n" +
+			"false: escalate sends every item to the human at once); or unreadable, when\n" +
+			"director.jsonl cannot be read. A headless director that is still open but\n" +
+			"no longer the current registration (detached, or replaced by attach\n" +
+			"--replace) is named at the end of the line, with `ralph org director stop\n" +
+			"--id`, which closes it; the JSON lists it under director.open_headless.\n" +
+			"A registration does not tell whether its session is still\n" +
 			"running: an item the director does not ack reaches the human at the ack\n" +
 			"deadline of `ralph org watch --all`.\n\n" +
 			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
