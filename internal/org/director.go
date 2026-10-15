@@ -2,6 +2,8 @@ package org
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,11 +29,45 @@ import (
 // Writes take director.lock, a lock of its own, so no path holds it together
 // with the manifest's or the inbox's lock. A registration says only that a
 // director was attached; it is no sign that the director is alive (D4).
+//
+// Stage 8a-2 (plan docs/plans/active/2026-10-15-org-director-start.md, D2,
+// D3, D4, and D9) adds the headless director that `ralph org director
+// start` launches in a herdr workspace of its own. Its attached carries
+// launch herdr, the token of that launch (the names of its herdr agent,
+// workspace, and tab hold it, D9), the model, and the permission mode, and
+// is written before any herdr call, so the registration is decided first
+// (D3). workspace_created and pane_created add the ids herdr gave, launched
+// says the agent started while the registration was still current, and
+// stopped says its pane and workspace were closed (D4). stopped is not
+// detached: detach only ends the current registration, so a headless
+// registration detached that way stays open, and `ralph org director stop`
+// can still close its pane, until a stopped is written for it. The headless
+// director is not an org seat, so none of this is a manifest line (D2).
 
-// Director event kinds: the "event" field of a director.jsonl line.
+// Director event kinds: the "event" field of a director.jsonl line. The last
+// four are written only for a headless registration (launch herdr).
 const (
-	DirectorEventAttached = "attached"
-	DirectorEventDetached = "detached"
+	DirectorEventAttached         = "attached"
+	DirectorEventDetached         = "detached"
+	DirectorEventWorkspaceCreated = "workspace_created"
+	DirectorEventPaneCreated      = "pane_created"
+	DirectorEventLaunched         = "launched"
+	DirectorEventStopped          = "stopped"
+)
+
+// DirectorLaunchHerdr is the launch of a registration that `ralph org
+// director start` wrote: a headless director in a herdr workspace of its
+// own. A promoted session's attached (`ralph org director attach`) has no
+// launch.
+const DirectorLaunchHerdr = "herdr"
+
+// The states of a headless registration (DirectorRegistration.State):
+// starting until its launched event, running after it, and stopped after
+// its stopped event. A promoted session's registration has no state.
+const (
+	DirectorStateStarting = "starting"
+	DirectorStateRunning  = "running"
+	DirectorStateStopped  = "stopped"
 )
 
 // Drivers a director can be attached with.
@@ -48,11 +85,22 @@ const DirectorWakePull = "pull"
 // same directory as director.jsonl.
 const directorLockFile = "director.lock"
 
-// ErrDirectorAttached is returned (wrapped) by Attach without Replace while
-// a registration is current. The message names that registration and no
-// way out of it; the caller says how to end or replace it (the CLI's
-// attachedError).
+// ErrDirectorAttached is returned (wrapped) by Attach without Replace and by
+// AttachHeadless while a registration is current, a headless one in state
+// starting included. The message names that registration and no way out of
+// it; the caller says how to end or replace it (the CLI's attachedError).
 var ErrDirectorAttached = errors.New("a director is already attached")
+
+// ErrDirectorNoOpenHeadless is returned (wrapped) by RecordWorkspace,
+// RecordPane, and MarkStopped when no open headless registration has the
+// id: no registration has it, a promoted session attached it (no launch
+// herdr), or it was already stopped, when the error wraps
+// ErrDirectorStopped too.
+var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has the id")
+
+// ErrDirectorStopped is wrapped together with ErrDirectorNoOpenHeadless when
+// the headless registration the id names already has its stopped event.
+var ErrDirectorStopped = errors.New("the headless registration was already stopped")
 
 // ErrDirectorNotAttached is returned (wrapped) by Detach when no
 // registration is current.
@@ -63,14 +111,16 @@ var ErrDirectorNotAttached = errors.New("no director is attached")
 // has already ended, and the current one belongs to someone else (D8).
 var ErrDirectorIDMismatch = errors.New("the id is not the current registration's")
 
-// ErrDirectorWriteNotRestored is returned (wrapped) by Attach and Detach when
-// a write to director.jsonl failed and the file could not be cut back to its
-// size before the write: it may hold part of the write (a replace cut off
-// after the detached line leaves no registration current), so the error
-// cannot say that nothing was recorded, and the caller says how to read the
-// registration again (the CLI names `ralph org director status`). Every other
-// failed append left nothing in the file: a failed open or marshal writes
-// nothing, and a failed write or close is cut back.
+// ErrDirectorWriteNotRestored is returned (wrapped) by every DirectorStore
+// writer (Attach, Detach, AttachHeadless, RecordWorkspace, RecordPane,
+// MarkLaunched, and MarkStopped) when a write to director.jsonl failed and
+// the file could not be cut back to its size before the write: it may hold
+// part of the write (a replace cut off after the detached line leaves no
+// registration current), so the error cannot say that nothing was recorded,
+// and the caller says how to read the registration again (the CLI names
+// `ralph org director status`). Every other failed append left nothing in
+// the file: a failed open or marshal writes nothing, and a failed write or
+// close is cut back.
 var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
 
 // directorRawIDPattern finds an "id":"d<N>" in the raw text of
@@ -83,53 +133,101 @@ var directorRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"d([0-9]+)`)
 // DirectorEvent is one line of director.jsonl. Every line carries ts, id,
 // event, and who wrote it: user (USER), cwd, and herdr_pane (whether
 // HERDR_PANE_ID was set; its value is not recorded). attached also carries
-// driver, wake, and pane_id (empty until `ralph org director start` of
-// stage 8a-2 writes it). detached carries the id of the registration it
-// ends, and force when it was removed without that id being given.
+// driver and wake. A promoted session's attached (`ralph org director
+// attach`) carries nothing more; the fold still reads a pane_id in it, as
+// stage 8a-1 did. The attached of `ralph org director start` adds launch
+// (herdr), token, model, and permission_mode, and leaves pane_id empty: the
+// pane is carried by pane_created, and the workspace by workspace_created
+// (workspace_id). launched and stopped carry nothing more. detached carries
+// the id of the registration it ends, and force when it was removed without
+// that id being given. A line of stage 8a-1 has none of the new fields and
+// reads as it did.
 type DirectorEvent struct {
-	TS        string   `json:"ts"`    // UTC RFC3339
-	ID        string   `json:"id"`    // d<N>
-	Event     string   `json:"event"` // one of the DirectorEvent* constants
-	Driver    string   `json:"driver,omitempty"`
-	Wake      []string `json:"wake,omitempty"`
-	PaneID    string   `json:"pane_id,omitempty"`
-	User      string   `json:"user"`
-	Cwd       string   `json:"cwd"`
-	HerdrPane bool     `json:"herdr_pane"`
-	Force     bool     `json:"force,omitempty"`
+	TS             string   `json:"ts"`    // UTC RFC3339
+	ID             string   `json:"id"`    // d<N>
+	Event          string   `json:"event"` // one of the DirectorEvent* constants
+	Driver         string   `json:"driver,omitempty"`
+	Wake           []string `json:"wake,omitempty"`
+	PaneID         string   `json:"pane_id,omitempty"`
+	Launch         string   `json:"launch,omitempty"` // DirectorLaunchHerdr, or empty
+	Token          string   `json:"token,omitempty"`  // 12 lowercase hex digits
+	Model          string   `json:"model,omitempty"`
+	PermissionMode string   `json:"permission_mode,omitempty"`
+	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	User           string   `json:"user"`
+	Cwd            string   `json:"cwd"`
+	HerdrPane      bool     `json:"herdr_pane"`
+	Force          bool     `json:"force,omitempty"`
 }
 
-// DirectorRegistration is the current registration, folded from its
-// attached event. AttachedAt is that event's ts; User, Cwd, and HerdrPane
-// are who attached it.
+// DirectorRegistration is a registration, folded from its attached event
+// and, for a headless one, the events of its launch. AttachedAt is that
+// attached's ts; User, Cwd, and HerdrPane are who attached it. Launch,
+// Token, Model, and PermissionMode come from the attached of a headless
+// registration (`ralph org director start`); WorkspaceID and PaneID from its
+// workspace_created and pane_created (a promoted session's PaneID from its
+// attached); State is starting, running, or stopped (DirectorState*). A
+// promoted session's registration has none of the fields after PaneID, so
+// its JSON is the shape of stage 8a-1.
 type DirectorRegistration struct {
-	ID         string   `json:"id"`
-	Driver     string   `json:"driver"`
-	Wake       []string `json:"wake"`
-	PaneID     string   `json:"pane_id,omitempty"`
-	AttachedAt string   `json:"attached_at"`
-	User       string   `json:"user"`
-	Cwd        string   `json:"cwd"`
-	HerdrPane  bool     `json:"herdr_pane"`
+	ID             string   `json:"id"`
+	Driver         string   `json:"driver"`
+	Wake           []string `json:"wake"`
+	PaneID         string   `json:"pane_id,omitempty"`
+	Launch         string   `json:"launch,omitempty"`
+	State          string   `json:"state,omitempty"`
+	Token          string   `json:"token,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	PermissionMode string   `json:"permission_mode,omitempty"`
+	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	AttachedAt     string   `json:"attached_at"`
+	User           string   `json:"user"`
+	Cwd            string   `json:"cwd"`
+	HerdrPane      bool     `json:"herdr_pane"`
+}
+
+// Headless reports whether `ralph org director start` wrote the
+// registration (launch herdr), not a promoted session.
+func (r DirectorRegistration) Headless() bool {
+	return r.Launch == DirectorLaunchHerdr
 }
 
 // describe names the registration in an error: its id, driver, and attach
-// time. The fold checks the id and the driver, but the attach time is the
-// event's ts as written, which a hand edit can fill with control characters,
-// so it is escaped like inbox text before it reaches a terminal.
+// time, and for a headless registration its state, so a refusal names a
+// registration still starting as such. The fold checks the id, the driver,
+// and the launch herdr, but the attach time is the event's ts as written,
+// which a hand edit can fill with control characters, so it is escaped like
+// inbox text before it reaches a terminal, and so is a launch other than
+// herdr.
 func (r DirectorRegistration) describe() string {
-	return fmt.Sprintf("%s (driver %s, attached %s)", r.ID, r.Driver, PrintableInboxText(r.AttachedAt, false))
+	details := "driver " + r.Driver + ", attached " + PrintableInboxText(r.AttachedAt, false)
+	switch {
+	case r.Headless():
+		details += ", headless " + r.State
+	case r.Launch != "":
+		details += ", launch " + PrintableInboxText(r.Launch, false)
+	}
+	return r.ID + " (" + details + ")"
 }
 
 // DirectorReadResult is the folded director.jsonl: the current registration
-// (nil when none), the number of lines that did not parse (skipped, like the
-// inbox's corrupt lines), and the number of parsed events the fold ignored:
-// an unknown kind, an id not of the form d<N>, an attached with a driver
-// other than claude and codex, an attached whose id an earlier attached
-// already used, an attached while another registration is current, and a
-// detached for an id that is not the current registration's.
+// (nil when none); every open headless registration, that is, every one with
+// launch herdr and no stopped, current or detached, ordered by its d<N>
+// (nil when none), which `ralph org director stop` can still close; the
+// number of lines that did not parse (skipped, like the inbox's corrupt
+// lines); and the number of parsed events the fold ignored: an unknown kind,
+// an id not of the form d<N>, an attached with a driver other than claude
+// and codex, an attached with launch herdr whose token is not 12 lowercase
+// hex digits, an attached whose id an earlier attached already used, an
+// attached while another registration is current, a detached for an id that
+// is not the current registration's, a workspace_created or pane_created
+// that names no open headless registration, carries no id, or comes after
+// one already recorded (the first one is kept), a launched for an id that is
+// not the current registration's or not starting, and a stopped for an id
+// that names no open headless registration.
 type DirectorReadResult struct {
 	Current       *DirectorRegistration
+	OpenHeadless  []DirectorRegistration
 	CorruptLines  int
 	IgnoredEvents int
 }
@@ -156,6 +254,29 @@ type DirectorDetach struct {
 	HerdrPane bool
 }
 
+// DirectorHeadlessAttach is what AttachHeadless records: the driver, model,
+// and permission mode (autonomous, edits, or guarded) of the headless
+// director `ralph org director start` launches. User, Cwd, and HerdrPane
+// describe the caller.
+type DirectorHeadlessAttach struct {
+	Driver         string
+	Model          string
+	PermissionMode string
+	User           string
+	Cwd            string
+	HerdrPane      bool
+}
+
+// DirectorWho is who writes a headless registration's later events
+// (RecordWorkspace, RecordPane, MarkLaunched, MarkStopped): USER, the
+// current directory, and whether HERDR_PANE_ID is set. The store does not
+// read the environment.
+type DirectorWho struct {
+	User      string
+	Cwd       string
+	HerdrPane bool
+}
+
 // DirectorStore reads and appends to director.jsonl.
 type DirectorStore struct {
 	path string
@@ -165,6 +286,49 @@ type DirectorStore struct {
 	// its restore after a failure; nil means f.Write and os.Truncate.
 	write    func(f *os.File, b []byte) (int, error)
 	truncate func(path string, size int64) error
+	// token is a test-only seam for AttachHeadless's launch token; nil means
+	// newDirectorToken.
+	token func() (string, error)
+}
+
+// directorTokenPattern is the shape of a launch token as newDirectorToken
+// makes it: 12 lowercase hex digits. The fold ignores a headless attached
+// whose token does not match, so a token read from director.jsonl is safe
+// to put in a herdr name or label and to compare a label with.
+var directorTokenPattern = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
+// newDirectorToken returns a new launch token: 6 bytes from crypto/rand in
+// lowercase hex.
+func newDirectorToken() (string, error) {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("make a launch token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// DirectorAgentName is the herdr agent name of the headless director
+// launched with token: "director_" and the token, 21 characters, within
+// herdr's agent-name rule `^[a-z][a-z0-9_-]{0,31}$` (maxHerdrAgentNameLen).
+// herdr's agent names are unique across its server, so the name holds the
+// token of the launch, not the ledger's d<N>, which the first director of
+// every repo shares (D9).
+func DirectorAgentName(token string) string {
+	return "director_" + token
+}
+
+// DirectorTabLabel is the label of the herdr tab that holds the headless
+// director launched with token; it is the agent name.
+func DirectorTabLabel(token string) string {
+	return DirectorAgentName(token)
+}
+
+// DirectorWorkspaceLabel is the label of the herdr workspace made for the
+// headless director launched with token. An org's workspace label and an org
+// seat's tab label hold no "_" (identifierPattern), so neither label of a
+// director can be an org's.
+func DirectorWorkspaceLabel(token string) string {
+	return "ralph_director_" + token
 }
 
 // DirectorPathIn returns the director.jsonl path within an already-resolved
@@ -186,7 +350,7 @@ func (s *DirectorStore) Path() string {
 
 // Read folds every event in director.jsonl. A missing file (or state dir)
 // reads as no registration, not an error; a file that cannot be read is an
-// error. Read takes no lock; Attach and Detach decide under the lock.
+// error. Read takes no lock; the writers decide under the lock.
 func (s *DirectorStore) Read() (DirectorReadResult, error) {
 	raw, err := s.readRaw()
 	if err != nil {
@@ -197,11 +361,13 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 
 // Attach records a new registration with driver a.Driver and wake pull, and
 // returns it. Under the director lock it reads the file again; while a
-// registration is current it returns ErrDirectorAttached, naming that
-// registration, and writes nothing, unless a.Replace is set: then it
-// appends the current registration's detached and the new attached as two
-// lines of one write (appendLocked), and returns the ended registration as
-// replaced. A reader without the lock (Read) thus finds no moment with no
+// registration is current (a headless one too, in state starting
+// included) it returns ErrDirectorAttached, naming that registration, and
+// writes nothing, unless a.Replace is set: then it appends the current
+// registration's detached and the new attached as two lines of one write
+// (appendLocked), and returns the ended registration as replaced. A headless
+// registration replaced that way stays open, for `ralph org director stop`
+// to close its pane, as one detached by Detach does. A reader without the lock (Read) thus finds no moment with no
 // registration between the two lines, as it could when they were two writes
 // (self-review L5 of org-director-attach). A write that fails ends one of
 // two ways. Either it is cut back under the same lock (appendLocked), even
@@ -316,6 +482,251 @@ func (s *DirectorStore) Detach(d DirectorDetach) (DirectorRegistration, error) {
 	return ended, nil
 }
 
+// AttachHeadless records the registration of a headless director, which
+// `ralph org director start` does before any herdr call (D3), and returns
+// it: state starting, a new id, and a new launch token. Under the director
+// lock it reads the file again; while any registration is current (a
+// promoted session's, or a headless one in any state) it returns
+// ErrDirectorAttached, naming that registration, and writes nothing. It has
+// no replace: start never ends another registration. Otherwise it appends
+// one attached with launch herdr, the token, h.Model, h.PermissionMode, and
+// wake pull. The new id is chosen as Attach chooses it, and a failed write
+// ends one of the two ways Attach's does. A driver other than claude and
+// codex, an empty model, and a permission mode other than autonomous, edits,
+// and guarded are refused before anything is read or written.
+func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegistration, error) {
+	const verb = "start"
+	if h.Driver != DirectorDriverClaude && h.Driver != DirectorDriverCodex {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown driver %q: use %s or %s", verb, h.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	if h.Model == "" {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: the model is empty", verb)
+	}
+	switch h.PermissionMode {
+	case PermissionModeAutonomous, PermissionModeEdits, PermissionModeGuarded:
+	default:
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown permission mode %q: use %s, %s, or %s",
+			verb, h.PermissionMode, PermissionModeAutonomous, PermissionModeEdits, PermissionModeGuarded)
+	}
+	newToken := newDirectorToken
+	if s.token != nil {
+		newToken = s.token
+	}
+	token, err := newToken()
+	if err != nil {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: %w", verb, err)
+	}
+	if !directorTokenPattern.MatchString(token) {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: launch token %q is not 12 lowercase hex digits", verb, token)
+	}
+	var reg DirectorRegistration
+	err = s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		fold := foldDirector(raw)
+		if cur := fold.current; cur != nil {
+			return fmt.Errorf("org: director: %s: %w: %s", verb, ErrDirectorAttached, cur.describe())
+		}
+		next, err := fold.nextID()
+		if err != nil {
+			return err
+		}
+		ev := DirectorEvent{
+			TS: s.now(), ID: next, Event: DirectorEventAttached,
+			Driver: h.Driver, Wake: []string{DirectorWakePull},
+			Launch: DirectorLaunchHerdr, Token: token, Model: h.Model, PermissionMode: h.PermissionMode,
+			User: h.User, Cwd: h.Cwd, HerdrPane: h.HerdrPane,
+		}
+		if err := s.appendLocked(raw, ev); err != nil {
+			return directorAppendFailed(verb, nil, err)
+		}
+		reg = registrationOf(ev)
+		return nil
+	})
+	if err != nil {
+		return DirectorRegistration{}, err
+	}
+	return reg, nil
+}
+
+// RecordWorkspace appends workspace_created with workspaceID, the herdr
+// workspace `ralph org director start` made, for the open headless
+// registration id, whether it is still current or was detached meanwhile (a
+// human's attach --replace or detach --force while start runs). With no
+// open headless registration id it returns ErrDirectorNoOpenHeadless; when
+// id already has a workspace recorded it refuses too, since the fold keeps
+// the first one. Neither writes anything. An id not of the form d<N> and an
+// empty workspaceID are refused before anything is read, and a missing
+// director.jsonl is refused without creating the state dir or the lock. A
+// failed write ends one of the two ways Attach's does.
+func (s *DirectorStore) RecordWorkspace(id, workspaceID string, who DirectorWho) error {
+	return s.recordHerdrID(id, DirectorEventWorkspaceCreated, workspaceID, who)
+}
+
+// RecordPane is RecordWorkspace for the pane: it appends pane_created with
+// paneID, the pane of the herdr tab `ralph org director start` made.
+func (s *DirectorStore) RecordPane(id, paneID string, who DirectorWho) error {
+	return s.recordHerdrID(id, DirectorEventPaneCreated, paneID, who)
+}
+
+// recordHerdrID is RecordWorkspace (kind workspace_created) and RecordPane
+// (kind pane_created) with value as the herdr id.
+func (s *DirectorStore) recordHerdrID(id, kind, value string, who DirectorWho) error {
+	what := "workspace"
+	if kind == DirectorEventPaneCreated {
+		what = "pane"
+	}
+	if _, ok := directorIDNumber(id); !ok {
+		return fmt.Errorf("org: director: record the %s: %q is not a registration id (d<N>, such as d1)", what, id)
+	}
+	verb := "record the " + what + " of " + id
+	if value == "" {
+		return fmt.Errorf("org: director: %s: the %s id is empty", verb, what)
+	}
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return directorNoRegistration(verb, id)
+	}
+	return s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		reg, err := foldDirector(raw).openHeadless(verb, id)
+		if err != nil {
+			return err
+		}
+		ev := DirectorEvent{TS: s.now(), ID: id, Event: kind, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane}
+		recorded := reg.WorkspaceID
+		if kind == DirectorEventPaneCreated {
+			recorded, ev.PaneID = reg.PaneID, value
+		} else {
+			ev.WorkspaceID = value
+		}
+		if recorded != "" {
+			return fmt.Errorf("org: director: %s: %s already has %s %s recorded", verb, id, what, PrintableInboxText(recorded, false))
+		}
+		if err := s.appendLocked(raw, ev); err != nil {
+			return directorAppendFailed(verb, nil, err)
+		}
+		return nil
+	})
+}
+
+// MarkLaunched appends launched for id and returns true when id is still the
+// current registration, a headless one in state starting; `ralph org
+// director start` calls it once its agent start went through. When the
+// current registration is another one, or none (a human's attach --replace
+// or detach --force came in while start ran), or id is not headless or
+// already stopped, it writes nothing and returns false with a nil error, and
+// start closes its own pane and workspace (D3). A current id already running
+// returns true and writes nothing. An id not of the form d<N> is refused
+// before anything is read; a missing director.jsonl returns false without
+// creating the state dir or the lock. A failed write ends one of the two ways
+// Attach's does.
+func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent bool, err error) {
+	if _, ok := directorIDNumber(id); !ok {
+		return false, fmt.Errorf("org: director: mark launched: %q is not a registration id (d<N>, such as d1)", id)
+	}
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	verb := "mark " + id + " launched"
+	err = s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		cur := foldDirector(raw).current
+		if cur == nil || cur.ID != id || !cur.Headless() || cur.State == DirectorStateStopped {
+			return nil
+		}
+		stillCurrent = true
+		if cur.State == DirectorStateRunning {
+			return nil
+		}
+		ev := DirectorEvent{TS: s.now(), ID: id, Event: DirectorEventLaunched, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane}
+		if err := s.appendLocked(raw, ev); err != nil {
+			stillCurrent = false
+			return directorAppendFailed(verb, nil, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return stillCurrent, nil
+}
+
+// MarkStopped records that the pane and workspace of the open headless
+// registration id are closed, which `ralph org director stop` and start's
+// cleanup do once herdr has closed them (or never made them, or no longer
+// knows them), and returns whether id was the current registration. For the
+// current registration it appends detached and stopped as two lines of one
+// write (appendLocked), so the registration ends with its stop; for one that
+// is no longer current it appends stopped only. With no open headless
+// registration id (none has it, a promoted session attached it, or it was
+// already stopped, which also wraps ErrDirectorStopped) it returns
+// ErrDirectorNoOpenHeadless and writes nothing. An id not of the form d<N> is
+// refused before anything is read, and a missing director.jsonl is refused
+// without creating the state dir or the lock. A failed write ends one of the
+// two ways Attach's does: cut back, with an error that says nothing was
+// recorded, or not, wrapping ErrDirectorWriteNotRestored.
+//
+// The detached comes first. A reader without the lock (Read) can find the
+// file between the two lines: one that reads while the write lands, or
+// every reader once a failed write's cut back failed too and left only the
+// first line. Detached alone leaves no registration current and id open:
+// start and attach go on, which is right with its pane closed, and `ralph
+// org director stop --id` still finds id, finds herdr no longer knows its
+// pane, and writes its stopped. Stopped alone would leave id current but
+// stopped: start and attach would refuse on it, stop would refuse it as
+// already stopped, and only a detach the human must think of would end it.
+func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
+	if _, ok := directorIDNumber(id); !ok {
+		return false, fmt.Errorf("org: director: stop: %q is not a registration id (d<N>, such as d1)", id)
+	}
+	verb := "stop " + id
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return false, directorNoRegistration(verb, id)
+	}
+	err = s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		fold := foldDirector(raw)
+		reg, err := fold.openHeadless(verb, id)
+		if err != nil {
+			return err
+		}
+		ts := s.now()
+		var events []DirectorEvent
+		var cur *DirectorRegistration
+		if fold.current == reg {
+			cur = reg
+			events = append(events, DirectorEvent{TS: ts, ID: id, Event: DirectorEventDetached, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane})
+		}
+		events = append(events, DirectorEvent{TS: ts, ID: id, Event: DirectorEventStopped, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane})
+		if err := s.appendLocked(raw, events...); err != nil {
+			return directorAppendFailed(verb, cur, err)
+		}
+		wasCurrent = cur != nil
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return wasCurrent, nil
+}
+
+// directorNoRegistration is the ErrDirectorNoOpenHeadless error for an id
+// that no registration has.
+func directorNoRegistration(verb, id string) error {
+	return fmt.Errorf("org: director: %s: %w: no registration %s is recorded", verb, ErrDirectorNoOpenHeadless, id)
+}
+
 func (s *DirectorStore) withLock(fn func() error) error {
 	return withFileLock(filepath.Dir(s.path), directorLockFile, "director", fn)
 }
@@ -342,7 +753,8 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 
 // appendLocked appends evs, one line each, in a single write, as the inbox's
 // appendLocked does for its one event: Attach with replace passes the
-// detached and the attached together. raw is the file as read under the
+// detached and the attached together, and MarkStopped of the current
+// registration the detached and the stopped. raw is the file as read under the
 // same lock hold. When raw does not end with a newline (a write cut off
 // mid-line), the write starts with one, so the cut line stays a separate
 // corrupt line and evs stay readable. An event that does not marshal fails
@@ -354,7 +766,7 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 // an empty director.jsonl reads as no registration, as a missing one does.
 // Only when the cut fails does the error wrap ErrDirectorWriteNotRestored;
 // any other error means nothing was recorded. Its errors do not start with
-// "org: director: ": Attach and Detach, its only callers, add that once
+// "org: director: ": the store's writers, its only callers, add that once
 // (directorAppendFailed).
 func (s *DirectorStore) appendLocked(raw []byte, evs ...DirectorEvent) error {
 	var lines []byte
@@ -401,9 +813,10 @@ func (s *DirectorStore) restoreLocked(size int, failed error) error {
 	return failed
 }
 
-// directorAppendFailed is the error Attach and Detach (verb, as in their
+// directorAppendFailed is the error the store's writers (verb, as in their
 // other errors) return when appendLocked fails while cur is the current
-// registration (nil when none). It says "org: director:" once, since
+// registration that the write would have changed (nil when none, or when the
+// write leaves the current registration as it is). It says "org: director:" once, since
 // appendLocked's errors do not. When the file may hold part of the write, it
 // ends at appendLocked's error, which says so, instead of saying nothing was
 // recorded; the caller names the command that reads the registration of the
@@ -420,20 +833,34 @@ func directorAppendFailed(verb string, cur *DirectorRegistration, err error) err
 	}
 }
 
-// registrationOf returns the registration an attached event records.
+// registrationOf returns the registration an attached event records. A
+// headless attached (launch herdr) starts in state starting; its pane and
+// workspace come only from its pane_created and workspace_created, so a
+// pane_id in that attached (start never writes one) is not read. An attached
+// with another launch keeps it, with its token, model, and permission mode,
+// so a later binary's registration still counts as one.
 func registrationOf(ev DirectorEvent) DirectorRegistration {
-	return DirectorRegistration{
+	reg := DirectorRegistration{
 		ID: ev.ID, Driver: ev.Driver, Wake: ev.Wake, PaneID: ev.PaneID, AttachedAt: ev.TS,
 		User: ev.User, Cwd: ev.Cwd, HerdrPane: ev.HerdrPane,
 	}
+	if ev.Launch != "" {
+		reg.Launch, reg.Token, reg.Model, reg.PermissionMode = ev.Launch, ev.Token, ev.Model, ev.PermissionMode
+	}
+	if reg.Headless() {
+		reg.State, reg.PaneID = DirectorStateStarting, ""
+	}
+	return reg
 }
 
 // directorFold is director.jsonl folded from its raw text.
 type directorFold struct {
+	// current is the current registration, one of regs.
 	current *DirectorRegistration
-	// used holds every id an applied attached event has had, so an
-	// attached that repeats one is ignored.
-	used    map[string]bool
+	// regs holds every registration an applied attached event made, by id,
+	// current or not: an attached that repeats an id is ignored, and the
+	// events of a headless registration apply to it after it was detached.
+	regs    map[string]*DirectorRegistration
 	corrupt int
 	ignored int
 	// maxN is the largest d<N> found anywhere in the file: in the raw text
@@ -443,7 +870,7 @@ type directorFold struct {
 }
 
 func foldDirector(raw []byte) *directorFold {
-	f := &directorFold{used: map[string]bool{}}
+	f := &directorFold{regs: map[string]*DirectorRegistration{}}
 	for _, m := range directorRawIDPattern.FindAllSubmatch(raw, -1) {
 		f.seeN(string(m[1]))
 	}
@@ -478,26 +905,84 @@ func (f *directorFold) apply(ev DirectorEvent) {
 		f.ignored++
 		return
 	}
+	// Only a hand edit (or a damaged file) writes an event that is ignored
+	// below: Attach writes the current registration's detached before a new
+	// attached, AttachHeadless writes a token of the right shape, and the
+	// other writers decide under the lock on the same fold.
+	reg := f.regs[ev.ID]
 	switch ev.Event {
 	case DirectorEventAttached:
-		// Attach writes the current registration's detached before a new
-		// attached, so only a hand edit writes any of these.
-		if (ev.Driver != DirectorDriverClaude && ev.Driver != DirectorDriverCodex) || f.used[ev.ID] || f.current != nil {
+		if (ev.Driver != DirectorDriverClaude && ev.Driver != DirectorDriverCodex) || reg != nil || f.current != nil ||
+			(ev.Launch == DirectorLaunchHerdr && !directorTokenPattern.MatchString(ev.Token)) {
 			f.ignored++
 			return
 		}
-		f.used[ev.ID] = true
-		reg := registrationOf(ev)
-		f.current = &reg
+		r := registrationOf(ev)
+		f.regs[ev.ID] = &r
+		f.current = &r
 	case DirectorEventDetached:
 		if f.current == nil || ev.ID != f.current.ID {
 			f.ignored++
 			return
 		}
 		f.current = nil
+	case DirectorEventWorkspaceCreated, DirectorEventPaneCreated:
+		if !isOpenHeadless(reg) {
+			f.ignored++
+			return
+		}
+		field, value := &reg.WorkspaceID, ev.WorkspaceID
+		if ev.Event == DirectorEventPaneCreated {
+			field, value = &reg.PaneID, ev.PaneID
+		}
+		// The first id recorded is kept: start records each once, and the
+		// stop that closes the pane and workspace by label must not be sent
+		// to another id by a later line.
+		if value == "" || *field != "" {
+			f.ignored++
+			return
+		}
+		*field = value
+	case DirectorEventLaunched:
+		// Start writes launched under the lock only while its registration
+		// is the current one and starting.
+		if reg == nil || reg != f.current || reg.State != DirectorStateStarting {
+			f.ignored++
+			return
+		}
+		reg.State = DirectorStateRunning
+	case DirectorEventStopped:
+		if !isOpenHeadless(reg) {
+			f.ignored++
+			return
+		}
+		reg.State = DirectorStateStopped
 	default:
 		f.ignored++
 	}
+}
+
+// isOpenHeadless reports whether r is a headless registration with no
+// stopped yet; a nil r is not.
+func isOpenHeadless(r *DirectorRegistration) bool {
+	return r != nil && r.Headless() && r.State != DirectorStateStopped
+}
+
+// openHeadless returns the open headless registration id of the fold, or the
+// ErrDirectorNoOpenHeadless error that verb returns: no registration has
+// id, a promoted session (or a later binary's launch) attached it, or it was
+// already stopped (ErrDirectorStopped).
+func (f *directorFold) openHeadless(verb, id string) (*DirectorRegistration, error) {
+	reg := f.regs[id]
+	switch {
+	case reg == nil:
+		return nil, directorNoRegistration(verb, id)
+	case !reg.Headless():
+		return nil, fmt.Errorf("org: director: %s: %w: %s was not started in herdr by ralph org director start", verb, ErrDirectorNoOpenHeadless, reg.describe())
+	case reg.State == DirectorStateStopped:
+		return nil, fmt.Errorf("org: director: %s: %w: %w: %s", verb, ErrDirectorNoOpenHeadless, ErrDirectorStopped, reg.describe())
+	}
+	return reg, nil
 }
 
 func (f *directorFold) nextID() (string, error) {
@@ -507,8 +992,25 @@ func (f *directorFold) nextID() (string, error) {
 	return "d" + strconv.FormatInt(f.maxN+1, 10), nil
 }
 
+// result returns the fold with copies of its registrations, so a caller
+// cannot change the fold through them.
 func (f *directorFold) result() DirectorReadResult {
-	return DirectorReadResult{Current: f.current, CorruptLines: f.corrupt, IgnoredEvents: f.ignored}
+	res := DirectorReadResult{CorruptLines: f.corrupt, IgnoredEvents: f.ignored}
+	if f.current != nil {
+		cur := *f.current
+		res.Current = &cur
+	}
+	for _, reg := range f.regs {
+		if isOpenHeadless(reg) {
+			res.OpenHeadless = append(res.OpenHeadless, *reg)
+		}
+	}
+	sort.Slice(res.OpenHeadless, func(i, j int) bool {
+		a, _ := directorIDNumber(res.OpenHeadless[i].ID)
+		b, _ := directorIDNumber(res.OpenHeadless[j].ID)
+		return a < b
+	})
+	return res
 }
 
 // directorIDNumber returns N for a registration id d<N> written the way

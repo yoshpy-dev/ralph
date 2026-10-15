@@ -2,6 +2,7 @@ package org
 
 import (
 	"embed"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -61,10 +62,18 @@ type RolePromptVars struct {
 // back to whatever --prompt was given verbatim, with no error: an unknown
 // role is not a failure, just "no template available".
 //
+// DirectorRole is not a seat role: its template, prompts/director.md, is
+// rendered only by RenderDirectorPrompt, so for it RenderRolePrompt returns
+// ("", false, nil) as for a role with no template. Spawn refuses the role
+// before it gets here (directorRoleSpawnErr, spawn.go).
+//
 // Placeholders that are not among the known {{...}} substitutions listed
 // below are left in the rendered text unchanged (documented, not an error)
 // -- the template author is expected to only use the known variable names.
 func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
+	if role == DirectorRole {
+		return "", false, nil
+	}
 	data, err := promptFS.ReadFile("prompts/" + role + ".md")
 	if err != nil {
 		return "", false, nil
@@ -88,6 +97,60 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{ENVELOPE}}", vars.Envelope,
 	)
 	return replacer.Replace(text), true, nil
+}
+
+// DirectorRole is the role name of the director: the key of its
+// [org.roles] and [org.permissions.roles] entries and the name of its
+// template, prompts/director.md. The director is not an org seat (plan
+// docs/plans/active/2026-10-15-org-director-start.md, D2 and D7): `ralph org
+// director start` launches it and RenderDirectorPrompt renders its template,
+// and `ralph org spawn --role director` is refused.
+const DirectorRole = "director"
+
+// DirectorPromptVars holds the values substituted into prompts/director.md
+// for the headless director `ralph org director start` launches: ID, its
+// registration's d<N>; Driver, claude or codex; StateDir, the org state
+// directory of the ledger, which every ralph org command it runs is given
+// with --state-dir; and Cwd, the directory it runs in.
+type DirectorPromptVars struct {
+	ID       string
+	Driver   string
+	StateDir string
+	Cwd      string
+}
+
+// RenderDirectorPrompt returns prompts/director.md with vars substituted:
+// {{ID}}, {{DRIVER}}, {{CWD}}, and {{STATE_DIR}}, which is vars.StateDir as
+// one shell word (shellQuote) so the commands in the template run as
+// written. Unlike RenderRolePrompt it refuses to leave a placeholder: an id
+// not of the form d<N>, a driver other than claude and codex, an empty
+// StateDir or Cwd, and a rendered text that still holds "{{" (a placeholder
+// it does not know, or a value that holds one) are errors.
+func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
+	if _, ok := directorIDNumber(vars.ID); !ok {
+		return "", fmt.Errorf("org: director prompt: %q is not a registration id (d<N>, such as d1)", vars.ID)
+	}
+	if vars.Driver != DirectorDriverClaude && vars.Driver != DirectorDriverCodex {
+		return "", fmt.Errorf("org: director prompt: unknown driver %q: use %s or %s", vars.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	if vars.StateDir == "" || vars.Cwd == "" {
+		return "", fmt.Errorf("org: director prompt: the state dir (%q) and the cwd (%q) must both be set", vars.StateDir, vars.Cwd)
+	}
+	data, err := promptFS.ReadFile("prompts/" + DirectorRole + ".md")
+	if err != nil {
+		return "", fmt.Errorf("org: director prompt: read the embedded template: %w", err)
+	}
+	text := strings.NewReplacer(
+		"{{ID}}", vars.ID,
+		"{{DRIVER}}", vars.Driver,
+		"{{STATE_DIR}}", shellQuote(vars.StateDir),
+		"{{CWD}}", vars.Cwd,
+	).Replace(string(data))
+	if i := strings.Index(text, "{{"); i >= 0 {
+		rest, _, _ := strings.Cut(text[i:], "\n")
+		return "", fmt.Errorf("org: director prompt: a placeholder is left after substitution: %q", rest)
+	}
+	return text, nil
 }
 
 // retiredRoleKind says how a retired role name left the vocabulary.

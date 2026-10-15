@@ -1429,3 +1429,142 @@ func TestRetiredRoleConfigKeys(t *testing.T) {
 		})
 	}
 }
+
+// testDirectorPromptVars are the vars of a headless director whose ledger
+// path holds a space, so the rendered commands show the quoting.
+func testDirectorPromptVars() DirectorPromptVars {
+	return DirectorPromptVars{ID: "d3", Driver: DirectorDriverCodex, StateDir: "/repo a/.harness/state/org", Cwd: "/repo a"}
+}
+
+// testDirectorStateDirArg is testDirectorPromptVars' StateDir as one shell
+// word, the way the template's commands carry it.
+const testDirectorStateDirArg = "'/repo a/.harness/state/org'"
+
+func mustRenderDirectorPrompt(t *testing.T, vars DirectorPromptVars) string {
+	t.Helper()
+	text, err := RenderDirectorPrompt(vars)
+	if err != nil {
+		t.Fatalf("RenderDirectorPrompt(%+v): %v", vars, err)
+	}
+	return text
+}
+
+func TestRenderDirectorPrompt_SubstitutesEveryPlaceholder(t *testing.T) {
+	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
+	if strings.Contains(text, "{{") || strings.Contains(text, "}}") {
+		t.Fatalf("rendered director prompt still holds a placeholder:\n%s", text)
+	}
+	for _, want := range []string{"- id: d3 / driver: codex", "- 台帳: " + testDirectorStateDirArg, "- cwd: /repo a"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("rendered director prompt has no line %q:\n%s", want, text)
+		}
+	}
+	// A single quote in the path is closed, escaped, and opened again, so
+	// every command in the template stays one shell word for it.
+	vars := testDirectorPromptVars()
+	vars.StateDir = "/it's/org"
+	if text := mustRenderDirectorPrompt(t, vars); !strings.Contains(text, `ralph org director status --state-dir '/it'\''s/org'`) {
+		t.Errorf("rendered director prompt does not quote a state dir with a single quote:\n%s", text)
+	}
+}
+
+// TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure pins AC4 and
+// AC11 of plan docs/plans/active/2026-10-15-org-director-start.md (D3 and
+// D7): the first step reads the registration and does nothing else unless
+// it is this director's; the procedure is the /director skill's, minus the
+// watch check and the attach that start did; every ralph org command gets
+// --state-dir; the human is talked to in this pane; the director does not
+// implement; and at the end it asks the human to stop it from outside herdr
+// instead of detaching.
+func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
+	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
+	section := func(header string) string {
+		t.Helper()
+		body, found := markdownSection(text, header)
+		if !found {
+			t.Fatalf("rendered director prompt has no %q section:\n%s", header, text)
+		}
+		return body
+	}
+	for _, tc := range []struct {
+		header  string
+		phrases []string
+	}{
+		{"## 最初の手順", []string{
+			"ほかの何よりも先に、次のコマンドを打つ。",
+			"ralph org director status --state-dir " + testDirectorStateDirArg,
+			"今の登録の `id` が `d3` であることを確かめてから動く。",
+			"`id` が `d3` と違うとき、または登録がなく `not attached` と出たときは、ほかに何もしない",
+			"そのことをこの pane に書いて止まる。detach も打たない。",
+		}},
+		{"## ミッション", []string{
+			"あなたは `ralph org director start` が立てた headless の director です。",
+			"手順の全体は `/director` skill に従ってください。",
+			"見張りの確かめ(`ralph status` の `org watch:` の行と `ralph org watch --all --detach`)と attach は start が済ませたので、打たない。",
+			"会話の要約のあとに `ralph org director status --state-dir " + testDirectorStateDirArg + "` で今の登録を読み直す手順は守る。",
+			"打つ `ralph org` のコマンドと `ralph status` には、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
+			"人とはこの pane で話す。",
+			"実装しない。",
+		}},
+		{"## 終わり", []string{
+			"`ralph org director detach` は打たない。",
+			"人に、herdr の外の端末から次のコマンドを打つよう頼む。",
+			"ralph org director stop --id d3 --state-dir " + testDirectorStateDirArg,
+			"stop は自分で打たない。",
+		}},
+	} {
+		body := section(tc.header)
+		for _, phrase := range tc.phrases {
+			if !containsPhrase(body, phrase) {
+				t.Errorf("%s section does not say %q:\n%s", tc.header, phrase, body)
+			}
+		}
+	}
+	// The first step comes before anything else the director is told.
+	if first, mission := strings.Index(text, "## 最初の手順"), strings.Index(text, "## ミッション"); first < 0 || mission < first {
+		t.Errorf("the first step (at %d) is not before the mission (at %d)", first, mission)
+	}
+}
+
+func TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(v *DirectorPromptVars)
+		want   string
+	}{
+		{"an id not of the form d<N>", func(v *DirectorPromptVars) { v.ID = "d01" }, `"d01" is not a registration id`},
+		{"an empty id", func(v *DirectorPromptVars) { v.ID = "" }, `"" is not a registration id`},
+		{"an unknown driver", func(v *DirectorPromptVars) { v.Driver = "gemini" }, `unknown driver "gemini"`},
+		{"an empty state dir", func(v *DirectorPromptVars) { v.StateDir = "" }, "must both be set"},
+		{"an empty cwd", func(v *DirectorPromptVars) { v.Cwd = "" }, "must both be set"},
+		{"a value that holds a placeholder", func(v *DirectorPromptVars) { v.Cwd = "/x/{{ID}}" }, "a placeholder is left after substitution"},
+		{"a state dir that holds braces", func(v *DirectorPromptVars) { v.StateDir = "/x/{{" }, "a placeholder is left after substitution"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			tc.mutate(&vars)
+			text, err := RenderDirectorPrompt(vars)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), "org: director prompt: ") {
+				t.Fatalf("RenderDirectorPrompt(%+v) err = %v, want one with %q", vars, err, tc.want)
+			}
+			if text != "" {
+				t.Errorf("refused render returned text %q", text)
+			}
+		})
+	}
+}
+
+// The director's template is embedded with the seat templates, but it is
+// not a seat role: RenderRolePrompt answers it as a role with no template,
+// so nothing renders it with seat vars.
+func TestRenderRolePrompt_DirectorIsNotASeatTemplate(t *testing.T) {
+	if _, err := promptFS.ReadFile("prompts/" + DirectorRole + ".md"); err != nil {
+		t.Fatalf("the director template is not embedded: %v", err)
+	}
+	vars := testRolePromptVars()
+	vars.Role, vars.SeatID = DirectorRole, DirectorRole
+	text, ok, err := RenderRolePrompt(DirectorRole, vars)
+	if err != nil || ok || text != "" {
+		t.Fatalf("RenderRolePrompt(%q) = (%q, %v, %v), want (\"\", false, nil)", DirectorRole, text, ok, err)
+	}
+}
