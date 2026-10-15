@@ -37,9 +37,9 @@ type DirectorHeadlessAttach struct {
 }
 
 // DirectorWho is who writes a headless registration's later events
-// (RecordWorkspace, RecordPane, MarkLaunched, MarkStopped): USER, the
-// current directory, and whether HERDR_PANE_ID is set. The store does not
-// read the environment.
+// (RecordWorkspace, RecordPane, MarkLaunched, MarkStopped,
+// MarkForceStopped): USER, the current directory, and whether HERDR_PANE_ID
+// is set. The store does not read the environment.
 type DirectorWho struct {
 	User      string
 	Cwd       string
@@ -288,6 +288,21 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 // stopped: start and attach would refuse on it, stop would refuse it as
 // already stopped, and only a detach the human must think of would end it.
 func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
+	return s.markStopped(id, who, false)
+}
+
+// MarkForceStopped is MarkStopped for `ralph org director stop --force`
+// (plan D11): its stopped carries force, which says the pane and the
+// workspace were not closed but left as they were, since herdr's labels did
+// not confirm them as this launch's or a close failed. The detached it
+// writes first for the current registration carries no force: unlike detach
+// --force's, it names the id it ends.
+func (s *DirectorStore) MarkForceStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
+	return s.markStopped(id, who, true)
+}
+
+// markStopped is MarkStopped, and with force MarkForceStopped.
+func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool) (wasCurrent bool, err error) {
 	if _, ok := directorIDNumber(id); !ok {
 		return false, fmt.Errorf("org: director: stop: %q is not a registration id (d<N>, such as d1)", id)
 	}
@@ -312,7 +327,7 @@ func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool
 			cur = reg
 			events = append(events, DirectorEvent{TS: ts, ID: id, Event: DirectorEventDetached, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane})
 		}
-		events = append(events, DirectorEvent{TS: ts, ID: id, Event: DirectorEventStopped, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane})
+		events = append(events, DirectorEvent{TS: ts, ID: id, Event: DirectorEventStopped, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane, Force: force})
 		if err := s.appendLocked(raw, events...); err != nil {
 			return directorAppendFailed(verb, cur, err)
 		}

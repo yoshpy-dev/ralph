@@ -41,8 +41,9 @@ import (
 // registration detached that way stays open, and `ralph org director stop`
 // can still close its pane, until a stopped is written for it. The headless
 // director is not an org seat, so none of this is a manifest line (D2). The
-// writers of a headless registration, its token and names, and the verbs
-// StartDirector and StopDirector are in director_start.go.
+// writers of a headless registration, its token and names, and the verb
+// StartDirector are in director_start.go; StopDirector is in
+// director_stop.go.
 
 // Director event kinds: the "event" field of a director.jsonl line. The last
 // four are written only for a headless registration (launch herdr).
@@ -92,10 +93,10 @@ const directorLockFile = "director.lock"
 var ErrDirectorAttached = errors.New("a director is already attached")
 
 // ErrDirectorNoOpenHeadless is returned (wrapped) by RecordWorkspace,
-// RecordPane, and MarkStopped when no open headless registration has the
-// id: no registration has it, a promoted session attached it (no launch
-// herdr), or it was already stopped, when the error wraps
-// ErrDirectorStopped too.
+// RecordPane, MarkStopped, and MarkForceStopped when no open headless
+// registration has the id: no registration has it, a promoted session
+// attached it (no launch herdr), or it was already stopped, when the error
+// wraps ErrDirectorStopped too.
 var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has the id")
 
 // ErrDirectorStopped is wrapped together with ErrDirectorNoOpenHeadless when
@@ -113,14 +114,14 @@ var ErrDirectorIDMismatch = errors.New("the id is not the current registration's
 
 // ErrDirectorWriteNotRestored is returned (wrapped) by every DirectorStore
 // writer (Attach, Detach, AttachHeadless, RecordWorkspace, RecordPane,
-// MarkLaunched, and MarkStopped) when a write to director.jsonl failed and
-// the file could not be cut back to its size before the write: it may hold
-// part of the write (a replace cut off after the detached line leaves no
-// registration current), so the error cannot say that nothing was recorded,
-// and the caller says how to read the registration again (the CLI names
-// `ralph org director status`). Every other failed append left nothing in
-// the file: a failed open or marshal writes nothing, and a failed write or
-// close is cut back.
+// MarkLaunched, MarkStopped, and MarkForceStopped) when a write to
+// director.jsonl failed and the file could not be cut back to its size
+// before the write: it may hold part of the write (a replace cut off after
+// the detached line leaves no registration current), so the error cannot say
+// that nothing was recorded, and the caller says how to read the
+// registration again (the CLI names `ralph org director status`). Every
+// other failed append left nothing in the file: a failed open or marshal
+// writes nothing, and a failed write or close is cut back.
 var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
 
 // directorRawIDPattern finds an "id":"d<N>" in the raw text of
@@ -138,10 +139,13 @@ var directorRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"d([0-9]+)`)
 // stage 8a-1 did. The attached of `ralph org director start` adds launch
 // (herdr), token, model, and permission_mode, and leaves pane_id empty: the
 // pane is carried by pane_created, and the workspace by workspace_created
-// (workspace_id). launched and stopped carry nothing more. detached carries
-// the id of the registration it ends, and force when it was removed without
-// that id being given. A line of stage 8a-1 has none of the new fields and
-// reads as it did.
+// (workspace_id). launched carries nothing more. stopped carries force when
+// `ralph org director stop --force` wrote it without closing the pane and the
+// workspace (plan D11: herdr's labels did not confirm them, or a close
+// failed); the fold reads it as any stopped. detached carries the id of the
+// registration it ends, and force when it was removed without that id being
+// given. A line of stage 8a-1 has none of the new fields and reads as it
+// did.
 type DirectorEvent struct {
 	TS             string   `json:"ts"`    // UTC RFC3339
 	ID             string   `json:"id"`    // d<N>

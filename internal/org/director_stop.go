@@ -28,14 +28,21 @@ var (
 	// (HERDR_PANE_ID is its recorded pane), and closing it would end the
 	// command before it records the stop.
 	ErrDirectorStopSelfPane = errors.New("run ralph org director stop from a terminal outside the director's pane")
+	// ErrDirectorStopSelfWorkspace: stop ran inside the director's own
+	// workspace (HERDR_WORKSPACE_ID is its recorded workspace, which herdr's
+	// label confirmed as this launch's), and closing it would end the command
+	// before it records the stop.
+	ErrDirectorStopSelfWorkspace = errors.New("run ralph org director stop from a terminal outside the director's workspace")
 )
 
 // DirectorStopParams describes one StopDirector call: Store is the
 // director.jsonl of the ledger, ID the registration to stop, and Who who
-// writes the stop.
+// writes the stop. Force records the stop even when the recorded pane and
+// workspace cannot be confirmed as this launch's or closed (plan D11).
 type DirectorStopParams struct {
 	Store *DirectorStore
 	ID    string
+	Force bool
 	Who   DirectorWho
 }
 
@@ -46,6 +53,15 @@ type DirectorStopParams struct {
 // happened to the pane and the workspace. UnrecordedWorkspaceLabel is set
 // when no workspace id was recorded: herdr may still hold a workspace with
 // this label that start made before it could record the id.
+//
+// Forced says Force recorded the stop although the pane or the workspace
+// may still be open: stopped carries force, the notes say what was left
+// open, CloseErr says why (herdr's labels did not confirm a recorded id, a
+// get failed or timed out, or a close failed), and HerdrCommands find this
+// launch's workspace by its label to close it by hand. They name no recorded
+// id: nothing checks it again once the stop is recorded, and a herdr that
+// renumbered its ids can give it to another launch. All three are unset when
+// Force changed nothing.
 type DirectorStopResult struct {
 	Registration             DirectorRegistration
 	WasCurrent               bool
@@ -53,6 +69,9 @@ type DirectorStopResult struct {
 	PaneNote                 string
 	WorkspaceNote            string
 	UnrecordedWorkspaceLabel string
+	Forced                   bool
+	CloseErr                 error
+	HerdrCommands            []string
 }
 
 // StopDirector closes the herdr pane and workspace of the open headless
@@ -63,15 +82,35 @@ type DirectorStopResult struct {
 // (ErrDirectorStopped), both with ErrDirectorNoOpenHeadless, and a call from
 // inside the director's own pane (ErrDirectorStopSelfPane).
 //
-// closeDirectorResources checks herdr's labels for the recorded pane and
+// confirmDirectorResources checks herdr's labels for the recorded pane and
 // workspace before anything is sent (D9): a label that is not this launch's
-// sends no C-c and closes nothing. Then it sends C-c to the pane, closes it,
-// and closes the workspace; a pane or workspace herdr no longer knows counts
-// as closed, and one not recorded is skipped. When any of that does not
-// finish, it returns a *DirectorCleanupError and writes nothing. Otherwise
-// MarkStopped writes stopped, with detached when the registration is
-// current. On a *DirectorCleanupError the result still carries Registration
-// and the notes.
+// sends no C-c and closes nothing. Once herdr's label confirmed the
+// recorded workspace as this launch's, a call from inside it
+// (HERDR_WORKSPACE_ID is its id) is refused with
+// ErrDirectorStopSelfWorkspace, with no C-c, no close, and nothing written.
+// The id alone does not refuse: after herdr renumbered its ids it can name
+// someone else's workspace, and that is the label mismatch instead. Then it
+// sends C-c to the pane, closes it, and closes the workspace
+// (closeConfirmedDirectorResources); a pane or workspace herdr no longer
+// knows counts as closed, and one not recorded is skipped. When any of that
+// does not finish, it returns a *DirectorCleanupError and writes nothing.
+// Otherwise MarkStopped writes stopped, with detached when the registration
+// is current. On a *DirectorCleanupError the result still carries
+// Registration and the notes.
+//
+// With p.Force (plan D11), a label that is not this launch's, a get that
+// fails or times out, and a close that fails do not end the stop: it sends
+// no C-c and no close that it has not sent yet (a pane it closed stays
+// closed), records the stop with MarkForceStopped (stopped with force, and
+// detached first while the registration is current), and returns Forced.
+// That is the way out after herdr lost its state and renumbered its ids:
+// the recorded ids can name another launch's pane and workspace (AC5), and
+// without Force every stop refuses on them while the registration stays
+// open. As with the seat's `ralph org stop --force` (stopSeatPane), nothing
+// unconfirmed is closed. When the labels match and the closes go through,
+// Force changes nothing: the stop is recorded without force and Forced is
+// false. The refusals above, the pane and the workspace ones included, hold
+// with Force too.
 func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	switch _, ok := directorIDNumber(p.ID); {
 	case p.Store == nil:
@@ -89,20 +128,52 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_PANE_ID is its pane %q, and closing that pane would end this command before it records the stop: %w",
 			p.ID, reg.PaneID, ErrDirectorStopSelfPane)
 	}
-	res := DirectorStopResult{Registration: reg}
+	closed, gone := o.confirmDirectorResources(reg)
+	if closed.err == nil && reg.WorkspaceID != "" && !gone.workspace && o.getenv(herdrWorkspaceIDEnv) == reg.WorkspaceID {
+		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_WORKSPACE_ID is its workspace %q, labelled %s, and closing that workspace would end this command before it records the stop: %w",
+			p.ID, reg.WorkspaceID, DirectorWorkspaceLabel(reg.Token), ErrDirectorStopSelfWorkspace)
+	}
+	if closed.err == nil {
+		closed = o.closeConfirmedDirectorResources(reg, closed, gone)
+	}
+	res := DirectorStopResult{Registration: reg, CtrlCNote: closed.ctrlC, PaneNote: closed.pane, WorkspaceNote: closed.workspace}
 	if reg.WorkspaceID == "" {
 		res.UnrecordedWorkspaceLabel = DirectorWorkspaceLabel(reg.Token)
 	}
-	closed := o.closeDirectorResources(reg)
-	res.CtrlCNote, res.PaneNote, res.WorkspaceNote = closed.ctrlC, closed.pane, closed.workspace
-	if closed.err != nil {
+	return recordDirectorStop(p, res, closed)
+}
+
+// recordDirectorStop is the end of StopDirector once closed is what it did
+// to the pane and the workspace of res.Registration: it records the stop,
+// with force when closed did not finish and p.Force is set, and fills in
+// WasCurrent and, for a forced stop, Forced, CloseErr, and HerdrCommands.
+// Without p.Force a close that did not finish records nothing. A record that
+// fails is a *DirectorCleanupError; after a forced stop its StopCommand
+// carries --force, since the retry meets what this one met.
+func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed directorClose) (DirectorStopResult, error) {
+	reg := res.Registration
+	forced := closed.err != nil
+	if forced && !p.Force {
 		return res, newDirectorCleanupError("stop", reg, closed, nil, closed.err, false)
 	}
-	wasCurrent, err := p.Store.MarkStopped(p.ID, p.Who)
-	if err != nil {
+	mark := p.Store.MarkStopped
+	if forced {
+		mark = p.Store.MarkForceStopped
+	}
+	wasCurrent, err := mark(p.ID, p.Who)
+	switch {
+	case err != nil && forced:
+		e := newDirectorCleanupError("stop", reg, closed, nil, errors.Join(closed.err, fmt.Errorf("record %s stopped: %w", p.ID, err)), false)
+		e.StopCommand = directorStopCommand(reg.ID, true)
+		return res, e
+	case err != nil:
 		return res, newDirectorCleanupError("stop", reg, closed, nil, fmt.Errorf("record %s stopped: %w", p.ID, err), false)
 	}
 	res.WasCurrent = wasCurrent
+	if forced {
+		res.Forced, res.CloseErr = true, closed.err
+		res.HerdrCommands = directorFindWorkspaceCommands(DirectorWorkspaceLabel(reg.Token))
+	}
 	return res, nil
 }
 
@@ -138,7 +209,10 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // but stays open; a stop writes nothing when it fails. HerdrCommands are what
 // a human can run to close what was left open (for Unconfirmed, finding the
 // workspace by its label, never closing a recorded id), and StopCommand
-// records the stop afterwards; the CLI adds its --state-dir to it.
+// records the stop afterwards; the CLI adds its --state-dir to it. For
+// Unconfirmed it carries --force (plan D11): the recorded ids may go on
+// naming another launch's pane and workspace, and a stop without it would
+// refuse on them again.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
@@ -202,40 +276,69 @@ type directorClose struct {
 
 // closeDirectorResources closes the herdr pane and workspace recorded for
 // reg, the closing shared by StopDirector and StartDirector's cleanup. It
-// first checks both: the pane with confirmSeatPane (its tab labelled
+// first checks both (confirmDirectorResources); when either is not
+// confirmed, or its get fails, nothing is sent to either. Then it sends C-c
+// to the pane, closes it, and closes the workspace
+// (closeConfirmedDirectorResources). StopDirector calls the two halves
+// itself, to refuse a call from inside the confirmed workspace in between.
+func (o *Org) closeDirectorResources(reg DirectorRegistration) directorClose {
+	c, gone := o.confirmDirectorResources(reg)
+	if c.err != nil {
+		return c
+	}
+	return o.closeConfirmedDirectorResources(reg, c, gone)
+}
+
+// directorGone is what confirmDirectorResources found herdr no longer has:
+// the recorded pane, the recorded workspace.
+type directorGone struct {
+	pane, workspace bool
+}
+
+// confirmDirectorResources checks the herdr pane and workspace recorded for
+// reg, with nothing sent: the pane with confirmSeatPane (its tab labelled
 // DirectorTabLabel and its workspace DirectorWorkspaceLabel of reg's token),
 // the workspace with confirmOrgWorkspace (labelled DirectorWorkspaceLabel).
-// When either is not confirmed, or its get fails, nothing is sent to either.
-// Then it sends C-c to the pane (a failed C-c is a note), closes it, and
-// closes the workspace, stopping at the first close that fails. A recorded
-// id herdr no longer knows counts as closed, and one not recorded is skipped.
-// Every herdr call runs under its own driverCallTimeout.
-func (o *Org) closeDirectorResources(reg DirectorRegistration) directorClose {
+// It returns the directorClose to go on with, whose err is set (notConfirmed)
+// when a recorded id is not confirmed or its get fails, and which recorded
+// ids herdr no longer knows. One not recorded is skipped. Every get runs
+// under its own driverCallTimeout.
+func (o *Org) confirmDirectorResources(reg DirectorRegistration) (directorClose, directorGone) {
 	tabLabel, wsLabel := DirectorTabLabel(reg.Token), DirectorWorkspaceLabel(reg.Token)
 	c := directorClose{ctrlC: "ctrl_c=skipped", pane: "pane=none recorded", workspace: "workspace=none recorded",
 		paneOpen: reg.PaneID != "", workspaceOpen: reg.WorkspaceID != ""}
-	var paneGone, wsGone bool
+	var gone directorGone
 	if reg.PaneID != "" {
-		gone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID)
+		paneGone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID)
 		if err != nil {
 			return c.notConfirmed(fmt.Errorf("pane %q is not confirmed as %s's (a tab labelled %s in a workspace labelled %s), so nothing was sent to it: %w",
-				reg.PaneID, reg.ID, tabLabel, wsLabel, err))
+				reg.PaneID, reg.ID, tabLabel, wsLabel, err)), gone
 		}
-		paneGone = gone
+		gone.pane = paneGone
 	}
 	if reg.WorkspaceID != "" {
-		gone, err := o.confirmOrgWorkspace(wsLabel, reg.WorkspaceID)
+		wsGone, err := o.confirmOrgWorkspace(wsLabel, reg.WorkspaceID)
 		if err != nil {
 			return c.notConfirmed(fmt.Errorf("workspace %q is not confirmed as %s's (labelled %s), so nothing was sent to it: %w",
-				reg.WorkspaceID, reg.ID, wsLabel, err))
+				reg.WorkspaceID, reg.ID, wsLabel, err)), gone
 		}
-		wsGone = gone
+		gone.workspace = wsGone
 	}
-	if reg.PaneID != "" && !o.closeDirectorPane(&c, reg.PaneID, paneGone) {
+	return c, gone
+}
+
+// closeConfirmedDirectorResources closes what confirmDirectorResources
+// confirmed for reg, going on from its c and gone: it sends C-c to the pane
+// (a failed C-c is a note), closes it, and closes the workspace, stopping at
+// the first close that fails. A recorded id herdr no longer knows counts as
+// closed, and one not recorded is skipped. Every herdr call runs under its
+// own driverCallTimeout.
+func (o *Org) closeConfirmedDirectorResources(reg DirectorRegistration, c directorClose, gone directorGone) directorClose {
+	if reg.PaneID != "" && !o.closeDirectorPane(&c, reg.PaneID, gone.pane) {
 		return c
 	}
 	if reg.WorkspaceID != "" {
-		o.closeDirectorWorkspace(&c, reg.WorkspaceID, wsGone)
+		o.closeDirectorWorkspace(&c, reg.WorkspaceID, gone.workspace)
 	}
 	return c
 }
@@ -314,13 +417,13 @@ func newDirectorCleanupError(verb string, reg DirectorRegistration, closed direc
 		Verb: verb, ID: reg.ID, WorkspaceID: reg.WorkspaceID, PaneID: reg.PaneID,
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		Err: cause, CleanupErr: cleanupErr, Unconfirmed: closed.unconfirmed, Detached: detached,
-		StopCommand: "ralph org director stop --id " + reg.ID,
+		StopCommand: directorStopCommand(reg.ID, closed.unconfirmed),
 	}
 	switch {
 	case closed.unconfirmed:
 		// The recorded ids may name another launch's pane and workspace, so
 		// the human finds this launch's workspace by its label instead.
-		e.HerdrCommands = []string{"herdr workspace list", "herdr workspace close <the id of the workspace labelled " + e.WorkspaceLabel + ">"}
+		e.HerdrCommands = directorFindWorkspaceCommands(e.WorkspaceLabel)
 	default:
 		if closed.paneOpen {
 			e.HerdrCommands = append(e.HerdrCommands, "herdr pane close "+directorShellWord(reg.PaneID))
@@ -330,6 +433,24 @@ func newDirectorCleanupError(verb string, reg DirectorRegistration, closed direc
 		}
 	}
 	return e
+}
+
+// directorFindWorkspaceCommands are the herdr commands that find the
+// workspace labelled label and close it, for a pane and workspace whose
+// recorded ids herdr's labels did not confirm or that nothing will check
+// again: they name the label, never a recorded id.
+func directorFindWorkspaceCommands(label string) []string {
+	return []string{"herdr workspace list", "herdr workspace close <the id of the workspace labelled " + label + ">"}
+}
+
+// directorStopCommand is the `ralph org director stop` command that records
+// the stop of id, with --force when force (the CLI adds its --state-dir).
+func directorStopCommand(id string, force bool) string {
+	cmd := "ralph org director stop --id " + id
+	if force {
+		cmd += " --force"
+	}
+	return cmd
 }
 
 // directorShellWordPattern is a herdr id that needs no quoting in a shell

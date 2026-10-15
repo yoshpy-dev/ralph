@@ -575,13 +575,24 @@ func TestStartDirector_ACleanupThatCannotCloseLeavesItDetachedOnly(t *testing.T)
 		_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
 		var ce *DirectorCleanupError
 		if !errors.As(err, &ce) || !ce.Unconfirmed || !ce.Detached ||
-			!slices.Equal(ce.HerdrCommands, []string{"herdr workspace list", "herdr workspace close <the id of the workspace labelled ralph_director_" + directorTestToken + ">"}) {
-			t.Fatalf("err = %#v, want an unconfirmed cleanup that finds the workspace by its label", err)
+			!slices.Equal(ce.HerdrCommands, []string{"herdr workspace list", "herdr workspace close <the id of the workspace labelled ralph_director_" + directorTestToken + ">"}) ||
+			ce.StopCommand != "ralph org director stop --id d1 --force" {
+			t.Fatalf("err = %#v, want an unconfirmed cleanup that finds the workspace by its label and records the stop with --force", err)
 		}
 		if len(f.h.sendKeysCalls) != 0 || len(f.h.paneCloseCalls) != 0 || len(f.h.workspaceCloseCalls) != 0 {
 			t.Fatalf("an unconfirmed pane got C-c %v, pane closes %v, workspace closes %v", f.h.sendKeysCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls)
 		}
 		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "detached d1")
+
+		// The stop it names records d1 with force and still sends nothing.
+		stopped, err := stopWithForce(f, "d1")
+		if err != nil || !stopped.Forced || stopped.WasCurrent {
+			t.Fatalf("stop --force: %+v, %v; want a forced stop of a registration no longer current", stopped, err)
+		}
+		if len(f.h.sendKeysCalls) != 0 || len(f.h.paneCloseCalls) != 0 || len(f.h.workspaceCloseCalls) != 0 {
+			t.Fatalf("stop --force sent C-c %v, pane closes %v, workspace closes %v", f.h.sendKeysCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls)
+		}
+		wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1+force")
 	})
 }
 

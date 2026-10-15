@@ -1,10 +1,14 @@
 package org
 
 import (
+	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
@@ -119,7 +123,12 @@ func TestStopDirector_ALabelNotThisLaunchsSendsNothing(t *testing.T) {
 			if !errors.As(err, &ce) || !ce.Unconfirmed || ce.Verb != "stop" || ce.Err != nil || ce.Detached {
 				t.Fatalf("err = %#v, want an unconfirmed stop", err)
 			}
-			for _, want := range append(tc.wantText, "nothing was recorded", "herdr workspace list") {
+			// The ids stay unconfirmed on a retry, so the way out records the
+			// stop with --force (D11).
+			if ce.StopCommand != "ralph org director stop --id d1 --force" {
+				t.Fatalf("StopCommand = %q, want the stop with --force", ce.StopCommand)
+			}
+			for _, want := range append(tc.wantText, "nothing was recorded", "herdr workspace list", "afterwards record the stop with ralph org director stop --id d1 --force") {
 				if !strings.Contains(err.Error(), want) {
 					t.Fatalf("err = %v, want it to say %q", err, want)
 				}
@@ -159,8 +168,9 @@ func TestStopDirector_ACloseThatFailsRecordsNothing(t *testing.T) {
 			before := directorFileState(t, f.store)
 			_, err := f.stop("d1")
 			var ce *DirectorCleanupError
-			if !errors.As(err, &ce) || ce.Unconfirmed || !errors.Is(err, closeErr) || !slices.Equal(ce.HerdrCommands, tc.wantCommands) {
-				t.Fatalf("err = %#v, want a close failure with commands %q", err, tc.wantCommands)
+			if !errors.As(err, &ce) || ce.Unconfirmed || !errors.Is(err, closeErr) || !slices.Equal(ce.HerdrCommands, tc.wantCommands) ||
+				ce.StopCommand != "ralph org director stop --id d1" {
+				t.Fatalf("err = %#v, want a close failure with commands %q and the stop without --force", err, tc.wantCommands)
 			}
 			if !slices.Equal(f.h.workspaceCloseCalls, tc.wantWsCloses) {
 				t.Fatalf("workspace closes = %v, want %v", f.h.workspaceCloseCalls, tc.wantWsCloses)
@@ -210,6 +220,11 @@ func TestStopDirector_Refusals(t *testing.T) {
 			f.mustStart(t, DirectorDriverClaude, "opus")
 			f.env[herdrPaneIDEnv] = "pane-1"
 			return DirectorStopParams{Store: f.store, ID: "d1"}
+		}, []error{ErrDirectorStopSelfPane}, "outside the director's pane"},
+		{"inside the director's own pane, with force", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+			f.mustStart(t, DirectorDriverClaude, "opus")
+			f.env[herdrPaneIDEnv] = "pane-1"
+			return DirectorStopParams{Store: f.store, ID: "d1", Force: true}
 		}, []error{ErrDirectorStopSelfPane}, "outside the director's pane"},
 	}
 	for _, tc := range cases {
@@ -283,4 +298,332 @@ func TestDirector_TwoLedgersOnOneHerdrServerNeverCloseEachOther(t *testing.T) {
 		t.Fatalf("B's stop: %v", err)
 	}
 	wantNoDirectorOpen(t, b.store)
+}
+
+// stopWithForce is f's stop of id with Force set.
+func stopWithForce(f *dirStartFixture, id string) (DirectorStopResult, error) {
+	p := f.stopParams(id)
+	p.Force = true
+	return f.o.StopDirector(p)
+}
+
+// wantNothingSent asserts h got no C-c and no pane or workspace close.
+func wantNothingSent(t *testing.T, h *directorHerdr) {
+	t.Helper()
+	if len(h.sendKeysCalls) != 0 || len(h.paneCloseCalls) != 0 || len(h.workspaceCloseCalls) != 0 {
+		t.Fatalf("C-c %v, pane closes %v, workspace closes %v, want none", h.sendKeysCalls, h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+}
+
+// findWorkspaceCommands are the herdr commands a forced stop of the launch
+// with token gives for what it left open: the label, never a recorded id.
+func findWorkspaceCommands(token string) []string {
+	return []string{"herdr workspace list", "herdr workspace close <the id of the workspace labelled ralph_director_" + token + ">"}
+}
+
+// TestStopDirector_ForceRecordsAStopWhoseLabelsAreAnotherLaunchs pins AC14
+// on AC5's two ledgers: after herdr renumbered its ids, ledger A's stop with
+// Force sends no C-c and no close to the pane and workspace its ids now
+// name (ledger B's), records stopped with force, detached first since A's
+// registration is current, and finds A's workspace by its label. B's
+// director.jsonl stays as it was, and B's own stop still closes B's.
+func TestStopDirector_ForceRecordsAStopWhoseLabelsAreAnotherLaunchs(t *testing.T) {
+	const tokenB = "ba0000000000"
+	a := newDirStartFixture(t, directorTestToken)
+	b := newDirStartFixture(t, tokenB)
+	b.o.Herdr = a.h
+	a.mustStart(t, DirectorDriverClaude, "opus")
+	h := a.h
+	h.paneTabs, h.paneWorkspaces, h.tabLabels, h.workspaceLabels = nil, nil, nil, nil
+	b.mustStart(t, DirectorDriverClaude, "opus")
+	beforeB, n := directorFileState(t, b.store), len(h.calls)
+
+	res, err := stopWithForce(a, "d1")
+	if err != nil {
+		t.Fatalf("A's stop --force: %v", err)
+	}
+	if !res.Forced || !res.WasCurrent || res.CloseErr == nil || !strings.Contains(res.CloseErr.Error(), `labelled "director_`+tokenB+`"`) ||
+		res.CtrlCNote != "ctrl_c=skipped: not confirmed" || res.PaneNote != "pane=not closed: not confirmed" || res.WorkspaceNote != "workspace=not closed: not confirmed" {
+		t.Fatalf("A's stop --force = %+v, want a forced stop that names B's label as found and closed nothing", res)
+	}
+	if !slices.Equal(res.HerdrCommands, findWorkspaceCommands(directorTestToken)) {
+		t.Fatalf("HerdrCommands = %q, want A's workspace found by its label", res.HerdrCommands)
+	}
+	if got := herdrCallsSince(h, n); !slices.Equal(got, []string{"pane_get", "tab_get"}) {
+		t.Fatalf("herdr calls = %v, want the pane check only", got)
+	}
+	wantNothingSent(t, h)
+	wantTrail(t, a.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
+	wantNoDirectorOpen(t, a.store)
+	if directorFileState(t, b.store) != beforeB {
+		t.Fatal("A's forced stop changed B's director.jsonl")
+	}
+
+	if _, err := b.stop("d1"); err != nil {
+		t.Fatalf("B's stop: %v", err)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) || !slices.Equal(h.workspaceCloseCalls, []string{"ws-1"}) {
+		t.Fatalf("B's stop: pane closes %v, workspace closes %v, want B's pane-1 and ws-1", h.paneCloseCalls, h.workspaceCloseCalls)
+	}
+	wantTrail(t, b.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1")
+}
+
+// TestStopDirector_ForceWithLabelsThatMatchClosesAsWithoutIt pins AC14's
+// last rule: with this launch's labels, Force changes nothing: C-c, the
+// pane and workspace closes, a stopped without force, and Forced false.
+func TestStopDirector_ForceWithLabelsThatMatchClosesAsWithoutIt(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	f.mustStart(t, DirectorDriverClaude, "opus")
+	n := len(f.h.calls)
+	res, err := stopWithForce(f, "d1")
+	if err != nil || res.Forced || res.CloseErr != nil || res.HerdrCommands != nil || !res.WasCurrent ||
+		res.CtrlCNote != "ctrl_c=ok" || res.PaneNote != "pane=closed" || res.WorkspaceNote != "workspace=closed" {
+		t.Fatalf("stop --force = %+v, %v; want the plain stop", res, err)
+	}
+	if got := herdrCallsSince(f.h, n); !slices.Equal(got, directorCloseCalls) {
+		t.Fatalf("herdr calls = %v, want %v", got, directorCloseCalls)
+	}
+	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1")
+	wantNoDirectorOpen(t, f.store)
+}
+
+// TestStopDirector_ForceAfterACloseThatFailsRecordsWhatWasLeftOpen pins
+// AC14's close rule: when the pane close fails, Force sends no workspace
+// close; when the workspace close fails, the pane it closed stays closed.
+// Either way stopped is recorded with force and the result says what was
+// left open and how to find it.
+func TestStopDirector_ForceAfterACloseThatFailsRecordsWhatWasLeftOpen(t *testing.T) {
+	closeErr := errors.New("herdr: connection refused")
+	cases := []struct {
+		name                         string
+		inject                       func(h *directorHerdr)
+		wantCalls                    []string
+		wantPaneNote, wantWorkspNote string
+		wantWsCloses                 []string
+	}{
+		{"the pane", func(h *directorHerdr) { h.paneCloseErrs = map[string]error{"pane-1": closeErr} },
+			[]string{"pane_get", "tab_get", "workspace_get", "workspace_get", "pane_send_keys", "pane_close"},
+			"pane=close failed: herdr: connection refused", "workspace=not closed: the pane was left open", nil},
+		{"the workspace", func(h *directorHerdr) { h.workspaceCloseErrs = map[string]error{"ws-1": closeErr} },
+			directorCloseCalls, "pane=closed", "workspace=close failed: herdr: connection refused", []string{"ws-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			f.mustStart(t, DirectorDriverClaude, "opus")
+			tc.inject(f.h)
+			n := len(f.h.calls)
+			res, err := stopWithForce(f, "d1")
+			if err != nil || !res.Forced || !res.WasCurrent || !errors.Is(res.CloseErr, closeErr) ||
+				res.CtrlCNote != "ctrl_c=ok" || res.PaneNote != tc.wantPaneNote || res.WorkspaceNote != tc.wantWorkspNote ||
+				!slices.Equal(res.HerdrCommands, findWorkspaceCommands(directorTestToken)) {
+				t.Fatalf("stop --force = %+v, %v", res, err)
+			}
+			if got := herdrCallsSince(f.h, n); !slices.Equal(got, tc.wantCalls) {
+				t.Fatalf("herdr calls = %v, want %v", got, tc.wantCalls)
+			}
+			if !slices.Equal(f.h.paneCloseCalls, []string{"pane-1"}) || !slices.Equal(f.h.workspaceCloseCalls, tc.wantWsCloses) {
+				t.Fatalf("pane closes %v, workspace closes %v, want pane-1 once and %v", f.h.paneCloseCalls, f.h.workspaceCloseCalls, tc.wantWsCloses)
+			}
+			wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
+			wantNoDirectorOpen(t, f.store)
+		})
+	}
+}
+
+// TestStopDirector_ForceWhenAGetTimesOutSendsNothing pins AC14 for a
+// recorded id herdr does not answer about: the pane check times out, so
+// nothing is sent, and Force records stopped with force alone for a
+// registration already detached.
+func TestStopDirector_ForceWhenAGetTimesOutSendsNothing(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	f.mustStart(t, DirectorDriverClaude, "opus")
+	if _, err := f.store.Detach(DirectorDetach{ID: "d1"}); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	f.o.DriverCallTimeout = 20 * time.Millisecond
+	f.h.getBlock = true
+	n := len(f.h.calls)
+	res, err := stopWithForce(f, "d1")
+	if err != nil || !res.Forced || res.WasCurrent || !errors.Is(res.CloseErr, context.DeadlineExceeded) ||
+		res.PaneNote != "pane=not closed: not confirmed" || !slices.Equal(res.HerdrCommands, findWorkspaceCommands(directorTestToken)) {
+		t.Fatalf("stop --force = %+v, %v; want a forced stop after the timed-out check", res, err)
+	}
+	if got := herdrCallsSince(f.h, n); !slices.Equal(got, []string{"pane_get"}) {
+		t.Fatalf("herdr calls = %v, want the pane check only", got)
+	}
+	wantNothingSent(t, f.h)
+	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
+	wantNoDirectorOpen(t, f.store)
+}
+
+// TestStopDirector_RefusesInsideTheDirectorsWorkspace pins AC9's workspace
+// rule: once herdr's label confirms the recorded workspace as this
+// launch's, a stop whose HERDR_WORKSPACE_ID is that workspace is refused,
+// with or without Force, with the checks only: no C-c, no close, nothing
+// written. A workspace recorded without a pane (a start that died before
+// its tab) is refused the same way. HERDR_WORKSPACE_ID of another workspace
+// does not refuse.
+func TestStopDirector_RefusesInsideTheDirectorsWorkspace(t *testing.T) {
+	cases := []struct {
+		name      string
+		setup     func(t *testing.T, f *dirStartFixture) string // returns the recorded workspace
+		wantCalls []string
+	}{
+		{"running", func(t *testing.T, f *dirStartFixture) string {
+			f.mustStart(t, DirectorDriverClaude, "opus")
+			return "ws-1"
+		}, []string{"pane_get", "tab_get", "workspace_get", "workspace_get"}},
+		{"only the workspace recorded", func(t *testing.T, f *dirStartFixture) string {
+			if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
+				t.Fatalf("AttachHeadless: %v", err)
+			}
+			if err := f.store.RecordWorkspace("d1", "ws-7", testDirectorWho); err != nil {
+				t.Fatalf("RecordWorkspace: %v", err)
+			}
+			setLabel(&f.h.workspaceLabels, "ws-7", DirectorWorkspaceLabel(directorTestToken))
+			return "ws-7"
+		}, []string{"workspace_get"}},
+	}
+	for _, tc := range cases {
+		for _, force := range []bool{false, true} {
+			name := tc.name
+			if force {
+				name += ", with force"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newDirStartFixture(t, directorTestToken)
+				f.env[herdrWorkspaceIDEnv] = tc.setup(t, f)
+				before, n := directorFileState(t, f.store), len(f.h.calls)
+				p := f.stopParams("d1")
+				p.Force = force
+				_, err := f.o.StopDirector(p)
+				if !errors.Is(err, ErrDirectorStopSelfWorkspace) || !strings.Contains(err.Error(), "outside the director's workspace") ||
+					!strings.Contains(err.Error(), "labelled ralph_director_"+directorTestToken) {
+					t.Fatalf("err = %v, want ErrDirectorStopSelfWorkspace naming the confirmed label", err)
+				}
+				var ce *DirectorCleanupError
+				if errors.As(err, &ce) {
+					t.Fatalf("err = %v, want a refusal, not a cleanup error", err)
+				}
+				if got := herdrCallsSince(f.h, n); !slices.Equal(got, tc.wantCalls) {
+					t.Fatalf("herdr calls = %v, want the checks only: %v", got, tc.wantCalls)
+				}
+				wantNothingSent(t, f.h)
+				if after := directorFileState(t, f.store); after != before {
+					t.Fatalf("director.jsonl changed from %q to %q", before, after)
+				}
+			})
+		}
+	}
+	t.Run("another workspace's id", func(t *testing.T) {
+		f := newDirStartFixture(t, directorTestToken)
+		f.mustStart(t, DirectorDriverClaude, "opus")
+		f.env[herdrWorkspaceIDEnv] = "ws-9"
+		if _, err := f.stop("d1"); err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+		wantNoDirectorOpen(t, f.store)
+	})
+	t.Run("a recorded workspace herdr no longer knows", func(t *testing.T) {
+		// Nothing is sent to it, so nothing can end this command.
+		f := newDirStartFixture(t, directorTestToken)
+		f.mustStart(t, DirectorDriverClaude, "opus")
+		delete(f.h.paneTabs, "pane-1")
+		delete(f.h.workspaceLabels, "ws-1")
+		f.env[herdrWorkspaceIDEnv] = "ws-1"
+		if res, err := f.stop("d1"); err != nil || res.WorkspaceNote != "workspace=already closed" {
+			t.Fatalf("stop = %+v, %v; want the workspace counted as closed", res, err)
+		}
+		wantNoDirectorOpen(t, f.store)
+	})
+}
+
+// TestStopDirector_ARenumberedWorkspaceIDIsTheLabelMismatch pins that the
+// workspace refusal waits for the label: when HERDR_WORKSPACE_ID is the
+// recorded id but herdr now gives that id to another launch (AC5's
+// renumbering), the stop is the label mismatch instead: refused with
+// nothing written without Force, recorded with force with it, and nothing
+// sent either way.
+func TestStopDirector_ARenumberedWorkspaceIDIsTheLabelMismatch(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		name := "without force"
+		if force {
+			name = "with force"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			f.mustStart(t, DirectorDriverClaude, "opus")
+			// herdr renumbered: pane-1 is gone and ws-1 is another launch's.
+			delete(f.h.paneTabs, "pane-1")
+			setLabel(&f.h.workspaceLabels, "ws-1", DirectorWorkspaceLabel("ffffffffffff"))
+			f.env[herdrWorkspaceIDEnv] = "ws-1"
+			before := directorFileState(t, f.store)
+			p := f.stopParams("d1")
+			p.Force = force
+			res, err := f.o.StopDirector(p)
+			if errors.Is(err, ErrDirectorStopSelfWorkspace) {
+				t.Fatalf("err = %v, want the label mismatch, not the workspace refusal", err)
+			}
+			wantNothingSent(t, f.h)
+			if !force {
+				var ce *DirectorCleanupError
+				if !errors.As(err, &ce) || !ce.Unconfirmed {
+					t.Fatalf("err = %#v, want an unconfirmed stop", err)
+				}
+				if after := directorFileState(t, f.store); after != before {
+					t.Fatalf("director.jsonl changed:\n%s", after)
+				}
+				return
+			}
+			if err != nil || !res.Forced || !strings.Contains(res.CloseErr.Error(), `labels it "ralph_director_ffffffffffff"`) {
+				t.Fatalf("stop --force = %+v, %v; want a forced stop over the mismatched workspace", res, err)
+			}
+			wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
+		})
+	}
+}
+
+// TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce pins the
+// forced stop whose record fails: nothing is recorded, the
+// *DirectorCleanupError joins why nothing was closed with why nothing was
+// recorded, and its StopCommand carries --force, since a retry meets the
+// same pane and workspace.
+func TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce(t *testing.T) {
+	closeErr := errors.New("herdr: connection refused")
+	cases := []struct {
+		name         string
+		inject       func(h *directorHerdr)
+		unconfirmed  bool
+		wantCommands []string
+	}{
+		{"a label that is another launch's", func(h *directorHerdr) { setLabel(&h.tabLabels, fakeTabID("pane-1"), "director_ffffffffffff") },
+			true, findWorkspaceCommands(directorTestToken)},
+		{"a pane close that fails", func(h *directorHerdr) { h.paneCloseErrs = map[string]error{"pane-1": closeErr} },
+			false, []string{"herdr pane close pane-1", "herdr workspace close ws-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			f.mustStart(t, DirectorDriverClaude, "opus")
+			tc.inject(f.h)
+			before := directorFileState(t, f.store)
+			f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
+			_, err := stopWithForce(f, "d1")
+			var ce *DirectorCleanupError
+			if !errors.As(err, &ce) || ce.Unconfirmed != tc.unconfirmed || !errors.Is(err, syscall.ENOSPC) ||
+				ce.StopCommand != "ralph org director stop --id d1 --force" || !slices.Equal(ce.HerdrCommands, tc.wantCommands) {
+				t.Fatalf("err = %#v, want a cleanup error that retries with --force", err)
+			}
+			if !tc.unconfirmed && !errors.Is(err, closeErr) {
+				t.Fatalf("err = %v, want it to keep the close failure", err)
+			}
+			if !strings.Contains(err.Error(), "nothing was recorded") {
+				t.Fatalf("err = %v, want it to say nothing was recorded", err)
+			}
+			if after := directorFileState(t, f.store); after != before {
+				t.Fatalf("director.jsonl changed:\n%s", after)
+			}
+		})
+	}
 }

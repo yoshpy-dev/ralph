@@ -1650,6 +1650,76 @@ func TestDirectorMarkStopped_ARegistrationNoLongerCurrentGetsStoppedOnly(t *test
 	}
 }
 
+// MarkForceStopped (plan D11) writes what MarkStopped writes with force on
+// the stopped line only: the detached written first for the current
+// registration names its id, so it carries no force. The fold reads the
+// forced stopped as any stopped, and a second stop is refused as already
+// stopped.
+func TestDirectorMarkForceStopped_OnlyTheStoppedLineCarriesForce(t *testing.T) {
+	const stoppedForce = `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"stopped","user":"bob","cwd":"/work/b","herdr_pane":false,"force":true}` + "\n"
+	t.Run("current", func(t *testing.T) {
+		s, _, clock := newTestHeadlessStore(t)
+		mustAttachHeadless(t, s)
+		if err := s.RecordPane("d1", "p1", testDirectorWho); err != nil {
+			t.Fatalf("RecordPane: %v", err)
+		}
+		before := readDirectorFile(t, s)
+		*clock = clock.Add(time.Minute)
+		var writes []string
+		s.write = func(f *os.File, b []byte) (int, error) {
+			writes = append(writes, string(b))
+			return f.Write(b)
+		}
+
+		wasCurrent, err := s.MarkForceStopped("d1", testDirectorWho)
+		if err != nil || !wasCurrent {
+			t.Fatalf("MarkForceStopped = %v, %v; want true, nil", wasCurrent, err)
+		}
+		want := `{"ts":"2026-10-15T09:01:00Z","id":"d1","event":"detached","user":"bob","cwd":"/work/b","herdr_pane":false}` + "\n" + stoppedForce
+		if len(writes) != 1 || writes[0] != want {
+			t.Fatalf("writes = %q, want one write of %q", writes, want)
+		}
+		if got := readDirectorFile(t, s); got != before+want {
+			t.Fatalf("director.jsonl = %q, want %q", got, before+want)
+		}
+		res := mustReadDirector(t, s)
+		if res.Current != nil || res.OpenHeadless != nil || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+			t.Fatalf("Read = %+v (current %+v), want no registration, nothing open, nothing skipped", res, res.Current)
+		}
+		if _, err := s.MarkForceStopped("d1", testDirectorWho); !errors.Is(err, ErrDirectorNoOpenHeadless) || !errors.Is(err, ErrDirectorStopped) {
+			t.Fatalf("second MarkForceStopped err = %v, want ErrDirectorNoOpenHeadless with ErrDirectorStopped", err)
+		}
+	})
+	t.Run("no longer current", func(t *testing.T) {
+		s, _, clock := newTestHeadlessStore(t)
+		mustAttachHeadless(t, s)
+		mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Replace: true, User: "carol"})
+		before := readDirectorFile(t, s)
+		*clock = clock.Add(time.Minute)
+
+		wasCurrent, err := s.MarkForceStopped("d1", testDirectorWho)
+		if err != nil || wasCurrent {
+			t.Fatalf("MarkForceStopped = %v, %v; want false, nil", wasCurrent, err)
+		}
+		if got := readDirectorFile(t, s); got != before+stoppedForce {
+			t.Fatalf("director.jsonl = %q, want %q", got, before+stoppedForce)
+		}
+		res := mustReadDirector(t, s)
+		if currentDirectorID(res) != "d2" || res.OpenHeadless != nil || res.IgnoredEvents != 0 {
+			t.Fatalf("Read = %+v (current %+v), want d2 current and nothing open", res, res.Current)
+		}
+	})
+	t.Run("not an id", func(t *testing.T) {
+		s, _, _ := newTestHeadlessStore(t)
+		if _, err := s.MarkForceStopped("e1", testDirectorWho); err == nil || !strings.Contains(err.Error(), "not a registration id") {
+			t.Fatalf("MarkForceStopped(e1) err = %v, want the id error", err)
+		}
+		if _, err := os.Stat(s.Path()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("MarkForceStopped(e1) wrote director.jsonl (stat err %v)", err)
+		}
+	})
+}
+
 func TestDirectorMarkStopped_RefusesWithNoOpenHeadlessRegistration(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
