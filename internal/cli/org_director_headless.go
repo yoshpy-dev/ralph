@@ -51,16 +51,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"[org.permissions.roles].director, else [org.permissions].default, and\n" +
 			"with --model, which [org.roles].director must allow; without --model,\n" +
 			"with the first model_pool entry for --driver that it allows, and a\n" +
-			"warning. A codex director runs only in guarded: start refuses\n" +
-			"autonomous and edits whatever [org.permissions].codex_verified says,\n" +
-			"because they run codex under --sandbox workspace-write, which keeps .git\n" +
-			"read-only, so the director could not start a feature org (ralph org\n" +
-			"start --plan runs git worktree add). Set\n" +
-			"[org.permissions.roles].director = \"guarded\" and let your codex config\n" +
-			"(~/.codex/config.toml) write .git and reach the network, or use --driver\n" +
-			"claude; a guarded codex director follows that config, so under\n" +
-			"sandbox_mode = \"workspace-write\" it meets the same wall.\n" +
-			"Without --config, those settings and [org.director].enabled\n" +
+			"warning. Without --config, those settings and [org.director].enabled\n" +
 			"are read from the main worktree's ralph.toml when the ledger is the main\n" +
 			"worktree's, so a feature worktree's ralph.toml does not choose them. The\n" +
 			"director runs in the ledger's main worktree root, else in the directory\n" +
@@ -72,22 +63,34 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"the herdr server's environment: start warns when it is set, and\n" +
 			"[org].agmsg_home in ralph.toml is what reaches the director.\n" +
 			"\n" +
+			"A codex director runs only in guarded: start refuses autonomous and\n" +
+			"edits whatever [org.permissions].codex_verified says, because they run\n" +
+			"codex under --sandbox workspace-write, which keeps .git read-only, so\n" +
+			"the director could not start a feature org (ralph org start --plan runs\n" +
+			"git worktree add). Set [org.permissions.roles].director = \"guarded\" and\n" +
+			"let your codex config (~/.codex/config.toml) write .git and reach the\n" +
+			"network, or use --driver claude; a guarded codex director follows that\n" +
+			"config, so under sandbox_mode = \"workspace-write\" it meets the same\n" +
+			"wall.\n" +
+			"\n" +
 			"start is refused, and writes nothing and runs no herdr, when\n" +
 			"[org.director].enabled is false, for a codex director in autonomous or\n" +
 			"edits, when the --config file's [org].agmsg_home is a relative path\n" +
-			"(neither absolute nor starting with ~/: the director, which runs in the\n" +
-			"main worktree root, and the watch, which resolves it from where start\n" +
-			"runs, would use different agmsg installs; give an absolute path), while\n" +
-			"a director is attached (one still starting included: stop a headless one\n" +
-			"with `ralph org director stop --id <id>`, detach a promoted session), and\n" +
-			"inside a herdr pane (HERDR_PANE_ID is set): run start from a terminal\n" +
-			"outside herdr. start has no --replace. Like `ralph org start`, it makes\n" +
-			"sure a long-running `ralph org watch --all` watches the ledger first: it\n" +
-			"launches one when none runs, and is refused when a watch holds the lock\n" +
-			"but is stale, stopping, or a --once run. When a step fails after the\n" +
-			"registration, start closes the pane and workspace it made, records the\n" +
-			"director stopped, and exits 1; what it could not close is printed with\n" +
-			"the herdr commands and the stop command that finish the cleanup.",
+			"(neither absolute nor starting with ~/: the director runs in the\n" +
+			"ledger's main worktree root when the ledger has one and the watch\n" +
+			"resolves it from where start runs, so the two may resolve it from\n" +
+			"different directories, and start refuses it wherever it runs; give an\n" +
+			"absolute path), while a director is attached (one still starting\n" +
+			"included: stop a headless one with `ralph org director stop --id <id>`,\n" +
+			"detach a promoted session), and inside a herdr pane (HERDR_PANE_ID is\n" +
+			"set): run start from a terminal outside herdr. start has no --replace.\n" +
+			"Like `ralph org start`, it makes sure a long-running\n" +
+			"`ralph org watch --all` watches the ledger first: it launches one when\n" +
+			"none runs, and is refused when a watch holds the lock but is stale,\n" +
+			"stopping, or a --once run. When a step fails after the registration,\n" +
+			"start closes the pane and workspace it made, records the director\n" +
+			"stopped, and exits 1; what it could not close is printed with the herdr\n" +
+			"commands and the stop command that finish the cleanup.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director start", driverName); err != nil {
@@ -173,15 +176,14 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 // a relative [org].agmsg_home of a --config (checkStartAgmsgHome, which also
 // warns when RALPH_ORG_AGMSG_HOME is set), and a model [org.roles].director
 // does not allow (resolveModelOrWarn's default is one it allows), wires
-// start's watch gate, and runs
-// (*org.Org).StartDirector in the ledger's main worktree root, else in the
-// current directory, with configPath, which StartDirector makes absolute and
-// gives as --config to the ralph org commands the director's prompt has it
-// run (not to the prompt's stop command, which the human runs). A refusal or
-// failure is returned (exit 1) in the words of startError; on success it
-// prints the registration, the pane to talk to the director in, and the stop
-// command, which, like the prompt's, has no --config (stop reads no
-// ralph.toml).
+// start's watch gate, and runs (*org.Org).StartDirector in the ledger's main
+// worktree root, else in the current directory, with configPath, which
+// StartDirector makes absolute and gives as --config to the ralph org
+// commands the director's prompt has it run (not to the prompt's stop
+// command, which the human runs). A refusal or failure is returned (exit 1)
+// in the words of startError; on success it prints the registration, the
+// pane to talk to the director in, and the stop command, which, like the
+// prompt's, has no --config (stop reads no ralph.toml).
 func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driverName, model string, timeoutMS int) error {
 	cfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -237,18 +239,23 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 // watch. The director runs in the ledger's main worktree root (when the
 // ledger has one) with the herdr server's environment, while the watch that
 // start launches gets the agmsg home resolved from this directory
-// (orgWatchChildAgmsgHome). So a relative [org].agmsg_home of a --config
-// that was given (agmsgHomeIsRelative, the rule orgWatchChildAgmsgHome
-// uses) is refused: the two would resolve it from different directories.
-// Without --config both read the main worktree root's ralph.toml and resolve
-// it from that root, so nothing is refused. When RALPH_ORG_AGMSG_HOME is set
-// here, it writes one warning line on stderr and goes on: the director's
-// pane does not get the variable.
+// (orgWatchChildAgmsgHome), so the two may resolve a relative
+// [org].agmsg_home from different directories and use different agmsg
+// installs. A relative value of a --config that was given
+// (agmsgHomeIsRelative, the rule orgWatchChildAgmsgHome uses) is therefore
+// refused wherever start runs: the rule does not compare the two
+// directories, so it also refuses in the main worktree root and on a ledger
+// with no main worktree, where they are the same (plan D13 chose the simple
+// rule). Without --config both read the main worktree root's ralph.toml and
+// resolve it from that root, so nothing is refused. When
+// RALPH_ORG_AGMSG_HOME is set here, it writes one warning line on stderr and
+// goes on: the director's pane does not get the variable.
 func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string) error {
 	if cmd.Flags().Changed("config") && configPath != "" && agmsgHomeIsRelative(cfgAgmsgHome) {
-		return fmt.Errorf("org: director start: [org].agmsg_home %q in %s is a relative path: the director runs in the ledger's main worktree root "+
-			"(when the ledger has one) and resolves it from there, while the watch resolves it from this directory, so the two would use different agmsg installs; "+
-			"give an absolute path (or one that starts with ~/)", cfgAgmsgHome, orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource))
+		return fmt.Errorf("org: director start: [org].agmsg_home %q in %s is a relative path: the director and the watch may resolve it from different directories "+
+			"and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it "+
+			"from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)",
+			cfgAgmsgHome, orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource))
 	}
 	if os.Getenv(orgAgmsgHomeEnv) != "" {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: director start: %s is set here, but the director's herdr pane has the herdr server's environment, "+

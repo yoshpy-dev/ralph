@@ -333,12 +333,22 @@ func codexModelPermittedForRole(orgCfg config.OrgConfig, role string, codexModel
 // against; the default applies to whichever unlisted role a seat spawns
 // under, and any such role could hold a codex model unless the pool itself
 // has none.
+//
+// Role director's own entry counts only as guarded: `ralph org director
+// start` refuses a codex director in every mode that runs it under
+// workspace-write (org.CodexModeRunsUnderWorkspaceWrite; plan
+// 2026-10-15-org-director-start, D12), so a director entry of edits or
+// autonomous never runs a codex agent under workspace-write, while a
+// guarded one follows the user config's sandbox_mode like a guarded seat
+// (reason (b) of codexSandboxReasons).
 func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guardedRole bool) {
-	apply := func(mode string) {
-		switch mode {
-		case org.PermissionModeEdits, org.PermissionModeAutonomous:
-			workspaceWriteRole = true
-		case org.PermissionModeGuarded:
+	apply := func(role, mode string) {
+		switch {
+		case org.CodexModeRunsUnderWorkspaceWrite(mode):
+			if role != org.DirectorRole {
+				workspaceWriteRole = true
+			}
+		case mode == org.PermissionModeGuarded:
 			guardedRole = true
 		}
 	}
@@ -347,11 +357,11 @@ func codexSeatModesPossible(orgCfg config.OrgConfig) (workspaceWriteRole, guarde
 	if len(codexModels) > 0 {
 		defaultsOnly := orgCfg
 		defaultsOnly.Permissions.Roles = nil
-		apply(org.ResolvePermissionMode(defaultsOnly, ""))
+		apply("", org.ResolvePermissionMode(defaultsOnly, ""))
 	}
 	for role, mode := range orgCfg.Permissions.Roles {
 		if codexModelPermittedForRole(orgCfg, role, codexModels) {
-			apply(mode)
+			apply(role, mode)
 		}
 	}
 	return workspaceWriteRole, guardedRole

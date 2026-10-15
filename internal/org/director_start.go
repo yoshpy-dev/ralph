@@ -374,15 +374,15 @@ var (
 // DirectorStartParams describes one StartDirector call. Store is the
 // director.jsonl of the ledger: its directory, made absolute, is the org
 // state dir the director is given (--state-dir in its prompt), and the
-// prompt file goes under <state dir>/prompts/. Model is
-// resolved by the caller. Cwd is the pane's directory, made absolute against
-// the caller's. ConfigPath is the ralph.toml the caller was given with
-// --config, "" when none was: made absolute against the caller's directory,
-// it goes into the prompt, whose ralph org commands for the director to run
-// carry it as --config (its stop command, for the human, does not: stop
-// reads no ralph.toml), so the director, which runs in Cwd, reads the
-// settings start read. TimeoutMS bounds the herdr agent start; 0 or less
-// means defaultSpawnTimeoutMS. Who is who writes the events.
+// prompt file goes under <state dir>/prompts/. Model is resolved by the
+// caller. Cwd is the pane's directory, made absolute against the caller's.
+// ConfigPath is the ralph.toml the caller was given with --config, "" when
+// none was: made absolute against the caller's directory, it goes into the
+// prompt, whose ralph org commands for the director to run carry it as
+// --config (its stop command, for the human, does not: stop reads no
+// ralph.toml), so the director, which runs in Cwd, reads the settings start
+// read. TimeoutMS bounds the herdr agent start; 0 or less means
+// defaultSpawnTimeoutMS. Who is who writes the events.
 type DirectorStartParams struct {
 	Store      *DirectorStore
 	Driver     string
@@ -538,7 +538,7 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permA
 	mode = ResolvePermissionMode(o.Config, DirectorRole)
 	// Before permissionArgsForDriver, so with codex_verified false this
 	// refusal, not the codex_verified one, says why (plan D12).
-	if p.Driver == DirectorDriverCodex && (mode == PermissionModeAutonomous || mode == PermissionModeEdits) {
+	if p.Driver == DirectorDriverCodex && CodexModeRunsUnderWorkspaceWrite(mode) {
 		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): "+
 			"%w, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, "+
 			"so the director could not start a feature org (ralph org start --plan runs git worktree add); "+

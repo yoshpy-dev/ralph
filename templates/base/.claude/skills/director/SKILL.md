@@ -149,10 +149,11 @@ start の設定と、director が動く場所は次のとおり。
   当たる。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
   この skill の指示だけで、permission では止まらない。
 - `--config` の設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでも
-  なければ、start は断る。director は main worktree のルートからその値を解き、
-  見張りは start を打った場所から解くので、別の agmsg を使ってしまう。絶対パス
-  で書く。人の shell の `RALPH_ORG_AGMSG_HOME` は director に届かない(herdr の
-  pane の環境は herdr server のもの)。設定されていれば start は警告を 1 行出して
+  なければ、start は断る。相対の値を director は自分が動く場所(次の項)から
+  解き、見張りは start を打った場所から解く。2 つの場所が違えば別の agmsg を
+  使ってしまうので、start は場所を比べず、どこで打っても断る。絶対パスで書く。
+  人の shell の `RALPH_ORG_AGMSG_HOME` は director に届かない(herdr の pane の
+  環境は herdr server のもの)。設定されていれば start は警告を 1 行出して
   続ける。director に届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。

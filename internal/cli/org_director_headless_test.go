@@ -599,10 +599,7 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused(t *testing.T) {
 				}
 				return
 			}
-			want := fmt.Sprintf("org: director start: [org].agmsg_home %q in the --config file %s is a relative path: the director runs in the ledger's main worktree root "+
-				"(when the ledger has one) and resolves it from there, while the watch resolves it from this directory, so the two would use different agmsg installs; "+
-				"give an absolute path (or one that starts with ~/)", home, configPath)
-			if err == nil || err.Error() != want {
+			if want := relativeAgmsgHomeRefusal(home, configPath); err == nil || err.Error() != want {
 				t.Fatalf("director start with agmsg_home %q = %v; want %q", home, err, want)
 			}
 			if stdout != "" || stderr != "" {
@@ -616,6 +613,82 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused(t *testing.T) {
 			}
 			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
 				t.Errorf("herdr calls = %v; want none", lines)
+			}
+		})
+	}
+}
+
+// relativeAgmsgHomeRefusal is start's whole error for the relative
+// [org].agmsg_home home of the --config file configPath (D13).
+func relativeAgmsgHomeRefusal(home, configPath string) string {
+	return fmt.Sprintf("org: director start: [org].agmsg_home %q in the --config file %s is a relative path: "+
+		"the director and the watch may resolve it from different directories and so use different agmsg installs "+
+		"(the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), "+
+		"so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)", home, configPath)
+}
+
+// AC15 through the CLI (D13): the refusal of a relative [org].agmsg_home in
+// a --config does not depend on where start runs, because the rule compares
+// no directories. It is refused in the ledger's main worktree root, where
+// the director runs in start's directory; in a linked worktree, where the
+// director runs in the main worktree root instead; and on a ledger with no
+// main worktree (--state-dir outside a repository), where the director again
+// runs in start's directory. Each refusal writes no director.jsonl and runs
+// no herdr. The same start with an absolute agmsg_home then succeeds, and
+// its workspace's --cwd shows where the director runs.
+func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		directorInCwd bool // the director runs in start's directory
+	}{
+		{"in the main worktree root", true},
+		{"in a linked worktree", false},
+		{"on a ledger with no main worktree", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stateDir, herdrLog, directorCwd string
+			args := []string{"director", "start", "--driver", "claude", "--model", "opus"}
+			if tc.name == "on a ledger with no main worktree" {
+				stateDir, herdrLog, directorCwd = directorStartLedger(t)
+				if root, ok := org.LedgerMainWorktreeRoot(stateDir, "flag"); ok {
+					t.Fatalf("the ledger %s has the main worktree %s; want none", stateDir, root)
+				}
+				args = append(args, "--state-dir", stateDir)
+			} else {
+				herdrLog, _ = setupOrgStubPATH(t)
+				unsetOrgAgmsgHomeEnv(t)
+				r := newLegacyLedgerRepo(t)
+				if tc.directorInCwd {
+					t.Chdir(r.mainRoot)
+				}
+				stateDir, directorCwd = r.sharedDir, r.mainRoot
+			}
+			startCwd, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := startCwd == directorCwd; got != tc.directorInCwd {
+				t.Fatalf("start runs in %s and the director in %s; want the same directory: %v", startCwd, directorCwd, tc.directorInCwd)
+			}
+
+			relative := writeDirectorConfig(t, "[org]\nagmsg_home = \"agmsg/home\"\n")
+			stdout, stderr, err := runOrgCmdStreams(t, slices.Concat(args, []string{"--config", relative})...)
+			if want := relativeAgmsgHomeRefusal("agmsg/home", relative); err == nil || err.Error() != want {
+				t.Fatalf("director start with a relative agmsg_home = %v (stdout: %s stderr: %s); want %q", err, stdout, stderr, want)
+			}
+			if got := directorFileOrAbsent(t, stateDir); got != "<absent>" {
+				t.Errorf("a refused start wrote director.jsonl: %s", got)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("herdr calls = %v; want none", lines)
+			}
+
+			absolute := writeDirectorConfig(t, fmt.Sprintf("[org]\nagmsg_home = %q\n", filepath.Join(t.TempDir(), "agmsg")))
+			if stdout, stderr, err = runOrgCmdStreams(t, slices.Concat(args, []string{"--config", absolute})...); err != nil {
+				t.Fatalf("director start with an absolute agmsg_home: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) == 0 || !strings.HasPrefix(lines[0], "workspace create --cwd "+directorCwd+" --label ") {
+				t.Errorf("herdr calls = %v; want the workspace made in %s", lines, directorCwd)
 			}
 		})
 	}
@@ -662,8 +735,11 @@ func TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector(t
 
 // The help of director start states D12 (a codex director runs guarded
 // only, why, the two ways out, and the guarded caveat) and D13 (the
-// relative agmsg_home refusal and the RALPH_ORG_AGMSG_HOME note), and no
-// longer says that codex_verified unlocks autonomous and edits.
+// relative agmsg_home refusal, wherever start runs, and the
+// RALPH_ORG_AGMSG_HOME note), and no longer says that codex_verified unlocks
+// autonomous and edits, nor that the director and the watch always use
+// different agmsg installs. "Without --config, those settings" follows the
+// sentence on the permission mode and the model it refers to.
 func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 	out, err := runOrgCmd(t, "director", "start", "--help")
 	if err != nil {
@@ -678,13 +754,18 @@ func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 		`a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall.`,
 		"RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
 		"for a codex director in autonomous or edits, when the --config file's [org].agmsg_home is a relative path (neither absolute nor starting with ~/",
+		"(neither absolute nor starting with ~/: the director runs in the ledger's main worktree root when the ledger has one and the watch resolves it " +
+			"from where start runs, so the two may resolve it from different directories, and start refuses it wherever it runs; give an absolute path)",
+		"with the first model_pool entry for --driver that it allows, and a warning. Without --config, those settings and [org.director].enabled are read",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("director start --help does not say %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(help, "need [org.permissions].codex_verified") {
-		t.Errorf("director start --help still says codex_verified unlocks autonomous and edits:\n%s", out)
+	for _, stale := range []string{"need [org.permissions].codex_verified", "would use different agmsg installs"} {
+		if strings.Contains(help, stale) {
+			t.Errorf("director start --help still says %q:\n%s", stale, out)
+		}
 	}
 }
 

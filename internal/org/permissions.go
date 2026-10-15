@@ -72,6 +72,20 @@ var (
 	codexEditsArgs      = []string{"--sandbox", "workspace-write"}
 )
 
+// CodexModeRunsUnderWorkspaceWrite reports whether permission mode mode runs
+// a codex agent under `--sandbox workspace-write`: autonomous and edits,
+// whose flags (codexAutonomousArgs, codexEditsArgs) both carry it. guarded
+// passes no sandbox flag, so codex follows the human's own config. This is
+// the one place that set of modes is spelled: checkDirectorStart refuses a
+// codex director in them (plan 2026-10-15-org-director-start, D12),
+// codexWritableRootArgs gives a codex leader in them --add-dir, and ralph
+// doctor's agmsg writable-root check counts the seat roles that resolve to
+// them. permissionArgsForDriver keeps its own switch, as it picks different
+// flags per mode.
+func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
+	return mode == PermissionModeAutonomous || mode == PermissionModeEdits
+}
+
 // permissionArgsForDriver maps driver + a resolved permission mode to the
 // driver-native CLI flags Spawn prepends to AgentStart's agentArgs (before
 // the "--model" flags -- see Spawn's agentArgs construction). A nil, nil
@@ -140,15 +154,15 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 
 // codexWritableRootArgs returns `--add-dir <stateDir>` for a codex leader
 // seat (role == LeaderIdentity) whose permission mode runs it under
-// `--sandbox workspace-write` (autonomous or edits; Spawn only reaches this
-// after permissionArgsForDriver has accepted that mode, i.e. once
-// cfg.Permissions.CodexVerified is true) when the org state directory is
-// not inside the seat's cwd, and nil otherwise. workspace-write leaves only
-// cwd (plus temp roots) writable, so a codex leader whose cwd is a linked
-// worktree could not append to the shared ledger under the main worktree's
-// .harness/state/org without it (plan 2026-10-07-org-state-dir-common,
-// AC8). guarded passes no sandbox flag at all and claude has no such
-// sandbox, so both get nil.
+// `--sandbox workspace-write` (CodexModeRunsUnderWorkspaceWrite: autonomous
+// or edits; Spawn only reaches this after permissionArgsForDriver has
+// accepted that mode, i.e. once cfg.Permissions.CodexVerified is true) when
+// the org state directory is not inside the seat's cwd, and nil otherwise.
+// workspace-write leaves only cwd (plus temp roots) writable, so a codex
+// leader whose cwd is a linked worktree could not append to the shared
+// ledger under the main worktree's .harness/state/org without it (plan
+// 2026-10-07-org-state-dir-common, AC8). guarded passes no sandbox flag at
+// all and claude has no such sandbox, so both get nil.
 //
 // Only the leader gets the flag because only the leader runs `ralph org`
 // verbs and so writes the ledger; implementer, reviewer, and every other
@@ -171,7 +185,7 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 // carries the absolute, unresolved state dir -- the same path the runtime
 // itself writes to.
 func codexWritableRootArgs(role, driver, mode, cwd, stateDir string) []string {
-	if role != LeaderIdentity || driver != "codex" || (mode != PermissionModeAutonomous && mode != PermissionModeEdits) {
+	if role != LeaderIdentity || driver != "codex" || !CodexModeRunsUnderWorkspaceWrite(mode) {
 		return nil
 	}
 	stateDir = mustAbs(stateDir)
