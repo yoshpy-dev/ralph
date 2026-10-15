@@ -128,7 +128,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] AC10 `ralph org director status` と `ralph status` の `director:` の行は、headless の登録なら `starting` か `running`、pane・workspace・model を出し、`--json` にも出す。`ralph org stop --all` は、閉じていない headless の登録があれば止め方を 1 行出し、終了コードは変えない
 - [x] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く。`--config` を渡した start の雛形は、`ralph org` のコマンドに `--config <絶対パス>` を付け、渡さない start の雛形は付けない
 - [x] AC12 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、AGENTS.md、`templates/base/ralph.toml` のコメント、tech-debt が 8a-2 の動きを説明し、「start はまだない」「headless の director はまだない」と書いた箇所が残っていない
-- [ ] AC15 `--config` を渡した start は、その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ断り(終了コード 1)、herdr を打たず、何も書かず、絶対パスにするよう案内する。絶対パス、`~/` で始まる値、空の値なら通る。`RALPH_ORG_AGMSG_HOME` が設定されていれば、director の pane に届かないことを警告の 1 行で出して続ける(D13)
+- [x] AC15 `--config` を渡した start は、その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ断り(終了コード 1)、herdr を打たず、何も書かず、絶対パスにするよう案内する。絶対パス、`~/` で始まる値、空の値なら通る。`RALPH_ORG_AGMSG_HOME` が設定されていれば、director の pane に届かないことを警告の 1 行で出して続ける(D13)
 - [x] AC13 テストは本物の herdr と osascript を打たず、repo の台帳に書かない。実機の確認は、人の herdr server に触れない隔離した herdr server で行う(evidence に残す)
 
 ## Implementation outline
@@ -194,6 +194,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - cycle 2: S6 3243c499(`--config` を渡した start の雛形に `{{ORG_FLAGS}}` と `{{CONFIG}}`(a539a765 で `{{CONFIG_LINE}}` に改名)で設定の絶対パスを入れた、`/director` skill の 1 文)と 4ef33195(/test のテストの穴 4 つのテスト、tech-debt の行を A12〜A14 の注だけに縮めた)。AC11 は文を変えたあと、3243c499 のテスト(`TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig` ほか)で満たしたことを確かめた。self-review(cycle 2)391b8b80 は LOW 5 件、Merge: yes
   - S7 a539a765(cycle 2 の self-review の C2-L1〜C2-L4: 雛形の stop の行は `--state-dir` だけ、`{{CONFIG_LINE}}` への改名、skill の「始める」の手順、テストのコメントの報告の番号を言葉に)。C2-L5 は 12c7428d。verify(cycle 2)d3bf2066 は pass(直す前の binary と並べて、cross-review の指摘が再現し HEAD で直ったことを確かめた)
   - test(cycle 2)6556bce5 は pass、sync-docs 147f2317。cross-review(cycle 2)d2971e1a は ACTION_REQUIRED 2 件: codex の director は workspace-write で `.git` に書けず `ralph org start --plan` が通らない、`--config` の相対の `agmsg_home` が director と見張りで別の場所を指す。consult(consult-plan-xreviewc2)の判定で D12・D13・AC15・S8 を足し、承認し直した(digest 43b4eae64cf2、図は permission と agmsg を描いていない)。上限を 3 に上げて後工程を回し直す(cycle-count.json は 2 のまま、cycle 3 の報告は `--cycle 3`)
+  - S8 caf1d025(D12: codex の director の autonomous と edits を断る `ErrDirectorCodexWorkspaceWrite`、`codexWritableRootArgs` を leader だけに戻す。D13: `--config` の相対の `agmsg_home` を断る `checkStartAgmsgHome` と共通の判定 `agmsgHomeIsRelative`、env の警告。help、template、skill の 4 面、README、仕様、recipe の 2 つ、tech-debt)。implementer の報告の範囲外の 2 点は /sync-docs に渡す: `ralph doctor` の codex の writable root の検査(`codexSeatModesPossible`)は role director も数えるので、start が断る mode で warn しうる。`/org` skill の director の行と permission の項が D12・D13 に触れない
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
