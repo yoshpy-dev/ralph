@@ -135,7 +135,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く。`--config` を渡した start の雛形は、`ralph org` のコマンドに `--config <絶対パス>` を付け、渡さない start の雛形は付けない
 - [x] AC12 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、AGENTS.md、`templates/base/ralph.toml` のコメント、tech-debt が 8a-2 の動きを説明し、「start はまだない」「headless の director はまだない」と書いた箇所が残っていない
 - [x] AC15 `--config` を渡した start は、その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ断り(終了コード 1)、herdr を打たず、何も書かず、絶対パスにするよう案内する。絶対パス、`~/` で始まる値、空の値なら通る。`RALPH_ORG_AGMSG_HOME` が設定されていれば、director の pane に届かないことを警告の 1 行で出して続ける(D13)
-- [ ] AC16 `/director` skill の 4 面の frontmatter が YAML として読める(description に、引用符のない「コロンと空白」がない)。tracked のすべての `SKILL.md` の frontmatter で、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があればテストが落ちる(D15)
+- [x] AC16 `/director` skill の 4 面の frontmatter が YAML として読める(description に、引用符のない「コロンと空白」がない)。tracked のすべての `SKILL.md` の frontmatter で、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があればテストが落ちる(D15)
 - [x] AC13 テストは本物の herdr と osascript を打たず、repo の台帳に書かない。実機の確認は、人の herdr server に触れない隔離した herdr server で行う(evidence に残す)
 
 ## Implementation outline
@@ -207,6 +207,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - self-review(cycle 3)e62df32e は LOW 4 件、Merge: yes。C3-L4(doctor)はコードの直しなので /sync-docs ではなく S9 で直す。Affected areas に S8 と S9 のファイルを、Implementation outline に S9 を足し、承認し直した(digest 96796452ceae、図はこれらのファイルを描いていない)
   - S9 83287d39(C3-L1 tech-debt の 2 行を plan の ID と d2971e1a の triage で指す、C3-L2 D13 の文を「どこで打っても断る」に直し、3 つの場所で断るテスト、C3-L3 help の段落の移動と recipe の文の移動、C3-L4 `CodexModeRunsUnderWorkspaceWrite` と doctor が director の edits・autonomous を数えないこと)。implementer の報告の範囲外の 3 点は /sync-docs に渡す: 仕様 85 行に C3-L2 と同じ言い切りが残る、`/org` skill の doctor の対象の説明が director を数えない変更を反映しない、doctor の pass の文が `director = "edits"` の設定では文字どおりに正しくない
   - verify(cycle 3)3504ee30 は pass、test(cycle 3)b0adfc63 は pass、sync-docs(cycle 3)49cee058。cross-review(cycle 3)6eef89e8 は ACTION_REQUIRED 2 件: `/director` skill の description が YAML として読めない、stop が start と重なると動いている director を stopped と記録しうる。consult(consult-plan-xreviewc3)の判定で D14・D15・AC16・S10 を足し、AC9 に 1 文足して承認し直した(digest ace92dd0aaa7、図は stop の断りと skill の frontmatter を描いていない)。上限を 4 に上げて後工程を回し直す(cycle-count.json は 2 のまま、cycle 4 の報告は `--cycle 4`)
+  - S10 b888d637(D14: stop 用の `MarkStoppedIfUnchanged` が、ロックの下で workspace と pane の id を最初の読みと比べ、違えば `ErrDirectorChangedDuringStop` で何も書かずに断る。start の後始末の `MarkStopped` と `MarkForceStopped` は比べない。D15: `/director` skill の description の言い換えと、`internal/config/skill_frontmatter_test.go`)。implementer の報告の範囲外の 1 点は /sync-docs に渡す: `/director` skill の「終える」5 番、README 258 行、仕様 85 行が、stop のこの断りを書いていない
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
