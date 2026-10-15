@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:59be16e75c68
+- Approved: 2026-10-15 sha256:5ca6e9a01b63
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -43,10 +43,11 @@
   - permission(D6): `[org.permissions.roles].director`、なければ `[org.permissions].default` を `permissionArgsForDriver` で driver の引数に直す。codex は `codex_verified` の規則のまま。座席の担当範囲の検査(`autonomousScopeGateErr`)は当てない
   - cwd: 台帳の main worktree のルート(`LedgerMainWorktreeRoot`)。台帳が main worktree のものでないときは start を打った場所で、codex には `--add-dir <台帳>` を足す
   - `enabled`、`[org.permissions]`、`[org.roles]`、`model_pool` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む(8a-1 の D6 と同じ規則)
-- `ralph org director stop --id <id>`(org の層 `StopDirector`、D4)
+- `ralph org director stop --id <id> [--force]`(org の層 `StopDirector`、`internal/org/director_stop.go`、D4、D11)
   - 対象は閉じていない headless の登録(`starting` でも `running` でも、今の登録でも detach で外れたものでも)。`--id` がない、その `id` の閉じていない headless の登録がない、すでに `stopped` があるときは断る(終了コード 1、何も書かない)。昇格したセッションの登録(`launch` がない)なら `detach --id` を案内する
-  - director の pane の中から打たれたら断る(`HERDR_PANE_ID` が登録の pane と同じ。閉じると打ったセッションが終わり、記録が書けないため)
+  - director の pane か workspace の中から打たれたら断る(`HERDR_PANE_ID` が登録の pane と同じとき。または label を確かめた workspace が `HERDR_WORKSPACE_ID` と同じとき。閉じると打ったセッションが終わり、記録が書けないため)
   - 手順: 記録した pane があれば、tab の label が `director_<token>` で workspace の label が `ralph_director_<token>` であることを確かめ(`confirmSeatPane` と同じ形)、C-c を送って閉じる → 記録した workspace があれば label を確かめて閉じる → `director.lock` の下で `stopped`(今の登録なら `detached` も)を書く。herdr が pane か workspace を知らなければ閉じ済みとして進む。label が違うときは C-c も close も打たない。確かめられない、閉じられないときは何も書かずに終了コード 1 で、理由と、人が閉じるための herdr の打ち方を出す
+  - `--force`: label が違う、確かめられない、閉じられないときも、C-c も close も(まだ打っていない分は)打たずに `force` 付きの `stopped`(今の登録なら `detached` も)を書き、閉じていないことと、label `ralph_director_<token>` の workspace を herdr で探して閉じる打ち方を出す。label が合えば `--force` があっても通常どおり閉じる。herdr が状態を失って id を振り直したあと、記録を片付ける手段にする(D11)
 - 役割の雛形(`internal/org/prompts/director.md`、`internal/org/prompts.go`、D7)
   - 座席の `RolePromptVars` とは別の `DirectorPromptVars`(登録の `id`、driver、台帳を指す `--state-dir` の値、cwd)で描く `RenderDirectorPrompt`
   - 中身
@@ -76,7 +77,7 @@
 
 ## Assumptions
 
-- herdr 0.7.5 の workspace と tab の label は自由な文字列で(`herdr workspace create --label <TEXT>`)、agent 名は herdr の server 全体で一意で `^[a-z][a-z0-9_-]{0,31}$`(`internal/org/spawn.go` の `herdrAgentName` と `maxHerdrAgentNameLen` の doc)。`director_<12 桁の hex>` は 21 字で収まる。org_id は `^[a-z][a-z0-9-]{0,29}$`(`internal/org/identifier.go`)で `_` を含まないので、`ralph_director_<token>` と `director_<token>` は org の workspace と座席の名前と重ならない
+- herdr 0.7.5 の workspace と tab の label は自由な文字列で(`herdr workspace create --label <TEXT>`)、agent 名は herdr の server 全体で一意で `^[a-z][a-z0-9_-]{0,31}$`(`internal/org/spawn.go` の `herdrAgentName` と `maxHerdrAgentNameLen` の doc)。`director_<12 桁の hex>` は 21 字で収まる。org_id は `^[a-z][a-z0-9-]{0,29}$`(`internal/org/identifier.go`)で `_` を含まないので、label の `ralph_director_<token>` と `director_<token>` は org の workspace と座席の label と重ならない。agent 名の `director_<token>` は、org_id が `director` で seat_id が token と同じ文字列の座席の agent 名とだけ重なりうる(そのときは agent start が失敗して start の後始末になり、label が違うのでほかの pane は閉じない。tech-debt に 1 行)
 - `confirmSeatPane(orgID, seatID, paneID)` と `confirmOrgWorkspace(orgID, workspaceID)`(`internal/org/verbs.go`)は manifest を読まず label の文字列だけを比べるので、token の名前で使える
 - `permissionArgsForDriver`、`writePromptFile`、`PromptFilePointer`、`agentStartWithRetry` は manifest に書かない(Explore の地図)
 - `[org.permissions.roles]` と `[org.roles]` は役割の名前を検証しないので、`director` の鍵は今の設定の検証のまま読める
@@ -85,12 +86,12 @@
 ## Affected areas
 
 - 変えるファイル: `internal/org/director.go`、`internal/org/director_test.go`、`internal/org/prompts.go`、`internal/org/prompts_test.go`、`internal/org/spawn.go`(role director の拒否)、`internal/org/verbs_all.go`(stop --all の案内の 1 行)、`internal/cli/org_director.go`、`internal/cli/org_director_test.go`、`internal/cli/org.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/status.go`、`internal/cli/status_test.go`、`internal/cli/org_stop_all_test.go`、`templates/base/ralph.toml`、`/director` skill の 4 面、README、仕様、AGENTS.md、`docs/tech-debt/README.md`
-- 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go` とそのテスト)
+- 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go`、`internal/org/director_stop.go` とそれぞれのテスト。S1b のあとで director_start.go が 949 行になり、800 行の目安を超えたので stop を分けた)
 
 ## Visual review
 
 - 図解ページ: `.harness/state/plan-visual/org-director-start.html`(図 1 全体図、図 2 start の順と後始末、図 3 登録の移り方)
-- 自己点検: 全体と全体図(`--fragment overview`)、図 2・図 3 を `./scripts/plan-visual.sh shot` で撮って読んだ。1 回目は全体図の縦の矢印が台帳の見出しを、破線が herdr の見出しを横切り、図 2 の失敗の枠の見出しと注が lifeline に重なっていた。直して撮り直した。Codex の計画助言を受けて、図 1 の名前を token 付きに、図 2 を「先に登録」の順(① から ⑥ と、失敗か割り込みの後始末)に、図 3 を `starting`・`running`・headless の detached・`stopped` に描き直した。2 回目の自己点検で、図 2 の矢印のラベルの下地が線を半分隠していたので、下地を外してラベルを線から離した。撮り直した 3 つの図と全体に重なりはない
+- 自己点検: 全体と全体図(`--fragment overview`)、図 2・図 3 を `./scripts/plan-visual.sh shot` で撮って読んだ。1 回目は全体図の縦の矢印が台帳の見出しを、破線が herdr の見出しを横切り、図 2 の失敗の枠の見出しと注が lifeline に重なっていた。直して撮り直した。Codex の計画助言を受けて、図 1 の名前を token 付きに、図 2 を「先に登録」の順(① から ⑥ と、失敗か割り込みの後始末)に、図 3 を `starting`・`running`・headless の detached・`stopped` に描き直した。2 回目の自己点検で、図 2 の矢印のラベルの下地が線を半分隠していたので、下地を外してラベルを線から離した。撮り直した 3 つの図と全体に重なりはない。S1b のあとの D11 で、図 1 の StopDirector を `internal/org/director_stop.go` に、stop の CLI に `[--force]` を足し、図 3 の注と冒頭の「変わるもの」に `--force` を書いた。3 回目の自己点検で stop の CLI の下の文字が箱からはみ出していたので短くし、撮り直した全体図と全体に重なりはない
 
 ## Design decisions
 
@@ -104,8 +105,9 @@
 - D8 director は model receipts に書かない。receipts は org と座席の鍵で、director には org がない。model と permission mode は登録に書く
 - D9 名前に起動ごとの token を入れる: start ごとに crypto/rand の 12 桁の hex を作り、agent 名は `director_<token>`、workspace の label は `ralph_director_<token>`、tab の label は `director_<token>`。止めるときも後始末のときも、tab と workspace の label がその token の名前であることを確かめてからだけ閉じる。Codex の計画助言 2(HIGH)と consult の判定。herdr の agent 名は server 全体で一意なので、台帳ごとの `d<N>` を名前にすると 2 つの repo の最初の director が同じ名前になる。herdr が状態を失って id を振り直すと、repo A の古い登録の pane id が repo B の pane を指しうるが、token が違うので label の検査で閉じない。最初の案(workspace の label `ralph_director`、tab の label `d<N>`)は退けた
 - D10 `stop --all` は headless の director を止めず、閉じていない headless の登録があれば止め方を 1 行出す。consult の判定(「ralph の仕組みだけで止められる」の案内)
+- D11 `director stop --force` は、label が違う・確かめられない・閉じられない登録でも、閉じずに `force` 付きの `stopped` を書く。workspace の中からの stop は、label を確かめた workspace が `HERDR_WORKSPACE_ID` と同じときに断る。S1b の実装で見つかった 2 つの穴への consult(consult-plan-dirstop)の判定。force がないと、herdr が id を振り直したあとの登録は stop が毎回断り、閉じていない headless の登録として status と `stop --all` の案内に残り続ける(手で `director.jsonl` を直すしかない)。座席の `ralph org stop --force` も、確かめられない pane には close を打たずに `stopped` を記録する(`internal/org/verbs.go` の `stopSeatPane` と `notClosedNote`)ので、同じ意味にした。close は打たないので、ほかの起動の pane を閉じないこと(AC5)は保たれる。workspace の検査を env の一致だけにしないのは、id の振り直しのあとに無関係な workspace にいる人を誤って断らないため。退けた案: workspace を閉じる前に `stopped` を書く(閉じ損ねたときの記録が事実と違う)
 
-Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D3 と D9 は Codex の計画助言の 2 件の HIGH を受けた consult の判定で決めた(ユーザーの指示「計画の分かれ目も自分で選ぶ」「Codex の修正の提案は必ず直す」)。D6 は仕様どおり。
+Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D3 と D9 は Codex の計画助言の 2 件の HIGH を受けた consult の判定で、D11 は S1b のあとの consult(consult-plan-dirstop)の判定で決めた(ユーザーの指示「計画の分かれ目も自分で選ぶ」「Codex の修正の提案は必ず直す」)。D6 は仕様どおり。
 
 ## Acceptance criteria
 
@@ -117,7 +119,8 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [ ] AC6 permission は `[org.permissions.roles].director` を読み、なければ `[org.permissions].default` を読む。claude で autonomous なら `--permission-mode bypassPermissions`、edits なら `acceptEdits`、guarded なら引数なし。codex は `codex_verified = false` なら guarded のほかを断る(spawn と同じ)。これらの設定と `enabled` と `[org.roles]` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む
 - [ ] AC7 見張りが動いていなければ start は見張りを起動してから director を立てる。止まりかけ・印が古い・`--once` の見張りでは断り、herdr を打たず、何も書かない
 - [ ] AC8 `ralph org director stop --id <id>` は、記録した pane の tab の label が `director_<token>` で workspace の label が `ralph_director_<token>` のとき、C-c を送り、pane と workspace を閉じ、`stopped` を書く。登録が今の登録なら `detached` も同じ write で書き、`ralph org director status` は not attached になる。detach で外れたあとの headless の登録にも効き、`stopped` だけを書く。`starting` のまま残った登録(pane も workspace も記録がない、または workspace だけ記録がある)にも効き、記録のある分だけ閉じる。herdr が pane か workspace を知らなければ閉じ済みとして進む
-- [ ] AC9 stop は、`--id` がない、その `id` の閉じていない headless の登録がない、`stopped` がすでにある、pane の中(`HERDR_PANE_ID` が登録の pane)から打たれた、label が違う、閉じられないときに断り(終了コード 1)、何も書かない。label が違うときは C-c も close も打たない。昇格したセッションの登録なら `detach --id` を案内する
+- [ ] AC9 stop は、`--id` がない、その `id` の閉じていない headless の登録がない、`stopped` がすでにある、pane の中(`HERDR_PANE_ID` が登録の pane)か workspace の中(label を確かめた workspace が `HERDR_WORKSPACE_ID`)から打たれたときに断り(終了コード 1)、何も書かない。`--force` がなければ、label が違う、閉じられないときも同じく断る。label が違うときは C-c も close も打たない。昇格したセッションの登録なら `detach --id` を案内する
+- [ ] AC14 `director stop --id <id> --force` は、label が違う(AC5 の台帳 A)、確かめられない、閉じられないとき、まだ打っていない C-c と close を打たずに `force` 付きの `stopped`(今の登録なら `detached` も)を書き、閉じていないことと label `ralph_director_<token>` の探し方を出す。label が合えば `--force` があっても閉じる。pane か workspace の中からの拒否は `--force` でも変わらない
 - [ ] AC10 `ralph org director status` と `ralph status` の `director:` の行は、headless の登録なら `starting` か `running`、pane・workspace・model を出し、`--json` にも出す。`ralph org stop --all` は、閉じていない headless の登録があれば止め方を 1 行出し、終了コードは変えない
 - [ ] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く
 - [ ] AC12 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、AGENTS.md、`templates/base/ralph.toml` のコメント、tech-debt が 8a-2 の動きを説明し、「start はまだない」「headless の director はまだない」と書いた箇所が残っていない
@@ -126,8 +129,9 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 ## Implementation outline
 
 1. S1 org の層: 登録の拡張(新しい field とイベント、閉じていない headless の登録の畳み込み、`starting` と `running`)、`StartDirector`(偽の herdr で、先に登録、id の書き足し、後始末)、`StopDirector`(token の名前の検査)、`prompts/director.md` と `RenderDirectorPrompt`、spawn の role director の拒否、`stop --all` の案内
-2. S2 CLI: `ralph org director start` と `stop`(設定を main worktree の規則で読む、見張りの確かめ、古い台帳)、`director status` と `ralph status` の表示、help
-3. S3 `/director` skill の 4 面と文書(README、仕様、AGENTS.md、template のコメント、tech-debt)
+2. S1c org の層の続き: stop を `internal/org/director_stop.go` に移すだけのコミット(`refactor:`)と、`--force` と workspace の中からの拒否のコミット(`feat:`)に分ける(D11)
+3. S2 CLI: `ralph org director start` と `stop`(`--force` を含む)(設定を main worktree の規則で読む、見張りの確かめ、古い台帳)、`director status` と `ralph status` の表示、help
+4. S3 `/director` skill の 4 面と文書(README、仕様、AGENTS.md、template のコメント、tech-debt)
 
 ## Verify plan
 
@@ -141,7 +145,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - Unit tests
   - director store: 新しい field とイベントの読み書き、`stopped` の書き方(今の登録なら `detached` も 1 回の write で)、閉じていない headless の登録の畳み込み(今の登録、detach で外れたもの、`stopped` 済み、`starting` と `running`)、id の書き足しのイベントがほかの `id` を指すとき、古い行(新しい field なし)の読み、壊れた行
   - StartDirector(偽の herdr): イベントの順(attached → workspace_created → pane_created → launched)、引数の順と中身、label と agent 名の token、雛形のファイル、各段の失敗の後始末(閉じる、閉じられないときの打ち方と `detached` だけ)、`launched` の前の `--replace`(AC4)、プロセスが落ちたあとの `starting` の登録、manifest に書かないこと
-  - StopDirector(偽の herdr): 成功、閉じ済み(not found)、label の違い、close の失敗、pane の中から、`stopped` 済み、pane のない登録、detach 後の登録、`starting` の登録(記録なし・workspace だけ)、2 つの台帳と id の振り直し(AC5)
+  - StopDirector(偽の herdr): 成功、閉じ済み(not found)、label の違い、close の失敗、pane の中から、`stopped` 済み、pane のない登録、detach 後の登録、`starting` の登録(記録なし・workspace だけ)、2 つの台帳と id の振り直し(AC5)、`--force`(label の違い・確かめられない・close の失敗で記録だけ、label が合えば閉じる、AC14)、workspace の中からの拒否(label を確かめた workspace が `HERDR_WORKSPACE_ID` のときだけ)
   - token: 12 桁の hex、agent 名の規則に収まる、2 回の start で違う
   - 雛形: `RenderDirectorPrompt` が `{{` を残さない、必要な文を含む(最初の手順の文の固定)。spawn の role director の拒否
   - permission: role director の解決(roles、default、codex の verified)
@@ -174,7 +178,8 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] Plan reviewed
 - [x] Plan approved
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1a b9861932(登録の拡張、雛形 `prompts/director.md` は他の役割と同じく日本語、spawn の role director の拒否)。S1b 8528515f(StartDirector と StopDirector、`codexWritableRootArgs` の director、StopAll の閉じていない headless の登録)。S1b の報告の 2 つの穴を consult(consult-plan-dirstop)に聞き、D11 と AC14 を足して計画を承認し直した(2026-10-15)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
