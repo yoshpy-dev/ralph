@@ -2,7 +2,8 @@
 
 - Date: 2026-10-15
 - Plan: docs/plans/active/2026-10-15-plan-visual-easy.md(承認済み、digest 819a5be1cf1f)
-- Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1)
+- Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1)と 2 回目(cycle 2)
+- Latest cycle: 2/2(末尾の「Cycle 2」節)。cycle 2 の重大度は CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。Merge: yes。cycle 1 の節(以下「Cycle 2」より前)は cycle 1 の時点の記録で、数と Merge の行はそのまま残している
 - Scope: diff の品質だけ。`git diff origin/main...HEAD`(HEAD 69a9dc1b、6 コミット、32 ファイル、+2665/-604)。S1 `821a3c69`、S2 `5b056944`、S3 `138481e0`。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs が受け持つので行っていない
 
 ## Evidence reviewed
@@ -59,3 +60,98 @@ _(登録簿には追記していない。L3 は M1 の直しと同じ箇所で 1
   2. L1: `aria-label` を L3 の対象に入れるか、`diagrams.md` と usage の L3 の文言を「文字」に限る。/verify の仕様の照合と合わせて決める
   3. L2: `leader.md` と `diagrams.md` の、古い helper の逃げ道を 1 つにそろえる
   4. L4・L5 は小さな差分(CSS の 1 行、コメント 2 行、`diagrams.md` の語彙 1 行、placeholder の改名)で直せる。cycle 1 の fix に入れるとよい。直さずに最後の cycle に届いたものは、1 つの行にまとめて登録簿へ
+
+## Cycle 2
+
+- Date: 2026-10-15
+- Reviewed HEAD: `52c9db31`(cross-review の修正)
+- Scope: `git diff fb7648b0..HEAD`(10 ファイル、+240/-47)。cross-review の指摘 2 件の修正 `52c9db31`(`lint_page` の awk、テスト 37 件、`diagrams.md` の L3・L6 の 2 行、`templates/base` の写し)と、記録(triage、計画の Test plan と digest、insight event)。範囲は cycle 1 と同じ diff の品質だけで、テストの実行、静的解析、仕様適合、文書のずれの検査はしていない
+- Cycle: 2/2(上限の cycle)
+- 指摘の ID: 以下の `C2-n` は、この節の中だけで使う。cycle 1 の `M1`・`L1`〜`L5` とは別の番号
+
+### Cycle 1 の指摘の扱い
+
+| ID | HEAD での状態 | 確認したこと |
+| --- | --- | --- |
+| M1 | 直した(`0067b837`) | `.claude/skills/pr/SKILL.md:37-40` は、見分け方の 1 行と 3 つの子の箇条書き(今の形、前の形、どちらも)で、「Otherwise」がない。4 面で同じ |
+| L1 | 直した(文書だけ、`0067b837`) | `diagrams.md` と usage が、L3 は属性を読まないと書く。verify が計画の L3 と照らして同意している |
+| L2 | 残した(verify が同意) | `leader.md:102-106` と `diagrams.md:195-200` は今も別の逃げ道を書く。verify の説明(leader が読む `diagrams.md` と helper は同じ worktree の同じコミットから来るので、2 つの指示が同時に届く組み合わせはない)を、`leader.md:95-98` の読む場所の指定と照らして受け入れる。登録簿の行は要らない |
+| L3 | 直した(`0067b837`) | `/pr` 4.a の今の形の末尾に、直したあとは `/plan` step 10.c と同じに lint を打ち、lint がどちらの helper にもなければ飛ばして節に書く、とある |
+| L4 | 直した(`0067b837`) | 雛形に `.t-head` と `__NON_GOAL` がない |
+| L5 | 直した(`0067b837`) | `scripts/plan-visual.sh:476` と `:499` にコメントがある |
+
+### Evidence reviewed
+
+- 読んだ差分: `scripts/plan-visual.sh` の cycle 2 の hunk すべて(`BEGIN` の `INLINE`、`parse_attrs` の `HAS_XY`、`tag_splits`、`close_figures`、`start_tag` の入れ子の分岐、`end_tag`)と、その周りの `lint_page` の全行、`tests/test-plan-visual.sh` の新しい 7 ケース、`diagrams.md` の L3・L6、plan-visual.sh のヘッダ、計画の差分、triage、insight event
+- `cmp`: `diagrams.md` の 4 面と、`scripts/plan-visual.sh` と `templates/base/scripts/plan-visual.sh` は byte 同一。`git diff fb7648b0..HEAD --check` は何も出さない
+- この修正の 3 つの awk での確認(手で作った 12 ページに `lint` を掛けただけで、テストスイートは動かしていない): macOS の awk 20200816、ubuntu:24.04 の mawk と gawk 5.2.1(docker、apt 版)。3 つとも出力が同じ。結果は次の表
+- `digest` を打つと `3b11a1def777` で、計画の `- Approved:` と一致する。この計画のページ(`.harness/state/plan-visual/plan-visual-easy.html`)と雛形は `lint` が rc 0
+- テストの数: コミットの「37 件」は、新しい 7 ケースの assertion を数えて 37(8、12、2、5、3、4、3)で合う
+
+| probe(easy 図の中の text) | 結果 |
+| --- | --- |
+| `<text>run</text><text>/director</text>`(`x` `y` つき) | 出力なし、rc 0 |
+| `internal/<tspan>org</tspan>` | `path-like text: internal/org` |
+| `internal/<tspan x="5" y="6">org</tspan>` | 出力なし(行を分ける) |
+| `internal/<tspan dx="5">org</tspan>` | `internal/org` を咎める(`dx` は分けない) |
+| `<tspan data-x="1">`、`<tspan title="a x=3">` | `internal/org` を咎める(`x` を属性名として読む) |
+| `<tspan x>`(値なし) | 出力なし(分ける) |
+| `internal/` の後ろの改行と空白のあとに `<tspan>org` | 出力なし(ソースの空白は語を切る) |
+| `in<tspan/>ternal/org` | 咎める(自己終了も分けない) |
+| 図の中で `<figure id="inner">` が始まる | L6 `figure starts inside figure easy-2` と、`inner` が折りたたみの外の L6 の 2 行 |
+| `internal/<mark>org</mark>`、`<u>`、`<abbr>`、`<kbd>`、`<q>` | 出力なし(下の「観察」) |
+| 閉じ忘れの easy 図のあとに section と折りたたみ | L3 の 5 行のあとに L6 の 1 行(下の「観察」) |
+| `</figure>` が 1 つ余る | 出力なし(これまでと同じ) |
+
+### Findings
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-1 | LOW | maintainability(テストが分岐を固定しない) | 入れ子の分岐の `close_figures()` は、開いている図を閉じる前に `check_easy` で、その図の文字と箱を検査する。今のテストは、図が閉じて次の図に文字と箱が流れ込まないことは固定するが、閉じる図の検査が走ることは固定しない。入れ子の開始を試す 4 ケースは、閉じられる図が欠陥のない図(`l6-nested`・`l6-nested-noid`・雛形は non-easy の詳細図、`l6-nested-easy` は欠陥のない overview)ばかりで、出力は L6 の 1 行だけを期待する。そのため行 434 を `NOPEN = 0; NPEND = 0`(閉じるが検査しない)に替えても、4 ケースの期待は変わらないはず(読んだうえの判断で、複製にスイートは掛けていない) | `scripts/plan-visual.sh:434`。probe: overview に `internal/org` を書いて `</figure>` を抜き、次に easy-2 を置いたページは、HEAD で `overview: L3: path-like text: internal/org` と L6 の 2 行、行 434 を替えた複製では L6 の 1 行だけで rc 1(複製に `lint` を掛けただけで、スイートは動かしていない)。`</figure>` の側は同じ `close_figures()` を呼ぶので、検査は既存のテストが固定している。固定されていないのは入れ子の呼び出しの 1 か所だけ | fixture を 1 つ足す: `internal/org` を持つ easy 図に `</figure>` がなく、次に別の図が始まるページで、その図の L3 の行と L6 の行の 2 行が出ること |
+| C2-2 | LOW | readability | `diagrams.md` の L3 の箇条書きで、新しい 2 文(「inline tags … do not split a word」と「to break a line, use …」)が、「not other attribute values such as `aria-label`.」とそれに続く「Write the `aria-label` in the same plain words as the figure」の間に入った。`aria-label` を読まないという文と、`aria-label` を図と同じ言葉で書くという助言は、cycle 1 の L1 の直しで 1 組にしたものだった。今は助言が「…, or `<br>`.」の直後に来て、改行の話の続きに読める。同じ箇条書きの「(the words between tags)」も、タグ(インライン)をまたぐ語を 1 語と数えるようになったので、そのままでは正確でない | `.claude/skills/plan/diagrams.md:226-235`(4 面で同じ) | 「Write the `aria-label` …」を「not other attribute values such as `aria-label`.」の直後に戻し、インラインのタグの 2 文を最後に置く。「(the words between tags)」は「(the words between tags that start a new line)」のように、次の文と合う形にしてもよい。skill の文面なので 4 面を同じに直す |
+
+この cycle は上限(2/2)なので、どちらも直さない場合は登録簿に残る場所がほかにない。C2-1 と C2-2 は、すでにある plan-visual-easy の行(`docs/tech-debt/README.md:252`、Test gaps)に (e) として足すのが 1 番簡単で、Trigger は「次に `lint_page` の入れ子の分岐か `diagrams.md` の L3 の文を変えるとき」がよい。直す場合、C2-2 は skill の文面なので記録だけの修正の例外には入らず、上限を上げて全体を回し直すことになる。どちらを選ぶかは lead が決める。
+
+### Positive notes
+
+- `tag_splits` の戻り値は、開始タグ(`parse_attrs` のあと)と終了タグで同じ関数を通る。`start &&` が終了タグで古い `HAS_XY` を読まないようにしていて、`<tspan x y>lib</tspan>/util` のテストがそれを固定している(この条件を外すと落ちる)
+- `parse_attrs` の `HAS_XY = 0` の初期化は、`l3-inline` の 1 行目(`<text x y>` の直後の `<tspan>`)が固定している。初期化を外すと `text` の `x` が次の `tspan` に残り、`internal/org` を見逃す
+- `class="x"`(属性名ではなく値)、`dx`・`dy`、シングルクォートの `y='140'` を別々の行で固定している。属性名の比較が `==` であることの確認として足りている
+- 10 個のインラインのタグそれぞれが、開始と終了の両方で語をつなぐことを `in<t>/t</t>/end` の 1 本で固定する。1 つでも `INLINE` から外すと、その名前の行と件数の assertion の両方が落ちる
+- 入れ子の分岐の 4 ケースは、ラベルが新しい図のものであること、id のない図が `figure#5` と順番で呼ばれること、easy 図の箱が 2 つの図にまたがらないこと(overview の 5 個と easy-2 の 2 個で `7 boxes` にならない)、雛形から `detail-overview` の `</figure>` を抜いた現実の形、を 1 つずつ見る
+- awk は POSIX の範囲(`split`、`in`、`substr`、`index`、`match` と局所変数)で、3 つの awk で同じ結果になった。`start` は awk の予約語ではない
+- コメントは、`tag_space`、`tag_splits`、`close_figures`、入れ子の分岐の理由、`parse_attrs` の `HAS_XY` のどれも、コードと合っている。`end_tag` の「figures do not nest: see start_tag」は、入れ子の分岐への参照になっている
+- コミットメッセージの記述(F1・F2・テストの件数・docs の面)は、差分と合っている
+
+### 観察(指摘にしない)
+
+- `INLINE` は 10 個の閉じた一覧で、`diagrams.md` と同じ。HTML の phrasing 要素のうち `mark`・`u`・`abbr`・`kbd`・`q` などは入っておらず、`internal/<mark>org</mark>` は通る(上の probe)。cross-review の指摘は `tspan` の場合で、`/plan` のページは SVG の `<text>` を使うので、書き手がこれらを語の途中に置く見込みは小さい。足すなら `BEGIN` の 1 語と `diagrams.md` の 4 面
+- `OPEN` と `PEND` は、入れ子の分岐のあと、1 つしか持てない。`for (k = 1; k <= NOPEN; k++)` の繰り返しと「every figure still open」というコメントは、スタックだった頃の形が残っている。1 つの変数にまとめれば読みやすいが、直すと上限を超えてパイプラインを回し直すので、今は直さなくてよい
+- 最後の easy 図の `</figure>` を抜くと、その後ろの `<section class="before">` や折りたたみの chrome の `<code>` とパスが、その図の文字として L3 に出る(probe の 5 行)。ブラウザでも同じ入れ子になるので咎めは正しい。規則の順に出すので、原因の L6 の行は 6 番目に来る。以前は L6 の行が 1 行も出なかったので、修正で改善している。行の文言の「(missing </figure>?)」が手がかりになる
+- 入れ子の図が、折りたたみの外にある easy でない図のときは、L6 が同じ図について 2 行出る(「starts inside」と「outside the fold」)。どちらも事実で、重複を嫌うほどの量ではない
+- コメントの中の語の切れ目(`internal/<!-- c -->org`)と大文字のタグ(`<TSPAN>`)は、どちらも語の切れ目として扱われる(コメントは空白、`TSPAN` は `INLINE` の名前に合わない)。見逃す方向で、計画が「大文字のタグは読まない」と決めた範囲
+
+### Coverage gaps
+
+- テストスイートは動かしていない(/test の担当)。新しい assertion が通ることは確かめていない。上の probe は、`lint` を手で作った 12 ページに掛けたもの
+- mawk のバージョン番号は確かめていない(ubuntu:24.04 の apt 版)。cycle 1 の S1 の記録は mawk 1.3.4
+- C2-1 の複製は 1 行だけ替えたもので、テストスイートに掛けて落ちないことまでは確かめていない。読んだ範囲では、閉じられる図に欠陥がある入れ子のテストはない
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C2-1: 入れ子の開始で閉じる図の検査が固定されていない | 入れ子の分岐の呼び出しから検査が落ちても、テストが通る | 最後の cycle で、lead が直すか残すかを決める | 次に `lint_page` の入れ子の分岐を変えるとき | `scripts/plan-visual.sh:434`、`tests/test-plan-visual.sh`(`l6-nested` 系) |
+| C2-2: `diagrams.md` の L3 の文の並び | 助言の文が前の文から離れて読みにくい(動作は変わらない) | skill の文面で、直すと 4 面と全体の回し直しになる | 次に `diagrams.md` の L3 を変えるとき | `.claude/skills/plan/diagrams.md:226-235` |
+
+_(登録簿には追記していない。直さないと決めたときは、上の 2 行を `docs/tech-debt/README.md:252` の (e) としてまとめる。)_
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM はなし。LOW 2 件)
+- Follow-ups:
+  1. C2-1: 閉じられる図に `internal/org` がある入れ子のページで、L3 と L6 の 2 行が出ることを固定する fixture を 1 つ足す。直すなら `lint_page` は変わらず、テストだけの差分
+  2. C2-2: 「Write the `aria-label` …」を元の位置に戻す、4 面の同じ編集
+  3. どちらも直さない場合は、`docs/tech-debt/README.md:252` に (e) として 1 行足す。足さないままこの cycle で `/pr` に進むと、2 件とも記録が残らない
