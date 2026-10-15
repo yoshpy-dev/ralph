@@ -75,7 +75,7 @@ One to three per page, each answering one question the approver has.
 2. The actors are people and roles (あなた, leader, 見張り, ...); draw the
    human with the person icon. No file paths, function names, event names,
    config keys, or monospace text. A command the human types themselves may
-   appear (`/director`, `director start`).
+   appear (`/director`, `ralph org stop --all`).
 3. A term the reader cannot avoid gets a one-line meaning in
    `<p class="words">` under the figure, the first time it appears.
 4. At most 5 boxes (`n-*` classes): `n-new` is what is added for the reader,
