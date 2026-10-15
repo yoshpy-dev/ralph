@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
+	"slices"
+	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -75,8 +78,9 @@ type OrgConfig struct {
 	// watch`. See OrgWatchdogConfig's doc comment.
 	Watchdog OrgWatchdogConfig `toml:"watchdog"`
 	// Director holds the director switch (whether `ralph org escalate`
-	// leaves an inbox item to the director and the ack deadline) and the
-	// inbox deadlines that `ralph org watch --all` checks. See
+	// leaves an inbox item to the director and the ack deadline), the inbox
+	// deadlines that `ralph org watch --all` checks, and the command `ralph
+	// org director start` opens a terminal with instead of herdr. See
 	// OrgDirectorConfig's doc comment.
 	Director OrgDirectorConfig `toml:"director"`
 	// Approval holds how a feature org's plan is approved. See
@@ -148,8 +152,9 @@ type OrgWatchdogConfig struct {
 
 // OrgDirectorConfig holds the `[org.director]` settings of
 // docs/specs/2026-10-07-org-multi-org-director.md: the director switch
-// Enabled (FR-9) and the inbox deadlines that `ralph org watch --all` checks
-// (FR-6).
+// Enabled (FR-9), the inbox deadlines that `ralph org watch --all` checks
+// (FR-6), and LaunchCmd, the terminal of a headless director outside herdr
+// (FR-9's launch (B)).
 type OrgDirectorConfig struct {
 	// Enabled is the director switch. When true (the default), `ralph org
 	// escalate` records an item in the org inbox and leaves it to the
@@ -168,6 +173,130 @@ type OrgDirectorConfig struct {
 	// ResolveMinutes is the resolve deadline: an item that is not resolved
 	// this long after it was escalated is sent to the human once more.
 	ResolveMinutes int `toml:"resolve_minutes"`
+	// LaunchCmd is the command `ralph org director start` runs to open a
+	// terminal for the headless director instead of a herdr workspace (stage
+	// 8a-2b). Empty, the default, keeps herdr. It is an argv array: start
+	// runs LaunchCmd[0] with the other elements as its arguments, without a
+	// shell, after replacing these placeholders in every element
+	// (ExpandDirectorLaunchArg):
+	//
+	//   - {script} (DirectorLaunchPlaceholderScript): the absolute path of the
+	//     launch script start writes under the ledger, which checks in with
+	//     ralph and then execs the agent
+	//   - {script_sh} (DirectorLaunchPlaceholderScriptSh): the same path
+	//     single-quoted for a shell, for a terminal that reads its command as
+	//     a shell string (tmux's shell-command, Orca's --command)
+	//   - {name} (DirectorLaunchPlaceholderName): director_<token>, a name
+	//     for the terminal
+	//   - {cwd} (DirectorLaunchPlaceholderCwd): the directory the director
+	//     runs in, the ledger's main worktree root
+	//
+	// A placeholder is a "{" and the next "}" with no other brace between
+	// them. Load refuses a non-empty LaunchCmd whose first element is empty
+	// or whitespace only, that has such a pair outside the four above (a
+	// shell brace group such as "{ a; }" included), or that has neither
+	// {script} nor {script_sh} in any element, since the launch script would
+	// then never run (ValidateDirectorLaunchCmd). A "{" or "}" that is not
+	// part of such a pair is passed through as written. The command must
+	// return once the terminal is open.
+	LaunchCmd []string `toml:"launch_cmd"`
+}
+
+// The placeholders of [org.director].launch_cmd (OrgDirectorConfig.LaunchCmd),
+// with their braces.
+const (
+	// DirectorLaunchPlaceholderScript is replaced by the absolute path of
+	// the launch script `ralph org director start` writes.
+	DirectorLaunchPlaceholderScript = "{script}"
+	// DirectorLaunchPlaceholderScriptSh is replaced by the same path
+	// single-quoted for a shell.
+	DirectorLaunchPlaceholderScriptSh = "{script_sh}"
+	// DirectorLaunchPlaceholderName is replaced by director_<token>.
+	DirectorLaunchPlaceholderName = "{name}"
+	// DirectorLaunchPlaceholderCwd is replaced by the directory the director
+	// runs in, the ledger's main worktree root.
+	DirectorLaunchPlaceholderCwd = "{cwd}"
+)
+
+// DirectorLaunchPlaceholders returns the placeholders of
+// [org.director].launch_cmd in a fixed order: {script}, {script_sh}, {name},
+// {cwd}. Each call returns a new slice.
+func DirectorLaunchPlaceholders() []string {
+	return []string{
+		DirectorLaunchPlaceholderScript,
+		DirectorLaunchPlaceholderScriptSh,
+		DirectorLaunchPlaceholderName,
+		DirectorLaunchPlaceholderCwd,
+	}
+}
+
+// directorLaunchPlaceholderPattern finds the placeholders of an element of
+// [org.director].launch_cmd: a "{" and the next "}" with no other brace
+// between them. ValidateDirectorLaunchCmd and ExpandDirectorLaunchArg both
+// use it, so what Load accepts is what start replaces.
+var directorLaunchPlaceholderPattern = regexp.MustCompile(`\{[^{}]*\}`)
+
+// isDirectorLaunchPlaceholder reports whether s, with its braces, is one of
+// DirectorLaunchPlaceholders.
+func isDirectorLaunchPlaceholder(s string) bool {
+	return slices.Contains(DirectorLaunchPlaceholders(), s)
+}
+
+// ValidateDirectorLaunchCmd returns an error naming [org.director].launch_cmd
+// and the reason when cmd is not empty and its first element is empty or
+// whitespace only, an element has a placeholder outside
+// DirectorLaunchPlaceholders, or no element has {script} or {script_sh}.
+// An empty cmd (start uses herdr) is valid. Load calls it; see
+// OrgDirectorConfig.LaunchCmd for the rules.
+func ValidateDirectorLaunchCmd(cmd []string) error {
+	if len(cmd) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(cmd[0]) == "" {
+		return fmt.Errorf("[org.director].launch_cmd: the first element is the command to run and must not be empty or whitespace only, got %q", cmd[0])
+	}
+	runsScript := false
+	for i, arg := range cmd {
+		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
+			if !isDirectorLaunchPlaceholder(placeholder) {
+				return fmt.Errorf("[org.director].launch_cmd: element %d %q has the unknown placeholder %s; the placeholders are %s",
+					i, arg, placeholder, strings.Join(DirectorLaunchPlaceholders(), ", "))
+			}
+			if placeholder == DirectorLaunchPlaceholderScript || placeholder == DirectorLaunchPlaceholderScriptSh {
+				runsScript = true
+			}
+		}
+	}
+	if !runsScript {
+		return fmt.Errorf("[org.director].launch_cmd: no element has %s or %s, so the terminal would never run the launch script; got %q",
+			DirectorLaunchPlaceholderScript, DirectorLaunchPlaceholderScriptSh, cmd)
+	}
+	return nil
+}
+
+// ExpandDirectorLaunchArg returns arg, an element of
+// [org.director].launch_cmd, with each placeholder replaced by its entry in
+// values, which is keyed by the placeholder with its braces (such as
+// DirectorLaunchPlaceholderScript). It finds placeholders by the rule Load
+// validates with, and replaces them all in one pass, so a value that itself
+// contains a placeholder is not replaced again. A placeholder with no entry
+// in values is an error, and arg is then returned unchanged.
+func ExpandDirectorLaunchArg(arg string, values map[string]string) (string, error) {
+	missing := ""
+	expanded := directorLaunchPlaceholderPattern.ReplaceAllStringFunc(arg, func(placeholder string) string {
+		value, ok := values[placeholder]
+		if !ok {
+			if missing == "" {
+				missing = placeholder
+			}
+			return placeholder
+		}
+		return value
+	})
+	if missing != "" {
+		return arg, fmt.Errorf("[org.director].launch_cmd: %q has the placeholder %s, which has no value", arg, missing)
+	}
+	return expanded, nil
 }
 
 // The two values of [org.approval].mode.
@@ -429,12 +558,17 @@ func Load(path string) (Config, error) {
 	// [org.director] validation. Same strict pattern as [org.watchdog]
 	// above: an absent [org.director] section (or an absent key within a
 	// present one) keeps Default()'s value. resolve_minutes may be shorter
-	// than ack_minutes; the two deadlines are checked independently.
+	// than ack_minutes; the two deadlines are checked independently. An
+	// absent or empty launch_cmd (start uses herdr) is valid; a non-empty one
+	// is checked by ValidateDirectorLaunchCmd.
 	if cfg.Org.Director.AckMinutes < 1 {
 		return cfg, fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
 	}
 	if cfg.Org.Director.ResolveMinutes < 1 {
 		return cfg, fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
+	}
+	if err := ValidateDirectorLaunchCmd(cfg.Org.Director.LaunchCmd); err != nil {
+		return cfg, err
 	}
 
 	// [org.approval] validation. Same strict pattern as [org.director]

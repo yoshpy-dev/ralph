@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -215,7 +217,9 @@ model = "opus"
 	if cfg.Org.AgmsgHome != want.AgmsgHome {
 		t.Errorf("agmsg_home = %q, want %q", cfg.Org.AgmsgHome, want.AgmsgHome)
 	}
-	if cfg.Org.Director != want.Director {
+	// OrgDirectorConfig holds a slice (LaunchCmd), so it is compared with
+	// reflect.DeepEqual rather than !=.
+	if !reflect.DeepEqual(cfg.Org.Director, want.Director) {
 		t.Errorf("director = %+v, want %+v", cfg.Org.Director, want.Director)
 	}
 }
@@ -791,8 +795,8 @@ watcher_model = ""
 }
 
 // TestDefault_OrgDirector verifies the [org.director] defaults: the director
-// switch enabled is true, and the inbox deadlines are ack_minutes 10 and
-// resolve_minutes 60.
+// switch enabled is true, the inbox deadlines are ack_minutes 10 and
+// resolve_minutes 60, and launch_cmd is empty (start uses herdr).
 func TestDefault_OrgDirector(t *testing.T) {
 	d := Default().Org.Director
 	if !d.Enabled {
@@ -803,6 +807,9 @@ func TestDefault_OrgDirector(t *testing.T) {
 	}
 	if d.ResolveMinutes != 60 {
 		t.Errorf("director.resolve_minutes = %d, want 60", d.ResolveMinutes)
+	}
+	if len(d.LaunchCmd) != 0 {
+		t.Errorf("director.launch_cmd = %q, want empty", d.LaunchCmd)
 	}
 }
 
@@ -825,7 +832,7 @@ stall_minutes = 20
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Org.Director != Default().Org.Director {
+	if !reflect.DeepEqual(cfg.Org.Director, Default().Org.Director) {
 		t.Errorf("director = %+v, want %+v", cfg.Org.Director, Default().Org.Director)
 	}
 	if !cfg.Org.Director.Enabled {
@@ -941,6 +948,256 @@ func TestLoad_OrgDirectorRejects(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestLoad_OrgDirectorLaunchCmd covers [org.director].launch_cmd through
+// Load() (plan 2026-10-16-org-director-launch-cmd, AC1). An absent key or an
+// empty array loads as empty (start uses herdr), and a value with {script}
+// or {script_sh} loads as written. A non-empty value whose first element is
+// empty or whitespace only, that has a {...} outside the four placeholders
+// (in any element), or that has neither {script} nor {script_sh}, fails with
+// an error that starts with the key and says the reason. Other keys of the
+// section keep their defaults either way.
+func TestLoad_OrgDirectorLaunchCmd(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string // the loaded launch_cmd; read only when wantErr is ""
+		wantErr string   // a substring of the error; "" means Load must succeed
+	}{
+		{"no file content", "", nil, ""},
+		{"section without the key", "[org.director]\nack_minutes = 5\n", nil, ""},
+		{"empty array keeps herdr", "[org.director]\nlaunch_cmd = []\n", nil, ""},
+		{
+			"{script} as an argument",
+			`[org.director]
+launch_cmd = ["sh", "-c", "nohup sh \"$1\" >/dev/null 2>&1 &", "sh", "{script}"]
+`,
+			[]string{"sh", "-c", `nohup sh "$1" >/dev/null 2>&1 &`, "sh", "{script}"},
+			"",
+		},
+		{
+			"{script_sh} in a shell string",
+			`[org.director]
+launch_cmd = ["tmux", "-L", "ralph", "new-session", "-d", "-s", "{name}", "-c", "{cwd}", "sh {script_sh}"]
+`,
+			[]string{"tmux", "-L", "ralph", "new-session", "-d", "-s", "{name}", "-c", "{cwd}", "sh {script_sh}"},
+			"",
+		},
+		{
+			"all four placeholders, two in one element",
+			`[org.director]
+launch_cmd = ["orca", "terminal", "create", "--name={name}", "--command", "cd {cwd} && sh {script_sh}", "{script}"]
+`,
+			[]string{"orca", "terminal", "create", "--name={name}", "--command", "cd {cwd} && sh {script_sh}", "{script}"},
+			"",
+		},
+		{"{script} as the command itself", "[org.director]\nlaunch_cmd = [\"{script}\"]\n", []string{"{script}"}, ""},
+		{
+			"unmatched braces pass through",
+			`[org.director]
+launch_cmd = ["sh", "-c", "echo }{ x{ {{script_sh}}", "{"]
+`,
+			[]string{"sh", "-c", "echo }{ x{ {{script_sh}}", "{"},
+			"",
+		},
+		{"empty first element", "[org.director]\nlaunch_cmd = [\"\", \"{script}\"]\n", nil,
+			`the first element is the command to run and must not be empty or whitespace only, got ""`},
+		{"whitespace-only first element", "[org.director]\nlaunch_cmd = [\" \\t\", \"{script}\"]\n", nil,
+			`must not be empty or whitespace only, got " \t"`},
+		{"unknown placeholder in a later element", "[org.director]\nlaunch_cmd = [\"tmux\", \"new-session\", \"-s\", \"{title}\", \"sh {script_sh}\"]\n", nil,
+			`element 3 "{title}" has the unknown placeholder {title}; the placeholders are {script}, {script_sh}, {name}, {cwd}`},
+		{"unknown placeholder in the first element", "[org.director]\nlaunch_cmd = [\"{terminal}\", \"{script}\"]\n", nil,
+			`element 0 "{terminal}" has the unknown placeholder {terminal}`},
+		{"misspelt placeholder next to a valid one", "[org.director]\nlaunch_cmd = [\"sh\", \"-c\", \"cd {cwd} && sh {scirpt}\"]\n", nil,
+			`element 2 "cd {cwd} && sh {scirpt}" has the unknown placeholder {scirpt}`},
+		{"placeholder in another case", "[org.director]\nlaunch_cmd = [\"sh\", \"{SCRIPT}\"]\n", nil,
+			`has the unknown placeholder {SCRIPT}`},
+		{"placeholder with spaces inside", "[org.director]\nlaunch_cmd = [\"sh\", \"{ script }\"]\n", nil,
+			`has the unknown placeholder { script }`},
+		{"empty braces", "[org.director]\nlaunch_cmd = [\"xargs\", \"-I\", \"{}\", \"sh\", \"{script}\"]\n", nil,
+			`element 2 "{}" has the unknown placeholder {}`},
+		{"shell brace group", "[org.director]\nlaunch_cmd = [\"sh\", \"-c\", \"{ sh \\\"$0\\\"; }\", \"{script}\"]\n", nil,
+			`has the unknown placeholder { sh "$0"; }`},
+		{"neither {script} nor {script_sh}", "[org.director]\nlaunch_cmd = [\"tmux\", \"new-session\", \"-d\", \"-s\", \"{name}\", \"-c\", \"{cwd}\"]\n", nil,
+			`no element has {script} or {script_sh}, so the terminal would never run the launch script`},
+		{"no placeholder at all", "[org.director]\nlaunch_cmd = [\"open\", \"-a\", \"Terminal\"]\n", nil,
+			`no element has {script} or {script_sh}`},
+		{"the first-element check comes first", "[org.director]\nlaunch_cmd = [\" \", \"{title}\"]\n", nil,
+			`the first element is the command to run`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Load: err = nil (launch_cmd = %q), want an error containing %q", cfg.Org.Director.LaunchCmd, tt.wantErr)
+				}
+				if !strings.HasPrefix(err.Error(), "[org.director].launch_cmd: ") {
+					t.Errorf("error = %q, want it to start with %q", err.Error(), "[org.director].launch_cmd: ")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if !slices.Equal(cfg.Org.Director.LaunchCmd, tt.want) {
+				t.Errorf("director.launch_cmd = %q, want %q", cfg.Org.Director.LaunchCmd, tt.want)
+			}
+			def := Default().Org.Director
+			if !cfg.Org.Director.Enabled || cfg.Org.Director.ResolveMinutes != def.ResolveMinutes {
+				t.Errorf("director.enabled, resolve_minutes = %v, %d, want the defaults %v, %d",
+					cfg.Org.Director.Enabled, cfg.Org.Director.ResolveMinutes, def.Enabled, def.ResolveMinutes)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgDirectorLaunchCmdWrongType verifies a launch_cmd that is not
+// an array of strings (a single string, or an array with a number) fails
+// Load at decoding, before ValidateDirectorLaunchCmd runs.
+func TestLoad_OrgDirectorLaunchCmdWrongType(t *testing.T) {
+	for _, content := range []string{
+		"[org.director]\nlaunch_cmd = \"tmux new-session {script_sh}\"\n",
+		"[org.director]\nlaunch_cmd = [\"sh\", 1, \"{script}\"]\n",
+	} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, err := Load(path); err == nil {
+			t.Errorf("Load(%q): err = nil (launch_cmd = %q), want a decode error", content, cfg.Org.Director.LaunchCmd)
+		}
+	}
+}
+
+// TestValidateDirectorLaunchCmd_EmptyIsValid verifies a nil and an empty
+// launch_cmd (start uses herdr) pass ValidateDirectorLaunchCmd, which Load
+// and `ralph org director start` share.
+func TestValidateDirectorLaunchCmd_EmptyIsValid(t *testing.T) {
+	for _, cmd := range [][]string{nil, {}} {
+		if err := ValidateDirectorLaunchCmd(cmd); err != nil {
+			t.Errorf("ValidateDirectorLaunchCmd(%q) = %v, want nil", cmd, err)
+		}
+	}
+}
+
+// TestDirectorLaunchPlaceholders verifies the placeholder constants and that
+// DirectorLaunchPlaceholders lists exactly those four, in order, as a slice
+// a caller may change without changing the next call's.
+func TestDirectorLaunchPlaceholders(t *testing.T) {
+	want := []string{"{script}", "{script_sh}", "{name}", "{cwd}"}
+	consts := []string{DirectorLaunchPlaceholderScript, DirectorLaunchPlaceholderScriptSh, DirectorLaunchPlaceholderName, DirectorLaunchPlaceholderCwd}
+	if !slices.Equal(consts, want) {
+		t.Errorf("placeholder constants = %q, want %q", consts, want)
+	}
+	got := DirectorLaunchPlaceholders()
+	if !slices.Equal(got, want) {
+		t.Fatalf("DirectorLaunchPlaceholders() = %q, want %q", got, want)
+	}
+	got[0] = "{changed}"
+	if again := DirectorLaunchPlaceholders(); !slices.Equal(again, want) {
+		t.Errorf("DirectorLaunchPlaceholders() after changing a returned slice = %q, want %q", again, want)
+	}
+}
+
+// TestExpandDirectorLaunchArg verifies the replacement start applies to each
+// launch_cmd element: every placeholder is replaced by its value in one
+// pass (a value holding a placeholder is not replaced again), braces that
+// are not a placeholder are kept as written, and a placeholder outside the
+// values (unknown, or known but given no value) is an error that returns the
+// element unchanged.
+func TestExpandDirectorLaunchArg(t *testing.T) {
+	values := map[string]string{
+		DirectorLaunchPlaceholderScript:   "/repo dir/.harness/state/org/launch/director_t1.sh",
+		DirectorLaunchPlaceholderScriptSh: `'/repo dir/.harness/state/org/launch/director_t1.sh'`,
+		DirectorLaunchPlaceholderName:     "director_t1",
+		DirectorLaunchPlaceholderCwd:      "/repo {name}",
+	}
+	tests := []struct {
+		arg     string
+		want    string
+		wantErr string
+	}{
+		{"{script}", "/repo dir/.harness/state/org/launch/director_t1.sh", ""},
+		{"sh {script_sh}", `sh '/repo dir/.harness/state/org/launch/director_t1.sh'`, ""},
+		{"--name={name}", "--name=director_t1", ""},
+		{"{name}-{name}", "director_t1-director_t1", ""},
+		{"{cwd}", "/repo {name}", ""},
+		{"cd {cwd} && sh {script_sh}", `cd /repo {name} && sh '/repo dir/.harness/state/org/launch/director_t1.sh'`, ""},
+		{"no placeholder", "no placeholder", ""},
+		{"", "", ""},
+		{"echo }{ x{ {{name}}", "echo }{ x{ {director_t1}", ""},
+		{"{title} {name}", "", `"{title} {name}" has the placeholder {title}, which has no value`},
+		{"{}", "", `has the placeholder {}, which has no value`},
+	}
+	for _, tt := range tests {
+		got, err := ExpandDirectorLaunchArg(tt.arg, values)
+		if tt.wantErr != "" {
+			if err == nil || !strings.HasPrefix(err.Error(), "[org.director].launch_cmd: ") || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("ExpandDirectorLaunchArg(%q) err = %v, want an error naming [org.director].launch_cmd and containing %q", tt.arg, err, tt.wantErr)
+			}
+			if got != tt.arg {
+				t.Errorf("ExpandDirectorLaunchArg(%q) on error = %q, want the element unchanged", tt.arg, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ExpandDirectorLaunchArg(%q): unexpected error: %v", tt.arg, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("ExpandDirectorLaunchArg(%q) = %q, want %q", tt.arg, got, tt.want)
+		}
+	}
+
+	// A known placeholder with no entry in values is an error too.
+	partial := map[string]string{DirectorLaunchPlaceholderScript: "/s.sh"}
+	if got, err := ExpandDirectorLaunchArg("sh {script} {cwd}", partial); err == nil || !strings.Contains(err.Error(), "has the placeholder {cwd}, which has no value") || got != "sh {script} {cwd}" {
+		t.Errorf("ExpandDirectorLaunchArg with no {cwd} value = %q, %v, want the element unchanged and an error naming {cwd}", got, err)
+	}
+}
+
+// TestTemplateRalphToml_LaunchCmdExampleIsValid verifies the commented-out
+// launch_cmd example in templates/base/ralph.toml, with its "# " removed,
+// loads under [org.director], so the example a user uncomments passes the
+// validation.
+func TestTemplateRalphToml_LaunchCmdExampleIsValid(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", "templates", "base", "ralph.toml"))
+	if err != nil {
+		t.Fatalf("read templates/base/ralph.toml: %v", err)
+	}
+	var examples []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if example, found := strings.CutPrefix(line, "# launch_cmd = "); found {
+			examples = append(examples, "launch_cmd = "+example)
+		}
+	}
+	if len(examples) != 1 {
+		t.Fatalf("templates/base/ralph.toml has %d lines starting with %q, want 1", len(examples), "# launch_cmd = ")
+	}
+	path := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(path, []byte("[org.director]\n"+examples[0]+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(the uncommented template example %q): %v", examples[0], err)
+	}
+	if len(cfg.Org.Director.LaunchCmd) == 0 {
+		t.Errorf("the uncommented template example %q loaded an empty launch_cmd", examples[0])
 	}
 }
 
