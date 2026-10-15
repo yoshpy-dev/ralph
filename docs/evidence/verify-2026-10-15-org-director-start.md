@@ -1383,3 +1383,386 @@ the human, carries none: stop reads no ralph.toml).
 - `pgrep -fl 'herdr server'` and `pgrep -fl osascript` printed nothing (exit 1). No real herdr ran, and the user's herdr server and `~/.config/herdr` were not touched.
 - The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists. `$PROBE/home` and `$PROBE/tmp` are empty.
 - The scratch ledgers, the two binaries, the stub, and the probe scripts stay in the session scratch directory.
+
+## Cycle 3 (HEAD c5a6a596)
+
+- Date: 2026-10-16 JST (UTC timestamps in the output read 2026-10-15T15:xx; JST is UTC+9)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start, HEAD c5a6a596, clean (`git status --porcelain` printed nothing). Merge base with origin/main is f21df66c. The delta since the cycle-2 verify (d3bf2066) holds the cross-review cycle-2 fixes D12 and D13 (plan 4b721b18, code caf1d025) and the cycle-3 self-review LOW fixes (plan 0bfbb054, code 83287d39)
+- Redaction: as above. The probe directory `$SCRATCH/c3p` is `$PROBE`. The probe ran every ralph command with `USER=probe`. The full wrapper log is `docs/evidence/verify-2026-10-15-152534.log`, and the raw outputs of this section are appended to `docs/evidence/verify-2026-10-15-org-director-start.log` under `===== Cycle 3 (HEAD c5a6a596)` (both gitignored, not committed)
+
+### C3-1. ./scripts/run-static-verify.sh (changed scope)
+
+```text
+# Verification run
+- Timestamp: 2026-10-15T15:25:34Z
+- Mode: static
+- Requested scope: changed
+
+==> Running local verifier
+==> shellcheck hook + verify scripts
+    OK
+[note: the 20 `sh -n` steps of .claude/hooks and templates/base/.claude/hooks and the two awk parses of the guard each printed OK; omitted here, in the wrapper log]
+==> jq -e . .claude/settings.json
+    [the JSON body jq printed is omitted here; it is in the wrapper log]
+    OK
+==> jq -e . templates/base/.claude/settings.json
+    [the JSON body jq printed is omitted here; it is in the wrapper log]
+    OK
+==> Codex hook single-source guard
+    OK
+==> Codex inline hook detector smoke test
+    OK
+==> Codex PR provenance policy guard
+    OK
+==> scripts/check-sync.sh
+[note: the TEMPLATE_ONLY and KNOWN_DIFF lines are omitted; the summary follows]
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+    OK
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid
+[ok] .claude/skills/implement/SKILL.md: all pipeline steps referenced
+[ok] .claude/skills/cross-review/SKILL.md: all pipeline steps referenced
+[ok] .claude/rules/ralph/subagent-policy.md: all pipeline steps referenced
+[ok] docs/quality/definition-of-done.md: all pipeline steps referenced
+[ok] README.md: all pipeline steps referenced
+[ok] AGENTS.md: all pipeline steps referenced
+    OK
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+    OK
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> tech-debt README plan references
+    OK
+==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned f21df66c..c5a6a596 against origin/main: clean
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-15-152534.log
+rc=0
+```
+
+### C3-2. Go and sync checks
+
+```text
+$ go version
+go version go1.26.0 darwin/arm64
+$ gofmt -l internal/ cmd/
+rc=0
+$ go vet ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+$ GOTOOLCHAIN=go1.25.8 go build ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./...
+rc=0
+$ $(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt -l ./cmd ./internal
+rc=0
+$ grep '^go ' go.mod
+go 1.25.8
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+rc=0
+$ ./scripts/check-sync.sh | tail -8
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+rc=0
+$ git diff --check origin/main...HEAD
+rc=0
+$ git diff --check d3bf2066..HEAD
+rc=0
+$ ./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md
+96796452ceae
+$ md5 -q {.claude,.agents,templates/base/.claude,templates/base/.agents}/skills/director/SKILL.md
+7aaf58f617dcc749d5bb1f8a39c0dc8c
+7aaf58f617dcc749d5bb1f8a39c0dc8c
+7aaf58f617dcc749d5bb1f8a39c0dc8c
+7aaf58f617dcc749d5bb1f8a39c0dc8c
+$ md5 -q {.claude,.agents,templates/base/.claude,templates/base/.agents}/skills/org/SKILL.md
+c1bb29c022619e5bf9b4572309ca7119
+c1bb29c022619e5bf9b4572309ca7119
+c1bb29c022619e5bf9b4572309ca7119
+c1bb29c022619e5bf9b4572309ca7119
+$ cmp docs/recipes/codex-seat-permissions.md templates/base/docs/recipes/codex-seat-permissions.md
+[exit 0]
+```
+
+Every `-l` printed no file name. The plan digest equals the `- Approved:` line (96796452ceae).
+
+### C3-3. Stub herdr probe: the D12 and D13 refusals, HEAD vs the pre-fix binary
+
+Setup:
+
+- HEAD binary: `go build -o $PROBE/bin/ralph ./cmd/ralph` from the clean worktree at c5a6a596. Pre-fix binary: `git archive 4b721b18` (the plan commit right before caf1d025) built into `$PROBE/prebin/ralph`. Each bin directory holds only ralph, a symlink to git, and the same stub `herdr`: a POSIX sh script that logs every call to `$PROBE/hstate/calls.log`, keeps the workspace and tab labels in files there, and answers in the JSON envelope shapes of `internal/org/driver/herdr.go` (as in C2-3). The stub never talks to a herdr server.
+- Every ralph command ran under `env -i HOME=$PROBE/home USER=probe LOGNAME=probe PATH=<bin dir> TMPDIR=$PROBE/tmp/ LANG=en_US.UTF-8`, so no real herdr, codex, claude, agmsg, or osascript could be found, and `HERDR_PANE_ID` was unset. Each cwd is under `$PROBE/work`, outside any git repo, so the ledger (an explicit `--state-dir`) is not a main worktree's: the director runs where start runs, and the ledger is outside that cwd.
+- After each command the probe printed how many lines the stub added to `calls.log`, and the lines.
+- Configs (`ralph.toml` in the cwd, or `cfg/ralph.toml` given as the relative `--config cfg/ralph.toml`):
+  - work/a: none (`config.Default()`: `[org.permissions].default = "autonomous"`, `codex_verified = false`)
+  - work/b: `[org.permissions] default = "autonomous"`, `codex_verified = true`
+  - work/c: `[org.permissions] default = "guarded"`, `codex_verified = true`; `[org.permissions.roles] director = "edits"`
+  - work/d/cfg: `[org] agmsg_home = "~/agmsg-probe"`; `[org.permissions] default = "autonomous"`, `codex_verified = true`; `[org.permissions.roles] director = "guarded"`
+  - work/e/cfg: `[org] agmsg_home = "agmsg/home"`; `[org.permissions.roles] director = "guarded"`
+  - work/f/cfg: `[org] agmsg_home = "~"`
+  - work/g (no `--config`): `[org] agmsg_home = "agmsg/home"`; `[org.permissions.roles] director = "guarded"`
+
+```text
+## Q1. codex director, no ralph.toml (config.Default: default autonomous, codex_verified false)
+$ (cd work/a && ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-a)   [bin=bin]
+org: director: start: permission mode "autonomous" of role director ([org.permissions.roles].director, else [org.permissions].default): a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, so the director could not start a feature org (ralph org start --plan runs git worktree add); set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, or start a claude director (--driver claude); a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-a
+[no such directory]
+
+## Q2. codex director, ralph.toml: default autonomous, codex_verified = true
+$ (cd work/b && ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-b)   [bin=bin]
+org: director: start: permission mode "autonomous" of role director ([org.permissions.roles].director, else [org.permissions].default): a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, so the director could not start a feature org (ralph org start --plan runs git worktree add); set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, or start a claude director (--driver claude); a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-b
+[no such directory]
+
+## Q3. codex director, ralph.toml: roles.director = edits, codex_verified = true
+$ (cd work/c && ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-c)   [bin=bin]
+org: director: start: permission mode "edits" of role director ([org.permissions.roles].director, else [org.permissions].default): a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: autonomous and edits run codex under --sandbox workspace-write, which keeps .git read-only, so the director could not start a feature org (ralph org start --plan runs git worktree add); set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) allow writing .git and reaching the network, or start a claude director (--driver claude); a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-c
+[no such directory]
+
+## Q4. --config cfg/ralph.toml with agmsg_home = "agmsg/home" (claude director)
+$ (cd work/e && ralph org director start --driver claude --model haiku --state-dir $PROBE/state-e --config cfg/ralph.toml)   [bin=bin]
+org: director start: [org].agmsg_home "agmsg/home" in the --config file cfg/ralph.toml is a relative path: the director and the watch may resolve it from different directories and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-e
+[no such directory]
+
+## Q5. --config cfg/ralph.toml with agmsg_home = "~"
+$ (cd work/f && ralph org director start --driver claude --model haiku --state-dir $PROBE/state-f --config cfg/ralph.toml)   [bin=bin]
+org: director start: [org].agmsg_home "~" in the --config file cfg/ralph.toml is a relative path: the director and the watch may resolve it from different directories and so use different agmsg installs (the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-f
+[no such directory]
+
+## Q6. positive control: guarded codex director with codex_verified, agmsg_home ~/..., ledger outside the cwd, RALPH_ORG_AGMSG_HOME set
+$ (cd work/d && RALPH_ORG_AGMSG_HOME=/nonexistent/agmsg ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-d --config cfg/ralph.toml)   [bin=bin]
+warning: director start: RALPH_ORG_AGMSG_HOME is set here, but the director's herdr pane has the herdr server's environment, so the director does not get it from here; [org].agmsg_home in the ralph.toml the director reads (the --config file, when given) reaches it
+ralph org director start: started the cross-org watch (pid 79185); log: $PROBE/state-d/watch.log
+started d1 (driver=codex, model=gpt-6-astra, permission=guarded, pane=w1:p1, workspace=w1)
+talk to the director in herdr: pane w1:p1, in the tab director_232d1401dbed of the workspace labelled ralph_director_232d1401dbed
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state-d'
+[exit 0]
+[stub herdr calls during this command: 3]
+herdr [workspace] [create] [--cwd] [$PROBE/work/d] [--label] [ralph_director_232d1401dbed]
+herdr [tab] [create] [--workspace] [w1] [--cwd] [$PROBE/work/d] [--label] [director_232d1401dbed]
+herdr [agent] [start] [director_232d1401dbed] [--kind] [codex] [--pane] [w1:p1] [--timeout] [60000] [--] [--model] [gpt-6-astra] [役割指示を読み込んで従ってください: $PROBE/state-d/prompts/director_232d1401dbed.md]
+$ ls -A state-d
+director.jsonl
+director.lock
+prompts
+watch-alive.json
+watch.lock
+watch.log
+[6 entries]
+$ cat state-d/director.jsonl
+{"ts":"2026-10-15T15:31:10Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"herdr","token":"232d1401dbed","model":"gpt-6-astra","permission_mode":"guarded","user":"probe","cwd":"$PROBE/work/d","herdr_pane":false}
+{"ts":"2026-10-15T15:31:11Z","id":"d1","event":"workspace_created","workspace_id":"w1","user":"probe","cwd":"$PROBE/work/d","herdr_pane":false}
+{"ts":"2026-10-15T15:31:11Z","id":"d1","event":"pane_created","pane_id":"w1:p1","user":"probe","cwd":"$PROBE/work/d","herdr_pane":false}
+{"ts":"2026-10-15T15:31:11Z","id":"d1","event":"launched","user":"probe","cwd":"$PROBE/work/d","herdr_pane":false}
+$ grep -n -- '--config\|設定' state-d/prompts/director_*.md | head -5
+5:- 設定: '$PROBE/work/d/cfg/ralph.toml'(start の --config)
+13:ralph org director status --state-dir '$PROBE/state-d' --config '$PROBE/work/d/cfg/ralph.toml'
+30:- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state-d' --config '$PROBE/work/d/cfg/ralph.toml'` で
+33:- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state-d' --config '$PROBE/work/d/cfg/ralph.toml'` を付ける。
+35:  どこでも、この台帳と、start が読んだ設定を使うため。終わりに人に頼む
+$ (cd work/d && ralph org director stop --id d1 --state-dir $PROBE/state-d)   [bin=bin]
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+[stub herdr calls during this command: 7]
+herdr [pane] [get] [w1:p1]
+herdr [tab] [get] [w1:t1]
+herdr [workspace] [get] [w1]
+herdr [workspace] [get] [w1]
+herdr [pane] [send-keys] [w1:p1] [C-c]
+herdr [pane] [close] [w1:p1]
+herdr [workspace] [close] [w1]
+$ (cd work/d && ralph org watch --stop --state-dir $PROBE/state-d)   [bin=bin]
+stopped ralph org watch --all (pid 79185)
+[exit 0]
+[stub herdr calls during this command: 0]
+
+## Q7. relative agmsg_home in ./ralph.toml without --config: not refused
+$ (cd work/g && ralph org director start --driver claude --model haiku --state-dir $PROBE/state-g)   [bin=bin]
+ralph org director start: started the cross-org watch (pid 79318); log: $PROBE/state-g/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w2:p1, workspace=w2)
+talk to the director in herdr: pane w2:p1, in the tab director_f23b45caa595 of the workspace labelled ralph_director_f23b45caa595
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state-g'
+[exit 0]
+[stub herdr calls during this command: 3]
+herdr [workspace] [create] [--cwd] [$PROBE/work/g] [--label] [ralph_director_f23b45caa595]
+herdr [tab] [create] [--workspace] [w2] [--cwd] [$PROBE/work/g] [--label] [director_f23b45caa595]
+herdr [agent] [start] [director_f23b45caa595] [--kind] [claude] [--pane] [w2:p1] [--timeout] [60000] [--] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state-g/prompts/director_f23b45caa595.md]
+$ (cd work/g && ralph org director stop --id d1 --state-dir $PROBE/state-g)   [bin=bin]
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+[stub herdr calls during this command: 7]
+[note: the same 7 calls as Q6's stop, on w2 and w2:p1]
+$ (cd work/g && ralph org watch --stop --state-dir $PROBE/state-g)   [bin=bin]
+stopped ralph org watch --all (pid 79318)
+[exit 0]
+[stub herdr calls during this command: 0]
+
+## Q8. pre-fix binary (4b721b18) on Q2's config
+$ (cd work/b && ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-pre-b)   [bin=prebin]
+ralph org director start: started the cross-org watch (pid 79512); log: $PROBE/state-pre-b/watch.log
+started d1 (driver=codex, model=gpt-6-astra, permission=autonomous, pane=w3:p1, workspace=w3)
+talk to the director in herdr: pane w3:p1, in the tab director_de3bf01610fa of the workspace labelled ralph_director_de3bf01610fa
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state-pre-b'
+[exit 0]
+[stub herdr calls during this command: 3]
+herdr [workspace] [create] [--cwd] [$PROBE/work/b] [--label] [ralph_director_de3bf01610fa]
+herdr [tab] [create] [--workspace] [w3] [--cwd] [$PROBE/work/b] [--label] [director_de3bf01610fa]
+herdr [agent] [start] [director_de3bf01610fa] [--kind] [codex] [--pane] [w3:p1] [--timeout] [60000] [--] [--sandbox] [workspace-write] [--ask-for-approval] [never] [--add-dir] [$PROBE/state-pre-b] [--model] [gpt-6-astra] [役割指示を読み込んで従ってください: $PROBE/state-pre-b/prompts/director_de3bf01610fa.md]
+[note: the stop (exit 0, the same 7 calls on w3) and `ralph org watch --stop` (pid 79512) followed]
+
+## Q9. pre-fix binary (4b721b18) on Q4's config
+$ (cd work/e && ralph org director start --driver claude --model haiku --state-dir $PROBE/state-pre-e --config cfg/ralph.toml)   [bin=prebin]
+ralph org director start: started the cross-org watch (pid 79629); log: $PROBE/state-pre-e/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w4:p1, workspace=w4)
+talk to the director in herdr: pane w4:p1, in the tab director_3fa7add67038 of the workspace labelled ralph_director_3fa7add67038
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state-pre-e'
+[exit 0]
+[stub herdr calls during this command: 3]
+herdr [workspace] [create] [--cwd] [$PROBE/work/e] [--label] [ralph_director_3fa7add67038]
+herdr [tab] [create] [--workspace] [w4] [--cwd] [$PROBE/work/e] [--label] [director_3fa7add67038]
+herdr [agent] [start] [director_3fa7add67038] [--kind] [claude] [--pane] [w4:p1] [--timeout] [60000] [--] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state-pre-e/prompts/director_3fa7add67038.md]
+[note: the stop (exit 0, the same 7 calls on w4) and `ralph org watch --stop` (pid 79629) followed]
+
+## Q10. pre-fix binary (4b721b18) on Q1 (no ralph.toml)
+$ (cd work/a && ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-pre-a)   [bin=prebin]
+org: director: start: permission mode "autonomous" of role director ([org.permissions.roles].director, else [org.permissions].default): org: codex seat permission mode "autonomous" requires [org.permissions].codex_verified=true; only guarded is allowed until then (fail-closed; verify the codex flag mapping on this machine first: docs/recipes/codex-seat-permissions.md)
+[exit 1]
+[stub herdr calls during this command: 0]
+$ ls -A state-pre-a
+[no such directory]
+```
+
+The five refusals of the HEAD binary (Q1 to Q5) exit 1, call no herdr, launch no watch, and leave no state directory at all. Q8 and Q9 are the cross-review cycle-2 findings 1 and 2 reproduced on the pre-fix binary: with `codex_verified = true` the codex director launched under `--sandbox workspace-write --ask-for-approval never --add-dir <ledger>`, and the relative `agmsg_home` of a `--config` was accepted. Q10 shows that before the fix a default config already refused codex, but with the codex_verified message, which pointed at the recipe that unlocks the mode now refused.
+
+Q11, run after Q1 to Q10 with the HEAD binary: the `RALPH_ORG_AGMSG_HOME` warning comes before the D12 refusal, so a refused start prints it too.
+
+```text
+$ (cd work/b && RALPH_ORG_AGMSG_HOME=/nonexistent/agmsg ralph org director start --driver codex --model gpt-6-astra --state-dir $PROBE/state-v5)   [bin=bin]
+warning: director start: RALPH_ORG_AGMSG_HOME is set here, but the director's herdr pane has the herdr server's environment, so the director does not get it from here; [org].agmsg_home in the ralph.toml the director reads (the --config file, when given) reaches it
+org: director: start: permission mode "autonomous" of role director ([org.permissions.roles].director, else [org.permissions].default): a codex director runs only in permission mode guarded, whatever [org.permissions].codex_verified says: [note: the rest as in Q2]
+[exit 1]
+[stub herdr calls: 0]
+$ ls -d state-v5
+"$PROBE/state-v5": No such file or directory (os error 2)
+```
+
+### C3-4. ralph org director start --help of the HEAD binary (the permission and refusal paragraphs)
+
+```text
+$ ralph org director start --help | sed -n '/^The director runs with/,/^Usage:/p'
+The director runs with the permission mode of
+[org.permissions.roles].director, else [org.permissions].default, and
+with --model, which [org.roles].director must allow; without --model,
+with the first model_pool entry for --driver that it allows, and a
+warning. Without --config, those settings and [org.director].enabled
+are read from the main worktree's ralph.toml when the ledger is the main
+worktree's, so a feature worktree's ralph.toml does not choose them. The
+director runs in the ledger's main worktree root, else in the directory
+start runs in. With --config, the ralph org commands the director's
+prompt has it run carry --config with that file's absolute path, so the
+director reads the settings start read (the prompt's stop command, for
+the human, carries none: stop reads no ralph.toml). RALPH_ORG_AGMSG_HOME
+set where start runs does not reach the director, whose herdr pane has
+the herdr server's environment: start warns when it is set, and
+[org].agmsg_home in ralph.toml is what reaches the director.
+
+A codex director runs only in guarded: start refuses autonomous and
+edits whatever [org.permissions].codex_verified says, because they run
+codex under --sandbox workspace-write, which keeps .git read-only, so
+the director could not start a feature org (ralph org start --plan runs
+git worktree add). Set [org.permissions.roles].director = "guarded" and
+let your codex config (~/.codex/config.toml) write .git and reach the
+network, or use --driver claude; a guarded codex director follows that
+config, so under sandbox_mode = "workspace-write" it meets the same
+wall.
+
+start is refused, and writes nothing and runs no herdr, when
+[org.director].enabled is false, for a codex director in autonomous or
+edits, when the --config file's [org].agmsg_home is a relative path
+(neither absolute nor starting with ~/: the director runs in the
+ledger's main worktree root when the ledger has one and the watch
+resolves it from where start runs, so the two may resolve it from
+different directories, and start refuses it wherever it runs; give an
+absolute path), while a director is attached (one still starting
+included: stop a headless one with `ralph org director stop --id <id>`,
+detach a promoted session), and inside a herdr pane (HERDR_PANE_ID is
+set): run start from a terminal outside herdr. start has no --replace.
+[note: the rest of the paragraph (the watch, the cleanup) is unchanged since cycle 2]
+```
+
+The cycle-2 quote of this help in C2-6 ("for codex, autonomous and edits need [org.permissions].codex_verified") describes the tree before caf1d025; the HEAD help above replaces it.
+
+### C3-5. Documentation drift greps
+
+```text
+$ grep -o '`--config` の `\[org\].agmsg_home` が相対パスなら[^。]*。' docs/specs/2026-10-07-org-multi-org-director.md
+`--config` の `[org].agmsg_home` が相対パスなら、director と見張りが別の場所から解くので、start が断る(D13)。
+$ grep -c 'may resolve it from different directories' README.md internal/cli/org_director_headless.go
+README.md:1
+internal/cli/org_director_headless.go:1
+$ sed -n 187p .claude/skills/org/SKILL.md | grep -c 'guarded'
+0
+$ sed -n 187p .claude/skills/org/SKILL.md | grep -c 'agmsg_home'
+0
+$ sed -n 1152,1185p .claude/skills/org/SKILL.md | grep -c 'director start` が断る\|codex の director'
+0
+$ grep -n 'const notNeeded' internal/cli/doctor_codex_writable_root_test.go
+982:	const notNeeded = "not needed: no role that can use a codex model resolves to edits or autonomous and <cfg> does not set sandbox_mode = \"workspace-write\""
+$ grep -n '"a director in edits"' internal/cli/doctor_codex_writable_root_test.go
+992:		{"a director in edits", true, "guarded", map[string]string{"director": "edits"}, "", "pass", notNeeded},
+$ git grep -n -e 'add-dir' -- ':!docs/reports' ':!docs/evidence' ':!docs/plans/archive' ':!*_test.go' ':!docs/insights' | grep -i director
+[note: 15 lines. The ones about the director are the plan (44, 91, 112, 124, 162: no --add-dir, D12), the recipe (both copies, 96 and 98: "The headless director ... gets no --add-dir"), tech-debt 259 (the D12 row), and director_start.go:459 ("no --add-dir: a codex director runs guarded only"). The rest match only "directory"/"directories" or the spec's file name (spec 182 and 236, tech-debt 169, tests/test-codex-exec-invocation.sh:124) and are about the leader seat or not about --add-dir for a director. None says a director gets --add-dir or needs codex_verified]
+```
+
+The `/org` skill's line 187 is its `director` row, and lines 1152 to 1185 are the `## permission 作法` items on the permission modes and the doctor's writable-root check.
+
+### C3-6. Cleanup and the files outside the scratch directory
+
+- Every watch the starts launched was stopped with `ralph org watch --stop` (pids 79185, 79318, 79512, 79629). Afterwards `pgrep -fl "$PROBE/"`, `pgrep -fl 'herdr server'`, and `pgrep -fl osascript` printed nothing (exit 1 each).
+- `$PROBE/hstate` holds only `calls.log` and the workspace counter: every stub workspace, tab, and pane the starts made was closed by a stop. `$PROBE/home` and `$PROBE/tmp` are empty.
+- `~/.codex/config.toml` before and after the probe: mtime `Oct 15 17:51:28 2026` (epoch 1792054288), size 33673, sha256 `ac1a4821574050d3630118510c7dd591bf1839b947f2bb35fe4106e41b61796f`, the same both times. No codex ran (none was on the probe's PATH).
+- The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists.
+- The scratch ledgers, the two binaries, the stub, and the probe script stay in the session scratch directory.

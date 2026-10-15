@@ -186,3 +186,106 @@ FR-3、FR-9 の起動 (B) の herdr の部分、受け入れ条件「director st
 - Partially verified: AC10(`starting` は実機で見ていない)、AC13(テストの側はコードを読んだ範囲)
 - Not verified: テストの実行、本物の agent が `--config` 付きの雛形のとおりに打つこと、symlink 経由の cwd での `--config` の `..`
 - Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。情報は 5 つ(C2-V1〜C2-V5)
+
+## Cycle 3
+
+- Date: 2026-10-16(JST。出力の UTC の時刻は 2026-10-15T15:xx)
+- Verifier: verifier subagent (Claude)。パイプラインの 3 回目で、上限を 3 に上げた最後の回。`.harness/state/standard-pipeline/cycle-count.json` は計画どおり 2 のままにした。cross-review cycle 2 の ACTION_REQUIRED 2 件(d2971e1a)を受けた D12・D13 の直し caf1d025(計画 4b721b18)と、self-review cycle 3(e62df32e、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 4、Merge: yes)の C3-L1〜C3-L4 の直し 83287d39(計画 0bfbb054)のあとに走らせた
+- Scope: `git diff d3bf2066..HEAD`(HEAD c5a6a596、30 ファイル、+1854/-234)。Go の変更は caf1d025 と 83287d39 の `internal/org/director_start.go`・`permissions.go`、`internal/cli/org_director_headless.go`・`org_watch.go`・`doctor_codex_writable_root.go` とそれぞれのテスト。ほかは文書(skill の 4 面、README、仕様、recipe の 2 つ、template の ralph.toml、tech-debt)、計画、後工程の記録。テストは走らせていない(/test の担当)。テストはコードを読み、どの AC をどう固定するかを確かめた。この節の行番号は HEAD c5a6a596 のもの
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は 96796452ceae で、`- Approved:` の digest と同じ。D12・D13・AC15・S8・S9 は cycle 3 のために足され、AC6 は D12 に合わせて書き直された
+- Evidence: `docs/evidence/verify-2026-10-15-org-director-start.md` の `## Cycle 3 (HEAD c5a6a596)`。C3-1 は run-static-verify、C3-2 は Go と同期の検査、C3-3 は HEAD と直す前の 4b721b18 の binary を偽の herdr で打った probe(Q1〜Q11)、C3-4 は help、C3-5 は文書のずれの grep、C3-6 は後片付けと `~/.codex/config.toml` の前後。wrapper の全ログは `docs/evidence/verify-2026-10-15-152534.log`、生の出力は `docs/evidence/verify-2026-10-15-org-director-start.log` の末尾(どちらも gitignore の対象)
+- Insight event: `./scripts/insights-append.sh --slug org-director-start --flow standard --phase verify --verdict pass --cycle 3 --low 3 --source skill` で 1 行足し、この報告と同じコミットに入れた。LOW 3 は下の C3-V1〜C3-V3
+
+### cycle 3 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| D12: codex の director の autonomous と edits を `codex_verified` によらず断る(caf1d025) | 満たす(binary でも確認) | `checkDirectorStart`(`internal/org/director_start.go:523`)は `ResolvePermissionMode` のあと、`permissionArgsForDriver`(549)より前に、`p.Driver == DirectorDriverCodex && CodexModeRunsUnderWorkspaceWrite(mode)`(541)で `ErrDirectorCodexWorkspaceWrite`(366)を包んで返す。登録の読みと見張りの関門はそのあとなので、断るときは何も書かず、見張りも起動しない。断りの文は、guarded にして人の codex の設定で `.git` と network を許す道と、claude を使う道を挙げ、guarded でも人の設定が workspace-write なら同じ壁に当たると書く。テスト(読んだだけ): `TestStartDirector_PermissionModeOfRoleDirector`(`director_start_test.go:337`。codex の autonomous と edits を、codex_verified が false と true、台帳が cwd の中と外で断り、文の 7 句を確かめ、codex_verified の文が出ないことも確かめる。codex の guarded は 3 通りで、引数なしで通る)、`TestStartDirector_RefusesBeforeWritingOrCallingHerdr` の 2 行(441、444)、CLI の `TestOrgDirectorStart_RefusedWithNothingWritten` の 2 行(`org_director_headless_test.go:245`。274 は `--config` の edits と codex_verified)。binary: C3-3 の Q1(既定の設定)、Q2(codex_verified = true の autonomous)、Q3(roles.director = edits)は終了コード 1 で、偽の herdr の呼び出しは 0、state dir は作られなかった。直す前の 4b721b18 の binary は Q2 の設定で director を立て、agent start に `--sandbox workspace-write --ask-for-approval never --add-dir <台帳>` を渡した(Q8)。cross-review の指摘 1 の場面が再現した |
+| D12: `codexWritableRootArgs` を leader だけに戻す | 満たす(binary でも確認) | `codexWritableRootArgs`(`internal/org/permissions.go:187`)は `role != LeaderIdentity` で nil を返す(188)。呼ぶのは `Spawn`(`internal/org/spawn.go:898`)だけになった。`StartDirector` の引数は permission の引数、`--model`、雛形を指す 1 文の 1 行(`director_start.go:497`)。`TestCodexWritableRootArgs`(`permissions_test.go:180`)の director の 2 行(233、234)は nil を期待する。binary: Q6 の codex の director(codex_verified = true、default autonomous、roles.director = guarded、台帳は cwd の外)は `-- --model gpt-6-astra <雛形を指す 1 文>` で起動し、`--sandbox` も `--add-dir` もなかった |
+| D13: `--config` の相対の `[org].agmsg_home` を断る(caf1d025)。どこで打っても断ると言う文(83287d39、C3-L2) | 満たす(binary でも確認) | CLI の `startDirector`(`internal/cli/org_director_headless.go:187`)が、enabled の検査のあと、`resolveModelOrWarn` と `StartDirector` の前に `checkStartAgmsgHome` を呼ぶ(200、本体 253)。`--config` が渡されたとき(`cmd.Flags().Changed("config")`)だけ、`agmsgHomeIsRelative`(`internal/cli/org_watch.go:395`。空でなく、絶対でなく、`~/` で始まらない)で判定する。見張りの子の `orgWatchChildAgmsgHome` も同じ関数を使う(377)。`RALPH_ORG_AGMSG_HOME` があれば stderr に警告を 1 行出して続ける(261)。テスト: `TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused`(564。相対、`./`、裸の `~` を断り、絶対、`~/`、空を通す。断るときは stdout も stderr も空で、見張りの起動は 0、台帳は空、herdr は 0)、`ARelativeAgmsgHomeIsRefusedWhereverStartRuns`(639。main worktree のルート、linked worktree、main worktree のない台帳)、`ARelativeAgmsgHomeWithoutConfigIsNotRefused`(700)、`WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector`(718)、`HelpStatesTheCodexAndAgmsgHomeRules`(743)。binary: Q4(`agmsg/home`)と Q5(`~`)は終了コード 1 で、herdr は 0、state dir はない。Q6(`~/agmsg-probe`)と Q7(`--config` なしの `./ralph.toml` の相対の値)は通り、Q6 では警告が 1 行出た。直す前の binary は Q4 の設定で director を立てた(Q9) |
+| C3-L1: tech-debt の 2 行の Related | 満たす | `docs/tech-debt/README.md:259` と 260 は計画の D12・AC6、D13・AC15 と、`git show d2971e1a:docs/reports/cross-review-triage-org-director-start.md` の `## ACTION_REQUIRED` の row 1・row 2 を指す。d2971e1a の triage の 30・31 行がその 2 件で、どちらの行も 5 列 |
+| C3-L2: D13 の文 | 満たす(仕様の 1 文を除く) | 断りの文(Q4)、help(C3-4)、README:258、`/director` skill(151〜157 行)は「may resolve」「2 つの場所が違えば」と書き、どこで打っても断ると言う。仕様の 85 行は言い切りのまま(C3-V1) |
+| C3-L3: help の段落と recipe の文の移動 | 満たす | help では model の文のすぐあとに `Without --config, those settings ...` が続き、codex の文は別の段落になった(C3-4)。recipe の director の文は doctor の検査の文の中(`docs/recipes/codex-seat-permissions.md:62-65`)へ移った。2 つの写しは cmp で同じ |
+| C3-L4: mode の集合を 1 つの関数にし、doctor が role director の edits と autonomous を数えない | 満たす(pass の文は C3-V3) | `CodexModeRunsUnderWorkspaceWrite`(`internal/org/permissions.go:85`)を、`checkDirectorStart`(541)、`codexWritableRootArgs`(188)、`codexSeatModesPossible`(`internal/cli/doctor_codex_writable_root.go:344`)が使う。`permissionArgsForDriver` の switch は mode ごとに違う引数を返すので残り、doc もそう書く。ほかに `PermissionModeEdits` を並べるのは `director_start.go:110` の 3 つの mode の検証だけ。`codexSeatModesPossible` は role director の edits と autonomous で `workspaceWriteRole` を立てない(348)。テスト: `TestCodexSeatModesPossible` の 3 行(`doctor_codex_writable_root_test.go:1665` から)、`TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted`(981。director の edits と autonomous は pass、座席の role の edits は warn、guarded の director は理由 (b) で warn) |
+
+### AC の確かめ直し(HEAD c5a6a596)
+
+cycle 3 の Go の差分は、D12(permission の断りと、`codexWritableRootArgs` の director の分岐の削除)、D13(CLI の agmsg_home の断りと警告、見張りと共有する判定)、doctor の数え方、help とコメントだけだった。登録・停止・表示・雛形・spawn の本体(`director.go`、`director_stop.go`、`prompts.go`、`prompts/director.md`、`spawn.go`、`verbs_all.go`、`internal/cli/org_director.go`、`status.go`)は差分の外。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(binary でも確認) | 引数は `director_start.go:497` の 1 行で組み、permission の引数、`--model`、雛形を指す 1 文の順は変わらない。codex の director が通るのは guarded だけなので、codex の形は `-- --model <slug> <1 文>` になる(Q6)。イベントは attached(launch・token・model・permission_mode)→ workspace_created → pane_created → launched の順で、label は `ralph_director_<token>` と `director_<token>`(Q6、Q7)。台帳には `manifest.jsonl` も `model-receipts.jsonl` もない(Q6 の `ls -A`)。claude の形は Q7(guarded で引数なし)。テストの `TestStartDirector_LaunchesInAWorkspaceOfItsOwn`(202)と CLI の `TestOrgDirectorStart_LaunchesRegistersAndStops`(150)は、codex の行を `roles.director = "guarded"` で引数なしの形に書き直した。この AC の codex の start が通る設定は guarded だけになったが、AC の文は permission mode を決めていないので、D12 と食い違わない |
+| AC2 | 満たす(cycle 2 のまま) | 拒否の経路は変わらず、D12 の検査が permission の検査の前に入っただけ。CLI の enabled の検査のあと、org の層では enabled、`HERDR_PANE_ID`、driver、model、D12、permission、登録の読み、見張りの順に確かめる。permission の拒否が登録の読みより前にあるのは cycle 1 から同じ |
+| AC3 | 満たす(cycle 2 のまま) | 後始末の `abort` と `DirectorCleanupError` は差分の外 |
+| AC4 | 満たす(cycle 2 のまま) | `replacedError`、`MarkLaunched`、雛形は差分の外 |
+| AC5 | 満たす(cycle 2 のまま) | `director_stop.go` と label の検査は差分の外。Q6〜Q9 の 4 回の start の token はどれも違う |
+| AC6 | 満たす(binary でも確認) | mode は `ResolvePermissionMode(o.Config, DirectorRole)`(roles.director、なければ default)。claude は autonomous で bypassPermissions、edits で acceptEdits、guarded で引数なし(`TestStartDirector_PermissionModeOfRoleDirector` の claude の 5 行。binary は cycle 2 の R2 の edits と Q7 の guarded)。codex は guarded で引数なしに通り(Q6)、autonomous と edits は codex_verified によらず終了コード 1 で、herdr を打たず何も書かずに断られ、guarded と人の codex の設定、または claude を案内する(Q1〜Q3)。codex の director の引数に `--add-dir` はない(Q6。台帳は cwd の外)。main worktree の ralph.toml を読む規則(`withMainWorktreeDirectorStartConfig`、`internal/cli/org.go:230`)は差分の外で、`TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml`(444)には `RALPH_ORG_AGMSG_HOME` を外す 1 行が増えただけ。cycle 1 と cycle 2 の AC6 の行は caf1d025 より前の木を書いている(C3-V4) |
+| AC7 | 満たす(cycle 2 のまま) | 見張りの関門の配線は差分の外。Q1〜Q5 の断りは関門より前なので見張りを起動しない(state dir が作られない)。Q6〜Q9 は見張りがなく、start が起動した |
+| AC8 | 満たす(binary でも確認) | Q6 と Q7 の stop は label を確かめ(pane get、tab get、workspace get)、C-c を送り、pane と workspace を閉じて `the director is no longer attached` を出した。本体は差分の外 |
+| AC9 | 満たす(cycle 2 のまま) | 差分の外 |
+| AC10 | 満たす(`starting` は実機で見ていない) | 差分の外 |
+| AC11 | 満たす(binary でも確認) | `DirectorRoleInputErr`、`RenderDirectorPrompt`、雛形は差分の外。Q6 は `--config` を渡した start で、雛形の設定の行(5 行)と、director が打つ `ralph org` のコマンド(13・30・33 行)に `--config '<絶対パス>'` が付いた |
+| AC12 | 満たす(AC の外の文書のずれは C3-V1・C3-V2) | skill の 4 面は同じ(md5 7aaf58f617dcc749d5bb1f8a39c0dc8c)で、`check-skill-sync.sh`(14 skill)と `check-sync.sh`(DRIFTED 0)が通る。help、README:258、仕様の 85 行、`templates/base/ralph.toml` のコメント(100〜114 行)、tech-debt の 251・259・260 行は D12 と D13 を書く。AGENTS.md の repo map は差分の外で、`director_start.go` と `director_stop.go` を書いたまま。「not available yet」「start はまだ」「headless の director はまだ」は、計画の文と、ないことを確かめるテスト(`internal/cli/org_director_test.go:816`、901〜902)にだけある |
+| AC13 | 満たす(テストの側はコードを読んだ範囲) | 新しいテストは `setupOrgStubPATH`・`directorStartLedger` の偽の herdr、`t.TempDir` の台帳、`setOrgWatchLaunch` の偽の起動を使う。doctor のテストは一時の agmsg と codex の設定を使う。binary の probe は `env -i` と、ralph・git・偽の herdr だけの PATH で打ったので、本物の herdr、codex、claude、osascript は見つからない。repo と worktree の `.harness/state/org` はない |
+| AC14 | 満たす(cycle 2 のまま) | 差分の外 |
+| AC15 | 満たす(binary でも確認) | 上の D13 の行。テストは相対(`agmsg/home`、`./agmsg`、裸の `~`)を断り、絶対、`~/`、空を通すことを確かめる。binary では Q4 と Q5 が断られ、Q6 が通った。断りは終了コード 1 で、herdr を打たず、何も書かず、絶対パスにするよう案内する。`RALPH_ORG_AGMSG_HOME` の警告は Q6 で 1 行出て、start は続いた |
+
+FR-3、FR-9 の起動 (B) の herdr の部分、受け入れ条件「director start --driver codex --model <slug>」は、codex の director を guarded で立てる形で満たす(Q6)。仕様の受け入れ条件は permission mode を書かないので、D12 と食い違わない。
+
+### 静的解析(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK(shellcheck、hook の `sh -n`、guard の awk、settings.json の jq、Codex の 3 つの guard、check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の計画の参照)、`gofmt: ok`、golangci-lint `0 issues.`、`secret-scan-branch: scanned f21df66c..c5a6a596 against origin/main: clean`。`templates/base/ralph.toml` の変更で言語の範囲は full に広がった |
+| `gofmt -l internal/ cmd/`、`go vet ./...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` と `go vet ./...` | pass | go.mod は `go 1.25.8`。go1.25.8 の GOROOT の `gofmt -l ./cmd ./internal` も出力なし |
+| `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` | pass | 14 skill が lock-step。IDENTICAL 169、DRIFTED 0、KNOWN_DIFF 5 |
+| `git diff --check origin/main...HEAD` と `git diff --check d3bf2066..HEAD` | pass | 出力なし |
+| 計画の digest | 一致 | 96796452ceae |
+| `/director` と `/org` の skill の 4 面、recipe の 2 つの写し | 同一 | md5 7aaf58f617dcc749d5bb1f8a39c0dc8c と c1bb29c022619e5bf9b4572309ca7119、recipe は cmp で exit 0 |
+
+### 文書のずれ(cycle 3)
+
+codex の director に codex_verified が要る、または `--add-dir` が付くと書いた箇所を、README、仕様、skill(`/org` を含む)、template、recipe、tech-debt、Go の help とコメントで探した。残っていない(C3-5 の grep。`--add-dir` の 15 行のうち director に触れる行は、どれも付かないと書く)。
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org director start --help`(`internal/cli/org_director_headless.go:32-93`) | yes | D12 の段落、D13 の断りと警告、拒否の一覧は Q1〜Q7 の動きと合う(C3-4)。cycle 2 の C2-6 の写しは直す前のもの(C3-V4) |
+| `/director` skill の 4 面(138〜159 行、「始める」の 3 の 173〜182 行) | yes | D12 の 2 つの道と guarded の壁、D13 の「2 つの場所が違えば」「どこで打っても断る」、`RALPH_ORG_AGMSG_HOME` が届かないことは、Q1〜Q6 と合う。「始める」の 3 は cycle 2 の C2-V4(`ralph status` と leader の escalate が `--config` を読まない)を書き足した |
+| README:258 | yes | D12(codex の director は guarded だけ、codex_verified によらない)と D13(どこで打っても断る、may resolve)を書く。`RALPH_ORG_AGMSG_HOME` の警告は書かないが、誤りもない |
+| `templates/base/ralph.toml`(90〜114 行) | yes | director の項は guarded だけ、`~/.codex/config.toml` の壁、`Without a director entry` の既定を書く |
+| `docs/recipes/codex-seat-permissions.md`(62〜65 行、96〜101 行)と template の写し | yes | doctor が director の edits と autonomous を数えないこと、director が台帳を書くのに `--add-dir` を受けない理由を書く |
+| `docs/tech-debt/README.md` 251・259・260 行 | yes | 5 列。259 は D12、260 は `RALPH_ORG_AGMSG_HOME` が pane に届かないこと |
+| 仕様 FR-9 の 8a-2 の注(85 行) | 一部(C3-V1) | 下の表 |
+| `/org` skill の 4 面(187 行、1152〜1185 行) | No(C3-V2) | 下の表 |
+| `ralph doctor` の「Codex sandbox (agmsg writable root)」の pass の文 | No(C3-V3) | 下の表 |
+
+| ID | Severity | Where | Finding |
+| --- | --- | --- | --- |
+| C3-V1 | LOW | 仕様 `docs/specs/2026-10-07-org-multi-org-director.md:85` | 「`--config` の `[org].agmsg_home` が相対パスなら、director と見張りが別の場所から解くので、start が断る(D13)」と言い切る。start を main worktree のルートで打つときと、台帳に main worktree がないときは、2 つは同じ場所から解く(見張りの子の作業場所 `orgWatchChild` の `req.dir` と director の cwd が同じ)が、start は断る。断りの文、help、README、skill は C3-L2 で「may」「違えば」に直り、どこで打っても断ると書く。仕様だけが直す前の言い方を残す。オーケストレーターの申し送りのとおりで、/sync-docs で「別の場所から解きうるので、どこで打っても断る」の形に直せる |
+| C3-V2 | LOW | `/org` skill の 4 面(187 行の `director` の行、1152〜1185 行の「permission 作法」) | (a) `director` の行は start の拒否を「director が登録されている間(`starting` を含む)と `enabled = false`」とだけ書き、permission mode を「`[org.permissions.roles].director`、なければ `[org.permissions].default`」とだけ書く。codex の director が guarded でしか立たないこと(D12)と、`--config` の相対の `agmsg_home` を断ること(D13)を書かない(C3-5 の grep で 0 件)。(b) 1156〜1157 行は `director = "mode"` が headless の director の mode を決めると書き、すぐあとに、codex は `codex_verified = true` で autonomous と edits が有効になると書く。座席の話だが、codex の director にも効くと読める。(c) doctor の検査の対象(1165〜1167 行)は「`codex_verified = true` で edits / autonomous に解決される role がある場合」と書き、role director の edits と autonomous を数えない変更(C3-L4)を反映しない。recipe の 62〜65 行は反映した。(d) 1182〜1184 行は「台帳を書くのは leader だけ」と書く。座席の話としては正しいが、recipe の 96〜100 行は headless の director も台帳を書くことと、それでも `--add-dir` を受けない理由を書く。(a)(b) は S8 の Progress が、(c) は S9 の Progress が /sync-docs に渡したもの。文書だけで直せる |
+| C3-V3 | LOW | `internal/cli/doctor_codex_writable_root.go:982`(`codexNotNeededWhyA`、398) | `codex_verified = true`、default が guarded、`[org.permissions.roles] director = "edits"`(または autonomous)で、ほかに workspace-write の role がないとき、Detail は「not needed: no role that can use a codex model resolves to edits or autonomous and ...」になる。role director は codex の model を使えて edits に解決されるので、文は文字どおりには正しくない。pass という結果は正しい(start がその director を断るので、workspace-write で動く codex はない)。テスト `TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted`(`doctor_codex_writable_root_test.go:981`)がこの文を 992 行の `notNeeded` で全文比較して固定するので、文を直すとテストも変わる。Go の変更になるので、上限 3 の最後の回のあとでは、self-review cycle 3 の Tech debt の下書きの行(C3-L2〜C3-L4)にこの 1 点を足して登録簿に入れる形がいちばん安い。直すときは「no seat role ... (role director's edits and autonomous do not count: director start refuses a codex director in them)」のような句にする |
+| C3-V4 | INFO | 前の回の記録 | cycle 1 と cycle 2 の AC6 の行(`codexWritableRootArgs` の director の分岐、codex_verified で codex の director の autonomous と edits が通る)と、cycle 2 の evidence の C2-6 の help の写し(「for codex, autonomous and edits need [org.permissions].codex_verified」)は、caf1d025 より前の木を書いている。書いた時点では正しかった。D12 で動きが変わったので、今の動きはこの節の AC6 と C3-4 が書く。前の節は書き換えていない |
+| C3-V5 | INFO | `checkStartAgmsgHome`(`internal/cli/org_director_headless.go:253`) | `RALPH_ORG_AGMSG_HOME` の警告は、model の検査、D12 の検査、登録の読みより前に出るので、そのあとで断られる start でも stderr に 1 行出る(Q11。D12 で断られ、herdr は 0、state dir なし)。D13 は「設定されていれば警告して続ける」と書くだけで、断られる start に出すかどうかを決めていない。害はない |
+
+### 観察
+
+- C3-3 の probe は、呼び出しを記録する偽の herdr を使った。本物の herdr server も agent も動かしていない。断る経路は herdr を打つ前に終わるので、偽の herdr の記録が 0 行であることで「herdr を打たない」を直接に確かめた。本物の codex を起動すると `~/.codex/config.toml` の更新時刻が変わりうる(cycle 1 の観察)ので、codex は起動しなかった
+- `~/.codex/config.toml` は probe の前後で、更新時刻(Oct 15 17:51:28 2026)、大きさ(33673)、sha256 が同じだった
+- 直す前の binary は `git archive 4b721b18` から作った。Q8 と Q9 で cross-review cycle 2 の 2 件が再現し、HEAD では同じ設定の Q2 と Q4 が断られた。Q10 では、直す前の binary も既定の設定(codex_verified = false)の codex を断っていたが、文は codex_verified の手順を案内していた。HEAD の Q1 は、codex_verified を true にしても通らないことを言う
+- start が起動した見張り 4 つは `ralph org watch --stop` で止め、あとの `pgrep` は空だった。repo と worktree の台帳はない
+
+### Coverage gaps(cycle 3)
+
+- テストの実行(/test の担当)。cycle 3 で足されたテスト(D12 の org と CLI の行、D13 の CLI の 5 関数、doctor の 2 つのテストの行)を go1.26 と `GOTOOLCHAIN=go1.25.8` で走らせるのは /test
+- guarded の codex の director が、人の codex の設定(`sandbox_mode = "danger-full-access"` など)の下で `ralph org start --plan` の `git worktree add` を通せるかは、本物の codex で見ていない。D12 の案内はこれを前提にする(tech-debt 259 行)
+- `RALPH_ORG_AGMSG_HOME` が director の pane に届かないことは、herdr の呼び出しの組み立て(`internal/org/driver/herdr.go` の `TabCreate` と `AgentStart` は引数だけを渡す)を読んで確かめただけで、本物の herdr server の pane の環境は見ていない
+- 足すと確信がいちばん増える確認: XDG の 3 変数と `HERDR_SOCKET_PATH` で隔離した herdr server で、`approval_policy = "never"` と `sandbox_mode = "danger-full-access"` を書いた一時の `CODEX_HOME` を使い、guarded の codex の director に `ralph org start --plan` を 1 回打たせて、`git worktree add` が通るかを見る。人の `~/.codex` には触れない
+
+### Verdict(cycle 3)
+
+- Verdict: pass(cycle 3、HEAD c5a6a596。LOW 3 件(C3-V1〜C3-V3)は文書と表示の文のずれで、merge を止めない)
+- Verified: D12(codex の director の autonomous と edits を codex_verified によらず断る、`codexWritableRootArgs` を leader だけに戻す)と D13(`--config` の相対の agmsg_home を断る、`RALPH_ORG_AGMSG_HOME` の警告)を、コードとテストの名前で辿り、HEAD の binary と偽の herdr で 5 つの断り(herdr 0、state dir なし、見張りなし)と 2 つの通る形を打って確かめた。直す前の 4b721b18 の binary で cross-review cycle 2 の 2 件が再現することも見た。self-review cycle 3 の C3-L1〜C3-L4 の直しを辿った。AC1・AC6・AC8・AC11・AC15 は binary でも見た。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build・vet・gofmt、skill と template の同期、`git diff --check`)。計画の digest は承認時と同じ
+- Partially verified: AC10(`starting` は実機で見ていない)、AC13(テストの側はコードを読んだ範囲)
+- Not verified: テストの実行、本物の herdr と codex の上で guarded の codex の director が機能の org を立てられること、本物の herdr の pane の環境
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(C3-V1〜C3-V3)。情報は 2 つ(C3-V4、C3-V5)
