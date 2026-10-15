@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:d59311f57d8e
+- Approved: 2026-10-15 sha256:671c60416856
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -138,7 +138,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - Static analysis checks: `./scripts/run-static-verify.sh`、`gofmt -l`、`go vet ./...`、`GOTOOLCHAIN=go1.25.8 go build ./... && go vet ./...`、`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`
 - Spec compliance criteria to confirm: FR-9 の起動 (B) の herdr の部分を AC1・AC7・AC8、`[org.permissions.roles].director` を AC6、受け入れ条件「director start --driver codex --model <slug>」を AC1 と実機の確認、FR-3 の「director は座席ではないので数えない」を AC1(manifest に書かない)と対応づける。launch_cmd が 8a-2b に送られたことを仕様の注に書いたか
 - Documentation drift to check: 「not available yet」「まだないもの」の headless の行(grep)、`/director` skill の 4 面、README と仕様の director の段落、AGENTS.md の repo map
-- Evidence to capture: 隔離した herdr server(XDG の 3 変数で分け、pane のシェルは bash)で、HEAD の binary の `ralph org director start --driver codex --model <slug>`(と claude)を打ち、`herdr workspace list` の label と `director.jsonl`、`ralph status` の `director:` の行を取り、`director stop --id` で pane と workspace が閉じることを確かめる。herdr が `_` を含む 22 字の label をそのまま返すことも見る。agent が起動しない環境なら、偽の herdr のテストと、そこまでの出力を残し、確かめていないと書く
+- Evidence to capture: 隔離した herdr server(XDG の 3 変数で分け、pane のシェルは bash)で、HEAD の binary の `ralph org director start --driver codex --model <slug>`(と claude)を打ち、`herdr workspace list` の label と `director.jsonl`、`ralph status` の `director:` の行を取り、`director stop --id` で pane と workspace が閉じることを確かめる。herdr が `_` を含む 27 字の label をそのまま返すことも見る。agent が起動しない環境なら、偽の herdr のテストと、そこまでの出力を残し、確かめていないと書く
 
 ## Test plan
 
@@ -182,7 +182,8 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - S1a b9861932(登録の拡張、雛形 `prompts/director.md` は他の役割と同じく日本語、spawn の role director の拒否)。S1b 8528515f(StartDirector と StopDirector、`codexWritableRootArgs` の director、StopAll の閉じていない headless の登録)。S1b の報告の 2 つの穴を consult(consult-plan-dirstop)に聞き、D11 と AC14 を足して計画を承認し直した(2026-10-15)
   - S1c b5ce8dea(stop を director_stop.go へ移すだけ)と a2d5fc01(stop の `--force`、director の workspace の中からの stop の拒否)。S2 d4da1c45(CLI の start・stop・status、stop --all の案内、main worktree の ralph.toml の読み方)。S2b 725fff10(org_director.go が 914 行になったので、start と stop の CLI を `internal/cli/org_director_headless.go` へ移すだけ)。新しいファイルを Affected areas に書き足し、承認し直した(digest d59311f57d8e、図は CLI のファイル名を描いていないので変えていない)
   - S3 9fb4f635(`/director` skill の 4 面、README、仕様 FR-9 の注、AGENTS.md、template の ralph.toml の注、tech-debt 5 行)。S3 の報告にあった範囲外の文書のずれ(`/org` skill の director の動詞の行、`ralph-workflow.md` の `/director` の項目が headless に触れない)は /sync-docs に渡す
-- [ ] Review artifact created
-- [ ] Verification artifact created
+  - self-review(cycle 1)b50d261b: CRITICAL・HIGH 0、MEDIUM 1、LOW 6。S4 da818b4f で 7 件を直し、dbd67a58 で改名のあとのコメント 4 行を直した。verify ec70c739 は pass(隔離した herdr server の実機で codex と claude の start と stop を確かめた)。verify の AC7 の一部未確認(見張りの印が古い場合)は S5 ca98c248 のテストで固定した(見張りを起動せずに断る)。verify の V4 で、Evidence to capture の label の字数を 22 から 27 に直し、承認し直した(digest 671c60416856、図は字数を描いていない)
+- [x] Review artifact created
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
