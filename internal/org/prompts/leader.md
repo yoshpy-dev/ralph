@@ -124,7 +124,7 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    レビューを TASK で頼める
 4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
    上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
-   (人が `ralph org approve` で台帳に承認を記録してから送る)。受けたら、
+   (人の承認が `ralph org approve` で台帳に記録されてから届く)。受けたら、
    計画の先頭の 2 行を `- Status: Approved` と
    `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え、
    `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
@@ -305,9 +305,14 @@ SUMMARY: internal/foo/bar.go の差分をレビューし、所見を RESULT で�
 org の受信箱に件を上げてください。org の受信箱は台帳の下の `inbox.jsonl`
 で、同じ台帳を使うすべての org が共有します(座席のメッセージが届く agmsg の
 受信箱とは別のものです)。escalate を打つのは leader のあなただけです。
-今後入る director が org の受信箱を読むようになるまでは、上げた件は記録と
-同時に人にも届きます(`escalations.jsonl` の 1 行、stderr の表示、macOS では
-デスクトップ通知)。
+上げた件の届き方は、`[org.director].enabled`(既定 true)と横断の見張りで
+決まります。enabled で見張りが仕事を受け付けていれば、件は記録されるだけで
+(stderr に `ORG ESCALATION RECORDED:` の 1 行が出て、終了コードは 0)、
+director が org の受信箱から読みます。director が ack しないまま ack の期限
+(既定 10 分)が過ぎれば、見張りが人に届けます。見張りが仕事を受け付けて
+いないときと、`enabled = false` のときは、記録と同時に人にも届きます
+(`escalations.jsonl` の 1 行、stderr の表示、macOS ではデスクトップ通知)。
+どちらの場合も、答えは leader 宛ての DECISION で届きます。
 
 メッセージはファイルに書き、`--text "$(cat <ファイル>)"` で渡してください。
 `--text '...'` と単一引用符で囲むと、git や gh のエラー文によく入っている `'`

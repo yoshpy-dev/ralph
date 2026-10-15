@@ -170,6 +170,9 @@ func runOrgCmdStreamsWithin(t *testing.T, limit time.Duration, args ...string) (
 	}
 }
 
+// AC4: no watch runs on the ledger (TestMain leaves the escalate watch
+// probe real), so with the director switch on by default the item goes to
+// the human at once with inbox_no_watch.
 func TestOrgEscalate_PrintsTheIDAndNotifiesTheHuman(t *testing.T) {
 	rec := recordDesktopNotify(t, nil)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -184,11 +187,11 @@ func TestOrgEscalate_PrintsTheIDAndNotifiesTheHuman(t *testing.T) {
 		}
 	}
 	item := cliInboxItem(t, stateDir, "e1")
-	if item.State != org.InboxStateOpen || !item.Notified || item.OrgID != "org-a" || item.Type != "QUESTION" {
-		t.Errorf("e1 = %+v; want open, notified, org-a, QUESTION", item)
+	if item.State != org.InboxStateOpen || !item.Notified || item.OrgID != "org-a" || item.Type != "QUESTION" || item.Delivery != org.InboxDeliveryNow {
+		t.Errorf("e1 = %+v; want open, notified, delivery now, org-a, QUESTION", item)
 	}
-	if last := item.Events[len(item.Events)-1]; last.Event != org.InboxEventNotified || last.Osascript != "ok" || last.Reason != "inbox_no_director" {
-		t.Errorf("last e1 event = %+v; want notified (inbox_no_director, osascript ok)", last)
+	if last := item.Events[len(item.Events)-1]; last.Event != org.InboxEventNotified || last.Osascript != "ok" || last.Reason != "inbox_no_watch" {
+		t.Errorf("last e1 event = %+v; want notified (inbox_no_watch, osascript ok)", last)
 	}
 	escLines := readLogLines(t, org.EscalationsPathIn(stateDir))
 	if len(escLines) != 1 {
@@ -198,8 +201,8 @@ func TestOrgEscalate_PrintsTheIDAndNotifiesTheHuman(t *testing.T) {
 	if err := json.Unmarshal([]byte(escLines[0]), &esc); err != nil {
 		t.Fatalf("parse the escalations line: %v", err)
 	}
-	if esc["inbox_id"] != "e1" || esc["org_id"] != "org-a" || esc["reason"] != "inbox_no_director" {
-		t.Errorf("escalations line = %v; want inbox_id e1, org_id org-a, reason inbox_no_director", esc)
+	if esc["inbox_id"] != "e1" || esc["org_id"] != "org-a" || esc["reason"] != "inbox_no_watch" {
+		t.Errorf("escalations line = %v; want inbox_id e1, org_id org-a, reason inbox_no_watch", esc)
 	}
 	if calls := rec.calls(); len(calls) != 1 || !strings.Contains(calls[0], "e1") || strings.Contains(calls[0], "plan A") {
 		t.Errorf("desktop notifications = %q; want one naming e1 without the body", calls)
@@ -309,6 +312,9 @@ func TestOrgEscalate_RecordedNotNotified_ExitsOneThenInboxNotifyCompletesIt(t *t
 	inbox := readCLIInbox(t, stateDir)
 	if ids := cliInboxIDs(inbox.Items); !slices.Equal(ids, []string{"e1"}) || !inbox.Items[0].Notified {
 		t.Errorf("inbox = %+v; want e1 alone, notified", inbox.Items)
+	}
+	if got := escalationReasonsIn(t, stateDir); !slices.Equal(got, []string{"e1 inbox_manual_notify"}) {
+		t.Errorf("escalations.jsonl = %v; want inbox notify's line with inbox_manual_notify", got)
 	}
 	listOut, _ = runInboxOK(t, "inbox", "--state-dir", stateDir)
 	if rows := inboxTableRows(t, listOut); len(rows) != 1 || rows[0][6] != "yes" {
@@ -457,6 +463,328 @@ func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
 	}
 }
 
+// escalationReasonsIn returns "<inbox_id> <reason>" for each line of the
+// escalations.jsonl in stateDir; nil when it does not exist.
+func escalationReasonsIn(t *testing.T, stateDir string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range readLogLines(t, org.EscalationsPathIn(stateDir)) {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("parse the escalations line %q: %v", line, err)
+		}
+		id, _ := rec["inbox_id"].(string)
+		reason, _ := rec["reason"].(string)
+		out = append(out, id+" "+reason)
+	}
+	return out
+}
+
+// setEscalateWatch makes every escalate's watch probe report l
+// (orgEscalateWatchOverride), and restores TestMain's nil at cleanup.
+func setEscalateWatch(t *testing.T, l org.WatchLiveness) {
+	t.Helper()
+	orig := orgEscalateWatchOverride
+	orgEscalateWatchOverride = func() org.WatchLiveness { return l }
+	t.Cleanup(func() { orgEscalateWatchOverride = orig })
+}
+
+// acceptingWatchLiveness is what the probe reports for a long-running watch
+// that accepts work.
+func acceptingWatchLiveness() org.WatchLiveness {
+	return org.WatchLiveness{State: org.WatchLivenessRunning, Mark: runningMark(4242, time.Now())}
+}
+
+// AC3, AC11: with the director switch on (the built-in default) and a watch
+// that accepts work, escalate only records the item: no escalations.jsonl
+// line, no notified event, no desktop notification, exit 0, the ID on
+// stdout, and the recorded-only banner on stderr. The list says deferred,
+// show says who takes it and how to send it now, and --json carries the
+// delivery. inbox notify then sends it with inbox_manual_notify. A resolved
+// deferred item is NOTIFIED no, as before.
+func TestOrgEscalate_WatchAcceptsWork_RecordsTheItemOnly(t *testing.T) {
+	rec := recordDesktopNotify(t, nil)
+	setEscalateWatch(t, acceptingWatchLiveness())
+	stateDir := t.TempDir()
+	ledger := []string{"--state-dir", stateDir}
+	suffix := " --state-dir '" + stateDir + "'"
+
+	stdout, stderr := runInboxOK(t, "escalate", "--org-id", "org-a", "--text", inboxQuestion("plan A or plan B?"), "--state-dir", stateDir)
+	if want := "escalated e1 (org=org-a type=QUESTION)\n"; stdout != want {
+		t.Errorf("stdout = %q; want %q", stdout, want)
+	}
+	wantBanner := "ORG ESCALATION RECORDED: org=org-a item=e1 type=QUESTION -- left in " + org.InboxPathIn(stateDir) + " for the director; " +
+		"if it is still open after the ack deadline of ralph org watch --all ([org.director].ack_minutes), the watch sends it to the human; " +
+		"read it with: ralph org inbox show e1" + suffix + "\n"
+	if stderr != wantBanner {
+		t.Errorf("stderr = %q; want %q", stderr, wantBanner)
+	}
+	if got := escalationReasonsIn(t, stateDir); got != nil {
+		t.Errorf("escalations.jsonl = %v; want none for a deferred item", got)
+	}
+	if calls := rec.calls(); len(calls) != 0 {
+		t.Errorf("desktop notifications = %q; want none", calls)
+	}
+	item := cliInboxItem(t, stateDir, "e1")
+	if item.Delivery != org.InboxDeliveryDeadline || item.Notified || len(item.Events) != 1 {
+		t.Fatalf("e1 = %+v; want delivery deadline, not notified, the escalated event only", item)
+	}
+
+	listOut, _ := runInboxOK(t, append([]string{"inbox"}, ledger...)...)
+	if rows := inboxTableRows(t, listOut); len(rows) != 1 || rows[0][0] != "e1" || rows[0][6] != "deferred" {
+		t.Errorf("inbox rows = %q; want e1 with NOTIFIED deferred", rows)
+	}
+	showOut, _ := runInboxOK(t, append([]string{"inbox", "show", "e1"}, ledger...)...)
+	if want := "notified: deferred (left to the director, or to the inbox deadlines of ralph org watch --all; to send it to the human now: ralph org inbox notify e1" + suffix + ")\n"; !strings.Contains(showOut, want) {
+		t.Errorf("inbox show does not contain %q:\n%s", want, showOut)
+	}
+	jsonOut, _ := runInboxOK(t, append([]string{"inbox", "--json"}, ledger...)...)
+	var payload orgInboxJSON
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("inbox --json: %v\n%s", err, jsonOut)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].Delivery != org.InboxDeliveryDeadline || !strings.Contains(jsonOut, `"delivery": "deadline"`) {
+		t.Errorf("inbox --json = %s; want e1 with delivery deadline", jsonOut)
+	}
+	showJSON, _ := runInboxOK(t, append([]string{"inbox", "show", "e1", "--json"}, ledger...)...)
+	if !strings.Contains(showJSON, `"delivery": "deadline"`) {
+		t.Errorf("inbox show --json = %s; want delivery deadline", showJSON)
+	}
+
+	stdout, stderr = runInboxOK(t, append([]string{"inbox", "notify", "e1"}, ledger...)...)
+	if stdout != "notified e1\n" || !strings.Contains(stderr, "ORG ESCALATION: org=org-a item=e1 ") {
+		t.Errorf("inbox notify stdout %q, stderr %q; want notified e1 and the escalation banner", stdout, stderr)
+	}
+	if got := escalationReasonsIn(t, stateDir); !slices.Equal(got, []string{"e1 inbox_manual_notify"}) {
+		t.Errorf("escalations.jsonl = %v; want inbox notify's line with inbox_manual_notify", got)
+	}
+	if calls := rec.calls(); len(calls) != 1 {
+		t.Errorf("desktop notifications = %q; want inbox notify's one", calls)
+	}
+	listOut, _ = runInboxOK(t, append([]string{"inbox"}, ledger...)...)
+	if rows := inboxTableRows(t, listOut); len(rows) != 1 || rows[0][6] != "yes" {
+		t.Errorf("inbox rows after notify = %q; want NOTIFIED yes", rows)
+	}
+
+	escalateOK(t, stateDir, "org-b", "TYPE: RESULT\nTASK_ID: org-b\n\nPR opened")
+	runInboxOK(t, append([]string{"inbox", "resolve", "e2", "--note", "https://example.invalid/pull/2"}, ledger...)...)
+	listOut, _ = runInboxOK(t, append([]string{"inbox", "--all"}, ledger...)...)
+	if rows := inboxTableRows(t, listOut); len(rows) != 2 || rows[1][0] != "e2" || rows[1][6] != "no" {
+		t.Errorf("inbox --all rows = %q; want the resolved deferred e2 with NOTIFIED no", rows)
+	}
+	if showOut, _ := runInboxOK(t, append([]string{"inbox", "show", "e2"}, ledger...)...); !strings.Contains(showOut, "notified: no\n") {
+		t.Errorf("inbox show of the resolved deferred e2 does not say notified: no:\n%s", showOut)
+	}
+}
+
+// AC3, AC4 through the real probe (no override): the watch.lock and the
+// liveness mark of the ledger escalate writes to decide. A running mark
+// leaves the item to the director; a --once mark, a stale mark, and no
+// watch send it at once with inbox_no_watch.
+func TestOrgEscalate_ProbesTheLedgersWatch(t *testing.T) {
+	once := runningMark(4242, time.Now())
+	once.Once = true
+	for _, tc := range []struct {
+		name       string
+		hold       bool
+		mark       *org.WatchAlive
+		wantReason string // "" means deferred
+	}{
+		{"a running watch", true, runningMark(4242, time.Now()), ""},
+		{"a --once watch", true, once, "inbox_no_watch"},
+		{"a stale watch", true, runningMark(4242, time.Now().Add(-time.Hour)), "inbox_no_watch"},
+		{"no watch", false, nil, "inbox_no_watch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := recordDesktopNotify(t, nil)
+			stateDir := t.TempDir()
+			if tc.hold {
+				holdWatchLock(t, stateDir, tc.mark)
+			}
+			escalateOK(t, stateDir, "org-a", inboxQuestion("which?"))
+			item := cliInboxItem(t, stateDir, "e1")
+			if tc.wantReason == "" {
+				if item.Delivery != org.InboxDeliveryDeadline || item.Notified || escalationReasonsIn(t, stateDir) != nil || len(rec.calls()) != 0 {
+					t.Errorf("e1 = %+v, escalations %v, notifications %q; want deferred with nothing sent", item, escalationReasonsIn(t, stateDir), rec.calls())
+				}
+				return
+			}
+			if item.Delivery != org.InboxDeliveryNow || !item.Notified || len(rec.calls()) != 1 {
+				t.Errorf("e1 = %+v, notifications %q; want delivery now, notified", item, rec.calls())
+			}
+			if got, want := escalationReasonsIn(t, stateDir), []string{"e1 " + tc.wantReason}; !slices.Equal(got, want) {
+				t.Errorf("escalations.jsonl = %v; want %v", got, want)
+			}
+		})
+	}
+}
+
+// AC4, AC5: enabled is read from the main worktree's ralph.toml when no
+// --config is given and the ledger is the main worktree's, however it was
+// found, so a feature worktree's ralph.toml does not switch it; --config,
+// and a ledger that is not the main worktree's, keep the caller's config.
+// The watch accepts work in every case, so enabled alone decides.
+func TestOrgEscalate_DirectorEnabledFromTheMainWorktreeRalphToml(t *testing.T) {
+	const disabled = "[org.director]\nenabled = false\n"
+	cases := []struct {
+		name string
+		// mainToml is the main checkout's ralph.toml ("" for none).
+		mainToml string
+		// setup writes the worktree's files and returns the escalate flags
+		// and the ledger it writes to ("" for the shared one).
+		setup      func(t *testing.T, r legacyLedgerRepo) (extra []string, ledger string)
+		wantReason string // "" means deferred
+	}{
+		{"main says false, from the linked worktree", disabled, func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			return nil, ""
+		}, "inbox_director_disabled"},
+		{"main says false, from a main checkout subdirectory", disabled, func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			sub := filepath.Join(r.mainRoot, "pkg")
+			if err := os.MkdirAll(sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(sub)
+			return nil, ""
+		}, "inbox_director_disabled"},
+		{"main says false, the worktree says true", disabled, func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), "[org.director]\nenabled = true\n")
+			return nil, ""
+		}, "inbox_director_disabled"},
+		{"no main ralph.toml, the worktree says false", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
+			return nil, ""
+		}, ""},
+		{"main says true, the worktree says false, --state-dir names the shared ledger", "[org.director]\nenabled = true\n", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
+			return []string{"--state-dir", r.sharedDir}, ""
+		}, ""},
+		{"no main ralph.toml, the worktree says false, RALPH_ORG_STATE_DIR names the shared ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
+			t.Setenv(org.EnvOrgStateDir, r.sharedDir)
+			return nil, ""
+		}, ""},
+		{"--config says false", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			writeTestFile(t, path, disabled)
+			return []string{"--config", path}, ""
+		}, "inbox_director_disabled"},
+		{"the worktree says false, --state-dir names another ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
+			other := filepath.Join(t.TempDir(), "org")
+			return []string{"--state-dir", other}, other
+		}, "inbox_director_disabled"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := recordDesktopNotify(t, nil)
+			setEscalateWatch(t, acceptingWatchLiveness())
+			r := newLegacyLedgerRepo(t)
+			if tc.mainToml != "" {
+				writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), tc.mainToml)
+			}
+			extra, ledger := tc.setup(t, r)
+			if ledger == "" {
+				ledger = r.sharedDir
+			}
+
+			stdout, stderr := runInboxOK(t, append([]string{"escalate", "--org-id", "org-a", "--text", inboxQuestion("which?")}, extra...)...)
+			if stdout != "escalated e1 (org=org-a type=QUESTION)\n" {
+				t.Fatalf("stdout = %q (stderr %q)", stdout, stderr)
+			}
+			item := cliInboxItem(t, ledger, "e1")
+			if tc.wantReason == "" {
+				if item.Delivery != org.InboxDeliveryDeadline || item.Notified || escalationReasonsIn(t, ledger) != nil || len(rec.calls()) != 0 {
+					t.Errorf("e1 = %+v, escalations %v, notifications %q; want deferred with nothing sent", item, escalationReasonsIn(t, ledger), rec.calls())
+				}
+				if !strings.HasPrefix(stderr, "ORG ESCALATION RECORDED: ") {
+					t.Errorf("stderr = %q; want the recorded-only banner", stderr)
+				}
+				return
+			}
+			if got, want := escalationReasonsIn(t, ledger), []string{"e1 " + tc.wantReason}; !slices.Equal(got, want) {
+				t.Errorf("escalations.jsonl = %v; want %v", got, want)
+			}
+			if item.Delivery != org.InboxDeliveryNow || !item.Notified || len(rec.calls()) != 1 {
+				t.Errorf("e1 = %+v, notifications %q; want delivery now, notified once", item, rec.calls())
+			}
+		})
+	}
+}
+
+// A main worktree ralph.toml that does not load is handled like a
+// ralph.toml that does not load: the human gets the not-recorded banner and
+// the desktop notification, nothing is recorded, and escalate exits 1 with
+// an error naming the file.
+func TestOrgEscalate_MainWorktreeRalphTomlLoadError_AlertsTheHumanAndExitsOne(t *testing.T) {
+	rec := recordDesktopNotify(t, nil)
+	setEscalateWatch(t, acceptingWatchLiveness())
+	r := newLegacyLedgerRepo(t)
+	mainToml := filepath.Join(r.mainRoot, "ralph.toml")
+	writeTestFile(t, mainToml, "[org]\nmax_orgs = 0\n")
+
+	stdout, stderr, err := runOrgCmdStreams(t, "escalate", "--org-id", "org-a", "--text", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck")
+	if err == nil {
+		t.Fatal("expected escalate to exit 1 when the main worktree's ralph.toml does not load")
+	}
+	for _, want := range []string{"could not be recorded", "[org.director].enabled", mainToml, "[org].max_orgs must be >= 1, got 0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want no ID", stdout)
+	}
+	if !strings.Contains(stderr, "ORG ESCALATION (NOT RECORDED): org=org-a type=BLOCKED") || !strings.Contains(stderr, mainToml) {
+		t.Errorf("stderr = %q; want the not-recorded banner naming %s", stderr, mainToml)
+	}
+	if calls := rec.calls(); len(calls) != 1 {
+		t.Errorf("desktop notifications = %q; want one", calls)
+	}
+	if got := inboxFileOrAbsent(t, r.sharedDir); got != "<absent>" {
+		t.Errorf("inbox = %q; want absent", got)
+	}
+	if got := escalationReasonsIn(t, r.sharedDir); !slices.Equal(got, []string{" inbox_not_recorded"}) {
+		t.Errorf("escalations.jsonl = %v; want one inbox_not_recorded line", got)
+	}
+}
+
+// AC8 for the Go help: escalate, inbox, and inbox notify describe the
+// director switch, the reasons, and NOTIFIED deferred.
+func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		wants []string
+	}{
+		{[]string{"escalate", "--help"}, []string{
+			"[org.director].enabled (default true)", "delivery deadline", "inbox_ack_deadline",
+			"Whether a director is attached does not change this.", "inbox_no_watch", "it is a --once run",
+			"inbox_director_disabled", "Without --config, enabled is read from the main worktree's ralph.toml",
+			"A main worktree ralph.toml that does not load is handled like a ralph.toml that does not load",
+		}},
+		{[]string{"inbox", "--help"}, []string{"deferred for one escalate left to the director", "A resolved item is yes or no."}},
+		{[]string{"inbox", "notify", "--help"}, []string{"reason inbox_manual_notify", "(NOTIFIED deferred)"}},
+		// The verb list carries each Short.
+		{[]string{"--help"}, []string{"Raise an item in the org inbox for the director or the human"}},
+		{[]string{"inbox", "--help"}, []string{"Send an inbox item to the human now"}},
+	} {
+		out, err := runOrgCmd(t, tc.args...)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		help := strings.Join(strings.Fields(out), " ")
+		for _, want := range tc.wants {
+			if !strings.Contains(help, want) {
+				t.Errorf("%v does not say %q:\n%s", tc.args, want, out)
+			}
+		}
+		for _, stale := range []string{"Until a director can be registered", "for now, notify the human"} {
+			if strings.Contains(help, stale) {
+				t.Errorf("%v still says %q", tc.args, stale)
+			}
+		}
+	}
+}
+
 // seedInboxStates escalates e1 (open), e2 (acked), and e3 (resolved) into
 // stateDir through the CLI.
 func seedInboxStates(t *testing.T, stateDir string) {
@@ -536,7 +864,7 @@ func TestOrgInbox_Show(t *testing.T) {
 	for _, sub := range []string{
 		"id: e2\n", "state: acked\n", "org: org-b\n", "type: BLOCKED\n", "task_id: org-b\n",
 		"acked_at: ", "notified: yes (", "message:\n  TYPE: BLOCKED\n  TASK_ID: org-b\n  \n  gh auth is missing\n",
-		"events:\n", " escalated\n", " notified reason=inbox_no_director osascript=ok\n", " acked\n",
+		"events:\n", " escalated\n", " notified reason=inbox_no_watch osascript=ok\n", " acked\n",
 	} {
 		if !strings.Contains(stdout, sub) {
 			t.Errorf("show e2 does not contain %q:\n%s", sub, stdout)
@@ -891,6 +1219,7 @@ func TestOrgWaitInbox_TimesOut(t *testing.T) {
 			tc.seed(t, stateDir)
 
 			stdout, _, elapsed, err := runOrgCmdStreamsWithin(t, 5*time.Second, "wait", "--inbox", "--timeout-ms", "300", "--state-dir", stateDir)
+			// The /director skill matches part of this text (org's inboxWaitTimeoutPhrase, internal/org/director_skill_sync_test.go).
 			if err == nil || !strings.Contains(err.Error(), "no open inbox item arrived within 300 ms") {
 				t.Fatalf("error = %v; want a timeout after 300 ms", err)
 			}

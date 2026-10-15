@@ -258,11 +258,12 @@ func TestStatusCmd_MergeGuaranteeOutsideARepositoryIsOriginUnreadable(t *testing
 	}
 }
 
-// AC6: the line comes right after the `org watch:` line on both text paths:
-// with no org (after the empty-roster note, before the doctor hint) and with
-// orgs (after the state-dir line, before the scaffold section and the
-// rosters).
-func TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine(t *testing.T) {
+// AC6: the line comes right after the `org watch:` line and the `director:`
+// line that follows it (plan 2026-10-14-org-director-attach) on both text
+// paths: with no org (after the empty-roster note, before the doctor hint)
+// and with orgs (after the state-dir line, before the scaffold section and
+// the rosters).
+func TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchAndDirectorLines(t *testing.T) {
 	statusMGRepo(t, "https://github.com/acme/app.git")
 	c := freshMergeGuaranteeCache("main")
 	wantLine := "merge guarantee: " + cachedMergeGuaranteeText(c)
@@ -286,9 +287,9 @@ func TestStatusCmd_MergeGuaranteeLineFollowsTheOrgWatchLine(t *testing.T) {
 				t.Fatalf("status: %v (output: %s)", err, out)
 			}
 			lines := strings.Split(out, "\n")
-			if len(lines) < 4 || !strings.HasPrefix(lines[0], tc.before) || !strings.HasPrefix(lines[1], "org watch: ") ||
-				lines[2] != wantLine || !strings.HasPrefix(lines[3], tc.after) {
-				t.Errorf("want %q, the org watch line, %q, then %q, got:\n%s", tc.before, wantLine, tc.after, out)
+			if len(lines) < 5 || !strings.HasPrefix(lines[0], tc.before) || !strings.HasPrefix(lines[1], "org watch: ") ||
+				!strings.HasPrefix(lines[2], "director: ") || lines[3] != wantLine || !strings.HasPrefix(lines[4], tc.after) {
+				t.Errorf("want %q, the org watch line, the director line, %q, then %q, got:\n%s", tc.before, wantLine, tc.after, out)
 			}
 		})
 	}
@@ -330,10 +331,24 @@ printf '%s\n' "$*" >> "$STATUS_MG_GH_LOG"
 exit 1
 `
 
-// AC6 and AC8: status never runs gh, and with a fresh cache its only git call
-// is the local `git remote get-url origin`, once a run, on both text and
-// --json, with orgs and without. PATH holds only a bin dir whose gh and git
-// log their calls (the git then runs the real one).
+// statusMGMaxRevParsePerRun is the most `git rev-parse` calls one `ralph
+// status --state-dir` run of TestStatusCmd_MergeGuaranteeRunsNoGH may make.
+// It is the number one run makes today: the two of gitMainWorktree in a
+// main checkout (rev-parse --git-dir --git-common-dir, then rev-parse
+// --show-toplevel), run once, when withMainWorktreeDirectorEnabled tells
+// whether --state-dir names the main worktree's ledger. A second read of
+// the switch, or a loop around it, goes over it (the bound the self-review
+// of org-director-attach asked for, Test intent changes (1)).
+const statusMGMaxRevParsePerRun = 2
+
+// AC6 and AC8: status never runs gh, and with a fresh cache its git calls are
+// local: the `git remote get-url origin` of the guarantee, once a run, and
+// the `git rev-parse` calls by which the director: line tells whether
+// --state-dir names the main worktree's ledger, whose ralph.toml then holds
+// [org.director].enabled (withMainWorktreeDirectorEnabled, plan
+// 2026-10-14-org-director-attach), at most statusMGMaxRevParsePerRun a run,
+// on both text and --json, with orgs and without. PATH holds only a bin dir
+// whose gh and git log their calls (the git then runs the real one).
 func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 	statusMGRepo(t, "https://github.com/acme/app.git")
 	realGit, err := exec.LookPath("git")
@@ -364,11 +379,21 @@ func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 	runs := 0
 	for _, dir := range []string{emptyDir, populatedDir} {
 		for _, extra := range [][]string{nil, {"--json"}} {
+			before := len(readLogLines(t, gitLog))
 			out, err := runStatusCmd(t, append([]string{"--state-dir", dir}, extra...)...)
 			if err != nil {
 				t.Fatalf("status %v: %v (output: %s)", extra, err, out)
 			}
 			runs++
+			revParse := 0
+			for _, call := range readLogLines(t, gitLog)[before:] {
+				if strings.HasPrefix(call, "rev-parse ") {
+					revParse++
+				}
+			}
+			if revParse > statusMGMaxRevParsePerRun {
+				t.Errorf("status %v ran git rev-parse %d times in one run; want at most %d", extra, revParse, statusMGMaxRevParsePerRun)
+			}
 			if extra == nil && statusMergeGuaranteeLine(t, out) != "merge guarantee: "+cachedMergeGuaranteeText(c) {
 				t.Errorf("status read no cached kind with the logging git:\n%s", out)
 			}
@@ -378,13 +403,18 @@ func TestStatusCmd_MergeGuaranteeRunsNoGH(t *testing.T) {
 		t.Errorf("status ran gh: %q (stat: %v)", readLogLines(t, ghLog), err)
 	}
 	gitCalls := readLogLines(t, gitLog)
-	if len(gitCalls) != runs {
-		t.Errorf("git ran %d times over %d status runs: %q; want once a run", len(gitCalls), runs, gitCalls)
-	}
+	origin := 0
 	for _, call := range gitCalls {
-		if call != "remote get-url origin" {
-			t.Errorf("status ran git %s; want only the local remote get-url origin", call)
+		switch {
+		case call == "remote get-url origin":
+			origin++
+		case strings.HasPrefix(call, "rev-parse "):
+		default:
+			t.Errorf("status ran git %s; want only the local remote get-url origin and rev-parse", call)
 		}
+	}
+	if origin != runs {
+		t.Errorf("git remote get-url origin ran %d times over %d status runs: %q; want once a run", origin, runs, gitCalls)
 	}
 }
 

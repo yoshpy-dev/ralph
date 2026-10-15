@@ -16,7 +16,10 @@ import (
 
 // Tests for `ralph org approve` and the CLI side of the approval check (plan
 // docs/plans/active/2026-10-12-org-plan-approval.md, AC2, AC3, AC4 and
-// AC13). Most of them seed the ledger as `ralph org start --plan` leaves it
+// AC13, and AC10 of plan 2026-10-14-org-director-attach, which makes approve
+// record only and print the resolve after the send: the tests that checked
+// 7a's resolve now check that the item stays open). Most of them seed the
+// ledger as `ralph org start --plan` leaves it
 // (seedApprovalOrg) instead of running start, whose recording of the mode is
 // covered by TestOrgStartPlan_ApprovalModeFromMainWorktree; the AC13 test
 // runs the real start in a temp git repo. None of them runs in parallel:
@@ -117,15 +120,18 @@ func planApprovedEvents(t *testing.T, stateDir string) []org.ManifestEvent {
 
 // wantApprovedBlock is what approve prints on stdout for the item id of
 // orgID approving ref: its approved line, then the send command whose
-// DECISION tells the leader, the message spelled out here. stateDirFlag is
-// " --state-dir '<dir>'" when the command repeats the ledger, else "".
+// DECISION tells the leader, the message spelled out here, and then the
+// resolve command to run once that send succeeded. stateDirFlag is
+// " --state-dir '<dir>'" when the commands repeat the ledger, else "".
 func wantApprovedBlock(id, orgID string, ref org.PlanRef, stateDirFlag string) string {
 	return "approved " + id + " (org=" + orgID + " plan=" + ref.Path + " sha256:" + ref.Digest + ")\n" +
-		"approve sends no message; tell the leader of org " + orgID + " with:\n" +
+		"approve sends no message and resolves nothing; tell the leader of org " + orgID + " with:\n" +
 		"ralph org send --org-id " + orgID + " --to leader" + stateDirFlag + " --text 'TYPE: DECISION\n" +
 		"PLAN: " + ref.Path + " sha256:" + ref.Digest + "\n" +
 		"\n" +
-		"approved'\n"
+		"approved'\n" +
+		"once that send succeeded, resolve the item with:\n" +
+		"ralph org inbox resolve " + id + stateDirFlag + " --note 'approved " + ref.Path + " sha256:" + ref.Digest + "'\n"
 }
 
 // ledgerFiles is the manifest's and the inbox's bytes under stateDir, which a
@@ -147,12 +153,13 @@ func fileBytesOrAbsent(t *testing.T, path string) string {
 	return string(data)
 }
 
-// AC2: approve records one plan_approved for the item, with the plan, its
-// digest and whole-file hash, the item, and who ran it; resolves the item
-// with the approval as its note; prints the approved line and the DECISION
-// command (repeating the --state-dir it was given) and the note that the file
-// was recorded as it is now; and leaves the plan file as it was.
-func TestOrgApprove_RecordsResolvesAndPrintsTheDecision(t *testing.T) {
+// AC2 and AC10: approve records one plan_approved for the item, with the
+// plan, its digest and whole-file hash, the item, and who ran it; leaves the
+// inbox as it was, so the item stays open; prints the approved line, the
+// DECISION command, and then the resolve command (both repeating the
+// --state-dir it was given), and the note that the file was recorded as it
+// is now; and leaves the plan file as it was.
+func TestOrgApprove_RecordsAndPrintsTheSendThenTheResolve(t *testing.T) {
 	approveEnv(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
 	wt := seedApprovalOrg(t, stateDir, "a", "per-plan")
@@ -160,6 +167,7 @@ func TestOrgApprove_RecordsResolvesAndPrintsTheDecision(t *testing.T) {
 	id := escalateOK(t, stateDir, "a", planQuestion(ref))
 	planPath := filepath.Join(wt, filepath.FromSlash(approveTestPlanRel))
 	eventsBefore := len(readManifestEvents(t, org.ManifestPathIn(stateDir)))
+	inboxBefore := inboxFileOrAbsent(t, stateDir)
 	cwd, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -193,8 +201,11 @@ func TestOrgApprove_RecordsResolvesAndPrintsTheDecision(t *testing.T) {
 	if got := len(readManifestEvents(t, org.ManifestPathIn(stateDir))); got != eventsBefore+1 {
 		t.Errorf("manifest events %d -> %d; want only the plan_approved added", eventsBefore, got)
 	}
-	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved || item.Note != "approved "+ref.String() {
-		t.Errorf("item %s = state %q note %q; want resolved with the note %q", id, item.State, item.Note, "approved "+ref.String())
+	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateOpen || item.Note != "" {
+		t.Errorf("item %s = state %q note %q; want it still open with no note", id, item.State, item.Note)
+	}
+	if after := inboxFileOrAbsent(t, stateDir); after != inboxBefore {
+		t.Errorf("approve wrote to the inbox:\nbefore: %s\nafter:  %s", inboxBefore, after)
 	}
 	if got := string(readFileBytes(t, planPath)); got != approveTestPlanDraft {
 		t.Errorf("approve changed the plan file:\n%s", got)
@@ -211,8 +222,10 @@ func TestOrgApprove_RecordsResolvesAndPrintsTheDecision(t *testing.T) {
 // with a stub ralph on PATH that prints its arguments, it gives `org send`
 // to the org's leader, the --state-dir, and the message, line breaks and
 // single quotes kept; and those arguments, with --dry-run, are a send the CLI
-// accepts.
-func TestOrgApprove_TheDecisionCommandRunsInAPOSIXShell(t *testing.T) {
+// accepts. The resolve command after it is one too: it gives `org inbox
+// resolve` of the item with the --state-dir and the note, single quotes
+// kept, and those arguments resolve the item with that note.
+func TestOrgApprove_TheDecisionAndResolveCommandsRunInAPOSIXShell(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Fatalf("sh is needed to run the printed command: %v", err)
@@ -230,16 +243,30 @@ func TestOrgApprove_TheDecisionCommandRunsInAPOSIXShell(t *testing.T) {
 		t.Fatalf("no send command in stdout:\n%s", stdout)
 	}
 	command := stdout[start : end+len("\napproved'")]
+	var resolveCommand string
+	for _, line := range strings.Split(stdout[end:], "\n") {
+		if strings.HasPrefix(line, "ralph org inbox resolve ") {
+			resolveCommand = line
+			break
+		}
+	}
+	if resolveCommand == "" {
+		t.Fatalf("no resolve command after the send command in stdout:\n%s", stdout)
+	}
 
 	stubDir := t.TempDir()
 	writeStubScript(t, filepath.Join(stubDir, "ralph"), "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\000' \"$a\"; done\n")
-	run := exec.Command(sh, "-c", command)
-	run.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := run.Output()
-	if err != nil {
-		t.Fatalf("sh -c %q: %v", command, err)
+	stubArgv := func(command string) []string {
+		t.Helper()
+		run := exec.Command(sh, "-c", command)
+		run.Env = append(os.Environ(), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		out, err := run.Output()
+		if err != nil {
+			t.Fatalf("sh -c %q: %v", command, err)
+		}
+		return strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
 	}
-	argv := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	argv := stubArgv(command)
 	message := "TYPE: DECISION\nPLAN: docs/plans/active/it's-a.md sha256:" + ref.Digest + "\n\napproved"
 	if want := []string{"org", "send", "--org-id", "a", "--to", "leader", "--state-dir", stateDir, "--text", message}; !slices.Equal(argv, want) {
 		t.Fatalf("the command's arguments = %q\nwant %q", argv, want)
@@ -254,10 +281,20 @@ func TestOrgApprove_TheDecisionCommandRunsInAPOSIXShell(t *testing.T) {
 		!strings.Contains(last.Details, "TYPE: DECISION") {
 		t.Errorf("last event = %+v; want a dry-run sent to a/leader with the DECISION", last)
 	}
+
+	argv = stubArgv(resolveCommand)
+	note := "approved docs/plans/active/it's-a.md sha256:" + ref.Digest
+	if want := []string{"org", "inbox", "resolve", id, "--state-dir", stateDir, "--note", note}; !slices.Equal(argv, want) {
+		t.Fatalf("the resolve command's arguments = %q\nwant %q", argv, want)
+	}
+	runInboxOK(t, argv[1:]...)
+	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved || item.Note != note {
+		t.Errorf("item %s = state %q note %q; want resolved with the note %q", id, item.State, item.Note, note)
+	}
 }
 
 // AC2 and AC4 with two IDs: both plans are recorded, in argument order,
-// both items resolved, a block per item in that order, and the note once.
+// both items stay open, a block per item in that order, and the note once.
 func TestOrgApprove_TwoItemsAtOnce(t *testing.T) {
 	approveEnv(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -280,8 +317,8 @@ func TestOrgApprove_TwoItemsAtOnce(t *testing.T) {
 		t.Errorf("plan_approved events = %+v; want b's (%s) then a's (%s)", approvals, e2, e1)
 	}
 	for _, id := range []string{e1, e2} {
-		if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateResolved {
-			t.Errorf("item %s is %s; want resolved", id, item.State)
+		if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateOpen {
+			t.Errorf("item %s is %s; want it still open", id, item.State)
 		}
 	}
 }
@@ -379,9 +416,9 @@ func TestOrgApprove_RefusesOrgID(t *testing.T) {
 	}
 }
 
-// The DECISION command repeats --state-dir when approve was given it, and
-// not when the ledger came from RALPH_ORG_STATE_DIR (the rule of
-// orgInboxHintStateDir).
+// The DECISION and resolve commands repeat --state-dir when approve was
+// given it, and not when the ledger came from RALPH_ORG_STATE_DIR (the rule
+// of orgInboxHintStateDir).
 func TestOrgApprove_TheDecisionCommandRepeatsAnExplicitStateDir(t *testing.T) {
 	for _, explicit := range []bool{true, false} {
 		t.Run(map[bool]string{true: "flag", false: "env"}[explicit], func(t *testing.T) {
@@ -403,12 +440,12 @@ func TestOrgApprove_TheDecisionCommandRepeatsAnExplicitStateDir(t *testing.T) {
 	}
 }
 
-// When the record is written but the item cannot be resolved, approve still
-// prints the approved block, exits 1, and names the resolve command, with the
-// --state-dir it was given; the record stays and the item stays open.
-func TestOrgApprove_AResolveThatFailsKeepsTheRecordAndPrintsIt(t *testing.T) {
+// approve writes nothing to the inbox, so with an inbox file it cannot write
+// it still records the approval, exits 0, and prints the whole block; 7a's
+// approve failed here on its resolve.
+func TestOrgApprove_PassesWithAnInboxItCannotWrite(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("root writes a read-only inbox file, so the resolve cannot be made to fail")
+		t.Skip("root writes a read-only inbox file, so the inbox cannot be made unwritable")
 	}
 	approveEnv(t)
 	stateDir := filepath.Join(t.TempDir(), "state")
@@ -420,29 +457,77 @@ func TestOrgApprove_AResolveThatFailsKeepsTheRecordAndPrintsIt(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(inbox, 0o644) })
 
-	stdout, _, err := runOrgCmdStreams(t, "approve", id, "--state-dir", stateDir)
-	if err == nil {
-		t.Fatalf("approve passed with an inbox it cannot write; stdout: %s", stdout)
-	}
-	for _, want := range []string{
-		"org: approve: the approval is recorded, but the inbox item could not be resolved: " + id + " (",
-		"run `ralph org inbox resolve " + id + " --state-dir '" + stateDir + "' --note 'approved " + ref.String() + "'` to finish",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error does not contain %q:\n%v", want, err)
-		}
+	stdout, stderr, err := runOrgCmdStreams(t, "approve", id, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("approve with an inbox it cannot write: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
 	if want := wantApprovedBlock(id, "a", ref, " --state-dir '"+stateDir+"'") + "\n" + approveRecordedNote + "\n"; stdout != want {
 		t.Errorf("stdout =\n%s\nwant\n%s", stdout, want)
 	}
 	if approvals := planApprovedEvents(t, stateDir); len(approvals) != 1 {
-		t.Errorf("plan_approved events = %+v; want the one record kept", approvals)
-	}
-	if err := os.Chmod(inbox, 0o644); err != nil {
-		t.Fatal(err)
+		t.Errorf("plan_approved events = %+v; want one", approvals)
 	}
 	if item := cliInboxItem(t, stateDir, id); item.State != org.InboxStateOpen {
 		t.Errorf("item %s is %s; want it still open", id, item.State)
+	}
+}
+
+// AC10: a second approve of an item whose approval is recorded is refused
+// with exit 1, records nothing, prints nothing on stdout, and repeats the
+// send command and then the resolve command, with the --state-dir it was
+// given. Once the item is resolved, approve refuses it as a resolved item.
+func TestOrgApprove_ASecondApproveOfTheItemIsRefused(t *testing.T) {
+	approveEnv(t)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	ref := writeWorktreePlan(t, seedApprovalOrg(t, stateDir, "a", "per-plan"), approveTestPlanRel, approveTestPlanDraft)
+	id := escalateOK(t, stateDir, "a", planQuestion(ref))
+	runInboxOK(t, "approve", id, "--state-dir", stateDir)
+	before := ledgerFiles(t, stateDir)
+
+	stdout, _, err := runOrgCmdStreams(t, "approve", id, "--state-dir", stateDir)
+	if !errors.Is(err, org.ErrPlanAlreadyApproved) {
+		t.Fatalf("the second approve = %v; want ErrPlanAlreadyApproved (stdout: %s)", err, stdout)
+	}
+	flag := " --state-dir '" + stateDir + "'"
+	block := wantApprovedBlock(id, "a", ref, flag)
+	send := block[strings.Index(block, "ralph org send ") : strings.Index(block, "approved'\n")+len("approved'")]
+	resolve := "ralph org inbox resolve " + id + flag + " --note 'approved " + ref.String() + "'"
+	if want := "org: approve " + id + `: the approval of this inbox item is already recorded (org_id "a", plan ` + ref.String() + "), " +
+		"so approve records nothing more for it; tell the leader with:\n" + send + "\n" +
+		"and once that send succeeded, resolve the item with:\n" + resolve; !strings.HasSuffix(err.Error(), "\n"+want) {
+		t.Errorf("error =\n%v\nwant it to end with\n%s", err, want)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want nothing", stdout)
+	}
+	if after := ledgerFiles(t, stateDir); after != before {
+		t.Errorf("a refused approve wrote to the ledger:\nbefore: %s\nafter:  %s", before, after)
+	}
+
+	runInboxOK(t, "inbox", "resolve", id, "--note", "approved "+ref.String(), "--state-dir", stateDir)
+	if _, _, err := runOrgCmdStreams(t, "approve", id, "--state-dir", stateDir); !errors.Is(err, org.ErrInboxResolved) {
+		t.Errorf("approve of the resolved item = %v; want ErrInboxResolved", err)
+	}
+}
+
+// An item someone else resolved in the meantime (ResolvedElsewhere) gets its
+// approved line and send command but no resolve lines; the other items get
+// theirs.
+func TestPrintApprovedPlans_NoResolveCommandForAnItemResolvedElsewhere(t *testing.T) {
+	refA := org.PlanRef{Path: approveTestPlanRel, Digest: "0123456789ab"}
+	refB := org.PlanRef{Path: approveTestPlanRel, Digest: "ba9876543210"}
+	var stdout, stderr bytes.Buffer
+	printApprovedPlans(&stdout, &stderr, []org.ApprovedPlan{
+		{ID: "e1", OrgID: "a", Plan: refA.Path, Digest: refA.Digest, RequiresApproval: true, ResolvedElsewhere: true},
+		{ID: "e2", OrgID: "b", Plan: refB.Path, Digest: refB.Digest, RequiresApproval: true},
+	}, "")
+	full := wantApprovedBlock("e1", "a", refA, "")
+	withoutResolve := full[:strings.Index(full, "once that send succeeded")]
+	if want := withoutResolve + "\n" + wantApprovedBlock("e2", "b", refB, "") + "\n" + approveRecordedNote + "\n"; stdout.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout.String(), want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q; want nothing", stderr.String())
 	}
 }
 
@@ -543,10 +628,13 @@ func TestOrgApproveHelp(t *testing.T) {
 		"that its org holds the binding `ralph org start --plan` recorded and was not disbanded since",
 		"stays inside the org's feature worktree (symlinks resolved), and is a regular file",
 		"the digest equals the plan file's digest now",
-		"Several IDs are all or nothing: when one item fails, nothing is recorded or resolved",
+		"Several IDs are all or nothing: when one item fails, nothing is recorded, every failure is listed",
 		"with who ran it (USER, whether HERDR_PANE_ID was set, and the current directory)",
 		"It records the plan file as it is now",
-		"approve never edits the plan file and never messages the leader",
+		"approve only records: it never edits the plan file, never messages the leader, and never resolves the inbox item",
+		"it prints the `ralph org send` command whose DECISION tells that org's leader, and then the `ralph org inbox resolve` command to run once that send succeeded. Run them in that order",
+		"the ack and resolve deadlines of `ralph org watch --all` can still bring it to a human",
+		"A second approve of an item whose approval is recorded is refused, with the two commands printed again",
 		"approve is refused when HERDR_PANE_ID is the pane of an active seat",
 		"so --org-id is refused",
 	} {
@@ -562,7 +650,7 @@ func TestOrgApproveHelp(t *testing.T) {
 	help = strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"`ralph org approve` records a human's approval of the plan a feature org's leader asked for there",
-		"wait --inbox, watch, approve, and the inbox verbs, which refuse it",
+		"wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("org --help does not say %q:\n%s", want, out)

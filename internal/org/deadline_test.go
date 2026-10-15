@@ -139,27 +139,39 @@ func TestInboxDeadlineDue(t *testing.T) {
 		{"acked, not notified, past the ack deadline", deadlineTestItem(InboxStateAcked), 30 * time.Minute, ""},
 		{"acked, not notified, exactly at the resolve deadline", deadlineTestItem(InboxStateAcked), 60 * time.Minute, ""},
 		{"acked, not notified, past the resolve deadline", deadlineTestItem(InboxStateAcked), 61 * time.Minute, resolve},
-		{"notified by escalate, past the ack deadline", deadlineTestItem(InboxStateOpen, inboxReasonNoDirector), 30 * time.Minute, ""},
-		{"notified by escalate, exactly at the resolve deadline", deadlineTestItem(InboxStateOpen, inboxReasonNoDirector), 60 * time.Minute, ""},
-		{"notified by escalate, past the resolve deadline", deadlineTestItem(InboxStateOpen, inboxReasonNoDirector), 61 * time.Minute, resolve},
+		{"notified by escalate, past the ack deadline", deadlineTestItem(InboxStateOpen, InboxReasonDirectorDisabled), 30 * time.Minute, ""},
+		{"notified by escalate, exactly at the resolve deadline", deadlineTestItem(InboxStateOpen, InboxReasonDirectorDisabled), 60 * time.Minute, ""},
+		{"notified by escalate, past the resolve deadline", deadlineTestItem(InboxStateOpen, InboxReasonDirectorDisabled), 61 * time.Minute, resolve},
+		{"notified by escalate with no watch, past the ack deadline", deadlineTestItem(InboxStateOpen, InboxReasonNoWatch), 30 * time.Minute, ""},
+		{"sent by inbox notify, past the ack deadline", deadlineTestItem(InboxStateOpen, InboxReasonManualNotify), 30 * time.Minute, ""},
+		{"sent by inbox notify, past the resolve deadline", deadlineTestItem(InboxStateOpen, InboxReasonManualNotify), 61 * time.Minute, resolve},
+		{"notified before stage 8a (inbox_no_director), past the ack deadline", deadlineTestItem(InboxStateOpen, "inbox_no_director"), 30 * time.Minute, ""},
 		{"sent at the ack deadline, later in the ack window", deadlineTestItem(InboxStateOpen, ack), 30 * time.Minute, ""},
 		{"sent at the ack deadline, past the resolve deadline", deadlineTestItem(InboxStateOpen, ack), 61 * time.Minute, resolve},
 		{"open, sent at the resolve deadline", deadlineTestItem(InboxStateOpen, ack, resolve), 3 * time.Hour, ""},
-		{"acked, sent at the resolve deadline", deadlineTestItem(InboxStateAcked, inboxReasonNoDirector, resolve), 3 * time.Hour, ""},
+		{"acked, sent at the resolve deadline", deadlineTestItem(InboxStateAcked, InboxReasonDirectorDisabled, resolve), 3 * time.Hour, ""},
 		{"open, not notified, both deadlines passed: resolve only", deadlineTestItem(InboxStateOpen), 61 * time.Minute, resolve},
 		{"open, not notified, exactly at the resolve deadline: ack only", deadlineTestItem(InboxStateOpen), 60 * time.Minute, ack},
 		{"an acked event with a reason is not a notification", ackedWithReason, 61 * time.Minute, resolve},
 		{"resolved straight from open, past the ack deadline", deadlineTestItem(InboxStateResolved), 30 * time.Minute, ""},
 		{"resolved straight from open, past the resolve deadline", deadlineTestItem(InboxStateResolved), 3 * time.Hour, ""},
-		{"resolved after escalate's notification", deadlineTestItem(InboxStateResolved, inboxReasonNoDirector), 3 * time.Hour, ""},
+		{"resolved after escalate's notification", deadlineTestItem(InboxStateResolved, InboxReasonDirectorDisabled), 3 * time.Hour, ""},
 		{"escalated_at with an offset is the same instant", withEscalatedAt(deadlineTestItem(InboxStateOpen), "2026-10-10T21:00:00+09:00"), 10*time.Minute + time.Second, ack},
 		{"resolved, escalated_at does not parse", withEscalatedAt(deadlineTestItem(InboxStateResolved), "yesterday"), 3 * time.Hour, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := InboxDeadlineDue(tc.item, deadlineT0.Add(tc.at), 10, 60)
-			if err != nil || got != tc.want {
-				t.Errorf("InboxDeadlineDue = (%q, %v); want (%q, nil)", got, err, tc.want)
+			// AC11: the result does not change with the item's delivery,
+			// "" being an escalated line written before stage 8a.
+			for _, delivery := range []string{"", InboxDeliveryNow, InboxDeliveryDeadline} {
+				item := tc.item
+				item.Delivery = delivery
+				item.Events = slices.Clone(tc.item.Events)
+				item.Events[0].Delivery = delivery
+				got, err := InboxDeadlineDue(item, deadlineT0.Add(tc.at), 10, 60)
+				if err != nil || got != tc.want {
+					t.Errorf("delivery %q: InboxDeadlineDue = (%q, %v); want (%q, nil)", delivery, got, err, tc.want)
+				}
 			}
 		})
 	}
@@ -475,9 +487,9 @@ func TestSweepInboxDeadlines_ARestartedWatchSendsWhatIsDueAndNothingTwice(t *tes
 	}
 }
 
-// AC6: escalate sends the item at once (inbox_no_director); the ack
-// deadline does not send it again, and the resolve deadline sends it once
-// more while it is not resolved.
+// AC6: escalate sends the item at once (the director switch is off, so
+// inbox_director_disabled); the ack deadline does not send it again, and
+// the resolve deadline sends it once more while it is not resolved.
 func TestSweepInboxDeadlines_AnEscalatedItemIsSentAgainOnlyAtTheResolveDeadline(t *testing.T) {
 	f := newDeadlineFixture(t)
 	res := f.escalate("org-a", "TYPE: RESULT\nTASK_ID: org-a\n\nPR https://example.invalid/pull/1")
@@ -500,7 +512,7 @@ func TestSweepInboxDeadlines_AnEscalatedItemIsSentAgainOnlyAtTheResolveDeadline(
 	if want := "org org-a: e1 (RESULT) not resolved within 60 min"; len(calls) != 2 || calls[1] != want {
 		t.Errorf("desktop notifications = %q; want escalate's and %q", calls, want)
 	}
-	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 inbox_no_director", "e1 " + InboxReasonResolveDeadline}; !slices.Equal(got, want) {
+	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonDirectorDisabled, "e1 " + InboxReasonResolveDeadline}; !slices.Equal(got, want) {
 		t.Errorf("escalations.jsonl = %v; want %v", got, want)
 	}
 	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
@@ -513,7 +525,7 @@ func TestSweepInboxDeadlines_AnEscalatedItemIsSentAgainOnlyAtTheResolveDeadline(
 			reasons = append(reasons, ev.Reason)
 		}
 	}
-	if want := []string{"inbox_no_director", InboxReasonResolveDeadline}; !slices.Equal(reasons, want) {
+	if want := []string{InboxReasonDirectorDisabled, InboxReasonResolveDeadline}; !slices.Equal(reasons, want) {
 		t.Errorf("notified reasons = %v; want %v", reasons, want)
 	}
 
@@ -522,6 +534,76 @@ func TestSweepInboxDeadlines_AnEscalatedItemIsSentAgainOnlyAtTheResolveDeadline(
 		t.Fatal(err)
 	}
 	assertSweep(t, "resolved", f.sweep(5*time.Hour, &InboxDeadlineMemory{}), nil, nil, nil)
+}
+
+// escalateDeferred escalates a QUESTION from org-a while a watch accepts
+// work, so escalate only records it (delivery deadline), and resets the
+// banner.
+func escalateDeferred(t *testing.T, f *escalateFixture) {
+	t.Helper()
+	f.useWatch(acceptingWatch())
+	if res := f.escalate("org-a", "TYPE: QUESTION\n\nplan A or plan B?"); res.Err != nil || res.ID != "e1" || !res.Deferred || res.Notified {
+		t.Fatalf("Escalate = %+v; want e1 deferred, not notified", res)
+	}
+	f.banner.Reset()
+}
+
+// AC3: an item escalate left to the director reaches the human only by the
+// deadlines: the ack deadline sends it with inbox_ack_deadline once
+// ack_minutes have passed and not before, and the resolve deadline once
+// more while it is not resolved.
+func TestSweepInboxDeadlines_ADeferredItemIsSentAtTheAckDeadline(t *testing.T) {
+	f := newDeadlineFixture(t)
+	escalateDeferred(t, f)
+	mem := &InboxDeadlineMemory{}
+	for _, at := range []time.Duration{0, time.Minute, 10 * time.Minute} {
+		assertSweep(t, fmt.Sprintf("%v after the escalate", at), f.sweep(at, mem), nil, nil, nil)
+	}
+	if calls := f.notifications(); len(calls) != 0 || fileOrAbsent(t, f.o.EscalationsPath) != "<absent>" {
+		t.Fatalf("the deferred item reached the human before its ack deadline: notifications %q", calls)
+	}
+
+	assertSweep(t, "past the ack deadline", f.sweep(10*time.Minute+time.Second, mem), []string{"e1 " + InboxReasonAckDeadline}, nil, nil)
+	assertSweep(t, "next sweep", f.sweep(11*time.Minute, mem), nil, nil, nil)
+	assertSweep(t, "a restarted watch", f.sweep(30*time.Minute, &InboxDeadlineMemory{}), nil, nil, nil)
+	if calls, want := f.notifications(), "org org-a: e1 (QUESTION) not acked within 10 min"; !slices.Equal(calls, []string{want}) {
+		t.Errorf("desktop notifications = %q; want [%q]", calls, want)
+	}
+	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
+	if item.Delivery != InboxDeliveryDeadline || !item.Notified || item.State != InboxStateOpen {
+		t.Errorf("e1 = %+v; want open, delivery deadline, notified", item)
+	}
+
+	assertSweep(t, "past the resolve deadline", f.sweep(61*time.Minute, mem), []string{"e1 " + InboxReasonResolveDeadline}, nil, nil)
+	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonAckDeadline, "e1 " + InboxReasonResolveDeadline}; !slices.Equal(got, want) {
+		t.Errorf("escalations.jsonl = %v; want %v", got, want)
+	}
+}
+
+// A deferred item the director acks gets no ack deadline, only the resolve
+// deadline; one sent with inbox notify gets no ack deadline either.
+func TestSweepInboxDeadlines_ADeferredItemAckedOrNotifiedByHandSkipsTheAckDeadline(t *testing.T) {
+	t.Run("acked", func(t *testing.T) {
+		f := newDeadlineFixture(t)
+		escalateDeferred(t, f)
+		if _, err := f.o.Inbox.Ack("e1"); err != nil {
+			t.Fatal(err)
+		}
+		assertSweep(t, "past the ack deadline", f.sweep(30*time.Minute, &InboxDeadlineMemory{}), nil, nil, nil)
+		assertSweep(t, "past the resolve deadline", f.sweep(61*time.Minute, &InboxDeadlineMemory{}), []string{"e1 " + InboxReasonResolveDeadline}, nil, nil)
+	})
+	t.Run("inbox notify", func(t *testing.T) {
+		f := newDeadlineFixture(t)
+		escalateDeferred(t, f)
+		if err := f.o.NotifyInboxItem("e1", &f.banner); err != nil {
+			t.Fatal(err)
+		}
+		assertSweep(t, "past the ack deadline", f.sweep(30*time.Minute, &InboxDeadlineMemory{}), nil, nil, nil)
+		assertSweep(t, "past the resolve deadline", f.sweep(61*time.Minute, &InboxDeadlineMemory{}), []string{"e1 " + InboxReasonResolveDeadline}, nil, nil)
+		if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonManualNotify, "e1 " + InboxReasonResolveDeadline}; !slices.Equal(got, want) {
+			t.Errorf("escalations.jsonl = %v; want %v", got, want)
+		}
+	})
 }
 
 // An item whose escalated_at does not parse is skipped, with one warning

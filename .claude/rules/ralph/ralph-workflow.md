@@ -6,8 +6,8 @@ workflow guidance formerly in CLAUDE.md.
 ## Default behavior
 
 - All skills (`/spec`, `/plan`, `/implement`, `/self-review`, `/verify`,
-  `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`, `/org`) are
-  auto-invoked. The scaffold ships no manual-trigger skill.
+  `/test`, `/sync-docs`, `/cross-review`, `/pr`, `/audit-harness`, `/org`,
+  `/director`) are auto-invoked. The scaffold ships no manual-trigger skill.
 - Use `/spec` when the request is too vague for `/plan`. `/spec` refines
   abstract ideas through decision-tree questioning with recommended answers,
   codebase exploration, web research, and interactive clarification. Issue-only
@@ -25,6 +25,9 @@ workflow guidance formerly in CLAUDE.md.
 - Autonomous multi-seat execution outside this interactive flow is the org
   runtime's job (`ralph org spawn/send/wait/...`). See the org runtime spec
   shipped with your project and `.claude/rules/ralph/agent-messaging.md`.
+- `/director` promotes the current interactive session to the director, the
+  one session the human talks to for every feature org: it registers with
+  `ralph org director attach`, handles the org inbox, and reports progress.
 - After `/implement`, the post-implementation pipeline runs via subagents
   (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review`
   (optional, inline), then `/pr`.

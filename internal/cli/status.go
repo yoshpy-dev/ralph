@@ -26,11 +26,11 @@ import (
 // directory (or a single org via --org-id), plus the latest `ralph org
 // watch` heartbeat and pending-alert count for each org when available,
 // whether the cross-org watch (`ralph org watch --all`) is running on that
-// state directory, and the merge guarantee `ralph doctor` cached there
-// (org.ReadMergeGuarantee). It reads org.ManifestStore/org.Roster directly
-// (read-only, no herdr/agmsg process required) -- the same derivation
-// `ralph org status` uses, just grouped across every org_id instead of
-// filtered to exactly one.
+// state directory, its director registration (orgDirectorReport), and the
+// merge guarantee `ralph doctor` cached there (org.ReadMergeGuarantee). It
+// reads org.ManifestStore/org.Roster directly (read-only, no herdr/agmsg
+// process required) -- the same derivation `ralph org status` uses, just
+// grouped across every org_id instead of filtered to exactly one.
 func newStatusCmd() *cobra.Command {
 	var (
 		stateDir string
@@ -50,6 +50,17 @@ func newStatusCmd() *cobra.Command {
 			"has run its last cycle and holds the lock until its in-flight work ends),\n" +
 			"stale (it holds the lock but its liveness mark is not fresh), or not running,\n" +
 			"with the pid and the time that mark was last updated.\n\n" +
+			"A `director:` line follows it: the director registration of the state\n" +
+			"directory (director.jsonl, which `ralph org director attach` and `detach`\n" +
+			"write) and [org.director].enabled, read as `ralph org escalate` reads it\n" +
+			"without --config (the main worktree's ralph.toml when the state directory\n" +
+			"is the main worktree's ledger, else ./ralph.toml). It is attached, with\n" +
+			"the registration's id, driver, attach time, who attached it, and its pane\n" +
+			"when one is recorded; not attached; disabled (enabled = false: escalate\n" +
+			"sends every item to the human at once); or unreadable, when director.jsonl\n" +
+			"cannot be read. A registration does not tell whether its session is still\n" +
+			"running: an item the director does not ack reaches the human at the ack\n" +
+			"deadline of `ralph org watch --all`.\n\n" +
 			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head with the\n" +
 			"latest default branch, as `ralph doctor` last found it -- github_protection\n" +
@@ -57,12 +68,19 @@ func newStatusCmd() *cobra.Command {
 			"has a merge queue, with a required check), pr_checks_only (only the gate and\n" +
 			"the CI that ran when the PR was made), or unknown -- with the branch, origin's\n" +
 			"repository and when doctor checked it. It reads the cache doctor writes in the\n" +
-			"state directory (merge-guarantee.json) and never runs gh; git runs only for\n" +
-			"the local `git remote get-url origin` in the current directory, and only when\n" +
-			"the cache is fresh. It is unknown, with the reason, when the state directory or\n" +
-			"the cache does not exist, the cache cannot be read or is more than 24 hours\n" +
-			"old, or origin's host or owner/repo is not the one doctor checked or cannot\n" +
-			"be read here.\n\n" +
+			"state directory (merge-guarantee.json) and never runs gh; for this line git\n" +
+			"runs only the local `git remote get-url origin` in the current directory, and\n" +
+			"only when the cache is fresh. It is unknown, with the reason, when the state\n" +
+			"directory or the cache does not exist, the cache cannot be read or is more\n" +
+			"than 24 hours old, or origin's host or owner/repo is not the one doctor\n" +
+			"checked or cannot be read here.\n\n" +
+			"status runs no gh and does not use the network. Besides that get-url, the\n" +
+			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
+			"a linked worktree) that finds the main worktree: to resolve the state\n" +
+			"directory when neither --state-dir nor RALPH_ORG_STATE_DIR names it, and,\n" +
+			"when one of them does, to tell whether it names the main worktree's ledger,\n" +
+			"whose ralph.toml then holds [org.director].enabled, whether or not the\n" +
+			"cache is fresh.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -141,15 +159,27 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	groups := groupSeatsByOrg(seats)
 	realCounts := buildRealSeatCounts(rr.Events, groups)
 
+	// ./ralph.toml is read once, for the watch's deadman_minutes and the
+	// director switch below, so one that does not load warns once.
+	orgCfg, orgCfgLoaded := statusOrgConfig(cmd.ErrOrStderr())
+
 	// The cross-org watch (`ralph org watch --all`) runs per state dir, not
 	// per org, so it is probed once here and shown on both paths below,
 	// the empty roster included: a watch can run before any org starts.
-	watch := org.ProbeWatch(stateDir, time.Now(), statusDeadmanMinutes(cmd.ErrOrStderr()))
+	watch := org.ProbeWatch(stateDir, time.Now(), orgCfg.DeadmanMinutes)
+
+	// The director registration belongs to the state dir too, so it is
+	// read once here (no lock) and shown on both paths, with the switch
+	// read as `ralph org escalate` reads it. Reading the switch runs the
+	// local git rev-parse calls of withMainWorktreeDirectorEnabled when
+	// --state-dir or RALPH_ORG_STATE_DIR names the ledger.
+	director := readOrgDirectorReport(stateDir, statusDirectorEnabled(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
+	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
 	// The merge guarantee is likewise read once, from the cache `ralph
 	// doctor` writes in the state dir, and shown on both paths. The read
-	// runs no gh; git runs only for the local `git remote get-url origin` in
-	// the current directory, and only when the cache is fresh.
+	// runs no gh, and its only git is the local `git remote get-url origin`
+	// in the current directory, run only when the cache is fresh.
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -157,13 +187,13 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	guarantee := org.ReadMergeGuarantee(ctx, stateDir, org.MergeGuaranteeReadParams{Dir: "."})
 
 	if len(groups) == 0 {
-		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch, guarantee)
+		return printStatusEmpty(cmd, stateDir, stateDirSource, filterOrgID, jsonOut, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
 	}
 
 	if jsonOut {
-		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, guarantee)
+		return printStatusJSONAllOrgs(cmd, stateDir, stateDirSource, filterOrgID, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
 	}
-	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, guarantee)
+	printStatusTableAllOrgs(cmd, stateDir, stateDirSource, groups, realCounts, rr.CorruptLines, scaffoldStat, watch, director, guarantee)
 	return nil
 }
 
@@ -174,21 +204,47 @@ func mergeGuaranteeLine(g org.MergeGuarantee) string {
 	return "merge guarantee: " + inboxField(g.Text())
 }
 
-// statusDeadmanMinutes returns the deadman_minutes `ralph status` judges the
-// watch's liveness mark by (org.ProbeWatch) when the mark does not carry the
-// watch's own deadman_minutes (a mark of an older version): the [org] table
-// of ./ralph.toml when present, read as the ralph org verbs read it without
-// --config (resolveOrgConfig), else the built-in default. status only reads,
-// so a ralph.toml that does not load falls back to the default with a
-// warning on stderr instead of failing the command.
-func statusDeadmanMinutes(stderr io.Writer) int {
+// statusOrgConfig loads the [org] config `ralph status` reads: the [org]
+// table of ./ralph.toml when present, read as the ralph org verbs read it
+// without --config (resolveOrgConfig), else the built-in defaults. Its
+// DeadmanMinutes is what the watch's liveness mark is judged by
+// (org.ProbeWatch) when the mark does not carry the watch's own
+// deadman_minutes (a mark of an older version), and statusDirectorEnabled
+// starts from it. status only reads, so a ralph.toml that does not load
+// falls back to the built-in defaults with one warning on stderr instead of
+// failing the command; loaded is false then.
+func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 	cfg, err := resolveOrgConfig("")
 	if err != nil {
-		fallback := config.Default().Org.DeadmanMinutes
-		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d)\n", err, fallback)
+		fallback := config.Default().Org
+		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d) "+
+			"and showing the director by the default [org.director].enabled (%t)\n", err, fallback.DeadmanMinutes, fallback.Director.Enabled)
+		return fallback, false
+	}
+	return cfg, true
+}
+
+// statusDirectorEnabled returns the [org.director].enabled that the
+// director: line of `ralph status` shows, read as `ralph org escalate` reads
+// it without --config: cfg, the config statusOrgConfig loaded from
+// ./ralph.toml, with withMainWorktreeDirectorEnabled's main worktree rule for
+// the ledger at stateDir. When ./ralph.toml did not load (loaded false, and
+// statusOrgConfig has warned), it is the built-in default and the main
+// worktree's ralph.toml is not read, so the same broken file is not reported
+// twice. status only reads, so a main worktree ralph.toml that does not load
+// falls back to the built-in default too, with its own warning on stderr,
+// instead of failing the command.
+func statusDirectorEnabled(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) bool {
+	if !loaded {
+		return cfg.Director.Enabled
+	}
+	fallback := config.Default().Org.Director.Enabled
+	cfg, err := withMainWorktreeDirectorEnabled(cfg, "", stateDir, stateDirSource)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t)\n", err, fallback)
 		return fallback
 	}
-	return cfg.DeadmanMinutes
+	return cfg.Director.Enabled
 }
 
 // orgWatchLine renders what org.ProbeWatch found about the cross-org watch
@@ -342,10 +398,10 @@ func printStateDirLine(out io.Writer, stateDir, stateDirSource string) {
 	_, _ = fmt.Fprintf(out, "state-dir: %s (source: %s)\n", stateDir, stateDirSource)
 }
 
-func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) error {
+func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, jsonOut bool, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) error {
 	out := cmd.OutOrStdout()
 	if jsonOut {
-		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+		payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: []statusOrgJSON{}, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(payload)
@@ -366,6 +422,7 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", stateDir, stateDirSource)
 	}
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
+	_, _ = fmt.Fprintln(out, orgDirectorLine(director))
 	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
@@ -420,7 +477,8 @@ type statusOrgJSON struct {
 // consumer never has to branch on which shape it received: `org_id` is only
 // present when --org-id filtered the roster, `corrupt_lines` only when the
 // manifest actually had corrupt lines, `orgs` is always an array (empty
-// or populated), and `org_watch` and `merge_guarantee` are always objects.
+// or populated), and `org_watch`, `director`, and `merge_guarantee` are
+// always objects.
 type statusJSON struct {
 	StateDir       string          `json:"state_dir"`
 	StateDirSource string          `json:"state_dir_source,omitempty"`
@@ -430,6 +488,10 @@ type statusJSON struct {
 	// OrgWatch is the cross-org watch of the state dir (see
 	// statusOrgWatchJSON), distinct from each org's `watch` heartbeat.
 	OrgWatch statusOrgWatchJSON `json:"org_watch"`
+	// Director is the director switch and registration of the state dir,
+	// as `ralph org director status --json` prints them
+	// (orgDirectorReport).
+	Director orgDirectorReport `json:"director"`
 	// MergeGuarantee is the merge guarantee of origin's default branch as
 	// the state dir's cache tells it, as org.ReadMergeGuarantee returns it:
 	// the cache's kind, or unknown with its reason.
@@ -521,12 +583,12 @@ func buildStatusScaffoldJSON(s *scaffoldStatus) *statusScaffoldJSON {
 	return &statusScaffoldJSON{Layout: s.Layout, Files: files, Drift: append([]string(nil), s.Drift...)}
 }
 
-func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) error {
+func printStatusJSONAllOrgs(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) error {
 	orgsJSON := make([]statusOrgJSON, 0, len(groups))
 	for _, g := range groups {
 		orgsJSON = append(orgsJSON, buildStatusOrgJSON(stateDir, g, realCounts[g.OrgID]))
 	}
-	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
+	payload := statusJSON{StateDir: stateDir, StateDirSource: stateDirSource, OrgID: filterOrgID, Orgs: orgsJSON, CorruptLines: corruptLines, OrgWatch: buildStatusOrgWatchJSON(watch), Director: director, MergeGuarantee: guarantee, Scaffold: buildStatusScaffoldJSON(scaffoldStat)}
 	enc := json.NewEncoder(cmd.OutOrStdout())
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
@@ -557,17 +619,19 @@ func buildStatusOrgJSON(stateDir string, g orgGroup, realCount realSeatCount) st
 	return result
 }
 
-func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, guarantee org.MergeGuarantee) {
+func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string, groups []orgGroup, realCounts map[string]realSeatCount, corruptLines int, scaffoldStat *scaffoldStatus, watch org.WatchLiveness, director orgDirectorReport, guarantee org.MergeGuarantee) {
 	out := cmd.OutOrStdout()
 
 	// Surfaced once at the top of the populated-roster table (tech-debt:
 	// "watchdog deferred LOW (1)") -- the empty-roster path
 	// (printStatusEmpty) folds the same "(source: ...)" annotation into its
 	// existing state-dir=... message instead of a separate line, since that
-	// path has no table to put a header line above. The org watch line and
-	// the merge guarantee line follow it, as they do that message.
+	// path has no table to put a header line above. The org watch line, the
+	// director line, and the merge guarantee line follow it, as they do that
+	// message.
 	printStateDirLine(out, stateDir, stateDirSource)
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
+	_, _ = fmt.Fprintln(out, orgDirectorLine(director))
 	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	printScaffoldSection(out, scaffoldStat)
 

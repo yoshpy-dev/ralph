@@ -22,14 +22,12 @@ type DoctorConfig struct {
 	RequireGo        bool `toml:"require_go"`
 }
 
-// OrgConfig holds the `[org]` envelope settings consumed by the `ralph org`
-// verb set (spawn/send/wait/read/stop/status/disband, internal/org) and by
-// `ralph doctor`. The fields are validated and stored here so later PRs
-// (seat-ification, Leader autonomy, Watchdog) build on a stable, lock-stepped
-// foundation.
-//
-// See docs/plans/active/2026-08-01-org-runtime-mechanism.md (or its archived
-// counterpart once the plan lands) for the full design.
+// OrgConfig holds the `[org]` table: the envelope and the settings that the
+// `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
+// validates the fields, and their defaults are kept in lock-step with
+// templates/base/ralph.toml and scripts/ralph-config.sh
+// (defaults_sync_test.go). The org runtime's design is
+// docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
 	// launch. Model is a CLI-native model name or alias, passed verbatim to
@@ -74,10 +72,12 @@ type OrgConfig struct {
 	// OrgPermissionsConfig's doc comment.
 	Permissions OrgPermissionsConfig `toml:"permissions"`
 	// Watchdog holds the pulse-layer/watcher-layer settings for `ralph org
-	// watch` (PR④). See OrgWatchdogConfig's doc comment.
+	// watch`. See OrgWatchdogConfig's doc comment.
 	Watchdog OrgWatchdogConfig `toml:"watchdog"`
-	// Director holds the inbox deadlines that `ralph org watch --all` checks.
-	// See OrgDirectorConfig's doc comment.
+	// Director holds the director switch (whether `ralph org escalate`
+	// leaves an inbox item to the director and the ack deadline) and the
+	// inbox deadlines that `ralph org watch --all` checks. See
+	// OrgDirectorConfig's doc comment.
 	Director OrgDirectorConfig `toml:"director"`
 	// Approval holds how a feature org's plan is approved. See
 	// OrgApprovalConfig's doc comment.
@@ -146,11 +146,22 @@ type OrgWatchdogConfig struct {
 	WatcherModel string `toml:"watcher_model"`
 }
 
-// OrgDirectorConfig holds the `[org.director]` settings of the inbox
-// deadlines that `ralph org watch --all` checks (FR-6 of
-// docs/specs/2026-10-07-org-multi-org-director.md). Stage 8a of that spec
-// adds the director's own settings (such as `enabled`) to the same section.
+// OrgDirectorConfig holds the `[org.director]` settings of
+// docs/specs/2026-10-07-org-multi-org-director.md: the director switch
+// Enabled (FR-9) and the inbox deadlines that `ralph org watch --all` checks
+// (FR-6).
 type OrgDirectorConfig struct {
+	// Enabled is the director switch. When true (the default), `ralph org
+	// escalate` records an item in the org inbox and leaves it to the
+	// director or to the ack deadline that `ralph org watch --all` checks, as
+	// long as a watch accepts work; with no such watch nobody checks the
+	// deadline, so escalate sends the item to the human at once. When false,
+	// escalate sends every item to the human at once, as it did before stage
+	// 8a. The `ralph org` verbs read it by the same rule as MaxOrgs: from the
+	// main worktree's ralph.toml when --config is not given and the ledger
+	// is the main worktree's, so an edit to the ralph.toml of a feature org's
+	// worktree does not switch it.
+	Enabled bool `toml:"enabled"`
 	// AckMinutes is the ack deadline: an open inbox item that has not been
 	// sent to the human yet is sent once this long after it was escalated.
 	AckMinutes int `toml:"ack_minutes"`
@@ -222,6 +233,7 @@ func Default() Config {
 				WatcherModel:    "haiku",
 			},
 			Director: OrgDirectorConfig{
+				Enabled:        true,
 				AckMinutes:     10,
 				ResolveMinutes: 60,
 			},

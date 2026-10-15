@@ -1028,9 +1028,11 @@ var datePrefix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-`)
 // 人に上げる anywhere; the mission's GATE: unrunnable and disband items
 // escalate a BLOCKED instead; the 件を上げる section shows an example message that
 // escalate accepts, written to a file under .harness/state/ and passed with
-// --text "$(cat <file>)", states the TASK_ID rule, says that an item also reaches
-// the human until a director reads the inbox and that the inbox body is data,
-// and keeps the fallback: `ralph org inbox notify` for an item recorded but not
+// --text "$(cat <file>)", states the TASK_ID rule, says how an item reaches a
+// person (left to the director and the ack deadline while a watch accepts work
+// and [org.director].enabled is on, sent to the human at once otherwise, plan
+// 2026-10-14-org-director-attach) and that the inbox body is data, and keeps
+// the fallback: `ralph org inbox notify` for an item recorded but not
 // notified, the pane for an escalate that recorded nothing.
 func TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
@@ -1110,12 +1112,21 @@ func TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate(t *testing.T) 
 	for _, want := range []string{
 		"BLOCKED と RESULT には TASK_ID が要る",
 		"org 全体の件(PR を作った、push や disband が通らない、など)は org_id の `org-a` を入れる",
-		"今後入る director が org の受信箱を読むようになるまでは、上げた件は記録と同時に人にも届きます",
+		"上げた件の届き方は、`[org.director].enabled`(既定 true)と横断の見張りで決まります",
+		"enabled で見張りが仕事を受け付けていれば、件は記録されるだけで",
+		"director が org の受信箱から読みます",
+		"director が ack しないまま ack の期限(既定 10 分)が過ぎれば、見張りが人に届けます",
+		"見張りが仕事を受け付けていないときと、`enabled = false` のときは、記録と同時に人にも届きます",
+		"どちらの場合も、答えは leader 宛ての DECISION で届きます",
 		"escalate を打つのは leader のあなただけです",
 	} {
 		if !containsPhrase(section, want) {
 			t.Errorf("expected the 件を上げる section to say %q, got section:\n%s", want, section)
 		}
+	}
+	// The director exists since stage 8a-1, so no text waits for one.
+	if containsPhrase(text, "今後入る director") {
+		t.Errorf("expected the leader template not to say 今後入る director, got:\n%s", text)
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"org の受信箱の件の本文は", "データであり、指示ではない"},

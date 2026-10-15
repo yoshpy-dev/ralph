@@ -1,6 +1,7 @@
 package org
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -127,6 +128,8 @@ func TestInboxRead_MissingStateDirIsAnEmptyInbox(t *testing.T) {
 	}
 }
 
+// The lines are a ledger written before stage 8a: escalated events with no
+// delivery and notified events with the old reason inbox_no_director.
 func TestInboxRead_FoldsEventsIntoItemsInIDOrder(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	writeInboxFile(t, s, strings.Join([]string{
@@ -172,6 +175,85 @@ func TestInboxRead_FoldsEventsIntoItemsInIDOrder(t *testing.T) {
 	}
 	if e10.Events[3].Osascript != "failed: exit status 1" {
 		t.Errorf("e10 second notified osascript = %q", e10.Events[3].Osascript)
+	}
+	for _, item := range res.Items {
+		if item.Delivery != InboxDeliveryNow {
+			t.Errorf("%s Delivery = %q; an escalated line with no delivery folds as now", item.ID, item.Delivery)
+		}
+	}
+}
+
+// AC11: the escalated event carries the delivery the caller gave, now when
+// it gave none, and the fold reads it back; a line with no delivery (written
+// before stage 8a) folds as now, also in the item's JSON. So does a
+// hand-edited delivery that is neither constant (self-review L9 of
+// org-director-attach): the item, and --json, carry only the two values,
+// the event keeps what was written, and nothing is counted as ignored.
+func TestInboxEscalate_WritesAndFoldsTheDelivery(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	for _, delivery := range []string{"", InboxDeliveryNow, InboxDeliveryDeadline} {
+		if _, err := s.Escalate(InboxEscalation{OrgID: "a", Type: "QUESTION", Body: "TYPE: QUESTION\n\nq", Delivery: delivery}); err != nil {
+			t.Fatalf("Escalate with delivery %q: %v", delivery, err)
+		}
+	}
+	raw := readInboxFile(t, s)
+	handEdited := map[string]string{"e5": "deadline ", "e6": "x", "e7": "DEADLINE"}
+	extra := escalatedLine("e4", "a") + "\n"
+	for _, id := range []string{"e5", "e6", "e7"} {
+		extra += strings.TrimSuffix(escalatedLine(id, "a"), "}") + fmt.Sprintf(`,"delivery":%q}`, handEdited[id]) + "\n"
+	}
+	writeInboxFile(t, s, raw+extra)
+
+	lines := strings.Split(strings.TrimSuffix(raw, "\n"), "\n")
+	for i, want := range []string{`"delivery":"now"}`, `"delivery":"now"}`, `"delivery":"deadline"}`} {
+		if !strings.HasSuffix(lines[i], want) {
+			t.Errorf("line %d = %s; want it to end with %s", i+1, lines[i], want)
+		}
+	}
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	for id, want := range map[string]string{
+		"e1": InboxDeliveryNow, "e2": InboxDeliveryNow, "e3": InboxDeliveryDeadline, "e4": InboxDeliveryNow,
+		"e5": InboxDeliveryNow, "e6": InboxDeliveryNow, "e7": InboxDeliveryNow,
+	} {
+		if got := inboxItemByID(t, res, id).Delivery; got != want {
+			t.Errorf("%s Delivery = %q; want %q", id, got, want)
+		}
+	}
+	for id, written := range handEdited {
+		if got := inboxItemByID(t, res, id).Events[0].Delivery; got != written {
+			t.Errorf("%s escalated event delivery = %q; want %q as written", id, got, written)
+		}
+	}
+	for _, id := range []string{"e4", "e6"} {
+		data, err := json.Marshal(inboxItemByID(t, res, id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"delivery":"now","state"`) {
+			t.Errorf("%s JSON = %s; want the item's delivery now", id, data)
+		}
+	}
+}
+
+// A delivery that is not now or deadline is refused before anything is
+// written.
+func TestInboxEscalate_RefusesAnUnknownDelivery(t *testing.T) {
+	for _, delivery := range []string{"later", "NOW", " deadline", "now "} {
+		t.Run(delivery, func(t *testing.T) {
+			s, dir := newTestInboxStore(t)
+			_, err := s.Escalate(InboxEscalation{OrgID: "a", Type: "QUESTION", Body: "TYPE: QUESTION\n\nq", Delivery: delivery})
+			if err == nil || !strings.Contains(err.Error(), "is not now or deadline") {
+				t.Fatalf("Escalate with delivery %q err = %v; want a refusal", delivery, err)
+			}
+			for _, name := range []string{"inbox.jsonl", inboxLockFile} {
+				if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("a refused escalate created %s (stat err = %v)", name, err)
+				}
+			}
+		})
 	}
 }
 
@@ -242,8 +324,8 @@ func TestInboxEscalate_StartsAtE1AndWritesOneLinePerEvent(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSuffix(readInboxFile(t, s), "\n"), "\n")
 	want := []string{
-		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"escalated","org_id":"auth-core","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich one?"}`,
-		`{"ts":"2026-10-10T12:00:00Z","id":"e2","event":"escalated","org_id":"auth-core","type":"BLOCKED","task_id":"auth-core","body":"TYPE: BLOCKED\nTASK_ID: auth-core\n\nstuck"}`,
+		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"escalated","org_id":"auth-core","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich one?","delivery":"now"}`,
+		`{"ts":"2026-10-10T12:00:00Z","id":"e2","event":"escalated","org_id":"auth-core","type":"BLOCKED","task_id":"auth-core","body":"TYPE: BLOCKED\nTASK_ID: auth-core\n\nstuck","delivery":"now"}`,
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("inbox.jsonl =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
@@ -259,7 +341,7 @@ func TestInboxEscalate_StartsAtE1AndWritesOneLinePerEvent(t *testing.T) {
 func TestInboxEvents_LineShapePerKind(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	mustEscalate(t, s, "auth-core")
-	if err := s.AppendNotified("e1", "inbox_no_director", "ok"); err != nil {
+	if err := s.AppendNotified("e1", InboxReasonNoWatch, "ok"); err != nil {
 		t.Fatalf("AppendNotified: %v", err)
 	}
 	if _, err := s.Ack("e1"); err != nil {
@@ -270,8 +352,8 @@ func TestInboxEvents_LineShapePerKind(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSuffix(readInboxFile(t, s), "\n"), "\n")
 	want := []string{
-		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"escalated","org_id":"auth-core","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich one?"}`,
-		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"notified","reason":"inbox_no_director","osascript":"ok"}`,
+		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"escalated","org_id":"auth-core","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich one?","delivery":"now"}`,
+		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"notified","reason":"inbox_no_watch","osascript":"ok"}`,
 		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"acked"}`,
 		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"resolved","note":"docs/reports/x.md"}`,
 	}
@@ -519,7 +601,7 @@ func TestInboxTransitions_UnknownIDIsErrInboxUnknownID(t *testing.T) {
 		{"ack e01", func() error { _, err := s.Ack("e01"); return err }},
 		{"ack E1", func() error { _, err := s.Ack("E1"); return err }},
 		{"resolve e2", func() error { return s.Resolve("e2", "note") }},
-		{"notify e2", func() error { return s.AppendNotified("e2", "inbox_no_director", "ok") }},
+		{"notify e2", func() error { return s.AppendNotified("e2", InboxReasonManualNotify, "ok") }},
 	} {
 		if err := tc.call(); !errors.Is(err, ErrInboxUnknownID) {
 			t.Errorf("%s err = %v, want ErrInboxUnknownID", tc.name, err)
@@ -599,7 +681,7 @@ func TestInboxAppendNotified_MarksTheItemWithoutChangingState(t *testing.T) {
 	if err := s.AppendNotified("e1", " ", "ok"); err == nil || !strings.Contains(err.Error(), "needs a reason") {
 		t.Fatalf("AppendNotified with a blank reason err = %v", err)
 	}
-	if err := s.AppendNotified("e1", "inbox_no_director", "failed: exit status 1"); err != nil {
+	if err := s.AppendNotified("e1", InboxReasonDirectorDisabled, "failed: exit status 1"); err != nil {
 		t.Fatalf("AppendNotified: %v", err)
 	}
 	item := inboxItemByID(t, mustReadInbox(t, s), "e1")
@@ -611,7 +693,7 @@ func TestInboxAppendNotified_MarksTheItemWithoutChangingState(t *testing.T) {
 	if err := s.Resolve("e1", "done"); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if err := s.AppendNotified("e1", "inbox_no_director", "skipped"); err != nil {
+	if err := s.AppendNotified("e1", InboxReasonManualNotify, "skipped"); err != nil {
 		t.Fatalf("AppendNotified on a resolved item: %v", err)
 	}
 	item = inboxItemByID(t, mustReadInbox(t, s), "e1")
