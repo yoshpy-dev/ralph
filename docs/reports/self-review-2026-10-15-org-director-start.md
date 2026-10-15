@@ -73,3 +73,71 @@ _(登録簿には追記していない。M1 は新しい debt ではなく既存
   4. L4〜L6: 小さな差分なので、fix の回にまとめて入れるとよい。直さずに最後の cycle に届いたら、1 つの行にまとめて登録簿に足す
   5. Go のコメントの `docs/plans/active/2026-10-15-org-director-start.md` は、`/pr` の archive で古くなる。8a-1 のときと同じ形で、指摘としては数えない
 - Known gaps: テスト、`gofmt`、`go vet`、go1.25.8 でのビルドは確かめていない。herdr の実機の動きと CLI の実際の出力は見ていない。新しい test の本文の大半は読んでいない
+
+## Cycle 2
+
+- Date: 2026-10-15
+- Plan: docs/plans/active/2026-10-15-org-director-start.md(承認済み、digest f65d7c59746c。cycle 1 の報告の時点は d59311f57d8e で、その後、verify の字数の訂正と cross-review の `--config` の 1 文で 2 回承認し直した)
+- Reviewer: reviewer subagent (Claude)。パイプライン 2 回目(cycle 2)。`RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定 2 のうち最後の回
+- Scope: diff の品質だけ。cross-review cycle 1 の ACTION_REQUIRED 1 件の直し 3243c499(11 ファイル、+276/-45)と、/test の穴 D4・E1・E12/E13・P2 の test と登録簿の行の縮め 4ef33195(3 ファイル、+134/-4)を、全体の `git diff origin/main...HEAD`(HEAD 4ef33195)の中で読んだ。この節の ID には `C2-` を付け、cycle 1 の M1・L1〜L6 と取り違えないようにする。テストの実行、静的解析、仕様適合、文書のずれの検査は /test・/verify・/sync-docs の担当なので行っていない
+
+### Evidence reviewed
+
+- 読んだ差分: 3243c499 と 4ef33195 の全 hunk(コード、test、skill の 4 面、`director.md`、登録簿の 1 行)。plan の 5a61a3cc と triage の 54cab8a2 は、直しの出どころとして読んだ
+- 読んだ周辺: `RenderDirectorPrompt` と `directorPromptNoConfigText`、`director.md` の全体、`checkDirectorStart`・`StartDirector` の doc と本体、`startDirector`・`stopDirector`・`startAttachedError`、`newOrgDirectorRuntime` の doc、`withMainWorktreeDirectorEnabled` と `withMainWorktreeDirectorStartConfig` の doc、`resolveOrgConfig`、`--config` の persistent flag(`org.go:52`)、`ralph status` の flag、`fakeHerdr` の `WorkspaceCreate`・`TabCreate`、`dirStartFixture`、`TestStartDirector_RefusesBeforeWritingOrCallingHerdr` の表と実行部、`TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml` の全体、`director_skill_sync_test.go` の冒頭、`/director` skill の 95〜190 行、plan の `--config` を含む行と Progress checklist、cross-review の triage report、test report の Test gaps、evidence の A12〜A14 の行、8a-1 の self-review の cycle 2 の節(形式の確認)
+- 確かめたこと
+  - cycle 1 の指摘 7 件(M1、L1〜L6)は、HEAD ですべて閉じている。M1: 登録簿の 189・192・212・245 行に 8a-2 の判断があり、245 行は headless の `attached` に `pane_id` がないことに直っている。L1: `checkDirectorStart` が gate の前に `Store.Read` している。L2: detach の出力に pane と workspace が開いたままの行がある。L3: `orgDirectorLine(r, hintStateDir)` が hint を受け取る。L4: `confirmSeatPane` の引数が `workspaceLabel`・`tabLabel`。L5: `directorRoleSpawnErr` はなく、公開名の `DirectorRoleInputErr` が 1 つ(`spawn.go:1430`)。L6: `origin/main...HEAD` の追加コメント行に 84 桁を超えるものはなく、「attach or detach」と行末の `Like` も残っていない。cycle 1 から持ち越した LOW はないので、最後の回でも登録簿に足す分は cycle 2 の指摘だけになる
+  - `--config` の道: CLI が `configPath` を `StartDirector` へ渡し(`org_director_headless.go:196`)、`checkDirectorStart` が gate のあとで絶対化し(`director_start.go:554-558`。state dir と cwd の絶対化と同じ位置)、`StartDirector` は `checkDirectorStart` のあとの `p` を `directorStartRun` にコピーするので、`writePrompt`(`:616`)は絶対化した値を渡す。`RenderDirectorPrompt` は絶対でない値を断る(`prompts.go:160-162`)。`{{STATE_DIR}}`・`{{ORG_FLAGS}}`・`{{CONFIG}}` の置換は `strings.NewReplacer` の 1 回で、置換後の文字は読み直されず、値に `{{` があれば最後の検査が断る
+  - 戻すと赤くなるか(読んで判断した。実行はしていない): CLI の `ConfigPath: configPath` を消すと、`TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml` の `--config` の case が赤になる。`checkDirectorStart` の絶対化を消すと、`RenderDirectorPrompt` が相対を断るので、org の test と CLI の test の両方が赤になる。CLI の case は linked worktree で start を打ち、director は main root で動くので、絶対化の基準を `Cwd` に変えても赤になる(期待値は worktree 側の `ralph.toml`)。`IsAbs` の断りを消すと `a relative config path` の case が赤になる。雛形の 3 つの実行コマンドと `ralph status` の文のどれかを戻すと、`directorPromptCommands` の突き合わせ(`ralph org` の言及の個数がコード内の個数と等しいこと、実行する 3 つの末尾が flags であること)が赤になる。期待値の quoting は `shellQuote` を呼ばず `'/cfg dir/it'\''s ralph.toml'` と書いてあり、宣言の写しではない。TempDir のパスは `--config` を含む subtest 名を持つので、空白つきの ` --config` で探しているのは正しい
+  - 4 つの穴の test: D4 は `wantGate` が false の行で、最初の `Store.Read` の失敗を無視する変異では gate が呼ばれて `gateCalls > 0` が赤になる。E1 は `AttachHeadless` の失敗のあとも進める変異で `workspace_create` が呼ばれ、herdr の呼び出しが 0 でなくなって赤になる。E12・E13 は、失敗した作成が出力を返す wrapper が `o.Herdr` に入っている(`newDirStartFixture` の `o.Herdr = f.h`)ので、出力を id として残す変異では `workspace_get`・`pane_get` の引数に出力が現れて赤になる。P2 は期待文が `startAttachedError` の format と一字一句同じで、`--state-dir` の有無を 2 行で固定している。`directorFileState` は directory を `<a directory>` と返すようになり、D4 の行の before と after の比較が成り立つ
+  - 登録簿の 256 行は `|` で分けて 5 列。A12〜A14 の説明(A12: 失敗した workspace の get を閉じ済みとみなす、A13: tab を herdr が知らない pane を閉じ済みとみなす、A14: workspace を知らない pane を確認済みとみなす)と test 名は、evidence の 867〜869 行・949〜954 行と合う。D4・E1・E12/E13・P2 の 4 件は、この行から外れて test になった
+  - `ralph status` に `--config` はない(`status.go:105-107` の flag は `--state-dir`・`--org-id`・`--json`)ので、skill の「`ralph status` には `--config` がない」は合う。`director stop`・`detach` は config を読まない(`newOrgDirectorRuntime` の `loadConfig` が false)ので、`--config` を足しても終了を止める道は増えない
+  - skill の 4 面は `cmp` で同一(`.claude` を基準に、`.agents` と `templates/base` の 3 面)。`git diff --check e683ee47..HEAD` は空。追加行に TODO・debug 出力・`/Users/`・秘密らしい文字列・U+FFFD はない
+  - 順序: `git log --format='%h parent=%p'` で、直しの 3243c499 の親は plan の 5a61a3cc、その親が triage の 54cab8a2、その親が AC の tick の e683ee47。cycle 1 の verify・test・sync-docs の報告は、どれも直しの前の tree を述べている
+  - 指摘にしなかったもの: `filepath.Abs` は `..` を字面で畳むので、cwd が symlink 経由で `--config ../x` のとき、start が読むファイルと雛形のパスが分かれうる。同じ関数が state dir と cwd に使う形と同じで、repo の他の `absPath` の使い方とも揃っているので数えない。`resolve the --config path` の失敗の枝に test がないのは、隣の `resolve the state dir`・`resolve the cwd` も同じ(`absPath` を差し替えるのは `spawn_test.go` だけ)
+- 確かめていないもの: テスト、`gofmt`、`go vet`、go1.25.8 でのビルド(新しい test が通ることは、読んだだけで実行していない)。本物の herdr で claude と codex の director が `--config` つきの雛形のとおりに動くこと。cwd が symlink 経由のときの `--config` の動き
+
+### Findings
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| C2-L1 | LOW | maintainability | 雛形の stop の行は `--state-dir` のあとに `--config` を持つが、`director stop` は config を読まない。stop は `loadConfig` が false で作られ、help も「stop reads no ralph.toml」と書く。start が stdout に出す stop の行は `--config` なしで、直したコミットの `startDirector` の doc も「the stop command, which needs no --config」と書くので、同じ start から人に渡る stop が 2 通りになる。あわせて、「every ralph org command in the director's prompt carries --config」という言い方(help、`startDirector` の doc、`RenderDirectorPrompt` の doc)は、雛形の `ralph org` の言及 7 つのうち、実行する 3 つ(status が 2 か所、stop)にだけ当たる。残る 4 つ(`ralph org director start`、`ralph org watch --all --detach`、`ralph org director detach`、語としての `ralph org`)は打たない言及で、test の `notRun` がそれを除いている。害はない(stop は `--config` を無視し、読めない config が stop を止めることもない) | `internal/org/prompts/director.md:33`・`:50`。`internal/cli/org_director_headless.go:59`(help)・`:133`・`:140`・`:161`・`:164`・`:207`(start が出す stop の行)。`internal/org/prompts.go:139`。`internal/cli/org_director.go:287-293`(detach と stop は config を読まない)。`internal/org/prompts_test.go:1613`(stop にも flags を要求) | 雛形の stop の行を、`ralph status` と同じ `--state-dir {{STATE_DIR}}` だけにする。`prompts_test.go` の突き合わせは stop の末尾だけ `--state-dir` にする。残すなら、`director.md:33`・help・2 つの doc の「どれも」「every」を「director が打つ」に直し、`startDirector` の doc に、雛形の stop の行が `--config` を持つ理由を足す |
+| C2-L2 | LOW | naming | `{{CONFIG}}` は値ではなく見出しの文を入れる。config があれば `'<path>'(start の --config)`、なければ散文の `directorPromptNoConfigText` になる。隣の `{{STATE_DIR}}` は、コマンドの中でそのまま動く shell の 1 語で、doc もそう書く。次に誰かが雛形のコマンドに `--config {{CONFIG}}` と書くと、`--config '/p'(start の --config)` か散文が出る。描画後の `{{` の残りの検査は通るので、見つからない。今の使い方(見出しの 1 行だけ)は合っていて、doc も「the header's name of the config」と書いている | `internal/org/prompts.go:134`・`:137-138`・`:141`・`:168-172`。`internal/org/prompts/director.md:4`・`:5` | 値でないと名前でわかる形(`{{CONFIG_NOTE}}` など)に改名する。変えるのは `director.md` と `prompts.go` の 2 か所で、test は描画後の文字列を見ているので変わらない |
+| C2-L3 | LOW | readability | skill の「始める」の 1 は、director が最初に打つ `ralph org director status --state-dir <台帳>` を `--config` なしの字面のまま残し、`--config` の条件は 3 にだけ足した。3 の「雛形に設定のパスが書かれていれば」を見分ける目印は、雛形の `- 設定:` の行が config のときだけ持つ `(start の --config)` で、config なしのときの行は `main worktree の ralph.toml(…)` と、path に見える語を含む散文になる。skill はその目印にも `設定:` の行にも触れない。director が実際に打つのは雛形の字面(`director.md:13`)なので、害は小さい。「立てる」の節と「start の設定」の箇条には、`--config` が雛形に入る話がなく、help にだけある。skill の文と雛形の見出しの結びつきを固定する test はない(inbox の待ちの文言には `director_skill_sync_test.go` がある) | `.claude/skills/director/SKILL.md:149`・`:156-160`・`:101-145`。`internal/org/prompts.go:134`・`:172`。`internal/cli/org_director_headless.go:59-61`。`internal/org/director_skill_sync_test.go:40` | 1 を「`ralph org director status --state-dir <台帳>`(雛形に `--config` があればそれも付ける)」にし、3 の条件は「雛形の `- 設定:` の行が `(start の --config)` で終わっていれば」と目印を名指す。skill の 4 面を `scripts/sync-skills.sh` で揃える |
+| C2-L4 | LOW | maintainability | Go のコメントが、書き換わる成果物の番号を指している。「cross-review cycle 1 finding 1」が 2 か所(`director_start_test.go:281` は slug もない)、「/test gap N of org-director-start, mutant X」が 4 か所。triage report は `/cross-review` が cycle ごとに同じ path へ書き換える(ヘッダは `Cycle: 1/2`)ので、cycle 2 の cross-review が終わると「finding 1」は別の指摘を指しうる。test report の gap の番号と evidence の mutant の ID も、cycle 2 の `/test` が作り直したときに同じとは限らない。8a-1 の self-review の cycle 2 の C2-L3 が同じ型で、直しは起きることを言葉で書く形だった。ここのコメントはどれも、欠陥を言葉でも書いているので、番号は足しているだけ。plan の 46 行にも同じ指し方がある | `internal/org/director_start_test.go:281`・`:450`・`:610`・`:651`。`internal/org/prompts_test.go:1573`。`internal/cli/org_director_headless_test.go:375`。`docs/plans/active/2026-10-15-org-director-start.md:46`。`docs/reports/cross-review-triage-org-director-start.md`(`Cycle: 1/2`) | 番号を外して言葉だけにするか、安定した AC11 に結ぶ(`prompts_test.go:1573` は AC11 も書いている)。`/cross-review` が走る前に直す。走ったあとでは、コメントの変更でも pipeline をもう 1 回回すことになる |
+| C2-L5 | LOW | records | plan の Progress checklist は、cycle 2 の直しを「cycle 2 で直し、/test のテストの穴 D4・E1・E12/E13・P2 のテストも足す」と、これからする形で書いたままで、実際の commit(3243c499 と 4ef33195)を記録していない。S1〜S5 と cycle 1 の直し(S4 da818b4f)は commit つきで書いてある。`/pr` が plan を archive するので、archive には予定の文が残る。また AC11 は e683ee47 で tick されたあとに `--config` の 1 文が足され(5a61a3cc)、それを満たす 3243c499 より前から `[x]` のまま | `docs/plans/active/2026-10-15-org-director-start.md:183-187`・`:126`・`:46`。`git log --format='%h parent=%p'`(e683ee47、54cab8a2、5a61a3cc、3243c499 の順) | Progress の行を commit つきの過去形に直す。Progress は承認の digest に入らない行なので、digest は変わらない。plan は records-only の例外の対象外なので、/verify の前に直す。/verify は AC11 を HEAD で読み直す |
+
+### Positive notes
+
+- cycle 1 の 7 件が、持ち越しも半端な直しもなく閉じている。cycle 2 の直しは、cross-review の「雛形に入れ、読む `ralph org` の動詞に付ける」の字面ではなく、start の cwd を基準にした絶対化(director は別の directory で動く)、相対を断る検査、quoting(空白と単引用符)まで届いている
+- CLI の test の case が、start を linked worktree で打ち、director を main root で動かす形になっていて、絶対化の基準を取り違える変異(`Cwd` 基準)を赤にする。org の test、prompt の test、CLI の test が、それぞれ別の層の変異を止めている
+- `directorPromptCommands` の突き合わせは、`ralph org` の言及の個数がコード内の個数と等しいことを要求するので、雛形にバッククォートなしの `ralph org ...` が足されても、flags のない言及が増えても気づける。実行しない 4 つの言及は `notRun` に明示されている
+- 4 つの穴の test は、それぞれ変異の入口を読んで赤になる形で、足した test が既存の表の行を弱めていない。`failedCreateOutput` は、本物の `driver.Herdr` が失敗でも stdout を返す癖を fake に足す形で、既存の seat の test の挙動(空文字列)は変えない
+- 登録簿の行は、直った 4 件を外し、残る A12〜A14 だけを、今は穴でない理由(seat の test が止める)と Trigger(director stop が共有の関数を使わなくなったとき)つきで残している。行は 5 列のまま
+
+### Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| `director start` の雛形・skill・コメントの小さな残り(cycle 2 の self-review C2-L1〜C2-L5)。雛形の stop の行が stop の読まない `--config` を持つことと「every ralph org command」の言い方。`{{CONFIG}}` が値でなく見出しの文であること。skill の「始める」の 1 の字面と 3 の条件の目印。コメントの「cross-review cycle 1 finding 1」「/test gap N」の指す先。plan の Progress が cycle 2 の commit を持たないこと | どれも挙動を変えない。director が打つ `ralph org` のコマンドに `--config` が付く動きは、org・prompt・CLI の 3 層の test が固定している | cap 2 の最後の cycle で、文言・コメント・名前の変更に pipeline をもう 1 回回す価値がない | 次に `director.md` か `RenderDirectorPrompt` の placeholder を変えるとき(C2-L1・C2-L2)。次に `/director` skill の headless の節を変えるとき(C2-L3)。次にそのコメントのある test に触れるとき(C2-L4) | `docs/reports/self-review-2026-10-15-org-director-start.md`(Cycle 2 の C2-L1〜C2-L5) |
+
+_(登録簿には追記していない。上の行は、C2-L1〜C2-L4 を直さずに進めるときに 1 行で足す形。C2-L5 は plan の記録で、`/pr` の前に直せるので行に入れない。)_
+
+### Coverage gaps
+
+- skill の `--config` の文(「雛形に設定のパスが書かれていれば」)と雛形の `- 設定:` の行を結ぶ test はない。inbox の待ちの文言には `director_skill_sync_test.go` があり、同じ形が取れる
+- `resolve the --config path`(`absPath` の失敗)の枝に test がない。隣の state dir と cwd の枝も同じ
+- 本物の herdr で claude と codex の director が、`--config` つきの雛形を読んで最初の `director status` を打つところは見ていない(test report の Test gaps 8 と同じ穴)
+- cwd が symlink 経由で `--config` に `..` があるときの、start が読むファイルと雛形のパスの一致
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM はなし。LOW 5 件は雛形の stop の行と言い回し、placeholder の名前、skill の字面、コメントの番号、plan の記録で、`--config` を director の `ralph org` のコマンドへ運ぶ動きと、4 つの穴の test に欠陥は見つからなかった)
+- Follow-ups:
+  1. C2-L5: plan の Progress の 1 行を、/verify の前に直す(plan は records-only の例外の外)。C2-L4 のコメントは、`/cross-review` が triage を書き換える前に直す
+  2. C2-L1〜C2-L3: 直すなら `director.md`・`prompts.go`・`prompts_test.go` と skill の 4 面を 1 つのコミットで。skill は `scripts/sync-skills.sh` で揃える
+  3. 直さずに進むなら、上の Tech debt の行を登録簿に足す。cap 2 の最後の回で、plan は `/pr` が archive するので、登録簿の行が唯一の受け皿になる
+  4. /verify への引き継ぎ: AC11 の tick は、AC11 の文が変わる(5a61a3cc)前、それを満たす直し(3243c499)が入る前のもの。cycle 1 の verify・test・sync-docs の報告と、README の director の段落(258 行)、`/director` skill の「立てる」の節、`/org` skill の director の行は、直しの前の tree を述べている。読み直しは各 phase の担当
+- Known gaps: テスト、`gofmt`、`go vet`、go1.25.8 でのビルドは確かめていない。新しい test が通ることと、「戻すと赤くなる」は、読んで判断したもので実行していない。本物の herdr での `--config` つきの director の動きは見ていない
