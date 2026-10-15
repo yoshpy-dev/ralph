@@ -28,12 +28,13 @@ set -eu
 #           HTML text (no browser): L1 exactly one id="overview", on a
 #           <figure class="easy">; L2 1 to 3 easy figures, none inside the
 #           fold; L3 no mono class, <code>, path, file name, or snake_case
-#           word in an easy figure; L4 per easy figure at most 5 n-* boxes,
-#           an <h2>, and an <svg> with an aria-label; L5 one
-#           <section class="before"> outside the fold; L6 one fold
-#           (<details class="deep">) holding #detail-overview and every
-#           figure that is not easy. Prints nothing when every rule holds;
-#           otherwise prints one finding per line on stdout as
+#           word in an easy figure (its text, class names, and <code> tags;
+#           other attribute values such as aria-label are not read); L4 per
+#           easy figure at most 5 n-* boxes, an <h2>, and an <svg> with an
+#           aria-label; L5 one <section class="before"> outside the fold; L6
+#           one fold (<details class="deep">) holding #detail-overview and
+#           every figure that is not easy. Prints nothing when every rule
+#           holds; otherwise prints one finding per line on stdout as
 #           "<figure id or page>: <rule>: <detail>" and exits 1.
 #   digest  Print the first 12 hex characters of the SHA-256 of <plan.md>
 #           without the `- Status:`, `- Approved:`, and `- Branch:` lines and
@@ -442,7 +443,8 @@ lint_page() {
     }
 
     # widen(s, a, b, cls, right) — s[a..b] grown left (and right when right
-    # is set) over characters matching cls; sets W_END to the new end.
+    # is set) over characters matching cls; sets W_END to the new end. It
+    # must not call match: its callers read RSTART and RLENGTH after it.
     function widen(s, a, b, cls, right,    n) {
       while (a > 1 && substr(s, a - 1, 1) ~ cls) a--
       if (right) {
@@ -465,6 +467,7 @@ lint_page() {
         add(3, label, "path-like text: " tok)
       }
       t = s
+      # The ";" in [A-Za-z0-9_;-] lets &gt;.html (from &lt;slug&gt;.html) be caught.
       while (match(t, /[A-Za-z0-9_;-]\.(go|sh|md|json|jsonl|toml|html|yaml|yml|py|ts|js|awk)[^A-Za-z0-9]/)) {
         tok = widen(t, RSTART, RSTART + RLENGTH - 2, "[A-Za-z0-9_.;&/-]", 0)
         t = substr(t, RSTART + RLENGTH - 1)

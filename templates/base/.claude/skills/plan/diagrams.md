@@ -102,6 +102,10 @@ One to three per page, each answering one question the approver has.
 Give each figure its own `<defs>`, with marker and icon ids prefixed by the
 figure number (`e1-arrow`, `e1-person`).
 
+Figures 2 and 3 use the same classes as figure 1, including `no` for the
+round number in the `<h2>`, `t-row` for a row label (`t-row now` for the row
+after this plan), and `rule` for the line between rows.
+
 ## Before you approve
 
 The box (承認の前に) has three columns, in plain words:
@@ -219,10 +223,12 @@ What `lint` checks, from the HTML text alone:
 
 - L1: exactly one `id="overview"`, on a `<figure class="easy">`
 - L2: 1 to 3 easy figures, none inside the fold
-- L3: no `mono` class, `<code>`, path-like word (`internal/org`, also
-  `S1/S2`), file name with an extension such as `.md` or `.sh`, or
-  snake_case word in an easy figure; slash commands (`/director`) and flags
-  (`--all`) pass
+- L3: in an easy figure, no `mono` class, `<code>` element, path-like word
+  (`internal/org`, also `S1/S2`), file name with an extension such as `.md`
+  or `.sh`, or snake_case word; slash commands (`/director`) and flags
+  (`--all`) pass. It reads the figure's text (the words between tags), its
+  `class` names, and its `<code>` tags, not other attribute values such as
+  `aria-label`. Write the `aria-label` in the same plain words as the figure
 - L4: in each easy figure, at most 5 `n-*` boxes, an `<h2>`, and an `<svg>`
   with a non-empty `aria-label`
 - L5: one `<section class="before">`, outside the fold
