@@ -111,11 +111,13 @@ const DirectorRole = "director"
 // DirectorPromptVars holds the values substituted into prompts/director.md
 // for the headless director `ralph org director start` launches: ID, its
 // registration's d<N>; Driver, claude or codex; StateDir, the org state
-// directory of the ledger, which every ralph org command it runs is given
-// with --state-dir; ConfigPath, the absolute path of the ralph.toml start was
-// given with --config, which every ralph org command it runs is given with
-// --config too, so it reads the settings start read ("" when start had no
-// --config); and Cwd, the directory it runs in.
+// directory of the ledger, which the ralph org commands the director runs,
+// and the stop command it asks the human to run, are given with --state-dir;
+// ConfigPath, the absolute path of the ralph.toml start was given with
+// --config ("" when start had none), which the ralph org commands the
+// director runs are given with --config too, so they read the settings start
+// read (the stop command is not: stop reads no ralph.toml); and Cwd, the
+// directory the director runs in.
 type DirectorPromptVars struct {
 	ID         string
 	Driver     string
@@ -124,7 +126,7 @@ type DirectorPromptVars struct {
 	Cwd        string
 }
 
-// directorPromptNoConfigText substitutes for {{CONFIG}} when
+// directorPromptNoConfigText substitutes for {{CONFIG_LINE}} when
 // DirectorPromptVars.ConfigPath is empty: the file the director's ralph org
 // commands read without --config. The director runs in the main worktree root
 // when the ledger is the main worktree's, so both the 8a-1 rule
@@ -136,10 +138,13 @@ const directorPromptNoConfigText = "main worktree の ralph.toml(台帳が main 
 // RenderDirectorPrompt returns prompts/director.md with vars substituted:
 // {{ID}}, {{DRIVER}}, {{CWD}}; {{STATE_DIR}}, which is vars.StateDir as one
 // shell word (shellQuote) so the commands in the template run as written;
-// {{ORG_FLAGS}}, the flags of every ralph org command in the template:
-// --state-dir with {{STATE_DIR}}, followed by --config with vars.ConfigPath
-// as one shell word when it is set; and {{CONFIG}}, the header's name of the
-// config: vars.ConfigPath as one shell word, else
+// {{ORG_FLAGS}}, the flags of the ralph org commands the template has the
+// director run: --state-dir with {{STATE_DIR}}, followed by --config with
+// vars.ConfigPath as one shell word when it is set (the template's stop
+// command, which the director asks the human to run, has --state-dir
+// {{STATE_DIR}} alone, as stop reads no ralph.toml); and {{CONFIG_LINE}},
+// the text of the header's 設定 line, not a value to put in a command:
+// vars.ConfigPath as one shell word followed by "(start の --config)", else
 // directorPromptNoConfigText. Without ConfigPath the text holds no
 // "--config". Unlike RenderRolePrompt it refuses to leave a placeholder: an
 // id not of the form d<N>, a driver other than claude and codex, an empty
@@ -165,18 +170,18 @@ func RenderDirectorPrompt(vars DirectorPromptVars) (string, error) {
 		return "", fmt.Errorf("org: director prompt: read the embedded template: %w", err)
 	}
 	stateDir := shellQuote(vars.StateDir)
-	orgFlags, config := "--state-dir "+stateDir, directorPromptNoConfigText
+	orgFlags, configLine := "--state-dir "+stateDir, directorPromptNoConfigText
 	if vars.ConfigPath != "" {
-		config = shellQuote(vars.ConfigPath)
+		config := shellQuote(vars.ConfigPath)
 		orgFlags += " --config " + config
-		config += "(start の --config)"
+		configLine = config + "(start の --config)"
 	}
 	text := strings.NewReplacer(
 		"{{ID}}", vars.ID,
 		"{{DRIVER}}", vars.Driver,
 		"{{STATE_DIR}}", stateDir,
 		"{{ORG_FLAGS}}", orgFlags,
-		"{{CONFIG}}", config,
+		"{{CONFIG_LINE}}", configLine,
 		"{{CWD}}", vars.Cwd,
 	).Replace(string(data))
 	if i := strings.Index(text, "{{"); i >= 0 {

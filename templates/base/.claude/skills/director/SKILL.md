@@ -146,7 +146,10 @@ start の設定と、director が動く場所は次のとおり。
 
 ### 始める(headless の director がすること)
 
-1. ほかの何よりも先に `ralph org director status --state-dir <台帳>` を打ち、
+1. ほかの何よりも先に、雛形の「最初の手順」のコマンドを打つ。雛形が設定の
+   パスを名指すとき(3)は
+   `ralph org director status --state-dir <台帳> --config <パス>`、
+   名指さないときは `ralph org director status --state-dir <台帳>` になる。
    今の登録の `id` が雛形に書かれた自分の `id` であることを確かめる。違う
    とき、または登録がなく `not attached` と出たときは、ほかに何もしない
    (受信箱の ack と resolve、leader への send、start をしない)。そのことを
@@ -154,10 +157,11 @@ start の設定と、director が動く場所は次のとおり。
 2. 「昇格」節の 2(見張りの確かめ)と 3(attach)は start が済ませたので
    打たない。5(会話の要約のあとの読み直し)は守る。
 3. 打つ `ralph org` のコマンドと `ralph status` には、どれも雛形に書かれた
-   `--state-dir <台帳>` を付ける。雛形に設定のパスが書かれていれば(start に
-   `--config` が渡されたとき)、`ralph org` のコマンドには
-   `--config <そのパス>` も付ける。`ralph status` には `--config` がない。
-   cwd がどこでも、start と同じ台帳と設定を使うため。
+   `--state-dir <台帳>` を付ける。雛形の見出しの `- 設定:` の行が
+   `(start の --config)` で終わっていれば(start に `--config` が渡された
+   とき)、`ralph org` のコマンドには、その行のパスを `--config <パス>` として
+   付ける。`ralph status` には `--config` がない。cwd がどこでも、start と同じ
+   台帳と設定を使うため。
 4. 人とはこの pane で話す。そのあとの仕事(分割計画、受信箱、進捗の報告)は、
    昇格した director と同じ手順で進める。
 

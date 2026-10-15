@@ -1506,7 +1506,7 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 			"手順の全体は `/director` skill に従ってください。",
 			"見張りの確かめ(`ralph status` の `org watch:` の行と `ralph org watch --all --detach`)と attach は start が済ませたので、打たない。",
 			"会話の要約のあとに `ralph org director status --state-dir " + testDirectorStateDirArg + "` で今の登録を読み直す手順は守る。",
-			"打つ `ralph org` のコマンドには、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
+			"あなたが打つ `ralph org` のコマンドには、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
 			"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
 			"人とはこの pane で話す。",
 			"実装しない。",
@@ -1570,16 +1570,19 @@ func directorPromptCommands(text string) []string {
 }
 
 // TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig pins AC11's
-// --config sentence (cross-review cycle 1 finding 1 of org-director-start):
-// with a ConfigPath, every ralph org command the template has the director
-// run ends with --state-dir and --config, each one shell word (a path with a
-// space and a single quote included), the instruction says so, and the header
-// names the file. Without one, the text holds no --config at all and the
-// header names the main worktree's ralph.toml. ralph status has no --config,
-// so it gets --state-dir only. The other ralph org mentions are ones the
-// director does not run.
+// --config sentence: with a ConfigPath, every ralph org command the template
+// has the director run ends with --state-dir and --config, each one shell
+// word (a path with a space and a single quote included), the instruction
+// says so, and the header names the file. Without one, the text holds no
+// --config at all and the header names the main worktree's ralph.toml.
+// ralph status has no --config, and stop, which the director asks the human
+// to run, reads no ralph.toml, so both get --state-dir only, with a
+// ConfigPath too (the stop command the CLI prints after start has no
+// --config either). The other ralph org mentions are ones the director does
+// not run.
 func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
 	const configArg = `'/cfg dir/it'\''s ralph.toml'`
+	stateDirFlag := "--state-dir " + testDirectorStateDirArg
 	notRun := []string{"ralph org", "ralph org director start", "ralph org watch --all --detach", "ralph org director detach"}
 	for _, tc := range []struct {
 		name, configPath, flags, header string
@@ -1600,22 +1603,25 @@ func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
 			}
 			var run []string
 			for _, c := range commands {
-				if slices.Contains(notRun, c) {
-					continue
+				if !slices.Contains(notRun, c) {
+					run = append(run, c)
 				}
-				head, ok := strings.CutSuffix(c, " "+tc.flags)
-				if !ok || strings.Contains(head, "--state-dir") || strings.Contains(head, "--config") {
-					t.Errorf("ralph org command %q does not end with %q", c, tc.flags)
-					continue
-				}
-				run = append(run, head)
 			}
-			if want := []string{"ralph org director status", "ralph org director status", "ralph org director stop --id d3"}; !slices.Equal(run, want) {
-				t.Errorf("ralph org commands with the flags = %q, want %q", run, want)
+			// Each ends with its flags and has no other: status, which the
+			// director runs, gets the config, and stop, which the human
+			// runs, gets the ledger alone.
+			want := []string{
+				"ralph org director status " + tc.flags,
+				"ralph org director status " + tc.flags,
+				"ralph org director stop --id d3 " + stateDirFlag,
+			}
+			if !slices.Equal(run, want) {
+				t.Errorf("ralph org commands the director runs or asks the human to run = %q, want %q", run, want)
 			}
 			for _, phrase := range []string{
-				"打つ `ralph org` のコマンドには、どれも `" + tc.flags + "` を付ける。",
-				"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
+				"あなたが打つ `ralph org` のコマンドには、どれも `" + tc.flags + "` を付ける。",
+				"`ralph status` には `" + stateDirFlag + "` だけを付ける。",
+				"終わりに人に頼む stop は ralph.toml を読まないので、`" + stateDirFlag + "` だけを持つ。",
 			} {
 				if !containsPhrase(text, phrase) {
 					t.Errorf("rendered director prompt does not say %q:\n%s", phrase, text)

@@ -371,10 +371,11 @@ var (
 // resolved by the caller. Cwd is the pane's directory, made absolute against
 // the caller's. ConfigPath is the ralph.toml the caller was given with
 // --config, "" when none was: made absolute against the caller's directory,
-// it goes into the prompt, whose ralph org commands carry it as --config, so
-// the director, which runs in Cwd, reads the settings start read. TimeoutMS
-// bounds the herdr agent start; 0 or less means defaultSpawnTimeoutMS. Who
-// is who writes the events.
+// it goes into the prompt, whose ralph org commands for the director to run
+// carry it as --config (its stop command, for the human, does not: stop
+// reads no ralph.toml), so the director, which runs in Cwd, reads the
+// settings start read. TimeoutMS bounds the herdr agent start; 0 or less
+// means defaultSpawnTimeoutMS. Who is who writes the events.
 type DirectorStartParams struct {
 	Store      *DirectorStore
 	Driver     string

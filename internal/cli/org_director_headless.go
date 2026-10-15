@@ -56,9 +56,10 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"are read from the main worktree's ralph.toml when the ledger is the main\n" +
 			"worktree's, so a feature worktree's ralph.toml does not choose them. The\n" +
 			"director runs in the ledger's main worktree root, else in the directory\n" +
-			"start runs in. With --config, every ralph org command in the director's\n" +
-			"prompt carries --config with that file's absolute path, so the director\n" +
-			"reads the settings start read.\n" +
+			"start runs in. With --config, the ralph org commands the director's\n" +
+			"prompt has it run carry --config with that file's absolute path, so the\n" +
+			"director reads the settings start read (the prompt's stop command, for\n" +
+			"the human, carries none: stop reads no ralph.toml).\n" +
 			"\n" +
 			"start is refused, and writes nothing and runs no herdr, when\n" +
 			"[org.director].enabled is false, while a director is attached (one\n" +
@@ -158,10 +159,12 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 // default is one it allows), wires start's watch gate, and runs
 // (*org.Org).StartDirector in the ledger's main worktree root, else in the
 // current directory, with configPath, which StartDirector makes absolute and
-// gives every ralph org command of the director's prompt as --config. A
-// refusal or failure is returned (exit 1) in the words of startError; on
-// success it prints the registration, the pane to talk to the director in,
-// and the stop command, which needs no --config (stop reads no ralph.toml).
+// gives as --config to the ralph org commands the director's prompt has it
+// run (not to the prompt's stop command, which the human runs). A refusal or
+// failure is returned (exit 1) in the words of startError; on success it
+// prints the registration, the pane to talk to the director in, and the stop
+// command, which, like the prompt's, has no --config (stop reads no
+// ralph.toml).
 func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driverName, model string, timeoutMS int) error {
 	cfg, err := resolveOrgConfig(configPath)
 	if err != nil {

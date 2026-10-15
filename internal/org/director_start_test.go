@@ -278,12 +278,13 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 }
 
 // TestStartDirector_CarriesTheConfigIntoThePrompt pins AC11's --config
-// sentence at the org layer (cross-review cycle 1 finding 1): a ConfigPath
-// relative to the caller's directory reaches the prompt file made absolute,
-// on the ralph org commands with --state-dir, since the director runs in
-// another directory; with none, the prompt file says no --config. (The
-// check looks for " --config", with the space, as the t.TempDir paths in the
-// prompt hold the test's name.)
+// sentence at the org layer: a ConfigPath relative to the caller's directory
+// reaches the prompt file made absolute, on the ralph org commands the
+// director runs, after --state-dir, since the director runs in another
+// directory, while the stop line has --state-dir alone, as stop reads no
+// ralph.toml; with none, the prompt file says no --config. (The check looks
+// for " --config", with the space, as the t.TempDir paths in the prompt hold
+// the test's name.)
 func TestStartDirector_CarriesTheConfigIntoThePrompt(t *testing.T) {
 	for _, tc := range []struct{ name, configPath string }{
 		{"a relative config path", "my ralph.toml"},
@@ -292,7 +293,8 @@ func TestStartDirector_CarriesTheConfigIntoThePrompt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDirStartFixture(t, directorTestToken)
 			t.Chdir(t.TempDir())
-			flags := "--state-dir " + shellQuote(f.dir)
+			stateDirFlag := "--state-dir " + shellQuote(f.dir)
+			flags := stateDirFlag
 			if tc.configPath != "" {
 				abs, err := filepath.Abs(tc.configPath)
 				if err != nil {
@@ -311,7 +313,7 @@ func TestStartDirector_CarriesTheConfigIntoThePrompt(t *testing.T) {
 				t.Fatalf("read the prompt file: %v", err)
 			}
 			prompt := string(data)
-			for _, want := range []string{"\nralph org director status " + flags + "\n", "\n  ralph org director stop --id d1 " + flags + "\n"} {
+			for _, want := range []string{"\nralph org director status " + flags + "\n", "\n  ralph org director stop --id d1 " + stateDirFlag + "\n"} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("prompt file lacks %q:\n%s", want, prompt)
 				}
@@ -447,8 +449,8 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 			}
 		}},
 		// The first look reads director.jsonl before the watch gate, so one
-		// that cannot be read is refused with no gate asked (/test gap 1 of
-		// org-director-start, mutant D4).
+		// that cannot be read is refused with no gate asked (a start that
+		// went on past the failed read would ask the gate).
 		{"director.jsonl unreadable", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
 			if err := os.Mkdir(f.store.Path(), 0o755); err != nil {
 				t.Fatalf("make director.jsonl a directory: %v", err)
@@ -607,8 +609,8 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 // failed workspace or tab create returns with its error, as driver.Herdr
 // does, is not kept as an id: the cleanup asks herdr about only what herdr
 // handed out, so a failed workspace create is followed by no herdr call, and
-// a failed tab create by the checks and the close of ws-1 alone (/test gap 3
-// of org-director-start, mutants E12 and E13).
+// a failed tab create by the checks and the close of ws-1 alone (a start that
+// kept the output as the workspace or the pane id would ask herdr about it).
 func TestStartDirector_AFailedCreatesOutputIsNotAnID(t *testing.T) {
 	boom := errors.New("herdr: connection refused")
 	for _, tc := range []struct {
@@ -648,7 +650,8 @@ func TestStartDirector_AFailedCreatesOutputIsNotAnID(t *testing.T) {
 // TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr pins that a start
 // whose attached cannot be written ends there: the write's error comes back,
 // herdr is not called, and director.jsonl is cut back to the empty file the
-// append made, or is absent (/test gap 2 of org-director-start, mutant E1).
+// append made, or is absent (a start that went on past the failed write
+// would create the workspace).
 func TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr(t *testing.T) {
 	f := newDirStartFixture(t, directorTestToken)
 	f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }

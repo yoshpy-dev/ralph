@@ -372,7 +372,8 @@ func TestOrgDirectorStart_AnAttachedDirectorIsRefusedBeforeTheWatchGate(t *testi
 // status with the --state-dir of the call when one was given, as the other
 // commands the director verbs print do. A CLI run would need a race, so this
 // tests the helper, as TestOrgDirector_NotRestoredErrorNamesTheStatusCommand
-// does (/test gap 4 of org-director-start, mutant P2).
+// does (a refusal that named status without the call's --state-dir would
+// read another ledger's registration).
 func TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus(t *testing.T) {
 	refusal := fmt.Errorf("org: director: start: %w: d1 (driver claude, attached 2026-10-15T09:00:00Z)", org.ErrDirectorAttached)
 	const rest = ", and run start again once none is attached (start has no --replace)"
@@ -414,10 +415,11 @@ func dirNames(t *testing.T, dir string) []string {
 // [org.permissions], [org.roles], and model_pool from the main worktree's
 // ralph.toml, not the linked worktree's, and the director runs in the main
 // worktree root; --config names the file to read instead. A main worktree
-// ralph.toml that does not load is an error. The prompt file's ralph org
-// commands carry a relative --config made absolute (in the main worktree
-// root, where the director runs, it would name the main worktree's file),
-// and without --config carry none (AC11).
+// ralph.toml that does not load is an error. The ralph org commands the
+// prompt file has the director run carry a relative --config made absolute
+// (in the main worktree root, where the director runs, it would name the
+// main worktree's file), and without --config carry none; its stop line
+// carries none either way, as stop reads no ralph.toml (AC11).
 func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 	const mainToml = "[org]\nmodel_pool = [{ driver = \"claude\", model = \"haiku\" }, { driver = \"claude\", model = \"opus\" }]\n\n" +
 		"[org.permissions]\ndefault = \"guarded\"\n\n[org.roles]\ndirector = [\"haiku\"]\n"
@@ -430,7 +432,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 		wantStderr         string
 		wantPerm, wantArgs string // the started line's permission, and agent start's flags before the pointer
 		wantModel          string
-		wantConfig         func(r legacyLedgerRepo) string // the --config of the prompt's ralph org commands (nil: none)
+		wantConfig         func(r legacyLedgerRepo) string // the --config of the ralph org commands the prompt has the director run (nil: none)
 	}{
 		{name: "no --config: the main worktree's settings", mainToml: mainToml, wtToml: worktreeToml,
 			args:       []string{"--driver", "claude"},
@@ -511,11 +513,12 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read the prompt file: %v", err)
 			}
-			flags := " --state-dir '" + r.sharedDir + "'"
+			stateDirFlag := " --state-dir '" + r.sharedDir + "'"
+			flags := stateDirFlag
 			if tc.wantConfig != nil {
 				flags += " --config '" + tc.wantConfig(r) + "'"
 			}
-			for _, want := range []string{"\nralph org director status" + flags + "\n", "\n  ralph org director stop --id d1" + flags + "\n"} {
+			for _, want := range []string{"\nralph org director status" + flags + "\n", "\n  ralph org director stop --id d1" + stateDirFlag + "\n"} {
 				if !strings.Contains(string(data), want) {
 					t.Errorf("prompt file %s lacks %q:\n%s", prompt, want, data)
 				}
