@@ -3,6 +3,8 @@ package org
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -135,6 +137,78 @@ func TestOrgStopAll_StopsEveryActiveSeatAcrossOrgsInOrder(t *testing.T) {
 		if ev.Event != EventStopped || ev.DryRun || ev.OrgID == "org-d" || ev.SeatID == "seat-gone" {
 			t.Fatalf("expected only real stopped events for the four active seats, got %+v", ev)
 		}
+	}
+}
+
+// TestOrgStopAll_ReportsOpenHeadlessDirectorsAndLeavesThem covers plan
+// 2026-10-15-org-director-start D10 (AC10's data half): StopAll stops the
+// seats and reports the ledger's open headless directors, current or
+// detached, without one herdr call for their panes or workspaces and without
+// writing director.jsonl. A stopped headless registration and a promoted
+// session's are not reported.
+func TestOrgStopAll_ReportsOpenHeadlessDirectorsAndLeavesThem(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	store := NewDirectorStore(filepath.Dir(o.Manifest.Path()))
+	writeDirectorFile(t, store, strings.Join([]string{
+		directorHeadlessAttachedLine("d1", "111111111111"),
+		directorWorkspaceLine("d1", "ws-d1"),
+		directorPaneLine("d1", "pane-d1"),
+		directorEventLine("d1", DirectorEventLaunched, ""),
+		directorDetachedLine("d1"),
+		directorHeadlessAttachedLine("d2", "222222222222"),
+		directorDetachedLine("d2"),
+		directorEventLine("d2", DirectorEventStopped, ""),
+		directorAttachedLine("d3", "claude"),
+		directorDetachedLine("d3"),
+		directorHeadlessAttachedLine("d4", "444444444444"),
+		directorWorkspaceLine("d4", "ws-d4"),
+	}, "\n")+"\n")
+	before := readDirectorFile(t, store)
+
+	for _, dryRun := range []bool{true, false} {
+		result := o.StopAll(StopAllParams{DryRun: dryRun})
+		if len(result.Errs) != 0 || result.DirectorReadErr != nil {
+			t.Fatalf("dry run %v: Errs %v, DirectorReadErr %v, want none", dryRun, result.Errs, result.DirectorReadErr)
+		}
+		var got []string
+		for _, r := range result.OpenHeadlessDirectors {
+			got = append(got, directorRegSummary(r))
+		}
+		if want := []string{"d1 running ws=ws-d1 pane=pane-d1", "d4 starting ws=ws-d4 pane="}; !slices.Equal(got, want) {
+			t.Fatalf("dry run %v: OpenHeadlessDirectors = %q, want %q", dryRun, got, want)
+		}
+	}
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected the seat stopped, got active %v", active)
+	}
+	for _, calls := range [][]string{h.paneGetCalls, h.sendKeysCalls, h.paneCloseCalls, h.workspaceGetCalls, h.workspaceCloseCalls} {
+		for _, id := range calls {
+			if strings.HasSuffix(id, "-d1") || strings.HasSuffix(id, "-d4") {
+				t.Fatalf("StopAll called herdr on the director's %s", id)
+			}
+		}
+	}
+	if after := readDirectorFile(t, store); after != before {
+		t.Fatalf("StopAll changed director.jsonl:\n%s", after)
+	}
+}
+
+// TestOrgStopAll_AnUnreadableDirectorFileChangesNothing: a director.jsonl
+// that cannot be read is recorded in DirectorReadErr only; the seats are
+// stopped and Errs stays empty.
+func TestOrgStopAll_AnUnreadableDirectorFileChangesNothing(t *testing.T) {
+	o, h, _ := testOrg(t)
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	if err := os.MkdirAll(DirectorPathIn(filepath.Dir(o.Manifest.Path())), 0o755); err != nil {
+		t.Fatalf("make director.jsonl a directory: %v", err)
+	}
+	result := o.StopAll(StopAllParams{})
+	if result.DirectorReadErr == nil || len(result.OpenHeadlessDirectors) != 0 {
+		t.Fatalf("DirectorReadErr %v, OpenHeadlessDirectors %v, want the read error and none", result.DirectorReadErr, result.OpenHeadlessDirectors)
+	}
+	if len(result.Errs) != 0 || !slices.Equal(result.StoppedSeats, []OrgSeat{{"org-a", "seat-1"}}) {
+		t.Fatalf("Errs %v, StoppedSeats %v, want the seat stopped with no error", result.Errs, result.StoppedSeats)
 	}
 }
 
