@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:43b4eae64cf2
+- Approved: 2026-10-15 sha256:96796452ceae
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -88,6 +88,7 @@
 ## Affected areas
 
 - 変えるファイル: `internal/org/director.go`、`internal/org/director_test.go`、`internal/org/prompts.go`、`internal/org/prompts_test.go`、`internal/org/spawn.go`(role director の拒否)、`internal/org/verbs_all.go`(stop --all の案内の 1 行)、`internal/cli/org_director.go`、`internal/cli/org_director_test.go`、`internal/cli/org.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/status.go`、`internal/cli/status_test.go`、`internal/cli/org_stop_all_test.go`、`templates/base/ralph.toml`、`/director` skill の 4 面、README、仕様、AGENTS.md、`docs/tech-debt/README.md`
+- S8 と S9 で足したファイル: `internal/org/permissions.go`、`internal/org/permissions_test.go`(director の `--add-dir` を消す、D12)、`internal/cli/org_watch.go`(agmsg_home の判定を start と共有する、D13)、`docs/recipes/codex-seat-permissions.md` とその template の写し、`internal/cli/doctor_codex_writable_root.go` とそのテスト(start が断る codex の director の mode を `ralph doctor` が座席の mode として数えないようにする。self-review cycle 3 の C3-L4)
 - 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go`、`internal/org/director_stop.go` とそれぞれのテスト。S1b のあとで director_start.go が 949 行になり、800 行の目安を超えたので stop を分けた)、start と stop の CLI のファイル(`internal/cli/org_director_headless.go` とそのテスト。S2 のあとで org_director.go が 914 行になったので分けた)
 
 ## Visual review
@@ -138,6 +139,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 3. S2 CLI: `ralph org director start` と `stop`(`--force` を含む)(設定を main worktree の規則で読む、見張りの確かめ、古い台帳)、`director status` と `ralph status` の表示、help
 4. S3 `/director` skill の 4 面と文書(README、仕様、AGENTS.md、template のコメント、tech-debt)
 5. S8 cross-review cycle 2 の 2 件: codex の director の autonomous と edits を断る(D12)、`--config` の相対の `agmsg_home` を断る(D13)。テスト、help、template のコメント、`/director` skill の 4 面、tech-debt を揃える
+6. S9 self-review cycle 3 の LOW 4 件: tech-debt の行が triage を位置で指すのを直す、D13 の断りの文を「どこから打っても断る」に合わせる、D12 の挿入の位置と折り返し、workspace-write の mode の集合を 1 つの関数にまとめ、`ralph doctor` が codex の director の autonomous と edits を数えないようにする
 
 ## Verify plan
 
@@ -195,6 +197,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - S7 a539a765(cycle 2 の self-review の C2-L1〜C2-L4: 雛形の stop の行は `--state-dir` だけ、`{{CONFIG_LINE}}` への改名、skill の「始める」の手順、テストのコメントの報告の番号を言葉に)。C2-L5 は 12c7428d。verify(cycle 2)d3bf2066 は pass(直す前の binary と並べて、cross-review の指摘が再現し HEAD で直ったことを確かめた)
   - test(cycle 2)6556bce5 は pass、sync-docs 147f2317。cross-review(cycle 2)d2971e1a は ACTION_REQUIRED 2 件: codex の director は workspace-write で `.git` に書けず `ralph org start --plan` が通らない、`--config` の相対の `agmsg_home` が director と見張りで別の場所を指す。consult(consult-plan-xreviewc2)の判定で D12・D13・AC15・S8 を足し、承認し直した(digest 43b4eae64cf2、図は permission と agmsg を描いていない)。上限を 3 に上げて後工程を回し直す(cycle-count.json は 2 のまま、cycle 3 の報告は `--cycle 3`)
   - S8 caf1d025(D12: codex の director の autonomous と edits を断る `ErrDirectorCodexWorkspaceWrite`、`codexWritableRootArgs` を leader だけに戻す。D13: `--config` の相対の `agmsg_home` を断る `checkStartAgmsgHome` と共通の判定 `agmsgHomeIsRelative`、env の警告。help、template、skill の 4 面、README、仕様、recipe の 2 つ、tech-debt)。implementer の報告の範囲外の 2 点は /sync-docs に渡す: `ralph doctor` の codex の writable root の検査(`codexSeatModesPossible`)は role director も数えるので、start が断る mode で warn しうる。`/org` skill の director の行と permission の項が D12・D13 に触れない
+  - self-review(cycle 3)e62df32e は LOW 4 件、Merge: yes。C3-L4(doctor)はコードの直しなので /sync-docs ではなく S9 で直す。Affected areas に S8 と S9 のファイルを、Implementation outline に S9 を足し、承認し直した(digest 96796452ceae、図はこれらのファイルを描いていない)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
