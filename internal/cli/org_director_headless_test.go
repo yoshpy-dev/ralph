@@ -367,6 +367,34 @@ func TestOrgDirectorStart_AnAttachedDirectorIsRefusedBeforeTheWatchGate(t *testi
 	}
 }
 
+// start's refusal from AttachHeadless when the registration it refused on is
+// gone, or unreadable, by the time start reads it again (Current nil) names
+// status with the --state-dir of the call when one was given, as the other
+// commands the director verbs print do. A CLI run would need a race, so this
+// tests the helper, as TestOrgDirector_NotRestoredErrorNamesTheStatusCommand
+// does (/test gap 4 of org-director-start, mutant P2).
+func TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus(t *testing.T) {
+	refusal := fmt.Errorf("org: director: start: %w: d1 (driver claude, attached 2026-10-15T09:00:00Z)", org.ErrDirectorAttached)
+	const rest = ", and run start again once none is attached (start has no --replace)"
+	for _, tc := range []struct {
+		name, hintStateDir, want string
+	}{
+		{"without --state-dir", "", refusal.Error() + ": read the current registration with ralph org director status" + rest},
+		{"with --state-dir", "/work/the ledger", refusal.Error() + ": read the current registration with ralph org director status --state-dir '/work/the ledger'" + rest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &orgDirectorRuntime{hintStateDir: tc.hintStateDir}
+			err := rt.startAttachedError(&org.DirectorAttachedError{Err: refusal})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("startAttachedError = %v; want %q", err, tc.want)
+			}
+			if !errors.Is(err, org.ErrDirectorAttached) {
+				t.Errorf("startAttachedError = %v; want it to still wrap ErrDirectorAttached", err)
+			}
+		})
+	}
+}
+
 // dirNames lists the names in dir, sorted.
 func dirNames(t *testing.T, dir string) []string {
 	t.Helper()

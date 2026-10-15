@@ -19,7 +19,10 @@ import (
 // directorHerdr is a fakeHerdr whose AgentStart also records the kind, the
 // pane, herdr's timeout, and the time left on its context, and runs
 // agentStartHook (when set) before it answers, so a test can change
-// director.jsonl while start waits on herdr (AC4).
+// director.jsonl while start waits on herdr (AC4). When failedCreateOutput is
+// set, a WorkspaceCreate or TabCreate that fails returns it along with the
+// error, as driver.Herdr returns the command's stdout with its error; the
+// double itself returns "" (the seats' tests keep that).
 type directorHerdr struct {
 	*fakeHerdr
 	agentStartKinds    []string
@@ -27,6 +30,23 @@ type directorHerdr struct {
 	agentStartTimeouts []int
 	agentStartLeft     []time.Duration // -1 when the context had no deadline
 	agentStartHook     func()
+	failedCreateOutput string
+}
+
+func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string) (string, error) {
+	id, err := h.fakeHerdr.WorkspaceCreate(ctx, cwd, label)
+	if err != nil && h.failedCreateOutput != "" {
+		return h.failedCreateOutput, err
+	}
+	return id, err
+}
+
+func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error) {
+	id, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label)
+	if err != nil && h.failedCreateOutput != "" {
+		return h.failedCreateOutput, err
+	}
+	return id, err
 }
 
 func (h *directorHerdr) AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error) {
@@ -129,9 +149,13 @@ func directorTrail(t *testing.T, s *DirectorStore) []string {
 	return trail
 }
 
-// directorFileState is director.jsonl's content, or "<missing>".
+// directorFileState is director.jsonl's content, "<missing>", or
+// "<a directory>" when a test made a directory of that name.
 func directorFileState(t *testing.T, s *DirectorStore) string {
 	t.Helper()
+	if fi, err := os.Stat(s.Path()); err == nil && fi.IsDir() {
+		return "<a directory>"
+	}
 	raw, err := os.ReadFile(s.Path())
 	if errors.Is(err, fs.ErrNotExist) {
 		return "<missing>"
@@ -373,7 +397,9 @@ func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 // current registration, a headless one still starting included, is refused
 // with a *DirectorAttachedError that says whether it is headless, also
 // before the watch gate, so with no watch running it is still the attached
-// refusal and no watch is launched (self-review L1 of org-director-start).
+// refusal and no watch is launched (self-review L1 of org-director-start). A
+// director.jsonl that cannot be read is refused by that same first look,
+// also before the watch gate.
 func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -418,6 +444,18 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 			if !errors.As(err, &ae) || ae.Current == nil || !ae.Current.Headless() || ae.Current.State != DirectorStateStarting ||
 				!strings.Contains(err.Error(), "headless starting") {
 				t.Fatalf("err = %v, want a *DirectorAttachedError naming the starting headless d1", err)
+			}
+		}},
+		// The first look reads director.jsonl before the watch gate, so one
+		// that cannot be read is refused with no gate asked (/test gap 1 of
+		// org-director-start, mutant D4).
+		{"director.jsonl unreadable", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
+			if err := os.Mkdir(f.store.Path(), 0o755); err != nil {
+				t.Fatalf("make director.jsonl a directory: %v", err)
+			}
+		}, false, syscall.EISDIR, func(t *testing.T, err error) {
+			if !strings.HasPrefix(err.Error(), "org: director: read ") || !strings.Contains(err.Error(), "director.jsonl") {
+				t.Fatalf("err = %v, want the failed read of director.jsonl", err)
 			}
 		}},
 		{"a director is attached and no watch runs", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
@@ -562,6 +600,70 @@ func TestStartDirector_AFailedStepClosesWhatItMadeAndRecordsTheStop(t *testing.T
 				t.Fatalf("the next start registered %s, want d2", res.Registration.ID)
 			}
 		})
+	}
+}
+
+// TestStartDirector_AFailedCreatesOutputIsNotAnID pins that the output a
+// failed workspace or tab create returns with its error, as driver.Herdr
+// does, is not kept as an id: the cleanup asks herdr about only what herdr
+// handed out, so a failed workspace create is followed by no herdr call, and
+// a failed tab create by the checks and the close of ws-1 alone (/test gap 3
+// of org-director-start, mutants E12 and E13).
+func TestStartDirector_AFailedCreatesOutputIsNotAnID(t *testing.T) {
+	boom := errors.New("herdr: connection refused")
+	for _, tc := range []struct {
+		name      string
+		inject    func(h *directorHerdr)
+		wantCalls []string
+		wantTrail []string
+	}{
+		{"workspace create", func(h *directorHerdr) { h.workspaceCreateErr = boom },
+			[]string{"workspace_create"}, []string{"attached d1", "detached d1", "stopped d1"}},
+		{"tab create", func(h *directorHerdr) { h.tabCreateErr = boom },
+			[]string{"workspace_create", "tab_create", "workspace_get", "workspace_close"},
+			[]string{"attached d1", "workspace_created d1", "detached d1", "stopped d1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			f.h.failedCreateOutput = "Error: create failed"
+			tc.inject(f.h)
+			_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+			if !errors.Is(err, boom) || !strings.Contains(err.Error(), "d1 is recorded stopped") {
+				t.Fatalf("err = %v, want the create's error and a finished cleanup", err)
+			}
+			if !slices.Equal(f.h.calls, tc.wantCalls) {
+				t.Fatalf("herdr calls = %v, want %v", f.h.calls, tc.wantCalls)
+			}
+			for _, ids := range [][]string{f.h.paneGetCalls, f.h.workspaceGetCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls} {
+				if slices.Contains(ids, f.h.failedCreateOutput) {
+					t.Fatalf("herdr was asked about the failed create's output %q: %v", f.h.failedCreateOutput, ids)
+				}
+			}
+			wantTrail(t, f.store, tc.wantTrail...)
+			wantNoDirectorOpen(t, f.store)
+		})
+	}
+}
+
+// TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr pins that a start
+// whose attached cannot be written ends there: the write's error comes back,
+// herdr is not called, and director.jsonl is cut back to the empty file the
+// append made, or is absent (/test gap 2 of org-director-start, mutant E1).
+func TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	if !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("err = %v, want ENOSPC", err)
+	}
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
+	}
+	if got := directorFileState(t, f.store); got != "" && got != "<missing>" {
+		t.Fatalf("director.jsonl = %q, want it empty or missing", got)
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "prompts")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a start with no registration made the prompts dir (stat err %v)", err)
 	}
 }
 
