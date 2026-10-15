@@ -154,3 +154,85 @@ commit の前に、worktree のルートで打った。
 ### Verdict
 
 Verdict: complete。依頼の 3 項目を直した。C2-V4 はコードで事実と確かめ、skill に 1 文、tech-debt に 1 行を足した。K15 と K16 は tech-debt の 1 行にした。静的検査と同期の検査は通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、足した文が本物の director の動きと合うことで、コードと verify の evidence(C2-5)から書き、実機を取り直してはいない。
+
+## Cycle 3
+
+- Date: 2026-10-16(JST)
+- Plan: `docs/plans/active/2026-10-15-org-director-start.md`(承認済み。`./scripts/plan-visual.sh digest` は `96796452ceae` で、`- Approved:` の行と同じ。この run で計画は触っていない)
+- Pipeline cycle: 3。上限を 3 に上げた最後の回。`.harness/state/standard-pipeline/cycle-count.json` は計画どおり 2 のままで、触っていない。insight event には `--cycle 3` を明示した。run 開始時の HEAD は `b0adfc63`(run 開始時の値で、この節を含む commit の SHA ではない)
+- cycle 2 の sync-docs(147f2317)のあとに入った変更: caf1d025(D12: codex の director の autonomous と edits を断る。D13: `--config` の相対の `agmsg_home` を断る)と 83287d39(self-review cycle 3 の C3-L1〜C3-L4)
+- 先行 report の cycle 3 の節: self-review(Merge: yes、LOW 4)、verify(pass。LOW 3 件の C3-V1〜C3-V3、情報 2 件の C3-V4・C3-V5)、test(pass、失敗 0。Test gaps 1〜6)
+- 項目の番号: 「項目 N」は依頼の項目 N。C3-V は verify の cycle 3 の節の ID、D3b・D8 は test の cycle 3 の mutation の ID
+- 内容の commit: この節、直した文書、tech-debt の 3 行、insight event を含む 1 つの commit(`docs: sync docs for org-director-start (cycle 3)`)
+- コードとテストは変えていない。変えたのは Markdown と `.agents` の生成物だけ
+
+### Summary
+
+依頼の 3 項目と tech-debt の (a)〜(d) を済ませた。項目 1(C3-V1)は仕様 85 行の D13 の文を「解きうるので、どこで打っても断る」に直した。項目 2(C3-V2)は `/org` skill の 4 面で、`director` の行、permission の項、doctor の対象、台帳と `--add-dir` の文を直した。項目 3 の掃き出しでは、直す誤りは見つからなかった。tech-debt には (a) と (c)、(b)、(d) の 3 行を足した。
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-9 の 8a-2 の注、85 行) | 項目 1(C3-V1) | 「director と見張りが別の場所から解くので、start が断る(D13)」を「別の場所から解きうるので、start はどこで打っても断る(D13)」にした。start は 2 つの場所を比べず、main worktree のルートから打つときも、台帳に main worktree がないときも断る(`checkStartAgmsgHome` の doc)。断りの文、help、README、`/director` skill は S9 の C3-L2 で同じ言い方に直っていて、仕様だけが残っていた |
+| `.claude/skills/org/SKILL.md`(動詞の表の `director` の行) | 項目 2(C3-V2 a) | permission mode の文の次に、codex の director は `guarded` でしか立たず、`autonomous` と `edits` は `codex_verified` によらず断られること(workspace-write では `.git` が読み取り専用で `ralph org start --plan` が通らない。guarded でも人の codex の設定が workspace-write なら同じ壁に当たる)を足した。`--config` の文の次に、その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければどこで打っても断ること、人の shell の `RALPH_ORG_AGMSG_HOME` は pane に届かず警告 1 行で続けることを足した |
+| 同上(「permission 作法」の `[org.permissions]` の項) | 項目 2(C3-V2 b) | `director = "mode"` の文の次に、codex の director は guarded でしか立たず、`autonomous` と `edits` は「下の座席の `codex_verified` が true でも」断られることを足した。次の項の `codex_verified` の文は座席の話でそのまま。隣り合う 2 つの項が、`codex_verified` を director にも効くように読ませていたので、director の側の文で打ち消した |
+| 同上(同じ節の doctor の対象) | 項目 2(C3-V2 c) | 対象の文の次に、role director は guarded のときだけ数え、codex の director の edits と autonomous は start が断るので数えない、を足した(`codexSeatModesPossible`。`docs/recipes/codex-seat-permissions.md` の同じ箇所と同じ内容) |
+| 同上(同じ節の台帳と `--add-dir` の文) | 項目 2(C3-V2 d) | 「台帳を書くのは leader だけ」は `--add-dir` の文脈で、座席の話としては正しかった。ただし headless の director も台帳に書くので、「座席のうち台帳を書くのは leader だけ」にし、headless の director は台帳に書くが `--add-dir` は受けないこと(codex の director は guarded でしか立たず、edits と autonomous は start が断る)を足した。recipe の「The org ledger and `--add-dir`」節と同じ内容 |
+| `.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | 項目 2 | `.claude` の 2 面は同じ edit を Edit で入れ、`.agents` の 2 面は `./scripts/sync-skills.sh` と `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で作り直した。4 面の md5 は `7439019e58b88ed23394c829dd00cbb7` で同じ。折り返しの行は全角を 2 として数えて 78 桁以下。`stop`・`disband` の行は触っていない(F-8 の行がそのセルの長さを書いているため) |
+| `docs/tech-debt/README.md`(新しい 3 行。`RALPH_ORG_AGMSG_HOME` の行の次) | tech-debt (a)(c) | 1 行目: D12 の Go の 2 つの残り。(a) doctor の pass の文「no role that can use a codex model resolves to edits or autonomous」は、`director = "edits"` の設定では文字どおりに正しくなく、`TestCheckCodexAgmsgWritableRoot_DirectorWorkspaceWriteModeIsNotCounted` が文全体を固定する(C3-V3)。(c) D12 のあと、`checkDirectorStart` の `permissionArgsForDriver` の error の return は、`config.Load` が作った設定では届かない |
+| 同上 | tech-debt (b) | 2 行目: test の cycle 3 の生き残りのうち閉じられる 2 つ。D3b(`--config ""` を渡す start を固定するテストがない)と D8(`enabled = false` と相対の `agmsg_home` のどちらの拒否が先かを固定するテストがない)。tester の probe の名前と、一番小さいテストの形を書いた |
+| 同上 | tech-debt (d) | 3 行目: 本物の herdr と codex で見ていない 2 つの前提。guarded の codex の director が、人の codex の設定の下で `git worktree add` を通せること(D12 の案内の前提)と、`RALPH_ORG_AGMSG_HOME` が本物の pane に届かないこと(D13 の警告の前提。herdr の呼び出しの引数を読んだだけ)。verifier が書いた確かめ方(隔離した herdr server と一時の `CODEX_HOME`)を Trigger に添えた |
+
+3 行とも、plan の ID(D12・D13・AC15)と固定の SHA(caf1d025、83287d39)、report の節の名前と finding・mutant の ID で指し、report の行番号や `file:line` は使っていない。S8 が足した 2 行(D12 の行と `RALPH_ORG_AGMSG_HOME` の行)と重なる記述はない。(d) の行は、その 2 行が事実として書いていることを「実機では見ていない」と書く別の行で、2 行を直してはいない。
+
+### 項目 3 の確かめ(codex の director が codex_verified を要する、または `--add-dir` を受けると書く箇所)
+
+- `.claude/rules/ralph/*.md` と `templates/base/.claude/rules/ralph/*.md`: director を挙げるのは `ralph-workflow.md`(2 面は同一)だけで、`/director` と headless の director と `director stop` に触れ、`codex_verified` と `--add-dir` には触れない
+- `AGENTS.md`: `director.go`・`director_start.go`・`director_stop.go` の句は permission に触れない。`docs/architecture/repo-map.md` の `.claude/skills/director/` の行も同じ
+- `README.md` 258 行: D12(codex の director は guarded だけ、`codex_verified` によらない)と D13(解きうる、どこで打っても断る)をすでに書く
+- 文書全体の grep(`--add-dir` と `codex_verified`。`docs/reports/`、`docs/evidence/`、`docs/plans/`、`docs/insights/` を除く): director に当たる行は、README 258 行、仕様 85 行、`/director` skill(4 面)、`/org` skill(今回直した)、`docs/recipes/codex-seat-permissions.md`(2 面)、`templates/base/ralph.toml` の director の注、tech-debt の D12 の行と headless の director の permission の行。どれも「guarded だけ、`codex_verified` によらない、`--add-dir` は受けない」と書く。仕様 182 行と 236 行、tech-debt の leader の `--add-dir` の行、`/org` skill の座席の `codex_verified` の文は leader と座席の話で、director に触れない
+- 結果: 直す誤りはなかった
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `ralph org director start --help`(Go) | 変更なし。D12 と D13 の段落、「wherever it runs」の文は S9 のあとの動きと合うと verify の C3-4 が確かめている。help は Go で、触っていない |
+| `/director` skill(4 面) | 変更なし。D12 の 2 つの道と guarded の壁、D13 の「2 つの場所が違えば」「どこで打っても断る」、`RALPH_ORG_AGMSG_HOME` が届かないことを書いていて、verify の Q1〜Q6 と合う |
+| `README.md`(動詞の表、`ralph status` の行、director の段落) | 変更なし。258 行は D12 と D13 を書く。`RALPH_ORG_AGMSG_HOME` の警告は書かないが、誤りはない |
+| `templates/base/ralph.toml`(`[org.permissions.roles]` の director の注) | 変更なし。director は guarded だけ、`~/.codex/config.toml` の壁、`Without a director entry` の既定を書く |
+| `docs/recipes/codex-seat-permissions.md` と template の写し | 変更なし。doctor が director の edits と autonomous を数えないこと、director が台帳に書いても `--add-dir` を受けない理由を書く。`/org` skill の今回の文はこれに合わせた |
+| `AGENTS.md`、`CLAUDE.md`、`.claude/rules/ralph/`、`docs/quality/`、`docs/architecture/repo-map.md` | 変更なし(上の項目 3 の確かめ) |
+| `docs/tech-debt/README.md` の既存の行 | 変更なし。D12 の行と `RALPH_ORG_AGMSG_HOME` の行は S9 で plan の ID と d2971e1a の triage を指す形になっていて、D12 と D13 に合う。F-8 の行(`/org` skill の `stop` と `disband` のセルの長さ)は、その 2 つの行を触っていないので変更なし |
+| `docs/specs/2026-08-01-org-runtime.md` | 変更なし。後の動詞を挙げず後継 spec を指す |
+
+### Left open
+
+- C3-V4(情報): cycle 1 と cycle 2 の verify の AC6 の行と、cycle 2 の evidence の help の写しは、caf1d025 より前の木を書いている。書いた時点では正しい前の記録なので触っていない
+- C3-V5(情報): `RALPH_ORG_AGMSG_HOME` の警告は、そのあとで断られる start でも 1 行出る。Go の動きで、害がないので触っていない
+- self-review の「Tech debt identified」にある下書きの行(C3-L2〜C3-L4)は足していない。S9(83287d39)がその 3 つを直した。C3-L1 も、tech-debt の 2 行の Related が plan の ID と d2971e1a を指す形に直っている
+- test の Test gaps 1・2(D3b、D8)、3(`permissionArgsForDriver` の return)、4・5(実機の 2 つ)は、上の 3 行に入れた。Test gaps 6(cycle 2 の K15・K16)は、cycle 2 の sync-docs が足した行のまま
+- `templates/base/ralph.toml` の reviewer の注(guarded の reviewer が permission prompt で止まる、と言う文)は、cycle 1 の Left open のまま
+- 計画の `- [ ] PR created` は、計画をオーケストレーターが持つので触っていない
+- 実機の動きは確かめていない。コードを変えていないので、verify と test の結果はそのまま有効
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `IDENTICAL: 169`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `go test ./internal/config/... ./internal/scaffold/... ./internal/org/ -run 'Skill|Sync|Defaults' -count=1`: 3 パッケージとも `ok`
+- `go test ./internal/scaffold/... ./internal/config/... ./internal/upgrade/... -count=1`: 3 パッケージとも `ok`
+- `./scripts/run-static-verify.sh`: rc 0、`==> All verifiers passed.`。「tech-debt README plan references」は OK、`gofmt: ok`、`0 issues.`、`secret-scan-branch: scanned f21df66c..b0adfc63 against origin/main: clean`。出力 425 行は scratchpad に落として読んだ。wrapper のログは gitignore の対象で、コミットしていない
+- `git diff --check`: 出力なし。変えたファイルの U+FFFD は 0 件
+- `git diff --numstat`(report と insight event を除く 6 ファイル): skill の 4 面は +14/-6 ずつ、仕様は +1/-1、tech-debt は +3/-0
+- skill の 4 面の md5: `7439019e58b88ed23394c829dd00cbb7`(`/org`)で同じ。`.agents` の 2 面の差分も `.claude` と同じ hunk だけ
+- tech-debt の新しい行は、`git show HEAD:docs/tech-debt/README.md` と比べて、増えた行が 3 行だけ(既存の行に変更なし)。3 行とも 5 列、backtick は列ごとに偶数、`file:line` は 0、計画の参照は `docs/plans/active/2026-10-15-org-director-start.md` だけ
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md`: `96796452ceae`(run の前も後も同じ)
+- `./scripts/insights-append.sh --slug org-director-start --flow standard --phase sync_docs --verdict pass --cycle 3 --source skill`(slug は日付なし): rc 0。`git status --short` は既存の `docs/insights/events/2026-10-15-org-director-start.jsonl` を `M` と示し、新しい `??` のファイルはない。足した行は cycle 3、verdict pass
+
+### Verdict
+
+Verdict: complete。依頼の 3 項目を直し、tech-debt の (a)〜(d) を 3 行にした。静的検査と同期の検査は通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、`/org` skill の足した文が本物の director の動きと合うことで、コードと verify・test の cycle 3 の記録から書き、実機を取り直してはいない。
