@@ -897,6 +897,52 @@ func TestStartDirector_AReplaceOrDetachWhileTheAgentStartsEndsItsOwnLaunch(t *te
 	}
 }
 
+// TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord
+// pins the start side of AC8's last sentence and of plan D14: a stop that
+// reads the registration once start has recorded its workspace and pane,
+// closes them, and records the stop while the agent starts leaves
+// MarkLaunched no current registration, so start cleans up (a stop came in),
+// finds that herdr no longer knows what it made, and its MarkStopped finds
+// the registration already stopped (ErrDirectorStopped). abort counts that
+// as recorded: start writes nothing more (no launched, no second stopped),
+// sends no C-c and no close, and returns ErrDirectorReplacedDuringStart that
+// says the registration is recorded stopped, not a *DirectorCleanupError.
+func TestStartDirector_AStopRecordedWhileTheAgentStartsCountsAsTheCleanupsRecord(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	var stopped DirectorStopResult
+	f.h.agentStartHook = func() {
+		f.h.agentStartHook = nil
+		var err error
+		if stopped, err = f.stop("d1"); err != nil {
+			t.Errorf("stop while the agent starts: %v", err)
+		}
+		// herdr no longer knows what the stop closed.
+		delete(f.h.workspaceLabels, "ws-1")
+		delete(f.h.paneTabs, "pane-1")
+	}
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+
+	if !stopped.WasCurrent || stopped.AlreadyStopped || stopped.PaneNote != "pane=closed" || stopped.WorkspaceNote != "workspace=closed" {
+		t.Fatalf("stop result = %+v, want d1's pane and workspace closed and its stop recorded", stopped)
+	}
+	var ce *DirectorCleanupError
+	if !errors.Is(err, ErrDirectorReplacedDuringStart) || errors.As(err, &ce) || !strings.Contains(err.Error(), "no registration is current") ||
+		!strings.HasSuffix(err.Error(), "; start closed what it had made in herdr, and d1 is recorded stopped") {
+		t.Fatalf("err = %v, want ErrDirectorReplacedDuringStart whose cleanup counts the stop's record", err)
+	}
+	at := slices.Index(f.h.calls, "agent_start")
+	if want := append([]string{"workspace_create", "tab_create"}, directorCloseCalls...); at < 0 || !slices.Equal(f.h.calls[:at], want) {
+		t.Fatalf("herdr calls = %v, want %v (the stop's) before the agent start", f.h.calls, want)
+	}
+	for _, call := range f.h.calls[at+1:] {
+		if call == "pane_send_keys" || call == "pane_close" || call == "workspace_close" {
+			t.Fatalf("herdr calls after the agent start = %v, want the cleanup to send nothing to what herdr no longer knows", f.h.calls[at+1:])
+		}
+	}
+	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1")
+	wantNoDirectorOpen(t, f.store)
+}
+
 // TestDirector_AStartThatDiedAfterItsAttachedLeavesAStartingRegistration
 // pins the crash after step 1: the registration reads starting, start and
 // attach refuse on it, and stop closes only what was recorded (nothing, or

@@ -960,3 +960,95 @@ func TestStopDirector_ARecordThatFailsSaysItsPrefixOnce(t *testing.T) {
 		t.Fatalf("director.jsonl changed:\n%s", after)
 	}
 }
+
+// TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt pins
+// the record of a stop, by stop and by start's cleanup (abort), whose write
+// stops after the detached and whose cut back fails too: the error comes
+// through directorRecordStopError and still wraps
+// ErrDirectorWriteNotRestored, ENOSPC, and the truncate error, so it says
+// that director.jsonl may hold part of the write and not that nothing was
+// recorded, with "org: director: " once, no herdr command, and the stop to
+// run. The whole detached ends the registration's current state and leaves
+// it open, so that stop, run once herdr no longer knows the pane and the
+// workspace, records its stopped. The text is checked by its parts, not
+// whole.
+func TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt(t *testing.T) {
+	errTruncate := errors.New("truncate refused")
+	agentErr := errors.New("agent start: exited")
+	cases := []struct {
+		name, prefix, open string
+		run                func(f *dirStartFixture, cutWrite func(*os.File, []byte) (int, error)) error
+	}{
+		{"stop", "org: director: stop d1: record d1 stopped: append to ", "d1 running ws=ws-1 pane=pane-1",
+			func(f *dirStartFixture, cutWrite func(*os.File, []byte) (int, error)) error {
+				f.mustStart(t, DirectorDriverClaude, "opus")
+				f.store.write = cutWrite
+				res, err := f.stop("d1")
+				if got := res.CtrlCNote + ", " + res.PaneNote + ", " + res.WorkspaceNote; got != "ctrl_c=ok, pane=closed, workspace=closed" {
+					t.Errorf("stop result notes = %q, want the pane and the workspace closed", got)
+				}
+				return err
+			}},
+		{"start's cleanup", "org: director: start d1: herdr agent start " + DirectorAgentName(directorTestToken) +
+			" (agent_start_retries=0): agent start: exited; its cleanup did not finish: record d1 stopped: append to ", "d1 starting ws=ws-1 pane=pane-1",
+			func(f *dirStartFixture, cutWrite func(*os.File, []byte) (int, error)) error {
+				f.h.agentStartErr = agentErr
+				writes := 0
+				f.store.write = func(file *os.File, b []byte) (int, error) {
+					writes++
+					if writes == 4 { // attached, workspace_created, pane_created, then the cleanup's detached and stopped
+						return cutWrite(file, b)
+					}
+					return file.Write(b)
+				}
+				_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+				if !errors.Is(err, agentErr) {
+					t.Errorf("err = %v, want the agent start's failure wrapped", err)
+				}
+				return err
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			var onDisk string
+			f.store.truncate = func(string, int64) error { return errTruncate }
+			err := tc.run(f, directorPartialWrite(t, f.store, &onDisk))
+
+			var ce *DirectorCleanupError
+			if !errors.As(err, &ce) || ce.Detached || ce.Unconfirmed || ce.HerdrCommands != nil || ce.StopCommand != "ralph org director stop --id d1" {
+				t.Fatalf("err = %#v, want a cleanup error that names the stop and no herdr command", err)
+			}
+			if !errors.Is(err, ErrDirectorWriteNotRestored) || !errors.Is(err, syscall.ENOSPC) || !errors.Is(err, errTruncate) {
+				t.Fatalf("err = %v, want ErrDirectorWriteNotRestored, ENOSPC, and the truncate error wrapped", err)
+			}
+			text := err.Error()
+			if !strings.HasPrefix(text, tc.prefix+f.store.Path()+": no space left on device") || strings.Count(text, "org: director: ") != 1 ||
+				!strings.Contains(text, "; director.jsonl may hold part of the write") || strings.Contains(text, "nothing was recorded") ||
+				strings.Contains(text, "nothing more was recorded") || !strings.HasSuffix(text, "; record the stop with ralph org director stop --id d1") {
+				t.Fatalf("err =\n%s\nwant it to start with %q, say \"org: director: \" once and that director.jsonl may hold part of the write, "+
+					"not that nothing was recorded, and end with the stop", text, tc.prefix)
+			}
+
+			if got := directorFileState(t, f.store); got != onDisk || !strings.Contains(onDisk, `"id":"d1","event":"detached"`) {
+				t.Fatalf("director.jsonl = %q, want the partial write %q with the whole detached", got, onDisk)
+			}
+			res := mustReadDirector(t, f.store)
+			if res.Current != nil || !slices.Equal(openHeadlessSummary(res), []string{tc.open}) || res.CorruptLines != 1 {
+				t.Fatalf("Read = current %+v, open %q, %d corrupt lines; want nothing current, %s open, the cut stopped corrupt",
+					res.Current, openHeadlessSummary(res), res.CorruptLines, tc.open)
+			}
+
+			// herdr closed both; the stop it names, run with the write
+			// working again, records the stopped of the open registration.
+			f.store.write, f.store.truncate = nil, nil
+			delete(f.h.workspaceLabels, "ws-1")
+			delete(f.h.paneTabs, "pane-1")
+			again, err := f.stop("d1")
+			if err != nil || again.WasCurrent || again.PaneNote != "pane=already closed" || again.WorkspaceNote != "workspace=already closed" {
+				t.Fatalf("stop again = %+v, %v; want the stopped of d1 recorded, d1 not current", again, err)
+			}
+			wantNoDirectorOpen(t, f.store)
+		})
+	}
+}
