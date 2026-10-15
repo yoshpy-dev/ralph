@@ -152,8 +152,11 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 			"--force closes as usual. When a start that is still running records a\n" +
 			"workspace or pane after stop read the registration, stop has not closed\n" +
 			"it, so it records nothing and exits 1 with what it closed: run it again\n" +
-			"to close what start recorded. stop reads no ralph.toml (nor the main\n" +
-			"worktree's), so one that does not load does not block it.",
+			"to close what start recorded. When start's cleanup (after a step of\n" +
+			"start failed) or another stop records the director stopped while stop\n" +
+			"closes it, stop records nothing more and exits 0 with what it closed and\n" +
+			"that the director was already recorded stopped. stop reads no ralph.toml\n" +
+			"(nor the main worktree's), so one that does not load does not block it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(id) == "" {
@@ -320,7 +323,8 @@ func (rt *orgDirectorRuntime) withStateDirInStopCommand(err error) error {
 // stopDirector is `ralph org director stop --id <id> [--force]` on rt (plan
 // 2026-10-15-org-director-start, D4 and D11): (*org.Org).StopDirector with
 // only the herdr driver and no config, as detach reads none, then the
-// result in the CLI's words (printOrgDirectorStop), or the refusal
+// result in the CLI's words (printOrgDirectorStop, exit 0, also when start's
+// cleanup or another stop recorded the stop first), or the refusal
 // (stopError).
 func (rt *orgDirectorRuntime) stopDirector(cmd *cobra.Command, id string, force bool) error {
 	o := newOrgDirectorHerdrRuntime(config.OrgConfig{})
@@ -380,7 +384,12 @@ func (rt *orgDirectorRuntime) notHeadlessError(id string, err error) error {
 // --force recorded it with something left open), whether the director is
 // no longer attached, and the label to look for when no workspace id was
 // recorded; for a forced stop, a warning on stderr with why and the herdr
-// commands that find this launch's workspace by its label.
+// commands that find this launch's workspace by its label. When start's
+// cleanup or another stop recorded the stop first (res.AlreadyStopped, plan
+// AC8), the first line says the director was already recorded stopped, with
+// the notes, and the next says who may have recorded it and that this stop
+// recorded nothing more. It names no stop to run, since one would be refused
+// as already stopped.
 func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	id := inboxField(res.Registration.ID)
 	out := cmd.OutOrStdout()
@@ -388,7 +397,12 @@ func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	if res.Forced {
 		forced = "forced; "
 	}
-	_, _ = fmt.Fprintf(out, "stopped %s (%s%s)\n", id, forced, orgDirectorStopNotes(res))
+	if res.AlreadyStopped {
+		_, _ = fmt.Fprintf(out, "%s was already recorded stopped (%s)\n", id, orgDirectorStopNotes(res))
+		_, _ = fmt.Fprintf(out, "start's cleanup or another stop recorded %s stopped after this stop read it, so this stop recorded nothing more\n", id)
+	} else {
+		_, _ = fmt.Fprintf(out, "stopped %s (%s%s)\n", id, forced, orgDirectorStopNotes(res))
+	}
 	if res.WasCurrent {
 		_, _ = fmt.Fprintln(out, "the director is no longer attached")
 	}

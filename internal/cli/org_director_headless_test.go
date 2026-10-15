@@ -1170,6 +1170,59 @@ func TestOrgDirectorStop_AStartThatRecordedMeanwhileNamesTheStopAgain(t *testing
 	}
 }
 
+// AC8's last sentence in the CLI's words: when start's cleanup or another
+// stop recorded the stop first (AlreadyStopped), stop exits 0. On stdout it
+// says that d1 was already recorded stopped, with what this stop did to the
+// pane and the workspace, and that this stop recorded nothing more. It says
+// nothing on stderr (no --force warning, also after a forced stop whose
+// close failed), does not say the director is no longer attached, and names
+// no stop to run, since one would be refused as already stopped. A CLI run
+// would need a start that records while stop runs, so this tests
+// printOrgDirectorStop with the result StopDirector returns (internal/org's
+// TestStopDirector_SucceedsWhenTheStopWasRecordedFirst pins how that result
+// is made). The stop help says so too.
+func TestOrgDirectorStop_AStopRecordedFirstNamesNoStopToRun(t *testing.T) {
+	for _, tc := range []struct {
+		name, workspaceNote string
+	}{
+		{"the workspace closed", "workspace=closed"},
+		{"a forced stop whose workspace close failed", "workspace=close failed: herdr: connection refused"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := org.DirectorStopResult{
+				Registration: org.DirectorRegistration{ID: "d1", WorkspaceID: "ws-7"},
+				CtrlCNote:    "ctrl_c=skipped", PaneNote: "pane=none recorded", WorkspaceNote: tc.workspaceNote,
+				AlreadyStopped: true,
+			}
+			cmd := NewRootCmd()
+			var stdout, stderr strings.Builder
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			printOrgDirectorStop(cmd, res)
+			want := "d1 was already recorded stopped (ctrl_c=skipped, pane=none recorded, " + tc.workspaceNote + ")\n" +
+				"start's cleanup or another stop recorded d1 stopped after this stop read it, so this stop recorded nothing more\n"
+			if got := stdout.String(); got != want {
+				t.Errorf("stdout =\n%q\nwant\n%q", got, want)
+			}
+			if got := stderr.String(); got != "" {
+				t.Errorf("stderr = %q; want nothing", got)
+			}
+			if strings.Contains(stdout.String(), "ralph org director stop") {
+				t.Errorf("stdout %q names a stop to run; want none", stdout.String())
+			}
+		})
+	}
+
+	out, err := runOrgCmd(t, "director", "stop", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "When start's cleanup (after a step of start failed) or another stop records the director stopped while stop closes it, " +
+		"stop records nothing more and exits 0 with what it closed and that the director was already recorded stopped."; !strings.Contains(strings.Join(strings.Fields(out), " "), want) {
+		t.Errorf("director stop --help does not say %q:\n%s", want, out)
+	}
+}
+
 // AC9 through the CLI: stop refuses, writing nothing and running no herdr,
 // without --id, for an id no registration has (naming status, which lists
 // the open headless directors), for a registration a promoted session

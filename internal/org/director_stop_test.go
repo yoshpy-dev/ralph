@@ -629,6 +629,12 @@ func TestStopDirector_AForcedStopThatCannotRecordSaysToRetryWithForce(t *testing
 			if !strings.Contains(err.Error(), "nothing was recorded") {
 				t.Fatalf("err = %v, want it to say nothing was recorded", err)
 			}
+			// The record's failure comes without the store's prefix, so the
+			// text names "org: director: stop d1: " once.
+			if n := strings.Count(err.Error(), "org: director: "); n != 1 || !strings.HasPrefix(err.Error(), "org: director: stop d1: ") ||
+				!strings.Contains(err.Error(), "\nrecord d1 stopped: nothing was recorded, so d1 (driver claude, attached "+directorTestNow+", headless running) is still the current registration: ") {
+				t.Fatalf("err = %v, want \"org: director: stop d1: \" once (found %d \"org: director: \") and the record's failure without its prefix", err, n)
+			}
 			if after := directorFileState(t, f.store); after != before {
 				t.Fatalf("director.jsonl changed:\n%s", after)
 			}
@@ -829,4 +835,128 @@ func TestStopDirector_AForcedStopRecordsWhatStartRecordedMeanwhile(t *testing.T)
 	wantNothingSent(t, f.h)
 	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1+force")
 	wantNoDirectorOpen(t, f.store)
+}
+
+// TestStopDirector_SucceedsWhenTheStopWasRecordedFirst pins AC8's last
+// sentence: when start's cleanup (or another stop) records the registration
+// stopped while this stop closes the workspace, this stop's record finds it
+// already stopped, adds nothing to director.jsonl, and succeeds with
+// AlreadyStopped. The result keeps the notes of what this stop did, with
+// WasCurrent and Forced false and no herdr command, and no error names a
+// stop to run. Start's cleanup records with MarkStopped, as abort
+// does once it has closed what it made. It comes after start's step 3
+// recorded a pane this stop did not read, and the stopped refusal comes
+// before the ids are compared (D14). With Force it holds for the stop whose
+// labels match and for the forced stop whose workspace close fails
+// (MarkForceStopped).
+func TestStopDirector_SucceedsWhenTheStopWasRecordedFirst(t *testing.T) {
+	closeErr := errors.New("herdr: connection refused")
+	startsCleanup := []string{"attached d1", "workspace_created d1", "pane_created d1", "detached d1", "stopped d1"}
+	cases := []struct {
+		name       string
+		running    bool // a running director, else one whose start recorded only workspace ws-7
+		force      bool
+		closeFails bool
+		wantNotes  string
+		wantTrail  []string
+	}{
+		{"another stop recorded it first", true, false, false, "ctrl_c=ok, pane=closed, workspace=closed",
+			[]string{"attached d1", "workspace_created d1", "pane_created d1", "launched d1", "detached d1", "stopped d1"}},
+		{"start's cleanup recorded it", false, false, false, "ctrl_c=skipped, pane=none recorded, workspace=closed", startsCleanup},
+		{"start's cleanup recorded it, with force", false, true, false, "ctrl_c=skipped, pane=none recorded, workspace=closed", startsCleanup},
+		{"start's cleanup recorded it while a forced stop's workspace close failed", false, true, true,
+			"ctrl_c=skipped, pane=none recorded, workspace=close failed: herdr: connection refused", startsCleanup},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			ws := "ws-1"
+			if tc.running {
+				f.mustStart(t, DirectorDriverClaude, "opus")
+			} else {
+				ws = "ws-7"
+				if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
+					t.Fatalf("AttachHeadless: %v", err)
+				}
+				if err := f.store.RecordWorkspace("d1", ws, testDirectorWho); err != nil {
+					t.Fatalf("RecordWorkspace: %v", err)
+				}
+				setLabel(&f.h.workspaceLabels, ws, DirectorWorkspaceLabel(directorTestToken))
+			}
+			if tc.closeFails {
+				f.h.workspaceCloseErrs = map[string]error{ws: closeErr}
+			}
+			var afterRecord string
+			f.h.workspaceCloseHook = func() {
+				f.h.workspaceCloseHook = nil
+				var err error
+				if tc.running {
+					// The other stop read d1 as this one did, closed, and records.
+					var read DirectorRegistration
+					if read, err = f.store.openHeadlessRegistration("stop d1", "d1"); err == nil {
+						_, err = f.store.MarkStoppedIfUnchanged(read, testDirectorWho)
+					}
+				} else {
+					// Start's step 3, then its cleanup after the agent start
+					// failed: it closed what it made and records the stop.
+					var pane string
+					if pane, err = f.h.TabCreate(context.Background(), ws, f.cwd, DirectorTabLabel(directorTestToken)); err == nil {
+						if err = f.store.RecordPane("d1", pane, testDirectorWho); err == nil {
+							_, err = f.store.MarkStopped("d1", testDirectorWho)
+						}
+					}
+				}
+				if err != nil {
+					t.Errorf("the record that comes first: %v", err)
+				}
+				afterRecord = directorFileState(t, f.store)
+			}
+			p := f.stopParams("d1")
+			p.Force = tc.force
+			res, err := f.o.StopDirector(p)
+			if err != nil {
+				t.Fatalf("stop = %v; want it to succeed, with nothing more to record", err)
+			}
+			if !res.AlreadyStopped || res.WasCurrent || res.Forced || res.CloseErr != nil || res.HerdrCommands != nil || res.Registration.ID != "d1" {
+				t.Fatalf("stop result = %+v; want AlreadyStopped with WasCurrent and Forced false and no herdr command", res)
+			}
+			if got := res.CtrlCNote + ", " + res.PaneNote + ", " + res.WorkspaceNote; got != tc.wantNotes {
+				t.Fatalf("stop result notes = %q, want %q", got, tc.wantNotes)
+			}
+			if afterRecord == "" || !slices.Equal(f.h.workspaceCloseCalls, []string{ws}) {
+				t.Fatalf("workspace closes = %v; want this stop's close of %s, which records the stop first", f.h.workspaceCloseCalls, ws)
+			}
+			if got := directorFileState(t, f.store); got != afterRecord {
+				t.Fatalf("this stop wrote to director.jsonl after the other record:\n%s\nwant\n%s", got, afterRecord)
+			}
+			wantTrail(t, f.store, tc.wantTrail...)
+			wantNoDirectorOpen(t, f.store)
+		})
+	}
+}
+
+// TestStopDirector_ARecordThatFailsSaysItsPrefixOnce pins the text of a stop
+// whose closes finished and whose record failed: "org: director: stop d1: "
+// once, then "record d1 stopped: " and the store's error without its own
+// prefix, with ENOSPC still wrapped, nothing recorded, no herdr command, and
+// the stop to run again without --force.
+func TestStopDirector_ARecordThatFailsSaysItsPrefixOnce(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	f.mustStart(t, DirectorDriverClaude, "opus")
+	before := directorFileState(t, f.store)
+	f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
+	_, err := f.stop("d1")
+	var ce *DirectorCleanupError
+	if !errors.As(err, &ce) || !errors.Is(err, syscall.ENOSPC) || ce.Unconfirmed || ce.HerdrCommands != nil || ce.StopCommand != "ralph org director stop --id d1" {
+		t.Fatalf("err = %#v, want a cleanup error that wraps ENOSPC and names the stop without --force", err)
+	}
+	want := "org: director: stop d1: record d1 stopped: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ", headless running) " +
+		"is still the current registration: append to " + f.store.Path() + ": no space left on device; nothing was recorded; " +
+		"record the stop with ralph org director stop --id d1"
+	if err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%v", err, want)
+	}
+	if after := directorFileState(t, f.store); after != before {
+		t.Fatalf("director.jsonl changed:\n%s", after)
+	}
 }

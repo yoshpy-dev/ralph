@@ -746,6 +746,40 @@ func TestStartDirector_ARecordThatFailsStillClosesWhatHerdrMade(t *testing.T) {
 	}
 }
 
+// TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce pins the text
+// of start's cleanup when it closed what start made and its MarkStopped
+// failed: "org: director: " once, in the cause, then "record d1 stopped: "
+// and the store's error without its "org: director: stop d1: ", with the
+// agent start's failure and ENOSPC still wrapped, no herdr command, and the
+// stop that records it. The registration stays as start left it.
+func TestStartDirector_ACleanupWhoseRecordFailsSaysThePrefixOnce(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	agentErr := errors.New("agent start: exited")
+	f.h.agentStartErr = agentErr
+	writes := 0
+	f.store.write = func(file *os.File, b []byte) (int, error) {
+		writes++
+		if writes == 4 { // attached, workspace_created, pane_created, then the cleanup's detached and stopped
+			return 0, syscall.ENOSPC
+		}
+		return file.Write(b)
+	}
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	var ce *DirectorCleanupError
+	if !errors.As(err, &ce) || ce.Verb != "start" || ce.Detached || ce.Unconfirmed || ce.HerdrCommands != nil ||
+		ce.StopCommand != "ralph org director stop --id d1" || !errors.Is(err, agentErr) || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("err = %#v, want a cleanup error that wraps the agent start and ENOSPC and names the stop", err)
+	}
+	want := "org: director: start d1: herdr agent start " + DirectorAgentName(directorTestToken) + " (agent_start_retries=0): agent start: exited; " +
+		"its cleanup did not finish: record d1 stopped: nothing was recorded, so d1 (driver claude, attached " + directorTestNow + ", headless starting) " +
+		"is still the current registration: append to " + f.store.Path() + ": no space left on device; nothing more was recorded; " +
+		"record the stop with ralph org director stop --id d1"
+	if err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%v", err, want)
+	}
+	wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1")
+}
+
 // TestStartDirector_ACleanupThatCannotCloseLeavesItDetachedOnly pins AC3's
 // second half: when start cannot close what it made, it writes detached only
 // and returns a *DirectorCleanupError with the herdr commands and the stop

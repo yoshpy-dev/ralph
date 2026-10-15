@@ -1974,6 +1974,19 @@ func TestDirectorHeadlessWriters_ACutOffWriteIsRestored(t *testing.T) {
 			}
 		}, func(s *DirectorStore) error { _, err := s.MarkStopped("d1", testDirectorWho); return err },
 			"org: director: stop d1: nothing was recorded: "},
+		{"MarkStoppedIfUnchanged of the current registration", headless,
+			func(s *DirectorStore) error {
+				read, err := s.openHeadlessRegistration("stop d1", "d1")
+				if err != nil {
+					return err
+				}
+				_, err = s.MarkStoppedIfUnchanged(read, testDirectorWho)
+				return err
+			},
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
+		{"MarkForceStopped of the current registration", headless,
+			func(s *DirectorStore) error { _, err := s.MarkForceStopped("d1", testDirectorWho); return err },
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, clock := newTestHeadlessStore(t, directorTestToken, "dddddddddddd")

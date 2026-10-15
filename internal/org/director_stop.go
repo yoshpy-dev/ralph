@@ -67,6 +67,13 @@ type DirectorStopParams struct {
 // id: nothing checks it again once the stop is recorded, and a herdr that
 // renumbered its ids can give it to another launch. All three are unset when
 // Force changed nothing.
+//
+// AlreadyStopped says that, after StopDirector read the registration, start's
+// cleanup or another stop recorded it stopped (start's cleanup does so once
+// it has closed what it made), so this stop found it stopped when it came to
+// record the stop and wrote nothing (plan AC8). The notes still say what this
+// stop did to the pane and the workspace. WasCurrent and Forced are false,
+// CloseErr and HerdrCommands are unset, and no stop is left to run again.
 type DirectorStopResult struct {
 	Registration             DirectorRegistration
 	WasCurrent               bool
@@ -77,15 +84,16 @@ type DirectorStopResult struct {
 	Forced                   bool
 	CloseErr                 error
 	HerdrCommands            []string
+	AlreadyStopped           bool
 }
 
 // StopDirector closes the herdr pane and workspace of the open headless
 // registration p.ID and records the stop (plan D4): current or detached,
 // starting or running. It refuses, with nothing written and no herdr call,
 // an empty or malformed id, an id no registration has, a registration a
-// session promoted (ErrDirectorNotHeadless) or one already stopped
-// (ErrDirectorStopped), both with ErrDirectorNoOpenHeadless, and a call from
-// inside the director's own pane (ErrDirectorStopSelfPane).
+// session promoted (ErrDirectorNotHeadless) or one already stopped when it
+// reads it (ErrDirectorStopped), both with ErrDirectorNoOpenHeadless, and a
+// call from inside the director's own pane (ErrDirectorStopSelfPane).
 //
 // confirmDirectorResources checks herdr's labels for the recorded pane and
 // workspace before anything is sent (D9): a label that is not this launch's
@@ -109,6 +117,14 @@ type DirectorStopResult struct {
 // run again, which closes what start recorded. On a *DirectorCleanupError
 // the result still carries Registration and the notes; the error's text
 // does not repeat the notes (the CLI prints them).
+//
+// The read also leaves time for start's cleanup, which closes what start made
+// and then records the stop, or for another stop, to record the registration
+// stopped first (plan AC8). The record then finds it stopped
+// (ErrDirectorStopped). StopDirector writes nothing more and returns the
+// result with AlreadyStopped and a nil error, as start's cleanup treats the
+// same refusal as success when a stop came first. This holds for a forced
+// stop too.
 //
 // With p.Force (plan D11), a label that is not this launch's, a get that
 // fails or times out, and a close that fails do not end the stop: it sends
@@ -163,15 +179,19 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 // Without p.Force a close that did not finish records nothing. A stop whose
 // closes finished is recorded by MarkStoppedIfUnchanged against
 // res.Registration, the registration as StopDirector read it (plan D14); a
-// forced one by MarkForceStopped, which compares no ids. A record that fails
-// is a *DirectorCleanupError; after a forced stop its StopCommand carries
-// --force, since the retry meets what this one met. For a start that
-// recorded an id after the read (ErrDirectorChangedDuringStop), its
-// CleanupErr holds the store's refusal without its prefix
-// (directorChangedError), so the error's text has
-// "org: director: stop <id>: " once, and says that this stop closed only
-// what it had read (what that was is in the result's notes, not in the
-// text), and its StopCommand is the stop to run again.
+// forced one by MarkForceStopped, which compares no ids. When either finds
+// the registration already stopped (ErrDirectorStopped: start's cleanup or
+// another stop recorded it after the read, plan AC8), nothing more is
+// written, and it returns res with AlreadyStopped and a nil error, forced or
+// not, as start's cleanup (abort) does for the same refusal. Any other record
+// that fails is a *DirectorCleanupError whose CleanupErr is
+// directorRecordStopError, so the error's text has
+// "org: director: stop <id>: " once. After a forced stop its StopCommand
+// carries --force, since the retry meets what this one met. For a start that
+// recorded an id after the read (ErrDirectorChangedDuringStop) the text also
+// says that this stop closed only what it had read (what that was is in the
+// result's notes, not in the text), and its StopCommand is the stop to run
+// again.
 func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed directorClose) (DirectorStopResult, error) {
 	reg := res.Registration
 	forced := closed.err != nil
@@ -185,17 +205,22 @@ func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed dir
 	} else {
 		wasCurrent, err = p.Store.MarkStoppedIfUnchanged(reg, p.Who)
 	}
-	var changed *directorChangedError
-	switch {
-	case err != nil && forced:
-		e := newDirectorCleanupError("stop", reg, closed, nil, errors.Join(closed.err, fmt.Errorf("record %s stopped: %w", p.ID, err)), false)
-		e.StopCommand = directorStopCommand(reg.ID, true)
-		return res, e
-	case errors.As(err, &changed):
-		return res, newDirectorCleanupError("stop", reg, closed, nil,
-			fmt.Errorf("record %s stopped: %w; this stop closed only what it had read", p.ID, changed), false)
-	case err != nil:
-		return res, newDirectorCleanupError("stop", reg, closed, nil, fmt.Errorf("record %s stopped: %w", p.ID, err), false)
+	if errors.Is(err, ErrDirectorStopped) {
+		res.AlreadyStopped = true
+		return res, nil
+	}
+	if err != nil {
+		recordErr := &directorRecordStopError{id: p.ID, err: err}
+		switch {
+		case forced:
+			e := newDirectorCleanupError("stop", reg, closed, nil, errors.Join(closed.err, recordErr), false)
+			e.StopCommand = directorStopCommand(reg.ID, true)
+			return res, e
+		case errors.Is(err, ErrDirectorChangedDuringStop):
+			return res, newDirectorCleanupError("stop", reg, closed, nil,
+				fmt.Errorf("%w; this stop closed only what it had read", recordErr), false)
+		}
+		return res, newDirectorCleanupError("stop", reg, closed, nil, recordErr, false)
 	}
 	res.WasCurrent = wasCurrent
 	if forced {
@@ -204,6 +229,28 @@ func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed dir
 	}
 	return res, nil
 }
+
+// directorRecordStopError is err, the store's failure to record the stop of
+// registration id (MarkStopped, MarkStoppedIfUnchanged, or MarkForceStopped),
+// as the CleanupErr of a *DirectorCleanupError: "record <id> stopped: " and
+// err's text with the "org: director: " and then the "stop <id>: " that the
+// store puts in front of its errors cut off. The text of that cleanup error
+// already starts with "org: director: stop <id>: " (a stop's) or with the
+// cause's "org: director: start <id>: " (start's cleanup, abort), so the
+// prefix appears once. It unwraps to err, so errors.Is and errors.As still
+// find every error err wraps: ErrDirectorChangedDuringStop,
+// ErrDirectorWriteNotRestored, and a failed write's syscall error.
+type directorRecordStopError struct {
+	id  string
+	err error
+}
+
+func (e *directorRecordStopError) Error() string {
+	text := strings.TrimPrefix(e.err.Error(), "org: director: ")
+	return "record " + e.id + " stopped: " + strings.TrimPrefix(text, "stop "+e.id+": ")
+}
+
+func (e *directorRecordStopError) Unwrap() error { return e.err }
 
 // openHeadlessRegistration returns the open headless registration id, read
 // without the lock (StopDirector's MarkStoppedIfUnchanged or

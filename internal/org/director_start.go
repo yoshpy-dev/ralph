@@ -352,8 +352,8 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read
 			return err
 		}
 		if read != nil && (reg.WorkspaceID != read.WorkspaceID || reg.PaneID != read.PaneID) {
-			return fmt.Errorf("org: director: %s: %w", verb,
-				&directorChangedError{id: id, then: directorRecordedIDs(*read), now: directorRecordedIDs(*reg)})
+			return fmt.Errorf("org: director: %s: %w: %s had %s when stop read it, and has %s now", verb,
+				ErrDirectorChangedDuringStop, id, directorRecordedIDs(*read), directorRecordedIDs(*reg))
 		}
 		ts := s.now()
 		var events []DirectorEvent
@@ -387,24 +387,6 @@ func directorRecordedIDs(reg DirectorRegistration) string {
 	}
 	return ws + " and " + pane
 }
-
-// directorChangedError is MarkStoppedIfUnchanged's refusal of registration
-// id (plan D14) without the "org: director: stop <id>: " that markStopped
-// puts in front of it, as it does for all its errors: then and now are the
-// workspace and pane ids recorded for id when stop read it and under the
-// lock (directorRecordedIDs). It wraps ErrDirectorChangedDuringStop.
-// recordDirectorStop finds it with errors.As and puts it in the
-// *DirectorCleanupError, whose Error writes that prefix itself, so the text
-// has the prefix once.
-type directorChangedError struct {
-	id, then, now string
-}
-
-func (e *directorChangedError) Error() string {
-	return fmt.Sprintf("%v: %s had %s when stop read it, and has %s now", ErrDirectorChangedDuringStop, e.id, e.then, e.now)
-}
-
-func (e *directorChangedError) Unwrap() error { return ErrDirectorChangedDuringStop }
 
 // The refusals and failures of StartDirector that the CLI tells apart, each
 // wrapped by an error that names the case. StopDirector's are in
@@ -730,7 +712,11 @@ func (r *directorStartRun) replacedError() error {
 }
 
 // abort is StartDirector's cleanup after cause: close what it made, then
-// record the stop, or, when the close did not finish, detached only.
+// record the stop, or, when the close did not finish, detached only. A
+// registration a stop recorded stopped first (ErrDirectorStopped) counts as
+// recorded. A record that fails otherwise is a *DirectorCleanupError whose
+// CleanupErr is directorRecordStopError, so its text has "org: director: "
+// once, in cause.
 func (r *directorStartRun) abort(cause error) error {
 	closed := r.o.closeDirectorResources(r.reg)
 	if closed.err == nil {
@@ -738,7 +724,7 @@ func (r *directorStartRun) abort(cause error) error {
 		if err == nil || errors.Is(err, ErrDirectorStopped) {
 			return fmt.Errorf("%w; start closed what it had made in herdr, and %s is recorded stopped", cause, r.reg.ID)
 		}
-		return newDirectorCleanupError("start", r.reg, closed, cause, fmt.Errorf("record %s stopped: %w", r.reg.ID, err), false)
+		return newDirectorCleanupError("start", r.reg, closed, cause, &directorRecordStopError{id: r.reg.ID, err: err}, false)
 	}
 	w := r.p.Who
 	_, err := r.p.Store.Detach(DirectorDetach{ID: r.reg.ID, User: w.User, Cwd: w.Cwd, HerdrPane: w.HerdrPane})
