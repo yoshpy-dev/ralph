@@ -236,3 +236,89 @@ commit の前に、worktree のルートで打った。
 ### Verdict
 
 Verdict: complete。依頼の 3 項目を直し、tech-debt の (a)〜(d) を 3 行にした。静的検査と同期の検査は通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、`/org` skill の足した文が本物の director の動きと合うことで、コードと verify・test の cycle 3 の記録から書き、実機を取り直してはいない。
+
+## Cycle 4
+
+- Date: 2026-10-16(JST)
+- Plan: `docs/plans/active/2026-10-15-org-director-start.md`(承認済み。`./scripts/plan-visual.sh digest` は `58be042da6fd` で、`- Approved:` の行と同じ。run の前も後も同じで、この run で計画は触っていない)
+- Pipeline cycle: 4。上限を 4 に上げた最後の回。`.harness/state/standard-pipeline/cycle-count.json` は計画どおり 2 のままで、触っていない。insight event には `--cycle 4` を明示した。run 開始時の HEAD は `80947235`(run 開始時の値で、この節を含む commit の SHA ではない)
+- cycle 3 の sync-docs(49cee058)のあとに入った変更: S10 b888d637(D14: stop がロックの下で workspace と pane の id を比べ、違えば断る。D15: skill の frontmatter のテスト)、S11 5097b67e(self-review cycle 4 の C4-L1〜C4-L3)、S12 44b80391(AC8 の最後の文: 記録のときにすでに `stopped` なら stop は終了コード 0。`directorRecordStopError` で前置きを 1 回に。書き手のテストの行)、tester 10efa82c(2 本のテスト)
+- 先行 report の cycle 4 の節: self-review(0b7c56d3、Merge: yes、LOW 4)、verify(pass。LOW 3 件の C4-V1〜C4-V3、情報 4 件の C4-V4〜C4-V7)、test(pass、失敗 0。Test gaps 1〜8)
+- 項目の番号: 「項目 N」は依頼の項目 N。C4-V は verify の cycle 4 の節の ID、F1・F3・F7 は test の cycle 4 の mutation の ID
+- 内容の commit: この節、直した文書、tech-debt の 2 行、insight event を含む 1 つの commit(`docs: sync docs for org-director-start (cycle 4)`)
+- コードとテストは変えていない。変えたのは Markdown と `.agents` の生成物と insight event だけ
+
+### Summary
+
+依頼の項目 1(C4-V1)と項目 2(C4-V2)を直した。`/director` skill の「終える」5 番と `/org` skill の `director` の行に、stop が start と重なる 2 つの場合(D14 の断りと、AC8 の終了コード 0)を足し、4 面を揃えた。項目 3(C4-V4)は、README と仕様が stop の結果を並べていないので足さなかった。tech-debt には 2 行を足した。F1・F3・F7 の行は足さなかった。
+
+### 書いた文とコードの突き合わせ
+
+足した文は、次のコードと help から書いた。
+
+- D14: `StopDirector` の閉じ終えた stop は `recordDirectorStop` で `MarkStoppedIfUnchanged` を呼ぶ。登録の workspace か pane の id が stop の読みと違えば `ErrDirectorChangedDuringStop` を返し、何も書かない。`DirectorCleanupError.Error` は「run <stop> again to close what start recorded」で終わり、`HerdrCommands` が空なので `--force` の案内は出ない。CLI の `stopError` は閉じたものを stderr の `stop <id>: ctrl_c=..., pane=..., workspace=...` の行に出し、終了コードは 1。`ralph org director stop --help` の「When a start that is still running records a workspace or pane after stop read the registration」の段落と合う
+- AC8: `recordDirectorStop` は `MarkStoppedIfUnchanged` と `MarkForceStopped` のどちらが返した `ErrDirectorStopped` も成功に扱い、`AlreadyStopped` を立てて nil を返す(`--force` の有無によらない)。CLI の `printOrgDirectorStop` は「`<id>` was already recorded stopped (...)」と「start's cleanup or another stop recorded `<id>` stopped after this stop read it, so this stop recorded nothing more」を出し、打つ stop は出さない。終了コードは 0。help の「When start's cleanup (after a step of start failed) or another stop records the director stopped while stop closes it」の段落と合う
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `.claude/skills/director/SKILL.md`(「終える」5 番の終わり、+7 行) | 項目 1(C4-V1) | 5 番は stop が断る場合(label が合わない、確かめられない、close が失敗した)と `--force` を書き、start と重なる 2 つの場合がなかった。足した文は 2 つ。(1) stop が登録を読んだあとで、まだ動いている start が workspace か pane を記録したときも、stop は何も書かずに終了コード 1 で断り、閉じたものと、もう一度打つ stop が出る。その stop を打つと start が記録した分を閉じる(D14)。(2) stop が閉じているあいだに、start が失敗して後始末で `stopped` を記録した、または別の stop が記録したときは、stop は何も足さずに終了コード 0 で終わり、すでに記録されていたことを出す。打ち直す stop は出ず、することはない(AC8)。番号は 5 のまま(6 を足すと `stop --all` の 6 が 7 になる)。`--force` には触れていない。`--force` を付けても label が合って閉じ終えた stop は D14 の比較を受け、比べないのは閉じずに記録する forced の記録と start の後始末だけなので(C4-V7)、「`--force` なら断られない」と読める言い方を避けた。折り返しの行は全角を 2 として数えて 78 桁以下 |
+| `.claude/skills/org/SKILL.md`(動詞の表の `director` の行) | 項目 2(C4-V2) | 「director の pane か workspace の中からの stop は、`--force` でも断られる。」の次に、2 文を足した。stop が登録を読んだあとで、動いている start が workspace か pane を記録したときも、何も書かずに断られ、打ち直す stop が出る(D14)。stop が閉じているあいだに start の後始末か別の stop が先に `stopped` を記録したときは、何も足さずに終了コード 0 で終わる(AC8)。`stop` と `disband` の行は触っていない(tech-debt の F-8 の行がそのセルの長さを書いているため。`director` の行の長さを書く行はない) |
+| `.agents/skills/director/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/` と `templates/base/.agents/skills/` の同じ 2 つ | 項目 1・2 | `.claude` の 2 面(root と template)は同じ edit を Edit で入れ、`.agents` の 2 面は `./scripts/sync-skills.sh` と `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で作り直した。frontmatter は触っていない(本文だけの変更で、`description` の「コロンと空白」の検査はそのまま通る)。4 面の md5 は `/director` が `aeddf64bf0a5f28a8ff80ea29fae7f35`、`/org` が `569b3fae68018b5daf6dbeb7bb31161c` で、それぞれ同じ |
+| `docs/tech-debt/README.md`(新しい 2 行。`Two premises of the org-director-start PR's D12 and D13` の行の次) | 項目 4 | 1 行目: stop の記録の失敗の文で同じ句が 2 回出る。(a) 一般の枝と forced の枝で「nothing was recorded」(store の `directorAppendFailed` の文と、`DirectorCleanupError.Error` の既定の末尾)。(b) 書き戻しも失敗した記録で「may hold part of the write」(`restoreLocked` の文と、`DirectorCleanupError.Error` の `ErrDirectorWriteNotRestored` の case)。2 行目: D14 と AC8 の競合は偽の herdr のテストだけで固定され、build した binary を CLI から打つテストも、本物の herdr で見た記録もない |
+
+README.md と `docs/specs/2026-10-07-org-multi-org-director.md` は変えていない(項目 3 の確かめは次)。
+
+### 項目 3 の確かめ(README と仕様の stop の記述)
+
+- README の director の段落(英語。258 行)は、stop を「labels を確かめ、pane と workspace を閉じ、stopped を記録する」と 1 文で書き、括弧で `--force` が確かめられない・閉じられない stop を記録することを足す。並べているのは通常の流れと `--force` の 1 つで、拒否(label が合わない、pane と workspace の中から、すでに stopped)や終了コードの一覧ではない
+- 仕様の FR-9 の 8a-2 の注(85 行)は、stop が label を確かめてから閉じ、`stopped` を書くとだけ書く。`--force` も拒否も書いていない
+- 依頼は「stop の結果がすでに並んでいるところにだけ足す。新しい節は作らない」なので、どちらにも足さなかった。D14 と AC8 は重なったときだけ起きるので、足さなくても誤りではない(verify の C4-V4 と同じ判断)。結果を並べているのは、skill の 2 つと stop の help
+
+### 項目 4 の確かめ(tech-debt)
+
+- 既存の行との重なり: `docs/tech-debt/README.md` に `MarkStoppedIfUnchanged`・`ErrDirectorChangedDuringStop`・`AlreadyStopped`・`directorRecordStopError` を書いた行はない。「may hold part of the write」と `restoreLocked` を書くのは org-director-attach の「Two test gaps」の行だけで、それは書き戻しの mutant(R11、H4、H5)の話であり、同じ句が 2 回出ることではない。「nothing was recorded」は書く行がない。足した 2 行はどれとも重ならない
+- (a) の確かめ: 一般の枝は `newDirectorCleanupError("stop", reg, closed, nil, recordErr, false)` で `Err` が nil なので、`DirectorCleanupError.Error` は既定の `; nothing was recorded` を足す。`recordErr` の文は store の `directorAppendFailed` の「`nothing was recorded`」で始まる。forced の枝は `errors.Join(closed.err, recordErr)` を `CleanupErr` に入れ、同じ既定の末尾が付く。`TestStopDirector_ARecordThatFailsSaysItsPrefixOnce` が一般の枝の全文を、2 つの句の両方を含めて固定している(`...: no space left on device; nothing was recorded; record the stop with ...`)。S1b(8528515f)の `DirectorCleanupError.Error` にすでに同じ既定の末尾があり、forced の枝は D11(a2d5fc01)の版にある
+- (b) の確かめ: `restoreLocked` は切り戻しに失敗したとき「..., so it may hold part of the write」で終わる error を返す。`DirectorCleanupError.Error` は `ErrDirectorWriteNotRestored` を包む error に `; director.jsonl may hold part of the write` を足す。言い方は違うが同じことを 2 回言う。`TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt`(stop と start の後始末の 2 つの場合)は文を部分ごとに確かめ、重なりは固定していない
+- 足さなかった行: test の F1(frontmatter のテストは `.claude/skills` がないと skip する)は、vendored の repo のための設計で、走ったことは log の行(54 本)で分かる。F3(`>` や `|` で始まる値の検査)は、違いが出るのが誤検出の向きだけで、そういう行は SKILL.md にない。F7(1 行に 2 つの形があるとき、失敗の文が名指す規則の名前)は、行がどちらでも落ちるので、違うのは文の中の名前だけ。test の報告はどれも PR を止めない gap と書き、害があるとは書いていないので、依頼の条件(test の報告が「大事」と言うときだけ)を満たさない。この 3 つは test の報告の Test gaps 1〜3 に残る
+- 足さなかった行(直った分): S11 の申し送りの 2 点(記録に失敗したほかの枝の前置きの重なり、書き手のテストの行)は S12(44b80391)が直した。前置きは `directorRecordStopError`(P1〜P6 が red)、書き手のテストは `TestDirectorHeadlessWriters_ACutOffWriteIsRestored` の `MarkStoppedIfUnchanged` と `MarkForceStopped` の行。verify の C4-V3 の「打っても already stopped で断られる stop を案内する」も S12 が直した(H1〜H6、C1、C2 が red)。self-review の「Tech debt identified」の下書き(C4-L1〜C4-L3)は S11(5097b67e)が直したので足していない
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `ralph org director stop --help`(Go) | 変更なし。D14 と AC8 の段落が `recordDirectorStop` と `printOrgDirectorStop` の動きと合う(上の突き合わせ)。help は Go で、触っていない |
+| `/director` skill(4 面) | 直した(項目 1)。ほかの節(昇格、立てる、見張り、`--config`、permission)は stop の結果を並べていない |
+| `/org` skill(4 面) | 直した(項目 2)。`stop`・`disband` の行と F-8 の行は触っていない |
+| `README.md` の director の段落 | 変更なし(項目 3)。誤りはない |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-9 の 8a-2 の注) | 変更なし(項目 3)。誤りはない |
+| `AGENTS.md`、`CLAUDE.md`、`.claude/rules/ralph/`、`docs/quality/`、`docs/architecture/repo-map.md` | 変更なし。`director_start.go` と `director_stop.go` の説明は D14 と AC8 の粒度に触れない。director の言及は `ralph-workflow.md`(2 面)の「ended with `director stop`」だけ |
+| `docs/tech-debt/README.md` の既存の行 | 変更なし。D12・D13 の行、attach の行、F-8 の行はそのまま |
+| 計画(`docs/plans/active/2026-10-15-org-director-start.md`) | 変更なし。S12 の申し送りの 3 点(C4-V1、C4-V2、「nothing was recorded」の重なり)をこの run で書いた。`- [ ] PR created` は計画をオーケストレーターが持つので触っていない |
+
+### Left open
+
+- verify の情報 4 件(C4-V4〜C4-V7): C4-V4 は項目 3 のとおり足さなかった。C4-V5(AC9 の括弧が、stop は workspace の記録がないと herdr を打たないのに `RecordWorkspace` を herdr の呼び出しの中に差し込むと読める)、C4-V6(stop が断ったあとの記録が `running` のまま、workspace はもう閉じている)、C4-V7(`--force` の扱い)は文書のずれではなく、触っていない。AC9 の括弧は承認済みの計画の文で、digest に入る
+- test の Test gaps 1〜3(F1、F3、F7)は上のとおり行にしていない。Test gap 7(`MarkStoppedIfUnchanged` と `MarkForceStopped` の writer の行に mutant を作っていない)と 8(cycle 3 の gap)は、cycle 4 の変更の外か、PASS を見た範囲
+- tech-debt の 2 行目の本物の herdr の確かめ(stop の `workspace close` と start の `tab create`・`agent start` の順)は、実機で見ていない
+- 実機の動きは確かめていない。コードを変えていないので、verify と test の結果はそのまま有効
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `IDENTICAL: 169`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `go test ./internal/config/ -count=1`: `ok`。うち `TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash` は `checked the frontmatter of 54 SKILL.md files under .claude/skills, .agents/skills, templates/base/.claude/skills, templates/base/.agents/skills` を出して PASS
+- `go test ./internal/org/ -run 'Skill' -count=1`: `ok`(`TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` が PASS)
+- `./scripts/run-static-verify.sh`: rc 0、`==> All verifiers passed.`。「tech-debt README plan references」は OK、`gofmt: ok`、`0 issues.`、`secret-scan-branch: scanned f21df66c..80947235 against origin/main: clean`。出力 423 行は scratchpad に落として読んだ。作業ツリーのままで走らせたので、この節と tech-debt の 2 行は secret scan の範囲(commit 済みの履歴)に入っていない。wrapper のログは gitignore の対象で、コミットしていない
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md`: `58be042da6fd`(run の前も後も同じ。`- Approved:` の行と同じ)
+- `git diff --check`: 出力なし。変えた 3 つのファイル(`/director` skill、`/org` skill、tech-debt)の U+FFFD は 0 件
+- `git diff --numstat`(report を除く): `/director` skill の 4 面は +7/-0 ずつ、`/org` skill の 4 面は +1/-1 ずつ、tech-debt は +2/-0、insight event は +1/-0
+- tech-debt の新しい 2 行は、5 列、backtick は列ごとに偶数、`file:line` は 0。計画の参照は `docs/plans/active/2026-10-15-org-director-start.md` だけで、report の行番号や finding の番号では指さず、plan の ID と固定の SHA(8528515f、a2d5fc01、b888d637、44b80391)と report の節の名前で指した
+- `./scripts/insights-append.sh --slug org-director-start --flow standard --phase sync_docs --verdict pass --source skill --cycle 4`(slug は日付なし。`--phase` は help の `sync_docs` で、cycle 1〜3 の event と同じ。依頼の `sync-docs` の綴りは受け付けない): rc 0。新しい `??` のファイルはなく、既存の `docs/insights/events/2026-10-15-org-director-start.jsonl` が `M`。足した行は cycle 4、verdict pass
+
+### Verdict
+
+Verdict: complete。依頼の項目 1 と項目 2 を直し、4 面を揃えた。項目 3 は、結果を並べていない README と仕様に足さなかった。tech-debt は 2 行にし、F1・F3・F7 は条件に合わないので足さなかった。同期の検査と Go の 3 つのテストは通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、足した文が本物の herdr での stop と start の重なりの動きと合うことで、コード、help、cycle 4 の verify の probe(偽の herdr)から書き、実機を取り直してはいない。

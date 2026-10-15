@@ -207,6 +207,13 @@ start の設定と、director が動く場所は次のとおり。
    閉じていないものを閉じずに止めたことを記録し、開いたまま残りうるものを
    出す。人は `herdr workspace list` で label `ralph_director_<token>` の
    workspace を探して閉じる。label が合えば、`--force` でもふつうに閉じる。
+   stop が登録を読んだあとで、まだ動いている start が workspace か pane を
+   記録したときも、stop は何も書かずに終了コード 1 で断る。閉じたものと、
+   もう一度打つ stop が出るので、それを打つと start が記録した分を閉じる。
+   逆に、stop が閉じているあいだに、start が失敗して後始末で `stopped` を
+   記録した、または別の stop が記録したときは、stop は何も足さずに終了コード
+   0 で終わり、すでに記録されていたことを出す。打ち直す stop は出ない。
+   することはない。
 6. `ralph org stop --all` と `ralph org disband --all` は headless の director
    を止めない。stop --all は、閉じていない headless の director があれば、
    `note:` の 1 行で `ralph org director stop --id <id>` を示す。
