@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:671c60416856
+- Approved: 2026-10-15 sha256:f65d7c59746c
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -43,6 +43,7 @@
   - permission(D6): `[org.permissions.roles].director`、なければ `[org.permissions].default` を `permissionArgsForDriver` で driver の引数に直す。codex は `codex_verified` の規則のまま。座席の担当範囲の検査(`autonomousScopeGateErr`)は当てない
   - cwd: 台帳の main worktree のルート(`LedgerMainWorktreeRoot`)。台帳が main worktree のものでないときは start を打った場所で、codex には `--add-dir <台帳>` を足す
   - `enabled`、`[org.permissions]`、`[org.roles]`、`model_pool` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む(8a-1 の D6 と同じ規則)
+  - `--config` を渡した start は、その絶対パスを雛形に入れ、director が打つ `ralph org` のコマンドに `--config <path>` を付けて描く。director が start と同じ設定を読むため(cross-review cycle 1 の指摘 1)
 - `ralph org director stop --id <id> [--force]`(org の層 `StopDirector`、`internal/org/director_stop.go`、D4、D11)
   - 対象は閉じていない headless の登録(`starting` でも `running` でも、今の登録でも detach で外れたものでも)。`--id` がない、その `id` の閉じていない headless の登録がない、すでに `stopped` があるときは断る(終了コード 1、何も書かない)。昇格したセッションの登録(`launch` がない)なら `detach --id` を案内する
   - director の pane か workspace の中から打たれたら断る(`HERDR_PANE_ID` が登録の pane と同じとき。または label を確かめた workspace が `HERDR_WORKSPACE_ID` と同じとき。閉じると打ったセッションが終わり、記録が書けないため)
@@ -122,7 +123,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] AC9 stop は、`--id` がない、その `id` の閉じていない headless の登録がない、`stopped` がすでにある、pane の中(`HERDR_PANE_ID` が登録の pane)か workspace の中(label を確かめた workspace が `HERDR_WORKSPACE_ID`)から打たれたときに断り(終了コード 1)、何も書かない。`--force` がなければ、label が違う、閉じられないときも同じく断る。label が違うときは C-c も close も打たない。昇格したセッションの登録なら `detach --id` を案内する
 - [x] AC14 `director stop --id <id> --force` は、label が違う(AC5 の台帳 A)、確かめられない、閉じられないとき、まだ打っていない C-c と close を打たずに `force` 付きの `stopped`(今の登録なら `detached` も)を書き、閉じていないことと label `ralph_director_<token>` の探し方を出す。label が合えば `--force` があっても閉じる。pane か workspace の中からの拒否は `--force` でも変わらない
 - [x] AC10 `ralph org director status` と `ralph status` の `director:` の行は、headless の登録なら `starting` か `running`、pane・workspace・model を出し、`--json` にも出す。`ralph org stop --all` は、閉じていない headless の登録があれば止め方を 1 行出し、終了コードは変えない
-- [x] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く
+- [x] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く。`--config` を渡した start の雛形は、`ralph org` のコマンドに `--config <絶対パス>` を付け、渡さない start の雛形は付けない
 - [x] AC12 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、AGENTS.md、`templates/base/ralph.toml` のコメント、tech-debt が 8a-2 の動きを説明し、「start はまだない」「headless の director はまだない」と書いた箇所が残っていない
 - [x] AC13 テストは本物の herdr と osascript を打たず、repo の台帳に書かない。実機の確認は、人の herdr server に触れない隔離した herdr server で行う(evidence に残す)
 
@@ -183,6 +184,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - S1c b5ce8dea(stop を director_stop.go へ移すだけ)と a2d5fc01(stop の `--force`、director の workspace の中からの stop の拒否)。S2 d4da1c45(CLI の start・stop・status、stop --all の案内、main worktree の ralph.toml の読み方)。S2b 725fff10(org_director.go が 914 行になったので、start と stop の CLI を `internal/cli/org_director_headless.go` へ移すだけ)。新しいファイルを Affected areas に書き足し、承認し直した(digest d59311f57d8e、図は CLI のファイル名を描いていないので変えていない)
   - S3 9fb4f635(`/director` skill の 4 面、README、仕様 FR-9 の注、AGENTS.md、template の ralph.toml の注、tech-debt 5 行)。S3 の報告にあった範囲外の文書のずれ(`/org` skill の director の動詞の行、`ralph-workflow.md` の `/director` の項目が headless に触れない)は /sync-docs に渡す
   - self-review(cycle 1)b50d261b: CRITICAL・HIGH 0、MEDIUM 1、LOW 6。S4 da818b4f で 7 件を直し、dbd67a58 で改名のあとのコメント 4 行を直した。verify ec70c739 は pass(隔離した herdr server の実機で codex と claude の start と stop を確かめた)。verify の AC7 の一部未確認(見張りの印が古い場合)は S5 ca98c248 のテストで固定した(見張りを起動せずに断る)。verify の V4 で、Evidence to capture の label の字数を 22 から 27 に直し、承認し直した(digest 671c60416856、図は字数を描いていない)
+  - test 8461043a は pass。origin/main(f21df66c)を 1cdddbbb で merge した(tech-debt の末尾の行が衝突し、両方を残した)。sync-docs e80ccafe。cross-review(cycle 1)54cab8a2 は ACTION_REQUIRED 1 件: `--config` を渡した start の設定が director の雛形に入らない。Scope と AC11 に `--config` の 1 文を足し、承認し直した(digest f65d7c59746c、図は設定のパスを描いていない)。cycle 2 で直し、/test のテストの穴 D4・E1・E12/E13・P2 のテストも足す
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
