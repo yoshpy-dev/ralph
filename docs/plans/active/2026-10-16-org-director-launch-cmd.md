@@ -203,6 +203,7 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
 - [x] Branch created
 - [x] Implementation started
   - S1 設定と検証: 4c3f5fb9。config が置き換えの規則(`ExpandDirectorLaunchArg`)と検証(`ValidateDirectorLaunchCmd`)も公開した
+  - S2 は大きいので 2 つのコミットに分けた。S2a(記録の形、check-in の書き手と隠れた動詞、起動時刻の読み方、SIGTERM と待ち、起動スクリプトと argv の組み立て): f8d4db99。S2a のあいだ、StopDirector は launch cmd の登録を断る(S3 で置き換える)。S2b は start の launch_cmd の道、後始末、CLI の出力、設定の読み方、雛形
   - D10 に「launch_cmd は main worktree の `ralph.toml` から読む」を足した(S1 の implementer の指摘)。図に関わらないので図はそのまま、digest を取り直して自動承認し直した(3edb71508e34 → af95b6db6074)
 - [ ] Review artifact created
 - [ ] Verification artifact created
