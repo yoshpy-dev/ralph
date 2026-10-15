@@ -160,8 +160,12 @@ start の設定と、director が動く場所は次のとおり。
    `--state-dir <台帳>` を付ける。雛形の見出しの `- 設定:` の行が
    `(start の --config)` で終わっていれば(start に `--config` が渡された
    とき)、`ralph org` のコマンドには、その行のパスを `--config <パス>` として
-   付ける。`ralph status` には `--config` がない。cwd がどこでも、start と同じ
-   台帳と設定を使うため。
+   付ける。cwd がどこでも、start と同じ台帳と設定を使うため。
+   `ralph status` には `--config` がなく、leader の `ralph org escalate` も
+   `--config` なしで読むので、この 2 つは start の `--config` のファイルでは
+   なく、`--config` なしで読む `ralph.toml` の `[org.director].enabled` を見る
+   (そちらが false で `--config` のファイルが true だと、`ralph status` の
+   `director:` の行は `disabled` と出て、leader の件は人へすぐ届く)。
 4. 人とはこの pane で話す。そのあとの仕事(分割計画、受信箱、進捗の報告)は、
    昇格した director と同じ手順で進める。
 

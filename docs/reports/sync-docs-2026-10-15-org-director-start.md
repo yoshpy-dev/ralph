@@ -77,3 +77,80 @@ commit の前に、worktree のルートで打った。
 ## Verdict
 
 Verdict: complete。依頼の 6 項目を直し、掃き出しで 4 か所の文書のずれを直した。静的検査と同期の検査は通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、`/org` skill の director の行の文が実機の出力と 1 文字ずつ合うことで、help と `/director` skill の文から書き、実機の出力を取り直してはいない。
+
+## Cycle 2
+
+- Date: 2026-10-15(JST)
+- Plan: `docs/plans/active/2026-10-15-org-director-start.md`(承認済み。`./scripts/plan-visual.sh digest` は `f65d7c59746c` で、`- Approved:` の行と同じ。この run で計画は触っていない。cycle 1 の節の `671c60416856` は、その後の 2 回の承認し直しの前の値)
+- Pipeline cycle: 2。run 開始時の HEAD は `6556bce5`(run 開始時の値で、この節を含む commit の SHA ではない)。差分の base は `origin/main`(f21df66c)との merge base
+- cycle 1 の sync-docs(e80ccafe)のあとに入った変更: 3243c499 と a539a765(start の `--config` を絶対パスにして、雛形の中で director が打つ `ralph org` のコマンドに付ける。雛形の stop の行と `ralph status` は `--state-dir` だけ。`{{CONFIG}}` を `{{CONFIG_LINE}}` に改名)、4ef33195(cycle 1 の Test gaps 1〜4 のテスト)
+- 先行 report の cycle 2 の節: self-review(Merge: yes、LOW 5)、verify(pass、情報 C2-V1〜C2-V5)、test(pass、失敗 0。Test gaps 1〜6)
+- 項目の番号: 「項目 N」は依頼の項目 N。C2-V は verify の cycle 2 の節の ID、K15・K16 は test の cycle 2 の mutation の ID
+- 内容の commit: この節、直した文書、insight event を含む 1 つの commit(`docs: sync docs for org-director-start (cycle 2)`)
+- コードとテストは変えていない。変えたのは Markdown と `.agents` の生成物だけ
+
+### Summary
+
+依頼の 3 項目をすべて直した。項目 1(C2-V3)は README、仕様の 8a-2 の注、`/org` skill の `director` の行に、start の `--config` が雛形に運ばれることを 1 句ずつ足した。項目 2(C2-V4)はコードで事実と確かめ、`/director` skill に 1 文、tech-debt に 1 行を足した。項目 3 は test の K15 と K16 を tech-debt の新しい 1 行にした。掃き出しでは、ほかに古くなった文書は見つからなかった。
+
+### Changes made
+
+| File | 項目 | Change |
+|------|------|--------|
+| `README.md`(258 行、director の段落) | 項目 1(C2-V3) | stop の説明の次に 1 文足した。start に渡した `--config <file>` は、絶対パスにして、director の役割の雛形が打たせる `ralph org` のコマンドに運ばれる。`ralph status`(`--config` がない)と、人に渡す stop のコマンドには運ばれない |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-9 の 8a-2 の注) | 項目 1(C2-V3) | permission mode の文の次に 1 文足した。start の `--config` は絶対パスにして雛形の中で director が打つ `ralph org` のコマンドに付ける。理由は director が start と同じ設定を読むため。`ralph status` には `--config` がなく、stop の打ち方は ralph.toml を読まないので付けない |
+| `.claude/skills/org/SKILL.md`(`director` の行) | 項目 1(C2-V3) | permission mode の文の次に 1 文足した。`--config` を渡した start は、その絶対パスを、雛形の中で director が打つ `ralph org` のコマンドに付ける(`ralph status` と人に頼む stop には付けない) |
+| `templates/base/.claude/skills/org/SKILL.md`、`.agents/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | 項目 1(C2-V3) | `.claude` の 2 面は同じ edit を Edit で入れた。`.agents` の 2 面は `./scripts/sync-skills.sh` と `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills ./scripts/sync-skills.sh` で作り直した。4 面の md5 は `c1bb29c022619e5bf9b4572309ca7119` で同じ。`stop`・`disband` の行は触っていない(F-8 の行がセルの長さを書いているため) |
+| `.claude/skills/director/SKILL.md`(「始める」の 3)と同じ 3 面 | 項目 2(C2-V4) | 「`ralph status` には `--config` がない。」を、1 文に直した。`ralph status` には `--config` がなく、leader の `ralph org escalate` も `--config` なしで読むので、この 2 つは start の `--config` のファイルでなく、`--config` なしで読む `ralph.toml` の `[org.director].enabled` を見る。そちらが false で `--config` のファイルが true なら、`ralph status` の `director:` の行は `disabled` と出て、leader の件は人へすぐ届く。直前の「cwd がどこでも、start と同じ台帳と設定を使うため」は、運ぶ文の理由なので、その文の直後に動かした。4 面の md5 は `52e76af939fd551478ee8aa969700d2e` で同じ。折り返しの行は全角を 2 として数えて 78 桁以下(この file の元の最大も 78) |
+| `docs/tech-debt/README.md` 257 行(新しい行) | 項目 3(K15・K16) | 項目 3 の 2 件を 1 行にした。(a) K15: `checkDirectorStart` の `resolve the --config path` の拒否を固定するテストがない(隣の state dir と cwd の拒否もない。`absPath` を差し替えるのは `internal/org/spawn_test.go` だけ)。一番小さいテストは probe の `TestProbe_C2_AConfigPathThatCannotBeMadeAbsoluteIsRefused`(`ConfigPath` のときだけ `absPath` を失敗させ、error の前置き、herdr の呼び出しが 0、`director.jsonl` と `prompts` がないことを見る)。(b) K16: skill の「始める」の 3 の印 `(start の --config)` と `RenderDirectorPrompt` の印を突き合わせるテストがない。一番小さいテストは probe の `TestProbe_C2_DirectorSkillNamesTheConfigLineMarker`(`TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase` と同じ形で、4 つの SKILL.md が印を backtick で囲んで含むことを見る)。どちらも HEAD で通り、狙った mutant で落ちる。K15 の影響は cwd が読めないときだけとみる、と test report の推測のまま書いた。cycle の上限の文は入れていない(上限は上げられるので、古くなる)。既存の A12〜A14 の行(256 行)には足さず、別の行にした。A12〜A14 は seat のテストが止める話で、K15・K16 は止めるテストが 0 の話で、Trigger が違うため |
+| `docs/tech-debt/README.md` 258 行(新しい行) | 項目 2(C2-V4) | `ralph status` に `--config` がないことの行。Debt は `--config` の start で director が `<file>` を読み、`ralph status` と leader の escalate が `--config` なしの ralph.toml を読むこと、見える向きは「`--config` なしで読む側が false、`<file>` が true」だけであること、逆向きは start が断るが、断りの文の「`ralph org escalate` はすでに人へ送る」は `<file>` の値で escalate が読む値ではないこと、警告は skill の 1 文だけであること。Impact は director が付いているのに先頭に立たず、件が人へすぐ届くこと、件は inbox に残ること。Why deferred は、8a-2 が `--config` を director 自身のコマンドにだけ運ぶこと。Trigger は、ずれの報告か、`ralph status` の `--config`(そのときは leader の escalate のファイルの出どころも決める)。evidence は verify の C2-5 |
+
+### 項目 2 の確かめ(C2-V4 は事実だった)
+
+- `ralph status` に `--config` がない。`newStatusCmd` の flag は `--state-dir`、`--org-id`、`--json`。`statusOrgConfig` は `resolveOrgConfig("")`(cwd の `./ralph.toml`)で、`statusDirectorEnabled` は `withMainWorktreeDirectorEnabled(cfg, "", ...)` を呼ぶ。help の文も「`ralph org escalate` reads it without --config」と書く
+- `ralph org escalate` は `--config` を受けるが、leader は付けない。`withMainWorktreeDirectorEnabled` は `configPath` が空で台帳が main worktree のものなら、main worktree の ralph.toml の `[org.director].enabled` を取る。`--config` があるか、台帳が main worktree のものでなければ、cfg をそのまま返す
+- start は `--config` のファイルの `enabled` で判定する(`startDirector` が `withMainWorktreeDirectorStartConfig` のあと `cfg.Director.Enabled` を見る。`--config` があれば cfg は変わらない)。false なら断る。だから食い違いが見えるのは、`--config` なしで読む側が false、`<file>` が true の向きだけ。verify の C2-5 はこの向きを、`./ralph.toml` が false、`cfg/ralph.toml` が true で測っている
+- 逆向きの断りの文(`startDirector`)は「`[org.director].enabled` is false in the --config file X, so ralph org escalate already sends every item to the human at once」と言う。`<file>` が false で repo の側が true なら、escalate は人へすぐ送らない。この文の食い違いは tech-debt の行に書き、コードは変えていない
+
+### Surfaces checked for drift
+
+| Surface | 結果 |
+|---------|------|
+| `ralph org director start --help` | 変更なし。`--config` の文(運ぶこと、stop の打ち方に付けないこと)は、README と `/org` skill に足した文と合う。verify の C2-6 が実機の出力で確かめている |
+| `/director` skill の「立てる」の「start の設定」の箇条 | 変更なし。`--config` なしの規則(main worktree の ralph.toml)を書く箇条で、`--config` を運ぶことは「始める」の 3 が書く。依頼は 1 文だったので、そこに足した |
+| `README.md`(動詞の表 124 行、`ralph status` の行 125) | 変更なし。124 行は `director start/stop`、125 行は headless の状態を書き、cycle 2 で変わった `--config` の運び方には触れない |
+| `AGENTS.md`、`CLAUDE.md`、`.claude/rules/ralph/`、`docs/quality/`、`docs/architecture/repo-map.md` | 変更なし。director start の `--config` の運び方を書く文がない。cycle 1 で直した `watchgate.go` の句と見張りの関門の文は、cycle 2 の変更に触れない |
+| `{{CONFIG}}`(改名前の名前) | `docs/reports/`、`docs/evidence/`、`docs/plans/` を除く Markdown、Go、toml、shell に 0 件。残るのは計画の Progress の 3243c499 の時点の記述(verify の C2-V1)で、計画は触っていない |
+| `templates/base/ralph.toml` の `[org.director]` のコメント | 変更なし。`enabled` が escalate の動き(`true` は inbox に記録して director か ack の期限、`false` は人へすぐ)を書く規則は、新しい行の「escalate は inbox に記録する」と合う |
+| `docs/tech-debt/README.md` の既存の行(245〜256) | `--config` を挙げる行は 0。256 行は 4ef33195 の縮め方のままで、挙げるテスト名は HEAD にある。F-8 の行は変更なし |
+| `docs/recipes/` | 変更なし。director start を扱う記述がない |
+| cycle 1 の節 | そのまま。「README 258 行は変更なし」などの記述は、cycle 1 の時点の判断として残した |
+
+### Left open
+
+- 計画の Progress の行(verify の C2-V1)と、AC11 の文と雛形の stop の行の言い方(C2-V2)は、計画をオーケストレーターが持つので触っていない
+- テストの名前 `TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig` の「Every」(C2-V5)は Go のテストなので、この run では触っていない
+- start の断りの文の「`ralph org escalate` はすでに人へ送る」の言い方は Go のコードなので、直していない。tech-debt の 258 行に書いた
+- `templates/base/ralph.toml` の reviewer の注(guarded の reviewer が permission prompt で止まる、と言う文)は、cycle 1 の Left open のまま
+- test の cycle 2 の Test gaps 3〜5(本物の herdr と agent が `--config` つきの雛形のとおりに打つこと、台帳が main worktree のもので director が別の場所で動くときの相対パス、存在しないファイルを指す `--config`)は、文書の話ではないので行にしていない。test の Test gaps 6 は cycle 1 の 1〜4 を閉じた旨
+- `docs/evidence/test-2026-10-15-org-director-start.md` と `verify-2026-10-15-org-director-start.md` の `/Users/` は 0 件で、`$HOME` の置き換えの項目は満たしている
+- 実機の動きは確かめていない。コードを変えていないので、verify と test の実機の結果はそのまま有効
+
+### Verification
+
+commit の前に、worktree のルートで打った。
+
+- `./scripts/check-skill-sync.sh`: `[ok] check-skill-sync: 14 skill(s) in lock-step`
+- `./scripts/check-sync.sh`: `IDENTICAL: 169`、`DRIFTED: 0`、`ROOT_ONLY: 0`、`TEMPLATE_ONLY: 11`、`KNOWN_DIFF: 5`、`PASS: all files in sync.`
+- `go test ./internal/config/... ./internal/scaffold/... ./internal/org/ -run 'Skill|Sync|Defaults' -count=1`: `ok`(config 1.093s、scaffold `[no tests to run]`、org 1.593s)
+- `./scripts/run-static-verify.sh`: rc 0、`==> All verifiers passed.`。「tech-debt README plan references」は OK、`gofmt: ok`、`0 issues.`、`secret-scan-branch: scanned f21df66c..6556bce5 against origin/main: clean`。出力 425 行は scratchpad に落として読んだ。wrapper のログは gitignore の対象で、コミットしていない
+- `git diff --check`: 出力なし。変えたファイルの U+FFFD は 0 件
+- `git diff --numstat`(report と insight event を除く 11 ファイル): +32/-14。`docs/tech-debt/README.md` は +2/-0、ほかは skill の 4 面ごと、README、仕様の 1 行ずつ
+- 変えた tech-debt の行は、`git show HEAD:docs/tech-debt/README.md` と比べて、増えた行が 257 と 258 の 2 行だけ(既存の行に変更なし)。2 行とも 5 列(列を区切る `|` で 7 片)、backtick は列ごとに偶数、`file:line` は 0
+- skill の 4 面の md5: `/director` は `52e76af939fd551478ee8aa969700d2e`、`/org` は `c1bb29c022619e5bf9b4572309ca7119` で、それぞれ 4 面が同じ
+- `./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md`: `f65d7c59746c`(run の前も後も同じ)
+- `./scripts/insights-append.sh --slug org-director-start --flow standard --phase sync_docs --verdict pass --cycle auto --source skill`(slug は日付なし): rc 0。`git status --short` は既存の `docs/insights/events/2026-10-15-org-director-start.jsonl` を `M` と示し、新しい `??` のファイルはない。足した行は cycle 2、verdict pass
+
+### Verdict
+
+Verdict: complete。依頼の 3 項目を直した。C2-V4 はコードで事実と確かめ、skill に 1 文、tech-debt に 1 行を足した。K15 と K16 は tech-debt の 1 行にした。静的検査と同期の検査は通った。コードとテストは触っていないので、verify と test の結果は変わらない。確かめていないのは、足した文が本物の director の動きと合うことで、コードと verify の evidence(C2-5)から書き、実機を取り直してはいない。
