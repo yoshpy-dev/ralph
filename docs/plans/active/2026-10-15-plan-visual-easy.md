@@ -1,7 +1,7 @@
 # plan-visual-easy
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:819a5be1cf1f
+- Approved: 2026-10-15 sha256:3b11a1def777
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: /plan の図解ページが難しいので、eli5 のように簡単にしたい(2026-10-15)。案 A(かんたん版を先頭に置き、今の図は折りたたむ)を選び、org-director-start の計画で作った試作を見て「かなり良い」と判断した。決定: (1) かんたん版の図 1 を `#overview` にし、/pr が PR に貼る図もそれにする (2) 人が自分で打つコマンドはかんたん版に書いてよい。関数名・パス・イベント名は書かない (3) 機械で確かめられる範囲は `scripts/plan-visual.sh` で確かめる
@@ -113,6 +113,8 @@ Critical forks: ユーザーが 2026-10-15 に決めた 3 点(Related request �
 - Integration tests: 雛形の 4 面を `lint` にかける。`./scripts/run-test.sh`
 - Regression tests: `open`・`shot`・`digest` の今のテストがそのまま通る
 - Edge cases: AC2 の端の場合。空のファイル、`<figure>` が閉じていないページは L1 か L6 で咎める(落ちずに終わる)
+  - 途中の図の閉じ忘れ: 図が開いている間に次の `<figure` が来たら、L6 で咎める(cross-review cycle 1 の指摘 1)
+  - インラインのタグをまたぐ語: `internal/<tspan>org</tspan>` と、`tspan` で分けた snake_case は L3 で咎める。`x` か `y` を持つ `tspan` と、別の `<text>` どうし(`<text>run</text><text>/director</text>`)は語を区切るので咎めない(cross-review cycle 1 の指摘 2)
 - Evidence to capture: `docs/evidence/` に `lint` の場合の出力
 
 ## Risks and mitigations
@@ -149,3 +151,4 @@ Critical forks: ユーザーが 2026-10-15 に決めた 3 点(Related request �
 - 2026-10-15 S1(821a3c69、implementer): `plan-visual.sh lint` と 89 件のテスト(全体 193 件 pass)。契約の外で決めたこと: `<!-- -->` は 1 つのタグとして読み飛ばす(雛形のコメントの例で L1 が 2 件にならないように)、`<style>` と `<script>` の中身は図の文字に入れない(`font: 13px/1.4` が L3 に掛かるため)、引用符の中の `>` でタグを終えない、空白だけの aria-label は空とみなす、L3 は一致した語を前後に広げて出す(`internal/org`)。Docker の ubuntu 24.04 で mawk 1.3.4 と gawk 5.2.1 でも同じ結果。この計画のページは lint rc=0(AC9)、前の形の org-director-start のページは L1・L2・L5・L6 で咎められた。範囲外で見つけたこと: `digest` は `awk ... "$1"` で読むので、`a=b.md` のような `=` を含む相対名だと stdin を読みにいく(昔からの挙動、tech-debt に書く)
 - 2026-10-15 S2(5b056944、implementer): 雛形と `diagrams.md` の 4 面、雛形の 4 面に `lint` をかけるテスト(全体 201 件 pass)。雛形は 4 面とも `lint` rc=0 で、全体・`#overview`・`#detail-overview` の PNG を読んで崩れがないことを確かめた(AC3)。契約の外で決めたこと: `<h1>` の置き場 `__HEADLINE__` を `<title>` の `__TITLE__` と分けた、折りたたみの詳細図の例の id を `detail-1` にした、Credit に eli5 を足した。`diagrams.md` の自己点検は、D5 の折りたたみの中の図に加えて、かんたん版の図 2・3 も 1 枚ずつ撮ると書いた(全体の 1 枚にも写るが、1 枚ずつのほうが崩れを見つけやすい。D5 より多く撮るだけで、D5 と食い違わない)。consult の指摘 2 点は S3 で扱う: /pr の `<fit>` を `diagrams.md` と同じ +200 にそろえる、かんたん版の決まり 2 の例 `director start` はまだないコマンドなので、今あるコマンドに替える
 - 2026-10-15 S3(138481e0、implementer): `/plan` の step 10.b〜10.d と 12.b、`/pr` の step 4.a(ページの形の見分けと `<fit>` の +200)、leader.md の step 2 の `lint` と固定の 3 行、plan の雛形のコメント、`diagrams.md` の決まり 2 の例(`/director`、`ralph org stop --all`)、AGENTS.md・repo-map・README、tech-debt の `digest` の行。`.ralph/core/AGENTS.core.md` と `templates/base/AGENTS.md` には helper の一覧がないので変えていない。決めたこと: 10.c は Lint と Self-check の 2 段にし、`shot` が 2 で終わったときに飛ばすのは撮るほうだけ(lint はブラウザなしで回る)。leader には main のチェックアウトの helper の逃げ道を書かない(leader の worktree と main は同じ scaffold)。`go test ./internal/org/...` は手元の Go と `GOTOOLCHAIN=go1.25.8` で ok、`go test -overlay` で 変更前の leader.md に差し替えると新しい 3 行が FAIL することも確かめた。S3 のあとでこの計画のページに `lint` をかけ直して rc=0。範囲外で気づいたこと: `/pr` の 4.a で図を直したあとに `lint` を打つ指示はない(4.a は `/plan` の 10.c と同じ自己点検と書くので、撮る前の点検は読める)
+- 2026-10-15 cross-review cycle 1(fb7648b0 の差分、codex): ACTION_REQUIRED 2 件(途中の図の閉じ忘れを通す、`tspan` で分けたパスを通す)。consult(consult-plan-xreviewfix)も同じ判定。直す前に Test plan の Edge cases に 2 行を足したので digest が 819a5be1cf1f から 3b11a1def777 に変わり、2026-10-11 の指示(作った計画は自動承認)に従って `- Approved:` を書き直した。/plan の step 10 は、図解ページの図がこの 2 つの場合を描いていないので描き直さず、`lint` をかけ直して rc=0 を確かめた。直したあとは cycle 2 として /self-review から回し直す
