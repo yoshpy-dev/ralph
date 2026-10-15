@@ -211,6 +211,12 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - self-review(cycle 4)0b7c56d3 は LOW 4 件、Merge: yes。C4-L4(この Progress が README と仕様を行番号で指す)はこの記録で段落の名前に直した。C4-L1〜C4-L3(書き手を名前で並べた doc が `MarkStoppedIfUnchanged` を落とす、断りの note が 2 回出る、frontmatter のテストの doc と失敗文が限界を言わない)は S11 で直す。どれも Affected areas のファイルの中
   - S11 5097b67e(C4-L1 書き手を並べた doc に `MarkStoppedIfUnchanged`、C4-L2 断りの文の前置きを 1 回にし note は CLI の stderr の行だけに、C4-L3 frontmatter のテストを `TestSkillFrontmatter_UnquotedValuesHaveNoColonSpaceOrSpaceHash` に改名し doc と失敗文で限界と規則を言う)。implementer の報告の範囲外の 2 点は /sync-docs で tech-debt に: 記録に失敗したほかの枝(`recordDirectorStop` の一般の枝と forced の枝、start の `abort`)の前置きの重なり、`TestDirectorHeadlessWriters_ACutOffWriteIsRestored` に `MarkStoppedIfUnchanged` と `MarkForceStopped` の行がない
   - verify(cycle 4)2440a199 は pass(LOW 3 件)。C4-V3: stop が閉じているあいだに start の後始末が先に `stopped` を書くと、stop のエラーが、打っても already stopped で断られる stop を案内する(記録は事実と合う。S1b からある枝)。AC8 に 1 文足して承認し直し(digest 58be042da6fd、図は描いていない)、S12 で直す。S11 の範囲外の 2 点(前置きの重なり、書き手のテストの行)も S12 で直す。C4-V1(`/director` skill の「終える」5 番)と C4-V2(`/org` skill の `director` の行)は /sync-docs に渡す
+  - S12 44b80391 の内容:
+    - C4-V3: 記録の段の `ErrDirectorStopped` を成功に扱い、`DirectorStopResult.AlreadyStopped` を立てる。CLI はすでに記録されていたことを出し、stop の打ち方は出さない。exit 0
+    - 前置き: `directorRecordStopError` を足し、一般・forced・changed の枝と start の `abort` で `org: director: stop <id>:` を 1 回にした。S11 の `directorChangedError` はこれに統合した
+    - 書き手のテスト: `MarkStoppedIfUnchanged` と `MarkForceStopped` の行を足した
+
+    CLI の偽の herdr は close の途中で台帳に書けないので、競争の形は org 側のテストで固定した。範囲外の 1 点は /sync-docs で tech-debt に回す: 一般の枝と forced の枝の文で「nothing was recorded」が 2 回出る(store の文と `DirectorCleanupError.Error` の既定の文、S1b から)。exit 0 で終わるこの場合は、C4-V1・C4-V2 と一緒に /sync-docs で書く
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
