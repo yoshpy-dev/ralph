@@ -1,7 +1,7 @@
 # org-director-start
 
 - Status: Approved
-- Approved: 2026-10-15 sha256:96796452ceae
+- Approved: 2026-10-16 sha256:ace92dd0aaa7
 - Owner: Claude Code
 - Date: 2026-10-15
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目(8a-2)。FR-9 の起動 (B)(`ralph org director start` で headless の director を立てる。既定は herdr の中の専用の workspace)、役割の雛形 `internal/org/prompts/director.md`、「headless の director の permission mode は `[org.permissions.roles].director` で決める(既定は `[org.permissions].default`)」、受け入れ条件「Given `ralph org director start --driver codex --model <slug>`、when 起動する、then director が herdr の専用 workspace で動き、台帳に登録される」。8a-1 は PR #229(9cbf7080)で merge 済み。範囲と分かれ目は consult(consult-plan-dirstart)の判定と Codex の計画助言による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -49,6 +49,7 @@
   - 対象は閉じていない headless の登録(`starting` でも `running` でも、今の登録でも detach で外れたものでも)。`--id` がない、その `id` の閉じていない headless の登録がない、すでに `stopped` があるときは断る(終了コード 1、何も書かない)。昇格したセッションの登録(`launch` がない)なら `detach --id` を案内する
   - director の pane か workspace の中から打たれたら断る(`HERDR_PANE_ID` が登録の pane と同じとき。または label を確かめた workspace が `HERDR_WORKSPACE_ID` と同じとき。閉じると打ったセッションが終わり、記録が書けないため)
   - 手順: 記録した pane があれば、tab の label が `director_<token>` で workspace の label が `ralph_director_<token>` であることを確かめ(`confirmSeatPane` と同じ形)、C-c を送って閉じる → 記録した workspace があれば label を確かめて閉じる → `director.lock` の下で `stopped`(今の登録なら `detached` も)を書く。herdr が pane か workspace を知らなければ閉じ済みとして進む。label が違うときは C-c も close も打たない。確かめられない、閉じられないときは何も書かずに終了コード 1 で、理由と、人が閉じるための herdr の打ち方を出す
+  - `stopped` を書くときは、ロックの下で読み直した登録の workspace と pane の id が、stop が最初に読んだときと同じことを確かめる。違えば(stop のあいだに start が記録を足した)何も書かずに終了コード 1 で、閉じたものと、もう一度 stop を打つことを出す(D14)。`--force` には当てない
   - `--force`: label が違う、確かめられない、閉じられないときも、C-c も close も(まだ打っていない分は)打たずに `force` 付きの `stopped`(今の登録なら `detached` も)を書き、閉じていないことと、label `ralph_director_<token>` の workspace を herdr で探して閉じる打ち方を出す。label が合えば `--force` があっても通常どおり閉じる。herdr が状態を失って id を振り直したあと、記録を片付ける手段にする(D11)
 - 役割の雛形(`internal/org/prompts/director.md`、`internal/org/prompts.go`、D7)
   - 座席の `RolePromptVars` とは別の `DirectorPromptVars`(登録の `id`、driver、台帳を指す `--state-dir` の値、cwd)で描く `RenderDirectorPrompt`
@@ -63,6 +64,7 @@
   - `ralph org director status` と `ralph status` の `director:` の行は、headless の登録なら `starting` か `running`、pane、workspace、model を出す(`--json` にも)。閉じていない headless の登録が今の登録のほかにもあれば、その `id` を出す
   - `ralph org stop --all` は、閉じていない headless の登録があれば、director は止めないことと `ralph org director stop --id <id>` の打ち方を 1 行出す(終了コードは変えない)
   - `ralph org director` の help から「start はまだない」を消し、start と stop を書く
+- skill の frontmatter の検査(D15): tracked のすべての `SKILL.md` の frontmatter で、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があればテストが落ちる
 - `/director` skill(4 面): director の立て方を 2 つ(昇格と `director start`)にし、headless の director の始め方(最初に登録を確かめる)と終わり方(detach を打たず、人に stop を頼む)を書く。「まだないもの」から headless の director を消す
 - 文書: README の director の段落、仕様 FR-9 の 8a-2 の注、AGENTS.md の repo map(`director.go`)、`templates/base/ralph.toml` の `[org.permissions.roles]` のコメント(director の例)、`docs/tech-debt/README.md`
 
@@ -89,6 +91,7 @@
 
 - 変えるファイル: `internal/org/director.go`、`internal/org/director_test.go`、`internal/org/prompts.go`、`internal/org/prompts_test.go`、`internal/org/spawn.go`(role director の拒否)、`internal/org/verbs_all.go`(stop --all の案内の 1 行)、`internal/cli/org_director.go`、`internal/cli/org_director_test.go`、`internal/cli/org.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/status.go`、`internal/cli/status_test.go`、`internal/cli/org_stop_all_test.go`、`templates/base/ralph.toml`、`/director` skill の 4 面、README、仕様、AGENTS.md、`docs/tech-debt/README.md`
 - S8 と S9 で足したファイル: `internal/org/permissions.go`、`internal/org/permissions_test.go`(director の `--add-dir` を消す、D12)、`internal/cli/org_watch.go`(agmsg_home の判定を start と共有する、D13)、`docs/recipes/codex-seat-permissions.md` とその template の写し、`internal/cli/doctor_codex_writable_root.go` とそのテスト(start が断る codex の director の mode を `ralph doctor` が座席の mode として数えないようにする。self-review cycle 3 の C3-L4)
+- S10 で足すファイル: skill の frontmatter の検査のテスト(新しいテストのファイル、D15)
 - 新しいファイル: `internal/org/prompts/director.md`、director の起動と停止の org の層のファイル(`internal/org/director_start.go`、`internal/org/director_stop.go` とそれぞれのテスト。S1b のあとで director_start.go が 949 行になり、800 行の目安を超えたので stop を分けた)、start と stop の CLI のファイル(`internal/cli/org_director_headless.go` とそのテスト。S2 のあとで org_director.go が 914 行になったので分けた)
 
 ## Visual review
@@ -111,8 +114,10 @@
 - D11 `director stop --force` は、label が違う・確かめられない・閉じられない登録でも、閉じずに `force` 付きの `stopped` を書く。workspace の中からの stop は、label を確かめた workspace が `HERDR_WORKSPACE_ID` と同じときに断る。S1b の実装で見つかった 2 つの穴への consult(consult-plan-dirstop)の判定。force がないと、herdr が id を振り直したあとの登録は stop が毎回断り、閉じていない headless の登録として status と `stop --all` の案内に残り続ける(手で `director.jsonl` を直すしかない)。座席の `ralph org stop --force` も、確かめられない pane には close を打たずに `stopped` を記録する(`internal/org/verbs.go` の `stopSeatPane` と `notClosedNote`)ので、同じ意味にした。close は打たないので、ほかの起動の pane を閉じないこと(AC5)は保たれる。workspace の検査を env の一致だけにしないのは、id の振り直しのあとに無関係な workspace にいる人を誤って断らないため。退けた案: workspace を閉じる前に `stopped` を書く(閉じ損ねたときの記録が事実と違う)
 - D12 codex の director は、解決した mode が autonomous か edits なら `codex_verified` によらず start が断る。案内は 2 つ: `[org.permissions.roles].director = "guarded"` にして人の codex の設定で `.git` への書き込みと network を許す、または claude の director を使う。cross-review cycle 2 の指摘 1 を受けた consult(consult-plan-xreviewc2)の判定。autonomous と edits の写し方は `--sandbox workspace-write` で、codex は書ける root の下の `.git` を読むだけにする(`docs/recipes/codex-seat-permissions.md`)。director が打つ `ralph org start --plan` は `git worktree add` と `.git` の下の状態を書くので、start が成功を報告したあとで director が自分の仕事をこなせない。断るので `codexWritableRootArgs` の director の分岐は使われなくなり、消す。guarded は引数を渡さないので、人の codex の設定が workspace-write なら同じ壁に当たる(案内に書く)。退けた案: director の autonomous だけ `--sandbox danger-full-access` に写す(D6 の座席と同じ写し方から外れ、権限を広げる。tech-debt に 1 行)、`--add-dir <git-common-dir>` と network の設定を足す(codex がそれで `.git` に書かせるかを確かめていない)
 - D13 `--config` を渡した start は、その設定の `[org].agmsg_home` が絶対パスでも `~/` でもなければ断る。cross-review cycle 2 の指摘 2 を受けた consult の判定。director の cwd は main worktree のルートで、start を打った場所と違いうる。見張りの子は `orgWatchChildAgmsgHome` で start の場所から解いた絶対パスを env で受け取るが、director の pane の env は herdr server のもので ralph から足せないので、相対の値は director と見張りで別の場所を指す。`--config` がなければ、どちらも main worktree のルートの `ralph.toml` を読み、そのルートから解くので食い違わない。人の shell の `RALPH_ORG_AGMSG_HOME` も director には届かない(座席も同じ)ので、設定されていれば警告を 1 行出して続け、tech-debt に 1 行書く。退けた案: 雛形のコマンドに `RALPH_ORG_AGMSG_HOME='<abs>'` の前置きを付ける(director が前置きを落とすと食い違う)、設定の相対パスを設定ファイルの場所から解く(全体の意味が変わる)
+- D14 stop は、ロックの下で `stopped` を書く前に、読み直した登録の workspace と pane の id を、最初に読んだときの値と比べ、違えば何も書かずに断る(新しい sentinel)。cross-review cycle 3 の指摘 2 を受けた consult(consult-plan-xreviewc3)の判定。stop はロックなしで登録を読むので、workspace の記録がない時点で読み、何も閉じずにいるあいだに start が workspace・pane・`launched` を書くと、動いている director を stopped と書いていた。D11 は事実と違う記録を残す案を退けている。`recordHerdrID` は記録済みの id を断るので、id は「空から値」にしか変わらず、等しいかを比べれば新しく記録されたかが分かる。`launched` は閉じるものに影響しないので比べない。`--force` は閉じていないことを記録するので当てない。stop が workspace を閉じたあとで start の次の段が失敗すれば、start の後始末が `stopped` を書く(`ErrDirectorStopped` を成功に扱う)。失敗しなければ director は running のまま残り、人の 2 回目の stop が閉じる。どちらでも記録は事実と一致する。退けた案: 違いを見つけたら stop が自分で読み直して閉じ直す(start の後始末との競争の扱いが増える)、`starting` の登録の stop を断る(落ちた start の登録を片付ける手段が消える)
+- D15 skill の frontmatter の検査を Go のテストで足す。cross-review cycle 3 の指摘 1 を受けた consult の判定。S3 の `/director` skill の description が、引用符のない値の中に「コロンと空白」を含み、YAML として読めなかった。`scripts/check-skill-sync.sh` は frontmatter を YAML として読まず、値の引用符も剥がすので、4 回の検証で誰も気づかなかった。go.mod に YAML のライブラリはなく、足すと依存が増える。scaffold される側に配る `check-skill-sync.sh` を変えると影響が広い。そこで、今回の型(引用符・`>`・`|` で始まらない値の「コロンと空白」と「空白と `#`」)だけを止める、repo の中のテストにした
 
-Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D3 と D9 は Codex の計画助言の 2 件の HIGH を受けた consult の判定で、D11 は S1b のあとの consult(consult-plan-dirstop)の判定で、D12 と D13 は cross-review cycle 2 のあとの consult(consult-plan-xreviewc2)の判定で決めた(ユーザーの指示「計画の分かれ目も自分で選ぶ」「Codex の修正の提案は必ず直す」)。D6 は仕様どおり。
+Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D3 と D9 は Codex の計画助言の 2 件の HIGH を受けた consult の判定で、D11 は S1b のあとの consult(consult-plan-dirstop)の判定で、D12 と D13 は cross-review cycle 2 のあとの consult(consult-plan-xreviewc2)の判定で、D14 と D15 は cross-review cycle 3 のあとの consult(consult-plan-xreviewc3)の判定で決めた(ユーザーの指示「計画の分かれ目も自分で選ぶ」「Codex の修正の提案は必ず直す」)。D6 は仕様どおり。
 
 ## Acceptance criteria
 
@@ -124,12 +129,13 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] AC6 permission は `[org.permissions.roles].director` を読み、なければ `[org.permissions].default` を読む。claude で autonomous なら `--permission-mode bypassPermissions`、edits なら `acceptEdits`、guarded なら引数なし。codex は guarded なら引数なしで通し、autonomous と edits は `codex_verified` によらず断って(終了コード 1、herdr を打たず、何も書かない)、guarded と人の codex の設定、または claude を案内する(D12)。codex の director の引数に `--add-dir` は入らない。これらの設定と `enabled` と `[org.roles]` は、`--config` がなく台帳が main worktree のものなら main worktree の `ralph.toml` から読む
 - [x] AC7 見張りが動いていなければ start は見張りを起動してから director を立てる。止まりかけ・印が古い・`--once` の見張りでは断り、herdr を打たず、何も書かない
 - [x] AC8 `ralph org director stop --id <id>` は、記録した pane の tab の label が `director_<token>` で workspace の label が `ralph_director_<token>` のとき、C-c を送り、pane と workspace を閉じ、`stopped` を書く。登録が今の登録なら `detached` も同じ write で書き、`ralph org director status` は not attached になる。detach で外れたあとの headless の登録にも効き、`stopped` だけを書く。`starting` のまま残った登録(pane も workspace も記録がない、または workspace だけ記録がある)にも効き、記録のある分だけ閉じる。herdr が pane か workspace を知らなければ閉じ済みとして進む
-- [x] AC9 stop は、`--id` がない、その `id` の閉じていない headless の登録がない、`stopped` がすでにある、pane の中(`HERDR_PANE_ID` が登録の pane)か workspace の中(label を確かめた workspace が `HERDR_WORKSPACE_ID`)から打たれたときに断り(終了コード 1)、何も書かない。`--force` がなければ、label が違う、閉じられないときも同じく断る。label が違うときは C-c も close も打たない。昇格したセッションの登録なら `detach --id` を案内する
+- [x] AC9 stop は、`--id` がない、その `id` の閉じていない headless の登録がない、`stopped` がすでにある、pane の中(`HERDR_PANE_ID` が登録の pane)か workspace の中(label を確かめた workspace が `HERDR_WORKSPACE_ID`)から打たれたときに断り(終了コード 1)、何も書かない。`--force` がなければ、label が違う、閉じられないときも同じく断る。label が違うときは C-c も close も打たない。昇格したセッションの登録なら `detach --id` を案内する。stop が読んでから `stopped` を書くまでのあいだに、その登録の workspace か pane の id が記録されたときも断り(終了コード 1)、何も書かず、閉じたものと、もう一度 stop を打つことを出す(D14。テストでは偽の herdr の確かめか close の中で `RecordWorkspace`・`RecordPane`・`MarkLaunched` を差し込み、director が running のまま残ることを確かめる)
 - [x] AC14 `director stop --id <id> --force` は、label が違う(AC5 の台帳 A)、確かめられない、閉じられないとき、まだ打っていない C-c と close を打たずに `force` 付きの `stopped`(今の登録なら `detached` も)を書き、閉じていないことと label `ralph_director_<token>` の探し方を出す。label が合えば `--force` があっても閉じる。pane か workspace の中からの拒否は `--force` でも変わらない
 - [x] AC10 `ralph org director status` と `ralph status` の `director:` の行は、headless の登録なら `starting` か `running`、pane・workspace・model を出し、`--json` にも出す。`ralph org stop --all` は、閉じていない headless の登録があれば止め方を 1 行出し、終了コードは変えない
 - [x] AC11 `ralph org spawn --role director` は断られ、何も書かない。`RenderDirectorPrompt` は `{{...}}` を残さず、雛形は `/director` skill を指し、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことを書く。`--config` を渡した start の雛形は、`ralph org` のコマンドに `--config <絶対パス>` を付け、渡さない start の雛形は付けない
 - [x] AC12 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、AGENTS.md、`templates/base/ralph.toml` のコメント、tech-debt が 8a-2 の動きを説明し、「start はまだない」「headless の director はまだない」と書いた箇所が残っていない
 - [x] AC15 `--config` を渡した start は、その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ断り(終了コード 1)、herdr を打たず、何も書かず、絶対パスにするよう案内する。絶対パス、`~/` で始まる値、空の値なら通る。`RALPH_ORG_AGMSG_HOME` が設定されていれば、director の pane に届かないことを警告の 1 行で出して続ける(D13)
+- [ ] AC16 `/director` skill の 4 面の frontmatter が YAML として読める(description に、引用符のない「コロンと空白」がない)。tracked のすべての `SKILL.md` の frontmatter で、引用符・`>`・`|` のどれでも始まらない値に「コロンと空白」か「空白と `#`」があればテストが落ちる(D15)
 - [x] AC13 テストは本物の herdr と osascript を打たず、repo の台帳に書かない。実機の確認は、人の herdr server に触れない隔離した herdr server で行う(evidence に残す)
 
 ## Implementation outline
@@ -140,6 +146,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 4. S3 `/director` skill の 4 面と文書(README、仕様、AGENTS.md、template のコメント、tech-debt)
 5. S8 cross-review cycle 2 の 2 件: codex の director の autonomous と edits を断る(D12)、`--config` の相対の `agmsg_home` を断る(D13)。テスト、help、template のコメント、`/director` skill の 4 面、tech-debt を揃える
 6. S9 self-review cycle 3 の LOW 4 件: tech-debt の行が triage を位置で指すのを直す、D13 の断りの文を「どこから打っても断る」に合わせる、D12 の挿入の位置と折り返し、workspace-write の mode の集合を 1 つの関数にまとめ、`ralph doctor` が codex の director の autonomous と edits を数えないようにする
+7. S10 cross-review cycle 3 の 2 件: stop がロックの下で workspace と pane の id を比べて断る(D14)、`/director` skill の description の言い換えと skill の frontmatter の検査のテスト(D15)
 
 ## Verify plan
 
@@ -199,6 +206,7 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
   - S8 caf1d025(D12: codex の director の autonomous と edits を断る `ErrDirectorCodexWorkspaceWrite`、`codexWritableRootArgs` を leader だけに戻す。D13: `--config` の相対の `agmsg_home` を断る `checkStartAgmsgHome` と共通の判定 `agmsgHomeIsRelative`、env の警告。help、template、skill の 4 面、README、仕様、recipe の 2 つ、tech-debt)。implementer の報告の範囲外の 2 点は /sync-docs に渡す: `ralph doctor` の codex の writable root の検査(`codexSeatModesPossible`)は role director も数えるので、start が断る mode で warn しうる。`/org` skill の director の行と permission の項が D12・D13 に触れない
   - self-review(cycle 3)e62df32e は LOW 4 件、Merge: yes。C3-L4(doctor)はコードの直しなので /sync-docs ではなく S9 で直す。Affected areas に S8 と S9 のファイルを、Implementation outline に S9 を足し、承認し直した(digest 96796452ceae、図はこれらのファイルを描いていない)
   - S9 83287d39(C3-L1 tech-debt の 2 行を plan の ID と d2971e1a の triage で指す、C3-L2 D13 の文を「どこで打っても断る」に直し、3 つの場所で断るテスト、C3-L3 help の段落の移動と recipe の文の移動、C3-L4 `CodexModeRunsUnderWorkspaceWrite` と doctor が director の edits・autonomous を数えないこと)。implementer の報告の範囲外の 3 点は /sync-docs に渡す: 仕様 85 行に C3-L2 と同じ言い切りが残る、`/org` skill の doctor の対象の説明が director を数えない変更を反映しない、doctor の pass の文が `director = "edits"` の設定では文字どおりに正しくない
+  - verify(cycle 3)3504ee30 は pass、test(cycle 3)b0adfc63 は pass、sync-docs(cycle 3)49cee058。cross-review(cycle 3)6eef89e8 は ACTION_REQUIRED 2 件: `/director` skill の description が YAML として読めない、stop が start と重なると動いている director を stopped と記録しうる。consult(consult-plan-xreviewc3)の判定で D14・D15・AC16・S10 を足し、AC9 に 1 文足して承認し直した(digest ace92dd0aaa7、図は stop の断りと skill の frontmatter を描いていない)。上限を 4 に上げて後工程を回し直す(cycle-count.json は 2 のまま、cycle 4 の報告は `--cycle 4`)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
