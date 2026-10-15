@@ -3378,14 +3378,14 @@ func TestOrgSpawn_DirectorRole_RejectedBeforeAnyManifestWrite(t *testing.T) {
 
 // The director role check matches exactly, like the rest of the role
 // handling: another spelling is an ordinary custom role name.
-func TestDirectorRoleSpawnErr_IsExactAndCaseSensitive(t *testing.T) {
+func TestDirectorRoleInputErr_IsExactAndCaseSensitive(t *testing.T) {
 	for _, role := range []string{"Director", "directors", " director", "", "leader", "reviewer"} {
-		if err := directorRoleSpawnErr(role); err != nil {
-			t.Errorf("directorRoleSpawnErr(%q) = %v, want nil", role, err)
+		if err := DirectorRoleInputErr(role); err != nil {
+			t.Errorf("DirectorRoleInputErr(%q) = %v, want nil", role, err)
 		}
 	}
-	if err := directorRoleSpawnErr(DirectorRole); err == nil {
-		t.Errorf("directorRoleSpawnErr(%q) = nil, want the refusal", DirectorRole)
+	if err := DirectorRoleInputErr(DirectorRole); err == nil {
+		t.Errorf("DirectorRoleInputErr(%q) = nil, want the refusal", DirectorRole)
 	}
 }
 

@@ -428,7 +428,7 @@ func printStatusEmpty(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID 
 		_, _ = fmt.Fprintf(out, "no org runtime state found (state-dir=%s (source: %s)) — run `ralph org spawn` to start one.\n", stateDir, stateDirSource)
 	}
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
-	_, _ = fmt.Fprintln(out, orgDirectorLine(director))
+	_, _ = fmt.Fprintln(out, orgDirectorLine(director, orgInboxHintStateDir(cmd, stateDir)))
 	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	if corruptLines > 0 {
 		_, _ = fmt.Fprintf(out, "warning: %d corrupt manifest line(s) skipped\n", corruptLines)
@@ -637,7 +637,7 @@ func printStatusTableAllOrgs(cmd *cobra.Command, stateDir, stateDirSource string
 	// message.
 	printStateDirLine(out, stateDir, stateDirSource)
 	_, _ = fmt.Fprintln(out, orgWatchLine(watch))
-	_, _ = fmt.Fprintln(out, orgDirectorLine(director))
+	_, _ = fmt.Fprintln(out, orgDirectorLine(director, orgInboxHintStateDir(cmd, stateDir)))
 	_, _ = fmt.Fprintln(out, mergeGuaranteeLine(guarantee))
 	printScaffoldSection(out, scaffoldStat)
 

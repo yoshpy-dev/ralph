@@ -833,7 +833,8 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 				t.Fatal(err)
 			}
 			d2 := seedHeadless(t, stateDir, "claude", "opus", "w-2", "", false)
-			const d1Note = "; the headless director d1 (running, pane p-1, workspace w-1) is still open but not attached: stop it with ralph org director stop --id d1"
+			suffix := " --state-dir '" + stateDir + "'"
+			d1Note := "; the headless director d1 (running, pane p-1, workspace w-1) is still open but not attached: stop it with ralph org director stop --id d1" + suffix
 			line := func() string {
 				t.Helper()
 				out, err := runStatusCmd(t, "--state-dir", stateDir)
@@ -866,7 +867,7 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 
 			writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
 			want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless starting, workspace w-2: " +
-				"stop it with ralph org director stop --id d2) -- ralph org escalate sends every item to the human at once" + d1Note
+				"stop it with ralph org director stop --id d2" + suffix + ") -- ralph org escalate sends every item to the human at once" + d1Note
 			if got := line(); got != want {
 				t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
 			}
@@ -878,11 +879,58 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 				t.Fatal(err)
 			}
 			want = directorNotAttachedLine + "; the headless directors d1 (running, pane p-1, workspace w-1), d2 (starting, workspace w-2) are still open but not attached: " +
-				"stop each with ralph org director stop --id <id>"
+				"stop each with ralph org director stop --id <id>" + suffix
 			if got := line(); got != want {
 				t.Errorf("director line with no registration current:\n got %q\nwant %q", got, want)
 			}
 		})
+	}
+}
+
+// Self-review L3 of org-director-start: the stop command on the director:
+// line repeats --state-dir exactly when it was given, through `ralph status`
+// and `ralph org director status` alike, shell-quoted so a state dir with a
+// space stays one argument, and names none when RALPH_ORG_STATE_DIR names
+// the ledger instead, as the other director commands do
+// (org.CommandWithStateDir).
+func TestStatusCmd_DirectorStopCommandRepeatsTheStateDir(t *testing.T) {
+	t.Chdir(t.TempDir())
+	stateDir := filepath.Join(t.TempDir(), "a ledger")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+	if _, err := org.NewDirectorStore(stateDir).Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	const stop = ": stop it with ralph org director stop --id d1"
+	statusLine := func(args ...string) string {
+		t.Helper()
+		out, err := runStatusCmd(t, args...)
+		if err != nil {
+			t.Fatalf("status %q: %v (output: %s)", args, err, out)
+		}
+		return statusDirectorLine(t, out)
+	}
+
+	withFlag := stop + " --state-dir '" + stateDir + "'"
+	for name, line := range map[string]string{
+		"ralph status --state-dir":              statusLine("--state-dir", stateDir),
+		"ralph org director status --state-dir": directorStatusLine(t, "--state-dir", stateDir),
+	} {
+		if !strings.HasSuffix(line, withFlag) {
+			t.Errorf("%s: director line %q does not end with %q", name, line, withFlag)
+		}
+	}
+
+	t.Setenv("RALPH_ORG_STATE_DIR", stateDir)
+	for name, line := range map[string]string{
+		"ralph status":              statusLine(),
+		"ralph org director status": directorStatusLine(t),
+	} {
+		if !strings.HasSuffix(line, stop) || strings.Contains(line, "--state-dir") {
+			t.Errorf("%s with RALPH_ORG_STATE_DIR: director line %q; want it to end with %q and name no --state-dir", name, line, stop)
+		}
 	}
 }
 

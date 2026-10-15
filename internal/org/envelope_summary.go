@@ -59,13 +59,13 @@ func DefaultModelForDriver(cfg config.OrgConfig, driver string) (string, error) 
 
 // DefaultModelForDriverAndRole returns the Model of the first cfg.ModelPool
 // entry whose Driver matches driver AND is permitted for role under
-// [org.roles] (modelAllowedForRole, envelope.go), in cfg.ModelPool's
+// [org.roles] (ModelAllowedForRole, envelope.go), in cfg.ModelPool's
 // declared order. This is `ralph org spawn`'s --model default when the
 // caller omits --model (and `ralph org start`'s, with role leader): spawn
 // accepts arbitrary roles, so a role-restricted pool (e.g. `implementer =
 // ["sonnet"]`) can make the pool's own head entry impermissible for the
 // requesting role -- picking that head anyway would warn-then-reject via
-// ValidateSpawnEnvelope's own modelAllowedForRole check
+// ValidateSpawnEnvelope's own ModelAllowedForRole check
 // (self-review MEDIUM-2). Skipping straight to the first
 // driver-and-role-permitted entry keeps the fallback warning honest: if it
 // prints a model, that model will also pass validation. An error is
@@ -74,7 +74,7 @@ func DefaultModelForDriver(cfg config.OrgConfig, driver string) (string, error) 
 // to an empty --model.
 func DefaultModelForDriverAndRole(cfg config.OrgConfig, driver, role string) (string, error) {
 	for _, entry := range cfg.ModelPool {
-		if entry.Driver == driver && modelAllowedForRole(cfg, role, entry.Model) {
+		if entry.Driver == driver && ModelAllowedForRole(cfg, role, entry.Model) {
 			return entry.Model, nil
 		}
 	}

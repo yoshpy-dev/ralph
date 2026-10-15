@@ -135,6 +135,9 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			out := cmd.OutOrStdout()
 			_, _ = fmt.Fprintln(out, line)
 			_, _ = fmt.Fprintf(out, "detach it with: %s\n", rt.command("ralph org director detach --id "+reg.ID))
+			if replaced != nil {
+				rt.printHeadlessStillOpen(out, *replaced)
+			}
 			probe := orgEscalateWatchProbe(rt.stateDir, rt.cfg.DeadmanMinutes)()
 			if !org.WatchAcceptsWork(probe) {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: director attach: %s is recorded, but no ralph org watch --all accepts work on the ledger %s (%s), "+
@@ -169,7 +172,11 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 			"whatever its id, for a human cleaning up after a session that is gone,\n" +
 			"and is recorded as forced; it cannot be combined with --id. With no\n" +
 			"registration, detach exits 1. detach reads no ralph.toml (nor the main\n" +
-			"worktree's), so one that does not load does not block it.",
+			"worktree's), so one that does not load does not block it. detach only\n" +
+			"records: when it ends a headless director's registration\n" +
+			"(`ralph org director start`), the director's herdr pane and workspace\n" +
+			"stay open, and detach prints the `ralph org director stop --id <id>`\n" +
+			"that closes them.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -189,12 +196,14 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return rt.notRestoredError(err)
 			}
+			out := cmd.OutOrStdout()
 			if force {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "detached %s (forced; driver=%s, attached at %s)\n",
+				_, _ = fmt.Fprintf(out, "detached %s (forced; driver=%s, attached at %s)\n",
 					inboxField(ended.ID), inboxField(ended.Driver), inboxField(ended.AttachedAt))
-				return nil
+			} else {
+				_, _ = fmt.Fprintf(out, "detached %s\n", ended.ID)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "detached %s\n", ended.ID)
+			rt.printHeadlessStillOpen(out, ended)
 			return nil
 		},
 	}
@@ -235,7 +244,7 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			if jsonOut {
 				return writeIndentedJSON(cmd.OutOrStdout(), report)
 			}
-			printOrgDirectorReport(cmd.OutOrStdout(), report)
+			printOrgDirectorReport(cmd.OutOrStdout(), report, rt.hintStateDir)
 			return nil
 		},
 	}
@@ -342,8 +351,23 @@ func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error 
 		"or replace it with %s", err, rt.command(detach), replace)
 }
 
-// notRestoredError is a store error err of attach or detach followed, when
-// it wraps org.ErrDirectorWriteNotRestored, by the command that reads the
+// printHeadlessStillOpen writes to w, after detach or attach --replace ended
+// reg, one line when reg is a headless director (`ralph org director
+// start`) that is not stopped: ending its registration only records it
+// (plan 2026-10-15-org-director-start, D4), so its herdr pane and workspace
+// stay open, and the line names the stop that closes them, with this
+// invocation's --state-dir.
+func (rt *orgDirectorRuntime) printHeadlessStillOpen(w io.Writer, reg org.DirectorRegistration) {
+	if !reg.Headless() || reg.State == org.DirectorStateStopped {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "the herdr pane and workspace of the headless director %s stay open; close them with: %s\n",
+		inboxField(reg.ID), rt.command("ralph org director stop --id "+inboxField(reg.ID)))
+}
+
+// notRestoredError is a store error err of attach, detach, start, or stop
+// (startError, stopError) followed, when it wraps
+// org.ErrDirectorWriteNotRestored, by the command that reads the
 // registration again: director.jsonl may hold part of the failed write, so
 // the store does not say that nothing was recorded. The store does not know
 // the --state-dir of this invocation, so the command is said here, as
@@ -462,9 +486,13 @@ func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
 // model, pane, and workspace, and the open headless registrations that are
 // not current are named at the end (orgDirectorOpenHeadlessNote). The values
 // from director.jsonl, which a human can edit, have their control
-// characters escaped (inboxField), so the line stays one line.
-func orgDirectorLine(r orgDirectorReport) string {
-	note := orgDirectorOpenHeadlessNote(r.OpenHeadless)
+// characters escaped (inboxField), so the line stays one line. The stop
+// commands it names repeat hintStateDir as --state-dir
+// (org.CommandWithStateDir; the caller passes orgInboxHintStateDir's value,
+// the state dir only when --state-dir was given), as the other director
+// commands do.
+func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
+	note := orgDirectorOpenHeadlessNote(r.OpenHeadless, hintStateDir)
 	switch r.State {
 	case orgDirectorStateAttached:
 		reg := r.Registration
@@ -489,7 +517,7 @@ func orgDirectorLine(r orgDirectorReport) string {
 		case r.Registration != nil && r.Registration.Headless():
 			reg := r.Registration
 			state += "; registration " + inboxField(reg.ID) + " is still recorded, headless " + inboxField(reg.State) + orgDirectorHerdrIDs(*reg) +
-				": stop it with ralph org director stop --id " + inboxField(reg.ID)
+				": stop it with " + org.CommandWithStateDir("ralph org director stop --id "+inboxField(reg.ID), hintStateDir)
 		case r.Registration != nil:
 			state += "; registration " + inboxField(r.Registration.ID) + " is still recorded"
 		}
@@ -516,8 +544,10 @@ func orgDirectorHerdrIDs(reg org.DirectorRegistration) string {
 // orgDirectorOpenHeadlessNote is the end of the director: line that names
 // the open headless registrations that are not current (detached, or
 // replaced, with their herdr pane not closed yet) and how to close them, or
-// "" when there are none (plan 2026-10-15-org-director-start, AC10).
-func orgDirectorOpenHeadlessNote(open []org.DirectorRegistration) string {
+// "" when there are none (plan 2026-10-15-org-director-start, AC10). The
+// stop command repeats hintStateDir as --state-dir, as orgDirectorLine's
+// does.
+func orgDirectorOpenHeadlessNote(open []org.DirectorRegistration, hintStateDir string) string {
 	if len(open) == 0 {
 		return ""
 	}
@@ -526,9 +556,11 @@ func orgDirectorOpenHeadlessNote(open []org.DirectorRegistration) string {
 		names = append(names, inboxField(reg.ID)+" ("+inboxField(reg.State)+orgDirectorHerdrIDs(reg)+")")
 	}
 	if len(open) == 1 {
-		return "; the headless director " + names[0] + " is still open but not attached: stop it with ralph org director stop --id " + inboxField(open[0].ID)
+		return "; the headless director " + names[0] + " is still open but not attached: stop it with " +
+			org.CommandWithStateDir("ralph org director stop --id "+inboxField(open[0].ID), hintStateDir)
 	}
-	return "; the headless directors " + strings.Join(names, ", ") + " are still open but not attached: stop each with ralph org director stop --id <id>"
+	return "; the headless directors " + strings.Join(names, ", ") + " are still open but not attached: stop each with " +
+		org.CommandWithStateDir("ralph org director stop --id <id>", hintStateDir)
 }
 
 // warnDirectorDamage writes to w (stderr, so --json output stays clean) the
@@ -552,9 +584,9 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 // fields of a headless registration (launch to workspace_id) and pane_id are
 // left out when not set, so a promoted session's lines are those of stage
 // 8a-1. Then one open_headless line per open headless registration that is
-// not current.
-func printOrgDirectorReport(w io.Writer, r orgDirectorReport) {
-	_, _ = fmt.Fprintln(w, orgDirectorLine(r))
+// not current. hintStateDir is orgDirectorLine's.
+func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir string) {
+	_, _ = fmt.Fprintln(w, orgDirectorLine(r, hintStateDir))
 	_, _ = fmt.Fprintf(w, "enabled: %t\n", r.Enabled)
 	if reg := r.Registration; reg != nil {
 		for _, f := range []struct{ name, value string }{

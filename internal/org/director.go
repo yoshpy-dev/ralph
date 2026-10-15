@@ -308,18 +308,18 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 // registration's detached and the new attached as two lines of one write
 // (appendLocked), and returns the ended registration as replaced. A headless
 // registration replaced that way stays open, for `ralph org director stop`
-// to close its pane, as one detached by Detach does. A reader without the lock (Read) thus finds no moment with no
-// registration between the two lines, as it could when they were two writes
-// (self-review L5 of org-director-attach). A write that fails ends one of
-// two ways. Either it is cut back under the same lock (appendLocked), even
-// when it stopped after the detached line, so the old registration stays
-// current and the error says nothing was recorded (only a Read between the
-// failed write and the cut can see part of it); or the cut fails too, and
-// the error wraps ErrDirectorWriteNotRestored and does not say that. A
-// failed write of a plain attach ends the same two ways. The new id is one
-// more than the largest d<N> anywhere in the file, damaged lines included. A
-// driver other than claude and codex is refused before anything is read or
-// written.
+// to close its pane, as one detached by Detach does. A reader without the
+// lock (Read) thus finds no moment with no registration between the two
+// lines, as it could when they were two writes (self-review L5 of
+// org-director-attach). A write that fails ends one of two ways. Either it
+// is cut back under the same lock (appendLocked), even when it stopped
+// after the detached line, so the old registration stays current and the
+// error says nothing was recorded (only a Read between the failed write and
+// the cut can see part of it); or the cut fails too, and the error wraps
+// ErrDirectorWriteNotRestored and does not say that. A failed write of a
+// plain attach ends the same two ways. The new id is one more than the
+// largest d<N> anywhere in the file, damaged lines included. A driver other
+// than claude and codex is refused before anything is read or written.
 func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, replaced *DirectorRegistration, err error) {
 	if a.Driver != DirectorDriverClaude && a.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: unknown driver %q: use %s or %s", a.Driver, DirectorDriverClaude, DirectorDriverCodex)
@@ -518,12 +518,12 @@ func (s *DirectorStore) restoreLocked(size int, failed error) error {
 // directorAppendFailed is the error the store's writers (verb, as in their
 // other errors) return when appendLocked fails while cur is the current
 // registration that the write would have changed (nil when none, or when the
-// write leaves the current registration as it is). It says "org: director:" once, since
-// appendLocked's errors do not. When the file may hold part of the write, it
-// ends at appendLocked's error, which says so, instead of saying nothing was
-// recorded; the caller names the command that reads the registration of the
-// ledger it was given (the CLI's notRestoredError, self-review C2-L1 of
-// org-director-attach).
+// write leaves the current registration as it is). It says "org: director:"
+// once, since appendLocked's errors do not. When the file may hold part of
+// the write, it ends at appendLocked's error, which says so, instead of
+// saying nothing was recorded; the caller names the command that reads the
+// registration of the ledger it was given (the CLI's notRestoredError,
+// self-review C2-L1 of org-director-attach).
 func directorAppendFailed(verb string, cur *DirectorRegistration, err error) error {
 	switch {
 	case errors.Is(err, ErrDirectorWriteNotRestored):

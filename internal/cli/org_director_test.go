@@ -866,6 +866,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"Give --id, the id attach printed", "it need not detach", "--force ends the current registration whatever its id",
 			"it cannot be combined with --id",
 			"detach reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
+			"detach only records: when it ends a headless director's registration (`ralph org director start`), the director's herdr pane and workspace stay open, " +
+				"and detach prints the `ralph org director stop --id <id>` that closes them",
 		}},
 		{[]string{"director", "status", "--help"}, []string{
 			"attached, not attached, disabled, or unreadable", "--json",

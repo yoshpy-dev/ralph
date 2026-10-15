@@ -354,8 +354,8 @@ var orgInboxPollIntervalOverride time.Duration
 // 2026-10-12-org-watch-gate: spawn, both forms of start, director start, and
 // send call it right after they build their runtime, and no other verb does,
 // so stop, disband, escalate, the inbox verbs, wait, read, status, report,
-// and watch work with no watch running. The gate (org.NewWatchGate) probes the ledger
-// at resolvedStateDir and judges a liveness mark that carries no
+// and watch work with no watch running. The gate (org.NewWatchGate) probes
+// the ledger at resolvedStateDir and judges a liveness mark that carries no
 // deadman_minutes by rt.Config's. Its refusal repeats --state-dir in the
 // commands it names when --state-dir was given, by orgInboxHintStateDir's
 // rule.
@@ -386,7 +386,9 @@ func wireOrgWatchGate(cmd *cobra.Command, rt *org.Org, resolvedStateDir string) 
 //
 // `ralph org director start` wires the same gate (plan
 // 2026-10-15-org-director-start, D5), which StartDirector calls after its
-// own input checks and before it writes anything. verb is the verb after
+// own input checks and its first look at a current registration, and
+// before it writes anything, so a start refused for its input or while a
+// director is attached launches no watch. verb is the verb after
 // "ralph org" ("start", "director start") and starts what it starts
 // ("leader", "director"): they name the verb in the stderr line of a
 // launched watch and in a failed launch's error, which says that no leader
@@ -550,7 +552,7 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 // and the same warning wording instead of each hand-rolling it. Threading
 // role through the fallback (rather than plain org.DefaultModelForDriver)
 // keeps the warning honest: if it prints a model, that model also passes
-// ValidateSpawnEnvelope's own modelAllowedForRole check, instead of
+// ValidateSpawnEnvelope's own ModelAllowedForRole check, instead of
 // warn-then-reject when a role-restricted pool's head entry is
 // impermissible for the requesting role (self-review MEDIUM-2). stderr is
 // cmd.ErrOrStderr() at call sites so tests can capture the warning without

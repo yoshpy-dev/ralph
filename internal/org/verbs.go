@@ -795,18 +795,61 @@ func isNotFound(err error) bool {
 	return errors.As(err, &nf) && nf.NotFound()
 }
 
+// labelWords is how confirmSeatPane's and confirmOrgWorkspace's errors name
+// the labels they check. seatLabelWords is for an org seat, whose tab and
+// workspace spawn labels with its seat id and org_id (TabCreate,
+// WorkspaceCreate), so the errors say seat "<id>" and org_id "<id>", as
+// they always have. directorLabelWords is for the headless director, whose
+// tab and workspace labels are DirectorTabLabel and DirectorWorkspaceLabel
+// (confirmDirectorResources names the registration itself), so the errors
+// say only which label was expected.
+type labelWords int
+
+const (
+	seatLabelWords labelWords = iota
+	directorLabelWords
+)
+
+// tab names the expected tab, after "pane %q is not ".
+func (w labelWords) tab(tabLabel string) string {
+	if w == seatLabelWords {
+		return fmt.Sprintf("seat %q's", tabLabel)
+	}
+	return fmt.Sprintf("in a tab labelled %q", tabLabel)
+}
+
+// workspace names the expected workspace, after "workspace %q is not ".
+func (w labelWords) workspace(workspaceLabel string) string {
+	if w == seatLabelWords {
+		return fmt.Sprintf("org_id %q's", workspaceLabel)
+	}
+	return fmt.Sprintf("labelled %q", workspaceLabel)
+}
+
+// paneWorkspace names the expected workspace, after "pane %q is not
+// confirmed in ".
+func (w labelWords) paneWorkspace(workspaceLabel string) string {
+	if w == seatLabelWords {
+		return fmt.Sprintf("org_id %q's workspace", workspaceLabel)
+	}
+	return fmt.Sprintf("a workspace labelled %q", workspaceLabel)
+}
+
 // confirmSeatPane checks, before anything sends C-c to or closes paneID,
-// that herdr still has it as seatID's pane in orgID's workspace: the tab
-// holding it is labelled seatID and its workspace orgID, the labels spawn
-// gave them (TabCreate with the seat id, WorkspaceCreate with the org_id).
-// herdr numbers its ids from w1 again when it loses its session state, so a
-// recorded id can come to name an unrelated pane (plan AC14). gone is true
-// when herdr does not know the pane (already closed). A non-nil err means the
-// pane is not confirmed and must be left alone: a label differs, or a get
-// call failed or timed out, including a tab or workspace herdr no longer
-// knows although it had the pane a moment before. Each of the three get
-// calls runs under its own driverCallTimeout deadline.
-func (o *Org) confirmSeatPane(orgID, seatID, paneID string) (gone bool, err error) {
+// that herdr still has it in a tab labelled tabLabel inside a workspace
+// labelled workspaceLabel, the labels the pane was made with: for an org
+// seat its seat id and org_id (spawn's TabCreate and WorkspaceCreate), and
+// for the headless director DirectorTabLabel and DirectorWorkspaceLabel of
+// its token (StartDirector; confirmDirectorResources calls this). words
+// says how its errors name the labels. herdr numbers its ids from w1 again
+// when it loses its session state, so a recorded id can come to name an
+// unrelated pane (plan AC14). gone is true when herdr does not know the pane
+// (already closed). A non-nil err means the pane is not confirmed and must
+// be left alone: a label differs, or a get call failed or timed out,
+// including a tab or workspace herdr no longer knows although it had the
+// pane a moment before. Each of the three get calls runs under its own
+// driverCallTimeout deadline.
+func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words labelWords) (gone bool, err error) {
 	var tabID, workspaceID string
 	err = o.callWithTimeout(func(ctx context.Context) error {
 		var getErr error
@@ -820,10 +863,10 @@ func (o *Org) confirmSeatPane(orgID, seatID, paneID string) (gone bool, err erro
 		return false, fmt.Errorf("check pane %q: %w", paneID, err)
 	}
 
-	var tabLabel string
+	var gotTab string
 	err = o.callWithTimeout(func(ctx context.Context) error {
 		var getErr error
-		tabLabel, getErr = o.Herdr.TabGet(ctx, tabID)
+		gotTab, getErr = o.Herdr.TabGet(ctx, tabID)
 		return getErr
 	})
 	switch {
@@ -834,25 +877,26 @@ func (o *Org) confirmSeatPane(orgID, seatID, paneID string) (gone bool, err erro
 	case err != nil:
 		return false, fmt.Errorf("check pane %q: %w", paneID, err)
 	}
-	if tabLabel != seatID {
-		return false, fmt.Errorf("pane %q is not seat %q's: herdr has it in tab %q labelled %q", paneID, seatID, tabID, tabLabel)
+	if gotTab != tabLabel {
+		return false, fmt.Errorf("pane %q is not %s: herdr has it in tab %q labelled %q", paneID, words.tab(tabLabel), tabID, gotTab)
 	}
 
-	switch wsGone, wsErr := o.confirmOrgWorkspace(orgID, workspaceID); {
+	switch wsGone, wsErr := o.confirmOrgWorkspace(workspaceLabel, workspaceID, words); {
 	case wsErr != nil:
-		return false, fmt.Errorf("pane %q is not confirmed in org_id %q's workspace: %w", paneID, orgID, wsErr)
+		return false, fmt.Errorf("pane %q is not confirmed in %s: %w", paneID, words.paneWorkspace(workspaceLabel), wsErr)
 	case wsGone:
-		return false, fmt.Errorf("pane %q is not confirmed in org_id %q's workspace: herdr has no workspace %q", paneID, orgID, workspaceID)
+		return false, fmt.Errorf("pane %q is not confirmed in %s: herdr has no workspace %q", paneID, words.paneWorkspace(workspaceLabel), workspaceID)
 	}
 	return false, nil
 }
 
 // confirmOrgWorkspace is confirmSeatPane for a workspace: herdr's label for
-// workspaceID must be orgID. gone is true when herdr does not know the
-// workspace (already closed); a non-nil err (a different label, or a failed
-// or timed-out get) means it must be left alone. The get runs under its own
-// driverCallTimeout deadline.
-func (o *Org) confirmOrgWorkspace(orgID, workspaceID string) (gone bool, err error) {
+// workspaceID must be workspaceLabel, an org's org_id or the headless
+// director's DirectorWorkspaceLabel, and words says how its errors name it.
+// gone is true when herdr does not know the workspace (already closed); a
+// non-nil err (a different label, or a failed or timed-out get) means it
+// must be left alone. The get runs under its own driverCallTimeout deadline.
+func (o *Org) confirmOrgWorkspace(workspaceLabel, workspaceID string, words labelWords) (gone bool, err error) {
 	var label string
 	err = o.callWithTimeout(func(ctx context.Context) error {
 		var getErr error
@@ -864,8 +908,8 @@ func (o *Org) confirmOrgWorkspace(orgID, workspaceID string) (gone bool, err err
 		return true, nil
 	case err != nil:
 		return false, fmt.Errorf("check workspace %q: %w", workspaceID, err)
-	case label != orgID:
-		return false, fmt.Errorf("workspace %q is not org_id %q's: herdr labels it %q", workspaceID, orgID, label)
+	case label != workspaceLabel:
+		return false, fmt.Errorf("workspace %q is not %s: herdr labels it %q", workspaceID, words.workspace(workspaceLabel), label)
 	}
 	return false, nil
 }
@@ -1091,7 +1135,7 @@ func (o *Org) stopSeatPane(p StopParams, paneID string) (ctrlCNote, paneNote str
 	if paneID == "" {
 		return "ctrl_c=skipped", "pane=no pane_id on record", false, nil
 	}
-	gone, err := o.confirmSeatPane(p.OrgID, p.Seat, paneID)
+	gone, err := o.confirmSeatPane(p.OrgID, p.Seat, paneID, seatLabelWords)
 	switch {
 	case err != nil:
 		return "ctrl_c=skipped: pane not confirmed", notClosedNote("pane=not closed", err, p.Force), false, err
@@ -1192,7 +1236,7 @@ func (o *Org) CloseDeferredSelfPane(paneID string, force bool) error {
 // when the pane closed or herdr does not know it, otherwise why it is still
 // open.
 func (o *Org) closeSelfPane(orgID, seatID, paneID string) error {
-	switch gone, err := o.confirmSeatPane(orgID, seatID, paneID); {
+	switch gone, err := o.confirmSeatPane(orgID, seatID, paneID, seatLabelWords); {
 	case err != nil:
 		return fmt.Errorf("left open: %w", err)
 	case gone:
@@ -1278,7 +1322,7 @@ func (o *Org) CloseDeferredSelfWorkspace(workspaceID string, force bool) error {
 
 // closeSelfWorkspace is closeSelfPane for CloseDeferredSelfWorkspace.
 func (o *Org) closeSelfWorkspace(orgID, workspaceID string) error {
-	switch gone, err := o.confirmOrgWorkspace(orgID, workspaceID); {
+	switch gone, err := o.confirmOrgWorkspace(orgID, workspaceID, seatLabelWords); {
 	case err != nil:
 		return fmt.Errorf("left open: %w", err)
 	case gone:
@@ -2088,7 +2132,7 @@ func (o *Org) disbandOwnLast(p DisbandParams, ownSeats []string, ownWorkspace st
 // failure, still without closing an unconfirmed workspace.
 func (o *Org) closeOrgWorkspace(p DisbandParams, workspaceID string, self bool, result *DisbandResult) {
 	var note, failed string
-	gone, closeErr := o.confirmOrgWorkspace(p.OrgID, workspaceID)
+	gone, closeErr := o.confirmOrgWorkspace(p.OrgID, workspaceID, seatLabelWords)
 	switch {
 	case closeErr != nil:
 		failed = "workspace=not closed"

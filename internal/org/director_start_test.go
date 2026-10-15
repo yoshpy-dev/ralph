@@ -325,7 +325,9 @@ func TestStartDirector_PermissionModeOfRoleDirector(t *testing.T) {
 // refusals: each writes nothing (director.jsonl as it was, no prompt file)
 // and calls no herdr, and the input checks run before the watch gate. A
 // current registration, a headless one still starting included, is refused
-// with a *DirectorAttachedError that says whether it is headless.
+// with a *DirectorAttachedError that says whether it is headless, also
+// before the watch gate, so with no watch running it is still the attached
+// refusal and no watch is launched (self-review L1 of org-director-start).
 func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -355,7 +357,7 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 		}, true, ErrNoRunningWatch, nil},
 		{"a promoted session is attached", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
 			mustAttachDirector(t, f.store, DirectorAttach{Driver: DirectorDriverClaude, User: "u", Cwd: "/w"})
-		}, true, ErrDirectorAttached, func(t *testing.T, err error) {
+		}, false, ErrDirectorAttached, func(t *testing.T, err error) {
 			var ae *DirectorAttachedError
 			if !errors.As(err, &ae) || ae.Current == nil || ae.Current.ID != "d1" || ae.Current.Headless() {
 				t.Fatalf("err = %#v, want a *DirectorAttachedError naming the promoted d1", err)
@@ -365,11 +367,23 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 			if _, err := f.store.AttachHeadless(testHeadlessAttach()); err != nil {
 				t.Fatalf("AttachHeadless: %v", err)
 			}
-		}, true, ErrDirectorAttached, func(t *testing.T, err error) {
+		}, false, ErrDirectorAttached, func(t *testing.T, err error) {
 			var ae *DirectorAttachedError
 			if !errors.As(err, &ae) || ae.Current == nil || !ae.Current.Headless() || ae.Current.State != DirectorStateStarting ||
 				!strings.Contains(err.Error(), "headless starting") {
 				t.Fatalf("err = %v, want a *DirectorAttachedError naming the starting headless d1", err)
+			}
+		}},
+		{"a director is attached and no watch runs", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
+			f.o.WatchGate = func() error {
+				return &WatchGateError{StateDir: f.dir, Liveness: WatchLiveness{State: WatchLivenessNotRunning}}
+			}
+			mustAttachDirector(t, f.store, DirectorAttach{Driver: DirectorDriverCodex, User: "u", Cwd: "/w"})
+		}, false, ErrDirectorAttached, func(t *testing.T, err error) {
+			var ae *DirectorAttachedError
+			if !errors.As(err, &ae) || ae.Current == nil || ae.Current.ID != "d1" || errors.Is(err, ErrNoRunningWatch) ||
+				err.Error() != "org: director: start: a director is already attached: "+ae.Current.describe() {
+				t.Fatalf("err = %v, want only AttachHeadless's refusal naming d1, not the watch gate's", err)
 			}
 		}},
 	}
@@ -413,6 +427,28 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 				t.Fatalf("a refusal made the prompts dir (stat err %v)", err)
 			}
 		})
+	}
+}
+
+// TestStartDirector_ARegistrationAfterTheFirstLookIsRefusedUnderTheLock pins
+// that the first look at a current registration only refuses early: an
+// attach that lands after it (here, while the watch gate runs) is still
+// refused by AttachHeadless under the lock, with the registration read
+// again, and start writes nothing and calls no herdr.
+func TestStartDirector_ARegistrationAfterTheFirstLookIsRefusedUnderTheLock(t *testing.T) {
+	f := newDirStartFixture(t, directorTestToken)
+	f.o.WatchGate = func() error {
+		mustAttachDirector(t, f.store, DirectorAttach{Driver: DirectorDriverClaude, User: "u", Cwd: "/w"})
+		return nil
+	}
+	_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+	var ae *DirectorAttachedError
+	if !errors.As(err, &ae) || !errors.Is(err, ErrDirectorAttached) || ae.Current == nil || ae.Current.ID != "d1" || ae.Current.Headless() {
+		t.Fatalf("err = %#v, want AttachHeadless's *DirectorAttachedError naming the promoted d1", err)
+	}
+	wantTrail(t, f.store, "attached d1")
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
 	}
 }
 

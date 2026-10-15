@@ -400,7 +400,7 @@ type SpawnResult struct {
 // docs/plans/active/2026-08-01-org-runtime-mechanism.md. For a non-dry-run
 // call, the ordering is, in this order:
 //  0. Input-only checks (identifier shape, the joined herdr agent-name
-//     length, RetiredRoleInputErr, directorRoleSpawnErr (the director is
+//     length, RetiredRoleInputErr, DirectorRoleInputErr (the director is
 //     not a seat), Reserve: leader seat only, paths
 //     normalized by NormalizeReservePaths, and Feature: only with Reserve,
 //     fields checked by validateFeatureBinding): pure functions of the request,
@@ -1113,8 +1113,8 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 	}
 	// The director role is refused the same way, as a plain rejection with
 	// no manifest event, no receipt, and no herdr call: the director is not
-	// a seat (directorRoleSpawnErr).
-	if err := directorRoleSpawnErr(p.Role); err != nil {
+	// a seat (DirectorRoleInputErr).
+	if err := DirectorRoleInputErr(p.Role); err != nil {
 		return p, err
 	}
 	// Reserve is input too: the org's reservation is taken by its leader seat
@@ -1415,30 +1415,24 @@ func RetiredRoleInputErr(role, seatID, prompt string) error {
 	return nil
 }
 
-// directorRoleSpawnErr refuses role DirectorRole for a seat. The director
+// DirectorRoleInputErr refuses role DirectorRole for a seat. The director
 // is not an org seat (plan docs/plans/active/2026-10-15-org-director-start.md,
 // D2 and D7): `ralph org director start` launches it with a herdr agent,
 // workspace, and tab of its own and records it in director.jsonl, never in
 // the manifest, so it is not counted in max_orgs or max_total_seats and not
 // stopped by stop --all. A seat spawned with the role would be counted and
 // stopped as a seat, and would start with no template (RenderRolePrompt has
-// none for the role). Like
-// RetiredRoleInputErr it reads only the request: an exact, case-sensitive
-// match, and a --prompt does not lift it.
-func directorRoleSpawnErr(role string) error {
+// none for the role). Like RetiredRoleInputErr it reads only the request:
+// an exact, case-sensitive match, and a --prompt does not lift it. `ralph
+// org spawn` in the CLI calls it next to RetiredRoleInputErr, before it
+// resolves --model, so --role director is refused before the --model
+// fallback prints its warning; Spawn runs it again (checkSpawnInput).
+func DirectorRoleInputErr(role string) error {
 	if role != DirectorRole {
 		return nil
 	}
 	return fmt.Errorf("org: role %q is not a seat role: the director is not an org seat; "+
 		"launch a headless director with ralph org director start, or promote an interactive session with ralph org director attach", role)
-}
-
-// DirectorRoleInputErr is directorRoleSpawnErr for `ralph org spawn` in the
-// CLI, which calls it next to RetiredRoleInputErr, before it resolves
-// --model: --role director is then refused before the --model fallback
-// prints its warning. Spawn runs the same check again (checkSpawnInput).
-func DirectorRoleInputErr(role string) error {
-	return directorRoleSpawnErr(role)
 }
 
 // retiredRoleConfigErr is the ralph.toml half of Spawn's guard for the

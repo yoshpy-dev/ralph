@@ -131,7 +131,7 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 		}
 		fold := foldDirector(raw)
 		if cur := fold.current; cur != nil {
-			return fmt.Errorf("org: director: %s: %w: %s", verb, ErrDirectorAttached, cur.describe())
+			return directorStartAttachedErr(cur)
 		}
 		next, err := fold.nextID()
 		if err != nil {
@@ -153,6 +153,13 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 		return DirectorRegistration{}, err
 	}
 	return reg, nil
+}
+
+// directorStartAttachedErr is the ErrDirectorAttached refusal of start while
+// cur is the current registration: AttachHeadless's under the lock, and the
+// same words from checkDirectorStart's first look.
+func directorStartAttachedErr(cur *DirectorRegistration) error {
+	return fmt.Errorf("org: director: start: %w: %s", ErrDirectorAttached, cur.describe())
 }
 
 // RecordWorkspace appends workspace_created with workspaceID, the herdr
@@ -387,10 +394,12 @@ type DirectorStartResult struct {
 }
 
 // DirectorAttachedError is StartDirector's refusal while a registration is
-// current. Err is AttachHeadless's error, which wraps ErrDirectorAttached and
-// names the registration it refused on. Current is the current registration
-// read again after the refusal, without the lock, so it can be newer; nil
-// when the read failed or none is current by then. Its Headless tells the
+// current. Err wraps ErrDirectorAttached and names the registration refused
+// on, in AttachHeadless's words, whether checkDirectorStart's first look
+// found it or AttachHeadless did under the lock. Current is the current
+// registration: the one the first look found, or, after AttachHeadless's
+// refusal, the one read again without the lock, which can be newer, and nil
+// when that read failed or none is current by then. Its Headless tells the
 // CLI which way out to print: `ralph org director stop --id` for a headless
 // one, `ralph org director detach --id` for a promoted session's.
 type DirectorAttachedError struct {
@@ -413,9 +422,14 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // codex or an empty model, when the permission mode of role director
 // ([org.permissions.roles].director, else [org.permissions].default) does not
 // map to the driver's flags (permissionArgsForDriver: codex is fail-closed
-// until codex_verified), when o.WatchGate refuses, and while a registration
-// is current (*DirectorAttachedError). A seat's scope gate
-// (autonomousScopeGateErr) does not apply: the director is not a seat.
+// until codex_verified), while a registration is current
+// (*DirectorAttachedError), and when o.WatchGate refuses. The current
+// registration is checked twice: first by a read without the lock before
+// the watch gate, so a start it refuses launches no watch (the gate the CLI
+// wires may launch one), then by AttachHeadless under the lock, which
+// decides. A director.jsonl that cannot be read is refused at the first
+// read. A seat's scope gate (autonomousScopeGateErr) does not apply: the
+// director is not a seat.
 //
 // Then, in this order, with no herdr call under director.lock (D3):
 //  1. AttachHeadless records the registration, state starting, with a new
@@ -486,11 +500,11 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 }
 
 // checkDirectorStart runs StartDirector's refusals that need no write and
-// no herdr call, in the order its doc comment lists them (all but the one
-// on a current registration, which AttachHeadless decides under the lock).
-// It returns the absolute state dir, the permission flags, and the
-// permission mode, and leaves p with Cwd made absolute and TimeoutMS
-// defaulted.
+// no herdr call, in the order its doc comment lists them. Its look at a
+// current registration reads without the lock and only refuses early;
+// AttachHeadless decides again under the lock. It returns the absolute
+// state dir, the permission flags, and the permission mode, and leaves p
+// with Cwd made absolute and TimeoutMS defaulted.
 func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permArgs []string, mode string, err error) {
 	switch {
 	case p.Store == nil:
@@ -510,6 +524,16 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (stateDir string, permA
 	if permArgs, err = permissionArgsForDriver(o.Config, p.Driver, mode); err != nil {
 		return "", nil, "", fmt.Errorf("org: director: start: permission mode %q of role %s ([org.permissions.roles].%s, else [org.permissions].default): %w",
 			mode, DirectorRole, DirectorRole, err)
+	}
+	// Before the watch gate, which may launch a watch, so a start refused
+	// while a director is attached starts nothing (self-review L1 of
+	// org-director-start).
+	res, err := p.Store.Read()
+	if err != nil {
+		return "", nil, "", err
+	}
+	if cur := res.Current; cur != nil {
+		return "", nil, "", &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return "", nil, "", err

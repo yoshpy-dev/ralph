@@ -315,6 +315,72 @@ func TestOrgDirectorStart_RefusedWithNothingWritten(t *testing.T) {
 	}
 }
 
+// Self-review L1 of org-director-start through the CLI, with TestMain's gate
+// that always passes set back to nil and no watch running: start refuses an
+// attached director before its watch gate, so it launches no watch, prints
+// nothing, and leaves the ledger as it was (no watch.log, watch.lock, or
+// liveness mark, director.jsonl unchanged), whether the director is a
+// promoted session or a headless one still starting.
+func TestOrgDirectorStart_AnAttachedDirectorIsRefusedBeforeTheWatchGate(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, stateDir string)
+	}{
+		{"a promoted session", func(t *testing.T, stateDir string) {
+			runInboxOK(t, "director", "attach", "--driver", "claude", "--state-dir", stateDir)
+		}},
+		{"a headless director still starting", func(t *testing.T, stateDir string) {
+			seedHeadless(t, stateDir, "codex", "gpt-6-astra", "", "", false)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			useRealOrgWatchGate(t)
+			launches := 0
+			setOrgWatchLaunch(t, func(orgWatchLaunchRequest) (*orgWatchProcess, error) {
+				launches++
+				return nil, errors.New("no launch in this test")
+			})
+			stateDir, herdrLog, _ := directorStartLedger(t)
+			tc.setup(t, stateDir)
+			before, entries := directorFileOrAbsent(t, stateDir), dirNames(t, stateDir)
+
+			stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir)
+			if !errors.Is(err, org.ErrDirectorAttached) {
+				t.Errorf("director start over an attached director with no watch = %v; want ErrDirectorAttached", err)
+			}
+			if launches != 0 {
+				t.Errorf("the watch launcher was called %d times; want none", launches)
+			}
+			if stdout != "" || stderr != "" {
+				t.Errorf("stdout = %q, stderr = %q; want nothing", stdout, stderr)
+			}
+			if after := directorFileOrAbsent(t, stateDir); after != before {
+				t.Errorf("a refused start changed director.jsonl:\nbefore: %s\nafter:  %s", before, after)
+			}
+			if got := dirNames(t, stateDir); !slices.Equal(got, entries) {
+				t.Errorf("ledger entries = %v; want %v as before (no watch files)", got, entries)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("herdr calls = %v; want none", lines)
+			}
+		})
+	}
+}
+
+// dirNames lists the names in dir, sorted.
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
 // AC6 through the CLI (D6): without --config, on the main worktree's ledger
 // found from a linked worktree, start takes [org.director].enabled,
 // [org.permissions], [org.roles], and model_pool from the main worktree's
@@ -542,7 +608,7 @@ func TestOrgDirectorStart_AFailedAgentStartIsCleanedUp(t *testing.T) {
 			t.Errorf("director.jsonl = %v; want %v", got, want)
 		}
 		want := directorNotAttachedLine + "; the headless director d1 (starting, pane pane-stub-1, workspace ws-stub-1) is still open but not attached: " +
-			"stop it with ralph org director stop --id d1"
+			"stop it with ralph org director stop --id d1" + suffix
 		if got := directorStatusLine(t, "--state-dir", stateDir); got != want {
 			t.Errorf("director line:\n got %q\nwant %q", got, want)
 		}
@@ -559,7 +625,7 @@ func TestOrgDirectorStop_ADetachedHeadlessDirector(t *testing.T) {
 	runInboxOK(t, "director", "detach", "--id", "d1", "--state-dir", stateDir)
 
 	want := directorNotAttachedLine + "; the headless director d1 (running, pane pane-stub-1, workspace ws-stub-1) is still open but not attached: " +
-		"stop it with ralph org director stop --id d1"
+		"stop it with ralph org director stop --id d1 --state-dir '" + stateDir + "'"
 	if got := directorStatusLine(t, "--state-dir", stateDir); got != want {
 		t.Errorf("director line:\n got %q\nwant %q", got, want)
 	}
@@ -881,6 +947,92 @@ func TestOrgDirectorAttach_RefusedByAHeadlessDirectorNamesStop(t *testing.T) {
 	}
 }
 
+// Self-review L2 of org-director-start: detach --id and detach --force of a
+// headless director that is not stopped only record (D4), so after their
+// detached line they print one more that says its herdr pane and workspace
+// stay open and names the stop that closes them, with --state-dir; they
+// write detached only and run no herdr. A headless registration already
+// stopped (a stopped with no detached, which a cut-back that failed can
+// leave) gets no such line. A promoted session's detach prints none either
+// (TestOrgDirector_AttachReplaceAndDetachByID pins its stdout whole).
+func TestOrgDirectorDetach_AHeadlessDirectorNamesItsStop(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		detached string // the first stdout line, after the id
+	}{
+		{"--id", []string{"--id", "d1"}, ""},
+		{"--force", []string{"--force"}, " (forced; driver=codex, attached at "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir, herdrLog, _ := directorStartLedger(t)
+			reg := seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+			want := "detached d1" + tc.detached
+			if tc.detached != "" {
+				want += reg.AttachedAt + ")"
+			}
+			want += "\nthe herdr pane and workspace of the headless director d1 stay open; close them with: ralph org director stop --id d1 --state-dir '" +
+				stateDir + "'\n"
+
+			stdout, _ := runInboxOK(t, append([]string{"director", "detach", "--state-dir", stateDir}, tc.args...)...)
+			if stdout != want {
+				t.Errorf("detach %v stdout =\n%s\nwant\n%s", tc.args, stdout, want)
+			}
+			if got := directorEventKinds(directorEventsIn(t, stateDir)); got[len(got)-1] != "detached d1" || len(got) != 5 {
+				t.Errorf("director.jsonl = %v; want the seeded four events and detached d1", got)
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("herdr calls = %v; want none", lines)
+			}
+		})
+	}
+
+	t.Run("already stopped", func(t *testing.T) {
+		stateDir, _, _ := directorStartLedger(t)
+		seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+		f, err := os.OpenFile(org.DirectorPathIn(stateDir), os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(`{"ts":"2026-10-15T09:00:00Z","id":"d1","event":"stopped","user":"alice","cwd":"/work","herdr_pane":false}` + "\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if res, err := org.NewDirectorStore(stateDir).Read(); err != nil || res.Current == nil || res.Current.State != org.DirectorStateStopped {
+			t.Fatalf("seeded registration = %+v, %v; want d1 current and stopped", res.Current, err)
+		}
+
+		stdout, _ := runInboxOK(t, "director", "detach", "--id", "d1", "--state-dir", stateDir)
+		if stdout != "detached d1\n" {
+			t.Errorf("detach of a stopped headless director stdout = %q; want only the detached line", stdout)
+		}
+	})
+}
+
+// Self-review L2 of org-director-start for attach --replace: replacing a
+// headless director leaves its herdr pane and workspace open, so after the
+// attached and detach lines attach prints the line that says so and names
+// the stop that closes the replaced one, with --state-dir.
+func TestOrgDirectorAttachReplace_AHeadlessDirectorNamesItsStop(t *testing.T) {
+	setEscalateWatch(t, acceptingWatchLiveness())
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	reg := seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+	suffix := " --state-dir '" + stateDir + "'"
+
+	stdout, _ := runInboxOK(t, "director", "attach", "--driver", "claude", "--replace", "--state-dir", stateDir)
+	want := "attached d2 (driver=claude), replacing d1 (driver=codex, attached at " + reg.AttachedAt + ")\n" +
+		"detach it with: ralph org director detach --id d2" + suffix + "\n" +
+		"the herdr pane and workspace of the headless director d1 stay open; close them with: ralph org director stop --id d1" + suffix + "\n"
+	if stdout != want {
+		t.Errorf("attach --replace stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
+	}
+}
+
 // AC10 for director status: a headless registration shows its state, model,
 // pane, and workspace on the director: line, and its fields in the text
 // form; the open headless registrations that are not current are named at
@@ -920,8 +1072,9 @@ func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout, _ = runInboxOK(t, "director", "status", "--state-dir", stateDir)
+	suffix := " --state-dir '" + stateDir + "'"
 	wantLine := directorAttachedLine("d2", "claude", d2.AttachedAt, "bob") + "; the headless director " + running +
-		" is still open but not attached: stop it with ralph org director stop --id d1"
+		" is still open but not attached: stop it with ralph org director stop --id d1" + suffix
 	if lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n"); lines[0] != wantLine || lines[len(lines)-1] != "open_headless: "+running ||
 		strings.Contains(stdout, "launch:") {
 		t.Errorf("status with d2 promoted over d1 =\n%s\nwant the line %q, d2's 8a-1 fields, and open_headless: %s", stdout, wantLine, running)
@@ -941,7 +1094,7 @@ func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantLine = directorNotAttachedLine + "; the headless directors " + running + ", d3 (starting) are still open but not attached: " +
-		"stop each with ralph org director stop --id <id>"
+		"stop each with ralph org director stop --id <id>" + suffix
 	if got := directorStatusLine(t, "--state-dir", stateDir); got != wantLine {
 		t.Errorf("director line with two open headless directors:\n got %q\nwant %q", got, wantLine)
 	}

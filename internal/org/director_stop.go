@@ -298,18 +298,19 @@ type directorGone struct {
 // confirmDirectorResources checks the herdr pane and workspace recorded for
 // reg, with nothing sent: the pane with confirmSeatPane (its tab labelled
 // DirectorTabLabel and its workspace DirectorWorkspaceLabel of reg's token),
-// the workspace with confirmOrgWorkspace (labelled DirectorWorkspaceLabel).
-// It returns the directorClose to go on with, whose err is set (notConfirmed)
-// when a recorded id is not confirmed or its get fails, and which recorded
-// ids herdr no longer knows. One not recorded is skipped. Every get runs
-// under its own driverCallTimeout.
+// the workspace with confirmOrgWorkspace (labelled DirectorWorkspaceLabel),
+// both with directorLabelWords, so their errors name the labels and not a
+// seat or an org_id. It returns the directorClose to go on with, whose err
+// is set (notConfirmed) when a recorded id is not confirmed or its get
+// fails, and which recorded ids herdr no longer knows. One not recorded is
+// skipped. Every get runs under its own driverCallTimeout.
 func (o *Org) confirmDirectorResources(reg DirectorRegistration) (directorClose, directorGone) {
 	tabLabel, wsLabel := DirectorTabLabel(reg.Token), DirectorWorkspaceLabel(reg.Token)
 	c := directorClose{ctrlC: "ctrl_c=skipped", pane: "pane=none recorded", workspace: "workspace=none recorded",
 		paneOpen: reg.PaneID != "", workspaceOpen: reg.WorkspaceID != ""}
 	var gone directorGone
 	if reg.PaneID != "" {
-		paneGone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID)
+		paneGone, err := o.confirmSeatPane(wsLabel, tabLabel, reg.PaneID, directorLabelWords)
 		if err != nil {
 			return c.notConfirmed(fmt.Errorf("pane %q is not confirmed as %s's (a tab labelled %s in a workspace labelled %s), so nothing was sent to it: %w",
 				reg.PaneID, reg.ID, tabLabel, wsLabel, err)), gone
@@ -317,7 +318,7 @@ func (o *Org) confirmDirectorResources(reg DirectorRegistration) (directorClose,
 		gone.pane = paneGone
 	}
 	if reg.WorkspaceID != "" {
-		wsGone, err := o.confirmOrgWorkspace(wsLabel, reg.WorkspaceID)
+		wsGone, err := o.confirmOrgWorkspace(wsLabel, reg.WorkspaceID, directorLabelWords)
 		if err != nil {
 			return c.notConfirmed(fmt.Errorf("workspace %q is not confirmed as %s's (labelled %s), so nothing was sent to it: %w",
 				reg.WorkspaceID, reg.ID, wsLabel, err)), gone

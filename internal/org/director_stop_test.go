@@ -133,6 +133,14 @@ func TestStopDirector_ALabelNotThisLaunchsSendsNothing(t *testing.T) {
 					t.Fatalf("err = %v, want it to say %q", err, want)
 				}
 			}
+			// The label checks are the seats' (confirmSeatPane,
+			// confirmOrgWorkspace), but a director is no seat and has no org:
+			// the mismatch names the labels only (self-review L4).
+			for _, word := range []string{"seat", "org_id"} {
+				if strings.Contains(err.Error(), word) {
+					t.Fatalf("err = %v, want it not to say %q", err, word)
+				}
+			}
 			if len(f.h.sendKeysCalls) != 0 || len(f.h.paneCloseCalls) != 0 || len(f.h.workspaceCloseCalls) != 0 {
 				t.Fatalf("C-c %v, pane closes %v, workspace closes %v, want none", f.h.sendKeysCalls, f.h.paneCloseCalls, f.h.workspaceCloseCalls)
 			}
