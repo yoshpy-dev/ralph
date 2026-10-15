@@ -87,3 +87,102 @@
 - Verified: AC1〜AC14 と D3、FR-3 の文がコードとテストのコードに対応している。self-review の M1・L1〜L6 と dbd67a58 の直し。静的解析(run-static-verify、gofmt、go vet、go1.25.8 の build・vet・gofmt、`git diff --check`、skill の 4 面)。隔離した herdr server での実機: codex と claude の start、label と agent 名、`director.jsonl` のイベント、`ralph status` と `director status` の行、stop で pane と workspace が閉じること、L7 の 9 つの拒否、id の振り直しのあとの label の違いでの拒否と `--force`、agent start の失敗の後始末、`stop --all` の note
 - Partially verified: AC7(印が古い場合)、AC10(`starting`)、AC13(テストの側はコードを読んだ範囲)
 - Not verified: テストの実行、claude の director が雛形を読んで動くこと、新しい `ralph` を PATH に持つ codex の director の 2 手目以降、`~/.codex/config.toml` の変更の中身
+
+## Cycle 2
+
+- Date: 2026-10-15
+- Verifier: verifier subagent (Claude)。パイプラインの 2 回目(`.harness/state/standard-pipeline/cycle-count.json` の cycle は 2 で、既定の上限 2 の最後)。cross-review cycle 1 の ACTION_REQUIRED 1 件(`docs/reports/cross-review-triage-org-director-start.md`)の直し 3243c499、/test の穴 D4・E1・E12/E13・P2 のテスト 4ef33195、self-review cycle 2(391b8b80、CRITICAL 0・HIGH 0・MEDIUM 0・LOW 5、Merge: yes)の C2-L1〜C2-L4 の直し a539a765 のあとに走らせた
+- Scope: `git diff origin/main...HEAD`(merge base f21df66c、HEAD a539a765)のうち、cycle 2 の差分 `git diff 54cab8a2..HEAD`(15 ファイル、+526/-55。Go は `internal/org/prompts.go`・`prompts/director.md`・`director_start.go`・`internal/cli/org_director_headless.go` とそのテスト)を中心に読んだ。cycle 1 の verify(ec70c739)から 54cab8a2 までの ca98c248(AC7 の印が古い見張りのテスト)、b6c86188(計画の字数)、1cdddbbb(origin/main の merge)、e80ccafe(sync-docs)、e683ee47(AC の tick)も、cycle 1 の指摘が閉じたかを見る範囲で読んだ。テストは走らせていない(/test の担当)。この節の行番号は HEAD a539a765 のもの。上の cycle 1 の節の行番号は dbd67a58 のまま
+- Plan: `Status: Approved`。`./scripts/plan-visual.sh digest` は f65d7c59746c で、`- Approved:` の digest と同じ。Scope の `--config` の 1 文(46 行)と AC11 は cycle 2 のために足された
+- Evidence: `docs/evidence/verify-2026-10-15-org-director-start.md` の `## Cycle 2 (HEAD a539a765)`。C2-1 は run-static-verify の出力、C2-2 は Go と同期の検査、C2-3 は HEAD の binary と偽の herdr で `--config` ありとなしの start を 1 回ずつ打った probe(雛形のファイル 2 つの全文)、C2-4 は cross-review の場面を HEAD と直す前の 54cab8a2 の binary で並べた probe、C2-5 は `ralph status` の `director:` の行、C2-6 は help、C2-7 は後片付け。wrapper の全ログは `docs/evidence/verify-2026-10-15-122004.log`、生の出力は `docs/evidence/verify-2026-10-15-org-director-start.log` の末尾(どちらも gitignore の対象)
+- Insight event: `./scripts/insights-append.sh --slug org-director-start --flow standard --phase verify --verdict pass --cycle auto --source skill` で 1 行足し、この報告と同じコミットに入れた。findings はすべて 0(下の情報 5 件は数えない)
+
+### cycle 2 の直しの確かめ
+
+| 変更 | Status | Evidence |
+| --- | --- | --- |
+| cross-review #1: `--config` を絶対パスにして雛形に入れ、director が打つ `ralph org` のコマンドに付ける(3243c499) | 満たす(binary でも確認) | CLI の `startDirector`(`internal/cli/org_director_headless.go:168`)が `ConfigPath: configPath` を `StartDirector` に渡す(`:199`)。`checkDirectorStart`(`internal/org/director_start.go:516`)が state dir と cwd のあとで `absPath` にし(`:555-559`)、`writePrompt` が `RenderDirectorPrompt` に渡す(`:617`)。`RenderDirectorPrompt`(`internal/org/prompts.go:155`)は絶対でない値を断り(`:165`)、`{{ORG_FLAGS}}` を `--state-dir <台帳>`、設定があればそのあとに `--config <path>`(どちらも `shellQuote` の 1 語)で描く(`:172-186`)。雛形で `{{ORG_FLAGS}}` を使うのは 13・30・33 行。テスト(読んだだけ): `TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig`(`prompts_test.go:1583`。空白と単引用符を含むパス、ありとなしの 2 通り、`ralph org` の言及の数とコードの中の数の一致)、`TestRenderDirectorPrompt_RefusesBadVarsAndLeftoverPlaceholders` の 2 行(`:1640`。相対のパス、`{{` を含むパス)、`TestStartDirector_CarriesTheConfigIntoThePrompt`(`director_start_test.go:288`。相対のパスが呼んだ側の場所で絶対になる)、CLI の `TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml` の `--config` の行(`org_director_headless_test.go:447`。linked worktree で打ち、director は main のルートで動く)。binary: C2-3 の R1 で相対の `cfg/ralph.toml` が雛形に `'$PROBE/work/cfg/ralph.toml'` として入り、雛形の最初のコマンドをそのまま打つと `attached d1`。C2-4 で、`./ralph.toml` が `enabled = false`、`--config` の設定が true のとき、54cab8a2 の director の最初のコマンドは `director: disabled` を返し(雛形の手順では何もせず止まる)、HEAD は `attached d1`・`enabled: true` を返した |
+| 人に頼む stop の行は `--state-dir` だけ(C2-L1) | 満たす(binary でも確認) | 雛形の 51 行は `--state-dir {{STATE_DIR}}` だけを持ち、33〜36 行は「あなたが打つ `ralph org` のコマンド」に `{{ORG_FLAGS}}`、`ralph status` と stop には `--state-dir` だけと書く。help(`org_director_headless.go:59-62`)、`startDirector` の doc(`:155-167`)、`DirectorPromptVars`・`RenderDirectorPrompt` の doc(`prompts.go:111-154`)も同じ区別を書く。`director stop` は ralph.toml を読まない(`newOrgDirectorRuntime` を `loadConfig` false で呼ぶ、`org_director_headless.go:141`)。テストは prompt・org・CLI の 3 層で stop の行の末尾が `--state-dir` だけであることを見る。binary: R1 と R2 の 51 行はどちらも `ralph org director stop --id dN --state-dir '$PROBE/state'` で、そのまま打って `stopped dN (ctrl_c=ok, pane=closed, workspace=closed)`。start が stdout に出す stop の行とも同じ形 |
+| `--config` がなければ `--config` を書かない(AC11 の後半) | 満たす(binary でも確認) | 設定の行は `directorPromptNoConfigText`(`prompts.go:136`)で、`--config` の字を含まない。R2 の雛形で `grep -c -- --config` は 0。R1 との差は id、設定の行、`--config` を持つ 3 行だけ(C2-3 の diff) |
+| `{{CONFIG}}` を `{{CONFIG_LINE}}` に改名(C2-L2) | 満たす | 雛形(5 行)と `prompts.go`(`:129`、`:145`、`:184`)だけが使い、`{{CONFIG}}` は `internal/`、skill の 4 面、README に残っていない。計画の Progress の 188 行は 3243c499 の時点の名前 `{{CONFIG}}` を書いている(下の C2-V1) |
+| skill の「始める」の 1 と 3(C2-L3) | 満たす | `.claude/skills/director/SKILL.md:149-153` は最初のコマンドを `--config` ありとなしの 2 形で書き、`:159-164` は目印を「`- 設定:` の行が `(start の --config)` で終わっていれば」と名指す。R1 の雛形の 5 行は `'<絶対パス>'(start の --config)` で終わり、R2 の 5 行はその目印を持たないので、skill の文で見分けられる。4 面の md5 は dbe32a18b8b46c47b44657c4e2443cfe で同じ |
+| テストのコメントの報告番号(C2-L4) | 満たす | branch の Go の追加行に「finding N」「cross-review cycle」「/test gap」「mutant X1」「gap N」はない(C2-2 の grep が exit 1) |
+| /test の穴 D4・E1・E12/E13・P2 のテスト(4ef33195) | 満たす(テストのコードで確認) | D4: `TestStartDirector_RefusesBeforeWritingOrCallingHerdr` の「director.jsonl unreadable」の行(`director_start_test.go:454`。`director.jsonl` を directory にし、gate を呼ばずに EISDIR で断る)。E1: `TestStartDirector_AFailedWriteOfAttachedCallsNoHerdr`(`:655`。最初の write の ENOSPC で herdr の呼び出しが 0、`prompts/` もない)。E12/E13: `TestStartDirector_AFailedCreatesOutputIsNotAnID`(`:614`。失敗した create が出力も返す偽の herdr、`failedCreateOutput`、`:22-50`)。P2: `TestOrgDirectorStart_AnAttachedRefusalWithNoCurrentNamesStatus`(`org_director_headless_test.go:377`。`startAttachedError` の `cur == nil` の文を `--state-dir` ありとなしで等号で比べる)。赤くなるかは /test の担当 |
+| tech-debt の行を A12〜A14 の注に縮めた(4ef33195) | 満たす | `docs/tech-debt/README.md:256` は 5 列。挙げた seat のテスト `TestOrgStopDisband_UnansweredGet_LeavesItAlone`(`internal/org/verbs_test.go:2436`)と `TestOrgStop_PaneNotConfirmed_NoCtrlCNoClose`(`:2305`)は HEAD にあり、test の evidence の 949〜954 行(A12〜A14 の `-orgfull` が red、`-clifull` が SURVIVED)と合う |
+| cycle 1 の V1〜V6 | 直った | V1: `/org` skill の動詞の一覧(58〜59 行)に `director start`・`director stop`、`director` の行(187 行)に headless の director。V2: `ralph-workflow.md:31-32` に `ralph org director start` と `director stop`(root と template は check-sync で同じ)。V3: `templates/base/ralph.toml:105-108` は guarded の director が agent 自身の承認の設定に従うと書く。V4: b6c86188 で計画の字数を 27 に。V5: e80ccafe で tech-debt の版の違いの行に測った結果。V6: e683ee47 で AC と Progress の checkbox |
+| AC7 の印が古い見張り(cycle 1 の一部未確認) | 満たす(テストのコードで確認) | ca98c248 が `TestOrgDirectorStart_WatchGate` に「stale with an old mark」の行を足した(`org_director_headless_test.go:556`)。cycle 1 の Coverage gaps で勧めた形 |
+
+### AC の確かめ直し(HEAD a539a765)
+
+cycle 2 の Go の差分は、雛形の描き方(`--config` の運び方、設定の行、stop の行)、`DirectorStartParams.ConfigPath` の絶対化、CLI の受け渡しと help、テストだけだった。登録・停止・表示・permission・見張りの関門の本体のコードは変わっていない(`git diff --stat 54cab8a2..HEAD -- '*.go'` は上の 4 ファイルとそのテスト)。
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | 満たす(binary でも確認) | C2-3 の R1・R2 の `director.jsonl` は attached(launch・token・model・permission_mode)→ workspace_created → pane_created → launched の順。偽の herdr の記録では label が `ralph_director_<token>` と `director_<token>`、agent start は `--` のあとに permission の引数(guarded はなし、edits は `--permission-mode acceptEdits`)、`--model haiku`、雛形を指す 1 文の順。4 つの台帳に `manifest.jsonl` も `model-receipts.jsonl` もない |
+| AC2 | 満たす(テストのコードで確認) | 拒否の経路は変わっていない。D4 と P2 のテストが、読めない `director.jsonl` と `cur == nil` の案内の 2 つの穴を埋めた。binary での拒否は cycle 1 の L7 のまま |
+| AC3 | 満たす(テストのコードで確認) | E1 と E12/E13 のテストが、attached の write の失敗と、失敗した create の出力を id として使わないことを固定した。後始末の本体は変わっていない |
+| AC4 | 満たす(binary でも確認) | 雛形の最初の手順は `ralph org director status {{ORG_FLAGS}}` になり、`--state-dir <台帳>` を含む(`--config` があればそのあとに続く)。違う `id` と `not attached` で何もしない文は 16〜19 行のまま。R1・R2 でそのコマンドを書かれたまま打つと、自分の `dN` が今の登録として出た。`launched` の前の `--replace` の経路は変わっていない |
+| AC5 | 満たす(cycle 1 のまま) | `director_stop.go` と `confirmSeatPane`・`confirmOrgWorkspace` は差分の外。R1・R2・R3・R4 の 5 回の start の token はどれも違う |
+| AC6 | 満たす(binary でも確認) | R1 は `--config cfg/ralph.toml` の `roles.director = "guarded"` を、R2 は `./ralph.toml` の `"edits"` を読み、`permission=` と agent start の引数がそれぞれ合った。main worktree の `ralph.toml` を読む規則は差分の外で、CLI のテストは `--config` の行を足しただけ |
+| AC7 | 満たす(テストのコードで確認) | 印が古い場合は ca98c248 のテストで固定された。R1・R3・R4 では見張りがなく、start が起動した(`started the cross-org watch`)。R2 は R1 の見張りを使った |
+| AC8 | 満たす(binary でも確認) | 雛形の stop の行をそのまま打つと、偽の herdr の label の確かめ(pane get、tab get、workspace get)、C-c、pane と workspace の close のあと `detached` と `stopped` が書かれ、`the director is no longer attached`(R1・R2) |
+| AC9 | 満たす(cycle 1 のまま) | stop の拒否の経路は差分の外 |
+| AC10 | 満たす(`starting` は実機で見ていない) | `orgDirectorLine` と `status.go` は差分の外。R1・R2 の `director status` は `headless running`、pane、workspace、model を出した |
+| AC11 | 満たす(binary でも確認) | spawn の `--role director` の拒否は差分の外。`RenderDirectorPrompt` は `{{` の残りを断る検査を保ち、R1・R2 の雛形にも残っていない。`/director` skill、`--state-dir`、最初の登録の確かめ、stop の頼み方、detach を打たないことの文はどちらの雛形にもある。足された文: `--config` を渡した start の雛形は director が打つ `ralph org` のコマンドに `--config '<絶対パス>'` を付け(R1 の 13・30・33 行)、渡さない start の雛形は `--config` を書かない(R2)。人に頼む stop の行は `--config` を持たない。AC の文の「`ralph org` のコマンド」は、Scope の 46 行の「director が打つ `ralph org` のコマンド」の短い言い方として読んだ(下の C2-V2) |
+| AC12 | 満たす | skill の 4 面は同じ(md5 dbe32a18b8b46c47b44657c4e2443cfe)、`check-skill-sync.sh`(14 skill)と `check-sync.sh`(DRIFTED 0)が通る。「not available yet」「start はまだ」「headless の director はまだ」は、ないことを確かめるテストと計画の文にだけある。`--config` の文の文書ごとの扱いは下の「文書のずれ(cycle 2)」 |
+| AC13 | 満たす(テストの側はコードを読んだ範囲) | 新しいテストは `newDirStartFixture` の偽の herdr と `t.TempDir` の台帳を使う。binary の probe は `env -i` と、ralph・git・偽の herdr だけの PATH で打ち、本物の herdr と osascript は見つからない。repo と worktree の `.harness/state/org` はない |
+| AC14 | 満たす(cycle 1 のまま) | `--force` の経路は差分の外 |
+
+FR-3、FR-9 の起動 (B) の herdr の部分、受け入れ条件「director start」の判定は cycle 1 のまま。cycle 2 の直しで、`--config` で渡した設定を director も読むようになった。
+
+### 静的解析(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc 0) | local verifier の全項目が OK(shellcheck、hook の `sh -n`、guard の awk、settings.json の jq、Codex の 3 つの guard、check-sync、check-pipeline-sync、check-skill-sync、check-template-purity、tech-debt の計画の参照)、`gofmt: ok`、golangci-lint `0 issues.`、`secret-scan-branch: scanned f21df66c..a539a765 against origin/main: clean`。`templates/base/ralph.toml` の変更で言語の範囲は full に広がった |
+| `gofmt -l ./cmd ./internal`、`go vet ./...`(go1.26.0) | pass | 出力なし |
+| `GOTOOLCHAIN=go1.25.8 go build ./...` と `go vet ./...` | pass | go.mod は `go 1.25.8`。go1.25.8 の GOROOT の `gofmt -l ./cmd ./internal` も出力なし |
+| `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` | pass | 14 skill が lock-step。IDENTICAL 169、DRIFTED 0、KNOWN_DIFF 5 |
+| `git diff --check origin/main...HEAD` と `git diff --check 54cab8a2..HEAD` | pass | 出力なし |
+| 計画の digest | 一致 | f65d7c59746c |
+
+### 文書のずれ(cycle 2)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| `ralph org director start --help`(`org_director_headless.go:59-62`) | yes | 「With --config, the ralph org commands the director's prompt has it run carry --config with that file's absolute path ... (the prompt's stop command, for the human, carries none: stop reads no ralph.toml)」は R1・R2 の雛形と合う(C2-6) |
+| `/director` skill の 4 面(「始める」の 1 と 3) | yes | 最初のコマンドの 2 形、`(start の --config)` の目印、`ralph status` には `--config` がないことは、R1・R2 の雛形と `status.go:105-107` の flag と合う |
+| 雛形 `director.md` と `prompts.go`・`director_start.go`・`startDirector` の doc | yes | `{{ORG_FLAGS}}` と `{{CONFIG_LINE}}` の中身、stop の行の扱い、絶対化の場所の説明はコードと合う |
+| README の director の段落(258 行)、仕様の 8a-2 の注(`docs/specs/2026-10-07-org-multi-org-director.md:85`) | yes(情報 C2-V3) | どちらも `--config` が雛形に入ることを書かないが、誤ったことも書かない |
+| 計画の Progress checklist | 一部遅れ(情報 C2-V1) | 下の表 |
+
+| ID | Severity | Where | Finding |
+| --- | --- | --- | --- |
+| C2-V1 | INFO | 計画の `## Progress checklist`(188 行) | cycle 2 の行は 3243c499 を「`{{ORG_FLAGS}}` と `{{CONFIG}}` で」と書くが、a539a765 で `{{CONFIG_LINE}}` に改名された。a539a765(self-review cycle 2 の C2-L1〜C2-L4 の直し)の行もない。3243c499 の時点の記録としては正しい。オーケストレーターが更新する欄なので失敗とはしない |
+| C2-V2 | INFO | 計画の AC11 と Scope の 46 行 | AC11 は「`ralph org` のコマンドに `--config <絶対パス>` を付け」と書き、Scope は「director が打つ `ralph org` のコマンド」と書く。雛形の stop の行は人が打つ `ralph org` のコマンドで、`--config` を持たない(stop は ralph.toml を読まないので、C2-L1 で外した)。実装は Scope の言い方どおりで、AC の文は同じ意味の短い言い方と読んだ。ずれではない |
+| C2-V3 | INFO | README:258、仕様の 8a-2 の注(85 行)、`/org` skill の `director` の行(187 行) | `--config` で渡した start の設定を director の雛形に入れることを書かない。help と `/director` skill が書いており、3 つの文はどれも誤りを言わない。次にこの段落に触れるときに 1 句足すとよい |
+| C2-V4 | INFO | `/director` skill の「始める」の 3 | `ralph status` には `--config` がないので、`--config` の設定と repo の `ralph.toml` で `[org.director].enabled` が違うと、`ralph status --state-dir` の `director:` の行は `disabled` を出し、director が自分で打つ `director status --config` は `attached`・`enabled: true` を出す(C2-5)。leader の `ralph org escalate` も `--config` なしで repo の `ralph.toml` を読むので、届き方については `ralph status` の行のほうが合っている。`--config` がコマンドごとの指定であることから来る形で、AC11 の外。skill はこの食い違いを書かない |
+| C2-V5 | INFO | `internal/org/prompts_test.go:1583` | テストの名前 `TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig` の「Every」は、C2-L1 で stop の行が `--config` を持たなくなったあとでは言い過ぎになった。doc comment は「every ralph org command the template has the director run」と範囲を書いており、テストの中身は stop の行に `--state-dir` だけを求める |
+
+### 観察
+
+- C2-3〜C2-5 の probe は、HEAD の binary を ralph・git・偽の herdr だけの PATH と `env -i` で打った。偽の herdr は herdr の server に触れず、呼び出しを記録し、label をファイルに持つ。本物の herdr、claude、codex、osascript は動いていない。台帳と cwd は scratch で、cwd は git の repo の外なので、director は start を打った場所で動く(雛形の `- cwd:` の行)
+- 雛形の最初のコマンドと stop の行は、雛形のファイルから行をそのまま取り、pane のシェルと同じく `/bin/sh -c` で打った。director が雛形を読んで打つコマンドの形は binary で確かめたが、agent が雛形を読んでそのとおりに打つかは見ていない
+- 直す前の binary は `git archive 54cab8a2` から scratch に作った。C2-4 の違いは雛形の 2 行(設定の行と `--config`)と最初のコマンドの答えだけで、start の出力と permission は同じ
+- start が起動した見張り 4 つは `ralph org watch --stop` で止め、あとの `pgrep` は空だった。偽の herdr の workspace と pane は stop がすべて閉じた
+
+### Coverage gaps(cycle 2)
+
+- テストの実行(/test の担当)。cycle 2 で足されたテスト(AC11 の 3 層、D4、E1、E12/E13、P2)を go1.26 と `GOTOOLCHAIN=go1.25.8` で走らせるのは /test
+- 本物の herdr と agent の上で、claude か codex の director が `--config` 付きの雛形を読み、最初のコマンドをそのまま打つところは見ていない(cycle 1 と同じく、claude はテーマ選択で止まり、codex は古い `ralph` を見つけた)
+- `--config` の設定と repo の `ralph.toml` が食い違うときの `ralph status` の行(C2-V4)を、skill か help に書くかは決まっていない
+- cwd が symlink 経由で `--config` に `..` があるときの、start が読むファイルと雛形のパスの一致(self-review cycle 2 の Coverage gaps と同じ)
+- 足すと確信がいちばん増える確認: cycle 1 の隔離した herdr server で、`CLAUDE_CONFIG_DIR` を初回の画面を済ませた一時の場所にし、PATH の先頭に HEAD の `ralph` を置いて、`--config` 付きの claude の director が最初のコマンドを打って `attached` を読むところを 1 回見る
+
+### Verdict(cycle 2)
+
+- Verdict: pass(cycle 2、HEAD a539a765。情報 5 件はどれも merge を止めない)
+- Verified: cross-review #1 の直し(`--config` の絶対化、雛形への受け渡し、director が打つ `ralph org` のコマンドへの付け方、`--config` がないときに書かないこと)を、コードとテストの名前で辿り、HEAD の binary と偽の herdr で `--config` ありとなしの start を打って雛形のファイル 2 つを読み、最初のコマンドと stop の行を書かれたまま打って確かめた。直す前の 54cab8a2 の binary で cross-review の場面が再現し、HEAD で起きないことを確かめた。self-review cycle 2 の C2-L1〜C2-L4、/test の穴 4 つのテスト、tech-debt の行、cycle 1 の V1〜V6、AC7 の印が古い場合のテストを辿った。AC1・AC4・AC6・AC8・AC10・AC11 は binary でも見た。静的解析はすべて通った(run-static-verify、gofmt、go vet、go1.25.8 の build・vet・gofmt、skill と template の同期、`git diff --check`)。計画の digest は承認時と同じ
+- Partially verified: AC10(`starting` は実機で見ていない)、AC13(テストの側はコードを読んだ範囲)
+- Not verified: テストの実行、本物の agent が `--config` 付きの雛形のとおりに打つこと、symlink 経由の cwd での `--config` の `..`
+- Findings: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。情報は 5 つ(C2-V1〜C2-V5)

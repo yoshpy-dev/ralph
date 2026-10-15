@@ -728,3 +728,658 @@ pgrep -fl 'herdr server' after:
 - The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists.
 - Left outside the scratch directory by the agents: the codex session record named in L3, and `~/.codex/config.toml`, whose modification time changed to 17:51 JST, the time the codex director started (it was 14 Oct 20:53 before). It holds no scratch path; what codex changed was not captured (no copy was taken before the run; likely the `[tui.model_availability_nux]` counter, which reads `gpt-6-astra = 4`, unconfirmed). It was not restored. claude ran with `CLAUDE_CONFIG_DIR` in `/tmp/rdst`: `~/.claude.json` has no project entry for the scratch cwd and `~/.claude/projects/` no directory for it.
 - The scratch ledgers and the HEAD binary stay in the session scratch directory.
+
+## Cycle 2 (HEAD a539a765)
+
+- Date: 2026-10-15 (UTC timestamps in the output read 2026-10-15T12:xx; JST is UTC+9)
+- Worktree: ~/MyDev/github.com/yoshpy-dev/ralph/.claude/worktrees/org-director-start, HEAD a539a765. origin/main f21df66c is merged in at 1cdddbbb, so the branch diff is `git diff origin/main...HEAD` (merge base f21df66c)
+- Redaction: as above. The probe directory `$SCRATCH/c2probe` is `$PROBE`. The probe ran every ralph command with `USER=probe`, so `probe` in the output is that value, not a login name. The full wrapper log is `docs/evidence/verify-2026-10-15-122004.log`, and the raw outputs of this section are appended to `docs/evidence/verify-2026-10-15-org-director-start.log` under `===== Cycle 2 (HEAD a539a765)` (both gitignored, not committed).
+
+### C2-1. ./scripts/run-static-verify.sh (changed scope)
+
+```text
+# Verification run
+- Timestamp: 2026-10-15T12:20:04Z
+- Mode: static
+- Requested scope: changed
+
+==> Running local verifier
+==> shellcheck hook + verify scripts
+    OK
+==> sh -n .claude/hooks/check_mojibake.sh
+    OK
+==> sh -n .claude/hooks/lib_json.sh
+    OK
+==> sh -n .claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n .claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n .claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n .claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n .claude/hooks/prompt_gate.sh
+    OK
+==> sh -n .claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n .claude/hooks/session_end_summary.sh
+    OK
+==> sh -n .claude/hooks/session_start_context.sh
+    OK
+==> sh -n templates/base/.claude/hooks/check_mojibake.sh
+    OK
+==> sh -n templates/base/.claude/hooks/lib_json.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_edit_verify.sh
+    OK
+==> sh -n templates/base/.claude/hooks/post_tool_failure_feedback.sh
+    OK
+==> sh -n templates/base/.claude/hooks/pre_bash_guard.sh
+    OK
+==> sh -n templates/base/.claude/hooks/precompact_checkpoint.sh
+    OK
+==> sh -n templates/base/.claude/hooks/prompt_gate.sh
+    OK
+==> sh -n templates/base/.claude/hooks/ralph-dispatch.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_end_summary.sh
+    OK
+==> sh -n templates/base/.claude/hooks/session_start_context.sh
+    OK
+==> awk parse of the guard in .claude/hooks
+    OK
+==> awk parse of the guard in templates/base/.claude/hooks
+    OK
+==> jq -e . .claude/settings.json
+[note: the settings.json dump of jq -e . is elided]
+    OK
+==> jq -e . templates/base/.claude/settings.json
+[note: the settings.json dump of jq -e . is elided]
+    OK
+==> Codex hook single-source guard
+    OK
+==> Codex inline hook detector smoke test
+    OK
+==> Codex PR provenance policy guard
+    OK
+==> scripts/check-sync.sh
+=== Checking templates/base/ <-> root ===
+  TEMPLATE_ONLY  .agents/skills/.gitkeep
+  KNOWN_DIFF     .claude/rules/ralph/model-routing.md
+  KNOWN_DIFF     .github/workflows/verify.yml
+  TEMPLATE_ONLY  .ralph/core/settings.ralph.json
+  KNOWN_DIFF     CLAUDE.md
+  TEMPLATE_ONLY  docs/architecture/.gitkeep
+  TEMPLATE_ONLY  docs/evidence/.gitkeep
+  KNOWN_DIFF     docs/quality/quality-gates.md
+  TEMPLATE_ONLY  docs/recipes/.gitkeep
+  KNOWN_DIFF     docs/recipes/adding-a-language-pack.md
+  TEMPLATE_ONLY  docs/references/.gitkeep
+  TEMPLATE_ONLY  docs/reports/.gitkeep
+  TEMPLATE_ONLY  docs/research/.gitkeep
+  TEMPLATE_ONLY  docs/roadmap/.gitkeep
+  TEMPLATE_ONLY  docs/tech-debt/.gitkeep
+  TEMPLATE_ONLY  ralph.toml
+
+=== Checking AGENTS.md managed block ===
+
+=== Checking templates/packs/ <-> packs/languages/ ===
+
+=== Checking for root-only files not in templates/base/ ===
+
+=== Checking for packs/languages/ files not in templates/packs/ ===
+
+=== Sync Summary ===
+  IDENTICAL:      169
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+    OK
+==> scripts/check-pipeline-sync.sh
+[ok] Canonical source valid
+[ok] .claude/skills/implement/SKILL.md: all pipeline steps referenced
+[ok] .claude/skills/cross-review/SKILL.md: all pipeline steps referenced
+[ok] .claude/rules/ralph/subagent-policy.md: all pipeline steps referenced
+[ok] docs/quality/definition-of-done.md: all pipeline steps referenced
+[ok] README.md: all pipeline steps referenced
+[ok] AGENTS.md: all pipeline steps referenced
+    OK
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+    OK
+==> scripts/check-template-purity.sh
+=== Checking templates for meta-repo-specific references ===
+
+PASS: no meta-repo-specific references found in templates.
+    OK
+==> tech-debt README plan references
+    OK
+==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned f21df66c..a539a765 against origin/main: clean
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-15-122004.log
+rc=0
+```
+
+### C2-2. Go and sync checks
+
+```text
+$ gofmt -l ./cmd ./internal
+rc=0
+$ go vet ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go version
+go version go1.25.8 darwin/arm64
+$ GOTOOLCHAIN=go1.25.8 go build ./...
+rc=0
+$ GOTOOLCHAIN=go1.25.8 go vet ./...
+rc=0
+$ $(GOTOOLCHAIN=go1.25.8 go env GOROOT)/bin/gofmt -l ./cmd ./internal
+[note: GOROOT is ~/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.8.darwin-arm64]
+rc=0
+$ ./scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+rc=0
+$ ./scripts/check-sync.sh | tail -6
+  DRIFTED:        0
+  ROOT_ONLY:      0
+  TEMPLATE_ONLY:  11
+  KNOWN_DIFF:     5
+
+PASS: all files in sync.
+$ git diff --check origin/main...HEAD
+rc=0
+$ git diff --check 54cab8a2..HEAD
+rc=0
+$ ./scripts/plan-visual.sh digest docs/plans/active/2026-10-15-org-director-start.md
+f65d7c59746c
+$ md5 -q .claude/skills/director/SKILL.md .agents/skills/director/SKILL.md templates/base/.claude/skills/director/SKILL.md templates/base/.agents/skills/director/SKILL.md
+dbe32a18b8b46c47b44657c4e2443cfe
+dbe32a18b8b46c47b44657c4e2443cfe
+dbe32a18b8b46c47b44657c4e2443cfe
+dbe32a18b8b46c47b44657c4e2443cfe
+$ git diff origin/main...HEAD -- '*.go' | grep '^+' | grep -i 'finding [0-9]\|cross-review cycle\|/test gap\|mutant [A-Z][0-9]\|gap [0-9]'
+[grep exit 1]
+$ grep -rn 'every ralph org command' internal/ | grep -v _test
+[grep exit 1]
+```
+
+go1.26.0 is the local toolchain; go.mod says `go 1.25.8`. Every `-l` printed no file name. The two greps are the residue checks of the self-review's C2-L4 (report numbers in Go comments) and C2-L1 (the "every ralph org command" wording outside the tests).
+
+### C2-3. HEAD binary probe: the prompt file with and without a relative --config
+
+Setup:
+
+- HEAD binary: `go build -o $PROBE/bin/ralph ./cmd/ralph` from the clean worktree at a539a765. `$PROBE/bin` holds only that binary, a symlink to git, and a stub `herdr` (a POSIX sh script that logs every call to `$PROBE/hstate/calls.log`, keeps the workspace and tab labels in files there, and answers in the JSON envelope shapes of `internal/org/driver/herdr.go`: `workspace create` gives `w<N>`, `tab create` gives `w<N>:p1` in tab `w<N>:t1`, `agent start` and `send-keys` answer ok, the gets answer the stored labels, and `pane close` and `workspace close` delete them; an unknown id answers a `*_not_found` envelope with exit 1). The stub never talks to a herdr server.
+- Every ralph command ran under `env -i HOME=$PROBE/home USER=probe LOGNAME=probe PATH=$PROBE/bin TMPDIR=$PROBE/tmp/ LANG=en_US.UTF-8`, so no osascript, real herdr, agmsg, claude, or codex could be found, `HERDR_PANE_ID` and `HERDR_WORKSPACE_ID` were unset, and nothing read the user's home. The cwd was `$PROBE/work`, which is not in a git repo, so the ledger is not a main worktree's and the director runs where start ran.
+- `$PROBE/work/cfg/ralph.toml` (the relative `--config cfg/ralph.toml`) and `$PROBE/work/ralph.toml` (read without `--config`) differ only in `[org.permissions.roles].director`, so the `permission=` field shows which file start read:
+
+```toml
+[org]
+driver_pool = ["claude"]
+model_pool = [
+  { driver = "claude", model = "haiku" },
+]
+
+[org.permissions]
+default = "autonomous"
+
+[org.permissions.roles]
+director = "guarded"   # $PROBE/work/ralph.toml: "edits"
+
+[org.director]
+enabled = true
+```
+
+- Before: `ls -A $PROBE/state` printed nothing (an empty scratch ledger). `pgrep -fl herdr` printed nothing (exit 1).
+- The probe ran the prompt's first command and its stop command by taking the lines as written from the prompt file (`grep -m1 '^ralph org director status'` and the indented `ralph org director stop` line) and running them with `/bin/sh -c` in the prompt's `- cwd:` directory, as a pane shell would.
+
+#### R1. director start --driver claude --model haiku with --config cfg/ralph.toml
+
+````text
+$ (cd $PROBE/work && ralph org director start --driver claude --model haiku --state-dir $PROBE/state --config cfg/ralph.toml)
+ralph org director start: started the cross-org watch (pid 73368); log: $PROBE/state/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w1:p1, workspace=w1)
+talk to the director in herdr: pane w1:p1, in the tab director_53b0807f6b30 of the workspace labelled ralph_director_53b0807f6b30
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state'
+[exit 0]
+
+$ ls $PROBE/state/prompts
+director_53b0807f6b30.md
+
+$ cat $PROBE/state/prompts/director_53b0807f6b30.md
+# 役割: director(headless)
+
+- id: d1 / driver: claude
+- 台帳: '$PROBE/state'
+- 設定: '$PROBE/work/cfg/ralph.toml'(start の --config)
+- cwd: $PROBE/work
+
+## 最初の手順
+
+ほかの何よりも先に、次のコマンドを打つ。
+
+```sh
+ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'
+```
+
+今の登録の `id` が `d1` であることを確かめてから動く。`id` が `d1` と
+違うとき、または登録がなく `not attached` と出たときは、ほかに何もしない
+(受信箱の ack と resolve、leader への send、start をしない)。そのことを
+この pane に書いて止まる。detach も打たない。
+
+## ミッション
+
+あなたは `ralph org director start` が立てた headless の director です。
+登録(台帳の `director.jsonl` の `d1`)は start が済ませています。人と
+機能ごとの org の間に立ち、手順の全体は `/director` skill に従ってください。
+
+- skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
+  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+  済ませたので、打たない。
+- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` で
+  今の登録を読み直す手順は守る。`id` が `d1` でなくなっていたら、
+  director として動くのをやめ、そのことをこの pane に書く。
+- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` を付ける。
+  `ralph status` には `--state-dir '$PROBE/state'` だけを付ける。cwd が
+  どこでも、この台帳と、start が読んだ設定を使うため。終わりに人に頼む
+  stop は ralph.toml を読まないので、`--state-dir '$PROBE/state'` だけを持つ。
+- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
+- 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
+  こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準
+  フロー(`/plan` → `/implement`)に任せる。
+
+## 終わり
+
+- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+  detach は登録を外すだけで、この pane と workspace は開いたまま残る。
+- 終えるときは、open か acked の件が残っていれば人に伝え、人に、herdr の外の
+  端末から次のコマンドを打つよう頼む。stop がこの pane と workspace を閉じ、
+  止めたことを台帳に記録する。
+
+  ```sh
+  ralph org director stop --id d1 --state-dir '$PROBE/state'
+  ```
+
+- stop は自分で打たない。この pane の中からは断られる(pane を閉じると、
+  打ったセッションが終わって記録を書けないため)。
+[end of $PROBE/state/prompts/director_53b0807f6b30.md]
+
+$ grep -n 'ralph org' $PROBE/state/prompts/director_53b0807f6b30.md
+13:ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'
+23:あなたは `ralph org director start` が立てた headless の director です。
+28:  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+30:- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` で
+33:- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` を付ける。
+44:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+51:  ralph org director stop --id d1 --state-dir '$PROBE/state'
+
+[note: the prompt's first command, run as written from its cwd]
+$ (cd $PROBE/work && ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml')
+director: attached d1 (driver=claude, headless running, model=haiku, pane w1:p1, workspace w1, attached at 2026-10-15T12:23:48Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d1
+driver: claude
+wake: pull
+attached_at: 2026-10-15T12:23:48Z
+user: probe
+cwd: $PROBE/work
+herdr_pane: no
+launch: herdr
+state: running
+model: haiku
+permission_mode: guarded
+token: 53b0807f6b30
+workspace_id: w1
+pane_id: w1:p1
+[exit 0]
+
+[note: the prompt's stop command, run as written]
+$ (cd $PROBE/work && ralph org director stop --id d1 --state-dir '$PROBE/state')
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+````
+
+The relative `cfg/ralph.toml` reached the prompt as `'$PROBE/work/cfg/ralph.toml'`, absolute and one shell word. The two status commands the director runs carry `--state-dir` then `--config`; the stop line (line 51) and the `ralph status` instruction carry `--state-dir` only. `permission=guarded` is the `--config` file's value.
+
+#### R2. director start --driver claude --model haiku without --config
+
+````text
+$ (cd $PROBE/work && ralph org director start --driver claude --model haiku --state-dir $PROBE/state)
+started d2 (driver=claude, model=haiku, permission=edits, pane=w2:p1, workspace=w2)
+talk to the director in herdr: pane w2:p1, in the tab director_dbac7302f192 of the workspace labelled ralph_director_dbac7302f192
+stop it with: ralph org director stop --id d2 --state-dir '$PROBE/state'
+[exit 0]
+
+$ ls $PROBE/state/prompts
+director_53b0807f6b30.md
+director_dbac7302f192.md
+
+$ cat $PROBE/state/prompts/director_dbac7302f192.md
+# 役割: director(headless)
+
+- id: d2 / driver: claude
+- 台帳: '$PROBE/state'
+- 設定: main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)
+- cwd: $PROBE/work
+
+## 最初の手順
+
+ほかの何よりも先に、次のコマンドを打つ。
+
+```sh
+ralph org director status --state-dir '$PROBE/state'
+```
+
+今の登録の `id` が `d2` であることを確かめてから動く。`id` が `d2` と
+違うとき、または登録がなく `not attached` と出たときは、ほかに何もしない
+(受信箱の ack と resolve、leader への send、start をしない)。そのことを
+この pane に書いて止まる。detach も打たない。
+
+## ミッション
+
+あなたは `ralph org director start` が立てた headless の director です。
+登録(台帳の `director.jsonl` の `d2`)は start が済ませています。人と
+機能ごとの org の間に立ち、手順の全体は `/director` skill に従ってください。
+
+- skill の「昇格」の手順のうち、見張りの確かめ(`ralph status` の
+  `org watch:` の行と `ralph org watch --all --detach`)と attach は start が
+  済ませたので、打たない。
+- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state'` で
+  今の登録を読み直す手順は守る。`id` が `d2` でなくなっていたら、
+  director として動くのをやめ、そのことをこの pane に書く。
+- あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state'` を付ける。
+  `ralph status` には `--state-dir '$PROBE/state'` だけを付ける。cwd が
+  どこでも、この台帳と、start が読んだ設定を使うため。終わりに人に頼む
+  stop は ralph.toml を読まないので、`--state-dir '$PROBE/state'` だけを持つ。
+- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
+- 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
+  こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準
+  フロー(`/plan` → `/implement`)に任せる。
+
+## 終わり
+
+- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+  detach は登録を外すだけで、この pane と workspace は開いたまま残る。
+- 終えるときは、open か acked の件が残っていれば人に伝え、人に、herdr の外の
+  端末から次のコマンドを打つよう頼む。stop がこの pane と workspace を閉じ、
+  止めたことを台帳に記録する。
+
+  ```sh
+  ralph org director stop --id d2 --state-dir '$PROBE/state'
+  ```
+
+- stop は自分で打たない。この pane の中からは断られる(pane を閉じると、
+  打ったセッションが終わって記録を書けないため)。
+[end of $PROBE/state/prompts/director_dbac7302f192.md]
+
+$ grep -c -- --config $PROBE/state/prompts/director_dbac7302f192.md
+0
+[exit 1]
+
+[note: the prompt's first command, run as written from its cwd]
+$ (cd $PROBE/work && ralph org director status --state-dir '$PROBE/state')
+director: attached d2 (driver=claude, headless running, model=haiku, pane w2:p1, workspace w2, attached at 2026-10-15T12:23:49Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+id: d2
+driver: claude
+wake: pull
+attached_at: 2026-10-15T12:23:49Z
+user: probe
+cwd: $PROBE/work
+herdr_pane: no
+launch: herdr
+state: running
+model: haiku
+permission_mode: edits
+token: dbac7302f192
+workspace_id: w2
+pane_id: w2:p1
+[exit 0]
+
+[note: the prompt's stop command, run as written]
+$ (cd $PROBE/work && ralph org director stop --id d2 --state-dir '$PROBE/state')
+stopped d2 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+
+$ diff <R1 prompt> <R2 prompt>
+3c3
+< - id: d1 / driver: claude
+---
+> - id: d2 / driver: claude
+5c5
+< - 設定: '$PROBE/work/cfg/ralph.toml'(start の --config)
+---
+> - 設定: main worktree の ralph.toml(台帳が main worktree のものでなければ、cwd の ralph.toml)
+13c13
+< ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'
+---
+> ralph org director status --state-dir '$PROBE/state'
+16c16
+< 今の登録の `id` が `d1` であることを確かめてから動く。`id` が `d1` と
+---
+> 今の登録の `id` が `d2` であることを確かめてから動く。`id` が `d2` と
+24c24
+< 登録(台帳の `director.jsonl` の `d1`)は start が済ませています。人と
+---
+> 登録(台帳の `director.jsonl` の `d2`)は start が済ませています。人と
+30,31c30,31
+< - 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` で
+<   今の登録を読み直す手順は守る。`id` が `d1` でなくなっていたら、
+---
+> - 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state'` で
+>   今の登録を読み直す手順は守る。`id` が `d2` でなくなっていたら、
+33c33
+< - あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state' --config '$PROBE/work/cfg/ralph.toml'` を付ける。
+---
+> - あなたが打つ `ralph org` のコマンドには、どれも `--state-dir '$PROBE/state'` を付ける。
+51c51
+<   ralph org director stop --id d1 --state-dir '$PROBE/state'
+---
+>   ralph org director stop --id d2 --state-dir '$PROBE/state'
+[exit 1]
+````
+
+Without `--config` the prompt says `--config` nowhere (`grep -c` 0), and `permission=edits` is `./ralph.toml`'s value. The two prompts differ only in the id, the 設定 line, and the three lines that carry `--config` in R1; the stop line differs by the id alone.
+
+#### director.jsonl and the stub herdr calls of R1 and R2
+
+```text
+$ cat $PROBE/state/director.jsonl
+{"ts":"2026-10-15T12:23:48Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"launch":"herdr","token":"53b0807f6b30","model":"haiku","permission_mode":"guarded","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d1","event":"workspace_created","workspace_id":"w1","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d1","event":"pane_created","pane_id":"w1:p1","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d1","event":"launched","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d1","event":"detached","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d1","event":"stopped","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d2","event":"attached","driver":"claude","wake":["pull"],"launch":"herdr","token":"dbac7302f192","model":"haiku","permission_mode":"edits","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d2","event":"workspace_created","workspace_id":"w2","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d2","event":"pane_created","pane_id":"w2:p1","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:49Z","id":"d2","event":"launched","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:50Z","id":"d2","event":"detached","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+{"ts":"2026-10-15T12:23:50Z","id":"d2","event":"stopped","user":"probe","cwd":"$PROBE/work","herdr_pane":false}
+
+$ cat $PROBE/hstate/calls.log
+herdr [workspace] [create] [--cwd] [$PROBE/work] [--label] [ralph_director_53b0807f6b30]
+herdr [tab] [create] [--workspace] [w1] [--cwd] [$PROBE/work] [--label] [director_53b0807f6b30]
+herdr [agent] [start] [director_53b0807f6b30] [--kind] [claude] [--pane] [w1:p1] [--timeout] [60000] [--] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state/prompts/director_53b0807f6b30.md]
+herdr [pane] [get] [w1:p1]
+herdr [tab] [get] [w1:t1]
+herdr [workspace] [get] [w1]
+herdr [workspace] [get] [w1]
+herdr [pane] [send-keys] [w1:p1] [C-c]
+herdr [pane] [close] [w1:p1]
+herdr [workspace] [close] [w1]
+herdr [workspace] [create] [--cwd] [$PROBE/work] [--label] [ralph_director_dbac7302f192]
+herdr [tab] [create] [--workspace] [w2] [--cwd] [$PROBE/work] [--label] [director_dbac7302f192]
+herdr [agent] [start] [director_dbac7302f192] [--kind] [claude] [--pane] [w2:p1] [--timeout] [60000] [--] [--permission-mode] [acceptEdits] [--model] [haiku] [役割指示を読み込んで従ってください: $PROBE/state/prompts/director_dbac7302f192.md]
+herdr [pane] [get] [w2:p1]
+herdr [tab] [get] [w2:t1]
+herdr [workspace] [get] [w2]
+herdr [workspace] [get] [w2]
+herdr [pane] [send-keys] [w2:p1] [C-c]
+herdr [pane] [close] [w2:p1]
+herdr [workspace] [close] [w2]
+
+$ (cd $PROBE/work && ralph org watch --stop --state-dir $PROBE/state)
+stopped ralph org watch --all (pid 73368)
+[exit 0]
+```
+
+The guarded director got no permission flag and the edits one `--permission-mode acceptEdits`, both before `--model` and the pointer sentence. Neither ledger has a `manifest.jsonl` or `model-receipts.jsonl`.
+
+### C2-4. HEAD vs pre-fix binary: the cross-review cycle-1 scenario (R3)
+
+The pre-fix binary was built from `git archive 54cab8a2` (the commit before the fix 3243c499) into `$PROBE/oldbin`, with the same git symlink and stub herdr. `$PROBE/work/ralph.toml` was changed to `[org.director].enabled = false` (the rest as in C2-3); `cfg/ralph.toml` still says true. Each binary ran on its own empty ledger.
+
+```text
+## R3 (HEAD a539a765)
+$ (cd $PROBE/work && ralph org director start --driver claude --model haiku --state-dir $PROBE/state3head --config cfg/ralph.toml)
+ralph org director start: started the cross-org watch (pid 77080); log: $PROBE/state3head/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w3:p1, workspace=w3)
+talk to the director in herdr: pane w3:p1, in the tab director_0abc3506eb3f of the workspace labelled ralph_director_0abc3506eb3f
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state3head'
+[exit 0]
+
+[note: lines 1-6 and the ralph org director lines of the prompt file]
+# 役割: director(headless)
+
+- id: d1 / driver: claude
+- 台帳: '$PROBE/state3head'
+- 設定: '$PROBE/work/cfg/ralph.toml'(start の --config)
+- cwd: $PROBE/work
+13:ralph org director status --state-dir '$PROBE/state3head' --config '$PROBE/work/cfg/ralph.toml'
+23:あなたは `ralph org director start` が立てた headless の director です。
+30:- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state3head' --config '$PROBE/work/cfg/ralph.toml'` で
+44:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+51:  ralph org director stop --id d1 --state-dir '$PROBE/state3head'
+
+[note: the prompt's first command, run as written from its cwd]
+$ (cd $PROBE/work && ralph org director status --state-dir '$PROBE/state3head' --config '$PROBE/work/cfg/ralph.toml')
+director: attached d1 (driver=claude, headless running, model=haiku, pane w3:p1, workspace w3, attached at 2026-10-15T12:24:38Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+[note: the registration fields that follow are elided; they match R1's with token 0abc3506eb3f, w3, w3:p1]
+[exit 0]
+
+$ (cd $PROBE/work && ralph org director stop --id d1 --state-dir $PROBE/state3head)
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+
+$ (cd $PROBE/work && ralph org watch --stop --state-dir $PROBE/state3head)
+stopped ralph org watch --all (pid 77080)
+[exit 0]
+
+## R3 (pre-fix 54cab8a2)
+$ (cd $PROBE/work && ralph org director start --driver claude --model haiku --state-dir $PROBE/state3old --config cfg/ralph.toml)
+ralph org director start: started the cross-org watch (pid 77237); log: $PROBE/state3old/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w4:p1, workspace=w4)
+talk to the director in herdr: pane w4:p1, in the tab director_724478a91769 of the workspace labelled ralph_director_724478a91769
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state3old'
+[exit 0]
+
+[note: lines 1-6 and the ralph org director lines of the prompt file]
+# 役割: director(headless)
+
+- id: d1 / driver: claude
+- 台帳: '$PROBE/state3old'
+- cwd: $PROBE/work
+
+12:ralph org director status --state-dir '$PROBE/state3old'
+22:あなたは `ralph org director start` が立てた headless の director です。
+29:- 会話の要約のあとに `ralph org director status --state-dir '$PROBE/state3old'` で
+42:- skill の「終わり」の手順のうち、`ralph org director detach` は打たない。
+49:  ralph org director stop --id d1 --state-dir '$PROBE/state3old'
+
+[note: the prompt's first command, run as written from its cwd]
+$ (cd $PROBE/work && ralph org director status --state-dir '$PROBE/state3old')
+director: disabled ([org.director].enabled = false; registration d1 is still recorded, headless running, pane w4:p1, workspace w4: stop it with ralph org director stop --id d1 --state-dir '$PROBE/state3old') -- ralph org escalate sends every item to the human at once
+enabled: false
+[note: the registration fields that follow are elided; token 724478a91769, w4, w4:p1]
+[exit 0]
+
+$ (cd $PROBE/work && ralph org director stop --id d1 --state-dir $PROBE/state3old)
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+
+$ (cd $PROBE/work && ralph org watch --stop --state-dir $PROBE/state3old)
+stopped ralph org watch --all (pid 77237)
+[exit 0]
+```
+
+With the pre-fix binary the start succeeded on the `--config` file, but the director's first command read `./ralph.toml` and answered `director: disabled`, which the prompt's first step treats as "not my registration" (stop and do nothing). With HEAD the same first command reads the `--config` file and answers `attached d1`, `enabled: true`. This is the cross-review cycle-1 finding reproduced on 54cab8a2 and gone on a539a765.
+
+### C2-5. ralph status beside a director started with --config (R4)
+
+Same files as C2-4 (`./ralph.toml` enabled = false, `cfg/ralph.toml` true), HEAD binary, ledger `$PROBE/state4`.
+
+```text
+$ (cd $PROBE/work && ralph org director start --driver claude --model haiku --state-dir $PROBE/state4 --config cfg/ralph.toml)
+ralph org director start: started the cross-org watch (pid 80053); log: $PROBE/state4/watch.log
+started d1 (driver=claude, model=haiku, permission=guarded, pane=w5:p1, workspace=w5)
+talk to the director in herdr: pane w5:p1, in the tab director_a2af88c354b0 of the workspace labelled ralph_director_a2af88c354b0
+stop it with: ralph org director stop --id d1 --state-dir '$PROBE/state4'
+[exit 0]
+
+$ (cd $PROBE/work && ralph status --state-dir '$PROBE/state4' | /usr/bin/grep -E '^(director|org watch):')
+org watch: running (pid 80053, mark updated 2026-10-15T12:25:20Z)
+director: disabled ([org.director].enabled = false; registration d1 is still recorded, headless running, pane w5:p1, workspace w5: stop it with ralph org director stop --id d1 --state-dir '$PROBE/state4') -- ralph org escalate sends every item to the human at once
+[exit 0]
+
+$ (cd $PROBE/work && ralph org director status --state-dir '$PROBE/state4' --config '$PROBE/work/cfg/ralph.toml' | /usr/bin/sed -n 1,2p)
+director: attached d1 (driver=claude, headless running, model=haiku, pane w5:p1, workspace w5, attached at 2026-10-15T12:25:20Z, by probe) -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline
+enabled: true
+[exit 0]
+
+$ (cd $PROBE/work && ralph org director stop --id d1 --state-dir $PROBE/state4)
+stopped d1 (ctrl_c=ok, pane=closed, workspace=closed)
+the director is no longer attached
+[exit 0]
+
+$ (cd $PROBE/work && ralph org watch --stop --state-dir $PROBE/state4)
+stopped ralph org watch --all (pid 80053)
+[exit 0]
+```
+
+`ralph status` has no `--config` (`internal/cli/status.go` flags: `--state-dir`, `--org-id`, `--json`), so its `director:` line follows `./ralph.toml` while the director's own status follows the `--config` file. A leader's `ralph org escalate` without `--config` reads the repo's file too, so the `ralph status` line is the one that describes how escalate delivers here.
+
+### C2-6. ralph org director start --help of the HEAD binary (the --config sentence)
+
+```text
+$ ralph org director start --help | sed -n '/^The director runs with/,/^$/p'
+The director runs with the permission mode of
+[org.permissions.roles].director, else [org.permissions].default (for
+codex, autonomous and edits need [org.permissions].codex_verified), and
+with --model, which [org.roles].director must allow; without --model,
+with the first model_pool entry for --driver that it allows, and a
+warning. Without --config, those settings and [org.director].enabled
+are read from the main worktree's ralph.toml when the ledger is the main
+worktree's, so a feature worktree's ralph.toml does not choose them. The
+director runs in the ledger's main worktree root, else in the directory
+start runs in. With --config, the ralph org commands the director's
+prompt has it run carry --config with that file's absolute path, so the
+director reads the settings start read (the prompt's stop command, for
+the human, carries none: stop reads no ralph.toml).
+```
+
+### C2-7. Cleanup
+
+- Every watch the starts launched was stopped with `ralph org watch --stop` (pids 73368, 77080, 77237, 80053). `pgrep -fl "$PROBE/"` afterwards printed nothing (exit 1).
+- `$PROBE/hstate` holds only `calls.log` and the workspace counter: every stub workspace, tab, and pane the starts made was closed by a stop.
+- `pgrep -fl 'herdr server'` and `pgrep -fl osascript` printed nothing (exit 1). No real herdr ran, and the user's herdr server and `~/.config/herdr` were not touched.
+- The repo's ledger was not written: neither `~/MyDev/github.com/yoshpy-dev/ralph/.harness/state/org` nor the worktree's `.harness/state/org` exists. `$PROBE/home` and `$PROBE/tmp` are empty.
+- The scratch ledgers, the two binaries, the stub, and the probe scripts stay in the session scratch directory.
