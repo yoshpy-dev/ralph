@@ -220,4 +220,4 @@ Critical forks: D1、D4、D10 は consult(consult-plan-dirstart)の判定で、D
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#231)
