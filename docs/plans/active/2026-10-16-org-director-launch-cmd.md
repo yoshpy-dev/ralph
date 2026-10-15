@@ -1,7 +1,7 @@
 # org-director-launch-cmd
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:3edb71508e34
+- Approved: 2026-10-16 sha256:af95b6db6074
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目の後半(8a-2b)。FR-9 の起動 (B) の「`[org.director].launch_cmd` で別の端末の起動コマンドに差し替えられる」。8a-2 は PR #231(3723d900)で merge 済みで、その計画(`docs/plans/archive/2026-10-15-org-director-start.md`)の D1 が launch_cmd をこの段に分けた。分かれ目は consult(consult-plan-launchcmd)の判定による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -100,7 +100,7 @@
   - 端末は閉じない。出力で、人が閉じることを言う
 - D8 自分を止める断り: env の `RALPH_DIRECTOR_TOKEN` が登録の token と同じなら、stop は断る。D3 のスクリプトがこの env を渡すので、director が自分の登録に stop を打つと、記録の前に自分のプロセスが終わってしまう。8a-2 の `HERDR_PANE_ID` の断りと同じ考え方
 - D9 start の `HERDR_PANE_ID` の断りは、launch_cmd の道では当てない(consult の F5)。8a-2 で断ったのは、herdr の pane の中から herdr を打つと後始末で困るためで、launch_cmd の道は herdr を打たない
-- D10 そのまま使うもの: codex の director は guarded だけ(8a-2 の D12)、claude の permission の写し方、`--config` の相対の `[org].agmsg_home` の断り(8a-2 の D13。規則は 1 つのままにする。consult)、見張りの確かめと起動(8a-2 の D5)、manifest と receipts に書かないこと(8a-2 の D2、D8)
+- D10 そのまま使うもの: codex の director は guarded だけ(8a-2 の D12)、claude の permission の写し方、`--config` の相対の `[org].agmsg_home` の断り(8a-2 の D13。規則は 1 つのままにする。consult)、見張りの確かめと起動(8a-2 の D5)、manifest と receipts に書かないこと(8a-2 の D2、D8)。launch_cmd は `[org.director].enabled` と同じ規則で読む: `--config` がなく台帳が main worktree のものなら、main worktree の `ralph.toml` から取る(`withMainWorktreeDirectorStartConfig`)。feature org の worktree の `ralph.toml` を書き換えても、ralph が打つコマンドは変わらない(S1 の implementer の指摘で足した)
 - D11 `Headless()` の意味: herdr でも cmd でも、`ralph org director start` が書いた登録を headless とする。stop、`stop --all` の案内、status は両方を扱う。herdr だけの処理(label の確かめ、pane と workspace を閉じる)は `launch = "herdr"` で分ける
 - D12 範囲: recipe は端末ごとに 1 例だけ書く(tmux、Orca、WezTerm)。スライスは「設定の検証 → start と check-in → stop → 文書」の順にする(consult の F6)
 
@@ -201,7 +201,9 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
 - [x] Plan reviewed
 - [x] Plan approved(ユーザーの指示「作成したプランは自動承認します」による自動承認。Codex の計画助言 1 件(HIGH)は D4・D6・D7 に反映済み)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 設定と検証: 4c3f5fb9。config が置き換えの規則(`ExpandDirectorLaunchArg`)と検証(`ValidateDirectorLaunchCmd`)も公開した
+  - D10 に「launch_cmd は main worktree の `ralph.toml` から読む」を足した(S1 の implementer の指摘)。図に関わらないので図はそのまま、digest を取り直して自動承認し直した(3edb71508e34 → af95b6db6074)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
