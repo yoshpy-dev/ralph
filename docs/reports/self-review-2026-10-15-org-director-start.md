@@ -23,7 +23,7 @@
   - 畳み込み: 新しい field のない 8a-1 の行はそのまま読める。headless の `attached` の `pane_id` は読まない(`registrationOf`)。`workspace_created`・`pane_created` は最初の 1 つを残す。`result()` は登録のコピーを返す
   - 8a-1 の test の書き換え 2 つ(`TestOrgDirector_AttachRefusesABadDriverBeforeReadingAnything`、`TestOrgDirectorHelp_DescribesTheRegistration`)は、元の確認を残したまま足している。`root` で動く環境の skip(`Geteuid`)も残っている。20 ms の `DriverCallTimeout` を使う test は、時間切れが起きる側を見ていて、勝ち負けの競合ではない
   - register の 5 行は `|` で分けて全行 5 列。Trigger 列に 8a・director・headless を含む行を全部抜き出して照らした(M1)
-- 確かめていないもの: テスト、`gofmt`、`go vet`、go1.25.8 でのビルド。本物の herdr での動き(`_` を含む 22 字の label が返ること、実機の agent start)。`ralph org director start|stop` を binary で動かした出力。`director_start_test.go`・`director_test.go`・`director_stop_test.go` の本文の大半
+- 確かめていないもの: テスト、`gofmt`、`go vet`、go1.25.8 でのビルド。本物の herdr での動き(`_` を含む 27 字の label が返ること、実機の agent start。27 字は 15 + 12 で、初版の「22 字」は /sync-docs で訂正した)。`ralph org director start|stop` を binary で動かした出力。`director_start_test.go`・`director_test.go`・`director_stop_test.go` の本文の大半
 
 ## Findings
 
@@ -59,7 +59,7 @@ _(登録簿には追記していない。M1 は新しい debt ではなく既存
 
 ## Coverage gaps
 
-- 実機の動き: herdr 0.7.5 が `ralph_director_<token>`(22 字、`_` を含む)の label をそのまま返すこと、claude と codex の agent start が通ること、`ralph org director start|stop` の出力を見ていない。計画の Evidence to capture と AC13 のとおり /test の担当
+- 実機の動き: herdr 0.7.5 が `ralph_director_<token>`(27 字、`_` を含む。初版の「22 字」は /sync-docs で訂正した)の label をそのまま返すこと、claude と codex の agent start が通ること、`ralph org director start|stop` の出力を見ていない。計画の Evidence to capture と AC13 のとおり /test の担当
 - L1 の道(見張りなし、director が attached、start)を通る test がない
 - `internal/org/director_test.go`(+958 行)ほか 3 つの新しい test ファイルの本文の大半は読んでいない。test 名の一覧と、拒否・時間切れ・label の違いの test だけを読んだ
 

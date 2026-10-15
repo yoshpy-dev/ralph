@@ -102,9 +102,10 @@ codex_verified = false
 # director needs codex_verified for autonomous and edits, as seats do).
 # Without it the director runs with default: with "autonomous", a claude
 # director runs with bypassPermissions, and only its role prompt and the
-# /director skill keep it from changing code. A guarded claude director
-# stops at the permission prompt in its herdr pane, where the human talks
-# to it.
+# /director skill keep it from changing code. A guarded director gets no
+# permission flag, so it follows the agent's own approval settings (the
+# human's Claude Code or ~/.codex/config.toml; for example claude with
+# permissions.defaultMode = "bypassPermissions" runs with no prompt).
 
 # [org.watchdog] configures `ralph org watch`'s two layers: a deterministic
 # pulse-layer timer (interval_seconds, stall_minutes) and an on-demand
