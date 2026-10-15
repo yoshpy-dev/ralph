@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# test-plan-visual.sh — scripts/plan-visual.sh open / shot / digest.
+# test-plan-visual.sh — scripts/plan-visual.sh open / shot / lint / digest.
 # The opener and the browser are always stubs: no real browser starts.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -95,6 +95,18 @@ assert_empty_file() {
   else
     fail "$1"
     sed 's/^/    | /' "$2"
+  fi
+}
+
+# assert_only_rule <desc> <rule> <file> — the file has at least one line and
+# every line reports <rule> (": L<n>: ").
+assert_only_rule() {
+  if [ -s "$3" ] && ! grep -Fvq -- ": $2: " "$3"; then
+    pass "$1"
+  else
+    fail "$1"
+    printf '    expected only %s lines, got:\n' "$2"
+    sed 's/^/    | /' "$3"
   fi
 }
 
@@ -193,6 +205,8 @@ assert_contains "--help prints usage on stdout" "Usage:" "$_out"
 assert_contains "--help documents RALPH_PLAN_VISUAL_OPENER" "RALPH_PLAN_VISUAL_OPENER" "$_out"
 assert_contains "--help documents RALPH_PLAN_VISUAL_BROWSER" "RALPH_PLAN_VISUAL_BROWSER" "$_out"
 assert_contains "--help documents that ticked boxes keep the digest" '"- [x]" or "- [X]" box' "$_out"
+# /plan tells an old helper apart by this exact line.
+assert_contains "--help lists the lint subcommand" "  scripts/plan-visual.sh lint <html>" "$_out"
 run_pv "$PLAN_VISUAL" bogus
 assert_eq "unknown subcommand exits 1" 1 "$_rc"
 assert_contains "unknown subcommand prints usage on stderr" "Usage:" "$_err"
@@ -358,6 +372,367 @@ run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" sho
 assert_eq "option without a value exits 1" 1 "$_rc"
 run_pv env RALPH_PLAN_VISUAL_BROWSER="$_tmp/bin/stub-browser" "$PLAN_VISUAL" shot "$_html" "$_png" --bogus 1
 assert_eq "unknown option exits 1" 1 "$_rc"
+
+printf '==> lint\n'
+# Parts of a page in the plain-figure layout that passes lint; each case below
+# swaps, moves, or drops one part. Its figures in order: overview, easy-2,
+# detail-overview, detail-2, and one without an id (figure#5).
+_pg_head='<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Plan visual review: sample</title>
+<style>
+  body:has(figure:target) > figure:not(:target) { display: none; }
+  .mono { font-family: ui-monospace, monospace; }
+</style>
+<!-- <figure id="overview"> inside a comment is not a tag -->
+</head>
+<body>
+<main>
+  <div class="chrome"><h1>見出し</h1><div class="meta"><code>docs/plans/active/sample.md</code></div></div>'
+_pg_overview='  <figure class="easy" id="overview">
+    <h2>承認する人は、上の図だけで決められる</h2>
+    <svg viewBox="0 0 1080 330" role="img" aria-label="今は読み解いてから決める。これからは図を読んで決める。">
+      <rect class="n-old"/><rect class="n-old"/><rect class="n-new"/><rect class="box n-new"/><rect class="n-fail"/>
+      <text x="20" y="92" class="t-row now">今</text>
+    </svg>
+    <div class="foot"><p class="words">人が打つのは /director と ralph org stop --all。1/3 が終わったら見る。</p><span class="made nomono">S1・S2 で作る</span></div>
+  </figure>'
+_pg_easy2='  <figure class="easy" id="easy-2">
+    <h2>決まりは機械で確かめる</h2>
+    <svg viewBox="0 0 1080 180" role="img" aria-label="書く、確かめる、見せる">
+      <style>.t { font: 13px/1.4 sans-serif; }</style>
+      <rect class="n-old"/><rect class="n-new"/>
+    </svg>
+  </figure>'
+_pg_before='  <section class="before chrome">
+    <h2>承認の前に</h2>
+    <ul><li>3 回に分けて作ります</li></ul>
+  </section>'
+_pg_fold_open='  <details class="deep">
+    <summary>くわしい図</summary>
+    <div class="chrome"><code>scripts/plan-visual.sh</code> と <span class="mono">workspace_created</span></div>'
+_pg_details='    <figure id="detail-overview">
+      <h3>詳細 1</h3>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="変わるファイル"><text class="mono">internal/org/x.go</text></svg>
+    </figure>
+    <figure id="detail-2"><h3>詳細 2</h3><details><summary>入れ子</summary>中身</details></figure>
+    <figure><h3>詳細 3</h3></figure>
+    <p class="out chrome">この図にないもの: なし</p>'
+_pg_fold_close='  </details>'
+
+# write_page <file> <part>... — the head, the parts, then the closing tags.
+write_page() {
+  _page="$1"
+  shift
+  {
+    printf '%s\n' "$_pg_head"
+    printf '%s\n' "$@"
+    printf '%s\n' '</main>' '</body>' '</html>'
+  } > "$_page"
+}
+
+# lint_case <name> <part>... — write $_tmp/lint-<name>.html with write_page
+# and lint it.
+lint_case() {
+  _case_page="$_tmp/lint-$1.html"
+  shift
+  write_page "$_case_page" "$@"
+  run_pv "$PLAN_VISUAL" lint "$_case_page"
+}
+
+lint_case good "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+_good="$_case_page"
+assert_eq "good page exits 0 (/director, --all, 1/3, class nomono, and a style body in an easy figure; paths, <code> and mono in the fold)" 0 "$_rc"
+assert_empty_file "good page prints no finding" "$_out"
+assert_empty_file "good page prints nothing on stderr" "$_err"
+
+_ov_id_first="$(printf '%s\n' "$_pg_overview" | sed 's/<figure class="easy" id="overview">/<figure id="overview" class="easy">/')"
+lint_case id-first "$_ov_id_first" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_contains "id-first fixture really has id before class" '<figure id="overview" class="easy">' "$_case_page"
+assert_eq "id before class in the overview tag exits 0" 0 "$_rc"
+assert_empty_file "id before class prints no finding" "$_out"
+
+sed "s/\"/'/g" "$_good" > "$_tmp/lint-single.html"
+assert_contains "single-quote fixture really uses single quotes" "<figure class='easy' id='overview'>" "$_tmp/lint-single.html"
+run_pv "$PLAN_VISUAL" lint "$_tmp/lint-single.html"
+assert_eq "single-quoted attributes exit 0" 0 "$_rc"
+assert_empty_file "single-quoted attributes print no finding" "$_out"
+
+_ov_split='  <figure
+      class="easy"
+      id="overview">
+    <h2>承認する人は、上の図だけで決められる</h2>
+    <svg viewBox="0 0 1080 330"
+         role="img"
+         aria-label="今 -> これから">
+      <rect class="n-new"/>
+    </svg>
+  </figure>'
+lint_case split "$_ov_split" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "start tags split over lines exit 0" 0 "$_rc"
+assert_empty_file "start tags split over lines print no finding" "$_out"
+
+_ov_gt='  <figure data-note="a > b" class="easy" id="overview">
+    <h2>見出し</h2>
+    <svg viewBox="0 0 10 10" aria-label="図"><rect class="n-new"/></svg>
+  </figure>'
+lint_case quoted-gt "$_ov_gt" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "a > inside a quoted value does not end the tag" 0 "$_rc"
+assert_empty_file "a > inside a quoted value prints no finding" "$_out"
+
+# awk would take a bare a=b.html operand for an assignment and read stdin.
+cp "$_good" "$_tmp/a=b.html"
+_saved_pwd="$(pwd)"
+cd "$_tmp"
+run_pv "$PLAN_VISUAL" lint a=b.html </dev/null
+cd "$_saved_pwd"
+assert_eq "a relative file name with = is read as the file" 0 "$_rc"
+assert_empty_file "a relative file name with = prints no finding" "$_out"
+
+# L1
+_ov_renamed="$(printf '%s\n' "$_pg_overview" | sed 's/id="overview"/id="easy-1"/')"
+lint_case l1-missing "$_ov_renamed" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "no id=overview exits 1" 1 "$_rc"
+assert_has_line "no id=overview is reported (the one in a comment does not count)" 'page: L1: no element has id="overview"' "$_out"
+assert_only_rule "no id=overview breaks only L1" L1 "$_out"
+
+_before_ov="$(printf '%s\n' "$_pg_before" | sed 's/<section class="before chrome">/<section class="before chrome" id="overview">/')"
+lint_case l1-section "$_ov_renamed" "$_pg_easy2" "$_before_ov" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "id=overview on a section exits 1" 1 "$_rc"
+assert_has_line "id=overview on a section is reported" 'overview: L1: id="overview" is on <section>, not on <figure class="easy">' "$_out"
+assert_only_rule "id=overview on a section breaks only L1" L1 "$_out"
+
+_easy2_ov="$(printf '%s\n' "$_pg_easy2" | sed 's/id="easy-2"/id="overview"/')"
+lint_case l1-two "$_pg_overview" "$_easy2_ov" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "two id=overview exit 1" 1 "$_rc"
+assert_has_line "two id=overview are reported" 'page: L1: 2 elements have id="overview", expected 1' "$_out"
+assert_only_rule "two id=overview break only L1" L1 "$_out"
+
+# The page layout before this rule: overview is not easy, no fold.
+_old_page='  <figure id="overview">
+    <h2>全体図</h2>
+    <svg viewBox="0 0 1080 420" aria-label="全体"><text class="mono">internal/org/x.go</text></svg>
+  </figure>
+  <figure id="detail-1"><h3>詳細 1</h3></figure>'
+lint_case old "$_old_page"
+assert_eq "old-format page exits 1" 1 "$_rc"
+assert_has_line "old-format page is reported under L1" 'overview: L1: the id="overview" figure lacks class easy' "$_out"
+
+# L2
+_easy3="$(printf '%s\n' "$_pg_easy2" | sed 's/id="easy-2"/id="easy-3"/')"
+_easy4="$(printf '%s\n' "$_pg_easy2" | sed 's/id="easy-2"/id="easy-4"/')"
+lint_case l2-four "$_pg_overview" "$_pg_easy2" "$_easy3" "$_easy4" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "four easy figures exit 1" 1 "$_rc"
+assert_has_line "four easy figures are reported" 'page: L2: 4 easy figures (<figure class="easy">), expected 1 to 3' "$_out"
+assert_only_rule "four easy figures break only L2" L2 "$_out"
+
+lint_case l2-fold "$_pg_overview" "$_pg_before" "$_pg_fold_open" "$_easy3" "$_pg_details" "$_pg_fold_close"
+assert_eq "an easy figure inside the fold exits 1" 1 "$_rc"
+assert_has_line "an easy figure inside the fold is reported" 'easy-3: L2: easy figure inside the fold' "$_out"
+assert_only_rule "an easy figure inside the fold breaks only L2" L2 "$_out"
+
+# L3
+_easy2_l3='  <figure class="easy" id="easy-2">
+    <h2>決まりは機械で確かめる</h2>
+    <svg viewBox="0 0 1080 180" role="img" aria-label="書く">
+      <rect class="n-old"/><text class="label mono">x</text>
+    </svg>
+    <p>internal/org を直す。S1/S2 で作る。plan-visual/&lt;slug&gt;.html に書く。README.md も。workspace_created を出す。<code>x</code></p>
+  </figure>'
+lint_case l3 "$_pg_overview" "$_easy2_l3" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "code-like text in an easy figure exits 1" 1 "$_rc"
+assert_has_line "class mono is reported" 'easy-2: L3: class mono on <text>' "$_out"
+assert_has_line "<code> is reported" 'easy-2: L3: <code> element' "$_out"
+assert_has_line "a path is reported with the word" 'easy-2: L3: path-like text: internal/org' "$_out"
+assert_has_line "S1/S2 is reported as path-like" 'easy-2: L3: path-like text: S1/S2' "$_out"
+assert_has_line "&lt;slug&gt;.html is reported by its extension" 'easy-2: L3: file extension: plan-visual/&lt;slug&gt;.html' "$_out"
+assert_has_line "README.md is reported by its extension" 'easy-2: L3: file extension: README.md' "$_out"
+assert_has_line "a snake_case word is reported" 'easy-2: L3: snake_case identifier: workspace_created' "$_out"
+assert_eq "code-like text gives exactly these 7 findings" 7 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "code-like text breaks only L3" L3 "$_out"
+
+# Words that inline tags split: easy-2 opened up to its svg, then the lines
+# under test.
+_easy2_open='  <figure class="easy" id="easy-2">
+    <h2>決まりは機械で確かめる</h2>
+    <svg viewBox="0 0 1080 180" role="img" aria-label="書く">
+      <rect class="n-old"/>'
+lint_case l3-inline "$_pg_overview" "$_easy2_open" \
+  '      <text x="20" y="40">internal/<tspan>org</tspan> を直す</text>' \
+  '      <text x="20" y="60">workspace<tspan class="x">_created</tspan> を出す</text>' \
+  '      <text x="20" y="80">docs<tspan dy="2">/plans</tspan> と scripts<tspan font-weight="700" dx='"'4'"'>/foo</tspan></text>' \
+  '      <text x="20" y="100"><tspan x="20" y="100">lib</tspan>/util</text>' \
+  '    </svg>' '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "words split by inline tspan tags exit 1" 1 "$_rc"
+assert_has_line "a path split by a tspan is reported whole" 'easy-2: L3: path-like text: internal/org' "$_out"
+assert_has_line "a snake_case word split by a tspan (class x is not an x attribute) is reported" 'easy-2: L3: snake_case identifier: workspace_created' "$_out"
+assert_has_line "a tspan with dy continues the path" 'easy-2: L3: path-like text: docs/plans' "$_out"
+assert_has_line "a tspan with a single-quoted dx after another attribute continues the path" 'easy-2: L3: path-like text: scripts/foo' "$_out"
+assert_has_line "the end of a tspan with x and y does not split the word after it" 'easy-2: L3: path-like text: lib/util' "$_out"
+assert_eq "split words give exactly these 5 findings" 5 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "split words break only L3" L3 "$_out"
+
+# Each inline tag joins the words at its start and at its end.
+_inline_ps=""
+for _t in tspan a b i em strong span small sub sup; do
+  _inline_ps="$_inline_ps
+    <p>in<$_t>/$_t</$_t>/end と</p>"
+done
+lint_case l3-inline-each "$_pg_overview" "$_easy2_open" '    </svg>' "$_inline_ps" '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "a path split by each inline tag exits 1" 1 "$_rc"
+for _t in tspan a b i em strong span small sub sup; do
+  assert_has_line "<$_t> and </$_t> do not split a word" "easy-2: L3: path-like text: in/$_t/end" "$_out"
+done
+assert_eq "each inline tag gives exactly one finding" 10 "$(wc -l < "$_out" | tr -d ' ')"
+
+lint_case l3-split "$_pg_overview" "$_easy2_open" \
+  '      <text x="20" y="40">run</text><text x="80" y="40">/director</text>' \
+  '      <text x="20" y="60">foo<tspan x="40" dy="20">/bar</tspan></text>' \
+  '      <text x="20" y="120">baz<tspan class="t" y='"'140'"'>/qux</tspan></text>' \
+  '    </svg>' '    <p class="words">a<br>/director</p>' '  </figure>' "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "separate <text> elements, a tspan with x or y, and <br> split words (exit 0)" 0 "$_rc"
+assert_empty_file "separate <text> elements, a tspan with x or y, and <br> print no finding" "$_out"
+
+# L4
+_easy2_l4='  <figure class="easy" id="easy-2">
+    <h3>見出しが h3</h3>
+    <svg viewBox="0 0 1080 180" role="img" aria-label="">
+      <rect class="n-old"/><rect class="n-old"/><rect class="n-new"/><rect class="n-new"/><rect class="n-fail"/><g class="group n-new"></g>
+    </svg>
+  </figure>'
+lint_case l4 "$_pg_overview" "$_easy2_l4" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "an easy figure with 6 boxes, no h2, and an empty aria-label exits 1" 1 "$_rc"
+assert_has_line "6 boxes are reported" 'easy-2: L4: 6 boxes (class n-*), at most 5' "$_out"
+assert_has_line "a missing h2 is reported" 'easy-2: L4: no <h2> heading' "$_out"
+assert_has_line "an empty aria-label is reported" 'easy-2: L4: no <svg> with a non-empty aria-label' "$_out"
+assert_only_rule "6 boxes, no h2, and an empty aria-label break only L4" L4 "$_out"
+
+_easy2_noaria="$(printf '%s\n' "$_pg_easy2" | sed 's/ aria-label="[^"]*"//')"
+lint_case l4-noaria "$_pg_overview" "$_easy2_noaria" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "an svg without aria-label exits 1" 1 "$_rc"
+assert_has_line "an svg without aria-label is reported" 'easy-2: L4: no <svg> with a non-empty aria-label' "$_out"
+assert_only_rule "an svg without aria-label breaks only L4" L4 "$_out"
+
+_easy2_blank="$(printf '%s\n' "$_pg_easy2" | sed 's/ aria-label="[^"]*"/ aria-label="  "/')"
+lint_case l4-blank "$_pg_overview" "$_easy2_blank" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "an aria-label of spaces only exits 1" 1 "$_rc"
+assert_only_rule "an aria-label of spaces only breaks only L4" L4 "$_out"
+
+# L5
+lint_case l5-missing "$_pg_overview" "$_pg_easy2" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "no before section exits 1" 1 "$_rc"
+assert_has_line "no before section is reported" 'page: L5: no <section class="before">' "$_out"
+assert_only_rule "no before section breaks only L5" L5 "$_out"
+
+lint_case l5-fold "$_pg_overview" "$_pg_easy2" "$_pg_fold_open" "$_pg_before" "$_pg_details" "$_pg_fold_close"
+assert_eq "a before section inside the fold exits 1" 1 "$_rc"
+assert_has_line "a before section inside the fold is reported" 'page: L5: <section class="before"> is inside the fold' "$_out"
+assert_only_rule "a before section inside the fold breaks only L5" L5 "$_out"
+
+# L6
+lint_case l6-nofold "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_details"
+assert_eq "no fold exits 1" 1 "$_rc"
+assert_has_line "no fold is reported" 'page: L6: no fold (<details class="deep">)' "$_out"
+assert_has_line "no detail-overview inside the fold is reported" 'page: L6: no <figure id="detail-overview"> inside the fold' "$_out"
+assert_has_line "a detail figure outside the fold is reported" 'detail-overview: L6: figure without class easy is outside the fold' "$_out"
+assert_has_line "a figure without an id is labelled by its order" 'figure#5: L6: figure without class easy is outside the fold' "$_out"
+assert_only_rule "no fold breaks only L6" L6 "$_out"
+
+lint_case l6-detail-after "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_fold_close" "$_pg_details"
+assert_eq "detail figures after the fold exit 1" 1 "$_rc"
+assert_has_line "detail figures after the fold are reported" 'page: L6: no <figure id="detail-overview"> inside the fold' "$_out"
+assert_only_rule "detail figures after the fold break only L6" L6 "$_out"
+
+lint_case l6-two "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close" '  <details class="deep"><summary>もう 1 つ</summary></details>'
+assert_eq "two folds exit 1" 1 "$_rc"
+assert_has_line "two folds are reported" 'page: L6: 2 folds (<details class="deep">), expected 1' "$_out"
+assert_only_rule "two folds break only L6" L6 "$_out"
+
+lint_case l6-open-fold "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details"
+assert_eq "a fold without </details> exits 1" 1 "$_rc"
+assert_has_line "a fold without </details> is reported" 'page: L6: a fold has no matching </details>' "$_out"
+assert_only_rule "a fold without </details> breaks only L6" L6 "$_out"
+
+_details_open="$(printf '%s\n' "$_pg_details" | sed '/<figure><h3>/s|</figure>||')"
+lint_case l6-open-figure "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_details_open" "$_pg_fold_close"
+assert_eq "a figure without </figure> exits 1" 1 "$_rc"
+assert_has_line "a figure without </figure> is reported" 'figure#5: L6: no </figure> after this figure' "$_out"
+assert_only_rule "a figure without </figure> breaks only L6" L6 "$_out"
+
+# A </figure> missing mid-page: the next figure starts inside the open one.
+_details_nested="$(printf '%s\n' "$_pg_details" | sed '/^    <\/figure>$/d')"
+lint_case l6-nested "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_details_nested" "$_pg_fold_close"
+assert_eq "the nested fixture really drops one </figure>" 4 "$(grep -c '</figure>' "$_case_page")"
+assert_eq "a figure starting inside detail-overview exits 1" 1 "$_rc"
+assert_has_line "a figure starting inside detail-overview is reported" 'detail-2: L6: figure starts inside figure detail-overview (missing </figure>?)' "$_out"
+assert_eq "a figure starting inside detail-overview gives exactly 1 finding" 1 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "a figure starting inside detail-overview breaks only L6" L6 "$_out"
+
+_details_nested5="$(printf '%s\n' "$_pg_details" | sed 's|</details></figure>|</details>|')"
+lint_case l6-nested-noid "$_pg_overview" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_details_nested5" "$_pg_fold_close"
+assert_eq "a figure without an id starting inside detail-2 exits 1" 1 "$_rc"
+assert_has_line "a figure without an id starting inside a figure is labelled by its order" 'figure#5: L6: figure starts inside figure detail-2 (missing </figure>?)' "$_out"
+assert_only_rule "a figure without an id starting inside a figure breaks only L6" L6 "$_out"
+
+_ov_nested="$(printf '%s\n' "$_pg_overview" | sed '/^  <\/figure>$/d')"
+lint_case l6-nested-easy "$_ov_nested" "$_pg_easy2" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "an easy figure starting inside the overview exits 1" 1 "$_rc"
+assert_has_line "an easy figure starting inside the overview is reported" 'easy-2: L6: figure starts inside figure overview (missing </figure>?)' "$_out"
+assert_eq "an easy figure starting inside the overview gives exactly 1 finding (no box count over both)" 1 "$(wc -l < "$_out" | tr -d ' ')"
+assert_only_rule "an easy figure starting inside the overview breaks only L6" L6 "$_out"
+
+# The figure that a nested start closes is still checked: easy-2 carries a
+# path and no </figure>, and easy-3 starts inside it.
+_easy2_path_open="$(printf '%s\n' "$_pg_easy2" | sed 's|^  </figure>$|    <p>internal/org を直す</p>|')"
+lint_case l6-nested-checked "$_pg_overview" "$_easy2_path_open" "$_easy3" "$_pg_before" "$_pg_fold_open" "$_pg_details" "$_pg_fold_close"
+assert_eq "the nested-checked fixture really drops the easy-2 </figure>" 5 "$(grep -c '</figure>' "$_case_page")"
+assert_eq "an easy figure closed by a nested start exits 1" 1 "$_rc"
+assert_has_line "easy-3 starting inside easy-2 is reported" 'easy-3: L6: figure starts inside figure easy-2 (missing </figure>?)' "$_out"
+assert_has_line "easy-2, closed by the nested start, is still checked for L3" 'easy-2: L3: path-like text: internal/org' "$_out"
+assert_eq "an easy figure closed by a nested start gives exactly 2 findings" 2 "$(wc -l < "$_out" | tr -d ' ')"
+
+# The /plan page skeleton without the </figure> of detail-overview: detail-1
+# would sit inside it in the browser.
+awk '/id="detail-overview"/ { d = 1 } d && /<\/figure>/ { d = 0; next } { print }' \
+  "$PROJECT_ROOT/.claude/skills/plan/visual-template.html" > "$_tmp/lint-template-nested.html"
+run_pv "$PLAN_VISUAL" lint "$_tmp/lint-template-nested.html"
+assert_eq "the template without the detail-overview </figure> exits 1" 1 "$_rc"
+assert_has_line "the template without the detail-overview </figure> reports detail-1" 'detail-1: L6: figure starts inside figure detail-overview (missing </figure>?)' "$_out"
+assert_eq "the template without the detail-overview </figure> gives exactly 1 finding" 1 "$(wc -l < "$_out" | tr -d ' ')"
+
+# The page skeleton of /plan, on each of its four faces, passes as shipped.
+for _face in .claude .agents templates/base/.claude templates/base/.agents; do
+  run_pv "$PLAN_VISUAL" lint "$PROJECT_ROOT/$_face/skills/plan/visual-template.html"
+  assert_eq "$_face visual-template.html passes lint (exit 0)" 0 "$_rc"
+  assert_empty_file "$_face visual-template.html prints no finding" "$_out"
+done
+
+: > "$_tmp/lint-empty.html"
+run_pv "$PLAN_VISUAL" lint "$_tmp/lint-empty.html"
+assert_eq "empty file exits 1" 1 "$_rc"
+assert_has_line "empty file is reported under L1" 'page: L1: no element has id="overview"' "$_out"
+
+# Cut off inside a quoted value: no closing quote, >, </figure>, or </html>.
+printf '%s\n' "$_pg_head" '  <figure class="easy" id="overview"><h2>途中</h2><svg aria-label="終わらない' > "$_tmp/lint-cut.html"
+run_pv "$PLAN_VISUAL" lint "$_tmp/lint-cut.html"
+assert_eq "a page cut off inside a tag exits 1" 1 "$_rc"
+assert_has_line "a page cut off inside a tag reports the open figure" 'overview: L6: no </figure> after this figure' "$_out"
+
+run_pv "$PLAN_VISUAL" lint
+assert_eq "lint without a file exits 1" 1 "$_rc"
+assert_contains "lint without a file prints usage on stderr" "Usage:" "$_err"
+assert_empty_file "lint without a file prints nothing on stdout" "$_out"
+run_pv "$PLAN_VISUAL" lint "$_good" "$_good"
+assert_eq "lint with two files exits 1" 1 "$_rc"
+assert_contains "lint with two files prints usage on stderr" "Usage:" "$_err"
+run_pv "$PLAN_VISUAL" lint "$_tmp/missing.html"
+assert_eq "lint of a missing file exits 1" 1 "$_rc"
+assert_contains "lint of a missing file names it on stderr" "missing.html" "$_err"
+assert_empty_file "lint of a missing file prints no finding" "$_out"
+run_pv "$PLAN_VISUAL" lint "$_tmp"
+assert_eq "lint of a directory exits 1" 1 "$_rc"
 
 printf '==> digest\n'
 # write_plan <file> <status> <approved> <branch> <owner> <objective> <checklist item> <notes>

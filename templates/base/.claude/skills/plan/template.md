@@ -21,7 +21,7 @@
 
 ## Visual review
 
-<!-- Visual review page path (.harness/state/plan-visual/<slug>.html) and the self-check result. See .claude/skills/plan/diagrams.md. -->
+<!-- Visual review page path (.harness/state/plan-visual/<slug>.html), the lint result, and the self-check result. See .claude/skills/plan/diagrams.md. -->
 <!-- No page? Write: "None (<reason>)" -->
 
 ## Design decisions
