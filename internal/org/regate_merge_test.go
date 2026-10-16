@@ -19,10 +19,12 @@ import (
 
 // TestRegate_MergesTheTipInAndPushes covers AC4: after origin's main moved on
 // past the branch's gate, Regate makes D3's merge commit with the caller's
-// environment (its committer, and GIT_MERGE_AUTOEDIT=no and LC_ALL=C over the
-// caller's values), runs the scripts on it, records a gate_passed of it via
-// regate for the binding's org, pushes it to origin's feat/auth without
-// force, and merge-order then classifies the branch ready.
+// environment (its committer and its locale, with only GIT_MERGE_AUTOEDIT=no
+// over the caller's value) in a process group of git's own, runs the scripts
+// on it, records a gate_passed of it via regate for the binding's org,
+// pushes it to origin's feat/auth without force, with GIT_TERMINAL_PROMPT=0
+// and the caller's locale, from ralph's process group, and merge-order then
+// classifies the branch ready.
 func TestRegate_MergesTheTipInAndPushes(t *testing.T) {
 	fx := newRegateFixture(t)
 	pre, oldTip := fx.tips(t)
@@ -31,9 +33,10 @@ func TestRegate_MergesTheTipInAndPushes(t *testing.T) {
 	if class := fx.mergeClass(t); class != MergeClassRebase {
 		t.Fatalf("merge-order class before the regate = %s; want rebase", class)
 	}
-	fx.setHooks(t, "pre-merge-commit", "env > \"$GATE_TEST_OUT/merge-env\"\n")
+	fx.setHooks(t, "pre-merge-commit", "env > \"$GATE_TEST_OUT/merge-env\"\n"+regateRecordPgid("merge-pgid"))
+	writeGateFile(t, fx.origin, "hooks/pre-receive", "#!/bin/sh\nenv > \"$GATE_TEST_OUT/push-env\"\n"+regateRecordPgid("push-pgid"), 0o755)
 	fx.env = append(fx.env, "GIT_COMMITTER_NAME=Carol", "GIT_COMMITTER_EMAIL=carol@example.com", "GIT_MERGE_AUTOEDIT=yes",
-		"LC_ALL=ja_JP.UTF-8")
+		"LC_ALL=ja_JP.UTF-8", "GIT_TERMINAL_PROMPT=1")
 
 	res := fx.mustRegate(t)
 	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
@@ -48,16 +51,29 @@ func TestRegate_MergesTheTipInAndPushes(t *testing.T) {
 		t.Errorf("merge commit by %q; want the caller's committer, and the repository's user as the author", who)
 	}
 	vars := strings.Split(fileOrAbsent(t, filepath.Join(fx.out, "merge-env")), "\n")
-	for _, w := range []string{"GIT_MERGE_AUTOEDIT=no", "LC_ALL=C", "GATE_TEST_OUT=" + fx.out} {
+	for _, w := range []string{"GIT_MERGE_AUTOEDIT=no", "LC_ALL=ja_JP.UTF-8", "GIT_TERMINAL_PROMPT=1", "GATE_TEST_OUT=" + fx.out} {
 		if !slices.Contains(vars, w) {
 			t.Errorf("the merge's environment has no %s", w)
 		}
 	}
-	for _, notW := range []string{"GIT_MERGE_AUTOEDIT=yes", "LC_ALL=ja_JP.UTF-8"} {
+	for _, notW := range []string{"GIT_MERGE_AUTOEDIT=yes", "LC_ALL=C", "GIT_TERMINAL_PROMPT=0"} {
 		if slices.Contains(vars, notW) {
-			t.Errorf("the merge's environment has the caller's %s", notW)
+			t.Errorf("the merge's environment has %s", notW)
 		}
 	}
+	fx.assertRegateGitGroup(t, "merge-pgid", false)
+	vars = strings.Split(fileOrAbsent(t, filepath.Join(fx.out, "push-env")), "\n")
+	for _, w := range []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=ja_JP.UTF-8"} {
+		if !slices.Contains(vars, w) {
+			t.Errorf("the push's environment has no %s", w)
+		}
+	}
+	for _, notW := range []string{"GIT_TERMINAL_PROMPT=1", "LC_ALL=C"} {
+		if slices.Contains(vars, notW) {
+			t.Errorf("the push's environment has %s", notW)
+		}
+	}
+	fx.assertRegateGitGroup(t, "push-pgid", true)
 	if calls := fx.calls(t); !slices.Equal(calls, []string{"static", "test"}) {
 		t.Fatalf("scripts run = %v; want static then test", calls)
 	}
@@ -124,11 +140,13 @@ func regateNoIdentityEnv(t *testing.T, env []string) []string {
 }
 
 // TestRegate_RefusedWhenTheMergeCommitCannotBeMade covers AC5: when git makes
-// no merge commit (a conflict, a pre-merge-commit hook that fails, no
-// user.name or user.email to make it with), Regate undoes a merge left in
-// progress, records nothing, runs no script, leaves HEAD, the tree, and
-// origin as they were with no MERGE_HEAD, and refuses with the reason (the
-// conflicting files for a conflict) and a next step.
+// no merge commit (a conflict, a pre-merge-commit hook that fails, a merge a
+// signal ends before it changed the worktree) or cannot make one (no
+// user.name or user.email to make it with, which Regate checks first),
+// Regate undoes a merge left in progress, records nothing, runs no script,
+// leaves HEAD, the tree, and origin as they were with no MERGE_HEAD, and
+// refuses with the reason (the conflicting files for a conflict) and a next
+// step.
 func TestRegate_RefusedWhenTheMergeCommitCannotBeMade(t *testing.T) {
 	mainTip := func(t *testing.T, fx *regateFixture) string {
 		return gitOut(t, fx.origin, "rev-parse", "refs/heads/main")
@@ -151,6 +169,18 @@ func TestRegate_RefusedWhenTheMergeCommitCannotBeMade(t *testing.T) {
 					"left in progress), so nothing was recorded: merge it yourself (git -C " + fx.worktree + " merge " +
 					"refs/remotes/origin/main), resolve the conflicts, commit, push, and run ralph org regate --branch feat/auth again"}
 			}},
+		// git diff --name-only quotes a non-ASCII name ("\303\244.txt") and
+		// does not mark where a name with a space ends, unless -z.
+		{name: "a conflict in files named with a space and a non-ASCII letter",
+			setup: func(t *testing.T, fx *regateFixture) []string {
+				fx.commitAndPush(t, fx.main, "a b.txt", "main's\n", "ä.txt", "main's\n")
+				fx.commitAndPush(t, fx.worktree, "a b.txt", "the feature's\n", "ä.txt", "the feature's\n")
+				return fx.env
+			},
+			want: func(t *testing.T, fx *regateFixture) []string {
+				return []string{" into feat/auth in " + fx.worktree + " conflicts in a b.txt, ä.txt, and regate does not resolve conflicts"}
+			},
+			notWant: []string{`\303`, `"`}},
 		{name: "a pre-merge-commit hook stops it",
 			setup: func(t *testing.T, fx *regateFixture) []string {
 				fx.pushToOrigin(t, "main")
@@ -164,6 +194,21 @@ func TestRegate_RefusedWhenTheMergeCommitCannotBeMade(t *testing.T) {
 					"nothing was recorded: a hook such as pre-merge-commit may have stopped it; fix what git said and run ralph org " +
 					"regate --branch feat/auth again; git said:\n  the hook says no"}
 			}},
+		// origin's main moved by an empty commit, so the merge changes no
+		// file, and the hook kills git before it makes the merge commit.
+		{name: "a signal ends it before it changed the worktree",
+			setup: func(t *testing.T, fx *regateFixture) []string {
+				fx.pushToOrigin(t, "main")
+				fx.setHooks(t, "pre-merge-commit", "kill -KILL $PPID\n")
+				return fx.env
+			},
+			want: func(t *testing.T, fx *regateFixture) []string {
+				tip := mainTip(t, fx)
+				return []string{"git merge --no-ff --no-edit -m 'Merge origin/main " + tip[:12] + " into feat/auth' " + tip + " in " +
+					fx.worktree + " was ended by a signal (killed) before it made a merge commit, so nothing was recorded: run ralph " +
+					"org regate --branch feat/auth again"}
+			},
+			notWant: []string{"git merge --abort undid"}},
 		{name: "no user.name or user.email",
 			setup: func(t *testing.T, fx *regateFixture) []string {
 				fx.pushToOrigin(t, "main")
@@ -172,13 +217,16 @@ func TestRegate_RefusedWhenTheMergeCommitCannotBeMade(t *testing.T) {
 				runGit(t, "-C", fx.main, "config", "--unset", "user.email")
 				return regateNoIdentityEnv(t, fx.env)
 			},
+			// git var says so in the caller's locale: Regate reads only its
+			// exit code, so the merge runs with no LC_ALL=C.
 			want: func(t *testing.T, fx *regateFixture) []string {
-				return []string{" in " + fx.worktree + " could not make the merge commit, since git has no user.name and user.email to " +
-					"make it with, so nothing was recorded: set them (git -C " + fx.worktree + " config user.name <name> and git -C " +
-					fx.worktree + " config user.email <email>, or in your global git config) and run ralph org regate --branch " +
-					"feat/auth again; git said:\n", "auto-detection is disabled"}
+				return []string{"org: regate: git in " + fx.worktree + " has no user.name and user.email to make the merge commit of " +
+					"origin's tip " + mainTip(t, fx) + " of main with (git var GIT_AUTHOR_IDENT failed), so regate merged nothing and " +
+					"recorded nothing: set them (git -C " + fx.worktree + " config user.name <name> and git -C " + fx.worktree +
+					" config user.email <email>, or in your global git config) and run ralph org regate --branch feat/auth again; " +
+					"git said:\n", "auto-detection is disabled"}
 			},
-			notWant: []string{"git merge --abort undid"}},
+			notWant: []string{"git merge --abort undid", "git merge --no-ff"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -191,6 +239,55 @@ func TestRegate_RefusedWhenTheMergeCommitCannotBeMade(t *testing.T) {
 				t.Fatal("a merge is still in progress in the worktree after the refusal")
 			}
 		})
+	}
+}
+
+// TestRegate_AMergeEndedByASignalSaysHowToPutTheWorktreeBack: a signal that
+// ends git merge in its pre-merge-commit hook (here the hook kills it) leaves
+// the merge's result staged with no merge in progress, which git merge
+// --abort refuses and git reset --keep leaves in the files. Regate records
+// nothing, runs no script, and returns an error that says git was ended by
+// the signal, how the worktree is, and the git reset --merge that puts it
+// back, which it then does. The merge ran in a process group of its own.
+func TestRegate_AMergeEndedByASignalSaysHowToPutTheWorktreeBack(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, _ := fx.tips(t)
+	fx.commitAndPush(t, fx.main, "README.md", "main's readme\n")
+	tip := gitOut(t, fx.origin, "rev-parse", "refs/heads/main")
+	fx.setHooks(t, "pre-merge-commit", regateRecordPgid("merge-pgid")+"kill -KILL $PPID\n")
+	manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+
+	res, err := fx.regate(context.Background())
+	want := "org: regate: git merge --no-ff --no-edit -m 'Merge origin/main " + tip[:12] + " into feat/auth' " + tip + " in " +
+		fx.worktree + " was ended by a signal (killed), and the worktree is not as it was before: HEAD is " + pre + " (it was " +
+		pre + "), and the worktree has 1 uncommitted change(s) or untracked file(s); nothing was recorded: check it with git -C " +
+		fx.worktree + " status, put it back with git -C " + fx.worktree + " reset --merge " + pre + ", which also undoes a merge " +
+		"in progress, and run ralph org regate --branch feat/auth again"
+	if err == nil || err.Error() != want {
+		t.Fatalf("regate = %+v, %v\nwant the error\n%s", res, err, want)
+	}
+	if !reflect.DeepEqual(res, RegateResult{}) {
+		t.Errorf("regate = %+v with the error; want an empty result", res)
+	}
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "M  README.md" || fx.mergeInProgress(t) {
+		t.Fatalf("the worktree after the regate (merge in progress: %v):\n%s\nwant README.md staged and no merge in progress",
+			fx.mergeInProgress(t), st)
+	}
+	if got := fileOrAbsent(t, fx.o.Manifest.Path()); got != manifest {
+		t.Errorf("the regate changed the manifest:\n%s", got)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Errorf("scripts run = %v; want none", calls)
+	}
+	fx.assertRegateGitGroup(t, "merge-pgid", false)
+	fx.assertUnlocked(t)
+
+	runGit(t, "-C", fx.worktree, "reset", "--merge", pre)
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Fatalf("the worktree after the git reset --merge the error names:\n%s", st)
+	}
+	if head := gitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
+		t.Fatalf("HEAD = %s after the git reset --merge; want %s", head, pre)
 	}
 }
 
@@ -697,6 +794,46 @@ func TestRegate_AnInterruptAfterTheRecordKeepsItAndTheMerge(t *testing.T) {
 	fx.assertUnlocked(t)
 
 	regateTestHooks.afterRecord = nil
+	if res = fx.mustRegate(t); res.Outcome != RegateOutcomePushOnly || !res.Pushed || res.Head != merge || fx.originBranch(t) != merge {
+		t.Fatalf("regate run again = %+v; want the merge commit %s pushed only", res, merge)
+	}
+}
+
+// TestRegate_APushEndedByASignalKeepsTheRecordAndTheMerge covers AC7 for a
+// push a signal ends (here its pre-push hook kills git): as for an interrupt
+// while the push runs, the record and the merge commit are kept, nothing is
+// pushed, and the error says that git was ended by the signal, that origin
+// may or may not have the merge commit, and to run Regate again, which then
+// pushes only.
+func TestRegate_APushEndedByASignalKeepsTheRecordAndTheMerge(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, _ := fx.tips(t)
+	tip := fx.pushToOrigin(t, "main")
+	fx.setHooks(t, "pre-push", "kill -KILL $PPID\n")
+	res, err := fx.regate(context.Background())
+	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+	if want := "org: regate: git push origin " + merge + ":refs/heads/feat/auth in " + fx.worktree + " was ended by a signal " +
+		"(killed) while " + merge + " was pushed to origin's feat/auth, so origin may or may not have it: the gate_passed record " +
+		"of it and HEAD are kept; run ralph org regate --branch feat/auth again, which pushes it, or finds it pushed"; err == nil ||
+		err.Error() != want {
+		t.Fatalf("regate = %v\nwant     %s", err, want)
+	}
+	if res.Outcome != RegateOutcomeMerged || res.Merge != merge || !res.Passed || res.Pushed || res.Undone || res.NotUndone != "" ||
+		res.PushFailed != "" {
+		t.Fatalf("regate = %+v; want the recorded pass of the merge commit %s kept, not pushed", res, merge)
+	}
+	fx.assertMergeCommit(t, merge, pre, tip)
+	if events := fx.gateEvents(t); len(events) != 1 || events[0].Event != EventGatePassed {
+		t.Fatalf("gate events = %+v; want the gate_passed kept", events)
+	}
+	if got := fx.originBranch(t); got != pre {
+		t.Fatalf("origin's feat/auth = %s; want it not pushed, %s", got, pre)
+	}
+	fx.assertUnlocked(t)
+
+	if err := os.Remove(filepath.Join(fx.out, "hooks", "pre-push")); err != nil {
+		t.Fatal(err)
+	}
 	if res = fx.mustRegate(t); res.Outcome != RegateOutcomePushOnly || !res.Pushed || res.Head != merge || fx.originBranch(t) != merge {
 		t.Fatalf("regate run again = %+v; want the merge commit %s pushed only", res, merge)
 	}

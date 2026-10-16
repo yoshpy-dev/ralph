@@ -126,9 +126,13 @@ var errFileLockHeld = errors.New("the lock is held")
 // heldFileLock is a flock that outlives the call that took it, unlike
 // withFileLock's: the lock file stays open with LOCK_EX on it until
 // release. The cross-org watch holds one for its lifetime (watchalive.go's
-// watch.lock). The lock is tied to the open file, not the process, so two
-// heldFileLocks on the same file in one process exclude each other too, and
-// the OS releases it when the process exits however it exits.
+// watch.lock), and ralph org regate one from its first check to its end
+// (regate.go's regate.lock), for minutes rather than for the watch's life,
+// with its marker written into the file for a spawn to read once its
+// fileLockHeld check finds the lock held (regateSpawnErr). The lock is tied
+// to the open file, not the process, so two heldFileLocks on the same file
+// in one process exclude each other too, and the OS releases it when the
+// process exits however it exits.
 type heldFileLock struct {
 	f *os.File
 }
@@ -136,7 +140,8 @@ type heldFileLock struct {
 // acquireHeldFileLock takes LOCK_EX on <dir>/<name> (both created as
 // needed) and keeps it. It retries a non-blocking attempt at
 // manifestLockPollInterval for up to wait (at least one attempt), so a
-// short shared lock that fileLockHeld takes does not make it fail. When the
+// short shared lock that fileLockHeld takes (a spawn's check of
+// regate.lock, ProbeWatch's of watch.lock) does not make it fail. When the
 // lock is still held after wait, the error wraps errFileLockHeld; any other
 // flock error returns at once.
 func acquireHeldFileLock(dir, name, what string, wait time.Duration) (*heldFileLock, error) {

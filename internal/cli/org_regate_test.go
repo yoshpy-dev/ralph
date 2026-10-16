@@ -574,6 +574,9 @@ func TestOrgRegate_Help(t *testing.T) {
 			"It never rebases and never force-pushes", "with via=regate", "GATE: pass, MERGED:, HEAD:, BASE:, LOG: and PUSHED: and exits 0",
 			"After static_failed or test_failed it undoes its merge commit", "After head_moved or tree_changed it keeps it",
 			"(PUSH_ONLY:, HEAD:, BASE:, LOG: and PUSHED:, exit 0)", "An interrupt (SIGINT, SIGTERM, or SIGHUP)",
+			"A merge, its abort, and its undo finish first: they run in a process group of their own, which the Ctrl-C or the " +
+				"hangup of the terminal does not reach either",
+			"When git has no user.name and user.email to make the merge commit with, regate merges nothing, records nothing, and exits 1",
 			"it needs no running watch and no approved plan",
 			"While it runs, ralph org spawn and ralph org start --plan of the org it works on are refused",
 			"--branch string",

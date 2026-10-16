@@ -970,13 +970,13 @@ func mergeRegateNext(t *mergeTarget, steps, purpose string) string {
 // mergeRegateFailedDetail is the Detail of t, a branch whose Details name
 // ralph org regate (mergeTarget.namesRegate), when its latest gate record r
 // is a gate_failed. When ralph org regate wrote r (via=regate), it says on
-// which head the gate ran and names
-// r's log: origin's tip of the branch when that is r's head (regate gated it
-// as it was), else the merge commit regate made of r's base into the branch,
-// which regate undid after static_failed or test_failed and kept in the
-// feature worktree after head_moved or tree_changed. A branch pushed after a
-// gate-only regate failed on origin's tip reads as the second too: merge-order
-// reads no commits, so it cannot tell the two apart.
+// which head the gate ran and names r's log: origin's tip of the branch when
+// that is r's head (regate gated it as it was), else the merge commit regate
+// made of r's base into the branch, which regate undid after static_failed
+// or test_failed and kept in the feature worktree after head_moved or
+// tree_changed. A branch pushed after a gate-only regate failed on origin's
+// tip reads as the second too: merge-order reads no commits, so it cannot
+// tell the two apart.
 func mergeRegateFailedDetail(t *mergeTarget, r gateRecord, remote mergeRemote) string {
 	next := mergeRegateNext(t, "fix it in the feature worktree, push it, and ", "")
 	switch {

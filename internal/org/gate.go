@@ -401,6 +401,10 @@ type gateWording struct {
 	prefix string // what the refusal starts with: "org: gate: "
 	again  string // its last step: "run the gate again"
 	verb   string // the command in the log's lines: "ralph org gate"
+	// afterCommit follows a commit the refusal asks for, before again: ""
+	// for Gate, which gates the worktree's HEAD; ralph org regate gates only
+	// what origin has, so it asks for a push too.
+	afterCommit string
 }
 
 // gateWords is Gate's wording.
@@ -589,15 +593,17 @@ func gateCheckScript(root, rel string, w gateWording) string {
 	info, err := os.Stat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return w.prefix + fmt.Sprintf("%s does not exist: the gate runs ./%s in the feature worktree, so add it, commit it, "+
-			"and %s", path, rel, w.again)
+		return w.prefix + fmt.Sprintf("%s does not exist: the gate runs ./%s in the feature worktree, so add it, commit it%s, "+
+			"and %s", path, rel, w.afterCommit, w.again)
 	case err != nil:
-		return w.prefix + fmt.Sprintf("%s cannot be read (%s): fix it, commit it, and %s", path, pathErrorCause(err), w.again)
+		return w.prefix + fmt.Sprintf("%s cannot be read (%s): fix it, commit it%s, and %s", path, pathErrorCause(err),
+			w.afterCommit, w.again)
 	case !info.Mode().IsRegular():
-		return w.prefix + fmt.Sprintf("%s is not a regular file: the gate runs ./%s, so make it the script, commit it, and %s",
-			path, rel, w.again)
+		return w.prefix + fmt.Sprintf("%s is not a regular file: the gate runs ./%s, so make it the script, commit it%s, and %s",
+			path, rel, w.afterCommit, w.again)
 	case info.Mode().Perm()&0o111 == 0:
-		return w.prefix + fmt.Sprintf("%s is not executable: run chmod +x %s, commit the change, and %s", path, rel, w.again)
+		return w.prefix + fmt.Sprintf("%s is not executable: run chmod +x %s, commit the change%s, and %s", path, rel,
+			w.afterCommit, w.again)
 	}
 	return ""
 }
@@ -611,7 +617,7 @@ func gateDirtyRefusal(root string, dirty []string, w gateWording) string {
 		list += fmt.Sprintf("\n  ... and %d more", more)
 	}
 	return w.prefix + fmt.Sprintf("the feature worktree %s has %d uncommitted change(s) or untracked file(s): commit or "+
-		"remove them (a file the scripts write belongs in .gitignore) and %s:\n%s", root, len(dirty), w.again, list)
+		"remove them (a file the scripts write belongs in .gitignore)%s and %s:\n%s", root, len(dirty), w.afterCommit, w.again, list)
 }
 
 // gateCheckAfter reads t's worktree again after both scripts passed and

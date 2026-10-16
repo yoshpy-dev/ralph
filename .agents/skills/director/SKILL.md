@@ -464,12 +464,15 @@ merge するかどうかは人が決める。人がはっきり頼んだとき�
 
 1. 1 本ずつ打つ。regate は台帳ごとに 1 つしか走らない。gate のスクリプトが
    走るので数分かかる。Claude Code では Bash の `run_in_background` で
-   走らせ、stdout と stderr を cwd の `.harness/state/` の下のファイルに書き、
-   終わってから終了コードと `GATE:`・`HEAD:`・`PUSHED:` の行を読む。前景で
-   打つなら、ツールの timeout を regate にかかる時間より長くする。
+   走らせ、stdout と stderr を cwd の `.harness/state/regate-<名前>.out` に
+   書き、終わってから終了コードと `GATE:`・`HEAD:`・`PUSHED:` の行を読む。
+   `<名前>` はブランチ名の `/` を `-` にしたもの(`feat/auth-token` なら
+   `feat-auth-token`)にする。`/` が残ると、ないディレクトリへの書き込みに
+   なって失敗する。前景で打つなら、ツールの timeout を regate にかかる時間
+   より長くする。
 
    ```sh
-   ralph org regate --branch <ブランチ> > .harness/state/regate-<slug>.out 2>&1
+   ralph org regate --branch feat/auth-token > .harness/state/regate-feat-auth-token.out 2>&1
    ```
 
 2. 終了コード 0 なら、merge-order を打ち直して、そのブランチが `ready` に

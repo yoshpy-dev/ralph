@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -519,7 +520,8 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 			setup: func(t *testing.T, fx *regateFixture) { writeGateFile(t, fx.worktree, "new.txt", "x\n", 0o644) },
 			want: func(fx *regateFixture) []string {
 				return []string{"the feature worktree " + fx.worktree + " has 1 uncommitted change(s) or untracked file(s)",
-					"and run ralph org regate --branch feat/auth again:\n  ?? new.txt"}
+					"(a file the scripts write belongs in .gitignore), push the commit to origin's feat/auth and run ralph org regate " +
+						"--branch feat/auth again:\n  ?? new.txt"}
 			}},
 		{name: "no default branch",
 			setup: func(t *testing.T, fx *regateFixture) {
@@ -538,7 +540,7 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 			},
 			want: func(fx *regateFixture) []string {
 				return []string{filepath.Join(fx.worktree, "scripts", "run-static-verify.sh") + " does not exist",
-					"add it, commit it, and run ralph org regate --branch feat/auth again"}
+					"add it, commit it, push the commit to origin's feat/auth, and run ralph org regate --branch feat/auth again"}
 			}},
 		{name: "the test script is not executable",
 			setup: func(t *testing.T, fx *regateFixture) {
@@ -549,7 +551,8 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 				gateCommit(t, fx.worktree, "the test script loses its x bit")
 			},
 			want: func(fx *regateFixture) []string {
-				return []string{filepath.Join(fx.worktree, "scripts", "run-test.sh") + " is not executable"}
+				return []string{filepath.Join(fx.worktree, "scripts", "run-test.sh") + " is not executable",
+					"commit the change, push the commit to origin's feat/auth, and run ralph org regate --branch feat/auth again"}
 			}},
 	}
 	for _, tc := range cases {
@@ -639,6 +642,64 @@ func TestRegate_RefusedWhileAnotherRegateHoldsTheLock(t *testing.T) {
 	}
 }
 
+// TestGateWording_RefusalsThatAskForACommit pins, word for word, the shared
+// refusals that ask for a commit (gateCheckScript's four, gateDirtyRefusal)
+// in both wordings: Gate's read as they did before ralph org regate shared
+// them, and regate's ask for a push of the commit too, since regate gates
+// only what origin has (gateWording.afterCommit).
+func TestGateWording_RefusalsThatAskForACommit(t *testing.T) {
+	root := t.TempDir()
+	writeGateFile(t, root, "scripts/plain.sh", "#!/bin/sh\n", 0o644)
+	mkdirAll(t, filepath.Join(root, "scripts", "dir.sh"))
+	writeGateFile(t, root, "file", "x\n", 0o644)
+	missing, unreadable := filepath.Join(root, "scripts", "missing.sh"), filepath.Join(root, "file", "x.sh")
+	dir, plain := filepath.Join(root, "scripts", "dir.sh"), filepath.Join(root, "scripts", "plain.sh")
+	for _, tc := range []struct {
+		name string
+		w    gateWording
+		want []string
+	}{
+		{"gate", gateWords, []string{
+			"org: gate: " + missing + " does not exist: the gate runs ./scripts/missing.sh in the feature worktree, so add it, " +
+				"commit it, and run the gate again",
+			"org: gate: " + unreadable + " cannot be read (not a directory): fix it, commit it, and run the gate again",
+			"org: gate: " + dir + " is not a regular file: the gate runs ./scripts/dir.sh, so make it the script, commit it, and " +
+				"run the gate again",
+			"org: gate: " + plain + " is not executable: run chmod +x scripts/plain.sh, commit the change, and run the gate again",
+			"org: gate: the feature worktree " + root + " has 1 uncommitted change(s) or untracked file(s): commit or remove them " +
+				"(a file the scripts write belongs in .gitignore) and run the gate again:\n  ?? new.txt",
+		}},
+		{"regate", regateWords("feat/auth"), []string{
+			"org: regate: " + missing + " does not exist: the gate runs ./scripts/missing.sh in the feature worktree, so add it, " +
+				"commit it, push the commit to origin's feat/auth, and run ralph org regate --branch feat/auth again",
+			"org: regate: " + unreadable + " cannot be read (not a directory): fix it, commit it, push the commit to origin's " +
+				"feat/auth, and run ralph org regate --branch feat/auth again",
+			"org: regate: " + dir + " is not a regular file: the gate runs ./scripts/dir.sh, so make it the script, commit it, push " +
+				"the commit to origin's feat/auth, and run ralph org regate --branch feat/auth again",
+			"org: regate: " + plain + " is not executable: run chmod +x scripts/plain.sh, commit the change, push the commit to " +
+				"origin's feat/auth, and run ralph org regate --branch feat/auth again",
+			"org: regate: the feature worktree " + root + " has 1 uncommitted change(s) or untracked file(s): commit or remove " +
+				"them (a file the scripts write belongs in .gitignore), push the commit to origin's feat/auth and run ralph org " +
+				"regate --branch feat/auth again:\n  ?? new.txt",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := []string{
+				gateCheckScript(root, "scripts/missing.sh", tc.w),
+				gateCheckScript(root, "file/x.sh", tc.w),
+				gateCheckScript(root, "scripts/dir.sh", tc.w),
+				gateCheckScript(root, "scripts/plain.sh", tc.w),
+				gateDirtyRefusal(root, []string{"?? new.txt"}, tc.w),
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("refusal %d =\n%q\nwant\n%q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 // TestRegate_FetchFailures covers AC2's fetch half: a fetch that fails
 // refuses with git's stderr; origin with no feature branch is told apart
 // (deleted after the merge, or never pushed), but only for the feature
@@ -684,9 +745,9 @@ func TestRegate_FetchFailures(t *testing.T) {
 			notWant: []string{"origin has no branch"}},
 		{name: "the fetch runs past the bound",
 			setup: func(t *testing.T, fx *regateFixture) {
-				timeout := regateRemoteTimeout
-				regateRemoteTimeout = 300 * time.Millisecond
-				t.Cleanup(func() { regateRemoteTimeout = timeout })
+				timeout := regateGitTimeout
+				regateGitTimeout = 300 * time.Millisecond
+				t.Cleanup(func() { regateGitTimeout = timeout })
 				// An upload-pack that never answers, with its output away from
 				// git's, so nothing holds the fetch's pipes once git is stopped.
 				writeGateFile(t, fx.out, "slow-upload-pack", "#!/bin/sh\nexec >/dev/null 2>&1 </dev/null\nsleep 3\n", 0o755)
@@ -706,6 +767,33 @@ func TestRegate_FetchFailures(t *testing.T) {
 			fx.assertRefused(t, res, err, before, tc.want(fx), tc.notWant)
 		})
 	}
+}
+
+// TestRegate_AFetchEndedByASignalRecordsNothing: a fetch a signal ends (here
+// a reference-transaction hook kills git as the fetch moves
+// refs/remotes/origin/main) is told as what it is, as an interrupt of the
+// fetch is: an error that says nothing was recorded, with the worktree and
+// origin as they were and no script run.
+func TestRegate_AFetchEndedByASignalRecordsNothing(t *testing.T) {
+	fx := newRegateFixture(t)
+	fx.pushToOrigin(t, "main")
+	fx.setHooks(t, "reference-transaction", "kill -KILL $PPID\n")
+	before := fx.snapshot(t)
+	res, err := fx.regate(context.Background())
+	if want := "org: regate: git fetch origin +refs/heads/main:refs/remotes/origin/main in " + fx.worktree + " was ended by a " +
+		"signal (killed), so nothing was recorded: run ralph org regate --branch feat/auth again"; err == nil || err.Error() != want {
+		t.Fatalf("regate = %+v, %v\nwant the error %s", res, err, want)
+	}
+	if !reflect.DeepEqual(res, RegateResult{}) {
+		t.Errorf("regate = %+v with the error; want an empty result", res)
+	}
+	if after := fx.snapshot(t); after != before {
+		t.Errorf("the regate changed the ledger, the worktree, or origin:\nbefore %+v\nafter  %+v", before, after)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Errorf("scripts run = %v; want none", calls)
+	}
+	fx.assertUnlocked(t)
 }
 
 // TestRegate_RefusesAHeadThatIsNotOriginsTip covers AC2's D4 half: after the
@@ -763,35 +851,66 @@ func TestRegate_RefusesAHeadThatIsNotOriginsTip(t *testing.T) {
 	}
 }
 
-// TestRegateRemoteEnv pins GIT_TERMINAL_PROMPT=0 (D8) and LC_ALL=C on the
-// git commands Regate runs against origin: both come after the caller's
-// environment, so they win over a value it sets, and the caller's slice is
-// not written to.
+// TestRegateRemoteEnv pins GIT_TERMINAL_PROMPT=0 (D8) on the git commands
+// Regate runs against origin, and LC_ALL=C on the fetches only, the one
+// whose messages Regate reads: each comes after the caller's environment, so
+// it wins over a value the caller sets, and the caller's slice is not
+// written to.
 func TestRegateRemoteEnv(t *testing.T) {
 	env := make([]string, 2, 8)
 	copy(env, []string{"GIT_TERMINAL_PROMPT=1", "LC_ALL=ja_JP.UTF-8"})
-	got := regateRemoteEnv(env)
-	if want := []string{"GIT_TERMINAL_PROMPT=1", "LC_ALL=ja_JP.UTF-8", "LC_ALL=C", "GIT_TERMINAL_PROMPT=0"}; !slices.Equal(got, want) {
+	if got, want := regateRemoteEnv(env), []string{"GIT_TERMINAL_PROMPT=1", "LC_ALL=ja_JP.UTF-8", "GIT_TERMINAL_PROMPT=0"}; !slices.Equal(got, want) {
 		t.Fatalf("regateRemoteEnv = %q; want %q", got, want)
 	}
+	got := regateFetchEnv(env)
+	if want := []string{"GIT_TERMINAL_PROMPT=1", "LC_ALL=ja_JP.UTF-8", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}; !slices.Equal(got, want) {
+		t.Fatalf("regateFetchEnv = %q; want %q", got, want)
+	}
 	if gateEnvValue(got, "GIT_TERMINAL_PROMPT") != "0" || gateEnvValue(got, "LC_ALL") != "C" {
-		t.Fatalf("regateRemoteEnv = %q; want GIT_TERMINAL_PROMPT=0 and LC_ALL=C to win", got)
+		t.Fatalf("regateFetchEnv = %q; want GIT_TERMINAL_PROMPT=0 and LC_ALL=C to win", got)
 	}
 	if spare := env[:4]; spare[2] != "" || spare[3] != "" {
-		t.Fatalf("regateRemoteEnv wrote %q into the caller's spare capacity", spare[2:])
+		t.Fatalf("regateRemoteEnv or regateFetchEnv wrote %q into the caller's spare capacity", spare[2:])
 	}
-	if got := regateRemoteEnv(nil); !slices.Equal(got, []string{"LC_ALL=C", "GIT_TERMINAL_PROMPT=0"}) {
-		t.Fatalf("regateRemoteEnv(nil) = %q", got)
+	if got := regateFetchEnv(nil); !slices.Equal(got, []string{"GIT_TERMINAL_PROMPT=0", "LC_ALL=C"}) {
+		t.Fatalf("regateFetchEnv(nil) = %q", got)
+	}
+}
+
+// regateRecordPgid is a hook line that appends the process group of the
+// hook, which is git's, to the file name in $GATE_TEST_OUT.
+func regateRecordPgid(name string) string {
+	return "ps -o pgid= -p $$ >> \"$GATE_TEST_OUT/" + name + "\"\n"
+}
+
+// assertRegateGitGroup checks the process groups regateRecordPgid wrote to
+// name: at least one, and each the test's own (ralph's) when inTestGroup,
+// else none of them (a group of git's own, regateBoundedGit's ownGroup).
+func (fx *regateFixture) assertRegateGitGroup(t *testing.T, name string, inTestGroup bool) {
+	t.Helper()
+	pgids := strings.Fields(fileOrAbsent(t, filepath.Join(fx.out, name)))
+	if len(pgids) == 0 {
+		t.Fatalf("no process group in %s", name)
+	}
+	test := strconv.Itoa(syscall.Getpgrp())
+	for _, pgid := range pgids {
+		if inTestGroup && pgid != test {
+			t.Errorf("%s: git ran in the process group %s; want ralph's, %s", name, pgid, test)
+		}
+		if !inTestGroup && pgid == test {
+			t.Errorf("%s: git ran in ralph's process group %s; want one of its own", name, pgid)
+		}
 	}
 }
 
 // TestRegate_FetchRunsWithNoTerminalPrompt covers AC2's environment: both
 // fetches run with GIT_TERMINAL_PROMPT=0 and LC_ALL=C even when the caller
-// sets other values, as an upload-pack that saves its environment shows.
+// sets other values, as an upload-pack that saves its environment shows. They
+// run in ralph's process group, where ssh can ask for a key on the terminal.
 func TestRegate_FetchRunsWithNoTerminalPrompt(t *testing.T) {
 	fx := newRegateFixture(t)
 	writeGateFile(t, fx.out, "upload-pack", "#!/bin/sh\nenv >> \"$GATE_TEST_OUT/fetch-env\"\necho fetch >> \"$GATE_TEST_OUT/fetches\"\n"+
-		"exec git upload-pack \"$@\"\n", 0o755)
+		regateRecordPgid("fetch-pgid")+"exec git upload-pack \"$@\"\n", 0o755)
 	runGit(t, "-C", fx.main, "config", "remote.origin.uploadpack", filepath.Join(fx.out, "upload-pack"))
 	fx.env = append(fx.env, "GIT_TERMINAL_PROMPT=1", "LC_ALL=ja_JP.UTF-8")
 	if res := fx.mustRegate(t); res.Outcome != RegateOutcomeGated || !res.Passed {
@@ -811,6 +930,7 @@ func TestRegate_FetchRunsWithNoTerminalPrompt(t *testing.T) {
 			t.Errorf("the fetch's environment has the caller's %s", notW)
 		}
 	}
+	fx.assertRegateGitGroup(t, "fetch-pgid", true)
 }
 
 // TestRegate_UpToDateDoesNothing covers AC3's first half: with HEAD

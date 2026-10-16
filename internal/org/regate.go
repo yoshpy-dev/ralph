@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -92,25 +93,23 @@ const (
 	// refuses: a spawn's check holds the lock shared for a moment (D9), which
 	// must not make a Regate fail.
 	regateLockWait = time.Second
-	// regateRemoteWaitDelay is regateRemoteGit's exec.Cmd.WaitDelay: how long
+	// regateGitWaitDelay is regateBoundedGit's exec.Cmd.WaitDelay: how long
 	// after the kill, or after git exited, it waits for the output pipes,
-	// which a child (ssh, a credential helper) can hold.
-	regateRemoteWaitDelay = 2 * time.Second
+	// which a child (ssh, a credential helper, a hook) can hold.
+	regateGitWaitDelay = 2 * time.Second
 	// regateStderrTailLines is how many of git's last stderr lines a refused
 	// fetch, merge, or push quotes.
 	regateStderrTailLines = 5
 	// regateRemoteNoRef is what git prints on stderr when origin has no ref
-	// a fetch names (LC_ALL=C, regateRemoteEnv).
+	// a fetch names (LC_ALL=C, regateFetchEnv).
 	regateRemoteNoRef = "couldn't find remote ref"
-	// regateNoIdentity is in what git prints on stderr when it has no
-	// committer or author name and email to make a commit with (LC_ALL=C):
-	// "Committer identity unknown", "Author identity unknown".
-	regateNoIdentity = "identity unknown"
 )
 
-// regateRemoteTimeout bounds each git command Regate runs against origin
-// (D8), and each one regateUncancelledGit runs. Tests shorten it.
-var regateRemoteTimeout = 120 * time.Second
+// regateGitTimeout bounds each git command Regate runs with
+// regateBoundedGit: the fetches and the push against origin (D8), the check
+// of the identity the merge commit needs, and the merge, its abort, and its
+// undo (regateUncancelledGit). Tests shorten it.
+var regateGitTimeout = 120 * time.Second
 
 // regateTestHooks are the points where a test stops Regate. Each is nil
 // outside tests.
@@ -132,11 +131,14 @@ type RegateParams struct {
 	Branch string
 	// Env is the caller's environment, NAME=value entries (the CLI passes
 	// os.Environ()); nil means os.Environ(). The scripts get it fixed by
-	// gateScriptEnv; the git commands against origin, and the merge, its
-	// abort, and its undo, get it with regateRemoteEnv's variables after it
-	// (the merge also with GIT_MERGE_AUTOEDIT=no, regateMergeEnv), so the
-	// merge commit has the caller's identity; the record's by= and
-	// herdr_pane= come from its USER and HERDR_PANE_ID, as Gate's do.
+	// gateScriptEnv. The git commands get it with only what Regate needs
+	// after it: the fetches GIT_TERMINAL_PROMPT=0 and LC_ALL=C
+	// (regateFetchEnv), the push GIT_TERMINAL_PROMPT=0 (regateRemoteEnv), the
+	// merge GIT_MERGE_AUTOEDIT=no (regateMergeEnv), and the identity check,
+	// the merge's abort, and its undo nothing, so the merge commit has the
+	// caller's identity and the merge's hooks run in the caller's locale; the
+	// record's by= and herdr_pane= come from its USER and HERDR_PANE_ID, as
+	// Gate's do.
 	Env []string
 }
 
@@ -208,7 +210,7 @@ type RegateResult struct {
 	// (a RegateOutcomeMerged pass, RegateOutcomePushOnly).
 	Pushed bool
 	// PushFailed is set when that push failed or ran past
-	// regateRemoteTimeout: why, the end of git's stderr, and the next step,
+	// regateGitTimeout: why, the end of git's stderr, and the next step,
 	// running Regate again, which pushes only (D4). The record and Head are
 	// kept as they are (D5).
 	PushFailed string
@@ -251,10 +253,12 @@ type RegateResult struct {
 // command that fails, a log that cannot be written, a record that cannot be
 // appended, and an interruption: when ctx is done, a running fetch, script,
 // or push is stopped (a merge, its abort, and its undo are not: they finish
-// first). Up to the moment the event is appended nothing is recorded, and the
-// merge commit is undone (regateInterrupted, regateMerged); after it, the
-// record and the merge commit are kept and nothing more is pushed
-// (regatePush).
+// first, in a process group of their own, which the Ctrl-C or the hangup a
+// terminal sends its foreground group does not reach either,
+// regateUncancelledGit). Up to the moment the event is appended nothing is
+// recorded, and the merge commit is undone (regateInterrupted,
+// regateMerged); after it, the record and the merge commit are kept and
+// nothing more is pushed (regatePush).
 func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) {
 	if p.Branch == "" {
 		return RegateResult{Refused: "org: regate: no branch named: name the feature branch to regate (ralph org merge-order " +
@@ -333,9 +337,11 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 const regatePrefix = "org: regate: "
 
 // regateWords is Regate's wording of the worktree checks it shares with
-// Gate (gateWording), for branch.
+// Gate (gateWording), for branch: a commit it asks for is to be pushed too,
+// since Regate refuses a HEAD that origin's tip of the branch is not (D4).
 func regateWords(branch string) gateWording {
-	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again", verb: "ralph org regate"}
+	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again", verb: "ralph org regate",
+		afterCommit: ", push the commit to origin's " + branch}
 }
 
 // regateLockPathIn is the regate.lock of the state dir stateDir.
@@ -610,20 +616,23 @@ func regateCheckInProgress(ctx context.Context, root string, w gateWording) (str
 // refs/remotes/origin/ (D8), so that origin having no t.branch is told apart
 // from every other failure, and returns the two tips it then reads there.
 // The refusal says why a fetch failed: origin has no t.branch, the fetch ran
-// past regateRemoteTimeout, or it failed another way, quoting the end of
-// git's stderr. The error is for ctx done or a git that could not run.
+// past regateGitTimeout, or it failed another way, quoting the end of git's
+// stderr. The error is for ctx done, a git that could not run, or a fetch a
+// signal ended, which, like ctx done, records nothing.
 func regateFetch(ctx context.Context, t gateTarget, env []string, w gateWording) (defaultTip, branchTip, refused string, err error) {
 	var tips []string
 	for _, name := range []string{t.base.branch, t.branch} {
 		spec := "+refs/heads/" + name + ":refs/remotes/origin/" + name
 		command := "git fetch origin " + spec
-		r, timedOut, err := regateRemoteGit(ctx, t.root, env, "fetch", "origin", spec)
+		r, timedOut, err := regateRemoteGit(ctx, t.root, regateFetchEnv(env), "fetch", "origin", spec)
 		switch {
+		case errors.As(err, new(regateGitSignaled)):
+			return "", "", "", fmt.Errorf("%w, so nothing was recorded: %s", err, w.again)
 		case err != nil:
 			return "", "", "", err
 		case timedOut:
 			return "", "", w.prefix + fmt.Sprintf("%s in %s ran past %s and was stopped, so nothing was recorded: check the "+
-				"network and origin's credentials and %s%s", command, t.root, regateRemoteTimeout, w.again, regateStderrTail(r.stderr)), nil
+				"network and origin's credentials and %s%s", command, t.root, regateGitTimeout, w.again, regateStderrTail(r.stderr)), nil
 		case r.code != 0 && name == t.branch && strings.Contains(r.stderr, regateRemoteNoRef):
 			return "", "", w.prefix + fmt.Sprintf("origin has no branch %s: it was deleted after the merge, or never pushed "+
 				"(%s in %s failed), so nothing was recorded: when its PR is merged there is nothing to regate; otherwise push "+
@@ -705,41 +714,87 @@ func regateIsAncestor(ctx context.Context, root, a, b string) (bool, error) {
 	return false, fmt.Errorf("%sgit merge-base --is-ancestor %s %s in %s: exit %d: %s", regatePrefix, a, b, root, r.code, r.stderr)
 }
 
-// regateRemoteEnv is env, copied, with LC_ALL=C and GIT_TERMINAL_PROMPT=0
-// after it, so both win (D8): git asks for no credentials on the terminal,
-// and prints its messages untranslated, which regateFetch reads
-// (regateRemoteNoRef). ssh's own prompt for a key is left as it is.
+// regateRemoteEnv is env, copied, with GIT_TERMINAL_PROMPT=0 after it, so it
+// wins (D8): a fetch or the push asks for no credentials on the terminal.
+// ssh's own prompt for a key is left as it is (regateRemoteGit).
 func regateRemoteEnv(env []string) []string {
-	return append(slices.Clip(env), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
+	return append(slices.Clip(env), "GIT_TERMINAL_PROMPT=0")
 }
 
-// regateRemoteGit runs `git --no-optional-locks -C dir args...`, a command
-// that talks to origin (or one regateUncancelledGit runs), with env and
-// regateRemoteEnv's variables, its stdin empty, stopped after
-// regateRemoteTimeout (D8); timedOut reports that the bound stopped it.
+// regateFetchEnv is regateRemoteEnv's env with LC_ALL=C after it, so that
+// git prints its messages untranslated, which regateFetch reads
+// (regateRemoteNoRef). The push and the merge read none of git's text, so
+// their hooks run in the caller's locale.
+func regateFetchEnv(env []string) []string {
+	return append(regateRemoteEnv(env), "LC_ALL=C")
+}
+
+// regateRemoteGit runs a git command that talks to origin, a fetch or the
+// push (D8), with env (regateBoundedGit) in ralph's process group: ssh can
+// then ask for a key on the terminal, and a Ctrl-C or a hangup of the
+// terminal reaches git as it reaches ralph, which stops the fetch or the
+// push the way an interrupt does (ctx done).
+func regateRemoteGit(ctx context.Context, dir string, env []string, args ...string) (gitResult, bool, error) {
+	return regateBoundedGit(ctx, dir, env, false, args...)
+}
+
+// regateGitSignaled is in the error regateBoundedGit returns for a git that
+// a signal ended while ctx was live and before the bound: a kill from
+// outside ralph, or, for a git in ralph's process group (regateRemoteGit),
+// the terminal's Ctrl-C or hangup before ctx saw it. Its text says what
+// became of git: "was ended by a signal (interrupt)".
+type regateGitSignaled struct{ signal syscall.Signal }
+
+func (e regateGitSignaled) Error() string {
+	return fmt.Sprintf("was ended by a signal (%v)", e.signal)
+}
+
+// regateBoundedGit runs `git --no-optional-locks -C dir args...` with env as
+// it is, its stdin empty, stopped after regateGitTimeout; timedOut reports
+// that the bound stopped it. With ownGroup, git runs in a process group of
+// its own, as the gate scripts do (runGateScript), so a signal the terminal
+// sends its foreground group (Ctrl-C, a hangup) reaches ralph and not git,
+// and the bound kills the whole group, git's children (a hook, ssh) with it.
+// A hook that reads the terminal then stops (SIGTTIN) until the bound.
 // WaitDelay closes the output pipes a child still holds after the kill or
 // after git exited, so a child cannot hold the bound up; an exit 0 whose pipe
 // a child held is a success, the way realMergeOrderExec reads it. The error
-// is for a git that could not run or ctx done; a non-zero exit is not one.
-func regateRemoteGit(ctx context.Context, dir string, env []string, args ...string) (r gitResult, timedOut bool, err error) {
-	remoteCtx, cancel := context.WithTimeout(ctx, regateRemoteTimeout)
+// is for a git that could not run, ctx done, and a git a signal ended
+// (regateGitSignaled); a non-zero exit is not one. Release builds target
+// darwin and linux only, where Setpgid and kill(-pgid) exist.
+func regateBoundedGit(ctx context.Context, dir string, env []string, ownGroup bool, args ...string) (r gitResult, timedOut bool,
+	err error) {
+	gitCtx, cancel := context.WithTimeout(ctx, regateGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(remoteCtx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
-	cmd.Env = regateRemoteEnv(env)
-	cmd.WaitDelay = regateRemoteWaitDelay
+	cmd := exec.CommandContext(gitCtx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	cmd.Env = env
+	if ownGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return nil
+		}
+	}
+	cmd.WaitDelay = regateGitWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
 	r = gitResult{stdout: stdout.String(), stderr: strings.TrimSpace(stderr.String())}
 	var exitErr *exec.ExitError
+	var status syscall.WaitStatus
+	if errors.As(runErr, &exitErr) {
+		status, _ = exitErr.Sys().(syscall.WaitStatus)
+	}
 	switch {
 	case ctx.Err() != nil:
 		return r, false, fmt.Errorf("org: regate: git %s in %s: %w", strings.Join(args, " "), dir, context.Cause(ctx))
-	case remoteCtx.Err() != nil:
+	case gitCtx.Err() != nil:
 		return r, true, nil
 	case runErr == nil, errors.Is(runErr, exec.ErrWaitDelay):
-	case errors.As(runErr, &exitErr) && exitErr.ExitCode() > 0:
+	case exitErr != nil && exitErr.ExitCode() > 0:
 		r.code = exitErr.ExitCode()
+	case exitErr != nil && status.Signaled():
+		return r, false, fmt.Errorf("org: regate: git %s in %s %w", strings.Join(args, " "), dir, regateGitSignaled{status.Signal()})
 	default:
 		return r, false, fmt.Errorf("org: regate: git %s in %s: %w", strings.Join(args, " "), dir, runErr)
 	}
