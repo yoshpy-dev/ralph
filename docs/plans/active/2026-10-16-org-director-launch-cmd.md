@@ -205,6 +205,8 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
   - S1 設定と検証: 4c3f5fb9。config が置き換えの規則(`ExpandDirectorLaunchArg`)と検証(`ValidateDirectorLaunchCmd`)も公開した
   - S2 は大きいので 2 つのコミットに分けた。S2a(記録の形、check-in の書き手と隠れた動詞、起動時刻の読み方、SIGTERM と待ち、起動スクリプトと argv の組み立て): f8d4db99。S2a のあいだ、StopDirector は launch cmd の登録を断る(S3 で置き換える)。S2b は start の launch_cmd の道、後始末、CLI の出力、設定の読み方、雛形
   - D10 に「launch_cmd は main worktree の `ralph.toml` から読む」を足した(S1 の implementer の指摘)。図に関わらないので図はそのまま、digest を取り直して自動承認し直した(3edb71508e34 → af95b6db6074)
+  - S2b(start の launch_cmd の道、check-in の待ち、後始末、CLI の出力、main worktree からの launch_cmd の読み込み、雛形の `{{IF_HERDR}}` / `{{IF_CMD}}` の行): 2f7962c9。CLI のテストは TestMain で agent の探索と ralph の実行ファイルの取得を失敗に固定し、本物の claude や codex を起動スクリプトから動かさない。偽の launch_cmd には `env -u RALPH_ORG_AGMSG_HOME` を足した(テストの env が偽の端末に漏れて、agmsg home を渡さない変異が残ったため)
+  - S3(stop の launch_cmd の道、`RALPH_DIRECTOR_TOKEN` の断り、status と `ralph status` と `--json` と `stop --all` の案内、start と stop の help): 4a9c44f8。`--force` は、本人と確かめたプロセスには普段どおり SIGTERM を送って待ち、終わらなければ force 付きで記録する。ps を読めなければ何も送らない(D11 の「確かめられれば `--force` でも普段どおり閉じる」と同じ意味)。JSON の `terminal_name` は CLI の表示用の型にだけ置き、記録の型は変えていない。このブランチのコメントが指す計画のパスを、計画 ID の形に直した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
