@@ -486,9 +486,11 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 		{name: "a rebase stopped on a conflict",
 			setup: func(t *testing.T, fx *regateFixture) { fx.stopRebaseOnAConflict(t, false) },
 			want: func(fx *regateFixture) []string {
-				return []string{"a rebase is in progress in " + fx.worktree + ", so HEAD is detached",
-					"git rebase --abort, and run ralph org regate --branch feat/auth again"}
-			}},
+				return []string{"a rebase is in progress in " + fx.worktree + ", so HEAD is detached and not on the feature branch " +
+					"feat/auth: undo it with git rebase --abort (regate merges origin's default branch instead, and a finished " +
+					"rebase would need a force push), and run ralph org regate --branch feat/auth again"}
+			},
+			notWant: []string{"rebase --continue"}},
 		// gateCheckBranch looks for a rebase only with HEAD detached;
 		// regateCheckInProgress also looks with the branch checked out.
 		{name: "a rebase directory with the branch checked out",
@@ -496,10 +498,11 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 				mkdirAll(t, gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge"))
 			},
 			want: func(fx *regateFixture) []string {
-				return []string{"a rebase is in progress in " + fx.worktree + ": finish it with git rebase --continue, or undo it " +
-					"with git rebase --abort, and run ralph org regate --branch feat/auth again"}
+				return []string{"a rebase is in progress in " + fx.worktree + ": undo it with git rebase --abort (regate merges " +
+					"origin's default branch instead, and a finished rebase would need a force push), and run ralph org regate " +
+					"--branch feat/auth again"}
 			},
-			notWant: []string{"detached"}},
+			notWant: []string{"detached", "rebase --continue"}},
 		// The merge check comes before the clean tree check, so a merge with
 		// staged changes is told as a merge. Its commit is to be pushed too:
 		// regate gates only what origin has.

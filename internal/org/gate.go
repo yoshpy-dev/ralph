@@ -405,10 +405,17 @@ type gateWording struct {
 	// for Gate, which gates the worktree's HEAD; ralph org regate gates only
 	// what origin has, so it asks for a push too.
 	afterCommit string
+	// rebaseSteps says what to do with a rebase stopped in the worktree:
+	// gateRebaseSteps for Gate.
+	rebaseSteps string
 }
 
+// gateRebaseSteps is Gate's way out of a stopped rebase: Gate gates the
+// rebased HEAD, so either end of the rebase will do.
+const gateRebaseSteps = "finish it with git rebase --continue, or undo it with git rebase --abort"
+
 // gateWords is Gate's wording.
-var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again", verb: "ralph org gate"}
+var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again", verb: "ralph org gate", rebaseSteps: gateRebaseSteps}
 
 // gateCheckWorktree runs Gate's checks of the worktree dir is in against f,
 // in Gate's order, and returns what they found, or the refusal of the first
@@ -495,7 +502,7 @@ func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding, w gate
 	}
 	if rebasing {
 		return "", w.prefix + fmt.Sprintf("a rebase is in progress in %s, so HEAD is detached and not on the feature branch %s: "+
-			"finish it with git rebase --continue, or undo it with git rebase --abort, and %s", root, f.Branch, w.again), nil
+			"%s, and %s", root, f.Branch, w.rebaseSteps, w.again), nil
 	}
 	return "", w.prefix + fmt.Sprintf("HEAD is detached in %s, not on the feature branch %s: run git switch %s "+
 		"and %s", root, f.Branch, f.Branch, w.again), nil

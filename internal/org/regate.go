@@ -344,10 +344,14 @@ const regatePrefix = "org: regate: "
 
 // regateWords is Regate's wording of the worktree checks it shares with
 // Gate (gateWording), for branch: a commit it asks for is to be pushed too,
-// since Regate refuses a HEAD that origin's tip of the branch is not (D4).
+// since Regate refuses a HEAD that origin's tip of the branch is not (D4). A
+// stopped rebase is only to be undone: a finished one rewrites the branch, so
+// origin would take it only with a force push, which Regate does not do (D3).
 func regateWords(branch string) gateWording {
 	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again", verb: "ralph org regate",
-		afterCommit: ", push the commit to origin's " + branch}
+		afterCommit: ", push the commit to origin's " + branch,
+		rebaseSteps: "undo it with git rebase --abort (regate merges origin's default branch instead, and a finished rebase " +
+			"would need a force push)"}
 }
 
 // regateLockPathIn is the regate.lock of the state dir stateDir.
@@ -606,8 +610,7 @@ func regateCheckInProgress(ctx context.Context, root, branch string, w gateWordi
 		return "", err
 	}
 	if rebasing {
-		return w.prefix + fmt.Sprintf("a rebase is in progress in %s: finish it with git rebase --continue, or undo it with "+
-			"git rebase --abort, and %s", root, w.again), nil
+		return w.prefix + fmt.Sprintf("a rebase is in progress in %s: %s, and %s", root, w.rebaseSteps, w.again), nil
 	}
 	merging, err := gateGitPathExists(ctx, w.prefix, root, "a merge", "MERGE_HEAD")
 	if err != nil {
