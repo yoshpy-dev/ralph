@@ -1,7 +1,7 @@
 # org-regate
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:7306f0d06797
+- Approved: 2026-10-16 sha256:0d63d9df1288
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目。FR-7 の「後から入る PR は、main に rebase してゲートを取り直してから出す」のうち、ほかの PR の merge のあとの取り直し。8a-1 の計画(`docs/plans/archive/2026-10-14-org-director-attach.md`)の D1 が、これを `auto_merge` と一緒に 3 本目に残した。consult(consult-plan-automerge、2026-10-16)の判定で 3 本目を 2 つに分け、取り直し(この計画、8a-3b)を `auto_merge`(8a-3a)より先に入れる。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -67,7 +67,7 @@
 - D1 動詞と単位: `ralph org regate --branch <b>`。merge-order の単位がブランチなので、ブランチで名指す。`--org-id` は断る(結びつきはブランチから読む)。台帳は他の動詞と同じ規則で決め、台帳を書く動詞として扱う(`orgLedgerMutating`)。新しい作業を始めないので、見張りも承認された計画も要らない
 - D2 結びつきと org の状態: ブランチ `b` の結びつきと最新の gate の記録は、merge-order と同じ `readMergeLedger` と `collectMergeTargets` で、manifest のロックの下で読む(ロックなしの読みは追記中の最終行を壊れた行に数える。tech-debt の行)。結びつきは、`b` を名指す完全な結びつきのうち manifest で最後のものを使う。その org_id が `RunningOrgs` に入っていれば断る(leader がその worktree を使っている。org_id を別の機能で立て直した場合も、記録が今の leader の動きに数えられないよう断る)。結びつきがなければ断る。最新の gate の記録が読めないか、そのあとに壊れた行がある(merge-order の `unreadable`)ときは、その前の成功の記録を使わない(AC3 と D4 の例外に当てない)
 - D3 取り込みは merge commit: `git merge --no-ff --no-edit -m 'Merge <base_ref の短い名前> <base の 12 桁> into <b>' <base の SHA>`。rebase と force push をしない。GitHub の「Update branch」と同じ操作で、PR の差分は変わらない(consult の判定。B' の rebase と force push は、この repo の決まりと合わず、push 先を壊すおそれがある)。取り込む前に、HEAD が既定のブランチの先頭を含んでいれば merge しない
-- D4 push する head を確かめる: fetch のあと、HEAD が `refs/remotes/origin/<b>` と同じでなければ断る(push していない作業を巻き込まない、誰かが push した先を上書きしない)。例外は push の打ち直しで、最新の gate の記録が読める `gate_passed`(D2)、その head が HEAD、base が今の既定のブランチの先頭、`origin/<b>` が HEAD の祖先のときだけ、merge も scripts も飛ばして push だけをする。例外に当たらずに断るとき、最新の記録の head が HEAD で HEAD の第 1 親が `origin/<b>` の先頭(regate 自身の、push していない merge commit)なら、`git -C <worktree> reset --keep refs/remotes/origin/<b>` のあとに regate を打ち直す手を出す。それ以外では人の push していない作業を消しうるので、その手は出さない
+- D4 push する head を確かめる: fetch のあと、HEAD が `refs/remotes/origin/<b>` と同じでなければ断る(push していない作業を巻き込まない、誰かが push した先を上書きしない)。例外は push の打ち直しで、最新の gate の記録が読める `gate_passed`(D2)、その head が HEAD、base が今の既定のブランチの先頭、`origin/<b>` が HEAD の祖先のときだけ、merge も scripts も飛ばして push だけをする。例外に当たらずに断るとき、最新の記録が regate の書いた(`via=regate`)読める記録で、その head が HEAD で、HEAD の第 1 親が `origin/<b>` の先頭(regate 自身の、push していない merge commit)なら、`git -C <worktree> reset --keep refs/remotes/origin/<b>` のあとに regate を打ち直す手を出す。それ以外では人の push していない作業を消しうるので、その手は出さない
 - D5 戻し方: regate が作った merge commit は、`gate_passed` を記録する前に限り、スクリプトが落ちたとき(`gate_failed` を記録したあと)、中断されたとき、結びつきや org が変わったときに、`git reset --keep <merge の前の HEAD>` で戻す。`gate_passed` を記録したあと(push の前と途中)の中断は push の失敗と同じに扱い、記録と merge commit を残す(origin が merge commit を受け取ったあとに応答が届かなかった場合に、戻すと origin と worktree が食い違い、打ち直しで直らないため)。打ち直しは fetch で push が届いたかを見て、届いていれば AC3、届いていなければ D4 の例外になる。戻すのは、HEAD がまだ regate の merge commit で、作業ツリーがきれいなときだけにする。スクリプトが走る間に人が commit した(`head_moved`)か、スクリプトがファイルを残した(`tree_changed`)ときは戻さない(`reset --keep` は人の commit を消し、汚れた作業ツリーでは止まるか変更が混ざる)。戻したときは、出力で「merge は戻した」と言い、LOG の行を出す(戻した merge commit はどのブランチからも届かなくなる)。戻さないときと戻せなかったときは、今の状態と戻すコマンドを出して終了コード 1 で終わる。失敗した merge を worktree に残す案は取らない(残すと D4 に「間の commit が regate の merge だけ」の例外が要り、その判定が regate 本体より重い。人が直すときは `git merge origin/<既定>` を自分で打てば同じ状態に戻る)
 - D6 記録の確かめ: `recordGate` の life の確かめは、走っている org 用のままにし、regate 用に別の確かめを足す。manifest のロックの下で読み直し、ブランチ `b` の最後の完全な結びつきが同じもの(org_id と結びつきの中身)で、その org が走っていないときだけ書く。記録の Details は gate と同じ形に `via=regate` を足す。読み手の `gateRecordFromDetails` は知らないキーを飛ばすが、` log=` のあとを丸ごと log の値として読むので、`via` は `log` より前に置く
 - D7 同時に走らせない: 台帳ごとのロック `regate.lock`(flock の排他)を、最初の確かめから push か巻き戻しの終わりまで持つ。Spawn が D9 で一瞬だけ共有で持つのと重ならないよう、取れなければ 1 秒まで短く打ち直し、それでも取れなければ断る。merge と巻き戻しが 2 つ重なると、一方の巻き戻しがもう一方の merge を消しうるため。台帳の書き込みは manifest のロックが守り、leader の `ralph org gate` は別の worktree で動くので、ブランチごとのロックは要らない(director は 1 本ずつ打つ)
@@ -139,7 +139,11 @@
 - [x] Plan reviewed(consult-plan-automerge で 3 回。Codex の計画の助言 3 件は HIGH 1 件(D9)と MEDIUM 2 件(D5 の push の扱い、D2 の壊れた記録)で、すべて入れた)
 - [x] Plan approved(ユーザーの「作成したプランは自動承認します」(2026-10-11)により自動承認)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(7b6894ea): regate の芯。implementer の相談(consult-plan-automerge)で、排他を取った直後に印を空にする直しが入り、D9 の文を合わせて承認し直した(0e719e0a、sha256:7306f0d06797)。計画にない足し: fetch の env の `LC_ALL=C`(「couldn't find remote ref」を英語で読むため)、D6 の結びつきの位置の比較、test hook `afterRecord`、remote を叩く git の 1 回ごとの 120 秒の上限
+  - S1 で残したもの: regate の gate のログの見出しが `# ralph org gate` のまま(`createGateLog` を共有)、共有の helper の誤りの接頭辞が `org: gate:` のまま、merge-order の JSON に `via` がない(S4 で扱う)
+  - S2(458c7728): `regateSpawnErr` を `checkCapacityAndStart` の先頭と `StartFeature` の ensure の前に置いた。dry-run は新しい life を作らないので外した(consult で可)。範囲外: 古い ralph の台帳(disbanded の前に stopped がない)では、Reserve 付きの leader の spawn が冪等の分岐で `scope_reserved` を書き、この確かめを通らない。新しい座席は起動せず、regate の記録は `recordRegate` が断る。S5 で tech-debt に 1 行足す。stale な seat の補償は `spawn_failed` を書いてから Phase 2 で断られる
+  - S3(5c7f585f): 取り込み、push、戻し方、push だけの打ち直し。計画からのずれ: `reset --keep` の手の条件に、最新の記録が `via=regate` であることを足した(leader の gate が通った head を手で落とさないため)。D4 の文を合わせて承認し直した(sha256:0d63d9df1288)。push だけの例外には `via` を求めない(leader が通した head はそのまま push する)。Outcome に `merged` と `push_only` を足し、push の失敗は誤りでなく `PushFailed` で返す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
