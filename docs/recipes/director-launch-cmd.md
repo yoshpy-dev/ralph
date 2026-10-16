@@ -169,13 +169,15 @@ ralph org director stop --id d1
   count as ended and are sent nothing. A check-in after that is refused.
 - When the process outlives its SIGTERM, stop records nothing, exits 1, and
   prints `ps -o pid,lstart,command -p <pid>` to look at it. Run stop again
-  once it has ended. When ps cannot be read (nothing is sent then), stop
+  once it has ended. When ps cannot be read (before the SIGTERM, nothing is
+  sent; while stop waits after it, the SIGTERM has already been sent), stop
   records nothing and exits 1 too: run it again once ps can read the pid.
   Either way, `--force` records the stop instead. stop never sends SIGKILL.
 - `--force` takes the same steps, so a process confirmed as this
   director's still gets its normal SIGTERM and nothing is sent when ps
-  cannot be read. When the end is still not confirmed, it records a forced
-  stop anyway, sends nothing more, and leaves the process as it is.
+  cannot be read before the SIGTERM. When the end is still not confirmed,
+  it records a forced stop anyway, sends nothing more, and leaves the
+  process as it is.
 - stop is refused, `--force` included, when `RALPH_DIRECTOR_TOKEN` is the
   registration's token: it is then running inside the director, whose
   process would end before stop records it.

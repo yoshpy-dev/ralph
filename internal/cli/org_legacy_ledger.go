@@ -21,8 +21,9 @@ const (
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
 	// `stop` / `disband` / `watch` / `escalate` / `approve` / `gate` /
 	// `inbox ack` / `inbox resolve` / `inbox notify` / `director attach` /
-	// `director detach` / `director start` / `director stop`) are refused
-	// while a legacy ledger still has active seats.
+	// `director detach` / `director start` / `director stop` /
+	// `director launched`) are refused while a legacy ledger still has
+	// active seats.
 	orgLedgerMutating
 )
 

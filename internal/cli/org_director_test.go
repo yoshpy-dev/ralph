@@ -893,7 +893,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"so run it from a terminal other than the director's.",
 			"When the process does not end within the 10 s, stop records nothing and exits 1 with the pid to look at " +
 				"(ps -o pid,lstart,command -p <pid>): run it again once that process has ended. " +
-				"When ps cannot be read (stop sends nothing then), stop records nothing and exits 1 with the pid too: run it again once ps can read it. " +
+				"When ps cannot be read (before the SIGTERM, stop sends nothing; while it waits after the SIGTERM, the SIGTERM has already been sent), " +
+				"stop records nothing and exits 1 with the pid too: run it again once ps can read it. " +
 				"Either way, --force records the stop instead: it takes the same steps and, when the end is still not confirmed, " +
 				"records the stop anyway, sends nothing more, and leaves the process as it is.",
 			"When the launch script checks in after stop read the registration, stop has sent that process nothing, so it records nothing and exits 1: " +

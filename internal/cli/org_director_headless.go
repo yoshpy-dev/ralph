@@ -193,14 +193,16 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 			"it, so run it from a terminal other than the director's. When the\n" +
 			"process does not end within the 10 s, stop records nothing and exits 1\n" +
 			"with the pid to look at (ps -o pid,lstart,command -p <pid>): run it\n" +
-			"again once that process has ended. When ps cannot be read (stop sends\n" +
-			"nothing then), stop records nothing and exits 1 with the pid too: run\n" +
-			"it again once ps can read it. Either way, --force records the stop\n" +
-			"instead: it takes the same steps and, when the end is still not\n" +
-			"confirmed, records the stop anyway, sends nothing more, and leaves the\n" +
-			"process as it is. When the launch script checks in after stop read the\n" +
-			"registration, stop has sent that process nothing, so it records nothing\n" +
-			"and exits 1: run it again to stop the process that checked in.\n" +
+			"again once that process has ended. When ps cannot be read (before the\n" +
+			"SIGTERM, stop sends nothing; while it waits after the SIGTERM, the\n" +
+			"SIGTERM has already been sent), stop records nothing and exits 1 with\n" +
+			"the pid too: run it again once ps can read it. Either way, --force\n" +
+			"records the stop instead: it takes the same steps and, when the end is\n" +
+			"still not confirmed, records the stop anyway, sends nothing more, and\n" +
+			"leaves the process as it is. When the launch script checks in after\n" +
+			"stop read the registration, stop has sent that process nothing, so it\n" +
+			"records nothing and exits 1: run it again to stop the process that\n" +
+			"checked in.\n" +
 			"\n" +
 			"stop is refused, and writes nothing, for an id with no open headless\n" +
 			"registration (a promoted session's registration is ended with\n" +
