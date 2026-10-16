@@ -742,7 +742,7 @@ func TestGate_BaseResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newGateFixture(t)
 			tc.setup(t, fx)
-			got, found, err := resolveGateBase(context.Background(), fx.worktree)
+			got, found, err := resolveGateBase(context.Background(), gateWords.prefix, fx.worktree)
 			wantSHA := gitOut(t, fx.worktree, "rev-parse", tc.baseRef)
 			if want := (gateBase{branch: tc.branch, ref: tc.baseRef, sha: wantSHA}); err != nil || !found || got != want {
 				t.Fatalf("resolveGateBase = %+v, %v, %v; want %+v", got, found, err, want)
@@ -760,10 +760,44 @@ func TestGate_BaseResolution(t *testing.T) {
 		fx := newGateFixture(t)
 		git(t, fx, "remote", "remove", "origin")
 		git(t, fx, "branch", "--quiet", "-D", "main")
-		if got, found, err := resolveGateBase(context.Background(), fx.worktree); err != nil || found || got != (gateBase{}) {
+		if got, found, err := resolveGateBase(context.Background(), gateWords.prefix, fx.worktree); err != nil || found || got != (gateBase{}) {
 			t.Fatalf("resolveGateBase = %+v, %v, %v; want none found", got, found, err)
 		}
 	})
+}
+
+// TestGateGitHelpers_ErrorsStartWithTheCallersPrefix covers the prefix the
+// git helpers Gate and Regate share take: Gate's "org: gate: " or Regate's
+// "org: regate: " starts each error, here of git run outside a repository
+// and, for gateGit, of git stopped by a done context.
+func TestGateGitHelpers_ErrorsStartWithTheCallersPrefix(t *testing.T) {
+	isolateGitEnv(t)
+	dir := resolved(t, t.TempDir())
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	bg := context.Background()
+	done, cancel := context.WithCancel(bg)
+	cancel()
+	for _, prefix := range []string{gateWords.prefix, regatePrefix} {
+		calls := []struct {
+			name string
+			call func() error
+		}{
+			{"gateGit", func() error { _, err := gateGit(done, prefix, dir, "status"); return err }},
+			{"gateGitOutput", func() error { _, err := gateGitOutput(bg, prefix, dir, "status"); return err }},
+			{"gateHead", func() error { _, err := gateHead(bg, prefix, dir); return err }},
+			{"gateDirtyLines", func() error { _, err := gateDirtyLines(bg, prefix, dir); return err }},
+			{"gateRefExists", func() error { _, err := gateRefExists(bg, prefix, dir, "refs/heads/main"); return err }},
+			{"resolveGateBase", func() error { _, _, err := resolveGateBase(bg, prefix, dir); return err }},
+			{"gateGitPathExists", func() error { _, err := gateGitPathExists(bg, prefix, dir, "a merge", "MERGE_HEAD"); return err }},
+			{"gateRebaseInProgress", func() error { _, err := gateRebaseInProgress(bg, prefix, dir); return err }},
+			{"gateCheckAfter", func() error { _, _, err := gateCheckAfter(bg, prefix, gateTarget{root: dir}); return err }},
+		}
+		for _, c := range calls {
+			if err := c.call(); err == nil || !strings.HasPrefix(err.Error(), prefix+"git ") {
+				t.Errorf("%s with the prefix %q = %v; want an error starting with %q", c.name, prefix, err, prefix+"git ")
+			}
+		}
+	}
 }
 
 // TestGate_ManifestLockNotHeldWhileScriptsRun covers AC5's first half: while

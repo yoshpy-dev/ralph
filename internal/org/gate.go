@@ -303,7 +303,7 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 	}
 	res.Reason, res.Tail = run.failed, run.tail
 	if res.Reason == "" {
-		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, target); err != nil {
+		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, gateWords.prefix, target); err != nil {
 			return res, gateInterrupted(ctx, err, logPath)
 		}
 	}
@@ -393,7 +393,9 @@ type gateBase struct {
 
 // gateWording is how the worktree checks that ralph org regate shares with
 // Gate (gateCheckBranch, gateDirtyRefusal, gateCheckScripts) name the verb
-// in a refusal: the two verbs' refusals differ only in these.
+// in a refusal: the two verbs' refusals differ only in these. The shared
+// helpers that only fail with an error (gateGit and the ones built on it)
+// take the prefix alone, so the error names the verb that ran them.
 type gateWording struct {
 	prefix string // what the refusal starts with: "org: gate: "
 	again  string // its last step: "run the gate again"
@@ -407,7 +409,7 @@ var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again"}
 // that fails. The error is a git command that could not run or failed in a
 // way no check expects.
 func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding) (gateTarget, string, error) {
-	r, err := gateGit(ctx, dir, "rev-parse", "--show-toplevel")
+	r, err := gateGit(ctx, gateWords.prefix, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return gateTarget{}, "", err
 	}
@@ -434,18 +436,18 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 	}
 	t := gateTarget{root: root, branch: branch}
 
-	dirty, err := gateDirtyLines(ctx, root)
+	dirty, err := gateDirtyLines(ctx, gateWords.prefix, root)
 	if err != nil {
 		return gateTarget{}, "", err
 	}
 	if len(dirty) > 0 {
 		return gateTarget{}, gateDirtyRefusal(root, dirty, gateWords), nil
 	}
-	if t.head, err = gateHead(ctx, root); err != nil {
+	if t.head, err = gateHead(ctx, gateWords.prefix, root); err != nil {
 		return gateTarget{}, "", err
 	}
 
-	base, found, err := resolveGateBase(ctx, root)
+	base, found, err := resolveGateBase(ctx, gateWords.prefix, root)
 	if err != nil {
 		return gateTarget{}, "", err
 	}
@@ -469,7 +471,7 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 // switch` fails until the rebase is finished or undone,
 // gateRebaseInProgress).
 func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding, w gateWording) (string, string, error) {
-	out, err := gateGitOutput(ctx, root, "branch", "--show-current")
+	out, err := gateGitOutput(ctx, w.prefix, root, "branch", "--show-current")
 	if err != nil {
 		return "", "", err
 	}
@@ -481,7 +483,7 @@ func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding, w gate
 		return "", w.prefix + fmt.Sprintf("%s has the branch %s checked out, not the feature branch %s: run git switch "+
 			"%s and %s", root, branch, f.Branch, f.Branch, w.again), nil
 	}
-	rebasing, err := gateRebaseInProgress(ctx, root)
+	rebasing, err := gateRebaseInProgress(ctx, w.prefix, root)
 	if err != nil {
 		return "", "", err
 	}
@@ -495,21 +497,22 @@ func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding, w gate
 
 // gateRebaseInProgress reports whether a rebase is stopped in root: git's
 // rebase-merge or rebase-apply directory for root's worktree exists
-// (gateGitPathExists).
-func gateRebaseInProgress(ctx context.Context, root string) (bool, error) {
-	return gateGitPathExists(ctx, root, "a rebase", "rebase-merge", "rebase-apply")
+// (gateGitPathExists). An error starts with prefix ("org: gate: ").
+func gateRebaseInProgress(ctx context.Context, prefix, root string) (bool, error) {
+	return gateGitPathExists(ctx, prefix, root, "a rebase", "rebase-merge", "rebase-apply")
 }
 
 // gateGitPathExists reports whether any of names, paths in git's directory
 // for root's worktree, exists (`git rev-parse --git-path` prints each,
 // relative to root unless it is absolute, as it is in a linked worktree).
-// what names the state they mark in the error ("a rebase").
-func gateGitPathExists(ctx context.Context, root, what string, names ...string) (bool, error) {
+// what names the state they mark in the error ("a rebase"), which starts
+// with prefix ("org: gate: ").
+func gateGitPathExists(ctx context.Context, prefix, root, what string, names ...string) (bool, error) {
 	args := []string{"rev-parse"}
 	for _, name := range names {
 		args = append(args, "--git-path", name)
 	}
-	out, err := gateGitOutput(ctx, root, args...)
+	out, err := gateGitOutput(ctx, prefix, root, args...)
 	if err != nil {
 		return false, err
 	}
@@ -522,7 +525,7 @@ func gateGitPathExists(ctx context.Context, root, what string, names ...string) 
 		case err == nil:
 			return true, nil
 		case !errors.Is(err, fs.ErrNotExist):
-			return false, fmt.Errorf("org: gate: check for %s in progress in %s: %w", what, root, err)
+			return false, fmt.Errorf("%scheck for %s in progress in %s: %w", prefix, what, root, err)
 		}
 	}
 	return false, nil
@@ -532,7 +535,7 @@ func gateGitPathExists(ctx context.Context, root, what string, names ...string) 
 // found no default branch: with an origin remote, fetch it; with none, there
 // is nothing to fetch, so create the default branch locally.
 func gateNoBaseRefusal(ctx context.Context, root string) (string, error) {
-	remotes, err := gateGitOutput(ctx, root, "remote")
+	remotes, err := gateGitOutput(ctx, gateWords.prefix, root, "remote")
 	if err != nil {
 		return "", err
 	}
@@ -549,7 +552,7 @@ func gateNoBaseRefusal(ctx context.Context, root string) (string, error) {
 // gateCheckAncestor refuses t when its base's tip is not an ancestor of
 // HEAD (`git merge-base --is-ancestor`, exit 1): the branch needs a rebase.
 func gateCheckAncestor(ctx context.Context, t gateTarget) (string, error) {
-	r, err := gateGit(ctx, t.root, "merge-base", "--is-ancestor", t.base.ref, "HEAD")
+	r, err := gateGit(ctx, gateWords.prefix, t.root, "merge-base", "--is-ancestor", t.base.ref, "HEAD")
 	switch {
 	case err != nil:
 		return "", err
@@ -611,16 +614,17 @@ func gateDirtyRefusal(root string, dirty []string, w gateWording) string {
 
 // gateCheckAfter reads t's worktree again after both scripts passed and
 // returns the gate_failed reason, or "" when HEAD is the same commit and the
-// worktree is still clean. dirty is set for tree_changed.
-func gateCheckAfter(ctx context.Context, t gateTarget) (reason string, dirty []string, err error) {
-	head, err := gateHead(ctx, t.root)
+// worktree is still clean. dirty is set for tree_changed. An error starts
+// with prefix ("org: gate: ").
+func gateCheckAfter(ctx context.Context, prefix string, t gateTarget) (reason string, dirty []string, err error) {
+	head, err := gateHead(ctx, prefix, t.root)
 	if err != nil {
 		return "", nil, err
 	}
 	if head != t.head {
 		return GateReasonHeadMoved, nil, nil
 	}
-	if dirty, err = gateDirtyLines(ctx, t.root); err != nil {
+	if dirty, err = gateDirtyLines(ctx, prefix, t.root); err != nil {
 		return "", nil, err
 	}
 	if len(dirty) > 0 {
@@ -636,10 +640,11 @@ func gateCheckAfter(ctx context.Context, t gateTarget) (reason string, dirty []s
 // then main, then master; the first for which refs/remotes/origin/<name> or
 // refs/heads/<name> exists is the default branch, and its base ref is the
 // remote ref when that exists and the local one otherwise. found is false
-// when no candidate exists. It reads only local refs, never the network.
-func resolveGateBase(ctx context.Context, root string) (gateBase, bool, error) {
+// when no candidate exists. It reads only local refs, never the network. An
+// error starts with prefix ("org: gate: ").
+func resolveGateBase(ctx context.Context, prefix, root string) (gateBase, bool, error) {
 	candidates := []string{"main", "master"}
-	r, err := gateGit(ctx, root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	r, err := gateGit(ctx, prefix, root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
 	switch {
 	case err != nil:
 		return gateBase{}, false, err
@@ -648,18 +653,18 @@ func resolveGateBase(ctx context.Context, root string) (gateBase, bool, error) {
 			candidates = append([]string{name}, candidates...)
 		}
 	case r.code != 1:
-		return gateBase{}, false, fmt.Errorf("org: gate: git symbolic-ref --quiet refs/remotes/origin/HEAD in %s: exit %d: %s", root, r.code, r.stderr)
+		return gateBase{}, false, fmt.Errorf("%sgit symbolic-ref --quiet refs/remotes/origin/HEAD in %s: exit %d: %s", prefix, root, r.code, r.stderr)
 	}
 	for _, name := range candidates {
 		for _, ref := range []string{"refs/remotes/origin/" + name, "refs/heads/" + name} {
-			exists, err := gateRefExists(ctx, root, ref)
+			exists, err := gateRefExists(ctx, prefix, root, ref)
 			if err != nil {
 				return gateBase{}, false, err
 			}
 			if !exists {
 				continue
 			}
-			sha, err := gateGitOutput(ctx, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+			sha, err := gateGitOutput(ctx, prefix, root, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 			if err != nil {
 				return gateBase{}, false, err
 			}
@@ -670,9 +675,10 @@ func resolveGateBase(ctx context.Context, root string) (gateBase, bool, error) {
 }
 
 // gateRefExists reports whether ref exists in root's repository (`git
-// show-ref --verify --quiet`, exit 1 for no).
-func gateRefExists(ctx context.Context, root, ref string) (bool, error) {
-	r, err := gateGit(ctx, root, "show-ref", "--verify", "--quiet", ref)
+// show-ref --verify --quiet`, exit 1 for no). An error starts with prefix
+// ("org: gate: ").
+func gateRefExists(ctx context.Context, prefix, root, ref string) (bool, error) {
+	r, err := gateGit(ctx, prefix, root, "show-ref", "--verify", "--quiet", ref)
 	switch {
 	case err != nil:
 		return false, err
@@ -681,20 +687,21 @@ func gateRefExists(ctx context.Context, root, ref string) (bool, error) {
 	case r.code == 1:
 		return false, nil
 	}
-	return false, fmt.Errorf("org: gate: git show-ref --verify %s in %s: exit %d: %s", ref, root, r.code, r.stderr)
+	return false, fmt.Errorf("%sgit show-ref --verify %s in %s: exit %d: %s", prefix, ref, root, r.code, r.stderr)
 }
 
-// gateHead returns root's HEAD commit.
-func gateHead(ctx context.Context, root string) (string, error) {
-	out, err := gateGitOutput(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+// gateHead returns root's HEAD commit. An error starts with prefix ("org:
+// gate: ").
+func gateHead(ctx context.Context, prefix, root string) (string, error) {
+	out, err := gateGitOutput(ctx, prefix, root, "rev-parse", "--verify", "HEAD^{commit}")
 	return strings.TrimSpace(out), err
 }
 
 // gateDirtyLines returns `git status --porcelain --untracked-files=all` in
 // root, one entry per line: nil for a clean worktree. Ignored files are not
-// listed.
-func gateDirtyLines(ctx context.Context, root string) ([]string, error) {
-	out, err := gateGitOutput(ctx, root, "status", "--porcelain", "--untracked-files=all")
+// listed. An error starts with prefix ("org: gate: ").
+func gateDirtyLines(ctx context.Context, prefix, root string) ([]string, error) {
+	out, err := gateGitOutput(ctx, prefix, root, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
@@ -717,8 +724,10 @@ type gitResult struct {
 // gateGit runs `git --no-optional-locks -C dir args...` (so a status does not
 // take the index lock from a git command the leader runs at the same time)
 // and returns its output and exit code. The error is for a git that could not
-// run or was stopped by ctx; a non-zero exit is not one.
-func gateGit(ctx context.Context, dir string, args ...string) (gitResult, error) {
+// run or was stopped by ctx; a non-zero exit is not one. It starts with
+// prefix, the verb that ran git: gateWords.prefix ("org: gate: ") for Gate,
+// regatePrefix for Regate.
+func gateGit(ctx context.Context, prefix, dir string, args ...string) (gitResult, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -727,25 +736,25 @@ func gateGit(ctx context.Context, dir string, args ...string) (gitResult, error)
 	var exitErr *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return r, fmt.Errorf("org: gate: git %s in %s: %w", strings.Join(args, " "), dir, context.Cause(ctx))
+		return r, fmt.Errorf("%sgit %s in %s: %w", prefix, strings.Join(args, " "), dir, context.Cause(ctx))
 	case err == nil:
 	case errors.As(err, &exitErr) && exitErr.ExitCode() > 0:
 		r.code = exitErr.ExitCode()
 	default:
-		return r, fmt.Errorf("org: gate: git %s in %s: %w", strings.Join(args, " "), dir, err)
+		return r, fmt.Errorf("%sgit %s in %s: %w", prefix, strings.Join(args, " "), dir, err)
 	}
 	return r, nil
 }
 
 // gateGitOutput is gateGit with a non-zero exit as an error naming git's
-// stderr, and returns stdout.
-func gateGitOutput(ctx context.Context, dir string, args ...string) (string, error) {
-	r, err := gateGit(ctx, dir, args...)
+// stderr, and returns stdout. An error starts with prefix ("org: gate: ").
+func gateGitOutput(ctx context.Context, prefix, dir string, args ...string) (string, error) {
+	r, err := gateGit(ctx, prefix, dir, args...)
 	if err != nil {
 		return "", err
 	}
 	if r.code != 0 {
-		return "", fmt.Errorf("org: gate: git %s in %s: exit %d: %s", strings.Join(args, " "), dir, r.code, r.stderr)
+		return "", fmt.Errorf("%sgit %s in %s: exit %d: %s", prefix, strings.Join(args, " "), dir, r.code, r.stderr)
 	}
 	return r.stdout, nil
 }

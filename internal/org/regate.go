@@ -62,7 +62,8 @@ import (
 const (
 	// RegateOutcomeUpToDate: HEAD contains origin's default branch tip and the
 	// branch's latest gate record is a gate_passed of HEAD on that tip
-	// (AC3). Nothing was run, recorded, or pushed.
+	// (AC3), whose log RegateResult.LogPath names. Nothing was run, recorded,
+	// or pushed.
 	RegateOutcomeUpToDate = "up_to_date"
 	// RegateOutcomeGated: HEAD contains the tip but has no such gate_passed
 	// (AC9). The scripts ran on HEAD and a gate_passed or gate_failed was
@@ -193,8 +194,9 @@ type RegateResult struct {
 	// the worktree is and the command that undoes the merge.
 	NotUndone string
 	// LogPath is the absolute path of the gate log under <state-dir>/gates/
-	// (RegateOutcomeGated, RegateOutcomeMerged); with RegateOutcomePushOnly,
-	// the log the pushed head's gate_passed names.
+	// (RegateOutcomeGated, RegateOutcomeMerged); with RegateOutcomeUpToDate
+	// and RegateOutcomePushOnly, the log the earlier gate_passed of Head
+	// names.
 	LogPath string
 	// Tail is the failing script's last gateTailLines output lines
 	// (static_failed and test_failed).
@@ -317,7 +319,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	case !contains:
 		return o.regateMerged(ctx, b, t, env, words, res)
 	case b.passedOn(t):
-		res.Outcome = RegateOutcomeUpToDate
+		res.Outcome, res.LogPath = RegateOutcomeUpToDate, b.gate.record.Log
 		return res, nil
 	}
 	if res, err = o.regateGate(ctx, b, t, env, res); err == nil && res.Refused == "" {
@@ -326,10 +328,14 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	return res, err
 }
 
+// regatePrefix starts every error Regate returns, including those of the git
+// helpers it shares with Gate (gateGit and the helpers built on it).
+const regatePrefix = "org: regate: "
+
 // regateWords is Regate's wording of the worktree checks it shares with
 // Gate (gateWording), for branch.
 func regateWords(branch string) gateWording {
-	return gateWording{prefix: "org: regate: ", again: "run ralph org regate --branch " + branch + " again"}
+	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again"}
 }
 
 // regateLockPathIn is the regate.lock of the state dir stateDir.
@@ -380,8 +386,7 @@ func readRegateBranch(l mergeLedger, branch string) regateBranch {
 		b := regateBranch{gate: t.gate, corruptAfterGate: t.corruptAfterGate}
 		if t.binding != nil {
 			b.binding = reservationFromEvent(l.events[t.bindingPos]).Feature
-			b.orgID, b.pos = t.binding.OrgID, t.bindingPos
-			b.running = slices.Contains(RunningOrgs(l.events), b.orgID)
+			b.orgID, b.pos, b.running = t.binding.OrgID, t.bindingPos, t.orgRunning
 		}
 		return b
 	}
@@ -510,7 +515,7 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s is not a directory: restore the worktree "+
 			"of the branch %s there and %s", orgID, f.Worktree, f.Branch, w.again), nil
 	}
-	r, err := gateGit(ctx, f.Worktree, "rev-parse", "--show-toplevel")
+	r, err := gateGit(ctx, w.prefix, f.Worktree, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return gateTarget{}, "", err
 	}
@@ -539,7 +544,7 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 	if refused, err = regateCheckInProgress(ctx, root, w); err != nil || refused != "" {
 		return gateTarget{}, refused, err
 	}
-	dirty, err := gateDirtyLines(ctx, root)
+	dirty, err := gateDirtyLines(ctx, w.prefix, root)
 	if err != nil {
 		return gateTarget{}, "", err
 	}
@@ -547,10 +552,10 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 		return gateTarget{}, gateDirtyRefusal(root, dirty, w), nil
 	}
 	t := gateTarget{root: root, branch: branch}
-	if t.head, err = gateHead(ctx, root); err != nil {
+	if t.head, err = gateHead(ctx, w.prefix, root); err != nil {
 		return gateTarget{}, "", err
 	}
-	base, found, err := resolveGateBase(ctx, root)
+	base, found, err := resolveGateBase(ctx, w.prefix, root)
 	if err != nil {
 		return gateTarget{}, "", err
 	}
@@ -571,7 +576,7 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 // rebase stopped on the branch would move it (gateGitPathExists). A rebase
 // with a detached HEAD has been refused by gateCheckBranch already.
 func regateCheckInProgress(ctx context.Context, root string, w gateWording) (string, error) {
-	rebasing, err := gateRebaseInProgress(ctx, root)
+	rebasing, err := gateRebaseInProgress(ctx, w.prefix, root)
 	if err != nil {
 		return "", err
 	}
@@ -579,7 +584,7 @@ func regateCheckInProgress(ctx context.Context, root string, w gateWording) (str
 		return w.prefix + fmt.Sprintf("a rebase is in progress in %s: finish it with git rebase --continue, or undo it with "+
 			"git rebase --abort, and %s", root, w.again), nil
 	}
-	merging, err := gateGitPathExists(ctx, root, "a merge", "MERGE_HEAD")
+	merging, err := gateGitPathExists(ctx, w.prefix, root, "a merge", "MERGE_HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -617,7 +622,7 @@ func regateFetch(ctx context.Context, t gateTarget, env []string, w gateWording)
 			return "", "", w.prefix + fmt.Sprintf("%s in %s failed (exit %d), so nothing was recorded: check origin (git "+
 				"remote get-url origin) and its credentials and %s%s", command, t.root, r.code, w.again, regateStderrTail(r.stderr)), nil
 		}
-		tip, err := gateGitOutput(ctx, t.root, "rev-parse", "--verify", "refs/remotes/origin/"+name+"^{commit}")
+		tip, err := gateGitOutput(ctx, w.prefix, t.root, "rev-parse", "--verify", "refs/remotes/origin/"+name+"^{commit}")
 		if err != nil {
 			return "", "", "", err
 		}
@@ -678,7 +683,7 @@ func regateCheckOriginHead(ctx context.Context, t gateTarget, originHead string,
 // b itself, in root's repository (`git merge-base --is-ancestor`, exit 1
 // for no).
 func regateIsAncestor(ctx context.Context, root, a, b string) (bool, error) {
-	r, err := gateGit(ctx, root, "merge-base", "--is-ancestor", a, b)
+	r, err := gateGit(ctx, regatePrefix, root, "merge-base", "--is-ancestor", a, b)
 	switch {
 	case err != nil:
 		return false, err
@@ -687,7 +692,7 @@ func regateIsAncestor(ctx context.Context, root, a, b string) (bool, error) {
 	case r.code == 1:
 		return false, nil
 	}
-	return false, fmt.Errorf("org: regate: git merge-base --is-ancestor %s %s in %s: exit %d: %s", a, b, root, r.code, r.stderr)
+	return false, fmt.Errorf("%sgit merge-base --is-ancestor %s %s in %s: exit %d: %s", regatePrefix, a, b, root, r.code, r.stderr)
 }
 
 // regateRemoteEnv is env, copied, with LC_ALL=C and GIT_TERMINAL_PROMPT=0
@@ -802,7 +807,7 @@ func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHe
 // regateParents returns commit's parents in root's repository, the first
 // parent first (`git rev-list --parents -n 1`): none for a root commit.
 func regateParents(ctx context.Context, root, commit string) ([]string, error) {
-	out, err := gateGitOutput(ctx, root, "rev-list", "--parents", "-n", "1", commit)
+	out, err := gateGitOutput(ctx, regatePrefix, root, "rev-list", "--parents", "-n", "1", commit)
 	if err != nil {
 		return nil, err
 	}
@@ -858,7 +863,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 		return regateUndoMerge(ctx, t, env, res), nil
 	case GateReasonHeadMoved:
 		why := "HEAD moved off it while the scripts ran (head_moved), and git reset --keep would drop what came after it"
-		if head, err := gateHead(context.WithoutCancel(ctx), t.root); err == nil {
+		if head, err := gateHead(context.WithoutCancel(ctx), regatePrefix, t.root); err == nil {
 			why = "HEAD moved off it to " + head + " while the scripts ran (head_moved), and git reset --keep would drop what came after it"
 		}
 		res.NotUndone = regateMergeLeft(t.root, res, why, "")
@@ -892,7 +897,7 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWordi
 		return "", "", err
 	}
 	if !timedOut && r.code == 0 {
-		head, err := gateHead(uncancelled, t.root)
+		head, err := gateHead(uncancelled, w.prefix, t.root)
 		if err != nil {
 			return "", "", err
 		}
@@ -912,8 +917,8 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWordi
 	// The conflicting files are read before the abort clears them; a failure
 	// to read them only leaves them out of the refusal, and the checks after
 	// the abort read the worktree again.
-	files, _ := gateGitOutput(uncancelled, t.root, "diff", "--name-only", "--diff-filter=U")
-	merging, err := gateGitPathExists(uncancelled, t.root, "a merge", "MERGE_HEAD")
+	files, _ := gateGitOutput(uncancelled, w.prefix, t.root, "diff", "--name-only", "--diff-filter=U")
+	merging, err := gateGitPathExists(uncancelled, w.prefix, t.root, "a merge", "MERGE_HEAD")
 	if err != nil {
 		return "", "", regateMergeNotBack(t, command, fmt.Sprintf("whether a merge is in progress cannot be read (%v)", err))
 	}
@@ -928,11 +933,11 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWordi
 		}
 		aborted = " (git merge --abort undid the merge it left in progress)"
 	}
-	head, err := gateHead(uncancelled, t.root)
+	head, err := gateHead(uncancelled, w.prefix, t.root)
 	if err != nil {
 		return "", "", regateMergeNotBack(t, command, fmt.Sprintf("HEAD cannot be read (%v)", err))
 	}
-	dirty, err := gateDirtyLines(uncancelled, t.root)
+	dirty, err := gateDirtyLines(uncancelled, w.prefix, t.root)
 	if err != nil {
 		return "", "", regateMergeNotBack(t, command, fmt.Sprintf("the worktree cannot be read (%v)", err))
 	}
@@ -986,7 +991,7 @@ func regateMergeNotBack(t gateTarget, command, state string) error {
 // res.NotUndone (regateMergeLeft).
 func regateUndoMerge(ctx context.Context, t gateTarget, env []string, res RegateResult) RegateResult {
 	uncancelled := context.WithoutCancel(ctx)
-	head, err := gateHead(uncancelled, t.root)
+	head, err := gateHead(uncancelled, regatePrefix, t.root)
 	if err != nil {
 		res.NotUndone = regateMergeLeft(t.root, res, fmt.Sprintf("HEAD cannot be read (%v)", err), "")
 		return res
@@ -995,7 +1000,7 @@ func regateUndoMerge(ctx context.Context, t gateTarget, env []string, res Regate
 		res.NotUndone = regateMergeLeft(t.root, res, "HEAD is now "+head+", not the merge commit", "")
 		return res
 	}
-	dirty, err := gateDirtyLines(uncancelled, t.root)
+	dirty, err := gateDirtyLines(uncancelled, regatePrefix, t.root)
 	switch {
 	case err != nil:
 		res.NotUndone = regateMergeLeft(t.root, res, fmt.Sprintf("the worktree cannot be read (%v)", err), "")
@@ -1095,7 +1100,7 @@ func regatePushInterrupted(ctx context.Context, t gateTarget, during bool) error
 // with the old value), so a fetch in between is not overwritten.
 func regateSetTrackingRef(ctx context.Context, t gateTarget) error {
 	ref := "refs/remotes/origin/" + t.branch
-	r, err := gateGit(ctx, t.root, "rev-parse", "--verify", "--quiet", ref)
+	r, err := gateGit(ctx, regatePrefix, t.root, "rev-parse", "--verify", "--quiet", ref)
 	if err != nil {
 		return fmt.Errorf("%w; %s was pushed to origin's %s", err, t.head, t.branch)
 	}
@@ -1103,7 +1108,7 @@ func regateSetTrackingRef(ctx context.Context, t gateTarget) error {
 	if old == t.head {
 		return nil
 	}
-	if _, err := gateGitOutput(ctx, t.root, "update-ref", ref, t.head, old); err != nil {
+	if _, err := gateGitOutput(ctx, regatePrefix, t.root, "update-ref", ref, t.head, old); err != nil {
 		return fmt.Errorf("%w; %s was pushed to origin's %s, and git fetch origin %s brings %s up to date", err, t.head, t.branch,
 			t.branch, ref)
 	}
@@ -1131,7 +1136,7 @@ func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env 
 	}
 	res.Reason, res.Tail = run.failed, run.tail
 	if res.Reason == "" {
-		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, t); err != nil {
+		if res.Reason, res.Dirty, err = gateCheckAfter(ctx, regatePrefix, t); err != nil {
 			return res, regateInterrupted(ctx, err, logPath)
 		}
 	}

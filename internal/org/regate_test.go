@@ -780,8 +780,9 @@ func TestRegate_FetchRunsWithNoTerminalPrompt(t *testing.T) {
 // TestRegate_UpToDateDoesNothing covers AC3's first half: with HEAD
 // containing origin's main and a gate_passed of HEAD on that tip, against
 // origin/main or the local main, Regate runs nothing, records nothing,
-// writes no log, and changes neither the worktree nor origin. The fetch
-// gives the tip it compares with, also when the local origin/main is gone.
+// writes no log, and changes neither the worktree nor origin; the result
+// names the log of that gate_passed. The fetch gives the tip it compares
+// with, also when the local origin/main is gone.
 func TestRegate_UpToDateDoesNothing(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -805,7 +806,7 @@ func TestRegate_UpToDateDoesNothing(t *testing.T) {
 			before := fx.snapshot(t)
 			res := fx.mustRegate(t)
 			want := RegateResult{Outcome: RegateOutcomeUpToDate, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: head,
-				Base: tip, BaseRef: "refs/remotes/origin/main"}
+				Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: "/state/gates/auth.log"}
 			if !reflect.DeepEqual(res, want) {
 				t.Fatalf("regate = %+v\nwant     %+v", res, want)
 			}
@@ -1283,6 +1284,31 @@ func TestRegate_Interrupted(t *testing.T) {
 			t.Fatalf("the clock was read %d times; want 2 (the log's name, then the event's TS)", reads)
 		}
 	})
+}
+
+// TestRegate_ErrorsOfTheSharedGitHelpersSayRegate covers the errors of the
+// git helpers Regate shares with Gate: from Regate they start with "org:
+// regate: ". A corrupt index in the feature worktree passes the branch checks
+// and then makes git status fail (gateDirtyLines); nothing is run or recorded.
+func TestRegate_ErrorsOfTheSharedGitHelpersSayRegate(t *testing.T) {
+	fx := newRegateFixture(t)
+	index := gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err := os.WriteFile(index, []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := fileOrAbsent(t, fx.o.Manifest.Path())
+	res, err := fx.regate(context.Background())
+	want := "org: regate: git status --porcelain --untracked-files=all in " + fx.worktree + ": exit 128: "
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("regate = %v; want an error starting with %q", err, want)
+	}
+	if !reflect.DeepEqual(res, RegateResult{}) || fx.calls(t) != nil {
+		t.Fatalf("regate = %+v and ran %v; want nothing", res, fx.calls(t))
+	}
+	if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before {
+		t.Fatalf("regate changed the manifest:\nbefore %s\nafter  %s", before, after)
+	}
+	fx.assertUnlocked(t)
 }
 
 // TestRegate_MergesTheTipInAndPushes covers AC4: after origin's main moved on
