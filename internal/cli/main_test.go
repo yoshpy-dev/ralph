@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +71,20 @@ import (
 // before it writes anything: PATH may hold a real claude or codex, and
 // os.Executable is the test binary, which a launch script would run as its
 // check-in. A test of launch_cmd sets its own (setDirectorLaunchSeams).
+//
+// It also turns off git's automatic maintenance for every git command the
+// tests run (disableGitAutoMaintenance). `git commit` starts `git
+// maintenance run --auto --quiet --detach` in the background (seen with git
+// 2.49 through GIT_TRACE2_EVENT), and that
+// process creates and removes .git/objects/maintenance.lock in the test's
+// repository while the test walks it: snapshotDirHashes then fails with
+// lstat ... no such file or directory (TestRunMigrateLegacy_ConfirmUX in
+// PR #220's CI, TestRunEjectIO_LegacyManifest_FailsClosed in PR #232's).
 func TestMain(m *testing.M) {
+	if err := disableGitAutoMaintenance(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
 	}
@@ -104,4 +119,78 @@ func TestMain(m *testing.M) {
 		return "", errors.New("a test asked for the ralph executable of a launch_cmd director; set orgDirectorRalphExecutable to a wrapper (setDirectorLaunchSeams)")
 	}
 	os.Exit(m.Run())
+}
+
+// disableGitAutoMaintenance sets maintenance.auto=false and gc.auto=0 for
+// every git command this test process and its children run, through the
+// GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n>, and GIT_CONFIG_VALUE_<n> variables.
+// It adds the two after any that the caller's environment already sets.
+func disableGitAutoMaintenance() error {
+	n := 0
+	if v := os.Getenv("GIT_CONFIG_COUNT"); v != "" {
+		var err error
+		if n, err = strconv.Atoi(v); err != nil || n < 0 {
+			return fmt.Errorf("TestMain: GIT_CONFIG_COUNT=%q is not a count of git config variables", v)
+		}
+	}
+	for _, kv := range [][2]string{{"maintenance.auto", "false"}, {"gc.auto", "0"}} {
+		if err := os.Setenv(fmt.Sprintf("GIT_CONFIG_KEY_%d", n), kv[0]); err != nil {
+			return fmt.Errorf("TestMain: set GIT_CONFIG_KEY_%d: %w", n, err)
+		}
+		if err := os.Setenv(fmt.Sprintf("GIT_CONFIG_VALUE_%d", n), kv[1]); err != nil {
+			return fmt.Errorf("TestMain: set GIT_CONFIG_VALUE_%d: %w", n, err)
+		}
+		n++
+	}
+	if err := os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(n)); err != nil {
+		return fmt.Errorf("TestMain: set GIT_CONFIG_COUNT: %w", err)
+	}
+	return nil
+}
+
+// TestMain_AGitCommitInATestStartsNoAutoMaintenance pins what TestMain's
+// disableGitAutoMaintenance is for: a commit that a test makes, the way
+// runMigrationTestGit does, starts no `git maintenance run --auto`. Git
+// writes every child process it starts to the GIT_TRACE2_EVENT file, so the
+// trace names maintenance when the setting does not reach the commit.
+func TestMain_AGitCommitInATestStartsNoAutoMaintenance(t *testing.T) {
+	dir := t.TempDir()
+	trace := filepath.Join(t.TempDir(), "trace2.json")
+	runMigrationTestGit(t, dir, "init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runMigrationTestGit(t, dir, "add", "a.txt")
+	cmd := exec.Command("git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "fixture")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TRACE2_EVENT="+trace)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatalf("read the trace2 file: %v", err)
+	}
+	if !strings.Contains(string(got), `"cmd_name"`) {
+		t.Fatalf("the trace2 file has no cmd_name event, so it says nothing about maintenance:\n%s", got)
+	}
+	if strings.Contains(string(got), "maintenance") {
+		t.Errorf("git commit started git maintenance with GIT_CONFIG_COUNT=%s:\n%s", os.Getenv("GIT_CONFIG_COUNT"), got)
+	}
+}
+
+// TestDisableGitAutoMaintenance_RefusesAValueThatIsNotACount covers the
+// error path: a GIT_CONFIG_COUNT that is not a non-negative number is
+// refused before any variable is set, since git would refuse it too.
+func TestDisableGitAutoMaintenance_RefusesAValueThatIsNotACount(t *testing.T) {
+	for _, v := range []string{"two", "-1"} {
+		t.Setenv("GIT_CONFIG_COUNT", v)
+		err := disableGitAutoMaintenance()
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("GIT_CONFIG_COUNT=%q", v)) {
+			t.Errorf("GIT_CONFIG_COUNT=%q: err = %v, want the refusal that names the value", v, err)
+		}
+		if got := os.Getenv("GIT_CONFIG_COUNT"); got != v {
+			t.Errorf("GIT_CONFIG_COUNT=%q: it is %q after the refusal, want it unchanged", v, got)
+		}
+	}
 }
