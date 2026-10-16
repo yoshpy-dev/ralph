@@ -77,19 +77,19 @@
 
 ## Acceptance criteria
 
-- [ ] AC1 断る(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr に出す): `--branch` がない、`--org-id` を付けた、`b` を名指す完全な結びつきがない、その org が走っている、worktree がない、worktree のブランチが `b` でない、detached HEAD、rebase か merge の途中、作業ツリーが汚れている、スクリプトがない、ほかの regate が走っている(D7)
-- [ ] AC2 fetch が落ちる、origin に `b` がない(merge のあとに消された。理由でそう言う)、HEAD が `origin/<b>` と違う(D4 の例外を除く)ときも、AC1 と同じく断る。fetch と push に `GIT_TERMINAL_PROMPT=0` が付く
-- [ ] AC3 HEAD が既定のブランチの先頭を含み、最新の gate の記録が読める、その HEAD と base の `gate_passed` なら、何も走らせず、記録も push もせず、そう言って終了コード 0。最新の記録が読めないか、そのあとに壊れた行があるときは、前の成功を使わずに AC9 の道で取り直し、そのあと merge-order がそのブランチを `ready` と出す(壊れた gate の Details と壊れた JSON 行の 2 つの場合)
-- [ ] AC4 取り込みの道: HEAD が先頭を含まなければ、D3 の merge commit を作り、スクリプトを走らせ、`gate_passed`(head は merge commit、base と base_ref は取り込んだ先頭、branch は `b`、`via=regate`、org_id は結びつきの org)を記録し、force なしで `origin/<b>` に push する。stdout に `GATE: pass`、`MERGED:`、`HEAD:`、`BASE:`、`LOG:`、`PUSHED:` の行を出して終了コード 0。そのあと merge-order はそのブランチを `ready` と出す
-- [ ] AC5 merge commit を作れない: 衝突、pre-merge-commit の hook が止めた、`user.name` か `user.email` がない、のどれでも、merge の途中なら `git merge --abort` で戻し、HEAD と作業ツリーが前のままであることを確かめ、何も記録せず、理由(衝突なら衝突したファイル)と次の手を出して終了コード 1
-- [ ] AC6 スクリプトが落ちたら、`gate_failed`(head は merge commit)を記録し、merge commit を戻し(D5)、push せず、「merge は戻した」と LOG を出して終了コード 1。`gate_passed` を記録する前の中断(SIGINT、SIGTERM、SIGHUP)ならスクリプトを止め、何も記録せず、merge commit を戻す。`head_moved` と `tree_changed` では gate と同じく `gate_failed` を記録し、戻さず、push せず、今の状態と戻すコマンドを出す
-- [ ] AC7 push が落ちたとき、または `gate_passed` を記録したあと(push の前か途中)に中断されたときは、記録と merge commit をそのままにして終了コード 1 になり、打ち直しを案内する。打ち直すと、push が届いていなければ D4 の例外で push だけをし、届いていれば(origin が受け取ったあと応答が届かなかった)AC3 になる。既定のブランチがその間に進んだとき、または fetch と push の間に誰かが `origin/<b>` に push した(push は non-fast-forward で落ち、`origin/<b>` が HEAD の祖先でなくなる)ときは、例外に当たらず断り、D4 の条件のときだけ `reset --keep` の手を出す。最新の記録が読めず HEAD が `origin/<b>` と違うときも、同じ条件で断る
-- [ ] AC8 スクリプトが走る間に、その org が立て直されたか、ブランチの結びつきが変わったら、何も記録せず、merge commit を戻して終了コード 1
-- [ ] AC9 gate だけの道: HEAD が `origin/<b>` と同じで既定の先頭を含むが、その head の通った記録がない(merge-order の `regate` や `failed` のあと、人が直して push した)なら、merge せずにスクリプトを走らせて記録する。push は要らない
-- [ ] AC10 merge-order の理由の欄: 結びつきの org が走っていないブランチでは、`ralph org gate --org-id <org>` と「(the gate runs only while the feature org runs)」の代わりに `ralph org regate --branch <b>` を出す。走っている org が今結びついているブランチは今のまま。org_id が別の機能で立て直されて走っているときは、その org が別のブランチで走っていることと、disband のあとに `ralph org regate --branch <b>` を打つことを言う。最新の記録が regate の `gate_failed`(`via=regate`)のときは、その head が regate の merge commit であることと log のパスを理由で言う。`regate`(origin の先頭が gate の head と違う)の理由は、走っていない org のブランチでは「gate のあとに push された、または gate の head が push されていない」と言う(regate の push が落ちたあとの状態を読み違えないため)
-- [ ] AC13 Spawn との排他(D9): regate が最初の確かめから終わりまでの間、同じ org_id の `ralph org spawn` と `ralph org start --plan` は何も記録せずに断られ(start は ensure の前に断る)、別の org_id の spawn は通る。regate が排他を取れないときは 1 秒まで打ち直してから断る。テストは、regate を最初の確かめのあとと記録の直後で止める test hook で確かめる
-- [ ] AC11 文書: `/org` skill の 4 面に動詞リファレンスの `regate` の行を足し、「merge してよい順」の人の手順を regate に置き換える。`/director` skill の 4 面に、人に頼まれたら regate を 1 本ずつ打ち、衝突と失敗は人に伝える手順を書く。仕様 FR-7 の注、tech-debt の merge-order の行、`AGENTS.md` の repo-map、CLI の help
-- [ ] AC12 テストはネットワークに出ず、本物の herdr、osascript、端末を打たない。Go のテストは go1.26 と `GOTOOLCHAIN=go1.25.8` の両方で通る
+- [x] AC1 断る(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr に出す): `--branch` がない、`--org-id` を付けた、`b` を名指す完全な結びつきがない、その org が走っている、worktree がない、worktree のブランチが `b` でない、detached HEAD、rebase か merge の途中、作業ツリーが汚れている、スクリプトがない、ほかの regate が走っている(D7)
+- [x] AC2 fetch が落ちる、origin に `b` がない(merge のあとに消された。理由でそう言う)、HEAD が `origin/<b>` と違う(D4 の例外を除く)ときも、AC1 と同じく断る。fetch と push に `GIT_TERMINAL_PROMPT=0` が付く
+- [x] AC3 HEAD が既定のブランチの先頭を含み、最新の gate の記録が読める、その HEAD と base の `gate_passed` なら、何も走らせず、記録も push もせず、そう言って終了コード 0。最新の記録が読めないか、そのあとに壊れた行があるときは、前の成功を使わずに AC9 の道で取り直し、そのあと merge-order がそのブランチを `ready` と出す(壊れた gate の Details と壊れた JSON 行の 2 つの場合)
+- [x] AC4 取り込みの道: HEAD が先頭を含まなければ、D3 の merge commit を作り、スクリプトを走らせ、`gate_passed`(head は merge commit、base と base_ref は取り込んだ先頭、branch は `b`、`via=regate`、org_id は結びつきの org)を記録し、force なしで `origin/<b>` に push する。stdout に `GATE: pass`、`MERGED:`、`HEAD:`、`BASE:`、`LOG:`、`PUSHED:` の行を出して終了コード 0。そのあと merge-order はそのブランチを `ready` と出す
+- [x] AC5 merge commit を作れない: 衝突、pre-merge-commit の hook が止めた、`user.name` か `user.email` がない、のどれでも、merge の途中なら `git merge --abort` で戻し、HEAD と作業ツリーが前のままであることを確かめ、何も記録せず、理由(衝突なら衝突したファイル)と次の手を出して終了コード 1
+- [x] AC6 スクリプトが落ちたら、`gate_failed`(head は merge commit)を記録し、merge commit を戻し(D5)、push せず、「merge は戻した」と LOG を出して終了コード 1。`gate_passed` を記録する前の中断(SIGINT、SIGTERM、SIGHUP)ならスクリプトを止め、何も記録せず、merge commit を戻す。`head_moved` と `tree_changed` では gate と同じく `gate_failed` を記録し、戻さず、push せず、今の状態と戻すコマンドを出す
+- [x] AC7 push が落ちたとき、または `gate_passed` を記録したあと(push の前か途中)に中断されたときは、記録と merge commit をそのままにして終了コード 1 になり、打ち直しを案内する。打ち直すと、push が届いていなければ D4 の例外で push だけをし、届いていれば(origin が受け取ったあと応答が届かなかった)AC3 になる。既定のブランチがその間に進んだとき、または fetch と push の間に誰かが `origin/<b>` に push した(push は non-fast-forward で落ち、`origin/<b>` が HEAD の祖先でなくなる)ときは、例外に当たらず断り、D4 の条件のときだけ `reset --keep` の手を出す。最新の記録が読めず HEAD が `origin/<b>` と違うときも、同じ条件で断る
+- [x] AC8 スクリプトが走る間に、その org が立て直されたか、ブランチの結びつきが変わったら、何も記録せず、merge commit を戻して終了コード 1
+- [x] AC9 gate だけの道: HEAD が `origin/<b>` と同じで既定の先頭を含むが、その head の通った記録がない(merge-order の `regate` や `failed` のあと、人が直して push した)なら、merge せずにスクリプトを走らせて記録する。push は要らない
+- [x] AC10 merge-order の理由の欄: 結びつきの org が走っていないブランチでは、`ralph org gate --org-id <org>` と「(the gate runs only while the feature org runs)」の代わりに `ralph org regate --branch <b>` を出す。走っている org が今結びついているブランチは今のまま。org_id が別の機能で立て直されて走っているときは、その org が別のブランチで走っていることと、disband のあとに `ralph org regate --branch <b>` を打つことを言う。最新の記録が regate の `gate_failed`(`via=regate`)のときは、その head が regate の merge commit であることと log のパスを理由で言う。`regate`(origin の先頭が gate の head と違う)の理由は、走っていない org のブランチでは「gate のあとに push された、または gate の head が push されていない」と言う(regate の push が落ちたあとの状態を読み違えないため)
+- [x] AC13 Spawn との排他(D9): regate が最初の確かめから終わりまでの間、同じ org_id の `ralph org spawn` と `ralph org start --plan` は何も記録せずに断られ(start は ensure の前に断る)、別の org_id の spawn は通る。regate が排他を取れないときは 1 秒まで打ち直してから断る。テストは、regate を最初の確かめのあとと記録の直後で止める test hook で確かめる
+- [x] AC11 文書: `/org` skill の 4 面に動詞リファレンスの `regate` の行を足し、「merge してよい順」の人の手順を regate に置き換える。`/director` skill の 4 面に、人に頼まれたら regate を 1 本ずつ打ち、衝突と失敗は人に伝える手順を書く。仕様 FR-7 の注、tech-debt の merge-order の行、`AGENTS.md` の repo-map、CLI の help
+- [x] AC12 テストはネットワークに出ず、本物の herdr、osascript、端末を打たない。Go のテストは go1.26 と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
 
@@ -154,5 +154,6 @@
   - verify(1762154c、pass、LOW 1 件は sync-docs の quality-gates.md)のあと、テストだけの d00da42c: merge のあとの親の確かめ(`TestRegate_AnotherCommitAfterTheMergeNamesResetKeep`)と、regate の古い台帳の守り(`TestOrgRegate_LegacyLedgerGuard`)。gate と approve にはあったのに regate にはなかった
 - [x] Review artifact created(`docs/reports/self-review-2026-10-16-org-regate.md`、1 周目の 2 回目)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-16-org-regate.md`、pass)
-- [ ] Test artifact created
+  - test(6e67e718、pass)の穴 1 のテストだけの 5e4ce6cd: 既定のブランチが HEAD の子孫(`TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch`、差分の空の `--no-ff` merge commit を作って gate し push する)。穴 2〜4(fetch・push の途中の中断、push・merge・`git var`・reset の 120 秒の上限、`merge --abort` 自体の失敗)は PR の既知の穴に書く
+- [x] Test artifact created(`docs/reports/test-2026-10-16-org-regate.md`、pass)
 - [ ] PR created
