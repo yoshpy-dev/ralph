@@ -146,6 +146,7 @@
   - S3(5c7f585f): 取り込み、push、戻し方、push だけの打ち直し。計画からのずれ: `reset --keep` の手の条件に、最新の記録が `via=regate` であることを足した(leader の gate が通った head を手で落とさないため)。D4 の文を合わせて承認し直した(sha256:0d63d9df1288)。push だけの例外には `via` を求めない(leader が通した head はそのまま push する)。Outcome に `merged` と `push_only` を足し、push の失敗は誤りでなく `PushFailed` で返す
   - S4(2c3874e2、1ace199b): CLI の `ralph org regate`、merge-order の理由の欄(AC10)と JSON の `via`、共有の helper の接頭辞。1ace199b は、S4 の implementer が push 済みの 2c3874e2 を amend した中身を、reset --soft で新しいコミットとして積み直したもの(force push なし)。regate のログの見出し、`tree_changed` の退避の一言、push が落ちたあと push だけで済む e2e のテストを含む
   - S4b(7602b00d、d8675039、8222d6bd): merge-order の help と台帳の注、org_id を別の機能で立て直して走っている org のブランチの Detail と regate の断りの文(AC10 の文を「今結びついているブランチ」に直し、承認し直した。sha256:f841204a7bc0)、`regate.go` から merge と push を `regate_merge.go` へ移した(中身は変えない)。`regate.go` は 851 行で、gate だけの道と共有する関数まで動かさないと 800 行を切らないので止めた
+  - S5(5400264c、6ec122b5): `/org` と `/director` の skill の 4 面、仕様の FR-7 の注、tech-debt(取り直しの行を RESOLVED にし、4 行足した)、`AGENTS.md`、`README.md`(動詞の表と regate の分類)。6ec122b5 は legacy ledger の注の動詞の一覧に `regate` を足した 1 語の直し。sync-docs に回すもの: `docs/quality/quality-gates.md` とその template の写しの「見張りなしで使える動詞」の一覧に regate がない
   - 範囲外(この PR では直さない): `internal/org/director_cmd_test.go:300-302` が sh の trap を 100 ms の sleep で待つので、負荷が高いと go1.25.8 の全体の実行で 1 回落ちた(単独では 5 回通る)。S5 で tech-debt に 1 行足す
 - [ ] Review artifact created
 - [ ] Verification artifact created
