@@ -19,9 +19,8 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
-// Tests for director_cmd.go (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D1, D3, D6, and
-// D7): the process reader, the stop of a recorded process, the launch
+// Tests for director_cmd.go (plan 2026-10-16-org-director-launch-cmd, D1,
+// D3, D6, and D7): the process reader, the stop of a recorded process, the launch
 // script, the launch_cmd argv and its runner, and StartDirector's launch_cmd
 // path (its checks, the wait for the check-in, and its cleanup). Every
 // process they signal is one the test started itself, and every process a
@@ -838,8 +837,7 @@ func TestRunDirectorLaunchCmd_ABackgroundChildHoldingTheOutputDoesNotHang(t *tes
 }
 
 // The tests of StartDirector's launch_cmd path (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC2, AC4, and AC5)
-// run real processes under t.TempDir(): a fake launch_cmd (sh), the launch
+// 2026-10-16-org-director-launch-cmd, AC2, AC4, and AC5) run real processes under t.TempDir(): a fake launch_cmd (sh), the launch
 // script start writes, a check-in that is this test binary
 // (TestDirectorCheckInHelperProcess) run through a ralph wrapper, and a fake
 // agent that records what it got and then becomes a sleep. The fake herdr

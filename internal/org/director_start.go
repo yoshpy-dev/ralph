@@ -23,9 +23,9 @@ import (
 // in director_stop.go. Neither verb writes a manifest line or a model
 // receipt (D2, D8): director.jsonl is the only record. The fold that reads
 // these events back is in director.go. With [org.director].launch_cmd
-// (plan docs/plans/active/2026-10-16-org-director-launch-cmd.md) StartDirector
-// opens the human's terminal instead of herdr; that path (startCmd) and its
-// cleanup are in director_cmd.go.
+// (plan 2026-10-16-org-director-launch-cmd) StartDirector opens the human's
+// terminal instead of herdr; that path (startCmd) and its cleanup are in
+// director_cmd.go.
 
 // DirectorHeadlessAttach is what AttachHeadless records: the launch
 // (DirectorLaunchHerdr, or DirectorLaunchCmd for a start with
@@ -660,8 +660,7 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // registration is current (Detach), and returns a *DirectorCleanupError.
 //
 // With [org.director].launch_cmd set (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D2), start makes
-// no herdr call at all: it records the registration with launch cmd and
+// 2026-10-16-org-director-launch-cmd, D2), start makes no herdr call at all: it records the registration with launch cmd and
 // opens the human's terminal with launch_cmd instead (startCmd, in
 // director_cmd.go). HERDR_PANE_ID does not refuse it (D9), and it also
 // refuses, before anything is written and with the refusals above in their

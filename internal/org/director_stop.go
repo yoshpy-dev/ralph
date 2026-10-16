@@ -13,6 +13,9 @@ import (
 // closing it shares with StartDirector's cleanup: the checks of herdr's
 // labels before anything is sent, the C-c and the closes, and the
 // *DirectorCleanupError of a start or a stop that could not finish them.
+// The stop of a launch cmd (plan 2026-10-16-org-director-launch-cmd, D7 and
+// D8: stopCmdDirector) is here too; the stop of its process that it shares
+// with start's cleanup (stopDirectorProcess) is in director_cmd.go.
 // StartDirector and the DirectorStore writers of a headless registration
 // are in director_start.go.
 
@@ -33,6 +36,19 @@ var (
 	// label confirmed as this launch's), and closing it would end the command
 	// before it records the stop.
 	ErrDirectorStopSelfWorkspace = errors.New("run ralph org director stop from a terminal outside the director's workspace")
+	// ErrDirectorStopSelfProcess: stop ran inside the director of a launch
+	// cmd (RALPH_DIRECTOR_TOKEN, which its launch script exports, is the
+	// registration's token), and stopping that process would end the command
+	// before it records the stop (plan 2026-10-16-org-director-launch-cmd,
+	// D8).
+	ErrDirectorStopSelfProcess = errors.New("run ralph org director stop from a terminal other than the director's")
+	// ErrDirectorProcessNotEnded: the stop of a launch cmd could not confirm
+	// that the process its launch script checked in with has ended (ps could
+	// not be read, so nothing was sent, or the process did not end within the
+	// wait after its SIGTERM), so without Force it recorded nothing (plan
+	// 2026-10-16-org-director-launch-cmd, D7). The process may still be
+	// running.
+	ErrDirectorProcessNotEnded = errors.New("the end of the process the launch script checked in with is not confirmed")
 	// ErrDirectorChangedDuringStop: a start still running recorded a
 	// workspace or pane of the registration after stop read it, so stop did
 	// not close it and recorded nothing (plan D14,
@@ -50,7 +66,8 @@ var (
 // DirectorStopParams describes one StopDirector call: Store is the
 // director.jsonl of the ledger, ID the registration to stop, and Who who
 // writes the stop. Force records the stop even when the recorded pane and
-// workspace cannot be confirmed as this launch's or closed (plan D11).
+// workspace cannot be confirmed as this launch's or closed (plan D11), or,
+// for a launch cmd, when the end of its process cannot be confirmed.
 type DirectorStopParams struct {
 	Store *DirectorStore
 	ID    string
@@ -81,6 +98,16 @@ type DirectorStopParams struct {
 // record the stop and wrote nothing (plan AC8). The notes still say what this
 // stop did to the pane and the workspace. WasCurrent and Forced are false,
 // CloseErr and HerdrCommands are unset, and no stop is left to run again.
+//
+// For a launch cmd (Registration.CmdLaunch, plan
+// 2026-10-16-org-director-launch-cmd, D7) the herdr notes, the label, and
+// HerdrCommands are unset. ProcessNote says what the stop did to the process
+// the launch script checked in with (Registration.PID, none before its
+// check-in), and TerminalName is director_<token>, the name launch_cmd's
+// {name} gave the terminal, which the stop leaves open. Forced says Force
+// recorded the stop although the end of that process was not confirmed: it
+// may still be running, and CloseErr says why (ps could not be read, or the
+// process did not end within the wait after its SIGTERM).
 type DirectorStopResult struct {
 	Registration             DirectorRegistration
 	WasCurrent               bool
@@ -88,6 +115,8 @@ type DirectorStopResult struct {
 	PaneNote                 string
 	WorkspaceNote            string
 	UnrecordedWorkspaceLabel string
+	ProcessNote              string
+	TerminalName             string
 	Forced                   bool
 	CloseErr                 error
 	HerdrCommands            []string
@@ -148,10 +177,31 @@ type DirectorStopResult struct {
 // false. The refusals above, the pane and the workspace ones included, hold
 // with Force too.
 //
-// A registration with launch cmd (plan 2026-10-16-org-director-launch-cmd)
-// has no herdr pane or workspace, and its stop by pid and start time (D7)
-// is not wired in yet: for now StopDirector refuses it, Force or not, with
-// ErrDirectorNotHerdrLaunch, writing nothing and calling no herdr.
+// A registration with launch cmd (plan 2026-10-16-org-director-launch-cmd,
+// D7 and D8) has no herdr pane or workspace, so its stop makes no herdr call
+// at all (stopCmdDirector): it ends the process the launch script checked
+// in with and records the stop. A call from inside that director, whose
+// RALPH_DIRECTOR_TOKEN is the registration's token, is refused first, with
+// Force too (ErrDirectorStopSelfProcess), sending nothing and writing
+// nothing. Then stopDirectorProcess sends SIGTERM to the recorded pid only
+// while ps reads for it the start time the check-in recorded (the launch
+// script before its exec, or the agent after it), and waits for it to end;
+// a pid with no process, a zombie, a pid with another start time, and a
+// registration with no pid yet (still starting) count as ended and are sent
+// nothing. Once it has ended, MarkStoppedIfUnchanged records the stop, as
+// above, after it checks under the lock that the pid and the start time are
+// the ones read: a check-in that landed after the read (that stop sent
+// nothing to its process) writes nothing and returns a *DirectorCleanupError
+// that wraps ErrDirectorCheckedInDuringStop and names the stop to run again.
+// When the end is not confirmed (ps cannot be read, or the process did not
+// end within directorStopWait of its SIGTERM), it writes nothing and returns
+// a *DirectorCleanupError that wraps ErrDirectorProcessNotEnded, with the pid
+// that may still be running. With Force it records that stop with
+// MarkForceStopped instead and returns Forced, sending nothing
+// stopDirectorProcess did not send (no SIGTERM when ps cannot be read). It
+// never sends SIGKILL, and Force changes nothing when the process ended. The
+// AlreadyStopped rule above holds for it too, and the terminal launch_cmd
+// opened is never closed.
 func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	switch _, ok := directorIDNumber(p.ID); {
 	case p.Store == nil:
@@ -165,9 +215,8 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	if err != nil {
 		return DirectorStopResult{}, err
 	}
-	if !reg.HerdrLaunch() {
-		return DirectorStopResult{}, fmt.Errorf("%w; this ralph cannot stop a director started with [org.director].launch_cmd yet",
-			directorNotHerdrLaunchErr("stop "+p.ID, reg))
+	if reg.CmdLaunch() {
+		return o.stopCmdDirector(p, reg)
 	}
 	if own := o.getenv(herdrPaneIDEnv); own != "" && own == reg.PaneID {
 		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_PANE_ID is its pane %q, and closing that pane would end this command before it records the stop: %w",
@@ -246,6 +295,86 @@ func recordDirectorStop(p DirectorStopParams, res DirectorStopResult, closed dir
 	return res, nil
 }
 
+// stopCmdDirector is StopDirector for reg, an open headless registration with
+// launch cmd (plan 2026-10-16-org-director-launch-cmd, D7 and D8): it makes
+// no herdr call. It refuses a call from inside that director first
+// (RALPH_DIRECTOR_TOKEN is reg's token), Force or not, with nothing sent and
+// nothing written: the launch script exported the variable, so the caller
+// runs under the process this stop would end. Then it stops the recorded
+// process (stopDirectorProcess) and records what that did
+// (recordCmdDirectorStop).
+func (o *Org) stopCmdDirector(p DirectorStopParams, reg DirectorRegistration) (DirectorStopResult, error) {
+	if own := o.getenv(directorTokenEnv); own != "" && own == reg.Token {
+		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: %s is its launch token, so this runs inside the director, whose launch script exported it, "+
+			"and stopping the director's process would end this command before it records the stop: %w", p.ID, directorTokenEnv, ErrDirectorStopSelfProcess)
+	}
+	stop := o.stopDirectorProcess(reg)
+	res := DirectorStopResult{Registration: reg, ProcessNote: stop.note, TerminalName: DirectorAgentName(reg.Token)}
+	return recordCmdDirectorStop(p, res, stop)
+}
+
+// recordCmdDirectorStop is recordDirectorStop for a launch cmd, once stop is
+// what stopDirectorProcess did to the process of res.Registration. When the
+// process ended (or none was recorded), MarkStoppedIfUnchanged records the
+// stop against the registration as stopCmdDirector read it, so a check-in
+// that landed after that read (ErrDirectorCheckedInDuringStop: this stop sent
+// nothing to its process) writes nothing and is a *DirectorCleanupError whose
+// StopCommand is the stop to run again. When the end is not confirmed,
+// nothing is written without p.Force, and the *DirectorCleanupError wraps
+// ErrDirectorProcessNotEnded and stop's reason; with p.Force,
+// MarkForceStopped records it, and the result is Forced with that reason as
+// CloseErr. ErrDirectorStopped from either record is AlreadyStopped with a
+// nil error, as for herdr. Any other record that fails is a
+// *DirectorCleanupError whose CleanupErr is directorRecordStopError, and
+// after a forced stop its StopCommand carries --force.
+func recordCmdDirectorStop(p DirectorStopParams, res DirectorStopResult, stop directorProcessStop) (DirectorStopResult, error) {
+	reg := res.Registration
+	ended := stop.outcome == directorProcessStopEnded
+	var notEnded error
+	if !ended {
+		notEnded = fmt.Errorf("%w: %w", ErrDirectorProcessNotEnded, stop.err)
+		if !p.Force {
+			return res, newDirectorCmdStopError(reg, notEnded, false)
+		}
+	}
+	var wasCurrent bool
+	var err error
+	if ended {
+		wasCurrent, err = p.Store.MarkStoppedIfUnchanged(reg, p.Who)
+	} else {
+		wasCurrent, err = p.Store.MarkForceStopped(p.ID, p.Who)
+	}
+	if errors.Is(err, ErrDirectorStopped) {
+		res.AlreadyStopped = true
+		return res, nil
+	}
+	if err != nil {
+		recordErr := &directorRecordStopError{id: p.ID, err: err}
+		switch {
+		case !ended:
+			return res, newDirectorCmdStopError(reg, errors.Join(notEnded, recordErr), true)
+		case errors.Is(err, ErrDirectorCheckedInDuringStop):
+			return res, newDirectorCmdStopError(reg, fmt.Errorf("%w; this stop sent nothing to the process that checked in", recordErr), false)
+		}
+		return res, newDirectorCmdStopError(reg, recordErr, false)
+	}
+	res.WasCurrent = wasCurrent
+	if !ended {
+		res.Forced, res.CloseErr = true, stop.err
+	}
+	return res, nil
+}
+
+// newDirectorCmdStopError is the *DirectorCleanupError of a stop of reg, a
+// launch cmd, that recorded nothing: no herdr ids, labels, or commands, the
+// pid that checked in, the terminal's name, and the stop to run, with
+// --force when force.
+func newDirectorCmdStopError(reg DirectorRegistration, cleanupErr error, force bool) *DirectorCleanupError {
+	e := newDirectorCmdCleanupError(reg, nil, cleanupErr, false)
+	e.Verb, e.StopCommand = "stop", directorStopCommand(reg.ID, force)
+	return e
+}
+
 // directorRecordStopError is err, the store's failure to record the stop of
 // registration id (MarkStopped, MarkStoppedIfUnchanged, or MarkForceStopped),
 // as the CleanupErr of a *DirectorCleanupError: "record <id> stopped: " and
@@ -319,6 +448,15 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // name launch_cmd's {name} gave the terminal, which is left open. The
 // workspace, pane, and label fields are empty, HerdrCommands is empty, and
 // StopCommand is the stop without --force.
+//
+// The same shape is a stop of a launch cmd that recorded nothing (D7,
+// stopCmdDirector): its CleanupErr wraps ErrDirectorProcessNotEnded when the
+// end of PID is not confirmed, and the text then names the stop to run again
+// once PID has ended (the caller adds --force as the other way out); it wraps
+// ErrDirectorCheckedInDuringStop when the launch script checked in after the
+// stop read the registration, and the text names the stop to run again,
+// which stops the process that checked in; otherwise the record failed. After
+// a forced stop whose record failed, StopCommand carries --force.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
@@ -359,10 +497,15 @@ func (e *DirectorCleanupError) Error() string {
 		fmt.Fprintf(&b, "; close it by hand: %s", strings.Join(e.HerdrCommands, ", then "))
 		then = "afterwards record the stop with "
 	}
+	var recordErr *directorRecordStopError
 	switch {
 	case e.StopCommand == "":
 	case errors.Is(e.CleanupErr, ErrDirectorChangedDuringStop):
 		b.WriteString("; run " + e.StopCommand + " again to close what start recorded")
+	case errors.Is(e.CleanupErr, ErrDirectorCheckedInDuringStop):
+		b.WriteString("; run " + e.StopCommand + " again to stop the process that checked in")
+	case errors.Is(e.CleanupErr, ErrDirectorProcessNotEnded) && !errors.As(e.CleanupErr, &recordErr):
+		fmt.Fprintf(&b, "; run %s again once pid %d has ended", e.StopCommand, e.PID)
 	default:
 		b.WriteString("; " + then + e.StopCommand)
 	}

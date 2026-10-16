@@ -44,12 +44,13 @@ func newOrgCmd() *cobra.Command {
 			"in the order their PRs may be merged, from those records and origin's\n" +
 			"branches. `ralph org director` registers the interactive session the\n" +
 			"human talks to as the director of the ledger, or launches a headless\n" +
-			"director in herdr (ralph org director start).",
+			"director in herdr (ralph org director start), or with\n" +
+			"[org.director].launch_cmd in the terminal that command opens.",
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles] and model_pool, from the main worktree's ralph.toml when the ledger is the main worktree's)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),

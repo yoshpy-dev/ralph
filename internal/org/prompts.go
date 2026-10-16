@@ -132,10 +132,10 @@ type DirectorPromptVars struct {
 
 // directorPromptLaunchPrefixes are the line prefixes of prompts/director.md
 // that keep a line for one launch only (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md): a director in a
-// herdr pane is talked to in that pane and stopped by closing it, and one in
-// the terminal launch_cmd opened is talked to there and stopped by its pid,
-// with the terminal left for the human to close. RenderDirectorPrompt keeps
+// 2026-10-16-org-director-launch-cmd): a director in a herdr pane is talked
+// to in that pane and stopped by closing it, and one in the terminal
+// launch_cmd opened is talked to there and stopped by its pid, with the
+// terminal left for the human to close. RenderDirectorPrompt keeps
 // a line with its launch's prefix, the prefix cut off, and drops a line with
 // the other's, before it substitutes the placeholders. A prefix anywhere but
 // at the start of a line is left in the text, where the placeholder check

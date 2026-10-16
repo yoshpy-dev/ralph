@@ -2111,9 +2111,9 @@ func TestDirectorAttachAndAttachHeadless_ConcurrentlyOnlyOneRegisters(t *testing
 }
 
 // The launch cmd registration of stage 8a-2b (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC2 and AC3): its
-// attached, its check-in (MarkCmdLaunched), and how the fold and the herdr
-// writers read it.
+// 2026-10-16-org-director-launch-cmd, AC2 and AC3): its attached, its
+// check-in (MarkCmdLaunched), and how the fold and the herdr writers read
+// it.
 
 // directorTestStartTime is the start time the check-ins of these tests
 // record, in ReadDirectorProcess's form.

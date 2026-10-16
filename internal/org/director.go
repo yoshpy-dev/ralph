@@ -45,11 +45,11 @@ import (
 // StartDirector are in director_start.go; StopDirector is in
 // director_stop.go.
 //
-// Stage 8a-2b (plan docs/plans/active/2026-10-16-org-director-launch-cmd.md,
-// D3, D4, D7, and D11) adds the headless director that start opens in a
-// terminal of the human's with [org.director].launch_cmd instead of herdr.
-// Its attached carries launch cmd with the same token, model, and permission
-// mode, and is written first too. It has no workspace or pane: its launched
+// Stage 8a-2b (plan 2026-10-16-org-director-launch-cmd, D3, D4, D7, and
+// D11) adds the headless director that start opens in a terminal of the
+// human's with [org.director].launch_cmd instead of herdr. Its attached
+// carries launch cmd with the same token, model, and permission mode, and
+// is written first too. It has no workspace or pane: its launched
 // is the check-in of the launch script (`ralph org director launched`,
 // MarkCmdLaunched) and carries the pid of that script, which execs the agent
 // and so keeps its pid, and the pid's start time as ps reads it
@@ -122,9 +122,8 @@ var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has th
 
 // ErrDirectorNotHerdrLaunch is returned (wrapped) by RecordWorkspace and
 // RecordPane for an open headless registration with launch cmd, which has no
-// herdr workspace or pane, and for now by StopDirector for one: it closes
-// herdr panes and workspaces only, and the stop of a launch cmd (plan
-// 2026-10-16-org-director-launch-cmd, D7) is not wired in yet.
+// herdr workspace or pane. StopDirector stops such a registration by its pid
+// and start time instead (plan 2026-10-16-org-director-launch-cmd, D7).
 var ErrDirectorNotHerdrLaunch = errors.New("the headless registration was started with [org.director].launch_cmd, not in herdr")
 
 // ErrDirectorCheckInRefused is returned (wrapped) by MarkCmdLaunched, the

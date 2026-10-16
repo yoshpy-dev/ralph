@@ -887,6 +887,88 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 	}
 }
 
+// AC8 of plan 2026-10-16-org-director-launch-cmd for `ralph status`: a
+// launch cmd's registration shows launch cmd, the name of its terminal, and
+// its pid once checked in, in place of the herdr ids, attached, open but not
+// attached, and disabled; --json carries launch, state, terminal_name, pid,
+// start_time, and model. The pids are made up: status reads or signals no
+// process.
+func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	t.Chdir(t.TempDir())
+	stateDir := t.TempDir()
+	store := org.NewDirectorStore(stateDir)
+	who := org.DirectorWho{User: "alice", Cwd: "/work"}
+	d1 := seedCmdHeadless(t, stateDir)
+	if err := store.MarkCmdLaunched(org.DirectorCmdCheckIn{ID: "d1", Token: d1.Token, PID: 4242, StartTime: directorTestStartTime, Who: who}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	d2 := seedCmdHeadless(t, stateDir)
+	name1, name2 := "director_"+d1.Token, "director_"+d2.Token
+	suffix := " --state-dir '" + stateDir + "'"
+	d1Open := "d1 (running, launch cmd, name " + name1 + ", pid 4242)"
+	d1Note := "; the headless director " + d1Open + " is still open but not attached: stop it with ralph org director stop --id d1" + suffix
+	line := func() string {
+		t.Helper()
+		out, err := runStatusCmd(t, "--state-dir", stateDir)
+		if err != nil {
+			t.Fatalf("status: %v (output: %s)", err, out)
+		}
+		return statusDirectorLine(t, out)
+	}
+
+	want := "director: attached d2 (driver=claude, headless starting, model=opus, launch cmd, name " + name2 + ", attached at " + d2.AttachedAt + ", by alice)" + tail + d1Note
+	if got := line(); got != want {
+		t.Errorf("director line:\n got %q\nwant %q", got, want)
+	}
+	jsonOut, err := runStatusCmd(t, "--state-dir", stateDir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	got := statusDirectorJSONOf(t, jsonOut)
+	if reg := got.Registration; got.State != "attached" || reg == nil || reg.ID != "d2" || reg.Launch != org.DirectorLaunchCmd || reg.State != org.DirectorStateStarting ||
+		reg.Model != "opus" || reg.TerminalName != name2 || reg.PID != 0 || len(got.OpenHeadless) != 1 || got.OpenHeadless[0].ID != "d1" ||
+		got.OpenHeadless[0].PID != 4242 || got.OpenHeadless[0].StartTime != directorTestStartTime || got.OpenHeadless[0].TerminalName != name1 {
+		t.Errorf("director = %+v; want d2 starting with launch cmd and %s, and d1 with pid 4242 in open_headless", got, name2)
+	}
+	for _, key := range []string{`"launch": "cmd"`, `"state": "starting"`, `"terminal_name": "` + name2 + `"`, `"pid": 4242`, `"start_time": "` + directorTestStartTime + `"`} {
+		if !strings.Contains(jsonOut, key) {
+			t.Errorf("status --json does not carry %s:\n%s", key, jsonOut)
+		}
+	}
+
+	if err := store.MarkCmdLaunched(org.DirectorCmdCheckIn{ID: "d2", Token: d2.Token, PID: 4343, StartTime: directorTestStartTime, Who: who}); err != nil {
+		t.Fatal(err)
+	}
+	want = "director: attached d2 (driver=claude, headless running, model=opus, launch cmd, name " + name2 + ", pid 4343, attached at " + d2.AttachedAt + ", by alice)" +
+		tail + d1Note
+	if got := line(); got != want {
+		t.Errorf("director line of a running d2:\n got %q\nwant %q", got, want)
+	}
+
+	writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
+	want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless running, launch cmd, name " + name2 + ", pid 4343: " +
+		"stop it with ralph org director stop --id d2" + suffix + ") -- ralph org escalate sends every item to the human at once" + d1Note
+	if got := line(); got != want {
+		t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
+	}
+
+	if err := os.Remove("ralph.toml"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Detach(org.DirectorDetach{ID: "d2", User: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	want = directorNotAttachedLine + "; the headless directors " + d1Open + ", d2 (running, launch cmd, name " + name2 + ", pid 4343) are still open but not attached: " +
+		"stop each with ralph org director stop --id <id>" + suffix
+	if got := line(); got != want {
+		t.Errorf("director line with no registration current:\n got %q\nwant %q", got, want)
+	}
+}
+
 // Self-review L3 of org-director-start: the stop command on the director:
 // line repeats --state-dir exactly when it was given, through `ralph status`
 // and `ralph org director status` alike, shell-quoted so a state dir with a
@@ -1056,6 +1138,9 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		"status runs no gh and does not use the network.",
 		"the local git rev-parse (and git worktree list --porcelain in a linked worktree) that finds the main worktree",
 		"when one of them does, to tell whether it names the main worktree's ledger, whose ralph.toml then holds [org.director].enabled, whether or not the cache is fresh",
+		// Plan 2026-10-16-org-director-launch-cmd, AC8.
+		"(for one launched with [org.director].launch_cmd, `launch cmd`, the name of its terminal, director_<token>, and the pid its launch script checked in with, " +
+			"in place of the pane and workspace; the JSON adds terminal_name)",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("status --help does not say %q:\n%s", want, out)

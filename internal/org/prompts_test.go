@@ -1533,7 +1533,7 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 
 // TestRenderDirectorPrompt_LaunchCmdTalksInTheTerminal pins the prompt of a
 // director started with [org.director].launch_cmd (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, AC2): the human is
+// 2026-10-16-org-director-launch-cmd, AC2): the human is
 // talked to in the terminal launch_cmd opened, the stop is asked for from
 // another terminal and ends the process but leaves the terminal for the
 // human to close, and the director does not run stop itself, which

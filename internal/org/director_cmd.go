@@ -17,7 +17,7 @@ import (
 )
 
 // The headless director of a launch cmd (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D1, D3, and D7):
+// 2026-10-16-org-director-launch-cmd, D1, D3, and D7):
 // `ralph org director start` with [org.director].launch_cmd writes a launch
 // script under the ledger, runs launch_cmd with its placeholders replaced and
 // without a shell, and the terminal it opens runs the script. The script

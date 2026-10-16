@@ -3,7 +3,9 @@ package org
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -234,29 +236,27 @@ func TestStopDirector_Refusals(t *testing.T) {
 			f.env[herdrPaneIDEnv] = "pane-1"
 			return DirectorStopParams{Store: f.store, ID: "d1", Force: true}
 		}, []error{ErrDirectorStopSelfPane}, "outside the director's pane"},
-		// Until stage 8a-2b's S3 (plan 2026-10-16-org-director-launch-cmd)
-		// teaches stop to end a launch cmd's process, it refuses one whether
-		// or not its script checked in, with force too.
-		{"a launch cmd starting", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
-			mustAttachCmdHeadless(t, f.store)
-			return f.stopParams("d1")
-		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
-		{"a launch cmd checked in", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+		// A launch cmd's stop run inside that director (plan
+		// 2026-10-16-org-director-launch-cmd, D8), with force too. Its pid
+		// is no process of the test's, so ps is stubbed to fail: whatever
+		// the stop does, it can send nothing.
+		{"a launch cmd, inside the director", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
 			mustAttachCmdHeadless(t, f.store)
 			if err := f.store.MarkCmdLaunched(testCheckIn(4242)); err != nil {
 				t.Fatal(err)
 			}
+			f.o.DirectorProcessReader = refusingProcessReader(t)
+			f.env[directorTokenEnv] = directorTestToken
 			return f.stopParams("d1")
-		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
-		{"a launch cmd checked in, with force", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
+		}, []error{ErrDirectorStopSelfProcess}, "from a terminal other than the director's"},
+		{"a launch cmd, inside the director, with force", func(t *testing.T, f *dirStartFixture) DirectorStopParams {
 			mustAttachCmdHeadless(t, f.store)
-			if err := f.store.MarkCmdLaunched(testCheckIn(4242)); err != nil {
-				t.Fatal(err)
-			}
+			f.o.DirectorProcessReader = refusingProcessReader(t)
+			f.env[directorTokenEnv] = directorTestToken
 			p := f.stopParams("d1")
 			p.Force = true
 			return p
-		}, []error{ErrDirectorNotHerdrLaunch}, "cannot stop a director started with [org.director].launch_cmd yet"},
+		}, []error{ErrDirectorStopSelfProcess}, "RALPH_DIRECTOR_TOKEN is its launch token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1074,4 +1074,508 @@ func TestStopDirector_ARecordThatCannotBeCutBackSaysTheFileMayHoldPartOfIt(t *te
 			wantNoDirectorOpen(t, f.store)
 		})
 	}
+}
+
+// The StopDirector tests of a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd, D7 and D8, AC6 and AC7). Each sends
+// signals only to processes the test started itself (startTestProcess, or
+// the launch script of a cmdStartFixture, which killCheckedInProcesses
+// cleans up), and none calls herdr.
+
+// newCmdStopFixture is a dirStartFixture with the launch cmd registration d1
+// attached, still starting, whose stop waits up to wait for the process
+// after its SIGTERM.
+func newCmdStopFixture(t *testing.T, wait time.Duration) *dirStartFixture {
+	t.Helper()
+	f := newDirStartFixture(t, directorTestToken)
+	mustAttachCmdHeadless(t, f.store)
+	f.o.DirectorStopWait = wait
+	return f
+}
+
+// checkInPID records the check-in of d1's launch script with pid and
+// startTime.
+func checkInPID(t *testing.T, f *dirStartFixture, pid int, startTime string) {
+	t.Helper()
+	if err := f.store.MarkCmdLaunched(DirectorCmdCheckIn{ID: "d1", Token: directorTestToken, PID: pid, StartTime: startTime, Who: testDirectorWho}); err != nil {
+		t.Fatalf("check in pid %d: %v", pid, err)
+	}
+}
+
+// checkInProcess records the check-in of d1 with p's pid and the start time
+// ps reads for it now, as the launch script's check-in does, and returns that
+// start time.
+func checkInProcess(t *testing.T, f *dirStartFixture, p *testProcess) string {
+	t.Helper()
+	reg := cmdRegistrationOf(t, p)
+	checkInPID(t, f, reg.PID, reg.StartTime)
+	return reg.StartTime
+}
+
+// startFakeAgent starts what a launch script execs, a fake agent: a shell
+// that writes a marker file and then becomes a sleep of 600 s, ignoring
+// SIGTERM when ignoreTerm (an ignored signal stays ignored across the exec).
+// It returns once the marker exists and the shell had time to reach its
+// exec, so the sleep holds the pid, as the agent keeps the launch script's.
+func startFakeAgent(t *testing.T, ignoreTerm bool) *testProcess {
+	t.Helper()
+	marker := filepath.Join(t.TempDir(), "agent ran")
+	trap := ""
+	if ignoreTerm {
+		trap = "trap '' TERM; "
+	}
+	p := startTestProcess(t, "/bin/sh", "-c", trap+": > "+shellQuote(marker)+"; exec "+shellQuote(sleepPath(t))+" 600")
+	waitForFileWithin(t, marker, 10*time.Second)
+	time.Sleep(100 * time.Millisecond)
+	return p
+}
+
+// refusingProcessReader is a DirectorProcessReader for a stop that must not
+// read the process: it fails the test, and returns an error so that a stop
+// reading it anyway sends nothing.
+func refusingProcessReader(t *testing.T) func(context.Context, int) (DirectorProcess, error) {
+	return func(_ context.Context, pid int) (DirectorProcess, error) {
+		t.Errorf("the stop read pid %d", pid)
+		return DirectorProcess{}, errors.New("ps must not be read")
+	}
+}
+
+// brokenProcessReader is a DirectorProcessReader whose ps cannot be read.
+func brokenProcessReader(context.Context, int) (DirectorProcess, error) {
+	return DirectorProcess{}, errors.New("ps is broken")
+}
+
+// wantAliveWith fails t unless ps reads pid alive with startTime, after a
+// moment that a SIGTERM would need to end it.
+func wantAliveWith(t *testing.T, pid int, startTime, what string) {
+	t.Helper()
+	time.Sleep(200 * time.Millisecond)
+	if proc := mustReadProcess(t, pid); proc.State != DirectorProcessAlive || proc.StartTime != startTime {
+		t.Fatalf("pid %d reads %+v, want it still running with start time %q: %s", pid, proc, startTime, what)
+	}
+}
+
+// AC6: the stop of a launch cmd whose process, alive with the start time
+// its check-in recorded, is the agent its launch script exec'd: one SIGTERM
+// ends it, the stop waits for that, and then records stopped, with detached
+// in the same write while the registration is current (stopped alone once it
+// was detached). The result says what was done to the process and names the
+// terminal, and no herdr is called.
+func TestStopDirector_LaunchCmdEndsTheCheckedInProcessAndRecordsTheStop(t *testing.T) {
+	for _, detachFirst := range []bool{false, true} {
+		name := "current"
+		if detachFirst {
+			name = "detached but open"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newCmdStopFixture(t, 5*time.Second)
+			agent := startFakeAgent(t, false)
+			checkInProcess(t, f, agent)
+			trail := []string{"attached d1", "launched d1"}
+			if detachFirst {
+				if _, err := f.store.Detach(DirectorDetach{ID: "d1"}); err != nil {
+					t.Fatalf("Detach: %v", err)
+				}
+				trail = append(trail, "detached d1")
+			}
+			res, err := f.stop("d1")
+			if err != nil {
+				t.Fatalf("stop: %v", err)
+			}
+			if res.WasCurrent == detachFirst || res.Registration.ID != "d1" || res.Registration.PID != agent.pid() ||
+				res.ProcessNote != "process=ended after SIGTERM" || res.TerminalName != "director_"+directorTestToken ||
+				res.Forced || res.AlreadyStopped || res.CloseErr != nil || res.HerdrCommands != nil ||
+				res.CtrlCNote != "" || res.PaneNote != "" || res.WorkspaceNote != "" || res.UnrecordedWorkspaceLabel != "" {
+				t.Fatalf("stop result = %+v", res)
+			}
+			if !agent.signalledBy(t, syscall.SIGTERM) {
+				t.Fatalf("the agent ended with %v, want SIGTERM", agent.cmd.ProcessState)
+			}
+			if proc := mustReadProcess(t, agent.pid()); proc.State != DirectorProcessGone {
+				t.Fatalf("pid %d reads %+v after the stop, want it gone", agent.pid(), proc)
+			}
+			if !detachFirst {
+				trail = append(trail, "detached d1")
+			}
+			wantTrail(t, f.store, append(trail, "stopped d1")...)
+			wantNoDirectorOpen(t, f.store)
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %v, want none for a launch cmd", f.h.calls)
+			}
+		})
+	}
+}
+
+// AC6: the same holds for the launch script before its exec. Start goes
+// through with a launch script whose check-in pauses right after it recorded
+// the check-in; the stop sends SIGTERM to the script's shell, whose pid and
+// start time the check-in recorded, sees it end, and records the stop.
+// Released then with success, the check-in has no script left to exec the
+// agent, so the agent never runs.
+func TestStopDirector_LaunchCmdStopsALaunchScriptPausedAfterItsCheckIn(t *testing.T) {
+	f := newCmdStartFixture(t, launchCmdInBackground, cmdStartOptions{pause: true})
+	p := f.params(DirectorDriverClaude, "opus")
+	p.TimeoutMS = 30000
+	started, err := f.o.StartDirector(p)
+	if err != nil {
+		t.Fatalf("StartDirector: %v", err)
+	}
+	waitForFileWithin(t, filepath.Join(f.pause, "checked-in"), 10*time.Second)
+	reg := started.Registration
+	res, err := f.stop("d1")
+	if err != nil || !res.WasCurrent || res.ProcessNote != "process=ended after SIGTERM" || res.Registration.PID != reg.PID || reg.PID <= 0 {
+		t.Fatalf("stop = %+v, %v; want the paused script's pid %d sent SIGTERM and ended", res, err, reg.PID)
+	}
+	if proc := mustReadProcess(t, reg.PID); proc.State == DirectorProcessAlive && proc.StartTime == reg.StartTime {
+		t.Fatalf("the launch script, pid %d, reads %+v after the stop, want it ended", reg.PID, proc)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+
+	f.release(t, 0)
+	time.Sleep(300 * time.Millisecond)
+	wantNoFile(t, f.agentMarker, "the agent ran although its launch script was stopped before its exec")
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
+	}
+}
+
+// AC6: a recorded process that has ended is sent nothing, and the stop is
+// recorded: a pid that another process has now (the test's own, alive, with
+// a start time that is not the recorded one: it is still running
+// afterwards), a pid no process has, and a zombie (exited, not yet reaped by
+// the test).
+func TestStopDirector_LaunchCmdSendsNothingToAProcessThatHasEnded(t *testing.T) {
+	const recorded = "Thu Jan 1 00:00:00 1970"
+	t.Run("another process has the pid", func(t *testing.T) {
+		f := newCmdStopFixture(t, 2*time.Second)
+		other := startTestProcess(t, sleepPath(t), "600")
+		now := cmdRegistrationOf(t, other).StartTime
+		checkInPID(t, f, other.pid(), recorded)
+		res, err := f.stop("d1")
+		want := fmt.Sprintf("process=already ended: pid %d is another process now (started %q, not %q)", other.pid(), now, recorded)
+		if err != nil || res.ProcessNote != want || !res.WasCurrent || res.Forced {
+			t.Fatalf("stop = %+v, %v; want it recorded with %q", res, err, want)
+		}
+		wantAliveWith(t, other.pid(), now, "the stop signalled a process with another start time")
+		wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+	})
+	t.Run("gone", func(t *testing.T) {
+		f := newCmdStopFixture(t, 2*time.Second)
+		p := startTestProcess(t, "/bin/sh", "-c", "exit 0")
+		if err := p.wait(); err != nil {
+			t.Fatal(err)
+		}
+		checkInPID(t, f, p.pid(), recorded)
+		res, err := f.stop("d1")
+		if want := fmt.Sprintf("process=already ended: no process has pid %d", p.pid()); err != nil || res.ProcessNote != want || !res.WasCurrent {
+			t.Fatalf("stop = %+v, %v; want it recorded with %q", res, err, want)
+		}
+		wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+	})
+	t.Run("zombie", func(t *testing.T) {
+		f := newCmdStopFixture(t, 2*time.Second)
+		p := startTestProcess(t, "/bin/sh", "-c", "exit 0")
+		proc := waitForProcessState(t, p.pid(), DirectorProcessZombie)
+		checkInPID(t, f, p.pid(), proc.StartTime)
+		res, err := f.stop("d1")
+		if want := fmt.Sprintf("process=already ended: pid %d is a zombie", p.pid()); err != nil || res.ProcessNote != want || !res.WasCurrent {
+			t.Fatalf("stop = %+v, %v; want it recorded with %q", res, err, want)
+		}
+		if p.signalledBy(t, syscall.SIGTERM) {
+			t.Fatal("the zombie's exit status says SIGTERM")
+		}
+		wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+	})
+}
+
+// AC6: a launch cmd still starting, with no check-in, has no process to
+// stop: ps is not read, nothing is sent, and stopped is recorded (with
+// detached, as it is current). A check-in that comes afterwards, from a
+// terminal that opened late, is refused, so its agent never starts.
+func TestStopDirector_ALaunchCmdStillStartingIsRecordedStoppedWithNothingSent(t *testing.T) {
+	f := newCmdStopFixture(t, time.Second)
+	f.o.DirectorProcessReader = refusingProcessReader(t)
+	res, err := f.stop("d1")
+	if err != nil || res.ProcessNote != "process=none recorded" || !res.WasCurrent || res.Registration.State != DirectorStateStarting ||
+		res.Registration.PID != 0 || res.TerminalName != "director_"+directorTestToken {
+		t.Fatalf("stop = %+v, %v; want d1 recorded stopped with no process recorded", res, err)
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+	err = f.store.MarkCmdLaunched(testCheckIn(4242))
+	if !errors.Is(err, ErrDirectorCheckInRefused) || !strings.Contains(err.Error(), "is already recorded stopped") {
+		t.Fatalf("a check-in after the stop = %v, want it refused as already stopped", err)
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+}
+
+// AC7: a process that ignores its SIGTERM is still running when the wait
+// runs out, so the stop without Force records nothing and returns a
+// *DirectorCleanupError of a launch cmd that wraps ErrDirectorProcessNotEnded
+// and names the pid and the stop to run again, and no herdr. With Force it
+// records stopped with force (detached first) and returns Forced with why.
+// Neither sends SIGKILL: the process is still running after both (the test
+// kills it itself in its cleanup).
+func TestStopDirector_ALaunchCmdProcessThatOutlivesItsSIGTERM(t *testing.T) {
+	f := newCmdStopFixture(t, 300*time.Millisecond)
+	agent := startFakeAgent(t, true)
+	start := checkInProcess(t, f, agent)
+	pid := agent.pid()
+	before := directorFileState(t, f.store)
+
+	res, err := f.stop("d1")
+	var ce *DirectorCleanupError
+	if !errors.As(err, &ce) || ce.Verb != "stop" || ce.ID != "d1" || ce.Launch != DirectorLaunchCmd || ce.PID != pid || ce.Err != nil ||
+		ce.TerminalName != "director_"+directorTestToken || ce.StopCommand != "ralph org director stop --id d1" || ce.Detached || ce.Unconfirmed ||
+		len(ce.HerdrCommands) != 0 || ce.WorkspaceLabel != "" || ce.TabLabel != "" || !errors.Is(err, ErrDirectorProcessNotEnded) {
+		t.Fatalf("err = %#v, want a stop's *DirectorCleanupError of a launch cmd that wraps ErrDirectorProcessNotEnded", err)
+	}
+	want := fmt.Sprintf("org: director: stop d1: the end of the process the launch script checked in with is not confirmed: pid %d did not end within 300ms of its SIGTERM; "+
+		"nothing was recorded; run ralph org director stop --id d1 again once pid %d has ended", pid, pid)
+	if err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%s", err, want)
+	}
+	if res.Registration.ID != "d1" || res.ProcessNote != "process=still running after SIGTERM" || res.Forced || res.WasCurrent {
+		t.Fatalf("stop result = %+v, want the note of the SIGTERM and nothing recorded", res)
+	}
+	if after := directorFileState(t, f.store); after != before {
+		t.Fatalf("director.jsonl changed:\n%s", after)
+	}
+	wantAliveWith(t, pid, start, "a stop that was not forced sent more than its SIGTERM")
+
+	res, err = stopWithForce(f, "d1")
+	if err != nil || !res.Forced || !res.WasCurrent || res.CloseErr == nil || !strings.Contains(res.CloseErr.Error(), "did not end within 300ms of its SIGTERM") ||
+		res.ProcessNote != "process=still running after SIGTERM" || res.AlreadyStopped || res.HerdrCommands != nil {
+		t.Fatalf("stop --force = %+v, %v; want it recorded forced with why", res, err)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1+force")
+	wantAliveWith(t, pid, start, "a forced stop sent SIGKILL")
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
+	}
+}
+
+// AC7: when ps cannot be read, the stop sends nothing at all. Without Force
+// it records nothing and returns the refusal; with Force it records stopped
+// with force and still sends nothing, so the process, read once by each
+// stop, is still running.
+func TestStopDirector_ALaunchCmdWhosePSCannotBeReadIsSentNothing(t *testing.T) {
+	f := newCmdStopFixture(t, time.Second)
+	agent := startFakeAgent(t, false)
+	start := checkInProcess(t, f, agent)
+	pid := agent.pid()
+	psErr := errors.New("ps: not here")
+	var reads []int
+	f.o.DirectorProcessReader = func(_ context.Context, readPID int) (DirectorProcess, error) {
+		reads = append(reads, readPID)
+		return DirectorProcess{}, psErr
+	}
+	before := directorFileState(t, f.store)
+
+	res, err := f.stop("d1")
+	want := "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps: not here; nothing was recorded; " +
+		fmt.Sprintf("run ralph org director stop --id d1 again once pid %d has ended", pid)
+	if !errors.Is(err, ErrDirectorProcessNotEnded) || !errors.Is(err, psErr) || err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%s", err, want)
+	}
+	if res.ProcessNote != "process=not signalled: ps could not be read" {
+		t.Fatalf("ProcessNote = %q, want that nothing was sent", res.ProcessNote)
+	}
+	if after := directorFileState(t, f.store); after != before {
+		t.Fatalf("director.jsonl changed:\n%s", after)
+	}
+	wantAliveWith(t, pid, start, "a stop whose ps could not be read sent a signal")
+
+	res, err = stopWithForce(f, "d1")
+	if err != nil || !res.Forced || !res.WasCurrent || !errors.Is(res.CloseErr, psErr) || res.ProcessNote != "process=not signalled: ps could not be read" {
+		t.Fatalf("stop --force = %+v, %v; want it recorded forced, with nothing sent", res, err)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1+force")
+	if !slices.Equal(reads, []int{pid, pid}) {
+		t.Fatalf("reads = %v, want one of pid %d by each stop", reads, pid)
+	}
+	wantAliveWith(t, pid, start, "a forced stop whose ps could not be read sent a signal")
+}
+
+// AC7 and D8: with RALPH_DIRECTOR_TOKEN set to the registration's token, the
+// stop runs inside the director, so it is refused with and without Force: ps
+// is not read, nothing is sent, nothing is written. A token of another
+// launch is not refused: that stop ends the process.
+func TestStopDirector_ALaunchCmdRefusesInsideTheDirector(t *testing.T) {
+	f := newCmdStopFixture(t, 5*time.Second)
+	agent := startFakeAgent(t, false)
+	start := checkInProcess(t, f, agent)
+	reads := 0
+	f.o.DirectorProcessReader = func(ctx context.Context, pid int) (DirectorProcess, error) {
+		reads++
+		return ReadDirectorProcess(ctx, pid)
+	}
+	f.env[directorTokenEnv] = directorTestToken
+	before := directorFileState(t, f.store)
+	for _, force := range []bool{false, true} {
+		p := f.stopParams("d1")
+		p.Force = force
+		_, err := f.o.StopDirector(p)
+		want := "org: director: stop d1: RALPH_DIRECTOR_TOKEN is its launch token, so this runs inside the director, whose launch script exported it, " +
+			"and stopping the director's process would end this command before it records the stop: run ralph org director stop from a terminal other than the director's"
+		if !errors.Is(err, ErrDirectorStopSelfProcess) || err.Error() != want {
+			t.Fatalf("stop (force %v) inside the director =\n%v\nwant\n%s", force, err, want)
+		}
+	}
+	if reads != 0 {
+		t.Fatalf("the refused stops read ps %d time(s), want none", reads)
+	}
+	if after := directorFileState(t, f.store); after != before {
+		t.Fatalf("director.jsonl changed:\n%s", after)
+	}
+	wantAliveWith(t, agent.pid(), start, "a refused stop sent a signal")
+
+	f.env[directorTokenEnv] = "ffffffffffff"
+	if res, err := f.stop("d1"); err != nil || res.ProcessNote != "process=ended after SIGTERM" {
+		t.Fatalf("stop with another launch's token = %+v, %v; want it to stop d1's process", res, err)
+	}
+	if !agent.signalledBy(t, syscall.SIGTERM) {
+		t.Fatalf("the agent ended with %v, want SIGTERM", agent.cmd.ProcessState)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+}
+
+// AC7 and D7 (the D14 rule for a pid): a check-in that lands after the stop
+// read the registration (no pid then, so the stop sent nothing) and before
+// it records makes that record refuse: nothing is written, and the
+// *DirectorCleanupError wraps ErrDirectorCheckedInDuringStop and names the
+// stop to run again. Run again, the stop reads the pid, sends SIGTERM to that
+// process, which the test started, and records the stop.
+func TestStopDirector_ALaunchCmdCheckInAfterTheReadRecordsNothing(t *testing.T) {
+	f := newCmdStopFixture(t, 5*time.Second)
+	agent := startFakeAgent(t, false)
+	var start string
+	f.store.beforeMarkStopped = func() {
+		f.store.beforeMarkStopped = nil
+		start = checkInProcess(t, f, agent)
+	}
+	res, err := f.stop("d1")
+	var ce *DirectorCleanupError
+	if !errors.As(err, &ce) || !errors.Is(err, ErrDirectorCheckedInDuringStop) || ce.Verb != "stop" || ce.Launch != DirectorLaunchCmd ||
+		ce.StopCommand != "ralph org director stop --id d1" || errors.Is(err, ErrDirectorProcessNotEnded) {
+		t.Fatalf("err = %#v, want a stop's *DirectorCleanupError that wraps ErrDirectorCheckedInDuringStop", err)
+	}
+	want := fmt.Sprintf("org: director: stop d1: record d1 stopped: the launch script checked in after stop read the registration: "+
+		"d1 had no pid when stop read it, and has pid %d started %q now; this stop sent nothing to the process that checked in; "+
+		"nothing was recorded; run ralph org director stop --id d1 again to stop the process that checked in", agent.pid(), start)
+	if err.Error() != want {
+		t.Fatalf("err =\n%v\nwant\n%s", err, want)
+	}
+	if res.ProcessNote != "process=none recorded" {
+		t.Fatalf("ProcessNote = %q, want none recorded", res.ProcessNote)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1")
+	wantAliveWith(t, agent.pid(), start, "the stop sent something to a process it had not read")
+
+	res, err = f.stop("d1")
+	if err != nil || res.ProcessNote != "process=ended after SIGTERM" || !res.WasCurrent {
+		t.Fatalf("the stop run again = %+v, %v; want it to stop the process that checked in", res, err)
+	}
+	if !agent.signalledBy(t, syscall.SIGTERM) {
+		t.Fatalf("the agent ended with %v, want SIGTERM", agent.cmd.ProcessState)
+	}
+	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+}
+
+// AC8's last sentence of 8a-2 for a launch cmd: when start's cleanup or
+// another stop records the registration stopped after this stop read it,
+// this stop's record finds it stopped, writes nothing more, and succeeds
+// with AlreadyStopped, WasCurrent and Forced false, and the note of what it
+// did to the process. It holds for a forced stop too (MarkForceStopped).
+func TestStopDirector_ALaunchCmdStopRecordedFirstSucceeds(t *testing.T) {
+	cases := []struct {
+		name     string
+		force    bool
+		psBroken bool
+		other    func(f *dirStartFixture) error
+		wantNote string
+	}{
+		{"another stop recorded it", false, false, func(f *dirStartFixture) error {
+			read, err := f.store.openHeadlessRegistration("stop d1", "d1")
+			if err == nil {
+				_, err = f.store.MarkStoppedIfUnchanged(read, testDirectorWho)
+			}
+			return err
+		}, "process=ended after SIGTERM"},
+		{"start's cleanup recorded it", false, false, func(f *dirStartFixture) error {
+			_, err := f.store.MarkStopped("d1", testDirectorWho)
+			return err
+		}, "process=ended after SIGTERM"},
+		{"start's cleanup recorded it while a forced stop could not read ps", true, true, func(f *dirStartFixture) error {
+			_, err := f.store.MarkStopped("d1", testDirectorWho)
+			return err
+		}, "process=not signalled: ps could not be read"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStopFixture(t, 5*time.Second)
+			agent := startFakeAgent(t, false)
+			checkInProcess(t, f, agent)
+			if tc.psBroken {
+				f.o.DirectorProcessReader = brokenProcessReader
+			}
+			var afterRecord string
+			f.store.beforeMarkStopped = func() {
+				f.store.beforeMarkStopped = nil
+				if err := tc.other(f); err != nil {
+					t.Errorf("the record that comes first: %v", err)
+				}
+				afterRecord = directorFileState(t, f.store)
+			}
+			p := f.stopParams("d1")
+			p.Force = tc.force
+			res, err := f.o.StopDirector(p)
+			if err != nil {
+				t.Fatalf("stop = %v; want it to succeed, with nothing more to record", err)
+			}
+			if !res.AlreadyStopped || res.WasCurrent || res.Forced || res.CloseErr != nil || res.ProcessNote != tc.wantNote || res.Registration.ID != "d1" {
+				t.Fatalf("stop result = %+v; want AlreadyStopped with WasCurrent and Forced false and the note %q", res, tc.wantNote)
+			}
+			if afterRecord == "" || directorFileState(t, f.store) != afterRecord {
+				t.Fatalf("this stop wrote to director.jsonl after the other record:\n%s\nwant\n%s", directorFileState(t, f.store), afterRecord)
+			}
+			wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1")
+		})
+	}
+}
+
+// The texts of a launch cmd's stop whose record fails: once the process
+// ended, "org: director: stop d1: " once, the store's error, ENOSPC wrapped,
+// nothing recorded, and the stop to run without --force; for a forced stop
+// whose end was not confirmed, both reasons and the stop with --force.
+func TestStopDirector_ALaunchCmdRecordThatFailsNamesTheStop(t *testing.T) {
+	t.Run("the process ended", func(t *testing.T) {
+		f := newCmdStopFixture(t, time.Second)
+		f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
+		_, err := f.stop("d1")
+		var ce *DirectorCleanupError
+		if !errors.As(err, &ce) || !errors.Is(err, syscall.ENOSPC) || ce.StopCommand != "ralph org director stop --id d1" || errors.Is(err, ErrDirectorProcessNotEnded) {
+			t.Fatalf("err = %#v, want a cleanup error that wraps ENOSPC and names the stop without --force", err)
+		}
+		if text := err.Error(); !strings.HasPrefix(text, "org: director: stop d1: record d1 stopped: nothing was recorded, so d1 (") ||
+			strings.Count(text, "org: director: ") != 1 || !strings.HasSuffix(text, "; nothing was recorded; record the stop with ralph org director stop --id d1") {
+			t.Fatalf("err = %s", text)
+		}
+	})
+	t.Run("a forced stop whose end was not confirmed", func(t *testing.T) {
+		f := newCmdStopFixture(t, time.Second)
+		agent := startFakeAgent(t, false)
+		checkInProcess(t, f, agent)
+		f.o.DirectorProcessReader = brokenProcessReader
+		f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
+		_, err := stopWithForce(f, "d1")
+		var ce *DirectorCleanupError
+		if !errors.As(err, &ce) || !errors.Is(err, syscall.ENOSPC) || !errors.Is(err, ErrDirectorProcessNotEnded) ||
+			ce.StopCommand != "ralph org director stop --id d1 --force" {
+			t.Fatalf("err = %#v, want both reasons and the stop with --force", err)
+		}
+		if text := err.Error(); !strings.HasPrefix(text, "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps is broken\n"+
+			"record d1 stopped: ") || !strings.HasSuffix(text, "; nothing was recorded; record the stop with ralph org director stop --id d1 --force") {
+			t.Fatalf("err = %s", text)
+		}
+	})
 }

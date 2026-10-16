@@ -21,9 +21,9 @@ import (
 // orgDirectorRuntime methods only they use, and the *org.Org they run on.
 // The hidden verb `ralph org director launched`, the check-in of the launch
 // script of a start with [org.director].launch_cmd (plan
-// docs/plans/active/2026-10-16-org-director-launch-cmd.md, D4), is here
-// too. newOrgDirectorCmd, which wires them, and the runtime and helpers that
-// the director verbs share are in org_director.go.
+// 2026-10-16-org-director-launch-cmd, D4), is here too. newOrgDirectorCmd,
+// which wires them, and the runtime and helpers that the director verbs
+// share are in org_director.go.
 
 func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 	var (
@@ -33,7 +33,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Launch a headless director in a herdr workspace of its own and register it",
+		Short: "Launch a headless director in a herdr workspace of its own, or with [org.director].launch_cmd, and register it",
 		Long: "ralph org director start launches a headless director and registers it\n" +
 			"as the director of the ledger: --driver (claude or codex) runs with the\n" +
 			"role prompt internal/org/prompts/director.md in a herdr workspace of its\n" +
@@ -43,6 +43,20 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"started d1 (driver=codex, model=..., permission=..., pane=...,\n" +
 			"workspace=...). Open herdr and talk to the director in that pane.\n" +
 			"\n" +
+			"With [org.director].launch_cmd set, start runs it in place of herdr.\n" +
+			"start writes the launch script <state-dir>/launch/director_<token>.sh\n" +
+			"(mode 0700), which goes to the directory the director runs in, exports\n" +
+			"RALPH_DIRECTOR_TOKEN (and RALPH_ORG_AGMSG_HOME when it is set where\n" +
+			"start runs), checks in, and then execs the agent that start found on\n" +
+			"its PATH with the arguments herdr would give it. start runs launch_cmd's\n" +
+			"argv, with {script}, {script_sh}, {name} (director_<token>) and {cwd}\n" +
+			"replaced and no shell between, for up to 10 s, and then waits for the\n" +
+			"check-in, which records the script's pid and that pid's start time, for\n" +
+			"up to --timeout-ms. It prints started d1 (driver=..., model=...,\n" +
+			"permission=..., launch=cmd, name=director_<token>, pid=...). Talk to\n" +
+			"the director in the terminal launch_cmd opened; ralph never closes that\n" +
+			"terminal, so it is left for you to close after stop.\n" +
+			"\n" +
 			"It writes <state-dir>/director.jsonl and the prompt file\n" +
 			"<state-dir>/prompts/director_<token>.md, and nothing to the manifest:\n" +
 			"the director is not an org seat, so max_orgs and max_total_seats do not\n" +
@@ -50,7 +64,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"(with launch herdr, the token, the model, and the permission mode) is\n" +
 			"written before any herdr call, so the registration is decided first;\n" +
 			"workspace_created and pane_created follow as herdr hands out the ids,\n" +
-			"and launched once the agent has started.\n" +
+			"and launched once the agent has started. With launch_cmd, attached\n" +
+			"(with launch cmd) is written before launch_cmd runs, and launched (with\n" +
+			"the pid and its start time) when the check-in comes.\n" +
 			"\n" +
 			"The director runs with the permission mode of\n" +
 			"[org.permissions.roles].director, else [org.permissions].default, and\n" +
@@ -58,15 +74,18 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"with the first model_pool entry for --driver that it allows, and a\n" +
 			"warning. Without --config, those settings and [org.director].enabled\n" +
 			"are read from the main worktree's ralph.toml when the ledger is the main\n" +
-			"worktree's, so a feature worktree's ralph.toml does not choose them. The\n" +
-			"director runs in the ledger's main worktree root, else in the directory\n" +
-			"start runs in. With --config, the ralph org commands the director's\n" +
-			"prompt has it run carry --config with that file's absolute path, so the\n" +
-			"director reads the settings start read (the prompt's stop command, for\n" +
-			"the human, carries none: stop reads no ralph.toml). RALPH_ORG_AGMSG_HOME\n" +
+			"worktree's, so a feature worktree's ralph.toml does not choose them.\n" +
+			"[org.director].launch_cmd is read the same way. The director runs in the\n" +
+			"ledger's main worktree root, else in the directory start runs in. With\n" +
+			"--config, the ralph org commands the director's prompt has it run carry\n" +
+			"--config with that file's absolute path, so the director reads the\n" +
+			"settings start read (the prompt's stop command, for the human, carries\n" +
+			"none: stop reads no ralph.toml). With herdr, RALPH_ORG_AGMSG_HOME\n" +
 			"set where start runs does not reach the director, whose herdr pane has\n" +
 			"the herdr server's environment: start warns when it is set, and\n" +
-			"[org].agmsg_home in ralph.toml is what reaches the director.\n" +
+			"[org].agmsg_home in ralph.toml is what reaches the director. With\n" +
+			"launch_cmd it does reach the director, as the launch script exports it,\n" +
+			"and start does not warn.\n" +
 			"\n" +
 			"A codex director runs only in guarded: start refuses autonomous and\n" +
 			"edits whatever [org.permissions].codex_verified says, because they run\n" +
@@ -89,13 +108,23 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"included: stop a headless one with `ralph org director stop --id <id>`,\n" +
 			"detach a promoted session), and inside a herdr pane (HERDR_PANE_ID is\n" +
 			"set): run start from a terminal outside herdr. start has no --replace.\n" +
-			"Like `ralph org start`, it makes sure a long-running\n" +
+			"With launch_cmd, HERDR_PANE_ID does not refuse start, which runs no\n" +
+			"herdr then, and start is also refused when the --driver agent is not on\n" +
+			"its PATH. Like `ralph org start`, it makes sure a long-running\n" +
 			"`ralph org watch --all` watches the ledger first: it launches one when\n" +
 			"none runs, and is refused when a watch holds the lock but is stale,\n" +
 			"stopping, or a --once run. When a step fails after the registration,\n" +
 			"start closes the pane and workspace it made, records the director\n" +
 			"stopped, and exits 1; what it could not close is printed with the herdr\n" +
-			"commands and the stop command that finish the cleanup.",
+			"commands and the stop command that finish the cleanup. With launch_cmd,\n" +
+			"when launch_cmd fails or runs out its 10 s, no check-in comes within\n" +
+			"--timeout-ms, or the registration is replaced while start waits, start\n" +
+			"stops what checked in by its pid and start time, as stop does, and\n" +
+			"records the director stopped, exits 1, and says that the terminal\n" +
+			"launch_cmd may have opened is left for you to close; a launch script\n" +
+			"that checks in from it afterwards is refused and starts no agent. When\n" +
+			"start cannot confirm that the process ended, it records the director\n" +
+			"detached only and prints the stop command that finishes the cleanup.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director start", driverName); err != nil {
@@ -111,7 +140,7 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&driverName, "driver", "", "the director's agent: claude or codex (required)")
 	cmd.Flags().StringVar(&model, "model", "", "model name or alias (default: first [org].model_pool entry permitted for role director on --driver, with a warning)")
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "how long herdr agent start may take, in milliseconds")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "how long herdr agent start may take, or with [org.director].launch_cmd how long start waits for the launch script's check-in, in milliseconds")
 
 	return cmd
 }
@@ -124,25 +153,51 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Close the herdr pane and workspace of a headless director and record it stopped",
+		Short: "Stop a headless director (close its herdr pane and workspace, or end its launch_cmd process) and record it stopped",
 		Long: "ralph org director stop closes the herdr pane and workspace of a\n" +
-			"headless director that `ralph org director start` launched, and records\n" +
+			"headless director that `ralph org director start` launched, or ends the\n" +
+			"process of one it launched with [org.director].launch_cmd, and records\n" +
 			"it stopped: a stopped event in <state-dir>/director.jsonl and, when it is\n" +
 			"the current registration, a detached in the same write, so no director\n" +
 			"is attached afterwards. Nothing is written to the manifest. Give --id,\n" +
 			"the id start printed. stop works on every headless registration that is\n" +
 			"still open: running, still starting (it closes what was recorded), or\n" +
 			"detached (a headless director that ran detach, or was replaced, keeps\n" +
-			"its pane until stop).\n" +
+			"its pane, or its process, until stop).\n" +
 			"\n" +
-			"Before it sends C-c to the pane and closes the pane and the workspace,\n" +
-			"stop checks that herdr has the pane in a tab labelled director_<token>\n" +
-			"inside a workspace labelled ralph_director_<token>, the names start gave\n" +
-			"them; a pane or workspace that fails the check (a label differs, or\n" +
-			"herdr cannot be asked) is not sent C-c and is not closed, because its\n" +
-			"recorded id may now name another launch's. A pane or workspace herdr no\n" +
-			"longer knows counts as closed, so a director whose pane a human closed\n" +
-			"in herdr is cleaned up with stop too.\n" +
+			"For a director in herdr, before it sends C-c to the pane and closes the\n" +
+			"pane and the workspace, stop checks that herdr has the pane in a tab\n" +
+			"labelled director_<token> inside a workspace labelled\n" +
+			"ralph_director_<token>, the names start gave them; a pane or workspace\n" +
+			"that fails the check (a label differs, or herdr cannot be asked) is not\n" +
+			"sent C-c and is not closed, because its recorded id may now name another\n" +
+			"launch's. A pane or workspace herdr no longer knows counts as closed, so\n" +
+			"a director whose pane a human closed in herdr is cleaned up with stop\n" +
+			"too.\n" +
+			"\n" +
+			"For a director launched with launch_cmd (launch cmd), stop runs no\n" +
+			"herdr. It reads with ps the pid the launch script checked in with, and\n" +
+			"sends SIGTERM to that pid alone, only when its start time is the one the\n" +
+			"check-in recorded, so the launch script before its exec and the agent\n" +
+			"after it are stopped alike; it then waits up to 10 s for the process to\n" +
+			"end before it records the stop. A pid that is gone, is a zombie, or has\n" +
+			"another start time (another process has it now) counts as ended and is\n" +
+			"sent nothing, and so is a registration still starting with no check-in\n" +
+			"yet, whose check-in is refused afterwards. stop never sends SIGKILL and\n" +
+			"does not close the terminal launch_cmd opened (name director_<token>):\n" +
+			"close it yourself. With or without --force, stop is refused, and writes\n" +
+			"nothing, when RALPH_DIRECTOR_TOKEN is the registration's token: it then\n" +
+			"runs inside the director, whose process would end before stop records\n" +
+			"it, so run it from a terminal other than the director's. When ps cannot\n" +
+			"be read (stop sends nothing then) or the process does not end within\n" +
+			"the 10 s, stop records nothing and exits 1 with the pid to look at\n" +
+			"(ps -o pid,lstart,command -p <pid>): run it again once that process has\n" +
+			"ended, or record the stop with --force, which takes the same steps and,\n" +
+			"when the end is still not confirmed, records the stop anyway, sends\n" +
+			"nothing more, and leaves the process as it is. When the launch script\n" +
+			"checks in after stop read the registration, stop has sent that process\n" +
+			"nothing, so it records nothing and exits 1: run it again to stop the\n" +
+			"process that checked in.\n" +
 			"\n" +
 			"stop is refused, and writes nothing, for an id with no open headless\n" +
 			"registration (a promoted session's registration is ended with\n" +
@@ -176,7 +231,8 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&id, "id", "", "the id of the headless director to stop (d1, d2, ...), as start printed it (required)")
-	cmd.Flags().BoolVar(&force, "force", false, "record the stop even when the pane or workspace cannot be confirmed or closed, closing nothing more (a human's cleanup)")
+	cmd.Flags().BoolVar(&force, "force", false, "record the stop even when the pane or workspace cannot be confirmed or closed, closing nothing more, "+
+		"or with launch_cmd when the process's end cannot be confirmed, sending nothing more (a human's cleanup)")
 
 	return cmd
 }
@@ -192,6 +248,12 @@ var (
 	orgDirectorAgentLookPath   func(file string) (string, error)
 	orgDirectorRalphExecutable func() (string, error)
 )
+
+// orgDirectorStopWait is the (*org.Org).DirectorStopWait of director start
+// and stop: how long they wait, after the SIGTERM to the process of a launch
+// cmd, for it to end. 0 means the org layer's 10 s; it is a variable so the
+// tests can wait less for a process that ignores its SIGTERM.
+var orgDirectorStopWait time.Duration
 
 // startDirector is `ralph org director start` on rt (plan
 // 2026-10-15-org-director-start, D5 and D6): it loads the config by
@@ -388,7 +450,8 @@ func (rt *orgDirectorRuntime) withStateDirInStopCommand(err error) error {
 // only the herdr driver and no config, as detach reads none, then the
 // result in the CLI's words (printOrgDirectorStop, exit 0, also when start's
 // cleanup or another stop recorded the stop first), or the refusal
-// (stopError).
+// (stopError). A launch cmd's registration is stopped by its pid and start
+// time with no herdr call (plan 2026-10-16-org-director-launch-cmd, D7).
 func (rt *orgDirectorRuntime) stopDirector(cmd *cobra.Command, id string, force bool) error {
 	o := newOrgDirectorHerdrRuntime(config.OrgConfig{})
 	res, err := o.StopDirector(org.DirectorStopParams{Store: rt.store, ID: id, Force: force, Who: orgDirectorCaller()})
@@ -413,14 +476,31 @@ func (rt *orgDirectorRuntime) stopDirector(cmd *cobra.Command, id string, force 
 // it (notHeadlessError). An id with no open headless registration names
 // status, which lists them. A write that may hold part of itself names
 // status (notRestoredError).
+//
+// A launch cmd's stop (plan 2026-10-16-org-director-launch-cmd, D7) comes as
+// a *org.DirectorCleanupError too, and w gets what was done to the process
+// (its ProcessNote). When the end of the process was not confirmed
+// (org.ErrDirectorProcessNotEnded: ps could not be read, or it outlived its
+// SIGTERM), the error adds that the pid may still be running and the ps
+// that shows it, and without --force names stop --force, which records the
+// stop and leaves the process as it is. A check-in that came after stop read
+// the registration (org.ErrDirectorCheckedInDuringStop) left nothing it read
+// running, so it names no --force.
 func (rt *orgDirectorRuntime) stopError(w io.Writer, id string, force bool, res org.DirectorStopResult, err error) error {
 	var cleanup *org.DirectorCleanupError
 	switch {
 	case errors.As(err, &cleanup):
 		_, _ = fmt.Fprintf(w, "stop %s: %s\n", inboxField(cleanup.ID), orgDirectorStopNotes(res))
 		err = rt.withStateDirInStopCommand(err)
+		forceCommand := rt.command("ralph org director stop --id " + inboxField(cleanup.ID) + " --force")
+		if errors.Is(err, org.ErrDirectorProcessNotEnded) && cleanup.PID > 0 {
+			err = fmt.Errorf("%w; pid %d may still be running: look with ps -o pid,lstart,command -p %d", err, cleanup.PID, cleanup.PID)
+			if !force {
+				err = fmt.Errorf("%w; or record the stop and leave the process as it is with %s", err, forceCommand)
+			}
+		}
 		if !force && !cleanup.Unconfirmed && len(cleanup.HerdrCommands) > 0 {
-			err = fmt.Errorf("%w; or record the stop and leave them open with %s", err, rt.command("ralph org director stop --id "+inboxField(cleanup.ID)+" --force"))
+			err = fmt.Errorf("%w; or record the stop and leave them open with %s", err, forceCommand)
 		}
 	case errors.Is(err, org.ErrDirectorNotHeadless):
 		return rt.notHeadlessError(id, err)
@@ -453,6 +533,13 @@ func (rt *orgDirectorRuntime) notHeadlessError(id string, err error) error {
 // the notes, and the next says who may have recorded it and that this stop
 // recorded nothing more. It names no stop to run, since one would be refused
 // as already stopped.
+//
+// For a launch cmd (plan 2026-10-16-org-director-launch-cmd, D7) the notes
+// are what was done to the process, and the lines after them say that the
+// terminal launch_cmd opened, named by res.TerminalName, is left for the
+// human to close (with no check-in recorded, that it may have opened one,
+// whose check-in is refused from now on); a forced stop's warning names the
+// pid that may still be running and the ps that shows it.
 func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	id := inboxField(res.Registration.ID)
 	out := cmd.OutOrStdout()
@@ -469,6 +556,10 @@ func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	if res.WasCurrent {
 		_, _ = fmt.Fprintln(out, "the director is no longer attached")
 	}
+	if res.Registration.CmdLaunch() {
+		printOrgDirectorCmdStop(cmd, res)
+		return
+	}
 	if label := res.UnrecordedWorkspaceLabel; label != "" {
 		_, _ = fmt.Fprintf(out, "no workspace id was recorded for %s: herdr may still have a workspace labelled %s that start made before it could record it; "+
 			"look for it with herdr workspace list\n", id, label)
@@ -483,10 +574,35 @@ func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	}
 }
 
+// printOrgDirectorCmdStop is the part of printOrgDirectorStop that is a
+// launch cmd's: the terminal left open and, for a forced stop, the warning
+// on stderr.
+func printOrgDirectorCmdStop(cmd *cobra.Command, res org.DirectorStopResult) {
+	id, pid, name := inboxField(res.Registration.ID), res.Registration.PID, inboxField(res.TerminalName)
+	out := cmd.OutOrStdout()
+	if pid > 0 {
+		_, _ = fmt.Fprintf(out, "the terminal that [org.director].launch_cmd opened (name %s) is left open for you to close\n", name)
+	} else {
+		_, _ = fmt.Fprintf(out, "the terminal that [org.director].launch_cmd may have opened (name %s) is left open for you to close, "+
+			"and a launch script that checks in from it now is refused and ends without starting the agent\n", name)
+	}
+	if res.Forced {
+		why := "-"
+		if res.CloseErr != nil {
+			why = inboxField(res.CloseErr.Error())
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: director stop --force: %s is recorded stopped, but pid %d, which its launch script checked in with, "+
+			"may still be running (%s); look with ps -o pid,lstart,command -p %d\n", id, pid, why, pid)
+	}
+}
+
 // orgDirectorStopNotes is what StopDirector did to the pane and the
 // workspace: its three notes, escaped (a close failure's note holds herdr's
-// error text).
+// error text); for a launch cmd, what it did to the process (ProcessNote).
 func orgDirectorStopNotes(res org.DirectorStopResult) string {
+	if res.Registration.CmdLaunch() {
+		return inboxField(res.ProcessNote)
+	}
 	return inboxField(res.CtrlCNote) + ", " + inboxField(res.PaneNote) + ", " + inboxField(res.WorkspaceNote)
 }
 
@@ -578,7 +694,9 @@ func (rt *orgDirectorRuntime) directorLaunched(id, token string, pid int) error 
 // none of the manifest, receipts, agmsg, or inbox newOrgRuntimeAt wires,
 // since StartDirector and StopDirector use none of them (the director is not
 // a seat, plan 2026-10-15-org-director-start, D2). Getenv is nil, so they
-// read HERDR_PANE_ID and HERDR_WORKSPACE_ID from the environment.
+// read HERDR_PANE_ID, HERDR_WORKSPACE_ID, and RALPH_DIRECTOR_TOKEN from the
+// environment, and so is DirectorProcessReader, so a launch cmd's process
+// is read with ps; DirectorStopWait is orgDirectorStopWait.
 func newOrgDirectorHerdrRuntime(cfg config.OrgConfig) *org.Org {
-	return &org.Org{Config: cfg, Herdr: driver.Herdr{R: driver.ExecRunner{}}}
+	return &org.Org{Config: cfg, Herdr: driver.Herdr{R: driver.ExecRunner{}}, DirectorStopWait: orgDirectorStopWait}
 }
