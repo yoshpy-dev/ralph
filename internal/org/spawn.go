@@ -417,9 +417,9 @@ type SpawnResult struct {
 	// never persisted. It is the zero Receipt on every path that appends no
 	// receipt at all, or whose append failed: an idempotent respawn, a
 	// plain rejection that never reaches reject() (identifier validation, a
-	// retired role name, the watch gate, a retired ralph.toml key; see
-	// Spawn's own doc comment), every SpawnOutcomeFailed return, and a
-	// reject()/dryRunSpawn receipts-append
+	// retired role name, the watch gate, a retired ralph.toml key, a regate
+	// running on the org; see Spawn's own doc comment), every
+	// SpawnOutcomeFailed return, and a reject()/dryRunSpawn receipts-append
 	// failure. The CLI layer reads this to decide whether to print the
 	// codex model-mismatch warning (AC-6), without re-reading the receipts
 	// file -- its gate (Honored=="false" AND a non-empty
@@ -471,7 +471,11 @@ type SpawnResult struct {
 //  5. Stale-in-flight compensation: a stale seat (prior spawn_started/
 //     spawn_step never resolved) is best-effort compensated and the
 //     manifest re-read, so it no longer counts toward max_seats.
-//  6. Capacity validation (ValidateSpawnCapacity) against the recomputed
+//  6. The regate check (regateSpawnErr; plan 2026-10-16-org-regate, D9):
+//     while a `ralph org regate` holds regate.lock with a marker naming
+//     p.OrgID, the spawn is a plain rejection (no `rejected` event, no
+//     receipt), before anything of a new life of the org is appended. Then
+//     capacity validation (ValidateSpawnCapacity) against the recomputed
 //     activeSeats, then the org-wide limits (ValidateOrgWideCapacity:
 //     max_orgs for an org that is not running yet, max_total_seats), then,
 //     with Reserve, the reservation (reservationDecision), all from the same
@@ -496,7 +500,9 @@ type SpawnResult struct {
 // and 7 in the exact same order as the real path above: the input-only
 // checks, retiredRoleConfigErr, ValidateSpawnEnvelope, then
 // permissionArgsForDriver, then the AC-2b gate, then spawnCapacityErr and
-// spawnFeatureSeatErr against the real events.
+// spawnFeatureSeatErr against the real events. It leaves out step 6's
+// regate check: a dry run starts no life of the org, so a regate has
+// nothing to exclude it from.
 // Steps 1 and 5 have no dry-run analogue -- dry-run events are excluded
 // from ActiveSeatCount/roster entirely, so there is no idempotent-respawn
 // case to short-circuit and no stale-in-flight saga to detect or
@@ -509,8 +515,9 @@ type SpawnResult struct {
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
 // worktree for a spawn this would refuse, so it first runs checkSpawnInput
 // and the watch gate (step 0) and spawnPrecheckErr, which repeats steps 1
-// to 7 on an unlocked read without writing anything. A change to the order
-// or to a check of steps 1 to 7 must be made in spawnPrecheckErr too.
+// to 7 on an unlocked read without writing anything, all but the regate
+// check, which StartFeature runs right after it. A change to the order or
+// to a check of steps 1 to 7 must be made in spawnPrecheckErr too.
 func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// The input-only checks (step 0 above) run first, before any manifest
 	// read or write; see checkSpawnInput. From here on p holds the
@@ -597,8 +604,9 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	defer cancel()
 
 	// The idempotent/retired-key/envelope/permission/AC-2b-gate checks,
-	// stale-in-flight detection, the capacity check, the feature org's
-	// checks, and the spawn_started append all run inside withManifestLock:
+	// stale-in-flight detection, the regate check, the capacity check, the
+	// feature org's checks, and the spawn_started append all run inside
+	// withManifestLock:
 	// this is the exact "read manifest -> ActiveSeatCount -> ValidateSpawn ->
 	// appendEvent" window docs/tech-debt/README.md flagged as an unlocked
 	// TOCTOU race ("max_seats is enforced across an unlocked read-then-append
@@ -1210,8 +1218,10 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // spawnFeatureSeatErr (which passes the leader seat StartFeature spawns). A
 // stale in-flight seat is counted as compensateStale leaves it (one more
 // `spawn_failed`), since Spawn decides capacity on its read after that
-// compensation. Spawn decides again under the lock, so the two can differ
-// only when another spawn changes the manifest in between.
+// compensation. Step 6's regate check reads regate.lock, not events, so it
+// is not here: StartFeature runs regateSpawnErr right after this. Spawn
+// decides again under the lock, so the two can differ only when another
+// spawn changes the manifest in between.
 // TestSpawnPrecheckErr_MatchesSpawn runs both on the same ledgers.
 func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent) error {
 	seat, found := seatFromEvents(events, p.OrgID, p.SeatID)
@@ -1260,6 +1270,8 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 // recorded, not a fresh read taken after the workspace/agent/agmsg round
 // trip that follows in Spawn.
 //
+// The regate check (regateSpawnErr) comes first: while a `ralph org regate`
+// runs on p.OrgID, the spawn is a plain rejection and nothing is appended.
 // The capacity check is spawnCapacityErr (max_seats, then the org-wide
 // limits, then the reservation), and the feature org's checks
 // (spawnFeatureSeatErr: its leader, then its approval) follow it; a refusal
@@ -1269,6 +1281,10 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 // lock is released and a racing spawn of another org sees it; it stays when
 // the saga fails later.
 func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []ManifestEvent) (*SpawnResult, time.Time) {
+	if err := regateSpawnErr(filepath.Dir(o.Manifest.Path()), p.OrgID); err != nil {
+		r := SpawnResult{Outcome: SpawnOutcomeRejected, Err: err}
+		return &r, time.Time{}
+	}
 	reserve, err := spawnCapacityErr(o.Config, p, req, events)
 	if err != nil {
 		r := o.reject(p, err)
@@ -1293,6 +1309,36 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 		return &r, time.Time{}
 	}
 	return nil, startedAt
+}
+
+// regateSpawnErr is the spawn's side of D9 of plan
+// docs/plans/active/2026-10-16-org-regate.md: the refusal of a spawn of
+// orgID while a `ralph org regate` of the ledger in stateDir works on
+// orgID's branch, so that no new life of the org starts under it. It tries
+// a shared lock on regate.lock without waiting (fileLockHeld). When no one
+// holds the lock, no regate runs, and a marker an earlier one left in the
+// file is not read. When it is held, only a marker (readRegateMarker) that
+// names orgID refuses; with no marker, or one that cannot be read, the
+// regate is still waiting for the manifest lock, and once it has it, it
+// finds the org this spawn records running and refuses itself, so the spawn
+// goes on, as it does for a marker of another org. A lock that cannot be
+// checked refuses too. Spawn calls it under the manifest lock
+// (checkCapacityAndStart), and StartFeature once before ensure.
+func regateSpawnErr(stateDir, orgID string) error {
+	path := regateLockPathIn(stateDir)
+	held, err := fileLockHeld(path)
+	if err != nil {
+		return fmt.Errorf("org: org_id %q is not spawned: whether a ralph org regate runs on it is not known, since its lock %s "+
+			"could not be checked (%w): make that file readable and run the same command again", orgID, path, err)
+	}
+	if !held {
+		return nil
+	}
+	if marked, ok := readRegateMarker(path); !ok || marked != orgID {
+		return nil
+	}
+	return fmt.Errorf("org: org_id %q is not spawned while ralph org regate runs on its branch (%s holds the regate's marker): "+
+		"wait for the regate to end and run the same command again", orgID, path)
 }
 
 // spawnCapacityErr runs, against events, every check of a new seat that
