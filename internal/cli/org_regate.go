@@ -101,8 +101,14 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"interrupted prints the lines before PUSHED: and exits 1 with the reason.\n" +
 			"Run regate again then: when the push did not land, it pushes HEAD and\n" +
 			"does nothing else (PUSH_ONLY:, HEAD:, BASE:, LOG: and PUSHED:, exit 0);\n" +
-			"when it did, regate is UP_TO_DATE. When origin's default branch or\n" +
-			"origin's branch moved in between, regate refuses and says what changed.\n" +
+			"when it did, regate is UP_TO_DATE. It pushes only when the branch's\n" +
+			"latest gate record is a gate_passed of HEAD on origin's default branch\n" +
+			"tip, origin's branch is under HEAD, and, for a record regate wrote, HEAD\n" +
+			"is regate's own merge commit: its parents are origin's tip of the branch\n" +
+			"and the record's base, and its subject is the one regate gave it. When a\n" +
+			"hook changed that subject, regate refuses and asks you to push HEAD\n" +
+			"yourself. When origin's default branch or origin's branch moved in\n" +
+			"between, regate refuses and says what changed.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops a running fetch, script,\n" +
 			"or push. A merge, its abort, and its undo finish first: they run in a\n" +
