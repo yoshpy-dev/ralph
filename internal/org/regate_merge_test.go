@@ -973,10 +973,12 @@ func TestRegate_APushThatLandedWhoseAnswerWasLost(t *testing.T) {
 
 // TestRegate_AFailedPushIsNotRetriedPastWhatChanged covers AC7's second half
 // (D4): after a push that failed, running Regate again refuses when origin's
-// feat/auth moved (someone pushed between the fetch and the push), with no
-// reset hint, since HEAD's first parent is no longer origin's tip of the
-// branch; and when origin's main moved, with the git reset --keep that drops
-// the merge commit nobody pushed, after which Regate merges anew.
+// feat/auth moved (someone pushed between the fetch and the push, or it was
+// put back under the merge commit's first parent, a force push), pushing
+// nothing and naming no reset hint, since HEAD's first parent is no longer
+// origin's tip of the branch; and when origin's main moved, with the git
+// reset --keep that drops the merge commit nobody pushed, after which Regate
+// merges anew.
 func TestRegate_AFailedPushIsNotRetriedPastWhatChanged(t *testing.T) {
 	t.Run("someone pushes the branch between the fetch and the push", func(t *testing.T) {
 		fx := newRegateFixture(t)
@@ -1035,6 +1037,24 @@ func TestRegate_AFailedPushIsNotRetriedPastWhatChanged(t *testing.T) {
 		if class := fx.mergeClass(t); class != MergeClassReady {
 			t.Fatalf("merge-order class = %s; want ready", class)
 		}
+	})
+
+	t.Run("origin's branch is put back under the merge commit's first parent", func(t *testing.T) {
+		fx := newRegateFixture(t)
+		pre, _ := fx.tips(t)
+		fx.pushToOrigin(t, "main")
+		allow := fx.rejectPushes(t)
+		first := fx.mustRegate(t)
+		if first.PushFailed == "" || first.Merge == "" {
+			t.Fatalf("regate = %+v; want a merge commit whose push failed", first)
+		}
+		allow()
+		under := gitOut(t, fx.worktree, "rev-parse", pre+"^")
+		runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", under)
+		callsBefore, before := fx.calls(t), fx.snapshot(t)
+		res, err := fx.regate(context.Background())
+		fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{"HEAD " + first.Merge + " of feat/auth in " + fx.worktree +
+			" has commits that origin's tip " + under + " of the branch does not"}, []string{"reset --keep"})
 	})
 }
 
@@ -1150,6 +1170,49 @@ func TestRegate_PushesALeadersGatedHeadButNamesNoResetForIt(t *testing.T) {
 		fx.assertRefused(t, res, err, before, []string{"HEAD " + head + " of feat/auth in " + fx.worktree + " has commits that origin's tip"},
 			[]string{"reset --keep"})
 	})
+}
+
+// TestRegate_AGateOnlyHeadIsNotPushedAgainOnceOriginLeftIt covers D4 for the
+// record of a gate-only Regate (AC9), which is via=regate too: it gated
+// origin's tip of feat/auth, and then origin's feat/auth was put back to that
+// head's first parent (a force push). Whether that gate passed or failed, and
+// also when the head is a merge commit on that parent but not of origin's
+// main the record names, HEAD is not the merge commit a Regate makes, so
+// running Regate again refuses, pushes nothing (origin's feat/auth stays at
+// the parent), records nothing, and names no git reset --keep, which would
+// drop the commit from the branch.
+func TestRegate_AGateOnlyHeadIsNotPushedAgainOnceOriginLeftIt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		setup  func(t *testing.T, fx *regateFixture) // before the gate-only regate
+		passed bool
+	}{
+		{"a pass on the branch's own commit", nil, true},
+		{"a failure on the branch's own commit", func(t *testing.T, fx *regateFixture) { fx.setExit(t, "test", 1) }, false},
+		{"a pass on a merge of another branch", func(t *testing.T, fx *regateFixture) {
+			side := gitOut(t, fx.worktree, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", "HEAD~1", "-m", "side",
+				"HEAD~1^{tree}")
+			runGit(t, "-C", fx.worktree, "merge", "--quiet", "--no-ff", "--no-edit", side)
+			runGit(t, "-C", fx.worktree, "push", "--quiet", "origin", "HEAD")
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			if tc.setup != nil {
+				tc.setup(t, fx)
+			}
+			head, _ := fx.tips(t)
+			if first := fx.mustRegate(t); first.Outcome != RegateOutcomeGated || first.Passed != tc.passed || first.Head != head {
+				t.Fatalf("gate-only regate = %+v; want a record of %s that passed: %v", first, head, tc.passed)
+			}
+			parent := gitOut(t, fx.worktree, "rev-parse", head+"^")
+			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", parent)
+			callsBefore, before := fx.calls(t), fx.snapshot(t)
+			res, err := fx.regate(context.Background())
+			fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{"HEAD " + head + " of feat/auth in " + fx.worktree +
+				" has commits that origin's tip " + parent + " of the branch does not"}, []string{"reset --keep"})
+		})
+	}
 }
 
 // TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset covers D2 for

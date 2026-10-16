@@ -60,19 +60,32 @@ func regateMergeEnv(env []string) []string {
 
 // regateHeadNotOnOrigin is Regate's path for a HEAD that is not originHead,
 // origin's tip of the branch after the fetch (D4). Regate gates only a head
-// origin has, with one exception, the retry of a push that failed: when
-// originHead is under HEAD and the branch's latest gate record is a pass of
-// HEAD on t's base tip (regateBranch.passedOn), it pushes HEAD and does
-// nothing else (regatePush, RegateOutcomePushOnly). Otherwise it refuses with
+// origin has, with one exception, the retry of a push that failed: when the
+// branch's latest gate record is a pass of HEAD on t's base tip
+// (regateBranch.passedOn) and HEAD is a head whose push may have failed, it
+// pushes HEAD and does nothing else (regatePush, RegateOutcomePushOnly). For
+// a pass Regate recorded (via=regate), HEAD must be its own merge commit on
+// originHead (regateIsOwnMerge): a gate-only Regate (AC9) records via=regate
+// too, and the head it gated was origin's tip then, so once origin's branch
+// was put back under that head (a force push), pushing it again would undo
+// what someone did to origin. For a pass with no via (ralph org gate, the
+// leader's), any HEAD with originHead under it will do: the leader's push of
+// its gated head may have failed. Otherwise it refuses with
 // regateCheckOriginHead's reason and regateResetHint's.
 func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, originHead string, env []string, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	if b.passedOn(t) {
-		under, err := regateIsAncestor(ctx, t.root, originHead, t.head)
+		var retry bool
+		var err error
+		if b.gate.record.Via == gateViaRegate {
+			retry, err = regateIsOwnMerge(ctx, t, originHead, b.gate.record.Base)
+		} else {
+			retry, err = regateIsAncestor(ctx, t.root, originHead, t.head)
+		}
 		if err != nil {
 			return RegateResult{}, regateInterrupted(ctx, err, "")
 		}
-		if under {
+		if retry {
 			res.Outcome, res.Passed, res.LogPath = RegateOutcomePushOnly, true, b.gate.record.Log
 			return regatePush(ctx, t, env, res)
 		}
@@ -91,22 +104,39 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 // regateResetHint is what the refusal of a HEAD that is not originHead adds
 // when HEAD is a merge commit an earlier Regate made and could not push (D4):
 // b's latest gate record is readable with no corrupt line after it, is one
-// Regate wrote (via=regate) of HEAD, and HEAD's first parent is originHead.
-// The hint is the git reset --keep that drops that commit, and running Regate
-// again, which merges anew. For any other HEAD it is "": the reset could drop
-// commits nobody pushed, a leader's gated head among them.
+// Regate wrote (via=regate) of HEAD, and HEAD is Regate's own merge commit on
+// originHead (regateIsOwnMerge). The record alone does not say that: a
+// gate-only Regate (AC9) records via=regate too, of a head that was origin's
+// tip when it was gated. The hint is the git reset --keep that drops that
+// commit, and running Regate again, which merges anew. For any other HEAD it
+// is "": the reset could drop commits nobody pushed, a leader's gated head
+// among them, or a commit origin had until its branch was put back under it.
 func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHead string, w gateWording) (string, error) {
 	g := b.gate
 	if g == nil || !g.readable || b.corruptAfterGate || g.record.Head != t.head || g.record.Via != gateViaRegate {
 		return "", nil
 	}
-	parents, err := regateParents(ctx, t.root, t.head)
-	if err != nil || len(parents) == 0 || parents[0] != originHead {
+	own, err := regateIsOwnMerge(ctx, t, originHead, g.record.Base)
+	if err != nil || !own {
 		return "", err
 	}
 	return fmt.Sprintf("; or, since HEAD is the merge commit an earlier regate made on origin's tip of the branch and did not "+
 		"push, drop it with git -C %s reset --keep refs/remotes/origin/%s and %s, which merges origin's %s anew",
 		t.root, t.branch, w.again, t.base.branch), nil
+}
+
+// regateIsOwnMerge reports whether t's HEAD has the shape of the merge commit
+// Regate makes on originHead, origin's tip of the branch after the fetch:
+// exactly two parents, originHead first and base second, base being the
+// default branch tip a gate record of HEAD names. regateMergeTip makes its
+// merge commit with the parents HEAD before the merge and t.base.sha, which
+// that record then names as its base. The commit's message is not read.
+func regateIsOwnMerge(ctx context.Context, t gateTarget, originHead, base string) (bool, error) {
+	parents, err := regateParents(ctx, t.root, t.head)
+	if err != nil {
+		return false, err
+	}
+	return slices.Equal(parents, []string{originHead, base}), nil
 }
 
 // regateParents returns commit's parents in root's repository, the first
