@@ -146,3 +146,12 @@ O11(check-in の `|| exit 1` を消す)では、check-in が断られたあと�
 - Blocked: なし
 - Verified: verify が「テストのみ」とした AC3〜AC8 の部分(上の対応表)と self-review M1。mutant 81 個のうち 78 個が赤で、生き残った 3 個は同値 1 個と LOW の穴 2 個(どちらも probe で閉じることを確かめた)。AC10 の隔離: canary は 0 回、残ったプロセスは 0、台帳は作られず、worktree には報告と insight event と evidence だけが残った(O23 の mutant が書いた 5 つのファイルは消した)
 - Not verified: Test gaps の 1〜5。どれも PR を止めるものではない
+
+## 追記(orchestrator): Test gaps の 4 を閉じた
+
+O33 と O35 の穴は、この報告のあとで 6b9b27d7 がテスト 2 本を足して閉じた(テストだけで、本番のコードは変えていない)。
+
+- `TestStartDirector_AStopWhileWaitingForTheCheckInIsTheCleanupsRecord`: O33 の overlay の mutant で赤、HEAD で 5 回とも緑
+- `TestStartDirector_ACleanupThatCannotConfirmTheEndWritesNothingOnceItIsNotCurrent`: `attach --replace` と `detach --force` の 2 ケースの表。O35 の mutant では 2 ケースとも赤になる。片方の枝だけを壊した mutant では、その枝のケースだけが赤になる。probe のポーリングの速さに頼らないよう、launch_cmd は replace か detach を記録したあとで終わる
+
+6b9b27d7 のあとも、`go test ./internal/org/... -count=1` は go1.26 と go1.25.8 の両方で ok だった。`-race -count=2` も 2 本で ok、テストが起こしたプロセスも残っていない。この報告の実行(e2667a6b)からの変更は org のテストのファイル 1 つだけなので、cli と残りのパッケージの結果はこの報告のままでよい。
