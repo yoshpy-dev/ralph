@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 )
@@ -19,8 +20,27 @@ import (
 // a terminal sends its foreground group stops it, only regateGitTimeout. The
 // merge, its abort, and its undo change the worktree, and one stopped
 // half-way would leave it in neither state. Regate looks at ctx after it.
-func regateUncancelledGit(ctx context.Context, dir string, env []string, args ...string) (gitResult, bool, error) {
-	return regateBoundedGit(context.WithoutCancel(ctx), dir, env, true, args...)
+// When ctx is done while git runs, one line on stderr says that Regate waits
+// for git, so that a human who pressed Ctrl-C does not kill ralph or git
+// half-way. A git that starts once ctx is done, the abort or the undo after
+// an interrupt, adds no line: the merge said it, or the interrupt stopped a
+// script, which ends at once.
+func regateUncancelledGit(ctx context.Context, dir string, env []string, stderr io.Writer, args ...string) (gitResult, bool, error) {
+	if ctx.Err() != nil {
+		return regateBoundedGit(context.WithoutCancel(ctx), dir, env, true, args...)
+	}
+	said := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(said)
+		_, _ = fmt.Fprintf(stderr, "org: regate: interrupted (%v): waiting for git %s in %s to finish (at most %s) before it "+
+			"stops, since a git stopped half-way would leave the worktree in neither state\n", context.Cause(ctx),
+			strings.Join(args[:min(2, len(args))], " "), dir, regateGitTimeout)
+	})
+	r, timedOut, err := regateBoundedGit(context.WithoutCancel(ctx), dir, env, true, args...)
+	if !stop() {
+		<-said
+	}
+	return r, timedOut, err
 }
 
 // regateMergeEnv is env, copied, with GIT_MERGE_AUTOEDIT=no after it, so the
@@ -108,8 +128,10 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // static_failed or test_failed. After a recorded head_moved or tree_changed
 // it is kept, and res.NotUndone says how to undo it (after tree_changed, also
 // how to set the scripts' changes aside first). An error or refusal after
-// the merge says what became of the merge commit (regateUndoneText).
-func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, w gateWording, res RegateResult) (RegateResult, error) {
+// the merge says what became of the merge commit (regateUndoneText). stderr
+// gets the line regateUncancelledGit writes.
+func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, stderr io.Writer, w gateWording,
+	res RegateResult) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
 		return RegateResult{}, regateInterrupted(ctx, err, "")
@@ -117,7 +139,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	if refused != "" {
 		return RegateResult{Refused: refused}, nil
 	}
-	merge, refused, err := regateMergeTip(ctx, t, env, w)
+	merge, refused, err := regateMergeTip(ctx, t, env, stderr, w)
 	if err != nil {
 		// The merge ran on a context the interrupt does not reach, so err
 		// is not ctx's: it says how the worktree is.
@@ -129,17 +151,17 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	res.Head, res.Merge, res.PreMergeHead = merge, merge, t.head
 	t.head = merge
 	if ctx.Err() != nil {
-		res = regateUndoMerge(ctx, t, env, res)
+		res = regateUndoMerge(ctx, t, env, stderr, res)
 		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))
 	}
 
 	res, err = o.regateGate(ctx, b, t, env, res)
 	switch {
 	case err != nil:
-		res = regateUndoMerge(ctx, t, env, res)
+		res = regateUndoMerge(ctx, t, env, stderr, res)
 		return res, fmt.Errorf("%w; %s", err, regateUndoneText(res))
 	case res.Refused != "":
-		res = regateUndoMerge(ctx, t, env, res)
+		res = regateUndoMerge(ctx, t, env, stderr, res)
 		res.Refused += "; " + regateUndoneText(res)
 		return res, nil
 	}
@@ -148,7 +170,7 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	case "":
 		return regatePush(ctx, t, env, res)
 	case GateReasonStaticFailed, GateReasonTestFailed:
-		return regateUndoMerge(ctx, t, env, res), nil
+		return regateUndoMerge(ctx, t, env, stderr, res), nil
 	case GateReasonHeadMoved:
 		why := "HEAD moved off it while the scripts ran (head_moved), and git reset --keep would drop what came after it"
 		if head, err := gateHead(context.WithoutCancel(ctx), regatePrefix, t.root); err == nil {
@@ -211,12 +233,14 @@ func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gate
 // run, a worktree it could not put back as it was (a merge stopped in a
 // hook leaves its result staged with no merge in progress), and a merge
 // commit with other parents: it says how the worktree is and what restores
-// it (regateMergeNotBack). Nothing is recorded then.
-func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWording) (merge, refused string, err error) {
+// it (regateMergeNotBack). Nothing is recorded then. stderr gets the line
+// regateUncancelledGit writes.
+func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.Writer, w gateWording) (merge, refused string, err error) {
 	uncancelled := context.WithoutCancel(ctx)
 	msg := fmt.Sprintf("Merge %s %s into %s", strings.TrimPrefix(t.base.ref, "refs/remotes/"), t.base.sha[:12], t.branch)
 	command := fmt.Sprintf("git merge --no-ff --no-edit -m '%s' %s", msg, t.base.sha)
-	r, timedOut, err := regateUncancelledGit(ctx, t.root, regateMergeEnv(env), "merge", "--no-ff", "--no-edit", "-m", msg, t.base.sha)
+	r, timedOut, err := regateUncancelledGit(ctx, t.root, regateMergeEnv(env), stderr, "merge", "--no-ff", "--no-edit", "-m", msg,
+		t.base.sha)
 	var signaled regateGitSignaled
 	ended := errors.As(err, &signaled)
 	if err != nil && !ended {
@@ -255,35 +279,37 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWordi
 	files, _ := gateGitOutput(uncancelled, w.prefix, t.root, "diff", "--name-only", "--diff-filter=U", "-z")
 	merging, err := gateGitPathExists(uncancelled, w.prefix, t.root, "a merge", "MERGE_HEAD")
 	if err != nil {
-		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("whether a merge is in progress cannot be read (%v)", err))
+		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("whether a merge is in progress cannot be read (%v)", err),
+			false)
 	}
 	aborted := ""
 	if merging {
-		ar, abortTimedOut, err := regateUncancelledGit(ctx, t.root, env, "merge", "--abort")
+		ar, abortTimedOut, err := regateUncancelledGit(ctx, t.root, env, stderr, "merge", "--abort")
 		var abortSignaled regateGitSignaled
 		switch {
 		case errors.As(err, &abortSignaled):
-			return "", "", regateMergeNotBack(t, command, outcome, "a merge was in progress, and git merge --abort "+abortSignaled.Error())
+			return "", "", regateMergeNotBack(t, command, outcome, "a merge was in progress, and git merge --abort "+abortSignaled.Error(),
+				false)
 		case err != nil:
 			return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("a merge is in progress, and git merge --abort could not "+
-				"run (%v)", err))
+				"run (%v)", err), false)
 		case abortTimedOut || ar.code != 0:
 			return "", "", regateMergeNotBack(t, command, outcome, "a merge is in progress, and git merge --abort failed"+
-				regateStderrTail(ar.stderr))
+				regateStderrTail(ar.stderr), false)
 		}
 		aborted = " (git merge --abort undid the merge it left in progress)"
 	}
 	head, err := gateHead(uncancelled, w.prefix, t.root)
 	if err != nil {
-		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("HEAD cannot be read (%v)", err))
+		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("HEAD cannot be read (%v)", err), false)
 	}
 	dirty, err := gateDirtyLines(uncancelled, w.prefix, t.root)
 	if err != nil {
-		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("the worktree cannot be read (%v)", err))
+		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("the worktree cannot be read (%v)", err), head != t.head)
 	}
 	if head != t.head || len(dirty) > 0 {
 		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("HEAD is %s (it was %s), and the worktree has %d "+
-			"uncommitted change(s) or untracked file(s)", head, t.head, len(dirty)))
+			"uncommitted change(s) or untracked file(s)", head, t.head, len(dirty)), head != t.head)
 	}
 
 	said := r.stderr
@@ -312,16 +338,25 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, w gateWordi
 // regateMergeNotBack is regateMergeTip's error for a merge that ended with
 // outcome ("made no merge commit", or how it was stopped) and left the
 // worktree in state, not as it was: nothing was recorded, and what puts the
-// worktree back. git reset --merge to the HEAD before the merge does that
-// whatever the merge left: a merge in progress (as git merge --abort does),
-// its result staged with no merge in progress (a git stopped in a hook,
-// which git merge --abort refuses and git reset --keep leaves in the files),
-// or a merge commit; it stops rather than drop a change of the user's to a
-// file the merge changed.
-func regateMergeNotBack(t gateTarget, command, outcome, state string) error {
+// worktree back. With HEAD still the HEAD before the merge, t.head (moved
+// false, or HEAD not read), that is git reset --merge to it, whatever the
+// merge left: a merge in progress (as git merge --abort does), or its result
+// staged with no merge in progress (a git stopped in a hook, which git merge
+// --abort refuses and git reset --keep leaves in the files). The tree was
+// clean before the merge, so what it drops from the index is the merge's.
+// With HEAD moved off t.head (moved: a commit was made, the merge commit
+// before a post-merge hook was stopped, or a hook's), it is git reset --keep,
+// as for a merge commit Regate keeps (regateMergeLeft): it stops rather than
+// drop a change of the user's to a file those commits changed.
+func regateMergeNotBack(t gateTarget, command, outcome, state string, moved bool) error {
+	undo := fmt.Sprintf("git -C %s reset --merge %s, which also undoes a merge in progress", t.root, t.head)
+	if moved {
+		undo = fmt.Sprintf("git -C %s reset --keep %s, which drops the commits made on it and stops rather than drop a change of "+
+			"yours", t.root, t.head)
+	}
 	return fmt.Errorf("org: regate: %s in %s %s, and the worktree is not as it was before: %s; nothing was recorded: check it "+
-		"with git -C %s status, put it back with git -C %s reset --merge %s, which also undoes a merge in progress, and run "+
-		"ralph org regate --branch %s again", command, t.root, outcome, state, t.root, t.root, t.head, t.branch)
+		"with git -C %s status, put it back with %s, and run ralph org regate --branch %s again", command, t.root, outcome, state,
+		t.root, undo, t.branch)
 }
 
 // regateUndoMerge undoes res.Merge, the merge commit Regate made on
@@ -331,9 +366,9 @@ func regateMergeNotBack(t gateTarget, command, outcome, state string) error {
 // on a dirty tree's changes or carries them along. Its git commands run on a
 // context ctx's cancellation does not reach, and the reset in a process
 // group of its own, so an interrupt does not stop the undo half-way
-// (regateUncancelledGit). When it does not undo, it sets res.NotUndone
-// (regateMergeLeft).
-func regateUndoMerge(ctx context.Context, t gateTarget, env []string, res RegateResult) RegateResult {
+// (regateUncancelledGit, which writes its line to stderr). When it does not
+// undo, it sets res.NotUndone (regateMergeLeft).
+func regateUndoMerge(ctx context.Context, t gateTarget, env []string, stderr io.Writer, res RegateResult) RegateResult {
 	uncancelled := context.WithoutCancel(ctx)
 	head, err := gateHead(uncancelled, regatePrefix, t.root)
 	if err != nil {
@@ -353,7 +388,7 @@ func regateUndoMerge(ctx context.Context, t gateTarget, env []string, res Regate
 		res.NotUndone = regateMergeLeft(t.root, res, fmt.Sprintf("the worktree has %d uncommitted change(s) or untracked file(s)", len(dirty)), "")
 		return res
 	}
-	r, timedOut, err := regateUncancelledGit(ctx, t.root, env, "reset", "--keep", res.PreMergeHead)
+	r, timedOut, err := regateUncancelledGit(ctx, t.root, env, stderr, "reset", "--keep", res.PreMergeHead)
 	var signaled regateGitSignaled
 	switch {
 	case errors.As(err, &signaled):

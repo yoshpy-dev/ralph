@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -561,6 +562,102 @@ func TestOrgRegate_InterruptUndoesTheMergeAndRecordsNothing(t *testing.T) {
 	}
 }
 
+// regateCLIStderr is the stderr of a command run in a goroutine: a buffer
+// behind a mutex, and wrote, closed on the first write, so that a test can
+// wait for a line before the command returns.
+type regateCLIStderr struct {
+	mu    sync.Mutex
+	buf   bytes.Buffer
+	once  sync.Once
+	wrote chan struct{}
+}
+
+func (w *regateCLIStderr) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.once.Do(func() { close(w.wrote) })
+	return w.buf.Write(p)
+}
+
+func (w *regateCLIStderr) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// AC6 through the CLI for an interrupt while the merge runs: SIGINT to the
+// ralph process while git merge waits in its pre-merge-commit hook does not
+// stop the merge, and stderr gets one line that says regate waits for it.
+// Once the hook lets the merge finish, regate undoes the merge commit,
+// records nothing, prints nothing on stdout, and exits 1; the undo that
+// starts after the interrupt adds no line.
+func TestOrgRegate_AnInterruptDuringTheMergeSaysOnStderrThatItWaits(t *testing.T) {
+	fx := newOrgRegateFixture(t)
+	pre := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD")
+	fx.moveMain(t)
+	started, release, hooks := filepath.Join(fx.out, "started"), filepath.Join(fx.out, "release"), filepath.Join(fx.out, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hook := "#!/bin/sh\ntouch '" + started + "'\nwhile [ ! -f '" + release + "' ]; do sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-merge-commit"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o644) })
+	runLedgerTestGit(t, "-C", fx.main, "config", "core.hooksPath", hooks)
+	before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
+
+	stderr := &regateCLIStderr{wrote: make(chan struct{})}
+	done := make(chan gateCLIResult, 1)
+	go func() {
+		root := NewRootCmd()
+		var stdout bytes.Buffer
+		root.SetOut(&stdout)
+		root.SetErr(stderr)
+		root.SetArgs([]string{"org", "regate", "--branch", "feat/a", "--state-dir", fx.stateDir})
+		err := root.ExecuteContext(context.Background())
+		done <- gateCLIResult{stdout.String(), stderr.String(), err}
+	}()
+	waitForGateCLIFile(t, started)
+	signalSelf(syscall.SIGINT)(t, nil)
+	select {
+	case <-stderr.wrote:
+	case r := <-done:
+		t.Fatalf("regate returned %+v while its merge waited for the hook; want the merge left to finish", r)
+	case <-time.After(10 * time.Second):
+		t.Fatal("stderr got nothing within 10s of the interrupt")
+	}
+	if err := os.WriteFile(release, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var r gateCLIResult
+	select {
+	case r = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("regate did not return within 15s of the release of the merge")
+	}
+
+	want := "org: regate: interrupted (interrupt signal received): waiting for git merge --no-ff in " + fx.worktree + " to finish " +
+		"(at most 2m0s) before it stops, since a git stopped half-way would leave the worktree in neither state\n"
+	if r.stderr != want {
+		t.Errorf("stderr = %q\nwant      %q", r.stderr, want)
+	}
+	merge := gateCLIGitOut(t, fx.worktree, "rev-parse", "feat/a@{1}")
+	if want := "org: regate: interrupted (interrupt signal received) before the scripts ran: nothing was recorded; the merge commit " +
+		merge + " was undone (git reset --keep " + pre + "), so only the reflog has it now"; r.err == nil || r.err.Error() != want {
+		t.Fatalf("regate = %v\nwant     %s", r.err, want)
+	}
+	if r.stdout != "" {
+		t.Errorf("stdout = %q; want nothing", r.stdout)
+	}
+	if after := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir)); after != before {
+		t.Errorf("an interrupted regate changed the manifest:\nbefore %s\nafter  %s", before, after)
+	}
+	if head := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
+		t.Errorf("HEAD = %s; want %s, the merge commit undone", head, pre)
+	}
+}
+
 // regate's help names what it does and refuses, and org --help lists regate
 // among the verbs that refuse --org-id.
 func TestOrgRegate_Help(t *testing.T) {
@@ -575,7 +672,7 @@ func TestOrgRegate_Help(t *testing.T) {
 			"After static_failed or test_failed it undoes its merge commit", "After head_moved or tree_changed it keeps it",
 			"(PUSH_ONLY:, HEAD:, BASE:, LOG: and PUSHED:, exit 0)", "An interrupt (SIGINT, SIGTERM, or SIGHUP)",
 			"A merge, its abort, and its undo finish first: they run in a process group of their own, which the Ctrl-C or the " +
-				"hangup of the terminal does not reach either",
+				"hangup of the terminal does not reach either, and regate says on stderr that it waits for one (at most 120 s)",
 			"When git has no user.name and user.email to make the merge commit with, regate merges nothing, records nothing, and exits 1",
 			"it needs no running watch and no approved plan",
 			"While it runs, ralph org spawn and ralph org start --plan of the org it works on are refused",

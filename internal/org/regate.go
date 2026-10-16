@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -137,6 +138,10 @@ type RegateParams struct {
 	// record's by= and herdr_pane= come from its USER and HERDR_PANE_ID, as
 	// Gate's do.
 	Env []string
+	// Stderr gets the one line Regate writes when ctx is done while a git it
+	// does not stop runs, the merge, its abort, or its undo: that it waits
+	// for that git to finish (regateUncancelledGit). nil uses os.Stderr.
+	Stderr io.Writer
 }
 
 // RegateResult is Regate's outcome when it returns no error. With an error
@@ -251,11 +256,11 @@ type RegateResult struct {
 // appended, and an interruption: when ctx is done, a running fetch, script,
 // or push is stopped (a merge, its abort, and its undo are not: they finish
 // first, in a process group of their own, which the Ctrl-C or the hangup a
-// terminal sends its foreground group does not reach either,
-// regateUncancelledGit). Up to the moment the event is appended nothing is
-// recorded, and the merge commit is undone (regateInterrupted,
-// regateMerged); after it, the record and the merge commit are kept and
-// nothing more is pushed (regatePush).
+// terminal sends its foreground group does not reach either, and p.Stderr
+// gets a line that says Regate waits for one, regateUncancelledGit). Up to
+// the moment the event is appended nothing is recorded, and the merge commit
+// is undone (regateInterrupted, regateMerged); after it, the record and the
+// merge commit are kept and nothing more is pushed (regatePush).
 func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) {
 	if p.Branch == "" {
 		return RegateResult{Refused: "org: regate: no branch named: name the feature branch to regate (ralph org merge-order " +
@@ -264,6 +269,10 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	env := p.Env
 	if env == nil {
 		env = os.Environ()
+	}
+	stderr := p.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
 	words := regateWords(p.Branch)
 
@@ -318,7 +327,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	case err != nil:
 		return RegateResult{}, regateInterrupted(ctx, err, "")
 	case !contains:
-		return o.regateMerged(ctx, b, t, env, words, res)
+		return o.regateMerged(ctx, b, t, env, stderr, words, res)
 	case b.passedOn(t):
 		res.Outcome, res.LogPath = RegateOutcomeUpToDate, b.gate.record.Log
 		return res, nil

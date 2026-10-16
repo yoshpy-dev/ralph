@@ -1,6 +1,7 @@
 package org
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -291,6 +292,56 @@ func TestRegate_AMergeEndedByASignalSaysHowToPutTheWorktreeBack(t *testing.T) {
 	}
 }
 
+// TestRegate_AMergeEndedAfterItsCommitNamesResetKeep: a signal that ends git
+// merge in its post-merge hook, once the merge commit is made, leaves HEAD on
+// that commit. Regate records nothing, runs no script, and returns an error
+// that names git reset --keep, which stops rather than drop a change of the
+// user's, not the git reset --merge it names while HEAD is where it was; that
+// reset puts the worktree back.
+func TestRegate_AMergeEndedAfterItsCommitNamesResetKeep(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, _ := fx.tips(t)
+	fx.commitAndPush(t, fx.main, "README.md", "main's readme\n")
+	tip := gitOut(t, fx.origin, "rev-parse", "refs/heads/main")
+	fx.setHooks(t, "post-merge", "kill -KILL $PPID\n")
+	manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+
+	res, err := fx.regate(context.Background())
+	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+	want := "org: regate: git merge --no-ff --no-edit -m 'Merge origin/main " + tip[:12] + " into feat/auth' " + tip + " in " +
+		fx.worktree + " was ended by a signal (killed), and the worktree is not as it was before: HEAD is " + merge + " (it was " +
+		pre + "), and the worktree has 0 uncommitted change(s) or untracked file(s); nothing was recorded: check it with git -C " +
+		fx.worktree + " status, put it back with git -C " + fx.worktree + " reset --keep " + pre + ", which drops the commits made " +
+		"on it and stops rather than drop a change of yours, and run ralph org regate --branch feat/auth again"
+	if err == nil || err.Error() != want {
+		t.Fatalf("regate = %+v, %v\nwant the error\n%s", res, err, want)
+	}
+	if parents := gitOut(t, fx.worktree, "rev-list", "--parents", "-n", "1", merge); parents != merge+" "+pre+" "+tip {
+		t.Fatalf("HEAD %s has the parents %q; want the merge commit of %s and %s", merge, parents, pre, tip)
+	}
+	if !reflect.DeepEqual(res, RegateResult{}) {
+		t.Errorf("regate = %+v with the error; want an empty result", res)
+	}
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" || fx.mergeInProgress(t) {
+		t.Fatalf("the worktree after the regate (merge in progress: %v):\n%s\nwant it clean", fx.mergeInProgress(t), st)
+	}
+	if got := fileOrAbsent(t, fx.o.Manifest.Path()); got != manifest {
+		t.Errorf("the regate changed the manifest:\n%s", got)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Errorf("scripts run = %v; want none", calls)
+	}
+	fx.assertUnlocked(t)
+
+	runGit(t, "-C", fx.worktree, "reset", "--keep", pre)
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Fatalf("the worktree after the git reset --keep the error names:\n%s", st)
+	}
+	if head := gitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
+		t.Fatalf("HEAD = %s after the git reset --keep; want %s", head, pre)
+	}
+}
+
 // TestRegate_AScriptFailureAfterTheMergeUndoesIt covers AC6's static_failed
 // and test_failed: Regate records a gate_failed of its merge commit, undoes
 // the merge commit with git reset --keep (HEAD back where it was, the merge
@@ -443,7 +494,9 @@ func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 // while a script runs, right before the record's lock, or under it right
 // before the append records nothing, undoes the merge commit, pushes nothing,
 // and returns an error that says so, naming the log once the scripts
-// started.
+// started. Stderr gets one line, that Regate waits for the merge, only when
+// the interrupt comes while the merge runs: the undo that starts after an
+// interrupt adds none.
 func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 	type outcome struct {
 		res RegateResult
@@ -483,13 +536,22 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		}
 		fx.assertUnlocked(t)
 	}
-	start := func(ctx context.Context, fx *regateFixture) <-chan outcome {
+	regate := func(ctx context.Context, fx *regateFixture, stderr *bytes.Buffer) (RegateResult, error) {
+		return fx.o.Regate(ctx, RegateParams{Branch: "feat/auth", Env: fx.env, Stderr: stderr})
+	}
+	start := func(ctx context.Context, fx *regateFixture, stderr *bytes.Buffer) <-chan outcome {
 		done := make(chan outcome, 1)
 		go func() {
-			res, err := fx.regate(ctx)
+			res, err := regate(ctx, fx, stderr)
 			done <- outcome{res, err}
 		}()
 		return done
+	}
+	noLine := func(t *testing.T, stderr *bytes.Buffer) {
+		t.Helper()
+		if stderr.Len() != 0 {
+			t.Errorf("stderr = %q; want nothing, since no git that is not stopped ran when the interrupt came", stderr)
+		}
 	}
 	wait := func(t *testing.T, done <-chan outcome) outcome {
 		t.Helper()
@@ -510,7 +572,8 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		done := start(ctx, fx)
+		var stderr bytes.Buffer
+		done := start(ctx, fx, &stderr)
 		waitForFile(t, started)
 		cancel()
 		select {
@@ -525,6 +588,11 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		if calls := fx.calls(t); calls != nil {
 			t.Fatalf("scripts run = %v; want none", calls)
 		}
+		want := "org: regate: interrupted (context canceled): waiting for git merge --no-ff in " + fx.worktree + " to finish (at most " +
+			regateGitTimeout.String() + ") before it stops, since a git stopped half-way would leave the worktree in neither state\n"
+		if got := stderr.String(); got != want {
+			t.Errorf("stderr = %q\nwant      %q", got, want)
+		}
 	})
 
 	t.Run("while a script runs", func(t *testing.T) {
@@ -538,10 +606,12 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		done := start(ctx, fx)
+		var stderr bytes.Buffer
+		done := start(ctx, fx, &stderr)
 		waitForFile(t, started)
 		cancel()
 		check(t, fx, pre, manifest, wait(t, done), afterScripts(fx))
+		noLine(t, &stderr)
 	})
 
 	t.Run("right before the record's lock", func(t *testing.T) {
@@ -550,8 +620,10 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		setRegateHook(t, &regateTestHooks.beforeRecord, cancel)
-		res, err := fx.regate(ctx)
+		var stderr bytes.Buffer
+		res, err := regate(ctx, fx, &stderr)
 		check(t, fx, pre, manifest, outcome{res, err}, afterScripts(fx))
+		noLine(t, &stderr)
 	})
 
 	t.Run("under the record's lock, right before the append", func(t *testing.T) {
@@ -566,8 +638,10 @@ func TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge(t *testing.T) {
 			}
 			return regateTestClock
 		}
-		res, err := fx.regate(ctx)
+		var stderr bytes.Buffer
+		res, err := regate(ctx, fx, &stderr)
 		check(t, fx, pre, manifest, outcome{res, err}, afterScripts(fx))
+		noLine(t, &stderr)
 	})
 }
 

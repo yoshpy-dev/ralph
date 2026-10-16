@@ -104,7 +104,8 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops a running fetch, script,\n" +
 			"or push. A merge, its abort, and its undo finish first: they run in a\n" +
 			"process group of their own, which the Ctrl-C or the hangup of the\n" +
-			"terminal does not reach either. Exit codes: 0\n" +
+			"terminal does not reach either, and regate says on stderr that it\n" +
+			"waits for one (at most 120 s). Exit codes: 0\n" +
 			"for UP_TO_DATE, a pass, and a push that landed; 1 for a refusal, a\n" +
 			"failure, a push that failed, an interrupt, and any other error. regate\n" +
 			"starts no autonomous work, so it needs no running watch and no approved\n" +
@@ -132,7 +133,7 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			// later ones are caught until stop runs.
 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
-			res, err := rt.Regate(ctx, org.RegateParams{Branch: branch, Env: os.Environ()})
+			res, err := rt.Regate(ctx, org.RegateParams{Branch: branch, Env: os.Environ(), Stderr: cmd.ErrOrStderr()})
 			return printRegateResult(cmd.OutOrStdout(), res, err)
 		},
 	}
