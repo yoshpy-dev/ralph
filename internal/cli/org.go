@@ -674,9 +674,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"`ralph org approve` since the org's last disband matches the plan\n" +
 			"file. Either refusal, --dry-run included, is recorded as `rejected`.\n" +
 			"\n" +
-			"A spawn into an org is refused, with nothing recorded, while\n" +
-			"`ralph org regate` works on that org's branch; run it again once the\n" +
-			"regate ends.",
+			"A spawn (not a --dry-run) into an org is refused, with nothing\n" +
+			"recorded, while `ralph org regate` works on that org's branch; run\n" +
+			"the spawn again once the regate ends.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err

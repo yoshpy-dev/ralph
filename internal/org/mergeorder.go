@@ -356,9 +356,9 @@ type mergeGateRecord struct {
 	ev       ManifestEvent
 	record   gateRecord
 	readable bool
-	// orgBranches is, for one that cannot be read, how many branches it is
+	// orgBranchCount is how many branches one that cannot be read is
 	// attached to: every branch its org had before it (collectMergeTargets).
-	orgBranches int
+	orgBranchCount int
 }
 
 // pos is t's place within its class: the index of its latest gate record, or
@@ -400,7 +400,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 	}
 	boundBranch := make(map[string]string) // org_id -> its latest complete binding's branch so far
 	// org_id -> every branch it had a complete binding or a readable gate
-	// record for so far, in the order they first came.
+	// record for so far, each once.
 	orgBranches := make(map[string][]string)
 	addOrgBranch := func(orgID, branch string) {
 		if !slices.Contains(orgBranches[orgID], branch) {
@@ -439,7 +439,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 				unattached++
 				continue
 			}
-			g.orgBranches = len(branches)
+			g.orgBranchCount = len(branches)
 			for _, branch := range branches {
 				target(branch).gate = g
 			}
@@ -937,9 +937,9 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 	switch {
 	case g != nil && !g.readable:
 		why := fmt.Sprintf("the latest gate record (%s at %s) cannot be read", g.ev.Event, g.ev.TS)
-		if g.orgBranches > 1 {
+		if g.orgBranchCount > 1 {
 			why += fmt.Sprintf(" and may be a record of another branch of the same org, %s, which has had %d branches", g.ev.OrgID,
-				g.orgBranches)
+				g.orgBranchCount)
 		}
 		if t.namesRegate() {
 			return MergeClassUnreadable, why + ": " + mergeRegateNext(t, "", " to record a new one")

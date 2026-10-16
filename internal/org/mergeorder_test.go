@@ -930,11 +930,16 @@ func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 }
 
 // TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt covers AC4's
-// last sentence (C8): a gate record that cannot be read attaches to the
-// branch of its org's latest complete binding before it, even when the org
-// was bound to another feature later, and one whose org has neither a
-// complete binding nor a readable gate record before it attaches to no
-// branch and is only counted in a note.
+// last sentence (C8): a gate record that cannot be read attaches to every
+// branch its org had a complete binding or a readable gate record for before
+// it (plan docs/plans/active/2026-10-16-org-regate.md, D2), here org-a's one
+// branch feat/x, and not to feat/y, which the org was bound to later; one
+// whose org has neither a complete binding nor a readable gate record before
+// it attaches to no branch and is only counted in a note. With one branch
+// before the record, the rule D2 replaced (the branch of the org's latest
+// complete binding before it) gives the same classes;
+// TestMergeOrder_UnreadableRecordAttachesToEveryBranchOfItsOrg covers an org
+// with two.
 func TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt(t *testing.T) {
 	fx := newMOFixture(t)
 	half := testFeature("split-1", "half", "0123456789ab")

@@ -13,10 +13,11 @@ import (
 )
 
 // How Regate (regate.go) merges origin's default branch in and pushes: the
-// merge commit (regateMerged, regateMergeTip, D3) and the check of what is on
-// disk in its way (regateCheckInTheWay), its undo (regateUndoMerge,
-// D5), the push and its retry (regatePush, regateHeadNotOnOrigin, D4), and
-// the git they run that ctx does not stop (regateUncancelledGit).
+// merge commit (regateMerged, regateMergeTip, D3), the check of what is on
+// disk in the merge's way (regateCheckInTheWay, regateMergeWrites), the merge
+// commit's undo (regateUndoMerge, D5), the push and its retry (regatePush,
+// regateHeadNotOnOrigin, D4), and the git they run that ctx does not stop
+// (regateUncancelledGit).
 
 // regateUncancelledGit runs git args in dir with env (regateBoundedGit) in a
 // process group of its own, on a context ctx's cancellation does not reach
@@ -126,17 +127,17 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // default branch tip (AC4): it checks that git has the identity the merge
 // commit needs (regateCheckIdentity) and that nothing git does not see is on
 // disk where the merge writes (regateCheckInTheWay), merges the tip in
-// (regateMergeTip, D3),
-// runs and records the gate on the merge commit (regateGate), and pushes a
-// recorded gate_passed (regatePush). Until a gate_passed is recorded, the
-// merge commit is undone (regateUndoMerge, D5): when Regate is interrupted
-// before the scripts, when nothing is recorded (the record is refused, or
-// Regate is interrupted or fails before the append), and after a recorded
-// static_failed or test_failed. After a recorded head_moved or tree_changed
-// it is kept, and res.NotUndone says how to undo it (after tree_changed, also
-// how to set the scripts' changes aside first). An error or refusal after
-// the merge says what became of the merge commit (regateUndoneText). stderr
-// gets the line regateUncancelledGit writes.
+// (regateMergeTip, D3), runs and records the gate on the merge commit
+// (regateGate), and pushes a recorded gate_passed (regatePush). Until a
+// gate_passed is recorded, the merge commit is undone (regateUndoMerge, D5):
+// when Regate is interrupted before the scripts, when nothing is recorded
+// (the record is refused, or Regate is interrupted or fails before the
+// append), and after a recorded static_failed or test_failed. After a
+// recorded head_moved or tree_changed it is kept, and res.NotUndone says how
+// to undo it (after tree_changed, also how to set the scripts' changes aside
+// first). An error or refusal after the merge says what became of the merge
+// commit (regateUndoneText). stderr gets the line regateUncancelledGit
+// writes.
 func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, stderr io.Writer, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
