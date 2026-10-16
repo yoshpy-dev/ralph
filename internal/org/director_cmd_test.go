@@ -875,8 +875,9 @@ func stopOwnBackgroundChild(t *testing.T, pidFile string, start time.Time) {
 }
 
 // The tests of StartDirector's launch_cmd path (plan
-// 2026-10-16-org-director-launch-cmd, AC2, AC4, and AC5) run real processes under t.TempDir(): a fake launch_cmd (sh), the launch
-// script start writes, a check-in that is this test binary
+// 2026-10-16-org-director-launch-cmd, AC2, AC4, and AC5) run real processes
+// under t.TempDir(): a fake launch_cmd (sh), the launch script start
+// writes, a check-in that is this test binary
 // (TestDirectorCheckInHelperProcess) run through a ralph wrapper, and a fake
 // agent that records what it got and then becomes a sleep. The fake herdr
 // must see no call. Each test kills, in its cleanup, the processes its

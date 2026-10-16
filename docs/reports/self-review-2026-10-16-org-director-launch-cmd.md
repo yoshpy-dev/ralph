@@ -58,3 +58,74 @@ _(行を足していないので、`docs/tech-debt/` への追記はない。)_
   2. L1(文書の 2 か所と skill の 4 面)は文書なので、直すなら /sync-docs で入れてよい。Go のコメント(`director_start.go:663`、`:188-190`)は L2〜L8 と同じ commit に入れる
   3. L2〜L8 は、直すなら M1 の fix と同じ commit にまとめる。直さずに進むなら、cap 2 の最後の回に当たるので、`/sync-docs` が L3・L6・L8(コメントの食い違いと重複)だけ登録簿に足す
   4. /test への引き継ぎ: Linux の `ps -o lstart` の安定(上の Not checked)と、相対の `RALPH_ORG_AGMSG_HOME` の case(M1 を直した場合)
+
+## Recheck (cycle 1 の直し)
+
+- Date: 2026-10-16
+- Plan: docs/plans/active/2026-10-16-org-director-launch-cmd.md(承認済み、digest 2aeecc48d0ba。上の報告の時点は af95b6db6074 で、D3 と AC2 に「相対の値は start を打ったディレクトリから絶対パスにしてから書く」を足して承認し直した)
+- Reviewer: reviewer subagent (Claude)。cycle 1 の指摘 M1・L1〜L8 の直しの確認で、パイプラインの新しい回ではない
+- Scope: diff の品質だけ。`git diff 91453d6a..4d32f98e`(HEAD 4d32f98e、直しの 98131af5 と plan の 4d32f98e、21 ファイル、+432/-225)。テストの実行、静的解析、仕様適合、文書のずれの検査は行っていない。この節の新しい ID には `RC-` を付け、上の M1・L1〜L8 と取り違えないようにする
+
+### Evidence reviewed
+
+- 読んだ差分: 上の範囲の全 hunk(Go のコードとテスト、recipe、skill、plan)。`abortCmd`、`MarkCmdLaunched`、`stopOwnBackgroundChild`、`orgDirectorPSLook`、`DriverCallTimeout` の doc は、diff の外の周辺も読んだ
+- 手で確かめたこと
+  - `git diff --check 91453d6a..4d32f98e` は空。recipe 2 面は `cmp` が同じ。skill 4 面は `md5` がすべて `fdcb69df0bf6872770bf5f38112299f4`
+  - `res.Launch` の参照は 0。残る `cleanup.Launch ==`(`internal/cli/org_director_headless.go:416`)は `DirectorCleanupError` のフィールドで、別の型
+  - `RALPH_ORG_AGMSG_HOME` の文字列は、テスト以外の Go ではコメントと help の文、`driver/agmsg.go:123` の定数だけ。`cli/org_watch.go` は `driver.AgmsgHomeEnv` の別名、`org/director_cmd.go:317` は `driver.AgmsgHomeEnv` で書く
+  - L8 の doc の列挙を呼び出し側と突き合わせた。workspace と tab の create(`director_start.go:837`、`:850`)、C-c と pane と workspace の close(`director_stop.go:640`、`:645`、`:670`)、launch_cmd の実行(`director_cmd.go:551`)、ps の読み(`director_cmd.go:124`)は、どれも `callWithTimeout` か `driverCallTimeout()` の下にある。label の get は `verbs.go:857`、`:870`、`:904` の所有確認の中で `callWithTimeout` を通る。列挙に欠けも余りもない
+  - 追加した Go の `//` コメント行のうち 105 桁を超えるものを、枝全体(`3723d900..HEAD`)で数えた。1 行(RC-L2)。直しで足した doc の中の 85 桁の行は別に 1 行ある(RC-L1)
+- 戻すと赤くなるか(読んで判断した。実行はしていない): M1 の CLI テスト(`org_director_headless_test.go:2122`)は linked worktree で相対の値を設定し、起動スクリプトが main worktree のルートへ `cd` したあとに偽の agent が `RALPH_ORG_AGMSG_HOME` を記録する。`startDirector` の絶対化を消すと org 層の断りで start が失敗して赤、基準を start の cwd でなく main worktree のルートにすると記録が `<wt>/agmsg/home` と合わず赤になる。launch_cmd の fixture は `env -u RALPH_ORG_AGMSG_HOME` で包んであるので、スクリプトが export しなければ agent に値は届かず、緑のまま通る道はない
+- 確かめていないもの: テスト、`gofmt`、`go vet`、go1.25.8 でのビルド。`%w: %w` は go.mod の Go 1.25.8 で使える形だが、ビルドは確かめていない
+
+### 指摘の状態
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 直った | `internal/cli/org_director_headless.go:319` が、launch_cmd のときだけ `agmsgHomeIsRelative` で見分けて `filepath.Abs` を掛ける(見張りの `orgWatchChildAgmsgHome` と同じ述語)。失敗は何も書く前に返る。org 層の `directorLaunchScript.text()`(`director_cmd.go:298`)が、絶対でも `~/` 始まりでもない値を断る。help、recipe、skill の 4 面、plan の D3 と AC2 に同じ 1 文が入り、4 つの書き方は食い違わない。CLI のテストは上のとおり |
+| L1 | 直った | `director_start.go` の `RecordWorkspace` と `StartDirector` の doc、recipe の「startup files」の段落、skill の項 5 が折り直された。recipe 2 面と skill 4 面は同一のまま。ただし折り直しの取りこぼしが 2 行ある(RC-L1、RC-L2) |
+| L2 | 直った | `stopOwnBackgroundChild`(`director_cmd_test.go:840`)が、pid を読んだ直後に ps で起動時刻を読み、テストの開始の 2 秒前以降に起動したものだけを対象にし、cleanup で送る直前にも同じ起動時刻を確かめる。ps を読めなければ送らない。`killCheckedInProcesses` と同じ方針で、AC10 に合う |
+| L3 | 直った | `MarkCmdLaunched` の switch が nil、token、`!CmdLaunch()`、stopped、current でない、starting でない、の順になり(`director_start.go:353-360`)、コメントと doc(`:308-315`)が同じ順を書く。`director_test.go` の行が token の食い違いを先に断ることを固定し、promoted session の行は token の断りに変わった |
+| L4 | 直った | `ErrDirectorProcessUnreadable`(`director_stop.go:58`)で枝を分け、文面は ps を読めないときだけ `again once ps can read pid N` と言う。ps を見る案内は `orgDirectorPSLook`(`org_director_headless.go:620`)が、読めない原因のときだけ空にする。stop の help、recipe、skill の 4 面、テストの 2 つの枝が同じ分け方で、`%w: %w` の両方が `errors.Is` で拾える |
+| L5 | 直った | `DirectorStartResult.Launch` を消し、`reg.CmdLaunch()`(`org_director_headless.go:336`)で分ける。org 側の 2 つの代入も消えた。doc は「whose Launch says which」に直った |
+| L6 | 直った | `driver.AgmsgHomeEnv` を 1 つ置き、読み手、見張りの別名、起動スクリプトの 3 つが使う。`directorAgmsgHomeEnv` は消えた |
+| L7 | 直った | `abortCmd`(`director_cmd.go:622`)が `for attempt := 1; attempt <= 2; attempt++` になった。`ErrDirectorCheckedInDuringStop` 以外は `break` でループを出て(`switch` の外にあるので、抜けるのは `for`)、2 周目も同じ error なら cleanup error に落ちる。読み直しは各周の先頭で `openHeadlessRegistration` を呼ぶので、`err` の出どころが追える |
+| L8 | 直った | `spawn.go:213-227` と `verbs.go:737-744` の doc に、director の herdr 呼び出し、launch_cmd の実行、ps の読みが入った。上の突き合わせのとおり、列挙は実際の呼び出しと合う。ただし直しで入れた 1 行が折り直されていない(RC-L1) |
+
+### Findings
+
+重大度の数: CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2。
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| RC-L1 | LOW | readability | L8 の直しで `defaultDriverCallTimeout` の doc に足した文が、段落を折り直さずに 87 桁の 1 行になった。同じ段落の他の行は 71〜76 桁で、上の L1 と同じ形(挿入した文のあとに折り直していない) | `internal/org/verbs.go:740`(`// and cleanup, when Org.DriverCallTimeout is unset (zero value). A call that has not`)。前後の `:739` と `:741` は 76 桁 | `:739-742` の 4 行を 76 桁前後で折り直す |
+| RC-L2 | LOW | readability | テストの helper 群の頭にあるコメントが、2 行目だけ 130 桁になっている。cycle 1 の L1 の取りこぼしで、直しの diff に context として出てきて見つけた。この枝で足した `//` コメントの中で 105 桁を超えるのはこの 1 行だけ | `internal/org/director_cmd_test.go:878`(`// 2026-10-16-org-director-launch-cmd, AC2, AC4, and AC5) run real processes under t.TempDir(): a fake launch_cmd (sh), the launch`)。前の行 `:877` は 53 桁で、plan の ID の前で折れている | `:877-885` のコメントを折り直す。上の 2 つとも、コメントだけで挙動に触れない |
+
+### Positive notes
+
+- M1 の直しは、見張りの `orgWatchChildAgmsgHome` と同じ述語(`agmsgHomeIsRelative`)を使い、同じ値が見張りと director で同じ agmsg を指す。org 層の断りは CLI からは届かない防御で、cwd と state dir の絶対パスの検査と同じ switch にあり、隣と形が揃っている
+- L4 の直しは、案内を出す条件を `errors.Is(why, ErrDirectorProcessUnreadable)` 1 か所にまとめ、`stopError` と `printOrgDirectorCmdStop` の 2 つの出力が同じ関数を通る。forced stop の record が失敗した枝と、ps を読めない枝の両方に、文面を固定するテストがある
+- `abortCmd` の再試行は有限で、各周が登録を読み直してから `stopDirectorProcess` を呼ぶ。SIGKILL は director の stop と start の cleanup に現れない(`grep` で再確認。`director_cmd.go:211` が送るのは SIGTERM だけで、SIGKILL の語はコメントと help の文にだけある。`gate_run.go:238` の SIGKILL は別の道)
+- 直しは 98131af5 の 1 コミットで、L1〜L8 の対象外の変更は plan の記録と `defaultDriverCallTimeout` の doc だけ。後者は implementer が範囲外で見つけたもので、plan の Progress に書かれている
+
+### 指摘にしなかったもの
+
+- org 層の `text()` の相対 agmsg home の断りは、`AttachHeadless` と prompt の書き込みのあとに起きる(`writeDirectorLaunchScript` から届く)。CLI は必ず絶対か `~/` 始まりを渡すので、届かない防御で、起きても `abortCmd` が `stopped` を書いて片付ける。state dir と cwd の絶対パスの検査が同じ位置にあるのと同じ形なので数えない
+- 相対の述語が cli の `agmsgHomeIsRelative` と org の `text()` の 2 か所にある。org は cli を import できず、org 側の行が相対と bare `~` の両方を固定しているので数えない
+- `director_test.go` の「The token comes first」のコメントは token 違いの herdr の行の上にあり、直後の promoted session の行の理由(token を持たない)も言っている。位置は少し曖昧だが、読み違える形ではない
+- plan の D3 が「self-review の M1」と書く。plan は記録で、この報告の ID は付け足しで増えるだけなので、番号は動かない
+
+### Tech debt identified
+
+なし。RC-L1 と RC-L2 はコメントの折り直しで、直すコストが小さい。`docs/tech-debt/README.md` は直しの diff に含まれず、変更もない。
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM はなし。cycle 1 の M1 と L1〜L8 はすべて直った。LOW 2 件は、L1 と同じ折り直しの取りこぼしで、挙動と文書に触れない)
+- Follow-ups:
+  1. RC-L1 と RC-L2 は、直すなら Go のコメントの折り直しだけ(`verbs.go:739-742`、`director_cmd_test.go:877-885`)。Go に触れるので、直すとパイプラインの回し直しになる。直さずに進むなら、cap 2 の最後の回に当たるので、`/sync-docs` が登録簿に 1 行(コメントの折り直し 2 か所)だけ足す
+  2. /test への引き継ぎは cycle 1 の 4 と同じ。Linux の `ps -o lstart` の安定は、まだ確かめていない
+
+### 追記(orchestrator)
+
+RC-L1 と RC-L2 は、cycle 1 の verify の前に orchestrator がコメントの折り直しだけで直した(この報告を足したのと同じコミット)。verify と test は cycle 1 のまま、この直しを含む HEAD で走るので、パイプラインの回し直しにはならない。

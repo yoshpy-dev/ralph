@@ -737,10 +737,10 @@ func (o *Org) Read(p ReadParams) ReadResult {
 // defaultDriverCallTimeout bounds each herdr / agmsg call Stop and Disband
 // make, each call of the watch's pulse cycle (the git status included), and
 // each herdr call, launch_cmd run, and ps read of a director's start, stop,
-// and cleanup, when Org.DriverCallTimeout is unset (zero value). A call that has not
-// answered by then counts as failed, so one unresponsive herdr or agmsg can
-// never hold a stop (or the stops after it), or the cycle of the other
-// orgs, forever.
+// and cleanup, when Org.DriverCallTimeout is unset (zero value). A call
+// that has not answered by then counts as failed, so one unresponsive herdr
+// or agmsg can never hold a stop (or the stops after it), or the cycle of
+// the other orgs, forever.
 const defaultDriverCallTimeout = 10 * time.Second
 
 // herdrPaneIDEnv is the variable herdr sets inside every pane to that pane's
