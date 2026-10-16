@@ -658,6 +658,66 @@ func TestOrgRegate_AnInterruptDuringTheMergeSaysOnStderrThatItWaits(t *testing.T
 	}
 }
 
+// regate writes the manifest, so it is refused while seats of an older,
+// per-worktree ledger are active (guardLegacyOrgStateDir), before it reads
+// the ledger or runs anything: run in the feature worktree with no
+// --state-dir, where the ledger shared by every worktree (the main
+// checkout's) binds feat/a to the disbanded org a and origin's main moved on
+// in origin itself, regate fetches nothing, merges nothing, runs no script,
+// prints nothing, and leaves both ledgers, the worktree, and origin as they
+// were.
+func TestOrgRegate_LegacyLedgerGuard(t *testing.T) {
+	setupOrgStubPATH(t)
+	fx := newOrgRegateFixture(t)
+	shared := filepath.Join(fx.main, ".harness", "state", "org")
+	legacy := filepath.Join(fx.worktree, ".harness", "state", "org")
+	seedGateOrg(t, shared, "a", fx.worktree)
+	appendSeedEvent(t, shared, org.ManifestEvent{OrgID: "a", Event: org.EventDisbanded})
+	spawnLedgerSeat(t, legacy, "seat-1")
+	tip := gateCLIGitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", "refs/heads/main",
+		"-m", "pushed", "refs/heads/main^{tree}")
+	runLedgerTestGit(t, "-C", fx.origin, "update-ref", "refs/heads/main", tip)
+	sharedManifest, legacyManifest := fileBytesOrAbsent(t, org.ManifestPathIn(shared)), fileBytesOrAbsent(t, org.ManifestPathIn(legacy))
+	head, tracking := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD"), gateCLIGitOut(t, fx.main, "rev-parse", "refs/remotes/origin/main")
+	origin := gateCLIGitOut(t, fx.origin, "for-each-ref")
+	t.Chdir(fx.worktree)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "regate", "--branch", "feat/a")
+	if want := "org: refusing to change the org ledger: this linked worktree still has an older ledger at " + legacy +
+		" with 1 active seat(s)"; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("regate = %v; want the legacy-ledger refusal starting %q (stdout: %s)", err, want, stdout)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("stdout = %q, stderr = %q; want nothing", stdout, stderr)
+	}
+	if after := fileBytesOrAbsent(t, org.ManifestPathIn(shared)); after != sharedManifest {
+		t.Errorf("a refused regate changed the shared manifest:\nbefore %s\nafter  %s", sharedManifest, after)
+	}
+	if after := fileBytesOrAbsent(t, org.ManifestPathIn(legacy)); after != legacyManifest {
+		t.Errorf("a refused regate changed the older manifest:\nbefore %s\nafter  %s", legacyManifest, after)
+	}
+	if got := gateCLIGitOut(t, fx.main, "rev-parse", "refs/remotes/origin/main"); got != tracking {
+		t.Errorf("refs/remotes/origin/main = %s; want %s, nothing fetched", got, tracking)
+	}
+	if got := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD"); got != head {
+		t.Errorf("HEAD = %s; want %s, nothing merged", got, head)
+	}
+	if st := gateCLIGitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Errorf("the worktree after a refused regate:\n%s", st)
+	}
+	if got := gateCLIGitOut(t, fx.origin, "for-each-ref"); got != origin {
+		t.Errorf("origin's refs after a refused regate:\n%s\nwant them as before:\n%s", got, origin)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Errorf("a refused regate ran %v", calls)
+	}
+	for _, name := range []string{"gates", "regate.lock"} {
+		if _, err := os.Stat(filepath.Join(shared, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a refused regate made %s in the shared ledger (stat: %v)", name, err)
+		}
+	}
+}
+
 // regate's help names what it does and refuses, and org --help lists regate
 // among the verbs that refuse --org-id.
 func TestOrgRegate_Help(t *testing.T) {

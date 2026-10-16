@@ -423,6 +423,69 @@ func gitFailure(t *testing.T, dir string, args ...string) string {
 	return "exit " + strconv.Itoa(exitErr.ExitCode()) + ": " + strings.TrimSpace(stderr.String())
 }
 
+// TestRegate_AnotherCommitAfterTheMergeNamesResetKeep: when git merge made
+// its merge commit (exit 0) but HEAD is then another commit (here a
+// post-merge hook makes a commit on top of it and moves the branch there, so
+// HEAD's only parent is the merge commit), Regate does not take HEAD for its
+// merge commit: it runs no script, records nothing, pushes nothing, and
+// leaves both commits, and its error names HEAD, its parents, the HEAD before
+// the merge and origin's tip, and the git reset --keep to the HEAD before the
+// merge, which drops both.
+func TestRegate_AnotherCommitAfterTheMergeNamesResetKeep(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, _ := fx.tips(t)
+	fx.commitAndPush(t, fx.main, "README.md", "main's readme\n")
+	tip := gitOut(t, fx.origin, "rev-parse", "refs/heads/main")
+	// git commit in the hook would read the MERGE_HEAD the merge still has
+	// and make a second merge commit; git commit-tree reads none.
+	fx.setHooks(t, "post-merge", `c=$(git -c user.name=t -c user.email=t@example.com commit-tree -p HEAD -m extra 'HEAD^{tree}') && `+
+		`git update-ref HEAD "$c"`+"\n")
+	manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+	originRefs := regateGitState(fx.origin, "for-each-ref")
+
+	res, err := fx.regate(context.Background())
+	head := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD^")
+	want := "org: regate: git merge --no-ff --no-edit -m 'Merge origin/main " + tip[:12] + " into feat/auth' " + tip + " in " +
+		fx.worktree + " left HEAD at " + head + `, whose parents are ["` + merge + `"], not HEAD ` + pre + " and origin's tip " + tip +
+		" of main (a hook may have made another commit), so regate ran nothing and recorded nothing: check git -C " + fx.worktree +
+		" log, and to undo the merge run git -C " + fx.worktree + " reset --keep " + pre
+	if err == nil || err.Error() != want {
+		t.Fatalf("regate = %+v, %v\nwant the error\n%s", res, err, want)
+	}
+	if !reflect.DeepEqual(res, RegateResult{}) {
+		t.Errorf("regate = %+v with the error; want an empty result", res)
+	}
+	if parents := gitOut(t, fx.worktree, "rev-list", "--parents", "-n", "1", head); parents != head+" "+merge {
+		t.Fatalf("HEAD %s has the parents %q; want only the merge commit %s", head, parents, merge)
+	}
+	if msg := gitOut(t, fx.worktree, "log", "-1", "--format=%B", head); msg != "extra" {
+		t.Errorf("HEAD's message = %q; want the hook's commit, extra", msg)
+	}
+	fx.assertMergeCommit(t, merge, pre, tip)
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" || fx.mergeInProgress(t) {
+		t.Fatalf("the worktree after the regate (merge in progress: %v):\n%s\nwant it clean", fx.mergeInProgress(t), st)
+	}
+	if got := fileOrAbsent(t, fx.o.Manifest.Path()); got != manifest {
+		t.Errorf("the regate changed the manifest:\n%s", got)
+	}
+	if calls := fx.calls(t); calls != nil {
+		t.Errorf("scripts run = %v; want none", calls)
+	}
+	if got := regateGitState(fx.origin, "for-each-ref"); got != originRefs {
+		t.Errorf("origin's refs after the regate:\n%s\nwant them as before:\n%s", got, originRefs)
+	}
+	fx.assertUnlocked(t)
+
+	runGit(t, "-C", fx.worktree, "reset", "--keep", pre)
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Fatalf("the worktree after the git reset --keep the error names:\n%s", st)
+	}
+	if head := gitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
+		t.Fatalf("HEAD = %s after the git reset --keep; want %s", head, pre)
+	}
+}
+
 // TestRegate_AScriptFailureAfterTheMergeUndoesIt covers AC6's static_failed
 // and test_failed: Regate records a gate_failed of its merge commit, undoes
 // the merge commit with git reset --keep (HEAD back where it was, the merge
