@@ -132,11 +132,12 @@ type RegateParams struct {
 	// gateScriptEnv. The git commands get it with only what Regate needs
 	// after it: the fetches GIT_TERMINAL_PROMPT=0 and LC_ALL=C
 	// (regateFetchEnv), the push GIT_TERMINAL_PROMPT=0 (regateRemoteEnv), the
-	// merge GIT_MERGE_AUTOEDIT=no (regateMergeEnv), and the identity check,
-	// the merge's abort, and its undo nothing, so the merge commit has the
-	// caller's identity and the merge's hooks run in the caller's locale; the
-	// record's by= and herdr_pane= come from its USER and HERDR_PANE_ID, as
-	// Gate's do.
+	// merge and the git merge-tree that checks what it writes
+	// (regateMergeWrites) GIT_MERGE_AUTOEDIT=no (regateMergeEnv), and the
+	// identity check, the merge's abort, and its undo nothing, so the merge
+	// commit has the caller's identity and the merge's hooks run in the
+	// caller's locale; the record's by= and herdr_pane= come from its USER and
+	// HERDR_PANE_ID, as Gate's do.
 	Env []string
 	// Stderr gets the one line Regate writes when ctx is done while a git it
 	// does not stop runs, the merge, its abort, or its undo: that it waits
