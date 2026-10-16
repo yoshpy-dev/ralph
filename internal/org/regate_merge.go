@@ -245,12 +245,13 @@ const regateInTheWayListed = 10
 // fast-forward only), and the clean-tree check (gateDirtyLines) lists no
 // ignored file. The paths the merge writes that HEAD does not track are
 // regateMergeWrites's; one of them is in the way when regatePathInTheWay
-// finds something untracked there. The refusal names what is on disk, the
-// first regateInTheWayListed of them. With no merge base it refuses nothing:
-// git merge refuses unrelated histories itself (regateMergeTip). The error is
-// for a git that fails, runs past regateGitTimeout, or is ended by a signal,
-// ctx done, and a path lstat cannot read; nothing is merged or recorded then
-// either.
+// finds something untracked there. The refusal names what is on disk, as it
+// is spelled there, the first regateInTheWayListed of them. With no merge base
+// it refuses nothing: git merge refuses unrelated histories itself
+// (regateMergeTip). The error is for a git that fails, runs past
+// regateGitTimeout, or is ended by a signal, ctx done, a path lstat cannot
+// read, and a directory that cannot be listed; nothing is merged or recorded
+// then either.
 func regateCheckInTheWay(ctx context.Context, t gateTarget, env []string, w gateWording) (string, error) {
 	r, err := gateGit(ctx, regatePrefix, t.root, "merge-base", t.head, t.base.sha)
 	switch {
@@ -362,46 +363,84 @@ func regateMergeWrites(ctx context.Context, t gateTarget, env []string, mergeBas
 
 // regatePathInTheWay is what is on disk in root in the way of the merge
 // writing p, a path HEAD does not track, relative to root as git names it,
-// with slashes; "" for nothing. It is p itself when lstat finds a
-// non-directory there (a file, a symlink), or a directory with something
+// with slashes; "" for nothing. On a file system that does not tell case
+// apart (macOS's default), lstat finds at p, or at a directory above it, what
+// is spelled otherwise on disk: lstat of README.md finds readme.md. So what
+// lstat finds is judged under its spelling on disk (regateSpellingOnDisk), and
+// that is the path returned. It is a non-directory at p (a file, a symlink),
+// unless it is spelled otherwise and HEAD tracks it under that spelling (it is
+// in the index, which is HEAD's in the clean tree Regate checked): its content
+// is then in git and the merge replaces it, as when origin's default branch
+// renames readme.md to README.md. It is a directory at p with something
 // untracked in it (`git ls-files --others --directory --no-empty-directory`),
 // whose files git merge removes when it writes a file there; an empty
 // directory, or one whose files HEAD tracks and the merge deletes, is not in
 // the way. It is the first directory above p that lstat finds as a
-// non-directory, unless HEAD tracks that path (it is in the index, which is
-// HEAD's in the clean tree Regate checked): the merge then replaces it with
-// the directory. In that clean tree, whatever untracked it finds is ignored.
-// Git runs only for a directory at p and a non-directory above it, with
-// --literal-pathspecs. The error is for a path lstat cannot read, a git that
+// non-directory, unless HEAD tracks it: the merge then replaces it with the
+// directory. In that clean tree, whatever untracked it finds is ignored. Git
+// runs only for a directory at p, a non-directory above it, and a
+// non-directory at p spelled otherwise, with --literal-pathspecs. The error is
+// for a path lstat cannot read, a directory that cannot be listed, a git that
 // fails, and ctx done.
 func regatePathInTheWay(ctx context.Context, root, p string) (string, error) {
 	parts := strings.Split(p, "/")
 	for i := range len(parts) {
-		rel := strings.Join(parts[:i+1], "/")
-		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
+		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(strings.Join(parts[:i+1], "/"))))
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			return "", nil
 		case err != nil:
 			return "", fmt.Errorf("%scheck what is on disk in %s where the merge writes %s: %w", regatePrefix, root, p, err)
-		case !info.IsDir() && i == len(parts)-1:
-			return rel, nil
-		case !info.IsDir():
-			tracked, err := gateGitOutput(ctx, regatePrefix, root, "--literal-pathspecs", "ls-files", "-z", "--", rel)
-			if err != nil || slices.Contains(strings.Split(tracked, "\x00"), rel) {
-				return "", err
-			}
-			return rel, nil
-		case i == len(parts)-1:
+		case info.IsDir() && i < len(parts)-1:
+			continue
+		}
+		disk, err := regateSpellingOnDisk(root, parts[:i+1])
+		if err != nil {
+			return "", fmt.Errorf("%scheck what is on disk in %s where the merge writes %s: %w", regatePrefix, root, p, err)
+		}
+		switch {
+		case info.IsDir():
 			untracked, err := gateGitOutput(ctx, regatePrefix, root, "--literal-pathspecs", "ls-files", "-z", "--others",
-				"--directory", "--no-empty-directory", "--", rel)
+				"--directory", "--no-empty-directory", "--", disk)
 			if err != nil || untracked == "" {
 				return "", err
 			}
-			return rel, nil
+		case i < len(parts)-1 || disk != p:
+			tracked, err := gateGitOutput(ctx, regatePrefix, root, "--literal-pathspecs", "ls-files", "-z", "--", disk)
+			if err != nil || slices.Contains(strings.Split(tracked, "\x00"), disk) {
+				return "", err
+			}
 		}
+		return disk, nil
 	}
 	return "", nil
+}
+
+// regateSpellingOnDisk is how the path of parts (its names from root down),
+// which lstat finds in root, is spelled on disk, relative to root with
+// slashes: each name is its directory's entry of that name, else the first
+// entry (in name order) whose name is the same when case is not told apart
+// (strings.EqualFold), so on a file system that tells case apart it is the
+// path parts spell. A name with no such entry (one the file system finds
+// under another Unicode normalization form, say) stays as it is. The error is
+// for a directory that cannot be listed.
+func regateSpellingOnDisk(root string, parts []string) (string, error) {
+	disk := make([]string, 0, len(parts))
+	for _, part := range parts {
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(strings.Join(disk, "/"))))
+		if err != nil {
+			return "", err
+		}
+		i := slices.IndexFunc(entries, func(e fs.DirEntry) bool { return e.Name() == part })
+		if i < 0 {
+			i = slices.IndexFunc(entries, func(e fs.DirEntry) bool { return strings.EqualFold(e.Name(), part) })
+		}
+		if i >= 0 {
+			part = entries[i].Name()
+		}
+		disk = append(disk, part)
+	}
+	return strings.Join(disk, "/"), nil
 }
 
 // regateMergeTip merges t's base tip into the branch checked out in t.root

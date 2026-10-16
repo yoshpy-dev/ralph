@@ -1224,6 +1224,31 @@ func (fx *regateFixture) moveAndPush(t *testing.T, dir, from, to string) {
 	runGit(t, "-C", dir, "push", "--quiet", "origin", "HEAD")
 }
 
+// shareMoveFromMain is shareFromMain for a rename: main renames from to to
+// (moveAndPush) and feat/auth takes it in with a merge, both pushed.
+func (fx *regateFixture) shareMoveFromMain(t *testing.T, from, to string) {
+	t.Helper()
+	fx.moveAndPush(t, fx.main, from, to)
+	runGit(t, "-C", fx.worktree, "merge", "--quiet", "--no-edit", "main")
+	runGit(t, "-C", fx.worktree, "push", "--quiet", "origin", "HEAD")
+}
+
+// regateSkipOnACaseSensitiveFS skips t unless the file system of t's temp
+// directories, the regate fixture's, does not tell case apart (macOS's
+// default): lstat of A there finds a file a.
+func regateSkipOnACaseSensitiveFS(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	writeGateFile(t, dir, "a", "a\n", 0o644)
+	_, err := os.Lstat(filepath.Join(dir, "A"))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		t.Skipf("the file system of %s tells case apart; the case needs one that does not", dir)
+	case err != nil:
+		t.Fatal(err)
+	}
+}
+
 // untrackRunLog has main track docs/evidence/run.log (an ignored path) and
 // feat/auth take that in with a merge and then stop tracking it, pushed: in
 // the worktree, run.log is an ignored file HEAD deleted, with the content
@@ -1259,7 +1284,9 @@ func regateInTheWayText(worktree, tip, listed string) string {
 // refuses naming what is in the way. The path the merge writes is also one a
 // directory rename on either side moves a file to, or the name git merge
 // gives HEAD's file in a file/directory conflict, which neither side's diff
-// names.
+// names. On a file system that does not tell case apart, what is in the way is
+// also spelled on disk in another case than the path the merge writes, and
+// the refusal names it as it is spelled on disk.
 func TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -1377,6 +1404,39 @@ func TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay(t *testing.T) {
 			kept: func(t *testing.T, fx *regateFixture) string {
 				return fileOrAbsent(t, filepath.Join(fx.worktree, "d~HEAD"))
 			}},
+		{name: "an ignored file at a path the tip adds spelled in another case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.excludeLocally(t, "notes.txt")
+				fx.commitIgnoredAndPush(t, fx.main, "NOTES.txt", "main's notes\n")
+				writeGateFile(t, fx.worktree, "notes.txt", "the local notes\n", 0o644)
+			},
+			listed: "notes.txt",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "notes.txt"))
+			}},
+		{name: "an ignored file where the tip adds a directory spelled in another case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.excludeLocally(t, "d")
+				fx.commitIgnoredAndPush(t, fx.main, "D/x", "main's x\n")
+				writeGateFile(t, fx.worktree, "d", "the local d\n", 0o644)
+			},
+			listed: "d",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "d"))
+			}},
+		{name: "an ignored directory at a path the tip adds a file at spelled in another case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.excludeLocally(t, "cache")
+				fx.commitIgnoredAndPush(t, fx.main, "CACHE", "main's cache\n")
+				writeGateFile(t, fx.worktree, "cache/inner", "the local cache\n", 0o644)
+			},
+			listed: "cache",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "cache", "inner"))
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1433,8 +1493,11 @@ func TestRegate_MergesOverAPathHEADDeletedThatTheTipDidNotTouch(t *testing.T) {
 // since git merge loses nothing there: an empty directory (empty directories
 // in it included) where origin's main adds a file, a directory HEAD tracks
 // that main turns into a file, and a file HEAD tracks that main turns into a
-// directory. Regate merges, passes, and pushes as usual, and the path is then
-// as main has it, in a clean tree.
+// directory. On a file system that does not tell case apart, also a file or a
+// directory HEAD tracks that main renames only in case, and a file HEAD tracks
+// that main turns into a directory spelled in another case: lstat finds HEAD's
+// file there under its spelling on disk. Regate merges, passes, and pushes as
+// usual, and the path is then as main has it, in a clean tree.
 func TestRegate_MergesWhenNothingUntrackedIsInTheMergesWay(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1462,6 +1525,30 @@ func TestRegate_MergesWhenNothingUntrackedIsInTheMergesWay(t *testing.T) {
 				fx.commitAndPush(t, fx.main, "conf/x", "main's x\n")
 			},
 			path: "conf/x", content: "main's x\n"},
+		{name: "a file HEAD tracks that the tip renames only in case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.shareMoveFromMain(t, "README.md", "readme.md")
+				fx.moveAndPush(t, fx.main, "readme.md", "README.md")
+			},
+			path: "README.md", content: "regate fixture\n"},
+		{name: "a directory HEAD tracks that the tip renames only in case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.shareFromMain(t, "Lib/a.txt", "a\n")
+				// git mv cannot rename a directory only in case there.
+				fx.moveAndPush(t, fx.main, "Lib", "lib.tmp")
+				fx.moveAndPush(t, fx.main, "lib.tmp", "lib")
+			},
+			path: "lib/a.txt", content: "a\n"},
+		{name: "a file HEAD tracks that the tip turns into a directory spelled in another case",
+			setup: func(t *testing.T, fx *regateFixture) {
+				regateSkipOnACaseSensitiveFS(t)
+				fx.shareFromMain(t, "conf", "main's conf\n")
+				runGit(t, "-C", fx.main, "rm", "--quiet", "conf")
+				fx.commitAndPush(t, fx.main, "CONF/x", "main's x\n")
+			},
+			path: "CONF/x", content: "main's x\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
