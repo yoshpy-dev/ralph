@@ -34,8 +34,10 @@ import (
 //     and refuses a HEAD that is not origin's tip of the branch (D4), but
 //     for the retry of a push that failed: a HEAD with origin's tip of the
 //     branch under it whose gate_passed on origin's default branch tip is
-//     the branch's latest record is pushed, and nothing else is done
-//     (regateHeadNotOnOrigin, RegateOutcomePushOnly);
+//     the branch's latest record is pushed (for a record Regate wrote,
+//     via=regate, only when HEAD is Regate's own merge commit,
+//     regateIsOwnMerge), and nothing else is done (regateHeadNotOnOrigin,
+//     RegateOutcomePushOnly);
 //   - when HEAD contains origin's default branch tip and the branch's latest
 //     gate record is a readable gate_passed of HEAD on that tip, it stops
 //     there (RegateOutcomeUpToDate, AC3); when HEAD contains the tip

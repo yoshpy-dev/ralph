@@ -405,13 +405,13 @@ func regateMergeWrites(ctx context.Context, t gateTarget, env []string, mergeBas
 // untracked in it (`git ls-files --others --directory --no-empty-directory`),
 // whose files git merge removes when it writes a file there; an empty
 // directory, or one whose files HEAD tracks and the merge deletes, is not in
-// the way. It is the first directory above p that lstat finds as a
-// non-directory, unless HEAD tracks it: the merge then replaces it with the
-// directory. In that clean tree, whatever untracked it finds is ignored. Git
-// runs only for a directory at p, a non-directory above it, and a
-// non-directory at p spelled otherwise, with --literal-pathspecs. The error is
-// for a path lstat cannot read, a directory that cannot be listed, a git that
-// fails, and ctx done.
+// the way. It is the first path above p that lstat finds as a non-directory
+// (a file or a symlink where the merge needs a directory), unless HEAD tracks
+// it: the merge then replaces it with the directory. In that clean tree,
+// whatever untracked it finds is ignored. Git runs only for a directory at p,
+// a non-directory above it, and a non-directory at p spelled otherwise, with
+// --literal-pathspecs. The error is for a path lstat cannot read, a directory
+// that cannot be listed, a git that fails, and ctx done.
 func regatePathInTheWay(ctx context.Context, root, p string) (string, error) {
 	parts := strings.Split(p, "/")
 	for i := range len(parts) {

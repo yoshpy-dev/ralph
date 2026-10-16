@@ -112,8 +112,9 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"for UP_TO_DATE, a pass, and a push that landed; 1 for a refusal, a\n" +
 			"failure, a push that failed, an interrupt, and any other error. regate\n" +
 			"starts no autonomous work, so it needs no running watch and no approved\n" +
-			"plan. While it runs, ralph org spawn and ralph org start --plan of the\n" +
-			"org it works on are refused; other orgs are not affected.",
+			"plan. While it runs, ralph org spawn (not a --dry-run) and ralph org\n" +
+			"start (either form) of the org it works on are refused; other orgs are\n" +
+			"not affected.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("org-id") {

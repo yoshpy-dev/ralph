@@ -735,7 +735,7 @@ func TestOrgRegate_Help(t *testing.T) {
 				"hangup of the terminal does not reach either, and regate says on stderr that it waits for one (at most 120 s)",
 			"When git has no user.name and user.email to make the merge commit with, regate merges nothing, records nothing, and exits 1",
 			"it needs no running watch and no approved plan",
-			"While it runs, ralph org spawn and ralph org start --plan of the org it works on are refused",
+			"While it runs, ralph org spawn (not a --dry-run) and ralph org start (either form) of the org it works on are refused",
 			"--branch string",
 		}},
 		{[]string{"--help"}, []string{
