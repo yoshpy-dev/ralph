@@ -108,37 +108,37 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
 
 ## Acceptance criteria
 
-- [ ] AC1 `[org.director].launch_cmd` は既定で空で、空なら start は 8a-2 と同じく herdr で起動する。空でない値のうち次のものは、`ralph.toml` の読み込みで断る。断るエラーはキーの名前と理由を言う
+- [x] AC1 `[org.director].launch_cmd` は既定で空で、空なら start は 8a-2 と同じく herdr で起動する。空でない値のうち次のものは、`ralph.toml` の読み込みで断る。断るエラーはキーの名前と理由を言う
   - 最初の要素が空白だけ
   - 決まった集合にない `{...}` を含む
   - `{script}` も `{script_sh}` も含まない
-- [ ] AC2 偽の launch_cmd での start は、次の順に進む
+- [x] AC2 偽の launch_cmd での start は、次の順に進む
   - まず `director.jsonl` に `launch = "cmd"`・`token`・`model`・`permission_mode` 付きの `attached` を書く
   - 台帳の `launch/director_<token>.sh` を 0700 で書く。中身は `cd`、`RALPH_DIRECTOR_TOKEN` の export、check-in、agent の絶対パスへの `exec` で、どの値も引用する
   - launch_cmd の置き換えた argv をシェルを通さずに打つ
   - check-in の `launched`(pid と `start_time` 付き)を待ち、stdout に `started d<N>`、launch、端末の名前 `director_<token>`、pid、stop の打ち方を出す
 
   start を打った env に `RALPH_ORG_AGMSG_HOME` があれば、スクリプトはその値を export し、なければ export しない。相対の値は start を打ったディレクトリから絶対パスにしてから書く。manifest には何も書かない
-- [ ] AC3 `ralph org director launched` は、登録が今の登録で、`launch = "cmd"`、`starting`、token が合い、pid が正で check-in の親の pid と同じで、その起動時刻を読めたときだけ、pid と `start_time` 付きの `launched` を書く。そうでなければ何も書かずに終了コード 1 で終わる。断られたとき、起動スクリプトは agent を起動しない(テストでは偽の agent が走らないことを見る)。`ralph org --help` には出ない
-- [ ] AC4 launch_cmd の終了コードが 0 でないとき、時間切れのとき、`--timeout-ms` のうちに check-in がないとき、待つあいだに `attach --replace` されたときは、start は終了コード 1 で終わり、出力は開いたかもしれない端末を人が閉じることを言う。記録は次のとおり
+- [x] AC3 `ralph org director launched` は、登録が今の登録で、`launch = "cmd"`、`starting`、token が合い、pid が正で check-in の親の pid と同じで、その起動時刻を読めたときだけ、pid と `start_time` 付きの `launched` を書く。そうでなければ何も書かずに終了コード 1 で終わる。断られたとき、起動スクリプトは agent を起動しない(テストでは偽の agent が走らないことを見る)。`ralph org --help` には出ない
+- [x] AC4 launch_cmd の終了コードが 0 でないとき、時間切れのとき、`--timeout-ms` のうちに check-in がないとき、待つあいだに `attach --replace` されたときは、start は終了コード 1 で終わり、出力は開いたかもしれない端末を人が閉じることを言う。記録は次のとおり
   - pid がなければ `stopped`(今の登録なら `detached` も)を書く
   - check-in が後始末と重なって pid が記録されていたら、D7 の確かめのあとでそのプロセスに SIGTERM を送り、終わったと確かめてから同じく記録する。check-in と exec のあいだの起動スクリプトにも同じく送る(テストは check-in の直後で止めた helper で確かめ、偽の agent が起動しないことを見る)
   - 終わったと確かめられなければ(ps を読めない、時間内に終わらない)`detached` だけを書き、出力に `ralph org director stop --id <id>` の打ち方を出す
-- [ ] AC5 start は、8a-2 の断り(`enabled = false`、codex の autonomous と edits、今の登録がある、見張りの関門、`--config` の相対の agmsg_home など)を launch_cmd の道でも当て、何も書かず、launch_cmd を打たない。driver の agent が start の env の PATH にないときも、同じく何も書かずに断る。`HERDR_PANE_ID` があっても、launch_cmd の道では断らない
-- [ ] AC6 launch_cmd の登録への `ralph org director stop --id <id>` は次のように動く
+- [x] AC5 start は、8a-2 の断り(`enabled = false`、codex の autonomous と edits、今の登録がある、見張りの関門、`--config` の相対の agmsg_home など)を launch_cmd の道でも当て、何も書かず、launch_cmd を打たない。driver の agent が start の env の PATH にないときも、同じく何も書かずに断る。`HERDR_PANE_ID` があっても、launch_cmd の道では断らない
+- [x] AC6 launch_cmd の登録への `ralph org director stop --id <id>` は次のように動く
   - 記録した pid のプロセスの起動時刻が `start_time` と同じときだけ SIGTERM を送り、終わるのを待ってから `stopped`(今の登録なら `detached` も同じ write で)を書く。exec の前の起動スクリプトにも後の agent にも同じく効く
   - プロセスがもうないか、zombie か、同じ pid で起動時刻の違うプロセス(テストでは別のプロセスの pid と、ずらした `start_time`)なら、何も送らずに `stopped` を書く
   - pid のない `starting` の登録には何も送らずに `stopped` を書き、そのあとの check-in は断られる
   - 出力は、端末を人が閉じることを言う
-- [ ] AC7 launch_cmd の登録への stop は、次のときに断り(終了コード 1)、何も書かない
+- [x] AC7 launch_cmd の登録への stop は、次のときに断り(終了コード 1)、何も書かない
   - `--force` がなく、ps を読めない、決まった時間のうちに終わらない。ps を読めなければ SIGTERM を送らず、SIGKILL はどの場合も送らない
   - env の `RALPH_DIRECTOR_TOKEN` が登録の token と同じ
   - stop が読んだあとに check-in が pid を記録した(D14 と同じく、もう一度 stop を打つよう出す)
 
   `--force` は、まだ送っていない SIGTERM を送らずに、`force` 付きの `stopped` を書く
-- [ ] AC8 `ralph org director status`、`ralph status` の `director:` の行、`--json` は、launch_cmd の登録なら launch `cmd`、状態(`starting` か `running`)、端末の名前、pid、model を出す。`ralph org stop --all` の案内は launch_cmd の閉じていない登録も数える。herdr の登録の出力は 8a-2 のまま
-- [ ] AC9 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、`templates/base/ralph.toml` のコメント、recipe の 2 面、tech-debt が launch_cmd の動きを説明し、「launch_cmd はまだない」と書いた箇所が残っていない
-- [ ] AC10 テストは本物の herdr、osascript、端末のアプリ、人の tmux を打たず、repo の台帳に書かない。プロセスを確かめて止めるテストは、テストが自分で起こしたプロセスにだけ signal を送る。実機の確認は、専用の socket の tmux server(`tmux -L <専用の名前>`)と隔離した台帳で、claude と codex の start と stop を打つ(evidence に残す)
+- [x] AC8 `ralph org director status`、`ralph status` の `director:` の行、`--json` は、launch_cmd の登録なら launch `cmd`、状態(`starting` か `running`)、端末の名前、pid、model を出す。`ralph org stop --all` の案内は launch_cmd の閉じていない登録も数える。herdr の登録の出力は 8a-2 のまま
+- [x] AC9 `/director` skill の 4 面が同じ中身で、`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様 FR-9 の注、`templates/base/ralph.toml` のコメント、recipe の 2 面、tech-debt が launch_cmd の動きを説明し、「launch_cmd はまだない」と書いた箇所が残っていない
+- [x] AC10 テストは本物の herdr、osascript、端末のアプリ、人の tmux を打たず、repo の台帳に書かない。プロセスを確かめて止めるテストは、テストが自分で起こしたプロセスにだけ signal を送る。実機の確認は、専用の socket の tmux server(`tmux -L <専用の名前>`)と隔離した台帳で、claude と codex の start と stop を打つ(evidence に残す)
 
 ## Implementation outline
 
@@ -214,5 +214,6 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
   - reviewer の確認で cycle 1 の 9 件は直ったと判定され、新しい LOW 2 件(コメントの折り直し)は 8ad4275d で直した
 - [x] Verification artifact created
   - verify cycle 1: `docs/reports/verify-2026-10-16-org-director-launch-cmd.md`(pass、LOW 1、情報 3)。V1(`orgLedgerMutating` の動詞の一覧に `director launched`)と I1(SIGTERM のあとの待ちで ps を読めなくなったときは、SIGTERM はもう送ってある。help、recipe、skill の文)は 0f5fbf89 で直した。同じ誤りの `ErrDirectorProcessNotEnded` の doc と、この Progress の S3 の文も直した
-- [ ] Test artifact created
+- [x] Test artifact created
+  - test cycle 1: `docs/reports/test-2026-10-16-org-director-launch-cmd.md`(pass)。go1.26 と go1.25.8、`-race`、繰り返し、ubuntu の container で通った。mutant 81 個のうち生き残った O33 と O35 は、6b9b27d7 のテスト 2 本で閉じた。Linux で時計が step したあとの lstart は確かめていない(tech-debt に足す)
 - [ ] PR created
