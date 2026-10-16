@@ -105,7 +105,7 @@ The launch script, run by the terminal, single-quotes every value and:
 
 1. goes to `{cwd}` (it exits 1 if it cannot);
 2. exports `RALPH_DIRECTOR_TOKEN`, and `RALPH_ORG_AGMSG_HOME` when it was
-   set where start ran;
+   set where start ran (a relative value made absolute from there);
 3. checks in with `<ralph> org director launched --id <id> --token <token>
    --pid "$$" --state-dir <ledger>`, where `<ralph>` is the absolute path of
    the ralph that ran start, and exits 1 if the check-in fails;
@@ -167,10 +167,11 @@ ralph org director stop --id d1
 - A pid that is gone, a zombie, a pid with another start time (another
   process has it now), and a registration still starting with no check-in
   count as ended and are sent nothing. A check-in after that is refused.
-- When ps cannot be read (nothing is sent then), or the process outlives its
-  SIGTERM, stop records nothing, exits 1, and prints
-  `ps -o pid,lstart,command -p <pid>` to look at it. Run stop again once it
-  has ended, or record the stop with `--force`. stop never sends SIGKILL.
+- When the process outlives its SIGTERM, stop records nothing, exits 1, and
+  prints `ps -o pid,lstart,command -p <pid>` to look at it. Run stop again
+  once it has ended. When ps cannot be read (nothing is sent then), stop
+  records nothing and exits 1 too: run it again once ps can read the pid.
+  Either way, `--force` records the stop instead. stop never sends SIGKILL.
 - `--force` takes the same steps, so a process confirmed as this
   director's still gets its normal SIGTERM and nothing is sent when ps
   cannot be read. When the end is still not confirmed, it records a forced
@@ -203,9 +204,10 @@ nothing changes.
   stop run from inside the director.
 - `RALPH_ORG_AGMSG_HOME`: exported by the launch script when it was set
   where start ran, so the director's `ralph org` commands use the agmsg
-  install it names. A herdr director does not get it (its pane has the
-  herdr server's environment), and start warns there; with `launch_cmd` it
-  does not warn.
+  install it names. A relative value is made absolute from where start ran,
+  as for the watch start launches, since the script first goes to `{cwd}`.
+  A herdr director does not get it (its pane has the herdr server's
+  environment), and start warns there; with `launch_cmd` it does not warn.
 
 Apart from its directory and these two variables, the director's
 environment is the terminal's (for the tmux example, the `-L ralph`
@@ -226,10 +228,13 @@ server's).
 - `launch_cmd ... could not be run`, `failed`, or `did not return in time`:
   the error names the command and the end of its output. Make the command
   return once the terminal is open.
-- stop exits 1 with `ps -o pid,lstart,command -p <pid>`: ps could not be
-  read, or the process did not end within 10 s of its SIGTERM. Look at the
-  pid, end it yourself if needed, and run stop again, or record the stop
-  with `--force`.
+- stop exits 1 with `ps -o pid,lstart,command -p <pid>`: the process did
+  not end within 10 s of its SIGTERM. Look at the pid, end it yourself if
+  needed, and run stop again, or record the stop with `--force`.
+- stop exits 1 with `again once ps can read pid <pid>`: ps could not be
+  read, so stop could not tell whether the process ended. The message holds
+  ps's error. Run stop again once ps works, or record the stop with
+  `--force`.
 - `run ralph org director stop from a terminal other than the director's`:
   the shell you ran stop in has the director's `RALPH_DIRECTOR_TOKEN`.
   Run it from another terminal.
@@ -239,8 +244,9 @@ server's).
   `PATH` of the agent's command shell (the agent runs its commands through
   your shell, whose startup files can set `PATH` again), which can be another
   version than the one that ran start. Make sure the `ralph` your shell's
-  startup files put first on `PATH` is the one you run start with. The check-in is not affected: the script runs it with the absolute
-  path of the ralph that ran start.
+  startup files put first on `PATH` is the one you run start with. The
+  check-in is not affected: the script runs it with the absolute path of
+  the ralph that ran start.
 
 ## Security
 

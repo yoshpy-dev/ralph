@@ -1326,8 +1326,9 @@ func TestStopDirector_ALaunchCmdProcessThatOutlivesItsSIGTERM(t *testing.T) {
 	var ce *DirectorCleanupError
 	if !errors.As(err, &ce) || ce.Verb != "stop" || ce.ID != "d1" || ce.Launch != DirectorLaunchCmd || ce.PID != pid || ce.Err != nil ||
 		ce.TerminalName != "director_"+directorTestToken || ce.StopCommand != "ralph org director stop --id d1" || ce.Detached || ce.Unconfirmed ||
-		len(ce.HerdrCommands) != 0 || ce.WorkspaceLabel != "" || ce.TabLabel != "" || !errors.Is(err, ErrDirectorProcessNotEnded) {
-		t.Fatalf("err = %#v, want a stop's *DirectorCleanupError of a launch cmd that wraps ErrDirectorProcessNotEnded", err)
+		len(ce.HerdrCommands) != 0 || ce.WorkspaceLabel != "" || ce.TabLabel != "" || !errors.Is(err, ErrDirectorProcessNotEnded) ||
+		errors.Is(err, ErrDirectorProcessUnreadable) {
+		t.Fatalf("err = %#v, want a stop's *DirectorCleanupError of a launch cmd that wraps ErrDirectorProcessNotEnded and ps was read", err)
 	}
 	want := fmt.Sprintf("org: director: stop d1: the end of the process the launch script checked in with is not confirmed: pid %d did not end within 300ms of its SIGTERM; "+
 		"nothing was recorded; run ralph org director stop --id d1 again once pid %d has ended", pid, pid)
@@ -1372,9 +1373,9 @@ func TestStopDirector_ALaunchCmdWhosePSCannotBeReadIsSentNothing(t *testing.T) {
 	before := directorFileState(t, f.store)
 
 	res, err := f.stop("d1")
-	want := "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps: not here; nothing was recorded; " +
-		fmt.Sprintf("run ralph org director stop --id d1 again once pid %d has ended", pid)
-	if !errors.Is(err, ErrDirectorProcessNotEnded) || !errors.Is(err, psErr) || err.Error() != want {
+	want := "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps could not be read: ps: not here; nothing was recorded; " +
+		fmt.Sprintf("run ralph org director stop --id d1 again once ps can read pid %d", pid)
+	if !errors.Is(err, ErrDirectorProcessNotEnded) || !errors.Is(err, ErrDirectorProcessUnreadable) || !errors.Is(err, psErr) || err.Error() != want {
 		t.Fatalf("err =\n%v\nwant\n%s", err, want)
 	}
 	if res.ProcessNote != "process=not signalled: ps could not be read" {
@@ -1386,7 +1387,8 @@ func TestStopDirector_ALaunchCmdWhosePSCannotBeReadIsSentNothing(t *testing.T) {
 	wantAliveWith(t, pid, start, "a stop whose ps could not be read sent a signal")
 
 	res, err = stopWithForce(f, "d1")
-	if err != nil || !res.Forced || !res.WasCurrent || !errors.Is(res.CloseErr, psErr) || res.ProcessNote != "process=not signalled: ps could not be read" {
+	if err != nil || !res.Forced || !res.WasCurrent || !errors.Is(res.CloseErr, psErr) || !errors.Is(res.CloseErr, ErrDirectorProcessUnreadable) ||
+		res.ProcessNote != "process=not signalled: ps could not be read" {
 		t.Fatalf("stop --force = %+v, %v; want it recorded forced, with nothing sent", res, err)
 	}
 	wantTrail(t, f.store, "attached d1", "launched d1", "detached d1", "stopped d1+force")
@@ -1569,11 +1571,12 @@ func TestStopDirector_ALaunchCmdRecordThatFailsNamesTheStop(t *testing.T) {
 		f.store.write = func(*os.File, []byte) (int, error) { return 0, syscall.ENOSPC }
 		_, err := stopWithForce(f, "d1")
 		var ce *DirectorCleanupError
-		if !errors.As(err, &ce) || !errors.Is(err, syscall.ENOSPC) || !errors.Is(err, ErrDirectorProcessNotEnded) ||
+		if !errors.As(err, &ce) || !errors.Is(err, syscall.ENOSPC) || !errors.Is(err, ErrDirectorProcessNotEnded) || !errors.Is(err, ErrDirectorProcessUnreadable) ||
 			ce.StopCommand != "ralph org director stop --id d1 --force" {
 			t.Fatalf("err = %#v, want both reasons and the stop with --force", err)
 		}
-		if text := err.Error(); !strings.HasPrefix(text, "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps is broken\n"+
+		if text := err.Error(); !strings.HasPrefix(text, "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: "+
+			"ps could not be read: ps is broken\n"+
 			"record d1 stopped: ") || !strings.HasSuffix(text, "; nothing was recorded; record the stop with ralph org director stop --id d1 --force") {
 			t.Fatalf("err = %s", text)
 		}

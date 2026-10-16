@@ -214,9 +214,14 @@ type Org struct {
 	// tab and workspace gets of the ownership check, the C-c, the pane
 	// close, the agmsg Leave), each workspace get and close Disband makes,
 	// the gets and the close in CloseDeferredSelfPane /
-	// CloseDeferredSelfWorkspace, and each call of the watch's pulse cycle
+	// CloseDeferredSelfWorkspace, each call of the watch's pulse cycle
 	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
-	// and the real git status), one fresh deadline per call. Zero (the
+	// and the real git status), each herdr call of `ralph org director
+	// start` and `stop` and of start's cleanup (the workspace and tab
+	// creates, the label gets, the C-c, and the pane and workspace closes;
+	// the agent start has the start's own timeout), and on the launch_cmd
+	// path the launch_cmd run and each ps read of the director's process
+	// (readDirectorProcess), one fresh deadline per call. Zero (the
 	// field's default) means "use defaultDriverCallTimeout" -- tests set a
 	// tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration

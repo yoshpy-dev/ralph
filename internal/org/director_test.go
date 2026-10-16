@@ -2421,10 +2421,13 @@ func TestDirectorMarkCmdLaunched_RefusesEveryOtherCheckIn(t *testing.T) {
 			"org: director: check in d2: the check-in of the launch script is refused, so its agent must not start: no registration d2 is recorded"},
 		{"a launch herdr", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) }, nil,
 			prefix + "d1 (driver codex, attached " + directorTestNow + ", headless starting) was not started with [org.director].launch_cmd"},
+		// The token comes first, so a caller without it learns nothing of
+		// the registration's launch: a promoted session has no token.
+		{"another token on a launch herdr", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+			func(c *DirectorCmdCheckIn) { c.Token = "aaaaaaaaaaaa" }, prefix + "the token is not the one d1 was started with"},
 		{"a promoted session", func(t *testing.T, s *DirectorStore) {
 			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
-		}, nil,
-			prefix + "d1 (driver claude, attached " + directorTestNow + ") was not started with [org.director].launch_cmd"},
+		}, nil, prefix + "the token is not the one d1 was started with"},
 		{"another token", cmdStarting, func(c *DirectorCmdCheckIn) { c.Token = "aaaaaaaaaaaa" },
 			prefix + "the token is not the one d1 was started with"},
 		{"another token on a stopped registration", func(t *testing.T, s *DirectorStore) {

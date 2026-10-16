@@ -385,7 +385,8 @@ func TestStopDirectorProcess_APSThatCannotBeReadSendsNothing(t *testing.T) {
 			return DirectorProcess{}, psErr
 		}}
 		got := o.stopDirectorProcess(reg)
-		if got.outcome != directorProcessStopUnreadable || got.signalled || !errors.Is(got.err, psErr) || got.note != "process=not signalled: ps could not be read" {
+		if got.outcome != directorProcessStopUnreadable || got.signalled || !errors.Is(got.err, psErr) || !errors.Is(got.err, ErrDirectorProcessUnreadable) ||
+			got.note != "process=not signalled: ps could not be read" {
 			t.Fatalf("stopDirectorProcess = %+v, want unreadable with nothing sent", got)
 		}
 		if !slices.Equal(reads, []int{reg.PID}) {
@@ -407,7 +408,8 @@ func TestStopDirectorProcess_APSThatCannotBeReadSendsNothing(t *testing.T) {
 			return DirectorProcess{}, psErr
 		}}
 		got := o.stopDirectorProcess(reg)
-		if got.outcome != directorProcessStopUnreadable || !got.signalled || !errors.Is(got.err, psErr) || got.note != "process=sent SIGTERM; ps could not be read after it" {
+		if got.outcome != directorProcessStopUnreadable || !got.signalled || !errors.Is(got.err, psErr) || !errors.Is(got.err, ErrDirectorProcessUnreadable) ||
+			got.note != "process=sent SIGTERM; ps could not be read after it" {
 			t.Fatalf("stopDirectorProcess = %+v, want unreadable after the SIGTERM", got)
 		}
 		if !p.signalledBy(t, syscall.SIGTERM) {
@@ -455,6 +457,13 @@ exec '/b/bin dir'\''s/cl'\''aude' '--permission-mode' 'bypassPermissions' '--mod
 `
 	if text != want {
 		t.Fatalf("launch script =\n%s\nwant\n%s", text, want)
+	}
+
+	// An agmsg home starting with ~/ is written as it is, for
+	// driver.ResolveAgmsgHome to expand.
+	s.AgmsgHome = "~/a g"
+	if text, err = s.text(); err != nil || !strings.Contains(text, "\nRALPH_ORG_AGMSG_HOME='~/a g'\nexport RALPH_ORG_AGMSG_HOME\n") {
+		t.Fatalf("text with the agmsg home ~/a g = %v:\n%s", err, text)
 	}
 
 	s.AgmsgHome, s.PermArgs = "", nil
@@ -661,6 +670,8 @@ func TestDirectorLaunchScript_RefusesValuesItCannotWrite(t *testing.T) {
 		{"a relative cwd", func(s *directorLaunchScript) { s.Cwd = "." }, `the cwd path "." is not absolute`},
 		{"a relative ralph", func(s *directorLaunchScript) { s.RalphPath = "ralph" }, `the ralph executable path "ralph" is not absolute`},
 		{"a relative agent", func(s *directorLaunchScript) { s.AgentPath = "claude" }, `the agent path "claude" is not absolute`},
+		{"a relative agmsg home", func(s *directorLaunchScript) { s.AgmsgHome = "agmsg/home" }, `the agmsg home "agmsg/home" is not absolute and does not start with ~/`},
+		{"an agmsg home of a bare ~", func(s *directorLaunchScript) { s.AgmsgHome = "~" }, `the agmsg home "~" is not absolute and does not start with ~/`},
 		{"no model", func(s *directorLaunchScript) { s.Model = "" }, "the model is empty"},
 		{"no prompt pointer", func(s *directorLaunchScript) { s.PromptPointer = "" }, "the prompt pointer is empty"},
 		{"a NUL byte", func(s *directorLaunchScript) { s.PermArgs = []string{"a\x00b"} }, "holds a NUL byte"},
@@ -807,33 +818,60 @@ func TestRunDirectorLaunchCmd_Failures(t *testing.T) {
 // not when the child ends.
 func TestRunDirectorLaunchCmd_ABackgroundChildHoldingTheOutputDoesNotHang(t *testing.T) {
 	dir := t.TempDir()
-	pidFile := filepath.Join(dir, "child.pid")
-	t.Cleanup(func() {
-		// The child is this test's: its pid is in the file it wrote. Stop it
-		// and wait (up to 5s) for it to be gone; init reaps it.
-		raw, err := os.ReadFile(pidFile)
-		if err != nil {
-			return
-		}
-		pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-		if err != nil || pid <= 0 {
-			return
-		}
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			if syscall.Kill(pid, 0) != nil {
-				return
-			}
-		}
-	})
 	start := time.Now()
 	err := runDirectorLaunchCmd(context.Background(), []string{"/bin/sh", "-c", shellQuote(sleepPath(t)) + " 5 & echo $! > child.pid; exit 0"}, dir, 200*time.Millisecond)
+	took := time.Since(start)
+	stopOwnBackgroundChild(t, filepath.Join(dir, "child.pid"), start)
 	if err != nil {
 		t.Fatalf("runDirectorLaunchCmd: %v", err)
 	}
-	if took := time.Since(start); took > 3*time.Second {
+	if took > 3*time.Second {
 		t.Fatalf("the call took %s: the child's output held it", took)
 	}
+}
+
+// stopOwnBackgroundChild is the cleanup for the background child of the
+// test above, whose shell wrote its pid to pidFile. It reads the pid's start
+// time with ps at once and, only when the pid is alive and started no
+// earlier than the test (start, less 2 s for ps's whole seconds), sends it
+// SIGTERM in t's cleanup, and only while ps still reads that start time for
+// it, so a process that got the pid later is never signalled; then it waits
+// (up to 5s) for it to be gone, which init reaps.
+func stopOwnBackgroundChild(t *testing.T, pidFile string, start time.Time) {
+	t.Helper()
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		return
+	}
+	read := func() (DirectorProcess, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		proc, err := ReadDirectorProcess(ctx, pid)
+		return proc, err == nil && proc.State == DirectorProcessAlive
+	}
+	proc, alive := read()
+	if !alive {
+		return
+	}
+	if started, err := time.Parse(directorPSStartTimeLayout, proc.StartTime); err != nil || started.Before(start.Add(-2*time.Second)) {
+		return
+	}
+	same := func() bool {
+		now, alive := read()
+		return alive && now.StartTime == proc.StartTime
+	}
+	t.Cleanup(func() {
+		if !same() {
+			return
+		}
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && same(); time.Sleep(20 * time.Millisecond) {
+		}
+	})
 }
 
 // The tests of StartDirector's launch_cmd path (plan
@@ -1153,7 +1191,7 @@ func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 				reg.Model != tc.model || reg.PermissionMode != tc.wantMode || reg.PID <= 0 || reg.StartTime == "" || reg.WorkspaceID != "" || reg.PaneID != "" {
 				t.Fatalf("Registration = %+v, want d1 running with launch cmd, a pid and its start time, no herdr ids", reg)
 			}
-			if res.Launch != DirectorLaunchCmd || res.TerminalName != "director_"+token || res.LaunchScriptPath != wantScript ||
+			if res.TerminalName != "director_"+token || res.LaunchScriptPath != wantScript ||
 				res.PromptPath != wantPrompt || res.AgentName != "" || res.WorkspaceLabel != "" || res.TabLabel != "" {
 				t.Fatalf("result = %+v, want launch cmd, director_%s, the script %s, and the prompt %s", res, token, wantScript, wantPrompt)
 			}

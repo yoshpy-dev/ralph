@@ -764,7 +764,8 @@ func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 		`Set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) write .git and reach the network, or use --driver claude;`,
 		`a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall.`,
 		"With herdr, RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
-		"With launch_cmd it does reach the director, as the launch script exports it, and start does not warn.",
+		"With launch_cmd it does reach the director, as the launch script exports it " +
+			"(a relative value made absolute from where start runs, as for the watch start launches), and start does not warn.",
 		"exports RALPH_DIRECTOR_TOKEN (and RALPH_ORG_AGMSG_HOME when it is set where start runs)",
 		"for a codex director in autonomous or edits, when the --config file's [org].agmsg_home is a relative path (neither absolute nor starting with ~/",
 		"(neither absolute nor starting with ~/: the director runs in the ledger's main worktree root when the ledger has one and the watch resolves it " +
@@ -2113,6 +2114,32 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWithALaunchCmd(t *testing.T
 	}
 }
 
+// D3 through the CLI: a relative RALPH_ORG_AGMSG_HOME set where start runs
+// (here a linked worktree) reaches the director made absolute from there,
+// as the watch start launches gets it. The launch script cds to the main
+// worktree root before it exports the variable, so the value as set here
+// would name a directory from that root instead.
+func TestOrgDirectorStart_LaunchCmdMakesARelativeAgmsgHomeAbsolute(t *testing.T) {
+	setupOrgStubPATH(t)
+	r := newLegacyLedgerRepo(t)
+	t.Setenv(orgAgmsgHomeEnv, "agmsg/home")
+	fakes := setDirectorLaunchSeams(t)
+	killDirectorLaunchedProcesses(t, r.sharedDir)
+	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), directorLaunchCmdToml)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus")
+	if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, launch=cmd, ") || stderr != "" {
+		t.Fatalf("director start = %v (stdout: %s stderr: %s); want d1 started with launch_cmd and nothing on stderr", err, stdout, stderr)
+	}
+	if _, err := os.Stat(org.DirectorPathIn(r.sharedDir)); err != nil {
+		t.Fatalf("the main worktree's ledger has no director.jsonl (%v), so the cleanup would not find the agent", err)
+	}
+	want := "agmsg=" + filepath.Join(r.worktree, "agmsg", "home")
+	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); len(got) < 2 || got[1] != want {
+		t.Fatalf("the agent recorded %q; want %q (not from the main worktree root %s)", got, want, r.mainRoot)
+	}
+}
+
 // D10 through the CLI: without --config, on the main worktree's ledger
 // found from a linked worktree, start takes launch_cmd from the main
 // worktree's ralph.toml, never the linked worktree's: the main worktree's
@@ -2481,9 +2508,11 @@ func TestOrgDirectorStop_ALaunchCmdIsRefusedInsideTheDirector(t *testing.T) {
 // stopError and printOrgDirectorStop on a launch cmd's results that the
 // tests above do not reach through a real process: a check-in after stop
 // read the registration names no --force and no ps (it sent that process
-// nothing), a forced stop whose record failed names the ps but not --force
-// again (its stop command carries --force already), and a stop that start's
-// cleanup recorded first says so and names the terminal.
+// nothing), a forced stop whose record failed names the ps (unless ps could
+// not be read) but not --force again (its stop command carries --force
+// already), a stop or a forced stop whose ps could not be read names no ps
+// to look with, and a stop that start's cleanup recorded first says so and
+// names the terminal.
 func TestOrgDirectorStop_LaunchCmdErrorsAndAlreadyStopped(t *testing.T) {
 	rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
 	reg := org.DirectorRegistration{ID: "d1", Driver: "claude", Launch: org.DirectorLaunchCmd, State: org.DirectorStateStarting, Token: "0123456789ab"}
@@ -2503,28 +2532,68 @@ func TestOrgDirectorStop_LaunchCmdErrorsAndAlreadyStopped(t *testing.T) {
 		t.Errorf("stopError wrote %q; want the process note", w.String())
 	}
 
-	w.Reset()
 	running := reg
 	running.State, running.PID = org.DirectorStateRunning, 77
-	forcedRecord := &org.DirectorCleanupError{
-		Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77,
-		CleanupErr:  errors.Join(fmt.Errorf("%w: ps is broken", org.ErrDirectorProcessNotEnded), errors.New("record d1 stopped: no space left on device")),
-		StopCommand: "ralph org director stop --id d1 --force",
-	}
-	err = rt.stopError(&w, "d1", true, org.DirectorStopResult{Registration: running, ProcessNote: "process=not signalled: ps could not be read"}, forcedRecord)
-	if err == nil || !strings.Contains(err.Error(), "ralph org director stop --id d1 --force --state-dir '/work/the ledger'") ||
-		!strings.HasSuffix(err.Error(), "; pid 77 may still be running: look with ps -o pid,lstart,command -p 77") ||
-		strings.Contains(err.Error(), "or record the stop and leave") {
-		t.Errorf("stopError of a forced stop whose record failed = %v", err)
-	}
-	if w.String() != "stop d1: process=not signalled: ps could not be read\n" {
-		t.Errorf("stopError wrote %q; want the process note", w.String())
+	for _, tc := range []struct {
+		name, note string
+		notEnded   error
+		wantSuffix string
+	}{
+		{"ps could not be read", "process=not signalled: ps could not be read",
+			fmt.Errorf("%w: %w: ps is broken", org.ErrDirectorProcessNotEnded, org.ErrDirectorProcessUnreadable), "; pid 77 may still be running"},
+		{"the process outlived its SIGTERM", "process=still running after SIGTERM",
+			fmt.Errorf("%w: pid 77 did not end within 10s of its SIGTERM", org.ErrDirectorProcessNotEnded),
+			"; pid 77 may still be running: look with ps -o pid,lstart,command -p 77"},
+	} {
+		w.Reset()
+		forcedRecord := &org.DirectorCleanupError{
+			Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77,
+			CleanupErr:  errors.Join(tc.notEnded, errors.New("record d1 stopped: no space left on device")),
+			StopCommand: "ralph org director stop --id d1 --force",
+		}
+		err = rt.stopError(&w, "d1", true, org.DirectorStopResult{Registration: running, ProcessNote: tc.note}, forcedRecord)
+		if err == nil || !strings.Contains(err.Error(), "ralph org director stop --id d1 --force --state-dir '/work/the ledger'") ||
+			!strings.HasSuffix(err.Error(), tc.wantSuffix) || strings.Contains(err.Error(), "or record the stop and leave") {
+			t.Errorf("%s: stopError of a forced stop whose record failed = %v; want it to end with %q", tc.name, err, tc.wantSuffix)
+		}
+		if w.String() != "stop d1: "+tc.note+"\n" {
+			t.Errorf("%s: stopError wrote %q; want the process note", tc.name, w.String())
+		}
 	}
 
+	// A stop that recorded nothing because ps could not be read names the
+	// stop to run again once ps can read the pid and stop --force, and no ps
+	// to look with.
+	w.Reset()
+	unreadable := &org.DirectorCleanupError{
+		Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77,
+		CleanupErr:  fmt.Errorf("%w: %w: ps is broken", org.ErrDirectorProcessNotEnded, org.ErrDirectorProcessUnreadable),
+		StopCommand: "ralph org director stop --id d1",
+	}
+	err = rt.stopError(&w, "d1", false, org.DirectorStopResult{Registration: running, ProcessNote: "process=not signalled: ps could not be read"}, unreadable)
+	want = "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps could not be read: ps is broken; " +
+		"nothing was recorded; run ralph org director stop --id d1 --state-dir '/work/the ledger' again once ps can read pid 77; pid 77 may still be running; " +
+		"or record the stop and leave the process as it is with ralph org director stop --id d1 --force --state-dir '/work/the ledger'"
+	if err == nil || err.Error() != want {
+		t.Errorf("stopError of a stop whose ps could not be read =\n%v\nwant\n%s", err, want)
+	}
+
+	// A forced stop whose ps could not be read warns that the pid may still
+	// be running, with why and no ps to look with.
 	cmd := &cobra.Command{}
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
+	printOrgDirectorStop(cmd, org.DirectorStopResult{Registration: running, Forced: true, WasCurrent: true, ProcessNote: "process=not signalled: ps could not be read",
+		TerminalName: "director_0123456789ab", CloseErr: fmt.Errorf("%w: ps is broken", org.ErrDirectorProcessUnreadable)})
+	wantErr := "warning: director stop --force: d1 is recorded stopped, but pid 77, which its launch script checked in with, may still be running " +
+		"(ps could not be read: ps is broken)\n"
+	if stderr.String() != wantErr {
+		t.Errorf("printOrgDirectorStop of a forced stop whose ps could not be read: stderr =\n%s\nwant\n%s", stderr.String(), wantErr)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
 	printOrgDirectorStop(cmd, org.DirectorStopResult{Registration: running, AlreadyStopped: true, ProcessNote: "process=ended after SIGTERM", TerminalName: "director_0123456789ab"})
 	wantOut := "d1 was already recorded stopped (process=ended after SIGTERM)\n" +
 		"start's cleanup or another stop recorded d1 stopped after this stop read it, so this stop recorded nothing more\n" +

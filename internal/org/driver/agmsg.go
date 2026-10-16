@@ -116,12 +116,18 @@ func (a Agmsg) DeliverySet(ctx context.Context, mode, agmsgType, projectPath str
 // scripts/ralph-config.sh (see internal/config/defaults_sync_test.go).
 const defaultAgmsgHome = "~/.agents/skills/agmsg"
 
+// AgmsgHomeEnv is the variable ResolveAgmsgHome reads before the
+// [org].agmsg_home config value. The commands that pass an agmsg home on to
+// another process (the CLI's detached watch, the launch script of a
+// headless director) set it under this name.
+const AgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
+
 // ResolveAgmsgHome resolves the agmsg home directory used to build script
-// paths. Precedence: env RALPH_ORG_AGMSG_HOME > cfgValue (the loaded
-// [org].agmsg_home config value) > defaultAgmsgHome. A leading "~/" is
-// expanded via os.UserHomeDir; other paths are returned unchanged.
+// paths. Precedence: env RALPH_ORG_AGMSG_HOME (AgmsgHomeEnv) > cfgValue (the
+// loaded [org].agmsg_home config value) > defaultAgmsgHome. A leading "~/"
+// is expanded via os.UserHomeDir; other paths are returned unchanged.
 func ResolveAgmsgHome(cfgValue string) string {
-	home := os.Getenv("RALPH_ORG_AGMSG_HOME")
+	home := os.Getenv(AgmsgHomeEnv)
 	if home == "" {
 		home = cfgValue
 	}

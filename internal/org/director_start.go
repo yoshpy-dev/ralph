@@ -186,10 +186,10 @@ func directorStartAttachedErr(cur *DirectorRegistration) error {
 // for one with launch cmd, which has no herdr workspace,
 // ErrDirectorNotHerdrLaunch; when id already has a workspace recorded it
 // refuses too, since the fold keeps the first one. None of them writes
-// anything. An id not of the form d<N> and an
-// empty workspaceID are refused before anything is read, and a missing
-// director.jsonl is refused without creating the state dir or the lock. A
-// failed write ends one of the two ways Attach's does.
+// anything. An id not of the form d<N> and an empty workspaceID are refused
+// before anything is read, and a missing director.jsonl is refused without
+// creating the state dir or the lock. A failed write ends one of the two
+// ways Attach's does.
 func (s *DirectorStore) RecordWorkspace(id, workspaceID string, who DirectorWho) error {
 	return s.recordHerdrID(id, DirectorEventWorkspaceCreated, workspaceID, who)
 }
@@ -308,8 +308,8 @@ type DirectorCmdCheckIn struct {
 // launch cmd, is still starting, and has the launch token c.Token. Then the
 // script execs the agent. Every other case writes nothing and returns an
 // error that wraps ErrDirectorCheckInRefused and says why, so the script
-// exits without starting the agent: no registration has c.ID, it has
-// another launch, c.Token is not its token, it is already stopped (start's
+// exits without starting the agent: no registration has c.ID, c.Token is
+// not its token, it has another launch, it is already stopped (start's
 // cleanup or `ralph org director stop` came first, so the terminal opened
 // too late), it is no longer the current registration (an attach --replace
 // or a detach came in), or it is already running (a check-in came first).
@@ -346,15 +346,17 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 		}
 		fold := foldDirector(raw)
 		reg := fold.regs[c.ID]
-		// The token comes before the state, so a caller without the token
-		// learns nothing more of the registration.
+		// The token comes before the launch and the state, so a caller
+		// without the token learns nothing more of the registration. A
+		// promoted session's registration has no token, so no token (12 hex
+		// digits, checked above) matches it.
 		switch {
 		case reg == nil:
 			return refuse("no registration %s is recorded", c.ID)
-		case !reg.CmdLaunch():
-			return refuse("%s was not started with [org.director].launch_cmd", reg.describe())
 		case reg.Token != c.Token:
 			return refuse("the token is not the one %s was started with", c.ID)
+		case !reg.CmdLaunch():
+			return refuse("%s was not started with [org.director].launch_cmd", reg.describe())
 		case reg.State == DirectorStateStopped:
 			return refuse("%s is already recorded stopped (start's cleanup or a stop came first)", reg.describe())
 		case reg != fold.current:
@@ -575,15 +577,14 @@ type DirectorStartParams struct {
 
 // DirectorStartResult is what StartDirector launched: the registration
 // (state running, with its workspace and pane, or, for a launch cmd, with
-// the pid and start time its launch script checked in with), its Launch
-// (DirectorLaunchHerdr or DirectorLaunchCmd), and the prompt file. For a
+// the pid and start time its launch script checked in with), whose Launch
+// says which (its HerdrLaunch or CmdLaunch), and the prompt file. For a
 // launch herdr: the herdr agent name, the labels of its workspace and tab,
 // and how many agent_pane_busy retries the agent start took. For a launch
 // cmd: TerminalName, director_<token>, which launch_cmd's {name} gave the
 // terminal, and LaunchScriptPath, the script that terminal ran.
 type DirectorStartResult struct {
 	Registration      DirectorRegistration
-	Launch            string
 	PromptPath        string
 	AgentName         string
 	WorkspaceLabel    string
@@ -660,12 +661,13 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // registration is current (Detach), and returns a *DirectorCleanupError.
 //
 // With [org.director].launch_cmd set (plan
-// 2026-10-16-org-director-launch-cmd, D2), start makes no herdr call at all: it records the registration with launch cmd and
-// opens the human's terminal with launch_cmd instead (startCmd, in
-// director_cmd.go). HERDR_PANE_ID does not refuse it (D9), and it also
-// refuses, before anything is written and with the refusals above in their
-// order, a launch_cmd that config.ValidateDirectorLaunchCmd refuses, a
-// driver's agent that is not on PATH, and a ralph executable it cannot find
+// 2026-10-16-org-director-launch-cmd, D2), start makes no herdr call at
+// all: it records the registration with launch cmd and opens the human's
+// terminal with launch_cmd instead (startCmd, in director_cmd.go).
+// HERDR_PANE_ID does not refuse it (D9), and it also refuses, before
+// anything is written and with the refusals above in their order, a
+// launch_cmd that config.ValidateDirectorLaunchCmd refuses, a driver's
+// agent that is not on PATH, and a ralph executable it cannot find
 // (checkDirectorLaunchCmd).
 func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) {
 	c, err := o.checkDirectorStart(&p)
@@ -711,7 +713,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	}
 	r.reg.State = DirectorStateRunning
 	return DirectorStartResult{
-		Registration: r.reg, Launch: DirectorLaunchHerdr, PromptPath: promptPath, AgentName: DirectorAgentName(reg.Token),
+		Registration: r.reg, PromptPath: promptPath, AgentName: DirectorAgentName(reg.Token),
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		AgentStartRetries: retries,
 	}, nil

@@ -209,7 +209,8 @@ start の設定と、director が動く場所は次のとおり。
   (herdr の pane の環境は herdr server のもの)。設定されていれば start は警告を
   1 行出して続ける。herdr の director に届くのは `ralph.toml` の
   `[org].agmsg_home` のほうになる。launch_cmd で立てた director には、起動
-  スクリプトがその値を export するので届き、start は警告しない。
+  スクリプトがその値を export するので届き、start は警告しない。相対の値は、
+  start が起こす見張りと同じく、start を打った場所から絶対パスにして渡す。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 
@@ -262,10 +263,10 @@ start の設定と、director が動く場所は次のとおり。
    片付ける。
 5. herdr で立てたものでは、label が合わないとき(herdr が状態を失って id を
    振り直したときなど)、label を確かめられないとき、close が失敗したときは、
-   stop は理由と、人が閉じるための herdr の打ち方を出して断る。label が
-   合わない pane と workspace には C-c も close も打たない。それでも記録を片付けるときは、
-   人が `ralph org director stop --id <id> --force` を打つ。`--force` は、まだ
-   閉じていないものを閉じずに止めたことを記録し、開いたまま残りうるものを
+   stop は理由と、人が閉じるための herdr の打ち方を出して断る。label が合わない
+   pane と workspace には C-c も close も打たない。それでも記録を片付けるとき
+   は、人が `ralph org director stop --id <id> --force` を打つ。`--force` は、
+   まだ閉じていないものを閉じずに止めたことを記録し、開いたまま残りうるものを
    出す。人は `herdr workspace list` で label `ralph_director_<token>` の
    workspace を探して閉じる。label が合えば、`--force` でもふつうに閉じる。
    stop が登録を読んだあとで、まだ動いている start が workspace か pane を
@@ -285,13 +286,15 @@ start の設定と、director が動く場所は次のとおり。
      何も送らずに `stopped` を記録する。そのあとの check-in は断られる。
      人が端末を閉じて director のプロセスが終わっていれば、同じ stop で
      片付く。
-   - ps を読めないとき(何も送らない)と、SIGTERM のあと 10 秒で終わらない
-     ときは、何も書かずに終了コード 1 で断り、見る打ち方
-     `ps -o pid,lstart,command -p <pid>` と `--force` の打ち方を出す。
-     SIGKILL は送らない。プロセスが終わってから stop を打ち直すか、人が
-     `--force` を打つ。`--force` も同じ手順を踏み(本人と確かめたプロセスには
-     SIGTERM を送り、ps を読めなければ何も送らない)、それでも終わったと
-     確かめられなければ、止めたことを記録してプロセスはそのままにする。
+   - SIGTERM のあと 10 秒で終わらないときは、何も書かずに終了コード 1 で
+     断り、見る打ち方 `ps -o pid,lstart,command -p <pid>` と `--force` の
+     打ち方を出す。プロセスが終わってから stop を打ち直す。ps を読めない
+     とき(何も送らない)も、何も書かずに終了コード 1 で断り、`--force` の
+     打ち方を出す。ps を読めるようになってから stop を打ち直す。どちらでも、
+     人が `--force` を打てば、止めたことを記録できる。SIGKILL は送らない。
+     `--force` も同じ手順を踏み(本人と確かめたプロセスには SIGTERM を送り、
+     ps を読めなければ何も送らない)、それでも終わったと確かめられなければ、
+     止めたことを記録してプロセスはそのままにする。
    - stop が登録を読んだあとで check-in が pid を記録したときは、何も書かずに
      断り、打ち直す stop を出す。打ち直すと check-in したプロセスを止める。
    - stop は launch_cmd が開いた端末を閉じない。人が閉じる(tmux の例では、

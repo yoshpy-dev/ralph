@@ -891,9 +891,11 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"stop never sends SIGKILL and does not close the terminal launch_cmd opened (name director_<token>): close it yourself.",
 			"With or without --force, stop is refused, and writes nothing, when RALPH_DIRECTOR_TOKEN is the registration's token",
 			"so run it from a terminal other than the director's.",
-			"When ps cannot be read (stop sends nothing then) or the process does not end within the 10 s, stop records nothing and exits 1 with the pid to look at " +
-				"(ps -o pid,lstart,command -p <pid>): run it again once that process has ended, or record the stop with --force, " +
-				"which takes the same steps and, when the end is still not confirmed, records the stop anyway, sends nothing more, and leaves the process as it is.",
+			"When the process does not end within the 10 s, stop records nothing and exits 1 with the pid to look at " +
+				"(ps -o pid,lstart,command -p <pid>): run it again once that process has ended. " +
+				"When ps cannot be read (stop sends nothing then), stop records nothing and exits 1 with the pid too: run it again once ps can read it. " +
+				"Either way, --force records the stop instead: it takes the same steps and, when the end is still not confirmed, " +
+				"records the stop anyway, sends nothing more, and leaves the process as it is.",
 			"When the launch script checks in after stop read the registration, stop has sent that process nothing, so it records nothing and exits 1: " +
 				"run it again to stop the process that checked in.",
 			"or with launch_cmd when the process's end cannot be confirmed, sending nothing more (a human's cleanup)",

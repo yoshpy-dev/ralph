@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,8 +85,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"set where start runs does not reach the director, whose herdr pane has\n" +
 			"the herdr server's environment: start warns when it is set, and\n" +
 			"[org].agmsg_home in ralph.toml is what reaches the director. With\n" +
-			"launch_cmd it does reach the director, as the launch script exports it,\n" +
-			"and start does not warn.\n" +
+			"launch_cmd it does reach the director, as the launch script exports it\n" +
+			"(a relative value made absolute from where start runs, as for the\n" +
+			"watch start launches), and start does not warn.\n" +
 			"\n" +
 			"A codex director runs only in guarded: start refuses autonomous and\n" +
 			"edits whatever [org.permissions].codex_verified says, because they run\n" +
@@ -188,16 +190,17 @@ func newOrgDirectorStopCmd(stateDir, configPath *string) *cobra.Command {
 			"close it yourself. With or without --force, stop is refused, and writes\n" +
 			"nothing, when RALPH_DIRECTOR_TOKEN is the registration's token: it then\n" +
 			"runs inside the director, whose process would end before stop records\n" +
-			"it, so run it from a terminal other than the director's. When ps cannot\n" +
-			"be read (stop sends nothing then) or the process does not end within\n" +
-			"the 10 s, stop records nothing and exits 1 with the pid to look at\n" +
-			"(ps -o pid,lstart,command -p <pid>): run it again once that process has\n" +
-			"ended, or record the stop with --force, which takes the same steps and,\n" +
-			"when the end is still not confirmed, records the stop anyway, sends\n" +
-			"nothing more, and leaves the process as it is. When the launch script\n" +
-			"checks in after stop read the registration, stop has sent that process\n" +
-			"nothing, so it records nothing and exits 1: run it again to stop the\n" +
-			"process that checked in.\n" +
+			"it, so run it from a terminal other than the director's. When the\n" +
+			"process does not end within the 10 s, stop records nothing and exits 1\n" +
+			"with the pid to look at (ps -o pid,lstart,command -p <pid>): run it\n" +
+			"again once that process has ended. When ps cannot be read (stop sends\n" +
+			"nothing then), stop records nothing and exits 1 with the pid too: run\n" +
+			"it again once ps can read it. Either way, --force records the stop\n" +
+			"instead: it takes the same steps and, when the end is still not\n" +
+			"confirmed, records the stop anyway, sends nothing more, and leaves the\n" +
+			"process as it is. When the launch script checks in after stop read the\n" +
+			"registration, stop has sent that process nothing, so it records nothing\n" +
+			"and exits 1: run it again to stop the process that checked in.\n" +
 			"\n" +
 			"stop is refused, and writes nothing, for an id with no open headless\n" +
 			"registration (a promoted session's registration is ended with\n" +
@@ -267,11 +270,14 @@ var orgDirectorStopWait time.Duration
 // ralph org commands the director's prompt has it run (not to the prompt's
 // stop command, which the human runs). With [org.director].launch_cmd set
 // (plan 2026-10-16-org-director-launch-cmd), it also gives StartDirector
-// RALPH_ORG_AGMSG_HOME as set here, which the launch script exports. A
-// refusal or failure is returned (exit 1) in the words of startError; on
-// success it prints the registration, where to talk to the director (the
-// herdr pane, or the terminal launch_cmd opened), and the stop command,
-// which, like the prompt's, has no --config (stop reads no ralph.toml).
+// RALPH_ORG_AGMSG_HOME as set here, which the launch script exports after
+// it cds to the directory the director runs in, so a relative value is made
+// absolute from this directory first (agmsgHomeIsRelative), as the watch
+// start launches gets it (orgWatchChildAgmsgHome). A refusal or failure is
+// returned (exit 1) in the words of startError; on success it prints the
+// registration, where to talk to the director (the herdr pane, or the
+// terminal launch_cmd opened), and the stop command, which, like the
+// prompt's, has no --config (stop reads no ralph.toml).
 func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driverName, model string, timeoutMS int) error {
 	cfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -310,6 +316,13 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	agmsgHome := ""
 	if cmdLaunch {
 		agmsgHome = os.Getenv(orgAgmsgHomeEnv)
+		if agmsgHomeIsRelative(agmsgHome) {
+			abs, err := filepath.Abs(agmsgHome)
+			if err != nil {
+				return fmt.Errorf("org: director start: make the agmsg home %s of %s absolute: %w", agmsgHome, orgAgmsgHomeEnv, err)
+			}
+			agmsgHome = abs
+		}
 	}
 	res, err := o.StartDirector(org.DirectorStartParams{
 		Store: rt.store, Driver: driverName, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
@@ -320,7 +333,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 	}
 	reg := res.Registration
 	out := cmd.OutOrStdout()
-	if res.Launch == org.DirectorLaunchCmd {
+	if reg.CmdLaunch() {
 		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, launch=%s, name=%s, pid=%d)\n", inboxField(reg.ID), inboxField(reg.Driver),
 			inboxField(reg.Model), inboxField(reg.PermissionMode), org.DirectorLaunchCmd, res.TerminalName, reg.PID)
 		_, _ = fmt.Fprintf(out, "talk to the director in the terminal that [org.director].launch_cmd opened (name %s)\n", res.TerminalName)
@@ -354,7 +367,7 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 // RALPH_ORG_AGMSG_HOME is set here and start uses herdr, it writes one
 // warning line on stderr and goes on: the director's pane does not get the
 // variable. With launch_cmd it warns about nothing, since the launch script
-// exports the variable as set here (D3).
+// exports the variable as set here (D3), made absolute by startDirector.
 func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string, cmdLaunch bool) error {
 	if cmd.Flags().Changed("config") && configPath != "" && agmsgHomeIsRelative(cfgAgmsgHome) {
 		return fmt.Errorf("org: director start: [org].agmsg_home %q in %s is a relative path: the director and the watch may resolve it from different directories "+
@@ -481,11 +494,12 @@ func (rt *orgDirectorRuntime) stopDirector(cmd *cobra.Command, id string, force 
 // a *org.DirectorCleanupError too, and w gets what was done to the process
 // (its ProcessNote). When the end of the process was not confirmed
 // (org.ErrDirectorProcessNotEnded: ps could not be read, or it outlived its
-// SIGTERM), the error adds that the pid may still be running and the ps
-// that shows it, and without --force names stop --force, which records the
-// stop and leaves the process as it is. A check-in that came after stop read
-// the registration (org.ErrDirectorCheckedInDuringStop) left nothing it read
-// running, so it names no --force.
+// SIGTERM), the error adds that the pid may still be running and, unless ps
+// could not be read (orgDirectorPSLook), the ps that shows it, and without
+// --force names stop --force, which records the stop and leaves the process
+// as it is. A check-in that came after stop read the registration
+// (org.ErrDirectorCheckedInDuringStop) left nothing it read running, so it
+// names no --force.
 func (rt *orgDirectorRuntime) stopError(w io.Writer, id string, force bool, res org.DirectorStopResult, err error) error {
 	var cleanup *org.DirectorCleanupError
 	switch {
@@ -494,7 +508,7 @@ func (rt *orgDirectorRuntime) stopError(w io.Writer, id string, force bool, res 
 		err = rt.withStateDirInStopCommand(err)
 		forceCommand := rt.command("ralph org director stop --id " + inboxField(cleanup.ID) + " --force")
 		if errors.Is(err, org.ErrDirectorProcessNotEnded) && cleanup.PID > 0 {
-			err = fmt.Errorf("%w; pid %d may still be running: look with ps -o pid,lstart,command -p %d", err, cleanup.PID, cleanup.PID)
+			err = fmt.Errorf("%w; pid %d may still be running%s", err, cleanup.PID, orgDirectorPSLook(": ", err, cleanup.PID))
 			if !force {
 				err = fmt.Errorf("%w; or record the stop and leave the process as it is with %s", err, forceCommand)
 			}
@@ -539,7 +553,8 @@ func (rt *orgDirectorRuntime) notHeadlessError(id string, err error) error {
 // terminal launch_cmd opened, named by res.TerminalName, is left for the
 // human to close (with no check-in recorded, that it may have opened one,
 // whose check-in is refused from now on); a forced stop's warning names the
-// pid that may still be running and the ps that shows it.
+// pid that may still be running and, unless ps could not be read, the ps
+// that shows it.
 func printOrgDirectorStop(cmd *cobra.Command, res org.DirectorStopResult) {
 	id := inboxField(res.Registration.ID)
 	out := cmd.OutOrStdout()
@@ -592,8 +607,21 @@ func printOrgDirectorCmdStop(cmd *cobra.Command, res org.DirectorStopResult) {
 			why = inboxField(res.CloseErr.Error())
 		}
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: director stop --force: %s is recorded stopped, but pid %d, which its launch script checked in with, "+
-			"may still be running (%s); look with ps -o pid,lstart,command -p %d\n", id, pid, why, pid)
+			"may still be running (%s)%s\n", id, pid, why, orgDirectorPSLook("; ", res.CloseErr, pid))
 	}
+}
+
+// orgDirectorPSLook is what the error or the warning of a launch cmd's stop
+// whose process's end was not confirmed for why says after "pid <pid> may
+// still be running": sep and the ps that shows pid, or nothing when why is
+// that ps could not be read (org.ErrDirectorProcessUnreadable), since ps
+// cannot show it then (the stop error names the stop to run again once ps
+// can read it).
+func orgDirectorPSLook(sep string, why error, pid int) string {
+	if errors.Is(why, org.ErrDirectorProcessUnreadable) {
+		return ""
+	}
+	return fmt.Sprintf("%slook with ps -o pid,lstart,command -p %d", sep, pid)
 }
 
 // orgDirectorStopNotes is what StopDirector did to the pane and the

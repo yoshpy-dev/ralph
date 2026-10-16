@@ -49,6 +49,13 @@ var (
 	// 2026-10-16-org-director-launch-cmd, D7). The process may still be
 	// running.
 	ErrDirectorProcessNotEnded = errors.New("the end of the process the launch script checked in with is not confirmed")
+	// ErrDirectorProcessUnreadable: the end of that process is not confirmed
+	// because ps could not read it (before the SIGTERM, so nothing was sent,
+	// or after it), not because it outlived its SIGTERM. The errors that wrap
+	// ErrDirectorProcessNotEnded for that reason wrap it too, so the hint
+	// names running stop again once ps can read the pid rather than looking
+	// at the pid with ps.
+	ErrDirectorProcessUnreadable = errors.New("ps could not be read")
 	// ErrDirectorChangedDuringStop: a start still running recorded a
 	// workspace or pane of the registration after stop read it, so stop did
 	// not close it and recorded nothing (plan D14,
@@ -195,8 +202,9 @@ type DirectorStopResult struct {
 // that wraps ErrDirectorCheckedInDuringStop and names the stop to run again.
 // When the end is not confirmed (ps cannot be read, or the process did not
 // end within directorStopWait of its SIGTERM), it writes nothing and returns
-// a *DirectorCleanupError that wraps ErrDirectorProcessNotEnded, with the pid
-// that may still be running. With Force it records that stop with
+// a *DirectorCleanupError that wraps ErrDirectorProcessNotEnded (and, when ps
+// could not be read, ErrDirectorProcessUnreadable), with the pid that may
+// still be running. With Force it records that stop with
 // MarkForceStopped instead and returns Forced, sending nothing
 // stopDirectorProcess did not send (no SIGTERM when ps cannot be read). It
 // never sends SIGKILL, and Force changes nothing when the process ended. The
@@ -452,11 +460,13 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // The same shape is a stop of a launch cmd that recorded nothing (D7,
 // stopCmdDirector): its CleanupErr wraps ErrDirectorProcessNotEnded when the
 // end of PID is not confirmed, and the text then names the stop to run again
-// once PID has ended (the caller adds --force as the other way out); it wraps
-// ErrDirectorCheckedInDuringStop when the launch script checked in after the
-// stop read the registration, and the text names the stop to run again,
-// which stops the process that checked in; otherwise the record failed. After
-// a forced stop whose record failed, StopCommand carries --force.
+// once PID has ended, or, when it also wraps ErrDirectorProcessUnreadable,
+// once ps can read PID (the caller adds --force as the other way out); it
+// wraps ErrDirectorCheckedInDuringStop when the launch script checked in
+// after the stop read the registration, and the text names the stop to run
+// again, which stops the process that checked in; otherwise the record
+// failed. After a forced stop whose record failed, StopCommand carries
+// --force.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
@@ -505,7 +515,11 @@ func (e *DirectorCleanupError) Error() string {
 	case errors.Is(e.CleanupErr, ErrDirectorCheckedInDuringStop):
 		b.WriteString("; run " + e.StopCommand + " again to stop the process that checked in")
 	case errors.Is(e.CleanupErr, ErrDirectorProcessNotEnded) && !errors.As(e.CleanupErr, &recordErr):
-		fmt.Fprintf(&b, "; run %s again once pid %d has ended", e.StopCommand, e.PID)
+		if errors.Is(e.CleanupErr, ErrDirectorProcessUnreadable) {
+			fmt.Fprintf(&b, "; run %s again once ps can read pid %d", e.StopCommand, e.PID)
+		} else {
+			fmt.Fprintf(&b, "; run %s again once pid %d has ended", e.StopCommand, e.PID)
+		}
 	default:
 		b.WriteString("; " + then + e.StopCommand)
 	}

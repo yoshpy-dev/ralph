@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // The headless director of a launch cmd (plan
@@ -173,7 +174,8 @@ const (
 
 // directorProcessStop is what stopDirectorProcess did: its outcome, whether
 // it sent the SIGTERM, a note for the output ("process=..."), and, for an
-// outcome other than ended, why.
+// outcome other than ended, why (for unreadable, an error that wraps
+// ErrDirectorProcessUnreadable and the read's error).
 type directorProcessStop struct {
 	outcome   string
 	signalled bool
@@ -200,7 +202,8 @@ func (o *Org) stopDirectorProcess(reg DirectorRegistration) directorProcessStop 
 	}
 	proc, err := o.readDirectorProcess(reg.PID)
 	if err != nil {
-		return directorProcessStop{outcome: directorProcessStopUnreadable, note: "process=not signalled: ps could not be read", err: err}
+		return directorProcessStop{outcome: directorProcessStopUnreadable, note: "process=not signalled: ps could not be read",
+			err: fmt.Errorf("%w: %w", ErrDirectorProcessUnreadable, err)}
 	}
 	if ended, how := directorProcessEnded(reg, proc); ended {
 		return directorProcessStop{outcome: directorProcessStopEnded, note: "process=already ended: " + how}
@@ -218,7 +221,7 @@ func (o *Org) stopDirectorProcess(reg DirectorRegistration) directorProcessStop 
 		proc, err := o.readDirectorProcess(reg.PID)
 		if err != nil {
 			return directorProcessStop{outcome: directorProcessStopUnreadable, signalled: true,
-				note: "process=sent SIGTERM; ps could not be read after it", err: err}
+				note: "process=sent SIGTERM; ps could not be read after it", err: fmt.Errorf("%w: %w", ErrDirectorProcessUnreadable, err)}
 		}
 		if ended, _ := directorProcessEnded(reg, proc); ended {
 			return directorProcessStop{outcome: directorProcessStopEnded, signalled: true, note: "process=ended after SIGTERM"}
@@ -237,10 +240,6 @@ func (o *Org) stopDirectorProcess(reg DirectorRegistration) directorProcessStop 
 // director can tell it is its own (plan D8).
 const directorTokenEnv = "RALPH_DIRECTOR_TOKEN"
 
-// directorAgmsgHomeEnv is the agmsg home variable (driver.Agmsg reads it)
-// that the launch script exports when start's environment has it (plan D3).
-const directorAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
-
 // DirectorLaunchScriptPath is where start writes the launch script of the
 // launch with token: <stateDir>/launch/director_<token>.sh.
 func DirectorLaunchScriptPath(stateDir, token string) string {
@@ -251,10 +250,13 @@ func DirectorLaunchScriptPath(stateDir, token string) string {
 // registration ID and launch Token; StateDir, the ledger (absolute), whose
 // launch/ it goes in and which the check-in names as --state-dir; Cwd
 // (absolute), where the agent runs; AgmsgHome, start's
-// RALPH_ORG_AGMSG_HOME ("" exports none); RalphPath and AgentPath, the
-// absolute paths of the ralph that ran start (os.Executable) and of the
-// driver's agent (exec.LookPath in start's environment); and the agent's
-// PermArgs, Model, and PromptPointer (PromptFilePointer of the prompt file).
+// RALPH_ORG_AGMSG_HOME ("" exports none), absolute or starting with "~/"
+// (which driver.ResolveAgmsgHome expands), since the script cds to Cwd
+// before it exports it and a relative value would name a directory from
+// there; RalphPath and AgentPath, the absolute paths of the ralph that ran
+// start (os.Executable) and of the driver's agent (exec.LookPath in start's
+// environment); and the agent's PermArgs, Model, and PromptPointer
+// (PromptFilePointer of the prompt file).
 type directorLaunchScript struct {
 	ID, Token     string
 	StateDir, Cwd string
@@ -267,9 +269,10 @@ type directorLaunchScript struct {
 }
 
 // text is the script s describes, or an error naming what is not usable:
-// an id or token not of their form, a path that is not absolute, an empty
-// model or prompt pointer, or a value holding a NUL byte, which no shell
-// word can hold. It cds to Cwd (exit 1 when it cannot), exports
+// an id or token not of their form, a path that is not absolute, an agmsg
+// home that is neither absolute nor starts with "~/", an empty model or
+// prompt pointer, or a value holding a NUL byte, which no shell word can
+// hold. It cds to Cwd (exit 1 when it cannot), exports
 // RALPH_DIRECTOR_TOKEN and, when AgmsgHome is set, RALPH_ORG_AGMSG_HOME,
 // runs the check-in `<ralph> org director launched --id <id> --token <token>
 // --pid "$$" --state-dir <state dir>` and exits 1 when it fails, so a
@@ -292,6 +295,8 @@ func (s directorLaunchScript) text() (string, error) {
 		}
 	}
 	switch {
+	case s.AgmsgHome != "" && !filepath.IsAbs(s.AgmsgHome) && !strings.HasPrefix(s.AgmsgHome, "~/"):
+		return "", fmt.Errorf("launch script: the agmsg home %q is not absolute and does not start with ~/", s.AgmsgHome)
 	case s.Model == "":
 		return "", errors.New("launch script: the model is empty")
 	case s.PromptPointer == "":
@@ -309,7 +314,7 @@ func (s directorLaunchScript) text() (string, error) {
 	b.WriteString("cd " + shellQuote(s.Cwd) + " || exit 1\n")
 	b.WriteString(directorTokenEnv + "=" + shellQuote(s.Token) + "\nexport " + directorTokenEnv + "\n")
 	if s.AgmsgHome != "" {
-		b.WriteString(directorAgmsgHomeEnv + "=" + shellQuote(s.AgmsgHome) + "\nexport " + directorAgmsgHomeEnv + "\n")
+		b.WriteString(driver.AgmsgHomeEnv + "=" + shellQuote(s.AgmsgHome) + "\nexport " + driver.AgmsgHomeEnv + "\n")
 	}
 	b.WriteString(shellQuote(s.RalphPath) + " org director launched --id " + shellQuote(s.ID) + " --token " + shellQuote(s.Token) +
 		` --pid "$$" --state-dir ` + shellQuote(s.StateDir) + " || exit 1\n")
@@ -554,8 +559,7 @@ func (r *directorStartRun) startCmd(c directorStartChecks) (DirectorStartResult,
 	}
 	r.reg = reg
 	return DirectorStartResult{
-		Registration: reg, Launch: DirectorLaunchCmd, PromptPath: promptPath,
-		TerminalName: DirectorAgentName(token), LaunchScriptPath: scriptPath,
+		Registration: reg, PromptPath: promptPath, TerminalName: DirectorAgentName(token), LaunchScriptPath: scriptPath,
 	}, nil
 }
 
@@ -617,8 +621,13 @@ func (r *directorStartRun) waitForCheckIn(scriptPath string) (DirectorRegistrati
 // whose CleanupErr is directorRecordStopError.
 func (r *directorStartRun) abortCmd(cause error) error {
 	verb := "start " + r.reg.ID
-	reg, err := r.p.Store.openHeadlessRegistration(verb, r.reg.ID)
-	for reread := false; ; reread = true {
+	var reg DirectorRegistration
+	var err error
+	// Two reads at most: only a check-in between the first read and its
+	// record makes the second, and the record after the second read is the
+	// last one, whatever it finds.
+	for attempt := 1; attempt <= 2; attempt++ {
+		reg, err = r.p.Store.openHeadlessRegistration(verb, r.reg.ID)
 		switch {
 		case errors.Is(err, ErrDirectorStopped):
 			return newDirectorLaunchCmdStoppedError(r.reg, cause, directorProcessStop{})
@@ -630,15 +639,14 @@ func (r *directorStartRun) abortCmd(cause error) error {
 			return r.detachCmdOnly(cause, reg, stop)
 		}
 		_, err = r.p.Store.MarkStoppedIfUnchanged(reg, r.p.Who)
-		switch {
-		case err == nil, errors.Is(err, ErrDirectorStopped):
+		if err == nil || errors.Is(err, ErrDirectorStopped) {
 			return newDirectorLaunchCmdStoppedError(reg, cause, stop)
-		case errors.Is(err, ErrDirectorCheckedInDuringStop) && !reread:
-			reg, err = r.p.Store.openHeadlessRegistration(verb, r.reg.ID)
-			continue
 		}
-		return newDirectorCmdCleanupError(reg, cause, &directorRecordStopError{id: reg.ID, err: err}, false)
+		if !errors.Is(err, ErrDirectorCheckedInDuringStop) {
+			break
+		}
 	}
+	return newDirectorCmdCleanupError(reg, cause, &directorRecordStopError{id: reg.ID, err: err}, false)
 }
 
 // detachCmdOnly is abortCmd's way out when stop did not confirm that the
