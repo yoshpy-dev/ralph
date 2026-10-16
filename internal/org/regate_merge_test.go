@@ -1349,26 +1349,18 @@ func TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay(t *testing.T) {
 				}
 				return target
 			}},
+		{name: "as many paths in the way as the refusal lists",
+			setup:  regateManyIgnoredInTheWay(regateInTheWayListed),
+			listed: regateManyIgnoredListed,
+			kept:   regateManyIgnoredKept(regateInTheWayListed)},
+		{name: "one path in the way more than the refusal lists",
+			setup:  regateManyIgnoredInTheWay(regateInTheWayListed + 1),
+			listed: regateManyIgnoredListed + ", and 1 more",
+			kept:   regateManyIgnoredKept(regateInTheWayListed + 1)},
 		{name: "more paths in the way than the refusal lists",
-			setup: func(t *testing.T, fx *regateFixture) {
-				var files []string
-				for i := 1; i <= regateInTheWayListed+2; i++ {
-					files = append(files, "ignored/f"+strconv.Itoa(100+i), "main's\n")
-				}
-				fx.commitIgnoredAndPush(t, fx.main, files...)
-				for i := 0; i < len(files); i += 2 {
-					writeGateFile(t, fx.worktree, files[i], "the local file\n", 0o644)
-				}
-			},
-			listed: "ignored/f101, ignored/f102, ignored/f103, ignored/f104, ignored/f105, ignored/f106, ignored/f107, ignored/f108, " +
-				"ignored/f109, ignored/f110, and 2 more",
-			kept: func(t *testing.T, fx *regateFixture) string {
-				var all []string
-				for i := 1; i <= regateInTheWayListed+2; i++ {
-					all = append(all, fileOrAbsent(t, filepath.Join(fx.worktree, "ignored", "f"+strconv.Itoa(100+i))))
-				}
-				return strings.Join(all, "|")
-			}},
+			setup:  regateManyIgnoredInTheWay(regateInTheWayListed + 2),
+			listed: regateManyIgnoredListed + ", and 2 more",
+			kept:   regateManyIgnoredKept(regateInTheWayListed + 2)},
 		{name: "an ignored file where the tip adds into a directory HEAD renamed",
 			setup: func(t *testing.T, fx *regateFixture) {
 				fx.excludeLocally(t, "lib2/new.txt")
@@ -1462,6 +1454,39 @@ func TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay(t *testing.T) {
 				t.Fatal("a merge is in progress in the worktree after the refusal")
 			}
 		})
+	}
+}
+
+// regateManyIgnoredListed is what the refusal of regateManyIgnoredInTheWay's
+// cases lists before its ", and N more": the first regateInTheWayListed paths.
+const regateManyIgnoredListed = "ignored/f101, ignored/f102, ignored/f103, ignored/f104, ignored/f105, ignored/f106, " +
+	"ignored/f107, ignored/f108, ignored/f109, ignored/f110"
+
+// regateManyIgnoredInTheWay sets up n ignored files in the merge's way,
+// ignored/f101 to ignored/f<100+n>, each one origin's main adds and the
+// worktree holds a file of its own at.
+func regateManyIgnoredInTheWay(n int) func(t *testing.T, fx *regateFixture) {
+	return func(t *testing.T, fx *regateFixture) {
+		var files []string
+		for i := 1; i <= n; i++ {
+			files = append(files, "ignored/f"+strconv.Itoa(100+i), "main's\n")
+		}
+		fx.commitIgnoredAndPush(t, fx.main, files...)
+		for i := 0; i < len(files); i += 2 {
+			writeGateFile(t, fx.worktree, files[i], "the local file\n", 0o644)
+		}
+	}
+}
+
+// regateManyIgnoredKept returns what is on disk at the n paths
+// regateManyIgnoredInTheWay(n) put in the way.
+func regateManyIgnoredKept(n int) func(t *testing.T, fx *regateFixture) string {
+	return func(t *testing.T, fx *regateFixture) string {
+		var all []string
+		for i := 1; i <= n; i++ {
+			all = append(all, fileOrAbsent(t, filepath.Join(fx.worktree, "ignored", "f"+strconv.Itoa(100+i))))
+		}
+		return strings.Join(all, "|")
 	}
 }
 
