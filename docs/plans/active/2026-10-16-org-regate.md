@@ -1,7 +1,7 @@
 # org-regate
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:f841204a7bc0
+- Approved: 2026-10-17 sha256:958fafab2a10
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目。FR-7 の「後から入る PR は、main に rebase してゲートを取り直してから出す」のうち、ほかの PR の merge のあとの取り直し。8a-1 の計画(`docs/plans/archive/2026-10-14-org-director-attach.md`)の D1 が、これを `auto_merge` と一緒に 3 本目に残した。consult(consult-plan-automerge、2026-10-16)の判定で 3 本目を 2 つに分け、取り直し(この計画、8a-3b)を `auto_merge`(8a-3a)より先に入れる。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -60,13 +60,13 @@
 
 - Page: `.harness/state/plan-visual/org-regate.html`(かんたん版の図 2 枚 `#overview`・`#easy-failure`、「承認の前に」の欄、閉じた折りたたみの中に `#detail-overview`・`#detail-paths`・`#detail-failure`)
 - Lint: `./scripts/plan-visual.sh lint .harness/state/plan-visual/org-regate.html` が終了コード 0
-- Self-check: `./scripts/plan-visual.sh shot` でページ全体と 5 枚の図を 1 枚ずつ撮り、PNG を読んで確かめた。文字のはみ出し、線と文字の重なり、箱の重なりはない。consult と Codex の助言を入れたあと(スライスを 5 本に、Spawn との排他、失敗の表に記録のあとの中断)も撮り直して確かめた
+- Self-check: `./scripts/plan-visual.sh shot` でページ全体と 5 枚の図を 1 枚ずつ撮り、PNG を読んで確かめた。文字のはみ出し、線と文字の重なり、箱の重なりはない。consult と Codex の助言を入れたあと(スライスを 5 本に、Spawn との排他、失敗の表に記録のあとの中断)も撮り直して確かめた。cross-review の P1 のあと、`#detail-failure` の表に「ignored のファイルとぶつかる(D3)」の行を足し、lint(終了コード 0)と撮り直しで確かめた
 
 ## Design decisions
 
 - D1 動詞と単位: `ralph org regate --branch <b>`。merge-order の単位がブランチなので、ブランチで名指す。`--org-id` は断る(結びつきはブランチから読む)。台帳は他の動詞と同じ規則で決め、台帳を書く動詞として扱う(`orgLedgerMutating`)。新しい作業を始めないので、見張りも承認された計画も要らない
-- D2 結びつきと org の状態: ブランチ `b` の結びつきと最新の gate の記録は、merge-order と同じ `readMergeLedger` と `collectMergeTargets` で、manifest のロックの下で読む(ロックなしの読みは追記中の最終行を壊れた行に数える。tech-debt の行)。結びつきは、`b` を名指す完全な結びつきのうち manifest で最後のものを使う。その org_id が `RunningOrgs` に入っていれば断る(leader がその worktree を使っている。org_id を別の機能で立て直した場合も、記録が今の leader の動きに数えられないよう断る)。結びつきがなければ断る。最新の gate の記録が読めないか、そのあとに壊れた行がある(merge-order の `unreadable`)ときは、その前の成功の記録を使わない(AC3 と D4 の例外に当てない)
-- D3 取り込みは merge commit: `git merge --no-ff --no-edit -m 'Merge <base_ref の短い名前> <base の 12 桁> into <b>' <base の SHA>`。rebase と force push をしない。GitHub の「Update branch」と同じ操作で、PR の差分は変わらない(consult の判定。B' の rebase と force push は、この repo の決まりと合わず、push 先を壊すおそれがある)。取り込む前に、HEAD が既定のブランチの先頭を含んでいれば merge しない
+- D2 結びつきと org の状態: ブランチ `b` の結びつきと最新の gate の記録は、merge-order と同じ `readMergeLedger` と `collectMergeTargets` で、manifest のロックの下で読む(ロックなしの読みは追記中の最終行を壊れた行に数える。tech-debt の行)。結びつきは、`b` を名指す完全な結びつきのうち manifest で最後のものを使う。その org_id が `RunningOrgs` に入っていれば断る(leader がその worktree を使っている。org_id を別の機能で立て直した場合も、記録が今の leader の動きに数えられないよう断る)。結びつきがなければ断る。最新の gate の記録が読めないか、そのあとに壊れた行がある(merge-order の `unreadable`)ときは、その前の成功の記録を使わない(AC3 と D4 の例外に当てない)。regate は org_id を別の機能で立て直した org の古い結びつきのブランチにも記録を書くので、読めない gate の記録は、その org がそれまでに完全な結びつきか読める記録を持ったすべてのブランチに付ける(どのブランチも古い成功の記録を保たない。cross-review の P2)。merge-order の理由の欄は、その記録が同じ org のほかのブランチのものかもしれないと言う
+- D3 取り込みは merge commit: `git merge --no-ff --no-edit -m 'Merge <base_ref の短い名前> <base の 12 桁> into <b>' <base の SHA>`。rebase と force push をしない。GitHub の「Update branch」と同じ操作で、PR の差分は変わらない(consult の判定。B' の rebase と force push は、この repo の決まりと合わず、push 先を壊すおそれがある)。取り込む前に、HEAD が既定のブランチの先頭を含んでいれば merge しない。merge は ignored のファイルを黙って上書きし(`--no-overwrite-ignore` は fast-forward にしか効かない。git 2.49 で確かめた)、きれいさの確かめは ignored のファイルを見ないので、merge の前に、tip の側で merge-base から変わり、HEAD が追跡していないパス(`git diff --name-only -z --no-renames <merge-base> <tip>` と `git diff --name-only -z --no-renames --diff-filter=A HEAD <tip>` の積)を取り、そのパスに disk の上で何かあるか、その上のディレクトリが非ディレクトリなら、何も merge も記録もせずに断り、ぶつかるパスを並べて「退かしてから打ち直す」と言う(cross-review の P1)
 - D4 push する head を確かめる: fetch のあと、HEAD が `refs/remotes/origin/<b>` と同じでなければ断る(push していない作業を巻き込まない、誰かが push した先を上書きしない)。例外は push の打ち直しで、最新の gate の記録が読める `gate_passed`(D2)、その head が HEAD、base が今の既定のブランチの先頭、`origin/<b>` が HEAD の祖先のときだけ、merge も scripts も飛ばして push だけをする。例外に当たらずに断るとき、最新の記録が regate の書いた(`via=regate`)読める記録で、その head が HEAD で、HEAD の第 1 親が `origin/<b>` の先頭(regate 自身の、push していない merge commit)なら、`git -C <worktree> reset --keep refs/remotes/origin/<b>` のあとに regate を打ち直す手を出す。それ以外では人の push していない作業を消しうるので、その手は出さない
 - D5 戻し方: regate が作った merge commit は、`gate_passed` を記録する前に限り、スクリプトが落ちたとき(`gate_failed` を記録したあと)、中断されたとき、結びつきや org が変わったときに、`git reset --keep <merge の前の HEAD>` で戻す。`gate_passed` を記録したあと(push の前と途中)の中断は push の失敗と同じに扱い、記録と merge commit を残す(origin が merge commit を受け取ったあとに応答が届かなかった場合に、戻すと origin と worktree が食い違い、打ち直しで直らないため)。打ち直しは fetch で push が届いたかを見て、届いていれば AC3、届いていなければ D4 の例外になる。戻すのは、HEAD がまだ regate の merge commit で、作業ツリーがきれいなときだけにする。スクリプトが走る間に人が commit した(`head_moved`)か、スクリプトがファイルを残した(`tree_changed`)ときは戻さない(`reset --keep` は人の commit を消し、汚れた作業ツリーでは止まるか変更が混ざる)。戻したときは、出力で「merge は戻した」と言い、LOG の行を出す(戻した merge commit はどのブランチからも届かなくなる)。戻さないときと戻せなかったときは、今の状態と戻すコマンドを出して終了コード 1 で終わる。失敗した merge を worktree に残す案は取らない(残すと D4 に「間の commit が regate の merge だけ」の例外が要り、その判定が regate 本体より重い。人が直すときは `git merge origin/<既定>` を自分で打てば同じ状態に戻る)
 - D6 記録の確かめ: `recordGate` の life の確かめは、走っている org 用のままにし、regate 用に別の確かめを足す。manifest のロックの下で読み直し、ブランチ `b` の最後の完全な結びつきが同じもの(org_id と結びつきの中身)で、その org が走っていないときだけ書く。記録の Details は gate と同じ形に `via=regate` を足す。読み手の `gateRecordFromDetails` は知らないキーを飛ばすが、` log=` のあとを丸ごと log の値として読むので、`via` は `log` より前に置く
@@ -77,7 +77,7 @@
 
 ## Acceptance criteria
 
-- [x] AC1 断る(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr に出す): `--branch` がない、`--org-id` を付けた、`b` を名指す完全な結びつきがない、その org が走っている、worktree がない、worktree のブランチが `b` でない、detached HEAD、rebase か merge の途中、作業ツリーが汚れている、スクリプトがない、ほかの regate が走っている(D7)
+- [x] AC1 断る(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr に出す): `--branch` がない、`--org-id` を付けた、`b` を名指す完全な結びつきがない、その org が走っている、worktree がない、worktree のブランチが `b` でない、detached HEAD、rebase か merge の途中、作業ツリーが汚れている、スクリプトがない、ほかの regate が走っている(D7)、merge が書くパスに ignored のファイルかディレクトリがある(D3)
 - [x] AC2 fetch が落ちる、origin に `b` がない(merge のあとに消された。理由でそう言う)、HEAD が `origin/<b>` と違う(D4 の例外を除く)ときも、AC1 と同じく断る。fetch と push に `GIT_TERMINAL_PROMPT=0` が付く
 - [x] AC3 HEAD が既定のブランチの先頭を含み、最新の gate の記録が読める、その HEAD と base の `gate_passed` なら、何も走らせず、記録も push もせず、そう言って終了コード 0。最新の記録が読めないか、そのあとに壊れた行があるときは、前の成功を使わずに AC9 の道で取り直し、そのあと merge-order がそのブランチを `ready` と出す(壊れた gate の Details と壊れた JSON 行の 2 つの場合)
 - [x] AC4 取り込みの道: HEAD が先頭を含まなければ、D3 の merge commit を作り、スクリプトを走らせ、`gate_passed`(head は merge commit、base と base_ref は取り込んだ先頭、branch は `b`、`via=regate`、org_id は結びつきの org)を記録し、force なしで `origin/<b>` に push する。stdout に `GATE: pass`、`MERGED:`、`HEAD:`、`BASE:`、`LOG:`、`PUSHED:` の行を出して終了コード 0。そのあと merge-order はそのブランチを `ready` と出す
@@ -156,4 +156,6 @@
 - [x] Verification artifact created(`docs/reports/verify-2026-10-16-org-regate.md`、pass)
   - test(6e67e718、pass)の穴 1 のテストだけの 5e4ce6cd: 既定のブランチが HEAD の子孫(`TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch`、差分の空の `--no-ff` merge commit を作って gate し push する)。穴 2〜4(fetch・push の途中の中断、push・merge・`git var`・reset の 120 秒の上限、`merge --abort` 自体の失敗)は PR の既知の穴に書く
 - [x] Test artifact created(`docs/reports/test-2026-10-16-org-regate.md`、pass)
+  - sync-docs(413ab307 まで): quality-gates.md の 2 面、`/org` skill の reset の手の条件。spawn と start の help に regate の間の断りを足した(413ab307)
+  - cross-review の 1 周目(413ab307、`docs/reports/cross-review-triage-org-regate.md`): ACTION_REQUIRED 2 件。P1 は merge が ignored のファイルを上書きする(codex の勧めた `--no-overwrite-ignore` は git 2.49 の `--no-ff` の merge に効かないと確かめた)、P2 は立て直した org_id で読めない gate の記録が別のブランチに付く。consult-plan-xreview8a3b の判定で、P1 は merge の前のパスの確かめ、P2 は読めない記録を org のすべてのブランチに付ける。D2・D3・AC1 と `#detail-failure` を直し、承認し直した(sha256:958fafab2a10)。cycle 2 で `/self-review` から回し直す
 - [ ] PR created
