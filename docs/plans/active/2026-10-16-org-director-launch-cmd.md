@@ -1,7 +1,7 @@
 # org-director-launch-cmd
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:af95b6db6074
+- Approved: 2026-10-16 sha256:2aeecc48d0ba
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 2 本目の後半(8a-2b)。FR-9 の起動 (B) の「`[org.director].launch_cmd` で別の端末の起動コマンドに差し替えられる」。8a-2 は PR #231(3723d900)で merge 済みで、その計画(`docs/plans/archive/2026-10-15-org-director-start.md`)の D1 が launch_cmd をこの段に分けた。分かれ目は consult(consult-plan-launchcmd)の判定による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -72,7 +72,7 @@
   `{script}` か `{script_sh}` のどちらもなければ検証エラーにする。起動スクリプトが走らなければ、start は必ず時間切れになるため。仕様のセキュリティの節(「シェルに解釈させない」)に従う。受信箱の本文は雛形に入らない
 - D2 選び方: launch_cmd が空でなければ、start はいつもそれを使う(consult の F4。仕様の「差し替えられる」)。登録の `launch` は `cmd` になる。`--launch` のフラグは足さない
 - D3 起動スクリプト: start は台帳の下の `launch/director_<token>.sh`(0700)に、次の 3 つを書く。どの値も単一引用符で囲む(既存の `directorShellWord` の形)
-  - `{cwd}` に `cd` し、`RALPH_DIRECTOR_TOKEN=<token>` を export する。start を打った env に `RALPH_ORG_AGMSG_HOME` があれば、その値も export する
+  - `{cwd}` に `cd` し、`RALPH_DIRECTOR_TOKEN=<token>` を export する。start を打った env に `RALPH_ORG_AGMSG_HOME` があれば、その値も export する。相対の値は、start を打ったディレクトリから絶対パスにしてから書く(見張りと同じ agmsg を指すため。self-review の M1)
   - check-in: start を打った ralph の絶対パス(`os.Executable`)で `ralph org director launched --id <id> --token <token> --pid $$ --state-dir <台帳の絶対パス>` を打つ。失敗したら exec せずに終わる。このパスは `Org` のフィールドで差し替えられ、テストは check-in のあとで止まる helper process を使う
   - `exec <agent の絶対パス> <permission の引数> --model <m> <雛形を指す 1 文>`。agent の絶対パスは、start の env で `exec.LookPath` が見つけたもの。見つからなければ start は何も書かずに断る。引数の並びは herdr の agent start に渡すものと同じ
 
@@ -118,7 +118,7 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
   - launch_cmd の置き換えた argv をシェルを通さずに打つ
   - check-in の `launched`(pid と `start_time` 付き)を待ち、stdout に `started d<N>`、launch、端末の名前 `director_<token>`、pid、stop の打ち方を出す
 
-  start を打った env に `RALPH_ORG_AGMSG_HOME` があれば、スクリプトはその値を export し、なければ export しない。manifest には何も書かない
+  start を打った env に `RALPH_ORG_AGMSG_HOME` があれば、スクリプトはその値を export し、なければ export しない。相対の値は start を打ったディレクトリから絶対パスにしてから書く。manifest には何も書かない
 - [ ] AC3 `ralph org director launched` は、登録が今の登録で、`launch = "cmd"`、`starting`、token が合い、pid が正で check-in の親の pid と同じで、その起動時刻を読めたときだけ、pid と `start_time` 付きの `launched` を書く。そうでなければ何も書かずに終了コード 1 で終わる。断られたとき、起動スクリプトは agent を起動しない(テストでは偽の agent が走らないことを見る)。`ralph org --help` には出ない
 - [ ] AC4 launch_cmd の終了コードが 0 でないとき、時間切れのとき、`--timeout-ms` のうちに check-in がないとき、待つあいだに `attach --replace` されたときは、start は終了コード 1 で終わり、出力は開いたかもしれない端末を人が閉じることを言う。記録は次のとおり
   - pid がなければ `stopped`(今の登録なら `detached` も)を書く
@@ -209,7 +209,8 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
   - S3(stop の launch_cmd の道、`RALPH_DIRECTOR_TOKEN` の断り、status と `ralph status` と `--json` と `stop --all` の案内、start と stop の help): 4a9c44f8。`--force` は、本人と確かめたプロセスには普段どおり SIGTERM を送って待ち、終わらなければ force 付きで記録する。ps を読めなければ何も送らない(D11 の「確かめられれば `--force` でも普段どおり閉じる」と同じ意味)。JSON の `terminal_name` は CLI の表示用の型にだけ置き、記録の型は変えていない。このブランチのコメントが指す計画のパスを、計画 ID の形に直した
   - S4(文書: `/director` と `/org` の skill の 4 面、README、仕様の注、recipe の 2 面、tech-debt、AGENTS.md、repo-map、`ralph org stop` の help): a6dda336。tech-debt の行は計画を active のパスで指す(`verify.local.sh` が存在しないパスで落ちるため。archive への書き換えは /pr の archive-plan.sh が行う)。そのあと `ralph status` の help の「which closes it」と、`/org` skill の書き換える動詞の一覧の `director launched` の抜けを直した
   - 実機の確認(AC10): `docs/evidence/director-launch-cmd-livefire-2026-10-16.md`。専用の socket の tmux 3.5a と隔離した台帳で、claude 2.1.291 と codex-cli 0.160.1 の start、check-in、status、`RALPH_DIRECTOR_TOKEN` の断り、stop を通した。どちらも、起動の確認画面の状態でも会話中でも SIGTERM で終わる。codex は npm の入口(node)が本体の子に SIGTERM を渡す。失敗の道は、端末を開かない launch_cmd(check-in の時間切れ、あとから打った起動スクリプトは断られる)と、終了コード 3 の launch_cmd。director が自分で打つ `ralph` は agent の shell の PATH で決まり、開発用のビルドで start を打つと古い版になる(既存の tech-debt の行に足した)
-- [ ] Review artifact created
+- [x] Review artifact created
+  - self-review cycle 1: `docs/reports/self-review-2026-10-16-org-director-launch-cmd.md`(MEDIUM 1、LOW 8)。全件を 98131af5 で直した。M1 は、相対の `RALPH_ORG_AGMSG_HOME` を start を打ったディレクトリから絶対パスにしてから起動スクリプトへ書くもの。org 層の起動スクリプトも、絶対パスでも `~/` 始まりでもない値を断る。L4 で ps を読めない枝の案内を分けた(`ErrDirectorProcessUnreadable`)。D3 と AC2 にこの絶対化を書き足したので、digest を取り直して自動承認し直した(af95b6db6074 → 2aeecc48d0ba)。`defaultDriverCallTimeout` の doc に director の呼び出しを足した(implementer が範囲外で見つけたもの)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
