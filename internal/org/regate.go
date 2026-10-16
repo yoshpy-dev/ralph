@@ -335,7 +335,7 @@ const regatePrefix = "org: regate: "
 // regateWords is Regate's wording of the worktree checks it shares with
 // Gate (gateWording), for branch.
 func regateWords(branch string) gateWording {
-	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again"}
+	return gateWording{prefix: regatePrefix, again: "run ralph org regate --branch " + branch + " again", verb: "ralph org regate"}
 }
 
 // regateLockPathIn is the regate.lock of the state dir stateDir.
@@ -826,8 +826,9 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // before the scripts, when nothing is recorded (the record is refused, or
 // Regate is interrupted or fails before the append), and after a recorded
 // static_failed or test_failed. After a recorded head_moved or tree_changed
-// it is kept, and res.NotUndone says how to undo it. An error or refusal
-// after the merge says what became of the merge commit (regateUndoneText).
+// it is kept, and res.NotUndone says how to undo it (after tree_changed, also
+// how to set the scripts' changes aside first). An error or refusal after
+// the merge says what became of the merge commit (regateUndoneText).
 func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, w gateWording, res RegateResult) (RegateResult, error) {
 	merge, refused, err := regateMergeTip(ctx, t, env, w)
 	if err != nil {
@@ -869,7 +870,9 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 		res.NotUndone = regateMergeLeft(t.root, res, why, "")
 	default:
 		res.NotUndone = regateMergeLeft(t.root, res, fmt.Sprintf("the scripts left %d uncommitted change(s) or untracked file(s) "+
-			"in the worktree (tree_changed), which git reset --keep stops on or carries along", len(res.Dirty)), "")
+			"in the worktree (tree_changed), which git reset --keep stops on or carries along", len(res.Dirty)),
+			fmt.Sprintf("; if git reset --keep stops on those changes, set them aside first (git -C %s stash -u, or move the files "+
+				"out of the worktree)", t.root))
 	}
 	return res, nil
 }
@@ -1122,12 +1125,13 @@ func regateSetTrackingRef(ctx context.Context, t gateTarget) error {
 // added to it, and Passed once a gate_passed is recorded. Nothing is recorded
 // when it returns an error or sets res.Refused.
 func (o *Org) regateGate(ctx context.Context, b regateBranch, t gateTarget, env []string, res RegateResult) (RegateResult, error) {
-	logPath, logFile, err := o.createGateLog(b.orgID)
+	w := regateWords(t.branch)
+	logPath, logFile, err := o.createGateLog(b.orgID, w)
 	if err != nil {
 		return res, err
 	}
 	res.LogPath = logPath
-	run, err := runGateScripts(ctx, t, gateScriptEnv(env), logFile)
+	run, err := runGateScripts(ctx, t, gateScriptEnv(env), logFile, w)
 	if closeErr := logFile.Close(); err == nil && closeErr != nil {
 		err = fmt.Errorf("org: regate: write the log %s: %w", logPath, closeErr)
 	}

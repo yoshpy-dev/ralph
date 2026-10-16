@@ -255,6 +255,69 @@ func TestOrgRegate_FailureAfterAMergeUndoesItAndExits1(t *testing.T) {
 	}
 }
 
+// D5 and D4 through the CLI: when origin refuses the push of a merge commit
+// whose gate_passed was recorded, regate keeps the record and the merge
+// commit, prints GATE: pass, MERGED:, HEAD:, BASE: and LOG: with no PUSHED:,
+// and exits 1 with the push's error. Run again once origin takes pushes, it
+// runs and records nothing, pushes the merge commit, prints exactly
+// PUSH_ONLY:, HEAD:, BASE:, LOG: and PUSHED: (no MERGED: line, since the
+// push-only path made no merge), and exits 0.
+func TestOrgRegate_AFailedPushIsPushedOnlyNextTime(t *testing.T) {
+	fx := newOrgRegateFixture(t)
+	pre := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD")
+	tip := fx.moveMain(t)
+	hook := filepath.Join(fx.origin, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'pushes are closed' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := fx.regate(t)
+	merge := gateCLIGitOut(t, fx.worktree, "rev-parse", "HEAD")
+	if want := "org: regate: git push origin " + merge + ":refs/heads/feat/a in " + fx.worktree + " failed (exit 1)"; err == nil ||
+		!strings.HasPrefix(err.Error(), want) || !strings.Contains(err.Error(), "pushes are closed") {
+		t.Fatalf("regate = %v; want an error starting with %q that quotes the hook (stdout: %s)", err, want, stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing", stderr)
+	}
+	lines := strings.Split(stdout, "\n")
+	if len(lines) != 6 {
+		t.Fatalf("stdout = %q; want five lines", stdout)
+	}
+	logPath := gateCLILogLine(t, fx.stateDir, lines[4])
+	want := "GATE: pass\nMERGED: " + merge + " (origin/main into " + pre + ")\nHEAD: " + merge + "\nBASE: " + tip + "\nLOG: " + logPath + "\n"
+	if stdout != want {
+		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	if got := gateCLIGitOut(t, fx.origin, "rev-parse", "refs/heads/feat/a"); got != pre {
+		t.Fatalf("origin's feat/a = %s; want %s, the push refused", got, pre)
+	}
+
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
+	stdout, stderr, err = fx.regate(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("regate again: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	want = "PUSH_ONLY: the latest gate record of feat/a is a gate_passed of HEAD on origin/main's tip, and origin's feat/a is behind " +
+		"HEAD: nothing was run or recorded\nHEAD: " + merge + "\nBASE: " + tip + "\nLOG: " + logPath + "\nPUSHED: " + merge +
+		" to origin's feat/a\n"
+	if stdout != want {
+		t.Fatalf("stdout of the second regate =\n%s\nwant\n%s", stdout, want)
+	}
+	if got := gateCLIGitOut(t, fx.origin, "rev-parse", "refs/heads/feat/a"); got != merge {
+		t.Errorf("origin's feat/a = %s; want the merge commit %s pushed", got, merge)
+	}
+	if after := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir)); after != before {
+		t.Errorf("a push-only regate changed the manifest:\nbefore %s\nafter  %s", before, after)
+	}
+	if calls := fx.calls(t); len(calls) != 2 {
+		t.Errorf("scripts run = %v; want none run by the second regate", calls)
+	}
+}
+
 // AC1 through the CLI: a refusal (here, the branch's org still runs, or no
 // binding names the branch) prints nothing on stdout or stderr (the refusal
 // is the error, which main prints on stderr), exits 1, runs no script, and

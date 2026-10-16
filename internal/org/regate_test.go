@@ -917,10 +917,17 @@ func TestRegate_GateOnlyRecordsAGatePassedViaRegate(t *testing.T) {
 		t.Fatalf("gate events = %+v\nwant one gate_passed of auth with Details %q", events, wantDetails)
 	}
 	log := fileOrAbsent(t, logPath)
-	for _, w := range []string{"# head: " + head, "# base: refs/remotes/origin/main " + tip, "==> ralph org gate: ./scripts/run-test.sh exited 0\n"} {
+	for _, w := range []string{
+		"# ralph org regate\n# worktree: " + fx.worktree + "\n# branch: feat/auth\n# head: " + head + "\n# base: refs/remotes/origin/main " + tip + "\n",
+		"==> ralph org regate: running ./scripts/run-static-verify.sh\n", "==> ralph org regate: ./scripts/run-static-verify.sh exited 0\n",
+		"==> ralph org regate: running ./scripts/run-test.sh\n", "==> ralph org regate: ./scripts/run-test.sh exited 0\n",
+	} {
 		if !strings.Contains(log, w) {
 			t.Errorf("log does not have %q:\n%s", w, log)
 		}
+	}
+	if strings.Contains(log, "ralph org gate") {
+		t.Errorf("regate's log names ralph org gate:\n%s", log)
 	}
 	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all", "--ignored"); st != "" {
 		t.Fatalf("the regate wrote in the worktree:\n%s", st)
@@ -1286,29 +1293,49 @@ func TestRegate_Interrupted(t *testing.T) {
 	})
 }
 
-// TestRegate_ErrorsOfTheSharedGitHelpersSayRegate covers the errors of the
-// git helpers Regate shares with Gate: from Regate they start with "org:
+// TestRegate_ErrorsOfTheSharedHelpersSayRegate covers the errors of the
+// helpers Regate shares with Gate: from Regate they start with "org:
 // regate: ". A corrupt index in the feature worktree passes the branch checks
-// and then makes git status fail (gateDirtyLines); nothing is run or recorded.
-func TestRegate_ErrorsOfTheSharedGitHelpersSayRegate(t *testing.T) {
-	fx := newRegateFixture(t)
-	index := gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
-	if err := os.WriteFile(index, []byte("garbage"), 0o644); err != nil {
-		t.Fatal(err)
+// and then makes git status fail (gateDirtyLines); a file where the gates
+// directory goes makes createGateLog fail. Nothing is run or recorded.
+func TestRegate_ErrorsOfTheSharedHelpersSayRegate(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, fx *regateFixture)
+		want  func(fx *regateFixture) string // what the error starts with
+	}{
+		{"git status", func(t *testing.T, fx *regateFixture) {
+			index := gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-path", "index")
+			if err := os.WriteFile(index, []byte("garbage"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, func(fx *regateFixture) string {
+			return "org: regate: git status --porcelain --untracked-files=all in " + fx.worktree + ": exit 128: "
+		}},
+		{"the gate log", func(t *testing.T, fx *regateFixture) {
+			writeGateFile(t, fx.stateDir, gateLogDir, "not a directory\n", 0o644)
+		}, func(fx *regateFixture) string {
+			return "org: regate: create the gate log dir " + filepath.Join(fx.stateDir, gateLogDir) + ": "
+		}},
 	}
-	before := fileOrAbsent(t, fx.o.Manifest.Path())
-	res, err := fx.regate(context.Background())
-	want := "org: regate: git status --porcelain --untracked-files=all in " + fx.worktree + ": exit 128: "
-	if err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Fatalf("regate = %v; want an error starting with %q", err, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			tc.setup(t, fx)
+			before := fileOrAbsent(t, fx.o.Manifest.Path())
+			res, err := fx.regate(context.Background())
+			if want := tc.want(fx); err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Fatalf("regate = %v; want an error starting with %q", err, want)
+			}
+			if res.Outcome != "" || res.Passed || res.Refused != "" || res.LogPath != "" || fx.calls(t) != nil {
+				t.Fatalf("regate = %+v and ran %v; want nothing run", res, fx.calls(t))
+			}
+			if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before {
+				t.Fatalf("regate changed the manifest:\nbefore %s\nafter  %s", before, after)
+			}
+			fx.assertUnlocked(t)
+		})
 	}
-	if !reflect.DeepEqual(res, RegateResult{}) || fx.calls(t) != nil {
-		t.Fatalf("regate = %+v and ran %v; want nothing", res, fx.calls(t))
-	}
-	if after := fileOrAbsent(t, fx.o.Manifest.Path()); after != before {
-		t.Fatalf("regate changed the manifest:\nbefore %s\nafter  %s", before, after)
-	}
-	fx.assertUnlocked(t)
 }
 
 // TestRegate_MergesTheTipInAndPushes covers AC4: after origin's main moved on
@@ -1544,7 +1571,9 @@ func TestRegate_AScriptFailureAfterTheMergeUndoesIt(t *testing.T) {
 // failure: a gate_failed of the merge commit is recorded and nothing is
 // pushed, but the merge commit is kept, and NotUndone says how to look at
 // the worktree and which git reset --keep undoes it, when a commit was made
-// after it, the tree is dirty, or git reset --keep fails.
+// after it, the tree is dirty, or git reset --keep fails. After tree_changed
+// it also says how to set the scripts' changes aside when the reset stops on
+// them.
 func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 	commit := "git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false commit --quiet --allow-empty -m moved\n"
 	cases := []struct {
@@ -1555,6 +1584,7 @@ func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 		reason       string
 		tail, dirty  []string
 		why          func(head, pre string) string
+		aside        bool   // NotUndone ends with how to set the changes aside
 		said         string // in git's stderr after NotUndone's text
 	}{
 		{name: "a commit while the scripts run", script: "test", hook: commit, commits: true, reason: GateReasonHeadMoved,
@@ -1565,7 +1595,7 @@ func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 			dirty: []string{"?? untracked.txt"}, why: func(string, string) string {
 				return "the scripts left 1 uncommitted change(s) or untracked file(s) in the worktree (tree_changed), which git reset " +
 					"--keep stops on or carries along"
-			}},
+			}, aside: true},
 		{name: "a failing script that commits", script: "static", hook: commit, fails: true, commits: true,
 			reason: GateReasonStaticFailed, tail: gateStubTail("static"), why: func(head, _ string) string {
 				return "HEAD is now " + head + ", not the merge commit"
@@ -1600,6 +1630,10 @@ func TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork(t *testing.T) {
 			merge, head := r.Head, gitOut(t, fx.worktree, "rev-parse", "HEAD")
 			fx.assertMergeCommit(t, merge, pre, tip)
 			notUndone := regateMergeKeptText(fx.worktree, merge, pre, tc.why(head, pre))
+			if tc.aside {
+				notUndone += "; if git reset --keep stops on those changes, set them aside first (git -C " + fx.worktree + " stash -u, " +
+					"or move the files out of the worktree)"
+			}
 			if tc.said == "" && res.NotUndone != notUndone ||
 				tc.said != "" && (!strings.HasPrefix(res.NotUndone, notUndone+"; git said:\n  ") || !strings.Contains(res.NotUndone, tc.said)) {
 				t.Fatalf("NotUndone = %q\nwant       %q (git saying %q)", res.NotUndone, notUndone, tc.said)

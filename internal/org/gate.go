@@ -289,12 +289,12 @@ func (o *Org) Gate(ctx context.Context, p GateParams) (GateResult, error) {
 		return GateResult{Refused: refused}, nil
 	}
 
-	logPath, logFile, err := o.createGateLog(p.OrgID)
+	logPath, logFile, err := o.createGateLog(p.OrgID, gateWords)
 	if err != nil {
 		return GateResult{}, err
 	}
 	res := GateResult{Head: target.head, Base: target.base.sha, BaseRef: target.base.ref, Branch: target.branch, LogPath: logPath}
-	run, err := runGateScripts(ctx, target, gateScriptEnv(env), logFile)
+	run, err := runGateScripts(ctx, target, gateScriptEnv(env), logFile, gateWords)
 	if closeErr := logFile.Close(); err == nil && closeErr != nil {
 		err = fmt.Errorf("org: gate: write the log %s: %w", logPath, closeErr)
 	}
@@ -395,14 +395,16 @@ type gateBase struct {
 // Gate (gateCheckBranch, gateDirtyRefusal, gateCheckScripts) name the verb
 // in a refusal: the two verbs' refusals differ only in these. The shared
 // helpers that only fail with an error (gateGit and the ones built on it)
-// take the prefix alone, so the error names the verb that ran them.
+// take the prefix alone, so the error names the verb that ran them. The log
+// and the scripts' runs (createGateLog, runGateScripts) name the verb too.
 type gateWording struct {
 	prefix string // what the refusal starts with: "org: gate: "
 	again  string // its last step: "run the gate again"
+	verb   string // the command in the log's lines: "ralph org gate"
 }
 
 // gateWords is Gate's wording.
-var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again"}
+var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again", verb: "ralph org gate"}
 
 // gateCheckWorktree runs Gate's checks of the worktree dir is in against f,
 // in Gate's order, and returns what they found, or the refusal of the first
