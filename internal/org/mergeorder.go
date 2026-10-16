@@ -21,10 +21,10 @@ import (
 // docs/plans/active/2026-10-14-org-merge-order.md (FR-8 of
 // docs/specs/2026-10-07-org-multi-org-director.md). It lists the feature
 // branches of the ledger in the order their PRs may be merged now. A branch is
-// ready when its latest gate record (gate.go's gateRecord) is a gate_passed
-// whose head is the branch's tip on origin and whose base is the tip of
-// origin's default branch now. The gate records are the only evidence it
-// reads: a reviewer's or the leader's word does not count.
+// ready when its latest gate record (gate_record.go's gateRecord) is a
+// gate_passed whose head is the branch's tip on origin and whose base is the
+// tip of origin's default branch now. The gate records are the only evidence
+// it reads: a reviewer's or the leader's word does not count.
 //
 // The targets are branches (C3): the branch of every complete feature binding
 // of the manifest, disbanded orgs included, and every branch a readable gate
