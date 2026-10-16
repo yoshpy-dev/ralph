@@ -1386,6 +1386,71 @@ func TestRegate_AMergeCommitWhoseSubjectAHookChangedIsNotPushedOnly(t *testing.T
 		" has commits that origin's tip " + pre + " of the branch does not"}, []string{"reset --keep"})
 }
 
+// TestRegate_RetriesThePushOfItsSignedMergeCommitWithShowSignatureOn covers
+// D4 in a repository that signs its commits with an ssh key and sets
+// log.showSignature: git log then prints a signed commit's signature check
+// on stdout before the format, so regateIsOwnMerge reads the subject with
+// --no-show-signature. After the push of Regate's signed merge commit
+// failed, running Regate again pushes it and does nothing else. The key and
+// the allowed signers file are the test's own, the config is the main
+// checkout's (GIT_CONFIG_GLOBAL=/dev/null, isolateGitEnv), and SSH_AUTH_SOCK
+// is unset for the test, git, and ssh-keygen, so no ssh-agent is asked.
+func TestRegate_RetriesThePushOfItsSignedMergeCommitWithShowSignatureOn(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen is not on PATH")
+	}
+	t.Setenv("SSH_AUTH_SOCK", "")
+	if err := os.Unsetenv("SSH_AUTH_SOCK"); err != nil {
+		t.Fatal(err)
+	}
+	fx := newRegateFixture(t)
+	keys := t.TempDir()
+	key := filepath.Join(keys, "key")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "regate fixture", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v\n%s", err, out)
+	}
+	pub, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeGateFile(t, keys, "allowed_signers", `regate@example.com namespaces="git" `+string(pub), 0o644)
+	for _, kv := range [][2]string{{"gpg.format", "ssh"}, {"user.signingkey", key}, {"commit.gpgsign", "true"},
+		{"log.showSignature", "true"}, {"gpg.ssh.allowedSignersFile", filepath.Join(keys, "allowed_signers")}} {
+		runGit(t, "-C", fx.main, "config", kv[0], kv[1])
+	}
+	pre, _ := fx.tips(t)
+	tip := fx.pushToOrigin(t, "main")
+	allow := fx.rejectPushes(t)
+	first := fx.mustRegate(t)
+	if first.Outcome != RegateOutcomeMerged || !first.Passed || first.PushFailed == "" || first.Merge == "" {
+		t.Fatalf("regate = %+v; want a merge commit that passed and whose push failed", first)
+	}
+	if parents := strings.Fields(gitOut(t, fx.worktree, "rev-list", "--parents", "-n", "1", first.Merge))[1:]; !slices.Equal(parents,
+		[]string{pre, tip}) {
+		t.Fatalf("merge commit %s has the parents %v; want the branch's %s, then origin's main %s", first.Merge, parents, pre, tip)
+	}
+	subject := "Merge origin/main " + tip[:12] + " into feat/auth"
+	if got := gitOut(t, fx.worktree, "log", "-1", "--format=%s", first.Merge); !strings.HasPrefix(got,
+		`Good "git" signature for regate@example.com with ED25519 key`) || !strings.HasSuffix(got, "\n"+subject) {
+		t.Fatalf("git log -1 --format=%%s %s = %q; want the signature check, then the subject %q", first.Merge, got, subject)
+	}
+
+	allow()
+	res := fx.mustRegate(t)
+	want := RegateResult{Outcome: RegateOutcomePushOnly, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
+		Head: first.Merge, Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: filepath.Join(fx.stateDir, gateLogDir, regateTestLog),
+		Pushed: true}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("regate after origin takes pushes = %+v\nwant     %+v", res, want)
+	}
+	if calls, events := fx.calls(t), fx.gateEvents(t); !slices.Equal(calls, []string{"static", "test"}) || len(events) != 1 {
+		t.Fatalf("the retry ran %v and left the gate events %+v; want nothing run and nothing recorded again", calls, events)
+	}
+	if got := fx.originBranch(t); got != first.Merge {
+		t.Fatalf("origin's feat/auth = %s after the retry; want the signed merge commit %s", got, first.Merge)
+	}
+}
+
 // TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset covers D2 for
 // a HEAD that is not origin's tip: after a push that failed, a gate record
 // that cannot be read or a corrupt line after the gate_passed may hide a
