@@ -1,7 +1,7 @@
 # org-regate
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:0d63d9df1288
+- Approved: 2026-10-16 sha256:f841204a7bc0
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目。FR-7 の「後から入る PR は、main に rebase してゲートを取り直してから出す」のうち、ほかの PR の merge のあとの取り直し。8a-1 の計画(`docs/plans/archive/2026-10-14-org-director-attach.md`)の D1 が、これを `auto_merge` と一緒に 3 本目に残した。consult(consult-plan-automerge、2026-10-16)の判定で 3 本目を 2 つに分け、取り直し(この計画、8a-3b)を `auto_merge`(8a-3a)より先に入れる。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -86,7 +86,7 @@
 - [ ] AC7 push が落ちたとき、または `gate_passed` を記録したあと(push の前か途中)に中断されたときは、記録と merge commit をそのままにして終了コード 1 になり、打ち直しを案内する。打ち直すと、push が届いていなければ D4 の例外で push だけをし、届いていれば(origin が受け取ったあと応答が届かなかった)AC3 になる。既定のブランチがその間に進んだとき、または fetch と push の間に誰かが `origin/<b>` に push した(push は non-fast-forward で落ち、`origin/<b>` が HEAD の祖先でなくなる)ときは、例外に当たらず断り、D4 の条件のときだけ `reset --keep` の手を出す。最新の記録が読めず HEAD が `origin/<b>` と違うときも、同じ条件で断る
 - [ ] AC8 スクリプトが走る間に、その org が立て直されたか、ブランチの結びつきが変わったら、何も記録せず、merge commit を戻して終了コード 1
 - [ ] AC9 gate だけの道: HEAD が `origin/<b>` と同じで既定の先頭を含むが、その head の通った記録がない(merge-order の `regate` や `failed` のあと、人が直して push した)なら、merge せずにスクリプトを走らせて記録する。push は要らない
-- [ ] AC10 merge-order の理由の欄: 結びつきの org が走っていないブランチでは、`ralph org gate --org-id <org>` と「(the gate runs only while the feature org runs)」の代わりに `ralph org regate --branch <b>` を出す。走っている org のブランチは今のまま。最新の記録が regate の `gate_failed`(`via=regate`)のときは、その head が regate の merge commit であることと log のパスを理由で言う。`regate`(origin の先頭が gate の head と違う)の理由は、走っていない org のブランチでは「gate のあとに push された、または gate の head が push されていない」と言う(regate の push が落ちたあとの状態を読み違えないため)
+- [ ] AC10 merge-order の理由の欄: 結びつきの org が走っていないブランチでは、`ralph org gate --org-id <org>` と「(the gate runs only while the feature org runs)」の代わりに `ralph org regate --branch <b>` を出す。走っている org が今結びついているブランチは今のまま。org_id が別の機能で立て直されて走っているときは、その org が別のブランチで走っていることと、disband のあとに `ralph org regate --branch <b>` を打つことを言う。最新の記録が regate の `gate_failed`(`via=regate`)のときは、その head が regate の merge commit であることと log のパスを理由で言う。`regate`(origin の先頭が gate の head と違う)の理由は、走っていない org のブランチでは「gate のあとに push された、または gate の head が push されていない」と言う(regate の push が落ちたあとの状態を読み違えないため)
 - [ ] AC13 Spawn との排他(D9): regate が最初の確かめから終わりまでの間、同じ org_id の `ralph org spawn` と `ralph org start --plan` は何も記録せずに断られ(start は ensure の前に断る)、別の org_id の spawn は通る。regate が排他を取れないときは 1 秒まで打ち直してから断る。テストは、regate を最初の確かめのあとと記録の直後で止める test hook で確かめる
 - [ ] AC11 文書: `/org` skill の 4 面に動詞リファレンスの `regate` の行を足し、「merge してよい順」の人の手順を regate に置き換える。`/director` skill の 4 面に、人に頼まれたら regate を 1 本ずつ打ち、衝突と失敗は人に伝える手順を書く。仕様 FR-7 の注、tech-debt の merge-order の行、`AGENTS.md` の repo-map、CLI の help
 - [ ] AC12 テストはネットワークに出ず、本物の herdr、osascript、端末を打たない。Go のテストは go1.26 と `GOTOOLCHAIN=go1.25.8` の両方で通る
@@ -144,6 +144,9 @@
   - S1 で残したもの: regate の gate のログの見出しが `# ralph org gate` のまま(`createGateLog` を共有)、共有の helper の誤りの接頭辞が `org: gate:` のまま、merge-order の JSON に `via` がない(S4 で扱う)
   - S2(458c7728): `regateSpawnErr` を `checkCapacityAndStart` の先頭と `StartFeature` の ensure の前に置いた。dry-run は新しい life を作らないので外した(consult で可)。範囲外: 古い ralph の台帳(disbanded の前に stopped がない)では、Reserve 付きの leader の spawn が冪等の分岐で `scope_reserved` を書き、この確かめを通らない。新しい座席は起動せず、regate の記録は `recordRegate` が断る。S5 で tech-debt に 1 行足す。stale な seat の補償は `spawn_failed` を書いてから Phase 2 で断られる
   - S3(5c7f585f): 取り込み、push、戻し方、push だけの打ち直し。計画からのずれ: `reset --keep` の手の条件に、最新の記録が `via=regate` であることを足した(leader の gate が通った head を手で落とさないため)。D4 の文を合わせて承認し直した(sha256:0d63d9df1288)。push だけの例外には `via` を求めない(leader が通した head はそのまま push する)。Outcome に `merged` と `push_only` を足し、push の失敗は誤りでなく `PushFailed` で返す
+  - S4(2c3874e2、1ace199b): CLI の `ralph org regate`、merge-order の理由の欄(AC10)と JSON の `via`、共有の helper の接頭辞。1ace199b は、S4 の implementer が push 済みの 2c3874e2 を amend した中身を、reset --soft で新しいコミットとして積み直したもの(force push なし)。regate のログの見出し、`tree_changed` の退避の一言、push が落ちたあと push だけで済む e2e のテストを含む
+  - S4b(7602b00d、d8675039、8222d6bd): merge-order の help と台帳の注、org_id を別の機能で立て直して走っている org のブランチの Detail と regate の断りの文(AC10 の文を「今結びついているブランチ」に直し、承認し直した。sha256:f841204a7bc0)、`regate.go` から merge と push を `regate_merge.go` へ移した(中身は変えない)。`regate.go` は 851 行で、gate だけの道と共有する関数まで動かさないと 800 行を切らないので止めた
+  - 範囲外(この PR では直さない): `internal/org/director_cmd_test.go:300-302` が sh の trap を 100 ms の sleep で待つので、負荷が高いと go1.25.8 の全体の実行で 1 回落ちた(単独では 5 回通る)。S5 で tech-debt に 1 行足す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
