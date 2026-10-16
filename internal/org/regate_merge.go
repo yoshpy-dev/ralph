@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
 
 // How Regate (regate.go) merges origin's default branch in and pushes: the
-// merge commit (regateMerged, regateMergeTip, D3), its undo (regateUndoMerge,
+// merge commit (regateMerged, regateMergeTip, D3) and the check of what is on
+// disk in its way (regateCheckInTheWay), its undo (regateUndoMerge,
 // D5), the push and its retry (regatePush, regateHeadNotOnOrigin, D4), and
 // the git they run that ctx does not stop (regateUncancelledGit).
 
@@ -119,7 +123,9 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 
 // regateMerged is Regate's path for a HEAD that does not contain origin's
 // default branch tip (AC4): it checks that git has the identity the merge
-// commit needs (regateCheckIdentity), merges the tip in (regateMergeTip, D3),
+// commit needs (regateCheckIdentity) and that nothing git does not see is on
+// disk where the merge writes (regateCheckInTheWay), merges the tip in
+// (regateMergeTip, D3),
 // runs and records the gate on the merge commit (regateGate), and pushes a
 // recorded gate_passed (regatePush). Until a gate_passed is recorded, the
 // merge commit is undone (regateUndoMerge, D5): when Regate is interrupted
@@ -134,6 +140,12 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	res RegateResult) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
+		return RegateResult{}, regateInterrupted(ctx, err, "")
+	}
+	if refused != "" {
+		return RegateResult{Refused: refused}, nil
+	}
+	if refused, err = regateCheckInTheWay(ctx, t, w); err != nil {
 		return RegateResult{}, regateInterrupted(ctx, err, "")
 	}
 	if refused != "" {
@@ -215,6 +227,101 @@ func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gate
 				"of %s with (git var %s failed), so regate merged nothing and recorded nothing: set them (git -C %s config "+
 				"user.name <name> and git -C %s config user.email <email>, or in your global git config) and %s%s", t.root,
 				t.base.sha, t.base.branch, ident, t.root, t.root, w.again, regateStderrTail(r.stderr)), nil
+		}
+	}
+	return "", nil
+}
+
+// regateInTheWayListed is how many of the paths in the way of the merge
+// regateCheckInTheWay's refusal names before it says how many more there are.
+const regateInTheWayListed = 10
+
+// regateCheckInTheWay refuses t when D3's merge of t's base tip would write
+// over something on disk in t.root that git does not see: git merge
+// overwrites an ignored file or directory at a path it writes without a word
+// (--no-overwrite-ignore guards a fast-forward only), and the clean-tree check
+// (gateDirtyLines) lists no ignored file. The paths the merge may write that
+// HEAD does not track are those the tip's side changed since the merge base,
+// `git diff --name-only -z --no-renames <merge-base> <tip>`, that HEAD does
+// not have, `git diff --name-only -z --no-renames --diff-filter=A HEAD <tip>`:
+// a path HEAD deleted that the tip did not touch stays as it is. One of them
+// is in the way when lstat finds anything there (a file, a directory, a
+// symlink), or finds a directory above it as something else
+// (regatePathInTheWay); the refusal names what is on disk, the first
+// regateInTheWayListed of them. With no merge base it refuses nothing: git
+// merge refuses unrelated histories itself (regateMergeTip). The error is for
+// a git that fails, ctx done, and a path lstat cannot read; nothing is merged
+// or recorded then either.
+func regateCheckInTheWay(ctx context.Context, t gateTarget, w gateWording) (string, error) {
+	r, err := gateGit(ctx, regatePrefix, t.root, "merge-base", t.head, t.base.sha)
+	switch {
+	case err != nil:
+		return "", err
+	case r.code == 1 && strings.TrimSpace(r.stdout) == "":
+		return "", nil
+	case r.code != 0:
+		return "", fmt.Errorf("%sgit merge-base %s %s in %s: exit %d: %s", regatePrefix, t.head, t.base.sha, t.root, r.code, r.stderr)
+	}
+	changed, err := gateGitOutput(ctx, regatePrefix, t.root, "diff", "--name-only", "-z", "--no-renames", strings.TrimSpace(r.stdout),
+		t.base.sha)
+	if err != nil {
+		return "", err
+	}
+	added, err := gateGitOutput(ctx, regatePrefix, t.root, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", t.head,
+		t.base.sha)
+	if err != nil {
+		return "", err
+	}
+	nul := func(c rune) bool { return c == 0 }
+	onTipSide := make(map[string]bool)
+	for _, p := range strings.FieldsFunc(changed, nul) {
+		onTipSide[p] = true
+	}
+	var inTheWay []string
+	seen := make(map[string]bool)
+	for _, p := range strings.FieldsFunc(added, nul) {
+		if !onTipSide[p] {
+			continue
+		}
+		found, err := regatePathInTheWay(t.root, p)
+		if err != nil {
+			return "", err
+		}
+		if found != "" && !seen[found] {
+			seen[found] = true
+			inTheWay = append(inTheWay, found)
+		}
+	}
+	if len(inTheWay) == 0 {
+		return "", nil
+	}
+	listed := strings.Join(inTheWay[:min(len(inTheWay), regateInTheWayListed)], ", ")
+	if more := len(inTheWay) - regateInTheWayListed; more > 0 {
+		listed += fmt.Sprintf(", and %d more", more)
+	}
+	return w.prefix + fmt.Sprintf("merging origin's tip %s of %s into %s in %s would write over what is on disk at %s, which "+
+		"HEAD does not track: ignored files or directories (or a file where the merge needs a directory) that git merge "+
+		"overwrites without a word, so regate merged nothing and recorded nothing: move them out of the worktree and %s",
+		t.base.sha, t.base.branch, t.branch, t.root, listed, w.again), nil
+}
+
+// regatePathInTheWay is what is on disk in root in the way of the merge
+// writing p, a path relative to root as git names it, with slashes: the
+// first directory above p that lstat finds as something else (a file, a
+// symlink), else p itself when lstat finds anything there; "" for nothing.
+// The error is for a path lstat cannot read.
+func regatePathInTheWay(root, p string) (string, error) {
+	parts := strings.Split(p, "/")
+	for i := range len(parts) {
+		rel := strings.Join(parts[:i+1], "/")
+		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return "", nil
+		case err != nil:
+			return "", fmt.Errorf("%scheck what is on disk in %s where the merge writes %s: %w", regatePrefix, root, p, err)
+		case i == len(parts)-1, !info.IsDir():
+			return rel, nil
 		}
 	}
 	return "", nil

@@ -1183,3 +1183,189 @@ func TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset(t *testing.T) 
 		})
 	}
 }
+
+// excludeLocally makes the main checkout and its worktrees ignore each
+// pattern, in the repository's own .git/info/exclude: a local ignore that no
+// commit carries.
+func (fx *regateFixture) excludeLocally(t *testing.T, patterns ...string) {
+	t.Helper()
+	writeGateFile(t, fx.main, ".git/info/exclude", strings.Join(patterns, "\n")+"\n", 0o644)
+}
+
+// commitIgnoredAndPush is commitAndPush for paths dir ignores (git add -f):
+// the branch checked out there starts tracking a path that is ignored.
+func (fx *regateFixture) commitIgnoredAndPush(t *testing.T, dir string, files ...string) string {
+	t.Helper()
+	for i := 0; i+1 < len(files); i += 2 {
+		writeGateFile(t, dir, files[i], files[i+1], 0o644)
+		runGit(t, "-C", dir, "add", "-f", files[i])
+	}
+	gateCommit(t, dir, "track "+files[0])
+	runGit(t, "-C", dir, "push", "--quiet", "origin", "HEAD")
+	return gitOut(t, dir, "rev-parse", "HEAD")
+}
+
+// untrackRunLog has main track docs/evidence/run.log (an ignored path) and
+// feat/auth take that in with a merge and then stop tracking it, pushed: in
+// the worktree, run.log is an ignored file HEAD deleted, with the content
+// "the local log\n".
+func (fx *regateFixture) untrackRunLog(t *testing.T) {
+	t.Helper()
+	fx.commitIgnoredAndPush(t, fx.main, "docs/evidence/run.log", "main's log\n")
+	runGit(t, "-C", fx.worktree, "merge", "--quiet", "--no-edit", "main")
+	runGit(t, "-C", fx.worktree, "rm", "--quiet", "--cached", "docs/evidence/run.log")
+	gateCommit(t, fx.worktree, "stop tracking the run log")
+	runGit(t, "-C", fx.worktree, "push", "--quiet", "origin", "HEAD")
+	writeGateFile(t, fx.worktree, "docs/evidence/run.log", "the local log\n", 0o644)
+}
+
+// regateInTheWayText is Regate's refusal of a merge of origin's main at tip
+// into feat/auth in worktree that would write over listed, what is on disk
+// there.
+func regateInTheWayText(worktree, tip, listed string) string {
+	return "org: regate: merging origin's tip " + tip + " of main into feat/auth in " + worktree + " would write over what is on " +
+		"disk at " + listed + ", which HEAD does not track: ignored files or directories (or a file where the merge needs a " +
+		"directory) that git merge overwrites without a word, so regate merged nothing and recorded nothing: move them out of the " +
+		"worktree and run ralph org regate --branch feat/auth again"
+}
+
+// TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay covers D3's check
+// before the merge (AC1): git merge overwrites an ignored file or directory at
+// a path it writes, and the clean-tree check does not see one, so when origin's
+// main adds or changes a path that HEAD does not track and something is on
+// disk there (or a file where the merge needs a directory), Regate merges
+// nothing, records nothing, runs no script, leaves HEAD, the tree, and origin
+// as they were with no MERGE_HEAD and the ignored files as they were, and
+// refuses naming what is in the way.
+func TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func(t *testing.T, fx *regateFixture)
+		listed string
+		// kept returns what is on disk in the way, to compare before and after.
+		kept func(t *testing.T, fx *regateFixture) string
+	}{
+		{name: "an ignored file at a path the tip adds",
+			setup: func(t *testing.T, fx *regateFixture) {
+				fx.commitIgnoredAndPush(t, fx.main, "docs/evidence/run.log", "main's log\n")
+				writeGateFile(t, fx.worktree, "docs/evidence/run.log", "the local log\n", 0o644)
+			},
+			listed: "docs/evidence/run.log",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "docs", "evidence", "run.log"))
+			}},
+		{name: "an ignored file HEAD deleted at a path the tip changed",
+			setup: func(t *testing.T, fx *regateFixture) {
+				fx.untrackRunLog(t)
+				fx.commitIgnoredAndPush(t, fx.main, "docs/evidence/run.log", "main's log, changed\n")
+			},
+			listed: "docs/evidence/run.log",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "docs", "evidence", "run.log"))
+			}},
+		{name: "an ignored file where the tip adds a directory",
+			setup: func(t *testing.T, fx *regateFixture) {
+				fx.excludeLocally(t, "d")
+				fx.commitIgnoredAndPush(t, fx.main, "d/x", "main's x\n", "d/y", "main's y\n")
+				writeGateFile(t, fx.worktree, "d", "the local d\n", 0o644)
+			},
+			listed: "d",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "d"))
+			}},
+		{name: "an ignored directory at a path the tip adds a file at",
+			setup: func(t *testing.T, fx *regateFixture) {
+				fx.excludeLocally(t, "cache")
+				fx.commitIgnoredAndPush(t, fx.main, "cache", "main's cache\n")
+				writeGateFile(t, fx.worktree, "cache/inner", "the local cache\n", 0o644)
+			},
+			listed: "cache",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				return fileOrAbsent(t, filepath.Join(fx.worktree, "cache", "inner"))
+			}},
+		{name: "an ignored symlink at a path the tip adds",
+			setup: func(t *testing.T, fx *regateFixture) {
+				fx.excludeLocally(t, "link")
+				fx.commitIgnoredAndPush(t, fx.main, "link", "main's link\n")
+				if err := os.Symlink("README.md", filepath.Join(fx.worktree, "link")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			listed: "link",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				target, err := os.Readlink(filepath.Join(fx.worktree, "link"))
+				if err != nil {
+					return "<" + err.Error() + ">"
+				}
+				return target
+			}},
+		{name: "more paths in the way than the refusal lists",
+			setup: func(t *testing.T, fx *regateFixture) {
+				var files []string
+				for i := 1; i <= regateInTheWayListed+2; i++ {
+					files = append(files, "ignored/f"+strconv.Itoa(100+i), "main's\n")
+				}
+				fx.commitIgnoredAndPush(t, fx.main, files...)
+				for i := 0; i < len(files); i += 2 {
+					writeGateFile(t, fx.worktree, files[i], "the local file\n", 0o644)
+				}
+			},
+			listed: "ignored/f101, ignored/f102, ignored/f103, ignored/f104, ignored/f105, ignored/f106, ignored/f107, ignored/f108, " +
+				"ignored/f109, ignored/f110, and 2 more",
+			kept: func(t *testing.T, fx *regateFixture) string {
+				var all []string
+				for i := 1; i <= regateInTheWayListed+2; i++ {
+					all = append(all, fileOrAbsent(t, filepath.Join(fx.worktree, "ignored", "f"+strconv.Itoa(100+i))))
+				}
+				return strings.Join(all, "|")
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			tc.setup(t, fx)
+			_, tip := fx.tips(t)
+			if exec.Command("git", "-C", fx.worktree, "merge-base", "--is-ancestor", tip, "HEAD").Run() == nil {
+				t.Fatalf("HEAD contains origin's main %s; the case needs a merge", tip)
+			}
+			kept, before := tc.kept(t, fx), fx.snapshot(t)
+			if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+				t.Fatalf("the worktree is not clean before the regate:\n%s", st)
+			}
+			res, err := fx.regate(context.Background())
+			fx.assertRefused(t, res, err, before, nil, nil)
+			if want := regateInTheWayText(fx.worktree, tip, tc.listed); res.Refused != want {
+				t.Errorf("refusal:\n%s\nwant\n%s", res.Refused, want)
+			}
+			if got := tc.kept(t, fx); got != kept {
+				t.Errorf("what was in the way is now %q; want it as it was, %q", got, kept)
+			}
+			if fx.mergeInProgress(t) {
+				t.Fatal("a merge is in progress in the worktree after the refusal")
+			}
+		})
+	}
+}
+
+// TestRegate_MergesOverAPathHEADDeletedThatTheTipDidNotTouch covers the other
+// side of D3's check: an ignored file sits at a path HEAD deleted and origin's
+// main has as the merge base had it, so the merge leaves the path deleted and
+// does not write it. Regate merges, passes, and pushes as usual, and the file
+// is as it was.
+func TestRegate_MergesOverAPathHEADDeletedThatTheTipDidNotTouch(t *testing.T) {
+	fx := newRegateFixture(t)
+	fx.untrackRunLog(t)
+	pre, _ := fx.tips(t)
+	tip := fx.pushToOrigin(t, "main")
+	res := fx.mustRegate(t)
+	if res.Outcome != RegateOutcomeMerged || !res.Passed || !res.Pushed || res.Refused != "" || res.PreMergeHead != pre {
+		t.Fatalf("regate = %+v; want the merge commit of %s on %s gated and pushed", res, tip, pre)
+	}
+	fx.assertMergeCommit(t, res.Merge, pre, tip)
+	if got := fileOrAbsent(t, filepath.Join(fx.worktree, "docs", "evidence", "run.log")); got != "the local log\n" {
+		t.Errorf("docs/evidence/run.log after the regate = %q; want the local log as it was", got)
+	}
+	if tracked := gitOut(t, fx.worktree, "ls-tree", "--name-only", res.Merge, "docs/evidence/"); tracked != "" {
+		t.Errorf("the merge commit tracks %q; want docs/evidence/run.log still deleted", tracked)
+	}
+}
