@@ -717,12 +717,14 @@ func regateUndoneText(res RegateResult) string {
 // regatePush pushes t's HEAD, the head of a gate_passed, to origin's branch
 // without force (`git push origin <sha>:refs/heads/<branch>`, regateRemoteGit,
 // D8), sets res.Pushed, and then points refs/remotes/origin/<branch> at it
-// when the push has not (regateSetTrackingRef). A push that fails or runs past
-// regateGitTimeout sets res.PushFailed. The record and HEAD stay as they
+// when the push has not and nothing else moved it (regateSetTrackingRef,
+// from the value it read right before the push). A push that fails or runs
+// past regateGitTimeout sets res.PushFailed. The record and HEAD stay as they
 // are either way (D5): running Regate again finds the push landed (AC3) or
 // pushes only (D4). The error is ctx done before or during the push, or a
 // push a signal ended (regatePushInterrupted for both), a git that cannot
-// run, or a remote-tracking ref that cannot be updated after the push.
+// run, or a remote-tracking ref that cannot be read before the push or
+// updated after it.
 func regatePush(ctx context.Context, t gateTarget, env []string, res RegateResult) (RegateResult, error) {
 	if ctx.Err() != nil {
 		return res, regatePushInterrupted(fmt.Sprintf("interrupted (%v)", context.Cause(ctx)), t, false)
@@ -732,6 +734,14 @@ func regatePush(ctx context.Context, t gateTarget, env []string, res RegateResul
 	kept := fmt.Sprintf("the gate_passed record of %s and HEAD are kept: check origin (git remote get-url origin), its "+
 		"credentials, and whether someone pushed to %s after the fetch, and run ralph org regate --branch %s again, which "+
 		"pushes only, or says what changed", t.head, t.branch, t.branch)
+	before, err := regateTrackingRef(ctx, t)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return res, regatePushInterrupted(fmt.Sprintf("interrupted (%v)", context.Cause(ctx)), t, false)
+	case err != nil:
+		return res, fmt.Errorf("%w, so %s was not pushed to origin's %s: the gate_passed record of it and HEAD are kept; run "+
+			"ralph org regate --branch %s again, which pushes it", err, t.head, t.branch, t.branch)
+	}
 	r, timedOut, err := regateRemoteGit(ctx, t.root, regateRemoteEnv(env), "push", "origin", spec)
 	var signaled regateGitSignaled
 	switch {
@@ -751,7 +761,10 @@ func regatePush(ctx context.Context, t gateTarget, env []string, res RegateResul
 		return res, nil
 	}
 	res.Pushed = true
-	return res, regateSetTrackingRef(context.WithoutCancel(ctx), t)
+	if hook := regateTestHooks.afterPush; hook != nil {
+		hook()
+	}
+	return res, regateSetTrackingRef(context.WithoutCancel(ctx), t, before)
 }
 
 // regatePushInterrupted is regatePush's error for a push that why (ctx done,
@@ -770,21 +783,43 @@ func regatePushInterrupted(why string, t gateTarget, during bool) error {
 // regateSetTrackingRef points refs/remotes/origin/<branch> at t's HEAD, which
 // Regate pushed to origin's branch, when the push has not: git updates it
 // only when remote.origin.fetch maps the branch there, which Regate does not
-// count on. It updates the ref from the value it read (`git update-ref`
-// with the old value), so a fetch in between is not overwritten.
-func regateSetTrackingRef(ctx context.Context, t gateTarget) error {
+// count on. before is the ref's value right before the push
+// (regateTrackingRef). The ref is moved only from before (`git update-ref`
+// with before as the old value): a value that is neither HEAD nor before was
+// set after the push by something else, such as a fetch that brought a newer
+// push to origin's branch, and is left as it is, so that Regate does not
+// rewind it to HEAD. So is a ref that moves off before between the read and
+// the update-ref, which then fails; an update-ref that fails with the ref
+// still at before is the error.
+func regateSetTrackingRef(ctx context.Context, t gateTarget, before string) error {
 	ref := "refs/remotes/origin/" + t.branch
-	r, err := gateGit(ctx, regatePrefix, t.root, "rev-parse", "--verify", "--quiet", ref)
+	now, err := regateTrackingRef(ctx, t)
 	if err != nil {
 		return fmt.Errorf("%w; %s was pushed to origin's %s", err, t.head, t.branch)
 	}
-	old := strings.TrimSpace(r.stdout)
-	if old == t.head {
+	if now == t.head || now != before {
 		return nil
 	}
-	if _, err := gateGitOutput(ctx, regatePrefix, t.root, "update-ref", ref, t.head, old); err != nil {
+	if hook := regateTestHooks.beforeTrackingUpdate; hook != nil {
+		hook()
+	}
+	if _, err := gateGitOutput(ctx, regatePrefix, t.root, "update-ref", ref, t.head, before); err != nil {
+		if again, readErr := regateTrackingRef(ctx, t); readErr == nil && again != before {
+			return nil
+		}
 		return fmt.Errorf("%w; %s was pushed to origin's %s, and git fetch origin %s brings %s up to date", err, t.head, t.branch,
 			t.branch, ref)
 	}
 	return nil
+}
+
+// regateTrackingRef reads refs/remotes/origin/<branch> in t.root, "" when
+// there is none (`git rev-parse --verify --quiet`). The error is for a git
+// that could not run or was stopped by ctx.
+func regateTrackingRef(ctx context.Context, t gateTarget) (string, error) {
+	r, err := gateGit(ctx, regatePrefix, t.root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+t.branch)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(r.stdout), nil
 }

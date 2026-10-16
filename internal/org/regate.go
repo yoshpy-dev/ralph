@@ -121,6 +121,14 @@ var regateTestHooks struct {
 	// afterRecord runs right after the record was appended, regate.lock
 	// still held, before a push.
 	afterRecord func()
+	// afterPush runs right after a push origin took, before Regate reads
+	// refs/remotes/origin/<branch> again to point it at the push
+	// (regateSetTrackingRef).
+	afterPush func()
+	// beforeTrackingUpdate runs right before regateSetTrackingRef's git
+	// update-ref of that ref, once its read found the ref still where it was
+	// before the push.
+	beforeTrackingUpdate func()
 }
 
 // RegateParams describes one `ralph org regate` call.

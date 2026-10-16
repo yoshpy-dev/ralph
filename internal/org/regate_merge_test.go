@@ -122,6 +122,75 @@ func TestRegate_PointsTheRemoteTrackingRefAtThePush(t *testing.T) {
 	}
 }
 
+// TestRegate_KeepsARemoteTrackingRefSomethingMovedAfterThePush covers AC7's
+// last sentence (D4): when refs/remotes/origin/feat/auth moves off where it
+// was before the push, here by a fetch of a newer push of origin's feat/auth
+// right after the push (which, with the default remote.origin.fetch, moved
+// the ref to the merge commit) or, with no remote.origin.fetch, right before
+// Regate's git update-ref of it, Regate leaves the ref at what the fetch
+// brought instead of rewinding it to the merge commit (after a fetch right
+// after the push, it runs no update-ref at all), and reports a pushed pass
+// with no error. An update-ref that fails while the ref is still where it was
+// before the push (here on a lock file another git left) is still an error.
+func TestRegate_KeepsARemoteTrackingRefSomethingMovedAfterThePush(t *testing.T) {
+	const ref = "refs/remotes/origin/feat/auth"
+	for _, tc := range []struct {
+		name          string
+		hook          *func()
+		noFetchConfig bool
+	}{
+		{"a fetch right after the push", &regateTestHooks.afterPush, false},
+		{"a fetch right before the update-ref", &regateTestHooks.beforeTrackingUpdate, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			fx.pushToOrigin(t, "main")
+			if tc.noFetchConfig {
+				runGit(t, "-C", fx.main, "config", "--unset-all", "remote.origin.fetch")
+			}
+			var newer string
+			setRegateHook(t, tc.hook, func() {
+				newer = fx.pushToOrigin(t, "feat/auth")
+				runGit(t, "-C", fx.worktree, "fetch", "--quiet", "origin", "+refs/heads/feat/auth:"+ref)
+			})
+			if tc.hook != &regateTestHooks.beforeTrackingUpdate {
+				setRegateHook(t, &regateTestHooks.beforeTrackingUpdate, func() {
+					t.Errorf("regate went on to git update-ref %s after the fetch moved it", ref)
+				})
+			}
+			res, err := fx.regate(context.Background())
+			if err != nil || res.Outcome != RegateOutcomeMerged || !res.Passed || !res.Pushed || res.Merge == "" || newer == "" {
+				t.Fatalf("regate = %+v, %v; want a pushed pass of a merge commit, with no error, and the hook run", res, err)
+			}
+			if got := gitOut(t, fx.worktree, "rev-parse", ref); got != newer {
+				t.Fatalf("%s = %s after the regate; want what the fetch brought, %s, not the pushed %s", ref, got, newer, res.Merge)
+			}
+		})
+	}
+
+	t.Run("an update-ref that fails with the ref where it was before the push", func(t *testing.T) {
+		fx := newRegateFixture(t)
+		pre, _ := fx.tips(t)
+		fx.pushToOrigin(t, "main")
+		runGit(t, "-C", fx.main, "config", "--unset-all", "remote.origin.fetch")
+		common := gitOut(t, fx.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+		setRegateHook(t, &regateTestHooks.beforeTrackingUpdate, func() { writeGateFile(t, common, ref+".lock", "", 0o644) })
+		res, err := fx.regate(context.Background())
+		if err == nil || !res.Pushed || res.Merge == "" || fx.originBranch(t) != res.Merge {
+			t.Fatalf("regate = %+v, %v; want the merge commit pushed and an error for the update-ref", res, err)
+		}
+		if prefix := "org: regate: git update-ref " + ref + " " + res.Merge + " " + pre + " in " + fx.worktree + ": exit "; !strings.HasPrefix(err.Error(), prefix) {
+			t.Errorf("error %q does not start with %q", err, prefix)
+		}
+		if suffix := "; " + res.Merge + " was pushed to origin's feat/auth, and git fetch origin feat/auth brings " + ref + " up to date"; !strings.HasSuffix(err.Error(), suffix) {
+			t.Errorf("error %q does not end with %q", err, suffix)
+		}
+		if got := gitOut(t, fx.worktree, "rev-parse", ref); got != pre {
+			t.Fatalf("%s = %s after the failed update-ref; want it where the fetch put it, %s", ref, got, pre)
+		}
+	})
+}
+
 // TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch covers the
 // test plan's edge case of origin's main a descendant of HEAD, a branch with
 // no commit main does not have: main took feat/auth's commit by a
