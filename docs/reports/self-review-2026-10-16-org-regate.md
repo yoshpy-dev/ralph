@@ -1,0 +1,57 @@
+# Self-review report: org-regate
+
+- Date: 2026-10-16
+- Plan: docs/plans/active/2026-10-16-org-regate.md(承認済み。8 段目の 8a-3b)
+- Reviewer: reviewer subagent (Claude)。パイプライン 1 回目(cycle 1)
+- Scope: diff の品質だけ。`git diff 670ec219...HEAD`(HEAD f4958e80、8 コミット、32 ファイル、+5918/-320)。テストの実行、静的解析、仕様適合、文書のずれの検査は行っていない(/test・/verify・/sync-docs の担当)。計画の D1〜D9 と Progress checklist は意図の確認にだけ使った
+
+## Evidence reviewed
+
+- 読んだ差分(コード、全体): `internal/org/regate.go`(851 行すべて)、`internal/org/regate_merge.go`(395 行すべて)、`internal/cli/org_regate.go`(230 行すべて)、`internal/org/gate.go`・`gate_run.go`・`spawn.go`・`feature.go`・`mergeorder.go` の diff すべて、`internal/cli/org.go`・`org_gate.go`・`org_legacy_ledger.go`・`org_merge_order.go` の diff すべて。`lockfile.go`(`acquireHeldFileLock`・`fileLockHeld`・`withFileLockContext`)は diff の外だが呼び出し側の前提として全部読んだ
+- 読んだテスト: `regate_test.go` の fixture 部(1〜140 行、370〜392 行、1135〜1165 行)、`regate_merge_test.go` の 600〜640 行と 670〜705 行、`spawn_test.go` の 4495〜4670 行、`org_regate_test.go` の 495〜580 行、`gate_test.go`・`mergeorder_test.go`・`feature_test.go`・`spawn_test.go` の既存行の削除と変更(削除は `mergeorder_test.go` の 2 行だけで、より強い検査に置き換わっている)。実行はしていない
+- 読んだ文書: `/director` skill の diff すべて、`/org` skill の diff(`-U0`)、README・AGENTS.md・仕様 FR-7 の追記(単語単位の diff)、`docs/tech-debt/README.md` の追加と書き換え 6 行。skill は 2 つとも 4 面を `cmp` で比べ、byte 一致
+- Gate の文面が変わっていないことの確認: `gate.go`・`gate_run.go`・`org_gate.go` の文字列の hunk をすべて読み、`w.prefix`(`org: gate: `)・`w.again`(`run the gate again`)・`w.verb`(`ralph org gate`)を入れた結果が元の文と一致することを 1 文ずつ見た(`gateCheckBranch` の 3 文、`gateCheckScript` の 4 文、`gateDirtyRefusal`、`gateGitPathExists` の error、`createGateLog` の 4 つの error、`runGateScripts` の見出しと各行、`printGateFailDetail` の 2 文)
+- 追加で grep: 追加行の debug 出力・TODO・`/Users/`・秘密の語・生成物(なし)、追加コードの識別子 159 個がコメントだけに現れていないか(すべて定義か使用がある)、`Setpgid`・`SysProcAttr` の全箇所、`regateTestHooks`・`regateRemoteTimeout` を書くテストが `t.Cleanup` で戻すか、`t.Parallel` の有無(これら 3 ファイルにはない)、追加コメント行の幅と折り(1 か所の崩れ)、tech-debt の追加行の列数(5 列ずつ)
+- 手で確かめたこと(scratchpad の使い捨ての repo で git を直接打った): (1) `pre-merge-commit` hook が 4 秒眠る repo で `git merge --no-ff` を走らせ、1 秒後に SIGINT を git に送ると、終了コード -2、`MERGE_HEAD` なし、index に merge の結果が staged、HEAD は merge 前のまま(M1 の根拠)。(2) 衝突したファイル名が `a b.txt` と `ä.txt` のとき、`git diff --name-only --diff-filter=U` は `a b.txt` と `"\303\244.txt"` を出す(L2 の根拠)
+
+## Findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| M1 | MEDIUM | exception-handling | merge、`merge --abort`、`reset --keep` は、割り込みの ctx で止まらないよう `context.WithoutCancel` で走らせるが、その git は ralph と同じ process group にいる。端末の Ctrl-C(SIGINT)と端末が閉じたときの SIGHUP は foreground の group 全体に届くので、守りたい git に直接届き、merge の途中や undo の途中で死ぬ。スクリプトの子は `Setpgid: true` で分けてあるのに、この 3 つは分けていない。help と doc は「merge とその abort と undo は先に終わる」と言い切る。手で確かめた結果は上の(1)で、git が死ぬと `MERGE_HEAD` は残らず、merge の結果だけが index に staged で残る。この状態は `git merge --abort` が効かず、`regateCheckInProgress` も merge 中と見ない。次の regate は dirty の断りに当たり、その文面は「commit or remove them」なので、従うと merge の途中結果が通常の commit になる。割り込んだ回の error は `regateMergeTip` が返す git の素の error(`git merge ...: signal: interrupt`)で、worktree の状態も戻し方も言わない。CLI のテストの割り込みは `signalSelf` で ralph 自身にだけ送り、スクリプトが走っている間に限るので、この道は通らない | `internal/org/regate_merge.go:15-22`(`regateUncancelledGit`)、`internal/org/regate.go:716-747`(`regateRemoteGit` は `SysProcAttr` を設定しない)、`internal/org/gate_run.go:189`(スクリプトは `Setpgid: true`)、`internal/org/regate_merge.go:174-177`(git の error をそのまま返す)、`internal/cli/org_regate.go:103-104`(help)、`internal/org/regate.go:252-254`(doc)、`internal/cli/org_regate_test.go:520-538` | `regateUncancelledGit` が走らせる 3 つの git(merge、abort、reset)を `SysProcAttr{Setpgid: true}` で別の group に置く。fetch と push は ssh の端末入力があるので分けない。別 group の git が端末を読もうとすると止まるが、120 秒の上限で終わる。分けないなら、help と doc の「先に終わる」を「ralph だけに届いた signal のとき」に直し、`regateMergeTip` が git を起動できずに返す error にも `regateMergeNotBack` と同じ状態の説明と戻し方(`reset --keep <HEAD>`)を付ける。テストは、ralph の group に SIGINT を送りながら hook を眠らせた merge を走らせる形で足す。確度: git 側は確認済み。ralph を端末から打った Ctrl-C は未実行で、process group が分かれていないことをソースで確かめた |
+| L1 | LOW | naming | `regateRemoteGit`・`regateRemoteEnv`・`regateRemoteTimeout` は名前が origin に出る git を指すが、`regateUncancelledGit` 経由でローカルの merge・abort・reset も走らせる。そのため `LC_ALL=C` と `GIT_TERMINAL_PROMPT=0` と 120 秒の上限が、利用者の `pre-merge-commit`・`commit-msg` hook にも掛かる。`LC_ALL=C` は stderr の `identity unknown` と `couldn't find remote ref` を読むためだけの設定で、hook の環境を変える副作用は doc のどこにも書かれていない。doc の「(D8)」はネットワークの fetch と push の理由で、merge には当てはまらない | `internal/org/regate.go:111-113`、`:708-714`、`:716-747`、`internal/org/regate_merge.go:15-30` | 名前を `regateGit`(上限と env を付ける runner)のようにするか、doc に「merge の hook にも `LC_ALL=C` が掛かる」と書く。hook が UTF-8 のロケールに頼る repo は少ないので、直すなら名前と doc だけで足りる |
+| L2 | LOW | readability | 衝突したファイルの一覧を `git diff --name-only --diff-filter=U` の出力を `strings.Fields` で分けて作るので、空白を含む名前は 2 つに分かれ、ASCII でない名前は `core.quotePath` の既定で `"\303\244.txt"` の形になる。断りの文は `conflicts in a, b.txt, "\303\244.txt"` と出る。AC5 が「衝突したファイル」を出すと言う文なので、人が `git merge` を自分で打つ前の手がかりが読みにくい | `internal/org/regate_merge.go:199`、`:232`、`:238-241`。手で確かめた結果は上の(2) | `-z` を付けて NUL で分ける(`core.quotePath` も効かなくなる)。表示は `strings.Join(..., ", ")` のままでよい |
+| L3 | LOW | readability | 読み間違えやすい 2 か所。(a) `regateMerged` の `switch res.Reason` の `default:` が `tree_changed` を指す。`GateReason*` に値が増えると、その値も「スクリプトが N 個の変更を残した(tree_changed)」と説明される。(b) `printRegateResult` の `case res.Outcome != Gated && res.Outcome != Merged, res.Passed:` は、tagless の switch のカンマが OR であることに頼る。意図(UP_TO_DATE と PUSH_ONLY と pass は nil)は doc を読まないと分からない | `internal/org/regate_merge.go:147-151`、`internal/cli/org_regate.go:180-185` | (a) `case GateReasonTreeChanged:` と書き、`default:` は想定外の reason として別の文にする。(b) `case res.Outcome == UpToDate || res.Outcome == PushOnly || res.Passed:` に展開する |
+| L4 | LOW | typo | `mergeRegateFailedDetail` の doc の折りが 1 か所だけ崩れている(`// which head the gate ran and names` が 40 桁で、次の行が `// r's log:` から始まる)。挿入した語のあとに段落を折り直していない形で、同じブロックの他の行は 76〜83 桁 | `internal/org/mergeorder.go:972-974` | 3 行を折り直す |
+| L5 | LOW | maintainability | `heldFileLock` の doc は「長く持つ flock」の持ち主を「クロス org の watch(`watch.lock`)」だけと言い、`acquireHeldFileLock` の doc は「`fileLockHeld` が取る短い共有ロック」で失敗しないための再試行と言う。この diff で 2 つ目の持ち主 `regate.lock`(最初の確かめから終わりまで持ち、Spawn が `fileLockHeld` で見る)が入ったが、`lockfile.go` は diff に入っていない | `internal/org/lockfile.go:126-131`、`:136-141`、呼び出し側は `internal/org/regate.go:270` | `heldFileLock` の doc に `regate.lock` を足す(`watch.lock` との違い: 持つ長さと、持ち主が印を書くこと) |
+| L6 | LOW | typo | `/director` skill の例 `ralph org regate --branch <ブランチ> > .harness/state/regate-<slug>.out 2>&1` の `<slug>` が定義されていない。ブランチ名には `/` が入る(`feat/auth-token`)ので、そのまま使うと存在しないディレクトリへのリダイレクトで失敗する。`/org` skill の例は `feat/auth-token` に `regate-auth-token.out` を当てていて、director の側にはその対応がない | `.claude/skills/director/SKILL.md:472`(と `.agents/skills/` と `templates/base/` の 3 つの写し)、対応する例は `.claude/skills/org/SKILL.md:1026` | `<slug>` を「ブランチ名の `/` を `-` にしたもの」と 1 行で言うか、`/org` skill の例と同じ具体例にする。4 面に同じ編集を入れる |
+| L7 | LOW | maintainability | 登録簿の追加行の pointer `internal/org/director_cmd_test.go:299-302` は、関数の宣言から `startTestProcess` の行までを指し、行が言う `time.Sleep(100 * time.Millisecond)` は 303 行にある(計画は `:300-302`)。行はテストの関数名も書いているので、番号がなくても探せる | `docs/tech-debt/README.md:276`、`internal/org/director_cmd_test.go:299-303` | 行番号を外して関数名だけにする(このリポジトリの他の pointer は関数名で書く) |
+| L8 | LOW | readability | `gateWording` に共通の断りの末尾が「commit it」「commit or remove them」のあとに regate の `again` を続ける。regate は HEAD が origin のブランチの先頭と同じであることを求めるので、利用者が commit して regate を打ち直すと、今度は「HEAD has commits that origin's tip does not: push them」で断られる。手は 1 回遠回りになるが、2 回目の断りが push を言うので行き止まりにはならない | `internal/org/gate.go:592-597`、`:613-614`(`gateCheckScript`・`gateDirtyRefusal`)、`internal/org/regate.go:665-690`(`regateCheckOriginHead`) | `gateWording` に「commit のあとにすること」の欄を足す(Gate は空、regate は「push して」)か、regate の `again` を `push it, and run ralph org regate --branch <b> again` にする |
+| L9 | LOW | maintainability | `regate.go` は 851 行で、コードレビューの目安の 800 行を超える。登録簿に行があり(S4b で `regate_merge.go` へ移したあと、共有の関数まで動かさないと切れないという理由)、追跡はされている。ただし理由の「差分のチャーン」は弱い。`regateFetch`・`regateStderrTail`・`regateRemoteEnv`・`regateRemoteGit`(約 90 行)は、同じ package の別ファイルへ移すだけで呼び出し側に触れず、S4b が merge と push で同じ移し方をしている。移すと 760 行前後になる | `internal/org/regate.go:608-658`、`:708-747`、`docs/tech-debt/README.md` の追加行(`regate.go` is 851 lines) | 登録簿の行の Trigger に書かれた移し方(fetch と remote git の runner を別ファイルへ)を、この PR の最後の commit で入れる。入れないなら、そのままで追跡は足りている |
+
+## Positive notes
+
+- ロックの順が一貫している。regate は `regate.lock`(排他)→ 印を空に → manifest ロックの下で台帳を読んで印を書く、の順で、manifest ロックの中で git を打たない。Spawn は manifest ロックの中で `regate.lock` の共有を待たずに 1 回試すだけなので、デッドロックにならない。regate が manifest ロックを待つ間に Spawn が先に `spawn_started` を書いても、regate が走っている org を見て断る(`regateFirstCheck`)。`recordRegate` は `recordGate` と同じ ctx の確かめ(ロックの前と append の直前)を持つ
+- 戻す条件が狭い。`regateUndoMerge` は HEAD がまだ regate の merge commit で、作業ツリーがきれいなときだけ `reset --keep` を打ち、`head_moved` と `tree_changed` では戻さずに戻すコマンドを出す。`gate_passed` を記録したあとは、中断も push の失敗も戻さず、打ち直しの道(push だけ、または UP_TO_DATE)に任せる
+- 引数から option を注入できる道がない。fetch の refspec は `+refs/heads/` から、push の spec は SHA から、merge の最後の引数は SHA から始まり、ブランチ名や `-m` の文字列が option になれない。シェルを通さず、force push の道がなく、`--no-verify` を使わない。`GIT_TERMINAL_PROMPT=0` と 120 秒の上限が fetch と push のすべてに付く
+- Gate の既存の文面を変えずに共通化している(上の「Gate の文面が変わっていないことの確認」)。共有 helper に prefix を渡す形は、`TestGateGitHelpers_ErrorsStartWithTheCallersPrefix` が 2 つの prefix で 9 個の helper を同じ形で検査する
+- 記録の確かめが `recordGate` の写しで、結びつきの位置(`pos`)と org の running を読み直してから書く。`readRegateBranch` は merge-order と同じ `collectMergeTargets` を通すので、2 つの verb が同じ台帳の読み方を共有する。`via` は `log` の前に置かれ、`gateRecordFromDetails` が `log=` 以降を丸ごと log として読む規則を壊さない(`TestGateRecordDetails_Via` が log の中の ` via=` と ` log=` も確かめる)
+- 登録簿の追加 4 行と書き換え 2 行が 5 列に揃い、書かれた関数名(`idempotentRespawn`、`checkCapacityAndStart`、`regateSpawnErr`、`recordRegate`、`mergeRegateFailedDetail` ほか)がすべて grep で見つかる。`idempotentRespawn` の行の主張(`Reserve` 付きの idempotent の分岐が `scope_reserved` を書き、`regateSpawnErr` を通らない)はコードと一致する。解消した行は、同じ表の他の解消済みの行と同じ形(行の上の `<!-- RESOLVED ... -->` と、Debt と Trigger の取り消し線)
+- skill の 4 面の `cmp` が `/org` と `/director` の両方で一致し、`$HOME` 配下の絶対パス、秘密の語、生成物、debug 出力は追加行にない。コメントの pointer は plan の ID と D・AC の番号で書かれ、cycle や finding の番号を指す形がない
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| なし。M1 は直す前提の指摘で、L1〜L8 は直すコストが小さい。L9 はこのブランチが登録簿に足した行で追跡されている。このブランチが足した行(4 行)の内容、列数、pointer を確かめ、重複はなかった | - | - | - | - |
+
+_(行を足していないので、`docs/tech-debt/` への追記はない。cycle 2 が cap 2 の最後の回なので、直さずに進む LOW が残るなら、cycle 2 のレビューで 1 行にまとめる。)_
+
+## Recommendation
+
+- Merge: yes(CRITICAL・HIGH はなし。MEDIUM 1 件(M1)は、端末の Ctrl-C のときに merge と undo の git が割り込みを防げないという、help と doc の約束と実装のずれで、signal を ralph だけに送る経路(スクリプトの停止、`kill`)と通常の経路は壊れない。LOW 9 件は命名、衝突ファイル名の分け方、読み方、コメントの折り、doc の列挙、skill の例、登録簿の pointer、断りの文面、ファイルの大きさ。ロックの順、戻す条件、引数の注入、Gate の文面の不変に欠陥は見つからなかった)
+- Follow-ups:
+  1. M1: `regateUncancelledGit` の 3 つの git を別の process group に置くか、help と doc を約束できる範囲に直し、`regateMergeTip` が返す error に状態と戻し方を足す。Go に触れるので、直すなら cycle 1 の fix としてパイプラインを回し直す(`/self-review` から)
+  2. L2〜L4 は M1 と同じ Go の commit にまとめる。L1 と L5 は名前と doc だけで、同じ commit に入れてよい
+  3. L6(skill の 4 面)と L7(登録簿の pointer)は文書だけの直しで、fix の commit に含めるか `/sync-docs` で入れる。L8 は文面の変更なので Go の commit に入れる。L9 は追跡済みで、入れるかは判断による
+  4. 直さずに進む LOW が残るなら、cap 2 の最後の回に当たるので、cycle 2 のレビューで登録簿の 1 行にまとめるよう依頼する
