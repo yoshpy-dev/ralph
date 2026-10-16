@@ -620,12 +620,13 @@ func TestMergeOrder_DetailsNameRegateForABranchWhoseOrgIsNotRunning(t *testing.T
 }
 
 // TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged covers AC10's
-// other half: the Details of a branch whose latest binding's org runs (also
-// when the org_id was disbanded and bound again to another feature, so the
-// org that runs is another feature's), and of a branch only gate records
-// name, are what they were before regate, byte for byte: ralph org gate
-// --org-id <org> and the clause that the gate runs only while the org runs.
-// A gate_failed regate wrote reads as any other then.
+// other half: the Details of a branch whose latest binding's org runs bound
+// to it (also when the org_id was disbanded and bound again to the branch,
+// after another feature or not), and of a branch only gate records name, are
+// what they were before regate, byte for byte: ralph org gate --org-id <org>
+// and the clause that the gate runs only while the org runs. A gate_failed
+// regate wrote reads as any other then. A running org bound to another
+// branch since is TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature.
 func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 	const clause = " (the gate runs only while the feature org runs)"
 	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
@@ -636,8 +637,13 @@ func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 		noGateWithNone bool // the branch is listed with no gate record
 	}{
 		{"a running org", func(o string) []any { return []any{moBind(o, "auth")} }, func(string) []any { return nil }, "org-a", true},
-		{"an org_id bound again to another feature, which runs", func(o string) []any { return []any{moBind(o, "auth")} },
-			func(o string) []any { return []any{moDisbanded(o), moBindTo(o, "split-1", "other", "feat/other")} }, "org-a", true},
+		{"an org_id bound again to the same feature, which runs", func(o string) []any { return []any{moBind(o, "auth")} },
+			func(o string) []any { return []any{moDisbanded(o), moBind(o, "auth")} }, "org-a", true},
+		{"an org_id bound to another feature and then to this one again, which runs", func(o string) []any {
+			return []any{moBind(o, "auth")}
+		}, func(o string) []any {
+			return []any{moDisbanded(o), moBindTo(o, "split-1", "other", "feat/other"), moDisbanded(o), moBind(o, "auth")}
+		}, "org-a", true},
 		{"no binding", func(o string) []any { return []any{moPassed(o, "feat/auth", moHeadA, moMain)} }, func(string) []any { return nil },
 			"org-x", false},
 	} {
@@ -691,6 +697,98 @@ func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature covers a branch
+// whose latest binding's org_id runs, but was started again for another
+// feature since (its latest complete binding is of another branch): ralph
+// org gate --org-id <org> would gate that feature's worktree, so every Detail
+// that tells the reader to gate the branch (unreadable, no_gate, failed,
+// regate, rebase) names the org_id and the branch it runs now, and says to
+// run ralph org regate --branch <branch> once the org is disbanded, with
+// regate's wording of each class, as for a branch whose org is not running.
+// ready keeps its text, and the entry's JSON is the one of the same branch
+// while the org runs bound to it, apart from Detail.
+func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
+	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
+	moved := moListing("main", "main", moMain2, "feat/auth", moHeadA)
+	const runsOn = "org_id org-a now runs another feature, on the branch feat/other: "
+	const regate = "once org-a is disbanded, run ralph org regate --branch feat/auth"
+	const next = runsOn + "fix it in the feature worktree, push it, and " + regate
+	for _, tc := range []struct {
+		name    string
+		lines   []any
+		listing string
+		class   string
+		detail  string // %s is the TS of the branch's latest gate record
+	}{
+		{"unreadable: a record that cannot be read", []any{moGarbled("org-a", EventGatePassed)}, onMain, MergeClassUnreadable,
+			"the latest gate record (gate_passed at %s) cannot be read: " + runsOn + regate + " to record a new one"},
+		{"unreadable: a corrupt line after the record", []any{moPassed("org-a", "feat/auth", moHeadA, moMain), moCorruptLine}, onMain,
+			MergeClassUnreadable, "a corrupt manifest line follows the latest gate record (gate_passed at %s) and may be a newer one: " +
+				runsOn + regate + " to record a new one"},
+		{"no_gate", nil, onMain, MergeClassNoGate, "no gate record: " + runsOn + regate + " before the PR is merged"},
+		{"failed: the leader's gate", []any{moFailed("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)}, onMain,
+			MergeClassFailed, "the gate failed (test_failed): " + next},
+		{"failed: regate's gate on origin's tip", []any{moRegateGate("org-a", "feat/auth", moHeadA, moMain, GateReasonTestFailed)},
+			onMain, MergeClassFailed, "the gate ralph org regate ran on origin's tip aaaaaaaaaaaa of the branch failed (test_failed); " +
+				"its log is " + moRegateLog + ": " + next},
+		{"failed: regate's merge commit", []any{moRegateGate("org-a", "feat/auth", moHeadB, moMain2, GateReasonTreeChanged)}, moved,
+			MergeClassFailed, "the gate ralph org regate ran failed (tree_changed) on bbbbbbbbbbbb, the merge commit it made of " +
+				"origin/main into the branch, which it kept in the feature worktree; its log is " + moRegateLog + ": " + next},
+		{"regate", []any{moPassed("org-a", "feat/auth", moHeadB, moMain)}, onMain, MergeClassRegate,
+			"pushed after the gate, or the gate's head was not pushed: origin has aaaaaaaaaaaa, the gate checked bbbbbbbbbbbb: " +
+				runsOn + regate},
+		{"rebase: the gate checked another branch", []any{moGate("org-a", "feat/auth", moHeadA, moMain, "refs/remotes/origin/develop", "")},
+			onMain, MergeClassRebase, "the gate checked against refs/remotes/origin/develop, but origin's default branch is now main: " +
+				runsOn + regate + ", which merges origin/main in and runs the gate again"},
+		{"rebase: origin/main moved", []any{moPassed("org-a", "feat/auth", moHeadA, moMain)}, moved, MergeClassRebase,
+			"origin/main moved: gate base 111111111111, now 222222222222: " + runsOn + regate +
+				", which merges origin/main in and runs the gate again"},
+		{"ready keeps its text", []any{moPassed("org-a", "feat/auth", moHeadA, moMain)}, onMain, MergeClassReady,
+			"the gate passed on aaaaaaaaaaaa, origin's tip of the branch, with base 111111111111, origin/main's tip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// entry is feat/auth's entry after org-a's binding to it, tc.lines,
+			// and after.
+			entry := func(after ...any) MergeOrderEntry {
+				fx := newMOFixture(t)
+				fx.add(t, moBind("org-a", "auth"))
+				fx.add(t, tc.lines...)
+				fx.add(t, after...)
+				fx.exec.lsOut = tc.listing
+				return moEntry(t, fx.run(t, false), "feat/auth")
+			}
+			e := entry(moDisbanded("org-a"), moBindTo("org-a", "split-1", "other", "feat/other"))
+			want := tc.detail
+			if e.Gate != nil && strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, e.Gate.TS)
+			}
+			if e.Class != tc.class || e.Detail != want {
+				t.Fatalf("feat/auth = %s\n%q\nwant %s\n%q", e.Class, e.Detail, tc.class, want)
+			}
+
+			// The same branch while org-a runs bound to it (feat/other is
+			// another org's): its Detail names ralph org gate, and the rest of
+			// the entry is the same.
+			bound := entry(moBindTo("org-b", "split-1", "other", "feat/other"))
+			if tc.class != MergeClassReady && !strings.Contains(bound.Detail, "run ralph org gate --org-id org-a ") {
+				t.Fatalf("feat/auth while org-a runs bound to it = %q; want ralph org gate --org-id org-a", bound.Detail)
+			}
+			e.Detail, bound.Detail = "", ""
+			got, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantJSON, err := json.Marshal(bound)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(wantJSON) {
+				t.Errorf("feat/auth's JSON apart from Detail =\n%s\nwant the one while org-a runs bound to it\n%s", got, wantJSON)
+			}
+		})
 	}
 }
 
@@ -822,8 +920,10 @@ func TestMergeOrder_LatestGateRecordWins(t *testing.T) {
 			switch note := moNoteWith(res, "corrupt line(s)"); {
 			case corrupt == 0 && note != "":
 				t.Errorf("notes = %q, want no corrupt-line note without a corrupt line", res.Notes)
-			case corrupt > 0 && !strings.Contains(note, fmt.Sprintf("the manifest has %d corrupt line(s)", corrupt)):
-				t.Errorf("notes = %q, want the corrupt-line note counting %d", res.Notes, corrupt)
+			case corrupt > 0 && note != fmt.Sprintf("the manifest has %d corrupt line(s) that cannot be read: a branch whose latest "+
+				"gate record comes before one is unreadable until ralph org gate (while the branch's org runs) or ralph org regate "+
+				"--branch <branch> (once that org is disbanded) records a new one", corrupt):
+				t.Errorf("notes = %q, want the corrupt-line note counting %d and naming the gate and regate", res.Notes, corrupt)
 			}
 		})
 	}

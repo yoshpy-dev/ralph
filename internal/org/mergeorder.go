@@ -278,8 +278,10 @@ func (o *Org) MergeOrder(ctx context.Context, p MergeOrderParams) (MergeOrderRes
 	return res, nil
 }
 
-// mergeRegateBranches is the set of targets' branches whose Details name
-// ralph org regate (mergeTarget.regates).
+// mergeRegateBranches is the set of targets' branches whose org is not
+// running (mergeTarget.regates). A branch whose org runs another feature now
+// is not in it, though its Details name ralph org regate too
+// (mergeTarget.namesRegate).
 func mergeRegateBranches(targets []*mergeTarget) map[string]bool {
 	branches := make(map[string]bool)
 	for _, t := range targets {
@@ -325,14 +327,26 @@ type mergeTarget struct {
 	corruptAfterGate bool
 	// orgRunning: binding is set and its org is in RunningOrgs.
 	orgRunning bool
-	pr         *MergeOrderPR
+	// orgRunsOn: orgRunning, and the org's latest complete binding is of
+	// another branch (the org_id was started again for another feature):
+	// that branch. "" otherwise.
+	orgRunsOn string
+	pr        *MergeOrderPR
 }
 
-// regates reports whether the Details of t name ralph org regate instead of
-// ralph org gate: t has a binding and its org is not running (disbanded), so
-// ralph org gate refuses it and ralph org regate runs on it.
+// regates reports whether t has a binding and its org is not running
+// (disbanded), so ralph org gate refuses it and ralph org regate runs on it.
 func (t *mergeTarget) regates() bool {
 	return t.binding != nil && !t.orgRunning
+}
+
+// namesRegate reports whether the Details of t name ralph org regate instead
+// of ralph org gate (mergeRegateNext): t.regates(), or t's org runs another
+// feature now (orgRunsOn), so ralph org gate --org-id <org> would gate that
+// feature's worktree, and ralph org regate runs on t once the org is
+// disbanded.
+func (t *mergeTarget) namesRegate() bool {
+	return t.regates() || t.orgRunsOn != ""
 }
 
 // mergeGateRecord is one real gate event attached to a branch: record is
@@ -367,7 +381,8 @@ func (t *mergeTarget) pos() int {
 // (C8). With neither it attaches nowhere and counts in unattached. A branch's
 // gate is the latest record attached to it. A branch with a binding is
 // orgRunning when its binding's org is in RunningOrgs of l's events, read
-// once.
+// once, and has orgRunsOn when that org's latest complete binding, read in
+// the same walk, is of another branch.
 func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int) {
 	byBranch := make(map[string]*mergeTarget)
 	target := func(branch string) *mergeTarget {
@@ -424,6 +439,9 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 	running := RunningOrgs(l.events)
 	for _, t := range targets {
 		t.orgRunning = t.binding != nil && slices.Contains(running, t.binding.OrgID)
+		if t.orgRunning && boundBranch[t.binding.OrgID] != t.branch {
+			t.orgRunsOn = boundBranch[t.binding.OrgID]
+		}
 	}
 	return targets, unattached
 }
@@ -434,7 +452,8 @@ func mergeLedgerNotes(corrupt, unattached int) []string {
 	var notes []string
 	if corrupt > 0 {
 		notes = append(notes, fmt.Sprintf("the manifest has %d corrupt line(s) that cannot be read: a branch whose latest gate "+
-			"record comes before one is unreadable until ralph org gate records a new one", corrupt))
+			"record comes before one is unreadable until ralph org gate (while the branch's org runs) or ralph org regate "+
+			"--branch <branch> (once that org is disbanded) records a new one", corrupt))
 	}
 	if unattached > 0 {
 		notes = append(notes, fmt.Sprintf("%d gate record(s) cannot be read and their org had neither a feature binding nor a "+
@@ -885,9 +904,10 @@ func mergeEntryFor(t *mergeTarget, remote mergeRemote) MergeOrderEntry {
 // state), unreadable, no_gate, failed, no_remote, regate, wrong_base (only
 // with a PR), rebase, ready. A Detail that tells the reader to gate the
 // branch names ralph org gate (mergeGateCommand) and ends with
-// mergeGateRunsWhileOrgRuns, or, for a branch whose org is not running
-// (mergeTarget.regates), names ralph org regate (mergeRegateCommand), which
-// runs from anywhere (plan docs/plans/active/2026-10-16-org-regate.md, AC10).
+// mergeGateRunsWhileOrgRuns, or, for a branch whose org is not running or
+// runs another feature now (mergeTarget.namesRegate), names ralph org regate
+// (mergeRegateNext), which runs from anywhere (plan
+// docs/plans/active/2026-10-16-org-regate.md, AC10).
 func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail string) {
 	if t.pr != nil {
 		switch strings.ToUpper(t.pr.State) {
@@ -898,26 +918,26 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 		}
 	}
 	g := t.gate
-	gate, regate := mergeGateCommand(t), mergeRegateCommand(t)
+	gate := mergeGateCommand(t)
 	switch {
 	case g != nil && !g.readable:
 		why := fmt.Sprintf("the latest gate record (%s at %s) cannot be read", g.ev.Event, g.ev.TS)
-		if t.regates() {
-			return MergeClassUnreadable, fmt.Sprintf("%s: run %s to record a new one", why, regate)
+		if t.namesRegate() {
+			return MergeClassUnreadable, why + ": " + mergeRegateNext(t, "", " to record a new one")
 		}
 		return MergeClassUnreadable, fmt.Sprintf("%s: run %s again in the feature worktree %s", why, gate, mergeGateRunsWhileOrgRuns)
 	case g != nil && t.corruptAfterGate:
 		why := fmt.Sprintf("a corrupt manifest line follows the latest gate record (%s at %s) and may be a newer one", g.ev.Event, g.ev.TS)
-		if t.regates() {
-			return MergeClassUnreadable, fmt.Sprintf("%s: run %s to record a new one", why, regate)
+		if t.namesRegate() {
+			return MergeClassUnreadable, why + ": " + mergeRegateNext(t, "", " to record a new one")
 		}
 		return MergeClassUnreadable, fmt.Sprintf("%s: run %s again in the feature worktree %s", why, gate, mergeGateRunsWhileOrgRuns)
-	case g == nil && t.regates():
-		return MergeClassNoGate, fmt.Sprintf("no gate record: run %s before the PR is merged", regate)
+	case g == nil && t.namesRegate():
+		return MergeClassNoGate, "no gate record: " + mergeRegateNext(t, "", " before the PR is merged")
 	case g == nil:
 		return MergeClassNoGate, fmt.Sprintf("no gate record: run %s in the feature worktree before the PR is merged %s",
 			gate, mergeGateRunsWhileOrgRuns)
-	case g.record.Reason != "" && t.regates():
+	case g.record.Reason != "" && t.namesRegate():
 		return MergeClassFailed, mergeRegateFailedDetail(t, g.record, remote)
 	case g.record.Reason != "":
 		return MergeClassFailed, fmt.Sprintf("the gate failed (%s): fix it and run %s again %s", g.record.Reason, gate,
@@ -927,14 +947,30 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 }
 
 // mergeRegateCommand is the ralph org regate command a Detail tells the
-// reader to run for t, a branch whose org is not running (mergeTarget.regates).
+// reader to run for t, a branch whose Details name it
+// (mergeTarget.namesRegate).
 func mergeRegateCommand(t *mergeTarget) string {
 	return "ralph org regate --branch " + t.branch
 }
 
-// mergeRegateFailedDetail is the Detail of t, a branch whose org is not
-// running, when its latest gate record r is a gate_failed. When ralph org
-// regate wrote r (via=regate), it says on which head the gate ran and names
+// mergeRegateNext is how a Detail of t, a branch whose Details name ralph org
+// regate (mergeTarget.namesRegate), tells the reader what to do: steps, then
+// "run" and mergeRegateCommand, then purpose. When t's org runs another
+// feature now (mergeTarget.orgRunsOn), it first names that org and its
+// branch, and says to run regate once the org is disbanded, since ralph org
+// regate refuses a branch whose org runs.
+func mergeRegateNext(t *mergeTarget, steps, purpose string) string {
+	if t.orgRunsOn == "" {
+		return steps + "run " + mergeRegateCommand(t) + purpose
+	}
+	return fmt.Sprintf("org_id %s now runs another feature, on the branch %s: %sonce %s is disbanded, run %s%s",
+		t.binding.OrgID, t.orgRunsOn, steps, t.binding.OrgID, mergeRegateCommand(t), purpose)
+}
+
+// mergeRegateFailedDetail is the Detail of t, a branch whose Details name
+// ralph org regate (mergeTarget.namesRegate), when its latest gate record r
+// is a gate_failed. When ralph org regate wrote r (via=regate), it says on
+// which head the gate ran and names
 // r's log: origin's tip of the branch when that is r's head (regate gated it
 // as it was), else the merge commit regate made of r's base into the branch,
 // which regate undid after static_failed or test_failed and kept in the
@@ -942,7 +978,7 @@ func mergeRegateCommand(t *mergeTarget) string {
 // gate-only regate failed on origin's tip reads as the second too: merge-order
 // reads no commits, so it cannot tell the two apart.
 func mergeRegateFailedDetail(t *mergeTarget, r gateRecord, remote mergeRemote) string {
-	next := "fix it in the feature worktree, push it, and run " + mergeRegateCommand(t)
+	next := mergeRegateNext(t, "fix it in the feature worktree, push it, and ", "")
 	switch {
 	case r.Via != gateViaRegate:
 		return fmt.Sprintf("the gate failed (%s): %s", r.Reason, next)
@@ -977,20 +1013,20 @@ func mergeGateCommand(t *mergeTarget) string {
 // record r is a readable gate_passed: no_remote, regate, wrong_base, rebase
 // or ready. A base_ref that is neither refs/remotes/origin/<name> nor
 // refs/heads/<name> matches no default branch, so it is rebase. For a branch
-// whose org is not running (mergeTarget.regates), regate also says that the
-// gate's head may not have been pushed (a regate whose push failed leaves
-// that), and rebase says that ralph org regate merges origin's default branch
-// in, which it does instead of a rebase.
+// whose Details name ralph org regate (mergeTarget.namesRegate), regate also
+// says that the gate's head may not have been pushed (a regate whose push
+// failed leaves that), and rebase says that ralph org regate merges origin's
+// default branch in, which it does instead of a rebase.
 func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class, detail string) {
 	def := remote.defaultBranch
 	tip, onOrigin := remote.heads[t.branch]
-	gate, regate := mergeGateCommand(t), mergeRegateCommand(t)
+	gate := mergeGateCommand(t)
 	switch {
 	case !onOrigin:
 		return MergeClassNoRemote, fmt.Sprintf("origin has no branch %s: it was not pushed, or was deleted after a merge", t.branch)
-	case tip != r.Head && t.regates():
+	case tip != r.Head && t.namesRegate():
 		return MergeClassRegate, fmt.Sprintf("pushed after the gate, or the gate's head was not pushed: origin has %s, the gate "+
-			"checked %s: run %s", shortMergeSHA(tip), shortMergeSHA(r.Head), regate)
+			"checked %s: %s", shortMergeSHA(tip), shortMergeSHA(r.Head), mergeRegateNext(t, "", ""))
 	case tip != r.Head:
 		return MergeClassRegate, fmt.Sprintf("pushed after the gate: origin has %s, the gate checked %s: run %s again %s",
 			shortMergeSHA(tip), shortMergeSHA(r.Head), gate, mergeGateRunsWhileOrgRuns)
@@ -1007,8 +1043,8 @@ func classifyGatePassed(t *mergeTarget, r gateRecord, remote mergeRemote) (class
 		why = fmt.Sprintf("origin/%s moved: gate base %s, now %s", def, shortMergeSHA(r.Base), shortMergeSHA(remote.defaultHead))
 	}
 	switch {
-	case why != "" && t.regates():
-		return MergeClassRebase, fmt.Sprintf("%s: run %s, which merges origin/%s in and runs the gate again", why, regate, def)
+	case why != "" && t.namesRegate():
+		return MergeClassRebase, why + ": " + mergeRegateNext(t, "", ", which merges origin/"+def+" in and runs the gate again")
 	case why != "":
 		return MergeClassRebase, fmt.Sprintf("%s: rebase on origin/%s and run %s again %s", why, def, gate, mergeGateRunsWhileOrgRuns)
 	}

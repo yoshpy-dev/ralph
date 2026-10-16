@@ -71,12 +71,17 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"  no_remote       origin has no such branch: not pushed, or deleted\n" +
 			"                  after a merge (told apart only with gh)\n" +
 			"  regate          origin's tip of the branch is not the head the gate\n" +
-			"                  checked: it was pushed after the gate\n" +
+			"                  checked: it was pushed after the gate, or the gate's\n" +
+			"                  head was not pushed (a regate whose push failed)\n" +
 			"  wrong_base      its PR merges into another branch than origin's\n" +
 			"                  default one\n" +
 			"  rebase          origin's default branch moved since the gate, or is\n" +
 			"                  another branch than the one the gate checked\n" +
 			"  ready           none of the above\n" +
+			"\n" +
+			"For a branch whose feature org is not running, the Details name ralph\n" +
+			"org regate --branch <b> instead of ralph org gate; for one whose org\n" +
+			"now runs another feature, they name it for once that org is disbanded.\n" +
 			"\n" +
 			"The list is in this order: ready, rebase, wrong_base, regate,\n" +
 			"unreadable, failed, no_remote, no_gate, and with --all merged and\n" +
