@@ -1,7 +1,7 @@
 # org-regate
 
 - Status: Approved
-- Approved: 2026-10-16 sha256:cc947554c451
+- Approved: 2026-10-16 sha256:7306f0d06797
 - Owner: Claude Code
 - Date: 2026-10-16
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目。FR-7 の「後から入る PR は、main に rebase してゲートを取り直してから出す」のうち、ほかの PR の merge のあとの取り直し。8a-1 の計画(`docs/plans/archive/2026-10-14-org-director-attach.md`)の D1 が、これを `auto_merge` と一緒に 3 本目に残した。consult(consult-plan-automerge、2026-10-16)の判定で 3 本目を 2 つに分け、取り直し(この計画、8a-3b)を `auto_merge`(8a-3a)より先に入れる。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -72,7 +72,7 @@
 - D6 記録の確かめ: `recordGate` の life の確かめは、走っている org 用のままにし、regate 用に別の確かめを足す。manifest のロックの下で読み直し、ブランチ `b` の最後の完全な結びつきが同じもの(org_id と結びつきの中身)で、その org が走っていないときだけ書く。記録の Details は gate と同じ形に `via=regate` を足す。読み手の `gateRecordFromDetails` は知らないキーを飛ばすが、` log=` のあとを丸ごと log の値として読むので、`via` は `log` より前に置く
 - D7 同時に走らせない: 台帳ごとのロック `regate.lock`(flock の排他)を、最初の確かめから push か巻き戻しの終わりまで持つ。Spawn が D9 で一瞬だけ共有で持つのと重ならないよう、取れなければ 1 秒まで短く打ち直し、それでも取れなければ断る。merge と巻き戻しが 2 つ重なると、一方の巻き戻しがもう一方の merge を消しうるため。台帳の書き込みは manifest のロックが守り、leader の `ralph org gate` は別の worktree で動くので、ブランチごとのロックは要らない(director は 1 本ずつ打つ)
 - D8 ネットワーク: fetch は既定のブランチと `b` の 2 回に分け、それぞれ明示の refspec(`+refs/heads/<x>:refs/remotes/origin/<x>`)で取る。`remote.origin.fetch` の設定に頼らず、`b` が origin にないこと(`couldn't find remote ref`)を既定のブランチの失敗と分けて言うため。fetch と push には `GIT_TERMINAL_PROMPT=0` を付け、1 回 120 秒で区切る。fetch が落ちたら何も記録せずに断る
-- D9 Spawn との排他: 新しい life を作る記録(`spawn_started`、`scope_reserved`、`org_workspace_created`)は Spawn の `withManifestLock` の中で書かれ、機能の worktree は `.claude/worktrees/org-<org_id>` で org_id と 1 対 1 である。そこで regate は、`regate.lock` の排他を取ったあと manifest のロックの下で、ロックファイルの中身に印(org_id、branch、worktree、pid)を書き、そのまま org が走っていないことを確かめる。Spawn は `withManifestLock` の判定の中で、冪等な打ち直しの判定のあとに `regate.lock` の共有を待たずに試す。取れれば regate は走っていないので、すぐ放して続ける。取れなければ印を読み、印の org_id が自分の org_id と同じときだけ、何も記録せずに断る。印がまだないか読めないときは続ける(regate が manifest のロックを待っている間で、そのあと regate が走っている org を確かめて断る)。印は消さず、regate は終わりに排他を放すだけにする(共有が取れれば Spawn は印を見ないので、古い印は害がない。消すと、push か巻き戻しの前に Spawn が空の印を読んで進みうる)。`ralph org start --plan` は手順 2(ロックなしの `spawnPrecheckErr`)でも同じ確かめをし、ensure の前に断る(ensure は既存の worktree を読むだけなので、間に regate が始まっても続く Spawn が断る)。regate の間にすべての start と spawn を断る案は、走っている別の org の leader の spawn まで止めるので取らない
+- D9 Spawn との排他: 新しい life を作る記録(`spawn_started`、`scope_reserved`、`org_workspace_created`)は Spawn の `withManifestLock` の中で書かれ、機能の worktree は `.claude/worktrees/org-<org_id>` で org_id と 1 対 1 である。そこで regate は、`regate.lock` の排他を取ったあと manifest のロックの下で、ロックファイルの中身に印(org_id、branch、worktree、pid)を書き、そのまま org が走っていないことを確かめる。Spawn は `withManifestLock` の判定の中で、冪等な打ち直しの判定のあとに `regate.lock` の共有を待たずに試す。取れれば regate は走っていないので、すぐ放して続ける。取れなければ印を読み、印の org_id が自分の org_id と同じときだけ、何も記録せずに断る。印がまだないか読めないときは続ける(regate が manifest のロックを待っている間で、そのあと regate が走っている org を確かめて断る)。regate は排他を取った直後に印を空にし(manifest のロックを待つ間に、前の regate が残した印で、その org の Spawn を断らないため)、manifest のロックの下で新しい印を書く。終わりには印を消さず、排他を放すだけにする(共有が取れれば Spawn は印を見ないので、残った印は害がない。終わりに消すと、push か巻き戻しの前に Spawn が空の印を読んで進みうる)。`ralph org start --plan` は手順 2(ロックなしの `spawnPrecheckErr`)でも同じ確かめをし、ensure の前に断る(ensure は既存の worktree を読むだけなので、間に regate が始まっても続く Spawn が断る)。regate の間にすべての start と spawn を断る案は、走っている別の org の leader の spawn まで止めるので取らない
 - Critical forks: D2〜D5、D7、D9 は consult(consult-plan-automerge)の判定と、この計画への確認で決めた。D9 と D5 の push の扱い、D2 の壊れた記録の扱いは Codex の計画の助言(HIGH 1 件、MEDIUM 2 件)を受けて足した
 
 ## Acceptance criteria
@@ -121,7 +121,7 @@
 - fetch と push は利用者の資格情報で origin に出る。`GIT_TERMINAL_PROMPT=0` で入力を待たず、120 秒で区切る。ssh の鍵の入力は止めない(`core.sshCommand` を上書きしない)
 - 衝突した PR は ralph では `ready` に戻らない。人が worktree で直して push し、regate を打ち直す(AC9 の道)か、org を立て直す。skill にそう書く
 - org_id を同じ名前で立て直すと、古いブランチの regate はその org が走る間断られる。disband のあとに打つよう理由で言う。逆に regate の間は、同じ org_id の start と spawn が断られる(D9)。理由で regate が終わってから打ち直すよう言う
-- regate が落ちて印が残り、別の regate が排他を取ってから印を書くまでの一瞬に、古い印の org_id の Spawn が断られうる。打ち直せば通るので、理由で打ち直しを言う
+- regate が排他を取ってから印を空にするまでの一瞬に、前の regate が残した印の org_id の Spawn が断られうる。打ち直せば通るので、理由で打ち直しを言う
 - Spawn の変更は、すべての spawn の `withManifestLock` の中に、待たない flock を 1 回足す。regate が走っていなければ取ってすぐ放すだけで、記録の形と判定は変わらない
 - 既定のブランチの決め方は gate と同じく `refs/remotes/origin/HEAD` を読む。merge-order は ls-remote の symref を読むので、既定のブランチを変えた repo では食い違いうる(gate と同じ割り切り。tech-debt の既存の行)
 
