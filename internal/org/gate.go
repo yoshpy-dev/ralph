@@ -61,9 +61,12 @@ const (
 var gitObjectPattern = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 // The keys of an EventGatePassed's or EventGateFailed's Details, written in
-// this order (reason only on gate_failed), each as one space-separated
-// `key=value` token. log comes last because its value is strconv.Quote'd and
-// may hold spaces, the rule of plan_approved's cwd (planApproval.details).
+// this order (reason only on gate_failed, via only on a record ralph org
+// regate wrote), each as one space-separated `key=value` token. log comes
+// last because its value is strconv.Quote'd and may hold spaces, the rule of
+// plan_approved's cwd (planApproval.details): gateRecordFromDetails reads
+// everything after " log=" as the log, so a key written after it would be
+// lost.
 const (
 	gateRecordReasonKey    = "reason"
 	gateRecordHeadKey      = "head"
@@ -72,8 +75,13 @@ const (
 	gateRecordBranchKey    = "branch"
 	gateRecordByKey        = "by"
 	gateRecordHerdrPaneKey = "herdr_pane"
+	gateRecordViaKey       = "via"
 	gateRecordLogKey       = "log"
 )
+
+// gateViaRegate is the via= of a gate record ralph org regate wrote
+// (regate.go); a record ralph org gate writes has no via=.
+const gateViaRegate = "regate"
 
 // GateParams describes one `ralph org gate` call.
 type GateParams struct {
@@ -130,7 +138,10 @@ type gateRecord struct {
 	By      string // USER, or approverUnknown (approverName)
 	// HerdrPane: HERDR_PANE_ID was set in the caller's environment.
 	HerdrPane bool
-	Log       string // the absolute path of the gate log
+	// Via is the verb that ran the gate when it is not ralph org gate
+	// (gateViaRegate), "" for ralph org gate.
+	Via string
+	Log string // the absolute path of the gate log
 }
 
 // event is the manifest event r is recorded as: gate_passed when Reason is
@@ -152,13 +163,16 @@ func (r gateRecord) details() string {
 	if r.Reason != "" {
 		d = gateRecordReasonKey + "=" + r.Reason + " "
 	}
-	return d + gateRecordHeadKey + "=" + r.Head +
+	d += gateRecordHeadKey + "=" + r.Head +
 		" " + gateRecordBaseKey + "=" + r.Base +
 		" " + gateRecordBaseRefKey + "=" + r.BaseRef +
 		" " + gateRecordBranchKey + "=" + r.Branch +
 		" " + gateRecordByKey + "=" + r.By +
-		" " + gateRecordHerdrPaneKey + "=" + pane +
-		" " + gateRecordLogKey + "=" + strconv.Quote(r.Log)
+		" " + gateRecordHerdrPaneKey + "=" + pane
+	if r.Via != "" {
+		d += " " + gateRecordViaKey + "=" + r.Via
+	}
+	return d + " " + gateRecordLogKey + "=" + strconv.Quote(r.Log)
 }
 
 // gateRecordFromDetails reads a gate event's Details back (stage 7c reads
@@ -166,8 +180,8 @@ func (r gateRecord) details() string {
 // token is not `key=value`, when head or base is not a commit SHA
 // (gitObjectPattern), base_ref is not under refs/, branch is empty, or reason
 // is set to anything but a GateReason* value. Keys it does not know are
-// skipped. by, herdr_pane and log are read on a best-effort basis: they are
-// for an audit. A record whose Reason is empty is a gate_passed one
+// skipped. by, herdr_pane, via and log are read on a best-effort basis: they
+// are for an audit. A record whose Reason is empty is a gate_passed one
 // (gateRecord.event); a reader checks that against the event's name.
 func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 	head, logValue, hasLog := strings.Cut(details, " "+gateRecordLogKey+"=")
@@ -182,7 +196,7 @@ func gateRecordFromDetails(details string) (r gateRecord, ok bool) {
 	r = gateRecord{
 		Reason: values[gateRecordReasonKey], Head: values[gateRecordHeadKey], Base: values[gateRecordBaseKey],
 		BaseRef: values[gateRecordBaseRefKey], Branch: values[gateRecordBranchKey], By: values[gateRecordByKey],
-		HerdrPane: values[gateRecordHerdrPaneKey] == "set",
+		HerdrPane: values[gateRecordHerdrPaneKey] == "set", Via: values[gateRecordViaKey],
 	}
 	if _, hasReason := values[gateRecordReasonKey]; hasReason && !isGateReason(r.Reason) {
 		return gateRecord{}, false
@@ -377,6 +391,17 @@ type gateBase struct {
 	sha    string // ref's tip
 }
 
+// gateWording is how the worktree checks that ralph org regate shares with
+// Gate (gateCheckBranch, gateDirtyRefusal, gateCheckScripts) name the verb
+// in a refusal: the two verbs' refusals differ only in these.
+type gateWording struct {
+	prefix string // what the refusal starts with: "org: gate: "
+	again  string // its last step: "run the gate again"
+}
+
+// gateWords is Gate's wording.
+var gateWords = gateWording{prefix: "org: gate: ", again: "run the gate again"}
+
 // gateCheckWorktree runs Gate's checks of the worktree dir is in against f,
 // in Gate's order, and returns what they found, or the refusal of the first
 // that fails. The error is a git command that could not run or failed in a
@@ -403,7 +428,7 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 		return gateTarget{}, fmt.Sprintf("org: gate: the gate ran in the git worktree %s, not in org_id %q's feature worktree %s: "+
 			"cd into %s and run the gate again", root, orgID, f.Worktree, f.Worktree), nil
 	}
-	branch, refused, err := gateCheckBranch(ctx, root, f)
+	branch, refused, err := gateCheckBranch(ctx, root, f, gateWords)
 	if err != nil || refused != "" {
 		return gateTarget{}, refused, err
 	}
@@ -414,7 +439,7 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 		return gateTarget{}, "", err
 	}
 	if len(dirty) > 0 {
-		return gateTarget{}, gateDirtyRefusal(root, dirty), nil
+		return gateTarget{}, gateDirtyRefusal(root, dirty, gateWords), nil
 	}
 	if t.head, err = gateHead(ctx, root); err != nil {
 		return gateTarget{}, "", err
@@ -432,19 +457,18 @@ func gateCheckWorktree(ctx context.Context, orgID, dir string, f *FeatureBinding
 	if refused, err = gateCheckAncestor(ctx, t); err != nil || refused != "" {
 		return gateTarget{}, refused, err
 	}
-	for _, rel := range []string{GateStaticScript, GateTestScript} {
-		if refused = gateCheckScript(root, rel); refused != "" {
-			return gateTarget{}, refused, nil
-		}
+	if refused = gateCheckScripts(root, gateWords); refused != "" {
+		return gateTarget{}, refused, nil
 	}
 	return t, "", nil
 }
 
 // gateCheckBranch returns the branch checked out in root, or the refusal of
-// a worktree that is not on f's branch: another branch, a detached HEAD, or
-// a rebase in progress (HEAD is detached then, and `git switch` fails until
-// the rebase is finished or undone, gateRebaseInProgress).
-func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding) (string, string, error) {
+// a worktree that is not on f's branch, worded with w: another branch, a
+// detached HEAD, or a rebase in progress (HEAD is detached then, and `git
+// switch` fails until the rebase is finished or undone,
+// gateRebaseInProgress).
+func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding, w gateWording) (string, string, error) {
 	out, err := gateGitOutput(ctx, root, "branch", "--show-current")
 	if err != nil {
 		return "", "", err
@@ -454,27 +478,38 @@ func gateCheckBranch(ctx context.Context, root string, f *FeatureBinding) (strin
 		return branch, "", nil
 	case "":
 	default:
-		return "", fmt.Sprintf("org: gate: %s has the branch %s checked out, not the feature branch %s: run git switch "+
-			"%s and run the gate again", root, branch, f.Branch, f.Branch), nil
+		return "", w.prefix + fmt.Sprintf("%s has the branch %s checked out, not the feature branch %s: run git switch "+
+			"%s and %s", root, branch, f.Branch, f.Branch, w.again), nil
 	}
 	rebasing, err := gateRebaseInProgress(ctx, root)
 	if err != nil {
 		return "", "", err
 	}
 	if rebasing {
-		return "", fmt.Sprintf("org: gate: a rebase is in progress in %s, so HEAD is detached and not on the feature branch %s: "+
-			"finish it with git rebase --continue, or undo it with git rebase --abort, and run the gate again", root, f.Branch), nil
+		return "", w.prefix + fmt.Sprintf("a rebase is in progress in %s, so HEAD is detached and not on the feature branch %s: "+
+			"finish it with git rebase --continue, or undo it with git rebase --abort, and %s", root, f.Branch, w.again), nil
 	}
-	return "", fmt.Sprintf("org: gate: HEAD is detached in %s, not on the feature branch %s: run git switch %s "+
-		"and run the gate again", root, f.Branch, f.Branch), nil
+	return "", w.prefix + fmt.Sprintf("HEAD is detached in %s, not on the feature branch %s: run git switch %s "+
+		"and %s", root, f.Branch, f.Branch, w.again), nil
 }
 
 // gateRebaseInProgress reports whether a rebase is stopped in root: git's
-// rebase-merge or rebase-apply directory for root's worktree exists (`git
-// rev-parse --git-path` prints each, relative to root unless it is absolute,
-// as it is in a linked worktree).
+// rebase-merge or rebase-apply directory for root's worktree exists
+// (gateGitPathExists).
 func gateRebaseInProgress(ctx context.Context, root string) (bool, error) {
-	out, err := gateGitOutput(ctx, root, "rev-parse", "--git-path", "rebase-merge", "--git-path", "rebase-apply")
+	return gateGitPathExists(ctx, root, "a rebase", "rebase-merge", "rebase-apply")
+}
+
+// gateGitPathExists reports whether any of names, paths in git's directory
+// for root's worktree, exists (`git rev-parse --git-path` prints each,
+// relative to root unless it is absolute, as it is in a linked worktree).
+// what names the state they mark in the error ("a rebase").
+func gateGitPathExists(ctx context.Context, root, what string, names ...string) (bool, error) {
+	args := []string{"rev-parse"}
+	for _, name := range names {
+		args = append(args, "--git-path", name)
+	}
+	out, err := gateGitOutput(ctx, root, args...)
 	if err != nil {
 		return false, err
 	}
@@ -487,7 +522,7 @@ func gateRebaseInProgress(ctx context.Context, root string) (bool, error) {
 		case err == nil:
 			return true, nil
 		case !errors.Is(err, fs.ErrNotExist):
-			return false, fmt.Errorf("org: gate: check for a rebase in progress in %s: %w", root, err)
+			return false, fmt.Errorf("org: gate: check for %s in progress in %s: %w", what, root, err)
 		}
 	}
 	return false, nil
@@ -531,36 +566,47 @@ func gateCheckAncestor(ctx context.Context, t gateTarget) (string, error) {
 		t.head, t.branch, t.base.ref, t.base.sha, next), nil
 }
 
-// gateCheckScript refuses rel in root when it does not exist or is not an
-// executable regular file (symlinks followed).
-func gateCheckScript(root, rel string) string {
+// gateCheckScripts refuses root, worded with w, when one of the two gate
+// scripts is not there to run (gateCheckScript), the static script first.
+func gateCheckScripts(root string, w gateWording) string {
+	for _, rel := range []string{GateStaticScript, GateTestScript} {
+		if refused := gateCheckScript(root, rel, w); refused != "" {
+			return refused
+		}
+	}
+	return ""
+}
+
+// gateCheckScript refuses rel in root, worded with w, when it does not exist
+// or is not an executable regular file (symlinks followed).
+func gateCheckScript(root, rel string, w gateWording) string {
 	path := filepath.Join(root, filepath.FromSlash(rel))
 	info, err := os.Stat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Sprintf("org: gate: %s does not exist: the gate runs ./%s in the feature worktree, so add it, commit it, "+
-			"and run the gate again", path, rel)
+		return w.prefix + fmt.Sprintf("%s does not exist: the gate runs ./%s in the feature worktree, so add it, commit it, "+
+			"and %s", path, rel, w.again)
 	case err != nil:
-		return fmt.Sprintf("org: gate: %s cannot be read (%s): fix it, commit it, and run the gate again", path, pathErrorCause(err))
+		return w.prefix + fmt.Sprintf("%s cannot be read (%s): fix it, commit it, and %s", path, pathErrorCause(err), w.again)
 	case !info.Mode().IsRegular():
-		return fmt.Sprintf("org: gate: %s is not a regular file: the gate runs ./%s, so make it the script, commit it, and run "+
-			"the gate again", path, rel)
+		return w.prefix + fmt.Sprintf("%s is not a regular file: the gate runs ./%s, so make it the script, commit it, and %s",
+			path, rel, w.again)
 	case info.Mode().Perm()&0o111 == 0:
-		return fmt.Sprintf("org: gate: %s is not executable: run chmod +x %s, commit the change, and run the gate again", path, rel)
+		return w.prefix + fmt.Sprintf("%s is not executable: run chmod +x %s, commit the change, and %s", path, rel, w.again)
 	}
 	return ""
 }
 
 // gateDirtyRefusal is the refusal of a worktree with the porcelain lines
-// dirty, the first GateDirtyListLines of them listed.
-func gateDirtyRefusal(root string, dirty []string) string {
+// dirty, worded with w, the first GateDirtyListLines of them listed.
+func gateDirtyRefusal(root string, dirty []string, w gateWording) string {
 	shown := dirty[:min(len(dirty), GateDirtyListLines)]
 	list := "  " + strings.Join(shown, "\n  ")
 	if more := len(dirty) - len(shown); more > 0 {
 		list += fmt.Sprintf("\n  ... and %d more", more)
 	}
-	return fmt.Sprintf("org: gate: the feature worktree %s has %d uncommitted change(s) or untracked file(s): commit or "+
-		"remove them (a file the scripts write belongs in .gitignore) and run the gate again:\n%s", root, len(dirty), list)
+	return w.prefix + fmt.Sprintf("the feature worktree %s has %d uncommitted change(s) or untracked file(s): commit or "+
+		"remove them (a file the scripts write belongs in .gitignore) and %s:\n%s", root, len(dirty), w.again, list)
 }
 
 // gateCheckAfter reads t's worktree again after both scripts passed and
