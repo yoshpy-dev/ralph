@@ -70,13 +70,15 @@ const (
 	// org count as running.
 	EventPlanApproved = "plan_approved"
 	// EventGatePassed and EventGateFailed are org-level, non-state events
-	// (SeatID empty, absent from stateEvents below) that only `ralph org
-	// gate` writes (Gate, gate.go): the gate scripts passed, or failed, on
-	// the feature worktree's HEAD. Details are `head=<sha> base=<sha>
-	// base_ref=<ref> branch=<branch> by=<USER or unknown>
-	// herdr_pane=<set|unset> log=<quoted path>`, with `reason=<static_failed,
-	// test_failed, head_moved or tree_changed>` first on gate_failed
-	// (gateRecord). A refusal before the scripts run records neither. The
+	// (SeatID empty, absent from stateEvents below) that `ralph org gate`
+	// (Gate, gate.go) and `ralph org regate` (Regate, regate.go) write: the
+	// gate scripts passed, or failed, on the feature worktree's HEAD. Details
+	// are `head=<sha> base=<sha> base_ref=<ref> branch=<branch> by=<USER or
+	// unknown> herdr_pane=<set|unset> log=<quoted path>`, with
+	// `reason=<static_failed, test_failed, head_moved or tree_changed>` first
+	// on gate_failed and, on a record ralph org regate wrote, ` via=regate`
+	// before `log=` (gateRecord in gate_record.go, which has the record's
+	// shape). A refusal before the scripts run records neither. The
 	// watch counts both as leader activity (leaderActivityEventCount); Roster
 	// skips them like every org-level event, and they do not make an org
 	// count as running.
