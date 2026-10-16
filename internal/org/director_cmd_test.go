@@ -1472,6 +1472,43 @@ func TestStartDirector_AReplaceWhileWaitingForTheCheckInEndsItsOwnLaunch(t *test
 	}
 }
 
+// AC4: a `ralph org director stop --id d1` that lands while start waits for
+// the check-in (no pid yet) records d1 detached and stopped. start's cleanup
+// then finds d1 already stopped and counts that stop as its record: it
+// returns a *DirectorLaunchCmdStoppedError and writes nothing more, not a
+// *DirectorCleanupError that names a stop no longer needed.
+func TestStartDirector_AStopWhileWaitingForTheCheckInIsTheCleanupsRecord(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+	f := newCmdStartFixture(t, launchCmdTouching(ran, 0), cmdStartOptions{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat(ran); err == nil {
+				if res, err := f.stop("d1"); err != nil || res.ProcessNote != "process=none recorded" {
+					t.Errorf("the stop during the wait = %+v, %v, want d1 stopped with no process recorded", res, err)
+				}
+				return
+			}
+		}
+		t.Error("launch_cmd did not run within 20s")
+	}()
+	p := f.params(DirectorDriverClaude, "opus")
+	p.TimeoutMS = 20000
+	_, err := f.o.StartDirector(p)
+	<-done
+	var stopped *DirectorLaunchCmdStoppedError
+	if !errors.As(err, &stopped) || !errors.Is(err, ErrDirectorReplacedDuringStart) || stopped.ID != "d1" || stopped.PID != 0 || stopped.Signalled ||
+		!strings.Contains(err.Error(), "no registration is current") || !strings.HasSuffix(err.Error(), "; d1 is recorded stopped") {
+		t.Fatalf("err = %#v (%v), want ErrDirectorReplacedDuringStart and a cleanup that counts the stop as its record", err, err)
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+	wantNoDirectorOpen(t, f.store)
+	if len(f.h.calls) != 0 {
+		t.Fatalf("herdr calls = %v, want none", f.h.calls)
+	}
+}
+
 // AC4 and D6: a check-in that lands after the cleanup read the registration
 // (no pid then) and before it records the stop makes that record refuse
 // (ErrDirectorCheckedInDuringStop). The cleanup reads once more, finds the
@@ -1590,6 +1627,84 @@ func TestStartDirector_ACleanupThatCannotConfirmTheEndLeavesItDetachedOnly(t *te
 			}
 			if proc := mustReadProcess(t, ce.PID); proc.State != DirectorProcessAlive || proc.StartTime != res.OpenHeadless[0].StartTime {
 				t.Fatalf("pid %d reads %+v, want the agent still running", ce.PID, proc)
+			}
+		})
+	}
+}
+
+// AC4 and D6: the same unconfirmed end once the registration is no longer
+// current, as an attach --replace or a detach --force landed while
+// launch_cmd ran: Detach by its id is refused, so the cleanup writes
+// nothing. d1 stays open, and the *DirectorCleanupError is not Detached and
+// says nothing more was recorded, as the detached is not the cleanup's.
+func TestStartDirector_ACleanupThatCannotConfirmTheEndWritesNothingOnceItIsNotCurrent(t *testing.T) {
+	cases := []struct {
+		name        string
+		land        func(s *DirectorStore) error
+		wantTrail   []string
+		wantCurrent string
+	}{
+		{"an attach --replace", func(s *DirectorStore) error {
+			_, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverClaude, Replace: true, User: "carol", Cwd: "/c"})
+			return err
+		}, []string{"attached d1", "launched d1", "detached d1", "attached d2"}, "d2"},
+		{"a detach --force", func(s *DirectorStore) error {
+			_, err := s.Detach(DirectorDetach{Force: true, User: "carol", Cwd: "/c"})
+			return err
+		}, []string{"attached d1", "launched d1", "detached d1+force"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStartFixture(t, nil, cmdStartOptions{ignoreTerm: true})
+			landed := filepath.Join(f.base, "landed")
+			f.o.Config.Director.LaunchCmd = launchCmdFailingOnceExists(landed)
+			f.o.DriverCallTimeout = 30 * time.Second
+			f.o.DirectorStopWait = 300 * time.Millisecond
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				// launch_cmd fails only once landed exists, so the replace
+				// or the detach is recorded before the cleanup reads d1.
+				defer func() { _ = os.WriteFile(landed, nil, 0o644) }()
+				for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+					if _, err := os.Stat(f.agentMarker); err == nil {
+						if err := tc.land(f.store); err != nil {
+							t.Errorf("%s: %v", tc.name, err)
+						}
+						return
+					}
+				}
+				t.Error("the agent did not run within 20s")
+			}()
+			_, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus"))
+			<-done
+			var ce *DirectorCleanupError
+			if !errors.As(err, &ce) || ce.ID != "d1" || ce.Launch != DirectorLaunchCmd || ce.Detached || ce.PID <= 0 ||
+				ce.StopCommand != "ralph org director stop --id d1" {
+				t.Fatalf("err = %#v (%v), want a *DirectorCleanupError of a launch cmd, not Detached, with the pid and the stop command", err, err)
+			}
+			for _, want := range []string{"launch_cmd sh failed: exit status 1", "d1 is not recorded stopped, since the end of the process that checked in is not confirmed",
+				"did not end within 300ms of its SIGTERM", "; nothing more was recorded", "record the stop with ralph org director stop --id d1"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to say %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "recorded detached only") {
+				t.Errorf("err = %v says the cleanup recorded d1 detached, but %s did", err, tc.name)
+			}
+			wantTrail(t, f.store, tc.wantTrail...)
+			launched := launchedEvent(t, f.store)
+			res := mustReadDirector(t, f.store)
+			if currentDirectorID(res) != tc.wantCurrent || len(res.OpenHeadless) != 1 || res.OpenHeadless[0].ID != "d1" ||
+				res.OpenHeadless[0].PID != launched.PID || ce.PID != launched.PID {
+				t.Fatalf("current %q, open %q, error pid %d, want %q current and d1 open with the checked-in pid %d",
+					currentDirectorID(res), openHeadlessSummary(res), ce.PID, tc.wantCurrent, launched.PID)
+			}
+			if proc := mustReadProcess(t, ce.PID); proc.State != DirectorProcessAlive || proc.StartTime != launched.StartTime {
+				t.Fatalf("pid %d reads %+v, want the agent still running", ce.PID, proc)
+			}
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %v, want none", f.h.calls)
 			}
 		})
 	}
