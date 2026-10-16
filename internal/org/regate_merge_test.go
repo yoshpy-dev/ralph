@@ -1284,6 +1284,108 @@ func TestRegate_AGateOnlyHeadIsNotPushedAgainOnceOriginLeftIt(t *testing.T) {
 	}
 }
 
+// TestRegate_APersonsMergeOfTheDefaultBranchIsNotTakenForRegates covers D4
+// for a merge commit of origin's main into feat/auth that a person made, as
+// the conflict refusal asks (git merge origin/main, commit, push) or as
+// GitHub's Update branch makes one: its parents are those of the merge commit
+// a Regate makes, origin's tip of feat/auth then and origin's main, but its
+// subject is git's or GitHub's. Once a gate-only Regate passed or failed on it
+// and origin's feat/auth was put back to its first parent (a force push),
+// running Regate again refuses, pushes nothing, records nothing, and names no
+// git reset --keep, which would drop the person's merge: with origin's main
+// as the merge took it in (no push-only), and once origin's main moved on.
+func TestRegate_APersonsMergeOfTheDefaultBranchIsNotTakenForRegates(t *testing.T) {
+	for _, m := range []struct {
+		name    string
+		subject string
+		merge   func(t *testing.T, fx *regateFixture) // after origin's main moved on
+	}{
+		{"git merge origin/main", "Merge remote-tracking branch 'origin/main' into feat/auth", func(t *testing.T, fx *regateFixture) {
+			runGit(t, "-C", fx.worktree, "fetch", "--quiet", "origin")
+			runGit(t, "-C", fx.worktree, "merge", "--quiet", "--no-ff", "--no-edit", "origin/main")
+			runGit(t, "-C", fx.worktree, "push", "--quiet", "origin", "HEAD")
+		}},
+		{"GitHub's Update branch", "Merge branch 'main' into feat/auth", func(t *testing.T, fx *regateFixture) {
+			// origin's new main commit (pushToOrigin) changes no file, so the
+			// merge's tree is feat/auth's.
+			merge := gitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", "refs/heads/feat/auth",
+				"-p", "refs/heads/main", "-m", "Merge branch 'main' into feat/auth", "refs/heads/feat/auth^{tree}")
+			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", merge)
+			runGit(t, "-C", fx.worktree, "fetch", "--quiet", "origin")
+			runGit(t, "-C", fx.worktree, "merge", "--quiet", "--ff-only", "origin/feat/auth")
+		}},
+	} {
+		for _, passed := range []bool{true, false} {
+			name := m.name + ", a pass"
+			if !passed {
+				name = m.name + ", a failure"
+			}
+			t.Run(name, func(t *testing.T) {
+				fx := newRegateFixture(t)
+				pre, _ := fx.tips(t)
+				fx.pushToOrigin(t, "main")
+				m.merge(t, fx)
+				head, tip := fx.tips(t)
+				if parents := strings.Fields(gitOut(t, fx.worktree, "rev-list", "--parents", "-n", "1", head))[1:]; !slices.Equal(parents,
+					[]string{pre, tip}) {
+					t.Fatalf("the person's merge %s has the parents %v; want %s, then origin's main %s", head, parents, pre, tip)
+				}
+				if subject := gitOut(t, fx.worktree, "log", "-1", "--format=%s", head); subject != m.subject {
+					t.Fatalf("the person's merge %s has the subject %q; want %q", head, subject, m.subject)
+				}
+				if !passed {
+					fx.setExit(t, "test", 1)
+				}
+				if first := fx.mustRegate(t); first.Outcome != RegateOutcomeGated || first.Passed != passed || first.Head != head ||
+					first.Base != tip {
+					t.Fatalf("gate-only regate = %+v; want a record of %s on %s that passed: %v", first, head, tip, passed)
+				}
+				runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", pre)
+				refusal := "HEAD " + head + " of feat/auth in " + fx.worktree + " has commits that origin's tip " + pre + " of the branch does not"
+				callsBefore, before := fx.calls(t), fx.snapshot(t)
+				res, err := fx.regate(context.Background())
+				fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{refusal}, []string{"reset --keep"})
+
+				fx.pushToOrigin(t, "main")
+				callsBefore, before = fx.calls(t), fx.snapshot(t)
+				res, err = fx.regate(context.Background())
+				fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{refusal}, []string{"reset --keep"})
+			})
+		}
+	}
+}
+
+// TestRegate_AMergeCommitWhoseSubjectAHookChangedIsNotPushedOnly covers D4
+// for a merge commit Regate made whose subject a prepare-commit-msg hook
+// changed: its parents are D3's, but its subject is not the one Regate
+// writes, so Regate cannot tell it from a person's merge. After its push
+// failed, running Regate again refuses, pushes nothing, and names no git
+// reset --keep (the safe side) instead of pushing it only.
+func TestRegate_AMergeCommitWhoseSubjectAHookChangedIsNotPushedOnly(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, _ := fx.tips(t)
+	tip := fx.pushToOrigin(t, "main")
+	fx.setHooks(t, "prepare-commit-msg", `printf '[checked] %s\n' "$(cat "$1")" > "$1.new" && mv "$1.new" "$1"`+"\n")
+	allow := fx.rejectPushes(t)
+	first := fx.mustRegate(t)
+	if first.Outcome != RegateOutcomeMerged || !first.Passed || first.PushFailed == "" || first.Merge == "" {
+		t.Fatalf("regate = %+v; want a merge commit that passed and whose push failed", first)
+	}
+	if parents := strings.Fields(gitOut(t, fx.worktree, "rev-list", "--parents", "-n", "1", first.Merge))[1:]; !slices.Equal(parents,
+		[]string{pre, tip}) {
+		t.Fatalf("merge commit %s has the parents %v; want the branch's %s, then origin's main %s", first.Merge, parents, pre, tip)
+	}
+	if subject, want := gitOut(t, fx.worktree, "log", "-1", "--format=%s", first.Merge), "[checked] Merge origin/main "+tip[:12]+
+		" into feat/auth"; subject != want {
+		t.Fatalf("merge commit subject = %q; want the hook's %q", subject, want)
+	}
+	allow()
+	callsBefore, before := fx.calls(t), fx.snapshot(t)
+	res, err := fx.regate(context.Background())
+	fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{"HEAD " + first.Merge + " of feat/auth in " + fx.worktree +
+		" has commits that origin's tip " + pre + " of the branch does not"}, []string{"reset --keep"})
+}
+
 // TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset covers D2 for
 // a HEAD that is not origin's tip: after a push that failed, a gate record
 // that cannot be read or a corrupt line after the gate_passed may hide a

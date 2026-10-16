@@ -62,20 +62,22 @@ func regateMergeEnv(env []string) []string {
 // (regateBranch.passedOn) and HEAD is a head whose push may have failed, it
 // pushes HEAD and does nothing else (regatePush, RegateOutcomePushOnly). For
 // a pass Regate recorded (via=regate), HEAD must be its own merge commit on
-// originHead (regateIsOwnMerge): a gate-only Regate (AC9) records via=regate
-// too, and the head it gated was origin's tip then, so once origin's branch
-// was put back under that head (a force push), pushing it again would undo
-// what someone did to origin. For a pass with no via (ralph org gate, the
-// leader's), any HEAD with originHead under it will do: the leader's push of
-// its gated head may have failed. Otherwise it refuses with
-// regateCheckOriginHead's reason and regateResetHint's.
+// originHead, by its parents and its subject (regateIsOwnMerge): a gate-only
+// Regate (AC9) records via=regate too, and the head it gated was origin's tip
+// then (a person's merge of the default branch tip, whose parents are those
+// of Regate's, among them), so once origin's branch was put back under that
+// head (a force push), pushing it again would undo what someone did to
+// origin. For a pass with no via (ralph org gate, the leader's), any HEAD
+// with originHead under it will do: the leader's push of its gated head may
+// have failed. Otherwise it refuses with regateCheckOriginHead's reason and
+// regateResetHint's.
 func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, originHead string, env []string, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	if b.passedOn(t) {
 		var retry bool
 		var err error
 		if b.gate.record.Via == gateViaRegate {
-			retry, err = regateIsOwnMerge(ctx, t, originHead, b.gate.record.Base)
+			retry, err = regateIsOwnMerge(ctx, t, originHead, b.gate.record)
 		} else {
 			retry, err = regateIsAncestor(ctx, t.root, originHead, t.head)
 		}
@@ -102,18 +104,20 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 // when HEAD is a merge commit an earlier Regate made and could not push (D4):
 // b's latest gate record is readable with no corrupt line after it, is one
 // Regate wrote (via=regate) of HEAD, and HEAD is Regate's own merge commit on
-// originHead (regateIsOwnMerge). The record alone does not say that: a
-// gate-only Regate (AC9) records via=regate too, of a head that was origin's
-// tip when it was gated. The hint is the git reset --keep that drops that
-// commit, and running Regate again, which merges anew. For any other HEAD it
-// is "": the reset could drop commits nobody pushed, a leader's gated head
-// among them, or a commit origin had until its branch was put back under it.
+// originHead, by its parents and its subject (regateIsOwnMerge). The record
+// alone does not say that: a gate-only Regate (AC9) records via=regate too,
+// of a head that was origin's tip when it was gated. The hint is the git
+// reset --keep that drops that commit, and running Regate again, which
+// merges anew. For any other HEAD it is "": the reset could drop commits
+// nobody pushed, a leader's gated head among them, or a commit origin had
+// until its branch was put back under it, such as a person's merge of the
+// default branch tip with the conflicts it resolved.
 func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHead string, w gateWording) (string, error) {
 	g := b.gate
 	if g == nil || !g.readable || b.corruptAfterGate || g.record.Head != t.head || g.record.Via != gateViaRegate {
 		return "", nil
 	}
-	own, err := regateIsOwnMerge(ctx, t, originHead, g.record.Base)
+	own, err := regateIsOwnMerge(ctx, t, originHead, g.record)
 	if err != nil || !own {
 		return "", err
 	}
@@ -123,17 +127,42 @@ func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHe
 }
 
 // regateIsOwnMerge reports whether t's HEAD has the shape of the merge commit
-// Regate makes on originHead, origin's tip of the branch after the fetch:
-// exactly two parents, originHead first and base second, base being the
-// default branch tip a gate record of HEAD names. regateMergeTip makes its
-// merge commit with the parents HEAD before the merge and t.base.sha, which
-// that record then names as its base. The commit's message is not read.
-func regateIsOwnMerge(ctx context.Context, t gateTarget, originHead, base string) (bool, error) {
+// Regate makes on originHead, origin's tip of the branch after the fetch, as
+// record, a gate record of HEAD that Regate wrote, names it: exactly two
+// parents, originHead first and record's base second, and the subject
+// regateMergeTip writes for record's base ref, record's base, and t's branch
+// (regateMergeSubject). regateMergeTip makes its merge commit with the
+// parents HEAD before the merge and t.base.sha, which that record then names
+// as its base, and with that subject. The parents alone do not tell it from
+// a merge commit of the default branch tip that a person made, as Regate's
+// conflict refusal asks (git merge origin/<name>, resolve, commit, push): its
+// parents are the same. Its subject is not: git merge's default is "Merge
+// remote-tracking branch 'origin/main' into <branch>", and GitHub's Update
+// branch writes "Merge branch 'main' into <branch>". A merge commit of
+// Regate's whose subject a hook changed is then not Regate's either, which
+// is the safe side: Regate refuses it rather than push it or name the git
+// reset --keep that drops it. The subject is read only when the parents
+// match, with --no-show-signature, since log.showSignature would print a
+// signed commit's signature check on stdout before it. The error is for a
+// git that cannot read the parents or the subject.
+func regateIsOwnMerge(ctx context.Context, t gateTarget, originHead string, record gateRecord) (bool, error) {
 	parents, err := regateParents(ctx, t.root, t.head)
+	if err != nil || !slices.Equal(parents, []string{originHead, record.Base}) {
+		return false, err
+	}
+	subject, err := gateGitOutput(ctx, regatePrefix, t.root, "log", "-1", "--no-show-signature", "--format=%s", t.head)
 	if err != nil {
 		return false, err
 	}
-	return slices.Equal(parents, []string{originHead, base}), nil
+	return strings.TrimSuffix(subject, "\n") == regateMergeSubject(record.BaseRef, record.Base, t.branch), nil
+}
+
+// regateMergeSubject is the subject of D3's merge commit of base, the tip of
+// baseRef (refs/remotes/origin/<name>), into branch: "Merge origin/<name>
+// <base's first 12 hex> into <branch>". A base shorter than 12 characters is
+// written whole; a gate record's base is a full SHA (gitObjectPattern).
+func regateMergeSubject(baseRef, base, branch string) string {
+	return fmt.Sprintf("Merge %s %s into %s", strings.TrimPrefix(baseRef, "refs/remotes/"), base[:min(12, len(base))], branch)
 }
 
 // regateParents returns commit's parents in root's repository, the first
@@ -263,7 +292,8 @@ func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gate
 
 // regateMergeTip merges t's base tip into the branch checked out in t.root
 // with D3's merge commit, `git merge --no-ff --no-edit -m 'Merge <origin/name>
-// <12 hex> into <branch>' <sha>`, run with env, so the commit has the
+// <12 hex> into <branch>' <sha>` (regateMergeSubject, which
+// regateIsOwnMerge checks too), run with env, so the commit has the
 // caller's identity and the caller's hooks run, and GIT_MERGE_AUTOEDIT=no
 // (regateMergeEnv), in a process group of its own on a context ctx's
 // cancellation does not reach (regateUncancelledGit). It returns the merge
@@ -282,7 +312,7 @@ func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gate
 // then. stderr gets the line regateUncancelledGit writes.
 func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.Writer, w gateWording) (merge, refused string, err error) {
 	uncancelled := context.WithoutCancel(ctx)
-	msg := fmt.Sprintf("Merge %s %s into %s", strings.TrimPrefix(t.base.ref, "refs/remotes/"), t.base.sha[:12], t.branch)
+	msg := regateMergeSubject(t.base.ref, t.base.sha, t.branch)
 	command := fmt.Sprintf("git merge --no-ff --no-edit -m '%s' %s", msg, t.base.sha)
 	r, timedOut, err := regateUncancelledGit(ctx, t.root, regateMergeEnv(env), stderr, "merge", "--no-ff", "--no-edit", "-m", msg,
 		t.base.sha)
