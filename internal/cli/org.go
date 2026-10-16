@@ -672,7 +672,11 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the org was started) is per-plan, a spawn of a seat whose role is\n" +
 			"implementer is also refused until an approval recorded with\n" +
 			"`ralph org approve` since the org's last disband matches the plan\n" +
-			"file. Either refusal, --dry-run included, is recorded as `rejected`.",
+			"file. Either refusal, --dry-run included, is recorded as `rejected`.\n" +
+			"\n" +
+			"A spawn into an org is refused, with nothing recorded, while\n" +
+			"`ralph org regate` works on that org's branch; run it again once the\n" +
+			"regate ends.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -859,6 +863,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"main worktree root when it has one, logging to <state dir>/watch.log)\n" +
 			"and waits up to 10s for it, and it is refused when a watch holds the\n" +
 			"lock but is stale, stopping, or a --once run.\n" +
+			"\n" +
+			"Both forms are refused, with nothing recorded, while\n" +
+			"`ralph org regate` works on the org's branch; run start again once\n" +
+			"the regate ends.\n" +
 			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {
