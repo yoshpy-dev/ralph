@@ -122,6 +122,63 @@ func TestRegate_PointsTheRemoteTrackingRefAtThePush(t *testing.T) {
 	}
 }
 
+// TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch covers the
+// test plan's edge case of origin's main a descendant of HEAD, a branch with
+// no commit main does not have: main took feat/auth's commit by a
+// fast-forward and moved on. HEAD still does not contain the tip, so Regate
+// makes D3's merge commit (--no-ff) on HEAD, whose tree is the tip's, runs
+// the scripts on it, records a gate_passed of it via regate, pushes it to
+// origin's feat/auth, and merge-order then classifies the branch ready.
+func TestRegate_MergesADefaultBranchTipThatAlreadyContainsTheBranch(t *testing.T) {
+	fx := newRegateFixture(t)
+	pre, oldTip := fx.tips(t)
+	fx.appendEvents(t, moGate("auth", "feat/auth", pre, oldTip, "refs/remotes/origin/main", ""))
+	runGit(t, "-C", fx.main, "merge", "--quiet", "--ff-only", "feat/auth")
+	tip := fx.commitAndPush(t, fx.main, "MAIN.md", "main moved on\n")
+	if parent := gitOut(t, fx.origin, "rev-parse", tip+"^"); parent != pre {
+		t.Fatalf("origin's main %s has the parent %s; want feat/auth's HEAD %s", tip, parent, pre)
+	}
+	if class := fx.mergeClass(t); class != MergeClassRebase {
+		t.Fatalf("merge-order class before the regate = %s; want rebase", class)
+	}
+
+	res := fx.mustRegate(t)
+	merge := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+	logPath := filepath.Join(fx.stateDir, gateLogDir, regateTestLog)
+	want := RegateResult{Outcome: RegateOutcomeMerged, Passed: true, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth",
+		Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, LogPath: logPath, Pushed: true}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("regate = %+v\nwant     %+v", res, want)
+	}
+	fx.assertMergeCommit(t, merge, pre, tip)
+	if diff := gitOut(t, fx.worktree, "diff", tip, merge); diff != "" {
+		t.Errorf("git diff %s %s:\n%s\nwant none: the merge commit's tree is origin's main", tip, merge, diff)
+	}
+	if files := gitOut(t, fx.worktree, "diff", "--name-only", pre, merge); files != "MAIN.md" {
+		t.Errorf("git diff --name-only %s %s = %q; want MAIN.md, main's commit after the branch", pre, merge, files)
+	}
+	if calls := fx.calls(t); !slices.Equal(calls, []string{"static", "test"}) {
+		t.Fatalf("scripts run = %v; want static then test", calls)
+	}
+	events := fx.gateEvents(t)
+	wantDetails := "head=" + merge + " base=" + tip + " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset " +
+		"via=regate log=" + strconv.Quote(logPath)
+	if len(events) != 2 || events[1].Event != EventGatePassed || events[1].OrgID != "auth" || events[1].SeatID != "" ||
+		events[1].Details != wantDetails {
+		t.Fatalf("gate events = %+v\nwant the seeded one, then a gate_passed of auth with Details %q", events, wantDetails)
+	}
+	if got := fx.originBranch(t); got != merge {
+		t.Fatalf("origin's feat/auth = %s; want the merge commit %s", got, merge)
+	}
+	if st := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Fatalf("the worktree after the regate:\n%s", st)
+	}
+	if class := fx.mergeClass(t); class != MergeClassReady {
+		t.Fatalf("merge-order class after the regate = %s; want ready", class)
+	}
+	fx.assertUnlocked(t)
+}
+
 // regateNoIdentityEnv is env with no name or email git could make a commit
 // with: no GIT_AUTHOR_*, GIT_COMMITTER_* or EMAIL, HOME an empty directory,
 // and no global or system git config (GIT_CONFIG_GLOBAL=/dev/null,
