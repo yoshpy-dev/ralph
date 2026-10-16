@@ -245,7 +245,8 @@ type RegateResult struct {
 // manifest lock only when the branch's binding and its org are as the first
 // check found them (recordRegate, D6): RegateOutcomeGated. When HEAD does not
 // contain the tip, it first makes D3's merge commit of the tip, or refuses
-// with the worktree as it was when git makes none (regateMergeTip, AC5), then
+// with the worktree as it was when something ignored is in the merge's way
+// (regateCheckInTheWay, D3) or git makes none (regateMergeTip, AC5), then
 // runs and records the gate on the merge commit the same way and pushes a
 // pass, or undoes the merge commit when nothing or a script failure was
 // recorded (regateMerged: RegateOutcomeMerged). regate.lock is released when

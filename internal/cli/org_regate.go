@@ -70,7 +70,10 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"a hook stops makes no commit: regate undoes a merge left in progress\n" +
 			"(git merge --abort), records nothing, names the conflicting files, and\n" +
 			"exits 1. When git has no user.name and user.email to make the merge\n" +
-			"commit with, regate merges nothing, records nothing, and exits 1.\n" +
+			"commit with, regate merges nothing, records nothing, and exits 1. So it\n" +
+			"does when an ignored file or directory is on disk where the merge\n" +
+			"would write (git merge overwrites those without a word): it names the\n" +
+			"paths to move out of the worktree.\n" +
 			"\n" +
 			"The gate runs the two scripts as ralph org gate does (see ralph org\n" +
 			"gate --help for their environment, the log under <state dir>/gates/,\n" +
