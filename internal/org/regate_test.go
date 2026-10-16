@@ -988,9 +988,10 @@ func TestRegate_UpToDateDoesNothing(t *testing.T) {
 // with HEAD containing origin's main but no readable gate_passed of HEAD on
 // that tip as the branch's latest record (none, a gate_failed, another head,
 // another base, another default branch), or a matching one that a record
-// that cannot be read or a corrupt line follows, Regate runs the scripts
-// without merging, records a gate_passed, pushes nothing, and merge-order
-// then classifies the branch ready.
+// that cannot be read or a corrupt line follows (a record of the org that
+// cannot be read too when the org_id was bound to another branch since, D2),
+// Regate runs the scripts without merging, records a gate_passed, pushes
+// nothing, and merge-order then classifies the branch ready.
 func TestRegate_GatesWhenNoRecordLetsItStop(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -1016,6 +1017,14 @@ func TestRegate_GatesWhenNoRecordLetsItStop(t *testing.T) {
 		{"a corrupt line after a matching gate_passed", func(_ *regateFixture, head, tip string) []any {
 			return []any{moGate("auth", "feat/auth", head, tip, "refs/remotes/origin/main", ""), regateCorruptLine}
 		}, MergeClassUnreadable},
+		// The org_id auth was bound to feat/billing after feat/auth, so the
+		// record that cannot be read may be either branch's (D2).
+		{"a gate record of the org that cannot be read after a matching gate_passed, with the org_id bound to another branch since",
+			func(fx *regateFixture, head, tip string) []any {
+				return []any{boundReserveEvent("auth", testFeature("split-1", "billing", "0123456789ab"), "internal/billing/"),
+					ManifestEvent{TS: fx.o.now(), OrgID: "auth", Event: EventDisbanded},
+					moGate("auth", "feat/auth", head, tip, "refs/remotes/origin/main", ""), moGarbled("auth", EventGateFailed)}
+			}, MergeClassUnreadable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

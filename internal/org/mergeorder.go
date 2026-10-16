@@ -356,6 +356,9 @@ type mergeGateRecord struct {
 	ev       ManifestEvent
 	record   gateRecord
 	readable bool
+	// orgBranches is, for one that cannot be read, how many branches it is
+	// attached to: every branch its org had before it (collectMergeTargets).
+	orgBranches int
 }
 
 // pos is t's place within its class: the index of its latest gate record, or
@@ -373,16 +376,17 @@ func (t *mergeTarget) pos() int {
 // branch a target and becomes the branch's binding and its org's latest one.
 // A gate record is readable when gateRecordFromDetails reads it and its event
 // name agrees with its reason; it attaches to its branch= branch, which it
-// makes a target, and becomes its org's latest readable one. One that is not
-// attaches to the branch of its org's latest complete binding before it,
-// since the gate runs only on that branch. With no such binding it attaches
-// to the branch of its org's latest readable gate record before it, so that a
-// branch only gate records name does not fall back to an older gate_passed
-// (C8). With neither it attaches nowhere and counts in unattached. A branch's
-// gate is the latest record attached to it. A branch with a binding is
-// orgRunning when its binding's org is in RunningOrgs of l's events, read
-// once, and has orgRunsOn when that org's latest complete binding, read in
-// the same walk, is of another branch.
+// makes a target. One that is not attaches to every branch its org had a
+// complete binding or a readable gate record for before it, so that none of
+// them falls back to an older gate_passed (C8): ralph org gate runs only on
+// the branch of the org's latest binding, but ralph org regate records under
+// the org of a branch's binding while the org_id may be bound to another
+// branch later (plan docs/plans/active/2026-10-16-org-regate.md, D2), so the
+// record may be any of them. With none it attaches nowhere and counts in
+// unattached. A branch's gate is the latest record attached to it. A branch
+// with a binding is orgRunning when its binding's org is in RunningOrgs of
+// l's events, read once, and has orgRunsOn when that org's latest complete
+// binding, read in the same walk, is of another branch.
 func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int) {
 	byBranch := make(map[string]*mergeTarget)
 	target := func(branch string) *mergeTarget {
@@ -395,7 +399,14 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 		return t
 	}
 	boundBranch := make(map[string]string) // org_id -> its latest complete binding's branch so far
-	gatedBranch := make(map[string]string) // org_id -> its latest readable gate record's branch so far
+	// org_id -> every branch it had a complete binding or a readable gate
+	// record for so far, in the order they first came.
+	orgBranches := make(map[string][]string)
+	addOrgBranch := func(orgID, branch string) {
+		if !slices.Contains(orgBranches[orgID], branch) {
+			orgBranches[orgID] = append(orgBranches[orgID], branch)
+		}
+	}
 	for i, ev := range l.events {
 		if ev.DryRun || ev.OrgID == "" || ev.SeatID != "" {
 			continue
@@ -410,24 +421,28 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 			t.binding = &MergeOrderBinding{OrgID: ev.OrgID, Feature: f.Feature, Split: f.Split, TS: ev.TS}
 			t.bindingPos = i
 			boundBranch[ev.OrgID] = f.Branch
+			addOrgBranch(ev.OrgID, f.Branch)
 		case EventGatePassed, EventGateFailed:
 			g := &mergeGateRecord{pos: i, ev: ev}
 			g.record, g.readable = gateRecordFromDetails(ev.Details)
 			g.readable = g.readable && g.record.event() == ev.Event
-			branch := g.record.Branch
 			if g.readable {
-				gatedBranch[ev.OrgID] = branch
-			} else {
-				g.record = gateRecord{}
-				// The binding first, then the readable gate record. Neither
-				// map holds "": a complete binding and a readable record
-				// both name a branch.
-				if branch = cmp.Or(boundBranch[ev.OrgID], gatedBranch[ev.OrgID]); branch == "" {
-					unattached++
-					continue
-				}
+				addOrgBranch(ev.OrgID, g.record.Branch)
+				target(g.record.Branch).gate = g
+				continue
 			}
-			target(branch).gate = g
+			g.record = gateRecord{}
+			// orgBranches holds no "": a complete binding and a readable
+			// record both name a branch.
+			branches := orgBranches[ev.OrgID]
+			if len(branches) == 0 {
+				unattached++
+				continue
+			}
+			g.orgBranches = len(branches)
+			for _, branch := range branches {
+				target(branch).gate = g
+			}
 		}
 	}
 	if n := len(l.corruptAt); n > 0 {
@@ -922,6 +937,10 @@ func classifyMergeTarget(t *mergeTarget, remote mergeRemote) (class, detail stri
 	switch {
 	case g != nil && !g.readable:
 		why := fmt.Sprintf("the latest gate record (%s at %s) cannot be read", g.ev.Event, g.ev.TS)
+		if g.orgBranches > 1 {
+			why += fmt.Sprintf(" and may be a record of another branch of the same org, %s, which has had %d branches", g.ev.OrgID,
+				g.orgBranches)
+		}
 		if t.namesRegate() {
 			return MergeClassUnreadable, why + ": " + mergeRegateNext(t, "", " to record a new one")
 		}
