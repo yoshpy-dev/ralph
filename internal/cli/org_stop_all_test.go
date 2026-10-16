@@ -930,6 +930,29 @@ func TestOrgStopAll_NamesTheOpenHeadlessDirectors(t *testing.T) {
 			return "note: stop --all stops org seats only, so the headless directors d1 (running), d2 (starting) are still open: " +
 				"stop each with ralph org director stop --id <id> --state-dir '" + stateDir + "'\n"
 		}},
+		// Plan 2026-10-16-org-director-launch-cmd, D11 and AC8: a launch
+		// cmd's registration is counted too. Its pid is a process the test
+		// started, so a stop --all that signalled it would show: the check
+		// registered last runs first among the cleanups, before the kill.
+		{"a launch cmd running and detached, and one starting", func(t *testing.T, stateDir string) {
+			p := startDirectorTestProcess(t, false)
+			reg := seedCmdHeadless(t, stateDir)
+			checkInDirector(t, stateDir, reg, p.pid(), p.startTime)
+			if _, err := org.NewDirectorStore(stateDir).Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+			seedCmdHeadless(t, stateDir)
+			t.Cleanup(func() { p.wantRunning(t, "stop --all signalled a launch cmd director's process") })
+		}, false, func(stateDir string) string {
+			return "note: stop --all stops org seats only, so the headless directors d1 (running), d2 (starting) are still open: " +
+				"stop each with ralph org director stop --id <id> --state-dir '" + stateDir + "'\n"
+		}},
+		{"one launch cmd starting, current", func(t *testing.T, stateDir string) {
+			seedCmdHeadless(t, stateDir)
+		}, false, func(stateDir string) string {
+			return "note: stop --all stops org seats only, so the headless director d1 (starting) is still open: " +
+				"stop it with ralph org director stop --id d1 --state-dir '" + stateDir + "'\n"
+		}},
 		{"a promoted session's registration", func(t *testing.T, stateDir string) {
 			if _, _, err := org.NewDirectorStore(stateDir).Attach(org.DirectorAttach{Driver: org.DirectorDriverClaude, User: "alice"}); err != nil {
 				t.Fatal(err)

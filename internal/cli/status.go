@@ -58,12 +58,16 @@ func newStatusCmd() *cobra.Command {
 			"is attached, with the registration's id, driver, attach time, who attached\n" +
 			"it, and its pane when one is recorded, and for a headless director that\n" +
 			"`ralph org director start` launched, `headless` with its state (starting or\n" +
-			"running), model, pane, and workspace; not attached; disabled (enabled =\n" +
-			"false: escalate sends every item to the human at once); or unreadable, when\n" +
-			"director.jsonl cannot be read. A headless director that is still open but\n" +
-			"no longer the current registration (detached, or replaced by attach\n" +
-			"--replace) is named at the end of the line, with `ralph org director stop\n" +
-			"--id`, which closes it; the JSON lists it under director.open_headless.\n" +
+			"running), model, pane, and workspace (for one launched with\n" +
+			"[org.director].launch_cmd, `launch cmd`, the name of its terminal,\n" +
+			"director_<token>, and the pid its launch script checked in with, in place\n" +
+			"of the pane and workspace; the JSON adds terminal_name); not attached;\n" +
+			"disabled (enabled = false: escalate sends every item to the human at\n" +
+			"once); or unreadable, when director.jsonl cannot be read. A headless\n" +
+			"director that is still open but no longer the current registration\n" +
+			"(detached, or replaced by attach --replace) is named at the end of the\n" +
+			"line, with `ralph org director stop --id`, which stops it; the JSON lists\n" +
+			"it under director.open_headless.\n" +
 			"A registration does not tell whether its session is still\n" +
 			"running: an item the director does not ack reaches the human at the ack\n" +
 			"deadline of `ralph org watch --all`.\n\n" +

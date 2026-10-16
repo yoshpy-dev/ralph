@@ -98,7 +98,8 @@ codex_verified = false
 # reviewer follows codex's own approval settings instead (whether it stops
 # there is unverified).
 # director sets the mode of the headless director that
-# `ralph org director start` launches in herdr (it is not a seat). A codex
+# `ralph org director start` launches, in herdr or with
+# [org.director].launch_cmd (it is not a seat). A codex
 # director runs only in "guarded": start refuses autonomous and edits
 # whatever codex_verified says, because they run codex under
 # --sandbox workspace-write, which keeps .git read-only, so the director
@@ -123,8 +124,8 @@ stall_minutes = 15
 watcher_enabled = true
 watcher_model = "haiku"
 
-# [org.director] sets the director switch and the inbox deadlines that
-# `ralph org watch --all` checks.
+# [org.director] sets the director switch, the inbox deadlines that
+# `ralph org watch --all` checks, and launch_cmd below.
 # enabled = true (default): `ralph org escalate` records the item in the org
 # inbox, and the director, or the ack deadline below, takes it, while a
 # `ralph org watch --all` accepts work; with no such watch, escalate sends
@@ -141,6 +142,18 @@ watcher_model = "haiku"
 enabled = true
 ack_minutes = 10
 resolve_minutes = 60
+# launch_cmd (empty by default: `ralph org director start` opens a herdr
+# workspace) is the command start runs instead to open a terminal for the
+# headless director. It is an array of arguments that ralph runs without a
+# shell, after replacing {script} (the absolute path of the launch script
+# ralph writes), {script_sh} (the same path single-quoted for a shell, for a
+# terminal that reads its command as a shell string), {name}
+# (director_<token>) and {cwd} (the main worktree root the director runs in).
+# It must contain {script} or {script_sh}, and any other {...} fails the
+# load. The command must return once the terminal is open; you close the
+# terminal yourself after `ralph org director stop`.
+# docs/recipes/director-launch-cmd.md has an example for each terminal.
+# launch_cmd = ["tmux", "-L", "ralph", "new-session", "-d", "-s", "{name}", "-c", "{cwd}", "sh {script_sh}"]
 
 # [org.approval] sets how the plan of an org started with
 # `ralph org start --plan` is approved. mode = "per-plan" (default): the

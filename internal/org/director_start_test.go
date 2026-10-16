@@ -231,7 +231,7 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 
 			reg := res.Registration
 			if reg.ID != "d1" || reg.State != DirectorStateRunning || reg.Token != token || reg.Driver != tc.driver || reg.Model != tc.model ||
-				reg.PermissionMode != tc.wantMode || reg.WorkspaceID != "ws-1" || reg.PaneID != "pane-1" || !reg.Headless() {
+				reg.PermissionMode != tc.wantMode || reg.WorkspaceID != "ws-1" || reg.PaneID != "pane-1" || !reg.HerdrLaunch() {
 				t.Fatalf("Registration = %+v, want d1 running with ws-1, pane-1, the token, model, and %s", reg, tc.wantMode)
 			}
 			wantPrompt := filepath.Join(f.dir, "prompts", "director_"+token+".md")

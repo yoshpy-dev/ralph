@@ -1,14 +1,22 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
@@ -477,7 +485,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 		{name: "a main worktree ralph.toml that does not load", mainToml: "[org]\nmax_orgs = 0\n",
 			args: []string{"--driver", "claude", "--model", "opus"},
 			wantErr: func(r legacyLedgerRepo) []string {
-				return []string{"org: load [org.director].enabled, [org.permissions], [org.roles] and model_pool from the main worktree's " +
+				return []string{"org: load [org.director].enabled and launch_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's " +
 					filepath.Join(r.mainRoot, "ralph.toml"), "[org].max_orgs must be >= 1, got 0"}
 			}},
 	}
@@ -739,7 +747,10 @@ func TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector(t
 // RALPH_ORG_AGMSG_HOME note), and no longer says that codex_verified unlocks
 // autonomous and edits, nor that the director and the watch always use
 // different agmsg installs. "Without --config, those settings" follows the
-// sentence on the permission mode and the model it refers to.
+// sentence on the permission mode and the model it refers to. The
+// RALPH_ORG_AGMSG_HOME note is herdr's, and with [org.director].launch_cmd
+// the variable reaches the director through the launch script, with no
+// warning (plan 2026-10-16-org-director-launch-cmd, D3): the help says both.
 func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 	out, err := runOrgCmd(t, "director", "start", "--help")
 	if err != nil {
@@ -752,7 +763,10 @@ func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 			"(ralph org start --plan runs git worktree add).",
 		`Set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) write .git and reach the network, or use --driver claude;`,
 		`a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall.`,
-		"RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
+		"With herdr, RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
+		"With launch_cmd it does reach the director, as the launch script exports it " +
+			"(a relative value made absolute from where start runs, as for the watch start launches), and start does not warn.",
+		"exports RALPH_DIRECTOR_TOKEN (and RALPH_ORG_AGMSG_HOME when it is set where start runs)",
 		"for a codex director in autonomous or edits, when the --config file's [org].agmsg_home is a relative path (neither absolute nor starting with ~/",
 		"(neither absolute nor starting with ~/: the director runs in the ledger's main worktree root when the ledger has one and the watch resolves it " +
 			"from where start runs, so the two may resolve it from different directories, and start refuses it wherever it runs; give an absolute path)",
@@ -1541,4 +1555,1232 @@ func TestOrgSpawn_RoleDirectorIsRefusedBeforeTheModelFallback(t *testing.T) {
 		t.Errorf("stderr = %q; want no --model fallback warning", stderr)
 	}
 	checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+}
+
+// The check-in `ralph org director launched` of a launch cmd's script (plan
+// 2026-10-16-org-director-launch-cmd, AC3 through the CLI). The tests run no
+// launch script: the check-in's parent is the test binary's own, or a
+// process the test started and gives through orgDirectorCheckInParentPID.
+
+// seedCmdHeadless records a launch cmd registration in the ledger stateDir
+// through the store, as start does before it runs launch_cmd, and returns it
+// (with its token).
+func seedCmdHeadless(t *testing.T, stateDir string) org.DirectorRegistration {
+	t.Helper()
+	reg, err := org.NewDirectorStore(stateDir).AttachHeadless(org.DirectorHeadlessAttach{
+		Launch: org.DirectorLaunchCmd, Driver: "claude", Model: "opus", PermissionMode: org.PermissionModeAutonomous, User: "alice", Cwd: "/work",
+	})
+	if err != nil {
+		t.Fatalf("seed the launch cmd registration: %v", err)
+	}
+	return reg
+}
+
+// setCheckInSeams points the check-in at parent as its parent pid and, when
+// read is non-nil, at read for the start time, until the test ends.
+func setCheckInSeams(t *testing.T, parent int, read func(context.Context, int) (org.DirectorProcess, error)) {
+	t.Helper()
+	oldParent, oldRead := orgDirectorCheckInParentPID, orgDirectorCheckInReadProcess
+	t.Cleanup(func() { orgDirectorCheckInParentPID, orgDirectorCheckInReadProcess = oldParent, oldRead })
+	orgDirectorCheckInParentPID = func() int { return parent }
+	if read != nil {
+		orgDirectorCheckInReadProcess = read
+	}
+}
+
+// launchedOf returns the launched events in stateDir's director.jsonl.
+func launchedOf(t *testing.T, stateDir string) []org.DirectorEvent {
+	t.Helper()
+	var launched []org.DirectorEvent
+	for _, ev := range directorEventsIn(t, stateDir) {
+		if ev.Event == org.DirectorEventLaunched {
+			launched = append(launched, ev)
+		}
+	}
+	return launched
+}
+
+// The check-in is for the launch script alone, so neither `ralph org
+// director --help` nor `ralph org --help` lists it; its own help still
+// says what it does.
+func TestOrgDirectorLaunched_IsHidden(t *testing.T) {
+	for _, args := range [][]string{{"director", "--help"}, {"--help"}, {"director"}} {
+		out, err := runOrgCmd(t, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "launched" {
+				t.Errorf("%v lists the hidden check-in: %q", args, line)
+			}
+		}
+		if strings.Contains(out, "Check in the launch script") {
+			t.Errorf("%v shows the check-in's short help:\n%s", args, out)
+		}
+	}
+	out, err := runOrgCmd(t, "director", "launched", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"the launch script that `ralph org director start` writes when [org.director].launch_cmd is set",
+		`(--pid "$$") before it execs the agent, and execs the agent only when it exits 0`,
+		"It is refused, writes nothing, and exits 1 with the reason on stderr, so the agent does not start",
+		"It reads no ralph.toml.", "--id", "--token", "--pid",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("director launched --help does not say %q:\n%s", want, out)
+		}
+	}
+}
+
+// AC3: the check-in records launched with --pid, the pid of the process
+// that ran it (here the test binary's parent, read with the real os.Getppid
+// and ps), and that pid's start time as org.ReadDirectorProcess reads it,
+// and prints nothing. It reads no ralph.toml, so a ./ralph.toml and a
+// --config that do not load do not block it.
+func TestOrgDirectorLaunched_RecordsThePIDAndItsStartTime(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "ralph.toml")
+	writeTestFile(t, broken, "[org\n")
+	t.Chdir(dir)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	reg := seedCmdHeadless(t, stateDir)
+	ppid := os.Getppid()
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "launched", "--id", reg.ID, "--token", reg.Token, "--pid", fmt.Sprint(ppid),
+		"--state-dir", stateDir, "--config", broken)
+	if err != nil || stdout != "" || stderr != "" {
+		t.Fatalf("director launched = %v, stdout %q, stderr %q; want nil and nothing printed", err, stdout, stderr)
+	}
+	proc, err := org.ReadDirectorProcess(context.Background(), ppid)
+	if err != nil || proc.State != org.DirectorProcessAlive || proc.StartTime == "" {
+		t.Fatalf("ReadDirectorProcess(%d) = %+v, %v", ppid, proc, err)
+	}
+	launched := launchedOf(t, stateDir)
+	if len(launched) != 1 || launched[0].ID != reg.ID || launched[0].PID != ppid || launched[0].StartTime != proc.StartTime ||
+		launched[0].User != os.Getenv("USER") || launched[0].Cwd != cwd {
+		t.Fatalf("launched = %+v; want one for %s with pid %d, start time %q, user %q, cwd %q", launched, reg.ID, ppid, proc.StartTime, os.Getenv("USER"), cwd)
+	}
+	res, err := org.NewDirectorStore(stateDir).Read()
+	if err != nil || res.Current == nil || res.Current.State != org.DirectorStateRunning || res.Current.PID != ppid {
+		t.Fatalf("Read = %+v, %v; want %s running with pid %d", res, err, reg.ID, ppid)
+	}
+}
+
+// The start time recorded is --pid's, not the check-in's own parent's: a
+// process the test started, given as the parent through the seam.
+func TestOrgDirectorLaunched_RecordsTheStartTimeOfTheGivenPID(t *testing.T) {
+	sleep := exec.Command("sleep", "30")
+	if err := sleep.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = sleep.Process.Kill()
+		_ = sleep.Wait()
+	})
+	pid := sleep.Process.Pid
+	setCheckInSeams(t, pid, nil)
+	stateDir := t.TempDir()
+	reg := seedCmdHeadless(t, stateDir)
+	runInboxOK(t, "director", "launched", "--id", reg.ID, "--token", reg.Token, "--pid", fmt.Sprint(pid), "--state-dir", stateDir)
+	proc, err := org.ReadDirectorProcess(context.Background(), pid)
+	if err != nil || proc.State != org.DirectorProcessAlive {
+		t.Fatalf("ReadDirectorProcess(%d) = %+v, %v", pid, proc, err)
+	}
+	if launched := launchedOf(t, stateDir); len(launched) != 1 || launched[0].PID != pid || launched[0].StartTime != proc.StartTime {
+		t.Fatalf("launched = %+v; want pid %d started %q", launched, pid, proc.StartTime)
+	}
+}
+
+// AC3: every other check-in is refused with one line, writes nothing, and
+// prints nothing on stdout, so the script exits without its agent: missing
+// flags (before the state dir is made), a --pid that is not the parent, a
+// pid whose start time ps does not read or that is not running, and what
+// the store refuses (another token, a stopped, herdr, or unknown
+// registration, a second check-in).
+func TestOrgDirectorLaunched_Refusals(t *testing.T) {
+	t.Run("missing flags", func(t *testing.T) {
+		stateDir := filepath.Join(t.TempDir(), "state")
+		const want = "org: director launched: give --id, --token, and --pid; the launch script that ralph org director start writes runs this check-in itself"
+		for _, args := range [][]string{
+			{"--token", "0123456789ab", "--pid", "1"},
+			{"--id", "d1", "--pid", "1"},
+			{"--id", "d1", "--token", "0123456789ab"},
+			{},
+		} {
+			stdout, _, err := runOrgCmdStreams(t, append(append([]string{"director", "launched"}, args...), "--state-dir", stateDir)...)
+			if err == nil || err.Error() != want || stdout != "" {
+				t.Errorf("launched %v = %v, stdout %q; want %q", args, err, stdout, want)
+			}
+		}
+		if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("a refused check-in created the state dir (stat: %v)", err)
+		}
+	})
+
+	gone := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessGone}, nil
+	}
+	zombie := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessZombie, StartTime: "Thu Oct 15 21:51:09 2026"}, nil
+	}
+	unreadable := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{}, errors.New("read process 4242: ps: exit status 2: bad\nline")
+	}
+	alive := func(context.Context, int) (org.DirectorProcess, error) {
+		return org.DirectorProcess{State: org.DirectorProcessAlive, StartTime: "Thu Oct 15 21:51:09 2026"}, nil
+	}
+	for _, tc := range []struct {
+		name   string
+		seed   func(t *testing.T, stateDir string) (id, token string)
+		parent int // 0 for the real os.Getppid
+		pid    int // 0 for the parent
+		read   func(context.Context, int) (org.DirectorProcess, error)
+		want   string // the whole error, with %s for the registration's attached ts
+	}{
+		{name: "a --pid that is not the parent", pid: os.Getpid(),
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: --pid " + fmt.Sprint(os.Getpid()) +
+				" is not the pid of the process that ran this check-in (" + fmt.Sprint(os.Getppid()) + `); the launch script passes its own ("$$")`},
+		{name: "a ps that cannot be read", parent: 4242, read: unreadable,
+			want: `org: director launched d1: the check-in of the launch script is refused, so its agent must not start: the start time of pid 4242 cannot be read: read process 4242: ps: exit status 2: bad\nline`},
+		{name: "a pid that is gone", parent: 4242, read: gone,
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: pid 4242 is gone, not a running process"},
+		{name: "a zombie", parent: 4242, read: zombie,
+			want: "org: director launched d1: the check-in of the launch script is refused, so its agent must not start: pid 4242 is zombie, not a running process"},
+		{name: "another token", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				return reg.ID, "aaaaaaaaaaaa"
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: the token is not the one d1 was started with"},
+		{name: "a stopped registration", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				if _, err := org.NewDirectorStore(stateDir).MarkStopped(reg.ID, org.DirectorWho{User: "alice"}); err != nil {
+					t.Fatal(err)
+				}
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless stopped, launch cmd) is already recorded stopped (start's cleanup or a stop came first)"},
+		{name: "a launch herdr registration", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedHeadless(t, stateDir, "claude", "opus", "", "", false)
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless starting) was not started with [org.director].launch_cmd"},
+		{name: "a second check-in", parent: 4242, read: alive,
+			seed: func(t *testing.T, stateDir string) (string, string) {
+				reg := seedCmdHeadless(t, stateDir)
+				if err := org.NewDirectorStore(stateDir).MarkCmdLaunched(org.DirectorCmdCheckIn{ID: reg.ID, Token: reg.Token, PID: 99, StartTime: "Wed Oct 14 00:00:00 2026"}); err != nil {
+					t.Fatal(err)
+				}
+				return reg.ID, reg.Token
+			},
+			want: "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"d1 (driver claude, attached %s, headless running, launch cmd, pid 99) has already checked in"},
+		{name: "an unknown registration", parent: 4242, read: alive,
+			seed: func(*testing.T, string) (string, string) { return "d9", "0123456789ab" },
+			want: "org: director: check in d9: the check-in of the launch script is refused, so its agent must not start: no registration d9 is recorded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			seed := tc.seed
+			if seed == nil {
+				seed = func(t *testing.T, stateDir string) (string, string) {
+					reg := seedCmdHeadless(t, stateDir)
+					return reg.ID, reg.Token
+				}
+			}
+			id, token := seed(t, stateDir)
+			if tc.parent != 0 {
+				setCheckInSeams(t, tc.parent, tc.read)
+			}
+			pid := tc.pid
+			if pid == 0 {
+				pid = orgDirectorCheckInParentPID()
+			}
+			before := directorFileOrAbsent(t, stateDir)
+			want := tc.want
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, directorEventsIn(t, stateDir)[0].TS)
+			}
+			stdout, _, err := runOrgCmdStreams(t, "director", "launched", "--id", id, "--token", token, "--pid", fmt.Sprint(pid), "--state-dir", stateDir)
+			if !errors.Is(err, org.ErrDirectorCheckInRefused) || err.Error() != want || strings.Contains(err.Error(), "\n") {
+				t.Fatalf("director launched err =\n%v\nwant\n%s", err, want)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want nothing", stdout)
+			}
+			if after := directorFileOrAbsent(t, stateDir); after != before {
+				t.Errorf("a refused check-in changed director.jsonl from %q to %q", before, after)
+			}
+		})
+	}
+}
+
+// The tests of director start with [org.director].launch_cmd through the
+// CLI (plan 2026-10-16-org-director-launch-cmd, AC2, AC4, AC5, and D10). The
+// launch script start writes runs for real: its
+// check-in is this test binary run as `ralph org director launched`
+// (TestOrgDirectorCheckInHelperProcess, through a ralph wrapper), and its
+// agent is a fake that records what it got and becomes a sleep, which the
+// test kills in its cleanup (killDirectorLaunchedProcesses). The stub herdr
+// stays on PATH and must log no call.
+
+// orgDirectorCheckInHelperEnv makes this test binary, run by the ralph
+// wrapper of setDirectorLaunchSeams, the check-in of a launch script.
+const orgDirectorCheckInHelperEnv = "RALPH_CLI_TEST_DIRECTOR_CHECKIN_HELPER"
+
+// TestOrgDirectorCheckInHelperProcess is not a test of its own: with
+// orgDirectorCheckInHelperEnv set, it runs the root command with the
+// arguments after "--" (`org director launched ...`, as the launch script
+// gives them) and exits 0 or, writing the error on stderr, 1. The wrapper
+// execs this binary, so its parent is the launch script's shell, which the
+// real check-in reads (os.Getppid and ps).
+func TestOrgDirectorCheckInHelperProcess(t *testing.T) {
+	if os.Getenv(orgDirectorCheckInHelperEnv) != "1" {
+		return
+	}
+	root := NewRootCmd()
+	root.SetArgs(flag.Args())
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+// directorLaunchFakes are what setDirectorLaunchSeams set up: the file the
+// fake agent writes once it runs (its pid, RALPH_ORG_AGMSG_HOME or
+// "<unset>", and each argument), and the names the agent lookup was asked
+// for.
+type directorLaunchFakes struct {
+	agentMarker string
+	lookedUp    []string
+}
+
+// setDirectorLaunchSeams points director start's agent lookup at a fake
+// agent and its ralph executable at a wrapper that runs
+// TestOrgDirectorCheckInHelperProcess, until the test ends.
+func setDirectorLaunchSeams(t *testing.T) *directorLaunchFakes {
+	t.Helper()
+	base := t.TempDir()
+	f := &directorLaunchFakes{agentMarker: filepath.Join(base, "agent.out")}
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, ralph := filepath.Join(base, "agent"), filepath.Join(base, "ralph")
+	marker := shellQuoteIfNeeded(f.agentMarker)
+	writeExecutable := func(path, content string) {
+		if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeExecutable(agent, "#!/bin/sh\n{\nprintf 'pid=%s\\n' \"$$\"\nprintf 'agmsg=%s\\n' \"${RALPH_ORG_AGMSG_HOME-<unset>}\"\n"+
+		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+marker+".tmp && mv "+marker+".tmp "+marker+"\nexec "+shellQuoteIfNeeded(sleep)+" 600\n")
+	writeExecutable(ralph, "#!/bin/sh\n"+orgDirectorCheckInHelperEnv+"=1\nexport "+orgDirectorCheckInHelperEnv+"\nexec "+shellQuoteIfNeeded(testBinary)+
+		" -test.run='^TestOrgDirectorCheckInHelperProcess$' -- \"$@\"\n")
+	oldLookPath, oldExecutable := orgDirectorAgentLookPath, orgDirectorRalphExecutable
+	t.Cleanup(func() { orgDirectorAgentLookPath, orgDirectorRalphExecutable = oldLookPath, oldExecutable })
+	orgDirectorAgentLookPath = func(file string) (string, error) {
+		f.lookedUp = append(f.lookedUp, file)
+		return agent, nil
+	}
+	orgDirectorRalphExecutable = func() (string, error) { return ralph, nil }
+	return f
+}
+
+// killDirectorLaunchedProcesses is t's cleanup for every process a launch
+// script of the ledger stateDir checked in with: each pid of a launched
+// event that ps still reads alive with the start time that event recorded
+// gets SIGKILL, and the cleanup waits (up to 5s) for it to be gone. No
+// other process is signalled.
+func killDirectorLaunchedProcesses(t *testing.T, stateDir string) {
+	t.Cleanup(func() {
+		raw, err := os.ReadFile(org.DirectorPathIn(stateDir))
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			var ev org.DirectorEvent
+			if json.Unmarshal([]byte(line), &ev) != nil || ev.Event != org.DirectorEventLaunched || ev.PID <= 0 {
+				continue
+			}
+			same := func() bool {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				proc, err := org.ReadDirectorProcess(ctx, ev.PID)
+				return err == nil && proc.State == org.DirectorProcessAlive && proc.StartTime == ev.StartTime
+			}
+			if !same() {
+				continue
+			}
+			_ = syscall.Kill(ev.PID, syscall.SIGKILL)
+			for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && same(); time.Sleep(20 * time.Millisecond) {
+			}
+		}
+	})
+}
+
+// waitForDirectorAgentMarker returns the lines the fake agent wrote, once it
+// has run (up to 30s).
+func waitForDirectorAgentMarker(t *testing.T, path string) []string {
+	t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			return readLogLines(t, path)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the fake agent did not write %s within 30s", path)
+		}
+	}
+}
+
+// directorLaunchCmdToml is a ralph.toml whose launch_cmd runs the launch
+// script in the background, as a terminal would, and returns at once. Like
+// a terminal, which has its own environment, the script does not get
+// RALPH_ORG_AGMSG_HOME from start's, so the agent has it only when the
+// script exports it.
+const directorLaunchCmdToml = "[org.director]\nlaunch_cmd = [\"sh\", \"-c\", 'env -u RALPH_ORG_AGMSG_HOME nohup sh \"$1\" >/dev/null 2>&1 &', \"sh\", \"{script}\"]\n"
+
+// directorTouchingLaunchCmdToml is a ralph.toml whose launch_cmd runs no
+// launch script: it creates path (so a test sees which one ran) and exits 3.
+func directorTouchingLaunchCmdToml(path string) string {
+	return fmt.Sprintf("[org.director]\nlaunch_cmd = [\"sh\", \"-c\", ': > \"$2\"; exit 3', \"sh\", \"{script}\", %q]\n", path)
+}
+
+// AC2 through the CLI: with launch_cmd, director start opens the terminal
+// with it, waits for the launch script's check-in, and prints the
+// registration with launch=cmd, the terminal's name, and the pid the script
+// checked in with, where to talk to the director, and the stop command with
+// --state-dir. RALPH_ORG_AGMSG_HOME set here gets no warning (D3): the launch
+// script exports it, so the agent runs with it, and with the permission
+// flags, --model, and the prompt pointer. No herdr is called.
+func TestOrgDirectorStart_LaunchCmdOpensTheTerminal(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	const agmsgHome = "/agmsg home/it's"
+	t.Setenv(orgAgmsgHomeEnv, agmsgHome)
+	fakes := setDirectorLaunchSeams(t)
+	killDirectorLaunchedProcesses(t, stateDir)
+	configPath := writeDirectorConfig(t, directorLaunchCmdToml)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
+	if err != nil {
+		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	events := directorEventsIn(t, stateDir)
+	if got, want := directorEventKinds(events), []string{"attached d1", "launched d1"}; !slices.Equal(got, want) {
+		t.Fatalf("director.jsonl = %v; want %v", got, want)
+	}
+	att, launched := events[0], events[1]
+	if att.Launch != org.DirectorLaunchCmd || len(att.Token) != 12 || att.Model != "opus" || att.PermissionMode != org.PermissionModeAutonomous || launched.PID <= 0 {
+		t.Fatalf("attached = %+v, launched = %+v; want launch cmd, a token, opus, autonomous, and a pid", att, launched)
+	}
+	tok := att.Token
+	wantOut := fmt.Sprintf("started d1 (driver=claude, model=opus, permission=autonomous, launch=cmd, name=director_%s, pid=%d)\n", tok, launched.PID) +
+		"talk to the director in the terminal that [org.director].launch_cmd opened (name director_" + tok + ")\n" +
+		"stop it with: ralph org director stop --id d1 --state-dir '" + stateDir + "'\n"
+	if stdout != wantOut {
+		t.Errorf("stdout =\n%s\nwant\n%s", stdout, wantOut)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing (no RALPH_ORG_AGMSG_HOME warning with launch_cmd)", stderr)
+	}
+	prompt := filepath.Join(stateDir, "prompts", "director_"+tok+".md")
+	want := []string{"pid=" + fmt.Sprint(launched.PID), "agmsg=" + agmsgHome,
+		"arg=--permission-mode", "arg=bypassPermissions", "arg=--model", "arg=opus", "arg=" + org.PromptFilePointer(prompt)}
+	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); !slices.Equal(got, want) {
+		t.Errorf("the agent recorded\n%q\nwant\n%q", got, want)
+	}
+	if !slices.Equal(fakes.lookedUp, []string{"claude"}) {
+		t.Errorf("the agent lookup was asked for %q; want [claude]", fakes.lookedUp)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none with launch_cmd", lines)
+	}
+}
+
+// AC4 through the CLI: a launch_cmd that exits non-zero ends start with exit
+// 1 and nothing on stdout; the error says what failed, that the
+// registration is recorded stopped, and that the terminal it may have
+// opened is left for the human to close while a late check-in from it is
+// refused. No herdr is called.
+func TestOrgDirectorStart_AFailedLaunchCmdLeavesTheTerminalToTheHuman(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	setDirectorLaunchSeams(t)
+	ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+	configPath := writeDirectorConfig(t, directorTouchingLaunchCmdToml(ran))
+
+	stdout, _, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
+	events := directorEventsIn(t, stateDir)
+	if got, want := directorEventKinds(events), []string{"attached d1", "detached d1", "stopped d1"}; !slices.Equal(got, want) {
+		t.Fatalf("director.jsonl = %v; want %v", got, want)
+	}
+	want := "org: director: start d1: launch_cmd sh failed: exit status 3; d1 is recorded stopped; the terminal that [org.director].launch_cmd may have opened " +
+		"(name director_" + events[0].Token + ") is left open for you to close, and a launch script that checks in from it now is refused and ends without starting the agent"
+	if err == nil || err.Error() != want {
+		t.Fatalf("director start err =\n%v\nwant\n%s", err, want)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want nothing", stdout)
+	}
+	if _, err := os.Stat(ran); err != nil {
+		t.Errorf("launch_cmd did not run: %v", err)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
+	}
+}
+
+// startError on a cleanup of a launch cmd that did not finish: the stop
+// command it names gets this invocation's --state-dir, and the error adds
+// that the terminal is to be closed once that stop is recorded. Nothing in it
+// names herdr.
+func TestOrgDirectorStart_ALaunchCmdCleanupErrorNamesTheStopAndTheTerminal(t *testing.T) {
+	rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
+	cleanup := &org.DirectorCleanupError{
+		Verb: "start", ID: "d4", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77, Detached: true,
+		Err:         errors.New("org: director: start d4: launch_cmd sh failed: exit status 1"),
+		CleanupErr:  errors.New("d4 is not recorded stopped, since the end of the process that checked in is not confirmed"),
+		StopCommand: "ralph org director stop --id d4",
+	}
+	err := rt.startError(cleanup)
+	want := "org: director: start d4: launch_cmd sh failed: exit status 1; its cleanup did not finish: d4 is not recorded stopped, since the end of the process " +
+		"that checked in is not confirmed; d4 was recorded detached only, so it is no longer the current registration but stays open; " +
+		"record the stop with ralph org director stop --id d4 --state-dir '/work/the ledger'; " +
+		"the terminal that [org.director].launch_cmd may have opened (name director_0123456789ab) is left open: close it once the stop is recorded"
+	if err == nil || err.Error() != want {
+		t.Fatalf("startError =\n%v\nwant\n%s", err, want)
+	}
+	var ce *org.DirectorCleanupError
+	if !errors.As(err, &ce) || ce != cleanup {
+		t.Errorf("startError = %v; want it to still wrap the cleanup error", err)
+	}
+}
+
+// start's refusal while a launch cmd registration is current names its stop
+// from a terminal other than the director's, not one outside herdr.
+func TestOrgDirectorStart_AnAttachedLaunchCmdRefusalNamesItsStop(t *testing.T) {
+	refusal := fmt.Errorf("org: director: start: %w: d2 (driver claude, attached 2026-10-15T09:00:00Z)", org.ErrDirectorAttached)
+	rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
+	err := rt.startAttachedError(&org.DirectorAttachedError{Err: refusal, Current: &org.DirectorRegistration{
+		ID: "d2", Driver: "claude", Launch: org.DirectorLaunchCmd, State: org.DirectorStateRunning, PID: 77,
+	}})
+	want := refusal.Error() + ": stop it with ralph org director stop --id d2 --state-dir '/work/the ledger' from a terminal other than the director's, " +
+		"then run start again (start has no --replace)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("startAttachedError =\n%v\nwant\n%s", err, want)
+	}
+	if !errors.Is(err, org.ErrDirectorAttached) {
+		t.Errorf("startAttachedError = %v; want it to still wrap ErrDirectorAttached", err)
+	}
+}
+
+// AC5 through the CLI (D10): a relative [org].agmsg_home of a --config is
+// refused with launch_cmd too, before anything is written or run.
+func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWithALaunchCmd(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	setDirectorLaunchSeams(t)
+	ran := filepath.Join(t.TempDir(), "launch_cmd ran")
+	configPath := writeDirectorConfig(t, "[org]\nagmsg_home = \"agmsg/home\"\n\n"+directorTouchingLaunchCmdToml(ran))
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
+	if want := relativeAgmsgHomeRefusal("agmsg/home", configPath); err == nil || err.Error() != want {
+		t.Fatalf("director start = %v; want %q", err, want)
+	}
+	if stdout != "" || stderr != "" {
+		t.Errorf("stdout = %q, stderr = %q; want nothing", stdout, stderr)
+	}
+	if got := dirNames(t, stateDir); len(got) != 0 {
+		t.Errorf("ledger entries = %v; want none", got)
+	}
+	if _, err := os.Stat(ran); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused start ran launch_cmd (stat %v)", err)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
+	}
+}
+
+// D3 through the CLI: a relative RALPH_ORG_AGMSG_HOME set where start runs
+// (here a linked worktree) reaches the director made absolute from there,
+// as the watch start launches gets it. The launch script cds to the main
+// worktree root before it exports the variable, so the value as set here
+// would name a directory from that root instead.
+func TestOrgDirectorStart_LaunchCmdMakesARelativeAgmsgHomeAbsolute(t *testing.T) {
+	setupOrgStubPATH(t)
+	r := newLegacyLedgerRepo(t)
+	t.Setenv(orgAgmsgHomeEnv, "agmsg/home")
+	fakes := setDirectorLaunchSeams(t)
+	killDirectorLaunchedProcesses(t, r.sharedDir)
+	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), directorLaunchCmdToml)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus")
+	if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, launch=cmd, ") || stderr != "" {
+		t.Fatalf("director start = %v (stdout: %s stderr: %s); want d1 started with launch_cmd and nothing on stderr", err, stdout, stderr)
+	}
+	if _, err := os.Stat(org.DirectorPathIn(r.sharedDir)); err != nil {
+		t.Fatalf("the main worktree's ledger has no director.jsonl (%v), so the cleanup would not find the agent", err)
+	}
+	want := "agmsg=" + filepath.Join(r.worktree, "agmsg", "home")
+	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); len(got) < 2 || got[1] != want {
+		t.Fatalf("the agent recorded %q; want %q (not from the main worktree root %s)", got, want, r.mainRoot)
+	}
+}
+
+// D10 through the CLI: without --config, on the main worktree's ledger
+// found from a linked worktree, start takes launch_cmd from the main
+// worktree's ralph.toml, never the linked worktree's: the main worktree's
+// launch_cmd runs, and with none there start uses herdr although the
+// worktree has one. --config names the file to read instead, so its
+// launch_cmd runs.
+func TestOrgDirectorStart_ReadsLaunchCmdFromTheMainWorktree(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		mainHas       bool
+		config        bool // --config ralph.toml (the worktree's)
+		wantRan       string
+		wantHerdrUsed bool
+	}{
+		{"no --config: the main worktree's launch_cmd", true, false, "main", false},
+		{"no --config: the main worktree has none", false, false, "", true},
+		{"--config names the worktree's ralph.toml", true, true, "worktree", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, _ := setupOrgStubPATH(t)
+			unsetOrgAgmsgHomeEnv(t)
+			setDirectorLaunchSeams(t)
+			r := newLegacyLedgerRepo(t)
+			marks := t.TempDir()
+			ranMain, ranWorktree := filepath.Join(marks, "main"), filepath.Join(marks, "worktree")
+			mainToml := ""
+			if tc.mainHas {
+				mainToml = directorTouchingLaunchCmdToml(ranMain)
+			}
+			writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), mainToml)
+			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), directorTouchingLaunchCmdToml(ranWorktree))
+			args := []string{"director", "start", "--driver", "claude", "--model", "opus"}
+			if tc.config {
+				args = append(args, "--config", "ralph.toml")
+			}
+
+			stdout, stderr, err := runOrgCmdStreams(t, args...)
+			if tc.wantHerdrUsed {
+				if err != nil || !strings.HasPrefix(stdout, "started d1 (driver=claude, model=opus, permission=autonomous, pane=pane-stub-1, ") {
+					t.Fatalf("director start = %v (stdout: %s stderr: %s); want d1 started in herdr", err, stdout, stderr)
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 3 {
+					t.Errorf("herdr calls = %v; want the three of a herdr start", lines)
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), "launch_cmd sh failed: exit status 3; d1 is recorded stopped") {
+					t.Fatalf("director start = %v (stdout: %s stderr: %s); want launch_cmd's failure", err, stdout, stderr)
+				}
+				if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+					t.Errorf("herdr calls = %v; want none", lines)
+				}
+			}
+			for _, m := range []struct{ name, path string }{{"main", ranMain}, {"worktree", ranWorktree}} {
+				_, err := os.Stat(m.path)
+				if ran := err == nil; ran != (m.name == tc.wantRan) {
+					t.Errorf("the %s worktree's launch_cmd ran: %v; want %v", m.name, ran, m.name == tc.wantRan)
+				}
+			}
+		})
+	}
+}
+
+// The tests of director stop, attach, detach, and status on a launch cmd's
+// registration through the CLI (plan 2026-10-16-org-director-launch-cmd, D7,
+// D8, AC6 to AC8). A stop signals only a process the test started itself:
+// the launch script of a real start (killDirectorLaunchedProcesses cleans
+// up after it), or startDirectorTestProcess's. A registration that no stop
+// runs on may carry a made-up pid, since nothing then reads or signals it.
+
+// directorTestStartTime is the start time the tests record with a made-up
+// pid.
+const directorTestStartTime = "Thu Oct 15 21:51:09 2026"
+
+// directorTestProcess is a process a test started (startDirectorTestProcess).
+type directorTestProcess struct {
+	cmd       *exec.Cmd
+	startTime string // as ps reads it once the process runs its sleep
+	waited    bool
+}
+
+// startDirectorTestProcess starts what a launch script leaves running, a
+// shell that writes a marker and becomes a sleep of 600 s, ignoring SIGTERM
+// when ignoreTerm (an ignored signal stays ignored across the exec), and
+// returns it once it runs the sleep, with its start time. It is killed
+// (SIGKILL) and waited for in t's cleanup unless the test waited for it;
+// until then its pid stays its own, so the kill reaches no other process.
+func startDirectorTestProcess(t *testing.T, ignoreTerm bool) *directorTestProcess {
+	t.Helper()
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "ran")
+	trap := ""
+	if ignoreTerm {
+		trap = "trap '' TERM; "
+	}
+	cmd := exec.Command("/bin/sh", "-c", trap+": > "+shellQuoteIfNeeded(marker)+"; exec "+shellQuoteIfNeeded(sleep)+" 600")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	p := &directorTestProcess{cmd: cmd}
+	t.Cleanup(func() {
+		if !p.waited {
+			_ = cmd.Process.Kill()
+			p.wait()
+		}
+	})
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the test process did not start within 10s")
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	p.startTime = p.read(t).StartTime
+	return p
+}
+
+func (p *directorTestProcess) pid() int { return p.cmd.Process.Pid }
+
+func (p *directorTestProcess) wait() {
+	if !p.waited {
+		_ = p.cmd.Wait()
+		p.waited = true
+	}
+}
+
+// read is ps's reading of p.
+func (p *directorTestProcess) read(t *testing.T) org.DirectorProcess {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	proc, err := org.ReadDirectorProcess(ctx, p.pid())
+	if err != nil {
+		t.Fatalf("read pid %d: %v", p.pid(), err)
+	}
+	return proc
+}
+
+// wantRunning fails t unless p, after a moment a SIGTERM would need to end
+// it, still runs with its start time: nothing was sent to it, or it ignored
+// what was.
+func (p *directorTestProcess) wantRunning(t *testing.T, what string) {
+	t.Helper()
+	time.Sleep(200 * time.Millisecond)
+	if proc := p.read(t); proc.State != org.DirectorProcessAlive || proc.StartTime != p.startTime {
+		t.Fatalf("pid %d reads %+v, want it still running: %s", p.pid(), proc, what)
+	}
+}
+
+// endedBySIGTERM reports whether p, waited for, was ended by SIGTERM.
+func (p *directorTestProcess) endedBySIGTERM() bool {
+	p.wait()
+	ws, ok := p.cmd.ProcessState.Sys().(syscall.WaitStatus)
+	return ok && ws.Signaled() && ws.Signal() == syscall.SIGTERM
+}
+
+// checkInDirector records the check-in of reg's launch script in the ledger
+// stateDir with pid and startTime, as `ralph org director launched` does.
+func checkInDirector(t *testing.T, stateDir string, reg org.DirectorRegistration, pid int, startTime string) {
+	t.Helper()
+	if err := org.NewDirectorStore(stateDir).MarkCmdLaunched(org.DirectorCmdCheckIn{
+		ID: reg.ID, Token: reg.Token, PID: pid, StartTime: startTime, Who: org.DirectorWho{User: "alice", Cwd: "/work"},
+	}); err != nil {
+		t.Fatalf("check in %s with pid %d: %v", reg.ID, pid, err)
+	}
+}
+
+// setOrgDirectorStopWait makes director stop wait d for a process after its
+// SIGTERM, until the test ends.
+func setOrgDirectorStopWait(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := orgDirectorStopWait
+	t.Cleanup(func() { orgDirectorStopWait = old })
+	orgDirectorStopWait = d
+}
+
+// unsetDirectorTokenEnv unsets RALPH_DIRECTOR_TOKEN for the test, so a run
+// inside a director's terminal does not change what stop does.
+func unsetDirectorTokenEnv(t *testing.T) {
+	t.Helper()
+	setOrUnsetEnv(t, "RALPH_DIRECTOR_TOKEN", "", true)
+}
+
+// AC6 and AC8 end to end: a director started with launch_cmd (its launch
+// script and the fake agent it execs run for real) shows launch cmd, its
+// terminal name, and its pid on the director: line of `ralph status` and in
+// its JSON; stop then sends SIGTERM to that pid, sees it end, records
+// detached and stopped, says that the terminal is left for the human, and
+// calls no herdr.
+func TestOrgDirectorStop_LaunchCmdEndsTheProcessAndLeavesTheTerminal(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	unsetDirectorTokenEnv(t)
+	fakes := setDirectorLaunchSeams(t)
+	killDirectorLaunchedProcesses(t, stateDir)
+	configPath := writeDirectorConfig(t, directorLaunchCmdToml)
+	runInboxOK(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
+	waitForDirectorAgentMarker(t, fakes.agentMarker)
+	events := directorEventsIn(t, stateDir)
+	att, launched := events[0], launchedOf(t, stateDir)[0]
+	name := "director_" + att.Token
+	by := ""
+	if user := os.Getenv("USER"); user != "" {
+		by = ", by " + user
+	}
+
+	out, err := runStatusCmd(t, "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("status: %v (output: %s)", err, out)
+	}
+	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s) -- "+
+		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline",
+		name, launched.PID, att.TS, by)
+	if got := statusDirectorLine(t, out); got != wantLine {
+		t.Errorf("director line:\n got %q\nwant %q", got, wantLine)
+	}
+	jsonOut, err := runStatusCmd(t, "--state-dir", stateDir, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+	}
+	if reg := statusDirectorJSONOf(t, jsonOut).Registration; reg == nil || reg.Launch != org.DirectorLaunchCmd || reg.State != org.DirectorStateRunning ||
+		reg.TerminalName != name || reg.PID != launched.PID || reg.StartTime != launched.StartTime || reg.Model != "opus" {
+		t.Errorf("status --json registration = %+v; want launch cmd, running, %s, pid %d, opus", reg, name, launched.PID)
+	}
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "stop", "--id", "d1", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("director stop: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	want := "stopped d1 (process=ended after SIGTERM)\nthe director is no longer attached\n" +
+		"the terminal that [org.director].launch_cmd opened (name " + name + ") is left open for you to close\n"
+	if stdout != want || stderr != "" {
+		t.Errorf("stop stdout =\n%s\nwant\n%s\nstderr = %q, want nothing", stdout, want, stderr)
+	}
+	if got, want := directorEventKinds(directorEventsIn(t, stateDir)), []string{"attached d1", "launched d1", "detached d1", "stopped d1"}; !slices.Equal(got, want) {
+		t.Errorf("director.jsonl = %v; want %v", got, want)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if proc, err := org.ReadDirectorProcess(ctx, launched.PID); err != nil || (proc.State == org.DirectorProcessAlive && proc.StartTime == launched.StartTime) {
+		t.Errorf("pid %d reads %+v, %v after the stop; want the director's process ended", launched.PID, proc, err)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none with launch_cmd", lines)
+	}
+}
+
+// AC6: a launch cmd's registration still starting has no process recorded,
+// so stop sends nothing, records it stopped, and says that the terminal
+// launch_cmd may have opened is left for the human and that its check-in is
+// refused from now on, which it is.
+func TestOrgDirectorStop_ALaunchCmdStillStartingIsRecordedStopped(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	unsetDirectorTokenEnv(t)
+	reg := seedCmdHeadless(t, stateDir)
+	stdout, stderr := runInboxOK(t, "director", "stop", "--id", "d1", "--state-dir", stateDir)
+	want := "stopped d1 (process=none recorded)\nthe director is no longer attached\n" +
+		"the terminal that [org.director].launch_cmd may have opened (name director_" + reg.Token + ") is left open for you to close, " +
+		"and a launch script that checks in from it now is refused and ends without starting the agent\n"
+	if stdout != want || stderr != "" {
+		t.Errorf("stop stdout =\n%s\nwant\n%s\nstderr = %q, want nothing", stdout, want, stderr)
+	}
+	err := org.NewDirectorStore(stateDir).MarkCmdLaunched(org.DirectorCmdCheckIn{ID: reg.ID, Token: reg.Token, PID: 4242, StartTime: directorTestStartTime})
+	if !errors.Is(err, org.ErrDirectorCheckInRefused) {
+		t.Errorf("a check-in after the stop = %v; want it refused", err)
+	}
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
+	}
+}
+
+// AC7: a process that ignores its SIGTERM outlives the wait (shortened to
+// 300ms), so stop without --force records nothing and exits 1: stderr says
+// what was done to the process, and the error that the pid may still be
+// running, the ps that shows it, and the two ways on, with --state-dir.
+// --force records the stop and warns that the pid may still be running.
+// Neither sends SIGKILL: the process still runs after both.
+func TestOrgDirectorStop_ALaunchCmdProcessThatOutlivesItsSIGTERM(t *testing.T) {
+	stateDir, herdrLog, _ := directorStartLedger(t)
+	unsetDirectorTokenEnv(t)
+	setOrgDirectorStopWait(t, 300*time.Millisecond)
+	reg := seedCmdHeadless(t, stateDir)
+	p := startDirectorTestProcess(t, true)
+	checkInDirector(t, stateDir, reg, p.pid(), p.startTime)
+	pid, suffix, name := p.pid(), " --state-dir '"+stateDir+"'", "director_"+reg.Token
+	before := directorFileOrAbsent(t, stateDir)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "director", "stop", "--id", "d1", "--state-dir", stateDir)
+	want := fmt.Sprintf("org: director: stop d1: the end of the process the launch script checked in with is not confirmed: pid %d did not end within 300ms of its SIGTERM; "+
+		"nothing was recorded; run ralph org director stop --id d1%s again once pid %d has ended; pid %d may still be running: look with ps -o pid,lstart,command -p %d; "+
+		"or record the stop and leave the process as it is with ralph org director stop --id d1 --force%s", pid, suffix, pid, pid, pid, suffix)
+	if err == nil || err.Error() != want {
+		t.Fatalf("director stop err =\n%v\nwant\n%s", err, want)
+	}
+	if stdout != "" || stderr != "stop d1: process=still running after SIGTERM\n" {
+		t.Errorf("stdout = %q, stderr = %q; want nothing and the process note", stdout, stderr)
+	}
+	if after := directorFileOrAbsent(t, stateDir); after != before {
+		t.Errorf("a refused stop changed director.jsonl from %q to %q", before, after)
+	}
+	p.wantRunning(t, "a stop that was not forced sent more than its SIGTERM")
+
+	stdout, stderr, err = runOrgCmdStreams(t, "director", "stop", "--id", "d1", "--force", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("director stop --force: %v (stdout: %s stderr: %s)", err, stdout, stderr)
+	}
+	want = "stopped d1 (forced; process=still running after SIGTERM)\nthe director is no longer attached\n" +
+		"the terminal that [org.director].launch_cmd opened (name " + name + ") is left open for you to close\n"
+	if stdout != want {
+		t.Errorf("stop --force stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	wantWarning := fmt.Sprintf("warning: director stop --force: d1 is recorded stopped, but pid %d, which its launch script checked in with, may still be running "+
+		"(pid %d did not end within 300ms of its SIGTERM); look with ps -o pid,lstart,command -p %d\n", pid, pid, pid)
+	if stderr != wantWarning {
+		t.Errorf("stop --force stderr =\n%s\nwant\n%s", stderr, wantWarning)
+	}
+	events := directorEventsIn(t, stateDir)
+	if got, want := directorEventKinds(events), []string{"attached d1", "launched d1", "detached d1", "stopped d1"}; !slices.Equal(got, want) || !events[3].Force {
+		t.Errorf("director.jsonl = %v (stopped %+v); want %v with the stop forced", got, events[len(events)-1], want)
+	}
+	p.wantRunning(t, "a forced stop sent SIGKILL")
+	if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+		t.Errorf("herdr calls = %v; want none", lines)
+	}
+}
+
+// D8 through the CLI: with RALPH_DIRECTOR_TOKEN set to the registration's
+// token, stop runs inside the director, so it is refused with and without
+// --force, writes nothing, and sends nothing: the process still runs. With
+// another launch's token in the variable, stop ends it.
+func TestOrgDirectorStop_ALaunchCmdIsRefusedInsideTheDirector(t *testing.T) {
+	stateDir, _, _ := directorStartLedger(t)
+	reg := seedCmdHeadless(t, stateDir)
+	p := startDirectorTestProcess(t, false)
+	checkInDirector(t, stateDir, reg, p.pid(), p.startTime)
+	before := directorFileOrAbsent(t, stateDir)
+	t.Setenv("RALPH_DIRECTOR_TOKEN", reg.Token)
+	want := "org: director: stop d1: RALPH_DIRECTOR_TOKEN is its launch token, so this runs inside the director, whose launch script exported it, " +
+		"and stopping the director's process would end this command before it records the stop: run ralph org director stop from a terminal other than the director's"
+	for _, args := range [][]string{{"--id", "d1"}, {"--id", "d1", "--force"}} {
+		stdout, stderr, err := runOrgCmdStreams(t, append(append([]string{"director", "stop"}, args...), "--state-dir", stateDir)...)
+		if !errors.Is(err, org.ErrDirectorStopSelfProcess) || err.Error() != want {
+			t.Fatalf("stop %v inside the director =\n%v\nwant\n%s", args, err, want)
+		}
+		if stdout != "" || stderr != "" {
+			t.Errorf("stop %v: stdout = %q, stderr = %q; want nothing", args, stdout, stderr)
+		}
+	}
+	if after := directorFileOrAbsent(t, stateDir); after != before {
+		t.Errorf("a refused stop changed director.jsonl from %q to %q", before, after)
+	}
+	p.wantRunning(t, "a refused stop sent a signal")
+
+	t.Setenv("RALPH_DIRECTOR_TOKEN", "ffffffffffff")
+	if stdout, _ := runInboxOK(t, "director", "stop", "--id", "d1", "--state-dir", stateDir); !strings.HasPrefix(stdout, "stopped d1 (process=ended after SIGTERM)\n") {
+		t.Errorf("stop with another launch's token: stdout = %q; want d1's process stopped", stdout)
+	}
+	if !p.endedBySIGTERM() {
+		t.Errorf("the process ended with %v; want SIGTERM", p.cmd.ProcessState)
+	}
+}
+
+// stopError and printOrgDirectorStop on a launch cmd's results that the
+// tests above do not reach through a real process: a check-in after stop
+// read the registration names no --force and no ps (it sent that process
+// nothing), a forced stop whose record failed names the ps (unless ps could
+// not be read) but not --force again (its stop command carries --force
+// already), a stop or a forced stop whose ps could not be read names no ps
+// to look with, and a stop that start's cleanup recorded first says so and
+// names the terminal.
+func TestOrgDirectorStop_LaunchCmdErrorsAndAlreadyStopped(t *testing.T) {
+	rt := &orgDirectorRuntime{hintStateDir: "/work/the ledger"}
+	reg := org.DirectorRegistration{ID: "d1", Driver: "claude", Launch: org.DirectorLaunchCmd, State: org.DirectorStateStarting, Token: "0123456789ab"}
+
+	var w strings.Builder
+	checkedIn := &org.DirectorCleanupError{
+		Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab",
+		CleanupErr: fmt.Errorf("record d1 stopped: %w: d1 had no pid when stop read it", org.ErrDirectorCheckedInDuringStop), StopCommand: "ralph org director stop --id d1",
+	}
+	err := rt.stopError(&w, "d1", false, org.DirectorStopResult{Registration: reg, ProcessNote: "process=none recorded"}, checkedIn)
+	want := "org: director: stop d1: record d1 stopped: the launch script checked in after stop read the registration: d1 had no pid when stop read it; " +
+		"nothing was recorded; run ralph org director stop --id d1 --state-dir '/work/the ledger' again to stop the process that checked in"
+	if err == nil || err.Error() != want || !errors.Is(err, org.ErrDirectorCheckedInDuringStop) {
+		t.Errorf("stopError =\n%v\nwant\n%s", err, want)
+	}
+	if w.String() != "stop d1: process=none recorded\n" {
+		t.Errorf("stopError wrote %q; want the process note", w.String())
+	}
+
+	running := reg
+	running.State, running.PID = org.DirectorStateRunning, 77
+	for _, tc := range []struct {
+		name, note string
+		notEnded   error
+		wantSuffix string
+	}{
+		{"ps could not be read", "process=not signalled: ps could not be read",
+			fmt.Errorf("%w: %w: ps is broken", org.ErrDirectorProcessNotEnded, org.ErrDirectorProcessUnreadable), "; pid 77 may still be running"},
+		{"the process outlived its SIGTERM", "process=still running after SIGTERM",
+			fmt.Errorf("%w: pid 77 did not end within 10s of its SIGTERM", org.ErrDirectorProcessNotEnded),
+			"; pid 77 may still be running: look with ps -o pid,lstart,command -p 77"},
+	} {
+		w.Reset()
+		forcedRecord := &org.DirectorCleanupError{
+			Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77,
+			CleanupErr:  errors.Join(tc.notEnded, errors.New("record d1 stopped: no space left on device")),
+			StopCommand: "ralph org director stop --id d1 --force",
+		}
+		err = rt.stopError(&w, "d1", true, org.DirectorStopResult{Registration: running, ProcessNote: tc.note}, forcedRecord)
+		if err == nil || !strings.Contains(err.Error(), "ralph org director stop --id d1 --force --state-dir '/work/the ledger'") ||
+			!strings.HasSuffix(err.Error(), tc.wantSuffix) || strings.Contains(err.Error(), "or record the stop and leave") {
+			t.Errorf("%s: stopError of a forced stop whose record failed = %v; want it to end with %q", tc.name, err, tc.wantSuffix)
+		}
+		if w.String() != "stop d1: "+tc.note+"\n" {
+			t.Errorf("%s: stopError wrote %q; want the process note", tc.name, w.String())
+		}
+	}
+
+	// A stop that recorded nothing because ps could not be read names the
+	// stop to run again once ps can read the pid and stop --force, and no ps
+	// to look with.
+	w.Reset()
+	unreadable := &org.DirectorCleanupError{
+		Verb: "stop", ID: "d1", Launch: org.DirectorLaunchCmd, TerminalName: "director_0123456789ab", PID: 77,
+		CleanupErr:  fmt.Errorf("%w: %w: ps is broken", org.ErrDirectorProcessNotEnded, org.ErrDirectorProcessUnreadable),
+		StopCommand: "ralph org director stop --id d1",
+	}
+	err = rt.stopError(&w, "d1", false, org.DirectorStopResult{Registration: running, ProcessNote: "process=not signalled: ps could not be read"}, unreadable)
+	want = "org: director: stop d1: the end of the process the launch script checked in with is not confirmed: ps could not be read: ps is broken; " +
+		"nothing was recorded; run ralph org director stop --id d1 --state-dir '/work/the ledger' again once ps can read pid 77; pid 77 may still be running; " +
+		"or record the stop and leave the process as it is with ralph org director stop --id d1 --force --state-dir '/work/the ledger'"
+	if err == nil || err.Error() != want {
+		t.Errorf("stopError of a stop whose ps could not be read =\n%v\nwant\n%s", err, want)
+	}
+
+	// A forced stop whose ps could not be read warns that the pid may still
+	// be running, with why and no ps to look with.
+	cmd := &cobra.Command{}
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	printOrgDirectorStop(cmd, org.DirectorStopResult{Registration: running, Forced: true, WasCurrent: true, ProcessNote: "process=not signalled: ps could not be read",
+		TerminalName: "director_0123456789ab", CloseErr: fmt.Errorf("%w: ps is broken", org.ErrDirectorProcessUnreadable)})
+	wantErr := "warning: director stop --force: d1 is recorded stopped, but pid 77, which its launch script checked in with, may still be running " +
+		"(ps could not be read: ps is broken)\n"
+	if stderr.String() != wantErr {
+		t.Errorf("printOrgDirectorStop of a forced stop whose ps could not be read: stderr =\n%s\nwant\n%s", stderr.String(), wantErr)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	printOrgDirectorStop(cmd, org.DirectorStopResult{Registration: running, AlreadyStopped: true, ProcessNote: "process=ended after SIGTERM", TerminalName: "director_0123456789ab"})
+	wantOut := "d1 was already recorded stopped (process=ended after SIGTERM)\n" +
+		"start's cleanup or another stop recorded d1 stopped after this stop read it, so this stop recorded nothing more\n" +
+		"the terminal that [org.director].launch_cmd opened (name director_0123456789ab) is left open for you to close\n"
+	if stdout.String() != wantOut || stderr.String() != "" {
+		t.Errorf("printOrgDirectorStop stdout =\n%s\nwant\n%s\nstderr = %q, want nothing", stdout.String(), wantOut, stderr.String())
+	}
+}
+
+// attach's refusal while a launch cmd's registration is current names the
+// stop from a terminal other than the director's, which stops its process,
+// and --replace, which leaves it running; it writes nothing. The pid is
+// made up: nothing reads or signals it.
+func TestOrgDirectorAttach_RefusedByALaunchCmdDirectorNamesItsStop(t *testing.T) {
+	stateDir := t.TempDir()
+	reg := seedCmdHeadless(t, stateDir)
+	checkInDirector(t, stateDir, reg, 4242, directorTestStartTime)
+	before := directorFileOrAbsent(t, stateDir)
+	suffix := " --state-dir '" + stateDir + "'"
+
+	stdout, _, err := runOrgCmdStreams(t, "director", "attach", "--driver", "claude", "--state-dir", stateDir)
+	if !errors.Is(err, org.ErrDirectorAttached) {
+		t.Fatalf("attach over a launch cmd director = %v; want ErrDirectorAttached", err)
+	}
+	if want := ", headless running, launch cmd, pid 4242): stop it with ralph org director stop --id d1" + suffix + " from a terminal other than the director's, " +
+		"which stops its process, or replace it with ralph org director attach --driver claude --replace" + suffix + ", which leaves that process running until such a stop"; !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("attach error %q does not end with %q", err, want)
+	}
+	if strings.Contains(err.Error(), "herdr") || strings.Contains(err.Error(), "detach") {
+		t.Errorf("attach error %q names herdr or detach; want the stop of a launch cmd", err)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want nothing", stdout)
+	}
+	if after := directorFileOrAbsent(t, stateDir); after != before {
+		t.Errorf("a refused attach changed director.jsonl")
+	}
+}
+
+// detach --id, detach --force, and attach --replace of a launch cmd's
+// registration only record, so they say that its process keeps running and
+// name the stop that ends it, with --state-dir; with no check-in recorded
+// yet they say that a check-in is refused now (it is) and name the stop that
+// records it stopped. The pid is made up: nothing reads or signals it.
+func TestOrgDirectorDetach_ALaunchCmdDirectorNamesItsStop(t *testing.T) {
+	setEscalateWatch(t, acceptingWatchLiveness())
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		pid      int
+		wantHead func(reg org.DirectorRegistration) string
+	}{
+		{"detach --id", []string{"director", "detach", "--id", "d1"}, 4242,
+			func(org.DirectorRegistration) string { return "detached d1\n" }},
+		{"detach --force, no check-in yet", []string{"director", "detach", "--force"}, 0,
+			func(reg org.DirectorRegistration) string {
+				return "detached d1 (forced; driver=claude, attached at " + reg.AttachedAt + ")\n"
+			}},
+		{"attach --replace", []string{"director", "attach", "--driver", "codex", "--replace"}, 4242,
+			func(reg org.DirectorRegistration) string {
+				return "attached d2 (driver=codex), replacing d1 (driver=claude, attached at " + reg.AttachedAt + ")\n"
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir, herdrLog, _ := directorStartLedger(t)
+			reg := seedCmdHeadless(t, stateDir)
+			if tc.pid > 0 {
+				checkInDirector(t, stateDir, reg, tc.pid, directorTestStartTime)
+			}
+			suffix := " --state-dir '" + stateDir + "'"
+			want := tc.wantHead(reg)
+			if strings.HasPrefix(want, "attached d2") {
+				want += "detach it with: ralph org director detach --id d2" + suffix + "\n"
+			}
+			if tc.pid > 0 {
+				want += "the process of the headless director d1 (pid 4242) keeps running; stop it with: ralph org director stop --id d1" + suffix + "\n"
+			} else {
+				want += "the headless director d1 has no pid yet: a check-in of its launch script is refused now, so it starts no agent; " +
+					"record its stop with: ralph org director stop --id d1" + suffix + "\n"
+			}
+
+			stdout, _ := runInboxOK(t, append(tc.args, "--state-dir", stateDir)...)
+			if stdout != want {
+				t.Errorf("%v stdout =\n%s\nwant\n%s", tc.args, stdout, want)
+			}
+			if tc.pid == 0 {
+				err := org.NewDirectorStore(stateDir).MarkCmdLaunched(org.DirectorCmdCheckIn{ID: reg.ID, Token: reg.Token, PID: 4242, StartTime: directorTestStartTime})
+				if !errors.Is(err, org.ErrDirectorCheckInRefused) {
+					t.Errorf("a check-in after the detach = %v; want it refused", err)
+				}
+			}
+			if lines := readLogLines(t, herdrLog); len(lines) != 0 {
+				t.Errorf("herdr calls = %v; want none", lines)
+			}
+		})
+	}
+}
+
+// AC8 for director status: a launch cmd's registration shows launch cmd,
+// its terminal name, and its pid (once checked in) on the director: line,
+// pid, start_time, and terminal_name in the text form, and the same in the
+// JSON; an open one that is not current is named so at the end of the line
+// and on its open_headless line. The pid is made up: nothing reads or
+// signals it.
+func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	stateDir := t.TempDir()
+	d1 := seedCmdHeadless(t, stateDir)
+	name, ts := "director_"+d1.Token, d1.AttachedAt
+
+	if got, want := directorStatusLine(t, "--state-dir", stateDir),
+		"director: attached d1 (driver=claude, headless starting, model=opus, launch cmd, name "+name+", attached at "+ts+", by alice)"+tail; got != want {
+		t.Errorf("director line of a starting d1:\n got %q\nwant %q", got, want)
+	}
+	checkInDirector(t, stateDir, d1, 4242, directorTestStartTime)
+	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
+	want := "director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name " + name + ", pid 4242, attached at " + ts + ", by alice)" + tail + "\n" +
+		"enabled: true\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
+		"launch: cmd\nstate: running\nmodel: opus\npermission_mode: autonomous\ntoken: " + d1.Token + "\npid: 4242\nstart_time: " + directorTestStartTime +
+		"\nterminal_name: " + name + "\n"
+	if stdout != want {
+		t.Errorf("status of a running d1 =\n%s\nwant\n%s", stdout, want)
+	}
+	jsonOut, _ := runInboxOK(t, "director", "status", "--json", "--state-dir", stateDir)
+	if reg := directorReportOf(t, jsonOut).Registration; reg == nil || reg.Launch != org.DirectorLaunchCmd || reg.State != org.DirectorStateRunning ||
+		reg.TerminalName != name || reg.PID != 4242 || reg.StartTime != directorTestStartTime || reg.Model != "opus" || reg.WorkspaceID != "" || reg.PaneID != "" {
+		t.Errorf("director status --json = %s; want d1 with launch cmd, running, %s, pid 4242", jsonOut, name)
+	}
+	for _, key := range []string{`"launch": "cmd"`, `"terminal_name": "` + name + `"`, `"pid": 4242`, `"start_time": "` + directorTestStartTime + `"`} {
+		if !strings.Contains(jsonOut, key) {
+			t.Errorf("director status --json does not carry %s:\n%s", key, jsonOut)
+		}
+	}
+
+	d2, _, err := org.NewDirectorStore(stateDir).Attach(org.DirectorAttach{Driver: org.DirectorDriverClaude, Replace: true, User: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ = runInboxOK(t, "director", "status", "--state-dir", stateDir)
+	open := "d1 (running, launch cmd, name " + name + ", pid 4242)"
+	wantLine := directorAttachedLine("d2", "claude", d2.AttachedAt, "bob") + "; the headless director " + open +
+		" is still open but not attached: stop it with ralph org director stop --id d1 --state-dir '" + stateDir + "'"
+	if lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n"); lines[0] != wantLine || lines[len(lines)-1] != "open_headless: "+open ||
+		strings.Contains(stdout, "terminal_name:") {
+		t.Errorf("status with d2 promoted over d1 =\n%s\nwant the line %q, d2's 8a-1 fields, and open_headless: %s", stdout, wantLine, open)
+	}
+	jsonOut, _ = runInboxOK(t, "director", "status", "--json", "--state-dir", stateDir)
+	report := directorReportOf(t, jsonOut)
+	if report.Registration == nil || report.Registration.ID != "d2" || report.Registration.TerminalName != "" || len(report.OpenHeadless) != 1 ||
+		report.OpenHeadless[0].ID != "d1" || report.OpenHeadless[0].TerminalName != name || report.OpenHeadless[0].PID != 4242 {
+		t.Errorf("director status --json = %s; want d2 current with no terminal_name and d1 in open_headless with %s", jsonOut, name)
+	}
+}
+
+// AC8's last sentence: terminal_name is added for a launch cmd only, so the
+// JSON of a herdr or a promoted registration in status is the
+// org.DirectorRegistration's, byte for byte, and a launch cmd's is that
+// with terminal_name added.
+func TestOrgDirectorReportRegistration_AddsTheTerminalNameForALaunchCmdOnly(t *testing.T) {
+	for _, reg := range []org.DirectorRegistration{
+		{ID: "d1", Driver: "codex", Wake: []string{"pull"}, Launch: org.DirectorLaunchHerdr, State: org.DirectorStateRunning, Token: "0123456789ab",
+			Model: "gpt-6-astra", PermissionMode: "guarded", WorkspaceID: "w-1", PaneID: "p-1", AttachedAt: "2026-10-16T09:00:00Z", User: "alice", Cwd: "/work"},
+		{ID: "d2", Driver: "claude", Wake: []string{"pull"}, PaneID: "%7", AttachedAt: "2026-10-16T09:00:00Z", User: "bob", Cwd: "/w", HerdrPane: true},
+	} {
+		got, err := json.Marshal(newOrgDirectorReportRegistration(reg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := json.Marshal(reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("the status JSON of %s =\n%s\nwant the registration's\n%s", reg.ID, got, want)
+		}
+	}
+	cmdReg := org.DirectorRegistration{ID: "d3", Driver: "claude", Wake: []string{"pull"}, Launch: org.DirectorLaunchCmd, State: org.DirectorStateRunning,
+		Token: "0123456789ab", Model: "opus", PermissionMode: "autonomous", PID: 4242, StartTime: directorTestStartTime, AttachedAt: "2026-10-16T09:00:00Z"}
+	got, err := json.Marshal(newOrgDirectorReportRegistration(cmdReg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(cmdReg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantStr := strings.TrimSuffix(string(want), "}") + `,"terminal_name":"director_0123456789ab"}`; string(got) != wantStr {
+		t.Errorf("the status JSON of a launch cmd =\n%s\nwant\n%s", got, wantStr)
+	}
 }

@@ -34,7 +34,7 @@
 - `docs/quality/`: definition of done and gates
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
-- `docs/recipes/`: hands-on recipes (Codex setup, agent teams, language packs, worktrees)
+- `docs/recipes/`: hands-on recipes (Codex setup, Codex seat permissions, agent teams, language packs, worktrees, the headless director's `launch_cmd` terminal)
 - `docs/roadmap/`: maturity-model and future direction documents
 - `docs/research/`: approach comparisons and investigation notes
 - `docs/references/`: source notes and external reference links
@@ -45,7 +45,7 @@
 - `.claude/skills/plan/`: create plans, build the visual review page (`diagrams.md`, `visual-template.html`), and gate on user approval (auto)
 - `.claude/skills/implement/`: create branch and execute plans interactively (auto)
 - `.claude/skills/org/`: autonomous multi-seat execution via `ralph org` verbs (auto)
-- `.claude/skills/director/`: promote the current session to the director of every feature org, or run as the headless director that `ralph org director start` launches in herdr; it registers with `ralph org director attach` (promotion), handles the org inbox, and reports progress (auto)
+- `.claude/skills/director/`: promote the current session to the director of every feature org, or run as the headless director that `ralph org director start` launches in herdr or with `[org.director].launch_cmd` in a terminal that command opens; it registers with `ralph org director attach` (promotion), handles the org inbox, and reports progress (auto)
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)

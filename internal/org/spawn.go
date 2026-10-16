@@ -214,9 +214,14 @@ type Org struct {
 	// tab and workspace gets of the ownership check, the C-c, the pane
 	// close, the agmsg Leave), each workspace get and close Disband makes,
 	// the gets and the close in CloseDeferredSelfPane /
-	// CloseDeferredSelfWorkspace, and each call of the watch's pulse cycle
+	// CloseDeferredSelfWorkspace, each call of the watch's pulse cycle
 	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
-	// and the real git status), one fresh deadline per call. Zero (the
+	// and the real git status), each herdr call of `ralph org director
+	// start` and `stop` and of start's cleanup (the workspace and tab
+	// creates, the label gets, the C-c, and the pane and workspace closes;
+	// the agent start has the start's own timeout), and on the launch_cmd
+	// path the launch_cmd run and each ps read of the director's process
+	// (readDirectorProcess), one fresh deadline per call. Zero (the
 	// field's default) means "use defaultDriverCallTimeout" -- tests set a
 	// tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
@@ -274,6 +279,34 @@ type Org struct {
 	// item is sent at once. The CLI sets it to ProbeWatch on the ledger's
 	// state dir for `ralph org escalate` only.
 	EscalateWatch func() WatchLiveness
+	// DirectorProcessReader overrides how the director of a launch cmd
+	// (director_cmd.go) reads a process by its pid before it signals it and
+	// while it waits for it to end. nil (the field's default) means
+	// ReadDirectorProcess, which runs ps; tests set it to simulate a ps that
+	// cannot be read.
+	DirectorProcessReader func(ctx context.Context, pid int) (DirectorProcess, error)
+	// DirectorStopWait bounds how long stopDirectorProcess waits, after its
+	// SIGTERM, for the director process of a launch cmd to end. Zero (the
+	// field's default) means "use defaultDirectorStopWait" (10s) -- tests
+	// set a short one so a process that ignores SIGTERM is reported fast.
+	DirectorStopWait time.Duration
+	// DirectorAgentLookPath overrides how StartDirector with
+	// [org.director].launch_cmd finds the driver's agent, the binary herdr's
+	// agent start runs for that kind ("claude" or "codex"), whose absolute
+	// path the launch script execs. nil (the field's default) means
+	// exec.LookPath in start's environment; tests set a fake agent.
+	DirectorAgentLookPath func(file string) (string, error)
+	// DirectorRalphExecutable overrides how that start finds the ralph whose
+	// absolute path the launch script's check-in runs. nil (the field's
+	// default) means os.Executable; tests point it at a wrapper that runs the
+	// test binary as the check-in.
+	DirectorRalphExecutable func() (string, error)
+	// DirectorCheckInPollInterval overrides how often that start reads
+	// director.jsonl again while it waits for the launch script's check-in.
+	// Zero (the field's default) means "use
+	// defaultDirectorCheckInPollInterval" (200ms) -- tests set a tiny value
+	// so a check-in is seen fast.
+	DirectorCheckInPollInterval time.Duration
 }
 
 func (o *Org) now() string {

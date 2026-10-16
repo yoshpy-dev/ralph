@@ -44,12 +44,13 @@ func newOrgCmd() *cobra.Command {
 			"in the order their PRs may be merged, from those records and origin's\n" +
 			"branches. `ralph org director` registers the interactive session the\n" +
 			"human talks to as the director of the ledger, or launches a headless\n" +
-			"director in herdr (ralph org director start).",
+			"director in herdr (ralph org director start), or with\n" +
+			"[org.director].launch_cmd in the terminal that command opens.",
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles] and model_pool, from the main worktree's ralph.toml when the ledger is the main worktree's)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -215,27 +216,29 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // withMainWorktreeDirectorStartConfig returns cfg with the settings `ralph
 // org director start` launches the headless director by taken from <main
 // worktree root>/ralph.toml, by the rule withMainWorktreeDirectorEnabled
-// follows: Director.Enabled, Permissions ([org.permissions]: default, roles,
-// and codex_verified), Roles ([org.roles]), and ModelPool. Only when
-// configPath is empty and the ledger is the main worktree's
-// (org.LedgerMainWorktreeRoot), with the built-in defaults when that file
-// does not exist. The director acts for every org of the ledger, and a
-// feature worktree's ralph.toml, which the leader running there can change,
-// must not choose its permission mode or its model (plan
+// follows: Director.Enabled, Director.LaunchCmd ([org.director].launch_cmd),
+// Permissions ([org.permissions]: default, roles, and codex_verified), Roles
+// ([org.roles]), and ModelPool. Only when configPath is empty and the ledger
+// is the main worktree's (org.LedgerMainWorktreeRoot), with the built-in
+// defaults when that file does not exist. The director acts for every org of
+// the ledger, and a feature worktree's ralph.toml, which the leader running
+// there can change, must not choose its permission mode or its model (plan
 // 2026-10-15-org-director-start, D6 and Scope), any more than whether a
-// director is used at all. With --config, or a ledger that is not the main
-// worktree's, cfg is returned unchanged. No other setting is taken. A main
-// worktree ralph.toml that fails to load is an error, which director start
-// returns.
+// director is used at all, nor the command start runs to open its terminal
+// (plan 2026-10-16-org-director-launch-cmd, D10). With --config, or a ledger
+// that is not the main worktree's, cfg is returned unchanged. No other
+// setting is taken. A main worktree ralph.toml that fails to load is an
+// error, which director start returns.
 func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled and launch_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
 	}
 	cfg.Director.Enabled = mainCfg.Director.Enabled
+	cfg.Director.LaunchCmd = mainCfg.Director.LaunchCmd
 	cfg.Permissions = mainCfg.Permissions
 	cfg.Roles = mainCfg.Roles
 	cfg.ModelPool = mainCfg.ModelPool
@@ -1306,7 +1309,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the seat stays recorded stopped and the failure is only a warning.\n" +
 			"A headless director (`ralph org director start`) is not an org seat, so\n" +
 			"--all leaves it open: when the ledger has one, a note: line on stderr names\n" +
-			"`ralph org director stop --id`, which closes it, and the exit code does not\n" +
+			"`ralph org director stop --id`, which stops it, and the exit code does not\n" +
 			"change.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {

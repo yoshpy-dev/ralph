@@ -1400,6 +1400,15 @@ func TestDirectorAttachHeadless_RefusesWhileARegistrationIsCurrent(t *testing.T)
 		{"a registration with a launch this binary does not know", func(t *testing.T, s *DirectorStore) {
 			writeDirectorFile(t, s, unknownLaunch+"\n")
 		}, "d1 (driver codex, attached 2026-10-15T00:00:00Z, launch terminal)"},
+		{"a launch cmd starting", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+		}, "d1 (driver codex, attached " + directorTestNow + ", headless starting, launch cmd)"},
+		{"a launch cmd checked in", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			if err := s.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+				t.Fatalf("MarkCmdLaunched: %v", err)
+			}
+		}, "d1 (driver codex, attached " + directorTestNow + ", headless running, launch cmd, pid 4242)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _ := newTestHeadlessStore(t, directorTestToken, "aaaaaaaaaaaa")
@@ -1482,6 +1491,7 @@ func TestDirectorAttachHeadless_RefusesBadInputBeforeReadingAnything(t *testing.
 		token  func() (string, error)
 		want   string
 	}{
+		{name: "an unknown launch", mutate: func(h *DirectorHeadlessAttach) { h.Launch = "terminal" }, want: `start: unknown launch "terminal": use herdr or cmd`},
 		{name: "no driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "" }, want: `start: unknown driver "": use claude or codex`},
 		{name: "an unknown driver", mutate: func(h *DirectorHeadlessAttach) { h.Driver = "gemini" }, want: `start: unknown driver "gemini"`},
 		{name: "no model", mutate: func(h *DirectorHeadlessAttach) { h.Model = "" }, want: "start: the model is empty"},
@@ -1987,6 +1997,12 @@ func TestDirectorHeadlessWriters_ACutOffWriteIsRestored(t *testing.T) {
 		{"MarkForceStopped of the current registration", headless,
 			func(s *DirectorStore) error { _, err := s.MarkForceStopped("d1", testDirectorWho); return err },
 			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting) is still the current registration: "},
+		{"MarkCmdLaunched", func(t *testing.T, s *DirectorStore) { mustAttachCmdHeadless(t, s) },
+			func(s *DirectorStore) error { return s.MarkCmdLaunched(testCheckIn(4242)) },
+			"org: director: check in d1: nothing was recorded: "},
+		{"MarkStopped of a launch cmd", func(t *testing.T, s *DirectorStore) { mustAttachCmdHeadless(t, s) },
+			func(s *DirectorStore) error { _, err := s.MarkStopped("d1", testDirectorWho); return err },
+			"org: director: stop d1: nothing was recorded, so d1 (driver codex, attached " + directorTestNow + ", headless starting, launch cmd) is still the current registration: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, clock := newTestHeadlessStore(t, directorTestToken, "dddddddddddd")
@@ -2091,5 +2107,437 @@ func TestDirectorAttachAndAttachHeadless_ConcurrentlyOnlyOneRegisters(t *testing
 	}
 	if lines := directorFileLines(t, s); len(lines) != 1 {
 		t.Fatalf("director.jsonl has %d lines, want 1: %q", len(lines), lines)
+	}
+}
+
+// The launch cmd registration of stage 8a-2b (plan
+// 2026-10-16-org-director-launch-cmd, AC2 and AC3): its attached, its
+// check-in (MarkCmdLaunched), and how the fold and the herdr writers read
+// it.
+
+// directorTestStartTime is the start time the check-ins of these tests
+// record, in ReadDirectorProcess's form.
+const directorTestStartTime = "Thu Oct 15 21:51:09 2026"
+
+func testCmdHeadlessAttach() DirectorHeadlessAttach {
+	h := testHeadlessAttach()
+	h.Launch = DirectorLaunchCmd
+	return h
+}
+
+func mustAttachCmdHeadless(t *testing.T, s *DirectorStore) DirectorRegistration {
+	t.Helper()
+	reg, err := s.AttachHeadless(testCmdHeadlessAttach())
+	if err != nil {
+		t.Fatalf("AttachHeadless(launch cmd): %v", err)
+	}
+	return reg
+}
+
+// testCheckIn is the check-in of d1's launch script with pid and
+// directorTestStartTime.
+func testCheckIn(pid int) DirectorCmdCheckIn {
+	return DirectorCmdCheckIn{ID: "d1", Token: directorTestToken, PID: pid, StartTime: directorTestStartTime, Who: testDirectorWho}
+}
+
+// directorCmdAttachedLine is the attached line of a launch cmd registration
+// as a test fixture.
+func directorCmdAttachedLine(id, token string) string {
+	return fmt.Sprintf(`{"ts":"2026-10-15T00:00:00Z","id":%q,"event":"attached","driver":"claude","wake":["pull"],"launch":"cmd","token":%q,"model":"m","permission_mode":"guarded","user":"u","cwd":"/w","herdr_pane":false}`, id, token)
+}
+
+// directorLaunchedLine is a launched line for id with pid and start_time,
+// each only when set, as a test fixture.
+func directorLaunchedLine(id string, pid int, startTime string) string {
+	fields := ""
+	if pid != 0 {
+		fields += fmt.Sprintf(`"pid":%d,`, pid)
+	}
+	if startTime != "" {
+		fields += fmt.Sprintf(`"start_time":%q,`, startTime)
+	}
+	return directorEventLine(id, DirectorEventLaunched, fields)
+}
+
+// directorLaunchSummary names r by its id, launch, state, pid, start time,
+// workspace, and pane.
+func directorLaunchSummary(r DirectorRegistration) string {
+	return fmt.Sprintf("%s %s %s pid=%d start=%q ws=%s pane=%s", r.ID, r.Launch, r.State, r.PID, r.StartTime, r.WorkspaceID, r.PaneID)
+}
+
+// AC2's record shape: AttachHeadless with launch cmd writes the attached of
+// a launch herdr with launch cmd, and the check-in adds launched with pid
+// and start_time; the fold reads them into the registration and its JSON.
+// The launch herdr lines of TestDirectorAttachHeadless_RecordsTheLaunchAndItsEvents
+// stay as they were.
+func TestDirectorAttachHeadless_RecordsALaunchCmdAndItsCheckIn(t *testing.T) {
+	s, _, clock := newTestHeadlessStore(t)
+	reg := mustAttachCmdHeadless(t, s)
+	want := DirectorRegistration{
+		ID: "d1", Driver: DirectorDriverCodex, Wake: []string{DirectorWakePull},
+		Launch: DirectorLaunchCmd, State: DirectorStateStarting, Token: directorTestToken,
+		Model: "gpt-x", PermissionMode: PermissionModeAutonomous,
+		AttachedAt: directorTestNow, User: "alice", Cwd: "/work/a",
+	}
+	if !reflect.DeepEqual(reg, want) {
+		t.Fatalf("AttachHeadless = %+v, want %+v", reg, want)
+	}
+	*clock = clock.Add(time.Second)
+	if err := s.MarkCmdLaunched(DirectorCmdCheckIn{ID: "d1", Token: directorTestToken, PID: 4242, StartTime: "  " + directorTestStartTime + "\n", Who: testDirectorWho}); err != nil {
+		t.Fatalf("MarkCmdLaunched: %v", err)
+	}
+	wantLines := []string{
+		`{"ts":"2026-10-15T09:00:00Z","id":"d1","event":"attached","driver":"codex","wake":["pull"],"launch":"cmd","token":"0123456789ab","model":"gpt-x","permission_mode":"autonomous","user":"alice","cwd":"/work/a","herdr_pane":false}`,
+		`{"ts":"2026-10-15T09:00:01Z","id":"d1","event":"launched","pid":4242,"start_time":"Thu Oct 15 21:51:09 2026","user":"bob","cwd":"/work/b","herdr_pane":false}`,
+	}
+	if got := directorFileLines(t, s); strings.Join(got, "\n") != strings.Join(wantLines, "\n") {
+		t.Fatalf("director.jsonl =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(wantLines, "\n"))
+	}
+	res := mustReadDirector(t, s)
+	want.State, want.PID, want.StartTime = DirectorStateRunning, 4242, directorTestStartTime
+	if res.Current == nil || !reflect.DeepEqual(*res.Current, want) || res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Fatalf("Read = %+v (current %+v), want %+v", res, res.Current, want)
+	}
+	if len(res.OpenHeadless) != 1 || !reflect.DeepEqual(res.OpenHeadless[0], want) {
+		t.Fatalf("OpenHeadless = %+v, want only %+v", res.OpenHeadless, want)
+	}
+	raw, err := json.Marshal(*res.Current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON := `{"id":"d1","driver":"codex","wake":["pull"],"launch":"cmd","state":"running","token":"0123456789ab","model":"gpt-x","permission_mode":"autonomous",` +
+		`"pid":4242,"start_time":"Thu Oct 15 21:51:09 2026","attached_at":"2026-10-15T09:00:00Z","user":"alice","cwd":"/work/a","herdr_pane":false}`
+	if string(raw) != wantJSON {
+		t.Fatalf("JSON = %s, want %s", raw, wantJSON)
+	}
+}
+
+// D11: a registration start wrote is headless whether it runs in herdr or in
+// a terminal of launch_cmd; only launch herdr has herdr's workspace and pane.
+func TestDirectorRegistration_HeadlessHerdrAndCmdLaunches(t *testing.T) {
+	for _, tc := range []struct {
+		launch                 string
+		headless, herdr, isCmd bool
+	}{
+		{"", false, false, false},
+		{DirectorLaunchHerdr, true, true, false},
+		{DirectorLaunchCmd, true, false, true},
+		{"terminal", false, false, false},
+		{"CMD", false, false, false},
+	} {
+		r := DirectorRegistration{Launch: tc.launch}
+		if r.Headless() != tc.headless || r.HerdrLaunch() != tc.herdr || r.CmdLaunch() != tc.isCmd {
+			t.Errorf("launch %q: Headless %v, HerdrLaunch %v, CmdLaunch %v; want %v, %v, %v",
+				tc.launch, r.Headless(), r.HerdrLaunch(), r.CmdLaunch(), tc.headless, tc.herdr, tc.isCmd)
+		}
+	}
+}
+
+// The fold of a launch cmd: launched applies only with a positive pid and a
+// start time, while the registration is current and starting; a launch
+// herdr's launched never carries them, so one that does is ignored; herdr's
+// workspace_created and pane_created do not apply to a launch cmd.
+func TestDirectorRead_FoldsLaunchCmdRegistrations(t *testing.T) {
+	att := directorCmdAttachedLine
+	tok := directorTestToken
+	stopped := directorEventLine("d1", DirectorEventStopped, "")
+	const st = directorTestStartTime
+	for _, tc := range []struct {
+		name        string
+		lines       []string
+		wantCurrent string // directorLaunchSummary of the current registration, "" for none
+		wantOpen    []string
+		wantIgnored int
+	}{
+		{
+			name:        "starting",
+			lines:       []string{att("d1", tok)},
+			wantCurrent: `d1 cmd starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+		},
+		{
+			name:        "checked in",
+			lines:       []string{att("d1", tok), directorLaunchedLine("d1", 4242, st)},
+			wantCurrent: `d1 cmd running pid=4242 start="` + st + `" ws= pane=`,
+			wantOpen:    []string{`d1 cmd running pid=4242 start="` + st + `" ws= pane=`},
+		},
+		{
+			name:        "a launched with no pid is ignored",
+			lines:       []string{att("d1", tok), directorLaunchedLine("d1", 0, st)},
+			wantCurrent: `d1 cmd starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launched with no start time is ignored",
+			lines:       []string{att("d1", tok), directorLaunchedLine("d1", 4242, "")},
+			wantCurrent: `d1 cmd starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launched with a negative pid is ignored",
+			lines:       []string{att("d1", tok), directorLaunchedLine("d1", -7, st)},
+			wantCurrent: `d1 cmd starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a second launched keeps the first pid",
+			lines:       []string{att("d1", tok), directorLaunchedLine("d1", 4242, st), directorLaunchedLine("d1", 99, "Fri Oct 16 00:00:00 2026")},
+			wantCurrent: `d1 cmd running pid=4242 start="` + st + `" ws= pane=`,
+			wantOpen:    []string{`d1 cmd running pid=4242 start="` + st + `" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launched after a detach is ignored",
+			lines:       []string{att("d1", tok), directorDetachedLine("d1"), directorLaunchedLine("d1", 4242, st)},
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launched after the stopped is ignored",
+			lines:       []string{att("d1", tok), directorDetachedLine("d1"), stopped, directorLaunchedLine("d1", 4242, st)},
+			wantIgnored: 1,
+		},
+		{
+			name:        "herdr's workspace and pane do not apply",
+			lines:       []string{att("d1", tok), directorWorkspaceLine("d1", "w1"), directorPaneLine("d1", "p1")},
+			wantCurrent: `d1 cmd starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 cmd starting pid=0 start="" ws= pane=`},
+			wantIgnored: 2,
+		},
+		{
+			name:        "a malformed token is ignored",
+			lines:       []string{att("d1", "0123456789AB"), att("d2", "")},
+			wantIgnored: 2,
+		},
+		{
+			name:  "stopped after its check-in, as MarkStopped writes it",
+			lines: []string{att("d1", tok), directorLaunchedLine("d1", 4242, st), directorDetachedLine("d1"), stopped},
+		},
+		{
+			name:        "a launch herdr's launched with a pid is ignored",
+			lines:       []string{directorHeadlessAttachedLine("d1", tok), directorLaunchedLine("d1", 4242, st)},
+			wantCurrent: `d1 herdr starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 herdr starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launch herdr's launched with a start time only is ignored",
+			lines:       []string{directorHeadlessAttachedLine("d1", tok), directorLaunchedLine("d1", 0, st)},
+			wantCurrent: `d1 herdr starting pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 herdr starting pid=0 start="" ws= pane=`},
+			wantIgnored: 1,
+		},
+		{
+			name:        "a launch herdr's launched without them still applies",
+			lines:       []string{directorHeadlessAttachedLine("d1", tok), directorLaunchedLine("d1", 0, "")},
+			wantCurrent: `d1 herdr running pid=0 start="" ws= pane=`,
+			wantOpen:    []string{`d1 herdr running pid=0 start="" ws= pane=`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestDirectorStore(t)
+			writeDirectorFile(t, s, strings.Join(tc.lines, "\n")+"\n")
+			res := mustReadDirector(t, s)
+			current := ""
+			if res.Current != nil {
+				current = directorLaunchSummary(*res.Current)
+			}
+			if current != tc.wantCurrent {
+				t.Errorf("current = %q, want %q", current, tc.wantCurrent)
+			}
+			var open []string
+			for _, r := range res.OpenHeadless {
+				open = append(open, directorLaunchSummary(r))
+			}
+			if !reflect.DeepEqual(open, tc.wantOpen) {
+				t.Errorf("OpenHeadless = %q, want %q", open, tc.wantOpen)
+			}
+			if res.IgnoredEvents != tc.wantIgnored || res.CorruptLines != 0 {
+				t.Errorf("ignored %d, corrupt %d; want %d and 0", res.IgnoredEvents, res.CorruptLines, tc.wantIgnored)
+			}
+		})
+	}
+}
+
+// What only a launch herdr has stays herdr's: RecordWorkspace and RecordPane
+// refuse a launch cmd with ErrDirectorNotHerdrLaunch, and MarkLaunched
+// (start's record of herdr's agent start) returns false and writes nothing
+// for it, as for a registration that is not headless.
+func TestDirectorHerdrWriters_LeaveALaunchCmdAlone(t *testing.T) {
+	for _, checkedIn := range []bool{false, true} {
+		t.Run(fmt.Sprintf("checked in %v", checkedIn), func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			mustAttachCmdHeadless(t, s)
+			if checkedIn {
+				if err := s.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := readDirectorFile(t, s)
+			for what, record := range map[string]func() error{
+				"workspace": func() error { return s.RecordWorkspace("d1", "w1", testDirectorWho) },
+				"pane":      func() error { return s.RecordPane("d1", "p1", testDirectorWho) },
+			} {
+				err := record()
+				if !errors.Is(err, ErrDirectorNotHerdrLaunch) || errors.Is(err, ErrDirectorNoOpenHeadless) ||
+					!strings.HasPrefix(err.Error(), "org: director: record the "+what+" of d1: ") || !strings.HasSuffix(err.Error(), " has no herdr workspace or pane") {
+					t.Errorf("record the %s err = %v, want ErrDirectorNotHerdrLaunch", what, err)
+				}
+			}
+			if still, err := s.MarkLaunched("d1", testDirectorWho); err != nil || still {
+				t.Errorf("MarkLaunched = %v, %v; want false, nil", still, err)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("director.jsonl changed to %q", got)
+			}
+		})
+	}
+}
+
+// AC3: the check-in records launched with the pid and its start time only
+// for the current launch cmd registration with the right token, still
+// starting; every other check-in is refused with ErrDirectorCheckInRefused,
+// says why, and writes nothing.
+func TestDirectorMarkCmdLaunched_RefusesEveryOtherCheckIn(t *testing.T) {
+	const prefix = "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: "
+	cmdStarting := func(t *testing.T, s *DirectorStore) { mustAttachCmdHeadless(t, s) }
+	for _, tc := range []struct {
+		name   string
+		setup  func(t *testing.T, s *DirectorStore)
+		mutate func(c *DirectorCmdCheckIn)
+		want   string // the whole error
+	}{
+		{"an id not of the form d<N>", cmdStarting, func(c *DirectorCmdCheckIn) { c.ID = "d01" },
+			`org: director: check in: the check-in of the launch script is refused, so its agent must not start: "d01" is not a registration id (d<N>, such as d1)`},
+		{"a malformed token", cmdStarting, func(c *DirectorCmdCheckIn) { c.Token = "0123456789AB" },
+			prefix + `the token "0123456789AB" is not 12 lowercase hex digits`},
+		{"pid 0", cmdStarting, func(c *DirectorCmdCheckIn) { c.PID = 0 }, prefix + "the pid 0 is not a positive number"},
+		{"a negative pid", cmdStarting, func(c *DirectorCmdCheckIn) { c.PID = -1 }, prefix + "the pid -1 is not a positive number"},
+		{"no start time", cmdStarting, func(c *DirectorCmdCheckIn) { c.StartTime = " \t" }, prefix + "the start time of pid 4242 is empty"},
+		{"an id no registration has", cmdStarting, func(c *DirectorCmdCheckIn) { c.ID = "d2" },
+			"org: director: check in d2: the check-in of the launch script is refused, so its agent must not start: no registration d2 is recorded"},
+		{"a launch herdr", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) }, nil,
+			prefix + "d1 (driver codex, attached " + directorTestNow + ", headless starting) was not started with [org.director].launch_cmd"},
+		// The token comes first, so a caller without it learns nothing of
+		// the registration's launch: a promoted session has no token.
+		{"another token on a launch herdr", func(t *testing.T, s *DirectorStore) { mustAttachHeadless(t, s) },
+			func(c *DirectorCmdCheckIn) { c.Token = "aaaaaaaaaaaa" }, prefix + "the token is not the one d1 was started with"},
+		{"a promoted session", func(t *testing.T, s *DirectorStore) {
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude})
+		}, nil, prefix + "the token is not the one d1 was started with"},
+		{"another token", cmdStarting, func(c *DirectorCmdCheckIn) { c.Token = "aaaaaaaaaaaa" },
+			prefix + "the token is not the one d1 was started with"},
+		{"another token on a stopped registration", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			if _, err := s.MarkStopped("d1", testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+		}, func(c *DirectorCmdCheckIn) { c.Token = "aaaaaaaaaaaa" }, prefix + "the token is not the one d1 was started with"},
+		{"stopped before the check-in", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			if _, err := s.MarkStopped("d1", testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+		}, nil, prefix + "d1 (driver codex, attached " + directorTestNow + ", headless stopped, launch cmd) is already recorded stopped (start's cleanup or a stop came first)"},
+		{"detached before the check-in", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			if _, err := s.Detach(DirectorDetach{ID: "d1"}); err != nil {
+				t.Fatal(err)
+			}
+		}, nil, prefix + "d1 (driver codex, attached " + directorTestNow + ", headless starting, launch cmd) is no longer the current registration (an attach --replace or a detach came in)"},
+		{"replaced before the check-in", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Replace: true})
+		}, nil, prefix + "d1 (driver codex, attached " + directorTestNow + ", headless starting, launch cmd) is no longer the current registration (an attach --replace or a detach came in)"},
+		{"a second check-in", func(t *testing.T, s *DirectorStore) {
+			mustAttachCmdHeadless(t, s)
+			if err := s.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+				t.Fatal(err)
+			}
+		}, func(c *DirectorCmdCheckIn) { c.PID = 5555 }, prefix + "d1 (driver codex, attached " + directorTestNow + ", headless running, launch cmd, pid 4242) has already checked in"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			tc.setup(t, s)
+			before := readDirectorFile(t, s)
+			c := testCheckIn(4242)
+			if tc.mutate != nil {
+				tc.mutate(&c)
+			}
+			err := s.MarkCmdLaunched(c)
+			if !errors.Is(err, ErrDirectorCheckInRefused) || err.Error() != tc.want {
+				t.Fatalf("MarkCmdLaunched(%+v) err =\n%v\nwant\n%s", c, err, tc.want)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("a refused check-in wrote %q", strings.TrimPrefix(got, before))
+			}
+		})
+	}
+	t.Run("a missing state dir", func(t *testing.T) {
+		state := filepath.Join(t.TempDir(), "absent", "org")
+		err := NewDirectorStore(state).MarkCmdLaunched(testCheckIn(4242))
+		if !errors.Is(err, ErrDirectorCheckInRefused) || !strings.HasSuffix(err.Error(), "no registration d1 is recorded") {
+			t.Fatalf("MarkCmdLaunched err = %v, want the refusal", err)
+		}
+		if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("MarkCmdLaunched created the state dir (stat err = %v)", err)
+		}
+	})
+}
+
+// D7 on D14's comparison: a check-in that lands after stop read the
+// registration makes MarkStoppedIfUnchanged refuse with
+// ErrDirectorCheckedInDuringStop, writing nothing, since stop did not stop
+// that process; a stop that reads again is recorded. MarkStopped and
+// MarkForceStopped, which compare nothing, stop a launch cmd as they stop a
+// launch herdr, and the late check-in after them is refused.
+func TestDirectorMarkStoppedIfUnchanged_RefusesACheckInAfterTheRead(t *testing.T) {
+	s, _, _ := newTestHeadlessStore(t)
+	mustAttachCmdHeadless(t, s)
+	read := *mustReadDirector(t, s).Current
+	if err := s.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+		t.Fatal(err)
+	}
+	before := readDirectorFile(t, s)
+	wasCurrent, err := s.MarkStoppedIfUnchanged(read, testDirectorWho)
+	want := `org: director: stop d1: the launch script checked in after stop read the registration: d1 had no pid when stop read it, and has pid 4242 started "` +
+		directorTestStartTime + `" now`
+	if !errors.Is(err, ErrDirectorCheckedInDuringStop) || errors.Is(err, ErrDirectorChangedDuringStop) || err.Error() != want || wasCurrent {
+		t.Fatalf("MarkStoppedIfUnchanged = %v, %v;\nwant false and %q", wasCurrent, err, want)
+	}
+	if got := readDirectorFile(t, s); got != before {
+		t.Fatalf("director.jsonl changed to %q", got)
+	}
+	reread := *mustReadDirector(t, s).Current
+	reread.StartTime = "Fri Oct 16 00:00:00 2026"
+	if _, err := s.MarkStoppedIfUnchanged(reread, testDirectorWho); !errors.Is(err, ErrDirectorCheckedInDuringStop) {
+		t.Fatalf("MarkStoppedIfUnchanged with another start time = %v, want ErrDirectorCheckedInDuringStop", err)
+	}
+	if wasCurrent, err := s.MarkStoppedIfUnchanged(*mustReadDirector(t, s).Current, testDirectorWho); err != nil || !wasCurrent {
+		t.Fatalf("MarkStoppedIfUnchanged after a new read = %v, %v; want true, nil", wasCurrent, err)
+	}
+	wantTrail(t, s, "attached d1", "launched d1", "detached d1", "stopped d1")
+
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force %v", force), func(t *testing.T) {
+			s, _, _ := newTestHeadlessStore(t)
+			mustAttachCmdHeadless(t, s)
+			mark := s.MarkStopped
+			stopped := "stopped d1"
+			if force {
+				mark, stopped = s.MarkForceStopped, "stopped d1+force"
+			}
+			if wasCurrent, err := mark("d1", testDirectorWho); err != nil || !wasCurrent {
+				t.Fatalf("stop = %v, %v; want true, nil", wasCurrent, err)
+			}
+			wantTrail(t, s, "attached d1", "detached d1", stopped)
+			if err := s.MarkCmdLaunched(testCheckIn(4242)); !errors.Is(err, ErrDirectorCheckInRefused) {
+				t.Fatalf("a check-in after the stop = %v, want ErrDirectorCheckInRefused", err)
+			}
+			wantNoDirectorOpen(t, s)
+		})
 	}
 }

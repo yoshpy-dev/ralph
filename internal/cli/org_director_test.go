@@ -372,6 +372,7 @@ func TestOrgDirector_RefusesOrgID(t *testing.T) {
 		{"director", "start", "--driver", "claude", "--model", "opus"},
 		{"director", "stop", "--id", "d1"},
 		{"director", "stop", "--id", "d1", "--force"},
+		{"director", "launched", "--id", "d1", "--token", "0123456789ab", "--pid", "1"},
 		{"director", "status"},
 		{"director", "status", "--json"},
 	} {
@@ -629,10 +630,10 @@ func TestOrgDirector_AttachWarnsWhileNoWatchAcceptsWork(t *testing.T) {
 	}
 }
 
-// attach, detach, start, and stop change the ledger, so a legacy worktree
-// ledger with active seats refuses them and they write nothing (start and
-// stop run no herdr either); director status only reads it and prints the
-// note once.
+// attach, detach, start, stop, and the launch script's check-in (launched)
+// change the ledger, so a legacy worktree ledger with active seats refuses
+// them and they write nothing (start and stop run no herdr either); director
+// status only reads it and prints the note once.
 func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
 	herdrLog, _ := setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
@@ -650,6 +651,7 @@ func TestOrgDirector_LegacyLedgerGuard(t *testing.T) {
 		{"director", "start", "--driver", "claude", "--model", "opus"},
 		{"director", "stop", "--id", "d1"},
 		{"director", "stop", "--id", "d1", "--force"},
+		{"director", "launched", "--id", "d1", "--token", "0123456789ab", "--pid", fmt.Sprint(os.Getppid())},
 	} {
 		stdout, _, err := runOrgCmdStreams(t, args...)
 		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") {
@@ -827,6 +829,10 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"The registration does not change what `ralph org escalate` does", "Nor does it mean the session is still running",
 			"There are two ways to have one.",
 			"`ralph org director start` launches a headless director in a herdr workspace of its own and registers it, and `ralph org director stop --id <id>` closes it again",
+			"With [org.director].launch_cmd set, start launches it with that command, which opens a terminal, and stop ends its process.",
+			// The verbs' Short lines (plan 2026-10-16-org-director-launch-cmd).
+			"Launch a headless director in a herdr workspace of its own, or with [org.director].launch_cmd, and register it",
+			"Stop a headless director (close its herdr pane and workspace, or end its launch_cmd process) and record it stopped",
 			"status shows the registration, the headless directors that are still open, and [org.director].enabled",
 			"attach", "detach", "start", "stop", "status",
 		}},
@@ -835,6 +841,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"whether HERDR_PANE_ID was set (not its value)", "attach is refused unless --replace is given",
 			"The replaced session's detach is then refused, and it need not detach",
 			"A headless director that `ralph org director start` launched counts too, starting or running: the refusal then names `ralph org director stop --id`",
+			"For one launched with [org.director].launch_cmd, that stop ends its process, run from a terminal other than the director's, " +
+				"and --replace leaves the process running.",
 			"attach is refused, and writes nothing, when [org.director].enabled is false",
 			"Without --config, enabled is read from the main worktree's ralph.toml", "Start one with `ralph org watch --all --detach`",
 		}},
@@ -849,6 +857,18 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"Without --config, those settings and [org.director].enabled are read from the main worktree's ralph.toml when the ledger is the main worktree's",
 			"inside a herdr pane (HERDR_PANE_ID is set): run start from a terminal outside herdr. start has no --replace.",
 			"it launches one when none runs, and is refused when a watch holds the lock but is stale, stopping, or a --once run",
+			// The launch_cmd path (plan 2026-10-16-org-director-launch-cmd).
+			"With [org.director].launch_cmd set, start runs it in place of herdr. start writes the launch script <state-dir>/launch/director_<token>.sh (mode 0700)",
+			"for up to 10 s, and then waits for the check-in, which records the script's pid and that pid's start time, for up to --timeout-ms.",
+			"It prints started d1 (driver=..., model=..., permission=..., launch=cmd, name=director_<token>, pid=...).",
+			"ralph never closes that terminal, so it is left for you to close after stop.",
+			"With launch_cmd, attached (with launch cmd) is written before launch_cmd runs, and launched (with the pid and its start time) when the check-in comes.",
+			"[org.director].launch_cmd is read the same way.",
+			"With launch_cmd, HERDR_PANE_ID does not refuse start, which runs no herdr then, and start is also refused when the --driver agent is not on its PATH.",
+			"start stops what checked in by its pid and start time, as stop does, and records the director stopped, exits 1, " +
+				"and says that the terminal launch_cmd may have opened is left for you to close",
+			"When start cannot confirm that the process ended, it records the director detached only and prints the stop command that finishes the cleanup.",
+			"or with [org.director].launch_cmd how long start waits for the launch script's check-in, in milliseconds",
 		}},
 		{[]string{"director", "stop", "--help"}, []string{
 			"a stopped event in <state-dir>/director.jsonl and, when it is the current registration, a detached in the same write",
@@ -861,6 +881,25 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"--force, a human's cleanup, then records the director stopped anyway, closing nothing more",
 			"(herdr workspace list, the workspace labelled ralph_director_<token>)",
 			"stop reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
+			// The launch_cmd path (plan 2026-10-16-org-director-launch-cmd, D7 and D8).
+			"or ends the process of one it launched with [org.director].launch_cmd, and records it stopped",
+			"For a director launched with launch_cmd (launch cmd), stop runs no herdr.",
+			"sends SIGTERM to that pid alone, only when its start time is the one the check-in recorded, so the launch script before its exec and the agent after it are stopped alike; " +
+				"it then waits up to 10 s for the process to end before it records the stop.",
+			"A pid that is gone, is a zombie, or has another start time (another process has it now) counts as ended and is sent nothing, " +
+				"and so is a registration still starting with no check-in yet, whose check-in is refused afterwards.",
+			"stop never sends SIGKILL and does not close the terminal launch_cmd opened (name director_<token>): close it yourself.",
+			"With or without --force, stop is refused, and writes nothing, when RALPH_DIRECTOR_TOKEN is the registration's token",
+			"so run it from a terminal other than the director's.",
+			"When the process does not end within the 10 s, stop records nothing and exits 1 with the pid to look at " +
+				"(ps -o pid,lstart,command -p <pid>): run it again once that process has ended. " +
+				"When ps cannot be read (before the SIGTERM, stop sends nothing; while it waits after the SIGTERM, the SIGTERM has already been sent), " +
+				"stop records nothing and exits 1 with the pid too: run it again once ps can read it. " +
+				"Either way, --force records the stop instead: it takes the same steps and, when the end is still not confirmed, " +
+				"records the stop anyway, sends nothing more, and leaves the process as it is.",
+			"When the launch script checks in after stop read the registration, stop has sent that process nothing, so it records nothing and exits 1: " +
+				"run it again to stop the process that checked in.",
+			"or with launch_cmd when the process's end cannot be confirmed, sending nothing more (a human's cleanup)",
 		}},
 		{[]string{"director", "detach", "--help"}, []string{
 			"Give --id, the id attach printed", "it need not detach", "--force ends the current registration whatever its id",
@@ -868,10 +907,13 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"detach reads no ralph.toml (nor the main worktree's), so one that does not load does not block it",
 			"detach only records: when it ends a headless director's registration (`ralph org director start`), the director's herdr pane and workspace stay open, " +
 				"and detach prints the `ralph org director stop --id <id>` that closes them",
+			"For one launched with [org.director].launch_cmd, its process keeps running, and the stop detach prints ends it.",
 		}},
 		{[]string{"director", "status", "--help"}, []string{
 			"attached, not attached, disabled, or unreadable", "--json",
 			"For a headless director (ralph org director start) the fields add its state (starting or running), model, permission mode, token, workspace, and pane",
+			"(for one launched with [org.director].launch_cmd, launch cmd, the pid and start_time its launch script checked in with, " +
+				"and terminal_name, the name director_<token> launch_cmd gave its terminal, in place of the workspace and pane)",
 			"still open are listed (open_headless), to be closed with `ralph org director stop --id <id>`",
 			"With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown",
 			"The registration does not tell whether its session is still running",
@@ -879,8 +921,9 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"`ralph org director` registers the interactive session the human talks to as the director of the ledger, or launches a headless director in herdr (ralph org director start)",
 			"approve, the director verbs, and the inbox verbs, which refuse it",
-			"escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles] and model_pool, " +
-				"from the main worktree's ralph.toml when the ledger is the main worktree's",
+			"escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool " +
+				"and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's",
+			"or launches a headless director in herdr (ralph org director start), or with [org.director].launch_cmd in the terminal that command opens.",
 		}},
 	} {
 		out, err := runOrgCmd(t, tc.args...)

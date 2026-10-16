@@ -62,6 +62,13 @@ import (
 // gate sets it back to nil (useRealOrgWatchGate). And it shortens the
 // gate's settle (orgWatchGateSettleOverride), so a refusal of a stale watch
 // comes in milliseconds instead of 2 s.
+//
+// It also points how director start with [org.director].launch_cmd finds
+// the agent and the ralph executable (orgDirectorAgentLookPath,
+// orgDirectorRalphExecutable) at a failure, so such a start is refused
+// before it writes anything: PATH may hold a real claude or codex, and
+// os.Executable is the test binary, which a launch script would run as its
+// check-in. A test of launch_cmd sets its own (setDirectorLaunchSeams).
 func TestMain(m *testing.M) {
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
@@ -90,5 +97,11 @@ func TestMain(m *testing.M) {
 	orgWatchStopPollIntervalOverride = 5 * time.Millisecond
 	orgWatchGateOverride = func() error { return nil }
 	orgWatchGateSettleOverride = 50 * time.Millisecond
+	orgDirectorAgentLookPath = func(file string) (string, error) {
+		return "", fmt.Errorf("a test looked up the %s agent for a launch_cmd director; set orgDirectorAgentLookPath to a fake (setDirectorLaunchSeams)", file)
+	}
+	orgDirectorRalphExecutable = func() (string, error) {
+		return "", errors.New("a test asked for the ralph executable of a launch_cmd director; set orgDirectorRalphExecutable to a wrapper (setDirectorLaunchSeams)")
+	}
 	os.Exit(m.Run())
 }

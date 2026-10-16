@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -34,7 +35,9 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 			"promoted with the /director skill, which runs attach. Or\n" +
 			"`ralph org director start` launches a headless director in a herdr\n" +
 			"workspace of its own and registers it, and\n" +
-			"`ralph org director stop --id <id>` closes it again. One director is\n" +
+			"`ralph org director stop --id <id>` closes it again. With\n" +
+			"[org.director].launch_cmd set, start launches it with that command,\n" +
+			"which opens a terminal, and stop ends its process. One director is\n" +
 			"registered at a time for every org in the ledger, so these verbs take\n" +
 			"no --org-id. attach records the session and prints the registration's\n" +
 			"id (d1, d2, ...); it is refused while another director is attached,\n" +
@@ -63,6 +66,8 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 		newOrgDirectorStartCmd(stateDir, configPath),
 		newOrgDirectorStopCmd(stateDir, configPath),
 		newOrgDirectorStatusCmd(stateDir, configPath),
+		// Hidden: only the launch script of a launch_cmd start runs it.
+		newOrgDirectorLaunchedCmd(stateDir, configPath),
 	)
 
 	return cmd
@@ -92,7 +97,10 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"session's detach is then refused, and it need not detach. A headless\n" +
 			"director that `ralph org director start` launched counts too, starting\n" +
 			"or running: the refusal then names `ralph org director stop --id`,\n" +
-			"which closes its herdr pane, and --replace leaves that pane open.\n" +
+			"which closes its herdr pane, and --replace leaves that pane open. For\n" +
+			"one launched with [org.director].launch_cmd, that stop ends its\n" +
+			"process, run from a terminal other than the director's, and --replace\n" +
+			"leaves the process running.\n" +
 			"\n" +
 			"attach is refused, and writes nothing, when [org.director].enabled is\n" +
 			"false: escalate then sends every item to the human at once. Without\n" +
@@ -176,7 +184,8 @@ func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
 			"records: when it ends a headless director's registration\n" +
 			"(`ralph org director start`), the director's herdr pane and workspace\n" +
 			"stay open, and detach prints the `ralph org director stop --id <id>`\n" +
-			"that closes them.",
+			"that closes them. For one launched with [org.director].launch_cmd, its\n" +
+			"process keeps running, and the stop detach prints ends it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -227,9 +236,12 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"attached, the registration's fields, or all of it as JSON with --json.\n" +
 			"For a headless director (ralph org director start) the fields add its\n" +
 			"state (starting or running), model, permission mode, token, workspace,\n" +
-			"and pane, and the headless directors that are no longer attached but\n" +
-			"still open are listed (open_headless), to be closed with\n" +
-			"`ralph org director stop --id <id>`.\n" +
+			"and pane (for one launched with [org.director].launch_cmd, launch cmd,\n" +
+			"the pid and start_time its launch script checked in with, and\n" +
+			"terminal_name, the name director_<token> launch_cmd gave its terminal,\n" +
+			"in place of the workspace and pane), and the headless directors that are\n" +
+			"no longer attached but still open are listed (open_headless), to be\n" +
+			"closed with `ralph org director stop --id <id>`.\n" +
 			"With enabled false the state is disabled whether or not a registration is\n" +
 			"recorded; one that is still recorded is named and its fields are shown.\n" +
 			"The registration does not tell whether its session is still running.",
@@ -332,12 +344,18 @@ func (rt *orgDirectorRuntime) command(command string) string {
 // than the one the store refused on. A headless one (`ralph org director
 // start`, starting or running) is ended with `ralph org director stop --id`,
 // which closes its herdr pane, not with detach (plan
-// 2026-10-15-org-director-start, AC2).
+// 2026-10-15-org-director-start, AC2); one with launch cmd is stopped from a
+// terminal other than the director's, and that stop ends its process (plan
+// 2026-10-16-org-director-launch-cmd, D7 and D8).
 func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error {
 	replace := rt.command("ralph org director attach --driver " + driverName + " --replace")
 	var cur *org.DirectorRegistration
 	if res, readErr := rt.store.Read(); readErr == nil {
 		cur = res.Current
+	}
+	if cur != nil && cur.CmdLaunch() {
+		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, which stops its process, "+
+			"or replace it with %s, which leaves that process running until such a stop", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace)
 	}
 	if cur != nil && cur.Headless() {
 		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, which closes its herdr pane, "+
@@ -356,13 +374,26 @@ func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error 
 // start`) that is not stopped: ending its registration only records it
 // (plan 2026-10-15-org-director-start, D4), so its herdr pane and workspace
 // stay open, and the line names the stop that closes them, with this
-// invocation's --state-dir.
+// invocation's --state-dir. For a launch cmd (plan
+// 2026-10-16-org-director-launch-cmd, D7) the line says that the process its
+// launch script checked in with keeps running, and names the stop that ends
+// it; with no check-in recorded yet, that a check-in is refused from now on,
+// as the registration is not current, so the launch script starts no agent,
+// and names the stop that records it stopped.
 func (rt *orgDirectorRuntime) printHeadlessStillOpen(w io.Writer, reg org.DirectorRegistration) {
 	if !reg.Headless() || reg.State == org.DirectorStateStopped {
 		return
 	}
-	_, _ = fmt.Fprintf(w, "the herdr pane and workspace of the headless director %s stay open; close them with: %s\n",
-		inboxField(reg.ID), rt.command("ralph org director stop --id "+inboxField(reg.ID)))
+	stop := rt.command("ralph org director stop --id " + inboxField(reg.ID))
+	switch {
+	case reg.CmdLaunch() && reg.PID > 0:
+		_, _ = fmt.Fprintf(w, "the process of the headless director %s (pid %d) keeps running; stop it with: %s\n", inboxField(reg.ID), reg.PID, stop)
+	case reg.CmdLaunch():
+		_, _ = fmt.Fprintf(w, "the headless director %s has no pid yet: a check-in of its launch script is refused now, so it starts no agent; "+
+			"record its stop with: %s\n", inboxField(reg.ID), stop)
+	default:
+		_, _ = fmt.Fprintf(w, "the herdr pane and workspace of the headless director %s stay open; close them with: %s\n", inboxField(reg.ID), stop)
+	}
 }
 
 // notRestoredError is a store error err of attach, detach, start, or stop
@@ -440,19 +471,42 @@ const (
 // registration is current, and not_attached. Registration is the current
 // registration (null when there is none or the file could not be read); a
 // headless one carries its launch, state, token, model, permission mode,
-// workspace, and pane (org.DirectorRegistration). OpenHeadless lists the
-// other open headless registrations, detached but with their pane not yet
+// workspace, and pane (org.DirectorRegistration), and one with launch cmd
+// its pid, start time, and terminal name instead of the workspace and the
+// pane (orgDirectorReportRegistration). OpenHeadless lists the other open
+// headless registrations, detached but with their pane or process not yet
 // closed, which `ralph org director stop --id` closes (omitted when none).
 // Error is the read error, set whenever the read failed (with disabled too),
 // and CorruptLines and IgnoredEvents the counts of org.DirectorReadResult.
 type orgDirectorReport struct {
-	Enabled       bool                       `json:"enabled"`
-	State         string                     `json:"state"`
-	Registration  *org.DirectorRegistration  `json:"registration"`
-	OpenHeadless  []org.DirectorRegistration `json:"open_headless,omitempty"`
-	Error         string                     `json:"error,omitempty"`
-	CorruptLines  int                        `json:"corrupt_lines"`
-	IgnoredEvents int                        `json:"ignored_events"`
+	Enabled       bool                            `json:"enabled"`
+	State         string                          `json:"state"`
+	Registration  *orgDirectorReportRegistration  `json:"registration"`
+	OpenHeadless  []orgDirectorReportRegistration `json:"open_headless,omitempty"`
+	Error         string                          `json:"error,omitempty"`
+	CorruptLines  int                             `json:"corrupt_lines"`
+	IgnoredEvents int                             `json:"ignored_events"`
+}
+
+// orgDirectorReportRegistration is a registration as status reports it: the
+// org.DirectorRegistration the fold made, its fields inline in the JSON, and
+// for a launch cmd TerminalName, the name launch_cmd gave the terminal
+// (org.DirectorAgentName of the token; plan
+// 2026-10-16-org-director-launch-cmd, AC8). The name follows from the token
+// and is not recorded, so it is added here, not to the fold's registration,
+// and a herdr or promoted registration's JSON is what it was before.
+type orgDirectorReportRegistration struct {
+	org.DirectorRegistration
+	TerminalName string `json:"terminal_name,omitempty"`
+}
+
+// newOrgDirectorReportRegistration is reg as status reports it.
+func newOrgDirectorReportRegistration(reg org.DirectorRegistration) orgDirectorReportRegistration {
+	r := orgDirectorReportRegistration{DirectorRegistration: reg}
+	if reg.CmdLaunch() {
+		r.TerminalName = org.DirectorAgentName(reg.Token)
+	}
+	return r
 }
 
 // readOrgDirectorReport reads the registration of the ledger at stateDir
@@ -465,13 +519,14 @@ func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
 	case err != nil:
 		report.Error, report.State = err.Error(), orgDirectorStateUnreadable
 	case res.Current != nil:
-		report.Registration, report.State = res.Current, orgDirectorStateAttached
+		cur := newOrgDirectorReportRegistration(*res.Current)
+		report.Registration, report.State = &cur, orgDirectorStateAttached
 	default:
 		report.State = orgDirectorStateNotAttached
 	}
 	for _, reg := range res.OpenHeadless {
 		if res.Current == nil || reg.ID != res.Current.ID {
-			report.OpenHeadless = append(report.OpenHeadless, reg)
+			report.OpenHeadless = append(report.OpenHeadless, newOrgDirectorReportRegistration(reg))
 		}
 	}
 	report.CorruptLines, report.IgnoredEvents = res.CorruptLines, res.IgnoredEvents
@@ -483,8 +538,10 @@ func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
 
 // orgDirectorLine is the one director: line that `ralph status` and `ralph
 // org director status` print for r. A headless registration adds its state,
-// model, pane, and workspace, and the open headless registrations that are
-// not current are named at the end (orgDirectorOpenHeadlessNote). The values
+// model, pane, and workspace (for a launch cmd, the launch, the terminal
+// name, and the pid: orgDirectorLaunchDetails), and the open headless
+// registrations that are not current are named at the end
+// (orgDirectorOpenHeadlessNote). The values
 // from director.jsonl, which a human can edit, have their control
 // characters escaped (inboxField), so the line stays one line. The stop
 // commands it names repeat hintStateDir as --state-dir
@@ -498,7 +555,7 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 		reg := r.Registration
 		details := "driver=" + inboxField(reg.Driver)
 		if reg.Headless() {
-			details += ", headless " + inboxField(reg.State) + ", model=" + inboxField(reg.Model) + orgDirectorHerdrIDs(*reg)
+			details += ", headless " + inboxField(reg.State) + ", model=" + inboxField(reg.Model) + orgDirectorLaunchDetails(reg.DirectorRegistration)
 		}
 		details += ", attached at " + inboxField(reg.AttachedAt)
 		if reg.User != "" {
@@ -516,7 +573,7 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			state += "; director.jsonl cannot be read: " + inboxField(r.Error)
 		case r.Registration != nil && r.Registration.Headless():
 			reg := r.Registration
-			state += "; registration " + inboxField(reg.ID) + " is still recorded, headless " + inboxField(reg.State) + orgDirectorHerdrIDs(*reg) +
+			state += "; registration " + inboxField(reg.ID) + " is still recorded, headless " + inboxField(reg.State) + orgDirectorLaunchDetails(reg.DirectorRegistration) +
 				": stop it with " + org.CommandWithStateDir("ralph org director stop --id "+inboxField(reg.ID), hintStateDir)
 		case r.Registration != nil:
 			state += "; registration " + inboxField(r.Registration.ID) + " is still recorded"
@@ -541,19 +598,36 @@ func orgDirectorHerdrIDs(reg org.DirectorRegistration) string {
 	return ids
 }
 
+// orgDirectorLaunchDetails is what the director: line and the open_headless
+// lines say of where a headless registration runs: for a launch herdr its
+// herdr ids (orgDirectorHerdrIDs), and for a launch cmd ", launch cmd", the
+// terminal name launch_cmd gave the terminal (", name director_<token>"),
+// and ", pid <pid>" once the check-in recorded one (plan
+// 2026-10-16-org-director-launch-cmd, AC8).
+func orgDirectorLaunchDetails(reg org.DirectorRegistration) string {
+	if !reg.CmdLaunch() {
+		return orgDirectorHerdrIDs(reg)
+	}
+	details := ", launch " + inboxField(reg.Launch) + ", name " + inboxField(org.DirectorAgentName(reg.Token))
+	if reg.PID > 0 {
+		details += ", pid " + strconv.Itoa(reg.PID)
+	}
+	return details
+}
+
 // orgDirectorOpenHeadlessNote is the end of the director: line that names
 // the open headless registrations that are not current (detached, or
-// replaced, with their herdr pane not closed yet) and how to close them, or
-// "" when there are none (plan 2026-10-15-org-director-start, AC10). The
-// stop command repeats hintStateDir as --state-dir, as orgDirectorLine's
-// does.
-func orgDirectorOpenHeadlessNote(open []org.DirectorRegistration, hintStateDir string) string {
+// replaced, with their herdr pane or launch_cmd process not stopped yet) and
+// how to stop them, or "" when there are none (plan
+// 2026-10-15-org-director-start, AC10). The stop command repeats
+// hintStateDir as --state-dir, as orgDirectorLine's does.
+func orgDirectorOpenHeadlessNote(open []orgDirectorReportRegistration, hintStateDir string) string {
 	if len(open) == 0 {
 		return ""
 	}
 	names := make([]string, 0, len(open))
 	for _, reg := range open {
-		names = append(names, inboxField(reg.ID)+" ("+inboxField(reg.State)+orgDirectorHerdrIDs(reg)+")")
+		names = append(names, inboxField(reg.ID)+" ("+inboxField(reg.State)+orgDirectorLaunchDetails(reg.DirectorRegistration)+")")
 	}
 	if len(open) == 1 {
 		return "; the headless director " + names[0] + " is still open but not attached: stop it with " +
@@ -583,8 +657,10 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 // current, one line per field of it, with control characters escaped. The
 // fields of a headless registration (launch to workspace_id) and pane_id are
 // left out when not set, so a promoted session's lines are those of stage
-// 8a-1. Then one open_headless line per open headless registration that is
-// not current. hintStateDir is orgDirectorLine's.
+// 8a-1, and so are pid, start_time, and terminal_name, which only a launch
+// cmd has (plan 2026-10-16-org-director-launch-cmd, AC8). Then one
+// open_headless line per open headless registration that is not current.
+// hintStateDir is orgDirectorLine's.
 func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir string) {
 	_, _ = fmt.Fprintln(w, orgDirectorLine(r, hintStateDir))
 	_, _ = fmt.Fprintf(w, "enabled: %t\n", r.Enabled)
@@ -596,9 +672,14 @@ func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir strin
 		} {
 			_, _ = fmt.Fprintf(w, "%s: %s\n", f.name, inboxField(f.value))
 		}
+		pid := ""
+		if reg.PID > 0 {
+			pid = strconv.Itoa(reg.PID)
+		}
 		for _, f := range []struct{ name, value string }{
 			{"launch", reg.Launch}, {"state", reg.State}, {"model", reg.Model}, {"permission_mode", reg.PermissionMode},
 			{"token", reg.Token}, {"workspace_id", reg.WorkspaceID}, {"pane_id", reg.PaneID},
+			{"pid", pid}, {"start_time", reg.StartTime}, {"terminal_name", reg.TerminalName},
 		} {
 			if f.value != "" {
 				_, _ = fmt.Fprintf(w, "%s: %s\n", f.name, inboxField(f.value))
@@ -606,6 +687,6 @@ func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir strin
 		}
 	}
 	for _, reg := range r.OpenHeadless {
-		_, _ = fmt.Fprintf(w, "open_headless: %s (%s%s)\n", inboxField(reg.ID), inboxField(reg.State), orgDirectorHerdrIDs(reg))
+		_, _ = fmt.Fprintf(w, "open_headless: %s (%s%s)\n", inboxField(reg.ID), inboxField(reg.State), orgDirectorLaunchDetails(reg.DirectorRegistration))
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5;
@@ -304,9 +305,9 @@ func orgWatchChildArgs(cmd *cobra.Command, resolvedStateDir, configPath string, 
 // ones that can point herdr at an isolated server.
 var orgWatchChildDroppedEnv = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_ENV"}
 
-// orgAgmsgHomeEnv is the variable driver.ResolveAgmsgHome reads before the
-// [org].agmsg_home config value.
-const orgAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
+// orgAgmsgHomeEnv is driver.AgmsgHomeEnv, the variable
+// driver.ResolveAgmsgHome reads before the [org].agmsg_home config value.
+const orgAgmsgHomeEnv = driver.AgmsgHomeEnv
 
 // orgWatchChild returns the detached watch that --detach and `ralph org
 // start` launch (plan 2026-10-12-org-watch-gate, F6): orgWatchChildArgs,
@@ -391,7 +392,9 @@ func orgWatchChildAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string)
 // driver.ResolveAgmsgHome expands against the user's home (a bare "~" is
 // not expanded, so it counts as relative). orgWatchChildAgmsgHome makes such
 // a value absolute for a watch that runs in another directory, and director
-// start refuses one in a --config (plan 2026-10-15-org-director-start, D13).
+// start refuses one in a --config (plan 2026-10-15-org-director-start, D13)
+// and makes one in RALPH_ORG_AGMSG_HOME absolute for the launch script of a
+// launch_cmd director (plan 2026-10-16-org-director-launch-cmd).
 func agmsgHomeIsRelative(home string) bool {
 	return home != "" && !filepath.IsAbs(home) && !strings.HasPrefix(home, "~/")
 }
