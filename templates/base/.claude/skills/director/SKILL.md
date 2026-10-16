@@ -1,6 +1,6 @@
 ---
 name: director
-description: Director's operating manual for the org runtime. The director is the one session the human talks to for every feature org, in one of two ways, either the current interactive session, promoted with this skill and registered with `ralph org director attach`, or a headless director that `ralph org director start` launches in a herdr workspace of its own. It drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once, or when the headless director (`ralph org director start`) needs its operating procedure.
+description: Director's operating manual for the org runtime. The director is the one session the human talks to for every feature org, in one of two ways, either the current interactive session, promoted with this skill and registered with `ralph org director attach`, or a headless director that `ralph org director start` launches, in a herdr workspace of its own or, with `[org.director].launch_cmd`, in a terminal that command opens. It drafts split plans with the human, starts feature orgs, handles the org inbox, and reports progress. Auto-invoked when the human asks this session to act as the director, or to run and answer for several feature orgs at once, or when the headless director (`ralph org director start`) needs its operating procedure.
 ---
 この skill は、director として人と機能ごとの org の間に立つための手順を書く。
 director の立て方は 2 つある。対話セッションを `/director` で昇格させる方法
@@ -33,8 +33,10 @@ skill はその節を指し、写さない。
 - `ralph org director attach` と `ralph org director start` が台帳の
   `director.jsonl` に書く登録は、誰が director かの記録で、そのセッションが
   動いていることは表さない。headless の登録の状態(`starting` か `running`)は、
-  start が agent を起動し終えたかどうかで決まり、セッションが今も動いて
-  いるかは表さない。登録があるかどうかで escalate の動きは変わらない。
+  start が agent を起動し終えたかどうか(`[org.director].launch_cmd` で
+  立てたものは、起動スクリプトの check-in が済んだかどうか)で決まり、
+  セッションが今も動いているかは表さない。登録があるかどうかで escalate の
+  動きは変わらない。
 - leader が escalate した件が人にどう届くかは、`[org.director].enabled`
   (既定 true)と横断の見張り(`ralph org watch --all`)で決まる。
   - enabled で、見張りが仕事を受け付けている: escalate は件を記録する
@@ -82,8 +84,9 @@ director も守る(「headless の director」節)。
    昇格したセッションの登録なら detach、headless の director の登録
    (`starting` も含む)なら `ralph org director stop --id <id>` になる。
    `--replace` は、人が入れ替えるとはっきり言ったときだけ打つ。headless の
-   director を `--replace` で入れ替えても、その pane と workspace は開いた
-   まま残るので、人に `ralph org director stop --id <id>` で閉じてもらう。
+   director を `--replace` で入れ替えても、その pane と workspace
+   (`[org.director].launch_cmd` で立てたものはプロセス)は残るので、人に
+   `ralph org director stop --id <id>` で止めてもらう。
 5. 会話の要約のあとは、`ralph org director status` で今の登録を読み直す。
    そこに出る `id` が覚えている `id` と違えば、ほかのセッションが
    `--replace` で入れ替えた。登録がなく `not attached` と出たときは、人の
@@ -94,14 +97,18 @@ director も守る(「headless の director」節)。
 
 ## headless の director
 
-`ralph org director start` は、herdr の中に director 専用の workspace を作り、
-そこで claude か codex を director として起動して、台帳に登録する。人が
-対話セッションを昇格させなくても director を置ける。
+`ralph org director start` は、claude か codex を director として起動して、
+台帳に登録する。人が対話セッションを昇格させなくても director を置ける。
+起動する場所は 2 通りある。既定では herdr の中に director 専用の workspace を
+作り、そこで起動する。`[org.director].launch_cmd` を設定すると herdr を
+使わず、そのコマンドが開いた端末(tmux、Orca、WezTerm など)で起動する
+(下の「launch_cmd で立てる」)。
 
 ### 立てる(人がすること)
 
-1. 人が、herdr の外の端末で、repo の中から start を打つ。herdr の pane の中
-   (`HERDR_PANE_ID` がある)で打つと断られる。
+1. 人が repo の中から start を打つ。herdr で立てるときは herdr の外の端末で
+   打つ。herdr の pane の中(`HERDR_PANE_ID` がある)で打つと断られる。
+   launch_cmd で立てるときは herdr を打たないので、この断りはない。
 
    ```sh
    ralph org director start --driver codex --model <slug>
@@ -111,30 +118,75 @@ director も守る(「headless の director」節)。
    `--model` は断られる。省略すると、`ralph org spawn` と同じく `model_pool`
    のうち `--driver` で使えて `[org.roles].director` が許す最初のものを使い、
    stderr に警告を出す。
-2. start は、最初に台帳の `director.jsonl` に登録を書く。次に herdr に label
-   `ralph_director_<token>` の workspace と label `director_<token>` の tab を
-   作り、その pane で `--driver` のエージェントを役割の雛形付きで起動する。
-   `<token>` は start ごとに新しい 12 桁の hex。
+2. start は、最初に台帳の `director.jsonl` に登録を書く。herdr で立てるときは、
+   次に herdr に label `ralph_director_<token>` の workspace と label
+   `director_<token>` の tab を作り、その pane で `--driver` のエージェントを
+   役割の雛形付きで起動する。launch_cmd で立てるときの流れは下の
+   「launch_cmd で立てる」に書く。`<token>` は start ごとに新しい 12 桁の hex。
 3. 長く動く見張り(`ralph org watch --all`)がなければ、start は先に見張りを
    起動し、stderr に `ralph org director start: started the cross-org watch`
    で始まる行を出す。見張りを起動できないとき、見張りが止まりかけ、印が
    古い、`--once` の見張りのときは、何も立てずに断られる。
-4. stdout に `started d1 (driver=codex, model=..., permission=..., pane=..., workspace=...)`、
+4. herdr で立てたときは、stdout に
+   `started d1 (driver=codex, model=..., permission=..., pane=..., workspace=...)`、
    話しかける pane、止める打ち方(`ralph org director stop --id d1`)が出る。
-   人は herdr でその pane に入り、director と話す。
+   人は herdr でその pane に入り、director と話す。launch_cmd で立てたときは
+   `started d1 (driver=codex, model=..., permission=..., launch=cmd, name=director_<token>, pid=<pid>)`、
+   launch_cmd が開いた端末で話すこと、止める打ち方が出る。
 5. ほかの director が登録されている(`starting` も含む)とき、
    `[org.director].enabled = false` のときは、start は何も書かず、herdr も
-   打たずに断られる。start に `--replace` はない。
-6. 登録のあとの段で失敗すると、start は作った pane と workspace を閉じ、
-   止めたことを記録して終了コード 1 で終わる。閉じられなかったものがあれば、
-   閉じる herdr の打ち方と `ralph org director stop --id <id>` が出る。
+   launch_cmd も打たずに断られる。start に `--replace` はない。
+6. herdr で立てるときに登録のあとの段で失敗すると、start は作った pane と
+   workspace を閉じ、止めたことを記録して終了コード 1 で終わる。閉じられ
+   なかったものがあれば、閉じる herdr の打ち方と
+   `ralph org director stop --id <id>` が出る。launch_cmd で立てるときの失敗は
+   下の「launch_cmd で立てる」に書く。
+
+### launch_cmd で立てる
+
+- `[org.director].launch_cmd` は引数の配列で、既定は空(herdr で立てる)。
+  空でなければ start はいつもそれを使う。ralph はシェルを通さずに打ち、
+  その前に各要素の次の文字列を置き換える。
+  - `{script}`: start が書く起動スクリプトの絶対パス
+  - `{script_sh}`: 同じパスを単一引用符で囲んだもの。tmux の shell-command や
+    Orca の `--command` のように、コマンドを 1 つの文字列としてシェルに
+    読ませる端末に使う
+  - `{name}`: `director_<token>`(端末の名前に使う)
+  - `{cwd}`: director が動くディレクトリ(台帳の main worktree のルート。
+    台帳が main worktree のものでなければ、start を打った場所)
+
+  `{script}` か `{script_sh}` のどちらかが要る。ほかの `{...}` を含む値と、
+  最初の要素が空白だけの値は、`ralph.toml` の読み込みで断られる。コマンドは
+  端末を開いたらすぐ戻るものにする(start は 10 秒で打ち切る)。端末ごとの
+  例(tmux、Orca、WezTerm)は `docs/recipes/director-launch-cmd.md` にある。
+- `--driver` のエージェントが start の PATH になければ、start は何も書かずに
+  断る。あれば `attached`(`launch = "cmd"`)を書いてから、台帳の下に起動
+  スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
+- 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
+  `RALPH_DIRECTOR_TOKEN` を export し(start を打った環境に
+  `RALPH_ORG_AGMSG_HOME` があればそれも)、start を打った ralph の絶対パスで
+  check-in(隠れた動詞 `ralph org director launched`)を打ってから、start が
+  PATH で見つけたエージェントの絶対パスを exec する。check-in が断られれば、
+  エージェントは起動しない。
+  check-in はスクリプトの pid とその起動時刻を記録する。exec は pid も起動
+  時刻も変えないので、記録した pid はそのままエージェントの pid になる。
+  start はこの check-in を `--timeout-ms`(既定 60 秒)まで待つ。
+- launch_cmd が打てない、0 以外で終わった、10 秒で戻らない、
+  `--timeout-ms` のうちに check-in がない、待つあいだに `attach --replace`
+  された、のどれでも、start は check-in したプロセスがあれば stop と同じ
+  確かめのあとで止め、`stopped` を記録して終了コード 1 で終わる。終わった
+  ことを確かめられないときは `detached` だけを書き、後始末に打つ
+  `ralph org director stop --id <id>` を出す。どちらでも、開いたかもしれない
+  端末は人が閉じる。そのあとで端末のスクリプトが check-in しても断られ、
+  エージェントは起動しない。
 
 start の設定と、director が動く場所は次のとおり。
 
 - `--config` がなく、台帳が main worktree のものなら、
-  `[org.director].enabled`、`[org.permissions]`、`[org.roles]`、`model_pool` を
-  main worktree の `ralph.toml` から読む。feature worktree の `ralph.toml` では
-  選べない。読めない `ralph.toml` はエラーになる。
+  `[org.director].enabled`、`[org.director].launch_cmd`、`[org.permissions]`、
+  `[org.roles]`、`model_pool` を main worktree の `ralph.toml` から読む。
+  feature worktree の `ralph.toml` では選べない(ralph が打つ launch_cmd も
+  変えられない)。読めない `ralph.toml` はエラーになる。
 - permission mode は `[org.permissions.roles].director`、なければ
   `[org.permissions].default`。template の既定は `autonomous` なので、claude の
   director は `--permission-mode bypassPermissions` で動く。codex の director は
@@ -152,9 +204,12 @@ start の設定と、director が動く場所は次のとおり。
   なければ、start は断る。相対の値を director は自分が動く場所(次の項)から
   解き、見張りは start を打った場所から解く。2 つの場所が違えば別の agmsg を
   使ってしまうので、start は場所を比べず、どこで打っても断る。絶対パスで書く。
-  人の shell の `RALPH_ORG_AGMSG_HOME` は director に届かない(herdr の pane の
-  環境は herdr server のもの)。設定されていれば start は警告を 1 行出して
-  続ける。director に届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。
+  この断りは launch_cmd で立てるときも同じ。
+- 人の shell の `RALPH_ORG_AGMSG_HOME` は、herdr で立てた director には届かない
+  (herdr の pane の環境は herdr server のもの)。設定されていれば start は警告を
+  1 行出して続ける。herdr の director に届くのは `ralph.toml` の
+  `[org].agmsg_home` のほうになる。launch_cmd で立てた director には、起動
+  スクリプトがその値を export するので届き、start は警告しない。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 
@@ -167,7 +222,7 @@ start の設定と、director が動く場所は次のとおり。
    今の登録の `id` が雛形に書かれた自分の `id` であることを確かめる。違う
    とき、または登録がなく `not attached` と出たときは、ほかに何もしない
    (受信箱の ack と resolve、leader への send、start をしない)。そのことを
-   pane に書いて止まる。detach も打たない。
+   pane(launch_cmd で立てたものは端末)に書いて止まる。detach も打たない。
 2. 「昇格」節の 2(見張りの確かめ)と 3(attach)は start が済ませたので
    打たない。5(会話の要約のあとの読み直し)は守る。
 3. 打つ `ralph org` のコマンドと `ralph status` には、どれも雛形に書かれた
@@ -180,29 +235,35 @@ start の設定と、director が動く場所は次のとおり。
    なく、`--config` なしで読む `ralph.toml` の `[org.director].enabled` を見る
    (そちらが false で `--config` のファイルが true だと、`ralph status` の
    `director:` の行は `disabled` と出て、leader の件は人へすぐ届く)。
-4. 人とはこの pane で話す。そのあとの仕事(分割計画、受信箱、進捗の報告)は、
-   昇格した director と同じ手順で進める。
+4. 人とは、herdr で立てたものはこの pane で、launch_cmd で立てたものは
+   launch_cmd が開いた端末で話す。そのあとの仕事(分割計画、受信箱、進捗の
+   報告)は、昇格した director と同じ手順で進める。
 
 ### 終える
 
 1. headless の director は detach を打たない。detach は登録を外すだけで、
-   pane と workspace は開いたまま残る。
-2. open か acked の件が残っていれば人に伝え、人に、herdr の外の端末から
-   `ralph org director stop --id <id>` を打つよう頼む。director 自身は stop を
-   打たない。director の pane か workspace の中で打った stop は、`--force` が
-   あっても断られる(閉じると打ったセッションが終わり、記録を書けないため)。
-3. stop は、記録した pane の tab の label が `director_<token>` で、workspace
-   の label が `ralph_director_<token>` であることを確かめてから、pane に C-c を
-   送り、pane と workspace を閉じて、`stopped` を記録する。今の登録なら、
-   同じ書き込みで登録も外れる。
+   pane と workspace(launch_cmd で立てたものはプロセス)は残る。
+2. open か acked の件が残っていれば人に伝え、人に
+   `ralph org director stop --id <id>` を打つよう頼む。herdr で立てたものは
+   herdr の外の端末から、launch_cmd で立てたものは director の端末とは別の
+   端末から打ってもらう。director 自身は stop を打たない。director の pane か
+   workspace の中で打った stop は、`--force` があっても断られる(閉じると
+   打ったセッションが終わり、記録を書けないため)。launch_cmd で立てた
+   director が打った stop も、env の `RALPH_DIRECTOR_TOKEN` が登録の token と
+   同じなので、`--force` があっても断られる(stop が director のプロセスを
+   止めると、打ったセッションが記録の前に終わるため)。
+3. herdr で立てたものでは、stop は、記録した pane の tab の label が
+   `director_<token>` で、workspace の label が `ralph_director_<token>` で
+   あることを確かめてから、pane に C-c を送り、pane と workspace を閉じて、
+   `stopped` を記録する。今の登録なら、同じ書き込みで登録も外れる。
 4. 人が herdr で閉じた pane も、同じ stop で片付く(herdr が知らない pane と
    workspace は閉じ済みとして扱う)。detach か `--replace` で外れたあとの
    headless の director と、start の途中で残った `starting` の登録も、stop で
    片付ける。
-5. label が合わないとき(herdr が状態を失って id を振り直したときなど)、
-   label を確かめられないとき、close が失敗したときは、stop は理由と、人が
-   閉じるための herdr の打ち方を出して断る。label が合わない pane と
-   workspace には C-c も close も打たない。それでも記録を片付けるときは、
+5. herdr で立てたものでは、label が合わないとき(herdr が状態を失って id を
+   振り直したときなど)、label を確かめられないとき、close が失敗したときは、
+   stop は理由と、人が閉じるための herdr の打ち方を出して断る。label が
+   合わない pane と workspace には C-c も close も打たない。それでも記録を片付けるときは、
    人が `ralph org director stop --id <id> --force` を打つ。`--force` は、まだ
    閉じていないものを閉じずに止めたことを記録し、開いたまま残りうるものを
    出す。人は `herdr workspace list` で label `ralph_director_<token>` の
@@ -212,11 +273,33 @@ start の設定と、director が動く場所は次のとおり。
    もう一度打つ stop が出るので、それを打つと start が記録した分を閉じる。
    逆に、stop が閉じているあいだに、start が失敗して後始末で `stopped` を
    記録した、または別の stop が記録したときは、stop は何も足さずに終了コード
-   0 で終わり、すでに記録されていたことを出す。打ち直す stop は出ない。
-   することはない。
-6. `ralph org stop --all` と `ralph org disband --all` は headless の director
-   を止めない。stop --all は、閉じていない headless の director があれば、
-   `note:` の 1 行で `ralph org director stop --id <id>` を示す。
+   0 で終わり、すでに記録されていたことを出す。打ち直す stop は出ず、
+   することはない(launch_cmd で立てたものでも同じ)。
+6. launch_cmd で立てたものでは、stop は herdr を打たない。check-in が記録した
+   pid を ps で読み、その起動時刻が記録と同じときだけ、その pid に SIGTERM を
+   送る。exec の前の起動スクリプトにも、exec のあとのエージェントにも同じく
+   効く。終わるのを 10 秒まで待ってから `stopped` を記録し、今の登録なら同じ
+   書き込みで登録も外れる。
+   - pid のプロセスがもうない、zombie、起動時刻が違う(別のプロセスがその
+     pid を使っている)ときと、まだ check-in のない `starting` の登録には、
+     何も送らずに `stopped` を記録する。そのあとの check-in は断られる。
+     人が端末を閉じて director のプロセスが終わっていれば、同じ stop で
+     片付く。
+   - ps を読めないとき(何も送らない)と、SIGTERM のあと 10 秒で終わらない
+     ときは、何も書かずに終了コード 1 で断り、見る打ち方
+     `ps -o pid,lstart,command -p <pid>` と `--force` の打ち方を出す。
+     SIGKILL は送らない。プロセスが終わってから stop を打ち直すか、人が
+     `--force` を打つ。`--force` も同じ手順を踏み(本人と確かめたプロセスには
+     SIGTERM を送り、ps を読めなければ何も送らない)、それでも終わったと
+     確かめられなければ、止めたことを記録してプロセスはそのままにする。
+   - stop が登録を読んだあとで check-in が pid を記録したときは、何も書かずに
+     断り、打ち直す stop を出す。打ち直すと check-in したプロセスを止める。
+   - stop は launch_cmd が開いた端末を閉じない。人が閉じる(tmux の例では、
+     エージェントが終わると tmux の session も閉じる)。
+7. `ralph org stop --all` と `ralph org disband --all` は headless の director
+   を止めない。stop --all は、閉じていない headless の director
+   (launch_cmd で立てたものも含む)があれば、`note:` の 1 行で
+   `ralph org director stop --id <id>` を示す。
 
 ## 分割計画と機能ごとの org
 
@@ -349,7 +432,9 @@ resolve してから send が失敗すると、件は期限から外れ、leader
 
 - `ralph status`: 全 org の座席と、`org watch:`(見張り)、`director:`
   (登録。headless の director なら `starting` か `running`、model、pane、
-  workspace も出る)、`merge guarantee:`(merge の時点の保証)の行。
+  workspace も出る。launch_cmd で立てたものは pane と workspace の代わりに
+  `launch cmd`、端末の名前、pid が出る)、`merge guarantee:`(merge の時点の
+  保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
   「merge してよい順」)。先頭に `merge guarantee:` の行が出る。
@@ -393,9 +478,6 @@ send が断られる。
 
 ## まだないもの
 
-- herdr の外の端末で headless の director を起動すること
-  (`[org.director].launch_cmd`)。今の `ralph org director start` は、herdr の
-  中の専用の workspace にだけ立てる。
 - PR の自動の merge。
 - 受信箱に件が来たときに director を起こす仕組み(push)。director は
   `ralph org wait --inbox` で待って件を拾う。

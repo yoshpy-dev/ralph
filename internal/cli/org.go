@@ -1309,7 +1309,7 @@ func newOrgStopCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the seat stays recorded stopped and the failure is only a warning.\n" +
 			"A headless director (`ralph org director start`) is not an org seat, so\n" +
 			"--all leaves it open: when the ledger has one, a note: line on stderr names\n" +
-			"`ralph org director stop --id`, which closes it, and the exit code does not\n" +
+			"`ralph org director stop --id`, which stops it, and the exit code does not\n" +
 			"change.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
