@@ -44,8 +44,9 @@ var (
 	ErrDirectorStopSelfProcess = errors.New("run ralph org director stop from a terminal other than the director's")
 	// ErrDirectorProcessNotEnded: the stop of a launch cmd could not confirm
 	// that the process its launch script checked in with has ended (ps could
-	// not be read, so nothing was sent, or the process did not end within the
-	// wait after its SIGTERM), so without Force it recorded nothing (plan
+	// not be read, before the SIGTERM, so nothing was sent, or while it waited
+	// after the SIGTERM, or the process did not end within that wait), so
+	// without Force it recorded nothing (plan
 	// 2026-10-16-org-director-launch-cmd, D7). The process may still be
 	// running.
 	ErrDirectorProcessNotEnded = errors.New("the end of the process the launch script checked in with is not confirmed")
