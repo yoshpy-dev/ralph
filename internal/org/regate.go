@@ -367,6 +367,9 @@ type regateBranch struct {
 	pos     int
 	// running: orgID is in RunningOrgs.
 	running bool
+	// runsOn: running, and orgID's latest complete binding is of another
+	// branch (mergeTarget.orgRunsOn): that branch. "" otherwise.
+	runsOn string
 	// gate is the branch's latest gate record (collectMergeTargets), nil for
 	// none; corruptAfterGate: it is readable and a corrupt line follows it.
 	gate             *mergeGateRecord
@@ -386,7 +389,7 @@ func readRegateBranch(l mergeLedger, branch string) regateBranch {
 		b := regateBranch{gate: t.gate, corruptAfterGate: t.corruptAfterGate}
 		if t.binding != nil {
 			b.binding = reservationFromEvent(l.events[t.bindingPos]).Feature
-			b.orgID, b.pos, b.running = t.binding.OrgID, t.bindingPos, t.orgRunning
+			b.orgID, b.pos, b.running, b.runsOn = t.binding.OrgID, t.bindingPos, t.orgRunning, t.orgRunsOn
 		}
 		return b
 	}
@@ -412,7 +415,9 @@ func (b regateBranch) passedOn(t gateTarget) bool {
 // regate.lock (lock) held and its marker emptied (D2, D9): it reads the
 // ledger line by line (readMergeLedger), finds branch in it
 // (readRegateBranch), and returns the refusal of a branch no complete binding
-// names or whose org runs. When the checks pass it writes lock's marker
+// names or whose org runs; for an org that runs another feature now
+// (regateBranch.runsOn), the refusal names that feature's branch instead of
+// the leader's ralph org gate. When the checks pass it writes lock's marker
 // before the manifest lock is released: the binding's org, branch, and
 // worktree, so a spawn of that org that comes after it refuses (D9). A
 // refusal leaves the marker empty.
@@ -430,6 +435,11 @@ func (o *Org) regateFirstCheck(ctx context.Context, branch string, lock *heldFil
 			refused = fmt.Sprintf("org: regate: no complete feature binding in the ledger names the branch %s: regate works on "+
 				"the branch of a feature org that ralph org start --plan started; ralph org merge-order lists the ledger's "+
 				"branches", branch)
+			return nil
+		case b.running && b.runsOn != "":
+			refused = fmt.Sprintf("org: regate: the branch %s is bound to org_id %q, which is running, but now for another feature, "+
+				"on the branch %s: wait for the org to be disbanded and run ralph org regate --branch %s then", branch, b.orgID,
+				b.runsOn, branch)
 			return nil
 		case b.running:
 			refused = fmt.Sprintf("org: regate: the branch %s is bound to org_id %q, which is running: while it runs, its leader "+

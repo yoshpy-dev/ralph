@@ -569,6 +569,42 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 	}
 }
 
+// TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns covers AC1's refusal
+// of a branch whose org runs, word for word: while the org runs bound to
+// the branch, the refusal names the leader's ralph org gate; once the org_id
+// was started again for another feature, its leader's gate checks that
+// feature's branch, so the refusal names that branch instead and only says
+// to wait for the disband.
+func TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, fx *regateFixture)
+		want  string
+	}{
+		{"the org runs bound to the branch", func(t *testing.T, fx *regateFixture) {
+			fx.appendEvents(t, boundReserveEvent("auth", fx.f, "internal/auth/"))
+			seedSeat(t, fx.o, "auth", LeaderIdentity, LeaderIdentity, "pane-2")
+		}, `org: regate: the branch feat/auth is bound to org_id "auth", which is running: while it runs, its leader runs ralph ` +
+			"org gate --org-id auth in the feature worktree, so wait for the org to be disbanded and run ralph org regate --branch " +
+			"feat/auth then"},
+		{"the org_id runs again for another feature", func(t *testing.T, fx *regateFixture) {
+			fx.appendEvents(t, boundReserveEvent("auth", testFeature("split-2", "billing", "0123456789ab"), "internal/billing/"))
+		}, `org: regate: the branch feat/auth is bound to org_id "auth", which is running, but now for another feature, on the ` +
+			"branch feat/billing: wait for the org to be disbanded and run ralph org regate --branch feat/auth then"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			tc.setup(t, fx)
+			before := fx.snapshot(t)
+			res, err := fx.o.Regate(context.Background(), RegateParams{Branch: "feat/auth", Env: fx.env})
+			fx.assertRefused(t, res, err, before, nil, nil)
+			if res.Refused != tc.want {
+				t.Fatalf("refusal =\n%q\nwant\n%q", res.Refused, tc.want)
+			}
+		})
+	}
+}
+
 // TestRegate_RefusedWhileAnotherRegateHoldsTheLock covers D7's half of
 // AC1: while another regate holds regate.lock, Regate retries it for 1s and
 // then refuses, writing nothing into the lock; once the lock is free it runs.
