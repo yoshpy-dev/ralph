@@ -8,23 +8,25 @@
 - Triager: Claude Code (main context)
 - Reviewer status: complete
 - Self-review cross-ref: yes
-- Cycle: 1/2
+- Cycle: 2/2 (cap reached)
 - Total reviewer findings: 2
 - After triage: ACTION_REQUIRED=2, WORTH_CONSIDERING=0, DISMISSED=0
 
 ## Triage context
 
-- Active plan: docs/plans/active/2026-10-16-org-regate.md (Approved sha256:f841204a7bc0)
-- Self-review report: docs/reports/self-review-2026-10-16-org-regate.md (second pass, Merge: yes, LOW 4 fixed in 0b6ba232)
-- Verify report: docs/reports/verify-2026-10-16-org-regate.md (pass)
-- Implementation context summary: the reviewed head is 413ab307. regate merges origin's default branch tip into a disbanded feature org's branch with `git merge --no-ff`, gates the merge commit, records the result under the org with via=regate, and pushes. merge-order and regate read the gate records through `collectMergeTargets` (`internal/org/mergeorder.go`).
+- Active plan: docs/plans/active/2026-10-16-org-regate.md (Approved sha256:260c539299bc)
+- Self-review report: docs/reports/self-review-2026-10-16-org-regate.md (cycle 2, Merge: yes)
+- Verify report: docs/reports/verify-2026-10-16-org-regate.md (cycle 2, second pass, pass)
+- Test report: docs/reports/test-2026-10-16-org-regate.md (cycle 2, pass)
+- Implementation context summary: the reviewed head is c60b2651. Cycle 1's two ACTION_REQUIRED findings were fixed in 85558f2c, ca840a45, and c621ccc9 (the check before the merge for something ignored in its way, D3) and f793924d (an unreadable gate record attached to every branch of its org, D2). The reviewer ran in the read-only sandbox and could not build the Go tests there (it said so); its findings come from reading the code.
+- The cycle-1 version of this report (cycle 1/2, the two findings above) is in git history at edb42681.
 
 ## ACTION_REQUIRED
 
 | # | Reviewer finding | Triage rationale | Affected file(s) |
 |---|-------------------|------------------|-------------------|
-| 1 | [P1] The merge can overwrite an ignored file in the worktree at a path the default branch newly tracks: the clean-tree check does not see ignored files, git merge overwrites them, and `reset --keep` cannot bring their content back. The reviewer recommends `--no-overwrite-ignore` | Real, and the loss is of uncommitted data (an ignored `.env` or local config). Reproduced on git 2.49.0: with a feature branch that ignores `secret.txt` and a main that tracks it, `git merge --no-ff` replaced the local content, and so did `git merge --no-ff --no-overwrite-ignore` (exit 0, MERGE_HEAD absent): that option guards the fast-forward checkout only, so the recommended fix does not stop it. The fix is a check before the merge that refuses, with nothing merged or recorded, when a path the merge would write (added on the tip's side) or a directory above it is already on disk in the worktree | internal/org/regate_merge.go (regateMergeTip and the checks before it), docs/plans/active/2026-10-16-org-regate.md (D3) |
-| 2 | [P2] With an org_id reused from branch A to branch B and both lives disbanded, a regate of A writes A's record under the org, but an unreadable gate record is attached to the org's latest binding (B), so a newer unreadable `gate_failed` of A leaves A's older pass as its latest: `passedOn` can then allow UP_TO_DATE or PUSH_ONLY and merge-order can say ready | Real, and new with this PR: before regate a gate record was written only while its org ran, so the latest binding was its branch; regate writes records for an older binding of a reused org_id, which makes the attachment of an unreadable record ambiguous. Narrow (a reused org_id and an unreadable record), but it can let a failed head be pushed or merged. The fix is the conservative one: an unreadable gate record of an org is attached to every branch that org has had a complete binding or a readable gate record for so far, so none of them keeps an older pass | internal/org/mergeorder.go (collectMergeTargets), internal/org/regate.go (readRegateBranch reads the same), docs/plans/active/2026-10-16-org-regate.md (D2) |
+| 1 | [P2] The `reset --keep` hint of a refused HEAD can name a person's commit as an unpushed regate merge: a gate-only regate also records `via=regate`, and the hint accepts a single-parent commit. After a gate-only run on a normal commit X, a force push of origin back to X's parent satisfies every condition, and the hint tells the human to drop X. The reviewer recommends recording whether regate made the merge and leaving the hint out when that cannot be established | Real: `regateResetHint` checks only that the latest record is a readable `via=regate` one of HEAD and that HEAD's first parent is origin's tip, and `regateGate` writes `via=regate` on the gate-only path too (AC9). The dropped commit stays in the reflog, but the hint recommends dropping someone's implementation work, which D4 meant to rule out. The same root (a gate-only regate's `via=regate` is not told apart from regate's own merge) also lets the push-only exception of D4 push X again after such a force push, which the reviewer did not flag; the fix covers both | internal/org/regate_merge.go (regateResetHint, regateHeadNotOnOrigin), docs/plans/active/2026-10-16-org-regate.md (D4) |
+| 2 | [P2] `regateSetTrackingRef` reads `refs/remotes/origin/<branch>` after the push and updates it from that value, so a fetch that lands between the push and the read (origin moved on to N) is overwritten back to the pushed head, and git then reports the branch as in sync | Real: with the default `remote.origin.fetch`, git push already moves the ref to the pushed head; a background fetch that then moves it to N makes the read return N, and `update-ref <ref> <head> N` succeeds and rewinds it. The window is short and a later fetch restores the ref, but a rewound tracking ref is also the expected value `git push --force-with-lease` uses. The fix is the one the reviewer gives: read the ref before the push, and after it update the ref only from that value, leaving any other value alone | internal/org/regate_merge.go (regatePush, regateSetTrackingRef) |
 
 ## WORTH_CONSIDERING
 
