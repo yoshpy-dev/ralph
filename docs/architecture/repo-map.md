@@ -34,7 +34,7 @@
 - `docs/quality/`: definition of done and gates
 - `docs/tech-debt/`: known debt and follow-ups
 - `docs/evidence/`: what counts as evidence
-- `docs/recipes/`: hands-on recipes (Codex setup, agent teams, language packs, worktrees)
+- `docs/recipes/`: hands-on recipes (Codex setup, Codex seat permissions, agent teams, language packs, worktrees, the headless director's `launch_cmd` terminal)
 - `docs/roadmap/`: maturity-model and future direction documents
 - `docs/research/`: approach comparisons and investigation notes
 - `docs/references/`: source notes and external reference links

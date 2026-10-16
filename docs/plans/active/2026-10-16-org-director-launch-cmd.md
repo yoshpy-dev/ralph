@@ -216,4 +216,5 @@ Critical forks: F1〜F7 を consult(consult-plan-launchcmd)に聞き、判定は
   - verify cycle 1: `docs/reports/verify-2026-10-16-org-director-launch-cmd.md`(pass、LOW 1、情報 3)。V1(`orgLedgerMutating` の動詞の一覧に `director launched`)と I1(SIGTERM のあとの待ちで ps を読めなくなったときは、SIGTERM はもう送ってある。help、recipe、skill の文)は 0f5fbf89 で直した。同じ誤りの `ErrDirectorProcessNotEnded` の doc と、この Progress の S3 の文も直した
 - [x] Test artifact created
   - test cycle 1: `docs/reports/test-2026-10-16-org-director-launch-cmd.md`(pass)。go1.26 と go1.25.8、`-race`、繰り返し、ubuntu の container で通った。mutant 81 個のうち生き残った O33 と O35 は、6b9b27d7 のテスト 2 本で閉じた。Linux で時計が step したあとの lstart は確かめていない(tech-debt に足す)
+  - sync-docs cycle 1: `docs/reports/sync-docs-2026-10-16-org-director-launch-cmd.md`。AGENTS.md の `internal/org/` の行に隠れた動詞 `director launched`、repo-map の recipes の行に launch_cmd の recipe を足した。tech-debt には 2 行(Linux の時計の step と lstart、`abortCmd` の 2 つ目の `ErrDirectorStopped` の枝にテストがない)を足した
 - [ ] PR created
