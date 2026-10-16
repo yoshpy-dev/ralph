@@ -1,74 +1,58 @@
 # Verify report: org-regate
 
-- Date: 2026-10-16
-- Plan: docs/plans/active/2026-10-16-org-regate.md(`Status: Approved`。`./scripts/plan-visual.sh digest` は f841204a7bc0 で、`- Approved:` の digest と同じ。仕様 `docs/specs/2026-10-07-org-multi-org-director.md` の FR-7 のうち、merge のあとの取り直し。8 段目の 8a-3b)
-- Verifier: verifier subagent (Claude)。パイプライン 1 回目(`.harness/state/standard-pipeline/cycle-count.json` の cycle は 1)
-- Scope: `git diff 670ec219...HEAD`(HEAD 0b6ba232、24 コミット、36 ファイル、+6790/-324)。仕様適合(AC1〜AC13、D1〜D9、FR-7 と FR-9)、実装中に記録したずれ 6 件、self-review の N1〜N4 の直し(0b6ba232)、文書のずれ、静的解析、HEAD の binary とローカルの bare origin での観察。テストは走らせていない(/test の受け持ち)。テストはコードを読み、どの AC をどう固定しているかを確かめた。行番号は HEAD 0b6ba232 のもの
-- Evidence: `docs/evidence/verify-2026-10-16-org-regate.log`(plan の digest、run-static-verify の出力、Go の検査、probe 1 と 2 のスクリプトと出力。`$PROBE1`・`$PROBE2` は scratchpad の probe のディレクトリ、`~` は `$HOME`)。wrapper の全ログは `docs/evidence/verify-2026-10-16-154249.log`。どちらも gitignore の対象
+- Date: 2026-10-17
+- Plan: docs/plans/active/2026-10-16-org-regate.md(`Status: Approved`。`./scripts/plan-visual.sh digest` は 260c539299bc で、`- Approved:` の digest と同じ。仕様 `docs/specs/2026-10-07-org-multi-org-director.md` の FR-7 のうち、merge のあとの取り直し。8 段目の 8a-3b)
+- Verifier: verifier subagent (Claude)。パイプライン 2 回目(`.harness/state/standard-pipeline/cycle-count.json` の cycle は 2)
+- Scope: `git diff 670ec219...HEAD`(HEAD 5e12dfe0、41 コミット、42 ファイル、+8091/-389)。AC1〜AC13 と D1〜D9 を HEAD でもう一度確かめ、cycle 1 の cross-review のあとに変わった D2・D3・AC1 を重く見た。cycle 1 の verify(HEAD 0b6ba232)のあとのコードの変更は 85558f2c、f793924d、a59220f5、ca840a45、5e12dfe0 の 5 コミットで、ほかにテストだけの d00da42c・5e4ce6cd と、sync-docs の 0257bd93・413ab307 がある。テストは走らせていない(/test の受け持ち)。行番号は HEAD 5e12dfe0 のもの
+- Evidence: `docs/evidence/verify-2026-10-16-org-regate.log` の「cycle 2」の節(cycle 1 の節のあとに足した。run-static-verify の出力、Go の検査、probe 3 と 4 のスクリプトと出力。`$PROBE3` は scratchpad の probe のディレクトリ、`~` は `$HOME`)。wrapper の全ログは `docs/evidence/verify-2026-10-16-190407.log`。どちらも gitignore の対象
+
+## cycle 1 からの変化
+
+- D2(f793924d、5e12dfe0): 読めない gate の記録は、その org が記録より前に完全な結びつきか読める記録を持ったすべてのブランチに付く(`collectMergeTargets`、`internal/org/mergeorder.go:390-461`、付ける先の集め方は `:404-409` と `:430-446`)。付く先が 2 つ以上なら、Detail が「may be a record of another branch of the same org, <org>, which has had <n> branches」と言う(`:938-943`)。cycle 1 の規則(最新の結びつきのブランチ、なければ最新の読める記録のブランチ)は消え、`gatedBranch` の残りはコードにない
+- D3 と AC1(85558f2c、ca840a45、a59220f5): merge の前に `regateCheckInTheWay`(`internal/org/regate_merge.go:254-292`)が、merge が書くパスのうち HEAD が追跡していないもの(`regateMergeWrites`、`:314-361`)の上に何かあれば断る。呼び出しは `git var` の確かめのあと、merge の前(`regateMerged`、`:150`)
+- cycle 1 の V1(`docs/quality/quality-gates.md` の 2 面の動詞の一覧)は 0257bd93 で直った。I1(`/org` skill の `reset --keep` の手の条件)も直り、skill は「そのあとに manifest の壊れた行がなく」と書く
+- self-review cycle 2 の C2-1〜C2-5 は、ca840a45(C2-1 の merge-tree、C2-2 の空のディレクトリと HEAD が追跡するディレクトリ)と 5e12dfe0(C2-3〜C2-5)ですべて直った。self-review の報告は HEAD a59220f5 の時点のもので、5 件を開いたまま書く
 
 ## Spec compliance
 
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
-| AC1 断る 11 の場合(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr) | 満たす(binary でも確認) | `--branch` なしと `--org-id` は CLI が台帳を読む前に断る(`internal/cli/org_regate.go:116`、`:119`)。結びつきなし・org が走っている(`internal/org/regate.go:440` の `regateFirstCheck`)、worktree なし・ブランチ違い・detached・rebase か merge の途中・汚れた作業ツリー・スクリプトなし(`regateCheckWorktree`、`:529`、`regateCheckInProgress`、`:607`)、ほかの regate(`:280` の `acquireHeldFileLock` と `errFileLockHeld`)。probe 1 の A1〜A3・E1、probe 2 の G1〜G3・G8 は、どれも終了コード 1 で stdout は空、HEAD・origin・manifest の行数は変わらない。テスト(読んだだけ): `TestRegate_RefusedBeforeTheFetch`、`TestRegate_RefusedWhileAnotherRegateHoldsTheLock`、`TestOrgRegate_RefusalPrintsNothingAndChangesNothing`、`TestOrgRegate_OrgIDRefusedBranchRequiredNoArguments` |
-| AC2 fetch の失敗、origin にブランチがない、HEAD が `origin/<b>` と違う。fetch と push に `GIT_TERMINAL_PROMPT=0` | 満たす(env はテストのコードで確認) | `regateFetch`(`internal/org/regate_git.go:30`)は 2 回に分けた明示の refspec で fetch し、`couldn't find remote ref` を分けて言う(`:44`)。HEAD の確かめは `regateCheckOriginHead`(`:82`)。env は `regateFetchEnv`(`:136`、`GIT_TERMINAL_PROMPT=0` と `LC_ALL=C`)と `regateRemoteEnv`(`:128`、push)。probe 2 の G5(origin から `feat/auth` を消す)は「origin has no branch feat/auth: it was deleted after the merge」、G6(origin の URL を無いパスに)は `failed (exit 128)` と git の stderr の 5 行、G4(push していない commit)は「has commits that origin's tip ... does not: ... push them」で、どれも終了コード 1。env は `TestRegate_FetchRunsWithNoTerminalPrompt` と `TestRegateRemoteEnv` が固定する(/test で確かめる) |
-| AC3 何もしない道と、壊れた記録のあとの取り直し | 満たす(binary でも確認) | `regateBranch.passedOn`(`internal/org/regate.go:421`)は、読める、あとに壊れた行がない、`gate_passed`、head と base と base_ref が今のもの、のすべてを求める。`:331` で `RegateOutcomeUpToDate`。probe 1 の B3 と D5 は `UP_TO_DATE:`・`HEAD:`・`BASE:`・前の `LOG:` を出して終了コード 0、manifest の行数とスクリプトの呼び出しは増えない。壊れた Details と壊れた JSON 行のあとに取り直して merge-order が `ready` を出すことは `TestRegate_GatesWhenNoRecordLetsItStop` の 2 つの case が固定する(/test で確かめる) |
-| AC4 取り込みの道(D3 の merge commit、記録、force なしの push、stdout の 6 行、merge-order が `ready`) | 満たす(binary でも確認) | `regateMergeTip`(`internal/org/regate_merge.go:242`)、`regateGate` の記録(`internal/org/regate.go:655` の `Via: gateViaRegate`)、`regatePush`(`regate_merge.go:473`。refspec は `<sha>:refs/heads/<b>` で `+` を付けない)。probe 1 の B1: `GATE: pass`・`MERGED:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:` の順で終了コード 0。commit は `Merge origin/main 71ff0650ba62 into feat/auth`、親は merge 前の HEAD と取り込んだ先頭、author は呼び出し元の git の名前。manifest の最後の行は `org_id: auth` の `gate_passed` で、Details は `... herdr_pane=unset via=regate log="..."`。B2 の merge-order は `ready` |
-| AC5 merge commit を作れない(衝突、pre-merge-commit の hook、名前がない) | 満たす(binary でも確認) | 名前は merge の前に `git var` で確かめる(`regateCheckIdentity`、`regate_merge.go:202`)。衝突と hook は `regateAbortLeftMerge`(`:327`)が `git merge --abort` のあとに HEAD と作業ツリーを確かめる。probe 2 の G10(README.md の衝突)は `conflicts in README.md`・`git merge --abort undid the merge it left in progress` を出し、HEAD は前のまま、`MERGE_HEAD` なし。G7(`user.useConfigOnly`)は `git var GIT_AUTHOR_IDENT failed` と設定の仕方を出し、merge は走らない。hook が止める場合と、signal で止まった merge は `TestRegate_RefusedWhenTheMergeCommitCannotBeMade`(5 case)と `TestRegate_AMergeEndedByASignalSaysHowToPutTheWorktreeBack` が固定する(/test で確かめる) |
-| AC6 スクリプトの失敗、記録の前の中断、`head_moved` と `tree_changed` | 満たす(一部はテストのコードで確認) | `regateMerged`(`regate_merge.go:133`)は `static_failed`・`test_failed` で `regateUndoMerge`(`:405`、`git reset --keep <merge の前の HEAD>`)、`head_moved`・`tree_changed` では戻さず `regateMergeLeft`(`:448`)で状態と戻すコマンドを出す。probe 1 の C1(`run-test.sh` が exit 1): `GATE: fail`・`REASON: test_failed`・`MERGED:`・`LOG:`、スクリプトの最後の行、「the merge commit ... was undone (git reset --keep ...)」、終了コード 1。HEAD は merge の前に戻り、記録は `via=regate` の `gate_failed`。中断と `head_moved`・`tree_changed` は `TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge`、`TestRegate_AMergeCommitIsKeptWhenUndoingItCouldLoseWork`、`TestOrgRegate_InterruptUndoesTheMergeAndRecordsNothing` が固定する(/test で確かめる) |
-| AC7 push の失敗と記録のあとの中断、打ち直し、進んだ既定のブランチ、D4 の手 | 満たす(binary でも確認) | `regatePush` は失敗を `PushFailed` にし、記録と HEAD を残す(`regate_merge.go:473`)。打ち直しは `regateHeadNotOnOrigin`(`:62`)。probe 1 の D1(origin の pre-receive が断る): push の前までの 5 行と `failed (exit 1)` で終了コード 1、HEAD は merge commit のまま。D3 の打ち直しは `PUSH_ONLY:` と `PUSHED:` で終了コード 0、D4 の merge-order は `ready`。probe 2 の G9b(push が落ちたあとに main が進む)は push だけをせずに断り、`reset --keep refs/remotes/origin/feat/auth` の手を出した。その手どおりに戻した G9c は新しい先頭を merge して push した。push を受け取ったあとの中断と、fetch と push の間の他人の push は `TestRegate_APushThatLandedWhoseAnswerWasLost`、`TestRegate_AnInterruptAfterTheRecordKeepsItAndTheMerge`、`TestRegate_AFailedPushIsNotRetriedPastWhatChanged` が固定する(/test で確かめる) |
-| AC8 スクリプトの間に org か結びつきが変わったら何も記録せず merge を戻す | 満たす(テストのコードで確認) | `recordRegate`(`internal/org/regate.go:681`)は manifest のロックの下で読み直し、結びつきなし、org_id か中身の違い、位置の違い、走っている org のどれでも記録せずに断る。`regateMerged` の `res.Refused` の枝(`regate_merge.go:163`)が merge を戻す。`TestRegate_NothingRecordedWhenTheBranchChangedWhileTheScriptsRan`、`TestRegate_ARefusedRecordAfterTheMergeUndoesIt` が固定する(/test で確かめる) |
-| AC9 gate だけの道 | 満たす(テストのコードで確認) | `internal/org/regate.go:335` の `regateGate` で、merge も push もしない。`TestRegate_GatesWhenNoRecordLetsItStop`(7 case、worktree と origin の ref が変わらないことも見る)、`TestRegate_GateOnlyRecordsAGatePassedViaRegate`、`TestOrgRegate_GateOnlyPassPrintsNoMergeAndNoPush`。probe ではこの道を単独では打っていない |
-| AC10 merge-order の理由の欄 | 満たす(binary でも確認) | `namesRegate`(`internal/org/mergeorder.go:348`)、`mergeRegateNext`(`:962`)、`mergeRegateFailedDetail`(`:980`)、`regate` の文(`:1027`)、`rebase` の文(`:1046`)。probe 1 の C2(regate の `gate_failed`)は merge commit とそれを戻したことと log のパスを、D2(push が落ちたあと)は「pushed after the gate, or the gate's head was not pushed」と `ralph org regate --branch feat/auth` を出す。probe 2 の G11a(org_id auth を `feat/other` で立て直した)は「org_id auth now runs another feature, on the branch feat/other: once auth is disbanded, run ralph org regate --branch feat/auth」を出し、走っている org が今結びついている `feat/other` の行は今までの `ralph org gate --org-id auth` の文のまま |
-| AC13 Spawn との排他(D9) | 満たす(テストのコードで確認) | spawn は `checkCapacityAndStart` の先頭(`internal/org/spawn.go:1284`、冪等の判定と stale の補償のあと)、start は ensure の前(`internal/org/feature.go:216`)で `regateSpawnErr`(`spawn.go:1327`)を呼ぶ。ロックの待ちは `regateLockWait = time.Second`(`regate.go:93`)。probe 2 の G8(perl の flock で `regate.lock` を 3 秒持つ)は約 1 秒で断られた。spawn と start の断りは `TestOrgSpawn_RefusedWhileRegateRunsOnTheOrg`(最初の確かめのあとと記録の直後の 2 つの hook)、`TestOrgSpawn_RegateLockStates`(4 状態)、`TestStartFeature_RefusedWhileRegateRunsOnTheOrg` が固定する(/test で確かめる)。spawn と start を binary では打っていない |
-| AC11 文書 | 満たす | 下の Documentation drift の表。AC11 が挙げる面(skill の 8 面、仕様の注、tech-debt、`AGENTS.md`、CLI の help)はすべて更新済み。挙げられていない `docs/quality/quality-gates.md` にずれが 1 件ある(V1) |
-| AC12 テストはネットワーク・herdr・osascript・端末を打たない。go1.26 と go1.25.8 | 一部(静的な部分を確認) | 足したテストの行に URL、`osascript`、`tmux`、本物の `herdr` の呼び出しはない。origin は `t.TempDir()` の下の bare repository(`newRegateFixture`、`internal/org/regate_test.go:52`)。CLI の merge-order は `setMergeOrderPATH` で gh のない PATH にして打つ(`internal/cli/org_regate_test.go:174`)。`go build` と `go vet` は go1.26.0 と `GOTOOLCHAIN=go1.25.8` の両方で通った。テストを両方の版で走らせるのは /test |
+| AC1 断る 12 の場合(何も記録せず、worktree も origin も変えず、終了コード 1、理由と次の手を stderr) | 満たす(binary でも確認。V2-1 の過剰な断りを除く) | cycle 1 の 11 の場合はコードの形が変わらず、行番号だけが動いた: `--branch` なしと `--org-id` は `internal/cli/org_regate.go:119`・`:123`、結びつきなしと走っている org は `regateFirstCheck`(`internal/org/regate.go:442`)、worktree・ブランチ・detached・汚れた作業ツリー・スクリプトは `regateCheckWorktree`(`:531`)、rebase か merge の途中は `regateCheckInProgress`(`:609`)、ほかの regate は `:282` の `acquireHeldFileLock`。cycle 2 で足した 12 番目の「merge が書くパスに ignored のファイルかディレクトリがある」は下の D3。probe 3 の H1(tip が足した `local.env` に ignored のファイル)は終了コード 1、stdout は空、stderr は `local.env` を名指して「move them out of the worktree and run ralph org regate --branch feat/auth again」。HEAD、origin の 2 つの ref、作業ツリー、manifest の行数と sha256、`local.env` の中身はどれも前のまま。H2(directory rename の移った先 `pkg/new.gen`)も同じ。pre-fix の binary(413ab307)は H1 で merge して push し、`local.env` を main の中身に黙って書き換えた。テスト(読んだだけ): `TestRegate_RefusedWhenSomethingIgnoredIsInTheMergesWay`(9 case)、`TestRegate_ChecksTheMergesWayWithAGitMergeTreeCannotWriteATree` |
+| AC2 fetch の失敗、origin にブランチがない、HEAD が `origin/<b>` と違う。fetch と push に `GIT_TERMINAL_PROMPT=0` | 満たす(cycle 1 の binary の確認のまま) | cycle 2 で変わっていない。`regateFetch`(`internal/org/regate_git.go:30`、ブランチがないときの文は `:45`)、`regateCheckOriginHead`(`:82`)、`regateRemoteEnv`(`:128`)と `regateFetchEnv`(`:136`) |
+| AC3 何もしない道と、壊れた記録のあとの取り直し | 満たす(binary でも確認) | `passedOn`(`internal/org/regate.go:423`)、`RegateOutcomeUpToDate`(`:334`)。D2 の新しい規則で、org_id を別のブランチに結び直したあとの読めない記録も、前の成功を使わない。probe 3 の D2-3 は、`feat/auth` の regate の通った記録のあとに auth を `feat/billing` に結び、disband し、読めない `gate_failed` を足した台帳で、UP_TO_DATE にならず gate だけの道を走り、`via=regate` の `gate_passed` を書いた。pre-fix の binary は同じ台帳で UP_TO_DATE を出した。テスト: `TestRegate_GatesWhenNoRecordLetsItStop` に足した case(`internal/org/regate_test.go`) |
+| AC4 取り込みの道 | 満たす(binary でも確認。V2-1 の入力を除く) | 流れは cycle 1 のまま(`regateMergeTip` は `internal/org/regate_merge.go:426`、記録の `Via: gateViaRegate` は `internal/org/regate.go:657`、push の refspec は `regate_merge.go:661` で `+` なし)。probe 3 の H1c(邪魔なファイルを退かしたあと)は `GATE: pass`・`MERGED:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:` を出して終了コード 0、merge commit の件名は `Merge origin/main <12 桁> into feat/auth` で、親は merge の前の HEAD と取り込んだ先頭。case を区別しない APFS で、既定のブランチがファイルの名前の大文字小文字だけを変えたときは merge に届かない(V2-1) |
+| AC5 merge commit を作れない | 満たす | 変わっていない(`regateCheckIdentity` は `regate_merge.go:216`、`regateAbortLeftMerge` は `:511`)。D3 の「共通の祖先がないときは git merge に断らせる」は probe 3 の H3 で確認した。origin の main を関係のない履歴に替えると、regate は確かめを飛ばし、`git merge` が「refusing to merge unrelated histories」(exit 128)で断り、regate は何も記録せずに終了コード 1。HEAD と manifest は前のまま |
+| AC6 スクリプトの失敗、記録の前の中断、`head_moved` と `tree_changed` | 満たす(cycle 1 の確認のまま) | `regateMerged`(`regate_merge.go:141`)、`regateUndoMerge`(`:589`)、`regateMergeLeft`(`:632`)。cycle 2 は `regateMerged` の先頭に確かめを足しただけで、戻し方は変わっていない |
+| AC7 push の失敗と記録のあとの中断、打ち直し | 満たす(cycle 1 の確認のまま) | `regatePush`(`:657`)、`regatePushInterrupted`(`:692`)、`regateHeadNotOnOrigin`(`:68`)、`regateResetHint`(`:98`) |
+| AC8 スクリプトの間の org か結びつきの変化 | 満たす(テストのコードで確認) | `recordRegate`(`internal/org/regate.go:683`)。変わっていない |
+| AC9 gate だけの道 | 満たす(binary でも確認) | cycle 1 では binary で単独には打っていなかった。probe 3 の D2-3 がこの道で、merge も push もせずに `GATE: pass`・`HEAD:`・`BASE:`・`LOG:` の 4 行を出し、HEAD と origin の ref は変わらず、manifest に 1 行足した。そのあとの merge-order(D2-4)は `feat/auth` を `ready` と出した |
+| AC10 merge-order の理由の欄 | 満たす(binary でも確認) | `namesRegate`(`internal/org/mergeorder.go:348`)、`mergeRegateNext`(`:981`)、`mergeRegateFailedDetail`(`:999`)、`regate` の文(`:1047`)。D2 の Detail の追記は probe 3 の D2-2 で、`feat/auth` と `feat/billing` の両方が `unreadable` になり、どちらも「may be a record of another branch of the same org, auth, which has had 2 branches: run ralph org regate --branch <ブランチ> to record a new one」を出した。pre-fix の binary は `feat/auth` を `ready` のまま出した |
+| AC13 Spawn との排他(D9) | 満たす(テストのコードで確認) | 変わっていない。`regateSpawnErr`(`internal/org/spawn.go:1327`)を spawn は `:1284`、start は `internal/org/feature.go:216` で呼ぶ。help は 413ab307 と 5e12dfe0 で spawn と start の断りを書き、spawn の help は `--dry-run` を除くと言う(`internal/cli/org.go:677-679`) |
+| AC11 文書 | 一部(LOW のずれ 3 件) | 下の Documentation drift の表。AC11 が挙げる面はすべて regate を書くが、cycle 2 の D2 と D3 の変更が、仕様の注、`/org` skill の regate の行、tech-debt の 1 行に届いていない(V2-2〜V2-4) |
+| AC12 テストの隔離、go1.26 と go1.25.8 | 一部(静的な部分を確認) | cycle 2 で足したテストの git の偽物は `t.TempDir()` の下の sh で(`regateWrapGit`、`internal/org/regate_merge_test.go:1512-1523`)、`t.Setenv` で PATH の先頭に置く。URL、`osascript`、本物の `herdr` の呼び出しはない。`go build` と `go vet` は go1.26.0 と `GOTOOLCHAIN=go1.25.8` の両方で通った。テストの実行は /test |
 
 D1〜D9:
 
-- D1: `--org-id` を断り(`org_regate.go:116`)、`orgLedgerMutating` で台帳を決める(`:123`)。`Regate` は見張りの関門も承認の確かめも呼ばない(`regate*.go` に `WatchGate` と承認の呼び出しはない)
-- D2: `readMergeLedger` と `collectMergeTargets` をロックの下で読む(`regate.go:443` の `withManifestLockContext`)。結びつきは同じブランチの最後の完全なもの(`collectMergeTargets` は後の `scope_reserved` で上書きする)。走っているかは `RunningOrgs`(`mergeorder.go:439`)
-- D3: merge の文は `Merge origin/<既定> <12 桁> into <b>`(`regate_merge.go:244`)。先頭を含めば merge しない(`regate.go:329`)。rebase と force push の道はない
-- D4: 上の AC2 と AC7。push だけの例外は `passedOn` と `origin/<b>` が HEAD の祖先であること(`regate_merge.go:64-72`)
-- D5: 戻すのは HEAD がまだ merge commit で作業ツリーがきれいなときだけ(`regateUndoMerge`、`regate_merge.go:405-424`)。記録のあとの中断は push の失敗と同じ扱い(`regatePushInterrupted`、`:508`)
-- D6: 記録の Details は `via` を `log` の前に置く(`internal/org/gate.go:173`)。probe の manifest の行で確かめた
-- D7: `regate.lock` は `Regate` の最初から `defer` の解放まで持つ(`regate.go:280-288`)。push と巻き戻しはその中にある
-- D8: 2 回の fetch、明示の refspec、`GIT_TERMINAL_PROMPT=0`、1 回 120 秒(`regateGitTimeout`、`regate.go:110`)。fetch の失敗は何も記録しない(probe G5、G6)
-- D9: 排他を取った直後に印を空にし(`regate.go:291`)、manifest のロックの下で org_id・branch・worktree・pid の印を書き(`:466`)、終わりに消さない。spawn は待たない共有の flock(`fileLockHeld`、`internal/org/lockfile.go:182`)で確かめ、印の org_id が自分のものと同じときだけ断る
+- D1: 変わっていない(`org_regate.go:119`、`:126` の `orgLedgerMutating`)
+- D2: 結びつきと記録は `regateFirstCheck` の `withManifestLockContext`(`regate.go:445`)の下で `readRegateBranch`(`:401`)が `collectMergeTargets` で読む。読めない記録を付ける先は上の「cycle 1 からの変化」のとおりで、計画の D2 の文(「その org がそれまでに完全な結びつきか読める記録を持ったすべてのブランチに付ける」「同じ org のほかのブランチのものかもしれないと言う」)と合う。付く先が 1 つの org では Detail に追記はない(`TestMergeOrder_UnreadableRecordAttachesToTheBindingBeforeIt` の doc がそう書く)。どの org も持たない記録は、今までどおり note で数える(`mergeorder.go:473-476`)
+- D3: 計画の文と 1 つずつ突き合わせた。merge と同じ env(`regateMergeEnv`)で、`-c` の上書きなしに `git merge-tree --write-tree --no-messages HEAD <tip>` を打ち、終了コード 0 と 1(衝突)の 1 行目の木を `git diff --name-only -z --no-renames --diff-filter=A HEAD <tree>` で HEAD と比べる(`regate_merge.go:314-333`)。`-h` が `--write-tree` を名指さない git では、merge-base からの tip 側の diff と HEAD に対する追加の diff の積に落とす(`:334-361`)。probe 3 の H1b で、2.38 より前の git を真似た偽物(`--write-tree` と `-h` に usage と 129 を返す)を PATH に置くと、merge-tree を 2 回(`--write-tree`、`-h`)打ってから同じ文で断った。邪魔かどうかは `regatePathInTheWay`(`:377-405`): 最後の要素が非ディレクトリ、追跡していないものを含むディレクトリ(`ls-files --others --directory --no-empty-directory`)、上のディレクトリが HEAD の追跡していない非ディレクトリ。共通の祖先がなければ確かめない(`:255-260`)。断りの文は 10 件まで名指し、残りを数える(`:239`、`:283-286`)
+- D4〜D9: cycle 1 から変わっていない。D6 の `via` は `log` より前(`internal/org/gate.go:172-175`)、D7 の `regateLockWait = time.Second`(`regate.go:93`)、D8 の `regateGitTimeout` は `:110`、D9 の印は取った直後に空にし(`:293`)、manifest のロックの下で書く(`:468`)
 
-FR-7 と FR-9:
+FR-7 と FR-9、8a-3a の持ち越しの判断は cycle 1 と同じで、cycle 2 の差分に `auto_merge` はない。
 
-- FR-7「後から入る PR は、main に rebase してゲートを取り直してから出す」: push する head(merge commit)で gate を取り、記録し、force なしで push する。仕様の注(`docs/specs/2026-10-07-org-multi-org-director.md:75`)が 7b の注の読み方(「push する head で最後の gate を取る」)に従うと書く。FR-7 の checkbox は付けない理由も同じ注にある
-- FR-9「director は ralph と gh の操作に限る」: regate は ralph の動詞で、`/director` skill は人に頼まれたときだけ 1 本ずつ打ち、衝突と失敗を git で直さない(`.claude/skills/director/SKILL.md:457`、`:515`)
-- 8a-3a に残すもの: diff の Go と設定に `auto_merge` はない(grep)
-
-### 実装中に記録したずれ(承認済みの計画の文との突き合わせ)
+### 実装中に記録したずれ(cycle 2 の分)
 
 | ずれ | 計画の文と合うか | Evidence |
 | --- | --- | --- |
-| D4 の `via=regate` を `reset --keep` の手の条件に足した | 合う | 承認の digest f841204a7bc0 の D4 は「最新の記録が regate の書いた(`via=regate`)読める記録で、その head が HEAD で、HEAD の第 1 親が `origin/<b>` の先頭」と書く。`regateResetHint`(`regate_merge.go:92-104`)は同じ 3 条件に、D2 が例外から外す「あとに壊れた行がある」を足して確かめる。push だけの例外は `via` を見ない(leader の通した head を押す)ことも Progress の S3 の注のとおり。probe 2 の G9b で手が出た |
-| D9 の印(取った直後に空にする、終わりに消さない) | 合う | D9 の文(0e719e0a で直して承認し直したもの)と `regate.go:291`・`:466`、解放の `defer`(`:288`)が一致する。印が空か読めない、別の org の印、ロックが空いている場合に spawn が続くことは `TestOrgSpawn_RegateLockStates` が固定する |
-| AC10 の文「走っている org が今結びついているブランチは今のまま」 | 合う | `namesRegate` は「走っていない」か「org が別のブランチで走っている」ときだけ真(`mergeorder.go:339-349`)。probe 2 の G11a で、`feat/other` は gate の文のまま、`feat/auth` は regate の文 |
-| merge・abort・戻し・`git var` を別のプロセスグループで動かし、fetch と push は ralph のグループに残す | 合う | 計画はプロセスグループを決めていない。Risks の 121 行は「ssh の鍵の入力は止めない(`core.sshCommand` を上書きしない)」で、fetch と push は `regateRemoteGit`(`regate_git.go:145`、`ownGroup=false`)で ralph のグループに残る。merge・abort・戻しは `regateUncancelledGit`(`regate_merge.go:28`)、`git var` は `regateBoundedGit(..., true, ...)`(`:206`、0b6ba232 で理由のコメントを足した)。D5 の「中断されたら merge commit を戻す」は、merge を終えてから戻すので成り立つ |
-| 中断のあと merge を待つ間の stderr の 1 行 | 合う | 計画にない足し。stdout の行と終了コードは変わらない。help(`org_regate.go:104-108`)と `/org` skill の `regate` の行がこの 1 行を書く |
-| regate の rebase 途中の断りは `git rebase --abort` だけを案内する | 合う | AC1 は「rebase の途中」を断り、理由と次の手を出すことだけを求める。D3 は rebase と force push をしない。`regateWords` の `rebaseSteps`(`regate.go:350-355`)で regate だけが変わり、gate の文は `gateRebaseSteps`(`gate.go:415`)のまま。probe 2 の G2 の文は「undo it with git rebase --abort (regate merges origin's default branch instead, and a finished rebase would need a force push)」 |
-
-### self-review の直し(0b6ba232)
-
-self-review の報告(`docs/reports/self-review-2026-10-16-org-regate.md`)は HEAD 07b9a465 の時点のもので、N1〜N4 を開いたまま挙げる。0b6ba232 がそのあとに 4 件を直した。
-
-| 指摘 | Status | Evidence |
-| --- | --- | --- |
-| N1 merge のあとに HEAD か親を読めないときの error | 直った | `regateMergeUnchecked`(`regate_merge.go:311`)が「merge は残っている、何も走らせず記録していない、`git log` を見る、`reset --keep <merge の前の HEAD>` で戻す」を言う。HEAD の読み、親の読み、親の違いの 3 つの return がこれを通る(`:254-266`)。推奨の `regateMergeNotBack(moved=true)` ではなく別の helper だが、案内の中身(`reset --keep` で merge の前の HEAD へ)は同じ。doc の列挙(`:234-241`)も直った。新しいテスト `TestRegate_AMergeCommitItCannotReadNamesResetKeep` |
-| N2 `regateMergeTip` の長さと `r` の隠れ | 直った | 失敗した merge の扱いを `regateAbortLeftMerge`(`:327`)に切り出し、`regateMergeTip` は 62 行。closure の引数は `c rune`(`:286`) |
-| N3 `git var` のグループの理由 | 直った | `:204-205` に 1 行の理由 |
-| N4 tech-debt の行数と行番号 | 直った | 0b6ba232 が「713 lines」「1495 lines」「`:299-303`」を消した。`docs/tech-debt/README.md:278` の「851 lines」は解消済みの行の取り消し線の中で、当時の記録 |
+| P1 の直しを、2 つの diff の積から merge-tree の木に替えた(ca840a45) | 合う | 承認し直した D3(sha256:260c539299bc)の文と同じ手順。Progress の 161 行が経緯を書く |
+| C2-2 の直し: 空のディレクトリと、HEAD が追跡するディレクトリをファイルに替える tip は断らない | 合う | D3 は「追跡していないものを含むディレクトリ」を邪魔とする。`TestRegate_MergesWhenNothingUntrackedIsInTheMergesWay` の 3 case |
+| 5e12dfe0 の名前と注の整理 | 合う(振る舞いは変わらない) | `orgBranches` の field を `orgBranchCount` にし、注と help の文を直しただけ。Progress にはこのコミットの注がない(情報) |
 
 ## Static analysis
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `./scripts/run-static-verify.sh` | pass(exit 0) | scope は changed、言語は golang。hook の shellcheck と `sh -n`、`check-sync.sh`(DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の plan の参照、gofmt ok、golangci-lint `0 issues`、`secret-scan-branch: scanned 670ec219..0b6ba232 against origin/main: clean` |
+| `./scripts/run-static-verify.sh` | pass(exit 0) | scope は changed、言語は golang。hook の shellcheck と `sh -n`、`check-sync.sh`(DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の plan の参照、gofmt ok、golangci-lint `0 issues`、`secret-scan-branch: scanned 670ec219..5e12dfe0 against origin/main: clean` |
 | `go vet ./...`(go1.26.0) | pass | 出力なし、rc 0 |
 | `gofmt -l internal/ cmd/` | pass | 出力なし |
 | `GOTOOLCHAIN=go1.25.8 go build ./...` | pass | go.mod の Go |
@@ -76,49 +60,60 @@ self-review の報告(`docs/reports/self-review-2026-10-16-org-regate.md`)は HE
 | `git diff --check 670ec219...HEAD` | pass | 出力なし |
 | `./scripts/check-skill-sync.sh` | pass | 14 skill が lock-step |
 | `./scripts/check-sync.sh` | pass | IDENTICAL 170、DRIFTED 0、KNOWN_DIFF 5 |
-| `./scripts/plan-visual.sh digest <plan>` | 一致 | f841204a7bc0 |
+| `./scripts/plan-visual.sh digest <plan>` | 一致 | 260c539299bc |
+
+## Findings
+
+| ID | Severity | 種類 | Finding | Evidence | 勧め |
+| --- | --- | --- | --- | --- | --- |
+| V2-1 | MEDIUM | 振る舞い(AC4 の端の入力) | case を区別しないファイルシステム(macOS の APFS の既定)で、origin の既定のブランチが追跡するファイルの名前の大文字小文字だけを変えると(`readme.md` を `README.md` に)、regate は merge を断る。merge-tree の木で `README.md` は HEAD に対する追加なので候補になり、`os.Lstat("README.md")` は追跡している `readme.md` を見つけ、`regatePathInTheWay` は「HEAD が追跡していない非ディレクトリ」として返す。ディレクトリの名前の大文字小文字を変えたときも、中のファイルで同じことが起きる。断りの文は「HEAD does not track」「move them out」と言うが、それは追跡しているファイルで、言われたとおり退かすと作業ツリーが汚れて次も断られる。同じ tip を素の `git merge --no-ff` で取り込むと成功する。何も書かずに断る側に倒れるので、ファイルは失われない。人が worktree で merge して push すれば、regate は gate だけの道で通る | `internal/org/regate_merge.go:377-405`(`:387-388` の最後の要素の分岐)、probe 4(`docs/evidence/verify-2026-10-16-org-regate.log` の「probe 4」。regate は終了コード 1、manifest は 2 行のまま、素の git merge は rc 0) | `core.ignorecase` が真の worktree では、lstat が見つけたものが HEAD の追跡するパス(大文字小文字を区別せずに一致し、merge が消すか名前を変えるもの)なら邪魔としない。直さないなら、tech-debt に 1 行足し、`/org` skill の regate の行に回避の手順(worktree で merge して push し、regate を打ち直す)を書く |
+| V2-2 | LOW | 文書(仕様) | 仕様の 7c-1 の注は「読めない記録は、打った org のその時点の結びつきのブランチに付ける(gate は結びつきのブランチでしか打てないため)」と書く。f793924d のあと、付く先はその org が持ったすべてのブランチで、理由(regate は古い結びつきのブランチにも記録を書く)も変わった。8a-3b の注(75 行)はこの変更と、ignored のファイルの断り(D3)を書いていない | `docs/specs/2026-10-07-org-multi-org-director.md:77`、`:75` | 8a-3b の注に D2 の付け方の変更と D3 の断りを足すか、7c-1 の注の該当の文に「8a-3b で、org が持ったすべてのブランチに付けるようにした」と添える(/sync-docs) |
+| V2-3 | LOW | 文書(skill、README) | ignored のファイルの断りは CLI の help(a59220f5、`internal/cli/org_regate.go:73-76`)にはあるが、`/org` skill の 4 面の `regate` の行(`.claude/skills/org/SKILL.md:188`)と README の regate の段落(`README.md:264`)にない。どちらも merge が commit を作らない場合として、衝突、hook、名前がないことは並べている。self-review cycle 2 が /sync-docs に引き継いだもの | 上の各行。4 面の md5 は同じ `1220e53006c5909b893daf51faaf2c4c` | 4 面と README に 1 文足す |
+| V2-4 | LOW | 文書(tech-debt) | 7c-1 の残りの行が、f793924d で変わったものを古い名前で指す。(1)「`unreadable` for a gate record that cannot be read and is attached to the branch of its org's latest readable gate record」は cycle 1 の規則の説明。(2) `TestMergeOrder_UnreadableRecordWithNoBindingAttachesToItsOrgsGatedBranch` は `...GatedBranches` に改名された(古い名前は新しい名前の前方一致なので grep では見つかるが、その名前の関数はない)。(3) (t) の「could update an org's `gatedBranch`」の `gatedBranch` は消え、今は `orgBranches` | `docs/tech-debt/README.md:239` | 3 か所を今の規則と名前に直す(/sync-docs) |
+
+情報(ずれに数えない):
+
+- I1 2.38 より前の git の落とし先は、directory rename の移った先を見ない(D3 と `regateMergeWrites` の doc がそう書く)。probe 3 の H2b で、偽の古い git では `pkg/new.gen` の ignored のファイルの前で断らず、merge が衝突して `git merge --abort` で戻ったあと、そのファイルはなくなっていた。計画どおりの割り切りだが、tech-debt に行がない。足すなら「git 2.38 より前、directory rename、その中への追加、移った先の ignored のファイル」の 4 つが重なる場合として書く
+- I2 `git merge-tree --write-tree` は repository に到達できない木と blob のオブジェクトを書く。ref も作業ツリーも変えないので、AC1 の「worktree も origin も変えず」には当たらない
+- I3 `/org` skill は regate の間に断られるものを「`ralph org spawn` と `ralph org start --plan`」と書き、start の help は「Both forms」と書く。素の `ralph org start` も leader の Spawn を通るので断られ、skill の「spawn」に含まれると読める。計画の D9 の文も skill と同じ書き方
+- I4 計画の Progress は 5e12dfe0 の注を持たず、「Review artifact created」の行の「1 周目の 2 回目」は、self-review の報告の先頭が cycle 2 になった今は付録 A を指す
+- I5 self-review の報告(HEAD a59220f5)は C2-1〜C2-5 を開いたまま書く。上の「cycle 1 からの変化」のとおり、どれも ca840a45 と 5e12dfe0 で直った。self-review の報告は記録の写しなので、直さない
 
 ## Documentation drift
 
 | Doc / contract | In sync? | Notes |
 | --- | --- | --- |
-| `/org` skill の 4 面 | yes(I1 を除く) | 4 面の md5 は `52efc20f57b38022ee4076d85733cf2e` で同じ。`regate` の行(`.claude/skills/org/SKILL.md:188`)の確かめの順、fetch、`reset --keep` の手、merge の文、出力の行、戻す条件、push の打ち直し、stderr の 1 行、終了コード、spawn と start の断りは、コードと probe の出力に合う。merge-order の行の理由の欄の説明、gate の記録の節の `via=regate`(`:927`)、「merge してよい順」の手順(`:1010` から)、見張りなしで使える動詞の一覧(`:1255`)、台帳を書き換える動詞の一覧に `regate` が入った |
-| `/director` skill の 4 面 | yes | md5 は `2aa01e8014c06fab49ff8b58b5688d34` で同じ。「merge のあとの取り直し」(`:457`)は、人に頼まれたときだけ、1 本ずつ、バックグラウンドで、失敗と衝突は人に伝える、走っている org には打たない、の手順。してはいけないこと(`:515`)と「まだないもの」(`:521`)も合う |
-| CLI の help(`ralph org regate`、`ralph org`、`--org-id`、`ralph org merge-order`) | yes | probe 1 の F1・F2 の出力。`--org-id` の説明に regate が入り、merge-order の `regate` の分類と理由の欄の説明(`internal/cli/org_merge_order.go:73-84`)は probe の出力と合う |
-| `AGENTS.md` の repo-map(90 行) | yes | `regate.go`・`regate_merge.go`・`regate_git.go` があり、書いた振る舞いと合う |
-| `README.md`(124、264 行) | yes | 動詞の表と merge-order の段落。merge-order の「fetch・gate・merge をしない」は merge-order について今も正しい |
-| 仕様の FR-7 の注(75 行) | yes | 名指すテスト 2 つ(`TestRegate_MergesTheTipInAndPushes`、`TestOrgRegate_MergesPushesAndThenIsUpToDate`)は実在する。FR-7 の checkbox を付けない理由がある |
-| `docs/tech-debt/README.md` | yes | 取り直しの行は RESOLVED の注と取り消し線になり、238 行に 8a-3b の注、275・276・279・280 行が足された。どれも 5 列。Trigger と Related が名指すテストと関数(`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`、`TestRegate_FetchFailures` ほか 4 つ、`idempotentRespawn`、`checkCapacityAndStart`、`regateSpawnErr`、`recordRegate`、`mergeRegateFailedDetail`)はすべて実在する。新しい行は計画を `docs/plans/active/` で指し、/pr の `archive-plan.sh` が書き換える |
-| `internal/cli/org_legacy_ledger.go:21-26` | yes | 台帳を書き換える動詞の doc comment に `regate` |
-| V1 `docs/quality/quality-gates.md:80` と `templates/base/docs/quality/quality-gates.md:79` | no(LOW) | Cross-org watch gate の行の「`stop`, `disband`, `escalate`, `approve`, `gate`, `merge-order`, ... work with no watch」に `regate` がない。regate は見張りを見ない(D1)ので、一覧が足りない。挙動は変わらない。lead が把握済みで、/sync-docs で 2 面とも直す |
-| 計画の AC と Progress の checkbox | 遅れている(情報) | AC1〜AC13 はすべて `[ ]`、Progress の「Verification artifact created」も `[ ]`。Progress に 0b6ba232(N1〜N4 の直し)の注がない |
-
-情報(ずれに数えない):
-
-- I1 `/org` skill の `regate` の行は、`reset --keep` の手の条件を「最新の gate の記録が読める、その HEAD の `via=regate` の記録で、HEAD の第 1 親が origin の先頭」と書く。コードは記録のあとに壊れた行がないことも求める(`regate_merge.go:94` の `b.corruptAfterGate`)。同じ行の `UP_TO_DATE:` の文はこの条件を書いている。コードのほうが手を出す場合が狭く、手が出ないだけなので、誤った操作には導かない
-- I2 `regateSpawnErr` は `regate.lock` を確かめられないとき(読めない、flock の失敗)も spawn を断る(`spawn.go:1327-1333`)。D9 はこの場合を決めていない。断る側に倒しており、doc comment が書く
-- I3 `regateGitTimeout`(120 秒)は fetch と push のほかに merge・abort・戻し・`git var` にも掛かる。D8 が名指すのは fetch と push だけで、Progress の S1 の注が「remote を叩く git の 1 回ごとの 120 秒の上限」として記録し、help と skill は merge の待ちを「最大 120 秒」と書く
-- I4 Test plan の「CLI の…台帳の決め方」のうち、regate が `orgLedgerMutating`(古い台帳の座席が動いている間は断る)で台帳を決めることは、コード(`org_regate.go:123`)で確かめたが、固定するテストはない。`TestOrgLegacyLedger_MutatingVerbsRefusedWhileLegacySeatsActive` の表は `gate` と `approve` も持たないので、今までの慣行と同じ
-- I5 tech-debt の 275 行(古い台帳で Reserve 付きの leader の spawn が冪等の枝で排他を通らない)は、読んで行の中身と名指す関数を確かめただけで、場面は再現していない
+| `/org` skill の 4 面 | 一部(V2-3) | 4 面の md5 は同じ。cycle 1 の I1(`reset --keep` の手の条件)は直った。merge-order の分類、「merge してよい順」の手順、見張りなしで使える動詞の一覧は今のコードに合う。regate の行に ignored のファイルの断りがない |
+| `/director` skill の 4 面 | yes | md5 は `2aa01e8014c06fab49ff8b58b5688d34` で同じ。「merge のあとの取り直し」の手順 3 は「断りの理由と次の手をそのまま人に伝える」と書き、D3 の断りもそこに入る |
+| CLI の help(`ralph org regate`、`ralph org`、`spawn`、`start`、`merge-order`) | yes | regate の help は D3 の断りを書く(`internal/cli/org_regate.go:73-76`)。spawn と start の help は regate の間の断りを書く(`internal/cli/org.go:677-679`、`:867-869`)。merge-order の help の `unreadable` の説明は付け方を言わないので、D2 の変更とぶつからない |
+| `AGENTS.md` の repo-map | yes | `regate.go`・`regate_merge.go`・`regate_git.go` と `regate.lock` の説明は今のコードに合う |
+| `README.md`(264 行) | 一部(V2-3) | merge-order の分類と regate の説明は合う。regate の merge が commit を作らない場合に ignored のファイルの断りがない |
+| 仕様(75 行と 77 行) | 一部(V2-2) | 7c-1 の注の付け方の文が古い |
+| `docs/tech-debt/README.md` | 一部(V2-4) | 8a-3b の行(232、233、275〜280 行)は今のコードに合う。7c-1 の残りの行(239 行)に古い規則と名前が 3 か所 |
+| `docs/quality/quality-gates.md` と `templates/base/docs/quality/quality-gates.md` | yes | cycle 1 の V1 は直った。Cross-org watch gate の行に `regate`、Quality pipeline gate の行に regate の説明がある。2 面の差は check-sync の KNOWN_DIFF のもので、regate の文は同じ |
+| `internal/cli/org_legacy_ledger.go` | yes | 台帳を書き換える動詞の doc comment に `regate`。`TestOrgRegate_LegacyLedgerGuard`(d00da42c)がある |
+| 計画の AC と Progress | ほぼ(情報 I4) | AC1〜AC13 は `[x]`。Progress は 5e12dfe0 の注がない |
 
 ## Observational checks
 
-HEAD の binary(`go build -o $PROBE1/bin/ralph ./cmd/ralph`)を、`$PROBE/bin`(ralph と Homebrew の git の symlink)、`/usr/bin`、`/bin` だけの PATH で打った。gh は PATH にない。HOME と `GIT_CONFIG_GLOBAL` は probe の中の偽の場所で、origin は probe の中の bare repository。台帳は main checkout の `.harness/state/org` で、`--state-dir` で渡した。manifest は auth の完全な結びつき(`feat/auth`、worktree は probe の linked worktree)と `disbanded` の 2 行から始めた。gate のスクリプトは `echo` と、環境変数で決める exit だけの stub。ネットワーク、herdr、本物の GitHub は打っていない。
+HEAD の binary(`go build -o $PROBE3/bin/ralph ./cmd/ralph`)と、cross-review の時点の 413ab307 から `git archive` で作った pre-fix の binary を、Homebrew の git 2.49.0 の symlink と `/usr/bin`・`/bin` だけの PATH で打った。gh は PATH にない。HOME と `GIT_CONFIG_GLOBAL` は probe の中の偽の場所で、origin は probe の中の bare repository、台帳は scratch の main checkout の `.harness/state/org`。gate のスクリプトは `echo` と exit 0 だけの stub。ネットワーク、herdr、本物の GitHub は打っていない。
 
-- probe 1(A〜F): 断り 3 つ、main が進んだあとの取り込み・記録・push と merge-order の `ready`、UP_TO_DATE、テストの失敗と merge の戻し、merge-order の regate の `gate_failed` の文、origin の pre-receive が断る push、merge-order の新しい `regate` の文、PUSH_ONLY、再びの UP_TO_DATE、走っている org の断り、help。上の AC1・AC3・AC4・AC6・AC7・AC10
-- probe 2(G1〜G11): 汚れた作業ツリー、止まった rebase、merge の途中、push していない commit、origin にないブランチ、fetch の失敗、git の名前がない、ほかの regate のロック(約 1 秒で断る)、push の失敗のあとに main が進んだときの `reset --keep` の手とその手のあとの取り直し、衝突、org_id を別の機能で立て直した org の merge-order の文と regate の断り。上の AC1・AC2・AC5・AC7・AC10・AC13
+- probe 3(HEAD の binary): H1 tip が足したパスの ignored のファイルで断る、H1b 2.38 より前の git の落とし先でも断る、H1c 退かしたあとの merge・gate・push、D2-1〜D2-4 読めない記録が org の 2 つのブランチに付き、regate が gate だけの道で取り直す、H2 directory rename の移った先で断る、H2b 落とし先は H2 を見落とす(I1)、H3 関係のない履歴は git merge が断る
+- probe 3(pre-fix の binary): H1 は `local.env` を黙って書き換えて push し、D2 の台帳で `feat/auth` は `ready` のまま、regate は UP_TO_DATE。cycle 2 の直しがこの 2 つを変えたことの対照
+- probe 4(HEAD の binary): case を区別しない APFS で、main が `readme.md` を `README.md` に変えると regate は断る(V2-1)。同じ tip を素の git merge は取り込む
 
 ## Coverage gaps
 
 - テストは走らせていない。go1.26 と `GOTOOLCHAIN=go1.25.8` の `go test ./internal/org/ ./internal/cli/` は /test で確かめる
-- 中断の道(スクリプトの間、merge の間、記録の直後、push の間の SIGINT・SIGTERM・SIGHUP)、`head_moved` と `tree_changed`、hook が git を殺す場合、fetch と push の env は、テストのコードを読んで確かめただけ
-- AC13 の spawn と `start --plan` の断りは binary で打っていない。spawn は herdr と agmsg を、start は見張りを要るため。テストが固定する
-- 端末の Ctrl-C が前景のプロセスグループに届く実機の確認、ssh の origin、本物の GitHub への push、Linux での動き
-- gate だけの道(AC9)を binary で単独には打っていない
+- cycle 1 の Coverage gaps はそのまま残る: 中断の道、`head_moved` と `tree_changed`、hook が git を殺す場合、fetch と push の env はテストを読んだだけ。AC13 の spawn と `start --plan` は binary で打っていない。端末の Ctrl-C の実機の確認、ssh の origin、本物の GitHub への push、Linux
+- D3 の確かめのうち、`lstat` が読めないパス、merge-base が 128 で落ちる場合、merge-tree の 120 秒の上限は、コードを読んだだけ(probe も、読んだ範囲のテストも、この 3 つを打たない)
+- 本物の 2.38 より前の git は打っていない。偽物は `--write-tree` と `-h` に usage を返すだけで、ほかの subcommand は 2.49.0 が答える
+- V2-1 は `README.md` の 1 ファイルの名前の変更でだけ打った。ディレクトリの名前の変更は、コードを読んで同じ道を通ると判断した
 
 ## Verdict
 
-- Verdict: pass(V1 は `docs/quality/quality-gates.md` の 2 面の動詞の一覧の LOW のずれで、/sync-docs で直す。merge を止めるものではない)
-- Verified: AC1〜AC8 と AC10 の本体(binary とローカルの bare origin で確認)、AC9 と AC13 のコードとテストの読み、AC11 の文書の面、AC12 の静的な部分。D1〜D9、FR-7 と FR-9、8a-3a のものを入れていないこと。実装中のずれ 6 件はどれも承認済みの計画の文と合う。self-review の N1〜N4 の直し(0b6ba232)。静的解析(run-static-verify、go vet、gofmt、go1.25.8 の build と vet、`git diff --check`、skill の 8 面の一致、check-sync、plan の digest)
-- Partially verified: AC6〜AC9 と AC13 のうちテストだけが固定する場合(上の Coverage gaps)、AC12 のテストの隔離(コードを読んだ範囲)
-- Not verified: テストの実行、端末の Ctrl-C の実機の確認、ssh と GitHub の origin、Linux、tech-debt 275 行の場面
+- Verdict: partial-pass(AC1〜AC13 は計画が書く道で満たし、D2・D3・AC1 の cycle 2 の直しは binary と pre-fix の対照で確かめた。V2-1 は MEDIUM で、case を区別しない APFS で既定のブランチがファイルの名前の大文字小文字だけを変えたとき、AC4 の merge に届かず、事実と違う断りを出す。何も書かずに断るので失われるものはなく、回避の手もある。V2-2〜V2-4 は LOW の文書のずれで、/sync-docs で直せる)
+- Verified: AC1〜AC5・AC9・AC10 の本体(binary とローカルの bare origin)。D2 の新しい付け方と Detail、D3 の merge-tree の道と 2.38 より前の落とし先、関係のない履歴を git merge に任せること、退かしたあとの取り直し。pre-fix の binary との対照 2 件。self-review cycle 2 の C2-1〜C2-5 がどれも直ったこと。cycle 1 の V1 と I1 が直ったこと。静的解析(run-static-verify、go vet、gofmt、go1.25.8 の build と vet、`git diff --check`、skill の 8 面の一致、check-sync、plan の digest)
+- Partially verified: AC6〜AC8 と AC13 のうちテストだけが固定する場合、AC11(LOW のずれ 3 件)、AC12 のテストの隔離(コードを読んだ範囲)
+- Not verified: テストの実行、本物の古い git、ディレクトリの大文字小文字の変更、端末の Ctrl-C の実機、ssh と GitHub の origin、Linux
+- Insight event: `insights-append.sh` の verdict に partial-pass がないので、これまでの partial-pass の verify と同じく `pass` で、`--cycle 2 --medium 1 --low 3` を付けて記録した
