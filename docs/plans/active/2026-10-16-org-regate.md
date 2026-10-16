@@ -148,7 +148,9 @@
   - S4b(7602b00d、d8675039、8222d6bd): merge-order の help と台帳の注、org_id を別の機能で立て直して走っている org のブランチの Detail と regate の断りの文(AC10 の文を「今結びついているブランチ」に直し、承認し直した。sha256:f841204a7bc0)、`regate.go` から merge と push を `regate_merge.go` へ移した(中身は変えない)。`regate.go` は 851 行で、gate だけの道と共有する関数まで動かさないと 800 行を切らないので止めた
   - S5(5400264c、6ec122b5): `/org` と `/director` の skill の 4 面、仕様の FR-7 の注、tech-debt(取り直しの行を RESOLVED にし、4 行足した)、`AGENTS.md`、`README.md`(動詞の表と regate の分類)。6ec122b5 は legacy ledger の注の動詞の一覧に `regate` を足した 1 語の直し。sync-docs に回すもの: `docs/quality/quality-gates.md` とその template の写しの「見張りなしで使える動詞」の一覧に regate がない
   - 範囲外(この PR では直さない): `internal/org/director_cmd_test.go:300-302` が sh の trap を 100 ms の sleep で待つので、負荷が高いと go1.25.8 の全体の実行で 1 回落ちた(単独では 5 回通る)。S5 で tech-debt に 1 行足す
-- [ ] Review artifact created
+  - self-review(1 周目、8e515ca7)の M1 と L1〜L9 の直し: d6a006dc(merge・abort・戻し・`git var` を別のプロセスグループで動かす。fetch と push は ssh の鍵の入力を止めないよう ralph のグループに残す。名前の確かめを merge の前に移す。文面の整理)、94ff3493(fetch と bounded git を `regate_git.go` へ移す、中身は変えない)
+  - そのあとの小さな直し: d441b921(割り込みのあと merge・abort・戻しを待つ間、stderr に 1 行出す。merge commit のあとで止まった merge には `reset --keep` を案内する)。d441b921 は、完了していた srfix の implementer が consult の遅れた返事で再開して作ったもの(新しいコミットで、amend なし)。a3cd529c(`/org` skill の名前の確かめと例のファイル名、merge 途中の断りに push を足す、`AGENTS.md` の `regate_git.go`)。regate の rebase 途中の断りは `git rebase --abort` だけを案内するようにした(終えた rebase は force push が要る、D3)。gate の文面は変えない
+- [x] Review artifact created(`docs/reports/self-review-2026-10-16-org-regate.md`、1 周目。直しのあと 2 回目を回す)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
