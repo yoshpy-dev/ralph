@@ -501,7 +501,8 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 			},
 			notWant: []string{"detached"}},
 		// The merge check comes before the clean tree check, so a merge with
-		// staged changes is told as a merge.
+		// staged changes is told as a merge. Its commit is to be pushed too:
+		// regate gates only what origin has.
 		{name: "a merge stopped before its commit",
 			setup: func(t *testing.T, fx *regateFixture) {
 				runGit(t, "-C", fx.worktree, "switch", "--quiet", "-c", "side")
@@ -512,8 +513,8 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 				runGit(t, "-C", fx.worktree, "-c", "user.name=t", "-c", "user.email=t@example.com", "merge", "--quiet", "--no-commit", "--no-ff", "side")
 			},
 			want: func(fx *regateFixture) []string {
-				return []string{"a merge is in progress in " + fx.worktree + ": finish it with git commit, or undo it with git merge " +
-					"--abort, and run ralph org regate --branch feat/auth again"}
+				return []string{"a merge is in progress in " + fx.worktree + ": finish it with git commit and push the commit to " +
+					"origin's feat/auth, or undo it with git merge --abort, and run ralph org regate --branch feat/auth again"}
 			},
 			notWant: []string{"uncommitted"}},
 		{name: "an untracked file",

@@ -563,7 +563,7 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 	if err != nil || refused != "" {
 		return gateTarget{}, refused, err
 	}
-	if refused, err = regateCheckInProgress(ctx, root, w); err != nil || refused != "" {
+	if refused, err = regateCheckInProgress(ctx, root, branch, w); err != nil || refused != "" {
 		return gateTarget{}, refused, err
 	}
 	dirty, err := gateDirtyLines(ctx, w.prefix, root)
@@ -596,8 +596,11 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 // regateCheckInProgress refuses root, worded with w, when a rebase or a
 // merge is stopped there: the merge Regate does not start on one, and a
 // rebase stopped on the branch would move it (gateGitPathExists). A rebase
-// with a detached HEAD has been refused by gateCheckBranch already.
-func regateCheckInProgress(ctx context.Context, root string, w gateWording) (string, error) {
+// with a detached HEAD has been refused by gateCheckBranch already. A merge
+// finished with git commit is to be pushed to origin's branch too, since
+// Regate gates only what origin has (D4); Gate has no such check, so the
+// wording is Regate's alone.
+func regateCheckInProgress(ctx context.Context, root, branch string, w gateWording) (string, error) {
 	rebasing, err := gateRebaseInProgress(ctx, w.prefix, root)
 	if err != nil {
 		return "", err
@@ -611,8 +614,8 @@ func regateCheckInProgress(ctx context.Context, root string, w gateWording) (str
 		return "", err
 	}
 	if merging {
-		return w.prefix + fmt.Sprintf("a merge is in progress in %s: finish it with git commit, or undo it with git merge "+
-			"--abort, and %s", root, w.again), nil
+		return w.prefix + fmt.Sprintf("a merge is in progress in %s: finish it with git commit and push the commit to origin's "+
+			"%s, or undo it with git merge --abort, and %s", root, branch, w.again), nil
 	}
 	return "", nil
 }
