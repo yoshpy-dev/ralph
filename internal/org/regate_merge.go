@@ -201,6 +201,8 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 // merged or recorded then either.
 func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gateWording) (string, error) {
 	for _, ident := range []string{"GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"} {
+		// In a group of its own, git var gets a terminal's Ctrl-C only via
+		// ctx, so the error is ctx's, not a race with regateGitSignaled.
 		r, timedOut, err := regateBoundedGit(ctx, t.root, env, true, "var", ident)
 		switch {
 		case err != nil:
@@ -227,14 +229,16 @@ func regateCheckIdentity(ctx context.Context, t gateTarget, env []string, w gate
 // commit once it has checked that the commit's parents are HEAD and the tip.
 // When git makes no merge commit (a conflict, a pre-merge-commit hook that
 // fails, a merge past regateGitTimeout or ended by a signal), it undoes a
-// merge left in progress with git merge --abort, checks that HEAD and the
-// tree are as they were, and returns the refusal, which names the
+// merge left in progress and checks that HEAD and the tree are as they were
+// (regateAbortLeftMerge), and returns the refusal, which names the
 // conflicting files for a conflict (AC5). The error is for a git that cannot
-// run, a worktree it could not put back as it was (a merge stopped in a
-// hook leaves its result staged with no merge in progress), and a merge
-// commit with other parents: it says how the worktree is and what restores
-// it (regateMergeNotBack). Nothing is recorded then. stderr gets the line
-// regateUncancelledGit writes.
+// run; for a worktree it could not put back as it was (a merge stopped in a
+// hook leaves its result staged with no merge in progress), which says how
+// the worktree is and what restores it (regateMergeNotBack); and for a merge
+// git says it made whose HEAD or parents cannot be read after it, or whose
+// parents are others, which says that the merge is still there and the git
+// reset --keep that undoes it (regateMergeUnchecked). Nothing is recorded
+// then. stderr gets the line regateUncancelledGit writes.
 func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.Writer, w gateWording) (merge, refused string, err error) {
 	uncancelled := context.WithoutCancel(ctx)
 	msg := fmt.Sprintf("Merge %s %s into %s", strings.TrimPrefix(t.base.ref, "refs/remotes/"), t.base.sha[:12], t.branch)
@@ -249,17 +253,16 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.W
 	if !timedOut && !ended && r.code == 0 {
 		head, err := gateHead(uncancelled, w.prefix, t.root)
 		if err != nil {
-			return "", "", err
+			return "", "", regateMergeUnchecked(t, command, fmt.Sprintf("made a merge commit, but HEAD cannot be read after it (%v)", err))
 		}
 		parents, err := regateParents(uncancelled, t.root, head)
 		if err != nil {
-			return "", "", err
+			return "", "", regateMergeUnchecked(t, command, fmt.Sprintf("made a merge commit, but the parents of HEAD %s cannot be "+
+				"read (%v)", head, err))
 		}
 		if !slices.Equal(parents, []string{t.head, t.base.sha}) {
-			return "", "", fmt.Errorf("org: regate: %s in %s left HEAD at %s, whose parents are %q, not HEAD %s and origin's tip %s "+
-				"of %s (a hook may have made another commit), so regate ran nothing and recorded nothing: check git -C %s log, "+
-				"and to undo the merge run git -C %s reset --keep %s", command, t.root, head, parents, t.head, t.base.sha,
-				t.base.branch, t.root, t.root, t.head)
+			return "", "", regateMergeUnchecked(t, command, fmt.Sprintf("left HEAD at %s, whose parents are %q, not HEAD %s and "+
+				"origin's tip %s of %s (a hook may have made another commit)", head, parents, t.head, t.base.sha, t.base.branch))
 		}
 		return head, "", nil
 	}
@@ -271,18 +274,70 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.W
 	case ended:
 		outcome = signaled.Error()
 	}
+	files, aborted, err := regateAbortLeftMerge(ctx, t, env, stderr, w, command, outcome)
+	if err != nil {
+		return "", "", err
+	}
+
+	said := r.stderr
+	if said == "" {
+		said = r.stdout
+	}
+	switch conflicted := strings.FieldsFunc(files, func(c rune) bool { return c == 0 }); {
+	case timedOut:
+		return "", w.prefix + fmt.Sprintf("%s in %s ran past %s and was stopped%s, so nothing was recorded: check the hooks a "+
+			"merge runs there (pre-merge-commit, prepare-commit-msg, commit-msg) and %s%s", command, t.root, regateGitTimeout,
+			aborted, w.again, regateStderrTail(said)), nil
+	case ended:
+		return "", w.prefix + fmt.Sprintf("%s in %s %s before it made a merge commit%s, so nothing was recorded: %s%s", command,
+			t.root, signaled, aborted, w.again, regateStderrTail(said)), nil
+	case len(conflicted) > 0:
+		return "", w.prefix + fmt.Sprintf("merging origin's tip %s of %s into %s in %s conflicts in %s, and regate does not "+
+			"resolve conflicts%s, so nothing was recorded: merge it yourself (git -C %s merge %s), resolve the conflicts, "+
+			"commit, push, and %s", t.base.sha, t.base.branch, t.branch, t.root, strings.Join(conflicted, ", "), aborted, t.root,
+			t.base.ref, w.again), nil
+	}
+	return "", w.prefix + fmt.Sprintf("%s in %s made no merge commit (exit %d)%s, so nothing was recorded: a hook such as "+
+		"pre-merge-commit may have stopped it; fix what git said and %s%s", command, t.root, r.code, aborted, w.again,
+		regateStderrTail(said)), nil
+}
+
+// regateMergeUnchecked is regateMergeTip's error for a merge, command, that
+// git says it made (exit 0) but whose commit regateMergeTip cannot take as
+// D3's, for why: HEAD or its parents cannot be read after it, or the parents
+// are not HEAD and the tip. Regate then runs no script, records nothing, and
+// leaves the merge as it is: the error says to check git log and names the
+// git reset --keep to t.head, the HEAD before the merge, that undoes it.
+func regateMergeUnchecked(t gateTarget, command, why string) error {
+	return fmt.Errorf("org: regate: %s in %s %s, so regate ran nothing and recorded nothing: check git -C %s log, and to undo "+
+		"the merge run git -C %s reset --keep %s", command, t.root, why, t.root, t.root, t.head)
+}
+
+// regateAbortLeftMerge is what regateMergeTip does after a merge, command,
+// that made no merge commit, as outcome says ("made no merge commit", or how
+// it was stopped): it reads the conflicting files, undoes a merge left in
+// progress with git merge --abort (aborted then says so, for the refusal),
+// and checks that HEAD is t.head and the tree is clean, as they were before
+// the merge. files is `git diff --name-only --diff-filter=U -z`, the
+// conflicting files, each ended by a NUL. Its git commands run on a context
+// ctx's cancellation does not reach, the abort in a process group of its own
+// (regateUncancelledGit, which writes its line to stderr). The error is for a
+// worktree it cannot read or could not put back as it was
+// (regateMergeNotBack).
+func regateAbortLeftMerge(ctx context.Context, t gateTarget, env []string, stderr io.Writer, w gateWording, command,
+	outcome string) (files, aborted string, err error) {
+	uncancelled := context.WithoutCancel(ctx)
 	// The conflicting files are read before the abort clears them, split on
 	// NUL (-z), so a name with a space stays whole and one with non-ASCII
 	// letters is not quoted (core.quotePath); a failure to read them only
 	// leaves them out of the refusal, and the checks after the abort read the
 	// worktree again.
-	files, _ := gateGitOutput(uncancelled, w.prefix, t.root, "diff", "--name-only", "--diff-filter=U", "-z")
+	files, _ = gateGitOutput(uncancelled, w.prefix, t.root, "diff", "--name-only", "--diff-filter=U", "-z")
 	merging, err := gateGitPathExists(uncancelled, w.prefix, t.root, "a merge", "MERGE_HEAD")
 	if err != nil {
 		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("whether a merge is in progress cannot be read (%v)", err),
 			false)
 	}
-	aborted := ""
 	if merging {
 		ar, abortTimedOut, err := regateUncancelledGit(ctx, t.root, env, stderr, "merge", "--abort")
 		var abortSignaled regateGitSignaled
@@ -311,32 +366,11 @@ func regateMergeTip(ctx context.Context, t gateTarget, env []string, stderr io.W
 		return "", "", regateMergeNotBack(t, command, outcome, fmt.Sprintf("HEAD is %s (it was %s), and the worktree has %d "+
 			"uncommitted change(s) or untracked file(s)", head, t.head, len(dirty)), head != t.head)
 	}
-
-	said := r.stderr
-	if said == "" {
-		said = r.stdout
-	}
-	switch conflicted := strings.FieldsFunc(files, func(r rune) bool { return r == 0 }); {
-	case timedOut:
-		return "", w.prefix + fmt.Sprintf("%s in %s ran past %s and was stopped%s, so nothing was recorded: check the hooks a "+
-			"merge runs there (pre-merge-commit, prepare-commit-msg, commit-msg) and %s%s", command, t.root, regateGitTimeout,
-			aborted, w.again, regateStderrTail(said)), nil
-	case ended:
-		return "", w.prefix + fmt.Sprintf("%s in %s %s before it made a merge commit%s, so nothing was recorded: %s%s", command,
-			t.root, signaled, aborted, w.again, regateStderrTail(said)), nil
-	case len(conflicted) > 0:
-		return "", w.prefix + fmt.Sprintf("merging origin's tip %s of %s into %s in %s conflicts in %s, and regate does not "+
-			"resolve conflicts%s, so nothing was recorded: merge it yourself (git -C %s merge %s), resolve the conflicts, "+
-			"commit, push, and %s", t.base.sha, t.base.branch, t.branch, t.root, strings.Join(conflicted, ", "), aborted, t.root,
-			t.base.ref, w.again), nil
-	}
-	return "", w.prefix + fmt.Sprintf("%s in %s made no merge commit (exit %d)%s, so nothing was recorded: a hook such as "+
-		"pre-merge-commit may have stopped it; fix what git said and %s%s", command, t.root, r.code, aborted, w.again,
-		regateStderrTail(said)), nil
+	return files, aborted, nil
 }
 
-// regateMergeNotBack is regateMergeTip's error for a merge that ended with
-// outcome ("made no merge commit", or how it was stopped) and left the
+// regateMergeNotBack is regateAbortLeftMerge's error for a merge that ended
+// with outcome ("made no merge commit", or how it was stopped) and left the
 // worktree in state, not as it was: nothing was recorded, and what puts the
 // worktree back. With HEAD still the HEAD before the merge, t.head (moved
 // false, or HEAD not read), that is git reset --merge to it, whatever the

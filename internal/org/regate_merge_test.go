@@ -3,7 +3,9 @@ package org
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -340,6 +342,85 @@ func TestRegate_AMergeEndedAfterItsCommitNamesResetKeep(t *testing.T) {
 	if head := gitOut(t, fx.worktree, "rev-parse", "HEAD"); head != pre {
 		t.Fatalf("HEAD = %s after the git reset --keep; want %s", head, pre)
 	}
+}
+
+// TestRegate_AMergeCommitItCannotReadNamesResetKeep: when git merge made its
+// merge commit (exit 0) but HEAD or the parents of HEAD cannot be read after
+// it (here a post-merge hook points HEAD at a branch that does not exist, or
+// moves the branch on to a commit whose parent is missing), Regate runs no
+// script, records nothing, pushes nothing, and leaves the merge commit, and
+// its error says that git made a merge commit, what cannot be read and why,
+// and the git reset --keep to the HEAD before the merge that undoes it.
+func TestRegate_AMergeCommitItCannotReadNamesResetKeep(t *testing.T) {
+	cases := []struct {
+		name     string
+		hook     string
+		mergeRef string // where the merge commit is after the hook
+		unread   func(t *testing.T, fx *regateFixture) string
+	}{
+		{name: "HEAD", hook: "git symbolic-ref HEAD refs/heads/missing\n", mergeRef: "refs/heads/feat/auth",
+			unread: func(t *testing.T, fx *regateFixture) string {
+				return "HEAD cannot be read after it (org: regate: git rev-parse --verify HEAD^{commit} in " + fx.worktree + ": " +
+					gitFailure(t, fx.worktree, "rev-parse", "--verify", "HEAD^{commit}") + ")"
+			}},
+		{name: "the parents of HEAD",
+			hook: `c=$(printf 'tree %s\nparent ` + strings.Repeat("0123456789", 4) + `\nauthor t <t@example.com> 0 +0000\n` +
+				`committer t <t@example.com> 0 +0000\n\nno parent\n' "$(git rev-parse 'HEAD^{tree}')" | ` +
+				`git hash-object -t commit -w --stdin) && git update-ref HEAD "$c"` + "\n",
+			mergeRef: "feat/auth@{1}",
+			unread: func(t *testing.T, fx *regateFixture) string {
+				head := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+				return "the parents of HEAD " + head + " cannot be read (org: regate: git rev-list --parents -n 1 " + head + " in " +
+					fx.worktree + ": " + gitFailure(t, fx.worktree, "rev-list", "--parents", "-n", "1", head) + ")"
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			pre, _ := fx.tips(t)
+			fx.commitAndPush(t, fx.main, "README.md", "main's readme\n")
+			tip := gitOut(t, fx.origin, "rev-parse", "refs/heads/main")
+			fx.setHooks(t, "post-merge", tc.hook)
+			manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+			originRefs := regateGitState(fx.origin, "for-each-ref")
+
+			res, err := fx.regate(context.Background())
+			want := "org: regate: git merge --no-ff --no-edit -m 'Merge origin/main " + tip[:12] + " into feat/auth' " + tip + " in " +
+				fx.worktree + " made a merge commit, but " + tc.unread(t, fx) + ", so regate ran nothing and recorded nothing: check " +
+				"git -C " + fx.worktree + " log, and to undo the merge run git -C " + fx.worktree + " reset --keep " + pre
+			if err == nil || err.Error() != want {
+				t.Fatalf("regate = %+v, %v\nwant the error\n%s", res, err, want)
+			}
+			if !reflect.DeepEqual(res, RegateResult{}) {
+				t.Errorf("regate = %+v with the error; want an empty result", res)
+			}
+			fx.assertMergeCommit(t, gitOut(t, fx.worktree, "rev-parse", tc.mergeRef), pre, tip)
+			if got := fileOrAbsent(t, fx.o.Manifest.Path()); got != manifest {
+				t.Errorf("the regate changed the manifest:\n%s", got)
+			}
+			if calls := fx.calls(t); calls != nil {
+				t.Errorf("scripts run = %v; want none", calls)
+			}
+			if got := regateGitState(fx.origin, "for-each-ref"); got != originRefs {
+				t.Errorf("origin's refs after the regate:\n%s\nwant them as before:\n%s", got, originRefs)
+			}
+			fx.assertUnlocked(t)
+		})
+	}
+}
+
+// gitFailure is how gateGitOutput's error ends for git args run in dir as
+// gateGit runs them, which fail: "exit <code>: <git's stderr>".
+func gitFailure(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	var stderr bytes.Buffer
+	cmd := exec.Command("git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	cmd.Stderr = &stderr
+	var exitErr *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &exitErr) {
+		t.Fatalf("git -C %s %v: %v; want it to fail", dir, args, err)
+	}
+	return "exit " + strconv.Itoa(exitErr.ExitCode()) + ": " + strings.TrimSpace(stderr.String())
 }
 
 // TestRegate_AScriptFailureAfterTheMergeUndoesIt covers AC6's static_failed
