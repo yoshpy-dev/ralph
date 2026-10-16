@@ -56,7 +56,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` / `stop` /
   `disband` / `watch` / `gate` / `escalate` / `approve` / `inbox ack` /
   `inbox resolve` / `inbox notify` / `director attach` / `director detach` /
-  `director start` / `director stop`)は
+  `director start` / `director stop` / `director launched`(launch_cmd の
+  起動スクリプトだけが打つ隠れた動詞))は
   終了コード 1 で止まり、古い台帳と共通の台帳のパスを示す。動いている座席が
   ないときと、読むだけの動詞
   (`ralph status`、`ralph org status` / `read` / `wait`(`--inbox` を含む)/

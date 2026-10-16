@@ -236,10 +236,10 @@ server's).
 - The director's first command, `ralph org director status`, fails (for
   example, an older ralph has no `ralph org director`): the director's own
   `ralph org` and `ralph status` commands use the `ralph` first on the
-  `PATH` of the agent's command shell (claude's Bash tool runs your login
-  shell), which can be another version than the one that ran start. Make
-  sure the `ralph` on your login shell's `PATH` is the one you run start
-  with. The check-in is not affected: the script runs it with the absolute
+  `PATH` of the agent's command shell (the agent runs its commands through
+  your shell, whose startup files can set `PATH` again), which can be another
+  version than the one that ran start. Make sure the `ralph` your shell's
+  startup files put first on `PATH` is the one you run start with. The check-in is not affected: the script runs it with the absolute
   path of the ralph that ran start.
 
 ## Security

@@ -66,7 +66,7 @@ func newStatusCmd() *cobra.Command {
 			"once); or unreadable, when director.jsonl cannot be read. A headless\n" +
 			"director that is still open but no longer the current registration\n" +
 			"(detached, or replaced by attach --replace) is named at the end of the\n" +
-			"line, with `ralph org director stop --id`, which closes it; the JSON lists\n" +
+			"line, with `ralph org director stop --id`, which stops it; the JSON lists\n" +
 			"it under director.open_headless.\n" +
 			"A registration does not tell whether its session is still\n" +
 			"running: an item the director does not ack reaches the human at the ack\n" +
