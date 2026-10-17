@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-18 sha256:18836a561f59
+- Approved: 2026-10-18 sha256:d4a2434b1e15
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -129,6 +129,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 9. S8: cross-review の 3 件の直し(3 つのコミットに分ける)。S8a: classic の保護で admin によらず `enforce_admins` を求める(D11、`mergeenforce.go`、AC5)。S8b: 読み直しで `headRefOid` を読み、gate の head のときだけ記録する(D6、`merge_run.go`、AC7・AC8)。S8c: 結びつきの org が同じ機能で走っている断りを `--wait-checks` で待つ(D5・D13、`merge.go`・`merge_wait.go`・`merge_run.go`、CLI の help、`/director` と `/org` の skill の 4 面ずつ、README、仕様の注、AC11・AC13)
 10. S9: cycle 2 の self-review の LOW 6 件(C2-1〜C2-6)の直し。動きは変えない。S9a: regate.lock を外す待ちの注 3 か所、`wait` の組み立てを kind ごとに 1 か所にする、`mergeReady` と `mergeWaitFor.r` の注、`permissions.admin` を渡す古い fixture、注と名前の小さな直し。結びつきのない gate だけのブランチでは「ほかの機能で走っている」を見分けられず予算まで待つことを、`orgWaitEnd` と `runningRefusal` の注と tech-debt に書く。S9b: merge のテストの偽の gh と git、fixture、JSON の組み立てを `internal/org/merge_fake_test.go` に移し(tech-debt 292 行の返済)、待つ間に disband して同じ org_id が同じブランチで起き直しても待ちが続くことを確かめるテストを足す
 11. S10: cross-review cycle 2 の 1 件の直し。読み直しで `baseRefName` も読み、MERGED で head が gate の head でも base が既定のブランチでない(空を含む)なら、記録せず `MERGED:` も出さずに終了コード 1(D6、`merge_run.go`、AC7・AC8)。確かめるコマンドとして示す `--json` の field にも `baseRefName` を足す
+12. S11: cycle 3 の self-review の LOW 7 件(C3-1〜C3-7)の直しと、merge-order の注。動きは変えない。`/org` skill の 4 面・仕様の注・`EventPRMerged` の注に base の条件を足す(C3-1)。`otherHeadMerged` と `otherBaseMerged` の末尾と、確かめる `--json` の field 列を 1 か所に寄せる(C3-2)。テストの重複を寄せる(C3-3)。kind の注 4 か所(C3-4)。`wait` の待つ kind を名指しの case にし、`default:` は届かない誤りにする(C3-5)。注と help の整形(C3-6)。tech-debt の行数(C3-7)。merge-order は MERGED の PR を base を見ずに `merged` と分類するので、`otherBaseMerged` の文にそのことを一言足し、tech-debt に 1 行書く(merge-order の分類は変えない)
 
 ## Verify plan
 
@@ -205,6 +206,8 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S9a e5831d14(C2-1 の注 3 か所は「merge_wait.go のすべての待ちの間は外す」と書き、merge_wait.go の先頭がそれを受ける。C2-2 は `orgWaitEnd`・`runningRefusal` の注と tech-debt の行。C2-3 は `wait` を `switch f.kind` に。C2-4 は `meClassicExec` の引数と `meBool` を消し、`permissions.admin` の値を渡すのは読まれないことを pin するテストだけにした。C2-6 はテスト名を `TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits` に)。S9b 7d0d08dd(偽の gh と git と fixture を `merge_fake_test.go` 662 行に移した。中身は `cmp` で一致。merge_test 626、merge_run_test 795、merge_wait_test 712 行で、どれも 800 行未満。新しいテスト `TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain` は、起き直したら待ちを終える mutant で落ちる。tech-debt 292 行は mergeguarantee と mergeorder の部分だけにした)。run-verify rc=0。動きを変えない直しなので reviewer の再レビューは打たず、cycle 2 の verify から続ける。implementer の範囲外の気づき(help、README、`/org` skill が gate だけのブランチの例外を書いていない)は sync-docs に回す
   - 2026-10-18(cycle 2 の verify から sync-docs まで): verify PASS(56003422、LOW の V3・V4 は sync-docs で直した)。test PASS(c7dfe662、LOW の T1 は 425a8543 で直した: 検査の待ちのあとに org の待ちが来る順のテスト。tester の mutant n1 で落ちることを確かめた)。sync-docs 56efae4a(gate だけのブランチの例外を help・README・`/org` と `/director` の skill の 8 面・仕様の 8 か所に書き、tech-debt 243 行の classic の条件を S8a に合わせた)。help の文と TestOrgMerge_Help の断片が変わったが、動きは変わらず、OrgMerge のテストは通った
   - 2026-10-18(cross-review cycle 2 のあと): Codex の 1 件(triage 305738fe、ACTION_REQUIRED): 9 段の確かめのあとに PR の base が付け替えられると、gate の head のまま別のブランチへ merge されても記録してしまう。S8b と同じ形で直す(S10: 読み直しに `baseRefName`)。Scope、D6、AC7、AC8、Implementation outline の S10、Test plan を直し、詳しい図 2 の 12 と 13 を直して撮り直し(lint rc=0)、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。上限は 2 なので、cycle-count.json は 2 のまま、`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げて /self-review から回し直す(回し直しを cycle 3 と呼ぶ。org-regate と同じ扱い)
+  - S10 590214fb(読み直しに `baseRefName`、`otherBaseMerged`。head が違えば head の文が先。新しいテストは `merge_readback_test.go`、mutant 7 個はどれも落ちる。run-verify rc=0)。consult は「進めてよい」で、merge-order が MERGED の PR を base を見ずに `merged` と分類する点を挙げた(`classifyMergeTarget`、確かめた)
+  - 2026-10-18(self-review cycle 3 のあと): report 99f47e05(LOW 7 件、Merge: yes)。LOW は cycle を上げずにこの cycle の中で直す。Implementation outline に S11(C3-1〜C3-7 と merge-order の注)を足した。動きは変えないので図は直さない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
