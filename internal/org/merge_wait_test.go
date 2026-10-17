@@ -14,43 +14,9 @@ import (
 
 // The wait of `ralph org merge --wait-checks` at the org layer (plan
 // docs/plans/active/2026-10-17-org-auto-merge.md, S7: D13 and AC13): Merge on
-// the fixtures of merge_run_test.go, with a fake clock (mwClock) in
-// MergeParams.waitTest, so that no test sleeps for the 30 s interval, and
+// the fixtures of merge_fake_test.go (mwFixture), with a fake clock (mwClock)
+// in MergeParams.waitTest, so that no test sleeps for the 30 s interval, and
 // the fake gh's answers changed while Merge sleeps.
-
-// mwMaxSleeps is how many sleeps mwClock allows before it ends the wait.
-const mwMaxSleeps = 50
-
-// mwClock is a fake clock for a wait: now moves only when sleep sleeps. Each
-// sleep is recorded; onSleep, when set, runs after it with the sleep's
-// number (from 1), as what happens while Merge sleeps. A sleep returns ctx's
-// error. After mwMaxSleeps sleeps it fails the test and stops ctx, so a wait
-// that does not end ends.
-type mwClock struct {
-	t       *testing.T
-	now     time.Time
-	sleeps  []time.Duration
-	onSleep func(n int)
-	stop    context.CancelCauseFunc
-}
-
-func (c *mwClock) Now() time.Time { return c.now }
-
-func (c *mwClock) sleep(ctx context.Context, d time.Duration) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	c.now = c.now.Add(d)
-	c.sleeps = append(c.sleeps, d)
-	if len(c.sleeps) > mwMaxSleeps {
-		c.t.Errorf("more than %d sleeps: the wait does not end", mwMaxSleeps)
-		c.stop(errors.New("too many sleeps"))
-	}
-	if c.onSleep != nil {
-		c.onSleep(len(c.sleeps))
-	}
-	return ctx.Err()
-}
 
 // The answers of gh pr checks in these tests.
 var (
@@ -86,97 +52,6 @@ func mwStart(why, left, budget string) string {
 // mwEnd is the line a wait that did not end in ctx done writes when it ends.
 func mwEnd(after, why string) string {
 	return "org: merge: stopped waiting for the checks of PR #7 after " + after + ": " + why + "; running every check again"
-}
-
-// mwFixture is mrFixture with gh pr checks answering checks, Merge's
-// params with WaitChecks and Progress, a ctx the test stops, and mwClock,
-// whose every sleep takes regate.lock and releases it (lockTaken counts
-// them) before onSleep.
-type mwFixture struct {
-	*mrFixture
-	clock     *mwClock
-	progress  *strings.Builder
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
-	p         MergeParams
-	onSleep   func(n int)
-	lockTaken int
-}
-
-func newMWFixture(t *testing.T, checks mgReply, wait time.Duration) *mwFixture {
-	t.Helper()
-	return newMWFixtureOn(t, nil, checks, wait)
-}
-
-// newMWFixtureOn is newMWFixture on the ledger lines (mxReadyLedger when
-// nil).
-func newMWFixtureOn(t *testing.T, lines []any, checks mgReply, wait time.Duration) *mwFixture {
-	t.Helper()
-	fx := &mwFixture{mrFixture: newMRFixture(t, lines), progress: &strings.Builder{}}
-	fx.ctx, fx.cancel = context.WithCancelCause(context.Background())
-	t.Cleanup(func() { fx.cancel(nil) })
-	fx.clock = &mwClock{t: t, now: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), stop: fx.cancel, onSleep: func(n int) {
-		lock, err := acquireHeldFileLock(fx.mo.stateDir, regateLockFile, "test", 0)
-		if err != nil {
-			t.Errorf("regate.lock while Merge waits: %v; want it free", err)
-		} else {
-			fx.lockTaken++
-			_ = lock.release()
-		}
-		if fx.onSleep != nil {
-			fx.onSleep(n)
-		}
-	}}
-	fx.exec.replies[mxPRChecks] = checks
-	fx.p = fx.params()
-	fx.p.WaitChecks, fx.p.Progress = wait, fx.progress
-	fx.p.waitTest = mergeWaitTest{now: fx.clock.Now, sleep: fx.clock.sleep}
-	return fx
-}
-
-// setChecks makes gh pr checks answer r from now on.
-func (fx *mwFixture) setChecks(r mgReply) {
-	fx.exec.mu.Lock()
-	defer fx.exec.mu.Unlock()
-	fx.exec.replies[mxPRChecks] = r
-}
-
-// afterCall runs f once the call with index n (from 0) has its answer.
-func (fx *mwFixture) afterCall(n int, f func()) {
-	fx.exec.after = func(i int) {
-		if i == n {
-			f()
-		}
-	}
-}
-
-// lines are the lines Merge wrote to Progress.
-func (fx *mwFixture) lines() []string {
-	var out []string
-	for line := range strings.Lines(fx.progress.String()) {
-		out = append(out, strings.TrimSuffix(line, "\n"))
-	}
-	return out
-}
-
-// check fails the test unless the commands, the sleeps, and the lines are
-// keys, sleeps, and lines, and regate.lock was free in every sleep and is
-// free now.
-func (fx *mwFixture) check(t *testing.T, keys []string, sleeps []time.Duration, lines []string) {
-	t.Helper()
-	if got := fx.exec.keys(); !slices.Equal(got, keys) {
-		t.Errorf("commands = %q\nwant %q", got, keys)
-	}
-	if !slices.Equal(fx.clock.sleeps, sleeps) {
-		t.Errorf("sleeps = %v, want %v", fx.clock.sleeps, sleeps)
-	}
-	if fx.lockTaken != len(fx.clock.sleeps) {
-		t.Errorf("regate.lock was taken in %d of the %d sleeps; want every one", fx.lockTaken, len(fx.clock.sleeps))
-	}
-	if got := fx.lines(); !slices.Equal(got, lines) {
-		t.Errorf("Progress =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(lines, "\n"))
-	}
-	mrAssertLockFree(t, fx.mo.stateDir)
 }
 
 // mwRounds are the commands of rounds of checkMerge that refused at gh pr
@@ -234,12 +109,6 @@ func TestMerge_WaitChecksWaitsOutPendingOrNoChecks(t *testing.T) {
 			}
 		})
 	}
-}
-
-// fx.run runs Merge with fx.p and fx.ctx.
-func (fx *mwFixture) run(t *testing.T) (MergeResult, error) {
-	t.Helper()
-	return fx.merge(fx.ctx, t, fx.p)
 }
 
 // TestMerge_WaitChecksEndsAndChecksAgain covers the other ends of a wait in
@@ -486,20 +355,6 @@ func mwOrgEnd(after, why string) string {
 	return `org: merge: stopped waiting for org_id "org-a" to be disbanded after ` + after + ": " + why + "; running every check again"
 }
 
-// addDuring appends lines to the ledger in the sleep numbered n (from 1)
-// and returns a pointer to what that appended, as the manifest holds it.
-func (fx *mwFixture) addDuring(t *testing.T, n int, lines ...any) *string {
-	var added string
-	fx.onSleep = func(i int) {
-		if i == n {
-			before := mrRead(t, fx.mo.path)
-			fx.mo.add(t, lines...)
-			added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
-		}
-	}
-	return &added
-}
-
 // TestMerge_WaitChecksWaitsForTheOrgToBeDisbanded covers the wait for the
 // org (D5, D13, AC11, AC13): with --wait-checks 1h, step 8's refusal for an
 // org that still runs the branch's feature is waited out with regate.lock
@@ -615,6 +470,63 @@ func TestMerge_WaitChecksForTheOrgEnds(t *testing.T) {
 			`org: merge: stopped waiting for org_id "org-a" to be disbanded after 30s: interrupted (test stopped); nothing was merged`})
 		if got := fx.appended(t); got != "" {
 			t.Errorf("appended %q", got)
+		}
+	})
+}
+
+// TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain: the branch's org
+// disbanded and started again, under the same org_id for the same feature on
+// the same branch, between two reads of the ledger runs at the next read, so
+// the wait for it goes on. It ends once the org is disbanded again, and then
+// every check runs again and the PR is merged and recorded once; with the org
+// never disbanded again, it ends once --wait-checks is used up, and the
+// checks refuse the org that still runs.
+func TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain(t *testing.T) {
+	restart := []any{moDisbanded("org-a"), moBind("org-a", "a")}
+	t.Run("disbanded again", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, time.Hour)
+		var added string
+		fx.onSleep = func(n int) {
+			var lines []any
+			switch n {
+			case 1:
+				lines = restart
+			case 3:
+				lines = []any{moDisbanded("org-a")}
+			default:
+				return
+			}
+			before := mrRead(t, fx.mo.path)
+			fx.mo.add(t, lines...)
+			added += strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+		}
+		res, err := fx.run(t)
+		want := mrResult("merge")
+		want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
+		if err != nil || res != want {
+			t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+		}
+		fx.check(t, slices.Concat(mxAll[:3], mxAll, []string{mrMerge, mrReread}),
+			slices.Repeat([]time.Duration{30 * time.Second}, 3),
+			[]string{mwOrgStart("1h0m0s", "1h0m0s"), mwOrgEnd("1m30s", "the org was disbanded")})
+		if got := fx.appended(t); got != added+mwMerged(t) {
+			t.Errorf("appended %q\nwant     %q", got, added+mwMerged(t))
+		}
+	})
+	t.Run("the time is up", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, 70*time.Second)
+		added := fx.addDuring(t, 1, restart...)
+		res, err := fx.run(t)
+		want := MergeResult{Refused: mwOrgRefusal + `; ralph org merge waited 1m10s for org_id "org-a" to be disbanded ` +
+			"(--wait-checks 1m10s); the org still runs: see what it does with ralph org status --org-id org-a, and a human " +
+			"decides whether to disband it (ralph org disband --org-id org-a)"}
+		if err != nil || res != want {
+			t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+		}
+		fx.check(t, slices.Concat(mxAll[:3], mxAll[:3]), []time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second},
+			[]string{mwOrgStart("1m10s", "1m10s"), mwOrgEnd("1m10s", "--wait-checks 1m10s is used up")})
+		if got := fx.appended(t); got != *added {
+			t.Errorf("appended %q\nwant     %q", got, *added)
 		}
 	})
 }
