@@ -112,15 +112,18 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"checks reports no checks yet. It releases regate.lock, so a ralph org\n" +
 			"regate or another merge can run meanwhile. For the org, it reads only\n" +
 			"the ledger every 30 s, with no git and no gh, until the org is\n" +
-			"disbanded, runs another feature, or the ledger cannot be read; for the\n" +
-			"checks, it reads only gh pr checks <n> -R <repo> every 30 s, until no\n" +
-			"check is pending any more or gh pr checks fails. Either wait also ends\n" +
-			"when the time is up. Then merge takes regate.lock again and runs every\n" +
-			"check above from the start, so a branch that moved meanwhile is refused,\n" +
-			"and an org still running or checks pending again are waited for again,\n" +
-			"all within the one duration. An org that runs another feature now, a\n" +
-			"check that failed or was cancelled, checks that are all skipping, and\n" +
-			"every other refusal are not waited for. When the time is up and the org\n" +
+			"disbanded, runs another feature (told apart only on a branch with a\n" +
+			"feature binding; on a branch with only a gate record, the wait goes on\n" +
+			"until the org is disbanded or the time is up), or the ledger cannot be\n" +
+			"read; for the checks, it reads only gh pr checks <n> -R <repo> every\n" +
+			"30 s, until no check is pending any more or gh pr checks fails. Either\n" +
+			"wait also ends when the time is up. Then merge takes regate.lock again\n" +
+			"and runs every check above from the start, so a branch that moved\n" +
+			"meanwhile is refused, and an org still running or checks pending again\n" +
+			"are waited for again, all within the one duration. An org that runs\n" +
+			"another feature now (on a branch with a feature binding), a check that\n" +
+			"failed or was cancelled, checks that are all skipping, and every other\n" +
+			"refusal are not waited for. When the time is up and the org\n" +
 			"still runs or the checks are still pending or none, merge refuses as\n" +
 			"without the flag and adds how long it waited; for the org, it also names\n" +
 			"ralph org status --org-id <org>, since whether to disband the org is a\n" +

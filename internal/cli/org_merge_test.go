@@ -750,10 +750,13 @@ func TestOrgMerge_Help(t *testing.T) {
 				"gh pr checks reports no checks yet.",
 			"It releases regate.lock, so a ralph org regate or another merge can run meanwhile.",
 			"For the org, it reads only the ledger every 30 s, with no git and no gh, until the org is disbanded, runs another " +
-				"feature, or the ledger cannot be read; for the checks, it reads only gh pr checks <n> -R <repo> every 30 s, until no " +
+				"feature (told apart only on a branch with a feature binding; on a branch with only a gate record, the wait goes " +
+				"on until the org is disbanded or the time is up), or the ledger cannot be read; for the checks, it reads only " +
+				"gh pr checks <n> -R <repo> every 30 s, until no " +
 				"check is pending any more or gh pr checks fails. Either wait also ends when the time is up. Then merge takes " +
 				"regate.lock again and runs every check above from the start",
-			"An org that runs another feature now, a check that failed or was cancelled, checks that are all skipping, and every " +
+			"An org that runs another feature now (on a branch with a feature binding), a check that failed or was cancelled, " +
+				"checks that are all skipping, and every " +
 				"other refusal are not waited for.",
 			"When the time is up and the org still runs or the checks are still pending or none, merge refuses as without the flag " +
 				"and adds how long it waited; for the org, it also names ralph org status --org-id <org>, since whether to disband " +
