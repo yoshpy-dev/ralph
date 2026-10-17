@@ -63,7 +63,12 @@ func newStatusCmd() *cobra.Command {
 			"director_<token>, and the pid its launch script checked in with, in place\n" +
 			"of the pane and workspace; the JSON adds terminal_name); not attached;\n" +
 			"disabled (enabled = false: escalate sends every item to the human at\n" +
-			"once); or unreadable, when director.jsonl cannot be read. A headless\n" +
+			"once); or unreadable, when director.jsonl cannot be read. Attached and\n" +
+			"not attached end with [org.director].auto_merge, read by the same rule\n" +
+			"as enabled: merges are left to the human (false), or a director merges\n" +
+			"the PRs `ralph org merge-order` lists as ready with `ralph org merge`,\n" +
+			"without asking (true); disabled says that auto_merge = true has no\n" +
+			"effect. The JSON has director.auto_merge, false included. A headless\n" +
 			"director that is still open but no longer the current registration\n" +
 			"(detached, or replaced by attach --replace) is named at the end of the\n" +
 			"line, with `ralph org director stop --id`, which stops it; the JSON lists\n" +
@@ -180,10 +185,11 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 
 	// The director registration belongs to the state dir too, so it is
 	// read once here (no lock) and shown on both paths, with the switch
-	// read as `ralph org escalate` reads it. Reading the switch runs the
-	// local git rev-parse calls of withMainWorktreeDirectorEnabled when
-	// --state-dir or RALPH_ORG_STATE_DIR names the ledger.
-	director := readOrgDirectorReport(stateDir, statusDirectorEnabled(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
+	// read as `ralph org escalate` reads it and auto_merge from the same
+	// file. Reading them runs the local git rev-parse calls of
+	// withMainWorktreeDirectorEnabled when --state-dir or
+	// RALPH_ORG_STATE_DIR names the ledger.
+	director := readOrgDirectorReport(stateDir, statusDirectorConfig(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
 	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
 	// The merge guarantee is likewise read once, from the cache `ralph
@@ -219,7 +225,7 @@ func mergeGuaranteeLine(g org.MergeGuarantee) string {
 // without --config (resolveOrgConfig), else the built-in defaults. Its
 // DeadmanMinutes is what the watch's liveness mark is judged by
 // (org.ProbeWatch) when the mark does not carry the watch's own
-// deadman_minutes (a mark of an older version), and statusDirectorEnabled
+// deadman_minutes (a mark of an older version), and statusDirectorConfig
 // starts from it. status only reads, so a ralph.toml that does not load
 // falls back to the built-in defaults with one warning on stderr instead of
 // failing the command; loaded is false then.
@@ -228,33 +234,37 @@ func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 	if err != nil {
 		fallback := config.Default().Org
 		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d) "+
-			"and showing the director by the default [org.director].enabled (%t)\n", err, fallback.DeadmanMinutes, fallback.Director.Enabled)
+			"and showing the director by the default [org.director].enabled (%t) and auto_merge (%t)\n",
+			err, fallback.DeadmanMinutes, fallback.Director.Enabled, fallback.Director.AutoMerge)
 		return fallback, false
 	}
 	return cfg, true
 }
 
-// statusDirectorEnabled returns the [org.director].enabled that the
-// director: line of `ralph status` shows, read as `ralph org escalate` reads
-// it without --config: cfg, the config statusOrgConfig loaded from
-// ./ralph.toml, with withMainWorktreeDirectorEnabled's main worktree rule for
-// the ledger at stateDir. When ./ralph.toml did not load (loaded false, and
-// statusOrgConfig has warned), it is the built-in default and the main
+// statusDirectorConfig returns the [org.director] settings that the
+// director: line of `ralph status` shows, Enabled and AutoMerge, read as
+// `ralph org escalate` reads the switch without --config: cfg, the config
+// statusOrgConfig loaded from ./ralph.toml, with
+// withMainWorktreeDirectorEnabled's main worktree rule for the ledger at
+// stateDir. When ./ralph.toml did not load (loaded false, and
+// statusOrgConfig has warned), they are the built-in defaults and the main
 // worktree's ralph.toml is not read, so the same broken file is not reported
 // twice. status only reads, so a main worktree ralph.toml that does not load
-// falls back to the built-in default too, with its own warning on stderr,
-// instead of failing the command.
-func statusDirectorEnabled(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) bool {
+// falls back to the built-in defaults too, with its own warning on stderr,
+// instead of failing the command. Only Enabled and AutoMerge are meant to be
+// read from the result.
+func statusDirectorConfig(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) config.OrgDirectorConfig {
 	if !loaded {
-		return cfg.Director.Enabled
+		return cfg.Director
 	}
-	fallback := config.Default().Org.Director.Enabled
+	fallback := config.Default().Org.Director
 	cfg, err := withMainWorktreeDirectorEnabled(cfg, "", stateDir, stateDirSource)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t)\n", err, fallback)
+		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t) and auto_merge (%t)\n",
+			err, fallback.Enabled, fallback.AutoMerge)
 		return fallback
 	}
-	return cfg.Director.Enabled
+	return cfg.Director
 }
 
 // orgWatchLine renders what org.ProbeWatch found about the cross-org watch

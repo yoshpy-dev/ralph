@@ -722,7 +722,8 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 			},
 			check: func(t *testing.T, _ string, line string) {
 				want := "director: attached d4 (driver=codex, attached at " + ts + ", pane %7) -- " +
-					"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+					"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
+					directorAutoMergeOff
 				if line != want {
 					t.Errorf("director line:\n got %q\nwant %q", line, want)
 				}
@@ -812,6 +813,115 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 	}
 }
 
+// AC2 of plan 2026-10-17-org-auto-merge for `ralph status`, with no orgs and
+// with two: the director: line of attached and not attached ends with what
+// [org.director].auto_merge means, before the note on open headless
+// directors; disabled says that auto_merge = true has no effect, and
+// unreadable says nothing of it. --json carries director.auto_merge, false
+// included. The settings come from ./ralph.toml: the state dirs are not a
+// main worktree's ledger.
+func TestStatusCmd_DirectorLineShowsAutoMerge(t *testing.T) {
+	const (
+		ts           = "2026-10-15T09:00:00Z"
+		on           = "[org.director]\nauto_merge = true\n"
+		attachedTail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+		disabledEnd  = ") -- ralph org escalate sends every item to the human at once"
+		noEffect     = "[org.director].enabled = false, so [org.director].auto_merge = true has no effect"
+	)
+	none := func(*testing.T, string) {}
+	attach := func(t *testing.T, stateDir string) {
+		t.Helper()
+		store := org.NewDirectorStore(stateDir)
+		store.Now = func() time.Time { return time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC) }
+		if _, _, err := store.Attach(org.DirectorAttach{Driver: org.DirectorDriverClaude, User: "alice", Cwd: "/work"}); err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+	}
+	openHeadless := func(t *testing.T, stateDir string) {
+		t.Helper()
+		seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
+		if _, err := org.NewDirectorStore(stateDir).Detach(org.DirectorDetach{ID: "d1", User: "alice"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openNote := func(stateDir string) string {
+		return "; the headless director d1 (running, pane p-1, workspace w-1) is still open but not attached: stop it with ralph org director stop --id d1" +
+			" --state-dir '" + stateDir + "'"
+	}
+	cases := []struct {
+		name          string
+		toml          string // ./ralph.toml ("" for none)
+		setup         func(t *testing.T, stateDir string)
+		wantLine      func(stateDir string) string // "" checks only that the line is unreadable
+		wantAutoMerge bool
+	}{
+		{"not attached, no ralph.toml", "", none, func(string) string { return directorNotAttachedLine }, false},
+		{"not attached, auto_merge = false", "[org.director]\nauto_merge = false\n", none, func(string) string { return directorNotAttachedLine }, false},
+		{"not attached, auto_merge = true", on, none, func(string) string { return directorNotAttachedBase + directorAutoMergeOnNotAttached }, true},
+		{"not attached with an open headless director, auto_merge = true", on, openHeadless, func(stateDir string) string {
+			return directorNotAttachedBase + directorAutoMergeOnNotAttached + openNote(stateDir)
+		}, true},
+		{"attached, auto_merge = false", "", attach, func(string) string { return directorAttachedLine("d1", "claude", ts, "alice") }, false},
+		{"attached, auto_merge = true", on, attach, func(string) string {
+			return "director: attached d1 (driver=claude, attached at " + ts + ", by alice)" + attachedTail + directorAutoMergeOnAttached
+		}, true},
+		{"disabled, auto_merge = false", "[org.director]\nenabled = false\n", none, func(string) string { return directorDisabledLine }, false},
+		{"disabled, auto_merge = true", "[org.director]\nenabled = false\nauto_merge = true\n", none, func(string) string {
+			return "director: disabled (" + noEffect + disabledEnd
+		}, true},
+		{"disabled with a registration left, auto_merge = true", "[org.director]\nenabled = false\nauto_merge = true\n", attach, func(string) string {
+			return "director: disabled (" + noEffect + "; registration d1 is still recorded" + disabledEnd
+		}, true},
+		{"unreadable, auto_merge = true", on, func(t *testing.T, stateDir string) {
+			t.Helper()
+			if err := os.Mkdir(org.DirectorPathIn(stateDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, func(string) string { return "" }, true},
+	}
+	for _, tc := range cases {
+		for _, seed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s, orgs %v", tc.name, seed), func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				if tc.toml != "" {
+					writeTestFile(t, "ralph.toml", tc.toml)
+				}
+				stateDir := t.TempDir()
+				tc.setup(t, stateDir)
+				if seed {
+					seedTwoOrgManifest(t, stateDir)
+				}
+
+				out, err := runStatusCmd(t, "--state-dir", stateDir)
+				if err != nil {
+					t.Fatalf("status: %v (output: %s)", err, out)
+				}
+				line := statusDirectorLine(t, out)
+				if want := tc.wantLine(stateDir); want != "" && line != want {
+					t.Errorf("director line:\n got %q\nwant %q", line, want)
+				} else if want == "" && (!strings.HasPrefix(line, "director: unreadable (") || strings.Contains(line, "[org.director].auto_merge") ||
+					strings.Contains(line, "merges")) {
+					// The read error holds the TempDir path, which holds this
+					// subtest's name, auto_merge included, so only the clause's
+					// own words are looked for.
+					t.Errorf("director line = %q; want unreadable, saying nothing of auto_merge", line)
+				}
+
+				jsonOut, err := runStatusCmd(t, "--state-dir", stateDir, "--json")
+				if err != nil {
+					t.Fatalf("status --json: %v (output: %s)", err, jsonOut)
+				}
+				if got := statusDirectorJSONOf(t, jsonOut); got.AutoMerge != tc.wantAutoMerge {
+					t.Errorf("director.auto_merge = %v; want %v", got.AutoMerge, tc.wantAutoMerge)
+				}
+				if key := fmt.Sprintf(`"auto_merge": %t,`, tc.wantAutoMerge); !strings.Contains(jsonOut, key) {
+					t.Errorf("status --json does not carry %s:\n%s", key, jsonOut)
+				}
+			})
+		}
+	}
+}
+
 // AC10 of plan 2026-10-15-org-director-start for `ralph status`, with no
 // orgs and with two: a current headless registration shows headless, its
 // state, model, and the herdr ids recorded on the director: line, and an
@@ -819,7 +929,8 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 // with the stop command, attached, disabled, and not attached; --json carries
 // the headless fields and director.open_headless.
 func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
+		directorAutoMergeOff
 	for _, seed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("orgs %v", seed), func(t *testing.T) {
 			t.Chdir(t.TempDir())
@@ -894,7 +1005,8 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 // start_time, and model. The pids are made up: status reads or signals no
 // process.
 func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
+		directorAutoMergeOff
 	t.Chdir(t.TempDir())
 	stateDir := t.TempDir()
 	store := org.NewDirectorStore(stateDir)
@@ -1040,8 +1152,8 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("status %v with a broken main ralph.toml: %v (stderr %s)", extra, err, stderr)
 		}
-		for _, want := range []string{"warning: status: org: load [org.director].enabled from the main worktree's " + mainToml,
-			"showing the director by the default [org.director].enabled (true)"} {
+		for _, want := range []string{"warning: status: org: load [org.director].enabled and auto_merge from the main worktree's " + mainToml,
+			"showing the director by the default [org.director].enabled (true) and auto_merge (false)\n"} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("status %v stderr does not contain %q:\n%s", extra, want, stderr)
 			}
@@ -1063,7 +1175,7 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 // org-director-attach), also in a main checkout, where ./ralph.toml is the
 // main worktree's file the switch would be read from, and with --json.
 func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *testing.T) {
-	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true)\n"
+	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true) and auto_merge (false)\n"
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) []string // chdirs and returns status's extra args
@@ -1141,6 +1253,10 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		// Plan 2026-10-16-org-director-launch-cmd, AC8.
 		"(for one launched with [org.director].launch_cmd, `launch cmd`, the name of its terminal, director_<token>, and the pid its launch script checked in with, " +
 			"in place of the pane and workspace; the JSON adds terminal_name)",
+		// Plan 2026-10-17-org-auto-merge, AC2.
+		"Attached and not attached end with [org.director].auto_merge, read by the same rule as enabled: merges are left to the human (false), " +
+			"or a director merges the PRs `ralph org merge-order` lists as ready with `ralph org merge`, without asking (true); " +
+			"disabled says that auto_merge = true has no effect. The JSON has director.auto_merge, false included.",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("status --help does not say %q:\n%s", want, out)

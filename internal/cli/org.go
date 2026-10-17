@@ -172,10 +172,11 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
 // another directory, or any other source, cfg is returned unchanged. No
 // other setting is taken from the main worktree here; escalate, director
-// attach and status, and `ralph status` take Director.Enabled by the same
-// rule (withMainWorktreeDirectorEnabled), and director start the settings
-// of the headless director (withMainWorktreeDirectorStartConfig). A main
-// worktree ralph.toml that fails to load is an error, not a fallback.
+// attach and status, and `ralph status` take Director.Enabled and
+// Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
+// and director start the settings of the headless director
+// (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
+// fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -190,30 +191,34 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 }
 
 // withMainWorktreeDirectorEnabled returns cfg with Director.Enabled (the
-// director switch, [org.director].enabled) taken from <main worktree
-// root>/ralph.toml, by the rule withMainWorktreeOrgLimits follows: only when
-// configPath is empty and the ledger is the main worktree's
-// (org.LedgerMainWorktreeRoot), with the built-in default (true) when that
-// file does not exist. A feature org's leader escalates from its feature
-// worktree, whose ralph.toml it can change, so that copy does not choose
-// whether its items are left to the director (plan
-// 2026-10-14-org-director-attach, D6). With --config, or a ledger that is
-// not the main worktree's, cfg is returned unchanged. No other setting is
-// taken. A main worktree ralph.toml that fails to load is an error, which
+// director switch, [org.director].enabled) and Director.AutoMerge
+// ([org.director].auto_merge, the mark the /director skill reads for merging
+// without asking) taken from <main worktree root>/ralph.toml, by the rule
+// withMainWorktreeOrgLimits follows: only when configPath is empty and the
+// ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
+// built-in defaults (true and false) when that file does not exist. A
+// feature org's leader escalates from its feature worktree, whose ralph.toml
+// it can change, so that copy does not choose whether its items are left to
+// the director (plan 2026-10-14-org-director-attach, D6), nor whether the
+// director merges its PR without asking (plan 2026-10-17-org-auto-merge,
+// AC2). With --config, or a ledger that is not the main worktree's, cfg is
+// returned unchanged. No other setting is taken; escalate goes by Enabled
+// alone. A main worktree ralph.toml that fails to load is an error, which
 // `ralph org escalate` handles like a ralph.toml that does not load, `ralph
 // org director attach` and `status` return, and `ralph status` warns about
-// before it shows the built-in default (statusDirectorEnabled). A verb that
+// before it shows the built-in defaults (statusDirectorConfig). A verb that
 // reports or acts on the switch reads it through this function, so it sees
 // the value escalate goes by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled and auto_merge from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
 	}
 	cfg.Director.Enabled = mainCfg.Director.Enabled
+	cfg.Director.AutoMerge = mainCfg.Director.AutoMerge
 	return cfg, nil
 }
 
