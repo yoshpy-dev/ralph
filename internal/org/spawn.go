@@ -1322,10 +1322,12 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 // regate is still waiting for the manifest lock, and once it has it, it
 // finds the org this spawn records running and refuses itself, so the spawn
 // goes on, as it does for a marker of another org. A `ralph org merge` holds
-// the lock too, for its whole run, with the marker empty, since a merge
-// changes no worktree (plan docs/plans/active/2026-10-17-org-auto-merge.md,
-// D3): a spawn finds no marker then and goes on while the merge runs. A lock
-// that cannot be checked refuses too. Spawn calls it under the manifest lock
+// the lock too, from its checks through gh pr merge and the record but not
+// while --wait-checks waits for the PR's checks (merge_wait.go), with the
+// marker empty, since a merge changes no worktree (plan
+// docs/plans/active/2026-10-17-org-auto-merge.md, D3): a spawn finds no
+// marker then and goes on while the merge runs. A lock that cannot be
+// checked refuses too. Spawn calls it under the manifest lock
 // (checkCapacityAndStart), and StartFeature once before ensure.
 func regateSpawnErr(stateDir, orgID string) error {
 	path := regateLockPathIn(stateDir)

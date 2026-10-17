@@ -125,14 +125,13 @@ func (w *mergeWait) wait(ctx context.Context, m *mergeCheck, f mergeWaitFor) err
 		why = fmt.Sprintf("PR #%d has no checks reported yet", f.r.prNumber)
 	}
 	w.line(fmt.Sprintf("%s, so ralph org merge waits for them for up to %s (--wait-checks %s), with regate.lock released, "+
-		"reading %s every %s", why, max(w.deadline.Sub(start), 0), w.budget, cmd, w.interval))
+		"reading %s every %s", why, mergeWaitDuration(max(w.deadline.Sub(start), 0)), w.budget, cmd, w.interval))
 	ended, interrupted := w.poll(ctx, m, f.r, cmd)
 	end := fmt.Sprintf("stopped waiting for the checks of PR #%d after %s: %s", f.r.prNumber, mergeWaitDuration(w.now().Sub(start)),
 		ended)
 	if interrupted {
 		w.line(end + "; nothing was merged")
-		return fmt.Errorf(mergePrefix+"interrupted (%v) while waiting for the checks of PR #%d, before gh pr merge ran: nothing "+
-			"was merged", context.Cause(ctx), f.r.prNumber)
+		return mergeInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d, before gh pr merge ran", f.r.prNumber))
 	}
 	w.line(end + "; running every check again")
 	return nil
@@ -155,6 +154,7 @@ func (w *mergeWait) poll(ctx context.Context, m *mergeCheck, r mergeReady, cmd s
 			// readChecks errs only when ctx is done.
 			return fmt.Sprintf("interrupted (%v)", context.Cause(ctx)), true
 		case kind.waits():
+			// Still pending, or none reported yet: the wait goes on.
 		case refused == "":
 			return "the checks passed", false
 		case kind == mergeChecksUnread:

@@ -49,10 +49,11 @@ var mergeTestHooks struct {
 // (an interruption, a pr_merged that could not be appended), Merge returns it
 // too, as far as it got.
 type MergeResult struct {
-	// Refused is set when Merge refused before gh pr merge ran: no branch
-	// named, another ralph org regate or merge holding regate.lock, or a
-	// check of checkMerge that failed. It says why and one next step. Nothing
-	// was merged or recorded, and every other field is empty.
+	// Refused is set when Merge refused before gh pr merge ran: a
+	// --wait-checks out of range (MergeWaitChecksRefusal), no branch named,
+	// another ralph org regate or merge holding regate.lock, or a check of
+	// checkMerge that failed. It says why and one next step. Nothing was
+	// merged or recorded, and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
 	// view read it back, or that read failed (D6): what happened, whether an
@@ -106,10 +107,9 @@ type MergeResult struct {
 // and writes none: a merge changes no worktree, so a spawn of the branch's org
 // goes on while it runs (regateSpawnErr). With p.WaitChecks, a refusal for
 // checks that are pending or not reported yet is waited out instead, with the
-// lock released, and the lock and every check are taken again after the wait
-// (mergeWait, D13). It then runs gh pr merge once
-// (mergeRun.merge) and, whatever that returned, reads the PR back once
-// (mergeRun.readBack, D6):
+// lock released; after the wait the lock is taken again and every check runs
+// again (mergeWait, D13). It then runs gh pr merge once (mergeRun.merge) and,
+// whatever that returned, reads the PR back once (mergeRun.readBack, D6):
 //
 //   - MERGED: it appends pr_merged (recordMerge, D4) and sets Merged and
 //     Recorded; Note says how gh pr merge failed when it did;
@@ -141,11 +141,11 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 	}
 	w := newMergeWait(p)
 	for {
-		res, wait, err := o.mergeLocked(ctx, p, w)
-		if wait == nil {
+		res, waitFor, err := o.mergeLocked(ctx, p, w)
+		if waitFor == nil {
 			return res, err
 		}
-		if err := w.wait(ctx, newMergeCheck(p), *wait); err != nil {
+		if err := w.wait(ctx, newMergeCheck(p), *waitFor); err != nil {
 			return MergeResult{}, err
 		}
 	}

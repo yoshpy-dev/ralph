@@ -88,10 +88,13 @@ const (
 	// regateLockFile is the lock in the state dir that Regate holds from its
 	// first check to its end (D7). Its content is the marker of the Regate
 	// that holds it, or that last held it (regateMarker, D9). ralph org merge
-	// (Merge, merge_run.go) holds it too, for its whole run, and empties the
-	// marker and writes none, since a merge changes no worktree (plan
+	// (mergeLocked, merge_run.go) holds it too, from its checks through gh pr
+	// merge and the record, and empties the marker and writes none, since a
+	// merge changes no worktree (plan
 	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate or
-	// Merge runs on a ledger at a time.
+	// Merge holds it on a ledger at a time. A Merge with --wait-checks
+	// releases it while it waits for the PR's checks (merge_wait.go, D13), so
+	// a Regate or another Merge can run meanwhile.
 	regateLockFile = "regate.lock"
 	// regateLockWait is how long Regate and Merge retry regate.lock before
 	// they refuse: a spawn's check holds the lock shared for a moment (D9),

@@ -237,7 +237,9 @@ func (fx *mwFixture) run(t *testing.T) (MergeResult, error) {
 // nothing merged and no time added to the refusal; gh pr checks failing ends
 // it and the checks run again (here they pass); a branch that moved while
 // Merge waited is refused by the checks again; and checks pending again in
-// the checks after a wait are waited for again, in a second wait.
+// the checks after a wait are waited for again, in a second wait, whose
+// start line rounds what is left of the time to the second when the checks
+// before it took a fraction of one.
 func TestMerge_WaitChecksEndsAndChecksAgain(t *testing.T) {
 	merged := mrResult("merge")
 	merged.Merged, merged.Recorded, merged.MergeCommit = true, true, mrOID
@@ -270,6 +272,18 @@ func TestMerge_WaitChecksEndsAndChecksAgain(t *testing.T) {
 			fx.afterCall(5, func() { fx.setChecks(mwPending) })
 		}, merged, mwRounds([]int{1, 1}, mergeTail...), []string{start, mwEnd("30s", "the checks passed"),
 			mwStart("has checks pending", "59m30s", "1h0m0s"), mwEnd("30s", "the checks passed")}},
+		{"pending again after checks that took 623ms", func(fx *mwFixture) {
+			fx.onSleep = func(int) { fx.setChecks(mwPass) }
+			fx.exec.after = func(i int) {
+				switch i {
+				case 5: // the read of the first wait
+					fx.setChecks(mwPending)
+				case 7: // the ls-remote of the checks after it
+					fx.clock.now = fx.clock.now.Add(623 * time.Millisecond)
+				}
+			}
+		}, merged, mwRounds([]int{1, 1}, mergeTail...), []string{start, mwEnd("30s", "the checks passed"),
+			mwStart("has checks pending", "59m29s", "1h0m0s"), mwEnd("30s", "the checks passed")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMWFixture(t, mwPending, time.Hour)
@@ -553,9 +567,11 @@ func TestMerge_WaitChecksWithTheRealClock(t *testing.T) {
 			!strings.HasSuffix(res.Refused, " for the checks (--wait-checks 60ms)") {
 			t.Fatalf("Merge = %+v, %v; want the refusal with the time waited", res, err)
 		}
+		// One read or more, not two: a first sleep that load delays by 50ms or
+		// more leaves no time for a second; the mwClock tests count the reads.
 		if polls := strings.Count(strings.Join(fx.exec.keys(), "\n"), mxPRChecks) - 2; took < 60*time.Millisecond ||
-			took > 10*time.Second || polls < 2 {
-			t.Errorf("Merge took %s with %d reads of the checks while it waited; want 60ms or more, and two reads or more", took,
+			took > 10*time.Second || polls < 1 {
+			t.Errorf("Merge took %s with %d reads of the checks while it waited; want 60ms or more, and one read or more", took,
 				polls)
 		}
 	})
