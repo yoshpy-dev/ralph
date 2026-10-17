@@ -554,6 +554,39 @@ func TestMerge_WaitChecksOrgAndChecksShareTheBudget(t *testing.T) {
 	}
 }
 
+// TestMerge_WaitChecksChecksThenOrgShareTheBudget is the other order: a wait
+// for checks still pending and, once they passed and org-a started again on
+// the same feature of feat/a meanwhile, a wait for the org, which gets what
+// is left of the one --wait-checks. The refusal names both waits in the order
+// they began.
+func TestMerge_WaitChecksChecksThenOrgShareTheBudget(t *testing.T) {
+	fx := newMWFixture(t, mwPending, 70*time.Second)
+	var added string
+	fx.onSleep = func(n int) {
+		if n == 1 {
+			before := mrRead(t, fx.mo.path)
+			fx.mo.add(t, moBind("org-a", "a"))
+			added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+			fx.setChecks(mwPass)
+		}
+	}
+	res, err := fx.run(t)
+	want := MergeResult{Refused: mwOrgRefusal + `; ralph org merge waited 1m10s for the checks and for org_id "org-a" to be ` +
+		"disbanded (--wait-checks 1m10s); the org still runs: see what it does with ralph org status --org-id org-a, and a human " +
+		"decides whether to disband it (ralph org disband --org-id org-a)"}
+	if err != nil || res != want {
+		t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+	}
+	fx.check(t, slices.Concat(mxAll[:5], []string{mxPRChecks}, mxAll[:3], mxAll[:3]),
+		[]time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second}, []string{
+			mwStart("has checks pending", "1m10s", "1m10s"), mwEnd("30s", "the checks passed"),
+			mwOrgStart("40s", "1m10s"), mwOrgEnd("40s", "--wait-checks 1m10s is used up"),
+		})
+	if got := fx.appended(t); got != added {
+		t.Errorf("appended %q\nwant     %q", got, added)
+	}
+}
+
 // TestMerge_WaitChecksDoesNotWaitOutOtherRefusals covers AC13's refusals
 // that are not waited out: with --wait-checks 1h, checks that failed, were
 // cancelled, are all skipping, have a bucket not known, or are pending beside
