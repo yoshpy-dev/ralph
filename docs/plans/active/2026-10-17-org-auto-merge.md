@@ -184,6 +184,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S5 71c0582e(skill の 8 面、README、`AGENTS.md`、仕様の FR-8 の注、quality-gates の 2 面、tech-debt、pin テスト `TestDirectorSkill_PinsTheAutoMergeSteps`)。pin は 6 つの断片とその順、古い文「`gh pr merge` で 1 本 merge し」がないこと。mutation 3/3。`/director` に「headless の director を `--config` で立てたとき、`director status` と `ralph status` の auto_merge が違えば false として扱う」を足した。tech-debt 238 行は外部コマンドの runner の重複が残るので、JSON の半分だけを RESOLVED にした
   - sync-docs に回すもの: tech-debt 238 行が `regateRemoteGit` を `internal/org/regate.go` に置いている(今は `regate_git.go`)
   - 2026-10-17(self-review cycle 1 のあと): report 29469c0e(MEDIUM 2、LOW 8)。M2(auto_merge = true でも検査待ちの断りで毎回止まる)を consult-plan-checkswait に聞き、動詞に待ちを入れる D13 と AC13 を足した。M1 を受けて Affected areas と D11 に `mergeenforce.go` を書いた。Implementation outline に S6(self-review の直し)と S7(`--wait-checks`)を足し、Scope・Test plan・Risks を直した。図 5 つを直して撮り直し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。self-review の直しは cycle を増やさず、S7 のあとに reviewer に S6・S7 の diff を見せてから verify に進む
+  - S6 4a39e909(M1 の移動、L1〜L8)。M1 は消えた行と増えた行を突き合わせ、違いが L8 の doc の直しと新しいファイルの先頭だけと確かめた。merge のあとの読み直しと `--disable-auto` は `realMergeDetachedExec`(Setpgid、ctx が終わればグループごと kill)で打つ。`gh pr merge` と確かめは ralph のグループのまま。origin の host・owner・repo が `-` で始まれば merge だけが断る(merge-order は変えない)。mutation 7/7。tech-debt 238 行の `regateRemoteGit` の場所も直した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
