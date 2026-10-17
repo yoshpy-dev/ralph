@@ -54,7 +54,7 @@ func TestMerge_MergesWithTheMethodAndRecordsPRMerged(t *testing.T) {
 			}
 			for key, argv := range map[string][]string{
 				mrMerge:  {"gh", "pr", "merge", "7", tc.flag, "--match-head-commit", moHeadA, "-R", mxRepoArg},
-				mrReread: {"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,headRefOid,mergeCommit,autoMergeRequest"},
+				mrReread: {"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,headRefOid,baseRefName,mergeCommit,autoMergeRequest"},
 			} {
 				if c := fx.call(t, key); !slices.Equal(append([]string{c.name}, c.args...), argv) {
 					t.Errorf("%s = %q\nwant %q", key, append([]string{c.name}, c.args...), argv)
@@ -102,14 +102,14 @@ func TestMerge_NotMergedRecordsNothing(t *testing.T) {
 		", which checks the PR and the protection again"
 	unknown := func(why string) string {
 		return "org: merge: " + mrViewCmd + " " + why + " after " + mrMergeCmd + " exited 0, so whether PR #7 was merged is unknown " +
-			"and nothing was recorded: check it with " + mrViewCmd + " --json state,headRefOid,mergeCommit (ralph org merge-order " +
-			"lists the branch as merged once it is)"
+			"and nothing was recorded: check it with " + mrViewCmd + " --json state,headRefOid,baseRefName,mergeCommit (ralph org " +
+			"merge-order lists the branch as merged once it is)"
 	}
 	notMerged := func(state string) string {
 		return "org: merge: " + mrMergeCmd + " exited 0 but PR #7 is " + state + ", not merged, so nothing was recorded: check the " +
 			"PR with " + mrViewCmd + " and run ralph org merge-order again"
 	}
-	const notJSON = "printed output that is not the PR's JSON with state,headRefOid,mergeCommit,autoMergeRequest"
+	const notJSON = "printed output that is not the PR's JSON with state,headRefOid,baseRefName,mergeCommit,autoMergeRequest"
 	for _, tc := range []struct {
 		name            string
 		reread, disable mgReply
@@ -192,8 +192,8 @@ func TestMerge_ReadsThePRBackAfterAFailedMerge(t *testing.T) {
 			"", mrDisabled, false},
 		{"fails, the read-back fails", false, mgReply{err: errors.New("exit status 4: HTTP 401")}, "org: merge: " + mrViewCmd +
 			" failed (exit status 4: HTTP 401) after " + mrMergeCmd + " failed, so whether PR #7 was merged is unknown and nothing " +
-			"was recorded: check it with " + mrViewCmd + " --json state,headRefOid,mergeCommit (ralph org merge-order lists the " +
-			"branch as merged once it is)" + said, "", mrMerged, false},
+			"was recorded: check it with " + mrViewCmd + " --json state,headRefOid,baseRefName,mergeCommit (ralph org merge-order " +
+			"lists the branch as merged once it is)" + said, "", mrMerged, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMRFixture(t, nil)
@@ -235,8 +235,8 @@ func TestMerge_ReadsThePRBackAfterAFailedMerge(t *testing.T) {
 func TestMerge_RecordsOnlyAMergeOfTheGatesHead(t *testing.T) {
 	failure := errors.New("exit status 1: GraphQL: Head branch was modified. Review and try the merge again.")
 	const said = "; gh said:\n  exit status 1: GraphQL: Head branch was modified. Review and try the merge again."
-	next := ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,mergeCommit), run " +
-		"ralph org merge-order again, and go on with the other branches"
+	next := ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,baseRefName," +
+		"mergeCommit), run ralph org merge-order again, and go on with the other branches"
 	otherHead := "but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged"
 	noHead := "but with no head, so whether the head the gate passed (aaaaaaaaaaaa) was merged is unknown"
 	for _, tc := range []struct {
@@ -343,8 +343,8 @@ func TestMerge_InterruptedOnceGHPRMergeStarted(t *testing.T) {
 		{"another head is merged", mgReply{out: mrReadBackAt("MERGED", moHeadB, mrOID, "null")}, mrViewCmd + " read PR #7 back " +
 			"as MERGED after " + mrMergeCmd + " failed, but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so " +
 			"a head the gate did not pass was merged, and nothing was recorded: check that merge yourself (" + mrViewCmd +
-			" --json state,headRefOid,mergeCommit), run ralph org merge-order again, and go on with the other branches" + said,
-			mrMerged, false},
+			" --json state,headRefOid,baseRefName,mergeCommit), run ralph org merge-order again, and go on with the other branches" +
+			said, mrMerged, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMRFixture(t, nil)

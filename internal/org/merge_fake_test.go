@@ -379,16 +379,22 @@ func (e *mrExec) run(ctx context.Context, dir string, env []string, name string,
 }
 
 // mrReadBack is a `gh pr view --json
-// state,headRefOid,mergeCommit,autoMergeRequest` answer whose head is the
-// gate's, moHeadA; an empty oid is a null mergeCommit, and autoMerge is the
+// state,headRefOid,baseRefName,mergeCommit,autoMergeRequest` answer whose
+// head is the gate's, moHeadA, and whose base is main, the fixture's default
+// branch; an empty oid is a null mergeCommit, and autoMerge is the
 // autoMergeRequest as JSON.
 func mrReadBack(state, oid, autoMerge string) string {
 	return mrReadBackAt(state, moHeadA, oid, autoMerge)
 }
 
-// mrReadBackAt is mrReadBack with head as headRefOid, written as JSON
-// writes it, control characters included.
+// mrReadBackAt is mrReadBack with head as headRefOid.
 func mrReadBackAt(state, head, oid, autoMerge string) string {
+	return mrReadBackInto(state, head, "main", oid, autoMerge)
+}
+
+// mrReadBackInto is mrReadBack with head as headRefOid and base as
+// baseRefName, each written as JSON writes it, control characters included.
+func mrReadBackInto(state, head, base, oid, autoMerge string) string {
 	commit := "null"
 	if oid != "" {
 		commit = `{"oid":"` + oid + `"}`
@@ -397,7 +403,12 @@ func mrReadBackAt(state, head, oid, autoMerge string) string {
 	if err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf(`{"autoMergeRequest":%s,"headRefOid":%s,"mergeCommit":%s,"state":%q}`, autoMerge, h, commit, state)
+	b, err := json.Marshal(base)
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf(`{"autoMergeRequest":%s,"baseRefName":%s,"headRefOid":%s,"mergeCommit":%s,"state":%q}`, autoMerge, b, h,
+		commit, state)
 }
 
 // mrFixture is mxFixture with mrExec in front of its mxExec, which answers
