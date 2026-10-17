@@ -1,57 +1,56 @@
 # sync-docs report: org-regate
 
 - Date: 2026-10-17(JST)
-- Plan: `docs/plans/active/2026-10-16-org-regate.md`(承認済み。この run で計画は触っていない)
-- Pipeline cycle: 2。base は `670ec219`、branch は `feat/org-regate`。run 開始時の HEAD は `f630e216`(run 開始時の値で、この report を含む commit の SHA ではない)
-- 先行 report: `docs/reports/self-review-2026-10-16-org-regate.md`、`docs/reports/verify-2026-10-16-org-regate.md`(cycle 2 の 2 回目は pass。LOW 4 件のうち V2-2〜V2-4 を下の変更 1〜3 で直す。V2-5 は変更 5 の tech-debt の行)、`docs/reports/test-2026-10-16-org-regate.md`(cycle 2 は pass)
-- cycle 1 の sync-docs(0257bd93)が直した `docs/quality/quality-gates.md` の 2 面と `/org` skill の `reset --keep` の条件は、この run で触っていない。cycle 1 の表は 0257bd93 の版の report にある
-- コードとテストは変えていない。変えたのは Markdown の 5 ファイル(`README.md`、仕様、tech-debt、`/org` skill の `.claude` 側 2 面)、`scripts/sync-skills.sh` で再生成した skill の写し 2 面、insight event の 1 行
+- Plan: `docs/plans/active/2026-10-16-org-regate.md`(承認済み。digest は sha256:3c417c48763c。この run で計画は触っていない)
+- Pipeline cycle: 3。base は `670ec219`、branch は `feat/org-regate`。run 開始時の HEAD は `cf5aae54`(run 開始時の値で、この report を含む commit の SHA ではない)
+- 先行 report: `docs/reports/self-review-2026-10-16-org-regate.md`(cycle 3。C3-5 とその登録簿の行の勧め)、`docs/reports/verify-2026-10-16-org-regate.md`(cycle 3 の 2 回目は pass。LOW 6 件のうち V3-2〜V3-4 を下の変更 1〜4 で直し、V3-3 が勧めた行を変更 5 にする。V3-1・V3-5〜V3-7 はコードの commit で直っている)、`docs/reports/test-2026-10-16-org-regate.md`(cycle 3 は pass。Test gap 12 を変更 6 の行にする)
+- cycle 1 と cycle 2 の sync-docs が直した面のうち、この run で触ったのは `/org` skill の `regate` の行、`AGENTS.md` の `internal/org/` の行、tech-debt の表だけ。cycle 2 の表は c60b2651 の版の report にある
+- コードとテストは変えていない。手で直した Markdown は 4 ファイル(`/org` skill の `.claude` 側 2 面、`AGENTS.md`、tech-debt)、`scripts/sync-skills.sh` で再生成した skill の写し 2 面、insight event の 1 行
 
 ## Summary
 
-cycle 2 のコード側の変更は 3 つ。merge の前に ignored のファイルを断る確かめ(D3、85558f2c・ca840a45・c621ccc9)、読めない gate の記録の付け先を org が持ったすべてのブランチにする変更(D2、f793924d)、help の語(a59220f5・413ab307・5e12dfe0)。verify が挙げた LOW の文書のずれ 3 件(V2-2〜V2-4)を直し、残る端の入力と確かめの穴を tech-debt の 7 行にした。`ralph org regate --help`、`ralph org merge-order --help`、`spawn` と `start` の help は、コードに当てて読み、直す箇所を見つけなかった。
+cycle 3 のコード側の変更は、push だけの打ち直しと `reset --keep` の手が regate 自身の merge commit の形(親がちょうど 2 つ、件名まで。556f73fb、0844ad2b)を前提にしたことと、D3 の確かめと gate の記録を別のファイルへ移したこと(0e08999f、14252f06)。文書で合っていなかったのは、`/org` skill の条件(V3-2)、tech-debt の 4 つの行が D3 の関数を置くファイル(V3-3)、`AGENTS.md` の repo-map(V3-4)。この 3 つを直し、残る 2 点を tech-debt の 2 行にした。`ralph org regate --help` は、コードに当てて読み、直す箇所を見つけなかった(f850de13 と 3a452a71 が hook の件名の断りを足し済み)。
 
 ## Changes made
 
 | File | Change |
 |------|--------|
-| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-7 の 8a-3b の注) | D3 と D2 を足した。D3: merge の前に、merge が書くパスに HEAD が追跡していないファイル・追跡していないものを含むディレクトリ・そのパスの上の場所にあるファイルがないかを確かめ、あれば merge も記録もせずに退かすパスを 10 件まで出して断る。理由(git merge は ignored のファイルを黙って上書きし、`--no-overwrite-ignore` は fast-forward にしか効かず、きれいさの確かめは ignored を見ない)、パスは `git merge-tree --write-tree` の木から取ること、2.38 より前の git の落とし先(directory rename の移った先を見ない)、大文字小文字を区別しない FS ではディスク上の綴りで判じること。D2: 読めない gate の記録の付け先を「打った org のその時点の結びつきのブランチ」から、その org がそれまでに完全な結びつきか読める記録を持ったすべてのブランチに変えた理由(regate が立て直した org の古い結びつきのブランチにも書く)と、付け先が 2 つ以上のときの理由の欄の文。この 2 つを固定するテストの名前 |
-| 同(7c-1 の注) | 「読めない記録は、打った org のその時点の結びつきのブランチに付ける」の履歴は残し、「8a-3b で、その org が持ったすべてのブランチに付けるように変えた」を添えた(V2-2) |
-| `.claude/skills/org/SKILL.md`(`regate` の行) | 作業ツリーの確かめ、identity の確かめのあとに、D3 の断りの 1 文を足した(merge が書くパスに ignored のファイルか追跡していないものを含むディレクトリがあれば、merge も記録もせずに退かすパスを 10 件まで出して終了コード 1)(V2-3) |
-| `templates/base/.claude/skills/org/SKILL.md` | 同じ文(root と同一バイト。Edit で同じ置換をした) |
-| `.agents/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | `scripts/sync-skills.sh` で再生成した(root は引数なし、template は `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills`)。差分は上の 1 文だけで、4 面は同一バイト |
-| `README.md`(`ralph org regate` の段落) | 「A conflict, a hook that stops the merge, or a missing git identity makes no commit and records nothing」の文に、ignored のファイルかそれを含むディレクトリが merge の書く場所にあるときも同じで、worktree の外へ退かすパスを 10 件まで出す、を足した(V2-3) |
-| `docs/tech-debt/README.md`(7c-1 の残りの行) | f793924d で変わった 3 か所を今の規則と名前に直した(V2-4)。(s) の付け先の説明(「org の最新の読める記録のブランチ」を、org-regate PR からはその org が読める記録を持ったすべてのブランチに)、テスト名(`...GatedBranch` を `...GatedBranches` に)、(t) の `gatedBranch`(今は順序つきの集合 `orgBranches`。行は、unreadable な記録の `branch=` を足す変異と、org のほかのブランチが古い pass の `ready` に戻る変異を言う形にした) |
-| 同(表の末尾に 7 行) | (a) 2.38 より前の git の落とし先が directory rename の移った先を見ない。(b) `branch.<name>.mergeOptions` を `git merge` は読み `git merge-tree` は読まない。(c) `isolateGitEnv` が `XDG_CONFIG_HOME` を触らない。(d) 大文字小文字の 6 case が CI の ubuntu で飛ぶ。(e) D3 が断りすぎる 2 つの場合(V2-5 の `readme.md` と `README.md`、入れ子の repository)。(f) 綴りだけ違うディレクトリでファイルごとに `git ls-files` を打つ(I6)。(g) merge が commit を作らなかったときの断りが、関係のない履歴でも hook を挙げる |
-| `docs/insights/events/2026-10-16-org-regate.jsonl` | `sync_docs`、cycle 2、pass、findings 0 の 1 行を `insights-append.sh` で足した |
+| `.claude/skills/org/SKILL.md`(`regate` の行) | V3-2。(1) `reset --keep` の手の条件を、HEAD の第 1 親が origin の先頭、から、HEAD の親がちょうど 2 つで、第 1 親が origin の先頭、第 2 親がその記録の base、件名が regate の書く `Merge origin/<既定のブランチ> <base の 12 桁> into <ブランチ>` に直した。(2) 打ち直しの文に、push だけをする条件を足した。最新の gate の記録がその HEAD と既定のブランチの先頭の読める `gate_passed` で、origin のそのブランチの先頭が HEAD の祖先のときだけ。regate が書いた記録(`via=regate`)では、そのうえで HEAD が(1)の merge commit の形でなければならない。hook が件名を変えた merge commit は形に当たらないので、push も手も出さずに断り、HEAD を自分で push するよう言う(そのあとの regate は `UP_TO_DATE:`)。leader の記録(`via` なし)は、origin の先頭が HEAD の祖先であればよい。help(`internal/cli/org_regate.go`)の文面に合わせた |
+| `templates/base/.claude/skills/org/SKILL.md` | 同じ 2 か所(root と同じ文字列で Edit した) |
+| `.agents/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` | `scripts/sync-skills.sh` で再生成した(root は引数なし、template は `CLAUDE_ROOT=templates/base/.claude/skills CODEX_ROOT=templates/base/.agents/skills`)。差分は上の 2 か所だけで、4 面は同一バイト |
+| `docs/tech-debt/README.md`(D3 の 4 つの行) | V3-3。`regateMergeWrites`・`regatePathInTheWay`・`regateSpellingOnDisk` を置くファイルを `internal/org/regate_merge.go` から `internal/org/regate_inway.go` に直した(2.38 より前の git の行は本文と最後の欄、`mergeOptions` の行は最後の欄で `regateMergeWrites` は `regate_inway.go`・`regateMergeTip` は `regate_merge.go` と分けた、大文字小文字と入れ子の repository の行は本文と最後の欄、綴りだけ違うディレクトリのファイルごとの `git ls-files` の行は本文と最後の欄)。最後の行の影響の欄は、regate の間に断られるものを「`spawn` と `start --plan`」から「`spawn`(`--dry-run` を除く)と `start`(どちらの形も)」(D9)に直した |
+| 同(表の末尾に 1 行) | self-review の C3-5 の(e)。push だけの打ち直しは、push が落ちたのか、届いたあとに origin のブランチが戻されたのか(force push)を見分けられない。leader の記録は origin の先頭が下にあるどの HEAD も push し直し、regate の記録は regate 自身の merge commit(親が origin の先頭と記録の base、件名が regate のもの)を、origin が第 1 親に戻されたときに push し直す。テストは、第 1 親の 1 つ下に戻した場合と gate だけの記録のあとを押さえる。gate だけの head への断り(`regateCheckOriginHead`)は「push してください」と言い、origin が戻された可能性は言わない。直し方は、push を試みた印を記録に足し、落ちた記録のあとだけ push し直すこと。この印は記録の形を変える(D2、D4)ので今は直さない。件名の確かめ(0844ad2b)のあとの形に書いた |
+| 同(表の末尾にもう 1 行) | test report の Test gap 12。`newTestWatchRun`(`internal/org/watch_test.go`)は `os.MkdirTemp("", "watch-status-*")` で作るディレクトリを消さず、`internal/org` のテストを 1 回走らせるごとに `$TMPDIR` に約 29 個が残る(cycle 3 の /test で 4 回の実行で 116 個増えた)。直し方は `t.TempDir()`。ただし helper が `testing.T` を取らないので、28 の呼び出し元(どれも `watch_test.go`)に引数を足すことになる。この PR は `watch_test.go` を触らないので直さない |
+| `AGENTS.md`(`internal/org/` の行) | V3-4。gate の句に `gate_record.go`(gate と regate が書き、merge-order が読む gate の記録)、regate の句に `regate_inway.go`(merge の前に、merge が書く場所に ignored のものがないかを確かめる)を足した |
+| `docs/insights/events/2026-10-17-org-regate.jsonl` | `sync_docs`、cycle 3、pass、findings 0 の 1 行を `insights-append.sh` で足した(スクリプトは UTC の日付でファイルを選ぶので、test の event と同じ `2026-10-17-` のファイルに入る) |
 
-tech-debt の新しい行は、コードに当てて確かめてから書いた。(b) は git 2.49.0 の scratch repository で、`branch.feat.mergeOptions` を `-s ours` にすると `merge-tree` は tip の足したファイルを挙げ、`git merge` は何も書かないことを見た(regate は通していない)。逆向き(merge が書くのに merge-tree が挙げないパス)は見ていないので、行にそう書いた。(c) は同じ scratch で、`GIT_CONFIG_GLOBAL=/dev/null` と `GIT_CONFIG_NOSYSTEM=1` のもとでも `$XDG_CONFIG_HOME/git/ignore` が効き、`XDG_CONFIG_HOME` を空のディレクトリにすると効かなくなることを見た。(e) の 2 つ目(入れ子の repository)は、コードが打つ git のコマンドを scratch で打ち、gitlink を足す tip と ignored の入れ子の repository で、`ls-files --others --directory` が `vendor/x/` を untracked と出す(regate は断る)一方、素の `git merge --no-ff` は成功することを見た。regate の binary は通していないので、行にそう書いた。
+書かなかった行: self-review が登録簿に足すよう勧めた行の(a)〜(d)(help と comment の文面、ファイルの行数、doc の言い回し)と、verify が勧めた V3-5〜V3-7 は、どれもコードの commit で直った(C3-1〜C3-4 は 82cf0d39・0e08999f・14252f06・ba84bccc、V3-1 は 0844ad2b、V3-5 と V3-6 は f850de13、V3-7 は 3989d914)ので、行にしていない。
+
+tech-debt の新しい 2 行は、コードに当てて確かめてから書いた。`regateHeadNotOnOrigin` の 2 つの枝(`via=regate` なら `regateIsOwnMerge`、そうでなければ `regateIsAncestor`)と、`regateIsOwnMerge` の確かめ(親が `[origin の先頭, 記録の base]` のちょうど 2 つで、件名が `regateMergeSubject` と同じ)、`regateCheckOriginHead` の「push them」の文は読んだ。`newTestWatchRun` の呼び出しは `grep` で 28 と数えた。ただし(e)の「push し直す」の 2 つの場合は、読んで導いたもので、binary では打っていない(verify の Coverage gaps と同じ)。
 
 ## Surfaces checked for drift
 
 | 面 | 結果 | メモ |
 |----|------|------|
-| `internal/cli/org_regate.go` の help | 合っている | 「it does when an ignored file or directory is on disk where the merge would write」の段落が D3 の断りを言い、退かすパスを出すことも言う。10 件の上限と merge-tree の道は書かないが、help の水準としてずれではない |
-| `internal/cli/org_merge_order.go` の help | 合っている | D2 の付け先は help に書かれていない(cycle 1 も同じ)。付け先が 2 つ以上のときの文は、実行時の Detail(`classifyMergeTarget` の「may be a record of another branch of the same org, <org>, which has had N branches」)にある。`unreadable` の分類の行はコードと同じ |
-| `ralph org spawn --help`、`ralph org start --help`(`internal/cli/org.go`) | 合っている | 「regate が走っている間は断られる」の段落が cycle 2 で入った。cycle 1 の「Left open」の 1 点目のうち help の側は解消した |
-| `/org` skill の `spawn` と `start` の行 | 直した(この run のあと、下の Left open の 1 点目) | この run の時点では、regate が走っている間の断りは書かれていなかった。「機能ごとの org」節の「merge してよい順」(その org が走っている間の regate と、regate が走っている間の `spawn` と `start --plan` の断り)が言う。行に足すかは決めずに残す。INFO |
-| `/org` skill の「merge してよい順」の手順 4 の「断り(worktree がない、作業ツリーが汚れている、HEAD が origin の先頭と違う、など)」 | 変更なし | 「など」で ignored のファイルの断りも覆われ、次の手は「stderr の次の手に従う」。4 面とも同じ |
-| `/org` skill と README の merge-order の記述 | 変更なし | `unreadable` を「最新の gate の記録が読めない、またはそのあとに manifest の壊れた行がある」と言う。付け先の規則は skill にも README にもなく(D2 の前も同じ)、仕様と tech-debt が持つ |
-| `/director` skill の「merge のあとの取り直し」(4 面) | 変更なし | 断りの個々の場合を並べず、「regate が出した文(衝突したファイル、`REASON:` と `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝える」と言う。ignored のファイルの断りもこれに入る。director は変更なし |
-| `AGENTS.md`(`internal/org/` の行) | 合っている | `regate.go`・`regate_merge.go`・`regate_git.go` の役割分担と `regate.lock` の句。cycle 2 で足したファイルはない(変わったのは既存の `.go` とテスト) |
-| `docs/quality/quality-gates.md` と template の写し | 変更なし | regate の文は断りの個々の場合を並べない |
-| `docs/architecture/repo-map.md`、`docs/recipes/`、`docs/quality/definition-of-done.md` | 変更不要 | regate にも merge-order の付け先にも触れていない |
+| `internal/cli/org_regate.go` の help | 合っている | 打ち直しの段落が「push だけをするのは、記録が HEAD の `gate_passed`、origin のブランチが HEAD の下、regate が書いた記録では HEAD が regate 自身の merge commit(親と件名)」で、hook が件名を変えたら断って「push HEAD yourself」と言う。変更 1 の skill の文はこれに合わせた。最後の段落の spawn(`--dry-run` を除く)と start(どちらの形も)も skill と同じ |
+| `README.md`(regate の段落) | 変更なし | 「記録のあとの push の失敗は記録と merge commit を残し、打ち直すと push だけをする」と言い、条件は書かない。形と件名の条件は計画の D4 と help が持ち、この文は条件のない通常の場合として誤りではない。spawn と start の断りは `--dry-run` を除く spawn と start(どちらの形も)で、コードと合う |
+| 仕様 `docs/specs/2026-10-07-org-multi-org-director.md`(8a-3b の注) | 変更なし | 「打ち直すと push だけをする」は設計の要約で、条件は計画の D4 が持つ。cycle 2 で直した spawn と start の言い方のまま |
+| `/director` skill(4 面) | 変更なし | regate が出した文(衝突したファイル、`REASON:` と `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝える、と言い、手と打ち直しの条件を並べない。hook が件名を変えた場合の断りもこれに入る |
+| `/org` skill のほかの regate の記述(「merge してよい順」の分類と手順 4) | 変更なし | 分類 `regate` の「push が落ちたあとなら、regate は push だけをする」と、手順 4 の「push の失敗: 理由を直してから打ち直すと、regate は push だけをする」は、通常の場合の記述。hook が件名を変えた場合は手順 4 の最後の「断り(…HEAD が origin の先頭と違う、など): stderr の次の手に従う」に入る。条件をここに複製しない |
+| `docs/quality/quality-gates.md` と template の写し | 変更なし | regate の文は「同じ 2 つのスクリプトを走らせ、`via=regate` で記録し、通れば push する」だけで、打ち直しの条件は書かない |
+| `docs/architecture/repo-map.md`、`docs/quality/definition-of-done.md`、`.ralph/core/AGENTS.core.md` | 変更不要 | regate と `internal/org/` のファイルの一覧を持たない(grep で 0 件) |
+| `docs/tech-debt/README.md` の D3 の 4 行と `regateMergeTip` の行 | 直した | 変更のとおり。`regateMergeTip` の行(断りの文が hook を挙げる)と、struck-through の行(S4b が merge などを `regate_merge.go` に移した履歴)は、そのときの記述として変えていない |
 | `internal/org/prompts/`(`leader.md`、`reviewer.md`、`director.md`) | 変更不要 | 計画の Non-goals |
 | `.claude/rules/ralph/` | 変更不要 | regate は座席にも message にも触れない |
-| 絶対パスの `$HOME` | なし | 今回の差分に `/Users/` も `hiroki.yoshioka` もない。U+FFFD もない(変更した 8 ファイルを数えた) |
-| 計画の Progress | 変更不要 | 計画は触らない依頼。cycle 2 の記録は 2 周目の self-review・verify・test まで入っている。`PR created` は /pr が付ける |
+| 計画の Progress | 変更不要 | 計画は触らない依頼。「Review artifact created」の行はすでに「今の版は cycle 3」になっている。`PR created` は /pr が付ける |
+| 絶対パスの `$HOME` | なし | 今回の差分に `/Users/` も `hiroki.yoshioka` もない。U+FFFD もない(変更したファイルを数えた) |
 
 ## Left open
 
-- (この run のあとに orchestrator が直した)`/org` skill の `spawn` と `start` の行に、regate が走っている間の断りを 1 文ずつ足した(4 面)。あわせて、regate の行、「merge してよい順」の注、README、仕様の 8a-3b の注が「`spawn` と `start --plan`」と書いていたのを、コードと help に合わせて「`spawn`(`--dry-run` を除く)と `start`(どちらの形も)」にした(`start <task>` も Spawn の `checkCapacityAndStart` を通るため)。計画は `start --plan` と書くが、`start <task>` も spawn なので食い違いではなく、承認済みの本文は変えない
-- test report の穴のうち、tech-debt に行がないもの: fetch と push の途中の中断(穴 1)、push・merge・`git var`・`reset --keep` の上限(穴 2)、`merge --abort` 自体の失敗(穴 3)、`regateUndoMerge` の読めない場合(穴 4)、D3 の確かめの error の道(穴 5)。計画の Progress のとおり PR の既知の穴に書く。穴 8(並べるパスの数の境目)は f630e216 のテストで埋まった(10 個と 11 個の行。`more >= 0` の mutant で 10 個の行が落ちることを確かめた)。穴 6 と穴 7 は、この run の tech-debt の (a) と (d) の行になった
-- `internal/org/director_cmd_test.go` の sh の trap を 100 ms の sleep で待つテストが、負荷が高い go1.25.8 の全体の実行で 1 回落ちたこと(tech-debt に行がある)。この PR では直さない
-- V2-5 の直し(同じ綴りのときも `git ls-files` を聞く)は、コードの変更なので入れていない。tech-debt の (e) の行にした
+- test report の穴のうち、tech-debt に行がないもの: D4 と AC7 の誤りの枝と追跡の ref の読みの失敗(穴 1)、署名が ssh の鍵ファイルの場合だけであること(穴 3)、fetch と push の途中の中断(穴 4)、push・`git var`・merge・`reset --keep`・`git merge-tree` の上限(穴 5)、`merge --abort` 自体の失敗と `regateUndoMerge` の読めない場合(穴 6)、D3 の確かめの error の道と本物の古い git(穴 7)、skill の文の中身を固定するテストがないこと(穴 9)、端末の本物の Ctrl-C・ssh の origin・本物の GitHub(穴 10)、変異を走らせていないこと(穴 11)。計画の Progress のとおり PR の既知の穴に書く。穴 2 は変更 5 の行、穴 12 は変更 6 の行、穴 8 は tech-debt の大文字小文字の行(cycle 2)になった
+- 本物の GitHub の「Update branch」の件名と、`-m` で regate と同じ件名を書いた人の merge commit(verify の I1、I3)。件名で見分ける以上避けられず、D4 が前提にしている。GitHub の件名が別の文でも、断る側に倒れる
+- `git merge-tree` は `merge.<name>.driver` を動かすので、driver を設定した repository では merge-tree と `git merge` で 2 回動くはず(self-review の Coverage gaps)。確かめていないので、tech-debt の行にしていない。`branch.<name>.mergeOptions` の行は driver に触れていない
+- `internal/org/director_cmd_test.go` の sh の trap を 100 ms の sleep で待つテストが、負荷が高い go1.25.8 の全体の実行で 1 回落ちたこと(tech-debt に行がある)。cycle 3 の /test では 5 回走らせて落ちなかった。この PR では直さない
 
 ## Verification
 
@@ -60,10 +59,10 @@ tech-debt の新しい行は、コードに当てて確かめてから書いた�
 | `./scripts/sync-skills.sh`(root と template) | 14 skill と 13 skill を再生成。変わったのは `org` の 2 面だけ |
 | `./scripts/check-skill-sync.sh` | 終了コード 0。`[ok] check-skill-sync: 14 skill(s) in lock-step` |
 | `./scripts/check-sync.sh` | 終了コード 0。PASS(DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5) |
-| `./scripts/run-static-verify.sh` | 終了コード 0。scope は changed(golang)。tech-debt の plan の参照、gofmt、golangci-lint(`0 issues.`)、`secret-scan-branch: scanned 670ec219..f630e216 against origin/main: clean`。出力は scratch に保存(repo の外) |
-| `/org` skill の 4 面 | 同一バイト |
-| `docs/tech-debt/README.md` の新しい 7 行と 7c-1 の行 | 区切りの縦線はどの行も 6 つ(5 列)。参照する plan と report は実在する。行が挙げる関数とテストの名前はコードに実在する |
-| この report を書く前の変更 8 ファイルの U+FFFD、差分の `/Users/` と `hiroki.yoshioka` | どちらも 0 件 |
+| `./scripts/run-static-verify.sh` | 終了コード 0。scope は changed(golang)。tech-debt の plan の参照 OK、gofmt ok、golangci-lint(`0 issues.`)、`secret-scan-branch: scanned 670ec219..cf5aae54 against origin/main: clean`。出力は scratch に保存(repo の外) |
+| `/org` skill の 4 面 | `cmp` で同一バイト(`.claude` と `.agents`、root と template) |
+| `docs/tech-debt/README.md` の 276 行目以降 | 区切りの縦線はどの行も 6 つ(5 列)。新しい 2 行が挙げる関数とテストの名前(`regateHeadNotOnOrigin`・`regateIsOwnMerge`・`regateCheckOriginHead`・`newTestWatchRun`、`TestRegate_AFailedPushIsNotRetriedPastWhatChanged`・`TestRegate_AGateOnlyHeadIsNotPushedAgainOnceOriginLeftIt`)はコードに実在する。D3 の 3 つの関数は `internal/org/regate_inway.go`、`regateMergeTip` は `internal/org/regate_merge.go` にある。参照する plan と report は実在する |
+| この report を書く前の変更 6 ファイルの U+FFFD、差分の `/Users/` と `hiroki.yoshioka` | どちらも 0 件 |
 | `git diff --check` | 出力なし、終了コード 0 |
 
 `./scripts/verify.local.sh` は走らせていない。変えたのは文書と skill の写しだけで、`run-static-verify.sh` が同じ範囲の検査(skill の lock-step、template の一致、tech-debt の plan の参照、secret scan)を含んで通っている。
@@ -71,4 +70,4 @@ tech-debt の新しい行は、コードに当てて確かめてから書いた�
 ## Verdict
 
 - Verdict: pass(sync-docs に stop condition はない)
-- Not verified: Go のテスト(コードを変えていないので走らせていない。verify と test の report が先行している)。tech-debt の (b) の逆向き(merge が書くのに merge-tree が挙げないパス)と (e) の 2 つ目(入れ子の repository)を regate の binary で打つこと、`-s ours` 以外の `mergeOptions` の効き方
+- Not verified: Go のテスト(コードを変えていないので走らせていない。verify と test の report が先行している)。tech-debt の(e)の 2 つの場合(leader の記録と regate の merge commit が、origin を戻されたあとに push し直されること)を regate の binary で打つこと(読んで導いたまま)
