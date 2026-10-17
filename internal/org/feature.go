@@ -26,7 +26,9 @@ import (
 //     checkSpawnInput, the watch gate (Org.WatchGate, when set;
 //     watchgate.go), then spawnPrecheckErr on an unlocked read of the
 //     manifest: max_orgs, max_total_seats, the reservation and its binding,
-//     and the rest of what Spawn refuses;
+//     and the rest of what Spawn refuses, then regateSpawnErr: no
+//     `ralph org regate` runs on the org_id (plan 2026-10-16-org-regate,
+//     D9; a regate that starts after this is refused by the Spawn of 6);
 //  3. the ralph-worktree.sh record of the worktree: an existing one is reused
 //     only when it was made for the same split plan feature, at the same path
 //     on the same branch, and that branch is checked out there;
@@ -209,6 +211,9 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 		return res
 	}
 	if err := spawnPrecheckErr(o.Config, checked, rr.Events); err != nil {
+		return refuse(err)
+	}
+	if err := regateSpawnErr(filepath.Dir(o.Manifest.Path()), orgID); err != nil {
 		return refuse(err)
 	}
 

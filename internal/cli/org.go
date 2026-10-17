@@ -42,13 +42,16 @@ func newOrgCmd() *cobra.Command {
 			"scripts on the head a feature org's leader pushes and records which head\n" +
 			"passed on which base. `ralph org merge-order` lists the feature branches\n" +
 			"in the order their PRs may be merged, from those records and origin's\n" +
-			"branches. `ralph org director` registers the interactive session the\n" +
-			"human talks to as the director of the ledger, or launches a headless\n" +
-			"director in herdr (ralph org director start), or with\n" +
-			"[org.director].launch_cmd in the terminal that command opens.",
+			"branches. `ralph org regate` merges the default branch into a disbanded\n" +
+			"feature org's branch, runs the gate on it, and pushes it, so a branch\n" +
+			"another PR's merge moved behind is ready again. `ralph org director`\n" +
+			"registers the interactive session the human talks to as the director\n" +
+			"of the ledger, or launches a headless director in herdr (ralph org\n" +
+			"director start), or with [org.director].launch_cmd in the terminal\n" +
+			"that command opens.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's)")
 
@@ -68,6 +71,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgApproveCmd(&stateDir, &configPath),
 		newOrgDirectorCmd(&stateDir, &configPath),
 		newOrgGateCmd(&orgID, &stateDir, &configPath),
+		newOrgRegateCmd(&stateDir, &configPath),
 		newOrgMergeOrderCmd(&stateDir, &configPath),
 	)
 
@@ -668,7 +672,11 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"the org was started) is per-plan, a spawn of a seat whose role is\n" +
 			"implementer is also refused until an approval recorded with\n" +
 			"`ralph org approve` since the org's last disband matches the plan\n" +
-			"file. Either refusal, --dry-run included, is recorded as `rejected`.",
+			"file. Either refusal, --dry-run included, is recorded as `rejected`.\n" +
+			"\n" +
+			"A spawn (not a --dry-run) into an org is refused, with nothing\n" +
+			"recorded, while `ralph org regate` works on that org's branch; run\n" +
+			"the spawn again once the regate ends.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -855,6 +863,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"main worktree root when it has one, logging to <state dir>/watch.log)\n" +
 			"and waits up to 10s for it, and it is refused when a watch holds the\n" +
 			"lock but is stale, stopping, or a --once run.\n" +
+			"\n" +
+			"Both forms are refused, with nothing recorded, while\n" +
+			"`ralph org regate` works on the org's branch; run start again once\n" +
+			"the regate ends.\n" +
 			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {

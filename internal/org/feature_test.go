@@ -1235,6 +1235,67 @@ func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 	}
 }
 
+// TestStartFeature_RefusedWhileRegateRunsOnTheOrg covers AC13 for start
+// (plan docs/plans/active/2026-10-16-org-regate.md, D9), on the ledger of
+// newRegateSpawnFixture (spawn_test.go): with a Regate of feat/auth stopped
+// right after its first check, a start whose org_id is auth is refused
+// before the worktree is looked up or ensured, with nothing recorded and no
+// driver called, and a start of another org_id goes through. A Regate that
+// starts after that check, while ensure runs, is refused by the leader
+// spawn, whose error says that the worktree stays.
+func TestStartFeature_RefusedWhileRegateRunsOnTheOrg(t *testing.T) {
+	regateRefusal := func(st *featureStart) string {
+		return `org: org_id "auth" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(st.stateDir) +
+			` holds the regate's marker): wait for the regate to end and run the same command again`
+	}
+	t.Run("before ensure", func(t *testing.T) {
+		fx := newRegateSpawnFixture(t)
+		st := newFeatureStartIn(t, fx.stateDir)
+		finish := stopRegateAt(t, fx, &regateTestHooks.afterFirstCheck)
+		p := st.params("auth-core")
+		p.OrgID = "auth"
+		before, manifest := takeSpawnSnapshot(t, st.o, st.h, st.a), fileOrAbsent(t, st.o.Manifest.Path())
+		assertStartRefused(t, st.o.StartFeature(p), regateRefusal(st))
+		st.wantCalls(t)
+		if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before || fileOrAbsent(t, st.o.Manifest.Path()) != manifest {
+			t.Fatalf("a refused start recorded or called something: %+v -> %+v", before, after)
+		}
+
+		st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+		if res, err := finish(); err != nil || !res.Passed {
+			t.Fatalf("regate = %+v, %v; want its gate_passed", res, err)
+		}
+	})
+	t.Run("a regate that starts during ensure", func(t *testing.T) {
+		fx := newRegateSpawnFixture(t)
+		st := newFeatureStartIn(t, fx.stateDir)
+		var finish func() (RegateResult, error)
+		st.wt.ensureHook = func() { finish = stopRegateAt(t, fx, &regateTestHooks.afterFirstCheck) }
+		p := st.params("auth-core")
+		p.OrgID = "auth"
+		before, manifest := takeSpawnSnapshot(t, st.o, st.h, st.a), fileOrAbsent(t, st.o.Manifest.Path())
+		res := st.o.StartFeature(p)
+		if finish == nil {
+			t.Fatalf("start = %+v without ensure; want it to reach ensure", res.Spawn)
+		}
+		wt := st.worktree("auth")
+		hint := "; the worktree " + wt + " and its branch fix/auth-core stay: running the same start again reuses them, " +
+			"and ./scripts/ralph-worktree.sh cleanup --id org-auth removes them if they are not needed"
+		if res.Spawn.Outcome != SpawnOutcomeRejected || res.Spawn.Err == nil || res.Spawn.Err.Error() != regateRefusal(st)+hint {
+			t.Fatalf("start = %+v\nwant the rejection %q", res.Spawn, regateRefusal(st)+hint)
+		}
+		if res.Worktree != wt {
+			t.Fatalf("expected the worktree in the result, got %q", res.Worktree)
+		}
+		if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before || fileOrAbsent(t, st.o.Manifest.Path()) != manifest {
+			t.Fatalf("a refused leader spawn recorded or called something: %+v -> %+v", before, after)
+		}
+		if res, err := finish(); err != nil || !res.Passed {
+			t.Fatalf("regate = %+v, %v; want its gate_passed", res, err)
+		}
+	})
+}
+
 // TestSpawnPrecheckErr_MatchesSpawn keeps spawnPrecheckErr in step with
 // Spawn: on the same ledger, the pre-check returns nil exactly when Spawn
 // goes on (spawned or idempotent), and otherwise Spawn's own refusal. The

@@ -17,10 +17,11 @@ import (
 	"time"
 )
 
-// How Gate (gate.go) runs the gate scripts: the log under <state-dir>/gates/
-// (createGateLog), the environment the scripts get (gateScriptEnv), each
-// script in a process group of its own (runGateScript), and the tail of the
-// failing script's output (gateOutput).
+// How Gate (gate.go) and Regate (regate.go) run the gate scripts: the log
+// under <state-dir>/gates/ (createGateLog), the environment the scripts get
+// (gateScriptEnv), each script in a process group of its own
+// (runGateScript), and the tail of the failing script's output (gateOutput).
+// The log's lines and the errors name the verb that runs them (gateWording).
 
 const (
 	// gateLogDir is the directory under the org state dir that holds the
@@ -87,15 +88,16 @@ func gateEnvValue(env []string, key string) string {
 // <state-dir>/gates/ (state-dir is the manifest's directory, made absolute):
 // <org_id>-<UTC time, gateLogTimeLayout>.log, or the same name with -2, -3,
 // ... before .log when one exists, created with O_EXCL so two gates never
-// share a log. It returns the log's absolute path and the open file.
-func (o *Org) createGateLog(orgID string) (string, *os.File, error) {
+// share a log. It returns the log's absolute path and the open file. An
+// error starts with w.prefix.
+func (o *Org) createGateLog(orgID string, w gateWording) (string, *os.File, error) {
 	stateDir, err := absPath(filepath.Dir(o.Manifest.Path()))
 	if err != nil {
-		return "", nil, fmt.Errorf("org: gate: resolve the state dir for the gate log: %w", err)
+		return "", nil, fmt.Errorf("%sresolve the state dir for the gate log: %w", w.prefix, err)
 	}
 	dir := filepath.Join(stateDir, gateLogDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("org: gate: create the gate log dir %s: %w", dir, err)
+		return "", nil, fmt.Errorf("%screate the gate log dir %s: %w", w.prefix, dir, err)
 	}
 	name := orgID + "-" + o.nowTime().UTC().Format(gateLogTimeLayout)
 	for n := 1; n <= gateLogMaxSuffix; n++ {
@@ -108,10 +110,10 @@ func (o *Org) createGateLog(orgID string) (string, *os.File, error) {
 			return path, f, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
-			return "", nil, fmt.Errorf("org: gate: create the gate log %s: %w", path, err)
+			return "", nil, fmt.Errorf("%screate the gate log %s: %w", w.prefix, path, err)
 		}
 	}
-	return "", nil, fmt.Errorf("org: gate: create the gate log: %d logs named %s already exist in %s", gateLogMaxSuffix, name, dir)
+	return "", nil, fmt.Errorf("%screate the gate log: %d logs named %s already exist in %s", w.prefix, gateLogMaxSuffix, name, dir)
 }
 
 // gateRun is what runGateScripts found.
@@ -124,40 +126,42 @@ type gateRun struct {
 // script in t.root (runGateScript), with env, writing a header line before
 // each and its exit status after it to log, and their output in between.
 // When a script left processes running that runGateScript stopped, a line
-// after its exit status says so; its exit status stands.
-// The error is ctx's when it is done, or a log write that failed.
-func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer) (gateRun, error) {
+// after its exit status says so; its exit status stands. The log's lines
+// name w.verb ("ralph org gate").
+// The error is ctx's when it is done, or a log write that failed, which
+// starts with w.prefix.
+func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writer, w gateWording) (gateRun, error) {
 	header := func(format string, args ...any) error {
 		if _, err := fmt.Fprintf(log, format, args...); err != nil {
-			return fmt.Errorf("org: gate: write the log: %w", err)
+			return fmt.Errorf("%swrite the log: %w", w.prefix, err)
 		}
 		return nil
 	}
-	if err := header("# ralph org gate\n# worktree: %s\n# branch: %s\n# head: %s\n# base: %s %s\n",
-		t.root, t.branch, t.head, t.base.ref, t.base.sha); err != nil {
+	if err := header("# %s\n# worktree: %s\n# branch: %s\n# head: %s\n# base: %s %s\n",
+		w.verb, t.root, t.branch, t.head, t.base.ref, t.base.sha); err != nil {
 		return gateRun{}, err
 	}
 	for _, s := range []struct{ rel, reason string }{
 		{GateStaticScript, GateReasonStaticFailed},
 		{GateTestScript, GateReasonTestFailed},
 	} {
-		if err := header("\n==> ralph org gate: running ./%s\n", s.rel); err != nil {
+		if err := header("\n==> %s: running ./%s\n", w.verb, s.rel); err != nil {
 			return gateRun{}, err
 		}
 		out := &gateOutput{log: log}
-		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out)
+		code, strays, err := runGateScript(ctx, t.root, s.rel, env, out, w.verb)
 		if err != nil {
-			_ = header("\n==> ralph org gate: ./%s interrupted\n", s.rel)
+			_ = header("\n==> %s: ./%s interrupted\n", w.verb, s.rel)
 			return gateRun{}, err
 		}
 		if out.err != nil {
-			return gateRun{}, fmt.Errorf("org: gate: write the log: %w", out.err)
+			return gateRun{}, fmt.Errorf("%swrite the log: %w", w.prefix, out.err)
 		}
-		if err := header("\n==> ralph org gate: ./%s exited %d\n", s.rel, code); err != nil {
+		if err := header("\n==> %s: ./%s exited %d\n", w.verb, s.rel, code); err != nil {
 			return gateRun{}, err
 		}
 		if strays {
-			if err := header("==> ralph org gate: stopped the processes ./%s left running after it exited\n", s.rel); err != nil {
+			if err := header("==> %s: stopped the processes ./%s left running after it exited\n", w.verb, s.rel); err != nil {
 				return gateRun{}, err
 			}
 		}
@@ -175,9 +179,10 @@ func runGateScripts(ctx context.Context, t gateTarget, env []string, log io.Writ
 // is still there gateKillGrace later gets SIGKILL (stopGateGroup); the error
 // is then ctx's. When the script exits on its own but leaves processes in its
 // group (a background job it did not wait for), they are stopped the same way
-// (stopGateStrays) and strays is set; the exit code stands. Release builds
-// target darwin and linux only, where Setpgid and kill(-pgid) exist.
-func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer) (code int, strays bool, err error) {
+// (stopGateStrays) and strays is set; the exit code stands. The lines it
+// writes to out name verb ("ralph org gate"). Release builds target darwin
+// and linux only, where Setpgid and kill(-pgid) exist.
+func runGateScript(ctx context.Context, root, rel string, env []string, out io.Writer, verb string) (code int, strays bool, err error) {
 	cmd := exec.CommandContext(ctx, filepath.Join(root, filepath.FromSlash(rel)))
 	cmd.Args[0] = "./" + rel
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = root, env, out, out
@@ -203,11 +208,11 @@ func runGateScript(ctx context.Context, root, rel string, env []string, out io.W
 		return 0, false, context.Cause(ctx)
 	}
 	if cmd.ProcessState == nil {
-		_, _ = fmt.Fprintf(out, "ralph org gate: ./%s could not run: %v\n", rel, runErr)
+		_, _ = fmt.Fprintf(out, "%s: ./%s could not run: %v\n", verb, rel, runErr)
 		return -1, false, nil
 	}
 	if errors.Is(runErr, exec.ErrWaitDelay) {
-		_, _ = fmt.Fprintf(out, "ralph org gate: a process ./%s started still held its output %s after it exited\n", rel, gateKillGrace)
+		_, _ = fmt.Fprintf(out, "%s: a process ./%s started still held its output %s after it exited\n", verb, rel, gateKillGrace)
 	}
 	return cmd.ProcessState.ExitCode(), stopGateStrays(cmd.Process.Pid), nil
 }

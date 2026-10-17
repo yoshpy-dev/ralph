@@ -4473,3 +4473,216 @@ func TestOrgSpawn_Reserve_DryRunPreviewsAndHoldsNothing(t *testing.T) {
 	}
 	spawnLeaderIn(t, o, h, "org-c", "ws-c", "pane-c", "docs/")
 }
+
+// The spawn's side of D9 of plan docs/plans/active/2026-10-16-org-regate.md
+// (AC13): while `ralph org regate` runs on a branch, a spawn of the branch's
+// org is refused with nothing recorded, and a spawn of any other org goes
+// through. feature_test.go covers `ralph org start --plan`.
+
+// newRegateSpawnFixture is newRegateFixture (regate_test.go: Regate of
+// feat/auth of the disbanded org auth) with a `stopped` for auth's leader,
+// as Disband leaves a seat. newRegateFixture's `disbanded` follows no
+// `stopped`, which leaves the leader `spawned`, as an older ralph's ledger
+// does, and makes a spawn of it the idempotent return, which comes before
+// the regate check.
+func newRegateSpawnFixture(t *testing.T) *regateFixture {
+	t.Helper()
+	fx := newRegateFixture(t)
+	fx.appendEvents(t, ManifestEvent{TS: fx.o.now(), OrgID: "auth", SeatID: LeaderIdentity, Event: EventStopped})
+	return fx
+}
+
+// testOrgIn is testOrg with its manifest and receipts in stateDir.
+func testOrgIn(t *testing.T, stateDir string) (*Org, *fakeHerdr, *fakeAgmsg) {
+	t.Helper()
+	o, h, a := testOrg(t)
+	o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
+	o.Receipts = NewReceiptStoreAtPath(filepath.Join(stateDir, "receipts.jsonl"))
+	return o, h, a
+}
+
+// stopRegateAt runs Regate of fx's feat/auth in a goroutine and returns once
+// Regate is in hook (one of regateTestHooks), where it waits. finish lets it
+// go on and returns what it returned; a cleanup calls finish when the test
+// did not.
+func stopRegateAt(t *testing.T, fx *regateFixture, hook *func()) (finish func() (RegateResult, error)) {
+	t.Helper()
+	reached, release := make(chan struct{}), make(chan struct{})
+	setRegateHook(t, hook, func() {
+		close(reached)
+		<-release
+	})
+	type outcome struct {
+		res RegateResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := fx.regate(context.Background())
+		done <- outcome{res, err}
+	}()
+	var once sync.Once
+	var got outcome
+	finish = func() (RegateResult, error) {
+		once.Do(func() {
+			close(release)
+			got = <-done
+		})
+		return got.res, got.err
+	}
+	// Registered after setRegateHook's cleanup, so it runs first: Regate
+	// has returned before the hook is cleared.
+	t.Cleanup(func() { _, _ = finish() })
+	select {
+	case <-reached:
+	case early := <-done:
+		once.Do(func() { got = early })
+		t.Fatalf("regate returned %+v, %v before it reached the hook", early.res, early.err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("regate did not reach the hook within 30s")
+	}
+	return finish
+}
+
+// assertRegateRefusedSpawn checks that r is the plain rejection of a spawn
+// of orgID while a regate of the ledger in stateDir runs on it: the error
+// says so and what to do, no receipt is named, and nothing changed since
+// before and manifest were taken (the manifest's bytes, the receipts, the
+// fake drivers' calls).
+func assertRegateRefusedSpawn(t *testing.T, r SpawnResult, orgID, stateDir string, o *Org, h *fakeHerdr, a *fakeAgmsg,
+	before spawnSnapshot, manifest string) {
+	t.Helper()
+	if r.Outcome != SpawnOutcomeRejected || r.Err == nil {
+		t.Fatalf("spawn of %s while a regate runs on it = %+v; want a rejection", orgID, r)
+	}
+	for _, want := range []string{
+		`org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(stateDir) +
+			` holds the regate's marker)`,
+		"wait for the regate to end and run the same command again",
+	} {
+		if !strings.Contains(r.Err.Error(), want) {
+			t.Errorf("error %q does not say %q", r.Err, want)
+		}
+	}
+	if r.ModelReceipt != (Receipt{}) {
+		t.Errorf("a refused spawn named the receipt %+v; want none", r.ModelReceipt)
+	}
+	if after := takeSpawnSnapshot(t, o, h, a); after != before {
+		t.Errorf("a refused spawn recorded or called something: %+v -> %+v", before, after)
+	}
+	if now := fileOrAbsent(t, o.Manifest.Path()); now != manifest {
+		t.Errorf("a refused spawn changed the manifest:\nbefore %s\nafter  %s", manifest, now)
+	}
+}
+
+// TestOrgSpawn_RefusedWhileRegateRunsOnTheOrg covers AC13 for spawn: with a
+// Regate of feat/auth stopped right after its first check (regate.lock held,
+// its marker naming auth) and right after its record, a spawn of a new seat
+// of auth is a plain rejection with nothing recorded and no driver called,
+// while a spawn of another org goes through. Regate then ends with its
+// gate_passed.
+func TestOrgSpawn_RefusedWhileRegateRunsOnTheOrg(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hook *func()
+	}{
+		{"after the first check", &regateTestHooks.afterFirstCheck},
+		{"right after the record", &regateTestHooks.afterRecord},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateSpawnFixture(t)
+			o, h, a := testOrgIn(t, fx.stateDir)
+			finish := stopRegateAt(t, fx, tc.hook)
+
+			before, manifest := takeSpawnSnapshot(t, o, h, a), fileOrAbsent(t, o.Manifest.Path())
+			r := o.Spawn(mustSpawnParams("auth", "worker-1"))
+			assertRegateRefusedSpawn(t, r, "auth", fx.stateDir, o, h, a, before, manifest)
+
+			if r := o.Spawn(mustSpawnParams("other", "seat-1")); r.Outcome != SpawnOutcomeSpawned || r.Err != nil {
+				t.Fatalf("spawn of another org while a regate runs = %+v; want it spawned", r)
+			}
+			if res, err := finish(); err != nil || !res.Passed {
+				t.Fatalf("regate = %+v, %v; want its gate_passed", res, err)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RegateLockStates covers which regate.lock refuses a spawn
+// (D9): only one held with a marker of the spawned org. One held with no
+// marker yet (a Regate waiting for the manifest lock), one held with
+// another org's marker, and a marker of the org left by a Regate that ended
+// (the lock free) all let the spawn go on.
+func TestOrgSpawn_RegateLockStates(t *testing.T) {
+	marker := func(orgID string) *regateMarker {
+		return &regateMarker{OrgID: orgID, Branch: "feat/" + orgID, Worktree: "/w/" + orgID, PID: os.Getpid()}
+	}
+	for _, tc := range []struct {
+		name    string
+		held    bool
+		marker  *regateMarker
+		refused bool
+	}{
+		{"held with no marker yet", true, nil, false},
+		{"held with another org's marker", true, marker("org-b"), false},
+		{"free with this org's marker", false, marker("org-a"), false},
+		{"held with this org's marker", true, marker("org-a"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			stateDir := filepath.Dir(o.Manifest.Path())
+			lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeRegateMarker(lock.f, tc.marker); err != nil {
+				t.Fatal(err)
+			}
+			if tc.held {
+				t.Cleanup(func() { _ = lock.release() })
+			} else if err := lock.release(); err != nil {
+				t.Fatal(err)
+			}
+
+			before, manifest := takeSpawnSnapshot(t, o, h, a), fileOrAbsent(t, o.Manifest.Path())
+			r := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+			if tc.refused {
+				assertRegateRefusedSpawn(t, r, "org-a", stateDir, o, h, a, before, manifest)
+				return
+			}
+			if r.Outcome != SpawnOutcomeSpawned || r.Err != nil {
+				t.Fatalf("spawn = %+v; want it spawned", r)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_RegateLockThatCannotBeCheckedRefuses: a regate.lock the spawn
+// cannot open refuses it with that error, nothing recorded, instead of
+// letting it go on unchecked.
+func TestOrgSpawn_RegateLockThatCannotBeCheckedRefuses(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root opens a file whatever its mode")
+	}
+	o, h, a := testOrg(t)
+	path := regateLockPathIn(filepath.Dir(o.Manifest.Path()))
+	if err := os.WriteFile(path, nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	before, manifest := takeSpawnSnapshot(t, o, h, a), fileOrAbsent(t, o.Manifest.Path())
+	r := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if r.Outcome != SpawnOutcomeRejected || !errors.Is(r.Err, os.ErrPermission) {
+		t.Fatalf("spawn = %+v; want a rejection wrapping the permission error", r)
+	}
+	for _, want := range []string{
+		`org: org_id "org-a" is not spawned: whether a ralph org regate runs on it is not known, since its lock ` + path + " could not be checked",
+		"make that file readable and run the same command again",
+	} {
+		if !strings.Contains(r.Err.Error(), want) {
+			t.Errorf("error %q does not say %q", r.Err, want)
+		}
+	}
+	if after := takeSpawnSnapshot(t, o, h, a); after != before || fileOrAbsent(t, o.Manifest.Path()) != manifest {
+		t.Fatalf("a refused spawn recorded or called something: %+v -> %+v", before, after)
+	}
+}

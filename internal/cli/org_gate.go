@@ -182,10 +182,30 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 	}
 
 	_, _ = fmt.Fprintf(w, "GATE: fail\nREASON: %s\nHEAD: %s\nBASE: %s\nLOG: %s\n", res.Reason, res.Head, res.Base, res.LogPath)
-	switch res.Reason {
+	printGateFailDetail(w, res.Reason, res.Tail, res.Dirty, gateCLIDetailWords)
+	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
+}
+
+// gateDetailWords is how printGateFailDetail words its next steps for the
+// verb that ran the gate: while is what nothing may change the worktree
+// during, again the step that runs the verb again.
+type gateDetailWords struct {
+	while, again string
+}
+
+// gateCLIDetailWords is ralph org gate's wording.
+var gateCLIDetailWords = gateDetailWords{while: "the gate runs", again: "run the gate again"}
+
+// printGateFailDetail prints the detail of a recorded gate_failed with
+// reason, after a blank line: the failing script's tail (static_failed,
+// test_failed), the files the scripts left with a hint (tree_changed), or one
+// line (head_moved), worded with words. The quoted lines are indented by two
+// spaces (printIndented).
+func printGateFailDetail(w io.Writer, reason string, tail, dirty []string, words gateDetailWords) {
+	switch reason {
 	case org.GateReasonStaticFailed, org.GateReasonTestFailed:
-		script := gateFailedScripts[res.Reason]
-		switch n := len(res.Tail); n {
+		script := gateFailedScripts[reason]
+		switch n := len(tail); n {
 		case 0:
 			_, _ = fmt.Fprintf(w, "\n%s printed nothing\n", script)
 		case 1:
@@ -193,19 +213,19 @@ func printGateResult(w io.Writer, res org.GateResult) error {
 		default:
 			_, _ = fmt.Fprintf(w, "\nlast %d lines of %s:\n", n, script)
 		}
-		printIndented(w, res.Tail)
+		printIndented(w, tail)
 	case org.GateReasonTreeChanged:
-		shown := res.Dirty[:min(len(res.Dirty), org.GateDirtyListLines)]
-		_, _ = fmt.Fprintf(w, "\nthe scripts left %d uncommitted change(s) or untracked file(s) in the feature worktree:\n", len(res.Dirty))
+		shown := dirty[:min(len(dirty), org.GateDirtyListLines)]
+		_, _ = fmt.Fprintf(w, "\nthe scripts left %d uncommitted change(s) or untracked file(s) in the feature worktree:\n", len(dirty))
 		printIndented(w, shown)
-		if more := len(res.Dirty) - len(shown); more > 0 {
+		if more := len(dirty) - len(shown); more > 0 {
 			_, _ = fmt.Fprintf(w, "  ... and %d more\n", more)
 		}
-		_, _ = fmt.Fprintln(w, "hint: when the scripts write these files, add their paths to .gitignore and commit that; then run the gate again")
+		_, _ = fmt.Fprintln(w, "hint: when the scripts write these files, add their paths to .gitignore and commit that; then "+words.again)
 	case org.GateReasonHeadMoved:
-		_, _ = fmt.Fprintln(w, "\nHEAD moved while the scripts ran: commit, reset, or switch nothing in the feature worktree while the gate runs, and run it again")
+		_, _ = fmt.Fprintln(w, "\nHEAD moved while the scripts ran: commit, reset, or switch nothing in the feature worktree while "+words.while+
+			", and run it again")
 	}
-	return fmt.Errorf("org: gate: recorded gate_failed (reason=%s); nothing to push until the gate passes", res.Reason)
 }
 
 // printIndented prints each of lines (none holds a line break) on its own

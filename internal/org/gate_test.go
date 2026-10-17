@@ -742,7 +742,7 @@ func TestGate_BaseResolution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newGateFixture(t)
 			tc.setup(t, fx)
-			got, found, err := resolveGateBase(context.Background(), fx.worktree)
+			got, found, err := resolveGateBase(context.Background(), gateWords.prefix, fx.worktree)
 			wantSHA := gitOut(t, fx.worktree, "rev-parse", tc.baseRef)
 			if want := (gateBase{branch: tc.branch, ref: tc.baseRef, sha: wantSHA}); err != nil || !found || got != want {
 				t.Fatalf("resolveGateBase = %+v, %v, %v; want %+v", got, found, err, want)
@@ -760,10 +760,44 @@ func TestGate_BaseResolution(t *testing.T) {
 		fx := newGateFixture(t)
 		git(t, fx, "remote", "remove", "origin")
 		git(t, fx, "branch", "--quiet", "-D", "main")
-		if got, found, err := resolveGateBase(context.Background(), fx.worktree); err != nil || found || got != (gateBase{}) {
+		if got, found, err := resolveGateBase(context.Background(), gateWords.prefix, fx.worktree); err != nil || found || got != (gateBase{}) {
 			t.Fatalf("resolveGateBase = %+v, %v, %v; want none found", got, found, err)
 		}
 	})
+}
+
+// TestGateGitHelpers_ErrorsStartWithTheCallersPrefix covers the prefix the
+// git helpers Gate and Regate share take: Gate's "org: gate: " or Regate's
+// "org: regate: " starts each error, here of git run outside a repository
+// and, for gateGit, of git stopped by a done context.
+func TestGateGitHelpers_ErrorsStartWithTheCallersPrefix(t *testing.T) {
+	isolateGitEnv(t)
+	dir := resolved(t, t.TempDir())
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	bg := context.Background()
+	done, cancel := context.WithCancel(bg)
+	cancel()
+	for _, prefix := range []string{gateWords.prefix, regatePrefix} {
+		calls := []struct {
+			name string
+			call func() error
+		}{
+			{"gateGit", func() error { _, err := gateGit(done, prefix, dir, "status"); return err }},
+			{"gateGitOutput", func() error { _, err := gateGitOutput(bg, prefix, dir, "status"); return err }},
+			{"gateHead", func() error { _, err := gateHead(bg, prefix, dir); return err }},
+			{"gateDirtyLines", func() error { _, err := gateDirtyLines(bg, prefix, dir); return err }},
+			{"gateRefExists", func() error { _, err := gateRefExists(bg, prefix, dir, "refs/heads/main"); return err }},
+			{"resolveGateBase", func() error { _, _, err := resolveGateBase(bg, prefix, dir); return err }},
+			{"gateGitPathExists", func() error { _, err := gateGitPathExists(bg, prefix, dir, "a merge", "MERGE_HEAD"); return err }},
+			{"gateRebaseInProgress", func() error { _, err := gateRebaseInProgress(bg, prefix, dir); return err }},
+			{"gateCheckAfter", func() error { _, _, err := gateCheckAfter(bg, prefix, gateTarget{root: dir}); return err }},
+		}
+		for _, c := range calls {
+			if err := c.call(); err == nil || !strings.HasPrefix(err.Error(), prefix+"git ") {
+				t.Errorf("%s with the prefix %q = %v; want an error starting with %q", c.name, prefix, err, prefix+"git ")
+			}
+		}
+	}
 }
 
 // TestGate_ManifestLockNotHeldWhileScriptsRun covers AC5's first half: while
@@ -1417,6 +1451,36 @@ func TestGateRecordDetails_RoundTrip(t *testing.T) {
 		if r, ok := gateRecordFromDetails(tc.details); !ok || r.Log != tc.log || r.Head != sha1 {
 			t.Errorf("%s: %q read as %+v (%v); want it read with log %q", tc.name, tc.details, r, ok, tc.log)
 		}
+	}
+}
+
+// TestGateRecordDetails_Via covers the via= of a record ralph org regate
+// writes (plan docs/plans/active/2026-10-16-org-regate.md, D6): it comes
+// right before log=, so a log path holding " via=" and " log=" is still read
+// whole, and it reads back on a pass and a failure; a record without it keeps
+// the Details ralph org gate wrote before via existed, byte for byte, and via
+// given twice does not read.
+func TestGateRecordDetails_Via(t *testing.T) {
+	sha1, sha1b := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	r := gateRecord{Head: sha1, Base: sha1b, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", By: "alice",
+		Log: `/my state/a " via=x log=y.log`}
+	const fields = " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset "
+	if got, want := r.details(), "head="+sha1+" base="+sha1b+fields+"log="+strconv.Quote(r.Log); got != want {
+		t.Fatalf("details without via = %q\nwant                %q", got, want)
+	}
+	r.Via = gateViaRegate
+	if got, want := r.details(), "head="+sha1+" base="+sha1b+fields+"via=regate log="+strconv.Quote(r.Log); got != want {
+		t.Fatalf("details with via = %q\nwant             %q", got, want)
+	}
+	for _, reason := range []string{"", GateReasonTestFailed} {
+		r.Reason = reason
+		if got, ok := gateRecordFromDetails(r.details()); !ok || got != r {
+			t.Errorf("details %q read back as %+v (%v); want %+v", r.details(), got, ok, r)
+		}
+	}
+	twice := strings.Replace(r.details(), " via=regate", " via=regate via=regate", 1)
+	if got, ok := gateRecordFromDetails(twice); ok {
+		t.Errorf("%q read as %+v; want via given twice refused", twice, got)
 	}
 }
 
