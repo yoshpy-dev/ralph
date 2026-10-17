@@ -119,12 +119,67 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 4 件。
 
 _(上の変更は report だけで、`docs/tech-debt/` には追記していない。)_
 
+## Cycle 2 re-review (S8、b1cbe054..298095c6)
+
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプライン cycle 2)
+- Scope: `git diff b1cbe054..298095c6`(HEAD 298095c6、24 ファイル、+994/-395)。d8e6afb3(計画)、S8a 9506ec64、S8b b2f0b534、S8c 320b4d75、298095c6(`AGENTS.md` と計画)。cycle 1 のコードで S8 が触っていない部分は見ていない。diff の品質だけを見た。テスト、静的解析、`gh` は走らせていない
+
+### Evidence reviewed
+
+- 全文を読んだ: `internal/org/merge_wait.go`(271 行)。`merge_run.go` の `Merge`・`mergeLocked`・`mergeAndRecord`・`otherHeadMerged`、`merge.go` の `checkMerge`・`checkMergeBranch`・`runningRefusal`・`mergeRefusalKind`、`mergeenforce.go` の `enforce`・`readEnforcementRepository`・`enforceClassic`、`org_merge.go` の `printMergeResult`
+- diff を読んだ: 上の 3 ファイルの残り、`internal/cli/org_merge.go`(help)、テスト(`merge_test.go`、`merge_run_test.go`、`merge_wait_test.go`、`mergeenforce_test.go`、`internal/cli/org_merge_test.go`、`director_skill_sync_test.go`)、README、`AGENTS.md`、仕様の注、tech-debt の 292・295 行目、計画。`/director` と `/org` の skill は変わった箇所と、`merge` の行の全文
+- 機械的な確認: `git diff --check b1cbe054..HEAD` は空。追加行に TODO・FIXME・print・`/Users/` はない。skill の 4 面は director、org とも `cmp` で一致。tech-debt の変わった 2 行(292、295)は 5 セルで、`|` の escape 漏れはない。tech-debt 292 行目の行数(merge_test.go 911、merge_run_test.go 1006、merge_wait_test.go 800、mergeenforce.go 318、mergeenforce_test.go 483)は `wc -l` と合う
+- 古い名前: `mergeChecksKind` と `mergeChecks{Other,Pending,Zero,NotPassed,Unread}` は `.go` に残っていない(`grep`)。残りは計画の S7 の進捗 1 行(195 行目。S8 の行が続けて改名を言う)と過去の report だけ。`mergeChecksText`(`mergeguarantee.go`)は別の関数
+
+### 前回の finding の判定
+
+- R1〜R4(S6・S7 の再レビュー): 97a1a062 で直っている。R1 の 3 か所は書き直され、R2 は `merge_wait.go:149` が `mergeWaitDuration` を通し、R4 の `waitFor` と `mergeInterrupted` は `merge_run.go:154-158` と `merge_wait.go:176` にある。R1 で書き直した文が S8c で足りなくなった点だけが新しい finding(C2-1)
+
+### 依頼された点の確認(finding にならなかったもの)
+
+1. `orgWaitEnd` がロックなしで台帳を読む: `checkMergeBranch` も `readMergeLedger(o.Manifest.Path())` をロックなしで呼ぶので、読み方は同じ。`readJSONLines` は読むだけで、壊れた行は数えて飛ばす。追記の途中の行に当たると、その周回は disband を見落とすだけで、30 秒後の次の周回が拾う。共有の状態を書く経路はない(`readMergeLedger`、`RunningOrgs`、`collectMergeTargets` は渡された events を読み、書くのは関数の中で作る map とスライスだけ。`mergeorder.go:423-495` を読んだ)。`checkMerge` は `corruptAfterGate` で壊れた行を見るが、`orgWaitEnd` が見るのは running と `orgRunsOn` だけなので影響しない
+2. step 8 の部分的な `mergeReady`: `checkMergeBranch` が step 8 で返す `r` は branch、origin の host と repo、`orgID` だけで、`prNumber`・`head` は空。呼び出し側で読むものは `wait` の `f.r.orgID` と `f.r.branch`(`orgWaitEnd` の中)、`waitedOut` の `r.orgID` だけで、0 の PR 番号や空の head を使う場所はない。`orgRunsOn` の断り(kind は Other)は `checkMerge` が `mergeReady{}` に落とす(`!kind.waits()`)。`TestCheckMerge_OrgThatStillRunsIsWaitedFor` が `r.branch`・`r.orgID`・`r.repoArg` を、`TestCheckMerge_RefusesWithNothingAfterTheFailingCheck` が空の `r` と `kind.waits() == false` を見る。型の注と `wait` の組み立て方は C2-3
+3. `waitedFor` の重複除去と文: `forWhat`(`the checks`、または `org_id "x" to be disbanded`)で除き、`" and for "` でつなぐので、「waited 1m10s for org_id "org-a" to be disbanded and for the checks (--wait-checks 1m10s)」と読める(テストが固定)。同じ待ちが 2 回目に起きても 1 回しか出ない。別の待ちを挟んで同じ org に戻ると、並びは初めて起きた順になる(まれで、文は崩れない)。開始行の `left` は `mergeWaitDuration(max(w.deadline.Sub(start), 0))` で、2 回目は残りを秒に丸める(テストは 40s)
+4. S8b: `otherHeadMerged` は `res.Merged` を立てず、`res.Failed` だけを返す。`printMergeResult` は `res.Merged` のときだけ `MERGED:` の行を出すので、行は出ない。`headRefOid` が空か欠けているときは別の文(「with no head, so whether … is unknown」)で、同じ分岐に入る(テスト 2 件)。head の比較は `viewPR`(step 9)と同じ完全一致で、gate の head は `gitObjectPattern`(小文字)で検査済みなので、大文字小文字で誤って「別の head」になる道はない。gh から来た head は `failed()` の `PrintableInboxText` を通る(制御文字のテストがある)
+5. S8a: `permissions.admin` を読む struct field、戻り値、`enforceClassic` の引数、`admin == nil` と `!*admin` の分岐は、コードから消えている。help、README、仕様の注、skill、tech-debt 295 行目、計画の D11・AC5 は enforce_admins を admin によらず求める形に揃っている。残りは古い fixture だけ(C2-4)
+6. 改名: 上の「古い名前」のとおり。`mergeRefusalKind` の 6 つの定数の doc と `waits()` の doc は、新しい kind に合わせて書き直されている
+7. skill の 4 面と動詞: director と org の `SKILL.md` は 4 面とも `cmp` で一致。org の `merge` の行は、org の待ちを「台帳だけを 30 秒ごとに読み、org が disband するか、ほかの機能で走り出すか、台帳が読めなくなるまで」と書き、`orgWaitEnd` の 3 つの終わり方と合う。時間切れの断りが `ralph org status --org-id <org>` を添え、disband は人が決める、という文は `waitedOut` と合う。director の skill は disband を打たずに人に伝えると書き、pin テスト(`directorSkillAutoMergeSteps`)が 2 文を固定する。「ほかの機能で走っている org は待たない」は、結びつきのあるブランチだけで成り立つ(C2-2)
+
+## Cycle 2 findings
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 6 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | C2-1: S8c で `regate.lock` を外す待ちが 2 つになったが、「待つ間は外す」と書いた 3 か所のコメントは「PR の検査を待つ間」のままで、org の disband を待つ間も外れることが読めない。3 か所とも cycle 1 の R1 の直し(97a1a062)が書いた文で、S8 の diff に入っていない。regate が走れる間を知りたい人に、org の待ちの間は走れないと読める。S6・S7 の R1 と同じ形(待ちを足した変更が、待ちの数を言い切った別ファイルの文を残す) | `internal/org/lockfile.go:136-137`(「releases it while it waits for the PR's checks (merge_wait.go)」)、`internal/org/regate.go:95-97`、`internal/org/spawn.go:1325-1326`(「but not while --wait-checks waits for the PR's checks」)。`git diff --stat b1cbe054 HEAD -- internal/org/lockfile.go internal/org/regate.go internal/org/spawn.go` は空。外す側は `merge_run.go` の `Merge` のループ(`wait` はロックの外) | 3 か所を「検査を待つ間と、org の disband を待つ間」に直す。次に待ちが増えても残らないよう、`merge_wait.go` の先頭に「`regate.lock` を外す待ちはこのファイルのものだけ」と書き、3 か所は `merge_wait.go` を指す形にしてもよい |
+| LOW | maintainability | C2-2: 「ほかの機能で走っている org は待たない」は、結びつき(binding)のあるブランチでだけ成り立つ。`orgRunsOn` は `t.binding != nil` のときしか立たない(`collectMergeTargets`)ので、gate の記録だけを持つブランチは、その org がほかの機能で走っていても step 8 は待つ種類(`mergeRefusalOrgRunning`)になり、`orgWaitEnd` も「ほかの機能」を見分けられず、予算(director は 60 分)まで待つ。その間 director は skill のとおりほかの merge も regate も打たず、時間切れの断りは「its leader may still push to the branch」と書く(その org は別のブランチを走らせている)。計画は進捗の 1 行(200 行目)に「安全側」と書いたが、help、README、skill、tech-debt にはなく、計画は `/pr` で archive される。現行の writer では gate の記録の前に結びつきがあるので、起きるのは台帳を手で直したときなどまれ(`TestCheckMerge_OrgThatStillRunsIsWaitedFor` の「gate-only branch」は org-b が feat/b を走らせている形で、この場合そのもの) | `internal/org/mergeorder.go:488-492`(`orgRunning` と `orgRunsOn` は `t.binding != nil` が前提)、`merge_wait.go:238-242`(`orgWaitEnd` は `targets[i].orgRunsOn` だけを見る)、`merge.go:489-504`(`runningRefusal` の `t.binding == nil` は `whose` の言い方を変えるだけ)、`merge_test.go` の `TestCheckMerge_OrgThatStillRunsIsWaitedFor`(ledger は `moBind("org-b", "b")` と `moPassed("org-b", "feat/a", ...)`)、計画 200 行目の末尾、`docs/tech-debt/README.md` に該当の行なし | tech-debt に 1 行足す(下の「Tech debt identified」)。直すなら `orgRunsOn` を `mergeTargetOrg(t)` の org でも立てる(merge-order の分類が変わるので別の変更) |
+| LOW | readability | C2-3: `wait` は、PR の検査の待ちの文(`the checks of PR #%d`、`f.r.prNumber`)を先に組み立ててから、org の待ちなら `what` と `forWhat` を上書きする。org の待ちでは `f.r.prNumber` は 0 で、「PR #0」の文字列が一度できる(使われはしない)。「何を待つか」の違いが `if f.kind == ...` の前後に散り、3 つ目の kind が待つ側に足されると、PR #0 の文がそのまま出る。`mergeReady` の型の doc は「every check passed のとき」のままで、待つ種類の断りでは途中までしか埋まらないこと(step 8 なら branch・origin・orgID だけ)が、`checkMerge` の doc にしか書かれていない。`mergeWaitFor.r` の doc にもない | `merge_wait.go:150`(`what, forWhat := fmt.Sprintf("the checks of PR #%d", f.r.prNumber), "the checks"`)と `:152-158`(org なら上書き)。`merge.go:94-96`(`mergeReady` の doc)、`merge_wait.go:80-85`(`mergeWaitFor`) | `switch f.kind` で `what`・`forWhat`・`read` を kind ごとに 1 か所で決める。`mergeReady` と `mergeWaitFor.r` の doc に「待つ種類の断りでは、断った step までに読んだ field だけが入る」と 1 文足す |
+| LOW | maintainability | C2-4: `permissions.admin` を読まなくなったのに、テストの fixture がその値を渡し続け、値が効くように読める。`meClassicExec(admin bool)` の引数は、呼び出し 4 か所が `false`(table の `meBool(false)` と 345 行目)と `true`(397、440 行目)を渡すが、どちらでも結果は同じ。table の `classic *bool` と `meBool` は nil か否かを運ぶだけになった。CLI の fixture と `merge_test.go` の fixture も `admin:false` を送る。値を変えて確かめる意図があるのは `TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller` の 4 つの caller だけ | `internal/org/mergeenforce_test.go:94-96`(`meClassicExec`)、`:105`(`meBool`)、`:170`(`classic *bool`)、`:285`・`:345`・`:397`・`:440`、`:82`(`newMEExec` の doc の「the caller, no admin」)。`internal/cli/org_merge_test.go:130`(`"permissions":{"admin":false}`)。`internal/org/merge_test.go:174` | `meClassicExec` から `admin` を外し、table の `classic` は `bool` にして `meBool` を消す。`newMEExec` の doc から「no admin」を外す。CLI と `merge_test.go` の fixture は `meRepoJSON` の admin を省くか、残すなら「読まれないことを pin する」と 1 行書く |
+| LOW | maintainability | C2-5: tech-debt 292 行目の Trigger は、S7 までは「merge のテストファイルの次の変更」だった。S8 がその次の変更になり、`merge_test.go` を 876 から 911、`merge_run_test.go` を 926 から 1006、`merge_wait_test.go` を 607 から 800 にしたが、fixture の移動は打たず、Trigger を「この計画のあとの次の変更(S8 はテストを足したが移動はしなかった)」に書き換えた。Trigger が起きるたびに書き換えると、行は動かない。`merge_wait_test.go` はちょうど 800 行で、次の 1 行で超える。code review の目安は 800 行未満 | `docs/tech-debt/README.md:292`(Debt、Trigger の両方に S8 の注)。`wc -l`(911、1006、800)と `wc -l` を b1cbe054 の各ファイルに打った値(876、926、607) | 移すのが機械的な作業(行に書いてある `merge_fake_test.go` への fake と fixture の移動)なら、cycle の中で打つ。打たないなら Trigger を「この PR が merge されたあとの最初の変更」のように、計画ではなく日付か出来事に結ぶ |
+| LOW | readability | C2-6: 小さな読みにくさが 4 つある。(a) `merge_run.go` の先頭コメントに、整形の途中の短い行がある(「passed (D4). Its gh calls run」)。(b) `Merge` の doc の文「a merge --match-head-commit keeps this gh pr merge from making」は、関係詞(that)が抜けて読みにくい。(c) `merge_wait.go` の先頭と `merge_wait_test.go` の org の待ちのテストが、根拠を AC11(`/director` skill)と書くが、動詞の org の待ちを定めるのは AC13。(d) テスト名 `TestCheckMerge_OrgThatStillRunsIsWaitedFor` は、`checkMerge` が待つかのように読める(実際は待つ kind を返すだけ) | (a)`merge_run.go:22-25`(23 行目と 25 行目の間に 24 行目だけ短い)。(b)`merge_run.go:121-124`。(c)`merge_wait.go:15`、`merge_wait_test.go:504`、計画の AC11・AC13。(d)`merge_test.go` の該当テスト | (a)再整形。(b)「a merge that --match-head-commit keeps this gh pr merge from making」。(c)AC13 を足す(D5 と AC11 は残してよい)。(d)`..._OrgThatStillRunsIsOfAKindThatWaits` のように、kind を見るテストだと分かる名前にする。どれも動作は変わらない |
+
+### Tech debt identified
+
+直さない場合に載せる行の案(`docs/tech-debt/` にはこの report からは追記していない)。これが cap の最終 run なので、直さない LOW は 1 行にまとめて載せる。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| C2-2: `ralph org merge --wait-checks` は、gate の記録だけを持ち結びつきのないブランチの org がほかの機能で走っているとき、それを見分けられず(`orgRunsOn` は `t.binding != nil` のときだけ立つ)、予算まで待ってから「leader がまだ push しうる」と断る | director が `--wait-checks 60m` で打つと、その間ほかの merge と regate を止めて 60 分待ち、断りの文も実情と違う。現行の writer では gate の記録の前に結びつきがあるので、台帳を手で直したときなどまれ | 見分けるには merge-order の分類(`orgRunsOn` の意味)を変える必要があり、このスライスの外。待つのは安全側 | `orgRunsOn` か merge-order の分類の次の変更、またはこの待ちが実際に起きたという報告 | 計画の D5・D13、この report の C2-2、`internal/org/mergeorder.go`(`collectMergeTargets`)、`internal/org/merge_wait.go`(`orgWaitEnd`) |
+| C2-1・C2-3〜C2-6 を直さない場合: `regate.lock` の待ちのコメント 3 か所、`wait` の組み立て、`admin` の fixture、292 行目の Trigger、先頭コメントの整形と名前 | 読み違えるだけで動作は変わらない | どれもコメント、テスト、名前で、cap の最終 run では直す手間のほうが大きい | `merge_wait.go`、`mergeenforce_test.go`、`merge_test.go` の次の変更 | この report の C2-1、C2-3〜C2-6 |
+
+_(上の変更は report だけで、`docs/tech-debt/` には追記していない。)_
+
 ## Recommendation
 
-- Merge: yes(CRITICAL、HIGH、MEDIUM はない)。前回の M1・M2・L1〜L8 は S6・S7 で直り、直し方に新しい問題はない。新しい LOW 4 件(R1 から R4)は、R1 のコメント 3 か所の訂正だけは `/verify` の前にまとめて直す価値がある。R2 から R4 は任意で、直さないなら tech-debt に 1 行
-- Follow-ups(再レビューのあと):
-  - R1 は 3 ファイルのコメント 1 語ずつ、R2 は 1 行とテスト 1 件。コードを触るなら、`/verify` の前にまとめて 1 コミットにできる
-  - insight event(`scripts/insights-append.sh`)は、report 以外を編集しない指示のため書いていない。再レビューの値は `--verdict pass --critical 0 --high 0 --medium 0 --low 4`
+- Merge: yes(cycle 2: CRITICAL、HIGH、MEDIUM はない。LOW 6 件)。S8a・S8b・S8c はコードとして正しい。`enforceClassic` は admin の値を読まず `enforce_admins` だけで決め、`mergeAndRecord` は MERGED でも head が違う(空を含む)と記録せず `Merged` も立てず、org の待ちは台帳だけをロックなしで読んで `checkMerge` と同じ読み方で終わる。新しい finding はどれも動作を変えない。C2-1(コメント 3 か所)と C2-2(tech-debt の行)は、`/verify` の前か `/pr` の前に 1 コミットでできる。ほかは任意で、直さないなら上の「Tech debt identified」の案を 1 行にして載せる
+- Follow-ups(cycle 2 のあと):
+  - C2-1 は 3 ファイルのコメントの 1 文ずつ。C2-2 は tech-debt に 1 行。C2-4 は fixture から引数を 1 つ外す。直すなら 1 コミットにまとめられる
+  - cap(`RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定 2)の最終 run なので、直したあとに全 pipeline を回し直すかは `/cross-review` の判断。コメントとテストの名前だけの直しなら、`post-implementation-pipeline.md` の「記録だけの修正」の例外には当たらない(コードのファイルを触る)ので、回すなら全部になる
+  - insight event(`scripts/insights-append.sh`)は、report 以外を編集しない指示のため書いていない。cycle 2 の値は `--verdict pass --critical 0 --high 0 --medium 0 --low 6`
+- Follow-ups(S6・S7 の再レビューのあと。どれも 97a1a062 で済み):
+  - 済: R1 は 3 ファイルのコメント 1 語ずつ、R2 は 1 行とテスト 1 件。R3 は実時間のテストの下限、R4 は 5 つの読みにくさ(cycle 2 の読みで 4 件とも直っていることを確かめた。R1 の新しい文は C2-1 で足りなくなった)
+  - 済: insight event は report 以外を編集しない指示のため書いていない。再レビューの値は `--verdict pass --critical 0 --high 0 --medium 0 --low 4`
+- Follow-ups(最初のレビューのあと):
   - 以下は最初のレビュー(再レビューの前)の Follow-ups で、どれも S6・S7 で済んだ(各行の頭の「済」)
   - 済: M2 は skill の文言の決め(待つか、止まるか)で、`/verify` が AC11 をどう読むかにもかかる。先に決めると pin テストと skill の 4 面をまとめて 1 回で直せる
   - 済: L1、L3、L5、L6 はコードの小さな直しで、まとめて 1 コミットにできる。L2、L4、L7、L8 は注と文言。`/self-review` の再実行は不要な範囲だが、コードを触るなら cycle 2 の対象になる
