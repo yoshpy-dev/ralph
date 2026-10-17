@@ -69,6 +69,8 @@ const (
 		"nothing was merged: wait for the pending ones and fix the others, and once all passed, " + mxAgain
 	mwFailRefusal = "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / lint (fail, FAILURE), so nothing was " +
 		"merged: wait for the pending ones and fix the others, and once all passed, " + mxAgain
+	mwNoneRefusal = "org: merge: gh pr checks 7 -R " + mxRepoArg + " reported no checks, so nothing shows that the PR's CI " +
+		"passed and nothing was merged: let CI run on the PR, and once it passed, " + mxAgain
 	mwInterrupted = "org: merge: interrupted (test stopped) while waiting for the checks of PR #7, before gh pr merge ran: " +
 		"nothing was merged"
 )
@@ -306,23 +308,36 @@ func TestMerge_WaitChecksEndsAndChecksAgain(t *testing.T) {
 
 // TestMerge_WaitChecksBudget covers AC13's time limit: the sleeps never go
 // past --wait-checks, the last one shortened to what is left; once it is
-// used up, the checks run again and, still pending, refuse with how long
-// Merge waited, counted from the start of the first wait, also over two
-// waits.
+// used up, the checks run again and, still pending or still with none
+// reported (as [] or as gh's sentence of no checks, a repository with no CI),
+// refuse with how long Merge waited, counted from the start of the first
+// wait, also over two waits. While it waits it reads only gh pr checks, and
+// it runs no gh pr merge.
 func TestMerge_WaitChecksBudget(t *testing.T) {
-	t.Run("pending until the time is up", func(t *testing.T) {
-		fx := newMWFixture(t, mwPending, 70*time.Second)
-		res, err := fx.run(t)
-		want := MergeResult{Refused: mwPendingRefusal + "; ralph org merge waited 1m10s for the checks (--wait-checks 1m10s)"}
-		if err != nil || res != want {
-			t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
-		}
-		fx.check(t, mwRounds([]int{3}, mxAll[:5]...), []time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second},
-			[]string{mwStart("has checks pending", "1m10s", "1m10s"), mwEnd("1m10s", "--wait-checks 1m10s is used up")})
-		if got := fx.appended(t); got != "" {
-			t.Errorf("appended %q", got)
-		}
-	})
+	for _, tc := range []struct {
+		name    string
+		checks  mgReply // gh pr checks' answer every time
+		refusal string
+		why     string
+	}{
+		{"pending until the time is up", mwPending, mwPendingRefusal, "has checks pending"},
+		{"none as [] until the time is up", mwNone, mwNoneRefusal, "has no checks reported yet"},
+		{"none as gh's sentence until the time is up", mwNoneSentence, mwNoneRefusal, "has no checks reported yet"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMWFixture(t, tc.checks, 70*time.Second)
+			res, err := fx.run(t)
+			want := MergeResult{Refused: tc.refusal + "; ralph org merge waited 1m10s for the checks (--wait-checks 1m10s)"}
+			if err != nil || res != want {
+				t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+			}
+			fx.check(t, mwRounds([]int{3}, mxAll[:5]...), []time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second},
+				[]string{mwStart(tc.why, "1m10s", "1m10s"), mwEnd("1m10s", "--wait-checks 1m10s is used up")})
+			if got := fx.appended(t); got != "" {
+				t.Errorf("appended %q", got)
+			}
+		})
+	}
 	t.Run("over two waits", func(t *testing.T) {
 		fx := newMWFixture(t, mwPending, 45*time.Second)
 		fx.onSleep = func(n int) {

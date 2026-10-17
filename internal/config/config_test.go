@@ -86,9 +86,12 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
 	}
-	// [org.director].auto_merge has no shell mirror in scripts/ralph-config.sh,
-	// so TestDefaultsLockStep does not cover it: the template states the
-	// default explicitly, and it loads as Default()'s value.
+	// TestDefaultsLockStep compares [org.director].auto_merge in this template
+	// with RALPH_ORG_DIRECTOR_AUTO_MERGE in scripts/ralph-config.sh and with
+	// Default(), but reads the template with Load, which keeps Default()'s
+	// value for a key the template leaves out: so this test checks that the
+	// template states the default explicitly, and that it loads as Default()'s
+	// value.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
