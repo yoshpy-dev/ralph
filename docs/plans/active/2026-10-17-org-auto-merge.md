@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-18 sha256:8045c82d9f59
+- Approved: 2026-10-18 sha256:305d97070f38
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -62,7 +62,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - `internal/org/mergeorder.go`(`pr_lookup`、ブランチ 1 本の読み取りを repository を固定して動詞から呼べる形に)、`internal/org/mergeorder_test.go`
 - `internal/org/mergeguarantee.go`(rules の読み取りを `CheckMergeEnforcement` と共有し、`ruleset_id` を残す。`CheckMergeGuarantee` と doctor の出力とキャッシュの形は変えない)、`internal/org/mergeguarantee_test.go`
 - `internal/org/mergeenforce.go`(新規、D11 の `CheckMergeEnforcement`。S3a で mergeguarantee.go に書き、self-review の M1 を受けて S6 で移す)、`internal/org/mergeenforce_test.go`(新規、同じく移す)
-- `internal/org/merge.go`(新規、S3a の確かめ)、`internal/org/merge_test.go`(新規)、`internal/org/merge_run.go`(新規、S3b の `Merge`: ロック、merge、読み直し、記録。merge.go が 800 行を超えないように分ける)、`internal/org/merge_run_test.go`(新規)、`internal/org/merge_wait.go`(新規、S7 の検査の待ち、D13)、`internal/org/merge_wait_test.go`(新規)
+- `internal/org/merge.go`(新規、S3a の確かめ)、`internal/org/merge_test.go`(新規)、`internal/org/merge_run.go`(新規、S3b の `Merge`: ロック、merge、読み直し、記録。merge.go が 800 行を超えないように分ける)、`internal/org/merge_run_test.go`(新規)、`internal/org/merge_wait.go`(新規、S7 の検査の待ち、D13)、`internal/org/merge_wait_test.go`(新規)、`internal/org/merge_fake_test.go`(新規、S9b で merge のテストの偽の gh と git と fixture を移す)
 - `internal/org/seat.go`(event `pr_merged`)、`internal/org/regate.go` と `internal/org/spawn.go`(regate.lock の注と断りの文を「regate か merge」に)
 - `internal/config/config.go`(`AutoMerge`)、`internal/config/config_test.go`、`templates/base/ralph.toml`、`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh`(既定値の写し `RALPH_ORG_DIRECTOR_AUTO_MERGE`)、`internal/config/defaults_sync_test.go`(3 面の一致)
 - `internal/cli/org_merge.go`(新規)、`internal/cli/org_merge_test.go`(新規)、`internal/cli/org.go`(動詞の登録、main worktree の設定の読み方)、`internal/cli/status.go`、`internal/cli/org_director.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/org_merge_order.go`(help に `pr_lookup`)
@@ -127,6 +127,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 7. S6: self-review の直し。M1(`CheckMergeEnforcement` 一式とそのテストを `mergeenforce.go` と `mergeenforce_test.go` に移す。動きは変えない)と L1〜L8(使わない `mergeCommit` の要求、`pr_merged` の `auto_merge=` の注、merge のあとの gh を別のプロセスグループで、`withMainWorktreeDirectorEnabled` の注、エラーの前置き、origin の host と owner/repo の先頭の `-`、tech-debt 239 行のセル、誤記)
 8. S7: `--wait-checks`(D13、`internal/org/merge_wait.go`)。gh の 0 件の文を 0 件として読む(D7)、確かめが断りの種類を返す形、CLI の flag と help、`/director` skill の merge の打ち方(background と `.harness/state/merge-<名前>.out`)、pin テスト、`/org` skill と README の `merge` の行
 9. S8: cross-review の 3 件の直し(3 つのコミットに分ける)。S8a: classic の保護で admin によらず `enforce_admins` を求める(D11、`mergeenforce.go`、AC5)。S8b: 読み直しで `headRefOid` を読み、gate の head のときだけ記録する(D6、`merge_run.go`、AC7・AC8)。S8c: 結びつきの org が同じ機能で走っている断りを `--wait-checks` で待つ(D5・D13、`merge.go`・`merge_wait.go`・`merge_run.go`、CLI の help、`/director` と `/org` の skill の 4 面ずつ、README、仕様の注、AC11・AC13)
+10. S9: cycle 2 の self-review の LOW 6 件(C2-1〜C2-6)の直し。動きは変えない。S9a: regate.lock を外す待ちの注 3 か所、`wait` の組み立てを kind ごとに 1 か所にする、`mergeReady` と `mergeWaitFor.r` の注、`permissions.admin` を渡す古い fixture、注と名前の小さな直し。結びつきのない gate だけのブランチでは「ほかの機能で走っている」を見分けられず予算まで待つことを、`orgWaitEnd` と `runningRefusal` の注と tech-debt に書く。S9b: merge のテストの偽の gh と git、fixture、JSON の組み立てを `internal/org/merge_fake_test.go` に移し(tech-debt 292 行の返済)、待つ間に disband して同じ org_id が同じブランチで起き直しても待ちが続くことを確かめるテストを足す
 
 ## Verify plan
 
@@ -198,6 +199,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - 2026-10-18: verify の I3 を受けて、受け入れ条件の checkbox を付け、AC12 と AC13 の順を直し、Verify plan の範囲を AC1〜AC13 にした。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
   - 2026-10-18(cross-review cycle 1 のあと): Codex の 3 件(triage b1cbe054、すべて ACTION_REQUIRED)の直し方を consult-plan-xreviewfix に聞き、D5・D6・D11・D13、AC5・AC7・AC8・AC11・AC13、Scope、Implementation outline の S8、Test plan、Risks を直した。図 5 つと一覧を直して撮り直し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。S8 のあとはパイプラインを /self-review から回し直す(cycle 2)
   - S8a 9506ec64(classic の保護は admin によらず `enforce_admins` を求め、`permissions.admin` を読まない)、S8b b2f0b534(読み直しに `headRefOid` を足し、gate の head のときだけ記録する。違えば Failed で `MERGED:` を出さない)、S8c 320b4d75(`mergeChecksKind` を `mergeRefusalKind` に改め、`mergeRefusalOrgRunning` を足した。org の待ちは台帳だけをロックなしで読み、org がほかの機能を走らせ始めたら待ちをやめる)。手元で `CheckMerge|Merge_|MergeWait|WaitChecks|Enforce|DirectorSkill`(org)と `OrgMerge`(cli)を go1.25.8 で打ち直して通った。push 済み。そのあと `AGENTS.md` の `merge_wait.go` の説明に org の待ちを足し、Verify plan の field 名から `permissions.admin` を外して、digest を取り直して承認し直した。結びつきのない gate だけのブランチでは `orgRunsOn` が立たないので、その org がほかの機能で起き直しても待ちは予算まで続く(安全側。consult の判定どおり)
+  - 2026-10-18(self-review cycle 2 のあと): report 31d27951(LOW 6 件、Merge: yes)。LOW は cycle を上げずにこの cycle の中で直す。Implementation outline に S9(S9a: C2-1〜C2-6 の直しと gate だけのブランチの限界の注と tech-debt、S9b: 偽の gh と git と fixture を `merge_fake_test.go` に移し、起き直しても待ちが続くテストを足す)と、Affected areas に `merge_fake_test.go` を足した。動きは変えないので図は直さない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
