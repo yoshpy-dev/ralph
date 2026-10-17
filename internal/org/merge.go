@@ -24,7 +24,9 @@ import (
 // itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
 // of the PR after it, and the record of pr_merged. The wait of --wait-checks,
 // for checks that are pending or not reported yet (S7) and for an org that
-// still runs the branch's feature to be disbanded (S8c), is in merge_wait.go.
+// still runs the branch's feature to be disbanded (S8c; on a branch with no
+// binding, also its gate's org that runs another feature now:
+// runningRefusal), is in merge_wait.go.
 //
 // The repository is origin's (D10): checkMerge reads its host and owner/repo
 // from `git remote get-url origin` and pins every gh call to it, with `-R
@@ -208,9 +210,9 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 // --wait-checks (merge_wait.go): for step 8 the branch and its org_id, whose
 // disband the wait reads in the ledger, and for step 10 what steps 2 to 9
 // read, the PR whose checks the wait reads; r is empty with any other
-// refusal. The error is for a manifest that
-// cannot be read and for ctx done; nothing was merged then either.
-// p.AutoMerge, p.WaitChecks, and p.Progress are not read.
+// refusal. The error is for a manifest that cannot be read and for ctx done;
+// nothing was merged then either. p.AutoMerge, p.WaitChecks, and p.Progress
+// are not read.
 func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
 	if p.Branch == "" {
 		return mergeReady{}, mergePrefix + "no branch named, so nothing was merged: name the feature branch to merge (ralph " +
