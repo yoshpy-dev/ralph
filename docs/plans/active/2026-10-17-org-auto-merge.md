@@ -171,6 +171,8 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S4 に足すもの: `internal/org/lockfile.go` の `heldFileLock` の注(regate.lock を握るのは regate だけと書いている)、`internal/org/seat.go` の package doc(gh を打つのは mergeorder.go だけと書いている。merge.go と merge_run.go も打つ)
   - S5 の tech-debt に足すもの: `mergeLsRemoteRefusal` と `mergeGHSaid` が merge-order の文言と `realMergeOrderExec` の err の形(`<exit err>: <stderr>`)に頼る。`merge_test.go`(835 行)と `merge_run_test.go`(842 行)が 800 行の目安を少し超える。検査が 0 件の PR で `gh pr checks` が実際に何を出すかは確かめていない(Risks の行のまま)
   - S4 e7624d79(CLI の `ralph org merge`、`RALPH_ORG_DIRECTOR_AUTO_MERGE` の 2 面、regate の拒否の文言、lockfile・seat・spawn・regate の注)。mutation 16/16。fake gh はシェルスクリプトで、Go 側に差し込み口は足していない。結果が何も立たないときもエラーにし、exit 0 は「merge して記録した」だけになる
+  - S5 71c0582e(skill の 8 面、README、`AGENTS.md`、仕様の FR-8 の注、quality-gates の 2 面、tech-debt、pin テスト `TestDirectorSkill_PinsTheAutoMergeSteps`)。pin は 6 つの断片とその順、古い文「`gh pr merge` で 1 本 merge し」がないこと。mutation 3/3。`/director` に「headless の director を `--config` で立てたとき、`director status` と `ralph status` の auto_merge が違えば false として扱う」を足した。tech-debt 238 行は外部コマンドの runner の重複が残るので、JSON の半分だけを RESOLVED にした
+  - sync-docs に回すもの: tech-debt 238 行が `regateRemoteGit` を `internal/org/regate.go` に置いている(今は `regate_git.go`)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
