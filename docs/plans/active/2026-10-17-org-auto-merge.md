@@ -208,6 +208,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - 2026-10-18(cross-review cycle 2 のあと): Codex の 1 件(triage 305738fe、ACTION_REQUIRED): 9 段の確かめのあとに PR の base が付け替えられると、gate の head のまま別のブランチへ merge されても記録してしまう。S8b と同じ形で直す(S10: 読み直しに `baseRefName`)。Scope、D6、AC7、AC8、Implementation outline の S10、Test plan を直し、詳しい図 2 の 12 と 13 を直して撮り直し(lint rc=0)、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。上限は 2 なので、cycle-count.json は 2 のまま、`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げて /self-review から回し直す(回し直しを cycle 3 と呼ぶ。org-regate と同じ扱い)
   - S10 590214fb(読み直しに `baseRefName`、`otherBaseMerged`。head が違えば head の文が先。新しいテストは `merge_readback_test.go`、mutant 7 個はどれも落ちる。run-verify rc=0)。consult は「進めてよい」で、merge-order が MERGED の PR を base を見ずに `merged` と分類する点を挙げた(`classifyMergeTarget`、確かめた)
   - 2026-10-18(self-review cycle 3 のあと): report 99f47e05(LOW 7 件、Merge: yes)。LOW は cycle を上げずにこの cycle の中で直す。Implementation outline に S11(C3-1〜C3-7 と merge-order の注)を足した。動きは変えないので図は直さない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
+  - S11a f6e5208e(`mergeOutcomeFields` と `mergedElsewhere`、base の Failed に merge-order の注、`mrNext` などを `merge_fake_test.go` へ、`addInSleeps`、kind の注、`wait` の case を名指しにして `default:` はエラー、新しいテスト `TestMergeWait_EveryKindThatWaitsHasACase` は waits() に Unread を足す mutant で落ちる)。S11b dd1d4867(skill の 4 面・仕様・`seat.go` に base の条件、tech-debt の行数の注と merge-order の新しい行)。run-verify rc=0。merge.go の注の折り返しと冒頭の要約の但し書きは orchestrator が直した(コメントだけ)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
