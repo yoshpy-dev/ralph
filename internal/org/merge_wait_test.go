@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -104,7 +105,14 @@ type mwFixture struct {
 
 func newMWFixture(t *testing.T, checks mgReply, wait time.Duration) *mwFixture {
 	t.Helper()
-	fx := &mwFixture{mrFixture: newMRFixture(t, nil), progress: &strings.Builder{}}
+	return newMWFixtureOn(t, nil, checks, wait)
+}
+
+// newMWFixtureOn is newMWFixture on the ledger lines (mxReadyLedger when
+// nil).
+func newMWFixtureOn(t *testing.T, lines []any, checks mgReply, wait time.Duration) *mwFixture {
+	t.Helper()
+	fx := &mwFixture{mrFixture: newMRFixture(t, lines), progress: &strings.Builder{}}
 	fx.ctx, fx.cancel = context.WithCancelCause(context.Background())
 	t.Cleanup(func() { fx.cancel(nil) })
 	fx.clock = &mwClock{t: t, now: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), stop: fx.cancel, onSleep: func(n int) {
@@ -453,12 +461,194 @@ func TestMerge_WaitChecksReleasesRegateLock(t *testing.T) {
 	})
 }
 
+// mwOrgRunning is a ledger where org-a still runs the feature of feat/a: its
+// binding and its gate record, and no disband.
+func mwOrgRunning() []any {
+	return []any{moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain)}
+}
+
+// mwOrgRefusal is the refusal of step 8 on mwOrgRunning.
+const mwOrgRefusal = `org: merge: the branch feat/a is bound to org_id "org-a", which is running, so its leader may still push ` +
+	"to the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), and " +
+	"once the org is disbanded, " + mxAgain
+
+// mwOrgStart is the line a wait for org-a to be disbanded writes when it
+// starts.
+func mwOrgStart(left, budget string) string {
+	return `org: merge: org_id "org-a" of the branch is still running (its leader disbands it after its RESULT), so ralph org ` +
+		"merge waits for it to be disbanded for up to " + left + " (--wait-checks " + budget + "), with regate.lock released, " +
+		"reading the ledger every 30s"
+}
+
+// mwOrgEnd is the line a wait for org-a that did not end in ctx done writes
+// when it ends.
+func mwOrgEnd(after, why string) string {
+	return `org: merge: stopped waiting for org_id "org-a" to be disbanded after ` + after + ": " + why + "; running every check again"
+}
+
+// addDuring appends lines to the ledger in the sleep numbered n (from 1)
+// and returns a pointer to what that appended, as the manifest holds it.
+func (fx *mwFixture) addDuring(t *testing.T, n int, lines ...any) *string {
+	var added string
+	fx.onSleep = func(i int) {
+		if i == n {
+			before := mrRead(t, fx.mo.path)
+			fx.mo.add(t, lines...)
+			added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+		}
+	}
+	return &added
+}
+
+// TestMerge_WaitChecksWaitsForTheOrgToBeDisbanded covers the wait for the
+// org (D5, D13, AC11): with --wait-checks 1h, step 8's refusal for an org that
+// still runs the branch's feature is waited out with regate.lock released,
+// reading only the ledger every 30 s, with no git or gh between the checks
+// before and after it; once the org is disbanded, every check runs again and
+// the PR is merged and recorded once. An org that runs another feature by the
+// next read ends the wait, and the checks refuse it as without a wait.
+func TestMerge_WaitChecksWaitsForTheOrgToBeDisbanded(t *testing.T) {
+	merged := mrResult("merge")
+	merged.Merged, merged.Recorded, merged.MergeCommit = true, true, mrOID
+	for _, tc := range []struct {
+		name   string
+		sleep  int   // the sleep in which lines are appended
+		lines  []any // what is appended then
+		want   MergeResult
+		keys   []string
+		waited string
+		ended  string
+	}{
+		{"disbanded in the first sleep", 1, []any{moDisbanded("org-a")}, merged,
+			slices.Concat(mxAll[:3], mxAll, []string{mrMerge, mrReread}), "30s", "the org was disbanded"},
+		{"disbanded in the third sleep", 3, []any{moDisbanded("org-a")}, merged,
+			slices.Concat(mxAll[:3], mxAll, []string{mrMerge, mrReread}), "1m30s", "the org was disbanded"},
+		{"runs another feature now", 1, []any{moDisbanded("org-a"), moBindTo("org-a", "split-1", "other", "feat/other")},
+			MergeResult{Refused: `org: merge: the branch feat/a is bound to org_id "org-a", which is running, now for another ` +
+				"feature on the branch feat/other, so nothing was merged: wait for the org to be disbanded and " + mxAgain},
+			slices.Concat(mxAll[:3], mxAll[:3]), "30s", "the org runs another feature now"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, time.Hour)
+			added := fx.addDuring(t, tc.sleep, tc.lines...)
+			res, err := fx.run(t)
+			if err != nil || res != tc.want {
+				t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, tc.want)
+			}
+			fx.check(t, tc.keys, slices.Repeat([]time.Duration{30 * time.Second}, tc.sleep),
+				[]string{mwOrgStart("1h0m0s", "1h0m0s"), mwOrgEnd(tc.waited, tc.ended)})
+			want := *added
+			if tc.want.Recorded {
+				want += mwMerged(t)
+			}
+			if got := fx.appended(t); got != want {
+				t.Errorf("appended %q\nwant     %q", got, want)
+			}
+		})
+	}
+}
+
+// TestMerge_WaitChecksForTheOrgEnds covers the other ends of the wait for
+// the org: once --wait-checks is used up with the org still running, the
+// checks run again and refuse with how long Merge waited and how to see what
+// the org does (whether to disband it is a human's call), with no gh pr
+// merge and nothing recorded; with no --wait-checks the refusal is as it was,
+// with no wait; a ledger that cannot be read ends the wait, and the checks
+// after it fail with the read's error; and ctx done while Merge sleeps is an
+// error that says what it waited for and that nothing was merged.
+func TestMerge_WaitChecksForTheOrgEnds(t *testing.T) {
+	t.Run("the time is up", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, 70*time.Second)
+		res, err := fx.run(t)
+		want := MergeResult{Refused: mwOrgRefusal + `; ralph org merge waited 1m10s for org_id "org-a" to be disbanded ` +
+			"(--wait-checks 1m10s); the org still runs: see what it does with ralph org status --org-id org-a, and a human " +
+			"decides whether to disband it (ralph org disband --org-id org-a)"}
+		if err != nil || res != want {
+			t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+		}
+		fx.check(t, slices.Concat(mxAll[:3], mxAll[:3]), []time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second},
+			[]string{mwOrgStart("1m10s", "1m10s"), mwOrgEnd("1m10s", "--wait-checks 1m10s is used up")})
+		if got := fx.appended(t); got != "" {
+			t.Errorf("appended %q", got)
+		}
+	})
+	t.Run("no --wait-checks", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, 0)
+		if res, err := fx.run(t); err != nil || res != (MergeResult{Refused: mwOrgRefusal}) {
+			t.Fatalf("Merge = %+v, %v\nwant the refusal %q", res, err, mwOrgRefusal)
+		}
+		fx.check(t, mxAll[:3], nil, nil)
+	})
+	t.Run("the ledger cannot be read", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, time.Hour)
+		fx.onSleep = func(int) {
+			if err := os.Remove(fx.mo.path); err != nil {
+				t.Fatal(err)
+			}
+			mkdirAll(t, fx.mo.path)
+		}
+		res, err := fx.run(t)
+		if err == nil || !strings.HasPrefix(err.Error(), "org: merge: read manifest: ") || res != (MergeResult{}) {
+			t.Fatalf("Merge = %+v, %v; want the error of the manifest that cannot be read", res, err)
+		}
+		lines := fx.lines()
+		if len(lines) != 2 || lines[0] != mwOrgStart("1h0m0s", "1h0m0s") || !strings.HasPrefix(lines[1], `org: merge: stopped `+
+			`waiting for org_id "org-a" to be disbanded after 30s: the ledger could not be read (`) ||
+			!strings.HasSuffix(lines[1], "; running every check again") {
+			t.Errorf("Progress =\n%s\nwant the start and an end for a ledger that could not be read", strings.Join(lines, "\n"))
+		}
+		if got := fx.exec.keys(); !slices.Equal(got, slices.Concat(mxAll[:3], mxAll[:1])) {
+			t.Errorf("commands = %q\nwant %q", got, slices.Concat(mxAll[:3], mxAll[:1]))
+		}
+		mrAssertLockFree(t, fx.mo.stateDir)
+	})
+	t.Run("interrupted while it sleeps", func(t *testing.T) {
+		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, time.Hour)
+		fx.onSleep = func(int) { fx.cancel(errors.New("test stopped")) }
+		res, err := fx.run(t)
+		const want = `org: merge: interrupted (test stopped) while waiting for org_id "org-a" to be disbanded, before gh pr ` +
+			"merge ran: nothing was merged"
+		if err == nil || err.Error() != want || res != (MergeResult{}) {
+			t.Fatalf("Merge = %+v, %v\nwant the error %q", res, err, want)
+		}
+		fx.check(t, mxAll[:3], []time.Duration{30 * time.Second}, []string{mwOrgStart("1h0m0s", "1h0m0s"),
+			`org: merge: stopped waiting for org_id "org-a" to be disbanded after 30s: interrupted (test stopped); nothing was merged`})
+		if got := fx.appended(t); got != "" {
+			t.Errorf("appended %q", got)
+		}
+	})
+}
+
+// TestMerge_WaitChecksOrgAndChecksShareTheBudget: a wait for the org and,
+// once it was disbanded, a wait for checks still pending share one
+// --wait-checks, counted from the start of the first wait, and the refusal
+// once it is used up says Merge waited for both.
+func TestMerge_WaitChecksOrgAndChecksShareTheBudget(t *testing.T) {
+	fx := newMWFixtureOn(t, mwOrgRunning(), mwPending, 70*time.Second)
+	added := fx.addDuring(t, 1, moDisbanded("org-a"))
+	res, err := fx.run(t)
+	want := MergeResult{Refused: mwPendingRefusal + `; ralph org merge waited 1m10s for org_id "org-a" to be disbanded and for ` +
+		"the checks (--wait-checks 1m10s)"}
+	if err != nil || res != want {
+		t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, want)
+	}
+	fx.check(t, slices.Concat(mxAll[:3], mwRounds([]int{2}, mxAll[:5]...)),
+		[]time.Duration{30 * time.Second, 30 * time.Second, 10 * time.Second}, []string{
+			mwOrgStart("1m10s", "1m10s"), mwOrgEnd("30s", "the org was disbanded"),
+			mwStart("has checks pending", "40s", "1m10s"), mwEnd("40s", "--wait-checks 1m10s is used up"),
+		})
+	if got := fx.appended(t); got != *added {
+		t.Errorf("appended %q\nwant     %q", got, *added)
+	}
+}
+
 // TestMerge_WaitChecksDoesNotWaitOutOtherRefusals covers AC13's refusals
 // that are not waited out: with --wait-checks 1h, checks that failed, were
 // cancelled, are all skipping, have a bucket not known, or are pending beside
-// one that failed, gh pr checks failing or printing no list, and a refusal
-// of another step, each refuse at once as with no --wait-checks, with no
-// sleep and no line; and with --wait-checks 0, pending checks refuse at once.
+// one that failed, gh pr checks failing or printing no list, the branch's org
+// running another feature now (D5), and a refusal of another step, each
+// refuse at once as with no --wait-checks, with no sleep and no line; and
+// with --wait-checks 0, pending checks refuse at once.
 func TestMerge_WaitChecksDoesNotWaitOutOtherRefusals(t *testing.T) {
 	check := func(bucket string) ghPRCheck {
 		return ghPRCheck{Bucket: bucket, Name: "lint", State: "X", Workflow: "ci"}
@@ -479,6 +669,9 @@ func TestMerge_WaitChecksDoesNotWaitOutOtherRefusals(t *testing.T) {
 			fx.setChecks(mgReply{err: errors.New("exit status 1: no checks reported on the 'feat/b' branch")})
 		}},
 		{"gh pr checks prints no list", func(fx *mwFixture) { fx.setChecks(mgReply{out: "<html>"}) }},
+		{"the org runs another feature now", func(fx *mwFixture) {
+			fx.mo.add(fx.clock.t, moBindTo("org-a", "split-1", "other", "feat/other"))
+		}},
 		{"no PR", func(fx *mwFixture) { fx.exec.replies[mxPRList] = mgReply{out: "[]"} }},
 		{"PR not OPEN", func(fx *mwFixture) {
 			fx.exec.replies[mxPRView] = mgReply{out: mxPRViewJSON("CLOSED", moHeadA, "main", "https://github.com/o/r/pull/7", "null")}

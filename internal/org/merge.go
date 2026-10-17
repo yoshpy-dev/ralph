@@ -22,8 +22,9 @@ import (
 // everything the merge rests on. This file holds the checks (checkMerge, S3a
 // of the plan): they merge nothing, write nothing, and take no lock. The merge
 // itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
-// of the PR after it, and the record of pr_merged. The wait of --wait-checks
-// for checks that are pending or not reported yet is in merge_wait.go (S7).
+// of the PR after it, and the record of pr_merged. The wait of --wait-checks,
+// for checks that are pending or not reported yet (S7) and for an org that
+// still runs the branch's feature to be disbanded (S8c), is in merge_wait.go.
 //
 // The repository is origin's (D10): checkMerge reads its host and owner/repo
 // from `git remote get-url origin` and pins every gh call to it, with `-R
@@ -79,7 +80,8 @@ type MergeParams struct {
 	AutoMerge bool
 	// WaitChecks is --wait-checks (D13, merge_wait.go): how long Merge may
 	// wait, with regate.lock released, for checks that are pending or not
-	// reported yet, from 0, which waits not at all, to maxMergeWaitChecks.
+	// reported yet and for the branch's org to be disbanded, from 0, which
+	// waits not at all, to maxMergeWaitChecks.
 	WaitChecks time.Duration
 	// Progress gets the line a wait writes when it starts and the one it
 	// writes when it ends; nil discards them.
@@ -194,90 +196,93 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 //
 // A refusal starts with "org: merge: ", says what was found, that nothing was
 // merged, and one next step; control characters in it, from the ledger or
-// gh, are escaped (PrintableInboxText). kind says which refusal of step 10 it
-// is, mergeChecksOther for a refusal of any other step and when every check
-// passed; with a refusal whose kind waits (pending checks, or none reported),
-// r holds what steps 2 to 9 read, the PR whose checks the wait of
-// --wait-checks reads (merge_wait.go), and is empty with any other refusal.
-// The error is for a manifest that cannot be read and for ctx done; nothing
-// was merged then either. p.AutoMerge, p.WaitChecks, and p.Progress are not
-// read.
-func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeChecksKind, err error) {
+// gh, are escaped (PrintableInboxText). kind says which refusal it is
+// (mergeRefusalKind): of step 8 for an org that still runs the branch's
+// feature, of step 10, and mergeRefusalOther for a refusal of any other step
+// and when every check passed. With a refusal whose kind waits, r holds what
+// the steps before it read, for the wait of --wait-checks (merge_wait.go):
+// for step 8 the branch and its org_id, whose disband the wait reads in the
+// ledger, and for step 10 what steps 2 to 9 read, the PR whose checks the wait
+// reads; r is empty with any other refusal. The error is for a manifest that
+// cannot be read and for ctx done; nothing was merged then either.
+// p.AutoMerge, p.WaitChecks, and p.Progress are not read.
+func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
 	if p.Branch == "" {
 		return mergeReady{}, mergePrefix + "no branch named, so nothing was merged: name the feature branch to merge (ralph " +
-			"org merge-order lists the ledger's branches)", mergeChecksOther, nil
+			"org merge-order lists the ledger's branches)", mergeRefusalOther, nil
 	}
 	m := newMergeCheck(p)
-	r, refused, err = o.checkMergeBranch(ctx, m)
+	r, refused, kind, err = o.checkMergeBranch(ctx, m)
 	if err == nil && refused == "" {
 		refused, kind, err = m.checkMergeOnGitHub(ctx, &r)
 	}
 	switch {
 	case err != nil:
-		return mergeReady{}, "", mergeChecksOther, err
+		return mergeReady{}, "", mergeRefusalOther, err
 	case refused != "" && !kind.waits():
 		return mergeReady{}, PrintableInboxText(refused, false), kind, nil
 	case refused != "":
 		return r, PrintableInboxText(refused, false), kind, nil
 	}
-	return r, "", mergeChecksOther, nil
+	return r, "", mergeRefusalOther, nil
 }
 
 // checkMergeBranch is steps 2 to 8 of checkMerge: origin, gh, the ledger,
-// the ls-remote, the PR, the class, and the org. It returns what they read.
-func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, string, error) {
+// the ls-remote, the PR, the class, and the org. It returns what they read;
+// kind is runningRefusal's when step 8 refused, else mergeRefusalOther.
+func (o *Org) checkMergeBranch(ctx context.Context, m *mergeCheck) (mergeReady, string, mergeRefusalKind, error) {
 	r := mergeReady{branch: m.branch}
 	if refused, err := m.readOrigin(ctx, &r); err != nil || refused != "" {
-		return mergeReady{}, refused, err
+		return mergeReady{}, refused, mergeRefusalOther, err
 	}
 	if _, err := m.lookPath("gh"); err != nil {
-		return mergeReady{}, m.ghMissing(r, err), nil
+		return mergeReady{}, m.ghMissing(r, err), mergeRefusalOther, nil
 	}
 	ledger, err := readMergeLedger(o.Manifest.Path())
 	if err != nil {
-		return mergeReady{}, "", fmt.Errorf("org: merge: read manifest: %w", err)
+		return mergeReady{}, "", mergeRefusalOther, fmt.Errorf("org: merge: read manifest: %w", err)
 	}
 	targets, _ := collectMergeTargets(ledger)
 	i := slices.IndexFunc(targets, func(t *mergeTarget) bool { return t.branch == m.branch })
 	if i < 0 {
 		return mergeReady{}, fmt.Sprintf(mergePrefix+"no feature binding or gate record in the ledger names the branch %s, so "+
 			"nothing was merged: ralph org merge merges only a branch ralph org merge-order lists as ready, so run it to see the "+
-			"ledger's branches", m.branch), nil
+			"ledger's branches", m.branch), mergeRefusalOther, nil
 	}
 	t := targets[i]
 	remote, refused, err := m.listOrigin(ctx)
 	if err != nil || refused != "" {
-		return mergeReady{}, refused, err
+		return mergeReady{}, refused, mergeRefusalOther, err
 	}
 	if refused, err := m.findPR(ctx, r, t); err != nil || refused != "" {
-		return mergeReady{}, refused, err
+		return mergeReady{}, refused, mergeRefusalOther, err
 	}
 	if class, detail := classifyMergeTarget(t, remote); class != MergeClassReady {
 		return mergeReady{}, fmt.Sprintf(mergePrefix+"ralph org merge-order lists the branch %s as %s, not ready, so nothing was "+
-			"merged: %s", m.branch, class, detail), nil
+			"merged: %s", m.branch, class, detail), mergeRefusalOther, nil
 	}
 	r.orgID = mergeTargetOrg(t)
-	if refused := m.runningRefusal(t, r.orgID, RunningOrgs(ledger.events)); refused != "" {
-		return mergeReady{}, refused, nil
+	if refused, kind := m.runningRefusal(t, r.orgID, RunningOrgs(ledger.events)); refused != "" {
+		return r, refused, kind, nil
 	}
 	r.prNumber, r.prURL = t.pr.Number, t.pr.URL
 	r.head, r.base, r.defaultBranch = t.gate.record.Head, t.gate.record.Base, remote.defaultBranch
-	return r, "", nil
+	return r, "", mergeRefusalOther, nil
 }
 
 // checkMergeOnGitHub is steps 9 to 13 of checkMerge: the PR as gh pr view
 // reads it, its checks, the protection, the merge method, and origin again.
 // It fills in r. kind is readChecks' when step 10 refused, else
-// mergeChecksOther.
-func (m *mergeCheck) checkMergeOnGitHub(ctx context.Context, r *mergeReady) (string, mergeChecksKind, error) {
+// mergeRefusalOther.
+func (m *mergeCheck) checkMergeOnGitHub(ctx context.Context, r *mergeReady) (string, mergeRefusalKind, error) {
 	if refused, err := m.viewPR(ctx, r); err != nil || refused != "" {
-		return refused, mergeChecksOther, err
+		return refused, mergeRefusalOther, err
 	}
 	if refused, kind, err := m.readChecks(ctx, *r); err != nil || refused != "" {
 		return refused, kind, err
 	}
 	refused, err := m.checkMergeAfterChecks(ctx, r)
-	return refused, mergeChecksOther, err
+	return refused, mergeRefusalOther, err
 }
 
 // checkMergeAfterChecks is steps 11 to 13 of checkMerge: the protection, the
@@ -477,14 +482,18 @@ func mergeTargetOrg(t *mergeTarget) string {
 // runningRefusal is step 8 of checkMerge (D5): the refusal when orgID, t's
 // org, is in running, "" otherwise. While the org runs, its leader may still
 // push to the branch and open or change the PR, and it raises a RESULT when it
-// is done; an org that runs another feature now (t.orgRunsOn) is refused too.
-func (m *mergeCheck) runningRefusal(t *mergeTarget, orgID string, running []string) string {
+// is done and then disbands the org: kind is mergeRefusalOrgRunning, which
+// --wait-checks waits out (D13). An org that runs another feature now
+// (t.orgRunsOn) is refused too, with mergeRefusalOther: its leader works on
+// another branch, and nothing says when that ends.
+func (m *mergeCheck) runningRefusal(t *mergeTarget, orgID string, running []string) (string, mergeRefusalKind) {
 	switch {
 	case !slices.Contains(running, orgID):
-		return ""
+		return "", mergeRefusalOther
 	case t.orgRunsOn != "":
 		return fmt.Sprintf(mergePrefix+"the branch %s is bound to org_id %q, which is running, now for another feature on the "+
-			"branch %s, so nothing was merged: wait for the org to be disbanded and %s", m.branch, orgID, t.orgRunsOn, m.again())
+			"branch %s, so nothing was merged: wait for the org to be disbanded and %s", m.branch, orgID, t.orgRunsOn,
+			m.again()), mergeRefusalOther
 	}
 	whose := "is bound to"
 	if t.binding == nil {
@@ -492,7 +501,7 @@ func (m *mergeCheck) runningRefusal(t *mergeTarget, orgID string, running []stri
 	}
 	return fmt.Sprintf(mergePrefix+"the branch %s %s org_id %q, which is running, so its leader may still push to the branch "+
 		"and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), and once "+
-		"the org is disbanded, %s", m.branch, whose, orgID, m.again())
+		"the org is disbanded, %s", m.branch, whose, orgID, m.again()), mergeRefusalOrgRunning
 }
 
 // ghPRView is the `gh pr view --json` output checkMerge reads.
@@ -565,32 +574,41 @@ func (c ghPRCheck) label() string {
 	return fmt.Sprintf("%s (%s, %s)", name, cmp.Or(c.Bucket, "no bucket"), cmp.Or(c.State, "no state"))
 }
 
-// mergeChecksKind says which refusal of readChecks (step 10 of checkMerge)
-// a refusal is, so that the wait of --wait-checks (D13, merge_wait.go) is
-// decided on it and not on the refusal's text.
-type mergeChecksKind int
+// mergeRefusalKind says which refusal of checkMerge a refusal is, as far as
+// the wait of --wait-checks (D5, D13, merge_wait.go) needs to know: the one
+// of step 8 for an org that still runs the branch's feature, and those of
+// readChecks (step 10), so that the wait is decided on the kind and not on
+// the refusal's text.
+type mergeRefusalKind int
 
 const (
-	// mergeChecksOther: a refusal of another step, or no refusal.
-	mergeChecksOther mergeChecksKind = iota
-	// mergeChecksPending: every check is pass, skipping, or pending, and one
-	// is pending.
-	mergeChecksPending
-	// mergeChecksZero: gh pr checks reported no checks, as [] or as
+	// mergeRefusalOther: a refusal of another step, of step 8 for an org
+	// that runs another feature now (mergeTarget.orgRunsOn), or no refusal.
+	mergeRefusalOther mergeRefusalKind = iota
+	// mergeRefusalOrgRunning: step 8 refused because the branch's org runs,
+	// and not another feature now: its leader disbands it after its RESULT.
+	mergeRefusalOrgRunning
+	// mergeRefusalChecksPending: every check is pass, skipping, or pending,
+	// and one is pending.
+	mergeRefusalChecksPending
+	// mergeRefusalChecksZero: gh pr checks reported no checks, as [] or as
 	// mergeNoChecksSentence.
-	mergeChecksZero
-	// mergeChecksNotPassed: a check is fail, cancel, or a bucket ralph does
-	// not know, or every check is skipping.
-	mergeChecksNotPassed
-	// mergeChecksUnread: gh pr checks failed, timed out, was not found, or
-	// printed no JSON list.
-	mergeChecksUnread
+	mergeRefusalChecksZero
+	// mergeRefusalChecksNotPassed: a check is fail, cancel, or a bucket
+	// ralph does not know, or every check is skipping.
+	mergeRefusalChecksNotPassed
+	// mergeRefusalChecksUnread: gh pr checks failed, timed out, was not
+	// found, or printed no JSON list.
+	mergeRefusalChecksUnread
 )
 
-// waits reports whether --wait-checks waits out a refusal of kind k: only
-// checks that are pending, or none reported yet, which a CI that runs may
-// turn into checks that passed.
-func (k mergeChecksKind) waits() bool { return k == mergeChecksPending || k == mergeChecksZero }
+// waits reports whether --wait-checks waits out a refusal of kind k: only an
+// org that still runs the branch's feature, which its leader disbands after
+// its RESULT, and checks that are pending, or none reported yet, which a CI
+// that runs may turn into checks that passed.
+func (k mergeRefusalKind) waits() bool {
+	return k == mergeRefusalOrgRunning || k == mergeRefusalChecksPending || k == mergeRefusalChecksZero
+}
 
 // readChecks is step 10 of checkMerge (D7): the PR's checks from `gh pr
 // checks`, which exits 8 while a check is pending and may exit non-zero in
@@ -598,9 +616,9 @@ func (k mergeChecksKind) waits() bool { return k == mergeChecksPending || k == m
 // only a timeout, a gh not found, and a stdout that is not a JSON list make
 // the error count, except that a gh whose error has mergeNoChecksSentence for
 // the branch reported no checks. It refuses unless every check's bucket is
-// pass or skipping and one is pass, and kind says why (mergeChecksKind). The
+// pass or skipping and one is pass, and kind says why (mergeRefusalKind). The
 // wait of --wait-checks reads the checks with it too.
-func (m *mergeCheck) readChecks(ctx context.Context, r mergeReady) (refused string, kind mergeChecksKind, err error) {
+func (m *mergeCheck) readChecks(ctx context.Context, r mergeReady) (refused string, kind mergeRefusalKind, err error) {
 	n := strconv.Itoa(r.prNumber)
 	cmd := "gh pr checks " + n + " -R " + r.repoArg
 	out, timedOut, err := m.gh(ctx, "pr", "checks", n, "-R", r.repoArg, "--json", mergePRChecksFields)
@@ -609,15 +627,15 @@ func (m *mergeCheck) readChecks(ctx context.Context, r mergeReady) (refused stri
 	switch {
 	case ctx.Err() != nil || errors.Is(err, exec.ErrNotFound) || timedOut:
 		refused, err = m.ghFailed(ctx, r, cmd, err, "the PR's checks are unknown")
-		return refused, mergeChecksUnread, err
+		return refused, mergeRefusalChecksUnread, err
 	case err != nil && !listed && strings.Contains(err.Error(), fmt.Sprintf(mergeNoChecksSentence, r.branch)):
 		checks = nil
 	case err != nil && !listed:
 		refused, err = m.ghFailed(ctx, r, cmd, err, "the PR's checks are unknown")
-		return refused, mergeChecksUnread, err
+		return refused, mergeRefusalChecksUnread, err
 	case !listed:
 		return fmt.Sprintf(mergePrefix+"%s printed output that is not a JSON list of checks, so the PR's checks are unknown and "+
-			"nothing was merged: %s", cmd, m.ghAccess(r)), mergeChecksUnread, nil
+			"nothing was merged: %s", cmd, m.ghAccess(r)), mergeRefusalChecksUnread, nil
 	}
 	var passed int
 	var others []string // every check that is not pass or skipping
@@ -637,11 +655,11 @@ func (m *mergeCheck) readChecks(ctx context.Context, r mergeReady) (refused stri
 	switch {
 	case len(checks) == 0:
 		return fmt.Sprintf(mergePrefix+"%s reported no checks, so nothing shows that the PR's CI passed and nothing was merged: "+
-			"let CI run on the PR, and once it passed, %s", cmd, m.again()), mergeChecksZero, nil
+			"let CI run on the PR, and once it passed, %s", cmd, m.again()), mergeRefusalChecksZero, nil
 	case len(others) > 0:
-		kind = mergeChecksPending
+		kind = mergeRefusalChecksPending
 		if ended {
-			kind = mergeChecksNotPassed
+			kind = mergeRefusalChecksNotPassed
 		}
 		return fmt.Sprintf(mergePrefix+"%d of the %d checks of PR #%d are not pass or skipping: %s, so nothing was merged: wait "+
 			"for the pending ones and fix the others, and once all passed, %s", len(others), len(checks), r.prNumber,
@@ -649,9 +667,9 @@ func (m *mergeCheck) readChecks(ctx context.Context, r mergeReady) (refused stri
 	case passed == 0:
 		return fmt.Sprintf(mergePrefix+"every one of the %d checks of PR #%d is skipping and none passed, so nothing shows that "+
 			"the PR's CI passed and nothing was merged: let a check run on the PR, and once it passed, %s", len(checks),
-			r.prNumber, m.again()), mergeChecksNotPassed, nil
+			r.prNumber, m.again()), mergeRefusalChecksNotPassed, nil
 	}
-	return "", mergeChecksOther, nil
+	return "", mergeRefusalOther, nil
 }
 
 // readMethod is step 12 of checkMerge (D2): the merge method `gh repo view`

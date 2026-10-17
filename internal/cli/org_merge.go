@@ -106,20 +106,28 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
-			"refused before anything is read), merge waits for the checks instead of\n" +
-			"refusing when the only refusal is that a check is pending, or that gh pr\n" +
+			"refused before anything is read), merge waits instead of refusing when\n" +
+			"the only refusal is that the branch's org is still running (its leader\n" +
+			"disbands it after its RESULT), that a check is pending, or that gh pr\n" +
 			"checks reports no checks yet. It releases regate.lock, so a ralph org\n" +
-			"regate or another merge can run meanwhile, and reads only gh pr checks\n" +
-			"<n> -R <repo> every 30 s, until no check is pending any more, gh pr\n" +
-			"checks fails, or the time is up; then it takes regate.lock again and runs\n" +
-			"every check above from the start, so a branch that moved meanwhile is\n" +
-			"refused, and checks pending again are waited for again. A check that\n" +
-			"failed or was cancelled, checks that are all skipping, and every other\n" +
-			"refusal are not waited for. When the time is up and the checks are still\n" +
-			"pending or none, merge refuses as without the flag and adds how long it\n" +
-			"waited. stderr gets one line when a wait starts and one when it ends. An\n" +
-			"interrupt while merge waits merges nothing and exits 1. In a repository\n" +
-			"with no CI, the checks stay at none, and merge waits until the time is up.\n" +
+			"regate or another merge can run meanwhile. For the org, it reads only\n" +
+			"the ledger every 30 s, with no git and no gh, until the org is\n" +
+			"disbanded, runs another feature, or the ledger cannot be read; for the\n" +
+			"checks, it reads only gh pr checks <n> -R <repo> every 30 s, until no\n" +
+			"check is pending any more or gh pr checks fails. Either wait also ends\n" +
+			"when the time is up. Then merge takes regate.lock again and runs every\n" +
+			"check above from the start, so a branch that moved meanwhile is refused,\n" +
+			"and an org still running or checks pending again are waited for again,\n" +
+			"all within the one duration. An org that runs another feature now, a\n" +
+			"check that failed or was cancelled, checks that are all skipping, and\n" +
+			"every other refusal are not waited for. When the time is up and the org\n" +
+			"still runs or the checks are still pending or none, merge refuses as\n" +
+			"without the flag and adds how long it waited; for the org, it also names\n" +
+			"ralph org status --org-id <org>, since whether to disband the org is a\n" +
+			"human's call. stderr gets one line when a wait starts and one when it\n" +
+			"ends. An interrupt while merge waits merges nothing and exits 1. In a\n" +
+			"repository with no CI, the checks stay at none, and merge waits until\n" +
+			"the time is up.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the git or gh call that\n" +
 			"runs, up to and including gh pr merge. Before gh pr merge, nothing is\n" +
@@ -133,8 +141,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"of another head than the gate's, an interrupt, and any other error.\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
-			"approved plan. While it runs, except while it waits for the checks,\n" +
-			"ralph org regate and another ralph org merge are refused on the ledger,\n" +
+			"approved plan. While it runs, except while it waits, ralph org regate\n" +
+			"and another ralph org merge are refused on the ledger,\n" +
 			"but ralph org spawn and start of the branch's org are not, since merge\n" +
 			"changes no worktree.\n" +
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in\n" +
@@ -187,7 +195,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&branch, "branch", "", "the feature branch whose PR to merge, as ralph org merge-order lists it (required)")
 	cmd.Flags().DurationVar(&waitChecks, "wait-checks", 0, "how long to wait, with regate.lock released, for checks that are "+
-		"pending or not reported yet before refusing, such as 60m (0 waits not at all; at most 6h)")
+		"pending or not reported yet and for the branch's org to be disbanded before refusing, such as 60m (0 waits not at all; "+
+		"at most 6h)")
 
 	return cmd
 }

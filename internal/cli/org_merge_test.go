@@ -94,6 +94,15 @@ type mergeCLIFixture struct {
 // finds from a linked worktree of it; else a temp dir of its own.
 func newMergeCLIFixture(t *testing.T, mainLedger bool) *mergeCLIFixture {
 	t.Helper()
+	fx := newMergeCLIFixtureOrgRunning(t, mainLedger)
+	appendSeedEvent(t, fx.stateDir, org.ManifestEvent{OrgID: "a", Event: org.EventDisbanded})
+	return fx
+}
+
+// newMergeCLIFixtureOrgRunning is newMergeCLIFixture with org a not
+// disbanded: it still runs the feature of feat/a.
+func newMergeCLIFixtureOrgRunning(t *testing.T, mainLedger bool) *mergeCLIFixture {
+	t.Helper()
 	fx := &mergeCLIFixture{mergeOrderFixture: newMergeOrderFixture(t, false)}
 	if mainLedger {
 		fx.stateDir = filepath.Join(fx.work, ".harness", "state", "org")
@@ -112,7 +121,6 @@ func newMergeCLIFixture(t *testing.T, mainLedger bool) *mergeCLIFixture {
 	fx.push(t, "feat/a")
 	fx.bind(t, "a", "a", "feat/a")
 	fx.gate(t, "a", "feat/a", "", fx.head, fx.main)
-	appendSeedEvent(t, fx.stateDir, org.ManifestEvent{OrgID: "a", Event: org.EventDisbanded})
 
 	fx.reply(t, "pr-list", `[{"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7","headRefOid":"`+fx.head+
 		`","baseRefName":"main","isCrossRepository":false}]`)
@@ -526,7 +534,9 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 // --wait-checks 1ms waits once: stderr gets the line of its start and the
 // line of its end, and once the time is up the checks run again and refuse
 // as without the flag, adding how long merge waited, with no gh pr merge and
-// the ledger as it was.
+// the ledger as it was. With the branch's org still running (D5), it waits
+// the same way for the org's disband, running no gh meanwhile, and the
+// refusal also names ralph org status for the org.
 func TestOrgMerge_WaitChecks(t *testing.T) {
 	t.Run("6h is taken", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)
@@ -562,6 +572,39 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		}
 		if got := fx.mergeCalls(t); len(got) != 0 {
 			t.Errorf("gh pr merge ran: %q", got)
+		}
+	})
+	t.Run("the time is up with the org still running", func(t *testing.T) {
+		fx := newMergeCLIFixtureOrgRunning(t, false)
+		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
+
+		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
+		const refusal = `org: merge: the branch feat/a is bound to org_id "a", which is running, so its leader may still push to ` +
+			"the branch and open or change the PR, and nothing was merged: handle the org's RESULT in the inbox (ralph org inbox), " +
+			"and once the org is disbanded, run ralph org merge --branch feat/a again; ralph org merge waited "
+		const hint = ` for org_id "a" to be disbanded (--wait-checks 1ms); the org still runs: see what it does with ralph org ` +
+			"status --org-id a, and a human decides whether to disband it (ralph org disband --org-id a)"
+		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), hint) || stdout != "" {
+			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited and ralph org status", err,
+				stdout)
+		}
+		lines := outputLines(stderr)
+		start := `org: merge: org_id "a" of the branch is still running (its leader disbands it after its RESULT), so ralph org ` +
+			"merge waits for it to be disbanded for up to 1ms (--wait-checks 1ms), with regate.lock released, reading the ledger " +
+			"every 30s"
+		if len(lines) != 2 || lines[0] != start || !strings.HasPrefix(lines[1], `org: merge: stopped waiting for org_id "a" to be `+
+			"disbanded after ") || !strings.HasSuffix(lines[1], ": --wait-checks 1ms is used up; running every check again") {
+			t.Errorf("stderr:\n%s\nwant the line of the wait's start and the line of its end", stderr)
+		}
+		if got := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir)); got != before {
+			t.Errorf("the ledger changed:\nbefore %s\nafter  %s", before, got)
+		}
+		// Only the gh pr list of each round of the checks: none while merge
+		// waited, and no gh pr view, checks, or merge.
+		calls := fx.ghCalls(t)
+		if len(calls) != 2 || !strings.HasPrefix(calls[0], "GH_PROMPT_DISABLED=1 pr list ") ||
+			!strings.HasPrefix(calls[1], "GH_PROMPT_DISABLED=1 pr list ") {
+			t.Errorf("gh calls = %q; want the gh pr list of the two rounds of the checks only", calls)
 		}
 	})
 }
@@ -698,21 +741,27 @@ func TestOrgMerge_Help(t *testing.T) {
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",
 			"Without --config, it is read from the main worktree's ralph.toml when the ledger is the main worktree's",
 			"--branch string",
-			// --wait-checks (S7, AC13).
+			// --wait-checks (S7, AC13), and its wait for the org (S8c, D5).
 			"--wait-checks duration how long to wait, with regate.lock released, for checks that are pending or not reported yet " +
-				"before refusing, such as 60m (0 waits not at all; at most 6h)",
+				"and for the branch's org to be disbanded before refusing, such as 60m (0 waits not at all; at most 6h)",
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default, waits not at all; at most 6h, and a negative " +
-				"value or one over 6h is refused before anything is read), merge waits for the checks instead of refusing when the " +
-				"only refusal is that a check is pending, or that gh pr checks reports no checks yet.",
-			"It releases regate.lock, so a ralph org regate or another merge can run meanwhile, and reads only gh pr checks <n> -R " +
-				"<repo> every 30 s, until no check is pending any more, gh pr checks fails, or the time is up; then it takes " +
+				"value or one over 6h is refused before anything is read), merge waits instead of refusing when the only refusal is " +
+				"that the branch's org is still running (its leader disbands it after its RESULT), that a check is pending, or that " +
+				"gh pr checks reports no checks yet.",
+			"It releases regate.lock, so a ralph org regate or another merge can run meanwhile.",
+			"For the org, it reads only the ledger every 30 s, with no git and no gh, until the org is disbanded, runs another " +
+				"feature, or the ledger cannot be read; for the checks, it reads only gh pr checks <n> -R <repo> every 30 s, until no " +
+				"check is pending any more or gh pr checks fails. Either wait also ends when the time is up. Then merge takes " +
 				"regate.lock again and runs every check above from the start",
-			"A check that failed or was cancelled, checks that are all skipping, and every other refusal are not waited for.",
-			"When the time is up and the checks are still pending or none, merge refuses as without the flag and adds how long it waited.",
+			"An org that runs another feature now, a check that failed or was cancelled, checks that are all skipping, and every " +
+				"other refusal are not waited for.",
+			"When the time is up and the org still runs or the checks are still pending or none, merge refuses as without the flag " +
+				"and adds how long it waited; for the org, it also names ralph org status --org-id <org>, since whether to disband " +
+				"the org is a human's call.",
 			"stderr gets one line when a wait starts and one when it ends.",
 			"An interrupt while merge waits merges nothing and exits 1.",
 			"In a repository with no CI, the checks stay at none, and merge waits until the time is up.",
-			"While it runs, except while it waits for the checks, ralph org regate and another ralph org merge are refused",
+			"While it runs, except while it waits, ralph org regate and another ralph org merge are refused",
 		}},
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",

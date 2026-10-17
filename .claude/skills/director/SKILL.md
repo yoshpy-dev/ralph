@@ -506,7 +506,12 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   `ralph org merge --branch <ブランチ> --wait-checks 60m` を打つ。検査が
   走っている(`pending`)か、まだ 1 件も出ていないという断りのときだけ、
   動詞は `regate.lock` を外し、30 秒ごとに `gh pr checks` を読み直して最大
-  60 分待つ。待ち終えたら、ロックを取り直して確かめを最初から打つ。Claude
+  60 分待つ。leader は RESULT を出したあとに org を disband するので、
+  受信箱の RESULT を見てすぐ打つと、ブランチの org がまだ走っているという
+  断りに当たることがある。動詞はこの断りでも、同じく `regate.lock` を外し、
+  30 秒ごとに台帳だけを読み直して(git と gh は打たない)org の disband を
+  待つ。ほかの機能で走り出した org は待たない。2 つの待ちは同じ 60 分を
+  分け合う。待ち終えたら、ロックを取り直して確かめを最初から打つ。Claude
   Code では Bash の `run_in_background` で走らせ、stdout と stderr を cwd の
   `.harness/state/merge-<名前>.out` に書き、終わってから終了コードと出力を
   読む。`<名前>` は regate と同じく、ブランチ名の `/` を `-` にしたもの
@@ -522,8 +527,10 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 
   待つ間、stderr には待ちに入るときと終えるときに 1 行ずつ出る。60 分
   たっても検査が `pending` のまま(か 0 件のまま)なら、待った時間を添えた
-  断りで終了コード 1 で終わる。ほかの断りと同じく、そのブランチはそこで
-  止める。
+  断りで終了コード 1 で終わる。org が走ったままなら、待った時間と
+  `ralph org status --org-id <org>` を添えた断りで終わる。org を disband
+  するかは人が決めるので、director は disband を打たずに、その断りを人に
+  伝える。ほかの断りと同じく、そのブランチはそこで止める。
 - `auto_merge = false` で人に頼まれた merge は、人が待つよう頼まない限り
   `--wait-checks` を付けずに打つ。前景で打ってよい。中の git と gh の
   呼び出しはどれも時間で区切られている。Claude Code では Bash のツールの

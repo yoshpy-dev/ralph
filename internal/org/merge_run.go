@@ -110,9 +110,10 @@ type MergeResult struct {
 // Once it holds the lock it empties the marker an earlier regate left there
 // and writes none: a merge changes no worktree, so a spawn of the branch's org
 // goes on while it runs (regateSpawnErr). With p.WaitChecks, a refusal for
-// checks that are pending or not reported yet is waited out instead, with the
-// lock released; after the wait the lock is taken again and every check runs
-// again (mergeWait, D13). It then runs gh pr merge once (mergeRun.merge) and,
+// checks that are pending or not reported yet, or for the branch's org that
+// still runs (not another feature), is waited out instead, with the lock
+// released; after the wait the lock is taken again and every check runs again
+// (mergeWait, D5, D13). It then runs gh pr merge once (mergeRun.merge) and,
 // whatever that returned, reads the PR back once (mergeRun.readBack, D6):
 //
 //   - MERGED at the gate's head: it appends pr_merged (recordMerge, D4) and
@@ -154,18 +155,20 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 		if waitFor == nil {
 			return res, err
 		}
-		if err := w.wait(ctx, newMergeCheck(p), *waitFor); err != nil {
+		if err := w.wait(ctx, newMergeCheck(p), o.Manifest.Path(), *waitFor); err != nil {
 			return MergeResult{}, err
 		}
 	}
 }
 
 // mergeLocked is Merge with regate.lock held, which it takes and releases:
-// the checks and, when they pass, the merge. When checkMerge refuses with
-// checks that w may still wait for (mergeChecksKind.waits, mergeWait.left),
-// it returns only wait, the PR to wait for, with the lock released, for Merge
-// to wait and call it again; a refusal of that kind once w's time is used up
-// says how long w waited (mergeWait.waited).
+// the checks and, when they pass, the merge. When checkMerge refuses with a
+// kind that w may still wait for (mergeRefusalKind.waits, mergeWait.left):
+// the branch's org that still runs, or checks pending or none, it returns only
+// wait, what to wait for, with the lock released, for Merge to wait and call
+// it again; a refusal of that kind once w's time is used up says how long w
+// waited, and for an org that still runs, how to see what it does
+// (mergeWait.waitedOut).
 func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res MergeResult, wait *mergeWaitFor, err error) {
 	stateDir := filepath.Dir(o.Manifest.Path())
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
@@ -194,7 +197,7 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	case refused != "" && kind.waits() && w.left():
 		return MergeResult{}, &mergeWaitFor{r: r, kind: kind}, nil
 	case refused != "" && kind.waits():
-		return MergeResult{Refused: refused + w.waited()}, nil, nil
+		return MergeResult{Refused: w.waitedOut(refused, r, kind)}, nil, nil
 	case refused != "":
 		return MergeResult{Refused: refused}, nil, nil
 	}

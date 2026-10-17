@@ -78,7 +78,9 @@ var directorSkillCopies = []string{
 // merge-order again and regates one branch, and merges that branch once it
 // is ready again; with either value it never runs gh pr merge itself, and it
 // stops a branch at a refusal or a failure of the verb and does not run it
-// again unasked.
+// again unasked. The last two say that --wait-checks also waits for the
+// branch's org to be disbanded after its RESULT (D5), and that the director
+// does not disband an org that still runs once the time is up.
 var directorSkillAutoMergeSteps = []string{
 	"merge も regate も人に頼まれたときだけ打つ",
 	"先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge する",
@@ -87,6 +89,8 @@ var directorSkillAutoMergeSteps = []string{
 	"そのブランチが `ready` に戻っていれば、2 と同じく merge して 3 に戻る",
 	"`gh pr merge` を直接打たない。merge は `ralph org merge` でだけ打つ",
 	"そのブランチはそこで止め、stderr の文(理由と次の手)をそのまま人に伝える。人に頼まれないまま打ち直さない",
+	"動詞はこの断りでも、同じく `regate.lock` を外し、30 秒ごとに台帳だけを読み直して(git と gh は打たない)org の disband を待つ",
+	"director は disband を打たずに、その断りを人に伝える",
 }
 
 // directorSkillOldMergeStep is a fragment of the step the skill had before
