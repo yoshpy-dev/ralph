@@ -21,10 +21,10 @@ import (
 // the PR back whatever gh pr merge returned (D6, AC7, AC8); removes an
 // auto-merge request GitHub held for the PR instead of merging it; and
 // records the org-level pr_merged when the PR is MERGED at the head the gate
-// passed (D4). Its gh calls run
-// through MergeOrderExec with GH_PROMPT_DISABLED=1, pinned to origin's
-// repository with -R, as checkMerge's are; the read-back and the removal run,
-// for the real commands, in a process group of their own (ghAfterStart).
+// passed (D4). Its gh calls run through MergeOrderExec with
+// GH_PROMPT_DISABLED=1, pinned to origin's repository with -R, as
+// checkMerge's are; the read-back and the removal run, for the real commands,
+// in a process group of their own (ghAfterStart).
 
 const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
@@ -119,7 +119,7 @@ type MergeResult struct {
 //   - MERGED at the gate's head: it appends pr_merged (recordMerge, D4) and
 //     sets Merged and Recorded; Note says how gh pr merge failed when it did;
 //   - MERGED at another head, or with no head read back: someone may have
-//     pushed and merged another head after the last check, a merge
+//     pushed and merged another head after the last check, a merge that
 //     --match-head-commit keeps this gh pr merge from making, so it records
 //     nothing, Failed says which head was merged, and Merged stays false
 //     (otherHeadMerged);

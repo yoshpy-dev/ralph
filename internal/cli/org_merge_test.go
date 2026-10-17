@@ -127,7 +127,7 @@ func newMergeCLIFixtureOrgRunning(t *testing.T, mainLedger bool) *mergeCLIFixtur
 	fx.reply(t, "pr-view", `{"autoMergeRequest":null,"baseRefName":"main","headRefOid":"`+fx.head+
 		`","mergeCommit":null,"state":"OPEN","url":"https://github.com/o/r/pull/7"}`)
 	fx.reply(t, "pr-checks", `[{"bucket":"pass","name":"verify","state":"SUCCESS","workflow":"ci"}]`)
-	fx.reply(t, "api-repo", `{"default_branch":"main","full_name":"o/r","permissions":{"admin":false}}`)
+	fx.reply(t, "api-repo", `{"default_branch":"main","full_name":"o/r"}`)
 	fx.reply(t, "api-graphql", `{"data":{"repository":{"mergeQueue":null}}}`)
 	fx.reply(t, "api-rules", `[{"type":"required_status_checks","ruleset_id":1,"parameters":`+
 		`{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"verify"}]}}]`)

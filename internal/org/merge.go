@@ -92,7 +92,10 @@ type MergeParams struct {
 }
 
 // mergeReady is what checkMerge found when every check passed: what the
-// merge of the branch's PR needs.
+// merge of the branch's PR needs. With a refusal whose kind waits
+// (mergeRefusalKind.waits), only the fields read up to the refusing step are
+// filled: for step 8 branch, origin's fields, and orgID, and for step 10 all
+// but protection, method, and methodFlag.
 type mergeReady struct {
 	branch string
 	// orgID is the org the merge is recorded under (D4): the org of the
@@ -485,7 +488,11 @@ func mergeTargetOrg(t *mergeTarget) string {
 // is done and then disbands the org: kind is mergeRefusalOrgRunning, which
 // --wait-checks waits out (D13). An org that runs another feature now
 // (t.orgRunsOn) is refused too, with mergeRefusalOther: its leader works on
-// another branch, and nothing says when that ends.
+// another branch, and nothing says when that ends. t.orgRunsOn is set only
+// when t has a binding (collectMergeTargets), so on a branch with a gate
+// record and no binding, an org that runs another feature now is refused as
+// one that still runs the branch's, with mergeRefusalOrgRunning, and
+// --wait-checks waits for it (orgWaitEnd, docs/tech-debt/README.md).
 func (m *mergeCheck) runningRefusal(t *mergeTarget, orgID string, running []string) (string, mergeRefusalKind) {
 	switch {
 	case !slices.Contains(running, orgID):

@@ -501,12 +501,12 @@ func (fx *mwFixture) addDuring(t *testing.T, n int, lines ...any) *string {
 }
 
 // TestMerge_WaitChecksWaitsForTheOrgToBeDisbanded covers the wait for the
-// org (D5, D13, AC11): with --wait-checks 1h, step 8's refusal for an org that
-// still runs the branch's feature is waited out with regate.lock released,
-// reading only the ledger every 30 s, with no git or gh between the checks
-// before and after it; once the org is disbanded, every check runs again and
-// the PR is merged and recorded once. An org that runs another feature by the
-// next read ends the wait, and the checks refuse it as without a wait.
+// org (D5, D13, AC11, AC13): with --wait-checks 1h, step 8's refusal for an
+// org that still runs the branch's feature is waited out with regate.lock
+// released, reading only the ledger every 30 s, with no git or gh between the
+// checks before and after it; once the org is disbanded, every check runs
+// again and the PR is merged and recorded once. An org that runs another
+// feature by the next read ends the wait; the checks refuse it without a wait.
 func TestMerge_WaitChecksWaitsForTheOrgToBeDisbanded(t *testing.T) {
 	merged := mrResult("merge")
 	merged.Merged, merged.Recorded, merged.MergeCommit = true, true, mrOID

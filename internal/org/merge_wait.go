@@ -12,9 +12,9 @@ import (
 
 // The wait of `ralph org merge --wait-checks <d>`, S7 of plan
 // docs/plans/active/2026-10-17-org-auto-merge.md (D13, AC13), and its wait
-// for an org to be disbanded, S8c (D5, AC11). A leader opens the PR right
-// after its gate and disbands, and regate's push makes CI run again, so a
-// branch merge-order lists as ready often has checks that still run, and a
+// for an org to be disbanded, S8c (D5, AC11, AC13). A leader opens the PR
+// right after its gate and disbands, and regate's push makes CI run again, so
+// a branch merge-order lists as ready often has checks that still run, and a
 // director that waits on the inbox has no turn that comes back to run merge
 // again. So the verb waits: when checkMerge (merge.go) refuses only because
 // the PR's checks are pending or none is reported yet (mergeRefusalKind.waits,
@@ -31,7 +31,13 @@ import (
 // regate.lock again as it took it first and runs every check of checkMerge
 // from the start, so a head or a base that moved meanwhile is refused as it
 // is without a wait. A refusal of any other kind, an org that runs another
-// feature now included, is never waited out.
+// feature now included (told apart only on a branch with a binding:
+// orgWaitEnd), is never waited out.
+//
+// A Merge waits only in this file, and lets go of regate.lock before it
+// returns only while it waits here. What lockfile.go, regate.go, and spawn.go
+// say of the lock while a merge waits points at this file, so a wait added
+// here needs no change there.
 
 const (
 	// maxMergeWaitChecks is the longest --wait-checks Merge takes
@@ -78,7 +84,9 @@ type mergeWait struct {
 }
 
 // mergeWaitFor is what a wait waits for: what checkMerge read before it
-// refused (r), and the kind of its refusal, which waits.
+// refused (r), and the kind of its refusal, which waits. r holds only the
+// fields read up to the refusing step (mergeReady): for the org's wait (step
+// 8) the branch, origin's fields, and orgID, and no PR.
 type mergeWaitFor struct {
 	r    mergeReady
 	kind mergeRefusalKind
@@ -147,25 +155,33 @@ func (w *mergeWait) wait(ctx context.Context, m *mergeCheck, manifest string, f 
 		w.started, w.deadline = start, start.Add(w.budget)
 	}
 	left := mergeWaitDuration(max(w.deadline.Sub(start), 0))
-	what, forWhat := fmt.Sprintf("the checks of PR #%d", f.r.prNumber), "the checks"
+	// What the wait waits for, by the kind of the refusal: what (its lines),
+	// forWhat (waitedFor), its first line, and read.
+	var what, forWhat, first string
 	var read func() (ended string, interrupted bool)
-	if f.kind == mergeRefusalOrgRunning {
+	switch f.kind {
+	case mergeRefusalOrgRunning:
+		// f.r has no PR (step 8).
 		what = fmt.Sprintf("org_id %q to be disbanded", f.r.orgID)
 		forWhat = what
-		w.line(fmt.Sprintf("org_id %q of the branch is still running (its leader disbands it after its RESULT), so ralph org "+
+		first = fmt.Sprintf("org_id %q of the branch is still running (its leader disbands it after its RESULT), so ralph org "+
 			"merge waits for it to be disbanded for up to %s (--wait-checks %s), with regate.lock released, reading the ledger "+
-			"every %s", f.r.orgID, left, w.budget, w.interval))
+			"every %s", f.r.orgID, left, w.budget, w.interval)
 		read = func() (string, bool) { return orgWaitEnd(manifest, f.r), false }
-	} else {
+	default:
+		// mergeRefusalChecksPending or mergeRefusalChecksZero, the other kinds
+		// that wait (mergeRefusalKind.waits): the checks of f.r's PR.
 		cmd := "gh pr checks " + strconv.Itoa(f.r.prNumber) + " -R " + f.r.repoArg
 		why := fmt.Sprintf("PR #%d has checks pending", f.r.prNumber)
 		if f.kind == mergeRefusalChecksZero {
 			why = fmt.Sprintf("PR #%d has no checks reported yet", f.r.prNumber)
 		}
-		w.line(fmt.Sprintf("%s, so ralph org merge waits for them for up to %s (--wait-checks %s), with regate.lock released, "+
-			"reading %s every %s", why, left, w.budget, cmd, w.interval))
+		what, forWhat = fmt.Sprintf("the checks of PR #%d", f.r.prNumber), "the checks"
+		first = fmt.Sprintf("%s, so ralph org merge waits for them for up to %s (--wait-checks %s), with regate.lock released, "+
+			"reading %s every %s", why, left, w.budget, cmd, w.interval)
 		read = func() (string, bool) { return m.checksWaitEnd(ctx, f.r, cmd) }
 	}
+	w.line(first)
 	if !slices.Contains(w.waitedFor, forWhat) {
 		w.waitedFor = append(w.waitedFor, forWhat)
 	}
@@ -226,7 +242,11 @@ func (m *mergeCheck) checksWaitEnd(ctx context.Context, r mergeReady, cmd string
 // (readMergeLedger), with no git and no gh. It says why the wait ends: the
 // ledger cannot be read, r.orgID is not in RunningOrgs any more, or the org
 // runs another feature now (mergeTarget.orgRunsOn of r.branch), which step 8
-// refuses without a wait; and "" while the org still runs.
+// refuses without a wait; and "" while the org still runs. orgRunsOn is set
+// only for a branch with a binding (collectMergeTargets): on a branch with a
+// gate record and no binding, an org that runs another feature now is not
+// told from one that still runs the branch's, so the wait goes on until the
+// org is disbanded or the budget is used up (docs/tech-debt/README.md).
 func orgWaitEnd(manifest string, r mergeReady) string {
 	ledger, err := readMergeLedger(manifest)
 	if err != nil {

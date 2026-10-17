@@ -171,7 +171,7 @@ func newMXExec() *mxExec {
 		mxPRList:   {out: moPRs(moPR(7, "OPEN", "main"))},
 		mxPRView:   {out: mxPRViewJSON("OPEN", moHeadA, "main", "https://github.com/o/r/pull/7", "null")},
 		mxPRChecks: {out: mxChecks(mxPass("verify"))},
-		mxRepoAPI:  {out: meRepoJSON("main", "o/r", false, false)},
+		mxRepoAPI:  {out: meRepoJSON("main", "o/r", nil, false)},
 		mxQueue:    {out: meQueueJSON("null")},
 		mxRules:    {out: mgRules(meChecksRule(1, true, "verify"))},
 		mxRuleset:  {out: meRuleset(1, "protect main", "never")},
@@ -307,7 +307,7 @@ func mxForeign(cmd, u string) string {
 // what was found, that nothing was merged, and one next step, with no command
 // after the failing check run, nothing written, and only read-only commands.
 // Every refusal here is of a kind --wait-checks does not wait out, with
-// nothing read kept; TestCheckMerge_OrgThatStillRunsIsWaitedFor and
+// nothing read kept; TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits and
 // TestCheckMerge_ReadsTheChecks have those it waits out.
 func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 	const listCmd = "gh pr list --head feat/a -R " + mxRepoArg
@@ -436,8 +436,8 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 			"PR #7 merges into develop, not origin's default branch main: change the PR's base to main"), 3},
 		{"not ready: no_gate", []any{moBind("org-a", "a"), moDisbanded("org-a")}, func(*mxFixture, *MergeParams) {}, notReady("no_gate",
 			"no gate record: run ralph org regate --branch feat/a before the PR is merged"), 3},
-		// 8. The org (D5); TestCheckMerge_OrgThatStillRunsIsWaitedFor has an
-		// org that still runs the branch's feature.
+		// 8. The org (D5); an org that still runs the branch's feature is in
+		// TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits.
 		{"org runs another feature now", append(mxReadyLedger(), moBindTo("org-a", "split-1", "other", "feat/other")),
 			func(*mxFixture, *MergeParams) {}, `org: merge: the branch feat/a is bound to org_id "org-a", which is running, now for ` +
 				"another feature on the branch feat/other, so nothing was merged: wait for the org to be disbanded and " + mxAgain, 3},
@@ -521,14 +521,14 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 	}
 }
 
-// TestCheckMerge_OrgThatStillRunsIsWaitedFor covers step 8 (D5) for an org
-// that still runs the branch's feature, the org of its binding or, for a
+// TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits covers step 8 (D5) for an
+// org that still runs the branch's feature, the org of its binding or, for a
 // branch with a gate record only, the gate's: the refusal is of the kind
 // mergeRefusalOrgRunning, which --wait-checks waits out (D13), and keeps the
 // branch and the org_id, for the wait to read the org's disband in the
 // ledger, with nothing after step 8 run. An org that runs another feature now
 // is refused with a kind not waited out (in the table above).
-func TestCheckMerge_OrgThatStillRunsIsWaitedFor(t *testing.T) {
+func TestCheckMerge_OrgThatStillRunsIsOfAKindThatWaits(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		ledger []any
