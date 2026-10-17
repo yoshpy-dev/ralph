@@ -45,7 +45,7 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 			"id, so a session that was replaced is refused and need not detach;\n" +
 			"--force ends the current registration whatever its id, for a human\n" +
 			"cleaning up. status shows the registration, the headless directors that\n" +
-			"are still open, and [org.director].enabled.\n" +
+			"are still open, [org.director].enabled, and [org.director].auto_merge.\n" +
 			"\n" +
 			"The registration does not change what `ralph org escalate` does:\n" +
 			"[org.director].enabled and the cross-org watch decide that (see\n" +

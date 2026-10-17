@@ -42,21 +42,21 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"--org-id is refused, and it works in that worktree whatever the current\n" +
 			"directory, which only picks the ledger, as for every org verb.\n" +
 			"\n" +
-			"First, regate checks that no other regate runs on the ledger (one runs\n" +
-			"at a time; it waits up to 1 s for the lock), that a complete binding\n" +
-			"names the branch and its org is not running, that the feature worktree\n" +
-			"exists and has the branch checked out (not detached, no rebase or merge\n" +
-			"in progress), that it is clean (git status --porcelain\n" +
-			"--untracked-files=all prints nothing), that a default branch is found\n" +
-			"(the one refs/remotes/origin/HEAD names, else main, else master), and\n" +
-			"that ./scripts/run-static-verify.sh and ./scripts/run-test.sh are\n" +
-			"executable files there. Then it fetches origin's default branch and the\n" +
-			"branch, each with its own refspec, with GIT_TERMINAL_PROMPT=0 and up to\n" +
-			"120 s each, and checks that HEAD is origin's tip of the branch: regate\n" +
-			"gates only what origin has. When a check or a fetch fails, or origin has\n" +
-			"no such branch (it was deleted after its merge), regate records nothing,\n" +
-			"leaves the worktree and origin as they were, says why and what to do\n" +
-			"next on stderr, and exits 1.\n" +
+			"First, regate checks that no other ralph org regate or merge runs on\n" +
+			"the ledger (one runs at a time; it waits up to 1 s for the lock), that\n" +
+			"a complete binding names the branch and its org is not running, that\n" +
+			"the feature worktree exists and has the branch checked out (not\n" +
+			"detached, no rebase or merge in progress), that it is clean (git status\n" +
+			"--porcelain --untracked-files=all prints nothing), that a default\n" +
+			"branch is found (the one refs/remotes/origin/HEAD names, else main,\n" +
+			"else master), and that ./scripts/run-static-verify.sh and\n" +
+			"./scripts/run-test.sh are executable files there. Then it fetches\n" +
+			"origin's default branch and the branch, each with its own refspec, with\n" +
+			"GIT_TERMINAL_PROMPT=0 and up to 120 s each, and checks that HEAD is\n" +
+			"origin's tip of the branch: regate gates only what origin has. When a\n" +
+			"check or a fetch fails, or origin has no such branch (it was deleted\n" +
+			"after its merge), regate records nothing, leaves the worktree and origin\n" +
+			"as they were, says why and what to do next on stderr, and exits 1.\n" +
 			"\n" +
 			"When HEAD contains origin's default branch tip and the branch's latest\n" +
 			"gate record is a gate_passed of HEAD on that tip, regate runs, records,\n" +

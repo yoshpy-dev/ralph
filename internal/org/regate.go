@@ -23,11 +23,11 @@ import (
 // bring it back to ready. Regate is that verb, named by the branch, as
 // merge-order lists them (D1):
 //
-//   - under regate.lock, which one Regate of a ledger holds at a time (D7),
-//     it reads the branch's latest complete feature binding and latest gate
-//     record under the manifest lock (D2), refuses a branch no complete
-//     binding names or whose org runs, and marks the lock with the org it
-//     works on, so a spawn of that org is refused until it ends (D9);
+//   - under regate.lock, which one Regate or Merge of a ledger holds at a
+//     time (D7), it reads the branch's latest complete feature binding and
+//     latest gate record under the manifest lock (D2), refuses a branch no
+//     complete binding names or whose org runs, and marks the lock with the
+//     org it works on, so a spawn of that org is refused until it ends (D9);
 //   - in the binding's feature worktree it makes Gate's checks of the branch,
 //     the tree, and the scripts (regateCheckWorktree);
 //   - it fetches origin's default branch and the branch (regateFetch, D8),
@@ -87,11 +87,15 @@ const (
 const (
 	// regateLockFile is the lock in the state dir that Regate holds from its
 	// first check to its end (D7). Its content is the marker of the Regate
-	// that holds it, or that last held it (regateMarker, D9).
+	// that holds it, or that last held it (regateMarker, D9). ralph org merge
+	// (Merge, merge_run.go) holds it too, for its whole run, and empties the
+	// marker and writes none, since a merge changes no worktree (plan
+	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate or
+	// Merge runs on a ledger at a time.
 	regateLockFile = "regate.lock"
-	// regateLockWait is how long Regate retries regate.lock before it
-	// refuses: a spawn's check holds the lock shared for a moment (D9), which
-	// must not make a Regate fail.
+	// regateLockWait is how long Regate and Merge retry regate.lock before
+	// they refuse: a spawn's check holds the lock shared for a moment (D9),
+	// which must not make either fail.
 	regateLockWait = time.Second
 	// regateGitWaitDelay is regateBoundedGit's exec.Cmd.WaitDelay: how long
 	// after the kill, or after git exited, it waits for the output pipes,
@@ -234,9 +238,9 @@ type RegateResult struct {
 // unchanged) when a check fails:
 //
 //   - p.Branch is not empty;
-//   - no other Regate of the ledger holds regate.lock after regateLockWait
-//     (D7); once it holds the lock, it empties the marker an earlier Regate
-//     left there (D9);
+//   - no other Regate or Merge of the ledger holds regate.lock after
+//     regateLockWait (D7); once it holds the lock, it empties the marker an
+//     earlier Regate left there (D9);
 //   - under the manifest lock, a complete feature binding names p.Branch,
 //     and the org of the latest one is not running (regateFirstCheck, D2);
 //   - the binding's worktree passes regateCheckWorktree;
@@ -292,8 +296,8 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
-		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate runs on this ledger (%s is held): "+
-			"one regate runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), words.again)}, nil
+		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate or merge runs on this ledger (%s is held): "+
+			"one runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), words.again)}, nil
 	case err != nil:
 		return RegateResult{}, err
 	}

@@ -176,6 +176,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.Itoa(tomlCfg.Org.Director.AckMinutes), strconv.Itoa(goCfg.Org.Director.AckMinutes))
 	check("org.director.resolve_minutes", "RALPH_ORG_DIRECTOR_RESOLVE_MINUTES",
 		strconv.Itoa(tomlCfg.Org.Director.ResolveMinutes), strconv.Itoa(goCfg.Org.Director.ResolveMinutes))
+	check("org.director.auto_merge", "RALPH_ORG_DIRECTOR_AUTO_MERGE",
+		strconv.FormatBool(tomlCfg.Org.Director.AutoMerge), strconv.FormatBool(goCfg.Org.Director.AutoMerge))
 	check("org.approval.mode", "RALPH_ORG_APPROVAL_MODE",
 		tomlCfg.Org.Approval.Mode, goCfg.Org.Approval.Mode)
 

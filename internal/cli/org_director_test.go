@@ -995,7 +995,7 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			// The verbs' Short lines (plan 2026-10-16-org-director-launch-cmd).
 			"Launch a headless director in a herdr workspace of its own, or with [org.director].launch_cmd, and register it",
 			"Stop a headless director (close its herdr pane and workspace, or end its launch_cmd process) and record it stopped",
-			"status shows the registration, the headless directors that are still open, and [org.director].enabled",
+			"status shows the registration, the headless directors that are still open, [org.director].enabled, and [org.director].auto_merge.",
 			"attach", "detach", "start", "stop", "status",
 		}},
 		{[]string{"director", "attach", "--help"}, []string{
@@ -1088,8 +1088,9 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"`ralph org director` registers the interactive session the human talks to as the director of the ledger, or launches a headless director in herdr (ralph org director start)",
 			"approve, the director verbs, and the inbox verbs, which refuse it",
-			"escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool " +
-				"and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's",
+			"escalate and director attach read [org.director].enabled, director status reads it and [org.director].auto_merge, merge reads auto_merge, " +
+				"and director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's " +
+				"ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule",
 			"or launches a headless director in herdr (ralph org director start), or with [org.director].launch_cmd in the terminal that command opens.",
 		}},
 	} {
