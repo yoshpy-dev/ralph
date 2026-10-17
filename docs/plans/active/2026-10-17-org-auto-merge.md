@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-17 sha256:1a1d58b4e12f
+- Approved: 2026-10-17 sha256:5ca635edbd8e
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -60,7 +60,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 
 - `internal/org/mergeorder.go`(`pr_lookup`、ブランチ 1 本の読み取りを repository を固定して動詞から呼べる形に)、`internal/org/mergeorder_test.go`
 - `internal/org/mergeguarantee.go`(D11 の `CheckMergeEnforcement`。rules の読み取りを共有し、`ruleset_id` を残す。`CheckMergeGuarantee` と doctor の出力とキャッシュの形は変えない)、`internal/org/mergeguarantee_test.go`
-- `internal/org/merge.go`(新規、動詞の本体。S3a の確かめと S3b の merge と後始末)、`internal/org/merge_test.go`(新規)
+- `internal/org/merge.go`(新規、S3a の確かめ)、`internal/org/merge_test.go`(新規)、`internal/org/merge_run.go`(新規、S3b の `Merge`: ロック、merge、読み直し、記録。merge.go が 800 行を超えないように分ける)、`internal/org/merge_run_test.go`(新規)
 - `internal/org/seat.go`(event `pr_merged`)、`internal/org/regate.go` と `internal/org/spawn.go`(regate.lock の注と断りの文を「regate か merge」に)
 - `internal/config/config.go`(`AutoMerge`)、`internal/config/config_test.go`、`templates/base/ralph.toml`、`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh`(既定値の写し `RALPH_ORG_DIRECTOR_AUTO_MERGE`)、`internal/config/defaults_sync_test.go`(3 面の一致)
 - `internal/cli/org_merge.go`(新規)、`internal/cli/org_merge_test.go`(新規)、`internal/cli/org.go`(動詞の登録、main worktree の設定の読み方)、`internal/cli/status.go`、`internal/cli/org_director.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/org_merge_order.go`(help に `pr_lookup`)
@@ -77,11 +77,11 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 ## Design decisions
 
 - D1 auto_merge の効かせ方: 動詞は auto_merge によらず打てる。auto_merge は `/director` skill が読む「人に聞かずに merge と取り直しをしてよいか」の印で、`ralph status` の `director:` の行と `ralph org director status` と動詞の出力に値を出す。director は gh を直接打てるので、動詞で止めても強制にならない。人に頼まれた merge もこの動詞で打てば、素の `gh pr merge` より確かめが増える(consult)。受け入れ条件(auto_merge が false なら merge しない)は skill の文で満たし、skill の文を Go のテストで pin する
-- D2 merge の方式: 設定を足さず、`gh repo view --json viewerDefaultMergeMethod -R <repo>` の方式で打つ。GitHub の画面で merge する人が既定で得る方式と同じで、変えたい人は repo の設定で変えられる。repo や ruleset が許さない方式なら GitHub が断る。知らない値なら動詞が断る
+- D2 merge の方式: 設定を足さず、`gh repo view <repo> --json viewerDefaultMergeMethod` の方式で打つ(`gh repo view` は `-R` を持たず、repository を引数で受ける)。GitHub の画面で merge する人が既定で得る方式と同じで、変えたい人は repo の設定で変えられる。repo や ruleset が許さない方式なら GitHub が断る。知らない値なら動詞が断る
 - D3 排他: 動詞は `regate.lock` の排他を取る(取れなければ 1 秒まで打ち直し、それでも取れなければ断る)。取った直後に印を空にし、merge の間は印を書かない。merge は worktree に触らないので、Spawn は空の印を読んで進む(regate の D9 の規則のまま)。これで regate と merge が台帳ごとに 1 つずつになり、regate が merge 中のブランチに push することもない
 - D4 記録: gh が MERGED を返したあとに、manifest のロックの下で org の記録 `pr_merged` を 1 行書く。org_id は結びつきの org(結びつきが読めないブランチでは、gate の記録の org)、Details は `branch=`、`pr=`、`head=`、`method=`、`merge_commit=`、`auto_merge=`。仕様のユーザーストーリー 5(全 org の起動・承認・相談・merge を台帳と reports で追う)のため。断りと失敗は書かない。`pr_merged` は座席の状態の記録ではなく、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない
 - D5 走っている org: D4 の org が `RunningOrgs` に入っていれば断る(その org が今ほかの機能を走らせていても断る)。leader は stop のあとに push と PR を打ち、RESULT を上げてから disband するので、走っている間の merge は leader の push と競る。断りの文は「受信箱の RESULT の件を処理し、org が disband してから打ち直す」と言う
-- D6 merge のあとの読み直し: `gh pr merge` が終了コード 0 で終わったら、`gh pr view <番号> --json state,mergeCommit,autoMergeRequest -R <repo>` を読む。MERGED なら D4 を書いて終了コード 0。MERGED でなければ、`autoMergeRequest` があれば(D11 の確かめのあとに queue ができた場合など、gh が merge の代わりに予約した)`gh pr merge <番号> --disable-auto -R <repo>` で外し、予約を外したことを言って終了コード 1。外す gh が落ちたら「予約が残っているかもしれない」と、外すコマンドを出して終了コード 1。予約がなければ「gh は 0 で終わったが PR は merge されていない」と言って終了コード 1。どれも記録しない。merge の呼び出しが始まったあとに中断されても、読み直しと外しは `context.WithoutCancel` と gh の timeout の下で 1 回打つ。前の版の「QUEUED: で終了コード 0」は捨てた(Codex の指摘 2)
+- D6 merge のあとの読み直し: `gh pr merge`(60 秒で区切る)を打ったら、終了コードによらず、`gh pr view <番号> --json state,mergeCommit,autoMergeRequest -R <repo>` を 1 回読む。gh が非 0 で終わったか時間切れでも、GitHub の側では merge か予約が済んでいることがあるため。MERGED なら D4 を書いて終了コード 0(gh が非 0 だったら、その stderr の末尾を注として出す)。MERGED でなければ、`autoMergeRequest` があれば(D11 の確かめのあとに queue ができた場合など、gh が merge の代わりに予約した)`gh pr merge <番号> --disable-auto -R <repo>` で外し、予約を外したことを言って終了コード 1。外す gh が落ちたら「予約が残っているかもしれない」と、外すコマンドを出して終了コード 1。予約がなければ、gh が非 0 ならその stderr の末尾を、0 なら「gh は 0 で終わったが PR は merge されていない」を言って終了コード 1。読み直しが落ちたら、PR の状態がわからないことと確かめるコマンドを言って終了コード 1。MERGED のとき以外は記録しない。merge の呼び出しが始まったあとに中断されても、読み直しと外しと記録は `context.WithoutCancel` と gh の timeout(記録は manifest のロックの待ち時間)の下で 1 回打ち、中断されたことを言って終了コード 1。前の版の「QUEUED: で終了コード 0」は捨てた(Codex の指摘 2)。前の版の「終了コード 0 のときだけ読み直す」は、gh の時間切れのあとに merge された PR を記録し損ねるので、S3b の前に改めた
 - D7 検査: `gh pr checks` の bucket がすべて `pass` か `skipping` で、`pass` が 1 つ以上のときだけ進む。`pending`・`fail`・`cancel` が 1 つでもあるか、検査が 0 件なら断り、名前と bucket を並べる
 - D8 merge の直前の ls-remote: 検査と保護を読んだあと、merge の直前に ls-remote を打ち直し、既定のブランチの先頭が gate の base、ブランチの先頭が gate の head のままかを確かめる。動いていれば何もせずに断る。`--match-head-commit` は PR の head を守り、base は D11 の up-to-date の保護が GitHub 側で守るので、この確かめは早い断りにあたる
 - D9 merge-order の `pr_lookup`: entry に 5 つの値の field を足す。`failed` の理由の文は今までどおり notes に置く。動詞は `found` のときだけ進む
@@ -103,8 +103,8 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - [ ] AC4 対象の repository: origin の URL が host と owner/repo を持たなければ断る。動詞が打つ gh はすべて `-R <host>/<owner>/<repo>`(`gh api` は `--hostname <host>`)を持つ。PR の url の host か owner/repo が origin と違えば断る(同じ owner/repo で host が違う場合を含む)
 - [ ] AC5 保護: 次のどれでも断る(AC3 と同じ終わり方): merge queue がある(GraphQL か rules のどちらかが示す)、queue の有無が読めない、up-to-date の rule がない(`pr_checks_only` にあたる)、up-to-date の rule が自前の required check を持たない、ruleset の `current_user_can_bypass` が `never` でない、classic の strict の保護で打つ本人が admin で `enforce_admins` が無効、保護のどれかが読めない。進む 2 つの場合(ruleset の never、classic の非 admin か enforce_admins)は通る。doctor の Merge guarantee の判定とキャッシュの形は変わらない(既存のテストが通る)
 - [ ] AC6 通る道: `gh pr merge <番号> <方式の flag> --match-head-commit <gate の head> -R <repo>` を 1 回打ち、`--auto`・`--admin`・`--delete-branch` を付けない。PR が MERGED になれば `pr_merged`(D4 の Details)を書き、`MERGED:`(PR の url)、`METHOD:`、`HEAD:`、`MERGE COMMIT:`、`AUTO MERGE:`、`PROTECTION:`(D11 で進んだ理由)の行を出して終了コード 0
-- [ ] AC7 merge のあと MERGED でないとき(D6): 予約があれば `--disable-auto` を打って終了コード 1、外す gh が落ちたら外すコマンドを出して終了コード 1、予約がなければ終了コード 1。どれも記録しない。merge の呼び出しのあとの中断でも、読み直しと外しを 1 回打つ
-- [ ] AC8 `gh pr merge` が落ちたか時間切れなら(最後の確かめのあとに base が進み、GitHub が断った場合を含む。偽の gh で試す)、gh の stderr の末尾を出し、何も記録せずに終了コード 1。merge が MERGED を返したあとに記録が落ちたら、merge したことと記録できなかったことを言って終了コード 1
+- [ ] AC7 merge のあと、読み直しで MERGED でないとき(D6): 予約があれば `--disable-auto` を打って終了コード 1、外す gh が落ちたら外すコマンドを出して終了コード 1、予約がなければ終了コード 1、読み直しが落ちたら確かめるコマンドを出して終了コード 1。どれも記録しない。merge の呼び出しのあとの中断でも、読み直しと外し(MERGED なら記録)を 1 回打ち、終了コード 1
+- [ ] AC8 `gh pr merge` が落ちたか時間切れでも、読み直しを 1 回打つ。MERGED でなければ(最後の確かめのあとに base が進み、GitHub が断った場合を含む。偽の gh で試す)、gh の stderr の末尾を出し、何も記録せずに終了コード 1。MERGED なら記録し、gh の stderr の末尾を注として出して終了コード 0。読み直しが MERGED を返したあとに記録が落ちたら、merge したことと記録できなかったことを言って終了コード 1
 - [ ] AC9 `pr_merged` は、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない。`ralph org report` の時系列の表に出る
 - [ ] AC10 merge が `regate.lock` を持つ間は regate が断られ、regate が持つ間は merge が断られる。merge の間も同じ org_id の Spawn は断られない
 - [ ] AC11 `/director` skill: auto_merge が false なら、merge も regate も人に頼まれたときだけ打ち、merge は `ralph org merge` で打つ。true なら、merge-order の先頭の `ready` を `ralph org merge` で 1 本 merge し、merge-order を打ち直し、regate を名指すブランチに 1 本ずつ regate を打ち、`ready` に戻れば merge する。どちらでも `gh pr merge` を直接打たず、動詞の断りと失敗はそこで止めて人に伝え、打ち直さない。この文を Go のテストが pin する
@@ -115,7 +115,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 1. S1: merge-order の `pr_lookup`(`internal/org/mergeorder.go`)。`lookupMergePRs` がブランチごとの結果を target に残し、`mergeEntryFor` が entry に写す。ブランチ 1 本の PR を、固定した repository で読める形にする。CLI の help に field を足す
 2. S2: 設定 `auto_merge`(`internal/config/config.go`)、main worktree の設定の読み方(`internal/cli/org.go`)、`ralph status` と `ralph org director status` の表示、`templates/base/ralph.toml`
 3. S3a: 確かめ(`internal/org/merge.go` の前半と `internal/org/mergeguarantee.go` の `CheckMergeEnforcement`)。対象の repository、ブランチの読み直し、走っている org、予約、検査、保護と迂回、queue、方式、直前の ls-remote。gh と git は `MergeOrderExec` を通し、何も変えない。偽の gh の表で網羅する
-4. S3b: merge と後始末(`internal/org/merge.go` の後半と `internal/org/seat.go` の event `pr_merged`)。ロック、`gh pr merge`、読み直し、予約の外し、記録、中断
+4. S3b: merge と後始末(`internal/org/merge_run.go` と `internal/org/seat.go` の event `pr_merged`)。ロック、`gh pr merge`、読み直し、予約の外し、記録、中断
 5. S4: CLI `ralph org merge`(`internal/cli/org_merge.go`)、動詞の登録と台帳を書く動詞の扱い、古い台帳の注、regate.lock の注と regate と Spawn の断りの文
 6. S5: skill の 8 面、仕様、README、`AGENTS.md`、quality-gates、tech-debt、skill の文を pin するテスト
 
@@ -165,6 +165,8 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S1 fa49d310(merge-order の `pr_lookup`)、S2 cddb608c(`auto_merge` の設定と表示)
   - 2026-10-17: Affected areas に `ralph-config.sh` の 2 面と `defaults_sync_test.go` を足した(`[org.director]` のほかの既定値と同じく 3 面で揃える。S4 で入れる)。digest を取り直して承認し直した
   - S4 に回すもの: `internal/cli/org.go` の `--config` の usage と `internal/cli/org_director.go` の group help が `[org.director].enabled` だけを名指す(auto_merge も読む)。S5 に回すもの: `docs/tech-debt/README.md` の `statusDirectorEnabled`(`statusDirectorConfig` に改名した)
+  - S3a acc81fef(merge の前の 13 段の確かめと `CheckMergeEnforcement`)。GraphQL の変数は `-F` でなく `-f`(`-F` は true や数や `@` で始まる値を読み替える)
+  - 2026-10-17(S3b の前): D6・AC7・AC8 を「`gh pr merge` の終了コードによらず読み直し、MERGED なら記録する」に改め、D2 の `gh repo view` の形を直し、S3b を `merge_run.go` に分けた。図 1 と図 2 を直して撮り直し、digest を取り直して承認し直した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
