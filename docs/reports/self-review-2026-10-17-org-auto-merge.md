@@ -65,11 +65,68 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 2 件、LOW 8 件。
 
 _(上の行は追加していない。依頼により、report 以外のファイルは編集しなかった。`docs/tech-debt/` への追記は、直さないと決めた finding の分だけ親側で行う。)_
 
+## Re-review (S6・S7、29469c0e..e8299e07)
+
+- Reviewer: reviewer サブエージェント(`/self-review` の再実行。パイプラインの cycle は増やさない)
+- Scope: `git diff 29469c0e e8299e07`(HEAD e8299e07、34 ファイル、+2255/-920)。見たのは S6 の 4a39e909 と S7 の e478e350。54ec0d7e、53bef7e1、67ccd546、e8299e07 は計画と insight の記録だけなので、計画の本文は見ていない。diff の品質だけを見た。テストと `gh` は走らせていない
+- 読んだもの:
+  - M1 の移動: `git show 4a39e909` の消えた行(mergeguarantee.go 306 行、mergeguarantee_test.go 440 行)と増えた行(mergeenforce.go 326 行、mergeenforce_test.go 452 行)を `diff` で突き合わせた。違いは package と import、先頭の説明コメント、L8 のコメント(`enforceClassic` の doc、`meRepoJSON` の doc、テストの先頭の説明)だけで、コードの行は同じ。mergeguarantee.go が外した import は `bytes` と `strconv` の 2 つで、残りの import は本文で使われている。mergeenforce.go と mergeenforce_test.go の import も、すべて本文に使い道がある(`grep -c`)
+  - S7: `merge_wait.go` と `merge_wait_test.go` の全文、`merge.go` と `merge_run.go` と `org_merge.go` の diff、`readChecks` と `checkMerge` の本文、`/director` と `/org` skill の diff。skill の 4 面(`.claude`、`.agents`、`templates/base` の 2 面。director と org)は `cmp` で一致
+  - 機械的な確認: `git diff --check 29469c0e e8299e07` は空。追加行に TODO・FIXME・print・`/Users/` はない。tech-debt の変わった 6 行(239、243、292、293、295、296)は 5 セルで、`|` のエスケープ漏れはない。S6・S7 の新規ファイルはどれも 800 行未満(merge_wait.go 193、merge_wait_test.go 576、mergeenforce.go 326、mergeenforce_test.go 452)
+
+### 前回の finding の判定
+
+- M1(`mergeguarantee.go` の増え方): 直った。移動は純粋で、中身は変わっていない(上の突き合わせ)。mergeguarantee.go は 1183 から 877 行、mergeguarantee_test.go は 1774 から 1334 行に戻った。877 行と 1334 行はまだ 800 行を超えるが、tech-debt 292 行目が両方を載せ、base の 848 行と 1334 行も書いてある。参照の更新(`seat.go` の gh の一覧、AGENTS.md、tech-debt 243・293・295 行)も済み、`CheckMergeEnforcement` を `mergeguarantee.go` にあると書く箇所は残っていない
+- M2(skill の auto 手順と検査待ちの断りの食い違い): 直った。D13 で動詞が待つ形にし、skill の手順 2 は `--wait-checks 60m` を付けて background で打つ。pin の断片(`directorSkillAutoMergeSteps`)も増えた。新しい問題は R1 から R4 だけ
+- L1(`mergeCommit` の要求): 直った。`merge.go:41` から外れ、テストの 3 か所(`merge_test.go:457`、`:689` ほか)も合っている
+- L2(`auto_merge=` の意味): 直った。`seat.go` の `EventPRMerged` の注に、設定の値であり director が聞かずに打ったかは表さないと書いた
+- L3(merge のあとの gh が同じプロセスグループ): 直った。`realMergeDetachedExec`(`runMergeOrderCommand` の `ownGroup`)は `Setpgid` と、ctx 終了でグループごと SIGKILL で、`gate_run.go` と `regate_git.go` の前例と同じ形。使うのは読み直しと `--disable-auto` だけ(`ghAfterStart`)で、`gh pr merge` 自体は ralph のグループのままにしてあり、help と doc がそう書いている。テストは、差し替え先、pgid、ctx 終了での子の kill の 3 つを見る。新しい問題はない
+- L4(`withMainWorktreeDirectorEnabled` の名前): 直った(doc の側)。関数の doc とエラーの文を「`[org.director]` の 2 つの値」に直し、`statusDirectorConfig` の doc は `readOrgDirectorReport` が `Enabled` と `AutoMerge` だけを読むと書く。`org_director.go:526` で確かめた。名前は変えていない
+- L5(エラーの前置きとパスの重複): 直った。ロックを取れない失敗はパスを 1 回言い、マーカーを空にする失敗は `lock.f.Truncate(0)` で merge 自身のエラーにした。`writeRegateMarker(f, nil)` の中身(`Truncate(0)` と空の `WriteAt`)と同じ動きで、注がその対応を書いている
+- L6(`gh repo view` の位置引数): 直った。`readOrigin` が host・owner・repo の先頭の `-` を断る(`merge.go:364-365`)。テストは scp 形式、URL 形式、owner、repo の 4 件
+- L7(tech-debt 239 行目): 直った。取り消した前半の文は残し、Impact と Why deferred は runner の重複だけの文に変わり、「see the comment above」は `MergeOrderEntry.PRLookup` の名指しになり、Related にも同じシンボルを足した。5 セル
+- L8(単語の重複): 直った。3 か所とも言い直した。`enforceClassic` の新しい文(「with checks the number of its required status checks」)は少し硬いが、意味は通る
+
+前回の「Tech debt identified」の 2 行(M1 と L3 を直さない場合)は、どちらも直ったので不要になった。
+
+### 依頼された点の確認(finding にならなかったもの)
+
+- 待つ間にロックを外している: `Merge` の `for` ループ(`merge_run.go:142-151`)が `mergeLocked` を呼び、`mergeLocked` は `defer lock.release()` で外してから `wait` を返す。待ちはループ側の `w.wait` で、ロックを持たない。テストの fake clock は sleep のたびに `acquireHeldFileLock` で取れることを確かめる(`lockTaken`)
+- 待ちのあと取り直して最初からやり直す: 次の周回で `acquireHeldFileLock`、マーカーを空にする、`checkMerge` の全 step の順。head と base が動けば最初の確かめが拾う(テストの「the branch moved」)
+- 予算を sleep が超えない: `poll` は `min(w.interval, left)` だけ寝て、`left <= 0` で「使い切った」と返す。期限は最初の待ちの開始から数え、2 回目以降の待ちと間の確かめの時間も引かれる。最後の read(gh の timeout 15 秒)と取り直したあとの確かめは予算の外に出るが、help の「time is up」は範囲を言い切っていないので、問題にしない
+- 中断: sleep 中も read 中も `wait` がエラーを返し、`Merge` は `MergeResult{}` で終わる。`gh pr merge` は走らず、何も記録しない(テストの `TestMerge_WaitChecksInterrupted`)
+- 待つかどうかの決め方: `merge_run.go` と `merge_wait.go` に拒否の文字列を比べる箇所はなく、`kind.waits()` だけで決める
+- r が漏れないか: `checkMerge` の switch の `refused != "" && !kind.waits()` が `mergeReady{}` を返し、`r` を返すのは待つ種類のときだけ。step 1 から 9 の拒否は `kind` が `mergeChecksOther` なので空になる。`TestCheckMerge_ReadsTheChecks` がこの対応を種類ごとに見る
+- 0 件の文の読み取り(`readChecks`): 3 つ目の case は `err != nil && !listed` で、かつ `err.Error()` が `fmt.Sprintf(mergeNoChecksSentence, r.branch)` を含むときだけ。`realMergeOrderExec` は終了コードの文のあとに stderr を付けるので、文は `err.Error()` に入る。文が引用符で囲まれるので、別のブランチ名(`feat/a2`、`feat/b`)の文は一致しない(テストにある)。502 などの別のエラー、タイムアウト、gh 不在はこの case の前か後で `mergeChecksUnread` になる。exit 0 で stdout にこの文だけがあるときも `!listed` で `Unread`。残る前提は gh の文言で、gh 2.102.0 のソースを読んだ結果だと計画にあり(私は gh を打っていない)、tech-debt 296 行目が文言が変わった場合を載せている
+- 進捗行の escape: `line` は `PrintableInboxText(mergePrefix+text, false)` を通す。repository の名前は origin の URL 由来で、start の行に入る(`cmd`)が escape される。待った時間を足す `waited()` と終了の行は `mergeWaitDuration` を通す。start の行だけ通っていない(R2)
+- CLI の範囲の検査: `org_merge.go:151` で、`--org-id` と `--branch` の確認のあと、台帳を読む前にある。`Merge` の中でも同じ検査を先頭でやるので、空の `--branch` と範囲外の `--wait-checks` を同時に渡すと、CLI は branch の文、`Merge` を直に呼ぶと範囲の文になる。どちらも何も実行しないので、順の違いは問題にしない
+- skill の背景実行の手順: `.harness/state/merge-<名前>.out`、`/` を `-` にする、終わるまでほかを打たない、が regate の手順(`SKILL.md:541`)と同じ形で、`<名前>` はその場で定義してある。待ちが検査の `pending` か 0 件のときだけで、60 分で終わらなければ断りで止まる、まで書いてある。CI のない repo で 60 分待って止まることは、help と D13 が書いている
+
+## Re-review findings
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 4 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R1: S7 で `--wait-checks` の待ちの間は Merge が `regate.lock` を外すようになったが、「merge はロックを run の間ずっと持つ」と書いた 3 か所のコメントが残っている。help、README、仕様、skill は直っているが、この 3 ファイルは S7 の diff に入っていない | `internal/org/lockfile.go:133`(「ralph org merge holds regate.lock too, for its whole run」)、`internal/org/regate.go:91`(「holds it too, for its whole run」と、続く「one Regate or Merge runs on a ledger at a time」)、`internal/org/spawn.go:1325`(「A `ralph org merge` holds the lock too, for its whole run」)。外す側は `merge_run.go:142-151` のループと `mergeLocked` の `defer lock.release()`。`git diff --stat 29469c0e e8299e07 -- internal/org/lockfile.go internal/org/regate.go internal/org/spawn.go` は空 | 3 か所の「whole run」を「checks から merge まで。`--wait-checks` で検査を待つ間は外していて、その間は regate が走れる(merge_wait.go)」に直す。spawn.go の文は、待つ間もロックが空くので spawn が通る点は変わらず、語だけ直せばよい |
+| LOW | readability | R2: 2 回目以降の待ちの開始行の「up to <残り>」が丸められず、ナノ秒まで出る。1 回目は残りが予算そのものなので `1h0m0s` と出るが、2 回目は取り直した確かめに実時間がかかるので、`59m26.847291035s` のような値になる。同じ待ちの終了行(`mergeWaitDuration`)と、断りに足す `waited()` は秒に丸めている。テストは fake clock が sleep でしか進まないので、2 回目の行を `59m30s` と書いて通ってしまい、この差を拾えない | `merge_wait.go:127-128`(`max(w.deadline.Sub(start), 0)` を `%s` に渡す)、`merge_wait.go:130` と `:106`(`mergeWaitDuration` を通す)、`merge_wait.go:176-181`。`merge_wait_test.go:272`(`mwStart("has checks pending", "59m30s", "1h0m0s")`) | `max(w.deadline.Sub(start), 0)` を `mergeWaitDuration(...)` で包む。テストは、確かめの間に fake clock を 1 秒未満の端数だけ進めて(例: `exec.after` で `now` に 123ms を足す)、2 回目の行が丸まることを見る |
+| LOW | maintainability | R3: 実時間のテストの `polls < 2` が、負荷で落ちうる。予算 60ms、間隔 10ms で、最初の sleep が 50ms 以上遅れると、次の周回の `left <= 0` で read が 1 回で終わり、`polls` が 1 になる。`-race` や `go test ./...` の並列では起きうる遅れ | `merge_wait_test.go:547-560`(`60*time.Millisecond`、`interval: 10 * time.Millisecond`、`polls < 2`) | 予算を 300ms ほどに広げるか、`polls < 1` にする。fake clock のテストが回数を正確に見ているので、この実時間のテストは「終わる」と「予算より短く終わらない」だけ見れば足りる |
+| LOW | readability | R4: 小さな読みにくさが 5 つある。(a) `MergeResult.Refused` の doc の一覧に、範囲外の `--wait-checks` がない。(b) `poll` の空の `case kind.waits():` に注がなく、C の fall-through に見える。(c) `Merge` の doc に、`(mergeWait, D13). It then runs gh pr merge once` の短い行(整形の途中の形)と「the lock and every check are taken again」(「every check」は taken ではなく run)がある。(d) `Merge` の局所変数 `wait`(`*mergeWaitFor`)が、`w.wait(...)` と並んで読み違えやすい。(e) `wait` の中断のエラーは `mergeInterrupted` と同じ文を手で書いている | (a)`merge_run.go:52-55`。(b)`merge_wait.go:157`。(c)`merge_run.go:106-112` あたり。(d)`merge_run.go:144-148`。(e)`merge_wait.go:134-135` と `merge.go:336-337`。`mergeInterrupted(ctx, "waiting for the checks of PR #7, before gh pr merge ran")` が同じ文字列を作る | (a)に範囲外を足す。(b)に「待ち続ける」の 1 行を足す。(c)は文を直して整形し直す。(d)は `waitFor` のような名前にする。(e)は `mergeInterrupted` を呼ぶ。どれも動作は変わらない |
+
+### Tech debt identified
+
+新しく足す行はない。R1 から R4 はどれもコメントと小さな直しで、直さないなら 1 行にまとめて tech-debt に載せる(Trigger は `merge_wait.go` か `Merge` の次の変更)。800 行を超えるファイルのうち S6・S7 で増えたものは tech-debt 292 行目が載せている。載っていないのは `internal/org/mergeorder.go`(base 1152、HEAD 1238、S6 が +26)で、`realMergeDetachedExec` はこのファイルの runner の隣にあるので置き場所は妥当だが、行数の行はない。もとから 800 行を超えている大きなファイルが repo に多く(`spawn.go` 2333 行ほか)、この PR で新しく超えたものではないので finding にはしない。
+
+_(上の変更は report だけで、`docs/tech-debt/` には追記していない。)_
+
 ## Recommendation
 
-- Merge: yes(CRITICAL と HIGH はない)。MEDIUM の M1 と M2 は、`/verify` の前に直すか、直さない理由を tech-debt に 1 行ずつ残す
-- Follow-ups:
-  - M2 は skill の文言の決め(待つか、止まるか)で、`/verify` が AC11 をどう読むかにもかかる。先に決めると pin テストと skill の 4 面をまとめて 1 回で直せる
-  - L1、L3、L5、L6 はコードの小さな直しで、まとめて 1 コミットにできる。L2、L4、L7、L8 は注と文言。`/self-review` の再実行は不要な範囲だが、コードを触るなら cycle 2 の対象になる
-  - tech-debt の 239 行目のセル 4 にある `regateRemoteGit` の置き場所(`internal/org/regate.go`。今は `regate_git.go`)は、base の `15d22b1a` にもある古い記述で、この PR の追加ではない。計画の Progress が `sync-docs` に回している項目と同じなので、そこで直す(L7 でセル 2 と 3 を書き直すときに一緒に直せる)
-  - insight event(`scripts/insights-append.sh`)は、report 以外を編集しない指示のため書いていない。値は `--verdict pass --critical 0 --high 0 --medium 2 --low 8`
+- Merge: yes(CRITICAL、HIGH、MEDIUM はない)。前回の M1・M2・L1〜L8 は S6・S7 で直り、直し方に新しい問題はない。新しい LOW 4 件(R1 から R4)は、R1 のコメント 3 か所の訂正だけは `/verify` の前にまとめて直す価値がある。R2 から R4 は任意で、直さないなら tech-debt に 1 行
+- Follow-ups(再レビューのあと):
+  - R1 は 3 ファイルのコメント 1 語ずつ、R2 は 1 行とテスト 1 件。コードを触るなら、`/verify` の前にまとめて 1 コミットにできる
+  - insight event(`scripts/insights-append.sh`)は、report 以外を編集しない指示のため書いていない。再レビューの値は `--verdict pass --critical 0 --high 0 --medium 0 --low 4`
+  - 以下は最初のレビュー(再レビューの前)の Follow-ups で、どれも S6・S7 で済んだ(各行の頭の「済」)
+  - 済: M2 は skill の文言の決め(待つか、止まるか)で、`/verify` が AC11 をどう読むかにもかかる。先に決めると pin テストと skill の 4 面をまとめて 1 回で直せる
+  - 済: L1、L3、L5、L6 はコードの小さな直しで、まとめて 1 コミットにできる。L2、L4、L7、L8 は注と文言。`/self-review` の再実行は不要な範囲だが、コードを触るなら cycle 2 の対象になる
+  - 済: tech-debt の 239 行目のセル 4 にある `regateRemoteGit` の置き場所(`internal/org/regate.go`。今は `regate_git.go`)は、base の `15d22b1a` にもある古い記述で、この PR の追加ではない。計画の Progress が `sync-docs` に回している項目と同じなので、そこで直す(L7 でセル 2 と 3 を書き直すときに一緒に直せる)
+  - 済: insight event(`scripts/insights-append.sh`)は、report 以外を編集しない指示のため書いていない。値は `--verdict pass --critical 0 --high 0 --medium 2 --low 8`(53bef7e1 で記録された)
