@@ -856,22 +856,30 @@ func mergeOriginFromURL(s string) (host string, repo mergeRepo, ok bool) {
 	return strings.ToLower(host), repo, true
 }
 
-// mergeRepoFromPRURL reads the owner and repository from a PR's url,
+// mergeRepoFromPRURL reads the owner and repository from a PR's url
+// (mergeHostRepoFromPRURL).
+func mergeRepoFromPRURL(s string) (repo mergeRepo, ok bool) {
+	_, repo, ok = mergeHostRepoFromPRURL(s)
+	return repo, ok
+}
+
+// mergeHostRepoFromPRURL reads the host, lowercased and without the port,
+// and the owner and repository from a PR's url,
 // `https://<host>/<owner>/<repo>/pull/<number>`; ok is false for any other
 // shape.
-func mergeRepoFromPRURL(s string) (repo mergeRepo, ok bool) {
+func mergeHostRepoFromPRURL(s string) (host string, repo mergeRepo, ok bool) {
 	u, err := url.Parse(s)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
-		return mergeRepo{}, false
+		return "", mergeRepo{}, false
 	}
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] != "pull" {
-		return mergeRepo{}, false
+		return "", mergeRepo{}, false
 	}
 	if n, err := strconv.Atoi(parts[3]); err != nil || n <= 0 {
-		return mergeRepo{}, false
+		return "", mergeRepo{}, false
 	}
-	return mergeRepo{owner: parts[0], name: parts[1]}, true
+	return strings.ToLower(u.Hostname()), mergeRepo{owner: parts[0], name: parts[1]}, true
 }
 
 // lookupMergePR runs `gh pr list --head <branch> --state all --limit
