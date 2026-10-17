@@ -71,14 +71,16 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"you: a ruleset whose up-to-date rule (Require branches to be up to date\n" +
 			"before merging) has required status checks of its own and whose\n" +
 			"current_user_can_bypass is never, or else a branch protection that is\n" +
-			"strict with required checks while you are not an admin of the\n" +
-			"repository or enforce_admins is enabled (its strict can be read only\n" +
-			"with admin access, so the refusal says to use a ruleset instead); that\n" +
-			"gh repo view gives the merge method (viewerDefaultMergeMethod: MERGE,\n" +
-			"SQUASH, or REBASE); and, last, that a second git ls-remote finds\n" +
-			"origin's default branch and the branch where the gate left them. A git\n" +
-			"or gh call that fails is refused too. A refusal merges and records\n" +
-			"nothing, says why and what to do next on stderr, and exits 1.\n" +
+			"strict with required checks and has enforce_admins enabled, whether or\n" +
+			"not you are an admin of the repository, since without it an admin or a\n" +
+			"custom role that may bypass branch protections can merge a head that\n" +
+			"is not up to date (its strict can be read only with admin access, so\n" +
+			"the refusal says to use a ruleset instead); that gh repo view gives the\n" +
+			"merge method (viewerDefaultMergeMethod: MERGE, SQUASH, or REBASE); and,\n" +
+			"last, that a second git ls-remote finds origin's default branch and the\n" +
+			"branch where the gate left them. A git or gh call that fails is refused\n" +
+			"too. A refusal merges and records nothing, says why and what to do next\n" +
+			"on stderr, and exits 1.\n" +
 			"\n" +
 			"Then merge runs gh pr merge <n> --merge|--squash|--rebase\n" +
 			"--match-head-commit <the gate's head> -R <repo> once, for up to 60 s,\n" +

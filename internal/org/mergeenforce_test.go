@@ -137,15 +137,15 @@ func meAssertGHCalls(t *testing.T, e *mgExec, host, owner, name, branch string) 
 // TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn covers D11 and AC5: it
 // is ok only when an up-to-date rule with checks of its own belongs to a
 // ruleset the caller cannot bypass (never), or when a strict branch
-// protection with checks applies to the caller (no admin, or enforce_admins
-// enabled); a merge queue (GraphQL or rules), a bypass of another value or
-// none, a ruleset or other read that fails, an admin that is unknown, and
-// nothing up to date are not ok, each with a Detail that says why and what to
-// do, and with the reads after the deciding one not run.
+// protection with checks applies to everyone (enforce_admins enabled,
+// TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller); a merge
+// queue (GraphQL or rules), a bypass of another value or none, a ruleset or
+// other read that fails, and nothing up to date are not ok, each with a
+// Detail that says why and what to do, and with the reads after the deciding
+// one not run.
 func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 	ruleset := []string{mgRepoEP, meQueueEP, mgRulesEP, meRuleset1EP}
 	classic := []string{mgRepoEP, meQueueEP, mgRulesEP, mgBranchEP, mgStrictEP}
-	enforce := append(slices.Clone(classic), meEnforceEP)
 	never := `the ruleset "protect main" (id 1) of ` + mgSubject + `, requires branches to be up to date before merging with its ` +
 		`1 required status check, and you cannot bypass it (current_user_can_bypass: never)`
 	bypassed := func(values string) string {
@@ -163,8 +163,6 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 		return mgSubject + ", has a merge queue (" + how + "): ralph org merge does not merge into a branch with a merge queue, so " +
 			"merge the PR through the queue yourself"
 	}
-	classicWhat := "the branch protection of " + mgSubject + ", requires branches to be up to date before merging with its 1 " +
-		"required status check"
 	queueUnknown := ", so whether " + mgSubject + ", has a merge queue is unknown" + meAccess
 	const queueCmd = "gh api --hostname github.com graphql (mergeQueue of main)"
 	for _, tc := range []struct {
@@ -250,30 +248,8 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 			false, queueCmd + " returned no repository.mergeQueue" + queueUnknown, false, []string{mgRepoEP, meQueueEP}},
 		{"GraphQL answer has no mergeQueue", nil, func(e *mgExec) { e.replies[meQueueEP] = mgReply{out: `{"data":{"repository":{}}}`} },
 			false, queueCmd + " returned no repository.mergeQueue" + queueUnknown, false, []string{mgRepoEP, meQueueEP}},
-		{"classic strict, no admin", meBool(false), func(*mgExec) {}, true,
-			classicWhat + ", and you are not an admin of the repository, so it applies to you", false, classic},
-		{"classic strict, admin, enforce_admins enabled", meBool(true), func(e *mgExec) {
-			e.replies[meEnforceEP] = mgReply{out: `{"url":"https://api.github.com/x","enabled":true}`}
-		}, true, classicWhat + ", and it applies to admins too (enforce_admins is enabled), so to you", false, enforce},
-		{"classic strict, admin, enforce_admins disabled", meBool(true), func(e *mgExec) {
-			e.replies[meEnforceEP] = mgReply{out: `{"url":"https://api.github.com/x","enabled":false}`}
-		}, false, classicWhat + ", but you are an admin of the repository and enforce_admins is disabled, so GitHub lets you merge " +
-			"a head that is not up to date: enable Do not allow bypassing the above settings in the branch protection, or " + meFix,
-			false, enforce},
-		{"classic strict, admin, enforce_admins cannot be read", meBool(true), func(e *mgExec) { e.replies[meEnforceEP] = mgAPIError("Not Found", "404") },
-			false, "gh api --hostname github.com " + meEnforceEP + " failed (exit status 1: gh: Not Found (HTTP 404)), so the protection " +
-				"of " + mgSubject + ", is unknown" + meAccess, false, enforce},
-		{"classic strict, admin, enforce_admins answer has no enabled", meBool(true), func(e *mgExec) {
-			e.replies[meEnforceEP] = mgReply{out: `{"url":"https://api.github.com/x"}`}
-		}, false, classicWhat + ", and you are an admin of the repository, but gh api --hostname github.com " + meEnforceEP + " printed " +
-			"no enabled, so whether it applies to admins is unknown: " + meFix + " instead", false, enforce},
-		{"classic strict, no permissions", meBool(false), func(e *mgExec) {
-			e.replies[mgRepoEP] = mgReply{out: meRepoJSON("main", "acme/app", nil, true)}
-		}, false, classicWhat + ", but gh api --hostname github.com " + mgRepoEP + " returned no permissions.admin, so whether it " +
-			"applies to you is unknown: " + meFix + " instead", false, classic},
-		{"classic strict, permissions with no admin", meBool(false), func(e *mgExec) {
-			e.replies[mgRepoEP] = mgReply{out: meRepoJSON("main", "acme/app", nil, false)}
-		}, false, "returned no permissions.admin, so whether it applies to you is unknown", true, classic},
+		// The strict classic protection's enforce_admins, for every caller:
+		// TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller.
 		{"classic strict that needs admin access (404)", meBool(false), func(e *mgExec) { e.replies[mgStrictEP] = mgAPIError("Not Found", "404") },
 			false, "the branch protection of " + mgSubject + ", requires 1 required status check, but whether it requires branches to " +
 				"be up to date before merging can be read only with admin access to the repository (gh api --hostname github.com " +
@@ -324,6 +300,61 @@ func TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn(t *testing.T) {
 			}
 			meAssertGHCalls(t, e, "github.com", "acme", "app", "main")
 		})
+	}
+}
+
+// TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller covers D11 and
+// AC5 for a strict branch protection with checks (cross-review #1 of the
+// plan): GitHub applies it by default neither to admins nor to custom roles
+// with the bypass branch protections permission, which permissions.admin does
+// not show, so it is ok only when enforce_admins is enabled, and not ok when
+// that is disabled, cannot be read, or has no enabled, whether
+// permissions.admin is true, false, or missing, or the answer has no
+// permissions at all; enforce_admins is read every time, after the strict.
+func TestMergeEnforcement_ClassicNeedsEnforceAdminsForEveryCaller(t *testing.T) {
+	what := "the branch protection of " + mgSubject + ", requires branches to be up to date before merging with its 1 " +
+		"required status check"
+	const enforceCmd = "gh api --hostname github.com " + meEnforceEP
+	endpoints := []string{mgRepoEP, meQueueEP, mgRulesEP, mgBranchEP, mgStrictEP, meEnforceEP}
+	callers := []struct{ name, repo string }{
+		{"an admin", meRepoJSON("main", "acme/app", true, false)},
+		{"not an admin", meRepoJSON("main", "acme/app", false, false)},
+		{"permissions with no admin", meRepoJSON("main", "acme/app", nil, false)},
+		{"no permissions", meRepoJSON("main", "acme/app", nil, true)},
+	}
+	for _, tc := range []struct {
+		name   string
+		reply  mgReply
+		ok     bool
+		detail string
+	}{
+		{"enforce_admins enabled", mgReply{out: `{"url":"https://api.github.com/x","enabled":true}`}, true, what + ", and it " +
+			"applies to admins and to custom roles that may bypass branch protections too (enforce_admins is enabled), so to you"},
+		{"enforce_admins disabled", mgReply{out: `{"url":"https://api.github.com/x","enabled":false}`}, false, what + ", but " +
+			"enforce_admins is disabled, so it does not apply to admins of the repository or to custom roles with the bypass branch " +
+			"protections permission, which you may hold though you are not an admin, and GitHub may let you merge a head that is " +
+			"not up to date: enable Do not allow bypassing the above settings in the branch protection, or " + meFix},
+		{"enforce_admins cannot be read", mgAPIError("Not Found", "404"), false, enforceCmd + " failed (exit status 1: gh: Not " +
+			"Found (HTTP 404)), so the protection of " + mgSubject + ", is unknown" + meAccess},
+		{"enforce_admins answer has no enabled", mgReply{out: `{"url":"https://api.github.com/x"}`}, false, what + ", but " +
+			enforceCmd + " printed no enabled, so whether it applies to admins and to custom roles that may bypass branch " +
+			"protections is unknown: " + meFix + " instead"},
+	} {
+		for _, c := range callers {
+			t.Run(tc.name+", "+c.name, func(t *testing.T) {
+				e := meClassicExec(false)
+				e.replies[mgRepoEP] = mgReply{out: c.repo}
+				e.replies[meEnforceEP] = tc.reply
+				got := CheckMergeEnforcement(context.Background(), meParams(e))
+				if got.OK != tc.ok || got.Detail != tc.detail {
+					t.Errorf("enforcement = %+v\nwant ok %v with %q", got, tc.ok, tc.detail)
+				}
+				if eps := e.endpoints(); !slices.Equal(eps, endpoints) {
+					t.Errorf("gh endpoints = %q, want %q", eps, endpoints)
+				}
+				meAssertGHCalls(t, e, "github.com", "acme", "app", "main")
+			})
+		}
 	}
 }
 

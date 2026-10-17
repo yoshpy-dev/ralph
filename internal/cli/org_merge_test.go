@@ -665,7 +665,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"that the branch's org is not running", "and no auto-merge request",
 			"that every check gh pr checks lists is pass or skipping, and at least one is pass",
 			"shows no merge queue", "whose current_user_can_bypass is never",
-			"strict with required checks while you are not an admin of the repository or enforce_admins is enabled",
+			"strict with required checks and has enforce_admins enabled, whether or not you are an admin of the repository, since " +
+				"without it an admin or a custom role that may bypass branch protections can merge a head that is not up to date",
 			"(viewerDefaultMergeMethod: MERGE, SQUASH, or REBASE)",
 			"a second git ls-remote finds origin's default branch and the branch where the gate left them",
 			"gh pr merge <n> --merge|--squash|--rebase --match-head-commit <the gate's head> -R <repo> once, for up to 60 s, " +

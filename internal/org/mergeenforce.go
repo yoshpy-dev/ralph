@@ -22,7 +22,8 @@ import (
 
 // mergeEnforceFix is what the not-ok Details of CheckMergeEnforcement about a
 // setting tell the reader to set: the only protection it reads that a caller
-// without admin access can read, an up-to-date rule of a ruleset.
+// without admin access can read and that says whether that caller can bypass
+// it (current_user_can_bypass), an up-to-date rule of a ruleset.
 const mergeEnforceFix = "add a ruleset to the branch with Require branches to be up to date before merging and at least one " +
 	"required status check, with no bypass for whoever runs ralph org merge"
 
@@ -69,9 +70,8 @@ type MergeEnforcement struct {
 // CheckMergeGuarantee, its kinds and its Details as they are. Every step runs
 // under one deadline, p.Timeout, with --hostname and GH_PROMPT_DISABLED=1:
 //
-//  1. `gh api repos/<o>/<r>`: its default_branch must be p.DefaultBranch;
-//     permissions.admin tells whether the caller is an admin, unknown when it
-//     is missing (readEnforcementRepository).
+//  1. `gh api repos/<o>/<r>`: its default_branch must be p.DefaultBranch
+//     (readEnforcementRepository).
 //  2. `gh api graphql` with repository(owner, name).mergeQueue(branch), which
 //     also sees a queue the branch protection sets: a queue, an errors list, a
 //     gh that fails, or an answer that is not that JSON is not ok
@@ -84,15 +84,15 @@ type MergeEnforcement struct {
 //     ok when none is or when a read fails (enforceRulesets).
 //  5. Otherwise the branch protection: its required checks (readMergeClassic)
 //     and, when it requires some, its strict (readMergeClassicStrict), which
-//     needs admin access. Strict with checks is ok when the caller is not an
-//     admin, or when `gh api repos/<o>/<r>/branches/<branch>/protection/enforce_admins`
-//     is enabled (enforceClassic).
+//     needs admin access. Strict with checks is ok only when
+//     `gh api repos/<o>/<r>/branches/<branch>/protection/enforce_admins` is
+//     enabled, whether the caller is an admin or not (enforceClassic).
 //  6. Anything else is not ok: nothing makes the PR up to date with its
 //     required checks, ralph doctor's pr_checks_only (notEnforced).
 //
 // These fields were read live on 2026-10-17 (the plan's Assumptions): the
 // ruleset_id of a rules/branches element, a ruleset's current_user_can_bypass
-// (never), repository.mergeQueue (null with no queue), and permissions.admin.
+// (never), and repository.mergeQueue (null with no queue).
 // Not seen live: the other values of current_user_can_bypass (always,
 // pull_requests_only, exempt) and a mergeQueue that is set. So every value but
 // never and null is not ok, as is every read that fails, ctx done included;
@@ -118,8 +118,7 @@ func CheckMergeEnforcement(ctx context.Context, p MergeEnforcementParams) MergeE
 // enforce runs the steps of CheckMergeEnforcement and returns whether the
 // merge may go on, and its Detail.
 func (g *mergeGuaranteeRun) enforce() (ok bool, detail string) {
-	admin, why := g.readEnforcementRepository()
-	if why != "" {
+	if why := g.readEnforcementRepository(); why != "" {
 		return false, why
 	}
 	if why := g.readMergeQueue(); why != "" {
@@ -147,7 +146,7 @@ func (g *mergeGuaranteeRun) enforce() (ok bool, detail string) {
 		case why != "":
 			return false, why + ": " + mergeEnforceFix + " instead, which ralph org merge reads without admin access"
 		case strict:
-			return g.enforceClassic(classic, admin)
+			return g.enforceClassic(classic)
 		}
 	}
 	return false, g.notEnforced(rules, classic)
@@ -163,29 +162,23 @@ func (g *mergeGuaranteeRun) enforceUnread(why string) string {
 }
 
 // readEnforcementRepository is step 1 of CheckMergeEnforcement: it sets
-// c.APIRepo and returns permissions.admin (nil when the answer has none), or
-// why the check cannot go on.
-func (g *mergeGuaranteeRun) readEnforcementRepository() (admin *bool, why string) {
+// c.APIRepo, or returns why the check cannot go on. permissions.admin is not
+// read: whether the caller is an admin decides nothing (enforceClassic).
+func (g *mergeGuaranteeRun) readEnforcementRepository() (why string) {
 	var repo struct {
 		DefaultBranch string `json:"default_branch"`
 		FullName      string `json:"full_name"`
-		Permissions   *struct {
-			Admin *bool `json:"admin"`
-		} `json:"permissions"`
 	}
 	path := g.repoPath()
 	if why := g.ghJSON(path, "a repository's JSON", &repo); why != "" {
-		return nil, g.enforceUnread(why)
+		return g.enforceUnread(why)
 	}
 	g.c.APIRepo = repo.FullName
 	if repo.DefaultBranch != g.c.DefaultBranch {
-		return nil, fmt.Sprintf("%s returned the default branch %q, but origin's HEAD names %s, so which branch's protection "+
+		return fmt.Sprintf("%s returned the default branch %q, but origin's HEAD names %s, so which branch's protection "+
 			"to read is unknown: run ralph org merge-order again", g.command(false, path), repo.DefaultBranch, g.c.DefaultBranch)
 	}
-	if repo.Permissions != nil {
-		admin = repo.Permissions.Admin
-	}
-	return admin, ""
+	return ""
 }
 
 // mergeQueueArgs are the arguments of the gh api graphql call of
@@ -277,20 +270,17 @@ func (g *mergeGuaranteeRun) enforceRulesets(strict []mergeStrictRuleset) (ok boo
 
 // enforceClassic is step 5 of CheckMergeEnforcement, for a branch protection
 // that requires branches to be up to date, with checks the number of its
-// required status checks: ok when the caller is not an admin of the
-// repository (admin false), or is one and enforce_admins is enabled; not ok
-// when admin is unknown (nil), or enforce_admins is disabled or cannot be
-// read.
-func (g *mergeGuaranteeRun) enforceClassic(checks int, admin *bool) (ok bool, detail string) {
+// required status checks: ok only when enforce_admins is enabled, whether the
+// caller is an admin of the repository or not; not ok when it is disabled or
+// cannot be read. By default such a protection applies neither to admins nor
+// to custom roles with the bypass branch protections permission, and
+// enforce_admins (Do not allow bypassing the above settings) applies it to
+// both (GitHub's About protected branches). permissions.admin does not show
+// such a role, so a caller who is not an admin may bypass the protection all
+// the same (cross-review #1 of the plan).
+func (g *mergeGuaranteeRun) enforceClassic(checks int) (ok bool, detail string) {
 	what := fmt.Sprintf("the branch protection of %s, requires branches to be up to date before merging with its %s",
 		g.subject(), mergeChecksText(checks))
-	switch {
-	case admin == nil:
-		return false, fmt.Sprintf("%s, but %s returned no permissions.admin, so whether it applies to you is unknown: %s instead",
-			what, g.command(false, g.repoPath()), mergeEnforceFix)
-	case !*admin:
-		return true, what + ", and you are not an admin of the repository, so it applies to you"
-	}
 	var body struct {
 		Enabled *bool `json:"enabled"`
 	}
@@ -300,14 +290,16 @@ func (g *mergeGuaranteeRun) enforceClassic(checks int, admin *bool) (ok bool, de
 	}
 	switch {
 	case body.Enabled == nil:
-		return false, fmt.Sprintf("%s, and you are an admin of the repository, but %s printed no enabled, so whether it applies to "+
-			"admins is unknown: %s instead", what, g.command(false, path), mergeEnforceFix)
+		return false, fmt.Sprintf("%s, but %s printed no enabled, so whether it applies to admins and to custom roles that may "+
+			"bypass branch protections is unknown: %s instead", what, g.command(false, path), mergeEnforceFix)
 	case *body.Enabled:
-		return true, what + ", and it applies to admins too (enforce_admins is enabled), so to you"
+		return true, what + ", and it applies to admins and to custom roles that may bypass branch protections too " +
+			"(enforce_admins is enabled), so to you"
 	}
-	return false, fmt.Sprintf("%s, but you are an admin of the repository and enforce_admins is disabled, so GitHub lets you merge "+
-		"a head that is not up to date: enable Do not allow bypassing the above settings in the branch protection, or %s",
-		what, mergeEnforceFix)
+	return false, fmt.Sprintf("%s, but enforce_admins is disabled, so it does not apply to admins of the repository or to "+
+		"custom roles with the bypass branch protections permission, which you may hold though you are not an admin, and GitHub "+
+		"may let you merge a head that is not up to date: enable Do not allow bypassing the above settings in the branch "+
+		"protection, or %s", what, mergeEnforceFix)
 }
 
 // notEnforced is the Detail of step 6 of CheckMergeEnforcement: nothing makes
