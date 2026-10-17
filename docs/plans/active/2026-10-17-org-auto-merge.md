@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-17 sha256:d67898ab68d4
+- Approved: 2026-10-17 sha256:abefab9fdedd
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -85,7 +85,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - D4 記録: gh が MERGED を返したあとに、manifest のロックの下で org の記録 `pr_merged` を 1 行書く。org_id は結びつきの org(結びつきが読めないブランチでは、gate の記録の org)、Details は `branch=`、`pr=`、`head=`、`method=`、`merge_commit=`、`auto_merge=`。仕様のユーザーストーリー 5(全 org の起動・承認・相談・merge を台帳と reports で追う)のため。断りと失敗は書かない。`pr_merged` は座席の状態の記録ではなく、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない
 - D5 走っている org: D4 の org が `RunningOrgs` に入っていれば断る(その org が今ほかの機能を走らせていても断る)。leader は stop のあとに push と PR を打ち、RESULT を上げてから disband するので、走っている間の merge は leader の push と競る。断りの文は「受信箱の RESULT の件を処理し、org が disband してから打ち直す」と言う
 - D6 merge のあとの読み直し: `gh pr merge`(60 秒で区切る)を打ったら、終了コードによらず、`gh pr view <番号> --json state,mergeCommit,autoMergeRequest -R <repo>` を 1 回読む。gh が非 0 で終わったか時間切れでも、GitHub の側では merge か予約が済んでいることがあるため。MERGED なら D4 を書いて終了コード 0(gh が非 0 だったら、その stderr の末尾を注として出す)。MERGED でなければ、`autoMergeRequest` があれば(D11 の確かめのあとに queue ができた場合など、gh が merge の代わりに予約した)`gh pr merge <番号> --disable-auto -R <repo>` で外し、予約を外したことを言って終了コード 1。外す gh が落ちたら「予約が残っているかもしれない」と、外すコマンドを出して終了コード 1。予約がなければ、gh が非 0 ならその stderr の末尾を、0 なら「gh は 0 で終わったが PR は merge されていない」を言って終了コード 1。読み直しが落ちたら、PR の状態がわからないことと確かめるコマンドを言って終了コード 1。MERGED のとき以外は記録しない。merge の呼び出しが始まったあとに中断されても、読み直しと外しと記録は `context.WithoutCancel` と gh の timeout(記録は manifest のロックの待ち時間)の下で 1 回打ち、中断されたことを言って終了コード 1。前の版の「QUEUED: で終了コード 0」は捨てた(Codex の指摘 2)。前の版の「終了コード 0 のときだけ読み直す」は、gh の時間切れのあとに merge された PR を記録し損ねるので、S3b の前に改めた
-- D7 検査: `gh pr checks` の bucket がすべて `pass` か `skipping` で、`pass` が 1 つ以上のときだけ進む。`pending`・`fail`・`cancel` が 1 つでもあるか、検査が 0 件なら断り、名前と bucket を並べる
+- D7 検査: `gh pr checks` の bucket がすべて `pass` か `skipping` で、`pass` が 1 つ以上のときだけ進む。`pending`・`fail`・`cancel` が 1 つでもあるか、検査が 0 件なら断り、名前と bucket を並べる。gh は検査が 0 件の PR では JSON を出さず、stderr に `no checks reported on the '<ブランチ>' branch` を出して終了コード 1 で終わる(gh 2.102.0 のソースの `populateStatusChecks` で確認した)。そこで、stdout が JSON の list でなく、gh の err がその文(名指しのブランチの名前で)を含むときを、gh の失敗ではなく 0 件として読む(S7)
 - D8 merge の直前の ls-remote: 検査と保護を読んだあと、merge の直前に ls-remote を打ち直し、既定のブランチの先頭が gate の base、ブランチの先頭が gate の head のままかを確かめる。動いていれば何もせずに断る。`--match-head-commit` は PR の head を守り、base は D11 の up-to-date の保護が GitHub 側で守るので、この確かめは早い断りにあたる
 - D9 merge-order の `pr_lookup`: entry に 5 つの値の field を足す。`failed` の理由の文は今までどおり notes に置く。動詞は `found` のときだけ進む
 - D10 対象の repository(Codex の指摘 1): gh は `-R` がないと cwd の remote から repository を選び、`upstream` の remote や `gh repo set-default` があればそちらを選びうる。動詞は origin の URL から host と owner/repo を読み(`mergeOriginFromURL`、host は doctor と同じ `mergeGuaranteeAPIHost`)、読めなければ断る。gh はすべてこの repository に固定し(`-R <host>/<owner>/<repo>`、`gh api --hostname <host>`)、PR の url の host と owner/repo が一致することも確かめる。merge-order の gh は変えず、動詞は名指しのブランチだけを固定した gh で読み直す
@@ -124,7 +124,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 5. S4: CLI `ralph org merge`(`internal/cli/org_merge.go`)、動詞の登録と台帳を書く動詞の扱い、古い台帳の注、regate.lock の注と regate と Spawn の断りの文
 6. S5: skill の 8 面、仕様、README、`AGENTS.md`、quality-gates、tech-debt、skill の文を pin するテスト
 7. S6: self-review の直し。M1(`CheckMergeEnforcement` 一式とそのテストを `mergeenforce.go` と `mergeenforce_test.go` に移す。動きは変えない)と L1〜L8(使わない `mergeCommit` の要求、`pr_merged` の `auto_merge=` の注、merge のあとの gh を別のプロセスグループで、`withMainWorktreeDirectorEnabled` の注、エラーの前置き、origin の host と owner/repo の先頭の `-`、tech-debt 239 行のセル、誤記)
-8. S7: `--wait-checks`(D13、`internal/org/merge_wait.go`)。確かめが断りの種類を返す形、CLI の flag と help、`/director` skill の merge の打ち方(background と `.harness/state/merge-<名前>.out`)、pin テスト、`/org` skill と README の `merge` の行
+8. S7: `--wait-checks`(D13、`internal/org/merge_wait.go`)。gh の 0 件の文を 0 件として読む(D7)、確かめが断りの種類を返す形、CLI の flag と help、`/director` skill の merge の打ち方(background と `.harness/state/merge-<名前>.out`)、pin テスト、`/org` skill と README の `merge` の行
 
 ## Verify plan
 
@@ -139,7 +139,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - Integration tests: 偽の gh(`MergeOrderExec`)と手元の bare repo を origin にした台帳で、CLI の `ralph org merge` を打ち、出力の行と終了コードと manifest を確かめる。`ralph status` の `director:` の行
 - Regression tests: merge-order の text の出力が変わらない(既存のテスト)。doctor の Merge guarantee の判定とキャッシュが変わらない(既存のテスト)。`pr_merged` が `RunningOrgs`、`orgsToDisband`、`max_orgs`、`leaderActivityEventCount` に入らない。regate と merge のロックの排他、merge の間の Spawn
 - `--wait-checks`(S7): pending から pass に変わって merge する、0 件から pass に変わる、pending から fail に変わって待たずに断る、時間切れ、待つ間の中断、待つ間の gh の失敗、待つ間に head が動く、待つ間に regate がロックを取れる、fail と cancel と skipping だけでは待たない、負の値と 6 時間を超える値
-- Edge cases: merge の直前に既定のブランチが動く、PR の head が gate の head と違う、検査が 0 件、gh が終了コード 8 で JSON を返す、merge のあとの読み直しが落ちる、予約を外す gh が落ちる、記録が落ちる、merge の呼び出しの途中の中断、`viewerDefaultMergeMethod` が空、同じ owner/repo で host が違う PR、upstream の remote がある checkout(`-R` で origin を打つ)
+- Edge cases: merge の直前に既定のブランチが動く、PR の head が gate の head と違う、検査が 0 件(gh が JSON の `[]` を出す場合と、`no checks reported on the '<ブランチ>' branch` で終了コード 1 の場合。別のブランチの名前の文と、ほかの終了コード 1 は gh の失敗のまま)、gh が終了コード 8 で JSON を返す、merge のあとの読み直しが落ちる、予約を外す gh が落ちる、記録が落ちる、merge の呼び出しの途中の中断、`viewerDefaultMergeMethod` が空、同じ owner/repo で host が違う PR、upstream の remote がある checkout(`-R` で origin を打つ)
 - Evidence to capture: `docs/evidence/test-2026-10-17-org-auto-merge.log`(`./scripts/run-test.sh`、`go test -race`、`GOTOOLCHAIN=go1.25.8`、カバレッジ)
 
 ## Risks and mitigations
@@ -153,6 +153,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - director が auto_merge を読み違えて merge するおそれ。動詞は auto_merge を強いないが、ready と検査と保護の確かめは常に通る。出力に `AUTO MERGE:` の値を出し、skill の手順は先に `ralph status` で値を読む
 - merge の呼び出しの途中で中断すると、merge されたのに記録が残らないことがある。出力で merge-order の打ち直しを言う
 - `--wait-checks` の待ちは 30 秒ごとに gh を 1 回打つ(60 分で 120 回)。GitHub の API の上限(認証済みで 1 時間に 5000 回)に比べて小さいが、待つ merge を並べると増える。skill は 1 本ずつ打つ
+- 0 件の読み取りは gh の stderr の文 `no checks reported on the '<ブランチ>' branch` に頼る。gh が文を変えると 0 件が gh の失敗として読まれ、待たずに断る(merge する側には倒れない)。tech-debt に書く
 - CI のない repo では、`--wait-checks` は 0 件のまま時間が切れるまで待ち、0 件の断りで終わる。D7 が pass を 1 つ以上求めるので、そうした repo ではもともと動詞で merge できない
 - `regate.lock` の名前が merge にも使われる。ファイル名は変えず、注と断りの文で「regate か merge」と言う
 
@@ -185,6 +186,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - sync-docs に回すもの: tech-debt 238 行が `regateRemoteGit` を `internal/org/regate.go` に置いている(今は `regate_git.go`)
   - 2026-10-17(self-review cycle 1 のあと): report 29469c0e(MEDIUM 2、LOW 8)。M2(auto_merge = true でも検査待ちの断りで毎回止まる)を consult-plan-checkswait に聞き、動詞に待ちを入れる D13 と AC13 を足した。M1 を受けて Affected areas と D11 に `mergeenforce.go` を書いた。Implementation outline に S6(self-review の直し)と S7(`--wait-checks`)を足し、Scope・Test plan・Risks を直した。図 5 つを直して撮り直し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。self-review の直しは cycle を増やさず、S7 のあとに reviewer に S6・S7 の diff を見せてから verify に進む
   - S6 4a39e909(M1 の移動、L1〜L8)。M1 は消えた行と増えた行を突き合わせ、違いが L8 の doc の直しと新しいファイルの先頭だけと確かめた。merge のあとの読み直しと `--disable-auto` は `realMergeDetachedExec`(Setpgid、ctx が終わればグループごと kill)で打つ。`gh pr merge` と確かめは ralph のグループのまま。origin の host・owner・repo が `-` で始まれば merge だけが断る(merge-order は変えない)。mutation 7/7。tech-debt 238 行の `regateRemoteGit` の場所も直した
+  - 2026-10-17(S7 の前): gh 2.102.0 のソース(`pkg/cmd/pr/checks/checks.go` の `populateStatusChecks`)で、検査が 0 件の PR の `gh pr checks --json` は JSON を出さず `no checks reported on the '<ブランチ>' branch` で終了コード 1 と確かめた。今の確かめはこれを gh の失敗として断り、D13 の 0 件の待ちに入らない。D7 に「その文を 0 件として読む」を足し、S7 の行、Test plan の edge case、Risks を直した。図の文は変わらない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
