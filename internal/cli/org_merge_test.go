@@ -384,7 +384,8 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
 			"exited 0, but into the base release, not main, the default branch the checks read, so main got nothing from it as far " +
 			"as ralph knows, and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state," +
-			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order again, and go on with the other branches"}, 1},
+			"headRefOid,baseRefName,mergeCommit), run ralph org merge-order again (it lists the branch as merged, though main got " +
+			"nothing from this merge), and go on with the other branches"}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIFixture(t, false)
@@ -764,12 +765,10 @@ func TestOrgMerge_Help(t *testing.T) {
 			"For the org, it reads only the ledger every 30 s, with no git and no gh, until the org is disbanded, runs another " +
 				"feature (told apart only on a branch with a feature binding; on a branch with only a gate record, the wait goes " +
 				"on until the org is disbanded or the time is up), or the ledger cannot be read; for the checks, it reads only " +
-				"gh pr checks <n> -R <repo> every 30 s, until no " +
-				"check is pending any more or gh pr checks fails. Either wait also ends when the time is up. Then merge takes " +
-				"regate.lock again and runs every check above from the start",
+				"gh pr checks <n> -R <repo> every 30 s, until no check is pending any more or gh pr checks fails. Either wait also " +
+				"ends when the time is up. Then merge takes regate.lock again and runs every check above from the start",
 			"An org that runs another feature now (on a branch with a feature binding), a check that failed or was cancelled, " +
-				"checks that are all skipping, and every " +
-				"other refusal are not waited for.",
+				"checks that are all skipping, and every other refusal are not waited for.",
 			"When the time is up and the org still runs or the checks are still pending or none, merge refuses as without the flag " +
 				"and adds how long it waited; for the org, it also names ralph org status --org-id <org>, since whether to disband " +
 				"the org is a human's call.",

@@ -235,10 +235,8 @@ func TestMerge_ReadsThePRBackAfterAFailedMerge(t *testing.T) {
 func TestMerge_RecordsOnlyAMergeOfTheGatesHead(t *testing.T) {
 	failure := errors.New("exit status 1: GraphQL: Head branch was modified. Review and try the merge again.")
 	const said = "; gh said:\n  exit status 1: GraphQL: Head branch was modified. Review and try the merge again."
-	next := ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,baseRefName," +
-		"mergeCommit), run ralph org merge-order again, and go on with the other branches"
-	otherHead := "but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged"
-	noHead := "but with no head, so whether the head the gate passed (aaaaaaaaaaaa) was merged is unknown"
+	otherHead := "at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged"
+	noHead := "with no head, so whether the head the gate passed (aaaaaaaaaaaa) was merged is unknown"
 	for _, tc := range []struct {
 		name    string
 		merge   mgReply
@@ -247,17 +245,16 @@ func TestMerge_RecordsOnlyAMergeOfTheGatesHead(t *testing.T) {
 		records bool
 	}{
 		{"gh pr merge refused, another head merged", mgReply{err: failure}, mrReadBackAt("MERGED", moHeadB, mrOID, "null"),
-			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " failed, " + otherHead + next + said, false},
+			mrMergedAfter("failed") + otherHead + mrNext + said, false},
 		{"gh pr merge exited 0, another head merged", mgReply{}, mrReadBackAt("MERGED", moHeadB, mrOID, "null"),
-			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " exited 0, " + otherHead + next, false},
+			mrMergedAfter("exited 0") + otherHead + mrNext, false},
 		{"MERGED with an empty head", mgReply{}, mrReadBackAt("MERGED", "", mrOID, "null"),
-			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " exited 0, " + noHead + next, false},
+			mrMergedAfter("exited 0") + noHead + mrNext, false},
 		{"MERGED with no headRefOid", mgReply{err: failure}, `{"autoMergeRequest":null,"mergeCommit":{"oid":"` + mrOID +
-			`"},"state":"MERGED"}`, "org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " failed, " +
-			noHead + next + said, false},
+			`"},"state":"MERGED"}`, mrMergedAfter("failed") + noHead + mrNext + said, false},
 		{"a head with control characters is escaped", mgReply{}, mrReadBackAt("MERGED", "b\x1b[2Jb", mrOID, "null"),
-			"org: merge: " + mrViewCmd + ` read PR #7 back as MERGED after ` + mrMergeCmd + ` exited 0, but at the head b\x1b[2Jb, ` +
-				"not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged" + next, false},
+			mrMergedAfter("exited 0") + `at the head b\x1b[2Jb, not aaaaaaaaaaaa, the head the gate passed, so a head the gate did ` +
+				"not pass was merged" + mrNext, false},
 		{"MERGED at the gate's head", mgReply{}, mrReadBack("MERGED", mrOID, "null"), "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -342,9 +339,7 @@ func TestMerge_InterruptedOnceGHPRMergeStarted(t *testing.T) {
 			"nothing was merged or recorded: run ralph org merge-order again and follow the branch's Detail" + said, mrMerged, false},
 		{"another head is merged", mgReply{out: mrReadBackAt("MERGED", moHeadB, mrOID, "null")}, mrViewCmd + " read PR #7 back " +
 			"as MERGED after " + mrMergeCmd + " failed, but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so " +
-			"a head the gate did not pass was merged, and nothing was recorded: check that merge yourself (" + mrViewCmd +
-			" --json state,headRefOid,baseRefName,mergeCommit), run ralph org merge-order again, and go on with the other branches" +
-			said, mrMerged, false},
+			"a head the gate did not pass was merged" + mrNext + said, mrMerged, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMRFixture(t, nil)

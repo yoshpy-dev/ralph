@@ -34,10 +34,10 @@ import (
 // feature now included (told apart only on a branch with a binding:
 // orgWaitEnd), is never waited out.
 //
-// A Merge waits only in this file, and lets go of regate.lock before it
-// returns only while it waits here. What lockfile.go, regate.go, and spawn.go
-// say of the lock while a merge waits points at this file, so a wait added
-// here needs no change there.
+// The waits in this file are the only place where a Merge lets go of
+// regate.lock midway, before it returns. What lockfile.go, regate.go, and
+// spawn.go say of the lock while a merge waits points at this file, so a wait
+// added here needs no change there.
 
 const (
 	// maxMergeWaitChecks is the longest --wait-checks Merge takes
@@ -147,8 +147,9 @@ func (w *mergeWait) waitedOut(refused string, r mergeReady, kind mergeRefusalKin
 // or what is left of the budget when that is less, and reads, until what the
 // refusal waits for is gone, the read fails, the budget is used up, or ctx is
 // done. Every read comes after a sleep. When it ends, it writes one line that
-// says why and how long it waited. The error is ctx done: nothing was merged,
-// and Merge returns it.
+// says why and how long it waited. The error is ctx done, or a kind wait has
+// no case for, which it returns before any line (not reached while every kind
+// that waits has one); nothing was merged, and Merge returns it.
 func (w *mergeWait) wait(ctx context.Context, m *mergeCheck, manifest string, f mergeWaitFor) error {
 	start := w.now()
 	if w.started.IsZero() {
@@ -168,9 +169,8 @@ func (w *mergeWait) wait(ctx context.Context, m *mergeCheck, manifest string, f 
 			"merge waits for it to be disbanded for up to %s (--wait-checks %s), with regate.lock released, reading the ledger "+
 			"every %s", f.r.orgID, left, w.budget, w.interval)
 		read = func() (string, bool) { return orgWaitEnd(manifest, f.r), false }
-	default:
-		// mergeRefusalChecksPending or mergeRefusalChecksZero, the other kinds
-		// that wait (mergeRefusalKind.waits): the checks of f.r's PR.
+	case mergeRefusalChecksPending, mergeRefusalChecksZero:
+		// The checks of f.r's PR.
 		cmd := "gh pr checks " + strconv.Itoa(f.r.prNumber) + " -R " + f.r.repoArg
 		why := fmt.Sprintf("PR #%d has checks pending", f.r.prNumber)
 		if f.kind == mergeRefusalChecksZero {
@@ -180,6 +180,9 @@ func (w *mergeWait) wait(ctx context.Context, m *mergeCheck, manifest string, f 
 		first = fmt.Sprintf("%s, so ralph org merge waits for them for up to %s (--wait-checks %s), with regate.lock released, "+
 			"reading %s every %s", why, left, w.budget, cmd, w.interval)
 		read = func() (string, bool) { return m.checksWaitEnd(ctx, f.r, cmd) }
+	default:
+		// Not reached: mergeRefusalKind.waits reports only the kinds above.
+		return fmt.Errorf(mergePrefix+"the refusal of kind %d has no wait in ralph org merge, so nothing was merged", f.kind)
 	}
 	w.line(first)
 	if !slices.Contains(w.waitedFor, forWhat) {

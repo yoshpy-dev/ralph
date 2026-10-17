@@ -30,11 +30,15 @@ const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
 	// zero or less.
 	defaultMergeTimeout = 60 * time.Second
+	// mergeOutcomeFields are the fields of gh pr view that say whether and
+	// how the PR merged, the ones a Failed tells the user to check a merge
+	// with: headRefOid tells a merge of the gate's head from one of another
+	// head, and baseRefName a merge into the default branch from one into
+	// another base.
+	mergeOutcomeFields = "state,headRefOid,baseRefName,mergeCommit"
 	// mergeReadBackFields are the fields Merge reads with gh pr view once gh
-	// pr merge returned (D6): headRefOid tells a merge of the gate's head
-	// from one of another head, and baseRefName a merge into the default
-	// branch from one into another base.
-	mergeReadBackFields = "state,headRefOid,baseRefName,mergeCommit,autoMergeRequest"
+	// pr merge returned (D6): mergeOutcomeFields and autoMergeRequest.
+	mergeReadBackFields = mergeOutcomeFields + ",autoMergeRequest"
 	// mergeGHTailLines is how many of the last lines of gh pr merge's error a
 	// Failed or a Note quotes (mergeGHSaid).
 	mergeGHTailLines = 5
@@ -114,10 +118,11 @@ type MergeResult struct {
 // and writes none: a merge changes no worktree, so a spawn of the branch's org
 // goes on while it runs (regateSpawnErr). With p.WaitChecks, a refusal for
 // checks that are pending or not reported yet, or for the branch's org that
-// still runs (not another feature), is waited out instead, with the lock
-// released; after the wait the lock is taken again and every check runs again
-// (mergeWait, D5, D13). It then runs gh pr merge once (mergeRun.merge) and,
-// whatever that returned, reads the PR back once (mergeRun.readBack, D6):
+// still runs (not another feature, which only a branch with a binding tells:
+// runningRefusal), is waited out instead, with the lock released; after the
+// wait the lock is taken again and every check runs again (mergeWait, D5,
+// D13). It then runs gh pr merge once (mergeRun.merge) and, whatever that
+// returned, reads the PR back once (mergeRun.readBack, D6):
 //
 //   - MERGED at the gate's head into the default branch: it appends pr_merged
 //     (recordMerge, D4) and sets Merged and Recorded; Note says how gh pr
@@ -345,8 +350,8 @@ func (o *Org) mergeAndRecord(ctx context.Context, run mergeRun, res MergeResult)
 	switch {
 	case unknown != "":
 		res.Failed = run.failed(fmt.Sprintf("%s %s after %s %s, so whether PR #%d was merged is unknown and nothing was "+
-			"recorded: check it with %s --json state,headRefOid,baseRefName,mergeCommit (ralph org merge-order lists the branch "+
-			"as merged once it is)", run.viewCmd(), unknown, run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd()), a)
+			"recorded: check it with %s --json %s (ralph org merge-order lists the branch as merged once it is)", run.viewCmd(),
+			unknown, run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd(), mergeOutcomeFields), a)
 	case back.State == "MERGED" && back.HeadRefOid != run.r.head:
 		res.Failed = run.otherHeadMerged(back.HeadRefOid, a)
 	case back.State == "MERGED" && back.BaseRefName != run.r.defaultBranch:
@@ -399,7 +404,7 @@ func (run mergeRun) removeAutoMerge(ctx context.Context, state string, a mergeAt
 // cross-review #3 of the plan). The merge is not recorded, since pr_merged
 // would say the gate's head was merged, and it is not reported as one: the
 // Failed names the head merged and says to check it and go on with the other
-// branches.
+// branches (mergedElsewhere).
 func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
 	merged := fmt.Sprintf("at the head %s, not %s, the head the gate passed, so a head the gate did not pass was merged",
 		shortMergeSHA(head), shortMergeSHA(run.r.head))
@@ -407,9 +412,7 @@ func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
 		merged = fmt.Sprintf("with no head, so whether the head the gate passed (%s) was merged is unknown",
 			shortMergeSHA(run.r.head))
 	}
-	return run.failed(fmt.Sprintf("%s read PR #%d back as MERGED after %s %s, but %s, and nothing was recorded: check that "+
-		"merge yourself (%s --json state,headRefOid,baseRefName,mergeCommit), run ralph org merge-order again, and go on with "+
-		"the other branches", run.viewCmd(), run.r.prNumber, run.mergeCmd(), run.how(a), merged, run.viewCmd()), a)
+	return run.mergedElsewhere(merged, "", a)
 }
 
 // otherBaseMerged is the Failed of a PR gh pr view read back as MERGED at
@@ -421,16 +424,33 @@ func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
 // from that merge as far as ralph knows, so it is not recorded, since
 // pr_merged would say the default branch got the gate's head, and it is not
 // reported as one: the Failed names the base and says to check the merge and
-// go on with the other branches.
+// go on with the other branches (mergedElsewhere). ralph org merge-order
+// classifies a MERGED PR as merged without reading its base
+// (classifyMergeTarget), so the Failed also says that merge-order lists the
+// branch as merged though the default branch got nothing from this merge, or
+// may have got nothing with no base read back.
 func (run mergeRun) otherBaseMerged(base string, a mergeAttempt) string {
 	merged := fmt.Sprintf("into the base %s, not %s, the default branch the checks read, so %s got nothing from it as far as "+
 		"ralph knows", base, run.r.defaultBranch, run.r.defaultBranch)
+	got := "got"
 	if base == "" {
 		merged = fmt.Sprintf("with no base, so whether it merged into %s is unknown", run.r.defaultBranch)
+		got = "may have got"
 	}
+	return run.mergedElsewhere(merged, fmt.Sprintf(" (it lists the branch as merged, though %s %s nothing from this merge)",
+		run.r.defaultBranch, got), a)
+}
+
+// mergedElsewhere is the Failed of a PR gh pr view read back as MERGED after
+// gh pr merge (a) in a way Merge does not record, which merged says
+// (otherHeadMerged, otherBaseMerged): that nothing was recorded, to check
+// that merge with gh pr view --json mergeOutcomeFields, to run ralph org
+// merge-order again, with listed right after it, and to go on with the other
+// branches.
+func (run mergeRun) mergedElsewhere(merged, listed string, a mergeAttempt) string {
 	return run.failed(fmt.Sprintf("%s read PR #%d back as MERGED after %s %s, but %s, and nothing was recorded: check that "+
-		"merge yourself (%s --json state,headRefOid,baseRefName,mergeCommit), run ralph org merge-order again, and go on with "+
-		"the other branches", run.viewCmd(), run.r.prNumber, run.mergeCmd(), run.how(a), merged, run.viewCmd()), a)
+		"merge yourself (%s --json %s), run ralph org merge-order again%s, and go on with the other branches", run.viewCmd(),
+		run.r.prNumber, run.mergeCmd(), run.how(a), merged, run.viewCmd(), mergeOutcomeFields, listed), a)
 }
 
 // failed is a Failed: mergePrefix and text, escaped (PrintableInboxText),

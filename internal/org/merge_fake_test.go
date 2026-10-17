@@ -19,9 +19,10 @@ import (
 // share (plan docs/plans/active/2026-10-17-org-auto-merge.md, S9b): mxExec, a
 // fake MergeOrderExec standing in for git and gh, and mxFixture, a ledger in
 // a temp state dir, for checkMerge (merge_test.go); mrExec and mrFixture,
-// which answer the calls Merge adds after checkMerge's (merge_run_test.go);
-// and mwClock and mwFixture, a fake clock and the fixture of the wait of
-// --wait-checks (merge_wait_test.go). No test runs gh or reaches a network.
+// which answer the calls Merge adds after checkMerge's (merge_run_test.go and
+// merge_readback_test.go); and mwClock and mwFixture, a fake clock and the
+// fixture of the wait of --wait-checks (merge_wait_test.go). No test runs gh
+// or reaches a network.
 
 // The keys mxExec answers by (mxKey).
 const (
@@ -323,6 +324,26 @@ const (
 	mrProtection = `the ruleset "protect main" (id 1) of ` + mxSubject + ", requires branches to be up to date before merging " +
 		"with its 1 required status check, and you cannot bypass it (current_user_can_bypass: never)"
 )
+
+// mrNext is the end of the Failed of a PR merged at another head: nothing
+// recorded and the next steps. mrNextBase is that of a PR merged into another
+// base, which adds, after merge-order, that it lists the branch as merged,
+// and mrNextNoBase that of a PR merged with no base read back.
+const (
+	mrCheckIt = ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,baseRefName," +
+		"mergeCommit), run ralph org merge-order again"
+	mrNext     = mrCheckIt + ", and go on with the other branches"
+	mrNextBase = mrCheckIt + " (it lists the branch as merged, though main got nothing from this merge), and go on with the " +
+		"other branches"
+	mrNextNoBase = mrCheckIt + " (it lists the branch as merged, though main may have got nothing from this merge), and go on " +
+		"with the other branches"
+)
+
+// mrMergedAfter is the start of the Failed of a PR read back as MERGED after
+// gh pr merge ended as how says.
+func mrMergedAfter(how string) string {
+	return "org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " " + how + ", but "
+}
 
 // mrOID is the merge commit the fixtures' read-back gives.
 var mrOID = strings.Repeat("c", 40)
@@ -661,12 +682,24 @@ func (fx *mwFixture) run(t *testing.T) (MergeResult, error) {
 // addDuring appends lines to the ledger in the sleep numbered n (from 1)
 // and returns a pointer to what that appended, as the manifest holds it.
 func (fx *mwFixture) addDuring(t *testing.T, n int, lines ...any) *string {
+	return fx.addInSleeps(t, map[int][]any{n: lines}, nil)
+}
+
+// addInSleeps appends adds[n] to the ledger in the sleep numbered n (from 1)
+// and then runs also, when set, in that sleep; it returns a pointer to what
+// the sleeps appended, in order, as the manifest holds it.
+func (fx *mwFixture) addInSleeps(t *testing.T, adds map[int][]any, also func()) *string {
 	var added string
-	fx.onSleep = func(i int) {
-		if i == n {
-			before := mrRead(t, fx.mo.path)
-			fx.mo.add(t, lines...)
-			added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+	fx.onSleep = func(n int) {
+		lines, ok := adds[n]
+		if !ok {
+			return
+		}
+		before := mrRead(t, fx.mo.path)
+		fx.mo.add(t, lines...)
+		added += strings.TrimPrefix(mrRead(t, fx.mo.path), before)
+		if also != nil {
+			also()
 		}
 	}
 	return &added

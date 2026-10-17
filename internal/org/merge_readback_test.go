@@ -13,17 +13,6 @@ import (
 // merge_fake_test.go, with mrExec answering the calls Merge adds after
 // checkMerge's, so no test runs gh or reaches a network.
 
-// mrNext is the end of the Failed of a PR merged at another head or into
-// another base: nothing recorded and the next steps.
-const mrNext = ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,baseRefName," +
-	"mergeCommit), run ralph org merge-order again, and go on with the other branches"
-
-// mrMergedAfter is the start of the Failed of a PR read back as MERGED after
-// gh pr merge ended as how says.
-func mrMergedAfter(how string) string {
-	return "org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " " + how + ", but "
-}
-
 // TestMerge_RecordsOnlyAMergeIntoTheDefaultBranch covers D6, AC7 and AC8 for
 // the base the read-back gives (cross-review cycle 2 #1 of the plan): a PR
 // read back as MERGED at the gate's head into another base than main, the
@@ -31,9 +20,10 @@ func mrMergedAfter(how string) string {
 // someone retargeted the PR after the checks, after gh pr merge exited 0 or
 // failed, is Failed with Merged not set, so no MERGED: line, and nothing
 // recorded; the Failed names the base, how gh pr merge ended with gh's tail,
-// and the next steps. When the head is not the gate's either, the Failed is
-// the head's (otherHeadMerged), base or no base. MERGED at the gate's head
-// into main is recorded.
+// and the next steps, which say that merge-order lists the branch as merged
+// though main got nothing from this merge (S11). When the head is not the
+// gate's either, the Failed is the head's (otherHeadMerged), base or no base.
+// MERGED at the gate's head into main is recorded.
 func TestMerge_RecordsOnlyAMergeIntoTheDefaultBranch(t *testing.T) {
 	failure := errors.New("exit status 1: HTTP 502: Bad Gateway")
 	const said = "; gh said:\n  exit status 1: HTTP 502: Bad Gateway"
@@ -49,16 +39,16 @@ func TestMerge_RecordsOnlyAMergeIntoTheDefaultBranch(t *testing.T) {
 		records bool
 	}{
 		{"gh pr merge exited 0, merged into another base", mgReply{}, mrReadBackInto("MERGED", moHeadA, "release", mrOID, "null"),
-			mrMergedAfter("exited 0") + otherBase + mrNext, false},
+			mrMergedAfter("exited 0") + otherBase + mrNextBase, false},
 		{"gh pr merge failed, merged into another base", mgReply{err: failure}, mrReadBackInto("MERGED", moHeadA, "release", mrOID,
-			"null"), mrMergedAfter("failed") + otherBase + mrNext + said, false},
+			"null"), mrMergedAfter("failed") + otherBase + mrNextBase + said, false},
 		{"MERGED with an empty base", mgReply{}, mrReadBackInto("MERGED", moHeadA, "", mrOID, "null"),
-			mrMergedAfter("exited 0") + noBase + mrNext, false},
+			mrMergedAfter("exited 0") + noBase + mrNextNoBase, false},
 		{"MERGED with no baseRefName", mgReply{err: failure}, `{"autoMergeRequest":null,"headRefOid":"` + moHeadA +
-			`","mergeCommit":{"oid":"` + mrOID + `"},"state":"MERGED"}`, mrMergedAfter("failed") + noBase + mrNext + said, false},
+			`","mergeCommit":{"oid":"` + mrOID + `"},"state":"MERGED"}`, mrMergedAfter("failed") + noBase + mrNextNoBase + said, false},
 		{"a base with control characters is escaped", mgReply{}, mrReadBackInto("MERGED", moHeadA, "rel\x1b[2Jease", mrOID, "null"),
 			mrMergedAfter("exited 0") + `into the base rel\x1b[2Jease, not main, the default branch the checks read, so main got ` +
-				"nothing from it as far as ralph knows" + mrNext, false},
+				"nothing from it as far as ralph knows" + mrNextBase, false},
 		{"another head into another base names the head", mgReply{}, mrReadBackInto("MERGED", moHeadB, "release", mrOID, "null"),
 			mrMergedAfter("exited 0") + otherHead + mrNext, false},
 		{"another head with no base names the head", mgReply{err: failure}, mrReadBackInto("MERGED", moHeadB, "", mrOID, "null"),
@@ -108,7 +98,7 @@ func TestMerge_InterruptedThenMergedIntoAnotherBase(t *testing.T) {
 	res, err := fx.merge(ctx, t, fx.params())
 	want := "org: merge: interrupted (test stopped) once gh pr merge had started, and then: " + mrViewCmd + " read PR #7 back as " +
 		"MERGED after " + mrMergeCmd + " failed, but into the base release, not main, the default branch the checks read, so main " +
-		"got nothing from it as far as ralph knows" + mrNext + "; gh said:\n  context canceled"
+		"got nothing from it as far as ralph knows" + mrNextBase + "; gh said:\n  context canceled"
 	if err == nil || err.Error() != want || res.Merged || res.Recorded {
 		t.Fatalf("Merge = %+v, %v\nwant the error %q", res, err, want)
 	}

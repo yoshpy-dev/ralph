@@ -201,12 +201,14 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 // merged, and one next step; control characters in it, from the ledger or
 // gh, are escaped (PrintableInboxText). kind says which refusal it is
 // (mergeRefusalKind): of step 8 for an org that still runs the branch's
-// feature, of step 10, and mergeRefusalOther for a refusal of any other step
-// and when every check passed. With a refusal whose kind waits, r holds what
-// the steps before it read, for the wait of --wait-checks (merge_wait.go):
-// for step 8 the branch and its org_id, whose disband the wait reads in the
-// ledger, and for step 10 what steps 2 to 9 read, the PR whose checks the wait
-// reads; r is empty with any other refusal. The error is for a manifest that
+// feature (on a branch with no binding, also for its gate's org that runs
+// another feature now: runningRefusal), of step 10, and mergeRefusalOther for
+// a refusal of any other step and when every check passed. With a refusal
+// whose kind waits, r holds what the steps before it read, for the wait of
+// --wait-checks (merge_wait.go): for step 8 the branch and its org_id, whose
+// disband the wait reads in the ledger, and for step 10 what steps 2 to 9
+// read, the PR whose checks the wait reads; r is empty with any other
+// refusal. The error is for a manifest that
 // cannot be read and for ctx done; nothing was merged then either.
 // p.AutoMerge, p.WaitChecks, and p.Progress are not read.
 func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
@@ -583,9 +585,10 @@ func (c ghPRCheck) label() string {
 
 // mergeRefusalKind says which refusal of checkMerge a refusal is, as far as
 // the wait of --wait-checks (D5, D13, merge_wait.go) needs to know: the one
-// of step 8 for an org that still runs the branch's feature, and those of
-// readChecks (step 10), so that the wait is decided on the kind and not on
-// the refusal's text.
+// of step 8 for an org that still runs the branch's feature (on a branch with
+// no binding, also for its gate's org that runs another feature now:
+// runningRefusal), and those of readChecks (step 10), so that the wait is
+// decided on the kind and not on the refusal's text.
 type mergeRefusalKind int
 
 const (
@@ -593,7 +596,9 @@ const (
 	// that runs another feature now (mergeTarget.orgRunsOn), or no refusal.
 	mergeRefusalOther mergeRefusalKind = iota
 	// mergeRefusalOrgRunning: step 8 refused because the branch's org runs,
-	// and not another feature now: its leader disbands it after its RESULT.
+	// and not another feature now as far as the ledger tells, which it does
+	// only for a branch with a binding (runningRefusal): its leader disbands
+	// it after its RESULT.
 	mergeRefusalOrgRunning
 	// mergeRefusalChecksPending: every check is pass, skipping, or pending,
 	// and one is pending.
@@ -610,9 +615,11 @@ const (
 )
 
 // waits reports whether --wait-checks waits out a refusal of kind k: only an
-// org that still runs the branch's feature, which its leader disbands after
-// its RESULT, and checks that are pending, or none reported yet, which a CI
-// that runs may turn into checks that passed.
+// org that still runs the branch's feature (on a branch with no binding, also
+// its gate's org that runs another feature now: runningRefusal), which its
+// leader disbands after its RESULT, and checks that are pending, or none
+// reported yet, which a CI that runs may turn into checks that passed.
+// mergeWait.wait has a case for each kind it reports.
 func (k mergeRefusalKind) waits() bool {
 	return k == mergeRefusalOrgRunning || k == mergeRefusalChecksPending || k == mergeRefusalChecksZero
 }

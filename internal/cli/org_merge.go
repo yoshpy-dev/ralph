@@ -127,10 +127,10 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"are waited for again, all within the one duration. An org that runs\n" +
 			"another feature now (on a branch with a feature binding), a check that\n" +
 			"failed or was cancelled, checks that are all skipping, and every other\n" +
-			"refusal are not waited for. When the time is up and the org\n" +
-			"still runs or the checks are still pending or none, merge refuses as\n" +
-			"without the flag and adds how long it waited; for the org, it also names\n" +
-			"ralph org status --org-id <org>, since whether to disband the org is a\n" +
+			"refusal are not waited for. When the time is up and the org still\n" +
+			"runs or the checks are still pending or none, merge refuses as without\n" +
+			"the flag and adds how long it waited; for the org, it also names ralph\n" +
+			"org status --org-id <org>, since whether to disband the org is a\n" +
 			"human's call. stderr gets one line when a wait starts and one when it\n" +
 			"ends. An interrupt while merge waits merges nothing and exits 1. In a\n" +
 			"repository with no CI, the checks stay at none, and merge waits until\n" +

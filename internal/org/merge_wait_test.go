@@ -474,32 +474,18 @@ func TestMerge_WaitChecksForTheOrgEnds(t *testing.T) {
 	})
 }
 
-// TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain: the branch's org
-// disbanded and started again, under the same org_id for the same feature on
-// the same branch, between two reads of the ledger runs at the next read, so
-// the wait for it goes on. It ends once the org is disbanded again, and then
-// every check runs again and the PR is merged and recorded once; with the org
-// never disbanded again, it ends once --wait-checks is used up, and the
-// checks refuse the org that still runs.
+// TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain: the branch's org is
+// disbanded and started again between two reads of the ledger, under the
+// same org_id for the same feature on the same branch. The org then runs at
+// the next read, so the wait for it goes on. It ends once the org is
+// disbanded again, and then every check runs again and the PR is merged and
+// recorded once; with the org never disbanded again, it ends once
+// --wait-checks is used up, and the checks refuse the org that still runs.
 func TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain(t *testing.T) {
 	restart := []any{moDisbanded("org-a"), moBind("org-a", "a")}
 	t.Run("disbanded again", func(t *testing.T) {
 		fx := newMWFixtureOn(t, mwOrgRunning(), mwPass, time.Hour)
-		var added string
-		fx.onSleep = func(n int) {
-			var lines []any
-			switch n {
-			case 1:
-				lines = restart
-			case 3:
-				lines = []any{moDisbanded("org-a")}
-			default:
-				return
-			}
-			before := mrRead(t, fx.mo.path)
-			fx.mo.add(t, lines...)
-			added += strings.TrimPrefix(mrRead(t, fx.mo.path), before)
-		}
+		added := fx.addInSleeps(t, map[int][]any{1: restart, 3: {moDisbanded("org-a")}}, nil)
 		res, err := fx.run(t)
 		want := mrResult("merge")
 		want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
@@ -509,8 +495,8 @@ func TestMerge_WaitChecksForTheOrgGoesOnWhenItStartsAgain(t *testing.T) {
 		fx.check(t, slices.Concat(mxAll[:3], mxAll, []string{mrMerge, mrReread}),
 			slices.Repeat([]time.Duration{30 * time.Second}, 3),
 			[]string{mwOrgStart("1h0m0s", "1h0m0s"), mwOrgEnd("1m30s", "the org was disbanded")})
-		if got := fx.appended(t); got != added+mwMerged(t) {
-			t.Errorf("appended %q\nwant     %q", got, added+mwMerged(t))
+		if got := fx.appended(t); got != *added+mwMerged(t) {
+			t.Errorf("appended %q\nwant     %q", got, *added+mwMerged(t))
 		}
 	})
 	t.Run("the time is up", func(t *testing.T) {
@@ -561,15 +547,7 @@ func TestMerge_WaitChecksOrgAndChecksShareTheBudget(t *testing.T) {
 // they began.
 func TestMerge_WaitChecksChecksThenOrgShareTheBudget(t *testing.T) {
 	fx := newMWFixture(t, mwPending, 70*time.Second)
-	var added string
-	fx.onSleep = func(n int) {
-		if n == 1 {
-			before := mrRead(t, fx.mo.path)
-			fx.mo.add(t, moBind("org-a", "a"))
-			added = strings.TrimPrefix(mrRead(t, fx.mo.path), before)
-			fx.setChecks(mwPass)
-		}
-	}
+	added := fx.addInSleeps(t, map[int][]any{1: {moBind("org-a", "a")}}, func() { fx.setChecks(mwPass) })
 	res, err := fx.run(t)
 	want := MergeResult{Refused: mwOrgRefusal + `; ralph org merge waited 1m10s for the checks and for org_id "org-a" to be ` +
 		"disbanded (--wait-checks 1m10s); the org still runs: see what it does with ralph org status --org-id org-a, and a human " +
@@ -582,8 +560,8 @@ func TestMerge_WaitChecksChecksThenOrgShareTheBudget(t *testing.T) {
 			mwStart("has checks pending", "1m10s", "1m10s"), mwEnd("30s", "the checks passed"),
 			mwOrgStart("40s", "1m10s"), mwOrgEnd("40s", "--wait-checks 1m10s is used up"),
 		})
-	if got := fx.appended(t); got != added {
-		t.Errorf("appended %q\nwant     %q", got, added)
+	if got := fx.appended(t); got != *added {
+		t.Errorf("appended %q\nwant     %q", got, *added)
 	}
 }
 
@@ -703,6 +681,31 @@ func TestMergeWait_Defaults(t *testing.T) {
 		reflect.ValueOf(w.now).Pointer() != reflect.ValueOf(time.Now).Pointer() ||
 		reflect.ValueOf(w.sleep).Pointer() != reflect.ValueOf(sleepContext).Pointer() {
 		t.Errorf("newMergeWait = %+v; want the budget, 30s, io.Discard, time.Now and sleepContext", w)
+	}
+}
+
+// TestMergeWait_EveryKindThatWaitsHasACase: for every kind that
+// mergeRefusalKind.waits reports, mergeWait.wait has a case, so a kind added
+// to waits with none fails here, as the error of wait's default (S11 of the
+// plan). With no budget, wait reads nothing: it writes its first line and its
+// last and returns. The kinds run past the last one declared, so one added at
+// the end is covered too.
+func TestMergeWait_EveryKindThatWaitsHasACase(t *testing.T) {
+	r := mergeReady{branch: "feat/a", orgID: "org-a", prNumber: 7, repoArg: mxRepoArg}
+	waiting := 0
+	for k := range mergeRefusalChecksUnread + 8 {
+		if !k.waits() {
+			continue
+		}
+		waiting++
+		progress := &strings.Builder{}
+		err := newMergeWait(MergeParams{Progress: progress}).wait(context.Background(), nil, "", mergeWaitFor{r: r, kind: k})
+		if n := strings.Count(progress.String(), "\n"); err != nil || n != 2 {
+			t.Errorf("wait for kind %d = %v, with %d lines:\n%s\nwant no error, its first line and its last", k, err, n, progress)
+		}
+	}
+	if waiting == 0 {
+		t.Fatal("no kind waits")
 	}
 }
 
