@@ -1152,7 +1152,7 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("status %v with a broken main ralph.toml: %v (stderr %s)", extra, err, stderr)
 		}
-		for _, want := range []string{"warning: status: org: load [org.director].enabled and auto_merge from the main worktree's " + mainToml,
+		for _, want := range []string{"warning: status: org: load [org.director] from the main worktree's " + mainToml,
 			"showing the director by the default [org.director].enabled (true) and auto_merge (false)\n"} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("status %v stderr does not contain %q:\n%s", extra, want, stderr)

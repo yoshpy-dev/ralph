@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 	"unicode"
@@ -192,7 +194,7 @@ func mrRecord(t *testing.T, details string) string {
 }
 
 // mrResult is the MergeResult fields the checks of the default fixture set,
-// for the merge method method.
+// with Method set to method.
 func mrResult(method string) MergeResult {
 	return MergeResult{Branch: "feat/a", OrgID: "org-a", PRNumber: 7, PRURL: "https://github.com/o/r/pull/7", Method: method,
 		Head: moHeadA, Protection: mrProtection}
@@ -839,4 +841,86 @@ func TestMerge_SharesRegateLockWithRegate(t *testing.T) {
 		}
 		mrAssertLockFree(t, fx.mo.stateDir)
 	})
+}
+
+// TestMerge_CallsAfterGHPRMergeRunDetached covers self-review L3 (S6 of the
+// plan): gh pr merge runs through the runner of the checks, in ralph's
+// process group, where an interruption stops it; the read-back and the
+// removal of an auto-merge request run through runDetached, which
+// newMergeCheck sets to realMergeDetachedExec for the real commands (no
+// Exec) and to Exec otherwise.
+func TestMerge_CallsAfterGHPRMergeRunDetached(t *testing.T) {
+	m := newMergeCheck(MergeParams{})
+	if reflect.ValueOf(m.run).Pointer() != reflect.ValueOf(realMergeOrderExec).Pointer() ||
+		reflect.ValueOf(m.runDetached).Pointer() != reflect.ValueOf(realMergeDetachedExec).Pointer() {
+		t.Error("newMergeCheck with no Exec: the checks and gh pr merge do not run through realMergeOrderExec, or the calls " +
+			"after gh pr merge not through realMergeDetachedExec")
+	}
+
+	fx := newMRFixture(t, nil)
+	r, refused, err := fx.mo.o.checkMerge(context.Background(), fx.params())
+	if err != nil || refused != "" {
+		t.Fatalf("checkMerge = %v, refused %q", err, refused)
+	}
+	detached := &mrExec{mxExec: &mxExec{}, reread: mgReply{out: mrReadBack("OPEN", "", mrRequest)}}
+	run := mergeRun{m: newMergeCheck(fx.params()), r: r}
+	run.m.runDetached = detached.run
+	res, err := fx.mo.o.mergeAndRecord(context.Background(), run, MergeResult{})
+	if err != nil || !strings.Contains(res.Failed, "which ralph org merge removed ("+mrDisableCmd+")") {
+		t.Fatalf("mergeAndRecord = %+v, %v; want the request removed", res, err)
+	}
+	if got := fx.exec.keys()[len(mxAll):]; !slices.Equal(got, []string{mrMerge}) {
+		t.Errorf("through the runner of the checks once they passed: %q; want gh pr merge only", got)
+	}
+	if got := detached.keys(); !slices.Equal(got, []string{mrReread, mrDisable}) {
+		t.Errorf("through runDetached: %q; want the read-back and the removal", got)
+	}
+}
+
+// TestRealMergeDetachedExec_RunsInAProcessGroupOfItsOwn covers self-review
+// L3: realMergeDetachedExec starts its command in a process group of its
+// own, led by the command, so a Ctrl-C or hangup the terminal sends the
+// test's (ralph's) foreground group does not reach it; realMergeOrderExec,
+// which runs gh pr merge, the checks, and merge-order, leaves its command in
+// the test's group. sh prints its pid and, with ps, its process group.
+func TestRealMergeDetachedExec_RunsInAProcessGroupOfItsOwn(t *testing.T) {
+	test := syscall.Getpgrp()
+	for _, tc := range []struct {
+		name     string
+		run      MergeOrderExec
+		ownGroup bool
+	}{{"realMergeDetachedExec", realMergeDetachedExec, true}, {"realMergeOrderExec", realMergeOrderExec, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.run(context.Background(), t.TempDir(), nil, "sh", "-c", `echo "$$ $(ps -o pgid= -p $$)"`)
+			var pid, pgid int
+			if _, scanErr := fmt.Sscan(out, &pid, &pgid); err != nil || scanErr != nil {
+				t.Fatalf("sh printed %q, %v (%v)", out, err, scanErr)
+			}
+			want := test
+			if tc.ownGroup {
+				want = pid
+			}
+			if pgid != want {
+				t.Errorf("sh (pid %d) ran in the process group %d; want %d (the test's is %d)", pid, pgid, want, test)
+			}
+		})
+	}
+}
+
+// TestRealMergeDetachedExec_CtxDoneKillsTheGroup: ctx done kills the whole
+// process group of realMergeDetachedExec's command, so a child the command
+// started ends with it, as the terminal's interrupt would have ended it in
+// ralph's group. The child would write its file 500 ms after it started.
+func TestRealMergeDetachedExec_CtxDoneKillsTheGroup(t *testing.T) {
+	alive := filepath.Join(t.TempDir(), "alive")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := realMergeDetachedExec(ctx, t.TempDir(), nil, "sh", "-c", `(sleep 0.5; echo alive > "$1") & wait`, "sh",
+		alive); err == nil {
+		t.Fatal("realMergeDetachedExec = nil error once ctx is done")
+	}
+	time.Sleep(time.Second)
+	if _, err := os.Stat(alive); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the command's child still ran after ctx was done (%s: %v); want the whole group killed", alive, err)
+	}
 }

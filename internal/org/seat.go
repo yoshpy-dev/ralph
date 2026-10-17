@@ -10,9 +10,9 @@
 // remote get-url origin` in mergeguarantee.go, and both in merge.go),
 // scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
 // scripts/run-test.sh of a feature worktree (gate_run.go), osascript
-// (watch.go), gh (mergeorder.go, mergeguarantee.go, merge.go, and
-// merge_run.go), ps and [org.director].launch_cmd (director_cmd.go), and
-// `claude -p` (watcher.go).
+// (watch.go), gh (mergeorder.go, mergeguarantee.go, mergeenforce.go,
+// merge.go, and merge_run.go), ps and [org.director].launch_cmd
+// (director_cmd.go), and `claude -p` (watcher.go).
 package org
 
 // Saga/event name constants recorded in ManifestEvent.Event.
@@ -95,7 +95,10 @@ const (
 	// binding (else of its latest gate record), Details `branch=<branch>
 	// pr=<number> head=<the head the gate passed> method=<merge, squash or
 	// rebase> merge_commit=<sha, or unknown when gh gave none>
-	// auto_merge=<true|false>`. A refusal and a merge that failed record
+	// auto_merge=<true|false>`. auto_merge= is the value of
+	// [org.director].auto_merge when the merge ran; it does not say whether
+	// the director merged without asking, since a merge a human asked for
+	// records the same value. A refusal and a merge that failed record
 	// none. Roster skips it like every org-level event, so stop --all finds
 	// no seat in it; it makes no org count as running (RunningOrgs, which
 	// max_orgs counts) nor a target of disband --all (orgsToDisband), and the

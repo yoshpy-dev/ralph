@@ -95,10 +95,13 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"cannot be recorded, merge prints the lines above and exits 1.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the git or gh call that\n" +
-			"runs. Before gh pr merge, nothing is merged. Once gh pr merge has\n" +
-			"started, merge still reads the PR back once and then removes a request\n" +
-			"or records the merge as above, prints the lines when the PR merged, and\n" +
-			"exits 1 saying it was interrupted. Exit codes: 0 for a merge that was\n" +
+			"runs, up to and including gh pr merge. Before gh pr merge, nothing is\n" +
+			"merged. Once gh pr merge has started, merge still reads the PR back once\n" +
+			"and then removes a request or records the merge as above, prints the\n" +
+			"lines when the PR merged, and exits 1 saying it was interrupted. The\n" +
+			"read-back and the removal run in a process group of their own, so a\n" +
+			"Ctrl-C or hangup the terminal sends does not stop them, and each is\n" +
+			"still bounded by gh's 15 s timeout. Exit codes: 0 for a merge that was\n" +
 			"recorded; 1 for a refusal, a merge that did not happen or is unknown, an\n" +
 			"interrupt, and any other error.\n" +
 			"\n" +

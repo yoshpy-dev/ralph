@@ -362,6 +362,12 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 		{"origin is a local path", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "/srv/git/r.git\n" }, noHost, 1},
 		{"origin is a file URL", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "file:///srv/o/r.git\n" }, noHost, 1},
 		{"origin names no owner/repo", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "https://github.com/o\n" }, noHost, 1},
+		{"origin's host starts with - (scp form)", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "git@-oProxyCommand=x:o/r.git\n" },
+			noHost, 1},
+		{"origin's host starts with - (URL form)", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "ssh://git@-x.example.com/o/r.git\n" },
+			noHost, 1},
+		{"origin's owner starts with -", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "git@github.com:-o/r.git\n" }, noHost, 1},
+		{"origin's repo starts with -", nil, func(fx *mxFixture, _ *MergeParams) { fx.exec.origin = "https://github.com/o/-r.git\n" }, noHost, 1},
 		// 3. gh on PATH, and a gh call that is not found later.
 		{"gh is not on PATH", nil, func(_ *mxFixture, p *MergeParams) { p.LookPath = mgNotFound }, mxGHMissing, 1},
 		{"gh pr list is not found", nil, reply(mxPRList, mxNotFound), mxGHMissing, 3},
@@ -439,10 +445,10 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 				"unknown and nothing was merged: " + mxAccess, 4},
 		{"gh pr view prints no JSON", nil, reply(mxPRView, mgReply{out: "<html>"}),
 			"org: merge: " + viewCmd + " printed output that is not the PR's JSON with state,url,headRefOid,baseRefName," +
-				"autoMergeRequest,mergeCommit, so nothing was merged: " + mxAccess, 4},
+				"autoMergeRequest, so nothing was merged: " + mxAccess, 4},
 		{"gh pr view leaves autoMergeRequest out", nil, reply(mxPRView, mgReply{out: `{"state":"OPEN","url":"` + pr7 +
 			`","headRefOid":"` + moHeadA + `","baseRefName":"main"}`}), "org: merge: " + viewCmd + " printed output that is not the " +
-			"PR's JSON with state,url,headRefOid,baseRefName,autoMergeRequest,mergeCommit, so nothing was merged: " + mxAccess, 4},
+			"PR's JSON with state,url,headRefOid,baseRefName,autoMergeRequest, so nothing was merged: " + mxAccess, 4},
 		{"PR is not OPEN", nil, view("MERGED", moHeadA, "main", pr7, "null"),
 			"org: merge: PR #7 is MERGED, not OPEN, so nothing was merged: run ralph org merge-order to see the branch's state", 4},
 		{"PR's head is not the gate's", nil, view("OPEN", moHeadB, "main", pr7, "null"),
@@ -645,7 +651,7 @@ func TestCheckMerge_PassesWithEverythingTheMergeNeeds(t *testing.T) {
 		{"git", "remote", "get-url", "origin"},
 		append([]string{"git"}, mxLsRemoteArgs...),
 		{"gh", "pr", "list", "--head", "feat/a", "--state", "all", "--limit", "1000", "--json", mergeOrderGHFields, "-R", mxRepoArg},
-		{"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,url,headRefOid,baseRefName,autoMergeRequest,mergeCommit"},
+		{"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,url,headRefOid,baseRefName,autoMergeRequest"},
 		{"gh", "pr", "checks", "7", "-R", mxRepoArg, "--json", "bucket,name,state,workflow"},
 		{"gh", "api", "--hostname", "github.com", "repos/o/r"},
 		{"gh", "api", "--hostname", "github.com", "-f", "query=" + mergeQueueQuery, "-f", "owner=o", "-f", "name=r", "-f",

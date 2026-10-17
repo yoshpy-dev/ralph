@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -1192,9 +1193,34 @@ func mergeOrderInterrupted(ctx context.Context, step string) error {
 // up by them; an exit 0 whose pipe a child held is a success, the way
 // realGitStatus reads it.
 func realMergeOrderExec(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
+	return runMergeOrderCommand(ctx, false, dir, env, name, args...)
+}
+
+// realMergeDetachedExec is realMergeOrderExec with the command in a process
+// group of its own, as the gate scripts (runGateScript) and regate's fetch
+// and push (regateBoundedGit) run: a signal the terminal sends its foreground
+// group (Ctrl-C, a hangup) reaches ralph and not the command, and ctx done
+// kills the whole group, the command's children with it. Merge runs the gh
+// calls it makes once gh pr merge has started through it
+// (mergeCheck.runDetached). Release builds target darwin and linux only,
+// where Setpgid and kill(-pgid) exist.
+func realMergeDetachedExec(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
+	return runMergeOrderCommand(ctx, true, dir, env, name, args...)
+}
+
+// runMergeOrderCommand runs the command of realMergeOrderExec, and with
+// ownGroup the one of realMergeDetachedExec.
+func runMergeOrderCommand(ctx context.Context, ownGroup bool, dir string, env []string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
+	if ownGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return nil
+		}
+	}
 	cmd.WaitDelay = mergeOrderWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

@@ -194,12 +194,13 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 	return cfg, nil
 }
 
-// withMainWorktreeDirectorEnabled returns cfg with Director.Enabled (the
+// withMainWorktreeDirectorEnabled returns cfg with two values of
+// [org.director], not only the Enabled its name says: Director.Enabled (the
 // director switch, [org.director].enabled) and Director.AutoMerge
 // ([org.director].auto_merge, the mark the /director skill reads for merging
-// without asking) taken from <main worktree root>/ralph.toml, by the rule
-// withMainWorktreeOrgLimits follows: only when configPath is empty and the
-// ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
+// without asking), both taken from <main worktree root>/ralph.toml, by the
+// rule withMainWorktreeOrgLimits follows: only when configPath is empty and
+// the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
 // built-in defaults (true and false) when that file does not exist. A
 // feature org's leader escalates from its feature worktree, whose ralph.toml
 // it can change, so that copy does not choose whether its items are left to
@@ -217,7 +218,7 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled and auto_merge from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director] from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil

@@ -22,7 +22,8 @@ import (
 // auto-merge request GitHub held for the PR instead of merging it; and
 // records the org-level pr_merged when the PR is MERGED (D4). Its gh calls run
 // through MergeOrderExec with GH_PROMPT_DISABLED=1, pinned to origin's
-// repository with -R, as checkMerge's are.
+// repository with -R, as checkMerge's are; the read-back and the removal run,
+// for the real commands, in a process group of their own (ghAfterStart).
 
 const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
@@ -115,9 +116,13 @@ type MergeResult struct {
 //
 // Failed records nothing. The read, the removal, and the record run with
 // ctx's cancellation dropped, under the gh timeout and the manifest lock's
-// wait, so an interruption once gh pr merge has started still gets each of
-// them once; Merge then returns an error that says it was interrupted and how
-// the merge ended, with MergeResult as far as it got. Before gh pr merge, an
+// wait, and for the real commands the read and the removal run in a process
+// group of their own (mergeRun.ghAfterStart), so neither ctx nor a Ctrl-C or
+// hangup the terminal sends its foreground group stops them: an interruption
+// once gh pr merge has started still gets each of them once; Merge then
+// returns an error that says it was interrupted and how the merge ended, with
+// MergeResult as far as it got. gh pr merge itself runs in ralph's group, and
+// an interruption stops it as it stops the checks. Before gh pr merge, an
 // interruption is an error with nothing merged. The other errors are a
 // manifest that cannot be read, a lock that cannot be taken or written, and a
 // pr_merged that cannot be appended after the merge (Merged set, Recorded
@@ -135,13 +140,16 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 			"ledger (%s is held): one runs at a time, so wait for it to end and run ralph org merge --branch %s again",
 			regateLockPathIn(stateDir), p.Branch), false)}, nil
 	case err != nil:
-		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged, since %s could not be taken: %w", regateLockPathIn(stateDir), err)
+		// err names the lock's path, or its dir.
+		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
 	}
 	defer func() { _ = lock.release() }()
 	// D3: the marker an earlier regate left goes at once, and Merge writes
-	// none, so no spawn of that org is refused while the merge runs.
-	if err := writeRegateMarker(lock.f, nil); err != nil {
-		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged: %w", err)
+	// none, so no spawn of that org is refused while the merge runs. Emptying
+	// it is what writeRegateMarker(lock.f, nil) does, a truncation; Merge
+	// truncates itself so that its error is merge's, not regate's.
+	if err := lock.f.Truncate(0); err != nil {
+		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged, since the marker in regate.lock could not be emptied: %w", err)
 	}
 
 	r, refused, err := o.checkMerge(ctx, p)
@@ -245,14 +253,23 @@ func (b mergeReadBack) mergeCommit() string {
 	return b.MergeCommit.OID
 }
 
+// ghAfterStart runs a gh call Merge makes once gh pr merge has started:
+// with ctx's cancellation dropped, bounded by the gh timeout, and through
+// runDetached, so for the real commands in a process group of its own
+// (realMergeDetachedExec), which a Ctrl-C or hangup the terminal sends its
+// foreground group does not reach.
+func (run mergeRun) ghAfterStart(ctx context.Context, args ...string) (out string, timedOut bool, err error) {
+	return run.m.ghWith(context.WithoutCancel(ctx), run.m.runDetached, args...)
+}
+
 // readBack is the read of the PR once gh pr merge returned, whatever it
 // returned (D6): gh pr view <n> -R <repo> --json mergeReadBackFields, once,
-// with ctx's cancellation dropped and the gh timeout. unknown is set when the
-// PR's state stays unknown, saying why: gh failed, or printed no JSON with a
-// state and, for a PR that is not MERGED, its autoMergeRequest, without which
-// Merge cannot tell whether to remove a request.
+// through ghAfterStart. unknown is set when the PR's state stays unknown,
+// saying why: gh failed, or printed no JSON with a state and, for a PR that
+// is not MERGED, its autoMergeRequest, without which Merge cannot tell
+// whether to remove a request.
 func (run mergeRun) readBack(ctx context.Context) (back mergeReadBack, unknown string) {
-	out, _, err := run.m.gh(context.WithoutCancel(ctx), "pr", "view", run.pr(), "-R", run.r.repoArg, "--json", mergeReadBackFields)
+	out, _, err := run.ghAfterStart(ctx, "pr", "view", run.pr(), "-R", run.r.repoArg, "--json", mergeReadBackFields)
 	if err != nil {
 		return mergeReadBack{}, "failed (" + mergeGuaranteeErrText(err) + ")"
 	}
@@ -301,10 +318,10 @@ func (o *Org) mergeAndRecord(ctx context.Context, run mergeRun, res MergeResult)
 // request after gh pr merge (a): GitHub held the request instead of merging,
 // as it does for a PR that cannot be merged yet (a check that still runs, a
 // merge queue the checks did not find). It removes the request with gh pr
-// merge --disable-auto, once, with ctx's cancellation dropped and the gh
-// timeout, and returns the Failed that says whether that worked.
+// merge --disable-auto, once, through ghAfterStart, and returns the Failed
+// that says whether that worked.
 func (run mergeRun) removeAutoMerge(ctx context.Context, state string, a mergeAttempt) string {
-	_, _, err := run.m.gh(context.WithoutCancel(ctx), "pr", "merge", run.pr(), "--disable-auto", "-R", run.r.repoArg)
+	_, _, err := run.ghAfterStart(ctx, "pr", "merge", run.pr(), "--disable-auto", "-R", run.r.repoArg)
 	if err != nil {
 		return run.failed(fmt.Sprintf("%s %s and did not merge PR #%d, which is %s: GitHub held an auto-merge request for it "+
 			"instead, and %s failed (%s), so the request may remain and GitHub may still merge the PR apart from ralph org "+

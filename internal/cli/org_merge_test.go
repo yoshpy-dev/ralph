@@ -623,6 +623,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"is removed with gh pr merge <n> --disable-auto -R <repo>",
 			"When the PR merged but pr_merged cannot be recorded, merge prints the lines above and exits 1.",
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP)",
+			"The read-back and the removal run in a process group of their own, so a Ctrl-C or hangup the terminal sends does " +
+				"not stop them",
 			"it needs no running watch and no approved plan",
 			"but ralph org spawn and start of the branch's org are not, since merge changes no worktree",
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",

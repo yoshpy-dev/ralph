@@ -36,7 +36,7 @@ const (
 	// mergePrefix starts every refusal and error of the merge verb.
 	mergePrefix = "org: merge: "
 	// mergePRViewFields are the fields checkMerge reads with gh pr view.
-	mergePRViewFields = "state,url,headRefOid,baseRefName,autoMergeRequest,mergeCommit"
+	mergePRViewFields = "state,url,headRefOid,baseRefName,autoMergeRequest"
 	// mergePRChecksFields are the fields checkMerge reads with gh pr checks.
 	mergePRChecksFields = "bucket,name,state,workflow"
 )
@@ -53,7 +53,9 @@ type MergeParams struct {
 	// Dir is the repository directory git and gh run in; empty means the
 	// current directory.
 	Dir string
-	// Exec runs git and gh; nil means realMergeOrderExec.
+	// Exec runs git and gh; nil means realMergeOrderExec, and
+	// realMergeDetachedExec for the gh calls after gh pr merge started
+	// (merge_run.go).
 	Exec MergeOrderExec
 	// LookPath finds gh before any gh call; nil means exec.LookPath.
 	LookPath func(file string) (string, error)
@@ -117,13 +119,17 @@ type mergeCheck struct {
 	lsTimeout, ghTimeout, enforcementTimeout time.Duration
 	// mergeTimeout bounds gh pr merge (Merge).
 	mergeTimeout time.Duration
+	// runDetached runs the gh calls Merge makes once gh pr merge has started
+	// (mergeRun.ghAfterStart): realMergeDetachedExec, a process group of
+	// their own, when MergeParams.Exec is nil, else MergeParams.Exec.
+	runDetached MergeOrderExec
 }
 
 func newMergeCheck(p MergeParams) *mergeCheck {
 	m := &mergeCheck{branch: p.Branch, dir: p.Dir, run: p.Exec, lookPath: p.LookPath, lsTimeout: p.LsRemoteTimeout,
-		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout, mergeTimeout: p.MergeTimeout}
+		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout, mergeTimeout: p.MergeTimeout, runDetached: p.Exec}
 	if m.run == nil {
-		m.run = realMergeOrderExec
+		m.run, m.runDetached = realMergeOrderExec, realMergeDetachedExec
 	}
 	if m.lookPath == nil {
 		m.lookPath = exec.LookPath
@@ -301,7 +307,8 @@ func mergeInterrupted(ctx context.Context, step string) error {
 
 // readOrigin is step 2 of checkMerge (D10): origin's host and owner/repo from
 // `git remote get-url origin`, bounded by the gh timeout, into r, or the
-// refusal of an origin that cannot be read or names none.
+// refusal of an origin that cannot be read, names none, or names a host,
+// owner or repo that starts with "-".
 func (m *mergeCheck) readOrigin(ctx context.Context, r *mergeReady) (string, error) {
 	getCtx, cancel := context.WithTimeout(ctx, m.ghTimeout)
 	defer cancel()
@@ -318,7 +325,12 @@ func (m *mergeCheck) readOrigin(ctx context.Context, r *mergeReady) (string, err
 			mergeGuaranteeGetURL, mergeGuaranteeErrText(err), m.again()), nil
 	}
 	host, repo, ok := mergeOriginFromURL(line)
-	if !ok {
+	// A host, owner or repo that starts with "-" is refused as no host and
+	// owner/repo: gh repo view takes <host>/<owner>/<repo> as an argument,
+	// where gh would read a leading "-" as a flag. merge-order's reading of
+	// origin does not check this.
+	dashed := strings.HasPrefix(host, "-") || strings.HasPrefix(repo.owner, "-") || strings.HasPrefix(repo.name, "-")
+	if !ok || dashed {
 		return fmt.Sprintf(mergePrefix+"origin's URL names no host and owner/repo (a local path, file://, or a scheme other "+
 			"than https, http, ssh and git), so there is no GitHub repository to merge in and nothing was merged: point origin "+
 			"at the GitHub repository (git remote set-url origin <URL>) and %s", m.again()), nil
@@ -407,9 +419,14 @@ func (m *mergeCheck) ghFailed(ctx context.Context, r mergeReady, cmd string, err
 // m.ghTimeout, and returns its stdout. timedOut reports that the timeout
 // stopped it, and err then says so.
 func (m *mergeCheck) gh(ctx context.Context, args ...string) (out string, timedOut bool, err error) {
+	return m.ghWith(ctx, m.run, args...)
+}
+
+// ghWith is gh run through run instead of m.run.
+func (m *mergeCheck) ghWith(ctx context.Context, run MergeOrderExec, args ...string) (out string, timedOut bool, err error) {
 	ghCtx, cancel := context.WithTimeout(ctx, m.ghTimeout)
 	defer cancel()
-	out, err = m.run(ghCtx, m.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", args...)
+	out, err = run(ghCtx, m.dir, []string{"GH_PROMPT_DISABLED=1"}, "gh", args...)
 	if err != nil && ghCtx.Err() != nil && ctx.Err() == nil {
 		return out, true, fmt.Errorf("timed out after %s: %w", m.ghTimeout, err)
 	}

@@ -251,8 +251,10 @@ func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 // worktree's ralph.toml is not read, so the same broken file is not reported
 // twice. status only reads, so a main worktree ralph.toml that does not load
 // falls back to the built-in defaults too, with its own warning on stderr,
-// instead of failing the command. Only Enabled and AutoMerge are meant to be
-// read from the result.
+// instead of failing the command. Only Enabled and AutoMerge of the result
+// follow that rule, and readOrgDirectorReport reads only those two: its other
+// fields (AckMinutes, ResolveMinutes, LaunchCmd) are ./ralph.toml's or the
+// built-in defaults, never the main worktree's.
 func statusDirectorConfig(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) config.OrgDirectorConfig {
 	if !loaded {
 		return cfg.Director

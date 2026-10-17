@@ -529,7 +529,7 @@ func TestOrgDirector_MainWorktreeRalphTomlLoadError(t *testing.T) {
 	writeTestFile(t, mainToml, "[org]\nmax_orgs = 0\n")
 	for _, args := range [][]string{{"director", "attach", "--driver", "claude"}, {"director", "status"}} {
 		stdout, _, err := runOrgCmdStreams(t, args...)
-		if err == nil || !strings.Contains(err.Error(), "org: load [org.director].enabled and auto_merge from the main worktree's "+mainToml) ||
+		if err == nil || !strings.Contains(err.Error(), "org: load [org.director] from the main worktree's "+mainToml) ||
 			!strings.Contains(err.Error(), "[org].max_orgs must be >= 1, got 0") {
 			t.Errorf("%v error = %v; want the main worktree load error", args, err)
 		}
