@@ -84,6 +84,21 @@ const (
 	// count as running.
 	EventGatePassed = "gate_passed"
 	EventGateFailed = "gate_failed"
+	// EventPRMerged is an org-level, non-state event (SeatID empty, absent
+	// from stateEvents below) that only `ralph org merge` writes (Merge,
+	// merge_run.go): gh pr merge merged the PR of a branch ralph org
+	// merge-order listed as ready, and gh pr view read the PR back as MERGED.
+	// It is written once per merge, under the org of the branch's latest
+	// binding (else of its latest gate record), Details `branch=<branch>
+	// pr=<number> head=<the head the gate passed> method=<merge, squash or
+	// rebase> merge_commit=<sha, or unknown when gh gave none>
+	// auto_merge=<true|false>`. A refusal and a merge that failed record
+	// none. Roster skips it like every org-level event, so stop --all finds
+	// no seat in it; it makes no org count as running (RunningOrgs, which
+	// max_orgs counts) nor a target of disband --all (orgsToDisband), and the
+	// watch does not count it as leader activity (leaderActivityEventCount).
+	// ralph org merge-order does not read it.
+	EventPRMerged = "pr_merged"
 )
 
 // stateEvents are the event types that drive seat status derivation

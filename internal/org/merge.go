@@ -19,7 +19,9 @@ import (
 // docs/specs/2026-10-07-org-multi-org-director.md): it merges, with gh, the
 // PR of one branch ralph org merge-order lists as ready, once it has checked
 // everything the merge rests on. This file holds the checks (checkMerge, S3a
-// of the plan): they merge nothing, write nothing, and take no lock.
+// of the plan): they merge nothing, write nothing, and take no lock. The merge
+// itself is in merge_run.go (Merge, S3b): regate.lock, gh pr merge, the read
+// of the PR after it, and the record of pr_merged.
 //
 // The repository is origin's (D10): checkMerge reads its host and owner/repo
 // from `git remote get-url origin` and pins every gh call to it, with `-R
@@ -59,6 +61,10 @@ type MergeParams struct {
 	// `git remote get-url origin`, and EnforcementTimeout the whole of
 	// CheckMergeEnforcement. Zero or less means 30 s, 15 s and 20 s.
 	LsRemoteTimeout, GHTimeout, EnforcementTimeout time.Duration
+	// MergeTimeout bounds gh pr merge, which Merge runs once (merge_run.go);
+	// zero or less means 60 s. The gh calls after it are bounded by
+	// GHTimeout.
+	MergeTimeout time.Duration
 	// AutoMerge is [org.director].auto_merge, which the verb only reports
 	// (D1): the checks do not read it, and the verb merges whatever it is.
 	AutoMerge bool
@@ -109,11 +115,13 @@ type mergeCheck struct {
 	run                                      MergeOrderExec
 	lookPath                                 func(string) (string, error)
 	lsTimeout, ghTimeout, enforcementTimeout time.Duration
+	// mergeTimeout bounds gh pr merge (Merge).
+	mergeTimeout time.Duration
 }
 
 func newMergeCheck(p MergeParams) *mergeCheck {
 	m := &mergeCheck{branch: p.Branch, dir: p.Dir, run: p.Exec, lookPath: p.LookPath, lsTimeout: p.LsRemoteTimeout,
-		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout}
+		ghTimeout: p.GHTimeout, enforcementTimeout: p.EnforcementTimeout, mergeTimeout: p.MergeTimeout}
 	if m.run == nil {
 		m.run = realMergeOrderExec
 	}
@@ -128,6 +136,9 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 	}
 	if m.enforcementTimeout <= 0 {
 		m.enforcementTimeout = defaultMergeGuaranteeTimeout
+	}
+	if m.mergeTimeout <= 0 {
+		m.mergeTimeout = defaultMergeTimeout
 	}
 	return m
 }
