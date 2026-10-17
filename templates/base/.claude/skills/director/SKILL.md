@@ -510,8 +510,11 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   Code では Bash の `run_in_background` で走らせ、stdout と stderr を cwd の
   `.harness/state/merge-<名前>.out` に書き、終わってから終了コードと出力を
   読む。`<名前>` は regate と同じく、ブランチ名の `/` を `-` にしたもの
-  (`/` が残ると、ないディレクトリへの書き込みになって失敗する)。終わる
-  まで、merge-order も regate もほかの merge も打たない。
+  (`/` が残ると、ないディレクトリへの書き込みになって失敗する)。Codex でも
+  そのドライバの background の実行で同じように走らせる。background に
+  できなければ前景で打ち、ツールの timeout を、待ちの上限の 60 分に、その
+  あとの確かめと merge にかかる時間を足した長さにする。終わるまで、
+  merge-order も regate もほかの merge も打たない。
 
   ```sh
   ralph org merge --branch feat/auth-token --wait-checks 60m > .harness/state/merge-feat-auth-token.out 2>&1
@@ -524,8 +527,9 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 - `auto_merge = false` で人に頼まれた merge は、人が待つよう頼まない限り
   `--wait-checks` を付けずに打つ。前景で打ってよい。中の git と gh の
   呼び出しはどれも時間で区切られている。Claude Code では Bash のツールの
-  timeout を 10 分にする。待つよう頼まれたら、上と同じく `--wait-checks` を
-  付けて background で打つ。
+  timeout を 10 分にし、Codex でもコマンドを打つツールの timeout を 10 分に
+  する。待つよう頼まれたら、上と同じく `--wait-checks` を付けて background
+  で打つ。
 
 ### merge のあとの取り直し
 
