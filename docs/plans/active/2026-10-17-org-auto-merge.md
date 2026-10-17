@@ -188,7 +188,8 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S6 4a39e909(M1 の移動、L1〜L8)。M1 は消えた行と増えた行を突き合わせ、違いが L8 の doc の直しと新しいファイルの先頭だけと確かめた。merge のあとの読み直しと `--disable-auto` は `realMergeDetachedExec`(Setpgid、ctx が終わればグループごと kill)で打つ。`gh pr merge` と確かめは ralph のグループのまま。origin の host・owner・repo が `-` で始まれば merge だけが断る(merge-order は変えない)。mutation 7/7。tech-debt 238 行の `regateRemoteGit` の場所も直した
   - 2026-10-17(S7 の前): gh 2.102.0 のソース(`pkg/cmd/pr/checks/checks.go` の `populateStatusChecks`)で、検査が 0 件の PR の `gh pr checks --json` は JSON を出さず `no checks reported on the '<ブランチ>' branch` で終了コード 1 と確かめた。今の確かめはこれを gh の失敗として断り、D13 の 0 件の待ちに入らない。D7 に「その文を 0 件として読む」を足し、S7 の行、Test plan の edge case、Risks を直した。図の文は変わらない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
   - S7 e478e350(`--wait-checks`、gh の 0 件の文の読み取り、`/director` の background の打ち方、skill の 8 面、README・`AGENTS.md`・仕様・tech-debt)。待つかどうかは `mergeChecksKind`(5 値、`waits()` は Pending と Zero だけ)で決め、checkMerge は待つ種類の断りのときだけ PR の読み取り(r)を返す。そのため merge_test.go の拒否表の「pending」の行を「fail」に替え、pending は ReadsTheChecks の側で r の中身まで確かめる(テストは弱めていない)。範囲の検査は CLI(state dir を解決する前)と `Merge`(ロックとコマンドの前)の 2 か所。mutation 9/9
-- [ ] Review artifact created
+  - 2026-10-17: reviewer の再レビュー(S6・S7、report d93bdce1)で前回の M1・M2・L1〜L8 はすべて直ったと確かめ、新しい LOW 4 件(R1〜R4)を 97a1a062 で直した(lock の注の「whole run」3 か所、2 回目の待ちの開始行の丸め、実時間テストの回数を 1 回以上に、doc と名前の小さな直し、`mergeorder.go` の行数を tech-debt に)。self-review の直しなので cycle は 1 のまま
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
