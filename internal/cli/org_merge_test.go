@@ -38,7 +38,7 @@ const mergeCLIFakeGH = `#!/bin/sh
 printf 'GH_PROMPT_DISABLED=%s %s\n' "$GH_PROMPT_DISABLED" "$*" >> "$MERGE_CLI_GH_LOG"
 case "$*" in
 "pr list "*) reply=pr-list ;;
-"pr view "*" --json state,mergeCommit,autoMergeRequest") reply=pr-read-back ;;
+"pr view "*" --json state,headRefOid,mergeCommit,autoMergeRequest") reply=pr-read-back ;;
 "pr view "*) reply=pr-view ;;
 "pr checks "*) reply=pr-checks ;;
 "pr merge "*" --disable-auto "*) reply=pr-disable-auto ;;
@@ -125,7 +125,8 @@ func newMergeCLIFixture(t *testing.T, mainLedger bool) *mergeCLIFixture {
 		`{"strict_required_status_checks_policy":true,"required_status_checks":[{"context":"verify"}]}}]`)
 	fx.reply(t, "api-ruleset", `{"name":"protect main","current_user_can_bypass":"never"}`)
 	fx.reply(t, "repo-view", `{"viewerDefaultMergeMethod":"MERGE"}`)
-	fx.reply(t, "pr-read-back", `{"state":"MERGED","mergeCommit":{"oid":"`+mergeCLIMergeCommit+`"},"autoMergeRequest":null}`)
+	fx.reply(t, "pr-read-back", `{"state":"MERGED","headRefOid":"`+fx.head+`","mergeCommit":{"oid":"`+mergeCLIMergeCommit+
+		`"},"autoMergeRequest":null}`)
 	return fx
 }
 
@@ -326,7 +327,7 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 				}
 			}
 			if !slices.ContainsFunc(calls, func(c string) bool {
-				return strings.HasSuffix(c, "pr view 7 -R "+mergeCLIRepoArg+" --json state,mergeCommit,autoMergeRequest")
+				return strings.HasSuffix(c, "pr view 7 -R "+mergeCLIRepoArg+" --json state,headRefOid,mergeCommit,autoMergeRequest")
 			}) {
 				t.Errorf("no read-back of the PR after gh pr merge: %q", calls)
 			}
@@ -336,11 +337,12 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 }
 
 // AC7 and AC8 through the CLI: when the read-back finds the PR not MERGED,
-// the command exits 1 with Merge's Failed as the error and nothing on
-// stdout, and nothing is recorded: after a gh pr merge that failed (GitHub
-// refused a base that moved), with gh's last lines in the error; and after an
-// auto-merge request GitHub held instead, which is removed with
-// --disable-auto.
+// or MERGED at another head than the gate's, the command exits 1 with
+// Merge's Failed as the error and nothing on stdout (no MERGED: line), and
+// nothing is recorded: after a gh pr merge that failed (GitHub refused a base
+// that moved), with gh's last lines in the error; after an auto-merge request
+// GitHub held instead, which is removed with --disable-auto; and after a gh
+// pr merge that --match-head-commit failed while another head was merged.
 func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -358,6 +360,15 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 			fx.reply(t, "pr-read-back", `{"state":"OPEN","mergeCommit":null,"autoMergeRequest":{"enabledAt":"2026-10-17T00:00:00Z"}}`)
 		}, []string{"org: merge: gh pr merge 7 -R github.com/o/r exited 0 and did not merge PR #7, which is OPEN: GitHub held an " +
 			"auto-merge request for it instead, which ralph org merge removed (gh pr merge 7 --disable-auto -R github.com/o/r)"}, 2},
+		{"another head was merged", func(t *testing.T, fx *mergeCLIFixture) {
+			fx.fail(t, "pr-merge", 1, "GraphQL: Head branch was modified. Review and try the merge again.")
+			fx.reply(t, "pr-read-back", `{"state":"MERGED","headRefOid":"`+strings.Repeat("b", 40)+`","mergeCommit":{"oid":"`+
+				mergeCLIMergeCommit+`"},"autoMergeRequest":null}`)
+		}, []string{"org: merge: gh pr view 7 -R github.com/o/r read PR #7 back as MERGED after gh pr merge 7 -R github.com/o/r " +
+			"failed, but at the head bbbbbbbbbbbb, not ", ", the head the gate passed, so a head the gate did not pass was merged, " +
+			"and nothing was recorded: check that merge yourself (gh pr view 7 -R github.com/o/r --json state,headRefOid," +
+			"mergeCommit), run ralph org merge-order again, and go on with the other branches; gh said:\n  exit status 1: GraphQL: " +
+			"Head branch was modified. Review and try the merge again."}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMergeCLIFixture(t, false)
@@ -674,6 +685,10 @@ func TestOrgMerge_Help(t *testing.T) {
 			"Whatever that returned, merge reads the PR back once with gh pr view",
 			"prints MERGED: <PR url> (PR #<n> of <branch>), METHOD:, HEAD:, MERGE COMMIT: (unknown when gh gave none), AUTO MERGE:, PROTECTION:",
 			"is removed with gh pr merge <n> --disable-auto -R <repo>",
+			// The merged head (S8b, cross-review #3).
+			"When the PR is MERGED at the gate's head, merge records pr_merged",
+			"When the PR is MERGED at another head, or with no head read back (someone may have pushed a new head and merged it " +
+				"after the checks), merge records nothing, prints no MERGED: line, names the head merged on stderr, and exits 1.",
 			"When the PR merged but pr_merged cannot be recorded, merge prints the lines above and exits 1.",
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP)",
 			"The read-back and the removal run in a process group of their own, so a Ctrl-C or hangup the terminal sends does " +

@@ -86,19 +86,23 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"--match-head-commit <the gate's head> -R <repo> once, for up to 60 s,\n" +
 			"never with --auto, --admin, or --delete-branch, so GitHub merges only\n" +
 			"while the PR's head is the gate's. Whatever that returned, merge reads\n" +
-			"the PR back once with gh pr view. When the PR is MERGED, merge records\n" +
-			"pr_merged for the org in the ledger, prints MERGED: <PR url> (PR #<n> of\n" +
-			"<branch>), METHOD:, HEAD:, MERGE COMMIT: (unknown when gh gave none),\n" +
-			"AUTO MERGE:, PROTECTION: (the setting that keeps the merge up to date),\n" +
-			"and NOTE: when gh pr merge failed or timed out though the PR merged, and\n" +
-			"exits 0. When the PR is not MERGED, merge records nothing, says what\n" +
-			"happened on stderr with the end of gh pr merge's error when it failed,\n" +
-			"and exits 1; an auto-merge request GitHub holds instead of merging is\n" +
-			"removed with gh pr merge <n> --disable-auto -R <repo>, and when that\n" +
-			"fails, merge prints that command for you to run. When the read fails,\n" +
-			"whether the PR merged is unknown: merge records nothing, names the gh\n" +
-			"pr view that checks it, and exits 1. When the PR merged but pr_merged\n" +
-			"cannot be recorded, merge prints the lines above and exits 1.\n" +
+			"the PR back once with gh pr view. When the PR is MERGED at the gate's\n" +
+			"head, merge records pr_merged for the org in the ledger, prints MERGED:\n" +
+			"<PR url> (PR #<n> of <branch>), METHOD:, HEAD:, MERGE COMMIT: (unknown\n" +
+			"when gh gave none), AUTO MERGE:, PROTECTION: (the setting that keeps the\n" +
+			"merge up to date), and NOTE: when gh pr merge failed or timed out though\n" +
+			"the PR merged, and exits 0. When the PR is MERGED at another head, or\n" +
+			"with no head read back (someone may have pushed a new head and merged\n" +
+			"it after the checks), merge records nothing, prints no MERGED: line,\n" +
+			"names the head merged on stderr, and exits 1. When the PR is not MERGED,\n" +
+			"merge records nothing, says what happened on stderr with the end of gh\n" +
+			"pr merge's error when it failed, and exits 1; an auto-merge request\n" +
+			"GitHub holds instead of merging is removed with gh pr merge <n>\n" +
+			"--disable-auto -R <repo>, and when that fails, merge prints that command\n" +
+			"for you to run. When the read fails, whether the PR merged is unknown:\n" +
+			"merge records nothing, names the gh pr view that checks it, and exits 1.\n" +
+			"When the PR merged but pr_merged cannot be recorded, merge prints the\n" +
+			"lines above and exits 1.\n" +
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
@@ -125,8 +129,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"read-back and the removal run in a process group of their own, so a\n" +
 			"Ctrl-C or hangup the terminal sends does not stop them, and each is\n" +
 			"still bounded by gh's 15 s timeout. Exit codes: 0 for a merge that was\n" +
-			"recorded; 1 for a refusal, a merge that did not happen or is unknown, an\n" +
-			"interrupt, and any other error.\n" +
+			"recorded; 1 for a refusal, a merge that did not happen, is unknown, or is\n" +
+			"of another head than the gate's, an interrupt, and any other error.\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. While it runs, except while it waits for the checks,\n" +
@@ -191,7 +195,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 // printMergeResult prints res, what Merge returned with err, and returns the
 // command's error.
 //
-// When gh pr view read the PR back as MERGED (res.Merged), stdout gets these
+// When gh pr view read the PR back as MERGED at the gate's head (res.Merged;
+// a merge of another head is res.Failed, with no lines), stdout gets these
 // lines first, also when err is set (pr_merged could not be recorded, or an
 // interrupt came once gh pr merge had started):
 //

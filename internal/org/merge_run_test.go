@@ -95,15 +95,26 @@ func (e *mrExec) run(ctx context.Context, dir string, env []string, name string,
 	return r.out, r.err
 }
 
-// mrReadBack is a `gh pr view --json state,mergeCommit,autoMergeRequest`
-// answer; an empty oid is a null mergeCommit, and autoMerge is the
+// mrReadBack is a `gh pr view --json
+// state,headRefOid,mergeCommit,autoMergeRequest` answer whose head is the
+// gate's, moHeadA; an empty oid is a null mergeCommit, and autoMerge is the
 // autoMergeRequest as JSON.
 func mrReadBack(state, oid, autoMerge string) string {
+	return mrReadBackAt(state, moHeadA, oid, autoMerge)
+}
+
+// mrReadBackAt is mrReadBack with head as headRefOid, written as JSON
+// writes it, control characters included.
+func mrReadBackAt(state, head, oid, autoMerge string) string {
 	commit := "null"
 	if oid != "" {
 		commit = `{"oid":"` + oid + `"}`
 	}
-	return fmt.Sprintf(`{"autoMergeRequest":%s,"mergeCommit":%s,"state":%q}`, autoMerge, commit, state)
+	h, err := json.Marshal(head)
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf(`{"autoMergeRequest":%s,"headRefOid":%s,"mergeCommit":%s,"state":%q}`, autoMerge, h, commit, state)
 }
 
 // mrFixture is mxFixture with mrExec in front of its mxExec, which answers
@@ -254,7 +265,7 @@ func TestMerge_MergesWithTheMethodAndRecordsPRMerged(t *testing.T) {
 			}
 			for key, argv := range map[string][]string{
 				mrMerge:  {"gh", "pr", "merge", "7", tc.flag, "--match-head-commit", moHeadA, "-R", mxRepoArg},
-				mrReread: {"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,mergeCommit,autoMergeRequest"},
+				mrReread: {"gh", "pr", "view", "7", "-R", mxRepoArg, "--json", "state,headRefOid,mergeCommit,autoMergeRequest"},
 			} {
 				if c := fx.call(t, key); !slices.Equal(append([]string{c.name}, c.args...), argv) {
 					t.Errorf("%s = %q\nwant %q", key, append([]string{c.name}, c.args...), argv)
@@ -302,14 +313,14 @@ func TestMerge_NotMergedRecordsNothing(t *testing.T) {
 		", which checks the PR and the protection again"
 	unknown := func(why string) string {
 		return "org: merge: " + mrViewCmd + " " + why + " after " + mrMergeCmd + " exited 0, so whether PR #7 was merged is unknown " +
-			"and nothing was recorded: check it with " + mrViewCmd + " --json state,mergeCommit (ralph org merge-order lists the " +
-			"branch as merged once it is)"
+			"and nothing was recorded: check it with " + mrViewCmd + " --json state,headRefOid,mergeCommit (ralph org merge-order " +
+			"lists the branch as merged once it is)"
 	}
 	notMerged := func(state string) string {
 		return "org: merge: " + mrMergeCmd + " exited 0 but PR #7 is " + state + ", not merged, so nothing was recorded: check the " +
 			"PR with " + mrViewCmd + " and run ralph org merge-order again"
 	}
-	const notJSON = "printed output that is not the PR's JSON with state,mergeCommit,autoMergeRequest"
+	const notJSON = "printed output that is not the PR's JSON with state,headRefOid,mergeCommit,autoMergeRequest"
 	for _, tc := range []struct {
 		name            string
 		reread, disable mgReply
@@ -392,8 +403,8 @@ func TestMerge_ReadsThePRBackAfterAFailedMerge(t *testing.T) {
 			"", mrDisabled, false},
 		{"fails, the read-back fails", false, mgReply{err: errors.New("exit status 4: HTTP 401")}, "org: merge: " + mrViewCmd +
 			" failed (exit status 4: HTTP 401) after " + mrMergeCmd + " failed, so whether PR #7 was merged is unknown and nothing " +
-			"was recorded: check it with " + mrViewCmd + " --json state,mergeCommit (ralph org merge-order lists the branch as " +
-			"merged once it is)" + said, "", mrMerged, false},
+			"was recorded: check it with " + mrViewCmd + " --json state,headRefOid,mergeCommit (ralph org merge-order lists the " +
+			"branch as merged once it is)" + said, "", mrMerged, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMRFixture(t, nil)
@@ -420,6 +431,70 @@ func TestMerge_ReadsThePRBackAfterAFailedMerge(t *testing.T) {
 			if got := fx.appended(t); got != wantAppended {
 				t.Errorf("appended %q\nwant     %q", got, wantAppended)
 			}
+		})
+	}
+}
+
+// TestMerge_RecordsOnlyAMergeOfTheGatesHead covers D6, AC7 and AC8 for the
+// head the read-back gives (cross-review #3 of the plan): a PR read back as
+// MERGED at another head than the gate's, or with no head (empty or left
+// out), after gh pr merge failed (--match-head-commit refused it while
+// someone merged a new head) or exited 0, is Failed with Merged not set, so no
+// MERGED: line, and nothing recorded; the Failed names the head merged, how gh
+// pr merge ended with gh's tail, and the next steps. MERGED at the gate's head
+// is recorded as before.
+func TestMerge_RecordsOnlyAMergeOfTheGatesHead(t *testing.T) {
+	failure := errors.New("exit status 1: GraphQL: Head branch was modified. Review and try the merge again.")
+	const said = "; gh said:\n  exit status 1: GraphQL: Head branch was modified. Review and try the merge again."
+	next := ", and nothing was recorded: check that merge yourself (" + mrViewCmd + " --json state,headRefOid,mergeCommit), run " +
+		"ralph org merge-order again, and go on with the other branches"
+	otherHead := "but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged"
+	noHead := "but with no head, so whether the head the gate passed (aaaaaaaaaaaa) was merged is unknown"
+	for _, tc := range []struct {
+		name    string
+		merge   mgReply
+		reread  string
+		failed  string // "" for a recorded merge
+		records bool
+	}{
+		{"gh pr merge refused, another head merged", mgReply{err: failure}, mrReadBackAt("MERGED", moHeadB, mrOID, "null"),
+			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " failed, " + otherHead + next + said, false},
+		{"gh pr merge exited 0, another head merged", mgReply{}, mrReadBackAt("MERGED", moHeadB, mrOID, "null"),
+			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " exited 0, " + otherHead + next, false},
+		{"MERGED with an empty head", mgReply{}, mrReadBackAt("MERGED", "", mrOID, "null"),
+			"org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " exited 0, " + noHead + next, false},
+		{"MERGED with no headRefOid", mgReply{err: failure}, `{"autoMergeRequest":null,"mergeCommit":{"oid":"` + mrOID +
+			`"},"state":"MERGED"}`, "org: merge: " + mrViewCmd + " read PR #7 back as MERGED after " + mrMergeCmd + " failed, " +
+			noHead + next + said, false},
+		{"a head with control characters is escaped", mgReply{}, mrReadBackAt("MERGED", "b\x1b[2Jb", mrOID, "null"),
+			"org: merge: " + mrViewCmd + ` read PR #7 back as MERGED after ` + mrMergeCmd + ` exited 0, but at the head b\x1b[2Jb, ` +
+				"not aaaaaaaaaaaa, the head the gate passed, so a head the gate did not pass was merged" + next, false},
+		{"MERGED at the gate's head", mgReply{}, mrReadBack("MERGED", mrOID, "null"), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMRFixture(t, nil)
+			fx.ex.merge, fx.ex.reread = tc.merge, mgReply{out: tc.reread}
+			res, err := fx.merge(context.Background(), t, fx.params())
+			want := mrResult("merge")
+			want.Failed = tc.failed
+			if tc.records {
+				want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
+			}
+			if err != nil || res != want {
+				t.Fatalf("Merge = %+v, %v\nFailed %q\nwant   %q", res, err, res.Failed, tc.failed)
+			}
+			mrNoRawControl(t, res.Failed)
+			if got := fx.exec.keys(); !slices.Equal(got, mrMerged) {
+				t.Errorf("commands = %q\nwant %q", got, mrMerged)
+			}
+			wantAppended := ""
+			if tc.records {
+				wantAppended = mrRecord(t, "branch=feat/a pr=7 head="+moHeadA+" method=merge merge_commit="+mrOID+" auto_merge=false")
+			}
+			if got := fx.appended(t); got != wantAppended {
+				t.Errorf("appended %q\nwant     %q", got, wantAppended)
+			}
+			mrAssertLockFree(t, fx.mo.stateDir)
 		})
 	}
 }
@@ -476,6 +551,11 @@ func TestMerge_InterruptedOnceGHPRMergeStarted(t *testing.T) {
 			false},
 		{"the PR is open", mgReply{out: mrReadBack("OPEN", "", "null")}, mrMergeCmd + " failed and PR #7 is OPEN, not merged, so " +
 			"nothing was merged or recorded: run ralph org merge-order again and follow the branch's Detail" + said, mrMerged, false},
+		{"another head is merged", mgReply{out: mrReadBackAt("MERGED", moHeadB, mrOID, "null")}, mrViewCmd + " read PR #7 back " +
+			"as MERGED after " + mrMergeCmd + " failed, but at the head bbbbbbbbbbbb, not aaaaaaaaaaaa, the head the gate passed, so " +
+			"a head the gate did not pass was merged, and nothing was recorded: check that merge yourself (" + mrViewCmd +
+			" --json state,headRefOid,mergeCommit), run ralph org merge-order again, and go on with the other branches" + said,
+			mrMerged, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMRFixture(t, nil)

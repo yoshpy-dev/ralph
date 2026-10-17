@@ -20,7 +20,8 @@ import (
 // the gate passed, never with --auto, --admin, or --delete-branch (AC6); reads
 // the PR back whatever gh pr merge returned (D6, AC7, AC8); removes an
 // auto-merge request GitHub held for the PR instead of merging it; and
-// records the org-level pr_merged when the PR is MERGED (D4). Its gh calls run
+// records the org-level pr_merged when the PR is MERGED at the head the gate
+// passed (D4). Its gh calls run
 // through MergeOrderExec with GH_PROMPT_DISABLED=1, pinned to origin's
 // repository with -R, as checkMerge's are; the read-back and the removal run,
 // for the real commands, in a process group of their own (ghAfterStart).
@@ -30,8 +31,9 @@ const (
 	// zero or less.
 	defaultMergeTimeout = 60 * time.Second
 	// mergeReadBackFields are the fields Merge reads with gh pr view once gh
-	// pr merge returned (D6).
-	mergeReadBackFields = "state,mergeCommit,autoMergeRequest"
+	// pr merge returned (D6): headRefOid tells a merge of the gate's head
+	// from one of another head.
+	mergeReadBackFields = "state,headRefOid,mergeCommit,autoMergeRequest"
 	// mergeGHTailLines is how many of the last lines of gh pr merge's error a
 	// Failed or a Note quotes (mergeGHSaid).
 	mergeGHTailLines = 5
@@ -56,13 +58,15 @@ type MergeResult struct {
 	// merged or recorded, and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
-	// view read it back, or that read failed (D6): what happened, whether an
+	// view read it back, is MERGED at a head that is not the gate's or with no
+	// head read back, or that read failed (D6): what happened, whether an
 	// auto-merge request GitHub held was removed, and one next step, then the
 	// end of gh pr merge's error when it failed (mergeGHSaid). Nothing was
-	// recorded. The fields from Branch on are set; MergeCommit is empty.
+	// recorded, and Merged is false. The fields from Branch on are set;
+	// MergeCommit is empty.
 	Failed string
-	// Merged reports that gh pr view read the PR back as MERGED after gh pr
-	// merge, whatever gh pr merge returned.
+	// Merged reports that gh pr view read the PR back as MERGED at the gate's
+	// head after gh pr merge, whatever gh pr merge returned.
 	Merged bool
 	// Recorded reports that pr_merged was appended (D4). With Merged it is
 	// false only when the append failed, and Merge's error says so.
@@ -111,8 +115,13 @@ type MergeResult struct {
 // again (mergeWait, D13). It then runs gh pr merge once (mergeRun.merge) and,
 // whatever that returned, reads the PR back once (mergeRun.readBack, D6):
 //
-//   - MERGED: it appends pr_merged (recordMerge, D4) and sets Merged and
-//     Recorded; Note says how gh pr merge failed when it did;
+//   - MERGED at the gate's head: it appends pr_merged (recordMerge, D4) and
+//     sets Merged and Recorded; Note says how gh pr merge failed when it did;
+//   - MERGED at another head, or with no head read back: someone may have
+//     pushed and merged another head after the last check, a merge
+//     --match-head-commit keeps this gh pr merge from making, so it records
+//     nothing, Failed says which head was merged, and Merged stays false
+//     (otherHeadMerged);
 //   - not MERGED with an auto-merge request, which GitHub holds instead of
 //     merging a PR that cannot be merged yet: it removes the request with gh
 //     pr merge --disable-auto, and Failed says whether that worked;
@@ -264,9 +273,11 @@ func (run mergeRun) how(a mergeAttempt) string {
 // mergeReadBack is gh pr view's answer with mergeReadBackFields.
 // AutoMergeRequest is the JSON as gh printed it, as in ghPRView: null when the
 // PR has no auto-merge request, nil when the field is missing. MergeCommit is
-// nil when gh printed null.
+// nil when gh printed null. HeadRefOid is the PR's head, the one merged when
+// it is MERGED; "" when gh gave none.
 type mergeReadBack struct {
 	State       string `json:"state"`
+	HeadRefOid  string `json:"headRefOid"`
 	MergeCommit *struct {
 		OID string `json:"oid"`
 	} `json:"mergeCommit"`
@@ -320,8 +331,10 @@ func (o *Org) mergeAndRecord(ctx context.Context, run mergeRun, res MergeResult)
 	switch {
 	case unknown != "":
 		res.Failed = run.failed(fmt.Sprintf("%s %s after %s %s, so whether PR #%d was merged is unknown and nothing was "+
-			"recorded: check it with %s --json state,mergeCommit (ralph org merge-order lists the branch as merged once it is)",
-			run.viewCmd(), unknown, run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd()), a)
+			"recorded: check it with %s --json state,headRefOid,mergeCommit (ralph org merge-order lists the branch as merged "+
+			"once it is)", run.viewCmd(), unknown, run.mergeCmd(), run.how(a), run.r.prNumber, run.viewCmd()), a)
+	case back.State == "MERGED" && back.HeadRefOid != run.r.head:
+		res.Failed = run.otherHeadMerged(back.HeadRefOid, a)
 	case back.State == "MERGED":
 		res.Merged, res.MergeCommit = true, back.mergeCommit()
 		if a.err != nil {
@@ -361,6 +374,26 @@ func (run mergeRun) removeAutoMerge(ctx context.Context, state string, a mergeAt
 	return run.failed(fmt.Sprintf("%s %s and did not merge PR #%d, which is %s: GitHub held an auto-merge request for it "+
 		"instead, which ralph org merge removed (%s), so nothing was merged or recorded: %s, which checks the PR and the "+
 		"protection again", run.mergeCmd(), run.how(a), run.r.prNumber, state, run.disableCmd(), run.m.again()), a)
+}
+
+// otherHeadMerged is the Failed of a PR gh pr view read back as MERGED, after
+// gh pr merge (a), at head, which is not the gate's, or with no head (head
+// empty): someone may have pushed a new head after the last check and merged
+// it, which --match-head-commit keeps this gh pr merge from doing (D6,
+// cross-review #3 of the plan). The merge is not recorded, since pr_merged
+// would say the gate's head was merged, and it is not reported as one: the
+// Failed names the head merged and says to check it and go on with the other
+// branches.
+func (run mergeRun) otherHeadMerged(head string, a mergeAttempt) string {
+	merged := fmt.Sprintf("at the head %s, not %s, the head the gate passed, so a head the gate did not pass was merged",
+		shortMergeSHA(head), shortMergeSHA(run.r.head))
+	if head == "" {
+		merged = fmt.Sprintf("with no head, so whether the head the gate passed (%s) was merged is unknown",
+			shortMergeSHA(run.r.head))
+	}
+	return run.failed(fmt.Sprintf("%s read PR #%d back as MERGED after %s %s, but %s, and nothing was recorded: check that "+
+		"merge yourself (%s --json state,headRefOid,mergeCommit), run ralph org merge-order again, and go on with the other "+
+		"branches", run.viewCmd(), run.r.prNumber, run.mergeCmd(), run.how(a), merged, run.viewCmd()), a)
 }
 
 // failed is a Failed: mergePrefix and text, escaped (PrintableInboxText),
