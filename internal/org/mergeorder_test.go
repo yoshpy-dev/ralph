@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1907,6 +1908,217 @@ func TestMergeOrder_GHLimitFullOfForksLeavesThePROut(t *testing.T) {
 	})
 }
 
+// moLookupFixture is one branch feat/<name> per name, each bound to its own
+// org and gated on origin's tips, so each is ready on origin's evidence, with
+// origin's URL origin.
+func moLookupFixture(t *testing.T, origin string, names ...string) *moFixture {
+	t.Helper()
+	fx := newMOFixture(t)
+	pairs := []string{"main", moMain}
+	for _, n := range names {
+		fx.add(t, moBind("org-"+n, n), moPassed("org-"+n, "feat/"+n, moHeadA, moMain))
+		pairs = append(pairs, "feat/"+n, moHeadA)
+	}
+	fx.exec.lsOut = moListing("main", pairs...)
+	fx.exec.origin = origin
+	return fx
+}
+
+// moLookups is each entry of res as its branch and its PRLookup.
+func moLookups(res MergeOrderResult) map[string]string {
+	out := make(map[string]string)
+	for _, e := range res.Entries {
+		out[e.Branch] = e.PRLookup
+	}
+	return out
+}
+
+// TestMergeOrder_PRLookupTellsWhatGHGaveForEachBranch covers AC1 of plan
+// docs/plans/active/2026-10-17-org-auto-merge.md (D9): in one run, each
+// entry's pr_lookup is what gh gave for its own branch: found for a PR of
+// origin's repository, which is the entry's PR; none for no PR and for only
+// fork PRs, fewer than the limit; limit_forks for the limit of fork PRs; and
+// failed for a gh that exits non-zero, times out, or prints something that
+// is not a PR list. Only a found entry has a PR, every entry is still ready,
+// and the JSON carries the value as pr_lookup.
+func TestMergeOrder_PRLookupTellsWhatGHGaveForEachBranch(t *testing.T) {
+	fx := moLookupFixture(t, "git@github.com:acme/app.git", "found", "none", "forks", "limit", "failed", "timeout", "junk")
+	fx.exec.setPR("feat/found", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+	fx.exec.setPR("feat/forks", moPRs(moForkPRs(100, 3)...))
+	fx.exec.setPR("feat/limit", moPRs(moForkPRs(100, mergeOrderGHLimit)...))
+	fx.exec.ghErr = map[string]error{"feat/failed": errors.New("exit status 1: HTTP 401: Bad credentials")}
+	fx.exec.ghBlock = map[string]bool{"feat/timeout": true}
+	fx.exec.setPR("feat/junk", "not json")
+	p := fx.params(false)
+	p.GHTimeout = 20 * time.Millisecond
+	res, err := fx.o.MergeOrder(context.Background(), p)
+	if err != nil {
+		t.Fatalf("MergeOrder: %v", err)
+	}
+	want := map[string]string{
+		"feat/found": MergeOrderPRLookupFound, "feat/none": MergeOrderPRLookupNone, "feat/forks": MergeOrderPRLookupNone,
+		"feat/limit": MergeOrderPRLookupLimitForks, "feat/failed": MergeOrderPRLookupFailed, "feat/timeout": MergeOrderPRLookupFailed,
+		"feat/junk": MergeOrderPRLookupFailed,
+	}
+	if got := moLookups(res); !maps.Equal(got, want) {
+		t.Fatalf("pr_lookup = %v,\nwant %v", got, want)
+	}
+	for _, e := range res.Entries {
+		if e.Class != MergeClassReady {
+			t.Errorf("%s = %s, want ready: pr_lookup changes no class", e.Branch, e.Class)
+		}
+		if (e.PRLookup == MergeOrderPRLookupFound) != (e.PR != nil) {
+			t.Errorf("%s: PR %+v with pr_lookup %s, want a PR exactly when found", e.Branch, e.PR, e.PRLookup)
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w := `"pr_lookup":"` + want[e.Branch] + `"`; !strings.Contains(string(b), w) {
+			t.Errorf("%s marshals as %s, want %s", e.Branch, b, w)
+		}
+	}
+	if e := moEntry(t, res, "feat/found"); e.PR == nil || e.PR.Number != 7 {
+		t.Errorf("feat/found PR = %+v, want #7", e.PR)
+	}
+	if !res.GHAvailable {
+		t.Errorf("GHAvailable = false, want true")
+	}
+}
+
+// TestMergeOrder_PRLookupFoundForALocalPathOrigin: an origin that is a local
+// path names no repository to check gh's PRs against, so a PR gh returns is
+// used as it is, one whose url names another repository or none included,
+// and is found; a branch with no PR is none.
+func TestMergeOrder_PRLookupFoundForALocalPathOrigin(t *testing.T) {
+	unparsable := moPR(8, "OPEN", "main")
+	unparsable.URL = "https://example.test/pull/8"
+	fx := moLookupFixture(t, "/srv/git/app.git", "a", "b", "c")
+	fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "main", "upstream-org", "app")))
+	fx.exec.setPR("feat/b", moPRs(unparsable))
+	res := fx.run(t, false)
+	want := map[string]string{"feat/a": MergeOrderPRLookupFound, "feat/b": MergeOrderPRLookupFound, "feat/c": MergeOrderPRLookupNone}
+	if got := moLookups(res); !maps.Equal(got, want) {
+		t.Fatalf("pr_lookup = %v, want %v", got, want)
+	}
+	if a, b := moEntry(t, res, "feat/a"), moEntry(t, res, "feat/b"); a.PR == nil || a.PR.Number != 7 || b.PR == nil || b.PR.Number != 8 {
+		t.Errorf("PRs = %+v and %+v, want #7 and #8 as gh returned them", a.PR, b.PR)
+	}
+}
+
+// TestMergeOrder_PRLookupIsSkippedForEveryBranchWhenNoGHAnswerIsUsed covers
+// AC1's skipped: with gh not found, and when a PR's repository is another
+// than origin's or cannot be checked (its url names none, or `git remote
+// get-url origin` fails), every entry is skipped with no PR: a branch gh
+// answered for before, found, failed or none, and the branches gh was never
+// asked about. A gh that goes missing after it answered for one branch
+// leaves that branch's PR out too.
+func TestMergeOrder_PRLookupIsSkippedForEveryBranchWhenNoGHAnswerIsUsed(t *testing.T) {
+	unparsable := moPR(9, "OPEN", "main")
+	unparsable.URL = "https://github.example.com/pull/9"
+	for _, tc := range []struct {
+		name string
+		// setup sets fx's exec up and returns the exec MergeOrder runs
+		// through instead of it, nil for fx's own.
+		setup   func(fx *moFixture) MergeOrderExec
+		ghCalls []string
+		gh      bool // GHAvailable
+	}{
+		{"gh is not found", func(fx *moFixture) MergeOrderExec {
+			fx.exec.ghMissing = true
+			return nil
+		}, []string{"feat/a"}, false},
+		{"gh goes missing after it answered for one branch", func(fx *moFixture) MergeOrderExec {
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+			answered := false
+			return func(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
+				out, err := fx.exec.run(ctx, dir, env, name, args...)
+				switch {
+				case name != "gh":
+					return out, err
+				case answered:
+					return "", &exec.Error{Name: "gh", Err: exec.ErrNotFound}
+				}
+				answered = true
+				return out, err
+			}
+		}, []string{"feat/a", "feat/b"}, false},
+		{"gh reads another repository after a failure, a found PR and none", func(fx *moFixture) MergeOrderExec {
+			fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+			fx.exec.setPR("feat/b", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+			fx.exec.setPR("feat/d", moPRs(moRepoPR(8, "MERGED", "main", "upstream-org", "app")))
+			return nil
+		}, []string{"feat/a", "feat/b", "feat/c", "feat/d"}, true},
+		{"a PR url that names no repository", func(fx *moFixture) MergeOrderExec {
+			fx.exec.setPR("feat/a", moPRs(unparsable))
+			return nil
+		}, []string{"feat/a"}, true},
+		{"git remote get-url origin fails", func(fx *moFixture) MergeOrderExec {
+			fx.exec.originErr = errors.New("exit status 2: error: No such remote 'origin'")
+			fx.exec.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+			return nil
+		}, []string{"feat/a"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := moLookupFixture(t, "git@github.com:acme/app.git", "a", "b", "c", "d", "e")
+			p := fx.params(false)
+			if run := tc.setup(fx); run != nil {
+				p.Exec = run
+			}
+			res, err := fx.o.MergeOrder(context.Background(), p)
+			if err != nil {
+				t.Fatalf("MergeOrder: %v", err)
+			}
+			if len(res.Entries) != 5 {
+				t.Fatalf("entries = %+v, want all five", res.Entries)
+			}
+			for _, e := range res.Entries {
+				if e.PRLookup != MergeOrderPRLookupSkipped || e.PR != nil || e.Class != MergeClassReady {
+					t.Errorf("%s = %s with PR %+v, pr_lookup %q; want ready, skipped, no PR", e.Branch, e.Class, e.PR, e.PRLookup)
+				}
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, tc.ghCalls) {
+				t.Errorf("gh asked about %q, want %q", got, tc.ghCalls)
+			}
+			if res.GHAvailable != tc.gh {
+				t.Errorf("GHAvailable = %v, want %v", res.GHAvailable, tc.gh)
+			}
+		})
+	}
+}
+
+// TestMergeOrder_PRLookupWithARepoPassesDashR: lookupMergePR adds `-R
+// <repo>` after merge-order's own arguments when repo is not empty, so gh
+// reads that repository, and adds nothing for "", which merge-order passes
+// (TestMergeOrder_RunsGitAndGHWithTheirArgsDirAndEnv pins its calls). The PR
+// is read the same either way.
+func TestMergeOrder_PRLookupWithARepoPassesDashR(t *testing.T) {
+	own := []string{"pr", "list", "--head", "feat/a", "--state", "all", "--limit", "1000", "--json",
+		"number,state,url,headRefOid,baseRefName,isCrossRepository"}
+	for _, tc := range []struct {
+		repo string
+		want []string
+	}{
+		{"", own},
+		{"github.com/acme/app", append(slices.Clone(own), "-R", "github.com/acme/app")},
+		{"ghe.example.com/team/app", append(slices.Clone(own), "-R", "ghe.example.com/team/app")},
+	} {
+		t.Run(cmp.Or(tc.repo, "no repo"), func(t *testing.T) {
+			e := &moExec{}
+			e.setPR("feat/a", moPRs(moRepoPR(7, "OPEN", "main", "acme", "app")))
+			pr, limitFull, err := lookupMergePR(context.Background(), "/repo", e.run, time.Second, tc.repo, "feat/a")
+			if err != nil || limitFull || pr == nil || pr.Number != 7 {
+				t.Fatalf("lookupMergePR = %+v, %v, %v; want PR #7", pr, limitFull, err)
+			}
+			calls := e.callsOf("gh")
+			if len(calls) != 1 || !slices.Equal(calls[0].args, tc.want) || calls[0].dir != "/repo" ||
+				!slices.Equal(calls[0].env, []string{"GH_PROMPT_DISABLED=1"}) {
+				t.Fatalf("gh calls = %+v, want one %q in /repo with GH_PROMPT_DISABLED=1", calls, tc.want)
+			}
+		})
+	}
+}
+
 // TestMergeOrder_ReadsTheLsRemoteListing covers the ls-remote half of C7:
 // branch names with several slashes, a branch called HEAD
 // (refs/heads/HEAD, which the pattern HEAD matches too) that is not taken
@@ -2331,8 +2543,9 @@ func moSnapshot(t *testing.T, root string) []string {
 }
 
 // TestMergeOrder_ResultJSONShape: the result marshals with snake_case keys,
-// empty lists as [] and the absent PR, gate and binding left out, and the
-// merge guarantee as an object, so the CLI can print it as it is for --json.
+// empty lists as [] and the absent PR, gate and binding left out, pr_lookup
+// in every entry, with or without a PR, and the merge guarantee as an object,
+// so the CLI can print it as it is for --json.
 func TestMergeOrder_ResultJSONShape(t *testing.T) {
 	fx := newMOFixture(t)
 	fx.add(t, moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain), moPassed("org-x", "feat/x", moHeadA, moMain))
@@ -2375,14 +2588,19 @@ func TestMergeOrder_ResultJSONShape(t *testing.T) {
 		{"result", keys(got.Top), []string{"default_branch", "default_head", "entries", "gh_available", "listed_at",
 			"merge_guarantee", "notes"}},
 		{"merge guarantee without a cache", keys(sub(got.Top["merge_guarantee"])), []string{"detail", "kind", "reason"}},
-		{"full entry", keys(got.Entries[0]), []string{"binding", "branch", "class", "detail", "gate", "pr", "rank", "remote_head"}},
+		{"full entry", keys(got.Entries[0]), []string{"binding", "branch", "class", "detail", "gate", "pr", "pr_lookup", "rank", "remote_head"}},
 		{"pr", keys(sub(got.Entries[0]["pr"])), []string{"base_ref_name", "head_ref_oid", "number", "state", "url"}},
 		{"gate", keys(sub(got.Entries[0]["gate"])), []string{"base", "base_ref", "event", "head", "readable", "reason", "ts"}},
 		{"binding", keys(sub(got.Entries[0]["binding"])), []string{"feature", "org_id", "split", "ts"}},
-		{"entry without a PR or binding", keys(got.Entries[1]), []string{"branch", "class", "detail", "gate", "rank", "remote_head"}},
+		{"entry without a PR or binding", keys(got.Entries[1]), []string{"branch", "class", "detail", "gate", "pr_lookup", "rank", "remote_head"}},
 	} {
 		if !slices.Equal(tc.got, tc.want) {
 			t.Errorf("%s keys = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+	for i, want := range []string{`"found"`, `"none"`} {
+		if got := string(got.Entries[i]["pr_lookup"]); got != want {
+			t.Errorf("entry %d pr_lookup = %s, want %s", i, got, want)
 		}
 	}
 

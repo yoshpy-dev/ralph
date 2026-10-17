@@ -843,6 +843,97 @@ func TestOrgMergeOrder_PRFromAnotherRepositoryThanOriginsIsLeftOut(t *testing.T)
 	}
 }
 
+// mergeOrderJSONLookups reads merge-order's --json output raw and returns
+// each entry's pr_lookup by its branch, failing the test when an entry has
+// no pr_lookup key.
+func mergeOrderJSONLookups(t *testing.T, raw string) map[string]string {
+	t.Helper()
+	var out struct {
+		Entries []map[string]json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatal(err)
+	}
+	lookups := make(map[string]string)
+	for _, e := range out.Entries {
+		var branch, lookup string
+		if err := json.Unmarshal(e["branch"], &branch); err != nil {
+			t.Fatalf("entry %s: branch: %v", e, err)
+		}
+		if _, ok := e["pr_lookup"]; !ok {
+			t.Fatalf("entry %s has no pr_lookup key", e)
+		}
+		if err := json.Unmarshal(e["pr_lookup"], &lookup); err != nil {
+			t.Fatalf("entry %s: pr_lookup: %v", e, err)
+		}
+		lookups[branch] = lookup
+	}
+	return lookups
+}
+
+// AC1 of plan docs/plans/active/2026-10-17-org-auto-merge.md through the CLI:
+// every --json entry has pr_lookup, what gh gave for its branch. With the
+// fake gh, feat/a, whose PR it prints, is found, feat/b, for which it prints
+// [], is none, and feat/c, for which it prints something that is not JSON, is
+// failed; the text of the same ledger is the table it was, with no
+// pr_lookup. With no gh on PATH, every entry is skipped.
+func TestOrgMergeOrder_JSONEntriesTellWhatGHsPRLookupGave(t *testing.T) {
+	t.Run("with the fake gh", func(t *testing.T) {
+		fx := newMergeOrderFixture(t, true)
+		main := fx.tip(t, "main")
+		heads := make(map[string]string)
+		for _, b := range []string{"a", "b", "c"} {
+			heads[b] = fx.branch(t, "feat/"+b)
+			fx.push(t, "feat/"+b)
+			fx.bind(t, b, b, "feat/"+b)
+			fx.gate(t, b, "feat/"+b, "", heads[b], main)
+		}
+		fx.prs(t, "feat/a", mergeOrderGHPR{Number: 3, State: "OPEN", URL: "https://example.test/pull/3", HeadRefOid: heads["a"], BaseRefName: "main"})
+		writeTestFile(t, filepath.Join(fx.ghPRs, "feat", "c.json"), "not json\n")
+
+		res, raw := fx.runJSON(t)
+		want := map[string]string{"feat/a": org.MergeOrderPRLookupFound, "feat/b": org.MergeOrderPRLookupNone, "feat/c": org.MergeOrderPRLookupFailed}
+		if got := mergeOrderJSONLookups(t, raw); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("--json pr_lookup = %v; want %v\n%s", got, want, raw)
+		}
+		for _, e := range res.Entries {
+			if e.PRLookup != want[e.Branch] || (e.PR != nil) != (e.Branch == "feat/a") {
+				t.Errorf("entry %s: pr_lookup %q, PR %+v; want %q with a PR only for feat/a", e.Branch, e.PRLookup, e.PR, want[e.Branch])
+			}
+		}
+
+		stdout, stderr, err := fx.run(t)
+		if err != nil || stderr != "" {
+			t.Fatalf("merge-order: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+		}
+		out := parseMergeOrderText(t, stdout)
+		checkMergeOrderRows(t, out.rows, []mergeOrderRow{
+			{"ready", "feat/a", "#3 https://example.test/pull/3", short(heads["a"]), short(main), "a/a", "the gate passed"},
+			{"ready", "feat/b", "-", short(heads["b"]), short(main), "b/b", "the gate passed"},
+			{"ready", "feat/c", "-", short(heads["c"]), short(main), "c/c", "the gate passed"},
+		})
+		if len(out.notes) != 3 || !strings.HasPrefix(out.notes[0], "gh pr list --head feat/c failed (its output is not a JSON list of PRs") {
+			t.Errorf("notes = %q; want the gh failure for feat/c, the ready note and the as-of note", out.notes)
+		}
+		if strings.Contains(stdout, "pr_lookup") {
+			t.Errorf("the text shows pr_lookup:\n%s", stdout)
+		}
+	})
+
+	t.Run("with no gh", func(t *testing.T) {
+		fx := newMergeOrderFixture(t, false)
+		seedReadyMergeOrderBranch(t, fx)
+		res, raw := fx.runJSON(t)
+		want := map[string]string{"feat/a": org.MergeOrderPRLookupSkipped}
+		if got := mergeOrderJSONLookups(t, raw); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("--json pr_lookup = %v; want %v\n%s", got, want, raw)
+		}
+		if res.GHAvailable || len(res.Entries) != 1 || res.Entries[0].PR != nil {
+			t.Errorf("gh_available %v, entries %+v; want no gh and feat/a with no PR", res.GHAvailable, res.Entries)
+		}
+	})
+}
+
 // AC7: when the ls-remote cannot tell origin's state, merge-order classifies
 // nothing, prints nothing on stdout, runs no gh, and exits 1 with the reason:
 // with no origin remote, git's own message; with origin's HEAD naming a
