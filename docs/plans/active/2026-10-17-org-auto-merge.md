@@ -167,6 +167,10 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S4 に回すもの: `internal/cli/org.go` の `--config` の usage と `internal/cli/org_director.go` の group help が `[org.director].enabled` だけを名指す(auto_merge も読む)。S5 に回すもの: `docs/tech-debt/README.md` の `statusDirectorEnabled`(`statusDirectorConfig` に改名した)
   - S3a acc81fef(merge の前の 13 段の確かめと `CheckMergeEnforcement`)。GraphQL の変数は `-F` でなく `-f`(`-F` は true や数や `@` で始まる値を読み替える)
   - 2026-10-17(S3b の前): D6・AC7・AC8 を「`gh pr merge` の終了コードによらず読み直し、MERGED なら記録する」に改め、D2 の `gh repo view` の形を直し、S3b を `merge_run.go` に分けた。図 1 と図 2 を直して撮り直し、digest を取り直して承認し直した
+  - S3b df8958a5(`Merge`、`pr_merged`、読み直しと予約の外しと記録、中断)。mutation 22/22。テスト用の `mergeTestHooks.afterChecks` を足した(確かめのあとの中断を起こすため)。merge_commit は git の SHA の形のときだけ使い、ほかは unknown
+  - S4 に足すもの: `internal/org/lockfile.go` の `heldFileLock` の注(regate.lock を握るのは regate だけと書いている)、`internal/org/seat.go` の package doc(gh を打つのは mergeorder.go だけと書いている。merge.go と merge_run.go も打つ)
+  - S5 の tech-debt に足すもの: `mergeLsRemoteRefusal` と `mergeGHSaid` が merge-order の文言と `realMergeOrderExec` の err の形(`<exit err>: <stderr>`)に頼る。`merge_test.go`(835 行)と `merge_run_test.go`(842 行)が 800 行の目安を少し超える。検査が 0 件の PR で `gh pr checks` が実際に何を出すかは確かめていない(Risks の行のまま)
+  - S4 e7624d79(CLI の `ralph org merge`、`RALPH_ORG_DIRECTOR_AUTO_MERGE` の 2 面、regate の拒否の文言、lockfile・seat・spawn・regate の注)。mutation 16/16。fake gh はシェルスクリプトで、Go 側に差し込み口は足していない。結果が何も立たないときもエラーにし、exit 0 は「merge して記録した」だけになる
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
