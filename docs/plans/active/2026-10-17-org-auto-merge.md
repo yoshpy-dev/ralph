@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-17 sha256:abefab9fdedd
+- Approved: 2026-10-18 sha256:76d09b87e280
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -101,19 +101,19 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 
 ## Acceptance criteria
 
-- [ ] AC1 merge-order の `--json` の entry に `pr_lookup` があり、gh の結果ごとに `found`・`none`・`failed`・`limit_forks`・`skipped` になる。gh がないときと、ほかの repository を読んで PR を捨てたときは、すべての entry が `skipped`。text の出力は変わらない
-- [ ] AC2 `[org.director].auto_merge` は既定 false で、`true` を読める。真偽値でない値は設定の検証エラー。台帳が main worktree のものなら、feature worktree の `ralph.toml` ではなく main worktree の `ralph.toml` から読む。`ralph status` の `director:` の行と `--json`、`ralph org director status` に値が出る
-- [ ] AC3 `ralph org merge --branch <b>` は次のどれでも、`gh pr merge` を打たず、何も記録せず、理由と次の手を出して終了コード 1 で終わる: ブランチの名指しがない、`--org-id` を渡した、ブランチが台帳にない、merge-order の class が `ready` でない(class と Detail を出す)、`pr_lookup` が `found` でない、PR が OPEN でない、PR の head が gate の head と違う、PR の base が既定のブランチでない、結びつきの org が走っている、PR に auto-merge の予約がある、検査が待っているか落ちたか取り消されたか 0 件、merge の方式が読めないか知らない値、ほかの regate か merge が台帳のロックを持っている、merge の直前の ls-remote で既定のブランチかブランチの先頭が動いた
-- [ ] AC4 対象の repository: origin の URL が host と owner/repo を持たなければ断る。動詞が打つ gh はすべて `-R <host>/<owner>/<repo>`(`gh api` は `--hostname <host>`)を持つ。PR の url の host か owner/repo が origin と違えば断る(同じ owner/repo で host が違う場合を含む)
-- [ ] AC5 保護: 次のどれでも断る(AC3 と同じ終わり方): merge queue がある(GraphQL か rules のどちらかが示す)、queue の有無が読めない、up-to-date の rule がない(`pr_checks_only` にあたる)、up-to-date の rule が自前の required check を持たない、ruleset の `current_user_can_bypass` が `never` でない、classic の strict の保護で打つ本人が admin で `enforce_admins` が無効、保護のどれかが読めない。進む 2 つの場合(ruleset の never、classic の非 admin か enforce_admins)は通る。doctor の Merge guarantee の判定とキャッシュの形は変わらない(既存のテストが通る)
-- [ ] AC6 通る道: `gh pr merge <番号> <方式の flag> --match-head-commit <gate の head> -R <repo>` を 1 回打ち、`--auto`・`--admin`・`--delete-branch` を付けない。PR が MERGED になれば `pr_merged`(D4 の Details)を書き、`MERGED:`(PR の url)、`METHOD:`、`HEAD:`、`MERGE COMMIT:`、`AUTO MERGE:`、`PROTECTION:`(D11 で進んだ理由)の行を出して終了コード 0
-- [ ] AC7 merge のあと、読み直しで MERGED でないとき(D6): 予約があれば `--disable-auto` を打って終了コード 1、外す gh が落ちたら外すコマンドを出して終了コード 1、予約がなければ終了コード 1、読み直しが落ちたら確かめるコマンドを出して終了コード 1。どれも記録しない。merge の呼び出しのあとの中断でも、読み直しと外し(MERGED なら記録)を 1 回打ち、終了コード 1
-- [ ] AC8 `gh pr merge` が落ちたか時間切れでも、読み直しを 1 回打つ。MERGED でなければ(最後の確かめのあとに base が進み、GitHub が断った場合を含む。偽の gh で試す)、gh の stderr の末尾を出し、何も記録せずに終了コード 1。MERGED なら記録し、gh の stderr の末尾を注として出して終了コード 0。読み直しが MERGED を返したあとに記録が落ちたら、merge したことと記録できなかったことを言って終了コード 1
-- [ ] AC9 `pr_merged` は、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない。`ralph org report` の時系列の表に出る
-- [ ] AC10 merge が `regate.lock` を持つ間は regate が断られ、regate が持つ間は merge が断られる。merge の間も同じ org_id の Spawn は断られない
-- [ ] AC11 `/director` skill: auto_merge が false なら、merge も regate も人に頼まれたときだけ打ち、merge は `ralph org merge` で打つ。true なら、merge-order の先頭の `ready` を `ralph org merge`(`--wait-checks 60m` を付けて background で打ち、終わってから出力を読む)で 1 本 merge し、merge-order を打ち直し、regate を名指すブランチに 1 本ずつ regate を打ち、`ready` に戻れば merge する。どちらでも `gh pr merge` を直接打たず、動詞の断りと失敗はそこで止めて人に伝え、打ち直さない。この文を Go のテストが pin する
-- [ ] AC13 `--wait-checks <d>`(D13): 確かめが検査待ちか 0 件で断るときだけ、何も記録せずにロックを外し、30 秒ごとに `gh pr checks` だけを読む。待っている検査がなくなるか、gh が落ちるか、時間が切れたら、ロックを取り直して確かめを最初から打つ。fail・cancel・skipping だけの断りと、ほかのすべての断りでは待たない。時間が切れたあとの確かめがまだ検査待ちか 0 件なら、待った時間を添えた断りで終了コード 1。待つ間の中断は何も merge せず終了コード 1。待つ間は regate.lock を持たない(regate が走れる)。`0` と省略は今の動き、負の値と 6 時間を超える値は gh を打つ前に断る。help と skill がこれを書く
-- [ ] AC12 文書: `/org` skill の動詞リファレンス、仕様 FR-8 の注、README、`AGENTS.md`、quality-gates の 2 面、tech-debt(237、238、240、242 行)、`templates/base/ralph.toml`、CLI の help が、動詞と設定と `pr_lookup` と保護の条件を書く
+- [x] AC1 merge-order の `--json` の entry に `pr_lookup` があり、gh の結果ごとに `found`・`none`・`failed`・`limit_forks`・`skipped` になる。gh がないときと、ほかの repository を読んで PR を捨てたときは、すべての entry が `skipped`。text の出力は変わらない
+- [x] AC2 `[org.director].auto_merge` は既定 false で、`true` を読める。真偽値でない値は設定の検証エラー。台帳が main worktree のものなら、feature worktree の `ralph.toml` ではなく main worktree の `ralph.toml` から読む。`ralph status` の `director:` の行と `--json`、`ralph org director status` に値が出る
+- [x] AC3 `ralph org merge --branch <b>` は次のどれでも、`gh pr merge` を打たず、何も記録せず、理由と次の手を出して終了コード 1 で終わる: ブランチの名指しがない、`--org-id` を渡した、ブランチが台帳にない、merge-order の class が `ready` でない(class と Detail を出す)、`pr_lookup` が `found` でない、PR が OPEN でない、PR の head が gate の head と違う、PR の base が既定のブランチでない、結びつきの org が走っている、PR に auto-merge の予約がある、検査が待っているか落ちたか取り消されたか 0 件、merge の方式が読めないか知らない値、ほかの regate か merge が台帳のロックを持っている、merge の直前の ls-remote で既定のブランチかブランチの先頭が動いた
+- [x] AC4 対象の repository: origin の URL が host と owner/repo を持たなければ断る。動詞が打つ gh はすべて `-R <host>/<owner>/<repo>`(`gh api` は `--hostname <host>`)を持つ。PR の url の host か owner/repo が origin と違えば断る(同じ owner/repo で host が違う場合を含む)
+- [x] AC5 保護: 次のどれでも断る(AC3 と同じ終わり方): merge queue がある(GraphQL か rules のどちらかが示す)、queue の有無が読めない、up-to-date の rule がない(`pr_checks_only` にあたる)、up-to-date の rule が自前の required check を持たない、ruleset の `current_user_can_bypass` が `never` でない、classic の strict の保護で打つ本人が admin で `enforce_admins` が無効、保護のどれかが読めない。進む 2 つの場合(ruleset の never、classic の非 admin か enforce_admins)は通る。doctor の Merge guarantee の判定とキャッシュの形は変わらない(既存のテストが通る)
+- [x] AC6 通る道: `gh pr merge <番号> <方式の flag> --match-head-commit <gate の head> -R <repo>` を 1 回打ち、`--auto`・`--admin`・`--delete-branch` を付けない。PR が MERGED になれば `pr_merged`(D4 の Details)を書き、`MERGED:`(PR の url)、`METHOD:`、`HEAD:`、`MERGE COMMIT:`、`AUTO MERGE:`、`PROTECTION:`(D11 で進んだ理由)の行を出して終了コード 0
+- [x] AC7 merge のあと、読み直しで MERGED でないとき(D6): 予約があれば `--disable-auto` を打って終了コード 1、外す gh が落ちたら外すコマンドを出して終了コード 1、予約がなければ終了コード 1、読み直しが落ちたら確かめるコマンドを出して終了コード 1。どれも記録しない。merge の呼び出しのあとの中断でも、読み直しと外し(MERGED なら記録)を 1 回打ち、終了コード 1
+- [x] AC8 `gh pr merge` が落ちたか時間切れでも、読み直しを 1 回打つ。MERGED でなければ(最後の確かめのあとに base が進み、GitHub が断った場合を含む。偽の gh で試す)、gh の stderr の末尾を出し、何も記録せずに終了コード 1。MERGED なら記録し、gh の stderr の末尾を注として出して終了コード 0。読み直しが MERGED を返したあとに記録が落ちたら、merge したことと記録できなかったことを言って終了コード 1
+- [x] AC9 `pr_merged` は、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない。`ralph org report` の時系列の表に出る
+- [x] AC10 merge が `regate.lock` を持つ間は regate が断られ、regate が持つ間は merge が断られる。merge の間も同じ org_id の Spawn は断られない
+- [x] AC11 `/director` skill: auto_merge が false なら、merge も regate も人に頼まれたときだけ打ち、merge は `ralph org merge` で打つ。true なら、merge-order の先頭の `ready` を `ralph org merge`(`--wait-checks 60m` を付けて background で打ち、終わってから出力を読む)で 1 本 merge し、merge-order を打ち直し、regate を名指すブランチに 1 本ずつ regate を打ち、`ready` に戻れば merge する。どちらでも `gh pr merge` を直接打たず、動詞の断りと失敗はそこで止めて人に伝え、打ち直さない。この文を Go のテストが pin する
+- [x] AC12 文書: `/org` skill の動詞リファレンス、仕様 FR-8 の注、README、`AGENTS.md`、quality-gates の 2 面、tech-debt(237、238、240、242 行)、`templates/base/ralph.toml`、CLI の help が、動詞と設定と `pr_lookup` と保護の条件を書く
+- [x] AC13 `--wait-checks <d>`(D13): 確かめが検査待ちか 0 件で断るときだけ、何も記録せずにロックを外し、30 秒ごとに `gh pr checks` だけを読む。待っている検査がなくなるか、gh が落ちるか、時間が切れたら、ロックを取り直して確かめを最初から打つ。fail・cancel・skipping だけの断りと、ほかのすべての断りでは待たない。時間が切れたあとの確かめがまだ検査待ちか 0 件なら、待った時間を添えた断りで終了コード 1。待つ間の中断は何も merge せず終了コード 1。待つ間は regate.lock を持たない(regate が走れる)。`0` と省略は今の動き、負の値と 6 時間を超える値は gh を打つ前に断る。help と skill がこれを書く
 
 ## Implementation outline
 
@@ -129,7 +129,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 ## Verify plan
 
 - Static analysis checks: `./scripts/run-static-verify.sh`(golangci-lint、gofmt、secret scan、check-sync、check-skill-sync)、`go vet ./...`、`GOTOOLCHAIN=go1.25.8 go vet ./...`
-- Spec compliance criteria to confirm: AC1〜AC12 を、コードと、HEAD から作った binary を偽の gh と手元の bare repo で打って確かめる。FR-8 の受け入れ条件は skill の文と pin するテストで確かめる。D11 の API の field 名(`ruleset_id`、`current_user_can_bypass`、`mergeQueue`、`permissions.admin`)が、計画の Assumptions に書いた実機の出力と合うことを確かめる
+- Spec compliance criteria to confirm: AC1〜AC13 を、コードと、HEAD から作った binary を偽の gh と手元の bare repo で打って確かめる。FR-8 の受け入れ条件は skill の文と pin するテストで確かめる。D11 の API の field 名(`ruleset_id`、`current_user_can_bypass`、`mergeQueue`、`permissions.admin`)が、計画の Assumptions に書いた実機の出力と合うことを確かめる
 - Documentation drift to check: help、skill の 8 面の同一性、README の動詞の表、`AGENTS.md` の repo-map、仕様の注、quality-gates の 2 面、`templates/base/ralph.toml` と `config.Default()` の一致
 - Evidence to capture: `docs/evidence/verify-2026-10-17-org-auto-merge.log`(run-static-verify の出力、probe のスクリプトと出力)
 
@@ -189,7 +189,9 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - 2026-10-17(S7 の前): gh 2.102.0 のソース(`pkg/cmd/pr/checks/checks.go` の `populateStatusChecks`)で、検査が 0 件の PR の `gh pr checks --json` は JSON を出さず `no checks reported on the '<ブランチ>' branch` で終了コード 1 と確かめた。今の確かめはこれを gh の失敗として断り、D13 の 0 件の待ちに入らない。D7 に「その文を 0 件として読む」を足し、S7 の行、Test plan の edge case、Risks を直した。図の文は変わらない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
   - S7 e478e350(`--wait-checks`、gh の 0 件の文の読み取り、`/director` の background の打ち方、skill の 8 面、README・`AGENTS.md`・仕様・tech-debt)。待つかどうかは `mergeChecksKind`(5 値、`waits()` は Pending と Zero だけ)で決め、checkMerge は待つ種類の断りのときだけ PR の読み取り(r)を返す。そのため merge_test.go の拒否表の「pending」の行を「fail」に替え、pending は ReadsTheChecks の側で r の中身まで確かめる(テストは弱めていない)。範囲の検査は CLI(state dir を解決する前)と `Merge`(ロックとコマンドの前)の 2 か所。mutation 9/9
   - 2026-10-17: reviewer の再レビュー(S6・S7、report d93bdce1)で前回の M1・M2・L1〜L8 はすべて直ったと確かめ、新しい LOW 4 件(R1〜R4)を 97a1a062 で直した(lock の注の「whole run」3 か所、2 回目の待ちの開始行の丸め、実時間テストの回数を 1 回以上に、doc と名前の小さな直し、`mergeorder.go` の行数を tech-debt に)。self-review の直しなので cycle は 1 のまま
+  - 2026-10-17: verify PASS(c0ad3f37、LOW の V1・V2 は sync-docs で直した)。test PASS(6e43569a、LOW の T1・T2 は 29afd327 で直した: 0 件のまま予算が切れる 2 行、config_test の古い注)。sync-docs b5efa956(`/director` の Codex の打ち方、tech-debt 239 行の runner の数、README の gh の固定と `ralph status` と regate のロック、`/org` の pending と fail の混在、regate の揺れの tech-debt の行)
+  - 2026-10-18: verify の I3 を受けて、受け入れ条件の checkbox を付け、AC12 と AC13 の順を直し、Verify plan の範囲を AC1〜AC13 にした。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
 - [x] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
