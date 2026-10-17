@@ -98,12 +98,16 @@ type MergeResult struct {
 }
 
 // Merge runs `ralph org merge --branch <p.Branch>`. It refuses
-// (MergeResult.Refused, nothing merged or recorded) when p.Branch is empty,
-// before any lock; when another ralph org regate or merge of the ledger holds
+// (MergeResult.Refused, nothing merged or recorded) when p.WaitChecks is out
+// of range (MergeWaitChecksRefusal) or p.Branch is empty, before any lock or
+// command; when another ralph org regate or merge of the ledger holds
 // regate.lock after regateLockWait (D3); and when a check of checkMerge fails.
 // Once it holds the lock it empties the marker an earlier regate left there
 // and writes none: a merge changes no worktree, so a spawn of the branch's org
-// goes on while it runs (regateSpawnErr). It then runs gh pr merge once
+// goes on while it runs (regateSpawnErr). With p.WaitChecks, a refusal for
+// checks that are pending or not reported yet is waited out instead, with the
+// lock released, and the lock and every check are taken again after the wait
+// (mergeWait, D13). It then runs gh pr merge once
 // (mergeRun.merge) and, whatever that returned, reads the PR back once
 // (mergeRun.readBack, D6):
 //
@@ -123,25 +127,47 @@ type MergeResult struct {
 // returns an error that says it was interrupted and how the merge ended, with
 // MergeResult as far as it got. gh pr merge itself runs in ralph's group, and
 // an interruption stops it as it stops the checks. Before gh pr merge, an
-// interruption is an error with nothing merged. The other errors are a
-// manifest that cannot be read, a lock that cannot be taken or written, and a
-// pr_merged that cannot be appended after the merge (Merged set, Recorded
-// not). regate.lock is released when Merge returns.
+// interruption is an error with nothing merged, also while a wait runs. The
+// other errors are a manifest that cannot be read, a lock that cannot be
+// taken or written, and a pr_merged that cannot be appended after the merge
+// (Merged set, Recorded not). regate.lock is released when Merge returns.
 func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
+	if refused := MergeWaitChecksRefusal(p.WaitChecks); refused != "" {
+		return MergeResult{Refused: refused}, nil
+	}
 	if p.Branch == "" {
-		_, refused, err := o.checkMerge(ctx, p)
+		_, refused, _, err := o.checkMerge(ctx, p)
 		return MergeResult{Refused: refused}, err
 	}
+	w := newMergeWait(p)
+	for {
+		res, wait, err := o.mergeLocked(ctx, p, w)
+		if wait == nil {
+			return res, err
+		}
+		if err := w.wait(ctx, newMergeCheck(p), *wait); err != nil {
+			return MergeResult{}, err
+		}
+	}
+}
+
+// mergeLocked is Merge with regate.lock held, which it takes and releases:
+// the checks and, when they pass, the merge. When checkMerge refuses with
+// checks that w may still wait for (mergeChecksKind.waits, mergeWait.left),
+// it returns only wait, the PR to wait for, with the lock released, for Merge
+// to wait and call it again; a refusal of that kind once w's time is used up
+// says how long w waited (mergeWait.waited).
+func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res MergeResult, wait *mergeWaitFor, err error) {
 	stateDir := filepath.Dir(o.Manifest.Path())
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
 		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate or merge runs on this "+
 			"ledger (%s is held): one runs at a time, so wait for it to end and run ralph org merge --branch %s again",
-			regateLockPathIn(stateDir), p.Branch), false)}, nil
+			regateLockPathIn(stateDir), p.Branch), false)}, nil, nil
 	case err != nil:
 		// err names the lock's path, or its dir.
-		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
+		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"nothing was merged, since regate.lock could not be taken: %w", err)
 	}
 	defer func() { _ = lock.release() }()
 	// D3: the marker an earlier regate left goes at once, and Merge writes
@@ -149,30 +175,34 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 	// it is what writeRegateMarker(lock.f, nil) does, a truncation; Merge
 	// truncates itself so that its error is merge's, not regate's.
 	if err := lock.f.Truncate(0); err != nil {
-		return MergeResult{}, fmt.Errorf(mergePrefix+"nothing was merged, since the marker in regate.lock could not be emptied: %w", err)
+		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"nothing was merged, since the marker in regate.lock could not be emptied: %w", err)
 	}
 
-	r, refused, err := o.checkMerge(ctx, p)
+	r, refused, kind, err := o.checkMerge(ctx, p)
 	switch {
 	case err != nil:
-		return MergeResult{}, err
+		return MergeResult{}, nil, err
+	case refused != "" && kind.waits() && w.left():
+		return MergeResult{}, &mergeWaitFor{r: r, kind: kind}, nil
+	case refused != "" && kind.waits():
+		return MergeResult{Refused: refused + w.waited()}, nil, nil
 	case refused != "":
-		return MergeResult{Refused: refused}, nil
+		return MergeResult{Refused: refused}, nil, nil
 	}
 	if hook := mergeTestHooks.afterChecks; hook != nil {
 		hook()
 	}
 	if ctx.Err() != nil {
-		return MergeResult{}, fmt.Errorf(mergePrefix+"interrupted (%v) after the checks passed, before gh pr merge ran: nothing "+
-			"was merged", context.Cause(ctx))
+		return MergeResult{}, nil, fmt.Errorf(mergePrefix+"interrupted (%v) after the checks passed, before gh pr merge ran: "+
+			"nothing was merged", context.Cause(ctx))
 	}
 	run := mergeRun{m: newMergeCheck(p), r: r}
-	res, err := o.mergeAndRecord(ctx, run, MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL,
+	res, err = o.mergeAndRecord(ctx, run, MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL,
 		Method: r.method, Head: r.head, AutoMerge: p.AutoMerge, Protection: r.protection})
 	if ctx.Err() != nil {
-		return res, mergeInterruptedAfterStart(ctx, res, err)
+		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
-	return res, err
+	return res, nil, err
 }
 
 // mergeRun is one Merge once its checks passed: the settings of its checks

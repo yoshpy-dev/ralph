@@ -858,7 +858,7 @@ func TestMerge_CallsAfterGHPRMergeRunDetached(t *testing.T) {
 	}
 
 	fx := newMRFixture(t, nil)
-	r, refused, err := fx.mo.o.checkMerge(context.Background(), fx.params())
+	r, refused, _, err := fx.mo.o.checkMerge(context.Background(), fx.params())
 	if err != nil || refused != "" {
 		t.Fatalf("checkMerge = %v, refused %q", err, refused)
 	}

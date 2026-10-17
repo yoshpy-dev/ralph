@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -27,9 +28,12 @@ import (
 // SIGTERM, or SIGHUP (gateSignalContext), and prints the result
 // (printMergeResult). Merge reads the org from the branch's binding or gate
 // record (D4), so --org-id is refused before anything is read, as regate
-// refuses it, and so is a missing --branch.
+// refuses it, and so are a missing --branch and a --wait-checks out of range
+// (org.MergeWaitChecksRefusal). --wait-checks (S7, D13) reaches Merge with
+// stderr for the lines of its wait.
 func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
+	var waitChecks time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "merge",
@@ -94,6 +98,23 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"pr view that checks it, and exits 1. When the PR merged but pr_merged\n" +
 			"cannot be recorded, merge prints the lines above and exits 1.\n" +
 			"\n" +
+			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
+			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
+			"refused before anything is read), merge waits for the checks instead of\n" +
+			"refusing when the only refusal is that a check is pending, or that gh pr\n" +
+			"checks reports no checks yet. It releases regate.lock, so a ralph org\n" +
+			"regate or another merge can run meanwhile, and reads only gh pr checks\n" +
+			"<n> -R <repo> every 30 s, until no check is pending any more, gh pr\n" +
+			"checks fails, or the time is up; then it takes regate.lock again and runs\n" +
+			"every check above from the start, so a branch that moved meanwhile is\n" +
+			"refused, and checks pending again are waited for again. A check that\n" +
+			"failed or was cancelled, checks that are all skipping, and every other\n" +
+			"refusal are not waited for. When the time is up and the checks are still\n" +
+			"pending or none, merge refuses as without the flag and adds how long it\n" +
+			"waited. stderr gets one line when a wait starts and one when it ends. An\n" +
+			"interrupt while merge waits merges nothing and exits 1. In a repository\n" +
+			"with no CI, the checks stay at none, and merge waits until the time is up.\n" +
+			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the git or gh call that\n" +
 			"runs, up to and including gh pr merge. Before gh pr merge, nothing is\n" +
 			"merged. Once gh pr merge has started, merge still reads the PR back once\n" +
@@ -106,9 +127,10 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"interrupt, and any other error.\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
-			"approved plan. While it runs, ralph org regate and another ralph org\n" +
-			"merge are refused on the ledger, but ralph org spawn and start of the\n" +
-			"branch's org are not, since merge changes no worktree.\n" +
+			"approved plan. While it runs, except while it waits for the checks,\n" +
+			"ralph org regate and another ralph org merge are refused on the ledger,\n" +
+			"but ralph org spawn and start of the branch's org are not, since merge\n" +
+			"changes no worktree.\n" +
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in\n" +
 			"pr_merged: merge merges whatever it is. The /director skill reads it to\n" +
 			"know whether it may merge without asking. Without --config, it is read\n" +
@@ -125,6 +147,9 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			if strings.TrimSpace(branch) == "" {
 				return errors.New("org: merge: --branch is required: name the feature branch whose PR to merge (ralph org merge-order " +
 					"lists the ledger's branches)")
+			}
+			if refused := org.MergeWaitChecksRefusal(waitChecks); refused != "" {
+				return errors.New(refused)
 			}
 			// newOrgRuntime's steps, split so that auto_merge is read by the
 			// main worktree rule of ralph org escalate.
@@ -148,12 +173,15 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			// later ones are caught until stop runs.
 			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
-			res, err := rt.Merge(ctx, org.MergeParams{Branch: branch, AutoMerge: rt.Config.Director.AutoMerge})
+			res, err := rt.Merge(ctx, org.MergeParams{Branch: branch, AutoMerge: rt.Config.Director.AutoMerge, WaitChecks: waitChecks,
+				Progress: cmd.ErrOrStderr()})
 			return printMergeResult(cmd.OutOrStdout(), res, err)
 		},
 	}
 
 	cmd.Flags().StringVar(&branch, "branch", "", "the feature branch whose PR to merge, as ralph org merge-order lists it (required)")
+	cmd.Flags().DurationVar(&waitChecks, "wait-checks", 0, "how long to wait, with regate.lock released, for checks that are "+
+		"pending or not reported yet before refusing, such as 60m (0 waits not at all; at most 6h)")
 
 	return cmd
 }

@@ -464,7 +464,8 @@ func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 	}
 }
 
-// AC3's flag refusals: --org-id, no --branch, and a blank --branch are
+// AC3's flag refusals, and AC13's range of --wait-checks: --org-id, no
+// --branch, a blank --branch, and a --wait-checks below 0 or above 6h are
 // refused before anything is read: exit 1 with the reason, nothing on
 // stdout, no git or gh run (not even to resolve the state dir), and no state
 // dir made.
@@ -478,6 +479,10 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 		orgIDRefusal  = "org: merge: --org-id does not apply: merge reads the org from the binding or the gate record of the branch --branch names"
 		branchRefusal = "org: merge: --branch is required: name the feature branch whose PR to merge (ralph org merge-order lists the ledger's branches)"
 	)
+	waitRefusal := func(d string) string {
+		return "org: merge: --wait-checks " + d + " is out of range, so nothing was merged: give a duration from 0 (no wait, the " +
+			"default) to 6h0m0s, such as 60m"
+	}
 	for _, tc := range []struct {
 		args []string
 		want string
@@ -487,6 +492,8 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 		{[]string{"merge", "--state-dir", stateDir}, branchRefusal},
 		{[]string{"merge", "--branch", "  ", "--state-dir", stateDir}, branchRefusal},
 		{[]string{"merge"}, branchRefusal},
+		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "-1s", "--state-dir", stateDir}, waitRefusal("-1s")},
+		{[]string{"merge", "--branch", "feat/a", "--wait-checks", "6h1m"}, waitRefusal("6h1m0s")},
 	} {
 		stdout, _, err := runOrgCmdStreams(t, tc.args...)
 		if err == nil || err.Error() != tc.want || stdout != "" {
@@ -501,6 +508,51 @@ func TestOrgMerge_FlagRefusalsReadNothing(t *testing.T) {
 			t.Errorf("a refused merge made %s (stat: %v)", dir, err)
 		}
 	}
+}
+
+// AC13 through the CLI: --wait-checks 6h, the longest, is taken, and with
+// checks that pass merge merges with nothing on stderr. With checks pending,
+// --wait-checks 1ms waits once: stderr gets the line of its start and the
+// line of its end, and once the time is up the checks run again and refuse
+// as without the flag, adding how long merge waited, with no gh pr merge and
+// the ledger as it was.
+func TestOrgMerge_WaitChecks(t *testing.T) {
+	t.Run("6h is taken", func(t *testing.T) {
+		fx := newMergeCLIFixture(t, false)
+		stdout, stderr, err := fx.merge(t, "--wait-checks", "6h")
+		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, false, "") {
+			t.Fatalf("merge --wait-checks 6h: err %v, stderr %q, stdout %q; want the merge", err, stderr, stdout)
+		}
+	})
+	t.Run("the time is up with checks pending", func(t *testing.T) {
+		fx := newMergeCLIFixture(t, false)
+		fx.reply(t, "pr-checks", `[{"bucket":"pass","name":"verify","state":"SUCCESS","workflow":"ci"},`+
+			`{"bucket":"pending","name":"e2e","state":"IN_PROGRESS","workflow":"ci"}]`)
+		fx.fail(t, "pr-checks", 8, "")
+		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
+
+		stdout, stderr, err := fx.merge(t, "--wait-checks", "1ms")
+		const refusal = "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / e2e (pending, IN_PROGRESS), so " +
+			"nothing was merged: wait for the pending ones and fix the others, and once all passed, run ralph org merge --branch " +
+			"feat/a again; ralph org merge waited "
+		if err == nil || !strings.HasPrefix(err.Error(), refusal) || !strings.HasSuffix(err.Error(), " for the checks (--wait-checks 1ms)") ||
+			stdout != "" {
+			t.Fatalf("merge --wait-checks 1ms: err %v, stdout %q; want the refusal with the time waited", err, stdout)
+		}
+		lines := outputLines(stderr)
+		start := "org: merge: PR #7 has checks pending, so ralph org merge waits for them for up to 1ms (--wait-checks 1ms), with " +
+			"regate.lock released, reading gh pr checks 7 -R " + mergeCLIRepoArg + " every 30s"
+		if len(lines) != 2 || lines[0] != start || !strings.HasPrefix(lines[1], "org: merge: stopped waiting for the checks of PR #7 "+
+			"after ") || !strings.HasSuffix(lines[1], ": --wait-checks 1ms is used up; running every check again") {
+			t.Errorf("stderr:\n%s\nwant the line of the wait's start and the line of its end", stderr)
+		}
+		if got := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir)); got != before {
+			t.Errorf("the ledger changed:\nbefore %s\nafter  %s", before, got)
+		}
+		if got := fx.mergeCalls(t); len(got) != 0 {
+			t.Errorf("gh pr merge ran: %q", got)
+		}
+	})
 }
 
 // AC2 for merge: with no --config and the main worktree's ledger, run from a
@@ -630,6 +682,21 @@ func TestOrgMerge_Help(t *testing.T) {
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",
 			"Without --config, it is read from the main worktree's ralph.toml when the ledger is the main worktree's",
 			"--branch string",
+			// --wait-checks (S7, AC13).
+			"--wait-checks duration how long to wait, with regate.lock released, for checks that are pending or not reported yet " +
+				"before refusing, such as 60m (0 waits not at all; at most 6h)",
+			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default, waits not at all; at most 6h, and a negative " +
+				"value or one over 6h is refused before anything is read), merge waits for the checks instead of refusing when the " +
+				"only refusal is that a check is pending, or that gh pr checks reports no checks yet.",
+			"It releases regate.lock, so a ralph org regate or another merge can run meanwhile, and reads only gh pr checks <n> -R " +
+				"<repo> every 30 s, until no check is pending any more, gh pr checks fails, or the time is up; then it takes " +
+				"regate.lock again and runs every check above from the start",
+			"A check that failed or was cancelled, checks that are all skipping, and every other refusal are not waited for.",
+			"When the time is up and the checks are still pending or none, merge refuses as without the flag and adds how long it waited.",
+			"stderr gets one line when a wait starts and one when it ends.",
+			"An interrupt while merge waits merges nothing and exits 1.",
+			"In a repository with no CI, the checks stay at none, and merge waits until the time is up.",
+			"While it runs, except while it waits for the checks, ralph org regate and another ralph org merge are refused",
 		}},
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",

@@ -73,13 +73,16 @@ var directorSkillCopies = []string{
 // steps (its section merge と auto_merge), in the order the skill has them:
 // with auto_merge = false the director merges and regates only when the
 // human asks; with auto_merge = true it merges the first ready branch with
-// ralph org merge, runs merge-order again and regates one branch, and
-// merges that branch once it is ready again; with either value it never
-// runs gh pr merge itself, and it stops a branch at a refusal or a failure
-// of the verb and does not run it again unasked.
+// ralph org merge, run with --wait-checks 60m in the background and read once
+// it ended (plan D13: the verb waits for checks still pending), runs
+// merge-order again and regates one branch, and merges that branch once it
+// is ready again; with either value it never runs gh pr merge itself, and it
+// stops a branch at a refusal or a failure of the verb and does not run it
+// again unasked.
 var directorSkillAutoMergeSteps = []string{
 	"merge も regate も人に頼まれたときだけ打つ",
 	"先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge する",
+	"`--wait-checks 60m` を付けて background で打ち、終わってから終了コードと出力を読む",
 	"merge-order を打ち直し、理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチの 1 本に regate を打つ",
 	"そのブランチが `ready` に戻っていれば、2 と同じく merge して 3 に戻る",
 	"`gh pr merge` を直接打たない。merge は `ralph org merge` でだけ打つ",
@@ -99,7 +102,9 @@ func withoutSpaces(s string) string { return strings.Join(strings.Fields(s), "")
 // and FR-8's acceptance criterion (with auto_merge = false the director does
 // not merge): ralph org merge does not read [org.director].auto_merge to
 // refuse (plan D1), so the skill's text is all that keeps a director from
-// merging unasked. Each copy must contain every fragment of
+// merging unasked, and the merge of auto_merge = true carries
+// --wait-checks 60m, without which it stops at checks still pending. Each
+// copy must contain every fragment of
 // directorSkillAutoMergeSteps, each after the one before it, compared with
 // spaces and line breaks removed (withoutSpaces), and must not contain
 // directorSkillOldMergeStep. scripts/check-skill-sync.sh keeps the copies

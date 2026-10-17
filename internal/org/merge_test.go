@@ -209,16 +209,22 @@ func (fx *mxFixture) params() MergeParams {
 
 // check runs checkMerge with p and fails the test unless the temp dir, the
 // manifest included, is as it was before, and every command run is read-only
-// (mxAssertReadOnly).
+// (mxAssertReadOnly). checkKind returns the kind of the refusal too.
 func (fx *mxFixture) check(ctx context.Context, t *testing.T, p MergeParams) (mergeReady, string, error) {
 	t.Helper()
+	r, refused, _, err := fx.checkKind(ctx, t, p)
+	return r, refused, err
+}
+
+func (fx *mxFixture) checkKind(ctx context.Context, t *testing.T, p MergeParams) (mergeReady, string, mergeChecksKind, error) {
+	t.Helper()
 	before := moSnapshot(t, fx.mo.root)
-	r, refused, err := fx.mo.o.checkMerge(ctx, p)
+	r, refused, kind, err := fx.mo.o.checkMerge(ctx, p)
 	if after := moSnapshot(t, fx.mo.root); !slices.Equal(after, before) {
 		t.Errorf("the temp dir changed:\nbefore %q\nafter  %q", before, after)
 	}
 	mxAssertReadOnly(t, fx.exec)
-	return r, refused, err
+	return r, refused, kind, err
 }
 
 // mxLsRemoteArgs are the ls-remote's arguments.
@@ -464,10 +470,12 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 		{"PR has an auto-merge request", nil, view("OPEN", moHeadA, "main", pr7, `{"enabledAt":"2026-10-17T00:00:00Z","mergeMethod":"MERGE"}`),
 			"org: merge: PR #7 has an auto-merge request already, which GitHub would carry out apart from ralph org merge, so nothing " +
 				"was merged: remove it (gh pr merge 7 --disable-auto -R github.com/o/r) and " + mxAgain, 4},
-		// 10. gh pr checks (D7); TestCheckMerge_ReadsTheChecks has the rest.
-		{"a check is pending", nil, reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"),
-			ghPRCheck{Bucket: "pending", Name: "lint", State: "IN_PROGRESS", Workflow: "ci"}), err: errors.New("exit status 8")}),
-			"org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / lint (pending, IN_PROGRESS), so nothing was merged: " +
+		// 10. gh pr checks (D7); TestCheckMerge_ReadsTheChecks has the rest,
+		// pending checks and none among them, whose refusal keeps what
+		// checkMerge read for the wait of --wait-checks.
+		{"a check failed", nil, reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"),
+			ghPRCheck{Bucket: "fail", Name: "lint", State: "FAILURE", Workflow: "ci"}), err: errors.New("exit status 1")}),
+			"org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / lint (fail, FAILURE), so nothing was merged: " +
 				"wait for the pending ones and fix the others, and once all passed, " + mxAgain, 5},
 		// 11. The protection (D11); TestMergeEnforcement_DecidesWhetherTheMergeMayGoOn has the rest.
 		{"merge queue", nil, reply(mxQueue, mgReply{out: meQueueJSON(`{"id":"MQ_1"}`)}), mxProtect + mxSubject + ", has a merge queue " +
@@ -522,7 +530,11 @@ func TestCheckMerge_RefusesWithNothingAfterTheFailingCheck(t *testing.T) {
 // only, and any pending, fail, cancel or unknown bucket refuse, naming the
 // checks (the first five and how many more). stdout is read whatever gh's
 // exit (8 while a check is pending); a stdout that is not a JSON list refuses
-// with gh's error, and a timeout refuses.
+// with gh's error, and a timeout refuses, except that gh's exit 1 with
+// mergeNoChecksSentence for the branch, as gh 2.102.0 answers a PR with no
+// checks, is zero checks. The kind of each refusal is the one --wait-checks
+// decides on (D13): only pending checks and none wait, and their refusal
+// keeps what checkMerge read; every other refusal leaves it empty.
 func TestCheckMerge_ReadsTheChecks(t *testing.T) {
 	const cmd = "gh pr checks 7 -R " + mxRepoArg
 	check := func(bucket, name, state string) ghPRCheck {
@@ -532,6 +544,11 @@ func TestCheckMerge_ReadsTheChecks(t *testing.T) {
 		return fmt.Sprintf("org: merge: %d of the %d checks of PR #7 are not pass or skipping: %s, so nothing was merged: wait for "+
 			"the pending ones and fix the others, and once all passed, %s", n, of, named, mxAgain)
 	}
+	ghFailed := func(why string) string {
+		return "org: merge: " + cmd + " failed (" + why + "), so the PR's checks are unknown and nothing was merged: " + mxAccess
+	}
+	noChecks := "org: merge: " + cmd + " reported no checks, so nothing shows that the PR's CI passed and nothing was merged: let " +
+		"CI run on the PR, and once it passed, " + mxAgain
 	var many []ghPRCheck
 	var manyNamed []string
 	for i := range 7 {
@@ -542,41 +559,53 @@ func TestCheckMerge_ReadsTheChecks(t *testing.T) {
 		name  string
 		reply mgReply
 		want  string // "" when the checks pass
+		kind  mergeChecksKind
 	}{
-		{"pass only", mgReply{out: mxChecks(mxPass("verify"), mxPass("test"))}, ""},
-		{"pass and skipping", mgReply{out: mxChecks(mxPass("verify"), check("skipping", "deploy", "SKIPPED"))}, ""},
+		{"pass only", mgReply{out: mxChecks(mxPass("verify"), mxPass("test"))}, "", mergeChecksOther},
+		{"pass and skipping", mgReply{out: mxChecks(mxPass("verify"), check("skipping", "deploy", "SKIPPED"))}, "", mergeChecksOther},
 		{"skipping only", mgReply{out: mxChecks(check("skipping", "deploy", "SKIPPED"))},
 			"org: merge: every one of the 1 checks of PR #7 is skipping and none passed, so nothing shows that the PR's CI passed " +
-				"and nothing was merged: let a check run on the PR, and once it passed, " + mxAgain},
+				"and nothing was merged: let a check run on the PR, and once it passed, " + mxAgain, mergeChecksNotPassed},
 		{"one pending", mgReply{out: mxChecks(mxPass("verify"), check("pending", "lint", "IN_PROGRESS"))},
-			notPassing(1, 2, "ci / lint (pending, IN_PROGRESS)")},
-		{"no checks", mgReply{out: "[]"}, "org: merge: " + cmd + " reported no checks, so nothing shows that the PR's CI passed and " +
-			"nothing was merged: let CI run on the PR, and once it passed, " + mxAgain},
+			notPassing(1, 2, "ci / lint (pending, IN_PROGRESS)"), mergeChecksPending},
+		{"no checks", mgReply{out: "[]"}, noChecks, mergeChecksZero},
 		{"exit 8 with a pending check on stdout", mgReply{out: mxChecks(check("pending", "lint", "QUEUED"), mxPass("verify")),
-			err: errors.New("exit status 8")}, notPassing(1, 2, "ci / lint (pending, QUEUED)")},
+			err: errors.New("exit status 8")}, notPassing(1, 2, "ci / lint (pending, QUEUED)"), mergeChecksPending},
 		{"a non-zero exit with checks that pass on stdout reads them", mgReply{out: mxChecks(mxPass("verify")),
-			err: errors.New("exit status 8")}, ""},
-		{"exit 1 with output that is not JSON", mgReply{out: "no checks reported on the 'feat/a' branch\n",
-			err: errors.New("exit status 1: no checks reported on the 'feat/a' branch")},
-			"org: merge: " + cmd + " failed (exit status 1: no checks reported on the 'feat/a' branch), so the PR's checks are " +
-				"unknown and nothing was merged: " + mxAccess},
+			err: errors.New("exit status 8")}, "", mergeChecksOther},
+		{"exit 1 with gh's sentence of no checks for the branch", mgReply{
+			err: errors.New("exit status 1: no checks reported on the 'feat/a' branch")}, noChecks, mergeChecksZero},
+		{"exit 1 with gh's sentence of no checks for another branch", mgReply{
+			err: errors.New("exit status 1: no checks reported on the 'feat/a2' branch")},
+			ghFailed("exit status 1: no checks reported on the 'feat/a2' branch"), mergeChecksUnread},
+		{"exit 1 with another error", mgReply{err: errors.New("exit status 1: HTTP 502: Bad Gateway")},
+			ghFailed("exit status 1: HTTP 502: Bad Gateway"), mergeChecksUnread},
+		{"exit 0 with gh's sentence on stdout", mgReply{out: "no checks reported on the 'feat/a' branch\n"}, "org: merge: " + cmd +
+			" printed output that is not a JSON list of checks, so the PR's checks are unknown and nothing was merged: " + mxAccess,
+			mergeChecksUnread},
 		{"exit 0 with output that is not JSON", mgReply{out: "<html>"}, "org: merge: " + cmd + " printed output that is not a " +
-			"JSON list of checks, so the PR's checks are unknown and nothing was merged: " + mxAccess},
+			"JSON list of checks, so the PR's checks are unknown and nothing was merged: " + mxAccess, mergeChecksUnread},
 		{"null is not a list", mgReply{out: "null"}, "org: merge: " + cmd + " printed output that is not a JSON list of checks, so " +
-			"the PR's checks are unknown and nothing was merged: " + mxAccess},
+			"the PR's checks are unknown and nothing was merged: " + mxAccess, mergeChecksUnread},
 		{"an object is not a list", mgReply{out: `{"bucket":"pass"}`}, "org: merge: " + cmd + " printed output that is not a JSON " +
-			"list of checks, so the PR's checks are unknown and nothing was merged: " + mxAccess},
+			"list of checks, so the PR's checks are unknown and nothing was merged: " + mxAccess, mergeChecksUnread},
 		{"fail and cancel", mgReply{out: mxChecks(mxPass("verify"), check("fail", "test", "FAILURE"), check("cancel", "e2e", "CANCELLED")),
-			err: errors.New("exit status 1")}, notPassing(2, 3, "ci / test (fail, FAILURE), ci / e2e (cancel, CANCELLED)")},
+			err: errors.New("exit status 1")}, notPassing(2, 3, "ci / test (fail, FAILURE), ci / e2e (cancel, CANCELLED)"),
+			mergeChecksNotPassed},
+		{"cancel only", mgReply{out: mxChecks(check("cancel", "e2e", "CANCELLED"))}, notPassing(1, 1, "ci / e2e (cancel, CANCELLED)"),
+			mergeChecksNotPassed},
+		{"pending and fail", mgReply{out: mxChecks(check("pending", "lint", "QUEUED"), check("fail", "test", "FAILURE")),
+			err: errors.New("exit status 1")}, notPassing(2, 2, "ci / lint (pending, QUEUED), ci / test (fail, FAILURE)"),
+			mergeChecksNotPassed},
 		{"a bucket not known", mgReply{out: mxChecks(mxPass("verify"), ghPRCheck{Name: "x"}, ghPRCheck{Bucket: "PASS", Name: "y",
-			State: "SUCCESS", Workflow: "y"})}, notPassing(2, 3, "x (no bucket, no state), y (PASS, SUCCESS)")},
+			State: "SUCCESS", Workflow: "y"})}, notPassing(2, 3, "x (no bucket, no state), y (PASS, SUCCESS)"), mergeChecksNotPassed},
 		{"more than five", mgReply{out: mxChecks(append([]ghPRCheck{mxPass("verify")}, many...)...)},
-			notPassing(7, 8, strings.Join(manyNamed[:5], ", ")+" and 2 more")},
+			notPassing(7, 8, strings.Join(manyNamed[:5], ", ")+" and 2 more"), mergeChecksPending},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMXFixture(t, nil)
 			fx.exec.replies[mxPRChecks] = tc.reply
-			r, refused, err := fx.check(context.Background(), t, fx.params())
+			r, refused, kind, err := fx.checkKind(context.Background(), t, fx.params())
 			switch {
 			case err != nil:
 				t.Fatalf("checkMerge error: %v", err)
@@ -584,6 +613,12 @@ func TestCheckMerge_ReadsTheChecks(t *testing.T) {
 				t.Fatalf("checkMerge = %+v, refused %q; want it to pass", r, refused)
 			case tc.want != "" && refused != tc.want:
 				t.Fatalf("refused %q\nwant    %q", refused, tc.want)
+			case kind != tc.kind:
+				t.Errorf("kind = %d, want %d", kind, tc.kind)
+			case tc.want != "" && kind.waits() && (r.branch != "feat/a" || r.prNumber != 7 || r.repoArg != mxRepoArg || r.head != moHeadA):
+				t.Errorf("checkMerge = %+v with a refusal --wait-checks waits out; want what it read of PR #7", r)
+			case tc.want != "" && !kind.waits() && r != (mergeReady{}):
+				t.Errorf("checkMerge = %+v with a refusal --wait-checks does not wait out; want it empty", r)
 			}
 			want := mxAll
 			if tc.want != "" {
@@ -600,11 +635,11 @@ func TestCheckMerge_ReadsTheChecks(t *testing.T) {
 		fx.exec.block = mxPRChecks
 		p := fx.params()
 		p.GHTimeout = 30 * time.Millisecond
-		_, refused, err := fx.check(context.Background(), t, p)
+		_, refused, kind, err := fx.checkKind(context.Background(), t, p)
 		want := "org: merge: " + cmd + " failed (timed out after 30ms: context deadline exceeded), so the PR's checks are unknown " +
 			"and nothing was merged: " + mxAccess
-		if err != nil || refused != want {
-			t.Fatalf("checkMerge = %v\nrefused %q\nwant    %q", err, refused, want)
+		if err != nil || refused != want || kind != mergeChecksUnread {
+			t.Fatalf("checkMerge = %v, kind %d\nrefused %q\nwant    %q", err, kind, refused, want)
 		}
 	})
 }

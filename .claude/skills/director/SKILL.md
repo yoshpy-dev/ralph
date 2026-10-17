@@ -466,7 +466,9 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 - `auto_merge = true`: 人に聞かずに、次の順で 1 本ずつ打つ。
   1. `ralph org merge-order` を打つ。
   2. 先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge
-     する。`ready` がなければ 3 に進む。
+     する。`--wait-checks 60m` を付けて background で打ち、終わってから
+     終了コードと出力を読む(この節の末尾の打ち方)。`ready` がなければ 3 に
+     進む。
   3. merge-order を打ち直し、理由の欄が `ralph org regate --branch <ブランチ>`
      を名指すブランチの 1 本に regate を打つ(下の「merge のあとの取り直し」)。
      1 本 merge すると、ほかの `ready` は `rebase` になる。
@@ -497,9 +499,33 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   repo の設定のことなので、どのブランチも `ralph org merge` では merge
   できない。merge は人が GitHub で打つと伝え、ほかのブランチにも
   `ralph org merge` を打たない。
-- `ralph org merge` は前景で打ってよい。中の git と gh の呼び出しはどれも
-  時間で区切られている。Claude Code では Bash のツールの timeout を 10 分に
-  する。
+
+`ralph org merge` の打ち方は、auto_merge の値で変わる。
+
+- `auto_merge = true` の手順 2 では、
+  `ralph org merge --branch <ブランチ> --wait-checks 60m` を打つ。検査が
+  走っている(`pending`)か、まだ 1 件も出ていないという断りのときだけ、
+  動詞は `regate.lock` を外し、30 秒ごとに `gh pr checks` を読み直して最大
+  60 分待つ。待ち終えたら、ロックを取り直して確かめを最初から打つ。Claude
+  Code では Bash の `run_in_background` で走らせ、stdout と stderr を cwd の
+  `.harness/state/merge-<名前>.out` に書き、終わってから終了コードと出力を
+  読む。`<名前>` は regate と同じく、ブランチ名の `/` を `-` にしたもの
+  (`/` が残ると、ないディレクトリへの書き込みになって失敗する)。終わる
+  まで、merge-order も regate もほかの merge も打たない。
+
+  ```sh
+  ralph org merge --branch feat/auth-token --wait-checks 60m > .harness/state/merge-feat-auth-token.out 2>&1
+  ```
+
+  待つ間、stderr には待ちに入るときと終えるときに 1 行ずつ出る。60 分
+  たっても検査が `pending` のまま(か 0 件のまま)なら、待った時間を添えた
+  断りで終了コード 1 で終わる。ほかの断りと同じく、そのブランチはそこで
+  止める。
+- `auto_merge = false` で人に頼まれた merge は、人が待つよう頼まない限り
+  `--wait-checks` を付けずに打つ。前景で打ってよい。中の git と gh の
+  呼び出しはどれも時間で区切られている。Claude Code では Bash のツールの
+  timeout を 10 分にする。待つよう頼まれたら、上と同じく `--wait-checks` を
+  付けて background で打つ。
 
 ### merge のあとの取り直し
 
