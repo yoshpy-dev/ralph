@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-17 sha256:070e87a21953
+- Approved: 2026-10-17 sha256:1a1d58b4e12f
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -62,7 +62,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - `internal/org/mergeguarantee.go`(D11 の `CheckMergeEnforcement`。rules の読み取りを共有し、`ruleset_id` を残す。`CheckMergeGuarantee` と doctor の出力とキャッシュの形は変えない)、`internal/org/mergeguarantee_test.go`
 - `internal/org/merge.go`(新規、動詞の本体。S3a の確かめと S3b の merge と後始末)、`internal/org/merge_test.go`(新規)
 - `internal/org/seat.go`(event `pr_merged`)、`internal/org/regate.go` と `internal/org/spawn.go`(regate.lock の注と断りの文を「regate か merge」に)
-- `internal/config/config.go`(`AutoMerge`)、`internal/config/config_test.go`、`templates/base/ralph.toml`
+- `internal/config/config.go`(`AutoMerge`)、`internal/config/config_test.go`、`templates/base/ralph.toml`、`scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh`(既定値の写し `RALPH_ORG_DIRECTOR_AUTO_MERGE`)、`internal/config/defaults_sync_test.go`(3 面の一致)
 - `internal/cli/org_merge.go`(新規)、`internal/cli/org_merge_test.go`(新規)、`internal/cli/org.go`(動詞の登録、main worktree の設定の読み方)、`internal/cli/status.go`、`internal/cli/org_director.go`、`internal/cli/org_legacy_ledger.go`、`internal/cli/org_merge_order.go`(help に `pr_lookup`)
 - `.claude/skills/director/SKILL.md` と写し 3 面、`.claude/skills/org/SKILL.md` と写し 3 面、`internal/org/director_skill_sync_test.go`(skill の文を pin する)
 - `README.md`、`AGENTS.md`、`docs/specs/2026-10-07-org-multi-org-director.md`、`docs/quality/quality-gates.md` と `templates/base/docs/quality/quality-gates.md`、`docs/tech-debt/README.md`
@@ -161,7 +161,10 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - [x] Plan reviewed
 - [x] Plan approved(2026-10-17、ユーザーの永続の指示による自動承認)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 fa49d310(merge-order の `pr_lookup`)、S2 cddb608c(`auto_merge` の設定と表示)
+  - 2026-10-17: Affected areas に `ralph-config.sh` の 2 面と `defaults_sync_test.go` を足した(`[org.director]` のほかの既定値と同じく 3 面で揃える。S4 で入れる)。digest を取り直して承認し直した
+  - S4 に回すもの: `internal/cli/org.go` の `--config` の usage と `internal/cli/org_director.go` の group help が `[org.director].enabled` だけを名指す(auto_merge も読む)。S5 に回すもの: `docs/tech-debt/README.md` の `statusDirectorEnabled`(`statusDirectorConfig` に改名した)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
