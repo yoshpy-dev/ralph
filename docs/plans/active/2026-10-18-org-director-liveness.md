@@ -174,5 +174,6 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
 - [x] Review artifact created
   - verify(1171515f)は pass。LOW 1 件(この Progress の S5 の行の文言)を直し、AC1〜AC9 に印を付けた。D2 の本文と、計画が名指す tech-debt の行番号は承認した本文なので変えず、逸脱はこの Progress と仕様の注に書いた
 - [x] Verification artifact created
-- [ ] Test artifact created
+  - test(eb16551a)は pass。新しいテスト 67 本、mutant 31 個がすべて赤、`-race` で DATA RACE 0。LOW 2 件(start の片付けで断る 2 つの道、確かめの読み直しのロック)は、テストだけのコミット 7ef22637 で 3 本を足して埋めた。INFO の `folded` の比較は残す
+- [x] Test artifact created
 - [ ] PR created

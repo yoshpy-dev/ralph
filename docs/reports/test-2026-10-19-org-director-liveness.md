@@ -124,3 +124,15 @@ AC ごとには、AC1 は starter の fold の行、AC2 は check-in の行、AC
 - Pass: run-test.sh(shell 41 本と Go 8 パッケージ)、go1.25.8 の全体(1 件の知られた揺れのほかすべて PASS、その 1 件は単独 10/10、org パッケージの再実行も PASS)、`-race`(550 本と 5 本、DATA RACE 0)、新しいテスト 67 本、mutant 31 個すべてが赤、canary の呼び出し 0(感度の確かめつき)
 - Fail: なし(この差分によるもの)
 - Blocked: なし
+
+## このあとに足したテスト(7ef22637)
+
+Test gaps の LOW 2 件を、テストだけのコミット 7ef22637 で埋めた。本番のコードは変えていない。INFO の M26 はそのまま残す。
+
+| gap | テスト | 赤になった mutant |
+| --- | --- | --- |
+| `:38` start の確かめで台帳が読めない | `TestStartDirector_ACheckThatCannotReadTheLedgerRefusesWithItsError`(読んだあとに director.jsonl をディレクトリに替える行と、director.lock がディレクトリの行の 2 つ。どちらも本物の道で `:38` に届く) | `return err` を `return refused` にしたもの、エラーを捨てて進むもの。どちらも 2 行とも赤 |
+| `:96` launch_cmd の片付けで終わりを確かめられない | `TestStartDirector_ALaunchCmdCleanupThatCannotConfirmTheEndRefusesStart`(偽の ps が 1 回目は gone、2 回目はエラー。pid はテストが起こした sleep) | `:96` の比較を `if false` にしたもの。stopped が書かれ d2 が立って赤 |
+| M02 ロックを持ったままの読み直し | `TestCheckDirector_TheReadUnderTheLockWaitsForAWriterThatHoldsIt`(既存の `directorCheckAfterRead` の差し込みで、本物の `MarkCmdLaunched` を書き込みの途中で止め、本物の flock を持たせたまま確かめを走らせる。順はロックだけで決まる) | `readDirectorVersion` から `withLock` を外したもの。`-count=20` で 20 回とも赤 |
+
+確かめたこと(すべて rc 0): `go build ./...` と `go vet ./internal/org/`、`gofmt -l` の出力なし、3 本を `-count=20`(60 PASS)、`GOTOOLCHAIN=go1.25.8` で `-count=3`、`-race -count=3`(ロックのテストは `-race -count=20` も)、`go test ./internal/org/ -run Director`、`./scripts/run-static-verify.sh`。herdr、gh、tmux、orca、osascript、open の canary を PATH の先頭に置いた実行で、呼び出しは 0 回だった。orchestrator も 3 本を `-count=5` で流し直し、15 回とも PASS した。Verdict は pass のまま変わらない。
