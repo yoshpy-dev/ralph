@@ -203,6 +203,7 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
 - [x] Branch created
 - [x] Implementation started
   - S1 設定(AC1): 2f08cfe7。launch_cmd と wake_cmd が placeholder の検査と置き換えのヘルパーを共有し、launch_cmd のエラー文は変わらない
+  - S2 登録(AC2・AC3、AC4 の attach と start): 0d49b2a0。逸脱 1 件: store の `Attach` は空の `Wake` を断らずに `["pull"]` として記録する(範囲外のテストが `Wake` なしで `DirectorAttach` を組むため。CLI はいつも解決済みの値を渡すので動作は同じ。空でない不正な wake と不正な形の送り先は store でも断る)。`--wake` のエラーは `config.ValidateDirectorWakeNamed` でフラグ名を出す。main worktree の wake と wake_cmd は attach だけが読み、status は登録の値を出す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
