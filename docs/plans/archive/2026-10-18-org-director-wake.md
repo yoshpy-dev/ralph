@@ -218,4 +218,4 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
 - [x] Review artifact created(`docs/reports/self-review-2026-10-18-org-director-wake.md`、cycle 1 と S6 の再レビュー)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-18-org-director-wake.md`)
 - [x] Test artifact created(`docs/reports/test-2026-10-18-org-director-wake.md`)
-- [ ] PR created
+- [x] PR created(#236)
