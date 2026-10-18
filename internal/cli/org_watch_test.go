@@ -1663,7 +1663,7 @@ func TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds(t *testing.T)
 }
 
 // The tests below are for the push wake of `ralph org watch --all` on the
-// CLI side (plan 2026-10-18-org-director-wake, S3b: D9 and AC4 for the
+// CLI side (plan 2026-10-18-org-director-wake, D9 and AC4 for the
 // watch): where [org.director].wake_cmd is read from and the directory it
 // runs in. The wake_cmd is a #!/bin/sh script under a temp directory that
 // appends "<pwd -P>|<its arguments>" to a mark file; no test runs herdr, a

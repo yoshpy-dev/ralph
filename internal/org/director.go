@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
@@ -73,7 +71,9 @@ import (
 // registration's target follows from its launch (ResolvedWakeTarget), so
 // its attached carries none. Whether a wake can be sent at all is checked
 // before anything is written: by the CLI's attach with
-// CheckDirectorAttachWake, and by StartDirector.
+// CheckDirectorAttachWake, and by StartDirector. CheckDirectorAttachWake,
+// ValidateDirectorWakeTarget, WakesByPush, and ResolvedWakeTarget are in
+// director_wake.go, with the push wake of the watch.
 
 // Director event kinds: the "event" field of a director.jsonl line. The last
 // four are written only for a headless registration (launch herdr or cmd;
@@ -124,32 +124,6 @@ const (
 	// --all` wakes when a new open inbox item arrives, by sending the wake
 	// line to the registration's target (ResolvedWakeTarget).
 	DirectorWakePush = config.DirectorWakePush
-)
-
-// MaxDirectorWakeTargetRunes is the longest wake target
-// ValidateDirectorWakeTarget accepts, in characters (runes).
-const MaxDirectorWakeTargetRunes = 256
-
-// The refusals of CheckDirectorAttachWake and of StartDirector's wake check
-// (plan 2026-10-18-org-director-wake, D4), each wrapped by an error that
-// says the wake and what to do.
-var (
-	// ErrDirectorWakeCmdNeeded: the wake has push, but nothing could send
-	// the wake line: [org.director].wake_cmd is empty, and the registration
-	// has no default way to be sent to (a promoted session, or a headless
-	// director in a terminal launch_cmd opened; only a headless director in
-	// herdr has one, its herdr pane).
-	ErrDirectorWakeCmdNeeded = errors.New("the wake has push, but [org.director].wake_cmd is empty")
-	// ErrDirectorWakeTargetNeeded: the wake has push and
-	// [org.director].wake_cmd has {target}, but attach was given no
-	// --wake-target to put there.
-	ErrDirectorWakeTargetNeeded = errors.New("[org.director].wake_cmd has {target}, but no --wake-target was given")
-	// ErrDirectorWakeTargetWithoutPush: attach was given --wake-target, but
-	// its wake has no push, so nothing would ever be sent there.
-	ErrDirectorWakeTargetWithoutPush = errors.New("--wake-target is given, but the wake has no push")
-	// ErrDirectorWakeTargetInvalid: the wake target is not of a shape the
-	// watch sends to (ValidateDirectorWakeTarget).
-	ErrDirectorWakeTargetInvalid = errors.New("the wake target is not usable")
 )
 
 // directorLockFile is the lock file every director.jsonl write takes, in the
@@ -324,104 +298,6 @@ func (r DirectorRegistration) CmdLaunch() bool {
 	return r.Launch == DirectorLaunchCmd
 }
 
-// WakesByPush reports whether the registration's wake has push, so `ralph
-// org watch --all` wakes it when a new open inbox item arrives (plan
-// 2026-10-18-org-director-wake, D3 and D6). The watch goes by this recorded
-// wake, not by [org.director].wake.
-func (r DirectorRegistration) WakesByPush() bool {
-	return slices.Contains(r.Wake, DirectorWakePush)
-}
-
-// ResolvedWakeTarget is where the wake line of the registration goes, the
-// {target} of [org.director].wake_cmd (plan 2026-10-18-org-director-wake,
-// D3): for a headless director in herdr its pane (PaneID, empty until its
-// pane_created), for one in a terminal launch_cmd opened the terminal's name
-// DirectorAgentName(token), which launch_cmd's {name} gave it, and for a
-// promoted session its WakeTarget, the --wake-target of attach (empty when
-// none was given). A registration of a launch this binary does not know
-// counts as a promoted session's.
-func (r DirectorRegistration) ResolvedWakeTarget() string {
-	switch {
-	case r.HerdrLaunch():
-		return r.PaneID
-	case r.CmdLaunch():
-		return DirectorAgentName(r.Token)
-	}
-	return r.WakeTarget
-}
-
-// ValidateDirectorWakeTarget returns an error wrapping
-// ErrDirectorWakeTargetInvalid and saying why when target is not a wake
-// target the watch sends to (plan 2026-10-18-org-director-wake, D4 and D8):
-// it must not be empty, must be valid UTF-8 with no control character
-// (unicode.IsControl), must be at most MaxDirectorWakeTargetRunes
-// characters long, and must not start with "-", which the command
-// [org.director].wake_cmd runs could read as an option. attach checks
-// --wake-target with it before anything is written, and the watch checks
-// a recorded target with it before it sends, since director.jsonl can be
-// edited by hand. The value is quoted in the error, so its characters
-// cannot drive a terminal.
-func ValidateDirectorWakeTarget(target string) error {
-	var reason string
-	switch {
-	case target == "":
-		reason = "it is empty"
-	case !utf8.ValidString(target):
-		reason = fmt.Sprintf("%q is not valid UTF-8", target)
-	case strings.IndexFunc(target, unicode.IsControl) >= 0:
-		reason = fmt.Sprintf("%q has a control character", target)
-	case utf8.RuneCountInString(target) > MaxDirectorWakeTargetRunes:
-		reason = fmt.Sprintf("it is %d characters long, more than %d", utf8.RuneCountInString(target), MaxDirectorWakeTargetRunes)
-	case strings.HasPrefix(target, "-"):
-		reason = fmt.Sprintf(`%q starts with "-", which the command [org.director].wake_cmd runs could read as an option`, target)
-	default:
-		return nil
-	}
-	return fmt.Errorf("%w: %s", ErrDirectorWakeTargetInvalid, reason)
-}
-
-// CheckDirectorAttachWake is `ralph org director attach`'s check that the
-// wake it is about to record can be sent (plan 2026-10-18-org-director-wake,
-// D4): wake is the resolved wake (the --wake value, else
-// [org.director].wake), target the --wake-target ("" when none was given),
-// and wakeCmd [org.director].wake_cmd, all read by the caller, so a refusal
-// writes nothing. In this order, it refuses:
-//
-//   - a wake with push while wakeCmd is empty (ErrDirectorWakeCmdNeeded): a
-//     promoted session has no default way to be sent the wake line
-//   - a wake with push, a wakeCmd that has {target} in some element, and no
-//     target (ErrDirectorWakeTargetNeeded)
-//   - a target with a wake that has no push
-//     (ErrDirectorWakeTargetWithoutPush)
-//   - a target ValidateDirectorWakeTarget refuses
-//     (ErrDirectorWakeTargetInvalid)
-//
-// The {target} test is a substring test, which finds what the placeholder
-// rule of config.ValidateDirectorWakeCmd finds: no brace can come between
-// the braces of "{target}". The wake itself and wakeCmd are not validated
-// here: the CLI validates --wake, and config.Load the two settings. Its
-// errors do not start with "org: "; the CLI adds its verb.
-func CheckDirectorAttachWake(wake []string, target string, wakeCmd []string) error {
-	push := slices.Contains(wake, DirectorWakePush)
-	joined := strings.Join(wake, ",")
-	switch {
-	case push && len(wakeCmd) == 0:
-		return fmt.Errorf("%w (wake %s): a session attached with ralph org director attach has no default way to be sent the wake line "+
-			"(only a headless director in herdr has one, its herdr pane), so ralph org watch --all could not wake it; "+
-			"set [org.director].wake_cmd, or attach with --wake pull", ErrDirectorWakeCmdNeeded, joined)
-	case push && target == "" && slices.ContainsFunc(wakeCmd, func(arg string) bool { return strings.Contains(arg, config.DirectorWakePlaceholderTarget) }):
-		return fmt.Errorf("%w (wake %s): pass --wake-target with where [org.director].wake_cmd sends the wake line", ErrDirectorWakeTargetNeeded, joined)
-	case !push && target != "":
-		return fmt.Errorf("%w (wake %s): the watch sends to the wake target only to push; drop --wake-target, or attach with --wake push or --wake pull,push",
-			ErrDirectorWakeTargetWithoutPush, joined)
-	case target != "":
-		if err := ValidateDirectorWakeTarget(target); err != nil {
-			return fmt.Errorf("--wake-target: %w", err)
-		}
-	}
-	return nil
-}
-
 // describe names the registration in an error: its id, driver, and attach
 // time, and for a headless registration its state, so a refusal names a
 // registration still starting as such, and for a launch cmd that launch and
@@ -550,18 +426,17 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 // reads the file again; while a registration is current (a headless one
 // too, in state starting included) it returns ErrDirectorAttached, naming
 // that registration, and writes nothing, unless a.Replace is set: then it
-// appends the current
-// registration's detached and the new attached as two lines of one write
-// (appendLocked), and returns the ended registration as replaced. A headless
-// registration replaced that way stays open, for `ralph org director stop`
-// to close its pane, as one detached by Detach does. A reader without the
-// lock (Read) thus finds no moment with no registration between the two
-// lines, as it could when they were two writes (self-review L5 of
-// org-director-attach). A write that fails ends one of two ways. Either it
-// is cut back under the same lock (appendLocked), even when it stopped
-// after the detached line, so the old registration stays current and the
-// error says nothing was recorded (only a Read between the failed write and
-// the cut can see part of it); or the cut fails too, and the error wraps
+// appends the current registration's detached and the new attached as two
+// lines of one write (appendLocked), and returns the ended registration as
+// replaced. A headless registration replaced that way stays open, for `ralph
+// org director stop` to close its pane, as one detached by Detach does. A
+// reader without the lock (Read) thus finds no moment with no registration
+// between the two lines, as it could when they were two writes (self-review
+// L5 of org-director-attach). A write that fails ends one of two ways.
+// Either it is cut back under the same lock (appendLocked), even when it
+// stopped after the detached line, so the old registration stays current and
+// the error says nothing was recorded (only a Read between the failed write
+// and the cut can see part of it); or the cut fails too, and the error wraps
 // ErrDirectorWriteNotRestored and does not say that. A failed write of a
 // plain attach ends the same two ways. The new id is one more than the
 // largest d<N> anywhere in the file, damaged lines included. A driver other

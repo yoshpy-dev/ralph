@@ -1489,7 +1489,7 @@ func TestRealGitStatus_IsCutOffAtTheDriverCallTimeout(t *testing.T) {
 }
 
 // The tests below are for step 2 of RunWatchAll's cycle, the push wake of
-// the director (plan 2026-10-18-org-director-wake, S3b: D6, D10, AC5, and
+// the director (plan 2026-10-18-org-director-wake, D6, D10, AC5, and
 // AC7). The wake_cmd is a writeWakeScript script in its own directory, given
 // to the watch as DirectorWakeDir.
 

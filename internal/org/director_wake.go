@@ -9,9 +9,141 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 )
+
+// The wake of a registration (plan 2026-10-18-org-director-wake, D3, D4, and
+// D8): the refusals of attach and start, the check of a wake target, and how
+// the watch reads a registration's wake and target. The Wake and WakeTarget
+// fields of a registration, DirectorWakePull, and DirectorWakePush are in
+// director.go.
+
+// MaxDirectorWakeTargetRunes is the longest wake target
+// ValidateDirectorWakeTarget accepts, in characters (runes).
+const MaxDirectorWakeTargetRunes = 256
+
+// The refusals of CheckDirectorAttachWake and of StartDirector's wake check
+// (plan 2026-10-18-org-director-wake, D4), each wrapped by an error that
+// says the wake and what to do.
+var (
+	// ErrDirectorWakeCmdNeeded: the wake has push, but nothing could send
+	// the wake line: [org.director].wake_cmd is empty, and the registration
+	// has no default way to be sent to (a promoted session, or a headless
+	// director in a terminal launch_cmd opened; only a headless director in
+	// herdr has one, its herdr pane).
+	ErrDirectorWakeCmdNeeded = errors.New("the wake has push, but [org.director].wake_cmd is empty")
+	// ErrDirectorWakeTargetNeeded: the wake has push and
+	// [org.director].wake_cmd has {target}, but attach was given no
+	// --wake-target to put there.
+	ErrDirectorWakeTargetNeeded = errors.New("[org.director].wake_cmd has {target}, but no --wake-target was given")
+	// ErrDirectorWakeTargetWithoutPush: attach was given --wake-target, but
+	// its wake has no push, so nothing would ever be sent there.
+	ErrDirectorWakeTargetWithoutPush = errors.New("--wake-target is given, but the wake has no push")
+	// ErrDirectorWakeTargetInvalid: the wake target is not of a shape the
+	// watch sends to (ValidateDirectorWakeTarget).
+	ErrDirectorWakeTargetInvalid = errors.New("the wake target is not usable")
+)
+
+// WakesByPush reports whether the registration's wake has push, so `ralph
+// org watch --all` wakes it when a new open inbox item arrives (plan
+// 2026-10-18-org-director-wake, D3 and D6). The watch goes by this recorded
+// wake, not by [org.director].wake.
+func (r DirectorRegistration) WakesByPush() bool {
+	return slices.Contains(r.Wake, DirectorWakePush)
+}
+
+// ResolvedWakeTarget is where the wake line of the registration goes, the
+// {target} of [org.director].wake_cmd (plan 2026-10-18-org-director-wake,
+// D3): for a headless director in herdr its pane (PaneID, empty until its
+// pane_created), for one in a terminal launch_cmd opened the terminal's name
+// DirectorAgentName(token), which launch_cmd's {name} gave it, and for a
+// promoted session its WakeTarget, the --wake-target of attach (empty when
+// none was given). A registration of a launch this binary does not know
+// counts as a promoted session's.
+func (r DirectorRegistration) ResolvedWakeTarget() string {
+	switch {
+	case r.HerdrLaunch():
+		return r.PaneID
+	case r.CmdLaunch():
+		return DirectorAgentName(r.Token)
+	}
+	return r.WakeTarget
+}
+
+// ValidateDirectorWakeTarget returns an error wrapping
+// ErrDirectorWakeTargetInvalid and saying why when target is not a wake
+// target the watch sends to (plan 2026-10-18-org-director-wake, D4 and D8):
+// it must not be empty, must be valid UTF-8 with no control character
+// (unicode.IsControl), must be at most MaxDirectorWakeTargetRunes
+// characters long, and must not start with "-", which the command
+// [org.director].wake_cmd runs could read as an option. attach checks
+// --wake-target with it before anything is written, and the watch checks
+// a recorded target with it before it sends, since director.jsonl can be
+// edited by hand. The value is quoted in the error, so its characters
+// cannot drive a terminal.
+func ValidateDirectorWakeTarget(target string) error {
+	var reason string
+	switch {
+	case target == "":
+		reason = "it is empty"
+	case !utf8.ValidString(target):
+		reason = fmt.Sprintf("%q is not valid UTF-8", target)
+	case strings.IndexFunc(target, unicode.IsControl) >= 0:
+		reason = fmt.Sprintf("%q has a control character", target)
+	case utf8.RuneCountInString(target) > MaxDirectorWakeTargetRunes:
+		reason = fmt.Sprintf("it is %d characters long, more than %d", utf8.RuneCountInString(target), MaxDirectorWakeTargetRunes)
+	case strings.HasPrefix(target, "-"):
+		reason = fmt.Sprintf(`%q starts with "-", which the command [org.director].wake_cmd runs could read as an option`, target)
+	default:
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrDirectorWakeTargetInvalid, reason)
+}
+
+// CheckDirectorAttachWake is `ralph org director attach`'s check that the
+// wake it is about to record can be sent (plan 2026-10-18-org-director-wake,
+// D4): wake is the resolved wake (the --wake value, else
+// [org.director].wake), target the --wake-target ("" when none was given),
+// and wakeCmd [org.director].wake_cmd, all read by the caller, so a refusal
+// writes nothing. In this order, it refuses:
+//
+//   - a wake with push while wakeCmd is empty (ErrDirectorWakeCmdNeeded): a
+//     promoted session has no default way to be sent the wake line
+//   - a wake with push, a wakeCmd that has {target} in some element, and no
+//     target (ErrDirectorWakeTargetNeeded)
+//   - a target with a wake that has no push
+//     (ErrDirectorWakeTargetWithoutPush)
+//   - a target ValidateDirectorWakeTarget refuses
+//     (ErrDirectorWakeTargetInvalid)
+//
+// The {target} test is a substring test, which finds what the placeholder
+// rule of config.ValidateDirectorWakeCmd finds: no brace can come between
+// the braces of "{target}". The wake itself and wakeCmd are not validated
+// here: the CLI validates --wake, and config.Load the two settings. Its
+// errors do not start with "org: "; the CLI adds its verb.
+func CheckDirectorAttachWake(wake []string, target string, wakeCmd []string) error {
+	push := slices.Contains(wake, DirectorWakePush)
+	joined := strings.Join(wake, ",")
+	switch {
+	case push && len(wakeCmd) == 0:
+		return fmt.Errorf("%w (wake %s): a session attached with ralph org director attach has no default way to be sent the wake line "+
+			"(only a headless director in herdr has one, its herdr pane), so ralph org watch --all could not wake it; "+
+			"set [org.director].wake_cmd, or attach with --wake pull", ErrDirectorWakeCmdNeeded, joined)
+	case push && target == "" && directorWakeCmdHasTarget(wakeCmd):
+		return fmt.Errorf("%w (wake %s): pass --wake-target with where [org.director].wake_cmd sends the wake line", ErrDirectorWakeTargetNeeded, joined)
+	case !push && target != "":
+		return fmt.Errorf("%w (wake %s): the watch sends to the wake target only to push; drop --wake-target, or attach with --wake push or --wake pull,push",
+			ErrDirectorWakeTargetWithoutPush, joined)
+	case target != "":
+		if err := ValidateDirectorWakeTarget(target); err != nil {
+			return fmt.Errorf("--wake-target: %w", err)
+		}
+	}
+	return nil
+}
 
 // The push wake of stage 8b-1 (plan 2026-10-18-org-director-wake, D5 to D8):
 // each cycle of `ralph org watch --all` (RunWatchAll), right after the inbox
@@ -24,8 +156,9 @@ import (
 // for the same registration for directorWakeRetry, in the watch's memory
 // only (DirectorWakeMemory). Waking leaves the inbox deadlines alone: an item
 // the director does not ack still reaches the human at its ack deadline
-// (D10). The registration's wake and target are in director.go; the runner
-// wake_cmd shares with launch_cmd is runDirectorCmd in director_cmd.go.
+// (D10). The registration's wake and target are read with WakesByPush and
+// ResolvedWakeTarget above; the runner wake_cmd shares with launch_cmd is
+// runDirectorCmd in director_cmd.go.
 
 const (
 	// directorWakeRetry is how long WakeDirector waits after a failed wake of
@@ -184,28 +317,21 @@ type DirectorWakeResult struct {
 // registration current in director.jsonl at stateDir for the inbox items it
 // was not woken for yet. In this order:
 //
-//  1. It reads director.jsonl (an error is Err). It does nothing, with no
+//  1. It reads director.jsonl (an error is Err) and does nothing, with no
 //     line, when no registration is current, when the registration's wake
-//     has no push (WakesByPush), and when the registration is headless and
-//     not running.
-//  2. It reads the inbox (Org.Inbox; none, or an error, is Err) and does
-//     nothing when no item is open and not woken (DirectorWakeItems).
+//     has no push, and when the registration is headless and not running
+//     (directorToWake).
+//  2. It reads the inbox (an error is Err) and does nothing when no item is
+//     open and not woken (directorToWake).
 //  3. It does nothing when mem holds the registration back: its wake failed
 //     less than directorWakeRetry before now (HeldBack).
-//  4. It chooses the sender (directorWakeSender): Config.Director.WakeCmd
-//     when it is not empty, run in wakeCmdDir (runDirectorWakeCmd);
-//     otherwise, for a headless director in herdr, its herdr pane
-//     (typeDirectorWakeLine); otherwise nothing, since nothing else can type
-//     into a promoted session or into the terminal launch_cmd opened. A
-//     wake_cmd that is not valid, a target that is not usable, and no
-//     sender are each said once per registration on banner and skipped.
-//  5. It sends DirectorWakeText(ids) once. On success it appends one woken
-//     event per item, all items included (not only the ones the line
-//     names), with the registration's id and the way it was sent; a write
-//     that fails is said on banner and recorded in mem as a failure, so a
-//     broken inbox is not woken every cycle. On failure it records the
-//     failure in mem at now, writes one line on banner, and writes no woken
-//     event.
+//  4. It chooses the sender, wake_cmd or the herdr pane, and skips a
+//     registration that has none, saying so once on banner
+//     (sendDirectorWake).
+//  5. It sends DirectorWakeText(ids) once. When that succeeds it appends a
+//     woken event for every item; when it fails it writes no woken event. A
+//     failed send or write is said on banner and recorded in mem
+//     (sendDirectorWake).
 //
 // wakeCmdDir is the absolute directory wake_cmd runs in, the directory of
 // the ralph.toml it was read from (D9; WatchAllParams.DirectorWakeDir); an
@@ -214,33 +340,8 @@ type DirectorWakeResult struct {
 // file is escaped on the banner (PrintableInboxText), and no line holds an
 // item's body. Config.Director.Enabled is not read.
 func (o *Org) WakeDirector(now time.Time, stateDir, wakeCmdDir string, mem *DirectorWakeMemory, banner io.Writer) DirectorWakeResult {
-	dres, err := NewDirectorStore(stateDir).Read()
-	if err != nil {
-		return DirectorWakeResult{Err: fmt.Errorf("org: director wake: %w", err)}
-	}
-	reg := dres.Current
+	reg, res := o.directorToWake(stateDir)
 	if reg == nil {
-		return DirectorWakeResult{Skipped: DirectorWakeSkippedNoRegistration}
-	}
-	res := DirectorWakeResult{RegistrationID: reg.ID}
-	switch {
-	case !reg.WakesByPush():
-		res.Skipped = DirectorWakeSkippedNoPush
-		return res
-	case reg.Headless() && reg.State != DirectorStateRunning:
-		res.Skipped = DirectorWakeSkippedNotRunning
-		return res
-	case o.Inbox == nil:
-		res.Err = errors.New("org: director wake: no inbox store is configured")
-		return res
-	}
-	inbox, err := o.Inbox.Read()
-	if err != nil {
-		res.Err = fmt.Errorf("org: director wake: %w", err)
-		return res
-	}
-	if res.IDs = DirectorWakeItems(inbox.Items); len(res.IDs) == 0 {
-		res.Skipped = DirectorWakeSkippedNothingToWake
 		return res
 	}
 	if mem == nil {
@@ -251,7 +352,67 @@ func (o *Org) WakeDirector(now time.Time, stateDir, wakeCmdDir string, mem *Dire
 		res.HeldBack = true
 		return res
 	}
-	sender, skipped, why := o.directorWakeSender(*reg, wakeCmdDir)
+	return o.sendDirectorWake(*reg, res, now, wakeCmdDir, mem, banner)
+}
+
+// directorToWake is steps 1 and 2 of WakeDirector. It reads director.jsonl
+// at stateDir and the inbox (Org.Inbox), and returns the current
+// registration with a result that holds its RegistrationID and the IDs to
+// wake (DirectorWakeItems). It returns no registration, with the result
+// WakeDirector returns as it is, when director.jsonl or the inbox cannot be
+// read or there is no inbox store (Err), and when there is nothing to send
+// (Skipped, and no line is written): no registration is current, the
+// registration's wake has no push (WakesByPush), the registration is
+// headless and not running, or no item is open and not woken.
+func (o *Org) directorToWake(stateDir string) (*DirectorRegistration, DirectorWakeResult) {
+	dres, err := NewDirectorStore(stateDir).Read()
+	if err != nil {
+		return nil, DirectorWakeResult{Err: fmt.Errorf("org: director wake: %w", err)}
+	}
+	reg := dres.Current
+	if reg == nil {
+		return nil, DirectorWakeResult{Skipped: DirectorWakeSkippedNoRegistration}
+	}
+	res := DirectorWakeResult{RegistrationID: reg.ID}
+	switch {
+	case !reg.WakesByPush():
+		res.Skipped = DirectorWakeSkippedNoPush
+		return nil, res
+	case reg.Headless() && reg.State != DirectorStateRunning:
+		res.Skipped = DirectorWakeSkippedNotRunning
+		return nil, res
+	case o.Inbox == nil:
+		res.Err = errors.New("org: director wake: no inbox store is configured")
+		return nil, res
+	}
+	inbox, err := o.Inbox.Read()
+	if err != nil {
+		res.Err = fmt.Errorf("org: director wake: %w", err)
+		return nil, res
+	}
+	if res.IDs = DirectorWakeItems(inbox.Items); len(res.IDs) == 0 {
+		res.Skipped = DirectorWakeSkippedNothingToWake
+		return nil, res
+	}
+	return reg, res
+}
+
+// sendDirectorWake is steps 4 and 5 of WakeDirector for reg, with res as
+// directorToWake returned it. It chooses the sender (directorWakeSender):
+// Config.Director.WakeCmd when it is not empty, run in wakeCmdDir
+// (runDirectorWakeCmd); otherwise, for a headless director in herdr, its
+// herdr pane (typeDirectorWakeLine); otherwise nothing, since nothing else
+// can type into a promoted session or into the terminal launch_cmd opened.
+// A wake_cmd that is not valid, a target that is not usable, and no sender
+// are each said once per registration on banner and skipped. Then it sends
+// DirectorWakeText(res.IDs) once. On success it appends one woken event per
+// item, all items included (not only the ones the line names), with reg's
+// id and the way it was sent; a write that fails is said on banner and
+// recorded in mem as a failure, so a broken inbox is not woken every cycle.
+// On failure it records the failure in mem at now, writes one line on
+// banner, and writes no woken event.
+func (o *Org) sendDirectorWake(reg DirectorRegistration, res DirectorWakeResult, now time.Time, wakeCmdDir string, mem *DirectorWakeMemory, banner io.Writer) DirectorWakeResult {
+	sender, skipped, why := o.directorWakeSender(reg, wakeCmdDir)
 	if skipped != "" {
 		res.Skipped = skipped
 		if mem.warnOnce(reg.ID, skipped) {
@@ -336,8 +497,9 @@ func (o *Org) directorWakeSender(reg DirectorRegistration, wakeCmdDir string) (s
 }
 
 // directorWakeCmdHasTarget reports whether an element of wakeCmd has
-// {target}. A substring test finds what the placeholder rule of
-// config.ValidateDirectorWakeCmd finds, as CheckDirectorAttachWake's does.
+// {target}, for CheckDirectorAttachWake and directorWakeSender. A substring
+// test finds what the placeholder rule of config.ValidateDirectorWakeCmd
+// finds: no brace can come between the braces of "{target}".
 func directorWakeCmdHasTarget(wakeCmd []string) bool {
 	return slices.ContainsFunc(wakeCmd, func(arg string) bool { return strings.Contains(arg, config.DirectorWakePlaceholderTarget) })
 }

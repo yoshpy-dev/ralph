@@ -178,7 +178,9 @@ wake_cmd = ["tmux", "-L", "ralph", "send-keys", "-t", "{target}", "-l", "{text}"
 ```
 
 The `";"` element is an argument that tmux reads as its own command
-separator; no shell is involved. `-l` sends the line literally.
+separator; no shell is involved, and `{target}` is the value of `-t`, which
+tmux reads as a target, not as a shell command (see Security). `-l` sends
+the line literally.
 
 ### tmux, with a pause before Enter
 
@@ -261,6 +263,11 @@ text typed during a turn as its next input; that was not checked live.
   and that registration is not tried again for 5 minutes. The gap lives in
   the watch's memory only: a restarted watch tries at once, and a new
   registration (a new `d<N>`) starts fresh.
+- With the herdr default, when the line was typed but the Enter failed (the
+  error says `after the line was typed`), the line stays in the director's
+  input line. The next try, 5 minutes later, types it once more, so the
+  director may get the line twice in one input; the meaning does not
+  change.
 - A registration that cannot be sent to at all (no sender, a target that
   fails the checks above, a `wake_cmd` that does not validate) is said once
   per registration: `watchdog: director d1 is not woken: ... (said once)`.
@@ -283,6 +290,17 @@ human.
   to use, `{target}` or the herdr pane (not empty, no control character, at
   most 256 characters, not starting with `-`), since `director.jsonl` can be
   edited by hand.
+- That check is of the target's shape only. `{target}` comes from the
+  registration (`director.jsonl`, which a leader can write; for a promoted
+  session, the `--wake-target` of attach) and may hold `;`, `$`, `` ` ``,
+  and spaces: tmux targets such as `$1`, `%3`, and `@2` need some of them.
+  Never put `{target}` inside a string a shell reads (`sh -c '...'`,
+  `bash -c`, a tmux shell-command, an Orca or terminal command line): give
+  it an argv element of its own (`"{target}"`, or a flag's value such as
+  `"--terminal", "{target}"`), or pass it to a script that reads it quoted
+  (`"$1"`), as the examples above do. A `wake_cmd` that puts `{target}` in
+  a shell string lets whoever can write `director.jsonl` run commands as
+  the user who runs the watch.
 - Without `--config`, when the ledger is the main worktree's, `wake_cmd`
   comes from the main worktree's `ralph.toml` and runs in its root, and a
   relative program is resolved from there, so a script with the same name

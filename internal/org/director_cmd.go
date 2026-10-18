@@ -400,9 +400,9 @@ func directorLaunchArgv(launchCmd []string, scriptPath, token, cwd string) ([]st
 // bytes, runDirectorLaunchCmd keeps for its error.
 const directorLaunchOutputLimit = 4096
 
-// defaultDirectorLaunchWaitDelay is runDirectorCmd's exec.Cmd.WaitDelay
+// defaultDirectorCmdWaitDelay is runDirectorCmd's exec.Cmd.WaitDelay
 // when its caller gives none, for launch_cmd and wake_cmd alike.
-const defaultDirectorLaunchWaitDelay = 2 * time.Second
+const defaultDirectorCmdWaitDelay = 2 * time.Second
 
 // directorTailBuffer keeps the last limit bytes written to it. os/exec calls
 // Write from one goroutine at a time when it is both Stdout and Stderr.
@@ -423,7 +423,7 @@ func (w *directorTailBuffer) Write(p []byte) (int, error) {
 // (directorLaunchArgv), without a shell: argv[0] with the rest as its
 // arguments, in dir, with stdin empty and stdout and stderr kept together
 // (their last directorLaunchOutputLimit bytes), under ctx, which bounds it
-// (start gives DriverCallTimeout). waitDelay (defaultDirectorLaunchWaitDelay
+// (start gives DriverCallTimeout). waitDelay (defaultDirectorCmdWaitDelay
 // when 0 or less) is its exec.Cmd.WaitDelay, so a background child that
 // keeps the output open cannot hold the call past the command's own exit
 // (an exit 0 counts then, as ExecRunner counts it) or past ctx. A command
@@ -449,7 +449,7 @@ func runDirectorCmd(ctx context.Context, key string, argv []string, dir string, 
 		return fmt.Errorf("%s: no command to run", key)
 	}
 	if waitDelay <= 0 {
-		waitDelay = defaultDirectorLaunchWaitDelay
+		waitDelay = defaultDirectorCmdWaitDelay
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir

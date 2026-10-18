@@ -26,15 +26,15 @@ import (
 // the manifest, so no path holds both locks.
 
 // Inbox event kinds: the "event" field of an inbox.jsonl line.
-// InboxEventWoken records that `ralph org watch --all` woke the director
-// for the item (plan 2026-10-18-org-director-wake, D10); a ralph from before
-// that stage counts it as an unknown kind and ignores it.
 const (
 	InboxEventEscalated = "escalated"
 	InboxEventNotified  = "notified"
-	InboxEventWoken     = "woken"
-	InboxEventAcked     = "acked"
-	InboxEventResolved  = "resolved"
+	// InboxEventWoken records that `ralph org watch --all` woke the director
+	// for the item (plan 2026-10-18-org-director-wake, D10); a ralph from
+	// before that stage counts it as an unknown kind and ignores it.
+	InboxEventWoken    = "woken"
+	InboxEventAcked    = "acked"
+	InboxEventResolved = "resolved"
 )
 
 // How the director was woken for an item: the "via" field of its woken

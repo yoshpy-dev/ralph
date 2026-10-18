@@ -270,6 +270,16 @@ type OrgDirectorConfig struct {
 	// registration must never choose the program), or that has a placeholder
 	// outside the two above in any element (ValidateDirectorWakeCmd). A "{"
 	// or "}" that is not part of such a pair is passed through as written.
+	//
+	// {target} comes from the registration (director.jsonl, which a leader
+	// can write; for a promoted session, the --wake-target of attach), and
+	// attach and the watch check only its shape (not empty, no control
+	// character, at most 256 characters, not starting with "-"), so it may
+	// hold ";", "$", backquotes, and spaces. Never put {target} inside a
+	// string a shell reads (sh -c '...', bash -c, a tmux shell-command, an
+	// Orca or terminal command line): give it an element of its own
+	// ("{target}", or a flag's value such as "--terminal", "{target}"), or
+	// pass it to a script that reads it quoted ("$1").
 	WakeCmd []string `toml:"wake_cmd"`
 }
 
@@ -309,12 +319,12 @@ const (
 	directorWakeCmdKey   = "[org.director].wake_cmd"
 )
 
-// directorLaunchPlaceholderPattern finds the placeholders of an element of
+// directorCmdPlaceholderPattern finds the placeholders of an element of
 // the two argv settings of [org.director], launch_cmd and wake_cmd: a "{"
 // and the next "}" with no other brace between them. The validation and the
 // replacement of both settings use it, so what Load accepts is what start
 // and the watch replace.
-var directorLaunchPlaceholderPattern = regexp.MustCompile(`\{[^{}]*\}`)
+var directorCmdPlaceholderPattern = regexp.MustCompile(`\{[^{}]*\}`)
 
 // checkDirectorCmdProgram returns an error naming key, an argv setting of
 // [org.director], when first, its first element, is empty or whitespace
@@ -331,7 +341,7 @@ func checkDirectorCmdProgram(key, first string) error {
 // that is not one of placeholders.
 func checkDirectorCmdPlaceholders(key string, cmd, placeholders []string) error {
 	for i, arg := range cmd {
-		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
+		for _, placeholder := range directorCmdPlaceholderPattern.FindAllString(arg, -1) {
 			if !slices.Contains(placeholders, placeholder) {
 				return fmt.Errorf("%s: element %d %q has the unknown placeholder %s; the placeholders are %s",
 					key, i, arg, placeholder, strings.Join(placeholders, ", "))
@@ -347,7 +357,7 @@ func checkDirectorCmdPlaceholders(key string, cmd, placeholders []string) error 
 // and arg is then returned unchanged.
 func expandDirectorCmdArg(key, arg string, values map[string]string) (string, error) {
 	missing := ""
-	expanded := directorLaunchPlaceholderPattern.ReplaceAllStringFunc(arg, func(placeholder string) string {
+	expanded := directorCmdPlaceholderPattern.ReplaceAllStringFunc(arg, func(placeholder string) string {
 		value, ok := values[placeholder]
 		if !ok {
 			if missing == "" {
@@ -380,7 +390,7 @@ func ValidateDirectorLaunchCmd(cmd []string) error {
 		return err
 	}
 	for _, arg := range cmd {
-		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
+		for _, placeholder := range directorCmdPlaceholderPattern.FindAllString(arg, -1) {
 			if placeholder == DirectorLaunchPlaceholderScript || placeholder == DirectorLaunchPlaceholderScriptSh {
 				return nil
 			}
@@ -474,7 +484,7 @@ func ValidateDirectorWakeCmd(cmd []string) error {
 	if err := checkDirectorCmdProgram(directorWakeCmdKey, cmd[0]); err != nil {
 		return err
 	}
-	if directorLaunchPlaceholderPattern.MatchString(cmd[0]) {
+	if directorCmdPlaceholderPattern.MatchString(cmd[0]) {
 		return fmt.Errorf("%s: the first element is the command to run and must not contain a placeholder (a director's registration must never choose the program), got %q", directorWakeCmdKey, cmd[0])
 	}
 	return checkDirectorCmdPlaceholders(directorWakeCmdKey, cmd, DirectorWakePlaceholders())

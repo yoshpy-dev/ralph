@@ -438,7 +438,7 @@ func TestStartDirector_ALaunchCmdStartThatPushesPassesWithAWakeCmd(t *testing.T)
 }
 
 // The tests below are for the push wake of `ralph org watch --all` (plan
-// 2026-10-18-org-director-wake, S3b: D5 to D8, AC5, AC6, and AC7):
+// 2026-10-18-org-director-wake, D5 to D8, AC5, AC6, and AC7):
 // WakeDirector, its text, the items it wakes for, and its memory. The
 // wake_cmd they run is a #!/bin/sh script under t.TempDir() that records its
 // arguments and its working directory (writeWakeScript); herdr is the fake of

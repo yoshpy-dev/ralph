@@ -179,8 +179,10 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
 // director attach also Director.Wake and Director.WakeCmd
-// (withMainWorktreeDirectorWakeConfig), and director start the settings of
-// the headless director, those two included
+// (withMainWorktreeDirectorWakeConfig), `ralph org watch --all` also
+// Director.Wake and Director.WakeCmd, through orgWatchDirectorWake
+// (withMainWorktreeDirectorWakeConfigFrom), and director start the settings
+// of the headless director, those two included
 // (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
 // fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
@@ -212,13 +214,12 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // returned unchanged. No other setting is taken; escalate goes by Enabled
 // alone, and director attach takes Director.Wake and Director.WakeCmd with
 // withMainWorktreeDirectorWakeConfig. A main worktree ralph.toml that fails
-// to load is an error, which
-// `ralph org escalate` handles like a ralph.toml that does not load, `ralph
-// org director attach` and `status` and `ralph org merge` return, and `ralph
-// status` warns about before it shows the built-in defaults
-// (statusDirectorConfig). A verb that reports or acts on the switch or on
-// auto_merge reads it through this function, so it sees the value escalate
-// and the director go by.
+// to load is an error, which `ralph org escalate` handles like a ralph.toml
+// that does not load, `ralph org director attach` and `status` and `ralph
+// org merge` return, and `ralph status` warns about before it shows the
+// built-in defaults (statusDirectorConfig). A verb that reports or acts on
+// the switch or on auto_merge reads it through this function, so it sees the
+// value escalate and the director go by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {

@@ -191,6 +191,13 @@ wake = ["pull"]
 # load. With an empty wake_cmd, only a headless director in herdr can be
 # pushed, by input to its herdr pane. The watch reads wake_cmd when it
 # starts, so restart `ralph org watch --all` after changing it.
+# {target} comes from the registration (director.jsonl, which a leader can
+# write; for a promoted session, its --wake-target) and is checked only for
+# its shape, so it may hold ;, $, backquotes, and spaces. Never put
+# {target} inside a string a shell reads (sh -c '...', bash -c, a tmux
+# shell-command, an Orca or terminal command line): give it an element of
+# its own ("{target}", or a flag's value such as "--terminal", "{target}"),
+# or pass it to a script that reads it quoted ("$1").
 # docs/recipes/director-wake.md has an example for each terminal.
 # wake_cmd = ["tmux", "-L", "ralph", "send-keys", "-t", "{target}", "-l", "{text}", ";", "send-keys", "-t", "{target}", "Enter"]
 
