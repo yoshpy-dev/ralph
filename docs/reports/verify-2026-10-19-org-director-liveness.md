@@ -86,3 +86,7 @@ CRITICAL、HIGH、MEDIUM はない。どれも計画の文で、コードと出�
 - Verified: AC1〜AC9 のコードとテストの突き合わせ。D1〜D8 と実装の一致(D2 の逸脱は記録あり)。静的解析(run-static-verify、go1.26.0 の vet、go1.25.8 の build と vet、check-skill-sync、check-sync、diff --check)。skill と recipe の写しの一致。文書のずれの 3 項目(残った文、tech-debt の書き分け、start の help)。80dd2982 が移動だけであること。実機の binary より後の変更の範囲
 - Partially verified: AC9 の実機(herdr の codex director の (a) と (b) だけ。launch_cmd と push は実機なし)
 - Not verified: テストの実行と `-race`、Linux の ps、Claude Code の director、launch_cmd の director の実機
+
+## このあとの変更の確かめ(2da83a76)
+
+この verify のあとに、7ef22637(テストだけ)と 622c204e(sync-docs による `ralph org director --help` の 1 文とそのテストの照合文字列、tech-debt の 2 行)が入った。verify はこの 2 つのあとに走らせ直していない。代わりに最終の HEAD 2da83a76 で `./scripts/run-verify.sh` を回し、rc 0 だった(静的解析、shell のテスト、Go の全パッケージ。evidence は gitignore の `docs/evidence/verify-2026-10-18-220917.log`)。上の Verdict は変えない。

@@ -136,3 +136,5 @@ Test gaps の LOW 2 件を、テストだけのコミット 7ef22637 で埋め�
 | M02 ロックを持ったままの読み直し | `TestCheckDirector_TheReadUnderTheLockWaitsForAWriterThatHoldsIt`(既存の `directorCheckAfterRead` の差し込みで、本物の `MarkCmdLaunched` を書き込みの途中で止め、本物の flock を持たせたまま確かめを走らせる。順はロックだけで決まる) | `readDirectorVersion` から `withLock` を外したもの。`-count=20` で 20 回とも赤 |
 
 確かめたこと(すべて rc 0): `go build ./...` と `go vet ./internal/org/`、`gofmt -l` の出力なし、3 本を `-count=20`(60 PASS)、`GOTOOLCHAIN=go1.25.8` で `-count=3`、`-race -count=3`(ロックのテストは `-race -count=20` も)、`go test ./internal/org/ -run Director`、`./scripts/run-static-verify.sh`。herdr、gh、tmux、orca、osascript、open の canary を PATH の先頭に置いた実行で、呼び出しは 0 回だった。orchestrator も 3 本を `-count=5` で流し直し、15 回とも PASS した。Verdict は pass のまま変わらない。
+
+7ef22637 のあとに 622c204e(sync-docs による `ralph org director --help` の 1 文とそのテストの照合文字列)も入った。このテストは走らせ直していないが、最終の HEAD 2da83a76 で `./scripts/run-verify.sh` を回し、rc 0 だった(Go は cli、config、org を含む全パッケージが ok。evidence は gitignore の `docs/evidence/verify-2026-10-18-220917.log`)。
