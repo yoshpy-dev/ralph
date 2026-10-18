@@ -208,6 +208,7 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
   - S3a 受信箱(AC8): 0f9b457f。`appendLocked` を複数の event を 1 回で書く形にした。`inbox show` の help の event の一覧に woken を足した
   - 順の入れ替え: S5(実機)を S4(文書)の前に回す。codex が作業中に届いた入力をどう扱うか(D11、Risks)の結果を skill と recipe に書くため
   - S3b 見張りが起こす手順(AC4 の見張りの分、AC5〜AC7): b716d041。launch_cmd の runner を `runDirectorCmd` に一般化し、wake_cmd は出力の末尾 512 バイトだけを残す(launch_cmd は 4096 バイトのまま、エラー文は変わらない)。`--detach` でも親が main worktree の ralph.toml を読み、読めなければ親のエラーにする。director.jsonl が読めないサイクルは起こす手順だけを飛ばす。S4 に回す残り: `--config` の help に `watch --all` が wake と wake_cmd を読むことを足す、`internal/cli/org_director_wake_test.go:26` の「S3 で入る」のコメントを直す
+  - S5 実機(AC10): `docs/evidence/director-wake-livefire-2026-10-18.md`。分離した herdr server で codex 0.160.1 の director を 2 回起こした。待っていない codex は 1 行を新しい手番として受け、受信箱を読んで ack し、QUESTION を人に聞いた。手番の途中に届いた 1 行と Enter は、次の手番まで待たされずに今の手番に差し込まれ(同じ turn_id)、失われなかった。pull と push の併用では、wait が拾った件を同じ秒に 1 行が名指しし、woken が acked のあとに記録されることがある。codex はどちらの回も最初の手番で `wait --inbox` を始めなかった。S4 で skill と recipe にこの結果を書く
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
