@@ -1,14 +1,22 @@
 # Live check: the push wake of a headless codex director (stage 8b-1, S5)
 
 Plan: `docs/plans/active/2026-10-18-org-director-wake.md` (D11, AC10).
-Two runs against an isolated herdr server and an isolated ledger: a codex
+Three runs against an isolated herdr server and an isolated ledger: a codex
 director registered with `wake = ["push"]` and woken while idle, then one
 registered with `wake = ["pull", "push"]` and woken while it was working on a
-`ralph org wait --inbox` it had been asked to run.
+`ralph org wait --inbox` it had been asked to run, then (Run 3, after the
+verify report) one more with `wake = ["push"]` and the skill and role
+prompt of S4.
 
-Values left out: the launch tokens are `<token-d1>` and `<token-d2>`, the
-herdr panes (the wake targets) are `<pane-d1>` and `<pane-d2>`, and `$HOME`
-is `~`.
+Runs 1 and 2 used the `/director` skill and the director role prompt of
+`88e433b2`, from before S4 (`78f8acb3`): that skill's 受信箱の処理 section
+told every director to wait with `ralph org wait --inbox` and did not
+describe the wake line, and the role prompt did not mention the line. Run 3
+used the binary, skill, and prompt of `abf295f9`, after S4 and the S6 fixes.
+
+Values left out: the launch tokens are `<token-d1>`, `<token-d2>`, and
+`<token-d3>`, the herdr panes (the wake targets) are `<pane-d1>`,
+`<pane-d2>`, and `<pane-d3>`, and `$HOME` is `~`.
 
 ## Setup
 
@@ -274,6 +282,72 @@ once=false state-dir=/tmp/rwk/ledger (source: flag))`): no wake failed and
 none was skipped with a line. `/tmp/rwk/osascript.log` was never created:
 neither item reached its ack deadline, and nothing was sent to the human.
 
+## Run 3: `wake = ["push"]`, the skill and role prompt after S4
+
+Set up again from scratch after the cleanup below (a new `/tmp/rwk`, a new
+ledger, so the director is `d1` and the item `e1` again), the same way as
+above, except:
+
+- ralph built from `abf295f9` (the code of the S6 fixes, `a0170256`, plus
+  the S6 note and the verify report), and `/tmp/rwk/proj/.agents/skills/`
+  taken from `abf295f9` (`git archive`): the director skill's 受信箱の処理
+  section says that a director with push runs no `wait --inbox` and ends its
+  turn, and the role prompt describes the line
+- `wake = ["push"]`, `wake_cmd` empty (the herdr default), watch pid 14614
+
+`ralph org director start --driver codex --model gpt-6-astra` started d1 in
+pane `<pane-d3>` of a new workspace, with no startup dialog.
+
+codex's first turn (09:15:28 to 09:15:53): it read its role prompt, ran
+`ralph org director status`, read the director skill including its
+受信箱の処理 section, ran `ralph org inbox`, and ended the turn with
+`headless director として、指示と通知を待ちます。`. It started no wait, as
+the skill now says for push.
+
+```
+$ ralph org escalate --org-id lf1 --text 'TYPE: QUESTION
+
+Live check 3 (skill after S4): please ack this item and ask the human before resolving.' …
+escalated e1 (org=lf1 type=QUESTION)
+```
+
+The inbox (`inbox.jsonl`, the body cut here only):
+
+```
+{"ts":"2026-10-18T09:16:29Z","id":"e1","event":"escalated","org_id":"lf1","type":"QUESTION","body":"…","delivery":"deadline"}
+{"ts":"2026-10-18T09:16:30Z","id":"e1","event":"woken","director_id":"d1","via":"herdr"}
+{"ts":"2026-10-18T09:16:40Z","id":"e1","event":"acked"}
+{"ts":"2026-10-18T09:17:40Z","id":"e1","event":"resolved","note":"live check 3"}
+```
+
+The watch's cycle came 1 s after the escalate. At 09:16:30 a new turn
+started with the line as its user message; codex ran `ralph org inbox`,
+`ralph org inbox show e1`, and `ralph org inbox ack e1` (acked at 09:16:40,
+11 s after the escalate), and ended the turn (09:16:49) by asking the human
+whether to answer the leader and resolve e1. Typed into the pane as the
+human: `はい、e1 は note "live check 3" で resolve してください。leader への送信は不要です。`
+codex resolved it at 09:17:40.
+
+```
+$ ralph org inbox show e1 …
+events:
+  2026-10-18T09:16:29Z escalated
+  2026-10-18T09:16:30Z woken director_id=d1 via=herdr
+  2026-10-18T09:16:40Z acked
+  2026-10-18T09:17:40Z resolved note=live check 3
+```
+
+`watch.log` held only its start line. Cleanup: `ralph org director stop
+--id d1` rc 0 (`ctrl_c=ok, pane=closed, workspace=closed`, `the director is
+no longer attached`), `ralph org watch --stop` rc 0 (`stopped ralph org
+watch --all (pid 14614)`), `herdr server stop` rc 0. The codex daemon again
+outlived them: three processes from
+`/tmp/rwk/home/.codex/packages/app-server-daemon/releases/0.160.1-aarch64-apple-darwin/bin/`
+(`codex app-server --listen unix:// --managed-daemon`, `codex app-server
+daemon pid-update-loop`, `codex-code-mode-host`), stopped by pid; then
+`/tmp/rwk` was removed and no process named `/tmp/rwk`. The user's herdr
+files had the same sha256 prefixes as below.
+
 ## Cleanup
 
 - `ralph org director stop --id d2` rc 0 (`pane=closed, workspace=closed`),
@@ -296,7 +370,8 @@ neither item reached its ack deadline, and nothing was sent to the human.
 - A codex director (0.160.1) takes the wake line typed into its idle pane as
   a new turn and handles it by the skill: it reads the inbox, acks, and asks
   the human for a QUESTION. The body's request was not carried out on its
-  own.
+  own. This held with the older skill (Run 1) and with the skill after S4
+  (Run 3).
 - When the line and Enter arrive while a turn runs, codex shows `tab to queue
   message` and, on Enter, puts the line into the running turn (the same
   `turn_id`), not into a queue for the next turn. The line was not lost, and
@@ -306,10 +381,11 @@ neither item reached its ack deadline, and nothing was sent to the human.
   and named by the wake line within a second. The director acked it once.
   The line may name an item that is already acked (the woken event then
   follows the acked one).
-- In both runs codex ended its first turn without starting
-  `ralph org wait --inbox`, although the skill says to wait on the inbox.
-  With `wake = ["push"]` that is what is wanted; with pull, the human or the
-  skill has to start the wait.
+- In Runs 1 and 2 codex ended its first turn without starting
+  `ralph org wait --inbox`, although the skill of `88e433b2` said to wait on
+  the inbox. In Run 3 it also started no wait, which is what the skill after
+  S4 says for push. Whether codex starts the wait with pull and the current
+  skill was not run.
 - codex fetched a curated plugin into the fake `CODEX_HOME`
   (`plugins/cache/openai-curated-remote/build-ios-apps/…/.mcp.json`), and its
   MCP server `xcodebuildmcp` failed to start (`No such file or directory`):
@@ -321,7 +397,9 @@ neither item reached its ack deadline, and nothing was sent to the human.
   the tests write (S3b). Orca's `orca terminal send` and tmux `send-keys`
   were not run against a real terminal
 - A Claude Code director, and a promoted session attached with
-  `--wake push --wake-target`
+  `--wake push --wake-target` (the recipe's herdr example for one included)
+- `wake = ["pull", "push"]`, and pull alone, with the skill after S4: Run 2
+  used the older skill
 - A wake that fails (a pane herdr no longer has, a herdr error) and the
   5-minute gap after it, which the tests in `internal/org/director_wake_test.go`
   and `watch_all_test.go` cover with a fake herdr

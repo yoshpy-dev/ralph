@@ -149,6 +149,36 @@ wake = ["push"]
 ralph org director start --driver codex --model <slug>
 ```
 
+### herdr: a promoted session
+
+The herdr default reaches only a headless director. A session promoted with
+`/director` inside a herdr pane needs a `wake_cmd`, with a pause before
+Enter as the herdr default has:
+
+```toml
+[org.director]
+wake_cmd = ["./scripts/wake-herdr.sh", "{target}", "{text}"]
+```
+
+```sh
+#!/bin/sh
+# scripts/wake-herdr.sh <pane> <text>: type the line into the pane, then press Enter.
+set -eu
+herdr pane send-text "$1" "$2"
+sleep 1
+herdr pane send-keys "$1" Enter
+```
+
+```sh
+ralph org director attach --driver claude --wake push --wake-target "$HERDR_PANE_ID"
+```
+
+Run attach in the session's own pane, where `HERDR_PANE_ID` holds the pane
+id. The watch's `herdr` must reach the same herdr server as that pane (the
+same `HERDR_SOCKET_PATH`, or the default socket for both). This example was
+not run live. A promoted session is one a human types into, so read "When
+to stay on pull" below first.
+
 ### Orca
 
 For a director session in an Orca terminal:
@@ -236,20 +266,25 @@ waits with `ralph org wait --inbox` and nothing is typed into its input.
 ## What the agents do with the line
 
 From a live check with codex-cli 0.160.1 as a headless director in herdr,
-woken by the herdr default (`docs/evidence/director-wake-livefire-2026-10-18.md`):
+woken by the herdr default (`docs/evidence/director-wake-livefire-2026-10-18.md`).
+Runs 1 and 2 used a `/director` skill and role prompt older than this
+recipe, which told every director to wait on the inbox and did not describe
+the line; Run 3 used the current ones with `["push"]`:
 
-- An idle codex took the line as a new turn. Following the `/director`
-  skill, it read the inbox, acked the item, and asked the human about the
-  QUESTION; it did not act on the item's body on its own.
+- An idle codex took the line as a new turn (Runs 1 and 3). Following the
+  `/director` skill, it read the inbox, acked the item, and asked the human
+  about the QUESTION; it did not act on the item's body on its own.
 - A line and Enter that arrived while a turn ran went into that running
   turn (the same `turn_id`), not into a queue for the next turn. The line
   was not lost, and codex read the inbox again in that turn.
 - With `["pull", "push"]`, the director's wait and the line named the same
   item within a second, and the line can name an item already acked (its
   `woken` event then follows the `acked` one). The director acked it once.
-- In its first turn codex did not start `ralph org wait --inbox` on its own.
-  With `["push"]` that is what is wanted; with pull, ask the director to
-  start the wait.
+- In its first turn codex did not start `ralph org wait --inbox`: in Runs 1
+  and 2 although the older skill said to, and in Run 3 because the current
+  skill says not to with `["push"]` (it ended the turn waiting for input).
+  Whether codex starts the wait on its own with pull and the current skill
+  was not checked; if it does not, ask the director to start it.
 
 A Claude Code director was not run here. Claude Code is expected to hold
 text typed during a turn as its next input; that was not checked live.
@@ -312,9 +347,10 @@ human.
 
 The herdr default was run end to end with codex-cli 0.160.1 on an isolated
 herdr server and an isolated ledger, with `["push"]` and with
-`["pull", "push"]` (`docs/evidence/director-wake-livefire-2026-10-18.md`).
+`["pull", "push"]`, then once more with `["push"]` and the current skill
+and role prompt (`docs/evidence/director-wake-livefire-2026-10-18.md`).
 `wake_cmd`, the failure lines, and the 5-minute gap are covered by the unit
-and CLI tests, with programs the tests write and a fake herdr. The Orca and
-tmux examples were not run against a real terminal, and neither a Claude
-Code director nor a promoted session attached with `--wake push
---wake-target` was run.
+and CLI tests, with programs the tests write and a fake herdr. The Orca,
+tmux, and promoted-session herdr examples were not run against a real
+terminal, and neither a Claude Code director nor a promoted session
+attached with `--wake push --wake-target` was run.
