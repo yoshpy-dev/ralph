@@ -1,7 +1,7 @@
 # org-auto-merge
 
 - Status: Approved
-- Approved: 2026-10-18 sha256:666427d803d5
+- Approved: 2026-10-18 sha256:21b90eff1dfc
 - Owner: Claude Code
 - Date: 2026-10-17
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の前半(8a)の 3 本目の前半(8a-3a)。FR-8「既定では人が merge する。`[org.director].auto_merge = true` にすると、director が CI の通った PR を merge する。どちらの場合も、director は『merge してよい順』を報告する」と、受け入れ条件「Given `auto_merge = false`(既定)、when PR の CI が通る、then director は merge せず、merge してよい順を報告する」。制約「director の権限は分割計画を書くことと、ralph と gh の操作に限る。`auto_merge` は既定で無効」。consult(consult-plan-automerge)の 2026-10-16 と 2026-10-17 の判定(2 回目は Codex の計画助言の HIGH 3 件の直し方)。tech-debt の merge-order と merge guarantee の行(237、238、240、242 行)
@@ -113,7 +113,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - [x] AC9 `pr_merged` は、走っている org の判定、`stop --all` と `disband --all` の対象、`max_orgs` の数え方、見張りの leader の動きの数え方に入らない。`ralph org report` の時系列の表に出る
 - [x] AC10 merge が `regate.lock` を持つ間は regate が断られ、regate が持つ間は merge が断られる。merge の間も同じ org_id の Spawn は断られない
 - [x] AC11 `/director` skill: auto_merge が false なら、merge も regate も人に頼まれたときだけ打ち、merge は `ralph org merge` で打つ。true なら、merge-order の先頭の `ready` を `ralph org merge`(`--wait-checks 60m` を付けて background で打ち、終わってから出力を読む。検査と、RESULT のあとの org の disband を動詞が待つ)で 1 本 merge し、merge-order を打ち直し、regate を名指すブランチに 1 本ずつ regate を打ち、`ready` に戻れば merge する。どちらでも `gh pr merge` を直接打たず、動詞の断りと失敗はそこで止めて人に伝え、打ち直さない。この文を Go のテストが pin する
-- [x] AC12 文書: `/org` skill の動詞リファレンス、仕様 FR-8 の注、README、`AGENTS.md`、quality-gates の 2 面、tech-debt(237、238、240、242 行)、`templates/base/ralph.toml`、CLI の help が、動詞と設定と `pr_lookup` と保護の条件を書く
+- [x] AC12 文書: `/org` skill の動詞リファレンス、仕様 FR-8 の注、README、`AGENTS.md`、quality-gates の 2 面、tech-debt(計画を書いたときの 237、238、240、242 行と、この計画が足した行。行の番号は追加でずれる)、`templates/base/ralph.toml`、CLI の help が、動詞と設定と `pr_lookup` と保護の条件を書く
 - [x] AC13 `--wait-checks <d>`(D13): 確かめが検査待ちか 0 件で断るときだけ、何も記録せずにロックを外し、30 秒ごとに `gh pr checks` だけを読む。待っている検査がなくなるか、gh が落ちるか、時間が切れたら、ロックを取り直して確かめを最初から打つ。確かめが「結びつきの org が同じ機能で走っている」で断るときも同じく待ち、30 秒ごとに台帳だけを読み(gh を打たない)、org が走らなくなるか時間が切れたら同じく確かめを最初から打つ。org がほかの機能を走らせている断り、fail・cancel・skipping だけの断り、ほかのすべての断りでは待たない。時間が切れたあとの確かめがまだ検査待ちか 0 件か org が走っているなら、待った時間を添えた断りで終了コード 1(org の場合は `ralph org status --org-id <org>` を添える)。待つ間の中断は何も merge せず終了コード 1。待つ間は regate.lock を持たない(regate が走れる)。`0` と省略は今の動き、負の値と 6 時間を超える値は gh を打つ前に断る。help と skill がこれを書く
 
 ## Implementation outline
@@ -211,6 +211,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - S11a f6e5208e(`mergeOutcomeFields` と `mergedElsewhere`、base の Failed に merge-order の注、`mrNext` などを `merge_fake_test.go` へ、`addInSleeps`、kind の注、`wait` の case を名指しにして `default:` はエラー、新しいテスト `TestMergeWait_EveryKindThatWaitsHasACase` は waits() に Unread を足す mutant で落ちる)。S11b dd1d4867(skill の 4 面・仕様・`seat.go` に base の条件、tech-debt の行数の注と merge-order の新しい行)。run-verify rc=0。merge.go の注の折り返しと冒頭の要約の但し書きは orchestrator が直した(コメントだけ)
   - 2026-10-18(cycle 3 の verify のあと): verify PASS(af36aaac、ずれなし、情報 8 件)。情報 I5 を受けて Affected areas に `merge_readback_test.go` を足し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
   - 2026-10-18(cycle 3 の test のあと): test PASS(dd7d0d73、LOW 2 件)。T1・T2 は d099bab0 で直した(既定のブランチを trunk にした読み直しのテストと、merge-order が別の base への merge を merged と並べることを pin するテスト。tester の mutant B14 と O1 はそれぞれで落ちる。run-verify rc=0)。テストを足しただけなので cycle は 3 のまま sync-docs に進む
+  - 2026-10-18(cycle 3 の sync-docs のあと): sync-docs 7f69ce96(tech-debt の 3 行: 292 行の行数、299 行に pin のテスト、300 行の regate.go の変更の書き方)。README の動詞の表は要約なので条件を足さない。計画のずれの注を受けて AC12 の tech-debt の行の書き方を直し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)。次は cross-review の cycle 3/3
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
