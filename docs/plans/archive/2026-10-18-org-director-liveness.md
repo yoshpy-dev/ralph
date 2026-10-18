@@ -176,4 +176,5 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
 - [x] Verification artifact created
   - test(eb16551a)は pass。新しいテスト 67 本、mutant 31 個がすべて赤、`-race` で DATA RACE 0。LOW 2 件(start の片付けで断る 2 つの道、確かめの読み直しのロック)は、テストだけのコミット 7ef22637 で 3 本を足して埋めた。INFO の `folded` の比較は残す
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created
+  - sync-docs(622c204e)は help の 1 文と tech-debt の 2 行を直した。cross-review(2da83a76)は Codex の指摘 0 件。2da83a76 で run-verify は rc 0。consult(done)の判定は「進めてよい」。PR #237
