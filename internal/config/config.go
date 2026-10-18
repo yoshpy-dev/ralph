@@ -218,8 +218,9 @@ type OrgDirectorConfig struct {
 	//   - pull (DirectorWakePull): the director waits on the inbox itself
 	//     with `ralph org wait --inbox`
 	//   - push (DirectorWakePush): when a new open inbox item arrives,
-	//     `ralph org watch --all` wakes the director once per item by sending
-	//     it one fixed line that names the item ids, never the message body,
+	//     `ralph org watch --all` wakes the director once for each item, by
+	//     sending it, once per cycle, one fixed line that names the ids of
+	//     the items it was not woken for yet, never the message body,
 	//     with WakeCmd, or, when WakeCmd is empty, as input to the herdr pane
 	//     of a headless director in herdr
 	//

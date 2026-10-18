@@ -47,7 +47,8 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n"+
 			"  - enabled, and a long-running watch accepts work on the ledger: the\n"+
 			"    item is only recorded (delivery deadline), for the director to read\n"+
-			"    with `ralph org wait --inbox`. When it is still open after\n"+
+			"    with `ralph org wait --inbox`, or to be woken for by the watch when\n"+
+			"    the director's wake includes push. When it is still open after\n"+
 			"    [org.director].ack_minutes, the watch sends it to the human (reason\n"+
 			"    inbox_ack_deadline). A banner on stderr says so, and the command\n"+
 			"    exits 0. Whether a director is attached does not change this.\n"+
