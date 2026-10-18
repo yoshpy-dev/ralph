@@ -215,4 +215,4 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#235)
