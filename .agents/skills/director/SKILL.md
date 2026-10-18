@@ -104,7 +104,7 @@ director も守る(「headless の director」節)。
 
    `--config` がなく、台帳が main worktree のものなら、wake と wake_cmd は
    main worktree の `ralph.toml` から読む。wake_cmd の書き方と端末ごとの例
-   (Orca、tmux)は `docs/recipes/director-wake.md` にある。
+   (herdr の pane、Orca、tmux)は `docs/recipes/director-wake.md` にある。
 4. ほかの director が登録されていると attach は断られ、エラーがその登録を
    終える打ち方と、入れ替える `--replace` の打ち方を示す。終える打ち方は、
    昇格したセッションの登録なら detach、headless の director の登録

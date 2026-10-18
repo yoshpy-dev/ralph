@@ -173,8 +173,10 @@ herdr pane send-keys "$1" Enter
 ralph org director attach --driver claude --wake push --wake-target "$HERDR_PANE_ID"
 ```
 
-Run attach in the session's own pane, where `HERDR_PANE_ID` holds the pane
-id. The watch's `herdr` must reach the same herdr server as that pane (the
+Make the script executable (`chmod +x scripts/wake-herdr.sh`). The path is
+resolved from the directory of the `ralph.toml`, and the script must finish
+within the 10 s. Run attach in the session's own pane, where
+`HERDR_PANE_ID` holds the pane id. The watch's `herdr` must reach the same herdr server as that pane (the
 same `HERDR_SOCKET_PATH`, or the default socket for both). This example was
 not run live. A promoted session is one a human types into, so read "When
 to stay on pull" below first.
