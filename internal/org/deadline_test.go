@@ -606,6 +606,59 @@ func TestSweepInboxDeadlines_ADeferredItemAckedOrNotifiedByHandSkipsTheAckDeadli
 	})
 }
 
+// Plan 2026-10-18-org-director-wake, D10 and AC7: a wake does not stop the
+// ack deadline. An item the director was woken for is due at the same
+// times, for the same reasons, as the same item not woken for, and the
+// sweep sends a woken deferred item to the human at its ack deadline and
+// not before.
+func TestInboxDeadlines_AWokenItemComesDueAsOneNotWoken(t *testing.T) {
+	t.Run("InboxDeadlineDue", func(t *testing.T) {
+		for _, state := range []string{InboxStateOpen, InboxStateAcked, InboxStateResolved} {
+			for _, notified := range [][]string{nil, {InboxReasonDirectorDisabled}, {InboxReasonAckDeadline}} {
+				for _, at := range []time.Duration{9 * time.Minute, 10 * time.Minute, 10*time.Minute + time.Second, 60 * time.Minute, 61 * time.Minute} {
+					plain := deadlineTestItem(state, notified...)
+					woken := deadlineTestItem(state, notified...)
+					woken.Events = append(woken.Events, InboxEvent{TS: inboxTestNow, ID: "e1", Event: InboxEventWoken, DirectorID: "d1", Via: InboxWokenViaWakeCmd})
+					woken.Woken, woken.WokenAt = true, inboxTestNow
+					want, wantErr := InboxDeadlineDue(plain, deadlineT0.Add(at), 10, 60)
+					got, err := InboxDeadlineDue(woken, deadlineT0.Add(at), 10, 60)
+					if got != want || err != nil || wantErr != nil {
+						t.Errorf("%s, notified %v, at %v: woken = (%q, %v); not woken = (%q, %v)", state, notified, at, got, err, want, wantErr)
+					}
+				}
+			}
+		}
+		woken := deadlineTestItem(InboxStateOpen)
+		woken.Woken, woken.WokenAt = true, inboxTestNow
+		if got, err := InboxDeadlineDue(woken, deadlineT0.Add(10*time.Minute+time.Second), 10, 60); got != InboxReasonAckDeadline || err != nil {
+			t.Errorf("an open woken item just past the ack deadline: InboxDeadlineDue = (%q, %v); want (%q, nil)", got, err, InboxReasonAckDeadline)
+		}
+	})
+	t.Run("sweep", func(t *testing.T) {
+		f := newDeadlineFixture(t)
+		escalateDeferred(t, f)
+		if err := f.o.Inbox.AppendWoken([]string{"e1"}, "d1", InboxWokenViaHerdr); err != nil {
+			t.Fatalf("AppendWoken: %v", err)
+		}
+		if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1"); !item.Woken || item.Notified || item.State != InboxStateOpen {
+			t.Fatalf("e1 = %+v; want open, woken, not notified", item)
+		}
+		mem := &InboxDeadlineMemory{}
+		assertSweep(t, "exactly at the ack deadline", f.sweep(10*time.Minute, mem), nil, nil, nil)
+		assertSweep(t, "past the ack deadline", f.sweep(10*time.Minute+time.Second, mem), []string{"e1 " + InboxReasonAckDeadline}, nil, nil)
+		if calls, want := f.notifications(), "org org-a: e1 (QUESTION) not acked within 10 min"; !slices.Equal(calls, []string{want}) {
+			t.Errorf("desktop notifications = %q; want [%q]", calls, want)
+		}
+		if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonAckDeadline}; !slices.Equal(got, want) {
+			t.Errorf("escalations.jsonl = %v; want %v", got, want)
+		}
+		item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
+		if got, want := inboxEventKinds(item), []string{InboxEventEscalated, InboxEventWoken, InboxEventNotified}; !slices.Equal(got, want) {
+			t.Errorf("e1 events = %v; want %v", got, want)
+		}
+	})
+}
+
 // An item whose escalated_at does not parse is skipped, with one warning
 // per memory; the other items are swept as usual.
 func TestSweepInboxDeadlines_WarnsOnceAboutAnEscalatedAtThatDoesNotParse(t *testing.T) {

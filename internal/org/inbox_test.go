@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -699,6 +700,307 @@ func TestInboxAppendNotified_MarksTheItemWithoutChangingState(t *testing.T) {
 	item = inboxItemByID(t, mustReadInbox(t, s), "e1")
 	if item.State != InboxStateResolved || strings.Join(inboxEventKinds(item), ",") != "escalated,notified,resolved,notified" {
 		t.Fatalf("item = %+v", item)
+	}
+}
+
+// wokenLine is a woken event line as a test fixture.
+func wokenLine(ts, id, directorID, via string) string {
+	return fmt.Sprintf(`{"ts":%q,"id":%q,"event":"woken","director_id":%q,"via":%q}`, ts, id, directorID, via)
+}
+
+// AC8 of plan 2026-10-18-org-director-wake: a woken event marks an item in
+// any state (open, acked, resolved) without changing the state. WokenAt is
+// the latest woken event's ts and every woken event stays in Events; an
+// acked after a woken still moves the item from open; a woken never sets
+// Notified; a woken for an ID with no escalated event creates no item and is
+// counted as ignored.
+func TestInboxRead_WokenMarksTheItemInAnyStateWithoutChangingIt(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	writeInboxFile(t, s, strings.Join([]string{
+		escalatedLine("e1", "org-a"),
+		wokenLine("2026-10-10T01:00:00Z", "e1", "d1", InboxWokenViaWakeCmd),
+		wokenLine("2026-10-10T01:00:30Z", "e1", "d2", InboxWokenViaHerdr),
+		escalatedLine("e2", "org-a"),
+		`{"ts":"2026-10-10T01:01:00Z","id":"e2","event":"acked"}`,
+		wokenLine("2026-10-10T01:02:00Z", "e2", "d1", InboxWokenViaHerdr),
+		escalatedLine("e3", "org-b"),
+		`{"ts":"2026-10-10T01:03:00Z","id":"e3","event":"resolved","note":"docs/reports/x.md"}`,
+		wokenLine("2026-10-10T01:04:00Z", "e3", "d1", InboxWokenViaWakeCmd),
+		escalatedLine("e4", "org-b"),
+		wokenLine("2026-10-10T01:05:00Z", "e4", "d1", InboxWokenViaWakeCmd),
+		`{"ts":"2026-10-10T01:06:00Z","id":"e4","event":"acked"}`,
+		wokenLine("2026-10-10T01:07:00Z", "e9", "d1", InboxWokenViaWakeCmd),
+	}, "\n")+"\n")
+
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 1 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 1 (the woken for e9, which has no escalated)", res.CorruptLines, res.IgnoredEvents)
+	}
+	if got := strings.Join(inboxItemIDs(res), ","); got != "e1,e2,e3,e4" {
+		t.Fatalf("items = %s, want e1,e2,e3,e4 (a woken creates no item)", got)
+	}
+	for _, tc := range []struct {
+		id, state, wokenAt, kinds string
+	}{
+		{"e1", InboxStateOpen, "2026-10-10T01:00:30Z", "escalated,woken,woken"},
+		{"e2", InboxStateAcked, "2026-10-10T01:02:00Z", "escalated,acked,woken"},
+		{"e3", InboxStateResolved, "2026-10-10T01:04:00Z", "escalated,resolved,woken"},
+		{"e4", InboxStateAcked, "2026-10-10T01:05:00Z", "escalated,woken,acked"},
+	} {
+		item := inboxItemByID(t, res, tc.id)
+		if item.State != tc.state || !item.Woken || item.WokenAt != tc.wokenAt || item.Notified || item.NotifiedAt != "" {
+			t.Errorf("%s = %+v; want state %s, woken at %s, not notified", tc.id, item, tc.state, tc.wokenAt)
+		}
+		if got := strings.Join(inboxEventKinds(item), ","); got != tc.kinds {
+			t.Errorf("%s events = %s; want %s", tc.id, got, tc.kinds)
+		}
+	}
+	e1 := inboxItemByID(t, res, "e1")
+	for i, want := range []InboxEvent{
+		{TS: "2026-10-10T01:00:00Z", ID: "e1", Event: InboxEventWoken, DirectorID: "d1", Via: InboxWokenViaWakeCmd},
+		{TS: "2026-10-10T01:00:30Z", ID: "e1", Event: InboxEventWoken, DirectorID: "d2", Via: InboxWokenViaHerdr},
+	} {
+		if got := e1.Events[i+1]; got != want {
+			t.Errorf("e1 event %d = %+v; want %+v", i+1, got, want)
+		}
+	}
+	if e3 := inboxItemByID(t, res, "e3"); e3.ResolvedAt != "2026-10-10T01:03:00Z" || e3.Note != "docs/reports/x.md" {
+		t.Errorf("e3 = %+v; want resolved at 01:03:00 with its note", e3)
+	}
+	if e4 := inboxItemByID(t, res, "e4"); e4.AckedAt != "2026-10-10T01:06:00Z" {
+		t.Errorf("e4 AckedAt = %q; want the acked after the woken applied", e4.AckedAt)
+	}
+}
+
+// AC8: lines with no woken event (written before stage 8b, one escalated
+// line from before stage 8a too) fold exactly as before: every field the
+// same, Woken false and WokenAt empty, and the item's JSON carries
+// "woken":false and no woken_at, with no director_id or via in its events.
+func TestInboxRead_LinesWithoutWokenFoldAsBefore(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	writeInboxFile(t, s, strings.Join([]string{
+		escalatedLine("e1", "org-a"),
+		`{"ts":"2026-10-10T00:00:01Z","id":"e1","event":"notified","reason":"inbox_no_director","osascript":"ok"}`,
+		`{"ts":"2026-10-10T00:00:02Z","id":"e1","event":"acked"}`,
+		`{"ts":"2026-10-10T00:00:03Z","id":"e2","event":"escalated","org_id":"org-b","type":"BLOCKED","task_id":"org-b","body":"TYPE: BLOCKED\nTASK_ID: org-b\n\nstuck","delivery":"deadline"}`,
+		`{"ts":"2026-10-10T00:00:04Z","id":"e2","event":"resolved","note":"docs/reports/x.md"}`,
+	}, "\n")+"\n")
+
+	res := mustReadInbox(t, s)
+	want := []InboxItem{
+		{
+			ID: "e1", OrgID: "org-a", Type: "QUESTION", Body: "TYPE: QUESTION\n\nwhich?", Delivery: InboxDeliveryNow,
+			State: InboxStateAcked, EscalatedAt: "2026-10-10T00:00:00Z", AckedAt: "2026-10-10T00:00:02Z",
+			Notified: true, NotifiedAt: "2026-10-10T00:00:01Z",
+			Events: []InboxEvent{
+				{TS: "2026-10-10T00:00:00Z", ID: "e1", Event: InboxEventEscalated, OrgID: "org-a", Type: "QUESTION", Body: "TYPE: QUESTION\n\nwhich?"},
+				{TS: "2026-10-10T00:00:01Z", ID: "e1", Event: InboxEventNotified, Reason: "inbox_no_director", Osascript: "ok"},
+				{TS: "2026-10-10T00:00:02Z", ID: "e1", Event: InboxEventAcked},
+			},
+		},
+		{
+			ID: "e2", OrgID: "org-b", Type: "BLOCKED", TaskID: "org-b", Body: "TYPE: BLOCKED\nTASK_ID: org-b\n\nstuck", Delivery: InboxDeliveryDeadline,
+			State: InboxStateResolved, EscalatedAt: "2026-10-10T00:00:03Z", ResolvedAt: "2026-10-10T00:00:04Z", Note: "docs/reports/x.md",
+			Events: []InboxEvent{
+				{TS: "2026-10-10T00:00:03Z", ID: "e2", Event: InboxEventEscalated, OrgID: "org-b", Type: "BLOCKED", TaskID: "org-b",
+					Body: "TYPE: BLOCKED\nTASK_ID: org-b\n\nstuck", Delivery: InboxDeliveryDeadline},
+				{TS: "2026-10-10T00:00:04Z", ID: "e2", Event: InboxEventResolved, Note: "docs/reports/x.md"},
+			},
+		},
+	}
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 || !reflect.DeepEqual(res.Items, want) {
+		t.Fatalf("Read = %+v\nwant items %+v with no damage", res, want)
+	}
+	data, err := json.Marshal(res.Items[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	const wantJSON = `{"id":"e1","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich?","delivery":"now","state":"acked",` +
+		`"escalated_at":"2026-10-10T00:00:00Z","acked_at":"2026-10-10T00:00:02Z","notified":true,"notified_at":"2026-10-10T00:00:01Z","woken":false,` +
+		`"events":[{"ts":"2026-10-10T00:00:00Z","id":"e1","event":"escalated","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich?"},` +
+		`{"ts":"2026-10-10T00:00:01Z","id":"e1","event":"notified","reason":"inbox_no_director","osascript":"ok"},` +
+		`{"ts":"2026-10-10T00:00:02Z","id":"e1","event":"acked"}]}`
+	if string(data) != wantJSON {
+		t.Errorf("e1 JSON =\n%s\nwant\n%s", data, wantJSON)
+	}
+}
+
+// AC8 (and the record AC5 needs): AppendWoken appends one woken line per ID,
+// in the order given, with director_id, via, and one ts for all, after the
+// lines already there. Items in every state take it, and no state changes; a
+// later woken moves WokenAt.
+func TestInboxAppendWoken_WritesOneLinePerIDWithOneTS(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	for _, orgID := range []string{"org-a", "org-b", "org-c"} {
+		mustEscalate(t, s, orgID)
+	}
+	if _, err := s.Ack("e2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Resolve("e3", "docs/reports/x.md"); err != nil {
+		t.Fatal(err)
+	}
+	before := readInboxFile(t, s)
+	s.Now = func() time.Time { return time.Date(2026, 10, 10, 12, 5, 0, 0, time.UTC) }
+
+	if err := s.AppendWoken([]string{"e3", "e1", "e2"}, "d2", InboxWokenViaWakeCmd); err != nil {
+		t.Fatalf("AppendWoken: %v", err)
+	}
+	added, ok := strings.CutPrefix(readInboxFile(t, s), before)
+	if !ok {
+		t.Fatalf("AppendWoken changed the lines already there:\n%s", readInboxFile(t, s))
+	}
+	want := `{"ts":"2026-10-10T12:05:00Z","id":"e3","event":"woken","director_id":"d2","via":"wake_cmd"}` + "\n" +
+		`{"ts":"2026-10-10T12:05:00Z","id":"e1","event":"woken","director_id":"d2","via":"wake_cmd"}` + "\n" +
+		`{"ts":"2026-10-10T12:05:00Z","id":"e2","event":"woken","director_id":"d2","via":"wake_cmd"}` + "\n"
+	if added != want {
+		t.Fatalf("AppendWoken appended\n%s\nwant\n%s", added, want)
+	}
+
+	s.Now = func() time.Time { return time.Date(2026, 10, 10, 12, 6, 0, 0, time.UTC) }
+	if err := s.AppendWoken([]string{"e1"}, "d3", InboxWokenViaHerdr); err != nil {
+		t.Fatalf("second AppendWoken: %v", err)
+	}
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	for _, tc := range []struct{ id, state, wokenAt string }{
+		{"e1", InboxStateOpen, "2026-10-10T12:06:00Z"},
+		{"e2", InboxStateAcked, "2026-10-10T12:05:00Z"},
+		{"e3", InboxStateResolved, "2026-10-10T12:05:00Z"},
+	} {
+		if item := inboxItemByID(t, res, tc.id); item.State != tc.state || !item.Woken || item.WokenAt != tc.wokenAt {
+			t.Errorf("%s = %+v; want state %s, woken at %s", tc.id, item, tc.state, tc.wokenAt)
+		}
+	}
+	e1 := inboxItemByID(t, res, "e1")
+	if last := e1.Events[len(e1.Events)-1]; last.Event != InboxEventWoken || last.DirectorID != "d3" || last.Via != InboxWokenViaHerdr {
+		t.Errorf("e1 last event = %+v; want woken by d3 via herdr", last)
+	}
+}
+
+// AppendWoken refuses, writing nothing: no IDs, a director ID not of the
+// form d<N>, a via other than wake_cmd and herdr, an ID given twice, and an
+// ID the inbox has no item for (ErrInboxUnknownID, naming the ID), also
+// when the other IDs are known.
+func TestInboxAppendWoken_RefusesAndWritesNothing(t *testing.T) {
+	const wakeCmd = InboxWokenViaWakeCmd
+	for _, tc := range []struct {
+		name       string
+		ids        []string
+		directorID string
+		via        string
+		want       string
+		unknownID  bool
+	}{
+		{"nil ids", nil, "d1", wakeCmd, "org: inbox: wake: the woken event needs at least one item ID", false},
+		{"empty ids", []string{}, "d1", wakeCmd, "needs at least one item ID", false},
+		{"empty director id", []string{"e1"}, "", wakeCmd, `org: inbox: wake: "" is not a registration id (d<N>, such as d1)`, false},
+		{"director id d0", []string{"e1"}, "d0", wakeCmd, `"d0" is not a registration id`, false},
+		{"director id d01", []string{"e1"}, "d01", wakeCmd, `"d01" is not a registration id`, false},
+		{"director id D1", []string{"e1"}, "D1", wakeCmd, `"D1" is not a registration id`, false},
+		{"an inbox id as the director id", []string{"e1"}, "e1", wakeCmd, `"e1" is not a registration id`, false},
+		{"empty via", []string{"e1"}, "d1", "", `org: inbox: wake: via "" is not wake_cmd or herdr`, false},
+		{"via tmux", []string{"e1"}, "d1", "tmux", `via "tmux" is not wake_cmd or herdr`, false},
+		{"via Herdr", []string{"e1"}, "d1", "Herdr", `via "Herdr" is not wake_cmd or herdr`, false},
+		{"via with a trailing space", []string{"e1"}, "d1", "herdr ", `via "herdr " is not wake_cmd or herdr`, false},
+		{"an id twice", []string{"e1", "e1"}, "d1", wakeCmd, "org: inbox: wake: item e1 is given twice", false},
+		{"an id twice among others", []string{"e1", "e2", "e1"}, "d1", wakeCmd, "item e1 is given twice", false},
+		{"an unknown id after known ones", []string{"e1", "e2", "e9"}, "d1", wakeCmd, "org: inbox: wake e9: ", true},
+		{"an unknown id first", []string{"e9", "e1"}, "d1", wakeCmd, "org: inbox: wake e9: ", true},
+		{"an id not of the form e<N>", []string{"e01"}, "d1", InboxWokenViaHerdr, "org: inbox: wake e01: ", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newTestInboxStore(t)
+			mustEscalate(t, s, "org-a")
+			mustEscalate(t, s, "org-b")
+			before := readInboxFile(t, s)
+			err := s.AppendWoken(tc.ids, tc.directorID, tc.via)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("AppendWoken err = %v; want it to contain %q", err, tc.want)
+			}
+			if errors.Is(err, ErrInboxUnknownID) != tc.unknownID {
+				t.Errorf("errors.Is(err, ErrInboxUnknownID) = %v; want %v (err %v)", !tc.unknownID, tc.unknownID, err)
+			}
+			if got := readInboxFile(t, s); got != before {
+				t.Fatalf("a refused AppendWoken changed inbox.jsonl to %q", got)
+			}
+		})
+	}
+}
+
+// A missing inbox has no items: AppendWoken returns ErrInboxUnknownID and
+// creates neither the state dir nor the lock.
+func TestInboxAppendWoken_OnAMissingInboxCreatesNothing(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "absent")
+	err := NewInboxStore(state).AppendWoken([]string{"e1"}, "d1", InboxWokenViaHerdr)
+	if !errors.Is(err, ErrInboxUnknownID) || !strings.Contains(err.Error(), "org: inbox: wake e1: ") {
+		t.Fatalf("AppendWoken on a missing inbox err = %v; want org: inbox: wake e1: ... ErrInboxUnknownID", err)
+	}
+	if _, err := os.Stat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("AppendWoken on a missing inbox created the state dir (stat err = %v)", err)
+	}
+}
+
+// A last line cut off mid-write stays a line of its own: the woken lines
+// start after a newline and fold, and the cut line is one corrupt line.
+func TestInboxAppendWoken_TornLastLineGetsTheNewlineFirst(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	const torn = `{"ts":"2026-10-10T00:00:00Z","id":"e6","event":"esc`
+	content := escalatedLine("e4", "a") + "\n" + escalatedLine("e5", "a") + "\n" + torn
+	writeInboxFile(t, s, content)
+	if err := s.AppendWoken([]string{"e4", "e5"}, "d1", InboxWokenViaWakeCmd); err != nil {
+		t.Fatalf("AppendWoken: %v", err)
+	}
+	want := content + "\n" +
+		`{"ts":"2026-10-10T12:00:00Z","id":"e4","event":"woken","director_id":"d1","via":"wake_cmd"}` + "\n" +
+		`{"ts":"2026-10-10T12:00:00Z","id":"e5","event":"woken","director_id":"d1","via":"wake_cmd"}` + "\n"
+	if got := readInboxFile(t, s); got != want {
+		t.Fatalf("inbox.jsonl =\n%q\nwant\n%q", got, want)
+	}
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 1 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 1 (the cut line) and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	for _, id := range []string{"e4", "e5"} {
+		if item := inboxItemByID(t, res, id); !item.Woken || item.State != InboxStateOpen {
+			t.Errorf("%s = %+v; want open and woken", id, item)
+		}
+	}
+}
+
+// AppendWoken reads and appends under the inbox lock: while another holder
+// has it, AppendWoken waits, then writes once it is released.
+func TestInboxAppendWoken_WaitsForTheInboxLock(t *testing.T) {
+	s, dir := newTestInboxStore(t)
+	mustEscalate(t, s, "org-a")
+	held, release := make(chan struct{}), make(chan struct{})
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- withFileLock(dir, inboxLockFile, "inbox", func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	done := make(chan error, 1)
+	go func() { done <- s.AppendWoken([]string{"e1"}, "d1", InboxWokenViaHerdr) }()
+	select {
+	case err := <-done:
+		t.Fatalf("AppendWoken returned (%v) while the inbox lock was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	if err := <-holderDone; err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("AppendWoken after release: %v", err)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, s), "e1"); !item.Woken {
+		t.Fatalf("e1 = %+v; want woken", item)
 	}
 }
 
