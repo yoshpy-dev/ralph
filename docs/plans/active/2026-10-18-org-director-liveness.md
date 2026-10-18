@@ -87,15 +87,15 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
 
 ## Acceptance criteria
 
-- [ ] AC1 starter: `director start`(herdr と launch_cmd のどちらも)が書く `attached` に `starter_pid`(start のプロセスの pid)と `starter_start_time` が載る。起動時刻を読めないときは両方とも載らず、start は進む。fold は field のない古い行を今どおり読む
-- [ ] AC2 check-in: 登録の starter が gone、zombie、起動時刻の違いのどれかなら、`ralph org director launched` は断り(終了コード 1)、`launched` を書かない。starter が生きているか、ps が読めないか、starter が記録されていなければ今どおり受け付ける
-- [ ] AC3 確かめ: D3 の表のすべての行(`no_starter`、`start_ended`、`starter_pid_reused`、`start_running`、`agent_found`、`agent_ended`、`pane_closed`、label の不一致、`agent get` の失敗、`process_ended`、`pid_reused`、`process_found`、ps の失敗、`changed`)が、偽の herdr と偽の ps で、決めた state と how を返す。昇格したセッションと stopped の登録は確かめない。確かめの途中で登録に event が増えたとき(読んだあと、ps を読む前に `launched` が書かれ、start のプロセスが終わる)、結果は `start_ended` にならない(herdr と launch_cmd の両方、テストの中の差し込みで順を決める)
-- [ ] AC4 見張り: 1 サイクルの順が「受信箱の期限 → 確かめ → 起こす → パルス → 生存の印」になり、確かめの結果が `director-alive.json` に id つきで書かれる。今の headless の登録がなければ書かない。見張りは director.jsonl に何も書かず、herdr の close も send-keys も打たない(確かめの分。起こす手順の send-text と Enter は 8b-1 のまま)。確かめの失敗は 1 行で、そのサイクルの起こす手順とパルスは進む
-- [ ] AC5 起こす手順: 同じサイクルの確かめが ended なら、push の登録にも 1 行を送らず `woken` を書かない。stderr には登録ごとに 1 回だけ書く。unknown なら今どおり送る
-- [ ] AC6 start の片付け: 今の登録が headless で ended なら、start は stop と同じ片付けをして stopped を記録し、片付けたことを 1 行出してから新しい登録を立てる。herdr の登録では label の合う pane と workspace だけを閉じる。alive か unknown なら今どおり断って何も書かず、文に確かめの結果が入る。昇格したセッションの登録では今どおり断る。片付けが記録まで届かなければ、新しい登録を書かずに断り、`stop --id` を言う。2 つの start が重なり、後の start が `starting` を読んだあとで先の start が `running` にして終わったとき、後の start は signal も close も送らず、新しい登録も書かずに断る(herdr と launch_cmd の両方、差し込みで順を決めるテスト)。片付けが閉じる pane・workspace と signal を送る pid は版 A のものだけ
-- [ ] AC7 attach の断りと表示: `--replace` なしの attach の断りの文に、印の結果(id が同じとき)と start のプロセスの確かめ(`starting` のとき)が入る。`ralph status` の `director:` の行、`ralph org director status`、両方の `--json` に確かめの結果が出る(印がないとき、id が違うとき、alive、ended、unknown の各行)。昇格したセッションの文は変わらない
-- [ ] AC8 文書: `/director` skill の 4 面が同じ中身で、headless の director の確かめの読み方を書く。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様の注(8b-1 の注に 8b-2 を 2 本に分けたこと、この段の注)、tech-debt(255 行を閉じるか残りに書き換え、247 行を昇格したセッションの分に絞る、209 行のきっかけを 8b-2b に、254 行に start の片付けの案内、codex の daemon と別の herdr server の行を足す)、AGENTS.md が新しい動きを説明する
-- [ ] AC9 テストは本物の herdr、osascript、端末、Orca、人の tmux、gh、network を打たず、repo の台帳に書かない。signal は自分で起こしたプロセスにだけ送る。実機の確認(D9 の (a) と (b))を分離した herdr server で行い、evidence に残す(`$HOME` は `~`、token と pane の値は伏せる)
+- [x] AC1 starter: `director start`(herdr と launch_cmd のどちらも)が書く `attached` に `starter_pid`(start のプロセスの pid)と `starter_start_time` が載る。起動時刻を読めないときは両方とも載らず、start は進む。fold は field のない古い行を今どおり読む
+- [x] AC2 check-in: 登録の starter が gone、zombie、起動時刻の違いのどれかなら、`ralph org director launched` は断り(終了コード 1)、`launched` を書かない。starter が生きているか、ps が読めないか、starter が記録されていなければ今どおり受け付ける
+- [x] AC3 確かめ: D3 の表のすべての行(`no_starter`、`start_ended`、`starter_pid_reused`、`start_running`、`agent_found`、`agent_ended`、`pane_closed`、label の不一致、`agent get` の失敗、`process_ended`、`pid_reused`、`process_found`、ps の失敗、`changed`)が、偽の herdr と偽の ps で、決めた state と how を返す。昇格したセッションと stopped の登録は確かめない。確かめの途中で登録に event が増えたとき(読んだあと、ps を読む前に `launched` が書かれ、start のプロセスが終わる)、結果は `start_ended` にならない(herdr と launch_cmd の両方、テストの中の差し込みで順を決める)
+- [x] AC4 見張り: 1 サイクルの順が「受信箱の期限 → 確かめ → 起こす → パルス → 生存の印」になり、確かめの結果が `director-alive.json` に id つきで書かれる。今の headless の登録がなければ書かない。見張りは director.jsonl に何も書かず、herdr の close も send-keys も打たない(確かめの分。起こす手順の send-text と Enter は 8b-1 のまま)。確かめの失敗は 1 行で、そのサイクルの起こす手順とパルスは進む
+- [x] AC5 起こす手順: 同じサイクルの確かめが ended なら、push の登録にも 1 行を送らず `woken` を書かない。stderr には登録ごとに 1 回だけ書く。unknown なら今どおり送る
+- [x] AC6 start の片付け: 今の登録が headless で ended なら、start は stop と同じ片付けをして stopped を記録し、片付けたことを 1 行出してから新しい登録を立てる。herdr の登録では label の合う pane と workspace だけを閉じる。alive か unknown なら今どおり断って何も書かず、文に確かめの結果が入る。昇格したセッションの登録では今どおり断る。片付けが記録まで届かなければ、新しい登録を書かずに断り、`stop --id` を言う。2 つの start が重なり、後の start が `starting` を読んだあとで先の start が `running` にして終わったとき、後の start は signal も close も送らず、新しい登録も書かずに断る(herdr と launch_cmd の両方、差し込みで順を決めるテスト)。片付けが閉じる pane・workspace と signal を送る pid は版 A のものだけ
+- [x] AC7 attach の断りと表示: `--replace` なしの attach の断りの文に、印の結果(id が同じとき)と start のプロセスの確かめ(`starting` のとき)が入る。`ralph status` の `director:` の行、`ralph org director status`、両方の `--json` に確かめの結果が出る(印がないとき、id が違うとき、alive、ended、unknown の各行)。昇格したセッションの文は変わらない
+- [x] AC8 文書: `/director` skill の 4 面が同じ中身で、headless の director の確かめの読み方を書く。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。help、README、仕様の注(8b-1 の注に 8b-2 を 2 本に分けたこと、この段の注)、tech-debt(255 行を閉じるか残りに書き換え、247 行を昇格したセッションの分に絞る、209 行のきっかけを 8b-2b に、254 行に start の片付けの案内、codex の daemon と別の herdr server の行を足す)、AGENTS.md が新しい動きを説明する
+- [x] AC9 テストは本物の herdr、osascript、端末、Orca、人の tmux、gh、network を打たず、repo の台帳に書かない。signal は自分で起こしたプロセスにだけ送る。実機の確認(D9 の (a) と (b))を分離した herdr server で行い、evidence に残す(`$HOME` は `~`、token と pane の値は伏せる)
 
 ## Implementation outline
 
@@ -167,11 +167,12 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
   - S3 3ece3deb(start の片付け、attach の断りの文)。記録は新しい `MarkStoppedAtVersion` と `ErrDirectorChangedSinceCheck` で版 A と比べる。start の通知は `DirectorStartParams.Notice` に 1 行。attach が start のプロセスを確かめるため `CheckDirectorStarter` を公開した。launch_cmd の片付けは director が終わっているので `RALPH_DIRECTOR_TOKEN` の拒否をかけない。確かめと片付けのあいだで登録を読み直す変異は seam がなく捕まらなかったので、S4 の前のコミットで seam とテストを足す
   - S4 は 2 つのコミット。fe773bfa(確かめと片付けのあいだの seam `directorStartAfterCheck` と、片付けが版 A だけに打つことのテスト。読み直す変異 2 つが red)、0b9b7ed3(`director:` の行と `director status` の確かめの節、`--json` の `check`)。headless の行の末尾を固定していた `org_director_headless_test.go` と `org_director_wake_test.go` の期待値も直した。`check` は state・how・checked_at・detail の 4 つで id を持たない。`enabled = false` のときは start の案内を出さず stop だけを言う。stopped のまま今の登録になっている headless の登録は見張りが確かめないので、前の文のまま
   - a6da6a3a は S4 の報告にあった doc の食い違いの修正(`director.check` に id がないこと、stop の記録の書き手に `MarkStoppedAtVersion`)
-  - S5 5e76f820(README、`/director` skill の 4 面、仕様の注、tech-debt、AGENTS.md、`org watch` の help の固定)。tech-debt の 255 行は解決として取り消し線にし、残り(no_starter などの unknown)を新しい行にした。249 行のきっかけも 8b-2b に直した
+  - S5 5e76f820(README、`/director` skill の 4 面、仕様の注、tech-debt、AGENTS.md、`org watch` の help の固定)。tech-debt の 255 行は解決の分を取り消し線にし、残り(no_starter などの unknown)を同じ行の Debt の欄に Still open として書いた(解決の注の行が 1 行入ったので、その行は今 256 行目)。249 行のきっかけも 8b-2b に直した
   - S6 fc215a2b(実機の確認の evidence と、仕様の注と tech-debt からの参照)。(a) `/quit` のあと見張りが `ended (agent_ended)`、次の start が片付けて d2 を立てた。(b) pane_created のあとで start を SIGKILL、見張りが `ended (start_ended)`、次の start が片付けて d4 を立てた。生きている d4 への start は `alive (agent_found)` を添えて断った。codex の daemon が turn の `ralph org wait --inbox` を director を止めたあとも抱えていたので、tech-debt の daemon の行に書いた
   - S5 が範囲の外で見つけた文書のずれは S5b 84ab7d1e で直した(`/org` skill の 4 面の watch と director の行、launch_cmd の recipe と wake の recipe とその写し、`org watch` の Short をサイクルの順に)
   - self-review(4d47285f)は Merge: yes で LOW 4 件。e85853c5 で L1・L2・L4、80dd2982 で L3 を直した。L1 は D2 からの逸脱で、check-in は start のプロセスを `director.lock` を取る前に ps で読み、ロックの下では読んだときと同じ starter が登録に残っているときだけその結果を使う(ps の最大 10 秒が、ロックを待つ側の 5 秒を超えるため)。読みとロックのあいだに starter が変わったとき(director.jsonl を手で書き換えたときだけ)は受け付ける。L3 で `internal/cli/org_director_check.go` と `internal/org/director_start_cleanup.go` を足し、`org_director.go` と `director_stop.go` を 800 行より短くした。仕様の注と tech-debt にも逸脱と新しいファイル名を書いた
 - [x] Review artifact created
-- [ ] Verification artifact created
+  - verify(1171515f)は pass。LOW 1 件(この Progress の S5 の行の文言)を直し、AC1〜AC9 に印を付けた。D2 の本文と、計画が名指す tech-debt の行番号は承認した本文なので変えず、逸脱はこの Progress と仕様の注に書いた
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
