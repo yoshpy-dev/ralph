@@ -1731,3 +1731,163 @@ func TestDirectorLaunchCmdStoppedError_Text(t *testing.T) {
 		}
 	}
 }
+
+// The starter on the launch_cmd path (plan 2026-10-18-org-director-liveness,
+// AC1 and AC2): start records its own process, and the check-in reads it
+// again with the real ps, as `ralph org director launched` does. The only
+// processes these tests signal are ones they started.
+
+// AC2 with ReadStarter nil (ReadDirectorProcess, the real ps): a starter
+// that is this test binary, read alive with its own start time, accepts the
+// check-in. A starter the test started and then killed refuses it, writing
+// nothing, both while it is a zombie and once it has been waited for and its
+// pid is gone (or, should the pid go to another process at once, another
+// process now, which is refused too).
+func TestDirectorMarkCmdLaunched_ReadsTheStarterWithPSWhenNoReaderIsGiven(t *testing.T) {
+	attachWithStarter := func(t *testing.T, pid int, startTime string) *DirectorStore {
+		t.Helper()
+		s, _, _ := newTestHeadlessStore(t)
+		h := testCmdHeadlessAttach()
+		h.StarterPID, h.StarterStartTime = pid, startTime
+		if _, err := s.AttachHeadless(h); err != nil {
+			t.Fatalf("AttachHeadless: %v", err)
+		}
+		return s
+	}
+	t.Run("this test binary", func(t *testing.T) {
+		self := mustReadProcess(t, os.Getpid())
+		s := attachWithStarter(t, os.Getpid(), self.StartTime)
+		if err := s.MarkCmdLaunched(testCheckIn(4242)); err != nil {
+			t.Fatalf("MarkCmdLaunched with this test binary as the starter: %v", err)
+		}
+		wantTrail(t, s, "attached d1", "launched d1")
+	})
+	t.Run("a process that ended", func(t *testing.T) {
+		p := startTestProcess(t, sleepPath(t), "30")
+		alive := mustReadProcess(t, p.pid())
+		if alive.State != DirectorProcessAlive {
+			t.Fatalf("pid %d reads %+v, want alive", p.pid(), alive)
+		}
+		s := attachWithStarter(t, p.pid(), alive.StartTime)
+		refused := func(want string) {
+			t.Helper()
+			before := readDirectorFile(t, s)
+			err := s.MarkCmdLaunched(testCheckIn(4242))
+			if !errors.Is(err, ErrDirectorCheckInRefused) || !strings.Contains(err.Error(), want) ||
+				!strings.HasSuffix(err.Error(), "), so no start waits for this check-in: run ralph org director start again") {
+				t.Fatalf("MarkCmdLaunched err = %v, want the refusal saying %q", err, want)
+			}
+			if got := readDirectorFile(t, s); got != before {
+				t.Fatalf("a refused check-in wrote %q", strings.TrimPrefix(got, before))
+			}
+		}
+		if err := p.cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		waitForProcessState(t, p.pid(), DirectorProcessZombie)
+		refused(fmt.Sprintf("is no longer running (pid %d is a zombie)", p.pid()))
+		_ = p.wait()
+		refused("is no longer running (")
+		wantTrail(t, s, "attached d1")
+	})
+}
+
+// AC1 on the launch_cmd path: start records its own process as the starter,
+// with the start time the real ps reads for it, and the launch script's
+// check-in, a child process that reads that pid again, accepts it. With a ps
+// that cannot be read, start records no starter and still starts the
+// director, whose check-in then reads no starter.
+func TestStartDirector_LaunchCmdRecordsItsOwnProcessAsTheStarter(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		broken bool
+	}{
+		{"ps reads the start", false},
+		{"ps cannot be read", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCmdStartFixture(t, launchCmdInBackground, cmdStartOptions{})
+			var reads []int
+			if tc.broken {
+				f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
+					reads = append(reads, pid)
+					return DirectorProcess{}, errors.New("ps is broken")
+				}
+			}
+			p := f.params(DirectorDriverClaude, "opus")
+			p.TimeoutMS = 30000
+			res, err := f.o.StartDirector(p)
+			if err != nil {
+				t.Fatalf("StartDirector: %v", err)
+			}
+			wantPID, wantTime := os.Getpid(), mustReadProcess(t, os.Getpid()).StartTime
+			if tc.broken {
+				wantPID, wantTime = 0, ""
+				if !slices.Equal(reads, []int{os.Getpid()}) {
+					t.Fatalf("start read the pids %v, want only its own %d", reads, os.Getpid())
+				}
+			}
+			line := directorFileLines(t, f.store)[0]
+			var attached DirectorEvent
+			if err := json.Unmarshal([]byte(line), &attached); err != nil || attached.Event != DirectorEventAttached || attached.Launch != DirectorLaunchCmd ||
+				attached.StarterPID != wantPID || attached.StarterStartTime != wantTime {
+				t.Fatalf("attached = %+v (%v), want launch cmd with the starter %d %q", attached, err, wantPID, wantTime)
+			}
+			if got := strings.Contains(line, `"starter_`); got != !tc.broken {
+				t.Fatalf("attached line %s holds a starter field: %v, want %v", line, got, !tc.broken)
+			}
+			reg := res.Registration
+			if reg.State != DirectorStateRunning || reg.PID <= 0 || reg.StarterPID != wantPID || reg.StarterStartTime != wantTime {
+				t.Fatalf("Registration = %+v, want d1 running, checked in, with the starter %d %q", reg, wantPID, wantTime)
+			}
+			wantTrail(t, f.store, "attached d1", "launched d1")
+		})
+	}
+}
+
+// AC2 on the launch_cmd path, end to end: a launch script whose check-in
+// finds that the recorded starter is not the process it was (here start's
+// reader gave a start time the real ps does not read for this test binary,
+// as when the start's pid went to another process) is refused, says why, and
+// exits 1 without running the agent. launch_cmd runs the script in the
+// foreground and keeps its output; start then finds no check-in within its
+// timeout and records the stop.
+func TestStartDirector_ACheckInRefusedForItsStarterRunsNoAgent(t *testing.T) {
+	const recorded = "Thu Jan 1 00:00:00 1970"
+	out := filepath.Join(t.TempDir(), "launch script output")
+	f := newCmdStartFixture(t, []string{"sh", "-c", `env -u RALPH_ORG_AGMSG_HOME sh "$1" > "$2" 2>&1; exit 0`, "sh", "{script}", out}, cmdStartOptions{})
+	f.o.DirectorProcessReader = func(ctx context.Context, pid int) (DirectorProcess, error) {
+		if pid == os.Getpid() {
+			return DirectorProcess{State: DirectorProcessAlive, StartTime: recorded}, nil
+		}
+		return ReadDirectorProcess(ctx, pid)
+	}
+	p := f.params(DirectorDriverClaude, "opus")
+	p.TimeoutMS = 500
+	_, err := f.o.StartDirector(p)
+	var stopped *DirectorLaunchCmdStoppedError
+	if !errors.As(err, &stopped) || !errors.Is(err, ErrDirectorNoCheckIn) || stopped.ID != "d1" || stopped.PID != 0 || stopped.Signalled {
+		t.Fatalf("err = %#v (%v), want a *DirectorLaunchCmdStoppedError for no check-in, with nothing that checked in", err, err)
+	}
+	wantTrail(t, f.store, "attached d1", "detached d1", "stopped d1")
+	var attached DirectorEvent
+	if err := json.Unmarshal([]byte(directorFileLines(t, f.store)[0]), &attached); err != nil ||
+		attached.StarterPID != os.Getpid() || attached.StarterStartTime != recorded {
+		t.Fatalf("attached = %+v (%v), want the starter %d %q", attached, err, os.Getpid(), recorded)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := mustReadProcess(t, os.Getpid())
+	for _, want := range []string{
+		"the check-in of the launch script is refused, so its agent must not start",
+		fmt.Sprintf("is no longer running (pid %d is another process now (started %q, not %q)), so no start waits for this check-in: run ralph org director start again",
+			os.Getpid(), self.StartTime, recorded),
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the launch script printed\n%s\nwant it to say %q", raw, want)
+		}
+	}
+	wantNoFile(t, f.agentMarker, "the agent ran after its check-in was refused")
+}

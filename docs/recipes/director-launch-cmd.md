@@ -84,7 +84,8 @@ ralph org director start --driver claude --model opus
 start first applies the same refusals as a herdr start, writing nothing and
 running no launch_cmd: `[org.director].enabled = false`, a codex director
 in anything but `guarded`, a `--config` whose `[org].agmsg_home` is a
-relative path, a director already attached (one still starting included),
+relative path, a promoted session already attached, a headless director
+already attached that the check below finds alive or cannot tell about,
 and a watch that is stale, stopping, or a `--once` run (start launches
 `ralph org watch --all` when none runs). It also refuses when the
 `--driver` agent (`claude` or `codex`) is not on its own `PATH`, and when
@@ -92,6 +93,26 @@ and a watch that is stale, stopping, or a `--once` run (start launches
 nothing could then type into the terminal launch_cmd opens (see
 `docs/recipes/director-wake.md`).
 `HERDR_PANE_ID` does not refuse it: you may run start from inside herdr.
+
+When the current registration is a headless director, one still
+`starting` included, start checks on the spot, before it looks at the
+watch, whether that director is still running, the way
+`ralph org watch --all` checks it each cycle: one still `starting` by the
+start process that recorded it, one running in herdr with
+`herdr agent get` and its pane, and one started with `launch_cmd` by the
+pid its launch script checked in with and that pid's start time.
+
+- `alive` or `unknown`: start is refused, writing nothing, with what the
+  check found and the `ralph org director stop --id <id>` that stops it.
+- `ended`: start cleans it up as stop would, but only what the registration
+  recorded when the check read it. For a `launch_cmd` director it sends
+  nothing to the process that has ended and leaves the terminal for you to
+  close. Once it has recorded the director stopped, it prints one line such
+  as `cleaned up d1, which had ended (process_ended): ...` and goes on; the
+  line stays even when start is then refused for another reason.
+- A cleanup that cannot finish (a close that fails, a registration that
+  changed after the check) records nothing, starts no director, exits 1,
+  and names the `ralph org director stop --id <id>` that finishes it.
 
 Then, in this order:
 
@@ -118,7 +139,14 @@ The launch script, run by the terminal, single-quotes every value and:
 
 The check-in is accepted only for the current registration, still
 `starting`, started with `launch_cmd`, with the same token, and with a
-`--pid` equal to the check-in's parent process (the script itself). It
+`--pid` equal to the check-in's parent process (the script itself), and
+only while the `ralph org director start` that recorded the registration
+still runs. start records its own pid and that pid's start time on
+`attached` (`starter_pid` and `starter_start_time`); once that pid is
+gone, a zombie, or has another start time, no start waits for the
+check-in, so it is refused. When ps cannot read that pid, and when the
+registration has no start process recorded (an older ralph wrote it, or
+start could not read its own start time), the check-in is accepted. It
 records `launched` with that pid and its start time (`ps -o lstart=`, read
 with `LC_ALL=C TZ=UTC`). The exec keeps the pid and the start time, so the
 recorded pid is the agent's from then on. A refused check-in writes
@@ -152,7 +180,10 @@ stop from another terminal, and that it never runs stop itself.
 `ralph org director status`, the `director:` line of `ralph status`, and
 their `--json` show a launch_cmd registration with `launch cmd`, its state
 (`starting` or `running`), the terminal name, the pid, and the model (the
-JSON field is `terminal_name`).
+JSON field is `terminal_name`), and what `ralph org watch --all` found
+when it last checked the director, such as
+`checked by the watch at <time>: alive (process_found)` (`check` in the
+JSON; the `/director` skill says how to read it).
 
 By default the director waits on the inbox itself. To have
 `ralph org watch --all` wake it when a new inbox item arrives, set
@@ -235,8 +266,14 @@ server's).
   command by hand with the placeholders filled in to see what it does, and
   start again, with a larger `--timeout-ms` for a slow terminal.
 - A terminal that opened late: its launch script's check-in is refused
-  (the registration is already stopped), so it exits 1 without starting the
-  agent. Close the terminal.
+  (the registration is already stopped, or the start that recorded it has
+  ended), so it exits 1 without starting the agent. Close the terminal.
+- A start that died before the check-in (killed, or the shell it ran in
+  closed) leaves the registration `starting`. Once the watch has checked
+  it, `ralph status` shows it `ended (start_ended)`; a launch script that
+  checks in after that is refused, and the next
+  `ralph org director start` cleans the registration up and starts a new
+  director.
 - `launch_cmd ... could not be run`, `failed`, or `did not return in time`:
   the error names the command and the end of its output. Make the command
   return once the terminal is open.

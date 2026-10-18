@@ -51,6 +51,16 @@ func directorWakeToml(wake, wakeCmd string) string {
 const directorAttachedTail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
 	directorAutoMergeOff
 
+// directorNotCheckedClause is what the director: line says of a headless
+// registration the watch has not checked yet (plan
+// 2026-10-18-org-director-liveness, D8).
+const directorNotCheckedClause = "not checked yet: ralph org watch --all checks it each cycle"
+
+// directorNotCheckedTail is directorAttachedTail for a headless registration
+// the watch has not checked yet: what follows the parentheses of its
+// director: line, with [org.director].auto_merge false.
+const directorNotCheckedTail = " -- " + directorNotCheckedClause + "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+
 // directorWakeCmdNeededText is the reason of ErrDirectorWakeCmdNeeded at
 // attach, after "(wake <wake>)".
 const directorWakeCmdNeededText = ": a session attached with ralph org director attach has no default way to be sent the wake line " +
@@ -407,7 +417,7 @@ func TestOrgDirectorStart_RecordsTheWakeAndPushesInHerdrWithNoWakeCmd(t *testing
 		t.Fatalf("director.jsonl = %+v; want attached d1 with wake pull,push and no wake_target, then three more", events)
 	}
 	wantLine := "director: attached d1 (driver=claude, headless running, model=opus, pane pane-stub-1, workspace ws-stub-1, attached at " + events[0].TS +
-		", by alice, wake=pull,push to pane-stub-1)" + directorAttachedTail
+		", by alice, wake=pull,push to pane-stub-1)" + directorNotCheckedTail
 
 	statusOut, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	if line, _, _ := strings.Cut(statusOut, "\n"); line != wantLine {
@@ -662,7 +672,7 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := "director: attached d1 (driver=codex, headless starting, model=gpt-6-astra, workspace w-1, attached at " + reg.AttachedAt + ", by alice, wake=push)" +
-			directorAttachedTail
+			directorNotCheckedTail
 		if got := directorStatusLine(t, "--state-dir", stateDir); got != want {
 			t.Errorf("director line before pane_created:\n got %q\nwant %q", got, want)
 		}
@@ -673,7 +683,7 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 			t.Fatalf("mark d1 launched: %v, %v", ok, err)
 		}
 		want = "director: attached d1 (driver=codex, headless running, model=gpt-6-astra, pane p-1, workspace w-1, attached at " + reg.AttachedAt +
-			", by alice, wake=push to p-1)" + directorAttachedTail
+			", by alice, wake=push to p-1)" + directorNotCheckedTail
 		stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 		if line, _, _ := strings.Cut(stdout, "\n"); line != want {
 			t.Errorf("director line after pane_created:\n got %q\nwant %q", line, want)
@@ -694,7 +704,7 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 		}
 		name := "director_" + reg.Token
 		want := "director: attached d1 (driver=claude, headless starting, model=opus, launch cmd, name " + name + ", attached at " + reg.AttachedAt +
-			", by alice, wake=pull,push to " + name + ")" + directorAttachedTail
+			", by alice, wake=pull,push to " + name + ")" + directorNotCheckedTail
 		stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 		if line, _, _ := strings.Cut(stdout, "\n"); line != want {
 			t.Errorf("director line:\n got %q\nwant %q", line, want)

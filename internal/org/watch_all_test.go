@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // lockedBuffer is a bytes.Buffer safe to write from the watch loop's
@@ -1488,7 +1489,7 @@ func TestRealGitStatus_IsCutOffAtTheDriverCallTimeout(t *testing.T) {
 	}
 }
 
-// The tests below are for step 2 of RunWatchAll's cycle, the push wake of
+// The tests below are for step 3 of RunWatchAll's cycle, the push wake of
 // the director (plan 2026-10-18-org-director-wake, D6, D10, AC5, and
 // AC7). The wake_cmd is a writeWakeScript script in its own directory, given
 // to the watch as DirectorWakeDir.
@@ -1618,8 +1619,8 @@ func TestRunWatchAll_DoesNotWakeAPullDirector(t *testing.T) {
 }
 
 // A director.jsonl that cannot be read (here: a directory in its place)
-// skips the wake with one line per cycle; the deadlines and the pulse still
-// run.
+// skips the director check and the wake with one line each per cycle, and
+// no director-alive.json is written; the deadlines and the pulse still run.
 func TestRunWatchAll_ADirectorFileThatCannotBeReadSkipsOnlyTheWake(t *testing.T) {
 	f := newWatchAllFixture(t)
 	f.spawn(t, "org-a", "seat-a")
@@ -1633,6 +1634,12 @@ func TestRunWatchAll_ADirectorFileThatCannotBeReadSkipsOnlyTheWake(t *testing.T)
 	}
 	if n := strings.Count(f.stderr.String(), "watchdog: director wake skipped this cycle: org: director wake: "); n != 2 {
 		t.Fatalf("stderr = %q; want the wake line once per cycle", f.stderr.String())
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director check skipped this cycle: org: director: read "); n != 2 {
+		t.Fatalf("stderr = %q; want the check line once per cycle", f.stderr.String())
+	}
+	if got := fileOrAbsent(t, DirectorAlivePathIn(f.dir)); got != "<absent>" {
+		t.Fatalf("director-alive.json = %q; want none", got)
 	}
 	if runs := readWakeRuns(t, mark); runs != nil {
 		t.Fatalf("wake_cmd ran %+v", runs)
@@ -1765,5 +1772,429 @@ func TestRunWatchAll_WakesTheDirectorOnceForAnEscalatedItem(t *testing.T) {
 	}
 	if f.stderr.String() != "" || len(f.notifications()) != 0 {
 		t.Fatalf("stderr %q, notifications %q; want neither before the ack deadline", f.stderr.String(), f.notifications())
+	}
+}
+
+// The tests below are for step 2 of RunWatchAll's cycle, the director check
+// and its mark (plan 2026-10-18-org-director-liveness, D4, D5, AC4, and
+// AC5). herdr is a cycleHerdr; a ps read, when a test needs one, is the
+// Org's DirectorProcessReader, never ps.
+
+// cycleHerdr is a fakeHerdr that also runs herdr agent get and logs every
+// call in order in calls: an agent get as "agent_get <target>", next to the
+// fakeHerdr's own calls (the gets, the closes, send-text, and send-keys). An
+// agent get answers agentGetErr[target], or "ok" (herdr has the agent).
+// before, when set, runs ahead of each agent get and send-text with the
+// name the call is logged under.
+type cycleHerdr struct {
+	*fakeHerdr
+	agentGetErr map[string]error
+	before      func(call string)
+}
+
+func (h *cycleHerdr) AgentGet(_ context.Context, target string) (string, error) {
+	call := "agent_get " + target
+	if h.before != nil {
+		h.before(call)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, call)
+	if err := h.agentGetErr[target]; err != nil {
+		return "", err
+	}
+	return "ok", nil
+}
+
+func (h *cycleHerdr) PaneSendText(ctx context.Context, paneID, text string) error {
+	if h.before != nil {
+		h.before("pane_send_text")
+	}
+	return h.fakeHerdr.PaneSendText(ctx, paneID, text)
+}
+
+func (h *cycleHerdr) log() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.calls)
+}
+
+// headlessInHerdr records d1 in f's director.jsonl, a headless director in
+// herdr with wake wake, running in workspace w7 and pane w7:p1, and gives f
+// a cycleHerdr that holds that pane in a tab and a workspace labelled for
+// its token, so the herdr wake can type into it. Spawn the org's seats
+// before: their calls would go to the new herdr. It returns the herdr and
+// the registration as recorded.
+func (f *watchAllFixture) headlessInHerdr(t *testing.T, wake string) (*cycleHerdr, DirectorRegistration) {
+	t.Helper()
+	s := f.directorStore()
+	a := testHeadlessAttach()
+	a.Wake = []string{wake}
+	reg, err := s.AttachHeadless(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordWorkspace(reg.ID, "w7", testDirectorWho); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordPane(reg.ID, "w7:p1", testDirectorWho); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkLaunched(reg.ID, testDirectorWho); err != nil {
+		t.Fatal(err)
+	}
+	h := &cycleHerdr{fakeHerdr: &fakeHerdr{}, agentGetErr: map[string]error{}}
+	setLabel(&h.paneTabs, "w7:p1", fakeTabID("w7:p1"))
+	setLabel(&h.paneWorkspaces, "w7:p1", "w7")
+	setLabel(&h.tabLabels, fakeTabID("w7:p1"), DirectorTabLabel(reg.Token))
+	setLabel(&h.workspaceLabels, "w7", DirectorWorkspaceLabel(reg.Token))
+	f.o.Herdr = h
+	f.o.SendEnterDelay = time.Millisecond
+	cur := mustReadDirector(t, s).Current
+	if cur == nil || cur.State != DirectorStateRunning || cur.PaneID != "w7:p1" {
+		t.Fatalf("registration = %+v, want d1 running in w7:p1", cur)
+	}
+	return h, *cur
+}
+
+// directorAgentNotFound is the error the driver's AgentGet returns for
+// herdr's agent_not_found reply about the agent of token (see
+// checkAgentNotFound).
+func directorAgentNotFound(token string) error {
+	return fmt.Errorf("%w (%w)", errors.New("herdr: exit status 1"), driver.NewHerdrError(driver.HerdrCodeAgentNotFound, "agent "+DirectorAgentName(token)+" not found"))
+}
+
+// readDirectorAliveMark reads f's director-alive.json, which must be there.
+func (f *watchAllFixture) readDirectorAliveMark(t *testing.T) DirectorAlive {
+	t.Helper()
+	mark, err := ReadDirectorAlive(f.dir)
+	if err != nil || mark == nil {
+		t.Fatalf("ReadDirectorAlive = %+v, %v; want a mark", mark, err)
+	}
+	return *mark
+}
+
+// AC4 and D4: one cycle runs the inbox deadlines, then the director check,
+// then the wake, then the pulse. When the check's herdr agent get runs, the
+// item past its ack deadline is already in escalations.jsonl; when the wake
+// types its line, director-alive.json already holds the check; the seat's
+// agent get of the pulse comes after the wake's send-keys. The mark holds the
+// registration's id and attached_at, the state and the how, and the cycle's
+// time; director.jsonl is byte for byte as it was.
+func TestRunWatchAll_ChecksTheDirectorAfterTheDeadlinesAndBeforeTheWakeAndThePulse(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	h, reg := f.headlessInHerdr(t, DirectorWakePush)
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now().Add(-11*time.Minute), "org-a")
+	directorBefore := directorFileState(t, f.directorStore())
+	checkCall := "agent_get " + DirectorAgentName(reg.Token)
+	snapshot := filepath.Join(t.TempDir(), "escalations-at-the-check")
+	var markAtSend *DirectorAlive
+	h.before = func(call string) {
+		switch call {
+		case checkCall:
+			if err := os.WriteFile(snapshot, []byte(fileOrAbsent(t, f.o.EscalationsPath)), 0o644); err != nil {
+				t.Error(err)
+			}
+		case "pane_send_text":
+			var err error
+			if markAtSend, err = ReadDirectorAlive(f.dir); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+
+	log := h.log()
+	wantFirst := []string{checkCall, "pane_get", "tab_get", "workspace_get", "pane_send_text", "pane_send_keys"}
+	if len(log) <= len(wantFirst) || !slices.Equal(log[:len(wantFirst)], wantFirst) {
+		t.Fatalf("herdr calls = %q; want %q first, then the pulse", log, wantFirst)
+	}
+	pulse := log[len(wantFirst):]
+	if !slices.Contains(pulse, "agent_get "+herdrAgentName("org-a", "seat-a")) {
+		t.Fatalf("herdr calls after the wake = %q; want the seat's agent get", pulse)
+	}
+	for _, call := range pulse {
+		if !strings.HasPrefix(call, "agent_get ") || call == checkCall {
+			t.Fatalf("herdr calls after the wake = %q; want only the pulse's agent gets", pulse)
+		}
+	}
+	if want := []string{e1 + " " + InboxReasonAckDeadline}; !slices.Equal(escalationReasons(t, snapshot), want) {
+		t.Fatalf("escalations.jsonl at the check = %v; want %v already sent", escalationReasons(t, snapshot), want)
+	}
+	want := DirectorAlive{ID: reg.ID, AttachedAt: reg.AttachedAt, State: DirectorCheckAlive, How: DirectorCheckHowAgentFound,
+		CheckedAt: f.clk.Now().UTC().Format(time.RFC3339)}
+	if markAtSend == nil || *markAtSend != want {
+		t.Fatalf("director-alive.json when the wake typed = %+v; want %+v", markAtSend, want)
+	}
+	if got := f.readDirectorAliveMark(t); got != want || reg.AttachedAt == "" {
+		t.Fatalf("director-alive.json = %+v; want %+v", got, want)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), e1); !item.Woken || item.Events[len(item.Events)-1].Via != InboxWokenViaHerdr {
+		t.Fatalf("item %s = %+v; want woken via herdr", e1, item)
+	}
+	if after := directorFileState(t, f.directorStore()); after != directorBefore {
+		t.Fatalf("director.jsonl changed from %q to %q", directorBefore, after)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-a"); s.Cycles != 1 {
+		t.Fatalf("org-a status = %+v; want 1 cycle", s)
+	}
+}
+
+// AC4 and AC5 over 3 cycles: the check writes nothing but its mark. Whatever
+// it finds, director.jsonl is byte for byte as it was, and herdr is only
+// asked to get (one agent get per cycle, and the label gets of an agent herdr
+// does not have): no close, no send-keys, no send-text. The mark holds the
+// last cycle's check. An ended registration with wake push is not woken
+// (D5): its open item gets no woken event, and the watch says so once over
+// the 3 cycles.
+func TestRunWatchAll_TheDirectorCheckWritesOnlyItsMark(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		wake       string
+		herdr      func(h *cycleHerdr, reg DirectorRegistration)
+		state, how string
+		detail     string
+	}{
+		{"alive", DirectorWakePull, func(*cycleHerdr, DirectorRegistration) {}, DirectorCheckAlive, DirectorCheckHowAgentFound, ""},
+		{"ended, its agent gone from its pane, with push", DirectorWakePush, func(h *cycleHerdr, reg DirectorRegistration) {
+			h.agentGetErr[DirectorAgentName(reg.Token)] = directorAgentNotFound(reg.Token)
+		}, DirectorCheckEnded, DirectorCheckHowAgentEnded, ""},
+		{"ended, its pane closed", DirectorWakePull, func(h *cycleHerdr, reg DirectorRegistration) {
+			h.agentGetErr[DirectorAgentName(reg.Token)] = directorAgentNotFound(reg.Token)
+			delete(h.paneTabs, "w7:p1")
+		}, DirectorCheckEnded, DirectorCheckHowPaneClosed, ""},
+		{"unknown, herdr does not answer", DirectorWakePull, func(h *cycleHerdr, reg DirectorRegistration) {
+			h.agentGetErr[DirectorAgentName(reg.Token)] = errors.New("herdr: no server is running")
+		}, DirectorCheckUnknown, DirectorCheckHowAgentGetFailed, "herdr: no server is running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			h, reg := f.headlessInHerdr(t, tc.wake)
+			tc.herdr(h, reg)
+			e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+			directorBefore := directorFileState(t, f.directorStore())
+			hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+				if n < 3 {
+					f.clk.Advance(time.Minute)
+				}
+			}}
+			if err := runWatchAll(t, f.o, context.Background(), f.params(3), hooks); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			if after := directorFileState(t, f.directorStore()); after != directorBefore {
+				t.Fatalf("director.jsonl changed from %q to %q", directorBefore, after)
+			}
+			log := h.log()
+			agentGets := 0
+			for _, call := range log {
+				switch call {
+				case "agent_get " + DirectorAgentName(reg.Token):
+					agentGets++
+				case "pane_get", "tab_get", "workspace_get":
+				default:
+					t.Fatalf("herdr calls = %q; want only gets", log)
+				}
+			}
+			if agentGets != 3 {
+				t.Fatalf("herdr calls = %q; want one agent get per cycle", log)
+			}
+			mark := f.readDirectorAliveMark(t)
+			want := DirectorAlive{ID: reg.ID, AttachedAt: reg.AttachedAt, State: tc.state, How: tc.how, CheckedAt: f.clk.Now().UTC().Format(time.RFC3339), Detail: mark.Detail}
+			if mark != want || !strings.Contains(mark.Detail, tc.detail) || (tc.detail == "") != (mark.Detail == "") {
+				t.Fatalf("director-alive.json = %+v; want %+v with a detail holding %q", mark, want, tc.detail)
+			}
+			if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), e1); item.Woken {
+				t.Fatalf("item %s = %+v; want it not woken", e1, item)
+			}
+			endedLine := "watchdog: director d1 is not woken: the watch's check found it ended (" + tc.how + ") (said once)"
+			wantLines := 0
+			if tc.wake == DirectorWakePush {
+				wantLines = 1
+			}
+			if n := strings.Count(f.stderr.String(), endedLine); n != wantLines || strings.Count(f.stderr.String(), "watchdog: director") != wantLines {
+				t.Fatalf("stderr = %q; want the ended line %d time(s) and no other director line", f.stderr.String(), wantLines)
+			}
+		})
+	}
+}
+
+// AC4: with no current headless registration (no director.jsonl, a promoted
+// session's, one stopped by stop, and one whose stopped was written without
+// its detached) the check runs nothing and writes no mark: none appears, and
+// a mark an earlier registration left stays byte for byte as it was.
+func TestRunWatchAll_WritesNoDirectorMarkWithoutACurrentHeadlessRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, f *watchAllFixture)
+	}{
+		{"no director.jsonl", func(*testing.T, *watchAllFixture) {}},
+		{"a promoted session", func(t *testing.T, f *watchAllFixture) {
+			mustAttachDirector(t, f.directorStore(), DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}})
+		}},
+		{"a headless registration stopped", func(t *testing.T, f *watchAllFixture) {
+			_, reg := f.headlessInHerdr(t, DirectorWakePull)
+			if _, err := f.directorStore().MarkStopped(reg.ID, testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a current headless registration stopped", func(t *testing.T, f *watchAllFixture) {
+			writeDirectorEvents(t, f.directorStore(), append(checkHerdrRunning(), checkEvent("d1", DirectorEventStopped, nil))...)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			h := &cycleHerdr{fakeHerdr: &fakeHerdr{}, agentGetErr: map[string]error{}}
+			f.o.Herdr = h
+			tc.setup(t, f)
+			h, _ = f.o.Herdr.(*cycleHerdr)
+			h.mu.Lock()
+			h.calls = nil
+			h.mu.Unlock()
+			if err := runWatchAll(t, f.o, context.Background(), f.params(2), WatchHooks{}); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			if got := fileOrAbsent(t, DirectorAlivePathIn(f.dir)); got != "<absent>" {
+				t.Fatalf("director-alive.json = %q; want none", got)
+			}
+			prior := DirectorAlive{ID: "d9", AttachedAt: "2026-10-01T00:00:00Z", State: DirectorCheckEnded, How: DirectorCheckHowPaneClosed, CheckedAt: "2026-10-01T00:01:00Z"}
+			if err := writeDirectorAlive(f.dir, prior); err != nil {
+				t.Fatal(err)
+			}
+			before := fileOrAbsent(t, DirectorAlivePathIn(f.dir))
+			if err := runWatchAll(t, f.o, context.Background(), f.params(2), WatchHooks{}); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			if after := fileOrAbsent(t, DirectorAlivePathIn(f.dir)); after != before {
+				t.Fatalf("director-alive.json changed from %q to %q", before, after)
+			}
+			if log := h.log(); len(log) != 0 {
+				t.Fatalf("herdr calls = %q; want none", log)
+			}
+			if strings.Contains(f.stderr.String(), "director check") {
+				t.Fatalf("stderr = %q; want no check line", f.stderr.String())
+			}
+		})
+	}
+}
+
+// AC4: a check that fails (here: director.lock cannot be opened, so the read
+// under it fails, while director.jsonl itself reads) is one line per cycle
+// and writes no mark, and the wake and the pulse go on: wake_cmd runs once
+// for the open item, and the org's pulse runs every cycle.
+func TestRunWatchAll_ADirectorCheckThatFailsIsOneLineAndTheWakeAndThePulseGoOn(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	p, mark := f.useWakeCmd(t, 2, "exit 0", "{target}", "{text}")
+	attached := checkAttachedAs("d1", directorTestToken, DirectorLaunchCmd, true)
+	attached.Wake = []string{DirectorWakePush}
+	writeDirectorEvents(t, f.directorStore(), attached,
+		checkEvent("d1", DirectorEventLaunched, func(ev *DirectorEvent) { ev.PID, ev.StartTime = checkAgentPID, checkAgentStart }))
+	f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
+		if pid != checkAgentPID {
+			t.Errorf("ps read pid %d", pid)
+		}
+		return DirectorProcess{State: DirectorProcessAlive, StartTime: checkAgentStart}, nil
+	}
+	if err := os.Mkdir(filepath.Join(f.dir, directorLockFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+	if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director check skipped this cycle: "); n != 2 || strings.Count(f.stderr.String(), "\n") != 2 {
+		t.Fatalf("stderr = %q; want the check line once per cycle and nothing else", f.stderr.String())
+	}
+	if got := fileOrAbsent(t, DirectorAlivePathIn(f.dir)); got != "<absent>" {
+		t.Fatalf("director-alive.json = %q; want none", got)
+	}
+	runs := readWakeRuns(t, mark)
+	if len(runs) != 1 || !slices.Equal(runs[0].args, []string{"director_" + directorTestToken, DirectorWakeText([]string{e1})}) {
+		t.Fatalf("wake_cmd runs = %+v; want one for %s", runs, e1)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), e1); !item.Woken {
+		t.Fatalf("item %s = %+v; want woken", e1, item)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-a"); s.Cycles != 2 {
+		t.Fatalf("org-a status = %+v; want 2 cycles", s)
+	}
+}
+
+// AC4 and AC5: a mark that cannot be written (here: a non-empty directory
+// where it goes) is one line per cycle; the wake still goes by the check, so
+// an ended registration with push is still not woken, and the pulse runs
+// every cycle.
+func TestRunWatchAll_ADirectorMarkThatCannotBeWrittenIsOneLineAndTheCycleGoesOn(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	h, reg := f.headlessInHerdr(t, DirectorWakePush)
+	h.agentGetErr[DirectorAgentName(reg.Token)] = directorAgentNotFound(reg.Token)
+	if err := os.MkdirAll(filepath.Join(DirectorAlivePathIn(f.dir), "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+	if err := runWatchAll(t, f.o, context.Background(), f.params(2), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	stderr := f.stderr.String()
+	if n := strings.Count(stderr, "watchdog: director check mark not written: org: write "+DirectorAlivePathIn(f.dir)+": "); n != 2 {
+		t.Fatalf("stderr = %q; want the mark line once per cycle", stderr)
+	}
+	if n := strings.Count(stderr, "watchdog: director d1 is not woken: the watch's check found it ended (agent_ended) (said once)"); n != 1 {
+		t.Fatalf("stderr = %q; want the ended line once", stderr)
+	}
+	if slices.Contains(h.log(), "pane_send_text") {
+		t.Fatalf("herdr calls = %q; want nothing typed", h.log())
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), e1); item.Woken {
+		t.Fatalf("item %s = %+v; want it not woken", e1, item)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-a"); s.Cycles != 2 {
+		t.Fatalf("org-a status = %+v; want 2 cycles", s)
+	}
+}
+
+// The plan's edge case: the start of a starting registration lands its
+// launched while the watch checks it, after the read, and then ends. The
+// mark is not start_ended: the check reads the registration again, finds it
+// running, and checks its agent.
+func TestRunWatchAll_ALaunchedThatLandsDuringTheCheckIsNotMarkedStartEnded(t *testing.T) {
+	f := newWatchAllFixture(t)
+	h := &cycleHerdr{fakeHerdr: &fakeHerdr{}, agentGetErr: map[string]error{}}
+	f.o.Herdr = h
+	s := f.directorStore()
+	writeDirectorEvents(t, s, checkAttached(DirectorLaunchHerdr, true), checkWorkspace("d1", "ws-1"), checkPane("d1", "pane-1"))
+	starterAlive := true
+	f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
+		if pid != checkStarterPID {
+			t.Errorf("ps read pid %d", pid)
+		}
+		if starterAlive {
+			return DirectorProcess{State: DirectorProcessAlive, StartTime: checkStarterStart}, nil
+		}
+		return DirectorProcess{State: DirectorProcessGone}, nil
+	}
+	var tries []int
+	f.o.directorCheckAfterRead = func(attempt int) {
+		tries = append(tries, attempt)
+		if attempt == 1 {
+			if _, err := s.MarkLaunched("d1", testDirectorWho); err != nil {
+				t.Errorf("MarkLaunched: %v", err)
+			}
+			starterAlive = false
+		}
+	}
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	got := f.readDirectorAliveMark(t)
+	if got.State != DirectorCheckAlive || got.How != DirectorCheckHowAgentFound || got.ID != "d1" || !slices.Equal(tries, []int{1, 2}) {
+		t.Fatalf("director-alive.json = %+v after tries %v; want alive agent_found from the second try, not start_ended", got, tries)
+	}
+	if log := h.log(); !slices.Equal(log, []string{"agent_get " + DirectorAgentName(directorTestToken)}) {
+		t.Fatalf("herdr calls = %q; want the second try's agent get only", log)
 	}
 }

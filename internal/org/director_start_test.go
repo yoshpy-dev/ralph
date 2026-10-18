@@ -1060,3 +1060,95 @@ func TestStartDirector_BoundsTheAgentStart(t *testing.T) {
 		t.Fatalf("agent start context had %v left, want the default timeout's deadline", left)
 	}
 }
+
+// Plan 2026-10-18-org-director-liveness, AC1 on the herdr path: start reads
+// its own process (os.Getpid) once with o.DirectorProcessReader, under a
+// deadline and before its attached is written, and records the pid and the
+// start time it read (trimmed) as the starter. A read that fails, a pid read
+// gone or a zombie, and an alive read without a start time record no
+// starter: the attached then has no starter field, and start still launches
+// the director.
+func TestStartDirector_RecordsItsOwnProcessAsTheStarter(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		proc     DirectorProcess
+		err      error
+		wantPID  int
+		wantTime string
+	}{
+		{"alive", DirectorProcess{State: DirectorProcessAlive, StartTime: " " + directorTestStartTime + "\n"}, nil, os.Getpid(), directorTestStartTime},
+		{"ps cannot be read", DirectorProcess{}, errors.New("ps is broken"), 0, ""},
+		{"gone", DirectorProcess{State: DirectorProcessGone}, nil, 0, ""},
+		{"a zombie", DirectorProcess{State: DirectorProcessZombie, StartTime: directorTestStartTime}, nil, 0, ""},
+		{"alive without a start time", DirectorProcess{State: DirectorProcessAlive, StartTime: " "}, nil, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			var reads []int
+			f.o.DirectorProcessReader = func(ctx context.Context, pid int) (DirectorProcess, error) {
+				reads = append(reads, pid)
+				if _, ok := ctx.Deadline(); !ok {
+					t.Errorf("start read pid %d with no deadline", pid)
+				}
+				if _, err := os.Stat(f.store.Path()); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("start read its process after director.jsonl was written (stat: %v)", err)
+				}
+				return tc.proc, tc.err
+			}
+			res := f.mustStart(t, DirectorDriverClaude, "opus")
+			if !slices.Equal(reads, []int{os.Getpid()}) {
+				t.Fatalf("start read the pids %v, want only its own %d", reads, os.Getpid())
+			}
+			line := directorFileLines(t, f.store)[0]
+			var attached DirectorEvent
+			if err := json.Unmarshal([]byte(line), &attached); err != nil || attached.Event != DirectorEventAttached ||
+				attached.StarterPID != tc.wantPID || attached.StarterStartTime != tc.wantTime {
+				t.Fatalf("attached = %+v (%v), want the starter %d %q", attached, err, tc.wantPID, tc.wantTime)
+			}
+			if got := strings.Contains(line, `"starter_`); got != (tc.wantPID != 0) {
+				t.Fatalf("attached line %s holds a starter field: %v, want %v", line, got, tc.wantPID != 0)
+			}
+			reg := res.Registration
+			if reg.State != DirectorStateRunning || reg.StarterPID != tc.wantPID || reg.StarterStartTime != tc.wantTime {
+				t.Fatalf("Registration = %+v, want d1 running with the starter %d %q", reg, tc.wantPID, tc.wantTime)
+			}
+			wantTrail(t, f.store, "attached d1", "workspace_created d1", "pane_created d1", "launched d1")
+			if cur := mustReadDirector(t, f.store).Current; cur == nil || cur.StarterPID != tc.wantPID || cur.StarterStartTime != tc.wantTime {
+				t.Fatalf("current = %+v, want the starter %d %q", cur, tc.wantPID, tc.wantTime)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-18-org-director-liveness, D1: the starter is read after
+// start's refusals, so a start refused before anything is written, here for
+// [org.director].enabled = false and for a registration already current,
+// runs no ps.
+func TestStartDirector_ARefusedStartReadsNoProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		setup     func(t *testing.T, f *dirStartFixture)
+		wantErrIs error
+	}{
+		{"enabled is false", func(_ *testing.T, f *dirStartFixture) { f.o.Config.Director.Enabled = false }, ErrDirectorDisabled},
+		{"a promoted session is attached", func(t *testing.T, f *dirStartFixture) {
+			mustAttachDirector(t, f.store, DirectorAttach{Driver: DirectorDriverClaude, User: "u", Cwd: "/w"})
+		}, ErrDirectorAttached},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newDirStartFixture(t, directorTestToken)
+			tc.setup(t, f)
+			f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
+				t.Errorf("a refused start read pid %d", pid)
+				return DirectorProcess{}, errors.New("ps must not be read")
+			}
+			before := directorFileState(t, f.store)
+			if _, err := f.o.StartDirector(f.params(DirectorDriverClaude, "opus")); !errors.Is(err, tc.wantErrIs) {
+				t.Fatalf("StartDirector err = %v, want it to wrap %v", err, tc.wantErrIs)
+			}
+			if after := directorFileState(t, f.store); after != before {
+				t.Fatalf("director.jsonl changed from %q to %q", before, after)
+			}
+		})
+	}
+}

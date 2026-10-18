@@ -988,7 +988,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"director", "--help"}, []string{
 			"<state-dir>/director.jsonl", "promoted with the /director skill", "One director is registered at a time for every org in the ledger",
 			"unless --replace is given", "so a session that was replaced is refused and need not detach", "--force ends the current registration whatever its id",
-			"The registration does not change what `ralph org escalate` does", "Nor does it mean the session is still running",
+			"The registration does not change what `ralph org escalate` does", "Nor does it mean a promoted session is still running",
+			"the cross-org watch checks a headless director each cycle (see status)",
 			"There are two ways to have one.",
 			"`ralph org director start` launches a headless director in a herdr workspace of its own and registers it, and `ralph org director stop --id <id>` closes it again",
 			"With [org.director].launch_cmd set, start launches it with that command, which opens a terminal, and stop ends its process.",
@@ -1079,6 +1080,17 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"still open are listed (open_headless), to be closed with `ralph org director stop --id <id>`",
 			"With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown",
 			"The registration does not tell whether its session is still running",
+			// Plan 2026-10-18-org-director-liveness, D8: the sentence above now
+			// holds for a promoted session only.
+			"The registration does not tell whether its session is still running for a promoted session (the /director skill, `ralph org director attach`).",
+			"For a headless director the director: line says instead what `ralph org watch --all`, which checks it each cycle, last found: " +
+				"checked by the watch at <time>: alive (<how>), ended (<how>), or unknown (<how>: <detail>); or not checked yet, " +
+				"before the watch has checked this registration (with why, when the watch's mark director-alive.json cannot be read).",
+			"An ended one is cleaned up by the next `ralph org director start`, which checks it again first " +
+				"(with enabled false start is refused, and the line names only the stop), or stopped with `ralph org director stop --id <id>`.",
+			"--json carries what the watch found as check (state, how, checked_at, detail; director.check in `ralph status --json`), " +
+				"left out until the watch has checked the current registration",
+			"the registration of a headless director carries starter_pid and starter_start_time",
 			// Plan 2026-10-17-org-auto-merge, AC2.
 			"[org.director].auto_merge, read from the same ralph.toml,", "then enabled, auto_merge and,",
 			"The director: line ends with what auto_merge means: with false, merges are left to the human; with true, the director (once one is attached) " +

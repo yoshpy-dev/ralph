@@ -147,8 +147,10 @@ func CheckDirectorAttachWake(wake []string, target string, wakeCmd []string) err
 
 // The push wake of stage 8b-1 (plan 2026-10-18-org-director-wake, D5 to D8):
 // each cycle of `ralph org watch --all` (RunWatchAll), right after the inbox
-// deadlines, wakes the attached director when its registration wakes by
-// push and the inbox holds open items it was not woken for yet. One fixed
+// deadlines and the director check (CheckDirector; plan
+// 2026-10-18-org-director-liveness, D4), wakes the attached director when
+// its registration wakes by push, the inbox holds open items it was not woken
+// for yet, and that cycle's check did not find it ended (D5). One fixed
 // line that names their ids (DirectorWakeText) is sent once per cycle, by
 // [org.director].wake_cmd or, when that is empty, as input to the herdr pane
 // of a headless director in herdr; then every one of those items gets a
@@ -174,7 +176,7 @@ const (
 )
 
 // Why WakeDirector sent nothing without a failure:
-// DirectorWakeResult.Skipped. The first four write no line; the last three
+// DirectorWakeResult.Skipped. The first four write no line; the last four
 // are each said once per registration on the banner (DirectorWakeMemory).
 const (
 	// DirectorWakeSkippedNoRegistration: no registration is current.
@@ -198,6 +200,12 @@ const (
 	// DirectorWakeSkippedNoSender: wake_cmd is empty and the registration is
 	// not a headless director in herdr, so nothing can type into it.
 	DirectorWakeSkippedNoSender = "no_sender"
+	// DirectorWakeSkippedEnded: the director check of the same watch cycle
+	// found the registration ended (DirectorCheckEnded; plan
+	// 2026-10-18-org-director-liveness, D5), so no director is there to read
+	// the line (the herdr pane of an agent that ended is back at a shell,
+	// which would read the line as a command).
+	DirectorWakeSkippedEnded = "ended"
 )
 
 // DirectorWakeText is the one line the watch sends to wake a director for
@@ -323,13 +331,20 @@ type DirectorWakeResult struct {
 //     (directorToWake).
 //  2. It reads the inbox (an error is Err) and does nothing when no item is
 //     open and not woken (directorToWake).
-//  3. It does nothing when mem holds the registration back: its wake failed
+//  3. It does nothing when check, the director check of the same cycle,
+//     found this registration ended (directorCheckFoundEnded; plan
+//     2026-10-18-org-director-liveness, D5), and says so once per
+//     registration on banner (DirectorWakeSkippedEnded). A check that was
+//     unknown or alive, a check of another registration, and no check
+//     (nil) let the wake go on as before: for an unknown one, the label
+//     check of a herdr pane (typeDirectorWakeLine) still guards the target.
+//  4. It does nothing when mem holds the registration back: its wake failed
 //     less than directorWakeRetry before now (HeldBack).
-//  4. It chooses the sender, wake_cmd or the herdr pane, and skips a
+//  5. It chooses the sender, wake_cmd or the herdr pane, and skips a
 //     registration it cannot send to (no sender, a wake_cmd that is not
 //     valid, a target that is not usable), saying so once per registration
 //     on banner (sendDirectorWake).
-//  5. It sends DirectorWakeText(ids) once. When that succeeds it appends a
+//  6. It sends DirectorWakeText(ids) once. When that succeeds it appends a
 //     woken event for every item; when it fails it writes no woken event. A
 //     failed send or write is said on banner and recorded in mem
 //     (sendDirectorWake).
@@ -340,7 +355,7 @@ type DirectorWakeResult struct {
 // is remembered, and banner nil means os.Stderr. Every value read from a
 // file is escaped on the banner (PrintableInboxText), and no line holds an
 // item's body. Config.Director.Enabled is not read.
-func (o *Org) WakeDirector(now time.Time, stateDir, wakeCmdDir string, mem *DirectorWakeMemory, banner io.Writer) DirectorWakeResult {
+func (o *Org) WakeDirector(now time.Time, stateDir, wakeCmdDir string, check *DirectorCheckResult, mem *DirectorWakeMemory, banner io.Writer) DirectorWakeResult {
 	reg, res := o.directorToWake(stateDir)
 	if reg == nil {
 		return res
@@ -349,6 +364,13 @@ func (o *Org) WakeDirector(now time.Time, stateDir, wakeCmdDir string, mem *Dire
 		mem = &DirectorWakeMemory{}
 	}
 	banner = bannerOrStderr(banner)
+	if directorCheckFoundEnded(check, *reg) {
+		res.Skipped = DirectorWakeSkippedEnded
+		if mem.warnOnce(reg.ID, DirectorWakeSkippedEnded) {
+			writeDirectorWakeLine(banner, "watchdog: director %s is not woken: the watch's check found it ended (%s) (said once)", reg.ID, check.Check.How)
+		}
+		return res
+	}
 	if mem.holdsBack(reg.ID, now) {
 		res.HeldBack = true
 		return res
@@ -398,7 +420,17 @@ func (o *Org) directorToWake(stateDir string) (*DirectorRegistration, DirectorWa
 	return reg, res
 }
 
-// sendDirectorWake is steps 4 and 5 of WakeDirector for reg, with res as
+// directorCheckFoundEnded reports whether check, the director check of the
+// same watch cycle, found reg ended (step 3 of WakeDirector): it checked a
+// registration, that registration has reg's ID and AttachedAt (an id is
+// given again once director.jsonl is removed, as DirectorAliveFor says), and
+// its state is DirectorCheckEnded. A nil check is no check.
+func directorCheckFoundEnded(check *DirectorCheckResult, reg DirectorRegistration) bool {
+	return check != nil && check.Checked && check.Check.State == DirectorCheckEnded &&
+		check.Registration.ID == reg.ID && check.Registration.AttachedAt == reg.AttachedAt
+}
+
+// sendDirectorWake is steps 5 and 6 of WakeDirector for reg, with res as
 // directorToWake returned it. It chooses the sender (directorWakeSender):
 // Config.Director.WakeCmd when it is not empty, run in wakeCmdDir
 // (runDirectorWakeCmd); otherwise, for a headless director in herdr, its

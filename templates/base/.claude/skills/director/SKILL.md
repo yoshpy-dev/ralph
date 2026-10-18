@@ -34,9 +34,11 @@ skill はその節を指し、写さない。
   `director.jsonl` に書く登録は、誰が director かの記録で、そのセッションが
   動いていることは表さない。headless の登録の状態(`starting` か `running`)は、
   start が agent を起動し終えたかどうか(`[org.director].launch_cmd` で
-  立てたものは、起動スクリプトの check-in が済んだかどうか)で決まり、
-  セッションが今も動いているかは表さない。登録があるかどうかで escalate の
-  動きは変わらない。
+  立てたものは、起動スクリプトの check-in が済んだかどうか)で決まる。
+  headless の director が今も動いているかは、横断の見張りが各サイクルで
+  確かめる(「headless の director」節の「確かめを読む」)。昇格した
+  セッションの登録は見張りも確かめないので、そのセッションが今も動いて
+  いるかは分からない。登録があるかどうかで escalate の動きは変わらない。
 - leader が escalate した件が人にどう届くかは、`[org.director].enabled`
   (既定 true)と横断の見張り(`ralph org watch --all`)で決まる。
   - enabled で、見張りが仕事を受け付けている: escalate は件を記録する
@@ -109,6 +111,12 @@ director も守る(「headless の director」節)。
    終える打ち方と、入れ替える `--replace` の打ち方を示す。終える打ち方は、
    昇格したセッションの登録なら detach、headless の director の登録
    (`starting` も含む)なら `ralph org director stop --id <id>` になる。
+   headless の director の登録で断られたときは、エラーの末尾に、見張りが
+   最後に確かめた結果と、`starting` なら登録を書いた start のプロセスを今
+   ps で読んだ結果が付く(読み方は「headless の director」節の「確かめを
+   読む」)。どちらかが ended なら、`ralph org director start` が片付けて
+   から新しい headless の director を立てることも案内される。attach は
+   herdr を打たず、片付けもしない。
    `--replace` は、人が入れ替えるとはっきり言ったときだけ打つ。headless の
    director を `--replace` で入れ替えても、その pane と workspace
    (`[org.director].launch_cmd` で立てたものはプロセス)は残るので、人に
@@ -159,9 +167,27 @@ director も守る(「headless の director」節)。
    人は herdr でその pane に入り、director と話す。launch_cmd で立てたときは
    `started d1 (driver=codex, model=..., permission=..., launch=cmd, name=director_<token>, pid=<pid>)`、
    launch_cmd が開いた端末で話すこと、止める打ち方が出る。
-5. ほかの director が登録されている(`starting` も含む)とき、
-   `[org.director].enabled = false` のときは、start は何も書かず、herdr も
-   launch_cmd も打たずに断られる。start に `--replace` はない。
+5. `[org.director].enabled = false` のときと、昇格したセッションが登録
+   されているときは、start は何も書かず、herdr も launch_cmd も打たずに
+   断られる。start に `--replace` はない。今の登録が headless の director
+   (`starting` も含む)なら、start は見張りを確かめる前に、その場でそれが
+   まだ動いているかを確かめる(確かめ方は下の「確かめを読む」)。
+   - alive か unknown なら、今までどおり何も書かずに断られる。エラーの
+     末尾に確かめた結果が付き、`ralph org director stop --id <id>` が
+     案内される。
+   - ended なら、start は stop と同じ片付けをする。閉じるのは、確かめた
+     ときに登録が記録していたものだけ。herdr で立てたものは label を
+     確かめた pane と workspace を閉じ、launch_cmd で立てたものは終わった
+     プロセスに何も送らない(開いた端末は残るので、人が閉じる)。
+     `stopped` を記録したら、stdout に
+     `cleaned up d1, which had ended (agent_ended): ...` のような 1 行を
+     出して先へ進む。そのあとで start がほかの理由で断られても、この 1 行は
+     残る。
+   - 片付けを終えられないとき(label が合わない、close が失敗した、確かめた
+     あとで登録が変わった)は、何も記録せず、新しい director も立てずに
+     終了コード 1 で断られ、片付けを終える `ralph org director stop --id <id>`
+     (label が合わないときは `--force` 付き)が出る。登録が変わったときは、
+     今の登録を読む `ralph org director status` も出る。
 6. herdr で立てるときに登録のあとの段で失敗すると、start は作った pane と
    workspace を閉じ、止めたことを記録して終了コード 1 で終わる。閉じられ
    なかったものがあれば、閉じる herdr の打ち方と
@@ -277,6 +303,70 @@ start の設定と、director が動く場所は次のとおり。
    launch_cmd が開いた端末で話す。そのあとの仕事(分割計画、受信箱、進捗の
    報告)は、昇格した director と同じ手順で進める。
 
+### 確かめを読む
+
+横断の見張り(`ralph org watch --all`)は各サイクルで、受信箱の期限を送った
+あと、起こす 1 行を送る前に、今の登録が headless の director で `stopped`
+でなければ、それがまだ動いているかを確かめる。昇格したセッションの登録は
+確かめない。確かめ方は登録で変わる。
+
+- `starting`: 登録を書いた `ralph org director start` のプロセスを ps で
+  読む。start は自分の pid と起動時刻を、`attached` の `starter_pid` と
+  `starter_start_time` に書いている。
+- herdr で立てた `running`: `herdr agent get director_<token>` を打つ。
+  herdr がその agent を知らなければ、記録した pane を stop と同じ label の
+  照合で読む。
+- launch_cmd で立てた `running`: check-in が記録した pid を ps で読み、
+  その起動時刻を記録と比べる。
+
+結果は `alive`、`ended`、`unknown` のどれかと、どの確かめで分かったか
+(how)の組で、見張りはそれを台帳の `director-alive.json` に上書きで書く。
+
+- alive: `start_running`(start のプロセスがまだ動いている)、`agent_found`
+  (herdr が agent を知っている)、`process_found`(pid の起動時刻が記録と
+  同じ)。
+- ended: `start_ended`(start のプロセスがないか、zombie)、`agent_ended`
+  (agent がなく、pane は shell に戻って残っている)、`pane_closed`(agent も
+  記録した pane もない)、`process_ended`(pid のプロセスがないか、zombie)。
+- unknown: `no_starter`(start のプロセスが記録されていない。古い ralph が
+  書いた登録か、start が自分の起動時刻を読めなかった)、`starter_pid_reused`
+  と `pid_reused`(pid の起動時刻が記録と違う。別のプロセスがその pid を
+  使っているか、時計が動いた)、`starter_unreadable` と `process_unreadable`
+  (ps が読めない)、`pane_unconfirmed`(label が合わないか、pane の get が
+  失敗した)、`agent_get_failed`(agent get が時間切れか失敗)、
+  `no_agent_get`(herdr の client が agent get を打てない)、`changed`
+  (確かめているあいだに登録が変わり、2 回とも確かめを捨てた)。unknown には
+  理由の短い文(detail)が付く。
+
+`ralph status` の `director:` の行と `ralph org director status` は、
+headless の director について、登録がセッションの生死を表さないという文の
+代わりに、この結果を出す。
+
+- `checked by the watch at <時刻>: alive (<how>)`、`ended (<how>)`、
+  `unknown (<how>: <detail>)`: 見張りがその時刻に確かめた結果。見張りが
+  止まっていると時刻は古いままなので、時刻も読む。
+- `not checked yet`: 見張りがこの登録をまだ確かめていない。印が読めない
+  ときは、その理由も付く。
+- ended のときは、片付けの打ち方が 2 つ付く。次の
+  `ralph org director start` は、もう一度その場で確かめてから片付け、新しい
+  headless の director を立てる。立て直さないなら
+  `ralph org director stop --id <id>` で止める。`[org.director].enabled = false`
+  のときは start が断られるので、stop だけが出る。
+- `--json` では、`check`(`ralph status --json` では `director.check`)に
+  state、how、checked_at、detail が載る。見張りが今の登録をまだ確かめて
+  いなければ載らない。
+
+見張りの確かめは印を書くだけで、`director.jsonl` には何も書かず、pane も
+workspace も閉じず、signal も送らない。ended と読んだ登録には、そのサイクルの
+起こす 1 行も送らない(「見張りが送る 1 行」)。起動時刻が記録と違う pid は、
+終わったとはみなさず unknown にする。unknown のままで start が断られるとき
+は、人が `ralph org director stop --id <id>` で止める。
+
+launch_cmd で立てた director の起動スクリプトは、登録を書いた start の
+プロセスがもう終わっていれば(pid のプロセスがない、zombie、起動時刻が違う)
+check-in を断られ、エージェントを起動しない。ps がその pid を読めないときと、
+start のプロセスが記録されていないときは、今までどおり受け付けられる。
+
 ### 終える
 
 1. headless の director は detach を打たない。detach は登録を外すだけで、
@@ -297,7 +387,9 @@ start の設定と、director が動く場所は次のとおり。
 4. 人が herdr で閉じた pane も、同じ stop で片付く(herdr が知らない pane と
    workspace は閉じ済みとして扱う)。detach か `--replace` で外れたあとの
    headless の director と、start の途中で残った `starting` の登録も、stop で
-   片付ける。
+   片付ける。今の登録の agent かプロセスが終わったときと、start の途中で
+   残った `starting` が今の登録のときは、次の `ralph org director start` も、
+   その場の確かめが ended と読めば片付ける(「立てる」の 5)。
 5. herdr で立てたものでは、label が合わないとき(herdr が状態を失って id を
    振り直したときなど)、label を確かめられないとき、close が失敗したときは、
    stop は理由と、人が閉じるための herdr の打ち方を出して断る。label が合わない
@@ -439,6 +531,10 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
   5 分のあいだ送り直さない。送る手段がない登録(wake_cmd が空の、昇格した
   セッションか launch_cmd の director)には送らず、登録ごとに 1 度だけ
   stderr に書く。どちらでも、件は ack の期限で人に届く。
+- 同じサイクルの確かめが ended と読んだ headless の director にも送らず、
+  登録ごとに 1 度だけ stderr に書く(「headless の director」節の「確かめを
+  読む」)。agent が終わった herdr の pane は shell に戻っているので、送ると
+  1 行がコマンドとして読まれるため。件は ack の期限で人に届く。
 
 ### 件の処理
 
@@ -527,7 +623,9 @@ resolve してから send が失敗すると、件は期限から外れ、leader
   workspace も出る。launch_cmd で立てたものは pane と workspace の代わりに
   `launch cmd`、端末の名前、pid が出る。wake に push があれば、
   `wake=push to <送り先>`(`pull,push` なら `wake=pull,push to <送り先>`)も
-  出る)、`merge guarantee:`(merge の時点の保証)の行。
+  出る。headless の director なら、見張りの確かめの結果も出る。読み方は
+  「headless の director」節の「確かめを読む」)、`merge guarantee:`
+  (merge の時点の保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
   「merge してよい順」)。先頭に `merge guarantee:` の行が出る。

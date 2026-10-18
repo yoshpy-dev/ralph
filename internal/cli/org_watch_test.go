@@ -1810,13 +1810,14 @@ func TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom(t *tes
 
 // The help of watch says what the wake step does, where wake_cmd is read
 // from and runs, and that a change of wake_cmd needs a restart; the list of
-// ralph org --help names the step.
+// ralph org --help names the step, with the director check before it, in
+// the order of a cycle (plan 2026-10-18-org-director-liveness, AC4).
 func TestOrgWatch_HelpDescribesTheDirectorWake(t *testing.T) {
 	orgHelp, _, err := runOrgCmdStreams(t, "--help")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark"; !strings.Contains(orgHelp, want) {
+	if want := "Watch every org of the ledger: inbox deadlines, director check, director wake, pulse, liveness mark"; !strings.Contains(orgHelp, want) {
 		t.Errorf("ralph org --help does not say %q:\n%s", want, orgHelp)
 	}
 	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
@@ -1834,5 +1835,36 @@ func TestOrgWatch_HelpDescribesTheDirectorWake(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
 		}
+	}
+}
+
+// The help of watch says that each cycle checks the current headless
+// director between the inbox deadlines and the wake, writes the result to
+// director-alive.json and nothing to director.jsonl, and does not wake a
+// director that check found ended (plan 2026-10-18-org-director-liveness,
+// D4 and D5).
+func TestOrgWatch_HelpDescribesTheDirectorCheck(t *testing.T) {
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	deadlines := "sends the inbox items past their [org.director] ack_minutes or resolve_minutes deadline to the human"
+	check := "Then it checks the current headless director (the one ralph org director start started) with herdr agent get or ps, " +
+		"and writes what it found (alive, ended, or unknown, and how it found that) to <state-dir>/director-alive.json"
+	wake := "Then, when the attached director was registered with a wake that includes push"
+	for _, want := range []string{
+		deadlines,
+		check,
+		"for that it closes nothing and writes nothing to director.jsonl",
+		wake,
+		"It does not wake a headless director the check of the same cycle found ended",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
+		}
+	}
+	if d, c, w := strings.Index(help, deadlines), strings.Index(help, check), strings.Index(help, wake); d < 0 || c < 0 || w < 0 || d >= c || c >= w {
+		t.Errorf("watch --help does not put the director check between the inbox deadlines and the wake (at %d, %d, %d):\n%s", d, c, w, stdout)
 	}
 }

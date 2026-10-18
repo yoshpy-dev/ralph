@@ -221,9 +221,11 @@ type Org struct {
 	// creates, the label gets, the C-c, and the pane and workspace closes;
 	// the agent start has the start's own timeout), and on the launch_cmd
 	// path the launch_cmd run and each ps read of the director's process
-	// (readDirectorProcess), one fresh deadline per call. Zero (the
-	// field's default) means "use defaultDriverCallTimeout" -- tests set a
-	// tiny value so a call that never answers times out fast.
+	// (readDirectorProcess), and each herdr call and ps read of
+	// CheckDirector (the agent get, the label gets, and the reads of the
+	// starter and of a launch cmd's process), one fresh deadline per call.
+	// Zero (the field's default) means "use defaultDriverCallTimeout" --
+	// tests set a tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
 	// Getenv overrides how Stop and Disband read the caller's herdr
 	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside
@@ -279,11 +281,16 @@ type Org struct {
 	// item is sent at once. The CLI sets it to ProbeWatch on the ledger's
 	// state dir for `ralph org escalate` only.
 	EscalateWatch func() WatchLiveness
-	// DirectorProcessReader overrides how the director of a launch cmd
-	// (director_cmd.go) reads a process by its pid before it signals it and
-	// while it waits for it to end. nil (the field's default) means
-	// ReadDirectorProcess, which runs ps; tests set it to simulate a ps that
-	// cannot be read.
+	// DirectorProcessReader overrides how a headless director's processes are
+	// read by their pid (readDirectorProcess): the stop of a launch cmd and
+	// start's cleanup (director_cmd.go), before they signal its process and
+	// while they wait for it to end; StartDirector, which reads its own start
+	// time to record as the starter (directorStarter); and CheckDirector
+	// (director_check.go), which reads the starter of a starting registration
+	// and the process of a running launch cmd (plan
+	// 2026-10-18-org-director-liveness, D1 and D3). nil (the field's default)
+	// means ReadDirectorProcess, which runs ps; tests set it to simulate a ps
+	// that cannot be read or answers for pids no test started.
 	DirectorProcessReader func(ctx context.Context, pid int) (DirectorProcess, error)
 	// DirectorStopWait bounds how long stopDirectorProcess waits, after its
 	// SIGTERM, for the director process of a launch cmd to end. Zero (the
@@ -307,6 +314,18 @@ type Org struct {
 	// defaultDirectorCheckInPollInterval" (200ms) -- tests set a tiny value
 	// so a check-in is seen fast.
 	DirectorCheckInPollInterval time.Duration
+	// directorCheckAfterRead is a test-only seam that CheckDirector
+	// (director_check.go) runs after each read of the registration it
+	// checks (version A, plan 2026-10-18-org-director-liveness, D3) and
+	// before it reads ps or herdr, with that try's number (1 or 2), so a
+	// test can land an event in between; nil means none.
+	directorCheckAfterRead func(attempt int)
+	// directorStartAfterCheck is a test-only seam that checkCurrentDirector
+	// (director_start_cleanup.go) runs once CheckDirector has found the current
+	// headless registration ended and before cleanUpEndedDirector cleans it
+	// up, so a test can change director.jsonl after the check's read of
+	// version A (plan 2026-10-18-org-director-liveness, D6); nil means none.
+	directorStartAfterCheck func()
 }
 
 func (o *Org) now() string {

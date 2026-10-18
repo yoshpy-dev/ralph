@@ -74,6 +74,17 @@ import (
 // CheckDirectorAttachWake, and by StartDirector. CheckDirectorAttachWake,
 // ValidateDirectorWakeTarget, WakesByPush, and ResolvedWakeTarget are in
 // director_wake.go, with the push wake of the watch.
+//
+// Stage 8b-2a (plan 2026-10-18-org-director-liveness, D1 and D2) records
+// which process wrote a headless registration. The attached of `ralph org
+// director start` carries the starter: the pid of the start process and that
+// pid's start time as ReadDirectorProcess reads it, both or neither (start
+// records neither when it cannot read its own start time). The check-in of a
+// launch cmd (MarkCmdLaunched) reads that process again and is refused once
+// it has ended, since no start then waits for the check-in, so the agent of
+// a terminal that opened that late does not start. A line without a starter,
+// or with a pair the fold cannot use, reads as a registration with no starter
+// recorded.
 
 // Director event kinds: the "event" field of a director.jsonl line. The last
 // four are written only for a headless registration (launch herdr or cmd;
@@ -137,10 +148,11 @@ const directorLockFile = "director.lock"
 var ErrDirectorAttached = errors.New("a director is already attached")
 
 // ErrDirectorNoOpenHeadless is returned (wrapped) by RecordWorkspace,
-// RecordPane, MarkStopped, MarkStoppedIfUnchanged, and MarkForceStopped when
-// no open headless registration has the id: no registration has it, a
-// promoted session attached it (no launch herdr or cmd), or it was already
-// stopped, when the error wraps ErrDirectorStopped too.
+// RecordPane, MarkStopped, MarkStoppedIfUnchanged, MarkStoppedAtVersion, and
+// MarkForceStopped when no open headless registration has the id: no
+// registration has it, a promoted session attached it (no launch herdr or
+// cmd), or it was already stopped, when the error wraps ErrDirectorStopped
+// too.
 var ErrDirectorNoOpenHeadless = errors.New("no open headless registration has the id")
 
 // ErrDirectorNotHerdrLaunch is returned (wrapped) by RecordWorkspace and
@@ -152,9 +164,11 @@ var ErrDirectorNotHerdrLaunch = errors.New("the headless registration was starte
 // ErrDirectorCheckInRefused is returned (wrapped) by MarkCmdLaunched, the
 // check-in of a launch script, whenever it writes nothing: the id is not a
 // registration with launch cmd, the token is not that launch's, the
-// registration is stopped, no longer current, or no longer starting, or the
-// pid or its start time is not usable. The message says which. The launch
-// script then exits without starting the agent.
+// registration is stopped, no longer current, or no longer starting, the
+// pid or its start time is not usable, or the start process that recorded
+// the registration has ended (plan 2026-10-18-org-director-liveness, D2).
+// The message says which. The launch script then exits without starting the
+// agent.
 var ErrDirectorCheckInRefused = errors.New("the check-in of the launch script is refused, so its agent must not start")
 
 // ErrDirectorStopped is wrapped together with ErrDirectorNoOpenHeadless when
@@ -172,13 +186,13 @@ var ErrDirectorIDMismatch = errors.New("the id is not the current registration's
 
 // ErrDirectorWriteNotRestored is returned (wrapped) by every DirectorStore
 // writer (Attach, Detach, AttachHeadless, RecordWorkspace, RecordPane,
-// MarkLaunched, MarkCmdLaunched, MarkStopped, MarkStoppedIfUnchanged, and
-// MarkForceStopped) when a write to director.jsonl failed and the file could
-// not be cut back to its size before the write: it may hold part of the
-// write (a replace cut off after the detached line leaves no registration
-// current), so the error cannot say that nothing was recorded, and the
-// caller says how to read the registration again (the CLI names `ralph org
-// director status`).
+// MarkLaunched, MarkCmdLaunched, MarkStopped, MarkStoppedIfUnchanged,
+// MarkStoppedAtVersion, and MarkForceStopped) when a write to director.jsonl
+// failed and the file could not be cut back to its size before the write: it
+// may hold part of the write (a replace cut off after the detached line
+// leaves no registration current), so the error cannot say that nothing was
+// recorded, and the caller says how to read the registration again (the CLI
+// names `ralph org director status`).
 // Every other failed append left nothing in the file: a failed open or
 // marshal writes nothing, and a failed write or close is cut back.
 var ErrDirectorWriteNotRestored = errors.New("director.jsonl could not be restored to its size before the append")
@@ -218,25 +232,35 @@ var directorRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"d([0-9]+)`)
 // of a promoted session attached with --wake-target carries wake_target. A
 // line without wake_target reads as it did; the fold reads a wake_target
 // only for a promoted session (registrationOf).
+//
+// Stage 8b-2a (plan 2026-10-18-org-director-liveness, D1): the attached of
+// `ralph org director start` (launch herdr or cmd) carries starter_pid and
+// starter_start_time, the pid of the start process that wrote it and that
+// pid's start time as ReadDirectorProcess reads it, both or neither. No
+// other event carries them, and the fold reads them only for a headless
+// registration (registrationOf), so every line of stage 8b-1 reads as it
+// did.
 type DirectorEvent struct {
-	TS             string   `json:"ts"`    // UTC RFC3339
-	ID             string   `json:"id"`    // d<N>
-	Event          string   `json:"event"` // one of the DirectorEvent* constants
-	Driver         string   `json:"driver,omitempty"`
-	Wake           []string `json:"wake,omitempty"`
-	WakeTarget     string   `json:"wake_target,omitempty"` // attached of a promoted session only
-	PaneID         string   `json:"pane_id,omitempty"`
-	Launch         string   `json:"launch,omitempty"` // DirectorLaunchHerdr, DirectorLaunchCmd, or empty
-	Token          string   `json:"token,omitempty"`  // 12 lowercase hex digits
-	Model          string   `json:"model,omitempty"`
-	PermissionMode string   `json:"permission_mode,omitempty"`
-	WorkspaceID    string   `json:"workspace_id,omitempty"`
-	PID            int      `json:"pid,omitempty"`        // launched of a launch cmd only
-	StartTime      string   `json:"start_time,omitempty"` // launched of a launch cmd only
-	User           string   `json:"user"`
-	Cwd            string   `json:"cwd"`
-	HerdrPane      bool     `json:"herdr_pane"`
-	Force          bool     `json:"force,omitempty"`
+	TS               string   `json:"ts"`    // UTC RFC3339
+	ID               string   `json:"id"`    // d<N>
+	Event            string   `json:"event"` // one of the DirectorEvent* constants
+	Driver           string   `json:"driver,omitempty"`
+	Wake             []string `json:"wake,omitempty"`
+	WakeTarget       string   `json:"wake_target,omitempty"` // attached of a promoted session only
+	PaneID           string   `json:"pane_id,omitempty"`
+	Launch           string   `json:"launch,omitempty"` // DirectorLaunchHerdr, DirectorLaunchCmd, or empty
+	Token            string   `json:"token,omitempty"`  // 12 lowercase hex digits
+	Model            string   `json:"model,omitempty"`
+	PermissionMode   string   `json:"permission_mode,omitempty"`
+	WorkspaceID      string   `json:"workspace_id,omitempty"`
+	PID              int      `json:"pid,omitempty"`                // launched of a launch cmd only
+	StartTime        string   `json:"start_time,omitempty"`         // launched of a launch cmd only
+	StarterPID       int      `json:"starter_pid,omitempty"`        // attached of a headless registration only
+	StarterStartTime string   `json:"starter_start_time,omitempty"` // attached of a headless registration only
+	User             string   `json:"user"`
+	Cwd              string   `json:"cwd"`
+	HerdrPane        bool     `json:"herdr_pane"`
+	Force            bool     `json:"force,omitempty"`
 }
 
 // DirectorRegistration is a registration, folded from its attached event
@@ -254,25 +278,34 @@ type DirectorEvent struct {
 // --wake-target (empty for a headless registration, whose target follows
 // from its launch: ResolvedWakeTarget), so a registration attached without
 // one has the JSON shape of stage 8a (plan 2026-10-18-org-director-wake,
-// D3).
+// D3). StarterPID and StarterStartTime come from the attached of a headless
+// registration: the `ralph org director start` process that wrote it and
+// that pid's start time (plan 2026-10-18-org-director-liveness, D1), which
+// the check-in of a launch cmd reads again (MarkCmdLaunched). Both are empty
+// when start could not read its own start time, for an attached written
+// before stage 8b-2a, and for a pair the fold cannot use (registrationOf). A
+// promoted session's registration never has them, so its JSON keeps the
+// shape above, and neither does a headless one with no starter recorded.
 type DirectorRegistration struct {
-	ID             string   `json:"id"`
-	Driver         string   `json:"driver"`
-	Wake           []string `json:"wake"`
-	WakeTarget     string   `json:"wake_target,omitempty"`
-	PaneID         string   `json:"pane_id,omitempty"`
-	Launch         string   `json:"launch,omitempty"`
-	State          string   `json:"state,omitempty"`
-	Token          string   `json:"token,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	PermissionMode string   `json:"permission_mode,omitempty"`
-	WorkspaceID    string   `json:"workspace_id,omitempty"`
-	PID            int      `json:"pid,omitempty"`
-	StartTime      string   `json:"start_time,omitempty"`
-	AttachedAt     string   `json:"attached_at"`
-	User           string   `json:"user"`
-	Cwd            string   `json:"cwd"`
-	HerdrPane      bool     `json:"herdr_pane"`
+	ID               string   `json:"id"`
+	Driver           string   `json:"driver"`
+	Wake             []string `json:"wake"`
+	WakeTarget       string   `json:"wake_target,omitempty"`
+	PaneID           string   `json:"pane_id,omitempty"`
+	Launch           string   `json:"launch,omitempty"`
+	State            string   `json:"state,omitempty"`
+	Token            string   `json:"token,omitempty"`
+	Model            string   `json:"model,omitempty"`
+	PermissionMode   string   `json:"permission_mode,omitempty"`
+	WorkspaceID      string   `json:"workspace_id,omitempty"`
+	PID              int      `json:"pid,omitempty"`
+	StartTime        string   `json:"start_time,omitempty"`
+	StarterPID       int      `json:"starter_pid,omitempty"`
+	StarterStartTime string   `json:"starter_start_time,omitempty"`
+	AttachedAt       string   `json:"attached_at"`
+	User             string   `json:"user"`
+	Cwd              string   `json:"cwd"`
+	HerdrPane        bool     `json:"herdr_pane"`
 }
 
 // Headless reports whether `ralph org director start` wrote the
@@ -391,6 +424,10 @@ type DirectorStore struct {
 	// takes the lock, so a test can land a check-in between a caller's read
 	// and its record of the stop; nil means none.
 	beforeMarkStopped func()
+	// beforeCheckInLock is a test-only seam that MarkCmdLaunched runs after
+	// its read of the starter and before it takes the lock, so a test can
+	// change the registration between the two reads; nil means none.
+	beforeCheckInLock func()
 }
 
 // DirectorPathIn returns the director.jsonl path within an already-resolved
@@ -595,11 +632,11 @@ func (s *DirectorStore) readRaw() ([]byte, error) {
 // appendLocked appends evs, one line each, in a single write, as the inbox's
 // appendLocked does for its one event: Attach with replace passes the
 // detached and the attached together, and MarkStopped,
-// MarkStoppedIfUnchanged, and MarkForceStopped of the current registration
-// the detached and the stopped. raw is the file as read under the same lock
-// hold. When raw does not end with a newline (a write cut off mid-line), the
-// write starts with one, so the cut line stays a separate corrupt line and
-// evs stay readable. An event that does not marshal fails
+// MarkStoppedIfUnchanged, MarkStoppedAtVersion, and MarkForceStopped of the
+// current registration the detached and the stopped. raw is the file as read
+// under the same lock hold. When raw does not end with a newline (a write cut
+// off mid-line), the write starts with one, so the cut line stays a separate
+// corrupt line and evs stay readable. An event that does not marshal fails
 // it before anything is written. When the write or the close fails, part of
 // the lines may be in the file (a full disk can stop a write after the
 // detached line), so it cuts the file back to len(raw) before returning
@@ -686,6 +723,11 @@ func directorAppendFailed(verb string, cur *DirectorRegistration, err error) err
 // read as written, whatever its values: the fold ignores no attached for
 // its wake. An attached with another launch keeps it, with its token, model,
 // and permission mode, so a later binary's registration still counts as one.
+// The starter (starter_pid and starter_start_time, plan
+// 2026-10-18-org-director-liveness, D1) is read for a headless registration
+// only, and only as a pair: a positive pid and a start time that is not
+// blank. Anything else, an attached of stage 8b-1, a hand edit, or a damaged
+// pair, reads as no starter recorded, and the attached still applies.
 func registrationOf(ev DirectorEvent) DirectorRegistration {
 	reg := DirectorRegistration{
 		ID: ev.ID, Driver: ev.Driver, Wake: ev.Wake, WakeTarget: ev.WakeTarget, PaneID: ev.PaneID, AttachedAt: ev.TS,
@@ -696,6 +738,9 @@ func registrationOf(ev DirectorEvent) DirectorRegistration {
 	}
 	if reg.Headless() {
 		reg.State, reg.PaneID, reg.WakeTarget = DirectorStateStarting, "", ""
+		if ev.StarterPID > 0 && strings.TrimSpace(ev.StarterStartTime) != "" {
+			reg.StarterPID, reg.StarterStartTime = ev.StarterPID, ev.StarterStartTime
+		}
 	}
 	return reg
 }

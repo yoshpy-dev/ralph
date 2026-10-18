@@ -50,6 +50,15 @@ const realTabGetNotFoundEnvelope = `{"error":{"code":"tab_not_found","message":"
 
 const realWorkspaceGetNotFoundEnvelope = `{"error":{"code":"workspace_not_found","message":"workspace w9 not found"},"id":"cli:workspace:get"}`
 
+// realAgentNotFoundEnvelope is herdr's `agent get` reply, with exit status 1,
+// for an agent it does not know. Its code is the live one (herdr v0.7.5 on an
+// isolated server, 2026-10-18; plan 2026-10-18-org-director-liveness,
+// Assumptions); the message is made up.
+const realAgentNotFoundEnvelope = `{"error":{"code":"agent_not_found","message":"agent director_0123456789ab not found"},"id":"cli:agent:get"}`
+
+// agentNotFoundEnvelopeText is how the error text renders that envelope.
+const agentNotFoundEnvelopeText = "herdr: agent_not_found: agent director_0123456789ab not found"
+
 func TestParseHerdrEnvelope(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -695,6 +704,7 @@ func TestIsNotFound(t *testing.T) {
 		{name: "wrapped pane_not_found", err: fmt.Errorf("stop seat reviewer: %w", NewHerdrError(HerdrCodePaneNotFound, "gone")), want: true},
 		{name: "doubly wrapped workspace_not_found", err: fmt.Errorf("disband: %w", fmt.Errorf("close: %w", NewHerdrError(HerdrCodeWorkspaceNotFound, "gone"))), want: true},
 		{name: "other code", err: NewHerdrError("agent_pane_busy", "busy"), want: false},
+		{name: "agent_not_found is no closed pane, tab or workspace", err: NewHerdrError(HerdrCodeAgentNotFound, "agent a1 not found"), want: false},
 		{name: "plain error text containing the code", err: errors.New("herdr: pane_not_found: pane w1:p9 not found"), want: false},
 		{name: "unrelated sentinel", err: errTest, want: false},
 	}
@@ -707,5 +717,136 @@ func TestIsNotFound(t *testing.T) {
 				t.Fatalf("NotFound via errors.As (%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// agentNotFoundViaInterface is how internal/org reads agent_not_found
+// (isAgentNotFound): a one-method interface of its own and errors.As. It must
+// agree with IsAgentNotFound for every error.
+func agentNotFoundViaInterface(err error) bool {
+	var nf interface{ AgentNotFound() bool }
+	return errors.As(err, &nf) && nf.AgentNotFound()
+}
+
+// TestIsAgentNotFound pins IsAgentNotFound on its own (plan
+// 2026-10-18-org-director-liveness, D3): agent_not_found matches directly and
+// through %w wrapping, while nil, the pane, tab and workspace not-found codes,
+// another code, and a plain error whose text merely contains the code do not.
+// Each case also checks the AgentNotFound method read through
+// agentNotFoundViaInterface, which must give the same answer.
+func TestIsAgentNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "agent_not_found", err: NewHerdrError(HerdrCodeAgentNotFound, "agent a1 not found"), want: true},
+		{name: "wrapped agent_not_found", err: fmt.Errorf("check d1: %w", NewHerdrError(HerdrCodeAgentNotFound, "gone")), want: true},
+		{name: "pane_not_found", err: NewHerdrError(HerdrCodePaneNotFound, "pane w1:p9 not found"), want: false},
+		{name: "tab_not_found", err: NewHerdrError(HerdrCodeTabNotFound, "tab w1:t9 not found"), want: false},
+		{name: "workspace_not_found", err: NewHerdrError(HerdrCodeWorkspaceNotFound, "workspace w9 not found"), want: false},
+		{name: "other code", err: NewHerdrError("agent_pane_busy", "busy"), want: false},
+		{name: "plain error text containing the code", err: errors.New(agentNotFoundEnvelopeText), want: false},
+		{name: "unrelated sentinel", err: errTest, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsAgentNotFound(tt.err); got != tt.want {
+				t.Fatalf("IsAgentNotFound(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+			if got := agentNotFoundViaInterface(tt.err); got != tt.want {
+				t.Fatalf("AgentNotFound via errors.As (%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHerdr_AgentGet_AgentNotFoundIsReadable pins AgentGet's failure contract
+// (plan 2026-10-18-org-director-liveness, D3): herdr's agent_not_found
+// envelope, printed on stdout or on stderr (which ExecRunner folds into the
+// Runner error), comes back as an error for which IsAgentNotFound is true and
+// IsNotFound is false, that still wraps the Runner error, and whose text is
+// the one checkHerdrEnvelopeError gave AgentGet before it wrapped the
+// envelope. A failure with no envelope is the Runner error as it was.
+func TestHerdr_AgentGet_AgentNotFoundIsReadable(t *testing.T) {
+	stderrErr := fmt.Errorf("herdr: exit status 1: %s", realAgentNotFoundEnvelope)
+	tests := []struct {
+		name         string
+		out          string
+		runErr       error
+		wantText     string
+		wantNotFound bool
+	}{
+		{name: "envelope on stdout", out: realAgentNotFoundEnvelope, runErr: errTest,
+			wantText: errTest.Error() + " (" + agentNotFoundEnvelopeText + ")", wantNotFound: true},
+		{name: "envelope on stderr, folded into the Runner error", out: "", runErr: stderrErr,
+			wantText: stderrErr.Error() + " (" + agentNotFoundEnvelopeText + ")", wantNotFound: true},
+		{name: "no envelope", out: "", runErr: errTest, wantText: errTest.Error(), wantNotFound: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: []string{tt.out}, errs: []error{tt.runErr}}
+			_, err := Herdr{R: f}.AgentGet(context.Background(), "director_0123456789ab")
+			if err == nil {
+				t.Fatal("AgentGet: want an error, got nil")
+			}
+			if err.Error() != tt.wantText {
+				t.Fatalf("AgentGet error = %q, want %q", err.Error(), tt.wantText)
+			}
+			if _, before := checkHerdrEnvelopeError(tt.out, tt.runErr); before.Error() != err.Error() {
+				t.Fatalf("AgentGet error = %q, but checkHerdrEnvelopeError gives %q: the text must not change", err.Error(), before.Error())
+			}
+			if got := IsAgentNotFound(err); got != tt.wantNotFound {
+				t.Fatalf("IsAgentNotFound(%v) = %v, want %v", err, got, tt.wantNotFound)
+			}
+			if got := agentNotFoundViaInterface(err); got != tt.wantNotFound {
+				t.Fatalf("AgentNotFound via errors.As (%v) = %v, want %v", err, got, tt.wantNotFound)
+			}
+			if IsNotFound(err) || notFoundViaInterface(err) {
+				t.Fatalf("IsNotFound(%v) = true: agent_not_found must not read as a closed pane, tab or workspace", err)
+			}
+			if !errors.Is(err, tt.runErr) {
+				t.Fatalf("AgentGet error %v no longer wraps the Runner error %v", err, tt.runErr)
+			}
+		})
+	}
+}
+
+// TestHerdr_AgentStartAndWait_KeepTheEnvelopeAsText pins that only AgentGet
+// wraps the envelope of a failed call: AgentStart and AgentWait fold a
+// pane_not_found or agent_not_found envelope into the text as before, so
+// neither IsNotFound nor IsAgentNotFound reads it, and the Runner error is
+// still wrapped.
+func TestHerdr_AgentStartAndWait_KeepTheEnvelopeAsText(t *testing.T) {
+	envelopes := map[string]string{
+		realPaneNotFoundEnvelope:  "herdr: pane_not_found: pane w99:p99 not found",
+		realAgentNotFoundEnvelope: agentNotFoundEnvelopeText,
+	}
+	for env, envText := range envelopes {
+		calls := map[string]func(h Herdr) error{
+			"AgentStart": func(h Herdr) error {
+				_, err := h.AgentStart(context.Background(), "worker-1", "claude", "pane-1", 0, nil)
+				return err
+			},
+			"AgentWait": func(h Herdr) error {
+				_, err := h.AgentWait(context.Background(), "worker-1", []string{"idle"}, 0)
+				return err
+			},
+		}
+		for name, call := range calls {
+			err := call(Herdr{R: &fakeRunner{outputs: []string{env}, errs: []error{errTest}}})
+			want := errTest.Error() + " (" + envText + ")"
+			switch {
+			case err == nil:
+				t.Fatalf("%s with %s: want an error, got nil", name, env)
+			case err.Error() != want:
+				t.Fatalf("%s error = %q, want %q", name, err.Error(), want)
+			case !errors.Is(err, errTest):
+				t.Fatalf("%s error %v no longer wraps the Runner error", name, err)
+			case IsNotFound(err), IsAgentNotFound(err):
+				t.Fatalf("%s error %v reads as a not-found code; only AgentGet wraps the envelope", name, err)
+			}
+		}
 	}
 }

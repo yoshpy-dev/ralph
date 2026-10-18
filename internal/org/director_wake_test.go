@@ -554,7 +554,8 @@ func (h *wakeTextHerdr) PaneSendKeys(ctx context.Context, paneID string, keys ..
 // wakeFixture is a dirStartFixture with an inbox in the same ledger, a
 // wake_cmd of ["./wake.sh", "{target}", "{text}"] whose wake.sh in cmdDir
 // records its runs in mark and exits 0, and a DirectorWakeMemory, so
-// WakeDirector can be called cycle after cycle at f.now.
+// WakeDirector can be called cycle after cycle at f.now. check is the
+// director check wake passes, the cycle's (nil: none).
 type wakeFixture struct {
 	*dirStartFixture
 	inbox  *InboxStore
@@ -563,6 +564,7 @@ type wakeFixture struct {
 	banner bytes.Buffer
 	mem    DirectorWakeMemory
 	now    time.Time
+	check  *DirectorCheckResult
 }
 
 func newWakeFixture(t *testing.T) *wakeFixture {
@@ -584,7 +586,7 @@ func (f *wakeFixture) script(t *testing.T, tail string) {
 }
 
 func (f *wakeFixture) wake() DirectorWakeResult {
-	return f.o.WakeDirector(f.now, f.dir, f.cmdDir, &f.mem, &f.banner)
+	return f.o.WakeDirector(f.now, f.dir, f.cmdDir, f.check, &f.mem, &f.banner)
 }
 
 // attachPush attaches a promoted session with wake pull,push and target.
@@ -907,7 +909,7 @@ func TestWakeDirector_ARelativeProgramIsResolvedFromTheWakeCmdDir(t *testing.T) 
 	}
 
 	e2 := f.escalate(t, "y")
-	if res := f.o.WakeDirector(f.now, f.dir, other, &f.mem, &f.banner); !res.Sent {
+	if res := f.o.WakeDirector(f.now, f.dir, other, nil, &f.mem, &f.banner); !res.Sent {
 		t.Fatalf("WakeDirector in %s = %+v, want sent", other, res)
 	}
 	if runs := readWakeRuns(t, otherMark); len(runs) != 1 || runs[0].pwd != wakeRealPath(t, other) || !slices.Equal(runs[0].args, []string{DirectorWakeText([]string{e2})}) {
@@ -1140,7 +1142,7 @@ func TestWakeDirector_WithoutAnAbsoluteDirectoryTheWakeCmdFails(t *testing.T) {
 		f := newWakeFixture(t)
 		f.attachPush(t, "term-1")
 		e1 := f.escalate(t, "x")
-		res := f.o.WakeDirector(f.now, f.dir, tc.dir, &f.mem, &f.banner)
+		res := f.o.WakeDirector(f.now, f.dir, tc.dir, nil, &f.mem, &f.banner)
 		want := "watchdog: director d1 not woken for " + e1 + ": " + tc.reason
 		if res.Failure == nil || res.Sent || !slices.Equal(f.bannerLines(), []string{want}) || f.runs(t) != nil {
 			t.Fatalf("WakeDirector with directory %q = %+v, banner %q, runs %+v; want the failure %q and no run", tc.dir, res, f.bannerLines(), f.runs(t), want)
@@ -1385,6 +1387,243 @@ func TestWakeDirector_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr(t *testing
 			}
 			if runs := f.runs(t); runs != nil || f.wokenIDs(t) != nil {
 				t.Fatalf("runs %+v, woken %q; want neither", runs, f.wokenIDs(t))
+			}
+		})
+	}
+}
+
+// The tests below are for the wake's use of the director check of the same
+// watch cycle (plan 2026-10-18-org-director-liveness, D5 and AC5). The check
+// is CheckDirector itself on the fixture's store, as the cycle runs it
+// before the wake, with the fake herdr's agent get (checkHerdr) or a fake ps
+// (DirectorProcessReader): no test runs herdr or reads ps for a pid it did
+// not start.
+
+// wakeCheckSetup makes a headless registration with wake push for a wake
+// test and the fakes its check reads: the herdr or the ps it is checked by.
+type wakeCheckSetup func(t *testing.T) (*wakeFixture, *checkHerdr, DirectorRegistration)
+
+// wakeInHerdr is a headless director in herdr, started with wake push and no
+// wake_cmd, so it is woken by typing into its pane, which the fake herdr
+// has with the labels of its token. Its herdr is a checkHerdr over the
+// start's fakeHerdr, with the start's calls cleared.
+func wakeInHerdr(t *testing.T) (*wakeFixture, *checkHerdr, DirectorRegistration) {
+	t.Helper()
+	f := newWakeFixture(t)
+	f.o.Config.Director.Wake = []string{DirectorWakePush}
+	f.o.Config.Director.WakeCmd = nil
+	reg := f.mustStart(t, DirectorDriverClaude, "opus").Registration
+	h := &checkHerdr{fakeHerdr: f.h.fakeHerdr}
+	f.o.Herdr = h
+	f.h.calls = nil
+	return f, h, reg
+}
+
+// wakeInLaunchCmd is d1, a headless director in a terminal launch_cmd opened,
+// with wake push, whose launch script checked in with checkAgentPID started
+// at checkAgentStart; the fixture's wake_cmd wakes it at director_<token>.
+// The fake ps answers gone for that pid until the test sets wakePS, and
+// fails the test for any other pid.
+func wakeInLaunchCmd(t *testing.T) (*wakeFixture, *checkHerdr, DirectorRegistration) {
+	t.Helper()
+	f := newWakeFixture(t)
+	writeDirectorEvents(t, f.store,
+		DirectorEvent{TS: directorTestNow, ID: "d1", Event: DirectorEventAttached, Driver: DirectorDriverCodex, Wake: []string{DirectorWakePush},
+			Launch: DirectorLaunchCmd, Token: directorTestToken, Model: "m", PermissionMode: PermissionModeGuarded, User: "u", Cwd: "/w"},
+		DirectorEvent{TS: directorTestNow, ID: "d1", Event: DirectorEventLaunched, PID: checkAgentPID, StartTime: checkAgentStart, User: "u", Cwd: "/w"},
+	)
+	wakePS(t, f, DirectorProcess{State: DirectorProcessGone})
+	h := &checkHerdr{fakeHerdr: f.h.fakeHerdr}
+	f.o.Herdr = h
+	return f, h, *mustReadDirector(t, f.store).Current
+}
+
+// wakePS makes f's fake ps answer proc for checkAgentPID.
+func wakePS(t *testing.T, f *wakeFixture, proc DirectorProcess) {
+	t.Helper()
+	f.o.DirectorProcessReader = func(_ context.Context, pid int) (DirectorProcess, error) {
+		if pid != checkAgentPID {
+			t.Errorf("ps read pid %d, want only %d", pid, checkAgentPID)
+		}
+		return proc, nil
+	}
+}
+
+// runCheck runs CheckDirector on f's store at f.now, as the cycle does
+// before its wake, asserts it checked the registration with state and how,
+// clears the herdr calls it made, and returns the result for f.wake.
+func (f *wakeFixture) runCheck(t *testing.T, h *checkHerdr, state, how string) *DirectorCheckResult {
+	t.Helper()
+	res, err := f.o.CheckDirector(f.store, f.now)
+	if err != nil || !res.Checked || res.Check.State != state || res.Check.How != how {
+		t.Fatalf("CheckDirector = %+v, %v; want %s %s", res, err, state, how)
+	}
+	h.mu.Lock()
+	h.calls = nil
+	h.mu.Unlock()
+	return &res
+}
+
+// AC5: when the check of the same cycle found the registration ended, the
+// wake sends nothing to it, by herdr or by wake_cmd, writes no woken event,
+// and says so once on the banner over cycles, as items arrive; with nothing
+// to wake it says nothing. It makes no herdr call, not even to confirm the
+// pane, and records no failure. The next cycle's check that finds it alive
+// lets the wake send again, for every item.
+func TestWakeDirector_ARegistrationTheCheckFoundEndedIsNotWoken(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup wakeCheckSetup
+		end   func(t *testing.T, f *wakeFixture, h *checkHerdr)
+		how   string
+		alive func(t *testing.T, f *wakeFixture, h *checkHerdr)
+		live  string
+	}{
+		{"a headless director in herdr", wakeInHerdr,
+			func(_ *testing.T, _ *wakeFixture, h *checkHerdr) { h.agentGetErr = checkAgentNotFound() }, DirectorCheckHowAgentEnded,
+			func(_ *testing.T, _ *wakeFixture, h *checkHerdr) { h.agentGetErr = nil }, DirectorCheckHowAgentFound},
+		{"a headless director of a launch cmd", wakeInLaunchCmd,
+			func(*testing.T, *wakeFixture, *checkHerdr) {}, DirectorCheckHowProcessEnded,
+			func(t *testing.T, f *wakeFixture, _ *checkHerdr) {
+				wakePS(t, f, DirectorProcess{State: DirectorProcessAlive, StartTime: checkAgentStart})
+			}, DirectorCheckHowProcessFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, h, reg := tc.setup(t)
+			tc.end(t, f, h)
+			f.check = f.runCheck(t, h, DirectorCheckEnded, tc.how)
+			if res := f.wake(); res.Skipped != DirectorWakeSkippedNothingToWake || f.banner.Len() != 0 {
+				t.Fatalf("WakeDirector with nothing open = %+v, banner %q; want nothing to wake and no line", res, f.banner.String())
+			}
+			ids := []string{f.escalate(t, "x")}
+			for i := range 3 {
+				f.now = wakeTestNow.Add(time.Duration(i) * 10 * time.Minute)
+				if i == 1 {
+					ids = append(ids, f.escalate(t, "y"))
+				}
+				res := f.wake()
+				if res.Skipped != DirectorWakeSkippedEnded || res.Sent || res.Failure != nil || res.HeldBack || res.Err != nil ||
+					res.RegistrationID != reg.ID || !slices.Equal(res.IDs, ids) {
+					t.Fatalf("WakeDirector %d = %+v, want skipped %s for %s and %q", i, res, DirectorWakeSkippedEnded, reg.ID, ids)
+				}
+			}
+			want := "watchdog: director d1 is not woken: the watch's check found it ended (" + tc.how + ") (said once)"
+			if lines := f.bannerLines(); !slices.Equal(lines, []string{want}) {
+				t.Fatalf("banner lines = %q, want [%q]", lines, want)
+			}
+			if woken, runs := f.wokenIDs(t), f.runs(t); woken != nil || runs != nil || len(h.calls) != 0 {
+				t.Fatalf("woken %q, wake_cmd runs %+v, herdr calls %q; want none", woken, runs, h.calls)
+			}
+			if f.mem.holdsBack(reg.ID, f.now) {
+				t.Fatal("the skip was recorded as a failed wake")
+			}
+
+			tc.alive(t, f, h)
+			f.check = f.runCheck(t, h, DirectorCheckAlive, tc.live)
+			if res := f.wake(); !res.Sent || !res.Recorded || !slices.Equal(res.IDs, ids) {
+				t.Fatalf("WakeDirector after a check that found it alive = %+v, want %q sent and recorded", res, ids)
+			}
+			if woken := f.wokenIDs(t); !slices.Equal(woken, ids) || len(f.bannerLines()) != 1 {
+				t.Fatalf("woken %q, banner %q; want %q woken and no new line", woken, f.bannerLines(), ids)
+			}
+		})
+	}
+}
+
+// AC5: a check that could not tell (unknown) wakes as before the check
+// existed. For a launch cmd wake_cmd runs; for herdr the line is typed once
+// the pane's labels are confirmed, and when they differ (agent_not_found
+// with a pane labelled for something else) the label check of 8b-1 keeps
+// the line from it: a failure, nothing typed.
+func TestWakeDirector_AnUnknownCheckWakesAsBefore(t *testing.T) {
+	t.Run("herdr, agent get failed", func(t *testing.T) {
+		f, h, _ := wakeInHerdr(t)
+		h.agentGetErr = errors.New("herdr: no server is running")
+		f.check = f.runCheck(t, h, DirectorCheckUnknown, DirectorCheckHowAgentGetFailed)
+		e1 := f.escalate(t, "x")
+		if res := f.wake(); !res.Sent || !res.Recorded || res.Via != InboxWokenViaHerdr {
+			t.Fatalf("WakeDirector = %+v, want sent by herdr and recorded", res)
+		}
+		if want := []string{"pane_get", "tab_get", "workspace_get", "pane_send_text", "pane_send_keys"}; !slices.Equal(h.calls, want) {
+			t.Fatalf("herdr calls = %q, want %q", h.calls, want)
+		}
+		if woken := f.wokenIDs(t); !slices.Equal(woken, []string{e1}) || f.banner.Len() != 0 {
+			t.Fatalf("woken %q, banner %q; want %s woken and no line", woken, f.banner.String(), e1)
+		}
+	})
+	t.Run("herdr, pane unconfirmed", func(t *testing.T) {
+		f, h, reg := wakeInHerdr(t)
+		h.agentGetErr = checkAgentNotFound()
+		h.tabLabels[fakeTabID(reg.PaneID)] = "seat-x"
+		f.check = f.runCheck(t, h, DirectorCheckUnknown, DirectorCheckHowPaneUnconfirmed)
+		f.escalate(t, "x")
+		res := f.wake()
+		if res.Sent || res.Skipped != "" || res.Failure == nil || !strings.Contains(res.Failure.Error(), "is not confirmed as d1's") {
+			t.Fatalf("WakeDirector = %+v, want the wake tried and failed at the label check", res)
+		}
+		if want := []string{"pane_get", "tab_get"}; !slices.Equal(h.calls, want) || f.wokenIDs(t) != nil {
+			t.Fatalf("herdr calls = %q, woken %q; want %q and nothing typed or woken", h.calls, f.wokenIDs(t), want)
+		}
+	})
+	t.Run("launch cmd, pid reused", func(t *testing.T) {
+		f, h, _ := wakeInLaunchCmd(t)
+		wakePS(t, f, DirectorProcess{State: DirectorProcessAlive, StartTime: checkOtherStart})
+		f.check = f.runCheck(t, h, DirectorCheckUnknown, DirectorCheckHowPIDReused)
+		e1 := f.escalate(t, "x")
+		res := f.wake()
+		runs := f.runs(t)
+		if !res.Sent || !res.Recorded || len(runs) != 1 || !slices.Equal(runs[0].args, []string{"director_" + directorTestToken, DirectorWakeText([]string{e1})}) {
+			t.Fatalf("WakeDirector = %+v (runs %+v), want one wake_cmd run to director_%s", res, runs, directorTestToken)
+		}
+	})
+}
+
+// AC5: an ended check that is not of the current registration does not hold
+// its wake back: a registration that replaced the checked one, one with the
+// checked id but another attached_at (director.jsonl removed and the id
+// given again), and a result that checked nothing. Each is woken as with no
+// check at all.
+func TestWakeDirector_AnEndedCheckOfAnotherRegistrationWakesAsBefore(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		after  func(t *testing.T, f *wakeFixture, check *DirectorCheckResult) *DirectorCheckResult
+		target string
+	}{
+		{"a registration that replaced it", func(t *testing.T, f *wakeFixture, check *DirectorCheckResult) *DirectorCheckResult {
+			if _, _, err := f.store.Attach(DirectorAttach{Driver: DirectorDriverClaude, Replace: true, Wake: []string{DirectorWakePush}, WakeTarget: "term-2"}); err != nil {
+				t.Fatal(err)
+			}
+			return check
+		}, "term-2"},
+		{"the same id attached at another time", func(t *testing.T, f *wakeFixture, check *DirectorCheckResult) *DirectorCheckResult {
+			writeDirectorEvents(t, f.store,
+				DirectorEvent{TS: "2026-10-16T09:00:00Z", ID: "d1", Event: DirectorEventAttached, Driver: DirectorDriverCodex, Wake: []string{DirectorWakePush},
+					Launch: DirectorLaunchCmd, Token: directorTestToken, Model: "m", PermissionMode: PermissionModeGuarded, User: "u", Cwd: "/w"},
+				DirectorEvent{TS: "2026-10-16T09:00:01Z", ID: "d1", Event: DirectorEventLaunched, PID: checkAgentPID, StartTime: checkAgentStart, User: "u", Cwd: "/w"},
+			)
+			return check
+		}, "director_" + directorTestToken},
+		{"a result that checked nothing", func(_ *testing.T, _ *wakeFixture, check *DirectorCheckResult) *DirectorCheckResult {
+			unchecked := *check
+			unchecked.Checked = false
+			return &unchecked
+		}, "director_" + directorTestToken},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, h, reg := wakeInLaunchCmd(t)
+			check := f.runCheck(t, h, DirectorCheckEnded, DirectorCheckHowProcessEnded)
+			if check.Registration.ID != reg.ID || check.Registration.AttachedAt != directorTestNow {
+				t.Fatalf("checked registration = %+v, want %s attached at %s", check.Registration, reg.ID, directorTestNow)
+			}
+			f.check = tc.after(t, f, check)
+			e1 := f.escalate(t, "x")
+			res := f.wake()
+			runs := f.runs(t)
+			if !res.Sent || !res.Recorded || len(runs) != 1 || !slices.Equal(runs[0].args, []string{tc.target, DirectorWakeText([]string{e1})}) {
+				t.Fatalf("WakeDirector = %+v (runs %+v), want one wake_cmd run to %s", res, runs, tc.target)
+			}
+			if f.banner.Len() != 0 {
+				t.Fatalf("banner = %q, want nothing", f.banner.String())
 			}
 		})
 	}

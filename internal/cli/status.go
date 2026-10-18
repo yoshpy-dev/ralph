@@ -73,9 +73,23 @@ func newStatusCmd() *cobra.Command {
 			"(detached, or replaced by attach --replace) is named at the end of the\n" +
 			"line, with `ralph org director stop --id`, which stops it; the JSON lists\n" +
 			"it under director.open_headless.\n" +
-			"A registration does not tell whether its session is still\n" +
-			"running: an item the director does not ack reaches the human at the ack\n" +
-			"deadline of `ralph org watch --all`.\n\n" +
+			"A registration does not tell whether its session is still running for\n" +
+			"a promoted session (the /director skill, `ralph org director attach`).\n" +
+			"For a headless director the line says instead what\n" +
+			"`ralph org watch --all`, which checks it each cycle, last found:\n" +
+			"checked by the watch at <time>: alive (<how>), ended (<how>), or unknown\n" +
+			"(<how>: <detail>); or not checked yet, before the watch has checked this\n" +
+			"registration (with why, when the watch's mark director-alive.json cannot\n" +
+			"be read). An ended one is cleaned up by the next\n" +
+			"`ralph org director start`, which checks it again first, or stopped with\n" +
+			"`ralph org director stop --id <id>`; with enabled false the line names\n" +
+			"only the stop. The JSON adds director.check (state, how, checked_at,\n" +
+			"detail) once the watch has checked the current registration, and a\n" +
+			"headless registration carries starter_pid and starter_start_time, the\n" +
+			"`ralph org director start` process that recorded it and its start time,\n" +
+			"when start could read them.\n" +
+			"Either way, an item the director does not ack reaches the human at the\n" +
+			"ack deadline of `ralph org watch --all`.\n\n" +
 			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head with the\n" +
 			"latest default branch, as `ralph doctor` last found it -- github_protection\n" +

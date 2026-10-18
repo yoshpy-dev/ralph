@@ -1472,10 +1472,10 @@ func TestOrgDirectorAttachReplace_AHeadlessDirectorNamesItsStop(t *testing.T) {
 // form; the open headless registrations that are not current are named at
 // the end of the line, one or several, and listed as open_headless lines and
 // in JSON. A promoted session's lines keep their 8a-1 form (also
-// TestOrgDirector_AttachReplaceAndDetachByID).
+// TestOrgDirector_AttachReplaceAndDetachByID). No watch has checked d1, so
+// its line says not checked yet (plan 2026-10-18-org-director-liveness, D8).
 func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	stateDir := t.TempDir()
 	store := org.NewDirectorStore(stateDir)
 	who := org.DirectorWho{User: "alice", Cwd: "/work"}
@@ -1629,6 +1629,9 @@ func TestOrgDirectorLaunched_IsHidden(t *testing.T) {
 		"the launch script that `ralph org director start` writes when [org.director].launch_cmd is set",
 		`(--pid "$$") before it execs the agent, and execs the agent only when it exits 0`,
 		"It is refused, writes nothing, and exits 1 with the reason on stderr, so the agent does not start",
+		// Plan 2026-10-18-org-director-liveness, D2.
+		"It is refused the same way when the `ralph org director start` that recorded the registration has ended",
+		"a ps that cannot read that pid does not refuse it.",
 		"It reads no ralph.toml.", "--id", "--token", "--pid",
 	} {
 		if !strings.Contains(help, want) {
@@ -1822,6 +1825,79 @@ func TestOrgDirectorLaunched_Refusals(t *testing.T) {
 			}
 			if after := directorFileOrAbsent(t, stateDir); after != before {
 				t.Errorf("a refused check-in changed director.jsonl from %q to %q", before, after)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-18-org-director-liveness, AC2 through the CLI: the check-in
+// reads the start process that recorded the registration with the same seam
+// it reads --pid with (orgDirectorCheckInReadProcess). A starter read gone
+// refuses it with one line and exit 1, writing nothing and printing nothing
+// on stdout; a starter still running with its recorded start time lets the
+// check-in record launched as before.
+func TestOrgDirectorLaunched_RefusesOnceTheStartThatRecordedItHasEnded(t *testing.T) {
+	const (
+		scriptPID  = 4242
+		starterPID = 7777
+		scriptTime = "Thu Oct 15 21:51:09 2026"
+		started    = "Wed Oct 14 00:00:00 2026"
+	)
+	for _, tc := range []struct {
+		name    string
+		starter org.DirectorProcess
+		want    string // the whole refusal, with %s for the attached ts; "" when the check-in is recorded
+	}{
+		{"the start has ended", org.DirectorProcess{State: org.DirectorProcessGone},
+			"org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
+				"the ralph org director start that recorded d1 (driver claude, attached %s, headless starting, launch cmd) is no longer running " +
+				"(no process has pid 7777), so no start waits for this check-in: run ralph org director start again"},
+		{"the start still runs", org.DirectorProcess{State: org.DirectorProcessAlive, StartTime: started}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			reg, err := org.NewDirectorStore(stateDir).AttachHeadless(org.DirectorHeadlessAttach{
+				Launch: org.DirectorLaunchCmd, Driver: "claude", Model: "opus", PermissionMode: org.PermissionModeAutonomous, Wake: []string{org.DirectorWakePull},
+				StarterPID: starterPID, StarterStartTime: started, User: "alice", Cwd: "/work",
+			})
+			if err != nil {
+				t.Fatalf("seed the launch cmd registration: %v", err)
+			}
+			var reads []int
+			setCheckInSeams(t, scriptPID, func(_ context.Context, pid int) (org.DirectorProcess, error) {
+				reads = append(reads, pid)
+				switch pid {
+				case scriptPID:
+					return org.DirectorProcess{State: org.DirectorProcessAlive, StartTime: scriptTime}, nil
+				case starterPID:
+					return tc.starter, nil
+				}
+				t.Errorf("the check-in read pid %d", pid)
+				return org.DirectorProcess{}, errors.New("not a pid of the test's")
+			})
+			before := directorFileOrAbsent(t, stateDir)
+			stdout, _, err := runOrgCmdStreams(t, "director", "launched", "--id", reg.ID, "--token", reg.Token, "--pid", fmt.Sprint(scriptPID), "--state-dir", stateDir)
+			if !slices.Equal(reads, []int{scriptPID, starterPID}) {
+				t.Errorf("the check-in read the pids %v, want --pid %d and then the starter %d", reads, scriptPID, starterPID)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want nothing", stdout)
+			}
+			if tc.want != "" {
+				want := fmt.Sprintf(tc.want, directorEventsIn(t, stateDir)[0].TS)
+				if !errors.Is(err, org.ErrDirectorCheckInRefused) || err.Error() != want || strings.Contains(err.Error(), "\n") {
+					t.Fatalf("director launched err =\n%v\nwant\n%s", err, want)
+				}
+				if after := directorFileOrAbsent(t, stateDir); after != before {
+					t.Fatalf("a refused check-in changed director.jsonl from %q to %q", before, after)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("director launched: %v", err)
+			}
+			if launched := launchedOf(t, stateDir); len(launched) != 1 || launched[0].PID != scriptPID || launched[0].StartTime != scriptTime {
+				t.Fatalf("launched = %+v; want one with pid %d started %q", launched, scriptPID, scriptTime)
 			}
 		})
 	}
@@ -2355,8 +2431,7 @@ func TestOrgDirectorStop_LaunchCmdEndsTheProcessAndLeavesTheTerminal(t *testing.
 	if err != nil {
 		t.Fatalf("status: %v (output: %s)", err, out)
 	}
-	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s) -- "+
-		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"+directorAutoMergeOff,
+	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s)"+directorNotCheckedTail,
 		name, launched.PID, att.TS, by)
 	if got := statusDirectorLine(t, out); got != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", got, wantLine)
@@ -2699,10 +2774,10 @@ func TestOrgDirectorDetach_ALaunchCmdDirectorNamesItsStop(t *testing.T) {
 // pid, start_time, and terminal_name in the text form, and the same in the
 // JSON; an open one that is not current is named so at the end of the line
 // and on its open_headless line. The pid is made up: nothing reads or
-// signals it.
+// signals it. No watch has checked d1, so its line says not checked yet
+// (plan 2026-10-18-org-director-liveness, D8).
 func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	stateDir := t.TempDir()
 	d1 := seedCmdHeadless(t, stateDir)
 	name, ts := "director_"+d1.Token, d1.AttachedAt

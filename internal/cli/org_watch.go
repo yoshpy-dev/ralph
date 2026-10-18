@@ -29,8 +29,9 @@ import (
 // --detach` starts that as a detached process (runOrgWatchDetach), and
 // `--stop` asks a running one to stop (runOrgWatchStop). All condition
 // evaluation, ALERT dedupe, deadman escalation, inbox deadline, director
-// wake, lock, and liveness mark logic lives in internal/org (watch.go,
-// deadline.go, director_wake.go, watchalive.go) -- this command checks the
+// check and its director-alive.json, director wake, lock, and liveness mark
+// logic lives in internal/org (watch.go, deadline.go, director_check.go,
+// director_wake.go, watchalive.go) -- this command checks the
 // flags, resolves the state directory (the one the manifest, receipts, and
 // inbox live in, via org.ResolveOrgStateDir) and the directory wake_cmd runs
 // in (orgWatchDirectorWake), and wires them through to org.WatchAllParams.
@@ -46,19 +47,26 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "watch",
-		Short: "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark",
+		Short: "Watch every org of the ledger: inbox deadlines, director check, director wake, pulse, liveness mark",
 		Long: "ralph org watch --all watches every org of the ledger in one process.\n" +
 			"Every --interval-seconds (default: [org.watchdog].interval_seconds) it\n" +
 			"sends the inbox items past their [org.director] ack_minutes or\n" +
-			"resolve_minutes deadline to the human. Then, when the attached director\n" +
-			"was registered with a wake that includes push ([org.director].wake, or\n" +
-			"director attach --wake), it wakes that director for the new open inbox\n" +
-			"items, through [org.director].wake_cmd (run without a shell, in the\n" +
-			"directory of the ralph.toml it was read from) or, with no wake_cmd, by\n" +
-			"typing into the herdr pane of a headless director in herdr. Without\n" +
-			"--config, when the ledger is the main worktree's, wake and wake_cmd come\n" +
-			"from the main worktree's ralph.toml, and wake_cmd runs in its root. It\n" +
-			"reads wake_cmd when it starts, so restart it after changing wake_cmd.\n" +
+			"resolve_minutes deadline to the human. Then it checks the current\n" +
+			"headless director (the one ralph org director start started) with herdr\n" +
+			"agent get or ps, and writes what it found (alive, ended, or unknown, and\n" +
+			"how it found that) to <state-dir>/director-alive.json; for that it\n" +
+			"closes nothing and writes nothing to director.jsonl. Then, when the\n" +
+			"attached director was registered with a wake that includes push\n" +
+			"([org.director].wake, or director attach --wake), it wakes that\n" +
+			"director for the new open inbox items, through [org.director].wake_cmd\n" +
+			"(run without a shell, in the directory of the ralph.toml it was read\n" +
+			"from) or, with no wake_cmd, by typing into the herdr pane of a headless\n" +
+			"director in herdr. It does not wake a headless director the check of\n" +
+			"the same cycle found ended.\n" +
+			"Without --config, when the ledger is the main worktree's, wake and\n" +
+			"wake_cmd come from the main worktree's ralph.toml, and wake_cmd runs in\n" +
+			"its root. It reads wake_cmd when it starts, so restart it after changing\n" +
+			"wake_cmd.\n" +
 			"Then it runs the pulse cycle of each running org: heartbeat-stall /\n" +
 			"process-liveness / worktree-scope-change ALERTs sent to the org's\n" +
 			"leader, and a deadman escalation\n" +

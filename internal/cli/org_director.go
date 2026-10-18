@@ -49,9 +49,10 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"The registration does not change what `ralph org escalate` does:\n" +
 			"[org.director].enabled and the cross-org watch decide that (see\n" +
-			"ralph org escalate --help). Nor does it mean the session is still\n" +
-			"running: an item the director does not ack reaches the human at the\n" +
-			"ack deadline of `ralph org watch --all`.",
+			"ralph org escalate --help). Nor does it mean a promoted session is\n" +
+			"still running; the cross-org watch checks a headless director each\n" +
+			"cycle (see status). An item the director does not ack reaches the\n" +
+			"human at the ack deadline of `ralph org watch --all`.",
 		Args: cobra.NoArgs,
 		// Runnable, so a mistyped verb is an unknown command (exit 1), as
 		// for `ralph org inbox`, instead of this help.
@@ -102,7 +103,12 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"which closes its herdr pane, and --replace leaves that pane open. For\n" +
 			"one launched with [org.director].launch_cmd, that stop ends its\n" +
 			"process, run from a terminal other than the director's, and --replace\n" +
-			"leaves the process running.\n" +
+			"leaves the process running. The refusal then also says what\n" +
+			"`ralph org watch --all` found when it last checked that director, and,\n" +
+			"for one still starting, what ps reads now of the start process that\n" +
+			"recorded it; when either says it has ended, the refusal names\n" +
+			"`ralph org director start`, which cleans it up before it starts a new\n" +
+			"headless director. attach itself runs no herdr and cleans up nothing.\n" +
 			"\n" +
 			"attach is refused, and writes nothing, when [org.director].enabled is\n" +
 			"false: escalate then sends every item to the human at once. Without\n" +
@@ -284,7 +290,23 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"merges the PRs `ralph org merge-order` lists as ready with\n" +
 			"`ralph org merge`, without asking. With enabled false, auto_merge = true\n" +
 			"has no effect, and the line says so.\n" +
-			"The registration does not tell whether its session is still running.",
+			"The registration does not tell whether its session is still running\n" +
+			"for a promoted session (the /director skill,\n" +
+			"`ralph org director attach`). For a headless director the director:\n" +
+			"line says instead what `ralph org watch --all`, which checks it each\n" +
+			"cycle, last found: checked by the watch at <time>: alive (<how>), ended\n" +
+			"(<how>), or unknown (<how>: <detail>); or not checked yet, before the\n" +
+			"watch has checked this registration (with why, when the watch's mark\n" +
+			"director-alive.json cannot be read). An ended one is cleaned up by the\n" +
+			"next `ralph org director start`, which checks it again first (with\n" +
+			"enabled false start is refused, and the line names only the stop), or\n" +
+			"stopped with `ralph org director stop --id <id>`. --json carries what\n" +
+			"the watch found as check (state, how, checked_at, detail;\n" +
+			"director.check in `ralph status --json`), left out until the watch has\n" +
+			"checked the current registration, and the registration of a headless\n" +
+			"director carries starter_pid and starter_start_time: the pid of the\n" +
+			"`ralph org director start` process that recorded it and that process's\n" +
+			"start time, when start could read them.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt, err := newOrgDirectorRuntime(cmd, "director status", *stateDir, *configPath, orgLedgerReadOnly, true)
@@ -378,39 +400,6 @@ func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string
 // one was given (org.CommandWithStateDir).
 func (rt *orgDirectorRuntime) command(command string) string {
 	return org.CommandWithStateDir(command, rt.hintStateDir)
-}
-
-// attachedError is the store's ErrDirectorAttached refusal err followed by
-// the commands that end or replace the current registration. The store's
-// message names the registration and ends there, so the two ways out are
-// said once, here (self-review L7 of org-director-attach). The current
-// registration is read again here, without the lock, so it can be newer
-// than the one the store refused on. A headless one (`ralph org director
-// start`, starting or running) is ended with `ralph org director stop --id`,
-// which closes its herdr pane, not with detach (plan
-// 2026-10-15-org-director-start, AC2); one with launch cmd is stopped from a
-// terminal other than the director's, and that stop ends its process (plan
-// 2026-10-16-org-director-launch-cmd, D7 and D8).
-func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error {
-	replace := rt.command("ralph org director attach --driver " + driverName + " --replace")
-	var cur *org.DirectorRegistration
-	if res, readErr := rt.store.Read(); readErr == nil {
-		cur = res.Current
-	}
-	if cur != nil && cur.CmdLaunch() {
-		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, which stops its process, "+
-			"or replace it with %s, which leaves that process running until such a stop", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace)
-	}
-	if cur != nil && cur.Headless() {
-		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, which closes its herdr pane, "+
-			"or replace it with %s, which leaves that pane open until such a stop", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace)
-	}
-	detach := "ralph org director detach --id <its id>"
-	if cur != nil {
-		detach = "ralph org director detach --id " + inboxField(cur.ID)
-	}
-	return fmt.Errorf("%w: end it with %s from the session that attached it (or with --force in place of --id, when that session is gone), "+
-		"or replace it with %s", err, rt.command(detach), replace)
 }
 
 // printHeadlessStillOpen writes to w, after detach or attach --replace ended
@@ -527,15 +516,24 @@ const (
 // closed, which `ralph org director stop --id` closes (omitted when none).
 // Error is the read error, set whenever the read failed (with disabled too),
 // and CorruptLines and IgnoredEvents the counts of org.DirectorReadResult.
+// Check is what the watch's check last found for the current registration
+// when it is headless and not stopped (plan 2026-10-18-org-director-liveness,
+// D8: watchChecks), read from the watch's mark when the mark is that
+// registration's (readOrgDirectorCheck); it is omitted when the watch has not
+// checked it yet, when the mark is another registration's or cannot be read
+// (markErr, which only the text form shows), and for a promoted session.
 type orgDirectorReport struct {
 	Enabled       bool                            `json:"enabled"`
 	AutoMerge     bool                            `json:"auto_merge"`
 	State         string                          `json:"state"`
 	Registration  *orgDirectorReportRegistration  `json:"registration"`
+	Check         *orgDirectorReportCheck         `json:"check,omitempty"`
 	OpenHeadless  []orgDirectorReportRegistration `json:"open_headless,omitempty"`
 	Error         string                          `json:"error,omitempty"`
 	CorruptLines  int                             `json:"corrupt_lines"`
 	IgnoredEvents int                             `json:"ignored_events"`
+	watchChecks   bool
+	markErr       string
 }
 
 // orgDirectorReportRegistration is a registration as status reports it: the
@@ -561,7 +559,8 @@ func newOrgDirectorReportRegistration(reg org.DirectorRegistration) orgDirectorR
 
 // readOrgDirectorReport reads the registration of the ledger at stateDir
 // (org.DirectorStore.Read, no lock) into an orgDirectorReport with
-// director's Enabled as the switch and its AutoMerge.
+// director's Enabled as the switch and its AutoMerge, and the watch's check
+// of the current registration (readOrgDirectorCheck).
 func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) orgDirectorReport {
 	report := orgDirectorReport{Enabled: director.Enabled, AutoMerge: director.AutoMerge}
 	res, err := org.NewDirectorStore(stateDir).Read()
@@ -571,6 +570,7 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 	case res.Current != nil:
 		cur := newOrgDirectorReportRegistration(*res.Current)
 		report.Registration, report.State = &cur, orgDirectorStateAttached
+		report.watchChecks, report.Check, report.markErr = readOrgDirectorCheck(stateDir, *res.Current)
 	default:
 		report.State = orgDirectorStateNotAttached
 	}
@@ -592,7 +592,12 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 // name, and the pid: orgDirectorLaunchDetails). A registration whose wake
 // has push ends its details with the wake and where the watch sends
 // (orgDirectorPushDetails); a pull-only one's line is that of stage 8a.
-// Attached and not attached
+// After the details, a registration the watch checks (headless and not
+// stopped) says what the watch's check found (orgDirectorWatchCheckClause),
+// and every other one (a promoted session's, or a headless one recorded
+// stopped while still current) that the registration does not tell whether
+// its session is still running; disabled adds the check after the stop
+// command. Attached and not attached
 // end with what [org.director].auto_merge means (orgDirectorAutoMergeClause),
 // and disabled says that auto_merge = true has no effect; unreadable says
 // nothing of it. The open headless registrations that are not current are
@@ -620,7 +625,11 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			details += ", pane " + inboxField(reg.PaneID)
 		}
 		details += orgDirectorPushDetails(reg.DirectorRegistration)
-		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- the registration does not tell whether its session is still running; " +
+		alive := "the registration does not tell whether its session is still running"
+		if r.watchChecks {
+			alive = orgDirectorWatchCheckClause(r, hintStateDir, true)
+		}
+		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- " + alive + "; " +
 			"inbox items it does not ack reach the human at the ack deadline" + orgDirectorAutoMergeClause(r.AutoMerge, true) + note
 	case orgDirectorStateDisabled:
 		state := "[org.director].enabled = false"
@@ -634,6 +643,11 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			reg := r.Registration
 			state += "; registration " + inboxField(reg.ID) + " is still recorded, headless " + inboxField(reg.State) + orgDirectorLaunchDetails(reg.DirectorRegistration) +
 				": stop it with " + org.CommandWithStateDir("ralph org director stop --id "+inboxField(reg.ID), hintStateDir)
+			if r.watchChecks {
+				// start refuses while the switch is off, so the check names no
+				// cleanup by start: the stop above is the way out.
+				state += "; " + orgDirectorWatchCheckClause(r, hintStateDir, false)
+			}
 		case r.Registration != nil:
 			state += "; registration " + inboxField(r.Registration.ID) + " is still recorded"
 		}
