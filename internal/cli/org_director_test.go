@@ -988,7 +988,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"director", "--help"}, []string{
 			"<state-dir>/director.jsonl", "promoted with the /director skill", "One director is registered at a time for every org in the ledger",
 			"unless --replace is given", "so a session that was replaced is refused and need not detach", "--force ends the current registration whatever its id",
-			"The registration does not change what `ralph org escalate` does", "Nor does it mean the session is still running",
+			"The registration does not change what `ralph org escalate` does", "Nor does it mean a promoted session is still running",
+			"the cross-org watch checks a headless director each cycle (see status)",
 			"There are two ways to have one.",
 			"`ralph org director start` launches a headless director in a herdr workspace of its own and registers it, and `ralph org director stop --id <id>` closes it again",
 			"With [org.director].launch_cmd set, start launches it with that command, which opens a terminal, and stop ends its process.",

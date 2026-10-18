@@ -49,9 +49,10 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 			"\n" +
 			"The registration does not change what `ralph org escalate` does:\n" +
 			"[org.director].enabled and the cross-org watch decide that (see\n" +
-			"ralph org escalate --help). Nor does it mean the session is still\n" +
-			"running: an item the director does not ack reaches the human at the\n" +
-			"ack deadline of `ralph org watch --all`.",
+			"ralph org escalate --help). Nor does it mean a promoted session is\n" +
+			"still running; the cross-org watch checks a headless director each\n" +
+			"cycle (see status). An item the director does not ack reaches the\n" +
+			"human at the ack deadline of `ralph org watch --all`.",
 		Args: cobra.NoArgs,
 		// Runnable, so a mistyped verb is an unknown command (exit 1), as
 		// for `ralph org inbox`, instead of this help.
