@@ -115,7 +115,7 @@ func TestOrgDirectorAttach_RefusesAWakeItCannotSendWithNothingWritten(t *testing
 		{"a --wake-target of 257 characters", directorWakeToml("", directorWakeCmdWithTarget), []string{"--wake", "push", "--wake-target", strings.Repeat("é", 257)},
 			org.ErrDirectorWakeTargetInvalid, targetErr + "it is 257 characters long, more than 256", none},
 		{"a --wake-target that starts with -", directorWakeToml("", directorWakeCmdWithTarget), []string{"--wake", "push", "--wake-target", "-x"},
-			org.ErrDirectorWakeTargetInvalid, targetErr + `"-x" starts with "-", which the command [org.director].wake_cmd runs could read as an option`, none},
+			org.ErrDirectorWakeTargetInvalid, targetErr + `"-x" starts with "-", which the program it is passed to could read as an option`, none},
 		{"--wake poll", "", []string{"--wake", "poll"}, nil, wakeErr + `element 0 "poll" is not a wake value; the values are "pull" and "push"`, none},
 		{"--wake pull,pull", "", []string{"--wake", "pull,pull"}, nil, wakeErr + `element 1 "pull" repeats element 0; list each value once`, none},
 		{"an empty --wake", "", []string{"--wake", ""}, nil, wakeErr + `element 0 "" is not a wake value; the values are "pull" and "push"`, none},
@@ -124,7 +124,7 @@ func TestOrgDirectorAttach_RefusesAWakeItCannotSendWithNothingWritten(t *testing
 		{"a bad --wake before a ralph.toml that does not load", broken, []string{"--wake", "push,push"}, nil,
 			wakeErr + `element 1 "push" repeats element 0; list each value once`, none},
 		{"a bad --wake-target before a ralph.toml that does not load", broken, []string{"--wake", "push", "--wake-target", "-x"},
-			org.ErrDirectorWakeTargetInvalid, targetErr + `"-x" starts with "-", which the command [org.director].wake_cmd runs could read as an option`, none},
+			org.ErrDirectorWakeTargetInvalid, targetErr + `"-x" starts with "-", which the program it is passed to could read as an option`, none},
 	}
 	for _, tc := range cases {
 		for _, replace := range []bool{false, true} {

@@ -78,8 +78,9 @@ func (r DirectorRegistration) ResolvedWakeTarget() string {
 // target the watch sends to (plan 2026-10-18-org-director-wake, D4 and D8):
 // it must not be empty, must be valid UTF-8 with no control character
 // (unicode.IsControl), must be at most MaxDirectorWakeTargetRunes
-// characters long, and must not start with "-", which the command
-// [org.director].wake_cmd runs could read as an option. attach checks
+// characters long, and must not start with "-", which the program it is
+// passed to (the one [org.director].wake_cmd runs, or herdr for the pane of
+// a headless director) could read as an option. attach checks
 // --wake-target with it before anything is written, and the watch checks
 // a recorded target with it before it sends, since director.jsonl can be
 // edited by hand. The value is quoted in the error, so its characters
@@ -96,7 +97,7 @@ func ValidateDirectorWakeTarget(target string) error {
 	case utf8.RuneCountInString(target) > MaxDirectorWakeTargetRunes:
 		reason = fmt.Sprintf("it is %d characters long, more than %d", utf8.RuneCountInString(target), MaxDirectorWakeTargetRunes)
 	case strings.HasPrefix(target, "-"):
-		reason = fmt.Sprintf(`%q starts with "-", which the command [org.director].wake_cmd runs could read as an option`, target)
+		reason = fmt.Sprintf(`%q starts with "-", which the program it is passed to could read as an option`, target)
 	default:
 		return nil
 	}

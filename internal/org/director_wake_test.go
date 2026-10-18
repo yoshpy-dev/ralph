@@ -67,7 +67,7 @@ func TestValidateDirectorWakeTarget(t *testing.T) {
 		{"invalid UTF-8", "a\xffb", `"a\xffb" is not valid UTF-8`},
 		{"257 characters", strings.Repeat("a", MaxDirectorWakeTargetRunes+1), "it is 257 characters long, more than 256"},
 		{"257 multibyte characters", strings.Repeat("あ", MaxDirectorWakeTargetRunes+1), "it is 257 characters long, more than 256"},
-		{"a leading dash", "-x", `"-x" starts with "-", which the command [org.director].wake_cmd runs could read as an option`},
+		{"a leading dash", "-x", `"-x" starts with "-", which the program it is passed to could read as an option`},
 		{"a flag", "--terminal", `"--terminal" starts with "-"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestCheckDirectorAttachWake(t *testing.T) {
 			"[org.director].wake_cmd sends the wake line"},
 		{pull, "%1", orca, "--wake-target is given, but the wake has no push (wake pull): the watch sends to the wake target only to push; " +
 			"drop --wake-target, or attach with --wake push or --wake pull,push"},
-		{push, "-x", orca, `--wake-target: the wake target is not usable: "-x" starts with "-", which the command [org.director].wake_cmd runs could read as an option`},
+		{push, "-x", orca, `--wake-target: the wake target is not usable: "-x" starts with "-", which the program it is passed to could read as an option`},
 	} {
 		if err := CheckDirectorAttachWake(tc.wake, tc.target, tc.wakeCmd); err == nil || err.Error() != tc.want {
 			t.Errorf("CheckDirectorAttachWake(%q, %q, %q) =\n%v\nwant\n%s", tc.wake, tc.target, tc.wakeCmd, err, tc.want)
@@ -1035,7 +1035,7 @@ func TestWakeDirector_AnUnusableTargetIsSaidOnceAndNothingRuns(t *testing.T) {
 		{"a control character", "t\x1b[2J", `watchdog: director d1 is not woken: [org.director].wake_cmd has {target}, but the wake target is not usable: ` +
 			`"t\x1b[2J" has a control character (said once)`},
 		{"a leading dash", "-x", `watchdog: director d1 is not woken: [org.director].wake_cmd has {target}, but the wake target is not usable: ` +
-			`"-x" starts with "-", which the command [org.director].wake_cmd runs could read as an option (said once)`},
+			`"-x" starts with "-", which the program it is passed to could read as an option (said once)`},
 		{"no target", "", `watchdog: director d1 is not woken: [org.director].wake_cmd has {target}, but the wake target is not usable: it is empty (said once)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1347,11 +1347,12 @@ func TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector(t *testing.T) {
 // starts with "-", one with an escape sequence) is skipped and said once
 // over cycles, and herdr is not called, not even to confirm the pane.
 func TestWakeDirector_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr(t *testing.T) {
+	const pre = "watchdog: director d1 is not woken: its herdr pane is not one to type into: the wake target is not usable: "
 	for _, tc := range []struct {
-		name, pane string
+		name, pane, line string
 	}{
-		{"a leading dash", "-x"},
-		{"a control character", "p\x1b[2J"},
+		{"a leading dash", "-x", pre + `"-x" starts with "-", which the program it is passed to could read as an option (said once)`},
+		{"a control character", "p\x1b[2J", pre + `"p\x1b[2J" has a control character (said once)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newWakeFixture(t)
@@ -1376,10 +1377,8 @@ func TestWakeDirector_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr(t *testing
 			if len(f.h.calls) != 0 {
 				t.Fatalf("herdr calls = %q, want none", f.h.calls)
 			}
-			lines := f.bannerLines()
-			if len(lines) != 1 || !strings.HasPrefix(lines[0], "watchdog: director d1 is not woken: its herdr pane is not one to type into: ") ||
-				!strings.HasSuffix(lines[0], " (said once)") {
-				t.Fatalf("banner lines = %q, want one line for the pane, said once", lines)
+			if lines := f.bannerLines(); len(lines) != 1 || lines[0] != tc.line {
+				t.Fatalf("banner lines = %q, want [%q]", lines, tc.line)
 			}
 			if strings.Contains(f.banner.String(), "\x1b") {
 				t.Fatalf("banner %q holds a raw escape", f.banner.String())
