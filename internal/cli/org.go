@@ -284,23 +284,35 @@ func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resol
 // worktree's, cfg is returned unchanged. No other setting is taken. A main
 // worktree ralph.toml that fails to load is an error, which attach returns.
 func withMainWorktreeDirectorWakeConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
+	cfg, _, err := withMainWorktreeDirectorWakeConfigFrom(cfg, configPath, resolvedStateDir, stateDirSource)
+	return cfg, err
+}
+
+// withMainWorktreeDirectorWakeConfigFrom is withMainWorktreeDirectorWakeConfig
+// that also returns mainToml, the main worktree's ralph.toml the two values
+// were taken from, "" when cfg is returned unchanged (--config, or a ledger
+// that is not the main worktree's). `ralph org watch --all` runs wake_cmd in
+// that file's directory (orgWatchDirectorWake; plan
+// 2026-10-18-org-director-wake, D9), so it learns which file the rule read
+// here instead of deriving the rule again.
+func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (_ config.OrgConfig, mainToml string, _ error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].wake and wake_cmd from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, "", fmt.Errorf("org: load [org.director].wake and wake_cmd from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
-		return cfg, nil
+		return cfg, "", nil
 	}
 	cfg.Director.Wake = mainCfg.Director.Wake
 	cfg.Director.WakeCmd = mainCfg.Director.WakeCmd
-	return cfg, nil
+	return cfg, path, nil
 }
 
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
 // root>/ralph.toml (config.Load: built-in defaults when the file does not
 // exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
 // withMainWorktreeDirectorStartConfig, and
-// withMainWorktreeDirectorWakeConfig.
+// withMainWorktreeDirectorWakeConfigFrom.
 // ok is false, with nothing loaded, when configPath is set or the ledger is
 // not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
 // loaded, also when err (the load error, unwrapped) is set.

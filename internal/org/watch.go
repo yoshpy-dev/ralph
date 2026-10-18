@@ -472,8 +472,8 @@ type WatchAllParams struct {
 	// the real darwin osascript best-effort (realEscalate, no-op elsewhere).
 	Escalate EscalateFunc
 	// Stderr gets the AC-5 escalation banners, the inbox deadline banners,
-	// and one line for each failure RunWatchAll goes past; nil uses
-	// os.Stderr.
+	// the lines of the director's wake (WakeDirector), and one line for each
+	// failure RunWatchAll goes past; nil uses os.Stderr.
 	Stderr io.Writer
 	// LockWait is how long to wait for watch.lock (AcquireWatchLock); zero
 	// means DefaultWatchLockWait.
@@ -486,6 +486,16 @@ type WatchAllParams struct {
 	// call it, so `ralph org watch --all` prints its banner there (tech-debt
 	// 204 (e)).
 	OnLocked func()
+	// DirectorWakeDir is the absolute directory [org.director].wake_cmd runs
+	// in when the cycle wakes the director by push (WakeDirector; plan
+	// 2026-10-18-org-director-wake, D9): the directory of the ralph.toml
+	// wake_cmd was read from. The CLI sets it to the main worktree root when
+	// wake_cmd was read by the main-worktree rule, to the directory of the
+	// --config file, or else to the directory the watch started in, whose
+	// ralph.toml it read. Empty means wake_cmd is never run: each wake by
+	// wake_cmd is a failure line, while the herdr default (a headless
+	// director in herdr with an empty wake_cmd) still works.
+	DirectorWakeDir string
 }
 
 // RunWatchAll is `ralph org watch --all`: one process that watches every
@@ -500,17 +510,24 @@ type WatchAllParams struct {
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
 //     git, so no org's pulse can hold it back;
-//  2. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
+//  2. wakes the attached director for the open inbox items it was not
+//     woken for yet when its registration wakes by push (WakeDirector, with
+//     one DirectorWakeMemory for the whole run and p.DirectorWakeDir; plan
+//     2026-10-18-org-director-wake, D6). It comes after step 1, so a wake
+//     that waits on wake_cmd or herdr does not hold back that cycle's sends
+//     to the human, and it does not look at Config.Director.Enabled;
+//  3. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
 //     the manifest, in that order, with each org's watch-status file read
 //     once and then kept in memory across cycles. An org that no longer
 //     runs (disbanded) is not evaluated and is dropped;
-//  3. rewrites the mark with the cycle's ts;
-//  4. calls hooks.OnCycle.
+//  4. rewrites the mark with the cycle's ts;
+//  5. calls hooks.OnCycle.
 //
-// A failure in step 1 or 2 (an inbox that cannot be read or written, the
-// manifest, one org's status file) is one line on Stderr and skips only its
-// own part: the other orgs, the mark, and the loop go on. A status file that
-// cannot be read is said once per org rather than every cycle (pulseOrg).
+// A failure in step 1, 2, or 3 (an inbox or a director.jsonl that cannot be
+// read or written, a wake that fails, the manifest, one org's status file)
+// is one line on Stderr and skips only its own part: the other orgs, the
+// mark, and the loop go on. A status file that cannot be read is said once
+// per org rather than every cycle (pulseOrg).
 // A cycle does not look at ctx (evaluateCycle). Between cycles RunWatchAll
 // waits Interval in ticks of StopPollInterval and ends after the cycle when
 // ctx is done or a stop request later than its start is there; Cycles > 0
@@ -569,6 +586,10 @@ type watchAllRun struct {
 	run         watchRun
 	statuses    map[string]*watchStatusFile
 	inboxMemory InboxDeadlineMemory
+	// wakeDir and wakeMemory are WakeDirector's directory of wake_cmd
+	// (WatchAllParams.DirectorWakeDir) and its memory across cycles (wake).
+	wakeDir    string
+	wakeMemory DirectorWakeMemory
 	// unreadableWarned holds the orgs whose status file could not be read
 	// and has been said so on stderr, so the line is written once per org,
 	// not every cycle (pulseOrg).
@@ -610,6 +631,7 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 			escalationsPath: EscalationsPathIn(p.StatusDir),
 		},
 		statuses:         map[string]*watchStatusFile{},
+		wakeDir:          p.DirectorWakeDir,
 		unreadableWarned: map[string]bool{},
 		mark: WatchAlive{
 			State: WatchAliveRunning, PID: os.Getpid(),
@@ -622,7 +644,9 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 	}
 }
 
-// cycle runs steps 1 to 3 of RunWatchAll's cycle.
+// cycle runs steps 1 to 4 of RunWatchAll's cycle: the inbox deadlines, the
+// director's wake, the pulse, and the mark, in that order (plan
+// 2026-10-18-org-director-wake, D6).
 func (w *watchAllRun) cycle() {
 	sweep := w.org.SweepInboxDeadlines(w.org.nowTime(), &w.inboxMemory, w.stderr)
 	if sweep.Err != nil {
@@ -631,8 +655,19 @@ func (w *watchAllRun) cycle() {
 	for _, f := range sweep.Failed {
 		_, _ = fmt.Fprintf(w.stderr, "watchdog: inbox item %s not sent for %s: %v\n", f.ID, f.Reason, f.Err)
 	}
+	w.wake()
 	w.pulse()
 	w.writeMark()
+}
+
+// wake runs the wake step of the cycle (WakeDirector). WakeDirector writes
+// its own lines for a failed or skipped wake; an error that kept it from
+// starting is one line here.
+func (w *watchAllRun) wake() {
+	res := w.org.WakeDirector(w.org.nowTime(), w.dir, w.wakeDir, &w.wakeMemory, w.stderr)
+	if res.Err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: director wake skipped this cycle: %v\n", res.Err)
+	}
 }
 
 // pulse runs the pulse cycle of every running org.

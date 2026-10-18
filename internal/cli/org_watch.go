@@ -28,11 +28,12 @@ import (
 // (*org.Org).RunWatchAll in the foreground (runOrgWatchAll), `--all
 // --detach` starts that as a detached process (runOrgWatchDetach), and
 // `--stop` asks a running one to stop (runOrgWatchStop). All condition
-// evaluation, ALERT dedupe, deadman escalation, inbox deadline, lock, and
-// liveness mark logic lives in internal/org (watch.go, deadline.go,
-// watchalive.go) -- this command checks the flags, resolves the state
-// directory (the one the manifest, receipts, and inbox live in, via
-// org.ResolveOrgStateDir), and wires them through to org.WatchAllParams.
+// evaluation, ALERT dedupe, deadman escalation, inbox deadline, director
+// wake, lock, and liveness mark logic lives in internal/org (watch.go,
+// deadline.go, director_wake.go, watchalive.go) -- this command checks the
+// flags, resolves the state directory (the one the manifest, receipts, and
+// inbox live in, via org.ResolveOrgStateDir) and the directory wake_cmd runs
+// in (orgWatchDirectorWake), and wires them through to org.WatchAllParams.
 //
 // The single-org watch (`--org-id`) is retired and refused: next to `--all`
 // it would make two processes watch the same org and write its
@@ -45,13 +46,22 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "watch",
-		Short: "Watch every org of the ledger: pulse, inbox deadlines, liveness mark",
+		Short: "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark",
 		Long: "ralph org watch --all watches every org of the ledger in one process.\n" +
 			"Every --interval-seconds (default: [org.watchdog].interval_seconds) it\n" +
 			"sends the inbox items past their [org.director] ack_minutes or\n" +
-			"resolve_minutes deadline to the human, then runs the pulse cycle of each\n" +
-			"running org: heartbeat-stall / process-liveness / worktree-scope-change\n" +
-			"ALERTs sent to the org's leader, and a deadman escalation\n" +
+			"resolve_minutes deadline to the human. Then, when the attached director\n" +
+			"was registered with a wake that includes push ([org.director].wake, or\n" +
+			"director attach --wake), it wakes that director for the new open inbox\n" +
+			"items, through [org.director].wake_cmd (run without a shell, in the\n" +
+			"directory of the ralph.toml it was read from) or, with no wake_cmd, by\n" +
+			"typing into the herdr pane of a headless director in herdr. Without\n" +
+			"--config, when the ledger is the main worktree's, wake and wake_cmd come\n" +
+			"from the main worktree's ralph.toml, and wake_cmd runs in its root. It\n" +
+			"reads wake_cmd when it starts, so restart it after changing wake_cmd.\n" +
+			"Then it runs the pulse cycle of each running org: heartbeat-stall /\n" +
+			"process-liveness / worktree-scope-change ALERTs sent to the org's\n" +
+			"leader, and a deadman escalation\n" +
 			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
 			"notification) when the leader does not respond within\n" +
 			"[org].deadman_minutes. It holds <state-dir>/watch.lock and rewrites its\n" +
@@ -92,10 +102,17 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Before --detach too, so a main worktree ralph.toml that does
+			// not load is this command's error, not only a line in the
+			// child's watch.log. The child computes its own directory.
+			wakeDir, err := orgWatchDirectorWake(rt, *configPath, resolvedStateDir, stateDirSource)
+			if err != nil {
+				return err
+			}
 			if detach {
 				return runOrgWatchDetach(cmd, rt, resolvedStateDir, stateDirSource, *configPath, intervalSeconds)
 			}
-			return runOrgWatchAll(cmd, rt, resolvedStateDir, stateDirSource, intervalSeconds, once)
+			return runOrgWatchAll(cmd, rt, resolvedStateDir, stateDirSource, wakeDir, intervalSeconds, once)
 		},
 	}
 
@@ -135,6 +152,41 @@ func checkOrgWatchFlags(cmd *cobra.Command, all, once, detach, stop bool) error 
 	return nil
 }
 
+// orgWatchDirectorWake sets rt.Config's Director.Wake and Director.WakeCmd
+// ([org.director].wake and wake_cmd) by the main-worktree rule
+// (withMainWorktreeDirectorWakeConfigFrom), so a feature worktree's
+// ralph.toml, which a leader can change, does not choose what the watch
+// runs, and returns the directory wake_cmd runs in, the directory of the
+// ralph.toml it was read from (plan 2026-10-18-org-director-wake, D9 and
+// AC4): the main worktree root when the rule applied, else the absolute
+// directory of --config when one was given, else the absolute working
+// directory, whose ./ralph.toml newOrgRuntimeAt read. Never the working
+// directory when the rule applied, so a watch started in a feature worktree
+// does not run a script of the same name there. A main worktree ralph.toml
+// that does not load is the error.
+func orgWatchDirectorWake(rt *org.Org, configPath, resolvedStateDir, stateDirSource string) (string, error) {
+	cfg, mainToml, err := withMainWorktreeDirectorWakeConfigFrom(rt.Config, configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return "", err
+	}
+	rt.Config = cfg
+	switch {
+	case mainToml != "":
+		return filepath.Dir(mainToml), nil
+	case configPath != "":
+		abs, err := filepath.Abs(configPath)
+		if err != nil {
+			return "", fmt.Errorf("org: watch: make --config %s absolute for [org.director].wake_cmd: %w", configPath, err)
+		}
+		return filepath.Dir(abs), nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("org: watch: read the working directory for [org.director].wake_cmd: %w", err)
+	}
+	return wd, nil
+}
+
 // orgWatchLockWaitOverride and orgWatchStopPollIntervalOverride are copied
 // into WatchAllParams.LockWait and StopPollInterval (runOrgWatchAll). Zero
 // in production, which means RunWatchAll's own defaults (2s and 1s);
@@ -149,8 +201,9 @@ var (
 // and writes its stopped mark. Once that context is done, the signals get
 // their default effect back, so a second one ends the process at once for a
 // cycle that takes long while herdr calls time out (the kernel then frees
-// watch.lock, and the mark is left as it was).
-func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirSource string, intervalSeconds int, once bool) error {
+// watch.lock, and the mark is left as it was). wakeDir is the directory
+// [org.director].wake_cmd runs in (orgWatchDirectorWake).
+func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirSource, wakeDir string, intervalSeconds int, once bool) error {
 	ctx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	context.AfterFunc(ctx, stopSignals)
@@ -217,6 +270,7 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 		LockWait:         orgWatchLockWaitOverride,
 		StopPollInterval: orgWatchStopPollIntervalOverride,
 		OnLocked:         banner,
+		DirectorWakeDir:  wakeDir,
 	}, hooks)
 }
 

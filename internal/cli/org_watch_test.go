@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -1658,5 +1659,180 @@ func TestOrgWatch_Once_HoldsTheLockUntilItsInFlightWatcherCallEnds(t *testing.T)
 	}
 	if got := org.ProbeWatch(stateDir, time.Now(), 10).State; got != org.WatchLivenessNotRunning {
 		t.Errorf("ProbeWatch after the watch = %q; want not_running", got)
+	}
+}
+
+// The tests below are for the push wake of `ralph org watch --all` on the
+// CLI side (plan 2026-10-18-org-director-wake, S3b: D9 and AC4 for the
+// watch): where [org.director].wake_cmd is read from and the directory it
+// runs in. The wake_cmd is a #!/bin/sh script under a temp directory that
+// appends "<pwd -P>|<its arguments>" to a mark file; no test runs herdr, a
+// terminal, or osascript.
+
+// writeWatchWakeScript writes path, mode 0755, a stand-in for the program
+// [org.director].wake_cmd names: each run appends one line to mark, the
+// working directory (pwd -P), "|", and its arguments joined by spaces.
+func writeWatchWakeScript(t *testing.T, path, mark string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s|%s\\n' \"$(pwd -P)\" \"$*\" >> '"+mark+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AC4 for the watch: with no --config, from a feature worktree whose ledger
+// is the main worktree's, the watch runs the main worktree's wake_cmd, with
+// the main worktree root as its working directory, so the main worktree's
+// ./wake.sh runs, not the feature worktree's script of the same name, and
+// the feature worktree's wake_cmd (another argument) is not used. With
+// --config, the wake_cmd of that file runs in that file's directory.
+func TestOrgWatch_RunsTheWakeCmdOfTheMainWorktreeInItsRoot(t *testing.T) {
+	r := newLegacyLedgerRepo(t)
+	marks := t.TempDir()
+	mainMark, wtMark, thirdMark := filepath.Join(marks, "main"), filepath.Join(marks, "wt"), filepath.Join(marks, "third")
+	writeWatchWakeScript(t, filepath.Join(r.mainRoot, "wake.sh"), mainMark)
+	writeWatchWakeScript(t, filepath.Join(r.worktree, "wake.sh"), wtMark)
+	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), directorWakeToml(`["pull", "push"]`, `["./wake.sh", "main", "{text}"]`))
+	writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), directorWakeToml(`["pull", "push"]`, `["./wake.sh", "worktree", "{text}"]`))
+	if _, _, err := org.NewDirectorStore(r.sharedDir).Attach(org.DirectorAttach{
+		Driver: org.DirectorDriverClaude, Wake: []string{org.DirectorWakePull, org.DirectorWakePush}, User: "alice", Cwd: r.worktree,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inbox := org.NewInboxStore(r.sharedDir)
+	escalate := func() string {
+		t.Helper()
+		id, err := inbox.Escalate(org.InboxEscalation{OrgID: "org-a", Type: "QUESTION", Body: inboxQuestion("which base?"), Delivery: org.InboxDeliveryDeadline})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	e1 := escalate()
+	_, stderr, err := runOrgCmdStreams(t, "watch", "--all", "--once")
+	if err != nil {
+		t.Fatalf("watch --all --once: %v (stderr %s)", err, stderr)
+	}
+	if got, want := readLogLines(t, mainMark), []string{r.mainRoot + "|main " + org.DirectorWakeText([]string{e1})}; !slices.Equal(got, want) {
+		t.Fatalf("runs of the main worktree's wake.sh = %q; want %q (stderr %s)", got, want, stderr)
+	}
+	if got := readLogLines(t, wtMark); got != nil {
+		t.Fatalf("the feature worktree's wake.sh ran: %q", got)
+	}
+	if strings.Contains(stderr, "not woken") {
+		t.Fatalf("stderr = %q; want no wake line", stderr)
+	}
+
+	third, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWatchWakeScript(t, filepath.Join(third, "wake.sh"), thirdMark)
+	writeTestFile(t, filepath.Join(third, "ralph.toml"), directorWakeToml(`["push"]`, `["./wake.sh", "third", "{text}"]`))
+	e2 := escalate()
+	if _, stderr, err := runOrgCmdStreams(t, "watch", "--all", "--once", "--config", filepath.Join(third, "ralph.toml")); err != nil {
+		t.Fatalf("watch --all --once --config: %v (stderr %s)", err, stderr)
+	}
+	if got, want := readLogLines(t, thirdMark), []string{third + "|third " + org.DirectorWakeText([]string{e2})}; !slices.Equal(got, want) {
+		t.Fatalf("runs of the --config directory's wake.sh = %q; want %q", got, want)
+	}
+	if n, got := len(readLogLines(t, mainMark)), readLogLines(t, wtMark); n != 1 || got != nil {
+		t.Fatalf("with --config: the main worktree's wake.sh ran %d times (want still 1), the feature worktree's %q", n, got)
+	}
+}
+
+// A main worktree ralph.toml that does not load is the error of the watch,
+// with --once and with --detach, before any watch starts: it does not fall
+// back to the feature worktree's wake_cmd.
+func TestOrgWatch_AMainWorktreeRalphTomlThatDoesNotLoadIsTheError(t *testing.T) {
+	r := newLegacyLedgerRepo(t)
+	refuseOrgWatchLaunch(t)
+	mainToml := filepath.Join(r.mainRoot, "ralph.toml")
+	writeTestFile(t, mainToml, "[org]\nmax_orgs = 0\n")
+	writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), directorWakeToml(`["push"]`, `["./wake.sh", "{text}"]`))
+	for _, mode := range []string{"--once", "--detach"} {
+		stdout, _, err := runOrgCmdStreams(t, "watch", "--all", mode)
+		if err == nil || !strings.HasPrefix(err.Error(), "org: load [org.director].wake and wake_cmd from the main worktree's "+mainToml+": ") ||
+			!strings.Contains(err.Error(), "[org].max_orgs must be >= 1, got 0") {
+			t.Fatalf("watch --all %s = %v; want the load error naming %s", mode, err, mainToml)
+		}
+		if stdout != "" {
+			t.Fatalf("watch --all %s stdout = %q; want nothing", mode, stdout)
+		}
+		if _, err := os.Stat(org.WatchAlivePathIn(r.sharedDir)); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("watch --all %s: the liveness mark exists (%v); want no watch started", mode, err)
+		}
+	}
+}
+
+// D9: orgWatchDirectorWake returns the directory wake_cmd runs in, the
+// directory of the ralph.toml it was read from, and takes wake and wake_cmd
+// from the main worktree's ralph.toml when the main-worktree rule applies
+// (even when that file does not exist: then the built-in defaults, not the
+// values read from the working directory). It runs no git here (the
+// sources it is given name no git tier that needs a call) and changes no
+// working directory.
+func TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainRoot, emptyRoot, other := t.TempDir(), t.TempDir(), t.TempDir()
+	writeTestFile(t, filepath.Join(mainRoot, "ralph.toml"), directorWakeToml(`["push"]`, `["./main-wake.sh", "{text}"]`))
+	ledger := func(root string) string { return filepath.Join(root, ".harness", "state", "org") }
+	read := config.OrgDirectorConfig{Wake: []string{"pull", "push"}, WakeCmd: []string{"./worktree-wake.sh", "{text}"}}
+	for _, tc := range []struct {
+		name, configPath, stateDir, source string
+		wantDir                            string
+		want                               config.OrgDirectorConfig
+	}{
+		{"the main-worktree rule", "", ledger(mainRoot), "git-main-worktree", mainRoot,
+			config.OrgDirectorConfig{Wake: []string{"push"}, WakeCmd: []string{"./main-wake.sh", "{text}"}}},
+		{"the main-worktree rule with no ralph.toml there", "", ledger(emptyRoot), "git-main-worktree", emptyRoot,
+			config.OrgDirectorConfig{Wake: config.Default().Org.Director.Wake, WakeCmd: config.Default().Org.Director.WakeCmd}},
+		{"an absolute --config", filepath.Join(other, "ralph.toml"), ledger(mainRoot), "git-main-worktree", other, read},
+		{"a relative --config", filepath.Join("sub", "ralph.toml"), ledger(mainRoot), "git-main-worktree", filepath.Join(wd, "sub"), read},
+		{"no --config and another ledger", "", filepath.Join(other, "state"), "cwd", wd, read},
+		{"no --config and a git-toplevel ledger", "", ledger(other), "git-toplevel", wd, read},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &org.Org{Config: config.OrgConfig{MaxOrgs: 3, Director: read}}
+			dir, err := orgWatchDirectorWake(rt, tc.configPath, tc.stateDir, tc.source)
+			if err != nil || dir != tc.wantDir {
+				t.Fatalf("orgWatchDirectorWake = %q, %v; want %q", dir, err, tc.wantDir)
+			}
+			if got := rt.Config.Director; !slices.Equal(got.Wake, tc.want.Wake) || !slices.Equal(got.WakeCmd, tc.want.WakeCmd) || rt.Config.MaxOrgs != 3 {
+				t.Fatalf("rt.Config = %+v; want wake %q and wake_cmd %q, the rest as it was", rt.Config, tc.want.Wake, tc.want.WakeCmd)
+			}
+		})
+	}
+}
+
+// The help of watch says what the wake step does, where wake_cmd is read
+// from and runs, and that a change of wake_cmd needs a restart; the list of
+// ralph org --help names the step.
+func TestOrgWatch_HelpDescribesTheDirectorWake(t *testing.T) {
+	orgHelp, _, err := runOrgCmdStreams(t, "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark"; !strings.Contains(orgHelp, want) {
+		t.Errorf("ralph org --help does not say %q:\n%s", want, orgHelp)
+	}
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	for _, want := range []string{
+		"when the attached director was registered with a wake that includes push ([org.director].wake, or director attach --wake), it wakes that director for the new open inbox items",
+		"through [org.director].wake_cmd (run without a shell, in the directory of the ralph.toml it was read from)",
+		"with no wake_cmd, by typing into the herdr pane of a headless director in herdr",
+		"Without --config, when the ledger is the main worktree's, wake and wake_cmd come from the main worktree's ralph.toml, and wake_cmd runs in its root",
+		"It reads wake_cmd when it starts, so restart it after changing wake_cmd",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
+		}
 	}
 }

@@ -400,8 +400,8 @@ func directorLaunchArgv(launchCmd []string, scriptPath, token, cwd string) ([]st
 // bytes, runDirectorLaunchCmd keeps for its error.
 const directorLaunchOutputLimit = 4096
 
-// defaultDirectorLaunchWaitDelay is runDirectorLaunchCmd's exec.Cmd.WaitDelay
-// when its caller gives none.
+// defaultDirectorLaunchWaitDelay is runDirectorCmd's exec.Cmd.WaitDelay
+// when its caller gives none, for launch_cmd and wake_cmd alike.
 const defaultDirectorLaunchWaitDelay = 2 * time.Second
 
 // directorTailBuffer keeps the last limit bytes written to it. os/exec calls
@@ -429,17 +429,31 @@ func (w *directorTailBuffer) Write(p []byte) (int, error) {
 // (an exit 0 counts then, as ExecRunner counts it) or past ctx. A command
 // that cannot be started, exits non-zero, or is killed when ctx ends is an
 // error that names argv[0] and holds the kept output, both escaped for a
-// terminal (PrintableInboxText) on one line.
+// terminal (PrintableInboxText) on one line. It is runDirectorCmd with the
+// key launch_cmd, which its errors start with.
 func runDirectorLaunchCmd(ctx context.Context, argv []string, dir string, waitDelay time.Duration) error {
+	return runDirectorCmd(ctx, "launch_cmd", argv, dir, waitDelay, directorLaunchOutputLimit)
+}
+
+// runDirectorCmd is the runner of the two argv settings of [org.director]
+// that ralph runs, launch_cmd (runDirectorLaunchCmd) and wake_cmd (the push
+// wake of `ralph org watch --all`, runDirectorWakeCmd; plan
+// 2026-10-18-org-director-wake, D8): it runs argv without a shell, in dir,
+// with stdin empty, under ctx, and with waitDelay as runDirectorLaunchCmd
+// says, and keeps the last outputLimit bytes of stdout and stderr together
+// for its error. key, the setting's name without its table, starts every
+// error, so a launch_cmd error reads as it did before wake_cmd shared this
+// runner.
+func runDirectorCmd(ctx context.Context, key string, argv []string, dir string, waitDelay time.Duration, outputLimit int) error {
 	if len(argv) == 0 {
-		return errors.New("launch_cmd: no command to run")
+		return fmt.Errorf("%s: no command to run", key)
 	}
 	if waitDelay <= 0 {
 		waitDelay = defaultDirectorLaunchWaitDelay
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	out := &directorTailBuffer{limit: directorLaunchOutputLimit}
+	out := &directorTailBuffer{limit: outputLimit}
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = waitDelay
 	err := cmd.Run()
@@ -456,11 +470,11 @@ func runDirectorLaunchCmd(ctx context.Context, argv []string, dir string, waitDe
 	}
 	switch {
 	case ctx.Err() != nil:
-		return fmt.Errorf("launch_cmd %s did not return in time and was killed (%v)%s", name, context.Cause(ctx), output)
+		return fmt.Errorf("%s %s did not return in time and was killed (%v)%s", key, name, context.Cause(ctx), output)
 	case cmd.ProcessState == nil:
-		return fmt.Errorf("launch_cmd %s could not be run: %w%s", name, err, output)
+		return fmt.Errorf("%s %s could not be run: %w%s", key, name, err, output)
 	}
-	return fmt.Errorf("launch_cmd %s failed: %w%s", name, err, output)
+	return fmt.Errorf("%s %s failed: %w%s", key, name, err, output)
 }
 
 // checkDirectorLaunchCmd is StartDirector's check of the launch_cmd path

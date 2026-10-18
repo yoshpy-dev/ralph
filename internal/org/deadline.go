@@ -54,7 +54,10 @@ const (
 // A deadline is passed only strictly after it (exactly ackMinutes after
 // escalated_at is not yet past). The error is set only when escalated_at
 // (an RFC3339 time) does not parse, which only a hand-edited inbox.jsonl
-// line can cause.
+// line can cause. It does not read Woken or WokenAt either: a push wake of
+// the director (WakeDirector) does not stop the ack deadline, so an item the
+// director was woken for but did not ack still reaches the human (plan
+// 2026-10-18-org-director-wake, D10).
 func InboxDeadlineDue(item InboxItem, now time.Time, ackMinutes, resolveMinutes int) (string, error) {
 	if item.State == InboxStateResolved {
 		return "", nil
@@ -165,7 +168,10 @@ type InboxDeadlineSweep struct {
 // A send that succeeded needs no memory: its notified event keeps the item
 // from being due for the same reason again. An item whose escalated_at does
 // not parse is skipped, with one warning line on banner the first time mem
-// sees it.
+// sees it. Like InboxDeadlineDue, it does not read whether the director was
+// woken for an item (its woken events), so a woken item is sent at its
+// deadline as any other; the watch runs it before the wake (plan
+// 2026-10-18-org-director-wake, D6 and D10).
 func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banner io.Writer) InboxDeadlineSweep {
 	if o.Inbox == nil {
 		return InboxDeadlineSweep{Err: errors.New("org: inbox deadlines: no inbox store is configured")}

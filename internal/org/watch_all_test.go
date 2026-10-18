@@ -1487,3 +1487,246 @@ func TestRealGitStatus_IsCutOffAtTheDriverCallTimeout(t *testing.T) {
 		t.Fatalf("realGitStatus took %v; want it cut off at the timeout plus the wait delay", elapsed)
 	}
 }
+
+// The tests below are for step 2 of RunWatchAll's cycle, the push wake of
+// the director (plan 2026-10-18-org-director-wake, S3b: D6, D10, AC5, and
+// AC7). The wake_cmd is a writeWakeScript script in its own directory, given
+// to the watch as DirectorWakeDir.
+
+// useWakeCmd sets f's wake_cmd to ["./wake.sh", args...], writes cmdDir's
+// wake.sh with tail after its record of the run, and returns the params of
+// cycles cycles with cmdDir as DirectorWakeDir, and the mark the runs are
+// recorded in.
+func (f *watchAllFixture) useWakeCmd(t *testing.T, cycles int, tail string, args ...string) (WatchAllParams, string) {
+	t.Helper()
+	cmdDir := t.TempDir()
+	mark := filepath.Join(t.TempDir(), "runs")
+	writeWakeScript(t, filepath.Join(cmdDir, "wake.sh"), mark, tail)
+	f.o.Config.Director.WakeCmd = append([]string{"./wake.sh"}, args...)
+	p := f.params(cycles)
+	p.DirectorWakeDir = cmdDir
+	return p, mark
+}
+
+// directorStore is the director store of f's ledger, on f's clock.
+func (f *watchAllFixture) directorStore() *DirectorStore {
+	s := NewDirectorStore(f.dir)
+	s.Now = f.clk.Now
+	return s
+}
+
+// D6: in a cycle the inbox deadlines are swept before the director is
+// woken, and the director is woken before any org's pulse: when wake_cmd
+// runs, the item past its ack deadline is already in escalations.jsonl, and
+// at the first herdr call of the pulse wake_cmd has run. The deadline send
+// does not keep the item from the wake: it is still open and not woken.
+func TestRunWatchAll_SweepsTheDeadlinesThenWakesTheDirectorBeforeThePulse(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	snapshot := filepath.Join(t.TempDir(), "escalations-at-the-wake")
+	p, mark := f.useWakeCmd(t, 1, "cat "+shellQuote(f.o.EscalationsPath)+" > "+shellQuote(snapshot), "{text}")
+	mustAttachDirector(t, f.directorStore(), DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull, DirectorWakePush}})
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now().Add(-11*time.Minute), "org-a")
+	var herdrCalls, runsAtFirstHerdrCall int
+	f.o.Herdr = &beforeAgentGetHerdr{fakeWatchHerdr: f.h, before: func() {
+		herdrCalls++
+		if herdrCalls == 1 {
+			runsAtFirstHerdrCall = len(readWakeRuns(t, mark))
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if want := []string{e1 + " " + InboxReasonAckDeadline}; !slices.Equal(escalationReasons(t, snapshot), want) {
+		t.Fatalf("escalations.jsonl when wake_cmd ran = %v; want %v already sent", escalationReasons(t, snapshot), want)
+	}
+	if herdrCalls == 0 || runsAtFirstHerdrCall != 1 {
+		t.Fatalf("wake_cmd runs at the first of %d herdr calls = %d; want 1", herdrCalls, runsAtFirstHerdrCall)
+	}
+	if item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), e1); !item.Notified || !item.Woken {
+		t.Fatalf("item %s = %+v; want notified and woken", e1, item)
+	}
+}
+
+// AC5: a registration whose wake has no push is not woken, by wake_cmd or by
+// herdr, cycle after cycle, and nothing is said about it; the same ledger
+// with a push registration is woken (the control).
+func TestRunWatchAll_DoesNotWakeAPullDirector(t *testing.T) {
+	t.Run("a promoted session", func(t *testing.T) {
+		f := newWatchAllFixture(t)
+		p, mark := f.useWakeCmd(t, 3, "exit 0", "{text}")
+		s := f.directorStore()
+		mustAttachDirector(t, s, DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}})
+		e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+		if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+			t.Fatalf("RunWatchAll: %v", err)
+		}
+		if runs := readWakeRuns(t, mark); runs != nil || f.stderr.String() != "" {
+			t.Fatalf("a pull director: wake_cmd runs %+v, stderr %q; want neither", runs, f.stderr.String())
+		}
+		if _, _, err := s.Attach(DirectorAttach{Driver: DirectorDriverClaude, Replace: true, Wake: []string{DirectorWakePush}}); err != nil {
+			t.Fatal(err)
+		}
+		p.Cycles = 1
+		if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+			t.Fatalf("RunWatchAll: %v", err)
+		}
+		if runs := readWakeRuns(t, mark); len(runs) != 1 || !slices.Equal(runs[0].args, []string{DirectorWakeText([]string{e1})}) {
+			t.Fatalf("a push director: wake_cmd runs %+v; want one for %s", runs, e1)
+		}
+	})
+
+	for _, wake := range []string{DirectorWakePull, DirectorWakePush} {
+		t.Run("a headless director in herdr with wake "+wake, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			s := f.directorStore()
+			h := testHeadlessAttach()
+			h.Wake = []string{wake}
+			reg, err := s.AttachHeadless(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RecordWorkspace(reg.ID, "w7", testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RecordPane(reg.ID, "w7:p1", testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.MarkLaunched(reg.ID, testDirectorWho); err != nil {
+				t.Fatal(err)
+			}
+			e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+			if err := runWatchAll(t, f.o, context.Background(), f.params(2), WatchHooks{}); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			f.h.mu.Lock()
+			texts, keys := slices.Clone(f.h.paneSendTextCall), slices.Clone(f.h.sendKeysCalls)
+			f.h.mu.Unlock()
+			if len(texts) != 0 || len(keys) != 0 {
+				t.Fatalf("herdr send-text %+v, send-keys %+v; want none (this fake has no pane to confirm)", texts, keys)
+			}
+			// fakeWatchHerdr has no pane: a push wake looks for it and fails.
+			tried := strings.Contains(f.stderr.String(), "watchdog: director d1 not woken for "+e1+`: herdr has no pane "w7:p1", so nothing was typed into it`)
+			if tried != (wake == DirectorWakePush) {
+				t.Fatalf("wake %s: stderr = %q; want the herdr wake tried only with push", wake, f.stderr.String())
+			}
+			if wake == DirectorWakePull && f.stderr.String() != "" {
+				t.Fatalf("wake pull: stderr = %q; want nothing", f.stderr.String())
+			}
+		})
+	}
+}
+
+// A director.jsonl that cannot be read (here: a directory in its place)
+// skips the wake with one line per cycle; the deadlines and the pulse still
+// run.
+func TestRunWatchAll_ADirectorFileThatCannotBeReadSkipsOnlyTheWake(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawn(t, "org-a", "seat-a")
+	p, mark := f.useWakeCmd(t, 2, "exit 0", "{text}")
+	if err := os.Mkdir(f.directorStore().Path(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now().Add(-11*time.Minute), "org-a")
+	if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director wake skipped this cycle: org: director wake: "); n != 2 {
+		t.Fatalf("stderr = %q; want the wake line once per cycle", f.stderr.String())
+	}
+	if runs := readWakeRuns(t, mark); runs != nil {
+		t.Fatalf("wake_cmd ran %+v", runs)
+	}
+	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{e1 + " " + InboxReasonAckDeadline}; !slices.Equal(got, want) {
+		t.Fatalf("escalations.jsonl = %v; want %v", got, want)
+	}
+	if s := readWatchStatusFile(t, f.dir, "org-a"); s.Cycles != 2 {
+		t.Fatalf("org-a status = %+v; want 2 cycles", s)
+	}
+}
+
+// AC7 and D10: a push wake does not stop the ack deadline. An item the
+// director was woken for and one whose wake failed both reach the human at
+// their ack deadlines when neither is acked.
+func TestRunWatchAll_WokenAndNotWokenItemsBothReachTheHumanAtTheAckDeadline(t *testing.T) {
+	f := newWatchAllFixture(t)
+	p, mark := f.useWakeCmd(t, 3, "exit 0", "{text}")
+	mustAttachDirector(t, f.directorStore(), DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePush}})
+	t0 := f.clk.Now()
+	e1 := escalateInboxAt(t, f.o.Inbox, t0, "org-a")
+	var e2 string
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		switch n {
+		case 1:
+			writeWakeScript(t, filepath.Join(p.DirectorWakeDir, "wake.sh"), mark, "exit 1")
+			f.clk.Advance(time.Minute)
+			e2 = escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-b")
+		case 2:
+			f.clk.Advance(11 * time.Minute)
+		}
+	}}
+	if err := runWatchAll(t, f.o, context.Background(), p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	inbox := mustReadInbox(t, f.o.Inbox)
+	if a, b := inboxItemByID(t, inbox, e1), inboxItemByID(t, inbox, e2); !a.Woken || b.Woken {
+		t.Fatalf("woken: %s %v, %s %v; want only %s", e1, a.Woken, e2, b.Woken, e1)
+	}
+	want := []string{e1 + " " + InboxReasonAckDeadline, e2 + " " + InboxReasonAckDeadline}
+	if got := escalationReasons(t, f.o.EscalationsPath); !slices.Equal(got, want) {
+		t.Fatalf("escalations.jsonl = %v; want both at the ack deadline %v", got, want)
+	}
+	if n := len(f.notifications()); n != 2 {
+		t.Fatalf("desktop notified %d times; want 2", n)
+	}
+	// e2's wake failed at t0+1m and was tried again at t0+12m.
+	if runs := readWakeRuns(t, mark); len(runs) != 3 {
+		t.Fatalf("wake_cmd ran %d times; want 3 (e1, then e2 twice)", len(runs))
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director d1 not woken for "+e2+": "); n != 2 {
+		t.Fatalf("stderr = %q; want the failure line for %s twice", f.stderr.String(), e2)
+	}
+}
+
+// AC5, end to end in the org layer: with a director attached with wake
+// pull,push and a watch that accepts work, an escalate is left to the
+// director, `wait --inbox` returns it, the next cycle runs wake_cmd once for
+// it, and the cycle after that runs nothing.
+func TestRunWatchAll_WakesTheDirectorOnceForAnEscalatedItem(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.o.EscalateWatch = acceptingWatch
+	p, mark := f.useWakeCmd(t, 2, "exit 0", "{target}", "{text}")
+	reg := mustAttachDirector(t, f.directorStore(), DirectorAttach{
+		Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull, DirectorWakePush}, WakeTarget: "orca-term-1",
+	})
+	var banner bytes.Buffer
+	res := f.o.Escalate(EscalateParams{OrgID: "org-a", Text: "TYPE: QUESTION\n\nMARKER-body-51c2 which base?", Banner: &banner})
+	if res.Err != nil || !res.Deferred {
+		t.Fatalf("Escalate = %+v; want the item left to the director", res)
+	}
+	f.o.InboxPollInterval = time.Millisecond
+	open, err := f.o.WaitInbox(time.Second)
+	if err != nil || len(open) != 1 || open[0].ID != res.ID {
+		t.Fatalf("WaitInbox = %+v, %v; want %s", open, err, res.ID)
+	}
+	var runsAfterCycle []int
+	hooks := WatchHooks{OnCycle: func(int, time.Time) { runsAfterCycle = append(runsAfterCycle, len(readWakeRuns(t, mark))) }}
+	if err := runWatchAll(t, f.o, context.Background(), p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if !slices.Equal(runsAfterCycle, []int{1, 1}) {
+		t.Fatalf("wake_cmd runs after each cycle = %v; want [1 1]", runsAfterCycle)
+	}
+	runs := readWakeRuns(t, mark)
+	if want := []string{"orca-term-1", DirectorWakeText([]string{res.ID})}; !slices.Equal(runs[0].args, want) || strings.Contains(runs[0].args[1], "MARKER") {
+		t.Fatalf("wake_cmd args = %q; want %q, with nothing of the body", runs[0].args, want)
+	}
+	item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), res.ID)
+	if last := item.Events[len(item.Events)-1]; !item.Woken || last.DirectorID != reg.ID || last.Via != InboxWokenViaWakeCmd || item.State != InboxStateOpen {
+		t.Fatalf("item %s = %+v; want open and woken by %s via wake_cmd", res.ID, item, reg.ID)
+	}
+	if f.stderr.String() != "" || len(f.notifications()) != 0 {
+		t.Fatalf("stderr %q, notifications %q; want neither before the ack deadline", f.stderr.String(), f.notifications())
+	}
+}
