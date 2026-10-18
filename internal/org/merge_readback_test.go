@@ -9,9 +9,12 @@ import (
 
 // The base the read-back of `ralph org merge` gives (plan
 // docs/plans/active/2026-10-17-org-auto-merge.md, S10: D6, AC7 and AC8 for
-// cross-review cycle 2 #1): Merge on the manifest fixtures of
-// merge_fake_test.go, with mrExec answering the calls Merge adds after
-// checkMerge's, so no test runs gh or reaches a network.
+// cross-review cycle 2 #1), and the default branch it is compared with when
+// that is not main: Merge on the manifest fixtures of merge_fake_test.go,
+// with mrExec answering the calls Merge adds after checkMerge's. Then how
+// `ralph org merge-order` lists a PR merged into another base, which the
+// Failed of such a merge names: MergeOrder on the fixtures of
+// mergeorder_test.go. No test runs gh or reaches a network.
 
 // TestMerge_RecordsOnlyAMergeIntoTheDefaultBranch covers D6, AC7 and AC8 for
 // the base the read-back gives (cross-review cycle 2 #1 of the plan): a PR
@@ -79,6 +82,101 @@ func TestMerge_RecordsOnlyAMergeIntoTheDefaultBranch(t *testing.T) {
 				t.Errorf("appended %q\nwant     %q", got, wantAppended)
 			}
 			mrAssertLockFree(t, fx.mo.stateDir)
+		})
+	}
+}
+
+// TestMerge_ComparesTheBaseWithOriginsDefaultBranch covers D6, AC7 and AC8
+// for the branch the read-back's base is compared with: origin's default
+// branch as the checks read it, not main. With trunk as origin's default
+// branch (ls-remote's HEAD, the gate's base, the PR's base, gh's repository
+// and its rules), a PR read back as MERGED at the gate's head into trunk is
+// recorded; one into main, or with no base, is Failed with Merged not set
+// and nothing recorded, and the Failed names trunk as the default branch
+// that got nothing, or may have got nothing, from that merge.
+func TestMerge_ComparesTheBaseWithOriginsDefaultBranch(t *testing.T) {
+	const trunkRules = "gh api repos/o/r/rules/branches/trunk"
+	commands := slices.Clone(mrMerged)
+	commands[slices.Index(commands, mxRules)] = trunkRules
+	for _, tc := range []struct {
+		name, base string
+		failed     string // "" for a recorded merge
+	}{
+		{"MERGED into trunk, the default branch", "trunk", ""},
+		{"MERGED into main, not the default branch", "main", mrMergedAfter("exited 0") + "into the base main, not trunk, the " +
+			"default branch the checks read, so trunk got nothing from it as far as ralph knows" + mrCheckIt + " (it lists the " +
+			"branch as merged, though trunk got nothing from this merge), and go on with the other branches"},
+		{"MERGED with no base", "", mrMergedAfter("exited 0") + "with no base, so whether it merged into trunk is unknown" +
+			mrCheckIt + " (it lists the branch as merged, though trunk may have got nothing from this merge), and go on with " +
+			"the other branches"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMRFixture(t, []any{moBind("org-a", "a"), moGate("org-a", "feat/a", moHeadA, moMain,
+				"refs/remotes/origin/trunk", ""), moDisbanded("org-a")})
+			fx.exec.ls = []mgReply{{out: moListing("trunk", "trunk", moMain, "feat/a", moHeadA)}}
+			fx.exec.replies[mxPRList] = mgReply{out: moPRs(moPR(7, "OPEN", "trunk"))}
+			fx.exec.replies[mxPRView] = mgReply{out: mxPRViewJSON("OPEN", moHeadA, "trunk", "https://github.com/o/r/pull/7", "null")}
+			fx.exec.replies[mxRepoAPI] = mgReply{out: meRepoJSON("trunk", "o/r", nil, false)}
+			fx.exec.replies[trunkRules] = mgReply{out: mgRules(meChecksRule(1, true, "verify"))}
+			fx.exec.replies[mxRuleset] = mgReply{out: meRuleset(1, "protect trunk", "never")}
+			fx.ex.reread = mgReply{out: mrReadBackInto("MERGED", moHeadA, tc.base, mrOID, "null")}
+			res, err := fx.merge(context.Background(), t, fx.params())
+			want := mrResult("merge")
+			want.Protection = `the ruleset "protect trunk" (id 1) of trunk, the default branch of origin's repository o/r, ` +
+				"requires branches to be up to date before merging with its 1 required status check, and you cannot bypass it " +
+				"(current_user_can_bypass: never)"
+			want.Failed = tc.failed
+			if tc.failed == "" {
+				want.Merged, want.Recorded, want.MergeCommit = true, true, mrOID
+			}
+			if err != nil || res != want {
+				t.Fatalf("Merge = %+v, %v\nFailed %q\nwant   %q", res, err, res.Failed, tc.failed)
+			}
+			if got := fx.exec.keys(); !slices.Equal(got, commands) {
+				t.Errorf("commands = %q\nwant %q", got, commands)
+			}
+			wantAppended := ""
+			if tc.failed == "" {
+				wantAppended = mrRecord(t, "branch=feat/a pr=7 head="+moHeadA+" method=merge merge_commit="+mrOID+" auto_merge=false")
+			}
+			if got := fx.appended(t); got != wantAppended {
+				t.Errorf("appended %q\nwant     %q", got, wantAppended)
+			}
+			mrAssertLockFree(t, fx.mo.stateDir)
+		})
+	}
+}
+
+// TestMergeOrder_ListsAMergeIntoAnotherBaseAsMerged pins the claim in
+// otherBaseMerged's Failed that ralph org merge-order lists the branch as
+// merged though the default branch got nothing, or may have got nothing,
+// from that merge: merge-order classifies a branch whose PR gh reads as
+// MERGED into another base than main, or with no base, as merged, hidden
+// and counted without All and listed with it. That is the tech-debt row on
+// merge-order classifying a MERGED PR without looking at its base
+// (docs/tech-debt/README.md), so whoever changes that classification changes
+// the Failed's text too.
+func TestMergeOrder_ListsAMergeIntoAnotherBaseAsMerged(t *testing.T) {
+	for _, tc := range []struct{ name, base string }{
+		{"MERGED into release", "release"},
+		{"MERGED with no base", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, moBind("org-a", "a"), moPassed("org-a", "feat/a", moHeadA, moMain))
+			fx.exec.lsOut = moListing("main", "main", moMain, "feat/a", moHeadA)
+			fx.exec.setPR("feat/a", moPRs(moPR(7, "MERGED", tc.base)))
+			res := fx.run(t, false)
+			if len(res.Entries) != 0 || moNoteWith(res, "1 branch(es) whose PR is merged or closed are not shown") == "" {
+				t.Fatalf("entries %v, notes %q; want feat/a hidden and counted as merged or closed", moOrder(res), res.Notes)
+			}
+			all := fx.run(t, true)
+			if got, want := moOrder(all), []string{"1 merged feat/a"}; !slices.Equal(got, want) {
+				t.Fatalf("order with All = %q, want %q", got, want)
+			}
+			if e := moEntry(t, all, "feat/a"); e.PR == nil || e.PR.Number != 7 || e.Detail != "PR #7 is merged" {
+				t.Errorf("feat/a = %+v, want PR #7 merged", e)
+			}
 		})
 	}
 }
