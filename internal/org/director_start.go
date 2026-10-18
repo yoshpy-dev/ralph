@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -55,9 +56,9 @@ type DirectorHeadlessAttach struct {
 
 // DirectorWho is who writes a headless registration's later events
 // (RecordWorkspace, RecordPane, MarkLaunched, MarkCmdLaunched, MarkStopped,
-// MarkStoppedIfUnchanged, MarkForceStopped): USER, the current directory,
-// and whether HERDR_PANE_ID is set. The store does not read the
-// environment.
+// MarkStoppedIfUnchanged, MarkStoppedAtVersion, MarkForceStopped): USER, the
+// current directory, and whether HERDR_PANE_ID is set. The store does not
+// read the environment.
 type DirectorWho struct {
 	User      string
 	Cwd       string
@@ -499,7 +500,7 @@ func directorCheckInStarterEnded(reg DirectorRegistration, read func(context.Con
 // stopped: start and attach would refuse on it, stop would refuse it as
 // already stopped, and only a detach the human must think of would end it.
 func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
-	return s.markStopped(id, who, false, nil)
+	return s.markStopped(id, who, false, nil, nil)
 }
 
 // MarkStoppedIfUnchanged is MarkStopped for `ralph org director stop` (plan
@@ -521,7 +522,7 @@ func (s *DirectorStore) MarkStopped(id string, who DirectorWho) (wasCurrent bool
 // from none to a value (MarkCmdLaunched records one while starting only).
 // Every other refusal is MarkStopped's.
 func (s *DirectorStore) MarkStoppedIfUnchanged(read DirectorRegistration, who DirectorWho) (wasCurrent bool, err error) {
-	return s.markStopped(read.ID, who, false, &read)
+	return s.markStopped(read.ID, who, false, &read, nil)
 }
 
 // MarkForceStopped is MarkStopped for `ralph org director stop --force`
@@ -533,14 +534,36 @@ func (s *DirectorStore) MarkStoppedIfUnchanged(read DirectorRegistration, who Di
 // recorded id (plan D14): a forced stop records that nothing more was
 // closed, which stays true when a start recorded an id meanwhile.
 func (s *DirectorStore) MarkForceStopped(id string, who DirectorWho) (wasCurrent bool, err error) {
-	return s.markStopped(id, who, true, nil)
+	return s.markStopped(id, who, true, nil, nil)
 }
 
-// markStopped is MarkStopped, with force MarkForceStopped, and with a
-// non-nil read MarkStoppedIfUnchanged: read is the registration as stop read
-// it, whose workspace and pane ids, pid, and start time must still be the
-// recorded ones.
-func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read *DirectorRegistration) (wasCurrent bool, err error) {
+// MarkStoppedAtVersion is MarkStoppedIfUnchanged for start's cleanup of a
+// current registration that its check found ended (plan
+// 2026-10-18-org-director-liveness, D6, cleanUpEndedDirector): read is the
+// registration as the check read it (version A, DirectorCheckResult's
+// Registration), read.ID the id to stop, and v that read's version
+// (DirectorCheckResult's version). Under the lock, before anything else, it
+// computes the version of read.ID in director.jsonl as it is now
+// (directorVersionOf) and, when that is not v, writes nothing and returns an
+// error that wraps ErrDirectorChangedSinceCheck and names both versions: an
+// event for read.ID was recorded after the check read it (any event:
+// launched, workspace_created, pane_created, detached, or stopped), or
+// another registration is current, so the cleanup, which closed only what
+// version A recorded, must not record the stop. A zero v never matches.
+// Otherwise it writes what MarkStoppedIfUnchanged writes for read (stopped,
+// with detached first while read.ID is current, in one write), whose
+// comparisons then pass, and every other refusal is MarkStopped's.
+func (s *DirectorStore) MarkStoppedAtVersion(read DirectorRegistration, v directorVersion, who DirectorWho) (wasCurrent bool, err error) {
+	return s.markStopped(read.ID, who, false, &read, &v)
+}
+
+// markStopped is MarkStopped, with force MarkForceStopped, with a non-nil
+// read MarkStoppedIfUnchanged, and with a non-nil version too
+// MarkStoppedAtVersion: read is the registration as stop (or start's check)
+// read it, whose workspace and pane ids, pid, and start time must still be
+// the recorded ones, and version the directorVersion of that read, which the
+// file must still hold for id.
+func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read *DirectorRegistration, version *directorVersion) (wasCurrent bool, err error) {
 	if _, ok := directorIDNumber(id); !ok {
 		return false, fmt.Errorf("org: director: stop: %q is not a registration id (d<N>, such as d1)", id)
 	}
@@ -557,6 +580,12 @@ func (s *DirectorStore) markStopped(id string, who DirectorWho, force bool, read
 			return err
 		}
 		fold := foldDirector(raw)
+		if version != nil {
+			if now := directorVersionOf(raw, fold, id); now != *version {
+				return fmt.Errorf("org: director: %s: %w: %s had %s when the check read it, and has %s now", verb,
+					ErrDirectorChangedSinceCheck, id, directorVersionText(*version), directorVersionText(now))
+			}
+		}
 		reg, err := fold.openHeadless(verb, id)
 		if err != nil {
 			return err
@@ -603,6 +632,18 @@ func directorRecordedIDs(reg DirectorRegistration) string {
 	return ws + " and " + pane
 }
 
+// directorVersionText names a directorVersion in MarkStoppedAtVersion's
+// error: how many events its id had and which registration was current
+// ("no registration" for none). Both come from the fold, which reads only an
+// id of the form d<N>, so neither needs escaping.
+func directorVersionText(v directorVersion) string {
+	current := "no registration"
+	if v.currentID != "" {
+		current = v.currentID
+	}
+	return fmt.Sprintf("%d events, with %s current", v.events, current)
+}
+
 // directorRecordedProcess names the pid and start time recorded for reg, a
 // launch cmd, in an error: "no pid" before its check-in.
 func directorRecordedProcess(reg DirectorRegistration) string {
@@ -641,6 +682,14 @@ var (
 	// its check-in was refused or failed), so start recorded the stop (plan
 	// 2026-10-16-org-director-launch-cmd, D5 and D6).
 	ErrDirectorNoCheckIn = errors.New("the launch script did not check in before the timeout")
+	// ErrDirectorChangedSinceCheck: start's cleanup of a current headless
+	// registration that its check found ended (plan
+	// 2026-10-18-org-director-liveness, D6) found under director.lock that
+	// director.jsonl recorded something for it after the check read it, or
+	// that another registration is current (MarkStoppedAtVersion), so it
+	// recorded nothing and started nothing: what it closed is only what the
+	// check read, and the registration may no longer be the one that ended.
+	ErrDirectorChangedSinceCheck = errors.New("the registration changed after start checked it")
 )
 
 // DirectorStartParams describes one StartDirector call. Store is the
@@ -659,6 +708,11 @@ var (
 // when it is not empty (the CLI gives start's RALPH_ORG_AGMSG_HOME), the
 // launch script exports it as RALPH_ORG_AGMSG_HOME (plan
 // 2026-10-16-org-director-launch-cmd, D3). Who is who writes the events.
+// Notice gets the one line start writes when it cleaned up a current
+// headless registration that its check found ended (plan
+// 2026-10-18-org-director-liveness, D6), as soon as that cleanup is
+// recorded, so the line is there even when start is refused afterwards; nil
+// means the line goes nowhere.
 type DirectorStartParams struct {
 	Store      *DirectorStore
 	Driver     string
@@ -668,6 +722,7 @@ type DirectorStartParams struct {
 	TimeoutMS  int
 	AgmsgHome  string
 	Who        DirectorWho
+	Notice     io.Writer
 }
 
 // DirectorStartResult is what StartDirector launched: the registration
@@ -698,9 +753,20 @@ type DirectorStartResult struct {
 // when that read failed or none is current by then. Its Headless tells the
 // CLI which way out to print: `ralph org director stop --id` for a headless
 // one, `ralph org director detach --id` for a promoted session's.
+//
+// Check is set when the first look checked the current headless
+// registration on the spot (CheckDirector; plan
+// 2026-10-18-org-director-liveness, D6) and found it alive or could not tell
+// (unknown): what the check found, which the CLI adds to the refusal.
+// Current is then the registration as that check read it. Check is nil for a
+// promoted session's registration, which is not checked, for a headless one
+// the check had nothing to check in (stopped while still current, say), and
+// for AttachHeadless's refusal under the lock. Error is Err's text either
+// way.
 type DirectorAttachedError struct {
 	Current *DirectorRegistration
 	Err     error
+	Check   *DirectorCheck
 }
 
 func (e *DirectorAttachedError) Error() string { return e.Err.Error() }
@@ -729,6 +795,19 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // decides. A director.jsonl that cannot be read is refused at the first
 // read. A seat's scope gate (autonomousScopeGateErr) does not apply: the
 // director is not a seat.
+//
+// A current registration that `ralph org director start` wrote is not
+// simply refused at that first read (plan 2026-10-18-org-director-liveness,
+// D6, checkCurrentDirector): start checks it on the spot (CheckDirector).
+// Alive or unknown is refused as before, with Check set; ended is cleaned up
+// as `ralph org director stop` without --force cleans it up, but only on the
+// registration as the check read it (cleanUpEndedDirector), recorded stopped
+// with MarkStoppedAtVersion, reported in one line on p.Notice, and start then
+// goes on to the watch gate. That cleanup makes herdr calls (the label checks,
+// C-c, and the closes) and writes director.jsonl before the watch gate, so a
+// start the gate refuses afterwards has still cleaned up. A cleanup that did
+// not get as far as its record returns its *DirectorCleanupError, and start
+// writes nothing.
 //
 // Then, in this order, with no herdr call under director.lock (D3):
 //  1. AttachHeadless records the registration, state starting, with a new
@@ -859,7 +938,9 @@ type directorStartChecks struct {
 
 // checkDirectorStart runs StartDirector's refusals that need no write and
 // no herdr call, in the order its doc comment lists them. Its look at a
-// current registration reads without the lock and only refuses early;
+// current registration reads without the lock and only refuses early, or,
+// for a headless one its check finds ended, cleans it up and goes on
+// (checkCurrentDirector, the one step here that may call herdr and write);
 // AttachHeadless decides again under the lock. It returns what it resolved
 // (directorStartChecks), and leaves p with Cwd and a non-empty ConfigPath
 // made absolute and TimeoutMS defaulted.
@@ -917,7 +998,9 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 		return c, err
 	}
 	if cur := res.Current; cur != nil {
-		return c, &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
+		if err := o.checkCurrentDirector(p, cur); err != nil {
+			return c, err
+		}
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return c, err
@@ -959,6 +1042,48 @@ func (o *Org) checkDirectorStartWake(cmdLaunch bool) error {
 		return fmt.Errorf("org: director: start: %w (wake %s), and [org.director].launch_cmd is set: launch_cmd opens a terminal ralph cannot type into, "+
 			"so ralph org watch --all could not wake the director; set [org.director].wake_cmd (its {target} is director_<token>, the name launch_cmd "+
 			"gives the terminal) or use wake = [%q]", ErrDirectorWakeCmdNeeded, strings.Join(wake, ","), DirectorWakePull)
+	}
+	return nil
+}
+
+// checkCurrentDirector is checkDirectorStart's first look at cur, the
+// current registration as a read without the lock found it (plan
+// 2026-10-18-org-director-liveness, D6). A promoted session's registration
+// is refused as before (*DirectorAttachedError), with no check. For a
+// headless one it runs CheckDirector on the spot, not the watch's mark, and:
+//   - a director.jsonl that cannot be read is that error;
+//   - with nothing to check (the registration is stopped while still
+//     current, or is no longer current or headless by the check's read) it is
+//     refused as before, naming cur;
+//   - alive or unknown is refused as before, with the registration the check
+//     read and what it found (Check);
+//   - ended is cleaned up on the registration as the check read it, version A
+//     (cleanUpEndedDirector), and once that is recorded its line goes to
+//     p.Notice and start goes on (nil). A cleanup that did not get as far as
+//     the record is its *DirectorCleanupError, with nothing written.
+//
+// AttachHeadless decides again under the lock either way.
+func (o *Org) checkCurrentDirector(p *DirectorStartParams, cur *DirectorRegistration) error {
+	refused := &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
+	if !cur.Headless() {
+		return refused
+	}
+	chk, err := o.CheckDirector(p.Store, o.nowTime())
+	switch {
+	case err != nil:
+		return err
+	case !chk.Checked:
+		return refused
+	case chk.Check.State != DirectorCheckEnded:
+		reg, check := chk.Registration, chk.Check
+		return &DirectorAttachedError{Current: &reg, Err: directorStartAttachedErr(&reg), Check: &check}
+	}
+	notice, err := o.cleanUpEndedDirector(p.Store, chk, p.Who)
+	if err != nil {
+		return err
+	}
+	if p.Notice != nil {
+		_, _ = fmt.Fprintln(p.Notice, notice)
 	}
 	return nil
 }

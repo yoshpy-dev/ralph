@@ -15,7 +15,10 @@ import (
 // *DirectorCleanupError of a start or a stop that could not finish them.
 // The stop of a launch cmd (plan 2026-10-16-org-director-launch-cmd, D7 and
 // D8: stopCmdDirector) is here too; the stop of its process that it shares
-// with start's cleanup (stopDirectorProcess) is in director_cmd.go.
+// with start's cleanup (stopDirectorProcess) is in director_cmd.go. So is
+// start's cleanup of a current registration that its check found ended
+// (plan 2026-10-18-org-director-liveness, D6: cleanUpEndedDirector), which
+// runs the same closes on the registration as that check read it.
 // StartDirector and the DirectorStore writers of a headless registration
 // are in director_start.go.
 
@@ -227,14 +230,38 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	if reg.CmdLaunch() {
 		return o.stopCmdDirector(p, reg)
 	}
+	res, closed, err := o.closeHerdrDirector(reg)
+	if err != nil {
+		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: %w", p.ID, err)
+	}
+	return recordDirectorStop(p, res, closed)
+}
+
+// closeHerdrDirector is what StopDirector does to reg, an open headless
+// registration with launch herdr, between its read and its record, and what
+// start's cleanup of a registration its check found ended does to the
+// registration that check read (cleanUpEndedDirector; plan
+// 2026-10-18-org-director-liveness, D6). It acts on reg as given and reads
+// nothing from director.jsonl, so it closes what reg records and nothing a
+// later line recorded. It refuses, with nothing sent, a call from inside
+// reg's pane (HERDR_PANE_ID is its recorded pane: ErrDirectorStopSelfPane)
+// and, once herdr's label confirmed reg's workspace as this launch's, a call
+// from inside that workspace (HERDR_WORKSPACE_ID is its id:
+// ErrDirectorStopSelfWorkspace). Those errors leave out the
+// "org: director: <verb> <id>: " that the caller puts in front. Otherwise it
+// checks herdr's labels (confirmDirectorResources) and, when both are
+// confirmed, sends C-c and closes (closeConfirmedDirectorResources), and
+// returns the result with its notes and what it did, closed, whose err says
+// why that did not finish.
+func (o *Org) closeHerdrDirector(reg DirectorRegistration) (DirectorStopResult, directorClose, error) {
 	if own := o.getenv(herdrPaneIDEnv); own != "" && own == reg.PaneID {
-		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_PANE_ID is its pane %q, and closing that pane would end this command before it records the stop: %w",
-			p.ID, reg.PaneID, ErrDirectorStopSelfPane)
+		return DirectorStopResult{}, directorClose{}, fmt.Errorf("HERDR_PANE_ID is its pane %q, and closing that pane would end this command before it records the stop: %w",
+			reg.PaneID, ErrDirectorStopSelfPane)
 	}
 	closed, gone := o.confirmDirectorResources(reg)
 	if closed.err == nil && reg.WorkspaceID != "" && !gone.workspace && o.getenv(herdrWorkspaceIDEnv) == reg.WorkspaceID {
-		return DirectorStopResult{}, fmt.Errorf("org: director: stop %s: HERDR_WORKSPACE_ID is its workspace %q, labelled %s, and closing that workspace would end this command before it records the stop: %w",
-			p.ID, reg.WorkspaceID, DirectorWorkspaceLabel(reg.Token), ErrDirectorStopSelfWorkspace)
+		return DirectorStopResult{}, directorClose{}, fmt.Errorf("HERDR_WORKSPACE_ID is its workspace %q, labelled %s, and closing that workspace would end this command before it records the stop: %w",
+			reg.WorkspaceID, DirectorWorkspaceLabel(reg.Token), ErrDirectorStopSelfWorkspace)
 	}
 	if closed.err == nil {
 		closed = o.closeConfirmedDirectorResources(reg, closed, gone)
@@ -243,7 +270,97 @@ func (o *Org) StopDirector(p DirectorStopParams) (DirectorStopResult, error) {
 	if reg.WorkspaceID == "" {
 		res.UnrecordedWorkspaceLabel = DirectorWorkspaceLabel(reg.Token)
 	}
-	return recordDirectorStop(p, res, closed)
+	return res, closed, nil
+}
+
+// cleanUpEndedDirector is start's cleanup of the registration chk checked
+// (plan 2026-10-18-org-director-liveness, D6): chk is the CheckDirector of
+// checkDirectorStart's first look, Checked and ended, and store the ledger's
+// director.jsonl. It does to chk.Registration, the registration as the check
+// read it (version A), what StopDirector without Force does after its read,
+// and it never reads the registration again to decide what to close, so a
+// pane, a workspace, or a pid recorded after that read is left alone (the
+// race of two starts in Codex's advisory on the plan). For a launch herdr
+// that is closeHerdrDirector: the refusals from inside the director's pane
+// or workspace, the check of herdr's labels, C-c, and the closes. For a
+// launch cmd it is stopDirectorProcess, which sends SIGTERM only to the
+// recorded pid while ps reads the recorded start time for it, so nothing
+// goes to a process the check found gone, nor to a starting registration,
+// which has no pid. The refusal of stopCmdDirector from inside the director
+// (RALPH_DIRECTOR_TOKEN) is not made: the director has ended, so ending its
+// process cannot end this command. Then MarkStoppedAtVersion records
+// stopped, with detached first as the registration is current, only while
+// director.jsonl still holds version A. There is no Force here: what is not
+// confirmed or not closed is left to `ralph org director stop`.
+//
+// Once that record is written it returns the one line that says what it did
+// (directorCleanupNotice) and a nil error. Otherwise it has written nothing,
+// and the error is a *DirectorCleanupError of verb start
+// (newDirectorCleanupError, or newDirectorCmdCleanupError for a launch cmd)
+// whose Err wraps ErrDirectorAttached and names the registration and how it
+// ended, whose CleanupErr says what stopped the cleanup (a refusal from
+// inside the director's pane or workspace, a label that is not this
+// launch's, a close that failed, a process whose end is not confirmed,
+// ErrDirectorChangedSinceCheck, or another record that failed), and whose
+// StopCommand is the stop that finishes it, with --force for a label that is
+// not this launch's, as a stop's error names it.
+func (o *Org) cleanUpEndedDirector(store *DirectorStore, chk DirectorCheckResult, who DirectorWho) (string, error) {
+	reg := chk.Registration
+	cause := fmt.Errorf("org: director: start: %w: %s, which start found ended (%s) when it checked it just now, and start could not clean it up, so it started no new director",
+		ErrDirectorAttached, reg.describe(), chk.Check.How)
+	if reg.CmdLaunch() {
+		stop := o.stopDirectorProcess(reg)
+		if stop.outcome != directorProcessStopEnded {
+			return "", newDirectorCmdCleanupError(reg, cause, fmt.Errorf("%w: %w", ErrDirectorProcessNotEnded, stop.err), false)
+		}
+		if _, err := store.MarkStoppedAtVersion(reg, chk.version, who); err != nil {
+			return "", newDirectorCmdCleanupError(reg, cause, &directorRecordStopError{id: reg.ID, err: err}, false)
+		}
+		return directorCmdCleanupNotice(reg, chk.Check.How, stop), nil
+	}
+	res, closed, err := o.closeHerdrDirector(reg)
+	switch {
+	case err != nil:
+		return "", newDirectorCleanupError("start", reg, directorClose{}, cause, err, false)
+	case closed.err != nil:
+		return "", newDirectorCleanupError("start", reg, closed, cause, closed.err, false)
+	}
+	if _, err := store.MarkStoppedAtVersion(reg, chk.version, who); err != nil {
+		return "", newDirectorCleanupError("start", reg, closed, cause, &directorRecordStopError{id: reg.ID, err: err}, false)
+	}
+	return directorHerdrCleanupNotice(res, chk.Check.How), nil
+}
+
+// directorHerdrCleanupNotice is the line of cleanUpEndedDirector for res, a
+// launch herdr it closed and recorded stopped, which had ended by how: its
+// notes on the C-c, the pane, and the workspace, escaped (a failed C-c's note
+// holds herdr's error text), and, when no workspace id was recorded, the
+// label of a workspace start may have made before it could record it.
+func directorHerdrCleanupNotice(res DirectorStopResult, how string) string {
+	line := fmt.Sprintf("cleaned up %s, which had ended (%s): %s, %s, %s, and recorded it stopped", res.Registration.ID, how,
+		PrintableInboxText(res.CtrlCNote, false), PrintableInboxText(res.PaneNote, false), PrintableInboxText(res.WorkspaceNote, false))
+	if label := res.UnrecordedWorkspaceLabel; label != "" {
+		line += "; herdr may still have a workspace labelled " + label + " that its start made before it could record it (herdr workspace list)"
+	}
+	return line
+}
+
+// directorCmdCleanupNotice is the line of cleanUpEndedDirector for reg, a
+// launch cmd it recorded stopped, which had ended by how, after stop: what
+// was done to the process, whether anything was sent to it, and the terminal
+// launch_cmd opened (or may have opened, before a check-in), which ralph
+// never closes.
+func directorCmdCleanupNotice(reg DirectorRegistration, how string, stop directorProcessStop) string {
+	line := fmt.Sprintf("cleaned up %s, which had ended (%s): %s, and recorded it stopped; ", reg.ID, how, PrintableInboxText(stop.note, false))
+	if !stop.signalled {
+		line += "nothing was sent to its process, and "
+	}
+	name := DirectorAgentName(reg.Token)
+	if reg.PID > 0 {
+		return line + "the terminal that [org.director].launch_cmd opened (name " + name + ") is left open for you to close"
+	}
+	return line + "the terminal that [org.director].launch_cmd may have opened (name " + name + ") is left open for you to close, " +
+		"and a launch script that checks in from it now is refused and starts no agent"
 }
 
 // recordDirectorStop is the end of StopDirector once closed is what it did
@@ -468,6 +585,15 @@ func (s *DirectorStore) openHeadlessRegistration(verb, id string) (DirectorRegis
 // again, which stops the process that checked in; otherwise the record
 // failed. After a forced stop whose record failed, StopCommand carries
 // --force.
+//
+// Start's cleanup of a current registration its check found ended (plan
+// 2026-10-18-org-director-liveness, D6, cleanUpEndedDirector) comes in the
+// same shape, Verb start, when it did not get as far as the record: Err wraps
+// ErrDirectorAttached and names the registration and how it ended, nothing
+// was written (Detached is false), and StopCommand finishes the cleanup.
+// When CleanupErr wraps ErrDirectorChangedSinceCheck, director.jsonl recorded
+// something for the registration after the check read it, so the text names
+// a start again, which checks it anew, before the stop.
 type DirectorCleanupError struct {
 	Verb           string
 	ID             string
@@ -515,6 +641,9 @@ func (e *DirectorCleanupError) Error() string {
 		b.WriteString("; run " + e.StopCommand + " again to close what start recorded")
 	case errors.Is(e.CleanupErr, ErrDirectorCheckedInDuringStop):
 		b.WriteString("; run " + e.StopCommand + " again to stop the process that checked in")
+	case errors.Is(e.CleanupErr, ErrDirectorChangedSinceCheck):
+		b.WriteString("; run start again, which checks the registration as it is now, or, when it is still open and has ended, " +
+			"record the stop with " + e.StopCommand)
 	case errors.Is(e.CleanupErr, ErrDirectorProcessNotEnded) && !errors.As(e.CleanupErr, &recordErr):
 		if errors.Is(e.CleanupErr, ErrDirectorProcessUnreadable) {
 			fmt.Fprintf(&b, "; run %s again once ps can read pid %d", e.StopCommand, e.PID)

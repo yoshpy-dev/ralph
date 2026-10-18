@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -102,7 +103,12 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"which closes its herdr pane, and --replace leaves that pane open. For\n" +
 			"one launched with [org.director].launch_cmd, that stop ends its\n" +
 			"process, run from a terminal other than the director's, and --replace\n" +
-			"leaves the process running.\n" +
+			"leaves the process running. The refusal then also says what\n" +
+			"`ralph org watch --all` found when it last checked that director, and,\n" +
+			"for one still starting, what ps reads now of the start process that\n" +
+			"recorded it; when either says it has ended, the refusal names\n" +
+			"`ralph org director start`, which cleans it up before it starts a new\n" +
+			"headless director. attach itself runs no herdr and cleans up nothing.\n" +
 			"\n" +
 			"attach is refused, and writes nothing, when [org.director].enabled is\n" +
 			"false: escalate then sends every item to the human at once. Without\n" +
@@ -390,7 +396,10 @@ func (rt *orgDirectorRuntime) command(command string) string {
 // which closes its herdr pane, not with detach (plan
 // 2026-10-15-org-director-start, AC2); one with launch cmd is stopped from a
 // terminal other than the director's, and that stop ends its process (plan
-// 2026-10-16-org-director-launch-cmd, D7 and D8).
+// 2026-10-16-org-director-launch-cmd, D7 and D8). For a headless one the
+// refusal ends with what is known of whether it is still alive
+// (attachHeadlessChecks; plan 2026-10-18-org-director-liveness, D7); a
+// promoted session's refusal says nothing of that.
 func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error {
 	replace := rt.command("ralph org director attach --driver " + driverName + " --replace")
 	var cur *org.DirectorRegistration
@@ -399,11 +408,13 @@ func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error 
 	}
 	if cur != nil && cur.CmdLaunch() {
 		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, which stops its process, "+
-			"or replace it with %s, which leaves that process running until such a stop", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace)
+			"or replace it with %s, which leaves that process running until such a stop%s", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace,
+			rt.attachHeadlessChecks(cur))
 	}
 	if cur != nil && cur.Headless() {
 		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, which closes its herdr pane, "+
-			"or replace it with %s, which leaves that pane open until such a stop", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace)
+			"or replace it with %s, which leaves that pane open until such a stop%s", err, rt.command("ralph org director stop --id "+inboxField(cur.ID)), replace,
+			rt.attachHeadlessChecks(cur))
 	}
 	detach := "ralph org director detach --id <its id>"
 	if cur != nil {
@@ -411,6 +422,49 @@ func (rt *orgDirectorRuntime) attachedError(err error, driverName string) error 
 	}
 	return fmt.Errorf("%w: end it with %s from the session that attached it (or with --force in place of --id, when that session is gone), "+
 		"or replace it with %s", err, rt.command(detach), replace)
+}
+
+// attachHeadlessChecks is what attach's refusal adds for cur, the current
+// headless registration (plan 2026-10-18-org-director-liveness, D7), each
+// part after "; ": when the watch's mark (director-alive.json) is cur's
+// (org.DirectorAliveFor: the same id and attached_at), what the watch found
+// and when; when cur is starting with a starter recorded, what ps reads of
+// that `ralph org director start` process now (org.CheckDirectorStarter);
+// and, when either says ended, that `ralph org director start` cleans cur up
+// before it starts a new headless director. It is "" when there is neither.
+// It makes no herdr call, sends nothing, and writes nothing: attach does not
+// clean up. A mark that cannot be read adds nothing, as the refusal does not
+// rest on it; every value read from the mark or the registration is escaped.
+func (rt *orgDirectorRuntime) attachHeadlessChecks(cur *org.DirectorRegistration) string {
+	var b strings.Builder
+	ended := false
+	if mark, err := org.ReadDirectorAlive(rt.stateDir); err == nil {
+		if m := org.DirectorAliveFor(mark, cur); m != nil {
+			fmt.Fprintf(&b, "; the watch checked %s at %s: %s", inboxField(cur.ID), inboxField(m.CheckedAt), orgDirectorCheckText(m.Check()))
+			ended = m.State == org.DirectorCheckEnded
+		}
+	}
+	if c, ok := org.CheckDirectorStarter(*cur, time.Now(), nil); ok {
+		fmt.Fprintf(&b, "; its start (pid %d), checked just now: %s", cur.StarterPID, orgDirectorCheckText(c))
+		ended = ended || c.State == org.DirectorCheckEnded
+	}
+	if ended {
+		fmt.Fprintf(&b, "; as it has ended, %s cleans it up and then starts a new headless director (it checks %s again first)",
+			rt.command("ralph org director start --driver <claude|codex>"), inboxField(cur.ID))
+	}
+	return b.String()
+}
+
+// orgDirectorCheckText is c, a check of a headless registration (plan
+// 2026-10-18-org-director-liveness, D3), in the CLI's words: its state and
+// its how, then its detail when it has one, each escaped (inboxField), as
+// "ended (pane_closed)" or "unknown (agent_get_failed: <detail>)".
+func orgDirectorCheckText(c org.DirectorCheck) string {
+	text := inboxField(c.State) + " (" + inboxField(c.How)
+	if c.Detail != "" {
+		text += ": " + inboxField(c.Detail)
+	}
+	return text + ")"
 }
 
 // printHeadlessStillOpen writes to w, after detach or attach --replace ended

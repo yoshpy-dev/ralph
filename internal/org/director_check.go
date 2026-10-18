@@ -19,9 +19,12 @@ import (
 // wrote is still alive, has ended, or cannot be told, and how it found that
 // out. The cross-org watch checks every cycle and writes the result to
 // director-alive.json (D4; the mark, at the end of this file, and
-// watchAllRun.checkDirector in watch.go), and the plan has start check before
-// it cleans up a dead registration (D6). The check writes nothing: no
-// director.jsonl line, no herdr close, no key, no signal.
+// watchAllRun.checkDirector in watch.go), and `ralph org director start`
+// checks the current registration on the spot and cleans it up when it has
+// ended (D6; checkCurrentDirector in director_start.go). `ralph org director
+// attach` refused by a starting registration reads only its starter row
+// (CheckDirectorStarter, D7). The check writes nothing: no director.jsonl
+// line, no herdr close, no key, no signal.
 // It reads the registration without the lock, runs ps or herdr, and then
 // reads it again under director.lock, and keeps its result only when the
 // registration did not change in between (directorVersion), so a start that
@@ -334,6 +337,25 @@ func (o *Org) checkDirectorStarter(reg DirectorRegistration) (state, how, detail
 			pid, proc.StartTime, reg.StarterStartTime)
 	}
 	return DirectorCheckAlive, DirectorCheckHowStartRunning, ""
+}
+
+// CheckDirectorStarter is the starter row of the check on its own (plan
+// 2026-10-18-org-director-liveness, D3 and D7), for `ralph org director
+// attach` refused by a starting headless registration: for reg, headless,
+// starting, and with a starter recorded, it reads the starter with read
+// (nil: ReadDirectorProcess, which runs ps) under one driver call timeout,
+// as CheckDirector's row does (checkDirectorStarter), and returns the check
+// made at now, its Detail escaped, and true. For any other registration it
+// reads nothing and returns false. It makes no herdr call, writes nothing,
+// and reads director.jsonl not at all, so it binds the result to no version:
+// the result is for a refusal's text, never for acting on the registration.
+func CheckDirectorStarter(reg DirectorRegistration, now time.Time, read func(context.Context, int) (DirectorProcess, error)) (DirectorCheck, bool) {
+	if !reg.Headless() || reg.State != DirectorStateStarting || reg.StarterPID <= 0 || reg.StarterStartTime == "" {
+		return DirectorCheck{}, false
+	}
+	o := &Org{DirectorProcessReader: read}
+	state, how, detail := o.checkDirectorStarter(reg)
+	return DirectorCheck{ID: reg.ID, State: state, How: how, CheckedAt: now.UTC().Format(time.RFC3339), Detail: PrintableInboxText(detail, false)}, true
 }
 
 // checkDirectorAgent is checkDirectorOnce for a running launch herdr: it asks

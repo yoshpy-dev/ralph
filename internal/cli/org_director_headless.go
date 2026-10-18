@@ -108,13 +108,12 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"ledger's main worktree root when the ledger has one and the watch\n" +
 			"resolves it from where start runs, so the two may resolve it from\n" +
 			"different directories, and start refuses it wherever it runs; give an\n" +
-			"absolute path), while a director is attached (one still starting\n" +
-			"included: stop a headless one with `ralph org director stop --id <id>`,\n" +
-			"detach a promoted session), and inside a herdr pane (HERDR_PANE_ID is\n" +
-			"set): run start from a terminal outside herdr. start has no --replace.\n" +
-			"With launch_cmd, HERDR_PANE_ID does not refuse start, which runs no\n" +
-			"herdr then, and start is also refused when the --driver agent is not on\n" +
-			"its PATH. It is refused too when [org.director].wake has push and\n" +
+			"absolute path), while a promoted session is attached (detach it; for a\n" +
+			"headless director, see below), and inside a herdr pane (HERDR_PANE_ID\n" +
+			"is set): run start from a terminal outside herdr. start has no\n" +
+			"--replace. With launch_cmd, HERDR_PANE_ID does not refuse start, which\n" +
+			"runs no herdr then, and start is also refused when the --driver agent is\n" +
+			"not on its PATH. It is refused too when [org.director].wake has push and\n" +
 			"wake_cmd is empty: the terminal launch_cmd opens is one ralph cannot\n" +
 			"type into, so set wake_cmd (its {target} is director_<token>) or use\n" +
 			"wake = [\"pull\"]. In herdr, push needs no wake_cmd: the watch types the\n" +
@@ -133,7 +132,27 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"script that checks in from it afterwards is refused and starts no agent.\n" +
 			"When start cannot confirm that the process ended, it records the\n" +
 			"director detached only and prints the stop command that finishes the\n" +
-			"cleanup.",
+			"cleanup.\n" +
+			"\n" +
+			"While a headless director that start launched is the attached one,\n" +
+			"starting or running, start checks it on the spot, before the watch, as\n" +
+			"`ralph org watch --all` checks it every cycle: one still starting by the\n" +
+			"start process that recorded it, one running in herdr with herdr agent\n" +
+			"get and its pane, and one launched with launch_cmd by its pid and that\n" +
+			"pid's start time. When the check finds it alive, or cannot tell, start\n" +
+			"is refused, writes nothing, and says what the check found: stop it with\n" +
+			"`ralph org director stop --id <id>` from a terminal outside herdr (for\n" +
+			"launch_cmd, from a terminal other than the director's). When the check\n" +
+			"finds it ended, start cleans it up as that stop would, but only what the\n" +
+			"registration recorded when the check read it: it closes the pane and\n" +
+			"workspace that herdr's labels confirm as that launch's, or, for\n" +
+			"launch_cmd, sends nothing to a process that is gone, and records the\n" +
+			"director stopped. It then prints one line, cleaned up d1, which had\n" +
+			"ended (...), and goes on, so the line is printed even when start is\n" +
+			"refused afterwards. When the cleanup cannot finish (a label that is not\n" +
+			"that launch's, a close that fails, or a registration that changed after\n" +
+			"the check read it), start records nothing, starts no director, and\n" +
+			"exits 1 with the stop command that finishes the cleanup.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director start", driverName); err != nil {
@@ -286,7 +305,10 @@ var orgDirectorStopWait time.Duration
 // returned (exit 1) in the words of startError; on success it prints the
 // registration, where to talk to the director (the herdr pane, or the
 // terminal launch_cmd opened), and the stop command, which, like the
-// prompt's, has no --config (stop reads no ralph.toml).
+// prompt's, has no --config (stop reads no ralph.toml). When start cleaned up
+// a current headless registration its check found ended (plan
+// 2026-10-18-org-director-liveness, D6), the line that says so comes first on
+// stdout (DirectorStartParams.Notice), also when start fails afterwards.
 func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driverName, model string, timeoutMS int) error {
 	cfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -333,15 +355,15 @@ func (rt *orgDirectorRuntime) startDirector(cmd *cobra.Command, configPath, driv
 			agmsgHome = abs
 		}
 	}
+	out := cmd.OutOrStdout()
 	res, err := o.StartDirector(org.DirectorStartParams{
 		Store: rt.store, Driver: driverName, Model: resolvedModel, Cwd: cwd, ConfigPath: configPath, TimeoutMS: timeoutMS,
-		AgmsgHome: agmsgHome, Who: orgDirectorCaller(),
+		AgmsgHome: agmsgHome, Who: orgDirectorCaller(), Notice: out,
 	})
 	if err != nil {
 		return rt.startError(err)
 	}
 	reg := res.Registration
-	out := cmd.OutOrStdout()
 	if reg.CmdLaunch() {
 		_, _ = fmt.Fprintf(out, "started %s (driver=%s, model=%s, permission=%s, launch=%s, name=%s, pid=%d)\n", inboxField(reg.ID), inboxField(reg.Driver),
 			inboxField(reg.Model), inboxField(reg.PermissionMode), org.DirectorLaunchCmd, res.TerminalName, reg.PID)
@@ -410,6 +432,13 @@ func (rt *orgDirectorRuntime) checkStartAgmsgHome(cmd *cobra.Command, configPath
 // cleanup that did not finish (a *org.DirectorCleanupError of a launch cmd,
 // whose text names no herdr pane or command) also says to close the
 // terminal once the stop it names is recorded.
+//
+// start's cleanup of a current headless registration its check found ended
+// (plan 2026-10-18-org-director-liveness, D6) fails as such a
+// *org.DirectorCleanupError too, its stop command with this invocation's
+// --state-dir. When it found that the registration changed after the check
+// read it (org.ErrDirectorChangedSinceCheck), it also names the status
+// command that reads the registration as it is now.
 func (rt *orgDirectorRuntime) startError(err error) error {
 	var attached *org.DirectorAttachedError
 	if errors.As(err, &attached) {
@@ -426,6 +455,9 @@ func (rt *orgDirectorRuntime) startError(err error) error {
 		err = fmt.Errorf("%w; the terminal that [org.director].launch_cmd may have opened (name %s) is left open: close it once the stop is recorded",
 			err, cleanup.TerminalName)
 	}
+	if errors.Is(err, org.ErrDirectorChangedSinceCheck) {
+		err = fmt.Errorf("%w; read the registration as it is now with %s", err, rt.command("ralph org director status"))
+	}
 	return rt.notRestoredError(err)
 }
 
@@ -437,19 +469,25 @@ func (rt *orgDirectorRuntime) startError(err error) error {
 // promoted session. start has no --replace (plan
 // 2026-10-15-org-director-start, Non-goals). e.Current was read again after
 // the refusal; when it is nil (none is current by then, or the read failed),
-// status reads it.
+// status reads it. When start checked a headless one on the spot and found it
+// alive or could not tell (e.Check; plan 2026-10-18-org-director-liveness,
+// D6), the refusal ends with what that check found.
 func (rt *orgDirectorRuntime) startAttachedError(e *org.DirectorAttachedError) error {
 	cur := e.Current
+	checked := ""
+	if e.Check != nil && cur != nil {
+		checked = "; start checked " + inboxField(cur.ID) + " just now: " + orgDirectorCheckText(*e.Check)
+	}
 	switch {
 	case cur == nil:
 		return fmt.Errorf("%w: read the current registration with %s, and run start again once none is attached (start has no --replace)",
 			e, rt.command("ralph org director status"))
 	case cur.CmdLaunch():
-		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, then run start again (start has no --replace)",
-			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)))
+		return fmt.Errorf("%w: stop it with %s from a terminal other than the director's, then run start again (start has no --replace)%s",
+			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)), checked)
 	case cur.Headless():
-		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, then run start again (start has no --replace)",
-			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)))
+		return fmt.Errorf("%w: stop it with %s from a terminal outside herdr, then run start again (start has no --replace)%s",
+			e, rt.command("ralph org director stop --id "+inboxField(cur.ID)), checked)
 	}
 	return fmt.Errorf("%w: end it with %s from the session that attached it (or with --force in place of --id, when that session is gone), "+
 		"then run start again (start has no --replace)", e, rt.command("ralph org director detach --id "+inboxField(cur.ID)))
