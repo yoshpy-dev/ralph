@@ -121,8 +121,8 @@ const directorCheckAttempts = 2
 // ID, State (DirectorCheck*), How (DirectorCheckHow*), CheckedAt (the time the
 // caller gave, UTC RFC3339), and, for unknown, Detail, a short reason
 // escaped for a terminal (PrintableInboxText); Detail is empty for alive and
-// ended. Its JSON is the shape the plan gives director-alive.json (D4) and
-// the director.check of status's --json (D8).
+// ended. Its JSON is the shape the plan gives director-alive.json (D4); the
+// director.check of status's --json (D8) carries the same fields but the ID.
 type DirectorCheck struct {
 	ID        string `json:"id"`
 	State     string `json:"state"`
@@ -447,8 +447,8 @@ func directorAliveOf(res DirectorCheckResult) DirectorAlive {
 	return DirectorAlive{ID: c.ID, AttachedAt: res.Registration.AttachedAt, State: c.State, How: c.How, CheckedAt: c.CheckedAt, Detail: c.Detail}
 }
 
-// Check is the mark's DirectorCheck, without the attached_at: the shape of
-// the director.check of status's --json (D8).
+// Check is the mark's DirectorCheck, without the attached_at. The
+// director.check of status's --json (D8) is its fields but the ID.
 func (m DirectorAlive) Check() DirectorCheck {
 	return DirectorCheck{ID: m.ID, State: m.State, How: m.How, CheckedAt: m.CheckedAt, Detail: m.Detail}
 }

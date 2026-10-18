@@ -502,15 +502,17 @@ func newDirectorCmdStopError(reg DirectorRegistration, cleanupErr error, force b
 }
 
 // directorRecordStopError is err, the store's failure to record the stop of
-// registration id (MarkStopped, MarkStoppedIfUnchanged, or MarkForceStopped),
-// as the CleanupErr of a *DirectorCleanupError: "record <id> stopped: " and
+// registration id (MarkStopped, MarkStoppedIfUnchanged, MarkStoppedAtVersion,
+// or MarkForceStopped), as the CleanupErr of a *DirectorCleanupError:
+// "record <id> stopped: " and
 // err's text with the "org: director: " and then the "stop <id>: " that the
 // store puts in front of its errors cut off. The text of that cleanup error
 // already starts with "org: director: stop <id>: " (a stop's) or with the
 // cause's "org: director: start <id>: " (start's cleanup, abort), so the
 // prefix appears once. It unwraps to err, so errors.Is and errors.As still
 // find every error err wraps: ErrDirectorChangedDuringStop,
-// ErrDirectorWriteNotRestored, and a failed write's syscall error.
+// ErrDirectorChangedSinceCheck, ErrDirectorWriteNotRestored, and a failed
+// write's syscall error.
 type directorRecordStopError struct {
 	id  string
 	err error
