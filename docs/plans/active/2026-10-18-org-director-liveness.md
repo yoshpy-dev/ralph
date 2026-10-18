@@ -164,6 +164,7 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
   - S1 d48c0d23(starter の field と check-in の断り)
   - S2 は 2 つのコミットに分けた。S2a 8f608232(`CheckDirector` と版の結びつけ、driver の `agent_not_found`)、S2b 0756a73a(見張りの確かめ、`director-alive.json`、ended の登録を起こさない)
   - S2b の印は id に加えて `attached_at` も照合する(director.jsonl を消すと id が振り直されるため)。確かめは起こす手順と同じく `[org.director].enabled` を見ない
+  - S3 3ece3deb(start の片付け、attach の断りの文)。記録は新しい `MarkStoppedAtVersion` と `ErrDirectorChangedSinceCheck` で版 A と比べる。start の通知は `DirectorStartParams.Notice` に 1 行。attach が start のプロセスを確かめるため `CheckDirectorStarter` を公開した。launch_cmd の片付けは director が終わっているので `RALPH_DIRECTOR_TOKEN` の拒否をかけない。確かめと片付けのあいだで登録を読み直す変異は seam がなく捕まらなかったので、S4 の前のコミットで seam とテストを足す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
