@@ -124,3 +124,18 @@ mutant は 83 個。表と方法は `docs/evidence/test-2026-10-18-org-director-
 - Blocked: なし
 - Verified: AC1〜AC8 をテストの名前に当て、mutant 83 個のうち 77 個が赤。生き残り 6 個は同値 2 個と LOW〜MEDIUM の穴 4 個で、穴はどれも probe で閉じることを確かめた。AC10 の隔離: canary は 0 回(感度は確認済み)、台帳は作られず、worktree にはこの報告と insight event と evidence と計画の 1 行だけが増えた
 - Unverified: 本物の herdr、Orca、tmux での起こし方(テストの範囲外)、CI の負荷の下での時間切れの行の揺れの頻度
+
+## このあとのテストの穴の直し(オーケストレーターの記録)
+
+この節はこの /test の判定を変えない。上の Test gaps の 1〜5 を、テストを足して閉じた記録で、この /test のあとに書いた。
+
+- e50bed12(implementer、テストだけ。`internal/org/watch_all_test.go`、`internal/org/director_wake_test.go`、`internal/cli/org_director_wake_test.go`、136 行の追加と 1 行の削除)
+  - 穴 1(G7、O4): `TestRunWatchAll_HoldsAFailedWakeBackAcrossCycles`(1 分おきの 3 サイクルで失敗する wake_cmd は 1 回、失敗の行も 1 回)と `TestRunWatchAll_SaysTheNoSenderLineOnceAcrossCycles`
+  - 穴 2(H6): `TestWakeDirector_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr`(pane `-x` と ESC を含む値。2 回呼んで 1 行、herdr は 0 回)
+  - 穴 3(M11): `TestWakeDirector_ABareProgramNameIsLookedUpInPath`。wake_cmd のディレクトリにも同じ名前のおとりを置き、それが動かないことも確かめる
+  - 穴 4(揺れ): `no return in time` の行の `DriverCallTimeout` を 1 秒から 3 秒にした。assert は変えていない。`-count=20` で 20 回とも PASS(load average 4〜5。15〜240 の負荷では確かめていない)
+  - 穴 5(verify の I3): `TestStatusJSON_CarriesTheWakeAndTheWakeTarget`
+  - mutant: e50bed12 の `git archive` の写しで、G7、O4、H6、M11 を mutation の evidence と同じ置き換えで入れ、`go test -overlay` で流した。どの mutant でも狙ったテストだけが FAIL し、ほかは PASS だった(implementer の報告。この記録を書いた者は流し直していない)
+- d2a740d3(オーケストレーター): implementer が報告した LOW の直し。`ValidateDirectorWakeTarget` の `-` で始まる値の理由の文が、wake_cmd のない herdr の既定の道でも「the command [org.director].wake_cmd runs」と書いていたので、「the program it is passed to」にした。その文を固定する org と cli のテスト 5 行を合わせて直し、穴 2 のテストは行の全文を固定する形にした
+- d2a740d3 で `./scripts/run-verify.sh` は rc 0(cli 219.9 s、org 301.3 s を含む Go の全パッケージが ok、secret scan はきれい。`docs/evidence/verify-2026-10-18-113125.log`、gitignore の対象)
+- 残り: Test gaps の 6〜9 は上のとおり。O3 と G5 は同値のまま

@@ -110,8 +110,8 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
 
 ## Acceptance criteria
 
-- [ ] AC1 設定: `[org.director].wake` は既定で `["pull"]` で、`["push"]`、`["pull", "push"]`、`["push", "pull"]` を読める。空の配列、`pull` と `push` 以外の値、重複は読み込みで断る。`wake_cmd` は既定で空で、最初の要素が空白だけのもの、最初の要素が placeholder を含むもの、`{target}` と `{text}` 以外の `{...}` を含むものは読み込みで断る。断るエラーはキーの名前と理由を言う。`wake = ["push"]` で `wake_cmd` が空でも、読み込みは通る。既定値は Go、`scripts/ralph-config.sh` の 2 面、`templates/base/ralph.toml` で同じ(`defaults_sync_test.go`)
-- [ ] AC2 attach: `--wake` と `--wake-target` の値を `attached` の `wake` と `wake_target` に書き、`--wake` を省くと設定の `wake` を書く。次のときは断り(終了コード 1)、何も書かない
+- [x] AC1 設定: `[org.director].wake` は既定で `["pull"]` で、`["push"]`、`["pull", "push"]`、`["push", "pull"]` を読める。空の配列、`pull` と `push` 以外の値、重複は読み込みで断る。`wake_cmd` は既定で空で、最初の要素が空白だけのもの、最初の要素が placeholder を含むもの、`{target}` と `{text}` 以外の `{...}` を含むものは読み込みで断る。断るエラーはキーの名前と理由を言う。`wake = ["push"]` で `wake_cmd` が空でも、読み込みは通る。既定値は Go、`scripts/ralph-config.sh` の 2 面、`templates/base/ralph.toml` で同じ(`defaults_sync_test.go`)
+- [x] AC2 attach: `--wake` と `--wake-target` の値を `attached` の `wake` と `wake_target` に書き、`--wake` を省くと設定の `wake` を書く。次のときは断り(終了コード 1)、何も書かない
   - wake に push を含み、wake_cmd が空
   - wake に push を含み、wake_cmd が `{target}` を含むのに `--wake-target` がない
   - wake に push を含まないのに `--wake-target` がある
@@ -119,18 +119,18 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
   - `--wake` に `pull` と `push` 以外の値や重複がある
 
   `ralph org director status`、`ralph status` の `director:` の行、`--json` は、登録の wake と送り先を出す(制御文字は今の表示と同じく escape する)
-- [ ] AC3 start: 設定の `wake` を `attached` に書く。wake に push を含み、launch_cmd の起動で wake_cmd が空なら、断って何も書かず、launch_cmd も herdr も打たない。herdr の起動は wake_cmd が空でも通す
-- [ ] AC4 設定の読み方と打つ場所: `--config` がなく台帳が main worktree のとき、feature org の worktree の `ralph.toml` の `wake` と `wake_cmd` を変えても、attach、start、`watch --all` が使う値は main worktree の `ralph.toml` のものになる。main と feature worktree に同じ相対パスの別のスクリプトを置き、main の wake_cmd がそれを `./` で指すとき、feature worktree から前景で立てた見張りは main 側のスクリプトだけを、main worktree のルートを作業ディレクトリにして打つ。`--config` なら、そのファイルのディレクトリで打つ
-- [ ] AC5 起こす手順(wake_cmd): 偽の wake_cmd を書き、`wake = ["pull", "push"]` で attach した台帳で escalate すると、`ralph org wait --inbox` がその件で返り、見張りの次のサイクルで wake_cmd が 1 回打たれる(仕様 120 行の受け入れ条件。「escalate が記録されると」を「見張りの次のサイクルで」と読む)
+- [x] AC3 start: 設定の `wake` を `attached` に書く。wake に push を含み、launch_cmd の起動で wake_cmd が空なら、断って何も書かず、launch_cmd も herdr も打たない。herdr の起動は wake_cmd が空でも通す
+- [x] AC4 設定の読み方と打つ場所: `--config` がなく台帳が main worktree のとき、feature org の worktree の `ralph.toml` の `wake` と `wake_cmd` を変えても、attach、start、`watch --all` が使う値は main worktree の `ralph.toml` のものになる。main と feature worktree に同じ相対パスの別のスクリプトを置き、main の wake_cmd がそれを `./` で指すとき、feature worktree から前景で立てた見張りは main 側のスクリプトだけを、main worktree のルートを作業ディレクトリにして打つ。`--config` なら、そのファイルのディレクトリで打つ
+- [x] AC5 起こす手順(wake_cmd): 偽の wake_cmd を書き、`wake = ["pull", "push"]` で attach した台帳で escalate すると、`ralph org wait --inbox` がその件で返り、見張りの次のサイクルで wake_cmd が 1 回打たれる(仕様 120 行の受け入れ条件。「escalate が記録されると」を「見張りの次のサイクルで」と読む)
   - 打たれる argv は置き換えたもので、シェルを通さない。`{text}` は件の ID を含み、本文を含まない
   - 件には `director_id` と `via` 付きの `woken` が書かれ、次のサイクルでは打たれない
   - 同じサイクルに 2 件あれば、1 回の打ちに 2 つの ID が載る。21 件以上なら 20 件の ID と残りの数が載る
   - acked、resolved、`woken` 済みの件では打たない。登録がない、wake に push がない、headless で `starting` か `stopped` のときも打たない
-- [ ] AC6 起こす手順(herdr の既定): wake_cmd が空で、herdr の headless の director が `running` のとき、見張りは label の照合、`pane send-text`、Enter の順に偽の herdr を打つ。照合が合わなければ send-text を打たない。wake_cmd があれば、`{target}` を pane id にして wake_cmd を打ち、herdr の send-text は打たない
-- [ ] AC7 失敗と期限: wake_cmd の終了コードが 0 でない、時間切れ、herdr の失敗のどれでも、`woken` を書かずに stderr に 1 行を出し、5 分のうちは同じ登録に打たない。送り先が D4 の形に合わない登録(手で書き換えた行)と、送る手段のない登録(promoted session か launch_cmd の director で wake_cmd が空)には打たず、stderr に登録ごとに 1 回だけ書く。送れなかった件も、送れた件も、ack しなければ ack の期限で人に届く(期限の送りは起こす手順より先に走り、`woken` を読まない)
-- [ ] AC8 受信箱: `woken` は状態を変えない。`ralph org inbox show` の events に出て、`--json` の item に `woken` と `woken_at` が載る。`woken` のない今までの行の読み方は変わらない。知らない件への `woken` は無視して数える
-- [ ] AC9 文書: `/director` skill の 4 面が同じ中身で、push で起こされたときの扱いを書き、「まだないもの」から push を外す。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。雛形、help、README、仕様 FR-10 の注(D4 と AC5 の 2 つの読み替え)、`templates/base/ralph.toml` のコメント、recipe の 2 面、tech-debt、AGENTS.md が push の動きを説明し、「push はまだない」と書いた箇所が残っていない
-- [ ] AC10 テストは本物の herdr、osascript、端末のアプリ、Orca、人の tmux を打たず、repo の台帳に書かない。実機の確認は、分離した herdr server と隔離した台帳で codex の director を起こし、evidence に残す(`$HOME` は `~` に、送り先と token の値は伏せる)
+- [x] AC6 起こす手順(herdr の既定): wake_cmd が空で、herdr の headless の director が `running` のとき、見張りは label の照合、`pane send-text`、Enter の順に偽の herdr を打つ。照合が合わなければ send-text を打たない。wake_cmd があれば、`{target}` を pane id にして wake_cmd を打ち、herdr の send-text は打たない
+- [x] AC7 失敗と期限: wake_cmd の終了コードが 0 でない、時間切れ、herdr の失敗のどれでも、`woken` を書かずに stderr に 1 行を出し、5 分のうちは同じ登録に打たない。送り先が D4 の形に合わない登録(手で書き換えた行)と、送る手段のない登録(promoted session か launch_cmd の director で wake_cmd が空)には打たず、stderr に登録ごとに 1 回だけ書く。送れなかった件も、送れた件も、ack しなければ ack の期限で人に届く(期限の送りは起こす手順より先に走り、`woken` を読まない)
+- [x] AC8 受信箱: `woken` は状態を変えない。`ralph org inbox show` の events に出て、`--json` の item に `woken` と `woken_at` が載る。`woken` のない今までの行の読み方は変わらない。知らない件への `woken` は無視して数える
+- [x] AC9 文書: `/director` skill の 4 面が同じ中身で、push で起こされたときの扱いを書き、「まだないもの」から push を外す。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。雛形、help、README、仕様 FR-10 の注(D4 と AC5 の 2 つの読み替え)、`templates/base/ralph.toml` のコメント、recipe の 2 面、tech-debt、AGENTS.md が push の動きを説明し、「push はまだない」と書いた箇所が残っていない
+- [x] AC10 テストは本物の herdr、osascript、端末のアプリ、Orca、人の tmux を打たず、repo の台帳に書かない。実機の確認は、分離した herdr server と隔離した台帳で codex の director を起こし、evidence に残す(`$HOME` は `~` に、送り先と token の値は伏せる)
 
 ## Implementation outline
 
@@ -212,6 +212,8 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
   - S4 文書(AC9): 78f8acb3。skill の 4 面(「受信箱の処理」を wait、見張りの 1 行、件の処理に分け、「まだないもの」の節を消した)、org skill の 4 面、prompt、README、AGENTS.md、仕様 FR-10 の注、recipe の 2 面(`docs/recipes/director-wake.md`)、launch-cmd の recipe の 2 面、tech-debt の 4 行、`--config` の help。recipe の索引はなく、check-sync.sh は root と template を名前を挙げずに比べるので、どちらも直していない。続けて 7b8b5449 で、範囲外として報告された 2 か所(escalate の help が pull しか書いていない、config と雛形のコメントの「once per item」)を直した
   - S6 self-review の 8 件(M1、L1〜L7)の直し: 705e56bf。M1 は文書だけで直した(`{target}` は登録から来て `;`、`$`、バッククォートを含みうるので、シェルが読む文字列に入れない、を recipe、`WakeCmd` の doc、雛形に書き、`{target_sh}` の案を tech-debt の 1 行にした)。L5 で attach の検査と登録の wake の部品を `director_wake.go`、CLI の wake の部品を新しい `internal/cli/org_director_wake.go` に移し、`WakeDirector` を `directorToWake` と `sendDirectorWake` に分けた。挙動とテストは変えていない。再レビュー(3a95cfc8)の LOW 4 件(R1〜R4、コメントと doc)は a0170256 で直した
   - verify(abf295f9、判定 pass)の 3 件の直し: V1(MEDIUM)は tech-debt の director の登録の行。push で登録が起こす先を決めるようになったので、書き換えで 1 行の送り先を変えたり起こすのを止めたりできることと、その歯止め(1 行は件の ID だけ、ack の期限)を書き、きっかけを 8b-2 か `Attach`・`Detach` の次の変更に移した。V2(LOW)は recipe の 2 面に、herdr の中で昇格したセッションの wake_cmd の例(send-text、1 秒、Enter のスクリプト)を足した(実機では打っていない)。V3(LOW)は、Run 1・2 が S4 の前の skill と prompt だったことを evidence と recipe に書き、abf295f9 の binary と skill で Run 3(`["push"]`)を回した。待っていない codex は wait を始めずに手番を終え、escalate の 1 秒後に起こされて新しい手番で ack し、人に聞いた
+  - verify の再確認(V1〜V3 は閉じた)で出た N1(LOW)、I6、I8 の直し: ea55f731。recipe の 2 面の herdr の昇格したセッションの例に実行権限と 10 秒の注、tech-debt の行の「wake_cmd があれば」を「`{target}` を含む wake_cmd があれば」に、`/director` skill の 4 面の例の列挙に herdr の pane を足した
+  - test(6a99b1a8、判定 pass)のテストの穴の直し: e50bed12 で、見張りのサイクルをまたぐ起こす手順のメモリ(mutant G7、O4)、herdr の既定の道の使えない pane id(H6)、名前だけの wake_cmd を PATH で引くこと(M11)、`ralph status --json` の wake と wake_target(verify の I3)のテストを足し、揺れた時間切れの行の timeout を 1 秒から 3 秒にした。4 つの mutant は新しいテストで赤になる(implementer が scratch の写しで確認)。implementer が見つけた LOW(`-` で始まる送り先の理由の文が、herdr の既定の道でも wake_cmd と書く)は d2a740d3 で「the program it is passed to」に直した。d2a740d3 で run-verify は rc 0
 - [x] Review artifact created(`docs/reports/self-review-2026-10-18-org-director-wake.md`、cycle 1 と S6 の再レビュー)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-18-org-director-wake.md`)
 - [x] Test artifact created(`docs/reports/test-2026-10-18-org-director-wake.md`)
