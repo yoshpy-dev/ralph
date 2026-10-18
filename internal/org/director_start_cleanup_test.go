@@ -629,6 +629,73 @@ func TestStartDirector_ARegistrationThatChangesBeforeTheRecordIsNotRecordedStopp
 	})
 }
 
+// cleanupOtherToken is the launch token of the headless d2 that
+// replaces d1 between start's check and its cleanup.
+const cleanupOtherToken = "cd0000000000"
+
+// AC6, the window between the check and the cleanup (directorStartAfterCheck):
+// the check finds d1 running in herdr and ended (agent_ended), and before the
+// cleanup starts a human force-detaches d1 and another start records a
+// headless d2 running in ws-7 and pane-7, labelled as its own in herdr. The
+// cleanup acts on d1 as the check read it (version A): C-c and the closes go
+// to d1's pane-1 and ws-1 only, never to d2's, and its record compares
+// version A, so it records nothing and refuses start with
+// ErrDirectorChangedSinceCheck naming both versions of d1. d2 stays current
+// and director.jsonl is as the seam left it.
+func TestStartDirector_TheCleanupActsOnTheRegistrationTheCheckRead(t *testing.T) {
+	events := checkHerdrRunning()
+	f := newCleanupFixture(t, events...)
+	f.ch.agentGetErr = checkAgentNotFound()
+	f.d1HerdrHasItsOwn()
+	f.herdrHas("pane-7", DirectorTabLabel(cleanupOtherToken), "ws-7", DirectorWorkspaceLabel(cleanupOtherToken))
+	var seamLeft string
+	var seamCalls int
+	f.o.directorStartAfterCheck = func() {
+		seamCalls++
+		if _, err := f.store.Detach(DirectorDetach{Force: true, User: "u", Cwd: "/w"}); err != nil {
+			t.Fatalf("Detach --force: %v", err)
+		}
+		f.store.token = func() (string, error) { return cleanupOtherToken, nil }
+		d2, err := f.store.AttachHeadless(DirectorHeadlessAttach{Driver: DirectorDriverClaude, Model: "opus", PermissionMode: PermissionModeGuarded,
+			Wake: []string{DirectorWakePull}, User: "u", Cwd: "/w"})
+		if err != nil || d2.ID != "d2" {
+			t.Fatalf("AttachHeadless = %+v, %v; want d2", d2, err)
+		}
+		if err := f.store.RecordWorkspace("d2", "ws-7", testDirectorWho); err != nil {
+			t.Fatalf("RecordWorkspace: %v", err)
+		}
+		if err := f.store.RecordPane("d2", "pane-7", testDirectorWho); err != nil {
+			t.Fatalf("RecordPane: %v", err)
+		}
+		if still, err := f.store.MarkLaunched("d2", testDirectorWho); err != nil || !still {
+			t.Fatalf("MarkLaunched = %v, %v", still, err)
+		}
+		seamLeft = directorFileState(t, f.store)
+	}
+	_, err := f.start()
+	if seamCalls != 1 {
+		t.Fatalf("directorStartAfterCheck ran %d times, want once, between the check and the cleanup", seamCalls)
+	}
+	ce := wantCleanupRefused(t, f, err, DirectorLaunchHerdr, ErrDirectorChangedSinceCheck, "ralph org director stop --id d1",
+		append(d1Trail(events), "detached d1+force", "attached d2", "workspace_created d2", "pane_created d2", "launched d2"))
+	if want := "d1 had 4 events, with d1 current when the check read it, and has 5 events, with d2 current now"; !strings.Contains(ce.CleanupErr.Error(), want) {
+		t.Fatalf("CleanupErr = %q, want it to name d1's version A and d1 as it is now: %q", ce.CleanupErr, want)
+	}
+	if ce.WorkspaceID != "ws-1" || ce.PaneID != "pane-1" || len(ce.HerdrCommands) != 0 {
+		t.Fatalf("cleanup error = %+v, want d1's ws-1 and pane-1, all closed", ce)
+	}
+	f.wantClosedOnly(t, []string{"pane-1"}, []string{"pane-1"}, []string{"ws-1"})
+	if want := append([]string{"agent_get", "pane_get", "tab_get", "workspace_get"}, directorCloseCalls...); !slices.Equal(f.h.calls, want) {
+		t.Fatalf("herdr calls = %q, want the check's and the cleanup's of d1 only: %q", f.h.calls, want)
+	}
+	if after := directorFileState(t, f.store); after != seamLeft {
+		t.Fatalf("the cleanup changed director.jsonl from\n%s\nto\n%s", seamLeft, after)
+	}
+	if cur := mustReadDirector(t, f.store).Current; cur == nil || cur.ID != "d2" || cur.State != DirectorStateRunning || cur.PaneID != "pane-7" {
+		t.Fatalf("current registration = %+v, want d2 running in pane-7", cur)
+	}
+}
+
 // mustDirectorVersion is the directorVersion of id in s's director.jsonl as
 // it is now.
 func mustDirectorVersion(t *testing.T, s *DirectorStore, id string) directorVersion {

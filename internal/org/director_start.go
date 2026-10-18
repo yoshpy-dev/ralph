@@ -1057,7 +1057,8 @@ func (o *Org) checkDirectorStartWake(cmdLaunch bool) error {
 //     refused as before, naming cur;
 //   - alive or unknown is refused as before, with the registration the check
 //     read and what it found (Check);
-//   - ended is cleaned up on the registration as the check read it, version A
+//   - ended runs o.directorStartAfterCheck (a test-only seam) and is cleaned
+//     up on the registration as the check read it, version A
 //     (cleanUpEndedDirector), and once that is recorded its line goes to
 //     p.Notice and start goes on (nil). A cleanup that did not get as far as
 //     the record is its *DirectorCleanupError, with nothing written.
@@ -1077,6 +1078,9 @@ func (o *Org) checkCurrentDirector(p *DirectorStartParams, cur *DirectorRegistra
 	case chk.Check.State != DirectorCheckEnded:
 		reg, check := chk.Registration, chk.Check
 		return &DirectorAttachedError{Current: &reg, Err: directorStartAttachedErr(&reg), Check: &check}
+	}
+	if o.directorStartAfterCheck != nil {
+		o.directorStartAfterCheck()
 	}
 	notice, err := o.cleanUpEndedDirector(p.Store, chk, p.Who)
 	if err != nil {
