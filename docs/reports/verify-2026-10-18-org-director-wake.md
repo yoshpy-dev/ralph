@@ -98,3 +98,43 @@ HEAD の binary(`GOTOOLCHAIN=go1.25.8` で build)で、herdr のない PATH と 
 - Verified: AC1〜AC5 と AC8 のコードとテストの突き合わせ、HEAD の binary の probe(attach の断り、wake_cmd の 1 回の実行と argv と打つ場所、`woken` の記録、`inbox show`、feature worktree の設定と script を使わないこと、launch_cmd の start の断り)。静的解析(run-static-verify、go1.25.8 と go1.26.0 の vet、go1.25.8 の build、check-skill-sync、check-sync)。写しの面の同一。仕様 FR-10 の注の読み替えとテスト名。「push はまだない」の残りがないこと
 - Partially verified: AC6 と AC7(テストのコードと実装を読んだ範囲。herdr の経路は HEAD では実機なし)、AC9(V1、V2)、AC10(テストの隔離はコードを読んだ範囲。実機の前提の開示は V3)
 - Not verified: テストの実行、HEAD の binary での実機の herdr、S4 の skill を読んだ director の振る舞い、Orca と tmux、Claude Code の director
+
+## Re-check of V1 to V3 (4331358c)
+
+- 対象: 4331358c(文書だけの 5 ファイル: tech-debt、recipe の 2 面、実機の evidence、計画)。HEAD は 4331358c。テストは走らせていない(/test が並行して走っている)
+- 結果: V1〜V3 は 3 件とも閉じた。上の `## Verdict` は変えない(直しは文書だけで、判定を変える事実は出なかった)。新しい指摘は LOW 1 件(N1)と情報 3 件
+
+| ID | 結果 | 根拠 |
+| --- | --- | --- |
+| V1 | 閉じた | `docs/tech-debt/README.md:249` の Impact は、escalate が登録を読まないこと、8b-1 から登録の `wake` と `wake_target` が起こす先を決めること、書き換えで送り先を変える(`attach --replace --wake push --wake-target`)か起こすのを止める(`--wake pull`)ことができること、歯止め(1 行は固定の文と ID だけ、ack の期限)を書く。Why deferred に 8b-1 で行を残した判断があり、Trigger は `Attach`・`Detach` の次の変更に移った。コードとの突き合わせ: attach は `--replace` の有無にかかわらず `attachWake` を `store.Attach` の前に呼び(`internal/cli/org_director.go:150`、`:155`)、`CheckDirectorAttachWake` は push で wake_cmd が空なら断る(`internal/org/director_wake.go:130`)。`directorToWake` は push のない登録を起こさない(`director_wake.go:378`)。`internal/org/escalate.go` と `deadline.go` に `NewDirectorStore`、`DirectorStore`、`director.jsonl` は 0 件(grep rc 1)。`InboxDeadlineDue` は `Woken` を読まない(`deadline.go:57-60`)。`DirectorWakeText` は固定の文と ID だけ(`director_wake.go:209-212`)。`Attach`(`director.go:450`)と `Detach`(`:518`)は今も pane を調べない(`Getenv`、`approveTripwire` は 0 件、`HERDR_PANE_ID` はコメントの 1 件だけ)。下の probe の P2〜P4 で、空の wake_cmd では `--replace --wake push --wake-target` が rc 1 で何も書かず、wake_cmd があれば送り先が替わり、`--wake pull` も通ることを見た |
+| V2 | 閉じた | `docs/recipes/director-wake.md:152-180`(template も同じ行)に herdr の promoted session の例があり、実機で打っていないと書く(`:178-179`)。script の argv は `internal/org/driver/herdr.go:285-294` の順(`pane send-text <pane> <text>`、`pane send-keys <pane> <keys>`)と同じ。attach は `HERDR_PANE_ID` を、設定されているかどうかだけ記録する(`internal/cli/org_director.go:488`)。そのため pane の中でも断らない。probe の P1 で、recipe から sed で抜いた `ralph.toml` と script を使い、偽の `HERDR_PANE_ID=w1:p2` の下で recipe の attach が rc 0 で通り、status に `wake=push to w1:p2` と `herdr_pane: yes` が出た。script の `sh -n` は rc 0 |
+| V3 | 閉じた | evidence の冒頭(`docs/evidence/director-wake-livefire-2026-10-18.md:3-19`)が、Run 1・2 は 88e433b2 の skill と prompt、Run 3 は abf295f9 の binary と skill と prompt だと書く。Run 3 の本文は `:285-350`、「What this run does not cover」は `:394-402`。recipe は `:266-290` と `:346-356` で同じことを書く。`git show 88e433b2:.agents/skills/director/SKILL.md` の 332 行はどの director にも `wait --inbox` で待てと書き、611〜614 行の「まだないもの」に push がある。`git show 88e433b2:internal/org/prompts/director.md` に `New org inbox` と `wake` は 0 件で、abf295f9 の prompt は 42〜46 行に 1 行の説明を持つ。recipe は 78f8acb3 で作られ、88e433b2 はその祖先(`git merge-base --is-ancestor` rc 0)なので、「older than this recipe」は正しい。`git diff --name-only a0170256 abf295f9` と `abf295f9 4331358c` はどちらも文書だけなので、Run 3 の binary と skill は HEAD のコードと skill と同じ。時刻も合う(abf295f9 は 09:13:15Z、Run 3 は 09:15:28Z〜09:17:40Z、4331358c は 09:39:39Z)。Run 3 そのものは記録された evidence で、ここでは打ち直していない(本物の herdr を使わない制約) |
+
+新しい指摘:
+
+| ID | Severity | Area | Finding | Evidence | 直し方 |
+| --- | --- | --- | --- | --- | --- |
+| N1 | LOW | 文書(recipe) | herdr の promoted session の例の script には、すぐ下の tmux の script の例にある「Make it executable (`chmod +x ...`)」と 10 秒の制限の文がない。wake_cmd はシェルを通さずに argv で打つ(`runDirectorWakeCmd`、`internal/org/director_wake.go:518-539`)。このため実行権のない script では起こすたびに失敗し、見張りは 1 行を出して 5 分あける。件は ack の期限で人に届くので、失われるものはない | `docs/recipes/director-wake.md:163-180`(template も同じ)、比べる文は `:234-236` | 2 面に `chmod +x scripts/wake-herdr.sh` の 1 文を足す(10 秒の文も同じ形で足せる) |
+
+情報(数えない):
+
+- I6: 249 行の「when `[org.director].wake_cmd` is set」は、送り先を替えられる条件としては広い。wake_cmd が `{target}` を含まないとき、attach は `--wake-target` を受けて記録する(`CheckDirectorAttachWake` の `target != ""` の分岐、`director_wake.go:139-142`)。しかし見張りはその値を使わない(`directorWakeSender`、`:473-479`)。危険を大きめに書く向きのずれなので、文書の誤りとしては数えない。正確にするなら「wake_cmd が `{target}` を含むとき」になる
+- I7: 計画の Progress(`docs/plans/active/2026-10-18-org-director-wake.md:214`)は、きっかけを「8b-2 か `Attach`・`Detach` の次の変更」と書く。249 行は「`Attach` か `Detach` の次の変更」をきっかけにして、8b-2 はその予定として括弧に入れる。8b-2 が `Attach` と `Detach` に触れなければ、249 行の文面では 8b-2 で発火しない
+- I8: `/director` skill の昇格の節(4 面、`.claude/skills/director/SKILL.md:105-107`)は recipe の例を「(Orca、tmux)」と挙げ、herdr の promoted session の例を挙げない。skill は人が打ち込むセッションを pull のままにすると書き、recipe の新しい例も「When to stay on pull」を先に読むよう書くので、食い違いはない
+- I1 の続き: 4331358c で「Verification artifact created」に印が付いた。AC1〜AC10 の checkbox はまだ付いていない(計画の 113〜133 行)
+
+実行したコマンド:
+
+| Command | Result |
+| --- | --- |
+| `git show --stat 4331358c` | 5 ファイル。Go、skill、prompt の変更はない |
+| `cmp docs/recipes/director-wake.md templates/base/docs/recipes/director-wake.md` | rc 0 |
+| `./scripts/check-sync.sh` | rc 0、DRIFTED 0 |
+| `./scripts/check-skill-sync.sh` | rc 0、14 skill が lock-step |
+| `./scripts/run-static-verify.sh`(既定の changed scope) | rc 0。tech-debt の plan 参照 OK、template purity OK、gofmt ok、golangci-lint 0 issues、secret scan 9e92d928..4331358c clean。生の出力は `docs/evidence/verify-2026-10-18-094658.log`(gitignore) |
+| `git diff --check abf295f9 4331358c` | rc 0 |
+| 伏せ字の grep(evidence、recipe の 2 面、tech-debt) | `w[0-9]+:p[0-9]+` は 4 ファイルとも rc 1、`/Users/` も 4 ファイルとも rc 1。16 桁以上の 16 進は evidence の 364〜365 行だけで、人の herdr ファイルの sha256 の頭(abf295f9 の版にもある)。launch token の形(12 桁の 16 進、`newDirectorToken`)はほかにない。4331358c で足した行の 8 桁以上の 16 進はコミットの SHA だけ |
+| `GOTOOLCHAIN=go1.25.8 go build -o <scratch>/ralph ./cmd/ralph` | rc 0(HEAD 4331358c) |
+| probe P1〜P4(`env -i`、PATH は scratch の ralph と `/usr/bin:/bin` だけで `command -v herdr` は rc 1、`--config` と `--state-dir` は scratch、見張りは打たない) | P1 rc 0(上の V2)。P2 rc 1、`the wake has push, but [org.director].wake_cmd is empty`、`director.jsonl` は 1 行のまま。P3 rc 0、`attached d2 (driver=codex, wake=push, wake_target=other), replacing d1`。P4 rc 0、status は `wake: pull` |
+
+最も確信を上げる次の確認: 本文の Coverage gaps に挙げた「HEAD の binary で push の codex director を 1 回起こす」は、Run 3(HEAD と同じコードと skill)の記録で答えられた。次に効くのは、recipe の herdr の promoted session の例を分離した herdr server で 1 回打つことと、現在の skill で pull の codex director が自分で wait を始めるかを見ることの 2 つ。

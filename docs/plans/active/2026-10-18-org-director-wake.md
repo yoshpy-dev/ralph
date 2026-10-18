@@ -214,5 +214,5 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
   - verify(abf295f9、判定 pass)の 3 件の直し: V1(MEDIUM)は tech-debt の director の登録の行。push で登録が起こす先を決めるようになったので、書き換えで 1 行の送り先を変えたり起こすのを止めたりできることと、その歯止め(1 行は件の ID だけ、ack の期限)を書き、きっかけを 8b-2 か `Attach`・`Detach` の次の変更に移した。V2(LOW)は recipe の 2 面に、herdr の中で昇格したセッションの wake_cmd の例(send-text、1 秒、Enter のスクリプト)を足した(実機では打っていない)。V3(LOW)は、Run 1・2 が S4 の前の skill と prompt だったことを evidence と recipe に書き、abf295f9 の binary と skill で Run 3(`["push"]`)を回した。待っていない codex は wait を始めずに手番を終え、escalate の 1 秒後に起こされて新しい手番で ack し、人に聞いた
 - [x] Review artifact created(`docs/reports/self-review-2026-10-18-org-director-wake.md`、cycle 1 と S6 の再レビュー)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-18-org-director-wake.md`)
-- [ ] Test artifact created
+- [x] Test artifact created(`docs/reports/test-2026-10-18-org-director-wake.md`)
 - [ ] PR created
