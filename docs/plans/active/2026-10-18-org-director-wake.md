@@ -204,6 +204,9 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
 - [x] Implementation started
   - S1 設定(AC1): 2f08cfe7。launch_cmd と wake_cmd が placeholder の検査と置き換えのヘルパーを共有し、launch_cmd のエラー文は変わらない
   - S2 登録(AC2・AC3、AC4 の attach と start): 0d49b2a0。逸脱 1 件: store の `Attach` は空の `Wake` を断らずに `["pull"]` として記録する(範囲外のテストが `Wake` なしで `DirectorAttach` を組むため。CLI はいつも解決済みの値を渡すので動作は同じ。空でない不正な wake と不正な形の送り先は store でも断る)。`--wake` のエラーは `config.ValidateDirectorWakeNamed` でフラグ名を出す。main worktree の wake と wake_cmd は attach だけが読み、status は登録の値を出す
+  - S3 は 2 つのコミットに分けた。S3a は受信箱の `woken`(AC8)、S3b は見張りが起こす手順(AC4 の見張りの分、AC5〜AC7)
+  - S3a 受信箱(AC8): 0f9b457f。`appendLocked` を複数の event を 1 回で書く形にした。`inbox show` の help の event の一覧に woken を足した
+  - 順の入れ替え: S5(実機)を S4(文書)の前に回す。codex が作業中に届いた入力をどう扱うか(D11、Risks)の結果を skill と recipe に書くため
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
