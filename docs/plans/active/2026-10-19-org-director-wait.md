@@ -1,7 +1,7 @@
 # org-director-wait
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-19 sha256:eacfb0d8b537
 - Owner: Claude Code
 - Date: 2026-10-19
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の後半の 2 本目の後半(8b-2b)。昇格したセッションの登録が生死を出さないこと(tech-debt の 247 行)と、見張りの停止に director が気づかないこと(209 行の半分)。8b-2a は PR #237 で merge 済み(main は e38b89a9)。中身と分け方は consult(consult-plan-promoted、2026-10-19)の判定による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -156,8 +156,8 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed(Codex の計画助言 2 件を直した: HIGH は consult の 2 回目の判定で自動の起動し直しをやめ、MEDIUM は印の持ち主を flock と `wait_id` で確かめる形にした)
+- [x] Plan approved(ユーザーの自動承認の指示による、2026-10-19)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
