@@ -210,6 +210,7 @@ director が、人に聞かずに CI の通った PR を 1 本ずつ merge し�
   - 2026-10-18(self-review cycle 3 のあと): report 99f47e05(LOW 7 件、Merge: yes)。LOW は cycle を上げずにこの cycle の中で直す。Implementation outline に S11(C3-1〜C3-7 と merge-order の注)を足した。動きは変えないので図は直さない。digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
   - S11a f6e5208e(`mergeOutcomeFields` と `mergedElsewhere`、base の Failed に merge-order の注、`mrNext` などを `merge_fake_test.go` へ、`addInSleeps`、kind の注、`wait` の case を名指しにして `default:` はエラー、新しいテスト `TestMergeWait_EveryKindThatWaitsHasACase` は waits() に Unread を足す mutant で落ちる)。S11b dd1d4867(skill の 4 面・仕様・`seat.go` に base の条件、tech-debt の行数の注と merge-order の新しい行)。run-verify rc=0。merge.go の注の折り返しと冒頭の要約の但し書きは orchestrator が直した(コメントだけ)
   - 2026-10-18(cycle 3 の verify のあと): verify PASS(af36aaac、ずれなし、情報 8 件)。情報 I5 を受けて Affected areas に `merge_readback_test.go` を足し、digest を取り直して承認し直した(ユーザーの永続の指示による自動承認)
+  - 2026-10-18(cycle 3 の test のあと): test PASS(dd7d0d73、LOW 2 件)。T1・T2 は d099bab0 で直した(既定のブランチを trunk にした読み直しのテストと、merge-order が別の base への merge を merged と並べることを pin するテスト。tester の mutant B14 と O1 はそれぞれで落ちる。run-verify rc=0)。テストを足しただけなので cycle は 3 のまま sync-docs に進む
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
