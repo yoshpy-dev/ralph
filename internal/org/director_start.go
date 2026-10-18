@@ -35,17 +35,22 @@ import (
 // [org.director].launch_cmd; empty means herdr), driver, model, permission
 // mode (autonomous, edits, or guarded), and wake ([org.director].wake as
 // start read it; plan 2026-10-18-org-director-wake, D3) of the headless
-// director `ralph org director start` launches. User, Cwd, and HerdrPane
-// describe the caller.
+// director `ralph org director start` launches. StarterPID and
+// StarterStartTime are the starter: the pid of the start process and that
+// pid's start time as ReadDirectorProcess read it (plan
+// 2026-10-18-org-director-liveness, D1), both set, or both empty when start
+// could not read them. User, Cwd, and HerdrPane describe the caller.
 type DirectorHeadlessAttach struct {
-	Launch         string
-	Driver         string
-	Model          string
-	PermissionMode string
-	Wake           []string
-	User           string
-	Cwd            string
-	HerdrPane      bool
+	Launch           string
+	Driver           string
+	Model            string
+	PermissionMode   string
+	Wake             []string
+	StarterPID       int
+	StarterStartTime string
+	User             string
+	Cwd              string
+	HerdrPane        bool
 }
 
 // DirectorWho is who writes a headless registration's later events
@@ -115,6 +120,12 @@ func DirectorWorkspaceLabel(token string) string {
 // autonomous, edits, and guarded, and a wake that config.ValidateDirectorWake
 // refuses (an empty one included: start always passes the wake it read) are
 // refused before anything is read or written.
+//
+// The attached also carries the starter, h.StarterPID and h.StarterStartTime
+// (trimmed), when both are given (plan 2026-10-18-org-director-liveness,
+// D1), and neither when neither is. A starter pid without a start time, a
+// start time without a pid, and a pid that is not positive are refused
+// before anything is read or written, like the input above.
 func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegistration, error) {
 	const verb = "start"
 	launch := h.Launch
@@ -138,6 +149,17 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 	}
 	if err := config.ValidateDirectorWake(h.Wake); err != nil {
 		return DirectorRegistration{}, fmt.Errorf("org: director: %s: %w", verb, err)
+	}
+	starterStartTime := strings.TrimSpace(h.StarterStartTime)
+	switch {
+	case h.StarterPID == 0 && starterStartTime == "":
+		// No starter: start could not read its own start time (D1).
+	case h.StarterPID < 0:
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: the starter pid %d is not a positive number", verb, h.StarterPID)
+	case h.StarterPID == 0:
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: the starter start time %q is given without its pid", verb, starterStartTime)
+	case starterStartTime == "":
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: the starter pid %d is given without its start time", verb, h.StarterPID)
 	}
 	newToken := newDirectorToken
 	if s.token != nil {
@@ -168,6 +190,7 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 			TS: s.now(), ID: next, Event: DirectorEventAttached,
 			Driver: h.Driver, Wake: slices.Clone(h.Wake),
 			Launch: launch, Token: token, Model: h.Model, PermissionMode: h.PermissionMode,
+			StarterPID: h.StarterPID, StarterStartTime: starterStartTime,
 			User: h.User, Cwd: h.Cwd, HerdrPane: h.HerdrPane,
 		}
 		if err := s.appendLocked(raw, ev); err != nil {
@@ -304,13 +327,23 @@ func (s *DirectorStore) MarkLaunched(id string, who DirectorWho) (stillCurrent b
 // and launch Token the launch script was written with, the PID it gives as
 // its own ($$, which stays the agent's pid across its exec), the StartTime
 // of that pid as ReadDirectorProcess read it, and Who runs the check-in.
+// ReadStarter is how MarkCmdLaunched reads the start process that recorded
+// the registration (plan 2026-10-18-org-director-liveness, D2); nil means
+// ReadDirectorProcess. The CLI passes the reader it reads PID with.
 type DirectorCmdCheckIn struct {
-	ID        string
-	Token     string
-	PID       int
-	StartTime string
-	Who       DirectorWho
+	ID          string
+	Token       string
+	PID         int
+	StartTime   string
+	Who         DirectorWho
+	ReadStarter func(ctx context.Context, pid int) (DirectorProcess, error)
 }
+
+// directorCheckInStarterTimeout bounds MarkCmdLaunched's read of the start
+// process that recorded the registration (plan
+// 2026-10-18-org-director-liveness, D2): 10 s, the driver call timeout that
+// bounds every other ps read of a director process (readDirectorProcess).
+const directorCheckInStarterTimeout = defaultDriverCallTimeout
 
 // MarkCmdLaunched is the check-in of a launch script (`ralph org director
 // launched`, plan 2026-10-16-org-director-launch-cmd, D4): it appends
@@ -330,6 +363,19 @@ type DirectorCmdCheckIn struct {
 // state dir or the lock. Whether c.PID is the caller's parent and alive is
 // the CLI's check, not the store's. A failed write ends one of the two ways
 // Attach's does.
+//
+// Once all of those pass, a registration with a starter recorded (the
+// `ralph org director start` process that wrote its attached; plan
+// 2026-10-18-org-director-liveness, D2) has that pid read with c.ReadStarter
+// (nil: ReadDirectorProcess) under directorCheckInStarterTimeout, still
+// under the lock, so the lock is held for as long as ps takes, within that
+// bound. When the pid has no process, is a zombie, or has a start time other
+// than the recorded one, that start has ended: nothing waits for the
+// check-in or cleans up after it, and the agent of a terminal that opened
+// that late must not start, so the check-in is refused the same way, with
+// that reason. A read that fails, and a registration with no starter, accept
+// the check-in as before, so a ps that cannot be read never keeps a director
+// from starting.
 func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 	verb := "check in " + c.ID
 	refuse := func(format string, args ...any) error {
@@ -375,6 +421,10 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 		case reg.State != DirectorStateStarting:
 			return refuse("%s has already checked in", reg.describe())
 		}
+		if how := directorCheckInStarterEnded(*reg, c.ReadStarter); how != "" {
+			return refuse("the ralph org director start that recorded %s is no longer running (%s), so no start waits for this check-in: "+
+				"run ralph org director start again", reg.describe(), how)
+		}
 		ev := DirectorEvent{
 			TS: s.now(), ID: c.ID, Event: DirectorEventLaunched, PID: c.PID, StartTime: startTime,
 			User: c.Who.User, Cwd: c.Who.Cwd, HerdrPane: c.Who.HerdrPane,
@@ -384,6 +434,40 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 		}
 		return nil
 	})
+}
+
+// directorCheckInStarterEnded is MarkCmdLaunched's look at the starter of
+// reg (plan 2026-10-18-org-director-liveness, D2): it returns how the start
+// process that recorded reg has ended (directorProcessEnded's words: no
+// process has the pid, it is a zombie, or it is another process now), or ""
+// when the check-in may go on. It reads nothing for a registration with no
+// starter recorded. It reads the starter pid with read (nil:
+// ReadDirectorProcess) under directorCheckInStarterTimeout, and a read that
+// fails, or that answers a state ReadDirectorProcess never gives, counts as
+// unreadable and returns "".
+func directorCheckInStarterEnded(reg DirectorRegistration, read func(context.Context, int) (DirectorProcess, error)) string {
+	if reg.StarterPID <= 0 || reg.StarterStartTime == "" {
+		return ""
+	}
+	if read == nil {
+		read = ReadDirectorProcess
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), directorCheckInStarterTimeout)
+	defer cancel()
+	proc, err := read(ctx, reg.StarterPID)
+	if err != nil {
+		return ""
+	}
+	switch proc.State {
+	case DirectorProcessAlive, DirectorProcessZombie, DirectorProcessGone:
+	default:
+		return ""
+	}
+	ended, how := directorProcessEnded(DirectorRegistration{PID: reg.StarterPID, StartTime: reg.StarterStartTime}, proc)
+	if !ended {
+		return ""
+	}
+	return how
 }
 
 // MarkStopped records that the pane and workspace of the open headless
@@ -648,7 +732,10 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //
 // Then, in this order, with no herdr call under director.lock (D3):
 //  1. AttachHeadless records the registration, state starting, with a new
-//     id and launch token and the wake of [org.director].wake
+//     id and launch token, the wake of [org.director].wake, and the
+//     starter, this process's pid and its start time (directorStarter; plan
+//     2026-10-18-org-director-liveness, D1), or no starter when ps does not
+//     read them
 //  2. WorkspaceCreate labelled DirectorWorkspaceLabel(token), then
 //     RecordWorkspace
 //  3. TabCreate labelled DirectorTabLabel(token), then RecordPane
@@ -696,8 +783,10 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 	if c.cmdLaunch {
 		launch = DirectorLaunchCmd
 	}
+	starterPID, starterStartTime := o.directorStarter()
 	reg, err := p.Store.AttachHeadless(DirectorHeadlessAttach{
 		Launch: launch, Driver: p.Driver, Model: p.Model, PermissionMode: c.mode, Wake: o.Config.Director.Wake,
+		StarterPID: starterPID, StarterStartTime: starterStartTime,
 		User: p.Who.User, Cwd: p.Who.Cwd, HerdrPane: p.Who.HerdrPane,
 	})
 	if errors.Is(err, ErrDirectorAttached) {
@@ -735,6 +824,25 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 		WorkspaceLabel: DirectorWorkspaceLabel(reg.Token), TabLabel: DirectorTabLabel(reg.Token),
 		AgentStartRetries: retries,
 	}, nil
+}
+
+// directorStarter is the starter StartDirector records on its attached (plan
+// 2026-10-18-org-director-liveness, D1): the pid of this process, the start
+// process, and that pid's start time, read with readDirectorProcess
+// (o.DirectorProcessReader when set, under one driverCallTimeout) after
+// checkDirectorStart, so a refused start runs no ps. Only a read that
+// answers alive with a start time gives both. A read that fails, or that
+// answers anything else, gives neither, and start goes on with no starter
+// recorded, so its launch script's check-in is not refused for one
+// (MarkCmdLaunched).
+func (o *Org) directorStarter() (pid int, startTime string) {
+	pid = os.Getpid()
+	proc, err := o.readDirectorProcess(pid)
+	startTime = strings.TrimSpace(proc.StartTime)
+	if err != nil || proc.State != DirectorProcessAlive || startTime == "" {
+		return 0, ""
+	}
+	return pid, startTime
 }
 
 // directorStartChecks is what checkDirectorStart resolved: the absolute

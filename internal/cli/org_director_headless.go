@@ -645,8 +645,11 @@ func orgDirectorStopNotes(res org.DirectorStopResult) string {
 
 // orgDirectorCheckInParentPID and orgDirectorCheckInReadProcess are how
 // `ralph org director launched` reads the pid of the process that ran it and
-// that pid's start time: os.Getppid and org.ReadDirectorProcess. They are
-// variables so the tests can give another parent or a ps that cannot be read.
+// that pid's start time: os.Getppid and org.ReadDirectorProcess. The check-in
+// reads the start process that recorded the registration with the same
+// orgDirectorCheckInReadProcess (MarkCmdLaunched's ReadStarter; plan
+// 2026-10-18-org-director-liveness, D2). They are variables so the tests can
+// give another parent or a ps that cannot be read.
 var (
 	orgDirectorCheckInParentPID   = os.Getppid
 	orgDirectorCheckInReadProcess = org.ReadDirectorProcess
@@ -677,7 +680,11 @@ func newOrgDirectorLaunchedCmd(stateDir, configPath *string) *cobra.Command {
 			"that ran it, when ps cannot read that pid's start time, or when the\n" +
 			"registration --id is not the current one, was not started with\n" +
 			"launch_cmd, is no longer starting (stopped, or already checked in), or\n" +
-			"has another launch token than --token. It reads no ralph.toml.",
+			"has another launch token than --token. It is refused the same way when\n" +
+			"the `ralph org director start` that recorded the registration has\n" +
+			"ended (ps finds no process with its pid, a zombie, or another process\n" +
+			"in its place), since no start waits for the check-in then; a ps that\n" +
+			"cannot read that pid does not refuse it. It reads no ralph.toml.",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -704,8 +711,11 @@ func newOrgDirectorLaunchedCmd(stateDir, configPath *string) *cobra.Command {
 // process's parent, the launch script that ran it, and a pid whose start
 // time ps does not read (org.ReadDirectorProcess, alive), and then records
 // the check-in with the store's MarkCmdLaunched, which refuses the rest
-// under the lock. Every refusal writes nothing and is returned (one line on
-// stderr, exit 1), and the script then exits without the agent.
+// under the lock, a start that recorded the registration and has ended
+// included (read with orgDirectorCheckInReadProcess too; plan
+// 2026-10-18-org-director-liveness, D2). Every refusal writes nothing and is
+// returned (one line on stderr, exit 1), and the script then exits without
+// the agent.
 func (rt *orgDirectorRuntime) directorLaunched(id, token string, pid int) error {
 	verb := "org: director launched " + inboxField(id)
 	if parent := orgDirectorCheckInParentPID(); pid != parent {
@@ -723,6 +733,7 @@ func (rt *orgDirectorRuntime) directorLaunched(id, token string, pid int) error 
 	}
 	return rt.notRestoredError(rt.store.MarkCmdLaunched(org.DirectorCmdCheckIn{
 		ID: id, Token: token, PID: pid, StartTime: proc.StartTime, Who: orgDirectorCaller(),
+		ReadStarter: orgDirectorCheckInReadProcess,
 	}))
 }
 
