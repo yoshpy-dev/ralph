@@ -56,6 +56,15 @@ const (
 	HerdrCodeWorkspaceNotFound = "workspace_not_found"
 )
 
+// HerdrCodeAgentNotFound is herdr's code for an agent name it does not know
+// (confirmed live, v0.7.5, as the `agent get` reply, with exit status 1, for
+// an agent that ended with /quit or was killed, while its pane stays open;
+// plan 2026-10-18-org-director-liveness, Assumptions). IsNotFound does not
+// match it: an agent herdr no longer has is not a pane, tab or workspace
+// that is already closed. IsAgentNotFound does, for the errors AgentGet
+// returns.
+const HerdrCodeAgentNotFound = "agent_not_found"
+
 // NewHerdrError returns the error this adapter builds from a herdr error
 // envelope with the given code and message. Production code never needs it
 // (the adapter parses envelopes itself); it exists so HerdrClient fakes in
@@ -88,6 +97,28 @@ func IsNotFound(err error) bool {
 		return false
 	}
 	return he.NotFound()
+}
+
+// AgentNotFound reports whether e's code is agent_not_found, the code
+// IsAgentNotFound matches. internal/org reads it through its own one-method
+// interface and errors.As, as it reads NotFound, so the liveness check of a
+// headless director can tell an agent that has ended from an `agent get`
+// that failed (plan 2026-10-18-org-director-liveness, D3).
+func (e *herdrError) AgentNotFound() bool {
+	return e.Code == HerdrCodeAgentNotFound
+}
+
+// IsAgentNotFound reports whether err carries a herdr error envelope whose
+// code is agent_not_found: herdr has no agent of the name the command gave.
+// It sees through fmt.Errorf("%w") wrapping. Only AgentGet wraps the envelope
+// of a failed call that way (checkHerdrAgentGetResult), so for an error of
+// AgentStart or AgentWait, whose envelope is only folded into the text, it is
+// false. Every other failure, the pane, tab and workspace not-found codes
+// included, returns false, as does nil; an error whose text merely contains
+// "agent_not_found" does not count.
+func IsAgentNotFound(err error) bool {
+	var he *herdrError
+	return errors.As(err, &he) && he.AgentNotFound()
 }
 
 // parseHerdrEnvelope parses trimmed herdr CLI stdout as a JSON envelope.
@@ -197,10 +228,36 @@ func (h Herdr) AgentStart(ctx context.Context, name, kind, paneID string, timeou
 }
 
 // AgentGet runs `herdr agent get TARGET`. The return value is informational
-// raw text (see checkHerdrEnvelopeError); it is not parsed into a struct.
+// raw text (see checkHerdrEnvelopeError); it is not parsed into a struct. A
+// failed call's error has the text checkHerdrEnvelopeError gives it, and also
+// wraps the envelope herdr printed (checkHerdrAgentGetResult), so an agent
+// herdr does not know comes back as an error for which IsAgentNotFound is
+// true (herdr exits 1 with an agent_not_found envelope).
 func (h Herdr) AgentGet(ctx context.Context, target string) (string, error) {
 	out, err := h.R.Run(ctx, "herdr", "agent", "get", target)
-	return checkHerdrEnvelopeError(out, err)
+	return checkHerdrAgentGetResult(out, err)
+}
+
+// checkHerdrAgentGetResult is checkHerdrEnvelopeError for AgentGet (plan
+// 2026-10-18-org-director-liveness, D3): the same output and the same error
+// text, but on a failed call the parsed envelope (from stdout, or from the
+// Runner error's text, where ExecRunner folds stderr) is wrapped with %w next
+// to the Runner error, as wrapHerdrRunError does, so its code stays readable
+// by IsAgentNotFound, and errors.Is on the Runner error still works. Only
+// AgentGet uses it: AgentStart and AgentWait keep checkHerdrEnvelopeError,
+// whose callers never read a code.
+func checkHerdrAgentGetResult(out string, err error) (string, error) {
+	if err == nil {
+		return checkHerdrEnvelopeError(out, nil)
+	}
+	trimmed := strings.TrimSpace(out)
+	if _, envErr, isEnvelope := parseHerdrEnvelope(trimmed); isEnvelope && envErr != nil {
+		return trimmed, fmt.Errorf("%w (%w)", err, envErr)
+	}
+	if envErr, ok := findHerdrErrorEnvelope(err.Error()); ok {
+		return trimmed, fmt.Errorf("%w (%w)", err, envErr)
+	}
+	return trimmed, err
 }
 
 // AgentWait runs
@@ -229,7 +286,8 @@ func (h Herdr) AgentWait(ctx context.Context, target string, until []string, tim
 // captured stderr into its message -- is enriched with the envelope's
 // code/message when one is found in stdout or embedded in the error text
 // itself, for readability; the original error is preserved via %w either
-// way.
+// way. AgentGet's failures go through checkHerdrAgentGetResult instead, which
+// gives the same text and also wraps the envelope.
 func checkHerdrEnvelopeError(out string, err error) (string, error) {
 	trimmed := strings.TrimSpace(out)
 	if err != nil {
@@ -263,7 +321,8 @@ func extractHerdrErrorEnvelope(s string) (string, bool) {
 
 // findHerdrErrorEnvelope is extractHerdrErrorEnvelope's parser. It returns
 // the embedded envelope's *herdrError itself, so checkHerdrCloseResult can
-// wrap it and keep its code readable by IsNotFound.
+// wrap it and keep its code readable by IsNotFound, and
+// checkHerdrAgentGetResult readable by IsAgentNotFound.
 func findHerdrErrorEnvelope(s string) (*herdrError, bool) {
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")

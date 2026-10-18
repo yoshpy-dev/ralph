@@ -796,6 +796,24 @@ func isNotFound(err error) bool {
 	return errors.As(err, &nf) && nf.NotFound()
 }
 
+// agentNotFoundError is how this package recognises herdr's reply for an
+// agent name it does not know, again without importing internal/org/driver:
+// the driver's error type has an AgentNotFound method that is true for
+// exactly the code driver.IsAgentNotFound matches (agent_not_found), which
+// the driver's AgentGet wraps so errors.As reaches it. It is kept apart from
+// notFoundError: an agent herdr no longer has is not a pane, tab, or
+// workspace that is already closed (plan 2026-10-18-org-director-liveness,
+// D3).
+type agentNotFoundError interface{ AgentNotFound() bool }
+
+// isAgentNotFound reports whether err, or an error it wraps, is herdr's
+// agent_not_found reply to `herdr agent get`. Any other error, a pane, tab,
+// or workspace not-found reply included, and nil, is false.
+func isAgentNotFound(err error) bool {
+	var nf agentNotFoundError
+	return errors.As(err, &nf) && nf.AgentNotFound()
+}
+
 // labelWords is how confirmSeatPane's and confirmOrgWorkspace's errors name
 // the labels they check. seatLabelWords is for an org seat, whose tab and
 // workspace spawn labels with its seat id and org_id (TabCreate,
