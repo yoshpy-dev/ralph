@@ -165,6 +165,11 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
   - S2 は 2 つのコミットに分けた。S2a 8f608232(`CheckDirector` と版の結びつけ、driver の `agent_not_found`)、S2b 0756a73a(見張りの確かめ、`director-alive.json`、ended の登録を起こさない)
   - S2b の印は id に加えて `attached_at` も照合する(director.jsonl を消すと id が振り直されるため)。確かめは起こす手順と同じく `[org.director].enabled` を見ない
   - S3 3ece3deb(start の片付け、attach の断りの文)。記録は新しい `MarkStoppedAtVersion` と `ErrDirectorChangedSinceCheck` で版 A と比べる。start の通知は `DirectorStartParams.Notice` に 1 行。attach が start のプロセスを確かめるため `CheckDirectorStarter` を公開した。launch_cmd の片付けは director が終わっているので `RALPH_DIRECTOR_TOKEN` の拒否をかけない。確かめと片付けのあいだで登録を読み直す変異は seam がなく捕まらなかったので、S4 の前のコミットで seam とテストを足す
+  - S4 は 2 つのコミット。fe773bfa(確かめと片付けのあいだの seam `directorStartAfterCheck` と、片付けが版 A だけに打つことのテスト。読み直す変異 2 つが red)、0b9b7ed3(`director:` の行と `director status` の確かめの節、`--json` の `check`)。headless の行の末尾を固定していた `org_director_headless_test.go` と `org_director_wake_test.go` の期待値も直した。`check` は state・how・checked_at・detail の 4 つで id を持たない。`enabled = false` のときは start の案内を出さず stop だけを言う。stopped のまま今の登録になっている headless の登録は見張りが確かめないので、前の文のまま
+  - a6da6a3a は S4 の報告にあった doc の食い違いの修正(`director.check` に id がないこと、stop の記録の書き手に `MarkStoppedAtVersion`)
+  - S5 5e76f820(README、`/director` skill の 4 面、仕様の注、tech-debt、AGENTS.md、`org watch` の help の固定)。tech-debt の 255 行は解決として取り消し線にし、残り(no_starter などの unknown)を新しい行にした。249 行のきっかけも 8b-2b に直した
+  - S6 fc215a2b(実機の確認の evidence と、仕様の注と tech-debt からの参照)。(a) `/quit` のあと見張りが `ended (agent_ended)`、次の start が片付けて d2 を立てた。(b) pane_created のあとで start を SIGKILL、見張りが `ended (start_ended)`、次の start が片付けて d4 を立てた。生きている d4 への start は `alive (agent_found)` を添えて断った。codex の daemon が turn の `ralph org wait --inbox` を director を止めたあとも抱えていたので、tech-debt の daemon の行に書いた
+  - S5 が範囲の外で見つけた文書のずれは S5b 84ab7d1e で直した(`/org` skill の 4 面の watch と director の行、launch_cmd の recipe と wake の recipe とその写し、`org watch` の Short をサイクルの順に)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
