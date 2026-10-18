@@ -290,7 +290,23 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"merges the PRs `ralph org merge-order` lists as ready with\n" +
 			"`ralph org merge`, without asking. With enabled false, auto_merge = true\n" +
 			"has no effect, and the line says so.\n" +
-			"The registration does not tell whether its session is still running.",
+			"The registration does not tell whether its session is still running\n" +
+			"for a promoted session (the /director skill,\n" +
+			"`ralph org director attach`). For a headless director the director:\n" +
+			"line says instead what `ralph org watch --all`, which checks it each\n" +
+			"cycle, last found: checked by the watch at <time>: alive (<how>), ended\n" +
+			"(<how>), or unknown (<how>: <detail>); or not checked yet, before the\n" +
+			"watch has checked this registration (with why, when the watch's mark\n" +
+			"director-alive.json cannot be read). An ended one is cleaned up by the\n" +
+			"next `ralph org director start`, which checks it again first (with\n" +
+			"enabled false start is refused, and the line names only the stop), or\n" +
+			"stopped with `ralph org director stop --id <id>`. --json carries what\n" +
+			"the watch found as check (state, how, checked_at, detail;\n" +
+			"director.check in `ralph status --json`), left out until the watch has\n" +
+			"checked the current registration, and the registration of a headless\n" +
+			"director carries starter_pid and starter_start_time: the pid of the\n" +
+			"`ralph org director start` process that recorded it and that process's\n" +
+			"start time, when start could read them.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt, err := newOrgDirectorRuntime(cmd, "director status", *stateDir, *configPath, orgLedgerReadOnly, true)
@@ -581,15 +597,37 @@ const (
 // closed, which `ralph org director stop --id` closes (omitted when none).
 // Error is the read error, set whenever the read failed (with disabled too),
 // and CorruptLines and IgnoredEvents the counts of org.DirectorReadResult.
+// Check is what the watch's check last found for the current registration
+// when it is headless and not stopped (plan 2026-10-18-org-director-liveness,
+// D8: watchChecks), read from the watch's mark when the mark is that
+// registration's (readOrgDirectorCheck); it is omitted when the watch has not
+// checked it yet, when the mark is another registration's or cannot be read
+// (markErr, which only the text form shows), and for a promoted session.
 type orgDirectorReport struct {
 	Enabled       bool                            `json:"enabled"`
 	AutoMerge     bool                            `json:"auto_merge"`
 	State         string                          `json:"state"`
 	Registration  *orgDirectorReportRegistration  `json:"registration"`
+	Check         *orgDirectorReportCheck         `json:"check,omitempty"`
 	OpenHeadless  []orgDirectorReportRegistration `json:"open_headless,omitempty"`
 	Error         string                          `json:"error,omitempty"`
 	CorruptLines  int                             `json:"corrupt_lines"`
 	IgnoredEvents int                             `json:"ignored_events"`
+	watchChecks   bool
+	markErr       string
+}
+
+// orgDirectorReportCheck is the check of a headless registration as status
+// reports it (plan 2026-10-18-org-director-liveness, D8): the state (alive,
+// ended, or unknown), how the check found it, when, and the detail of an
+// unknown one ("" for alive and ended), from the watch's mark
+// (director-alive.json) as read. The JSON keeps them unescaped, as it keeps
+// the registration's values; the text form escapes them.
+type orgDirectorReportCheck struct {
+	State     string `json:"state"`
+	How       string `json:"how"`
+	CheckedAt string `json:"checked_at"`
+	Detail    string `json:"detail"`
 }
 
 // orgDirectorReportRegistration is a registration as status reports it: the
@@ -615,7 +653,8 @@ func newOrgDirectorReportRegistration(reg org.DirectorRegistration) orgDirectorR
 
 // readOrgDirectorReport reads the registration of the ledger at stateDir
 // (org.DirectorStore.Read, no lock) into an orgDirectorReport with
-// director's Enabled as the switch and its AutoMerge.
+// director's Enabled as the switch and its AutoMerge, and the watch's check
+// of the current registration (readOrgDirectorCheck).
 func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) orgDirectorReport {
 	report := orgDirectorReport{Enabled: director.Enabled, AutoMerge: director.AutoMerge}
 	res, err := org.NewDirectorStore(stateDir).Read()
@@ -625,6 +664,7 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 	case res.Current != nil:
 		cur := newOrgDirectorReportRegistration(*res.Current)
 		report.Registration, report.State = &cur, orgDirectorStateAttached
+		report.watchChecks, report.Check, report.markErr = readOrgDirectorCheck(stateDir, *res.Current)
 	default:
 		report.State = orgDirectorStateNotAttached
 	}
@@ -640,13 +680,71 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 	return report
 }
 
+// readOrgDirectorCheck reads what the watch's check found for cur, the
+// current registration of the ledger at stateDir (plan
+// 2026-10-18-org-director-liveness, D8). watchChecks is set when cur is
+// headless and not stopped, the registrations `ralph org watch --all` checks
+// each cycle; a promoted session's, and a stopped one's, are never checked,
+// and nothing is read for them. For one the watch checks, check is the mark
+// (org.ReadDirectorAlive) when it is cur's (org.DirectorAliveFor: the same id
+// and attached_at), and nil when there is no mark or it is another
+// registration's; markErr is the error of a mark that cannot be read or does
+// not parse, which leaves check nil and never fails the status.
+func readOrgDirectorCheck(stateDir string, cur org.DirectorRegistration) (watchChecks bool, check *orgDirectorReportCheck, markErr string) {
+	if !cur.Headless() || cur.State == org.DirectorStateStopped {
+		return false, nil, ""
+	}
+	mark, err := org.ReadDirectorAlive(stateDir)
+	if err != nil {
+		return true, nil, err.Error()
+	}
+	if m := org.DirectorAliveFor(mark, &cur); m != nil {
+		return true, &orgDirectorReportCheck{State: m.State, How: m.How, CheckedAt: m.CheckedAt, Detail: m.Detail}, ""
+	}
+	return true, nil, ""
+}
+
+// orgDirectorWatchCheckClause is what the director: line says of r's current
+// registration in place of "the registration does not tell whether its
+// session is still running", when the watch checks it (r.watchChecks; plan
+// 2026-10-18-org-director-liveness, D8): "checked by the watch at <time>: "
+// and the check (orgDirectorCheckText), or "not checked yet" with when the
+// watch checks it and, for a mark that cannot be read, why. When the check
+// says ended and cleanup is set (the switch is on, so start can run), it adds
+// the two ways out: `ralph org director start`, which cleans the registration
+// up and then starts a new headless director, and `ralph org director stop
+// --id`, each with hintStateDir as --state-dir (org.CommandWithStateDir).
+// Every value read from the mark or the registration is escaped (inboxField).
+func orgDirectorWatchCheckClause(r orgDirectorReport, hintStateDir string, cleanup bool) string {
+	c := r.Check
+	if c == nil {
+		clause := "not checked yet: ralph org watch --all checks it each cycle"
+		if r.markErr != "" {
+			clause += ", but its mark cannot be read (" + inboxField(r.markErr) + ")"
+		}
+		return clause
+	}
+	clause := "checked by the watch at " + inboxField(c.CheckedAt) + ": " + orgDirectorCheckText(org.DirectorCheck{State: c.State, How: c.How, Detail: c.Detail})
+	if cleanup && c.State == org.DirectorCheckEnded {
+		id := inboxField(r.Registration.ID)
+		clause += "; as it has ended, " + org.CommandWithStateDir("ralph org director start --driver <claude|codex>", hintStateDir) +
+			" cleans it up and then starts a new headless director, or " + org.CommandWithStateDir("ralph org director stop --id "+id, hintStateDir) + " stops it"
+	}
+	return clause
+}
+
 // orgDirectorLine is the one director: line that `ralph status` and `ralph
 // org director status` print for r. A headless registration adds its state,
 // model, pane, and workspace (for a launch cmd, the launch, the terminal
 // name, and the pid: orgDirectorLaunchDetails). A registration whose wake
 // has push ends its details with the wake and where the watch sends
 // (orgDirectorPushDetails); a pull-only one's line is that of stage 8a.
-// Attached and not attached
+// After the details, a registration the watch checks (headless and not
+// stopped) says what the watch's check found (orgDirectorWatchCheckClause),
+// and every other one (a promoted session's, or a headless one recorded
+// stopped while still current) that the registration does not tell whether
+// its session is still running; disabled adds the check after the stop
+// command. Attached and not attached
 // end with what [org.director].auto_merge means (orgDirectorAutoMergeClause),
 // and disabled says that auto_merge = true has no effect; unreadable says
 // nothing of it. The open headless registrations that are not current are
@@ -674,7 +772,11 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			details += ", pane " + inboxField(reg.PaneID)
 		}
 		details += orgDirectorPushDetails(reg.DirectorRegistration)
-		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- the registration does not tell whether its session is still running; " +
+		alive := "the registration does not tell whether its session is still running"
+		if r.watchChecks {
+			alive = orgDirectorWatchCheckClause(r, hintStateDir, true)
+		}
+		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- " + alive + "; " +
 			"inbox items it does not ack reach the human at the ack deadline" + orgDirectorAutoMergeClause(r.AutoMerge, true) + note
 	case orgDirectorStateDisabled:
 		state := "[org.director].enabled = false"
@@ -688,6 +790,11 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			reg := r.Registration
 			state += "; registration " + inboxField(reg.ID) + " is still recorded, headless " + inboxField(reg.State) + orgDirectorLaunchDetails(reg.DirectorRegistration) +
 				": stop it with " + org.CommandWithStateDir("ralph org director stop --id "+inboxField(reg.ID), hintStateDir)
+			if r.watchChecks {
+				// start refuses while the switch is off, so the check names no
+				// cleanup by start: the stop above is the way out.
+				state += "; " + orgDirectorWatchCheckClause(r, hintStateDir, false)
+			}
 		case r.Registration != nil:
 			state += "; registration " + inboxField(r.Registration.ID) + " is still recorded"
 		}

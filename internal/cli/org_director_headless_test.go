@@ -1472,10 +1472,10 @@ func TestOrgDirectorAttachReplace_AHeadlessDirectorNamesItsStop(t *testing.T) {
 // form; the open headless registrations that are not current are named at
 // the end of the line, one or several, and listed as open_headless lines and
 // in JSON. A promoted session's lines keep their 8a-1 form (also
-// TestOrgDirector_AttachReplaceAndDetachByID).
+// TestOrgDirector_AttachReplaceAndDetachByID). No watch has checked d1, so
+// its line says not checked yet (plan 2026-10-18-org-director-liveness, D8).
 func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	stateDir := t.TempDir()
 	store := org.NewDirectorStore(stateDir)
 	who := org.DirectorWho{User: "alice", Cwd: "/work"}
@@ -2431,8 +2431,7 @@ func TestOrgDirectorStop_LaunchCmdEndsTheProcessAndLeavesTheTerminal(t *testing.
 	if err != nil {
 		t.Fatalf("status: %v (output: %s)", err, out)
 	}
-	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s) -- "+
-		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"+directorAutoMergeOff,
+	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s)"+directorNotCheckedTail,
 		name, launched.PID, att.TS, by)
 	if got := statusDirectorLine(t, out); got != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", got, wantLine)
@@ -2775,10 +2774,10 @@ func TestOrgDirectorDetach_ALaunchCmdDirectorNamesItsStop(t *testing.T) {
 // pid, start_time, and terminal_name in the text form, and the same in the
 // JSON; an open one that is not current is named so at the end of the line
 // and on its open_headless line. The pid is made up: nothing reads or
-// signals it.
+// signals it. No watch has checked d1, so its line says not checked yet
+// (plan 2026-10-18-org-director-liveness, D8).
 func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	stateDir := t.TempDir()
 	d1 := seedCmdHeadless(t, stateDir)
 	name, ts := "director_"+d1.Token, d1.AttachedAt

@@ -1079,6 +1079,17 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"still open are listed (open_headless), to be closed with `ralph org director stop --id <id>`",
 			"With enabled false the state is disabled whether or not a registration is recorded; one that is still recorded is named and its fields are shown",
 			"The registration does not tell whether its session is still running",
+			// Plan 2026-10-18-org-director-liveness, D8: the sentence above now
+			// holds for a promoted session only.
+			"The registration does not tell whether its session is still running for a promoted session (the /director skill, `ralph org director attach`).",
+			"For a headless director the director: line says instead what `ralph org watch --all`, which checks it each cycle, last found: " +
+				"checked by the watch at <time>: alive (<how>), ended (<how>), or unknown (<how>: <detail>); or not checked yet, " +
+				"before the watch has checked this registration (with why, when the watch's mark director-alive.json cannot be read).",
+			"An ended one is cleaned up by the next `ralph org director start`, which checks it again first " +
+				"(with enabled false start is refused, and the line names only the stop), or stopped with `ralph org director stop --id <id>`.",
+			"--json carries what the watch found as check (state, how, checked_at, detail; director.check in `ralph status --json`), " +
+				"left out until the watch has checked the current registration",
+			"the registration of a headless director carries starter_pid and starter_start_time",
 			// Plan 2026-10-17-org-auto-merge, AC2.
 			"[org.director].auto_merge, read from the same ralph.toml,", "then enabled, auto_merge and,",
 			"The director: line ends with what auto_merge means: with false, merges are left to the human; with true, the director (once one is attached) " +

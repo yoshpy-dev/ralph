@@ -927,10 +927,11 @@ func TestStatusCmd_DirectorLineShowsAutoMerge(t *testing.T) {
 // state, model, and the herdr ids recorded on the director: line, and an
 // open headless registration that is not current is named at the end of it
 // with the stop command, attached, disabled, and not attached; --json carries
-// the headless fields and director.open_headless.
+// the headless fields and director.open_headless. No watch has checked d2,
+// so the line says not checked yet (plan 2026-10-18-org-director-liveness,
+// D8), with the switch off too.
 func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	for _, seed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("orgs %v", seed), func(t *testing.T) {
 			t.Chdir(t.TempDir())
@@ -978,7 +979,7 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 
 			writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
 			want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless starting, workspace w-2: " +
-				"stop it with ralph org director stop --id d2" + suffix + ") -- ralph org escalate sends every item to the human at once" + d1Note
+				"stop it with ralph org director stop --id d2" + suffix + "; " + directorNotCheckedClause + ") -- ralph org escalate sends every item to the human at once" + d1Note
 			if got := line(); got != want {
 				t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
 			}
@@ -1003,10 +1004,10 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 // its pid once checked in, in place of the herdr ids, attached, open but not
 // attached, and disabled; --json carries launch, state, terminal_name, pid,
 // start_time, and model. The pids are made up: status reads or signals no
-// process.
+// process. No watch has checked d2, so the line says not checked yet (plan
+// 2026-10-18-org-director-liveness, D8).
 func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+	const tail = directorNotCheckedTail
 	t.Chdir(t.TempDir())
 	stateDir := t.TempDir()
 	store := org.NewDirectorStore(stateDir)
@@ -1063,7 +1064,7 @@ func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
 
 	writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
 	want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless running, launch cmd, name " + name2 + ", pid 4343: " +
-		"stop it with ralph org director stop --id d2" + suffix + ") -- ralph org escalate sends every item to the human at once" + d1Note
+		"stop it with ralph org director stop --id d2" + suffix + "; " + directorNotCheckedClause + ") -- ralph org escalate sends every item to the human at once" + d1Note
 	if got := line(); got != want {
 		t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
 	}
@@ -1245,6 +1246,17 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		"A `director:` line follows it", "read as `ralph org escalate` reads it without --config",
 		"It is attached,", "not attached;", "disabled (enabled = false: escalate sends every item to the human at once)",
 		"or unreadable, when director.jsonl cannot be read", "A registration does not tell whether its session is still running",
+		// Plan 2026-10-18-org-director-liveness, D8: the sentence above now
+		// holds for a promoted session only.
+		"A registration does not tell whether its session is still running for a promoted session (the /director skill, `ralph org director attach`).",
+		"For a headless director the line says instead what `ralph org watch --all`, which checks it each cycle, last found: " +
+			"checked by the watch at <time>: alive (<how>), ended (<how>), or unknown (<how>: <detail>); or not checked yet, " +
+			"before the watch has checked this registration (with why, when the watch's mark director-alive.json cannot be read).",
+		"An ended one is cleaned up by the next `ralph org director start`, which checks it again first, or stopped with " +
+			"`ralph org director stop --id <id>`; with enabled false the line names only the stop.",
+		"The JSON adds director.check (state, how, checked_at, detail) once the watch has checked the current registration, " +
+			"and a headless registration carries starter_pid and starter_start_time",
+		"Either way, an item the director does not ack reaches the human at the ack deadline of `ralph org watch --all`.",
 		"A `merge guarantee:` line follows it",
 		"for this line git runs only the local `git remote get-url origin` in the current directory, and only when the cache is fresh",
 		"status runs no gh and does not use the network.",
