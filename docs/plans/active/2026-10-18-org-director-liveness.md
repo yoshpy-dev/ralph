@@ -170,7 +170,8 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
   - S5 5e76f820(README、`/director` skill の 4 面、仕様の注、tech-debt、AGENTS.md、`org watch` の help の固定)。tech-debt の 255 行は解決として取り消し線にし、残り(no_starter などの unknown)を新しい行にした。249 行のきっかけも 8b-2b に直した
   - S6 fc215a2b(実機の確認の evidence と、仕様の注と tech-debt からの参照)。(a) `/quit` のあと見張りが `ended (agent_ended)`、次の start が片付けて d2 を立てた。(b) pane_created のあとで start を SIGKILL、見張りが `ended (start_ended)`、次の start が片付けて d4 を立てた。生きている d4 への start は `alive (agent_found)` を添えて断った。codex の daemon が turn の `ralph org wait --inbox` を director を止めたあとも抱えていたので、tech-debt の daemon の行に書いた
   - S5 が範囲の外で見つけた文書のずれは S5b 84ab7d1e で直した(`/org` skill の 4 面の watch と director の行、launch_cmd の recipe と wake の recipe とその写し、`org watch` の Short をサイクルの順に)
-- [ ] Review artifact created
+  - self-review(4d47285f)は Merge: yes で LOW 4 件。e85853c5 で L1・L2・L4、80dd2982 で L3 を直した。L1 は D2 からの逸脱で、check-in は start のプロセスを `director.lock` を取る前に ps で読み、ロックの下では読んだときと同じ starter が登録に残っているときだけその結果を使う(ps の最大 10 秒が、ロックを待つ側の 5 秒を超えるため)。読みとロックのあいだに starter が変わったとき(director.jsonl を手で書き換えたときだけ)は受け付ける。L3 で `internal/cli/org_director_check.go` と `internal/org/director_start_cleanup.go` を足し、`org_director.go` と `director_stop.go` を 800 行より短くした。仕様の注と tech-debt にも逸脱と新しいファイル名を書いた
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
