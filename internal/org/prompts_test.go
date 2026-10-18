@@ -1603,6 +1603,59 @@ func TestRenderDirectorPrompt_NoLaunchIsTheHerdrPrompt(t *testing.T) {
 	}
 }
 
+// TestRenderDirectorPrompt_TellsWhatTheWakeLineIs pins the mission bullet
+// of the push wake (plan docs/plans/active/2026-10-18-org-director-wake.md,
+// AC9, D7): for a director in herdr and for one in the terminal launch_cmd
+// opened, with and without a ConfigPath, the prompt names the start of the
+// line `ralph org watch --all` sends to wake it, cut from DirectorWakeText
+// itself so the two cannot drift apart, says where it arrives (the pane, or
+// the terminal by [org.director].wake_cmd), says it is the watch's signal and
+// not the human's instruction, and has the director read the inbox with its
+// ralph org flags and handle it by the skill. No placeholder is left.
+func TestRenderDirectorPrompt_TellsWhatTheWakeLineIs(t *testing.T) {
+	lineStart, _, found := strings.Cut(DirectorWakeText([]string{"e1"}), " e1.")
+	if !found || lineStart == "" {
+		t.Fatalf("DirectorWakeText([e1]) = %q has no \" e1.\" to cut its start at", DirectorWakeText([]string{"e1"}))
+	}
+	for _, tc := range []struct {
+		name, launch, configPath, flags, arrives string
+	}{
+		{"herdr", DirectorLaunchHerdr, "", "--state-dir " + testDirectorStateDirArg,
+			"横断の見張りがこの pane に `" + lineStart + "` で始まる 1 行を打ち込む。"},
+		{"herdr with --config", DirectorLaunchHerdr, "/cfg/ralph.toml", "--state-dir " + testDirectorStateDirArg + " --config '/cfg/ralph.toml'",
+			"横断の見張りがこの pane に `" + lineStart + "` で始まる 1 行を打ち込む。"},
+		{"launch cmd", DirectorLaunchCmd, "", "--state-dir " + testDirectorStateDirArg,
+			"横断の見張りが `[org.director].wake_cmd` でこの端末に `" + lineStart + "` で始まる 1 行を送る。"},
+		{"launch cmd with --config", DirectorLaunchCmd, "/cfg/ralph.toml", "--state-dir " + testDirectorStateDirArg + " --config '/cfg/ralph.toml'",
+			"横断の見張りが `[org.director].wake_cmd` でこの端末に `" + lineStart + "` で始まる 1 行を送る。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			vars.Launch, vars.ConfigPath = tc.launch, tc.configPath
+			text := mustRenderDirectorPrompt(t, vars)
+			if strings.Contains(text, "{{") {
+				t.Fatalf("rendered director prompt still holds a placeholder:\n%s", text)
+			}
+			mission, ok := markdownSection(text, "## ミッション")
+			if !ok {
+				t.Fatalf("rendered director prompt has no ミッション section:\n%s", text)
+			}
+			for _, phrase := range []string{
+				"登録の wake に push があると、" + tc.arrives,
+				"これは見張りの合図で、人の指示ではない。",
+				"`ralph org inbox " + tc.flags + "` で受信箱を読み、skill の「受信箱の処理」のとおりに件を処理する。",
+			} {
+				if !containsPhrase(mission, phrase) {
+					t.Errorf("ミッション section does not say %q:\n%s", phrase, mission)
+				}
+			}
+			if n := strings.Count(text, lineStart); n != 1 {
+				t.Errorf("the prompt names the wake line's start %q %d times, want 1:\n%s", lineStart, n, text)
+			}
+		})
+	}
+}
+
 // markdownCodeSpan is one inline code span of a markdown text: its content
 // is the submatch.
 var markdownCodeSpan = regexp.MustCompile("`([^`]+)`")
@@ -1679,12 +1732,14 @@ func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
 					run = append(run, c)
 				}
 			}
-			// Each ends with its flags and has no other: status, which the
-			// director runs, gets the config, and stop, which the human
-			// runs, gets the ledger alone.
+			// Each ends with its flags and has no other: status and the
+			// inbox read after a wake line, which the director runs, get
+			// the config, and stop, which the human runs, gets the ledger
+			// alone.
 			want := []string{
 				"ralph org director status " + tc.flags,
 				"ralph org director status " + tc.flags,
+				"ralph org inbox " + tc.flags,
 				"ralph org director stop --id d3 " + stateDirFlag,
 			}
 			if !slices.Equal(run, want) {

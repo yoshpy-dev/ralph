@@ -1090,7 +1090,8 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 			"approve, the director verbs, and the inbox verbs, which refuse it",
 			"escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), " +
 				"director status reads it and [org.director].auto_merge, merge reads auto_merge, " +
-				"and director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, " +
+				"director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, " +
+				"and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), " +
 				"from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule",
 			"or launches a headless director in herdr (ralph org director start), or with [org.director].launch_cmd in the terminal that command opens.",
 		}},

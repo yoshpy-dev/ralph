@@ -87,7 +87,10 @@ in anything but `guarded`, a `--config` whose `[org].agmsg_home` is a
 relative path, a director already attached (one still starting included),
 and a watch that is stale, stopping, or a `--once` run (start launches
 `ralph org watch --all` when none runs). It also refuses when the
-`--driver` agent (`claude` or `codex`) is not on its own `PATH`.
+`--driver` agent (`claude` or `codex`) is not on its own `PATH`, and when
+`[org.director].wake` has push and `[org.director].wake_cmd` is empty, since
+nothing could then type into the terminal launch_cmd opens (see
+`docs/recipes/director-wake.md`).
 `HERDR_PANE_ID` does not refuse it: you may run start from inside herdr.
 
 Then, in this order:
@@ -150,6 +153,13 @@ stop from another terminal, and that it never runs stop itself.
 their `--json` show a launch_cmd registration with `launch cmd`, its state
 (`starting` or `running`), the terminal name, the pid, and the model (the
 JSON field is `terminal_name`).
+
+By default the director waits on the inbox itself. To have
+`ralph org watch --all` wake it when a new inbox item arrives, set
+`wake = ["push"]` and a `wake_cmd` that types into this terminal, with
+`{target}` replaced by its name `director_<token>`;
+`docs/recipes/director-wake.md` pairs a tmux `wake_cmd` with the tmux
+example above.
 
 ## Stop it
 

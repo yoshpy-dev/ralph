@@ -22,8 +22,9 @@ import (
 // and where status says the wake line goes. Every ledger is under
 // t.TempDir() (named with --state-dir, or found in a temp repository by
 // newLegacyLedgerRepo). start runs the stub herdr or a launch_cmd that only
-// creates a file, and no test runs herdr, a terminal, or osascript; nothing
-// runs a wake_cmd here (the watch does, in stage 8b-1's S3).
+// creates a file, and no test runs herdr, a terminal, or osascript. Only
+// `ralph org watch --all` runs wake_cmd (its tests are in
+// org_watch_test.go); nothing here runs it.
 
 // The wake_cmd values the tests write: one whose {target} needs a
 // --wake-target, and one that needs none. Nothing runs them.

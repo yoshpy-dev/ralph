@@ -168,8 +168,10 @@ auto_merge = false
 # item. "pull": the director waits with `ralph org wait --inbox`. "push":
 # when a new open inbox item arrives, `ralph org watch --all` wakes the
 # director once per item with one fixed line that names the item ids,
-# never the message body. ["pull", "push"]: both. An empty array, any
-# other value, or a value listed twice fails the load.
+# never the message body (one line per cycle for all the new items). An
+# item the director does not ack still reaches you at ack_minutes.
+# ["pull", "push"]: both. An empty array, any other value, or a value
+# listed twice fails the load.
 # `ralph org director attach` (unless given --wake) and
 # `ralph org director start` record this value with the director's
 # registration, and the watch acts on the recorded value, so attach or
