@@ -700,3 +700,155 @@ func TestDirectorCheck_JSON(t *testing.T) {
 		t.Fatalf("JSON = %s, want %s", raw, want)
 	}
 }
+
+// The mark (D4): director-alive.json holds the check and the attached_at of
+// the registration it checked, under the keys id, attached_at, state, how,
+// checked_at, and detail, mode 0644. A second write replaces the first, and
+// the reader reads back what was written; Check gives the check without the
+// attached_at.
+func TestDirectorAlive_WriteAndReadBack(t *testing.T) {
+	dir := t.TempDir()
+	res := DirectorCheckResult{
+		Checked:      true,
+		Check:        DirectorCheck{ID: "d2", State: DirectorCheckEnded, How: DirectorCheckHowAgentEnded, CheckedAt: checkNowUTC},
+		Registration: DirectorRegistration{ID: "d2", AttachedAt: "2026-10-18T08:00:00Z", Launch: DirectorLaunchHerdr},
+	}
+	mark := directorAliveOf(res)
+	want := DirectorAlive{ID: "d2", AttachedAt: "2026-10-18T08:00:00Z", State: DirectorCheckEnded, How: DirectorCheckHowAgentEnded, CheckedAt: checkNowUTC}
+	if mark != want || mark.Check() != res.Check {
+		t.Fatalf("directorAliveOf = %+v (check %+v), want %+v (check %+v)", mark, mark.Check(), want, res.Check)
+	}
+	if err := writeDirectorAlive(dir, mark); err != nil {
+		t.Fatalf("writeDirectorAlive: %v", err)
+	}
+	raw, err := os.ReadFile(DirectorAlivePathIn(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFile := "{\n" +
+		`  "id": "d2",` + "\n" +
+		`  "attached_at": "2026-10-18T08:00:00Z",` + "\n" +
+		`  "state": "ended",` + "\n" +
+		`  "how": "agent_ended",` + "\n" +
+		`  "checked_at": "2026-10-18T09:30:00Z",` + "\n" +
+		`  "detail": ""` + "\n" +
+		"}\n"
+	if string(raw) != wantFile {
+		t.Fatalf("director-alive.json =\n%s\nwant\n%s", raw, wantFile)
+	}
+	if DirectorAlivePathIn(dir) != filepath.Join(dir, "director-alive.json") {
+		t.Fatalf("DirectorAlivePathIn = %s", DirectorAlivePathIn(dir))
+	}
+	info, err := os.Stat(DirectorAlivePathIn(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("mark mode = %v, want 0644", perm)
+	}
+	got, err := ReadDirectorAlive(dir)
+	if err != nil || got == nil || *got != want {
+		t.Fatalf("ReadDirectorAlive = %+v, %v; want %+v", got, err, want)
+	}
+
+	next := DirectorAlive{ID: "d3", AttachedAt: "2026-10-18T09:00:00Z", State: DirectorCheckUnknown, How: DirectorCheckHowAgentGetFailed,
+		CheckedAt: checkNowUTC, Detail: "herdr agent get director_x failed"}
+	if err := writeDirectorAlive(dir, next); err != nil {
+		t.Fatalf("writeDirectorAlive: %v", err)
+	}
+	if got, err := ReadDirectorAlive(dir); err != nil || got == nil || *got != next {
+		t.Fatalf("ReadDirectorAlive after a second write = %+v, %v; want %+v", got, err, next)
+	}
+	if entries := dirEntryNames(t, dir); !slices.Equal(entries, []string{DirectorAliveFileName}) {
+		t.Fatalf("state dir = %q, want only the mark: no temporary file left", entries)
+	}
+}
+
+// The reader: no mark, in a state dir or none at all, is nil with no error;
+// a mark that does not parse, is not an object, or cannot be read (a
+// directory in its place) is an error and no mark. Values are kept as read,
+// a control character in the detail of a hand-edited mark included, for the
+// printers to escape.
+func TestReadDirectorAlive_MissingMalformedAndAsRead(t *testing.T) {
+	for _, dir := range []string{t.TempDir(), filepath.Join(t.TempDir(), "absent")} {
+		if mark, err := ReadDirectorAlive(dir); mark != nil || err != nil {
+			t.Fatalf("ReadDirectorAlive(%s) with no mark = %+v, %v; want nil, nil", dir, mark, err)
+		}
+	}
+	for name, content := range map[string]string{"not JSON": "{", "an array": "[]", "a number for the id": `{"id": 2}`} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(DirectorAlivePathIn(dir), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mark, err := ReadDirectorAlive(dir)
+			if mark != nil || err == nil || !strings.HasPrefix(err.Error(), "org: director: parse "+DirectorAlivePathIn(dir)+": ") {
+				t.Fatalf("ReadDirectorAlive of %q = %+v, %v; want nil and the parse error", content, mark, err)
+			}
+		})
+	}
+	t.Run("a directory in its place", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(DirectorAlivePathIn(dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mark, err := ReadDirectorAlive(dir)
+		if mark != nil || err == nil || !strings.HasPrefix(err.Error(), "org: director: read "+DirectorAlivePathIn(dir)+": ") {
+			t.Fatalf("ReadDirectorAlive of a directory = %+v, %v; want nil and the read error", mark, err)
+		}
+	})
+	t.Run("values as read", func(t *testing.T) {
+		dir := t.TempDir()
+		hand := `{"id":"d1","attached_at":"t","state":"weird","how":"h","checked_at":"c","detail":"a\u001b[2Jb","extra":1}`
+		if err := os.WriteFile(DirectorAlivePathIn(dir), []byte(hand), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mark, err := ReadDirectorAlive(dir)
+		want := DirectorAlive{ID: "d1", AttachedAt: "t", State: "weird", How: "h", CheckedAt: "c", Detail: "a\x1b[2Jb"}
+		if err != nil || mark == nil || *mark != want {
+			t.Fatalf("ReadDirectorAlive = %+v, %v; want %+v", mark, err, want)
+		}
+	})
+}
+
+// A write that fails (a non-empty directory where the mark goes, so the
+// rename fails) is an error and leaves no temporary file.
+func TestWriteDirectorAlive_AFailedWriteLeavesNoTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(DirectorAlivePathIn(dir), "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := writeDirectorAlive(dir, DirectorAlive{ID: "d1", State: DirectorCheckAlive})
+	if err == nil || !strings.HasPrefix(err.Error(), "org: write "+DirectorAlivePathIn(dir)+": ") {
+		t.Fatalf("writeDirectorAlive over a non-empty directory = %v, want the write error", err)
+	}
+	if entries := dirEntryNames(t, dir); !slices.Equal(entries, []string{DirectorAliveFileName}) {
+		t.Fatalf("state dir after a failed write = %q, want no temporary file left", entries)
+	}
+}
+
+// DirectorAliveFor (D8): a mark counts only for the registration whose id
+// and attached_at it holds; one of another id, of the same id attached at
+// another time (director.jsonl removed and the id given again), no mark, and
+// no registration are nil.
+func TestDirectorAliveFor(t *testing.T) {
+	reg := &DirectorRegistration{ID: "d2", AttachedAt: "2026-10-18T08:00:00Z"}
+	mark := &DirectorAlive{ID: "d2", AttachedAt: "2026-10-18T08:00:00Z", State: DirectorCheckAlive, How: DirectorCheckHowAgentFound}
+	if got := DirectorAliveFor(mark, reg); got != mark {
+		t.Fatalf("DirectorAliveFor of its own registration = %+v, want the mark", got)
+	}
+	for name, tc := range map[string]struct {
+		mark *DirectorAlive
+		reg  *DirectorRegistration
+	}{
+		"another id":               {&DirectorAlive{ID: "d1", AttachedAt: mark.AttachedAt}, reg},
+		"another attached_at":      {&DirectorAlive{ID: "d2", AttachedAt: "2026-10-17T08:00:00Z"}, reg},
+		"no attached_at in a mark": {&DirectorAlive{ID: "d2"}, reg},
+		"no mark":                  {nil, reg},
+		"no registration":          {mark, nil},
+	} {
+		if got := DirectorAliveFor(tc.mark, tc.reg); got != nil {
+			t.Errorf("%s: DirectorAliveFor = %+v, want nil", name, got)
+		}
+	}
+}

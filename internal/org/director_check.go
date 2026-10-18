@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -14,10 +17,11 @@ import (
 // docs/plans/active/2026-10-18-org-director-liveness.md, D3): CheckDirector
 // reads whether the current registration that `ralph org director start`
 // wrote is still alive, has ended, or cannot be told, and how it found that
-// out. The plan has the cross-org watch write its result to
-// director-alive.json (D4) and start check before it cleans up a dead
-// registration (D6); this file holds the check alone. The check writes
-// nothing: no director.jsonl line, no herdr close, no key, no signal.
+// out. The cross-org watch checks every cycle and writes the result to
+// director-alive.json (D4; the mark, at the end of this file, and
+// watchAllRun.checkDirector in watch.go), and the plan has start check before
+// it cleans up a dead registration (D6). The check writes nothing: no
+// director.jsonl line, no herdr close, no key, no signal.
 // It reads the registration without the lock, runs ps or herdr, and then
 // reads it again under director.lock, and keeps its result only when the
 // registration did not change in between (directorVersion), so a start that
@@ -381,4 +385,92 @@ func (o *Org) checkDirectorProcess(reg DirectorRegistration) (state, how, detail
 			pid, proc.StartTime, reg.StartTime)
 	}
 	return DirectorCheckAlive, DirectorCheckHowProcessFound, ""
+}
+
+// The mark of the check (plan 2026-10-18-org-director-liveness, D4 and D8):
+// each cycle of `ralph org watch --all` whose CheckDirector checked a
+// registration (Checked) replaces director-alive.json in the org state dir
+// with the result and that registration's attached_at
+// (watchAllRun.checkDirector, watch.go). One watch runs per ledger
+// (watch.lock), so the mark has one writer. A cycle with nothing to check
+// writes nothing and leaves the last mark as it was, so the mark may be of a
+// registration that is no longer current: a reader goes by DirectorAliveFor,
+// which keeps a mark only for the registration whose id and attached_at it
+// holds (an id is given again once director.jsonl is removed, and the
+// attached_at tells the two apart). The mark is never read to decide what to
+// close or stop.
+
+// DirectorAliveFileName is the file name of the mark within the org state
+// dir.
+const DirectorAliveFileName = "director-alive.json"
+
+// DirectorAlive is the mark, director-alive.json: the DirectorCheck of the
+// registration the watch last checked, with AttachedAt, that registration's
+// attached_at (DirectorRegistration.AttachedAt). Its values are read from a
+// file, so a reader keeps them as read and escapes them where it prints
+// them (PrintableInboxText), as it does the registration's.
+type DirectorAlive struct {
+	ID         string `json:"id"`
+	AttachedAt string `json:"attached_at"`
+	State      string `json:"state"`
+	How        string `json:"how"`
+	CheckedAt  string `json:"checked_at"`
+	Detail     string `json:"detail"`
+}
+
+// directorAliveOf is the mark of res, a result with Checked set: its Check
+// and the attached_at of its Registration.
+func directorAliveOf(res DirectorCheckResult) DirectorAlive {
+	c := res.Check
+	return DirectorAlive{ID: c.ID, AttachedAt: res.Registration.AttachedAt, State: c.State, How: c.How, CheckedAt: c.CheckedAt, Detail: c.Detail}
+}
+
+// Check is the mark's DirectorCheck, without the attached_at: the shape of
+// the director.check of status's --json (D8).
+func (m DirectorAlive) Check() DirectorCheck {
+	return DirectorCheck{ID: m.ID, State: m.State, How: m.How, CheckedAt: m.CheckedAt, Detail: m.Detail}
+}
+
+// DirectorAlivePathIn returns the director-alive.json path within an
+// already-resolved org state dir (see WatchAlivePathIn).
+func DirectorAlivePathIn(stateDir string) string {
+	return filepath.Join(stateDir, DirectorAliveFileName)
+}
+
+// writeDirectorAlive replaces the mark in stateDir (writeJSONFileAtomic, as
+// writeWatchAlive does), so a reader sees the old mark or the new, never a
+// part.
+func writeDirectorAlive(stateDir string, mark DirectorAlive) error {
+	return writeJSONFileAtomic(DirectorAlivePathIn(stateDir), mark)
+}
+
+// ReadDirectorAlive reads the mark in stateDir. A missing mark (or state dir)
+// is nil with a nil error: no watch has checked a registration of this
+// ledger yet. A mark that cannot be read or does not parse is an error. The
+// mark returned may be of any registration; pass it through DirectorAliveFor.
+func ReadDirectorAlive(stateDir string) (*DirectorAlive, error) {
+	path := DirectorAlivePathIn(stateDir)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("org: director: read %s: %w", path, err)
+	}
+	var mark DirectorAlive
+	if err := json.Unmarshal(data, &mark); err != nil {
+		return nil, fmt.Errorf("org: director: parse %s: %w", path, err)
+	}
+	return &mark, nil
+}
+
+// DirectorAliveFor returns mark when it is the mark of reg: both are set,
+// and the mark's id and attached_at equal reg's ID and AttachedAt. Otherwise
+// it returns nil, and the reader says reg was not checked yet (D8). It
+// compares the values only; it does not check them.
+func DirectorAliveFor(mark *DirectorAlive, reg *DirectorRegistration) *DirectorAlive {
+	if mark == nil || reg == nil || mark.ID != reg.ID || mark.AttachedAt != reg.AttachedAt {
+		return nil
+	}
+	return mark
 }

@@ -80,16 +80,19 @@ const (
 )
 
 // watchHerdrProbe is a consumption-side extension of HerdrClient (see
-// architecture.md: "prefer interfaces at consumption sites") for the pulse
-// layer's liveness/stall conditions, which need herdr `agent get` --
-// something send/wait/read/stop never call. Defined here rather than added
-// to HerdrClient itself in spawn.go, so that interface's existing
-// implementers (real driver.Herdr, and every pre-Slice-3 test fake) are
-// unaffected. driver.Herdr -- the real implementation
-// internal/cli/org.go's newOrgRuntime wires into every Org.Herdr -- already
-// satisfies this structurally; the pulse cycle type-asserts Org.Herdr
-// against it per call and treats a failed assertion as "probe unavailable"
-// (best effort, never fatal to the pulse loop).
+// architecture.md: "prefer interfaces at consumption sites") for the herdr
+// `agent get` that send/wait/read/stop never call. Two readers need it: the
+// pulse layer's liveness/stall conditions, and the check of a headless
+// director in herdr (CheckDirector, director_check.go; plan
+// 2026-10-18-org-director-liveness, D3), which the cross-org watch runs every
+// cycle. Defined here rather than added to HerdrClient itself in spawn.go,
+// so that interface's existing implementers (real driver.Herdr, and every
+// pre-Slice-3 test fake) are unaffected. driver.Herdr -- the real
+// implementation internal/cli/org.go's newOrgRuntime wires into every
+// Org.Herdr -- already satisfies this structurally; both readers type-assert
+// Org.Herdr against it per call. The pulse cycle treats a failed assertion
+// as "probe unavailable" (best effort, never fatal to the pulse loop), and
+// the director check as unknown (DirectorCheckHowNoAgentGet).
 type watchHerdrProbe interface {
 	AgentGet(ctx context.Context, target string) (string, error)
 }
@@ -451,8 +454,9 @@ const defaultWatchStopPollInterval = time.Second
 // RunWatchAll).
 type WatchAllParams struct {
 	// StatusDir is the org state dir: watch.lock, watch-alive.json,
-	// watch-stop.json, each org's watch-status-<org_id>.json, and
-	// escalations.jsonl live in it (the directory of the manifest the Org
+	// watch-stop.json, each org's watch-status-<org_id>.json,
+	// escalations.jsonl, and the director's director.jsonl and
+	// director-alive.json live in it (the directory of the manifest the Org
 	// reads, in production). Required.
 	StatusDir string
 	// Interval is the pulse-cycle wait (ResolveWatchInterval): <= 0 falls
@@ -510,24 +514,38 @@ type WatchAllParams struct {
 //  1. sends the inbox items past a deadline (SweepInboxDeadlines, with one
 //     InboxDeadlineMemory for the whole run). It needs no herdr, agmsg, or
 //     git, so no org's pulse can hold it back;
-//  2. wakes the attached director for the open inbox items it was not
+//  2. checks the current registration of director.jsonl when it is
+//     headless and not stopped (CheckDirector; plan
+//     2026-10-18-org-director-liveness, D4) and replaces director-alive.json
+//     with the result (DirectorAlive). With nothing to check it writes
+//     nothing and leaves the mark as it was. It writes nothing to
+//     director.jsonl and closes, types, and signals nothing; it takes
+//     director.lock only to read the registration again. It comes after
+//     step 1, so a check that waits on herdr or ps does not hold back that
+//     cycle's sends to the human, and, like step 3, it does not look at
+//     Config.Director.Enabled;
+//  3. wakes the attached director for the open inbox items it was not
 //     woken for yet when its registration wakes by push (WakeDirector, with
-//     one DirectorWakeMemory for the whole run and p.DirectorWakeDir; plan
-//     2026-10-18-org-director-wake, D6). It comes after step 1, so a wake
-//     that waits on wake_cmd or herdr does not hold back that cycle's sends
-//     to the human, and it does not look at Config.Director.Enabled;
-//  3. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
+//     step 2's result, one DirectorWakeMemory for the whole run, and
+//     p.DirectorWakeDir; plan 2026-10-18-org-director-wake, D6), unless step
+//     2 found that registration ended (plan
+//     2026-10-18-org-director-liveness, D5). It comes after step 1, so a
+//     wake that waits on wake_cmd or herdr does not hold back that cycle's
+//     sends to the human, and it does not look at Config.Director.Enabled;
+//  4. runs the pulse cycle (evaluateCycle) of each org in RunningOrgs of
 //     the manifest, in that order, with each org's watch-status file read
 //     once and then kept in memory across cycles. An org that no longer
 //     runs (disbanded) is not evaluated and is dropped;
-//  4. rewrites the mark with the cycle's ts;
-//  5. calls hooks.OnCycle.
+//  5. rewrites the mark with the cycle's ts;
+//  6. calls hooks.OnCycle.
 //
-// A failure in step 1, 2, or 3 (an inbox or a director.jsonl that cannot be
-// read or written, a wake that fails, the manifest, one org's status file)
-// is one line on Stderr and skips only its own part: the other orgs, the
-// mark, and the loop go on. A status file that cannot be read is said once
-// per org rather than every cycle (pulseOrg).
+// A failure in step 1, 2, 3, or 4 (an inbox or a director.jsonl that cannot
+// be read or written, a director-alive.json that cannot be written, a wake
+// that fails, the manifest, one org's status file) is one line on Stderr and
+// skips only its own part: the other orgs, the mark, and the loop go on. A
+// check that fails gives the wake no result, so the wake goes on as before
+// the check existed. A status file that cannot be read is said once per org
+// rather than every cycle (pulseOrg).
 // A cycle does not look at ctx (evaluateCycle). Between cycles RunWatchAll
 // waits Interval in ticks of StopPollInterval and ends after the cycle when
 // ctx is done or a stop request later than its start is there; Cycles > 0
@@ -644,9 +662,10 @@ func (o *Org) newWatchAllRun(p WatchAllParams, hooks WatchHooks, startedAt time.
 	}
 }
 
-// cycle runs steps 1 to 4 of RunWatchAll's cycle: the inbox deadlines, the
-// director's wake, the pulse, and the mark, in that order (plan
-// 2026-10-18-org-director-wake, D6).
+// cycle runs steps 1 to 5 of RunWatchAll's cycle: the inbox deadlines, the
+// director check, the director's wake, the pulse, and the mark, in that order
+// (plan 2026-10-18-org-director-wake, D6; plan
+// 2026-10-18-org-director-liveness, D4 and D5).
 func (w *watchAllRun) cycle() {
 	sweep := w.org.SweepInboxDeadlines(w.org.nowTime(), &w.inboxMemory, w.stderr)
 	if sweep.Err != nil {
@@ -655,16 +674,43 @@ func (w *watchAllRun) cycle() {
 	for _, f := range sweep.Failed {
 		_, _ = fmt.Fprintf(w.stderr, "watchdog: inbox item %s not sent for %s: %v\n", f.ID, f.Reason, f.Err)
 	}
-	w.wake()
+	check := w.checkDirector()
+	w.wake(check)
 	w.pulse()
 	w.writeMark()
 }
 
-// wake runs the wake step of the cycle (WakeDirector). WakeDirector writes
-// its own lines for a failed or skipped wake; an error that kept it from
-// starting is one line here.
-func (w *watchAllRun) wake() {
-	res := w.org.WakeDirector(w.org.nowTime(), w.dir, w.wakeDir, &w.wakeMemory, w.stderr)
+// checkDirector runs the director check of the cycle (CheckDirector on the
+// ledger's director.jsonl, at the cycle's time; plan
+// 2026-10-18-org-director-liveness, D4) and returns its result for the
+// wake, or nil when nothing was checked. A check that fails (director.jsonl
+// cannot be read, or director.lock cannot be taken for the read under it) is
+// one line and returns nil. A result with Checked replaces
+// director-alive.json (writeDirectorAlive, with the attached_at of the
+// registration it checked); a write that fails is one line, and the result
+// is still returned, since the wake goes by the check, not by the mark.
+// Nothing is written when nothing was checked.
+func (w *watchAllRun) checkDirector() *DirectorCheckResult {
+	res, err := w.org.CheckDirector(NewDirectorStore(w.dir), w.org.nowTime())
+	if err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: director check skipped this cycle: %v\n", err)
+		return nil
+	}
+	if !res.Checked {
+		return nil
+	}
+	if err := writeDirectorAlive(w.dir, directorAliveOf(res)); err != nil {
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: director check mark not written: %v\n", err)
+	}
+	return &res
+}
+
+// wake runs the wake step of the cycle (WakeDirector) with check, the
+// cycle's director check (nil for none). WakeDirector writes its own lines
+// for a failed or skipped wake; an error that kept it from starting is one
+// line here.
+func (w *watchAllRun) wake(check *DirectorCheckResult) {
+	res := w.org.WakeDirector(w.org.nowTime(), w.dir, w.wakeDir, check, &w.wakeMemory, w.stderr)
 	if res.Err != nil {
 		_, _ = fmt.Fprintf(w.stderr, "watchdog: director wake skipped this cycle: %v\n", res.Err)
 	}
