@@ -159,8 +159,11 @@ Critical forks: 8b-2 の分け方(8b-2a = この計画、8b-2b = 昇格したセ
 
 - [x] Plan reviewed
 - [x] Plan approved(ユーザーの指示「作成したプランは自動承認します」による自動承認、2026-10-18)
-- [ ] Branch created
-- [ ] Implementation started
+- [x] Branch created(feat/org-director-liveness)
+- [x] Implementation started
+  - S1 d48c0d23(starter の field と check-in の断り)
+  - S2 は 2 つのコミットに分けた。S2a 8f608232(`CheckDirector` と版の結びつけ、driver の `agent_not_found`)、S2b 0756a73a(見張りの確かめ、`director-alive.json`、ended の登録を起こさない)
+  - S2b の印は id に加えて `attached_at` も照合する(director.jsonl を消すと id が振り直されるため)。確かめは起こす手順と同じく `[org.director].enabled` を見ない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
