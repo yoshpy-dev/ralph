@@ -726,7 +726,7 @@ func TestOrgEscalate_MainWorktreeRalphTomlLoadError_AlertsTheHumanAndExitsOne(t 
 	if err == nil {
 		t.Fatal("expected escalate to exit 1 when the main worktree's ralph.toml does not load")
 	}
-	for _, want := range []string{"could not be recorded", "[org.director].enabled", mainToml, "[org].max_orgs must be >= 1, got 0"} {
+	for _, want := range []string{"could not be recorded", "org: load [org.director] from the main worktree's " + mainToml, "[org].max_orgs must be >= 1, got 0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}

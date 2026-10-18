@@ -93,6 +93,14 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"list, in the same order, as JSON, with the guarantee as\n" +
 			"merge_guarantee.\n" +
 			"\n" +
+			"Each --json entry also has pr_lookup, which the text does not show:\n" +
+			"what gh's PR lookup gave for the branch. It is found (its PR is used),\n" +
+			"none (gh returned no PR, or fewer than 1000, all from forks), failed\n" +
+			"(gh failed for the branch, and a note says why), limit_forks (gh\n" +
+			"returned 1000 PRs, all from forks), or skipped for every branch: gh\n" +
+			"is not on PATH, or its PRs were left out because gh read another\n" +
+			"repository than origin's or the check could not be made.\n" +
+			"\n" +
 			"The merge guarantee line says what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head\n" +
 			"with the latest default branch, as ralph doctor last found it and\n" +

@@ -326,11 +326,24 @@ type mergeRules struct {
 	// requires together.
 	checks     int
 	mergeQueue bool // a merge_queue rule
+	// strictRulesets are the rulesets of the up-to-date rules that require
+	// checks of their own, each once, in the order the output names them:
+	// what CheckMergeEnforcement reads the caller's bypass of.
+	// CheckMergeGuarantee does not read it.
+	strictRulesets []mergeStrictRuleset
+}
+
+// mergeStrictRuleset is a ruleset whose up-to-date rule requires checks of
+// its own: its id (0 when the rule names none) and the most checks one of its
+// rules requires.
+type mergeStrictRuleset struct {
+	id, checks int
 }
 
 // ghBranchRule is one element of the rules/branches output.
 type ghBranchRule struct {
 	Type       string `json:"type"`
+	RulesetID  int    `json:"ruleset_id"`
 	Parameters struct {
 		Strict bool `json:"strict_required_status_checks_policy"`
 		Checks []struct {
@@ -381,11 +394,27 @@ func (g *mergeGuaranteeRun) readMergeRules() (rules mergeRules, why string) {
 			if r.Parameters.Strict {
 				rules.strictChecks = max(rules.strictChecks, len(own))
 				rules.strictNoChecks = rules.strictNoChecks || len(own) == 0
+				if len(own) > 0 {
+					rules.addStrictRuleset(r.RulesetID, len(own))
+				}
 			}
 		}
 	}
 	rules.checks = len(required)
 	return rules, ""
+}
+
+// addStrictRuleset adds the ruleset id, whose up-to-date rule requires checks
+// checks of its own, to r.strictRulesets, or raises its count when it is
+// there already.
+func (r *mergeRules) addStrictRuleset(id, checks int) {
+	for i := range r.strictRulesets {
+		if r.strictRulesets[i].id == id {
+			r.strictRulesets[i].checks = max(r.strictRulesets[i].checks, checks)
+			return
+		}
+	}
+	r.strictRulesets = append(r.strictRulesets, mergeStrictRuleset{id: id, checks: checks})
 }
 
 // readMergeClassic is step 5: the distinct checks the classic branch

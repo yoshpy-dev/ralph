@@ -129,10 +129,16 @@ var errFileLockHeld = errors.New("the lock is held")
 // watch.lock), and ralph org regate one from its first check to its end
 // (regate.go's regate.lock), for minutes rather than for the watch's life,
 // with its marker written into the file for a spawn to read once its
-// fileLockHeld check finds the lock held (regateSpawnErr). The lock is tied
-// to the open file, not the process, so two heldFileLocks on the same file
-// in one process exclude each other too, and the OS releases it when the
-// process exits however it exits.
+// fileLockHeld check finds the lock held (regateSpawnErr). ralph org merge
+// holds regate.lock too, from its checks through gh pr merge and the record
+// (merge_run.go's mergeLocked), with the marker emptied and none written, so
+// one regate or merge holds it on a ledger at a time and a spawn goes on
+// while a merge runs. A merge with --wait-checks releases it for every wait
+// in merge_wait.go, so that a regate or another merge can run meanwhile, and
+// takes it again for the checks after the wait. The lock is tied to the open
+// file, not the process, so two heldFileLocks on the same file in one
+// process exclude each other too, and the OS releases it when the process
+// exits however it exits.
 type heldFileLock struct {
 	f *os.File
 }

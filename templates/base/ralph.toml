@@ -125,7 +125,7 @@ watcher_enabled = true
 watcher_model = "haiku"
 
 # [org.director] sets the director switch, the inbox deadlines that
-# `ralph org watch --all` checks, and launch_cmd below.
+# `ralph org watch --all` checks, and auto_merge and launch_cmd below.
 # enabled = true (default): `ralph org escalate` records the item in the org
 # inbox, and the director, or the ack deadline below, takes it, while a
 # `ralph org watch --all` accepts work; with no such watch, escalate sends
@@ -142,6 +142,15 @@ watcher_model = "haiku"
 enabled = true
 ack_minutes = 10
 resolve_minutes = 60
+# auto_merge = true: the director merges, without asking, each PR that
+# `ralph org merge-order` lists as ready, with `ralph org merge`, and
+# re-gates the other branches with `ralph org regate`. auto_merge = false
+# (default): the director only reports the merge order, and the merges are
+# yours; you can still ask the director to merge one PR with
+# `ralph org merge`. Whichever value is set, `ralph org merge` checks the
+# PR, its checks, and the branch protection before it merges. An absent
+# auto_merge loads as false. It is read from the same ralph.toml as enabled.
+auto_merge = false
 # launch_cmd (empty by default: `ralph org director start` opens a herdr
 # workspace) is the command start runs instead to open a terminal for the
 # headless director. It is an array of arguments that ralph runs without a

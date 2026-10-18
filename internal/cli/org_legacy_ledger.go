@@ -20,7 +20,7 @@ const (
 	orgLedgerReadOnly orgLedgerAccess = iota
 	// orgLedgerMutating verbs (`ralph org spawn` / `start` / `send` /
 	// `stop` / `disband` / `watch` / `escalate` / `approve` / `gate` /
-	// `regate` / `inbox ack` / `inbox resolve` / `inbox notify` /
+	// `regate` / `merge` / `inbox ack` / `inbox resolve` / `inbox notify` /
 	// `director attach` / `director detach` / `director start` /
 	// `director stop` / `director launched`) are refused while a legacy
 	// ledger still has active seats.

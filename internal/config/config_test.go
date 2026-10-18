@@ -82,8 +82,25 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("templates/base/ralph.toml not found: %v", err)
 	}
-	if _, err := Load(path); err != nil {
+	cfg, err := Load(path)
+	if err != nil {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
+	}
+	// TestDefaultsLockStep compares [org.director].auto_merge in this template
+	// with RALPH_ORG_DIRECTOR_AUTO_MERGE in scripts/ralph-config.sh and with
+	// Default(), but reads the template with Load, which keeps Default()'s
+	// value for a key the template leaves out: so this test checks that the
+	// template states the default explicitly, and that it loads as Default()'s
+	// value.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\nauto_merge = false\n") {
+		t.Error("templates/base/ralph.toml does not set auto_merge = false in [org.director]")
+	}
+	if got, want := cfg.Org.Director.AutoMerge, Default().Org.Director.AutoMerge; got != want {
+		t.Errorf("templates/base/ralph.toml director.auto_merge = %v, want Default()'s %v", got, want)
 	}
 }
 
@@ -795,12 +812,16 @@ watcher_model = ""
 }
 
 // TestDefault_OrgDirector verifies the [org.director] defaults: the director
-// switch enabled is true, the inbox deadlines are ack_minutes 10 and
-// resolve_minutes 60, and launch_cmd is empty (start uses herdr).
+// switch enabled is true, auto_merge is false (merges stay the human's), the
+// inbox deadlines are ack_minutes 10 and resolve_minutes 60, and launch_cmd
+// is empty (start uses herdr).
 func TestDefault_OrgDirector(t *testing.T) {
 	d := Default().Org.Director
 	if !d.Enabled {
 		t.Error("director.enabled = false, want true")
+	}
+	if d.AutoMerge {
+		t.Error("director.auto_merge = true, want false")
 	}
 	if d.AckMinutes != 10 {
 		t.Errorf("director.ack_minutes = %d, want 10", d.AckMinutes)
@@ -838,19 +859,24 @@ stall_minutes = 20
 	if !cfg.Org.Director.Enabled {
 		t.Error("director.enabled = false, want true for an absent [org.director]")
 	}
+	if cfg.Org.Director.AutoMerge {
+		t.Error("director.auto_merge = true, want false for an absent [org.director]")
+	}
 }
 
 // TestLoad_OrgDirectorRoundTrip verifies explicit [org.director] values
 // round-trip through Load() unchanged, including a resolve_minutes shorter
-// than ack_minutes (the two deadlines are independent) and enabled = false,
-// and that setting one key leaves the others at their defaults (a section
-// without enabled loads as true).
+// than ack_minutes (the two deadlines are independent), enabled = false, and
+// auto_merge = true, and that setting one key leaves the others at their
+// defaults (a section without enabled loads as true, one without auto_merge
+// as false).
 func TestLoad_OrgDirectorRoundTrip(t *testing.T) {
 	t.Run("all keys", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "ralph.toml")
 		content := `[org.director]
 enabled = false
+auto_merge = true
 ack_minutes = 25
 resolve_minutes = 5
 `
@@ -863,6 +889,9 @@ resolve_minutes = 5
 		}
 		if cfg.Org.Director.Enabled {
 			t.Error("director.enabled = true, want false")
+		}
+		if !cfg.Org.Director.AutoMerge {
+			t.Error("director.auto_merge = false, want true")
 		}
 		if cfg.Org.Director.AckMinutes != 25 {
 			t.Errorf("director.ack_minutes = %d, want 25", cfg.Org.Director.AckMinutes)
@@ -894,15 +923,21 @@ ack_minutes = 1
 		if !cfg.Org.Director.Enabled {
 			t.Error("director.enabled = false, want true for a section without enabled")
 		}
+		if cfg.Org.Director.AutoMerge {
+			t.Error("director.auto_merge = true, want false for a section without auto_merge")
+		}
 	})
 
 	tests := []struct {
-		name        string
-		content     string
-		wantEnabled bool
+		name          string
+		content       string
+		wantEnabled   bool
+		wantAutoMerge bool
 	}{
-		{"enabled = true", "[org.director]\nenabled = true\n", true},
-		{"enabled = false alone", "[org.director]\nenabled = false\n", false},
+		{"enabled = true", "[org.director]\nenabled = true\n", true, false},
+		{"enabled = false alone", "[org.director]\nenabled = false\n", false, false},
+		{"auto_merge = true alone", "[org.director]\nauto_merge = true\n", true, true},
+		{"auto_merge = false alone", "[org.director]\nauto_merge = false\n", true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -917,12 +952,36 @@ ack_minutes = 1
 			if cfg.Org.Director.Enabled != tt.wantEnabled {
 				t.Errorf("director.enabled = %v, want %v", cfg.Org.Director.Enabled, tt.wantEnabled)
 			}
+			if cfg.Org.Director.AutoMerge != tt.wantAutoMerge {
+				t.Errorf("director.auto_merge = %v, want %v", cfg.Org.Director.AutoMerge, tt.wantAutoMerge)
+			}
 			def := Default().Org.Director
 			if cfg.Org.Director.AckMinutes != def.AckMinutes || cfg.Org.Director.ResolveMinutes != def.ResolveMinutes {
 				t.Errorf("director deadlines = %d, %d, want defaults %d, %d",
 					cfg.Org.Director.AckMinutes, cfg.Org.Director.ResolveMinutes, def.AckMinutes, def.ResolveMinutes)
 			}
 		})
+	}
+}
+
+// TestLoad_OrgDirectorAutoMergeWrongType verifies an auto_merge that is not
+// a bool (a string, "true" included, or a number) fails Load at decoding
+// rather than loading as either value (plan 2026-10-17-org-auto-merge, AC2).
+// The decoder's message names the Go field, not the key, so only the error
+// is checked, as for launch_cmd.
+func TestLoad_OrgDirectorAutoMergeWrongType(t *testing.T) {
+	for _, content := range []string{
+		"[org.director]\nauto_merge = \"yes\"\n",
+		"[org.director]\nauto_merge = \"true\"\n",
+		"[org.director]\nauto_merge = 1\n",
+	} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, err := Load(path); err == nil {
+			t.Errorf("Load(%q): err = nil (auto_merge = %v), want a decode error", content, cfg.Org.Director.AutoMerge)
+		}
 	}
 }
 

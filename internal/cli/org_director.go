@@ -45,7 +45,7 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 			"id, so a session that was replaced is refused and need not detach;\n" +
 			"--force ends the current registration whatever its id, for a human\n" +
 			"cleaning up. status shows the registration, the headless directors that\n" +
-			"are still open, and [org.director].enabled.\n" +
+			"are still open, [org.director].enabled, and [org.director].auto_merge.\n" +
 			"\n" +
 			"The registration does not change what `ralph org escalate` does:\n" +
 			"[org.director].enabled and the cross-org watch decide that (see\n" +
@@ -228,11 +228,12 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show the director registration of the ledger and [org.director].enabled",
+		Short: "Show the director registration of the ledger, [org.director].enabled, and auto_merge",
 		Long: "ralph org director status shows [org.director].enabled, read as\n" +
-			"`ralph org escalate` reads it, and the current director registration of\n" +
-			"the ledger: the director: line of `ralph status` (attached, not\n" +
-			"attached, disabled, or unreadable), then enabled and, when a director is\n" +
+			"`ralph org escalate` reads it, [org.director].auto_merge, read from the\n" +
+			"same ralph.toml, and the current director registration of the ledger:\n" +
+			"the director: line of `ralph status` (attached, not attached, disabled,\n" +
+			"or unreadable), then enabled, auto_merge and, when a director is\n" +
 			"attached, the registration's fields, or all of it as JSON with --json.\n" +
 			"For a headless director (ralph org director start) the fields add its\n" +
 			"state (starting or running), model, permission mode, token, workspace,\n" +
@@ -244,6 +245,11 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"closed with `ralph org director stop --id <id>`.\n" +
 			"With enabled false the state is disabled whether or not a registration is\n" +
 			"recorded; one that is still recorded is named and its fields are shown.\n" +
+			"The director: line ends with what auto_merge means: with false, merges\n" +
+			"are left to the human; with true, the director (once one is attached)\n" +
+			"merges the PRs `ralph org merge-order` lists as ready with\n" +
+			"`ralph org merge`, without asking. With enabled false, auto_merge = true\n" +
+			"has no effect, and the line says so.\n" +
 			"The registration does not tell whether its session is still running.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -251,7 +257,7 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report := readOrgDirectorReport(rt.stateDir, rt.cfg.Director.Enabled)
+			report := readOrgDirectorReport(rt.stateDir, rt.cfg.Director)
 			warnDirectorDamage(cmd.ErrOrStderr(), rt.store.Path(), report)
 			if jsonOut {
 				return writeIndentedJSON(cmd.OutOrStdout(), report)
@@ -282,9 +288,10 @@ func checkOrgDirectorDriver(verb, driverName string) error {
 // orgDirectorRuntime is what the director verbs work on: the registration
 // store of the ledger, the state dir org.ResolveOrgStateDir resolved with its
 // source, the --state-dir the printed commands repeat
-// (orgInboxHintStateDir), and the [org] config with Director.Enabled read by
-// withMainWorktreeDirectorEnabled (the zero value for detach and stop, which
-// read none, and for start, which loads its own: startDirector).
+// (orgInboxHintStateDir), and the [org] config with Director.Enabled and
+// Director.AutoMerge read by withMainWorktreeDirectorEnabled (the zero value
+// for detach and stop, which read none, and for start, which loads its own:
+// startDirector).
 type orgDirectorRuntime struct {
 	store          *org.DirectorStore
 	stateDir       string
@@ -297,12 +304,13 @@ type orgDirectorRuntime struct {
 // registration belongs to the whole ledger, so an --org-id is refused rather
 // than ignored, as the inbox verbs refuse it (newOrgInboxRuntime). access
 // is the verb's orgLedgerAccess for guardLegacyOrgStateDir. loadConfig is
-// set for attach and status, which read [org.director].enabled: for them a
-// ralph.toml that does not load, or a main worktree ralph.toml that does
-// not, is an error. detach and stop pass false and read neither, so a config
-// that does not load does not block ending a registration (self-review L4 of
-// org-director-attach); start passes false and loads the config itself, by
-// withMainWorktreeDirectorStartConfig's rule.
+// set for attach and status, which read [org.director].enabled (status
+// auto_merge too): for them a ralph.toml that does not load, or a main
+// worktree ralph.toml that does not, is an error. detach and stop pass false
+// and read neither, so a config that does not load does not block ending a
+// registration (self-review L4 of org-director-attach); start passes false
+// and loads the config itself, by withMainWorktreeDirectorStartConfig's
+// rule.
 func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string, access orgLedgerAccess, loadConfig bool) (*orgDirectorRuntime, error) {
 	if cmd.Flags().Changed("org-id") {
 		return nil, fmt.Errorf("org: %s: --org-id does not apply: the director registration belongs to the whole ledger, not to one org", verb)
@@ -465,10 +473,12 @@ const (
 
 // orgDirectorReport is the director switch and registration of a ledger as
 // `ralph status` (its director: line and director key) and `ralph org
-// director status` report them, and their --json wire shape. State is
-// disabled when Enabled is false, whatever the registration; otherwise
-// unreadable when director.jsonl could not be read, attached when a
-// registration is current, and not_attached. Registration is the current
+// director status` report them, and their --json wire shape. AutoMerge is
+// [org.director].auto_merge, read from the same ralph.toml as Enabled and
+// always present in the JSON, false included; it does not change State.
+// State is disabled when Enabled is false, whatever the registration;
+// otherwise unreadable when director.jsonl could not be read, attached when
+// a registration is current, and not_attached. Registration is the current
 // registration (null when there is none or the file could not be read); a
 // headless one carries its launch, state, token, model, permission mode,
 // workspace, and pane (org.DirectorRegistration), and one with launch cmd
@@ -480,6 +490,7 @@ const (
 // and CorruptLines and IgnoredEvents the counts of org.DirectorReadResult.
 type orgDirectorReport struct {
 	Enabled       bool                            `json:"enabled"`
+	AutoMerge     bool                            `json:"auto_merge"`
 	State         string                          `json:"state"`
 	Registration  *orgDirectorReportRegistration  `json:"registration"`
 	OpenHeadless  []orgDirectorReportRegistration `json:"open_headless,omitempty"`
@@ -510,10 +521,10 @@ func newOrgDirectorReportRegistration(reg org.DirectorRegistration) orgDirectorR
 }
 
 // readOrgDirectorReport reads the registration of the ledger at stateDir
-// (org.DirectorStore.Read, no lock) into an orgDirectorReport with enabled
-// as the switch.
-func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
-	report := orgDirectorReport{Enabled: enabled}
+// (org.DirectorStore.Read, no lock) into an orgDirectorReport with
+// director's Enabled as the switch and its AutoMerge.
+func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) orgDirectorReport {
+	report := orgDirectorReport{Enabled: director.Enabled, AutoMerge: director.AutoMerge}
 	res, err := org.NewDirectorStore(stateDir).Read()
 	switch {
 	case err != nil:
@@ -530,7 +541,7 @@ func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
 		}
 	}
 	report.CorruptLines, report.IgnoredEvents = res.CorruptLines, res.IgnoredEvents
-	if !enabled {
+	if !director.Enabled {
 		report.State = orgDirectorStateDisabled
 	}
 	return report
@@ -539,9 +550,11 @@ func readOrgDirectorReport(stateDir string, enabled bool) orgDirectorReport {
 // orgDirectorLine is the one director: line that `ralph status` and `ralph
 // org director status` print for r. A headless registration adds its state,
 // model, pane, and workspace (for a launch cmd, the launch, the terminal
-// name, and the pid: orgDirectorLaunchDetails), and the open headless
-// registrations that are not current are named at the end
-// (orgDirectorOpenHeadlessNote). The values
+// name, and the pid: orgDirectorLaunchDetails). Attached and not attached
+// end with what [org.director].auto_merge means (orgDirectorAutoMergeClause),
+// and disabled says that auto_merge = true has no effect; unreadable says
+// nothing of it. The open headless registrations that are not current are
+// named at the end (orgDirectorOpenHeadlessNote). The values
 // from director.jsonl, which a human can edit, have their control
 // characters escaped (inboxField), so the line stays one line. The stop
 // commands it names repeat hintStateDir as --state-dir
@@ -565,9 +578,12 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 			details += ", pane " + inboxField(reg.PaneID)
 		}
 		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- the registration does not tell whether its session is still running; " +
-			"inbox items it does not ack reach the human at the ack deadline" + note
+			"inbox items it does not ack reach the human at the ack deadline" + orgDirectorAutoMergeClause(r.AutoMerge, true) + note
 	case orgDirectorStateDisabled:
 		state := "[org.director].enabled = false"
+		if r.AutoMerge {
+			state += ", so [org.director].auto_merge = true has no effect"
+		}
 		switch {
 		case r.Error != "":
 			state += "; director.jsonl cannot be read: " + inboxField(r.Error)
@@ -582,7 +598,24 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 	case orgDirectorStateUnreadable:
 		return "director: unreadable (" + inboxField(r.Error) + ")"
 	}
-	return "director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work" + note
+	return "director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work" +
+		orgDirectorAutoMergeClause(r.AutoMerge, false) + note
+}
+
+// orgDirectorAutoMergeClause is the part of the director: line that says,
+// while the switch is on, what [org.director].auto_merge means: with false,
+// merges are left to the human; with true, the director merges the PRs
+// `ralph org merge-order` lists as ready with `ralph org merge` without
+// asking, once one is attached when attached is false (plan
+// 2026-10-17-org-auto-merge, AC2).
+func orgDirectorAutoMergeClause(autoMerge, attached bool) string {
+	switch {
+	case !autoMerge:
+		return "; merges are left to the human ([org.director].auto_merge = false)"
+	case attached:
+		return "; the director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
+	}
+	return "; once attached, a director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
 }
 
 // orgDirectorHerdrIDs is ", pane <id>" and ", workspace <id>" for the herdr
@@ -653,17 +686,19 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 }
 
 // printOrgDirectorReport prints `ralph org director status`'s text form: the
-// director: line (orgDirectorLine), enabled, and, when a registration is
-// current, one line per field of it, with control characters escaped. The
-// fields of a headless registration (launch to workspace_id) and pane_id are
-// left out when not set, so a promoted session's lines are those of stage
-// 8a-1, and so are pid, start_time, and terminal_name, which only a launch
-// cmd has (plan 2026-10-16-org-director-launch-cmd, AC8). Then one
+// director: line (orgDirectorLine), enabled, auto_merge, and, when a
+// registration is current, one line per field of it, with control
+// characters escaped. The fields of a headless registration (launch to
+// workspace_id) and pane_id are left out when not set, so a promoted
+// session's lines are those of stage 8a-1 (with auto_merge after enabled),
+// and so are pid, start_time, and terminal_name, which only a launch cmd
+// has (plan 2026-10-16-org-director-launch-cmd, AC8). Then one
 // open_headless line per open headless registration that is not current.
 // hintStateDir is orgDirectorLine's.
 func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir string) {
 	_, _ = fmt.Fprintln(w, orgDirectorLine(r, hintStateDir))
 	_, _ = fmt.Fprintf(w, "enabled: %t\n", r.Enabled)
+	_, _ = fmt.Fprintf(w, "auto_merge: %t\n", r.AutoMerge)
 	if reg := r.Registration; reg != nil {
 		for _, f := range []struct{ name, value string }{
 			{"id", reg.ID}, {"driver", reg.Driver}, {"wake", strings.Join(reg.Wake, ",")},

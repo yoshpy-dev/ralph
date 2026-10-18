@@ -1474,7 +1474,8 @@ func TestOrgDirectorAttachReplace_AHeadlessDirectorNamesItsStop(t *testing.T) {
 // in JSON. A promoted session's lines keep their 8a-1 form (also
 // TestOrgDirector_AttachReplaceAndDetachByID).
 func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
+		directorAutoMergeOff
 	stateDir := t.TempDir()
 	store := org.NewDirectorStore(stateDir)
 	who := org.DirectorWho{User: "alice", Cwd: "/work"}
@@ -1483,7 +1484,7 @@ func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
 
 	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	want := "director: attached d1 (driver=codex, headless starting, model=gpt-6-astra, workspace w-1, attached at " + ts + ", by alice)" + tail + "\n" +
-		"enabled: true\nid: d1\ndriver: codex\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
+		"enabled: true\nauto_merge: false\nid: d1\ndriver: codex\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
 		"launch: herdr\nstate: starting\nmodel: gpt-6-astra\npermission_mode: autonomous\ntoken: " + d1.Token + "\nworkspace_id: w-1\n"
 	if stdout != want {
 		t.Errorf("status of a starting d1 =\n%s\nwant\n%s", stdout, want)
@@ -2354,7 +2355,7 @@ func TestOrgDirectorStop_LaunchCmdEndsTheProcessAndLeavesTheTerminal(t *testing.
 		t.Fatalf("status: %v (output: %s)", err, out)
 	}
 	wantLine := fmt.Sprintf("director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name %s, pid %d, attached at %s%s) -- "+
-		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline",
+		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"+directorAutoMergeOff,
 		name, launched.PID, att.TS, by)
 	if got := statusDirectorLine(t, out); got != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", got, wantLine)
@@ -2699,7 +2700,8 @@ func TestOrgDirectorDetach_ALaunchCmdDirectorNamesItsStop(t *testing.T) {
 // and on its open_headless line. The pid is made up: nothing reads or
 // signals it.
 func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
-	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+	const tail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
+		directorAutoMergeOff
 	stateDir := t.TempDir()
 	d1 := seedCmdHeadless(t, stateDir)
 	name, ts := "director_"+d1.Token, d1.AttachedAt
@@ -2711,7 +2713,7 @@ func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
 	checkInDirector(t, stateDir, d1, 4242, directorTestStartTime)
 	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	want := "director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name " + name + ", pid 4242, attached at " + ts + ", by alice)" + tail + "\n" +
-		"enabled: true\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
+		"enabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
 		"launch: cmd\nstate: running\nmodel: opus\npermission_mode: autonomous\ntoken: " + d1.Token + "\npid: 4242\nstart_time: " + directorTestStartTime +
 		"\nterminal_name: " + name + "\n"
 	if stdout != want {

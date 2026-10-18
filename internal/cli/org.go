@@ -44,16 +44,19 @@ func newOrgCmd() *cobra.Command {
 			"in the order their PRs may be merged, from those records and origin's\n" +
 			"branches. `ralph org regate` merges the default branch into a disbanded\n" +
 			"feature org's branch, runs the gate on it, and pushes it, so a branch\n" +
-			"another PR's merge moved behind is ready again. `ralph org director`\n" +
+			"another PR's merge moved behind is ready again. `ralph org merge`\n" +
+			"merges, with gh, the PR of a branch merge-order lists as ready, once it\n" +
+			"has checked the PR, its checks, and GitHub's protection of the default\n" +
+			"branch again, and records the merge. `ralph org director`\n" +
 			"registers the interactive session the human talks to as the director\n" +
 			"of the ledger, or launches a headless director in herdr (ralph org\n" +
 			"director start), or with [org.director].launch_cmd in the terminal\n" +
 			"that command opens.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate, director attach, and director status read [org.director].enabled, and director start reads it with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled, director status reads it and [org.director].auto_merge, merge reads auto_merge, and director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -73,6 +76,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgGateCmd(&orgID, &stateDir, &configPath),
 		newOrgRegateCmd(&stateDir, &configPath),
 		newOrgMergeOrderCmd(&stateDir, &configPath),
+		newOrgMergeCmd(&stateDir, &configPath),
 	)
 
 	return cmd
@@ -172,10 +176,11 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
 // another directory, or any other source, cfg is returned unchanged. No
 // other setting is taken from the main worktree here; escalate, director
-// attach and status, and `ralph status` take Director.Enabled by the same
-// rule (withMainWorktreeDirectorEnabled), and director start the settings
-// of the headless director (withMainWorktreeDirectorStartConfig). A main
-// worktree ralph.toml that fails to load is an error, not a fallback.
+// attach and status, merge, and `ralph status` take Director.Enabled and
+// Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
+// and director start the settings of the headless director
+// (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
+// fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -189,31 +194,37 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 	return cfg, nil
 }
 
-// withMainWorktreeDirectorEnabled returns cfg with Director.Enabled (the
-// director switch, [org.director].enabled) taken from <main worktree
-// root>/ralph.toml, by the rule withMainWorktreeOrgLimits follows: only when
-// configPath is empty and the ledger is the main worktree's
-// (org.LedgerMainWorktreeRoot), with the built-in default (true) when that
-// file does not exist. A feature org's leader escalates from its feature
-// worktree, whose ralph.toml it can change, so that copy does not choose
-// whether its items are left to the director (plan
-// 2026-10-14-org-director-attach, D6). With --config, or a ledger that is
-// not the main worktree's, cfg is returned unchanged. No other setting is
-// taken. A main worktree ralph.toml that fails to load is an error, which
+// withMainWorktreeDirectorEnabled returns cfg with two values of
+// [org.director], not only the Enabled its name says: Director.Enabled (the
+// director switch, [org.director].enabled) and Director.AutoMerge
+// ([org.director].auto_merge, the mark the /director skill reads for merging
+// without asking), both taken from <main worktree root>/ralph.toml, by the
+// rule withMainWorktreeOrgLimits follows: only when configPath is empty and
+// the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
+// built-in defaults (true and false) when that file does not exist. A
+// feature org's leader escalates from its feature worktree, whose ralph.toml
+// it can change, so that copy does not choose whether its items are left to
+// the director (plan 2026-10-14-org-director-attach, D6), nor whether the
+// director merges its PR without asking (plan 2026-10-17-org-auto-merge,
+// AC2). With --config, or a ledger that is not the main worktree's, cfg is
+// returned unchanged. No other setting is taken; escalate goes by Enabled
+// alone. A main worktree ralph.toml that fails to load is an error, which
 // `ralph org escalate` handles like a ralph.toml that does not load, `ralph
-// org director attach` and `status` return, and `ralph status` warns about
-// before it shows the built-in default (statusDirectorEnabled). A verb that
-// reports or acts on the switch reads it through this function, so it sees
-// the value escalate goes by.
+// org director attach` and `status` and `ralph org merge` return, and `ralph
+// status` warns about before it shows the built-in defaults
+// (statusDirectorConfig). A verb that reports or acts on the switch or on
+// auto_merge reads it through this function, so it sees the value escalate
+// and the director go by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director] from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
 	}
 	cfg.Director.Enabled = mainCfg.Director.Enabled
+	cfg.Director.AutoMerge = mainCfg.Director.AutoMerge
 	return cfg, nil
 }
 

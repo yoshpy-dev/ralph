@@ -4,12 +4,15 @@
 // manifest, and tri-state model receipts. It has no cobra wiring, which
 // lives in internal/cli/org.go, and reaches herdr and agmsg only through
 // the adapters in internal/org/driver. It runs a few other commands itself
-// with exec.Command: git (statedir.go, watch.go, feature.go, gate.go, and
-// `git ls-remote`, plus `git remote get-url origin` once gh returned a PR,
-// in mergeorder.go), scripts/ralph-worktree.sh (feature.go),
-// scripts/run-static-verify.sh and scripts/run-test.sh of a feature worktree
-// (gate_run.go), osascript (watch.go), gh (mergeorder.go) and `claude -p`
-// (watcher.go).
+// with exec.Command: git (statedir.go, watch.go, feature.go, gate.go,
+// regate_git.go for Regate's fetches, merge, and push, `git ls-remote`, plus
+// `git remote get-url origin` once gh returned a PR, in mergeorder.go, `git
+// remote get-url origin` in mergeguarantee.go, and both in merge.go),
+// scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
+// scripts/run-test.sh of a feature worktree (gate_run.go), osascript
+// (watch.go), gh (mergeorder.go, mergeguarantee.go, mergeenforce.go,
+// merge.go, and merge_run.go), ps and [org.director].launch_cmd
+// (director_cmd.go), and `claude -p` (watcher.go).
 package org
 
 // Saga/event name constants recorded in ManifestEvent.Event.
@@ -84,6 +87,24 @@ const (
 	// count as running.
 	EventGatePassed = "gate_passed"
 	EventGateFailed = "gate_failed"
+	// EventPRMerged is an org-level, non-state event (SeatID empty, absent
+	// from stateEvents below) that only `ralph org merge` writes (Merge,
+	// merge_run.go): gh pr merge merged the PR of a branch ralph org
+	// merge-order listed as ready, and gh pr view read the PR back as MERGED
+	// at the gate's head into the default branch. It is written once per
+	// merge, under the org of the branch's latest binding (else of its latest
+	// gate record), Details `branch=<branch> pr=<number> head=<the head the gate
+	// passed> method=<merge, squash or rebase> merge_commit=<sha, or unknown
+	// when gh gave none> auto_merge=<true|false>`. auto_merge= is the value of
+	// [org.director].auto_merge when the merge ran; it does not say whether
+	// the director merged without asking, since a merge a human asked for
+	// records the same value. A refusal and a merge that failed record
+	// none. Roster skips it like every org-level event, so stop --all finds
+	// no seat in it; it makes no org count as running (RunningOrgs, which
+	// max_orgs counts) nor a target of disband --all (orgsToDisband), and the
+	// watch does not count it as leader activity (leaderActivityEventCount).
+	// ralph org merge-order does not read it.
+	EventPRMerged = "pr_merged"
 )
 
 // stateEvents are the event types that drive seat status derivation

@@ -90,13 +90,15 @@ RALPH_ORG_WATCHDOG_WATCHER_ENABLED="${RALPH_ORG_WATCHDOG_WATCHER_ENABLED:-true}"
 RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
 # RALPH_ORG_DIRECTOR_* mirror [org.director] (enabled, the director switch of
 # `ralph org escalate`; ack_minutes/resolve_minutes, the inbox deadlines of
-# `ralph org watch --all`). Kept unexported for the same reason as
-# RALPH_ORG_AGMSG_HOME above. These vars exist only so the three lock-step
-# surfaces agree on the default values; no `ralph org` verb reads them from
-# the environment.
+# `ralph org watch --all`; auto_merge, the mark the /director skill reads
+# before it merges with `ralph org merge` without asking). Kept unexported for
+# the same reason as RALPH_ORG_AGMSG_HOME above. These vars exist only so the
+# three lock-step surfaces agree on the default values; no `ralph org` verb
+# reads them from the environment.
 RALPH_ORG_DIRECTOR_ENABLED="${RALPH_ORG_DIRECTOR_ENABLED:-true}"
 RALPH_ORG_DIRECTOR_ACK_MINUTES="${RALPH_ORG_DIRECTOR_ACK_MINUTES:-10}"
 RALPH_ORG_DIRECTOR_RESOLVE_MINUTES="${RALPH_ORG_DIRECTOR_RESOLVE_MINUTES:-60}"
+RALPH_ORG_DIRECTOR_AUTO_MERGE="${RALPH_ORG_DIRECTOR_AUTO_MERGE:-false}"
 # RALPH_ORG_APPROVAL_MODE mirrors [org.approval].mode (per-plan|split, how
 # the plan of an org from `ralph org start --plan` is approved). Kept
 # unexported for the same reason as RALPH_ORG_AGMSG_HOME above. This var

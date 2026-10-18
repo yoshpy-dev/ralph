@@ -78,10 +78,11 @@ type OrgConfig struct {
 	// watch`. See OrgWatchdogConfig's doc comment.
 	Watchdog OrgWatchdogConfig `toml:"watchdog"`
 	// Director holds the director switch (whether `ralph org escalate`
-	// leaves an inbox item to the director and the ack deadline), the inbox
-	// deadlines that `ralph org watch --all` checks, and the command `ralph
-	// org director start` opens a terminal with instead of herdr. See
-	// OrgDirectorConfig's doc comment.
+	// leaves an inbox item to the director and the ack deadline), the
+	// auto_merge mark the /director skill reads, the inbox deadlines that
+	// `ralph org watch --all` checks, and the command `ralph org director
+	// start` opens a terminal with instead of herdr. See OrgDirectorConfig's
+	// doc comment.
 	Director OrgDirectorConfig `toml:"director"`
 	// Approval holds how a feature org's plan is approved. See
 	// OrgApprovalConfig's doc comment.
@@ -152,7 +153,8 @@ type OrgWatchdogConfig struct {
 
 // OrgDirectorConfig holds the `[org.director]` settings of
 // docs/specs/2026-10-07-org-multi-org-director.md: the director switch
-// Enabled (FR-9), the inbox deadlines that `ralph org watch --all` checks
+// Enabled (FR-9), AutoMerge, whether the director merges ready PRs without
+// asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
 // (FR-6), and LaunchCmd, the terminal of a headless director outside herdr
 // (FR-9's launch (B)).
 type OrgDirectorConfig struct {
@@ -167,6 +169,15 @@ type OrgDirectorConfig struct {
 	// is the main worktree's, so an edit to the ralph.toml of a feature org's
 	// worktree does not switch it.
 	Enabled bool `toml:"enabled"`
+	// AutoMerge is the mark the /director skill reads for whether it may,
+	// without asking, merge each PR `ralph org merge-order` lists as ready
+	// with `ralph org merge` and re-gate the rest with `ralph org regate`
+	// (spec FR-8). When false (the default), the director only reports the
+	// merge order, and merges are the human's. `ralph org merge` runs the
+	// same checks whichever value is set (plan 2026-10-17-org-auto-merge,
+	// D1). It is read from the main worktree's ralph.toml by the same rule
+	// as Enabled.
+	AutoMerge bool `toml:"auto_merge"`
 	// AckMinutes is the ack deadline: an open inbox item that has not been
 	// sent to the human yet is sent once this long after it was escalated.
 	AckMinutes int `toml:"ack_minutes"`
@@ -363,6 +374,7 @@ func Default() Config {
 			},
 			Director: OrgDirectorConfig{
 				Enabled:        true,
+				AutoMerge:      false,
 				AckMinutes:     10,
 				ResolveMinutes: 60,
 			},
@@ -560,7 +572,8 @@ func Load(path string) (Config, error) {
 	// present one) keeps Default()'s value. resolve_minutes may be shorter
 	// than ack_minutes; the two deadlines are checked independently. An
 	// absent or empty launch_cmd (start uses herdr) is valid; a non-empty one
-	// is checked by ValidateDirectorLaunchCmd.
+	// is checked by ValidateDirectorLaunchCmd. enabled and auto_merge need no
+	// check here: toml.Unmarshal already refuses a value that is not a bool.
 	if cfg.Org.Director.AckMinutes < 1 {
 		return cfg, fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
 	}
