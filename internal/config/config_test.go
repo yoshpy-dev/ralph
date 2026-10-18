@@ -1541,6 +1541,36 @@ func TestValidateDirectorWake(t *testing.T) {
 	}
 }
 
+// TestValidateDirectorWakeNamed checks the rule of ValidateDirectorWake
+// under another name, as `ralph org director attach --wake` calls it (plan
+// 2026-10-18-org-director-wake, AC2): each error starts with that name, not
+// the key, and keeps the rest of the key's text; the four valid values pass.
+func TestValidateDirectorWakeNamed(t *testing.T) {
+	for _, wake := range [][]string{{"pull"}, {"push"}, {"pull", "push"}, {"push", "pull"}} {
+		if err := ValidateDirectorWakeNamed("--wake", wake); err != nil {
+			t.Errorf("ValidateDirectorWakeNamed(--wake, %q) = %v, want nil", wake, err)
+		}
+	}
+	for _, tc := range []struct {
+		wake []string
+		want string
+	}{
+		{nil, `--wake: the array must not be empty; the values are "pull" and "push", one or both`},
+		{[]string{""}, `--wake: element 0 "" is not a wake value; the values are "pull" and "push"`},
+		{[]string{"pull", " push"}, `--wake: element 1 " push" is not a wake value; the values are "pull" and "push"`},
+		{[]string{"pull", "pull"}, `--wake: element 1 "pull" repeats element 0; list each value once`},
+	} {
+		err := ValidateDirectorWakeNamed("--wake", tc.wake)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("ValidateDirectorWakeNamed(--wake, %q) = %v, want %q", tc.wake, err, tc.want)
+		}
+		keyed := ValidateDirectorWake(tc.wake)
+		if want := "[org.director].wake" + strings.TrimPrefix(tc.want, "--wake"); keyed == nil || keyed.Error() != want {
+			t.Errorf("ValidateDirectorWake(%q) = %v, want %q", tc.wake, keyed, want)
+		}
+	}
+}
+
 // TestValidateDirectorWakeCmd_EmptyIsValid verifies a nil and an empty
 // wake_cmd pass ValidateDirectorWakeCmd, which Load and later the watch
 // share.

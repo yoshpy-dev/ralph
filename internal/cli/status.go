@@ -253,8 +253,10 @@ func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 // falls back to the built-in defaults too, with its own warning on stderr,
 // instead of failing the command. Only Enabled and AutoMerge of the result
 // follow that rule, and readOrgDirectorReport reads only those two: its other
-// fields (AckMinutes, ResolveMinutes, LaunchCmd) are ./ralph.toml's or the
-// built-in defaults, never the main worktree's.
+// fields (AckMinutes, ResolveMinutes, LaunchCmd, Wake, WakeCmd) are
+// ./ralph.toml's or the built-in defaults, never the main worktree's. The
+// wake the director: line shows is the registration's, recorded at attach or
+// start (plan 2026-10-18-org-director-wake, D3), not Wake.
 func statusDirectorConfig(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) config.OrgDirectorConfig {
 	if !loaded {
 		return cfg.Director

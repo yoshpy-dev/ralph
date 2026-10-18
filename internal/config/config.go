@@ -414,17 +414,28 @@ const (
 // ValidateDirectorWake returns an error naming [org.director].wake and the
 // reason when wake is empty, has a value other than DirectorWakePull and
 // DirectorWakePush, or lists a value twice. The order does not matter. Load
-// calls it; see OrgDirectorConfig.Wake for the rules.
+// calls it; see OrgDirectorConfig.Wake for the rules. It is
+// ValidateDirectorWakeNamed with the key as the name.
 func ValidateDirectorWake(wake []string) error {
+	return ValidateDirectorWakeNamed(directorWakeKey, wake)
+}
+
+// ValidateDirectorWakeNamed is ValidateDirectorWake for a wake given
+// somewhere other than [org.director].wake: its errors start with name in
+// place of the key, such as "--wake" for the flag of `ralph org director
+// attach`, whose value is split on "," into wake (plan
+// 2026-10-18-org-director-wake, D3). The rules and the rest of each error's
+// text are ValidateDirectorWake's.
+func ValidateDirectorWakeNamed(name string, wake []string) error {
 	if len(wake) == 0 {
-		return fmt.Errorf("%s: the array must not be empty; the values are %q and %q, one or both", directorWakeKey, DirectorWakePull, DirectorWakePush)
+		return fmt.Errorf("%s: the array must not be empty; the values are %q and %q, one or both", name, DirectorWakePull, DirectorWakePush)
 	}
 	for i, value := range wake {
 		if value != DirectorWakePull && value != DirectorWakePush {
-			return fmt.Errorf("%s: element %d %q is not a wake value; the values are %q and %q", directorWakeKey, i, value, DirectorWakePull, DirectorWakePush)
+			return fmt.Errorf("%s: element %d %q is not a wake value; the values are %q and %q", name, i, value, DirectorWakePull, DirectorWakePush)
 		}
 		if first := slices.Index(wake, value); first < i {
-			return fmt.Errorf("%s: element %d %q repeats element %d; list each value once", directorWakeKey, i, value, first)
+			return fmt.Errorf("%s: element %d %q repeats element %d; list each value once", name, i, value, first)
 		}
 	}
 	return nil

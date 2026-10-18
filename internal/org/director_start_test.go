@@ -97,6 +97,9 @@ func newDirStartFixture(t *testing.T, tokens ...string) *dirStartFixture {
 	f := &dirStartFixture{o: o, h: &directorHerdr{fakeHerdr: fh}, dir: filepath.Dir(o.Manifest.Path()), cwd: t.TempDir(), env: map[string]string{}}
 	o.Herdr = f.h
 	o.Config.Director.Enabled = true
+	// config.Default's wake: testOrgConfig is hand-built, and start refuses
+	// an empty wake (plan 2026-10-18-org-director-wake, AC3).
+	o.Config.Director.Wake = []string{DirectorWakePull}
 	o.Getenv = func(key string) string { return f.env[key] }
 	o.AgentStartRetryInterval = time.Millisecond
 	f.store = NewDirectorStore(f.dir)
@@ -456,6 +459,45 @@ func TestStartDirector_RefusesBeforeWritingOrCallingHerdr(t *testing.T) {
 		{"permission rule with codex_verified", func(_ *testing.T, f *dirStartFixture, p *DirectorStartParams) {
 			p.Driver, f.o.Config.Permissions.Default, f.o.Config.Permissions.CodexVerified = DirectorDriverCodex, PermissionModeEdits, true
 		}, false, ErrDirectorCodexWorkspaceWrite, nil},
+		// Plan 2026-10-18-org-director-wake, AC3: the wake is checked with
+		// the input checks, since an Org can be built without config.Load.
+		{"an empty wake", func(_ *testing.T, f *dirStartFixture, _ *DirectorStartParams) { f.o.Config.Director.Wake = nil }, false, nil,
+			func(t *testing.T, err error) {
+				if want := `org: director: start: [org.director].wake: the array must not be empty; the values are "pull" and "push", one or both`; err.Error() != want {
+					t.Fatalf("err = %v, want %q", err, want)
+				}
+			}},
+		{"an unknown wake", func(_ *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
+			f.o.Config.Director.Wake = []string{"pull", "tmux"}
+		}, false, nil,
+			func(t *testing.T, err error) {
+				if want := `org: director: start: [org.director].wake: element 1 "tmux" is not a wake value`; !strings.HasPrefix(err.Error(), want) {
+					t.Fatalf("err = %v, want it to start with %q", err, want)
+				}
+			}},
+		// A launch_cmd start that pushes with no wake_cmd is refused before
+		// checkDirectorLaunchCmd, so neither the agent nor ralph is looked
+		// for, and before the codex permission rule.
+		{"launch_cmd, push, and no wake_cmd", func(t *testing.T, f *dirStartFixture, p *DirectorStartParams) {
+			wakeTestLaunchCmd(t, f)
+			f.o.Config.Director.Wake = []string{DirectorWakePush}
+			p.Driver, f.o.Config.Permissions.Default = DirectorDriverCodex, PermissionModeAutonomous
+		}, false, ErrDirectorWakeCmdNeeded, func(t *testing.T, err error) {
+			want := "org: director: start: the wake has push, but [org.director].wake_cmd is empty (wake push), and [org.director].launch_cmd is set: " +
+				"launch_cmd opens a terminal ralph cannot type into, so ralph org watch --all could not wake the director; set [org.director].wake_cmd " +
+				`(its {target} is director_<token>, the name launch_cmd gives the terminal) or use wake = ["pull"]`
+			if err.Error() != want {
+				t.Fatalf("err =\n%v\nwant\n%s", err, want)
+			}
+		}},
+		{"launch_cmd, pull and push, and no wake_cmd", func(t *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
+			wakeTestLaunchCmd(t, f)
+			f.o.Config.Director.Wake = []string{DirectorWakePull, DirectorWakePush}
+		}, false, ErrDirectorWakeCmdNeeded, func(t *testing.T, err error) {
+			if !strings.Contains(err.Error(), "(wake pull,push), and [org.director].launch_cmd is set") {
+				t.Fatalf("err = %v, want it to name the wake pull,push", err)
+			}
+		}},
 		{"watch gate", func(_ *testing.T, f *dirStartFixture, _ *DirectorStartParams) {
 			f.o.WatchGate = func() error {
 				return &WatchGateError{StateDir: f.dir, Liveness: WatchLiveness{State: WatchLivenessNotRunning}}

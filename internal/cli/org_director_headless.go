@@ -76,7 +76,9 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"warning. Without --config, those settings and [org.director].enabled\n" +
 			"are read from the main worktree's ralph.toml when the ledger is the main\n" +
 			"worktree's, so a feature worktree's ralph.toml does not choose them.\n" +
-			"[org.director].launch_cmd is read the same way. The director runs in the\n" +
+			"[org.director].launch_cmd is read the same way. So are\n" +
+			"[org.director].wake, which start records as the director's wake (see\n" +
+			"ralph org director attach --help), and wake_cmd. The director runs in the\n" +
 			"ledger's main worktree root, else in the directory start runs in. With\n" +
 			"--config, the ralph org commands the director's prompt has it run carry\n" +
 			"--config with that file's absolute path, so the director reads the\n" +
@@ -112,21 +114,26 @@ func newOrgDirectorStartCmd(stateDir, configPath *string) *cobra.Command {
 			"set): run start from a terminal outside herdr. start has no --replace.\n" +
 			"With launch_cmd, HERDR_PANE_ID does not refuse start, which runs no\n" +
 			"herdr then, and start is also refused when the --driver agent is not on\n" +
-			"its PATH. Like `ralph org start`, it makes sure a long-running\n" +
-			"`ralph org watch --all` watches the ledger first: it launches one when\n" +
-			"none runs, and is refused when a watch holds the lock but is stale,\n" +
-			"stopping, or a --once run. When a step fails after the registration,\n" +
-			"start closes the pane and workspace it made, records the director\n" +
-			"stopped, and exits 1; what it could not close is printed with the herdr\n" +
-			"commands and the stop command that finish the cleanup. With launch_cmd,\n" +
-			"when launch_cmd fails or runs out its 10 s, no check-in comes within\n" +
-			"--timeout-ms, or the registration is replaced while start waits, start\n" +
-			"stops what checked in by its pid and start time, as stop does, and\n" +
-			"records the director stopped, exits 1, and says that the terminal\n" +
-			"launch_cmd may have opened is left for you to close; a launch script\n" +
-			"that checks in from it afterwards is refused and starts no agent. When\n" +
-			"start cannot confirm that the process ended, it records the director\n" +
-			"detached only and prints the stop command that finishes the cleanup.",
+			"its PATH. It is refused too when [org.director].wake has push and\n" +
+			"wake_cmd is empty: the terminal launch_cmd opens is one ralph cannot\n" +
+			"type into, so set wake_cmd (its {target} is director_<token>) or use\n" +
+			"wake = [\"pull\"]. In herdr, push needs no wake_cmd: the watch types the\n" +
+			"wake line into the director's pane. Like `ralph org start`, it makes\n" +
+			"sure a long-running `ralph org watch --all` watches the ledger first:\n" +
+			"it launches one when none runs, and is refused when a watch holds the\n" +
+			"lock but is stale, stopping, or a --once run. When a step fails after\n" +
+			"the registration, start closes the pane and workspace it made, records\n" +
+			"the director stopped, and exits 1; what it could not close is printed\n" +
+			"with the herdr commands and the stop command that finish the cleanup.\n" +
+			"With launch_cmd, when launch_cmd fails or runs out its 10 s, no check-in\n" +
+			"comes within --timeout-ms, or the registration is replaced while start\n" +
+			"waits, start stops what checked in by its pid and start time, as stop\n" +
+			"does, and records the director stopped, exits 1, and says that the\n" +
+			"terminal launch_cmd may have opened is left for you to close; a launch\n" +
+			"script that checks in from it afterwards is refused and starts no agent.\n" +
+			"When start cannot confirm that the process ended, it records the\n" +
+			"director detached only and prints the stop command that finishes the\n" +
+			"cleanup.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director start", driverName); err != nil {

@@ -75,8 +75,10 @@ func newOrgDirectorCmd(stateDir, configPath *string) *cobra.Command {
 
 func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 	var (
-		driver  string
-		replace bool
+		driver     string
+		replace    bool
+		wakeFlag   string
+		wakeTarget string
 	)
 
 	cmd := &cobra.Command{
@@ -107,6 +109,22 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 			"--config, enabled is read from the main worktree's ralph.toml when the\n" +
 			"ledger is the main worktree's, as `ralph org escalate` reads it.\n" +
 			"\n" +
+			"--wake is how the director learns of a new open inbox item: pull (it\n" +
+			"waits on the inbox with `ralph org wait --inbox`), push, or both\n" +
+			"(pull,push). With push, `ralph org watch --all` wakes it by running\n" +
+			"[org.director].wake_cmd with {target} replaced by --wake-target and\n" +
+			"{text} by one fixed line that names the new items. Without --wake,\n" +
+			"attach records [org.director].wake. attach is refused, and writes\n" +
+			"nothing (with --replace, the current registration stays), when --wake\n" +
+			"has a value other than pull and push or one twice, when the wake\n" +
+			"has push and wake_cmd is empty, when wake_cmd has {target} and no\n" +
+			"--wake-target is given, when --wake-target is given and the wake has no\n" +
+			"push, and when --wake-target is empty, has a control character, is\n" +
+			"longer than 256 characters, or starts with \"-\". Without --config,\n" +
+			"wake and wake_cmd are read from the main worktree's ralph.toml by the\n" +
+			"rule of enabled. The success line adds wake= (and wake_target=) when the\n" +
+			"wake has push: attached d1 (driver=claude, wake=push, wake_target=...).\n" +
+			"\n" +
 			"When no `ralph org watch --all` accepts work on the ledger, attach still\n" +
 			"records the registration and warns on stderr: until one does, escalate\n" +
 			"sends items to the human at once instead of leaving them to the\n" +
@@ -114,6 +132,10 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkOrgDirectorDriver("director attach", driver); err != nil {
+				return err
+			}
+			flagWake, err := checkOrgDirectorAttachWakeFlags(cmd, wakeFlag, wakeTarget)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgDirectorRuntime(cmd, "director attach", *stateDir, *configPath, orgLedgerMutating, true)
@@ -125,9 +147,13 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 					"and leaves nothing to a director; to use one, set [org.director].enabled = true there",
 					orgDirectorEnabledFile(*configPath, rt.stateDir, rt.stateDirSource))
 			}
+			wake, err := rt.attachWake(*configPath, flagWake, wakeTarget)
+			if err != nil {
+				return err
+			}
 			who := orgDirectorCaller()
 			reg, replaced, err := rt.store.Attach(org.DirectorAttach{
-				Driver: driver, Replace: replace, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane,
+				Driver: driver, Replace: replace, Wake: wake, WakeTarget: wakeTarget, User: who.User, Cwd: who.Cwd, HerdrPane: who.HerdrPane,
 			})
 			if err != nil {
 				if errors.Is(err, org.ErrDirectorAttached) {
@@ -135,10 +161,10 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 				}
 				return rt.notRestoredError(err)
 			}
-			line := fmt.Sprintf("attached %s (driver=%s)", reg.ID, reg.Driver)
+			line := fmt.Sprintf("attached %s (driver=%s%s)", reg.ID, reg.Driver, orgDirectorAttachWakeDetails(reg))
 			if replaced != nil {
-				line += fmt.Sprintf(", replacing %s (driver=%s, attached at %s)",
-					inboxField(replaced.ID), inboxField(replaced.Driver), inboxField(replaced.AttachedAt))
+				line += fmt.Sprintf(", replacing %s (driver=%s, attached at %s%s)",
+					inboxField(replaced.ID), inboxField(replaced.Driver), inboxField(replaced.AttachedAt), orgDirectorAttachWakeDetails(*replaced))
 			}
 			out := cmd.OutOrStdout()
 			_, _ = fmt.Fprintln(out, line)
@@ -158,8 +184,81 @@ func newOrgDirectorAttachCmd(stateDir, configPath *string) *cobra.Command {
 
 	cmd.Flags().StringVar(&driver, "driver", "", "the session's agent: claude or codex (required)")
 	cmd.Flags().BoolVar(&replace, "replace", false, "end the current registration and record this one instead of refusing")
+	cmd.Flags().StringVar(&wakeFlag, "wake", "", "how the director learns of a new inbox item: pull, push, or pull,push (default: [org.director].wake); "+
+		"push has ralph org watch --all wake it by running [org.director].wake_cmd with {target} = --wake-target")
+	cmd.Flags().StringVar(&wakeTarget, "wake-target", "", "where [org.director].wake_cmd sends the wake line, its {target} (such as a terminal's handle); "+
+		"only with a wake that has push")
 
 	return cmd
+}
+
+// checkOrgDirectorAttachWakeFlags is attach's check of --wake and
+// --wake-target before anything is read (plan 2026-10-18-org-director-wake,
+// D3 and AC2), as checkOrgDirectorDriver checks --driver. It returns the
+// --wake value split on "," (nothing trimmed), or nil when --wake was not
+// given, and refuses one that config.ValidateDirectorWakeNamed refuses (a
+// value other than pull and push, an empty part, or one twice), naming
+// --wake. A --wake-target that was given, an empty one included, must pass
+// org.ValidateDirectorWakeTarget. Whether the wake can be sent needs the
+// config, so attachWake checks that.
+func checkOrgDirectorAttachWakeFlags(cmd *cobra.Command, wakeFlag, wakeTarget string) ([]string, error) {
+	var wake []string
+	if cmd.Flags().Changed("wake") {
+		wake = strings.Split(wakeFlag, ",")
+		if err := config.ValidateDirectorWakeNamed("--wake", wake); err != nil {
+			return nil, fmt.Errorf("org: director attach: %w", err)
+		}
+	}
+	if cmd.Flags().Changed("wake-target") {
+		if err := org.ValidateDirectorWakeTarget(wakeTarget); err != nil {
+			return nil, fmt.Errorf("org: director attach: --wake-target: %w", err)
+		}
+	}
+	return wake, nil
+}
+
+// attachWake resolves the wake attach records and checks that it can be
+// sent (plan 2026-10-18-org-director-wake, D4 and D9): flagWake, the --wake
+// that checkOrgDirectorAttachWakeFlags returned, else [org.director].wake,
+// and [org.director].wake_cmd, both read by
+// withMainWorktreeDirectorWakeConfig's rule (from the main worktree's
+// ralph.toml when --config is not given and the ledger is the main
+// worktree's), so a feature worktree's ralph.toml chooses neither. It runs
+// org.CheckDirectorAttachWake with target, the --wake-target; a refusal
+// names the file the settings were read from (orgDirectorEnabledFile's
+// rule) and is returned before anything is written. A main worktree
+// ralph.toml that does not load is an error.
+func (rt *orgDirectorRuntime) attachWake(configPath string, flagWake []string, target string) ([]string, error) {
+	cfg, err := withMainWorktreeDirectorWakeConfig(rt.cfg, configPath, rt.stateDir, rt.stateDirSource)
+	if err != nil {
+		return nil, err
+	}
+	wake, read := flagWake, "[org.director].wake_cmd is read from "
+	if wake == nil {
+		wake, read = cfg.Director.Wake, "[org.director].wake and wake_cmd are read from "
+	}
+	if err := org.CheckDirectorAttachWake(wake, target, cfg.Director.WakeCmd); err != nil {
+		return nil, fmt.Errorf("org: director attach: %w; %s%s", err, read, orgDirectorEnabledFile(configPath, rt.stateDir, rt.stateDirSource))
+	}
+	return wake, nil
+}
+
+// orgDirectorAttachWakeDetails is what attach's success line says of reg's
+// wake, inside its parentheses after the driver (plan
+// 2026-10-18-org-director-wake, AC2): nothing for a wake without push, so a
+// pull-only line is the line of stage 8a; else ", wake=" and the wake, and
+// ", wake_target=" and the recorded target when there is one. A replaced
+// registration was read from director.jsonl, which a human can edit, so the
+// values are escaped (inboxField).
+func orgDirectorAttachWakeDetails(reg org.DirectorRegistration) string {
+	if !reg.WakesByPush() {
+		return ""
+	}
+	details := ", wake=" + inboxField(strings.Join(reg.Wake, ","))
+	if reg.WakeTarget != "" {
+		details += ", wake_target=" + inboxField(reg.WakeTarget)
+	}
+	return details
 }
 
 func newOrgDirectorDetachCmd(stateDir, configPath *string) *cobra.Command {
@@ -243,6 +342,10 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"in place of the workspace and pane), and the headless directors that are\n" +
 			"no longer attached but still open are listed (open_headless), to be\n" +
 			"closed with `ralph org director stop --id <id>`.\n" +
+			"The fields show the registration's wake, and wake_target when attach was\n" +
+			"given --wake-target. For a registration whose wake has push, the\n" +
+			"director: line adds wake= and where `ralph org watch --all` sends the\n" +
+			"wake line: the --wake-target, the herdr pane, or the terminal name.\n" +
 			"With enabled false the state is disabled whether or not a registration is\n" +
 			"recorded; one that is still recorded is named and its fields are shown.\n" +
 			"The director: line ends with what auto_merge means: with false, merges\n" +
@@ -291,7 +394,9 @@ func checkOrgDirectorDriver(verb, driverName string) error {
 // (orgInboxHintStateDir), and the [org] config with Director.Enabled and
 // Director.AutoMerge read by withMainWorktreeDirectorEnabled (the zero value
 // for detach and stop, which read none, and for start, which loads its own:
-// startDirector).
+// startDirector). attach reads Director.Wake and Director.WakeCmd on top of
+// it, by withMainWorktreeDirectorWakeConfig (attachWake), so status, which
+// shows the recorded wake, reads neither.
 type orgDirectorRuntime struct {
 	store          *org.DirectorStore
 	stateDir       string
@@ -423,7 +528,10 @@ func (rt *orgDirectorRuntime) notRestoredError(err error) error {
 // for the director verbs, by the rule of withMainWorktreeDirectorEnabled:
 // the --config file, else the main worktree's ralph.toml when the ledger is
 // the main worktree's, else ./ralph.toml (resolveOrgConfig). director start
-// reads [org.roles] from the same file (withMainWorktreeDirectorStartConfig).
+// reads [org.roles] from the same file (withMainWorktreeDirectorStartConfig),
+// and attach and start read [org.director].wake and wake_cmd from it
+// (withMainWorktreeDirectorWakeConfig and that function; plan
+// 2026-10-18-org-director-wake, D9).
 func orgDirectorEnabledFile(configPath, resolvedStateDir, stateDirSource string) string {
 	if configPath != "" {
 		return "the --config file " + configPath
@@ -550,7 +658,10 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 // orgDirectorLine is the one director: line that `ralph status` and `ralph
 // org director status` print for r. A headless registration adds its state,
 // model, pane, and workspace (for a launch cmd, the launch, the terminal
-// name, and the pid: orgDirectorLaunchDetails). Attached and not attached
+// name, and the pid: orgDirectorLaunchDetails). A registration whose wake
+// has push ends its details with the wake and where the watch sends
+// (orgDirectorPushDetails); a pull-only one's line is that of stage 8a.
+// Attached and not attached
 // end with what [org.director].auto_merge means (orgDirectorAutoMergeClause),
 // and disabled says that auto_merge = true has no effect; unreadable says
 // nothing of it. The open headless registrations that are not current are
@@ -577,6 +688,7 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 		if !reg.Headless() && reg.PaneID != "" {
 			details += ", pane " + inboxField(reg.PaneID)
 		}
+		details += orgDirectorPushDetails(reg.DirectorRegistration)
 		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- the registration does not tell whether its session is still running; " +
 			"inbox items it does not ack reach the human at the ack deadline" + orgDirectorAutoMergeClause(r.AutoMerge, true) + note
 	case orgDirectorStateDisabled:
@@ -616,6 +728,24 @@ func orgDirectorAutoMergeClause(autoMerge, attached bool) string {
 		return "; the director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
 	}
 	return "; once attached, a director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)"
+}
+
+// orgDirectorPushDetails is the end of the details of the director: line
+// for a registration whose wake has push (plan
+// 2026-10-18-org-director-wake, AC2): ", wake=" and the wake, then " to "
+// and the target the watch sends to (ResolvedWakeTarget: a promoted
+// session's --wake-target, a herdr pane, or a launch cmd's terminal name)
+// when there is one. For a wake without push it is "". The values come from
+// director.jsonl, so they are escaped (inboxField).
+func orgDirectorPushDetails(reg org.DirectorRegistration) string {
+	if !reg.WakesByPush() {
+		return ""
+	}
+	details := ", wake=" + inboxField(strings.Join(reg.Wake, ","))
+	if target := reg.ResolvedWakeTarget(); target != "" {
+		details += " to " + inboxField(target)
+	}
+	return details
 }
 
 // orgDirectorHerdrIDs is ", pane <id>" and ", workspace <id>" for the herdr
@@ -692,19 +822,29 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 // workspace_id) and pane_id are left out when not set, so a promoted
 // session's lines are those of stage 8a-1 (with auto_merge after enabled),
 // and so are pid, start_time, and terminal_name, which only a launch cmd
-// has (plan 2026-10-16-org-director-launch-cmd, AC8). Then one
-// open_headless line per open headless registration that is not current.
-// hintStateDir is orgDirectorLine's.
+// has (plan 2026-10-16-org-director-launch-cmd, AC8). wake_target follows
+// wake only when a promoted session was attached with --wake-target (plan
+// 2026-10-18-org-director-wake, AC2): a headless registration's target is
+// on its pane_id or terminal_name line. Then one open_headless line per
+// open headless registration that is not current. hintStateDir is
+// orgDirectorLine's.
 func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir string) {
 	_, _ = fmt.Fprintln(w, orgDirectorLine(r, hintStateDir))
 	_, _ = fmt.Fprintf(w, "enabled: %t\n", r.Enabled)
 	_, _ = fmt.Fprintf(w, "auto_merge: %t\n", r.AutoMerge)
 	if reg := r.Registration; reg != nil {
-		for _, f := range []struct{ name, value string }{
-			{"id", reg.ID}, {"driver", reg.Driver}, {"wake", strings.Join(reg.Wake, ",")},
-			{"attached_at", reg.AttachedAt}, {"user", reg.User}, {"cwd", reg.Cwd},
-			{"herdr_pane", yesNo(reg.HerdrPane)},
+		for _, f := range []struct {
+			name, value string
+			omitEmpty   bool
+		}{
+			{"id", reg.ID, false}, {"driver", reg.Driver, false}, {"wake", strings.Join(reg.Wake, ","), false},
+			{"wake_target", reg.WakeTarget, true},
+			{"attached_at", reg.AttachedAt, false}, {"user", reg.User, false}, {"cwd", reg.Cwd, false},
+			{"herdr_pane", yesNo(reg.HerdrPane), false},
 		} {
+			if f.omitEmpty && f.value == "" {
+				continue
+			}
 			_, _ = fmt.Fprintf(w, "%s: %s\n", f.name, inboxField(f.value))
 		}
 		pid := ""
