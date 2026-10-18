@@ -80,9 +80,9 @@ type OrgConfig struct {
 	// Director holds the director switch (whether `ralph org escalate`
 	// leaves an inbox item to the director and the ack deadline), the
 	// auto_merge mark the /director skill reads, the inbox deadlines that
-	// `ralph org watch --all` checks, and the command `ralph org director
-	// start` opens a terminal with instead of herdr. See OrgDirectorConfig's
-	// doc comment.
+	// `ralph org watch --all` checks, the command `ralph org director start`
+	// opens a terminal with instead of herdr, and how the watch wakes the
+	// director (wake, wake_cmd). See OrgDirectorConfig's doc comment.
 	Director OrgDirectorConfig `toml:"director"`
 	// Approval holds how a feature org's plan is approved. See
 	// OrgApprovalConfig's doc comment.
@@ -155,8 +155,9 @@ type OrgWatchdogConfig struct {
 // docs/specs/2026-10-07-org-multi-org-director.md: the director switch
 // Enabled (FR-9), AutoMerge, whether the director merges ready PRs without
 // asking (FR-8), the inbox deadlines that `ralph org watch --all` checks
-// (FR-6), and LaunchCmd, the terminal of a headless director outside herdr
-// (FR-9's launch (B)).
+// (FR-6), LaunchCmd, the terminal of a headless director outside herdr
+// (FR-9's launch (B)), and Wake and WakeCmd, how `ralph org watch --all`
+// wakes the director when a new inbox item arrives (FR-10).
 type OrgDirectorConfig struct {
 	// Enabled is the director switch. When true (the default), `ralph org
 	// escalate` records an item in the org inbox and leaves it to the
@@ -211,6 +212,64 @@ type OrgDirectorConfig struct {
 	// part of such a pair is passed through as written. The command must
 	// return once the terminal is open.
 	LaunchCmd []string `toml:"launch_cmd"`
+	// Wake is how the director learns of a new open inbox item (stage 8b,
+	// FR-10): one or both of these values, in any order:
+	//
+	//   - pull (DirectorWakePull): the director waits on the inbox itself
+	//     with `ralph org wait --inbox`
+	//   - push (DirectorWakePush): when a new open inbox item arrives,
+	//     `ralph org watch --all` wakes the director once per item by sending
+	//     it one fixed line that names the item ids, never the message body,
+	//     with WakeCmd, or, when WakeCmd is empty, as input to the herdr pane
+	//     of a headless director in herdr
+	//
+	// The default is ["pull"]. The watch acts on the wake of the director's
+	// registration in director.jsonl, not on this value: this value is the
+	// wake `ralph org director attach` (when --wake is not given) and
+	// `ralph org director start` record, so a change takes effect at the next
+	// attach or start. Load refuses an empty array, a value other than pull
+	// and push, and a value listed twice (ValidateDirectorWake). It accepts
+	// push with an empty WakeCmd, since whether a director can be pushed
+	// depends on its registration: attach and start check that. Wake is read
+	// from the main worktree's ralph.toml by the same rule as Enabled and
+	// LaunchCmd (when --config is not given and the ledger is the main
+	// worktree's), so an edit to the ralph.toml of a feature org's worktree
+	// does not change it.
+	Wake []string `toml:"wake"`
+	// WakeCmd is the command `ralph org watch --all` runs to wake a director
+	// whose registration's wake has push (Wake). Empty, the default, leaves
+	// only a headless director in herdr able to be pushed, by input to its
+	// herdr pane; a non-empty WakeCmd is used for every registration, that
+	// one included. It is an argv array: the watch runs WakeCmd[0] with the
+	// other elements as its arguments, without a shell, after replacing these
+	// placeholders in every element (ExpandDirectorWakeArg):
+	//
+	//   - {target} (DirectorWakePlaceholderTarget): where the registration
+	//     says to send: the --wake-target of `ralph org director attach`, the
+	//     herdr pane of a headless director in herdr, or director_<token>,
+	//     the terminal name of a director started with LaunchCmd
+	//   - {text} (DirectorWakePlaceholderText): the one fixed line, which
+	//     names the new items' ids and never their message body
+	//
+	// The watch runs WakeCmd in the directory of the ralph.toml it was read
+	// from: the main worktree root under the rule below, the directory of
+	// the --config file, or else the directory the watch started in, whose
+	// ralph.toml it read. A relative WakeCmd[0] that contains "/" is resolved
+	// from that directory; a name without "/" is looked up in PATH. The watch
+	// reads WakeCmd when it starts, so restart the watch after changing it.
+	// WakeCmd is read from the main worktree's ralph.toml by the same rule as
+	// Wake, so a leader, who can edit its feature worktree's ralph.toml,
+	// cannot change what the watch runs.
+	//
+	// A placeholder is found by the same rule as in LaunchCmd: a "{" and the
+	// next "}" with no other brace between them. Load refuses a non-empty
+	// WakeCmd whose first element is empty or whitespace only, whose first
+	// element has any placeholder (the first element is the program to run,
+	// and {target} comes from director.jsonl, which a leader can write, so a
+	// registration must never choose the program), or that has a placeholder
+	// outside the two above in any element (ValidateDirectorWakeCmd). A "{"
+	// or "}" that is not part of such a pair is passed through as written.
+	WakeCmd []string `toml:"wake_cmd"`
 }
 
 // The placeholders of [org.director].launch_cmd (OrgDirectorConfig.LaunchCmd),
@@ -241,58 +300,51 @@ func DirectorLaunchPlaceholders() []string {
 	}
 }
 
+// The [org.director] keys that the errors of the validation and replacement
+// functions below start with.
+const (
+	directorLaunchCmdKey = "[org.director].launch_cmd"
+	directorWakeKey      = "[org.director].wake"
+	directorWakeCmdKey   = "[org.director].wake_cmd"
+)
+
 // directorLaunchPlaceholderPattern finds the placeholders of an element of
-// [org.director].launch_cmd: a "{" and the next "}" with no other brace
-// between them. ValidateDirectorLaunchCmd and ExpandDirectorLaunchArg both
-// use it, so what Load accepts is what start replaces.
+// the two argv settings of [org.director], launch_cmd and wake_cmd: a "{"
+// and the next "}" with no other brace between them. The validation and the
+// replacement of both settings use it, so what Load accepts is what start
+// and the watch replace.
 var directorLaunchPlaceholderPattern = regexp.MustCompile(`\{[^{}]*\}`)
 
-// isDirectorLaunchPlaceholder reports whether s, with its braces, is one of
-// DirectorLaunchPlaceholders.
-func isDirectorLaunchPlaceholder(s string) bool {
-	return slices.Contains(DirectorLaunchPlaceholders(), s)
-}
-
-// ValidateDirectorLaunchCmd returns an error naming [org.director].launch_cmd
-// and the reason when cmd is not empty and its first element is empty or
-// whitespace only, an element has a placeholder outside
-// DirectorLaunchPlaceholders, or no element has {script} or {script_sh}.
-// An empty cmd (start uses herdr) is valid. Load calls it; see
-// OrgDirectorConfig.LaunchCmd for the rules.
-func ValidateDirectorLaunchCmd(cmd []string) error {
-	if len(cmd) == 0 {
-		return nil
-	}
-	if strings.TrimSpace(cmd[0]) == "" {
-		return fmt.Errorf("[org.director].launch_cmd: the first element is the command to run and must not be empty or whitespace only, got %q", cmd[0])
-	}
-	runsScript := false
-	for i, arg := range cmd {
-		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
-			if !isDirectorLaunchPlaceholder(placeholder) {
-				return fmt.Errorf("[org.director].launch_cmd: element %d %q has the unknown placeholder %s; the placeholders are %s",
-					i, arg, placeholder, strings.Join(DirectorLaunchPlaceholders(), ", "))
-			}
-			if placeholder == DirectorLaunchPlaceholderScript || placeholder == DirectorLaunchPlaceholderScriptSh {
-				runsScript = true
-			}
-		}
-	}
-	if !runsScript {
-		return fmt.Errorf("[org.director].launch_cmd: no element has %s or %s, so the terminal would never run the launch script; got %q",
-			DirectorLaunchPlaceholderScript, DirectorLaunchPlaceholderScriptSh, cmd)
+// checkDirectorCmdProgram returns an error naming key, an argv setting of
+// [org.director], when first, its first element, is empty or whitespace
+// only.
+func checkDirectorCmdProgram(key, first string) error {
+	if strings.TrimSpace(first) == "" {
+		return fmt.Errorf("%s: the first element is the command to run and must not be empty or whitespace only, got %q", key, first)
 	}
 	return nil
 }
 
-// ExpandDirectorLaunchArg returns arg, an element of
-// [org.director].launch_cmd, with each placeholder replaced by its entry in
-// values, which is keyed by the placeholder with its braces (such as
-// DirectorLaunchPlaceholderScript). It finds placeholders by the rule Load
-// validates with, and replaces them all in one pass, so a value that itself
-// contains a placeholder is not replaced again. A placeholder with no entry
-// in values is an error, and arg is then returned unchanged.
-func ExpandDirectorLaunchArg(arg string, values map[string]string) (string, error) {
+// checkDirectorCmdPlaceholders returns an error naming key, an argv setting
+// of [org.director], for the first placeholder of cmd, element by element,
+// that is not one of placeholders.
+func checkDirectorCmdPlaceholders(key string, cmd, placeholders []string) error {
+	for i, arg := range cmd {
+		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
+			if !slices.Contains(placeholders, placeholder) {
+				return fmt.Errorf("%s: element %d %q has the unknown placeholder %s; the placeholders are %s",
+					key, i, arg, placeholder, strings.Join(placeholders, ", "))
+			}
+		}
+	}
+	return nil
+}
+
+// expandDirectorCmdArg returns arg, an element of key, an argv setting of
+// [org.director], with each placeholder replaced by its entry in values in
+// one pass. A placeholder with no entry in values is an error naming key,
+// and arg is then returned unchanged.
+func expandDirectorCmdArg(key, arg string, values map[string]string) (string, error) {
 	missing := ""
 	expanded := directorLaunchPlaceholderPattern.ReplaceAllStringFunc(arg, func(placeholder string) string {
 		value, ok := values[placeholder]
@@ -305,9 +357,126 @@ func ExpandDirectorLaunchArg(arg string, values map[string]string) (string, erro
 		return value
 	})
 	if missing != "" {
-		return arg, fmt.Errorf("[org.director].launch_cmd: %q has the placeholder %s, which has no value", arg, missing)
+		return arg, fmt.Errorf("%s: %q has the placeholder %s, which has no value", key, arg, missing)
 	}
 	return expanded, nil
+}
+
+// ValidateDirectorLaunchCmd returns an error naming [org.director].launch_cmd
+// and the reason when cmd is not empty and its first element is empty or
+// whitespace only, an element has a placeholder outside
+// DirectorLaunchPlaceholders, or no element has {script} or {script_sh}.
+// An empty cmd (start uses herdr) is valid. Load calls it; see
+// OrgDirectorConfig.LaunchCmd for the rules.
+func ValidateDirectorLaunchCmd(cmd []string) error {
+	if len(cmd) == 0 {
+		return nil
+	}
+	if err := checkDirectorCmdProgram(directorLaunchCmdKey, cmd[0]); err != nil {
+		return err
+	}
+	if err := checkDirectorCmdPlaceholders(directorLaunchCmdKey, cmd, DirectorLaunchPlaceholders()); err != nil {
+		return err
+	}
+	for _, arg := range cmd {
+		for _, placeholder := range directorLaunchPlaceholderPattern.FindAllString(arg, -1) {
+			if placeholder == DirectorLaunchPlaceholderScript || placeholder == DirectorLaunchPlaceholderScriptSh {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%s: no element has %s or %s, so the terminal would never run the launch script; got %q",
+		directorLaunchCmdKey, DirectorLaunchPlaceholderScript, DirectorLaunchPlaceholderScriptSh, cmd)
+}
+
+// ExpandDirectorLaunchArg returns arg, an element of
+// [org.director].launch_cmd, with each placeholder replaced by its entry in
+// values, which is keyed by the placeholder with its braces (such as
+// DirectorLaunchPlaceholderScript). It finds placeholders by the rule Load
+// validates with, and replaces them all in one pass, so a value that itself
+// contains a placeholder is not replaced again. A placeholder with no entry
+// in values is an error, and arg is then returned unchanged.
+func ExpandDirectorLaunchArg(arg string, values map[string]string) (string, error) {
+	return expandDirectorCmdArg(directorLaunchCmdKey, arg, values)
+}
+
+// The two values of [org.director].wake (OrgDirectorConfig.Wake). The org
+// package names the same values for a director's registration.
+const (
+	// DirectorWakePull is the wake of a director that waits on the inbox
+	// itself (`ralph org wait --inbox`).
+	DirectorWakePull = "pull"
+	// DirectorWakePush is the wake of a director that `ralph org watch
+	// --all` wakes when a new open inbox item arrives.
+	DirectorWakePush = "push"
+)
+
+// ValidateDirectorWake returns an error naming [org.director].wake and the
+// reason when wake is empty, has a value other than DirectorWakePull and
+// DirectorWakePush, or lists a value twice. The order does not matter. Load
+// calls it; see OrgDirectorConfig.Wake for the rules.
+func ValidateDirectorWake(wake []string) error {
+	if len(wake) == 0 {
+		return fmt.Errorf("%s: the array must not be empty; the values are %q and %q, one or both", directorWakeKey, DirectorWakePull, DirectorWakePush)
+	}
+	for i, value := range wake {
+		if value != DirectorWakePull && value != DirectorWakePush {
+			return fmt.Errorf("%s: element %d %q is not a wake value; the values are %q and %q", directorWakeKey, i, value, DirectorWakePull, DirectorWakePush)
+		}
+		if first := slices.Index(wake, value); first < i {
+			return fmt.Errorf("%s: element %d %q repeats element %d; list each value once", directorWakeKey, i, value, first)
+		}
+	}
+	return nil
+}
+
+// The placeholders of [org.director].wake_cmd (OrgDirectorConfig.WakeCmd),
+// with their braces.
+const (
+	// DirectorWakePlaceholderTarget is replaced by where the director's
+	// registration says to send the wake line.
+	DirectorWakePlaceholderTarget = "{target}"
+	// DirectorWakePlaceholderText is replaced by the one fixed wake line.
+	DirectorWakePlaceholderText = "{text}"
+)
+
+// DirectorWakePlaceholders returns the placeholders of
+// [org.director].wake_cmd in a fixed order: {target}, {text}. Each call
+// returns a new slice.
+func DirectorWakePlaceholders() []string {
+	return []string{
+		DirectorWakePlaceholderTarget,
+		DirectorWakePlaceholderText,
+	}
+}
+
+// ValidateDirectorWakeCmd returns an error naming [org.director].wake_cmd
+// and the reason when cmd is not empty and its first element is empty or
+// whitespace only, its first element has any placeholder, or an element has
+// a placeholder outside DirectorWakePlaceholders. An empty cmd is valid.
+// Load calls it; see OrgDirectorConfig.WakeCmd for the rules.
+func ValidateDirectorWakeCmd(cmd []string) error {
+	if len(cmd) == 0 {
+		return nil
+	}
+	if err := checkDirectorCmdProgram(directorWakeCmdKey, cmd[0]); err != nil {
+		return err
+	}
+	if directorLaunchPlaceholderPattern.MatchString(cmd[0]) {
+		return fmt.Errorf("%s: the first element is the command to run and must not contain a placeholder (a director's registration must never choose the program), got %q", directorWakeCmdKey, cmd[0])
+	}
+	return checkDirectorCmdPlaceholders(directorWakeCmdKey, cmd, DirectorWakePlaceholders())
+}
+
+// ExpandDirectorWakeArg returns arg, an element of [org.director].wake_cmd,
+// with each placeholder replaced by its entry in values, which is keyed by
+// the placeholder with its braces (such as DirectorWakePlaceholderTarget).
+// It finds placeholders by the rule Load validates with, and replaces them
+// all in one pass, so a value that itself contains a placeholder is not
+// replaced again. A placeholder with no entry in values is an error, and arg
+// is then returned unchanged.
+func ExpandDirectorWakeArg(arg string, values map[string]string) (string, error) {
+	return expandDirectorCmdArg(directorWakeCmdKey, arg, values)
 }
 
 // The two values of [org.approval].mode.
@@ -377,6 +546,7 @@ func Default() Config {
 				AutoMerge:      false,
 				AckMinutes:     10,
 				ResolveMinutes: 60,
+				Wake:           []string{DirectorWakePull},
 			},
 			Approval: OrgApprovalConfig{
 				Mode: ApprovalModePerPlan,
@@ -572,8 +742,13 @@ func Load(path string) (Config, error) {
 	// present one) keeps Default()'s value. resolve_minutes may be shorter
 	// than ack_minutes; the two deadlines are checked independently. An
 	// absent or empty launch_cmd (start uses herdr) is valid; a non-empty one
-	// is checked by ValidateDirectorLaunchCmd. enabled and auto_merge need no
-	// check here: toml.Unmarshal already refuses a value that is not a bool.
+	// is checked by ValidateDirectorLaunchCmd. An absent wake keeps
+	// Default()'s ["pull"], and an explicit `wake = []` reaches
+	// ValidateDirectorWake as empty and fails it. wake_cmd is checked like
+	// launch_cmd, by ValidateDirectorWakeCmd; a wake with push and an empty
+	// wake_cmd is valid here (attach and start check whether a director can
+	// be pushed). enabled and auto_merge need no check here: toml.Unmarshal
+	// already refuses a value that is not a bool.
 	if cfg.Org.Director.AckMinutes < 1 {
 		return cfg, fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
 	}
@@ -581,6 +756,12 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
 	}
 	if err := ValidateDirectorLaunchCmd(cfg.Org.Director.LaunchCmd); err != nil {
+		return cfg, err
+	}
+	if err := ValidateDirectorWake(cfg.Org.Director.Wake); err != nil {
+		return cfg, err
+	}
+	if err := ValidateDirectorWakeCmd(cfg.Org.Director.WakeCmd); err != nil {
 		return cfg, err
 	}
 

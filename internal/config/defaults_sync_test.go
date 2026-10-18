@@ -178,6 +178,10 @@ func TestDefaultsLockStep(t *testing.T) {
 		strconv.Itoa(tomlCfg.Org.Director.ResolveMinutes), strconv.Itoa(goCfg.Org.Director.ResolveMinutes))
 	check("org.director.auto_merge", "RALPH_ORG_DIRECTOR_AUTO_MERGE",
 		strconv.FormatBool(tomlCfg.Org.Director.AutoMerge), strconv.FormatBool(goCfg.Org.Director.AutoMerge))
+	// wake is an array like driver_pool, so the shell var is comma-joined
+	// (wake_cmd, like launch_cmd, has no shell var).
+	check("org.director.wake", "RALPH_ORG_DIRECTOR_WAKE",
+		strings.Join(tomlCfg.Org.Director.Wake, ","), strings.Join(goCfg.Org.Director.Wake, ","))
 	check("org.approval.mode", "RALPH_ORG_APPROVAL_MODE",
 		tomlCfg.Org.Approval.Mode, goCfg.Org.Approval.Mode)
 
