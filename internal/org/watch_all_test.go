@@ -1688,6 +1688,43 @@ func TestRunWatchAll_WokenAndNotWokenItemsBothReachTheHumanAtTheAckDeadline(t *t
 	}
 }
 
+// AC7 across cycles: RunWatchAll keeps one DirectorWakeMemory for the whole
+// run, so a wake_cmd that fails runs once in 3 cycles a minute apart, not
+// once per cycle, and its failure line is written once.
+func TestRunWatchAll_HoldsAFailedWakeBackAcrossCycles(t *testing.T) {
+	f := newWatchAllFixture(t)
+	p, mark := f.useWakeCmd(t, 3, "exit 1", "{text}")
+	mustAttachDirector(t, f.directorStore(), DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePush}})
+	e1 := escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+	hooks := WatchHooks{OnCycle: func(int, time.Time) { f.clk.Advance(time.Minute) }}
+	if err := runWatchAll(t, f.o, context.Background(), p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if runs := readWakeRuns(t, mark); len(runs) != 1 {
+		t.Fatalf("wake_cmd ran %d times in 3 cycles a minute apart; want 1", len(runs))
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director d1 not woken for "+e1+": "); n != 1 {
+		t.Fatalf("stderr = %q; want one failure line", f.stderr.String())
+	}
+}
+
+// AC7 across cycles: the line for a push registration with no way to send
+// (a promoted session while wake_cmd is empty) is written once over the 3
+// cycles of one watch run, not once per cycle.
+func TestRunWatchAll_SaysTheNoSenderLineOnceAcrossCycles(t *testing.T) {
+	f := newWatchAllFixture(t)
+	p := f.params(3)
+	p.DirectorWakeDir = t.TempDir()
+	mustAttachDirector(t, f.directorStore(), DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePush}})
+	escalateInboxAt(t, f.o.Inbox, f.clk.Now(), "org-a")
+	if err := runWatchAll(t, f.o, context.Background(), p, WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if n := strings.Count(f.stderr.String(), "watchdog: director d1 is not woken: its wake has push, but [org.director].wake_cmd is empty"); n != 1 {
+		t.Fatalf("stderr = %q; want the no-sender line once", f.stderr.String())
+	}
+}
+
 // AC5, end to end in the org layer: with a director attached with wake
 // pull,push and a watch that accepts work, an escalate is left to the
 // director, `wait --inbox` returns it, the next cycle runs wake_cmd once for

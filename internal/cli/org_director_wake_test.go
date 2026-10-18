@@ -705,6 +705,27 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 	})
 }
 
+// AC2 for `ralph status --json`: its director object carries the
+// registration's wake and wake_target, as `ralph org director status --json`
+// does.
+func TestStatusJSON_CarriesTheWakeAndTheWakeTarget(t *testing.T) {
+	setEscalateWatch(t, acceptingWatchLiveness())
+	t.Chdir(t.TempDir())
+	setOrUnsetEnv(t, "HERDR_PANE_ID", "", true)
+	t.Setenv("USER", "alice")
+	stateDir := t.TempDir()
+	configPath := writeDirectorConfig(t, directorWakeToml("", directorWakeCmdWithTarget))
+	runInboxOK(t, "director", "attach", "--driver", "claude", "--state-dir", stateDir, "--config", configPath, "--wake", "pull,push", "--wake-target", "term-1")
+	out, err := runStatusCmd(t, "--json", "--state-dir", stateDir)
+	if err != nil {
+		t.Fatalf("ralph status --json: %v (output %s)", err, out)
+	}
+	if reg := statusDirectorJSONOf(t, out).Registration; reg == nil || !slices.Equal(reg.Wake, []string{"pull", "push"}) || reg.WakeTarget != "term-1" ||
+		!strings.Contains(out, `"wake_target": "term-1"`) {
+		t.Errorf("ralph status --json = %s; want the director's wake pull,push and wake_target term-1", out)
+	}
+}
+
 // AC2 for status: the wake and the wake target of a hand-edited
 // director.jsonl print with their control characters escaped, on the
 // director: line and on the wake: and wake_target: lines, so neither can

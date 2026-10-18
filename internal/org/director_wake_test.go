@@ -918,6 +918,32 @@ func TestWakeDirector_ARelativeProgramIsResolvedFromTheWakeCmdDir(t *testing.T) 
 	}
 }
 
+// D9 and AC4: a program whose name has no "/" is looked up in PATH, not
+// resolved from the wake_cmd directory. With wake_cmd ["wakeprobe",
+// "{text}"], the wakeprobe of a directory first on PATH runs, with the
+// wake_cmd directory as its working directory, and the wakeprobe in the
+// wake_cmd directory itself does not run.
+func TestWakeDirector_ABareProgramNameIsLookedUpInPath(t *testing.T) {
+	f := newWakeFixture(t)
+	bin, cmdDirMark := t.TempDir(), filepath.Join(t.TempDir(), "cmd-dir-runs")
+	writeWakeScript(t, filepath.Join(bin, "wakeprobe"), f.mark, "exit 0")
+	writeWakeScript(t, filepath.Join(f.cmdDir, "wakeprobe"), cmdDirMark, "exit 0")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	f.o.Config.Director.WakeCmd = []string{"wakeprobe", "{text}"}
+	f.attachPush(t, "")
+	e1 := f.escalate(t, "x")
+
+	if res := f.wake(); !res.Sent || !res.Recorded {
+		t.Fatalf("WakeDirector = %+v (banner %q), want sent and recorded", res, f.banner.String())
+	}
+	if runs := f.runs(t); len(runs) != 1 || runs[0].pwd != wakeRealPath(t, f.cmdDir) || !slices.Equal(runs[0].args, []string{DirectorWakeText([]string{e1})}) {
+		t.Fatalf("runs of %s/wakeprobe = %+v, want one in %s", bin, runs, f.cmdDir)
+	}
+	if runs := readWakeRuns(t, cmdDirMark); runs != nil {
+		t.Fatalf("the wakeprobe of the wake_cmd directory ran: %+v", runs)
+	}
+}
+
 // AC7: a wake_cmd that exits non-zero, or does not return within
 // DriverCallTimeout, writes no woken event and one line, and the
 // registration is not tried again until 5 minutes have passed on the clock;
@@ -930,7 +956,9 @@ func TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes(t *testing.T) {
 		reason  string
 	}{
 		{"a non-zero exit", func(*testing.T) string { return "exit 1" }, 0, "failed: exit status 1"},
-		{"no return in time", func(t *testing.T) string { return "exec " + shellQuote(sleepPath(t)) + " 30" }, time.Second,
+		// 3 s, not 1 s: the script records its run before it sleeps, and
+		// under load sh can take more than a second to get there.
+		{"no return in time", func(t *testing.T) string { return "exec " + shellQuote(sleepPath(t)) + " 30" }, 3 * time.Second,
 			"did not return in time and was killed (context deadline exceeded)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1312,4 +1340,53 @@ func TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector(t *testing.T) {
 			t.Fatalf("herdr calls = %q, send-text %+v; want none", f.h.calls, h.texts)
 		}
 	})
+}
+
+// AC6 and D8: with no wake_cmd, a headless director in herdr whose recorded
+// pane id is not one to type into (a hand-edited pane_created: one that
+// starts with "-", one with an escape sequence) is skipped and said once
+// over cycles, and herdr is not called, not even to confirm the pane.
+func TestWakeDirector_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr(t *testing.T) {
+	for _, tc := range []struct {
+		name, pane string
+	}{
+		{"a leading dash", "-x"},
+		{"a control character", "p\x1b[2J"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWakeFixture(t)
+			f.o.Config.Director.WakeCmd = nil
+			writeDirectorEvents(t, f.store,
+				DirectorEvent{TS: directorTestNow, ID: "d1", Event: DirectorEventAttached, Driver: DirectorDriverCodex, Wake: []string{DirectorWakePush},
+					Launch: DirectorLaunchHerdr, Token: directorTestToken, Model: "m", PermissionMode: PermissionModeGuarded, User: "u", Cwd: "/w"},
+				DirectorEvent{TS: directorTestNow, ID: "d1", Event: DirectorEventPaneCreated, PaneID: tc.pane, User: "u", Cwd: "/w"},
+				DirectorEvent{TS: directorTestNow, ID: "d1", Event: DirectorEventLaunched, User: "u", Cwd: "/w"},
+			)
+			if cur := mustReadDirector(t, f.store).Current; cur == nil || cur.State != DirectorStateRunning || cur.PaneID != tc.pane {
+				t.Fatalf("registration = %+v, want d1 running with pane %q", cur, tc.pane)
+			}
+			f.escalate(t, "x")
+			f.h.calls = nil
+			for i := range 2 {
+				f.now = wakeTestNow.Add(time.Duration(i) * 10 * time.Minute)
+				if res := f.wake(); res.Skipped != DirectorWakeSkippedTargetInvalid || res.Sent || res.Failure != nil || res.RegistrationID != "d1" {
+					t.Fatalf("WakeDirector %d = %+v, want skipped %s for d1", i, res, DirectorWakeSkippedTargetInvalid)
+				}
+			}
+			if len(f.h.calls) != 0 {
+				t.Fatalf("herdr calls = %q, want none", f.h.calls)
+			}
+			lines := f.bannerLines()
+			if len(lines) != 1 || !strings.HasPrefix(lines[0], "watchdog: director d1 is not woken: its herdr pane is not one to type into: ") ||
+				!strings.HasSuffix(lines[0], " (said once)") {
+				t.Fatalf("banner lines = %q, want one line for the pane, said once", lines)
+			}
+			if strings.Contains(f.banner.String(), "\x1b") {
+				t.Fatalf("banner %q holds a raw escape", f.banner.String())
+			}
+			if runs := f.runs(t); runs != nil || f.wokenIDs(t) != nil {
+				t.Fatalf("runs %+v, woken %q; want neither", runs, f.wokenIDs(t))
+			}
+		})
+	}
 }
