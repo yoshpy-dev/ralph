@@ -424,6 +424,10 @@ type DirectorStore struct {
 	// takes the lock, so a test can land a check-in between a caller's read
 	// and its record of the stop; nil means none.
 	beforeMarkStopped func()
+	// beforeCheckInLock is a test-only seam that MarkCmdLaunched runs after
+	// its read of the starter and before it takes the lock, so a test can
+	// change the registration between the two reads; nil means none.
+	beforeCheckInLock func()
 }
 
 // DirectorPathIn returns the director.jsonl path within an already-resolved

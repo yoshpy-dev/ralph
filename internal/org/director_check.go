@@ -121,8 +121,13 @@ const directorCheckAttempts = 2
 // ID, State (DirectorCheck*), How (DirectorCheckHow*), CheckedAt (the time the
 // caller gave, UTC RFC3339), and, for unknown, Detail, a short reason
 // escaped for a terminal (PrintableInboxText); Detail is empty for alive and
-// ended. Its JSON is the shape the plan gives director-alive.json (D4); the
-// director.check of status's --json (D8) carries the same fields but the ID.
+// ended. It is the result in memory: CheckDirector and CheckDirectorStarter
+// return it, and DirectorAlive.Check gives it back from the mark. Nothing
+// writes it as JSON. The mark, director-alive.json, is DirectorAlive (six
+// keys, attached_at among them), and the director.check of status's --json
+// (D8) is the CLI's orgDirectorReportCheck (four keys, no id). Its JSON tags
+// are kept for TestDirectorCheck_JSON only, so changing them changes neither
+// file nor output.
 type DirectorCheck struct {
 	ID        string `json:"id"`
 	State     string `json:"state"`
@@ -426,11 +431,14 @@ func (o *Org) checkDirectorProcess(reg DirectorRegistration) (state, how, detail
 // dir.
 const DirectorAliveFileName = "director-alive.json"
 
-// DirectorAlive is the mark, director-alive.json: the DirectorCheck of the
+// DirectorAlive is the mark, director-alive.json, with its six keys id,
+// attached_at, state, how, checked_at, and detail: the DirectorCheck of the
 // registration the watch last checked, with AttachedAt, that registration's
-// attached_at (DirectorRegistration.AttachedAt). Its values are read from a
-// file, so a reader keeps them as read and escapes them where it prints
-// them (PrintableInboxText), as it does the registration's.
+// attached_at (DirectorRegistration.AttachedAt). A key added here is not
+// added to status's director.check (the CLI's orgDirectorReportCheck), which
+// copies four of them. Its values are read from a file, so a reader keeps
+// them as read and escapes them where it prints them (PrintableInboxText),
+// as it does the registration's.
 type DirectorAlive struct {
 	ID         string `json:"id"`
 	AttachedAt string `json:"attached_at"`
@@ -447,8 +455,10 @@ func directorAliveOf(res DirectorCheckResult) DirectorAlive {
 	return DirectorAlive{ID: c.ID, AttachedAt: res.Registration.AttachedAt, State: c.State, How: c.How, CheckedAt: c.CheckedAt, Detail: c.Detail}
 }
 
-// Check is the mark's DirectorCheck, without the attached_at. The
-// director.check of status's --json (D8) is its fields but the ID.
+// Check is the mark's DirectorCheck, without the attached_at, for a reader
+// that prints it (attach's refusal). The director.check of status's --json
+// (D8) does not come from it: the CLI copies the mark's state, how,
+// checked_at, and detail into orgDirectorReportCheck.
 func (m DirectorAlive) Check() DirectorCheck {
 	return DirectorCheck{ID: m.ID, State: m.State, How: m.How, CheckedAt: m.CheckedAt, Detail: m.Detail}
 }

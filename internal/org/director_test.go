@@ -2728,12 +2728,13 @@ func TestDirectorRead_FoldsTheStarterOfAHeadlessAttachedOnly(t *testing.T) {
 }
 
 // AC2: once every other check of the check-in passes, MarkCmdLaunched reads
-// the registration's starter, still under the director lock and within
-// directorCheckInStarterTimeout, and refuses, writing nothing, when the
-// start process that recorded the registration has ended: its pid has no
-// process, is a zombie, or has another start time. A starter still running
-// with its recorded start time, a read that fails, an answer ps never gives,
-// and a registration with no starter accept the check-in as before.
+// the registration's starter, before it takes the director lock (self-review
+// L1) and within directorCheckInStarterTimeout, and refuses, writing
+// nothing, when the start process that recorded the registration has ended:
+// its pid has no process, is a zombie, or has another start time. A starter
+// still running with its recorded start time, a read that fails, an answer
+// ps never gives, and a registration with no starter accept the check-in as
+// before.
 func TestDirectorMarkCmdLaunched_RefusesACheckInOnceTheStartThatRecordedItHasEnded(t *testing.T) {
 	const prefix = "org: director: check in d1: the check-in of the launch script is refused, so its agent must not start: " +
 		"the ralph org director start that recorded d1 (driver codex, attached " + directorTestNow + ", headless starting, launch cmd) is no longer running ("
@@ -2784,8 +2785,8 @@ func TestDirectorMarkCmdLaunched_RefusesACheckInOnceTheStartThatRecordedItHasEnd
 			if !reflect.DeepEqual(reads, wantReads) {
 				t.Fatalf("the check-in read the pids %v, want %v", reads, wantReads)
 			}
-			if !tc.noStarter && (!lockHeld || left <= 0 || left > directorCheckInStarterTimeout) {
-				t.Fatalf("the starter was read with director.lock held %v and %s left, want it held and a deadline within %s", lockHeld, left, directorCheckInStarterTimeout)
+			if !tc.noStarter && (lockHeld || left <= 0 || left > directorCheckInStarterTimeout) {
+				t.Fatalf("the starter was read with director.lock held %v and %s left, want it free and a deadline within %s", lockHeld, left, directorCheckInStarterTimeout)
 			}
 			if tc.want != "" {
 				if !errors.Is(err, ErrDirectorCheckInRefused) || err.Error() != tc.want || strings.Contains(err.Error(), "\n") {
@@ -2865,6 +2866,128 @@ func TestDirectorMarkCmdLaunched_ReadsTheStarterOnlyAfterItsOtherChecks(t *testi
 			if got := readDirectorFile(t, s); got != before {
 				t.Fatalf("a refused check-in wrote %q", strings.TrimPrefix(got, before))
 			}
+		})
+	}
+}
+
+// Self-review L1: MarkCmdLaunched reads the starter before it takes the
+// director lock, so a ReadStarter that takes the lock itself, waiting less
+// than a waiter of the lock does, gets it. The check-in then goes by what it
+// read: a gone start refuses it, a running one accepts it.
+func TestDirectorMarkCmdLaunched_ReadsTheStarterWithTheDirectorLockFree(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		proc    DirectorProcess
+		refused bool
+	}{
+		{"the start's pid has no process", DirectorProcess{State: DirectorProcessGone}, true},
+		{"the start still runs", DirectorProcess{State: DirectorProcessAlive, StartTime: directorTestStartTime}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir, _ := newTestHeadlessStore(t)
+			if _, err := s.AttachHeadless(testCmdHeadlessAttachWithStarter()); err != nil {
+				t.Fatalf("AttachHeadless: %v", err)
+			}
+			took := false
+			c := testCheckIn(4242)
+			c.ReadStarter = func(context.Context, int) (DirectorProcess, error) {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := withFileLockContext(ctx, dir, directorLockFile, "director", func() error {
+					took = true
+					return nil
+				}); err != nil {
+					t.Errorf("the starter's reader could not take director.lock: %v", err)
+				}
+				return tc.proc, nil
+			}
+			err := s.MarkCmdLaunched(c)
+			if !took {
+				t.Fatal("the starter's reader did not take director.lock, want the lock free while the starter is read")
+			}
+			if tc.refused {
+				if !errors.Is(err, ErrDirectorCheckInRefused) || !strings.Contains(err.Error(), "is no longer running (no process has pid 7777)") {
+					t.Fatalf("MarkCmdLaunched err = %v, want the refusal for the gone start", err)
+				}
+				wantTrail(t, s, "attached d1")
+				return
+			}
+			if err != nil {
+				t.Fatalf("MarkCmdLaunched: %v", err)
+			}
+			wantTrail(t, s, "attached d1", "launched d1")
+		})
+	}
+}
+
+// Self-review L1: under the lock, the starter read before it counts only
+// while the registration still records that starter. The store's
+// beforeCheckInLock rewrites director.jsonl between the read and the lock, as
+// a hand edit could. With the same starter, the gone start refuses the
+// check-in; with another start time, another pid, or no starter under the
+// lock, the check-in is accepted, and so it is when only the read under the
+// lock finds a starter. ps reads the starter once at most, never with the
+// lock held.
+func TestDirectorMarkCmdLaunched_UsesTheStarterItReadOnlyWhileTheRegistrationStillRecordsIt(t *testing.T) {
+	const recorded = `"starter_pid":7777,"starter_start_time":"` + directorTestStartTime + `",`
+	for _, tc := range []struct {
+		name      string
+		noStarter bool                // the attached records no starter
+		edit      func(string) string // director.jsonl under the lock, from the file as attached
+		wantReads int
+		refused   bool // only for the edit that changes nothing
+	}{
+		{"the same starter", false, func(f string) string { return f }, 1, true},
+		{"another start time", false, func(f string) string {
+			return strings.Replace(f, recorded, `"starter_pid":7777,"starter_start_time":"Fri Oct 16 00:00:00 2026",`, 1)
+		}, 1, false},
+		{"another pid", false, func(f string) string {
+			return strings.Replace(f, recorded, `"starter_pid":7778,"starter_start_time":"`+directorTestStartTime+`",`, 1)
+		}, 1, false},
+		{"no starter", false, func(f string) string { return strings.Replace(f, recorded, "", 1) }, 1, false},
+		{"a starter only under the lock", true, func(f string) string { return withStarterFields(f, recorded) }, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir, _ := newTestHeadlessStore(t)
+			h := testCmdHeadlessAttachWithStarter()
+			if tc.noStarter {
+				h = testCmdHeadlessAttach()
+			}
+			if _, err := s.AttachHeadless(h); err != nil {
+				t.Fatalf("AttachHeadless: %v", err)
+			}
+			attached := readDirectorFile(t, s)
+			edited := tc.edit(attached)
+			if (edited == attached) != tc.refused {
+				t.Fatalf("the edit of %s changed it: %v, want %v", attached, edited != attached, !tc.refused)
+			}
+			s.beforeCheckInLock = func() { writeDirectorFile(t, s, edited) }
+			reads := 0
+			c := testCheckIn(4242)
+			c.ReadStarter = func(context.Context, int) (DirectorProcess, error) {
+				reads++
+				if directorLockHeldElsewhere(t, dir) {
+					t.Error("the starter was read with director.lock held")
+				}
+				return DirectorProcess{State: DirectorProcessGone}, nil
+			}
+			err := s.MarkCmdLaunched(c)
+			if reads != tc.wantReads {
+				t.Fatalf("the check-in read the starter %d times, want %d", reads, tc.wantReads)
+			}
+			if tc.refused {
+				if !errors.Is(err, ErrDirectorCheckInRefused) || !strings.Contains(err.Error(), "is no longer running (no process has pid 7777)") {
+					t.Fatalf("MarkCmdLaunched err = %v, want the refusal for the gone start", err)
+				}
+				if got := readDirectorFile(t, s); got != edited {
+					t.Fatalf("a refused check-in wrote %q", strings.TrimPrefix(got, edited))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("MarkCmdLaunched: %v", err)
+			}
+			wantTrail(t, s, "attached d1", "launched d1")
 		})
 	}
 }

@@ -344,6 +344,9 @@ type DirectorCmdCheckIn struct {
 // process that recorded the registration (plan
 // 2026-10-18-org-director-liveness, D2): 10 s, the driver call timeout that
 // bounds every other ps read of a director process (readDirectorProcess).
+// That is longer than the 5 s a waiter for director.lock waits
+// (manifestLockTimeout), so MarkCmdLaunched makes the read before it takes
+// the lock, never while it holds it.
 const directorCheckInStarterTimeout = defaultDriverCallTimeout
 
 // MarkCmdLaunched is the check-in of a launch script (`ralph org director
@@ -368,15 +371,26 @@ const directorCheckInStarterTimeout = defaultDriverCallTimeout
 // Once all of those pass, a registration with a starter recorded (the
 // `ralph org director start` process that wrote its attached; plan
 // 2026-10-18-org-director-liveness, D2) has that pid read with c.ReadStarter
-// (nil: ReadDirectorProcess) under directorCheckInStarterTimeout, still
-// under the lock, so the lock is held for as long as ps takes, within that
-// bound. When the pid has no process, is a zombie, or has a start time other
-// than the recorded one, that start has ended: nothing waits for the
-// check-in or cleans up after it, and the agent of a terminal that opened
-// that late must not start, so the check-in is refused the same way, with
-// that reason. A read that fails, and a registration with no starter, accept
-// the check-in as before, so a ps that cannot be read never keeps a director
-// from starting.
+// (nil: ReadDirectorProcess) under directorCheckInStarterTimeout. The read is
+// made before the lock, on the registration as a read without the lock finds
+// it, and only when that registration passes the same checks: ps never runs
+// while the lock is held, as a waiter for the lock gives up sooner
+// (manifestLockTimeout; self-review L1 of org-director-liveness). Under the
+// lock its result counts only while the registration still records the
+// starter that was read, the same StarterPID and StarterStartTime, which its
+// attached writes once; a start that has ended never runs again, so a read
+// made before the lock still holds under it. When the pid has no process, is
+// a zombie, or has a start time other than the recorded one, that start has
+// ended: nothing waits for the check-in or cleans up after it, and the agent
+// of a terminal that opened that late must not start, so the check-in is
+// refused the same way, with that reason. The check-in is accepted as before
+// when the read fails, when no starter is recorded, and when the starter
+// under the lock is not the one read (the read without the lock found
+// another starter or none, found a registration the checks refused, or could
+// not read director.jsonl): ps is not run under the lock then, the same as
+// for a read that fails, so a ps that cannot be read never keeps a director
+// from starting. s's beforeCheckInLock, a test-only seam, runs between the
+// read and the lock.
 func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 	verb := "check in " + c.ID
 	refuse := func(format string, args ...any) error {
@@ -397,12 +411,9 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
 		return refuse("no registration %s is recorded", c.ID)
 	}
-	return s.withLock(func() error {
-		raw, err := s.readRaw()
-		if err != nil {
-			return err
-		}
-		fold := foldDirector(raw)
+	// checks is the check-in's checks of registration c.ID in fold, in their
+	// order: the registration when it passes them all, else the refusal.
+	checks := func(fold *directorFold) (*DirectorRegistration, error) {
 		reg := fold.regs[c.ID]
 		// The token comes before the launch and the state, so a caller
 		// without the token learns nothing more of the registration. A
@@ -410,21 +421,44 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 		// digits, checked above) matches it.
 		switch {
 		case reg == nil:
-			return refuse("no registration %s is recorded", c.ID)
+			return nil, refuse("no registration %s is recorded", c.ID)
 		case reg.Token != c.Token:
-			return refuse("the token is not the one %s was started with", c.ID)
+			return nil, refuse("the token is not the one %s was started with", c.ID)
 		case !reg.CmdLaunch():
-			return refuse("%s was not started with [org.director].launch_cmd", reg.describe())
+			return nil, refuse("%s was not started with [org.director].launch_cmd", reg.describe())
 		case reg.State == DirectorStateStopped:
-			return refuse("%s is already recorded stopped (start's cleanup or a stop came first)", reg.describe())
+			return nil, refuse("%s is already recorded stopped (start's cleanup or a stop came first)", reg.describe())
 		case reg != fold.current:
-			return refuse("%s is no longer the current registration (an attach --replace or a detach came in)", reg.describe())
+			return nil, refuse("%s is no longer the current registration (an attach --replace or a detach came in)", reg.describe())
 		case reg.State != DirectorStateStarting:
-			return refuse("%s has already checked in", reg.describe())
+			return nil, refuse("%s has already checked in", reg.describe())
 		}
-		if how := directorCheckInStarterEnded(*reg, c.ReadStarter); how != "" {
+		return reg, nil
+	}
+	// read is the registration whose starter was read before the lock, and
+	// ended how that starter has ended ("": it was not read, or it may go on).
+	var read DirectorRegistration
+	var ended string
+	if raw, err := s.readRaw(); err == nil {
+		if reg, err := checks(foldDirector(raw)); err == nil {
+			read, ended = *reg, directorCheckInStarterEnded(*reg, c.ReadStarter)
+		}
+	}
+	if s.beforeCheckInLock != nil {
+		s.beforeCheckInLock()
+	}
+	return s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		reg, err := checks(foldDirector(raw))
+		if err != nil {
+			return err
+		}
+		if ended != "" && reg.StarterPID == read.StarterPID && reg.StarterStartTime == read.StarterStartTime {
 			return refuse("the ralph org director start that recorded %s is no longer running (%s), so no start waits for this check-in: "+
-				"run ralph org director start again", reg.describe(), how)
+				"run ralph org director start again", reg.describe(), ended)
 		}
 		ev := DirectorEvent{
 			TS: s.now(), ID: c.ID, Event: DirectorEventLaunched, PID: c.PID, StartTime: startTime,
@@ -438,7 +472,8 @@ func (s *DirectorStore) MarkCmdLaunched(c DirectorCmdCheckIn) error {
 }
 
 // directorCheckInStarterEnded is MarkCmdLaunched's look at the starter of
-// reg (plan 2026-10-18-org-director-liveness, D2): it returns how the start
+// reg, made before it takes the director lock (plan
+// 2026-10-18-org-director-liveness, D2): it returns how the start
 // process that recorded reg has ended (directorProcessEnded's words: no
 // process has the pid, it is a zombie, or it is another process now), or ""
 // when the check-in may go on. It reads nothing for a registration with no

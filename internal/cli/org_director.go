@@ -618,11 +618,15 @@ type orgDirectorReport struct {
 }
 
 // orgDirectorReportCheck is the check of a headless registration as status
-// reports it (plan 2026-10-18-org-director-liveness, D8): the state (alive,
-// ended, or unknown), how the check found it, when, and the detail of an
-// unknown one ("" for alive and ended), from the watch's mark
-// (director-alive.json) as read. The JSON keeps them unescaped, as it keeps
-// the registration's values; the text form escapes them.
+// reports it (plan 2026-10-18-org-director-liveness, D8), the director.check
+// of --json with four keys: the state (alive, ended, or unknown), how the
+// check found it, when, and the detail of an unknown one ("" for alive and
+// ended), copied from the watch's mark (org.DirectorAlive,
+// director-alive.json, whose id and attached_at it leaves out) as read
+// (readOrgDirectorCheck). It is not org.DirectorCheck, which nothing
+// marshals, and a key added to the mark is not added here. The JSON keeps
+// the values unescaped, as it keeps the registration's values; the text form
+// escapes them.
 type orgDirectorReportCheck struct {
 	State     string `json:"state"`
 	How       string `json:"how"`

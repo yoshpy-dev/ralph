@@ -26,7 +26,10 @@ import (
 // stubHerdrAgentNotFound puts in front of the stub herdr on PATH a herdr
 // whose `agent get` answers herdr's agent_not_found envelope with exit 1, as
 // herdr does once the agent is gone, and logs it to the stub's log; every
-// other call goes to the stub.
+// other call goes to the stub. Call it with the same t after
+// setupOrgStubPATH (through directorStartLedger): it fails the test, before
+// it writes its herdr, when the herdr PATH finds is not under this test's
+// temp dir, so it never hands a call to a real herdr.
 func stubHerdrAgentNotFound(t *testing.T) {
 	t.Helper()
 	stub, err := exec.LookPath("herdr")
@@ -34,6 +37,9 @@ func stubHerdrAgentNotFound(t *testing.T) {
 		t.Fatalf("look up the stub herdr: %v", err)
 	}
 	dir := t.TempDir()
+	if root := filepath.Dir(dir) + string(filepath.Separator); !strings.HasPrefix(stub, root) {
+		t.Fatalf("the herdr on PATH is %s, not a stub under this test's temp dir %s: call setupOrgStubPATH first", stub, root)
+	}
 	writeStubScript(t, filepath.Join(dir, "herdr"), `#!/bin/sh
 if [ "$1 $2" = "agent get" ]; then
   if [ -n "$ORG_HERDR_LOG" ]; then

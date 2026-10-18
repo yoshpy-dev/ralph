@@ -688,8 +688,11 @@ func TestDirectorVersionOf(t *testing.T) {
 	}
 }
 
-// The JSON of a check has the five keys director-alive.json and status's
-// director.check carry (D4 and D8), detail included when empty.
+// DirectorCheck's JSON tags give five keys, id, state, how, checked_at, and
+// detail, detail included when empty. Only this test marshals a
+// DirectorCheck: director-alive.json is DirectorAlive (six keys,
+// TestDirectorAlive_WriteAndReadBack), and status's director.check is the
+// CLI's orgDirectorReportCheck (four keys).
 func TestDirectorCheck_JSON(t *testing.T) {
 	raw, err := json.Marshal(DirectorCheck{ID: "d3", State: DirectorCheckEnded, How: DirectorCheckHowAgentEnded, CheckedAt: checkNowUTC})
 	if err != nil {
