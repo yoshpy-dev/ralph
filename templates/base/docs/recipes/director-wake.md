@@ -18,11 +18,15 @@ or `--wake pull,push` (default: the setting), and `ralph org director start`
 records the setting. The watch acts on the recorded wake, not on the
 setting, so attach or start the director again after changing it.
 
-Each cycle, after it has sent the inbox items past a deadline and before
-the pulse of each org, the watch:
+Each cycle, after it has sent the inbox items past a deadline and checked
+whether the current headless director is still running, and before the
+pulse of each org, the watch:
 
 1. reads the current registration, and goes on only when its wake has push
-   and, for a headless director, its state is `running`;
+   and, for a headless director, its state is `running` and that cycle's
+   check did not find it ended (the watch then says so on its stderr, once
+   per registration; an ended director cannot read the line, and the herdr
+   pane of one is back at a shell, which would run it as a command);
 2. takes the open inbox items that have no `woken` event;
 3. sends the director this line, once for all of them:
 

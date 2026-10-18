@@ -47,7 +47,7 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "watch",
-		Short: "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark",
+		Short: "Watch every org of the ledger: inbox deadlines, director check, director wake, pulse, liveness mark",
 		Long: "ralph org watch --all watches every org of the ledger in one process.\n" +
 			"Every --interval-seconds (default: [org.watchdog].interval_seconds) it\n" +
 			"sends the inbox items past their [org.director] ack_minutes or\n" +

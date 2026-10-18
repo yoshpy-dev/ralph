@@ -1810,13 +1810,14 @@ func TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom(t *tes
 
 // The help of watch says what the wake step does, where wake_cmd is read
 // from and runs, and that a change of wake_cmd needs a restart; the list of
-// ralph org --help names the step.
+// ralph org --help names the step, with the director check before it, in
+// the order of a cycle (plan 2026-10-18-org-director-liveness, AC4).
 func TestOrgWatch_HelpDescribesTheDirectorWake(t *testing.T) {
 	orgHelp, _, err := runOrgCmdStreams(t, "--help")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "Watch every org of the ledger: pulse, inbox deadlines, director wake, liveness mark"; !strings.Contains(orgHelp, want) {
+	if want := "Watch every org of the ledger: inbox deadlines, director check, director wake, pulse, liveness mark"; !strings.Contains(orgHelp, want) {
 		t.Errorf("ralph org --help does not say %q:\n%s", want, orgHelp)
 	}
 	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
