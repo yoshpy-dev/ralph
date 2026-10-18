@@ -321,7 +321,7 @@ type Org struct {
 	// test can land an event in between; nil means none.
 	directorCheckAfterRead func(attempt int)
 	// directorStartAfterCheck is a test-only seam that checkCurrentDirector
-	// (director_start.go) runs once CheckDirector has found the current
+	// (director_start_cleanup.go) runs once CheckDirector has found the current
 	// headless registration ended and before cleanUpEndedDirector cleans it
 	// up, so a test can change director.jsonl after the check's read of
 	// version A (plan 2026-10-18-org-director-liveness, D6); nil means none.

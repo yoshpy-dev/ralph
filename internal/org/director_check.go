@@ -21,7 +21,7 @@ import (
 // director-alive.json (D4; the mark, at the end of this file, and
 // watchAllRun.checkDirector in watch.go), and `ralph org director start`
 // checks the current registration on the spot and cleans it up when it has
-// ended (D6; checkCurrentDirector in director_start.go). `ralph org director
+// ended (D6; checkCurrentDirector in director_start_cleanup.go). `ralph org director
 // attach` refused by a starting registration reads only its starter row
 // (CheckDirectorStarter, D7). The check writes nothing: no director.jsonl
 // line, no herdr close, no key, no signal.

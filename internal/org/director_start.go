@@ -1081,52 +1081,6 @@ func (o *Org) checkDirectorStartWake(cmdLaunch bool) error {
 	return nil
 }
 
-// checkCurrentDirector is checkDirectorStart's first look at cur, the
-// current registration as a read without the lock found it (plan
-// 2026-10-18-org-director-liveness, D6). A promoted session's registration
-// is refused as before (*DirectorAttachedError), with no check. For a
-// headless one it runs CheckDirector on the spot, not the watch's mark, and:
-//   - a director.jsonl that cannot be read is that error;
-//   - with nothing to check (the registration is stopped while still
-//     current, or is no longer current or headless by the check's read) it is
-//     refused as before, naming cur;
-//   - alive or unknown is refused as before, with the registration the check
-//     read and what it found (Check);
-//   - ended runs o.directorStartAfterCheck (a test-only seam) and is cleaned
-//     up on the registration as the check read it, version A
-//     (cleanUpEndedDirector), and once that is recorded its line goes to
-//     p.Notice and start goes on (nil). A cleanup that did not get as far as
-//     the record is its *DirectorCleanupError, with nothing written.
-//
-// AttachHeadless decides again under the lock either way.
-func (o *Org) checkCurrentDirector(p *DirectorStartParams, cur *DirectorRegistration) error {
-	refused := &DirectorAttachedError{Current: cur, Err: directorStartAttachedErr(cur)}
-	if !cur.Headless() {
-		return refused
-	}
-	chk, err := o.CheckDirector(p.Store, o.nowTime())
-	switch {
-	case err != nil:
-		return err
-	case !chk.Checked:
-		return refused
-	case chk.Check.State != DirectorCheckEnded:
-		reg, check := chk.Registration, chk.Check
-		return &DirectorAttachedError{Current: &reg, Err: directorStartAttachedErr(&reg), Check: &check}
-	}
-	if o.directorStartAfterCheck != nil {
-		o.directorStartAfterCheck()
-	}
-	notice, err := o.cleanUpEndedDirector(p.Store, chk, p.Who)
-	if err != nil {
-		return err
-	}
-	if p.Notice != nil {
-		_, _ = fmt.Fprintln(p.Notice, notice)
-	}
-	return nil
-}
-
 // newDirectorAttachedError is the *DirectorAttachedError for AttachHeadless's
 // refusal err, with the current registration read again from store.
 func newDirectorAttachedError(store *DirectorStore, err error) error {
