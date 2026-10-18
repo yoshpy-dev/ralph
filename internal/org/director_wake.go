@@ -119,11 +119,10 @@ func ValidateDirectorWakeTarget(target string) error {
 //   - a target ValidateDirectorWakeTarget refuses
 //     (ErrDirectorWakeTargetInvalid)
 //
-// The {target} test is a substring test, which finds what the placeholder
-// rule of config.ValidateDirectorWakeCmd finds: no brace can come between
-// the braces of "{target}". The wake itself and wakeCmd are not validated
-// here: the CLI validates --wake, and config.Load the two settings. Its
-// errors do not start with "org: "; the CLI adds its verb.
+// The {target} test is directorWakeCmdHasTarget. The wake itself and
+// wakeCmd are not validated here: the CLI validates --wake, and config.Load
+// the two settings. Its errors do not start with "org: "; the CLI adds its
+// verb.
 func CheckDirectorAttachWake(wake []string, target string, wakeCmd []string) error {
 	push := slices.Contains(wake, DirectorWakePush)
 	joined := strings.Join(wake, ",")
@@ -326,8 +325,9 @@ type DirectorWakeResult struct {
 //  3. It does nothing when mem holds the registration back: its wake failed
 //     less than directorWakeRetry before now (HeldBack).
 //  4. It chooses the sender, wake_cmd or the herdr pane, and skips a
-//     registration that has none, saying so once on banner
-//     (sendDirectorWake).
+//     registration it cannot send to (no sender, a wake_cmd that is not
+//     valid, a target that is not usable), saying so once per registration
+//     on banner (sendDirectorWake).
 //  5. It sends DirectorWakeText(ids) once. When that succeeds it appends a
 //     woken event for every item; when it fails it writes no woken event. A
 //     failed send or write is said on banner and recorded in mem
@@ -410,7 +410,8 @@ func (o *Org) directorToWake(stateDir string) (*DirectorRegistration, DirectorWa
 // id and the way it was sent; a write that fails is said on banner and
 // recorded in mem as a failure, so a broken inbox is not woken every cycle.
 // On failure it records the failure in mem at now, writes one line on
-// banner, and writes no woken event.
+// banner, and writes no woken event. mem and banner must not be nil:
+// WakeDirector puts in their defaults before it calls this.
 func (o *Org) sendDirectorWake(reg DirectorRegistration, res DirectorWakeResult, now time.Time, wakeCmdDir string, mem *DirectorWakeMemory, banner io.Writer) DirectorWakeResult {
 	sender, skipped, why := o.directorWakeSender(reg, wakeCmdDir)
 	if skipped != "" {

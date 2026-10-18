@@ -11,11 +11,12 @@ import (
 )
 
 // The wake of a director in the director verbs (plan
-// docs/plans/active/2026-10-18-org-director-wake.md, D3, D4, D9, and AC2):
-// attach's check of --wake and --wake-target, the wake attach records and
-// its check against [org.director].wake_cmd, and what attach's success line
-// and the director: line say of a wake with push. newOrgDirectorAttachCmd
-// (org_director.go) registers the two flags and calls these.
+// 2026-10-18-org-director-wake, D3, D4, D9, and AC2): attach's check of
+// --wake and --wake-target, the wake attach records and its check against
+// [org.director].wake_cmd, and what attach's success line and the director:
+// line say of a wake with push. newOrgDirectorAttachCmd (org_director.go)
+// registers the two flags and calls the first three; orgDirectorLine
+// (org_director.go) calls orgDirectorPushDetails.
 
 // checkOrgDirectorAttachWakeFlags is attach's check of --wake and
 // --wake-target before anything is read (plan 2026-10-18-org-director-wake,

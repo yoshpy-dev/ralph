@@ -17,10 +17,10 @@ import (
 )
 
 // Tests for the wake of a director's registration (plan
-// docs/plans/active/2026-10-18-org-director-wake.md, stage 8b-1: D3, D4,
-// AC2, and AC3 in the org layer): the wake and wake_target an attached
-// records, the shape of a wake target, attach's check that a wake can be
-// sent, the target a registration resolves to, and the wake start records.
+// 2026-10-18-org-director-wake, stage 8b-1: D3, D4, AC2, and AC3 in the org
+// layer): the wake and wake_target an attached records, the shape of a wake
+// target, attach's check that a wake can be sent, the target a registration
+// resolves to, and the wake start records.
 // Every test runs on a store under t.TempDir() and the fake herdr, never
 // herdr, a terminal, or a launch_cmd.
 

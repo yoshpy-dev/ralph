@@ -15,10 +15,10 @@ import (
 )
 
 // Tests for how a director is woken, through the CLI (plan
-// docs/plans/active/2026-10-18-org-director-wake.md, D3, D4, D9, AC2, AC3,
-// and AC4 for attach and start): the wake and the wake target attach and
-// start record, the attach and start refusals of a wake that cannot be
-// sent, the main worktree's ralph.toml as the source of wake and wake_cmd,
+// 2026-10-18-org-director-wake, D3, D4, D9, AC2, AC3, and AC4 for attach
+// and start): the wake and the wake target attach and start record, the
+// attach and start refusals of a wake that cannot be sent, the main
+// worktree's ralph.toml as the source of wake and wake_cmd,
 // and where status says the wake line goes. Every ledger is under
 // t.TempDir() (named with --state-dir, or found in a temp repository by
 // newLegacyLedgerRepo). start runs the stub herdr or a launch_cmd that only

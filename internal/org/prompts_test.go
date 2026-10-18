@@ -1604,10 +1604,10 @@ func TestRenderDirectorPrompt_NoLaunchIsTheHerdrPrompt(t *testing.T) {
 }
 
 // TestRenderDirectorPrompt_TellsWhatTheWakeLineIs pins the mission bullet
-// of the push wake (plan docs/plans/active/2026-10-18-org-director-wake.md,
-// AC9, D7): for a director in herdr and for one in the terminal launch_cmd
-// opened, with and without a ConfigPath, the prompt names the start of the
-// line `ralph org watch --all` sends to wake it, cut from DirectorWakeText
+// of the push wake (plan 2026-10-18-org-director-wake, AC9, D7): for a
+// director in herdr and for one in the terminal launch_cmd opened, with and
+// without a ConfigPath, the prompt names the start of the line
+// `ralph org watch --all` sends to wake it, cut from DirectorWakeText
 // itself so the two cannot drift apart, says where it arrives (the pane, or
 // the terminal by [org.director].wake_cmd), says it is the watch's signal and
 // not the human's instruction, and has the director read the inbox with its
