@@ -60,3 +60,61 @@ _(上の行は、依頼により `docs/tech-debt/README.md` には足してい�
   - L1 と L4 は数行の直し。L2 は tag とテストを外す直し。どれも production の動きは変わらないが、コードに触るので、直すなら post-implementation pipeline を最初から回す(記録だけの修正の例外には入らない)
   - 修正 cycle を作るなら、L1・L2・L4 をまとめて 1 回で直す。作らないなら、L1 から L4 を known gaps として PR に書き、L3 は tech-debt の 1 行にする
   - insight event(`docs/insights/events/`)は、「このレポート以外のファイルは変えない」という指示のため、追記していない
+
+## Re-review of the fixes (e85853c5, 80dd2982, abe689e2)
+
+- Date: 2026-10-19
+- Reviewer: reviewer サブエージェント(`/self-review` の修正の再レビュー)
+- Scope: `git show e85853c5 80dd2982 abe689e2`(HEAD abe689e2)。diff の品質だけを見た。テスト、`go build`、`go vet`、gofmt は走らせていない
+
+### Evidence reviewed
+
+- e85853c5 の diff を全部読んだ。`MarkCmdLaunched` は修正後の全文(`internal/org/director_start.go:352-472`)と、`readRaw`・`withLock`・`withFileLockContext`・`acquireFlock` の呼び出し側(`director.go`、`lockfile.go`)も読んだ。新しい 2 つのテストと書き換えた 1 つ(`director_test.go:2728-2993`)、`directorLockHeldElsewhere`、`withStarterFields`、`stubHerdrAgentNotFound` と `setupOrgStubPATH`・`directorStartLedger` を読んだ
+- 80dd2982 は移動の純度を機械的に確かめた。移動元 3 ファイルで消えた行と、新しい 2 ファイルの行を、重複を数えたまま sort して `diff` した。違いは package、import、ファイル冒頭のコメント、移動元の冒頭のコメントの書き換えだけで、コードの行は 1 行も違わない。移動元の import が使われているかは grep で見た(`strings.`、`io.`、`regexp.`、`time.` などの本体での使用数が、移動の前後で同じか 1 減っただけ)。コンパイルは確かめていない
+- 移した関数名と元のファイル名を一緒に書いた箇所を repo 全体(report と archive を除く)で grep し、`director_stop.go`・`director_start.go`・`org_director.go` を名指すコメントを全部読んだ
+- abe689e2 は plan の進捗、spec の注、tech-debt の変わった行を読んだ。tech-debt の変わった行は 5 セルのまま
+- `git diff --check e85853c5^ HEAD` は空。追加したコメント行で 84 桁を超えるものが 1 行ある(下の N1)
+
+### 前回の指摘の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| L1 | 修正済み | `director_start.go:442-446` で lock の前に登録を読んで ps を打ち、`:450` 以降の lock の中では登録を読み直して同じ `checks` を通し、`:459` で starter が同じときだけ結果を使う。ps は lock の中で打たない。下に詳細 |
+| L2 | 修正済み | `DirectorCheck`・`DirectorAlive`・`orgDirectorReportCheck` の doc が、どの JSON かを言い分けた(`director_check.go:120-131`、`:434-442`、`:458-462`。`org_director_check.go:101-111`)。数を実物と照らした。`DirectorAlive` は `id`・`attached_at`・`state`・`how`・`checked_at`・`detail` の 6 キー(`TestDirectorAlive_WriteAndReadBack` の期待値と一致)、`orgDirectorReportCheck` は 4 キー、`DirectorCheck` を marshal するのは `TestDirectorCheck_JSON` だけ。tag とテストを外す案は採らず、tag は「そのテストのためだけ」と doc に書いた(N2) |
+| L3 | 一部修正 | この PR で 800 行を超えた 2 ファイルは直った。`internal/cli/org_director.go` 945 から 793、`internal/org/director_stop.go` 871 から 782。移動は動きを変えていない。`director_start.go` は 1203 行のままで、登録の行もない(R1) |
+| L4 | 修正済み | `org_director_cleanup_test.go:40-42` が `filepath.Dir(t.TempDir())`(この test の一時 dir の根)の下に `LookPath` の結果があることを確かめ、そうでなければ herdr を書く前に `t.Fatalf` する。`setupOrgStubPATH` の stub は同じ t の別の `t.TempDir()` なので根の下に入り、開発者の本物の herdr は入らない。呼び出し元 2 か所(`:86`、`:194`)はどちらも `directorStartLedger(t)` のあと、同じ t |
+
+### L1 の確認
+
+- 登録が、読みと lock のあいだに変わる場合。starter 以外の変化(stopped、detached、別の check-in、別の登録が current になる)は、lock の中の `checks`(`:416-436`、修正前と同じ case の並び)が断り、`ended` は使われない。断りの文は修正前と同じ。starter の変化は `:459` の比較が外れて受け付ける。同じ id の starter は `attached` が 1 回書くだけなので、変わるのは `director.jsonl` を手で書き換えたときだけ。消して作り直すと同じ id が出うるが、token も変わるので、`checks` の token の case が先に断る
+- 断りはすべて lock の下で決まる。pre-lock の `checks` の error は捨てるだけで、`ended` は「断る材料」であって決定ではない。`appendLocked` も lock の中。lock の中で `checks` が通らなければ、`ended` の中身に関係なく `checks` の断りが返る
+- ps が失敗したときは受け付ける。`directorCheckInStarterEnded`(`:484-505`)は read の失敗と知らない state を `""` で返し、`:459` に入らない。pre-lock の `readRaw` の失敗も同じ。lock の中の `readRaw` の失敗は今までどおり返す
+- token が合わない呼び出しは、pre-lock の `checks` が断るので ps を打たせない(`ReadsTheStarterOnlyAfterItsOtherChecks` が見ている)。token を持たない呼び出しが登録について知ることは増えていない
+- 状態を作る前の `os.Stat` の断り(`director.jsonl` がなければ state dir も lock も作らない)は、pre-lock の読みより前にあり、変わっていない
+- ps を lock の中に戻すと落ちるか。落ちる。`...ReadsTheStarterWithTheDirectorLockFree`(`director_test.go:2877`)は ReadStarter の中で `withFileLockContext` を 2 秒で取りに行く。flock は open file description ごとなので、同じプロセスの別 fd でも待たされる。lock を持ったまま読む実装は 2 秒で timeout し、`took` が false のまま `t.Fatal` になる。`...UsesTheStarterItReadOnlyWhile...`(`:2931`)と、反転させた `...RefusesACheckInOnceTheStartThat...`(`:2738`)は `directorLockHeldElsewhere` で、持っているのを見つけたら落ちる。`:2931` の 5 行は、starter の照合(`:459` の 2 つの比較)を外した実装も落とす(起動時刻違い、pid 違い、starter なしが受け付けに変わる)。edit が何も変えなかったときは `(edited == attached) != tc.refused` で検出するので、`strings.Replace` が外れてテストが素通りすることもない
+- lock の中で初めて starter が出る行(`a starter only under the lock`)は `wantReads` が 0(ps を打たない)で、lock の中で starter を読み直す実装を落とす
+
+### 新しい指摘
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 1 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R1: L3 の残り。`director_start.go` は 800 行を超えたまま、この PR で 977 から 1203 行(+23%)になり、登録の行がない。L3 が分けるよう求めた 3 つのうち、starter まわり(`directorStarter`)と、片付けの記録の store 側(`MarkStoppedAtVersion`、`directorVersionText`)は `director_start.go` に残り、`checkCurrentDirector`(46 行)だけが出た。ほかに、この PR で足したテストの 2 ファイルが 800 行をわずかに超える(`director_check_test.go` 857、`director_start_cleanup_test.go` 804)。出た 2 ファイルの余白も小さい(`org_director.go` は 7 行、`director_stop.go` は 18 行)。repo は 800 行超のファイルを登録に載せる慣行がある(`regate.go` 851 行、`mergeguarantee.go` 877 行、`regate_test.go` の行)。cycle 1 のレポートの「Tech debt identified」の行(L3)は、この修正で範囲が変わったのに、tech-debt には入っていない。失敗の筋書き: 次の 8b-2b が `director_start.go` か `org_director.go` に機能を足し、後者は 7 行で 800 を超え、前者は 1200 行のファイルの中に入る | `wc -l`: `director_start.go` 1203(base 88e37b1d は 977)、`director_check_test.go` 857、`director_start_cleanup_test.go` 804。`internal/org/director_start.go:591`(`MarkStoppedAtVersion`)、`:674`(`directorVersionText`)、`:952`(`directorStarter`)。`docs/tech-debt/README.md` に `director_start.go` の行数の行はない(`grep -n "800" docs/tech-debt/README.md` の director 系の行はない)。80dd2982 のコミットメッセージは `checkCurrentDirector` だけを `director_start.go` から出したと書いている | tech-debt に 1 行足す(今の修正 cycle の外でよい)。Debt は「`director_start.go` 1203 行、`director_check_test.go` 857 行、`director_start_cleanup_test.go` 804 行が 800 行を超える。`org_director.go` と `director_stop.go` は 800 行の手前」。Trigger は「8b-2b など、次に director の start か check を変える計画」。分けるなら `MarkStoppedAtVersion` と `directorVersionText` を `director_start_cleanup.go` に移すのが最小(約 100 行)。cycle 1 の「Tech debt identified」の L3 の行は、この行に置き換わる |
+
+### 確認したが上げないもの
+
+- N1(NOTE): `internal/org/director_check.go:24` のコメント 1 行が 85 桁。80dd2982 が `director_start.go` を `director_start_cleanup.go` に書き換えて 8 桁伸び、同じ段落の他の行(65 から 78 桁)は詰め直されていない。折り返すだけ
+- N2(NOTE): `DirectorCheck` の JSON tag は、doc が自分で「`TestDirectorCheck_JSON` のためだけ」と言う状態で残った。tag とそのテストを外せば doc の 1 文が要らなくなる。L2 の「間違った説明」は消えているので、指摘としては閉じている
+- N3(NOTE): lock の中の starter の照合(`:459`)は、同じ token で starter だけが変わる、つまり手書きの編集にしか効かない。lock の外に ps を出すだけなら、`ended` を `checks` のあとで使うだけで足りる。照合は doc に理由が書いてあり、テストも 5 行ある。害はないので、足した理由(約 10 行と seam 1 つとテスト 1 つ)を了承する側に倒した
+- テストの穴(`/test` の範囲): ps が ended と読んだあとで、lock を取る前に登録が stopped・detached・checked-in になる場合の、「`checks` の断りが starter の断りに勝ち、何も書かない」を固定するテストはない。コードは `:450-458` の順(`checks`、そのあとに `ended`)で正しい。`beforeCheckInLock` を使えば 1 ケースで書ける
+- plan の D2(`docs/plans/active/2026-10-18-org-director-liveness.md:67`)は「ロックの下で読み」のままだが、進捗(`:173`)が D2 からの逸脱として理由つきで書いてあり、spec の注にも書いた。plan が archive されても両方残る。D2 の行に「逸脱あり」と足すかは `/sync-docs` に任せる
+- `director_start.go:21-31` の冒頭のコメントは、start の片付けが `director_start_cleanup.go` にあることを指さない(`director_stop.go` と新しいファイルの冒頭は指す)。grep で見つかるので上げない
+- コードのコメントとテストのコメントにある「self-review L1」の形(4 か所)と、tech-debt の「the self-review's L1」は、このレポートの ID を指す。repo にはこの形も slug つきの形も先例がある。このレポートは書き換えず追記しているので、ID は動かない。後の cycle が同じファイルを書き換えるなら曖昧になる
+
+### 結論
+
+- Merge: yes(変更なし)。新しい CRITICAL・HIGH・MEDIUM はないので、cycle 1 の findings の要約と Merge の行は書き換えていない。L1、L2、L4 は修正済み、L3 は 2 ファイルが直り、`director_start.go` と 2 つのテストファイルの分が R1(LOW)として残る
+- Follow-ups:
+  - R1 は tech-debt に 1 行足すだけでよい(上の案)。ファイルを分ける場合は、動きを変えない移動だけのコミットにする
+  - N1 は直すなら 1 行の折り返し。直さなくてよい
