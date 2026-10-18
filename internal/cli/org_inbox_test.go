@@ -905,6 +905,118 @@ func TestOrgInbox_Show(t *testing.T) {
 	}
 }
 
+// AC8 of plan 2026-10-18-org-director-wake: show lists each woken event as
+// `<ts> woken director_id=<d> via=<via>` after the events before it, with
+// control characters in the values escaped; show --json and the list's
+// --json carry woken and woken_at, and an item never woken carries "woken":
+// false and no woken_at. A woken event changes neither the state nor the
+// table, and is not counted as damage. show's help names the kind.
+func TestOrgInbox_ShowsTheWokenEvent(t *testing.T) {
+	stateDir := t.TempDir()
+	escalateOK(t, stateDir, "org-a", inboxQuestion("which plan?"))
+	escalateOK(t, stateDir, "org-b", inboxQuestion("never woken"))
+	store := org.NewInboxStore(stateDir)
+	for _, w := range []struct {
+		minute     int
+		directorID string
+		via        string
+	}{{0, "d1", org.InboxWokenViaWakeCmd}, {5, "d2", org.InboxWokenViaHerdr}} {
+		store.Now = func() time.Time { return time.Date(2026, 10, 18, 9, w.minute, 0, 0, time.UTC) }
+		if err := store.AppendWoken([]string{"e1"}, w.directorID, w.via); err != nil {
+			t.Fatalf("AppendWoken: %v", err)
+		}
+	}
+	// A hand-edited woken line: show escapes its values.
+	line, err := json.Marshal(org.InboxEvent{TS: "2026-10-18T09:06:00Z", ID: "e1", Event: org.InboxEventWoken, DirectorID: "d3\x1b[2J", Via: "herdr\tx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(org.InboxPathIn(stateDir), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := runInboxOK(t, "inbox", "show", "e1", "--state-dir", stateDir)
+	if stderr != "" {
+		t.Errorf("show stderr = %q; want nothing (a woken event is not damage)", stderr)
+	}
+	if strings.ContainsRune(stdout, 0x1b) || !strings.Contains(stdout, "state: open\n") {
+		t.Errorf("show e1 printed a raw ESC or a state other than open:\n%s", stdout)
+	}
+	_, events, ok := strings.Cut(stdout, "events:\n")
+	if !ok {
+		t.Fatalf("show e1 has no events section:\n%s", stdout)
+	}
+	lines := outputLines(events)
+	if len(lines) != 5 || !strings.HasSuffix(lines[0], " escalated") || !strings.HasSuffix(lines[1], " notified reason=inbox_no_watch osascript=ok") {
+		t.Fatalf("show e1 events = %q; want escalated, notified, then the three woken", lines)
+	}
+	for i, want := range []string{
+		"  2026-10-18T09:00:00Z woken director_id=d1 via=wake_cmd",
+		"  2026-10-18T09:05:00Z woken director_id=d2 via=herdr",
+		`  2026-10-18T09:06:00Z woken director_id=d3\x1b[2J via=herdr\tx`,
+	} {
+		if lines[2+i] != want {
+			t.Errorf("show e1 event line %d = %q; want %q", 3+i, lines[2+i], want)
+		}
+	}
+
+	showJSON, _ := runInboxOK(t, "inbox", "show", "e1", "--json", "--state-dir", stateDir)
+	var item org.InboxItem
+	if err := json.Unmarshal([]byte(showJSON), &item); err != nil {
+		t.Fatalf("show --json stdout is not JSON: %v\n%s", err, showJSON)
+	}
+	if !item.Woken || item.WokenAt != "2026-10-18T09:06:00Z" || item.State != org.InboxStateOpen || len(item.Events) != 5 {
+		t.Errorf("show --json = %+v; want open, woken at 09:06:00, 5 events", item)
+	}
+	for _, sub := range []string{`"woken": true`, `"woken_at": "2026-10-18T09:06:00Z"`, `"event": "woken"`, `"director_id": "d1"`, `"via": "wake_cmd"`} {
+		if !strings.Contains(showJSON, sub) {
+			t.Errorf("show --json does not contain %s:\n%s", sub, showJSON)
+		}
+	}
+
+	listJSON, stderr := runInboxOK(t, "inbox", "--json", "--state-dir", stateDir)
+	if stderr != "" {
+		t.Errorf("inbox --json stderr = %q; want nothing", stderr)
+	}
+	var payload struct {
+		Items         []map[string]any `json:"items"`
+		IgnoredEvents int              `json:"ignored_events"`
+	}
+	if err := json.Unmarshal([]byte(listJSON), &payload); err != nil {
+		t.Fatalf("inbox --json stdout is not JSON: %v\n%s", err, listJSON)
+	}
+	if len(payload.Items) != 2 || payload.IgnoredEvents != 0 {
+		t.Fatalf("inbox --json = %s; want e1 and e2, nothing ignored", listJSON)
+	}
+	if e1 := payload.Items[0]; e1["id"] != "e1" || e1["woken"] != true || e1["woken_at"] != "2026-10-18T09:06:00Z" {
+		t.Errorf("inbox --json e1 = %v; want woken true, woken_at 2026-10-18T09:06:00Z", e1)
+	}
+	e2 := payload.Items[1]
+	if _, hasWokenAt := e2["woken_at"]; e2["id"] != "e2" || e2["woken"] != false || hasWokenAt {
+		t.Errorf("inbox --json e2 = %v; want woken false and no woken_at", e2)
+	}
+
+	listOut, _ := runInboxOK(t, "inbox", "--state-dir", stateDir)
+	if rows := inboxTableRows(t, listOut); len(rows) != 2 || len(rows[0]) != 8 || rows[0][1] != "open" || rows[0][6] != "yes" {
+		t.Errorf("inbox rows = %q; want e1 open, NOTIFIED yes, 8 columns", rows)
+	}
+
+	help, err := runOrgCmd(t, "inbox", "show", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "(escalated, notified, woken, acked, resolved)"; !strings.Contains(strings.Join(strings.Fields(help), " "), want) {
+		t.Errorf("inbox show --help does not say %q:\n%s", want, help)
+	}
+}
+
 func TestOrgInbox_EmptyInbox(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	for _, tc := range []struct {

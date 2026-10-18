@@ -1,0 +1,146 @@
+# org-director-wake /test cycle 1: mutation results
+
+- HEAD 4331358c (base 9e92d928), 2026-10-18
+- Copy: `git -C <worktree> archive HEAD | tar -x -C <scratch>/mut/src`. The worktree was not edited.
+- Each mutant is a literal replacement; the driver checks that every old string occurs exactly once in the file, writes the mutated file and an overlay json under `<scratch>/mut/m/<id>/`, and runs `go test -overlay <overlay> -count=1` package by package, stopping at the first red package.
+- `-run` patterns (timeout 4m; whole-package runs use 30m):
+  - org: `Wake|Woken|Inbox|Deadline|DirectorAttach|DirectorRead|DirectorRegistration|StartDirector|RunWatchAll|Prompt`
+  - cli: `Wake|Woken|MainWorktreeRalphToml` (mutants of internal/cli: `Wake|Woken|OrgDirector|OrgInbox|OrgWatch|Status`)
+  - config: whole package
+- PATH starts with canary stubs of herdr, osascript, tmux, orca, gh and open (each logs one line and exits 97). Their log stayed at 0 lines for every run below.
+- Baseline in the copy at HEAD: org (pattern) ok 53.7 s, cli (wide pattern) ok 193.9 s, config ok 0.8 s.
+- Columns: id | group | file | change | verdict | first failing tests | packages (rc) | seconds.
+- `flake-only`: the run went red, but only through the subtest `TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time`, which fails under load at HEAD too (see "Flake" below). It is counted as a survivor.
+
+## Result
+
+83 mutants: 77 killed, 6 not killed by the committed tests (G7, O4, O3, H6, M11 survived; G5 went red only through the flake).
+
+| id | group | file | change | verdict | first failing tests | packages | s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| S1 | selection | org/director_wake.go | 選ぶ条件から `!item.Woken` を外す(woken 済みも起こす) | killed | TestDirectorWakeItems, TestRunWatchAll_WakesTheDirectorOnceForAnEscalatedItem ほか5本 | org(rc1) | 68 |
+| S2 | selection | org/director_wake.go | `State == open` を `State != resolved` に(acked も起こす) | killed | TestDirectorWakeItems, TestWakeDirector_RunsNothingWithoutAnItemOrAPushRegistration | org(rc1) | 64 |
+| S3 | selection | org/director_wake.go | `State == open` を `State != acked` に(resolved も起こす) | killed | TestDirectorWakeItems, TestWakeDirector_RunsNothingWithoutAnItemOrAPushRegistration | org(rc1) | 55 |
+| C1 | cap | org/director_wake.go | `len(ids) <= 20` を `< 20` に | killed | TestDirectorWakeText | org(rc1) | 53 |
+| C2 | cap | org/director_wake.go | 上限 20 を 21 に | killed | TestDirectorWakeText, TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes ほか1本 | org(rc1) | 49 |
+| C3 | cap | org/director_wake.go | `plus N more` の N を全件の数に | killed | TestDirectorWakeText, TestWakeDirector_OneRunNamesEveryNewItem | org(rc1) | 50 |
+| C4 | cap | org/director_wake.go | woken を名指した 20 件にだけ書く | killed | TestWakeDirector_OneRunNamesEveryNewItem | org(rc1) | 52 |
+| C5 | cap | org/director_wake.go | 名指す ID を 19 件に | killed | TestDirectorWakeText, TestWakeDirector_OneRunNamesEveryNewItem | org(rc1) | 51 |
+| G1 | gap | org/director_wake.go | 間隔 5 分を 4 分に | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes, TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 45 |
+| G2 | gap | org/director_wake.go | `now.Sub(at) < 5m` を `<=` に | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes, TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 44 |
+| G3 | gap | org/director_wake.go | 送れなかったときの recordFailure を消す | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes | org(rc1) | 48 |
+| G4 | gap | org/director_wake.go | woken を書けなかったときの recordFailure を消す | killed | TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 48 |
+| G5 | gap | org/director_wake.go | 送れたあとの recordSuccess を消す | flake-only | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes (no_return_in_time only) | org(rc1) | 50 |
+| G6 | gap | org/director_wake.go | holdsBack の判定を消す | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes, TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 50 |
+| G7 | gap | org/watch.go | 見張りが呼ぶたびに新しい DirectorWakeMemory を渡す | SURVIVED | - | org(rc0)+cli(rc0) | 122 |
+| G8 | gap | org/director_wake.go | 失敗の時刻を 5 分前として覚える | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes, TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 46 |
+| O1 | said-once | org/director_wake.go | warnOnce がいつも true を返す | killed | TestWakeDirector_AnUnusableTargetIsSaidOnceAndNothingRuns, TestWakeDirector_NoWayToSendIsSaidOncePerRegistration | org(rc1) | 47 |
+| O2 | said-once | org/director_wake.go | 一度だけの鍵から登録の ID を外す | killed | TestWakeDirector_NoWayToSendIsSaidOncePerRegistration | org(rc1) | 59 |
+| O3 | said-once | org/director_wake.go | 一度だけの鍵から理由を外す | SURVIVED | - | org(rc0)+cli(rc0) | 125 |
+| O4 | said-once | org/watch.go | 見張りがサイクルごとにメモリを空にする | SURVIVED | - | org(rc0)+cli(rc0) | 124 |
+| H1 | herdr | org/director_wake.go | confirmSeatPane の照合を消す | killed | TestRunWatchAll_DoesNotWakeAPullDirector, TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 51 |
+| H2 | herdr | org/director_wake.go | 照合のエラーを無視する | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 47 |
+| H3 | herdr | org/director_wake.go | herdr に pane がないこと(gone)を無視する | killed | TestRunWatchAll_DoesNotWakeAPullDirector, TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 50 |
+| H4 | herdr | org/director_wake.go | workspace と tab の label を入れ替えて照合する | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 47 |
+| H5 | herdr | org/director_wake.go | send-text と Enter のあいだの待ちを消す | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 47 |
+| H6 | herdr | org/director_wake.go | herdr の pane id の形の確かめを消す | SURVIVED | - | org(rc0)+cli(rc0) | 136 |
+| H7 | herdr | org/director_wake.go | 送る手段なしの分岐を `!HerdrLaunch` から `CmdLaunch` に | killed | TestWakeDirector_NoWayToSendIsSaidOncePerRegistration | org(rc1) | 48 |
+| H8 | herdr | org/director_wake.go | Enter の失敗を無視する | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 49 |
+| H9 | herdr | org/director_wake.go | Enter の代わりに C-m を送る | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 51 |
+| W1 | woken | org/director_wake.go | 送れなかったときも woken を書く | killed | TestRunWatchAll_WokenAndNotWokenItemsBothReachTheHumanAtTheAckDeadline, TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes ほか2本 | org(rc1) | 49 |
+| W2 | woken | org/director_wake.go | woken の via をいつも wake_cmd にする | killed | TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 48 |
+| W3 | woken | org/director_wake.go | woken の director_id をいつも d1 にする | killed | TestWakeDirector_AReplacedRegistrationIsNotHeldBackAndDoesNotWakeAgain | org(rc1) | 49 |
+| W4 | woken | org/inbox.go | AppendWoken の知らない ID の断りを消す | killed | TestInboxAppendWoken_RefusesAndWritesNothing, TestWakeDirector_AWokenWriteThatFailsHoldsTheRegistrationBack | org(rc1) | 50 |
+| W5 | woken | org/director_wake.go | 送れなかったことを無視して送れたとして扱う | killed | TestRunWatchAll_DoesNotWakeAPullDirector, TestRunWatchAll_WokenAndNotWokenItemsBothReachTheHumanAtTheAckDeadline ほか5本 | org(rc1) | 48 |
+| A1 | attach | org/director_wake.go | push で wake_cmd が空の断りを消す | killed | TestCheckDirectorAttachWake | org(rc1) | 49 |
+| A2 | attach | org/director_wake.go | `{target}` があり送り先がない断りを消す | killed | TestCheckDirectorAttachWake | org(rc1) | 49 |
+| A3 | attach | org/director_wake.go | push がなく送り先がある断りを消す | killed | TestCheckDirectorAttachWake, TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes | org(rc1) | 51 |
+| A4 | attach | org/director_wake.go | CheckDirectorAttachWake の送り先の形の確かめを消す | killed | TestCheckDirectorAttachWake | org(rc1) | 54 |
+| A5 | attach | cli/org_director_wake.go | CLI の `--wake-target` の形の確かめを消す | killed | TestOrgDirectorAttach_RefusesAWakeItCannotSendWithNothingWritten | cli(rc1) | 60 |
+| A6 | attach | org/director_wake.go | 送り先の長さの上限 `> 256` を `>= 256` に | killed | TestValidateDirectorWakeTarget | org(rc1) | 44 |
+| A7 | attach | org/director_wake.go | `-` で始まる送り先の断りを消す | killed | TestCheckDirectorAttachWake, TestDirectorAttach_RefusesABadWakeOrTargetWithNothingWritten ほか2本 | org(rc1) | 47 |
+| A8 | attach | org/director_wake.go | 制御文字を含む送り先の断りを消す | killed | TestCheckDirectorAttachWake, TestDirectorAttach_RefusesABadWakeOrTargetWithNothingWritten ほか2本 | org(rc1) | 47 |
+| A9 | attach | org/director.go | store の Attach の送り先の確かめを消す | killed | TestDirectorAttach_RefusesABadWakeOrTargetWithNothingWritten | org(rc1) | 49 |
+| A10 | attach | cli/org_director_wake.go | CLI の `--wake` の値の確かめを消す | killed | TestOrgDirectorAttach_RefusesAWakeItCannotSendWithNothingWritten | cli(rc1) | 50 |
+| A11 | attach | cli/org_director_wake.go | `--wake` の有無を `Changed` でなく値が空でないかで見る | killed | TestOrgDirectorAttach_RefusesAWakeItCannotSendWithNothingWritten | cli(rc1) | 55 |
+| A12 | attach | org/director.go | attached に wake_target を書かない | killed | TestDirectorAttach_RecordsTheWakeAndTheWakeTarget, TestRunWatchAll_WakesTheDirectorOnceForAnEscalatedItem ほか8本 | org(rc1) | 36 |
+| T1 | start | org/director_start.go | start の wake の確かめを呼ばない | killed | TestStartDirector_RefusesBeforeWritingOrCallingHerdr | org(rc1) | 44 |
+| T2 | start | org/director_start.go | herdr の start も push と空の wake_cmd で断る | killed | TestStartDirector_RecordsTheWakeOfTheConfig, TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 42 |
+| T3 | start | org/director_start.go | wake_cmd があっても launch_cmd と push の start を断る | killed | TestStartDirector_ALaunchCmdStartThatPushesPassesWithAWakeCmd | org(rc1) | 43 |
+| T4 | start | org/director_start.go | wake の確かめを checkDirectorLaunchCmd のあとへ移す | killed | TestStartDirector_RefusesBeforeWritingOrCallingHerdr | org(rc1) | 42 |
+| T5 | start | org/director_start.go | wake の確かめを見張りの門のあとへ移す | killed | TestStartDirector_RefusesBeforeWritingOrCallingHerdr | org(rc1) | 43 |
+| T6 | start | org/director_start.go | start の ValidateDirectorWake を消す | killed | TestStartDirector_RefusesBeforeWritingOrCallingHerdr | org(rc1) | 43 |
+| T7 | start | org/director_start.go | start が設定の wake でなく pull を渡す | killed | TestStartDirector_RecordsTheWakeOfTheConfig, TestWakeDirector_TypesIntoTheHerdrPaneOfAHeadlessDirector | org(rc1) | 36 |
+| T8 | start | org/director_start.go | AttachHeadless が渡された wake でなく pull を書く | killed | TestDirectorAttachHeadless_RecordsTheWake, TestDirectorRegistration_WakesByPushAndResolvedWakeTarget ほか4本 | org(rc1) | 36 |
+| M1 | config-read | cli/org.go | main worktree の wake を取らない(attach と watch) | killed | TestOrgDirectorAttach_ReadsTheWakeFromTheMainWorktree, TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom ほか1本 | cli(rc1) | 39 |
+| M2 | config-read | cli/org.go | main worktree の wake_cmd を取らない(attach と watch) | killed | TestOrgDirectorAttach_ReadsTheWakeFromTheMainWorktree, TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom ほか2本 | cli(rc1) | 35 |
+| M3 | config-read | cli/org.go | start が main worktree の wake を取らない | killed | TestOrgDirectorStart_ReadsTheWakeFromTheMainWorktree | cli(rc1) | 38 |
+| M4 | config-read | cli/org.go | start が main worktree の wake_cmd を取らない | killed | TestOrgDirectorStart_ReadsTheWakeFromTheMainWorktree | cli(rc1) | 37 |
+| M5 | config-read | cli/org_watch.go | main の規則で読んだとき、打つ場所を main のルートでなく作業ディレクトリにする | killed | TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom, TestOrgWatch_RunsTheWakeCmdOfTheMainWorktreeInItsRoot | cli(rc1) | 83 |
+| M6 | config-read | cli/org_watch.go | 見張りが main から読んだ値を rt.Config に入れない | killed | TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom, TestOrgWatch_RunsTheWakeCmdOfTheMainWorktreeInItsRoot | cli(rc1) | 38 |
+| M7 | config-read | cli/org_director_wake.go | attach の確かめに main でなく rt.cfg の wake_cmd を使う | killed | TestOrgDirectorAttach_ReadsTheWakeFromTheMainWorktree | cli(rc1) | 55 |
+| M8 | config-read | cli/org_director_wake.go | attach の記録に main でなく rt.cfg の wake を使う | killed | TestOrgDirectorAttach_ReadsTheWakeFromTheMainWorktree | cli(rc1) | 88 |
+| M9 | config-read | cli/org_watch.go | `--config` のディレクトリを絶対パスにしない | killed | TestOrgWatchDirectorWake_ReturnsTheDirectoryOfTheRalphTomlItReadFrom | cli(rc1) | 59 |
+| M10 | config-read | org/director_wake.go | wake_cmd を打つ場所(cmd.Dir)を空にする | killed | TestWakeDirector_ARelativeProgramIsResolvedFromTheWakeCmdDir, TestWakeDirector_RunsTheWakeCmdOnceAndRecordsWoken | org(rc1) | 48 |
+| M11 | config-read | org/director_wake.go | 区切りのない実行ファイルの名前も設定のディレクトリから解く | SURVIVED | - | org(rc0)+cli(rc0) | 131 |
+| M12 | config-read | org/director_wake.go | 相対の実行ファイルを設定のディレクトリから解かない | killed | TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes (a_non-zero_exit and no_return_in_time) | org(rc1) | 45 |
+| M13 | config-read | cli/org_watch.go | CLI が DirectorWakeDir を渡さない | killed | TestOrgWatch_RunsTheWakeCmdOfTheMainWorktreeInItsRoot | cli(rc1) | 39 |
+| M14 | config-read | org/watch.go | RunWatchAll が DirectorWakeDir を使わない | killed | TestRunWatchAll_DoesNotWakeAPullDirector, TestRunWatchAll_SweepsTheDeadlinesThenWakesTheDirectorBeforeThePulse ほか2本 | org(rc1) | 40 |
+| I1 | inbox | org/inbox.go | fold が Woken を立てない | killed | TestInboxAppendWoken_TornLastLineGetsTheNewlineFirst, TestInboxAppendWoken_WaitsForTheInboxLock ほか14本 | org(rc1) | 40 |
+| I2 | inbox | org/inbox.go | fold が woken を知らない event として捨てる | killed | TestInboxDeadlines_AWokenItemComesDueAsOneNotWoken, TestInboxRead_WokenMarksTheItemInAnyStateWithoutChangingIt ほか8本 | org(rc1) | 47 |
+| I3 | inbox | org/deadline.go | 期限の計算が Woken の件を飛ばす | killed | TestInboxDeadlines_AWokenItemComesDueAsOneNotWoken, TestRunWatchAll_WokenAndNotWokenItemsBothReachTheHumanAtTheAckDeadline | org(rc1) | 33 |
+| I4 | inbox | cli/org_inbox.go | inbox show の event から director_id を外す | killed | TestOrgInbox_ShowsTheWokenEvent | cli(rc1) | 65 |
+| I5 | inbox | org/inbox.go | woken が件を acked にする | killed | TestInboxAppendWoken_TornLastLineGetsTheNewlineFirst, TestInboxAppendWoken_WritesOneLinePerIDWithOneTS ほか5本 | org(rc1) | 32 |
+| R1 | cycle | org/watch.go | サイクルの「起こす」と pulse の順を入れ替える | killed | TestRunWatchAll_SweepsTheDeadlinesThenWakesTheDirectorBeforeThePulse | org(rc1) | 37 |
+| R2 | cycle | org/watch.go | 「起こす」を期限の送りの前に移す | killed | TestRunWatchAll_SweepsTheDeadlinesThenWakesTheDirectorBeforeThePulse | org(rc1) | 32 |
+| R3 | cycle | org/watch.go | サイクルから「起こす」を消す | killed | TestRunWatchAll_ADirectorFileThatCannotBeReadSkipsOnlyTheWake, TestRunWatchAll_DoesNotWakeAPullDirector ほか3本 | org(rc1) | 35 |
+| K1 | settings | config/config.go | wake の重複の断りを消す | killed | TestLoad_OrgDirectorWake, TestValidateDirectorWakeNamed | config(rc1) | 1 |
+| K2 | settings | config/config.go | 空の wake の断りを消す | killed | TestLoad_OrgDirectorWake, TestValidateDirectorWake ほか1本 | config(rc1) | 1 |
+| K3 | settings | config/config.go | wake_cmd の最初の要素の placeholder の断りを消す | killed | TestLoad_OrgDirectorWakeCmd | config(rc1) | 1 |
+| K4 | settings | config/config.go | Load が wake_cmd を確かめない | killed | TestLoad_OrgDirectorWakeCmd | config(rc1) | 1 |
+| K5 | settings | config/config.go | 既定の wake を pull,push にする | killed | TestDefault_OrgDirector, TestDefaultsLockStep ほか2本 | config(rc1) | 2 |
+| K6 | settings | config/config.go | wake_cmd の最初の要素が空白だけの断りを消す | killed | TestLoad_OrgDirectorWakeCmd | config(rc1) | 1 |
+| K7 | settings | config/config.go | Load が wake を確かめない | killed | TestLoad_OrgDirectorWake | config(rc1) | 1 |
+
+## Survivors rerun on the whole org and cli packages (no -run)
+
+| bundle | mutants | run | org (whole) | cli (whole) | verdict |
+| --- | --- | --- | --- | --- | --- |
+| B1 | G7 | 1 | rc 0, 602 s | rc 0, 409 s | SURVIVED |
+| B2 | H6 + M11 + O3 + G5 | 1 | rc 1, 599 s: only `TestRegate_FetchFailures/the_fetch_runs_past_the_bound` (regate_test.go:771, exit 128 "Could not read from remote repository" instead of "ran past 300ms"), with B1's whole-org run side by side | not run | flake, not counted |
+| B2 | H6 + M11 + O3 + G5 | 2 | rc 0, 505 s | rc 0, 326 s | SURVIVED |
+
+O4 was not rerun on the whole packages: it is the same kind of change as G7 (the watch's memory does not persist across calls) and P4/P4b kill both. The regate failure is the flake already recorded in the org-auto-merge /test (then with three whole-org runs side by side); none of the four mutants touches regate.
+
+## Probes (scratch test files read through -overlay, not committed)
+
+| probe | file | what it pins | HEAD | kills |
+| --- | --- | --- | --- | --- |
+| P1 | cli zz_probe_status_json_test.go | `ralph status --json` carries the registration's `wake` (pull,push) and `wake_target` (verify gap I3) | PASS | - (no mutant; closes a coverage gap) |
+| P2 | org zz_probe_wake_test.go TestProbe_ABareProgramNameIsLookedUpInPath | a wake_cmd whose program has no "/" is looked up in PATH and run in the wake_cmd directory | PASS | M11 |
+| P3 | org TestProbe_AnUnusableHerdrPaneIsSkippedWithoutCallingHerdr (panes "-x" and an escape sequence) | with no wake_cmd, a headless herdr director whose recorded pane is not a usable target is skipped, said once over two calls 10 minutes apart, and herdr is not called | PASS | H6 |
+| P4 | org TestProbe_TheWatchHoldsAFailedWakeBackAcrossCycles | one RunWatchAll keeps one DirectorWakeMemory: a failing wake_cmd runs once over 3 cycles a minute apart, and its failure line is written once | PASS | G7, O4 |
+| P4b | org TestProbe_TheWatchSaysNoSenderOnceAcrossCycles | the no-sender line is written once over the 3 cycles of one watch run | PASS | G7, O4 |
+| canary | org zz_probe_canary_test.go TestProbe_TheRealHerdrDriverReachesTheCanary | sensitivity check of the canary: the real driver (driver.Herdr over driver.ExecRunner) with a separate canary dir first on PATH reaches the canary (1 line logged, exit 97, the wake fails); the shared canary log stayed at 0 | PASS | - |
+
+Kill matrix of the probes (each probe run against each survivor mutant through a combined overlay):
+
+| mutant | P2 | P3 | P4 | P4b |
+| --- | --- | --- | --- | --- |
+| M11 | red | green | green | green |
+| H6 | green | red | green | green |
+| G7 | green | green | red | red |
+| O4 | green | green | red | red |
+| O3 | green | green | green | green |
+| G5 | green | green | green | green |
+
+## Equivalence notes
+
+- O3 (the said-once key without the reason): for a ledger ralph writes, the reason a registration is skipped does not change while its id stays the same. A registration's launch, wake, wake_cmd presence, and pane are fixed at attach or start; a different reason needs a new id (attach --replace, start). Only a hand-edited director.jsonl (for example the same id changed from a herdr launch to a promoted session) changes the reason under one id, and then the second reason is not said. Judged equivalent for ralph-written ledgers; LOW at most.
+- G5 (recordSuccess removed): recordSuccess deletes the failure time of a registration. A wake is only sent when holdsBack is false, which already means no failure in the last 5 minutes, so a stale entry left behind only holds back again if a new failure is recorded, which overwrites it. Expected equivalent; its red run came only from the flake below, and the kill matrix keeps it green.
+
+## Flake
+
+- `TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time` (internal/org/director_wake_test.go:952, "woken [] after 0 runs, want none after one"). The row sets DriverCallTimeout to 1 s; the stand-in script records its run before `exec sleep 30`, and under load the sh start and the mark write do not happen within 1 s, so the run is killed before it is recorded.
+- Seen in the A3, C2, G5 and G6 mutant runs (none of them touches timing) and in 1 of 40 runs of `-count=40` at HEAD with load average 15 to 240 from other sessions. A3, C2 and G6 were also red through other tests; G5 was red only through this subtest.
+- Proposed fix: raise the row's timeout to about 3 s, or accept `len(runs) <= 1` for the timeout row.

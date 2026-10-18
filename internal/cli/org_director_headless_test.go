@@ -90,7 +90,7 @@ func seedHeadless(t *testing.T, stateDir, driverName, model, workspaceID, paneID
 	t.Helper()
 	store := org.NewDirectorStore(stateDir)
 	reg, err := store.AttachHeadless(org.DirectorHeadlessAttach{
-		Driver: driverName, Model: model, PermissionMode: org.PermissionModeAutonomous, User: "alice", Cwd: "/work",
+		Driver: driverName, Model: model, PermissionMode: org.PermissionModeAutonomous, Wake: []string{org.DirectorWakePull}, User: "alice", Cwd: "/work",
 	})
 	if err != nil {
 		t.Fatalf("seed the headless registration: %v", err)
@@ -485,7 +485,7 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 		{name: "a main worktree ralph.toml that does not load", mainToml: "[org]\nmax_orgs = 0\n",
 			args: []string{"--driver", "claude", "--model", "opus"},
 			wantErr: func(r legacyLedgerRepo) []string {
-				return []string{"org: load [org.director].enabled and launch_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's " +
+				return []string{"org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's " +
 					filepath.Join(r.mainRoot, "ralph.toml"), "[org].max_orgs must be >= 1, got 0"}
 			}},
 	}
@@ -1569,7 +1569,8 @@ func TestOrgSpawn_RoleDirectorIsRefusedBeforeTheModelFallback(t *testing.T) {
 func seedCmdHeadless(t *testing.T, stateDir string) org.DirectorRegistration {
 	t.Helper()
 	reg, err := org.NewDirectorStore(stateDir).AttachHeadless(org.DirectorHeadlessAttach{
-		Launch: org.DirectorLaunchCmd, Driver: "claude", Model: "opus", PermissionMode: org.PermissionModeAutonomous, User: "alice", Cwd: "/work",
+		Launch: org.DirectorLaunchCmd, Driver: "claude", Model: "opus", PermissionMode: org.PermissionModeAutonomous, Wake: []string{org.DirectorWakePull},
+		User: "alice", Cwd: "/work",
 	})
 	if err != nil {
 		t.Fatalf("seed the launch cmd registration: %v", err)

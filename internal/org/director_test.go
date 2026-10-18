@@ -1063,7 +1063,7 @@ func newTestHeadlessStore(t *testing.T, tokens ...string) (*DirectorStore, strin
 
 func testHeadlessAttach() DirectorHeadlessAttach {
 	return DirectorHeadlessAttach{
-		Driver: DirectorDriverCodex, Model: "gpt-x", PermissionMode: PermissionModeAutonomous,
+		Driver: DirectorDriverCodex, Model: "gpt-x", PermissionMode: PermissionModeAutonomous, Wake: []string{DirectorWakePull},
 		User: "alice", Cwd: "/work/a",
 	}
 }
@@ -1497,6 +1497,11 @@ func TestDirectorAttachHeadless_RefusesBadInputBeforeReadingAnything(t *testing.
 		{name: "no model", mutate: func(h *DirectorHeadlessAttach) { h.Model = "" }, want: "start: the model is empty"},
 		{name: "no permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "" }, want: `start: unknown permission mode "": use autonomous, edits, or guarded`},
 		{name: "an unknown permission mode", mutate: func(h *DirectorHeadlessAttach) { h.PermissionMode = "bypass" }, want: `unknown permission mode "bypass"`},
+		// Plan 2026-10-18-org-director-wake, AC3: start always passes the
+		// wake it read, so an empty one is a caller's bug.
+		{name: "no wake", mutate: func(h *DirectorHeadlessAttach) { h.Wake = nil }, want: "start: [org.director].wake: the array must not be empty"},
+		{name: "an unknown wake", mutate: func(h *DirectorHeadlessAttach) { h.Wake = []string{"poll"} }, want: `start: [org.director].wake: element 0 "poll" is not a wake value`},
+		{name: "a wake listed twice", mutate: func(h *DirectorHeadlessAttach) { h.Wake = []string{"push", "push"} }, want: `element 1 "push" repeats element 0`},
 		{name: "no token", token: func() (string, error) { return "", errToken }, want: "start: no randomness"},
 		{name: "a malformed token", token: func() (string, error) { return "0123456789AB", nil }, want: `launch token "0123456789AB" is not 12 lowercase hex digits`},
 	} {

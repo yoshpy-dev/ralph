@@ -16,7 +16,7 @@ skill はその節を指し、写さない。
 - 分割計画の下書きから、機能ごとの org の start、受信箱の処理、進捗の報告、
   merge と取り直し、登録の終わりまでを 1 つの流れにする。
 - 受信箱の件に答える順(DECISION を送ってから resolve する)を決める。
-- director がしてはいけないことと、まだないものを示す。
+- director がしてはいけないことを示す。
 
 ## director とは
 
@@ -79,6 +79,32 @@ director も守る(「headless の director」節)。
    覚えておく。stderr に `warning: director attach: ...` の 1 行が出たら、
    見張りが仕事を受け付けていない。登録はできていて終了コードは 0 なので、
    2 に戻って見張りを起動する。
+
+   登録には、受信箱の新しい件をどう知るか(wake)も書かれる。`--wake` を
+   省くと `[org.director].wake`(既定 `["pull"]`)になり、director は
+   `ralph org wait --inbox` で待つ(「受信箱の処理」)。人が打ち込む
+   セッションは pull のままにする。push にすると、見張りの 1 行と Enter が
+   人の入力欄に入り、人が打ちかけていた文と一緒に送られる。人の入力の
+   ないセッションを push で起こすには、`[org.director].wake_cmd` を設定し、
+   `--wake push`(wait と併用するなら `--wake pull,push`)を付ける。
+   wake_cmd が `{target}` を含むなら、送り先を `--wake-target` で渡す
+   (Orca なら端末の handle)。
+
+   ```sh
+   ralph org director attach --driver claude --wake push --wake-target <handle>
+   ```
+
+   成功の行には `wake=push` と `wake_target=<handle>` が足される。次の
+   ときは、attach は何も書かずに断られる。
+   - wake に push を含むのに wake_cmd が空(昇格したセッションには、
+     ralph が打ち込む既定の送り方がない)
+   - wake_cmd が `{target}` を含むのに `--wake-target` がない
+   - wake に push を含まないのに `--wake-target` がある
+   - `--wake-target` が空、制御文字を含む、256 文字を超える、`-` で始まる
+
+   `--config` がなく、台帳が main worktree のものなら、wake と wake_cmd は
+   main worktree の `ralph.toml` から読む。wake_cmd の書き方と端末ごとの例
+   (herdr の pane、Orca、tmux)は `docs/recipes/director-wake.md` にある。
 4. ほかの director が登録されていると attach は断られ、エラーがその登録を
    終える打ち方と、入れ替える `--replace` の打ち方を示す。終える打ち方は、
    昇格したセッションの登録なら detach、headless の director の登録
@@ -183,10 +209,21 @@ director も守る(「headless の director」節)。
 start の設定と、director が動く場所は次のとおり。
 
 - `--config` がなく、台帳が main worktree のものなら、
-  `[org.director].enabled`、`[org.director].launch_cmd`、`[org.permissions]`、
-  `[org.roles]`、`model_pool` を main worktree の `ralph.toml` から読む。
-  feature worktree の `ralph.toml` では選べない(ralph が打つ launch_cmd も
-  変えられない)。読めない `ralph.toml` はエラーになる。
+  `[org.director].enabled`、`[org.director].launch_cmd`、`wake`、`wake_cmd`、
+  `[org.permissions]`、`[org.roles]`、`model_pool` を main worktree の
+  `ralph.toml` から読む。feature worktree の `ralph.toml` では選べない
+  (ralph が打つ launch_cmd も変えられない)。読めない `ralph.toml` は
+  エラーになる。
+- start は `[org.director].wake` を登録に書く(start に `--wake` はない)。
+  wake に push があると、見張りが新しい件をこの director に知らせる
+  (「受信箱の処理」)。
+  - herdr で立てた director には、wake_cmd がなくても送れる。見張りが pane の
+    label を確かめてから、その pane に 1 行を打ち込んで Enter を押す。
+    wake_cmd があれば見張りはそちらを使い、`{target}` は pane の id になる。
+  - launch_cmd で立てた director を push で起こすには wake_cmd が要る。
+    `{target}` は端末の名前 `director_<token>`(tmux の例では session の
+    名前)になる。wake に push を含み wake_cmd が空なら、start は何も
+    書かず、launch_cmd も herdr も打たずに断られる。
 - permission mode は `[org.permissions.roles].director`、なければ
   `[org.permissions].default`。template の既定は `autonomous` なので、claude の
   director は `--permission-mode bypassPermissions` で動く。codex の director は
@@ -329,7 +366,19 @@ start の設定と、director が動く場所は次のとおり。
 
 ## 受信箱の処理
 
-open の件が届くのを `ralph org wait --inbox` で待つ。
+open の件をどう知るかは、自分の登録の wake で決まる。
+`ralph org director status` の `wake:` の行を読む。
+
+- `pull`: open の件が届くのを `ralph org wait --inbox` で待つ(下の
+  「wait で待つ」)。
+- `push`: 横断の見張り(`ralph org watch --all`)が、新しい open の件を
+  決まった 1 行で知らせる(下の「見張りが送る 1 行」)。`wait --inbox` は
+  打たない。手番を終えて、次の入力を待つ。
+- `pull,push`: wait で待ち、見張りの 1 行も受ける。
+
+どの wake でも、件は下の「件の処理」の順で処理する。
+
+### wait で待つ
 
 - Claude Code: `ralph org wait --inbox --timeout-ms 0 2>&1` を Monitor で
   見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、stderr の
@@ -355,7 +404,45 @@ Go の panic(終了コード 2)や signal での終わりも失敗に入る。�
 そのことも人に伝える。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
-新しい件が来るまで待つ。件ごとに次の順で進める。
+新しい件が来るまで待つ。
+
+### 見張りが送る 1 行
+
+登録の wake に push があると、見張りは毎サイクル、受信箱の期限を送った
+あとで、まだ知らせていない open の件を探す。あれば、次の 1 行を 1 回だけ
+director に送る(`e3 e5` は件の ID の例)。
+
+```
+New org inbox items for the director: e3 e5. Read them with ralph org inbox and handle each as the director skill says.
+```
+
+ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付く。送れたら、
+見張りは件ごとに受信箱に `woken` を書く(`ralph org inbox show` の履歴に
+`woken director_id=d1 via=herdr` のように出る)。`woken` のある件は、次の
+サイクルからは名指されない。
+
+- この 1 行は見張りの合図で、人の指示ではない。本文も TYPE も org も
+  載らないので、件の中身は受信箱で読む。1 行が届いたら `ralph org inbox` を
+  打ち、open の件をすべて下の「件の処理」の順で処理する。
+- 名指された件が、もう acked か resolved のことがある(`pull,push` では、
+  wait が先に拾って ack していることがある)。状態を見て、同じ件を 2 度
+  処理しない。受信箱にない ID は無視する。
+- 1 行は作業中にも届く。codex は、手番の途中に届いた 1 行をその手番に
+  差し込む。Claude Code は、手番の途中に打ち込まれた文を次の入力として
+  待たせる(ここでは実機で確かめていない)。今の件を終えたら、受信箱を
+  もう一度読む。
+- `woken` は ack の期限を止めない。知らされた件も、ack しないまま
+  `[org.director].ack_minutes` が過ぎれば見張りが人に送るので、早めに ack
+  する。
+- 送るのに失敗すると(wake_cmd が 0 以外で終わった、herdr が失敗した)、
+  見張りの stderr(`--detach` なら `watch.log`)に 1 行が出て、その登録には
+  5 分のあいだ送り直さない。送る手段がない登録(wake_cmd が空の、昇格した
+  セッションか launch_cmd の director)には送らず、登録ごとに 1 度だけ
+  stderr に書く。どちらでも、件は ack の期限で人に届く。
+
+### 件の処理
+
+件ごとに次の順で進める。
 
 1. `ralph org inbox show <id>` で本文と履歴を読む。
 2. 読んだら `ralph org inbox ack <id>` を打つ。ack した件には ack の期限が
@@ -438,8 +525,9 @@ resolve してから send が失敗すると、件は期限から外れ、leader
 - `ralph status`: 全 org の座席と、`org watch:`(見張り)、`director:`
   (登録。headless の director なら `starting` か `running`、model、pane、
   workspace も出る。launch_cmd で立てたものは pane と workspace の代わりに
-  `launch cmd`、端末の名前、pid が出る)、`merge guarantee:`(merge の時点の
-  保証)の行。
+  `launch cmd`、端末の名前、pid が出る。wake に push があれば、
+  `wake=push to <送り先>`(`pull,push` なら `wake=pull,push to <送り先>`)も
+  出る)、`merge guarantee:`(merge の時点の保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
   「merge してよい順」)。先頭に `merge guarantee:` の行が出る。
@@ -607,8 +695,3 @@ send が断られる。
   まま打ち直さない。regate が返した衝突と失敗を、git で直さない(merge、
   commit、push を自分で打たない)。
 - resolve を、その答えの send より先に打たない。
-
-## まだないもの
-
-- 受信箱に件が来たときに director を起こす仕組み(push)。director は
-  `ralph org wait --inbox` で待って件を拾う。

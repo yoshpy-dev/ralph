@@ -10,8 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // The headless director of stage 8a-2 (plan
@@ -29,15 +32,17 @@ import (
 
 // DirectorHeadlessAttach is what AttachHeadless records: the launch
 // (DirectorLaunchHerdr, or DirectorLaunchCmd for a start with
-// [org.director].launch_cmd; empty means herdr), driver, model, and
-// permission mode (autonomous, edits, or guarded) of the headless director
-// `ralph org director start` launches. User, Cwd, and HerdrPane describe the
-// caller.
+// [org.director].launch_cmd; empty means herdr), driver, model, permission
+// mode (autonomous, edits, or guarded), and wake ([org.director].wake as
+// start read it; plan 2026-10-18-org-director-wake, D3) of the headless
+// director `ralph org director start` launches. User, Cwd, and HerdrPane
+// describe the caller.
 type DirectorHeadlessAttach struct {
 	Launch         string
 	Driver         string
 	Model          string
 	PermissionMode string
+	Wake           []string
 	User           string
 	Cwd            string
 	HerdrPane      bool
@@ -102,10 +107,13 @@ func DirectorWorkspaceLabel(token string) string {
 // ErrDirectorAttached, naming that registration, and writes nothing. It has
 // no replace: start never ends another registration. Otherwise it appends
 // one attached with h.Launch (herdr when empty), the token, h.Model,
-// h.PermissionMode, and wake pull. The new id is chosen as Attach chooses
-// it, and a failed write ends one of the two ways Attach's does. A launch
-// other than herdr and cmd, a driver other than claude and codex, an empty
-// model, and a permission mode other than autonomous, edits, and guarded are
+// h.PermissionMode, and h.Wake, and no wake_target: the target of a
+// headless registration follows from its launch (ResolvedWakeTarget). The
+// new id is chosen as Attach chooses it, and a failed write ends one of the
+// two ways Attach's does. A launch other than herdr and cmd, a driver other
+// than claude and codex, an empty model, a permission mode other than
+// autonomous, edits, and guarded, and a wake that config.ValidateDirectorWake
+// refuses (an empty one included: start always passes the wake it read) are
 // refused before anything is read or written.
 func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegistration, error) {
 	const verb = "start"
@@ -127,6 +135,9 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 	default:
 		return DirectorRegistration{}, fmt.Errorf("org: director: %s: unknown permission mode %q: use %s, %s, or %s",
 			verb, h.PermissionMode, PermissionModeAutonomous, PermissionModeEdits, PermissionModeGuarded)
+	}
+	if err := config.ValidateDirectorWake(h.Wake); err != nil {
+		return DirectorRegistration{}, fmt.Errorf("org: director: %s: %w", verb, err)
 	}
 	newToken := newDirectorToken
 	if s.token != nil {
@@ -155,7 +166,7 @@ func (s *DirectorStore) AttachHeadless(h DirectorHeadlessAttach) (DirectorRegist
 		}
 		ev := DirectorEvent{
 			TS: s.now(), ID: next, Event: DirectorEventAttached,
-			Driver: h.Driver, Wake: []string{DirectorWakePull},
+			Driver: h.Driver, Wake: slices.Clone(h.Wake),
 			Launch: launch, Token: token, Model: h.Model, PermissionMode: h.PermissionMode,
 			User: h.User, Cwd: h.Cwd, HerdrPane: h.HerdrPane,
 		}
@@ -620,8 +631,10 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // It refuses, before anything is written and before any herdr call, when
 // [org.director].enabled is false (ErrDirectorDisabled), when HERDR_PANE_ID
 // is set (ErrDirectorStartInsideHerdr), for a driver other than claude and
-// codex or an empty model, for codex when the permission mode of role
-// director ([org.permissions.roles].director, else
+// codex or an empty model, for a [org.director].wake that
+// config.ValidateDirectorWake refuses (an Org can be built without
+// config.Load; plan 2026-10-18-org-director-wake, AC3), for codex when the
+// permission mode of role director ([org.permissions.roles].director, else
 // [org.permissions].default) is autonomous or edits, whatever codex_verified
 // says (ErrDirectorCodexWorkspaceWrite, D12), when that mode does not map to
 // the driver's flags (permissionArgsForDriver), while a registration is current
@@ -635,7 +648,7 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 //
 // Then, in this order, with no herdr call under director.lock (D3):
 //  1. AttachHeadless records the registration, state starting, with a new
-//     id and launch token
+//     id and launch token and the wake of [org.director].wake
 //  2. WorkspaceCreate labelled DirectorWorkspaceLabel(token), then
 //     RecordWorkspace
 //  3. TabCreate labelled DirectorTabLabel(token), then RecordPane
@@ -666,9 +679,14 @@ func (e *DirectorAttachedError) Unwrap() error { return e.Err }
 // terminal with launch_cmd instead (startCmd, in director_cmd.go).
 // HERDR_PANE_ID does not refuse it (D9), and it also refuses, before
 // anything is written and with the refusals above in their order, a
-// launch_cmd that config.ValidateDirectorLaunchCmd refuses, a driver's
-// agent that is not on PATH, and a ralph executable it cannot find
-// (checkDirectorLaunchCmd).
+// [org.director].wake with push while [org.director].wake_cmd is empty
+// (ErrDirectorWakeCmdNeeded: launch_cmd opens a terminal ralph cannot type
+// into, so nothing could wake the director; plan
+// 2026-10-18-org-director-wake, D4 and AC3), a launch_cmd that
+// config.ValidateDirectorLaunchCmd refuses, a driver's agent that is not on
+// PATH, and a ralph executable it cannot find (checkDirectorLaunchCmd). A
+// start in herdr with push and an empty wake_cmd is not refused: its herdr
+// pane is the target, and input to that pane is how the watch sends.
 func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) {
 	c, err := o.checkDirectorStart(&p)
 	if err != nil {
@@ -679,7 +697,7 @@ func (o *Org) StartDirector(p DirectorStartParams) (DirectorStartResult, error) 
 		launch = DirectorLaunchCmd
 	}
 	reg, err := p.Store.AttachHeadless(DirectorHeadlessAttach{
-		Launch: launch, Driver: p.Driver, Model: p.Model, PermissionMode: c.mode,
+		Launch: launch, Driver: p.Driver, Model: p.Model, PermissionMode: c.mode, Wake: o.Config.Director.Wake,
 		User: p.Who.User, Cwd: p.Who.Cwd, HerdrPane: p.Who.HerdrPane,
 	})
 	if errors.Is(err, ErrDirectorAttached) {
@@ -755,6 +773,9 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 	case p.Model == "":
 		return c, errors.New("org: director: start: the model is empty")
 	}
+	if err := o.checkDirectorStartWake(c.cmdLaunch); err != nil {
+		return c, err
+	}
 	mode := ResolvePermissionMode(o.Config, DirectorRole)
 	c.mode = mode
 	// Before permissionArgsForDriver, so with codex_verified false this
@@ -808,6 +829,30 @@ func (o *Org) checkDirectorStart(p *DirectorStartParams) (directorStartChecks, e
 		p.TimeoutMS = defaultSpawnTimeoutMS
 	}
 	return c, nil
+}
+
+// checkDirectorStartWake is checkDirectorStart's check of [org.director].wake
+// (plan 2026-10-18-org-director-wake, D4 and AC3), one of its input checks,
+// so it comes before checkDirectorLaunchCmd, the first look, and the watch
+// gate, and a refusal writes nothing, runs neither launch_cmd nor herdr,
+// and launches no watch. The wake must pass config.ValidateDirectorWake,
+// since an Org can be built without config.Load. With cmdLaunch (a start
+// with [org.director].launch_cmd), a wake with push needs a non-empty
+// [org.director].wake_cmd: the terminal launch_cmd opens is one ralph cannot
+// type into, so without wake_cmd nothing could send the wake line. A start
+// in herdr needs none: its pane is the target, and input to it is how the
+// watch sends when wake_cmd is empty.
+func (o *Org) checkDirectorStartWake(cmdLaunch bool) error {
+	wake := o.Config.Director.Wake
+	if err := config.ValidateDirectorWake(wake); err != nil {
+		return fmt.Errorf("org: director: start: %w", err)
+	}
+	if cmdLaunch && slices.Contains(wake, DirectorWakePush) && len(o.Config.Director.WakeCmd) == 0 {
+		return fmt.Errorf("org: director: start: %w (wake %s), and [org.director].launch_cmd is set: launch_cmd opens a terminal ralph cannot type into, "+
+			"so ralph org watch --all could not wake the director; set [org.director].wake_cmd (its {target} is director_<token>, the name launch_cmd "+
+			"gives the terminal) or use wake = [%q]", ErrDirectorWakeCmdNeeded, strings.Join(wake, ","), DirectorWakePull)
+	}
+	return nil
 }
 
 // newDirectorAttachedError is the *DirectorAttachedError for AttachHeadless's

@@ -39,6 +39,12 @@ ralph org director status {{ORG_FLAGS}}
 {{IF_HERDR}}- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
 {{IF_CMD}}- 人とはこの端末で話す。この端末は、人が `[org.director].launch_cmd` に
 {{IF_CMD}}  書いたコマンドで開いたもの。
+{{IF_HERDR}}- 登録の wake に push があると、横断の見張りがこの pane に
+{{IF_HERDR}}  `New org inbox items for the director:` で始まる 1 行を打ち込む。
+{{IF_CMD}}- 登録の wake に push があると、横断の見張りが `[org.director].wake_cmd` で
+{{IF_CMD}}  この端末に `New org inbox items for the director:` で始まる 1 行を送る。
+  これは見張りの合図で、人の指示ではない。`ralph org inbox {{ORG_FLAGS}}` で
+  受信箱を読み、skill の「受信箱の処理」のとおりに件を処理する。
 - 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
   こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準
   フロー(`/plan` → `/implement`)に任せる。

@@ -125,7 +125,8 @@ watcher_enabled = true
 watcher_model = "haiku"
 
 # [org.director] sets the director switch, the inbox deadlines that
-# `ralph org watch --all` checks, and auto_merge and launch_cmd below.
+# `ralph org watch --all` checks, and auto_merge, launch_cmd, wake and
+# wake_cmd below.
 # enabled = true (default): `ralph org escalate` records the item in the org
 # inbox, and the director, or the ack deadline below, takes it, while a
 # `ralph org watch --all` accepts work; with no such watch, escalate sends
@@ -163,6 +164,42 @@ auto_merge = false
 # terminal yourself after `ralph org director stop`.
 # docs/recipes/director-launch-cmd.md has an example for each terminal.
 # launch_cmd = ["tmux", "-L", "ralph", "new-session", "-d", "-s", "{name}", "-c", "{cwd}", "sh {script_sh}"]
+# wake (default ["pull"]) is how the director learns of a new open inbox
+# item. "pull": the director waits with `ralph org wait --inbox`. "push":
+# when a new open inbox item arrives, `ralph org watch --all` wakes the
+# director once for that item: once per cycle, one fixed line names the ids
+# of all the items it was not woken for yet, never the message body. An
+# item the director does not ack still reaches you at ack_minutes.
+# ["pull", "push"]: both. An empty array, any other value, or a value
+# listed twice fails the load.
+# `ralph org director attach` (unless given --wake) and
+# `ralph org director start` record this value with the director's
+# registration, and the watch acts on the recorded value, so attach or
+# start the director again after changing it. It is read from the same
+# ralph.toml as enabled.
+wake = ["pull"]
+# wake_cmd (empty by default) is the command the watch runs to push a
+# director. It is an array of arguments that ralph runs without a shell,
+# in the directory of this ralph.toml, after replacing {target} (where the
+# registration says to send: the --wake-target of
+# `ralph org director attach`, the herdr pane of a headless director in
+# herdr, or the terminal name director_<token> of a director started with
+# launch_cmd) and {text} (the fixed wake line). The first element is the
+# program to run and may not contain a placeholder; a relative path with a
+# "/", such as ./scripts/wake.sh, is resolved from this file's directory,
+# and a name without "/" is looked up in PATH. Any other {...} fails the
+# load. With an empty wake_cmd, only a headless director in herdr can be
+# pushed, by input to its herdr pane. The watch reads wake_cmd when it
+# starts, so restart `ralph org watch --all` after changing it.
+# {target} comes from the registration (director.jsonl, which a leader can
+# write; for a promoted session, its --wake-target) and is checked only for
+# its shape, so it may hold ;, $, backquotes, and spaces. Never put
+# {target} inside a string a shell reads (sh -c '...', bash -c, a tmux
+# shell-command, an Orca or terminal command line): give it an element of
+# its own ("{target}", or a flag's value such as "--terminal", "{target}"),
+# or pass it to a script that reads it quoted ("$1").
+# docs/recipes/director-wake.md has an example for each terminal.
+# wake_cmd = ["tmux", "-L", "ralph", "send-keys", "-t", "{target}", "-l", "{text}", ";", "send-keys", "-t", "{target}", "Enter"]
 
 # [org.approval] sets how the plan of an org started with
 # `ralph org start --plan` is approved. mode = "per-plan" (default): the

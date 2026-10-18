@@ -102,6 +102,17 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if got, want := cfg.Org.Director.AutoMerge, Default().Org.Director.AutoMerge; got != want {
 		t.Errorf("templates/base/ralph.toml director.auto_merge = %v, want Default()'s %v", got, want)
 	}
+	// The same holds for [org.director].wake, which TestDefaultsLockStep
+	// compares with RALPH_ORG_DIRECTOR_WAKE.
+	if !strings.Contains(string(data), "\nwake = [\"pull\"]\n") {
+		t.Error(`templates/base/ralph.toml does not set wake = ["pull"] in [org.director]`)
+	}
+	if got, want := cfg.Org.Director.Wake, Default().Org.Director.Wake; !slices.Equal(got, want) {
+		t.Errorf("templates/base/ralph.toml director.wake = %q, want Default()'s %q", got, want)
+	}
+	if len(cfg.Org.Director.WakeCmd) != 0 {
+		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
+	}
 }
 
 // TestLoad_RequireCodexCLI verifies the new toml field round-trips. The doctor
@@ -813,8 +824,9 @@ watcher_model = ""
 
 // TestDefault_OrgDirector verifies the [org.director] defaults: the director
 // switch enabled is true, auto_merge is false (merges stay the human's), the
-// inbox deadlines are ack_minutes 10 and resolve_minutes 60, and launch_cmd
-// is empty (start uses herdr).
+// inbox deadlines are ack_minutes 10 and resolve_minutes 60, launch_cmd is
+// empty (start uses herdr), wake is ["pull"] (the director waits on the inbox
+// itself), and wake_cmd is empty.
 func TestDefault_OrgDirector(t *testing.T) {
 	d := Default().Org.Director
 	if !d.Enabled {
@@ -831,6 +843,18 @@ func TestDefault_OrgDirector(t *testing.T) {
 	}
 	if len(d.LaunchCmd) != 0 {
 		t.Errorf("director.launch_cmd = %q, want empty", d.LaunchCmd)
+	}
+	if want := []string{"pull"}; !slices.Equal(d.Wake, want) {
+		t.Errorf("director.wake = %q, want %q", d.Wake, want)
+	}
+	if len(d.WakeCmd) != 0 {
+		t.Errorf("director.wake_cmd = %q, want empty", d.WakeCmd)
+	}
+	// Each call builds its own Wake, so a caller that changes one does not
+	// change the next Default().
+	d.Wake[0] = "changed"
+	if again := Default().Org.Director.Wake; !slices.Equal(again, []string{"pull"}) {
+		t.Errorf("Default().Org.Director.Wake after changing a returned slice = %q, want [pull]", again)
 	}
 }
 
@@ -1257,6 +1281,415 @@ func TestTemplateRalphToml_LaunchCmdExampleIsValid(t *testing.T) {
 	}
 	if len(cfg.Org.Director.LaunchCmd) == 0 {
 		t.Errorf("the uncommented template example %q loaded an empty launch_cmd", examples[0])
+	}
+}
+
+// TestLoad_OrgDirectorWake covers [org.director].wake through Load() (plan
+// 2026-10-18-org-director-wake, AC1). An absent [org.director], an absent
+// key, or no file content loads as ["pull"]; pull, push, and both in either
+// order load as written. An empty array, a value other than pull and push
+// (another case and the empty string included), and a value listed twice
+// fail with an error that starts with the key and says the reason. Other
+// keys of the section keep their defaults either way.
+func TestLoad_OrgDirectorWake(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string // the loaded wake; read only when wantErr is ""
+		wantErr string   // a substring of the error; "" means Load must succeed
+	}{
+		{"no file content", "", []string{"pull"}, ""},
+		{"no [org.director]", "[org.watchdog]\nstall_minutes = 20\n", []string{"pull"}, ""},
+		{"section without the key", "[org.director]\nack_minutes = 5\n", []string{"pull"}, ""},
+		{"pull", "[org.director]\nwake = [\"pull\"]\n", []string{"pull"}, ""},
+		{"push", "[org.director]\nwake = [\"push\"]\n", []string{"push"}, ""},
+		{"pull and push", "[org.director]\nwake = [\"pull\", \"push\"]\n", []string{"pull", "push"}, ""},
+		{"push and pull", "[org.director]\nwake = [\"push\", \"pull\"]\n", []string{"push", "pull"}, ""},
+		{"empty array", "[org.director]\nwake = []\n", nil,
+			`the array must not be empty; the values are "pull" and "push", one or both`},
+		{"unknown value", "[org.director]\nwake = [\"poll\"]\n", nil,
+			`element 0 "poll" is not a wake value; the values are "pull" and "push"`},
+		{"unknown value after a valid one", "[org.director]\nwake = [\"pull\", \"tmux\"]\n", nil,
+			`element 1 "tmux" is not a wake value`},
+		{"value in another case", "[org.director]\nwake = [\"Push\"]\n", nil,
+			`element 0 "Push" is not a wake value`},
+		{"empty string", "[org.director]\nwake = [\"\"]\n", nil,
+			`element 0 "" is not a wake value`},
+		{"value with spaces", "[org.director]\nwake = [\" pull\"]\n", nil,
+			`element 0 " pull" is not a wake value`},
+		{"comma-joined value", "[org.director]\nwake = [\"pull,push\"]\n", nil,
+			`element 0 "pull,push" is not a wake value`},
+		{"pull twice", "[org.director]\nwake = [\"pull\", \"pull\"]\n", nil,
+			`element 1 "pull" repeats element 0; list each value once`},
+		{"push twice around pull", "[org.director]\nwake = [\"push\", \"pull\", \"push\"]\n", nil,
+			`element 2 "push" repeats element 0; list each value once`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Load: err = nil (wake = %q), want an error containing %q", cfg.Org.Director.Wake, tt.wantErr)
+				}
+				if !strings.HasPrefix(err.Error(), "[org.director].wake: ") {
+					t.Errorf("error = %q, want it to start with %q", err.Error(), "[org.director].wake: ")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if !slices.Equal(cfg.Org.Director.Wake, tt.want) {
+				t.Errorf("director.wake = %q, want %q", cfg.Org.Director.Wake, tt.want)
+			}
+			if len(cfg.Org.Director.WakeCmd) != 0 {
+				t.Errorf("director.wake_cmd = %q, want empty", cfg.Org.Director.WakeCmd)
+			}
+			def := Default().Org.Director
+			if !cfg.Org.Director.Enabled || cfg.Org.Director.ResolveMinutes != def.ResolveMinutes || len(cfg.Org.Director.LaunchCmd) != 0 {
+				t.Errorf("director.enabled, resolve_minutes, launch_cmd = %v, %d, %q, want the defaults %v, %d, empty",
+					cfg.Org.Director.Enabled, cfg.Org.Director.ResolveMinutes, cfg.Org.Director.LaunchCmd, def.Enabled, def.ResolveMinutes)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgDirectorWakePushWithoutWakeCmd verifies that Load accepts a
+// wake with push and no wake_cmd (absent or empty): whether a director can be
+// pushed depends on its registration, so `ralph org director attach` and
+// `start` check it, not Load (plan 2026-10-18-org-director-wake, D4).
+func TestLoad_OrgDirectorWakePushWithoutWakeCmd(t *testing.T) {
+	for _, content := range []string{
+		"[org.director]\nwake = [\"push\"]\n",
+		"[org.director]\nwake = [\"push\"]\nwake_cmd = []\n",
+		"[org.director]\nwake = [\"pull\", \"push\"]\nwake_cmd = []\n",
+	} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Errorf("Load(%q): unexpected error: %v", content, err)
+			continue
+		}
+		if !slices.Contains(cfg.Org.Director.Wake, "push") || len(cfg.Org.Director.WakeCmd) != 0 {
+			t.Errorf("Load(%q): wake, wake_cmd = %q, %q, want push and an empty wake_cmd", content, cfg.Org.Director.Wake, cfg.Org.Director.WakeCmd)
+		}
+	}
+}
+
+// TestLoad_OrgDirectorWakeCmd covers [org.director].wake_cmd through Load()
+// (plan 2026-10-18-org-director-wake, AC1). An absent key or an empty array
+// loads as empty, and a value whose placeholders are {target} and {text}
+// outside the first element loads as written, braces that form no pair
+// included. A non-empty value whose first element is empty or whitespace
+// only, whose first element has any placeholder (a known one included), or
+// that has a {...} other than the two in any element fails with an error that
+// starts with the key and says the reason. Other keys of the section keep
+// their defaults either way.
+func TestLoad_OrgDirectorWakeCmd(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string // the loaded wake_cmd; read only when wantErr is ""
+		wantErr string   // a substring of the error; "" means Load must succeed
+	}{
+		{"no file content", "", nil, ""},
+		{"section without the key", "[org.director]\nack_minutes = 5\n", nil, ""},
+		{"empty array", "[org.director]\nwake_cmd = []\n", nil, ""},
+		{
+			"tmux send-keys",
+			`[org.director]
+wake_cmd = ["tmux", "-L", "ralph", "send-keys", "-t", "{target}", "-l", "{text}", ";", "send-keys", "-t", "{target}", "Enter"]
+`,
+			[]string{"tmux", "-L", "ralph", "send-keys", "-t", "{target}", "-l", "{text}", ";", "send-keys", "-t", "{target}", "Enter"},
+			"",
+		},
+		{
+			"orca terminal send",
+			`[org.director]
+wake_cmd = ["orca", "terminal", "send", "--terminal", "{target}", "--text", "{text}", "--enter"]
+`,
+			[]string{"orca", "terminal", "send", "--terminal", "{target}", "--text", "{text}", "--enter"},
+			"",
+		},
+		{"both placeholders in one element", "[org.director]\nwake_cmd = [\"./wake.sh\", \"{target}{text}\"]\n",
+			[]string{"./wake.sh", "{target}{text}"}, ""},
+		{"a placeholder inside a longer element", "[org.director]\nwake_cmd = [\"wake\", \"--to={target}\", \"--line={text}\"]\n",
+			[]string{"wake", "--to={target}", "--line={text}"}, ""},
+		{"no placeholder at all", "[org.director]\nwake_cmd = [\"/usr/local/bin/wake-director\"]\n",
+			[]string{"/usr/local/bin/wake-director"}, ""},
+		{
+			"unmatched braces pass through",
+			`[org.director]
+wake_cmd = ["sh", "-c", "echo }{ x{ {{text}}", "{"]
+`,
+			[]string{"sh", "-c", "echo }{ x{ {{text}}", "{"},
+			"",
+		},
+		{"an unpaired brace in the first element", "[org.director]\nwake_cmd = [\"wake{\", \"{text}\"]\n",
+			[]string{"wake{", "{text}"}, ""},
+		{"empty first element", "[org.director]\nwake_cmd = [\"\", \"{text}\"]\n", nil,
+			`the first element is the command to run and must not be empty or whitespace only, got ""`},
+		{"whitespace-only first element", "[org.director]\nwake_cmd = [\" \\t\", \"{text}\"]\n", nil,
+			`must not be empty or whitespace only, got " \t"`},
+		{"{target} as the first element", "[org.director]\nwake_cmd = [\"{target}\", \"{text}\"]\n", nil,
+			`the first element is the command to run and must not contain a placeholder (a director's registration must never choose the program), got "{target}"`},
+		{"{text} as the first element", "[org.director]\nwake_cmd = [\"{text}\"]\n", nil,
+			`must not contain a placeholder (a director's registration must never choose the program), got "{text}"`},
+		{"a placeholder inside the first element", "[org.director]\nwake_cmd = [\"./bin/{target}.sh\", \"{text}\"]\n", nil,
+			`must not contain a placeholder (a director's registration must never choose the program), got "./bin/{target}.sh"`},
+		{"an unknown placeholder in the first element", "[org.director]\nwake_cmd = [\"{prog}\", \"{text}\"]\n", nil,
+			`must not contain a placeholder (a director's registration must never choose the program), got "{prog}"`},
+		{"placeholder in another case", "[org.director]\nwake_cmd = [\"tmux\", \"send-keys\", \"-t\", \"{TARGET}\", \"-l\", \"{text}\"]\n", nil,
+			`element 3 "{TARGET}" has the unknown placeholder {TARGET}; the placeholders are {target}, {text}`},
+		{"a launch_cmd placeholder", "[org.director]\nwake_cmd = [\"tmux\", \"send-keys\", \"-t\", \"{name}\", \"{text}\"]\n", nil,
+			`element 3 "{name}" has the unknown placeholder {name}`},
+		{"misspelt placeholder next to a valid one", "[org.director]\nwake_cmd = [\"wake\", \"{target} {txet}\"]\n", nil,
+			`element 1 "{target} {txet}" has the unknown placeholder {txet}`},
+		{"placeholder with spaces inside", "[org.director]\nwake_cmd = [\"wake\", \"{ text }\"]\n", nil,
+			`has the unknown placeholder { text }`},
+		{"empty braces", "[org.director]\nwake_cmd = [\"xargs\", \"-I\", \"{}\", \"wake\", \"{text}\"]\n", nil,
+			`element 2 "{}" has the unknown placeholder {}`},
+		{"shell brace group", "[org.director]\nwake_cmd = [\"sh\", \"-c\", \"{ echo \\\"$0\\\"; }\", \"{text}\"]\n", nil,
+			`has the unknown placeholder { echo "$0"; }`},
+		{"the first-element empty check comes first", "[org.director]\nwake_cmd = [\" \", \"{title}\"]\n", nil,
+			`must not be empty or whitespace only`},
+		{"the first-element placeholder check comes before the unknown one", "[org.director]\nwake_cmd = [\"{target}\", \"{title}\"]\n", nil,
+			`must not contain a placeholder`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("Load: err = nil (wake_cmd = %q), want an error containing %q", cfg.Org.Director.WakeCmd, tt.wantErr)
+				}
+				if !strings.HasPrefix(err.Error(), "[org.director].wake_cmd: ") {
+					t.Errorf("error = %q, want it to start with %q", err.Error(), "[org.director].wake_cmd: ")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if !slices.Equal(cfg.Org.Director.WakeCmd, tt.want) {
+				t.Errorf("director.wake_cmd = %q, want %q", cfg.Org.Director.WakeCmd, tt.want)
+			}
+			def := Default().Org.Director
+			if !slices.Equal(cfg.Org.Director.Wake, def.Wake) || !cfg.Org.Director.Enabled || len(cfg.Org.Director.LaunchCmd) != 0 {
+				t.Errorf("director.wake, enabled, launch_cmd = %q, %v, %q, want the defaults %q, %v, empty",
+					cfg.Org.Director.Wake, cfg.Org.Director.Enabled, cfg.Org.Director.LaunchCmd, def.Wake, def.Enabled)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgDirectorWakeWrongType verifies a wake or wake_cmd that is not
+// an array of strings (a single string, or an array with a number) fails
+// Load at decoding, before ValidateDirectorWake and ValidateDirectorWakeCmd
+// run.
+func TestLoad_OrgDirectorWakeWrongType(t *testing.T) {
+	for _, content := range []string{
+		"[org.director]\nwake = \"pull\"\n",
+		"[org.director]\nwake = [\"pull\", 1]\n",
+		"[org.director]\nwake_cmd = \"tmux send-keys -t {target} {text}\"\n",
+		"[org.director]\nwake_cmd = [\"wake\", 1, \"{text}\"]\n",
+	} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if cfg, err := Load(path); err == nil {
+			t.Errorf("Load(%q): err = nil (wake = %q, wake_cmd = %q), want a decode error", content, cfg.Org.Director.Wake, cfg.Org.Director.WakeCmd)
+		}
+	}
+}
+
+// TestValidateDirectorWake checks ValidateDirectorWake directly, as attach
+// and start may call it on a value that did not come through Load: the four
+// valid values pass, and nil fails like an empty array.
+func TestValidateDirectorWake(t *testing.T) {
+	if DirectorWakePull != "pull" || DirectorWakePush != "push" {
+		t.Errorf("DirectorWakePull, DirectorWakePush = %q, %q, want pull, push", DirectorWakePull, DirectorWakePush)
+	}
+	for _, wake := range [][]string{{"pull"}, {"push"}, {"pull", "push"}, {"push", "pull"}} {
+		if err := ValidateDirectorWake(wake); err != nil {
+			t.Errorf("ValidateDirectorWake(%q) = %v, want nil", wake, err)
+		}
+	}
+	for _, wake := range [][]string{nil, {}} {
+		err := ValidateDirectorWake(wake)
+		if err == nil || err.Error() != `[org.director].wake: the array must not be empty; the values are "pull" and "push", one or both` {
+			t.Errorf("ValidateDirectorWake(%#v) = %v, want the empty-array error", wake, err)
+		}
+	}
+}
+
+// TestValidateDirectorWakeNamed checks the rule of ValidateDirectorWake
+// under another name, as `ralph org director attach --wake` calls it (plan
+// 2026-10-18-org-director-wake, AC2): each error starts with that name, not
+// the key, and keeps the rest of the key's text; the four valid values pass.
+func TestValidateDirectorWakeNamed(t *testing.T) {
+	for _, wake := range [][]string{{"pull"}, {"push"}, {"pull", "push"}, {"push", "pull"}} {
+		if err := ValidateDirectorWakeNamed("--wake", wake); err != nil {
+			t.Errorf("ValidateDirectorWakeNamed(--wake, %q) = %v, want nil", wake, err)
+		}
+	}
+	for _, tc := range []struct {
+		wake []string
+		want string
+	}{
+		{nil, `--wake: the array must not be empty; the values are "pull" and "push", one or both`},
+		{[]string{""}, `--wake: element 0 "" is not a wake value; the values are "pull" and "push"`},
+		{[]string{"pull", " push"}, `--wake: element 1 " push" is not a wake value; the values are "pull" and "push"`},
+		{[]string{"pull", "pull"}, `--wake: element 1 "pull" repeats element 0; list each value once`},
+	} {
+		err := ValidateDirectorWakeNamed("--wake", tc.wake)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("ValidateDirectorWakeNamed(--wake, %q) = %v, want %q", tc.wake, err, tc.want)
+		}
+		keyed := ValidateDirectorWake(tc.wake)
+		if want := "[org.director].wake" + strings.TrimPrefix(tc.want, "--wake"); keyed == nil || keyed.Error() != want {
+			t.Errorf("ValidateDirectorWake(%q) = %v, want %q", tc.wake, keyed, want)
+		}
+	}
+}
+
+// TestValidateDirectorWakeCmd_EmptyIsValid verifies a nil and an empty
+// wake_cmd pass ValidateDirectorWakeCmd, which Load and later the watch
+// share.
+func TestValidateDirectorWakeCmd_EmptyIsValid(t *testing.T) {
+	for _, cmd := range [][]string{nil, {}} {
+		if err := ValidateDirectorWakeCmd(cmd); err != nil {
+			t.Errorf("ValidateDirectorWakeCmd(%q) = %v, want nil", cmd, err)
+		}
+	}
+}
+
+// TestDirectorWakePlaceholders verifies the wake_cmd placeholder constants
+// and that DirectorWakePlaceholders lists exactly those two, in order, as a
+// slice a caller may change without changing the next call's.
+func TestDirectorWakePlaceholders(t *testing.T) {
+	want := []string{"{target}", "{text}"}
+	consts := []string{DirectorWakePlaceholderTarget, DirectorWakePlaceholderText}
+	if !slices.Equal(consts, want) {
+		t.Errorf("placeholder constants = %q, want %q", consts, want)
+	}
+	got := DirectorWakePlaceholders()
+	if !slices.Equal(got, want) {
+		t.Fatalf("DirectorWakePlaceholders() = %q, want %q", got, want)
+	}
+	got[0] = "{changed}"
+	if again := DirectorWakePlaceholders(); !slices.Equal(again, want) {
+		t.Errorf("DirectorWakePlaceholders() after changing a returned slice = %q, want %q", again, want)
+	}
+}
+
+// TestExpandDirectorWakeArg verifies the replacement the watch applies to
+// each wake_cmd element: every placeholder is replaced by its value in one
+// pass (a value holding a placeholder is not replaced again), braces that
+// are not a placeholder are kept as written, and a placeholder outside the
+// values (unknown, or known but given no value) is an error that names
+// [org.director].wake_cmd and returns the element unchanged.
+func TestExpandDirectorWakeArg(t *testing.T) {
+	values := map[string]string{
+		DirectorWakePlaceholderTarget: "director_t1 {text}",
+		DirectorWakePlaceholderText:   "ralph inbox: new items e3 e4 {target}",
+	}
+	tests := []struct {
+		arg     string
+		want    string
+		wantErr string
+	}{
+		{"{target}", "director_t1 {text}", ""},
+		{"{text}", "ralph inbox: new items e3 e4 {target}", ""},
+		{"{target}{text}", "director_t1 {text}ralph inbox: new items e3 e4 {target}", ""},
+		{"--to={target}", "--to=director_t1 {text}", ""},
+		{"{target}-{target}", "director_t1 {text}-director_t1 {text}", ""},
+		{"no placeholder", "no placeholder", ""},
+		{"", "", ""},
+		{"echo }{ x{ {{text}}", "echo }{ x{ {ralph inbox: new items e3 e4 {target}}", ""},
+		{"{TARGET} {text}", "", `"{TARGET} {text}" has the placeholder {TARGET}, which has no value`},
+		{"{name}", "", `has the placeholder {name}, which has no value`},
+		{"{}", "", `has the placeholder {}, which has no value`},
+	}
+	for _, tt := range tests {
+		got, err := ExpandDirectorWakeArg(tt.arg, values)
+		if tt.wantErr != "" {
+			if err == nil || !strings.HasPrefix(err.Error(), "[org.director].wake_cmd: ") || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("ExpandDirectorWakeArg(%q) err = %v, want an error naming [org.director].wake_cmd and containing %q", tt.arg, err, tt.wantErr)
+			}
+			if got != tt.arg {
+				t.Errorf("ExpandDirectorWakeArg(%q) on error = %q, want the element unchanged", tt.arg, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ExpandDirectorWakeArg(%q): unexpected error: %v", tt.arg, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("ExpandDirectorWakeArg(%q) = %q, want %q", tt.arg, got, tt.want)
+		}
+	}
+
+	// A known placeholder with no entry in values is an error too.
+	partial := map[string]string{DirectorWakePlaceholderText: "wake line"}
+	if got, err := ExpandDirectorWakeArg("{target} {text}", partial); err == nil ||
+		err.Error() != `[org.director].wake_cmd: "{target} {text}" has the placeholder {target}, which has no value` || got != "{target} {text}" {
+		t.Errorf("ExpandDirectorWakeArg with no {target} value = %q, %v, want the element unchanged and an error naming {target}", got, err)
+	}
+}
+
+// TestTemplateRalphToml_WakeCmdExampleIsValid verifies the commented-out
+// wake_cmd example in templates/base/ralph.toml, with its "# " removed,
+// loads under [org.director] with both placeholders outside the first
+// element, so the example a user uncomments passes the validation.
+func TestTemplateRalphToml_WakeCmdExampleIsValid(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location")
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "..", "..", "templates", "base", "ralph.toml"))
+	if err != nil {
+		t.Fatalf("read templates/base/ralph.toml: %v", err)
+	}
+	var examples []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if example, found := strings.CutPrefix(line, "# wake_cmd = "); found {
+			examples = append(examples, "wake_cmd = "+example)
+		}
+	}
+	if len(examples) != 1 {
+		t.Fatalf("templates/base/ralph.toml has %d lines starting with %q, want 1", len(examples), "# wake_cmd = ")
+	}
+	path := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(path, []byte("[org.director]\nwake = [\"push\"]\n"+examples[0]+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(the uncommented template example %q): %v", examples[0], err)
+	}
+	cmd := cfg.Org.Director.WakeCmd
+	if len(cmd) < 2 || !slices.Contains(cmd[1:], DirectorWakePlaceholderTarget) || !slices.Contains(cmd[1:], DirectorWakePlaceholderText) {
+		t.Errorf("the uncommented template example %q loaded wake_cmd %q, want {target} and {text} as arguments", examples[0], cmd)
 	}
 }
 

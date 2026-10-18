@@ -47,7 +47,8 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"\n"+
 			"  - enabled, and a long-running watch accepts work on the ledger: the\n"+
 			"    item is only recorded (delivery deadline), for the director to read\n"+
-			"    with `ralph org wait --inbox`. When it is still open after\n"+
+			"    with `ralph org wait --inbox`, or to be woken for by the watch when\n"+
+			"    the director's wake includes push. When it is still open after\n"+
 			"    [org.director].ack_minutes, the watch sends it to the human (reason\n"+
 			"    inbox_ack_deadline). A banner on stderr says so, and the command\n"+
 			"    exits 0. Whether a director is attached does not change this.\n"+
@@ -184,7 +185,7 @@ func newOrgInboxShowCmd(stateDir, configPath *string) *cobra.Command {
 		Use:   "show <id>",
 		Short: "Show one inbox item: its message and its history",
 		Long: "ralph org inbox show prints one item: its fields, the whole message, and\n" +
-			"every event recorded for it (escalated, notified, acked, resolved).\n" +
+			"every event recorded for it (escalated, notified, woken, acked, resolved).\n" +
 			"Control characters in the item are printed as escapes (\\x1b), so a\n" +
 			"message cannot drive the terminal. An unknown ID exits 1.",
 		Args: cobra.ExactArgs(1),
@@ -415,9 +416,11 @@ func inboxItemDeferred(item org.InboxItem) bool {
 
 // printInboxItem prints `ralph org inbox show`'s text form: one field per
 // line, the whole message indented, then every event. Fields that are not
-// set (acked_at on an open item, for example) are left out. hintStateDir is
-// orgInboxHintStateDir's value for the `inbox notify` command of an item
-// that is not notified.
+// set (acked_at on an open item, for example) are left out. Each event line
+// is its ts, its kind, and the key=value pairs it carries: a woken event's
+// reads `<ts> woken director_id=d<N> via=<via>` (plan
+// 2026-10-18-org-director-wake, D10). hintStateDir is orgInboxHintStateDir's
+// value for the `inbox notify` command of an item that is not notified.
 func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	field := func(name, value string) {
 		if value != "" {
@@ -451,7 +454,9 @@ func printInboxItem(w io.Writer, item org.InboxItem, hintStateDir string) {
 	_, _ = fmt.Fprintln(w, "events:")
 	for _, ev := range item.Events {
 		line := ev.TS + " " + ev.Event
-		for _, kv := range []struct{ key, value string }{{"reason", ev.Reason}, {"osascript", ev.Osascript}, {"note", ev.Note}} {
+		for _, kv := range []struct{ key, value string }{
+			{"reason", ev.Reason}, {"osascript", ev.Osascript}, {"note", ev.Note}, {"director_id", ev.DirectorID}, {"via", ev.Via},
+		} {
 			if kv.value != "" {
 				line += " " + kv.key + "=" + kv.value
 			}

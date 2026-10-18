@@ -29,12 +29,27 @@ import (
 const (
 	InboxEventEscalated = "escalated"
 	InboxEventNotified  = "notified"
-	InboxEventAcked     = "acked"
-	InboxEventResolved  = "resolved"
+	// InboxEventWoken records that `ralph org watch --all` woke the director
+	// for the item (plan 2026-10-18-org-director-wake, D10); a ralph from
+	// before that stage counts it as an unknown kind and ignores it.
+	InboxEventWoken    = "woken"
+	InboxEventAcked    = "acked"
+	InboxEventResolved = "resolved"
+)
+
+// How the director was woken for an item: the "via" field of its woken
+// event (plan 2026-10-18-org-director-wake, D8). InboxWokenViaWakeCmd is a
+// run of [org.director].wake_cmd; InboxWokenViaHerdr is the wake line typed
+// into the herdr pane of a headless director in herdr (pane send-text, then
+// Enter).
+const (
+	InboxWokenViaWakeCmd = "wake_cmd"
+	InboxWokenViaHerdr   = "herdr"
 )
 
 // Inbox item states, folded from the events. notified records that the
-// item was sent to the human path and changes no state.
+// item was sent to the human path, and woken that the director was woken
+// for it; neither changes the state.
 const (
 	InboxStateOpen     = "open"
 	InboxStateAcked    = "acked"
@@ -62,8 +77,8 @@ const InboxNoteMaxRunes = 500
 // directory as inbox.jsonl.
 const inboxLockFile = "inbox.lock"
 
-// ErrInboxUnknownID is returned (wrapped) by Ack, Resolve, and
-// AppendNotified when the inbox has no item with the given ID.
+// ErrInboxUnknownID is returned (wrapped) by Ack, Resolve, AppendNotified,
+// and AppendWoken when the inbox has no item with the given ID.
 var ErrInboxUnknownID = errors.New("no such inbox item")
 
 // ErrInboxResolved is returned (wrapped) by Ack and Resolve on an item that
@@ -81,20 +96,24 @@ var inboxRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"e([0-9]+)`)
 // org_id, type, task_id (when the message has one), body, and delivery
 // (written as one of the InboxDelivery* constants; lines written before
 // stage 8a have none); notified carries reason and osascript (the result of
-// the macOS notification, e.g. "ok", "failed: ...", "skipped"); resolved
-// carries note; acked carries nothing more.
+// the macOS notification, e.g. "ok", "failed: ...", "skipped"); woken
+// carries director_id (the d<N> of the director registration that was woken)
+// and via (one of the InboxWokenVia* constants); resolved carries note;
+// acked carries nothing more.
 type InboxEvent struct {
-	TS        string `json:"ts"`    // UTC RFC3339
-	ID        string `json:"id"`    // e<N>
-	Event     string `json:"event"` // one of the InboxEvent* constants
-	OrgID     string `json:"org_id,omitempty"`
-	Type      string `json:"type,omitempty"`
-	TaskID    string `json:"task_id,omitempty"`
-	Body      string `json:"body,omitempty"`
-	Delivery  string `json:"delivery,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Osascript string `json:"osascript,omitempty"`
-	Note      string `json:"note,omitempty"`
+	TS         string `json:"ts"`    // UTC RFC3339
+	ID         string `json:"id"`    // e<N>
+	Event      string `json:"event"` // one of the InboxEvent* constants
+	OrgID      string `json:"org_id,omitempty"`
+	Type       string `json:"type,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	Body       string `json:"body,omitempty"`
+	Delivery   string `json:"delivery,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Osascript  string `json:"osascript,omitempty"`
+	Note       string `json:"note,omitempty"`
+	DirectorID string `json:"director_id,omitempty"`
+	Via        string `json:"via,omitempty"`
 }
 
 // InboxEscalation is what Escalate records: the org that raised the item,
@@ -117,7 +136,10 @@ type InboxEscalation struct {
 // InboxDelivery* constants, and InboxDeliveryNow otherwise (none, or a
 // hand-edited value), so it is always one of the two; Events keep the
 // escalated event as written. NotifiedAt is the time of the latest notified
-// event.
+// event. Woken is set once the director was woken for the item (a woken
+// event, plan 2026-10-18-org-director-wake, D10), and WokenAt is the time of
+// the latest woken event; neither changes the state, and the inbox
+// deadlines (InboxDeadlineDue) do not read them.
 type InboxItem struct {
 	ID          string       `json:"id"`
 	OrgID       string       `json:"org_id"`
@@ -132,6 +154,8 @@ type InboxItem struct {
 	Note        string       `json:"note,omitempty"`
 	Notified    bool         `json:"notified"`
 	NotifiedAt  string       `json:"notified_at,omitempty"`
+	Woken       bool         `json:"woken"`
+	WokenAt     string       `json:"woken_at,omitempty"`
 	Events      []InboxEvent `json:"events"`
 }
 
@@ -161,9 +185,11 @@ func PrintableInboxText(s string, keepLineBreaks bool) string {
 // e10), the number of lines that did not parse (skipped, like the
 // manifest's corrupt lines), and the number of parsed events the fold
 // ignored: an unknown kind, an ID not of the form e<N>, an event for an ID
-// with no escalated event, a second escalated for an ID, and a transition
-// the item's state does not allow (acked on an item that is not open,
-// resolved on a resolved item).
+// with no escalated event (a notified or woken one included), a second
+// escalated for an ID, and a transition the item's state does not allow
+// (acked on an item that is not open, resolved on a resolved item). A
+// notified or woken event is never a transition, so it applies in any
+// state.
 type InboxReadResult struct {
 	Items         []InboxItem
 	CorruptLines  int
@@ -260,6 +286,62 @@ func (s *InboxStore) AppendNotified(id, reason, osascript string) error {
 	}
 	return s.update("notify", id, func(*InboxItem) (*InboxEvent, error) {
 		return &InboxEvent{Event: InboxEventNotified, Reason: reason, Osascript: osascript}, nil
+	})
+}
+
+// AppendWoken records that the director was woken for each item in ids
+// (plan 2026-10-18-org-director-wake, D6 and D10): under one hold of the
+// inbox lock it reads the inbox again and appends one woken event per ID,
+// in the order given and all with the same ts, in a single write.
+// directorID is the d<N> of the registration that was woken, and via how it
+// was woken (one of the InboxWokenVia* constants). Like notified, woken
+// changes no state, and it is recorded for an item in any state: one acked
+// or resolved while the wake was under way was still woken for.
+//
+// It refuses, before anything is read, an empty ids, a directorID not of
+// the form d<N>, a via that is not one of the constants, and an ID given
+// twice; after the read, an ID the inbox has no item for (ErrInboxUnknownID,
+// wrapped, naming the ID). A refusal writes nothing. A missing inbox file
+// has no items, so it returns ErrInboxUnknownID without creating the state
+// dir or the lock.
+func (s *InboxStore) AppendWoken(ids []string, directorID, via string) error {
+	if len(ids) == 0 {
+		return errors.New("org: inbox: wake: the woken event needs at least one item ID")
+	}
+	if _, ok := directorIDNumber(directorID); !ok {
+		return fmt.Errorf("org: inbox: wake: %q is not a registration id (d<N>, such as d1)", directorID)
+	}
+	switch via {
+	case InboxWokenViaWakeCmd, InboxWokenViaHerdr:
+	default:
+		return fmt.Errorf("org: inbox: wake: via %q is not %s or %s", via, InboxWokenViaWakeCmd, InboxWokenViaHerdr)
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return fmt.Errorf("org: inbox: wake: item %s is given twice", id)
+		}
+		seen[id] = true
+	}
+	unknown := func(id string) error { return fmt.Errorf("org: inbox: wake %s: %w", id, ErrInboxUnknownID) }
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return unknown(ids[0])
+	}
+	return s.withLock(func() error {
+		raw, err := s.readRaw()
+		if err != nil {
+			return err
+		}
+		items := foldInbox(raw).items
+		ts := s.now()
+		evs := make([]InboxEvent, 0, len(ids))
+		for _, id := range ids {
+			if items[id] == nil {
+				return unknown(id)
+			}
+			evs = append(evs, InboxEvent{TS: ts, ID: id, Event: InboxEventWoken, DirectorID: directorID, Via: via})
+		}
+		return s.appendLocked(raw, evs...)
 	})
 }
 
@@ -381,25 +463,30 @@ func (s *InboxStore) readRaw() ([]byte, error) {
 	return raw, nil
 }
 
-// appendLocked appends ev as one line in a single write. raw is the file
-// as read under the same lock hold. When raw does not end with a newline (a
-// write cut off mid-line), the write starts with one, so the cut line stays
-// a separate corrupt line and ev stays readable (Codex plan advisory
-// finding 1).
-func (s *InboxStore) appendLocked(raw []byte, ev InboxEvent) error {
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return fmt.Errorf("org: inbox: marshal the %s event: %w", ev.Event, err)
-	}
+// appendLocked appends evs, one line each, in a single write (AppendWoken
+// passes several; every other caller one). raw is the file as read under
+// the same lock hold. When raw does not end with a newline (a write cut off
+// mid-line), the write starts with one, so the cut line stays a separate
+// corrupt line and the events stay readable (Codex plan advisory finding
+// 1). An event that does not marshal fails the call before anything is
+// written.
+func (s *InboxStore) appendLocked(raw []byte, evs ...InboxEvent) error {
+	var lines []byte
 	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
-		line = append([]byte{'\n'}, line...)
+		lines = append(lines, '\n')
 	}
-	line = append(line, '\n')
+	for _, ev := range evs {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			return fmt.Errorf("org: inbox: marshal the %s event: %w", ev.Event, err)
+		}
+		lines = append(append(lines, line...), '\n')
+	}
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("org: inbox: open %s: %w", s.path, err)
 	}
-	if _, err := f.Write(line); err != nil {
+	if _, err := f.Write(lines); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("org: inbox: append to %s: %w", s.path, err)
 	}
@@ -476,7 +563,7 @@ func (f *inboxFold) apply(ev InboxEvent) {
 			State: InboxStateOpen, EscalatedAt: ev.TS, Events: []InboxEvent{ev},
 		}
 		return
-	case InboxEventNotified, InboxEventAcked, InboxEventResolved:
+	case InboxEventNotified, InboxEventWoken, InboxEventAcked, InboxEventResolved:
 	default:
 		f.ignored++
 		return
@@ -489,6 +576,11 @@ func (f *inboxFold) apply(ev InboxEvent) {
 	case InboxEventNotified:
 		item.Notified = true
 		item.NotifiedAt = ev.TS
+	case InboxEventWoken:
+		// A record of a wake, in any state (plan
+		// 2026-10-18-org-director-wake, D10): it changes no state.
+		item.Woken = true
+		item.WokenAt = ev.TS
 	case InboxEventAcked:
 		if item.State != InboxStateOpen {
 			f.ignored++

@@ -10,10 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // The director registration (FR-9 of
@@ -58,6 +61,19 @@ import (
 // what only herdr has, the workspace and the pane, is for launch herdr only
 // (HerdrLaunch). The launch script, the launch_cmd runner, and the process
 // checks are in director_cmd.go.
+//
+// Stage 8b-1 (plan 2026-10-18-org-director-wake, D3 and D4) records how a
+// director is woken. Every attached carries its wake, pull, push, or both:
+// the --wake of `ralph org director attach` (else [org.director].wake), or
+// the [org.director].wake that start read. A promoted session's attached
+// also carries wake_target, the --wake-target attach was given: where
+// [org.director].wake_cmd sends the wake line ({target}). A headless
+// registration's target follows from its launch (ResolvedWakeTarget), so
+// its attached carries none. Whether a wake can be sent at all is checked
+// before anything is written: by the CLI's attach with
+// CheckDirectorAttachWake, and by StartDirector. CheckDirectorAttachWake,
+// ValidateDirectorWakeTarget, WakesByPush, and ResolvedWakeTarget are in
+// director_wake.go, with the push wake of the watch.
 
 // Director event kinds: the "event" field of a director.jsonl line. The last
 // four are written only for a headless registration (launch herdr or cmd;
@@ -98,10 +114,17 @@ const (
 	DirectorDriverCodex  = "codex"
 )
 
-// DirectorWakePull is the wake mode of a director that waits on the inbox
-// itself (`ralph org wait --inbox`). It is the only mode so far; stage 8b
-// adds push.
-const DirectorWakePull = "pull"
+// The wakes of a registration (DirectorRegistration.Wake), one or both, the
+// values of [org.director].wake (plan 2026-10-18-org-director-wake, D3).
+const (
+	// DirectorWakePull is the wake of a director that waits on the inbox
+	// itself (`ralph org wait --inbox`).
+	DirectorWakePull = config.DirectorWakePull
+	// DirectorWakePush is the wake of a director that `ralph org watch
+	// --all` wakes when a new open inbox item arrives, by sending the wake
+	// line to the registration's target (ResolvedWakeTarget).
+	DirectorWakePush = config.DirectorWakePush
+)
 
 // directorLockFile is the lock file every director.jsonl write takes, in the
 // same directory as director.jsonl.
@@ -189,12 +212,19 @@ var directorRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"d([0-9]+)`)
 // check-in (MarkCmdLaunched), adds pid and start_time, the pid's start time
 // as ReadDirectorProcess reads it. No other event carries them, so every
 // line of stage 8a-2 reads as it did.
+//
+// Stage 8b-1 (plan 2026-10-18-org-director-wake, D3): the wake of an
+// attached may have push as well as (or in place of) pull, and the attached
+// of a promoted session attached with --wake-target carries wake_target. A
+// line without wake_target reads as it did; the fold reads a wake_target
+// only for a promoted session (registrationOf).
 type DirectorEvent struct {
 	TS             string   `json:"ts"`    // UTC RFC3339
 	ID             string   `json:"id"`    // d<N>
 	Event          string   `json:"event"` // one of the DirectorEvent* constants
 	Driver         string   `json:"driver,omitempty"`
 	Wake           []string `json:"wake,omitempty"`
+	WakeTarget     string   `json:"wake_target,omitempty"` // attached of a promoted session only
 	PaneID         string   `json:"pane_id,omitempty"`
 	Launch         string   `json:"launch,omitempty"` // DirectorLaunchHerdr, DirectorLaunchCmd, or empty
 	Token          string   `json:"token,omitempty"`  // 12 lowercase hex digits
@@ -220,11 +250,16 @@ type DirectorEvent struct {
 // or stopped (DirectorState*). A promoted session's registration has none of
 // the fields after PaneID, so its JSON is the shape of stage 8a-1, and a
 // launch herdr's has no PID or StartTime, so its JSON is the shape of stage
-// 8a-2.
+// 8a-2. Wake is the attached's wake, and WakeTarget a promoted session's
+// --wake-target (empty for a headless registration, whose target follows
+// from its launch: ResolvedWakeTarget), so a registration attached without
+// one has the JSON shape of stage 8a (plan 2026-10-18-org-director-wake,
+// D3).
 type DirectorRegistration struct {
 	ID             string   `json:"id"`
 	Driver         string   `json:"driver"`
 	Wake           []string `json:"wake"`
+	WakeTarget     string   `json:"wake_target,omitempty"`
 	PaneID         string   `json:"pane_id,omitempty"`
 	Launch         string   `json:"launch,omitempty"`
 	State          string   `json:"state,omitempty"`
@@ -313,14 +348,20 @@ type DirectorReadResult struct {
 }
 
 // DirectorAttach is what Attach records. Replace ends the current
-// registration first instead of refusing. User, Cwd, and HerdrPane describe
-// the caller; the store does not read the environment.
+// registration first instead of refusing. Wake is the registration's wake
+// (DirectorWakePull, DirectorWakePush, or both) and WakeTarget where the
+// wake line goes ("" for none), as `ralph org director attach` resolved and
+// checked them (CheckDirectorAttachWake; plan 2026-10-18-org-director-wake,
+// D3 and D4). User, Cwd, and HerdrPane describe the caller; the store does
+// not read the environment.
 type DirectorAttach struct {
-	Driver    string
-	Replace   bool
-	User      string
-	Cwd       string
-	HerdrPane bool
+	Driver     string
+	Replace    bool
+	Wake       []string
+	WakeTarget string
+	User       string
+	Cwd        string
+	HerdrPane  bool
 }
 
 // DirectorDetach is what Detach records. Exactly one of ID (the current
@@ -380,29 +421,47 @@ func (s *DirectorStore) Read() (DirectorReadResult, error) {
 	return foldDirector(raw).result(), nil
 }
 
-// Attach records a new registration with driver a.Driver and wake pull, and
-// returns it. Under the director lock it reads the file again; while a
-// registration is current (a headless one too, in state starting
-// included) it returns ErrDirectorAttached, naming that registration, and
-// writes nothing, unless a.Replace is set: then it appends the current
-// registration's detached and the new attached as two lines of one write
-// (appendLocked), and returns the ended registration as replaced. A headless
-// registration replaced that way stays open, for `ralph org director stop`
-// to close its pane, as one detached by Detach does. A reader without the
-// lock (Read) thus finds no moment with no registration between the two
-// lines, as it could when they were two writes (self-review L5 of
-// org-director-attach). A write that fails ends one of two ways. Either it
-// is cut back under the same lock (appendLocked), even when it stopped
-// after the detached line, so the old registration stays current and the
-// error says nothing was recorded (only a Read between the failed write and
-// the cut can see part of it); or the cut fails too, and the error wraps
+// Attach records a new registration with driver a.Driver, wake a.Wake, and
+// wake target a.WakeTarget, and returns it. Under the director lock it
+// reads the file again; while a registration is current (a headless one
+// too, in state starting included) it returns ErrDirectorAttached, naming
+// that registration, and writes nothing, unless a.Replace is set: then it
+// appends the current registration's detached and the new attached as two
+// lines of one write (appendLocked), and returns the ended registration as
+// replaced. A headless registration replaced that way stays open, for `ralph
+// org director stop` to close its pane, as one detached by Detach does. A
+// reader without the lock (Read) thus finds no moment with no registration
+// between the two lines, as it could when they were two writes (self-review
+// L5 of org-director-attach). A write that fails ends one of two ways.
+// Either it is cut back under the same lock (appendLocked), even when it
+// stopped after the detached line, so the old registration stays current and
+// the error says nothing was recorded (only a Read between the failed write
+// and the cut can see part of it); or the cut fails too, and the error wraps
 // ErrDirectorWriteNotRestored and does not say that. A failed write of a
 // plain attach ends the same two ways. The new id is one more than the
 // largest d<N> anywhere in the file, damaged lines included. A driver other
-// than claude and codex is refused before anything is read or written.
+// than claude and codex is refused before anything is read or written, and
+// so, as a second check behind the CLI's (plan 2026-10-18-org-director-wake,
+// D4), are a non-empty a.Wake that config.ValidateDirectorWake refuses and a
+// non-empty a.WakeTarget that ValidateDirectorWakeTarget refuses. Whether
+// the wake can be sent depends on [org.director].wake_cmd, which the store
+// does not read: the CLI checks it (CheckDirectorAttachWake). An empty
+// a.Wake records pull, the wake every Attach recorded before stage 8b.
 func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, replaced *DirectorRegistration, err error) {
 	if a.Driver != DirectorDriverClaude && a.Driver != DirectorDriverCodex {
 		return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: unknown driver %q: use %s or %s", a.Driver, DirectorDriverClaude, DirectorDriverCodex)
+	}
+	wake := []string{DirectorWakePull}
+	if len(a.Wake) > 0 {
+		if err := config.ValidateDirectorWake(a.Wake); err != nil {
+			return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: %w", err)
+		}
+		wake = slices.Clone(a.Wake)
+	}
+	if a.WakeTarget != "" {
+		if err := ValidateDirectorWakeTarget(a.WakeTarget); err != nil {
+			return DirectorRegistration{}, nil, fmt.Errorf("org: director: attach: %w", err)
+		}
 	}
 	err = s.withLock(func() error {
 		raw, err := s.readRaw()
@@ -428,7 +487,7 @@ func (s *DirectorStore) Attach(a DirectorAttach) (reg DirectorRegistration, repl
 		}
 		ev := DirectorEvent{
 			TS: ts, ID: next, Event: DirectorEventAttached,
-			Driver: a.Driver, Wake: []string{DirectorWakePull},
+			Driver: a.Driver, Wake: wake, WakeTarget: a.WakeTarget,
 			User: a.User, Cwd: a.Cwd, HerdrPane: a.HerdrPane,
 		}
 		if err := s.appendLocked(raw, append(events, ev)...); err != nil {
@@ -621,19 +680,22 @@ func directorAppendFailed(verb string, cur *DirectorRegistration, err error) err
 // herdr's pane and workspace come only from its pane_created and
 // workspace_created, and a launch cmd has none, so a pane_id in that attached
 // (start never writes one) is not read, nor is a pid or a start time (only a
-// launch cmd's launched carries them). An attached with another launch keeps
-// it, with its token, model, and permission mode, so a later binary's
-// registration still counts as one.
+// launch cmd's launched carries them), nor a wake_target: start never writes
+// one, and a headless registration's target follows from its launch
+// (ResolvedWakeTarget; plan 2026-10-18-org-director-wake, D3). The wake is
+// read as written, whatever its values: the fold ignores no attached for
+// its wake. An attached with another launch keeps it, with its token, model,
+// and permission mode, so a later binary's registration still counts as one.
 func registrationOf(ev DirectorEvent) DirectorRegistration {
 	reg := DirectorRegistration{
-		ID: ev.ID, Driver: ev.Driver, Wake: ev.Wake, PaneID: ev.PaneID, AttachedAt: ev.TS,
+		ID: ev.ID, Driver: ev.Driver, Wake: ev.Wake, WakeTarget: ev.WakeTarget, PaneID: ev.PaneID, AttachedAt: ev.TS,
 		User: ev.User, Cwd: ev.Cwd, HerdrPane: ev.HerdrPane,
 	}
 	if ev.Launch != "" {
 		reg.Launch, reg.Token, reg.Model, reg.PermissionMode = ev.Launch, ev.Token, ev.Model, ev.PermissionMode
 	}
 	if reg.Headless() {
-		reg.State, reg.PaneID = DirectorStateStarting, ""
+		reg.State, reg.PaneID, reg.WakeTarget = DirectorStateStarting, "", ""
 	}
 	return reg
 }

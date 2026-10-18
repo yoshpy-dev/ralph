@@ -56,7 +56,7 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled, director status reads it and [org.director].auto_merge, merge reads auto_merge, and director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -178,7 +178,11 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // other setting is taken from the main worktree here; escalate, director
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
-// and director start the settings of the headless director
+// director attach also Director.Wake and Director.WakeCmd
+// (withMainWorktreeDirectorWakeConfig), `ralph org watch --all` also
+// Director.Wake and Director.WakeCmd, through orgWatchDirectorWake
+// (withMainWorktreeDirectorWakeConfigFrom), and director start the settings
+// of the headless director, those two included
 // (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
 // fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
@@ -208,13 +212,14 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // director merges its PR without asking (plan 2026-10-17-org-auto-merge,
 // AC2). With --config, or a ledger that is not the main worktree's, cfg is
 // returned unchanged. No other setting is taken; escalate goes by Enabled
-// alone. A main worktree ralph.toml that fails to load is an error, which
-// `ralph org escalate` handles like a ralph.toml that does not load, `ralph
-// org director attach` and `status` and `ralph org merge` return, and `ralph
-// status` warns about before it shows the built-in defaults
-// (statusDirectorConfig). A verb that reports or acts on the switch or on
-// auto_merge reads it through this function, so it sees the value escalate
-// and the director go by.
+// alone, and director attach takes Director.Wake and Director.WakeCmd with
+// withMainWorktreeDirectorWakeConfig. A main worktree ralph.toml that fails
+// to load is an error, which `ralph org escalate` handles like a ralph.toml
+// that does not load, `ralph org director attach` and `status` and `ralph
+// org merge` return, and `ralph status` warns about before it shows the
+// built-in defaults (statusDirectorConfig). A verb that reports or acts on
+// the switch or on auto_merge reads it through this function, so it sees the
+// value escalate and the director go by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -232,6 +237,8 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // org director start` launches the headless director by taken from <main
 // worktree root>/ralph.toml, by the rule withMainWorktreeDirectorEnabled
 // follows: Director.Enabled, Director.LaunchCmd ([org.director].launch_cmd),
+// Director.Wake and Director.WakeCmd ([org.director].wake, which start
+// records, and wake_cmd, which a launch_cmd start that pushes needs),
 // Permissions ([org.permissions]: default, roles, and codex_verified), Roles
 // ([org.roles]), and ModelPool. Only when configPath is empty and the ledger
 // is the main worktree's (org.LedgerMainWorktreeRoot), with the built-in
@@ -240,30 +247,73 @@ func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedS
 // there can change, must not choose its permission mode or its model (plan
 // 2026-10-15-org-director-start, D6 and Scope), any more than whether a
 // director is used at all, nor the command start runs to open its terminal
-// (plan 2026-10-16-org-director-launch-cmd, D10). With --config, or a ledger
-// that is not the main worktree's, cfg is returned unchanged. No other
-// setting is taken. A main worktree ralph.toml that fails to load is an
-// error, which director start returns.
+// (plan 2026-10-16-org-director-launch-cmd, D10), nor how it is woken (plan
+// 2026-10-18-org-director-wake, D9). With --config, or a ledger that is not
+// the main worktree's, cfg is returned unchanged. No other setting is taken.
+// A main worktree ralph.toml that fails to load is an error, which director
+// start returns.
 func withMainWorktreeDirectorStartConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled and launch_cmd, [org.permissions], [org.roles] and model_pool from the main worktree's %s: %w", path, err)
+		return config.OrgConfig{}, fmt.Errorf("org: load [org.director].enabled, launch_cmd, wake and wake_cmd, [org.permissions], [org.roles] and model_pool "+
+			"from the main worktree's %s: %w", path, err)
 	}
 	if !ok {
 		return cfg, nil
 	}
 	cfg.Director.Enabled = mainCfg.Director.Enabled
 	cfg.Director.LaunchCmd = mainCfg.Director.LaunchCmd
+	cfg.Director.Wake = mainCfg.Director.Wake
+	cfg.Director.WakeCmd = mainCfg.Director.WakeCmd
 	cfg.Permissions = mainCfg.Permissions
 	cfg.Roles = mainCfg.Roles
 	cfg.ModelPool = mainCfg.ModelPool
 	return cfg, nil
 }
 
+// withMainWorktreeDirectorWakeConfig returns cfg with Director.Wake
+// ([org.director].wake) and Director.WakeCmd ([org.director].wake_cmd) taken
+// from <main worktree root>/ralph.toml, by the rule
+// withMainWorktreeDirectorEnabled follows: only when configPath is empty and
+// the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
+// built-in defaults (["pull"] and none) when that file does not exist (plan
+// 2026-10-18-org-director-wake, D9 and AC4). `ralph org director attach`
+// records the wake when --wake is not given and checks with the wake_cmd
+// whether a wake with push can be sent; the watch runs that wake_cmd, so a
+// feature worktree's ralph.toml, which the leader running there can change,
+// must choose neither. With --config, or a ledger that is not the main
+// worktree's, cfg is returned unchanged. No other setting is taken. A main
+// worktree ralph.toml that fails to load is an error, which attach returns.
+func withMainWorktreeDirectorWakeConfig(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
+	cfg, _, err := withMainWorktreeDirectorWakeConfigFrom(cfg, configPath, resolvedStateDir, stateDirSource)
+	return cfg, err
+}
+
+// withMainWorktreeDirectorWakeConfigFrom is withMainWorktreeDirectorWakeConfig
+// that also returns mainToml, the main worktree's ralph.toml the two values
+// were taken from, "" when cfg is returned unchanged (--config, or a ledger
+// that is not the main worktree's). `ralph org watch --all` runs wake_cmd in
+// that file's directory (orgWatchDirectorWake; plan
+// 2026-10-18-org-director-wake, D9), so it learns which file the rule read
+// here instead of deriving the rule again.
+func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (_ config.OrgConfig, mainToml string, _ error) {
+	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return config.OrgConfig{}, "", fmt.Errorf("org: load [org.director].wake and wake_cmd from the main worktree's %s: %w", path, err)
+	}
+	if !ok {
+		return cfg, "", nil
+	}
+	cfg.Director.Wake = mainCfg.Director.Wake
+	cfg.Director.WakeCmd = mainCfg.Director.WakeCmd
+	return cfg, path, nil
+}
+
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
 // root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled, and
-// withMainWorktreeDirectorStartConfig.
+// exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
+// withMainWorktreeDirectorStartConfig, and
+// withMainWorktreeDirectorWakeConfigFrom.
 // ok is false, with nothing loaded, when configPath is set or the ledger is
 // not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
 // loaded, also when err (the load error, unwrapped) is set.
