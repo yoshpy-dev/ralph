@@ -201,7 +201,8 @@ Critical forks: 8b の分け方(8b-1 = FR-10、8b-2 = 生存の印と `starting`
 - [x] Plan reviewed
 - [x] Plan approved(ユーザーの指示「作成したプランは自動承認します」による自動承認。Codex の計画助言 1 件(HIGH)は D2・D8・D9・AC1・AC4 に反映済み)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 設定(AC1): 2f08cfe7。launch_cmd と wake_cmd が placeholder の検査と置き換えのヘルパーを共有し、launch_cmd のエラー文は変わらない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
