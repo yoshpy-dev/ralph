@@ -72,3 +72,56 @@ _(今回は台帳に行を足していない。コミットの範囲が、この
   1. M1: recipe の Security、`WakeCmd` の doc、`templates/base/ralph.toml` に `{target}` の注意を足す。動きは変わらない。recipe は root と `templates/base/` を同じ内容に保つ
   2. L2 と L3 は Go のコードに触れる数行の直し。L4、L6、L7 はコメントだけ。L1 は文 1 つか、Enter のやり直し 1 回。L5 は任意
   3. どれも、この task の記録(report と insight event)だけの直しではないので、`post-implementation-pipeline.md` の記録だけの修正の例外には入らない
+
+## Re-review (S6, 2129f422..705e56bf)
+
+- Reviewer: reviewer サブエージェント(`/self-review` の再実行。パイプラインの cycle は増やさない)
+- Scope: `git diff 2129f422..705e56bf`(705e56bf の 1 コミット、15 ファイル、+406/-296)。cycle-1 の M1 と L1〜L7 の直しと、その直しが持ち込んだものだけを見た。diff の品質だけを見て、テスト、静的解析、整形は走らせていない
+- 読んだもの:
+  - 15 ファイルの diff を全部読んだ。新規の `internal/cli/org_director_wake.go`(105 行)は全文、`internal/org/director_wake.go` は `WakeDirector` の前後と移ってきた部分を読んだ
+  - 移動の突き合わせ: `git diff -U0` の消えた行と増えた行を、行の文字列そのまま(tab も)の多重集合で比べた。`director.go` から `director_wake.go` へ: 消えた行のうち増えた側にないのは、L2 の 1 行(`case push && target == ""` の式)、pointer の 1 行(`// CheckDirectorAttachWake, and by StartDirector.`)、L4(a) の折り直しの 12 行だけ。`org_director.go` から `org_director_wake.go` へ: 消えた行はすべて増えた側にある。定義の順も diff の並びで同じ。移った 10 個の名前は、repo に 1 か所ずつしか定義がない(`grep -rn`)。`director.go` が外した import は `unicode` と `unicode/utf8` だけで、残る import は本文で使われている(`slices`、`strings`、`sort`、`regexp`、`config`)。`org_director.go` の `strings` と `config` も同じ
+  - `WakeDirector` の分割: 前の `2129f422:internal/org/director_wake.go` の本体と、`WakeDirector`、`directorToWake`、`sendDirectorWake` を並べて、読む順、skip の種類、返す result の項目、banner の文を 1 つずつ突き合わせた
+  - M1 の文面は、recipe の `wake_cmd` の例、`/director` skill、`launch_cmd` の `{script_sh}` の扱いと突き合わせた
+  - 機械的な確認: `git diff --check` は空。追加行に TODO・FIXME・print・`/Users/`・U+FFFD はない。recipe の 2 面は `cmp` で一致し、diff も同じ。tech-debt の変わった行は 2 つ(239 行目の改名と、末尾 301 行目の新しい行)で、301 行目は 5 セル、`|` の漏れはない
+
+### 前回の finding の判定
+
+- M1(`{target}` をシェルの文字列に入れる危険): 直った。注意は 4 面にある。recipe の Security(`docs/recipes/director-wake.md:293-302`)と tmux の例の 1 文(`:180-183`)、`OrgDirectorConfig.WakeCmd` の doc(`config.go:274-281`)、`templates/base/ralph.toml:194-200`。どれも、形の検査だけであること、`;` `$` バッククォート 空白を通すこと(tmux の id が要る)、シェルが読む文字列に入れず argv の 1 要素か `"$1"` と引用する script に渡すこと、を言う。recipe の例はこの規則に合う(`{target}` は argv の 1 要素で `:58`、`:158`、`:177`、`:220`。`:192` は script に渡し、script は `"$1"` と引用している(`:199-201`))。`sh -c` に入れた例はない。選択肢の `{target_sh}` は見送り、tech-debt 301 行目に載せた。5 セルで、Trigger は「シェルの文字列に `{target}` が要る `wake_cmd`、またはその報告」。行が指す `shellQuote`(`internal/org/feature.go:408`)は `{script_sh}` の値を作る関数(`director_cmd.go` の `directorLaunchArgv`)で、行の説明と合う。Related の plan の path は `/pr` の `archive-plan.sh` が書き換える。新しい問題はない
+- L1(Enter だけの失敗で行が 2 回入る): 直った(文書の側)。recipe `:266-270` に、行は入力欄に残り、5 分後の再試行がもう 1 度打ち、意味は変わらない、と書いた。括弧の引用 `after the line was typed` は `director_wake.go:571` のエラー文と一致する。コードで Enter だけをやり直す案は取っていない
+- L2(`{target}` を含むかの判定が 2 か所): 直った。`CheckDirectorAttachWake` は `directorWakeCmdHasTarget(wakeCmd)` を呼ぶ(`director_wake.go:135`)。式は `:503` の 1 か所で、呼び手は `:135` と `:473` の 2 つ。helper の doc の呼び手(「for CheckDirectorAttachWake and directorWakeSender」)と合う。前の「as CheckDirectorAttachWake's does」は消えた。同じ理由の文が 2 つの doc に残った点は R2
+- L3(共有する部品に launch の名前): 直った。`directorCmdPlaceholderPattern`(`config.go:327`)と `defaultDirectorCmdWaitDelay`(`director_cmd.go:405`)に改め、使い手と doc、tech-debt 239 行目も直っている。古い名前は、コード、doc、register のどこにも残らない(repo 全体を grep。残りはこの report の L3 の行と、過去の `sync-docs-2026-10-16-org-director-launch-cmd.md` だけで、時点の記録なので直さない)。`directorLaunchOutputLimit` は launch の名前のまま。使うのは `runDirectorLaunchCmd` だけで、wake_cmd は自分の `directorWakeOutputLimit`(`director_wake.go:173`)を持つので、共有の部品ではなく、名前は合う
+- L4(折り直しの取りこぼし): 直った(3 か所とも)。(a) `DirectorStore.Attach` の doc は 1 段落に折り直された(`director.go:429` から)。(b) `withMainWorktreeDirectorEnabled` の doc も同じ(`org.go:217-222`)。(c) `InboxEventWoken` の説明は定数の行の上に移った(`inbox.go:32-34`)。定数の並びはコメント行で揃えが 2 つの塊に分かれ、後ろの 3 行の桁が詰まっているので、整形済みの形に見える(`gofmt` は走らせていない)。折り直した行は 77 桁以内で、周りと同じ幅
+- L5(wake の部品の置き場所と `WakeDirector` の長さ): 直った。attach の検査(`ValidateDirectorWakeTarget`、`CheckDirectorAttachWake`、`ErrDirectorWake*`、`MaxDirectorWakeTargetRunes`、`WakesByPush`、`ResolvedWakeTarget`)は `director_wake.go` に、CLI の 4 関数は新しい `org_director_wake.go` に移った。行数は `director.go` が 1031 から 906、`org_director.go` が 867 から 780、`director_wake.go` が 412 から 574。`director.go` はまだ 800 行を超える(PR の前は 844)。`config.go` は M1 の doc で 789 から 799 行になり、800 行の 1 行手前に来た。`WakeDirector` は 15 行、`directorToWake` は 32 行、`sendDirectorWake` は 27 行
+- L6(`withMainWorktreeOrgLimits` の使い手の列挙): 直った。`org.go:182-185` に `ralph org watch --all` と `orgWatchDirectorWake`(`withMainWorktreeDirectorWakeConfigFrom` 経由)が入り、`orgWatchDirectorWake` の doc(`org_watch.go:155-166`)と合う
+- L7(コメントの slice 名 `S3b`): 直った。3 か所(`org_watch_test.go:1666`、`watch_all_test.go:1492`、`director_wake_test.go:441`)から外れた。この PR の追加行を `S<数字>` で grep しても、残るのは前の PR の slice を引く tech-debt の行だけ
+
+前回の「Tech debt identified」は「なし」だった。M1 の `{target_sh}` だけが直しの中で register の 1 行(301 行目)になり、ほかは直った。
+
+### 移動と分割が動きを変えないこと
+
+- 移動は純粋。コードの行は L2 の 1 行を除いて同じ。変わった文は、`director.go:74-76` の pointer(`director_wake.go` にあるものの名前を並べた)、`director_wake.go:18-22` の新しい先頭の説明、既存の説明の「The registration's wake and target are in director.go」を「are read with WakesByPush and ResolvedWakeTarget above」に直した 1 文、`org_director_wake.go:13-18` の先頭の説明
+- `WakeDirector` の分割は動きを変えない。順は、director.jsonl を読む、登録がなければ `no_registration`、push でなければ `no_push`、headless で running でなければ `not_running`、inbox の store がなければ Err、inbox を読む、起こす件がなければ `nothing_to_wake`、`mem` と `banner` の既定、`holdsBack`、sender の選択、送信、`AppendWoken`、`recordSuccess`。前も後もこの順で、`directorToWake` が前半を、`sendDirectorWake` が後半を持つ。各 return の result の項目(`RegistrationID`、`IDs`、`Skipped`、`HeldBack`、`Err`)も前と同じ値になる。`sendDirectorWake` の本体は、diff では文脈の行になる(banner の 3 つの文、`Failure`、`Sent`、`Via`、`Recorded` の付け方は変わらない)。変わった行は `o.directorWakeSender(*reg, ...)` が `reg` の値渡しになった 1 行だけ
+- cycle-1 の表の `file:line` は、この直しで動いた(`director.go:364` と `:412` は `director_wake.go` へ、`org_director.go` の 4 関数は `org_director_wake.go` へ)。cycle-1 の行番号は 3023dcd5 時点のままで、この節の行番号は 705e56bf で引き直した
+
+## Re-review findings (S6)
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 4 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R1: `sendDirectorWake` は `mem` と `banner` が nil でないことを前提にするが、doc がそう書いていない。nil の既定は `WakeDirector` が 2 つの helper の間で入れる。`DirectorWakeMemory` の method は nil の受け手で止まる(`holdsBack`、`recordFailure`、`warnOnce` はどれも `m` のフィールドに触れる)。呼び手は今 1 つだけだが、分割で「既定を入れる関数」と「使う関数」が分かれた。あわせて `WakeDirector` の step 4 の文(「skips a registration that has none」)は、skip の種類を sender がない場合だけにしていて、前の文(wake_cmd が不正、送り先が使えない、sender がない)より狭い | `director_wake.go:347-350`(既定)、`:414`(`sendDirectorWake`)、`:258-278`(3 つの method)、`:328-330`(step 4 の文)。前の文は `git show 2129f422:internal/org/director_wake.go` の step 4。広い側の文は `sendDirectorWake` の doc と `DirectorWakeSkipped*` の doc にある | `sendDirectorWake` の doc に「`mem` と `banner` は nil でない(WakeDirector が既定を入れる)」を足す。step 4 は「sender を選び(wake_cmd か herdr の pane)、なければ、また wake_cmd か送り先が使えなければ、登録ごとに 1 度だけ banner に言って skip する」と言い直す |
+| LOW | maintainability | R2: 「`{target}` の判定は部分文字列で、`config.ValidateDirectorWakeCmd` の placeholder の規則が見つけるものと同じ」という理由の文が、`CheckDirectorAttachWake` の doc と `directorWakeCmdHasTarget` の doc の両方にある。L2 の直しで式は helper の 1 か所になったが、理由は 2 か所に残り、片方を直し忘れやすい形が式から doc に移った | `director_wake.go:122-124`(`CheckDirectorAttachWake` の doc)、`:499-502`(helper の doc) | `CheckDirectorAttachWake` の側は「`{target}` の判定は `directorWakeCmdHasTarget`」と指すだけにして、理由は helper の doc に 1 つ置く |
+| LOW | readability | R3: `org_director_wake.go` の先頭の説明の最後の文「newOrgDirectorAttachCmd (org_director.go) registers the two flags and calls these」は、4 関数のうち 3 つに当たる。`orgDirectorPushDetails` を呼ぶのは `orgDirectorLine`(`ralph status` と `director status` の `director:` 行)で、`newOrgDirectorAttachCmd` ではない。同じ説明の前の文は `director:` 行を挙げているので、読み手は呼び手を取り違える | `org_director_wake.go:16-18`、`org_director.go:137`、`:150`、`:164`(3 関数の呼び出し)、`:622`(`orgDirectorPushDetails` の呼び出し。関数は `orgDirectorLine`、`:606`) | 「calls the first three; orgDirectorLine (org_director.go) calls orgDirectorPushDetails」のように呼び手を分ける |
+| LOW | naming | R4: `org_director_wake.go:13-14` は plan を `docs/plans/active/2026-10-18-org-director-wake.md` の path で引く。`/pr` が plan を archive へ動かすとこの path は消え、`archive-plan.sh` が書き換えるのは `docs/tech-debt/README.md` の links だけ(`scripts/archive-plan.sh:54-65`)。同じ commit が触った `director_wake.go` は slug の形(`plan 2026-10-18-org-director-wake`、`:18`、`:29`、`:59`、`:78`)で引く。同じ腐りは repo にもう 1 つある。`org_director.go:21` が引く `docs/plans/active/2026-10-15-org-director-start.md` は、いま `docs/plans/archive/` にある。この PR のテストの先頭の説明 3 か所も path の形で、cycle 1 では見落とした | `org_director_wake.go:13-14`、`director_wake_test.go:20`、`org_director_wake_test.go:18`、`prompts_test.go:1607`、`org_director.go:21` | この PR の 4 か所を `plan 2026-10-18-org-director-wake` の形に揃える。`org_director.go:21` はこの PR の外なので触らなくてよい |
+
+### Tech debt identified
+
+新しく足す行はない。R1 から R4 は、Go のコードを変えないコメントだけの直し。直さないまま最後の cycle に入るなら、1 行にまとめて `/sync-docs` が足す(Trigger は `director_wake.go` か `org_director_wake.go` の次の変更)。M1 の残りの `{target_sh}` は、直しの commit が tech-debt 301 行目に載せた。
+
+_(上の変更は report だけで、`docs/tech-debt/` には追記していない。同じ cycle の再レビューなので insight event も足していない。phase と cycle が集計の鍵なので、`self_review` の cycle 1 の行がもう 1 つ増えると二重に数える。)_
+
+### Re-review の判定
+
+cycle-1 の M1 と L1〜L7 は 8 件とも直った。この再レビューで足した指摘は LOW 4 件(R1〜R4)で、CRITICAL、HIGH、MEDIUM はない。cycle-1 の件数(MEDIUM 1、LOW 7)からの現在の残りは、LOW 4 件になる。
+
+- Merge: yes(S6 の再レビュー。CRITICAL・HIGH・MEDIUM なし。LOW 4 件はコメントと doc の直しで、動きを変えない。移動は純粋で、`WakeDirector` の分割は動きを変えない)
