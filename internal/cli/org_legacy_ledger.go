@@ -14,7 +14,8 @@ type orgLedgerAccess int
 
 const (
 	// orgLedgerReadOnly verbs (`ralph status`, `ralph org status` / `read`
-	// / `wait` (with or without --inbox) / `report` / `inbox` /
+	// / `wait` (with or without --inbox, and --inbox --director, which
+	// writes only its own mark director-wait.json) / `report` / `inbox` /
 	// `inbox show` / `merge-order` / `director status`, `ralph insights`)
 	// only print a note about a legacy ledger.
 	orgLedgerReadOnly orgLedgerAccess = iota

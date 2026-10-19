@@ -1237,6 +1237,7 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		until     string
 		timeoutMS int
 		inbox     bool
+		director  string
 	)
 
 	cmd := &cobra.Command{
@@ -1257,10 +1258,35 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"TYPE, first line of the body). Acked items do not count. --timeout-ms\n" +
 			"bounds it the same way (exit 1 when no open item arrives in time, 0\n" +
 			"waits unbounded). --inbox cannot be combined with --org-id, --seat, or\n" +
-			"--until.",
+			"--until.\n" +
+			"\n" +
+			"--director <id> (only with --inbox) is the wait of the director\n" +
+			"registered as <id>, of the form d<N> (such as d1). It waits only while\n" +
+			"<id> is the current registration and not stopped: otherwise it exits 5\n" +
+			"without waiting. While it waits, it reads the registration again\n" +
+			"every 30 s and exits 5 at the first such read after <id> is replaced,\n" +
+			"detached, or stopped. It writes its own mark, director-wait.json in\n" +
+			"the state dir, when it starts, every 30 s, when the watch it sees\n" +
+			"changes, and when it ends, with how it ended; `ralph org director\n" +
+			"status` and `ralph status` show it. Every 5 s it probes the cross-org\n" +
+			"watch (ralph org watch --all), and when a watch that accepted work\n" +
+			"(at its last probe, or at the previous --director wait of <id>) no\n" +
+			"longer does and no inbox item is open, it exits 4, naming what\n" +
+			"watch.lock and watch-alive.json show and the command that starts a\n" +
+			"watch, ralph org watch --all --detach. It starts no watch itself.\n" +
+			"When no watch accepts work at its start, it prints a note: line on\n" +
+			"stderr and keeps waiting. SIGINT, SIGTERM, and SIGHUP end it: it\n" +
+			"writes end=signal to its mark and then ends by the same signal. A\n" +
+			"SIGHUP or SIGINT that was ignored when it started (nohup ignores\n" +
+			"SIGHUP) stays ignored.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --director is checked first, so it is never taken for a
+			// seat wait's flag, and nothing is read before the refusal.
+			if cmd.Flags().Changed("director") && !inbox {
+				return errors.New("org: wait: --director needs --inbox")
+			}
 			if inbox {
-				return runOrgWaitInbox(cmd, *stateDir, *configPath, timeoutMS)
+				return runOrgWaitInbox(cmd, *stateDir, *configPath, timeoutMS, director)
 			}
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -1287,30 +1313,42 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&until, "until", "idle,done", "comma-separated states to wait for (idle,done,blocked; not with --inbox)")
 	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "wait timeout in milliseconds, bounded by default (pass 0 to explicitly wait unbounded)")
 	cmd.Flags().BoolVar(&inbox, "inbox", false, "wait for an open item in the org inbox instead of a seat (no --org-id, --seat, or --until)")
+	cmd.Flags().StringVar(&director, "director", "",
+		"wait as the director registration `id` (d<N>, such as d1; only with --inbox): exit 5 unless it is the current registration, exit 4 when the watch stops accepting work, and keep the mark director-wait.json")
 
 	return cmd
 }
 
 // runOrgWaitInbox is `ralph org wait --inbox`: (*org.Org).WaitInbox, then
-// one line per open item on stdout. The inbox is shared by every org in the
-// ledger, so --org-id is refused rather than ignored, as are --seat and
-// --until, which name a seat wait.
-func runOrgWaitInbox(cmd *cobra.Command, stateDir, configPath string, timeoutMS int) error {
+// one line per open item on stdout (printInboxWaitItems). The inbox is
+// shared by every org in the ledger, so --org-id is refused rather than
+// ignored, as are --seat and --until, which name a seat wait. With
+// --director it is runOrgWaitInboxDirector instead, after the same refusals.
+func runOrgWaitInbox(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, director string) error {
 	for _, flag := range []string{"org-id", "seat", "until"} {
 		if cmd.Flags().Changed(flag) {
 			return fmt.Errorf("org: wait: --inbox cannot be combined with --%s", flag)
 		}
+	}
+	if cmd.Flags().Changed("director") {
+		return runOrgWaitInboxDirector(cmd, stateDir, configPath, timeoutMS, director)
 	}
 	rt, err := newOrgRuntime(cmd, stateDir, configPath, orgLedgerReadOnly)
 	if err != nil {
 		return err
 	}
 	items, err := rt.WaitInbox(time.Duration(timeoutMS) * time.Millisecond)
+	printInboxWaitItems(cmd.OutOrStdout(), items)
+	return err
+}
+
+// printInboxWaitItems prints the open items a wait --inbox returned, one
+// line each: ID, org, TYPE, and the first line of the body, tab-separated.
+func printInboxWaitItems(w io.Writer, items []org.InboxItem) {
 	for _, item := range items {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			inboxField(item.ID), inboxField(item.OrgID), inboxField(item.Type), inboxSummary(item.Body))
 	}
-	return err
 }
 
 func newOrgReadCmd(orgID, stateDir, configPath *string) *cobra.Command {

@@ -14,7 +14,7 @@ import (
 // the check in the CLI's words, which start's refusal uses too, and what
 // status reads of the watch's mark and the director: line says of it.
 // newOrgDirectorAttachCmd (org_director.go) calls attachedError, and
-// readOrgDirectorReport and orgDirectorLine (org_director.go) call
+// readOrgDirectorReport and orgDirectorLine (org_director_report.go) call
 // readOrgDirectorCheck and orgDirectorWatchCheckClause.
 
 // attachedError is the store's ErrDirectorAttached refusal err followed by

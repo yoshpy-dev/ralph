@@ -3,7 +3,8 @@
 The director is the session the human talks to for every feature org: a
 promoted interactive session (`ralph org director attach`) or a headless
 director (`ralph org director start`). By default it learns of a new open
-inbox item by waiting on the inbox with `ralph org wait --inbox` (pull).
+inbox item by waiting on the inbox with
+`ralph org wait --inbox --director <id>` (pull).
 With push, the cross-org watch (`ralph org watch --all`) wakes it instead,
 by typing one fixed line into its terminal. This recipe covers push: when
 the watch sends the line, how to set it up for each kind of director, and
@@ -267,7 +268,8 @@ Keep a session a human types into on pull. The line and its Enter land in
 the session's input, so text the human was typing when the line arrived is
 sent along with it. The same holds while you type into a headless
 director's pane or terminal (not checked live). With pull the director
-waits with `ralph org wait --inbox` and nothing is typed into its input.
+waits with `ralph org wait --inbox --director <id>` and nothing is typed
+into its input.
 
 ## What the agents do with the line
 

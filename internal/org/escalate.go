@@ -285,15 +285,9 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 	// so an item that arrived just before the deadline is still returned.
 	expired := false
 	for {
-		inbox, err := o.Inbox.Read()
+		open, err := o.openInboxItems()
 		if err != nil {
 			return nil, fmt.Errorf("org: wait --inbox: %w", err)
-		}
-		var open []InboxItem
-		for _, item := range inbox.Items {
-			if item.State == InboxStateOpen {
-				open = append(open, item)
-			}
 		}
 		if len(open) > 0 {
 			return open, nil
@@ -307,6 +301,25 @@ func (o *Org) WaitInbox(timeout time.Duration) ([]InboxItem, error) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// openInboxItems is one read of the inbox for a wait: the open items in ID
+// order (nil when none), or the read's error as Inbox.Read returned it. It
+// is the read of every round of WaitInbox and of the director's wait
+// (WaitInboxForDirector, director_wait.go), so both count the same items as
+// open; each wraps the error in its own prefix.
+func (o *Org) openInboxItems() ([]InboxItem, error) {
+	inbox, err := o.Inbox.Read()
+	if err != nil {
+		return nil, err
+	}
+	var open []InboxItem
+	for _, item := range inbox.Items {
+		if item.State == InboxStateOpen {
+			open = append(open, item)
+		}
+	}
+	return open, nil
 }
 
 // escalateDelivery decides how Escalate delivers a new item (the cases in

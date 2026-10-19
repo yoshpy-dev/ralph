@@ -49,15 +49,16 @@ const directorNotAttachedLine = directorNotAttachedBase + directorAutoMergeOff
 const directorDisabledLine = "director: disabled ([org.director].enabled = false) -- ralph org escalate sends every item to the human at once"
 
 // directorAttachedLine is the director: line of a registration with id,
-// driver, attach time ts, and user, and no pane, with auto_merge off.
+// driver, attach time ts, and user, and no pane, with auto_merge off and no
+// mark of its wait --inbox --director.
 func directorAttachedLine(id, driver, ts, user string) string {
 	by := ""
 	if user != "" {
 		by = ", by " + user
 	}
 	return "director: attached " + id + " (driver=" + driver + ", attached at " + ts + by + ") -- " +
-		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-		directorAutoMergeOff
+		"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
+		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
 }
 
 // directorFileOrAbsent returns director.jsonl in stateDir, or "<absent>"
@@ -157,7 +158,8 @@ func TestOrgDirector_AttachReplaceAndDetachByID(t *testing.T) {
 
 	statusOut, _ := runInboxOK(t, append([]string{"director", "status"}, ledger...)...)
 	wantStatus := directorAttachedLine("d1", "claude", ev.TS, "alice") + "\n" +
-		"enabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ev.TS + "\nuser: alice\ncwd: " + cwd + "\nherdr_pane: yes\n"
+		"enabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ev.TS + "\nuser: alice\ncwd: " + cwd + "\nherdr_pane: yes\n" +
+		directorNoWaitMarkLine + "\n"
 	if statusOut != wantStatus {
 		t.Errorf("director status =\n%s\nwant\n%s", statusOut, wantStatus)
 	}
@@ -892,7 +894,8 @@ func TestOrgDirector_StatusWarnsAboutDamageAndEscapesValues(t *testing.T) {
 		}
 	}
 	wantLine := `director: attached d2 (driver=claude, attached at 2026-10-15T09:00:00Z, by eve\x1b[2J\ndirector: forged, pane %7\r) -- ` +
-		"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+		"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
+		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
 	lines := strings.Split(stdout, "\n")
 	if lines[0] != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", lines[0], wantLine)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -123,24 +124,59 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // registered with signal.Notify until stop runs, so a later signal is caught
 // too (and dropped once the channel's one slot is full) and does not end
 // ralph.
+//
+// It is signalCauseContext without its second result, the signal that
+// arrived, which only `ralph org wait --inbox --director` reads.
 func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Context, func()) {
+	ctx, _, stop := signalCauseContext(parent, sigs...)
+	return ctx, stop
+}
+
+// signalCauseContext is gateSignalContext with one more result: received
+// returns the first of sigs that the goroutine took, which cancelled ctx
+// unless ctx had just ended, or nil when it took none (no signal came, or
+// parent or stop ended ctx first). stop waits for the goroutine to end, so
+// once stop has returned, received no longer changes. With no sigs it
+// registers none, since signal.Notify with no signals would relay every
+// signal (SIGCHLD and SIGURG too); the director's wait drops the ones that
+// were ignored when ralph started (notIgnoredSignals).
+func signalCauseContext(parent context.Context, sigs ...os.Signal) (ctx context.Context, received func() os.Signal, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
 	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, sigs...)
+	if len(sigs) > 0 {
+		signal.Notify(ch, sigs...)
+	}
+	var (
+		mu  sync.Mutex
+		got os.Signal
+	)
+	ended := make(chan struct{})
 	if ctx.Err() == nil {
 		go func() {
+			defer close(ended)
 			select {
 			case s := <-ch:
+				mu.Lock()
+				got = s
+				mu.Unlock()
 				cancel(errors.New(s.String() + " signal received"))
 			case <-ctx.Done():
 			}
 		}()
+	} else {
+		close(ended)
 	}
-	stop := func() {
+	received = func() os.Signal {
+		mu.Lock()
+		defer mu.Unlock()
+		return got
+	}
+	stop = func() {
 		cancel(nil)
+		<-ended
 		signal.Stop(ch)
 	}
-	return ctx, stop
+	return ctx, received, stop
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a

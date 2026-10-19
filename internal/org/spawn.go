@@ -240,8 +240,9 @@ type Org struct {
 	// set a fake.
 	Worktrees FeatureWorktrees
 	// Inbox is the org inbox (inbox.go) Escalate records to and
-	// NotifyInboxItem reads (escalate.go); WaitInbox reads it too. nil
-	// means no inbox: all three return an error.
+	// NotifyInboxItem reads (escalate.go); WaitInbox and
+	// WaitInboxForDirector (director_wait.go) read it too. nil means no
+	// inbox: all four return an error.
 	Inbox *InboxStore
 	// EscalationsPath is the escalations.jsonl the inbox's human path
 	// appends to (escalate.go), the same file `ralph org watch` writes:
@@ -260,10 +261,11 @@ type Org struct {
 	// otherwise, and the printed commands then carry no --state-dir
 	// (InboxCommand's doc says why).
 	InboxHintStateDir string
-	// InboxPollInterval overrides how often WaitInbox reads the inbox again
-	// while no item is open. Zero (the field's default) means "use
-	// defaultInboxPollInterval" (1s) -- tests set a tiny value so a wait
-	// for an item that arrives later returns fast.
+	// InboxPollInterval overrides how often WaitInbox and
+	// WaitInboxForDirector read the inbox again while no item is open. Zero
+	// (the field's default) means "use defaultInboxPollInterval" (1s) --
+	// tests set a tiny value so a wait for an item that arrives later
+	// returns fast.
 	InboxPollInterval time.Duration
 	// WatchGate is the watch gate (watchgate.go): Spawn, StartFeature, and
 	// Send of a TASK call it before they write to the manifest or call herdr

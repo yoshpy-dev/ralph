@@ -223,7 +223,9 @@ func TestDirectorLine_ShowsTheWatchsCheckOfAHeadlessDirector(t *testing.T) {
 
 // D8: a promoted session's registration (attach) is never checked. With a
 // mark that has its id and attached_at, ended, both lines are the ones of
-// stage 8a-1, byte for byte, and neither --json has a check key.
+// stage 8a-1 with only the clause stage 8b-2b added for a registration with
+// no wait --inbox --director mark (directorNoWaitMarkClause), and neither
+// --json has a check key.
 func TestDirectorLine_APromotedSessionIsNotChecked(t *testing.T) {
 	t.Chdir(t.TempDir())
 	stateDir := t.TempDir()

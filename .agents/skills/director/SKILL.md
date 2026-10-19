@@ -38,7 +38,11 @@ skill はその節を指し、写さない。
   headless の director が今も動いているかは、横断の見張りが各サイクルで
   確かめる(「headless の director」節の「確かめを読む」)。昇格した
   セッションの登録は見張りも確かめないので、そのセッションが今も動いて
-  いるかは分からない。登録があるかどうかで escalate の動きは変わらない。
+  いるかは分からない。その director が `--director` を付けた wait で待って
+  いれば、wait が書く印から、その wait がいつ始まり、最後にいつ印を書いたか
+  (終わっていれば、いつどう終わったか)が分かる。印は wait が書いたことを
+  表し、セッションが動いていることは表さない(「受信箱の処理」の「wait で
+  待つ」)。登録があるかどうかで escalate の動きは変わらない。
 - leader が escalate した件が人にどう届くかは、`[org.director].enabled`
   (既定 true)と横断の見張り(`ralph org watch --all`)で決まる。
   - enabled で、見張りが仕事を受け付けている: escalate は件を記録する
@@ -78,17 +82,18 @@ director も守る(「headless の director」節)。
 
    stdout に `attached d1 (driver=claude)` と、登録を外すときの
    `ralph org director detach --id d1` の行が出る。この登録の `id`(`d1`)を
-   覚えておく。stderr に `warning: director attach: ...` の 1 行が出たら、
-   見張りが仕事を受け付けていない。登録はできていて終了コードは 0 なので、
-   2 に戻って見張りを起動する。
+   覚えておく。受信箱を待つ wait の `--director` にも渡す(「受信箱の
+   処理」の「wait で待つ」)。stderr に `warning: director attach: ...` の
+   1 行が出たら、見張りが仕事を受け付けていない。登録はできていて
+   終了コードは 0 なので、2 に戻って見張りを起動する。
 
    登録には、受信箱の新しい件をどう知るか(wake)も書かれる。`--wake` を
    省くと `[org.director].wake`(既定 `["pull"]`)になり、director は
-   `ralph org wait --inbox` で待つ(「受信箱の処理」)。人が打ち込む
-   セッションは pull のままにする。push にすると、見張りの 1 行と Enter が
-   人の入力欄に入り、人が打ちかけていた文と一緒に送られる。人の入力の
-   ないセッションを push で起こすには、`[org.director].wake_cmd` を設定し、
-   `--wake push`(wait と併用するなら `--wake pull,push`)を付ける。
+   `ralph org wait --inbox --director <id>` で待つ(「受信箱の処理」)。
+   人が打ち込むセッションは pull のままにする。push にすると、見張りの
+   1 行と Enter が人の入力欄に入り、人が打ちかけていた文と一緒に送られる。
+   人の入力のないセッションを push で起こすには、`[org.director].wake_cmd`
+   を設定し、`--wake push`(wait と併用するなら `--wake pull,push`)を付ける。
    wake_cmd が `{target}` を含むなら、送り先を `--wake-target` で渡す
    (Orca なら端末の handle)。
 
@@ -355,6 +360,9 @@ headless の director について、登録がセッションの生死を表さ�
 - `--json` では、`check`(`ralph status --json` では `director.check`)に
   state、how、checked_at、detail が載る。見張りが今の登録をまだ確かめて
   いなければ載らない。
+- `ralph org director status` の `wait:` の行は、headless の director にも
+  出る。見張りの確かめではなく、director の wait が書いた印を読む(「受信箱の
+  処理」の「wait で待つ」)。
 
 見張りの確かめは印を書くだけで、`director.jsonl` には何も書かず、pane も
 workspace も閉じず、signal も送らない。ended と読んだ登録には、そのサイクルの
@@ -461,8 +469,8 @@ start のプロセスが記録されていないときは、今までどおり�
 open の件をどう知るかは、自分の登録の wake で決まる。
 `ralph org director status` の `wake:` の行を読む。
 
-- `pull`: open の件が届くのを `ralph org wait --inbox` で待つ(下の
-  「wait で待つ」)。
+- `pull`: open の件が届くのを `ralph org wait --inbox --director <id>` で
+  待つ(下の「wait で待つ」)。
 - `push`: 横断の見張り(`ralph org watch --all`)が、新しい open の件を
   決まった 1 行で知らせる(下の「見張りが送る 1 行」)。`wait --inbox` は
   打たない。手番を終えて、次の入力を待つ。
@@ -472,19 +480,68 @@ open の件をどう知るかは、自分の登録の wake で決まる。
 
 ### wait で待つ
 
-- Claude Code: `ralph org wait --inbox --timeout-ms 0 2>&1` を Monitor で
-  見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、stderr の
-  文も同じ出力に出る。終了コード 0 なら open の件を出して返ったので、
-  件を処理し、また待つ。件は 1 件 1 行で、ID、org、TYPE、本文の 1 行目を
-  タブで区切る。stderr の `note:` の行が混ざることもあるが、件ではない。
+wait には `--director <自分の id>` を付ける。自分の id は、attach が出した
+登録の `id`(「昇格」の 3 の `d1`)で、headless の director なら雛形に
+書かれた `id` になる。
+
+- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms 0 2>&1` を
+  Monitor で見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、
+  stderr の文も同じ出力に出る。終了コード 0 なら open の件を出して返った
+  ので、件を処理し、また待つ。件は 1 件 1 行で、ID、org、TYPE、本文の
+  1 行目をタブで区切る。stderr の `note:` の行と、`wait --inbox --director: `
+  で始まる行が混ざることもあるが、件ではない(扱いは下の箇条)。
   `--timeout-ms 0` には時間切れがないので、終了コード 1 はいつも失敗で、
   打ち直さない。扱いは下の段落のとおり。
-- Codex: `ralph org wait --inbox --timeout-ms 300000` のように時間を
-  区切った wait を繰り返す。終了コード 1 で、stderr が
+- Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように
+  時間を区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
   来なかっただけなので、もう一度打つ。
 
-終了コード 0 と、時間を区切った wait の時間切れ(終了コード 1 で、
+`--director` を付けた wait は、件を返すほかに次のことをする。
+
+- `d1` が今の登録で、stopped でないあいだだけ待つ。始める前にそうでなければ
+  待たずに終了コード 5 で返る。待つあいだは 30 秒ごとに登録を読み直し、
+  `--replace`、detach、stop で今の登録でなくなっていれば、その読み直しで
+  終了コード 5 で返る。登録が変わってから返るまで 30 秒ほどかかることもある。
+- 自分の印(台帳の `director-wait.json`)を、始めたとき、30 秒ごと、見張りの
+  様子が変わったとき、終わるときに書く。`ralph org director status` の
+  `wait:` の行と、昇格したセッションの `ralph status` の `director:` の行が、
+  その印を出す。印は wait が書いたこと(いつ始まり、最後にいつ印を書いたか、
+  いつどう終わったか)を表し、director が動いていることは表さない。
+- 5 秒ごとに横断の見張りを確かめる。仕事を受け付けていた見張りが受け付け
+  なくなり、open の件がなければ、終了コード 4 で返る。見張りは起動しない。
+
+終了コードと stderr の行は、次のように扱う。
+
+- 4: 仕事を受け付けていた見張りが、もう受け付けていない。前の wait が終わった
+  あとで止まった見張りも、次の wait が 4 で返す。stderr の 1 行は、
+  `watch.lock` と見張りの印 `watch-alive.json` の事実と、見張りを起動する
+  `ralph org watch --all --detach` を名指す。その事実とコマンドを人に伝え、
+  wait を打ち直す。見張りを自分では起動しない。見張りの印からは、人が
+  止めたのか、ひとりでに止まったのかが分からないため。起動するのは、人が
+  そう言ったときだけ。wait も受信箱も見張りに依らないので、件の処理は
+  続ける。見張りがないあいだに escalate された件は人にもすぐ届き、それより
+  前に記録だけにした件は、見張りがまた動くまで期限で人に届かない(1 行も
+  そう言う)。
+- 5: 登録がもう自分のものではない(`--replace` で入れ替えられた、detach
+  された、stop された)。「昇格」の 5 と同じく、director として動くのを
+  やめ(受信箱の ack と resolve、leader への send、start をしない)、
+  そのことを人に言う。detach は打たない。
+- 見張りが仕事を受け付けていないという `note:` の行: 始めたときから見張りが
+  なく、wait は待ち続ける。その 1 行を人に伝える。前の wait にも同じ
+  `note:` が出ていたとき、または前の wait が同じ見張りのことで終了コード 4
+  で終わっていたときは、伝え直さない(Codex の 300 秒の繰り返しで、同じ
+  知らせを人に何度も送らないため)。
+- 見張りがまた仕事を受け付けるようになったという `note:` の行: wait は
+  待ち続ける。人に 1 行伝えれば足りる。
+- `wait --inbox --director: ` で始まる行: 印のこと(ほかの
+  `wait --inbox --director` が印を引き継いだ、印を書けない)で、wait は
+  待ち続ける。人に 1 度伝える。
+- 1: 失敗(下の段落)。Codex の時間切れの文は、上のとおり打ち直す。
+  `--director` を知らない古い ralph も、知らないフラグとして終了コード 1 で
+  断る。
+
+終了コード 0、4、5 と、時間を区切った wait の時間切れ(終了コード 1 で、
 stderr が時間切れの文を含む)のほかは、どの終わり方も失敗として扱う。
 終了コード 1 の失敗には、`ralph.toml` や受信箱(`inbox.jsonl`)が
 読めないものがある。この失敗はすぐ返り、打ち直しても同じ失敗が続く。
@@ -624,7 +681,9 @@ resolve してから send が失敗すると、件は期限から外れ、leader
   `launch cmd`、端末の名前、pid が出る。wake に push があれば、
   `wake=push to <送り先>`(`pull,push` なら `wake=pull,push to <送り先>`)も
   出る。headless の director なら、見張りの確かめの結果も出る。読み方は
-  「headless の director」節の「確かめを読む」)、`merge guarantee:`
+  「headless の director」節の「確かめを読む」。昇格したセッションなら、
+  その登録の `wait --inbox --director` の印の事実か、印がないことも出る。
+  読み方は「受信箱の処理」の「wait で待つ」)、`merge guarantee:`
   (merge の時点の保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
@@ -793,3 +852,7 @@ send が断られる。
   まま打ち直さない。regate が返した衝突と失敗を、git で直さない(merge、
   commit、push を自分で打たない)。
 - resolve を、その答えの send より先に打たない。
+- wait が終了コード 4 か見張りがないという `note:` で知らせた見張りを、自分の
+  判断で起動しない。起動するのは、人がそう言ったときだけ(「昇格」の 2 は、
+  人が昇格を頼んだ手順の中で、attach の前に見張りを確かめて起動するもので、
+  これとは別)。
