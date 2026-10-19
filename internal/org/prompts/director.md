@@ -39,6 +39,11 @@ ralph org director status {{ORG_FLAGS}}
 {{IF_HERDR}}- 人とはこの pane で話す。人は herdr でこの pane に入って話しかける。
 {{IF_CMD}}- 人とはこの端末で話す。この端末は、人が `[org.director].launch_cmd` に
 {{IF_CMD}}  書いたコマンドで開いたもの。
+- 登録の wake に pull があるとき、skill の「受信箱の処理」の wait は
+  `ralph org wait --inbox --director {{ID}} {{ORG_FLAGS}}` に、skill の
+  とおり `--timeout-ms` を足して打つ。終了コード 5 で返ったら、今の登録は
+  もう `{{ID}}` ではない。「最初の手順」で `id` が違ったときと同じく、
+  ほかに何もせず、そのことを書いて止まる。detach も打たない。
 {{IF_HERDR}}- 登録の wake に push があると、横断の見張りがこの pane に
 {{IF_HERDR}}  `New org inbox items for the director:` で始まる 1 行を打ち込む。
 {{IF_CMD}}- 登録の wake に push があると、横断の見張りが `[org.director].wake_cmd` で

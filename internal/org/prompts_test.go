@@ -1479,7 +1479,9 @@ func TestRenderDirectorPrompt_SubstitutesEveryPlaceholder(t *testing.T) {
 // watch check and the attach that start did; every ralph org command gets
 // --state-dir; the human is talked to in this pane; the director does not
 // implement; and at the end it asks the human to stop it from outside herdr
-// instead of detaching.
+// instead of detaching. The inbox wait carries --director with the id, and
+// its exit 5 stops the director as the first step does (plan
+// 2026-10-19-org-director-wait, D6).
 func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 	text := mustRenderDirectorPrompt(t, testDirectorPromptVars())
 	section := func(header string) string {
@@ -1509,6 +1511,8 @@ func TestRenderDirectorPrompt_PinsTheHeadlessDirectorsProcedure(t *testing.T) {
 			"あなたが打つ `ralph org` のコマンドには、どれも `--state-dir " + testDirectorStateDirArg + "` を付ける。",
 			"`ralph status` には `--state-dir " + testDirectorStateDirArg + "` だけを付ける。",
 			"人とはこの pane で話す。",
+			"`ralph org wait --inbox --director d3 --state-dir " + testDirectorStateDirArg + "` に、skill のとおり `--timeout-ms` を足して打つ。",
+			"終了コード 5 で返ったら、今の登録はもう `d3` ではない。「最初の手順」で `id` が違ったときと同じく、ほかに何もせず、そのことを書いて止まる。detach も打たない。",
 			"実装しない。",
 		}},
 		{"## 終わり", []string{
@@ -1732,13 +1736,14 @@ func TestRenderDirectorPrompt_GivesEveryRalphOrgCommandTheConfig(t *testing.T) {
 					run = append(run, c)
 				}
 			}
-			// Each ends with its flags and has no other: status and the
-			// inbox read after a wake line, which the director runs, get
-			// the config, and stop, which the human runs, gets the ledger
-			// alone.
+			// Each ends with its flags and has no other: status, the
+			// director's inbox wait, and the inbox read after a wake line,
+			// which the director runs, get the config, and stop, which the
+			// human runs, gets the ledger alone.
 			want := []string{
 				"ralph org director status " + tc.flags,
 				"ralph org director status " + tc.flags,
+				"ralph org wait --inbox --director d3 " + tc.flags,
 				"ralph org inbox " + tc.flags,
 				"ralph org director stop --id d3 " + stateDirFlag,
 			}
