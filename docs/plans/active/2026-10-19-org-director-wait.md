@@ -175,6 +175,7 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
   - verify(cycle 2、pass、LOW 1、INFO 3、e71c0e3a)の C2-1(実機の evidence の「後のコミットは wait の動きを変えない」が 38cac6f1 で崩れた)は sync-docs で直す。C2-2 はこの行
   - test(cycle 2、pass、c905a7e7)は cycle 2 のコードに mutant 30 個を入れ、生き残りの穴 G8〜G11 を出した。G8(同じ id が新しい `attached_at` でロックの前に登録し直されたとき。`begin` の確かめに nil を渡しても通っていた)は、cross-review で直した競合の同じ id の場合なので、G9〜G11 と一緒に probe 4 本を 99144e8f でテストにした(本番のコードは変えていない。mutant B01、N1、N2、B12、B19 で赤になることは implementer が確かめた)。全パッケージでの実行は PR の前の run-verify で行う
   - sync-docs(cycle 2)の直し: 実機の evidence の冒頭に、38cac6f1 が wait の動きを変えたこと(最初の確かめとロックのあいだに登録が変わった wait は印を書かずに 5 で返る)と、(a)〜(h) はその道を通らず打ち直していないことを足した(verify C2-1)。仕様 8b-2b の注に、最初の印を書く前のロックの下の読み直しを 1 句足した(C2-3)。tech-debt の 306 行の行数(`director_wait_watch_test.go` 640、`director_wait_owner_test.go` 388)と 308 行(G8〜G11 を 99144e8f が払ったこと)を直した。help、skill、README、recipe、AGENTS.md は cycle 2 の動きと合っていて変えていない。report は `docs/reports/sync-docs-2026-10-19-org-director-wait.md` の `## Cycle 2`
+  - cross-review(cycle 2、上限の 2 回目)は Codex の指摘なしで Case C(31b36cfe)。PR の前の `GOFLAGS=-timeout=30m ./scripts/run-verify.sh`(b7f66534、load average 50 前後)は rc 1 だった。落ちたのは doctor のテスト 2 本で、1 本目はスタブの `claude --version` が 5 秒の時間切れになった。2 本とも単独では 3 回とも通り、`internal/cli` の走らせ直し(31b36cfe)は 376 秒で通った。ほかの検証(静的解析、shell のテスト、ほかの Go のパッケージ。`internal/org` は 1537 秒)は通った。この揺れは tech-debt に新しい行を足した。このブランチは doctor を変えていない
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
