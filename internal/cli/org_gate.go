@@ -125,8 +125,8 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 // too (and dropped once the channel's one slot is full) and does not end
 // ralph.
 //
-// It is signalCauseContext without the signal that arrived, which `ralph org
-// wait --inbox --director` needs too.
+// It is signalCauseContext without its second result, the signal that
+// arrived, which only `ralph org wait --inbox --director` reads.
 func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Context, func()) {
 	ctx, _, stop := signalCauseContext(parent, sigs...)
 	return ctx, stop

@@ -1263,8 +1263,9 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"--director <id> (only with --inbox) is the wait of the director\n" +
 			"registered as <id>, of the form d<N> (such as d1). It waits only while\n" +
 			"<id> is the current registration and not stopped: otherwise it exits 5\n" +
-			"without waiting, and it exits 5 when <id> is replaced, detached, or\n" +
-			"stopped while it waits. It writes its own mark, director-wait.json in\n" +
+			"without waiting. While it waits, it reads the registration again\n" +
+			"every 30 s and exits 5 at the first such read after <id> is replaced,\n" +
+			"detached, or stopped. It writes its own mark, director-wait.json in\n" +
 			"the state dir, when it starts, every 30 s, when the watch it sees\n" +
 			"changes, and when it ends, with how it ended; `ralph org director\n" +
 			"status` and `ralph status` show it. Every 5 s it probes the cross-org\n" +

@@ -19,9 +19,10 @@ import (
 // <id>`. It returns the open inbox items as WaitInbox does, and besides:
 //
 //   - it waits only while the current director registration is <id> and not
-//     stopped, read before it starts and again at every rewrite of its mark
-//     (D1), so the wait of a session that `attach --replace` replaced ends by
-//     itself (ErrDirectorWaitNotCurrent);
+//     stopped, read before it starts and again every
+//     DirectorWaitMarkInterval (D1), so the wait of a session that
+//     `attach --replace` replaced ends by itself (ErrDirectorWaitNotCurrent)
+//     at the next such read;
 //   - it writes its own mark, director-wait.json, under director-wait.lock
 //     (D2): when it started, when it last wrote, the watch it last saw, and
 //     how it ended. A promoted session's registration tells nothing about
@@ -34,8 +35,10 @@ import (
 //     on its own, so the text says only what the lock and the mark show.
 //
 // A wait without --director (WaitInbox) does none of this. The mark is read
-// by status and never to decide what to stop or start; it says what the wait
-// wrote, not that the director is alive.
+// by status, and by the next wait of the same registration for the
+// watch_accepting it carries over (D3); nothing reads it to start or stop a
+// watch or a session. It says what the wait wrote, not that the director is
+// alive.
 
 // File names of the director's wait, within the org state dir.
 const (
@@ -47,8 +50,10 @@ const (
 )
 
 // How a director's wait ended (DirectorWaitMark.End), one for each end of
-// D2. The CLI (S2 of the plan) maps them to exit codes: items 0, timeout 1,
-// watch 4, not_current 5, error 1, and signal the signal's own.
+// D2. The CLI maps them to exit codes: items 0, timeout 1, watch 4 and
+// not_current 5 (ExitCode in internal/cli/exitcode.go, by the error that
+// wraps ErrDirectorWaitNoWatch or ErrDirectorWaitNotCurrent), error 1, and
+// signal the signal's own (runOrgWaitInboxDirector raises the signal again).
 const (
 	// DirectorWaitEndItems: it returned the open inbox items.
 	DirectorWaitEndItems = "items"
@@ -71,21 +76,23 @@ const (
 // The intervals of a director's wait (D2 and D3), which
 // DirectorWaitParams.MarkInterval and WatchProbeInterval override.
 const (
-	// directorWaitMarkInterval is how often the wait reads director.jsonl
-	// again and rewrites its mark's seen_at.
-	directorWaitMarkInterval = 30 * time.Second
+	// DirectorWaitMarkInterval is how often the wait reads director.jsonl
+	// again and rewrites its mark's seen_at. The readers of the mark use it
+	// too: `ralph status` and `ralph org director status` say that a running
+	// wait has not written its mark since when its seen_at is more than two
+	// of these old (D5).
+	DirectorWaitMarkInterval = 30 * time.Second
 	// directorWaitWatchProbeInterval is how often the wait probes the watch.
 	directorWaitWatchProbeInterval = 5 * time.Second
-	// DirectorWaitMarkInterval is directorWaitMarkInterval for the readers of
-	// the mark: `ralph status` and `ralph org director status` say that a
-	// running wait has not written its mark since when its seen_at is more
-	// than two of these old (D5).
-	DirectorWaitMarkInterval = directorWaitMarkInterval
 )
 
 // directorWaitErrPrefix starts every error of WaitInboxForDirector, as "org:
 // wait --inbox: " starts WaitInbox's.
 const directorWaitErrPrefix = "org: wait --inbox --director: "
+
+// directorWaitNoticePrefix starts the stderr lines about the mark (sayLost,
+// sayWriteFailed); the /director skill tells these lines apart by it.
+const directorWaitNoticePrefix = "wait --inbox --director: "
 
 // ErrDirectorWaitNoWatch is wrapped by WaitInboxForDirector's error when a
 // cross-org watch that accepted work no longer does and no inbox item is open
@@ -104,7 +111,7 @@ var ErrDirectorWaitNotCurrent = errors.New("not the current director registratio
 // those of the registration the wait was for, so a reader goes by
 // DirectorWaitFor; PID is the wait's process. StartedAt is when it started
 // and SeenAt when it last wrote the mark: at its start, every
-// directorWaitMarkInterval, at a change of the watch it saw, and at its end.
+// DirectorWaitMarkInterval, at a change of the watch it saw, and at its end.
 // WatchAccepting is whether the watch accepted work when the wait last
 // probed it, which the next wait of the same registration carries over (D3),
 // with one exception: a change from accepting to not accepting is written
@@ -183,7 +190,7 @@ type DirectorWaitParams struct {
 	// os.Stderr.
 	Stderr io.Writer
 	// MarkInterval is how often director.jsonl is read again and the mark's
-	// seen_at rewritten (directorWaitMarkInterval when zero).
+	// seen_at rewritten (DirectorWaitMarkInterval when zero).
 	MarkInterval time.Duration
 	// WatchProbeInterval is how often the watch is probed
 	// (directorWaitWatchProbeInterval when zero).
@@ -348,7 +355,7 @@ type directorWaitRun struct {
 
 func newDirectorWaitRun(o *Org, p DirectorWaitParams) *directorWaitRun {
 	if p.MarkInterval <= 0 {
-		p.MarkInterval = directorWaitMarkInterval
+		p.MarkInterval = DirectorWaitMarkInterval
 	}
 	if p.WatchProbeInterval <= 0 {
 		p.WatchProbeInterval = directorWaitWatchProbeInterval
@@ -640,11 +647,11 @@ func (w *directorWaitRun) sayLost(other *DirectorWaitMark) {
 	w.lost = true
 	path := DirectorWaitPathIn(w.p.StateDir)
 	if other == nil {
-		_, _ = fmt.Fprintf(w.stderr, "wait --inbox --director: %s no longer holds the mark of this wait (wait_id %s): the file is missing, so this wait does not write it again and keeps waiting\n",
+		_, _ = fmt.Fprintf(w.stderr, directorWaitNoticePrefix+"%s no longer holds the mark of this wait (wait_id %s): the file is missing, so this wait does not write it again and keeps waiting\n",
 			path, w.mark.WaitID)
 		return
 	}
-	_, _ = fmt.Fprintf(w.stderr, "wait --inbox --director: another ralph org wait --inbox --director (wait_id %s, pid %d) took over %s, so this wait (wait_id %s) does not write it again and keeps waiting\n",
+	_, _ = fmt.Fprintf(w.stderr, directorWaitNoticePrefix+"another ralph org wait --inbox --director (wait_id %s, pid %d) took over %s, so this wait (wait_id %s) does not write it again and keeps waiting\n",
 		PrintableInboxText(other.WaitID, false), other.PID, path, w.mark.WaitID)
 }
 
@@ -654,7 +661,7 @@ func (w *directorWaitRun) sayWriteFailed(err error) {
 		return
 	}
 	w.writeFailedSaid = true
-	_, _ = fmt.Fprintf(w.stderr, "wait --inbox --director: the wait mark is not written (this wait keeps waiting, and says this once): %v\n", err)
+	_, _ = fmt.Fprintf(w.stderr, directorWaitNoticePrefix+"the wait mark is not written (this wait keeps waiting, and says this once): %v\n", err)
 }
 
 // directorWaitItemsDetail is the detail of end items.
