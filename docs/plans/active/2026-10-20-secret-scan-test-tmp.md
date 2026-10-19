@@ -65,16 +65,16 @@ Critical forks: None
 
 ## Acceptance criteria
 
-- [ ] AC1: no line of `tests/test-secret-scan.sh` names
+- [x] AC1: no line of `tests/test-secret-scan.sh` names
   `/tmp/ralph-secret-scan-test.out` or `/tmp/ralph-secret-scan-test.err`;
   `expect_exit`, `expect_stderr_contains`, `expect_stderr_not_contains`,
   and every other reader use the per-run capture directory
-- [ ] AC2: the per-run capture directory is not inside `$workdir`, and
+- [x] AC2: the per-run capture directory is not inside `$workdir`, and
   the `trap` on EXIT, HUP, INT, and TERM removes it
-- [ ] AC3: run alone, the script passes with the same pass count as
+- [x] AC3: run alone, the script passes with the same pass count as
   before the change (`FAIL: 0`; the count is recorded in the test report)
-- [ ] AC4: two copies started together both exit 0 with `FAIL: 0`
-- [ ] AC5: row 170 of `docs/tech-debt/README.md` is marked resolved with
+- [x] AC4: two copies started together both exit 0 with `FAIL: 0`
+- [x] AC5: row 170 of `docs/tech-debt/README.md` is marked resolved with
   this change, in the register's style
 
 ## Implementation outline
@@ -141,7 +141,14 @@ Notes:
   instruction
 - 2026-10-20: the trial plan's consult (consult-plan-trial) kept this
   precursor (D11 there)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 inline (single-file edit plus its tech-debt row), ece77f30:
+    captures under a per-run `capdir`; alone 123/0 (same as before),
+    two at once both exit 0 with `FAIL: 0`, TERM leaves nothing;
+    run-verify exit 0 (`docs/evidence/secret-scan-test-tmp-2026-10-20.md`).
+    The first tech-debt note cited the archive path of this plan, which
+    the README plan-reference check refused; it cites the active path,
+    which `/pr`'s archive script rewrites
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
