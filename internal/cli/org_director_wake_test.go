@@ -47,9 +47,10 @@ func directorWakeToml(wake, wakeCmd string) string {
 }
 
 // directorAttachedTail is what follows the parentheses of an attached
-// director: line with [org.director].auto_merge false.
-const directorAttachedTail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-	directorAutoMergeOff
+// director: line of a promoted session with [org.director].auto_merge false
+// and no mark of its wait --inbox --director.
+const directorAttachedTail = " -- the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
+	"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
 
 // directorNotCheckedClause is what the director: line says of a headless
 // registration the watch has not checked yet (plan
@@ -621,7 +622,7 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 		wantLine := "director: attached d1 (driver=claude, attached at " + ev.TS + ", by alice, wake=pull,push to term-1)" + directorAttachedTail
 		stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 		want := wantLine + "\nenabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull,push\nwake_target: term-1\nattached_at: " + ev.TS +
-			"\nuser: alice\ncwd: " + cwd + "\nherdr_pane: no\n"
+			"\nuser: alice\ncwd: " + cwd + "\nherdr_pane: no\n" + directorNoWaitMarkLine + "\n"
 		if stdout != want {
 			t.Errorf("director status =\n%s\nwant\n%s", stdout, want)
 		}

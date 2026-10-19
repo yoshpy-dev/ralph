@@ -306,7 +306,22 @@ func newOrgDirectorStatusCmd(stateDir, configPath *string) *cobra.Command {
 			"checked the current registration, and the registration of a headless\n" +
 			"director carries starter_pid and starter_start_time: the pid of the\n" +
 			"`ralph org director start` process that recorded it and that process's\n" +
-			"start time, when start could read them.",
+			"start time, when start could read them.\n" +
+			"A wait: line follows the fields while a registration is current, headless\n" +
+			"or not: what director-wait.json, the mark `ralph org wait --inbox\n" +
+			"--director <id>` writes, says of the last such wait for this registration\n" +
+			"(the same id and attach time): that the wait (pid <pid>) started at <time>\n" +
+			"and last wrote its mark at <time>, adding that it has not written it since\n" +
+			"when that is more than 60s before now (the wait rewrites it every 30s);\n" +
+			"that it ended at <time> (<end>: items, timeout, watch, not_current, error,\n" +
+			"or signal); that there is no such mark; or why the mark cannot be read.\n" +
+			"For a promoted session the director: line adds the same after the\n" +
+			"sentence that the registration does not tell whether its session is still\n" +
+			"running. Both say what the wait wrote, not that the director is waiting or\n" +
+			"alive. --json carries the mark as wait (wait_id, pid, started_at,\n" +
+			"seen_at, watch_accepting, ended_at, end, detail; director.wait in\n" +
+			"`ralph status --json`), left out when there is no mark of this\n" +
+			"registration or it cannot be read.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rt, err := newOrgDirectorRuntime(cmd, "director status", *stateDir, *configPath, orgLedgerReadOnly, true)
@@ -522,18 +537,28 @@ const (
 // registration's (readOrgDirectorCheck); it is omitted when the watch has not
 // checked it yet, when the mark is another registration's or cannot be read
 // (markErr, which only the text form shows), and for a promoted session.
+// Wait is the mark of the director's wait, `ralph org wait --inbox
+// --director` (plan 2026-10-19-org-director-wait, D5), for any current
+// registration, headless or not, enabled false included, when the mark is
+// that registration's (readOrgDirectorWait); it is omitted when there is no
+// such mark or the mark cannot be read (waitErr, which only the text form
+// shows). waitStale is set for a running wait that has not rewritten its mark
+// for two of its intervals.
 type orgDirectorReport struct {
 	Enabled       bool                            `json:"enabled"`
 	AutoMerge     bool                            `json:"auto_merge"`
 	State         string                          `json:"state"`
 	Registration  *orgDirectorReportRegistration  `json:"registration"`
 	Check         *orgDirectorReportCheck         `json:"check,omitempty"`
+	Wait          *orgDirectorReportWait          `json:"wait,omitempty"`
 	OpenHeadless  []orgDirectorReportRegistration `json:"open_headless,omitempty"`
 	Error         string                          `json:"error,omitempty"`
 	CorruptLines  int                             `json:"corrupt_lines"`
 	IgnoredEvents int                             `json:"ignored_events"`
 	watchChecks   bool
 	markErr       string
+	waitStale     bool
+	waitErr       string
 }
 
 // orgDirectorReportRegistration is a registration as status reports it: the
@@ -559,8 +584,9 @@ func newOrgDirectorReportRegistration(reg org.DirectorRegistration) orgDirectorR
 
 // readOrgDirectorReport reads the registration of the ledger at stateDir
 // (org.DirectorStore.Read, no lock) into an orgDirectorReport with
-// director's Enabled as the switch and its AutoMerge, and the watch's check
-// of the current registration (readOrgDirectorCheck).
+// director's Enabled as the switch and its AutoMerge, the watch's check of
+// the current registration (readOrgDirectorCheck), and the mark of that
+// registration's wait --inbox --director (readOrgDirectorWait).
 func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) orgDirectorReport {
 	report := orgDirectorReport{Enabled: director.Enabled, AutoMerge: director.AutoMerge}
 	res, err := org.NewDirectorStore(stateDir).Read()
@@ -571,6 +597,7 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 		cur := newOrgDirectorReportRegistration(*res.Current)
 		report.Registration, report.State = &cur, orgDirectorStateAttached
 		report.watchChecks, report.Check, report.markErr = readOrgDirectorCheck(stateDir, *res.Current)
+		report.Wait, report.waitStale, report.waitErr = readOrgDirectorWait(stateDir, *res.Current)
 	default:
 		report.State = orgDirectorStateNotAttached
 	}
@@ -596,14 +623,18 @@ func readOrgDirectorReport(stateDir string, director config.OrgDirectorConfig) o
 // stopped) says what the watch's check found (orgDirectorWatchCheckClause),
 // and every other one (a promoted session's, or a headless one recorded
 // stopped while still current) that the registration does not tell whether
-// its session is still running; disabled adds the check after the stop
-// command. Attached and not attached
+// its session is still running. A promoted session's line adds after that
+// sentence what the mark of its wait --inbox --director says
+// (orgDirectorWaitClause; plan 2026-10-19-org-director-wait, D5); a headless
+// registration's line says nothing of that mark, and neither does the
+// disabled line. Disabled adds the check after the stop command. Attached
+// and not attached
 // end with what [org.director].auto_merge means (orgDirectorAutoMergeClause),
 // and disabled says that auto_merge = true has no effect; unreadable says
 // nothing of it. The open headless registrations that are not current are
 // named at the end (orgDirectorOpenHeadlessNote). The values
-// from director.jsonl, which a human can edit, have their control
-// characters escaped (inboxField), so the line stays one line. The stop
+// from director.jsonl and the marks, which a human can edit, have their
+// control characters escaped (inboxField), so the line stays one line. The stop
 // commands it names repeat hintStateDir as --state-dir
 // (org.CommandWithStateDir; the caller passes orgInboxHintStateDir's value,
 // the state dir only when --state-dir was given), as the other director
@@ -626,8 +657,11 @@ func orgDirectorLine(r orgDirectorReport, hintStateDir string) string {
 		}
 		details += orgDirectorPushDetails(reg.DirectorRegistration)
 		alive := "the registration does not tell whether its session is still running"
-		if r.watchChecks {
+		switch {
+		case r.watchChecks:
 			alive = orgDirectorWatchCheckClause(r, hintStateDir, true)
+		case !reg.Headless():
+			alive += orgDirectorWaitClause(r)
 		}
 		return "director: attached " + inboxField(reg.ID) + " (" + details + ") -- " + alive + "; " +
 			"inbox items it does not ack reach the human at the ack deadline" + orgDirectorAutoMergeClause(r.AutoMerge, true) + note
@@ -752,7 +786,9 @@ func warnDirectorDamage(w io.Writer, path string, r orgDirectorReport) {
 // has (plan 2026-10-16-org-director-launch-cmd, AC8). wake_target follows
 // wake only when a promoted session was attached with --wake-target (plan
 // 2026-10-18-org-director-wake, AC2): a headless registration's target is
-// on its pane_id or terminal_name line. Then one open_headless line per
+// on its pane_id or terminal_name line. After the fields, a current
+// registration, headless or not, gets the wait: line (orgDirectorWaitLine;
+// plan 2026-10-19-org-director-wait, D5). Then one open_headless line per
 // open headless registration that is not current. hintStateDir is
 // orgDirectorLine's.
 func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir string) {
@@ -787,6 +823,7 @@ func printOrgDirectorReport(w io.Writer, r orgDirectorReport, hintStateDir strin
 				_, _ = fmt.Fprintf(w, "%s: %s\n", f.name, inboxField(f.value))
 			}
 		}
+		_, _ = fmt.Fprintln(w, orgDirectorWaitLine(r))
 	}
 	for _, reg := range r.OpenHeadless {
 		_, _ = fmt.Fprintf(w, "open_headless: %s (%s%s)\n", inboxField(reg.ID), inboxField(reg.State), orgDirectorLaunchDetails(reg.DirectorRegistration))

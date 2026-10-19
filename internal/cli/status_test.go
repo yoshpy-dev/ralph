@@ -722,8 +722,8 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 			},
 			check: func(t *testing.T, _ string, line string) {
 				want := "director: attached d4 (driver=codex, attached at " + ts + ", pane %7) -- " +
-					"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" +
-					directorAutoMergeOff
+					"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
+					"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
 				if line != want {
 					t.Errorf("director line:\n got %q\nwant %q", line, want)
 				}
@@ -824,7 +824,7 @@ func TestStatusCmd_DirectorLineShowsAutoMerge(t *testing.T) {
 	const (
 		ts           = "2026-10-15T09:00:00Z"
 		on           = "[org.director]\nauto_merge = true\n"
-		attachedTail = " -- the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline"
+		attachedTail = " -- the registration does not tell whether its session is still running" + directorNoWaitMarkClause + "; inbox items it does not ack reach the human at the ack deadline"
 		disabledEnd  = ") -- ralph org escalate sends every item to the human at once"
 		noEffect     = "[org.director].enabled = false, so [org.director].auto_merge = true has no effect"
 	)

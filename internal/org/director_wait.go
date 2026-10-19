@@ -76,6 +76,11 @@ const (
 	directorWaitMarkInterval = 30 * time.Second
 	// directorWaitWatchProbeInterval is how often the wait probes the watch.
 	directorWaitWatchProbeInterval = 5 * time.Second
+	// DirectorWaitMarkInterval is directorWaitMarkInterval for the readers of
+	// the mark: `ralph status` and `ralph org director status` say that a
+	// running wait has not written its mark since when its seen_at is more
+	// than two of these old (D5).
+	DirectorWaitMarkInterval = directorWaitMarkInterval
 )
 
 // directorWaitErrPrefix starts every error of WaitInboxForDirector, as "org:

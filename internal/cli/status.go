@@ -89,7 +89,19 @@ func newStatusCmd() *cobra.Command {
 			"`ralph org director start` process that recorded it and its start time,\n" +
 			"when start could read them.\n" +
 			"Either way, an item the director does not ack reaches the human at the\n" +
-			"ack deadline of `ralph org watch --all`.\n\n" +
+			"ack deadline of `ralph org watch --all`.\n" +
+			"For a promoted session the line adds, after the sentence that the\n" +
+			"registration does not tell whether its session is still running, what\n" +
+			"director-wait.json, the mark `ralph org wait --inbox --director <id>`\n" +
+			"writes, says of the last such wait for the registration (the same id and\n" +
+			"attach time): that it (pid <pid>) started at <time> and last wrote its\n" +
+			"mark at <time>, adding that it has not written it since when that is more\n" +
+			"than 60s before now (the wait rewrites it every 30s); that it ended at\n" +
+			"<time> (<end>); that there is no such mark; or why the mark cannot be\n" +
+			"read. It says what the wait wrote, not that the director is waiting or\n" +
+			"alive. The JSON adds director.wait (wait_id, pid, started_at, seen_at,\n" +
+			"watch_accepting, ended_at, end, detail) when there is a mark of the\n" +
+			"current registration, a headless one's included.\n\n" +
 			"A `merge guarantee:` line follows it: what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head with the\n" +
 			"latest default branch, as `ralph doctor` last found it -- github_protection\n" +
