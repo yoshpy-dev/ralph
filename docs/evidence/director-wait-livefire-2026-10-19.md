@@ -2,8 +2,12 @@
 
 Plan: `docs/plans/active/2026-10-19-org-director-wait.md` (D8, AC9). Run on
 2026-10-19 with the `ralph` binary built from the task branch at fa95a3d8
-(S1 to S3; the later S4 commits change only documents, test files, and the
-headless role prompt, which this check does not use).
+(S1 to S3). The later commits change documents, test files, the headless
+role prompt (which this check does not use), and, in the self-review fixes
+c1d31e3f and 33da4185, Go comments, a move of code between files, one
+constant in place of two with the same value, and the help sentence about
+when exit 5 comes; none of them changes what the wait does or what it prints
+while it waits.
 
 ## Setup
 
@@ -379,7 +383,8 @@ done
   skill's two ways); this check started the waits from a shell
 - An open inbox item ending the wait while the watch had just stopped (open
   items win over exit 4); the unit tests cover it
-  (`internal/org/director_wait_test.go`), and this check raised no item so
+  (`TestWaitInboxForDirector_AnOpenItemWinsOverAWatchThatStopped` in
+  `internal/org/director_wait_watch_test.go`), and this check raised no item so
   that no notification path ran
 - A wait started with SIGHUP or SIGINT ignored (nohup); the CLI tests cover it
   in a child process (`internal/cli/org_wait_director_test.go`)
