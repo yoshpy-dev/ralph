@@ -16,7 +16,7 @@ import (
 // [org.director].wake_cmd, and what attach's success line and the director:
 // line say of a wake with push. newOrgDirectorAttachCmd (org_director.go)
 // registers the two flags and calls the first three; orgDirectorLine
-// (org_director.go) calls orgDirectorPushDetails.
+// (org_director_report.go) calls orgDirectorPushDetails.
 
 // checkOrgDirectorAttachWakeFlags is attach's check of --wake and
 // --wake-target before anything is read (plan 2026-10-18-org-director-wake,

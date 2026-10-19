@@ -12,7 +12,7 @@ import (
 // of the mark director-wait.json, which `ralph org wait --inbox --director
 // <id>` writes, and what the wait: line of `ralph org director status` and
 // the director: line of a promoted session say of it. readOrgDirectorReport,
-// orgDirectorLine, and printOrgDirectorReport (org_director.go) call
+// orgDirectorLine, and printOrgDirectorReport (org_director_report.go) call
 // readOrgDirectorWait, orgDirectorWaitClause, and orgDirectorWaitLine. The
 // mark says what the wait wrote, so neither line says that the director is
 // waiting or alive.
