@@ -1,0 +1,225 @@
+Mutation testing: org-director-wait-bound (stage 8b-2c), /test cycle 1, 2026-10-19
+==================================================================================
+
+Tree under test: worktree .claude/worktrees/org-director-wait-bound, HEAD 5c7fa9df
+(base 3a803a87). go1.26.0 darwin/arm64; every run repeated on go1.25.8
+(GOTOOLCHAIN) with the same verdicts and problem lines (only timings differ).
+
+Harness: <scratch>/wb/mutants.py (not committed). `git archive HEAD` was
+extracted twice under <scratch>/wb: arch/ (the copy the tests run in) and
+pristine/ (untouched). Before and after each mutant the harness copies the four
+director SKILL.md copies and internal/org/director_skill_sync_test.go back from
+pristine/. A mutant replaces a literal snippet that must occur exactly once in
+the named file (the harness stops otherwise; "25 分" -> "30 分" in M6x checks a
+count of exactly 3), then runs, in arch/:
+
+  go test ./internal/org/ -run TestDirectorSkill -count=1 -v -timeout 10m
+
+The test reads the skill copies relative to its own source file
+(directorSkillRepoRoot, runtime.Caller), so in arch/ it reads arch/'s copies:
+the HEAD test file reads mutated skills without any tracked file being edited.
+The four HEAD copies are byte-identical (sha256 2956f50d...), so a mutant of one
+copy is a copy that drifted from the others. M3b copies the four skill files of
+3a803a87 (sha256 b5985650..., also identical to one another). M6 and M6y edit
+arch/'s copy of the test file. The worktree was never edited: `git status
+--porcelain` was empty before and after; `git status --porcelain --ignored`
+(without .harness/cache/) differed only by the run-test.sh log
+docs/evidence/verify-2026-10-19-134151.log. After the last run, `cmp` of the
+five files in arch/ against pristine/ reported no difference.
+
+A run counts as red when go test exits 1 with a test failure (no build failure
+occurred). Problem lines below are the t.Errorf/t.Fatalf output, prefixed ">".
+Line numbers: the skill's Claude Code bullet is 487-503, the note: bullet 539-543,
+the exception paragraph 565-575 (.claude/skills/director/SKILL.md at HEAD).
+
+Summary: 22 runs. Control green. Lead's mutants (1)-(6): 12 runs, 12 red.
+(6) companions M6x/M6y: red. Extras M7/M8: red. Gap probes G1-G3, G1b, G2b:
+green (the prose they delete or revert is pinned by no test; see the test
+report's gaps). G1b and G2b undo the rule itself, not one of its copies: G1b
+leaves the skill saying nowhere that a Claude Code director runs a timed-out
+wait again (the general "a timeout of a bounded wait is no failure" sentence
+of the failure paragraph stays, as at 3a803a87), and G2b leaves it with no
+Monitor-expiry exception at all.
+
+(1)-(5) are red through TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+(the real-copies test). (6) leaves the real-copies test green on the HEAD skill
+(N=1500000 < M=1800000, so the removed check had nothing to report) and is red
+through TestDirectorSkillWaitBoundProblems/N_equal_to_M and /N_greater_than_M.
+M6x/M6y show what the n >= m check guards on real copies: with the four copies
+changed to N=1800000 and every "25 分" to "30 分" (N == M, minutes in step),
+the HEAD test fails only on "N=1800000 must be less than ... M=1800000"; with
+the (6) test, the real-copies test passes and only the table rows stay red.
+
+id | result | secs | mutant
+    top-level PASS / FAIL
+    > problem lines
+------------------------------------------------------------------------------
+
+CTRL | rc=0 | pass | 1s | control: HEAD files, no change
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
+M1a | rc=1 | FAIL | 1s | (1) .claude/skills/director/SKILL.md: wait --timeout-ms 1500000 -> 1800000
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.01s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M1b | rc=1 | FAIL | 1s | (1) .agents/skills/director/SKILL.md: wait --timeout-ms 1500000 -> 1800000
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.01s)
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M1c | rc=1 | FAIL | 1s | (1) templates/base/.claude/skills/director/SKILL.md: wait --timeout-ms 1500000 -> 1800000
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M1d | rc=1 | FAIL | 1s | (1) templates/base/.agents/skills/director/SKILL.md: wait --timeout-ms 1500000 -> 1800000
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=30 (the wait's --timeout-ms N=1800000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M2 | rc=1 | FAIL | 1s | (2) .claude/skills/director/SKILL.md: the bullet's Monitor `timeout_ms` に `1800000` -> `1800001`
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the Monitor's timeout_ms M=1800001 is over the Monitor tool's maximum 1800000 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ has `timeout_ms` に `1800000`, but the Claude Code bullet's M=1800001: every `timeout_ms` に `<M>` there must be the same -- see this test's doc comment for what to update
+
+M3a | rc=1 | FAIL | 1s | (3) all four copies: the Claude Code bullet replaced by the 3a803a87 bullet (--timeout-ms 0), rest of the subsection kept
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=0 (the wait's --timeout-ms N=0), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=0 (the wait's --timeout-ms N=0), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=0 (the wait's --timeout-ms N=0), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the subsection ### wait で待つ says 25 分, want N/60000=0 (the wait's --timeout-ms N=0), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+
+M3b | rc=1 | FAIL | 1s | (3) all four copies: the whole skill restored to 3a803a87
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the wait's --timeout-ms N=0 must be greater than 0: the wait must time out on its own -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+
+M4 | rc=1 | FAIL | 1s | (4) .claude/skills/director/SKILL.md: the exception paragraph's `timeout_ms` に `1800000` -> `600000`
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ has `timeout_ms` に `600000`, but the Claude Code bullet's M=1800000: every `timeout_ms` に `<M>` there must be the same -- see this test's doc comment for what to update
+
+M5a | rc=1 | FAIL | 1s | (5) .claude/skills/director/SKILL.md: 区切りの 25 分 -> 20 分 (the bullet, line 490)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the subsection ### wait で待つ says 20 分, want N/60000=25 (the wait's --timeout-ms N=1500000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M5b | rc=1 | FAIL | 1s | (5) .agents/skills/director/SKILL.md: (25 分のうちに -> 20 分 (the bullet's Bash sentence, line 499)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the subsection ### wait で待つ says 20 分, want N/60000=25 (the wait's --timeout-ms N=1500000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M5c | rc=1 | FAIL | 1s | (5) templates/base/.agents/skills/director/SKILL.md: wait を 25 分や -> 20 分 (the note: bullet of the exit-code list, line 542)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the subsection ### wait で待つ says 20 分, want N/60000=25 (the wait's --timeout-ms N=1500000), the Monitor's default 5, or its maximum 30 -- see this test's doc comment for what to update
+
+M6 | rc=1 | FAIL | 1s | (6) test: directorSkillWaitBoundProblems's `n >= m` check removed (HEAD skill)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    top-level FAIL: TestDirectorSkillWaitBoundProblems
+    --- FAIL: TestDirectorSkillWaitBoundProblems (0.00s)
+    --- FAIL: TestDirectorSkillWaitBoundProblems/N_equal_to_M (0.00s)
+    --- FAIL: TestDirectorSkillWaitBoundProblems/N_greater_than_M (0.00s)
+    > director_skill_sync_test.go:523: problems = [], want 1 matching ["N=1800000 must be less than the Monitor's timeout_ms M=1800000"]
+    > director_skill_sync_test.go:523: problems = ["the subsection ### wait で待つ has `timeout_ms` に `1800000`, but the Claude Code bullet's M=1500000: every `timeout_ms` に `<M>` there must be the same"], want 2 matching ["N=1800000 must be less than the Monitor's timeout_ms M=1500000" "has `timeout_ms` に `1800000`, but the Claude Code bullet's M=1500000"]
+
+M6x | rc=1 | FAIL | 1s | (6, control) all four copies: N=1800000 and every 25 分 -> 30 分 (N == M, minutes in step), HEAD test
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: .agents/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+    > director_skill_sync_test.go:365: templates/base/.agents/skills/director/SKILL.md: the wait's --timeout-ms N=1800000 must be less than the Monitor's timeout_ms M=1800000, so the wait times out before the Monitor stops it with SIGTERM -- see this test's doc comment for what to update
+
+M6y | rc=1 | FAIL | 1s | (6, combined) the M6x skill with the M6 test
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    top-level FAIL: TestDirectorSkillWaitBoundProblems
+    --- FAIL: TestDirectorSkillWaitBoundProblems (0.00s)
+    --- FAIL: TestDirectorSkillWaitBoundProblems/N_equal_to_M (0.00s)
+    --- FAIL: TestDirectorSkillWaitBoundProblems/N_greater_than_M (0.00s)
+    > director_skill_sync_test.go:523: problems = [], want 1 matching ["N=1800000 must be less than the Monitor's timeout_ms M=1800000"]
+    > director_skill_sync_test.go:523: problems = ["the subsection ### wait で待つ has `timeout_ms` に `1800000`, but the Claude Code bullet's M=1500000: every `timeout_ms` に `<M>` there must be the same"], want 2 matching ["N=1800000 must be less than the Monitor's timeout_ms M=1500000" "has `timeout_ms` に `1800000`, but the Claude Code bullet's M=1500000"]
+
+M7 | rc=1 | FAIL | 1s | (extra) .claude/skills/director/SKILL.md: the bullet's Monitor `timeout_ms` に `1800000` dropped (M missing)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: .claude/skills/director/SKILL.md: the Claude Code bullet of ### wait で待つ has 0 matches of the Monitor's "`timeout_ms` に `<M>`", want exactly 1 -- see this test's doc comment for what to update
+
+M8 | rc=1 | FAIL | 1s | (extra) templates/base/.claude/skills/director/SKILL.md: the Codex bullet's --timeout-ms 300000 -> --timeout-ms 0
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+    --- FAIL: TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap (0.00s)
+    > director_skill_sync_test.go:365: templates/base/.claude/skills/director/SKILL.md: the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM -- see this test's doc comment for what to update
+
+G1 | rc=0 | pass | 1s | (gap probe, AC3) all four copies: the Claude Code bullet's timeout-rerun sentence deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
+G2 | rc=0 | pass | 1s | (gap probe, AC3/D3) all four copies: the Monitor-expiry exception paragraph deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
+G3 | rc=0 | pass | 1s | (gap probe, AC2) all four copies: the Bash run_in_background sentences deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
+G1b | rc=0 | pass | 1s | (gap probe, AC3) G1 plus the exit-code item '1:' back to its 3a803a87 wording (only Codex timeouts are run again)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
+G2b | rc=0 | pass | 1s | (gap probe, AC3/D3) G2 plus the failure paragraph's list of non-failures back to its 3a803a87 wording (no Monitor-expiry exception)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: -
+
