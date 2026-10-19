@@ -590,14 +590,18 @@ func TestDirectorWait_AMarkTakenOverIsNotWrittenAgain(t *testing.T) {
 	}
 	var aErr, bErr lockedBuffer
 	a := newRun(4101, &aErr)
-	a.begin(context.Background())
+	if err := a.begin(context.Background()); err != nil {
+		t.Fatalf("A's start: %v", err)
+	}
 	if m := f.mark(t); m.WaitID != "4101-"+strconv.FormatInt(dirWaitT0.UnixNano(), 10) {
 		t.Fatalf("after A's start the mark is %+v; want A's", m)
 	}
 
 	clock = clock.Add(time.Second)
 	b := newRun(4102, &bErr)
-	b.begin(context.Background())
+	if err := b.begin(context.Background()); err != nil {
+		t.Fatalf("B's start: %v", err)
+	}
 	bWaitID := "4102-" + strconv.FormatInt(clock.UnixNano(), 10)
 	if m := f.mark(t); m.WaitID != bWaitID {
 		t.Fatalf("after B's start the mark is %+v; want B's", m)
