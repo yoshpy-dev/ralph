@@ -88,7 +88,9 @@ scratch directory).
 ## Output
 
 The bash job lines (`… Terminated: 15`, `… Killed: 9`) name the script by its
-scratch path, written `<scratch>` here.
+scratch path, written `<scratch>` here. Each `wN stdout:` line ended with
+one space after the colon, since every wait's stdout was empty; that space is
+left out here.
 
 ```text
 ### 02:29:16 setup
@@ -114,7 +116,7 @@ status json director.wait: {"wait_id": "61952-1792376960028151000", "pid": 61952
 stopped ralph org watch --all (pid 61613)
 watch --stop exit=0
 w1 exit=4
-w1 stdout: 
+w1 stdout:
 w1 stderr:
 org: wait --inbox --director: no watch accepts work: a ralph org watch --all accepted work when this wait last probed it, and none does now: watch.lock is free and watch-alive.json says stopped at 2026-10-19T02:29:23Z (pid 61613); the command that starts one is `ralph org watch --all --detach --state-dir '/tmp/dw8/state'`; while no watch accepts work, an item escalated reaches the human at once, but an item left for the director before then reaches the human at its ack deadline only once a watch runs again
 mark: {
@@ -165,7 +167,7 @@ mark: {
 ### 02:29:38 (c) SIGKILL of the watch (a process this script started): the wait exits 4
 sent SIGKILL to the watch
 w2 exit=4
-w2 stdout: 
+w2 stdout:
 w2 stderr:
 note: no ralph org watch --all accepts work on this ledger, and this wait keeps waiting: watch.lock is free and watch-alive.json says stopped at 2026-10-19T02:29:23Z (pid 61613); the command that starts one is `ralph org watch --all --detach --state-dir '/tmp/dw8/state'`; while no watch accepts work, an item escalated reaches the human at once, but an item left for the director before then reaches the human at its ack deadline only once a watch runs again
 note: a ralph org watch --all accepts work again on this ledger: watch.lock is held and watch-alive.json says running (pid 63029, written at 2026-10-19T02:29:30Z)
@@ -187,7 +189,7 @@ mark: {
 started ralph org watch --all (pid 65008); log: /tmp/dw8/state/watch.log
 watch --detach exit=0
 w3 exit=1
-w3 stdout: 
+w3 stdout:
 w3 stderr:
 org: wait --inbox --director: no open inbox item arrived within 3000 ms
 mark: {
@@ -207,7 +209,7 @@ mark: {
 stopped ralph org watch --all (pid 65008)
 watch --stop exit=0
 w4 exit=4
-w4 stdout: 
+w4 stdout:
 w4 stderr:
 org: wait --inbox --director: no watch accepts work: a ralph org watch --all accepted work when the last wait of d1 wrote its mark, and none does now: watch.lock is free and watch-alive.json says stopped at 2026-10-19T02:29:48Z (pid 65008); the command that starts one is `ralph org watch --all --detach --state-dir '/tmp/dw8/state'`; while no watch accepts work, an item escalated reaches the human at once, but an item left for the director before then reaches the human at its ack deadline only once a watch runs again
 mark: {
@@ -230,7 +232,7 @@ attached d2 (driver=claude), replacing d1 (driver=claude, attached at 2026-10-19
 detach it with: ralph org director detach --id d2 --state-dir '/tmp/dw8/state'
 attach --replace exit=0
 w5 exit=5
-w5 stdout: 
+w5 stdout:
 w5 stderr:
 org: wait --inbox --director: d1 is not the current director registration: the current registration is d2 (driver claude, attached 2026-10-19T02:29:56Z)
 mark: {
@@ -248,7 +250,7 @@ mark: {
 
 ### 02:30:25 (e) a wait for the replaced id is refused at once with 5, writing nothing
 w5b exit=5
-w5b stdout: 
+w5b stdout:
 w5b stderr:
 org: wait --inbox --director: d1 is not the current director registration: the current registration is d2 (driver claude, attached 2026-10-19T02:29:56Z)
 the mark is unchanged
@@ -257,7 +259,7 @@ the mark is unchanged
 sent SIGTERM to w6
 <scratch>/s5-livefire.sh: line 31: 71933 Terminated: 15          "$R" org wait --inbox --director "$2" --timeout-ms "$3" --state-dir "$SD" > "$D/$1.out" 2> "$D/$1.err"
 w6 exit=143
-w6 stdout: 
+w6 stdout:
 w6 stderr:
 mark: {
   "wait_id": "71933-1792377026763807000",
@@ -278,7 +280,7 @@ wait: the wait --inbox --director of d2 (pid 71933) ended at 2026-10-19T02:30:29
 sent SIGKILL to w7
 <scratch>/s5-livefire.sh: line 31: 72756 Killed: 9               "$R" org wait --inbox --director "$2" --timeout-ms "$3" --state-dir "$SD" > "$D/$1.out" 2> "$D/$1.err"
 w7 exit=137
-w7 stdout: 
+w7 stdout:
 w7 stderr:
 mark: {
   "wait_id": "72756-1792377031307302000",
@@ -320,7 +322,7 @@ mark: {
 sent SIGTERM to w9
 <scratch>/s5-livefire.sh: line 31: 81462 Terminated: 15          "$R" org wait --inbox --director "$2" --timeout-ms "$3" --state-dir "$SD" > "$D/$1.out" 2> "$D/$1.err"
 w9 exit=143
-w9 stdout: 
+w9 stdout:
 w9 stderr:
 mark: {
   "wait_id": "81462-1792377104064582000",
@@ -338,7 +340,7 @@ w8 still waiting
 sent SIGTERM to w8
 <scratch>/s5-livefire.sh: line 31: 81173 Terminated: 15          "$R" org wait --inbox --director "$2" --timeout-ms "$3" --state-dir "$SD" > "$D/$1.out" 2> "$D/$1.err"
 w8 exit=143
-w8 stdout: 
+w8 stdout:
 w8 stderr:
 wait --inbox --director: another ralph org wait --inbox --director (wait_id 81462-1792377104064582000, pid 81462) took over /tmp/dw8/state/director-wait.json, so this wait (wait_id 81173-1792377100996725000) does not write it again and keeps waiting
 mark: {
