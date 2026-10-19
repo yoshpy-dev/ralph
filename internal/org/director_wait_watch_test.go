@@ -16,9 +16,9 @@ import (
 // 2026-10-19-org-director-wait, AC2, AC4, and AC5 at the org layer): open
 // items, the timeout, a watch that stops or starts accepting work (with the
 // carry-over from the previous mark and the settle of a stale watch), a
-// registration that changes, a done ctx, a read that fails, and the text
-// about the watch. The fixture and the helpers, and the AC9 rules the tests
-// follow, are in director_wait_test.go.
+// registration that changes, a done ctx, a read that fails, the intervals
+// that zero params take, and the text about the watch. The fixture and the
+// helpers, and the AC9 rules the tests follow, are in director_wait_test.go.
 
 // AC2: an open item ends the wait with the items, and the mark holds every
 // field of D2 with end items. With a watch that accepts work there is no
@@ -526,6 +526,16 @@ func TestWaitInboxForDirector_AReadThatFailsEndsWithError(t *testing.T) {
 		}
 		wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndError, false, "org: director: read ")
 	})
+}
+
+// D2 and D3: the zero intervals of DirectorWaitParams take
+// DirectorWaitMarkInterval and DirectorWaitWatchProbeInterval, the constants
+// the help of `ralph org wait` quotes.
+func TestDirectorWait_ZeroIntervalsTakeTheConstants(t *testing.T) {
+	w := newDirectorWaitRun(&Org{}, DirectorWaitParams{})
+	if w.p.MarkInterval != DirectorWaitMarkInterval || w.p.WatchProbeInterval != DirectorWaitWatchProbeInterval {
+		t.Errorf("defaults = mark %v, probe %v; want %v and %v", w.p.MarkInterval, w.p.WatchProbeInterval, DirectorWaitMarkInterval, DirectorWaitWatchProbeInterval)
+	}
 }
 
 // AC5, the text (D3): one for each row, the facts of the lock and the mark

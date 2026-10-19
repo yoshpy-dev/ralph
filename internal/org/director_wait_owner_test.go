@@ -16,13 +16,14 @@ import (
 // The tests of who writes the director's wait mark (plan
 // 2026-10-19-org-director-wait, D1 and D2 at the org layer): the start reads
 // director.jsonl again under director-wait.lock, so a wait whose registration
-// was replaced or became unreadable since its first read writes nothing and
-// leaves the mark on disk as it was; a wait whose mark file was removed
-// after its first write does not write it again; and a start that cannot
-// take the lock still carries the previous mark's watch over. The fixture and
-// the helpers, and the AC9 rules the tests follow, are in
-// director_wait_test.go; the tests of the owner once both waits have started
-// are there too.
+// was replaced, attached again with a new attached_at, or became unreadable
+// since its first read writes nothing and leaves the mark on disk as it was;
+// a wait whose mark file was removed after its first write does not write it
+// again; the start's mark has seen_at, and a start whose write fails says so
+// at once; and a start that cannot take the lock still carries the previous
+// mark's watch over. The fixture and the helpers, and the AC9 rules the
+// tests follow, are in director_wait_test.go; the tests of the owner once
+// both waits have started are there too.
 
 // setDirectorWaitBeforeBeginLock sets the directorWaitBeforeBeginLock seam
 // for the rest of the test.
@@ -129,6 +130,115 @@ func TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock(t 
 	}
 }
 
+// D1 and D2, the race above with the same id: d1's wait passes its first
+// check, and before its start takes director-wait.lock the registration
+// becomes d1 again with a new attached_at (director.jsonl removed and d1
+// attached again, or a hand edit), and the new session's wait for d1 writes
+// its mark. The old wait's start compares attached_at under the lock and
+// ends with ErrDirectorWaitNotCurrent: the new wait's mark stays byte for
+// byte, the old wait says nothing, and the new wait keeps the mark (its
+// rewrite a minute later lands). The seam runs on the old wait's goroutine,
+// so a row returns its error for t.Errorf instead of calling t.Fatal.
+func TestWaitInboxForDirector_ASameIDAttachedAgainBeforeTheStartTakesTheLock(t *testing.T) {
+	rows := map[string]func(f *dirWaitFixture) error{
+		"the ledger removed and attached again": func(f *dirWaitFixture) error {
+			if err := os.Remove(f.store.Path()); err != nil {
+				return err
+			}
+			f.store.Now = func() time.Time { return dirWaitT0.Add(-30 * time.Minute) }
+			reg, _, err := f.store.Attach(DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}, User: "u", Cwd: "/w"})
+			if err == nil && (reg.ID != "d1" || reg.AttachedAt != "2026-10-19T08:30:00Z") {
+				return errors.New("the new attach is " + reg.ID + " at " + reg.AttachedAt + "; want d1 at 08:30")
+			}
+			return err
+		},
+		"a hand edit": func(f *dirWaitFixture) error {
+			ev := DirectorEvent{TS: "2026-10-19T08:30:00Z", ID: "d1", Event: DirectorEventAttached, Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}, User: "u", Cwd: "/w"}
+			raw, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			tmp := f.store.Path() + ".new"
+			if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+				return err
+			}
+			return os.Rename(tmp, f.store.Path())
+		},
+	}
+	for name, change := range rows {
+		t.Run(name, func(t *testing.T) {
+			f := newDirWaitFixture(t)
+			if reg := f.attach(t); reg.ID != "d1" || reg.AttachedAt != "2026-10-19T08:00:00Z" {
+				t.Fatalf("first attach = %+v", reg)
+			}
+			newCtx, newCancel := context.WithCancelCause(context.Background())
+			defer newCancel(nil)
+			var newErr lockedBuffer
+			var newOffset atomic.Int64
+			p2 := f.params("d1")
+			p2.PID, p2.Stderr, p2.Timeout = 4102, &newErr, dirWaitLimit
+			p2.Now = func() time.Time { return dirWaitT0.Add(time.Duration(newOffset.Load())) }
+			newWaitID := "4102-" + strconv.FormatInt(dirWaitT0.UnixNano(), 10)
+
+			var fired atomic.Bool
+			var newDone <-chan dirWaitOutcome
+			var newRaw string
+			setDirectorWaitBeforeBeginLock(t, func() {
+				if !fired.CompareAndSwap(false, true) {
+					return // the new wait's own start
+				}
+				if err := change(f); err != nil {
+					t.Errorf("attach d1 again: %v", err)
+					return
+				}
+				newDone = f.startDirectorWait(newCtx, p2)
+				deadline := time.Now().Add(dirWaitLimit)
+				for {
+					raw, err := rawDirectorWait(f.dir)
+					var m DirectorWaitMark
+					if err == nil && json.Unmarshal([]byte(raw), &m) == nil && m.WaitID == newWaitID {
+						newRaw = raw
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Errorf("the new wait never wrote its mark: last read %q, %v", raw, err)
+						return
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			})
+
+			var oldErr lockedBuffer
+			p1 := f.params("d1")
+			p1.Stderr, p1.Timeout = &oldErr, dirWaitLimit
+			out := f.runDirectorWait(t, p1)
+			if newDone == nil || newRaw == "" {
+				t.Fatal("the seam did not start the new wait and see its mark")
+			}
+			if !errors.Is(out.err, ErrDirectorWaitNotCurrent) || !strings.Contains(out.err.Error(), "not the d1 attached 2026-10-19T08:00:00Z that this wait started for") {
+				t.Errorf("the old wait = %v; want ErrDirectorWaitNotCurrent for d1 attached again", out.err)
+			}
+			if got, err := rawDirectorWait(f.dir); err != nil || got != newRaw {
+				t.Errorf("after the old wait director-wait.json is %q (%v); want the new wait's as it was:\n%s", got, err, newRaw)
+			}
+			if s := oldErr.String(); s != "" {
+				t.Errorf("the old wait's stderr = %q; want nothing", s)
+			}
+			newOffset.Store(int64(time.Minute))
+			f.waitForMark(t, "the new wait's rewrite a minute later", func(m DirectorWaitMark) bool {
+				return m.WaitID == newWaitID && m.SeenAt == "2026-10-19T09:01:00Z" && m.End == ""
+			})
+			newCancel(errors.New("signal: terminated"))
+			if o := awaitDirectorWait(t, newDone); o.err == nil || !strings.Contains(o.err.Error(), "signal: terminated") {
+				t.Fatalf("the new wait = %v; want its signal", o.err)
+			}
+			if s := newErr.String(); strings.Contains(s, directorWaitNoticePrefix) {
+				t.Errorf("the new wait's stderr = %q; want no line about the mark", s)
+			}
+		})
+	}
+}
+
 // D1, the start's read under the lock: a director.jsonl that cannot be read
 // there (a directory put in its place after the first read) ends the wait
 // with a plain error, not ErrDirectorWaitNotCurrent, and writes nothing: no
@@ -203,6 +313,49 @@ func TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain(t *t
 		t.Errorf("the removed mark was written again (stat err %v)", err)
 	}
 	if s := f.stderr.String(); strings.Count(s, "\n") != 1 || !strings.HasPrefix(s, directorWaitNoticePrefix) {
+		t.Errorf("stderr = %q; want one line about the mark", s)
+	}
+}
+
+// D2: the start's mark carries seen_at, the start time, before any later
+// write (the mark interval is an hour here), so the readers of the mark can
+// tell its age from the start on.
+func TestWaitInboxForDirector_TheStartsMarkHasSeenAt(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	p := f.params("d1")
+	p.MarkInterval, p.Timeout = time.Hour, dirWaitLimit
+	done := f.startDirectorWait(ctx, p)
+	m := f.waitForMark(t, "the start", func(DirectorWaitMark) bool { return true })
+	cancel(errors.New("signal: terminated"))
+	_ = awaitDirectorWait(t, done)
+	if m.SeenAt != "2026-10-19T09:00:00Z" || m.SeenAt != m.StartedAt {
+		t.Errorf("the start's mark = %+v; want seen_at = started_at = 2026-10-19T09:00:00Z", m)
+	}
+}
+
+// AC2 at the start: a start whose write fails says so at once, before any
+// later write of the mark (the mark interval is an hour here), and only
+// once; the wait goes on and returns the item.
+func TestWaitInboxForDirector_AStartWhoseWriteFailsSaysSoAtOnce(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	if err := os.Mkdir(DirectorWaitPathIn(f.dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := f.params("d1")
+	p.MarkInterval, p.Timeout = time.Hour, dirWaitLimit
+	done := f.startDirectorWait(context.Background(), p)
+	waitForStderr(t, f.stderr, "the wait mark is not written")
+	f.escalate(t, "org-a")
+	if out := awaitDirectorWait(t, done); out.err != nil || len(out.items) != 1 {
+		t.Fatalf("wait = %v, %v; want e1", waitInboxItemIDs(out.items), out.err)
+	}
+	if s := f.stderr.String(); strings.Count(s, "\n") != 1 {
 		t.Errorf("stderr = %q; want one line about the mark", s)
 	}
 }
