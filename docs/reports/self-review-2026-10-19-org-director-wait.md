@@ -125,3 +125,77 @@ CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 2 件。
 - Follow-ups:
   - N1 と N2 は `docs/tech-debt/README.md` の 2 行(306 と 231)の直しだけ。コード・skill・plan に触れないので、パイプラインの再走は要らないが、記録だけの修正の例外(`docs/reports/` と insight event だけ)の対象でもないので、どう扱うかは lead が決める。直すなら、`/pr` の前にその 1 コミットにする
   - L6 は `/pr` の本文に caveat を書き、merge のあとに release の issue へ 1 行を足す
+
+## Cycle 2 review (8a33364b..7866785b)
+
+- Date: 2026-10-19
+- Plan: `docs/plans/active/2026-10-19-org-director-wait.md`(パイプライン cycle 2。cross-review の cycle 1 の ACTION_REQUIRED 1 件の直しと、test の穴の払いの確認)
+- Range: `git diff 8a33364b..HEAD`(38cac6f1、b3b692e1、7866785b の 3 コミット、8 ファイル、+375/-27)。HEAD 7866785b。この節より上の行は変えていない
+- 見たもの: 直しの diff を全部。`internal/org/director_wait.go` の全文(789 行)。新しいテスト `director_wait_owner_test.go`(235 行)の全文と、`director_wait_test.go` のフィクスチャ(1 から 200 行)。`DirectorStore.Read`(`director.go:450-459`)と `withFileLock`(`lockfile.go:78-120`)。`internal/cli/org_wait_director.go` と `org.go:1255-1290` の help。plan の D1、D2、D3 とチェックリスト、tech-debt の 231、247、248、306、308 の行。cross-review の triage。cycle 1 の節(上)
+- 走らせたもの(依頼で許された範囲だけ):
+  - `go test ./internal/org/ -run 'DirectorWait|WaitInbox' -count=1 -timeout 30m -coverprofile=<scratchpad>` は ok(6.3 s)
+  - 新しい 6 テストを `-race -count=8` で走らせて ok(4.6 s)
+  - `go vet ./internal/org/ ./internal/cli/` は出力なし
+  - `git diff --check 8a33364b..HEAD` は空。追加行に TODO、FIXME、debug の出力はなく、追加したコメント行で 90 桁を超えるものもない。`gofmt -l` は変更した Go 6 ファイルで空(読むだけ)
+  - 全体のテストと静的解析は `/verify` と `/test` に任せた
+
+### cycle 1 の指摘の扱い
+
+| 指摘 | 結果 | 根拠 |
+| --- | --- | --- |
+| cross-review の ACTION_REQUIRED(始める前の確かめとロックのあいだの `attach --replace`) | fixed | 38cac6f1。`begin` がロックの中で `director.jsonl` を読み直し、`refresh` と同じ `directorWaitCheckCurrent(w.p.ID, &w.reg, ...)` で確かめる(`director_wait.go:437-450`)。今の登録でなければ `ErrDirectorWaitNotCurrent`、読めなければ prefix 付きの plain error を返し、どちらも `decide()` と書き込みの前に出る。triage が求めた「d2 の印がそのまま残り、d1 が 5 で返り、d2 がそのあとも書ける」を `TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock` が固定する |
+| test の穴 G1 から G5 と G7(tech-debt の 308 行) | fixed(G5 は下の I1) | b3b692e1。G1 は `..._AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain`、G2 は `..._AStartThatCannotTakeTheLockStillCarriesOverTheWatch`、G3 は `..._ACancelDuringTheStartSettleWritesNoNote`、G4 は `..._TheDetailIsEscaped`、G5 は `TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer`、G7 は `reraiseSignal` のコメント(`org_wait_director.go:119-127`)。名前はすべて存在する。G6 は 308 行に残した |
+| self-review の N1、N2(row 306 の途中で終わった文、row 231 の (j)) | fixed(cycle 1 のうちに e7940546) | row 306 は「is 743 lines.」で終わり、row 231 の (j) は「2 つのテストは `signalCauseContext` に移す」と書く |
+| self-review の L6(release のノートの届け先) | open のまま。`/pr` で実行 | リポジトリ内に届け先がない点は変わらない。cycle 1 の節のとおり、PR 本文の 1 行と merge 後の release の issue へのコメント |
+
+### begin の直しの確認
+
+- ロックの順: ロックの中で呼ぶ `DirectorStore.Read()` は lock を取らない(`director.go:450-452`「Read takes no lock」)ので、`director-wait.lock` の中に別の lock は入れ子にならない。`directorWaitLockFile` を取るのは `begin` と `save` だけ(grep)。`director.lock` を持ったまま `director-wait.lock` を待つ経路はない。
+- 直列の議論: d2 の attach は d2 の wait の lock の前に着く。d1 が lock の中で「d1 が今の登録」と読めば、d2 の wait は d1 が手を放してから書くので d2 の印が後に残る。d1 が d2 の wait より後に lock を取れば、読み直しで d2 が見える。`attach` の 2 行(detached と attached)は 1 回の write なので、lock なしの `Read` が間の状態を見ることはない(`director.go:467-472`)。
+- `begin` の出口: (1) 今の登録で書く、(2) 今の登録でなく、印も end も `note:` も書かずに 5、(3) 読めず、同じく何も書かずに plain error、(4) ロックが取れず、ロックなしで前の印を読んで引き継ぎ、失敗を 1 回言って続ける、(5) ctx が settle を切り、前の値を保つ。(2) と (3) は `decide()` を呼ぶ前に closure を出て、`w.end`、`sayWriteFailed`、`note:` の行も通らない。coverprofile で `begin` は 100%、`directorWaitCheckCurrent` も 100%。
+- seam: `directorWaitBeforeBeginLock`(`:479`)を呼ぶのは `begin`(`:430-432`)だけで、非テストのコードに代入はない(grep)。nil のときの本番の動きは 2 行の nil 判定だけ。テストは `setDirectorWaitBeforeBeginLock` で入れて `t.Cleanup` で戻し、`t.Parallel` を使うテストは director の wait の 3 ファイルにない。seam を読む goroutine(d1 と d2)が走るのは、テストの冒頭の代入と `t.Cleanup` の復元のあいだだけで、`-race -count=8` で警告はなかった。
+- エラーの扱い: `begin` が返す error を握りつぶす呼び出しはない。`begin` の呼び出しは `WaitInboxForDirector`(`:299`)と `director_wait_test.go` の 2 か所で、2 か所とも戻り値を確かめる。`readErr` の prefix は最初の読み(`:293`)と `refresh`(`:602`)と同じ `directorWaitErrPrefix` で、テストが `org: wait --inbox --director: org: director: read ` で始まることを確かめる。
+
+### 新しいテストの確認
+
+- 時間に頼る正の assert はない。待つ側は `waitForMark`、`waitForStderr`、`awaitDirectorWait` の 10 秒の上限つきの polling で、固定 sleep は 2 つ。G1 の 150 ms は「書き直されない」を見る負の窓で、遅い環境では見逃す側にしか倒れず、誤って落ちる側には倒れない。G3 の 100 ms は、cancel が `begin` の前に着いても `probe` の `select` が `ctx.Done()` を先に拾うので、同じ道を通る(sleep がなくても成り立つ)。
+- goroutine の後始末: 競合のテストの d2 は `defer d2Cancel(nil)` で止まり、正常系は `awaitDirectorWait` で戻りを待ってから終わる。`t.Fatal` の失敗の道では d2 の goroutine が `t.TempDir` の掃除と重なりうるが、失敗の道だけ。
+- 判別力: 競合のテストは `begin` の確かめを外すと d1 の印が残って落ちる。読めない `director.jsonl` のテストは、`readErr` の道を外すと `res.Current` が nil のまま `directorWaitCheckCurrent` に入り `ErrDirectorWaitNotCurrent` になるので、`errors.Is(..., ErrDirectorWaitNotCurrent)` の否定で落ちる。2 つの道が別々のテストで固定される。変異は走らせていない。読んだだけ。
+- G1 から G4 は `docs/evidence/test-2026-10-19-org-director-wait-mutation.txt` の probe と同じ形で、引き継ぎ(`wasAccepting`)の判定、`!settled` の `note:` 抑止、`PrintableInboxText` の escape を 1 つずつ見る。
+
+### 指摘
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 2 件、INFO 3 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | L1: `begin` が 70 行になり、リポジトリの 50 行の目安を超えた。cycle 1 は 48 行で「`WaitInbox` と同じ型」として上げなかった。この直しで 22 行増え、ロックの中の closure が外の 2 変数(`readErr`、`notCurrent`)に結果を置き、閉じたあとの `switch` で戻す形になった。違いは prefix を付けるか付けないかだけで、2 変数と `switch` は 1 つの「断られた」error で足りる。2 つの名前の型もそろっていない(`readErr` は error の語尾、`notCurrent` は名詞)。`director_wait.go` は 789 行で、row 306 の Trigger(800 行を超える変更)まで 11 行しかないので、次にここへ足す人が分ける羽目になる | `internal/org/director_wait.go:405-474`(`begin`)、`:433-456`(2 変数と `switch`)、`wc -l` 789。`docs/tech-debt/README.md:306` | closure の中で `refused = fmt.Errorf("%s%w", directorWaitErrPrefix, err)` と `refused = err` を入れ、閉じたあとは `if refused != nil { return refused }` にする(2 変数と `switch` が消え、4 行ほど減る)。もう 1 つの道は、ロックの中の読み、確かめ、書きを `w.writeStart(observed)` のようなメソッドに出すこと。どちらもコードの変更なので、cap の 2 回目の今は直さず、下の tech-debt の 1 行にする |
+| LOW | readability | L2: この直しで、コメントが読む点を 2 つのまま数えている所が残った。(a) パッケージ冒頭(`:21-25`)は登録を「始める前と `DirectorWaitMarkInterval` ごとに読む」と書くが、今は始める前、印を書く直前のロックの中、30 秒ごとの 3 回。`WaitInboxForDirector` と `begin` の doc は直っていて、冒頭だけが残った。(b) `directorWaitCheckCurrent` の doc は「started is nil before the start」と書くが、`begin`(wait の start)は `&w.reg` を渡す。nil を渡すのは最初の読み(`:295`)だけで、「start」が wait 全体を指すのか `begin` を指すのか読み取れない。(c) 参考: `directorWaitLockFile` の doc の「A wait refused before it starts creates neither file」は最初の確かめには正しい。`begin` で断られた wait は空の lock ファイルを作るが、その旨は `WaitInboxForDirector` の doc(「the lock file may exist then」)にだけある | `internal/org/director_wait.go:21-25`、`:305-311`(doc)と `:443`(`&w.reg`)、`:295`(nil)、`:46-49`、`:241-243` | (a) 「read before it starts, again under the lock before it writes its mark, and again every ...」。(b) 「started is nil for the first read, before the wait has taken the lock」。(c) 「refused by the first read」と書くか、そのままでよい。コメントだけの変更だが、コードのファイルなので記録だけの修正の例外の対象外。cap の今は L1 と同じ 1 行にまとめる |
+| INFO | test(`/test` に引き継ぐ) | I1: G5 を払うテストは定数と help を突き合わせるが、ゼロ値の既定が定数を使うこと(`newDirectorWaitRun` の既定 5 つ、`p.WatchProbeInterval = DirectorWaitWatchProbeInterval` の `:372` を含む)は coverprofile で 1 度も走らない。`:372` の右辺を別の値にしても全テストが通る。同じく、`begin` の `&w.reg`(`:443`)を nil にしても通る。attached_at が変わる場合は `directorWaitCheckCurrent` と `refresh` のテストにはあるが、`begin` のテストにはない。row 308 の「G1 から G5 がテストになった」は、定数と help の突き合わせとしては正しい | coverprofile の未走行ブロック `director_wait.go:368-382`、`:485-487`。`internal/org/director_wait_watch_test.go:375-379`(refresh)、`director_wait_test.go:330`(関数) | `/test` の判断に任せる。row 308 の G6 の一覧に「既定値の代入」を足してもよいが、`:372` は名前付きの定数を代入する 1 行なので、足さなくても危険は小さい |
+| INFO | exception-handling | I2: ロックが取れなかった `begin` は読み直さずに続ける(`:457-459`)。このとき `decide()` がロックなしで読んだ前の印が `prevWaitID` になるので、`attach --replace` の競合と重なった場合に限り、30 秒後の `refresh` が書く `not_current` の end が `owns` を通って d2 の印を置き換えうる(ディスクが `prevWaitID` のままなら持ち主扱い)。cycle 1 の ACTION_REQUIRED と同じ結果が、2 つの失敗の重なりで残る。ただしロックが開けない(directory、権限)ときは `save` も同じロックを取れず書かない。残るのは 5 秒の timeout(別のプロセスが 5 秒ロックを持つ)と競合が重なる場合だけで、揃いにくい。`begin` の doc の「the first refresh reads the registration again」は書かない理由の説明としては足りるが、その refresh の end の書き込みには触れていない | `internal/org/director_wait.go:457-459`、`:677-688`(`owns`)、`:596-610`(`refresh`) | 上げない。直すなら、ロックが取れなかった `begin` は `prevWaitID` を空にして、前の印を置き換えられない状態で続ける |
+| INFO | maintainability | I3: 計画の D2(`:66`)は `directorWaitMarkInterval`(小文字)のままで、cycle 2 は D3(`:70`)の定数名だけを `DirectorWaitWatchProbeInterval` に直した。D2 の名前は cycle 1 の L1 で 1 つの `DirectorWaitMarkInterval` になったもので、チェックリスト(`:169`)に記録がある。計画を直すと承認の digest が変わるので、記録で足りる | `docs/plans/active/2026-10-19-org-director-wait.md:66`、`:70`、`:169` | 上げない。archive される計画は、D2 の名前が実装と違うことをチェックリストで示している |
+
+### 確認して問題がなかったもの
+
+- 小文字の旧名: `directorWaitWatchProbeInterval` は `docs/reports/test-...md:145` と `sync-docs-...md:29`(cycle 1 の記録)にだけ残り、コード、help、計画の D3、tech-debt にはない。新しい名前の使用は定数の宣言、`DirectorWaitParams` の doc、既定の代入、CLI のテストの 4 か所で、どれも大文字側。
+- tech-debt: row 306 と 308 は `|` が 6 本(5 cell)で、cell 内に生の `|` はない。row 306 の数字は `wc -l` と一致する(`director_wait.go` 789、`director_wait_test.go` 687、`director_wait_watch_test.go` 630、`director_wait_owner_test.go` 235、`org_director.go` 505、`org_director_report.go` 342、`director_start.go` 1203、`director_check_test.go` 857、`director_start_cleanup_test.go` 804、`herdr_test.go` 852、`director_stop.go` 782)。row 308 が挙げるテスト名 5 つと関数名 4 つ(`directorWaitItemsDetail`、`probeAgain`、`directorWaitWatchFacts`、`directorWaitWatchState`)は存在する。G6 の一覧は coverprofile の未走行ブロック(`:718`、`:577-579`、`:754-755`、`:771`)と合う。この直しで古くなった open の行はない(247、248 は `begin` を述べない)。
+- 呼び出しの網羅: 直しが古くした「`begin` は登録を読み直さず書く」と述べる文は、`director_wait.go` の冒頭の 1 か所(L2)以外にない。`/director` skill、README、AGENTS.md、仕様の 8b-2b の注、help は「始める前に今の登録でなければ待たずに 5」までしか言わず、直しと食い違わない(書き足りるかは `/sync-docs`)。
+- help のテスト: 3 つの期待文は `org.go:1262-1272` の help を空白で畳んだ文に含まれ、`strconv.FormatFloat` で「30 s」「5 s」を作る。既存の `TestDirectorWaitLine_HelpDescribesTheWait` は status 側の 30s だけを見るので、重複でなく別の面。テストの名前の前置きが `DirectorWaitLine_` なのは、30 秒を見る兄弟の隣に置いたため。
+- `reraiseSignal` のコメント: 「stop は前でも後でもよい」は、`signal.Reset(sig)` が Notify を外してから送るので成り立つ。呼び出し側は `stop()` を先に呼ぶ(`:76`)ままで、コメントが言う条件は実装より弱いだけ。
+- コミットの題: b3b692e1 は `test:` だが、定数の export とコメントを含む。export はテストが読むためで、差は小さい。上げない。
+
+### Tech debt identified
+
+最後の cycle(cap 2 の 2 回目)で直さない LOW は先送りになる。次の 1 行を `docs/tech-debt/README.md` に足すと、先送りが記録に残る(依頼により、レポート以外は変えていない)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| Small findings of the org-director-wait PR's cycle-2 self-review (LOW; none changes behavior). (a) L1: `begin` in `internal/org/director_wait.go` is 70 lines, over the 50-line target; the closure under `director-wait.lock` hands two errors out through `readErr` and `notCurrent` and a `switch` returns them, which a single `refused` error would do in fewer lines. (b) L2: the header of the file (`:21-25`) lists two reads of `director.jsonl` (before the start, every 30 s), not the three (the third is under the lock before the first write of the mark), and the doc of `directorWaitCheckCurrent` says "started is nil before the start" while `begin` passes `&w.reg` | A reader counts two reads and misses the one that guards the mark's first write; `begin` is the longest function of the file after `loop`, in a file 11 lines under 800 | Both are code-side changes found on the last pipeline cycle (cap 2); a change to `begin` or to a comment of the file restarts the post-implementation pipeline | The next change to `begin` or to the header of `internal/org/director_wait.go`, or the change that takes the file past 800 lines (row 306) | `docs/plans/active/2026-10-19-org-director-wait.md`; `docs/reports/self-review-2026-10-19-org-director-wait.md` (Cycle 2 review, L1, L2) |
+
+### Recommendation
+
+- Merge: yes(ブランチ全体、`main...HEAD`。CRITICAL・HIGH・MEDIUM なし。cycle 1 の MEDIUM 1 件(M1)と LOW 6 件(L1 から L5、L7)と N1・N2 は直ったままで、L6 は `/pr` で実行する。cycle 2 の直し(`begin` がロックの中で登録を読み直す)は、ロックの順、書かない 2 つの出口、seam の本番での nil、テストの時間の使い方のどれにも欠陥が見つからず、LOW 2 件(`begin` の長さ、冒頭のコメントの読む点の数)と INFO 3 件は動きを壊すものではない)
+- Follow-ups:
+  - L1 と L2 は、cap のまま進むなら上の 1 行を `docs/tech-debt/README.md` に足す(コミット前に lead が決める)。cap を上げて直すなら、L1 と L2 は 1 コミットで足り、パイプライン全体を最初から回す
+  - I1 は `/test` に引き継ぐ。I2 と I3 は上げない
+  - この節でレポート以外は変えていない。insight event(`self_review`、cycle 2、low 2)は `docs/insights/events/2026-10-19-org-director-wait.jsonl` に足したが、コミットはしていない
