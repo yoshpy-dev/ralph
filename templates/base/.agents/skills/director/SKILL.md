@@ -484,14 +484,22 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
 登録の `id`(「昇格」の 3 の `d1`)で、headless の director なら雛形に
 書かれた `id` になる。
 
-- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms 0 2>&1` を
-  Monitor で見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、
+- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms 1500000 2>&1`
+  を Monitor で見張り、Monitor の `timeout_ms` に `1800000` を渡す。Monitor は
+  `timeout_ms`(既定 5 分、最大 30 分)が過ぎた処理に SIGTERM を送って止める
+  ので、wait が自分の区切りの 25 分で先に終わるようにする。`2>&1` で、
   stderr の文も同じ出力に出る。終了コード 0 なら open の件を出して返った
   ので、件を処理し、また待つ。件は 1 件 1 行で、ID、org、TYPE、本文の
   1 行目をタブで区切る。stderr の `note:` の行と、`wait --inbox --director: `
   で始まる行が混ざることもあるが、件ではない(扱いは下の箇条)。
-  `--timeout-ms 0` には時間切れがないので、終了コード 1 はいつも失敗で、
-  打ち直さない。扱いは下の段落のとおり。
+  終了コード 1 で、stderr が `no open inbox item arrived within` を含む
+  ときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ。
+  同じコマンドを Bash の `run_in_background` で走らせてもよい。ただし
+  Bash で走らせた wait は、`/exit` の「Move to background and exit」の
+  あとも、claude が SIGKILL で終わったあとも走り続ける(25 分のうちに
+  ひとりでに終わる)。`note:` の行と `wait --inbox --director: ` で始まる
+  行も、wait が終わるまで届かない。Monitor の wait は、claude の SIGKILL
+  のほかは、セッションがどう終わっても SIGTERM で止まる。
 - Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように
   時間を区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
@@ -530,27 +538,36 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
 - 見張りが仕事を受け付けていないという `note:` の行: 始めたときから見張りが
   なく、wait は待ち続ける。その 1 行を人に伝える。前の wait にも同じ
   `note:` が出ていたとき、または前の wait が同じ見張りのことで終了コード 4
-  で終わっていたときは、伝え直さない(Codex の 300 秒の繰り返しで、同じ
-  知らせを人に何度も送らないため)。
+  で終わっていたときは、伝え直さない(時間を区切った wait を 25 分や
+  300 秒ごとに繰り返すので、同じ知らせを人に何度も送らないため)。
 - 見張りがまた仕事を受け付けるようになったという `note:` の行: wait は
   待ち続ける。人に 1 行伝えれば足りる。
 - `wait --inbox --director: ` で始まる行: 印のこと(ほかの
   `wait --inbox --director` が印を引き継いだ、印を書けない)で、wait は
   待ち続ける。人に 1 度伝える。
-- 1: 失敗(下の段落)。Codex の時間切れの文は、上のとおり打ち直す。
-  `--director` を知らない古い ralph も、知らないフラグとして終了コード 1 で
-  断る。
+- 1: 失敗(下の段落)。ただし時間切れの文があれば、Claude Code でも Codex
+  でも上のとおり打ち直す。`--director` を知らない古い ralph も、知らない
+  フラグとして終了コード 1 で断る。
 
 終了コード 0、4、5 と、時間を区切った wait の時間切れ(終了コード 1 で、
-stderr が時間切れの文を含む)のほかは、どの終わり方も失敗として扱う。
+stderr が時間切れの文を含む)と、Monitor の期限切れのあとの signal での
+終わり(下の段落)のほかは、どの終わり方も失敗として扱う。
 終了コード 1 の失敗には、`ralph.toml` や受信箱(`inbox.jsonl`)が
 読めないものがある。この失敗はすぐ返り、打ち直しても同じ失敗が続く。
-Go の panic(終了コード 2)や signal での終わりも失敗に入る。失敗なら
-打ち直さない。受信箱を待つのをやめ、エラーの文を人に伝えて、人の指示を
-待つ。detach は打たないので、登録は残る。見張り(`ralph org watch --all`)
-が動いていて受信箱を読めるあいだは、件は期限で人に届く。受信箱が
-読めない失敗では見張りも受信箱を読めず、期限の知らせも止まる。
-そのことも人に伝える。
+Go の panic(終了コード 2)と、それ以外の signal での終わりも失敗に入る。
+失敗なら打ち直さない。受信箱を待つのをやめ、エラーの文を人に伝えて、
+人の指示を待つ。detach は打たないので、登録は残る。見張り
+(`ralph org watch --all`)が動いていて受信箱を読めるあいだは、件は期限で
+人に届く。受信箱が読めない失敗では見張りも受信箱を読めず、期限の知らせも
+止まる。そのことも人に伝える。
+
+signal での終わりで失敗にしないのは 1 つだけで、Monitor が期限切れを
+知らせた(「Monitor expired」の知らせが来た)すぐあとに、wait が signal で
+終わったときに限る。Monitor が自分の `timeout_ms` で wait を止めたので、
+wait の失敗ではない。wait を打ち直し、それからは Monitor の `timeout_ms`
+に `1800000` を渡す(渡し忘れて既定の 5 分で止められたときなど)。ほかの
+signal での終わり、panic、時間切れの文のない終了コード 1 は、上のとおり
+失敗で、打ち直さない。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。

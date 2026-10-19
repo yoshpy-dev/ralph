@@ -18,9 +18,12 @@ package org
 // CODEX_ROOT=templates/base/.agents/skills).
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +145,263 @@ func TestDirectorSkill_PinsTheAutoMergeSteps(t *testing.T) {
 		if strings.Contains(text, old) {
 			t.Errorf("%s still contains %q, the step that merged with gh pr merge directly -- see this test's doc comment", rel, directorSkillOldMergeStep)
 		}
+	}
+}
+
+// directorSkillMonitorMaxTimeoutMs is the Monitor tool's maximum timeout_ms
+// (30 minutes) in Claude Code 2.1.291, the version of the experiment in
+// docs/evidence/director-wait-monitor-2026-10-19.md. The Monitor stops a task
+// at its timeout_ms (default 5 minutes) with SIGTERM.
+const directorSkillMonitorMaxTimeoutMs = 1800000
+
+var (
+	// directorSkillWaitTimeoutRe reads N, the --timeout-ms of the Claude Code
+	// director's inbox wait.
+	directorSkillWaitTimeoutRe = regexp.MustCompile(`--director d1 --timeout-ms ([0-9]+)`)
+	// directorSkillMonitorTimeoutRe reads M, the timeout_ms the skill tells a
+	// Claude Code director to pass to the Monitor tool.
+	directorSkillMonitorTimeoutRe = regexp.MustCompile("`timeout_ms` に `([0-9]+)`")
+	// directorSkillUnboundedWaitRe finds --timeout-ms 0, a wait with no
+	// timeout, which the Monitor stops with SIGTERM at its own timeout_ms.
+	directorSkillUnboundedWaitRe = regexp.MustCompile(`--timeout-ms 0([^0-9]|$)`)
+)
+
+// withSingleSpaces makes every run of spaces and line breaks in s one space,
+// so a fragment of the skill that keeps a space between a flag and its value
+// matches however its paragraph is wrapped.
+func withSingleSpaces(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// directorSkillClaudeCodeWaitBullet returns the Claude Code bullet of the
+// skill's subsection ### wait で待つ: the line starting "- Claude Code:" in
+// that subsection and the lines after it, up to the next line that is not
+// blank and does not start with a space (the next bullet at the same indent,
+// a heading, or a paragraph). ok is false when the subsection has no such
+// bullet.
+func directorSkillClaudeCodeWaitBullet(text string) (bullet string, ok bool) {
+	lines := strings.Split(text, "\n")
+	inSection := false
+	start := -1
+	for i, line := range lines {
+		if start >= 0 {
+			if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") {
+				return strings.Join(lines[start:i], "\n"), true
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			inSection = strings.TrimSpace(line) == "### wait で待つ"
+			continue
+		}
+		if inSection && strings.HasPrefix(line, "- Claude Code:") {
+			start = i
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	return strings.Join(lines[start:], "\n"), true
+}
+
+// directorSkillOneNumber reads the number of re's single match in the
+// Claude Code bullet b. what names the match in the problem it returns, ""
+// when there is none.
+func directorSkillOneNumber(b string, re *regexp.Regexp, what string) (int, string) {
+	matches := re.FindAllStringSubmatch(b, -1)
+	if len(matches) != 1 {
+		return 0, fmt.Sprintf("the Claude Code bullet of ### wait で待つ has %d matches of %s, want exactly 1", len(matches), what)
+	}
+	n, err := strconv.Atoi(matches[0][1])
+	if err != nil {
+		return 0, fmt.Sprintf("the Claude Code bullet's %s is not a number: %v", what, err)
+	}
+	return n, ""
+}
+
+// directorSkillWaitBoundProblems checks that a /director skill text bounds
+// the Claude Code director's inbox wait below the Monitor's timeout: its
+// Claude Code bullet of ### wait で待つ, compared with withSingleSpaces, holds
+// exactly one --director d1 --timeout-ms N and exactly one
+// `timeout_ms` に `M`, with 0 < N < M <= directorSkillMonitorMaxTimeoutMs,
+// and the whole text holds no --timeout-ms 0. It returns one line per
+// problem, nil when there is none.
+func directorSkillWaitBoundProblems(text string) []string {
+	var problems []string
+	if bullet, ok := directorSkillClaudeCodeWaitBullet(text); !ok {
+		problems = append(problems, `no "- Claude Code:" bullet in the subsection "### wait で待つ"`)
+	} else {
+		b := withSingleSpaces(bullet)
+		n, nProblem := directorSkillOneNumber(b, directorSkillWaitTimeoutRe, "the wait's `--director d1 --timeout-ms <N>`")
+		m, mProblem := directorSkillOneNumber(b, directorSkillMonitorTimeoutRe, "the Monitor's \"`timeout_ms` に `<M>`\"")
+		for _, p := range []string{nProblem, mProblem} {
+			if p != "" {
+				problems = append(problems, p)
+			}
+		}
+		if nProblem == "" && n <= 0 {
+			problems = append(problems, fmt.Sprintf("the wait's --timeout-ms N=%d must be greater than 0: the wait must time out on its own", n))
+		}
+		if nProblem == "" && mProblem == "" && n >= m {
+			problems = append(problems, fmt.Sprintf("the wait's --timeout-ms N=%d must be less than the Monitor's timeout_ms M=%d, so the wait times out before the Monitor stops it with SIGTERM", n, m))
+		}
+		if mProblem == "" && m > directorSkillMonitorMaxTimeoutMs {
+			problems = append(problems, fmt.Sprintf("the Monitor's timeout_ms M=%d is over the Monitor tool's maximum %d", m, directorSkillMonitorMaxTimeoutMs))
+		}
+	}
+	if directorSkillUnboundedWaitRe.MatchString(withSingleSpaces(text)) {
+		problems = append(problems, "the text contains --timeout-ms 0, a wait with no timeout that the Monitor stops with SIGTERM")
+	}
+	return problems
+}
+
+// TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap pins the
+// numbers of the Claude Code director's inbox wait in the /director skill
+// (plan docs/plans/active/2026-10-19-org-director-wait-bound.md, D1 and D5).
+// The skill tells a Claude Code director to run
+// ralph org wait --inbox --director d1 --timeout-ms N under the Monitor tool
+// with the Monitor's timeout_ms M. The Monitor stops a task at its
+// timeout_ms with SIGTERM, and the skill counts an end by a signal as a
+// failure not to run again unless the Monitor said it expired, so the wait
+// must time out first: 0 < N < M <= directorSkillMonitorMaxTimeoutMs. No
+// copy may keep --timeout-ms 0, the unbounded wait the skill had before.
+// scripts/check-skill-sync.sh keeps the four copies identical but does not
+// read the numbers.
+//
+// If this test fails after a deliberate change to the bullet, keep one
+// --director d1 --timeout-ms <N> and one `timeout_ms` に `<M>` in the Claude
+// Code bullet of ### wait で待つ, or change directorSkillWaitBoundProblems
+// with it; otherwise restore the numbers in .claude/skills/director/SKILL.md
+// and templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file. If a newer Claude Code changes the Monitor's maximum, change
+// directorSkillMonitorMaxTimeoutMs with evidence of the new value.
+func TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's wait-bound check (vendored repo?)", rel, err)
+		}
+		for _, p := range directorSkillWaitBoundProblems(string(data)) {
+			t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+		}
+	}
+}
+
+// TestDirectorSkillWaitBoundProblems runs directorSkillWaitBoundProblems on
+// small texts shaped like the skill's subsection ### wait で待つ. Each has
+// the Codex bullet after the Claude Code one and, after the list, the
+// Monitor's `timeout_ms` に `1800000` of the paragraph on the Monitor's
+// expiry: neither may be read as the Claude Code bullet's.
+func TestDirectorSkillWaitBoundProblems(t *testing.T) {
+	skill := func(claudeCode string) string {
+		return "## 受信箱の処理\n\n### wait で待つ\n\nwait には `--director <自分の id>` を付ける。\n\n" +
+			claudeCode +
+			"- Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように\n" +
+			"  時間を区切った wait を繰り返す。\n\n" +
+			"wait を打ち直し、それからは Monitor の `timeout_ms` に `1800000` を渡す。\n\n" +
+			"### 見張りが送る 1 行\n"
+	}
+	bullet := func(n, m string) string {
+		return "- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms " + n + " 2>&1`\n" +
+			"  を Monitor で見張り、Monitor の `timeout_ms` に `" + m + "` を渡す。\n"
+	}
+	// oldBullet is the bullet the skill had before the plan, verbatim.
+	oldBullet := "- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms 0 2>&1` を\n" +
+		"  Monitor で見張るか、Bash の `run_in_background` で走らせる。`2>&1` で、\n" +
+		"  stderr の文も同じ出力に出る。終了コード 0 なら open の件を出して返った\n" +
+		"  ので、件を処理し、また待つ。件は 1 件 1 行で、ID、org、TYPE、本文の\n" +
+		"  1 行目をタブで区切る。stderr の `note:` の行と、`wait --inbox --director: `\n" +
+		"  で始まる行が混ざることもあるが、件ではない(扱いは下の箇条)。\n" +
+		"  `--timeout-ms 0` には時間切れがないので、終了コード 1 はいつも失敗で、\n" +
+		"  打ち直さない。扱いは下の段落のとおり。\n"
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string // a fragment of each problem, in order; nil for none
+	}{
+		{
+			name: "the bounded wait below the Monitor's timeout_ms",
+			text: skill(bullet("1500000", "1800000")),
+		},
+		{
+			name: "the old bullet: --timeout-ms 0 and no Monitor timeout_ms",
+			text: skill(oldBullet),
+			want: []string{"has 0 matches of the Monitor's", "N=0 must be greater than 0", "contains --timeout-ms 0"},
+		},
+		{
+			name: "N equal to M",
+			text: skill(bullet("1800000", "1800000")),
+			want: []string{"N=1800000 must be less than the Monitor's timeout_ms M=1800000"},
+		},
+		{
+			name: "N greater than M",
+			text: skill(bullet("1800000", "1500000")),
+			want: []string{"N=1800000 must be less than the Monitor's timeout_ms M=1500000"},
+		},
+		{
+			name: "M over the Monitor's maximum",
+			text: skill(bullet("1500000", "1800001")),
+			want: []string{"M=1800001 is over the Monitor tool's maximum 1800000"},
+		},
+		{
+			name: "M missing from the bullet, though the paragraph after the list has one",
+			text: skill("- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms 1500000 2>&1`\n" +
+				"  を Monitor で見張る。\n"),
+			want: []string{"has 0 matches of the Monitor's"},
+		},
+		{
+			name: "N missing from the bullet, though the Codex bullet has one",
+			text: skill("- Claude Code: `ralph org wait --inbox --director d1 2>&1` を Monitor で\n" +
+				"  見張り、Monitor の `timeout_ms` に `1800000` を渡す。\n"),
+			want: []string{"has 0 matches of the wait's `--director d1 --timeout-ms <N>`"},
+		},
+		{
+			name: "two --timeout-ms values in the bullet",
+			text: skill(bullet("1500000", "1800000") +
+				"  Bash なら `ralph org wait --inbox --director d1 --timeout-ms 600000` でもよい。\n"),
+			want: []string{"has 2 matches of the wait's"},
+		},
+		{
+			name: "--timeout-ms 0 elsewhere in the text, with a correct bullet",
+			text: skill(bullet("1500000", "1800000")) + "\n人の wait は `ralph org wait --inbox --timeout-ms 0` で待つ。\n",
+			want: []string{"contains --timeout-ms 0"},
+		},
+		{
+			name: "--timeout-ms 0 wrapped over two lines elsewhere",
+			text: skill(bullet("1500000", "1800000")) + "\n人の wait は `ralph org wait --inbox --timeout-ms\n0` で待つ。\n",
+			want: []string{"contains --timeout-ms 0"},
+		},
+		{
+			name: "the bullet wrapped over lines",
+			text: skill("- Claude Code: `ralph org wait --inbox --director d1 --timeout-ms\n" +
+				"  1500000 2>&1` を Monitor で見張り、Monitor の `timeout_ms`\n" +
+				"  に `1800000` を渡す。\n"),
+		},
+		{
+			name: "the bullet at the end of the text",
+			text: "### wait で待つ\n\n" + bullet("1500000", "1800000"),
+		},
+		{
+			name: "no Claude Code bullet",
+			text: skill(""),
+			want: []string{`no "- Claude Code:" bullet`},
+		},
+		{
+			name: "a Claude Code bullet only in another subsection",
+			text: "### 件の処理\n\n" + bullet("1500000", "1800000") + "\n" + skill(""),
+			want: []string{`no "- Claude Code:" bullet`},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := directorSkillWaitBoundProblems(tc.text)
+			if len(got) != len(tc.want) {
+				t.Fatalf("problems = %q, want %d matching %q", got, len(tc.want), tc.want)
+			}
+			for i, frag := range tc.want {
+				if !strings.Contains(got[i], frag) {
+					t.Errorf("problem %d = %q, want it to contain %q", i, got[i], frag)
+				}
+			}
+		})
 	}
 }
