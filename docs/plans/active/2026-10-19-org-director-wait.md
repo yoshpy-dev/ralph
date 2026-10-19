@@ -169,5 +169,5 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
   - verify(pass、LOW 2、INFO 4)の V3: D1 の「印を書き直すたびに登録を読み直す」は、実装では 30 秒ごとの読み直し(`refresh`、`DirectorWaitMarkInterval`)だけで、`note:` のあとのすぐの書き直しと終わりの書き込みは登録を読まない。help、skill、仕様の注、AC4 はこの動きに合わせて書いてある
 - [x] Review artifact created
 - [x] Verification artifact created
-- [ ] Test artifact created
+- [x] Test artifact created
 - [ ] PR created
