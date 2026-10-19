@@ -167,6 +167,7 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
   - S5(evidence)は c780bc11。`docs/evidence/director-wait-session-end-2026-10-19.md`(計画の前の実験)と `docs/evidence/director-wait-livefire-2026-10-19.md`(D8 の (a)〜(h)、fa95a3d8 の binary、/tmp/dw8 の台帳)
   - self-review(MEDIUM 1、LOW 7)の直し: f0a4d04c(evidence の末尾の空白、tech-debt の org-gate の行の (j))、c1d31e3f(director の report を `internal/cli/org_director_report.go` に、wait のテストを `director_wait_watch_test.go` に分け、定数とコメントを整え、help と skill に「登録の変化には 30 秒ごとの読み直しで気づく」と書いた)、33da4185(古くなったファイル名の参照)、tech-debt の 306 行の行数。D2 の `directorWaitMarkInterval` は、実装では export した `DirectorWaitMarkInterval` 1 つになった。L6(release のノート)は PR の本文と memory の release の項目に書く
   - verify(pass、LOW 2、INFO 4)の V3: D1 の「印を書き直すたびに登録を読み直す」は、実装では 30 秒ごとの読み直し(`refresh`、`DirectorWaitMarkInterval`)だけで、`note:` のあとのすぐの書き直しと終わりの書き込みは登録を読まない。help、skill、仕様の注、AC4 はこの動きに合わせて書いてある
+  - sync-docs(cycle 1)の直し: README の pull の wait と recipe `director-wake.md`(root と template)の 2 か所を `--director <id>` に揃えた(verify V5)。tech-debt は 253 行(この段が受信箱の処理と `WaitInbox` を変えてきっかけに当たったが持ち越した、V1)と 279 行(2 回目の揺れ、持ち越し)に書き足し、残りのテストの穴(G1〜G5、G7)を 308 行に足した。V2、V4、V6 は 45f5d586 までに直っていた。report は `docs/reports/sync-docs-2026-10-19-org-director-wait.md`
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
