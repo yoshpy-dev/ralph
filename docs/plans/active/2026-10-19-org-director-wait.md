@@ -84,15 +84,15 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
 
 ## Acceptance criteria
 
-- [ ] AC1 フラグ: `--director` は `--inbox` のときだけ受け付け、`d<N>` の形でない値と `--inbox` のない指定は何も読まずに終了コード 1 で断る。今の登録がその id でない(登録がない、別の id、stopped)なら、印を書かずに終了コード 5 で返り、文が今の登録を名指す
-- [ ] AC2 印: `--director` の wait は始めたとき、30 秒ごと、見張りの様子が変わったとき、終わるときに、`director-wait.lock` の中で `director-wait.json` を一時ファイルと rename で書き、D2 の field を持つ。終わり方ごと(items、timeout、watch、not_current、error、signal)に `end` と終了コードが決まった値になる。印を書けなくても wait は続き、stderr に 1 回だけ書く
-- [ ] AC3 持ち主: 印の書き込みは、ディスクの印の `wait_id` が自分のときだけ行う。偽の時計で `A が始める → B が始める → A の書き直し → B の終わり` の順を打つと、印は B のものが残り、B の `end` が載り、A はそれ以降一度も書かない
-- [ ] AC4 登録の変化: 待っているあいだに今の登録が `--replace`、detach、stop で変わると、次の印の書き直しで `not_current` を書いて終了コード 5 で返る
-- [ ] AC5 見張り: `--director` の wait は、受け付けていた見張りが受け付けなくなった(not_running、settle のあとの stale、stopping、`--once`)と分かり、その回の受信箱に open の件がなければ、終了コード 4 で返る。open の件があれば終了コード 0。前の印の `watch_accepting` が true で、始めたときに受け付けていなければ 4。前の印がないか false なら、`note:` を出して待ち続ける。lock を持ち印がまだない見張りが settle の内に running を書けば、4 にならない。stderr の 1 行は D3 の 6 つの事実を書き分け、原因を言わない: 見張りが panic で止まったときと同じ印(lock が外れ、印は stopped)と、stopped の印を書けずに止まったときと同じ印(lock が外れ、印は running)を fixture で作り、どちらの文も事実だけで、「人が止めた」「落ちた」と言わないことを確かめる
-- [ ] AC6 終了コード: `ralph` は D4 のとおり 4 と 5 を返し、upgrade の 3 とほかの 1 は変わらない。`--director` のない `wait --inbox` と座席の `wait` は、印を書かず、見張りを読まず、今と同じ出力と終了コードを返す(今のテストがそのまま通る)
-- [ ] AC7 表示: `ralph org director status` の `wait:` の行、`ralph status` の `director:` の行(昇格したセッションのとき)、両方の `--json` の `director.wait` が、走っている wait、印を書き直していない wait、終わった wait(終わり方ごと)、印がない、別の登録の印、読めない印の各行で D5 のとおりに出る。印の値は escape される。headless の登録の `director:` の行は変わらない
-- [ ] AC8 文書: `/director` skill の 4 面が同じ中身で、`--director` の wait と終了コード 4・5 と `note:` の扱い(D6。自分では起動し直さない)を書く。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。雛形、help、README、仕様の注(8b-2b で決めたこと、8b-2a の注の続き)、tech-debt(247 行と 209 行の書き換え、B の新しい行)、AGENTS.md が新しい動きを説明する
-- [ ] AC9 テストは本物の herdr、osascript、端末、Orca、人の tmux、gh、network を打たず、repo の台帳に書かない。signal は自分で起こしたプロセスにだけ送る。実験の記録と D8 の実機の確認を evidence に残す(`$HOME` は `~`、token と pane の値は伏せる)
+- [x] AC1 フラグ: `--director` は `--inbox` のときだけ受け付け、`d<N>` の形でない値と `--inbox` のない指定は何も読まずに終了コード 1 で断る。今の登録がその id でない(登録がない、別の id、stopped)なら、印を書かずに終了コード 5 で返り、文が今の登録を名指す
+- [x] AC2 印: `--director` の wait は始めたとき、30 秒ごと、見張りの様子が変わったとき、終わるときに、`director-wait.lock` の中で `director-wait.json` を一時ファイルと rename で書き、D2 の field を持つ。終わり方ごと(items、timeout、watch、not_current、error、signal)に `end` と終了コードが決まった値になる。印を書けなくても wait は続き、stderr に 1 回だけ書く
+- [x] AC3 持ち主: 印の書き込みは、ディスクの印の `wait_id` が自分のときだけ行う。偽の時計で `A が始める → B が始める → A の書き直し → B の終わり` の順を打つと、印は B のものが残り、B の `end` が載り、A はそれ以降一度も書かない
+- [x] AC4 登録の変化: 待っているあいだに今の登録が `--replace`、detach、stop で変わると、次の印の書き直しで `not_current` を書いて終了コード 5 で返る
+- [x] AC5 見張り: `--director` の wait は、受け付けていた見張りが受け付けなくなった(not_running、settle のあとの stale、stopping、`--once`)と分かり、その回の受信箱に open の件がなければ、終了コード 4 で返る。open の件があれば終了コード 0。前の印の `watch_accepting` が true で、始めたときに受け付けていなければ 4。前の印がないか false なら、`note:` を出して待ち続ける。lock を持ち印がまだない見張りが settle の内に running を書けば、4 にならない。stderr の 1 行は D3 の 6 つの事実を書き分け、原因を言わない: 見張りが panic で止まったときと同じ印(lock が外れ、印は stopped)と、stopped の印を書けずに止まったときと同じ印(lock が外れ、印は running)を fixture で作り、どちらの文も事実だけで、「人が止めた」「落ちた」と言わないことを確かめる
+- [x] AC6 終了コード: `ralph` は D4 のとおり 4 と 5 を返し、upgrade の 3 とほかの 1 は変わらない。`--director` のない `wait --inbox` と座席の `wait` は、印を書かず、見張りを読まず、今と同じ出力と終了コードを返す(今のテストがそのまま通る)
+- [x] AC7 表示: `ralph org director status` の `wait:` の行、`ralph status` の `director:` の行(昇格したセッションのとき)、両方の `--json` の `director.wait` が、走っている wait、印を書き直していない wait、終わった wait(終わり方ごと)、印がない、別の登録の印、読めない印の各行で D5 のとおりに出る。印の値は escape される。headless の登録の `director:` の行は変わらない
+- [x] AC8 文書: `/director` skill の 4 面が同じ中身で、`--director` の wait と終了コード 4・5 と `note:` の扱い(D6。自分では起動し直さない)を書く。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る。雛形、help、README、仕様の注(8b-2b で決めたこと、8b-2a の注の続き)、tech-debt(247 行と 209 行の書き換え、B の新しい行)、AGENTS.md が新しい動きを説明する
+- [x] AC9 テストは本物の herdr、osascript、端末、Orca、人の tmux、gh、network を打たず、repo の台帳に書かない。signal は自分で起こしたプロセスにだけ送る。実験の記録と D8 の実機の確認を evidence に残す(`$HOME` は `~`、token と pane の値は伏せる)
 
 ## Implementation outline
 
@@ -161,6 +161,10 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
 - [x] Branch created
 - [x] Implementation started
   - S1(org 層)は 67938662。D2 の `watch_accepting` の意味を実装に合わせて書き足し(止まりは `end=watch` だけが false と書く)、`detail-mark` の図を直して lint と撮り直しをし、ユーザーの自動承認の指示で承認を取り直した(sha256:7d6739ec79ce)
+  - S2(cli)は 000e83b9。始めたときに無視されていた SIGHUP と SIGINT を受け取らない直しを 4e4cc06c に分けた。AC1 の「何も読まずに断る」は、設定を読む前に id を確かめる形にして 5667f850 で直した
+  - S3(表示)は fa95a3d8。`wait:` の行、昇格したセッションの `director:` の行の続き、`--json` の `wait` と `director.wait`
+  - S4(文書)は aba16ec2。skill の「してはいけないこと」で昇格の手順 2 の起動と起動し直しを書き分ける直しを 61114ca4 に分けた
+  - S5(evidence)は c780bc11。`docs/evidence/director-wait-session-end-2026-10-19.md`(計画の前の実験)と `docs/evidence/director-wait-livefire-2026-10-19.md`(D8 の (a)〜(h)、fa95a3d8 の binary、/tmp/dw8 の台帳)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
