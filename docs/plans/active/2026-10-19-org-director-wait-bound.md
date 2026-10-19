@@ -72,7 +72,7 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - [x] AC6: 実機の確認 (a)〜(g) の結果が `docs/evidence/director-wait-bound-livefire-2026-10-19.md` にある。(e) では人の入力なしに時間切れの打ち直しが 2 回以上続き、そのあとの件が返って ack されている。(f) では Monitor の期限切れのあとに wait が打ち直されている。(g) では外からの SIGTERM のあとに wait が打ち直されていない
 - [x] AC7: tech-debt の B の行が、Monitor と Bash それぞれで残る場合、残った wait の上限(25 分)、残った wait が返した件の行き先、親の pid で見分けない理由を書き、閉じていない
 - [x] AC8: 仕様の FR-10 に 8b-2c で決めたことの注がある
-- [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が通る
+- [x] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が通る
 
 ## Implementation outline
 
@@ -128,6 +128,8 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - 2026-10-19: self-review(cycle 1、060b9650)は Merge: yes で、MEDIUM 1 件と LOW 6 件、INFO 3 件。止めていた run-verify(テストのファイルが変わるため)は直したあとに打ち直す。S4(implementer)で直した。dc98d5ec は skill とテスト: L1(Monitor の wait が止まる終わり方を確かめた 4 つに絞った)、L2(signal の例外を、その wait を見張っていた Monitor の期限切れの知らせに結び、知らせと wait の終わりの順を問わないようにした)、L3(小節の中の `timeout_ms` の数がどれも M と同じで、「K 分」が N/60000・既定 5・最大 30 のどれかであることもテストが見る)、L4(テストのコメントの計画の道)、L6(表の縁と Atoi の文)。ffc56a2e は記録: M1(tech-debt の B の行と仕様の注の確かめていないこと、試験用の指示のこと、「60 s or less」の言い方)、L5(livefire の (e) の打ち直しの回数、記録しなかった Monitor の task id)、I1(実験の evidence の Reading を 3a803a87 の時点の過去形にした)。I2(行の長さ)と I3(表のテストの名前)は直していない。計画からのずれ: L2 で、D3 と R1 の「Monitor の期限切れの知らせのあと」の順の前提を skill と仕様の注から外した。計画の本文は承認の digest を保つため直していない
 - 2026-10-19: 直しの再レビュー(8796abec)は Merge after fixes: yes で、L2 の順の点が新しい LOW(N1)として残った。「どちらが先に届いてもよい」では、終わりを先に見た director が決められない。S5(implementer、de2b05d1)で、終わりを見た時点でその wait の Monitor の知らせが届いていれば打ち直し、届いていなければ失敗とし、あとから知らせが届けばそこで打ち直す形にした。実機の確認は 5aea657f の skill の文で打ち、その後の文(dc98d5ec と de2b05d1)では打ち直していないことを、livefire の evidence と仕様の注に書いた。実機の打ち直しはしていない(done の consult で判断する)
 - [x] Review artifact created
-- [ ] Verification artifact created
+- 2026-10-19: verify(cycle 1、024e2ba6)は pass(AC1〜AC8 を満たす。AC9 は run-verify の結果待ち)。指摘は INFO 2 件。V1: D6 は (a)〜(d) を haiku で打つと書くが、実機の確認は全部 sonnet で打った(livefire の Setup)。AC6 はモデルを名指さないので、受け入れには響かない。V2: Monitor の既定 5 分と最大 30 分は、Assumptions のとおりツールの説明から取った値で、期限切れを実際に見たのは、実験の m4 の 20 秒と、実機の確認の 10 秒と 15 秒だけ。本物の 25 分と 30 分を確かめていないことは tech-debt の B の行に書いてある。どちらも直していない
+- 2026-10-19: AC9。`GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は rc 0(83c0d34d のコードで打ち、終わりの secret scan は 024e2ba6 まで。de2b05d1 のあとはコードと skill を変えていない)。internal/cli 304.6 s、internal/org 380.5 s で、全パッケージが ok。self-review の直しの前と S5 の前に打ち始めた 2 回は、テストのファイルと skill が変わるので途中で止めた
+- [x] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
