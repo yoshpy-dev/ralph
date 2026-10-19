@@ -129,6 +129,15 @@ human will type anything in this session."
   item handling with send and resolve) for hours
 - codex, and a headless director started with `ralph org director start`
 - Bash `run_in_background` as the wait's runner
+- The skill's text after 5aea657f: the sessions read the section as of
+  5aea657f. After the check, dc98d5ec narrowed the sentence on how a
+  Monitor wait stops and tied the signal exception to that wait's own
+  Monitor, and the commit that added this line made the exception
+  decidable when the director sees the signal end before the Monitor's
+  notice. These later texts were not run again. For (b) and (f) the table
+  records that the Monitor expired and the wait ended by a signal, not
+  whether the session saw the notice before the end; a signal end seen
+  before the Monitor's notice was not checked
 
 Left on the machine: claude's own records of these sessions
 (`~/.claude/projects/-private-tmp-xbw-proj/`, the trust entry for
