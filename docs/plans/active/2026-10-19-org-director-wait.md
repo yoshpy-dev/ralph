@@ -171,6 +171,8 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
   - sync-docs(cycle 1)の直し: README の pull の wait と recipe `director-wake.md`(root と template)の 2 か所を `--director <id>` に揃えた(verify V5)。tech-debt は 253 行(この段が受信箱の処理と `WaitInbox` を変えてきっかけに当たったが持ち越した、V1)と 279 行(2 回目の揺れ、持ち越し)に書き足し、残りのテストの穴(G1〜G5、G7)を 308 行に足した。V2、V4、V6 は 45f5d586 までに直っていた。report は `docs/reports/sync-docs-2026-10-19-org-director-wait.md`
   - cross-review(cycle 1)の ACTION_REQUIRED 1 件(始める前の確かめとロックのあいだに `attach --replace` が入ると、古い wait が新しい wait の印を上書きする)を 38cac6f1 で直した: `begin` がロックの中で `director.jsonl` を読み直し、今の登録でなければ何も書かずに 5 で、読めなければ何も書かずにその誤りで返る。直しを外すと競合のテストが落ちることは implementer が確かめた。同じ cycle 2 で、tech-debt の 308 行のテストの穴のうち G1〜G5 と G7 を b3b692e1 で払い(evidence の probe 4 本をテストにし、5 秒の間隔を help と突き合わせ、`reraiseSignal` のコメントを直した)、308 行は G6 だけにした。D2 に読み直しを書き足し、D3 の定数名を export した `DirectorWaitWatchProbeInterval` に直したので、`detail-flow` と `detail-mark` を直して、ユーザーの自動承認の指示で承認を取り直した(sha256:aa991f0ee004)
   - self-review(cycle 2、LOW 2、INFO 3、Merge: yes、9b3b02b7)の I3 で、D2 に残っていた小文字の定数名を `DirectorWaitMarkInterval` に直した。図には定数名がないので描き直しはせず、ユーザーの自動承認の指示で承認を取り直した(sha256:e67985a2f2d7)。L1(`begin` が 70 行)と L2(登録を読む回数のコメント)は新しい implementer で直す
+  - L1 と L2 は 6086af65 で直した: `begin` を 44 行にし(前の印を読む `decideStart` と、見張りの様子で `note:` を出す `noteStartWatch` に分けた)、登録を読むのが 3 回(始める前、ロックの中、30 秒ごと)だとコメントに書いた。動きは変えていない。`director_wait.go` は 799 行で、tech-debt の 306 行に書いた
+  - verify(cycle 2、pass、LOW 1、INFO 3、e71c0e3a)の C2-1(実機の evidence の「後のコミットは wait の動きを変えない」が 38cac6f1 で崩れた)は sync-docs で直す。C2-2 はこの行
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
