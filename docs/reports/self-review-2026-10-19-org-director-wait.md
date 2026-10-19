@@ -80,3 +80,48 @@ _(上の項目は、依頼により `docs/tech-debt/README.md` には反映し�
   - M1 は、分割するか row 306 を今の数字に書き直す。分割はコードに触れるので、パイプライン全体を最初から回す。row だけの書き直しは、コード・skill・plan に触れず、`docs/tech-debt/README.md` だけの変更になる(記録だけの修正の例外の対象外なので、`/sync-docs` と cross-review の扱いは lead が決める)。L7 の row 231 の書き足しも同じ `docs/tech-debt/README.md` の変更で、M1 の row 306 とまとめて 1 コミットにできる
   - L1、L3、L4、L5 はコメントと定数の名前だけで、動きは変わらない。L2 は evidence の空白を削る。いずれもコードや evidence に触れるので、直すなら post-implementation pipeline を最初から回す(記録だけの修正の例外には入らない)
   - L6 は release の issue への 1 行コメントで、コードは変えない。`/pr` で本文に書くときに一緒に決める
+
+## Fixes review (cycle 1)
+
+- Date: 2026-10-19
+- Range: `git diff 73a6310b..9f7a883e`(f0a4d04c、c1d31e3f、33da4185、9f7a883e の 4 コミット、17 ファイル)。この節より上の行は変えていない
+- 見たもの: 直しの diff を全部、移動した本体の突き合わせ、直した場所の今の行、`git diff --check`。テストと静的解析は走らせていない(run-verify が別に走っている)
+
+### 指摘ごとの結果
+
+| 指摘 | 結果 | 根拠 |
+| --- | --- | --- |
+| M1 | fixed | `wc -l` で `internal/cli/org_director.go` 831 から 505、新しい `internal/cli/org_director_report.go` 342、`internal/org/director_wait_test.go` 1252 から 683、新しい `internal/org/director_wait_watch_test.go` 590。`director_wait.go` は 736 から 743 で、800 まで 57 行。row 306 は `docs/tech-debt/README.md:306` で数字と Trigger(`director_wait.go` が 800 を超える変更)と Related(plan とこのレポート)を直し、5 cell のまま。残る N1 は下 |
+| L1 | fixed | `internal/org/director_wait.go:84` の `DirectorWaitMarkInterval` 1 つになり、既定は `:358`、読む側は `org_director_wait_line.go:68`、`:86` のまま。stderr の 3 文は `:95` の `directorWaitNoticePrefix` を `:650`、`:654`、`:664` で使い、doc(`:93-94`)に skill が前置きで行を見分けることが書いてある。`org: ` 付きの `directorWaitErrPrefix`(`:91`)は別の文面なので残してよい |
+| L2 | fixed | `git diff --check e38b89a9...HEAD` が空。`docs/evidence/director-wait-livefire-2026-10-19.md` の 10 行は `wN stdout:` の末尾の空白だけが消え、冒頭の説明に「各行は colon の後に空白 1 つで終わっていたが、ここでは落とした」という注を足した。記録の意味は変わらない |
+| L3 | fixed | `director_wait.go:53-56` が「The CLI maps them to exit codes」と書き、`ExitCode`(`internal/cli/exitcode.go`)と `runOrgWaitInboxDirector` の再送を名前で指す。`S2 of the plan` はない |
+| L4 | fixed | (a) `internal/cli/org_director_report.go:128-152` の `orgDirectorLine` の doc は段落を組み直し、`and not attached` だけの短い行はない(移動した本文との差はこの 8 行から 7 行への組み直しだけ)。(b) `internal/cli/org_gate.go:128-129` が「It is signalCauseContext without its second result, the signal that arrived, which only `ralph org wait --inbox --director` reads.」になった |
+| L5 | fixed | `director_wait.go:38-41` が読み手を 2 つ書く(status と、次の wait の `watch_accepting` の引き継ぎ(D3))。ついでに `:22-25` の doc も「30 秒ごとの読み直しで、次の読みで終わる」に合わせた |
+| L6 | not fixed(先送りを妥当と見る) | リポジトリ内に届け先はない。PR がまだなく、release のノートの控えもまだ書けないので、いま直せる場所がない。道は妥当: `/pr` の本文に caveat を 1 行書き、merge の後に release の issue へ 1 行コメントを足す(`.goreleaser.yml:36-39` が `docs:`・`test:`・`chore:` を落とすので、コミットの題には載らない)。lead の記録の「release のノートに足すこと」にも 8b-2b の項目を足す。`/pr` で実行する |
+| L7 | fixed(内容) | `docs/tech-debt/README.md:231` の (j) に、「stage 8b-2b から `gateSignalContext` は `signalCauseContext` の包みで、director の wait が来た signal を読むので、`signal.NotifyContext` に戻すのは gate・regate・merge の呼び出しだけ。`signalCauseContext` とその新しいテストは残る」が入った。残りは N2 |
+
+### 動きを変えない移動か
+
+- `internal/cli/org_director.go` から `org_director_report.go`: 73a6310b の `org_director.go` の移した範囲(324 行)と、新しいファイルの同じ範囲(322 行)を `diff` した。違いは `orgDirectorLine` の doc の組み直し(L4a)だけで、関数の本体、struct、tag、定数、escape の呼び出しは同じ。新しいファイルは冒頭に説明と import を足しただけ。`org_director.go` は `strconv` と `strings` の import を落とし、ほかの import は残り、新しいファイルの import と使用数が合う(使用数を数えた。コンパイルは `/verify` に任せた)
+- `internal/org/director_wait_test.go` から `director_wait_watch_test.go`: 73a6310b のファイルの全行を sort して、新しい 2 ファイルの全行を sort した集合と `comm` で比べた。消えた行は 0、増えた行は `package`、`import` の括弧と 9 つの import、新しいファイルの冒頭のコメント 7 行だけ。テストの数は 25 から 12 と 13 で合う。fixture とヘルパは `director_wait_test.go` に残り、冒頭のコメントがそう言う
+- `33da4185` は `org_director_check.go:17`、`org_director_wait_line.go:15`、`org_director_wake.go:19` のコメントだけ。`org_director.go` と書いたままの `org_director_headless.go:27`、`org_director_check.go:16`、`org_director_wake.go:17`、`org_director_report.go:19` は、今も `org_director.go` にあるもの(`newOrgDirectorAttachCmd` など)を指していて正しい
+- `director_wait.go` の変更は定数 1 つにまとめたことと、コメント、前置きの定数化だけ。`DirectorWaitMarkInterval` の値は 30 秒のままで、`p.MarkInterval` の既定(`:358`)と読む側の `2*org.DirectorWaitMarkInterval` は変わらない。stderr の 3 文は、前置きの定数を足しても文字列が前と同じ(`wait --inbox --director: `)で、skill の「その前置きで始まる行」は保たれる
+- help と skill: `internal/cli/org.go:1267` と `.claude/skills/director/SKILL.md:503-505` が「30 秒ごとの読み直しで、変わった後の最初の読みで 5」と書く。前の節の Coverage gaps に書いた `/verify` への引き継ぎ(間隔の言及がない)は解けた。skill の 4 面は `cmp` が一致
+
+### 直しで増えた指摘
+
+CRITICAL 0 件、HIGH 0 件、MEDIUM 0 件、LOW 2 件。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | typo | N1: row 306 の Debt の cell の最後の文が途中で終わっている。「the new `internal/org/director_wait.go` is 743」で、単位の「lines」も句点もなく、すぐ次が `\|` の cell の区切り。row の前の部分は「(1252)」「(683)」のように数字だけを括弧に入れて書くが、この文だけは主語と数字が直接つながり、何の数字か読めない | `docs/tech-debt/README.md:306` の Debt の cell の末尾 | 「the new `internal/org/director_wait.go` is 743 lines.」にする。row の 1 文字の直しで、`docs/tech-debt/README.md` だけの変更 |
+| LOW | maintainability | N2: row 231 の (j) が、直したあとも 2 つのテストを消せるものとして挙げている。(j) の前半は「`gateSignalContext` と `TestOrgGate_SignalContextParentCauseAndStop` と `TestOrgGate_SignalContextKeepsLaterSignalsCaught` は消せる」と言い、後半(今回足した分)は「`signalCauseContext` とその新しいテストは残る」と言う。しかし残る `signalCauseContext` の cause、親の cancel、`stop`、後から来た signal の扱いを直接確かめるのはこの 2 つのテストで(`gateSignalContext` 経由)、新しいテスト(`org_wait_director_test.go:547`)は「signal 0 個なら登録しない」だけを見る。director の wait の end-to-end のテスト(`:457`、`:485`、`:600`)は signal ごとの cause と 2 回目の SIGTERM を見るが、親が自前の cause を持つ場合(`:729` は `context.WithCancelCause` の親で `errParent` を確かめる。`:457` の親は `context.WithCancel` で cause は `context.Canceled` のまま)と、`stop` で cause が `context.Canceled` になること(`:729`)は見ない。(j) の手順どおりに消すと、この 2 点を押さえるテストが `signalCauseContext` から失われる | `docs/tech-debt/README.md:231`。`internal/cli/org_gate_test.go:729`、`:763`(2 つのテスト、`gateSignalContext` を呼ぶ)。`internal/cli/org_wait_director_test.go:457`、`:485`、`:547`、`:600` | (j) の前半を「2 つのテストは `gateSignalContext` ではなく `signalCauseContext` を呼ぶ形に書き換えて残す」に直す。row だけの変更で、コードは変えない。次に go.mod を 1.26 以上にする変更の中で払ってもよいが、その場合も row の文は今直す方が誤読が少ない |
+
+どちらも、動きとテストに影響せず、`docs/tech-debt/README.md` の row だけに閉じる。N1 と N2 は同じファイルなので、直すなら 1 コミットにできる。
+
+### Recommendation
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。最初のレポートの MEDIUM 1 件(M1)と LOW 6 件(L1、L2、L3、L4、L5、L7)は直った。L6 は PR 本文と release の issue への 1 行コメントとして先送りし、その道は妥当。直しで増えた LOW 2 件(N1 の途中で終わった文、N2 の消せるテストの挙げ方)は row だけの文面の直しで、動きを壊すものはない。移動した 2 組のコードは動きを変えていない)
+- Follow-ups:
+  - N1 と N2 は `docs/tech-debt/README.md` の 2 行(306 と 231)の直しだけ。コード・skill・plan に触れないので、パイプラインの再走は要らないが、記録だけの修正の例外(`docs/reports/` と insight event だけ)の対象でもないので、どう扱うかは lead が決める。直すなら、`/pr` の前にその 1 コミットにする
+  - L6 は `/pr` の本文に caveat を書き、merge のあとに release の issue へ 1 行を足す
