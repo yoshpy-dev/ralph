@@ -179,4 +179,4 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
-- [ ] PR created
+- [x] PR created(#238)
