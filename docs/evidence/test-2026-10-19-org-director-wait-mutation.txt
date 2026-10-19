@@ -431,3 +431,475 @@ C07       equivalent. reraiseSignal calls signal.Reset(sig) before it sends the
           child copy of the test binary) passes with the mutant. The comment
           "The caller's signal.Notify must be stopped before it runs"
           (org_wait_director.go:124-125) asks for more than the code needs.
+
+
+Cycle 2 (8a33364b..3add2caf), /test cycle 2, 2026-10-19
+==============================================================================
+
+Tree under test: worktree .claude/worktrees/org-director-wait, HEAD 3add2caf
+(base e38b89a9). go1.26.0 darwin/arm64. Scope: the cycle-2 code of
+internal/org/director_wait.go only: begin (38cac6f1: the read of
+director.jsonl under director-wait.lock, the not-current and read-error
+refusals, the lock fallback), decideStart and noteStartWatch (split out of
+begin in 6086af65), WaitInboxForDirector's handling of begin's error, three
+re-runs of cycle 1's survivors against the cycle-2 tests (O02, O35, O32;
+O31 and O28 are B09 and B21 below), and the zero-value defaults that the
+cycle-2 self-review's I1 names.
+
+Harness: <scratch>/mut2/mutants.py (not committed), the same method as cycle
+1: each mutant replaces one literal snippet that occurs exactly once in a copy
+of director_wait.go under <scratch>/mut2/<id>/, and `go test -overlay` reads
+the copy in place of the worktree's file. The worktree was never edited:
+`git status --porcelain` was empty before and after, and
+`git status --porcelain --ignored` (without .harness/cache/) differed only by
+the run-test.sh log docs/evidence/verify-2026-10-19-082913.log. Line numbers
+are those of HEAD 3add2caf.
+
+Filtered runs (one mutant at a time, sequential, after run-test.sh had ended):
+  org: go test -overlay ... -count=1 -timeout 8m -run 'DirectorWait|WaitInbox' ./internal/org/
+  cli: go test -overlay ... -count=1 -timeout 8m -run 'OrgWait|OrgDirector|DirectorWaitLine|ExitCode' ./internal/cli/
+A mutant counts as killed when the run exits non-zero with test failures (no
+mutant failed to build). Every org-filter survivor was run on the cli filter
+too.
+
+C2-1. Results: 30 mutants: 23 killed, 7 survived (org filter)
+------------------------------------------------------------------------------
+id | file:line | decision | verdict | secs | top-level tests that failed
+    - original snippet (tabs removed, newlines as ' / ')
+    + mutant snippet
+
+B01 | internal/org/director_wait.go:426 | begin re-read compares no attached_at (nil started) | survived | 18s | -
+    - directorWaitCheckCurrent(w.p.ID, &w.reg, res.Current); err != nil { / refused = err
+    + directorWaitCheckCurrent(w.p.ID, nil, res.Current); err != nil { / refused = err
+B02 | internal/org/director_wait.go:426 | begin re-read check dropped | killed | 28s | TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock
+    - if _, err := directorWaitCheckCurrent(w.p.ID, &w.reg, res.Current); err != nil { / refused = err / return nil ...
+    + _ = res
+B03 | internal/org/director_wait.go:421 | begin read error under the lock treated as no registration | killed | 15s | TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - res, err := NewDirectorStore(w.p.StateDir).Read() / if err != nil { / refused = fmt.Errorf("%s%w", directorWai...
+    + res, _ := NewDirectorStore(w.p.StateDir).Read()
+B04 | internal/org/director_wait.go:423 | begin read error loses the prefix | killed | 16s | TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - refused = fmt.Errorf("%s%w", directorWaitErrPrefix, err)
+    + refused = err
+B05 | internal/org/director_wait.go:423 | begin read error returned from the lock (wait goes on) | killed | 11s | TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - refused = fmt.Errorf("%s%w", directorWaitErrPrefix, err) / return nil
+    + return fmt.Errorf("%s%w", directorWaitErrPrefix, err)
+B06 | internal/org/director_wait.go:427 | begin not-current returned from the lock (wait goes on) | killed | 23s | TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock
+    - refused = err / return nil
+    + return err
+B07 | internal/org/director_wait.go:433 | begin refusal ignored after the lock | killed | 12s | TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock, TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - if refused != nil { / return refused / }
+    + _ = refused
+B08 | internal/org/director_wait.go:430 | decided not set under the lock (decideStart again without it) | survived | 11s | -
+    - wasAccepting, decided = w.decideStart(observed), true
+    + wasAccepting = w.decideStart(observed)
+B09 | internal/org/director_wait.go:436 | untaken lock skips decideStart (cycle-1 O31) | killed | 12s | TestWaitInboxForDirector_AStartThatCannotTakeTheLockStillCarriesOverTheWatch
+    - if !decided { / wasAccepting = w.decideStart(observed) / }
+    + _ = decided
+B10 | internal/org/director_wait.go:436 | decideStart fallback condition inverted | killed | 10s | TestWaitInboxForDirector_AStartThatCannotTakeTheLockStillCarriesOverTheWatch
+    - if !decided { / wasAccepting = w.decideStart(observed)
+    + if decided { / wasAccepting = w.decideStart(observed)
+B11 | internal/org/director_wait.go:441 | start write success never sets written | killed | 21s | TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain
+    - } else { / w.written = true / } / w.noteStartWatch
+    + } / w.noteStartWatch
+B12 | internal/org/director_wait.go:439 | start write failure not said | survived | 10s | -
+    - if err != nil { / w.sayWriteFailed(err) / } else {
+    + if err != nil { / } else {
+B13 | internal/org/director_wait.go:299 | WaitInboxForDirector ignores begin's error | killed | 11s | TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock, TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - if err := w.begin(ctx); err != nil { / return nil, err / }
+    + _ = w.begin(ctx)
+B14 | internal/org/director_wait.go:300 | WaitInboxForDirector writes an end on begin's refusal | killed | 10s | TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock, TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing
+    - return nil, err / } / return w.loop(ctx)
+    + w.end(DirectorWaitEndNotCurrent, "refused") / return nil, err / } / return w.loop(ctx)
+B15 | internal/org/director_wait.go:456 | decideStart keeps no prevWaitID | killed | 21s | TestWaitInboxForDirector_AWaitWhoseFirstWriteFailedWritesOnceItCan
+    - if prev != nil { / w.prevWaitID = prev.WaitID / }
+    + (removed)
+B16 | internal/org/director_wait.go:459 | decideStart carries over from any previous mark | killed | 14s | TestWaitInboxForDirector_CarriesOverOnlyThisRegistrationsPreviousMark
+    - wasAccepting = DirectorWaitFor(prev, &w.reg) != nil && prev.WatchAccepting
+    + wasAccepting = prev != nil && prev.WatchAccepting
+B17 | internal/org/director_wait.go:462 | decideStart: accepting ignores the carried value | killed | 21s | TestWaitInboxForDirector_ACancelDuringTheStartSettleKeepsTheCarriedWatch, TestWaitInboxForDirector_CarriesOverOnlyThisRegistrationsPreviousMark
+    - w.accepting = observed || wasAccepting
+    + w.accepting = observed
+B18 | internal/org/director_wait.go:463 | decideStart: start mark's watch_accepting not set | killed | 80s | TestWaitInboxForDirector_AStaleWatchThatWritesItsMarkWithinTheSettle, TestWaitInboxForDirector_AWatchThatStopsAcceptingWorkEndsTheWait, TestWaitInboxForDirector_AnOpenItemWinsOverAWatchThatStopped
+    - w.mark.WatchAccepting = w.accepting / w.mark.SeenAt = w.p.Now().UTC().Format(time.RFC3339) / return wasAccepti...
+    + w.mark.SeenAt = w.p.Now().UTC().Format(time.RFC3339) / return wasAccepting
+B19 | internal/org/director_wait.go:464 | decideStart: start mark has no seen_at | survived | 15s | -
+    - w.mark.SeenAt = w.p.Now().UTC().Format(time.RFC3339) / return wasAccepting
+    + return wasAccepting
+B20 | internal/org/director_wait.go:465 | decideStart returns accepting instead of wasAccepting | survived | 11s | -
+    - return wasAccepting / }
+    + return w.accepting / }
+B21 | internal/org/director_wait.go:477 | a ctx-cut settle counts as decided (cycle-1 O28) | killed | 10s | TestWaitInboxForDirector_ACancelDuringTheStartSettleWritesNoNote
+    - case !settled, observed:
+    + case observed:
+B22 | internal/org/director_wait.go:477 | an accepting watch at the start is not a no-op | killed | 10s | TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain, TestWaitInboxForDirector_AMarkThatCannotBeWrittenIsSaidOnce, TestWaitInboxForDirector_AStaleWatchThatWritesItsMarkWithinTheSettle, TestWaitInboxForDirector_AWaitWhoseFirstWriteFailedWritesOnceItCan, TestWaitInboxForDirector_AWatchThatStopsAcceptingWorkEndsTheWait, TestWaitInboxForDirector_AnOpenItemEndsWithItems, TestWaitInboxForDirector_TwoWaitsLeaveTheLaterOnesMark
+    - case !settled, observed:
+    + case !settled:
+B23 | internal/org/director_wait.go:482 | start note uses a zero liveness | killed | 10s | TestWaitInboxForDirector_TimesOutWithThePhraseAfterANote
+    - directorWaitWatchFacts(w.p, w.watch)) / } / }
+    + directorWaitWatchFacts(w.p, WatchLiveness{})) / } / }
+B24 | internal/org/director_wait.go:405 | begin does not keep the probe's liveness | killed | 10s | TestWaitInboxForDirector_AnOpenItemWinsOverAWatchThatStopped, TestWaitInboxForDirector_CarriesOverOnlyThisRegistrationsPreviousMark, TestWaitInboxForDirector_TimesOutWithThePhraseAfterANote
+    - w.watch = l / observed := WatchAcceptsWork(l)
+    + observed := WatchAcceptsWork(l)
+B25 | internal/org/director_wait.go:479 | start carry-over sets no noWatch | killed | 11s | TestWaitInboxForDirector_AStartThatCannotTakeTheLockStillCarriesOverTheWatch, TestWaitInboxForDirector_AnOpenItemWinsOverAWatchThatStopped
+    - w.noWatch = true / w.noWatchSince = "the last wait of "
+    + w.noWatchSince = "the last wait of "
+R02 | internal/org/director_wait.go:691 | owner: drop the written guard (cycle-1 O02) | killed | 21s | TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain
+    - if w.written { / return false / } / if disk == nil {
+    + if disk == nil {
+R35 | internal/org/director_wait.go:691 | removed mark written again (cycle-1 O35) | killed | 22s | TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain
+    - if w.written { / return false / } / if disk == nil { / return w.prevWaitID == "" / }
+    + if disk == nil { / return w.prevWaitID == "" / } / if w.written { / return false / }
+R32 | internal/org/director_wait.go:648 | detail not escaped (cycle-1 O32) | killed | 10s | TestWaitInboxForDirector_TheDetailIsEscaped
+    - w.mark.End, w.mark.Detail = end, PrintableInboxText(detail, false)
+    + w.mark.End, w.mark.Detail = end, detail
+N1 | internal/org/director_wait.go:374 | default watch probe interval is not the constant | survived | 12s | -
+    - p.WatchProbeInterval = DirectorWaitWatchProbeInterval
+    + p.WatchProbeInterval = time.Hour
+N2 | internal/org/director_wait.go:371 | default mark interval is not the constant | survived | 12s | -
+    - p.MarkInterval = DirectorWaitMarkInterval
+    + p.MarkInterval = time.Hour
+
+C2-2. First failing assertion of each killed mutant (each read: a behavior
+      difference, not a timeout or a flake; <tmp> replaces t.TempDir paths)
+------------------------------------------------------------------------------
+B02  director_wait_owner_test.go:105: after d1's wait director-wait.json is d1's
+     mark (wait_id 4100-..., end not_current, detail "the current registration
+     is d2"); want d2's as it was
+B03  director_wait_owner_test.go:164: err = org: wait --inbox --director: d1 is
+     not the current director registration: no registration is current; want a
+     plain read error with the prefix
+B04  director_wait_owner_test.go:164: err = org: director: read <tmp>/.../director.jsonl:
+     ... is a directory; want a plain read error with the prefix
+B05  director_wait_owner_test.go:169: director-wait.json = d1's mark with end
+     error; want none (and :174: stderr has "the wait mark is not written" and
+     a note: line; want nothing)
+B06  director_wait_owner_test.go:105: as B02 (d1's not_current end over d2's mark)
+B07  director_wait_owner_test.go:111: d1's stderr = "note: no ralph org watch
+     --all accepts work on this ledger, ..."; want nothing
+B09  director_wait_owner_test.go:227: err = ... no open inbox item arrived within
+     300 ms; want ErrDirectorWaitNoWatch carried over without the lock
+B10  director_wait_owner_test.go:227: as B09
+B11  director_wait_owner_test.go:195: stderr never said "no longer holds the
+     mark of this wait": ""
+B13  director_wait_owner_test.go:111: d1's stderr = "wait --inbox --director:
+     another ralph org wait --inbox --director (wait_id 4102-..., pid 4102)
+     took over <tmp>/.../director-wait.json, ..."; want nothing
+B14  director_wait_owner_test.go:111: as B13
+B15  director_wait_test.go:552: director-wait.json never showed this wait's
+     mark: last read the previous wait's (WaitID 1-1)
+B16  director_wait_watch_test.go:245: err = ... no watch accepts work: a ralph
+     org watch --all accepted work when the last wait of d1 wrote its mark ...
+     (carried over from another registration's mark)
+B17  director_wait_watch_test.go:217: mark = {... WatchAccepting:false ...}
+     (the carried value was dropped)
+B18  director_wait_watch_test.go:129: director-wait.json never showed the start
+     with a watch that accepts work
+B21  director_wait_watch_test.go:483: stderr = "note: no ralph org watch --all
+     accepts work on this ledger, and this wait keeps waiting: ..."; want nothing
+B22  director_wait_owner_test.go:206: stderr = "note: ... watch-alive.json says
+     running (pid 4242, ..."; want one line about the mark
+B23  director_wait_watch_test.go:72: stderr = "note: ... keeps waiting: the
+     watch is ; ..." (the facts of a zero liveness)
+B24  director_wait_watch_test.go:72: as B23
+B25  director_wait_owner_test.go:227: err = ... accepted work when this wait
+     last probed it ...; want the carried-over text "when the last wait of d1
+     wrote its mark"
+R02  director_wait_owner_test.go:195: stderr never said "no longer holds the
+     mark of this wait": ""
+R35  director_wait_owner_test.go:195: as R02
+R32  director_wait_watch_test.go:439: detail = "signal\x1b[2J"; want the cause
+     escaped
+
+C2-3. Survivors on the cli filter, and why no whole-package rerun
+------------------------------------------------------------------------------
+cli filter (sequential): B01 81s, B08 79s, B12 68s, B19 61s, B20 56s,
+N1 62s, N2 62s: all survived (rc 0).
+
+No whole-package rerun was needed: the mutated functions are reached only
+through WaitInboxForDirector, and every test that reaches it is in a file
+whose every test the two filters select:
+  grep -rn 'WaitInboxForDirector\|newDirectorWaitRun\|DirectorWaitParams{' internal cmd
+    -> code only in internal/org/director_wait.go and internal/cli/org_wait_director.go;
+       elsewhere only comments (spawn.go:244, :265, escalate.go:309)
+  org tests that run a wait: director_wait_test.go (fixture and begin calls),
+    director_wait_owner_test.go, director_wait_watch_test.go; every func Test
+    in the three files matches 'DirectorWait|WaitInbox' (grep -v is empty)
+  cli tests that run `ralph org wait --inbox --director`: org_wait_director_test.go
+    and org_director_wait_line_test.go; every func Test in them matches the
+    cli filter; the other test files that name `--director`
+    (org_director_check_line_test.go, org_director_wake_test.go,
+    org_director_test.go, exitcode_test.go, prompts_test.go) do so only in
+    comments, error values, or template strings, and run no wait.
+
+C2-4. Probes (not committed; added to package org through the overlay as
+      internal/org/zz_probe_dirwait2_test.go)
+------------------------------------------------------------------------------
+go test -overlay <scratch>/mut2/<X>/overlay-probe.json ./internal/org/ -run '^TestProbeDirWait2_' -count=<n> -v -timeout 30m
+
+  HEAD (-count=10): 60 PASS lines (P5 with 2 subtests, P6, P7, P8), FAIL 0
+  HEAD with -race -count=3: ok, 18 PASS lines, DATA RACE 0
+  B01 (-count=3): FAIL TestProbeDirWait2_ASameIDAttachedAgainBeforeTheStartTakesTheLock,
+      both subtests, all 3 runs; P6, P7, P8 PASS:
+      zz_probe_dirwait2_test.go:107: after the old wait director-wait.json is
+        {"wait_id": "4100-1792400400000000000", "id": "d1",
+         "attached_at": "2026-10-19T08:00:00Z", "pid": 4100, ...,
+         "watch_accepting": false, "ended_at": "2026-10-19T09:00:00Z",
+         "end": "not_current", "detail": "d1 was attached again"};
+        want the new wait's as it was:
+        {"wait_id": "4102-1792400400000000000", "id": "d1",
+         "attached_at": "2026-10-19T08:30:00Z", "pid": 4102, ...}
+      zz_probe_dirwait2_test.go:110: the old wait's stderr = "note: no ralph
+        org watch --all accepts work on this ledger, and this wait keeps
+        waiting: ..."; want nothing
+      zz_probe_dirwait2_test.go:113: director-wait.json never showed the new
+        wait's rewrite a minute later: last read the old wait's mark with end
+        not_current
+  B08 (-count=3): all PASS
+  B12 (-count=3): FAIL TestProbeDirWait2_AStartWhoseWriteFailsSaysSoAtOnce,
+      all 3 runs: the line about the failed write appears only when the
+      wait's end (its 10 s timeout) fails to write, so the item escalated
+      after it is not returned:
+      zz_probe_dirwait2_test.go:151: wait = [], org: wait --inbox --director:
+        no open inbox item arrived within 10000 ms; want e1
+  B19 (-count=3): FAIL TestProbeDirWait2_TheStartsMarkHasSeenAt, all 3 runs:
+      zz_probe_dirwait2_test.go:173: the start's mark = {... StartedAt:
+        2026-10-19T09:00:00Z SeenAt: WatchAccepting:true ...}; want seen_at =
+        started_at = 2026-10-19T09:00:00Z
+  B20 (-count=3): all PASS
+  N1 (-count=3): FAIL TestProbeDirWait2_ZeroIntervalsTakeTheConstants:
+      zz_probe_dirwait2_test.go:132: defaults = mark 30s, probe 1h0m0s; want 30s and 5s
+  N2 (-count=3): FAIL TestProbeDirWait2_ZeroIntervalsTakeTheConstants:
+      zz_probe_dirwait2_test.go:132: defaults = mark 1h0m0s, probe 5s; want 30s and 5s
+  Each mutant failed only the probe aimed at it.
+
+Probe source:
+
+package org
+
+// Probe tests for the /test cycle 2 of org-director-wait (tester, not
+// committed): each pins one behavior that no committed test pins, to show
+// that the surviving mutant named in its comment is killable. Added to the
+// package through `go test -overlay` only.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// P5 (B01, self-review I1): d1's wait passes its first check, and before its
+// start takes director-wait.lock the registration becomes d1 again with a new
+// attached_at (the ledger removed and attached again, or a hand edit), and the
+// new session's wait for d1 writes its mark. The old wait's start must read
+// the attached_at under the lock and end with ErrDirectorWaitNotCurrent,
+// leaving the new wait's mark byte for byte, saying nothing, and the new
+// wait keeps the mark (its rewrite a minute later lands, no lost line).
+func TestProbeDirWait2_ASameIDAttachedAgainBeforeTheStartTakesTheLock(t *testing.T) {
+	rows := map[string]func(f *dirWaitFixture) error{
+		"the ledger removed and attached again": func(f *dirWaitFixture) error {
+			if err := os.Remove(f.store.Path()); err != nil {
+				return err
+			}
+			f.store.Now = func() time.Time { return dirWaitT0.Add(-30 * time.Minute) }
+			reg, _, err := f.store.Attach(DirectorAttach{Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}, User: "u", Cwd: "/w"})
+			if err == nil && (reg.ID != "d1" || reg.AttachedAt != "2026-10-19T08:30:00Z") {
+				return errors.New("the new attach is " + reg.ID + " at " + reg.AttachedAt + "; want d1 at 08:30")
+			}
+			return err
+		},
+		"a hand edit": func(f *dirWaitFixture) error {
+			ev := DirectorEvent{TS: "2026-10-19T08:30:00Z", ID: "d1", Event: DirectorEventAttached, Driver: DirectorDriverClaude, Wake: []string{DirectorWakePull}, User: "u", Cwd: "/w"}
+			raw, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			tmp := f.store.Path() + ".new"
+			if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+				return err
+			}
+			return os.Rename(tmp, f.store.Path())
+		},
+	}
+	for name, change := range rows {
+		t.Run(name, func(t *testing.T) {
+			f := newDirWaitFixture(t)
+			if reg := f.attach(t); reg.ID != "d1" || reg.AttachedAt != "2026-10-19T08:00:00Z" {
+				t.Fatalf("first attach = %+v", reg)
+			}
+			newCtx, newCancel := context.WithCancelCause(context.Background())
+			defer newCancel(nil)
+			var newErr lockedBuffer
+			var newOffset atomic.Int64
+			p2 := f.params("d1")
+			p2.PID, p2.Stderr, p2.Timeout = 4102, &newErr, dirWaitLimit
+			p2.Now = func() time.Time { return dirWaitT0.Add(time.Duration(newOffset.Load())) }
+			newWaitID := "4102-" + strconv.FormatInt(dirWaitT0.UnixNano(), 10)
+
+			var fired atomic.Bool
+			var newDone <-chan dirWaitOutcome
+			var newRaw string
+			setDirectorWaitBeforeBeginLock(t, func() {
+				if !fired.CompareAndSwap(false, true) {
+					return // the new wait's own start
+				}
+				if err := change(f); err != nil {
+					t.Errorf("attach d1 again: %v", err)
+					return
+				}
+				newDone = f.startDirectorWait(newCtx, p2)
+				deadline := time.Now().Add(dirWaitLimit)
+				for {
+					raw, err := rawDirectorWait(f.dir)
+					var m DirectorWaitMark
+					if err == nil && json.Unmarshal([]byte(raw), &m) == nil && m.WaitID == newWaitID {
+						newRaw = raw
+						return
+					}
+					if time.Now().After(deadline) {
+						t.Errorf("the new wait never wrote its mark: last read %q, %v", raw, err)
+						return
+					}
+					time.Sleep(5 * time.Millisecond)
+				}
+			})
+
+			var oldErr lockedBuffer
+			p1 := f.params("d1")
+			p1.Stderr, p1.Timeout = &oldErr, dirWaitLimit
+			out := f.runDirectorWait(t, p1)
+			if newDone == nil || newRaw == "" {
+				t.Fatal("the seam did not start the new wait and see its mark")
+			}
+			if !errors.Is(out.err, ErrDirectorWaitNotCurrent) || !strings.Contains(out.err.Error(), "not the d1 attached 2026-10-19T08:00:00Z that this wait started for") {
+				t.Errorf("the old wait = %v; want ErrDirectorWaitNotCurrent for d1 attached again", out.err)
+			}
+			if got, err := rawDirectorWait(f.dir); err != nil || got != newRaw {
+				t.Errorf("after the old wait director-wait.json is %q (%v); want the new wait's as it was:\n%s", got, err, newRaw)
+			}
+			if s := oldErr.String(); s != "" {
+				t.Errorf("the old wait's stderr = %q; want nothing", s)
+			}
+			newOffset.Store(int64(time.Minute))
+			f.waitForMark(t, "the new wait's rewrite a minute later", func(m DirectorWaitMark) bool {
+				return m.WaitID == newWaitID && m.SeenAt == "2026-10-19T09:01:00Z" && m.End == ""
+			})
+			newCancel(errors.New("signal: terminated"))
+			if o := awaitDirectorWait(t, newDone); o.err == nil || !strings.Contains(o.err.Error(), "signal: terminated") {
+				t.Fatalf("the new wait = %v; want its signal", o.err)
+			}
+			if s := newErr.String(); strings.Contains(s, directorWaitNoticePrefix) {
+				t.Errorf("the new wait's stderr = %q; want no line about the mark", s)
+			}
+		})
+	}
+}
+
+// P6 (N1, N2, self-review I1 first half): the zero intervals of
+// DirectorWaitParams take the exported constants the help quotes.
+func TestProbeDirWait2_ZeroIntervalsTakeTheConstants(t *testing.T) {
+	w := newDirectorWaitRun(&Org{}, DirectorWaitParams{})
+	if w.p.MarkInterval != DirectorWaitMarkInterval || w.p.WatchProbeInterval != DirectorWaitWatchProbeInterval {
+		t.Errorf("defaults = mark %v, probe %v; want %v and %v", w.p.MarkInterval, w.p.WatchProbeInterval, DirectorWaitMarkInterval, DirectorWaitWatchProbeInterval)
+	}
+}
+
+// P7 (B12): a start whose first write fails says so at once, before any
+// later write of the mark (the mark interval is an hour here), and only once.
+func TestProbeDirWait2_AStartWhoseWriteFailsSaysSoAtOnce(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	if err := os.Mkdir(DirectorWaitPathIn(f.dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := f.params("d1")
+	p.MarkInterval, p.Timeout = time.Hour, dirWaitLimit
+	done := f.startDirectorWait(context.Background(), p)
+	waitForStderr(t, f.stderr, "the wait mark is not written")
+	f.escalate(t, "org-a")
+	if out := awaitDirectorWait(t, done); out.err != nil || len(out.items) != 1 {
+		t.Fatalf("wait = %v, %v; want e1", waitInboxItemIDs(out.items), out.err)
+	}
+	if s := f.stderr.String(); strings.Count(s, "\n") != 1 {
+		t.Errorf("stderr = %q; want one line about the mark", s)
+	}
+}
+
+// P8 (B19): the start's mark carries seen_at, the start time, before any
+// later write (the mark interval is an hour here).
+func TestProbeDirWait2_TheStartsMarkHasSeenAt(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	p := f.params("d1")
+	p.MarkInterval, p.Timeout = time.Hour, dirWaitLimit
+	done := f.startDirectorWait(ctx, p)
+	m := f.waitForMark(t, "the start", func(DirectorWaitMark) bool { return true })
+	cancel(errors.New("signal: terminated"))
+	_ = awaitDirectorWait(t, done)
+	if m.SeenAt != "2026-10-19T09:00:00Z" || m.SeenAt != m.StartedAt {
+		t.Errorf("the start's mark = %+v; want seen_at = started_at = 2026-10-19T09:00:00Z", m)
+	}
+}
+
+C2-5. Classification of the cycle-2 survivors
+------------------------------------------------------------------------------
+B01       closable gap (LOW). Self-review I1 confirmed. begin's read under
+          director-wait.lock compares attached_at (directorWaitCheckCurrent
+          with &w.reg), but no committed test changes the registration to the
+          same id with a new attached_at between the first read and the lock:
+          TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock
+          changes the id (d2), and the attached-again row of
+          _ARegistrationThatChangesEndsTheWait changes it after the start, for
+          refresh. With nil, the old wait passes the read under the lock,
+          writes its mark over the new wait's (decideStart reads the new
+          mark as prevWaitID, DirectorWaitFor rejects it for the carry-over),
+          prints a note: (P5 runs no watch), ends not_current at its first
+          refresh, and the new
+          wait, already written, finds another wait_id and never writes the
+          mark again: the cycle-1 cross-review defect for the same-id case.
+          The same id comes back only when director.jsonl is removed and a
+          session attaches again (nextID restarts at d1) or by a hand edit,
+          inside the window of begin's probe (up to the settle). P5 kills it
+          on both rows.
+B12       closable gap (LOW). A start whose first write fails says so at
+          once (begin's sayWriteFailed). Every committed test of a failed
+          start write keeps the obstacle, so a later save (the 20 ms refresh,
+          or the end) says the same line once and the count stays 1; with the
+          mutant the line comes only from that later save (30 s in
+          production, or never if the second write succeeds). P7 kills it.
+B19       closable gap (LOW). The start's mark has seen_at = the start
+          time. Every test reads seen_at only after a later save rewrote it,
+          or not at all. With the mutant the mark carries no seen_at until
+          the first refresh (30 s): `director status` then says "last wrote
+          its mark at " with no time, and readOrgDirectorWait never marks a
+          seen_at that does not parse as stale, so a wait SIGKILLed before
+          its first refresh would show as running with no "has not written
+          it since" clause for good (D2 and D5 rely on seen_at for that).
+          P8 kills it.
+N1, N2    pinned by nothing (INFO). Self-review I1, first half. The defaults
+          run (the cli filter covers newDirectorWaitRun at 100%), so the
+          claim "never runs in tests" holds only for the org run, but no test
+          checks their value: every wait test sets short intervals, and
+          TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer pins
+          the constants against the help, not their use as defaults. P6, a
+          white-box check of newDirectorWaitRun, kills both.
+B08       equivalent for every sequential schedule. Without decided, begin
+          calls decideStart again after its write, without the lock: it reads
+          its own mark (prevWaitID becomes its own wait_id, which owns no
+          longer consults once written is set) and gets the same
+          watch_accepting, so noteStartWatch decides the same. The two differ
+          only when another wait writes the mark between this wait's release
+          of the lock and that second read; no test can schedule that without
+          a seam after the lock.
+B20       equivalent. decideStart's result reaches only noteStartWatch, whose
+          first case takes every observed=true start; with observed false,
+          w.accepting = observed || wasAccepting = wasAccepting.

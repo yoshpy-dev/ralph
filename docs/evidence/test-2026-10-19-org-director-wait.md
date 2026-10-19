@@ -187,3 +187,116 @@ elapsed=72s
 ## 7. Mutation
 
 56 overlay mutants, 50 killed on the filtered runs; the 6 survivors also survive their whole package; 5 of them are killed by one probe test each, and 1 is equivalent. The table, the first failing assertion of each kill, the whole-package reruns, and the probe source are in `docs/evidence/test-2026-10-19-org-director-wait-mutation.txt`.
+
+# Cycle 2 (8a33364b..3add2caf)
+
+- HEAD 3add2caf (base e38b89a9), same machine (macOS arm64, Darwin 25.5.0, 12 CPUs), go1.26.0 and go1.25.8 (`GOTOOLCHAIN`)
+- 2026-10-19 17:29 to 18:45 JST. Load average 7 to 94 during the runs, from other sessions on the machine (no load was added on purpose this cycle)
+- `<scratch>` is the session scratchpad outside the worktree; `<tmp>` replaces the per-user temp path and the random part of `t.TempDir` names; `~` is `$HOME`
+- No test or code file was changed. Mutants and probes were overlay files under `<scratch>/mut2/` read through `go test -overlay`; `git status --porcelain` was empty before and after, and `git status --porcelain --ignored` (without `.harness/cache/`) differed only by the run-test.sh log `docs/evidence/verify-2026-10-19-082913.log`
+- Every Go command below ran alone, one after another; no two whole-package runs overlapped (run-test.sh's own `go test ./...` is the only whole-package run of this cycle)
+
+## C2-1. `GOFLAGS=-timeout=30m ./scripts/run-test.sh` (go1.26.0)
+
+```
+# Verification run
+- Timestamp: 2026-10-19T08:29:13Z
+- Mode: test
+- Requested scope: changed
+==> Language scope: changed (changed_languages)
+==> Language packs selected: golang
+ok  	github.com/yoshpy-dev/ralph/internal/cli	679.384s
+ok  	github.com/yoshpy-dev/ralph/internal/config	1.792s
+ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/org	836.566s
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+
+==> All verifiers passed.
+Evidence saved to: docs/evidence/verify-2026-10-19-082913.log
+rc=0 elapsed=1869s     (17:29:12 to 18:00:21 JST; load average 56 at the end)
+```
+
+Shell suites (local verifier): the same 41 as cycle 1 (C1 section 1), each ending `OK` (41 `OK` lines); no `FAIL: <n>` line with n > 0; one skip, the same as cycle 1 (`tests/test-secret-scan-branch.sh`: the real git older than 2.41 case, git 2.49.0).
+
+## C2-2. Focused runs
+
+```
+go test ./internal/org/ -run 'DirectorWait|WaitInbox|CheckDirectorWaitID|ReadDirectorWait' -count=10 -timeout 30m -v
+ok  	github.com/yoshpy-dev/ralph/internal/org	55.295s
+rc=0 elapsed=57s   top-level 370 PASS (37 tests x 10), 0 FAIL, 0 SKIP; 870 PASS lines with subtests
+
+go test -race ./internal/org/ -run 'DirectorWait|WaitInbox' -count=5 -timeout 30m -v
+ok  	github.com/yoshpy-dev/ralph/internal/org	29.787s
+rc=0 elapsed=45s   top-level 185 PASS (37 x 5), 0 FAIL; 435 PASS lines; WARNING: DATA RACE lines 0
+
+go test ./internal/cli/ -run 'OrgWait|OrgDirector|DirectorWaitLine|ExitCode' -count=3 -timeout 30m -v
+ok  	github.com/yoshpy-dev/ralph/internal/cli	382.866s
+rc=0 elapsed=384s  top-level 345 PASS (115 x 3), 0 FAIL, 0 SKIP; 957 PASS lines (load average 40 to 90)
+
+GOTOOLCHAIN=go1.25.8 go test ./internal/org/ ./internal/cli/ -run 'DirectorWait|WaitInbox|OrgWait|DirectorWaitLine' -count=1 -timeout 30m -v
+go version go1.25.8 darwin/arm64
+ok  	github.com/yoshpy-dev/ralph/internal/org	6.455s    (40 top-level PASS)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	17.976s   (27 top-level PASS)
+rc=0 elapsed=36s   top-level 67 PASS, 0 FAIL, 0 SKIP; 156 PASS lines
+```
+
+The 7 tests added in cycle 2 (6 org: `TestWaitInboxForDirector_ARegistrationReplacedBeforeTheStartTakesTheLock`, `_ARegistrationThatCannotBeReadUnderTheStartsLockWritesNothing`, `_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain`, `_AStartThatCannotTakeTheLockStillCarriesOverTheWatch`, `_TheDetailIsEscaped`, `_ACancelDuringTheStartSettleWritesNoNote`; 1 cli: `TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer`) have 60, 30, 3, and 7 top-level PASS lines in the four runs: every run, no failure. No known flake fired in any run of this cycle (`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` of `docs/tech-debt/README.md:279`, which failed in cycle 1's go1.25.8 run, and `TestRegate_FetchFailures/the_fetch_runs_past_the_bound` both passed inside run-test.sh's whole-package org run).
+
+## C2-3. Isolation (AC9): canary on PATH for the cycle-2 tests
+
+Canaries for `herdr gh tmux orca osascript open agmsg codex claude curl` (log `<name> <args>` to `<scratch>/canary/calls.log`, exit 1) first on PATH; the real ones are in `/opt/homebrew/bin` and `/usr/bin`:
+
+```
+PATH=<scratch>/canary/bin:$PATH sh -c 'command -v herdr gh tmux orca osascript open'   -> all six resolve to <scratch>/canary/bin
+sensitivity: PATH=<scratch>/canary/bin:$PATH sh -c 'herdr --sensitivity-check'          -> calls.log: "herdr --sensitivity-check"
+(calls.log emptied)
+PATH=<scratch>/canary/bin:$PATH go test ./internal/org/ -run '^(<the 6 cycle-2 org tests>)$' -count=1 -v -timeout 30m
+ok  	github.com/yoshpy-dev/ralph/internal/org	1.026s     (6 PASS)
+PATH=<scratch>/canary/bin:$PATH go test ./internal/cli/ -run '^TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer$' -count=1 -v -timeout 30m
+ok  	github.com/yoshpy-dev/ralph/internal/cli	0.520s     (1 PASS)
+canary calls: 0
+```
+
+The default ledger `<main checkout>/.harness/state/org` and the worktree's `.harness/state/org` did not exist after the runs; nothing under `<main checkout>/.git/ralph/` changed after 17:29 JST (`find -newermt`); no `director-wait.*` file appeared in the worktree outside the committed evidence docs.
+
+## C2-4. Coverage of `internal/org/director_wait.go` (filtered runs)
+
+```
+go test ./internal/org/ -run 'DirectorWait|WaitInbox|CheckDirectorWaitID|ReadDirectorWait' -count=1 -coverprofile=<scratch>/cover2-org.out -timeout 30m
+ok  	github.com/yoshpy-dev/ralph/internal/org	6.007s	coverage: 9.7% of statements
+go test ./internal/cli/ -run 'OrgWait|OrgDirector|DirectorWaitLine|ExitCode' -count=1 -coverpkg=./internal/cli/,./internal/org/ -coverprofile=<scratch>/cover2-cli.out -timeout 30m
+ok  	github.com/yoshpy-dev/ralph/internal/cli	63.849s	coverage: 28.3% of statements in ./internal/cli/, ./internal/org/
+```
+
+`go tool cover -func`, org run (cli run in brackets where it differs and is higher):
+
+```
+DirectorWaitPathIn 100.0%       ReadDirectorWait 100.0%        DirectorWaitFor 100.0%
+CheckDirectorWaitID 100.0%      WaitInboxForDirector 87.5%     directorWaitCheckCurrent 100.0%
+newDirectorWaitRun 54.5% [100.0%]  begin 100.0%                decideStart 100.0%
+noteStartWatch 100.0%           loop 97.6%                     probe 100.0%
+probeAgain 92.9%                refresh 100.0%                 endNoWatch 100.0%
+endError 100.0%                 endSignal 100.0%               end 100.0%
+save 100.0%                     owns 100.0%                    sayLost 100.0%
+sayWriteFailed 100.0%           directorWaitItemsDetail 66.7%  directorWaitWatchFacts 100.0%
+directorWaitWatchState 87.5%    directorWaitTSOf 66.7%         directorWaitMarkTS 66.7%
+```
+
+Blocks with count 0 in both runs (the `newDirectorWaitRun` defaults at 370-384 run in the cli run; cycle 1's `begin` lock-fallback block and `sayLost`'s no-mark block are now covered):
+
+```
+284-286  nil Inbox guard              287-289  empty StateDir guard
+495-497  loop: InboxPollInterval <= 0 default
+587-589  probeAgain: ctx done during a round's settle
+728      directorWaitItemsDetail: "<n> open inbox items" (n > 1)
+764-765  not_running with a mark state other than running/stopping/stopped
+781      the fallback "the watch is <state>"
+786-788  directorWaitTSOf(nil)        795-797  directorWaitMarkTS("")
+```
+
+## C2-5. Mutation
+
+30 overlay mutants of `internal/org/director_wait.go` (25 on `begin`, `decideStart`, `noteStartWatch`, and `WaitInboxForDirector`'s handling of `begin`'s error; 3 re-runs of cycle 1's survivors O02, O35, O32 against the cycle-2 tests; 2 on the zero-value defaults of self-review I1). Org filter: 23 killed, 7 survived; the 7 also survive the cli filter; 5 of them are killed by one probe each (P5 to P8), 2 are equivalent. Table, first failing assertions, probe results and source: `docs/evidence/test-2026-10-19-org-director-wait-mutation.txt`, section "Cycle 2".
