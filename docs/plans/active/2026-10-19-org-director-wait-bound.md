@@ -133,4 +133,5 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - [x] Verification artifact created
 - 2026-10-19: test(cycle 1、35280638)は pass。run-test.sh は rc 0(996 秒)、`TestDirectorSkill` は 2 つの toolchain で 25 本 PASS、数の mutant は 22 回のすべてで落ちた。指摘は LOW 1 件(T1: テストが数だけを固定し、AC2 と AC3 の文は 4 つの写しを揃えて消しても落ちない)と INFO 1 件(T2)。T1 は S6(implementer、9eb98897)で直した。`TestDirectorSkill_PinsTheClaudeCodeWaitRules` が、Claude Code の箇条の 5 つの断片(時間切れの打ち直し、Bash の代わりの手と残り方、`note:` の届き方)と小節の 7 つの断片(`1:` の打ち直し、Monitor の期限切れの例外と、知らせが届いていないとき・あとから届いたとき)を固定する。断片を 1 つずつ壊す 22 の mutant がすべて落ちた(`docs/evidence/test-2026-10-19-org-director-wait-bound-rules-mutation.txt`)。このあと run-verify を打ち直す
 - [x] Test artifact created
+- 2026-10-19: sync-docs(cycle 1)は、README の director の段落、recipe、AGENTS.md、repo-map、`docs/quality/`、`.claude/rules/ralph/`、`/org` skill、雛形、help を skill の変更に突き合わせた。ずれは tech-debt 248 行の「Not checked」が、実機の確認のあとに変えた skill の文(dc98d5ec、de2b05d1)を書いていない 1 点で、直した。記録は `docs/reports/sync-docs-2026-10-19-org-director-wait-bound.md`
 - [ ] PR created
