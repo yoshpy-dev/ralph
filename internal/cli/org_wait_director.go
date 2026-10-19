@@ -30,11 +30,16 @@ import (
 // until then, so a second one cannot end the process before the end is
 // written. Once the items are printed, a signal that arrived ends the process
 // by that same signal (orgDirectorWaitReraise), as it would have without the
-// handler. When the process is still alive after that, because the signal
-// was ignored when ralph started (a nohup'd SIGHUP), the wait's error is
-// returned (exit 1). A context of the command that ends with no signal ends
-// the wait the same way, with "context canceled" as the cause, and its error
-// is returned.
+// handler. A SIGHUP or SIGINT that was ignored when ralph started (nohup
+// ignores SIGHUP, a shell's `&` SIGINT) is not registered
+// (notIgnoredSignals), since signal.Notify would install a handler for it:
+// it stays ignored and does not end the wait. (Go keeps an inherited ignore
+// only for those two; it handles SIGTERM in any case, so SIGTERM is always
+// registered.) When the signal sent again does not end the process
+// within reraiseSignal's grace, the command returns what the wait returned:
+// its error (exit 1), or nil after the items it printed. A context of the
+// command that ends with no signal ends the wait the same way, with "context
+// canceled" as the cause, and its error is returned.
 //
 // The verb only reads the ledger except for its own mark, so it is
 // orgLedgerReadOnly: a legacy worktree ledger gets a note, not a refusal.
@@ -51,7 +56,7 @@ func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, ti
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, received, stop := signalCauseContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, received, stop := signalCauseContext(parent, notIgnoredSignals(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)...)
 	items, err := rt.WaitInboxForDirector(ctx, org.DirectorWaitParams{
 		ID:                 id,
 		StateDir:           resolved,
@@ -83,6 +88,19 @@ var (
 	orgDirectorWaitSettleOverride             time.Duration
 )
 
+// notIgnoredSignals returns sigs, in order, without those ignored when it
+// runs (signal.Ignored): before the wait registers any, that is how they
+// were when ralph started.
+func notIgnoredSignals(sigs ...os.Signal) []os.Signal {
+	var kept []os.Signal
+	for _, sig := range sigs {
+		if !signal.Ignored(sig) {
+			kept = append(kept, sig)
+		}
+	}
+	return kept
+}
+
 // orgDirectorWaitReraise ends the process by sig, the signal that ended a
 // --director wait, after the wait wrote its end. reraiseSignal in
 // production; an in-process test sets a recorder, since the real one would
@@ -96,8 +114,10 @@ const reraiseGrace = 2 * time.Second
 // reraiseSignal sends sig to this process with its handling reset to what it
 // was when ralph started, so the process ends by sig as if nothing had
 // caught it, and returns only when it has not ended within reraiseGrace: sig
-// was ignored when ralph started (a nohup'd SIGHUP), or could not be sent.
-// The caller's signal.Notify must be stopped before it runs.
+// could not be sent, or its handling at ralph's start does not end the
+// process. The wait registers no signal that was ignored at the start
+// (notIgnoredSignals), so that is not the usual case. The caller's
+// signal.Notify must be stopped before it runs.
 func reraiseSignal(sig os.Signal) {
 	s, ok := sig.(syscall.Signal)
 	if !ok {

@@ -1275,7 +1275,9 @@ func newOrgWaitCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"watch, ralph org watch --all --detach. It starts no watch itself.\n" +
 			"When no watch accepts work at its start, it prints a note: line on\n" +
 			"stderr and keeps waiting. SIGINT, SIGTERM, and SIGHUP end it: it\n" +
-			"writes end=signal to its mark and then ends by the same signal.",
+			"writes end=signal to its mark and then ends by the same signal. A\n" +
+			"SIGHUP or SIGINT that was ignored when it started (nohup ignores\n" +
+			"SIGHUP) stays ignored.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// --director is checked first, so it is never taken for a
 			// seat wait's flag, and nothing is read before the refusal.

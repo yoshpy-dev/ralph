@@ -136,11 +136,16 @@ func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Conte
 // returns the first of sigs that the goroutine took, which cancelled ctx
 // unless ctx had just ended, or nil when it took none (no signal came, or
 // parent or stop ended ctx first). stop waits for the goroutine to end, so
-// once stop has returned, received no longer changes.
+// once stop has returned, received no longer changes. With no sigs it
+// registers none, since signal.Notify with no signals would relay every
+// signal (SIGCHLD and SIGURG too); the director's wait drops the ones that
+// were ignored when ralph started (notIgnoredSignals).
 func signalCauseContext(parent context.Context, sigs ...os.Signal) (ctx context.Context, received func() os.Signal, stop func()) {
 	ctx, cancel := context.WithCancelCause(parent)
 	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, sigs...)
+	if len(sigs) > 0 {
+		signal.Notify(ch, sigs...)
+	}
 	var (
 		mu  sync.Mutex
 		got os.Signal

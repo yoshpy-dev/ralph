@@ -510,6 +510,26 @@ func TestOrgWaitInbox_WithoutDirectorHandlesNoSignal(t *testing.T) {
 	wantNoDirectorWaitFiles(t, stateDir)
 }
 
+// signalCauseContext with no signals, which the director's wait would pass
+// if notIgnoredSignals dropped all three, registers none: a child that exits
+// sends this process SIGCHLD, which signal.Notify with no signals would
+// relay, and the context would end with "child exited signal received".
+func TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone(t *testing.T) {
+	ctx, received, stop := signalCauseContext(context.Background())
+	defer stop()
+	if err := exec.Command("true").Run(); err != nil {
+		t.Fatalf("run true: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("ctx ended (%v, cause %v) after a child exited; want it alive", err, context.Cause(ctx))
+	}
+	stop()
+	if sig := received(); sig != nil {
+		t.Errorf("received = %v; want nil", sig)
+	}
+}
+
 // holdDirectorWaitLock takes director-wait.lock in stateDir, as a wait
 // writing its mark does, until the returned unlock runs (or the cleanup).
 func holdDirectorWaitLock(t *testing.T, stateDir string) (unlock func()) {
@@ -542,10 +562,11 @@ const dirWaitSignalChildEnv = "RALPH_TEST_ORG_WAIT_DIRECTOR_SIGNAL_CHILD"
 // once the mark says end=signal with "terminated signal received". While the
 // test holds director-wait.lock, so the child cannot write its end yet, a
 // second SIGTERM does not end it: it ends by SIGTERM only after the lock is
-// released and the end is written. A child started with SIGHUP ignored (as
-// nohup starts a process) still ends the wait on SIGHUP and writes its end,
-// but the signal raised again is ignored, so after the bounded grace the
-// command returns the wait's error, which is exit 1.
+// released and the end is written. A child started with SIGHUP and SIGINT
+// ignored (as nohup ignores SIGHUP, and a shell's `&` SIGINT) does not
+// register them: neither ends the wait nor writes an end, and SIGTERM still
+// ends it by SIGTERM. (Go keeps an inherited ignore only for SIGHUP and
+// SIGINT; it handles SIGTERM in any case.)
 func TestOrgWaitDirector_ASignalEndsTheProcessByIt(t *testing.T) {
 	if dir := os.Getenv(dirWaitSignalChildEnv); dir != "" {
 		root := NewRootCmd()
@@ -556,15 +577,19 @@ func TestOrgWaitDirector_ASignalEndsTheProcessByIt(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name     string
+		name string
+		// trap names the signals sh sets to ignored before it starts the
+		// child, which exec keeps; ignored are sent first and must not end
+		// the wait. sig then ends it, with cause.
+		trap     string
+		ignored  []syscall.Signal
 		sig      syscall.Signal
 		cause    string
-		ignored  bool
 		holdLock bool
 	}{
-		{"SIGTERM", syscall.SIGTERM, "terminated signal received", false, false},
-		{"a second SIGTERM while the end waits for the lock", syscall.SIGTERM, "terminated signal received", false, true},
-		{"SIGHUP ignored at the start", syscall.SIGHUP, "hangup signal received", true, false},
+		{"SIGTERM", "", nil, syscall.SIGTERM, "terminated signal received", false},
+		{"a second SIGTERM while the end waits for the lock", "", nil, syscall.SIGTERM, "terminated signal received", true},
+		{"SIGHUP and SIGINT ignored at the start", "HUP INT", []syscall.Signal{syscall.SIGHUP, syscall.SIGINT}, syscall.SIGTERM, "terminated signal received", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stateDir := t.TempDir()
@@ -573,10 +598,8 @@ func TestOrgWaitDirector_ASignalEndsTheProcessByIt(t *testing.T) {
 			defer cancel()
 			args := []string{"-test.run=^TestOrgWaitDirector_ASignalEndsTheProcessByIt$", "-test.count=1"}
 			child := exec.CommandContext(ctx, os.Args[0], args...)
-			if tc.ignored {
-				// sh sets SIGHUP to ignored, which exec keeps for the
-				// test binary.
-				child = exec.CommandContext(ctx, "sh", append([]string{"-c", `trap '' HUP; exec "$0" "$@"`, os.Args[0]}, args...)...)
+			if tc.trap != "" {
+				child = exec.CommandContext(ctx, "sh", append([]string{"-c", `trap '' ` + tc.trap + `; exec "$0" "$@"`, os.Args[0]}, args...)...)
 			}
 			child.Env = append(os.Environ(), dirWaitSignalChildEnv+"="+stateDir)
 			var out bytes.Buffer
@@ -597,6 +620,21 @@ func TestOrgWaitDirector_ASignalEndsTheProcessByIt(t *testing.T) {
 				<-exited
 			})
 			waitForDirectorWaitMark(t, stateDir, "the child's start", func(m org.DirectorWaitMark) bool { return m.StartedAt != "" })
+			if len(tc.ignored) > 0 {
+				for _, sig := range tc.ignored {
+					if err := child.Process.Signal(sig); err != nil {
+						t.Fatalf("send %v to the child: %v", sig, err)
+					}
+				}
+				select {
+				case <-exited:
+					t.Fatalf("the child ended (%v) on %v, which it was started with ignored\n%s", waitErr, tc.ignored, out.String())
+				case <-time.After(300 * time.Millisecond):
+				}
+				if m := readDirectorWaitMark(t, stateDir); m.End != "" {
+					t.Fatalf("mark = %+v after %v, which the child was started with ignored; want no end", m, tc.ignored)
+				}
+			}
 			var unlock func()
 			if tc.holdLock {
 				unlock = holdDirectorWaitLock(t, stateDir)
@@ -624,27 +662,15 @@ func TestOrgWaitDirector_ASignalEndsTheProcessByIt(t *testing.T) {
 			case <-time.After(dirWaitCLILimit):
 				t.Fatalf("the child did not end within %v of the signal\n%s", dirWaitCLILimit, out.String())
 			}
-			err := waitErr
-
-			if tc.ignored {
-				if err != nil {
-					t.Fatalf("the child with SIGHUP ignored = %v; want it to return and exit 0\n%s", err, out.String())
-				}
-				if want := "returned: exit 1: org: wait --inbox --director: the wait was stopped: " + tc.cause + "\n"; !strings.Contains(out.String(), want) {
-					t.Errorf("the child printed:\n%s\nwant the line %q", out.String(), want)
-				}
-			} else {
-				var exitErr *exec.ExitError
-				if !errors.As(err, &exitErr) {
-					t.Fatalf("the child = %v; want it ended by %v\n%s", err, tc.sig, out.String())
-				}
-				ws, ok := exitErr.Sys().(syscall.WaitStatus)
-				if !ok || !ws.Signaled() || ws.Signal() != tc.sig {
-					t.Fatalf("the child ended with %v; want it ended by %v\n%s", exitErr, tc.sig, out.String())
-				}
-				if strings.Contains(out.String(), "returned:") {
-					t.Errorf("the child returned from the command:\n%s\nwant it ended by %v first", out.String(), tc.sig)
-				}
+			var exitErr *exec.ExitError
+			if !errors.As(waitErr, &exitErr) {
+				t.Fatalf("the child = %v; want it ended by %v\n%s", waitErr, tc.sig, out.String())
+			}
+			if ws, ok := exitErr.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != tc.sig {
+				t.Fatalf("the child ended with %v; want it ended by %v\n%s", exitErr, tc.sig, out.String())
+			}
+			if strings.Contains(out.String(), "returned:") {
+				t.Errorf("the child returned from the command:\n%s\nwant it ended by %v first", out.String(), tc.sig)
 			}
 			m := readDirectorWaitMark(t, stateDir)
 			wantDirectorWaitEnd(t, m, org.DirectorWaitEndSignal, false, tc.cause)
