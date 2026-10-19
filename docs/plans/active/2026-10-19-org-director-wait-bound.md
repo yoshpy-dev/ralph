@@ -64,14 +64,14 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 
 ## Acceptance criteria
 
-- [ ] AC1: skill の 4 つの写しの「wait で待つ」の Claude Code の箇条が、`ralph org wait --inbox --director d1 --timeout-ms 1500000 2>&1` を Monitor で見張り、Monitor の `timeout_ms` に `1800000` を渡すと書く。`--timeout-ms 0` はどの写しにも残らない
-- [ ] AC2: 同じ箇条が、Bash の `run_in_background` を代わりの手として書き、Move to background と claude の SIGKILL のあとも wait が残ること(25 分のうちに終わる)と、`note:` の行が wait の終わりまで届かないことを書く
-- [ ] AC3: skill の終了コードの扱いが、時間切れ(終了コード 1 と `no open inbox item arrived within`)を Claude Code でも打ち直すと書き、Monitor の期限切れの知らせのあとの signal での終わりを打ち直す終わりとして、それ以外の signal での終わりと分けて書く
-- [ ] AC4: `internal/org/director_skill_sync_test.go` に足したテストが、4 つの写しで `0 < N < M <= 1800000` と `--timeout-ms 0` がないことを確かめ、skill を前の形(`--timeout-ms 0`)に戻すと落ちる
-- [ ] AC5: `./scripts/check-skill-sync.sh` が通り、4 つの写しが同じ
-- [ ] AC6: 実機の確認 (a)〜(g) の結果が `docs/evidence/director-wait-bound-livefire-2026-10-19.md` にある。(e) では人の入力なしに時間切れの打ち直しが 2 回以上続き、そのあとの件が返って ack されている。(f) では Monitor の期限切れのあとに wait が打ち直されている。(g) では外からの SIGTERM のあとに wait が打ち直されていない
-- [ ] AC7: tech-debt の B の行が、Monitor と Bash それぞれで残る場合、残った wait の上限(25 分)、残った wait が返した件の行き先、親の pid で見分けない理由を書き、閉じていない
-- [ ] AC8: 仕様の FR-10 に 8b-2c で決めたことの注がある
+- [x] AC1: skill の 4 つの写しの「wait で待つ」の Claude Code の箇条が、`ralph org wait --inbox --director d1 --timeout-ms 1500000 2>&1` を Monitor で見張り、Monitor の `timeout_ms` に `1800000` を渡すと書く。`--timeout-ms 0` はどの写しにも残らない
+- [x] AC2: 同じ箇条が、Bash の `run_in_background` を代わりの手として書き、Move to background と claude の SIGKILL のあとも wait が残ること(25 分のうちに終わる)と、`note:` の行が wait の終わりまで届かないことを書く
+- [x] AC3: skill の終了コードの扱いが、時間切れ(終了コード 1 と `no open inbox item arrived within`)を Claude Code でも打ち直すと書き、Monitor の期限切れの知らせのあとの signal での終わりを打ち直す終わりとして、それ以外の signal での終わりと分けて書く
+- [x] AC4: `internal/org/director_skill_sync_test.go` に足したテストが、4 つの写しで `0 < N < M <= 1800000` と `--timeout-ms 0` がないことを確かめ、skill を前の形(`--timeout-ms 0`)に戻すと落ちる
+- [x] AC5: `./scripts/check-skill-sync.sh` が通り、4 つの写しが同じ
+- [x] AC6: 実機の確認 (a)〜(g) の結果が `docs/evidence/director-wait-bound-livefire-2026-10-19.md` にある。(e) では人の入力なしに時間切れの打ち直しが 2 回以上続き、そのあとの件が返って ack されている。(f) では Monitor の期限切れのあとに wait が打ち直されている。(g) では外からの SIGTERM のあとに wait が打ち直されていない
+- [x] AC7: tech-debt の B の行が、Monitor と Bash それぞれで残る場合、残った wait の上限(25 分)、残った wait が返した件の行き先、親の pid で見分けない理由を書き、閉じていない
+- [x] AC8: 仕様の FR-10 に 8b-2c で決めたことの注がある
 - [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が通る
 
 ## Implementation outline
@@ -121,7 +121,10 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - [x] Plan approved
 - [x] Branch created
 - 2026-10-19: Codex の計画助言(gpt-6-astra、xhigh、rc 0)は MEDIUM 1 件。実機の確認が wait 1 回ごとの終わりしか見ず、skill に従うセッションが人の入力なしで待ち直すことを確かめていない。D6・AC6・Test plan・R5 に (e)〜(g) を足して直した。ユーザーの永続の指示により、計画は自動承認した(digest 505a695e5548)。図解ページは作っていない(Visual review の節)
-- [ ] Implementation started
+- [x] Implementation started
+- 2026-10-19: S1(implementer、5aea657f)。skill の 4 つの写しの Claude Code の wait を `--timeout-ms 1500000` で区切り、Monitor の `timeout_ms` に `1800000` を渡し、時間切れと Monitor の期限切れのあとの signal での終わりを打ち直すようにした。`directorSkillWaitBoundProblems` と 2 つのテスト(表は 14 件)を足した。箇条の終わりは、handoff の「次の `- ` の行か見出し」より広く「空でなく、空白で始まらない次の行」にした(字下げのない段落まで箇条に含めないため)
+- 2026-10-19: S2(orchestrator、f9c60c0c)。分離した herdr server の pane の claude で (a)〜(g) を確かめた。最初のセッションは「test director」の書き方を区切りのある確認と読み、5 回目の時間切れのあとに自分で止まった。2 本目のセッションには「この役に終わりはない」の 1 行を足した。本物の skill はそう書いていないので skill は変えず、evidence に書いた。最初の (g) は wait が時間切れで終わった直後で外れたので、2 本目のセッションで打ち直した
+- 2026-10-19: S3(implementer、d9884acd)。tech-debt の B の行を書き換え(閉じていない)、仕様に 8b-2c の注を足した。注は handoff の「90 行目のあと」ではなく、FR-10 の最後の注(8b-1)のあとに置いた。90 行目は FR-9 の中で、AC8 は FR-10 を名指すため。S3 の報告にあった 247 行目(昇格したセッションの行)の Trigger 列の「Stage 8b-2c」は、終わった段を指していたので orchestrator が直した(8324476b)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
