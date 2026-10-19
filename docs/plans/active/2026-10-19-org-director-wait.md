@@ -1,7 +1,7 @@
 # org-director-wait
 
 - Status: Approved
-- Approved: 2026-10-19 sha256:7d6739ec79ce
+- Approved: 2026-10-19 sha256:aa991f0ee004
 - Owner: Claude Code
 - Date: 2026-10-19
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の後半の 2 本目の後半(8b-2b)。昇格したセッションの登録が生死を出さないこと(tech-debt の 247 行)と、見張りの停止に director が気づかないこと(209 行の半分)。8b-2a は PR #237 で merge 済み(main は e38b89a9)。中身と分け方は consult(consult-plan-promoted、2026-10-19)の判定による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -58,15 +58,16 @@ director の受信箱の wait(`ralph org wait --inbox`)に `--director <id>` を
 - Lint: `./scripts/plan-visual.sh lint` exit 0
 - Self-check: 全体、かんたん版の 2 枚、折りたたみの 4 枚を `shot` で撮って読んだ。流れ図で生存線が 2 つの文字に重なっていたので背景を足し、撮り直して直ったことを確かめた
 - Codex の計画助言を受けた直しのあと、`overview`(あなたに伝える箱)、`easy-branches`(起動し直さない 3 つの分かれ)、`detail-flow`、`detail-mark`(`wait_id`、`watch_accepting`、`director-wait.lock`)、`detail-watch`(事実の文の表)と「承認の前に」を描き直し、lint(exit 0)と 7 枚の撮り直しと読み直しをした
+- cross-review の 1 回目の直し(始めた wait がロックの中で登録を読み直す)のあと、`detail-flow`(持ち主になる段)と `detail-mark`(印の箱の注)の文を直し、lint(exit 0)と 2 枚の撮り直しと読み直しをした
 
 ## Design decisions
 
 - D1 `--director <id>`: `--inbox` のときだけ受け付け、`d<N>` の形でなければ何も読まずに終了コード 1 で断る。wait は始める前に `director.jsonl` を読み、今の登録が `<id>` で stopped でないとき(state のない昇格したセッションの登録、headless の `starting` と `running`)だけ待つ。そうでなければ、印を書かずに `ErrDirectorWaitNotCurrent` で返る(終了コード 5、文は今の登録を名指す)。待つあいだも印を書き直すたびに登録を読み直し、今の登録が `<id>` でなくなったか、`attached_at` が変わったか、stopped になったら、印に `not_current` と書いて終了コード 5 で返る(`--replace` された古いセッションの wait は、これで自分で止まる)
 - D2 印 `director-wait.json`: `wait_id`(`<pid>-<始めた時刻の nanosecond>`。乱数の 16 進は secret の scan に掛かりうるので使わない)、`id`、`attached_at`(登録に結ぶ。表示は 8b-2a の `DirectorAliveFor` と同じく id と attached_at が合う印だけを読む)、`pid`、`started_at`、`seen_at`、`watch_accepting`(最後に見た見張りが件を受け付けていたか。ただし受け付けていた見張りが受け付けなくなったことは、それを終了コード 4 で返す終わり `end=watch` だけが false と書く。open の件や signal が先に wait を終えたときは true のまま残し、同じ登録の次の wait が始めたときに 4 で返る。S1 の実装で決めた。字義どおり false を書くと、その変化が次の wait で `note:` だけになるため)、終わったときは `ended_at`、`end`、`detail`(短い文)。書くのは始めたとき、`directorWaitMarkInterval`(30 秒)ごと、見張りの様子が変わったとき、終わるとき
-  - 書き込みはいつも `director-wait.lock` の flock の中で、印を読み、持ち主を確かめてから `writeJSONFileAtomic` で書く。始めた wait は前の印を読んでから自分の `wait_id` で上書きし、持ち主になる。そのあとの書き込みは、ディスクの印の `wait_id` が自分のときだけ行う。持ち主でなくなった wait(後から別の wait が始めた)は、stderr に 1 回だけ書き、印には二度と書かずに待ち続ける(Codex の計画助言 2。`A が始める → B が始める → A の書き直し → B の終わり` の順でも、B の終わりが残る)
+  - 書き込みはいつも `director-wait.lock` の flock の中で、印を読み、持ち主を確かめてから `writeJSONFileAtomic` で書く。始めた wait は、同じロックの中で `director.jsonl` を読み直して今の登録が始める前に確かめた登録のままか(`refresh` と同じ確かめ)を確かめ、前の印を読んでから自分の `wait_id` で上書きし、持ち主になる。今の登録でなくなっていれば何も書かずに終了コード 5 で返り、`director.jsonl` を読めなければ何も書かずにその誤りで返る(cross-review の 1 回目の指摘で足した。始める前の確かめとロックのあいだに `attach --replace` が入ると、古い wait が新しい wait の印を上書きしていた)。そのあとの書き込みは、ディスクの印の `wait_id` が自分のときだけ行う。持ち主でなくなった wait(後から別の wait が始めた)は、stderr に 1 回だけ書き、印には二度と書かずに待ち続ける(Codex の計画助言 2。`A が始める → B が始める → A の書き直し → B の終わり` の順でも、B の終わりが残る)
   - 印を書けなくても wait は続け、stderr に 1 回だけ書く
   - `end` は次のどれか: `items`(open の件を返した、終了コード 0)、`timeout`(`--timeout-ms` の時間切れ、終了コード 1)、`watch`(D3、終了コード 4)、`not_current`(D1、終了コード 5)、`error`(受信箱や登録が読めない、終了コード 1)、`signal`(SIGINT、SIGTERM、SIGHUP。印を書いてから、その signal で終わる)。SIGKILL では書けないので、`seen_at` が古いまま残る
-- D3 見張りの確かめ: `--director` の wait は、始めたときと `directorWaitWatchProbeInterval`(5 秒)ごとに `ProbeWatch` を読み、`WatchAcceptsWork` で受け付けているかを決める。`stale` のときだけは、watch gate(`NewWatchGate`)と同じく `DefaultWatchGateSettle` のあいだ読み直し、そのあいだに受け付けるようになれば受け付けているとする(起動し直した見張りが lock を取って最初の印を書く前の瞬間を、止まった見張りと取り違えないため)
+- D3 見張りの確かめ: `--director` の wait は、始めたときと `DirectorWaitWatchProbeInterval`(5 秒)ごとに `ProbeWatch` を読み、`WatchAcceptsWork` で受け付けているかを決める。`stale` のときだけは、watch gate(`NewWatchGate`)と同じく `DefaultWatchGateSettle` のあいだ読み直し、そのあいだに受け付けるようになれば受け付けているとする(起動し直した見張りが lock を取って最初の印を書く前の瞬間を、止まった見張りと取り違えないため)
   - 終了コード 4(`ErrDirectorWaitNoWatch`)で返るのは、受け付けていた見張りが受け付けなくなったときだけで、その回の受信箱に open の件があれば終了コード 0 を先にする(consult の 2 回目の判定)。「受け付けていた」は、この wait が前の回に受け付けていると見たこと、または始めたときなら、同じ登録の前の印の `watch_accepting` が true だったことを言う。前の印を引き継ぐので、Codex の 300 秒の wait の繰り返しで、wait と wait のあいだに見張りが止まっても次の wait が 4 で返る
   - 始めたときから受け付けていない(前の印がない、または前の印も false)なら、stderr に `note:` の 1 行を出して待ち続ける。受け付けていなかった見張りが受け付けるようになったら、`note:` の 1 行を出し、印の `watch_accepting` をすぐ書き直す
   - 4 の 1 行と `note:` の 1 行は、lock と見張りの印の事実だけを言い、「人が止めた」「落ちた」とは言わない: lock が外れていて印が running か stopping のまま(pid、最後に書いた時刻、「stopped の印を書かずに終わった」)、lock が外れていて印が stopped(pid、`stopped_at`)、lock が外れていて印がない、lock は持たれているが settle のあとも印が古いか running でない(pid、最後に書いた時刻、`WatchKillHint`)、止まる途中(stopping)、`--once` の見張り。どの文も `ralph org watch --all --detach` を名指し(`--state-dir` を付けたときは付ける)、見張りがないあいだの escalate は人にすぐ届くこと(`inbox_no_watch`)と、それより前に director に残された件は、見張りがまた動くまで期限で人に届かないことを言う。値は escape する
@@ -168,6 +169,7 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
   - self-review(MEDIUM 1、LOW 7)の直し: f0a4d04c(evidence の末尾の空白、tech-debt の org-gate の行の (j))、c1d31e3f(director の report を `internal/cli/org_director_report.go` に、wait のテストを `director_wait_watch_test.go` に分け、定数とコメントを整え、help と skill に「登録の変化には 30 秒ごとの読み直しで気づく」と書いた)、33da4185(古くなったファイル名の参照)、tech-debt の 306 行の行数。D2 の `directorWaitMarkInterval` は、実装では export した `DirectorWaitMarkInterval` 1 つになった。L6(release のノート)は PR の本文と memory の release の項目に書く
   - verify(pass、LOW 2、INFO 4)の V3: D1 の「印を書き直すたびに登録を読み直す」は、実装では 30 秒ごとの読み直し(`refresh`、`DirectorWaitMarkInterval`)だけで、`note:` のあとのすぐの書き直しと終わりの書き込みは登録を読まない。help、skill、仕様の注、AC4 はこの動きに合わせて書いてある
   - sync-docs(cycle 1)の直し: README の pull の wait と recipe `director-wake.md`(root と template)の 2 か所を `--director <id>` に揃えた(verify V5)。tech-debt は 253 行(この段が受信箱の処理と `WaitInbox` を変えてきっかけに当たったが持ち越した、V1)と 279 行(2 回目の揺れ、持ち越し)に書き足し、残りのテストの穴(G1〜G5、G7)を 308 行に足した。V2、V4、V6 は 45f5d586 までに直っていた。report は `docs/reports/sync-docs-2026-10-19-org-director-wait.md`
+  - cross-review(cycle 1)の ACTION_REQUIRED 1 件(始める前の確かめとロックのあいだに `attach --replace` が入ると、古い wait が新しい wait の印を上書きする)を 38cac6f1 で直した: `begin` がロックの中で `director.jsonl` を読み直し、今の登録でなければ何も書かずに 5 で、読めなければ何も書かずにその誤りで返る。直しを外すと競合のテストが落ちることは implementer が確かめた。同じ cycle 2 で、tech-debt の 308 行のテストの穴のうち G1〜G5 と G7 を b3b692e1 で払い(evidence の probe 4 本をテストにし、5 秒の間隔を help と突き合わせ、`reraiseSignal` のコメントを直した)、308 行は G6 だけにした。D2 に読み直しを書き足し、D3 の定数名を export した `DirectorWaitWatchProbeInterval` に直したので、`detail-flow` と `detail-mark` を直して、ユーザーの自動承認の指示で承認を取り直した(sha256:aa991f0ee004)
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
