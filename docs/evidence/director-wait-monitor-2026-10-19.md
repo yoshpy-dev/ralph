@@ -81,12 +81,12 @@ Notes on the runs:
   a pane close, and the Monitor's own expiry. Only a SIGKILL of claude (a
   crash) leaves it running.
 - The Monitor tool ends every monitor at its `timeout_ms` (default 5
-  minutes, at most 30 minutes) with SIGTERM. The `/director` skill tells a
-  Claude Code director to run `ralph org wait --inbox --director d1
-  --timeout-ms 0 2>&1` under Monitor or with Bash `run_in_background`, and
-  counts an end by a signal as a failure not to run again. A director that
-  picks Monitor therefore stops waiting for the inbox within 30 minutes and
-  reports a failure.
+  minutes, at most 30 minutes) with SIGTERM. At 3a803a87, before stage
+  8b-2c, the `/director` skill told a Claude Code director to run
+  `ralph org wait --inbox --director d1 --timeout-ms 0 2>&1` under Monitor
+  or with Bash `run_in_background`, and counted an end by a signal as a
+  failure not to run again; a director that picked Monitor therefore
+  stopped waiting for the inbox within 30 minutes and reported a failure.
 - A task that outlives its session after a SIGKILL keeps its own parent,
   the `zsh -c` shell, which is reparented to pid 1. The wait's parent pid
   does not change; telling this case apart would need the grandparent, and
@@ -95,8 +95,8 @@ Notes on the runs:
 - Not checked here: a real `ralph org wait` under Monitor (this used a shell
   script), whether Go's runtime ends on SIGPIPE when it writes to a socket
   with no other end, whether the Bash tool's `run_in_background` has a time
-  limit longer than the control's 12 minutes, and codex (whose background wait's parent is its app-server daemon,
-  as stage 8b-2a's live check saw).
+  limit longer than the control's 12 minutes, and codex (whose background
+  wait's parent is its app-server daemon, as stage 8b-2a's live check saw).
 
 Left on the machine: claude's own records of these sessions
 (`~/.claude/projects/-private-tmp-x9m-proj/`, the trust entry for
