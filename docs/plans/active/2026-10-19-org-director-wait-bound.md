@@ -126,7 +126,8 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - 2026-10-19: S2(orchestrator、f9c60c0c)。分離した herdr server の pane の claude で (a)〜(g) を確かめた。最初のセッションは「test director」の書き方を区切りのある確認と読み、5 回目の時間切れのあとに自分で止まった。2 本目のセッションには「この役に終わりはない」の 1 行を足した。本物の skill はそう書いていないので skill は変えず、evidence に書いた。最初の (g) は wait が時間切れで終わった直後で外れたので、2 本目のセッションで打ち直した
 - 2026-10-19: S3(implementer、d9884acd)。tech-debt の B の行を書き換え(閉じていない)、仕様に 8b-2c の注を足した。注は handoff の「90 行目のあと」ではなく、FR-10 の最後の注(8b-1)のあとに置いた。90 行目は FR-9 の中で、AC8 は FR-10 を名指すため。S3 の報告にあった 247 行目(昇格したセッションの行)の Trigger 列の「Stage 8b-2c」は、終わった段を指していたので orchestrator が直した(8324476b)
 - 2026-10-19: self-review(cycle 1、060b9650)は Merge: yes で、MEDIUM 1 件と LOW 6 件、INFO 3 件。止めていた run-verify(テストのファイルが変わるため)は直したあとに打ち直す。S4(implementer)で直した。dc98d5ec は skill とテスト: L1(Monitor の wait が止まる終わり方を確かめた 4 つに絞った)、L2(signal の例外を、その wait を見張っていた Monitor の期限切れの知らせに結び、知らせと wait の終わりの順を問わないようにした)、L3(小節の中の `timeout_ms` の数がどれも M と同じで、「K 分」が N/60000・既定 5・最大 30 のどれかであることもテストが見る)、L4(テストのコメントの計画の道)、L6(表の縁と Atoi の文)。ffc56a2e は記録: M1(tech-debt の B の行と仕様の注の確かめていないこと、試験用の指示のこと、「60 s or less」の言い方)、L5(livefire の (e) の打ち直しの回数、記録しなかった Monitor の task id)、I1(実験の evidence の Reading を 3a803a87 の時点の過去形にした)。I2(行の長さ)と I3(表のテストの名前)は直していない。計画からのずれ: L2 で、D3 と R1 の「Monitor の期限切れの知らせのあと」の順の前提を skill と仕様の注から外した。計画の本文は承認の digest を保つため直していない
-- [ ] Review artifact created
+- 2026-10-19: 直しの再レビュー(8796abec)は Merge after fixes: yes で、L2 の順の点が新しい LOW(N1)として残った。「どちらが先に届いてもよい」では、終わりを先に見た director が決められない。S5(implementer、de2b05d1)で、終わりを見た時点でその wait の Monitor の知らせが届いていれば打ち直し、届いていなければ失敗とし、あとから知らせが届けばそこで打ち直す形にした。実機の確認は 5aea657f の skill の文で打ち、その後の文(dc98d5ec と de2b05d1)では打ち直していないことを、livefire の evidence と仕様の注に書いた。実機の打ち直しはしていない(done の consult で判断する)
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
