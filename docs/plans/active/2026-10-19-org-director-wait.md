@@ -1,7 +1,7 @@
 # org-director-wait
 
 - Status: Approved
-- Approved: 2026-10-19 sha256:eacfb0d8b537
+- Approved: 2026-10-19 sha256:7d6739ec79ce
 - Owner: Claude Code
 - Date: 2026-10-19
 - Related request: 機能ごとの org と director の仕様(`docs/specs/2026-10-07-org-multi-org-director.md`)の 8 段目の後半の 2 本目の後半(8b-2b)。昇格したセッションの登録が生死を出さないこと(tech-debt の 247 行)と、見張りの停止に director が気づかないこと(209 行の半分)。8b-2a は PR #237 で merge 済み(main は e38b89a9)。中身と分け方は consult(consult-plan-promoted、2026-10-19)の判定による。ユーザーは「すべてが完了するまで次のプランを自律的に進めて」と言った(2026-10-11)
@@ -62,7 +62,7 @@ director の受信箱の wait(`ralph org wait --inbox`)に `--director <id>` を
 ## Design decisions
 
 - D1 `--director <id>`: `--inbox` のときだけ受け付け、`d<N>` の形でなければ何も読まずに終了コード 1 で断る。wait は始める前に `director.jsonl` を読み、今の登録が `<id>` で stopped でないとき(state のない昇格したセッションの登録、headless の `starting` と `running`)だけ待つ。そうでなければ、印を書かずに `ErrDirectorWaitNotCurrent` で返る(終了コード 5、文は今の登録を名指す)。待つあいだも印を書き直すたびに登録を読み直し、今の登録が `<id>` でなくなったか、`attached_at` が変わったか、stopped になったら、印に `not_current` と書いて終了コード 5 で返る(`--replace` された古いセッションの wait は、これで自分で止まる)
-- D2 印 `director-wait.json`: `wait_id`(`<pid>-<始めた時刻の nanosecond>`。乱数の 16 進は secret の scan に掛かりうるので使わない)、`id`、`attached_at`(登録に結ぶ。表示は 8b-2a の `DirectorAliveFor` と同じく id と attached_at が合う印だけを読む)、`pid`、`started_at`、`seen_at`、`watch_accepting`(最後に見た見張りが件を受け付けていたか)、終わったときは `ended_at`、`end`、`detail`(短い文)。書くのは始めたとき、`directorWaitMarkInterval`(30 秒)ごと、見張りの様子が変わったとき、終わるとき
+- D2 印 `director-wait.json`: `wait_id`(`<pid>-<始めた時刻の nanosecond>`。乱数の 16 進は secret の scan に掛かりうるので使わない)、`id`、`attached_at`(登録に結ぶ。表示は 8b-2a の `DirectorAliveFor` と同じく id と attached_at が合う印だけを読む)、`pid`、`started_at`、`seen_at`、`watch_accepting`(最後に見た見張りが件を受け付けていたか。ただし受け付けていた見張りが受け付けなくなったことは、それを終了コード 4 で返す終わり `end=watch` だけが false と書く。open の件や signal が先に wait を終えたときは true のまま残し、同じ登録の次の wait が始めたときに 4 で返る。S1 の実装で決めた。字義どおり false を書くと、その変化が次の wait で `note:` だけになるため)、終わったときは `ended_at`、`end`、`detail`(短い文)。書くのは始めたとき、`directorWaitMarkInterval`(30 秒)ごと、見張りの様子が変わったとき、終わるとき
   - 書き込みはいつも `director-wait.lock` の flock の中で、印を読み、持ち主を確かめてから `writeJSONFileAtomic` で書く。始めた wait は前の印を読んでから自分の `wait_id` で上書きし、持ち主になる。そのあとの書き込みは、ディスクの印の `wait_id` が自分のときだけ行う。持ち主でなくなった wait(後から別の wait が始めた)は、stderr に 1 回だけ書き、印には二度と書かずに待ち続ける(Codex の計画助言 2。`A が始める → B が始める → A の書き直し → B の終わり` の順でも、B の終わりが残る)
   - 印を書けなくても wait は続け、stderr に 1 回だけ書く
   - `end` は次のどれか: `items`(open の件を返した、終了コード 0)、`timeout`(`--timeout-ms` の時間切れ、終了コード 1)、`watch`(D3、終了コード 4)、`not_current`(D1、終了コード 5)、`error`(受信箱や登録が読めない、終了コード 1)、`signal`(SIGINT、SIGTERM、SIGHUP。印を書いてから、その signal で終わる)。SIGKILL では書けないので、`seen_at` が古いまま残る
@@ -159,7 +159,8 @@ Critical forks: 8b-2b の中身と分け方、印を書く wait の区別、印�
 - [x] Plan reviewed(Codex の計画助言 2 件を直した: HIGH は consult の 2 回目の判定で自動の起動し直しをやめ、MEDIUM は印の持ち主を flock と `wait_id` で確かめる形にした)
 - [x] Plan approved(ユーザーの自動承認の指示による、2026-10-19)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(org 層)は 67938662。D2 の `watch_accepting` の意味を実装に合わせて書き足し(止まりは `end=watch` だけが false と書く)、`detail-mark` の図を直して lint と撮り直しをし、ユーザーの自動承認の指示で承認を取り直した(sha256:7d6739ec79ce)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
