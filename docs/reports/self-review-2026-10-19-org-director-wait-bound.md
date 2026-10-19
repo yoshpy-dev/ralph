@@ -56,3 +56,30 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - I1〜I3 は上げるだけで、直さなくてよい(I1 は M1 と同じ commit に入れると手間が少ない)
   - 直さずに cap(2)のまま進むなら、L1〜L6 は cycle 2 の self-review で LOW の残りとして 1 行の tech-debt にまとめる(今回は足していない)
   - この節でレポート以外は変えていない。insight event(`self_review`、cycle 1、medium 1、low 6)を `docs/insights/events/2026-10-19-org-director-wait-bound.jsonl` に足し、レポートと同じ commit に入れる
+
+## Re-review after fixes (cycle 1)
+
+- Date: 2026-10-19
+- Scope: `git show dc98d5ec`(skill の 4 つの写しとテスト)と `git show ffc56a2e`(tech-debt の 248 行、仕様の 98 行、evidence の 2 つ)。HEAD の 546b46ab は計画の進捗の注だけなので対象外。変えた範囲は全文を読んだ。diff の品質だけを見て、テストと静的解析は走らせていない
+- 手元で確かめた(読むだけ): skill の 4 つの写しは `cmp` で同じ。`git diff --check 3a803a87...HEAD` は rc 0。dc98d5ec^ から HEAD の追加行に、`/Users/`、`hiroki`、12 桁以上の 16 進、UUID、token の語、pane id、session id はない。本物の skill の `### wait で待つ`(481〜575 行、中に `#` で始まる行なし)を、テストと同じ切り方と空白の畳み方で Python に通すと、`([0-9]+) ?分` は 5・30・25・25・25・5 の 6 件で、どれも N/60000=25、既定 5、最大 30 のどれか。`` `timeout_ms` に `X` `` は 2 件で、どちらも 1800000(箇条に 1 件、段落に 1 件)。箇条の N は 1500000 の 1 件、M は 1800000 の 1 件。全文に `--timeout-ms 0` はない。表の 21 件は、コードを読んで 1 件ずつ追い、期待した問題の数と順に一致した
+
+### 指摘ごとの結果
+
+- M1: 解消。248 行の Not checked に、本物の `/director` skill で何時間も動く director と headless の director を足し、試験用の指示の枠、1 つ目のセッションが 5 回目の時間切れで止まったこと、2 つ目に足した 1 行も書いた。「60 s or less」は「時間切れまで走らせた区間はどれも 60 s 以下(15 s、40 s、20 s、10 s)で、(c) の 10 分の wait は `/exit` が先に止めた」に合わせた。仕様の 98 行も、試験用の director の指示だったことと、この 2 つを確かめていないことを書いた。どちらも livefire の Notes と表の (b)(c)(d)(g) に合い、248 行の区切りの `|` は 6 のまま
+- L1: 解消。skill の文は「`/exit` の既定、Move to background and exit、pane を閉じたとき、Monitor の期限のどれでも」の 4 つに絞られ、Monitor の実験の m1・m2・m5・m4 と 1 対 1 で合う。4 つの写しは同じ
+- L2: 一部。「その wait を見張っていた Monitor が期限切れを知らせた」ときに限るので、別の wait の知らせや、(g) のように知らせのない外からの TERM には読めない。1 つの Monitor の期限切れより広くは読めず、この点は解消。知らせと wait の終わりの順を決めない点は、下の N1 に残る
+- L3: 解消。小節の `` `timeout_ms` に `X` `` を全部 M と、「<K> 分」を N/60000・既定 5・最大 30 と突き合わせる。小節の外の「10 分」「60 分」(merge の節)は読まず、表の「小節の外」の 1 件がそれを押さえる。N と M の読めない場合の skip と、N が分の倍数でない場合の K の skip は、doc コメントとコードが合う
+- L4: 解消。テストのコメントは計画をファイル名だけで挙げ、`active/` や `archive/` の道を持たない。dc98d5ec は同じファイルの 109 行の先例(`docs/plans/active/2026-10-17-org-auto-merge.md`)も `archive/` に直した。この PR の対象外の行だが、指摘どおり古くなっていた道で、害はない
+- L5: 解消。(e) の行は mark log と合う(12:15:18 の wait は 12:15:38 に時間切れ、12:15:40 に打ち直し、12:15:40 の wait の時間切れ 12:16:00 のあとで止まった。時間切れは 12:14:14・12:14:36・12:14:58・12:15:38・12:16:00 の 5 回で、Notes の「5 回目」と合う)。Monitor の task id は「Values left out」の次に、記録しなかったことと、`wait_id` で結べることを書いた。計画の D6 が (e)〜(g) を挙げているのと合う
+- L6: 解消。表に「箇条に `timeout_ms` が 2 つ」と「`--timeout-ms 0` が文末」が入り、どちらも狙った枝を通る。Atoi の文は「does not fit in an int」になった
+- I1: 解消。「At 3a803a87, before stage 8b-2c, the `/director` skill told …」の過去形になった(`git show 3a803a87:.claude/skills/director/SKILL.md` の 487〜488 行が `--timeout-ms 0` と Monitor か `run_in_background` で、合う)。足した行は 75 字以内で、前後の折り返しに合う
+- I2: 変えていない(INFO、直さなくてよい)。248 行は 4871 字から 5321 字になった
+- I3: 変えていない(INFO、直さなくてよい)
+
+### 新しい指摘
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW (N1) | maintainability(skill の規則と記録) | 例外の段落が「知らせと wait の終わりのどちらが先に届いてもよい」と書くので、director が signal での終わりを見た時点で知らせがまだ来ていないとき、失敗にするのか知らせを待つのかが決まらない。待つ側に読むと、(g) のように知らせの来ない外からの TERM で、失敗として人に伝えず待ち続ける。cycle 1 の文(「すぐあとに」)は、その時点で決められた。この形は L2 で勧めたもので、順を書かないことだけを見て、見た時点で決められるかを見ていなかった。また、実機の確認のセッションが読んだのは 5aea657f の「すぐあとに」の文(evidence の 100 行に版がある)で、(g) の記録は「知らせは終わりの前に来なかった」と、順を決めた文への結果になっている。今の「どちらが先でも」の文と、L1 で絞った文は、実機の確認が読んだ文ではない。仕様の 98 行と tech-debt の 248 行は、確認がどの版の skill に対するものかを書かない | `.claude/skills/director/SKILL.md` 565〜571 行。`git show 5aea657f:.claude/skills/director/SKILL.md` の 565 行。`docs/evidence/director-wait-bound-livefire-2026-10-19.md` の 40・41 行、100 行 | 見た時点で決まる文にする。例は「その wait を見張っていた Monitor の期限切れの知らせが、wait の終わりを見た時点で来ている(または同じ通知に載っている)ときに限る。まだ来ていなければ失敗として扱う」(順を決めるが、(f)(g) の記録と合う)。または今の文のまま、livefire の「Not checked here」に「L1 と L2 の文は実機の確認のあとに変えた。signal での終わりが知らせより先に見えた場合は確かめていない」と 1 文足す。前者は skill の 2 つの元の写しを変えて `scripts/sync-skills.sh` を 2 回回し、表のテストに順を決めた文の 1 件を足す |
+
+- Merge after fixes: yes(CRITICAL・HIGH なし。M1、L1、L3〜L6、I1 は解消し、L2 は相手の Monitor に結ぶ点が解消して、順の点が N1(LOW)として残る。N1 は 1 文の直しで、いまの動きを壊すものではなく、害は、外からの TERM のあとに director が人に伝えず待つ読み方をした場合に限る。skill の 4 つの写しの同一、追加行の個人情報、tech-debt の区切り、evidence と mark log の時刻には欠陥がなかった)
