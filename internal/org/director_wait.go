@@ -82,8 +82,9 @@ const (
 	// wait has not written its mark since when its seen_at is more than two
 	// of these old (D5).
 	DirectorWaitMarkInterval = 30 * time.Second
-	// directorWaitWatchProbeInterval is how often the wait probes the watch.
-	directorWaitWatchProbeInterval = 5 * time.Second
+	// DirectorWaitWatchProbeInterval is how often the wait probes the watch,
+	// which the help of `ralph org wait` says too.
+	DirectorWaitWatchProbeInterval = 5 * time.Second
 )
 
 // directorWaitErrPrefix starts every error of WaitInboxForDirector, as "org:
@@ -193,7 +194,7 @@ type DirectorWaitParams struct {
 	// seen_at rewritten (DirectorWaitMarkInterval when zero).
 	MarkInterval time.Duration
 	// WatchProbeInterval is how often the watch is probed
-	// (directorWaitWatchProbeInterval when zero).
+	// (DirectorWaitWatchProbeInterval when zero).
 	WatchProbeInterval time.Duration
 	// Settle is how long a stale watch is probed again before it counts as
 	// not accepting work (DefaultWatchGateSettle when zero), as for the
@@ -368,7 +369,7 @@ func newDirectorWaitRun(o *Org, p DirectorWaitParams) *directorWaitRun {
 		p.MarkInterval = DirectorWaitMarkInterval
 	}
 	if p.WatchProbeInterval <= 0 {
-		p.WatchProbeInterval = directorWaitWatchProbeInterval
+		p.WatchProbeInterval = DirectorWaitWatchProbeInterval
 	}
 	if p.Settle <= 0 {
 		p.Settle = DefaultWatchGateSettle

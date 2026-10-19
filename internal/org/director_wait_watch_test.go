@@ -423,6 +423,23 @@ func TestWaitInboxForDirector_ACancelledContextEndsWithSignal(t *testing.T) {
 	}
 }
 
+// The mark's detail is escaped for a terminal, as DirectorWaitMark's doc
+// says: a cause with a control character is written with it escaped.
+func TestWaitInboxForDirector_TheDetailIsEscaped(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	done := f.startDirectorWait(ctx, f.params("d1"))
+	f.waitForMark(t, "the start", func(DirectorWaitMark) bool { return true })
+	cancel(errors.New("signal\x1b[2J"))
+	_ = awaitDirectorWait(t, done)
+	if m := f.mark(t); m.Detail != `signal\x1b[2J` {
+		t.Errorf("detail = %q; want the cause escaped", m.Detail)
+	}
+}
+
 // A ctx done during the start's settle decides nothing about the watch: the
 // mark keeps the previous mark's watch_accepting, so the next wait still
 // ends for the change.
@@ -443,6 +460,29 @@ func TestWaitInboxForDirector_ACancelDuringTheStartSettleKeepsTheCarriedWatch(t 
 		t.Fatalf("wait = %v after %v; want the signal before the settle of %v ended", out.err, out.elapsed, p.Settle)
 	}
 	wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndSignal, true, "signal: interrupt")
+}
+
+// A ctx done during the start's settle, with nothing to carry over, writes
+// no note: line: the wait does not keep waiting, as that line would say.
+func TestWaitInboxForDirector_ACancelDuringTheStartSettleWritesNoNote(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	mustAcquireWatchLock(t, f.dir)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	p := f.params("d1")
+	p.Settle = 5 * time.Second
+	done := f.startDirectorWait(ctx, p)
+	time.Sleep(100 * time.Millisecond)
+	cancel(errors.New("signal: interrupt"))
+	out := awaitDirectorWait(t, done)
+	if out.err == nil || out.elapsed >= p.Settle || !strings.Contains(out.err.Error(), "signal: interrupt") {
+		t.Fatalf("wait = %v after %v; want the signal before the settle of %v ended", out.err, out.elapsed, p.Settle)
+	}
+	if s := f.stderr.String(); s != "" {
+		t.Errorf("stderr = %q; want nothing", s)
+	}
+	wantDirectorWaitEnd(t, f.mark(t), DirectorWaitEndSignal, false, "signal: interrupt")
 }
 
 // AC2: an inbox or a director.jsonl that cannot be read ends the wait with

@@ -646,3 +646,23 @@ func TestDirectorWaitLine_HelpDescribesTheWait(t *testing.T) {
 		t.Errorf("org.DirectorWaitMarkInterval = %v; the help says 30s and 60s", org.DirectorWaitMarkInterval)
 	}
 }
+
+// D2 and D3: the help of `ralph org wait` says the intervals the org layer
+// waits with, org.DirectorWaitMarkInterval for the read of the registration
+// and the rewrite of the mark and org.DirectorWaitWatchProbeInterval for the
+// probe of the watch, so a change of either constant fails here.
+func TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer(t *testing.T) {
+	stdout, _ := runInboxOK(t, "wait", "--help")
+	help := strings.Join(strings.Fields(stdout), " ")
+	secs := func(d time.Duration) string { return strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + " s" }
+	mark, probe := secs(org.DirectorWaitMarkInterval), secs(org.DirectorWaitWatchProbeInterval)
+	for _, want := range []string{
+		"While it waits, it reads the registration again every " + mark + " and exits 5",
+		"in the state dir, when it starts, every " + mark + ", when the watch it sees changes",
+		"Every " + probe + " it probes the cross-org watch (ralph org watch --all)",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("ralph org wait --help does not say %q:\n%s", want, stdout)
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -12,13 +13,16 @@ import (
 	"time"
 )
 
-// The tests of who writes the director's wait mark when a wait starts (plan
+// The tests of who writes the director's wait mark (plan
 // 2026-10-19-org-director-wait, D1 and D2 at the org layer): the start reads
 // director.jsonl again under director-wait.lock, so a wait whose registration
 // was replaced or became unreadable since its first read writes nothing and
-// leaves the mark on disk as it was. The fixture and the helpers, and the AC9
-// rules the tests follow, are in director_wait_test.go; the tests of the
-// owner once both waits have started are there too.
+// leaves the mark on disk as it was; a wait whose mark file was removed
+// after its first write does not write it again; and a start that cannot
+// take the lock still carries the previous mark's watch over. The fixture and
+// the helpers, and the AC9 rules the tests follow, are in
+// director_wait_test.go; the tests of the owner once both waits have started
+// are there too.
 
 // setDirectorWaitBeforeBeginLock sets the directorWaitBeforeBeginLock seam
 // for the rest of the test.
@@ -170,5 +174,62 @@ func TestWaitInboxForDirector_ARegistrationThatCannotBeReadUnderTheStartsLockWri
 				t.Errorf("stderr = %q; want nothing", s)
 			}
 		})
+	}
+}
+
+// D2: a mark removed while the wait runs, after its first write, is said
+// once and not written again; the wait goes on and returns the item. The
+// test removes the file under director-wait.lock, so the removal cannot land
+// between a save's read and its rename.
+func TestWaitInboxForDirector_AMarkRemovedWhileTheWaitRunsIsNotWrittenAgain(t *testing.T) {
+	f := newDirWaitFixture(t)
+	f.attach(t)
+	holdRunningWatch(t, f.dir)
+	p := f.params("d1")
+	p.Timeout = dirWaitLimit
+	done := f.startDirectorWait(context.Background(), p)
+	f.waitForMark(t, "the start", func(DirectorWaitMark) bool { return true })
+	if err := withFileLock(f.dir, directorWaitLockFile, "test", func() error { return os.Remove(DirectorWaitPathIn(f.dir)) }); err != nil {
+		t.Fatal(err)
+	}
+	waitForStderr(t, f.stderr, "no longer holds the mark of this wait")
+	time.Sleep(150 * time.Millisecond) // several more mark intervals of 20ms
+	f.escalate(t, "org-a")
+	out := awaitDirectorWait(t, done)
+	if out.err != nil || len(out.items) != 1 {
+		t.Fatalf("wait = %v, %v; want e1", waitInboxItemIDs(out.items), out.err)
+	}
+	if _, err := os.Stat(DirectorWaitPathIn(f.dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the removed mark was written again (stat err %v)", err)
+	}
+	if s := f.stderr.String(); strings.Count(s, "\n") != 1 || !strings.HasPrefix(s, directorWaitNoticePrefix) {
+		t.Errorf("stderr = %q; want one line about the mark", s)
+	}
+}
+
+// D2 and D3: a start that cannot take director-wait.lock (a directory here)
+// does not get to the read of director.jsonl under it, reads the previous
+// mark of this registration without the lock, and carries its
+// watch_accepting over, so with no watch now it ends for the watch. The
+// failed write is said once, no note: line is written, and the previous mark
+// stays, since the end cannot take the lock either.
+func TestWaitInboxForDirector_AStartThatCannotTakeTheLockStillCarriesOverTheWatch(t *testing.T) {
+	f := newDirWaitFixture(t)
+	reg := f.attach(t)
+	f.writeMark(t, DirectorWaitMark{WaitID: "1-1", ID: reg.ID, AttachedAt: reg.AttachedAt, PID: 1, WatchAccepting: true, End: DirectorWaitEndTimeout})
+	if err := os.Mkdir(filepath.Join(f.dir, directorWaitLockFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := f.params("d1")
+	p.Timeout = 300 * time.Millisecond
+	out := f.runDirectorWait(t, p)
+	if !errors.Is(out.err, ErrDirectorWaitNoWatch) || !strings.Contains(out.err.Error(), "accepted work when the last wait of d1 wrote its mark") {
+		t.Fatalf("err = %v; want ErrDirectorWaitNoWatch carried over without the lock", out.err)
+	}
+	if s := f.stderr.String(); strings.Count(s, "the wait mark is not written") != 1 || strings.Contains(s, "note: ") {
+		t.Errorf("stderr = %q; want one line about the mark and no note:", s)
+	}
+	if m := f.mark(t); m.WaitID != "1-1" {
+		t.Errorf("mark = %+v; want the previous wait's", m)
 	}
 }

@@ -121,8 +121,9 @@ const reraiseGrace = 2 * time.Second
 // caught it, and returns only when it has not ended within reraiseGrace: sig
 // could not be sent, or its handling at ralph's start does not end the
 // process. The wait registers no signal that was ignored at the start
-// (notIgnoredSignals), so that is not the usual case. The caller's
-// signal.Notify must be stopped before it runs.
+// (notIgnoredSignals), so that is not the usual case. signal.Reset(sig)
+// removes this process's Notify for sig before it sends the signal, so the
+// caller's stop may run before or after it.
 func reraiseSignal(sig os.Signal) {
 	s, ok := sig.(syscall.Signal)
 	if !ok {
