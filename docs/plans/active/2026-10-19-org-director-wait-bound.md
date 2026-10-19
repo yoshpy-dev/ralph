@@ -131,5 +131,6 @@ None(図解ページは作らなかった。書き込みの途中で止まった
 - 2026-10-19: verify(cycle 1、024e2ba6)は pass(AC1〜AC8 を満たす。AC9 は run-verify の結果待ち)。指摘は INFO 2 件。V1: D6 は (a)〜(d) を haiku で打つと書くが、実機の確認は全部 sonnet で打った(livefire の Setup)。AC6 はモデルを名指さないので、受け入れには響かない。V2: Monitor の既定 5 分と最大 30 分は、Assumptions のとおりツールの説明から取った値で、期限切れを実際に見たのは、実験の m4 の 20 秒と、実機の確認の 10 秒と 15 秒だけ。本物の 25 分と 30 分を確かめていないことは tech-debt の B の行に書いてある。どちらも直していない
 - 2026-10-19: AC9。`GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は rc 0(83c0d34d のコードで打ち、終わりの secret scan は 024e2ba6 まで。de2b05d1 のあとはコードと skill を変えていない)。internal/cli 304.6 s、internal/org 380.5 s で、全パッケージが ok。self-review の直しの前と S5 の前に打ち始めた 2 回は、テストのファイルと skill が変わるので途中で止めた
 - [x] Verification artifact created
-- [ ] Test artifact created
+- 2026-10-19: test(cycle 1、35280638)は pass。run-test.sh は rc 0(996 秒)、`TestDirectorSkill` は 2 つの toolchain で 25 本 PASS、数の mutant は 22 回のすべてで落ちた。指摘は LOW 1 件(T1: テストが数だけを固定し、AC2 と AC3 の文は 4 つの写しを揃えて消しても落ちない)と INFO 1 件(T2)。T1 は S6(implementer、9eb98897)で直した。`TestDirectorSkill_PinsTheClaudeCodeWaitRules` が、Claude Code の箇条の 5 つの断片(時間切れの打ち直し、Bash の代わりの手と残り方、`note:` の届き方)と小節の 7 つの断片(`1:` の打ち直し、Monitor の期限切れの例外と、知らせが届いていないとき・あとから届いたとき)を固定する。断片を 1 つずつ壊す 22 の mutant がすべて落ちた(`docs/evidence/test-2026-10-19-org-director-wait-bound-rules-mutation.txt`)。このあと run-verify を打ち直す
+- [x] Test artifact created
 - [ ] PR created
