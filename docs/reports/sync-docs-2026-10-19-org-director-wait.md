@@ -95,3 +95,81 @@
 ## Insight event
 
 この run では追加していない(orchestrator が追加する)。
+
+## Cycle 2
+
+- Date: 2026-10-19
+- Pipeline cycle: 2。範囲は `8a33364b..28eec963`(28eec963 は run 開始時の HEAD で、この report を含む commit の SHA ではない)。base は `e38b89a9`
+- 渡された指摘: verify cycle 2 の C2-1(LOW、実機の evidence の冒頭)と C2-3(INFO、仕様の注)、test cycle 2 の G8〜G11(tech-debt 308 行)、cycle 2 が起こしうる文書のずれの確認
+- cycle 2 のコードの変更(`git diff 8a33364b..HEAD`): 38cac6f1(`begin` がロックの下で `director.jsonl` を読み直す)、b3b692e1 と 99144e8f(テスト、`DirectorWaitWatchProbeInterval` の export、`reraiseSignal` のコメント)、6086af65(`begin` を `decideStart` と `noteStartWatch` に分けた)。`.claude`、`.agents`、`templates`、`README.md`、`AGENTS.md`、`docs/recipes`、`docs/quality`、`docs/architecture` は、この差分に入っていない
+- この run が変えたのは、実機の evidence の冒頭、仕様の 8b-2b の注の 1 句、tech-debt の 306 行と 308 行、計画の Progress checklist の 1 項目、この report、insight event。コード、計画の本文、先行の report(cycle 1 の sync-docs と、cycle 2 の self-review、verify、test)には触っていない
+
+### Summary
+
+ずれは 4 点で、どれも記録の文だった。直した。help、`/director` skill(4 面)、README、recipe(2 面)、AGENTS.md、`agent-messaging.md` は cycle 2 の動きと合っていて、変えていない。
+
+1. 実機の evidence の冒頭は、実機に使った fa95a3d8 より後のコミットは wait の動きを変えないと書いていた。38cac6f1 は、最初の確かめとロックのあいだに登録が変わった wait を、印を書かずに 5 で返すようにしたので、その文が成り立たなくなった(verify C2-1)。
+2. 仕様 8b-2b の注は、始める前の確かめしか言わず、最初の印を書く前のロックの下の読み直しに触れていなかった(verify C2-3)。
+3. tech-debt の 308 行は、cycle 2 の `/test` が出した G8〜G11 を 99144e8f が払ったことを言っていなかった。
+4. tech-debt の 306 行の行数が 99144e8f で古くなっていた(`director_wait_watch_test.go` 630 が 640 に、`director_wait_owner_test.go` 235 が 388 に)。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/evidence/director-wait-livefire-2026-10-19.md`(冒頭) | 第 1 段落を「The later commits, except 38cac6f1 below, ...」に直し、段落を 1 つ足した。足した段落は事実だけを言う: 38cac6f1 は 1 つの道で wait の動きを変えた(`begin` がロックの下で `director.jsonl` を読み直し、今の登録でなければ印を書かずに 5 で返る。前は、その wait が印を書き、あとの読み直しが 5 で終わらせるまで待った)。(a)〜(h) はこの道を通らない((e) の 5 は始まった wait の 30 秒の読み直しから、断られた wait は最初の確かめで落ちた)。38cac6f1 以降の binary で打ち直していない。そのあとの 3 コミット(b3b692e1、6086af65、99144e8f)は動きを変えない。実機の出力、表、script は書き換えていない |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(8b-2b の注、90 行) | 「始める前にそうでなければ印を書かずに終了コード 5 で返り」のあとに 1 句「(最初の印を書く前にも `director-wait.lock` の下で読み直し、そのあいだに登録が変わっていても同じ)」を足した。注は 5 を返して印を書かない場面を決めたこととして書く場所で、その場面が 1 つ増えたため。同じ id で `attached_at` が変わった場合、読めない場合、lock の file が残りうることは計画の D2 に書いてあるので、注には足していない |
+| `docs/tech-debt/README.md`(308 行) | 払った穴の一覧に 1 文足した: cycle 2 の `/test`(mutant 30 個、生き残り 7 個)が G8〜G11 を出し、99144e8f が probe P5〜P8 をテストにした。G8 は `TestWaitInboxForDirector_ASameIDAttachedAgainBeforeTheStartTakesTheLock`、G9 は `..._AStartWhoseWriteFailsSaysSoAtOnce`、G10 は `..._TheStartsMarkHasSeenAt`、G11 は `TestDirectorWait_ZeroIntervalsTakeTheConstants`。Related の `(Test gaps G1 to G7)` に `; Cycle 2, Test gaps G8 to G11` を足した。残る項目は G6 だけで、セルは 5、`\|` なし |
+| `docs/tech-debt/README.md`(306 行) | cycle 2 の文の行数を `wc -l` に合わせた(`director_wait_watch_test.go` 640、`director_wait_owner_test.go` 388)。「the tests of b3b692e1」を「the tests of b3b692e1 and 99144e8f」にした。ほかの数(`director_wait.go` 799、`director_wait_test.go` 687、1203、857、804、852、782、342、505)は今の行数と合う。セルは 5 |
+| `docs/plans/active/2026-10-19-org-director-wait.md`(Progress checklist) | 「Implementation started」の下に、この run の直しの注を 1 項目足した。本文(Progress checklist より上)は変えていない。digest は `e67985a2f2d7` のまま |
+| `docs/insights/events/2026-10-19-org-director-wait.jsonl` | `sync_docs`、cycle 2、`complete` の 1 行を `insights-append.sh` で足した |
+| `docs/reports/sync-docs-2026-10-19-org-director-wait.md` | この節を足した |
+
+### Surfaces checked for drift
+
+| 面 | 結果 | メモ |
+|----|------|------|
+| `ralph org wait --help`(`go run ./cmd/ralph org wait --help`) | 合っている | 「It waits only while <id> is the current registration and not stopped: otherwise it exits 5 without waiting」は、ロックの下の読み直しで断られる場合にも当たる(待たずに 5 で返る)。30 s の読み直しと印、5 s の見張りの確かめ、4 と 5、`note:`、signal の文は cycle 1 のまま。30 s と 5 s は `TestDirectorWaitLine_TheWaitHelpSaysTheIntervalsOfTheOrgLayer` が `org.DirectorWaitMarkInterval` と `org.DirectorWaitWatchProbeInterval` に結ぶ |
+| 終了コード(0、1、4、5) | 合っている | `internal/cli/exitcode.go` は 3(upgrade)、4(`ErrDirectorWaitNoWatch`)、5(`ErrDirectorWaitNotCurrent`)、ほかは 1 のまま。cycle 2 は終了コードを足していない。ロックの下で `director.jsonl` を読めないときは prefix 付きの plain error で 1 になり、skill の「0、4、5 と時間切れのほかは失敗」に入る |
+| 旧名 `directorWaitWatchProbeInterval`、`directorWaitMarkInterval` | 残っていない | `git grep`(`docs/reports` と `docs/evidence` を除く)で当たるのは、計画の Progress の 169 行(D2 の名前が変わった記録)だけ。コード、help、計画の D2 と D3、tech-debt にはない |
+| `/director` skill(`.claude`、`.agents`、`templates/base/.claude`、`templates/base/.agents`) | 合っている | 4 面は `cmp` で同一バイト。「始める前にそうでなければ待たずに終了コード 5 で返る」は新しい道にも当たる(待たずに 5 で、director として動くのをやめる扱いは同じ)。30 秒の読み直し、5 秒の見張りの確かめ、0、4、5 の扱いは実装と合う。変えていない |
+| `README.md`(124、258、260 行) | 合っている | `wait --inbox --director <id>`、「waits only while `<id>` is the current registration」、4 と 5、印の説明は cycle 2 の動きと食い違わない |
+| `docs/recipes/director-wake.md` と template の写し | 合っている | `cmp` で同一バイト。7 行と 271 行は `--director <id>` を書く |
+| `AGENTS.md`(`internal/org/` の行) | 合っている | 「ends with exit 4 ... and 5 when its registration is not current」は実装に合う。file 名 `director_wait.go` は変わらない |
+| `.claude/rules/ralph/agent-messaging.md` | 変更不要 | `wait` の記述がない(TYPE の表、星形の topology、2,000 字の上限、escalate の話) |
+| `docs/architecture/repo-map.md`、`docs/quality/` | 変更不要 | cycle 2 の差分に入っていない。新しい file も script も門も足していない |
+| 実機の evidence | 直した | 上の Changes made |
+| 仕様 8b-2b の注 | 直した | 上の Changes made。ほかの文(印の field、`end` の 6 値、5 秒と 30 秒、終了コード 4 と 5)は実装と合う |
+| tech-debt(306、308 行) | 直した | 上の Changes made。plan の参照は `docs/plans/active/2026-10-19-org-director-wait.md` で、実在する |
+| `$HOME` の絶対パス、U+FFFD、`git diff --check` | なし | 変えた 4 file に `/Users/` も U+FFFD もない。`git diff --check` は終了コード 0 |
+
+### Left open
+
+- test report の cycle 2 の節の「残る穴: G8、G9、G10(LOW)、G11、G6(INFO)」は、99144e8f より前の記録である。`/test` が verdict を持つ report なので書き換えていない。払ったことは計画の Progress と tech-debt の 308 行にある
+- 実機の確認は fa95a3d8 の binary のままで、38cac6f1 以降の binary で (a)〜(h) を打ち直していない。evidence の冒頭にそう書いた。打ち直すかは orchestrator が決める(変わったのは、(a)〜(h) が通らない道だけである)
+- self-review cycle 2 の I2(ロックを取れない開始と `attach --replace` が重なる場合)は、self-review が上げないと決めたとおり、tech-debt にも書いていない。`begin` のコメントは、ロックを取れないときは最初の `refresh` が登録を読み直すと言っている
+- `ralph org director --help`(グループ)の段落が 8a-2 の言い方のままであることは、cycle 1 の report のとおり。cycle 2 の差分は触れていない
+- 実機で打っていない面(Monitor で打った wait、codex の繰り返しで打った wait、nohup で始めた wait、Linux での signal の継承)は、cycle 1 の report と verify と test の report のとおり
+
+### Verification
+
+| Command | Result |
+|---------|--------|
+| `go run ./cmd/ralph org wait --help` | 上の表のとおり、help の文が cycle 2 の動きと合う |
+| `./scripts/check-skill-sync.sh` | 終了コード 0。`[ok] check-skill-sync: 14 skill(s) in lock-step`。skill は変えていないので `sync-skills.sh` は走らせていない |
+| `./scripts/check-sync.sh` | 終了コード 0。`PASS: all files in sync.`(IDENTICAL 171、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5) |
+| `cmp` の `director` skill の 4 面と recipe の 2 面 | どれも同一バイト |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-19-org-director-wait.md` | 編集のあとも `e67985a2f2d7`(計画の `- Approved:` の行と同じ) |
+| tech-debt の 306、308 行の欄の数と plan の参照 | セルは 5(`\|` は行頭と行末を含めて 6 個)。U+FFFD なし。参照する `docs/` と `internal/` の path は実在し、`docs/plans/` の参照に欠けなし |
+| `git diff --check` | 出力なし、終了コード 0 |
+
+`./scripts/verify.local.sh`、`./scripts/run-static-verify.sh`、`go test` は走らせていない。この run はコードを変えておらず、変えたのは markdown 5 file と insight event だけである。
+
+### Verdict
+
+- Verdict: pass(sync-docs に stop condition はない)
+- Not verified: 38cac6f1 以降の binary での実機の確認、上の Left open の実機の面、Linux、`go test` と `run-static-verify.sh`(コードの変更なし)
+
+### Insight event
+
+`./scripts/insights-append.sh --slug org-director-wait --flow standard --phase sync_docs --verdict complete --source skill --cycle 2` で `docs/insights/events/2026-10-19-org-director-wait.jsonl` に 1 行足した(`ts` 2026-10-19T10:11:48Z)。

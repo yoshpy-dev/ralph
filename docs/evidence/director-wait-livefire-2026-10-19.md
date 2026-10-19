@@ -2,12 +2,26 @@
 
 Plan: `docs/plans/active/2026-10-19-org-director-wait.md` (D8, AC9). Run on
 2026-10-19 with the `ralph` binary built from the task branch at fa95a3d8
-(S1 to S3). The later commits change documents, test files, the headless
-role prompt (which this check does not use), and, in the self-review fixes
-c1d31e3f and 33da4185, Go comments, a move of code between files, one
-constant in place of two with the same value, and the help sentence about
-when exit 5 comes; none of them changes what the wait does or what it prints
-while it waits.
+(S1 to S3). The later commits, except 38cac6f1 below, change documents,
+test files, the headless role prompt (which this check does not use), and,
+in the self-review fixes c1d31e3f and 33da4185, Go comments, a move of code
+between files, one constant in place of two with the same value, and the
+help sentence about when exit 5 comes; none of them changes what the wait
+does or what it prints while it waits.
+
+38cac6f1, the fix of the cross-review of cycle 1, does change what the wait
+does, in one path. `begin` now reads `director.jsonl` again under
+`director-wait.lock` before its first write of the mark, and a wait whose
+registration is no longer the current one (replaced, detached, stopped, or
+attached again since the wait's first check) exits 5 with nothing written.
+Before, that wait wrote its mark over the current wait's and kept waiting
+until a later read ended it with 5. None of the checks (a) to (h) takes this
+path: the 5 of (e) comes from the 30 s read of a wait that had started, and
+the refused wait of (e) failed the first check. These checks were not run
+again with a binary built from 38cac6f1 or later. The commits after
+38cac6f1 (b3b692e1, 6086af65, 99144e8f) export a constant, split `begin`
+into smaller functions, edit comments, and add tests; they do not change
+what the wait does.
 
 ## Setup
 
