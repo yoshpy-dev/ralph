@@ -19,10 +19,10 @@ import (
 // <id>`. It returns the open inbox items as WaitInbox does, and besides:
 //
 //   - it waits only while the current director registration is <id> and not
-//     stopped, read before it starts and again every
-//     DirectorWaitMarkInterval (D1), so the wait of a session that
-//     `attach --replace` replaced ends by itself (ErrDirectorWaitNotCurrent)
-//     at the next such read;
+//     stopped, read before it starts, again under director-wait.lock before
+//     its first write of the mark (begin), and every DirectorWaitMarkInterval
+//     (D1), so the wait of a session that `attach --replace` replaced ends by
+//     itself (ErrDirectorWaitNotCurrent) at the next such read;
 //   - it writes its own mark, director-wait.json, under director-wait.lock
 //     (D2): when it started, when it last wrote, the watch it last saw, and
 //     how it ended. A promoted session's registration tells nothing about
@@ -45,7 +45,7 @@ const (
 	DirectorWaitFileName = "director-wait.json"
 	// directorWaitLockFile is the lock every write of director-wait.json
 	// takes (withFileLock), as director.lock is for director.jsonl. A
-	// wait refused before it starts creates neither file.
+	// wait refused before begin creates neither file.
 	directorWaitLockFile = "director-wait.lock"
 )
 
@@ -304,8 +304,10 @@ func (o *Org) WaitInboxForDirector(ctx context.Context, p DirectorWaitParams) ([
 
 // directorWaitCheckCurrent checks that cur, the current registration (nil
 // for none), is the one a wait for id may wait for (D1): cur is id and not
-// stopped, and, once the wait has started for started, has its attached_at
-// (started is nil before the start). It returns a nil error when it is.
+// stopped, and, when started is set, has started's attached_at.
+// WaitInboxForDirector's first read passes nil, before the wait has a
+// registration; begin's read under the lock and refresh's pass &w.reg,
+// the one that first read found. It returns a nil error when it is.
 // Otherwise the error wraps ErrDirectorWaitNotCurrent and names cur
 // (describe, which escapes its attach time), and detail is the short reason
 // for the mark.
@@ -340,8 +342,8 @@ type directorWaitRun struct {
 	stderr io.Writer
 	reg    DirectorRegistration
 	mark   DirectorWaitMark
-	// prevWaitID is the wait_id of the mark the start read under the lock
-	// ("" for none or an unreadable one). Until a write of this wait lands
+	// prevWaitID is the wait_id of the mark the start read (decideStart, ""
+	// for none or an unreadable one). Until a write of this wait lands
 	// (written), a later write may still replace that mark.
 	prevWaitID string
 	written    bool
@@ -388,20 +390,16 @@ func newDirectorWaitRun(o *Org, p DirectorWaitParams) *directorWaitRun {
 // the registration as refresh does (directorWaitCheckCurrent with w.reg), so
 // a registration replaced since WaitInboxForDirector's first read, while the
 // probe ran, is caught before the write. Then it reads the previous mark and
-// writes its own with what it found, which makes it the owner. A registration
-// that is no longer current returns the error that wraps
+// writes its own with what it found (decideStart), which makes it the owner.
+// A registration that is no longer current returns the error that wraps
 // ErrDirectorWaitNotCurrent, and a director.jsonl that cannot be read a plain
 // error; either way begin writes no mark, no end, and no note: line, and the
 // mark of the wait that is now current stays as it was. The probe runs before
 // the lock, so the lock is held for the reads and the write only, as for
-// every later write. A probe that ctx cut short in its settle decides
-// nothing: the wait carries over the previous mark's watch_accepting, and its
-// loop ends at once for ctx. A watch the previous mark saw accepting work
-// that accepts none now is a change for the first round to report, so the
-// mark keeps watch_accepting true until then (DirectorWaitMark). When the
-// lock cannot be taken, the previous mark is read without it, the failed
-// write is said once, and the wait goes on: the first refresh reads the
-// registration again.
+// every later write. When the lock cannot be taken, the previous mark is read
+// without it, the failed write is said once, and the wait goes on: the first
+// refresh reads the registration again. Last, it acts on what the probe found
+// (noteStartWatch).
 func (w *directorWaitRun) begin(ctx context.Context) error {
 	l, settled := w.probe(ctx, true)
 	w.watch = l
@@ -412,65 +410,77 @@ func (w *directorWaitRun) begin(ctx context.Context) error {
 		ID:     w.reg.ID, AttachedAt: w.reg.AttachedAt, PID: w.p.PID,
 		StartedAt: start.UTC().Format(time.RFC3339),
 	}
-	var wasAccepting bool
-	decide := func() {
-		// An unreadable previous mark carries nothing over, and the start
-		// replaces it.
-		prev, _ := ReadDirectorWait(w.p.StateDir)
-		if prev != nil {
-			w.prevWaitID = prev.WaitID
-		}
-		wasAccepting = DirectorWaitFor(prev, &w.reg) != nil && prev.WatchAccepting
-		// A probe ctx cut short found the watch stale, so observed is false
-		// then, and the carried value stands.
-		w.accepting = observed || wasAccepting
-		w.mark.WatchAccepting = w.accepting
-		w.mark.SeenAt = w.p.Now().UTC().Format(time.RFC3339)
-	}
 	if directorWaitBeforeBeginLock != nil {
 		directorWaitBeforeBeginLock()
 	}
-	// readErr and notCurrent carry out of the lock the two outcomes of the
-	// read under it that end the wait with nothing written.
-	var readErr, notCurrent error
-	decided := false
+	// refused carries out of the lock the outcome of the read under it that
+	// ends the wait with nothing written.
+	var refused error
+	var wasAccepting, decided bool
 	err := withFileLock(w.p.StateDir, directorWaitLockFile, "director wait", func() error {
 		res, err := NewDirectorStore(w.p.StateDir).Read()
 		if err != nil {
-			readErr = err
+			refused = fmt.Errorf("%s%w", directorWaitErrPrefix, err)
 			return nil
 		}
 		if _, err := directorWaitCheckCurrent(w.p.ID, &w.reg, res.Current); err != nil {
-			notCurrent = err
+			refused = err
 			return nil
 		}
-		decide()
-		decided = true
+		wasAccepting, decided = w.decideStart(observed), true
 		return writeJSONFileAtomic(DirectorWaitPathIn(w.p.StateDir), w.mark)
 	})
-	switch {
-	case readErr != nil:
-		return fmt.Errorf("%s%w", directorWaitErrPrefix, readErr)
-	case notCurrent != nil:
-		return notCurrent
+	if refused != nil {
+		return refused
 	}
 	if !decided {
-		decide()
+		wasAccepting = w.decideStart(observed)
 	}
 	if err != nil {
 		w.sayWriteFailed(err)
 	} else {
 		w.written = true
 	}
+	w.noteStartWatch(settled, observed, wasAccepting)
+	return nil
+}
+
+// decideStart reads the mark left before this wait, keeps its wait_id
+// (prevWaitID), and sets the start's watch_accepting and seen_at (D3):
+// watch_accepting is true when the probe found the watch accepting work
+// (observed) or the previous mark, of the same registration
+// (DirectorWaitFor), says true, which it returns as wasAccepting. An
+// unreadable previous mark carries nothing over, and the start replaces it.
+func (w *directorWaitRun) decideStart(observed bool) (wasAccepting bool) {
+	prev, _ := ReadDirectorWait(w.p.StateDir)
+	if prev != nil {
+		w.prevWaitID = prev.WaitID
+	}
+	wasAccepting = DirectorWaitFor(prev, &w.reg) != nil && prev.WatchAccepting
+	// A probe ctx cut short found the watch stale, so observed is false
+	// then, and the carried value stands.
+	w.accepting = observed || wasAccepting
+	w.mark.WatchAccepting = w.accepting
+	w.mark.SeenAt = w.p.Now().UTC().Format(time.RFC3339)
+	return wasAccepting
+}
+
+// noteStartWatch acts on what begin's probe found (D3). A probe that ctx cut
+// short in its settle (settled false) decides nothing: the wait carries over
+// the previous mark's watch_accepting, and its loop ends at once for ctx. A
+// watch the previous mark saw accepting work that accepts none now is a
+// change for the first round to report, so the mark keeps watch_accepting
+// true until then (DirectorWaitMark). With nothing to carry over, a watch
+// that accepts no work gets one note: line, and the wait goes on.
+func (w *directorWaitRun) noteStartWatch(settled, observed, wasAccepting bool) {
 	switch {
 	case !settled, observed:
 	case wasAccepting:
 		w.noWatch = true
 		w.noWatchSince = "the last wait of " + w.reg.ID + " wrote its mark"
 	default:
-		_, _ = fmt.Fprintf(w.stderr, "note: no ralph org watch --all accepts work on this ledger, and this wait keeps waiting: %s\n", directorWaitWatchFacts(w.p, l))
+		_, _ = fmt.Fprintf(w.stderr, "note: no ralph org watch --all accepts work on this ledger, and this wait keeps waiting: %s\n", directorWaitWatchFacts(w.p, w.watch))
 	}
-	return nil
 }
 
 // directorWaitBeforeBeginLock is a test-only seam that begin runs after its
