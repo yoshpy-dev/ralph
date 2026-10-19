@@ -533,3 +533,97 @@ func TestDirectorSkillWaitBoundProblems(t *testing.T) {
 		})
 	}
 }
+
+// directorSkillClaudeCodeWaitBulletRules are fragments of the Claude Code
+// bullet of the /director skill's subsection ### wait で待つ, each the words
+// of one rule plan 2026-10-19-org-director-wait-bound.md gave a Claude Code
+// director (AC2 and AC3).
+var directorSkillClaudeCodeWaitBulletRules = []string{
+	// AC3: exit 1 with the timeout phrase in stderr is a timeout, and a
+	// Claude Code director runs the wait again, as a Codex one does.
+	"終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ",
+	// AC2: Bash's run_in_background may run the wait instead of the Monitor.
+	"同じコマンドを Bash の `run_in_background` で走らせてもよい",
+	// AC2: a wait run with Bash keeps running after /exit's "Move to
+	// background and exit",
+	"Bash で走らせた wait は、`/exit` の「Move to background and exit」のあとも",
+	// AC2: and after claude ends with SIGKILL.
+	"claude が SIGKILL で終わったあとも走り続ける",
+	// AC2: its note: lines (and the wait's own lines) reach the director only
+	// when the wait ends.
+	"`note:` の行と `wait --inbox --director: ` で始まる行も、wait が終わるまで届かない",
+}
+
+// directorSkillWaitSubsectionRules are fragments of the rest of that
+// subsection, its exit-code list and its paragraph on the Monitor's expiry,
+// each the words of one rule the same plan gave a Claude Code director (AC3).
+var directorSkillWaitSubsectionRules = []string{
+	// AC3: the exit-code list's item 1: runs a timed-out wait again under
+	// Claude Code too, not only under Codex.
+	"ただし時間切れの文があれば、Claude Code でも Codex でも上のとおり打ち直す",
+	// AC3: an end by a signal is a failure but for one exception,
+	"signal での終わりで失敗にしないのは 1 つだけで",
+	// AC3: decided at the time the director sees the end,
+	"wait が signal で終わったのを見た時点で",
+	// AC3: by whether the expiry notice of the Monitor that watched that wait
+	// has already arrived;
+	"その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている",
+	// AC3: if it has not, the end is a failure,
+	"見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗として扱う",
+	// AC3: until a later notice of that Monitor, which makes the director run
+	// the wait again
+	"あとからその Monitor の知らせが届いたら、そこで同じように打ち直し",
+	// AC3: and tell the human that the end it took for a failure was the
+	// Monitor's expiry.
+	"失敗とした終わりは Monitor の期限切れだったと人に伝える",
+}
+
+// TestDirectorSkill_PinsTheClaudeCodeWaitRules pins the rules of the
+// /director skill's subsection ### wait で待つ that plan
+// 2026-10-19-org-director-wait-bound.md added for a Claude Code director (AC2
+// and AC3), the words TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap
+// does not read: a timed-out wait is run again (the Claude Code bullet and the
+// exit-code item 1:); an end by a signal is no failure only when the expiry
+// notice of the Monitor that watched the wait has already arrived when the
+// director sees the end, and a later notice makes the director run the wait
+// again; and the wait may run under Bash's run_in_background, which outlives
+// the session and holds back its note: lines until it ends. Each copy's
+// Claude Code bullet (directorSkillClaudeCodeWaitBullet) must contain every
+// fragment of directorSkillClaudeCodeWaitBulletRules, and its subsection
+// (directorSkillWaitSubsection) every fragment of
+// directorSkillWaitSubsectionRules, compared with spaces and line breaks
+// removed (withoutSpaces). scripts/check-skill-sync.sh keeps the copies
+// identical but does not read Go, so the four copies changed together pass it.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment; otherwise restore the text of
+// ### wait で待つ in .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheClaudeCodeWaitRules(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's wait-rule check (vendored repo?)", rel, err)
+		}
+		section := directorSkillWaitSubsection(string(data))
+		bullet, _ := directorSkillClaudeCodeWaitBullet(section)
+		for _, in := range []struct {
+			name      string
+			text      string
+			fragments []string
+		}{
+			{"the Claude Code bullet of ### wait で待つ", bullet, directorSkillClaudeCodeWaitBulletRules},
+			{"the subsection ### wait で待つ", section, directorSkillWaitSubsectionRules},
+		} {
+			text := withoutSpaces(in.text)
+			for _, fragment := range in.fragments {
+				if !strings.Contains(text, withoutSpaces(fragment)) {
+					t.Errorf("%s: %s does not contain %q -- see this test's doc comment for what to update", rel, in.name, fragment)
+				}
+			}
+		}
+	}
+}

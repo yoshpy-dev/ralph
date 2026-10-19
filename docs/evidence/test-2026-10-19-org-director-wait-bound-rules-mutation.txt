@@ -1,0 +1,186 @@
+Mutation testing: TestDirectorSkill_PinsTheClaudeCodeWaitRules (org-director-wait-bound, S6, test finding T1), 2026-10-19
+=========================================================================================================================
+
+Tree under test: `git archive HEAD` of worktree .claude/worktrees/org-director-wait-bound at
+HEAD 35280638, extracted twice under <scratch>/impl-s6-t1: arch/ (the copy the tests run in)
+and pristine/ (untouched). The worktree's new internal/org/director_skill_sync_test.go (the S6
+change, not yet committed then) was copied into both. go1.26.0 darwin/arm64; every run
+repeated with GOTOOLCHAIN=go1.25.8 with the same verdicts and problem lines (only timings
+differ; `diff` of the two outputs with the seconds column masked is empty).
+
+Harness: <scratch>/impl-s6-t1/mutants.py (not committed). Before and after each mutant it
+copies the four director SKILL.md copies and the test file back from pristine/. A mutant
+replaces a snippet in all four copies at once (the copies are byte-identical, sha256
+2956f50d...), matched with spaces and line breaks ignored, since the skill wraps lines
+anywhere; the harness stops unless the snippet matches exactly once in each copy. Every mutant
+therefore keeps the four copies identical, which scripts/check-skill-sync.sh accepts. Then, in
+arch/:
+
+  go test ./internal/org/ -run TestDirectorSkill -count=1 -v -timeout 10m
+
+The test reads the copies relative to its own source file (directorSkillRepoRoot), so in arch/
+it reads arch/'s mutated copies; no tracked file in the worktree was edited by a mutant. After
+the last run, `cmp` of the five files in arch/ against pristine/ reported no difference.
+
+Pinned fragments (compared with withoutSpaces):
+  directorSkillClaudeCodeWaitBulletRules, searched in the Claude Code bullet of ### wait で待つ:
+    F1  (AC3) 終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ
+    F2  (AC2) 同じコマンドを Bash の `run_in_background` で走らせてもよい
+    F3  (AC2) Bash で走らせた wait は、`/exit` の「Move to background and exit」のあとも
+    F4  (AC2) claude が SIGKILL で終わったあとも走り続ける
+    F5  (AC2) `note:` の行と `wait --inbox --director: ` で始まる行も、wait が終わるまで届かない
+  directorSkillWaitSubsectionRules, searched in the whole subsection ### wait で待つ:
+    F6  (AC3) ただし時間切れの文があれば、Claude Code でも Codex でも上のとおり打ち直す
+    F7  (AC3) signal での終わりで失敗にしないのは 1 つだけで
+    F8  (AC3) wait が signal で終わったのを見た時点で
+    F9  (AC3) その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている
+    F10 (AC3) 見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗として扱う
+    F11 (AC3) あとからその Monitor の知らせが届いたら、そこで同じように打ち直し
+    F12 (AC3) 失敗とした終わりは Monitor の期限切れだったと人に伝える
+
+Summary: 23 runs per toolchain. Control green (all five TestDirectorSkill tests pass). 22
+mutants, 22 red, each through TestDirectorSkill_PinsTheClaudeCodeWaitRules alone: the four
+tests that existed before stay green on every mutant, as the test report's T1 found. Every
+fragment is the only problem of at least one mutant (F1: B1a B1b G1; F2: B2 B6; F3: B3; F4:
+B4; F5: B5a B5b; F6: S1; F7: S2; F8: S3; F9: S4a S4b S4c; F10: S5; F11: S6; F12: S7). B6
+moves F2's sentence into the Codex bullet, which only the bullet scope catches (the whole
+subsection still contains it). G1, G1b, G2, G2b and G3 are the tester's gap probes of
+test-2026-10-19-org-director-wait-bound-mutation.txt, green with the HEAD test file and red
+with the new one.
+
+A run counts as red when go test exits 1 with a test failure (no build failure occurred).
+"> [x4]" lines are the new test's t.Errorf messages, printed once with the copy's path
+removed; x4 means all four copies printed it.
+
+id | rc | result | new test | secs | mutant
+    top-level PASS / FAIL
+    > problem lines
+------------------------------------------------------------------------------
+
+CTRL | rc=0 | pass | new test green | 1s | control: HEAD skill copies, the new test file, no change
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems, TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    top-level FAIL: -
+
+B1a | rc=1 | FAIL | new test red | 1s | (AC3, bullet) Codex と同じくもう一度打つ -> 失敗として打ち直さない
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ" -- see this test's doc comment for what to update
+
+B1b | rc=1 | FAIL | new test red | 1s | (AC3, bullet) the timeout sentence's 終了コード 1 -> 終了コード 3
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ" -- see this test's doc comment for what to update
+
+G1 | rc=1 | FAIL | new test red | 1s | (tester's gap probe, AC3) the bullet's timeout-rerun sentence deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ" -- see this test's doc comment for what to update
+
+B2 | rc=1 | FAIL | new test red | 1s | (AC2, bullet) run_in_background で走らせてもよい -> 走らせない
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "同じコマンドを Bash の `run_in_background` で走らせてもよい" -- see this test's doc comment for what to update
+
+B3 | rc=1 | FAIL | new test red | 1s | (AC2, bullet) the 「Move to background and exit」 clause dropped
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "Bash で走らせた wait は、`/exit` の「Move to background and exit」のあとも" -- see this test's doc comment for what to update
+
+B4 | rc=1 | FAIL | new test red | 1s | (AC2, bullet) the SIGKILL clause dropped
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "claude が SIGKILL で終わったあとも走り続ける" -- see this test's doc comment for what to update
+
+B5a | rc=1 | FAIL | new test red | 1s | (AC2, bullet) note: lines: wait が終わるまで届かない -> すぐ届く
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "`note:` の行と `wait --inbox --director: ` で始まる行も、wait が終わるまで届かない" -- see this test's doc comment for what to update
+
+B5b | rc=1 | FAIL | new test red | 1s | (AC2, bullet) `note:` dropped from the sentence on lines held back
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "`note:` の行と `wait --inbox --director: ` で始まる行も、wait が終わるまで届かない" -- see this test's doc comment for what to update
+
+B6 | rc=1 | FAIL | new test red | 1s | (AC2, scope) the run_in_background sentence moved from the Claude Code bullet to the Codex bullet
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "同じコマンドを Bash の `run_in_background` で走らせてもよい" -- see this test's doc comment for what to update
+
+G3 | rc=1 | FAIL | new test red | 1s | (tester's gap probe, AC2) the Bash run_in_background sentences deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "同じコマンドを Bash の `run_in_background` で走らせてもよい" -- see this test's doc comment for what to update
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "Bash で走らせた wait は、`/exit` の「Move to background and exit」のあとも" -- see this test's doc comment for what to update
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "claude が SIGKILL で終わったあとも走り続ける" -- see this test's doc comment for what to update
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "`note:` の行と `wait --inbox --director: ` で始まる行も、wait が終わるまで届かない" -- see this test's doc comment for what to update
+
+S1 | rc=1 | FAIL | new test red | 1s | (AC3, item 1:) Claude Code でも Codex でも -> Codex では
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "ただし時間切れの文があれば、Claude Code でも Codex でも上のとおり打ち直す" -- see this test's doc comment for what to update
+
+G1b | rc=1 | FAIL | new test red | 1s | (tester's gap probe, AC3) G1 plus item 1: back to its 3a803a87 wording
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the Claude Code bullet of ### wait で待つ does not contain "終了コード 1 で、stderr が `no open inbox item arrived within` を含むときは、時間内に件が来なかっただけなので、Codex と同じくもう一度打つ" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "ただし時間切れの文があれば、Claude Code でも Codex でも上のとおり打ち直す" -- see this test's doc comment for what to update
+
+S2 | rc=1 | FAIL | new test red | 1s | (AC3, exception) 失敗にしないのは 1 つだけで -> たとえば
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "signal での終わりで失敗にしないのは 1 つだけで" -- see this test's doc comment for what to update
+
+S3 | rc=1 | FAIL | new test red | 1s | (AC3, exception) 見た時点で -> あといつでも (no longer decided when the end is seen)
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "wait が signal で終わったのを見た時点で" -- see this test's doc comment for what to update
+
+S4a | rc=1 | FAIL | new test red | 1s | (AC3, exception) その wait を見張っていた Monitor -> どれかの Monitor
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている" -- see this test's doc comment for what to update
+
+S4b | rc=1 | FAIL | new test red | 1s | (AC3, exception) (「Monitor expired」) dropped
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている" -- see this test's doc comment for what to update
+
+S4c | rc=1 | FAIL | new test red | 1s | (AC3, exception) もう届いている -> いずれ届く
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている" -- see this test's doc comment for what to update
+
+S5 | rc=1 | FAIL | new test red | 1s | (AC3, exception) not yet arrived: 失敗として扱う -> しばらく待って打ち直す
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗として扱う" -- see this test's doc comment for what to update
+
+S6 | rc=1 | FAIL | new test red | 1s | (AC3, exception) a later notice: 同じように打ち直し -> 打ち直さず
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "あとからその Monitor の知らせが届いたら、そこで同じように打ち直し" -- see this test's doc comment for what to update
+
+S7 | rc=1 | FAIL | new test red | 1s | (AC3, exception) telling the human the failure was the Monitor's expiry dropped
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "失敗とした終わりは Monitor の期限切れだったと人に伝える" -- see this test's doc comment for what to update
+
+G2 | rc=1 | FAIL | new test red | 1s | (tester's gap probe, AC3) the Monitor-expiry exception paragraph deleted
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "signal での終わりで失敗にしないのは 1 つだけで" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "wait が signal で終わったのを見た時点で" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗として扱う" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "あとからその Monitor の知らせが届いたら、そこで同じように打ち直し" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "失敗とした終わりは Monitor の期限切れだったと人に伝える" -- see this test's doc comment for what to update
+
+G2b | rc=1 | FAIL | new test red | 1s | (tester's gap probe, AC3) G2 plus the failure paragraph's list of non-failures back to its 3a803a87 wording
+    top-level PASS: TestDirectorSkill_NamesTheInboxWaitTimeoutPhrase, TestDirectorSkill_PinsTheAutoMergeSteps, TestDirectorSkill_BoundsTheClaudeCodeWaitBelowTheMonitorCap, TestDirectorSkillWaitBoundProblems
+    top-level FAIL: TestDirectorSkill_PinsTheClaudeCodeWaitRules
+    > [x4] the subsection ### wait で待つ does not contain "signal での終わりで失敗にしないのは 1 つだけで" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "wait が signal で終わったのを見た時点で" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "その wait を見張っていた Monitor の期限切れの知らせ(「Monitor expired」)がもう届いている" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "見た時点でその知らせがまだ届いていなければ、上の段落のとおり失敗として扱う" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "あとからその Monitor の知らせが届いたら、そこで同じように打ち直し" -- see this test's doc comment for what to update
+    > [x4] the subsection ### wait で待つ does not contain "失敗とした終わりは Monitor の期限切れだったと人に伝える" -- see this test's doc comment for what to update
