@@ -208,11 +208,10 @@ func TestOrgWaitDirector_RefusesItsFlagsBeforeReadingAnything(t *testing.T) {
 	}
 }
 
-// AC1: an id that is not d<N> is refused by the org layer before it reads
-// director.jsonl (a directory here, which a read would fail on), with exit
-// 1, and nothing is written: no mark, no lock, and a state dir that did not
-// exist is not created. A well-formed id is read for, and with no
-// registration exits 5.
+// AC1: an id that is not d<N> is refused before director.jsonl is read (a
+// directory here, which a read would fail on), with exit 1, and nothing is
+// written: no mark, no lock, and a state dir that did not exist is not
+// created. A well-formed id is read for, and with no registration exits 5.
 func TestOrgWaitDirector_RefusesAnIDThatIsNotDN(t *testing.T) {
 	for _, id := range []string{"x", "d", "d0"} {
 		stateDir := t.TempDir()
@@ -245,6 +244,37 @@ func TestOrgWaitDirector_RefusesAnIDThatIsNotDN(t *testing.T) {
 	}
 	if _, err := os.Stat(missing); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("a wait for d12 with no registration created the state dir (stat err %v)", err)
+	}
+}
+
+// AC1: an id that is not d<N> is refused before the state dir is resolved
+// and ralph.toml is loaded. Next to a --config that does not parse, the
+// error is the id's, not the config's, with exit 1, and a --state-dir that
+// does not exist is not created. A well-formed id on the same flags gets as
+// far as the config, so the config does fail to load.
+func TestOrgWaitDirector_RefusesABadIDBeforeItLoadsTheConfig(t *testing.T) {
+	tmp := t.TempDir()
+	badConfig := filepath.Join(tmp, "ralph.toml")
+	if err := os.WriteFile(badConfig, []byte("[org\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(tmp, "state")
+	for _, id := range []string{"", "x", "d0", "D1"} {
+		stdout, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs(id, stateDir, "--timeout-ms", "0", "--config", badConfig)...)
+		if want := "org: wait --inbox --director: " + strconv.Quote(id) + " is not a registration id (d<N>, such as d1)"; err == nil || err.Error() != want || ExitCode(err) != 1 {
+			t.Errorf("id %q: error = %v (exit %d); want %q and exit 1", id, err, ExitCode(err), want)
+		}
+		if stdout != "" {
+			t.Errorf("id %q: stdout = %q; want nothing", id, stdout)
+		}
+	}
+
+	_, _, _, err := runOrgCmdStreamsWithin(t, 5*time.Second, directorWaitArgs("d1", stateDir, "--timeout-ms", "0", "--config", badConfig)...)
+	if err == nil || !strings.HasPrefix(err.Error(), "org: load config: ") || ExitCode(err) != 1 {
+		t.Errorf("d1 next to a config that does not parse: error = %v (exit %d); want the config's error and exit 1", err, ExitCode(err))
+	}
+	if _, err := os.Stat(stateDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a refused wait --director created the state dir (stat err %v)", err)
 	}
 }
 

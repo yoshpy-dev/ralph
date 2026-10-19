@@ -422,6 +422,24 @@ func TestWaitInboxForDirector_RefusesBeforeItWaits(t *testing.T) {
 	})
 }
 
+// AC1: CheckDirectorWaitID, which the CLI calls before it reads anything,
+// accepts the ids a registration is written with and refuses every other id
+// with the text WaitInboxForDirector refused it with before the check was
+// split out of it (spelled out here, not built from directorWaitErrPrefix).
+func TestCheckDirectorWaitID_AcceptsOnlyDN(t *testing.T) {
+	for _, id := range []string{"d1", "d12", "d9223372036854775807"} {
+		if err := CheckDirectorWaitID(id); err != nil {
+			t.Errorf("CheckDirectorWaitID(%q) = %v; want nil", id, err)
+		}
+	}
+	for _, id := range []string{"", "d", "d0", "d01", "d-1", "d+1", "x1", "D1", "d1x", "d1 ", "e1", "d9223372036854775808"} {
+		want := "org: wait --inbox --director: " + strconv.Quote(id) + " is not a registration id (d<N>, such as d1)"
+		if err := CheckDirectorWaitID(id); err == nil || err.Error() != want {
+			t.Errorf("CheckDirectorWaitID(%q) = %v; want %q", id, err, want)
+		}
+	}
+}
+
 // D1: a promoted session's registration and a headless one that is starting
 // or running are waited for, and the mark binds the wait to that
 // registration.

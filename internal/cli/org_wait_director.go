@@ -17,12 +17,14 @@ import (
 // (*org.Org).WaitInboxForDirector, then the open items it returned on
 // stdout, printed as a wait without --director prints them
 // (printInboxWaitItems). runOrgWaitInbox has already refused --org-id,
-// --seat, and --until. The org layer refuses an id that is not d<N> before it
-// reads anything, and a registration that is not current with nothing
-// written; until then this function only resolves the state dir and loads
-// ralph.toml, and writes nothing. Its note: lines and the lines about its mark
-// go to the command's stderr. The exit codes 4 and 5 come from the org
-// layer's errors (ExitCode).
+// --seat, and --until. An id that is not d<N> is refused first
+// (org.CheckDirectorWaitID), before the state dir is resolved (which may run
+// git) or ralph.toml is loaded, so nothing is read for it (AC1). The org layer
+// refuses a registration that is not current with nothing written; until then
+// this function only resolves the state dir and loads ralph.toml, and writes
+// nothing. Its note: lines and the lines about its mark go to the command's
+// stderr. The exit codes 4 and 5 come from the org layer's errors
+// (ExitCode).
 //
 // SIGINT, SIGTERM, and SIGHUP cancel the wait's context with a cause that
 // names the signal (signalCauseContext), and the org layer writes end=signal
@@ -44,6 +46,9 @@ import (
 // The verb only reads the ledger except for its own mark, so it is
 // orgLedgerReadOnly: a legacy worktree ledger gets a note, not a refusal.
 func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, timeoutMS int, id string) error {
+	if err := org.CheckDirectorWaitID(id); err != nil {
+		return err
+	}
 	resolved, source := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
 	if err := guardLegacyOrgStateDir(cmd, resolved, source, orgLedgerReadOnly); err != nil {
 		return err

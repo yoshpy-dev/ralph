@@ -194,6 +194,17 @@ type DirectorWaitParams struct {
 	PID int
 }
 
+// CheckDirectorWaitID returns nil for an id of the form d<N>, written the
+// way a registration id is (directorIDNumber), and otherwise the error
+// WaitInboxForDirector refuses that id with. It reads nothing, so the CLI
+// calls it before it resolves the state dir or loads ralph.toml (AC1).
+func CheckDirectorWaitID(id string) error {
+	if _, ok := directorIDNumber(id); !ok {
+		return fmt.Errorf("%s%q is not a registration id (d<N>, such as d1)", directorWaitErrPrefix, id)
+	}
+	return nil
+}
+
 // WaitInboxForDirector is `ralph org wait --inbox --director <id>` (plan
 // 2026-10-19-org-director-wait): it returns the open inbox items in ID order,
 // as WaitInbox does, reading the inbox every Org.InboxPollInterval
@@ -201,13 +212,13 @@ type DirectorWaitParams struct {
 // and probes the watch.
 //
 // Before it reads anything it refuses an id that is not of the form d<N>
-// with a plain error. It then reads director.jsonl: the current registration
-// must be p.ID and not stopped (a promoted session's registration has no
-// state; a headless one may be starting or running). Otherwise the error
-// wraps ErrDirectorWaitNotCurrent and names the current registration or says
-// there is none, and nothing is written: no mark, no lock file. A
-// director.jsonl that cannot be read is a plain error, with nothing written
-// either (D1).
+// with a plain error (CheckDirectorWaitID). It then reads director.jsonl:
+// the current registration must be p.ID and not stopped (a promoted
+// session's registration has no state; a headless one may be starting or
+// running). Otherwise the error wraps ErrDirectorWaitNotCurrent and names the
+// current registration or says there is none, and nothing is written: no
+// mark, no lock file. A director.jsonl that cannot be read is a plain error,
+// with nothing written either (D1).
 //
 // Then it probes the watch, and under director-wait.lock reads the mark left
 // before it and replaces it with its own, so it is the mark's owner (D2).
@@ -246,8 +257,8 @@ type DirectorWaitParams struct {
 // returns an error that wraps the cause. Each end is written to the mark
 // before the wait returns, while it is the owner.
 func (o *Org) WaitInboxForDirector(ctx context.Context, p DirectorWaitParams) ([]InboxItem, error) {
-	if _, ok := directorIDNumber(p.ID); !ok {
-		return nil, fmt.Errorf("%s%q is not a registration id (d<N>, such as d1)", directorWaitErrPrefix, p.ID)
+	if err := CheckDirectorWaitID(p.ID); err != nil {
+		return nil, err
 	}
 	if o.Inbox == nil {
 		return nil, errors.New(directorWaitErrPrefix + "no inbox store is configured")
