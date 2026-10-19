@@ -498,8 +498,9 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   Bash で走らせた wait は、`/exit` の「Move to background and exit」の
   あとも、claude が SIGKILL で終わったあとも走り続ける(25 分のうちに
   ひとりでに終わる)。`note:` の行と `wait --inbox --director: ` で始まる
-  行も、wait が終わるまで届かない。Monitor の wait は、claude の SIGKILL
-  のほかは、セッションがどう終わっても SIGTERM で止まる。
+  行も、wait が終わるまで届かない。Monitor の wait は、`/exit` の既定、
+  「Move to background and exit」、pane を閉じたとき、Monitor の期限の
+  どれでも SIGTERM で止まる。
 - Codex: `ralph org wait --inbox --director d1 --timeout-ms 300000` のように
   時間を区切った wait を繰り返す。終了コード 1 で、stderr が
   `no open inbox item arrived within` を含むときは、時間内に件が
@@ -550,8 +551,8 @@ wait には `--director <自分の id>` を付ける。自分の id は、attach
   フラグとして終了コード 1 で断る。
 
 終了コード 0、4、5 と、時間を区切った wait の時間切れ(終了コード 1 で、
-stderr が時間切れの文を含む)と、Monitor の期限切れのあとの signal での
-終わり(下の段落)のほかは、どの終わり方も失敗として扱う。
+stderr が時間切れの文を含む)と、Monitor が期限切れを知らせた wait の
+signal での終わり(下の段落)のほかは、どの終わり方も失敗として扱う。
 終了コード 1 の失敗には、`ralph.toml` や受信箱(`inbox.jsonl`)が
 読めないものがある。この失敗はすぐ返り、打ち直しても同じ失敗が続く。
 Go の panic(終了コード 2)と、それ以外の signal での終わりも失敗に入る。
@@ -561,13 +562,13 @@ Go の panic(終了コード 2)と、それ以外の signal での終わりも�
 人に届く。受信箱が読めない失敗では見張りも受信箱を読めず、期限の知らせも
 止まる。そのことも人に伝える。
 
-signal での終わりで失敗にしないのは 1 つだけで、Monitor が期限切れを
-知らせた(「Monitor expired」の知らせが来た)すぐあとに、wait が signal で
-終わったときに限る。Monitor が自分の `timeout_ms` で wait を止めたので、
-wait の失敗ではない。wait を打ち直し、それからは Monitor の `timeout_ms`
-に `1800000` を渡す(渡し忘れて既定の 5 分で止められたときなど)。ほかの
-signal での終わり、panic、時間切れの文のない終了コード 1 は、上のとおり
-失敗で、打ち直さない。
+signal での終わりで失敗にしないのは 1 つだけで、その wait を見張っていた
+Monitor が期限切れを知らせた(「Monitor expired」の知らせが来た)ときに
+限る。知らせと wait の終わりのどちらが先に届いてもよい。Monitor が自分の
+`timeout_ms` で wait を止めたので、wait の失敗ではない。wait を打ち直し、
+それからは Monitor の `timeout_ms` に `1800000` を渡す(渡し忘れて既定の
+5 分で止められたときなど)。ほかの signal での終わり、panic、時間切れの
+文のない終了コード 1 は、上のとおり失敗で、打ち直さない。
 
 wait は open の件があるとすぐ返る。読んだ件を ack すれば、次の wait は
 新しい件が来るまで待つ。
