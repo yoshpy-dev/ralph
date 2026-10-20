@@ -1,0 +1,12 @@
+{
+  "wait_id": "97171-1792478255645456000",
+  "id": "d1",
+  "attached_at": "2026-10-20T03:16:59Z",
+  "pid": 97171,
+  "started_at": "2026-10-20T06:37:35Z",
+  "seen_at": "2026-10-20T07:02:35Z",
+  "watch_accepting": true,
+  "ended_at": "2026-10-20T07:02:35Z",
+  "end": "timeout",
+  "detail": "no open inbox item within 1500000 ms"
+}

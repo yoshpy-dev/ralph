@@ -1,0 +1,11 @@
+# Usage outside the seats' worktrees: ~/.claude/projects/-private-tmp-ot-ralph (the clone's root), 27 one-message sessions, all claude-haiku-4-5-20251001.
+# Classified by each session's first user message: "Run exactly this ..." = the S1 setup probes (PATH checks, not part of the trial's cost); the on-demand watcher prompt of `ralph org watch` = watcher.
+# Message ids deduplicated; tokens: input, cache write 1h, cache write 5m, cache read, output.
+watcher claude-haiku-4-5-20251001 msgs=21 input=189 cache_write_1h=753905 cache_write_5m=0 cache_read=384468 output=34296 first=2026-10-20T03:22:36.866Z last=2026-10-20T05:52:58.462Z
+probe   claude-haiku-4-5-20251001 msgs=6  input=54  cache_write_1h=124559 cache_write_5m=0 cache_read=196597 output=857   first=2026-10-20T03:12:58.993Z last=2026-10-20T03:13:45.625Z
+# Seats (seat-usage.tsv): every cache write is a 1h write (usage.cache_creation.ephemeral_1h_input_tokens): opus 491330, sonnet 382876; 5m writes 0; inference_geo global; speed standard.
+# Prices read on 2026-10-20 from https://platform.claude.com/docs/en/about-claude/pricing (USD per million tokens: base input / 5m cache write / 1h cache write / cache hit / output):
+#   Claude Opus 5.5    4 / 5    / 8 / 0.20 / 20
+#   Claude Sonnet 5.5  2 / 2.50 / 4 / 0.10 / 10
+#   Claude Haiku 4.5   1 / 1.25 / 2 / 0.10 / 5
+# The director's own cost (this Claude Code session) is not separable and is left out.

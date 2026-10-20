@@ -1,0 +1,30 @@
+{"ts":"2026-10-20T03:21:32Z","org_id":"report-escape","seat_id":"leader","role":"leader","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-20T03:21:55Z","org_id":"doctor-escape","seat_id":"leader","role":"leader","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-20T03:22:41Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T03:23:26Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T03:33:52Z","org_id":"doctor-escape","seat_id":"implementer","role":"implementer","driver":"claude","commanded_model":"sonnet","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-20T03:34:21Z","org_id":"doctor-escape","seat_id":"reviewer","role":"reviewer","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-20T03:38:24Z","org_id":"doctor-escape","seat_id":"implementer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T03:39:21Z","org_id":"doctor-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T03:41:01Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T03:42:51Z","org_id":"report-escape","seat_id":"reviewer","role":"reviewer","driver":"claude","commanded_model":"sonnet","honored":"unknown","reason":"interactive session; effective model not yet observable"}
+{"ts":"2026-10-20T03:49:46Z","org_id":"doctor-escape","seat_id":"implementer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T03:51:04Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T03:52:22Z","org_id":"doctor-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T03:54:37Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=circular"}
+{"ts":"2026-10-20T03:58:30Z","org_id":"report-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T04:25:54Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T04:35:34Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T04:44:39Z","org_id":"doctor-escape","seat_id":"implementer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"watcher_error"}
+{"ts":"2026-10-20T04:46:38Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T04:49:56Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T04:57:19Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T04:58:01Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:00:25Z","org_id":"doctor-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=fake_progress"}
+{"ts":"2026-10-20T05:11:44Z","org_id":"report-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:16:42Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:33:05Z","org_id":"report-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:34:31Z","org_id":"report-escape","seat_id":"reviewer","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:36:29Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T05:53:13Z","org_id":"doctor-escape","seat_id":"leader","role":"watchdog","driver":"claude","commanded_model":"haiku","honored":"unknown","reason":"verdict=normal"}
+{"ts":"2026-10-20T06:11:37Z","org_id":"doctor-escape","seat_id":"leader","role":"leader","driver":"claude","commanded_model":"opus","honored":"unknown","reason":"interactive session; effective model not yet observable"}

@@ -1,0 +1,59 @@
+watching every org (interval=30s once=false state-dir=/private/tmp/ot/ralph/.harness/state/org (source: flag))
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/scope_change@1792466534119750000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/scope_change@1792466572110228000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/liveness@1792466637222727000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/liveness@1792467216800083000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: failed to ALERT leader for org "doctor-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "leader" condition "scope_change"
+watchdog: failed to ALERT leader for org "doctor-escape" condition "liveness": bash: timed out: context deadline exceeded
+watchdog: watcher error for org "doctor-escape" seat "implementer" condition "scope_change": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/scope_change@1792467426313389000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/scope_change@1792467596651434000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: failed to ALERT leader for org "report-escape" condition "liveness": bash: timed out: context deadline exceeded
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/liveness@1792467694385125000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/implementer/scope_change@1792467426313389000 subject=implementer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/reviewer/liveness@1792467426313389000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/reviewer/scope_change@1792467426313389000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: failed to ALERT leader for org "doctor-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "leader" condition "scope_change"
+watchdog: failed to ALERT leader for org "doctor-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/scope_change@1792468106748803000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher error for org "doctor-escape" seat "implementer" condition "scope_change": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+watchdog: failed to ALERT leader for org "report-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: failed to ALERT leader for org "report-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "report-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/scope_change@1792468182953120000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher error for org "report-escape" seat "leader" condition "scope_change": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+watchdog: failed to ALERT leader for org "doctor-escape" condition "stall": bash: timed out: context deadline exceeded
+watchdog: watcher error for org "doctor-escape" seat "reviewer" condition "stall": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792468410434523000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/reviewer/scope_change@1792468182953120000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/reviewer/stall@1792468674477468000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792470281658624000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher error for org "doctor-escape" seat "leader" condition "stall": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/stall@1792470874713814000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: failed to ALERT leader for org "doctor-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "leader" condition "scope_change"
+watchdog: failed to ALERT leader for org "doctor-escape" condition "scope_change": bash: timed out: context deadline exceeded
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/scope_change@1792471403439730000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher error for org "doctor-escape" seat "implementer" condition "scope_change": org: watcher: invoke claude: claude: timed out: context deadline exceeded
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792471562970994000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher already in flight, skipping semantic trigger for org "report-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/scope_change@1792471762669132000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/stall@1792472204191997000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher already in flight, skipping semantic trigger for org "doctor-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/scope_change@1792472247793409000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792473374194225000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher already in flight, skipping semantic trigger for org "report-escape" seat "leader" condition "stall"
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/stall@1792473385593778000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/reviewer/stall@1792473070473937000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher already in flight, skipping semantic trigger for org "report-escape" seat "reviewer" condition "scope_change"
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/scope_change@1792474363036956000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watchdog: watcher already in flight, skipping semantic trigger for org "report-escape" seat "leader" condition "stall"
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/leader/stall@1792474463888396000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792474566994084000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+WATCHDOG ESCALATION: org=report-escape alert=report-escape/reviewer/stall@1792474431821719000 subject=reviewer reason=deadman_timeout -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl
+watching every org (interval=30s once=false state-dir=/private/tmp/ot/ralph/.harness/state/org (source: flag))
+WATCHDOG ESCALATION: org=doctor-escape alert=doctor-escape/leader/stall@1792475533367879000 subject=leader reason=leader_is_anomaly_subject -- see /private/tmp/ot/ralph/.harness/state/org/escalations.jsonl

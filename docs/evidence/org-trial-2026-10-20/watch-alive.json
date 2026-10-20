@@ -1,0 +1,8 @@
+{
+  "state": "running",
+  "pid": 33773,
+  "started_at": "2026-10-20T05:49:08.019075Z",
+  "ts": "2026-10-20T07:16:24Z",
+  "interval_seconds": 30,
+  "deadman_minutes": 10
+}

@@ -1,0 +1,71 @@
+{
+  "org_id": "doctor-escape",
+  "last_cycle_ts": "2026-10-20T06:12:52Z",
+  "cycles": 301,
+  "watchdog_joined": true,
+  "conditions": {
+    "doctor-escape/implementer/scope_change": {
+      "active": true,
+      "first_ts": "2026-10-20T04:43:23Z"
+    },
+    "doctor-escape/leader/liveness": {
+      "active": false,
+      "first_ts": "2026-10-20T03:33:36Z"
+    },
+    "doctor-escape/leader/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-20T04:57:27Z"
+    },
+    "doctor-escape/leader/stall": {
+      "active": false,
+      "first_ts": "2026-10-20T05:52:13Z"
+    },
+    "doctor-escape/reviewer/liveness": {
+      "active": false,
+      "first_ts": "2026-10-20T03:37:06Z"
+    },
+    "doctor-escape/reviewer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-20T04:57:27Z"
+    },
+    "doctor-escape/reviewer/stall": {
+      "active": true,
+      "first_ts": "2026-10-20T04:59:54Z"
+    }
+  },
+  "escalated": {
+    "doctor-escape/implementer/scope_change@1792467426313389000": true,
+    "doctor-escape/leader/liveness@1792467216800083000": true,
+    "doctor-escape/leader/scope_change@1792466572110228000": true,
+    "doctor-escape/leader/scope_change@1792467426313389000": true,
+    "doctor-escape/leader/scope_change@1792468106748803000": true,
+    "doctor-escape/leader/scope_change@1792471403439730000": true,
+    "doctor-escape/leader/scope_change@1792472247793409000": true,
+    "doctor-escape/leader/stall@1792468410434523000": true,
+    "doctor-escape/leader/stall@1792470281658624000": true,
+    "doctor-escape/leader/stall@1792471562970994000": true,
+    "doctor-escape/leader/stall@1792473374194225000": true,
+    "doctor-escape/leader/stall@1792474566994084000": true,
+    "doctor-escape/leader/stall@1792475533367879000": true,
+    "doctor-escape/reviewer/liveness@1792467426313389000": true,
+    "doctor-escape/reviewer/scope_change@1792467426313389000": true
+  },
+  "seat_snapshots": {
+    "implementer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-4\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"interactive_ready\":true,\"name\":\"doctor-escape_implementer\",\"pane_id\":\"pane-3\",\"revision\":4252,\"state_change_seq\":19,\"tab_id\":\"tab-3\",\"terminal_id\":\"term-3\",\"terminal_title\":\"◑ Doctor-escape implementer\",\"terminal_title_stripped\":\"◑ Doctor-escape implementer\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status": "M  internal/cli/doctor_merge_guarantee.go\nM  internal/cli/doctor_merge_guarantee_test.go\n",
+      "git_status_seen": true
+    },
+    "leader": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-5\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"interactive_ready\":true,\"name\":\"doctor-escape_leader\",\"pane_id\":\"pane-10\",\"revision\":88,\"state_change_seq\":75,\"tab_id\":\"tab-10\",\"terminal_id\":\"term-10\",\"terminal_title\":\"◑ Doctor-escape leader prompt\",\"terminal_title_stripped\":\"◑ Doctor-escape leader prompt\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "reviewer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-6\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-doctor-escape\",\"interactive_ready\":true,\"name\":\"doctor-escape_reviewer\",\"pane_id\":\"pane-4\",\"revision\":427,\"state_change_seq\":52,\"tab_id\":\"tab-4\",\"terminal_id\":\"term-4\",\"terminal_title\":\"✳ Doctor-escape reviewer\",\"terminal_title_stripped\":\"Doctor-escape reviewer\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    }
+  }
+}
