@@ -227,7 +227,16 @@ doctor-escape's first gate ended `static_failed`).
     and two other mentions of the org report in the `/org` skill (the
     `inbox resolve` example, the closing checklist); none of them is a
     report name a gate reads
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created
+  - `docs/reports/self-review-2026-10-20-org-report-names.md` (a462abd9):
+    Merge yes, LOW 5, INFO 2. 3ff6abdc fixed L1 to L4 (the test's and the
+    register's wording, slug citations, the reviewer prefix built from
+    `defaultReportDir`); the revalidation (3b849c35) says yes. Left as
+    they are: L4's rest (`prompts_test.go` uses a constant of
+    `report_names_sync_test.go`, the same package) and L5 (the plan puts
+    the AC2 check in that test)
+- [x] Verification artifact created
+  - `docs/reports/verify-2026-10-20-org-report-names.md` (dc98070b): pass;
+    INFO V1 (this checklist was behind) fixed here
 - [ ] Test artifact created
 - [ ] PR created
