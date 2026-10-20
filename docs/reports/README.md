@@ -7,6 +7,8 @@ Use this directory for:
 - sync-docs reports (documentation drift)
 - cross-review triage reports
 - walkthrough notes
+- reviewer seat reports of a feature org (org runtime)
+- org reports written by `ralph org report`
 
 Suggested naming:
 - `self-review-YYYY-MM-DD-short-slug.md`
@@ -15,6 +17,8 @@ Suggested naming:
 - `sync-docs-YYYY-MM-DD-short-slug.md`
 - `cross-review-triage-YYYY-MM-DD-short-slug.md`
 - `walkthrough-YYYY-MM-DD-short-slug.md`
+- `review-YYYY-MM-DD-<org_id>-<seat_id>.md`
+- `org-manifest-<org_id>-YYYY-MM-DD.md`
 
 Reports are intended to reduce handoff ambiguity for both humans and agents.
 
