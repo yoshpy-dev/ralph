@@ -176,6 +176,8 @@ func BuildOrgReport(events []ManifestEvent, receipts []Receipt, orgID, date stri
 			if details == "" {
 				details = "-"
 			}
+			// A raw "|" would split the markdown table row into extra cells.
+			details = strings.ReplaceAll(details, "|", `\|`)
 			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ev.TS, seatID, ev.Event, details)
 		}
 		b.WriteString("\n")
