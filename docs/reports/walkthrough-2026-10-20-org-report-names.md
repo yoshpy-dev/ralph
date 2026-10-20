@@ -52,7 +52,7 @@
 | AC4 | `TestReportNames_DocsMatchConstants` と `TestReadRepoFile_MissingFileIsNotAnError`。mutant 22 本のうち 18 本が狙った検査で赤、4 本(M16〜M19、対象 file を消す)は該当 subtest だけ skip で rc 0 |
 | AC5 | 2 つの README が `cmp` で同一。`check-sync.sh` が rc 0(`DRIFTED: 0`、`ROOT_ONLY: 0`) |
 | AC6 | tech-debt の 319〜321 行と evidence の F8 を verify が読んだ。未エスケープの `|` を数える awk が挙げる崩れた行は 22、32、278 行の 3 つだけで、base と同じ。319〜321 行は入らない |
-| AC7 | `run-static-verify.sh` rc 0(verify、HEAD 3b849c35)。`run-test.sh` rc 0(shell 41 本と Go 8 パッケージ、test、HEAD c6824707)。`internal/org` を go1.26.0 と go1.25.8 で通した。`run-verify.sh` を 1 本のコマンドとしては走らせていない |
+| AC7 | `run-static-verify.sh` rc 0(verify、HEAD 3b849c35)。`run-test.sh` rc 0(shell 41 本と Go 8 パッケージ、test、HEAD c6824707)。`internal/org` を go1.26.0 と go1.25.8 で通した。`run-verify.sh` は各スライスの implementer が rc 0 で走らせた(9349914b、7a45cb14、5b7fe3c0、3ff6abdc の各 HEAD。コードの最後の変更は 3ff6abdc) |
 
 ## 4. 後工程の報告
 
