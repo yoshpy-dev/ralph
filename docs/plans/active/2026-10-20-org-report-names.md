@@ -238,5 +238,8 @@ doctor-escape's first gate ended `static_failed`).
 - [x] Verification artifact created
   - `docs/reports/verify-2026-10-20-org-report-names.md` (dc98070b): pass;
     INFO V1 (this checklist was behind) fixed here
-- [ ] Test artifact created
+- [x] Test artifact created
+  - `docs/reports/test-2026-10-20-org-report-names.md` (1786e2b4): pass;
+    gap G1 (LOW: no test runs `check-sync.sh`'s prefix match) and G2 to G5
+    (INFO)
 - [ ] PR created
