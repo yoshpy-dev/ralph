@@ -23,7 +23,7 @@ expect_exit() {
   want=$2
   shift 2
   set +e
-  "$@" >/tmp/ralph-secret-scan-test.out 2>/tmp/ralph-secret-scan-test.err
+  "$@" >"$capdir/out" 2>"$capdir/err"
   got=$?
   set -e
   if [ "$got" -eq "$want" ]; then
@@ -31,14 +31,19 @@ expect_exit() {
   else
     not_ok "$name (exit $got, want $want)"
     printf '%s\n' "--- stdout ---"
-    cat /tmp/ralph-secret-scan-test.out
+    cat "$capdir/out"
     printf '%s\n' "--- stderr ---"
-    cat /tmp/ralph-secret-scan-test.err
+    cat "$capdir/err"
   fi
 }
 
+# capdir holds the stdout and stderr each expect_exit captures, per run and
+# outside the fixture repository $workdir, so two copies of this script
+# running at once do not overwrite or delete each other's captures. The trap
+# is set before workdir exists, hence ${workdir:-} under set -u.
+capdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-secret-scan-test.XXXXXX")"
+trap 'rm -rf "$capdir" "${workdir:-}"' EXIT HUP INT TERM
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-secret-scan.XXXXXX")"
-trap 'rm -rf "$workdir" /tmp/ralph-secret-scan-test.out /tmp/ralph-secret-scan-test.err' EXIT HUP INT TERM
 
 cd "$workdir"
 git init -q
@@ -113,20 +118,20 @@ token="$(printf 'sk_live_%s' 'abcdefghijklmnopqrstuv')"
 expect_stderr_contains() {
   name=$1
   needle=$2
-  if grep -F -- "$needle" /tmp/ralph-secret-scan-test.err >/dev/null 2>&1; then
+  if grep -F -- "$needle" "$capdir/err" >/dev/null 2>&1; then
     ok "$name"
   else
     not_ok "$name (missing in stderr: $needle)"
-    cat /tmp/ralph-secret-scan-test.err
+    cat "$capdir/err"
   fi
 }
 
 expect_stderr_not_contains() {
   name=$1
   needle=$2
-  if grep -F -- "$needle" /tmp/ralph-secret-scan-test.err >/dev/null 2>&1; then
+  if grep -F -- "$needle" "$capdir/err" >/dev/null 2>&1; then
     not_ok "$name (unexpectedly in stderr: $needle)"
-    cat /tmp/ralph-secret-scan-test.err
+    cat "$capdir/err"
   else
     ok "$name"
   fi
