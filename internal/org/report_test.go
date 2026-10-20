@@ -92,6 +92,24 @@ func TestBuildOrgReport_RosterTimelineReceiptsAndResiduals(t *testing.T) {
 	}
 }
 
+func TestBuildOrgReport_EscapesPipesInEventDetails(t *testing.T) {
+	events := []ManifestEvent{
+		{TS: "2026-08-02T10:00:00Z", OrgID: "org-p", SeatID: "s1", Event: EventSpawned, Details: "cmd=a|b scope=x"},
+		{TS: "2026-08-02T10:00:01Z", OrgID: "org-p", SeatID: "s2", Event: EventStopped, Details: "pane=ok leave=ok"},
+	}
+
+	got := BuildOrgReport(events, nil, "org-p", "2026-08-02", 0)
+
+	escaped := "| 2026-08-02T10:00:00Z | s1 | " + string(EventSpawned) + " | cmd=a\\|b scope=x |"
+	if !strings.Contains(got, escaped) {
+		t.Errorf("expected the details pipe escaped as \\| in a 4-cell row %q, got:\n%s", escaped, got)
+	}
+	plain := "| 2026-08-02T10:00:01Z | s2 | " + string(EventStopped) + " | pane=ok leave=ok |"
+	if !strings.Contains(got, plain) {
+		t.Errorf("expected details without a pipe unchanged %q, got:\n%s", plain, got)
+	}
+}
+
 func TestBuildOrgReport_EmptyOrg_NoEventsNote(t *testing.T) {
 	got := BuildOrgReport(nil, nil, "org-empty", "2026-08-02", 0)
 
