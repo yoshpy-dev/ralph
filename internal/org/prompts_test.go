@@ -967,8 +967,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 // (spec FR-7), says how to find the default branch, and says ralph does not
 // read the two lines; the example RESULT parses with one GATE: pass, one
 // HEAD: and one BASE: header, and the report contract names them. It also
-// pins AC2 of plan docs/plans/active/2026-10-20-org-report-names.md: the
-// contract names the report file, with the org id and the seat id filled in.
+// pins AC2 of plan 2026-10-20-org-report-names: the contract names the report
+// file, with the org id and the seat id filled in.
 func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 	mission, found := markdownSection(text, "## ミッション")

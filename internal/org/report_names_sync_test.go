@@ -13,7 +13,7 @@ import (
 // reviewerReportPrefix starts the name of the reviewer seat's report
 // (prompts/reviewer.md, レポート契約). scripts/check-sync.sh excludes it as a
 // prefix, so a feature org's gate does not report the file as ROOT_ONLY.
-const reviewerReportPrefix = "docs/reports/review-"
+const reviewerReportPrefix = defaultReportDir + "/review-"
 
 // reportNamesRepoRoot resolves the repository root from this source file's
 // location: internal/org/report_names_sync_test.go -> ../../, as
@@ -68,13 +68,17 @@ func hasLine(text, want string) bool {
 }
 
 // TestReportNames_DocsMatchConstants pins AC4 of plan
-// docs/plans/active/2026-10-20-org-report-names.md: the names of the two
-// reports a feature org writes into its worktree, the reviewer seat's report
-// (reviewerReportPrefix) and the org report of `ralph org report`
-// (defaultReportDir and orgReportFilePrefix in report.go), are spelled the
-// same in every hand-written place. A feature org's gate runs
-// scripts/check-sync.sh, which reports either file as ROOT_ONLY unless its
-// prefix is excluded, and nothing else catches a rename on one side only.
+// 2026-10-20-org-report-names: the names of the two reports a feature org
+// writes into its worktree, the reviewer seat's report (reviewerReportPrefix)
+// and the org report of `ralph org report` (defaultReportDir and
+// orgReportFilePrefix in report.go), are spelled the same in the hand-written
+// places listed below, the ones a feature org's gate and the naming list rely
+// on. A feature org's gate runs scripts/check-sync.sh, which reports either
+// file as ROOT_ONLY unless its prefix is excluded, and nothing else catches a
+// rename on one side only. Other prose that names the org report is not
+// checked: the help of `ralph org report` (internal/cli/org.go), the prefix
+// check in internal/cli/org_test.go, and the /org skill's `inbox resolve`
+// example and closing checklist.
 //
 // If this test fails, make these agree with reviewerReportPrefix and with
 // defaultReportDir + "/" + orgReportFilePrefix:
@@ -132,7 +136,7 @@ func TestReportNames_DocsMatchConstants(t *testing.T) {
 			t.Fatalf("%s: expected a line Suggested naming:, found none", rel)
 		}
 		list, _, _ := strings.Cut(rest, "\n\n")
-		reviewerName := strings.TrimPrefix(reviewerReportPrefix, "docs/reports/")
+		reviewerName := strings.TrimPrefix(reviewerReportPrefix, defaultReportDir+"/")
 		for _, want := range []string{
 			"- `" + reviewerName + "YYYY-MM-DD-<org_id>-<seat_id>.md`",
 			"- `" + orgReportFilePrefix + "<org_id>-YYYY-MM-DD.md`",

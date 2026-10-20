@@ -12,8 +12,9 @@ import (
 const defaultReportDir = "docs/reports"
 
 // orgReportFilePrefix starts the file name of every `ralph org report`
-// artifact. scripts/check-sync.sh, docs/reports/README.md and the /org skill
-// spell it by hand; report_names_sync_test.go ties them to this constant.
+// artifact. scripts/check-sync.sh, docs/reports/README.md and the /org
+// skill's `report` row spell it by hand; report_names_sync_test.go ties them
+// to this constant.
 const orgReportFilePrefix = "org-manifest-"
 
 // ReportParams describes one `ralph org report` invocation.
