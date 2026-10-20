@@ -57,3 +57,30 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - M1・L1〜L5 の直しは、tech-debt の 4 行(216・246・309・323)、証拠の 1 項(Not verified)と 3〜4 行(M1)、計画の注 1 項目で、コードは変わらない。register・証拠・計画の編集は `post-implementation-pipeline.md` の「記録だけの修正」の外にあたる。いまは `/verify` の前なので、直すかどうかと、直したあとに self-review を回し直すかは lead の判断に任せる。直さずに進めるなら、cycle 2 の self-review で残りを 1 行の tech-debt にまとめる(今回は足していない)
   - I1〜I3 は直さなくてよい。I2 の 700 行と 284 行の折り直しは、M1 の証拠の追記と同じ commit に入れると手間が少ない
   - insight event(`self_review`、cycle 1、critical 0、high 0、medium 1、low 5)は、依頼が「このレポートだけを commit」だったので足していない。`./scripts/insights-append.sh --slug org-trial --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 1 --low 5 --cycle auto --source skill` で足せる
+
+## Re-review of the fixes (a288d23b)
+
+- Date: 2026-10-20
+- Scope: `git show a288d23b` だけ(`docs/tech-debt/README.md`、`docs/evidence/org-trial-2026-10-20.md`、計画の Progress の注。+28/-16)。diff の品質だけを見た。テスト、静的解析、仕様適合は走らせていない
+- 確かめたこと: 変えた 4 つの register 行を欄ごとに旧新で比べた(未エスケープの `|` で分けて、どれも 7 片 = 5 欄で変わらない)。証拠の 5 か所は `--word-diff` で語の増減を見た。M1 の証拠の文は `inbox.jsonl` の e1・e2 の本文と、F6・F13 の参照は証拠の全箇所と、計画の注は計画の決定・Non-goals と証拠の Trial deviations と register 298 行のコメントと突き合わせた。`./scripts/plan-visual.sh digest docs/plans/active/2026-10-20-org-trial.md` は `5b82ee1e30a1`(承認時と同じ)。足した行に `/Users/`・`/home/`・pane id の形・UUID・メールの形・login name・秘密の形はなく、U+FFFD も 0 件。`git diff --check a288d23b^ a288d23b` は出力なし。証拠の変更 5 か所はどれもコードフェンスの外で、表・`sh` ブロック・`text` ブロックに触れていないので、前回の再計算 17 本の一致はそのまま有効(再実行はしていない)
+
+| ID | 結果 | 確かめたこと |
+| --- | --- | --- |
+| M1 | fixed | 216 行の Debt 欄の前半が「before the stage 9 trial, no run of a claude or codex leader in a herdr pane had done so」になり、後半の試行の結果と食い違わない。`was unknown` への時制の変更は妥当で、「before the stage 9 trial」が 1 文全体にかかり、次の文が「PNG を読んだかは leader の自己申告だけ、codex の leader は試していない」と残りを述べる。証拠には 383〜386 行(「Approval wait per feature plan」の末尾)に 4 行が入った。e1・e2 の本文は両方に `VISUAL: .harness/state/plan-visual/<slug>.html` の行があり、SUMMARY が「図解ページは lint が通り、shot で撮って確かめた」なので、証拠の文(「passed `lint` and was shot」「leaders' own claim」「PNG を読んだかは未確認」)は本文より控えめで、超えていない。座席は計画の Non-goals どおり claude だけで、「no codex leader was tried」と合う |
+| L1 | fixed | 計画の注に I6 の項が入った(AC8 の項と同じ深さ)。「third user decision」は冒頭の決定の 3 つ目(人が ruleset を直す)、Non-goals は 63 行、`gh api -X PUT` の 06:09:55Z は証拠 288〜289 行、Trial deviations の I6 は証拠 860 行、「on the human's word」は register 298 行のコメントにあり、5 つとも合う。digest は変わらない |
+| L2 | fixed | 246 行の 1 文目は「(a), (b), (d), (e), (f) and (i) change no behavior, and (g) is a gap in the tests.」になり、(h) の語が総覧から消えた。`~~` で囲まず文から外した判断は妥当(総覧には (c) も元から入っていない)。(h) の本文・Impact・Why・Trigger・Related の閉じ方は変えていない |
+| L3 | fixed | 323 行の Why 欄は「The org-plan-approval leftovers row's (a)」。217 行の先頭は「Small leftovers of org-plan-approval」、(a) は PR #241 で RESOLVED なので指す先が合う。register に `[Rr]ows? [0-9]{2,3}` の形はなくなった(grep 0 件) |
+| L4 | fixed | 309 行の Impact に「A gate or regate run from a shell without `GOFLAGS` fails the same way (F10)」、Trigger に「or a gate or regate that times out」。Debt 欄の F10(regate は `GOFLAGS` なしで timeout、座席の gate は herdr の環境の `-timeout=30m` で通った)と合う。Trigger の形は元の「a CI verify job that ...」と同じ並びで、「next」が付かない点は元の文の形を引いただけなので指摘にしない |
+| L5 | fixed | 証拠 914〜916 行は「(F13) was not investigated, and the records cannot tell: the watchdog's path discards the notification's error」。F13 の本文(821 行)がその内容で、ほかの `F6`(198・427・739 行)と `F13`(470 行)の参照も合う |
+| I1 | fixed | Snapshot の節(106〜107 行)に「The two org reports are verbatim: do not edit them with the Edit or Write tools (the mojibake hook would ask to rewrite the U+FFFD)」。`.claude/hooks/check_mojibake.sh` は編集された file 全体を走査して exit 2 を返すので、文は正しい |
+| I2 | fixed | 284 行と 700 行の再折り返し。`--word-diff` で語の増減はなく、空白の位置だけが変わった。2 つとも 80 桁以内に戻り、残る長い行(inline code を含む行と 302 行の 223 桁)は前回の報告が許した形のまま |
+| I3 | not fixed | 依頼どおり直していない。304 行の Trigger は前回の報告のまま(INFO) |
+
+### New findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW (N1) | maintainability(記録の主張) | 216 行の Trigger 欄が元の文のまま「Stage 9 (FR-12, two orgs run at once), or the first feature org run in per-plan mode: record whether the page was made, whether `lint` ran ..., whether the page was shot, and whether the PNG was read, for each driver」。この PR が stage 9 の試行で、Debt 欄は「The stage 9 trial (2026-10-20) met the trigger for claude ... no codex leader was tried, so the row stays open」と書くので、Trigger の 2 つの条件はどちらも満たされ、まだ満たされていない条件(codex の leader の run、claude の leader が PNG を読んだことの確認)は Debt 欄にしか書かれていない。Debt 欄だけ直して Trigger 欄が古い文を残す形で、register の他の行で繰り返し出ている(PR 自身の段階を Trigger が名指す形)。もう 1 点、証拠に結果の 4 行が入ったのに、Related 欄は証拠の該当の節を指さない(Debt 欄が `inbox.jsonl` を引くだけ)。前回の報告は Trigger の「record」の置き場の不在を指摘しただけで、この 2 点には触れていなかった | `docs/tech-debt/README.md` 216 行の Trigger 欄(4 つ目)と Related 欄(5 つ目)、Debt 欄の最後の 2 文。証拠 383〜386 行 | Trigger 欄を残る条件で書き直す(例: 「The first feature org run with a codex leader, or a claude leader run whose session record shows the PNG read: record ...」)。Related 欄に `docs/evidence/org-trial-2026-10-20.md`(Approval wait per feature plan)を足す。register の 1 行の編集で、コードも digest も変わらない |
+
+- Merge: yes(CRITICAL・HIGH なし。前回の MEDIUM 1 件(M1)と LOW 5 件(L1〜L5)と INFO 2 件(I1・I2)は直り、I3 は依頼どおり据え置き。新しい LOW は 1 件(N1)で、216 行の Trigger 欄と Related 欄の 2 か所の直し。`/verify` の前なので、直すかどうかは lead の判断に任せる。直さずに最後の self-review の回まで残るなら、その回で tech-debt の 1 行にまとめる)
+- insight event: 前回の cycle 1 の event(medium 1、low 5)はそのまま。この再レビューの N1 を数えた event は足していない(依頼が「このレポートだけを commit」)
