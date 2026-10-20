@@ -1,7 +1,7 @@
 # doctor Merge guarantee Detail escape
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-20 sha256:c55693d7f59c
 - Owner: Claude Code (org leader doctor-escape)
 - Date: 2026-10-20
 - Related request: split plan trial, feature doctor-escape
