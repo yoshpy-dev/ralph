@@ -11,6 +11,11 @@ import (
 // (AC-4, FR-9 後半 -- see docs/plans/active/2026-08-02-org-runtime-lead.md).
 const defaultReportDir = "docs/reports"
 
+// orgReportFilePrefix starts the file name of every `ralph org report`
+// artifact. scripts/check-sync.sh, docs/reports/README.md and the /org skill
+// spell it by hand; report_names_sync_test.go ties them to this constant.
+const orgReportFilePrefix = "org-manifest-"
+
 // ReportParams describes one `ralph org report` invocation.
 type ReportParams struct {
 	OrgID string
@@ -55,7 +60,7 @@ func (o *Org) Report(p ReportParams) ReportResult {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return ReportResult{Err: fmt.Errorf("org: report: create output dir %s: %w", outDir, err)}
 	}
-	path := filepath.Join(outDir, fmt.Sprintf("org-manifest-%s-%s.md", p.OrgID, date))
+	path := filepath.Join(outDir, fmt.Sprintf("%s%s-%s.md", orgReportFilePrefix, p.OrgID, date))
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return ReportResult{Err: fmt.Errorf("org: report: write %s: %w", path, err)}
 	}

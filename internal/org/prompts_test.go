@@ -966,7 +966,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 // RESULT carries, as header lines, the HEAD: and BASE: the reviewer verified
 // (spec FR-7), says how to find the default branch, and says ralph does not
 // read the two lines; the example RESULT parses with one GATE: pass, one
-// HEAD: and one BASE: header, and the report contract names them.
+// HEAD: and one BASE: header, and the report contract names them. It also
+// pins AC2 of plan docs/plans/active/2026-10-20-org-report-names.md: the
+// contract names the report file, with the org id and the seat id filled in.
 func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 	mission, found := markdownSection(text, "## ミッション")
@@ -1021,6 +1023,44 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	}
 	if item, ok := markdownItem(contract, "leader へは RESULT"); !ok || !containsPhrase(item, "`GATE: pass` と、検証した commit と base の `HEAD:`・`BASE:` のヘッダ") {
 		t.Errorf("expected the reviewer's report contract to name the HEAD: and BASE: headers of a passing RESULT, got item:\n%s", item)
+	}
+
+	// The first item of the contract names the report file. Two reviewer
+	// seats of one org must write different files, and both names must start
+	// with the prefix scripts/check-sync.sh excludes.
+	reportPathRe := regexp.MustCompile("`(docs/reports/[^`]+\\.md)`")
+	reportPath := func(rendered string) string {
+		t.Helper()
+		section, _ := markdownSection(rendered, "## レポート契約")
+		item, ok := markdownItem(section, "最終的な所見は")
+		if !ok {
+			t.Fatalf("expected the reviewer's report contract to have an item starting 最終的な所見は, got section:\n%s", section)
+		}
+		match := reportPathRe.FindStringSubmatch(item)
+		if match == nil {
+			t.Fatalf("expected the report contract's first item to name a file under docs/reports/, got item:\n%s", item)
+		}
+		return match[1]
+	}
+	first := reportPath(text)
+	if want := "docs/reports/review-<YYYY-MM-DD>-org-a-reviewer.md"; first != want {
+		t.Errorf("expected the report contract to name the report %q, got %q", want, first)
+	}
+	vars := testRolePromptVars()
+	vars.Role = "reviewer"
+	vars.SeatID = "reviewer-2"
+	secondText, ok, err := RenderRolePrompt("reviewer", vars)
+	if err != nil || !ok {
+		t.Fatalf("RenderRolePrompt(reviewer) for seat reviewer-2: ok=%v, err=%v", ok, err)
+	}
+	second := reportPath(secondText)
+	if first == second {
+		t.Errorf("expected seats reviewer and reviewer-2 of one org to name different reports, both got %q", first)
+	}
+	for _, p := range []string{first, second} {
+		if !strings.HasPrefix(p, reviewerReportPrefix) {
+			t.Errorf("expected the report name %q to start with %q, which scripts/check-sync.sh excludes", p, reviewerReportPrefix)
+		}
 	}
 }
 
