@@ -149,7 +149,16 @@ Notes:
     The first tech-debt note cited the archive path of this plan, which
     the README plan-reference check refused; it cites the active path,
     which `/pr`'s archive script rewrites
-- [ ] Review artifact created
+- [x] Review artifact created
+  - Self-review cycle 1 (71a4ca8f): Merge yes; M1, L1, L2 and I1 fixed in
+    one new commit. M1: item (e) of the org-stop-all test-gaps row of
+    `docs/tech-debt/README.md` names the same fixed paths, so it is closed
+    there too (a small widening of the Scope's "row 170" to the same
+    defect's second entry). L1: the evidence names the base commit
+    e333200c for the old script, not `HEAD`. L2: the evidence's TERM row
+    says what the run shows (the `trap` removed both directories; the
+    exit code depends on where TERM lands, 128 and 1 in two runs), not
+    that the script stops on TERM. I1: a comment on `${workdir:-}`
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created

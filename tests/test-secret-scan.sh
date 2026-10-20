@@ -39,7 +39,8 @@ expect_exit() {
 
 # capdir holds the stdout and stderr each expect_exit captures, per run and
 # outside the fixture repository $workdir, so two copies of this script
-# running at once do not overwrite or delete each other's captures.
+# running at once do not overwrite or delete each other's captures. The trap
+# is set before workdir exists, hence ${workdir:-} under set -u.
 capdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-secret-scan-test.XXXXXX")"
 trap 'rm -rf "$capdir" "${workdir:-}"' EXIT HUP INT TERM
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/ralph-secret-scan.XXXXXX")"
