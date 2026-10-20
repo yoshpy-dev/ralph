@@ -159,6 +159,16 @@ Notes:
     says what the run shows (the `trap` removed both directories; the
     exit code depends on where TERM lands, 128 and 1 in two runs), not
     that the script stops on TERM. I1: a comment on `${workdir:-}`
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created
+  - Verify cycle 1 (67aef785): pass; V1 (LOW, how the register note said
+    the old script was run) fixed in 74598215; V2 to V4 are INFO
+- [x] Test artifact created
+  - Test cycle 1 (823066af): pass; alone 123/0 (AC3); three runs of two
+    copies at once all ended with exit 0 and `FAIL: 0` (AC4), where the
+    old script failed 2 checks in one copy in both runs; G1 (LOW, nothing
+    in the suite stops the captures going back to a fixed path) is now a
+    row of `docs/tech-debt/README.md`; G2 to G5 are INFO
+  - sync-docs cycle 1: no live doc states the old fixed paths as current
+    (the two register entries were closed by ece77f30 and 90fc10d1);
+    added the G1 row to `docs/tech-debt/README.md`
 - [ ] PR created
