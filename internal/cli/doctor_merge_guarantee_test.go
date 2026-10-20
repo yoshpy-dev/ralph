@@ -333,6 +333,20 @@ func TestMergeGuaranteeResult_EverySaveOutcome(t *testing.T) {
 	}
 }
 
+// TestMergeGuaranteeResult_EscapesControlCharacters: a ledger path with ESC
+// and a line break reaches Detail as its Go escapes, never as raw bytes.
+func TestMergeGuaranteeResult_EscapesControlCharacters(t *testing.T) {
+	path := "/p/\x1b[31mred\nline/merge-guarantee.json"
+	r := mergeGuaranteeResult(org.MergeGuaranteeCheck{Kind: org.MergeGuaranteeUnknown, Detail: "the reason"},
+		org.MergeGuaranteeSave{Path: path, NoLedger: true})
+	if strings.ContainsAny(r.Detail, "\x1b\n") {
+		t.Errorf("Detail has a raw control character: %q", r.Detail)
+	}
+	if !strings.Contains(r.Detail, `\x1b[31mred\nline`) {
+		t.Errorf("Detail lacks the escaped path: %q", r.Detail)
+	}
+}
+
 // TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir: the
 // production resolver leaves Exec and LookPath nil (real git and gh), runs
 // them in targetDir, and caches into the state dir org.ResolveOrgStateDir

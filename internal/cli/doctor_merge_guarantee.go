@@ -87,6 +87,6 @@ func mergeGuaranteeResult(c org.MergeGuaranteeCheck, s org.MergeGuaranteeSave) c
 	default:
 		saved = fmt.Sprintf("not cached (%v): there was no old cache", s.WriteErr)
 	}
-	r.Detail = c.Kind + ": " + c.Detail + "; " + saved
+	r.Detail = org.PrintableInboxText(c.Kind+": "+c.Detail+"; "+saved, false)
 	return r
 }
