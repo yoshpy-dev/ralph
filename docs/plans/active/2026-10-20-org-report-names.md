@@ -113,31 +113,31 @@ doctor-escape's first gate ended `static_failed`).
 
 ## Acceptance criteria
 
-- [ ] AC1: with untracked `docs/reports/review-2026-10-20-x-reviewer.md` and
+- [x] AC1: with untracked `docs/reports/review-2026-10-20-x-reviewer.md` and
   `docs/reports/org-manifest-x-2026-10-20.md` in the worktree,
   `./scripts/check-sync.sh` exits 0 and prints neither as `ROOT_ONLY`;
   with an untracked `docs/reports/other-x.md` it still exits 1 and names
   that file (the exclusion stays narrow)
-- [ ] AC2: the rendered reviewer prompt names its report
+- [x] AC2: the rendered reviewer prompt names its report
   `docs/reports/review-<YYYY-MM-DD>-<org_id>-<seat_id>.md`, with the org
   id and the seat id filled in, in the first item of `## レポート契約`, and
   `TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase` checks it; two
   prompts rendered for one org with different seat ids name different
   files, and both names start with the excluded `docs/reports/review-`
-- [ ] AC3: `report.go` builds the org report's path from a named
+- [x] AC3: `report.go` builds the org report's path from a named
   constant, and the file it writes is still
   `org-manifest-<org_id>-<date>.md` (the existing report tests pass)
-- [ ] AC4: a test in `internal/org` fails if the reviewer template, the
+- [x] AC4: a test in `internal/org` fails if the reviewer template, the
   `check-sync.sh` exclusions, `docs/reports/README.md`, or the `/org`
   skill's `report` row stops spelling the two names; it skips a file
   that is absent
-- [ ] AC5: `docs/reports/README.md` and its template copy list both
+- [x] AC5: `docs/reports/README.md` and its template copy list both
   reports and stay identical (`./scripts/check-sync.sh` exits 0)
-- [ ] AC6: the F8 tech-debt row is resolved (`RESOLVED 2026-10-20 in
+- [x] AC6: the F8 tech-debt row is resolved (`RESOLVED 2026-10-20 in
   fix/org-report-names`), the F11 row's Trigger no longer names "the
   separate PR of the `check-sync.sh` row above" and the row stays open,
   and the evidence's F8 names the fix branch
-- [ ] AC7: `./scripts/run-verify.sh` exits 0, and the `internal/org` tests
+- [x] AC7: `./scripts/run-verify.sh` exits 0, and the `internal/org` tests
   pass with `GOTOOLCHAIN=go1.25.8`
 
 ## Implementation outline
@@ -212,7 +212,21 @@ doctor-escape's first gate ended `static_failed`).
 - [x] Plan approved (the user's standing instruction approves plans
       automatically)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 9349914b: the two exclusions in `scripts/check-sync.sh`, both
+    `docs/reports/README.md` copies. AC1: rc=0 with the two untracked
+    reports, rc=1 naming `docs/reports/other-x.md`
+  - S2 7a45cb14: `orgReportFilePrefix`, the reviewer template's name,
+    the new check in `prompts_test.go`, `report_names_sync_test.go`
+    (`TestReportNames_DocsMatchConstants`, `TestReadRepoFile_MissingFileIsNotAnError`);
+    the drift checks failed as expected on the README and on check-sync
+  - S3 5b7fe3c0: the F8 row resolved, the F11 Trigger reworded, the
+    evidence's F8 names the branch
+  - Out of scope, left as they are: the `ralph org report` help text
+    (`internal/cli/org.go`), the prefix check in `internal/cli/org_test.go`,
+    and two other mentions of the org report in the `/org` skill (the
+    `inbox resolve` example, the closing checklist); none of them is a
+    report name a gate reads
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
