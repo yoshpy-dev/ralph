@@ -61,3 +61,25 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - 新しい test ファイルは gofmt・vet を通していない(目で見たのは import の使用と、doc コメントの箇条書きの字下げだけ)
   - F11 の行の Impact と Trigger の中身(この修正のあと、leader が skill の手順 2 で org report をコミットすると、session-end の WIP hook が拾うものが残るのはどの場合か)は、diff の質ではなく設計の話なので見ていない。L2 は欄どうしの食い違いだけを指す
   - 計画の「Visual review」(図解ページと PNG の確認)は読んでいない
+
+## Revalidation (3ff6abdc)
+
+対象は修正コミット 3ff6abdc(`git show 3ff6abdc`、4 ファイル、+20/-15)。上の Findings と Merge 行、既存の重大度は変えていない。diff の質だけを見た。テストと静的解析は回していない。
+
+- L1: resolved。(a) `internal/org/report_names_sync_test.go:70-82` の冒頭が「every hand-written place」をやめ、検査する 4 か所と、検査しない場所(`ralph org report` の help、`internal/cli/org_test.go` の前方一致、skill の `inbox resolve` の例と締めのチェックリスト)を分けて書く。挙げた 3 か所の実在は `git grep org-manifest-` で確かめた(`internal/cli/org.go:1931`、`org_test.go:3032`、`.claude/skills/org/SKILL.md:184,1336`)。(b) `internal/org/report.go:14-17` の主語が「the /org skill's `report` row」になり、test の検査と合う。(c) `docs/tech-debt/README.md:319` の RESOLVED が、reviewer の名前(雛形・除外・README)と org report の名前(除外・README・skill の `report` 行)を分けて書き、test の subtest 4 つと合う
+- L2: resolved。`docs/tech-debt/README.md:321` の Why 欄が「a design choice that was tied to the `check-sync.sh` row above (F8), which fix/org-report-names closed without moving the org report」になり、閉じた行を生きた依存として指さない。この行は 5 欄のまま
+- L3: resolved。`internal/org/prompts_test.go:970` と `report_names_sync_test.go:71` が `plan 2026-10-20-org-report-names` の slug 引きになった。このブランチの差分(docs/plans・docs/reports・docs/tech-debt を除く `*.go` `*.sh` `*.md`)に `plans/active/2026-10-20-org-report-names` を引く場所は残っていない。register 側のパスは `archive-plan.sh` が書き換える。reflow した 2 つのコメントの行幅は 78 文字以内で、過長行はない
+- L4: 一部 resolved。ディレクトリの組み立ては直った。`reviewerReportPrefix = defaultReportDir + "/review-"`(`report_names_sync_test.go:16`)になり、README の検査は `strings.TrimPrefix(reviewerReportPrefix, defaultReportDir+"/")`(139 行)で、`defaultReportDir` を変えても両方が追随する。残り: `prompts_test.go:1061-1062` が、別の test ファイルで定義された `reviewerReportPrefix` に依存する点は、そのまま(推奨は定数を `prompts_test.go` に置くか `reviewerReportFilePrefix` を足す形だった)。LOW のまま。コンパイルが落ちるのは sync test のファイルを消す・移すときだけで、害は小さい
+- L5: not addressed(依頼どおり)。計画が AC2 の検査をこの test に足すと書くので、現状でよい。LOW のまま
+- I1・I2: not addressed(依頼どおり、直さなくてよい項目)
+
+新しい指摘:
+
+- INFO (N1) maintainability(コメントの列挙): `report_names_sync_test.go:80-82` の「Other prose that names the org report is not checked: ...」は閉じた列挙に読めるが、`internal/org/report.go:36` と `:116` の doc コメントも org report の名前を手で書く(同じファイルの定数のすぐ近くなので害は小さい)。同じ冒頭の「the ones a feature org's gate and the naming list rely on」は、reviewer の雛形と skill の `report` 行には当てはまらず、関係節が列挙より狭い。直すなら関係節を削り、「not checked」の列挙に「and the doc comments in report.go」を足すか「for example」に変える。直さなくてもよい
+- INFO (N2) readability(記録の重複): F11 の行(`docs/tech-debt/README.md:321`)の Why 欄と Trigger 欄の最後の文が、同じ事実(F8 の行は org report を動かさずに閉じた)を 2 回書く。食い違いではなく重複。直さなくてよい
+
+確かめたこと: `awk '/^\| /{...}' docs/tech-debt/README.md` の出力は `22: 7`、`32: 5`、`278: 10` の 3 行だけ(今回の修正で欄の数が崩れた行はない)。`git diff 3ff6abdc^ 3ff6abdc --check` は rc 0。確かめていないこと: テスト・gofmt・vet の実行、修正後の `check-sync.sh` の実行。
+
+残りの LOW(L4 の残り、L5)は、この回が最終回なら 1 行にまとめて register に足す。最終回でなければ次の回で扱う。
+
+Revalidation merge: yes
