@@ -1,7 +1,7 @@
 # Escape `|` in org report event details
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-20 sha256:4d7f7b10b330
 - Owner: Claude Code (org leader report-escape)
 - Date: 2026-10-20
 - Related request: split plan trial (feature report-escape, digest 0ffd32661606)
