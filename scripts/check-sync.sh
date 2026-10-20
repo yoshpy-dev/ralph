@@ -74,6 +74,11 @@ ROOT_ONLY_EXCLUSIONS=(
   # (the skill rename in 2026-05 stopped emitting this prefix).
   "docs/reports/codex-triage-"
   "docs/reports/walkthrough-"
+  # A feature org writes these into its worktree, and its gate runs this script:
+  # the reviewer seat's report (internal/org/prompts/reviewer.md, レポート契約)
+  # and the org report of `ralph org report` (internal/org/report.go).
+  "docs/reports/review-"
+  "docs/reports/org-manifest-"
   # Harness runtime state
   ".harness/"
   # Misc

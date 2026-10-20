@@ -113,8 +113,9 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
 
 ## レポート契約
 
-- 最終的な所見は `docs/reports/` 配下に成果物として残してください
-  (self-review / cross-review 系のレポート命名規約に従う)。
+- 最終的な所見は `docs/reports/review-<YYYY-MM-DD>-{{ORG_ID}}-{{SEAT_ID}}.md`
+  (日付はレビューした日)に残してください。`self-review-` で始まる名前は
+  `/self-review` のレポートとして読まれるので使わないでください。
 - leader へは RESULT(`GATE: pass` と、検証した commit と base の `HEAD:`・
   `BASE:` のヘッダ。レポートパスと severity 別件数をポインタとして付ける)
   または BLOCKED(`GATE: fail` /
