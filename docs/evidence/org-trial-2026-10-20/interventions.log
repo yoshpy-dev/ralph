@@ -1,0 +1,11 @@
+# interventions (UTC). columns: n | what | asked | answered | latency_s | answer / ledger events caused
+# asked = the timestamp of the director's AskUserQuestion call in its Claude Code transcript; answered = the timestamp of that call's tool result (the human's answer). Read from the transcript on 2026-10-20 at 07:30Z.
+# The first version of this log was written by hand during the trial and was off by 4 to 414 s (I5's answer was written as 06:10:16Z, the transcript says 06:03:22Z); the transcript times replace it.
+I1 | split plan approval (splits/trial.md) + ruleset status | 2026-10-20T03:18:22Z | 2026-10-20T03:20:57Z | 155 | split approved (2 lines written 03:21Z); ruleset: not yet, to be fixed before the merge step
+I2 | feature plan approval report-escape (inbox e1) | 2026-10-20T03:24:02Z | 2026-10-20T03:24:50Z | 49 | approved -> plan_approved 03:25:02Z (ralph org approve e1)
+I3 | feature plan approval doctor-escape (inbox e2) | 2026-10-20T03:30:50Z | 2026-10-20T03:30:54Z | 5 | approved -> plan_approved 03:31:22Z (ralph org approve e2)
+I4 | D6 part 2: stop and restart the cross-org watch (one question for both) | 2026-10-20T05:42:54Z | 2026-10-20T05:48:28Z | 334 | stop and restart allowed -> watch stopped 05:48:38Z, restarted 05:49:08Z
+I5 | merge of PR #241: asked how to merge (ruleset not fixed); the human asked back whether the director can fix the ruleset | 2026-10-20T05:59:11Z | 2026-10-20T06:03:22Z | 250 | question back: "あなたがrulesetを直すことはできないの？"
+I6 | ruleset change (add required status checks check + verify, up to date) and merge #241 with ralph org merge | 2026-10-20T06:04:29Z | 2026-10-20T06:09:00Z | 271 | fix and merge #241 -> ruleset PUT 06:09:55Z, pr_merged #241 06:10:59Z
+I7 | D8 second merge: auto_merge = true, regate and merge #242 by the director | 2026-10-20T06:16:20Z | 2026-10-20T06:20:18Z | 238 | auto_merge, regate and merge -> regate 2 gate_passed 07:09:51Z, pr_merged #242 07:14:16Z (auto_merge=true)
+# total: 7 interventions, 1302 s (21 min 42 s) of latency; the human's thinking time is inside the latency and is not separated

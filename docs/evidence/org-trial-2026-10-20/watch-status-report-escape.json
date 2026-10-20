@@ -1,0 +1,61 @@
+{
+  "org_id": "report-escape",
+  "last_cycle_ts": "2026-10-20T05:57:45Z",
+  "cycles": 272,
+  "watchdog_joined": true,
+  "conditions": {
+    "report-escape/leader/liveness": {
+      "active": false,
+      "first_ts": "2026-10-20T03:41:34Z"
+    },
+    "report-escape/leader/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-20T05:32:43Z"
+    },
+    "report-escape/leader/stall": {
+      "active": false,
+      "first_ts": "2026-10-20T05:34:23Z"
+    },
+    "report-escape/reviewer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-20T05:32:43Z"
+    },
+    "report-escape/reviewer/stall": {
+      "active": true,
+      "first_ts": "2026-10-20T05:33:51Z"
+    }
+  },
+  "escalated": {
+    "report-escape/leader/liveness@1792466637222727000": true,
+    "report-escape/leader/liveness@1792467694385125000": true,
+    "report-escape/leader/scope_change@1792466534119750000": true,
+    "report-escape/leader/scope_change@1792467596651434000": true,
+    "report-escape/leader/scope_change@1792468182953120000": true,
+    "report-escape/leader/scope_change@1792471762669132000": true,
+    "report-escape/leader/scope_change@1792474363036956000": true,
+    "report-escape/leader/stall@1792470874713814000": true,
+    "report-escape/leader/stall@1792472204191997000": true,
+    "report-escape/leader/stall@1792473385593778000": true,
+    "report-escape/leader/stall@1792474463888396000": true,
+    "report-escape/reviewer/scope_change@1792468182953120000": true,
+    "report-escape/reviewer/stall@1792468674477468000": true,
+    "report-escape/reviewer/stall@1792473070473937000": true,
+    "report-escape/reviewer/stall@1792474431821719000": true
+  },
+  "seat_snapshots": {
+    "implementer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-1\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"interactive_ready\":true,\"name\":\"report-escape_implementer\",\"pane_id\":\"pane-9\",\"revision\":137,\"state_change_seq\":29,\"tab_id\":\"tab-9\",\"terminal_id\":\"term-9\",\"terminal_title\":\"◐ Report-escape implementer\",\"terminal_title_stripped\":\"◐ Report-escape implementer\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true
+    },
+    "leader": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-2\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"interactive_ready\":true,\"name\":\"report-escape_leader\",\"pane_id\":\"pane-1\",\"revision\":4398,\"state_change_seq\":72,\"tab_id\":\"tab-1\",\"terminal_id\":\"term-1\",\"terminal_title\":\"◐ Report-escape_leader prompt\",\"terminal_title_stripped\":\"◐ Report-escape_leader prompt\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "reviewer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-3\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ot/ralph/.claude/worktrees/org-report-escape\",\"interactive_ready\":true,\"name\":\"report-escape_reviewer\",\"pane_id\":\"pane-6\",\"revision\":885,\"state_change_seq\":65,\"tab_id\":\"tab-6\",\"terminal_id\":\"term-6\",\"terminal_title\":\"✳ Report-escape reviewer\",\"terminal_title_stripped\":\"Report-escape reviewer\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    }
+  }
+}

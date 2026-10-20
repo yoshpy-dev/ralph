@@ -1,0 +1,9 @@
+org	seat	session_label	model	msgs	input	cache_write	cache_read	output	first	last
+doctor-escape	implementer	implementer-1	claude-sonnet-5-5	20	40	112820	1915386	5272	2026-10-20T03:33:35.769Z	2026-10-20T04:43:32.273Z
+doctor-escape	leader	leader-1	claude-opus-5-5	70	140	131973	9633445	23244	2026-10-20T03:21:57.494Z	2026-10-20T06:06:00.606Z
+doctor-escape	leader	leader-2	claude-opus-5-5	6	12	73918	511354	1055	2026-10-20T06:11:45.331Z	2026-10-20T06:13:04.356Z
+doctor-escape	reviewer	reviewer-1	claude-opus-5-5	19	38	152446	1807456	5233	2026-10-20T03:34:11.959Z	2026-10-20T04:57:42.819Z
+report-escape	implementer	implementer-1	claude-sonnet-5-5	5	10	69495	397122	699	2026-10-20T03:41:13.823Z	2026-10-20T03:42:05.756Z
+report-escape	implementer	implementer-2	claude-sonnet-5-5	16	32	52252	1595636	4499	2026-10-20T03:44:24.651Z	2026-10-20T04:55:41.859Z
+report-escape	leader	leader-1	claude-opus-5-5	58	116	132993	7998261	17888	2026-10-20T03:21:34.486Z	2026-10-20T05:57:47.074Z
+report-escape	reviewer	reviewer-1	claude-sonnet-5-5	16	32	148309	1480366	4887	2026-10-20T03:42:28.045Z	2026-10-20T05:32:44.093Z

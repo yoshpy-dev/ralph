@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "kind": "github_protection",
+  "detail": "main, the default branch of origin's repository yoshpy-dev/ralph, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset requires branches to be up to date before merging",
+  "host": "github.com",
+  "repo": "yoshpy-dev/ralph",
+  "api_repo": "yoshpy-dev/ralph",
+  "default_branch": "main",
+  "checked_at": "2026-10-20T06:10:08Z"
+}
