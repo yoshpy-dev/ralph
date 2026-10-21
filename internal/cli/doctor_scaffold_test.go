@@ -449,13 +449,16 @@ func TestCheckScaffoldIntegrity_CorruptManifest_StrictFails(t *testing.T) {
 	t.Setenv("PATH", binDir)
 	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
 
-	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(dir, false, false) })
+	// Both runs keep doctor's output for the failure messages, so a failure
+	// names the check that failed.
+	var nonStrictOut, strictOut string
+	nonStrictErr := captureStdoutText(t, &nonStrictOut, func() error { return runDoctorFull(dir, false, false) })
 	if nonStrictErr != nil {
-		t.Errorf("non-strict: err = %v, want nil (a corrupt manifest is a warning without --strict)", nonStrictErr)
+		t.Errorf("non-strict: err = %v, want nil (a corrupt manifest is a warning without --strict)\ndoctor output:\n%s", nonStrictErr, nonStrictOut)
 	}
-	strictErr := captureStdout(t, func() error { return runDoctorFull(dir, false, true) })
+	strictErr := captureStdoutText(t, &strictOut, func() error { return runDoctorFull(dir, false, true) })
 	if strictErr == nil {
-		t.Fatal("strict: err = nil, want non-nil (a corrupt manifest must fail --strict)")
+		t.Fatalf("strict: err = nil, want non-nil (a corrupt manifest must fail --strict)\ndoctor output:\n%s", strictOut)
 	}
 }
 

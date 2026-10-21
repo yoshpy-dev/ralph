@@ -229,6 +229,11 @@ func countFailed(results []checkResult) int {
 	return n
 }
 
+// doctorProbeTimeout bounds each `<bin> --version` that probeBinary runs.
+// 5 s is the bound for users of ralph doctor; internal/cli's TestMain raises
+// it for the package's stub binaries.
+var doctorProbeTimeout = 5 * time.Second
+
 // probeBinary runs `<bin> --version` to confirm the binary on PATH is actually
 // callable. A bare exec.LookPath success is not enough — stale or broken
 // shims (npm-installed CLIs that lost their entry script, version managers
@@ -236,18 +241,19 @@ func countFailed(results []checkResult) int {
 // which lets `ralph doctor` report `pass` while every subsequent /implement or
 // /cross-review fails.
 //
-// Bounded by a 5-second timeout so a hung CLI cannot wedge `ralph doctor`.
+// Bounded by doctorProbeTimeout (5 s for users) so a hung CLI cannot wedge
+// `ralph doctor`; the timeout error names the bound it used.
 // Returns the first non-empty line of the version output so multi-line
 // banners do not break the doctor table layout.
 func probeBinary(bin string) (version string, err error) {
 	if _, lookErr := exec.LookPath(bin); lookErr != nil {
 		return "", fmt.Errorf("%s not found in PATH: %w", bin, lookErr)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), doctorProbeTimeout)
 	defer cancel()
 	out, runErr := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("%s --version timed out after 5s", bin)
+		return "", fmt.Errorf("%s --version timed out after %s", bin, doctorProbeTimeout)
 	}
 	if runErr != nil {
 		return "", fmt.Errorf("%s --version failed: %w", bin, runErr)

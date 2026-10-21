@@ -752,10 +752,23 @@ func TestRegate_FetchFailures(t *testing.T) {
 				timeout := regateGitTimeout
 				regateGitTimeout = 300 * time.Millisecond
 				t.Cleanup(func() { regateGitTimeout = timeout })
-				// An upload-pack that never answers, with its output away from
-				// git's, so nothing holds the fetch's pipes once git is stopped.
-				writeGateFile(t, fx.out, "slow-upload-pack", "#!/bin/sh\nexec >/dev/null 2>&1 </dev/null\nsleep 3\n", 0o755)
+				// An upload-pack that answers nothing for 20 s and then leaves a
+				// marker. Its stdout stays open: it is the pipe git reads, and
+				// closed, git reads EOF and exits 128 in about 0.2 s, racing the
+				// 300ms bound. Its stderr and stdin go to /dev/null, so once the
+				// bound kills git (git only, in ralph's group) the stub holds none
+				// of the fetch's pipes. The runner reads an expired bound before
+				// git's exit code, so a fetch that ended with the stub would read
+				// "ran past" too; the marker, checked after Regate returned (a
+				// cleanup, run before the temp dir is removed), tells them apart.
+				ended := filepath.Join(fx.out, "upload-pack-ended")
+				writeGateFile(t, fx.out, "slow-upload-pack", "#!/bin/sh\nexec 2>/dev/null </dev/null\nsleep 20\n: > "+shellQuote(ended)+"\n", 0o755)
 				runGit(t, "-C", fx.main, "config", "remote.origin.uploadpack", filepath.Join(fx.out, "slow-upload-pack"))
+				t.Cleanup(func() {
+					if fileOrAbsent(t, ended) != "<absent>" {
+						t.Errorf("the slow upload-pack ran to its end (%s exists), so the fetch ended with it, not at the bound", ended)
+					}
+				})
 			},
 			want: func(fx *regateFixture) []string {
 				return []string{"git fetch origin +refs/heads/main:refs/remotes/origin/main in " + fx.worktree + " ran past 300ms and " +

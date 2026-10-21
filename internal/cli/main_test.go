@@ -36,6 +36,15 @@ import (
 // ledger exists. A test of the check sets its own resolver and restores
 // this one.
 //
+// It also raises probeBinary's bound (doctorProbeTimeout) to a minute: the
+// stub binaries' `--version` can take more than 5 s on a heavily loaded
+// machine. Four runDoctor*-based tests failed that way under load: the three
+// in the doctor-test row of docs/tech-debt/README.md (2026-10-19 and
+// 2026-10-21) and TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected
+// (docs/reports/test-2026-10-13-org-plan-approval.md); three of them printed
+// "claude --version timed out after 5s". 5 s stays doctor's bound for users;
+// the test of the timeout sets its own bound and restores this one.
+//
 // It also pins org.go's codex model-observation overrides
 // (orgCodexSessionsDirOverride/orgCodexModelObserveTimeoutOverride/
 // orgCodexModelObserveIntervalOverride) to a sessions directory that does
@@ -101,6 +110,7 @@ func TestMain(m *testing.M) {
 			LookPath: func(string) (string, error) { return "", errors.New("gh lookup disabled in tests") },
 		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist")
 	}
+	doctorProbeTimeout = time.Minute
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")
 	orgCodexModelObserveTimeoutOverride = 50 * time.Millisecond
 	orgCodexModelObserveIntervalOverride = 5 * time.Millisecond

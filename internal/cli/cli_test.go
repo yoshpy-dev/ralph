@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
 )
@@ -374,6 +375,46 @@ func TestProbeBinary_MissingBinary(t *testing.T) {
 
 	if _, err := probeBinary("claude"); err == nil {
 		t.Fatal("probeBinary returned nil error for missing binary")
+	}
+}
+
+// TestProbeBinary_TimeoutNamesTheBound pins the timeout path: a `--version`
+// that runs past doctorProbeTimeout is reported as a timeout that names the
+// bound probeBinary used. TestMain raises the bound for the package's stub
+// binaries, so this test sets a small one of its own. The shim sleeps 2 s:
+// past the 100 ms bound, and short of doctor's 5 s, so a probeBinary that
+// ignored the variable would see the shim end and report no output instead
+// of a timeout. It execs sleep so the kill on the deadline reaches the
+// sleeping process; a shell that kept the output pipe open in a child would
+// hold CombinedOutput until the child exits. sleep is named by its path
+// because PATH holds only the shim.
+func TestProbeBinary_TimeoutNamesTheBound(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "claude")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nexec /bin/sleep 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	orig := doctorProbeTimeout
+	doctorProbeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { doctorProbeTimeout = orig })
+
+	_, err := probeBinary("claude")
+	if err == nil || !strings.Contains(err.Error(), "claude --version timed out after 100ms") {
+		t.Fatalf("probeBinary err = %v, want the timeout that names the 100ms bound", err)
+	}
+}
+
+// TestMain_RaisesTheDoctorProbeTimeout pins the raise in TestMain: the bound
+// of probeBinary (doctorProbeTimeout) is above doctor's 5 s default for every
+// test that runs a stub binary's `--version`, which can take more than 5 s on
+// a heavily loaded machine. Without the raise those doctor tests time out
+// under load, and no other test notices: the raise is invisible until a stub
+// runs past 5 s. It does not run in parallel: a test that sets its own bound
+// restores this one, as TestProbeBinary_TimeoutNamesTheBound does.
+func TestMain_RaisesTheDoctorProbeTimeout(t *testing.T) {
+	if doctorProbeTimeout <= 5*time.Second {
+		t.Fatalf("doctorProbeTimeout = %s, want above doctor's 5s default: TestMain (main_test.go) raises it so the stub-binary doctor tests do not time out under load (the doctor-test row of docs/tech-debt/README.md)", doctorProbeTimeout)
 	}
 }
 
