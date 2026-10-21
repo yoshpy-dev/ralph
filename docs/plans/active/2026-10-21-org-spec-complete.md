@@ -130,5 +130,5 @@ docs だけなので、戻すときはこの PR を revert する。
 - self-review の再レビュー(370d30ff、Merge yes、LOW N1 と INFO N2〜N5)のうち、N1(Status の数に日付、後の PR が Status も更新する)、N4(ALERT の原因の候補から F7 を外した)、N5(F4 の関係する項目に受け入れ条件 3)を 43bf5c6e で直した。N2(計画の本文の古い言い方)と N3 は直さない。run-verify は exit 0
 - [x] Verification artifact created(verify pass、641036ad。INFO V1〜V3)
 - verify の V1 の記録: 見込みの `[ ]` にない FR-4 と受け入れ条件 5 も、S1(1a5bc2ee)から `[ ]` にした。理由は試行の所見 F4(implementer を立てるのに、leader が残った pane を手で閉じる回り道が要った)。所見と食い違う 10 項目の注は、印の規則どおり Open questions ではなく所見と tech-debt の行を指す
-- [ ] Test artifact created
+- [x] Test artifact created(test pass、84ef6f59。INFO T1〜T3。go1.26.0 の 1 回目に load で落ちた doctor のテスト 1 本は、単独と打ち直しで通った。sync-docs が tech-debt の既存の行 "Two doctor tests" に足した)
 - [ ] PR created
