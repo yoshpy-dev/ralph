@@ -63,3 +63,10 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - 生の `ralph org spawn` を本物の herdr に打つ実機の確認は、この PR の evidence にない(S1 は手で作った pane と claude の座席)。codex の座席の環境も実機では見ていない。記録の文は claude の座席と書いているので食い違いはないが、`/test` と PR の本文で未確認として扱う
   - 「fix/seat-agmsg-self-name」の文字は、仕様・根拠の表・tech-debt に残る。PR の番号が決まったら置き換える(計画の「後の PR に残すこと」に載っている)
   - F4 の行の「the agmsg self-rename of the row above」は、4b で F3 の RESOLVED に合わせる(同上)
+
+## LOW の直し(報告のあと)
+
+- L1・L2・L4 は 4991744e で直した。L1 は `PaneEnv` の doc に「値は argv と警告に出るので秘密を入れない」を足し、`warnNoPaneEnv` の doc の 1 文目を書き直した。警告の文面と挙動は変えていない。L2 は `AgmsgSelfNameEnv` を足して `AgmsgSelfNameOff` をそれから作り、起動スクリプトは `strings.Cut` をやめて名前の定数を直に書く。スクリプトの出力は同じバイト列で、全文を固定する試験がそのまま通る。`AgmsgSelfNameOff` の doc には起動スクリプトも export することを足した。L4 は evidence (c) に、表の値がどの列も send.sh 1 本ごとの時間で、20 本か 24 本(6 本ずつ 4 回)の中央値であることを書き、tech-debt の ALERT の行を「each send took」にした。数字は変えていない
+- 確かめたこと(implementer の報告): `gofmt -l` は空、`go vet` は rc 0、`go test -count=1 -timeout 30m` は driver・org・cli で rc 0、`GOTOOLCHAIN=go1.25.8` でも driver・org で rc 0、`check-sync.sh` と `check-skill-sync.sh` は rc 0
+- L3 は直さない。`readLines(...)[3]` は前からの書き方で、`[4]` はそれに合わせた
+- この直しは、続く `/verify`、`/test`、`/cross-review` の差分に入る
