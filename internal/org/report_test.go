@@ -1,6 +1,7 @@
 package org
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,110 @@ func TestBuildOrgReport_EscapesPipesInEventDetails(t *testing.T) {
 	plain := "| 2026-08-02T10:00:01Z | s2 | " + string(EventStopped) + " | pane=ok leave=ok |"
 	if !strings.Contains(got, plain) {
 		t.Errorf("expected details without a pipe unchanged %q, got:\n%s", plain, got)
+	}
+}
+
+// reportCellCases are Details texts (a sent event's message body and the
+// like) with the expected details cell of the event timeline row each one
+// becomes.
+func reportCellCases() []struct {
+	name     string
+	details  string
+	wantCell string
+} {
+	return []struct {
+		name     string
+		details  string
+		wantCell string
+	}{
+		{"header lines and a blank line", "TYPE: TASK\nTASK_ID: t-1\n\nbody", "TYPE: TASK<br>TASK_ID: t-1<br><br>body"},
+		{"CRLF line breaks", "TYPE: TASK\r\nTASK_ID: t-1\r\n\r\nbody", "TYPE: TASK<br>TASK_ID: t-1<br><br>body"},
+		{"lone CR", "line one\rline two", "line one<br>line two"},
+		{"LF then CR is two breaks", "a\n\rb", "a<br><br>b"},
+		{"pipe next to a line break", "a|\n|b", `a\|<br>\|b`},
+		{"backslash at a line end", "go test \\\n  ./internal/org/", `go test \\<br>  ./internal/org/`},
+		{"fenced snippet", "```sh\nralph org report\n```", "\\`\\`\\`sh<br>ralph org report<br>\\`\\`\\`"},
+		{"placeholder in angle brackets", "write <path> then stop", `write \<path> then stop`},
+		{"escaped pipe already in the text", `a\|b`, `a\\\|b`},
+		{"plain text", "pane=ok leave=ok", "pane=ok leave=ok"},
+		{"empty details", "", "-"},
+	}
+}
+
+// timelineRow is the event timeline line BuildOrgReport writes for a sent
+// event of seat s1 at ts whose details cell is cell.
+func timelineRow(ts, cell string) string {
+	return "| " + ts + " | s1 | " + EventSent + " | " + cell + " |"
+}
+
+// eventTimelineLines returns the lines of report's event timeline table: its
+// two header lines, then one line per row, up to the blank line before the
+// Model receipts section.
+func eventTimelineLines(t *testing.T, report string) []string {
+	t.Helper()
+	const start = "## Event timeline\n\n"
+	const end = "\n\n## Model receipts"
+	i := strings.Index(report, start)
+	j := strings.Index(report, end)
+	if i < 0 || j < i {
+		t.Fatalf("expected an event timeline section followed by the model receipts section, got:\n%s", report)
+	}
+	return strings.Split(report[i+len(start):j], "\n")
+}
+
+// unescapedPipes counts the pipes of line that end a table cell: every pipe
+// with no backslash right before it.
+func unescapedPipes(line string) int {
+	n := 0
+	for i := 0; i < len(line); i++ {
+		if line[i] == '|' && (i == 0 || line[i-1] != '\\') {
+			n++
+		}
+	}
+	return n
+}
+
+func TestBuildOrgReport_DetailsCellKeepsEachEventOnOneRow(t *testing.T) {
+	const ts = "2026-08-02T10:00:00Z"
+	for _, c := range reportCellCases() {
+		t.Run(c.name, func(t *testing.T) {
+			events := []ManifestEvent{{TS: ts, OrgID: "org-c", SeatID: "s1", Event: EventSent, Details: c.details}}
+
+			got := BuildOrgReport(events, nil, "org-c", "2026-08-02", 0)
+
+			lines := eventTimelineLines(t, got)
+			if len(lines) != 3 {
+				t.Fatalf("expected the timeline to be its 2 header lines and 1 row, got %d lines %q", len(lines), lines)
+			}
+			if want := timelineRow(ts, c.wantCell); lines[2] != want {
+				t.Errorf("details %q: timeline row\n got %q\nwant %q", c.details, lines[2], want)
+			}
+		})
+	}
+}
+
+func TestBuildOrgReport_TimelineHasOneLinePerEventOfFourCells(t *testing.T) {
+	cases := reportCellCases()
+	events := make([]ManifestEvent, 0, len(cases))
+	for i, c := range cases {
+		ts := fmt.Sprintf("2026-08-02T10:00:%02dZ", i)
+		events = append(events, ManifestEvent{TS: ts, OrgID: "org-c", SeatID: "s1", Event: EventSent, Details: c.details})
+	}
+
+	got := BuildOrgReport(events, nil, "org-c", "2026-08-02", 0)
+
+	lines := eventTimelineLines(t, got)
+	if len(lines) != len(events)+2 {
+		t.Fatalf("expected the timeline to be its 2 header lines and %d rows, got %d lines:\n%s", len(events), len(lines), strings.Join(lines, "\n"))
+	}
+	for i, c := range cases {
+		row := lines[i+2]
+		if want := timelineRow(events[i].TS, c.wantCell); row != want {
+			t.Errorf("%s: timeline row\n got %q\nwant %q", c.name, row, want)
+		}
+		if n := unescapedPipes(row); n != 5 {
+			t.Errorf("%s: expected a row of 4 cells (5 unescaped pipes), got %d in %q", c.name, n, row)
+		}
 	}
 }
 
