@@ -403,4 +403,17 @@ regression.
     with `TestMain_RaisesTheDoctorProbeTimeout`; D3 then fails only that
     test (813 others pass)
 - [x] Test artifact created (docs/reports/test-2026-10-21-test-stability.md, d4918ed9 and d34e60c6)
+  - /sync-docs (docs/reports/sync-docs-2026-10-21-test-stability.md) pass: no
+    doc says or implies that gate, regate, or run-verify stop at go's
+    10-minute default or that run-verify needs `GOFLAGS=-timeout=30m`. Three
+    comments in docs/tech-debt/README.md changed: the F9 row's (the test
+    report's base-vs-HEAD runs replace "nothing was measured under load"), the
+    doctor row's (names `TestMain_RaisesTheDoctorProbeTimeout`, ec852215, and
+    that the original failure was not reproduced), and the F10 row's (the
+    `ralph upgrade` delivery is read from the planner and its test, not run).
+    No new row: G2 is a clause of the doctor row, G3 is in the F9 row, G4 is
+    the existing `TestMain` row of the codex model cache, G5 and G6 are
+    Non-goals and release-note items. V1 stays (Progress S2 names the
+    deviation; editing Risks would change the approval digest). V4 is the next
+    series PR's work
 - [ ] PR created
