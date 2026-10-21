@@ -106,7 +106,13 @@ run_static() {
 }
 
 run_tests() {
-  go test ./... || status=1
+  # go test's own default stops a package after 10 minutes. The 30-minute
+  # default goes first in GOFLAGS: Go applies the entries in order, so a
+  # timeout the caller set (in GOFLAGS or with go env -w, in any form Go
+  # accepts) comes later and wins. A -timeout on the command line would
+  # override the caller's instead.
+  goflags=$(go env GOFLAGS 2>/dev/null) || goflags="${GOFLAGS:-}"
+  GOFLAGS="-timeout=30m${goflags:+ $goflags}" go test ./... || status=1
 }
 
 verify_root() {
