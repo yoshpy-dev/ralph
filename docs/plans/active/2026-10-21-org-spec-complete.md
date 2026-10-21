@@ -127,6 +127,7 @@ docs だけなので、戻すときはこの PR を revert する。
 - [x] Implementation started(S1 根拠の表 1a5bc2ee、S2 仕様の印と Status bc9fe9e0。S1 の implementer は run-verify のあとコミットの前に止まったので、表を確かめてから手でコミットした)
 - [x] Review artifact created(self-review cycle 1: 7bf4bbb9、Merge yes、MEDIUM 1・LOW 5。直しは 9733eb31)
 - 計画からのずれ(self-review の M1・L1 を直した結果。印の規則は変えていない): 見込みの `[ ]` に FR-3 を足した。試行で見張りから leader への ALERT が 10 回届かず、うち 7 回が `scope_change` だったため。この所見は tech-debt に行がなかったので、`docs/tech-debt/README.md` の末尾に 1 行足し(Affected areas の外)、根拠の表の所見の表に「leader への ALERT」の行を足した(18 行)。F6 は FR-6 の文と食い違わないと読み直し、FR-6 の `[ ]` の理由は F13 だけにした。印の数は仕様で `[x]` 20、`[ ]` 12
+- self-review の再レビュー(370d30ff、Merge yes、LOW N1 と INFO N2〜N5)のうち、N1(Status の数に日付、後の PR が Status も更新する)、N4(ALERT の原因の候補から F7 を外した)、N5(F4 の関係する項目に受け入れ条件 3)を 43bf5c6e で直した。N2(計画の本文の古い言い方)と N3 は直さない。run-verify は exit 0
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
