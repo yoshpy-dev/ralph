@@ -1383,6 +1383,48 @@ func TestOrgSend_JapaneseBodyOver200Bytes_DetailsStayValidUTF8(t *testing.T) {
 	}
 }
 
+// TestOrgSend_DryRun_JapaneseBodyOver200Bytes_DetailsStayValidUTF8 is the
+// dry-run counterpart of the test above (gap G1 of PR #246's test report):
+// the dry-run branch of Send cuts the body like the real send, so the same
+// message with DryRun set leaves a dry-run `sent` event whose Details, read
+// back from the manifest, are valid UTF-8 with no U+FFFD and end in the
+// truncation marker, with no driver call made.
+func TestOrgSend_DryRun_JapaneseBodyOver200Bytes_DetailsStayValidUTF8(t *testing.T) {
+	o, h, a := testOrg(t)
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\n" + strings.Repeat("日本語の本文を記録する。", 10)
+	if len(msg) <= sendDetailsMaxLen || utf8.RuneStart(msg[sendDetailsMaxLen]) {
+		t.Fatalf("test message must run past %d bytes with byte %d inside a character, got %d bytes", sendDetailsMaxLen, sendDetailsMaxLen, len(msg))
+	}
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, DryRun: true})
+	if result.Err != nil {
+		t.Fatalf("expected the dry-run send to succeed, got %v", result.Err)
+	}
+	if len(h.calls) != 0 || len(a.calls) != 0 {
+		t.Fatalf("expected no driver calls for a dry-run send, got herdr=%v agmsg=%v", h.calls, a.calls)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSent || !last.DryRun {
+		t.Fatalf("expected a dry-run sent event, got %+v", last)
+	}
+	details := last.Details
+	if !utf8.ValidString(details) {
+		t.Errorf("expected valid UTF-8 Details, got %q", details)
+	}
+	if strings.ContainsRune(details, utf8.RuneError) {
+		t.Errorf("expected no U+FFFD in Details (the bytes of a split character), got %q", details)
+	}
+	const suffix = "...(truncated)"
+	if !strings.HasSuffix(details, suffix) {
+		t.Fatalf("expected Details to end in %q, got %q", suffix, details)
+	}
+	if kept := strings.TrimSuffix(details, suffix); !strings.HasPrefix(msg, kept) || len(kept) > sendDetailsMaxLen {
+		t.Errorf("expected the kept text to be a prefix of the message of at most %d bytes, got %q (%d bytes)", sendDetailsMaxLen, kept, len(kept))
+	}
+}
+
 // TestOrgSend_EnterDelay_WaitsAtLeastConfiguredDuration asserts the wait
 // between PaneSendText and PaneSendKeys is real: with Org.SendEnterDelay
 // set to a small-but-measurable value, elapsed wall time around Send is at
