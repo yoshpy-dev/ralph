@@ -351,6 +351,23 @@ regression.
     invalid value (go1.26 prints `notaflag` with rc 0); `go test` then
     fails on it as it does today, so the behavior is the same and only that
     sentence of Risks was wrong
+  - S3 dc58715a: the first implementer stopped on an API connection error
+    after writing an untracked draft; a second one reviewed it, fixed its
+    tree comment, made the other-x.md case add to the two excluded reports
+    (AC3's "adding"), and committed it. 16/16; mutants m1 and m2 (an F8
+    entry removed) fail 3 checks each, m3 (`docs/reports/` added) 6, m4
+    (substring match) 2, the nested case only: the pattern is a whole path,
+    so `x-review-y.md` does not contain it; the x-review-y case catches a
+    match on the file name after the directory (m7, 2 checks). The script
+    before F8 (9349914b^) fails 5
+  - S4 439ae909: `doctorProbeTimeout` (5 s), TestMain raises it to a
+    minute, `TestProbeBinary_TimeoutNamesTheBound` (stub `exec /bin/sleep
+    2`: past 100 ms and short of 5 s, so a probe that ignores the variable
+    fails), the scaffold test prints doctor's output. The three tests 10/10
+    on both toolchains; `internal/cli` 246 s with a load average of 150 at
+    the start. A fourth test failed the same way on 2026-10-13
+    (`TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected`); the TestMain
+    comment names it
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
