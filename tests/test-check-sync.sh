@@ -73,7 +73,8 @@ workdir="$(cd "$workdir" && pwd -P)"
 cleanup() {
   rm -rf "$workdir"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 # A small tree the script passes: AGENTS.md and templates/base/AGENTS.md carry
 # the managed block that templates/base/.ralph/core/AGENTS.core.md holds, and

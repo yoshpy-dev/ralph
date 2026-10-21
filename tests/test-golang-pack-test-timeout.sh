@@ -89,7 +89,8 @@ workdir="$(cd "$workdir" && pwd -P)"
 cleanup() {
   rm -rf "$workdir"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 # case_file <label>: a file name under workdir for a case's logs.
 case_file() {
@@ -146,16 +147,15 @@ run_fake() {
   _label="$1"
   _mode="$2"
   shift 2
-  FAKE_LOG="$(case_file "fake $_label").log"
+  FAKE_GO_LOG="$(case_file "fake $_label").log"
   _out="$(case_file "fake $_label").out"
-  : >"$FAKE_LOG"
+  : >"$FAKE_GO_LOG"
   set +e
   (
     cd "$repo_a"
     unset GOFLAGS GOCACHE STATICCHECK_CACHE RALPH_VERIFY_PROJECT_ROOTS \
       FAKE_GO_ENV_FAIL FAKE_GO_ENV_GOFLAGS
     PATH="$fake_path"
-    FAKE_GO_LOG="$FAKE_LOG"
     HARNESS_VERIFY_MODE="$_mode"
     export PATH FAKE_GO_LOG HARNESS_VERIFY_MODE
     env "$@" "$GOLANG_VERIFY"
@@ -171,10 +171,10 @@ expect_go_test() {
   _label="$1"
   _want="$2"
   assert_line "$_label: go test in . gets GOFLAGS=$_want" \
-    "GOFLAGS=$_want|test ./...|$repo_a" "$FAKE_LOG"
+    "GOFLAGS=$_want|test ./...|$repo_a" "$FAKE_GO_LOG"
   assert_line "$_label: go test in svc gets GOFLAGS=$_want" \
-    "GOFLAGS=$_want|test ./...|$repo_a/svc" "$FAKE_LOG"
-  assert_count "$_label: one go test per root" 2 "|test " "$FAKE_LOG"
+    "GOFLAGS=$_want|test ./...|$repo_a/svc" "$FAKE_GO_LOG"
+  assert_count "$_label: one go test per root" 2 "|test " "$FAKE_GO_LOG"
 }
 
 run_fake "no GOFLAGS" test
@@ -193,9 +193,9 @@ run_fake "go env fails" test FAKE_GO_ENV_FAIL=1 GOFLAGS=-count=1
 expect_go_test "go env fails" "-timeout=30m -count=1"
 
 run_fake "static mode" static
-assert_line "static mode: go vet runs in ." "GOFLAGS=|vet ./...|$repo_a" "$FAKE_LOG"
-assert_count "static mode: no go test" 0 "|test " "$FAKE_LOG"
-assert_count "static mode: no go env" 0 "|env " "$FAKE_LOG"
+assert_line "static mode: go vet runs in ." "GOFLAGS=|vet ./...|$repo_a" "$FAKE_GO_LOG"
+assert_count "static mode: no go test" 0 "|test " "$FAKE_GO_LOG"
+assert_count "static mode: no go env" 0 "|env " "$FAKE_GO_LOG"
 
 # ─── Part B: the real go reports the deadline a test sees ─────────────────
 
@@ -250,7 +250,7 @@ GO
   run_real() {
     _label="$1"
     shift
-    DEADLINE_FILE="$(case_file "$_label").deadline"
+    DEADLINE_OUT="$(case_file "$_label").deadline"
     _out="$(case_file "$_label").out"
     set +e
     (
@@ -266,7 +266,6 @@ GO
       GOWORK=off
       GOPROXY=off
       HARNESS_VERIFY_MODE="test"
-      DEADLINE_OUT="$DEADLINE_FILE"
       export PATH GOENV GOTOOLCHAIN GOWORK GOPROXY HARNESS_VERIFY_MODE DEADLINE_OUT
       env "$@" "$GOLANG_VERIFY"
     ) >"$_out" 2>&1
@@ -278,7 +277,7 @@ GO
   expect_deadline() {
     _label="$1"
     _want="$2"
-    _got="$(sed -n '1p' "$DEADLINE_FILE" 2>/dev/null || true)"
+    _got="$(sed -n '1p' "$DEADLINE_OUT" 2>/dev/null || true)"
     if [ "$_got" = "$_want" ]; then
       record_pass "$_label: the test's deadline is $_want minutes away"
     else
