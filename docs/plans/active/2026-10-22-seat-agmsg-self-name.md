@@ -124,6 +124,9 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
 - [x] Branch created
 - [x] Implementation started
   - S1(計測): `docs/evidence/agmsg-self-name-2026-10-22.md`。(a) `--env` は足すだけで D2 はそのまま。(b)〜(d) は期待どおり。(e) は off で名前が残り、対照の on で `agent_not_found` になったので、F3 は S2〜S4 のあとに RESOLVED にできる。(f) 見張りの環境の上乗せは約 65 ms なので ALERT の行は開いたまま。pane の環境は約 1〜2 s 遅く、F4 に効いていた可能性を 4b に渡す
+  - S2 b0a607d9、S4 a34612fd(spawn.go の HerdrClient のコメントの配線の文も直した)、S3 f16423da(CLI テストの herdr の stub が `tab create --help` に答えるよう、`internal/cli/org_test.go` と `internal/cli/org_director_headless_test.go` を範囲に足した)
+  - AC7 の範囲を足した(consult-plan-seatenv の判定 (i)): F3 を直すと D-F3 の回り道 3 つが要らなくなるので、F8・F10 の前例のとおり D-F3 を「いいえ(今は)」にし、D-F3 だけが理由だった FR-9 を根拠の表と仕様の両方で `[x]` にする。印の数は仕様が 21/11 から 22/10、根拠の表が 20/11 から 21/10 になる。FR-9 の注には AC3・AC4 のテスト名と evidence の (e) と「残る食い違いはない」を書く
+  - 後の PR に残すこと: この PR の番号への書き換え(F3・D-F3・FR-5・FR-9 の注と表の「fix/seat-agmsg-self-name」、仕様の Status と PR 一覧)。tech-debt の F4 の行の「announce の時間切れの原因」は、evidence の (c)・(f)(pane の環境で on が約 1〜2 s 遅い)で 4b が書き換える
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
