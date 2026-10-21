@@ -125,7 +125,8 @@ docs だけなので、戻すときはこの PR を revert する。
 - [x] Plan approved(ユーザーの常設の指示により自動承認、2026-10-21)
 - [x] Branch created
 - [x] Implementation started(S1 根拠の表 1a5bc2ee、S2 仕様の印と Status bc9fe9e0。S1 の implementer は run-verify のあとコミットの前に止まったので、表を確かめてから手でコミットした)
-- [ ] Review artifact created
+- [x] Review artifact created(self-review cycle 1: 7bf4bbb9、Merge yes、MEDIUM 1・LOW 5。直しは 9733eb31)
+- 計画からのずれ(self-review の M1・L1 を直した結果。印の規則は変えていない): 見込みの `[ ]` に FR-3 を足した。試行で見張りから leader への ALERT が 10 回届かず、うち 7 回が `scope_change` だったため。この所見は tech-debt に行がなかったので、`docs/tech-debt/README.md` の末尾に 1 行足し(Affected areas の外)、根拠の表の所見の表に「leader への ALERT」の行を足した(18 行)。F6 は FR-6 の文と食い違わないと読み直し、FR-6 の `[ ]` の理由は F13 だけにした。印の数は仕様で `[x]` 20、`[ ]` 12
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
