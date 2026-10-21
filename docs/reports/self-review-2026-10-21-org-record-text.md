@@ -78,3 +78,7 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - `gh api markdown` での描画(AC3b)は見ていない。`\\\|` が「`\|` の文字そのまま」に出ることは、GFM の表の分割と escape の規則から読んだだけで、描画では確かめていない
   - 計画の「Visual review」(図解ページと PNG)は読んでいない
   - `docs/evidence/org-trial-2026-10-20/` の本文と、`org-spec-evidence` の「項目」表の NFR 記録の置き場所の注(60 行、「F12 と F14 は…食い違わない」)は、文書のずれの範囲なので見ていない(読んだ限り、この文は今も正しい)
+
+## I4 の直し(orchestrator の追記)
+
+I4 は、Go のコメントだけを直す 8a52987f で直した。`reportCellReplacer` の doc の冒頭を「GFM の表の 1 行に収まり、pipe、backslash、backtick、`<` は書いたとおりに出る」の意味の文にし、末尾を「they cannot split the row or end the table」にした。直したのはコメントだけで、`strings.NewReplacer` の組は変わらない。`gofmt -l` は出力なし、`go vet ./internal/org/` は通った。`/verify` と `/test` は 8a52987f 以降の tree で走らせる。
