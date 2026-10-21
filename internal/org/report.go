@@ -114,10 +114,11 @@ func permissionModeFromDetails(details string) string {
 }
 
 // reportCellReplacer escapes an event's Details for the details cell of
-// BuildOrgReport's event timeline, so the event stays on one table row and a
-// GFM renderer shows the text as written. It is one strings.Replacer, a single
-// pass, so nothing it writes is escaped again. A raw pipe would split the row
-// into extra cells, so it gets a backslash. Each line break would end the row
+// BuildOrgReport's event timeline, so the event stays on one table row of a
+// GFM renderer, which shows its pipes, backslashes, backticks, and less-than
+// signs as written. It is one strings.Replacer, a single pass, so nothing it
+// writes is escaped again. A raw pipe would split the row into extra cells,
+// so it gets a backslash. Each line break would end the row
 // (and a blank line the table), so it is written <br>; "\r\n" is listed before
 // "\r" and "\n" because a Replacer tries its pairs in argument order at a
 // position, so a CRLF gives one <br>. A backslash gets a backslash because a
@@ -127,7 +128,7 @@ func permissionModeFromDetails(details string) string {
 // text. A less-than sign gets a backslash so a placeholder such as <path> is
 // not read as an HTML tag. The other Markdown characters (*, _, [, ], ~, &,
 // and >) are left as they are, so a renderer can still show them as emphasis,
-// a link, or an entity; they cannot split the row or hide text.
+// a link, or an entity; they cannot split the row or end the table.
 var reportCellReplacer = strings.NewReplacer(
 	`\`, `\\`,
 	"|", `\|`,
