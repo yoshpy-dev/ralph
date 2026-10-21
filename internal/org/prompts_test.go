@@ -1042,9 +1042,6 @@ const reviewerReportPrefix = defaultReportDir + "/" + reviewerReportFilePrefix
 func TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 
-	// The first item of the contract names the report file. Two reviewer
-	// seats of one org must write different files, and both names must start
-	// with the prefix scripts/check-sync.sh excludes.
 	reportPathRe := regexp.MustCompile("`(docs/reports/[^`]+\\.md)`")
 	reportPath := func(rendered string) string {
 		t.Helper()

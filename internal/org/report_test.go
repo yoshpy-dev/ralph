@@ -111,19 +111,17 @@ func TestBuildOrgReport_EscapesPipesInEventDetails(t *testing.T) {
 	}
 }
 
-// reportCellCases are Details texts (a sent event's message body and the
-// like) with the expected details cell of the event timeline row each one
-// becomes.
-func reportCellCases() []struct {
+// reportCellCase is a Details text (a sent event's message body and the
+// like) with the expected details cell of the event timeline row it becomes.
+type reportCellCase struct {
 	name     string
 	details  string
 	wantCell string
-} {
-	return []struct {
-		name     string
-		details  string
-		wantCell string
-	}{
+}
+
+// reportCellCases are the Details texts both timeline tests render.
+func reportCellCases() []reportCellCase {
+	return []reportCellCase{
 		{"header lines and a blank line", "TYPE: TASK\nTASK_ID: t-1\n\nbody", "TYPE: TASK<br>TASK_ID: t-1<br><br>body"},
 		{"CRLF line breaks", "TYPE: TASK\r\nTASK_ID: t-1\r\n\r\nbody", "TYPE: TASK<br>TASK_ID: t-1<br><br>body"},
 		{"lone CR", "line one\rline two", "line one<br>line two"},

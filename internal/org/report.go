@@ -125,7 +125,9 @@ func permissionModeFromDetails(details string) string {
 // <br> after it. A backtick gets a backslash because the backticks of a fenced
 // snippet, once on one line, would form a code span that shows each <br> as
 // text. A less-than sign gets a backslash so a placeholder such as <path> is
-// not read as an HTML tag.
+// not read as an HTML tag. The other Markdown characters (*, _, [, ], ~, &,
+// and >) are left as they are, so a renderer can still show them as emphasis,
+// a link, or an entity; they cannot split the row or hide text.
 var reportCellReplacer = strings.NewReplacer(
 	`\`, `\\`,
 	"|", `\|`,
