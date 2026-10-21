@@ -320,8 +320,7 @@ func (s directorLaunchScript) text() (string, error) {
 	if s.AgmsgHome != "" {
 		b.WriteString(driver.AgmsgHomeEnv + "=" + shellQuote(s.AgmsgHome) + "\nexport " + driver.AgmsgHomeEnv + "\n")
 	}
-	selfName, selfNameValue, _ := strings.Cut(driver.AgmsgSelfNameOff, "=")
-	b.WriteString(selfName + "=" + shellQuote(selfNameValue) + "\nexport " + selfName + "\n")
+	b.WriteString(driver.AgmsgSelfNameEnv + "=" + shellQuote("off") + "\nexport " + driver.AgmsgSelfNameEnv + "\n")
 	b.WriteString(shellQuote(s.RalphPath) + " org director launched --id " + shellQuote(s.ID) + " --token " + shellQuote(s.Token) +
 		` --pid "$$" --state-dir ` + shellQuote(s.StateDir) + " || exit 1\n")
 	words := []string{shellQuote(s.AgentPath)}

@@ -42,7 +42,9 @@ type Herdr struct {
 	// (docs/evidence/agmsg-self-name-2026-10-22.md, (a)). Empty adds no
 	// --env and runs no check. Production passes AgmsgSelfNameOff, so an
 	// agmsg a seat runs itself cannot rename the seat's herdr agent (finding
-	// F3; the same evidence, (e)).
+	// F3; the same evidence, (e)). The values appear in the `herdr tab
+	// create` argv, which ps shows, and in the warning line, so never put a
+	// secret in PaneEnv.
 	PaneEnv []string
 	// Warn receives the warning line TabCreate writes when it cannot add
 	// PaneEnv; nil means os.Stderr.
@@ -302,8 +304,8 @@ func (h Herdr) paneEnvSupported(ctx context.Context) bool {
 	return p.supported
 }
 
-// warnNoPaneEnv writes the one warning line of a herdr TabCreate cannot add
-// PaneEnv to, to Warn (os.Stderr when nil). probeErr is the help call's
+// warnNoPaneEnv writes to Warn (os.Stderr when nil) the one warning line for
+// a herdr whose TabCreate cannot add PaneEnv. probeErr is the help call's
 // error, nil when the help just does not list --env. The consequences it
 // names are those of the one entry production passes, AgmsgSelfNameOff.
 func (h Herdr) warnNoPaneEnv(probeErr error) {

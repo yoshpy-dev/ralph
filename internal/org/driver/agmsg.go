@@ -25,14 +25,19 @@ type Agmsg struct {
 	Home string
 }
 
+// AgmsgSelfNameEnv is the variable that turns agmsg's naming of the herdr
+// agent and pane it runs in on or off (see AgmsgSelfNameOff).
+const AgmsgSelfNameEnv = "AGMSG_SELF_NAME"
+
 // AgmsgSelfNameOff is added to the environment of every agmsg script ralph
 // runs (Agmsg.run), winning over a value ralph's own environment has.
 // agmsg 1.5.1 otherwise names the herdr agent and pane it runs in, and that
 // rename loses the <org_id>_<seat_id> name ralph addresses a seat's agent
 // by (finding F3; docs/evidence/agmsg-self-name-2026-10-22.md). The CLI's
 // wiring also passes it as Herdr.PaneEnv, so the panes ralph creates carry
-// it for the agmsg a seat runs itself.
-const AgmsgSelfNameOff = "AGMSG_SELF_NAME=off"
+// it for the agmsg a seat runs itself, and the launch script of a headless
+// director (internal/org/director_cmd.go) exports it.
+const AgmsgSelfNameOff = AgmsgSelfNameEnv + "=off"
 
 // run shells out to `bash <home>/scripts/<script> <args...>` via the
 // injected Runner, through RunEnv with AgmsgSelfNameOff when the Runner
