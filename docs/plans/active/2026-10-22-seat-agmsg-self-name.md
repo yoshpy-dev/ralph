@@ -122,7 +122,8 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
 - [x] Plan reviewed(consult-plan-seatenv: 4 本目を 4a と 4b に分け、案 i の計測と案 x の help の確かめで進めてよい)
 - [x] Plan approved(ユーザーの指示「作成したプランは自動承認します」による。Codex の計画助言 2 件(HIGH: 受け取る側に届くかを見ていない、MEDIUM: 本物の座席の agent の名前を見ていない)は、AC6 の (d) と (e)、AC7、S1、Risks に反映した)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(計測): `docs/evidence/agmsg-self-name-2026-10-22.md`。(a) `--env` は足すだけで D2 はそのまま。(b)〜(d) は期待どおり。(e) は off で名前が残り、対照の on で `agent_not_found` になったので、F3 は S2〜S4 のあとに RESOLVED にできる。(f) 見張りの環境の上乗せは約 65 ms なので ALERT の行は開いたまま。pane の環境は約 1〜2 s 遅く、F4 に効いていた可能性を 4b に渡す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
