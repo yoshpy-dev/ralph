@@ -337,7 +337,20 @@ regression.
   `GOFLAGS` entry and the cancellation the subtest could not see)
 - [x] Plan approved (auto-approved under the user's standing instruction)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 3f8ccd9b: the stub keeps stdout open, sleeps 20 s, then writes
+    `upload-pack-ended`; a `t.Cleanup` of the case fails the subtest if it
+    exists. 20/20 on go1.26.0 and go1.25.8; with a 2 s bound the base stub
+    gives "failed (exit 128)" and the new one "ran past 2s and was
+    stopped"; the `exec.Command` mutant fails on the marker
+  - S2 db1e5ac7: `run_tests` and both READMEs; the suite has 34 checks
+    (24 with a fake go, 10 with the real one), 34/34 on both toolchains,
+    24 plus a SKIP line with no go on PATH; mutants m1 (default last), m2
+    (no `go env`), m3 (base), m4 (command line) fail 11, 3, 11, 13 checks.
+    Deviation from the Risks section: `go env GOFLAGS` does not fail on an
+    invalid value (go1.26 prints `notaflag` with rc 0); `go test` then
+    fails on it as it does today, so the behavior is the same and only that
+    sentence of Risks was wrong
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
