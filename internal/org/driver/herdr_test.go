@@ -1,12 +1,15 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // realWorkspaceCreateEnvelope and realTabCreateEnvelope are captured live
@@ -223,6 +226,375 @@ func TestHerdr_TabCreate_ErrorEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "workspace_not_found") {
 		t.Fatalf("expected error to contain the envelope code, got: %v", err)
+	}
+}
+
+// herdrTabCreateHelp is `herdr tab create --help` of herdr 0.7.5 (run
+// 2026-10-22), with its blank description lines left out.
+const herdrTabCreateHelp = `Create a tab
+
+Usage: herdr tab create [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE_ID>
+      --cwd <PATH>
+      --label <TEXT>
+      --env <KEY=VALUE>
+          Set an environment variable for the launched process
+      --focus
+      --no-focus`
+
+// herdrTabCreateHelpNoEnv is a made-up help of a herdr without --env, whose
+// other flags start with "--env".
+const herdrTabCreateHelpNoEnv = `Usage: herdr tab create [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE_ID>
+      --cwd <PATH>
+      --label <TEXT>
+      --envelope <FILE>
+      --environment <NAME>`
+
+// tabCreateArgv is the argv TabCreate runs for the calls below, before any
+// --env.
+var tabCreateArgv = []string{"herdr", "tab", "create", "--workspace", "w3", "--cwd", "/tmp/cwd", "--label", "worker-1"}
+
+// paneEnvFakeRunner answers `herdr tab create --help` with help and helpErr,
+// or with helpFn when it is set, and every other call with
+// realTabCreateEnvelope. It records each call's argv; mu makes it safe for
+// concurrent TabCreate calls.
+type paneEnvFakeRunner struct {
+	mu        sync.Mutex
+	help      string
+	helpErr   error
+	helpFn    func(ctx context.Context) (string, error)
+	helpCalls int
+	tabCalls  [][]string
+}
+
+func (f *paneEnvFakeRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	argv := append([]string{name}, args...)
+	isHelp := reflect.DeepEqual(argv, []string{"herdr", "tab", "create", "--help"})
+	f.mu.Lock()
+	if isHelp {
+		f.helpCalls++
+	} else {
+		f.tabCalls = append(f.tabCalls, argv)
+	}
+	f.mu.Unlock()
+	if !isHelp {
+		return realTabCreateEnvelope, nil
+	}
+	if f.helpFn != nil {
+		return f.helpFn(ctx)
+	}
+	return f.help, f.helpErr
+}
+
+// tabCreateTwice runs TabCreate through h and through a copy of h held as a
+// HerdrClient-shaped interface, the way org.Org holds it, and checks that
+// both return the pane id of realTabCreateEnvelope.
+func tabCreateTwice(t *testing.T, h Herdr) {
+	t.Helper()
+	var copied interface {
+		TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error)
+	} = h
+	for i, create := range []func(ctx context.Context, workspaceID, cwd, label string) (string, error){h.TabCreate, copied.TabCreate} {
+		got, err := create(context.Background(), "w3", "/tmp/cwd", "worker-1")
+		if err != nil {
+			t.Fatalf("TabCreate #%d: unexpected error: %v", i+1, err)
+		}
+		if got != "w3:p2" {
+			t.Fatalf("TabCreate #%d = %q; want w3:p2", i+1, got)
+		}
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvAddsEnvWhenHelpListsIt pins AC3 of plan
+// 2026-10-22-seat-agmsg-self-name: with a herdr whose `tab create --help`
+// lists --env, every tab create gets `--env AGMSG_SELF_NAME=off` after
+// --label, and the help runs once for a NewHerdr value and its copies.
+func TestHerdr_TabCreate_PaneEnvAddsEnvWhenHelpListsIt(t *testing.T) {
+	f := &paneEnvFakeRunner{help: herdrTabCreateHelp}
+	var warn bytes.Buffer
+	h := NewHerdr(f, AgmsgSelfNameOff)
+	h.Warn = &warn
+
+	tabCreateTwice(t, h)
+
+	want := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	if !reflect.DeepEqual(f.tabCalls, [][]string{want, want}) {
+		t.Fatalf("tab create argv = %v; want %v twice", f.tabCalls, want)
+	}
+	if f.helpCalls != 1 {
+		t.Fatalf("help ran %d times; want 1 for a value and its copy", f.helpCalls)
+	}
+	if warn.Len() != 0 {
+		t.Fatalf("warning = %q; want none", warn.String())
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce pins AC4: with a herdr
+// whose help does not list --env, or whose help fails or times out, the tab
+// is created without --env and the warning is written once, as one line.
+func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
+	tests := []struct {
+		name       string
+		runner     func() *paneEnvFakeRunner
+		probeLimit time.Duration
+		wantReason string
+	}{
+		{
+			name:       "help lists only --envelope and --environment",
+			runner:     func() *paneEnvFakeRunner { return &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv} },
+			wantReason: "herdr tab create has no --env flag",
+		},
+		{
+			name: "help fails",
+			runner: func() *paneEnvFakeRunner {
+				return &paneEnvFakeRunner{help: "unknown option: --help", helpErr: errors.New("herdr: exit status 2:\nunknown option: --help")}
+			},
+			wantReason: "could not check whether herdr tab create has --env ('herdr tab create --help': herdr: exit status 2: unknown option: --help)",
+		},
+		{
+			name: "help lists --env but exits non-zero",
+			runner: func() *paneEnvFakeRunner {
+				return &paneEnvFakeRunner{help: herdrTabCreateHelp, helpErr: errors.New("herdr: exit status 1")}
+			},
+			wantReason: "could not check whether herdr tab create has --env ('herdr tab create --help': herdr: exit status 1)",
+		},
+		{
+			name: "help times out",
+			runner: func() *paneEnvFakeRunner {
+				return &paneEnvFakeRunner{helpFn: func(ctx context.Context) (string, error) {
+					select {
+					case <-ctx.Done():
+						return "", fmt.Errorf("herdr: timed out: %w", ctx.Err())
+					case <-time.After(2 * time.Second):
+						return "", errors.New("fake help: the probe timeout did not end the call")
+					}
+				}}
+			},
+			probeLimit: 50 * time.Millisecond,
+			wantReason: "could not check whether herdr tab create has --env ('herdr tab create --help': herdr: timed out: context deadline exceeded)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.probeLimit > 0 {
+				old := herdrPaneEnvProbeTimeout
+				herdrPaneEnvProbeTimeout = tt.probeLimit
+				t.Cleanup(func() { herdrPaneEnvProbeTimeout = old })
+			}
+			f := tt.runner()
+			var warn bytes.Buffer
+			h := NewHerdr(f, AgmsgSelfNameOff)
+			h.Warn = &warn
+
+			start := time.Now()
+			tabCreateTwice(t, h)
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Fatalf("two TabCreate calls took %v; want well under the fake help's 2 s", elapsed)
+			}
+
+			if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, tabCreateArgv}) {
+				t.Fatalf("tab create argv = %v; want %v twice, with no --env", f.tabCalls, tabCreateArgv)
+			}
+			if f.helpCalls != 1 {
+				t.Fatalf("help ran %d times; want 1, the failure cached", f.helpCalls)
+			}
+			want := "ralph: warning: " + tt.wantReason + ", so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
+				"an agmsg run inside a seat may rename the seat's herdr agent, and ralph may then fail to reach it (agent_not_found); " +
+				"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
+			if warn.String() != want {
+				t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), want)
+			}
+		})
+	}
+}
+
+// TestHerdr_TabCreate_NoPaneEnvRunsNoProbe: without PaneEnv, a literal Herdr
+// and a NewHerdr value run today's argv and never run the help.
+func TestHerdr_TabCreate_NoPaneEnvRunsNoProbe(t *testing.T) {
+	for name, build := range map[string]func(r Runner) Herdr{
+		"literal":   func(r Runner) Herdr { return Herdr{R: r} },
+		"NewHerdr":  func(r Runner) Herdr { return NewHerdr(r) },
+		"empty env": func(r Runner) Herdr { return NewHerdr(r, []string{}...) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &paneEnvFakeRunner{help: herdrTabCreateHelp}
+			var warn bytes.Buffer
+			h := build(f)
+			h.Warn = &warn
+
+			tabCreateTwice(t, h)
+
+			if f.helpCalls != 0 {
+				t.Fatalf("help ran %d times; want 0 with no PaneEnv", f.helpCalls)
+			}
+			if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, tabCreateArgv}) {
+				t.Fatalf("tab create argv = %v; want %v twice", f.tabCalls, tabCreateArgv)
+			}
+			if warn.Len() != 0 {
+				t.Fatalf("warning = %q; want none", warn.String())
+			}
+		})
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvKeepsOrder: each PaneEnv entry becomes one
+// --env, in PaneEnv's order, a repeated key included.
+func TestHerdr_TabCreate_PaneEnvKeepsOrder(t *testing.T) {
+	f := &paneEnvFakeRunner{help: herdrTabCreateHelp}
+	h := NewHerdr(f, "A=1", "B=2", "A=3")
+
+	if _, err := h.TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1"); err != nil {
+		t.Fatalf("TabCreate: %v", err)
+	}
+	want := append(append([]string{}, tabCreateArgv...), "--env", "A=1", "--env", "B=2", "--env", "A=3")
+	if !reflect.DeepEqual(f.tabCalls, [][]string{want}) {
+		t.Fatalf("tab create argv = %v; want %v", f.tabCalls, want)
+	}
+}
+
+// TestNewHerdr_CopiesPaneEnv: NewHerdr keeps its own copy of the entries, so
+// a caller that changes its slice afterwards does not change the panes.
+func TestNewHerdr_CopiesPaneEnv(t *testing.T) {
+	env := []string{"A=1"}
+	h := NewHerdr(&paneEnvFakeRunner{}, env...)
+	env[0] = "A=changed"
+	if !reflect.DeepEqual(h.PaneEnv, []string{"A=1"}) {
+		t.Fatalf("PaneEnv = %v; want [A=1]", h.PaneEnv)
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvLiteralChecksEveryCall: a Herdr built as a
+// literal with PaneEnv has no shared check, so it runs the help, and warns
+// when it cannot add --env, on every call.
+func TestHerdr_TabCreate_PaneEnvLiteralChecksEveryCall(t *testing.T) {
+	for name, tt := range map[string]struct {
+		help      string
+		wantArgv  []string
+		wantLines int
+	}{
+		"help lists --env": {help: herdrTabCreateHelp, wantArgv: append(append([]string{}, tabCreateArgv...), "--env", "X=1")},
+		"no --env":         {help: herdrTabCreateHelpNoEnv, wantArgv: tabCreateArgv, wantLines: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &paneEnvFakeRunner{help: tt.help}
+			var warn bytes.Buffer
+			h := Herdr{R: f, PaneEnv: []string{"X=1"}, Warn: &warn}
+
+			tabCreateTwice(t, h)
+
+			if f.helpCalls != 2 {
+				t.Fatalf("help ran %d times; want 2, one per call", f.helpCalls)
+			}
+			if !reflect.DeepEqual(f.tabCalls, [][]string{tt.wantArgv, tt.wantArgv}) {
+				t.Fatalf("tab create argv = %v; want %v twice", f.tabCalls, tt.wantArgv)
+			}
+			if got := strings.Count(warn.String(), "\n"); got != tt.wantLines {
+				t.Fatalf("warning lines = %d (%q); want %d", got, warn.String(), tt.wantLines)
+			}
+		})
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvCanceledCallerIsNotCached: a help that fails
+// because the caller's ctx has ended is neither cached nor warned about, so
+// the next call checks again.
+func TestHerdr_TabCreate_PaneEnvCanceledCallerIsNotCached(t *testing.T) {
+	f := &paneEnvFakeRunner{helpFn: func(ctx context.Context) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return herdrTabCreateHelp, nil
+	}}
+	var warn bytes.Buffer
+	h := NewHerdr(f, AgmsgSelfNameOff)
+	h.Warn = &warn
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.TabCreate(canceled, "w3", "/tmp/cwd", "worker-1"); err != nil {
+		t.Fatalf("TabCreate with the canceled ctx: %v (the fake tab create ignores ctx)", err)
+	}
+	if _, err := h.TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1"); err != nil {
+		t.Fatalf("TabCreate: %v", err)
+	}
+
+	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, withEnv}) {
+		t.Fatalf("tab create argv = %v; want %v, then %v", f.tabCalls, tabCreateArgv, withEnv)
+	}
+	if f.helpCalls != 2 {
+		t.Fatalf("help ran %d times; want 2, the canceled one not cached", f.helpCalls)
+	}
+	if warn.Len() != 0 {
+		t.Fatalf("warning = %q; want none", warn.String())
+	}
+}
+
+// TestHerdr_TabCreate_PaneEnvConcurrentCallsCheckOnce: TabCreate calls that
+// run at the same time on copies of one NewHerdr value run the help once and
+// all get --env.
+func TestHerdr_TabCreate_PaneEnvConcurrentCallsCheckOnce(t *testing.T) {
+	f := &paneEnvFakeRunner{helpFn: func(context.Context) (string, error) {
+		time.Sleep(20 * time.Millisecond)
+		return herdrTabCreateHelp, nil
+	}}
+	h := NewHerdr(f, AgmsgSelfNameOff)
+
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func(c Herdr) {
+			defer wg.Done()
+			_, err := c.TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1")
+			errs <- err
+		}(h)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("TabCreate: %v", err)
+		}
+	}
+
+	if f.helpCalls != 1 {
+		t.Fatalf("help ran %d times; want 1", f.helpCalls)
+	}
+	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	for _, argv := range f.tabCalls {
+		if !reflect.DeepEqual(argv, withEnv) {
+			t.Fatalf("tab create argv = %v; want %v", argv, withEnv)
+		}
+	}
+	if len(f.tabCalls) != n {
+		t.Fatalf("tab create ran %d times; want %d", len(f.tabCalls), n)
+	}
+}
+
+// TestHerdrHelpEnvFlag: --env counts only as a whole flag.
+func TestHerdrHelpEnvFlag(t *testing.T) {
+	for help, want := range map[string]bool{
+		"      --env <KEY=VALUE>":             true,
+		"  -e, --env <KEY=VALUE>":             true,
+		"Usage: herdr tab create [--env KEY]": true,
+		"--env=KEY=VALUE":                     true,
+		"--label <TEXT>\n--env\n--focus":      true,
+		"      --envelope <FILE>":             false,
+		"      --environment <NAME>":          false,
+		"      --env-file <PATH>":             false,
+		"      --no-env":                      false,
+		"":                                    false,
+	} {
+		if got := herdrHelpEnvFlag.MatchString(help); got != want {
+			t.Errorf("herdrHelpEnvFlag.MatchString(%q) = %v; want %v", help, got, want)
+		}
 	}
 }
 

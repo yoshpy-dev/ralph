@@ -15,7 +15,7 @@ import (
 // ~/.agents/skills/agmsg). Every method below shells out to
 // `bash <home>/scripts/<script> <positional args...>`, matching the real
 // script signatures exactly, with AGMSG_SELF_NAME=off added to the script's
-// environment when R implements EnvRunner (agmsgSelfNameOff).
+// environment when R implements EnvRunner (AgmsgSelfNameOff).
 type Agmsg struct {
 	R Runner
 	// Home is the resolved agmsg home directory (see ResolveAgmsgHome).
@@ -25,15 +25,17 @@ type Agmsg struct {
 	Home string
 }
 
-// agmsgSelfNameOff is added to the environment of every agmsg script ralph
+// AgmsgSelfNameOff is added to the environment of every agmsg script ralph
 // runs (Agmsg.run), winning over a value ralph's own environment has.
 // agmsg 1.5.1 otherwise names the herdr agent and pane it runs in, and that
 // rename loses the <org_id>_<seat_id> name ralph addresses a seat's agent
-// by (finding F3; docs/evidence/agmsg-self-name-2026-10-22.md).
-const agmsgSelfNameOff = "AGMSG_SELF_NAME=off"
+// by (finding F3; docs/evidence/agmsg-self-name-2026-10-22.md). The CLI's
+// wiring also passes it as Herdr.PaneEnv, so the panes ralph creates carry
+// it for the agmsg a seat runs itself.
+const AgmsgSelfNameOff = "AGMSG_SELF_NAME=off"
 
 // run shells out to `bash <home>/scripts/<script> <args...>` via the
-// injected Runner, through RunEnv with agmsgSelfNameOff when the Runner
+// injected Runner, through RunEnv with AgmsgSelfNameOff when the Runner
 // implements EnvRunner and through Run otherwise. Centralizing the
 // script-path join here means every method's stub test asserts the same
 // "bash <home>/scripts/<script>" prefix, catching any future drift in one
@@ -42,7 +44,7 @@ func (a Agmsg) run(ctx context.Context, script string, args ...string) (string, 
 	scriptPath := filepath.Join(a.Home, "scripts", script)
 	full := append([]string{scriptPath}, args...)
 	if er, ok := a.R.(EnvRunner); ok {
-		return er.RunEnv(ctx, []string{agmsgSelfNameOff}, "bash", full...)
+		return er.RunEnv(ctx, []string{AgmsgSelfNameOff}, "bash", full...)
 	}
 	return a.R.Run(ctx, "bash", full...)
 }

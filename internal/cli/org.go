@@ -351,8 +351,10 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		Config:   orgCfg,
 		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(resolvedStateDir)),
 		Receipts: org.NewReceiptStoreAtPath(org.ReceiptsPathIn(resolvedStateDir)),
-		Herdr:    driver.Herdr{R: runner},
-		Agmsg:    driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
+		// The seat panes spawn creates carry AGMSG_SELF_NAME=off, so an agmsg
+		// a seat runs itself cannot rename its herdr agent (finding F3).
+		Herdr: driver.NewHerdr(runner, driver.AgmsgSelfNameOff),
+		Agmsg: driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
 		// Inbox, EscalationsPath, and DesktopNotify are set below by
 		// wireOrgInbox, which newOrgEscalateFallbackRuntime shares.
 		InboxPollInterval: orgInboxPollIntervalOverride,
