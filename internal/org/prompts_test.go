@@ -962,13 +962,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 }
 
 // TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase pins the reviewer
-// side of AC8 of plan docs/plans/active/2026-10-13-org-gate.md: a passing
-// RESULT carries, as header lines, the HEAD: and BASE: the reviewer verified
-// (spec FR-7), says how to find the default branch, and says ralph does not
-// read the two lines; the example RESULT parses with one GATE: pass, one
-// HEAD: and one BASE: header, and the report contract names them. It also
-// pins AC2 of plan 2026-10-20-org-report-names: the contract names the report
-// file, with the org id and the seat id filled in.
+// side of AC8 of plan org-gate: a passing RESULT carries, as header lines,
+// the HEAD: and BASE: the reviewer verified (spec FR-7), says how to find the
+// default branch, and says ralph does not read the two lines; the example
+// RESULT parses with one GATE: pass, one HEAD: and one BASE: header, and the
+// report contract names them.
 func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 	mission, found := markdownSection(text, "## ミッション")
@@ -1024,6 +1022,25 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 	if item, ok := markdownItem(contract, "leader へは RESULT"); !ok || !containsPhrase(item, "`GATE: pass` と、検証した commit と base の `HEAD:`・`BASE:` のヘッダ") {
 		t.Errorf("expected the reviewer's report contract to name the HEAD: and BASE: headers of a passing RESULT, got item:\n%s", item)
 	}
+}
+
+// reviewerReportFilePrefix starts the file name of the reviewer seat's report
+// (prompts/reviewer.md, レポート契約), the name docs/reports/README.md's
+// Suggested naming list writes without the directory.
+const reviewerReportFilePrefix = "review-"
+
+// reviewerReportPrefix starts the path of the reviewer seat's report under
+// defaultReportDir. scripts/check-sync.sh excludes it as a prefix, so a
+// feature org's gate does not report the file as ROOT_ONLY.
+const reviewerReportPrefix = defaultReportDir + "/" + reviewerReportFilePrefix
+
+// TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport pins AC2 of plan
+// org-report-names: the first item of the reviewer's report contract names
+// the report file, with the org id and the seat id filled in; two reviewer
+// seats of one org name different files; and both names start with
+// reviewerReportPrefix, the prefix scripts/check-sync.sh excludes.
+func TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
 
 	// The first item of the contract names the report file. Two reviewer
 	// seats of one org must write different files, and both names must start
