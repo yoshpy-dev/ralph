@@ -73,7 +73,7 @@
 
 ## 4. 確かめていないこと
 
-- ec852215 と後の記録のコミットのあとに、run-verify の全体は打ち直していない。ec852215 はテスト 1 本の追加で、両方の toolchain と D3 の写しの `internal/cli` の全体(813 本が通過)で確かめた。CI の verify(ubuntu)が HEAD で全体を走らせる
+- ec852215 と後の記録のコミットのあとに、run-verify の全体は打ち直していない。ec852215 はテスト 1 本の追加で、両方の toolchain と D3 の写しの `internal/cli` の全体(813 本が通過)で確かめた。a41bad68 では `go test -count=1 -timeout 30m ./internal/cli/` が通った(252.8 秒、load average 3.4〜5.6)。CI の verify(ubuntu)が HEAD で全体を走らせる
 - Linux では、手元で走らせていない(CI が見る)
 - 実際の project での `ralph upgrade` は打っていない。pack が届くことは `internal/upgrade/replaceplan.go` とその試験で読んだ範囲
 - 負荷の下での live の regate と試行は打ち直していない(計画の Non-goals)
