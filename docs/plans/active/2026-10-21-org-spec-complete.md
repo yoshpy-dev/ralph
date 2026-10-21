@@ -124,7 +124,7 @@ docs だけなので、戻すときはこの PR を revert する。
 - [x] Plan reviewed(Codex の計画助言 1 件、HIGH: 試行の所見と食い違う項目を `[ ]` に残す規則を足した)
 - [x] Plan approved(ユーザーの常設の指示により自動承認、2026-10-21)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(S1 根拠の表 1a5bc2ee、S2 仕様の印と Status bc9fe9e0。S1 の implementer は run-verify のあとコミットの前に止まったので、表を確かめてから手でコミットした)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
