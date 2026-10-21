@@ -266,7 +266,12 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
 - [x] Plan reviewed (Codex plan advisory: one MEDIUM, applied: the details cell also escapes `\`, `` ` ``, and `<`, with AC3 cases and AC3b; consult-plan-recordtext: proceed)
 - [x] Plan approved (auto-approved per the user's standing instruction of 2026-10-11)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 (F12) 19fad46d: `truncateForDetails` cuts at a character boundary, with its tests
+  - S2 (F14) a88e7382: `escapeReportCell` in `BuildOrgReport`, with its tests
+  - S3 3c688ff3: `reviewerReportFilePrefix` and `reviewerReportPrefix` move to `prompts_test.go`, and `TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport` takes the 6 report-name checks (tests only)
+  - S4 f7f2644b: records. Deviations: the F12 and F14 tech-debt rows strike the trigger cell too, as the F8 row does; their evidence cells add this plan's active path, because the plan-reference check fails on the archive path while the plan is in flight (`/pr`'s `archive-plan.sh` rewrites it); the new Go comments write "pipe" as a word; spec line 141 gets one sentence after its 。
+  - Out of scope, left as is: the doc comment of `TestReportNames_DocsMatchConstants` (`internal/org/report_names_sync_test.go`) still names a plan by its date-slug form
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
