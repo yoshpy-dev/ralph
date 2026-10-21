@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
@@ -1269,6 +1270,116 @@ func TestOrgSend_RawAndUnconfirmed_DetailsPrefixOrder(t *testing.T) {
 	wantPrefix := "raw=true submit_unconfirmed=true "
 	if !strings.HasPrefix(last.Details, wantPrefix) {
 		t.Fatalf("expected Details to start with %q, got %q", wantPrefix, last.Details)
+	}
+}
+
+// TestTruncateForDetails_CutsAtACharacterBoundary pins the cut of a `sent`
+// event's Details (trial finding F12): the kept prefix is at most
+// sendDetailsMaxLen (200) bytes, and when byte 200 falls inside a
+// multi-byte character the cut moves back to that character's start, so a
+// valid UTF-8 body never leaves half a character in the manifest. Each case
+// name gives the layout as "<n> ASCII bytes then <character>", so the
+// character starts at zero-based byte n. The last case is not valid UTF-8:
+// there the step back stops after utf8.UTFMax-1 bytes.
+func TestTruncateForDetails_CutsAtACharacterBoundary(t *testing.T) {
+	const suffix = "...(truncated)"
+	const threeByte = "あ" // U+3042, 3 bytes in UTF-8
+	const fourByte = "𠀋"  // U+2000B, 4 bytes in UTF-8
+	if len(threeByte) != 3 || len(fourByte) != 4 {
+		t.Fatalf("test characters have the wrong UTF-8 length: %d, %d", len(threeByte), len(fourByte))
+	}
+	ascii := func(n int) string { return strings.Repeat("a", n) }
+	tail := ascii(20) // keeps every truncated input past 200 bytes
+
+	tests := []struct {
+		name       string
+		in         string
+		wantPrefix string
+		truncated  bool
+		validUTF8  bool
+	}{
+		{"199 ASCII bytes then a 3-byte character (split at 200, cut back to 199)", ascii(199) + threeByte + tail, ascii(199), true, true},
+		{"197 ASCII bytes then a 3-byte character (ends at 200, kept)", ascii(197) + threeByte + tail, ascii(197) + threeByte, true, true},
+		{"196 ASCII bytes then a 4-byte character (ends at 200, kept)", ascii(196) + fourByte + tail, ascii(196) + fourByte, true, true},
+		{"197 ASCII bytes then a 4-byte character (split at 200, cut back to 197)", ascii(197) + fourByte + tail, ascii(197), true, true},
+		{"198 ASCII bytes then a 4-byte character (split at 200, cut back to 198)", ascii(198) + fourByte + tail, ascii(198), true, true},
+		{"199 ASCII bytes then a 4-byte character (split at 200, cut back to 199)", ascii(199) + fourByte + tail, ascii(199), true, true},
+		{"200 ASCII bytes then a 4-byte character (starts at 200, cut at 200)", ascii(200) + fourByte + tail, ascii(200), true, true},
+		{"250 ASCII bytes (cut at 200)", ascii(250), ascii(200), true, true},
+		{"200 ASCII bytes (unchanged)", ascii(200), ascii(200), false, true},
+		{"197 ASCII bytes then a 3-byte character, 200 bytes in all (unchanged)", ascii(197) + threeByte, ascii(197) + threeByte, false, true},
+		{"190 ASCII bytes then 20 continuation bytes, not valid UTF-8 (step back stops at 197)", ascii(190) + strings.Repeat("\x80", 20), ascii(190) + strings.Repeat("\x80", 7), true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := utf8.ValidString(tc.in); got != tc.validUTF8 {
+				t.Fatalf("test input: utf8.ValidString = %v, want %v", got, tc.validUTF8)
+			}
+			got := truncateForDetails(tc.in)
+			want := tc.wantPrefix
+			if tc.truncated {
+				want += suffix
+			}
+			if got != want {
+				t.Fatalf("truncateForDetails(%q)\n= %q\nwant %q", tc.in, got, want)
+			}
+			prefix := got
+			if tc.truncated {
+				prefix = strings.TrimSuffix(got, suffix)
+				if minLen := sendDetailsMaxLen - (utf8.UTFMax - 1); len(prefix) < minLen {
+					t.Errorf("expected the cut at most utf8.UTFMax-1 bytes before %d (at least %d bytes kept), got %d", sendDetailsMaxLen, minLen, len(prefix))
+				}
+			}
+			if len(prefix) > sendDetailsMaxLen {
+				t.Errorf("expected at most %d bytes kept, got %d", sendDetailsMaxLen, len(prefix))
+			}
+			if tc.validUTF8 && !utf8.ValidString(got) {
+				t.Errorf("expected valid UTF-8 for a valid UTF-8 input, got %q", got)
+			}
+		})
+	}
+}
+
+// TestOrgSend_JapaneseBodyOver200Bytes_DetailsStayValidUTF8 is trial
+// finding F12 through Send: a typed message whose Japanese body runs past
+// sendDetailsMaxLen bytes, with byte 200 inside a character, leaves a
+// `sent` event whose Details, read back from the manifest, are valid UTF-8
+// with no U+FFFD and end in the truncation marker. A cut that split the
+// character would reach the manifest as invalid bytes, which JSON encoding
+// writes as U+FFFD.
+func TestOrgSend_JapaneseBodyOver200Bytes_DetailsStayValidUTF8(t *testing.T) {
+	o, _, _ := testOrg(t)
+	if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn failed: %+v", r)
+	}
+
+	msg := "TYPE: TASK\nTASK_ID: t-1\n\n" + strings.Repeat("日本語の本文を記録する。", 10)
+	if len(msg) <= sendDetailsMaxLen || utf8.RuneStart(msg[sendDetailsMaxLen]) {
+		t.Fatalf("test message must run past %d bytes with byte %d inside a character, got %d bytes", sendDetailsMaxLen, sendDetailsMaxLen, len(msg))
+	}
+	result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg})
+	if result.Err != nil {
+		t.Fatalf("expected the send to succeed, got %v", result.Err)
+	}
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSent {
+		t.Fatalf("expected last event sent, got %q", last.Event)
+	}
+	details := last.Details
+	if !utf8.ValidString(details) {
+		t.Errorf("expected valid UTF-8 Details, got %q", details)
+	}
+	if strings.ContainsRune(details, utf8.RuneError) {
+		t.Errorf("expected no U+FFFD in Details (the bytes of a split character), got %q", details)
+	}
+	const suffix = "...(truncated)"
+	if !strings.HasSuffix(details, suffix) {
+		t.Fatalf("expected Details to end in %q, got %q", suffix, details)
+	}
+	if kept := strings.TrimSuffix(details, suffix); !strings.HasPrefix(msg, kept) || len(kept) > sendDetailsMaxLen {
+		t.Errorf("expected the kept text to be a prefix of the message of at most %d bytes, got %q (%d bytes)", sendDetailsMaxLen, kept, len(kept))
 	}
 }
 
