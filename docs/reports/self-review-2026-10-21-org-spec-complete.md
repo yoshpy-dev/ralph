@@ -1,67 +1,78 @@
 # Self-review report: org-spec-complete
 
 - Date: 2026-10-21
-- Plan: `docs/plans/active/2026-10-21-org-spec-complete.md`(パイプライン cycle 1)
-- Reviewer: reviewer サブエージェント(`/self-review`)
-- Scope: `git diff 765bcc46...HEAD`(HEAD 264814a4、3 ファイル、+315/-34)。docs だけの変更で、コードは含まない。内訳は仕様 `docs/specs/2026-10-07-org-multi-org-director.md`(+76/-34)、根拠の表 `docs/evidence/org-spec-evidence-2026-10-21.md`(新規 108 行)、計画の Progress の 1 行。diff の品質だけを見た。仕様適合、テストの実行、静的解析、文書のずれは `/verify`・`/test`・`/sync-docs` に任せた。
+- Plan: `docs/plans/active/2026-10-21-org-spec-complete.md`(パイプライン cycle 1。直しのあとの再レビュー)
+- Reviewer: reviewer サブエージェント(`/self-review`、2 回目)
+- 前の版: 7bf4bbb9 の report(M1、L1〜L5、I1〜I3)。原文は `git show 7bf4bbb9:docs/reports/self-review-2026-10-21-org-spec-complete.md`。計画の Progress が「M1・L1」と ID で指すので、この版は ID を引き継ぎ、状態の列を足した。新しい所見は N1〜N5
+- Scope: `git diff 765bcc46...HEAD`(HEAD c56b70a4、5 ファイル、docs だけ)。直しの commit 9733eb31(仕様 +11/-10、根拠の表 +13/-12、tech-debt +1)と計画の c56b70a4(+2/-1)を重点に見た。diff の品質だけを見た。仕様適合、テストの実行、静的解析、文書のずれは `/verify`・`/test`・`/sync-docs` に任せた
 
 ## Evidence reviewed
 
-- 全文を読んだ: 根拠の表 108 行、計画 131 行、仕様の diff 全体(`-U0` と、変えた行ごとの語単位の差分)
-- 仕様の変更が範囲に収まるか(計画の AC7): base と HEAD の仕様を行の集合で比べた。base の行のうち HEAD に同じ形で残らないのは 34 行で、内訳は印の `[ ]` から `[x]` への 1 文字の変更が 20、Rollout の PR 番号が 9、文を直した行が 5(7c-2 の注、8a-3b の注、8a-3a の注、8b-1 の注、FR-12 の注)。5 行の語単位の差分は、「checkbox は付けない」の類の文の書き換え、8b-1 の注の「121 行」「120 行」4 か所を受け入れ条件の文言に置き換えた分、のどちらかだけだった。要件・設計・受け入れ条件の文は変わっていない。足した行は Status の節 23 行と「印(2026-10-21)」の注 19 行
-- 印と根拠の表の判定: 仕様の 32 個の checkbox を、表の 31 行(FR-12 は表の対象外)と 1 つずつ照らした。`[x]` は 21(表の 20 と、前から `[x]` の FR-12)、`[ ]` は 11 で、表の「判定の数」と一致した。`[ ]` の 11 項目の F 番号は、Status の節が挙げる F3、F4、F6、F7、F10、F13、D-F3 の全部と、Open questions の 2 つに重なる
-- 注と表の突き合わせ: 19 の注を、表の「根拠」「注」の列と、試行の証拠(`docs/evidence/org-trial-2026-10-20.md` の F4・F6・F7・F10 の本文、Trial deviations、Not verified)と、仕様の該当の注(FR-6 の 6 段目の後半、FR-8 の 8a-3a、FR-9 の 8a-1 と 8a-2、FR-10 の 8b-1、4 段目の計画の「`rejected` は書かない」)に当たって照らした。数字と固有名(「4 回目の spawn」「4 回」「49 分後」「30 件」「`GOFLAGS=-timeout=30m`」「`guarded`」)は合った
-- 根拠の表の記述の確かめ(読むだけ): 表の 65 個のテスト名を `git grep -n 'func <名前>(' -- '*.go'` で数え、101 か所の参照すべてで 1 件ずつ、表が書く `_test.go` のパスの中に見つかった。表が指す証拠のファイル 12 本は存在する。試行の節の見出し(Two orgs、Merges、Gates、Stop and restart の Part 1 と Part 2、Interventions、Trial deviations、Approval wait per feature plan、The director's handling of the inbox)はすべて実在する。tech-debt の行の名前 15 個は、`docs/tech-debt/README.md` の行の最初のセルの先頭に 1 件ずつある。Open questions の 1 つ目と 2 つ目は、FR-10 と NFR の注が引く文と同じ。`.claude/skills/org/SKILL.md` に「## 機能ごとの org」があり、「編成パターン」「Parallel」「Leaded」は 0 件。`.claude/skills/director/SKILL.md` に「### merge と auto_merge」がある。`scripts/verify.local.sh` が `check-sync.sh` と `check-skill-sync.sh` を走らせる
-- 数の確かめ: PR 28 本(仕様 1、1 段目 1、2 段目 2、3 段目 1、4 段目 2、5 段目 1、6 段目 2、7 段目 4、8a 5、8b 4、9 段目 2、機能の PR 2、#244 の 1)は Status、Rollout、表の「段ごとの PR」で一致。表の「NFR 入れ方」の 25 本は、`docs/plans/archive/` の `2026-10-07` 以降の org の計画 24 本と `2026-10-20-secret-scan-test-tmp` の計 25 本に、self-review・verify・test・sync-docs の 4 つの report がすべてあることで裏づく(欠けは 0)。最新のタグは v5.1.0(2026-08-24)で、Status の「release はまだ切っていない」は今日は正しい
-- F4 の推定の元: `internal/org/verbs_all.go` の `StopAll` は `Roster(...)` の `s.Active` だけを止め、`internal/org/reserve.go` の `TotalActiveSeats` も同じ `s.Active` だけを数え、`internal/org/seat.go` の `activeEvents` は `spawn_started`・`spawn_step`・`spawned` の 3 つで `spawn_failed` を含まない
-- `git diff --check`(出力なし)、追加行への `/Users/`・`/home/`・メールの形・login name・`ghp_`・`sk-`・`AKIA`・`xox` の grep(0 件)、3 ファイルの U+FFFD(0 件)、`./scripts/plan-visual.sh digest`(`98781cfa6662`、承認時と同じ。S2 のあとの計画の差は Progress の 1 行だけ)
-- 確かめていない: テストの本文(名前と置き場所だけを確かめた。表が「各テストの doc comment と本文の一部を読んだ」と書くとおりで、私もそれ以上は読んでいない)、`gh pr view` での PR の状態(表の記録を信じ、数の整合だけ見た)、F1〜F14 のうち F4・F6・F7・F10 以外の本文、natural-japanese の lint(hook が書き込み時に回す)
+- 直しの diff を全部読んだ: `git show 9733eb31`、`git diff 7bf4bbb9 HEAD`、`git show c56b70a4`。あわせて根拠の表 109 行、計画 132 行、仕様の Status と印の注 20 個を HEAD で読んだ
+- 仕様の変更が範囲に収まるか(計画の AC7): base と HEAD の仕様を行の集合で比べた。base の行のうち HEAD に同じ形で残らないのは 33 行で、内訳は印の 1 文字の変更 19、Rollout の PR 番号 9、文を直した行 5。足した行は 70 で、Status 17、「印(2026-10-21)」の注 20、印の行 19、Rollout 9、文を直した行 5。範囲外の行は 0。直しの commit が触れた「文を直した行」は 7c-2 の注の 1 行だけで、語単位の差は「それと 」から「このほかに、」への 1 か所だった
+- 印と根拠の表の判定: 仕様の 32 個の checkbox のうち FR-12 を除く 31 個を、表の判定の列とスクリプトで 1 つずつ照らした(31 件すべて一致)。仕様は `[x]` が 20(表の 19 と、前から `[x]` の FR-12)、`[ ]` が 12 で、表の「判定の数」(19 と 12)、Status の「12 項目」と合う。Status の所見の一覧(F3、F4、F7、F10、F13、D-F3、「leader への ALERT」)は、`[ ]` の 10 項目の注が挙げる所見の和集合と同じで、F6 は FR-6 の注に「関連する所見」として 1 回出るだけ
+- 新しい tech-debt の行を、根拠と照らした。`docs/evidence/org-trial-2026-10-20/watch.log` の `failed to ALERT leader` は 10 行で、`scope_change` 7、`liveness` 2、`stall` 1、すべて `bash: timed out: context deadline exceeded`。`internal/org/watch.go` の `sendAlert` は `callWithTimeout` の下で `SendWatchdogAlert` を打ち、失敗を stderr に書いて続ける。`internal/org/verbs.go` の `defaultDriverCallTimeout` は `10 * time.Second`。`checkDeadman` は、座席が subject の alert を leader の活動で消し、期限か leader が subject のときに escalate する(行の Impact は座席が subject の話として合う)。行は 5 列、記録された所見の名前は表と仕様の 3 か所で行の先頭と一致、16 進の値・pane の id・`/Users/` なし
+- F4 の推定の元を HEAD で読み直した: `internal/org/reserve.go` の `RunningOrgs`(active な座席、閉じていない workspace、予約のどれかがある org を数える)と `TotalActiveSeats`(`s.Active` だけを数える)、`internal/org/seat.go` の `activeEvents`(`spawn_failed` を含まない)。AC3 の注と、FR-3 の注の「`max_total_seats` の数にも入らないはず」は、この 3 つと合う
+- 範囲外の確かめ(読むだけ): 最新のタグは v5.1.0(2026-08-24)で、Status の release の文は今日正しい。`./scripts/plan-visual.sh digest` は `98781cfa6662` で承認時と同じ(Progress の行は digest に入らない)。`git diff --check origin/main...HEAD` は出力なし。直しの追加行に `/Users/`・`ghp_`・`sk-`・`AKIA`・`xox`・10 桁以上の 16 進の並びは 0 件、U+FFFD は 0 件。テスト名は、ブランチの差に `.go` が 0 本なので cycle 1 の照合(65 個、101 か所)がそのまま成り立つ
+- `/pr` の archive が計画の `docs/plans/active/` のリンクを書き換えるのは `docs/tech-debt/README.md` だけで(`.claude/skills/pr/SKILL.md` の 8、前例は 7e05e368)、新しい行の `docs/plans/active/2026-10-21-org-spec-complete.md` は archive の commit で直る。根拠の表 3 行目の同じパスは直らないが、前例の `docs/evidence/org-trial-2026-10-20.md` の 3 行目も `plans/active/` のままなので、所見にしない
+- 確かめていない: テストの本文(名前と置き場所だけ)、`gh pr view` での PR の状態(表の記録を信じた)、試行の本文の F6・F7 以外の所見、natural-japanese の lint(hook が書き込み時に回す)
 
 ## Findings
 
 <!-- Area recommended values: naming, readability, unnecessary-change, typo,
      null-safety, debug-code, secrets, exception-handling, security, maintainability -->
 
+### 前の版の所見の状態
+
+| ID | Severity | 要点 | 状態 | 直しの確認 |
+| --- | --- | --- | --- | --- |
+| M1 | MEDIUM | F4 の推定が FR-2・受け入れ条件 2・NFR では `[ ]` の理由なのに、FR-3 と受け入れ条件 3 では印の注がないまま `[x]`。表の F6 の行と「確かめていないこと」も FR-3 をめぐって引き合っていた | 解決(方針 (b)) | FR-3 を `[ ]` にした(仕様 61 行)。注(66 行)は、leader への ALERT の失敗 10 回(`scope_change` が 7 回、原因は調べていない)と、F4 の座席が `max_total_seats` の数に入らないはず(推定、再現していない)を書く。表は 37 行に「leader への ALERT」の行を足し、23 行(F4)に `max_total_seats` と `max_orgs` の扱い、49 行(FR-3)、104・105 行(確かめていないこと)を直した。受け入れ条件 3 は `[x]` のままで、注(152 行)が、`RunningOrgs` は閉じていない workspace と予約でも org を数えるので F4 の org も `max_orgs` に入る、と理由を書く。コードと合う。数は上の Evidence のとおり一致 |
+| L1 | LOW | FR-6 の注が F6 を `[ ]` の理由に並べるが、F6 は FR-6 のどの文とも食い違わない | 解決 | FR-6 の注(92 行)は F13 から始まり、F6 は「関連する所見。FR-6 の文とは食い違わない」。表 25 行の F6 は「いいえ。…」で始まり、FR-3 に関わる ALERT の失敗は 37 行の別の行に分けた。Status の一覧から F6 が消えた |
+| L2 | LOW | Status の release の文に日付がない | 解決 | 仕様 24 行が「2026-10-21 の時点で最新のタグは v5.1.0(2026-08-24)で…」になった。`git tag` と合う |
+| L3 | LOW | 「この系列」の指す先が仕様にない | 解決(N1 が残る) | 「この系列」は消えた(仕様 22 行)。ただし直しの文言「この PR のあと」の「この PR」も、仕様に番号がない(N1) |
+| L4 | LOW | 表の「このブランチの run-verify も通った」が確かめられない | 解決 | 表 61 行から消え、`verify.local.sh` と CI の説明だけが残る |
+| L5 | LOW | 日本語の 4 点((a) 表 5 行の「食い違う」の定義、(b)「(状態の説明)」、(c)「合成の根拠で」、(d) 7c-2 の注の「それと」) | 解決 | (a) 表 5 行が「項目の文が起きないと言っていることが試行で起きたか、…回り道が要ったことで」になった。読める(「起きたか」と「要ったこと」の述語が不ぞろいなだけ)。(b) 仕様 137 行が「(NFR の「状態の説明」)」。(c) 仕様 148 行が「別々のテストで確かめた」で、「合成の根拠」は表 63 行の注に残る。(d) 仕様 102 行が「このほかに、」 |
+| I1 | INFO | AC3 の注が計画を完全なパスで指す。「`start --plan` の事前の検査は何も書かずに断る」の決定が仕様にない | 一部解決 | パスはファイル名だけになった(仕様 152 行)。決定が仕様にない点は残るが、AC7 と引き合うので系列の PR に回す、は cycle 1 のとおり。対応不要 |
+| I2 | INFO | 「28 本」「25 本」の数え方 | 解決 | Status 5 行は「関係する PR は次の 28 本」、表 62 行は「関係する PR 28 本のうち…25 本」。28 は、仕様 1、9 段 24、試行の機能の PR 2、#244 の 1。25 は 24 と #244 |
+| I3 | INFO | AC1 の `[x]` の基準 | 対応不要のまま | M1 の直しで基準を締めた対象は F4 の推定と ALERT で、AC1(3 つの org の表示)に関わらない |
+
+### 直したあとの新しい所見
+
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| MEDIUM (M1) | maintainability(記録の主張) | F4 の同じ推定が、FR-2 では `[ ]` の理由になり、FR-3 では印を変えない扱いになっていて、FR-3 と受け入れ条件 3 の `[x]` に付く既知の未確認が仕様から読めない。FR-2、受け入れ条件 2、NFR 安全の不変条件は、「`spawn_failed` と記録されたまま動く座席を `stop --all` は止めないはず(コードからの推定、再現していない)」を理由に `[ ]` にした。一方、同じ座席を `max_total_seats` が数えないこと(`TotalActiveSeats` も同じ `s.Active` で数える)は、表の「確かめていないこと」の 2 つ目の項目に「FR-3 の印はこの推定では変えていない」と書かれただけで、理由は書かれていない。FR-3 の 3 つ目の項目「範囲の外への変更は、今の watchdog の検知(ALERT)で知らせる」についても、表の F6 の行は「検知は動いて ALERT を上げた」と読んで `[x]` を支える一方、「確かめていないこと」の 3 つ目は「FR-3 の範囲の外への変更の知らせは、この ALERT に頼る」と書き、同じ表の中で 2 つの記述が引き合う(試行の `watch.log` では leader への ALERT の失敗 10 回のうち 7 回が `scope_change`。`scope_change` の escalation は 13 件で、人への通知は 1 件を除いて shim に残る。その 1 件(03:48:26Z、doctor-escape の leader)が、原因を調べていない F13 そのもの)。仕様の FR-3 と受け入れ条件 3 の項目には、FR-2 や受け入れ条件 3 の `rejected` の注のような印の注が 1 つもない | 仕様 60 行(FR-2 の注)と 61 行(FR-3、注なしの `[x]`)、149〜151 行(受け入れ条件 2 の注と、受け入れ条件 3 の `rejected` の注。F4 の座席の数え方には触れない)。表 47 行(FR-2)、48 行(FR-3 の「注」の列)、103・104 行(確かめていないこと)。`internal/org/reserve.go` の `TotalActiveSeats`、`internal/org/verbs_all.go` の `StopAll`、`internal/org/seat.go` の `activeEvents`。`docs/evidence/org-trial-2026-10-20/watch.log` の `failed to ALERT leader` 10 行(うち `scope_change` が 7 行) | 次のどちらかを、`/verify` の前に決める。(a) FR-3 の項目の下に印の注を 1 つ足す。「`[x]`。次の 2 つは確かめていない: `spawn_failed` と記録されて動く座席が `max_total_seats` の数に入らないはず(FR-2 と同じ推定。再現していない)。試行の leader への ALERT の失敗 10 回のうち 7 回は `scope_change` で、原因は調べていない」。受け入れ条件 3 の注にも 1 句足す。(b) 推定で FR-2 を `[ ]` にしたのと同じ基準で FR-3 と受け入れ条件 3 も `[ ]` にし、表の判定の数(20 と 11)と Status の「11 項目」を直す。どちらでも、表の F4 の行の「FR-3 の印は…変えていない」に、変えない理由を 1 文足す |
-| LOW (L1) | readability(根拠の言い方) | FR-6 の注は、F6 を FR-6 が `[ ]` である理由に並べるが、表の F6 の行の説明は、FR-6 のどの文とも食い違わないことを示している。F6 の「食い違う」は「はい(FR-6)」で始まるが、続けて「FR-6 は、見張りが人の経路へ直接送るものとして期限の切れた受信箱の件を挙げる。試行では期限の切れた件は 0 件で、人へ直接届いたのはパルスの escalation だった」と書く。FR-6 に、パルスの escalation を director か受信箱に通すと言う文はない(仕様 41 行は、人に届くのは watchdog のデッドマンだと今の姿を書き、FR-9 の director の仕事の列にも入っていない)。FR-6 を `[ ]` にする根拠は、F13(「通知を試したこと、人が受け取ったこと、座席を止めたことは、別々に記録する」という FR-6 の 6 つ目の項目に直接反する)だけで足りる。注と Status の「食い違う項目」を読む人は、F6 がどの文に反するのかを探すことになる | 仕様 91 行(FR-6 の注)、20 行(Status)。表 25 行(F6 の行)。仕様 84〜88 行(FR-6 の項目) | FR-6 の注を F13 から始め、F6 は「関連する所見(期限の切れた件ではなく、パルスの escalation が受信箱を通らなかった。設計の穴で、FR-6 の文とは食い違わない)」に分ける。表の F6 の「食い違う」は「いいえ。…」にして、関係する項目に FR-6 を残す。M1 で表の判定を直すなら、同じ編集で |
-| LOW (L2) | maintainability(時間で古くなる文) | Status の「release(タグ)はまだ切っていない。人が `/release` で切る。」に日付がない。今日は正しい(最新のタグは v5.1.0、2026-08-24)が、タグが切られた日に誤りになり、仕様を直す理由が誰にも生じない。同じ節の 1 文目は「2026-10-21 に `gh pr view` で確かめた」と日付を持つので、この文だけが日付なしの現在形になっている | 仕様 24 行。`git tag --sort=-creatordate | head -1` は v5.1.0 | 「2026-10-21 時点で最新のタグは v5.1.0(2026-08-24)で、この仕様の段を含む release は切っていない。人が `/release` で切る」の形にする。「まだ」と現在形をやめる |
-| LOW (L3) | readability(指す先がない言葉) | Status の「試行の所見の直しは、この系列の後の PR で入れる。それぞれの PR は…」の「この系列」は、仕様の中に指す先がない。定義は根拠の表の冒頭(「この PR に続く系列」)にだけある。仕様だけを読む人は、系列が何を指すかも、どこに系列の一覧があるかも分からない | 仕様 22 行。表 16 行 | 「試行の所見の直しは、この PR のあとの別々の PR で入れる(作業名と順は根拠の表の「試行の所見」の節)」の形にする |
-| LOW (L4) | maintainability(確かめられない主張) | 表の NFR パリティの行の根拠に「このブランチの run-verify も通った」とある。いつの run かも、ログの場所も、exit code もなく、リポジトリのどこからも確かめられない(計画は S1 の implementer が run-verify のあとコミットの前で止まったと書くだけ)。同じ文の前半の「`scripts/verify.local.sh` が…`check-sync.sh` と `check-skill-sync.sh` を走らせ、CI も走らせる」が、`[x]` を支える仕組みの根拠として足りている | 表 60 行。計画 127 行の Progress | 後半の「このブランチの run-verify も通った」を削る(`/verify` の report が持つ事実なので、この表に重ねる必要がない)。残すなら report のパスと日付を添える |
-| LOW (L5) | readability(日本語) | 次の 4 点は、読み返さないと意味が取れない。(a) 表の冒頭の「食い違うとは、項目の文が起きないと言うことを試行で見たか、…」は、「項目の文が(起きない、と)言っていることが、試行で起きた」の意味だが、そう読めない。F の行すべての判定がこの定義に依るので、誤読が一番高くつく。(b) 仕様 136 行(NFR 安全の不変条件の注)の「(状態の説明)」は、NFR の本文の「状態の説明・停止・期限切れの件の人への通知」の最初の語を断片で借りたもので、注の中では何の説明か分からない。(c) 仕様 147 行(受け入れ条件 1 の注)の「合成の根拠で」は、表の 59・62 行の言い方(「合成の根拠」)をそのまま写した造語で、注の読み手に説明がない。(d) 仕様 101 行(7c-2 の注)は、直したあとの 1 文目が「(8a-3b の注で決めた)」と決まった話で終わり、次の文が「それと FR-8 の `auto_merge` と director の報告は 8a 段目に残した」と始まる。元は「付けない。それと…残した」で、どちらも「未決のまま残したこと」を並べていたが、今は前の文が決着したので「それと」の並びが合わない | 表 5 行(定義)。仕様 136・147・101 行 | (a)「項目の文が起きないと言っていることが、試行で起きた。または、…回り道が要った」に。(b)「(NFR の「状態の説明」)」に。(c)「別々のテストで確かめた」と言い切り、「合成の根拠」の語は表の判定の注に置く。(d)「それと」を消すか「このほかに」にする |
-| INFO (I1) | maintainability(参照の形) | 受け入れ条件 3 の注が、判断の根拠として `docs/plans/archive/2026-10-09-org-feature-worktree.md` と完全なパスで書く。仕様の中で計画を指す書き方は、ほかのすべての注が「詳細は 4 段目の計画(`2026-10-09-org-feature-worktree.md`)に書いた」の形(ファイル名だけ)。また「`start --plan` の事前の検査は何も書かずに断る」という決定は、4 段目の注にも仕様のどこにもなく、アーカイブされた計画の 31 行にだけある。受け入れ条件 3 の読みの根拠が仕様の外にある | 仕様 151 行。`docs/plans/archive/2026-10-09-org-feature-worktree.md` 31 行 | 急がない。パスをファイル名だけの形にそろえる。決定を 4 段目の注に 1 文足すのが筋だが、AC7(要件・設計の文を変えない)と引き合うので、系列の PR に回す |
-| INFO (I2) | readability(数え方) | Status の 1 文目「段ごとの PR は次のとおりで、28 本すべてが merge 済み」の 28 本には、段の PR でない #241・#242(試行の機能の PR)と #244(F8 の直し)が含まれる(リストには別に書いてある)。表の NFR 入れ方の行の「9 段の PR のうち…25 本」も、9 段の外の #244 を含んで 25 にしている。どちらも数は正しく、リストを読めば分かる | 仕様 5 行。表 61 行 | 急がない。「次の 28 本」「関係する PR 28 本のうち」に言い換えると誤読がなくなる |
-| INFO (I3) | maintainability(判断の記録) | 受け入れ条件 1 は `[x]` だが、表の「確かめていないこと」が「3 つの org は、テストでも実機でも 1 度に動かしていない」と書く。表の規則(部品ごとのテストで確かめた項目は `[x]`)に沿った判定で、注も「合成の根拠」「実機は 2 つの org まで」と開示している。ここは判定の好みの問題で、欠陥ではない。M1 で `[x]` の基準を締めるなら、同じ基準で読み直す余地がある | 仕様 146・147 行。表 62・105 行 | 対応は不要。M1 の方針(b)を選ぶ場合だけ見直す |
+| LOW (N1) | maintainability(時間で古くなる文) | Status の 2・3 段落が、今日の数と一覧を現在形で言い、更新の担当に入れていない。20 行の「12 項目は `[ ]` のまま残る。試行の所見(F3、F4、F7、F10、F13、D-F3、「leader への ALERT」)と食い違う項目と…」は、系列の最初の PR が 1 項目に `[x]` を付けた時点で誤りになる。22 行は、各 PR が更新するものを「項目の印と根拠の表」と書き、Status の数と一覧を含めない。同じ 22 行の「この PR のあとの別々の PR」は、この PR の番号が仕様のどこにもなく(Status の一覧は merge 済みの 28 本)、あとから読む人は PR を特定できない。L3 の直しの文言は私が勧めたもので、「この PR」の指す先を見ていなかった。L2 と同じ型(日付のない現在形) | 仕様 20・22 行。計画の Risks の「2 本目以降の計画の Scope に「仕様の印と根拠の表を更新する」を入れる」。前例の `docs/specs/2026-08-17-overlay-scaffold-v2.md` の `## Status` は数も一覧も持たない | 次のどちらか。(a) 20 行を「2026-10-21 の時点で 12 項目は…」にし、22 行の更新の対象に「Status の節の数と所見の一覧」を足す。(b) 数と一覧を消し、「`[ ]` の項目と理由は、項目の下の「印(2026-10-21)」と根拠の表にある」にする(更新が要らない)。どちらでも、22 行の「この PR のあとの別々の PR で入れる」は「2026-10-21 の時点で、試行の所見の直しは別々の PR で入れる予定で」にする |
+| INFO (N2) | maintainability(計画の本文が古い) | 既知の残り 1。計画の本文 28 行は「食い違う」の旧い言い回し、36 行は見込みの `[ ]` に FR-3 がなく、FR-6 の理由に F6 を挙げたまま。承認の digest が本文にかかるため直していない。ずれは Progress の 129 行に、FR-3 の追加と F6 の読み直しとして記録してあり、「印の規則は変えていない」とも合う(表 5 行の言い回しの直しは意味を変えない)。36 行は「見込む」と書き、計画の AC3 は仕様と表の判定の一致を言うので、見込みが AC を縛らない。`/pr` が計画を archive したあとも本文は旧いままだが、Progress の行が差を言う | 計画 28・36・129 行。`./scripts/plan-visual.sh digest` は承認時と同じ | 対応不要。直すなら Progress の 129 行に「28 行の言い回しは表の 5 行で読みやすく直した」を 1 句足す程度(任意) |
+| INFO (N3) | maintainability(版の記録) | 既知の残り 2。表 7 行の「確かめた版は…85ec1339(base との差は計画のファイル 1 つ)」は、85ec1339 の時点の事実で、今の差は 5 ファイルに広がった。この版に固定されているのはテスト名の照合で、`git diff --name-only 85ec1339 HEAD` が出すのは docs の 5 ファイルだけ(`.go` も `.sh` もない)。新しい行が読んだ `RunningOrgs`・`TotalActiveSeats`・`sendAlert` も、765bcc46 と HEAD で同じコード。記述は今も成り立つ | 表 7 行。`git diff --name-only 85ec1339 HEAD` | 対応不要 |
+| INFO (N4) | readability(原因の候補) | 表 37 行の「候補は座席の環境(F3)か busy な leader(F7)」と、tech-debt の行の Trigger「F3 の改名か F7 の busy な leader かを確かめる」は推測で、「候補」「確かめる」と書くので言い過ぎではない。ただし F3・F7 に引かれる点が 2 つある。`SendWatchdogAlert` は `Agmsg.Send` を直接呼び、F7 の失敗が出た `ralph org send` の herdr の idle 待ち(`wait for seat leader idle/done: herdr: timed out`)を通らない。エラーも `bash: timed out` で、F3 の `agent_not_found` や F7 の herdr のものと違う。10 回の失敗は doctor-escape 7、report-escape 3 で、F7 の polling は report-escape の leader の話(試行の本文の F7) | 表 37 行。tech-debt の行の Trigger。`internal/org/watch.go` の `SendWatchdogAlert`。`watch.log` の 10 行。試行の本文の F7 | 対応不要。直すなら Trigger の「確かめる」を「agmsg の send 自体(`bash: timed out`)を見る。F3・F7 は推測」にする |
+| INFO (N5) | readability(所見から項目への参照) | 表 23 行の F4 の「関係する項目」に受け入れ条件 3 がない。同じ行の「食い違う」の列は `max_orgs` が F4 の org を数えると書き、仕様の受け入れ条件 3 の注(152 行)と表 65 行も F4 を指すので、所見から項目へたどると受け入れ条件 3 が出ない | 表 23・65 行。仕様 152 行 | 任意。「関係する項目」に「受け入れ条件 3(食い違わない)」を足す |
 
 ## Positive notes
 
-- 仕様の変更は、計画の範囲に収まっている。base の 34 行(印 20、Rollout 9、文 5)と足した行(Status 23、注 19)を行単位で分類して、範囲外の行は 0 だった。8b-1 の注の「121 行」「120 行」4 か所は、条文の文言の引用に置き換わっていて、置き換えた引用は仕様の受け入れ条件の本文と一字一句合う。FR-12 の注に残る `checkbox` の語は 1 か所で、「FR-12 の checkbox は付けた」と今の印に合う
-- 31 個の印は、表の判定と 1 対 1 で一致した。`[ ]` の 11 項目はどれも、注が所見の番号か Open questions の問いを指し、tech-debt の行の名前は、表のどの行も `docs/tech-debt/README.md` に 1 件ずつ実在する
-- 注は、推定を推定と書く。FR-2、NFR 安全の不変条件、受け入れ条件 2 の注は「はずである(コードからの推定で、再現していない)」と言い切らない。FR-10 と NFR ツール非依存は「所見との食い違いはないが、…実機で動かしていない」と、`[ ]` の理由が所見でなく実機の不足であることを分けて書く。注の数字(4 回目の spawn、4 回待ち切れた、49 分後、30 件、`GOFLAGS=-timeout=30m`)は、試行の証拠の本文と合った
-- 根拠の表の記述は、外から確かめられた。65 個のテスト名と 101 か所の参照(置き場所つき)がすべて実在し、証拠のファイル、試行の節の見出し、tech-debt の行も実在する。「確かめていないこと」の節が、推定、未調査の原因、テストの全文を読んでいないことを分けて書き、仕様の注が言い過ぎる方向の誤りを自分で減らしている
-- Rollout の PR 番号と Status の PR の一覧は、memory の記録と、表の「段ごとの PR」に一致した。「進行中」は仕様から消えている。前例の `docs/specs/2026-08-17-overlay-scaffold-v2.md` と同じ位置(`#` の見出しの直後)に `## Status` がある
-- 漏えいはなく(`/Users/`、メールの形、token の形が 0 件)、U+FFFD は 0 件、`git diff --check` は出力なし。計画の承認 digest は変わっていない
+- 31 個の印は表の判定と 1 対 1 で一致し、数(仕様 20 と 12、表 19 と 12、Status 12)と所見の一覧は、注の中身から数え直しても合った。M1 の直しは、同じ推定を FR-2 と FR-3 の両方に当てて、当てない AC3 には理由(`RunningOrgs`)を書いており、cycle 1 で指した「同じ推定を一部の項目にだけ当てる」型は残っていない
+- 仕様の変更は計画の範囲に収まっている。base の 33 行と足した 70 行を行単位で分類して範囲外は 0 で、直しの commit が既存の要件・設計の文に触れたのは 7c-2 の注の「それと 」1 語だけ
+- 新しい tech-debt の行は、ログの数(10 = 7 + 2 + 1)、10 秒、`sendAlert` の best-effort、`checkDeadman` の挙動、すべてコードとログと合う。原因を「調べていない」と書き、FR-3 が `[ ]` である理由をこの PR の外の作業(系列の PR)に結びつけている。漏えいと U+FFFD はなく、`git diff --check` は出力なし
+- 計画の digest は変わらず、Progress の 129 行が、FR-3 の追加、tech-debt の行が計画の Affected areas の外にあること、F6 の読み直しを分けて記録している
 
 ## Coverage gaps
 
-- 表のテストが項目の文のどこまでを見るかは確かめていない。名前と置き場所の実在だけを見た。たとえば `TestMerge_MergesWithTheMethodAndRecordsPRMerged` が NFR 記録の置き場所の「merge を manifest に記録する」を実際に確かめるかは、本文を読んでいない
+- 表のテストが項目の文のどこまでを見るかは確かめていない。名前と置き場所の実在だけを見た(cycle 1 と同じ)
+- `watch.log` の行に時刻がなく、10 回の失敗の subject は、隣の `skipping semantic trigger` の行と escalation の alert id から読んだ(座席が subject のものがあり、`deadman_timeout` の escalation が出たところまで)。全件の対応表は作っていない
 - `gh pr view` は打っていない。PR の状態は表の記録を信じた
-- F1〜F14 のうち F4・F6・F7・F10 を除く本文は読んでいない。表の「食い違う」の判定のうち、F3・F13・D-F3 は表の文と仕様の注の一致だけを見た
+- 試行の本文の F6・F7 以外の所見は読んでいない。表の「食い違う」の判定のうち F3・F13・D-F3 は、表の文と仕様の注の一致だけを見た
 - 日本語の lint は回していない(書き込み時の hook の担当)
 
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| なし | — | cycle 1 で、M1・L1〜L5 はすべて文の直しで、仕様と根拠の表の数行。cap の最後の回で残るときだけ、1 行にまとめて足す | — | — |
+| なし(新しい行は足さない) | — | この PR が足した行 "The watch's ALERTs to the leaders failed"(commit 9733eb31)は、行の主張をログとコードで照らして合った(N4 は書き方の注意)。N1 は直しを勧める。この回は cap の最後ではない。直さずに最後の回まで残るなら、1 行にまとめて足す | — | — |
 
 _(If any rows were added above, also append them to `docs/tech-debt/`.)_
 
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH なし。MEDIUM 1 件は、F4 の同じ推定が FR-2 では `[ ]` の理由になり、FR-3 と受け入れ条件 3 では未確認のまま `[x]` で、その注が仕様にない点(M1)。LOW 5 件は、FR-6 の注が F6 を FR-6 の文との食い違いのように並べる点(L1)、Status の release の文に日付がない点(L2)、「この系列」の指す先が仕様にない点(L3)、「このブランチの run-verify も通った」を確かめられない点(L4)、日本語の読みにくい 4 か所(L5)。範囲の遵守、印と表の判定の 1 対 1 の一致、テスト名・証拠・tech-debt の行・PR の数の実在、漏えい、U+FFFD には欠陥が見つからなかった)
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。cycle 1 の M1 と L1〜L5 は解決した。LOW は N1 の 1 件で、Status の数と一覧に日付がなく、更新の担当にも入っておらず、「この PR」の指す先も仕様にない点。INFO は、前の版の I1(一部解決)と I3、新しい N2〜N5。印の 31 件の一致、数、範囲の遵守、新しい tech-debt の行の正しさ、漏えいと U+FFFD には欠陥が見つからなかった)
 - Follow-ups:
-  - M1・L1〜L5 の直しは、仕様の数行(FR-3 の注、FR-6 の注、Status の 2 文、101・136・147 行)と表の数行(5 行目、25 行目、60 行目、103 行目)で、コードは変わらない。これらは `post-implementation-pipeline.md` の「記録だけの修正」の外(仕様と表は、この task の report や insight event ではない)。いまは `/verify` の前なので、直すかどうかと、直したあとに self-review を回し直すかは lead の判断に任せる。M1 の(b)を選ぶと判定の数が変わるので、`/verify` の grep の数え上げの前に直すと手戻りがない
-  - I1〜I3 は直さなくてよい
-  - insight event(`self_review`、cycle 1、critical 0、high 0、medium 1、low 5)は、依頼が「このレポートだけを commit」だったので足していない。`./scripts/insights-append.sh --slug org-spec-complete --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 1 --low 5 --cycle auto --source skill` で足せる
+  - N1 の直しは仕様の 2 行(20・22 行)の数語で、コードは変わらない。`/verify` の grep の数え上げの前に直すと手戻りがない。直したあとに self-review を回し直すかは lead の判断に任せる(仕様の 2 行の直しは `post-implementation-pipeline.md` の「記録だけの修正」の外)
+  - N2〜N5 と I1、I3 は直さなくてよい。N2 が言う本文のずれは、Progress の行が記録している。計画の Progress の「Review artifact created」の行は、この再レビューの結果(MEDIUM 0、LOW 1)に合わせて直すと、cycle 1 の数(MEDIUM 1、LOW 5)と読み違えられない
+  - insight event(`self_review`)は足していない。直しのあとの状態で足すなら `./scripts/insights-append.sh --slug org-spec-complete --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 1 --cycle auto --source skill`。N1 を直したあとなら `--low 0`
