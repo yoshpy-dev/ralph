@@ -386,7 +386,13 @@ regression.
     merged PRs by number. 4f83c84c took out a clause that named the AC7
     run of `./scripts/run-test.sh` before it ran; the FR-7 notes name the
     pack suite only
-- [ ] Review artifact created
-- [ ] Verification artifact created
+  - `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` at 818bd4b1: rc 0 in
+    13 min (19:30:48Z to 19:43:59Z, load average 4.7 at the start and 6.7
+    at the end; `internal/cli` 240 s, `internal/org` 312 s)
+  - Self-review LOW L1 (the new suites resumed after a signal) and L3 (two
+    names for one scratch path) fixed in 6d990dfc; L2 (the duplicated
+    checks of the two Japanese-body tests) kept
+- [x] Review artifact created (docs/reports/self-review-2026-10-21-test-stability.md, c02647ca and 44c9f87a)
+- [x] Verification artifact created (docs/reports/verify-2026-10-21-test-stability.md, 24df95dd)
 - [ ] Test artifact created
 - [ ] PR created
