@@ -208,3 +208,10 @@ load 150 でも stub の `--version` は 5 s に届かず、2026-10-19 と 10-21
 - Fail: なし
 - Blocked: なし
 - 残る穴: G1(LOW)。`TestMain` の bound の引き上げを確かめる試験がない。ふつうの実行では差が出ないので、マージを止めるものではない
+
+## G1 の直し(報告のあと)
+
+- G1 は ec852215 で埋めた。`internal/cli/cli_test.go` の `TestMain_RaisesTheDoctorProbeTimeout` は、`doctorProbeTimeout` が doctor の既定の 5 s を超えていなければ落ちる。`TestProbeBinary_TimeoutNamesTheBound` の直後に置き、並列にしない(自分の bound を置く試験は `t.Cleanup` で戻す)
+- 確かめたこと(implementer の報告): `gofmt -l` は空、`go vet ./internal/cli/` は通った。新しい試験と probe の 3 試験と doctor の 3 試験は、go1.26.0 と go1.25.8 の両方で 7 本とも通った。probe の試験と新しい試験を `-count=3` で並べても 3 周とも通った。scratch の写しで `TestMain` の `doctorProbeTimeout = time.Minute` を消す mutant(上の D3)では、新しい試験が `doctorProbeTimeout = 5s, want above doctor's 5s default` で落ち、写しの `internal/cli` の全体(233 秒)で落ちたのはこの 1 本だけで、813 本は通った
+- これで、section 11 の D3 は生き残りから赤に変わる。生き残りは等価の m6 だけになる。上の表と Verdict の行は報告の時点の記録として残す
+- この直しは、続く `/sync-docs` と `/cross-review` の差分に入る
