@@ -58,3 +58,11 @@ _(行を足していないので、`docs/tech-debt/` への追記はない。)_
 - Merge: yes。CRITICAL、HIGH、MEDIUM の所見はない。LOW の 3 件(L1〜L3)は任意で、直さなくても `/verify` に進める
 - Follow-ups: L1 は既存の約 10 本の suite と同じ形なので、`tests/` の trap を揃えるときにまとめて直す。L2・L3 を直す場合も、テストの意図は変わらない。どれを直しても `/self-review` の cycle 2 を要するため、cycle の上限(2)を使い切るなら、直さずに `/verify` へ進める
 - 範囲外で `/verify` に渡すこと: spec の `[x]` が 21 で、根拠の表の 20 と 1 つ違う(base でも 20 と 19)。進捗メモは「spec 21 and 11」と書いており、この PR が作った差ではない
+
+## LOW の直し(報告のあと)
+
+- L1 と L3 は 6d990dfc で直した。2 つの新しい suite は `trap cleanup EXIT` と `trap 'exit 1' HUP INT TERM` に分けた(`tests/test-agent-models.sh:62-63` と同じ形)。`tests/test-golang-pack-test-timeout.sh` は、stub と go test が環境から読む `FAKE_GO_LOG` と `DEADLINE_OUT` の名前だけを残し、`FAKE_LOG` と `DEADLINE_FILE` をなくした。既存の約 10 本の suite の trap はこの PR では直さない
+- 確かめたこと(implementer の報告): `sh -n` と `bash -n` が両方とも通り、`tests/test-check-sync.sh` は 16 件すべて PASS、`tests/test-golang-pack-test-timeout.sh` は go1.26.0 と go1.25.8 の両方で 34 件すべて PASS。専用の `TMPDIR` で起動して途中で TERM を送ると、2 本とも rc 1 で Summary の前に止まり、`TMPDIR` に何も残らなかった
+- L2 は直さない。既存の試験を 1 byte も変えないことを優先した。同じ形の試験が 3 本目になったときに 3 本まとめて helper に出す
+- 範囲外の項の数の差(spec の 21 と根拠の表の 20)は FR-12 の分である。根拠の表は FR-12 を入れない(表の前文)ので、spec の 32 項目に対して表は 31 項目になる
+- この直しは、続く `/verify`、`/test`、`/cross-review` の差分に入る
