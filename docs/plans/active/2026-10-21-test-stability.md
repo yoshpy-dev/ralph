@@ -250,7 +250,7 @@ regression.
   入れ方" row counts #246 with the other fixes (26 PRs whose plan and four
   reports were checked by file name); #246 reads `MERGED` with
   `gh pr view` (read only)
-- [ ] AC7: `./scripts/run-verify.sh` exits 0 (with `GOFLAGS=-timeout=30m`),
+- [x] AC7: `./scripts/run-verify.sh` exits 0 (with `GOFLAGS=-timeout=30m`),
   `GOTOOLCHAIN=go1.25.8 go test -timeout 30m ./...` passes, and
   `env -u GOFLAGS ./scripts/run-test.sh` exits 0 (the pack's own bound)
 
@@ -394,5 +394,13 @@ regression.
     checks of the two Japanese-body tests) kept
 - [x] Review artifact created (docs/reports/self-review-2026-10-21-test-stability.md, c02647ca and 44c9f87a)
 - [x] Verification artifact created (docs/reports/verify-2026-10-21-test-stability.md, 24df95dd)
-- [ ] Test artifact created
+  - /test (d4918ed9) pass: `env -u GOFLAGS ./scripts/run-test.sh` rc 0 in
+    773 s (load 5.2 to 5.0; `internal/cli` 251.7 s, `internal/org`
+    314.2 s), `GOTOOLCHAIN=go1.25.8 go test -count=1 -timeout 30m ./...`
+    rc 0 in 332 s, the F9 subtest 20/20 and the doctor tests 40/40 on both
+    toolchains, 20 of 22 mutants red (m6 is equivalent). Its G1 (no test
+    pins the raise in `TestMain`, mutant D3 survived) closed in ec852215
+    with `TestMain_RaisesTheDoctorProbeTimeout`; D3 then fails only that
+    test (813 others pass)
+- [x] Test artifact created (docs/reports/test-2026-10-21-test-stability.md, d4918ed9 and d34e60c6)
 - [ ] PR created
