@@ -195,7 +195,7 @@ regression.
 
 ## Acceptance criteria
 
-- [ ] AC1: the stub of `the fetch runs past the bound` leaves stdout open
+- [x] AC1: the stub of `the fetch runs past the bound` leaves stdout open
   (no `>/dev/null` on fd 1), sends stderr to `/dev/null`, sleeps 20 s, and
   then writes a marker; the subtest fails if the marker exists when Regate
   returns; the subtest passes 20 of 20 alone with `-count=20` on both
@@ -204,7 +204,7 @@ regression.
   "failed (exit 128)" and the new stub gives "ran past 2s and was
   stopped"; with `exec.Command` in place of `exec.CommandContext` in
   `regateBoundedGit` (no cancellation), the new subtest fails on the marker
-- [ ] AC2: with `HARNESS_VERIFY_MODE=test`, a fake `go` on `PATH` (which
+- [x] AC2: with `HARNESS_VERIFY_MODE=test`, a fake `go` on `PATH` (which
   prints `$GOFLAGS` for `go env GOFLAGS`, like go) records what `go test`
   gets: with no `GOFLAGS`, `GOFLAGS=-timeout=30m` and `test ./...` in each
   Go root; with `GOFLAGS=-count=1`, `-timeout=30m -count=1`; with
@@ -218,7 +218,7 @@ regression.
   `GOFLAGS=-timeout=45m`, with `GOFLAGS='"-timeout=45m"'`, and with
   `-timeout=45m` written by `go env -w` into a scratch `GOENV`. The two
   copies of `verify.sh` are identical (`scripts/check-sync.sh`)
-- [ ] AC3: `tests/test-check-sync.sh` runs a copy of `scripts/check-sync.sh`
+- [x] AC3: `tests/test-check-sync.sh` runs a copy of `scripts/check-sync.sh`
   over a scratch tree: `docs/reports/review-x.md` and
   `docs/reports/org-manifest-x.md` give rc 0; adding
   `docs/reports/other-x.md` gives rc 1 with a `ROOT_ONLY` line naming it;
@@ -226,19 +226,19 @@ regression.
   that matches only part of the name, or not at the start) are
   `ROOT_ONLY` too. The suite fails on base's script with either entry
   removed from `ROOT_ONLY_EXCLUSIONS` (checked in a scratch copy)
-- [ ] AC4: `probeBinary` reads `doctorProbeTimeout` (5 s by default) and
+- [x] AC4: `probeBinary` reads `doctorProbeTimeout` (5 s by default) and
   its timeout error says the bound it used, which reads "timed out after
   5s" by default; `TestMain` in `internal/cli` raises it; a test with a
   stub that sleeps past a 100 ms bound gets "timed out after 100ms";
   `TestCheckScaffoldIntegrity_CorruptManifest_StrictFails` includes
   doctor's output in its failure messages. The three doctor tests of the
   row pass 10 of 10 alone
-- [ ] AC5: a test sends a Japanese body over 200 bytes with byte 200 inside
+- [x] AC5: a test sends a Japanese body over 200 bytes with byte 200 inside
   a character and `DryRun: true`; the recorded dry-run `sent` event's
   Details are valid UTF-8, hold no U+FFFD, end in `...(truncated)`, and
   keep a prefix of at most 200 bytes. A mutant that stops cutting in the
   dry-run branch fails it
-- [ ] AC6: the five tech-debt rows are resolved with the convention of the
+- [x] AC6: the five tech-debt rows are resolved with the convention of the
   rows around them, each naming what closes it; the evidence table's F9,
   F10, and G1 rows name this branch and its F12 and F14 rows name #246;
   the spec's marks count 21 `[x]` and 11 `[ ]` (FR-12 included), its
@@ -376,6 +376,16 @@ regression.
     branch) fails it on the suffix, M2 (a byte cut in the dry-run branch)
     on U+FFFD and on the 200-byte prefix, and no other test fails under
     either
+  - S6 58f2624f and 4f83c84c: the five tech-debt rows resolved; the
+    evidence table's F9, F10, G1 name this branch, F12 and F14 name #246,
+    and F10's 食い違う cell reads いいえ(今は); FR-7 `[x]` with its note;
+    spec 21 and 11, evidence table 20 and 11; #246 in both PR lists, 29
+    PRs, all read `MERGED` with `gh pr view` on 2026-10-22; "NFR 入れ方"
+    counts 26. The doctor row's opening now reads "Doctor tests such as".
+    The evidence doc's sentence "(番号はまだない)" became one that writes
+    merged PRs by number. 4f83c84c took out a clause that named the AC7
+    run of `./scripts/run-test.sh` before it ran; the FR-7 notes name the
+    pack suite only
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
