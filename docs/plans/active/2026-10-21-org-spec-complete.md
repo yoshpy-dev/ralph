@@ -72,15 +72,15 @@ None (docs-only change: 仕様の印と注と Status の節を変えるだけで
 
 ## Acceptance criteria
 
-- [ ] AC1: 仕様に `## Status` の節があり、9 段がすべて merge 済みであること、段ごとの PR 番号(Assumptions の一覧)、`[ ]` のまま残る項目があってその理由(試行の所見と codex の実機)を根拠の表が持つこと、release は人が切ることを書いている。PR 番号は `gh pr view <n> --json state` で MERGED を確かめた番号だけ
-- [ ] AC2: Rollout に「進行中」がなく(`grep -c 進行中` が 0)、9 つの段の行それぞれに PR 番号がある
-- [ ] AC3: FR-1〜FR-11、NFR 5 つ、受け入れ条件 15 個の印が根拠の表の判定と一致する。`[ ]` の項目には、足りないものと Open questions の問いを指す注がある
-- [ ] AC4: 仕様の中に「checkbox は付けない」「checkbox は、ほかの FR と同じく付けない」の類の文が残らない(`grep -n 'checkbox' <spec>` の各行が今の印と食い違わない)
-- [ ] AC5: FR-10 の 8b-1 の注に「121 行」「120 行」が残らず、受け入れ条件を文言で指す
-- [ ] AC6: 根拠の表 `docs/evidence/org-spec-evidence-2026-10-21.md` が 31 項目(FR 11、NFR 5、受け入れ条件 15)を持ち、各行に根拠(テストのパスと関数名、証拠のファイル、仕様の注のどれか 1 つ以上)と判定がある。表のテスト名は `git grep -n 'func <名前>('` で 1 件ずつ見つかる
-- [ ] AC6b: 根拠の表に試行の所見の表がある。F1〜F14、D-F3、folder trust の行、G1 のそれぞれについて、関係する項目、食い違うかどうか、直す PR(この系列のどれか。決まっていなければ「未定」)を書く。食い違うとした所見に結びつく項目は、仕様で `[ ]` のままで、その所見と tech-debt の行を指す
-- [ ] AC7: 仕様の要件・設計の文(印・注・Status・Rollout の PR 番号以外)は変わらない。`git diff` の変わった行が上の範囲に収まる
-- [ ] AC8: `./scripts/run-verify.sh` が exit 0(check-sync と check-skill-sync を含む)
+- [x] AC1: 仕様に `## Status` の節があり、9 段がすべて merge 済みであること、段ごとの PR 番号(Assumptions の一覧)、`[ ]` のまま残る項目があってその理由(試行の所見と codex の実機)を根拠の表が持つこと、release は人が切ることを書いている。PR 番号は `gh pr view <n> --json state` で MERGED を確かめた番号だけ
+- [x] AC2: Rollout に「進行中」がなく(`grep -c 進行中` が 0)、9 つの段の行それぞれに PR 番号がある
+- [x] AC3: FR-1〜FR-11、NFR 5 つ、受け入れ条件 15 個の印が根拠の表の判定と一致する。`[ ]` の項目には、足りないものと Open questions の問いを指す注がある
+- [x] AC4: 仕様の中に「checkbox は付けない」「checkbox は、ほかの FR と同じく付けない」の類の文が残らない(`grep -n 'checkbox' <spec>` の各行が今の印と食い違わない)
+- [x] AC5: FR-10 の 8b-1 の注に「121 行」「120 行」が残らず、受け入れ条件を文言で指す
+- [x] AC6: 根拠の表 `docs/evidence/org-spec-evidence-2026-10-21.md` が 31 項目(FR 11、NFR 5、受け入れ条件 15)を持ち、各行に根拠(テストのパスと関数名、証拠のファイル、仕様の注のどれか 1 つ以上)と判定がある。表のテスト名は `git grep -n 'func <名前>('` で 1 件ずつ見つかる
+- [x] AC6b: 根拠の表に試行の所見の表がある。F1〜F14、D-F3、folder trust の行、G1 のそれぞれについて、関係する項目、食い違うかどうか、直す PR(この系列のどれか。決まっていなければ「未定」)を書く。食い違うとした所見に結びつく項目は、仕様で `[ ]` のままで、その所見と tech-debt の行を指す
+- [x] AC7: 仕様の要件・設計の文(印・注・Status・Rollout の PR 番号以外)は変わらない。`git diff` の変わった行が上の範囲に収まる
+- [x] AC8: `./scripts/run-verify.sh` が exit 0(check-sync と check-skill-sync を含む)
 
 ## Implementation outline
 
@@ -128,6 +128,7 @@ docs だけなので、戻すときはこの PR を revert する。
 - [x] Review artifact created(self-review cycle 1: 7bf4bbb9、Merge yes、MEDIUM 1・LOW 5。直しは 9733eb31)
 - 計画からのずれ(self-review の M1・L1 を直した結果。印の規則は変えていない): 見込みの `[ ]` に FR-3 を足した。試行で見張りから leader への ALERT が 10 回届かず、うち 7 回が `scope_change` だったため。この所見は tech-debt に行がなかったので、`docs/tech-debt/README.md` の末尾に 1 行足し(Affected areas の外)、根拠の表の所見の表に「leader への ALERT」の行を足した(18 行)。F6 は FR-6 の文と食い違わないと読み直し、FR-6 の `[ ]` の理由は F13 だけにした。印の数は仕様で `[x]` 20、`[ ]` 12
 - self-review の再レビュー(370d30ff、Merge yes、LOW N1 と INFO N2〜N5)のうち、N1(Status の数に日付、後の PR が Status も更新する)、N4(ALERT の原因の候補から F7 を外した)、N5(F4 の関係する項目に受け入れ条件 3)を 43bf5c6e で直した。N2(計画の本文の古い言い方)と N3 は直さない。run-verify は exit 0
-- [ ] Verification artifact created
+- [x] Verification artifact created(verify pass、641036ad。INFO V1〜V3)
+- verify の V1 の記録: 見込みの `[ ]` にない FR-4 と受け入れ条件 5 も、S1(1a5bc2ee)から `[ ]` にした。理由は試行の所見 F4(implementer を立てるのに、leader が残った pane を手で閉じる回り道が要った)。所見と食い違う 10 項目の注は、印の規則どおり Open questions ではなく所見と tech-debt の行を指す
 - [ ] Test artifact created
 - [ ] PR created
