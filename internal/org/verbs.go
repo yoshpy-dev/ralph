@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -650,12 +651,22 @@ func capMSToContext(ctx context.Context, want time.Duration) int {
 }
 
 // truncateForDetails clips text for the manifest Details field so a long
-// message body never inflates the JSONL manifest unreasonably.
+// message body never inflates the JSONL manifest unreasonably. It keeps at
+// most sendDetailsMaxLen bytes and cuts at a character boundary: when byte
+// sendDetailsMaxLen falls inside a multi-byte character, the cut moves back
+// to that character's start, so the kept prefix is valid UTF-8 whenever text
+// is (a split character would reach the manifest as one U+FFFD per byte).
+// The step back is at most utf8.UTFMax-1 bytes, so text that is not valid
+// UTF-8 is still cut within that many bytes of sendDetailsMaxLen.
 func truncateForDetails(text string) string {
 	if len(text) <= sendDetailsMaxLen {
 		return text
 	}
-	return text[:sendDetailsMaxLen] + "...(truncated)"
+	cut := sendDetailsMaxLen
+	for i := 0; i < utf8.UTFMax-1 && !utf8.RuneStart(text[cut]); i++ {
+		cut--
+	}
+	return text[:cut] + "...(truncated)"
 }
 
 // WaitParams describes one `ralph org wait` invocation. Wait is a pure

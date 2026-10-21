@@ -10,11 +10,6 @@ import (
 	"testing"
 )
 
-// reviewerReportPrefix starts the name of the reviewer seat's report
-// (prompts/reviewer.md, レポート契約). scripts/check-sync.sh excludes it as a
-// prefix, so a feature org's gate does not report the file as ROOT_ONLY.
-const reviewerReportPrefix = defaultReportDir + "/review-"
-
 // reportNamesRepoRoot resolves the repository root from this source file's
 // location: internal/org/report_names_sync_test.go -> ../../, as
 // sendDefaultsRepoRoot does.
@@ -136,9 +131,8 @@ func TestReportNames_DocsMatchConstants(t *testing.T) {
 			t.Fatalf("%s: expected a line Suggested naming:, found none", rel)
 		}
 		list, _, _ := strings.Cut(rest, "\n\n")
-		reviewerName := strings.TrimPrefix(reviewerReportPrefix, defaultReportDir+"/")
 		for _, want := range []string{
-			"- `" + reviewerName + "YYYY-MM-DD-<org_id>-<seat_id>.md`",
+			"- `" + reviewerReportFilePrefix + "YYYY-MM-DD-<org_id>-<seat_id>.md`",
 			"- `" + orgReportFilePrefix + "<org_id>-YYYY-MM-DD.md`",
 		} {
 			if !hasLine(list, want) {

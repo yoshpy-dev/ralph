@@ -138,7 +138,7 @@ ralph には LLM を使わない制御層(共通の台帳、全 org の上限、
 - [ ] **ツール非依存**: director・leader・座席は、claude と codex のどちらでも動く。Orca などの外部の端末は必須にしない
   - 印(2026-10-21): 試行の所見との食い違いはないが、機能の org の leader・implementer・reviewer を codex で動かした実機がない(試行はすべて claude で、4 段目の実機の記録も codex の leader を確かめていない)。Open questions の問いは 2 つ目の「codex の座席の `--add-dir` が sandbox の中で効くか」(根拠は `docs/evidence/org-spec-evidence-2026-10-21.md`)
 - [x] **記録の置き場所**: 記録は共通の台帳(manifest・受信箱・receipts)と git と reports に置く。agmsg と push は通知だけに使う
-  - 印(2026-10-21): この項目を 1 本で確かめるテストはなく、部品ごとのテスト(受信箱、receipts、merge の記録、push の 1 行)と試行のスナップショット `docs/evidence/org-trial-2026-10-20/` を合わせた。記録の見た目の所見 F12 と F14 は食い違わない(根拠は `docs/evidence/org-spec-evidence-2026-10-21.md`)
+  - 印(2026-10-21): この項目を 1 本で確かめるテストはなく、部品ごとのテスト(受信箱、receipts、merge の記録、push の 1 行)と試行のスナップショット `docs/evidence/org-trial-2026-10-20/` を合わせた。記録の見た目の所見 F12 と F14 は食い違わない(根拠は `docs/evidence/org-spec-evidence-2026-10-21.md`)。F12 と F14 は fix/org-record-text で直した(`sent` の Details は字の切れ目で切り、`ralph org report` の event timeline は改行を `<br>` にして 1 件を 1 行に収める)
 - [x] **パリティ**: `templates/base/` とルート、`.claude/skills/` と `.agents/skills/` の同期ゲート(`scripts/check-sync.sh`、`scripts/check-skill-sync.sh`)を通す
 - [x] **入れ方**: 各段は標準フロー(`/plan` → `/implement` → パイプライン → `/pr`)で入れる
 

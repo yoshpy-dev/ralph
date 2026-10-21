@@ -113,6 +113,38 @@ func permissionModeFromDetails(details string) string {
 	return ""
 }
 
+// reportCellReplacer escapes an event's Details for the details cell of
+// BuildOrgReport's event timeline, so the event stays on one table row of a
+// GFM renderer, which shows its pipes, backslashes, backticks, and less-than
+// signs as written. It is one strings.Replacer, a single pass, so nothing it
+// writes is escaped again. A raw pipe would split the row into extra cells,
+// so it gets a backslash. Each line break would end the row
+// (and a blank line the table), so it is written <br>; "\r\n" is listed before
+// "\r" and "\n" because a Replacer tries its pairs in argument order at a
+// position, so a CRLF gives one <br>. A backslash gets a backslash because a
+// shell continuation (a backslash at a line end) would otherwise escape the
+// <br> after it. A backtick gets a backslash because the backticks of a fenced
+// snippet, once on one line, would form a code span that shows each <br> as
+// text. A less-than sign gets a backslash so a placeholder such as <path> is
+// not read as an HTML tag. The other Markdown characters (*, _, [, ], ~, &,
+// and >) are left as they are, so a renderer can still show them as emphasis,
+// a link, or an entity; they cannot split the row or end the table.
+var reportCellReplacer = strings.NewReplacer(
+	`\`, `\\`,
+	"|", `\|`,
+	"`", "\\`",
+	"<", `\<`,
+	"\r\n", "<br>",
+	"\r", "<br>",
+	"\n", "<br>",
+)
+
+// escapeReportCell returns details written as one cell of the event
+// timeline (see reportCellReplacer).
+func escapeReportCell(details string) string {
+	return reportCellReplacer.Replace(details)
+}
+
 // BuildOrgReport renders a `docs/reports/org-manifest-<org_id>-<date>.md`
 // markdown document from already-org-filtered manifest events and receipts
 // (see (*Org).Report, the only production caller). It is a pure function of
@@ -182,9 +214,7 @@ func BuildOrgReport(events []ManifestEvent, receipts []Receipt, orgID, date stri
 			if details == "" {
 				details = "-"
 			}
-			// A raw "|" would split the markdown table row into extra cells.
-			details = strings.ReplaceAll(details, "|", `\|`)
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ev.TS, seatID, ev.Event, details)
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ev.TS, seatID, ev.Event, escapeReportCell(details))
 		}
 		b.WriteString("\n")
 	}
