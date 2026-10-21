@@ -405,6 +405,19 @@ func TestProbeBinary_TimeoutNamesTheBound(t *testing.T) {
 	}
 }
 
+// TestMain_RaisesTheDoctorProbeTimeout pins the raise in TestMain: the bound
+// of probeBinary (doctorProbeTimeout) is above doctor's 5 s default for every
+// test that runs a stub binary's `--version`, which can take more than 5 s on
+// a heavily loaded machine. Without the raise those doctor tests time out
+// under load, and no other test notices: the raise is invisible until a stub
+// runs past 5 s. It does not run in parallel: a test that sets its own bound
+// restores this one, as TestProbeBinary_TimeoutNamesTheBound does.
+func TestMain_RaisesTheDoctorProbeTimeout(t *testing.T) {
+	if doctorProbeTimeout <= 5*time.Second {
+		t.Fatalf("doctorProbeTimeout = %s, want above doctor's 5s default: TestMain (main_test.go) raises it so the stub-binary doctor tests do not time out under load (the doctor-test row of docs/tech-debt/README.md)", doctorProbeTimeout)
+	}
+}
+
 // validHooksJSON is the shipped-form fixture: a schema-valid hooks.json
 // whose PostToolUse, PreToolUse, SessionStart, and UserPromptSubmit handlers
 // all route through ralph-dispatch.sh, mirroring the real tracked
