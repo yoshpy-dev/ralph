@@ -156,7 +156,7 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
 
 ## Acceptance criteria
 
-- [ ] AC1: `truncateForDetails` returns a valid UTF-8 string for every
+- [x] AC1: `truncateForDetails` returns a valid UTF-8 string for every
   valid UTF-8 input, keeps at most `sendDetailsMaxLen` bytes before the
   suffix, and returns an input of at most 200 bytes unchanged. Cases: 199
   ASCII bytes then a 3-byte character (kept prefix is the 199 bytes); a
@@ -164,10 +164,10 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
   starting at bytes 197, 198, 199, and 200; all-ASCII over 200 bytes
   (cut at 200, as today); exactly 200 bytes (unchanged); an input that is
   not valid UTF-8 (the cut stays within `utf8.UTFMax - 1` bytes of 200)
-- [ ] AC2: a `Send` with a Japanese body longer than 200 bytes records a
+- [x] AC2: a `Send` with a Japanese body longer than 200 bytes records a
   `sent` event whose Details are valid UTF-8, hold no U+FFFD, and end in
   `...(truncated)`
-- [ ] AC3: `BuildOrgReport` writes an event whose Details hold header
+- [x] AC3: `BuildOrgReport` writes an event whose Details hold header
   lines and a blank line as one row of four cells, with `<br>` for each
   line break; `\r\n` and a lone `\r` give one `<br>` each; a `|` next to a
   line break is still escaped as `\|`; a `\` at a line end is written
@@ -176,16 +176,16 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
   event timeline has exactly one line per event
   plus its two header lines. The cell of exact expected strings is
   compared whole, not by `strings.Contains` on a part
-- [ ] AC3b: a report with the AC3 cases, rendered once with GitHub's GFM
+- [x] AC3b: a report with the AC3 cases, rendered once with GitHub's GFM
   renderer (`gh api markdown -f mode=gfm -F text=@<file>`, read-only, by
   the verifier as evidence, not in a test), has one `<tr>` per event, a
   `<br>` element for each line break, no `<code>` element, four cells in
   each row, and shows the `\`, the backticks, `<path>`, and `\|` as
   written
-- [ ] AC4: the existing report and send tests pass unchanged, including
+- [x] AC4: the existing report and send tests pass unchanged, including
   `TestBuildOrgReport_EscapesPipesInEventDetails` and the Details prefix
   tests of `Send`
-- [ ] AC5: `reviewerReportPrefix` and `reviewerReportFilePrefix` are
+- [x] AC5: `reviewerReportPrefix` and `reviewerReportFilePrefix` are
   defined in `internal/org/prompts_test.go`; `report_names_sync_test.go`
   no longer defines `reviewerReportPrefix` and its README check uses
   `reviewerReportFilePrefix`; `TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport`
@@ -193,12 +193,12 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
   no longer does. `go test ./internal/org -run 'TestRenderRolePrompt_Reviewer|TestReportNames'`
   passes, and the set of checks is the same as before (each moved
   `t.Errorf`/`t.Fatalf` is in the new test)
-- [ ] AC6: the two tech-debt rows are resolved with the convention of the
+- [x] AC6: the two tech-debt rows are resolved with the convention of the
   rows around them, each naming the tests that close it; the evidence
   table's F12 and F14 rows name this branch; the spec's NFR 記録の置き場所
   note says this branch fixed F12 and F14, and no mark or Status count
   changes
-- [ ] AC7: `./scripts/run-verify.sh` exits 0 (with `GOFLAGS=-timeout=30m`),
+- [x] AC7: `./scripts/run-verify.sh` exits 0 (with `GOFLAGS=-timeout=30m`),
   and `GOTOOLCHAIN=go1.25.8 go test -timeout 30m ./internal/org/` passes
 
 ## Implementation outline
@@ -272,7 +272,8 @@ Also close the two test-only LOW findings PR #244 left in `internal/org`
   - S3 3c688ff3: `reviewerReportFilePrefix` and `reviewerReportPrefix` move to `prompts_test.go`, and `TestRenderRolePrompt_Reviewer_ReportContractNamesTheReport` takes the 6 report-name checks (tests only)
   - S4 f7f2644b: records. Deviations: the F12 and F14 tech-debt rows strike the trigger cell too, as the F8 row does; their evidence cells add this plan's active path, because the plan-reference check fails on the archive path while the plan is in flight (`/pr`'s `archive-plan.sh` rewrites it); the new Go comments write "pipe" as a word; spec line 141 gets one sentence after its 。
   - Out of scope, left as is: the doc comment of `TestReportNames_DocsMatchConstants` (`internal/org/report_names_sync_test.go`) still names a plan by its date-slug form
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - Self-review fixes, cycle 1: cab879de (L1 a sentence in the `reportCellReplacer` comment on the characters left as they are, L2 first half the evidence cells struck with `(RESOLVED の行)`, L3 the `reportCellCase` type, I2 the duplicated top comment of the new prompts test removed) and 8a52987f (I4: the `reportCellReplacer` comment says what the renderer shows). The second half of L2 (this PR's number in the evidence table's F12 and F14 rows, the spec's PR list, and the evidence doc's PR list) goes to the next series PR, as #245 did for F8
+- [x] Review artifact created (`docs/reports/self-review-2026-10-21-org-record-text.md`, Merge: yes)
+- [x] Verification artifact created (`docs/reports/verify-2026-10-21-org-record-text.md`, Verdict: pass)
+- [x] Test artifact created (`docs/reports/test-2026-10-21-org-record-text.md`, Verdict: pass, f8172150)
 - [ ] PR created
