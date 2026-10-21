@@ -368,6 +368,14 @@ regression.
     the start. A fourth test failed the same way on 2026-10-13
     (`TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected`); the TestMain
     comment names it
+  - S5 43df3185: `TestOrgSend_DryRun_JapaneseBodyOver200Bytes_DetailsStayValidUTF8`
+    sends the Japanese body of the real-send test with `DryRun: true` (no
+    spawn: the dry-run branch returns before `findSeat`) and checks no
+    driver call, a last event `sent` with `DryRun`, and the four Details
+    conditions. Both toolchains pass it; mutant M1 (no cut in the dry-run
+    branch) fails it on the suffix, M2 (a byte cut in the dry-run branch)
+    on U+FFFD and on the 200-byte prefix, and no other test fails under
+    either
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
