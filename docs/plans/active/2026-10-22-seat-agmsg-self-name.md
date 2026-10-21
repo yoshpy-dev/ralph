@@ -65,14 +65,14 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
 
 ## Acceptance criteria
 
-- [ ] AC1: ralph が打つ agmsg のすべての呼び出し(Send・Join・TeamMembers・History・Leave・Whoami・DeliverySet)が、`AGMSG_SELF_NAME=off` を含む環境で打たれる。打つ側の環境に `AGMSG_SELF_NAME=on` があっても、子の環境の値は off になる
-- [ ] AC2: 本番の組み立て(`ralph org` の verbs が使う Org)の agmsg の Runner は、環境を足して打てる。テストがこれを固める
-- [ ] AC3: `--env` のある herdr では、座席の pane と herdr の headless の director の pane の `herdr tab create` に `--env AGMSG_SELF_NAME=off` が付く。`--env` の確かめは同じ driver の値で 1 回だけ打たれる
-- [ ] AC4: `--env` のない herdr(help に `--env` がない、または help が失敗する)では、`--env` を付けずに pane を作り、spawn と start は今までどおり成功し、stderr に警告が 1 行出る(何が起きうるかを書く)
-- [ ] AC5: launch_cmd の起動スクリプトが、check-in とエージェントの exec の前に `AGMSG_SELF_NAME=off` を export する
-- [ ] AC6: 分離した herdr server での計測と確かめを `docs/evidence/agmsg-self-name-2026-10-22.md` に書く。(a) `tab create --env FOO=bar` の値が pane の shell とその子に届き、PATH と HOME が残るか。(b) pane の中で打った agmsg が、off なら pane の名前を変えず、on なら変えるか(対照)。(c) 見張りの環境(HERDR_PANE_ID なし)と座席の pane の環境で、send.sh の時間を on と off で測った数字、同時に打った場合の数字。(d) 受け取る側に届くか: 条件ごとに新しい agmsg の状態(team と DB を作り直し、on の条件で書かれた placement の記録を使い回さない)で、off で送った ALERT と同じ形のメッセージを、受け取る側の `inbox.sh`(off)が読めること。(e) 本物の座席で名前が残るか: pane を `--env AGMSG_SELF_NAME=off` 付きで作り、`herdr agent start` で claude(haiku)を起動し、その座席が自分の Bash tool から `inbox.sh` を打ったあとも、`herdr agent get <名前>` でその名前が引けること。`--env` なしの pane(on)を対照にする。(f) ALERT の行を閉じるか開いたままにするかの判断と理由。ユーザーの herdr server、`~/.config/herdr`、Orca に触れていないこと
-- [ ] AC7: 記録を合わせる。tech-debt の F3 の行は、AC6 の (e) が通ったときだけ RESOLVED にする(通らなければ、残る部分を書いて開いたままにする)。「leader への ALERT」の行を AC6 の結果で書き換える。根拠の表の F3 と「leader への ALERT」の行、仕様の FR-5 と FR-3 の印の注を合わせる。V4: 根拠の表の F9・F10・G1 の行と、両方の文書の FR-7 の注にある「fix/test-stability」を「#247」に、両方の文書の PR 一覧に #247 を足し(30 本)、仕様の Status に「試行の所見 F9・F10・G1 の直し: #247」を足す
-- [ ] AC8: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
+- [x] AC1: ralph が打つ agmsg のすべての呼び出し(Send・Join・TeamMembers・History・Leave・Whoami・DeliverySet)が、`AGMSG_SELF_NAME=off` を含む環境で打たれる。打つ側の環境に `AGMSG_SELF_NAME=on` があっても、子の環境の値は off になる
+- [x] AC2: 本番の組み立て(`ralph org` の verbs が使う Org)の agmsg の Runner は、環境を足して打てる。テストがこれを固める
+- [x] AC3: `--env` のある herdr では、座席の pane と herdr の headless の director の pane の `herdr tab create` に `--env AGMSG_SELF_NAME=off` が付く。`--env` の確かめは同じ driver の値で 1 回だけ打たれる
+- [x] AC4: `--env` のない herdr(help に `--env` がない、または help が失敗する)では、`--env` を付けずに pane を作り、spawn と start は今までどおり成功し、stderr に警告が 1 行出る(何が起きうるかを書く)
+- [x] AC5: launch_cmd の起動スクリプトが、check-in とエージェントの exec の前に `AGMSG_SELF_NAME=off` を export する
+- [x] AC6: 分離した herdr server での計測と確かめを `docs/evidence/agmsg-self-name-2026-10-22.md` に書く。(a) `tab create --env FOO=bar` の値が pane の shell とその子に届き、PATH と HOME が残るか。(b) pane の中で打った agmsg が、off なら pane の名前を変えず、on なら変えるか(対照)。(c) 見張りの環境(HERDR_PANE_ID なし)と座席の pane の環境で、send.sh の時間を on と off で測った数字、同時に打った場合の数字。(d) 受け取る側に届くか: 条件ごとに新しい agmsg の状態(team と DB を作り直し、on の条件で書かれた placement の記録を使い回さない)で、off で送った ALERT と同じ形のメッセージを、受け取る側の `inbox.sh`(off)が読めること。(e) 本物の座席で名前が残るか: pane を `--env AGMSG_SELF_NAME=off` 付きで作り、`herdr agent start` で claude(haiku)を起動し、その座席が自分の Bash tool から `inbox.sh` を打ったあとも、`herdr agent get <名前>` でその名前が引けること。`--env` なしの pane(on)を対照にする。(f) ALERT の行を閉じるか開いたままにするかの判断と理由。ユーザーの herdr server、`~/.config/herdr`、Orca に触れていないこと
+- [x] AC7: 記録を合わせる。tech-debt の F3 の行は、AC6 の (e) が通ったときだけ RESOLVED にする(通らなければ、残る部分を書いて開いたままにする)。「leader への ALERT」の行を AC6 の結果で書き換える。根拠の表の F3 と「leader への ALERT」の行、仕様の FR-5 と FR-3 の印の注を合わせる。V4: 根拠の表の F9・F10・G1 の行と、両方の文書の FR-7 の注にある「fix/test-stability」を「#247」に、両方の文書の PR 一覧に #247 を足し(30 本)、仕様の Status に「試行の所見 F9・F10・G1 の直し: #247」を足す
+- [x] AC8: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
 
@@ -126,7 +126,10 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
   - S1(計測): `docs/evidence/agmsg-self-name-2026-10-22.md`。(a) `--env` は足すだけで D2 はそのまま。(b)〜(d) は期待どおり。(e) は off で名前が残り、対照の on で `agent_not_found` になったので、F3 は S2〜S4 のあとに RESOLVED にできる。(f) 見張りの環境の上乗せは約 65 ms なので ALERT の行は開いたまま。pane の環境は約 1〜2 s 遅く、F4 に効いていた可能性を 4b に渡す
   - S2 b0a607d9、S4 a34612fd(spawn.go の HerdrClient のコメントの配線の文も直した)、S3 f16423da(CLI テストの herdr の stub が `tab create --help` に答えるよう、`internal/cli/org_test.go` と `internal/cli/org_director_headless_test.go` を範囲に足した)
   - AC7 の範囲を足した(consult-plan-seatenv の判定 (i)): F3 を直すと D-F3 の回り道 3 つが要らなくなるので、F8・F10 の前例のとおり D-F3 を「いいえ(今は)」にし、D-F3 だけが理由だった FR-9 を根拠の表と仕様の両方で `[x]` にする。印の数は仕様が 21/11 から 22/10、根拠の表が 20/11 から 21/10 になる。FR-9 の注には AC3・AC4 のテスト名と evidence の (e) と「残る食い違いはない」を書く
-  - 後の PR に残すこと: この PR の番号への書き換え(F3・D-F3・FR-5・FR-9 の注と表の「fix/seat-agmsg-self-name」、仕様の Status と PR 一覧)。tech-debt の F4 の行の「announce の時間切れの原因」は、evidence の (c)・(f)(pane の環境で on が約 1〜2 s 遅い)で 4b が書き換える
+  - 後の PR に残すこと: この PR の番号への書き換え(F3・D-F3・FR-5・FR-9 の注と表の「fix/seat-agmsg-self-name」、仕様の Status と PR 一覧)。tech-debt の F4 の行の「announce の時間切れの原因」は、evidence の (c)・(f)(pane の環境で on が約 1〜2 s 遅い)で 4b が書き換える。F4 の行は F3 の行を "the agmsg self-rename of the row above" と指しており、F3 の行を RESOLVED にしたので、4b で合わせる
+  - S5 08d091f5(tech-debt の F3 を RESOLVED、ALERT の行に計測の数字、根拠の表と仕様の F3・D-F3・FR-3・FR-5・FR-9 と #247)。印の数は仕様 22/10、根拠の表 21/10
+  - AC8: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は 08d091f5 で rc 0(760 s)。go1.25.8 のテストは各 slice の implementer が driver・org・cli で通した
+  - sync-docs に渡すもの: `docs/recipes/director-launch-cmd.md` の 131 行と 248 行(と templates/base の写し)、`/director` skill の起動スクリプトの export の説明(と写し)に `AGMSG_SELF_NAME=off`、`AgmsgSelfNameOff` の doc コメントに起動スクリプト。未確認のこと: 0.7.5 より古い herdr が `tab create --help` を無視するなら、確かめのときに tab を 1 つ作る
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
