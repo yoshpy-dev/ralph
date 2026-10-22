@@ -205,7 +205,7 @@ func TestOrgDirectorStart_LaunchesRegistersAndStops(t *testing.T) {
 			}
 			wantHerdr := []string{
 				"workspace create --cwd " + cwd + " --label ralph_director_" + tok,
-				"tab create --workspace ws-stub-1 --cwd " + cwd + " --label director_" + tok,
+				"tab create --workspace ws-stub-1 --cwd " + cwd + " --label director_" + tok + " --env AGMSG_SELF_NAME=off",
 				"agent start director_" + tok + " --kind " + tc.driver + " --pane pane-stub-1 --timeout 60000 -- " + tc.permArgs +
 					"--model " + tc.model + " " + org.PromptFilePointer(prompt),
 			}

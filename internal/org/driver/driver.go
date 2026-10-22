@@ -27,7 +27,18 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (string, error)
 }
 
-// ExecRunner is the real Runner, backed by exec.CommandContext.
+// EnvRunner is an optional interface a Runner implements when it can run a
+// command with extra environment variables. env holds KEY=VALUE entries
+// added on top of the current process environment (os.Environ()); a later
+// entry wins over an earlier one and over the parent's value of the same
+// key. Callers check for it with a type assertion and fall back to Run, so
+// a test fake that only records argv need not implement it.
+type EnvRunner interface {
+	RunEnv(ctx context.Context, env []string, name string, args ...string) (string, error)
+}
+
+// ExecRunner is the real Runner, backed by exec.CommandContext. It also
+// implements EnvRunner.
 type ExecRunner struct{}
 
 // execWaitDelay is ExecRunner's exec.Cmd.WaitDelay. A var so a test can
@@ -39,7 +50,21 @@ var execWaitDelay = 2 * time.Second
 // the returned error so callers get CLI diagnostics without re-running the
 // command.
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return execRun(ctx, nil, name, args...)
+}
+
+// RunEnv is Run with env added to the current process environment, so the
+// command sees env's value of a key the parent also sets.
+func (ExecRunner) RunEnv(ctx context.Context, env []string, name string, args ...string) (string, error) {
+	return execRun(ctx, append(os.Environ(), env...), name, args...)
+}
+
+// execRun is the body of Run and RunEnv. env is the command's whole
+// environment, or nil to inherit the current process's (Run). os/exec keeps
+// only the last value of a key that env holds twice.
+func execRun(ctx context.Context, env []string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

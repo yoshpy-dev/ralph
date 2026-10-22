@@ -782,7 +782,8 @@ func (rt *orgDirectorRuntime) directorLaunched(id, token string, pid int) error 
 // a seat, plan 2026-10-15-org-director-start, D2). Getenv is nil, so they
 // read HERDR_PANE_ID, HERDR_WORKSPACE_ID, and RALPH_DIRECTOR_TOKEN from the
 // environment, and so is DirectorProcessReader, so a launch cmd's process
-// is read with ps; DirectorStopWait is orgDirectorStopWait.
+// is read with ps; DirectorStopWait is orgDirectorStopWait. The director's
+// pane carries AGMSG_SELF_NAME=off, as a seat's does (newOrgRuntimeAt).
 func newOrgDirectorHerdrRuntime(cfg config.OrgConfig) *org.Org {
-	return &org.Org{Config: cfg, Herdr: driver.Herdr{R: driver.ExecRunner{}}, DirectorStopWait: orgDirectorStopWait}
+	return &org.Org{Config: cfg, Herdr: driver.NewHerdr(driver.ExecRunner{}, driver.AgmsgSelfNameOff), DirectorStopWait: orgDirectorStopWait}
 }

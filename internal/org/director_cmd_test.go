@@ -434,10 +434,11 @@ func testLaunchScript(base string) directorLaunchScript {
 	}
 }
 
-// AC2: the launch script cds to the cwd, exports RALPH_DIRECTOR_TOKEN and
-// RALPH_ORG_AGMSG_HOME (only when given), checks in, and execs the agent
-// with the permission flags, --model, and the prompt pointer in that order,
-// every value single-quoted.
+// AC2: the launch script cds to the cwd, exports RALPH_DIRECTOR_TOKEN,
+// RALPH_ORG_AGMSG_HOME (only when given), and AGMSG_SELF_NAME=off (always,
+// right before the check-in), checks in, and execs the agent with the
+// permission flags, --model, and the prompt pointer in that order, every
+// value single-quoted.
 func TestDirectorLaunchScript_TextQuotesEveryValue(t *testing.T) {
 	s := testLaunchScript("/b")
 	text, err := s.text()
@@ -452,6 +453,8 @@ RALPH_DIRECTOR_TOKEN='0123456789ab'
 export RALPH_DIRECTOR_TOKEN
 RALPH_ORG_AGMSG_HOME='/b/a g'\''m'
 export RALPH_ORG_AGMSG_HOME
+AGMSG_SELF_NAME='off'
+export AGMSG_SELF_NAME
 '/b/bin dir'\''s/ralph' org director launched --id 'd7' --token '0123456789ab' --pid "$$" --state-dir '/b/st'\''ate dir' || exit 1
 exec '/b/bin dir'\''s/cl'\''aude' '--permission-mode' 'bypassPermissions' '--model' 'op$us ` + "`x`" + `' '役割指示を読み込んで従ってください: /b/st'\''ate dir/prompts/director_0123456789ab.md'
 `
@@ -474,29 +477,38 @@ exec '/b/bin dir'\''s/cl'\''aude' '--permission-mode' 'bypassPermissions' '--mod
 	if strings.Contains(text, "RALPH_ORG_AGMSG_HOME") {
 		t.Fatalf("a script with no agmsg home exports one:\n%s", text)
 	}
+	// AC5: AGMSG_SELF_NAME=off does not depend on the agmsg home, and it is
+	// exported before the check-in line (and so before the exec).
+	if !strings.Contains(text, "\nexport RALPH_DIRECTOR_TOKEN\nAGMSG_SELF_NAME='off'\nexport AGMSG_SELF_NAME\n'/b/bin dir'\\''s/ralph' org director launched ") {
+		t.Fatalf("a script with no agmsg home does not export AGMSG_SELF_NAME=off right before the check-in:\n%s", text)
+	}
 	if !strings.Contains(text, "\nexec '/b/bin dir'\\''s/cl'\\''aude' '--model' 'op$us `x`' '役割指示") {
 		t.Fatalf("with no permission flags the exec line is not the agent, --model, and the pointer:\n%s", text)
 	}
 }
 
 // launchScriptFakes writes, under dir, a fake ralph that records its
-// arguments and its parent pid and exits with checkInExit, and a fake agent
-// that records its pid, directory, two variables, and arguments, both in a
-// directory whose name holds a space and a single quote. It returns the
-// script with those paths and the files they record to.
-func launchScriptFakes(t *testing.T, dir string, checkInExit int) (s directorLaunchScript, ralphArgs, ralphPPID, agentOut string) {
+// arguments, its parent pid, and its AGMSG_SELF_NAME and exits with
+// checkInExit, and a fake agent that records its pid, directory, three
+// variables, and arguments, both in a directory whose name holds a space and
+// a single quote. It returns the script with those paths and the files they
+// record to.
+func launchScriptFakes(t *testing.T, dir string, checkInExit int) (s directorLaunchScript, ralphArgs, ralphPPID, ralphSelfName, agentOut string) {
 	t.Helper()
 	s = testLaunchScript(dir)
-	ralphArgs, ralphPPID, agentOut = filepath.Join(dir, "ralph.args"), filepath.Join(dir, "ralph.ppid"), filepath.Join(dir, "agent.out")
+	ralphArgs, ralphPPID, ralphSelfName = filepath.Join(dir, "ralph.args"), filepath.Join(dir, "ralph.ppid"), filepath.Join(dir, "ralph.selfname")
+	agentOut = filepath.Join(dir, "agent.out")
 	writeTestExecutable(t, s.RalphPath, "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > "+shellQuote(ralphArgs)+
-		"\nprintf '%s\\n' \"$PPID\" > "+shellQuote(ralphPPID)+"\nexit "+strconv.Itoa(checkInExit)+"\n")
+		"\nprintf '%s\\n' \"$PPID\" > "+shellQuote(ralphPPID)+"\nprintf '%s\\n' \"${AGMSG_SELF_NAME-<unset>}\" > "+shellQuote(ralphSelfName)+
+		"\nexit "+strconv.Itoa(checkInExit)+"\n")
 	writeTestExecutable(t, s.AgentPath, "#!/bin/sh\n{\nprintf 'pid=%s\\n' \"$$\"\nprintf 'pwd=%s\\n' \"$(pwd -P)\"\n"+
 		"printf 'token=%s\\n' \"${RALPH_DIRECTOR_TOKEN-<unset>}\"\nprintf 'agmsg=%s\\n' \"${RALPH_ORG_AGMSG_HOME-<unset>}\"\n"+
+		"printf 'selfname=%s\\n' \"${AGMSG_SELF_NAME-<unset>}\"\n"+
 		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+shellQuote(agentOut)+"\n")
 	if err := os.MkdirAll(s.Cwd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return s, ralphArgs, ralphPPID, agentOut
+	return s, ralphArgs, ralphPPID, ralphSelfName, agentOut
 }
 
 // runLaunchScript runs the script at path as a terminal would, with env as
@@ -530,11 +542,14 @@ func readLines(t *testing.T, path string) []string {
 // agent's. The agent runs in the cwd with the token and the agmsg home
 // exported and its arguments as written. Without an agmsg home the agent
 // gets none. A check-in that fails starts no agent and the script exits 1.
+// AC5: the terminal's environment has AGMSG_SELF_NAME=on, and both the
+// check-in and the agent see the off the script exports, with or without an
+// agmsg home.
 func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
-	env := []string{"PATH=/usr/bin:/bin"}
+	env := []string{"PATH=/usr/bin:/bin", "AGMSG_SELF_NAME=on"}
 	t.Run("the check-in passes", func(t *testing.T) {
 		dir := t.TempDir()
-		s, ralphArgs, ralphPPID, agentOut := launchScriptFakes(t, dir, 0)
+		s, ralphArgs, ralphPPID, ralphSelfName, agentOut := launchScriptFakes(t, dir, 0)
 		path, err := writeDirectorLaunchScript(s)
 		if err != nil {
 			t.Fatalf("writeDirectorLaunchScript: %v", err)
@@ -556,11 +571,14 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 		if ppid := readLines(t, ralphPPID); len(ppid) != 1 || ppid[0] != pid {
 			t.Fatalf("the check-in's parent = %q, want the --pid %s", ppid, pid)
 		}
+		if got := readLines(t, ralphSelfName); !slices.Equal(got, []string{"off"}) {
+			t.Fatalf("the check-in's AGMSG_SELF_NAME = %q, want off", got)
+		}
 		cwd, err := filepath.EvalSymlinks(s.Cwd)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"pid=" + pid, "pwd=" + cwd, "token=" + directorTestToken, "agmsg=" + s.AgmsgHome,
+		want := []string{"pid=" + pid, "pwd=" + cwd, "token=" + directorTestToken, "agmsg=" + s.AgmsgHome, "selfname=off",
 			"arg=--permission-mode", "arg=bypassPermissions", "arg=--model", "arg=" + s.Model, "arg=" + s.PromptPointer}
 		if got := readLines(t, agentOut); !slices.Equal(got, want) {
 			t.Fatalf("the agent recorded\n%q\nwant\n%q", got, want)
@@ -568,7 +586,7 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 	})
 	t.Run("no agmsg home", func(t *testing.T) {
 		dir := t.TempDir()
-		s, _, _, agentOut := launchScriptFakes(t, dir, 0)
+		s, _, _, ralphSelfName, agentOut := launchScriptFakes(t, dir, 0)
 		s.AgmsgHome = ""
 		path, err := writeDirectorLaunchScript(s)
 		if err != nil {
@@ -580,10 +598,16 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 		if got := readLines(t, agentOut)[3]; got != "agmsg=<unset>" {
 			t.Fatalf("the agent got %q, want no RALPH_ORG_AGMSG_HOME", got)
 		}
+		if got := readLines(t, ralphSelfName); !slices.Equal(got, []string{"off"}) {
+			t.Fatalf("with no agmsg home the check-in's AGMSG_SELF_NAME = %q, want off", got)
+		}
+		if got := readLines(t, agentOut)[4]; got != "selfname=off" {
+			t.Fatalf("with no agmsg home the agent got %q, want selfname=off", got)
+		}
 	})
 	t.Run("the check-in is refused", func(t *testing.T) {
 		dir := t.TempDir()
-		s, ralphArgs, _, agentOut := launchScriptFakes(t, dir, 1)
+		s, ralphArgs, _, _, agentOut := launchScriptFakes(t, dir, 1)
 		path, err := writeDirectorLaunchScript(s)
 		if err != nil {
 			t.Fatal(err)
@@ -600,7 +624,7 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 	})
 	t.Run("a cwd that is gone", func(t *testing.T) {
 		dir := t.TempDir()
-		s, ralphArgs, _, agentOut := launchScriptFakes(t, dir, 0)
+		s, ralphArgs, _, _, agentOut := launchScriptFakes(t, dir, 0)
 		s.Cwd = filepath.Join(dir, "missing")
 		path, err := writeDirectorLaunchScript(s)
 		if err != nil {
@@ -996,6 +1020,7 @@ func newCmdStartFixture(t *testing.T, launchCmd []string, opts cmdStartOptions) 
 	writeTestExecutable(t, f.agentPath, "#!/bin/sh\n"+trap+"{\nprintf 'pid=%s\\n' \"$$\"\n"+
 		"printf 'pwd=%s\\n' \"$(pwd -P)\"\n"+
 		"printf 'token=%s\\n' \"${RALPH_DIRECTOR_TOKEN-<unset>}\"\nprintf 'agmsg=%s\\n' \"${RALPH_ORG_AGMSG_HOME-<unset>}\"\n"+
+		"printf 'selfname=%s\\n' \"${AGMSG_SELF_NAME-<unset>}\"\n"+
 		"for a in \"$@\"; do printf 'arg=%s\\n' \"$a\"; done\n} > "+shellQuote(f.agentMarker+".tmp")+
 		" && mv "+shellQuote(f.agentMarker+".tmp")+" "+shellQuote(f.agentMarker)+"\nexec "+shellQuote(sleepPath(t))+" 600\n")
 	testBinary, err := os.Executable()
@@ -1152,10 +1177,12 @@ func launchedEvent(t *testing.T, s *DirectorStore) DirectorEvent {
 // and the launch script (0700), runs launch_cmd, and waits for the check-in,
 // which records launched with the pid of the script and its start time. The
 // agent then runs in its place (same pid) with the permission flags,
-// --model, and the prompt pointer, the token exported, and
-// RALPH_ORG_AGMSG_HOME exported only when start was given one. start asks
-// for the driver's binary by its name, calls no herdr (HERDR_PANE_ID set
-// does not refuse it, D9), and writes no manifest or receipt.
+// --model, and the prompt pointer, the token exported,
+// RALPH_ORG_AGMSG_HOME exported only when start was given one, and
+// AGMSG_SELF_NAME=off over the on of the environment launch_cmd passes on
+// (AC5). start asks for the driver's binary by its name, calls no herdr
+// (HERDR_PANE_ID set does not refuse it, D9), and writes no manifest or
+// receipt.
 func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 	cases := []struct {
 		name, driver, model string
@@ -1173,6 +1200,7 @@ func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCmdStartFixture(t, launchCmdInBackground, cmdStartOptions{})
+			t.Setenv("AGMSG_SELF_NAME", "on")
 			f.o.Config.Permissions = tc.perms
 			if tc.inHerdr {
 				f.env[herdrPaneIDEnv] = "pane-9"
@@ -1217,7 +1245,7 @@ func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 			if agmsg == "" {
 				agmsg = "<unset>"
 			}
-			want := []string{"pid=" + strconv.Itoa(reg.PID), "pwd=" + cwd, "token=" + token, "agmsg=" + agmsg}
+			want := []string{"pid=" + strconv.Itoa(reg.PID), "pwd=" + cwd, "token=" + token, "agmsg=" + agmsg, "selfname=off"}
 			for _, arg := range append(slices.Clone(tc.wantPerm), "--model", tc.model, PromptFilePointer(wantPrompt)) {
 				want = append(want, "arg="+arg)
 			}

@@ -77,7 +77,22 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // workspace-<id> hold the label. A test that seeds the ledger directly
 // records its panes there too (seedSeat in org_stop_all_test.go). A get for
 // an id with no file answers herdr's *_not_found envelope with exit 1.
+//
+// `tab create --help` answers a help that lists --env, as herdr 0.7.5 does,
+// unlogged and with no id handed out, so driver.Herdr's --env check leaves
+// the log and the ids as they were and each `tab create` ends with
+// `--env AGMSG_SELF_NAME=off`. ORG_STUB_TAB_CREATE_HELP=noenv makes the help
+// list --envelope instead of --env, as a herdr without --env would, so each
+// `tab create` has no --env and driver.Herdr warns.
 const herdrStub = `#!/bin/sh
+if [ "$1 $2 $3" = "tab create --help" ]; then
+  if [ "$ORG_STUB_TAB_CREATE_HELP" = "noenv" ]; then
+    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --envelope <FILE>'
+  else
+    printf '%s\n' 'Usage: herdr tab create [OPTIONS]' '' 'Options:' '      --workspace <WORKSPACE_ID>' '      --cwd <PATH>' '      --label <TEXT>' '      --env <KEY=VALUE>'
+  fi
+  exit 0
+fi
 if [ -n "$ORG_HERDR_LOG" ]; then
   echo "$@" >> "$ORG_HERDR_LOG"
 fi
@@ -246,6 +261,7 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	t.Setenv("ORG_STUB_AGENT_WAIT_CONFIRM_FAIL", "")
 	t.Setenv("ORG_STUB_CLOSE_FAIL_IDS", "")
 	t.Setenv("ORG_STUB_CLOSE_NOT_FOUND_IDS", "")
+	t.Setenv("ORG_STUB_TAB_CREATE_HELP", "")
 	// stop and disband treat the pane and workspace these name as the
 	// caller's own and close them last; pin both unset so no test depends on
 	// whether `go test` runs inside a herdr pane.
@@ -402,6 +418,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 	}
 	if n := countLinesWithPrefix(herdrLines, "tab create"); n != 2 {
 		t.Fatalf("expected 2 'tab create' calls (one per seat), got %d (log: %v)", n, herdrLines)
+	}
+	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
+	// 2026-10-22-seat-agmsg-self-name, AC3).
+	for _, l := range herdrLines {
+		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, " --env AGMSG_SELF_NAME=off") {
+			t.Fatalf("tab create call %q does not end with --env AGMSG_SELF_NAME=off", l)
+		}
 	}
 
 	// Each agmsg invocation's HELLO message body itself contains newlines,

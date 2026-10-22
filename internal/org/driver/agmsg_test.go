@@ -189,6 +189,127 @@ func TestAgmsg_DeliverySet_InvalidModeRejectedBeforeRun(t *testing.T) {
 	}
 }
 
+// agmsgCallCase is one Agmsg method call and the argv it must run.
+type agmsgCallCase struct {
+	name string
+	call func(a Agmsg) error
+	want []string
+}
+
+// agmsgCallCases covers each of the seven Agmsg methods that run a script.
+func agmsgCallCases() []agmsgCallCase {
+	ctx := context.Background()
+	const home = "/home/agmsg"
+	return []agmsgCallCase{
+		{
+			name: "Send",
+			call: func(a Agmsg) error { return a.Send(ctx, "ralph-org-1", "leader", "worker-1", "start now") },
+			want: append(bashScript(home, "send.sh"), "ralph-org-1", "leader", "worker-1", "start now"),
+		},
+		{
+			name: "Join",
+			call: func(a Agmsg) error { return a.Join(ctx, "ralph-org-1", "worker-1", "claude-code", "/repo") },
+			want: append(bashScript(home, "join.sh"), "ralph-org-1", "worker-1", "claude-code", "/repo"),
+		},
+		{
+			name: "TeamMembers",
+			call: func(a Agmsg) error {
+				_, err := a.TeamMembers(ctx, "ralph-org-1")
+				return err
+			},
+			want: append(bashScript(home, "team.sh"), "ralph-org-1"),
+		},
+		{
+			name: "History",
+			call: func(a Agmsg) error {
+				_, err := a.History(ctx, "ralph-org-1", "leader", 20)
+				return err
+			},
+			want: append(bashScript(home, "history.sh"), "ralph-org-1", "leader", "20"),
+		},
+		{
+			name: "Leave",
+			call: func(a Agmsg) error { return a.Leave(ctx, "ralph-org-1", "worker-1") },
+			want: append(bashScript(home, "leave.sh"), "ralph-org-1", "worker-1"),
+		},
+		{
+			name: "Whoami",
+			call: func(a Agmsg) error {
+				_, err := a.Whoami(ctx, "/repo", "claude-code")
+				return err
+			},
+			want: append(bashScript(home, "whoami.sh"), "/repo", "claude-code"),
+		},
+		{
+			name: "DeliverySet",
+			call: func(a Agmsg) error { return a.DeliverySet(ctx, "monitor", "claude-code", "/repo") },
+			want: append(bashScript(home, "delivery.sh"), "set", "monitor", "claude-code", "/repo"),
+		},
+	}
+}
+
+// TestAgmsg_EnvRunner_EveryCallRunsWithSelfNameOff: when the Runner
+// implements EnvRunner, every Agmsg method runs its script through RunEnv
+// with exactly AGMSG_SELF_NAME=off and the same argv Run would get, and
+// never through Run.
+func TestAgmsg_EnvRunner_EveryCallRunsWithSelfNameOff(t *testing.T) {
+	for _, tt := range agmsgCallCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &envFakeRunner{}
+			if err := tt.call(Agmsg{R: f, Home: "/home/agmsg"}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(f.calls) != 0 {
+				t.Fatalf("expected no Run call, got %d calls: %v", len(f.calls), f.calls)
+			}
+			if len(f.envCalls) != 1 {
+				t.Fatalf("expected 1 RunEnv call, got %d: %v", len(f.envCalls), f.envCalls)
+			}
+			c := f.envCalls[0]
+			if want := []string{"AGMSG_SELF_NAME=off"}; !reflect.DeepEqual(c.env, want) {
+				t.Fatalf("env mismatch: got %v, want %v", c.env, want)
+			}
+			if c.name != "bash" || !reflect.DeepEqual(c.args, tt.want) {
+				t.Fatalf("argv mismatch: got name=%q args=%v, want name=bash args=%v", c.name, c.args, tt.want)
+			}
+		})
+	}
+}
+
+// TestAgmsg_RunOnlyRunner_FallsBackToRun: a Runner that does not implement
+// EnvRunner still runs every Agmsg method's script through Run, with the
+// same argv.
+func TestAgmsg_RunOnlyRunner_FallsBackToRun(t *testing.T) {
+	for _, tt := range agmsgCallCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{}
+			if err := tt.call(Agmsg{R: f, Home: "/home/agmsg"}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(f.calls) != 1 {
+				t.Fatalf("expected 1 Run call, got %d: %v", len(f.calls), f.calls)
+			}
+			if c := f.lastCall(); c.name != "bash" || !reflect.DeepEqual(c.args, tt.want) {
+				t.Fatalf("argv mismatch: got name=%q args=%v, want name=bash args=%v", c.name, c.args, tt.want)
+			}
+		})
+	}
+}
+
+// TestAgmsg_DeliverySet_InvalidModeRejectedBeforeRunEnv: an invalid mode is
+// rejected before RunEnv too, not only before Run.
+func TestAgmsg_DeliverySet_InvalidModeRejectedBeforeRunEnv(t *testing.T) {
+	f := &envFakeRunner{}
+	a := Agmsg{R: f, Home: "/home/agmsg"}
+
+	if err := a.DeliverySet(context.Background(), "bogus-mode", "claude-code", "/repo"); err == nil {
+		t.Fatal("expected invalid mode to be rejected, got nil error")
+	}
+	if len(f.calls) != 0 || len(f.envCalls) != 0 {
+		t.Fatalf("expected no call for invalid mode, got Run %v and RunEnv %v", f.calls, f.envCalls)
+	}
+}
+
 func TestResolveAgmsgHome_Precedence(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

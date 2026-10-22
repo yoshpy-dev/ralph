@@ -51,6 +51,30 @@ func (f *fakeRunner) lastCall() call {
 	return f.calls[len(f.calls)-1]
 }
 
+// envCall records one RunEnv() invocation's env and argv.
+type envCall struct {
+	env  []string
+	name string
+	args []string
+}
+
+// envFakeRunner is a fakeRunner that also implements EnvRunner. RunEnv
+// calls land in envCalls and Run calls in the embedded fakeRunner's calls,
+// so a test can tell which of the two an adapter used.
+type envFakeRunner struct {
+	fakeRunner
+	envCalls []envCall
+}
+
+func (f *envFakeRunner) RunEnv(_ context.Context, env []string, name string, args ...string) (string, error) {
+	f.envCalls = append(f.envCalls, envCall{
+		env:  append([]string{}, env...),
+		name: name,
+		args: append([]string{}, args...),
+	})
+	return "", nil
+}
+
 func TestExecRunner_Run_Success(t *testing.T) {
 	r := ExecRunner{}
 	out, err := r.Run(context.Background(), "echo", "hello", "world")
@@ -141,6 +165,80 @@ func TestExecRunner_Run_StderrCaptured(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "err") {
 		t.Fatalf("expected stderr detail in error, got: %v", err)
+	}
+}
+
+// TestExecRunner_RunEnv_AddsToTheParentEnvironment: RunEnv's entry wins over
+// the parent's value of the same key (and a later entry over an earlier
+// one), the rest of the parent's environment still reaches the child, and
+// Run, given no env, still sees the parent's value.
+func TestExecRunner_RunEnv_AddsToTheParentEnvironment(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	t.Setenv("AGMSG_SELF_NAME", "on")
+	t.Setenv("RALPH_DRIVER_TEST_INHERITED", "kept")
+	script := `printf '%s|%s' "$AGMSG_SELF_NAME" "$RALPH_DRIVER_TEST_INHERITED"`
+	r := ExecRunner{}
+
+	tests := []struct {
+		name string
+		run  func() (string, error)
+		want string
+	}{
+		{
+			name: "RunEnv overrides the parent's value",
+			run: func() (string, error) {
+				return r.RunEnv(context.Background(), []string{"AGMSG_SELF_NAME=off"}, "sh", "-c", script)
+			},
+			want: "off|kept",
+		},
+		{
+			name: "the later of two RunEnv entries wins",
+			run: func() (string, error) {
+				return r.RunEnv(context.Background(), []string{"AGMSG_SELF_NAME=on", "AGMSG_SELF_NAME=off"}, "sh", "-c", script)
+			},
+			want: "off|kept",
+		},
+		{
+			name: "Run inherits the parent's value",
+			run: func() (string, error) {
+				return r.Run(context.Background(), "sh", "-c", script)
+			},
+			want: "on|kept",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := tt.run()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if out != tt.want {
+				t.Fatalf("want %q, got %q", tt.want, out)
+			}
+		})
+	}
+}
+
+// TestExecRunner_RunEnv_TimeoutHonored: RunEnv ends at ctx's deadline with
+// the same "<name>: timed out" error Run returns.
+func TestExecRunner_RunEnv_TimeoutHonored(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ExecRunner{}.RunEnv(ctx, []string{"AGMSG_SELF_NAME=off"}, "sleep", "5")
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "sleep: timed out") {
+		t.Fatalf("expected a timed-out error, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected errors.Is(err, context.DeadlineExceeded), got: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("RunEnv did not honor ctx timeout: took %v", elapsed)
 	}
 }
 
