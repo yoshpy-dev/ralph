@@ -130,7 +130,7 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 - [x] Plan approved(ユーザーの常の指示による自動承認)
 - [x] Branch created
 - [x] Implementation started(S1 88706897 hook と写しとテスト、S2 416993cf pane の環境の一覧と配線、S3 3dedaef9 実機の確かめ(4 つとも期待どおり)、S4 b5b12ae9 leader の雛形と文書、S5 80cb817a 記録、075b2160 記録の引き方の直し。S2 は handoff の外の `internal/cli/org_director_headless.go` も直した(headless の director の pane の組み立て)。S4 は運用規律の (b) を `org: spawn step` で始まるエラーに絞り、それ以外は BLOCKED にした(台帳への追記が失敗すると pane が残るため)。/org skill の手順 6 にも `wip:` の確かめを足した)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-22-seat-wip-checkpoint.md`、Merge 可、LOW 7。7 件とも a79b0f82 で直した)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-22-seat-wip-checkpoint.md`、pass。V1・V2 は sync-docs で直した)
+- [x] Test artifact created(`docs/reports/test-2026-10-22-seat-wip-checkpoint.md`、pass。G1・G2 は 62f92f42 で直した。G3〜G6 は残した。detached HEAD の `wip:` のコミットは tech-debt の行にした)
 - [ ] PR created

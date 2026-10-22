@@ -141,3 +141,12 @@ scratchpad の一時の repo(`GIT_CONFIG_GLOBAL` を一時のファイルに、`
 - Pass: AC1〜AC5b と AC9 の behavioral test がすべて通った(go1.26.0 と go1.25.8、`-race`、`-count=3`、canary)。mutant 53 本のうち 52 本が赤。生き残りの W16 は今回変えていない枝(G1)
 - Fail: なし
 - Blocked: なし
+
+## Addendum(2026-10-22、sync-docs)
+
+この報告のあとの 62f92f42(`test:` の 1 コミット)が G1 と G2 を埋めた。変えたのは `tests/test-wip-checkpoint-hooks.sh` と `internal/org/director_cmd_test.go` だけで、hook・コード・雛形は変えていない。上の表と Verdict は /test の時点のまま残し、ここに足すだけにする。sync-docs が 62f92f42 の tree で打ち直したのは、hook のテスト(`bash tests/test-wip-checkpoint-hooks.sh`)と、下の W16・O3 の 2 本の mutant だけで、Go のテスト全体とほかの mutant は打ち直していない。
+
+- G1(埋めた): hook のテストは 108 件から 156 件になった(rc 0、156 passed、0 failed)。hook 4 本それぞれに、master の汚れた木(値なしと `off`。どちらもコミットなしで skipped の行もない)と、detached HEAD の汚れた木(値なしでその HEAD にコミットが 1 つ、`off` でコミットなし)の行を足した。detached HEAD では `git rev-parse --abbrev-ref HEAD` が `HEAD` を返し、`unknown` にならないので、hook は feature ブランチとして扱って `wip:` のコミットを作る。これは前からの振る舞いで、変えずにテストで固めた。tech-debt に行を足した(「The session-end and pre-compaction WIP hooks make a `wip:` commit on a detached HEAD」)。W16(master を守る case から外す)は、session_end(root)の master の 2 件(値なしと `off`)が赤になり、生き残らなくなった(hook 4 本とテストを scratchpad に写して打ち直した。154 passed、2 failed)。`unknown` の枝(`git rev-parse` が失敗するとき)を打つ行は足していない
+- G2(埋めた): `TestDirectorLaunchScript_ChecksInThenExecsTheAgent` に subtest `the terminal passes neither value` を足した。端末の環境に 2 つの値がない状態で起動スクリプトを打ち、check-in の環境と agent の両方が `selfname=off` と `wipcheckpoint=off` を見ることを確かめる。O3(`export` を書かない)は、この subtest が赤にする(`go test -overlay` で打ち直した。`-run 'TestDirectorLaunchScript_ChecksInThenExecsTheAgent|TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn'` で落ちたのはこの subtest だけ)。全文を比べる `TestDirectorLaunchScript_TextQuotesEveryValue` に頼らずに固まる
+- G3〜G6: 変わらず残る
+- mutant: /test の 53 本のうち、生き残りだった W16 は赤になった。ほかの 52 本は打ち直していない。hook のテストの書き方が変わったので、W1〜W15 の 62f92f42 のあとの結果は未確認
