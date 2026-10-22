@@ -1,0 +1,113 @@
+# Walkthrough: watch-escalation-inbox(試行の所見 F6・F13、見張りの escalation を受信箱の ALERT の件にする)
+
+- Date: 2026-10-23
+- Plan: docs/plans/active/2026-10-23-watch-escalation-inbox.md(/pr で archive に移す)
+- PR: fix/watch-escalation-inbox(番号は PR を作ったあとに書く)
+- Branch: fix/watch-escalation-inbox(base e8e8d652、この walkthrough の前の HEAD 1cf9fc8b。25 commits、44 files、+3349/-284)
+- 読む範囲: コードは Go の 7 files(+536/-165)で、本体は `internal/org/watch.go`(+296/-73)、`internal/org/escalate.go`(+152/-41)、`internal/org/inbox.go`(+35/-19)。`internal/org/deadline.go` は呼び出しに `item.AlertID` を渡すだけ(+4/-2)。`internal/cli/org_watch.go` と `internal/cli/org_inbox.go` は help と注の文だけ、`internal/config/config.go` は doc コメントだけ。director の雛形 `internal/org/prompts/director.md`(+3)。`templates/base/ralph.toml` はコメントだけ(+7/-4)。テストは 8 files(+1718/-40)で、`watch_test.go`(+817/-34)、`watch_all_test.go`(+414)、`escalate_test.go`(+286/-5)が大半。文書は `/org` と `/director` の skill の 4 写しずつ(8 files)、`agent-messaging.md` の 2 写し、README、AGENTS.md、`docs/quality/quality-gates.md` と `docs/recipes/director-wake.md` の 2 写しずつ、仕様 2 本、根拠の表、tech-debt。残りは計画、後工程の報告 5 本(cross-review は triage)、insight event
+- 後工程は 1 回(cycle 1)で終え、cross-review の指摘は 0 件
+
+```
+何を直すか → 計画 → 受信箱の側(S1) → 見張りの側(S2、S2b) → 文書(S3) → 記録(S4) → 後工程と、その中の直し → AC の根拠 → 確かめていないこと
+```
+
+## 1. この PR が何か
+
+- 試行の所見を直す系列の 6 本目(F6・F13)。5 本目は #251(F5)
+- F6: 試行(stage 9)で、見張りの escalation 30 件が、director が登録されて受信箱を処理している間も、受信箱も director も通らずに人へ直接届いた。`escalateAlert` が `escalations.jsonl` の行、stderr の banner、osascript の通知を、`[org.director].enabled` に関わらず出していたため
+- F13: `escalateAlert` は通知を `_ = w.escalateFn(...)` で呼び、結果を捨てていた。30 件のうち通知の shim に呼び出しのない 1 件について、なぜ通知が出なかったかを記録から言えなかった
+- 直し 1(受信箱の道): 見張りの escalation(理由 `leader_is_anomaly_subject` と `deadman_timeout`)を、受信箱の TYPE `ALERT` の件 1 つにする(`escalateToInbox`)。本文は ralph が作る typed message で、見出し `ORG_ID`・`SEAT`・`CONDITION`・`REASON`・`ALERT_ID`・`ALERT_TS` と 1 行の説明を持つ。`escalated` の event と件は `alert_id` の欄を持つ
+- 届け方は leader の escalate と同じ判定の関数 `inboxDelivery` で、この見張り自身について決める。`[org.director].enabled` で、その見張りが `--once` でなく止める頼みも出ていなければ delivery `deadline`。件の記録と stderr の 1 行だけで、`escalations.jsonl` の行も通知もない。open のまま残った件は ack の期限、ack されて resolve されない件は resolve の期限で、`ralph org watch --all` の `SweepInboxDeadlines` が人に届ける。そうでなければ delivery `now` で、記録と同時に `sendInboxItemToHuman` で人に送り、通知の結果は件の `notified` に残る(F13)
+- 直し 2(今の道): 受信箱がない・読めない・書けないとき、と、件の見出しに入れる状態ファイルの値が見張りの書く形でないときは、件を書かずに今までの道に落ちる。順は stderr の banner、通知、`escalations.jsonl` の 1 行で、行は新しい欄 `osascript` に通知の結果(`ok`、`failed: <err>`、`skipped`)を持つ(F13)
+- 重複: 見張りは書く前に受信箱を読み、同じ `alert_id` の件があれば新しい件を書かない(件を書いたあと、状態ファイルを保存する前に止まった見張りの再起動の形)。その件が open で未通知、かつ今の見張りが任せられないときだけ、同じ ID で人に送る
+- 人への道を ALERT に合わせた: `inboxItemTypes` を `escalateTypes` とは別に持ち、`notifiableType` が ALERT を `<invalid>` にしない。`ralph org escalate` は ALERT を今までどおり断るので、ALERT の件を書けるのは見張りだけ。ALERT の件を人に送るとき、行に `alert_id` と対象の座席(`subject`)を残し、通知の題は `ralph org watch`
+- director の扱い(D7): `/director` skill(4 写し)と雛形 `director.md` に、ALERT の件は ralph が書いた件で、状態を読み、leader に知らせるか人に送るかまでにする、座席や org を止めるのは人、と書いた
+- 安全の性質(D6): director が resolve した delivery `deadline` の ALERT の件は人に届かない。org-runtime 仕様の「人間エスカレーションはパルス層からのみ発火し、LLM が抑止できない」は、機能ごとの org の仕様が優先すると読み、FR-6 の注に書いた。全 LLM が止まれば期限で届く。遅れの上限は、open のままの件が `ack_minutes` + 見張りの間隔、ack のあと止まった件が `resolve_minutes` + 見張りの間隔で、deadman の件は `deadman_minutes` が先に加わる
+- director が無効のとき(D8): ALERT の件も記録と同時に人に送り、resolve の期限も効く。resolve されない件は、最初の通知のあと resolve の期限でもう 1 回届き、1 つの alert の通知は最大 2 回になる(tech-debt に行がある)。release のノートに書く
+- 記録に残る `fix/split-preamble` を `#251` に直した。この PR 自身は 4c 以降と同じく、merge の前のブランチ名 `fix/watch-escalation-inbox` で書き、番号は次の PR が書く
+- 戻し方: この PR を revert する。受信箱に残った ALERT の件は、古い binary でも読めて resolve できる(fold は TYPE が空でないことだけを見て、知らない欄は無視する)。古い binary の見張りは今までどおり人へ直接送る
+
+## 2. 読む順(commit ごと)
+
+1. dbd90827 計画、b593269f 計画の追記
+   - Objective、Scope、Non-goals、Design decisions(D1〜D9)、AC1〜AC10 を読む。承認の digest は初め `95d7155105d7`。S2 の consult の指摘で D4 を直して `c6039d0bef22`(b593269f)、verify の所見で D5 に値の検査を足して `0bf5660a7229`(8d1c53ce)に取り直した。以降、本文は変えていない(Progress と AC の checkbox だけが動く)
+   - D1: 方式は案 A。見張りの escalation を受信箱の件にし、leader の escalate と同じ判定と人への道を使う。案 B(F13 だけ直し、director には写しだけ送る)は F6 の「人に 5 分ごとに通知が来る」が直らない。案 C(director の生存の確かめが新しいときだけ任せる)は、仕様 FR-9 の「登録の有無で escalate の動きは変わらない」とずれる
+   - D3: 見張りの「受け付けている」は、そのサイクルの見張り自身について、`--once` でなく(`WatchAllParams.Cycles == 0`)、止める頼みが出ていないこと。止まる直前の見張りが `deadline` で書いた件は次の見張りが起動するまで誰も期限を見ないので、そのときは今すぐ送る
+   - D4: 重複の判定(件を 2 つ書かない)と、届け終えたか(通知を終えたか)を分ける。送るかは、件を書いた見張りの判定でなく今の見張りの判定だけで決める。新しい件と同じ規則にそろえ、送る理由を今の見張りの事実と合わせるため(S2 の consult。b593269f)。Codex の計画助言 1(HIGH。重複の判定が送り残しを捨てる)への答え
+   - D6: 遅れの上限を、件の状態で分けて書く。ack のあとの上限は Codex の計画助言 2(MEDIUM)。ALERT の件だけ ack で ack の期限を外さない案は、leader の件と規則が分かれるので採らない
+   - 見ること: Non-goals は、leader への ALERT の送信が時間切れになる件(tech-debt の別の行)、ALERT の誤検知を減らすこと、leader の escalate の届け方を変えること、director が座席や org を止めること、件をまとめて resolve する動詞、実機の確かめ
+2. bb15d508 S1 受信箱の側(AC1 の欄、AC6、AC7、AC3 の人への道)
+   - `internal/org/inbox.go:117` の `InboxEvent.AlertID` と `:159` の `InboxItem.AlertID` は `omitempty`。`Escalate`(`:253`)は `in.AlertID` を escalated の event に書き(`:279`)、fold は escalated の event だけから読む(`:578`)。欄のない古い行は `""` に畳まれる
+   - `internal/org/escalate.go:45` の `inboxItemTypes` は `escalateTypes`(`:37`)に ALERT を足した別の一覧。`validateEscalation` は `escalateTypes` を見て ALERT を断る(`:402`)。`notifiableType`(`:508`)は `inboxItemTypes` を見る
+   - `inboxDelivery`(`:364`)は Enabled と「受け付けているか」を受け取る関数で、`escalateDelivery`(`:344`)が呼ぶ。`enabled` が false のとき `acceptsWork` を呼ばない。leader の escalate の動きは変えない
+   - `sendInboxItemToHuman`(`:435`)は引数に `alertID` を持ち、行に `alert_id` と、`alertIDSeat`(`:526`)で読んだ座席を `subject` に入れる(`:440`)。`inboxHumanTextFor`(`:472`)は ALERT の件に `WATCHDOG ESCALATION` の banner と題 `ralph org watch` を返す。`internal/org/deadline.go:213` の期限の送りも `item.AlertID` を渡す
+   - テスト: `TestInboxEscalate_WritesAndFoldsTheAlertID`(`internal/org/inbox_test.go:265`)、`TestInboxRead_AlertIDComesOnlyFromTheEscalatedEvent`(`:316`)、`TestNotifiableType_TakesTheInboxItemTypes`(`internal/org/escalate_test.go:931`)、`TestEscalate_RefusesTypeAlertAndWritesNothing`(`:956`)、`TestInboxDelivery`(`:982`)、`TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat`(`:1028`)、`TestInboxHumanTextFor_AnAlertItemGetsTheWatchText`(`:1099`)、`TestAlertIDSeat`(`:1152`)、`TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat`(`internal/org/deadline_test.go:617`)
+   - 見ること: leader の escalate の既存のテストは期待を変えずに通る(AC7)。`escalateTypes` が 3 つのままなので、`ralph org escalate` が ALERT を断る動きも同じ
+3. 100b6932 S2 見張りの側(AC1〜AC5)、6bc7864e S2b 重複した件を送る条件
+   - `internal/org/watch.go:1607` の `escalateAlert` は、理由を決め(`:1608-1611`)、`escalateToInbox`(`:1639`)を呼び、error なら `escalateWithoutInbox`(`:1772`)に落ちる(`:1612-1613`)。戻ったあとは `status.Escalated` に入れて pending から消す(`:1616-1618`)ので、どの分岐でも同じ alert を 2 度 escalate しない
+   - `escalateToInbox`: 値の検査(`checkWatchEscalationValues`、`:1685`。後述の d9b8cd9a)、受信箱を読む、`inboxDelivery(w.cfg.Director.Enabled, w.acceptsWork)`(`:1650`)で届け方を決める、同じ `alert_id` の件を探す(`:1652`)、なければ本文 `watchEscalationBody`(`:1754`)を `protocol.ValidateText`(`:1657`)に通して `Inbox.Escalate` に書く。delivery `deadline` は stderr の 1 行だけ(`:1664`)、`now` は `sendAlertItemToHuman`(`:1730`、送りを終えられないときは `ralph org inbox notify <id>` を示す 1 行)
+   - 「受け付けている」の配線: `watchAllRun.acceptsWork`(`:699`)が `!w.mark.Once && !w.stopRequested()` を返し、`watchRun` の欄(`:461`)に `:689` で渡す。escalation のたびに読むので、止める頼みがサイクルの途中で書かれても、そのあとの escalation は `now` になる
+   - `escalateRecordedItem`(`:1713`)の条件(`:1715`)は `item.State != InboxStateOpen || item.Notified || watchDelivery != InboxDeliveryNow`。S2 の実装は件の delivery も見ていた(どちらかが `now` なら送る)のを、6bc7864e が今の見張りの判定だけにした。計画 D4・AC4 は b593269f で直し済み
+   - 今の道: `escalateWithoutInbox`(`:1772`)は banner(`:1773`)、通知 `notifyWithoutInbox`(`:1775`)、`appendJSONLine`(`:1780`)の順。行の欄 `osascript` は `escalationRecord`(`:286`)に足した
+   - テスト: `newWatchInboxFixture`(`internal/org/watch_test.go:862`)は `DesktopNotify` と `Escalate` を記録だけの stub にし、herdr と agmsg は既存の fake。`TestWatch_Escalation_ASeatsAlertAndAnAlertAboutTheLeaderEachBecomeOneAlertItem`(`:963`)、`..._SendsTheAlertItemAtOnceUnlessThisWatchCanLeaveItToTheDirector`(`:1047`)、`..._LeavesTheAlertItemToTheDirectorWhenThisWatchAcceptsWork`(`:1112`)、`..._ASendThatIsNotCompletedNamesInboxNotifyAndLeavesTheItemToTheAckDeadline`(`:1162`)、`..._AnAlertAlreadyInTheInboxGetsNoSecondItem`(`:1201`、9 件)、`..._WithoutTheInboxWritesTheBannerThenNotifiesThenWritesOneLine`(`:1323`)。`RunWatchAll` を通すものは `internal/org/watch_all_test.go` の `TestRunWatchAll_AOnceRunSendsItsEscalationAtOnceWithTheDirectorOn`(`:2233`)、`..._ALongRunningWatchLeavesItsEscalationToTheDirectorUntilADeadline`(`:2260`)、`..._ACycleWithAStopRequestSendsItsEscalationAtOnce`(`:2342`)、`..._AOnceRunSendsTheUnnotifiedAlertItemOfAPendingAlertUnderItsOwnID`(`:2393`)
+   - 見ること: 受信箱を持たない Org の前からの `TestWatch_Deadman_*` は今の道を通り、期待を変えずに通る。書き直したのは `TestWatch_Deadman_EscalateFuncGetsItsOwnDeadlineEvenWhenTheLoopIsCancelled`(`:784`)だけで、fixture が受信箱を持つので 2 つの道の subtest にした
+4. 587f5b6a、b278070c S3 文書(AC8)
+   - `/org` skill: `watch` の行(`.claude/skills/org/SKILL.md:194`)と、「受信箱」節の見張りの ALERT の件の項(`:420-469`)。届き方、`escalations.jsonl` の行の欄、重複、受信箱に書けないとき、期限と遅れの上限、`enabled = false` のとき人が resolve することを書いた
+   - `/director` skill: 冒頭の項(`.claude/skills/director/SKILL.md:61`)、「件の処理」の ALERT の項(`:658`)、遅れの上限(`:673`)、止めない約束(`:921`)。雛形 `internal/org/prompts/director.md:53-55` に 1 行
+   - `.claude/rules/ralph/agent-messaging.md:121-128` に、ALERT の件を書くのは見張りだけで、本文はデータだと書いた。`ralph org watch` の help は `internal/cli/org_watch.go:73-83`。README(124、254、256 行)と `docs/quality/quality-gates.md:79` の見張りの行も、見張りの escalation が ALERT の件になることに合わせた
+   - 仕様: FR-6 の注(`docs/specs/2026-10-07-org-multi-org-director.md:100`)と、org-runtime 仕様の注(`docs/specs/2026-08-01-org-runtime.md:179`)。b278070c は、2 つの注の範囲を「見張りが見るすべての org」に直し、resolve で人に届かなくなるのは delivery `deadline` の件だけと書いた
+   - 写しは `.agents/skills/`、`templates/base/.claude/skills/`、`templates/base/.agents/skills/` の 3 組で、`/org` と `/director` の 4 写しずつ、`agent-messaging.md` の 2 写しがバイト一致。`docs/quality/quality-gates.md` の 2 写しは元から違う行(KNOWN_DIFF)があり、この PR の変更行は両側で同じ
+   - テスト: `TestRenderDirectorPrompt_LeavesTheStopForAnAlertItemToTheHuman`(`internal/org/prompts_test.go:1987`)が、雛形の 1 行を herdr と launch_cmd の両方で固める
+   - 見ること: skill の ALERT の件の項が、director が resolve した deadline の件は人に届かないこと(D6)と、director が無効のとき最大 2 回届くこと(D8)を、仕様と同じ言い方で書いているか
+5. b1fb161b、a560bec6、a9ffddd0、48227e36 S4 記録(AC9)
+   - tech-debt: F6(`docs/tech-debt/README.md:325`、直上の注は `:324`)と F13(`:334`、注は `:333`)を取り消し線と RESOLVED の注で閉じた。新しい open の行は二重通知(`:341`)。F5 の RESOLVED の注の `fix/split-preamble` を `#251` に直した
+   - 仕様: FR-6(`docs/specs/2026-10-07-org-multi-org-director.md:91`)と安全の不変条件(`:145`)を `[x]` にし、印の数は `[x]` 28、`[ ]` 4(base は 26 と 6)。PR の一覧は 34 本(`:5`)で、#251 を数え、この PR は数えない(`:25`)。経路を書いた行(`:240`)も直した
+   - 根拠の表(`docs/evidence/org-spec-evidence-2026-10-21.md`): F6(25 行)・F13(32 行)の行の直す PR、FR-6(52 行)と安全の不変条件(58 行)の行、`[x]` 27 と `[ ]` 4(79 行)、PR の一覧の #251 とこの PR の行(103・104 行)、34 本を確かめた文(106 行)
+   - 二重通知の行(`docs/tech-debt/README.md:341`)は、resolve の期限(`InboxDeadlineDue`、`internal/org/deadline.go`)が人に送ったかを見ないことが原因。a560bec6 と 48227e36 は、この行と仕様の注を、director を置かない使い方だけでなく、最初の通知が送られたすべての形(director が無効、`--once` か止める頼みの出た見張り、director の `inbox notify`)に広げた。a9ffddd0 は計画の Progress に S2・S3 の commit と release のノートの文を足した
+   - 見ること: `fix/split-preamble` が `docs/specs`・`docs/evidence`・`docs/tech-debt` から 0 件になっている(base は 1・4・2 件)
+6. 後工程と、その中の直し
+   - 6765dae1 self-review(マージ可、CRITICAL・HIGH・MEDIUM 0、LOW 9)。d9b8cd9a で直した: F1(今の道で行が書けないとき、stderr の行に `notification=<結果>`)、F2(`ralph org inbox` と `inbox notify` の help に ALERT の件)、F3(`retiredConditionTypeFromAlertID` を `alertIDConditionType` に改名、`watch.go:1070`)、F4(見出しに入れる値の検査 `checkWatchEscalationValues`、`:1685`)、F5(通知の送りを `notifyBounded`、`escalate.go:584` に 1 つにし、継ぎ目を `desktopNotifyGOOS`、`:571` に 1 つに)、F6(`WatchAllParams.StatusDir` の doc)、F7 の `delivery` を `watchDelivery` にする改名(b)、F8(コメントの参照 2 か所)。F7 のもう半分(a、`sendInboxItemToHuman` の文字列引数 5 つの束ね直し)は直しておらず、tech-debt にも書いていない。F9(`watch.go` のファイルの大きさ)と、受信箱の道で行が書けないと通知の結果が残らないこと(F1 の受信箱の側)は tech-debt の行にした(`docs/tech-debt/README.md:343` と `:342`)。30991e63 はその insight event
+   - F4 の直しで、件の見出しに入れる状態ファイルの値が検査を通らないときも今の道に落ちるようになった。計画の D5・AC5 にない 4 つ目の条件なので、verify の所見に合わせて 8d1c53ce が計画の Scope・D5・AC5 に足し、digest を取り直した
+   - 7780966a verify(pass。LOW 3、INFO 1、coverage gap 1)。000a2352 で直した: 「人へ escalate する」と読める古い文 4 か所(`internal/config/config.go:59` の `DeadmanMinutes` の doc、`templates/base/ralph.toml:51`、`watch.go` のコメント、tech-debt の Impact)、`/org` skill と FR-6 の注に 4 つ目の条件、tech-debt の「both deliveries」、README の言い方(INFO)、`ralph org watch` の help を固めるテスト `TestOrgWatch_HelpDescribesTheAlertItemEscalation`(`internal/cli/org_watch_test.go:1879`)。47c213f6 はその insight event
+   - 439359f3 test(pass、mutant 54 本中 51 本が赤、穴 3 件)。08083792 が穴 1〜3 を埋めた。コードは変えず、`watch_test.go` と `watch_all_test.go` だけ。穴 1 は座席の ALERT(`deadman_timeout`)が delivery `deadline` で記録される形(`TestRunWatchAll_ALongRunningWatchLeavesASeatsDeadmanEscalationToTheDirectorUntilTheAckDeadline`、`watch_all_test.go:2474`)、穴 2 は osascript に渡る題が `ralph org watch` であること(`TestWatch_Escalation_TheOsascriptNotificationIsTitledAfterTheWatch`、`watch_test.go:1524`)、穴 3 は 2 つの org が同じサイクルで `deadline` の件を書く形(`TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline`、`watch_all_test.go:2543`)。b09b04bb は insight event と、test の報告の「この報告のあとに埋めた穴」
+   - 03beb611 sync-docs(食い違い 4 つを直した): AGENTS.md の repo map に見張りの escalation の 1 句、`docs/recipes/director-wake.md` と template の写しに、見張りが書く ALERT の件は pulse の中で書かれ wake はその前に走るので、push の director には次のサイクルで知らされること、tech-debt のファイルの大きさの行の行数(`watch.go` 1848、`watch_test.go` 3007)、計画の Progress の 3 行。95374404 はその insight event
+   - 86620383 cross-review の triage(cycle 1/2、指摘 0)。`codex exec review --base main` を read-only で打ち、指摘なしで終わった。codex は read-only の sandbox が一時ディレクトリを書けないため、Go のテストを走らせていない。1cf9fc8b はその insight event
+   - `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` の結果は AC10 の行
+
+## 3. AC の根拠
+
+| AC | 根拠 |
+|----|------|
+| AC1 | S1、S2。`TestWatch_Escalation_ASeatsAlertAndAnAlertAboutTheLeaderEachBecomeOneAlertItem`(`internal/org/watch_test.go:963`、2 件)が、座席の ALERT(deadman_timeout)と leader の ALERT がそれぞれ件を 1 つだけ書くこと、本文が `protocol.Parse` と `protocol.Validate` を通ること、見出しが 6 つちょうどであることを見る。`TestInboxEscalate_WritesAndFoldsTheAlertID`(`internal/org/inbox_test.go:265`)と `TestInboxRead_AlertIDComesOnlyFromTheEscalatedEvent`(`:316`)は、inbox.jsonl の行をバイトで比べ、欄のない古い行が `""` で畳まれること、あとの event の `alert_id` が件の値を変えないことを見る。mutant A29〜A31・A36 が赤 |
+| AC2 | S2。`TestWatch_Escalation_LeavesTheAlertItemToTheDirectorWhenThisWatchAcceptsWork`(`watch_test.go:1112`、leader の ALERT と座席の ALERT)は `escalations.jsonl` を作らず通知もせず、stderr がちょうど 1 行であることを見る。`TestRunWatchAll_ALongRunningWatchLeavesItsEscalationToTheDirectorUntilADeadline`(`internal/org/watch_all_test.go:2260`)は、open の件が 11 分後のサイクルで `inbox_ack_deadline`、ack した件が 61 分後のサイクルで `inbox_resolve_deadline` で届くことを見る。座席の ALERT は `..._LeavesASeatsDeadmanEscalation...`(`:2474`、08083792)。mutant A3・A12・A41・A48 が赤 |
+| AC3 | S2。`TestWatch_Escalation_SendsTheAlertItemAtOnceUnlessThisWatchCanLeaveItToTheDirector`(`watch_test.go:1047`、4 件)、`TestRunWatchAll_AOnceRunSendsItsEscalationAtOnceWithTheDirectorOn`(`watch_all_test.go:2233`)、`TestRunWatchAll_ACycleWithAStopRequestSendsItsEscalationAtOnce`(`:2342`、起動時にある頼みと途中で書かれる頼み)。理由は `inbox_director_disabled` か `inbox_no_watch`。通知が失敗すると `notified` が `failed: exit status 1: Not authorized to send Apple events`(F13)。行は `ts`・`org_id`・`inbox_id`・`alert_id`・`subject`・`reason` のちょうど 6 欄(`TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat`、`escalate_test.go:1028`、`TestAlertIDSeat`、`:1152`)。送りを終えられないと `ralph org inbox notify <id>` を示す 1 行が出て、件は ack の期限で送られる(`..._ASendThatIsNotCompleted...`、`watch_test.go:1162`)。mutant A1・A2・A4・A5・A6・A17〜A19・A26・A38・A44〜A46 が赤 |
+| AC4 | S2、S2b。`TestWatch_Escalation_AnAlertAlreadyInTheInboxGetsNoSecondItem`(`watch_test.go:1201`、9 件)。`escalateRecordedItem` の条件の 3 つの項それぞれに、その項だけで送らない行がある。`TestRunWatchAll_AOnceRunSendsTheUnnotifiedAlertItemOfAPendingAlertUnderItsOwnID`(`watch_all_test.go:2393`)は、件を書いたあと通知の前に落ちた形から `--once` で起動し直すと同じ ID で届き、件は 1 つのままで、alert が pending から外れることを見る。mutant A7〜A11・A39・A47 が赤 |
+| AC5 | S2。`TestWatch_Escalation_WithoutTheInboxWritesTheBannerThenNotifiesThenWritesOneLine`(`watch_test.go:1323`、5 件)が、受信箱がない・読めない・書けないで、banner、通知、行の順になること(通知の stub の中で banner がもう出ていて行がまだないことで見る)と、`osascript` が `ok`・`failed: <err>`・`skipped` になることを見る。行が書けないときの `notification=<結果>` は `..._ALineThatCannotBeWritten...`(`:1407`)、値の検査は `..._AnAlertWithValuesTheWatchDoesNotWriteRecordsNoItem`(`:1458`、4 件)。mutant A13〜A16・A24・A32〜A35・A37・A43 が赤 |
+| AC6 | S1、S2。`TestInboxHumanTextFor_AnAlertItemGetsTheWatchText`(`escalate_test.go:1099`)、`TestNotifiableType_TakesTheInboxItemTypes`(`:931`)、`TestEscalate_RefusesTypeAlertAndWritesNothing`(`:956`。`inbox.jsonl`・`inbox.lock`・`escalations.jsonl` を作らない)、`TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat`(`deadline_test.go:617`)。osascript に渡る題は `TestWatch_Escalation_TheOsascriptNotificationIsTitledAfterTheWatch`(`watch_test.go:1524`、偽の osascript の引数を完全一致で見る。08083792)。mutant A20〜A23・A27・A28・A42 が赤 |
+| AC7 | S1。`escalateDelivery`(`escalate.go:344`)は `inboxDelivery`(`:364`)を呼ぶだけになり、見張りも同じ関数を呼ぶ(`watch.go:1650`)。`TestInboxDelivery`(`escalate_test.go:982`、6 通りと `acceptsWork` を呼ぶ回数)。前からある `TestEscalate_*`・`TestNotifyInboxItem_*`・`TestSweepInboxDeadlines_*`・`TestInboxDeadlines_*` は期待を変えずに通り、mutant A25(leader の escalate に見張りを渡さない)は前からあるテスト 7 本で赤になる |
+| AC8 | S3。verify が 4 写しずつの `cmp` と、`check-skill-sync.sh`(14 skill)、`check-sync.sh`(DRIFTED 0)を見た。`TestRenderDirectorPrompt_LeavesTheStopForAnAlertItemToTheHuman`(`prompts_test.go:1987`)、`TestOrgWatch_HelpDescribesTheAlertItemEscalation`(`internal/cli/org_watch_test.go:1879`)、`TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch`(`internal/cli/org_inbox_test.go:753`)。mutant P1・P2・C1・C2 が赤。「デッドマン時の人間エスカレーション」は 4 写しのどれにも残っていない |
+| AC9 | S4。verify が仕様の印(`[x]` 28、`[ ]` 4)と根拠の表(27 と 4)を数え、動いたのは FR-6 と安全の不変条件の 2 つだけであることを確かめた。`fix/split-preamble` は `docs/specs`・`docs/evidence`・`docs/tech-debt` に 0 件。PR の一覧は仕様と根拠の表の両方で 34 本。#251 が merge 済みであることは main の e8e8d652 が「Merge pull request #251」であることで確かめた(gh は打っていない)。tech-debt の F6・F13 の行は取り消し線・RESOLVED の注・Trigger の欄の `~~...~~ — RESOLVED` がそろい、セルは 5 つ。sync-docs も数え直した |
+| AC10 | `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` を 95374404 から打ち、rc 0(1014 秒、「All verifiers passed」)。Language scope は full で、Go のテストは internal/cli(360.861 秒)と internal/org(506.599 秒)を cache なしで通った。走っているあいだに 86620383 と 1cf9fc8b(triage の報告と insight event だけ)がコミットされ、秘密の走査は `e8e8d652..1cf9fc8b` を見て clean。go1.25.8 は 08083792 で `go test -count=1 -timeout 30m ./internal/org/... ./internal/cli/...` が rc 0(376 秒)で、そのあとに Go のファイルの変更はない |
+
+テストの強さ(test の報告より):
+
+- go1.26 で、新しいテストと同じ関数を見る前からのテストを `-count=3`(org は RUN 885、cli は RUN 148)と `-race`(RUN 295)で通した。`GOFLAGS='-timeout=30m -count=1' ./scripts/run-test.sh` は rc 0(851 秒、shell 44 本と Go 8 パッケージ)。org・cli・config は go1.25.8 でも rc 0(391 秒)
+- herdr・agmsg・osascript・open・tmux・gh・orca・claude・codex・curl・wget・nc・ssh を、呼ばれたら記録して終わる canary にした PATH と空の HOME で打ち、外への呼び出しは 0 回だった。canary は感度も確かめた(mutant A24 では osascript の呼び出しを 2 回記録し、テストが赤になった)
+- mutant は 54 本のうち 51 本が赤になった。生き残った 3 本のうち、A49 と A50(osascript に渡る題)は 08083792 のテストで赤になった。A40(本文の protocol の検査を飛ばす)は同値で、`protocol.Validate` が落ちる 4 つの形のどれも、本文が固定の見出しと 1 行で、値の検査(`checkWatchEscalationValues`)を先に通すので、赤にする入力がない。ほかの 51 本は 08083792 のあとに打ち直していない
+- base のテストファイル 8 つを HEAD のコードに重ねて打つと、落ちたのは意図して変えた期待の 2 本だけ(cli の help の文 1 本、org の通知の継ぎ目 1 本)。テストファイルの差分で消えた行は 4 か所で、`TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` の darwin の skip(GOOS の継ぎ目と偽の osascript に置き換え、期待は `skipped` のまま)、`TestEscalationRecord_WatchAndInboxLinesKeepTheirOwnID` の doc コメント、`TestWatch_Deadman_EscalateFuncGetsItsOwnDeadline...` の本体、cli の inbox の help の期待の 1 行
+- `internal/org` の statement coverage は 94.9%(前回の報告は 94.8%)。差分で足した関数の未到達は、osascript に届く道(`realEscalate` が 0.0%、`inboxDesktopNotify` が 50.0%。計測は 08083792 の前)と、`escalateToInbox` で `protocol.ValidateText` が落ちたときの return(A40 と同じく到達しない)
+
+## 4. 確かめていないこと
+
+- 実機では打っていない(計画の Non-goals)。本物の herdr、director のセッション、osascript は動かしていない。Go のテストは fake の herdr・agmsg と stub の通知(`DesktopNotify`、`Escalate`)で、osascript に渡る引数だけを偽の osascript で見た。通知が画面に出るか、題が実際に `ralph org watch` と見えるかは見ていない
+- director の LLM が skill と雛形のとおりに ALERT の件を処理するか(leader に知らせる、人に送る、座席や org を止めない)は見ていない。雛形は 1 行の文言をテストで固めただけで、skill は `cmp` と文面の突き合わせ
+- Codex 側の skill(`.agents/skills/` と `templates/base/.agents/skills/` の写し)は、バイト一致と `check-skill-sync.sh` で見ただけで、Codex の session で読ませていない
+- cobra の `ralph org watch --all --once` を通して ALERT の件ができるテストは cli にない。CLI が見張りと同じ Org の `Inbox` と `EscalationsPath` を渡すことは、期限の送信を見る既存の cli テスト(`internal/cli/org_watch_test.go` の `--once` の期限の送信が `EscalationsPathIn(stateDir)` に行を書くもの)で間接に固まっているだけ。`WatchAllParams.StatusDir` の doc が呼び出し側に求める「`Org.EscalationsPath` を `EscalationsPathIn(StatusDir)` にする」ことを、ALERT の件で直接見るテストもない
+- push で登録した director の wake は、サイクルの中で pulse より前に走るので、`deadline` で記録された ALERT の件の wake は次のサイクルになる(`docs/recipes/director-wake.md` に書いた)。ALERT の件の wake を見るテストはない(`WakeDirector` は TYPE を読まない)
+- F7 の `sendInboxItemToHuman` と `inboxHumanTextFor` の文字列引数 5 つの束ね直しは直していない。tech-debt の行にもしていないので、この PR の記録を書き換える系列の次の PR で 1 行足す。呼び出しは 4 か所で、引数の順は `(orgID, id, typ, alertID, reason)` でそろい、取り違えるとコンパイルは通る
+- 受信箱の道で `escalations.jsonl` の行が書けないとき、通知の結果は banner にも件にも残らない(`docs/tech-debt/README.md:342`)。leader の件も同じで、今の道だけ stderr の行が結果を持つ。`watch.go`(1848 行)と `watch_test.go`(3007 行)が 800 行の目安を超える(`:343`)。どちらも tech-debt に行がある
+- 二重通知(最大 2 回)と、新しい skill に新しい binary が要ることは、release のノートに書く。repo に CHANGELOG はなく、書くのは `/pr` の本文と release の仕事
+- 08083792 のあとに打ち直したのは `go test -count=1 -timeout 30m ./internal/org/... ./internal/cli/...`(go1.26 で rc 0、359 秒。go1.25.8 で rc 0、376 秒)と、足したテストの `-count=5`。`./scripts/run-test.sh` を単独で打ち直すことと mutant の打ち直しは、その tree でしていない。代わりに 95374404 からの `run-verify.sh` が、その中の Go のテスト(internal/cli と internal/org は cache なし)と shell のテストを打ち、rc 0 だった(AC10 の行)
+- 仕様の「Current state」(48 行)の「人に届くのは watchdog のデッドマンだけ」は 2026-10-07 時点の問題の記述で、5 段目から古い。背景の節なので、この PR では書き直していない
+- 記録に残る `fix/watch-escalation-inbox` を、この PR の番号に置き換えること。次の PR でする。置き換え先は `grep -rn 'fix/watch-escalation-inbox' docs/specs docs/evidence docs/tech-debt` で見つかる行で、仕様は 25・101・146 行、根拠の表は 16・25・32・52・58・104・115 行、tech-debt は 324・325・333・334・341〜343 行。置き換えると PR の一覧は 35 本になる
+- 手元は macOS(Darwin 25.5.0、arm64)だけで、Linux では走らせていない(CI が見る)。darwin だけで走っていた `TestEscalate_NoDesktopNotificationOffDarwinIsSkipped` は、GOOS の継ぎ目(`desktopNotifyGOOS`)でどの OS でも走る

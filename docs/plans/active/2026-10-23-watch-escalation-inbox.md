@@ -86,16 +86,16 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: 見張りの escalation は、受信箱に TYPE `ALERT` の件を 1 つ書く。本文は `protocol.Parse` と `protocol.Validate` を通る typed message で、見張りの ALERT の代わりの文(`sendAlert`)と同じ見出し `ORG_ID`・`SEAT`・`CONDITION` に、`REASON`(`leader_is_anomaly_subject` か `deadman_timeout`)、`ALERT_ID`、`ALERT_TS`(元の ALERT の時刻)を足した見出しと、1 行の説明を持つ。escalated の event と、それを畳んだ件(`InboxItem`)は `alert_id` の欄を持つ。欄のない古い行も今までどおり読める
-- [ ] AC2: `[org.director].enabled` で、見張りが `--once` でなく止める頼みも出ていないとき、件は delivery `deadline` で記録だけされ、escalations.jsonl の行も通知もない。stderr には `WATCHDOG ESCALATION` で始まり、件の ID と director に任せたことを言う 1 行が出る。その件は、ack の期限を過ぎて open なら、次のサイクルの `SweepInboxDeadlines` で人に届く(理由 `inbox_ack_deadline`)。ack されてから resolve されない件は、resolve の期限を過ぎたサイクルで人に届く(理由 `inbox_resolve_deadline`、D6 の ack のあとの上限)
-- [ ] AC3: director が無効のとき、`--once` の見張りのとき、止める頼みが出ているときは、件は delivery `now` で記録され、同じサイクルで人への道に送られる。送る理由は leader の件と同じ `inbox_director_disabled` か `inbox_no_watch` にする。escalations.jsonl の行は `inbox_id`・`alert_id`・対象の座席(`subject`)を持ち、`subject` が `leader` なら元の理由は `leader_is_anomaly_subject`、それ以外なら `deadman_timeout` と読める。`notified` の event は通知の結果を持ち、通知が失敗すると `failed: <err>` になる(F13)。人への道を終えられなかったとき(escalations.jsonl に書けないなど)は、stderr に `ralph org inbox notify <id>` を示す 1 行を出す。その件は open で `notified` がないので、ack の期限でも人に届く
-- [ ] AC4: 同じ alert_id の件がもう受信箱にあれば、見張りは新しい件を書かない(落ちた見張りの再起動の形)。その件が届け済み、ack 済み、resolve 済みなら通知もしない。その件が open で `notified` がなく、今の見張りが任せられない(判定が delivery `now`)なら、同じ ID で人への道に送る(件を書いたあと通知の前に落ち、ack の期限の前に `--once` で起動し直した形を含む)。今の見張りが任せられるなら送らず、stderr に 1 行書き、件は ack の期限で届く。どの場合も、escalate した alert は pending から消える
-- [ ] AC5: 受信箱に書けないとき(Inbox が nil、読めない、書けない)と、見出しに入れる値が検査を通らないとき(D5)は、stderr の banner、通知、escalations.jsonl の 1 行の順で今の道に落ちる。行は `alert_id`、`subject`、`reason` と、通知の結果の `osascript`(`ok`、`failed: <err>`、通知の手段がなく darwin でもないときは `skipped`)を持つ。通知が失敗すると `osascript` は `failed: <err>` になる(F13)
-- [ ] AC6: 人への道の ALERT の件では、記録と同時に送るときも期限で送るときも、デスクトップ通知が org、件の ID、TYPE `ALERT` を出し(`<invalid>` にならない)、題は `ralph org watch` になる。期限で送るときの escalations.jsonl の行も `alert_id` と `subject` を持つ。本文は通知に出さない。`ralph org escalate` は TYPE `ALERT` を今までどおり断り、何も書かない
-- [ ] AC7: leader の escalate の届け方は変わらない(既存の escalate のテストが、期待を変えずに通る)。届け方の判定は、leader の escalate と見張りが同じ関数で決める
-- [ ] AC8: 文書を合わせる。`/director` skill(4 写し)の「件の処理」に ALERT の件の扱い(D7)、雛形 `director.md` にその 1 行、`/org` skill(4 写し)の `watch` の行と「受信箱」節(D8)、`agent-messaging.md`(2 写し)の escalation の節、`ralph org watch` の help、仕様の FR-6 の注(D6)。写しはバイト一致。prompts_test.go が director の雛形の 1 行を固める
-- [ ] AC9: 記録を合わせる。tech-debt の F6 と F13 の行を取り消し線と RESOLVED の注で閉じる。根拠の表の F6・F13 の行の直す PR、FR-6 と NFR 安全の不変条件の行を `[x]` にする(ほかの所見が残っていないことを確かめる)。仕様の FR-6 と安全の不変条件を `[x]` にし、印の数を直す(`[x]` 28 / `[ ]` 4、根拠の表は 27 / 4 の見込み)。「fix/split-preamble」を「#251」に直し、PR 一覧を 34 本にする。この PR は merge の前のブランチ名 `fix/watch-escalation-inbox` で書き、番号は次の PR が書く
-- [ ] AC10: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
+- [x] AC1: 見張りの escalation は、受信箱に TYPE `ALERT` の件を 1 つ書く。本文は `protocol.Parse` と `protocol.Validate` を通る typed message で、見張りの ALERT の代わりの文(`sendAlert`)と同じ見出し `ORG_ID`・`SEAT`・`CONDITION` に、`REASON`(`leader_is_anomaly_subject` か `deadman_timeout`)、`ALERT_ID`、`ALERT_TS`(元の ALERT の時刻)を足した見出しと、1 行の説明を持つ。escalated の event と、それを畳んだ件(`InboxItem`)は `alert_id` の欄を持つ。欄のない古い行も今までどおり読める
+- [x] AC2: `[org.director].enabled` で、見張りが `--once` でなく止める頼みも出ていないとき、件は delivery `deadline` で記録だけされ、escalations.jsonl の行も通知もない。stderr には `WATCHDOG ESCALATION` で始まり、件の ID と director に任せたことを言う 1 行が出る。その件は、ack の期限を過ぎて open なら、次のサイクルの `SweepInboxDeadlines` で人に届く(理由 `inbox_ack_deadline`)。ack されてから resolve されない件は、resolve の期限を過ぎたサイクルで人に届く(理由 `inbox_resolve_deadline`、D6 の ack のあとの上限)
+- [x] AC3: director が無効のとき、`--once` の見張りのとき、止める頼みが出ているときは、件は delivery `now` で記録され、同じサイクルで人への道に送られる。送る理由は leader の件と同じ `inbox_director_disabled` か `inbox_no_watch` にする。escalations.jsonl の行は `inbox_id`・`alert_id`・対象の座席(`subject`)を持ち、`subject` が `leader` なら元の理由は `leader_is_anomaly_subject`、それ以外なら `deadman_timeout` と読める。`notified` の event は通知の結果を持ち、通知が失敗すると `failed: <err>` になる(F13)。人への道を終えられなかったとき(escalations.jsonl に書けないなど)は、stderr に `ralph org inbox notify <id>` を示す 1 行を出す。その件は open で `notified` がないので、ack の期限でも人に届く
+- [x] AC4: 同じ alert_id の件がもう受信箱にあれば、見張りは新しい件を書かない(落ちた見張りの再起動の形)。その件が届け済み、ack 済み、resolve 済みなら通知もしない。その件が open で `notified` がなく、今の見張りが任せられない(判定が delivery `now`)なら、同じ ID で人への道に送る(件を書いたあと通知の前に落ち、ack の期限の前に `--once` で起動し直した形を含む)。今の見張りが任せられるなら送らず、stderr に 1 行書き、件は ack の期限で届く。どの場合も、escalate した alert は pending から消える
+- [x] AC5: 受信箱に書けないとき(Inbox が nil、読めない、書けない)と、見出しに入れる値が検査を通らないとき(D5)は、stderr の banner、通知、escalations.jsonl の 1 行の順で今の道に落ちる。行は `alert_id`、`subject`、`reason` と、通知の結果の `osascript`(`ok`、`failed: <err>`、通知の手段がなく darwin でもないときは `skipped`)を持つ。通知が失敗すると `osascript` は `failed: <err>` になる(F13)
+- [x] AC6: 人への道の ALERT の件では、記録と同時に送るときも期限で送るときも、デスクトップ通知が org、件の ID、TYPE `ALERT` を出し(`<invalid>` にならない)、題は `ralph org watch` になる。期限で送るときの escalations.jsonl の行も `alert_id` と `subject` を持つ。本文は通知に出さない。`ralph org escalate` は TYPE `ALERT` を今までどおり断り、何も書かない
+- [x] AC7: leader の escalate の届け方は変わらない(既存の escalate のテストが、期待を変えずに通る)。届け方の判定は、leader の escalate と見張りが同じ関数で決める
+- [x] AC8: 文書を合わせる。`/director` skill(4 写し)の「件の処理」に ALERT の件の扱い(D7)、雛形 `director.md` にその 1 行、`/org` skill(4 写し)の `watch` の行と「受信箱」節(D8)、`agent-messaging.md`(2 写し)の escalation の節、`ralph org watch` の help、仕様の FR-6 の注(D6)。写しはバイト一致。prompts_test.go が director の雛形の 1 行を固める
+- [x] AC9: 記録を合わせる。tech-debt の F6 と F13 の行を取り消し線と RESOLVED の注で閉じる。根拠の表の F6・F13 の行の直す PR、FR-6 と NFR 安全の不変条件の行を `[x]` にする(ほかの所見が残っていないことを確かめる)。仕様の FR-6 と安全の不変条件を `[x]` にし、印の数を直す(`[x]` 28 / `[ ]` 4、根拠の表は 27 / 4 の見込み)。「fix/split-preamble」を「#251」に直し、PR 一覧を 34 本にする。この PR は merge の前のブランチ名 `fix/watch-escalation-inbox` で書き、番号は次の PR が書く
+- [x] AC10: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
 
@@ -156,4 +156,5 @@
 - [x] Review artifact created
 - [x] Verification artifact created
 - [x] Test artifact created
+  - cross-review は 86620383(cycle 1/2、指摘 0 件)。最後の `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は 95374404 から打ち、rc 0(1014 秒、internal/cli と internal/org は cache なし、秘密の走査は `e8e8d652..1cf9fc8b` で clean)。go1.25.8 は 08083792 で rc 0(376 秒)で、そのあとに Go のファイルの変更はない。AC1〜AC10 に印を付けた
 - [ ] PR created
