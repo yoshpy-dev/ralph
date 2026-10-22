@@ -1036,12 +1036,16 @@ func TestRenderRolePrompt_Leader_PushRefusesWipCommits(t *testing.T) {
 
 // TestRenderRolePrompt_Leader_FeatureOrgSeatRules pins AC5 of plan
 // 2026-10-22-split-preamble: step 1 of the 機能ごとの org section copies the
-// task's 全機能の座席に適用する決まり block, as it is, into a section of that
-// name in the feature plan, and step 5 uses the driver and model the block
-// names for the spawn's --driver and --model and, instead of copying the
-// other rules into a TASK's body (capped at protocol.DefaultMaxBodyChars),
-// tells the TASK to follow that section of the plan. Both name the block by
-// the words that start the lead line featureLeaderTask writes before it.
+// task's 全機能の座席に適用する決まり block, as it is and with its fence
+// lines, into a section of that name in the feature plan (without the fence,
+// the preamble's own ## headings would become sections of the plan), and
+// step 5 uses the driver and model the block names for the spawn's --driver
+// and --model and, instead of copying the other rules into a TASK's body
+// (capped at protocol.DefaultMaxBodyChars), tells the TASK to follow that
+// section of the plan. Step 3, where per-plan may spawn the reviewer before
+// the approval and so before step 5, says that spawn uses the block's driver
+// and model too. All three name the block by the words that start the lead
+// line featureLeaderTask writes before it.
 func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
@@ -1065,7 +1069,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
 	}{
 		{"1. 機能の計画を", []string{
 			"タスクの本文(機能の目的と受け入れ条件)を計画に写す",
-			"タスクに「" + rules + "」の囲みがあれば、計画に `## " + rules + "` の節を作り、その囲みを中身ごと原文のまま写す(言い換えず、削らない。座席はこの節を読む。手順 5)",
+			"タスクに「" + rules + "」の囲みがあれば、計画に `## " + rules + "` の節を作り、その囲みを、囲みの行も含めて中身ごと原文のまま写す(言い換えず、削らない。座席はこの節を読む。手順 5)",
+		}},
+		{"3. (per-plan)", []string{
+			"reviewer は承認の前に spawn してよく、計画のレビューを TASK で頼める",
+			"ここで reviewer を spawn するときも、タスクに「" + rules + "」があれば、そこに書かれた driver と model を `--driver` と `--model` に使う(手順 5)",
 		}},
 		{"5. implementer と reviewer を", []string{
 			"TASK には機能の計画のパスを書く",

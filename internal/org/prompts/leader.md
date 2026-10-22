@@ -89,10 +89,11 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
    沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。タスクに
    「全機能の座席に適用する決まり」の囲みがあれば、計画に
-   `## 全機能の座席に適用する決まり` の節を作り、その囲みを中身ごと原文の
-   まま写す(言い換えず、削らない。座席はこの節を読む。手順 5)。計画の先頭
-   (最初の `## ` の見出しより前)には `- Status: Draft` と `- Approved: TBD`
-   の行を 1 つずつ置く(雛形にあればそれを使う)。`/plan` skill は使わない
+   `## 全機能の座席に適用する決まり` の節を作り、その囲みを、囲みの行も
+   含めて中身ごと原文のまま写す(言い換えず、削らない。座席はこの節を読む。
+   手順 5)。計画の先頭(最初の `## ` の見出しより前)には
+   `- Status: Draft` と `- Approved: TBD` の行を 1 つずつ置く(雛形にあれば
+   それを使う)。`/plan` skill は使わない
    (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
    per-plan の承認は手順 3 の QUESTION で求める)
 2. (per-plan)図解ページを、`/plan` skill の `diagrams.md` と
@@ -130,7 +131,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 
    上げたら返事を待つ。返事が来るまで implementer は spawn しない(承認の前は
    spawn も TASK も断られる)。reviewer は承認の前に spawn してよく、計画の
-   レビューを TASK で頼める
+   レビューを TASK で頼める。ここで reviewer を spawn するときも、タスクに
+   「全機能の座席に適用する決まり」があれば、そこに書かれた driver と model を
+   `--driver` と `--model` に使う(手順 5)
 4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
    上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
    (人の承認が `ralph org approve` で台帳に記録されてから届く)。受けたら、
