@@ -143,7 +143,9 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 // split as newOrgRuntimeAt: each caller also passes the directory on, to
 // wireOrgWatchGate (spawn) or wireOrgStartWatchGate (start), and `ralph org
 // start --plan` to StartFeatureParams.StateDir and org.FeatureRepoRoot with
-// its source.
+// its source. It sets InboxHintStateDir (orgInboxHintStateDir), so the
+// `ralph org stop` commands Spawn's errors print for a seat left with an
+// unfinished spawn repeat --state-dir when it was given.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 		return nil, err
@@ -156,6 +158,7 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	if err != nil {
 		return nil, err
 	}
+	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
 	return rt, nil
 }
 

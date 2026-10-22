@@ -1612,7 +1612,7 @@ func TestOrgSpawn_FailureAfterSpawnDeadline_ClosesPaneUnderFreshDeadlines(t *tes
 	o, h, a := testOrg(t)
 	a.joinBlocks = map[string]bool{"seat-1": true}
 	p := mustSpawnParams("org-a", "seat-1")
-	p.TimeoutMS = 50
+	p.TimeoutMS = 500 // the Join waits for it; the steps before have margin under load
 
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
@@ -1647,7 +1647,7 @@ func TestOrgSpawn_HelloTimeout_LeavesThenClosesPane(t *testing.T) {
 		herdrAtLeave = slices.Clone(h.calls)
 	}
 	p := mustSpawnParams("org-a", "seat-1")
-	p.TimeoutMS = 50
+	p.TimeoutMS = 500 // the HELLO waits for it; the steps before have margin under load
 
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
@@ -1871,7 +1871,7 @@ func TestOrgSpawn_FailureAfterPane_CloseTimesOut_RecordsSpawnCloseFailed(t *test
 // context.DeadlineExceeded: the deadline ended its wait between retries,
 // and the hint still comes, since it reads the spawn's ctx.
 func TestOrgSpawn_SpawnDeadlineRunsOut_ErrorHintsAtTimeoutMS(t *testing.T) {
-	const hint = "(the spawn's --timeout-ms deadline of 50 ms, shared by every herdr and agmsg step, ran out; retry with a larger --timeout-ms)"
+	const hint = "(the spawn's --timeout-ms deadline of 500 ms, shared by every herdr and agmsg step, ran out; retry with a larger --timeout-ms)"
 	busy := errors.New("herdr: " + agentPaneBusyMarker)
 	for _, tc := range []struct {
 		name   string
@@ -1898,7 +1898,7 @@ func TestOrgSpawn_SpawnDeadlineRunsOut_ErrorHintsAtTimeoutMS(t *testing.T) {
 			o, h, a := testOrg(t)
 			tc.inject(o, h, a)
 			p := mustSpawnParams("org-a", "seat-1")
-			p.TimeoutMS = 50
+			p.TimeoutMS = 500 // each injected step waits for it; the steps before have margin under load
 
 			result := spawnWithin(t, o, p, 10*time.Second)
 			if result.Outcome != SpawnOutcomeFailed {
@@ -2158,13 +2158,13 @@ func TestOrgSpawn_StaleSeat_PaneNotClosed_RefusesTheSpawn(t *testing.T) {
 		wantDetails string
 	}{
 		{"the pane check fails", func(_ *Org, h *fakeHerdr) { h.getErrs = map[string]error{"stale-pane": getErr} }, getErr, false,
-			`compensation=ctrl_c=skipped: pane not confirmed pane=not closed: check pane "stale-pane": herdr: connect: connection refused)`},
+			`compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": herdr: connect: connection refused)`},
 		{"the pane check times out", func(o *Org, h *fakeHerdr) { o.DriverCallTimeout, h.getBlock = 20*time.Millisecond, true },
-			context.DeadlineExceeded, false, `pane=not closed: check pane "stale-pane": context deadline exceeded)`},
+			context.DeadlineExceeded, false, `compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": context deadline exceeded)`},
 		{"herdr has the pane but not its tab", func(_ *Org, h *fakeHerdr) { delete(h.tabLabels, fakeTabID("stale-pane")) }, nil, false,
-			`pane=not closed: check pane "stale-pane": herdr has no tab "tab-stale-pane" although it has the pane`},
+			`compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": herdr has no tab "tab-stale-pane" although it has the pane`},
 		{"herdr has the pane but not its workspace", func(_ *Org, h *fakeHerdr) { delete(h.workspaceLabels, "ws-stale") }, nil, false,
-			`pane=not closed: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: herdr has no workspace "ws-stale")`},
+			`compensation=ctrl_c=skipped pane=not confirmed, not closed: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: herdr has no workspace "ws-stale")`},
 		{"the close fails", func(_ *Org, h *fakeHerdr) { h.paneCloseErrs = map[string]error{"stale-pane": closeErr} }, closeErr, true,
 			"compensation=ctrl_c=ok pane=close failed: herdr pane close: connect: connection refused)"},
 		{"the close times out", func(o *Org, h *fakeHerdr) { o.DriverCallTimeout, h.paneCloseBlock = 20*time.Millisecond, true },
@@ -2334,6 +2334,69 @@ func TestSpawnPrecheckErr_InFlightSeatRefusal_MatchesSpawn(t *testing.T) {
 	}
 	if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.Err.Error() != pre.Error() {
 		t.Fatalf("expected Spawn to refuse with the pre-check's error %q, got %+v", pre, r)
+	}
+}
+
+// TestOrgSpawn_StopHints_RepeatInboxHintStateDir covers the `ralph org stop`
+// command that Spawn's errors print for a seat left with an unfinished spawn
+// (stopSeatCommand), on each of its four paths: with Org.InboxHintStateDir
+// set, as the CLI sets it for a ledger named with --state-dir, the command
+// ends with --state-dir and the dir, quoted, so a feature org's leader can
+// run it as printed; unset, the command is the plain one and no --state-dir
+// is printed.
+func TestOrgSpawn_StopHints_RepeatInboxHintStateDir(t *testing.T) {
+	const stop = "ralph org stop --org-id org-a --seat seat-1"
+	for _, path := range []struct {
+		name    string
+		setup   func(t *testing.T, o *Org, h *fakeHerdr, p *SpawnParams)
+		outcome SpawnOutcome
+		after   string // what the error says after the command
+	}{
+		{"failStepWithNote, the close fails", func(_ *testing.T, _ *Org, h *fakeHerdr, _ *SpawnParams) {
+			h.paneID, h.agentStartErr = "pane-7", errors.New("stub failure")
+			h.paneCloseErrs = map[string]error{"pane-7": errors.New("herdr pane close: connect: connection refused")}
+		}, SpawnOutcomeFailed, ""},
+		{"inFlightSeatErr, a retry the envelope refuses", func(t *testing.T, o *Org, h *fakeHerdr, p *SpawnParams) {
+			seedStaleSeatOnPane(t, o, h, "pane-7")
+			p.Model = "not-a-real-model"
+		}, SpawnOutcomeRejected, ""},
+		{"compensateStale, the caller's own pane", func(t *testing.T, o *Org, h *fakeHerdr, _ *SpawnParams) {
+			seedStaleSeatOnPane(t, o, h, "stale-pane")
+			o.Getenv = func(key string) string {
+				if key == herdrPaneIDEnv {
+					return "stale-pane"
+				}
+				return ""
+			}
+		}, SpawnOutcomeRejected, " from another pane"},
+		{"refuseStaleRespawn, the pane check fails", func(t *testing.T, o *Org, h *fakeHerdr, _ *SpawnParams) {
+			seedStaleSeatOnPane(t, o, h, "stale-pane")
+			h.getErrs = map[string]error{"stale-pane": errors.New("herdr: connect: connection refused")}
+		}, SpawnOutcomeFailed, ""},
+	} {
+		for _, dir := range []struct{ name, set, want string }{
+			{"unset", "", stop},
+			{"set", "/state/org", stop + " --state-dir '/state/org'"},
+			{"set, quoted", "/state dir/it's", stop + ` --state-dir '/state dir/it'\''s'`},
+		} {
+			t.Run(path.name+", "+dir.name, func(t *testing.T) {
+				o, h, _ := testOrg(t)
+				o.InboxHintStateDir = dir.set
+				p := mustSpawnParams("org-a", "seat-1")
+				path.setup(t, o, h, &p)
+
+				r := o.Spawn(p)
+				if r.Outcome != path.outcome || r.Err == nil {
+					t.Fatalf("expected %s with an error, got %+v", path.outcome, r)
+				}
+				if got := r.Err.Error(); !strings.HasSuffix(got, " "+dir.want+path.after) {
+					t.Errorf("expected the error to end with %q, got %v", " "+dir.want+path.after, got)
+				}
+				if dir.set == "" && strings.Contains(r.Err.Error(), "--state-dir") {
+					t.Errorf("expected no --state-dir with InboxHintStateDir unset, got %v", r.Err)
+				}
+			})
+		}
 	}
 }
 

@@ -231,11 +231,12 @@ type Org struct {
 	// Zero (the field's default) means "use defaultDriverCallTimeout" --
 	// tests set a tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
-	// Getenv overrides how Stop and Disband read the caller's herdr
+	// Getenv overrides how Stop, Disband and Spawn read the caller's herdr
 	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside
-	// every pane). nil (the field's default) means os.Getenv -- tests set it
-	// so the result does not depend on whether the test process itself runs
-	// inside a herdr pane.
+	// every pane; Spawn reads HERDR_PANE_ID in compensateStale, so it never
+	// closes the pane that runs it). nil (the field's default) means
+	// os.Getenv -- tests set it so the result does not depend on whether the
+	// test process itself runs inside a herdr pane.
 	Getenv func(string) string
 	// Worktrees reads and makes the feature worktrees of StartFeature
 	// (feature.go): the records and `ensure` of scripts/ralph-worktree.sh,
@@ -260,9 +261,12 @@ type Org struct {
 	DesktopNotify EscalateFunc
 	// InboxHintStateDir is the --state-dir that the inbox commands
 	// (InboxCommand) named by the banner and the errors of Escalate and
-	// NotifyInboxItem repeat. The CLI sets it to the resolved state dir
-	// only when the ledger was named with --state-dir; it is empty
-	// otherwise, and the printed commands then carry no --state-dir
+	// NotifyInboxItem repeat. The `ralph org stop` commands that Spawn's
+	// errors print for a seat left with an unfinished spawn repeat it too
+	// (stopSeatCommand), so a feature org's leader, which names its ledger
+	// with --state-dir, can run them as printed. The CLI sets it to the
+	// resolved state dir only when the ledger was named with --state-dir; it
+	// is empty otherwise, and the printed commands then carry no --state-dir
 	// (InboxCommand's doc says why).
 	InboxHintStateDir string
 	// InboxPollInterval overrides how often WaitInbox and
@@ -1308,7 +1312,10 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // permissionArgsForDriver, autonomousScopeGateErr, spawnCapacityErr and
 // spawnFeatureSeatErr (which passes the leader seat StartFeature spawns).
 // For a seat in flight, the refusals of the envelope, permission and
-// --scope checks carry inFlightSeatErr's words, as Spawn's do. A stale
+// --scope checks carry inFlightSeatErr's words, as Spawn's do, except that
+// its stop command never repeats --state-dir: it has no Org to read
+// InboxHintStateDir from, so StartFeature's pre-check prints the plain
+// command where Spawn would add --state-dir. A stale
 // in-flight seat is counted as compensateStale leaves it once compensated
 // (one more `spawn_failed`), since Spawn decides capacity on its read after
 // that compensation. compensateStale can also refuse the spawn (a pane it
@@ -1331,7 +1338,7 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 	inFlight := found && spawnInFlight(seat.Event)
 	refuse := func(cause error) error {
 		if inFlight {
-			return inFlightSeatErr(p, seat, cause)
+			return inFlightSeatErr(p, seat, cause, "")
 		}
 		return cause
 	}
@@ -2163,22 +2170,32 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 // (plan 2026-10-22-seat-spawn-close, D6).
 func (o *Org) rejectUnlessInFlight(p SpawnParams, existing *SeatStatus, cause error) SpawnResult {
 	if existing != nil && spawnInFlight(existing.Event) {
-		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: inFlightSeatErr(p, *existing, cause)}
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: inFlightSeatErr(p, *existing, cause, o.InboxHintStateDir)}
 	}
 	return o.reject(p, cause)
 }
 
 // inFlightSeatErr wraps cause, the refusal of a spawn of seat, whose latest
 // state event is in flight, with what is left of that seat: its unfinished
-// spawn, the pane it recorded when there is one, and the stop that ends it.
-// Spawn (rejectUnlessInFlight) and spawnPrecheckErr give the same error.
-func inFlightSeatErr(p SpawnParams, seat SeatStatus, cause error) error {
+// spawn, the pane it recorded when there is one, and the stop that ends it
+// (stopSeatCommand with hintStateDir, Org.InboxHintStateDir). Spawn
+// (rejectUnlessInFlight) and spawnPrecheckErr give the same error.
+func inFlightSeatErr(p SpawnParams, seat SeatStatus, cause error, hintStateDir string) error {
 	on := ""
 	if seat.PaneID != "" {
 		on = fmt.Sprintf(" on pane %q", seat.PaneID)
 	}
-	return fmt.Errorf("%w; seat %q in org_id %q has an unfinished spawn%s, left as it is: end it with ralph org stop --org-id %s --seat %s",
-		cause, p.SeatID, p.OrgID, on, p.OrgID, p.SeatID)
+	return fmt.Errorf("%w; seat %q in org_id %q has an unfinished spawn%s, left as it is: end it with %s",
+		cause, p.SeatID, p.OrgID, on, stopSeatCommand(p.OrgID, p.SeatID, hintStateDir))
+}
+
+// stopSeatCommand is the `ralph org stop --org-id <o> --seat <s>` that
+// Spawn's errors print for a seat left with an unfinished spawn
+// (inFlightSeatErr, failStepWithNote, compensateStale and
+// refuseStaleRespawn), with --state-dir <hintStateDir> when hintStateDir,
+// Org.InboxHintStateDir, is set (CommandWithStateDir).
+func stopSeatCommand(orgID, seatID, hintStateDir string) string {
+	return CommandWithStateDir("ralph org stop --org-id "+orgID+" --seat "+seatID, hintStateDir)
 }
 
 // spawnInFlight reports whether event, a seat's latest state event, is a
@@ -2409,8 +2426,9 @@ func (o *Org) failStep(p SpawnParams, step string, cause, deadlineErr error, pan
 // that pane and records `stopped`, as after a stop_failed (spec FR-2). The
 // returned error wraps both the step's cause and the close's error and says
 // how to close the pane: `herdr pane close <id>` or `ralph org stop
-// --org-id <o> --seat <s>`. A failed append of spawn_close_failed is joined
-// to that error.
+// --org-id <o> --seat <s>` (stopSeatCommand, with --state-dir when
+// Org.InboxHintStateDir is set). A failed append of spawn_close_failed is
+// joined to that error.
 //
 // deadlineErr is the spawn ctx's Err(), read by the caller as soon as the
 // step returned, before any compensation (the agmsg_announce Leave
@@ -2446,8 +2464,8 @@ func (o *Org) failStepWithNote(p SpawnParams, step string, cause, deadlineErr er
 		details += " " + note
 	}
 	if closeErr != nil {
-		err := fmt.Errorf("org: spawn step %s failed: %w%s; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or ralph org stop --org-id %s --seat %s",
-			step, cause, hint, paneID, closeErr, paneID, p.OrgID, p.SeatID)
+		err := fmt.Errorf("org: spawn step %s failed: %w%s; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or %s",
+			step, cause, hint, paneID, closeErr, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))
 		if appendErr := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
 			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
@@ -2509,25 +2527,31 @@ func (o *Org) compensateLeave(team, agentID string) string {
 // it, and only then gets closeSpawnPane's C-c and close (plan
 // 2026-10-22-seat-spawn-close, D3). Every call runs under its own
 // driverCallTimeout deadline, never the spawn's ctx. The outcomes, as
-// Details' `compensation=` words them:
+// Details' `compensation=` words them (every form but the first reads
+// `ctrl_c=<outcome> pane=<outcome>`):
 //   - no pane recorded: `no pane to compensate`, then spawn_failed.
 //   - not found: `ctrl_c=skipped pane=already closed`, then spawn_failed.
 //   - another label (the tab's, or the workspace's under a tab labelled
 //     for the seat; errLabelMismatch): the recorded id now names something
 //     else, so the pane gets no C-c and no close, and spawn_failed says
-//     `pane=left untouched, labelled differently: <err>`. Spawn goes on: if
-//     the old pane still holds the herdr agent name under another id, the
-//     new spawn's agent_start fails with agent_name_taken and closes its own
-//     pane.
-//   - confirmed and closed, or not found by the close: closeSpawnPane's
-//     words, then spawn_failed.
+//     `ctrl_c=skipped pane=left untouched, labelled differently: <err>`.
+//     Spawn goes on: if the old pane still holds the herdr agent name under
+//     another id, the new spawn's agent_start fails with agent_name_taken
+//     and closes its own pane.
+//   - confirmed: closeSpawnPane's words, `ctrl_c=ok` or `ctrl_c=failed:
+//     <err>`, then `pane=closed` or `pane=already closed` (not found by the
+//     close), and spawn_failed; or, when the close failed, `pane=close
+//     failed: <err>` and the refusal below.
 //   - not confirmed (a get failed or timed out, or herdr has the pane but
-//     not its tab or its workspace) or the close failed: the pane may still
-//     run the seat, so the spawn is refused with SpawnOutcomeFailed: no
-//     spawn_started and no rejected, but the non-state spawn_close_failed
-//     (Details `respawn refused (previous_event=<event>
-//     compensation=<words>)`), so the seat stays active on its recorded
-//     pane, and the error says how to close it.
+//     not its tab or its workspace): `ctrl_c=skipped pane=not confirmed, not
+//     closed: <err>` and the refusal below.
+//
+// The refusal, when the pane was not confirmed or its close failed: the
+// pane may still run the seat, so the spawn is refused with
+// SpawnOutcomeFailed: no spawn_started and no rejected, but the non-state
+// spawn_close_failed (refuseStaleRespawn; Details `respawn refused
+// (previous_event=<event> compensation=<words>)`), so the seat stays active
+// on its recorded pane, and the error says how to close it.
 //
 // The caller's own pane (existing.PaneID equals HERDR_PANE_ID, read via
 // o.Getenv) is neither confirmed nor sent anything, since closing it would
@@ -2538,8 +2562,8 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 	compensation := "no pane to compensate"
 	if paneID != "" {
 		if paneID == o.getenv(herdrPaneIDEnv) {
-			r := SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, the pane running this command, so it is left as it is: run ralph org stop --org-id %s --seat %s from another pane",
-				p.SeatID, p.OrgID, paneID, p.OrgID, p.SeatID)}
+			r := SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, the pane running this command, so it is left as it is: run %s from another pane",
+				p.SeatID, p.OrgID, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))}
 			return &r
 		}
 		gone, err := o.confirmSeatPane(p.OrgID, p.SeatID, paneID, seatLabelWords)
@@ -2550,7 +2574,7 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 		case errors.Is(err, errLabelMismatch):
 			compensation = fmt.Sprintf("ctrl_c=skipped pane=left untouched, labelled differently: %v", err)
 		case err != nil:
-			compensation, closeErr = fmt.Sprintf("ctrl_c=skipped: pane not confirmed pane=not closed: %v", err), err
+			compensation, closeErr = fmt.Sprintf("ctrl_c=skipped pane=not confirmed, not closed: %v", err), err
 		default:
 			compensation, closeErr = o.closeSpawnPane(paneID)
 		}
@@ -2573,8 +2597,8 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 // external ids, and returns SpawnOutcomeFailed with an error that names the
 // pane and says how to close it. A failed append is joined to that error.
 func (o *Org) refuseStaleRespawn(p SpawnParams, existing SeatStatus, compensation string, closeErr error) *SpawnResult {
-	err := fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, not closed, so this spawn was refused and the seat left active: %w; close it with: herdr pane close %s, or ralph org stop --org-id %s --seat %s",
-		p.SeatID, p.OrgID, existing.PaneID, closeErr, existing.PaneID, p.OrgID, p.SeatID)
+	err := fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, not closed, so this spawn was refused and the seat left active: %w; close it with: herdr pane close %s, or %s",
+		p.SeatID, p.OrgID, existing.PaneID, closeErr, existing.PaneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))
 	if appendErr := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
 		Role: existing.Role, Driver: existing.Driver, Model: existing.Model, Worktree: existing.Worktree,
