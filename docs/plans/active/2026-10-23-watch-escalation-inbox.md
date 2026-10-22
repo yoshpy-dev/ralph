@@ -149,7 +149,7 @@
   - 逸脱の注(2026-10-23、S2 の実装中): S2 の consult の勧めで、重複した件を送るかを、件を書いた見張りの判定でなく今の見張りの判定だけで決めることにした(D4・AC4・Test plan・Risks を直し、図解の詳細 2 と承認の前の箱を直して lint と撮り直しで確かめ、digest を 95d7155105d7 から c6039d0bef22 に取り直して自動承認した)。Codex の計画助言 1 の形(落ちたあと `--once` で起動し直す)は、今の見張りが任せられないので同じ ID で送られる
   - S2 は 100b6932(見張りの escalation を受信箱の ALERT の件にする、今の道の `osascript`)、S2b は 6bc7864e(重複した件を今の見張りの判定だけで送る)
   - S3 は 587f5b6a(文書)と b278070c(consult の指摘で、2 つの仕様の注の範囲を「見張りが見るすべての org」に直し、resolve で止まるのは delivery `deadline` の件だけと書いた)
-  - release のノートに足す文(S3 の consult の勧め): 「resolve の期限は人に送ったかを見ないので、director を置かない使い方(無効、または有効で登録がない)では、resolve しない ALERT の件が最初の通知のあと resolve の期限でもう 1 回届き、1 つの alert の通知が最大 2 回になる」。tech-debt にも 1 行残す(S4)
+  - release のノートに足す文(S3 の consult の勧め): 「resolve の期限は人に送ったかを見ないので、resolve されない ALERT の件は、最初の通知(director が無効か登録がないとき、`--once` か止める頼みの出た見張りのとき、director が `inbox notify` で送ったとき)のあと resolve の期限でもう 1 回届き、1 つの alert の通知が最大 2 回になる」。tech-debt にも 1 行残した(S4 の b1fb161b と a560bec6)
 - [x] Branch created
 - [ ] Review artifact created
 - [ ] Verification artifact created
