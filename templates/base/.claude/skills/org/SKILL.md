@@ -449,7 +449,10 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
     送るとき(enabled でない、`--once`、止める頼みが出ている)だけ、同じ ID で
     人に送る。それ以外は stderr に 1 行書くだけで、件は director と期限に
     任せる。
-  - 受信箱に書けないとき(受信箱が読めない・書けない)は、今までどおり
+  - 受信箱に書けないとき(受信箱がない・読めない・書けない)と、見出しに
+    入れる状態ファイルの値が見張りの書く形でないとき(対象の座席が座席の
+    名前でない、`alert_id` が `<org>/<seat>/<condition>@<n>` の形でない、
+    `alert_id` か元の時刻が制御文字を含む)は、件を書かず、今までどおり
     stderr の表示、デスクトップ通知、`escalations.jsonl` の 1 行の順で人に
     送る。その行は `alert_id`・`subject`・`reason` と、通知の結果の
     `osascript`(`ok`、`failed: <err>`、`skipped`)を持つ。

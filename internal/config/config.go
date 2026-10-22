@@ -57,8 +57,13 @@ type OrgConfig struct {
 	// it under the manifest lock, alongside the per-org MaxSeats.
 	MaxTotalSeats int `toml:"max_total_seats"`
 	// DeadmanMinutes is how long an ALERT of `ralph org watch` may go
-	// unanswered by the leader before the deadman escalates it to the human;
-	// 0 (or any value below 1) means the deadman never escalates by timeout.
+	// unanswered by the leader before the deadman escalates it. The
+	// escalation is an ALERT item of the org inbox, which reaches the human
+	// like a leader's escalate does: left to the director and the inbox
+	// deadlines when [org.director].enabled and the watch accepts work,
+	// otherwise sent at once (the inbox section of the /org skill has the
+	// details). 0 (or any value below 1) means the deadman never escalates
+	// by timeout.
 	// The liveness mark of `ralph org watch --all` counts as stale once it is
 	// older than the larger of this value (the default 10 when it is below
 	// 1) and two watch intervals.

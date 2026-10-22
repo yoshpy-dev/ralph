@@ -1309,9 +1309,10 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    another spawn, and compensateStale's refusals (the caller's own pane,
 //	    which writes nothing, and a pane neither confirmed nor closed, which
 //	    writes only spawn_close_failed). A leader that only retries into
-//	    those refusals is stuck, so the deadman may go on to the human (plan
-//	    2026-10-22-seat-spawn-close, self-review L2). The exclusion applies
-//	    to any event in this lifecycle set whose Details carry
+//	    those refusals is stuck, so the deadman may go on to escalate it as an
+//	    ALERT item of the inbox (plan 2026-10-22-seat-spawn-close,
+//	    self-review L2). The exclusion applies to any event in this
+//	    lifecycle set whose Details carry
 //	    "reason=watchdog_..." -- in practice only the pre-#152
 //	    watchdog's cutoff `stopped` writes ever carried it.
 //	    No code path has produced such an event since PR #152 removed the
