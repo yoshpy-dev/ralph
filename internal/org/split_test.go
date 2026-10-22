@@ -86,8 +86,9 @@ func loadSplitPlanContent(t *testing.T, content string) (*SplitPlan, string, err
 // TestLoadSplitPlan_ParsesFeatures covers plan AC1's accepted shape: the
 // header's Status and approval digest, features in file order, `- Type:`
 // defaulting to feat, `- Reserve:` normalized by the reservation rules,
-// `- Depends on:` (none and a slug), the body without the field lines, and
-// other `## ` sections and the prose before the first feature ignored.
+// `- Depends on:` (none and a slug), the body without the field lines, the
+// `## Overview` section before `## Features` as the preamble, and the
+// `## Notes` section after it and the prose before the first feature ignored.
 func TestLoadSplitPlan_ParsesFeatures(t *testing.T) {
 	plan, path, err := loadSplitPlanContent(t, splitPlanFixture)
 	if err != nil {
@@ -101,6 +102,9 @@ func TestLoadSplitPlan_ParsesFeatures(t *testing.T) {
 	}
 	if want := PlanDigest([]byte(splitPlanFixture)); plan.Digest != want {
 		t.Errorf("Digest = %q, want PlanDigest of the file %q", plan.Digest, want)
+	}
+	if want := "## Overview\n\n認証まわりを 2 つの機能に分ける。"; plan.Preamble != want {
+		t.Errorf("Preamble = %q, want %q", plan.Preamble, want)
 	}
 	want := []SplitFeature{
 		{
@@ -303,6 +307,7 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"branch in another section", minimalSplitPlan("### a\n- Reserve: a/\n## Notes\n- Branch: x\n"), "line 10: a - Branch: line is not allowed"},
 		{"status in a feature", minimalSplitPlan("### a\n- Reserve: a/\n- Status: Approved\n"), "line 9: a - Status: or - Approved: line after the header"},
 		{"approved in another section", minimalSplitPlan("### a\n- Reserve: a/\n\n## Notes\n- Approved: x\n"), "line 11: a - Status: or - Approved: line after the header"},
+		{"status in the preamble", "# t\n\n## Rules\n- Status: Approved\n\n## Features\n### a\n- Reserve: a/\n", "line 4: a - Status: or - Approved: line after the header"},
 		{"second status in the header", "# t\n- Status: Draft\n- Status: Approved\n\n## Features\n### a\n- Reserve: a/\n", "line 3: a second - Status: line (the first is on line 2)"},
 		{"second approved in the header", "# t\n- Approved: x\n- Approved: y\n\n## Features\n### a\n- Reserve: a/\n", "line 3: a second - Approved: line (the first is on line 2)"},
 		{"progress checklist at the end", minimalSplitPlan("### a\n- Reserve: a/\n\n## Progress checklist\n\n- [ ] done\n"), "line 10: a ## Progress checklist section is not allowed"},
@@ -311,6 +316,7 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"checked box", minimalSplitPlan("### a\n- Reserve: a/\n- [x] done\n"), "line 9: a checked box"},
 		{"indented capital checked box", minimalSplitPlan("### a\n- Reserve: a/\n  - [X] done\n"), "line 9: a checked box"},
 		{"tab-indented checked box in the header", "# t\n\t- [x] note\n## Features\n### a\n- Reserve: a/\n", "line 2: a checked box"},
+		{"checked box in the preamble", "# t\n\n## Rules\n- [x] rule\n\n## Features\n### a\n- Reserve: a/\n", "line 4: a checked box"},
 		// Code fences: the lines the digest skips are refused inside one too,
 		// and a fence left open is refused at the line that opened it.
 		{"branch inside a fence", minimalSplitPlan("### a\n- Reserve: a/\n```\n- Branch: feat/x\n```\n"), "line 10: a - Branch: line is not allowed"},
@@ -325,6 +331,7 @@ func TestLoadSplitPlan_Rejects(t *testing.T) {
 		{"tilde fence closed by backticks", minimalSplitPlan("### a\n- Reserve: a/\n~~~\n```\n"), "line 9: the code fence ~~~ is never closed"},
 		{"fence closed by a line with text after it", minimalSplitPlan("### a\n- Reserve: a/\n```\n``` more\n"), "line 9: the code fence ``` is never closed"},
 		{"unclosed fence in the header", "# t\n```\n\n## Features\n### a\n- Reserve: a/\n", "line 2: the code fence ``` is never closed"},
+		{"unclosed fence in the preamble", "# t\n\n## Rules\n```\n## Features\n### a\n- Reserve: a/\n", "line 4: the code fence ``` is never closed"},
 		{"unclosed fence with CRLF", strings.ReplaceAll(minimalSplitPlan("### a\n- Reserve: a/\n```\n## Usage\n"), "\n", "\r\n"), "line 9: the code fence ``` is never closed"},
 	}
 	for _, tt := range tests {
@@ -502,6 +509,144 @@ func TestLoadSplitPlan_FencedBodyIsApproved(t *testing.T) {
 		if PlanDigest([]byte(strings.Replace(approved, line+"\n", line+" edited\n", 1))) == PlanDigest([]byte(approved)) {
 			t.Errorf("editing the fenced line %q did not change the digest", line)
 		}
+	}
+}
+
+// TestLoadSplitPlan_TrialPreamble reads the split plan of the stage 9 trial
+// (plan AC1 of split-preamble): its preamble runs from the `## 目的` heading
+// to the last seat rule and holds the rules both features share, but not the
+// title, the header's `- Status:` and `- Approved:` lines, `## Features` or
+// a feature section, and its features load as before.
+func TestLoadSplitPlan_TrialPreamble(t *testing.T) {
+	plan, err := LoadSplitPlan(filepath.Join(splitTestRepoRoot(t), "docs", "evidence", "org-trial-2026-10-20", "splits", "trial.md"))
+	if err != nil {
+		t.Fatalf("LoadSplitPlan: %v", err)
+	}
+	if !strings.HasPrefix(plan.Preamble, "## 目的\n") || !strings.HasSuffix(plan.Preamble, "\n- 予約の外のファイルは編集しない") {
+		t.Errorf("Preamble does not run from ## 目的 to the line - 予約の外のファイルは編集しない:\n%s", plan.Preamble)
+	}
+	if !strings.Contains(plan.Preamble, "座席の決まり(両方の機能に共通):") {
+		t.Errorf("Preamble has no seat rules:\n%s", plan.Preamble)
+	}
+	for _, out := range []string{"# 9 段目", "- Status:", "- Approved:", "## Features", "### report-escape", "### doctor-escape"} {
+		if strings.Contains(plan.Preamble, out) {
+			t.Errorf("Preamble contains %q:\n%s", out, plan.Preamble)
+		}
+	}
+	want := []SplitFeature{
+		{Slug: "report-escape", Type: "fix", Reserve: []string{"internal/org/report.go", "internal/org/report_test.go"}},
+		{Slug: "doctor-escape", Type: "fix", Reserve: []string{"internal/cli/doctor_merge_guarantee.go", "internal/cli/doctor_merge_guarantee_test.go"}},
+	}
+	bodyEnds := [][2]string{ // the start of each body's first line and its whole last line
+		{"`ralph org report` のイベントの表", "- [ ] `go test ./internal/org/` が通る(`GOTOOLCHAIN=go1.25.8` でも)"},
+		{"`ralph doctor` の `Merge guarantee` の検査は", "- [ ] `go test ./internal/cli/` が通る(`GOTOOLCHAIN=go1.25.8` でも)"},
+	}
+	if len(plan.Features) != len(want) {
+		t.Fatalf("got %d features %+v, want %d", len(plan.Features), plan.Features, len(want))
+	}
+	for i, f := range plan.Features {
+		if !strings.HasPrefix(f.Body, bodyEnds[i][0]) || !strings.HasSuffix(f.Body, "\n"+bodyEnds[i][1]) {
+			t.Errorf("feature %s Body does not run from %q to %q:\n%s", f.Slug, bodyEnds[i][0], bodyEnds[i][1], f.Body)
+		}
+		want[i].Body = f.Body
+	}
+	assertSplitFeatures(t, plan.Features, want)
+}
+
+// TestLoadSplitPlan_Preamble covers the bounds of the preamble (plan AC2 of
+// split-preamble). It starts at the first `## ` heading outside a fence and
+// ends before the `## Features` heading; a fenced `## Features` line in it,
+// and its `### ` and field-like lines, are text; blank lines around it are
+// trimmed, and CRLF lines lose their "\r". The header's free text, the lines
+// of `## Features` before the first feature and the sections after
+// `## Features` are in neither the preamble nor a body.
+func TestLoadSplitPlan_Preamble(t *testing.T) {
+	const twoSections = "# t\n\n## A\n\na\n\n## B\n\nb\n\n## Features\n### a\n- Reserve: a/\n"
+	a := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
+	tests := []struct {
+		name     string
+		content  string
+		preamble string
+		want     []SplitFeature
+	}{
+		{
+			name:     "no section between the header and Features",
+			content:  minimalSplitPlan("### a\n- Reserve: a/\n"),
+			preamble: "",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "two sections in file order",
+			content:  twoSections,
+			preamble: "## A\n\na\n\n## B\n\nb",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "the same with CRLF lines",
+			content:  strings.ReplaceAll(twoSections, "\n", "\r\n"),
+			preamble: "## A\n\na\n\n## B\n\nb",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "header text and blank lines around the preamble left out",
+			content:  "# t\n\nheader prose\n\n\n## Rules\n\n\nrule\n\n \t\n\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n\n\nrule",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "a fenced heading in the header starts no preamble",
+			content:  "# t\n```\n## Other\n```\n- Status: Draft\n\n## Rules\nrule\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\nrule",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "a fenced Features line stays in the preamble",
+			content:  "# t\n\n- Status: Draft\n\n## Rules\n\n```\n## Features\n### x\n- Reserve: x/\n```\n\n## Features\n\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n\n```\n## Features\n### x\n- Reserve: x/\n```",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "a fence of 4 backticks holding one of 3 stays whole",
+			content:  "# t\n\n## Rules\n\n````md\n```\n## Features\n```\n````\n\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n\n````md\n```\n## Features\n```\n````",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "a tilde fence stays whole",
+			content:  "# t\n\n## Rules\n~~~\n## Other\n~~~\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n~~~\n## Other\n~~~",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "### and field-like lines are text",
+			content:  "# t\n\n## Rules\n\n### not-a-feature\n- Reserve: x/\n- Type: docs\n\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n\n### not-a-feature\n- Reserve: x/\n- Type: docs",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "Features heading with trailing blanks, prose before the first feature left out",
+			content:  "# t\n\n## Rules\nrule\n## Features \t\n\nEach feature is one org.\n\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\nrule",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "a section after Features is in neither the preamble nor a body",
+			content:  "# t\n\n## Rules\n\nrule\n\n## Features\n\n### a\n- Reserve: a/\n\nbody\n\n## Notes\n\nnotes\n",
+			preamble: "## Rules\n\nrule",
+			want:     []SplitFeature{{Slug: "a", Type: "feat", Reserve: []string{"a/"}, Body: "body"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, _, err := loadSplitPlanContent(t, tt.content)
+			if err != nil {
+				t.Fatalf("LoadSplitPlan: %v", err)
+			}
+			if plan.Preamble != tt.preamble {
+				t.Errorf("Preamble = %q, want %q", plan.Preamble, tt.preamble)
+			}
+			assertSplitFeatures(t, plan.Features, tt.want)
+		})
 	}
 }
 
