@@ -3339,7 +3339,7 @@ func TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile(t *testing.T) {
 			prompt := string(data)
 			for _, want := range []string{
 				"do bash " + tc.want + "/inbox.sh ralph-org-a leader --quiet 2>&1",
-				"`bash " + tc.want + "/history.sh ralph-org-a leader`",
+				"`bash " + tc.want + "/history.sh ralph-org-a leader 50`",
 			} {
 				if !strings.Contains(prompt, want) {
 					t.Errorf("expected the leader's prompt file to contain %q, got:\n%s", want, prompt)

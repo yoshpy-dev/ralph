@@ -1464,8 +1464,10 @@ func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 		{"- Monitor ツールがあるとき(Claude Code)", "25 分たつと終わり、あなたの claude のプロセスがなくなったときも 10 秒ほどで終わります(Monitor の期限の 30 分より先に終わる)"},
 		{"- Monitor ツールがあるとき(Claude Code)", "終わりの 1 行(`agmsg の見張りが終わった。`)か Monitor の期限の知らせが来たら、張り直します"},
 		{"- Monitor ツールがあるとき(Claude Code)", "前の見張りが動いているうちは、もう 1 つ張りません"},
+		{"- Monitor ツールがあるとき(Claude Code)", "agmsg skill や hook が agmsg の `watch.sh` の見張りを張るよう促しても、張りません"},
 		{"- `inbox.sh --quiet` は", "出したメッセージを既読にします"},
-		{"- `inbox.sh --quiet` は", "張り直す前と、届くはずのメッセージ(座席の RESULT など)が来ないときは、`bash " + scripts + "/history.sh " + team + " leader` で直近のメッセージを読み、まだ扱っていないものを扱います"},
+		{"- `inbox.sh --quiet` は", "張り直す前と、届くはずのメッセージ(座席の RESULT など)が来ないときは、`bash " + scripts + "/history.sh " + team + " leader 50` で直近の 50 件を読み、まだ扱っていないものを扱います"},
+		{"- `inbox.sh --quiet` は", "あなたが送った TASK も 50 件に入るので、足りなければ数を増やします"},
 		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "`ralph org gate` や `ralph org wait` のように終わるまで時間のかかるコマンドは、`run_in_background` で走らせて手番を終えます"},
 		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "終わると知らせが来て、次の手番が始まります"},
 		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "`ralph org status` と `ralph org read` はすぐ返るので、前面で打ってかまいません"},
@@ -1593,7 +1595,7 @@ func TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir(t *testing.T) {
 			if got := leaderMonitorCommand(t, text); got != leaderMonitorCommandFor(want, "ralph-org-a") {
 				t.Errorf("Monitor command = %q, want the inbox.sh of %s", got, want)
 			}
-			for _, cmd := range []string{"bash " + want + "/history.sh ralph-org-a leader`", "bash " + want + "/inbox.sh ralph-org-a leader --quiet`"} {
+			for _, cmd := range []string{"bash " + want + "/history.sh ralph-org-a leader 50`", "bash " + want + "/inbox.sh ralph-org-a leader --quiet`"} {
 				if !strings.Contains(text, cmd) {
 					t.Errorf("expected the rendered leader template to contain %q, got:\n%s", cmd, text)
 				}
@@ -1606,18 +1608,31 @@ func TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir(t *testing.T) {
 }
 
 // TestRenderRolePrompt_Leader_MonitorCommandRuns runs the rendered Monitor
-// command with bash against a stand-in inbox.sh under an agmsg home whose
+// command with bash, and with zsh (the shell the Monitor tool may run it
+// with, as on macOS), against a stand-in inbox.sh under an agmsg home whose
 // path has a space and a single quote, and stand-in date and sleep on PATH:
 // date reads 1000 twice (the deadline is 2500), then 5000, so the loop runs
 // once and ends by its deadline. The quoted scripts path reaches inbox.sh,
 // which gets the team, leader, and --quiet; its stdout and stderr both come
 // out with the empty and blank lines dropped; the loop sleeps 10 seconds;
-// and the end line comes last.
+// and the end line comes last. zsh runs with -f, so no user startup file
+// puts another date or sleep ahead of the stand-ins on PATH (a system
+// /etc/zshenv may set ZDOTDIR itself, so overriding ZDOTDIR does not keep
+// the user's files out).
 func TestRenderRolePrompt_Leader_MonitorCommandRuns(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash not available")
+	for _, shell := range []string{"bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			path, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s not available", shell)
+			}
+			runLeaderMonitorCommand(t, path)
+		})
 	}
+}
+
+func runLeaderMonitorCommand(t *testing.T, shell string) {
+	t.Helper()
 	dir := t.TempDir()
 	home := filepath.Join(dir, "agmsg it's here")
 	writeTestExecutable(t, filepath.Join(home, "scripts", "inbox.sh"),
@@ -1632,12 +1647,16 @@ func TestRenderRolePrompt_Leader_MonitorCommandRuns(t *testing.T) {
 	command := leaderMonitorCommand(t, renderLeaderWithAgmsgHome(t, home))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bash, "-c", command)
+	args := []string{"-c", command}
+	if filepath.Base(shell) == "zsh" {
+		args = append([]string{"-f"}, args...)
+	}
+	cmd := exec.CommandContext(ctx, shell, args...)
 	cmd.Env = append(os.Environ(), "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"STUB_DATE_COUNT="+count, "STUB_SLEEP_LOG="+sleepLog)
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("bash -c <Monitor command>: %v (stdout %q)", err, out)
+		t.Fatalf("%s -c <Monitor command>: %v (stdout %q)", filepath.Base(shell), err, out)
 	}
 	if want := "args: ralph-org-a leader --quiet\nFROM: reviewer\ninbox stderr\n" + leaderMonitorEndLine + "\n"; string(out) != want {
 		t.Errorf("Monitor command output = %q, want %q", out, want)

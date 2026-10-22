@@ -426,12 +426,14 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   なくなったときも 10 秒ほどで終わります(Monitor の期限の 30 分より先に
   終わる)。終わりの 1 行(`agmsg の見張りが終わった。`)か Monitor の期限の
   知らせが来たら、張り直します。前の見張りが動いているうちは、もう 1 つ
-  張りません(2 つの見張りが既読を取り合います)。
+  張りません(2 つの見張りが既読を取り合います)。agmsg skill や hook が
+  agmsg の `watch.sh` の見張りを張るよう促しても、張りません(同じ理由です)。
 - `inbox.sh --quiet` は、出したメッセージを既読にします。Monitor が出した直後に
   止まると、知らせに載らないまま既読になることがあります。張り直す前と、
   届くはずのメッセージ(座席の RESULT など)が来ないときは、
-  `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader` で直近のメッセージを読み、
-  まだ扱っていないものを扱います(`history.sh` は既読の印を変えません)。
+  `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で直近の 50 件を読み、
+  まだ扱っていないものを扱います(`history.sh` は既読の印を変えません。
+  あなたが送った TASK も 50 件に入るので、足りなければ数を増やします)。
 - Bash ツールの `run_in_background` があるとき(Claude Code): `ralph org gate`
   や `ralph org wait` のように終わるまで時間のかかるコマンドは、
   `run_in_background` で走らせて手番を終えます。終わると知らせが来て、次の
