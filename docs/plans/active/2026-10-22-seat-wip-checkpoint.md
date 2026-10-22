@@ -1,7 +1,7 @@
 # seat-wip-checkpoint
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-22 sha256:b98f2806ab31
 - Owner: Claude Code
 - Date: 2026-10-22
 - Related request: 試行の所見を直す系列の 4 本目の 3 つ目「座席の環境 4c」(ユーザーの依頼「2. 修正可能なものは修正してください」、2026-10-21)
@@ -18,7 +18,8 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 - 2 つの hook(`.claude/hooks/session_end_summary.sh` と `.claude/hooks/precompact_checkpoint.sh`、`templates/base/.claude/hooks/` の写し)が、環境の `RALPH_WIP_CHECKPOINT` がちょうど `off` のとき WIP コミットだけを飛ばす。summary と checkpoint の md は今までどおり書き、コミットを飛ばしたことを 1 行書く
 - ralph が作る pane(座席の leader・implementer・reviewer と、herdr の headless の director)の `herdr tab create` に、`--env AGMSG_SELF_NAME=off` に加えて `--env RALPH_WIP_CHECKPOINT=off` を付ける。pane に足す値の一覧は 1 か所に置き、launch_cmd の起動スクリプトもその一覧を export する
 - `--env` のない herdr の warning の文と `Herdr.PaneEnv` の説明を、2 つの値それぞれの帰結を書く形に直す(G3)
-- leader の雛形(`internal/org/prompts/leader.md`)の番号のない「運用規律」の節に、spawn の失敗の扱いを 1 項足す
+- leader の雛形(`internal/org/prompts/leader.md`)の「機能ごとの org」の手順 14 に、gate の打ち直しと push の前に件名が `wip:` のコミットを探し、あれば止まって BLOCKED を上げる文を足す(値が届かない古い herdr や、片方だけ新しい配備で WIP コミットができたときの守り。Codex の指摘 1)
+- leader の雛形の番号のない「運用規律」の節に、spawn の失敗の扱いを 1 項足す
 - 文書: `.claude/rules/ralph/git-commit-strategy.md`(と写し)、`/org` と `/director` の skill(と写し)、`docs/recipes/director-launch-cmd.md`(と写し)のうち pane の環境を書いた箇所
 - 実機の確かめ: 分離した herdr server で本物の claude を使い、hook が pane の環境の値を見ることを確かめる
 - 記録: tech-debt の F11 の行(326 行)と 191 行、試行の evidence の F11 の文への訂正の注、根拠の表と仕様の F11 の行、「fix/seat-spawn-close」を「#249」に(仕様、根拠の表、tech-debt)、PR 一覧を 32 本に
@@ -57,7 +58,7 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 
 - Page: `.harness/state/plan-visual/seat-wip-checkpoint.html`
 - Lint: `./scripts/plan-visual.sh lint` rc 0
-- Self-check: 全体、易しい図 3 枚(`overview`、`easy-yours`、`easy-spawn`)、折りたたみの中の 3 枚(`detail-overview`、`detail-sequence`、`detail-hook`)を撮って読んだ。詳しい図 1 の S3・S5 の印が箱の縁に重なっていたので「記録」の見出しの横へ移し、撮り直して崩れがないことを確かめた
+- Self-check: 全体、易しい図 3 枚(`overview`、`easy-yours`、`easy-spawn`)、折りたたみの中の 3 枚(`detail-overview`、`detail-sequence`、`detail-hook`)を撮って読んだ。詳しい図 1 の S3・S5 の印が箱の縁に重なっていたので「記録」の見出しの横へ移し、撮り直して崩れがないことを確かめた。Codex の指摘を入れたあと、図 3、承認の前の欄、詳しい図 1 を直し、lint(rc 0)と撮影をやり直した
 
 ## Design decisions
 
@@ -65,7 +66,7 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 - D2 効かせる範囲: ralph が作る pane のすべて(leader を含む座席と、herdr の headless の director)。leader も座席の pane で動き(`spawn.go` の `TabCreate`)、機能の worktree を implementer と reviewer と分け合うので、どの座席のセッション終わりも同じ worktree をコミットしうる。headless の director は main worktree のルートで動き、ふつう main なので hook はもともと飛ばすが、揃える。launch_cmd で立てた director は起動スクリプトが同じ一覧を export する
 - D3 一覧の置き場所: pane に足す値は 1 つの一覧に置き、本番の組み立て(`driver.NewHerdr`)と起動スクリプトの export の両方がそれを読む。warning はその一覧の値ごとに帰結を書く
 - D4 hook の文: summary と checkpoint の md の書き方は変えず、値が `off` のときに `- WIP commit: skipped (RALPH_WIP_CHECKPOINT=off)` の行を足し、`git add` も `git commit` も打たない。main・master・unknown のときの振る舞いは変えない
-- D5 leader の雛形: F11 のためには手順を変えない。現行の手順 9(gate の前の `git status --porcelain`)と手順 14(HEAD が gate の HEAD と同じか)が、座席の WIP コミットが push に乗るのを既に止めている。追加は 4b の follow-up の 1 項だけで、番号のない「運用規律」の節に置く(手順の位置を固めるテストをずらさない。consult の指摘)
+- D5 leader の雛形: 現行の手順は座席の WIP コミットの push を止めない。手順 9 の `git status --porcelain` はコミット済みのものを見ず、手順 14 は HEAD が gate の HEAD と違えば gate を打ち直すので、打ち直した gate が通れば WIP コミットも push される(Codex の指摘 1)。値が届けばコミットは作られないが、古い herdr(`--env` なし)や、binary と hook の片方だけが新しい配備では作られる。そこで手順 14 に、gate を打ち直す前と push の前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打ち、件名が `wip:` で始まるコミットがあれば gate も push も打たずに BLOCKED を上げる文を足す。`wip` の型は自動のチェックポイントだけに使う決まり(git-commit-strategy)なので、機能の PR に `wip:` が要ることはない。手順の番号と、手順 14 の既存の句(`14. HEAD(` で始まること、「違えば push せず、gate を打ち直す(手順 12)」)は変えない。spawn の失敗の 1 項は番号のない「運用規律」の節に置く(手順の位置を固めるテストをずらさない。consult の指摘)
 - D6 実機の確かめの比べ方: ralph の spawn を通さず、分離した herdr で `herdr tab create --env` を直接打って本物の claude を起動する(4a の (e) と同じ)。ralph が 2 つの `--env` を付けることは Go のテストで固める。一時の repo には `.claude/hooks/` を丸ごと(dispatcher、`.d`、本体)写し、settings.json と揃える(consult の指摘: 本体だけだと dispatcher を通らず、hook が走らないと読み違える)
 - Critical forks: None(D1〜D6 は consult と相談して決めた。どれも 1 スライスの中で戻せる)
 
@@ -75,10 +76,11 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 - [ ] AC2: 本番の組み立ての `Herdr.PaneEnv` は `AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off` をこの順で持ち、`--env` のある herdr では、座席の pane(spawn と start)と herdr の headless の director の pane の `herdr tab create` に `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off` が付く。`--env` の確かめは今までどおり 1 回だけ
 - [ ] AC3: launch_cmd の起動スクリプトは、check-in とエージェントの exec の前に、一覧のすべての値(`AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off`)を export する
 - [ ] AC4: `--env` のない herdr(help に `--env` がない、help が失敗する)では、どちらの値も付けずに pane を作り、spawn と start は今までどおり成功し、stderr に warning が 1 行出る。その行は 2 つの値を挙げ、それぞれの帰結(agmsg が pane の agent の名前を変えうること、pane の中の Claude Code のセッションの hook が feature ブランチで WIP コミットを作りうること)を書く。`Herdr.PaneEnv` と `warnNoPaneEnv` の説明が「1 つの値」と書かない
-- [ ] AC5: leader の雛形の「運用規律」の節に、spawn の失敗の扱いの 1 項がある。中身: spawn が終了コード 1 で `spawn failed:` を出したらエラーの文を読む。`seat left active` と `ralph org stop` が出ていれば、出ている `ralph org stop` を打ってから打ち直す。`--timeout-ms` の期限が切れたと出ていれば、大きい `--timeout-ms` で打ち直す。同じ座席で 2 回続けて失敗したら、打ち直さずに BLOCKED を上げる。spawn に失敗した座席の HELLO が受信箱に届いていても、その座席は動いていない。`internal/org/prompts_test.go` がこの項を固め、手順の位置を固める既存のテストは変えずに通る
+- [ ] AC5: leader の雛形の「運用規律」の節に、spawn の失敗の扱いの 1 項がある。中身: spawn が終了コード 1 で `spawn failed:` を出したらエラーの文を読む。(a) エラーが `seat left active` を含むとき(pane を閉じられなかった)、その座席は動いているかもしれない。エラーにある `ralph org stop --org-id … --seat …` を打ち、それが終了コード 0 で終わり、`ralph org status` でその座席が active でないことを確かめてから打ち直す。stop が終了コード 1 で返ったとき、または座席がまだ active のときは、打ち直さずに BLOCKED を上げる(Codex の指摘 2)。(b) 含まないとき、pane は閉じてあり、その座席から HELLO が受信箱に届いていても座席は動いていない。`--timeout-ms` の期限が切れたと出ていれば大きい `--timeout-ms` で、そうでなければそのまま打ち直す。(c) 同じ座席の spawn が 2 回続けて失敗したら、打ち直さずに BLOCKED を上げる。`internal/org/prompts_test.go` がこの項の (a)〜(c) を固め、手順の位置を固める既存のテストは変えずに通る
+- [ ] AC5b: leader の雛形の手順 14 が、gate を打ち直す前と push の前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打ち、件名が `wip:` で始まるコミットがあれば gate も push も打たずに、そのコミットを本文に書いて `ralph org escalate` で BLOCKED を上げると書く。項目は `14. HEAD(` で始まり、「違えば push せず、gate を打ち直す(手順 12)」の句も残る。`internal/org/prompts_test.go` が新しい文と、それが gate の打ち直しと push より前に読まれる位置にあることを固める
 - [ ] AC6: 分離した herdr server での実機の確かめを `docs/evidence/seat-wip-checkpoint-2026-10-22.md` に書く。(a) `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off` の pane で、両方の値が pane の shell に届く。(b) その pane で起動した本物の claude を C-c と `herdr pane close` で終わらせると、SessionEnd の hook が走り(summary の md が書かれる)、コミットは増えず、md に skipped の行がある。(c) 値を付けない pane の同じ手順では WIP コミットが 1 つ増える(対照)。(d) PreCompact: `/compact` を送り、同じく比べる。起こせなければ、そのことと理由を書く
 - [ ] AC7: 文書を合わせる。`git-commit-strategy.md`(と写し)の End-of-Session の節に、`RALPH_WIP_CHECKPOINT=off` のときは飛ばすことと、ralph がそれを自分の作る pane に付けることを書く。`/org`・`/director` の skill と `director-launch-cmd.md`(と写し)のうち `AGMSG_SELF_NAME=off` を pane や起動スクリプトの環境として書いた箇所に、2 つ目の値を足す
-- [ ] AC8: 記録を合わせる。tech-debt の F11 の行(326 行)と 191 行は、AC6 の (b) と (c) が通ったときだけ RESOLVED にする。326 行の「a leader's session ends ... after the gate, the push, and the PR」を、試行の時刻から読めること(止められた座席のセッション)に直す。RESOLVED の注には、現行の leader の手順 9 と 14 が座席の WIP コミットの push を既に止めていたことと、hook を止めると `git add -A` による巻き込みもなくなることを書く。試行の evidence の F11 の文(806〜808 行)には訂正の注を足す(「after the PR」は時刻と合わない)。根拠の表の F11 の行の「直す PR」と、仕様の Status と PR 一覧(32 本)を合わせる。仕様、根拠の表、tech-debt に残る「fix/seat-spawn-close」を「#249」に直す
+- [ ] AC8: 記録を合わせる。tech-debt の F11 の行(326 行)と 191 行は、AC6 の (b) と (c) が通ったときだけ RESOLVED にする。326 行の「a leader's session ends ... after the gate, the push, and the PR」を、試行の時刻から読めること(止められた座席のセッション)に直す。RESOLVED の注は、効く範囲を限って書く: 新しい binary が `--env` のある herdr で作った pane で、新しい hook が動くとき、座席のセッションは WIP コミットを作らず、`git add -A` による巻き込みもない。古い herdr や片方だけ新しい配備では作られうるが、手順 14 の新しい文が push の前に止める。前からの手順 9 と 14 だけでは止まらなかったことも書く(D5)。試行の evidence の F11 の文(806〜808 行)には訂正の注を足す(「after the PR」は時刻と合わない)。根拠の表の F11 の行の「直す PR」と、仕様の Status と PR 一覧(32 本)を合わせる。仕様、根拠の表、tech-debt に残る「fix/seat-spawn-close」を「#249」に直す
 - [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
@@ -86,7 +88,7 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 1. S1(implementer): D1・D4。2 つの hook と写し、`tests/test-wip-checkpoint-hooks.sh`(AC1)
 2. S2(implementer): D2・D3。pane に足す値の一覧、本番の組み立て、起動スクリプトの export、warning の文と説明、それを固めるテストの更新(AC2、AC3、AC4)
 3. S3(orchestrator が打つ): 実機の確かめ(AC6)。S1 の hook を写した一時の repo で打つ。hook が値を見ないと分かったら、D1 を見直して計画に戻る
-4. S4(implementer): leader の雛形の 1 項とテスト(AC5)、文書(AC7)
+4. S4(implementer): leader の雛形の手順 14 の文と運用規律の 1 項、そのテスト(AC5、AC5b)、文書(AC7)
 5. S5(implementer、sonnet): 記録(AC8)。S3 の結果で RESOLVED にするかを決める
 
 ## Verify plan
@@ -98,16 +100,17 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 
 ## Test plan
 
-- Unit tests: `tests/test-wip-checkpoint-hooks.sh` が、一時の git repo(feature ブランチ、汚れたファイル)で 2 つの hook を、値なし・`off`・`on`・`OFF`・空で打ち、コミットの有無と md の行を見る。main でコミットしないことも見る。Go: 一覧の中身と順、`TabCreate` が 2 つの `--env` を付ける、warning が 2 つの値と帰結を書く、起動スクリプトが 2 つを export する、leader の雛形の項
+- Unit tests: `tests/test-wip-checkpoint-hooks.sh` が、一時の git repo(feature ブランチ、汚れたファイル)で 2 つの hook を、値なし・`off`・`on`・`OFF`・空で打ち、コミットの有無と md の行を見る。main でコミットしないことも見る。Go: 一覧の中身と順、`TabCreate` が 2 つの `--env` を付ける、warning が 2 つの値と帰結を書く、起動スクリプトが 2 つを export する、leader の雛形の運用規律の項((a) の stop の失敗と active のままのときの BLOCKED、(b)、(c))と手順 14 の `wip:` の文(打ち直しと push より前)
 - Integration tests: `internal/cli` の本番の組み立てで `PaneEnv` が 2 つの値を持つこと、spawn と director start の stub の herdr が 2 つの `--env` を受けること
-- Regression tests: 今の driver・spawn・director・prompts のテストが、期待の文を 2 つ目の値に合わせる以外は変えずに通る。手順の位置を固める `TestRenderRolePrompt_Leader_FeatureOrgProcedure` は変えない
+- Regression tests: 今の driver・spawn・director・prompts のテストが、期待の文を 2 つ目の値に合わせる以外は変えずに通る。手順の位置を固める `TestRenderRolePrompt_Leader_FeatureOrgProcedure` の今の期待は消さず、手順 14 の新しい文の期待を足すだけにする
 - Edge cases: 値が `OFF`(大文字)や空のときはコミットする。作業ツリーがきれいなら値によらず何もしない。`--env` の確かめが失敗したときの warning
 - Evidence to capture: `go test -count=1 -timeout 30m ./internal/org/... ./internal/cli/...` を go1.26 と go1.25.8 で、`bash tests/test-wip-checkpoint-hooks.sh`
 
 ## Risks and mitigations
 
 - hook が pane の環境を見ない(Claude Code が hook に環境を渡さない、または dispatcher が消す): S3 で先に確かめ、見なければ D1 を見直す(たとえば hook が `HERDR_PANE_ID` と ralph の台帳を読む形)。`ralph-dispatch.sh` が環境を消さないことは S3 の前に読んで確かめる
-- 古い herdr(`--env` なし)では値が届かず、WIP コミットが戻る: warning の 1 行で知らせる。現行の leader の手順 9 と 14 が push への混入を止める
+- 古い herdr(`--env` なし)や、binary と hook の片方だけが新しい配備では値が届かず、WIP コミットが戻る: warning の 1 行で知らせ、leader の手順 14 の新しい文が push の前に `wip:` のコミットを見つけて BLOCKED にする。leader が雛形に従わなければ止まらない(雛形の指示であって ralph の検査ではない)
+- spawn に失敗して pane を閉じられなかった座席が動き続ける: 運用規律の新しい項は、stop の成功と `ralph org status` で active でないことを確かめてから打ち直すと書き、確かめられなければ BLOCKED にする
 - 座席が残した未コミットの変更が、コミットされずに作業ツリーに残る: これは意図した形で、leader の手順 9 の `git status --porcelain` が gate の前に拾う。gate のあとに残ったものは cleanup が断るので、人が気づく
 - 実機の確かめで、claude のフォルダ信頼の項目が `~/.claude.json` に 1 つ増え、session の記録が `~/.claude/projects/` に残る(4a と同じ)。evidence に書く。ユーザーのグローバルの hook も一時の repo で走る
 - 文書の写しの書き漏れ: check-sync と check-skill-sync が落とす
@@ -123,8 +126,8 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed(consult consult-plan-wipseat: 進めてよい。Codex の計画助言: HIGH 1(手順 9 と 14 は WIP コミットの push を止めない)と MEDIUM 1(閉じられなかった座席を止まったと扱う)を、ユーザーの常の指示どおり計画に入れた: D5、AC5、AC5b、AC8、Risks、Test plan)
+- [x] Plan approved(ユーザーの常の指示による自動承認)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
