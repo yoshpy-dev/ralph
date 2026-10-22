@@ -130,7 +130,7 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
   - S5 08d091f5(tech-debt の F3 を RESOLVED、ALERT の行に計測の数字、根拠の表と仕様の F3・D-F3・FR-3・FR-5・FR-9 と #247)。印の数は仕様 22/10、根拠の表 21/10
   - AC8: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は 08d091f5 で rc 0(760 s)。go1.25.8 のテストは各 slice の implementer が driver・org・cli で通した
   - sync-docs に渡すもの: `docs/recipes/director-launch-cmd.md` の 131 行と 248 行(と templates/base の写し)、`/director` skill の起動スクリプトの export の説明(と写し)に `AGMSG_SELF_NAME=off`、`AgmsgSelfNameOff` の doc コメントに起動スクリプト。未確認のこと: 0.7.5 より古い herdr が `tab create --help` を無視するなら、確かめのときに tab を 1 つ作る
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-22-seat-agmsg-self-name.md`、Merge 可、LOW 4。L1・L2・L4 は 4991744e で直した)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-22-seat-agmsg-self-name.md`、pass。V1〜V3 は sync-docs に渡す)
+- [x] Test artifact created(`docs/reports/test-2026-10-22-seat-agmsg-self-name.md`、pass。G1・G2 のテストと G5・V4 の警告の文は、cross-review の前に直す)
 - [ ] PR created
