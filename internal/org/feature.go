@@ -369,10 +369,10 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 }
 
 // featurePreambleLead is the line featureLeaderTask writes before the fenced
-// preamble of the split plan. Steps 1 and 5 of the 機能ごとの org section of
+// preamble of the split plan. Steps 1, 3, and 5 of the 機能ごとの org section of
 // prompts/leader.md name the block by its first words,
 // 全機能の座席に適用する決まり.
-const featurePreambleLead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+const featurePreambleLead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節を、原文のまま下の囲みに入れた):"
 
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,

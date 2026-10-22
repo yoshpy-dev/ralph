@@ -578,7 +578,7 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 // body adds no trailing blank line, and a preamble of blank lines only
 // leaves the task as it is without one.
 func TestFeatureLeaderTask_Preamble(t *testing.T) {
-	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節を、原文のまま下の囲みに入れた):"
 	bare := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
 	withPreamble := func(preamble string) *SplitPlan {
 		p := *bare
@@ -669,7 +669,7 @@ func TestStartFeature_LeaderPromptHoldsPreamble(t *testing.T) {
 			headings = append(headings, line)
 		}
 	}
-	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節を、原文のまま下の囲みに入れた):"
 	const body = "Objective: add the token store.\n\n- [ ] AC1: tokens persist"
 
 	var long strings.Builder
