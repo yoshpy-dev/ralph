@@ -143,4 +143,4 @@ spawn が途中で失敗したとき、その spawn が作った herdr の pane 
 - [x] Review artifact created(`docs/reports/self-review-2026-10-22-seat-spawn-close.md`、Merge 可、LOW 10。L1・L2・L5〜L9 を dde26a8f・3edc8590・70b23052・37aae73a で直し、L3・L4・L10 は残した)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-22-seat-spawn-close.md`、pass。V1〜V6 を 0a032b37・3b07848d で直した。run-verify は 37aae73a で rc 0、731 秒)
 - [x] Test artifact created(`docs/reports/test-2026-10-22-seat-spawn-close.md`、pass。G1・G2 を 0a032b37 で直した)
-- [ ] PR created
+- [x] PR created(#249。sync-docs は 2bced00b、cross-review は指摘 0 件で 4cb15162、walkthrough は e36df030)
