@@ -350,6 +350,7 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		return nil, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
+	agmsgHome := driver.ResolveAgmsgHome(orgCfg.AgmsgHome)
 	rt := &org.Org{
 		Config:   orgCfg,
 		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(resolvedStateDir)),
@@ -359,7 +360,10 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		// its herdr agent (finding F3), and RALPH_WIP_CHECKPOINT=off, so the
 		// seat's Claude Code session makes no wip: commit (finding F11).
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
-		Agmsg: driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
+		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
+		// The leader's role prompt names the same home's scripts in its
+		// inbox commands ({{AGMSG_SCRIPTS}}).
+		AgmsgHome: agmsgHome,
 		// Inbox, EscalationsPath, and DesktopNotify are set below by
 		// wireOrgInbox, which newOrgEscalateFallbackRuntime shares.
 		InboxPollInterval: orgInboxPollIntervalOverride,

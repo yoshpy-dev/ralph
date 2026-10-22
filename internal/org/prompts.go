@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // promptFS embeds every role prompt template under internal/org/prompts/.
@@ -58,6 +59,32 @@ type RolePromptVars struct {
 	// (EnvelopeSummary, envelope_summary.go) substituted for {{ENVELOPE}} --
 	// currently only prompts/leader.md references it.
 	Envelope string
+	// AgmsgHome is the agmsg home directory, as driver.ResolveAgmsgHome
+	// returns it and unquoted: the one ralph's own agmsg calls run their
+	// scripts from (Org.AgmsgHome, which Spawn passes here). {{AGMSG_SCRIPTS}}
+	// is its scripts directory, made absolute and given as one shell word
+	// (shellQuote), so the inbox.sh and history.sh commands of
+	// prompts/leader.md, the only template that references it, read the
+	// team's store ralph writes to even when [org].agmsg_home or
+	// RALPH_ORG_AGMSG_HOME names another agmsg. Empty means
+	// driver.ResolveAgmsgHome("").
+	AgmsgHome string
+}
+
+// agmsgScriptsWord is the value of {{AGMSG_SCRIPTS}} for home (see
+// RolePromptVars.AgmsgHome): home's scripts directory, made absolute against
+// the working directory when it is relative (the seat's pane runs in another
+// one; a path that cannot be made absolute is kept as it is), and
+// single-quoted as one shell word.
+func agmsgScriptsWord(home string) string {
+	if home == "" {
+		home = driver.ResolveAgmsgHome("")
+	}
+	scripts := filepath.Join(home, "scripts")
+	if abs, err := filepath.Abs(scripts); err == nil {
+		scripts = abs
+	}
+	return shellQuote(scripts)
 }
 
 // RenderRolePrompt returns the rendered template for role with vars
@@ -99,6 +126,7 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{PLAN_PATH}}", vars.PlanPath,
 		"{{TASK}}", vars.Task,
 		"{{ENVELOPE}}", vars.Envelope,
+		"{{AGMSG_SCRIPTS}}", agmsgScriptsWord(vars.AgmsgHome),
 	)
 	return replacer.Replace(text), true, nil
 }

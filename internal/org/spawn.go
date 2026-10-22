@@ -180,6 +180,13 @@ type Org struct {
 	Herdr    HerdrClient
 	Agmsg    AgmsgClient
 	Now      Clock
+	// AgmsgHome is the agmsg home directory Agmsg runs its scripts from
+	// (an AgmsgClient does not expose it). Spawn passes it to the role
+	// prompt (RolePromptVars.AgmsgHome), so the leader's inbox commands read
+	// the store ralph's agmsg calls write to. The CLI sets it to the same
+	// driver.ResolveAgmsgHome value it gives driver.Agmsg's Home. Empty (the
+	// field's default) means driver.ResolveAgmsgHome("").
+	AgmsgHome string
 	// AgentStartRetryInterval overrides the wait between agent_pane_busy
 	// retries in agentStartWithRetry. Zero (the field's default) means "use
 	// defaultAgentStartRetryInterval" -- tests set this to a tiny value so
@@ -999,12 +1006,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// implementer.md / reviewer.md) into the initial prompt;
 	// --prompt, if also given, is appended after it. An unknown role leaves
 	// initialPrompt as plain --prompt (possibly empty) -- no error, no
-	// fallback template. Task and Envelope are only referenced by
-	// prompts/leader.md today; every other template ignores them.
+	// fallback template. Task, Envelope, and AgmsgHome are only referenced
+	// by prompts/leader.md today; every other template ignores them.
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
-		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
+		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, paneID)
@@ -2260,7 +2267,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	initialPrompt := p.Prompt
 	rendered, ok, err := RenderRolePrompt(p.Role, RolePromptVars{
 		OrgID: p.OrgID, SeatID: p.SeatID, Team: team, Role: p.Role, Scope: p.Scope,
-		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
+		Task: p.Task, Envelope: EnvelopeSummary(o.Config), AgmsgHome: o.AgmsgHome,
 	})
 	if err != nil {
 		return o.failStep(p, "agent_start", err, nil, "")
