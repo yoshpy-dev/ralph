@@ -197,3 +197,13 @@
 ./scripts/insights-append.sh --slug watch-escalation-inbox --flow standard --phase test \
   --verdict pass --cycle auto --source skill || true
 ```
+
+## この報告のあとに埋めた穴
+
+この報告のあとの 08083792(`test:` の 1 コミット)が穴 1〜3 を埋めた。変えたのは `internal/org/watch_test.go` と `internal/org/watch_all_test.go` だけで、コードは変えていない。上の表と Verdict は /test の時点のまま残し、ここに足すだけにする。
+
+- 穴 1: `TestWatch_Escalation_LeavesTheAlertItemToTheDirectorWhenThisWatchAcceptsWork` を 2 ケースの表にし、座席の ALERT(`deadman_timeout`)が delivery `deadline` で記録され、escalations.jsonl の行も通知もなく、stderr が 1 行だけになるケースを足した。`TestRunWatchAll_ALongRunningWatchLeavesASeatsDeadmanEscalationToTheDirectorUntilTheAckDeadline` は、長く動く見張りの 3 サイクルで、座席の ALERT が deadline の件になり、ack の期限を過ぎたサイクルで `subject` が座席、理由が `inbox_ack_deadline` の行と通知 1 件で届くことを見る
+- 穴 2: `TestWatch_Escalation_TheOsascriptNotificationIsTitledAfterTheWatch` は、`setDesktopNotifyGOOS(t, "darwin")` にして PATH を引数を記録する偽の osascript の dir だけにし、osascript に渡る引数を 1 回の呼び出しの完全一致で見る。ケースは、ALERT の件をすぐ送る形と ack の期限で送る形(受信箱の道)、受信箱に書けない形(`realEscalate`)、対照の leader の escalate(題は `ralph org escalate`)の 4 つ。本物の osascript は打たない
+- 穴 3: `TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline` は、同じサイクルで 2 つの org の件がそれぞれ deadline で記録され、次のサイクルで件ごとの escalations.jsonl の行と通知で届くことを固める。2 つの org が同じサイクルで上げる件は既存のテストがほぼ覆っていて、このテストだけが捕まえた変異は implementer が作った 1 つ(deadline の件に限って重複の判定が org を見ない形)だけだった
+- mutant: A49 と A50 は穴 2 のテストで赤になった。題をいつも `ralph org watch` に固定する変異は、対照のケースで赤になった。穴 1 の変異(座席の ALERT で deadline のときだけ now にする)は新しい 2 本で赤になった。ほかの 51 本は打ち直していない
+- 打ち直したテスト: `gofmt -l internal` は出力なし、`go vet ./internal/org/...` は rc 0。`go test -count=1 -timeout 30m ./internal/org/... ./internal/cli/...` は手元の Go で rc 0(359 秒)、`GOTOOLCHAIN=go1.25.8` で rc 0(376 秒)。足したテストは `-count=5` で両方の Go で通った。`./scripts/run-test.sh` 全体は 08083792 の tree で打ち直していない
