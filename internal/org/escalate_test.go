@@ -1271,8 +1271,13 @@ func TestEscalateNotRecorded_ChecksTheMessageThenAlertsTheHuman(t *testing.T) {
 	})
 }
 
-// The watch and inbox lines share escalations.jsonl: a watch line keeps its
-// alert_id and gets no inbox_id, an inbox line the other way round.
+// The watch and inbox lines share escalations.jsonl: the line of a watch
+// escalation the inbox could not take keeps its alert_id and gets no
+// inbox_id, and the line of a leader's inbox item the other way round. The
+// line of an ALERT item carries both
+// (TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat), and the
+// osascript field of a watch line is pinned by
+// TestWatch_Escalation_WithoutTheInboxWritesTheBannerThenNotifiesThenWritesOneLine.
 func TestEscalationRecord_WatchAndInboxLinesKeepTheirOwnID(t *testing.T) {
 	watchLine, err := json.Marshal(escalationRecord{TS: inboxTestNow, OrgID: "org-a", AlertID: "org-a/seat-1/stall@1", Subject: "seat-1", Reason: "deadman_timeout"})
 	if err != nil {
