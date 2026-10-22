@@ -92,7 +92,7 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // feature worktree's run-static-verify.sh and run-test.sh for the gate,
 // osascript and `claude -p`; see the package comment in seat.go) --
 // driver.Herdr satisfies this interface structurally. Wiring lives in internal/cli/org.go:
-// driver.NewHerdr(runner, driver.AgmsgSelfNameOff), with runner a
+// driver.NewHerdr(runner, driver.SeatPaneEnv()...), with runner a
 // driver.ExecRunner, is assigned directly to Org.Herdr.
 type HerdrClient interface {
 	WorkspaceCreate(ctx context.Context, cwd, label string) (string, error)

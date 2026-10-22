@@ -69,13 +69,15 @@ fi
 echo '{"id":"cli:tab:create","result":{"root_pane":{"pane_id":"w1:p2","tab_id":"w1:t2","workspace_id":"w1"},"tab":{"tab_id":"w1:t2"},"type":"tab_created"}}'
 `
 
-// TestOrgRuntimes_HerdrPaneEnvIsSelfNameOff pins AC3 of plan
-// 2026-10-22-seat-agmsg-self-name on the wiring side: the herdr driver of
+// TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv pins AC3 of plan
+// 2026-10-22-seat-agmsg-self-name and AC2 of plan
+// 2026-10-22-seat-wip-checkpoint on the wiring side: the herdr driver of
 // the org verbs' runtime (the seat panes of spawn and start) and of director
-// start (the headless director's pane) has exactly AGMSG_SELF_NAME=off as
-// its PaneEnv. Two tab creates through each, run against a stand-in herdr
-// on PATH, both carry it and check --env once.
-func TestOrgRuntimes_HerdrPaneEnvIsSelfNameOff(t *testing.T) {
+// start (the headless director's pane) has exactly driver.SeatPaneEnv,
+// AGMSG_SELF_NAME=off then RALPH_WIP_CHECKPOINT=off, as its PaneEnv. Two
+// tab creates through each, run against a stand-in herdr on PATH, both
+// carry them and check --env once.
+func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "herdr"), []byte(orgRuntimeEnvHerdrStub), 0o755); err != nil {
 		t.Fatal(err)
@@ -95,8 +97,11 @@ func TestOrgRuntimes_HerdrPaneEnvIsSelfNameOff(t *testing.T) {
 			if !ok {
 				t.Fatalf("Herdr is %T; want a driver.Herdr", client)
 			}
-			if want := []string{"AGMSG_SELF_NAME=off"}; !reflect.DeepEqual(h.PaneEnv, want) {
+			if want := []string{"AGMSG_SELF_NAME=off", "RALPH_WIP_CHECKPOINT=off"}; !reflect.DeepEqual(h.PaneEnv, want) {
 				t.Fatalf("PaneEnv = %q; want %q", h.PaneEnv, want)
+			}
+			if want := driver.SeatPaneEnv(); !reflect.DeepEqual(h.PaneEnv, want) {
+				t.Fatalf("PaneEnv = %q; want driver.SeatPaneEnv() %q", h.PaneEnv, want)
 			}
 
 			herdrLog := filepath.Join(t.TempDir(), "herdr.log")
@@ -110,7 +115,7 @@ func TestOrgRuntimes_HerdrPaneEnvIsSelfNameOff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tabCreate := "tab create --workspace w1 --cwd /tmp/cwd --label seat-1 --env AGMSG_SELF_NAME=off"
+			tabCreate := "tab create --workspace w1 --cwd /tmp/cwd --label seat-1 --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off"
 			if got, want := strings.Split(strings.TrimSpace(string(data)), "\n"), []string{"tab create --help", tabCreate, tabCreate}; !slices.Equal(got, want) {
 				t.Fatalf("herdr calls = %q; want %q", got, want)
 			}
@@ -172,9 +177,16 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 					t.Fatalf("herdr call %q has --env; want none on a herdr without it", l)
 				}
 			}
-			const warning = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: "
+			const warning = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: "
 			if !strings.HasPrefix(stderr, warning) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stderr, "\n") {
 				t.Fatalf("stderr = %q; want exactly the one line that starts with %q", stderr, warning)
+			}
+			// The line names the consequence of each entry (plan
+			// 2026-10-22-seat-wip-checkpoint, AC4).
+			for _, clause := range []string{"may rename the pane's herdr agent", "may commit a feature branch's uncommitted changes as 'wip:'"} {
+				if !strings.Contains(stderr, clause) {
+					t.Fatalf("stderr = %q; want it to say %q", stderr, clause)
+				}
 			}
 		})
 	}

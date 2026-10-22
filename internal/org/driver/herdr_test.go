@@ -313,18 +313,20 @@ func tabCreateTwice(t *testing.T, h Herdr) {
 }
 
 // TestHerdr_TabCreate_PaneEnvAddsEnvWhenHelpListsIt pins AC3 of plan
-// 2026-10-22-seat-agmsg-self-name: with a herdr whose `tab create --help`
-// lists --env, every tab create gets `--env AGMSG_SELF_NAME=off` after
-// --label, and the help runs once for a NewHerdr value and its copies.
+// 2026-10-22-seat-agmsg-self-name and AC2 of plan
+// 2026-10-22-seat-wip-checkpoint: with a herdr whose `tab create --help`
+// lists --env, every tab create of a Herdr with SeatPaneEnv gets
+// `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off` after --label,
+// and the help runs once for a NewHerdr value and its copies.
 func TestHerdr_TabCreate_PaneEnvAddsEnvWhenHelpListsIt(t *testing.T) {
 	f := &paneEnvFakeRunner{help: herdrTabCreateHelp}
 	var warn bytes.Buffer
-	h := NewHerdr(f, AgmsgSelfNameOff)
+	h := NewHerdr(f, SeatPaneEnv()...)
 	h.Warn = &warn
 
 	tabCreateTwice(t, h)
 
-	want := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	want := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off", "--env", "RALPH_WIP_CHECKPOINT=off")
 	if !reflect.DeepEqual(f.tabCalls, [][]string{want, want}) {
 		t.Fatalf("tab create argv = %v; want %v twice", f.tabCalls, want)
 	}
@@ -336,9 +338,11 @@ func TestHerdr_TabCreate_PaneEnvAddsEnvWhenHelpListsIt(t *testing.T) {
 	}
 }
 
-// TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce pins AC4: with a herdr
-// whose help does not list --env, or whose help fails or times out, the tab
-// is created without --env and the warning is written once, as one line.
+// TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce pins AC4 (of both
+// plans): with a herdr whose help does not list --env, or whose help fails
+// or times out, the tab of a Herdr with SeatPaneEnv is created without
+// --env and the warning, which names both entries and their consequences,
+// is written once, as one line.
 func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -390,7 +394,7 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 			}
 			f := tt.runner()
 			var warn bytes.Buffer
-			h := NewHerdr(f, AgmsgSelfNameOff)
+			h := NewHerdr(f, SeatPaneEnv()...)
 			h.Warn = &warn
 
 			start := time.Now()
@@ -412,13 +416,68 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 	}
 }
 
+// The clauses warnNoPaneEnv writes for AgmsgSelfNameOff and for
+// WIPCheckpointOff, and the advice that ends every warning line, written out
+// here so that a change to paneEnvConsequence's text fails the tests.
+const (
+	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
+		"and ralph may then fail to reach it (agent_not_found)"
+	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
+		"at its session end or context compaction (its WIP-checkpoint hooks)"
+	noPaneEnvAdvice = "; use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
+)
+
 // noPaneEnvWarning is the line warnNoPaneEnv writes for PaneEnv
-// [AgmsgSelfNameOff] and reason.
+// SeatPaneEnv() and reason.
 func noPaneEnvWarning(reason string) string {
-	return "warning: " + reason + ", so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
-		"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-		"and ralph may then fail to reach it (agent_not_found); " +
-		"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
+	return "warning: " + reason + ", so ralph creates herdr panes without --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: " +
+		agmsgSelfNameClause + "; " + wipCheckpointClause + noPaneEnvAdvice
+}
+
+// TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence pins AC4 of
+// plan 2026-10-22-seat-wip-checkpoint: on a herdr without --env the one
+// warning line lists every PaneEnv entry and adds, in PaneEnv's order, the
+// clause of each entry the driver knows; an entry it does not know adds no
+// clause. With AgmsgSelfNameOff alone the line is, word for word, the one of
+// plan 2026-10-22-seat-agmsg-self-name.
+func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) {
+	const head = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env "
+	for name, tt := range map[string]struct {
+		paneEnv []string
+		want    string
+	}{
+		"SeatPaneEnv": {SeatPaneEnv(),
+			head + "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: " + agmsgSelfNameClause + "; " + wipCheckpointClause + noPaneEnvAdvice},
+		"AgmsgSelfNameOff alone": {[]string{AgmsgSelfNameOff},
+			"warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
+				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
+				"and ralph may then fail to reach it (agent_not_found); " +
+				"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"},
+		"WIPCheckpointOff alone": {[]string{WIPCheckpointOff},
+			head + "RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},
+		"the two the other way round": {[]string{WIPCheckpointOff, AgmsgSelfNameOff},
+			head + "RALPH_WIP_CHECKPOINT=off --env AGMSG_SELF_NAME=off: " + wipCheckpointClause + "; " + agmsgSelfNameClause + noPaneEnvAdvice},
+		"an unknown entry": {[]string{"X=1"},
+			head + "X=1" + noPaneEnvAdvice},
+		"an unknown entry and WIPCheckpointOff": {[]string{"X=1", WIPCheckpointOff},
+			head + "X=1 --env RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv}
+			var warn bytes.Buffer
+			h := NewHerdr(f, tt.paneEnv...)
+			h.Warn = &warn
+
+			tabCreateTwice(t, h)
+
+			if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, tabCreateArgv}) {
+				t.Fatalf("tab create argv = %v; want %v twice, with no --env", f.tabCalls, tabCreateArgv)
+			}
+			if warn.String() != tt.want {
+				t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), tt.want)
+			}
+		})
+	}
 }
 
 // TestHerdr_TabCreate_PaneEnvNilWarnWritesToStderr pins AC4 for the Herdr
@@ -439,7 +498,7 @@ func TestHerdr_TabCreate_PaneEnvNilWarnWritesToStderr(t *testing.T) {
 	})
 	f := &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv}
 
-	tabCreateTwice(t, NewHerdr(f, AgmsgSelfNameOff))
+	tabCreateTwice(t, NewHerdr(f, SeatPaneEnv()...))
 
 	os.Stderr = orig
 	_ = w.Close()
@@ -553,7 +612,7 @@ func TestHerdr_TabCreate_PaneEnvCanceledCallerIsNotCached(t *testing.T) {
 		return herdrTabCreateHelp, nil
 	}}
 	var warn bytes.Buffer
-	h := NewHerdr(f, AgmsgSelfNameOff)
+	h := NewHerdr(f, SeatPaneEnv()...)
 	h.Warn = &warn
 
 	canceled, cancel := context.WithCancel(context.Background())
@@ -565,7 +624,7 @@ func TestHerdr_TabCreate_PaneEnvCanceledCallerIsNotCached(t *testing.T) {
 		t.Fatalf("TabCreate: %v", err)
 	}
 
-	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off", "--env", "RALPH_WIP_CHECKPOINT=off")
 	if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, withEnv}) {
 		t.Fatalf("tab create argv = %v; want %v, then %v", f.tabCalls, tabCreateArgv, withEnv)
 	}
@@ -585,7 +644,7 @@ func TestHerdr_TabCreate_PaneEnvConcurrentCallsCheckOnce(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		return herdrTabCreateHelp, nil
 	}}
-	h := NewHerdr(f, AgmsgSelfNameOff)
+	h := NewHerdr(f, SeatPaneEnv()...)
 
 	const n = 8
 	var wg sync.WaitGroup
@@ -609,7 +668,7 @@ func TestHerdr_TabCreate_PaneEnvConcurrentCallsCheckOnce(t *testing.T) {
 	if f.helpCalls != 1 {
 		t.Fatalf("help ran %d times; want 1", f.helpCalls)
 	}
-	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off")
+	withEnv := append(append([]string{}, tabCreateArgv...), "--env", "AGMSG_SELF_NAME=off", "--env", "RALPH_WIP_CHECKPOINT=off")
 	for _, argv := range f.tabCalls {
 		if !reflect.DeepEqual(argv, withEnv) {
 			t.Fatalf("tab create argv = %v; want %v", argv, withEnv)
