@@ -62,7 +62,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ### Functional requirements
 
-- [ ] **FR-1 `ralph org` 動詞セット**: `spawn` / `send` / `wait` / `read` / `stop` / `status` / `disband` を冪等な決定論実装で提供する。`spawn` は 1 コマンドで herdr pane 作成 → worktree 用意 → agmsg チーム参加 → 役割プロンプト投入 → エンベロープ検証を完了する。プール外モデル・座席上限超過・スコープ違反は動詞のバリデーションで拒否し、receipts に記録する。
+- [ ] **FR-1 `ralph org` 動詞セット**: `spawn` / `send` / `wait` / `read` / `stop` / `status` / `disband` を冪等な決定論実装で提供する。`spawn` は 1 コマンドで herdr pane 作成 → worktree 用意 → agmsg チーム参加 → 役割プロンプト投入 → エンベロープ検証を完了する。プール外モデル・座席上限超過・スコープ違反は動詞のバリデーションで拒否し、receipts に記録する。ただし、spawn が途中で止まった座席(最後の state event が `spawn_started` か `spawn_step`)の打ち直しをエンベロープ・permission・`--scope` の検査で断るときは、`rejected` も receipt も書かない。`rejected` を書くと座席が pane の id を持たない記録で終わり、`stop` も次の spawn も途中の spawn の pane を探さなくなるためである(`--dry-run` は今までどおり記録する)。
 - [ ] **FR-2 `[org]` エンベロープ設定**: `model_pool`(`{ driver, model }` の組。model は `claude --model <名>` / `codex --model <名>` に渡す CLI ネイティブ名)、`driver_pool`、`[org.roles]`(役割別許可プール)、`max_seats`、budget(座席別/タスク全体の wall-clock 上限、fix ラウンド上限) **(2026-09-16 改訂で撤去)**を定義できる。config.go(struct / `Default()` / `Load()`)・`templates/base/ralph.toml`・`scripts/ralph-config.sh` のロックステップを維持し、`defaults_sync_test.go` を更新する。`ralph doctor` は全プールエントリを起動プローブし、無効なモデル ID を警告する。
 - [ ] **FR-3 座席 = 常駐対話セッション**: 座席は herdr pane 内の対話 CLI セッション(`claude --model <名>` / `codex --model <名>` 直接起動)。初期プロンプトは起動引数で渡し、追加指示は `herdr agent wait --until idle` を挟んだ `send` 動詞経由とする。座席内部での Task サブエージェント fan-out は座席の裁量。
 - [ ] **FR-4 agmsg スター型プロトコル**: identity は `lead` / `scout-<n>` / `impl-<slug>` / `reviewer` / `qa` / `watchdog`。typed message(`TYPE: TASK | RESULT | QUESTION | REVIEW | DECISION | BLOCKED | CONTRACT | HEARTBEAT | STOP`、`TASK_ID`、`EVIDENCE` はコミット SHA / ファイルパス / レポートへのポインタのみ)。impl 間の直接通信は CONTRACT のみ、lead 経由。プロトコルは `/org` skill と `.claude/rules/` に明文化する。 **(2026-10-04 改訂で変更: identity は `leader`、`qa` は撤去)**
@@ -84,7 +84,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 
 ## Acceptance criteria
 
-- [ ] Given エンベロープにないモデル、when Lead が `ralph org spawn` を実行、then 機構がエラーで拒否し、receipts に `honored=false` 相当の拒否記録が残る。
+- [ ] Given エンベロープにないモデル、when Lead が `ralph org spawn` を実行、then 機構がエラーで拒否し、receipts に `honored=false` 相当の拒否記録が残る(spawn が途中で止まった座席の打ち直しは何も記録しない。FR-1)。
 - [ ] Given `max_seats` に達した状態、when Lead が追加 spawn、then 拒否され manifest に記録される。
 - [ ] Given 座席の wall-clock budget 超過、when パルス層が検知、then LLM の判断を経由せず座席が遮断され、manifest に遮断イベントが記録され、Lead に通知される。**(2026-09-16 改訂で撤去)**
 - [ ] Given Lead が watchdog 通知に N 分無応答、when デッドマン条項発動、then 人間へ通知が届く。

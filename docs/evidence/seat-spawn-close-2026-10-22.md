@@ -70,7 +70,7 @@ HELLO の印と、`pane close` を断る印の両方を付けて `seat-b` を打
 
 ### (d) stop で片付く
 
-`ralph org stop --org-id ssc --seat seat-a` と `ralph org stop --all`(`seat-b` を止めた)のあと、`ralph org disband --org-id ssc` を打った。どれも終了コード 0。`herdr agent list` と `herdr workspace list` は空になった。
+`ralph org stop --org-id ssc --seat seat-a` と `ralph org stop --all`((e) の 3 が立てた `seat-b` を止めた)のあと、`ralph org disband --org-id ssc` を打った。どれも終了コード 0。`herdr agent list` と `herdr workspace list` は空になった。
 
 ## 確かめていないもの
 

@@ -92,3 +92,16 @@ CRITICAL、HIGH、MEDIUM はない。
 - Verified: AC1〜AC5、AC9、AC10 のコードとテストの本文の対応(補償の 10 か所の呼び出し、10 秒の期限と spawn の ctx を使わないこと、`spawn_close_failed` が state でないこと、stale の補償の 5 つの分かれ、ロックの位置と順、途中の座席への 3 つの拒否と事前検査、stop の案内の `--state-dir`、help と案内の文)、AC6 の evidence と S4 の生の出力、AC7 の記録(印 26/6 と 25/6、1 項目ずつの一致、31 本の PR、`fix/seat-agmsg-self-name` の置き換え、前文の予定の順、F4 の行の時刻、新しい 4 行の参照、テスト名 63 個)、静的解析(run-static-verify の rc 0、go1.25.8 の build と vet、`git diff --check`、足した行の走査)、文書のずれ、計画の digest
 - Partially verified: AC6 の (e) と (d) を引く記録の文(V1)
 - Not verified: AC8(orchestrator の run-verify の結果待ち)、Go のテストの実行(`/test`)、閉じられなかった座席を本物の herdr で stop が拾うこと、本物の claude の座席
+
+## 直したもの(cycle 1、報告のあと)
+
+コードのコメントとテストの直しは 0a032b37、記録の直しはこの節を足したコミット(`docs: correct the seat-spawn-close records after verify and test`)である。上の判定と重大度は変えていない。
+
+- V1: 直した(記録)。仕様の FR-2 と受け入れ条件 2 の注、根拠の表の FR-2 の行と F4 の直しの項(107 行)、tech-debt の F4 の RESOLVED のコメントを、実機では閉じられなかった座席の pane を同じ座席の次の正しい spawn の補償が閉じたこと((e))、`stop` と `stop --all` が閉じることはテストで確かめたことに分けて書いた。evidence の (d) は、`stop --all` が止めたのが (e) の 3 が立てた `seat-b` だと書いた。印の判定は変えていない
+- V2: 直した(記録)。試行の manifest で、`spawn_started` から同じ spawn の `spawned` か `spawn_failed` までを測った。記録が agmsg の step(Details が `agmsg_` か `step=agmsg_` で始まる記録)に届いた spawn は 10 回のうち 8 回で、7〜144 秒だった。leader でない 5 回では 27〜144 秒だった。tech-debt の行に、この範囲と測り方を書いた
+- V3: 直した(記録)。org runtime の仕様の FR-1 に、途中で止まった座席の打ち直しをエンベロープ・permission・`--scope` の検査で断るときは `rejected` も receipt も書かないこと(`--dry-run` は書く)を足した。受け入れ条件の 1 つ目からは FR-1 を引いた
+- V4: 直した(0a032b37)。`Spawn` の doc に、途中の座席に対しては本番は何も書かずにエラーへ `inFlightSeatErr` の後半を足し、dry run は dry run の `rejected` と honored=false の receipt を書く、と違いを書いた。コメントだけ
+- V5: 直した(0a032b37)。spawn の期限の ctx を作る行に、stale の補償の時間も `--timeout-ms` から出ること(呼び出しはそれぞれ 10 秒で区切られ、期限では切れない)を書いた。コメントだけで、動作、help、skill は変えていない
+- V6: 直した(記録)。仕様の FR-3 と NFR の注に、記録した pane の id が今は別の label の pane を指すときは `compensateStale` が触らずに `spawn_failed` を書く例外を足した。根拠の表の NFR 安全の不変条件の行(58 行)にも同じ文があったので、同じ例外を足した
+- V7: 残した。計画の checkbox は orchestrator が付ける
+- ほか: 0a032b37 でファイルの長さが変わったので、tech-debt の大きさの行の数を直した(`spawn.go` 2665 行、`spawn_test.go` 5859 行、新しいテストの塊は約 1100 行)

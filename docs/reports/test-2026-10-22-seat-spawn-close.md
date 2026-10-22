@@ -161,3 +161,12 @@ load に弱いことが分かっているテストも、org と cli をパッケ
 - Pass: run-test.sh(shell 43 本、Go 8 パッケージ)、org・cli・driver・protocol の `-count=1` を go1.26.0 と go1.25.8 で、新しいテストと期待を変えたテスト 48 本の `-count=3 -v` を go1.26.0・go1.25.8・`-race` で(どれも 144/144、subtest 216/216、SKIP 0)、時間に敏感な 13 本の `-count=10` を load average 26〜79 の下で(130/130)、coverage の実行を load average 最大約 100 の下で、canary の PATH で 48 本(本物の herdr などへの呼び出し 0 回、感度あり)。mutant は 47 本のうち 46 本が赤で、生き残りは G1 の L7 だけ
 - Fail: なし
 - Blocked: なし
+
+## 直したもの(cycle 1、報告のあと)
+
+テストの直しは 0a032b37 である。上の判定と重大度は変えていない。
+
+- G1: 直した(0a032b37)。`TestOrgSpawn_SeatLock_RefusesASecondSpawnOfTheSeat` の期待の文に `the lock is held after 0s` を足した。ロックの待ちを 2 秒にした mutant(`go test -overlay`。worktree には書いていない)で、このテストだけが赤になった
+- G2: 直した(0a032b37)。`internal/org/spawn_test.go` にテストを 2 本足した。`TestOrgSpawn_FailureAfterPane_CloseAndRecordFail_ErrorJoinsTheAppendError` は close の時点で manifest を読み取り専用にし(`verbs_test.go` の `closeHookHerdr` と `readOnlyManifest`)、`TestOrgSpawn_StaleSeat_PaneNotClosed_RecordFails_ErrorJoinsTheAppendError` は spawn の前に読み取り専用にする。どちらも、エラーが pane と 2 つのコマンドを書いたまま追記の誤り(`fs.ErrPermission` と `org: spawn: record spawn_close_failed:`)を包むこと、記録が増えず座席が active のまま残ることを見る。2 か所の `errors.Join` をそれぞれ外した mutant で、対応するテストだけが赤になった。stop の `stop_failed` の追記の失敗(`internal/org/verbs.go` の `Stop`)は、この直しのファイルの外なので、テストのないまま残した
+- G3〜G6: 残した(INFO)。上に書いたとおり、共通の道は今のテストが通っている
+- 打ったもの: 0a032b37 と同じコードで、`go test -count=1 -timeout 30m ./internal/org/... ./internal/cli/...` が go1.26.0 で rc 0(310 秒。org 309.6 秒、cli 239.4 秒)、`GOTOOLCHAIN=go1.25.8` で rc 0(332 秒。org 326.6 秒、cli 250.7 秒)。driver と protocol もどちらも ok。トップレベルのテストは org 1145 本、driver 66 本、protocol 15 本、cli 820 本(`go test -list`)。足した 2 本と変えた 1 本の `-count=3 -v` は、どちらの toolchain でも 9/9 が PASS で、SKIP はなかった
