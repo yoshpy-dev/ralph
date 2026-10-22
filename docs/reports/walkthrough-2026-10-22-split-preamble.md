@@ -59,7 +59,7 @@
    - de6ca6b2 test(pass、mutant 41 本中 38 本が赤)。33e51acc は、1 回目の `run-test.sh` で落ちた internal/cli の競合を tech-debt の 348 行にした。7a955d2c は、生き残った mutant 3 本が示した G1・G2 を埋めた: `TestFeatureLeaderTask_Preamble` に依存のある機能 `auth-ui` の行(G1)と、前文の最後の行の末尾の空白が残る行(G2)、`TestLoadSplitPlan_Preamble` に同じ形の行。コードと雛形は変えていない。18c93ff0 が test の報告に「この報告のあとに埋めた穴」を足した
    - 30068218 sync-docs(食い違いなし。この run が変えたのは報告だけ)、e9824d39 その insight event
    - b59ca7df cross-review の triage(cycle 1/2、指摘 0)。`codex exec review --base main` を read-only で打ち、指摘なしで終わった
-   - `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は e9824d39 で走らせている(結果は AC9)
+   - `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は e9824d39 から打ち、rc 0(AC9)
 
 ## 3. AC の根拠
 
@@ -73,7 +73,7 @@
 | AC6 | S2。`TestOrgStartHelp_TaskSource`(`internal/cli/org_feature_test.go:524`)、`TestOrgStartPlan_FlagCombinationsRefused` の「a task argument」の行 |
 | AC7 | S3。verify が 4 写しずつの `cmp`、`check-skill-sync.sh`(14 skill)、`check-sync.sh`(DRIFTED 0)を見た。「`## Features` の外の節は自由に書ける」の古い文が残っていないことを、sync-docs が grep で見た |
 | AC8 | S4。verify が取り消し線と RESOLVED の注、注が挙げるテスト 7 本の実在、`fix/seat-wip-checkpoint` が archive と過去の報告のほか残っていないこと、PR の一覧 33 本と集合の一致、印 26/6 と 25/6 を数え直した。sync-docs も数え直した |
-| AC9 | 未定(run-verify の結果を待つ)。`GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は e9824d39 で走らせている。ほかに、`run-test.sh` が 2 回目で rc 0(1,447 秒)、go1.25.8 の org と cli のテストが rc 0、go1.26 と go1.25.8 の `go vet` と go1.25.8 の `go build ./...` が rc 0。計画の AC9 の checkbox は `[ ]` のまま |
+| AC9 | `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は e9824d39 から打ち、rc 0。internal/cli と internal/org は cache なしで ok。走っているあいだにこの walkthrough(6e1ae46b、報告 1 つだけ)が入り、branch の secret scan は a7bdc884..6e1ae46b を読んだ。ほかに、`run-test.sh` が 2 回目で rc 0(1,447 秒)、go1.25.8 の org と cli のテストが rc 0、go1.26 と go1.25.8 の `go vet` と go1.25.8 の `go build ./...` が rc 0 |
 
 テストの強さ(test の報告より):
 
@@ -91,6 +91,5 @@
 - 既存の分割計画で前文を背景のつもりで書いていた作者には、渡る中身が増える。計画の Risks は release のノートに書くとしている。repo に CHANGELOG はなく、書くのは release の仕事
 - 7a955d2c のあとに打ち直したのは、前文に関わるテスト(go1.26 と go1.25.8)と `internal/org` の全体(383 秒)。`./scripts/run-test.sh` 全体と internal/cli は、その tree で打ち直していない。mutant は生き残りの 3 本だけで、ほかの 38 本は打ち直していない(テストの変更は行を足しただけ)
 - 1 回目の `run-test.sh` で、internal/cli の `TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` が 1 件落ちた。この diff が触れない前からの SIGTERM の競合で、この PR では直していない。単独の `-count=20` と 2 回目の `run-test.sh` は通り、tech-debt の 348 行に原因と直し方がある
-- run-verify の結果は未定(AC9)。結果が出たら、AC9 の行を書き換え、計画の AC9 の checkbox を付ける
 - 記録に残る `fix/split-preamble` を、この PR の番号に置き換えること。次の PR でする。置き換え先は、仕様の Status の一覧の F5 の行(24 行)、根拠の表の 16 行・24 行・103 行・113 行、tech-debt の 322 行の RESOLVED の注の頭と 323 行の結びの括弧。置き換えると PR の一覧は 34 本になる
 - Linux では、手元で走らせていない(CI が見る)

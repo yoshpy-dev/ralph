@@ -76,7 +76,7 @@
 - [x] AC6: `ralph org start` の help と、`--plan` に task の引数を渡したときのエラーが、タスクは機能の本文と分割計画の前文から作られると書く。それを固めるテストの期待も直す
 - [x] AC7: 文書を合わせる。`/org` skill(4 写し)の分割計画の節が「全機能の leader に渡るのは `## Features` より前の `## ` の節だけで、ヘッダの自由文、`## Features` の中の最初の `### ` より前の行、`## Features` より後の節は渡らない」と書き、start の手順 6 のタスクの中身に前文を足す。`/director` skill(4 写し)の分割計画の手順に、全機能に共通の決まりは `## Features` より前の節に書くと 1 文。仕様の FR-4 と README の段落に前文が渡ることを足す。写しはバイト一致
 - [x] AC8: 記録を合わせる。tech-debt の F5 の行を取り消し線と RESOLVED の注で閉じる。根拠の表の F5 の行の直す PR を書く。仕様・根拠の表・tech-debt に残る「fix/seat-wip-checkpoint」を「#250」に直し(tech-debt の RESOLVED の注と、`wip:` の行の「Step 14 ... (fix/seat-wip-checkpoint)」を含む)、PR 一覧を 33 本にする。この PR は、4c と同じく merge の前のブランチ名 `fix/split-preamble` で書き、番号は次の PR が書く。仕様の印の数(`[x]` 26 / `[ ]` 6、根拠の表は 25 / 6)は、F5 が挙げる FR-4 が `[x]` なので変わらないはず
-- [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
+- [x] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
 
@@ -132,4 +132,6 @@
 - [x] Review artifact created(self-review ed5d57d6、Merge OK、LOW 4 件は b09b7c12 と c0ff8398 で直した)
 - [x] Verification artifact created(verify ab89243c、pass、INFO 3 件。I1 と I3 は次のコミットで直し、I2 はこの印)
 - [x] Test artifact created(test de6ca6b2、pass。G1・G2 は 7a955d2c で埋めた。1 回目の run-test.sh で落ちた internal/cli のテストはこの diff と関係しない前からの競合で、tech-debt の行にした(33e51acc))
+- [x] run-verify: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` は e9824d39 から打ち、rc 0(2026-10-22T16:00:33Z に開始。走っているあいだに walkthrough の 6e1ae46b が入り、branch の secret scan は a7bdc884..6e1ae46b を読んだ。6e1ae46b は報告 1 つだけ)。internal/cli と internal/org は cache なしで ok。go1.25.8 は test の報告と 7a955d2c の implementer が打った
+- [x] Cross-review(cycle 1/2、指摘 0 件、triage b59ca7df)
 - [ ] PR created
