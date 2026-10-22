@@ -1,7 +1,7 @@
 # watch-escalation-inbox
 
 - Status: Approved
-- Approved: 2026-10-23 sha256:c6039d0bef22
+- Approved: 2026-10-23 sha256:0bf5660a7229
 - Owner: Claude Code
 - Date: 2026-10-23
 - Related request: 試行の所見を直す系列の 6 本目「見張りの escalation」(ユーザーの依頼「2. 修正可能なものは修正してください」、2026-10-21)
@@ -22,7 +22,7 @@
 - 人への道を ALERT の件に合わせる
   - `notifiableType` が ALERT を `<invalid>` にしない。escalate が受け付ける TYPE の一覧(`escalateTypes`)とは別に、受信箱の件の TYPE の一覧を持つ。`ralph org escalate` が ALERT を断る動きは変えない
   - ALERT の件を人へ送るとき、escalations.jsonl の行に alert_id と対象の座席を残し、デスクトップ通知の題は `ralph org watch` にする
-- 受信箱に書けないとき(受信箱がない、読めない、書けない)は今の道に落とす。stderr の banner、通知、escalations.jsonl の 1 行の順にし、行には新しい欄 `osascript` で通知の結果を書く。値は受信箱の `notified` と同じ(`ok`、`failed: <err>`、`skipped`)にする(F13)
+- 受信箱に書けないとき(受信箱がない、読めない、書けない)と、件の見出しに入れる見張りの状態ファイルの値が検査を通らないときは、今の道に落とす。stderr の banner、通知、escalations.jsonl の 1 行の順にし、行には新しい欄 `osascript` で通知の結果を書く。値は受信箱の `notified` と同じ(`ok`、`failed: <err>`、`skipped`)にする(F13)
 - director の扱い: `/director` skill(4 写し)の「受信箱の処理」と、雛形 `internal/org/prompts/director.md` に ALERT の件の扱いを足す。ALERT は ralph が書いた件である。director は `ralph status`、`ralph org read --seat leader`、`ralph org report` を見て、leader に知らせるか、人に notify するところまでを行う。座席や org を止めるかは人が決める
 - 文書
   - `/org` skill(4 写し)の動詞の表の `watch` の行(「デッドマン時の人間エスカレーション」)と「受信箱」節
@@ -77,7 +77,7 @@
 - D2 TYPE: 件の TYPE は `ALERT` にする。protocol の TYPE の表で、見張りが異常を知らせるときの TYPE が ALERT なので、それに合わせる。受信箱の件に別の印(source の欄など)は足さない。`ralph org escalate` は今までどおり ALERT を断るので、ALERT の件を書けるのは見張りだけになる
 - D3 届け方の判定: `escalateDelivery` の中身を、Enabled と「仕事を受け付けているか」を受け取る関数に切り出し、leader の escalate と見張りの両方が使う。見張りの側の「受け付けている」は、そのサイクルの見張り自身について、`--once` でなく(`WatchAllParams.Cycles == 0`)、止める頼みが出ていないこと(`stopRequested`)とする。止まる直前の見張りが delivery `deadline` で書いた件は、次の見張りが起動するまで誰も期限を見ないため、そのときは今すぐ送る
 - D4 重複: escalated の event に `alert_id` を持たせ、見張りは書く前に受信箱を読んで同じ alert_id の件を探す。重複の判定(件を 2 つ書かない)と、届け終えたか(通知を終えたか)は分けて扱う。同じ alert_id の件があれば新しい件は書かない。その件が open で `notified` がなく、今の見張りの判定(D3)が delivery `now` のときは、その判定の理由を付けて同じ ID で人への道に送る。それ以外(届け済み、ack 済み、resolve 済み、今の見張りが任せられる)は、受信箱にもうあることを stderr に 1 行書くだけにし、director と受信箱の期限に任せる(open で `notified` のない件なので、ack の期限で人に届く)。件を書いた見張りの判定ではなく今の見張りの判定で決めるのは、新しい件と同じ規則にそろえ、送る理由を今の見張りの事実と合わせるため(実装中の consult。2026-10-23 の逸脱の注)。status ファイルの保存は org のサイクルの最後なので、件を書いたあと、通知の前やその保存の前に落ちた見張りが、次の起動で同じ alert を escalate しても、件は 1 つのままで、送り残しは送られる(Codex の計画助言 1)
-- D5 受信箱に書けないとき: 今の道(banner、通知、escalations.jsonl の 1 行)に落とす。行は通知のあとに 1 行で書き、`osascript` の欄に結果を入れる。通知の前に書いて結果を 2 行目にする案は、行の数が増えるだけで読み手が得るものがないので採らない
+- D5 受信箱に書けないとき: 今の道(banner、通知、escalations.jsonl の 1 行)に落とす。件の見出しに入れる見張りの状態ファイルの値(対象の座席が座席の名前でない、alert_id が見張りの書く形でない、alert_id か元の時刻が改行などの制御文字を含む)が検査を通らないときも、件を書かずに同じ道に落とす。director が読む本文の見出しが増えないようにするためで、banner の値は逃がしてから出す(self-review F4、d9b8cd9a)。行は通知のあとに 1 行で書き、`osascript` の欄に結果を入れる。通知の前に書いて結果を 2 行目にする案は、行の数が増えるだけで読み手が得るものがないので採らない
 - D6 安全の性質: director が resolve した ALERT の件は、人に届かない。org-runtime 仕様の「人間エスカレーションはパルス層からのみ発火し、LLM が抑止できない」は、機能ごとの org の仕様が優先する(org-runtime 仕様の 2026-10-07 の注)と読み、FR-6 の注に書く。全 LLM が止まれば、ack と resolve の期限で人に届くので、NFR 安全の不変条件(期限切れの件の人への通知)は保たれる。人に届くまでの遅れの上限は、件の状態で分かれる。open のまま残った件は、escalation から最大 `ack_minutes` + 見張りの間隔で届く。director が ack してから止まった件は、ack の期限から外れるので(`InboxDeadlineDue`)、escalation から最大 `resolve_minutes` + 見張りの間隔で届く(既定で 60 分と間隔)。deadman_timeout の件は、どちらにも、ALERT から escalation までの `deadman_minutes` が先に加わる。ALERT の件だけ ack で ack の期限を外さない案は、leader の件と規則が分かれるので採らない(Codex の計画助言 2)
 - D7 director の役目: ALERT の件に対して、director は状態を読み、leader に知らせるか人に notify するまでにする。座席や org を止めるのは人の判断にする。director が止めると、LLM が人への道を閉じる形が増えるため
 - D8 director が無効のとき: ALERT の件も、leader の件と同じく記録と同時に人へ送り、resolve の期限も効く。人が resolve しない ALERT の件は、`resolve_minutes`(既定 60 分)のあとにもう 1 回人に届く。leader の件と同じ規則にそろえ、`/org` skill の「受信箱」節に、人が ALERT の件を resolve することを書く
@@ -90,7 +90,7 @@
 - [ ] AC2: `[org.director].enabled` で、見張りが `--once` でなく止める頼みも出ていないとき、件は delivery `deadline` で記録だけされ、escalations.jsonl の行も通知もない。stderr には `WATCHDOG ESCALATION` で始まり、件の ID と director に任せたことを言う 1 行が出る。その件は、ack の期限を過ぎて open なら、次のサイクルの `SweepInboxDeadlines` で人に届く(理由 `inbox_ack_deadline`)。ack されてから resolve されない件は、resolve の期限を過ぎたサイクルで人に届く(理由 `inbox_resolve_deadline`、D6 の ack のあとの上限)
 - [ ] AC3: director が無効のとき、`--once` の見張りのとき、止める頼みが出ているときは、件は delivery `now` で記録され、同じサイクルで人への道に送られる。送る理由は leader の件と同じ `inbox_director_disabled` か `inbox_no_watch` にする。escalations.jsonl の行は `inbox_id`・`alert_id`・対象の座席(`subject`)を持ち、`subject` が `leader` なら元の理由は `leader_is_anomaly_subject`、それ以外なら `deadman_timeout` と読める。`notified` の event は通知の結果を持ち、通知が失敗すると `failed: <err>` になる(F13)。人への道を終えられなかったとき(escalations.jsonl に書けないなど)は、stderr に `ralph org inbox notify <id>` を示す 1 行を出す。その件は open で `notified` がないので、ack の期限でも人に届く
 - [ ] AC4: 同じ alert_id の件がもう受信箱にあれば、見張りは新しい件を書かない(落ちた見張りの再起動の形)。その件が届け済み、ack 済み、resolve 済みなら通知もしない。その件が open で `notified` がなく、今の見張りが任せられない(判定が delivery `now`)なら、同じ ID で人への道に送る(件を書いたあと通知の前に落ち、ack の期限の前に `--once` で起動し直した形を含む)。今の見張りが任せられるなら送らず、stderr に 1 行書き、件は ack の期限で届く。どの場合も、escalate した alert は pending から消える
-- [ ] AC5: 受信箱に書けないとき(Inbox が nil、読めない、書けない)は、stderr の banner、通知、escalations.jsonl の 1 行の順で今の道に落ちる。行は `alert_id`、`subject`、`reason` と、通知の結果の `osascript`(`ok`、`failed: <err>`、通知の手段がなく darwin でもないときは `skipped`)を持つ。通知が失敗すると `osascript` は `failed: <err>` になる(F13)
+- [ ] AC5: 受信箱に書けないとき(Inbox が nil、読めない、書けない)と、見出しに入れる値が検査を通らないとき(D5)は、stderr の banner、通知、escalations.jsonl の 1 行の順で今の道に落ちる。行は `alert_id`、`subject`、`reason` と、通知の結果の `osascript`(`ok`、`failed: <err>`、通知の手段がなく darwin でもないときは `skipped`)を持つ。通知が失敗すると `osascript` は `failed: <err>` になる(F13)
 - [ ] AC6: 人への道の ALERT の件では、記録と同時に送るときも期限で送るときも、デスクトップ通知が org、件の ID、TYPE `ALERT` を出し(`<invalid>` にならない)、題は `ralph org watch` になる。期限で送るときの escalations.jsonl の行も `alert_id` と `subject` を持つ。本文は通知に出さない。`ralph org escalate` は TYPE `ALERT` を今までどおり断り、何も書かない
 - [ ] AC7: leader の escalate の届け方は変わらない(既存の escalate のテストが、期待を変えずに通る)。届け方の判定は、leader の escalate と見張りが同じ関数で決める
 - [ ] AC8: 文書を合わせる。`/director` skill(4 写し)の「件の処理」に ALERT の件の扱い(D7)、雛形 `director.md` にその 1 行、`/org` skill(4 写し)の `watch` の行と「受信箱」節(D8)、`agent-messaging.md`(2 写し)の escalation の節、`ralph org watch` の help、仕様の FR-6 の注(D6)。写しはバイト一致。prompts_test.go が director の雛形の 1 行を固める
@@ -149,6 +149,8 @@
   - 逸脱の注(2026-10-23、S2 の実装中): S2 の consult の勧めで、重複した件を送るかを、件を書いた見張りの判定でなく今の見張りの判定だけで決めることにした(D4・AC4・Test plan・Risks を直し、図解の詳細 2 と承認の前の箱を直して lint と撮り直しで確かめ、digest を 95d7155105d7 から c6039d0bef22 に取り直して自動承認した)。Codex の計画助言 1 の形(落ちたあと `--once` で起動し直す)は、今の見張りが任せられないので同じ ID で送られる
   - S2 は 100b6932(見張りの escalation を受信箱の ALERT の件にする、今の道の `osascript`)、S2b は 6bc7864e(重複した件を今の見張りの判定だけで送る)
   - S3 は 587f5b6a(文書)と b278070c(consult の指摘で、2 つの仕様の注の範囲を「見張りが見るすべての org」に直し、resolve で止まるのは delivery `deadline` の件だけと書いた)
+  - S4 は b1fb161b と a560bec6(記録)。self-review の LOW 9 件は d9b8cd9a で直した(F7 の引数の束ね直しだけ見送り、F9 と F1 の受信箱の道は tech-debt の行にした)
+  - 逸脱の注(2026-10-23、verify の所見): self-review F4 の直し(d9b8cd9a)で、件の見出しに入れる見張りの状態ファイルの値が検査を通らないときも今の道に落ちるようになった。Scope・D5・AC5 に足し、図解の詳細 2 の分かれ道の札と注を直して lint(exit 0)と撮り直しで確かめ、digest を c6039d0bef22 から 0bf5660a7229 に取り直して自動承認した
   - release のノートに足す文(S3 の consult の勧め): 「resolve の期限は人に送ったかを見ないので、resolve されない ALERT の件は、最初の通知(director が無効か登録がないとき、`--once` か止める頼みの出た見張りのとき、director が `inbox notify` で送ったとき)のあと resolve の期限でもう 1 回届き、1 つの alert の通知が最大 2 回になる」。tech-debt にも 1 行残した(S4 の b1fb161b と a560bec6)
 - [x] Branch created
 - [ ] Review artifact created
