@@ -417,10 +417,12 @@ type SpawnParams struct {
 	// Task is substituted into the seat's role prompt template as {{TASK}}
 	// (RolePromptVars.Task, prompts.go). Only prompts/leader.md references
 	// {{TASK}} today -- `ralph org start` (internal/cli/org.go's
-	// newOrgStartCmd) is the only production caller that sets this field,
-	// passing its required positional task argument straight through. Every
-	// other --role spawn leaves it empty (harmless: an unreferenced
-	// substitution is simply never used, same as Envelope below).
+	// newOrgStartCmd) is the only production caller that sets this field:
+	// it passes its positional task argument straight through, or with
+	// --plan the task featureLeaderTask (feature.go) builds from the split
+	// plan. Every other --role spawn leaves it empty (harmless: an
+	// unreferenced substitution is simply never used, same as Envelope
+	// below).
 	Task string
 }
 

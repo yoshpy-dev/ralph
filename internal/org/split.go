@@ -25,6 +25,10 @@ import (
 //	- Status: Approved
 //	- Approved: <date> sha256:<the value scripts/plan-visual.sh digest prints>
 //
+//	## <a section such as Objective>
+//
+//	<the rules the seats of every feature follow>
+//
 //	## Features
 //
 //	### <slug>
@@ -34,6 +38,12 @@ import (
 //	- Depends on: none
 //
 //	<the feature's body: its objective and acceptance criteria>
+//
+// The `## ` sections between the header and `## Features` are the preamble
+// (SplitPlan.Preamble), which `ralph org start --plan` puts into the leader
+// task of every feature. The other lines outside a feature (the header's
+// free text, the lines of `## Features` before its first `### <slug>`, and
+// the `## ` sections after `## Features`) go nowhere.
 //
 // The approval digest is the one scripts/plan-visual.sh digest prints for any
 // plan (PlanDigest). That digest skips some lines, so a split plan must not
@@ -85,6 +95,7 @@ type SplitPlan struct {
 	Status         string // value of the header `- Status:` line, trimmed ("" if absent)
 	ApprovedDigest string // the 12 hex digits after `sha256:` on the header `- Approved:` line ("" if absent or not 12 hex digits)
 	Digest         string // PlanDigest of the file bytes
+	Preamble       string // the `## ` sections before `## Features` with their headings (fenced code blocks whole), leading and trailing blank lines trimmed ("" if none)
 	Features       []SplitFeature
 }
 
@@ -295,12 +306,15 @@ type splitHeader struct {
 // parseSplitPlan parses a split plan's bytes. Lines are split on "\n" and
 // lose one trailing "\r". A line of a fenced code block is never a heading
 // or a field line: in a feature it is body, elsewhere it is read as any
-// other text there is. Errors name the line and are wrapped by
-// LoadSplitPlan with the plan's path.
+// other text there is. Every line from the first `## ` heading up to the
+// `## Features` heading is preamble, headings and fenced code blocks
+// included; the other lines outside a feature are dropped. Errors name the
+// line and are wrapped by LoadSplitPlan with the plan's path.
 func parseSplitPlan(data []byte) (*SplitPlan, error) {
 	var (
 		header       splitHeader
 		inHeader     = true
+		preamble     []string
 		featuresLine int
 		inFeatures   bool
 		features     []*splitFeatureDraft
@@ -321,6 +335,8 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 			}
 			if inFeatures {
 				featuresLine = n
+			} else if featuresLine == 0 {
+				preamble = append(preamble, line)
 			}
 			continue
 		}
@@ -335,6 +351,9 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 				"keep one of each in the header, before the first ## heading", n, digestSkipsReason)
 		}
 		if !inFeatures {
+			if featuresLine == 0 {
+				preamble = append(preamble, line)
+			}
 			continue
 		}
 		if fenced {
@@ -364,7 +383,7 @@ func parseSplitPlan(data []byte) (*SplitPlan, error) {
 	if err := fence.unclosedErr(); err != nil {
 		return nil, err
 	}
-	return finishSplitPlan(header, featuresLine, features)
+	return finishSplitPlan(header, preamble, featuresLine, features)
 }
 
 // splitFence is the fenced code block parseSplitPlan is in, after CommonMark:
@@ -581,14 +600,14 @@ func parseSplitDependsOn(value string) ([]string, error) {
 // finishSplitPlan checks what needs the whole file (the `## Features`
 // section, its features, each feature's `- Reserve:` and the slugs its
 // `- Depends on:` names) and builds the SplitPlan.
-func finishSplitPlan(header splitHeader, featuresLine int, drafts []*splitFeatureDraft) (*SplitPlan, error) {
+func finishSplitPlan(header splitHeader, preamble []string, featuresLine int, drafts []*splitFeatureDraft) (*SplitPlan, error) {
 	if featuresLine == 0 {
 		return nil, fmt.Errorf("no %s section: list the features under it as ### <slug> headings", splitFeaturesHeading)
 	}
 	if len(drafts) == 0 {
 		return nil, fmt.Errorf("line %d: %s has no ### <slug> feature", featuresLine, splitFeaturesHeading)
 	}
-	p := &SplitPlan{Status: header.status, ApprovedDigest: header.approvedDigest}
+	p := &SplitPlan{Status: header.status, ApprovedDigest: header.approvedDigest, Preamble: trimBlankLines(preamble)}
 	for _, f := range drafts {
 		if f.Reserve == nil {
 			return nil, fmt.Errorf("line %d: feature %s has no - %s: line: list the paths it reserves", f.line, f.Slug, splitFieldReserve)

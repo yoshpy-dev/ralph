@@ -463,7 +463,10 @@ start のプロセスが記録されていないときは、今までどおり�
 ## 分割計画と機能ごとの org
 
 1. 人と話して仕事を機能に分け、分割計画を台帳の `splits/<id>.md` に書く
-   (書き方は `/org` skill の「分割計画」)。
+   (書き方は `/org` skill の「分割計画」)。全機能に共通の決まり(座席の
+   driver と model、編集してはいけないファイルなど)は、`## Features` より
+   前の `## ` の節に書く。start はその節をどの機能の leader のタスクにも
+   入れ、leader はそれを自分の機能の計画に写して座席に渡す。
 2. `/plan` skill と同じ手順で図解ページを作り(`visual-template.html` と
    `diagrams.md`。置き場所は `.harness/state/plan-visual/<id>.html`)、
    `./scripts/plan-visual.sh open <ページ>` で開いて人に見せ、承認するかを

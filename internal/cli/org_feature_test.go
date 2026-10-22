@@ -94,7 +94,7 @@ func TestOrgStartPlan_FlagCombinationsRefused(t *testing.T) {
 		{"a blank --plan", []string{"--plan", " ", "--feature", "a"}, []string{"org: start: --plan and --feature must not be blank"}},
 		{"a blank --feature", []string{"--plan", "demo.md", "--feature", ""}, []string{"--plan and --feature must not be blank"}},
 		{"a task argument", []string{"--plan", "demo.md", "--feature", "a", "task text"},
-			[]string{`org: start: --plan takes no task argument (got "task text")`, supplies}},
+			[]string{`org: start: --plan takes no task argument (got "task text")`, supplies + ", and the feature's body and the plan's preamble are its task"}},
 		{"--cwd", []string{"--plan", "demo.md", "--feature", "a", "--cwd", "."}, []string{"org: start: --plan cannot be combined with --cwd: " + supplies}},
 		{"--scope", []string{"--plan", "demo.md", "--feature", "a", "--scope", "s"}, []string{"--plan cannot be combined with --scope: " + supplies}},
 		{"--reserve", []string{"--plan", "demo.md", "--feature", "a", "--reserve", "docs/"}, []string{"--plan cannot be combined with --reserve: " + supplies}},
@@ -515,6 +515,22 @@ func TestOrgStartHelp_ApprovalModeSource(t *testing.T) {
 		if !strings.Contains(help, want) {
 			t.Errorf("start --help does not say %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestOrgStartHelp_TaskSource: `ralph org start --help` says that the --plan
+// form's task is made of the feature's body and the split plan's preamble
+// (plan 2026-10-22-split-preamble, AC6).
+func TestOrgStartHelp_TaskSource(t *testing.T) {
+	out, err := runOrgCmd(t, "start", "--help")
+	if err != nil {
+		t.Fatalf("start --help: %v", err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	const want = "and its task from the feature's body and the plan's preamble (its ## sections before ## Features), " +
+		"so --cwd, --scope, --reserve, --allow-unscoped and a task argument are refused"
+	if !strings.Contains(help, want) {
+		t.Errorf("start --help does not say %q:\n%s", want, out)
 	}
 }
 
