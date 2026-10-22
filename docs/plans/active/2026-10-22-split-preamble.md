@@ -68,14 +68,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: `LoadSplitPlan` が試行の分割計画 `docs/evidence/org-trial-2026-10-20/splits/trial.md` を読むと、`Preamble` は `## 目的` の見出しから「予約の外のファイルは編集しない」の行までで、「座席の決まり」を含み、`# 9 段目` の題、`- Status:`・`- Approved:` の行、`## Features` の見出し、機能の節を含まない。機能(slug、Type、Reserve、Depends on、Body)は今と同じに読める
-- [ ] AC2: 境界。前文の中のフェンスに入った `## Features` の行は前文の一部として残り、本当の `## Features` を見誤らない。`## Features` より後の `## ` の節は `Preamble` にも機能の本文にも入らない。前文の前後の空行は詰める。ヘッダのあとすぐ `## Features` なら `Preamble` は空。CRLF の分割計画でも前文の行は `\r` を持たない
-- [ ] AC3: `featureLeaderTask` は、前文が空でなければ、今の行のあとに空行、前置きの 1 行、フェンスで囲んだ前文、空行、機能の本文の順で書く。フェンスはバッククォートで、前文の中の最長のバッククォートの並びより 1 つ長く、最低 3(前文に 4 連があれば 5 連)。前文が空なら、タスクは今と同じ文字列
-- [ ] AC4: stub の herdr で `ralph org start --plan`(または `StartFeature`)を回すと、leader の role prompt の `## タスク` の節に前置きの行と前文のブロックがあり、role prompt の既存の節(`## スター型トポロジのルール` など)は 1 つずつ見つかる。前文の中の `{{ORG_ID}}` は置き換えられずに残る。2,000 字を超える前文でも start は通り、前文は削られずに role prompt に入る
-- [ ] AC5: leader の雛形の「機能ごとの org」の手順 1 に、タスクの「全機能の座席に適用する決まり」を機能の計画に囲みの行ごと原文のまま写す 1 文があり、手順 3(per-plan で承認の前に reviewer を立てるところ)に、そのときも手順 5 の決まりの driver と model を使う 1 文があり、手順 5 に、その決まりの driver と model を spawn の引数に反映し、ほかの決まりは TASK の本文に写さず、TASK に書いた機能の計画から読ませる 1 文がある。どちらも前置きの行と同じ言葉(「全機能の座席に適用する決まり」)を使う。`internal/org/prompts_test.go` がその 3 文を固め、手順の位置を固める既存のテストは変えずに通る
-- [ ] AC6: `ralph org start` の help と、`--plan` に task の引数を渡したときのエラーが、タスクは機能の本文と分割計画の前文から作られると書く。それを固めるテストの期待も直す
-- [ ] AC7: 文書を合わせる。`/org` skill(4 写し)の分割計画の節が「全機能の leader に渡るのは `## Features` より前の `## ` の節だけで、ヘッダの自由文、`## Features` の中の最初の `### ` より前の行、`## Features` より後の節は渡らない」と書き、start の手順 6 のタスクの中身に前文を足す。`/director` skill(4 写し)の分割計画の手順に、全機能に共通の決まりは `## Features` より前の節に書くと 1 文。仕様の FR-4 と README の段落に前文が渡ることを足す。写しはバイト一致
-- [ ] AC8: 記録を合わせる。tech-debt の F5 の行を取り消し線と RESOLVED の注で閉じる。根拠の表の F5 の行の直す PR を書く。仕様・根拠の表・tech-debt に残る「fix/seat-wip-checkpoint」を「#250」に直し(tech-debt の RESOLVED の注と、`wip:` の行の「Step 14 ... (fix/seat-wip-checkpoint)」を含む)、PR 一覧を 33 本にする。この PR は、4c と同じく merge の前のブランチ名 `fix/split-preamble` で書き、番号は次の PR が書く。仕様の印の数(`[x]` 26 / `[ ]` 6、根拠の表は 25 / 6)は、F5 が挙げる FR-4 が `[x]` なので変わらないはず
+- [x] AC1: `LoadSplitPlan` が試行の分割計画 `docs/evidence/org-trial-2026-10-20/splits/trial.md` を読むと、`Preamble` は `## 目的` の見出しから「予約の外のファイルは編集しない」の行までで、「座席の決まり」を含み、`# 9 段目` の題、`- Status:`・`- Approved:` の行、`## Features` の見出し、機能の節を含まない。機能(slug、Type、Reserve、Depends on、Body)は今と同じに読める
+- [x] AC2: 境界。前文の中のフェンスに入った `## Features` の行は前文の一部として残り、本当の `## Features` を見誤らない。`## Features` より後の `## ` の節は `Preamble` にも機能の本文にも入らない。前文の前後の空行は詰める。ヘッダのあとすぐ `## Features` なら `Preamble` は空。CRLF の分割計画でも前文の行は `\r` を持たない
+- [x] AC3: `featureLeaderTask` は、前文が空でなければ、今の行のあとに空行、前置きの 1 行、フェンスで囲んだ前文、空行、機能の本文の順で書く。フェンスはバッククォートで、前文の中の最長のバッククォートの並びより 1 つ長く、最低 3(前文に 4 連があれば 5 連)。前文が空なら、タスクは今と同じ文字列
+- [x] AC4: stub の herdr で `ralph org start --plan`(または `StartFeature`)を回すと、leader の role prompt の `## タスク` の節に前置きの行と前文のブロックがあり、role prompt の既存の節(`## スター型トポロジのルール` など)は 1 つずつ見つかる。前文の中の `{{ORG_ID}}` は置き換えられずに残る。2,000 字を超える前文でも start は通り、前文は削られずに role prompt に入る
+- [x] AC5: leader の雛形の「機能ごとの org」の手順 1 に、タスクの「全機能の座席に適用する決まり」を機能の計画に囲みの行ごと原文のまま写す 1 文があり、手順 3(per-plan で承認の前に reviewer を立てるところ)に、そのときも手順 5 の決まりの driver と model を使う 1 文があり、手順 5 に、その決まりの driver と model を spawn の引数に反映し、ほかの決まりは TASK の本文に写さず、TASK に書いた機能の計画から読ませる 1 文がある。どちらも前置きの行と同じ言葉(「全機能の座席に適用する決まり」)を使う。`internal/org/prompts_test.go` がその 3 文を固め、手順の位置を固める既存のテストは変えずに通る
+- [x] AC6: `ralph org start` の help と、`--plan` に task の引数を渡したときのエラーが、タスクは機能の本文と分割計画の前文から作られると書く。それを固めるテストの期待も直す
+- [x] AC7: 文書を合わせる。`/org` skill(4 写し)の分割計画の節が「全機能の leader に渡るのは `## Features` より前の `## ` の節だけで、ヘッダの自由文、`## Features` の中の最初の `### ` より前の行、`## Features` より後の節は渡らない」と書き、start の手順 6 のタスクの中身に前文を足す。`/director` skill(4 写し)の分割計画の手順に、全機能に共通の決まりは `## Features` より前の節に書くと 1 文。仕様の FR-4 と README の段落に前文が渡ることを足す。写しはバイト一致
+- [x] AC8: 記録を合わせる。tech-debt の F5 の行を取り消し線と RESOLVED の注で閉じる。根拠の表の F5 の行の直す PR を書く。仕様・根拠の表・tech-debt に残る「fix/seat-wip-checkpoint」を「#250」に直し(tech-debt の RESOLVED の注と、`wip:` の行の「Step 14 ... (fix/seat-wip-checkpoint)」を含む)、PR 一覧を 33 本にする。この PR は、4c と同じく merge の前のブランチ名 `fix/split-preamble` で書き、番号は次の PR が書く。仕様の印の数(`[x]` 26 / `[ ]` 6、根拠の表は 25 / 6)は、F5 が挙げる FR-4 が `[x]` なので変わらないはず
 - [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
@@ -129,7 +129,7 @@
 - [x] Plan approved(ユーザーの決定により自動承認、2026-10-22。S2 のあとの consult の指摘を入れて承認し直した: f6a95e46e01d → f0735c9a1ac6)
 - [x] Implementation started(S1 03651616、S2 ef33170f、S2b b10c6f25、S3 1b65bf49 と 546ad029、S4 c407bd67)
 - [x] Branch created
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created(self-review ed5d57d6、Merge OK、LOW 4 件は b09b7c12 と c0ff8398 で直した)
+- [x] Verification artifact created(verify ab89243c、pass、INFO 3 件。I1 と I3 は次のコミットで直し、I2 はこの印)
 - [ ] Test artifact created
 - [ ] PR created
