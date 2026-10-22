@@ -153,7 +153,7 @@
   - 逸脱の注(2026-10-23、verify の所見): self-review F4 の直し(d9b8cd9a)で、件の見出しに入れる見張りの状態ファイルの値が検査を通らないときも今の道に落ちるようになった。Scope・D5・AC5 に足し、図解の詳細 2 の分かれ道の札と注を直して lint(exit 0)と撮り直しで確かめ、digest を c6039d0bef22 から 0bf5660a7229 に取り直して自動承認した
   - release のノートに足す文(S3 の consult の勧め): 「resolve の期限は人に送ったかを見ないので、resolve されない ALERT の件は、最初の通知(director が無効か登録がないとき、`--once` か止める頼みの出た見張りのとき、director が `inbox notify` で送ったとき)のあと resolve の期限でもう 1 回届き、1 つの alert の通知が最大 2 回になる」。tech-debt にも 1 行残した(S4 の b1fb161b と a560bec6)
 - [x] Branch created
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
 - [ ] PR created
