@@ -141,3 +141,11 @@ load に弱いことが分かっているテスト(`TestStopDirectorProcess_APro
 - Pass: run-test.sh(shell 43 本、Go 8 パッケージ)、org・cli・driver・protocol の `-count=1` を go1.26.0 と go1.25.8 で、新しい 21 本の `-v`(SKIP 0)、確かめの同時実行のテストの `-count=3`・`-count=200`・`-race`(負荷の下を含む)、回帰の 51 本。mutant は 40 本のうち 35 本が赤で、生き残りは等価の 1 本と、G1〜G3 の穴に当たる 4 本
 - Fail: なし
 - Blocked: なし
+
+## テストのあとの直し(報告のあと)
+
+- G1・G2 と、警告の文の G5・verify の V4 は 9c88b759 で直した。警告の行は `warning: ` で始め(CLI のほかの警告と同じ形)、「an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent」と座席と headless の director の両方を指す文にした。出先は今までどおり Warn(nil なら os.Stderr)で、`cmd.ErrOrStderr()` には変えていない
+- G1: driver に `TestHerdr_TabCreate_PaneEnvNilWarnWritesToStderr`(Warn が nil のとき os.Stderr に 1 行)を、CLI に `TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr`(`internal/cli/org_runtime_env_test.go`。spawn と director start の 2 つの subtest)を足した。CLI の herdr の stub は `ORG_STUB_TAB_CREATE_HELP=noenv` のとき `--env` のない help を返し、既定の help は変わらない。G2: `TestHerdrHelpEnvFlag` に `"Options:\n      --env": true` と `"      --keep--env": false` の 2 行を足した
+- 確かめたこと(implementer の報告): `gofmt -l` は空、`go vet` は rc 0、`go test -count=1 -timeout 30m` は driver・org・cli で rc 0、`GOTOOLCHAIN=go1.25.8` でも同じ 3 つで rc 0。新しいテストは `-v` で PASS(SKIP 0)。mutant は D20 で driver と CLI の新しいテストが赤、D25 と D28 で `TestHerdrHelpEnvFlag` が赤、stub が mode を無視する mutant で CLI のテストが赤になり、手を加えない tree ではどれも緑
+- G3(警告の区切り、INFO)と G4(start --plan の CLI テストが `--env` を見ない、INFO)は直さない。G3 は本番の PaneEnv が 1 つだけで、G4 は組み立て側のテストが固めている
+- この直しは、続く `/cross-review` の差分に入る
