@@ -1158,11 +1158,13 @@ func TestWatch_Escalation_ASendThatIsNotCompletedNamesInboxNotifyAndLeavesTheIte
 
 // AC4: an alert the inbox already holds as an item (a watch that recorded
 // it and ended before saving its status file) gets no second item. The
-// item is sent to the human path under its own ID only when nothing has
-// reached a person yet and no one else will send it: it is open with no
-// notified event, and it was recorded to be sent at once or this watch
-// cannot leave it to the director. One stderr line names the item either
-// way, and the alert leaves the pending alerts.
+// item is sent to the human path under its own ID, with this watch's
+// reason, only when it is open with no notified event and this watch
+// cannot leave it to the director, whatever delivery it was recorded with.
+// An open, unnotified item this watch can leave to the director is not
+// sent, even one recorded to be sent at once: it stays unnotified for the
+// director and the ack deadline. One stderr line names the item either way,
+// and the alert leaves the pending alerts.
 func TestWatch_Escalation_AnAlertAlreadyInTheInboxGetsNoSecondItem(t *testing.T) {
 	yes, no := true, false
 	markNotified := func(t *testing.T, s *InboxStore, id string) {
@@ -1190,7 +1192,8 @@ func TestWatch_Escalation_AnAlertAlreadyInTheInboxGetsNoSecondItem(t *testing.T)
 		wantReason string
 	}{
 		{name: "already notified", delivery: InboxDeliveryNow, then: markNotified},
-		{name: "open, to be sent at once, this watch accepts work", delivery: InboxDeliveryNow, enabled: true, accepts: &yes, wantReason: InboxReasonNoWatch},
+		{name: "open, to be sent at once, this watch accepts work, left to the director and the deadlines", delivery: InboxDeliveryNow, enabled: true, accepts: &yes},
+		{name: "open, to be sent at once, this watch accepts no work", delivery: InboxDeliveryNow, enabled: true, accepts: &no, wantReason: InboxReasonNoWatch},
 		{name: "open, to be sent at once, director switch off", delivery: InboxDeliveryNow, wantReason: InboxReasonDirectorDisabled},
 		{name: "open, left to the director, this watch accepts work", delivery: InboxDeliveryDeadline, enabled: true, accepts: &yes},
 		{name: "open, left to the director, this watch accepts no work", delivery: InboxDeliveryDeadline, enabled: true, accepts: &no, wantReason: InboxReasonNoWatch},

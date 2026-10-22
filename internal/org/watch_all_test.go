@@ -2385,10 +2385,10 @@ func TestRunWatchAll_ACycleWithAStopRequestSendsItsEscalationAtOnce(t *testing.T
 // AC4 and D4: a watch recorded an ALERT item and ended before it sent the
 // item or saved its status file, so the inbox holds an open, unnotified
 // item with the alert_id and the status file still holds that alert
-// pending. A `--once` run escalates the alert again: it sends that item
-// under its own ID, whether it was recorded to be sent at once or left to
-// the director, writes no second item, and the alert leaves the pending
-// alerts of the saved status file.
+// pending. A `--once` run escalates the alert again: it cannot leave the
+// item to the director, so it sends that item under its own ID, whether it
+// was recorded to be sent at once or left to the director, writes no second
+// item, and the alert leaves the pending alerts of the saved status file.
 func TestRunWatchAll_AOnceRunSendsTheUnnotifiedAlertItemOfAPendingAlertUnderItsOwnID(t *testing.T) {
 	for _, delivery := range []string{InboxDeliveryNow, InboxDeliveryDeadline} {
 		t.Run("recorded with delivery "+delivery, func(t *testing.T) {

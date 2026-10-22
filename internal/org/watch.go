@@ -1658,24 +1658,21 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 // holds as item, one with its alert_id: a watch that recorded the item and
 // ended before it saved its status file left the alert pending, so the next
 // watch escalates it again (plan 2026-10-23-watch-escalation-inbox, D4). It
-// writes no second item. It sends item to the human path, under its own ID,
-// only when nothing has reached a person yet and no one else will send it:
-// the item is open with no notified event, and either it was recorded to be
-// sent at once (its delivery is InboxDeliveryNow, and that send did not
-// happen) or this watch cannot leave it to the director (delivery, which
-// inboxDelivery decided for this watch, is InboxDeliveryNow). The send's
-// reason is sendReason, or InboxReasonNoWatch when this watch would have
-// left a new item to the director. Either way one stderr line names the
-// item.
+// writes no second item. As for a new item, only this watch's decision
+// counts, whatever delivery the item was recorded with: it sends item to
+// the human path, under its own ID and with sendReason, only when the item
+// is open with no notified event and this watch cannot leave it to the
+// director (delivery, which inboxDelivery decided for this watch, is
+// InboxDeliveryNow, so sendReason is set). Otherwise it sends nothing: a
+// notified or resolved item needs no send, an acked one is left to the
+// resolve deadline, and an open one with no notified event to the director
+// and the ack deadline. Either way one stderr line names the item.
 func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, head, delivery, sendReason string) {
 	state := fmt.Sprintf("state=%s notified=%t delivery=%s", item.State, item.Notified, item.Delivery)
-	if item.State != InboxStateOpen || item.Notified || (item.Delivery != InboxDeliveryNow && delivery != InboxDeliveryNow) {
+	if item.State != InboxStateOpen || item.Notified || delivery != InboxDeliveryNow {
 		_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); nothing new is recorded or sent; read it with: %s\n",
 			head, item.ID, state, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
 		return
-	}
-	if sendReason == "" {
-		sendReason = InboxReasonNoWatch
 	}
 	_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); sending that item to the human\n", head, item.ID, state)
 	w.sendAlertItemToHuman(orgID, item.ID, alertID, sendReason)
