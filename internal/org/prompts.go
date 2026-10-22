@@ -28,9 +28,11 @@ var promptFS embed.FS
 const defaultScopeText = "未指定(読み取り中心で、リポジトリ規約に従うこと)"
 
 // RolePromptVars holds the values substituted into a role prompt template.
-// Substitution is plain strings.ReplaceAll on "{{NAME}}" placeholders (no
-// templating engine, no control flow) -- kept deliberately small and boring
-// per .claude/rules/ralph/architecture.md.
+// Substitution is one strings.NewReplacer pass over "{{NAME}}" placeholders
+// (no templating engine, no control flow) -- kept deliberately small and
+// boring per .claude/rules/ralph/architecture.md. The single pass never
+// rescans substituted text, so a "{{ORG_ID}}" inside a value (a split plan's
+// preamble in Task, say) stays literal.
 type RolePromptVars struct {
 	OrgID  string
 	SeatID string
@@ -47,9 +49,10 @@ type RolePromptVars struct {
 	PlanPath string
 	// Task is the task text substituted for {{TASK}} -- currently only
 	// prompts/leader.md references it. `ralph org start`'s positional task
-	// argument (internal/cli/org.go's newOrgStartCmd) flows through
-	// SpawnParams.Task (spawn.go) into this field. Every other embedded role
-	// template ignores it.
+	// argument (internal/cli/org.go's newOrgStartCmd), or with --plan the
+	// task featureLeaderTask (feature.go) builds from the split plan, flows
+	// through SpawnParams.Task (spawn.go) into this field. Every other
+	// embedded role template ignores it.
 	Task string
 	// Envelope is a one-line summary of the org's [org] envelope
 	// (EnvelopeSummary, envelope_summary.go) substituted for {{ENVELOPE}} --
