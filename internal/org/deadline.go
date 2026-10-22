@@ -26,7 +26,9 @@ import (
 // Both are computed from inbox.jsonl on every sweep, so a restarted watch
 // sends an item whose deadline passed while no watch ran, and the notified
 // event of a send keeps the next sweep (in this process or another) from
-// sending it again.
+// sending it again. A TYPE ALERT item, which the watch records for one of
+// its own escalations (plan 2026-10-23-watch-escalation-inbox), is due by
+// the same rules, and its sends carry its alert_id.
 
 // Reasons of a deadline send, written to its escalations.jsonl line and its
 // notified event.
@@ -208,7 +210,7 @@ func (o *Org) SweepInboxDeadlines(now time.Time, mem *InboxDeadlineMemory, banne
 			sweep.HeldBack = append(sweep.HeldBack, send)
 			continue
 		}
-		if err := o.sendInboxItemToHuman(item.OrgID, item.ID, item.Type, reason, banner); err != nil {
+		if err := o.sendInboxItemToHuman(item.OrgID, item.ID, item.Type, item.AlertID, reason, banner); err != nil {
 			mem.recordFailure(key, now)
 			send.Err = err
 			sweep.Failed = append(sweep.Failed, send)

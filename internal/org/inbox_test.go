@@ -258,6 +258,82 @@ func TestInboxEscalate_RefusesAnUnknownDelivery(t *testing.T) {
 	}
 }
 
+// Plan 2026-10-23-watch-escalation-inbox, AC1: the escalated event of an
+// item the cross-org watch records carries the ALERT's alert_id, and the
+// fold reads it back on the item, on its escalated event, and in the item's
+// JSON. An item recorded with no alert_id writes no field and folds with "".
+func TestInboxEscalate_WritesAndFoldsTheAlertID(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	const alertID = "org-a/seat-1/stall@1760097600000000000"
+	const body = "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: escalated"
+	if _, err := s.Escalate(InboxEscalation{OrgID: "org-a", Type: "ALERT", Body: body, Delivery: InboxDeliveryDeadline, AlertID: alertID}); err != nil {
+		t.Fatalf("Escalate with an alert_id: %v", err)
+	}
+	mustEscalate(t, s, "org-a")
+
+	lines := strings.Split(strings.TrimSuffix(readInboxFile(t, s), "\n"), "\n")
+	want := []string{
+		`{"ts":"2026-10-10T12:00:00Z","id":"e1","event":"escalated","org_id":"org-a","type":"ALERT","body":"TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\n\nwatchdog: escalated","delivery":"deadline","alert_id":"org-a/seat-1/stall@1760097600000000000"}`,
+		`{"ts":"2026-10-10T12:00:00Z","id":"e2","event":"escalated","org_id":"org-a","type":"QUESTION","body":"TYPE: QUESTION\n\nwhich one?","delivery":"now"}`,
+	}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("inbox.jsonl =\n%s\nwant\n%s", strings.Join(lines, "\n"), strings.Join(want, "\n"))
+	}
+
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	alert := inboxItemByID(t, res, "e1")
+	if alert.AlertID != alertID || alert.Type != "ALERT" || alert.Body != body || alert.Delivery != InboxDeliveryDeadline || alert.State != InboxStateOpen {
+		t.Errorf("e1 = %+v; want the ALERT item with alert_id %s, delivery deadline, open", alert, alertID)
+	}
+	if got := alert.Events[0].AlertID; got != alertID {
+		t.Errorf("e1 escalated event alert_id = %q; want %q", got, alertID)
+	}
+	if question := inboxItemByID(t, res, "e2"); question.AlertID != "" || question.Events[0].AlertID != "" {
+		t.Errorf("e2 = %+v; want no alert_id on an item recorded without one", question)
+	}
+	data, err := json.Marshal(alert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"type":"ALERT","alert_id":"` + alertID + `","body"`; !strings.Contains(string(data), want) {
+		t.Errorf("e1 JSON = %s; want it to contain %s", data, want)
+	}
+	if data, err = json.Marshal(inboxItemByID(t, res, "e2")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"alert_id"`) {
+		t.Errorf("e2 JSON = %s; want no alert_id", data)
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC1: an escalated line with no
+// alert_id (every line written before that plan) folds with "" and is not
+// counted as damage, and an alert_id on a later event (a hand edit) does not
+// change the item's: only the escalated event names it.
+func TestInboxRead_AlertIDComesOnlyFromTheEscalatedEvent(t *testing.T) {
+	s, _ := newTestInboxStore(t)
+	writeInboxFile(t, s, strings.Join([]string{
+		escalatedLine("e1", "org-a"),
+		`{"ts":"2026-10-10T00:00:01Z","id":"e1","event":"notified","reason":"inbox_no_watch","osascript":"ok","alert_id":"org-a/seat-1/stall@1"}`,
+		`{"ts":"2026-10-10T00:00:02Z","id":"e2","event":"escalated","org_id":"org-a","type":"ALERT","body":"TYPE: ALERT\n\nx","delivery":"now","alert_id":"org-a/leader/liveness@2"}`,
+		`{"ts":"2026-10-10T00:00:03Z","id":"e2","event":"acked","alert_id":"org-a/seat-9/stall@3"}`,
+	}, "\n")+"\n")
+
+	res := mustReadInbox(t, s)
+	if res.CorruptLines != 0 || res.IgnoredEvents != 0 {
+		t.Errorf("corrupt=%d ignored=%d, want 0 and 0", res.CorruptLines, res.IgnoredEvents)
+	}
+	if e1 := inboxItemByID(t, res, "e1"); e1.AlertID != "" || !e1.Notified {
+		t.Errorf("e1 = %+v; want no alert_id (the escalated line has none) and notified", e1)
+	}
+	if e2 := inboxItemByID(t, res, "e2"); e2.AlertID != "org-a/leader/liveness@2" || e2.State != InboxStateAcked {
+		t.Errorf("e2 = %+v; want the escalated event's alert_id and acked", e2)
+	}
+}
+
 func TestInboxRead_SkipsAndCountsLinesItCannotUse(t *testing.T) {
 	s, _ := newTestInboxStore(t)
 	writeInboxFile(t, s, strings.Join([]string{

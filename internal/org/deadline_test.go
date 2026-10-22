@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -604,6 +605,62 @@ func TestSweepInboxDeadlines_ADeferredItemAckedOrNotifiedByHandSkipsTheAckDeadli
 			t.Errorf("escalations.jsonl = %v; want %v", got, want)
 		}
 	})
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC2 and AC6: an ALERT item the
+// watch left to the director (delivery deadline) reaches the human at its
+// ack deadline while it is open, and at its resolve deadline once acked and
+// not resolved (D6). Each send's escalations.jsonl line carries the item's
+// alert_id and the ALERT's seat as the subject (leader for an ALERT about
+// the leader), and the desktop text names ALERT, not <invalid>, and never
+// the body.
+func TestSweepInboxDeadlines_SendsAnAlertItemWithItsAlertIDAndSeat(t *testing.T) {
+	f := newDeadlineFixture(t)
+	const seatAlert, leaderAlert = "org-a/seat-1/stall@1760097600000000000", "org-a/leader/liveness@1760097600000000001"
+	escalateAlertItem(t, f.o.Inbox, seatAlert, InboxDeliveryDeadline)
+	escalateAlertItem(t, f.o.Inbox, leaderAlert, InboxDeliveryDeadline)
+	if _, err := f.o.Inbox.Ack("e2"); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSweep(t, "past the ack deadline", f.sweep(11*time.Minute, &InboxDeadlineMemory{}), []string{"e1 " + InboxReasonAckDeadline}, nil, nil)
+	assertSweep(t, "past the resolve deadline", f.sweep(61*time.Minute, &InboxDeadlineMemory{}),
+		[]string{"e1 " + InboxReasonResolveDeadline, "e2 " + InboxReasonResolveDeadline}, nil, nil)
+
+	line := func(id, alertID, subject, reason string) map[string]any {
+		return map[string]any{"ts": inboxTestNow, "org_id": "org-a", "inbox_id": id, "alert_id": alertID, "subject": subject, "reason": reason}
+	}
+	want := []map[string]any{
+		line("e1", seatAlert, "seat-1", InboxReasonAckDeadline),
+		line("e1", seatAlert, "seat-1", InboxReasonResolveDeadline),
+		line("e2", leaderAlert, "leader", InboxReasonResolveDeadline),
+	}
+	if got := escalationLines(t, f.o.EscalationsPath); !reflect.DeepEqual(got, want) {
+		t.Errorf("escalations.jsonl =\n%v\nwant\n%v", got, want)
+	}
+	if calls, want := f.notifications(), []string{
+		"org org-a: e1 (ALERT) not acked within 10 min",
+		"org org-a: e1 (ALERT) not resolved within 60 min",
+		"org org-a: e2 (ALERT) not resolved within 60 min",
+	}; !slices.Equal(calls, want) {
+		t.Errorf("desktop notifications = %q; want %q", calls, want)
+	}
+	banner := f.banner.String()
+	if !strings.HasPrefix(banner, "ORG INBOX DEADLINE: org=org-a item=e1 type=ALERT -- not acked within 10m (inbox_ack_deadline); ") {
+		t.Errorf("banner = %q; want the deadline banner of e1 with TYPE ALERT first", banner)
+	}
+	if strings.Contains(banner+strings.Join(f.notifications(), ""), "did not act") {
+		t.Errorf("the ALERT item's body reached the banner or the notification")
+	}
+	inbox := mustReadInbox(t, f.o.Inbox)
+	if e1 := inboxItemByID(t, inbox, "e1"); e1.State != InboxStateOpen || e1.AlertID != seatAlert ||
+		!slices.Equal(inboxEventKinds(e1), []string{InboxEventEscalated, InboxEventNotified, InboxEventNotified}) {
+		t.Errorf("e1 = %+v; want open, its alert_id, notified at both deadlines", e1)
+	}
+	if e2 := inboxItemByID(t, inbox, "e2"); e2.State != InboxStateAcked ||
+		!slices.Equal(inboxEventKinds(e2), []string{InboxEventEscalated, InboxEventAcked, InboxEventNotified}) {
+		t.Errorf("e2 = %+v; want acked, notified at the resolve deadline only", e2)
+	}
 }
 
 // Plan 2026-10-18-org-director-wake, D10 and AC7: a wake does not stop the

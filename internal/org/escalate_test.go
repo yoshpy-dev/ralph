@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -894,6 +895,273 @@ func TestNotifyInboxItem_HandEditedLineEscapesTheBannerAndKeepsTheNotificationNe
 				t.Errorf("e1 = %+v; want notified", item)
 			}
 		})
+	}
+}
+
+// alertItemBody is the body of the TYPE ALERT test items, shaped like the
+// message the cross-org watch records for one of its escalations (plan
+// 2026-10-23-watch-escalation-inbox, AC1). Its last line must reach neither
+// a banner nor a desktop notification.
+const alertItemBody = "TYPE: ALERT\nORG_ID: org-a\nSEAT: seat-1\nCONDITION: stall\nREASON: deadman_timeout\n\n" +
+	"watchdog: the leader did not act on the stall ALERT"
+
+// escalateAlertItem records a TYPE ALERT item of org-a with alertID and
+// delivery straight into s, as the cross-org watch does, and returns its ID.
+func escalateAlertItem(t *testing.T, s *InboxStore, alertID, delivery string) string {
+	t.Helper()
+	id, err := s.Escalate(InboxEscalation{OrgID: "org-a", Type: protocol.TypeAlert, Body: alertItemBody, Delivery: delivery, AlertID: alertID})
+	if err != nil {
+		t.Fatalf("record the ALERT item %s: %v", alertID, err)
+	}
+	return id
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC6: the human path takes ALERT
+// as an item's TYPE besides the three escalate accepts, so an ALERT item's
+// desktop text names ALERT; any other TYPE still reaches it as <invalid>.
+// Adding ALERT to the inbox's list leaves escalate's own list as it was.
+func TestNotifiableType_TakesTheInboxItemTypes(t *testing.T) {
+	for _, tc := range []struct{ typ, want string }{
+		{"QUESTION", "QUESTION"},
+		{"BLOCKED", "BLOCKED"},
+		{"RESULT", "RESULT"},
+		{"ALERT", "ALERT"},
+		{"TASK", inboxNotifyInvalid},
+		{"HEARTBEAT", inboxNotifyInvalid},
+		{"alert", inboxNotifyInvalid},
+		{"ALERT ", inboxNotifyInvalid},
+		{"", inboxNotifyInvalid},
+	} {
+		if got := notifiableType(tc.typ); got != tc.want {
+			t.Errorf("notifiableType(%q) = %q; want %q", tc.typ, got, tc.want)
+		}
+	}
+	if want := []string{"QUESTION", "BLOCKED", "RESULT"}; !slices.Equal(escalateTypes, want) {
+		t.Errorf("escalateTypes = %v; want %v (escalate does not take ALERT)", escalateTypes, want)
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC6: escalate still refuses TYPE
+// ALERT, which only the cross-org watch writes, and writes nothing: no
+// inbox.jsonl or inbox.lock, no escalations.jsonl line, no banner, no
+// desktop notification, and no question to the watch.
+func TestEscalate_RefusesTypeAlertAndWritesNothing(t *testing.T) {
+	f := newEscalateFixture(t)
+	f.useWatch(acceptingWatch())
+	res := f.escalate("org-a", alertItemBody)
+	if res.Err == nil || res.ID != "" || res.Recorded || res.Notified || res.Deferred {
+		t.Fatalf("Escalate of a TYPE ALERT message = %+v; want a refusal", res)
+	}
+	if want := "TYPE ALERT cannot be escalated: use one of QUESTION, BLOCKED, RESULT"; !strings.Contains(res.Err.Error(), want) {
+		t.Errorf("error %q does not contain %q", res.Err, want)
+	}
+	for _, path := range []string{f.o.Inbox.Path(), filepath.Join(f.stateDir, inboxLockFile), f.o.EscalationsPath} {
+		if got := fileOrAbsent(t, path); got != "<absent>" {
+			t.Errorf("%s = %q; want absent after a refusal", path, got)
+		}
+	}
+	if f.banner.Len() != 0 || len(f.notifications()) != 0 || f.watchCallCount() != 0 {
+		t.Errorf("a refusal wrote a banner %q, notified %v, or asked the watch %d times", f.banner.String(), f.notifications(), f.watchCallCount())
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, D3 and AC7: inboxDelivery is the
+// decision leader escalate and the watch share. With the director switch
+// off it sends at once without asking whether a watch accepts work; with it
+// on, no answer or a watch that does not accept work sends at once with
+// no_watch, and only a watch that accepts work leaves the item to the
+// deadline.
+func TestInboxDelivery(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name                     string
+		enabled                  bool
+		accepts                  *bool // nil passes a nil acceptsWork
+		wantDelivery, wantReason string
+		wantCalls                int
+	}{
+		{"disabled, a watch that accepts work", false, &yes, InboxDeliveryNow, InboxReasonDirectorDisabled, 0},
+		{"disabled, a watch that does not", false, &no, InboxDeliveryNow, InboxReasonDirectorDisabled, 0},
+		{"disabled, no acceptsWork", false, nil, InboxDeliveryNow, InboxReasonDirectorDisabled, 0},
+		{"enabled, no acceptsWork", true, nil, InboxDeliveryNow, InboxReasonNoWatch, 0},
+		{"enabled, a watch that does not accept work", true, &no, InboxDeliveryNow, InboxReasonNoWatch, 1},
+		{"enabled, a watch that accepts work", true, &yes, InboxDeliveryDeadline, "", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			var acceptsWork func() bool
+			if tc.accepts != nil {
+				answer := *tc.accepts
+				acceptsWork = func() bool {
+					calls++
+					return answer
+				}
+			}
+			delivery, reason := inboxDelivery(tc.enabled, acceptsWork)
+			if delivery != tc.wantDelivery || reason != tc.wantReason {
+				t.Errorf("inboxDelivery = (%q, %q); want (%q, %q)", delivery, reason, tc.wantDelivery, tc.wantReason)
+			}
+			if calls != tc.wantCalls {
+				t.Errorf("acceptsWork called %d times; want %d", calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC3 and AC6: an ALERT item sent to
+// the human path at once (director_disabled, no_watch) or by inbox notify
+// writes one escalations.jsonl line with its inbox_id, its alert_id, and the
+// ALERT's seat as the subject (leader for an ALERT about the leader, which
+// the watch escalates as leader_is_anomaly_subject; none for an alert_id of
+// another shape). The banner is the watch's, the desktop text names ALERT
+// and never the body, and the notified event records the notification's
+// result, failed: <err> included (F13).
+func TestSendInboxItemToHuman_AnAlertItemCarriesItsAlertIDAndSeat(t *testing.T) {
+	cases := []struct {
+		name, alertID, reason string
+		// viaNotify sends with NotifyInboxItem, which reads the alert_id from
+		// the item, instead of calling sendInboxItemToHuman directly.
+		viaNotify     bool
+		notifyErr     error
+		wantSubject   string // "" means no subject field
+		wantOsascript string
+	}{
+		{name: "a seat's ALERT, director disabled", alertID: "org-a/seat-1/stall@1760097600000000000",
+			reason: InboxReasonDirectorDisabled, wantSubject: "seat-1", wantOsascript: "ok"},
+		{name: "an ALERT about the leader, no watch, the notification fails", alertID: "org-a/leader/liveness@1760097600000000001",
+			reason: InboxReasonNoWatch, notifyErr: errors.New("exit status 1: Not authorized to send Apple events"),
+			wantSubject: "leader", wantOsascript: "failed: exit status 1: Not authorized to send Apple events"},
+		{name: "inbox notify reads the alert_id from the item", alertID: "org-a/seat-2/scope_change@5",
+			reason: InboxReasonManualNotify, viaNotify: true, wantSubject: "seat-2", wantOsascript: "ok"},
+		{name: "an alert_id of another shape has no subject", alertID: "org-a/seat-1@5",
+			reason: InboxReasonDirectorDisabled, wantOsascript: "ok"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEscalateFixture(t)
+			f.notifyErr = tc.notifyErr
+			id := escalateAlertItem(t, f.o.Inbox, tc.alertID, InboxDeliveryNow)
+			var err error
+			if tc.viaNotify {
+				err = f.o.NotifyInboxItem(id, &f.banner)
+			} else {
+				err = f.o.sendInboxItemToHuman("org-a", id, protocol.TypeAlert, tc.alertID, tc.reason, &f.banner)
+			}
+			if err != nil {
+				t.Fatalf("send the ALERT item: %v", err)
+			}
+
+			want := map[string]any{"ts": inboxTestNow, "org_id": "org-a", "inbox_id": "e1", "alert_id": tc.alertID, "reason": tc.reason}
+			if tc.wantSubject != "" {
+				want["subject"] = tc.wantSubject
+			}
+			if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
+				t.Errorf("escalations.jsonl = %v; want exactly one line %v", lines, want)
+			}
+			wantBanner := "WATCHDOG ESCALATION: org=org-a item=e1 type=ALERT alert=" + tc.alertID +
+				" -- recorded in " + f.o.Inbox.Path() + "; read it with: ralph org inbox show e1\n"
+			if got := f.banner.String(); got != wantBanner {
+				t.Errorf("banner = %q; want %q", got, wantBanner)
+			}
+			if calls := f.notifications(); !slices.Equal(calls, []string{"org org-a raised e1 (ALERT)"}) {
+				t.Errorf("desktop notifications = %q; want one naming ALERT", calls)
+			}
+			if strings.Contains(f.banner.String()+strings.Join(f.notifications(), ""), "did not act") {
+				t.Errorf("the ALERT item's body reached the banner or the notification")
+			}
+			item := inboxItemByID(t, mustReadInbox(t, f.o.Inbox), "e1")
+			if item.State != InboxStateOpen || !item.Notified || !slices.Equal(inboxEventKinds(item), []string{InboxEventEscalated, InboxEventNotified}) {
+				t.Fatalf("e1 = %+v; want open, notified once", item)
+			}
+			if ev := item.Events[1]; ev.Reason != tc.reason || ev.Osascript != tc.wantOsascript {
+				t.Errorf("notified event = %+v; want reason %s, osascript %q", ev, tc.reason, tc.wantOsascript)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC6: the text of each send of an
+// ALERT item. A send at once or by inbox notify gets the watch's banner and
+// title and the desktop text of a leader's item with ALERT as the TYPE; a
+// deadline send keeps the deadline text, which now names ALERT too. A
+// hand-edited org_id or alert_id is escaped in the banner, and neither
+// reaches the desktop text. A leader's item keeps the escalate text, and a
+// TYPE that is not exactly ALERT is not an ALERT item.
+func TestInboxHumanTextFor_AnAlertItemGetsTheWatchText(t *testing.T) {
+	f := newDeadlineFixture(t)
+	path := f.o.Inbox.Path()
+	const alertID = "org-a/seat-1/stall@1"
+	watchText := inboxHumanText{
+		banner:  "WATCHDOG ESCALATION: org=org-a item=e1 type=ALERT alert=" + alertID + " -- recorded in " + path + "; read it with: ralph org inbox show e1",
+		title:   "ralph org watch",
+		desktop: "org org-a raised e1 (ALERT)",
+	}
+	cases := []struct {
+		name, orgID, typ, alertID, reason string
+		want                              inboxHumanText
+	}{
+		{"ALERT, director disabled", "org-a", "ALERT", alertID, InboxReasonDirectorDisabled, watchText},
+		{"ALERT, no watch", "org-a", "ALERT", alertID, InboxReasonNoWatch, watchText},
+		{"ALERT, inbox notify", "org-a", "ALERT", alertID, InboxReasonManualNotify, watchText},
+		{"ALERT with no alert_id", "org-a", "ALERT", "", InboxReasonNoWatch, inboxHumanText{
+			banner: "WATCHDOG ESCALATION: org=org-a item=e1 type=ALERT -- recorded in " + path + "; read it with: ralph org inbox show e1",
+			title:  "ralph org watch", desktop: "org org-a raised e1 (ALERT)",
+		}},
+		{"ALERT with control characters in its org_id and alert_id", "org-a\x1b[2J", "ALERT", alertID + "\x07", InboxReasonDirectorDisabled, inboxHumanText{
+			banner: `WATCHDOG ESCALATION: org=org-a\x1b[2J item=e1 type=ALERT alert=` + alertID + `\a -- recorded in ` + path + "; read it with: ralph org inbox show e1",
+			title:  "ralph org watch", desktop: "org <invalid> raised e1 (ALERT)",
+		}},
+		{"ALERT at the ack deadline", "org-a", "ALERT", alertID, InboxReasonAckDeadline, inboxHumanText{
+			banner: "ORG INBOX DEADLINE: org=org-a item=e1 type=ALERT -- not acked within 10m (inbox_ack_deadline); read it with: ralph org inbox show e1",
+			title:  "ralph org watch", desktop: "org org-a: e1 (ALERT) not acked within 10 min",
+		}},
+		{"ALERT at the resolve deadline", "org-a", "ALERT", alertID, InboxReasonResolveDeadline, inboxHumanText{
+			banner: "ORG INBOX DEADLINE: org=org-a item=e1 type=ALERT -- not resolved within 60m (inbox_resolve_deadline); read it with: ralph org inbox show e1",
+			title:  "ralph org watch", desktop: "org org-a: e1 (ALERT) not resolved within 60 min",
+		}},
+		{"a leader's QUESTION keeps the escalate text", "org-a", "QUESTION", "", InboxReasonDirectorDisabled, inboxHumanText{
+			banner: "ORG ESCALATION: org=org-a item=e1 type=QUESTION -- recorded in " + path + "; read it with: ralph org inbox show e1",
+			title:  "ralph org escalate", desktop: "org org-a raised e1 (QUESTION)",
+		}},
+		{"a lower-case alert is not an ALERT item", "org-a", "alert", alertID, InboxReasonDirectorDisabled, inboxHumanText{
+			banner: "ORG ESCALATION: org=org-a item=e1 type=alert -- recorded in " + path + "; read it with: ralph org inbox show e1",
+			title:  "ralph org escalate", desktop: "org org-a raised e1 (<invalid>)",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := f.o.inboxHumanTextFor(tc.orgID, "e1", tc.typ, tc.alertID, tc.reason); got != tc.want {
+				t.Errorf("inboxHumanTextFor =\n%+v\nwant\n%+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Plan 2026-10-23-watch-escalation-inbox, AC3: alertIDSeat reads the seat
+// from the alert_id sendAlert writes, "<org>/<seat>/<condition>@<n>", and
+// gives "" for any other shape.
+func TestAlertIDSeat(t *testing.T) {
+	for _, tc := range []struct{ alertID, want string }{
+		{"org-a/seat-1/stall@1760097600000000000", "seat-1"},
+		{"org-a/leader/liveness@1", "leader"},
+		{"org-a/seat-1/scope_change@0", "seat-1"},
+		{"", ""},
+		{"org-a/seat-1/stall", ""},
+		{"org-a/seat-1/stall@", ""},
+		{"org-a/seat-1/stall@12x", ""},
+		{"org-a/seat-1/stall@-1", ""},
+		{"org-a/seat-1@1", ""},
+		{"org-a/x/seat-1/stall@1", ""},
+		{"org-a//stall@1", ""},
+		{"/seat-1/stall@1", ""},
+		{"org-a/seat-1/@1", ""},
+		{"org-a/Seat 1/stall@1", ""},
+		{"Org-A/seat-1/stall@1", ""},
+	} {
+		if got := alertIDSeat(tc.alertID); got != tc.want {
+			t.Errorf("alertIDSeat(%q) = %q; want %q", tc.alertID, got, tc.want)
+		}
 	}
 }
 
