@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -2460,5 +2461,154 @@ func TestRunWatchAll_TwoOrgsEscalatingInOneCycleGetOneAlertItemEach(t *testing.T
 	}
 	if len(lineAlerts) != 2 || len(f.notifications()) != 2 {
 		t.Errorf("escalations.jsonl lines %v, %d notifications; want two of each", lineAlerts, len(f.notifications()))
+	}
+}
+
+// AC2 for a seat's ALERT: a long-running watch with the director switch on
+// leaves the deadman escalation of a seat's ALERT to the director as it
+// does one about the leader. The cycle that raises the ALERT records
+// nothing; the cycle past the deadman timeout records the item with
+// delivery deadline and reason deadman_timeout, with no escalations.jsonl
+// line and no notification; the cycle past the item's ack deadline sends it
+// with inbox_ack_deadline, on a line that names the seat as its subject.
+func TestRunWatchAll_ALongRunningWatchLeavesASeatsDeadmanEscalationToTheDirectorUntilTheAckDeadline(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.spawn(t, "org-a", "seat-1")
+	f.h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{errors.New("herdr: agent not found")}
+	alertTS := f.clk.Now().UTC().Format(time.RFC3339)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var afterAlert, recorded []InboxItem
+	var linesAtRecord []string
+	var notifiedAtRecord int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		switch n {
+		case 1:
+			afterAlert = f.alertItems(t)
+			f.clk.Advance(time.Duration(f.o.Config.DeadmanMinutes+1) * time.Minute)
+		case 2:
+			recorded = f.alertItems(t)
+			linesAtRecord = escalationReasons(t, f.o.EscalationsPath)
+			notifiedAtRecord = len(f.notifications())
+			f.clk.Advance(time.Duration(f.o.Config.Director.AckMinutes+1) * time.Minute)
+		default:
+			cancel()
+		}
+	}}
+	// A git status that does not change, so the seat's worktree raises no
+	// scope_change ALERT from cycle 2 on.
+	p := f.params(0)
+	p.GitStatus = func(string) (string, error) { return "", nil }
+	if err := runWatchAll(t, f.o, ctx, p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if len(afterAlert) != 0 {
+		t.Fatalf("ALERT items after the cycle that raised the ALERT = %+v; want none before the deadman timeout", afterAlert)
+	}
+	if len(recorded) != 1 || recorded[0].ID != "e1" || recorded[0].Delivery != InboxDeliveryDeadline || recorded[0].Notified ||
+		!strings.HasPrefix(recorded[0].AlertID, conditionKey("org-a", "seat-1", condLiveness)+"@") {
+		t.Fatalf("ALERT items after the deadman timeout = %+v; want e1 left to the director with the alert_id of seat-1's liveness ALERT", recorded)
+	}
+	assertAlertItemBody(t, recorded[0].Body, map[string]string{
+		"ORG_ID": "org-a", "SEAT": "seat-1", "CONDITION": condLiveness, "REASON": "deadman_timeout",
+		"ALERT_ID": recorded[0].AlertID, "ALERT_TS": alertTS,
+	})
+	if len(linesAtRecord) != 0 || notifiedAtRecord != 0 {
+		t.Errorf("after the deadman timeout: escalations %v, %d notifications; want none", linesAtRecord, notifiedAtRecord)
+	}
+	if line := "WATCHDOG ESCALATION: org=org-a alert=" + recorded[0].AlertID + " subject=seat-1 reason=deadman_timeout item=e1 -- left in " +
+		f.o.Inbox.Path() + " for the director"; !strings.Contains(f.stderr.String(), line) {
+		t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+	}
+	if items := f.alertItems(t); len(items) != 1 || !items[0].Notified || items[0].Events[len(items[0].Events)-1].Reason != InboxReasonAckDeadline {
+		t.Fatalf("ALERT items at the end = %+v; want only e1, notified at its ack deadline", items)
+	}
+	want := map[string]any{"ts": f.clk.Now().UTC().Format(time.RFC3339), "org_id": "org-a", "inbox_id": "e1", "alert_id": recorded[0].AlertID,
+		"subject": "seat-1", "reason": InboxReasonAckDeadline}
+	if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
+		t.Errorf("escalations.jsonl = %v; want exactly one line %v", lines, want)
+	}
+	if got := f.notifications(); !slices.Equal(got, []string{"org org-a: e1 (ALERT) not acked within 10 min"}) {
+		t.Errorf("desktop notifications = %q; want the one of e1 at its ack deadline", got)
+	}
+}
+
+// AC2 with two orgs: the leaders of two orgs fail in the same cycle of a
+// long-running watch with the director switch on. Each org gets its own
+// ALERT item, both recorded with delivery deadline and neither sent, and
+// the cycle past their ack deadline sends each of them once with
+// inbox_ack_deadline, on its own escalations.jsonl line with its own
+// alert_id, and with its own desktop notification.
+func TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.spawnFailingLeader(t, "org-a")
+	f.spawnFailingLeader(t, "org-b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var recorded []InboxItem
+	var linesAtRecord []string
+	var notifiedAtRecord int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		if n == 1 {
+			recorded = f.alertItems(t)
+			linesAtRecord = escalationReasons(t, f.o.EscalationsPath)
+			notifiedAtRecord = len(f.notifications())
+			f.clk.Advance(time.Duration(f.o.Config.Director.AckMinutes+1) * time.Minute)
+			return
+		}
+		cancel()
+	}}
+	// A git status that does not change, so the leaders' worktrees raise no
+	// scope_change ALERT, and so no third item, from cycle 2 on.
+	p := f.params(0)
+	p.GitStatus = func(string) (string, error) { return "", nil }
+	if err := runWatchAll(t, f.o, ctx, p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	recordedByOrg := map[string]InboxItem{}
+	for _, item := range recorded {
+		recordedByOrg[item.OrgID] = item
+	}
+	if len(recorded) != 2 || len(recordedByOrg) != 2 {
+		t.Fatalf("ALERT items after the first cycle = %+v; want one of each org", recorded)
+	}
+	if len(linesAtRecord) != 0 || notifiedAtRecord != 0 {
+		t.Errorf("after the first cycle: escalations %v, %d notifications; want none", linesAtRecord, notifiedAtRecord)
+	}
+	if n := strings.Count(f.stderr.String(), " -- left in "+f.o.Inbox.Path()+" for the director; "); n != 2 {
+		t.Errorf("stderr = %q; want two lines saying an item was left to the director", f.stderr.String())
+	}
+	items := f.alertItems(t)
+	if len(items) != 2 {
+		t.Fatalf("ALERT items at the end = %+v; want the two of the first cycle", items)
+	}
+	lines := map[string]map[string]any{}
+	for _, line := range escalationLines(t, f.o.EscalationsPath) {
+		id, _ := line["inbox_id"].(string)
+		lines[id] = line
+	}
+	var wantNotify []string
+	for _, item := range items {
+		if was := recordedByOrg[item.OrgID]; item.ID != was.ID || was.Delivery != InboxDeliveryDeadline || was.Notified ||
+			!strings.HasPrefix(was.AlertID, conditionKey(item.OrgID, LeaderIdentity, condLiveness)+"@") {
+			t.Errorf("ALERT item of %s after the first cycle = %+v; want it left to the director with the alert_id of its leader's ALERT, and %s at the end", item.OrgID, was, item.ID)
+		}
+		if !item.Notified || item.Events[len(item.Events)-1].Reason != InboxReasonAckDeadline {
+			t.Errorf("ALERT item of %s at the end = %+v; want it notified at its ack deadline", item.OrgID, item)
+		}
+		want := map[string]any{"ts": f.clk.Now().UTC().Format(time.RFC3339), "org_id": item.OrgID, "inbox_id": item.ID, "alert_id": item.AlertID,
+			"subject": LeaderIdentity, "reason": InboxReasonAckDeadline}
+		if !reflect.DeepEqual(lines[item.ID], want) {
+			t.Errorf("escalations.jsonl line of %s = %v; want %v", item.ID, lines[item.ID], want)
+		}
+		wantNotify = append(wantNotify, "org "+item.OrgID+": "+item.ID+" (ALERT) not acked within 10 min")
+	}
+	got := f.notifications()
+	slices.Sort(got)
+	slices.Sort(wantNotify)
+	if len(lines) != 2 || !slices.Equal(got, wantNotify) {
+		t.Errorf("escalations.jsonl lines %v, desktop notifications %q; want one line each and %q", lines, got, wantNotify)
 	}
 }
