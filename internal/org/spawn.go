@@ -560,7 +560,12 @@ type SpawnResult struct {
 // same order, a request that fails more than one check (e.g. an
 // out-of-pool model *and* a scope-less autonomous spawn) is rejected for
 // the same first cause in both modes, so `--dry-run`'s predicted rejection
-// always matches what a real spawn of the same request would record.
+// matches what a real spawn of the same request would record, but for one
+// case: for a seat whose latest state event is in flight, a real spawn
+// that the envelope, permission or --scope check refuses records nothing
+// and adds inFlightSeatErr's tail to the cause (rejectUnlessInFlight),
+// while the dry run still records its dry-run `rejected` and an
+// honored=false receipt and returns the plain cause.
 //
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
 // worktree for a spawn this would refuse, so it first runs checkSpawnInput
@@ -674,6 +679,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.dryRunSpawn(p, resolvedPermMode, reserve)
 	}
 
+	// The spawn's one deadline starts here, before Phase 1, so the time a
+	// stale seat's compensateStale takes comes out of p.TimeoutMS
+	// (--timeout-ms), although each of its calls is bounded by its own
+	// driverCallTimeout (10 s) and not by this ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 

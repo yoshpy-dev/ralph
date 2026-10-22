@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1860,6 +1861,45 @@ func TestOrgSpawn_FailureAfterPane_CloseTimesOut_RecordsSpawnCloseFailed(t *test
 	}
 }
 
+// TestOrgSpawn_FailureAfterPane_CloseAndRecordFail_ErrorJoinsTheAppendError
+// covers failStepWithNote's failed append of spawn_close_failed: with the
+// close failing and the manifest made read-only at the close
+// (closeHookHerdr, verbs_test.go), the error still says the pane was not
+// closed and how to close it, and joins the append's error. Nothing is
+// recorded after the spawn_step that recorded the pane, so the seat stays
+// active on it.
+func TestOrgSpawn_FailureAfterPane_CloseAndRecordFail_ErrorJoinsTheAppendError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, h, _ := testOrg(t)
+	closeErr := errors.New("herdr pane close: connect: connection refused")
+	h.paneID = "pane-7"
+	h.paneCloseErrs = map[string]error{"pane-7": closeErr}
+	h.agentStartErr = errors.New("stub failure")
+	o.Herdr = &closeHookHerdr{fakeHerdr: h, during: func() { readOnlyManifest(t, o) }}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, closeErr) || !errors.Is(result.Err, fs.ErrPermission) {
+		t.Fatalf("expected a failure wrapping the close's error and the append's permission error, got %+v", result)
+	}
+	for _, want := range []string{`pane "pane-7" not closed`, "herdr pane close pane-7", "ralph org stop --org-id org-a --seat seat-1", "org: spawn: record spawn_close_failed: "} {
+		if !strings.Contains(result.Err.Error(), want) {
+			t.Errorf("expected the error to contain %q, got %v", want, result.Err)
+		}
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-7"}) {
+		t.Fatalf("expected one close of pane-7, got %v", h.paneCloseCalls)
+	}
+	events := mustReadEvents(t, o)
+	if last := events[len(events)-1]; last.Event != EventSpawnStep || last.PaneID != "pane-7" {
+		t.Fatalf("expected the spawn_step recording pane-7 last, got %+v", last)
+	}
+	if active := activeRealSeats(t, o); !slices.Equal(active, []OrgSeat{{"org-a", "seat-1"}}) {
+		t.Fatalf("expected seat-1 left active, got %v", active)
+	}
+}
+
 // --- plan 2026-10-22-seat-spawn-close: the --timeout-ms hint (AC5) --------
 
 // TestOrgSpawn_SpawnDeadlineRunsOut_ErrorHintsAtTimeoutMS covers plan AC5's
@@ -2217,6 +2257,39 @@ func TestOrgSpawn_StaleSeat_PaneNotClosed_RefusesTheSpawn(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOrgSpawn_StaleSeat_PaneNotClosed_RecordFails_ErrorJoinsTheAppendError
+// covers refuseStaleRespawn's failed append of spawn_close_failed: with the
+// stale seat's pane not confirmed and the manifest read-only, the spawn is
+// still refused with the error that names the pane and how to close it,
+// joined with the append's error, and nothing is written, so the seat stays
+// active on its recorded pane.
+func TestOrgSpawn_StaleSeat_PaneNotClosed_RecordFails_ErrorJoinsTheAppendError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a read-only file's permission bit")
+	}
+	o, h, _ := testOrg(t)
+	seedStaleSeatOnPane(t, o, h, "stale-pane")
+	getErr := errors.New("herdr: connect: connection refused")
+	h.getErrs = map[string]error{"stale-pane": getErr}
+	readOnlyManifest(t, o)
+	before := len(mustReadEvents(t, o))
+
+	r := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if r.Outcome != SpawnOutcomeFailed || !errors.Is(r.Err, getErr) || !errors.Is(r.Err, fs.ErrPermission) {
+		t.Fatalf("expected a failure wrapping the check's error and the append's permission error, got %+v", r)
+	}
+	for _, want := range []string{`has an unfinished spawn on pane "stale-pane", not closed, so this spawn was refused`,
+		"herdr pane close stale-pane", "ralph org stop --org-id org-a --seat seat-1", "org: spawn: record spawn_close_failed: "} {
+		if !strings.Contains(r.Err.Error(), want) {
+			t.Errorf("expected the error to contain %q, got %v", want, r.Err)
+		}
+	}
+	if n := len(mustReadEvents(t, o)); n != before {
+		t.Fatalf("expected nothing written, events %d -> %d", before, n)
+	}
+	assertSeatInFlightOn(t, o, "stale-pane")
 }
 
 // TestOrgSpawn_StaleSeat_CallersOwnPane_RefusedWithNothingWritten covers

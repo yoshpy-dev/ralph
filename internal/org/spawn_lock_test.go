@@ -102,7 +102,7 @@ func TestOrgSpawn_SeatLock_RefusesASecondSpawnOfTheSeat(t *testing.T) {
 	if second.Outcome != SpawnOutcomeRejected || !errors.Is(second.Err, errFileLockHeld) {
 		t.Fatalf("expected the second spawn refused for the held lock, got %+v", second)
 	}
-	for _, want := range []string{`another ralph org spawn of seat "seat-1" in org_id "org-a" is running`, "retry after it returns"} {
+	for _, want := range []string{`another ralph org spawn of seat "seat-1" in org_id "org-a" is running`, "retry after it returns", "the lock is held after 0s"} {
 		if !strings.Contains(second.Err.Error(), want) {
 			t.Errorf("expected the error to contain %q, got %v", want, second.Err)
 		}
