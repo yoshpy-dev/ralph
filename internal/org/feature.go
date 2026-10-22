@@ -173,13 +173,13 @@ func featureWorktreeCleanup(orgID string) string {
 // plan id, slug, approval digest, branch, worktree, and the approval mode of
 // o.Config, featureApprovalMode), a one-line scope, and a task made of what
 // the org was started for, the ledger p.StateDir and the approval mode
-// included, and the feature's body (featureLeaderTask). Running the same
-// start again reuses the worktree and, while the leader is active, records
-// nothing; with another approval mode it is another binding, which the
-// spawn refuses (reservationDecision). A worktree whose record was made for
-// another split plan's feature is not used, whether it was there before
-// ensure (checkFeatureWorktreeReuse) or another start made it while this one
-// ran (checkEnsuredFeatureWorktree).
+// included, the split plan's preamble in a code fence, and the feature's
+// body (featureLeaderTask). Running the same start again reuses the worktree
+// and, while the leader is active, records nothing; with another approval
+// mode it is another binding, which the spawn refuses (reservationDecision).
+// A worktree whose record was made for another split plan's feature is not
+// used, whether it was there before ensure (checkFeatureWorktreeReuse) or
+// another start made it while this one ran (checkEnsuredFeatureWorktree).
 func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	var res StartFeatureResult
 	refuse := func(err error) StartFeatureResult {
@@ -368,12 +368,22 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 	}
 }
 
+// featurePreambleLead is the line featureLeaderTask writes before the fenced
+// preamble of the split plan. Steps 1 and 5 of the 機能ごとの org section of
+// prompts/leader.md name the block by its first words,
+// 全機能の座席に適用する決まり.
+const featurePreambleLead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
 // the branch, the reserved paths, the features it depends on, the approval
 // mode recorded in the binding (approval), the procedure to follow, and the
 // ledger stateDir with the --state-dir to pass to every `ralph org`
-// command, then a blank line and f's body as the plan has it.
+// command; then, when plan.Preamble is not blank, a blank line, the line
+// featurePreambleLead and the preamble as the plan has it in a code fence
+// (fenceFor), so that its `## ` headings are not read as sections of the
+// role prompt; then a blank line and f's body as the plan has it. A blank
+// preamble adds nothing, and an empty body adds nothing either.
 // The leader's pane has the herdr server's environment, which is not
 // necessarily the one start ran in, and ralph passes neither the --state-dir
 // nor the RALPH_ORG_STATE_DIR given to start to the pane, so the leader's own
@@ -396,10 +406,31 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
 		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
 	}, "\n")
+	if strings.TrimSpace(plan.Preamble) != "" {
+		fence := fenceFor(plan.Preamble)
+		task += "\n\n" + featurePreambleLead + "\n" + fence + "\n" + plan.Preamble + "\n" + fence
+	}
 	if f.Body != "" {
 		task += "\n\n" + f.Body
 	}
 	return task
+}
+
+// fenceFor is the backtick code fence that holds text whole: one backtick
+// longer than the longest run of backticks anywhere in text, and at least 3,
+// so that no fence line inside text (nor any other run of backticks) closes
+// it.
+func fenceFor(text string) string {
+	longest, run := 0, 0
+	for i := 0; i < len(text); i++ {
+		if text[i] != '`' {
+			run = 0
+			continue
+		}
+		run++
+		longest = max(longest, run)
+	}
+	return strings.Repeat("`", max(3, longest+1))
 }
 
 // shellQuote returns s as one POSIX shell word: s in single quotes, where

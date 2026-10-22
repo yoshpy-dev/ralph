@@ -87,7 +87,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
-   沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。計画の先頭
+   沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。タスクに
+   「全機能の座席に適用する決まり」の囲みがあれば、計画に
+   `## 全機能の座席に適用する決まり` の節を作り、その囲みを中身ごと原文の
+   まま写す(言い換えず、削らない。座席はこの節を読む。手順 5)。計画の先頭
    (最初の `## ` の見出しより前)には `- Status: Draft` と `- Approved: TBD`
    の行を 1 つずつ置く(雛形にあればそれを使う)。`/plan` skill は使わない
    (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
@@ -142,7 +145,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
    org_id が長いと、これより長い seat_id は spawn で拒否される)。どちらにも
    `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の計画の
-   パスを書く。per-plan では、implementer への TASK にいつも
+   パスを書く。タスクに「全機能の座席に適用する決まり」があれば、そこに
+   書かれた driver と model を spawn の `--driver` と `--model` に使う。
+   ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は
+   2,000 字までで、長い決まりは入らない)、計画の
+   `## 全機能の座席に適用する決まり` の節に従うよう TASK に書く。
+   per-plan では、implementer への TASK にいつも
    `PLAN: <計画のパス> sha256:<digest>` のヘッダ(最後に承認された digest。
    計画の `- Approved:` の行の digest)を 1 行付ける。ヘッダは `TASK_ID:` の
    次の行に書く(空行のあとの本文に書いたものはヘッダとして読まれない)。

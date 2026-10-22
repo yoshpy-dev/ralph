@@ -918,7 +918,8 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"and the leader runs there. Its reservation (the feature's `- Reserve:`\n" +
 			"paths) and the org's binding to the feature (shown by\n" +
 			"`ralph org status`) come from the plan, and its task from the\n" +
-			"feature's body, so --cwd, --scope, --reserve, --allow-unscoped and a\n" +
+			"feature's body and the plan's preamble (its ## sections before\n" +
+			"## Features), so --cwd, --scope, --reserve, --allow-unscoped and a\n" +
 			"task argument are refused. Running the same start again reuses the\n" +
 			"worktree; a start into a running org that was not started for that\n" +
 			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
@@ -1040,7 +1041,7 @@ func checkOrgStartPlanInput(cmd *cobra.Command, args []string, orgID, plan, feat
 	}
 	const supplies = "with --plan the split plan supplies the leader's cwd (the feature worktree), its scope and its reservation"
 	if len(args) > 0 {
-		return fmt.Errorf("org: start: --plan takes no task argument (got %q): %s, and the feature's body is its task", args[0], supplies)
+		return fmt.Errorf("org: start: --plan takes no task argument (got %q): %s, and the feature's body and the plan's preamble are its task", args[0], supplies)
 	}
 	for _, flag := range orgStartPlanConflicts {
 		if cmd.Flags().Changed(flag) {

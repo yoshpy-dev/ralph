@@ -1034,6 +1034,62 @@ func TestRenderRolePrompt_Leader_PushRefusesWipCommits(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Leader_FeatureOrgSeatRules pins AC5 of plan
+// 2026-10-22-split-preamble: step 1 of the 機能ごとの org section copies the
+// task's 全機能の座席に適用する決まり block, as it is, into a section of that
+// name in the feature plan, and step 5 uses the driver and model the block
+// names for the spawn's --driver and --model and, instead of copying the
+// other rules into a TASK's body (capped at protocol.DefaultMaxBodyChars),
+// tells the TASK to follow that section of the plan. Both name the block by
+// the words that start the lead line featureLeaderTask writes before it.
+func TestRenderRolePrompt_Leader_FeatureOrgSeatRules(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+
+	const rules = "全機能の座席に適用する決まり"
+	task := featureLeaderTask(&SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab", Preamble: "## 目的\n\n- model は sonnet"},
+		SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan)
+	if !strings.Contains(task, "\n\n"+rules+"(") {
+		t.Fatalf("featureLeaderTask no longer starts the preamble's lead line with %q, the words the leader template names the block by; got:\n%s", rules, task)
+	}
+	if protocol.DefaultMaxBodyChars != 2000 {
+		t.Fatalf("protocol.DefaultMaxBodyChars = %d, but step 5 of the leader template says a TASK's body is capped at 2,000 characters", protocol.DefaultMaxBodyChars)
+	}
+
+	for _, c := range []struct {
+		marker string
+		order  []string
+	}{
+		{"1. 機能の計画を", []string{
+			"タスクの本文(機能の目的と受け入れ条件)を計画に写す",
+			"タスクに「" + rules + "」の囲みがあれば、計画に `## " + rules + "` の節を作り、その囲みを中身ごと原文のまま写す(言い換えず、削らない。座席はこの節を読む。手順 5)",
+		}},
+		{"5. implementer と reviewer を", []string{
+			"TASK には機能の計画のパスを書く",
+			"タスクに「" + rules + "」があれば、そこに書かれた driver と model を spawn の `--driver` と `--model` に使う",
+			"ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は 2,000 字までで、長い決まりは入らない)、計画の `## " + rules + "` の節に従うよう TASK に書く",
+		}},
+	} {
+		item, ok := markdownItem(section, c.marker)
+		if !ok {
+			t.Errorf("expected the 機能ごとの org section to have an item naming %q, got section:\n%s", c.marker, section)
+			continue
+		}
+		s, at := squashSpace(item), -1
+		for _, want := range c.order {
+			i := strings.Index(s, squashSpace(want))
+			if i < 0 || i < at {
+				t.Errorf("expected the 機能ごとの org item naming %q to say %q in this order, but %q is missing or out of order, got item:\n%s", c.marker, c.order, want, item)
+				break
+			}
+			at = i
+		}
+	}
+}
+
 // TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase pins the reviewer
 // side of AC8 of plan org-gate: a passing RESULT carries, as header lines,
 // the HEAD: and BASE: the reviewer verified (spec FR-7), says how to find the

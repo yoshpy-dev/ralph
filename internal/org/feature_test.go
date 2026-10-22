@@ -9,8 +9,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // `ralph org start --plan` at the org layer (plan
@@ -564,6 +566,166 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 		if want := "1|" + dir; string(got) != want {
 			t.Errorf("--state-dir %s reads in sh as %q, want %q", word, got, want)
 		}
+	}
+}
+
+// TestFeatureLeaderTask_Preamble pins AC3 of plan 2026-10-22-split-preamble:
+// a split plan's preamble goes after the task's lines and before the
+// feature's body, as a blank line, the lead line and the preamble as it is
+// in a backtick fence one longer than its longest run of backticks and at
+// least 3 (a tilde fence or inline code inside keeps 3, a fenced block of 3
+// makes 4 with the inner fence kept whole, a run of 4 makes 5). An empty
+// body adds no trailing blank line, and a preamble of blank lines only
+// leaves the task as it is without one.
+func TestFeatureLeaderTask_Preamble(t *testing.T) {
+	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+	bare := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
+	withPreamble := func(preamble string) *SplitPlan {
+		p := *bare
+		p.Preamble = preamble
+		return &p
+	}
+	noBody := SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"internal/auth/"}}
+	body := noBody
+	body.Body = "Objective: add the token store.\n\n- [ ] AC1"
+	task := func(plan *SplitPlan, f SplitFeature) string {
+		return featureLeaderTask(plan, f, "/state", "/wt", "fix/auth-core", config.ApprovalModePerPlan)
+	}
+	// head is the task without a preamble or a body, which
+	// TestFeatureLeaderTask pins line by line.
+	head := task(bare, noBody)
+
+	const rules = "## 目的\n\n座席の決まり:\n\n- model は sonnet\n- org {{ORG_ID}} の外は編集しない"
+	for _, tc := range []struct {
+		name, preamble string
+		f              SplitFeature
+		want           string
+	}{
+		{"a preamble and a body", rules, body,
+			head + "\n\n" + lead + "\n```\n" + rules + "\n```\n\nObjective: add the token store.\n\n- [ ] AC1"},
+		{"a preamble and no body", rules, noBody,
+			head + "\n\n" + lead + "\n```\n" + rules + "\n```"},
+		{"a preamble of blank lines and a body", "\n \n\t\n", body, head + "\n\nObjective: add the token store.\n\n- [ ] AC1"},
+		{"a preamble of blank lines and no body", "\n\n", noBody, head},
+		{"inline code and a tilde fence keep 3 backticks", "## 目的\n\n`x` と ``y``\n\n~~~\n## 例\n~~~", noBody,
+			head + "\n\n" + lead + "\n```\n## 目的\n\n`x` と ``y``\n\n~~~\n## 例\n~~~\n```"},
+		{"a fenced block of 3 backticks makes 4", "## 目的\n\n```sh\n## not a heading\n```", noBody,
+			head + "\n\n" + lead + "\n````\n## 目的\n\n```sh\n## not a heading\n```\n````"},
+		{"a run of 4 backticks makes 5", "## 目的\n\n````md\n```\n````", body,
+			head + "\n\n" + lead + "\n`````\n## 目的\n\n````md\n```\n````\n`````\n\nObjective: add the token store.\n\n- [ ] AC1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := task(withPreamble(tc.preamble), tc.f); got != tc.want {
+				t.Errorf("task =\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
+	// No preamble at all is the task as TestFeatureLeaderTask pins it.
+	if got, want := task(bare, body), head+"\n\nObjective: add the token store.\n\n- [ ] AC1"; got != want {
+		t.Errorf("task with no preamble =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestFenceFor: the fence is one backtick longer than the longest run of
+// backticks in the text, wherever the run stands, and at least 3.
+func TestFenceFor(t *testing.T) {
+	for _, tc := range []struct{ text, want string }{
+		{"", "```"},
+		{"no backticks", "```"},
+		{"`a` and ``b``", "```"},
+		{"```", "````"},
+		{"x ```` y", "`````"},
+		{"`````\n` ``", "``````"},
+		{"ends with ``````", "```````"},
+	} {
+		if got := fenceFor(tc.text); got != tc.want {
+			t.Errorf("fenceFor(%q) = %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
+
+// TestStartFeature_LeaderPromptHoldsPreamble covers AC4 of plan
+// 2026-10-22-split-preamble at the org layer: start --plan on a split plan
+// whose preamble has a seat-rules line, a {{ORG_ID}} and a fenced block puts
+// the lead line and the fenced preamble into the ## タスク section of the
+// leader's prompt, between the task's lines and the feature's body, with
+// {{ORG_ID}} left as it is; every section of the role prompt is still found
+// exactly once, and the preamble's ## 目的 only inside the fence. A preamble
+// longer than the TASK body cap starts as well and reaches the prompt whole.
+// markdownSection would end the ## タスク section at the fenced ## 目的, so the
+// section is cut out between its heading and the next one of the template.
+func TestStartFeature_LeaderPromptHoldsPreamble(t *testing.T) {
+	const overview = "## Overview\n\n認証まわりを 2 つの機能に分ける。\n"
+	if !strings.Contains(splitPlanFixture, overview) {
+		t.Fatalf("splitPlanFixture has no %q to replace", overview)
+	}
+	template, err := promptFS.ReadFile("prompts/leader.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var headings []string
+	for _, line := range strings.Split(string(template), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			headings = append(headings, line)
+		}
+	}
+	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節。原文のまま下に囲む):"
+	const body = "Objective: add the token store.\n\n- [ ] AC1: tokens persist"
+
+	var long strings.Builder
+	long.WriteString("## 目的\n\n座席の決まり(両方の機能に共通):\n")
+	for i := 1; utf8.RuneCountInString(long.String()) <= protocol.DefaultMaxBodyChars; i++ {
+		fmt.Fprintf(&long, "\n- 決まり %03d: 予約の外のファイルは編集しない", i)
+	}
+	for _, tc := range []struct{ name, preamble, fence string }{
+		{"rules, a placeholder and a fenced block",
+			"## 目的\n\n座席の決まり(両方の機能に共通):\n\n- implementer は driver claude、model sonnet で立てる\n" +
+				"- org {{ORG_ID}} の予約の外のファイルは編集しない\n\n```sh\ngo test ./...\n```\n\n## 進め方\n\n機能ごとに PR を 1 本作る。",
+			"````"},
+		{"longer than the TASK body cap", long.String(), "```"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFeatureStart(t)
+			st.writePlan(t, "auth-split", approveSplitPlan(t, strings.Replace(splitPlanFixture, overview, tc.preamble+"\n", 1)))
+			res := st.mustStart(t, st.params("auth-core"), SpawnOutcomeSpawned)
+			if res.Split.Preamble != tc.preamble {
+				t.Fatalf("Preamble = %q, want %q", res.Split.Preamble, tc.preamble)
+			}
+
+			promptPath, err := st.o.promptFilePath("auth-core", LeaderIdentity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(promptPath)
+			if err != nil {
+				t.Fatalf("read the leader's prompt: %v", err)
+			}
+			prompt := string(data)
+			_, rest, ok := strings.Cut(prompt, "\n## タスク\n\n")
+			section, _, closed := strings.Cut(rest, "\n\n## スター型トポロジのルール\n")
+			if !ok || !closed {
+				t.Fatalf("expected the leader's prompt to have a ## タスク section followed by ## スター型トポロジのルール, got:\n%s", prompt)
+			}
+			block := "\n\n" + lead + "\n" + tc.fence + "\n" + tc.preamble + "\n" + tc.fence + "\n\n" + body
+			if !strings.HasPrefix(section, "- 分割計画: auth-split(") || !strings.HasSuffix(section, "を付ける)"+block) {
+				t.Fatalf("expected the ## タスク section to be the task's lines, the lead line, the preamble in a %s fence and the feature's body, got:\n%s", tc.fence, section)
+			}
+			feature, _ := res.Split.Feature("auth-core")
+			if want := featureLeaderTask(res.Split, feature, st.stateDir, st.worktree("auth-core"), "fix/auth-core", config.ApprovalModePerPlan); section != want {
+				t.Errorf("## タスク section =\n%s\nwant featureLeaderTask's\n%s", section, want)
+			}
+			if strings.Contains(tc.preamble, "{{ORG_ID}}") && !strings.Contains(section, "- org {{ORG_ID}} の予約の外") {
+				t.Errorf("expected {{ORG_ID}} in the preamble to stay as it is, got:\n%s", section)
+			}
+			for _, h := range headings {
+				if n := strings.Count("\n"+prompt, "\n"+h+"\n"); n != 1 {
+					t.Errorf("expected the role prompt's %q once, found it %d times:\n%s", h, n, prompt)
+				}
+			}
+			if n := strings.Count(prompt, "\n## 目的\n"); n != 1 || !strings.Contains(section, "\n"+tc.fence+"\n## 目的\n") {
+				t.Errorf("expected the preamble's ## 目的 once, right after the opening fence, found it %d times:\n%s", n, prompt)
+			}
+		})
 	}
 }
 
