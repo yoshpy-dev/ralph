@@ -67,3 +67,22 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - L3、L4、L8、L9 はテストと呼び出しの形の整理で、動作を変えない。L4 はテスト 6 件の期待文も動く。L7 と L10 は任意
   - パイプラインは cycle 1 で、LOW を今直すと `/verify` 以降をもう一度走らせる。cycle 2 が上限なので、直すものを選ぶなら L1 と L2 だけにして、残りは tech-debt の 1 行に束ねる案もある
   - 範囲外として扱ったこと(新しい指摘ではない): `Org.Getenv` の doc(`spawn.go:234`)が「Stop と Disband が読む」のままで、`compensateStale` が新しい読み手になった(`approve.go:123`、`director_stop.go:258` も前から読み手)。新しい binary の `compensateStale` は、記録に `spawn_step` が残る spawn を、ロックを取らない古い binary が実行中でも stale と見て閉じる(古い binary の spawn の途中で更新すると起きる。計画の D5 は新しい binary 同士だけを守る)。仕様の `[x]` の数と evidence の数字(`/verify`)、`docs/plans/active/` を指す文字(evidence の 4 行目など。`/pr` の archive で tech-debt の行は直るが evidence は直らない)
+
+## 直したもの(cycle 1、レビューのあと)
+
+L1〜L10 と範囲外の注記について、直したか残したかを書く。コードとテストの直しはコミット dde26a8f、記録の直しはこの節を足したコミットにある。
+
+- L1: 直した(dde26a8f)。復旧の案内 4 か所の `ralph org stop --org-id <o> --seat <s>` を `stopSeatCommand` 1 つにまとめた。`Org.InboxHintStateDir` が入っていれば、`CommandWithStateDir` が `--state-dir <台帳>` を引用符つきで末尾に足す。CLI は `newOrgSpawnRuntimeAt`(`internal/cli/org.go`)で `orgInboxHintStateDir` の値を入れる。`spawn`、`start`、`start --plan` はこの関数で runtime を作るので、どれも `--state-dir` を明示したときだけ案内に付く。`InboxHintStateDir` の doc も、Spawn の案内が同じ値を繰り返すと書き足した。テストは `TestOrgSpawn_StopHints_RepeatInboxHintStateDir`(4 つの道のそれぞれで、未設定、設定、引用符の要る値の 3 通り)と、`internal/cli/org_test.go` の `TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir`(`--state-dir` では付き、`RALPH_ORG_STATE_DIR` では付かない)。`stopSeatCommand` が値を無視する変異と、CLI の代入を消す変異は、どちらも新しいテストで赤になった。`StartFeature` の事前検査(`spawnPrecheckErr`)は `Org` を持たないので、その案内には `--state-dir` が付かない。`spawnPrecheckErr` の doc にそう書いた
+- L2: 動作は変えず、`leaderActivityEventCount` の doc に数えるものと数えないものを書いた(dde26a8f)。spawn が書く event で数えるのは `spawn_started` だけで、`spawn_failed` と `spawn_close_failed` は数えない。途中の座席への検査拒否、ロックによる断り、`compensateStale` の 2 つの断り(自分の pane、確かめも閉じもできない pane)は `spawn_started` も `rejected` も書かないので数えない。断られる spawn を打ち直すだけの leader は止まっているので、deadman が人へ escalation してよいと決めた
+- L3: 残した。`failStepWithNote` の引数を変えると呼び出しのすべてに手が入り、動作は変わらない。後の整理に回す
+- L4: 直した(dde26a8f)。確かめられない道の語を `ctrl_c=skipped pane=not confirmed, not closed: <err>` にし、`compensateStale` の doc の一覧に形をすべて並べた。`TestOrgSpawn_StaleSeat_PaneNotClosed_RefusesTheSpawn` の 4 ケースの期待文を合わせた。`ctrl_c=skipped:` の形は `Stop`(`stopSeatPane`、`internal/org/verbs.go`)と director の stop(`director_stop.go`)にもあり、この PR の範囲の外なので残る。同じ状況で `Stop` の `stop_failed` は `ctrl_c=skipped: pane not confirmed pane=not closed: <err>` と書くので、`spawn_close_failed` と `stop_failed` の語は揃っていない。evidence(`docs/evidence/seat-spawn-close-2026-10-22.md`)と skill の 4 写しは古い語を引いていない
+- L5: 直した(この節のコミット)。org-stop-all の行の Why deferred の欄で、(b) を挙げた文を取り消し線にした
+- L6: 直した(この節のコミット)。ALERT の行の Trigger に、spawn の join と HELLO(試行の失敗した spawn で 17〜81 s)も同じ測り方で見ることを足した。F4 の行の「agmsg がなぜ遅かったかは分からない」という文から、ALERT の行を書き出しの語で指した
+- L7: ファイルは分けず、`spawn.go` と `spawn_test.go` の大きさの行を tech-debt に足した(この節のコミット)。分けると 1000 行ほどが動くが、確かめる中身は変わらない
+- L8: 直した(dde26a8f)。3 本(5 ケース)の `TimeoutMS` を 50 から 500 にし、期限の案内の期待文も 500 ms にした。どの fake(`joinBlocks`、`sendBlock`、1 時間待つ `agent start` の再試行)も spawn の期限が切れるまで待つ。期限を伸ばしても、期限が切れる step は変わらず、前の step の余裕が増えるだけになる。直しを戻すと赤になることは、コードから読んで変わらない。補償が spawn の ctx を使えば `assertLiveBoundedCtxs` が切れた ctx を見て落ち、pane を閉じなければ herdr の呼び出しの列が合わず、案内がなければ文の検査が落ちる
+- L9: 直した(dde26a8f)。`appendLegacyRejectedRetry` を `checkRetryRefusedThenAppendLegacyRejected` に改めた。動作は変えていない
+- L10: 残した。10 秒の上限は `defaultDriverCallTimeout` の 1 定数で、文の写しごとに固定するテストを足しても、手間に見合うものが少ない
+- 範囲外の注記
+  - `Org.Getenv` の doc に Spawn を足した(dde26a8f)。`compensateStale` が自分の pane を見分けるために `HERDR_PANE_ID` を読む
+  - 古い binary の spawn がロックを取らない件は、tech-debt の stop とロックの行に 1 文足した(この節のコミット)。コードから読んだもので、再現はしていない
+  - evidence の `docs/plans/active/` を指す文字は残した。`archive-plan.sh` が書き換えるのは `docs/tech-debt/README.md` だけで、#248 の evidence と同じ扱いにした
