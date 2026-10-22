@@ -1312,13 +1312,11 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // permissionArgsForDriver, autonomousScopeGateErr, spawnCapacityErr and
 // spawnFeatureSeatErr (which passes the leader seat StartFeature spawns).
 // For a seat in flight, the refusals of the envelope, permission and
-// --scope checks carry inFlightSeatErr's words, as Spawn's do, except that
-// its stop command never repeats --state-dir: it has no Org to read
-// InboxHintStateDir from, so StartFeature's pre-check prints the plain
-// command where Spawn would add --state-dir. A stale
-// in-flight seat is counted as compensateStale leaves it once compensated
-// (one more `spawn_failed`), since Spawn decides capacity on its read after
-// that compensation. compensateStale can also refuse the spawn (a pane it
+// --scope checks carry inFlightSeatErr's words, as Spawn's do, with the
+// stop command repeating hintStateDir (the caller's Org.InboxHintStateDir).
+// A stale in-flight seat is counted as compensateStale leaves it once
+// compensated (one more `spawn_failed`), since Spawn decides capacity on its
+// read after that compensation. compensateStale can also refuse the spawn (a pane it
 // can neither confirm nor close, or the caller's own), which only herdr and
 // the environment tell, so Spawn can refuse a stale seat after this
 // pre-check passed. Step 6's regate check reads regate.lock, not events, so
@@ -1326,7 +1324,7 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // decides again under the lock, so the two can otherwise differ only when
 // another spawn changes the manifest in between.
 // TestSpawnPrecheckErr_MatchesSpawn runs both on the same ledgers.
-func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent) error {
+func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent, hintStateDir string) error {
 	seat, found := seatFromEvents(events, p.OrgID, p.SeatID)
 	if found && seat.Event == EventSpawned {
 		_, err := idempotentRespawnDecision(cfg, p, seat, events)
@@ -1338,7 +1336,7 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 	inFlight := found && spawnInFlight(seat.Event)
 	refuse := func(cause error) error {
 		if inFlight {
-			return inFlightSeatErr(p, seat, cause, "")
+			return inFlightSeatErr(p, seat, cause, hintStateDir)
 		}
 		return cause
 	}
@@ -2527,8 +2525,7 @@ func (o *Org) compensateLeave(team, agentID string) string {
 // it, and only then gets closeSpawnPane's C-c and close (plan
 // 2026-10-22-seat-spawn-close, D3). Every call runs under its own
 // driverCallTimeout deadline, never the spawn's ctx. The outcomes, as
-// Details' `compensation=` words them (every form but the first reads
-// `ctrl_c=<outcome> pane=<outcome>`):
+// Details' `compensation=` words them:
 //   - no pane recorded: `no pane to compensate`, then spawn_failed.
 //   - not found: `ctrl_c=skipped pane=already closed`, then spawn_failed.
 //   - another label (the tab's, or the workspace's under a tab labelled
@@ -2543,8 +2540,9 @@ func (o *Org) compensateLeave(team, agentID string) string {
 //     close), and spawn_failed; or, when the close failed, `pane=close
 //     failed: <err>` and the refusal below.
 //   - not confirmed (a get failed or timed out, or herdr has the pane but
-//     not its tab or its workspace): `ctrl_c=skipped pane=not confirmed, not
-//     closed: <err>` and the refusal below.
+//     not its tab or its workspace): `ctrl_c=skipped: pane not confirmed
+//     pane=not closed: <err>`, the words stopSeatPane (verbs.go) gives a
+//     stop_failed in the same case, and the refusal below.
 //
 // The refusal, when the pane was not confirmed or its close failed: the
 // pane may still run the seat, so the spawn is refused with
@@ -2574,7 +2572,7 @@ func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
 		case errors.Is(err, errLabelMismatch):
 			compensation = fmt.Sprintf("ctrl_c=skipped pane=left untouched, labelled differently: %v", err)
 		case err != nil:
-			compensation, closeErr = fmt.Sprintf("ctrl_c=skipped pane=not confirmed, not closed: %v", err), err
+			compensation, closeErr = fmt.Sprintf("ctrl_c=skipped: pane not confirmed pane=not closed: %v", err), err
 		default:
 			compensation, closeErr = o.closeSpawnPane(paneID)
 		}

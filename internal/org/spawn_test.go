@@ -2158,13 +2158,13 @@ func TestOrgSpawn_StaleSeat_PaneNotClosed_RefusesTheSpawn(t *testing.T) {
 		wantDetails string
 	}{
 		{"the pane check fails", func(_ *Org, h *fakeHerdr) { h.getErrs = map[string]error{"stale-pane": getErr} }, getErr, false,
-			`compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": herdr: connect: connection refused)`},
+			`compensation=ctrl_c=skipped: pane not confirmed pane=not closed: check pane "stale-pane": herdr: connect: connection refused)`},
 		{"the pane check times out", func(o *Org, h *fakeHerdr) { o.DriverCallTimeout, h.getBlock = 20*time.Millisecond, true },
-			context.DeadlineExceeded, false, `compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": context deadline exceeded)`},
+			context.DeadlineExceeded, false, `pane=not closed: check pane "stale-pane": context deadline exceeded)`},
 		{"herdr has the pane but not its tab", func(_ *Org, h *fakeHerdr) { delete(h.tabLabels, fakeTabID("stale-pane")) }, nil, false,
-			`compensation=ctrl_c=skipped pane=not confirmed, not closed: check pane "stale-pane": herdr has no tab "tab-stale-pane" although it has the pane`},
+			`pane=not closed: check pane "stale-pane": herdr has no tab "tab-stale-pane" although it has the pane`},
 		{"herdr has the pane but not its workspace", func(_ *Org, h *fakeHerdr) { delete(h.workspaceLabels, "ws-stale") }, nil, false,
-			`compensation=ctrl_c=skipped pane=not confirmed, not closed: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: herdr has no workspace "ws-stale")`},
+			`pane=not closed: pane "stale-pane" is not confirmed in org_id "org-a"'s workspace: herdr has no workspace "ws-stale")`},
 		{"the close fails", func(_ *Org, h *fakeHerdr) { h.paneCloseErrs = map[string]error{"stale-pane": closeErr} }, closeErr, true,
 			"compensation=ctrl_c=ok pane=close failed: herdr pane close: connect: connection refused)"},
 		{"the close times out", func(o *Org, h *fakeHerdr) { o.DriverCallTimeout, h.paneCloseBlock = 20*time.Millisecond, true },
@@ -2316,24 +2316,34 @@ func TestOrgSpawn_InFlightSeat_RefusedRetryWritesNothing(t *testing.T) {
 // spawnPrecheckErr in step with Spawn for a seat in flight (the case
 // TestSpawnPrecheckErr_MatchesSpawn has no row for): the pre-check refuses
 // a retry that fails the envelope check with the same error Spawn's plain
-// rejection gives, unfinished spawn and pane included.
+// rejection gives, unfinished spawn and pane included, and the stop command
+// with or without --state-dir as Org.InboxHintStateDir says.
 func TestSpawnPrecheckErr_InFlightSeatRefusal_MatchesSpawn(t *testing.T) {
-	o, h, _ := testOrg(t)
-	seedStaleSeatOnPane(t, o, h, "pane-7")
-	p := mustSpawnParams("org-a", "seat-1")
-	p.Model = "not-a-real-model"
-	checked, err := checkSpawnInput(p)
-	if err != nil {
-		t.Fatalf("checkSpawnInput: %v", err)
-	}
+	const stop = "end it with ralph org stop --org-id org-a --seat seat-1"
+	for _, dir := range []struct{ name, set, want string }{
+		{"InboxHintStateDir unset", "", stop},
+		{"InboxHintStateDir set", "/state/org", stop + " --state-dir '/state/org'"},
+	} {
+		t.Run(dir.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			o.InboxHintStateDir = dir.set
+			seedStaleSeatOnPane(t, o, h, "pane-7")
+			p := mustSpawnParams("org-a", "seat-1")
+			p.Model = "not-a-real-model"
+			checked, err := checkSpawnInput(p)
+			if err != nil {
+				t.Fatalf("checkSpawnInput: %v", err)
+			}
 
-	pre := spawnPrecheckErr(o.Config, checked, mustReadEvents(t, o))
-	r := o.Spawn(p)
-	if pre == nil || !strings.Contains(pre.Error(), `has an unfinished spawn on pane "pane-7"`) {
-		t.Fatalf("expected the pre-check to name the unfinished spawn, got %v", pre)
-	}
-	if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.Err.Error() != pre.Error() {
-		t.Fatalf("expected Spawn to refuse with the pre-check's error %q, got %+v", pre, r)
+			pre := spawnPrecheckErr(o.Config, checked, mustReadEvents(t, o), o.InboxHintStateDir)
+			r := o.Spawn(p)
+			if pre == nil || !strings.Contains(pre.Error(), `has an unfinished spawn on pane "pane-7"`) || !strings.HasSuffix(pre.Error(), dir.want) {
+				t.Fatalf("expected the pre-check to name the unfinished spawn and end with %q, got %v", dir.want, pre)
+			}
+			if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.Err.Error() != pre.Error() {
+				t.Fatalf("expected Spawn to refuse with the pre-check's error %q, got %+v", pre, r)
+			}
+		})
 	}
 }
 
