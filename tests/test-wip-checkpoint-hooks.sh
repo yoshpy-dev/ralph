@@ -13,8 +13,12 @@
 #      the hook's subject that holds both files; the md has no skipped line
 #   2. the same tree with "off": HEAD and the index unchanged, the untracked
 #      file still untracked, the md ends with exactly one skipped line
-#   3. main, dirty tree, unset or "off": no commit, no skipped line
-#   4. feature branch, clean tree, unset or "off": no commit, no skipped line
+#   3. detached HEAD, dirty tree: as 1 with the value unset (the commit lands
+#      on the detached HEAD) and as 2 with "off". git rev-parse --abbrev-ref
+#      reads a detached HEAD as "HEAD", not "unknown", so the hooks treat it
+#      as a feature branch; these cases pin what they do today
+#   4. main or master, dirty tree, unset or "off": no commit, no skipped line
+#   5. feature branch, clean tree, unset or "off": no commit, no skipped line
 # In every case the hook exits 0, writes its md (title first), and writes no
 # .harness/logs/hook-failures.log.
 set -eu
@@ -63,7 +67,8 @@ fail() {
 }
 
 # make_repo BRANCH — a fresh repo with one commit on main (.gitignore and
-# tracked.txt), then on BRANCH. Sets _repo.
+# tracked.txt), then on BRANCH ("detached": a detached HEAD at that commit).
+# Sets _repo.
 make_repo() {
   _repo_count=$((_repo_count + 1))
   # A counter, not the mode, names the repo: "off" and "OFF" are the same
@@ -78,9 +83,11 @@ make_repo() {
   printf 'one\n' > "${_repo}/tracked.txt"
   git -C "$_repo" add .gitignore tracked.txt
   git -C "$_repo" commit -q -m 'initial'
-  if [ "$1" != main ]; then
-    git -C "$_repo" checkout -q -b "$1"
-  fi
+  case "$1" in
+    main) ;;
+    detached) git -C "$_repo" checkout -q --detach ;;
+    *) git -C "$_repo" checkout -q -b "$1" ;;
+  esac
 }
 
 # make_dirty — a tracked change and an untracked file in _repo.
@@ -168,33 +175,38 @@ expect_no_failure_log() {
   fi
 }
 
-# case_commits HOOK MODE — feature branch, dirty tree: one wip commit.
+# case_commits HOOK MODE BRANCH — dirty tree on BRANCH (a feature branch, or
+# "detached"): one wip commit on that HEAD, which stays on BRANCH.
 case_commits() {
-  make_repo feature/wip-test
+  make_repo "$3"
   make_dirty
+  _head_before="$(git -C "$_repo" rev-parse --abbrev-ref HEAD)"
   run_hook "$1" "$2"
-  _desc="${_label}, $(mode_label "$2"), dirty feature branch"
+  _desc="${_label}, $(mode_label "$2"), dirty ${3}"
   _count="$(git -C "$_repo" rev-list --count HEAD)"
   _got="$(git -C "$_repo" log -1 --format=%s)"
   _status="$(git -C "$_repo" status --porcelain)"
+  _head_after="$(git -C "$_repo" rev-parse --abbrev-ref HEAD)"
   if [ "$_rc" -eq 0 ] && [ "$_count" = 2 ] && [ "$_got" = "$_subject" ] \
-    && [ -z "$_status" ] && git -C "$_repo" cat-file -e HEAD:untracked.txt 2>/dev/null; then
-    pass "${_desc}: one commit '${_subject}' with both files"
+    && [ -z "$_status" ] && git -C "$_repo" cat-file -e HEAD:untracked.txt 2>/dev/null \
+    && [ "$_head_after" = "$_head_before" ]; then
+    pass "${_desc}: one commit '${_subject}' with both files on ${_head_after}"
   else
-    fail "${_desc}: exit ${_rc}, ${_count} commits, last subject '${_got}', status '${_status}'"
+    fail "${_desc}: exit ${_rc}, ${_count} commits, last subject '${_got}', status '${_status}', HEAD ${_head_before} -> ${_head_after}"
     show_file "$_out"
   fi
   expect_md "$_desc" 0
   expect_no_failure_log "$_desc"
 }
 
-# case_off HOOK — feature branch, dirty tree, "off": no commit, no git add.
+# case_off HOOK BRANCH — dirty tree on BRANCH (a feature branch, or
+# "detached"), "off": no commit, no git add.
 case_off() {
-  make_repo feature/wip-test
+  make_repo "$2"
   make_dirty
   _before="$(git -C "$_repo" rev-parse HEAD)"
   run_hook "$1" off
-  _desc="${_label}, $(mode_label off), dirty feature branch"
+  _desc="${_label}, $(mode_label off), dirty ${2}"
   _after="$(git -C "$_repo" rev-parse HEAD)"
   _status="$(git -C "$_repo" status --porcelain)"
   _want_status="$(printf ' M tracked.txt\n?? untracked.txt')"
@@ -210,7 +222,8 @@ case_off() {
 }
 
 # case_no_commit HOOK BRANCH DIRTY MODE — a case that commits nothing with any
-# value: main with a dirty tree, or a feature branch with a clean tree.
+# value: main or master with a dirty tree, or a feature branch with a clean
+# tree.
 case_no_commit() {
   make_repo "$2"
   if [ "$3" = dirty ]; then
@@ -258,11 +271,15 @@ for _hook in session_end_summary precompact_checkpoint; do
       continue
     fi
     for _mode in unset on OFF empty; do
-      case_commits "$_path" "$_mode"
+      case_commits "$_path" "$_mode" feature/wip-test
     done
-    case_off "$_path"
-    case_no_commit "$_path" main dirty unset
-    case_no_commit "$_path" main dirty off
+    case_off "$_path" feature/wip-test
+    case_commits "$_path" unset detached
+    case_off "$_path" detached
+    for _branch in main master; do
+      case_no_commit "$_path" "$_branch" dirty unset
+      case_no_commit "$_path" "$_branch" dirty off
+    done
     case_no_commit "$_path" feature/wip-test clean unset
     case_no_commit "$_path" feature/wip-test clean off
   done

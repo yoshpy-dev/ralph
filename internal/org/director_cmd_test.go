@@ -554,8 +554,8 @@ func readLines(t *testing.T, path string) []string {
 // gets none. A check-in that fails starts no agent and the script exits 1.
 // AC5: the terminal's environment has AGMSG_SELF_NAME=on and
 // RALPH_WIP_CHECKPOINT=on, and both the check-in and the agent see the off
-// the script exports for each, with or without an agmsg home (plan
-// 2026-10-22-seat-wip-checkpoint, AC3).
+// the script exports for each, with or without an agmsg home, and also when
+// the terminal passes neither (plan 2026-10-22-seat-wip-checkpoint, AC3).
 func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "AGMSG_SELF_NAME=on", "RALPH_WIP_CHECKPOINT=on"}
 	t.Run("the check-in passes", func(t *testing.T) {
@@ -617,6 +617,26 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 		}
 		if got := readLines(t, agentOut)[5]; got != "wipcheckpoint=off" {
 			t.Fatalf("with no agmsg home the agent got %q, want wipcheckpoint=off", got)
+		}
+	})
+	// The values the terminal passes reach the children even without an
+	// export, so only a terminal that passes neither shows that the script
+	// exports what it sets.
+	t.Run("the terminal passes neither value", func(t *testing.T) {
+		dir := t.TempDir()
+		s, _, _, ralphPaneEnv, agentOut := launchScriptFakes(t, dir, 0)
+		path, err := writeDirectorLaunchScript(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code := runLaunchScript(t, path, []string{"PATH=/usr/bin:/bin"}); code != 0 {
+			t.Fatalf("the launch script exited %d, want 0", code)
+		}
+		if got := readLines(t, ralphPaneEnv); !slices.Equal(got, launchScriptPaneEnvOff) {
+			t.Fatalf("with neither value in the terminal the check-in's environment = %q, want %q", got, launchScriptPaneEnvOff)
+		}
+		if got := readLines(t, agentOut)[4:6]; !slices.Equal(got, []string{"selfname=off", "wipcheckpoint=off"}) {
+			t.Fatalf("with neither value in the terminal the agent got %q, want selfname=off and wipcheckpoint=off", got)
 		}
 	})
 	t.Run("the check-in is refused", func(t *testing.T) {
