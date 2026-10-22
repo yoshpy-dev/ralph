@@ -242,7 +242,16 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
       戻る。reviewer が通したら、手順 9 からやり直す
 13. implementer と reviewer を `ralph org stop` で止める
 14. HEAD(`git rev-parse HEAD`)が手順 12 の gate が出した `HEAD:` と同じ
-    ことを確かめる。違えば push せず、gate を打ち直す(手順 12)。同じなら
+    ことを確かめる。gate を打ち直す前と push の前に、
+    `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打つ
+    (`<既定のブランチ>` は手順 9 の決め方で決める)。件名が `wip:` で始まる
+    コミットがあれば、gate も push も打たず、そのコミットの行を本文に書いて、
+    BLOCKED(TASK_ID は `{{ORG_ID}}`)を「件を上げる」の節の手順で
+    `ralph org escalate` で上げる。`wip:` のコミットは、Claude Code の
+    セッションの hook がセッションの終わりと compaction の前に作る自動の
+    チェックポイントで、機能の PR には要らない(gate の前に作られたものは
+    gate の HEAD にも入っているので、HEAD が同じでも `git log` を打つ)。
+    HEAD が違えば push せず、gate を打ち直す(手順 12)。同じなら
     `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
     作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
     タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
@@ -407,3 +416,29 @@ ralph org escalate --state-dir <台帳> --org-id {{ORG_ID}} --text "$(cat .harne
   上げてください。SUMMARY には断られたコマンドを、EVIDENCE にはエラーの文の
   要点(見張りの状態と pid)を書きます。上げたら、返事が来るまで spawn と
   TASK の送信を打たずに待ってください。
+- `ralph org spawn` が終了コード 1 で返り、stdout に `spawn failed:` の行が
+  出たら(stderr にも同じエラーの文が出ます)、エラーの文を読んで次のように
+  分けてください。stdout の `rejected:` の行で断られたとき(同じ座席の別の
+  spawn が動いている、横断の見張りが動いていない、承認の検査、など)は、
+  ここには当たりません。BLOCKED は、TASK_ID を org_id の `{{ORG_ID}}`、
+  SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の要点にして、
+  「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで
+  その座席の spawn を打たずに待ってください。
+  - エラーが `seat left active` を含むとき: ralph が座席の pane を閉じられ
+    なかったので、座席は動いているかもしれません。エラーにある
+    `ralph org stop --org-id … --seat …` を、`--force` を足さずにそのまま
+    打ってください(`--force` は pane を閉じられなくても止めたと記録します)。
+    stop が終了コード 0 で終わり、`ralph org status` でその座席の STATE の欄
+    に `(active)` が付いていない(active でない)ことを確かめてから、次の項
+    のとおりに打ち直してください。stop が終了コード 1 で返ったとき、または
+    座席がまだ active のときは、打ち直さずに BLOCKED を上げてください。
+  - エラーが `org: spawn step` で始まり、`seat left active` を含まないとき:
+    ralph は座席の pane を閉じています(pane を作る前に失敗したときは pane が
+    ありません)。その座席の HELLO が agmsg の受信箱に届いていても、座席は
+    動いていません。エラーに `retry with a larger --timeout-ms` があれば
+    (spawn の `--timeout-ms` の期限が切れた)、大きい `--timeout-ms` で打ち
+    直し、なければそのまま打ち直してください。
+  - それ以外のエラー(台帳を読めない・書けない、など)のときは、pane が
+    残っていることがあるので、打ち直さずに BLOCKED を上げてください。
+  - 同じ座席の spawn が 2 回続けて `spawn failed:` で失敗したら、上のどの
+    場合でも打ち直さずに BLOCKED を上げてください。

@@ -26,6 +26,9 @@ verify, commit with conventional format, and do not leave uncommitted changes
 between steps. There is no separate iteration-commit mechanism — a seat's
 work is recorded in the org saga manifest (`.harness/state/org/manifest.jsonl`)
 and receipts alongside its git commits, not in a `progress.log`.
+ralph turns off the end-of-session WIP commit below in the panes of seats
+(see there), so changes a seat leaves uncommitted stay uncommitted until a
+seat commits them.
 
 ## End-of-Session / Pre-Compaction WIP Commits
 
@@ -35,6 +38,21 @@ When a session ends or context compaction occurs on a feature branch:
 - Only on feature branches (never on main/master)
 - Message format: `wip: checkpoint before <reason>`
 - These are safe to squash later
+- Skipped when `RALPH_WIP_CHECKPOINT` is exactly `off`: the hook still
+  writes its summary (`.harness/state/session-end.md` or
+  `.harness/state/precompact-checkpoint.md`) and, when there are uncommitted
+  changes, notes `- WIP commit: skipped (RALPH_WIP_CHECKPOINT=off)` in it,
+  but runs no `git add` or `git commit`. Any other value (`on`, `OFF`,
+  empty) or none commits as above
+- ralph sets `RALPH_WIP_CHECKPOINT=off` in every herdr pane it creates (org
+  seats, leaders included, and a herdr headless director) and in the launch
+  script of a director started with `[org.director].launch_cmd`, so a seat's
+  session does not commit a feature org's uncommitted work in the worktree
+  the seats share. A herdr whose `tab create` has no `--env` creates the
+  panes without it, and ralph warns on stderr. Either way, a feature org's
+  leader looks for `wip:` commits on its branch before it re-runs the gate
+  or pushes, and raises a BLOCKED instead when it finds one (step 14 of its
+  role prompt)
 
 ## Safety Bracket (Guidance)
 
