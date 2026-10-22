@@ -1860,6 +1860,160 @@ func TestOrgSpawn_FailureAfterPane_CloseTimesOut_RecordsSpawnCloseFailed(t *test
 	}
 }
 
+// --- plan 2026-10-22-seat-spawn-close: the --timeout-ms hint (AC5) --------
+
+// TestOrgSpawn_SpawnDeadlineRunsOut_ErrorHintsAtTimeoutMS covers plan AC5's
+// error: a step that fails because the spawn's one deadline ran out returns
+// an error that names that deadline in ms and says to raise --timeout-ms,
+// right after the step's cause, whether the pane then closed (spawn_failed)
+// or not (spawn_close_failed). The hint stays out of Details. The agent
+// start case fails with the last agent_pane_busy error, which does not wrap
+// context.DeadlineExceeded: the deadline ended its wait between retries,
+// and the hint still comes, since it reads the spawn's ctx.
+func TestOrgSpawn_SpawnDeadlineRunsOut_ErrorHintsAtTimeoutMS(t *testing.T) {
+	const hint = "(the spawn's --timeout-ms deadline of 50 ms, shared by every herdr and agmsg step, ran out; retry with a larger --timeout-ms)"
+	busy := errors.New("herdr: " + agentPaneBusyMarker)
+	for _, tc := range []struct {
+		name   string
+		inject func(o *Org, h *fakeHerdr, a *fakeAgmsg)
+		step   string
+		// wantEvent is the spawn's last manifest event; wantDeadlineErr,
+		// whether the error wraps context.DeadlineExceeded.
+		wantEvent       string
+		wantDeadlineErr bool
+	}{
+		{"agmsg join runs past the deadline", func(_ *Org, _ *fakeHerdr, a *fakeAgmsg) {
+			a.joinBlocks = map[string]bool{"seat-1": true}
+		}, "agmsg_join", EventSpawnFailed, true},
+		{"HELLO runs past the deadline and the close fails", func(_ *Org, h *fakeHerdr, a *fakeAgmsg) {
+			a.sendBlock = true
+			h.paneCloseErrs = map[string]error{"pane-1": errors.New("herdr pane close: connect: connection refused")}
+		}, "agmsg_announce", EventSpawnCloseFailed, true},
+		{"agent start busy until the deadline ends the retries", func(o *Org, h *fakeHerdr, _ *fakeAgmsg) {
+			h.agentStartErr = busy
+			o.AgentStartRetryInterval = time.Hour
+		}, "agent_start", EventSpawnFailed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			tc.inject(o, h, a)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.TimeoutMS = 50
+
+			result := spawnWithin(t, o, p, 10*time.Second)
+			if result.Outcome != SpawnOutcomeFailed {
+				t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+			}
+			msg := result.Err.Error()
+			if want := "spawn step " + tc.step + " failed: "; !strings.Contains(msg, want) {
+				t.Fatalf("expected the error to contain %q, got %v", want, result.Err)
+			}
+			if !strings.Contains(msg, hint) {
+				t.Fatalf("expected the error to contain the hint %q, got %v", hint, result.Err)
+			}
+			if got := errors.Is(result.Err, context.DeadlineExceeded); got != tc.wantDeadlineErr {
+				t.Errorf("errors.Is(err, context.DeadlineExceeded) = %v, want %v (err %v)", got, tc.wantDeadlineErr, result.Err)
+			}
+			if tc.step == "agent_start" && !errors.Is(result.Err, busy) {
+				t.Errorf("expected the error to keep wrapping the agent_pane_busy cause, got %v", result.Err)
+			}
+			if tc.wantEvent == EventSpawnCloseFailed {
+				if i, j := strings.Index(msg, hint), strings.Index(msg, `pane "pane-1" not closed`); j < 0 || i > j {
+					t.Errorf("expected the hint before the not-closed part of the error, got %v", result.Err)
+				}
+			}
+
+			events := mustReadEvents(t, o)
+			last := events[len(events)-1]
+			if last.Event != tc.wantEvent {
+				t.Fatalf("expected %s last, got %+v", tc.wantEvent, last)
+			}
+			assertDetailsContains(t, last.Details, "step="+tc.step+" ")
+			if strings.Contains(last.Details, "--timeout-ms") {
+				t.Errorf("expected the hint to stay out of Details, got %q", last.Details)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_FailureBeforeSpawnDeadline_NoTimeoutMSHint is AC5's other
+// side: a step that fails with the spawn's deadline still open gets no
+// --timeout-ms hint, even when the close of its pane then runs out of its
+// own DriverCallTimeout bound, so the error wraps context.DeadlineExceeded
+// all the same.
+func TestOrgSpawn_FailureBeforeSpawnDeadline_NoTimeoutMSHint(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		inject    func(o *Org, h *fakeHerdr, a *fakeAgmsg)
+		wantEvent string
+	}{
+		{"agmsg join fails", func(_ *Org, _ *fakeHerdr, a *fakeAgmsg) {
+			a.joinErrs = map[string]error{"seat-1": errors.New("stub failure: seat join")}
+		}, EventSpawnFailed},
+		{"agent start fails and the close times out", func(o *Org, h *fakeHerdr, _ *fakeAgmsg) {
+			o.DriverCallTimeout = 20 * time.Millisecond
+			h.agentStartErr = errors.New("stub failure: agent start")
+			h.paneCloseBlock = true
+		}, EventSpawnCloseFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			tc.inject(o, h, a)
+			p := mustSpawnParams("org-a", "seat-1")
+			p.TimeoutMS = 60000
+
+			result := spawnWithin(t, o, p, 10*time.Second)
+			if result.Outcome != SpawnOutcomeFailed {
+				t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+			}
+			if strings.Contains(result.Err.Error(), "--timeout-ms") || strings.Contains(result.Err.Error(), "ran out") {
+				t.Fatalf("expected no --timeout-ms hint for a failure inside the deadline, got %v", result.Err)
+			}
+			events := mustReadEvents(t, o)
+			if last := events[len(events)-1]; last.Event != tc.wantEvent {
+				t.Fatalf("expected %s last, got %+v", tc.wantEvent, last)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_HelloFailsInsideDeadline_LeavePastIt_NoTimeoutMSHint: the
+// spawn's deadline is read when the HELLO fails, before the Leave, so a
+// HELLO that failed with the deadline still open gets no hint even when the
+// Leave takes the spawn past its deadline. The Leave sleeps until 300 ms
+// after the deadline of a 500 ms spawn, counted from before Spawn was
+// called.
+func TestOrgSpawn_HelloFailsInsideDeadline_LeavePastIt_NoTimeoutMSHint(t *testing.T) {
+	o, _, a := testOrg(t)
+	a.sendErr = errors.New("stub failure: agmsg send")
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 500
+	start := time.Now()
+	pastDeadline := time.Duration(p.TimeoutMS)*time.Millisecond + 300*time.Millisecond
+	var atLeave time.Duration
+	a.leaveHook = func() {
+		atLeave = time.Since(start)
+		time.Sleep(pastDeadline - atLeave)
+	}
+
+	result := spawnWithin(t, o, p, 10*time.Second)
+	if atLeave >= time.Duration(p.TimeoutMS)*time.Millisecond {
+		t.Fatalf("the Leave began %v after the spawn started, past its %d ms deadline: the HELLO did not fail inside it", atLeave, p.TimeoutMS)
+	}
+	if result.Outcome != SpawnOutcomeFailed || !strings.Contains(result.Err.Error(), "spawn step agmsg_announce failed") {
+		t.Fatalf("expected the spawn to fail at agmsg_announce, got %+v", result)
+	}
+	if strings.Contains(result.Err.Error(), "--timeout-ms") {
+		t.Fatalf("expected no --timeout-ms hint for a HELLO that failed inside the deadline, got %v", result.Err)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected spawn_failed last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "compensation=ctrl_c=ok pane=closed", "leave=ok")
+}
+
 // --- plan 2026-10-22-seat-spawn-close: a stale seat's pane (AC4, AC10) ----
 
 // putSeatPaneInHerdr makes h know paneID as orgID/seatID's pane, as

@@ -366,7 +366,11 @@ type SpawnParams struct {
 	// seat's role prompt template as {{SCOPE}} and (2) recorded on the
 	// `spawned` manifest event's Details as "scope=<value>" so it is at
 	// least auditable after the fact.
-	Scope     string
+	Scope string
+	// TimeoutMS is the deadline, in milliseconds, of the whole spawn, which
+	// every herdr and agmsg step shares (defaultSpawnTimeoutMS when <= 0).
+	// The compensation after a failed step runs on driverCallTimeout instead
+	// (see failStepWithNote).
 	TimeoutMS int
 	DryRun    bool
 	// AllowUnscoped bypasses the minimum control gate (AC-2b) that would
@@ -956,12 +960,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 	workspaceID, err := o.resolveWorkspace(ctx, p, events)
 	if err != nil {
-		return o.failStep(p, "workspace_create", err, "")
+		return o.failStep(p, "workspace_create", err, ctx.Err(), "")
 	}
 
 	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID)
 	if err != nil {
-		return o.failStep(p, "tab_create", err, "")
+		return o.failStep(p, "tab_create", err, ctx.Err(), "")
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -988,7 +992,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
-		return o.failStep(p, "agent_start", err, paneID)
+		return o.failStep(p, "agent_start", err, nil, paneID)
 	}
 	if ok {
 		if p.Prompt != "" {
@@ -1036,10 +1040,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			var perr error
 			promptPath, perr = o.promptFilePath(p.OrgID, p.SeatID)
 			if perr != nil {
-				return o.failStep(p, "prompt_file", perr, paneID)
+				return o.failStep(p, "prompt_file", perr, nil, paneID)
 			}
 			if err := writePromptFile(promptPath, initialPrompt); err != nil {
-				return o.failStep(p, "prompt_file", err, paneID)
+				return o.failStep(p, "prompt_file", err, nil, paneID)
 			}
 			agentArgs = append(agentArgs, PromptFilePointer(promptPath))
 			agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
@@ -1053,7 +1057,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// success path below) -- agentStartWithRetry already computed it, so
 		// this is a cheap addition that answers "how many attempts were made
 		// before this gave up" for a failed spawn, not only a successful one.
-		return o.failStepWithNote(p, "agent_start", err, paneID, "", fmt.Sprintf("agent_start_retries=%d", retries))
+		return o.failStepWithNote(p, "agent_start", err, ctx.Err(), paneID, "", fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
 		// This must stay the LAST thing appended to agentStartedDetails:
@@ -1099,7 +1103,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	if err := o.Agmsg.Join(ctx, team, p.SeatID, agmsgTypeForDriver(p.Driver), p.Cwd); err != nil {
-		return o.failStep(p, "agmsg_join", err, paneID)
+		return o.failStep(p, "agmsg_join", err, ctx.Err(), paneID)
 	}
 	joinedDetails := "agmsg_joined"
 	if leaderSelfSpawn {
@@ -1128,8 +1132,11 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// 2026-10-22-seat-spawn-close, D4), each under its own
 			// driverCallTimeout deadline: a HELLO that timed out may still
 			// have reached the leader, and the pane is closed all the same.
+			// The spawn's ctx is read before the Leave, which may outlast
+			// what was left of the deadline (see failStepWithNote).
+			deadlineErr := ctx.Err()
 			leaveNote := o.compensateLeave(team, p.SeatID)
-			return o.failStepWithNote(p, "agmsg_announce", err, paneID, team, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
+			return o.failStepWithNote(p, "agmsg_announce", err, deadlineErr, paneID, team, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
 		}
 		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -2230,7 +2237,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
-		return o.failStep(p, "agent_start", err, "")
+		return o.failStep(p, "agent_start", err, nil, "")
 	}
 	if ok {
 		if p.Prompt != "" {
@@ -2242,7 +2249,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	if initialPrompt != "" && needsPromptFile(initialPrompt) {
 		promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID)
 		if perr != nil {
-			return o.failStep(p, "prompt_file", perr, "")
+			return o.failStep(p, "prompt_file", perr, nil, "")
 		}
 		agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
 	}
@@ -2369,8 +2376,8 @@ func openOrgWorkspaces(events []ManifestEvent, orgID string) []string {
 // preserved on the event so the pane stays traceable from the manifest
 // alone (AC-10). A pane that could not be closed records
 // spawn_close_failed instead (see failStepWithNote).
-func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) SpawnResult {
-	return o.failStepWithNote(p, step, cause, paneID, "", "")
+func (o *Org) failStep(p SpawnParams, step string, cause, deadlineErr error, paneID string) SpawnResult {
+	return o.failStepWithNote(p, step, cause, deadlineErr, paneID, "", "")
 }
 
 // failStepWithNote is failStep plus an extra free-text note appended to
@@ -2405,6 +2412,22 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 // --org-id <o> --seat <s>`. A failed append of spawn_close_failed is joined
 // to that error.
 //
+// deadlineErr is the spawn ctx's Err(), read by the caller as soon as the
+// step returned, before any compensation (the agmsg_announce Leave
+// included) can use up what was left of the deadline; it is nil for a step
+// that makes no driver call (rendering the role prompt, writing the prompt
+// file) and in a dry run. When it is context.DeadlineExceeded, the step
+// failed because the spawn's one deadline (p.TimeoutMS, which every herdr
+// and agmsg step shares) ran out, and the returned error, in both cases
+// above, carries spawnDeadlineHint right after the step's cause; Details do
+// not. The spawn's ctx is read rather than errors.Is on cause, since a
+// deadline can end a step whose error does not wrap DeadlineExceeded:
+// agentStartWithRetry returns the last agent_pane_busy error when the
+// deadline ends its wait between attempts. herdr's own agent start
+// --timeout (also p.TimeoutMS) needs no separate check: it starts counting
+// after workspace_create and tab_create, so the spawn's ctx kills the herdr
+// call first.
+//
 // DryRun: p.DryRun on the appended event mirrors p.DryRun exactly: it is
 // always false for every real-Spawn caller (failStep/failStepWithNote are
 // only reachable from the non-dry-run branch of Spawn itself, after the
@@ -2412,15 +2435,19 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 // so a dry-run failure is correctly excluded from ActiveSeatCount/roster
 // like every other dry-run event, instead of fabricating a real seat's
 // spawn_failed state.
-func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, team, note string) SpawnResult {
+func (o *Org) failStepWithNote(p SpawnParams, step string, cause, deadlineErr error, paneID, team, note string) SpawnResult {
+	hint := ""
+	if errors.Is(deadlineErr, context.DeadlineExceeded) {
+		hint = spawnDeadlineHint(p.TimeoutMS)
+	}
 	compensation, closeErr := o.closeSpawnPane(paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)
 	if note != "" {
 		details += " " + note
 	}
 	if closeErr != nil {
-		err := fmt.Errorf("org: spawn step %s failed: %w; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or ralph org stop --org-id %s --seat %s",
-			step, cause, paneID, closeErr, paneID, p.OrgID, p.SeatID)
+		err := fmt.Errorf("org: spawn step %s failed: %w%s; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or ralph org stop --org-id %s --seat %s",
+			step, cause, hint, paneID, closeErr, paneID, p.OrgID, p.SeatID)
 		if appendErr := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
 			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
@@ -2435,7 +2462,15 @@ func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, 
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
 		PaneID: paneID, DryRun: p.DryRun, Details: details,
 	})
-	return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn step %s failed: %w", step, cause)}
+	return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn step %s failed: %w%s", step, cause, hint)}
+}
+
+// spawnDeadlineHint is what failStepWithNote adds to a spawn's error, right
+// after the step's cause, when the step failed because the spawn's deadline
+// ran out. timeoutMS is p.TimeoutMS after Spawn defaulted it, so the hint
+// names the value the spawn ran with.
+func spawnDeadlineHint(timeoutMS int) string {
+	return fmt.Sprintf(" (the spawn's --timeout-ms deadline of %d ms, shared by every herdr and agmsg step, ran out; retry with a larger --timeout-ms)", timeoutMS)
 }
 
 // compensateLeave sends a best-effort agmsg Leave for agentID from team,
