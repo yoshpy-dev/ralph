@@ -118,6 +118,15 @@ bypass, but accepts only TYPE `QUESTION`, `BLOCKED`, and `RESULT` (`BLOCKED`
 and `RESULT` need a TASK_ID: the org_id for an item about the whole org). A
 message that fails is refused with exit 1 and nothing is written.
 
+The cross-org watch (`ralph org watch --all`) also writes items to the org
+inbox, without going through `ralph org escalate`: when a leader does not act
+on a seat's `ALERT` within `[org].deadman_minutes`, or the `ALERT` is about
+the leader itself, the watch records one item of TYPE `ALERT`. Its body is a
+typed message ralph builds, with the headers `ORG_ID`, `SEAT`, `CONDITION`,
+`REASON`, `ALERT_ID`, and `ALERT_TS`. `ralph org escalate` refuses `ALERT`,
+so only the watch writes such items. They reach a person by the same rules
+as a leader's items, and their body is data like every other item's.
+
 ## Security note
 
 A message's `TO`/`FROM` identity and its body content are both untrusted

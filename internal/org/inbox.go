@@ -19,9 +19,11 @@ import (
 )
 
 // The inbox is where a leader raises an item for the director (FR-5 of
-// docs/specs/2026-10-07-org-multi-org-director.md): inbox.jsonl in the
-// shared org state dir, next to the manifest. It is append-only; an item's
-// state is folded from its events (open -> acked -> resolved). Writes take
+// docs/specs/2026-10-07-org-multi-org-director.md), and where the cross-org
+// watch records each of its escalations as a TYPE ALERT item (plan
+// 2026-10-23-watch-escalation-inbox, D2): inbox.jsonl in the shared org
+// state dir, next to the manifest. It is append-only; an item's state is
+// folded from its events (open -> acked -> resolved). Writes take
 // inbox.lock, a lock separate from the manifest's: no inbox write touches
 // the manifest, so no path holds both locks.
 
@@ -93,9 +95,12 @@ var inboxRawIDPattern = regexp.MustCompile(`"id"\s*:\s*"e([0-9]+)`)
 
 // InboxEvent is one line of inbox.jsonl. Every line carries ts, id, and
 // event; the other fields belong to one kind each. escalated carries
-// org_id, type, task_id (when the message has one), body, and delivery
+// org_id, type, task_id (when the message has one), body, delivery
 // (written as one of the InboxDelivery* constants; lines written before
-// stage 8a have none); notified carries reason and osascript (the result of
+// stage 8a have none), and alert_id (only on a TYPE ALERT item the cross-org
+// watch records for one of its escalations: the alert_id of the watch's
+// ALERT, plan 2026-10-23-watch-escalation-inbox, D4; lines written before
+// that plan have none); notified carries reason and osascript (the result of
 // the macOS notification, e.g. "ok", "failed: ...", "skipped"); woken
 // carries director_id (the d<N> of the director registration that was woken)
 // and via (one of the InboxWokenVia* constants); resolved carries note;
@@ -109,6 +114,7 @@ type InboxEvent struct {
 	TaskID     string `json:"task_id,omitempty"`
 	Body       string `json:"body,omitempty"`
 	Delivery   string `json:"delivery,omitempty"`
+	AlertID    string `json:"alert_id,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	Osascript  string `json:"osascript,omitempty"`
 	Note       string `json:"note,omitempty"`
@@ -118,16 +124,19 @@ type InboxEvent struct {
 
 // InboxEscalation is what Escalate records: the org that raised the item,
 // the message's TYPE and TASK_ID (empty when it has none), the whole
-// message text as Body, and how the caller delivers the item as Delivery
-// (one of the InboxDelivery* constants; empty means InboxDeliveryNow).
-// Escalate does not check the message against internal/org/protocol; its
-// caller does.
+// message text as Body, how the caller delivers the item as Delivery (one
+// of the InboxDelivery* constants; empty means InboxDeliveryNow), and, for
+// an item the cross-org watch records for one of its ALERTs, that ALERT's
+// alert_id as AlertID (empty otherwise; plan
+// 2026-10-23-watch-escalation-inbox, D4). Escalate does not check the
+// message against internal/org/protocol; its caller does.
 type InboxEscalation struct {
 	OrgID    string
 	Type     string
 	TaskID   string
 	Body     string
 	Delivery string
+	AlertID  string
 }
 
 // InboxItem is one item folded from its events. Events holds the events
@@ -135,16 +144,19 @@ type InboxEscalation struct {
 // Delivery is its escalated event's delivery when that is one of the
 // InboxDelivery* constants, and InboxDeliveryNow otherwise (none, or a
 // hand-edited value), so it is always one of the two; Events keep the
-// escalated event as written. NotifiedAt is the time of the latest notified
-// event. Woken is set once the director was woken for the item (a woken
-// event, plan 2026-10-18-org-director-wake, D10), and WokenAt is the time of
-// the latest woken event; neither changes the state, and the inbox
-// deadlines (InboxDeadlineDue) do not read them.
+// escalated event as written. AlertID is its escalated event's alert_id,
+// "" when the event has none (every item but the cross-org watch's ALERT
+// items, plan 2026-10-23-watch-escalation-inbox, D4). NotifiedAt is the time
+// of the latest notified event. Woken is set once the director was woken for
+// the item (a woken event, plan 2026-10-18-org-director-wake, D10), and
+// WokenAt is the time of the latest woken event; neither changes the state,
+// and the inbox deadlines (InboxDeadlineDue) do not read them.
 type InboxItem struct {
 	ID          string       `json:"id"`
 	OrgID       string       `json:"org_id"`
 	Type        string       `json:"type"`
 	TaskID      string       `json:"task_id,omitempty"`
+	AlertID     string       `json:"alert_id,omitempty"`
 	Body        string       `json:"body"`
 	Delivery    string       `json:"delivery"`
 	State       string       `json:"state"`
@@ -234,9 +246,10 @@ func (s *InboxStore) Read() (InboxReadResult, error) {
 // Escalate records a new item: under the inbox lock it allocates the next
 // ID (one more than the largest e<N> anywhere in the file, damaged lines
 // included) and appends the escalated event, with in.Delivery as its
-// delivery (InboxDeliveryNow when in.Delivery is empty). A delivery that is
-// not one of the InboxDelivery* constants is refused before anything is
-// read. It returns the new ID.
+// delivery (InboxDeliveryNow when in.Delivery is empty) and in.AlertID as
+// its alert_id (none when empty). A delivery that is not one of the
+// InboxDelivery* constants is refused before anything is read. It returns
+// the new ID.
 func (s *InboxStore) Escalate(in InboxEscalation) (string, error) {
 	for _, field := range []struct{ name, value string }{{"org_id", in.OrgID}, {"type", in.Type}, {"body", in.Body}} {
 		if strings.TrimSpace(field.value) == "" {
@@ -263,7 +276,7 @@ func (s *InboxStore) Escalate(in InboxEscalation) (string, error) {
 		}
 		ev := InboxEvent{
 			TS: s.now(), ID: next, Event: InboxEventEscalated,
-			OrgID: in.OrgID, Type: in.Type, TaskID: in.TaskID, Body: in.Body, Delivery: delivery,
+			OrgID: in.OrgID, Type: in.Type, TaskID: in.TaskID, Body: in.Body, Delivery: delivery, AlertID: in.AlertID,
 		}
 		if err := s.appendLocked(raw, ev); err != nil {
 			return err
@@ -558,8 +571,11 @@ func (f *inboxFold) apply(ev InboxEvent) {
 		if delivery != InboxDeliveryDeadline {
 			delivery = InboxDeliveryNow
 		}
+		// Only the escalated event names the item's alert_id; a line
+		// without one (every line before plan
+		// 2026-10-23-watch-escalation-inbox) folds with "".
 		f.items[ev.ID] = &InboxItem{
-			ID: ev.ID, OrgID: ev.OrgID, Type: ev.Type, TaskID: ev.TaskID, Body: ev.Body, Delivery: delivery,
+			ID: ev.ID, OrgID: ev.OrgID, Type: ev.Type, TaskID: ev.TaskID, AlertID: ev.AlertID, Body: ev.Body, Delivery: delivery,
 			State: InboxStateOpen, EscalatedAt: ev.TS, Events: []InboxEvent{ev},
 		}
 		return

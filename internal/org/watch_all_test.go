@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/driver"
+	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
 // lockedBuffer is a bytes.Buffer safe to write from the watch loop's
@@ -2196,5 +2198,417 @@ func TestRunWatchAll_ALaunchedThatLandsDuringTheCheckIsNotMarkedStartEnded(t *te
 	}
 	if log := h.log(); !slices.Equal(log, []string{"agent_get " + DirectorAgentName(directorTestToken)}) {
 		t.Fatalf("herdr calls = %q; want the second try's agent get only", log)
+	}
+}
+
+// --- plan 2026-10-23-watch-escalation-inbox: the escalations of a run -----
+
+// spawnFailingLeader spawns orgID's leader as a seat whose herdr agent get
+// keeps failing, so the first cycle raises a liveness ALERT about the leader
+// and escalates it at once (leader_is_anomaly_subject).
+func (f *watchAllFixture) spawnFailingLeader(t *testing.T, orgID string) {
+	t.Helper()
+	if r := f.o.Spawn(watchSpawnParams(orgID, LeaderIdentity, LeaderIdentity)); r.Outcome != SpawnOutcomeSpawned {
+		t.Fatalf("spawn the leader of %s failed: %+v", orgID, r)
+	}
+	f.h.AgentGetErrSeq[herdrAgentName(orgID, LeaderIdentity)] = []error{errors.New("herdr: agent not found")}
+}
+
+// alertItems returns the TYPE ALERT items of f's inbox, in ID order.
+func (f *watchAllFixture) alertItems(t *testing.T) []InboxItem {
+	t.Helper()
+	var out []InboxItem
+	for _, item := range mustReadInbox(t, f.o.Inbox).Items {
+		if item.Type == protocol.TypeAlert {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// D3 and AC3: a `--once` run marks itself once, so it accepts no work and
+// sends its escalation at once even with the director switch on, with
+// inbox_no_watch: no one would check the ack deadline of an item it left to
+// the director.
+func TestRunWatchAll_AOnceRunSendsItsEscalationAtOnceWithTheDirectorOn(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.spawnFailingLeader(t, "org-a")
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	items := f.alertItems(t)
+	if len(items) != 1 || items[0].Delivery != InboxDeliveryNow || !items[0].Notified {
+		t.Fatalf("ALERT items = %+v; want one sent at once", items)
+	}
+	if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonNoWatch}; !slices.Equal(got, want) {
+		t.Errorf("escalations.jsonl = %v; want %v", got, want)
+	}
+	if got := f.notifications(); !slices.Equal(got, []string{"org org-a raised e1 (ALERT)"}) {
+		t.Errorf("desktop notifications = %q; want the one of e1", got)
+	}
+}
+
+// AC2 and D6: a long-running watch with the director switch on leaves its
+// escalation to the director: the cycle that records the item writes no
+// escalations.jsonl line and sends no notification. An item still open
+// past the ack deadline is sent in the next cycle with inbox_ack_deadline;
+// one the director acked and did not resolve is not sent at the ack
+// deadline but in the cycle past the resolve deadline, with
+// inbox_resolve_deadline. The line of that send carries the alert_id and
+// the leader as subject.
+func TestRunWatchAll_ALongRunningWatchLeavesItsEscalationToTheDirectorUntilADeadline(t *testing.T) {
+	cases := []struct {
+		name string
+		ack  bool
+		want string
+	}{
+		{"open past the ack deadline", false, InboxReasonAckDeadline},
+		{"acked, past the resolve deadline", true, InboxReasonResolveDeadline},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			f.o.Config.Director.Enabled = true
+			f.spawnFailingLeader(t, "org-a")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			lastCycle := 2
+			if tc.ack {
+				lastCycle = 3
+			}
+			var recorded []InboxItem
+			var afterFirst, atAckDeadline []string
+			var notifiedAfterFirst int
+			hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+				switch {
+				case n == 1:
+					recorded = f.alertItems(t)
+					afterFirst = escalationReasons(t, f.o.EscalationsPath)
+					notifiedAfterFirst = len(f.notifications())
+					if tc.ack {
+						if _, err := f.o.Inbox.Ack("e1"); err != nil {
+							t.Fatalf("ack e1: %v", err)
+						}
+					}
+					f.clk.Advance(11 * time.Minute)
+				case n == 2 && tc.ack:
+					atAckDeadline = escalationReasons(t, f.o.EscalationsPath)
+					f.clk.Advance(50 * time.Minute)
+				}
+				if n == lastCycle {
+					cancel()
+				}
+			}}
+			// A git status that does not change, so the leader's worktree raises
+			// no scope_change ALERT, and so no second item, from cycle 2 on.
+			p := f.params(0)
+			p.GitStatus = func(string) (string, error) { return "", nil }
+			if err := runWatchAll(t, f.o, ctx, p, hooks); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			if items := f.alertItems(t); len(items) != 1 {
+				t.Fatalf("ALERT items at the end = %+v; want only e1", items)
+			}
+			if len(recorded) != 1 || recorded[0].ID != "e1" || recorded[0].Delivery != InboxDeliveryDeadline || recorded[0].Notified ||
+				!strings.HasPrefix(recorded[0].AlertID, conditionKey("org-a", LeaderIdentity, condLiveness)+"@") {
+				t.Fatalf("ALERT items after the first cycle = %+v; want e1 left to the director with the leader's alert_id", recorded)
+			}
+			if len(afterFirst) != 0 || notifiedAfterFirst != 0 {
+				t.Errorf("after the first cycle: escalations %v, %d notifications; want none", afterFirst, notifiedAfterFirst)
+			}
+			if !strings.Contains(f.stderr.String(), "item=e1 -- left in "+f.o.Inbox.Path()+" for the director") {
+				t.Errorf("stderr = %q; want the line saying e1 was left to the director", f.stderr.String())
+			}
+			if tc.ack && len(atAckDeadline) != 0 {
+				t.Errorf("escalations.jsonl past the ack deadline of an acked item = %v; want none", atAckDeadline)
+			}
+			lines := escalationLines(t, f.o.EscalationsPath)
+			if got := escalationReasons(t, f.o.EscalationsPath); !slices.Equal(got, []string{"e1 " + tc.want}) ||
+				lines[0]["alert_id"] != recorded[0].AlertID || lines[0]["subject"] != LeaderIdentity {
+				t.Errorf("escalations.jsonl = %v; want one %s line for e1 with its alert_id and subject leader", lines, tc.want)
+			}
+			if n := len(f.notifications()); n != 1 {
+				t.Errorf("desktop notified %d times; want 1, at the deadline", n)
+			}
+		})
+	}
+}
+
+// D3: a cycle in which a stop request for the run is there does not leave
+// its escalation to the director, whether the request was there at the
+// start or was written during the cycle: the run ends after the cycle, and
+// no watch would check the ack deadline until the next one starts.
+func TestRunWatchAll_ACycleWithAStopRequestSendsItsEscalationAtOnce(t *testing.T) {
+	for _, duringTheCycle := range []bool{false, true} {
+		name := "a stop request there at the start"
+		if duringTheCycle {
+			name = "a stop request written during the cycle"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			f.o.Config.Director.Enabled = true
+			f.spawnFailingLeader(t, "org-a")
+			writeStop := func() {
+				if err := WriteWatchStopRequest(f.dir, f.clk.Now().Add(time.Second)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if duringTheCycle {
+				written := false
+				f.o.Herdr = &beforeAgentGetHerdr{fakeWatchHerdr: f.h, before: func() {
+					if !written {
+						written = true
+						writeStop()
+					}
+				}}
+			} else {
+				writeStop()
+			}
+			var cycles int
+			if err := runWatchAll(t, f.o, context.Background(), f.params(0), WatchHooks{OnCycle: func(n int, _ time.Time) { cycles = n }}); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			if cycles != 1 {
+				t.Fatalf("ran %d cycles; want the run to end after the first", cycles)
+			}
+			items := f.alertItems(t)
+			if len(items) != 1 || items[0].Delivery != InboxDeliveryNow || !items[0].Notified {
+				t.Fatalf("ALERT items = %+v; want one sent at once", items)
+			}
+			if got, want := escalationReasons(t, f.o.EscalationsPath), []string{"e1 " + InboxReasonNoWatch}; !slices.Equal(got, want) {
+				t.Errorf("escalations.jsonl = %v; want %v", got, want)
+			}
+		})
+	}
+}
+
+// AC4 and D4: a watch recorded an ALERT item and ended before it sent the
+// item or saved its status file, so the inbox holds an open, unnotified
+// item with the alert_id and the status file still holds that alert
+// pending. A `--once` run escalates the alert again: it cannot leave the
+// item to the director, so it sends that item under its own ID, whether it
+// was recorded to be sent at once or left to the director, writes no second
+// item, and the alert leaves the pending alerts of the saved status file.
+func TestRunWatchAll_AOnceRunSendsTheUnnotifiedAlertItemOfAPendingAlertUnderItsOwnID(t *testing.T) {
+	for _, delivery := range []string{InboxDeliveryNow, InboxDeliveryDeadline} {
+		t.Run("recorded with delivery "+delivery, func(t *testing.T) {
+			f := newWatchAllFixture(t)
+			f.o.Config.Director.Enabled = true
+			f.spawn(t, "org-a", "seat-1")
+			status, alertID := pendingLeaderAlert(f.clk)
+			if err := status.save(filepath.Join(f.dir, WatchStatusFileName("org-a"))); err != nil {
+				t.Fatal(err)
+			}
+			id := escalateAlertItem(t, f.o.Inbox, alertID, delivery)
+
+			if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+				t.Fatalf("RunWatchAll: %v", err)
+			}
+			inbox := mustReadInbox(t, f.o.Inbox)
+			if ids := inboxItemIDs(inbox); !slices.Equal(ids, []string{id}) {
+				t.Fatalf("inbox items = %v; want only %s", ids, id)
+			}
+			if item := inboxItemByID(t, inbox, id); !item.Notified {
+				t.Errorf("%s = %+v; want it notified", id, item)
+			}
+			lines := escalationLines(t, f.o.EscalationsPath)
+			if got, want := escalationReasons(t, f.o.EscalationsPath), []string{id + " " + InboxReasonNoWatch}; !slices.Equal(got, want) || lines[0]["alert_id"] != alertID {
+				t.Errorf("escalations.jsonl = %v; want one %s line for %s with alert_id %s", lines, InboxReasonNoWatch, id, alertID)
+			}
+			if n := len(f.notifications()); n != 1 {
+				t.Errorf("desktop notified %d times; want 1", n)
+			}
+			saved := readWatchStatusFile(t, f.dir, "org-a")
+			if _, pending := saved.PendingAlerts[alertID]; pending || !saved.Escalated[alertID] {
+				t.Errorf("saved status: pending %v, escalated %v; want %s escalated and no longer pending", saved.PendingAlerts, saved.Escalated, alertID)
+			}
+		})
+	}
+}
+
+// Two orgs whose leaders fail in the same cycle get one ALERT item each,
+// with their own alert_ids, escalations.jsonl lines, and notifications.
+func TestRunWatchAll_TwoOrgsEscalatingInOneCycleGetOneAlertItemEach(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.spawnFailingLeader(t, "org-a")
+	f.spawnFailingLeader(t, "org-b")
+	if err := runWatchAll(t, f.o, context.Background(), f.params(1), WatchHooks{}); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	items := f.alertItems(t)
+	if len(items) != 2 {
+		t.Fatalf("ALERT items = %+v; want two", items)
+	}
+	byOrg := map[string]InboxItem{}
+	for _, item := range items {
+		byOrg[item.OrgID] = item
+	}
+	lineAlerts := map[string]any{}
+	for _, line := range escalationLines(t, f.o.EscalationsPath) {
+		id, _ := line["inbox_id"].(string)
+		lineAlerts[id] = line["alert_id"]
+	}
+	for _, orgID := range []string{"org-a", "org-b"} {
+		item, ok := byOrg[orgID]
+		if !ok || !item.Notified || !strings.HasPrefix(item.AlertID, conditionKey(orgID, LeaderIdentity, condLiveness)+"@") {
+			t.Errorf("ALERT item of %s = %+v; want one sent with the alert_id of its leader's ALERT", orgID, item)
+			continue
+		}
+		if lineAlerts[item.ID] != item.AlertID {
+			t.Errorf("escalations.jsonl line of %s has alert_id %v; want %s", item.ID, lineAlerts[item.ID], item.AlertID)
+		}
+	}
+	if len(lineAlerts) != 2 || len(f.notifications()) != 2 {
+		t.Errorf("escalations.jsonl lines %v, %d notifications; want two of each", lineAlerts, len(f.notifications()))
+	}
+}
+
+// AC2 for a seat's ALERT: a long-running watch with the director switch on
+// leaves the deadman escalation of a seat's ALERT to the director as it
+// does one about the leader. The cycle that raises the ALERT records
+// nothing; the cycle past the deadman timeout records the item with
+// delivery deadline and reason deadman_timeout, with no escalations.jsonl
+// line and no notification; the cycle past the item's ack deadline sends it
+// with inbox_ack_deadline, on a line that names the seat as its subject.
+func TestRunWatchAll_ALongRunningWatchLeavesASeatsDeadmanEscalationToTheDirectorUntilTheAckDeadline(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.spawn(t, "org-a", "seat-1")
+	f.h.AgentGetErrSeq[herdrAgentName("org-a", "seat-1")] = []error{errors.New("herdr: agent not found")}
+	alertTS := f.clk.Now().UTC().Format(time.RFC3339)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var afterAlert, recorded []InboxItem
+	var linesAtRecord []string
+	var notifiedAtRecord int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		switch n {
+		case 1:
+			afterAlert = f.alertItems(t)
+			f.clk.Advance(time.Duration(f.o.Config.DeadmanMinutes+1) * time.Minute)
+		case 2:
+			recorded = f.alertItems(t)
+			linesAtRecord = escalationReasons(t, f.o.EscalationsPath)
+			notifiedAtRecord = len(f.notifications())
+			f.clk.Advance(time.Duration(f.o.Config.Director.AckMinutes+1) * time.Minute)
+		default:
+			cancel()
+		}
+	}}
+	// A git status that does not change, so the seat's worktree raises no
+	// scope_change ALERT from cycle 2 on.
+	p := f.params(0)
+	p.GitStatus = func(string) (string, error) { return "", nil }
+	if err := runWatchAll(t, f.o, ctx, p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	if len(afterAlert) != 0 {
+		t.Fatalf("ALERT items after the cycle that raised the ALERT = %+v; want none before the deadman timeout", afterAlert)
+	}
+	if len(recorded) != 1 || recorded[0].ID != "e1" || recorded[0].Delivery != InboxDeliveryDeadline || recorded[0].Notified ||
+		!strings.HasPrefix(recorded[0].AlertID, conditionKey("org-a", "seat-1", condLiveness)+"@") {
+		t.Fatalf("ALERT items after the deadman timeout = %+v; want e1 left to the director with the alert_id of seat-1's liveness ALERT", recorded)
+	}
+	assertAlertItemBody(t, recorded[0].Body, map[string]string{
+		"ORG_ID": "org-a", "SEAT": "seat-1", "CONDITION": condLiveness, "REASON": "deadman_timeout",
+		"ALERT_ID": recorded[0].AlertID, "ALERT_TS": alertTS,
+	})
+	if len(linesAtRecord) != 0 || notifiedAtRecord != 0 {
+		t.Errorf("after the deadman timeout: escalations %v, %d notifications; want none", linesAtRecord, notifiedAtRecord)
+	}
+	if line := "WATCHDOG ESCALATION: org=org-a alert=" + recorded[0].AlertID + " subject=seat-1 reason=deadman_timeout item=e1 -- left in " +
+		f.o.Inbox.Path() + " for the director"; !strings.Contains(f.stderr.String(), line) {
+		t.Errorf("stderr = %q; want %q", f.stderr.String(), line)
+	}
+	if items := f.alertItems(t); len(items) != 1 || !items[0].Notified || items[0].Events[len(items[0].Events)-1].Reason != InboxReasonAckDeadline {
+		t.Fatalf("ALERT items at the end = %+v; want only e1, notified at its ack deadline", items)
+	}
+	want := map[string]any{"ts": f.clk.Now().UTC().Format(time.RFC3339), "org_id": "org-a", "inbox_id": "e1", "alert_id": recorded[0].AlertID,
+		"subject": "seat-1", "reason": InboxReasonAckDeadline}
+	if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
+		t.Errorf("escalations.jsonl = %v; want exactly one line %v", lines, want)
+	}
+	if got := f.notifications(); !slices.Equal(got, []string{"org org-a: e1 (ALERT) not acked within 10 min"}) {
+		t.Errorf("desktop notifications = %q; want the one of e1 at its ack deadline", got)
+	}
+}
+
+// AC2 with two orgs: the leaders of two orgs fail in the same cycle of a
+// long-running watch with the director switch on. Each org gets its own
+// ALERT item, both recorded with delivery deadline and neither sent, and
+// the cycle past their ack deadline sends each of them once with
+// inbox_ack_deadline, on its own escalations.jsonl line with its own
+// alert_id, and with its own desktop notification.
+func TestRunWatchAll_TwoOrgsEscalatingInOneCycleAreEachLeftToTheDirectorUntilTheirAckDeadline(t *testing.T) {
+	f := newWatchAllFixture(t)
+	f.o.Config.Director.Enabled = true
+	f.spawnFailingLeader(t, "org-a")
+	f.spawnFailingLeader(t, "org-b")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var recorded []InboxItem
+	var linesAtRecord []string
+	var notifiedAtRecord int
+	hooks := WatchHooks{OnCycle: func(n int, _ time.Time) {
+		if n == 1 {
+			recorded = f.alertItems(t)
+			linesAtRecord = escalationReasons(t, f.o.EscalationsPath)
+			notifiedAtRecord = len(f.notifications())
+			f.clk.Advance(time.Duration(f.o.Config.Director.AckMinutes+1) * time.Minute)
+			return
+		}
+		cancel()
+	}}
+	// A git status that does not change, so the leaders' worktrees raise no
+	// scope_change ALERT, and so no third item, from cycle 2 on.
+	p := f.params(0)
+	p.GitStatus = func(string) (string, error) { return "", nil }
+	if err := runWatchAll(t, f.o, ctx, p, hooks); err != nil {
+		t.Fatalf("RunWatchAll: %v", err)
+	}
+	recordedByOrg := map[string]InboxItem{}
+	for _, item := range recorded {
+		recordedByOrg[item.OrgID] = item
+	}
+	if len(recorded) != 2 || len(recordedByOrg) != 2 {
+		t.Fatalf("ALERT items after the first cycle = %+v; want one of each org", recorded)
+	}
+	if len(linesAtRecord) != 0 || notifiedAtRecord != 0 {
+		t.Errorf("after the first cycle: escalations %v, %d notifications; want none", linesAtRecord, notifiedAtRecord)
+	}
+	if n := strings.Count(f.stderr.String(), " -- left in "+f.o.Inbox.Path()+" for the director; "); n != 2 {
+		t.Errorf("stderr = %q; want two lines saying an item was left to the director", f.stderr.String())
+	}
+	items := f.alertItems(t)
+	if len(items) != 2 {
+		t.Fatalf("ALERT items at the end = %+v; want the two of the first cycle", items)
+	}
+	lines := map[string]map[string]any{}
+	for _, line := range escalationLines(t, f.o.EscalationsPath) {
+		id, _ := line["inbox_id"].(string)
+		lines[id] = line
+	}
+	var wantNotify []string
+	for _, item := range items {
+		if was := recordedByOrg[item.OrgID]; item.ID != was.ID || was.Delivery != InboxDeliveryDeadline || was.Notified ||
+			!strings.HasPrefix(was.AlertID, conditionKey(item.OrgID, LeaderIdentity, condLiveness)+"@") {
+			t.Errorf("ALERT item of %s after the first cycle = %+v; want it left to the director with the alert_id of its leader's ALERT, and %s at the end", item.OrgID, was, item.ID)
+		}
+		if !item.Notified || item.Events[len(item.Events)-1].Reason != InboxReasonAckDeadline {
+			t.Errorf("ALERT item of %s at the end = %+v; want it notified at its ack deadline", item.OrgID, item)
+		}
+		want := map[string]any{"ts": f.clk.Now().UTC().Format(time.RFC3339), "org_id": item.OrgID, "inbox_id": item.ID, "alert_id": item.AlertID,
+			"subject": LeaderIdentity, "reason": InboxReasonAckDeadline}
+		if !reflect.DeepEqual(lines[item.ID], want) {
+			t.Errorf("escalations.jsonl line of %s = %v; want %v", item.ID, lines[item.ID], want)
+		}
+		wantNotify = append(wantNotify, "org "+item.OrgID+": "+item.ID+" (ALERT) not acked within 10 min")
+	}
+	got := f.notifications()
+	slices.Sort(got)
+	slices.Sort(wantNotify)
+	if len(lines) != 2 || !slices.Equal(got, wantNotify) {
+		t.Errorf("escalations.jsonl lines %v, desktop notifications %q; want one line each and %q", lines, got, wantNotify)
 	}
 }

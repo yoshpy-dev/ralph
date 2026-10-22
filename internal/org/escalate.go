@@ -36,6 +36,14 @@ import (
 // TASK_ID; protocol.Validate enforces that.
 var escalateTypes = []string{protocol.TypeQuestion, protocol.TypeBlocked, protocol.TypeResult}
 
+// inboxItemTypes are the TYPEs an inbox item is written with: escalateTypes
+// from a leader's escalate, and ALERT, which only the cross-org watch
+// writes, for each of its escalations (plan
+// 2026-10-23-watch-escalation-inbox, D2). Escalate still refuses ALERT
+// (escalateTypes); this list is what the human path accepts as a TYPE
+// (notifiableType).
+var inboxItemTypes = append(slices.Clone(escalateTypes), protocol.TypeAlert)
+
 // Reasons of the human-path records, written to the escalations.jsonl line
 // and the notified event of a send. Escalate writes
 // InboxReasonDirectorDisabled when Config.Director.Enabled is false and
@@ -62,12 +70,16 @@ const (
 	inboxNotifySkipped = "skipped"
 )
 
-// inboxDesktopNotifyTimeout bounds one desktop notification call: the
-// inbox's, and the watch deadman's (escalateAlert, watch.go).
+// inboxDesktopNotifyTimeout bounds one desktop notification call
+// (notifyBounded): the inbox's, and that of a watch escalation the inbox
+// could not take (escalateWithoutInbox, watch.go).
 const inboxDesktopNotifyTimeout = 10 * time.Second
 
 // Titles of the inbox's desktop notifications on the osascript path, named
-// after the command whose process sends them.
+// after the command whose process sends them, or for an ALERT item after
+// the watch that raised it (plan 2026-10-23-watch-escalation-inbox, AC6):
+// inboxNotifyTitleWatch for a deadline send and for every send of an ALERT
+// item, inboxNotifyTitleEscalate for the other sends.
 const (
 	inboxNotifyTitleEscalate = "ralph org escalate"
 	inboxNotifyTitleWatch    = "ralph org watch"
@@ -85,9 +97,10 @@ const defaultInboxPollInterval = time.Second
 const inboxWaitTimeoutPhrase = "no open inbox item arrived within"
 
 // inboxNotifyInvalid stands for an org_id or a TYPE in the desktop
-// notification that Escalate would have refused, which only a hand-edited
-// inbox.jsonl line can hold: the notification text is built into an
-// AppleScript string, so such a value is not passed on.
+// notification that no inbox writer would have written (an org_id that is
+// not an identifier, a TYPE not in inboxItemTypes), which only a
+// hand-edited inbox.jsonl line can hold: the notification text is built
+// into an AppleScript string, so such a value is not passed on.
 const inboxNotifyInvalid = "<invalid>"
 
 // EscalationsPathIn returns the escalations.jsonl path within an
@@ -198,7 +211,7 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 		res.Deferred = true
 		return res
 	}
-	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, reason, banner); err != nil {
+	if err := o.sendInboxItemToHuman(p.OrgID, id, m.Type, "", reason, banner); err != nil {
 		res.Err = fmt.Errorf("org: escalate: the item is recorded as %s, but the notification was not completed (%w): run `%s` to send it again (not escalate, which records another item)", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 		return res
 	}
@@ -251,7 +264,7 @@ func (o *Org) NotifyInboxItem(id string, banner io.Writer) error {
 	if item.State == InboxStateResolved {
 		return fmt.Errorf("org: inbox notify %s: %w, so nothing is left to notify", id, ErrInboxResolved)
 	}
-	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, InboxReasonManualNotify, bannerOrStderr(banner)); err != nil {
+	if err := o.sendInboxItemToHuman(item.OrgID, id, item.Type, item.AlertID, InboxReasonManualNotify, bannerOrStderr(banner)); err != nil {
 		return fmt.Errorf("org: inbox notify %s: the notification was not completed (%w): run `%s` again", id, err, InboxCommand("notify", id, o.InboxHintStateDir))
 	}
 	return nil
@@ -323,15 +336,36 @@ func (o *Org) openInboxItems() ([]InboxItem, error) {
 }
 
 // escalateDelivery decides how Escalate delivers a new item (the cases in
-// Escalate's doc): InboxDeliveryDeadline with no reason when
-// Config.Director.Enabled is set and EscalateWatch reports a watch that
+// Escalate's doc) with inboxDelivery: InboxDeliveryDeadline with no reason
+// when Config.Director.Enabled is set and EscalateWatch reports a watch that
 // accepts work, and InboxDeliveryNow with the reason of the send at once
-// otherwise. EscalateWatch is called only when Enabled is set.
+// otherwise. EscalateWatch is called only when Enabled is set, and a nil
+// EscalateWatch counts as no watch.
 func (o *Org) escalateDelivery() (delivery, reason string) {
-	if !o.Config.Director.Enabled {
+	var acceptsWork func() bool
+	if o.EscalateWatch != nil {
+		acceptsWork = func() bool { return WatchAcceptsWork(o.EscalateWatch()) }
+	}
+	return inboxDelivery(o.Config.Director.Enabled, acceptsWork)
+}
+
+// inboxDelivery decides how a new inbox item reaches a person, the same way
+// for a leader's escalate (escalateDelivery) and for an escalation of the
+// cross-org watch (plan 2026-10-23-watch-escalation-inbox, D3). enabled is
+// Config.Director.Enabled, and acceptsWork reports whether a cross-org watch
+// that will check the ack deadline accepts work:
+//
+//   - enabled is false: InboxDeliveryNow with InboxReasonDirectorDisabled.
+//     acceptsWork is not called.
+//   - acceptsWork is nil or returns false: no one would check the ack
+//     deadline, so InboxDeliveryNow with InboxReasonNoWatch.
+//   - otherwise: InboxDeliveryDeadline with no reason; the item is left to
+//     the director and to the ack deadline.
+func inboxDelivery(enabled bool, acceptsWork func() bool) (delivery, reason string) {
+	if !enabled {
 		return InboxDeliveryNow, InboxReasonDirectorDisabled
 	}
-	if o.EscalateWatch == nil || !WatchAcceptsWork(o.EscalateWatch()) {
+	if acceptsWork == nil || !acceptsWork() {
 		return InboxDeliveryNow, InboxReasonNoWatch
 	}
 	return InboxDeliveryDeadline, ""
@@ -372,30 +406,42 @@ func validateEscalation(orgID, text string) (protocol.Message, error) {
 }
 
 // sendInboxItemToHuman is the human path shared by Escalate,
-// NotifyInboxItem, and SweepInboxDeadlines (deadline.go): the
-// escalations.jsonl line, the banner, the desktop notification (org, ID,
-// and TYPE only, never the message body), and then the notified event with
-// the notification's result. reason goes on the escalations.jsonl line and
-// the notified event, and picks the banner and the notification text
+// NotifyInboxItem, and SweepInboxDeadlines (deadline.go), and by the
+// cross-org watch's ALERT items (plan 2026-10-23-watch-escalation-inbox):
+// the escalations.jsonl line, the banner, the desktop notification (org,
+// ID, and TYPE only, never the message body), and then the notified event
+// with the notification's result. reason goes on the escalations.jsonl line
+// and the notified event, and picks the banner and the notification text
 // (inboxHumanTextFor). The banner and the notification are best-effort.
 // When the escalations.jsonl line cannot be written, the notified event is
 // not written either, so the item stays unnotified in the inbox and `ralph
 // org inbox notify` can complete it. The item's state never changes.
 //
-// orgID and typ come from inbox.jsonl when NotifyInboxItem or
+// alertID is the item's alert_id (InboxItem.AlertID). When it is "" (a
+// leader's item) the escalations.jsonl line names the leader as its
+// subject, as it always has. When it is set (an ALERT item of the watch),
+// the line carries alert_id and, as its subject, the seat the watch's ALERT
+// was about (alertIDSeat; no subject when alertID does not have the shape
+// sendAlert writes), so the line reads like the watch's own escalation
+// lines.
+//
+// orgID, typ, and alertID come from inbox.jsonl when NotifyInboxItem or
 // SweepInboxDeadlines calls, so a hand-edited line can hold anything there:
 // the banner escapes them with PrintableInboxText, and the desktop
-// notification gets them only when they are values Escalate accepts
-// (inboxNotifyInvalid otherwise). The ID is one the inbox fold accepted
-// (e<N>). The banner's `inbox show` command repeats Org.InboxHintStateDir.
-func (o *Org) sendInboxItemToHuman(orgID, id, typ, reason string, banner io.Writer) error {
+// notification gets orgID and typ only when they are values an inbox
+// writer writes (inboxNotifyInvalid otherwise) and never gets alertID. The
+// ID is one the inbox fold accepted (e<N>). The banner's `inbox show`
+// command repeats Org.InboxHintStateDir.
+func (o *Org) sendInboxItemToHuman(orgID, id, typ, alertID, reason string, banner io.Writer) error {
 	recordErr := errors.New("no escalations.jsonl path is configured")
 	if o.EscalationsPath != "" {
-		recordErr = appendJSONLine(o.EscalationsPath, escalationRecord{
-			TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason,
-		})
+		rec := escalationRecord{TS: o.now(), OrgID: orgID, InboxID: id, Subject: LeaderIdentity, Reason: reason}
+		if alertID != "" {
+			rec.AlertID, rec.Subject = alertID, alertIDSeat(alertID)
+		}
+		recordErr = appendJSONLine(o.EscalationsPath, rec)
 	}
-	text := o.inboxHumanTextFor(orgID, id, typ, reason)
+	text := o.inboxHumanTextFor(orgID, id, typ, alertID, reason)
 	_, _ = fmt.Fprintln(banner, text.banner)
 	osascript := o.inboxDesktopNotify(text.title, text.desktop)
 	if recordErr != nil {
@@ -415,11 +461,29 @@ type inboxHumanText struct {
 
 // inboxHumanTextFor returns the text of a send for reason: the deadline
 // text (inboxDeadlineHumanText) for the two deadline reasons, and the text
-// of an escalated item otherwise. It and inboxDeadlineHumanText take their
-// four strings in sendInboxItemToHuman's order (orgID, id, typ, reason).
-func (o *Org) inboxHumanTextFor(orgID, id, typ, reason string) inboxHumanText {
+// of an escalated item otherwise. For a TYPE ALERT item, the cross-org
+// watch's (plan 2026-10-23-watch-escalation-inbox, AC6), the escalated
+// item's text is the watch's: a banner that starts with WATCHDOG
+// ESCALATION, as the watch's own escalation banner does, and names the
+// alert_id when there is one, under the title inboxNotifyTitleWatch; the
+// desktop text has the same shape as a leader's item. It takes its strings
+// in sendInboxItemToHuman's order (orgID, id, typ, alertID, reason), and
+// inboxDeadlineHumanText the same without alertID.
+func (o *Org) inboxHumanTextFor(orgID, id, typ, alertID, reason string) inboxHumanText {
 	if reason == InboxReasonAckDeadline || reason == InboxReasonResolveDeadline {
 		return o.inboxDeadlineHumanText(orgID, id, typ, reason)
+	}
+	if typ == protocol.TypeAlert {
+		alert := ""
+		if alertID != "" {
+			alert = " alert=" + PrintableInboxText(alertID, false)
+		}
+		return inboxHumanText{
+			banner: fmt.Sprintf("WATCHDOG ESCALATION: org=%s item=%s type=%s%s -- recorded in %s; read it with: %s",
+				PrintableInboxText(orgID, false), id, typ, alert, o.Inbox.Path(), InboxCommand("show", id, o.InboxHintStateDir)),
+			title:   inboxNotifyTitleWatch,
+			desktop: fmt.Sprintf("org %s raised %s (%s)", notifiableOrgID(orgID), id, notifiableType(typ)),
+		}
 	}
 	return inboxHumanText{
 		banner: fmt.Sprintf("ORG ESCALATION: org=%s item=%s type=%s -- recorded in %s; read it with: %s",
@@ -438,13 +502,39 @@ func notifiableOrgID(orgID string) string {
 	return orgID
 }
 
-// notifiableType returns typ when it is one of escalateTypes, and
+// notifiableType returns typ when it is one of inboxItemTypes (ALERT
+// included, plan 2026-10-23-watch-escalation-inbox, AC6), and
 // inboxNotifyInvalid otherwise.
 func notifiableType(typ string) string {
-	if !slices.Contains(escalateTypes, typ) {
+	if !slices.Contains(inboxItemTypes, typ) {
 		return inboxNotifyInvalid
 	}
 	return typ
+}
+
+// alertIDSeat returns the seat part of a watch alert_id, which sendAlert
+// (watch.go) writes as conditionKey(org, seat, condition) + "@" + the
+// ALERT's time in Unix nanoseconds: "<org>/<seat>/<condition>@<n>". It
+// returns "" when alertID does not have that shape (an org and a seat that
+// are identifiers, a non-empty condition, and a decimal n), which only a
+// hand-edited inbox.jsonl line can hold. The seat is the subject of the
+// watch's ALERT, so it also tells why the watch escalated it
+// (escalateAlert): LeaderIdentity means leader_is_anomaly_subject, and any
+// other seat deadman_timeout (plan 2026-10-23-watch-escalation-inbox, AC3).
+// alertIDConditionType (watch.go) reads the condition of the same shape and
+// checks only its separators; a change to the shape changes both.
+func alertIDSeat(alertID string) string {
+	at := strings.LastIndex(alertID, "@")
+	if at < 0 {
+		return ""
+	}
+	nano := alertID[at+1:]
+	parts := strings.Split(alertID[:at], "/")
+	if nano == "" || strings.Trim(nano, "0123456789") != "" || len(parts) != 3 ||
+		ValidateIdentifier("org_id", parts[0]) != nil || ValidateIdentifier("seat_id", parts[1]) != nil || parts[2] == "" {
+		return ""
+	}
+	return parts[1]
 }
 
 // alertUnrecordedEscalation tells the human about an escalate that was not
@@ -463,19 +553,40 @@ func (o *Org) alertUnrecordedEscalation(orgID, typ string, cause error, banner i
 	}
 }
 
-// inboxDesktopNotify sends the desktop notification and returns the result
-// a notified event records: "ok", "failed: <err>", or "skipped" when
-// DesktopNotify is nil off darwin. title is used on the osascript path
-// only; DesktopNotify gets the message alone.
+// inboxDesktopNotify sends the desktop notification with DesktopNotify
+// (notifyBounded) and returns the result a notified event records: "ok",
+// "failed: <err>", or "skipped" when DesktopNotify is nil off darwin. title
+// is used on the osascript path only; DesktopNotify gets the message alone.
 func (o *Org) inboxDesktopNotify(title, message string) string {
-	notify := o.DesktopNotify
+	return notifyBounded(o.DesktopNotify, func(ctx context.Context, message string) error {
+		return osascriptNotify(ctx, title, message)
+	}, message)
+}
+
+// desktopNotifyGOOS is the GOOS notifyBounded reads when it has no notify
+// function: on darwin it notifies with osascript, and elsewhere it sends
+// nothing and returns skipped. It is runtime.GOOS; a test sets another value
+// so that a nil Org.DesktopNotify or WatchAllParams.Escalate never reaches
+// osascript.
+var desktopNotifyGOOS = runtime.GOOS
+
+// notifyBounded sends one desktop notification of message and returns its
+// result with the values of the inbox's notified event: ok, failed: <err>,
+// or skipped. It is the notification of the inbox's human path
+// (inboxDesktopNotify, with Org.DesktopNotify) and of a watch escalation the
+// inbox could not take (notifyWithoutInbox, with WatchAllParams.Escalate,
+// watch.go). It calls notify, or when notify is nil, onDarwin (osascript) on
+// darwin and nothing elsewhere (skipped), by desktopNotifyGOOS. The call gets
+// its own bound, inboxDesktopNotifyTimeout from context.Background(): an
+// osascript that does not return cannot hold the caller, and a SIGINT or
+// SIGTERM that cancels the caller's context does not cut off a notification
+// that is never sent again (self-review L2).
+func notifyBounded(notify, onDarwin EscalateFunc, message string) string {
 	if notify == nil {
-		if runtime.GOOS != "darwin" {
+		if desktopNotifyGOOS != "darwin" {
 			return inboxNotifySkipped
 		}
-		notify = func(ctx context.Context, message string) error {
-			return osascriptNotify(ctx, title, message)
-		}
+		notify = onDarwin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inboxDesktopNotifyTimeout)
 	defer cancel()

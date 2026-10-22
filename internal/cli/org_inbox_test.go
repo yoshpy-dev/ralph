@@ -761,8 +761,18 @@ func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
 			"inbox_director_disabled", "Without --config, enabled is read from the main worktree's ralph.toml",
 			"A main worktree ralph.toml that does not load is handled like a ralph.toml that does not load",
 		}},
-		{[]string{"inbox", "--help"}, []string{"deferred for one escalate left to the director", "A resolved item is yes or no."}},
+		{[]string{"inbox", "--help"}, []string{"deferred for one escalate or the cross-org watch left to the director", "A resolved item is yes or no."}},
 		{[]string{"inbox", "notify", "--help"}, []string{"reason inbox_manual_notify", "(NOTIFIED deferred)"}},
+		// Self-review F2 of plan 2026-10-23-watch-escalation-inbox: the list
+		// and notify say that the watch's ALERT items are there too.
+		{[]string{"inbox", "--help"}, []string{
+			"and the TYPE ALERT items the cross-org watch (`ralph org watch --all`) records for its escalations",
+			"or for an ALERT item the cross-org watch, whose header values come from the watch's status file.",
+		}},
+		{[]string{"inbox", "notify", "--help"}, []string{
+			"or for a TYPE ALERT item whose cross-org watch, did not complete its notification",
+			"for one escalate or the cross-org watch left to the director and the inbox deadlines (NOTIFIED deferred)",
+		}},
 		// The verb list carries each Short.
 		{[]string{"--help"}, []string{"Raise an item in the org inbox for the director or the human"}},
 		{[]string{"inbox", "--help"}, []string{"Send an inbox item to the human now"}},

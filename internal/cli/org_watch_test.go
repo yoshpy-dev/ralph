@@ -1868,3 +1868,30 @@ func TestOrgWatch_HelpDescribesTheDirectorCheck(t *testing.T) {
 		t.Errorf("watch --help does not put the director check between the inbox deadlines and the wake (at %d, %d, %d):\n%s", d, c, w, stdout)
 	}
 }
+
+// The help of watch says that a deadman or leader escalation is recorded as
+// a TYPE ALERT item of the org inbox, which reaches the human like a
+// leader's escalate does (left to the director and the inbox deadlines, or
+// sent at once), and that a watch the inbox cannot take the item from sends
+// it to the human outside the inbox, with the notification's result on the
+// escalations.jsonl line (plan 2026-10-23-watch-escalation-inbox, D6 and
+// the verify report's coverage gap).
+func TestOrgWatch_HelpDescribesTheAlertItemEscalation(t *testing.T) {
+	stdout, _, err := runOrgCmdStreams(t, "watch", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	for _, want := range []string{
+		"When the leader does not respond to an ALERT within [org].deadman_minutes, or the ALERT is about the leader, " +
+			"it records the escalation as a TYPE ALERT item of the org inbox, which reaches the human the way a leader's escalate does",
+		"with [org.director].enabled and a watch that is neither --once nor asked to stop, it is left to the director and the inbox deadlines",
+		"otherwise it is also sent to the human at once (<state-dir>/escalations.jsonl, a stderr banner, and a desktop notification)",
+		"When the inbox cannot take the item, the watch sends the escalation to the human outside the inbox: " +
+			"a stderr banner, a desktop notification, and an escalations.jsonl line that records the notification's result",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("watch --help does not say %q:\n%s", want, stdout)
+		}
+	}
+}

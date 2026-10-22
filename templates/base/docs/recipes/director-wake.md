@@ -50,6 +50,13 @@ line that failed writes no event, so its items are named again in a later
 try. If the watch dies after sending the line and before writing the
 events, the next watch names those items once more.
 
+The watch's own escalations, the `ALERT` items it records for a deadman
+timeout or an ALERT about a leader, are written during the pulse, which
+runs after the wake. A director registered with push is named such an item
+in the next cycle's line, up to one `[org.watchdog].interval_seconds` (30
+by default) after the item was recorded; the ack deadline counts from the
+record, not from the line.
+
 `ralph org director status` shows the registration's `wake:` (and
 `wake_target:` for a promoted session given one), and the `director:` line
 of `ralph status` and of `director status` adds `, wake=<wake> to <target>`
