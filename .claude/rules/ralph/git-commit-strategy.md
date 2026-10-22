@@ -26,9 +26,12 @@ verify, commit with conventional format, and do not leave uncommitted changes
 between steps. There is no separate iteration-commit mechanism — a seat's
 work is recorded in the org saga manifest (`.harness/state/org/manifest.jsonl`)
 and receipts alongside its git commits, not in a `progress.log`.
-ralph turns off the end-of-session WIP commit below in the panes of seats
-(see there), so changes a seat leaves uncommitted stay uncommitted until a
-seat commits them.
+
+ralph turns off the end-of-session and pre-compaction WIP commits below in
+every herdr pane it creates (org seats, leaders included, and a herdr
+headless director) and in the launch script of a director started with
+`[org.director].launch_cmd` (see there), so changes a seat leaves
+uncommitted stay uncommitted until a seat commits them.
 
 ## End-of-Session / Pre-Compaction WIP Commits
 

@@ -420,10 +420,10 @@ ralph org escalate --state-dir <台帳> --org-id {{ORG_ID}} --text "$(cat .harne
   出たら(stderr にも同じエラーの文が出ます)、エラーの文を読んで次のように
   分けてください。stdout の `rejected:` の行で断られたとき(同じ座席の別の
   spawn が動いている、横断の見張りが動いていない、承認の検査、など)は、
-  ここには当たりません。BLOCKED は、TASK_ID を org_id の `{{ORG_ID}}`、
-  SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の要点にして、
-  「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで
-  その座席の spawn を打たずに待ってください。
+  ここには当たりません。下の項で BLOCKED を上げるときは、TASK_ID を org_id の
+  `{{ORG_ID}}`、SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の
+  要点にして、「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が
+  来るまでその座席の spawn を打たずに待ってください。
   - エラーが `seat left active` を含むとき: ralph が座席の pane を閉じられ
     なかったので、座席は動いているかもしれません。エラーにある
     `ralph org stop --org-id … --seat …` を、`--force` を足さずにそのまま

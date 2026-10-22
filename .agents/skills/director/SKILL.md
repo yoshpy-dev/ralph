@@ -225,10 +225,10 @@ director も守る(「headless の director」節)。
   `RALPH_WIP_CHECKPOINT=off` を export する(agmsg home の有無によらない。
   1 つ目は agmsg が herdr の agent や pane の名前を変えないようにし、2 つ目は
   director の Claude Code のセッションの hook が、セッションの終わりと
-  compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を打った ralph の絶対パスで
-  check-in(隠れた動詞 `ralph org director launched`)を打ち、start が
-  PATH で見つけたエージェントの絶対パスを exec する。check-in が断られれば、
-  エージェントは起動しない。
+  compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を
+  打った ralph の絶対パスで check-in(隠れた動詞 `ralph org director launched`)
+  を打ち、start が PATH で見つけたエージェントの絶対パスを exec する。check-in
+  が断られれば、エージェントは起動しない。
   check-in はスクリプトの pid とその起動時刻を記録する。exec は pid も起動
   時刻も変えないので、記録した pid はそのままエージェントの pid になる。
   start はこの check-in を `--timeout-ms`(既定 60 秒)まで待つ。
@@ -281,10 +281,10 @@ start の設定と、director が動く場所は次のとおり。
   (herdr の pane の環境は herdr server のもので、ralph が足す
   `AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off` だけが加わる)。
   設定されていれば start は警告を 1 行出して続ける。herdr の director に
-  届くのは `ralph.toml` の
-  `[org].agmsg_home` のほうになる。launch_cmd で立てた director には、起動
-  スクリプトがその値を export するので届き、start は警告しない。相対の値は、
-  start が起こす見張りと同じく、start を打った場所から絶対パスにして渡す。
+  届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。launch_cmd で
+  立てた director には、起動スクリプトがその値を export するので届き、start は
+  警告しない。相対の値は、start が起こす見張りと同じく、start を打った場所から
+  絶対パスにして渡す。
 - herdr で立てる director の pane は、ralph が
   `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
   で作る。1 つ目は、agmsg が pane の agent の名前を変えると、ralph がその

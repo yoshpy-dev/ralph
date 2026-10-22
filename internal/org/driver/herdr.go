@@ -315,7 +315,8 @@ func (h Herdr) paneEnvSupported(ctx context.Context) bool {
 // WIPCheckpointOff, the entries of SeatPaneEnv that production passes for
 // the panes of seats and of a headless director) it names, in PaneEnv's
 // order, what a pane created without it may do; an entry it does not know
-// adds no clause.
+// adds no clause. The clauses are joined with "; ", and the advice to use a
+// herdr with --env follows as a sentence of its own, after ". ".
 func (h Herdr) warnNoPaneEnv(probeErr error) {
 	w := h.Warn
 	if w == nil {
@@ -336,8 +337,8 @@ func (h Herdr) warnNoPaneEnv(probeErr error) {
 	if len(consequences) > 0 {
 		what = ": " + strings.Join(consequences, "; ")
 	}
-	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s%s; "+
-		"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
+	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s%s. "+
+		"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
 		reason, strings.Join(h.PaneEnv, " --env "), what)
 }
 

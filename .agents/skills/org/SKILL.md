@@ -888,13 +888,13 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
    なくて断られる。revert は同じ中身を元のパスに戻すので、承認の検査はそのまま
    通る。
 5. implementer と reviewer を `stop` する。
-6. gate の打ち直しと push の前に
-   `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打ち、件名が
-   `wip:` で始まるコミットがあれば、どちらも打たずにそのコミットを本文に
-   書いて `BLOCKED` を escalate する(`wip:` は Claude Code のセッションの
-   hook が作る自動のチェックポイントで、機能の PR には要らない。gate の前に
-   作られたものは gate の HEAD にも入っている)。HEAD が gate の出した
-   `HEAD:` と同じことを確かめてから、
+6. HEAD が gate の出した `HEAD:` と同じことを確かめる。gate の打ち直しと
+   push の前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を
+   打ち、件名が `wip:` で始まるコミットがあれば、どちらも打たずにそのコミット
+   を本文に書いて `BLOCKED` を escalate する(`wip:` は Claude Code の
+   セッションの hook が作る自動のチェックポイントで、機能の PR には要らない。
+   gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも
+   `git log` を打つ)。HEAD が違えば 4 の gate を打ち直し、同じなら
    `git push -u origin <type>/<slug>` と `gh pr create` で PR を 1 本作る。
    タイトルと本文は `/pr` skill の雛形に合わせてよいが、`/pr` skill は実行
    しない(PR のあと task worktree と local branch を消すので、leader の cwd が

@@ -6,16 +6,19 @@ package driver
 // (see WIPCheckpointOff).
 const WIPCheckpointEnv = "RALPH_WIP_CHECKPOINT"
 
-// WIPCheckpointOff is an entry of SeatPaneEnv, so a Claude Code session in a
-// pane ralph creates does not commit a feature branch's uncommitted changes
-// as wip: when it ends or compacts its context, in a feature worktree the
-// seats of an org share (finding F11; plan 2026-10-22-seat-wip-checkpoint).
+// WIPCheckpointOff is an entry of SeatPaneEnv. With it, a Claude Code
+// session in a pane ralph creates makes no wip: commit of its worktree's
+// uncommitted changes when the session ends or compacts its context. In a
+// feature org, a seat's worktree is the feature worktree that all the seats
+// of the org share, so such a commit could take in another seat's work
+// (finding F11; plan 2026-10-22-seat-wip-checkpoint).
 const WIPCheckpointOff = WIPCheckpointEnv + "=off"
 
 // SeatPaneEnv returns the KEY=VALUE entries ralph adds to the environment of
 // every pane it creates, in this order: AgmsgSelfNameOff, WIPCheckpointOff.
-// The CLI passes them to NewHerdr, so they are the Herdr.PaneEnv of the
-// panes of seats and of a headless director, and the launch script of a
+// Despite its name it is not only for seats: the CLI passes the entries to
+// NewHerdr, so they are the Herdr.PaneEnv of the panes of seats (leaders
+// included) and of a headless director in herdr, and the launch script of a
 // headless director started with launch_cmd (internal/org/director_cmd.go)
 // exports each of them. Every call returns a new slice, so a caller that
 // changes it changes no other caller's entries.

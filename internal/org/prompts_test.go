@@ -1379,9 +1379,11 @@ func TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry(t *testing.T)
 // runs, so the leader retries, with a larger --timeout-ms when the error
 // says the deadline ran out. Any other error (the ledger's) and (c) a second
 // failure in a row of the same seat raise a BLOCKED, with the org_id for its
-// TASK_ID, through the 件を上げる section. The words the item sorts the
-// errors by are in the errors Spawn returns, so a reworded error cannot
-// leave the rule pointing at text spawn no longer prints.
+// TASK_ID, through the 件を上げる section; the sentence before the cases says
+// it is how to raise the BLOCKED the cases below call for, not that every
+// spawn failed: raises one. The words the item sorts the errors by are in
+// the errors Spawn returns, so a reworded error cannot leave the rule
+// pointing at text spawn no longer prints.
 func TestRenderRolePrompt_Leader_SpawnFailedIsSortedByItsError(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 運用規律")
@@ -1396,7 +1398,7 @@ func TestRenderRolePrompt_Leader_SpawnFailedIsSortedByItsError(t *testing.T) {
 		{marker, []string{
 			"`ralph org spawn` が終了コード 1 で返り、stdout に `spawn failed:` の行が出たら(stderr にも同じエラーの文が出ます)",
 			"stdout の `rejected:` の行で断られたとき(同じ座席の別の spawn が動いている、横断の見張りが動いていない、承認の検査、など)は、ここには当たりません",
-			"BLOCKED は、TASK_ID を org_id の `org-a`、SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の要点にして、「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまでその座席の spawn を打たずに待ってください",
+			"ここには当たりません。下の項で BLOCKED を上げるときは、TASK_ID を org_id の `org-a`、SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の要点にして、「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまでその座席の spawn を打たずに待ってください",
 		}},
 		{"エラーが `seat left active` を含むとき", []string{
 			"座席は動いているかもしれません",

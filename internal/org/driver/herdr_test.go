@@ -424,7 +424,7 @@ const (
 		"and ralph may then fail to reach it (agent_not_found)"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
-	noPaneEnvAdvice = "; use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
+	noPaneEnvAdvice = ". Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
 )
 
 // noPaneEnvWarning is the line warnNoPaneEnv writes for PaneEnv
@@ -438,8 +438,11 @@ func noPaneEnvWarning(reason string) string {
 // plan 2026-10-22-seat-wip-checkpoint: on a herdr without --env the one
 // warning line lists every PaneEnv entry and adds, in PaneEnv's order, the
 // clause of each entry the driver knows; an entry it does not know adds no
-// clause. With AgmsgSelfNameOff alone the line is, word for word, the one of
-// plan 2026-10-22-seat-agmsg-self-name.
+// clause. The clauses are joined with "; " and the advice follows as a
+// sentence of its own, so it does not read as one more clause. With
+// AgmsgSelfNameOff alone the line is the one of plan
+// 2026-10-22-seat-agmsg-self-name except that the advice starts ". Use"
+// where that line had "; use".
 func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) {
 	const head = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env "
 	for name, tt := range map[string]struct {
@@ -451,8 +454,8 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 		"AgmsgSelfNameOff alone": {[]string{AgmsgSelfNameOff},
 			"warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
 				"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
-				"and ralph may then fail to reach it (agent_not_found); " +
-				"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"},
+				"and ralph may then fail to reach it (agent_not_found). " +
+				"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"},
 		"WIPCheckpointOff alone": {[]string{WIPCheckpointOff},
 			head + "RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},
 		"the two the other way round": {[]string{WIPCheckpointOff, AgmsgSelfNameOff},
