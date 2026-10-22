@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -403,13 +405,53 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 			if f.helpCalls != 1 {
 				t.Fatalf("help ran %d times; want 1, the failure cached", f.helpCalls)
 			}
-			want := "ralph: warning: " + tt.wantReason + ", so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
-				"an agmsg run inside a seat may rename the seat's herdr agent, and ralph may then fail to reach it (agent_not_found); " +
-				"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
-			if warn.String() != want {
+			if want := noPaneEnvWarning(tt.wantReason); warn.String() != want {
 				t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), want)
 			}
 		})
+	}
+}
+
+// noPaneEnvWarning is the line warnNoPaneEnv writes for PaneEnv
+// [AgmsgSelfNameOff] and reason.
+func noPaneEnvWarning(reason string) string {
+	return "warning: " + reason + ", so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: " +
+		"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
+		"and ralph may then fail to reach it (agent_not_found); " +
+		"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
+}
+
+// TestHerdr_TabCreate_PaneEnvNilWarnWritesToStderr pins AC4 for the Herdr
+// the CLI builds, a NewHerdr value with Warn nil: with a herdr whose help
+// does not list --env, the warning line goes to os.Stderr, once. It swaps
+// os.Stderr, so it does not run in parallel.
+func TestHerdr_TabCreate_PaneEnvNilWarnWritesToStderr(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = orig
+		_ = w.Close()
+		_ = r.Close()
+	})
+	f := &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv}
+
+	tabCreateTwice(t, NewHerdr(f, AgmsgSelfNameOff))
+
+	os.Stderr = orig
+	_ = w.Close()
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read the os.Stderr pipe: %v", err)
+	}
+	if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, tabCreateArgv}) {
+		t.Fatalf("tab create argv = %v; want %v twice, with no --env", f.tabCalls, tabCreateArgv)
+	}
+	if want := noPaneEnvWarning("herdr tab create has no --env flag"); string(got) != want {
+		t.Fatalf("os.Stderr =\n%q\nwant exactly one line\n%q", got, want)
 	}
 }
 
@@ -578,7 +620,9 @@ func TestHerdr_TabCreate_PaneEnvConcurrentCallsCheckOnce(t *testing.T) {
 	}
 }
 
-// TestHerdrHelpEnvFlag: --env counts only as a whole flag.
+// TestHerdrHelpEnvFlag: --env counts only as a whole flag, at the end of the
+// help too (ExecRunner trims the output, so a help whose last line is --env
+// ends in it).
 func TestHerdrHelpEnvFlag(t *testing.T) {
 	for help, want := range map[string]bool{
 		"      --env <KEY=VALUE>":             true,
@@ -586,10 +630,12 @@ func TestHerdrHelpEnvFlag(t *testing.T) {
 		"Usage: herdr tab create [--env KEY]": true,
 		"--env=KEY=VALUE":                     true,
 		"--label <TEXT>\n--env\n--focus":      true,
+		"Options:\n      --env":               true,
 		"      --envelope <FILE>":             false,
 		"      --environment <NAME>":          false,
 		"      --env-file <PATH>":             false,
 		"      --no-env":                      false,
+		"      --keep--env":                   false,
 		"":                                    false,
 	} {
 		if got := herdrHelpEnvFlag.MatchString(help); got != want {

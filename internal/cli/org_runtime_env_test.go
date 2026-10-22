@@ -117,3 +117,65 @@ func TestOrgRuntimes_HerdrPaneEnvIsSelfNameOff(t *testing.T) {
 		})
 	}
 }
+
+// TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr pins AC4 of plan
+// 2026-10-22-seat-agmsg-self-name at the CLI: against setupOrgStubPATH's
+// herdr in mode ORG_STUB_TAB_CREATE_HELP=noenv, whose `tab create --help`
+// lists no --env, `ralph org spawn` and `ralph org director start` succeed,
+// create their tab without --env, and write the one warning line to the
+// process's stderr (the CLI builds its Herdr with Warn nil). It runs the
+// verbs as main does, with os.Stdout and os.Stderr swapped, so it does not
+// run in parallel.
+func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setup   func(t *testing.T) (herdrLog string, args []string)
+		wantOut string // the start of stdout
+	}{
+		{
+			name: "spawn",
+			setup: func(t *testing.T) (string, []string) {
+				herdrLog, _ := setupOrgStubPATH(t)
+				return herdrLog, []string{"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+					"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
+					"--scope", "test-scope", "--state-dir", filepath.Join(t.TempDir(), "state")}
+			},
+			wantOut: `spawned seat "seat-1" `,
+		},
+		{
+			name: "director start",
+			setup: func(t *testing.T) (string, []string) {
+				stateDir, herdrLog, _ := directorStartLedger(t)
+				t.Setenv("USER", "alice")
+				return herdrLog, []string{"director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir}
+			},
+			wantOut: "started d1 ",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			herdrLog, args := tc.setup(t)
+			t.Setenv("ORG_STUB_TAB_CREATE_HELP", "noenv")
+
+			stdout, stderr, err := runOrgCmdSplitStreams(t, args...)
+			if err != nil {
+				t.Fatalf("%s: %v (stdout: %s stderr: %s)", tc.name, err, stdout, stderr)
+			}
+			if !strings.HasPrefix(stdout, tc.wantOut) {
+				t.Fatalf("stdout = %q; want it to start with %q", stdout, tc.wantOut)
+			}
+			lines := readLogLines(t, herdrLog)
+			if n := countLinesWithPrefix(lines, "tab create"); n != 1 {
+				t.Fatalf("tab create calls = %d; want 1 (herdr calls %q)", n, lines)
+			}
+			for _, l := range lines {
+				if strings.Contains(l, "--env") {
+					t.Fatalf("herdr call %q has --env; want none on a herdr without it", l)
+				}
+			}
+			const warning = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off: "
+			if !strings.HasPrefix(stderr, warning) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stderr, "\n") {
+				t.Fatalf("stderr = %q; want exactly the one line that starts with %q", stderr, warning)
+			}
+		})
+	}
+}

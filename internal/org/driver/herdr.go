@@ -41,10 +41,10 @@ type Herdr struct {
 	// 0.7.5 adds them to the pane's environment and keeps the rest of it
 	// (docs/evidence/agmsg-self-name-2026-10-22.md, (a)). Empty adds no
 	// --env and runs no check. Production passes AgmsgSelfNameOff, so an
-	// agmsg a seat runs itself cannot rename the seat's herdr agent (finding
-	// F3; the same evidence, (e)). The values appear in the `herdr tab
-	// create` argv, which ps shows, and in the warning line, so never put a
-	// secret in PaneEnv.
+	// agmsg run inside a seat's pane, or a headless director's, cannot rename
+	// that pane's herdr agent (finding F3; the same evidence, (e)). The
+	// values appear in the `herdr tab create` argv, which ps shows, and in
+	// the warning line, so never put a secret in PaneEnv.
 	PaneEnv []string
 	// Warn receives the warning line TabCreate writes when it cannot add
 	// PaneEnv; nil means os.Stderr.
@@ -306,8 +306,10 @@ func (h Herdr) paneEnvSupported(ctx context.Context) bool {
 
 // warnNoPaneEnv writes to Warn (os.Stderr when nil) the one warning line for
 // a herdr whose TabCreate cannot add PaneEnv. probeErr is the help call's
-// error, nil when the help just does not list --env. The consequences it
-// names are those of the one entry production passes, AgmsgSelfNameOff.
+// error, nil when the help just does not list --env. The line starts with
+// "warning: " as the CLI's other warnings do. The consequences it names are
+// those of the one entry production passes, AgmsgSelfNameOff, in the panes
+// of seats and of a headless director.
 func (h Herdr) warnNoPaneEnv(probeErr error) {
 	w := h.Warn
 	if w == nil {
@@ -318,8 +320,9 @@ func (h Herdr) warnNoPaneEnv(probeErr error) {
 		reason = "could not check whether herdr tab create has --env ('herdr tab create --help': " +
 			strings.Join(strings.Fields(probeErr.Error()), " ") + ")"
 	}
-	_, _ = fmt.Fprintf(w, "ralph: warning: %s, so ralph creates herdr panes without --env %s: "+
-		"an agmsg run inside a seat may rename the seat's herdr agent, and ralph may then fail to reach it (agent_not_found); "+
+	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s: "+
+		"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, "+
+		"and ralph may then fail to reach it (agent_not_found); "+
 		"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
 		reason, strings.Join(h.PaneEnv, " --env "))
 }
