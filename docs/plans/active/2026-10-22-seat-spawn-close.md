@@ -139,6 +139,7 @@ spawn が途中で失敗したとき、その spawn が作った herdr の pane 
   - S2 97782369(AC4・AC9・AC10)。計画にない追加: stale の座席の記録した pane が打った本人の pane(`HERDR_PANE_ID`)のときは、確かめも C-c も close もせず、何も書かずに断る(stop の自分の pane の規則と同じ。閉じると打ったセッションが終わるため)。`ralph org start --plan` の事前検査も、途中の座席への拒否で Spawn と同じ文を出す
   - S3 abb11e8c(AC5)。期限の案内は、step が返った直後の spawn の ctx の `Err()` で決める(agent start の再試行を期限が打ち切ると、原因が DeadlineExceeded を包まないため)
   - S4(AC6): `docs/evidence/seat-spawn-close-2026-10-22.md`。(a)〜(e) に加え、同じ座席の重ねた spawn をロックが断ること (f) も実機で見た
+  - S5 a7133901(AC7)。仕様は 26/6、根拠の表は 25/6。tech-debt には新しい行を 3 つ足した(動いている spawn の途中の stop、`spawn_close_failed` の座席の status の空の欄、manifest の書き込みが失敗した道が pane を閉じないこと)。org-stop-all の行の (b) は S2 の label の確かめで直ったので RESOLVED にした
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
