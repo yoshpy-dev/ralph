@@ -23,6 +23,13 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 
 - herdr / agmsg が導入済みであること。`ralph doctor` で `herdr` / `agmsg`
   チェックを確認する(org を使わない標準フローは両ツールなしで動く)。
+  ralph は座席の pane を `herdr tab create --env AGMSG_SELF_NAME=off` で
+  作り、座席が自分で打つ agmsg が herdr の agent の名前を変えないように
+  する(herdr 0.7.5 の `--env`)。`--env` のない herdr でも動くが、
+  `warning: herdr tab create has no --env flag` で始まる警告が stderr に
+  1 行出て、座席の agmsg が名前を変えると ralph が座席に届かなくなる
+  ことがある(`agent_not_found`)。ralph 自身が打つ agmsg には、herdr の
+  版によらず `AGMSG_SELF_NAME=off` が付く。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
   `max_orgs` / `max_total_seats` / `permissions`)が意図通り設定されて
   いること。未設定の場合は既定値

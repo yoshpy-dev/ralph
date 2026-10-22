@@ -221,8 +221,10 @@ director も守る(「headless の director」節)。
   スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
 - 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
   `RALPH_DIRECTOR_TOKEN` を export し(start を打った環境に
-  `RALPH_ORG_AGMSG_HOME` があればそれも)、start を打った ralph の絶対パスで
-  check-in(隠れた動詞 `ralph org director launched`)を打ってから、start が
+  `RALPH_ORG_AGMSG_HOME` があればそれも)、`AGMSG_SELF_NAME=off` を export
+  する(agmsg home の有無によらない。agmsg が herdr の agent や pane の
+  名前を変えないようにする)。そのあと、start を打った ralph の絶対パスで
+  check-in(隠れた動詞 `ralph org director launched`)を打ち、start が
   PATH で見つけたエージェントの絶対パスを exec する。check-in が断られれば、
   エージェントは起動しない。
   check-in はスクリプトの pid とその起動時刻を記録する。exec は pid も起動
@@ -274,11 +276,20 @@ start の設定と、director が動く場所は次のとおり。
   使ってしまうので、start は場所を比べず、どこで打っても断る。絶対パスで書く。
   この断りは launch_cmd で立てるときも同じ。
 - 人の shell の `RALPH_ORG_AGMSG_HOME` は、herdr で立てた director には届かない
-  (herdr の pane の環境は herdr server のもの)。設定されていれば start は警告を
+  (herdr の pane の環境は herdr server のもので、ralph が足す
+  `AGMSG_SELF_NAME=off` だけが加わる)。設定されていれば start は警告を
   1 行出して続ける。herdr の director に届くのは `ralph.toml` の
   `[org].agmsg_home` のほうになる。launch_cmd で立てた director には、起動
   スクリプトがその値を export するので届き、start は警告しない。相対の値は、
   start が起こす見張りと同じく、start を打った場所から絶対パスにして渡す。
+- herdr で立てる director の pane は、ralph が
+  `herdr tab create --env AGMSG_SELF_NAME=off` で作る。agmsg が pane の
+  agent の名前を変えると、ralph がその director に届かなくなるため
+  (`agent_not_found`)。herdr の `tab create --help` に `--env` がなければ
+  (0.7.5 にはある)、`--env` を付けずに作り、
+  `warning: herdr tab create has no --env flag` で始まる警告を stderr に
+  1 行出す。その herdr では、director が自分で打つ agmsg が pane の名前を
+  変えうる。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 
