@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Plan: docs/plans/active/2026-10-23-watch-escalation-inbox.md(/pr で archive に移す)
-- PR: fix/watch-escalation-inbox(番号は PR を作ったあとに書く)
+- PR: #252
 - Branch: fix/watch-escalation-inbox(base e8e8d652、この walkthrough の前の HEAD 1cf9fc8b。25 commits、44 files、+3349/-284)
 - 読む範囲: コードは Go の 7 files(+536/-165)で、本体は `internal/org/watch.go`(+296/-73)、`internal/org/escalate.go`(+152/-41)、`internal/org/inbox.go`(+35/-19)。`internal/org/deadline.go` は呼び出しに `item.AlertID` を渡すだけ(+4/-2)。`internal/cli/org_watch.go` と `internal/cli/org_inbox.go` は help と注の文だけ、`internal/config/config.go` は doc コメントだけ。director の雛形 `internal/org/prompts/director.md`(+3)。`templates/base/ralph.toml` はコメントだけ(+7/-4)。テストは 8 files(+1718/-40)で、`watch_test.go`(+817/-34)、`watch_all_test.go`(+414)、`escalate_test.go`(+286/-5)が大半。文書は `/org` と `/director` の skill の 4 写しずつ(8 files)、`agent-messaging.md` の 2 写し、README、AGENTS.md、`docs/quality/quality-gates.md` と `docs/recipes/director-wake.md` の 2 写しずつ、仕様 2 本、根拠の表、tech-debt。残りは計画、後工程の報告 5 本(cross-review は triage)、insight event
 - 後工程は 1 回(cycle 1)で終え、cross-review の指摘は 0 件
