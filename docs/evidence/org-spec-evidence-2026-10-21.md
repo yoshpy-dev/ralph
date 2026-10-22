@@ -102,7 +102,7 @@
 | F11 の直し | - | #250 |
 | F5 の直し | - | fix/split-preamble(merge する前のブランチ名。番号は次の PR が書く。33 本に数えない) |
 
-33 本すべてを、2026-10-22 に `gh pr view <n> --json state --jq .state` で読み、どれも `MERGED` だった(gh の active account は yoshpy-dev。読んだだけで、書き込みはしていない)。#248 は、この表に足した 2026-10-22 に同じコマンドで読み直した。#249 は、この表に足した 2026-10-22 に `gh pr view 249 --json state --jq .state` で読み、`MERGED` だった。#250 は、この表に足した 2026-10-22 に `gh pr view 250 --json state` で読み、`MERGED` だった。
+33 本すべてを、2026-10-22 に `gh pr view <n> --json state --jq .state` で読み、どれも `MERGED` だった(gh の active account は yoshpy-dev。読んだだけで、書き込みはしていない)。#248 は、この表に足した 2026-10-22 に同じコマンドで読み直した。#249 は、この表に足した 2026-10-22 に `gh pr view 249 --json state --jq .state` で読み、`MERGED` だった。#250 は、この表に足した 2026-10-22 に `gh pr view 250 --json state,mergedAt,mergeCommit` で読み、`MERGED` だった。
 
 ## 確かめていないこと
 
