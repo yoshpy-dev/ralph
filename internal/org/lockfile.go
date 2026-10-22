@@ -19,6 +19,17 @@ import (
 // which is scoped by org_id but reads the same manifest file).
 const manifestLockFile = "manifest.lock"
 
+// spawnLockName is the name of the lock file a non-dry-run Spawn of seatID
+// in orgID holds (acquireHeldFileLock) in the manifest directory from
+// before its first manifest read until it returns, so a second spawn of the
+// same seat is refused at once instead of taking the first one's in-flight
+// records for a stale saga (plan 2026-10-22-seat-spawn-close, D5). Both ids
+// passed ValidateIdentifier, which allows no `_` and no path separator, so
+// the name is one file per seat and stays inside the directory.
+func spawnLockName(orgID, seatID string) string {
+	return "spawn-" + orgID + "_" + seatID + ".lock"
+}
+
 // manifestLockTimeout bounds how long withManifestLock waits to acquire the
 // flock before giving up with a clear timeout error. flock(2) is released
 // automatically when the holding process exits or its file descriptor
@@ -135,10 +146,11 @@ var errFileLockHeld = errors.New("the lock is held")
 // one regate or merge holds it on a ledger at a time and a spawn goes on
 // while a merge runs. A merge with --wait-checks releases it for every wait
 // in merge_wait.go, so that a regate or another merge can run meanwhile, and
-// takes it again for the checks after the wait. The lock is tied to the open
-// file, not the process, so two heldFileLocks on the same file in one
-// process exclude each other too, and the OS releases it when the process
-// exits however it exits.
+// takes it again for the checks after the wait. A spawn holds one on its
+// seat's spawnLockName for the whole call, with no marker. The lock is tied
+// to the open file, not the process, so two heldFileLocks on the same file
+// in one process exclude each other too, and the OS releases it when the
+// process exits however it exits.
 type heldFileLock struct {
 	f *os.File
 }

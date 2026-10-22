@@ -865,6 +865,26 @@ func (w labelWords) paneWorkspace(workspaceLabel string) string {
 	return fmt.Sprintf("a workspace labelled %q", workspaceLabel)
 }
 
+// errLabelMismatch is what errors.Is finds in confirmSeatPane's and
+// confirmOrgWorkspace's error when herdr has the pane in a tab, or the
+// workspace, under a label other than the expected one, and in none of
+// their other errors (a get that failed or timed out, a tab or workspace
+// herdr no longer knows although it had the pane). Its own text never
+// shows: labelMismatchError keeps the error's text as it was. Only a
+// spawn's stale compensation reads it (compensateStale, spawn.go), to leave
+// a pane labelled for something else alone and go on; every other caller
+// only checks err != nil.
+var errLabelMismatch = errors.New("label mismatch")
+
+// labelMismatchError is a label-differs error of confirmSeatPane or
+// confirmOrgWorkspace: its text is msg, and errors.Is matches it to
+// errLabelMismatch.
+type labelMismatchError struct{ msg string }
+
+func (e *labelMismatchError) Error() string { return e.msg }
+
+func (e *labelMismatchError) Is(target error) bool { return target == errLabelMismatch }
+
 // confirmSeatPane checks, before anything sends C-c to or closes paneID,
 // that herdr still has it in a tab labelled tabLabel inside a workspace
 // labelled workspaceLabel, the labels the pane was made with: for an org
@@ -875,10 +895,11 @@ func (w labelWords) paneWorkspace(workspaceLabel string) string {
 // when it loses its session state, so a recorded id can come to name an
 // unrelated pane (plan AC14). gone is true when herdr does not know the pane
 // (already closed). A non-nil err means the pane is not confirmed and must
-// be left alone: a label differs, or a get call failed or timed out,
-// including a tab or workspace herdr no longer knows although it had the
-// pane a moment before. Each of the three get calls runs under its own
-// driverCallTimeout deadline.
+// be left alone: a label differs (the tab's or the workspace's; errors.Is
+// finds errLabelMismatch), or a get call failed or timed out, including a
+// tab or workspace herdr no longer knows although it had the pane a moment
+// before. Each of the three get calls runs under its own driverCallTimeout
+// deadline.
 func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words labelWords) (gone bool, err error) {
 	var tabID, workspaceID string
 	err = o.callWithTimeout(func(ctx context.Context) error {
@@ -908,7 +929,7 @@ func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words lab
 		return false, fmt.Errorf("check pane %q: %w", paneID, err)
 	}
 	if gotTab != tabLabel {
-		return false, fmt.Errorf("pane %q is not %s: herdr has it in tab %q labelled %q", paneID, words.tab(tabLabel), tabID, gotTab)
+		return false, &labelMismatchError{fmt.Sprintf("pane %q is not %s: herdr has it in tab %q labelled %q", paneID, words.tab(tabLabel), tabID, gotTab)}
 	}
 
 	switch wsGone, wsErr := o.confirmOrgWorkspace(workspaceLabel, workspaceID, words); {
@@ -924,8 +945,9 @@ func (o *Org) confirmSeatPane(workspaceLabel, tabLabel, paneID string, words lab
 // workspaceID must be workspaceLabel, an org's org_id or the headless
 // director's DirectorWorkspaceLabel, and words says how its errors name it.
 // gone is true when herdr does not know the workspace (already closed); a
-// non-nil err (a different label, or a failed or timed-out get) means it
-// must be left alone. The get runs under its own driverCallTimeout deadline.
+// non-nil err (a different label, which errors.Is matches to
+// errLabelMismatch, or a failed or timed-out get) means it must be left
+// alone. The get runs under its own driverCallTimeout deadline.
 func (o *Org) confirmOrgWorkspace(workspaceLabel, workspaceID string, words labelWords) (gone bool, err error) {
 	var label string
 	err = o.callWithTimeout(func(ctx context.Context) error {
@@ -939,7 +961,7 @@ func (o *Org) confirmOrgWorkspace(workspaceLabel, workspaceID string, words labe
 	case err != nil:
 		return false, fmt.Errorf("check workspace %q: %w", workspaceID, err)
 	case label != workspaceLabel:
-		return false, fmt.Errorf("workspace %q is not %s: herdr labels it %q", workspaceID, words.workspace(workspaceLabel), label)
+		return false, &labelMismatchError{fmt.Sprintf("workspace %q is not %s: herdr labels it %q", workspaceID, words.workspace(workspaceLabel), label)}
 	}
 	return false, nil
 }

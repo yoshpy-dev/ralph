@@ -4543,12 +4543,14 @@ func appendInterruptedCodexSpawnTrail(t *testing.T, o *Org, orgID, seatID, promp
 // idempotent-eligible (Spawn's own idempotent early return only fires on
 // EventSpawned): a second Spawn call for the same org/seat still reaches
 // ValidateSpawnEnvelope, which runs BEFORE Spawn's own stale-in-flight
-// compensation branch -- so an invalid retry gets rejected via reject()
-// while these two events survive untouched on the manifest. That lets a
-// test set up exactly the scenario codexSpawnCorrelation must handle
-// correctly (issue #173): it still finds this ORIGINAL spawn_started,
-// while the roster's latest state becomes the REJECTED retry's own
-// Driver/Model.
+// compensation branch -- so an invalid retry is refused while these two
+// events survive untouched on the manifest. Since plan
+// 2026-10-22-seat-spawn-close (D6) that refusal writes nothing for a seat
+// in flight; an older ralph's reject() appended a `rejected`, which
+// appendLegacyRejectedRetry adds. That lets a test set up exactly the
+// scenario codexSpawnCorrelation must handle correctly (issue #173): it
+// still finds this ORIGINAL spawn_started, while the roster's latest state
+// becomes the REJECTED retry's own Driver/Model.
 // base carries whichever Role/Driver/Model the caller needs (AC-1 uses
 // codex/codex; AC-2's reverse case uses a claude-launched seat).
 func appendInterruptedAgentStartedTrail(t *testing.T, o *Org, base ManifestEvent, promptPath string, spawnStartedAt time.Time) {
@@ -4566,6 +4568,35 @@ func appendInterruptedAgentStartedTrail(t *testing.T, o *Org, base ManifestEvent
 	step.Details = codexPromptFileDetailsPrefix + promptPath
 	if err := o.appendEvent(step); err != nil {
 		t.Fatalf("seed spawn_step: %v", err)
+	}
+}
+
+// appendLegacyRejectedRetry checks that r, Spawn's answer to the retry p
+// over an interrupted trail (appendInterruptedAgentStartedTrail), is a
+// plain rejection that left the seat on the trail's spawn_step with no
+// receipt (plan 2026-10-22-seat-spawn-close, D6), and then appends the
+// `rejected` an older ralph's reject() recorded for the same retry, with the
+// retry's own Role/Driver/Model and the refusal's cause, as a ledger such a
+// binary left still holds. The roster's latest state then carries the
+// retry's Driver/Model, the scenario of issue #173.
+func appendLegacyRejectedRetry(t *testing.T, o *Org, p SpawnParams, r SpawnResult) {
+	t.Helper()
+	if r.Outcome != SpawnOutcomeRejected || r.Err == nil || r.ModelReceipt != (Receipt{}) {
+		t.Fatalf("expected a plain rejection of the retry, got %+v", r)
+	}
+	seat, ok := seatFromEvents(mustReadEvents(t, o), p.OrgID, p.SeatID)
+	if !ok || seat.Event != EventSpawnStep {
+		t.Fatalf("expected the refused retry to leave the seat on its spawn_step, got %+v (found %v)", seat, ok)
+	}
+	cause := errors.Unwrap(r.Err)
+	if cause == nil {
+		t.Fatalf("expected the refusal to wrap its cause, got %v", r.Err)
+	}
+	if err := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventRejected,
+		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd, Details: cause.Error(),
+	}); err != nil {
+		t.Fatalf("seed the legacy rejected: %v", err)
 	}
 }
 
@@ -4915,9 +4946,10 @@ func TestOrgStop_Codex_DryRunRespawnDoesNotDisplaceRealSpawnCorrelation(t *testi
 // org/seat with a DIFFERENT, out-of-pool model, which Spawn rejects via
 // ValidateSpawnEnvelope BEFORE it ever reaches the stale-in-flight
 // compensation branch (Spawn's own doc comment: ValidateSpawnEnvelope runs
-// before stale-in-flight compensation). The `rejected` event this appends
-// carries the RETRY's own Model/Driver, becoming the roster's latest
-// SeatStatus for this seat --
+// before stale-in-flight compensation). The `rejected` event an older ralph
+// appended for it (appendLegacyRejectedRetry; a current one writes nothing
+// for a seat in flight) carries the RETRY's own Model/Driver, becoming the
+// roster's latest SeatStatus for this seat --
 // but codexSpawnCorrelation still finds the ORIGINAL spawn_started
 // (rejected events are never scanned by it), so Stop's receipt must
 // compare the session record against the ORIGINAL commanded model, never
@@ -4942,13 +4974,11 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-5-codex",
 	}, promptPath, spawnStartedAt)
 
-	retryResult := o.Spawn(SpawnParams{
+	retry := SpawnParams{
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
-	})
-	if retryResult.Outcome != SpawnOutcomeRejected {
-		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
 	}
+	appendLegacyRejectedRetry(t, o, retry, o.Spawn(retry))
 
 	// Test setup invariant: after the rejected retry, the roster reflects
 	// that retry's own model, not the original spawn's -- exactly the
@@ -4986,8 +5016,9 @@ func TestOrgStop_Codex_RecoversCommandedModelAfterInterruptedRetryRejected(t *te
 
 // TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver is AC-2's
 // forward case: the seat's ORIGINAL (launched) spawn was codex, but a
-// later retry for a DIFFERENT DRIVER (claude) gets rejected -- becoming
-// the roster's latest SeatStatus with Driver="claude". Stop must still
+// later retry for a DIFFERENT DRIVER (claude) gets rejected -- its
+// `rejected`, as an older ralph recorded it (appendLegacyRejectedRetry),
+// becoming the roster's latest SeatStatus with Driver="claude". Stop must still
 // attempt observation: "is this a codex seat" is decided by the
 // CORRELATED spawn's own Driver, never the roster's.
 func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.T) {
@@ -5008,13 +5039,11 @@ func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-5-codex",
 	}, promptPath, spawnStartedAt)
 
-	retryResult := o.Spawn(SpawnParams{
+	retry := SpawnParams{
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "not-a-real-model",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
-	})
-	if retryResult.Outcome != SpawnOutcomeRejected {
-		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
 	}
+	appendLegacyRejectedRetry(t, o, retry, o.Spawn(retry))
 
 	seat, ok, err := o.findSeat(orgID, seatID)
 	if err != nil || !ok {
@@ -5044,7 +5073,8 @@ func TestOrgStop_Codex_ObservesWhenRejectedRetryUsedADifferentDriver(t *testing.
 
 // TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCodexRetry
 // is AC-2's reverse case: the seat's ORIGINAL (launched) spawn was claude,
-// and a later codex retry gets rejected -- the roster's latest SeatStatus
+// and a later codex retry gets rejected -- with the `rejected` an older ralph
+// recorded for it (appendLegacyRejectedRetry), the roster's latest SeatStatus
 // shows Driver="codex", but Stop must not observe at all (not even
 // model_observed=none): the CORRELATED spawn decides "is this a codex
 // seat", and it never was.
@@ -5057,13 +5087,11 @@ func TestOrgStop_Codex_NoObservationWhenLaunchedSpawnWasClaude_DespiteRejectedCo
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "claude", Model: "sonnet",
 	}, "", spawnStartedAt)
 
-	retryResult := o.Spawn(SpawnParams{
+	retry := SpawnParams{
 		OrgID: orgID, SeatID: seatID, Role: "implementer", Driver: "codex", Model: "gpt-9-nonexistent",
 		Cwd: "/tmp/seat", TimeoutMS: 5000, Scope: "test-scope",
-	})
-	if retryResult.Outcome != SpawnOutcomeRejected {
-		t.Fatalf("expected the retry to be rejected (out-of-pool model), got %+v", retryResult)
 	}
+	appendLegacyRejectedRetry(t, o, retry, o.Spawn(retry))
 
 	seat, ok, err := o.findSeat(orgID, seatID)
 	if err != nil || !ok {
