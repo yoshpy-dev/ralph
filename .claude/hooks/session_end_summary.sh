@@ -27,17 +27,24 @@ fi
   fi
 } > .harness/state/session-end.md
 
-# WIP commit on feature branches before session end
+# WIP commit on feature branches before session end.
+# RALPH_WIP_CHECKPOINT=off skips only the commit: ralph sets it in the herdr
+# panes it creates for org seats, whose session end must not commit (see
+# .claude/rules/ralph/git-commit-strategy.md).
 if command -v git >/dev/null 2>&1; then
   current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '%s' 'unknown')"
   case "$current_branch" in
     main|master|unknown) ;;
     *)
       if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-        git add -A 2>/dev/null || true
-        if ! git commit -m 'wip: checkpoint before session end' 2>/dev/null; then
-          mkdir -p .harness/logs
-          printf '%s WIP commit failed (session_end on branch %s)\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$current_branch" >> .harness/logs/hook-failures.log
+        if [ "${RALPH_WIP_CHECKPOINT:-}" = "off" ]; then
+          printf '\n%s\n' '- WIP commit: skipped (RALPH_WIP_CHECKPOINT=off)' >> .harness/state/session-end.md
+        else
+          git add -A 2>/dev/null || true
+          if ! git commit -m 'wip: checkpoint before session end' 2>/dev/null; then
+            mkdir -p .harness/logs
+            printf '%s WIP commit failed (session_end on branch %s)\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$current_branch" >> .harness/logs/hook-failures.log
+          fi
         fi
       fi
       ;;
