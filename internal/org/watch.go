@@ -10,12 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
@@ -70,7 +70,7 @@ func WatchStatusFileName(orgID string) string {
 // EscalationsRelName is the file name (within the same state directory) the
 // human path appends to, one JSON line per send: each send of an inbox item
 // (escalate.go), the watch's ALERT items included, and each AC-5 watch
-// escalation the inbox could not take (escalateAlert).
+// escalation the inbox could not take (escalateWithoutInbox).
 const EscalationsRelName = "escalations.jsonl"
 
 // Pulse-layer condition type tags. Used both as the third segment of a
@@ -398,19 +398,14 @@ func (o *Org) realGitStatus(cwd string) (string, error) {
 }
 
 // realEscalate is the notification of a watch escalation the inbox could
-// not take when WatchAllParams.Escalate is nil and escalateGOOS is darwin
-// (notifyWithoutInbox): a macOS notification via osascript, titled after the
-// watch. Its error is recorded in the escalation's escalations.jsonl line
-// (osascript: failed: <err>), not dropped.
+// not take when WatchAllParams.Escalate is nil and desktopNotifyGOOS is
+// darwin (notifyWithoutInbox, through notifyBounded): a macOS notification
+// via osascript, titled after the watch. Its error is recorded in the
+// escalation's escalations.jsonl line (osascript: failed: <err>), not
+// dropped.
 func realEscalate(ctx context.Context, message string) error {
 	return osascriptNotify(ctx, inboxNotifyTitleWatch, message)
 }
-
-// escalateGOOS is the GOOS notifyWithoutInbox reads when
-// WatchAllParams.Escalate is nil: on darwin it notifies with realEscalate,
-// and elsewhere it sends nothing and records skipped. It is runtime.GOOS; a
-// test sets another value so that a nil Escalate never reaches osascript.
-var escalateGOOS = runtime.GOOS
 
 // osascriptNotify shows a macOS notification via osascript. realEscalate
 // and the inbox's human path (escalate.go) share it; the error carries
@@ -478,7 +473,16 @@ type WatchAllParams struct {
 	// watch-stop.json, each org's watch-status-<org_id>.json,
 	// escalations.jsonl, and the director's director.jsonl and
 	// director-alive.json live in it (the directory of the manifest the Org
-	// reads, in production). Required.
+	// reads, in production). Required. The watch writes the escalations.jsonl
+	// line of an escalation the inbox could not take to
+	// EscalationsPathIn(StatusDir) (escalateWithoutInbox), but an
+	// escalation the inbox takes is sent through the inbox's human path,
+	// which writes its line to Org.EscalationsPath (sendInboxItemToHuman).
+	// So a caller sets Org.EscalationsPath to EscalationsPathIn(StatusDir),
+	// as the CLI does: with Org.EscalationsPath unset, each send of an ALERT
+	// item to the human shows its banner and desktop notification but
+	// writes no escalations.jsonl line and no notified event, so the ack
+	// deadline sends it again while it is open.
 	StatusDir string
 	// Interval is the pulse-cycle wait (ResolveWatchInterval): <= 0 falls
 	// back to Org.Config.Watchdog.IntervalSeconds, then to 30s if that is
@@ -498,7 +502,8 @@ type WatchAllParams struct {
 	// on darwin (realEscalate) and none elsewhere, recorded as skipped. An
 	// escalation the inbox takes is an ALERT item, notified through
 	// Org.DesktopNotify like a leader's item (plan
-	// 2026-10-23-watch-escalation-inbox, D9).
+	// 2026-10-23-watch-escalation-inbox, D9); StatusDir says where each
+	// path writes its escalations.jsonl line.
 	Escalate EscalateFunc
 	// Stderr gets the AC-5 escalation banners, the inbox deadline banners,
 	// the lines of the director's wake (WakeDirector), and one line for each
@@ -947,10 +952,10 @@ func (w *watchAllRun) stopAndRelease(lock *WatchLock) {
 //
 // Each herdr and agmsg call of the cycle, and the real git status, runs
 // under its own Org.callWithTimeout deadline, and the desktop notification
-// of an escalation under its own inboxDesktopNotifyTimeout (the inbox's
-// human path, or notifyWithoutInbox; escalateAlert), each cut from
-// context.Background(), not from the watch loop's context (Codex plan
-// advisory finding 1 of docs/plans/active/2026-10-11-org-cross-watch.md;
+// of an escalation under its own inboxDesktopNotifyTimeout (notifyBounded,
+// for the inbox's human path or notifyWithoutInbox; escalateAlert), each
+// cut from context.Background(), not from the watch loop's context (Codex
+// plan advisory finding 1 of docs/plans/active/2026-10-11-org-cross-watch.md;
 // self-review L2): a call that does not answer fails like any other failure
 // of that call, so one org cannot hold the cycle of the others, and a watch
 // told to stop still finishes its cycle with real answers rather than with
@@ -1041,25 +1046,28 @@ func pruneRetiredConditions(status *watchStatusFile) {
 		}
 	}
 	for alertID := range status.PendingAlerts {
-		if retiredConditionNames[retiredConditionTypeFromAlertID(alertID)] {
+		if retiredConditionNames[alertIDConditionType(alertID)] {
 			delete(status.PendingAlerts, alertID)
 		}
 	}
 	for alertID := range status.Escalated {
-		if retiredConditionNames[retiredConditionTypeFromAlertID(alertID)] {
+		if retiredConditionNames[alertIDConditionType(alertID)] {
 			delete(status.Escalated, alertID)
 		}
 	}
 }
 
-// retiredConditionTypeFromAlertID recovers the condition-type segment from
-// an AlertID shaped "<org_id>/<seat_id>/<condition_type>@<unixnano>"
-// (sendAlert's "%s@%d" format over conditionKey) -- the segment between the
-// last "/" and the "@". Returns "" (never a retiredConditionNames match) if
-// the id does not have that shape, which is the safe default: an
-// unparseable id is left alone rather than guessed at. escalateAlert reads
-// the CONDITION of an ALERT item's body (watchEscalationBody) the same way.
-func retiredConditionTypeFromAlertID(alertID string) string {
+// alertIDConditionType recovers the condition-type segment from an AlertID
+// shaped "<org_id>/<seat_id>/<condition_type>@<unixnano>" (sendAlert's
+// "%s@%d" format over conditionKey) -- the segment between the last "/" and
+// the "@". Returns "" (never a retiredConditionNames match) if the id does
+// not have that shape, which is the safe default: an unparseable id is left
+// alone rather than guessed at. pruneRetiredConditions reads it to find the
+// alerts of a retired condition, and watchEscalationBody for the CONDITION
+// of an ALERT item's body. It checks only the separators; alertIDSeat
+// (escalate.go) reads the seat of the same shape and checks all of it, so a
+// change to the shape changes both.
+func alertIDConditionType(alertID string) string {
 	at := strings.LastIndex(alertID, "@")
 	if at < 0 {
 		return ""
@@ -1591,8 +1599,10 @@ func (w *watchRun) checkDeadman(status *watchStatusFile, rr ManifestReadResult, 
 // once. An alert the inbox already holds as an item (a watch that ended
 // after recording it and before saving its status file) gets no second
 // item (D4). When the inbox cannot take the item (no inbox store, an inbox
-// that cannot be read or written), the escalation takes the path it took
-// before the inbox held ALERT items (escalateWithoutInbox, D5).
+// that cannot be read or written, or values of the ALERT in the
+// watch-status file that the watch would not have written), the escalation
+// takes the path it took before the inbox held ALERT items
+// (escalateWithoutInbox, D5).
 func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pending *watchPendingAlert, now time.Time) {
 	reason := "deadman_timeout"
 	if pending.Subject == LeaderIdentity {
@@ -1611,18 +1621,24 @@ func (w *watchRun) escalateAlert(status *watchStatusFile, alertID string, pendin
 // orgID, with the delivery inboxDelivery decides, and writes on stderr what
 // it did. With delivery InboxDeliveryDeadline the item is only recorded: no
 // escalations.jsonl line and no desktop notification, and one stderr line
-// says it was left to the director (AC2). With InboxDeliveryNow it is sent
-// to the human path at once (sendAlertItemToHuman, AC3), whose
+// says it was left to the director (plan 2026-10-23-watch-escalation-inbox,
+// AC2). With InboxDeliveryNow it is sent to the human path at once
+// (sendAlertItemToHuman; plan 2026-10-23-watch-escalation-inbox, AC3), whose
 // escalations.jsonl line goes to Org.EscalationsPath, the file the CLI also
 // gives the watch. An alert that is already an item is handled by
 // escalateRecordedItem.
 //
 // It returns an error, having written nothing to the inbox or to stderr,
-// only when the inbox cannot take the item: Org.Inbox is nil, the inbox
-// cannot be read, the body fails the protocol check (which the body
-// watchEscalationBody builds passes), or the item cannot be recorded. Once
-// the item is recorded it returns nil.
+// only when the inbox cannot take the item: the ALERT's values from the
+// watch-status file are not ones the watch writes
+// (checkWatchEscalationValues), Org.Inbox is nil, the inbox cannot be read,
+// the body fails the protocol check (which the body watchEscalationBody
+// builds passes), or the item cannot be recorded. Once the item is recorded
+// it returns nil.
 func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingAlert, reason string) error {
+	if err := checkWatchEscalationValues(alertID, pending); err != nil {
+		return err
+	}
 	if w.org.Inbox == nil {
 		return errors.New("no inbox store is configured")
 	}
@@ -1654,6 +1670,30 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 	return nil
 }
 
+// checkWatchEscalationValues returns an error when a value of the pending
+// ALERT that watchEscalationBody puts into the item's headers is not one
+// sendAlert writes: a subject that is not a seat_id (ValidateIdentifier),
+// an alertID that alertIDSeat does not read, or a control character in
+// alertID or in the ALERT's ts. The values come from the watch-status file,
+// which a hand edit can change, and the body is read by the director, so a
+// line break in one of them must not add a header (self-review F4 of plan
+// 2026-10-23-watch-escalation-inbox). escalateAlert then takes the path
+// without the inbox, whose banner escapes them (escalationHead) and names
+// the error as its cause, so the error holds no value unescaped: only
+// ValidateIdentifier's names the subject, quoted with %q.
+func checkWatchEscalationValues(alertID string, pending *watchPendingAlert) error {
+	if err := ValidateIdentifier("seat_id", pending.Subject); err != nil {
+		return fmt.Errorf("the ALERT's subject in the watch-status file is not a seat: %w", err)
+	}
+	if alertIDSeat(alertID) == "" || strings.ContainsFunc(alertID, unicode.IsControl) {
+		return errors.New("the alert_id in the watch-status file does not have the shape <org>/<seat>/<condition>@<n> the watch writes")
+	}
+	if strings.ContainsFunc(pending.TS, unicode.IsControl) {
+		return errors.New("the ALERT's ts in the watch-status file holds a control character")
+	}
+	return nil
+}
+
 // escalateRecordedItem is escalateToInbox for an alert the inbox already
 // holds as item, one with its alert_id: a watch that recorded the item and
 // ended before it saved its status file left the alert pending, so the next
@@ -1662,14 +1702,16 @@ func (w *watchRun) escalateToInbox(orgID, alertID string, pending *watchPendingA
 // counts, whatever delivery the item was recorded with: it sends item to
 // the human path, under its own ID and with sendReason, only when the item
 // is open with no notified event and this watch cannot leave it to the
-// director (delivery, which inboxDelivery decided for this watch, is
+// director (watchDelivery, which inboxDelivery decided for this watch, is
 // InboxDeliveryNow, so sendReason is set). Otherwise it sends nothing: a
 // notified or resolved item needs no send, an acked one is left to the
 // resolve deadline, and an open one with no notified event to the director
-// and the ack deadline. Either way one stderr line names the item.
-func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, head, delivery, sendReason string) {
+// and the ack deadline. Either way one stderr line names the item, with the
+// item's own state, notified, and delivery (item.Delivery, the delivery it
+// was recorded with, not watchDelivery).
+func (w *watchRun) escalateRecordedItem(orgID, alertID string, item InboxItem, head, watchDelivery, sendReason string) {
 	state := fmt.Sprintf("state=%s notified=%t delivery=%s", item.State, item.Notified, item.Delivery)
-	if item.State != InboxStateOpen || item.Notified || delivery != InboxDeliveryNow {
+	if item.State != InboxStateOpen || item.Notified || watchDelivery != InboxDeliveryNow {
 		_, _ = fmt.Fprintf(w.stderr, "%s -- already in the inbox as %s (%s); nothing new is recorded or sent; read it with: %s\n",
 			head, item.ID, state, InboxCommand("show", item.ID, w.org.InboxHintStateDir))
 		return
@@ -1706,14 +1748,15 @@ func escalationHead(orgID, alertID, subject, reason string) string {
 // headers of the watch's ALERT (sendAlert) -- ORG_ID, SEAT (the ALERT's
 // subject), and CONDITION (read from alertID) -- then REASON, ALERT_ID, and
 // ALERT_TS (the time of the ALERT), and one line saying why the watch
-// escalated it.
+// escalated it. escalateToInbox checks the values from the watch-status
+// file first (checkWatchEscalationValues), so none of them adds a header.
 func watchEscalationBody(orgID, alertID string, pending *watchPendingAlert, reason string, deadmanMinutes int) string {
 	why := fmt.Sprintf("the leader showed no activity within %d minutes (deadman_minutes) of the ALERT", deadmanMinutes)
 	if reason == "leader_is_anomaly_subject" {
 		why = "the ALERT is about the leader itself, so the watch did not wait for the leader to act"
 	}
 	return fmt.Sprintf("TYPE: ALERT\nORG_ID: %s\nSEAT: %s\nCONDITION: %s\nREASON: %s\nALERT_ID: %s\nALERT_TS: %s\n\nwatchdog: escalated to a person because %s",
-		orgID, pending.Subject, retiredConditionTypeFromAlertID(alertID), reason, alertID, pending.TS, why)
+		orgID, pending.Subject, alertIDConditionType(alertID), reason, alertID, pending.TS, why)
 }
 
 // escalateWithoutInbox is escalateAlert's path when the inbox cannot take
@@ -1722,7 +1765,9 @@ func watchEscalationBody(orgID, alertID string, pending *watchPendingAlert, reas
 // order: the stderr banner, which names the cause; the desktop notification
 // (notifyWithoutInbox); and one escalations.jsonl line with alert_id,
 // subject, reason, and the notification's result as osascript (F13). A line
-// that cannot be written is one more stderr line.
+// that cannot be written is one more stderr line, which carries that result
+// as notification=<result>, so the result is not lost with the line
+// (self-review F1 of plan 2026-10-23-watch-escalation-inbox).
 func (w *watchRun) escalateWithoutInbox(orgID, alertID, subject, reason string, now time.Time, cause error) {
 	_, _ = fmt.Fprintf(w.stderr, "%s -- see %s (not recorded in the inbox: %v)\n",
 		escalationHead(orgID, alertID, subject, reason), w.escalationsPath, cause)
@@ -1732,33 +1777,23 @@ func (w *watchRun) escalateWithoutInbox(orgID, alertID, subject, reason string, 
 		Subject: subject, Reason: reason, Osascript: osascript,
 	}
 	if err := appendJSONLine(w.escalationsPath, rec); err != nil {
-		_, _ = fmt.Fprintf(w.stderr, "watchdog: escalation of alert %s not recorded: %v\n", PrintableInboxText(alertID, false), err)
+		_, _ = fmt.Fprintf(w.stderr, "watchdog: escalation of alert %s not recorded: %v; notification=%s\n",
+			PrintableInboxText(alertID, false), err, PrintableInboxText(osascript, false))
 	}
 }
 
 // notifyWithoutInbox sends the desktop notification of an escalation the
-// inbox could not take with w.escalateFn (WatchAllParams.Escalate) and
-// returns the result with the values of the inbox's notified event
-// (inboxDesktopNotify): ok, failed: <err>, or skipped. A nil escalateFn is
-// realEscalate on darwin and skipped elsewhere (escalateGOOS). The call gets
-// its own bound from context.Background(), as the inbox's does: an
-// osascript that does not return cannot hold the cycle, and a SIGINT or
-// SIGTERM in the middle of the cycle does not cut off the notification of
-// the escalation, which is never sent again (self-review L2).
+// inbox could not take with w.escalateFn (WatchAllParams.Escalate) through
+// notifyBounded, as the inbox's human path sends its own
+// (inboxDesktopNotify), and returns the result with the values of the
+// inbox's notified event: ok, failed: <err>, or skipped. A nil escalateFn
+// is realEscalate on darwin and skipped elsewhere (desktopNotifyGOOS). The
+// call gets its own bound from context.Background(): an osascript that does
+// not return cannot hold the cycle, and a SIGINT or SIGTERM in the middle of
+// the cycle does not cut off the notification of the escalation, which is
+// never sent again (self-review L2).
 func (w *watchRun) notifyWithoutInbox(message string) string {
-	notify := w.escalateFn
-	if notify == nil {
-		if escalateGOOS != "darwin" {
-			return inboxNotifySkipped
-		}
-		notify = realEscalate
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), inboxDesktopNotifyTimeout)
-	defer cancel()
-	if err := notify(ctx, message); err != nil {
-		return "failed: " + err.Error()
-	}
-	return inboxNotifyOK
+	return notifyBounded(w.escalateFn, realEscalate, message)
 }
 
 // maxEscalatedEntries caps status.Escalated (tech-debt: "watchdog deferred

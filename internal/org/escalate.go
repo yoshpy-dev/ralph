@@ -70,8 +70,9 @@ const (
 	inboxNotifySkipped = "skipped"
 )
 
-// inboxDesktopNotifyTimeout bounds one desktop notification call: the
-// inbox's, and the watch deadman's (escalateAlert, watch.go).
+// inboxDesktopNotifyTimeout bounds one desktop notification call
+// (notifyBounded): the inbox's, and that of a watch escalation the inbox
+// could not take (escalateWithoutInbox, watch.go).
 const inboxDesktopNotifyTimeout = 10 * time.Second
 
 // Titles of the inbox's desktop notifications on the osascript path, named
@@ -520,6 +521,8 @@ func notifiableType(typ string) string {
 // watch's ALERT, so it also tells why the watch escalated it
 // (escalateAlert): LeaderIdentity means leader_is_anomaly_subject, and any
 // other seat deadman_timeout (plan 2026-10-23-watch-escalation-inbox, AC3).
+// alertIDConditionType (watch.go) reads the condition of the same shape and
+// checks only its separators; a change to the shape changes both.
 func alertIDSeat(alertID string) string {
 	at := strings.LastIndex(alertID, "@")
 	if at < 0 {
@@ -550,19 +553,40 @@ func (o *Org) alertUnrecordedEscalation(orgID, typ string, cause error, banner i
 	}
 }
 
-// inboxDesktopNotify sends the desktop notification and returns the result
-// a notified event records: "ok", "failed: <err>", or "skipped" when
-// DesktopNotify is nil off darwin. title is used on the osascript path
-// only; DesktopNotify gets the message alone.
+// inboxDesktopNotify sends the desktop notification with DesktopNotify
+// (notifyBounded) and returns the result a notified event records: "ok",
+// "failed: <err>", or "skipped" when DesktopNotify is nil off darwin. title
+// is used on the osascript path only; DesktopNotify gets the message alone.
 func (o *Org) inboxDesktopNotify(title, message string) string {
-	notify := o.DesktopNotify
+	return notifyBounded(o.DesktopNotify, func(ctx context.Context, message string) error {
+		return osascriptNotify(ctx, title, message)
+	}, message)
+}
+
+// desktopNotifyGOOS is the GOOS notifyBounded reads when it has no notify
+// function: on darwin it notifies with osascript, and elsewhere it sends
+// nothing and returns skipped. It is runtime.GOOS; a test sets another value
+// so that a nil Org.DesktopNotify or WatchAllParams.Escalate never reaches
+// osascript.
+var desktopNotifyGOOS = runtime.GOOS
+
+// notifyBounded sends one desktop notification of message and returns its
+// result with the values of the inbox's notified event: ok, failed: <err>,
+// or skipped. It is the notification of the inbox's human path
+// (inboxDesktopNotify, with Org.DesktopNotify) and of a watch escalation the
+// inbox could not take (notifyWithoutInbox, with WatchAllParams.Escalate,
+// watch.go). It calls notify, or when notify is nil, onDarwin (osascript) on
+// darwin and nothing elsewhere (skipped), by desktopNotifyGOOS. The call gets
+// its own bound, inboxDesktopNotifyTimeout from context.Background(): an
+// osascript that does not return cannot hold the caller, and a SIGINT or
+// SIGTERM that cancels the caller's context does not cut off a notification
+// that is never sent again (self-review L2).
+func notifyBounded(notify, onDarwin EscalateFunc, message string) string {
 	if notify == nil {
-		if runtime.GOOS != "darwin" {
+		if desktopNotifyGOOS != "darwin" {
 			return inboxNotifySkipped
 		}
-		notify = func(ctx context.Context, message string) error {
-			return osascriptNotify(ctx, title, message)
-		}
+		notify = onDarwin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inboxDesktopNotifyTimeout)
 	defer cancel()

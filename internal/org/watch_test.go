@@ -1252,13 +1252,14 @@ func TestWatch_Escalation_AnAlertAlreadyInTheInboxGetsNoSecondItem(t *testing.T)
 	}
 }
 
-// setEscalateGOOS sets escalateGOOS to goos for the test, so a nil
-// escalateFn reads as that GOOS and, off darwin, never reaches osascript.
-func setEscalateGOOS(t *testing.T, goos string) {
+// setDesktopNotifyGOOS sets desktopNotifyGOOS to goos for the test, so a
+// nil escalateFn or Org.DesktopNotify reads as that GOOS (notifyBounded)
+// and, off darwin, never reaches osascript.
+func setDesktopNotifyGOOS(t *testing.T, goos string) {
 	t.Helper()
-	saved := escalateGOOS
-	escalateGOOS = goos
-	t.Cleanup(func() { escalateGOOS = saved })
+	saved := desktopNotifyGOOS
+	desktopNotifyGOOS = goos
+	t.Cleanup(func() { desktopNotifyGOOS = saved })
 }
 
 // AC5 and F13: when the inbox cannot take the escalation (no inbox store,
@@ -1312,7 +1313,7 @@ func TestWatch_Escalation_WithoutTheInboxWritesTheBannerThenNotifiesThenWritesOn
 			status, alertID := pendingLeaderAlert(f.clk)
 			run := f.run(nil)
 			if tc.nilEscalate {
-				setEscalateGOOS(t, "linux")
+				setDesktopNotifyGOOS(t, "linux")
 				run.escalateFn = nil
 			}
 			if err := run.evaluateCycle("org-a", status); err != nil {
@@ -1342,6 +1343,119 @@ func TestWatch_Escalation_WithoutTheInboxWritesTheBannerThenNotifiesThenWritesOn
 				if items := mustReadInbox(t, f.o.Inbox).Items; len(items) != 0 {
 					t.Errorf("inbox = %+v; want no item", items)
 				}
+			}
+			assertEscalatedOnce(t, status, alertID)
+		})
+	}
+}
+
+// Self-review F1: on the path without the inbox, an escalations.jsonl line
+// that cannot be written is one more stderr line after the banner, and that
+// line carries the notification's result as notification=<result> (ok,
+// failed: <err>, or skipped), so the result is not lost with the line.
+func TestWatch_Escalation_WithoutTheInboxALineThatCannotBeWrittenStillNamesTheNotificationsResult(t *testing.T) {
+	cases := []struct {
+		name          string
+		escalateErr   error
+		nilEscalate   bool
+		wantOsascript string
+	}{
+		{name: "the notification is sent", wantOsascript: "ok"},
+		{name: "the notification fails", escalateErr: errors.New("exit status 1: Not authorized to send Apple events"),
+			wantOsascript: "failed: exit status 1: Not authorized to send Apple events"},
+		{name: "no notification off darwin", nilEscalate: true, wantOsascript: "skipped"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			f.o.Inbox = nil
+			if err := os.Mkdir(f.o.EscalationsPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			f.escalateErr = tc.escalateErr
+			status, alertID := pendingLeaderAlert(f.clk)
+			run := f.run(nil)
+			if tc.nilEscalate {
+				setDesktopNotifyGOOS(t, "linux")
+				run.escalateFn = nil
+			}
+			if err := run.evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+
+			lines := strings.Split(strings.TrimSuffix(f.stderr.String(), "\n"), "\n")
+			if len(lines) != 2 || !strings.HasPrefix(lines[0], "WATCHDOG ESCALATION: org=org-a alert="+alertID+" ") {
+				t.Fatalf("stderr = %q; want the banner and one more line", f.stderr.String())
+			}
+			wantStart, wantEnd := "watchdog: escalation of alert "+alertID+" not recorded: ", "; notification="+tc.wantOsascript
+			if !strings.HasPrefix(lines[1], wantStart) || !strings.HasSuffix(lines[1], wantEnd) || !strings.Contains(lines[1], f.o.EscalationsPath) {
+				t.Errorf("second stderr line = %q; want %q, the error naming %s, then %q", lines[1], wantStart, f.o.EscalationsPath, wantEnd)
+			}
+			assertEscalatedOnce(t, status, alertID)
+		})
+	}
+}
+
+// Self-review F4: a pending ALERT whose values in the watch-status file are
+// not ones the watch writes (a subject with a line break, an alert_id whose
+// condition holds one, an alert_id of another shape, a ts with a line
+// break) records no item: a line break in a header value would add a
+// header to the body the director reads. The escalation takes the path
+// without the inbox instead: one stderr line, the banner with the values
+// escaped and the cause, the notification, and the escalations.jsonl line
+// with the values as they are.
+func TestWatch_Escalation_AnAlertWithValuesTheWatchDoesNotWriteRecordsNoItem(t *testing.T) {
+	const inject = "\nINJECTED: yes"
+	cases := []struct {
+		name string
+		// alert returns the pending ALERT of org-a and its alert_id, raised
+		// before clk's time; the cycle at clk's time escalates it.
+		alert      func(clk *fakeClock) (string, *watchPendingAlert)
+		wantReason string
+		wantCause  string
+	}{
+		{name: "a subject with a line break", alert: func(clk *fakeClock) (string, *watchPendingAlert) {
+			id := fmt.Sprintf("%s@%d", conditionKey("org-a", "seat-1", condLiveness), clk.Now().UnixNano())
+			return id, &watchPendingAlert{AlertID: id, TS: clk.Now().Add(-6 * time.Minute).UTC().Format(time.RFC3339), Subject: "seat-1" + inject, HistoryLeaderLines: -1}
+		}, wantReason: "deadman_timeout", wantCause: `the ALERT's subject in the watch-status file is not a seat: org: invalid seat_id "seat-1\nINJECTED: yes"`},
+		{name: "an alert_id whose condition holds a line break", alert: func(clk *fakeClock) (string, *watchPendingAlert) {
+			id := fmt.Sprintf("%s%s@%d", conditionKey("org-a", LeaderIdentity, condLiveness), inject, clk.Now().UnixNano())
+			return id, &watchPendingAlert{AlertID: id, TS: clk.Now().UTC().Format(time.RFC3339), Subject: LeaderIdentity, HistoryLeaderLines: -1}
+		}, wantReason: "leader_is_anomaly_subject", wantCause: "the alert_id in the watch-status file does not have the shape"},
+		{name: "an alert_id of another shape", alert: func(clk *fakeClock) (string, *watchPendingAlert) {
+			id := fmt.Sprintf("org-a/%s@%d", LeaderIdentity, clk.Now().UnixNano())
+			return id, &watchPendingAlert{AlertID: id, TS: clk.Now().UTC().Format(time.RFC3339), Subject: LeaderIdentity, HistoryLeaderLines: -1}
+		}, wantReason: "leader_is_anomaly_subject", wantCause: "the alert_id in the watch-status file does not have the shape"},
+		{name: "a ts with a line break", alert: func(clk *fakeClock) (string, *watchPendingAlert) {
+			id := fmt.Sprintf("%s@%d", conditionKey("org-a", LeaderIdentity, condLiveness), clk.Now().UnixNano())
+			return id, &watchPendingAlert{AlertID: id, TS: clk.Now().UTC().Format(time.RFC3339) + inject, Subject: LeaderIdentity, HistoryLeaderLines: -1}
+		}, wantReason: "leader_is_anomaly_subject", wantCause: "the ALERT's ts in the watch-status file holds a control character"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newWatchInboxFixture(t)
+			f.o.Config.DeadmanMinutes = 5
+			alertID, pending := tc.alert(f.clk)
+			status := &watchStatusFile{OrgID: "org-a", PendingAlerts: map[string]*watchPendingAlert{alertID: pending}}
+			if err := f.run(nil).evaluateCycle("org-a", status); err != nil {
+				t.Fatalf("evaluateCycle: %v", err)
+			}
+
+			if items := mustReadInbox(t, f.o.Inbox).Items; len(items) != 0 {
+				t.Errorf("inbox = %+v; want no item", items)
+			}
+			wantBanner := "WATCHDOG ESCALATION: org=org-a alert=" + PrintableInboxText(alertID, false) + " subject=" + PrintableInboxText(pending.Subject, false) +
+				" reason=" + tc.wantReason + " -- see " + f.o.EscalationsPath + " (not recorded in the inbox: "
+			if got := f.stderr.String(); !strings.HasPrefix(got, wantBanner) || !strings.Contains(got, tc.wantCause) || strings.Count(got, "\n") != 1 {
+				t.Errorf("stderr = %q; want the one banner %q... naming %q", got, wantBanner, tc.wantCause)
+			}
+			if len(f.escalated) != 1 || len(f.notified) != 0 {
+				t.Errorf("without-inbox notifications %q, inbox notifications %q; want one and none", f.escalated, f.notified)
+			}
+			want := map[string]any{"ts": f.clk.Now().UTC().Format(time.RFC3339), "org_id": "org-a", "alert_id": alertID, "subject": pending.Subject,
+				"reason": tc.wantReason, "osascript": "ok"}
+			if lines := escalationLines(t, f.o.EscalationsPath); len(lines) != 1 || !reflect.DeepEqual(lines[0], want) {
+				t.Errorf("escalations.jsonl = %v; want exactly one line %v", lines, want)
 			}
 			assertEscalatedOnce(t, status, alertID)
 		})

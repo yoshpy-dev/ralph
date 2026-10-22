@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -314,10 +313,19 @@ func TestEscalate_DesktopNotificationFailureStillSucceeds(t *testing.T) {
 	}
 }
 
+// With DesktopNotify nil, the inbox's notification reads the GOOS seam the
+// watch's notification without the inbox reads too (desktopNotifyGOOS,
+// notifyBounded; self-review F5 of plan 2026-10-23-watch-escalation-inbox),
+// so the test sets it off darwin and runs on every GOOS. PATH holds only a
+// fake osascript that fails, so a notification that did not read the seam
+// would record failed: ... here, not reach the real osascript.
 func TestEscalate_NoDesktopNotificationOffDarwinIsSkipped(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("with DesktopNotify nil, darwin runs the real osascript")
+	setDesktopNotifyGOOS(t, "linux")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "osascript"), []byte("#!/bin/sh\necho 'the fake osascript ran' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	t.Setenv("PATH", bin)
 	f := newEscalateFixture(t)
 	f.o.DesktopNotify = nil
 	res := f.escalate("org-a", "TYPE: QUESTION\n\nwhich?")
