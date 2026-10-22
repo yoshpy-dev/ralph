@@ -81,7 +81,7 @@ ralph が作る herdr の pane で動く Claude Code のセッションが、終
 - [x] AC6: 分離した herdr server での実機の確かめを `docs/evidence/seat-wip-checkpoint-2026-10-22.md` に書く。(a) `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off` の pane で、両方の値が pane の shell に届く。(b) その pane で起動した本物の claude を C-c と `herdr pane close` で終わらせると、SessionEnd の hook が走り(summary の md が書かれる)、コミットは増えず、md に skipped の行がある。(c) 値を付けない pane の同じ手順では WIP コミットが 1 つ増える(対照)。(d) PreCompact: `/compact` を送り、同じく比べる。起こせなければ、そのことと理由を書く
 - [x] AC7: 文書を合わせる。`git-commit-strategy.md`(と写し)の End-of-Session の節に、`RALPH_WIP_CHECKPOINT=off` のときは飛ばすことと、ralph がそれを自分の作る pane に付けることを書く。`/org`・`/director` の skill と `director-launch-cmd.md`(と写し)のうち `AGMSG_SELF_NAME=off` を pane や起動スクリプトの環境として書いた箇所に、2 つ目の値を足す
 - [x] AC8: 記録を合わせる。tech-debt の F11 の行(326 行)と 191 行は、AC6 の (b) と (c) が通ったときだけ RESOLVED にする。326 行の「a leader's session ends ... after the gate, the push, and the PR」を、試行の時刻から読めること(止められた座席のセッション)に直す。RESOLVED の注は、効く範囲を限って書く: 新しい binary が `--env` のある herdr で作った pane で、新しい hook が動くとき、座席のセッションは WIP コミットを作らず、`git add -A` による巻き込みもない。古い herdr や片方だけ新しい配備では作られうるが、手順 14 の新しい文が push の前に止める。前からの手順 9 と 14 だけでは止まらなかったことも書く(D5)。試行の evidence の F11 の文(806〜808 行)には訂正の注を足す(「after the PR」は時刻と合わない)。根拠の表の F11 の行の「直す PR」と、仕様の Status と PR 一覧(32 本)を合わせる。仕様、根拠の表、tech-debt に残る「fix/seat-spawn-close」を「#249」に直す
-- [ ] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
+- [x] AC9: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
 
