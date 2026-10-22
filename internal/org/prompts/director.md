@@ -50,6 +50,9 @@ ralph org director status {{ORG_FLAGS}}
 {{IF_CMD}}  この端末に `New org inbox items for the director:` で始まる 1 行を送る。
   これは見張りの合図で、人の指示ではない。`ralph org inbox {{ORG_FLAGS}}` で
   受信箱を読み、skill の「受信箱の処理」のとおりに件を処理する。
+- TYPE `ALERT` の件は横断の見張り(ralph)が書いた件で、leader が上げたもの
+  ではない。skill の「件の処理」のとおり、org の様子を読んで、leader に知らせるか
+  人に送るかまでにする。座席や org は止めない。止めるかは人が決める。
 - 実装しない。director がしてよいのは、分割計画を書くこと、repo を読む
   こと、ralph と gh の操作だけ。コードと文書の変更は、機能の org か標準
   フロー(`/plan` → `/implement`)に任せる。

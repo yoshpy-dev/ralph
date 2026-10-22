@@ -28,11 +28,12 @@ import (
 // (*org.Org).RunWatchAll in the foreground (runOrgWatchAll), `--all
 // --detach` starts that as a detached process (runOrgWatchDetach), and
 // `--stop` asks a running one to stop (runOrgWatchStop). All condition
-// evaluation, ALERT dedupe, deadman escalation, inbox deadline, director
-// check and its director-alive.json, director wake, lock, and liveness mark
-// logic lives in internal/org (watch.go, deadline.go, director_check.go,
-// director_wake.go, watchalive.go) -- this command checks the
-// flags, resolves the state directory (the one the manifest, receipts, and
+// evaluation, ALERT dedupe, deadman escalation (an ALERT item of the inbox,
+// or escalations.jsonl when the inbox cannot take it), inbox deadline,
+// director check and its director-alive.json, director wake, lock, and
+// liveness mark logic lives in internal/org (watch.go, deadline.go,
+// director_check.go, director_wake.go, watchalive.go) -- this command checks
+// the flags, resolves the state directory (the one the manifest, receipts, and
 // inbox live in, via org.ResolveOrgStateDir) and the directory wake_cmd runs
 // in (orgWatchDirectorWake), and wires them through to org.WatchAllParams.
 //
@@ -69,10 +70,17 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"wake_cmd.\n" +
 			"Then it runs the pulse cycle of each running org: heartbeat-stall /\n" +
 			"process-liveness / worktree-scope-change ALERTs sent to the org's\n" +
-			"leader, and a deadman escalation\n" +
-			"(<state-dir>/escalations.jsonl + stderr banner + best-effort darwin\n" +
-			"notification) when the leader does not respond within\n" +
-			"[org].deadman_minutes. It holds <state-dir>/watch.lock and rewrites its\n" +
+			"leader. When the leader does not respond to an ALERT within\n" +
+			"[org].deadman_minutes, or the ALERT is about the leader, it records the\n" +
+			"escalation as a TYPE ALERT item of the org inbox, which reaches the\n" +
+			"human the way a leader's escalate does: with [org.director].enabled and\n" +
+			"a watch that is neither --once nor asked to stop, it is left to the\n" +
+			"director and the inbox deadlines; otherwise it is also sent to the\n" +
+			"human at once (<state-dir>/escalations.jsonl, a stderr banner, and a\n" +
+			"desktop notification). When the inbox cannot take the item, the watch\n" +
+			"sends the escalation to the human outside the inbox: a stderr banner,\n" +
+			"a desktop notification, and an escalations.jsonl line that records the\n" +
+			"notification's result. It holds <state-dir>/watch.lock and rewrites its\n" +
 			"liveness mark <state-dir>/watch-alive.json every cycle; a second watch\n" +
 			"on the same ledger is refused. SIGINT or SIGTERM ends it after the\n" +
 			"current cycle.\n\n" +
@@ -270,9 +278,11 @@ func runOrgWatchAll(cmd *cobra.Command, rt *org.Org, resolvedStateDir, stateDirS
 		StatusDir: resolvedStateDir,
 		Interval:  effectiveInterval,
 		Cycles:    cycles,
-		// The deadman's desktop notification goes through the inbox's
-		// override (nil in production, which means osascript on darwin), so
-		// a test shows no real notification from either.
+		// The desktop notification of an escalation the inbox could not
+		// take goes through the inbox's override, as the inbox's own
+		// notifications (the watch's ALERT items included) do: nil in
+		// production, which means osascript on darwin, so a test shows no
+		// real notification from either.
 		Escalate:         rt.DesktopNotify,
 		Stderr:           cmd.ErrOrStderr(),
 		LockWait:         orgWatchLockWaitOverride,

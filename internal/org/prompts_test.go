@@ -1977,6 +1977,36 @@ func TestRenderDirectorPrompt_TellsWhatTheWakeLineIs(t *testing.T) {
 	}
 }
 
+// TestRenderDirectorPrompt_LeavesTheStopForAnAlertItemToTheHuman pins the
+// mission bullet of the watch's ALERT items (plan
+// 2026-10-23-watch-escalation-inbox, AC8 and D7): for a director in herdr
+// and for one in the terminal launch_cmd opened, the prompt says once that a
+// TYPE ALERT item is the cross-org watch's, not the leader's, has the
+// director go only as far as telling the leader or sending it to the human
+// by the skill, and leaves stopping a seat or an org to the human.
+func TestRenderDirectorPrompt_LeavesTheStopForAnAlertItemToTheHuman(t *testing.T) {
+	const bullet = "TYPE `ALERT` の件は横断の見張り(ralph)が書いた件で、leader が上げたものではない。" +
+		"skill の「件の処理」のとおり、org の様子を読んで、leader に知らせるか人に送るかまでにする。" +
+		"座席や org は止めない。止めるかは人が決める。"
+	for _, launch := range []string{DirectorLaunchHerdr, DirectorLaunchCmd} {
+		t.Run(launch, func(t *testing.T) {
+			vars := testDirectorPromptVars()
+			vars.Launch = launch
+			text := mustRenderDirectorPrompt(t, vars)
+			mission, ok := markdownSection(text, "## ミッション")
+			if !ok {
+				t.Fatalf("rendered director prompt has no ミッション section:\n%s", text)
+			}
+			if !containsPhrase(mission, bullet) {
+				t.Errorf("ミッション section does not say %q:\n%s", bullet, mission)
+			}
+			if n := strings.Count(text, "TYPE `ALERT`"); n != 1 {
+				t.Errorf("the prompt names TYPE `ALERT` %d times, want 1:\n%s", n, text)
+			}
+		})
+	}
+}
+
 // markdownCodeSpan is one inline code span of a markdown text: its content
 // is the submatch.
 var markdownCodeSpan = regexp.MustCompile("`([^`]+)`")

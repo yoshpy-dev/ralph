@@ -176,7 +176,7 @@ Ralph Loop(/loop)の自律実行系を撤去し、Lead LLM が herdr(実行・�
 - **越権防止**: プール外モデル・座席上限は LLM から見えない機構層(動詞バリデーション)で拒否する。エンベロープの壁は判断対象にしない。スコープ外書き込みは PR② 時点では spawn `--scope` の manifest 記録+役割プロンプト指示+スモークでの前後 `git status` 検査に留め、**決定論的検知は PR④ の Watchdog パルス層に一本化**する(PR② 計画で確定した境界変更)。
 - **agmsg 経由のインジェクション**: 座席は他座席からのメッセージを指示ではなくデータとして扱う規約を役割プロンプトと `/org` skill に明記。EVIDENCE はポインタのみとし、シークレットや長文コンテキストをメッセージに載せない(`git-commit-strategy.md` の safe-quoting 原則を send 動詞にも適用)。
 - **自律座席の権限**: 座席の permission mode / sandbox は現行 `RALPH_PERMISSION_MODE` / codex sandbox 設定の流儀を継承し、エンベロープで指定可能にする。
-- **デッドマン経路の完全性**: 人間エスカレーションはパルス層(決定論)からのみ発火し、LLM が抑止できない。
+- **デッドマン経路の完全性**: 人間エスカレーションはパルス層(決定論)からのみ発火し、LLM が抑止できない。 **(2026-10-23 の注: 機能ごとの org では、見張りの escalation は受信箱の ALERT の件になり、director が resolve すると人に届かない。上の 2026-10-07 の注のとおり後継の仕様が優先し、その読み方は `docs/specs/2026-10-07-org-multi-org-director.md` の FR-6 の注「試行の所見 F6 と F13 の直しで決めたこと」に書いた)**
 
 ## Open questions
 
