@@ -134,7 +134,11 @@ spawn が途中で失敗したとき、その spawn が作った herdr の pane 
 - [x] Plan reviewed(consult-plan-seatenv4b: 進めてよい。D3 の label が違う場合は断らずに進む形に変え、AC3 のテストで stop が `spawn_step` の pane_id を使うことを見る、AC6 に (e)、AC7 に根拠の表の前文を足した)
 - [x] Plan approved(ユーザーの指示「作成したプランは自動承認します」による。計画の Codex 助言の HIGH 2 件(途中の座席への不正な再試行が `rejected` を書いて閉じられなかった pane を台帳から隠す、動いている spawn の途中の記録を stale と取り違えて閉じる)は、どちらもコードで確かめて、Scope、D5・D6、AC9・AC10、S2、Risks、図解ページに反映した)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 80780740(AC1〜AC3)。範囲の外では、`internal/cli/org_test.go` の 1 件を新しい補償の順(C-c のあとに close)を見る形に直した(弱めていない)
+  - S2 97782369(AC4・AC9・AC10)。計画にない追加: stale の座席の記録した pane が打った本人の pane(`HERDR_PANE_ID`)のときは、確かめも C-c も close もせず、何も書かずに断る(stop の自分の pane の規則と同じ。閉じると打ったセッションが終わるため)。`ralph org start --plan` の事前検査も、途中の座席への拒否で Spawn と同じ文を出す
+  - S3 abb11e8c(AC5)。期限の案内は、step が返った直後の spawn の ctx の `Err()` で決める(agent start の再試行を期限が打ち切ると、原因が DeadlineExceeded を包まないため)
+  - S4(AC6): `docs/evidence/seat-spawn-close-2026-10-22.md`。(a)〜(e) に加え、同じ座席の重ねた spawn をロックが断ること (f) も実機で見た
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
