@@ -445,6 +445,11 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 - Status: Approved
 - Approved: 2026-10-09 sha256:<digest>
 
+## 座席の決まり
+
+- 座席は claude で、implementer は opus、reviewer は sonnet にする
+- 予約の外のファイルは編集しない
+
 ## Features
 
 ### auth-token
@@ -480,8 +485,25 @@ worktree のルートの `.harness/state/org/`)の下の `splits/<id>.md` に置
 - `- Depends on:` は任意。同じ分割計画の slug をカンマ区切りで書くか、
   `none` と書く。start は依存の順を強制せず、leader のタスクに書くだけ。
 - フィールドの行は行頭に書き、1 つの機能に各 1 行まで。節のほかの行が機能の
-  本文で、leader のタスクになる。`## Features` の外の節(目的や背景など)は
-  自由に書ける。
+  本文で、その機能の leader のタスクに入る。
+- `## Features` より前の `## ` の節(上の例の `## 座席の決まり`)が前文で、
+  目的や、全機能の座席に適用する決まり(座席の driver と model、編集しては
+  いけないファイルなど)を書く。start は、どの機能の leader のタスクにも、
+  「全機能の座席に適用する決まり」で始まる 1 行の前置きと、前文を
+  バッククォートのコードブロックで囲んだものを入れる。前文の見出しの行と
+  中のコードブロックはそのまま入る(前後の空行は詰める)。前文は長くても
+  削られずに入るので、全機能に共通の決まりを前文に書き、長い背景は機能の
+  本文か別のファイルに書く。
+- 先頭の題などの自由文、`## Features` の中の最初の `### ` より前の行、
+  `## Features` より後の `## ` の節は、どの leader にも渡らない(読み込みは
+  拒否しない)。
+- leader は前文を、自分の機能の計画の `## 全機能の座席に適用する決まり` の
+  節に囲みの行ごと写す。座席の driver と model は leader が spawn の引数に
+  使い、ほかの決まりは座席がその節から読む(leader の雛形の「機能ごとの
+  org」の手順 1・3・5。写したかを ralph は確かめない)。機能の計画は
+  コミットされ、機能の PR と計画の archive に入るので、台帳(git が無視する
+  場所)に置く分割計画と違い、前文はリポジトリの履歴に入る。コミットしては
+  いけないことを前文に書かない。
 - バッククォートかチルダ 3 つ以上で囲んだコードブロックの中の行は、見出しや
   フィールドの形をしていても、囲みの行ごと本文に残る。閉じていないコード
   ブロックは読み込みで拒否する。
@@ -551,9 +573,11 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
 6. その worktree を cwd にして leader を spawn する。予約は機能の
    `- Reserve:` で、予約の記録に機能との結びつき(分割計画の id、slug、
    digest、ブランチ、worktree、承認方式)が入る。scope の説明は
-   `split <id> feature <slug> (reserve: <paths>)`、タスクは分割計画・機能・
-   worktree・ブランチ・予約・依存・承認方式・台帳の行と機能の本文になる。
-   spawn はロックの下で 2 の判定をやり直す。
+   `split <id> feature <slug> (reserve: <paths>)` になる。タスクは、分割
+   計画・機能・worktree・ブランチ・予約・依存・承認方式・進め方・台帳の行、
+   前文のブロック(前置きの 1 行と、コードブロックで囲んだ前文。分割計画に
+   前文がなければ入らない)、機能の本文の順になる(「分割計画」)。spawn は
+   ロックの下で 2 の判定をやり直す。
 
 タスクの `- 台帳:` の行には、start が使った台帳の絶対パスと、それを指す
 `--state-dir`(シェルの単一引用符で囲んだもの)が入る。leader は
@@ -1188,14 +1212,17 @@ receipts / 役割雛形)を使うため、手順は共通。
 いずれの経路でも、Leader は以下のサイクルで座席を統括する:
 
 1. タスクを読む。分割計画の機能のタスク(`start --plan` の leader)なら、機能の
-   計画を worktree の `docs/plans/active/` に書いてコミットする。タスクの
+   計画を worktree の `docs/plans/active/` に書いてコミットする。タスクに
+   前文のブロック(「全機能の座席に適用する決まり」)があれば、その計画に
+   囲みの行ごと写す(「分割計画」)。タスクの
    `- 承認方式:` が `per-plan` なら、図解ページを書き、`PLAN:` と `VISUAL:` の
    ヘッダを付けた QUESTION を `escalate` で上げ、人の承認の DECISION を受けて
    から計画の先頭の 2 行を書いてコミットする(「機能の計画の承認」)。
 2. 座席を `spawn` する(役割別プロンプト雛形が自動展開される)。既定は
-   implementer 1 席と reviewer 1 席。`--model` を明示する。per-plan の機能の
-   org では、implementer は承認のあとに立てる(reviewer は承認の前に立てて
-   計画のレビューを頼んでよい)。
+   implementer 1 席と reviewer 1 席。`--model` を明示する(前文のブロックに
+   driver と model があれば、それを `--driver` と `--model` に使う)。
+   per-plan の機能の org では、implementer は承認のあとに立てる(reviewer は
+   承認の前に立てて計画のレビューを頼んでよい)。
 3. `send` で TASK を委譲する。per-plan の機能の org では、implementer への TASK に
    承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
 4. `wait` / `status` / `read` で座席の状態を観察する。
