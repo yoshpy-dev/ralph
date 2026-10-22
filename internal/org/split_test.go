@@ -557,9 +557,10 @@ func TestLoadSplitPlan_TrialPreamble(t *testing.T) {
 // split-preamble). It starts at the first `## ` heading outside a fence and
 // ends before the `## Features` heading; a fenced `## Features` line in it,
 // and its `### ` and field-like lines, are text; blank lines around it are
-// trimmed, and CRLF lines lose their "\r". The header's free text, the lines
-// of `## Features` before the first feature and the sections after
-// `## Features` are in neither the preamble nor a body.
+// trimmed, but trailing spaces on its last line stay, and CRLF lines lose
+// their "\r". The header's free text, the lines of `## Features` before the
+// first feature and the sections after `## Features` are in neither the
+// preamble nor a body.
 func TestLoadSplitPlan_Preamble(t *testing.T) {
 	const twoSections = "# t\n\n## A\n\na\n\n## B\n\nb\n\n## Features\n### a\n- Reserve: a/\n"
 	a := SplitFeature{Slug: "a", Type: "feat", Reserve: []string{"a/"}}
@@ -591,6 +592,12 @@ func TestLoadSplitPlan_Preamble(t *testing.T) {
 			name:     "header text and blank lines around the preamble left out",
 			content:  "# t\n\nheader prose\n\n\n## Rules\n\n\nrule\n\n \t\n\n## Features\n### a\n- Reserve: a/\n",
 			preamble: "## Rules\n\n\nrule",
+			want:     []SplitFeature{a},
+		},
+		{
+			name:     "trailing spaces on the last line stay",
+			content:  "# t\n\n## Rules\n\nrule  \n\n## Features\n### a\n- Reserve: a/\n",
+			preamble: "## Rules\n\nrule  ",
 			want:     []SplitFeature{a},
 		},
 		{

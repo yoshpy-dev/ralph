@@ -576,7 +576,8 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 // least 3 (a tilde fence or inline code inside keeps 3, a fenced block of 3
 // makes 4 with the inner fence kept whole, a run of 4 makes 5). An empty
 // body adds no trailing blank line, and a preamble of blank lines only
-// leaves the task as it is without one.
+// leaves the task as it is without one. A feature that depends on another
+// gets the block too, and trailing spaces on the preamble's last line stay.
 func TestFeatureLeaderTask_Preamble(t *testing.T) {
 	const lead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節を、原文のまま下の囲みに入れた):"
 	bare := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
@@ -594,6 +595,12 @@ func TestFeatureLeaderTask_Preamble(t *testing.T) {
 	// head is the task without a preamble or a body, which
 	// TestFeatureLeaderTask pins line by line.
 	head := task(bare, noBody)
+	// depHead is the same for a second feature, whose "依存する機能" line
+	// names the first.
+	depNoBody := SplitFeature{Slug: "auth-ui", Type: "fix", Reserve: []string{"internal/ui/"}, DependsOn: []string{"auth-core"}}
+	depBody := depNoBody
+	depBody.Body = body.Body
+	depHead := task(bare, depNoBody)
 
 	const rules = "## 目的\n\n座席の決まり:\n\n- model は sonnet\n- org {{ORG_ID}} の外は編集しない"
 	for _, tc := range []struct {
@@ -605,6 +612,10 @@ func TestFeatureLeaderTask_Preamble(t *testing.T) {
 			head + "\n\n" + lead + "\n```\n" + rules + "\n```\n\nObjective: add the token store.\n\n- [ ] AC1"},
 		{"a preamble and no body", rules, noBody,
 			head + "\n\n" + lead + "\n```\n" + rules + "\n```"},
+		{"a feature that depends on another gets the preamble", rules, depBody,
+			depHead + "\n\n" + lead + "\n```\n" + rules + "\n```\n\nObjective: add the token store.\n\n- [ ] AC1"},
+		{"trailing spaces on the last line stay", "## 目的\n\nrule  ", noBody,
+			head + "\n\n" + lead + "\n```\n## 目的\n\nrule  \n```"},
 		{"a preamble of blank lines and a body", "\n \n\t\n", body, head + "\n\nObjective: add the token store.\n\n- [ ] AC1"},
 		{"a preamble of blank lines and no body", "\n\n", noBody, head},
 		{"inline code and a tilde fence keep 3 backticks", "## 目的\n\n`x` と ``y``\n\n~~~\n## 例\n~~~", noBody,
