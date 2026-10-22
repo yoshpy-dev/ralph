@@ -557,8 +557,13 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesPane(t *testing.T) {
 	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
 		t.Fatalf("expected exactly 1 compensation send-keys call (a pane existed), got %d (log: %v)", n, herdrLines)
 	}
-	if !strings.Contains(herdrLines[len(herdrLines)-1], "C-c") {
-		t.Errorf("expected compensation to send C-c, got last herdr call: %q", herdrLines[len(herdrLines)-1])
+	// The compensation sends C-c to the pane and then closes it (plan
+	// 2026-10-22-seat-spawn-close, AC1), so the log ends with those two calls.
+	if n := len(herdrLines); n < 2 || herdrLines[n-2] != "pane send-keys "+last.PaneID+" C-c" || herdrLines[n-1] != "pane close "+last.PaneID {
+		t.Errorf("expected the herdr log to end with the C-c to %s and then its close, got %v", last.PaneID, herdrLines)
+	}
+	if !strings.Contains(last.Details, "compensation=ctrl_c=ok pane=closed") {
+		t.Errorf("expected Details to record the C-c and the close, got %q", last.Details)
 	}
 }
 
@@ -2444,6 +2449,53 @@ func TestOrgSpawn_MissingScope_NonZeroExit_NoAllowUnscoped(t *testing.T) {
 	events := readManifestEvents(t, org.ManifestPathIn(stateDir))
 	if len(events) != 1 || events[0].Event != "rejected" {
 		t.Errorf("expected exactly one rejected manifest event for the gate rejection, got: %v", events)
+	}
+}
+
+// TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir covers the CLI
+// half of the stop hints' --state-dir: newOrgSpawnRuntimeAt sets
+// org.Org.InboxHintStateDir by orgInboxHintStateDir's rule, so a retry of a
+// seat left in flight that the envelope refuses ends its error with the stop
+// command and --state-dir, quoted, when the ledger was named with
+// --state-dir, and with the plain command when the same ledger came from
+// RALPH_ORG_STATE_DIR. The refusal writes nothing and calls no herdr.
+func TestOrgSpawn_InFlightSeatRefusal_StopHintRepeatsStateDir(t *testing.T) {
+	herdrLog, _ := setupOrgStubPATH(t)
+	stateDir := filepath.Join(t.TempDir(), "state dir")
+	store := org.NewManifestStoreAtPath(org.ManifestPathIn(stateDir))
+	for _, ev := range []org.ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "org-a", SeatID: "seat-1", Event: org.EventSpawnStarted, Role: "worker", Driver: "claude", Model: "sonnet"},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "org-a", SeatID: "seat-1", Event: org.EventSpawnStep, PaneID: "pane-7", Details: "tab_created"},
+	} {
+		if err := store.Append(ev); err != nil {
+			t.Fatalf("seed %s: %v", ev.Event, err)
+		}
+	}
+	args := []string{
+		"spawn", "--org-id", "org-a", "--id", "seat-1", "--role", "worker",
+		"--driver", "claude", "--model", "not-a-real-model", "--cwd", t.TempDir(), "--scope", "test-scope",
+	}
+	const stop = "; seat \"seat-1\" in org_id \"org-a\" has an unfinished spawn on pane \"pane-7\", left as it is: end it with ralph org stop --org-id org-a --seat seat-1"
+
+	t.Run("--state-dir", func(t *testing.T) {
+		out, err := runOrgCmd(t, append(args, "--state-dir", stateDir)...)
+		if want := stop + " --state-dir '" + stateDir + "'"; err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Fatalf("expected the refusal to end with %q, got %v (output: %s)", want, err, out)
+		}
+	})
+	t.Run("RALPH_ORG_STATE_DIR", func(t *testing.T) {
+		t.Setenv(org.EnvOrgStateDir, stateDir)
+		out, err := runOrgCmd(t, args...)
+		if err == nil || !strings.HasSuffix(err.Error(), stop) || strings.Contains(err.Error(), "--state-dir") {
+			t.Fatalf("expected the refusal to end with %q and name no --state-dir, got %v (output: %s)", stop, err, out)
+		}
+	})
+
+	if herdrLines := readLogLines(t, herdrLog); len(herdrLines) != 0 {
+		t.Errorf("expected no herdr call for the refusals, got: %v", herdrLines)
+	}
+	if events := readManifestEvents(t, org.ManifestPathIn(stateDir)); len(events) != 2 {
+		t.Errorf("expected the two seeded events only (no rejected), got: %v", events)
 	}
 }
 

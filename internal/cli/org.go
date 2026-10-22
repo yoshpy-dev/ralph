@@ -143,7 +143,9 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 // split as newOrgRuntimeAt: each caller also passes the directory on, to
 // wireOrgWatchGate (spawn) or wireOrgStartWatchGate (start), and `ralph org
 // start --plan` to StartFeatureParams.StateDir and org.FeatureRepoRoot with
-// its source.
+// its source. It sets InboxHintStateDir (orgInboxHintStateDir), so the
+// `ralph org stop` commands Spawn's errors print for a seat left with an
+// unfinished spawn repeat --state-dir when it was given.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
 	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
 		return nil, err
@@ -156,6 +158,7 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 	if err != nil {
 		return nil, err
 	}
+	rt.InboxHintStateDir = orgInboxHintStateDir(cmd, resolvedStateDir)
 	return rt, nil
 }
 
@@ -704,6 +707,18 @@ const orgReserveFlagUsage = "reserve a path for this org, relative to the repo r
 	"Refused when it overlaps the reservation of another running org; released by ralph org disband. " +
 	"Satisfies the autonomous-mode --scope requirement"
 
+// orgSpawnTimeoutFlagUsage is the --timeout-ms usage `ralph org spawn` and
+// `ralph org start` share, given the herdr and agmsg steps of the seat's
+// spawn: org.Spawn runs them all under one deadline of --timeout-ms, and
+// each compensating call after a failed step under a 10s bound of its own
+// (internal/org's defaultDriverCallTimeout; plan
+// 2026-10-22-seat-spawn-close, D2 and D4). No backticks, as for
+// orgReserveFlagUsage.
+func orgSpawnTimeoutFlagUsage(steps string) string {
+	return "deadline in milliseconds for the whole spawn, shared by every herdr and agmsg step (" + steps + "); " +
+		"the cleanup after a failed step is bounded separately, 10s per call"
+}
+
 func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var (
 		seatID, role, driverName, model, cwd, prompt, scope, leaderDriver string
@@ -807,7 +822,7 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	if err := cmd.Flags().MarkDeprecated(deprecatedLeaderDriverFlag, "use --leader-driver"); err != nil {
 		panic(err) // the flag was registered on the line above
 	}
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace and tab create, agent start, agmsg joins, HELLO"))
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate and record without starting a real seat")
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement (recorded on the spawned event)")
 
@@ -989,7 +1004,7 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	cmd.Flags().StringVar(&cwd, "cwd", "", "working directory for the leader seat (required without --plan); a relative path is made absolute from the directory this command runs in")
 	cmd.Flags().StringVar(&scope, "scope", "", "optional scope description, as for ralph org spawn --scope")
 	cmd.Flags().StringArrayVar(&reserve, "reserve", nil, orgReserveFlagUsage)
-	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, "per-step herdr timeout in milliseconds")
+	cmd.Flags().IntVar(&timeoutMS, "timeout-ms", 60000, orgSpawnTimeoutFlagUsage("workspace and tab create, agent start, agmsg join"))
 	cmd.Flags().BoolVar(&allowUnscoped, "allow-unscoped", false, "explicitly bypass the autonomous-mode --scope requirement")
 	cmd.Flags().StringVar(&plan, "plan", "", "approved split plan, a file <id>.md in <state dir>/splits/, to start one feature of; "+
 		"needs --feature and replaces the task argument, --cwd, --scope and --reserve; --allow-unscoped is refused with it")

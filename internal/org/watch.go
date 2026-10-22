@@ -1256,8 +1256,20 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    writes it, so a leader that keeps retrying a stop while herdr does
 //	    not answer still counts as acting, the same as a stop that closed
 //	    the pane; a stop the operator runs counts too, as `stopped` always
-//	    has. The exclusion applies to any event in this lifecycle set whose
-//	    Details carry "reason=watchdog_..." -- in practice only the pre-#152
+//	    has. Of a spawn's own writes only spawn_started counts, not
+//	    spawn_failed or the non-state spawn_close_failed, so a spawn whose
+//	    step failed after spawn_started counts once, whether or not it closed
+//	    its pane. A spawn refused before spawn_started counts only by the
+//	    `rejected` it writes, and these refusals write none, so they do not
+//	    count: a seat in flight refused by the envelope, permission or
+//	    --scope check (rejectUnlessInFlight), the seat's spawn lock held by
+//	    another spawn, and compensateStale's refusals (the caller's own pane,
+//	    which writes nothing, and a pane neither confirmed nor closed, which
+//	    writes only spawn_close_failed). A leader that only retries into
+//	    those refusals is stuck, so the deadman may go on to the human (plan
+//	    2026-10-22-seat-spawn-close, self-review L2). The exclusion applies
+//	    to any event in this lifecycle set whose Details carry
+//	    "reason=watchdog_..." -- in practice only the pre-#152
 //	    watchdog's cutoff `stopped` writes ever carried it.
 //	    No code path has produced such an event since PR #152 removed the
 //	    org budget concept (2026-09-17): StopParams no longer has a Reason

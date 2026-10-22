@@ -2,6 +2,7 @@ package org
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -213,7 +214,9 @@ type Org struct {
 	CodexModelObserveInterval time.Duration
 	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
 	// tab and workspace gets of the ownership check, the C-c, the pane
-	// close, the agmsg Leave), each workspace get and close Disband makes,
+	// close, the agmsg Leave), each compensating call of a failed Spawn (the
+	// C-c and the close of the pane it made, the agmsg Leave after a failed
+	// HELLO), each workspace get and close Disband makes,
 	// the gets and the close in CloseDeferredSelfPane /
 	// CloseDeferredSelfWorkspace, each call of the watch's pulse cycle
 	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
@@ -228,11 +231,12 @@ type Org struct {
 	// Zero (the field's default) means "use defaultDriverCallTimeout" --
 	// tests set a tiny value so a call that never answers times out fast.
 	DriverCallTimeout time.Duration
-	// Getenv overrides how Stop and Disband read the caller's herdr
+	// Getenv overrides how Stop, Disband and Spawn read the caller's herdr
 	// environment (HERDR_PANE_ID and HERDR_WORKSPACE_ID, set by herdr inside
-	// every pane). nil (the field's default) means os.Getenv -- tests set it
-	// so the result does not depend on whether the test process itself runs
-	// inside a herdr pane.
+	// every pane; Spawn reads HERDR_PANE_ID in compensateStale, so it never
+	// closes the pane that runs it). nil (the field's default) means
+	// os.Getenv -- tests set it so the result does not depend on whether the
+	// test process itself runs inside a herdr pane.
 	Getenv func(string) string
 	// Worktrees reads and makes the feature worktrees of StartFeature
 	// (feature.go): the records and `ensure` of scripts/ralph-worktree.sh,
@@ -257,9 +261,12 @@ type Org struct {
 	DesktopNotify EscalateFunc
 	// InboxHintStateDir is the --state-dir that the inbox commands
 	// (InboxCommand) named by the banner and the errors of Escalate and
-	// NotifyInboxItem repeat. The CLI sets it to the resolved state dir
-	// only when the ledger was named with --state-dir; it is empty
-	// otherwise, and the printed commands then carry no --state-dir
+	// NotifyInboxItem repeat. The `ralph org stop` commands that Spawn's
+	// errors print for a seat left with an unfinished spawn repeat it too
+	// (stopSeatCommand), so a feature org's leader, which names its ledger
+	// with --state-dir, can run them as printed. The CLI sets it to the
+	// resolved state dir only when the ledger was named with --state-dir; it
+	// is empty otherwise, and the printed commands then carry no --state-dir
 	// (InboxCommand's doc says why).
 	InboxHintStateDir string
 	// InboxPollInterval overrides how often WaitInbox and
@@ -363,7 +370,11 @@ type SpawnParams struct {
 	// seat's role prompt template as {{SCOPE}} and (2) recorded on the
 	// `spawned` manifest event's Details as "scope=<value>" so it is at
 	// least auditable after the fact.
-	Scope     string
+	Scope string
+	// TimeoutMS is the deadline, in milliseconds, of the whole spawn, which
+	// every herdr and agmsg step shares (defaultSpawnTimeoutMS when <= 0).
+	// The compensation after a failed step runs on driverCallTimeout instead
+	// (see failStepWithNote).
 	TimeoutMS int
 	DryRun    bool
 	// AllowUnscoped bypasses the minimum control gate (AC-2b) that would
@@ -439,8 +450,10 @@ type SpawnResult struct {
 	// never persisted. It is the zero Receipt on every path that appends no
 	// receipt at all, or whose append failed: an idempotent respawn, a
 	// plain rejection that never reaches reject() (identifier validation, a
-	// retired role name, the watch gate, a retired ralph.toml key, a regate
-	// running on the org; see Spawn's own doc comment), every
+	// retired role name, the watch gate, another spawn holding the seat's
+	// spawn lock, a retired ralph.toml key, a refused retry of a seat in
+	// flight, a stale seat on the caller's own pane, a regate running on the
+	// org; see Spawn's own doc comment), every
 	// SpawnOutcomeFailed return, and a reject()/dryRunSpawn receipts-append
 	// failure. The CLI layer reads this to decide whether to print the
 	// codex model-mismatch warning (AC-6), without re-reading the receipts
@@ -465,7 +478,11 @@ type SpawnResult struct {
 //     the same point. The watch gate (Org.WatchGate, when set;
 //     watchgate.go) runs right after them, also before the manifest is
 //     read and in dry-run mode too, and its refusal is a plain rejection as
-//     well (plan 2026-10-12-org-watch-gate, F1 and F3).
+//     well (plan 2026-10-12-org-watch-gate, F1 and F3). Then, in real mode
+//     only, the seat's spawn lock (spawnLockName) is taken with one
+//     attempt, before the manifest is read, and held until Spawn returns:
+//     while another spawn of the same seat holds it, the spawn is a plain
+//     rejection, with no driver call (plan 2026-10-22-seat-spawn-close, D5).
 //  1. Idempotent early return: an already-spawned seat returns the existing
 //     seat with no config-dependent validation attempted at all (so an
 //     at-cap org can never reject a respawn-of-active-seat retry, a no-op
@@ -489,10 +506,18 @@ type SpawnResult struct {
 //  4. AC-2b minimum control gate (the autonomous-mode --scope requirement)
 //     -- also stateless, but checked after the idempotent return and the
 //     envelope/permission checks above so it only ever applies to a
-//     genuinely new spawn attempt.
+//     genuinely new spawn attempt. Steps 3 and 4 go through reject(),
+//     except for a seat whose latest state event is in flight
+//     (spawn_started or spawn_step): then a refusal is a plain rejection
+//     (rejectUnlessInFlight; plan 2026-10-22-seat-spawn-close, D6), since a
+//     `rejected`, a state event with no pane_id, would make the seat
+//     inactive and put a pane left open out of reach of stop.
 //  5. Stale-in-flight compensation: a stale seat (prior spawn_started/
-//     spawn_step never resolved) is best-effort compensated and the
-//     manifest re-read, so it no longer counts toward max_seats.
+//     spawn_step never resolved) is compensated (compensateStale: the
+//     recorded pane confirmed as the seat's, then closed) and recorded
+//     spawn_failed, and the manifest re-read, so it no longer counts toward
+//     max_seats. A pane that cannot be confirmed or closed refuses the
+//     spawn and leaves the seat active (spawn_close_failed).
 //  6. The regate check (regateSpawnErr; plan 2026-10-16-org-regate, D9):
 //     while a `ralph org regate` holds regate.lock with a marker naming
 //     p.OrgID, the spawn is a plain rejection (no `rejected` event, no
@@ -516,7 +541,10 @@ type SpawnResult struct {
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
-// spawned|spawn_failed manifest trail and a tri-state model receipt.
+// spawned|spawn_failed manifest trail and a tri-state model receipt. A step
+// failing after tab_create closes the pane it made; when that close fails,
+// spawn_close_failed replaces spawn_failed and the seat stays active (see
+// failStepWithNote).
 //
 // The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, 6,
 // and 7 in the exact same order as the real path above: the input-only
@@ -532,7 +560,12 @@ type SpawnResult struct {
 // same order, a request that fails more than one check (e.g. an
 // out-of-pool model *and* a scope-less autonomous spawn) is rejected for
 // the same first cause in both modes, so `--dry-run`'s predicted rejection
-// always matches what a real spawn of the same request would record.
+// matches what a real spawn of the same request would record, but for one
+// case: for a seat whose latest state event is in flight, a real spawn
+// that the envelope, permission or --scope check refuses records nothing
+// and adds inFlightSeatErr's tail to the cause (rejectUnlessInFlight),
+// while the dry run still records its dry-run `rejected` and an
+// honored=false receipt and returns the plain cause.
 //
 // `ralph org start --plan` (StartFeature, feature.go) must not make a
 // worktree for a spawn this would refuse, so it first runs checkSpawnInput
@@ -566,6 +599,30 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = defaultSpawnTimeoutMS
+	}
+
+	// The seat's spawn lock (step 0 above) is taken here, before the first
+	// manifest read, and held until Spawn returns on every path, the codex
+	// model observation at the end included. So the in-flight records
+	// Phase 1 below finds for the seat are always those of a spawn that has
+	// returned or died (flock is released with the process), never those of
+	// one still running, whose pane compensateStale would otherwise close.
+	// One non-blocking attempt: a spawn of the seat that holds the lock makes
+	// this a plain rejection, with nothing written and no driver call; a
+	// retry once it has returned finds the seat it spawned and answers
+	// idempotently. Spawns of other seats and orgs never wait on it. It is
+	// always taken before the manifest lock, and nothing takes the two the
+	// other way round. A dry run takes no lock: it writes only dry-run
+	// events and compensates nothing.
+	if !p.DryRun {
+		lock, err := acquireHeldFileLock(filepath.Dir(o.Manifest.Path()), spawnLockName(p.OrgID, p.SeatID), "spawn", 0)
+		if errors.Is(err, errFileLockHeld) {
+			return SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf("org: spawn: another ralph org spawn of seat %q in org_id %q is running; retry after it returns: %w", p.SeatID, p.OrgID, err)}
+		}
+		if err != nil {
+			return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn: %w", err)}
+		}
+		defer func() { _ = lock.release() }()
 	}
 
 	rr, err := o.Manifest.Read()
@@ -622,6 +679,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.dryRunSpawn(p, resolvedPermMode, reserve)
 	}
 
+	// The spawn's one deadline starts here, before Phase 1, so the time a
+	// stale seat's compensateStale takes comes out of p.TimeoutMS
+	// (--timeout-ms), although each of its calls is bounded by its own
+	// driverCallTimeout (10 s) and not by this ctx.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.TimeoutMS)*time.Millisecond)
 	defer cancel()
 
@@ -639,25 +700,29 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// same host.
 	//
 	// Final locking shape (fixed self-review MEDIUM-3: the lock used to also
-	// wrap compensateStale's herdr PaneSendKeys round trip, contradicting
-	// this very comment and risking a concurrent spawn timing out on
-	// manifestLockTimeout -- 5s -- behind a compensation call bounded by the
-	// much longer p.TimeoutMS): when a stale in-flight seat is detected, the
+	// wrap compensateStale's herdr round trip, contradicting this very
+	// comment and risking a concurrent spawn timing out on
+	// manifestLockTimeout -- 5s -- behind compensation calls that each take
+	// up to driverCallTimeout): when a stale in-flight seat is detected, the
 	// lock below stops at that detection (no compensation, no capacity
 	// check, no append) and releases; compensateStale's driver round trip
-	// runs lock-free immediately after; a *second* withManifestLock call
-	// then re-reads the manifest and runs the capacity check + spawn_started
-	// append against that fresh, lock-held snapshot (checkCapacityAndStart).
-	// A fresh read is required rather than reusing the first lock's snapshot
-	// because compensateStale's own manifest write happened without the
-	// lock held -- another concurrent spawn could have raced in during that
-	// window, so the capacity decision must be made against a snapshot taken
-	// while the (re-acquired) lock is held, preserving the same TOCTOU
-	// guarantee as the non-stale path below. The lock is never scoped over
-	// the workspace/agent/agmsg side effects that follow Spawn's own locked
-	// section(s) -- per the plan's rollout note, a long-running herdr/agmsg
-	// round trip (bounded by p.TimeoutMS, up to defaultSpawnTimeoutMS) must
-	// not serialize every concurrent spawn behind it.
+	// (the pane's gets, its C-c and its close) runs lock-free, under only
+	// the seat's spawn lock, immediately after; a *second* withManifestLock
+	// call then re-reads the manifest and runs the capacity check +
+	// spawn_started append against that fresh, lock-held snapshot
+	// (checkCapacityAndStart). A fresh read is required rather than reusing
+	// the first lock's snapshot because compensateStale's own manifest write
+	// happened without the lock held -- a concurrent spawn of another seat
+	// could have raced in during that window (one of the same seat cannot
+	// while this call holds the seat's spawn lock), so the capacity decision
+	// must be made against a snapshot taken while the (re-acquired) lock is
+	// held, preserving the same TOCTOU guarantee as the non-stale path below.
+	// The manifest lock is never scoped over the workspace/agent/agmsg side
+	// effects that follow Spawn's own locked section(s) -- per the plan's
+	// rollout note, a long-running herdr/agmsg round trip (bounded by
+	// p.TimeoutMS, up to defaultSpawnTimeoutMS) must not serialize every
+	// concurrent spawn behind it. The seat's spawn lock is, but it only
+	// keeps out a second spawn of that one seat, which it refuses at once.
 	var existing *SeatStatus
 	var early *SpawnResult
 	// permArgs is set inside the locked closure below (permissionArgsForDriver's
@@ -746,9 +811,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// cannot change as a result of compensating a stale seat, so a
 		// request that fails here must be rejected with zero driver calls:
 		// reject()'s "no external side effect was ever attempted" claim
-		// only holds if this check runs first.
+		// only holds if this check runs first. For a seat in flight, this
+		// check, the permission check and the AC-2b gate below refuse with
+		// nothing written (rejectUnlessInFlight), so the seat keeps its
+		// recorded pane for stop and for a later spawn's compensation.
 		if err := ValidateSpawnEnvelope(o.Config, req); err != nil {
-			r := o.reject(p, err)
+			r := o.rejectUnlessInFlight(p, existing, err)
 			early = &r
 			return nil
 		}
@@ -762,7 +830,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// Spawn.
 		args, permErr := permissionArgsForDriver(o.Config, p.Driver, resolvedPermMode)
 		if permErr != nil {
-			r := o.reject(p, permErr)
+			r := o.rejectUnlessInFlight(p, existing, permErr)
 			early = &r
 			return nil
 		}
@@ -799,15 +867,17 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// No spawn_started is ever written for this path (reject() never
 		// appends one), so a rejected attempt still cannot count toward
 		// [org].max_seats or leave a stale saga behind -- only the audit
-		// trail changed, not the fail-closed semantics.
+		// trail changed, not the fail-closed semantics. A seat in flight is
+		// the exception: rejectUnlessInFlight writes nothing for it.
 		if err := autonomousScopeGateErr(p, resolvedPermMode); err != nil {
-			r := o.reject(p, err)
+			r := o.rejectUnlessInFlight(p, existing, err)
 			early = &r
 			return nil
 		}
 
-		if existing != nil && (existing.Event == EventSpawnStarted || existing.Event == EventSpawnStep) {
-			// Stale in-flight saga from a prior crashed/interrupted spawn:
+		if existing != nil && spawnInFlight(existing.Event) {
+			// Stale in-flight saga from a prior crashed/interrupted spawn
+			// (never a running one: this call holds the seat's spawn lock):
 			// record it for lock-free compensation right after this closure
 			// returns, then let Phase 2 (below) re-acquire the lock for a
 			// fresh capacity check + append -- see the doc comment above
@@ -828,17 +898,22 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	if staleExisting != nil {
-		// Lock-free: best-effort compensate the stale seat (a herdr
-		// PaneSendKeys round trip) and mark it spawn_failed, exactly as
-		// Phase 1 used to do while still holding the lock.
-		o.compensateStale(ctx, p, *staleExisting)
+		// Lock-free: compensate the stale seat (compensateStale: confirm its
+		// recorded pane, then the C-c and the close) and mark it
+		// spawn_failed. When the pane can be neither confirmed nor closed,
+		// or it is the caller's own, compensateStale refuses this spawn and
+		// Spawn returns its result here, before Phase 2.
+		if r := o.compensateStale(p, *staleExisting); r != nil {
+			return *r
+		}
 		afterStaleCompensation()
 
 		// Phase 2 (locked): re-read post-compensation and re-run BOTH checks
 		// that could have gone stale during the lock-free compensate window
 		// above (self-review Cycle-2 M-2 fix):
-		//   - idempotency: a concurrent racer's Spawn call for this exact
-		//     seat could have completed a full saga while our lock was
+		//   - idempotency: a racer's Spawn call for this exact seat that
+		//     takes no spawn lock (an older ralph binary) could have
+		//     completed a full saga while our lock was
 		//     released for compensateStale's herdr round trip. Phase 1's
 		//     EventSpawned early return only guards against a racer that
 		//     was already spawned *before* our own Phase 1 read -- it says
@@ -898,12 +973,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 
 	workspaceID, err := o.resolveWorkspace(ctx, p, events)
 	if err != nil {
-		return o.failStep(p, "workspace_create", err, "")
+		return o.failStep(p, "workspace_create", err, ctx.Err(), "")
 	}
 
 	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID)
 	if err != nil {
-		return o.failStep(p, "tab_create", err, "")
+		return o.failStep(p, "tab_create", err, ctx.Err(), "")
 	}
 	if err := o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -930,7 +1005,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
-		return o.failStep(p, "agent_start", err, paneID)
+		return o.failStep(p, "agent_start", err, nil, paneID)
 	}
 	if ok {
 		if p.Prompt != "" {
@@ -978,10 +1053,10 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			var perr error
 			promptPath, perr = o.promptFilePath(p.OrgID, p.SeatID)
 			if perr != nil {
-				return o.failStep(p, "prompt_file", perr, paneID)
+				return o.failStep(p, "prompt_file", perr, nil, paneID)
 			}
 			if err := writePromptFile(promptPath, initialPrompt); err != nil {
-				return o.failStep(p, "prompt_file", err, paneID)
+				return o.failStep(p, "prompt_file", err, nil, paneID)
 			}
 			agentArgs = append(agentArgs, PromptFilePointer(promptPath))
 			agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
@@ -995,7 +1070,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// success path below) -- agentStartWithRetry already computed it, so
 		// this is a cheap addition that answers "how many attempts were made
 		// before this gave up" for a failed spawn, not only a successful one.
-		return o.failStepWithNote(p, "agent_start", err, paneID, fmt.Sprintf("agent_start_retries=%d", retries))
+		return o.failStepWithNote(p, "agent_start", err, ctx.Err(), paneID, "", fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
 		// This must stay the LAST thing appended to agentStartedDetails:
@@ -1041,7 +1116,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	}
 
 	if err := o.Agmsg.Join(ctx, team, p.SeatID, agmsgTypeForDriver(p.Driver), p.Cwd); err != nil {
-		return o.failStep(p, "agmsg_join", err, paneID)
+		return o.failStep(p, "agmsg_join", err, ctx.Err(), paneID)
 	}
 	joinedDetails := "agmsg_joined"
 	if leaderSelfSpawn {
@@ -1066,8 +1141,15 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// roster entry behind -- best-effort Leave it back out, and record
 			// the outcome in spawn_failed's Details alongside the leader-join note
 			// so both compensation steps stay auditable from the manifest alone.
-			leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
-			return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
+			// The Leave comes first, then the pane's C-c and close (plan
+			// 2026-10-22-seat-spawn-close, D4), each under its own
+			// driverCallTimeout deadline: a HELLO that timed out may still
+			// have reached the leader, and the pane is closed all the same.
+			// The spawn's ctx is read before the Leave, which may outlast
+			// what was left of the deadline (see failStepWithNote).
+			deadlineErr := ctx.Err()
+			leaveNote := o.compensateLeave(team, p.SeatID)
+			return o.failStepWithNote(p, "agmsg_announce", err, deadlineErr, paneID, team, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
 		}
 		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -1237,15 +1319,21 @@ func checkSpawnInput(p SpawnParams) (SpawnParams, error) {
 // idempotentRespawnDecision, the decision of the idempotent return;
 // otherwise retiredRoleConfigErr, ValidateSpawnEnvelope,
 // permissionArgsForDriver, autonomousScopeGateErr, spawnCapacityErr and
-// spawnFeatureSeatErr (which passes the leader seat StartFeature spawns). A
-// stale in-flight seat is counted as compensateStale leaves it (one more
-// `spawn_failed`), since Spawn decides capacity on its read after that
-// compensation. Step 6's regate check reads regate.lock, not events, so it
-// is not here: StartFeature runs regateSpawnErr right after this. Spawn
-// decides again under the lock, so the two can differ only when another
-// spawn changes the manifest in between.
+// spawnFeatureSeatErr (which passes the leader seat StartFeature spawns).
+// For a seat in flight, the refusals of the envelope, permission and
+// --scope checks carry inFlightSeatErr's words, as Spawn's do, with the
+// stop command repeating hintStateDir (the caller's Org.InboxHintStateDir).
+// A stale in-flight seat is counted as compensateStale leaves it once
+// compensated (one more `spawn_failed`), since Spawn decides capacity on its
+// read after that compensation. compensateStale can also refuse the spawn (a pane it
+// can neither confirm nor close, or the caller's own), which only herdr and
+// the environment tell, so Spawn can refuse a stale seat after this
+// pre-check passed. Step 6's regate check reads regate.lock, not events, so
+// it is not here: StartFeature runs regateSpawnErr right after this. Spawn
+// decides again under the lock, so the two can otherwise differ only when
+// another spawn changes the manifest in between.
 // TestSpawnPrecheckErr_MatchesSpawn runs both on the same ledgers.
-func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent) error {
+func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEvent, hintStateDir string) error {
 	seat, found := seatFromEvents(events, p.OrgID, p.SeatID)
 	if found && seat.Event == EventSpawned {
 		_, err := idempotentRespawnDecision(cfg, p, seat, events)
@@ -1254,18 +1342,25 @@ func spawnPrecheckErr(cfg config.OrgConfig, p SpawnParams, events []ManifestEven
 	if err := retiredRoleConfigErr(cfg); err != nil {
 		return err
 	}
+	inFlight := found && spawnInFlight(seat.Event)
+	refuse := func(cause error) error {
+		if inFlight {
+			return inFlightSeatErr(p, seat, cause, hintStateDir)
+		}
+		return cause
+	}
 	req := SpawnRequest{OrgID: p.OrgID, SeatID: p.SeatID, Role: p.Role, Driver: p.Driver, Model: p.Model}
 	if err := ValidateSpawnEnvelope(cfg, req); err != nil {
-		return err
+		return refuse(err)
 	}
 	mode := ResolvePermissionMode(cfg, p.Role)
 	if _, err := permissionArgsForDriver(cfg, p.Driver, mode); err != nil {
-		return err
+		return refuse(err)
 	}
 	if err := autonomousScopeGateErr(p, mode); err != nil {
-		return err
+		return refuse(err)
 	}
-	if found && (seat.Event == EventSpawnStarted || seat.Event == EventSpawnStep) {
+	if inFlight {
 		events = append(slices.Clip(events), ManifestEvent{OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed})
 	}
 	if _, err := spawnCapacityErr(cfg, p, req, events); err != nil {
@@ -2070,6 +2165,52 @@ func (o *Org) reject(p SpawnParams, cause error) SpawnResult {
 	return result
 }
 
+// rejectUnlessInFlight is how Spawn's Phase 1 refuses a spawn that fails the
+// envelope, permission or --scope check: reject(), except for a seat whose
+// latest state event is in flight (existing, the seat's roster entry, nil
+// for a seat never seen; spawnInFlight). Such a seat is left by a spawn that
+// died, or that could not close its pane (spawn_close_failed), and a
+// `rejected`, a state event with no pane_id, would make it inactive, so
+// neither stop, stop --all nor the next spawn's compensateStale would find
+// that pane any more. So, like idempotentRespawn, it writes no event and no
+// receipt and returns a plain rejection whose error is inFlightSeatErr's
+// (plan 2026-10-22-seat-spawn-close, D6).
+func (o *Org) rejectUnlessInFlight(p SpawnParams, existing *SeatStatus, cause error) SpawnResult {
+	if existing != nil && spawnInFlight(existing.Event) {
+		return SpawnResult{Outcome: SpawnOutcomeRejected, Err: inFlightSeatErr(p, *existing, cause, o.InboxHintStateDir)}
+	}
+	return o.reject(p, cause)
+}
+
+// inFlightSeatErr wraps cause, the refusal of a spawn of seat, whose latest
+// state event is in flight, with what is left of that seat: its unfinished
+// spawn, the pane it recorded when there is one, and the stop that ends it
+// (stopSeatCommand with hintStateDir, Org.InboxHintStateDir). Spawn
+// (rejectUnlessInFlight) and spawnPrecheckErr give the same error.
+func inFlightSeatErr(p SpawnParams, seat SeatStatus, cause error, hintStateDir string) error {
+	on := ""
+	if seat.PaneID != "" {
+		on = fmt.Sprintf(" on pane %q", seat.PaneID)
+	}
+	return fmt.Errorf("%w; seat %q in org_id %q has an unfinished spawn%s, left as it is: end it with %s",
+		cause, p.SeatID, p.OrgID, on, stopSeatCommand(p.OrgID, p.SeatID, hintStateDir))
+}
+
+// stopSeatCommand is the `ralph org stop --org-id <o> --seat <s>` that
+// Spawn's errors print for a seat left with an unfinished spawn
+// (inFlightSeatErr, failStepWithNote, compensateStale and
+// refuseStaleRespawn), with --state-dir <hintStateDir> when hintStateDir,
+// Org.InboxHintStateDir, is set (CommandWithStateDir).
+func stopSeatCommand(orgID, seatID, hintStateDir string) string {
+	return CommandWithStateDir("ralph org stop --org-id "+orgID+" --seat "+seatID, hintStateDir)
+}
+
+// spawnInFlight reports whether event, a seat's latest state event, is a
+// spawn that never ended: spawn_started or spawn_step.
+func spawnInFlight(event string) bool {
+	return event == EventSpawnStarted || event == EventSpawnStep
+}
+
 // dryRunSpawn simulates the full saga's manifest trail with DryRun: true on
 // every event, without ever calling Herdr or Agmsg (AC-8). Dry-run events are
 // excluded from the default roster/status view and from ActiveSeatCount, so
@@ -2109,7 +2250,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	// a dry run could report SpawnOutcomeSpawned for a spawn the real path
 	// would fail at "agent_start"/"prompt_file". Both are now propagated as
 	// a failed result the same way failStep would in the real path -- paneID
-	// is "" since a dry run never creates a real pane (compensatePane then
+	// is "" since a dry run never creates a real pane (closeSpawnPane then
 	// records "no pane to compensate", matching dry-run's zero-side-effect
 	// contract), and DryRun: p.DryRun on the resulting spawn_failed event
 	// (see failStepWithNote) keeps it excluded from real-seat accounting.
@@ -2120,7 +2261,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 		Task: p.Task, Envelope: EnvelopeSummary(o.Config),
 	})
 	if err != nil {
-		return o.failStep(p, "agent_start", err, "")
+		return o.failStep(p, "agent_start", err, nil, "")
 	}
 	if ok {
 		if p.Prompt != "" {
@@ -2132,7 +2273,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	if initialPrompt != "" && needsPromptFile(initialPrompt) {
 		promptPath, perr := o.promptFilePath(p.OrgID, p.SeatID)
 		if perr != nil {
-			return o.failStep(p, "prompt_file", perr, "")
+			return o.failStep(p, "prompt_file", perr, nil, "")
 		}
 		agentStartedDetails = codexPromptFileDetailsPrefix + promptPath
 	}
@@ -2251,27 +2392,66 @@ func openOrgWorkspaces(events []ManifestEvent, orgID string) []string {
 	return open
 }
 
-// failStep records a spawn_failed event for a saga step that returned an
-// error: best-effort compensation (send C-c to the pane, if one exists yet)
-// followed by a manifest event whose Details captures the failing step, the
+// failStep records the end of a saga step that returned an error:
+// compensation of the pane this spawn created, if one exists yet
+// (closeSpawnPane: a C-c, then `herdr pane close`), followed by a
+// spawn_failed event whose Details captures the failing step, the
 // underlying error, and the compensation outcome. paneID (if non-empty) is
-// preserved on the event so an orphaned external resource stays traceable
-// from the manifest alone (AC-10).
-func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) SpawnResult {
-	return o.failStepWithNote(p, step, cause, paneID, "")
+// preserved on the event so the pane stays traceable from the manifest
+// alone (AC-10). A pane that could not be closed records
+// spawn_close_failed instead (see failStepWithNote).
+func (o *Org) failStep(p SpawnParams, step string, cause, deadlineErr error, paneID string) SpawnResult {
+	return o.failStepWithNote(p, step, cause, deadlineErr, paneID, "", "")
 }
 
 // failStepWithNote is failStep plus an extra free-text note appended to
-// Details. Two note-carrying callers: the agmsg_announce failure path
+// Details, and the agmsg team the seat joined ("" before agmsg_join
+// succeeded). Two note-carrying callers: the agmsg_announce failure path
 // (carrying the ensureLeaderJoined outcome and the agmsg_announce Leave
 // compensation forward — a missing "leader" roster entry is the most likely
 // root cause of a Send rejection) and the agent_start failure path
 // (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
 // auditable). failStep (no note) additionally covers dryRunSpawn's
 // RenderRolePrompt/promptFilePath error paths (AC-10b) -- paneID is always
-// "" there since a dry run never creates a real pane, so compensatePane
-// records "no pane to compensate" for those calls, matching dry-run's
-// zero-side-effect contract.
+// "" there since a dry run never creates a real pane, so closeSpawnPane
+// makes no driver call and records "no pane to compensate" for those calls,
+// matching dry-run's zero-side-effect contract.
+//
+// Details read `step=<step> error=<cause> compensation=<outcome>`, then the
+// note. outcome is `no pane to compensate` when paneID is "" (a failure
+// before tab_create returned a pane, or a dry run), and otherwise the C-c's
+// outcome and then the close's, worded as Stop words them: `ctrl_c=ok` or
+// `ctrl_c=failed: <err>`, then `pane=closed`, `pane=already closed` (herdr's
+// not-found reply to the close), or `pane=close failed: <err>`.
+//
+// A close that failed (any error but not-found, a timeout included) leaves
+// the pane, and with it the herdr agent name <org_id>_<seat_id>, behind.
+// Then spawn_failed is not written; the non-state EventSpawnCloseFailed is
+// written instead, with the same seat fields, the pane id, team, and the
+// same Details, so the seat stays active in the roster on the spawn_step
+// that recorded the pane id, and `ralph org stop` (one seat or --all) closes
+// that pane and records `stopped`, as after a stop_failed (spec FR-2). The
+// returned error wraps both the step's cause and the close's error and says
+// how to close the pane: `herdr pane close <id>` or `ralph org stop
+// --org-id <o> --seat <s>` (stopSeatCommand, with --state-dir when
+// Org.InboxHintStateDir is set). A failed append of spawn_close_failed is
+// joined to that error.
+//
+// deadlineErr is the spawn ctx's Err(), read by the caller as soon as the
+// step returned, before any compensation (the agmsg_announce Leave
+// included) can use up what was left of the deadline; it is nil for a step
+// that makes no driver call (rendering the role prompt, writing the prompt
+// file) and in a dry run. When it is context.DeadlineExceeded, the step
+// failed because the spawn's one deadline (p.TimeoutMS, which every herdr
+// and agmsg step shares) ran out, and the returned error, in both cases
+// above, carries spawnDeadlineHint right after the step's cause; Details do
+// not. The spawn's ctx is read rather than errors.Is on cause, since a
+// deadline can end a step whose error does not wrap DeadlineExceeded:
+// agentStartWithRetry returns the last agent_pane_busy error when the
+// deadline ends its wait between attempts. herdr's own agent start
+// --timeout (also p.TimeoutMS) needs no separate check: it starts counting
+// after workspace_create and tab_create, so the spawn's ctx kills the herdr
+// call first.
 //
 // DryRun: p.DryRun on the appended event mirrors p.DryRun exactly: it is
 // always false for every real-Spawn caller (failStep/failStepWithNote are
@@ -2280,78 +2460,206 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 // so a dry-run failure is correctly excluded from ActiveSeatCount/roster
 // like every other dry-run event, instead of fabricating a real seat's
 // spawn_failed state.
-func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, note string) SpawnResult {
-	compensation := compensatePane(o.Herdr, paneID)
+func (o *Org) failStepWithNote(p SpawnParams, step string, cause, deadlineErr error, paneID, team, note string) SpawnResult {
+	hint := ""
+	if errors.Is(deadlineErr, context.DeadlineExceeded) {
+		hint = spawnDeadlineHint(p.TimeoutMS)
+	}
+	compensation, closeErr := o.closeSpawnPane(paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)
 	if note != "" {
 		details += " " + note
+	}
+	if closeErr != nil {
+		err := fmt.Errorf("org: spawn step %s failed: %w%s; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or %s",
+			step, cause, hint, paneID, closeErr, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))
+		if appendErr := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
+			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+			PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
+		}); appendErr != nil {
+			err = errors.Join(err, fmt.Errorf("org: spawn: record %s: %w", EventSpawnCloseFailed, appendErr))
+		}
+		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed,
 		Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
 		PaneID: paneID, DryRun: p.DryRun, Details: details,
 	})
-	return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn step %s failed: %w", step, cause)}
+	return SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: spawn step %s failed: %w%s", step, cause, hint)}
+}
+
+// spawnDeadlineHint is what failStepWithNote adds to a spawn's error, right
+// after the step's cause, when the step failed because the spawn's deadline
+// ran out. timeoutMS is p.TimeoutMS after Spawn defaulted it, so the hint
+// names the value the spawn ran with.
+func spawnDeadlineHint(timeoutMS int) string {
+	return fmt.Sprintf(" (the spawn's --timeout-ms deadline of %d ms, shared by every herdr and agmsg step, ran out; retry with a larger --timeout-ms)", timeoutMS)
 }
 
 // compensateLeave sends a best-effort agmsg Leave for agentID from team,
 // used by the agmsg_announce failure path (AC-6/tech-debt: "spawn の
 // agmsg_announce(HELLO send)失敗パスの補償が...Leave しない"): by the time
 // HELLO Send fails, the seat's own Join has already succeeded, so without
-// this call a failed spawn leaves a stale roster entry behind. Errors are
-// recorded in the returned string, not propagated -- like compensatePane,
-// this is inherently best-effort and must never itself fail the saga.
-func compensateLeave(a AgmsgClient, team, agentID string) string {
+// this call a failed spawn leaves a stale roster entry behind. The Leave
+// runs under its own driverCallTimeout deadline (callWithTimeout), not the
+// spawn's ctx, which has often expired by then, so an agmsg that does not
+// answer cannot hold the spawn. Errors are recorded in the returned string,
+// not propagated -- like closeSpawnPane, this is inherently best-effort and
+// must never itself fail the saga.
+func (o *Org) compensateLeave(team, agentID string) string {
 	if team == "" || agentID == "" {
 		return "skipped: no team/agent to leave"
 	}
-	if err := a.Leave(context.Background(), team, agentID); err != nil {
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Agmsg.Leave(ctx, team, agentID)
+	}); err != nil {
 		return fmt.Sprintf("failed: %v", err)
 	}
 	return "ok"
 }
 
-// compensateStale best-effort-compensates a stale in-flight saga (a prior
-// spawn_started/spawn_step for the same seat, never resolved) and records
-// its spawn_failed terminus before Spawn proceeds to a fresh attempt.
-// existing's external ids (PaneID, AgmsgTeam) are carried forward onto the
-// spawn_failed event so they remain traceable.
-func (o *Org) compensateStale(ctx context.Context, p SpawnParams, existing SeatStatus) {
-	compensation := compensatePaneCtx(ctx, o.Herdr, existing.PaneID)
+// compensateStale compensates a stale in-flight saga (a prior
+// spawn_started/spawn_step for the same seat, never resolved: that spawn
+// died, or could not close its pane and recorded spawn_close_failed) before
+// Spawn proceeds to a fresh attempt. It returns nil when Spawn goes on to
+// Phase 2, after it recorded the saga's spawn_failed terminus, and otherwise
+// the result Spawn returns. existing's external ids (PaneID, AgmsgTeam) are
+// carried forward onto the event it writes so they remain traceable.
+//
+// existing's pane is one the manifest recorded, so, as Stop does, it is
+// confirmed as the seat's (confirmSeatPane: its tab labelled with the seat
+// id in a workspace labelled with the org_id) before anything is sent to
+// it, and only then gets closeSpawnPane's C-c and close (plan
+// 2026-10-22-seat-spawn-close, D3). Every call runs under its own
+// driverCallTimeout deadline, never the spawn's ctx. The outcomes, as
+// Details' `compensation=` words them:
+//   - no pane recorded: `no pane to compensate`, then spawn_failed.
+//   - not found: `ctrl_c=skipped pane=already closed`, then spawn_failed.
+//   - another label (the tab's, or the workspace's under a tab labelled
+//     for the seat; errLabelMismatch): the recorded id now names something
+//     else, so the pane gets no C-c and no close, and spawn_failed says
+//     `ctrl_c=skipped pane=left untouched, labelled differently: <err>`.
+//     Spawn goes on: if the old pane still holds the herdr agent name under
+//     another id, the new spawn's agent_start fails with agent_name_taken
+//     and closes its own pane.
+//   - confirmed: closeSpawnPane's words, `ctrl_c=ok` or `ctrl_c=failed:
+//     <err>`, then `pane=closed` or `pane=already closed` (not found by the
+//     close), and spawn_failed; or, when the close failed, `pane=close
+//     failed: <err>` and the refusal below.
+//   - not confirmed (a get failed or timed out, or herdr has the pane but
+//     not its tab or its workspace): `ctrl_c=skipped: pane not confirmed
+//     pane=not closed: <err>`, the words stopSeatPane (verbs.go) gives a
+//     stop_failed in the same case, and the refusal below.
+//
+// The refusal, when the pane was not confirmed or its close failed: the
+// pane may still run the seat, so the spawn is refused with
+// SpawnOutcomeFailed: no spawn_started and no rejected, but the non-state
+// spawn_close_failed (refuseStaleRespawn; Details `respawn refused
+// (previous_event=<event> compensation=<words>)`), so the seat stays active
+// on its recorded pane, and the error says how to close it.
+//
+// The caller's own pane (existing.PaneID equals HERDR_PANE_ID, read via
+// o.Getenv) is neither confirmed nor sent anything, since closing it would
+// end the command that runs this: the spawn is a plain rejection with
+// nothing written, and the error says to stop the seat from another pane.
+func (o *Org) compensateStale(p SpawnParams, existing SeatStatus) *SpawnResult {
+	paneID := existing.PaneID
+	compensation := "no pane to compensate"
+	if paneID != "" {
+		if paneID == o.getenv(herdrPaneIDEnv) {
+			r := SpawnResult{Outcome: SpawnOutcomeRejected, Err: fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, the pane running this command, so it is left as it is: run %s from another pane",
+				p.SeatID, p.OrgID, paneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))}
+			return &r
+		}
+		gone, err := o.confirmSeatPane(p.OrgID, p.SeatID, paneID, seatLabelWords)
+		var closeErr error
+		switch {
+		case gone:
+			compensation = "ctrl_c=skipped pane=already closed"
+		case errors.Is(err, errLabelMismatch):
+			compensation = fmt.Sprintf("ctrl_c=skipped pane=left untouched, labelled differently: %v", err)
+		case err != nil:
+			compensation, closeErr = fmt.Sprintf("ctrl_c=skipped: pane not confirmed pane=not closed: %v", err), err
+		default:
+			compensation, closeErr = o.closeSpawnPane(paneID)
+		}
+		if closeErr != nil {
+			return o.refuseStaleRespawn(p, existing, compensation, closeErr)
+		}
+	}
 	details := fmt.Sprintf("superseded by respawn (previous_event=%s compensation=%s)", existing.Event, compensation)
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed,
 		Role: existing.Role, Driver: existing.Driver, Model: existing.Model, Worktree: existing.Worktree,
 		PaneID: existing.PaneID, AgmsgTeam: existing.AgmsgTeam, Details: details,
 	})
+	return nil
+}
+
+// refuseStaleRespawn is compensateStale's refusal when the stale seat's pane
+// was not closed (closeErr: the reason it was not confirmed, or the close's
+// error): it records spawn_close_failed with existing's seat fields and
+// external ids, and returns SpawnOutcomeFailed with an error that names the
+// pane and says how to close it. A failed append is joined to that error.
+func (o *Org) refuseStaleRespawn(p SpawnParams, existing SeatStatus, compensation string, closeErr error) *SpawnResult {
+	err := fmt.Errorf("org: spawn: seat %q in org_id %q has an unfinished spawn on pane %q, not closed, so this spawn was refused and the seat left active: %w; close it with: herdr pane close %s, or %s",
+		p.SeatID, p.OrgID, existing.PaneID, closeErr, existing.PaneID, stopSeatCommand(p.OrgID, p.SeatID, o.InboxHintStateDir))
+	if appendErr := o.appendEvent(ManifestEvent{
+		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
+		Role: existing.Role, Driver: existing.Driver, Model: existing.Model, Worktree: existing.Worktree,
+		PaneID: existing.PaneID, AgmsgTeam: existing.AgmsgTeam,
+		Details: fmt.Sprintf("respawn refused (previous_event=%s compensation=%s)", existing.Event, compensation),
+	}); appendErr != nil {
+		err = errors.Join(err, fmt.Errorf("org: spawn: record %s: %w", EventSpawnCloseFailed, appendErr))
+	}
+	r := SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
+	return &r
 }
 
 // afterStaleCompensation is a no-op by default; tests reassign it (mirroring
 // absPath's "package-level var, test reassigns" seam above) to inject a
 // manifest mutation in the lock-free window between compensateStale's own
 // write (the line just above this call site in Spawn) and Phase 2's
-// re-acquire -- simulating a concurrent racer's Spawn call for the same
-// seat landing in that exact window, so Phase 2's idempotent re-check
+// re-acquire -- simulating a racer's Spawn call for the same seat that
+// takes no spawn lock (an older binary) landing in that exact window, so
+// Phase 2's idempotent re-check
 // (self-review Cycle-2 M-2 fix) is deterministically testable without a
 // real goroutine race.
 var afterStaleCompensation = func() {}
 
-// compensatePane is the failStep-path compensation helper: it always uses a
-// fresh background context so a best-effort cleanup call is never itself cut
-// short by the saga's own (possibly already-expired) timeout context.
-func compensatePane(h HerdrClient, paneID string) string {
-	return compensatePaneCtx(context.Background(), h, paneID)
-}
-
-// compensatePaneCtx sends a best-effort C-c to paneID (if non-empty) and
-// describes the outcome for a manifest Details string. Errors are recorded,
-// not propagated -- compensation is inherently best-effort.
-func compensatePaneCtx(ctx context.Context, h HerdrClient, paneID string) string {
+// closeSpawnPane is the failStep-path compensation: a best-effort C-c to
+// paneID, the pane this spawn's own TabCreate returned, then `herdr pane
+// close` on it, each call under its own driverCallTimeout deadline
+// (callWithTimeout), never the spawn's ctx, which has already expired when
+// the step failed by running out of time. There is no label check, since
+// the id came from this spawn's TabCreate moments ago. compensateStale uses
+// it too, once confirmSeatPane has confirmed a stale seat's recorded pane.
+// It returns the compensation outcome for Details (see failStepWithNote for
+// its wording) and the reason the pane was not closed: nil when it closed,
+// when herdr reported it not found (already closed), and when paneID is ""
+// (no pane yet, or a dry run), which makes no driver call. A failed C-c
+// alone does not count as not closed when the close succeeds.
+func (o *Org) closeSpawnPane(paneID string) (string, error) {
 	if paneID == "" {
-		return "no pane to compensate"
+		return "no pane to compensate", nil
 	}
-	if err := h.PaneSendKeys(ctx, paneID, "C-c"); err != nil {
-		return fmt.Sprintf("C-c failed: %v", err)
+	ctrlCNote := "ctrl_c=ok"
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneSendKeys(ctx, paneID, "C-c")
+	}); err != nil {
+		ctrlCNote = fmt.Sprintf("ctrl_c=failed: %v", err)
 	}
-	return "C-c sent"
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneClose(ctx, paneID)
+	})
+	switch {
+	case err == nil:
+		return ctrlCNote + " pane=closed", nil
+	case isNotFound(err):
+		return ctrlCNote + " pane=already closed", nil
+	default:
+		return fmt.Sprintf("%s pane=close failed: %v", ctrlCNote, err), err
+	}
 }

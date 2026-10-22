@@ -210,7 +210,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf("org: read manifest: %w", err)}
 		return res
 	}
-	if err := spawnPrecheckErr(o.Config, checked, rr.Events); err != nil {
+	if err := spawnPrecheckErr(o.Config, checked, rr.Events, o.InboxHintStateDir); err != nil {
 		return refuse(err)
 	}
 	if err := regateSpawnErr(filepath.Dir(o.Manifest.Path()), orgID); err != nil {

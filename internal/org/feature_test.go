@@ -677,6 +677,36 @@ func TestStartFeature_PrecheckRefusesWithoutWorktree(t *testing.T) {
 	}
 }
 
+// TestStartFeature_PrecheckStopHintRepeatsInboxHintStateDir: StartFeature
+// passes Org.InboxHintStateDir to spawnPrecheckErr, so a start whose leader
+// seat was left in flight and that the envelope refuses (a model outside the
+// pool) ends its error with the stop command and --state-dir, as Spawn's
+// refusal would, before any worktree call and with nothing recorded.
+func TestStartFeature_PrecheckStopHintRepeatsInboxHintStateDir(t *testing.T) {
+	st := newFeatureStart(t)
+	st.o.InboxHintStateDir = "/state/org"
+	st.o.Config.ModelPool = []config.OrgModelPoolEntry{{Driver: "claude", Model: "opus"}}
+	for _, ev := range []ManifestEvent{
+		{TS: "2026-08-01T00:00:00Z", OrgID: "auth-core", SeatID: LeaderIdentity, Event: EventSpawnStarted, Role: LeaderIdentity, Driver: "claude", Model: "sonnet"},
+		{TS: "2026-08-01T00:00:01Z", OrgID: "auth-core", SeatID: LeaderIdentity, Event: EventSpawnStep, PaneID: "pane-7", Details: "tab_created"},
+	} {
+		if err := st.o.Manifest.Append(ev); err != nil {
+			t.Fatalf("seed %s: %v", ev.Event, err)
+		}
+	}
+	before := takeSpawnSnapshot(t, st.o, st.h, st.a)
+
+	res := st.o.StartFeature(st.params("auth-core"))
+	assertStartRefused(t, res, `model "sonnet" not in [org].model_pool`, `has an unfinished spawn on pane "pane-7"`)
+	if want := "end it with ralph org stop --org-id auth-core --seat leader --state-dir '/state/org'"; !strings.HasSuffix(res.Spawn.Err.Error(), want) {
+		t.Errorf("expected the refusal to end with %q, got %v", want, res.Spawn.Err)
+	}
+	st.wantCalls(t)
+	if after := takeSpawnSnapshot(t, st.o, st.h, st.a); after != before {
+		t.Fatalf("expected nothing recorded or called, %+v -> %+v", before, after)
+	}
+}
+
 // TestStartFeature_SameStartAgainReusesWorktree covers the first sentence of
 // plan AC6 (and of AC1 of plan
 // docs/plans/archive/2026-10-10-org-feature-worktree-ownership.md): the same
@@ -1430,7 +1460,7 @@ func TestSpawnPrecheckErr_MatchesSpawn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("checkSpawnInput: %v", err)
 			}
-			pre := spawnPrecheckErr(o.Config, checked, mustReadEvents(t, o))
+			pre := spawnPrecheckErr(o.Config, checked, mustReadEvents(t, o), o.InboxHintStateDir)
 			r := o.Spawn(tc.p)
 			if tc.want == "" {
 				if pre != nil || (r.Outcome != SpawnOutcomeSpawned && r.Outcome != SpawnOutcomeIdempotent) {
