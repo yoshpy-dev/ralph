@@ -132,5 +132,6 @@ agmsg 1.5.1 が herdr の agent と pane の名前を書き換えて、ralph が
   - sync-docs に渡すもの: `docs/recipes/director-launch-cmd.md` の 131 行と 248 行(と templates/base の写し)、`/director` skill の起動スクリプトの export の説明(と写し)に `AGMSG_SELF_NAME=off`、`AgmsgSelfNameOff` の doc コメントに起動スクリプト。未確認のこと: 0.7.5 より古い herdr が `tab create --help` を無視するなら、確かめのときに tab を 1 つ作る
 - [x] Review artifact created(`docs/reports/self-review-2026-10-22-seat-agmsg-self-name.md`、Merge 可、LOW 4。L1・L2・L4 は 4991744e で直した)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-22-seat-agmsg-self-name.md`、pass。V1〜V3 は sync-docs に渡す)
-- [x] Test artifact created(`docs/reports/test-2026-10-22-seat-agmsg-self-name.md`、pass。G1・G2 のテストと G5・V4 の警告の文は、cross-review の前に直す)
+- [x] Test artifact created(`docs/reports/test-2026-10-22-seat-agmsg-self-name.md`、pass。G1・G2 のテストと G5・V4 の警告の文は 9c88b759 で直した)
+- [x] Docs synced(`docs/reports/sync-docs-2026-10-22-seat-agmsg-self-name.md`。ab5c6c96 で recipe、`/director`・`/org` skill、README、tech-debt の F3 の RESOLVED、仕様と根拠の表の FR-9 の注を合わせた)
 - [ ] PR created
