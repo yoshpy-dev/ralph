@@ -131,5 +131,5 @@
 - [x] Branch created
 - [x] Review artifact created(self-review ed5d57d6、Merge OK、LOW 4 件は b09b7c12 と c0ff8398 で直した)
 - [x] Verification artifact created(verify ab89243c、pass、INFO 3 件。I1 と I3 は次のコミットで直し、I2 はこの印)
-- [ ] Test artifact created
+- [x] Test artifact created(test de6ca6b2、pass。G1・G2 は 7a955d2c で埋めた。1 回目の run-test.sh で落ちた internal/cli のテストはこの diff と関係しない前からの競合で、tech-debt の行にした(33e51acc))
 - [ ] PR created

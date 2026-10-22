@@ -146,3 +146,12 @@
 - Fail: なし。1 回目の run-test.sh の 1 件は、この diff と関係しない前からの競合で、原因を確かめた(Failure analysis)
 - Blocked: なし
 - Gaps: G1(LOW、依存のある機能の行がない)、G2(INFO)。どちらも PR を止めない
+
+## この報告のあとに埋めた穴
+
+この報告のあとの 7a955d2c(`test:` の 1 コミット)が G1 と G2 を埋めた。変えたのは `internal/org/feature_test.go` と `internal/org/split_test.go` だけで、コードと雛形は変えていない。上の表と Verdict は /test の時点のまま残し、ここに足すだけにする。
+
+- G1: `TestFeatureLeaderTask_Preamble` に、`auth-core` に依存する機能 `auth-ui` の行を足した。期待は、前文のない計画で作ったその機能の頭の部分に、前置きの 1 行・囲み・前文・本文を文字で足して組み立てる
+- G2: `TestLoadSplitPlan_Preamble` と `TestFeatureLeaderTask_Preamble` に、前文の最後の行の末尾の空白 2 つが残る行を 1 つずつ足した
+- mutant: 生き残りだった 3 本を 1 本ずつ入れて打ち直した。G1 は依存する機能の行が、G2 は読み込みの行が、G3 はタスクの行が、それぞれ 1 行だけ赤になった。ほかの 38 本は打ち直していない
+- 打ち直したテスト: `gofmt -l internal/org/` は出力なし、`go vet ./internal/org/` は rc 0。前文に関わるテストは、手元の Go と `GOTOOLCHAIN=go1.25.8` の両方で ok。`go test -count=1 -timeout 30m ./internal/org/` は ok(383 秒)。`./scripts/run-test.sh` 全体と internal/cli は 7a955d2c の tree で打ち直していない
