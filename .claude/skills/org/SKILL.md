@@ -23,13 +23,19 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
 
 - herdr / agmsg が導入済みであること。`ralph doctor` で `herdr` / `agmsg`
   チェックを確認する(org を使わない標準フローは両ツールなしで動く)。
-  ralph は座席の pane を `herdr tab create --env AGMSG_SELF_NAME=off` で
-  作り、座席が自分で打つ agmsg が herdr の agent の名前を変えないように
-  する(herdr 0.7.5 の `--env`)。`--env` のない herdr でも動くが、
-  `warning: herdr tab create has no --env flag` で始まる警告が stderr に
-  1 行出て、座席の agmsg が名前を変えると ralph が座席に届かなくなる
-  ことがある(`agent_not_found`)。ralph 自身が打つ agmsg には、herdr の
-  版によらず `AGMSG_SELF_NAME=off` が付く。
+  ralph は座席の pane を
+  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
+  で作る(herdr 0.7.5 の `--env`)。1 つ目の値は、座席が自分で打つ agmsg が
+  herdr の agent の名前を変えないようにする。2 つ目の値は、pane の中の
+  Claude Code のセッションの hook が、セッションの終わりと compaction の前に
+  未コミットの変更を `wip:` でコミットしないようにする。`--env` のない
+  herdr でも動くが、`warning: herdr tab create has no --env flag` で始まる
+  警告が stderr に 1 行出て、どちらの値も付かない。そのときは、座席の
+  agmsg が名前を変えると ralph が座席に届かなくなることがあり
+  (`agent_not_found`)、座席のセッションが `wip:` のコミットを作ることが
+  ある(機能の org の leader は、ブランチにそのコミットがあれば push せずに
+  BLOCKED を上げる)。ralph 自身が打つ agmsg には、herdr の版によらず
+  `AGMSG_SELF_NAME=off` が付く。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
   `max_orgs` / `max_total_seats` / `permissions`)が意図通り設定されて
   いること。未設定の場合は既定値
@@ -882,7 +888,13 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
    なくて断られる。revert は同じ中身を元のパスに戻すので、承認の検査はそのまま
    通る。
 5. implementer と reviewer を `stop` する。
-6. HEAD が gate の出した `HEAD:` と同じことを確かめてから、
+6. HEAD が gate の出した `HEAD:` と同じことを確かめる。gate の打ち直しと
+   push の前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を
+   打ち、件名が `wip:` で始まるコミットがあれば、どちらも打たずにそのコミット
+   を本文に書いて `BLOCKED` を escalate する(`wip:` は Claude Code の
+   セッションの hook が作る自動のチェックポイントで、機能の PR には要らない。
+   gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも
+   `git log` を打つ)。HEAD が違えば 4 の gate を打ち直し、同じなら
    `git push -u origin <type>/<slug>` と `gh pr create` で PR を 1 本作る。
    タイトルと本文は `/pr` skill の雛形に合わせてよいが、`/pr` skill は実行
    しない(PR のあと task worktree と local branch を消すので、leader の cwd が

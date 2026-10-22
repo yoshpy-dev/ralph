@@ -221,12 +221,14 @@ director も守る(「headless の director」節)。
   スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
 - 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
   `RALPH_DIRECTOR_TOKEN` を export し(start を打った環境に
-  `RALPH_ORG_AGMSG_HOME` があればそれも)、`AGMSG_SELF_NAME=off` を export
-  する(agmsg home の有無によらない。agmsg が herdr の agent や pane の
-  名前を変えないようにする)。そのあと、start を打った ralph の絶対パスで
-  check-in(隠れた動詞 `ralph org director launched`)を打ち、start が
-  PATH で見つけたエージェントの絶対パスを exec する。check-in が断られれば、
-  エージェントは起動しない。
+  `RALPH_ORG_AGMSG_HOME` があればそれも)、`AGMSG_SELF_NAME=off` と
+  `RALPH_WIP_CHECKPOINT=off` を export する(agmsg home の有無によらない。
+  1 つ目は agmsg が herdr の agent や pane の名前を変えないようにし、2 つ目は
+  director の Claude Code のセッションの hook が、セッションの終わりと
+  compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を
+  打った ralph の絶対パスで check-in(隠れた動詞 `ralph org director launched`)
+  を打ち、start が PATH で見つけたエージェントの絶対パスを exec する。check-in
+  が断られれば、エージェントは起動しない。
   check-in はスクリプトの pid とその起動時刻を記録する。exec は pid も起動
   時刻も変えないので、記録した pid はそのままエージェントの pid になる。
   start はこの check-in を `--timeout-ms`(既定 60 秒)まで待つ。
@@ -277,19 +279,23 @@ start の設定と、director が動く場所は次のとおり。
   この断りは launch_cmd で立てるときも同じ。
 - 人の shell の `RALPH_ORG_AGMSG_HOME` は、herdr で立てた director には届かない
   (herdr の pane の環境は herdr server のもので、ralph が足す
-  `AGMSG_SELF_NAME=off` だけが加わる)。設定されていれば start は警告を
-  1 行出して続ける。herdr の director に届くのは `ralph.toml` の
-  `[org].agmsg_home` のほうになる。launch_cmd で立てた director には、起動
-  スクリプトがその値を export するので届き、start は警告しない。相対の値は、
-  start が起こす見張りと同じく、start を打った場所から絶対パスにして渡す。
+  `AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off` だけが加わる)。
+  設定されていれば start は警告を 1 行出して続ける。herdr の director に
+  届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。launch_cmd で
+  立てた director には、起動スクリプトがその値を export するので届き、start は
+  警告しない。相対の値は、start が起こす見張りと同じく、start を打った場所から
+  絶対パスにして渡す。
 - herdr で立てる director の pane は、ralph が
-  `herdr tab create --env AGMSG_SELF_NAME=off` で作る。agmsg が pane の
-  agent の名前を変えると、ralph がその director に届かなくなるため
-  (`agent_not_found`)。herdr の `tab create --help` に `--env` がなければ
-  (0.7.5 にはある)、`--env` を付けずに作り、
-  `warning: herdr tab create has no --env flag` で始まる警告を stderr に
-  1 行出す。その herdr では、director が自分で打つ agmsg が pane の名前を
-  変えうる。
+  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
+  で作る。1 つ目は、agmsg が pane の agent の名前を変えると、ralph がその
+  director に届かなくなるため(`agent_not_found`)。2 つ目は、pane の中の
+  Claude Code のセッションの hook が、セッションの終わりと compaction の前に
+  未コミットの変更を `wip:` でコミットしないようにするため。herdr の
+  `tab create --help` に `--env` がなければ(0.7.5 にはある)、`--env` を
+  付けずに作り、`warning: herdr tab create has no --env flag` で始まる警告を
+  stderr に 1 行出す。その herdr では、director が自分で打つ agmsg が pane の
+  名前を変えることがあり、director のセッションの hook が `wip:` のコミットを
+  作ることがある。
 - director は台帳の main worktree のルートで動く。台帳が main worktree の
   ものでなければ、start を打った場所で動く。
 

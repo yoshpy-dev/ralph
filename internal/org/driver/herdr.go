@@ -40,11 +40,14 @@ type Herdr struct {
 	// lists --env in `herdr tab create --help` (paneEnvSupported). herdr
 	// 0.7.5 adds them to the pane's environment and keeps the rest of it
 	// (docs/evidence/agmsg-self-name-2026-10-22.md, (a)). Empty adds no
-	// --env and runs no check. Production passes AgmsgSelfNameOff, so an
-	// agmsg run inside a seat's pane, or a headless director's, cannot rename
-	// that pane's herdr agent (finding F3; the same evidence, (e)). The
-	// values appear in the `herdr tab create` argv, which ps shows, and in
-	// the warning line, so never put a secret in PaneEnv.
+	// --env and runs no check. Production passes the entries of
+	// SeatPaneEnv, for the panes of seats and of a headless director:
+	// AgmsgSelfNameOff, so an agmsg run inside such a pane cannot rename the
+	// pane's herdr agent (finding F3; the same evidence, (e)), and
+	// WIPCheckpointOff, so the WIP-checkpoint hooks of a Claude Code session
+	// in it make no wip: commit (finding F11). The values appear in the
+	// `herdr tab create` argv, which ps shows, and in the warning line, so
+	// never put a secret in PaneEnv.
 	PaneEnv []string
 	// Warn receives the warning line TabCreate writes when it cannot add
 	// PaneEnv; nil means os.Stderr.
@@ -307,9 +310,13 @@ func (h Herdr) paneEnvSupported(ctx context.Context) bool {
 // warnNoPaneEnv writes to Warn (os.Stderr when nil) the one warning line for
 // a herdr whose TabCreate cannot add PaneEnv. probeErr is the help call's
 // error, nil when the help just does not list --env. The line starts with
-// "warning: " as the CLI's other warnings do. The consequences it names are
-// those of the one entry production passes, AgmsgSelfNameOff, in the panes
-// of seats and of a headless director.
+// "warning: " as the CLI's other warnings do and lists every PaneEnv entry.
+// For each entry this driver knows (paneEnvConsequence: AgmsgSelfNameOff and
+// WIPCheckpointOff, the entries of SeatPaneEnv that production passes for
+// the panes of seats and of a headless director) it names, in PaneEnv's
+// order, what a pane created without it may do; an entry it does not know
+// adds no clause. The clauses are joined with "; ", and the advice to use a
+// herdr with --env follows as a sentence of its own, after ". ".
 func (h Herdr) warnNoPaneEnv(probeErr error) {
 	w := h.Warn
 	if w == nil {
@@ -320,11 +327,19 @@ func (h Herdr) warnNoPaneEnv(probeErr error) {
 		reason = "could not check whether herdr tab create has --env ('herdr tab create --help': " +
 			strings.Join(strings.Fields(probeErr.Error()), " ") + ")"
 	}
-	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s: "+
-		"an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, "+
-		"and ralph may then fail to reach it (agent_not_found); "+
-		"use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
-		reason, strings.Join(h.PaneEnv, " --env "))
+	var consequences []string
+	for _, kv := range h.PaneEnv {
+		if c := paneEnvConsequence(kv); c != "" {
+			consequences = append(consequences, c)
+		}
+	}
+	what := ""
+	if len(consequences) > 0 {
+		what = ": " + strings.Join(consequences, "; ")
+	}
+	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s%s. "+
+		"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
+		reason, strings.Join(h.PaneEnv, " --env "), what)
 }
 
 // AgentStart runs

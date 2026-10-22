@@ -961,6 +961,79 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 	}
 }
 
+// TestRenderRolePrompt_Leader_PushRefusesWipCommits pins AC5b of plan
+// 2026-10-22-seat-wip-checkpoint: before step 14 re-runs the gate or
+// pushes, it lists the branch's commits with git log and, when a subject
+// starts with wip:, runs neither, writes the commits in the body and
+// escalates a BLOCKED with the org_id for its TASK_ID. Steps 9 and 14 alone
+// let a seat's wip: commit through: step 9's git status sees no committed
+// change, and a re-run gate that passes pushes it (D5). The check comes
+// right after the HEAD comparison's first sentence and before both the
+// re-run and the push, and it runs when HEAD equals the gate's HEAD too,
+// since a wip: commit made before the gate is in that HEAD. The
+// WIP-checkpoint hooks commit subjects that start with wip:, which is what
+// the step tells their commits by.
+func TestRenderRolePrompt_Leader_PushRefusesWipCommits(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+	const marker = "14. HEAD("
+	item, ok := markdownItem(section, marker)
+	if !ok {
+		t.Fatalf("expected the 機能ごとの org section to have an item naming %q, got section:\n%s", marker, section)
+	}
+	const gitLog = "`git log --format='%h %s' origin/<既定のブランチ>..HEAD`"
+	for _, want := range []string{
+		"gate を打ち直す前と push の前に、" + gitLog + " を打つ",
+		"(`<既定のブランチ>` は手順 9 の決め方で決める)",
+		"件名が `wip:` で始まるコミットがあれば、gate も push も打たず、そのコミットの行を本文に書いて、BLOCKED(TASK_ID は `org-a`)を「件を上げる」の節の手順で `ralph org escalate` で上げる",
+		"`wip:` のコミットは、Claude Code のセッションの hook がセッションの終わりと compaction の前に作る自動のチェックポイントで、機能の PR には要らない",
+		"gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも `git log` を打つ",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the 機能ごとの org item naming %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	// The check is read after the HEAD comparison and before the gate is
+	// re-run or the branch pushed.
+	s, at := squashSpace(item), -1
+	order := []string{
+		"gate が出した `HEAD:` と同じことを確かめる",
+		gitLog,
+		"件名が `wip:` で始まるコミットがあれば、gate も push も打たず",
+		"違えば push せず、gate を打ち直す(手順 12)",
+		"`git push -u origin <ブランチ>` で push し",
+	}
+	for _, step := range order {
+		i := strings.Index(s, squashSpace(step))
+		if i < 0 || i < at {
+			t.Errorf("expected step 14 to say %q in this order, but %q is missing or out of order, got item:\n%s", order, step, item)
+			break
+		}
+		at = i
+	}
+
+	// The hooks whose commits the check finds commit subjects that start
+	// with wip:.
+	for _, hook := range []string{".claude/hooks/session_end_summary.sh", ".claude/hooks/precompact_checkpoint.sh"} {
+		t.Run(hook, func(t *testing.T) {
+			body, ok, err := readRepoFile(reportNamesRepoRoot(t), hook)
+			if err != nil {
+				t.Fatalf("read %s: %v", hook, err)
+			}
+			if !ok {
+				t.Skipf("%s not found -- skipping the wip: subject check for it", hook)
+			}
+			if !strings.Contains(body, "git commit -m 'wip: ") {
+				t.Errorf("expected %s to commit a subject that starts with wip:, which step 14 of the leader template tells its commits by, got:\n%s", hook, body)
+			}
+		})
+	}
+}
+
 // TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase pins the reviewer
 // side of AC8 of plan org-gate: a passing RESULT carries, as header lines,
 // the HEAD: and BASE: the reviewer verified (spec FR-7), says how to find the
@@ -1292,6 +1365,132 @@ func TestRenderRolePrompt_Leader_WatchRefusalEscalatesWithoutRetry(t *testing.T)
 			t.Errorf("WatchGateError for %s (once=%t) = %q; want it to contain %q and %q, which the leader template tells the refusal by",
 				l.State, l.Mark != nil && l.Mark.Once, msg, watchCommand, refusalWords)
 		}
+	}
+}
+
+// TestRenderRolePrompt_Leader_SpawnFailedIsSortedByItsError pins AC5 of
+// plan 2026-10-22-seat-wip-checkpoint: the 運用規律 item on a spawn that
+// exits 1 with a spawn failed: line (a rejected: refusal is not this case)
+// sorts it by the error. (a) seat left active: the seat may be running, so
+// the leader runs the error's ralph org stop without --force and retries
+// only once that stop exits 0 and ralph org status shows the seat without
+// (active), raising a BLOCKED otherwise. (b) An org: spawn step error
+// without those words: the pane is closed and a HELLO does not mean the seat
+// runs, so the leader retries, with a larger --timeout-ms when the error
+// says the deadline ran out. Any other error (the ledger's) and (c) a second
+// failure in a row of the same seat raise a BLOCKED, with the org_id for its
+// TASK_ID, through the 件を上げる section; the sentence before the cases says
+// it is how to raise the BLOCKED the cases below call for, not that every
+// spawn failed: raises one. The words the item sorts the errors by are in
+// the errors Spawn returns, so a reworded error cannot leave the rule
+// pointing at text spawn no longer prints.
+func TestRenderRolePrompt_Leader_SpawnFailedIsSortedByItsError(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 運用規律")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 運用規律' section, got:\n%s", text)
+	}
+	const marker = "stdout に `spawn failed:` の行が"
+	cases := []struct {
+		marker string
+		want   []string
+	}{
+		{marker, []string{
+			"`ralph org spawn` が終了コード 1 で返り、stdout に `spawn failed:` の行が出たら(stderr にも同じエラーの文が出ます)",
+			"stdout の `rejected:` の行で断られたとき(同じ座席の別の spawn が動いている、横断の見張りが動いていない、承認の検査、など)は、ここには当たりません",
+			"ここには当たりません。下の項で BLOCKED を上げるときは、TASK_ID を org_id の `org-a`、SUMMARY を失敗した spawn のコマンド、EVIDENCE をエラーの文の要点にして、「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまでその座席の spawn を打たずに待ってください",
+		}},
+		{"エラーが `seat left active` を含むとき", []string{
+			"座席は動いているかもしれません",
+			"エラーにある `ralph org stop --org-id … --seat …` を、`--force` を足さずにそのまま打ってください",
+			"stop が終了コード 0 で終わり、`ralph org status` でその座席の STATE の欄に `(active)` が付いていない(active でない)ことを確かめてから、次の項のとおりに打ち直してください",
+			"stop が終了コード 1 で返ったとき、または座席がまだ active のときは、打ち直さずに BLOCKED を上げてください",
+		}},
+		{"エラーが `org: spawn step` で始まり", []string{
+			"`seat left active` を含まないとき",
+			"ralph は座席の pane を閉じています",
+			"その座席の HELLO が agmsg の受信箱に届いていても、座席は動いていません",
+			"エラーに `retry with a larger --timeout-ms` があれば(spawn の `--timeout-ms` の期限が切れた)、大きい `--timeout-ms` で打ち直し、なければそのまま打ち直してください",
+		}},
+		{"それ以外のエラー", []string{"打ち直さずに BLOCKED を上げてください"}},
+		{"2 回続けて", []string{"同じ座席の spawn が 2 回続けて `spawn failed:` で失敗したら、上のどの場合でも打ち直さずに BLOCKED を上げてください"}},
+	}
+	for _, c := range cases {
+		item, ok := markdownItem(section, c.marker)
+		if !ok {
+			t.Errorf("expected the 運用規律 section to have an item naming %q, got section:\n%s", c.marker, section)
+			continue
+		}
+		for _, want := range c.want {
+			if !containsPhrase(item, want) {
+				t.Errorf("expected the 運用規律 item naming %q to say %q, got item:\n%s", c.marker, want, item)
+			}
+		}
+	}
+	// The cases are nested under the spawn failed: bullet, before the next
+	// bullet of the section.
+	start := strings.Index(section, marker)
+	if start < 0 {
+		t.Fatalf("expected the 運用規律 section to name %q, got section:\n%s", marker, section)
+	}
+	bullet := section[start:]
+	if end := strings.Index(bullet, "\n- "); end >= 0 {
+		bullet = bullet[:end]
+	}
+	for _, c := range cases[1:] {
+		if item, ok := markdownItem(bullet, c.marker); !ok || !strings.HasPrefix(item, "  - ") {
+			t.Errorf("expected the case naming %q to be a nested bullet of the 運用規律 item naming %q, got bullet:\n%s", c.marker, marker, bullet)
+		}
+	}
+
+	// A close that fails leaves the seat active and says seat left active
+	// with the stop to run; a close that does not leaves it inactive and the
+	// error names the step only. Both start with org: spawn step.
+	for _, tc := range []struct {
+		name       string
+		closeErr   error
+		wantActive bool
+	}{
+		{"the pane closed", nil, false},
+		{"the close failed", errors.New("herdr pane close: connect: connection refused"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			h.agentStartErr = errors.New("stub failure: agent start")
+			if tc.closeErr != nil {
+				h.paneCloseErrs = map[string]error{"pane-1": tc.closeErr}
+			}
+			r := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+			if r.Outcome != SpawnOutcomeFailed || r.Err == nil {
+				t.Fatalf("expected SpawnOutcomeFailed with an error, got %+v", r)
+			}
+			msg := r.Err.Error()
+			if !strings.HasPrefix(msg, "org: spawn step ") {
+				t.Errorf("expected the error to start with %q, which the leader template sorts it by, got %q", "org: spawn step ", msg)
+			}
+			if got := strings.Contains(msg, "seat left active"); got != tc.wantActive {
+				t.Errorf("expected seat left active in the error to be %t, got %q", tc.wantActive, msg)
+			}
+			if tc.wantActive && !strings.Contains(msg, "ralph org stop --org-id org-a --seat seat-1") {
+				t.Errorf("expected the error to name the ralph org stop the leader template runs, got %q", msg)
+			}
+			if got := len(activeRealSeats(t, o)) == 1; got != tc.wantActive {
+				t.Errorf("expected the seat to be active (%t) after the spawn, got active seats %v", tc.wantActive, activeRealSeats(t, o))
+			}
+		})
+	}
+	// A spawn refused over a stale pane it could not close leaves the seat
+	// active and says so too, and the deadline's hint carries the words the
+	// item tells it by.
+	o, _, _ := testOrg(t)
+	stale := o.refuseStaleRespawn(mustSpawnParams("org-a", "seat-1"),
+		SeatStatus{OrgID: "org-a", SeatID: "seat-1", PaneID: "stale-pane", Event: EventSpawnStep},
+		"ctrl_c=skipped: pane not confirmed pane=not closed: stub", errors.New("stub: herdr does not answer"))
+	if stale == nil || stale.Outcome != SpawnOutcomeFailed || !strings.Contains(stale.Err.Error(), "seat left active") {
+		t.Errorf("expected a stale respawn that cannot close the pane to fail with seat left active, got %+v", stale)
+	}
+	if hint := spawnDeadlineHint(60000); !strings.Contains(hint, "retry with a larger --timeout-ms") {
+		t.Errorf("spawnDeadlineHint(60000) = %q; want it to contain %q, which the leader template tells the deadline by", hint, "retry with a larger --timeout-ms")
 	}
 }
 

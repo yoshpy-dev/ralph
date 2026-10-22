@@ -273,17 +273,21 @@ type directorLaunchScript struct {
 // home that is neither absolute nor starts with "~/", an empty model or
 // prompt pointer, or a value holding a NUL byte, which no shell word can
 // hold. It cds to Cwd (exit 1 when it cannot), exports
-// RALPH_DIRECTOR_TOKEN, RALPH_ORG_AGMSG_HOME when AgmsgHome is set, and
-// AGMSG_SELF_NAME=off (driver.AgmsgSelfNameOff), runs the check-in
+// RALPH_DIRECTOR_TOKEN, RALPH_ORG_AGMSG_HOME when AgmsgHome is set, and each
+// entry of driver.SeatPaneEnv, in its order (AGMSG_SELF_NAME=off, then
+// RALPH_WIP_CHECKPOINT=off), runs the check-in
 // `<ralph> org director launched --id <id> --token <token> --pid "$$"
 // --state-dir <state dir>` and exits 1 when it fails, so a refused check-in
 // starts no agent, and then execs the agent with PermArgs, --model, Model,
 // and PromptPointer, in the order herdr's agent start gets them. Every
-// value is single-quoted (shellQuote), whatever it holds. AGMSG_SELF_NAME
-// is exported whatever AgmsgHome is: the terminal launch_cmd opens is not a
-// pane ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does not
-// reach it, and an agmsg the director runs in a herdr pane would otherwise
-// rename that pane's agent (finding F3).
+// value is single-quoted (shellQuote), whatever it holds. The SeatPaneEnv
+// entries are exported whatever AgmsgHome is: the terminal launch_cmd opens
+// is not a pane ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does
+// not reach it. Without AGMSG_SELF_NAME=off an agmsg the director runs in a
+// herdr pane would rename that pane's agent (finding F3), and without
+// RALPH_WIP_CHECKPOINT=off the WIP-checkpoint hooks of the director's
+// Claude Code session may commit a feature branch's uncommitted changes as
+// wip: at its session end or context compaction (finding F11).
 func (s directorLaunchScript) text() (string, error) {
 	if _, ok := directorIDNumber(s.ID); !ok {
 		return "", fmt.Errorf("launch script: %q is not a registration id (d<N>, such as d1)", s.ID)
@@ -320,7 +324,10 @@ func (s directorLaunchScript) text() (string, error) {
 	if s.AgmsgHome != "" {
 		b.WriteString(driver.AgmsgHomeEnv + "=" + shellQuote(s.AgmsgHome) + "\nexport " + driver.AgmsgHomeEnv + "\n")
 	}
-	b.WriteString(driver.AgmsgSelfNameEnv + "=" + shellQuote("off") + "\nexport " + driver.AgmsgSelfNameEnv + "\n")
+	for _, kv := range driver.SeatPaneEnv() {
+		name, value, _ := strings.Cut(kv, "=")
+		b.WriteString(name + "=" + shellQuote(value) + "\nexport " + name + "\n")
+	}
 	b.WriteString(shellQuote(s.RalphPath) + " org director launched --id " + shellQuote(s.ID) + " --token " + shellQuote(s.Token) +
 		` --pid "$$" --state-dir ` + shellQuote(s.StateDir) + " || exit 1\n")
 	words := []string{shellQuote(s.AgentPath)}
@@ -538,7 +545,8 @@ func (o *Org) directorCheckInPollInterval() time.Duration {
 //  1. writePrompt: the prompt file, rendered for launch cmd, at
 //     <state dir>/prompts/director_<token>.md, as for herdr
 //  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN,
-//     RALPH_ORG_AGMSG_HOME when p.AgmsgHome is set, and AGMSG_SELF_NAME=off,
+//     RALPH_ORG_AGMSG_HOME when p.AgmsgHome is set, and the entries of
+//     driver.SeatPaneEnv (AGMSG_SELF_NAME=off, RALPH_WIP_CHECKPOINT=off),
 //     the check-in with c.ralphPath, and the exec of c.agentPath with the
 //     permission flags, --model, and the prompt file's PromptFilePointer, in
 //     the order herdr's agent start gets them
