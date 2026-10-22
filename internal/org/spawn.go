@@ -2,6 +2,7 @@ package org
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -213,7 +214,9 @@ type Org struct {
 	CodexModelObserveInterval time.Duration
 	// DriverCallTimeout bounds each herdr / agmsg call Stop makes (the pane,
 	// tab and workspace gets of the ownership check, the C-c, the pane
-	// close, the agmsg Leave), each workspace get and close Disband makes,
+	// close, the agmsg Leave), each compensating call of a failed Spawn (the
+	// C-c and the close of the pane it made, the agmsg Leave after a failed
+	// HELLO), each workspace get and close Disband makes,
 	// the gets and the close in CloseDeferredSelfPane /
 	// CloseDeferredSelfWorkspace, each call of the watch's pulse cycle
 	// (watch.go: the herdr agent gets, the agmsg Join, Send, and History,
@@ -516,7 +519,10 @@ type SpawnResult struct {
 //
 // Only then does the saga proceed to (unless DryRun) the workspace/tab/
 // agent/agmsg side effects with a spawn_started -> spawn_step* ->
-// spawned|spawn_failed manifest trail and a tri-state model receipt.
+// spawned|spawn_failed manifest trail and a tri-state model receipt. A step
+// failing after tab_create closes the pane it made; when that close fails,
+// spawn_close_failed replaces spawn_failed and the seat stays active (see
+// failStepWithNote).
 //
 // The DryRun path (self-review Cycle-2 M-1 fix) runs steps 0, 2, 3, 4, 6,
 // and 7 in the exact same order as the real path above: the input-only
@@ -995,7 +1001,7 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		// success path below) -- agentStartWithRetry already computed it, so
 		// this is a cheap addition that answers "how many attempts were made
 		// before this gave up" for a failed spawn, not only a successful one.
-		return o.failStepWithNote(p, "agent_start", err, paneID, fmt.Sprintf("agent_start_retries=%d", retries))
+		return o.failStepWithNote(p, "agent_start", err, paneID, "", fmt.Sprintf("agent_start_retries=%d", retries))
 	}
 	if retries > 0 {
 		// This must stay the LAST thing appended to agentStartedDetails:
@@ -1066,8 +1072,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 			// roster entry behind -- best-effort Leave it back out, and record
 			// the outcome in spawn_failed's Details alongside the leader-join note
 			// so both compensation steps stay auditable from the manifest alone.
-			leaveNote := compensateLeave(o.Agmsg, team, p.SeatID)
-			return o.failStepWithNote(p, "agmsg_announce", err, paneID, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
+			// The Leave comes first, then the pane's C-c and close (plan
+			// 2026-10-22-seat-spawn-close, D4), each under its own
+			// driverCallTimeout deadline: a HELLO that timed out may still
+			// have reached the leader, and the pane is closed all the same.
+			leaveNote := o.compensateLeave(team, p.SeatID)
+			return o.failStepWithNote(p, "agmsg_announce", err, paneID, team, fmt.Sprintf("leader_join=%s leave=%s", leaderJoinNote, leaveNote))
 		}
 		if err := o.appendEvent(ManifestEvent{
 			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnStep,
@@ -2109,7 +2119,7 @@ func (o *Org) dryRunSpawn(p SpawnParams, mode string, reserve bool) SpawnResult 
 	// a dry run could report SpawnOutcomeSpawned for a spawn the real path
 	// would fail at "agent_start"/"prompt_file". Both are now propagated as
 	// a failed result the same way failStep would in the real path -- paneID
-	// is "" since a dry run never creates a real pane (compensatePane then
+	// is "" since a dry run never creates a real pane (closeSpawnPane then
 	// records "no pane to compensate", matching dry-run's zero-side-effect
 	// contract), and DryRun: p.DryRun on the resulting spawn_failed event
 	// (see failStepWithNote) keeps it excluded from real-seat accounting.
@@ -2251,27 +2261,49 @@ func openOrgWorkspaces(events []ManifestEvent, orgID string) []string {
 	return open
 }
 
-// failStep records a spawn_failed event for a saga step that returned an
-// error: best-effort compensation (send C-c to the pane, if one exists yet)
-// followed by a manifest event whose Details captures the failing step, the
+// failStep records the end of a saga step that returned an error:
+// compensation of the pane this spawn created, if one exists yet
+// (closeSpawnPane: a C-c, then `herdr pane close`), followed by a
+// spawn_failed event whose Details captures the failing step, the
 // underlying error, and the compensation outcome. paneID (if non-empty) is
-// preserved on the event so an orphaned external resource stays traceable
-// from the manifest alone (AC-10).
+// preserved on the event so the pane stays traceable from the manifest
+// alone (AC-10). A pane that could not be closed records
+// spawn_close_failed instead (see failStepWithNote).
 func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) SpawnResult {
-	return o.failStepWithNote(p, step, cause, paneID, "")
+	return o.failStepWithNote(p, step, cause, paneID, "", "")
 }
 
 // failStepWithNote is failStep plus an extra free-text note appended to
-// Details. Two note-carrying callers: the agmsg_announce failure path
+// Details, and the agmsg team the seat joined ("" before agmsg_join
+// succeeded). Two note-carrying callers: the agmsg_announce failure path
 // (carrying the ensureLeaderJoined outcome and the agmsg_announce Leave
 // compensation forward — a missing "leader" roster entry is the most likely
 // root cause of a Send rejection) and the agent_start failure path
 // (carrying `agent_start_retries=N` so exhausted pane-busy retries stay
 // auditable). failStep (no note) additionally covers dryRunSpawn's
 // RenderRolePrompt/promptFilePath error paths (AC-10b) -- paneID is always
-// "" there since a dry run never creates a real pane, so compensatePane
-// records "no pane to compensate" for those calls, matching dry-run's
-// zero-side-effect contract.
+// "" there since a dry run never creates a real pane, so closeSpawnPane
+// makes no driver call and records "no pane to compensate" for those calls,
+// matching dry-run's zero-side-effect contract.
+//
+// Details read `step=<step> error=<cause> compensation=<outcome>`, then the
+// note. outcome is `no pane to compensate` when paneID is "" (a failure
+// before tab_create returned a pane, or a dry run), and otherwise the C-c's
+// outcome and then the close's, worded as Stop words them: `ctrl_c=ok` or
+// `ctrl_c=failed: <err>`, then `pane=closed`, `pane=already closed` (herdr's
+// not-found reply to the close), or `pane=close failed: <err>`.
+//
+// A close that failed (any error but not-found, a timeout included) leaves
+// the pane, and with it the herdr agent name <org_id>_<seat_id>, behind.
+// Then spawn_failed is not written; the non-state EventSpawnCloseFailed is
+// written instead, with the same seat fields, the pane id, team, and the
+// same Details, so the seat stays active in the roster on the spawn_step
+// that recorded the pane id, and `ralph org stop` (one seat or --all) closes
+// that pane and records `stopped`, as after a stop_failed (spec FR-2). The
+// returned error wraps both the step's cause and the close's error and says
+// how to close the pane: `herdr pane close <id>` or `ralph org stop
+// --org-id <o> --seat <s>`. A failed append of spawn_close_failed is joined
+// to that error.
 //
 // DryRun: p.DryRun on the appended event mirrors p.DryRun exactly: it is
 // always false for every real-Spawn caller (failStep/failStepWithNote are
@@ -2280,11 +2312,23 @@ func (o *Org) failStep(p SpawnParams, step string, cause error, paneID string) S
 // so a dry-run failure is correctly excluded from ActiveSeatCount/roster
 // like every other dry-run event, instead of fabricating a real seat's
 // spawn_failed state.
-func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, note string) SpawnResult {
-	compensation := compensatePane(o.Herdr, paneID)
+func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, team, note string) SpawnResult {
+	compensation, closeErr := o.closeSpawnPane(paneID)
 	details := fmt.Sprintf("step=%s error=%v compensation=%s", step, cause, compensation)
 	if note != "" {
 		details += " " + note
+	}
+	if closeErr != nil {
+		err := fmt.Errorf("org: spawn step %s failed: %w; pane %q not closed, seat left active: %w; close it with: herdr pane close %s, or ralph org stop --org-id %s --seat %s",
+			step, cause, paneID, closeErr, paneID, p.OrgID, p.SeatID)
+		if appendErr := o.appendEvent(ManifestEvent{
+			TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnCloseFailed,
+			Role: p.Role, Driver: p.Driver, Model: p.Model, Worktree: p.Cwd,
+			PaneID: paneID, AgmsgTeam: team, DryRun: p.DryRun, Details: details,
+		}); appendErr != nil {
+			err = errors.Join(err, fmt.Errorf("org: spawn: record %s: %w", EventSpawnCloseFailed, appendErr))
+		}
+		return SpawnResult{Outcome: SpawnOutcomeFailed, Err: err}
 	}
 	_ = o.appendEvent(ManifestEvent{
 		TS: o.now(), OrgID: p.OrgID, SeatID: p.SeatID, Event: EventSpawnFailed,
@@ -2298,14 +2342,19 @@ func (o *Org) failStepWithNote(p SpawnParams, step string, cause error, paneID, 
 // used by the agmsg_announce failure path (AC-6/tech-debt: "spawn の
 // agmsg_announce(HELLO send)失敗パスの補償が...Leave しない"): by the time
 // HELLO Send fails, the seat's own Join has already succeeded, so without
-// this call a failed spawn leaves a stale roster entry behind. Errors are
-// recorded in the returned string, not propagated -- like compensatePane,
-// this is inherently best-effort and must never itself fail the saga.
-func compensateLeave(a AgmsgClient, team, agentID string) string {
+// this call a failed spawn leaves a stale roster entry behind. The Leave
+// runs under its own driverCallTimeout deadline (callWithTimeout), not the
+// spawn's ctx, which has often expired by then, so an agmsg that does not
+// answer cannot hold the spawn. Errors are recorded in the returned string,
+// not propagated -- like closeSpawnPane, this is inherently best-effort and
+// must never itself fail the saga.
+func (o *Org) compensateLeave(team, agentID string) string {
 	if team == "" || agentID == "" {
 		return "skipped: no team/agent to leave"
 	}
-	if err := a.Leave(context.Background(), team, agentID); err != nil {
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Agmsg.Leave(ctx, team, agentID)
+	}); err != nil {
 		return fmt.Sprintf("failed: %v", err)
 	}
 	return "ok"
@@ -2336,11 +2385,38 @@ func (o *Org) compensateStale(ctx context.Context, p SpawnParams, existing SeatS
 // real goroutine race.
 var afterStaleCompensation = func() {}
 
-// compensatePane is the failStep-path compensation helper: it always uses a
-// fresh background context so a best-effort cleanup call is never itself cut
-// short by the saga's own (possibly already-expired) timeout context.
-func compensatePane(h HerdrClient, paneID string) string {
-	return compensatePaneCtx(context.Background(), h, paneID)
+// closeSpawnPane is the failStep-path compensation: a best-effort C-c to
+// paneID, the pane this spawn's own TabCreate returned, then `herdr pane
+// close` on it, each call under its own driverCallTimeout deadline
+// (callWithTimeout), never the spawn's ctx, which has already expired when
+// the step failed by running out of time. There is no label check, since
+// the id came from this spawn's TabCreate moments ago.
+// It returns the compensation outcome for Details (see failStepWithNote for
+// its wording) and the reason the pane was not closed: nil when it closed,
+// when herdr reported it not found (already closed), and when paneID is ""
+// (no pane yet, or a dry run), which makes no driver call. A failed C-c
+// alone does not count as not closed when the close succeeds.
+func (o *Org) closeSpawnPane(paneID string) (string, error) {
+	if paneID == "" {
+		return "no pane to compensate", nil
+	}
+	ctrlCNote := "ctrl_c=ok"
+	if err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneSendKeys(ctx, paneID, "C-c")
+	}); err != nil {
+		ctrlCNote = fmt.Sprintf("ctrl_c=failed: %v", err)
+	}
+	err := o.callWithTimeout(func(ctx context.Context) error {
+		return o.Herdr.PaneClose(ctx, paneID)
+	})
+	switch {
+	case err == nil:
+		return ctrlCNote + " pane=closed", nil
+	case isNotFound(err):
+		return ctrlCNote + " pane=already closed", nil
+	default:
+		return fmt.Sprintf("%s pane=close failed: %v", ctrlCNote, err), err
+	}
 }
 
 // compensatePaneCtx sends a best-effort C-c to paneID (if non-empty) and

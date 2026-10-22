@@ -2105,6 +2105,34 @@ func TestOrgStop_CloseFails_RecordsStopFailedThenRetryStops(t *testing.T) {
 	}
 }
 
+// TestOrgStop_SeatLeftActiveBySpawnCloseFailure_ClosesRecordedPane covers
+// plan 2026-10-22-seat-spawn-close AC3's follow-up on the one-seat stop: a
+// spawn that could not close its pane recorded spawn_close_failed and left
+// the seat active, and once herdr answers, Stop closes the pane_id the
+// seat's spawn_step recorded and records stopped.
+func TestOrgStop_SeatLeftActiveBySpawnCloseFailure_ClosesRecordedPane(t *testing.T) {
+	o, h, a := testOrg(t)
+	pane := spawnLeavingPaneOpen(t, o, h, a, "org-a", "seat-1", "pane-7")
+	closesBefore := len(h.paneCloseCalls)
+
+	result := o.Stop(StopParams{OrgID: "org-a", Seat: "seat-1"})
+	if result.Err != nil || result.CloseErr != nil {
+		t.Fatalf("expected the stop to close the seat's pane, got Err=%v CloseErr=%v", result.Err, result.CloseErr)
+	}
+	if got := h.paneCloseCalls[closesBefore:]; !slices.Equal(got, []string{pane}) {
+		t.Fatalf("stop's pane closes = %v, want only the recorded %s", got, pane)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventStopped || last.PaneID != pane {
+		t.Fatalf("expected stopped recording %s last, got %+v", pane, last)
+	}
+	assertDetailsContains(t, last.Details, "pane=closed")
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected no active seat after the stop, got %v", active)
+	}
+}
+
 // TestOrgStop_Force_CloseFails_RecordsStoppedForced covers plan AC10 on the
 // stop side: with Force, a failed close is still recorded as stopped (details
 // say forced and keep the failure), the Leave runs, Err is nil, and the

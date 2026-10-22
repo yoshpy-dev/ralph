@@ -557,8 +557,13 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesPane(t *testing.T) {
 	if n := countLinesWithPrefix(herdrLines, "pane send-keys"); n != 1 {
 		t.Fatalf("expected exactly 1 compensation send-keys call (a pane existed), got %d (log: %v)", n, herdrLines)
 	}
-	if !strings.Contains(herdrLines[len(herdrLines)-1], "C-c") {
-		t.Errorf("expected compensation to send C-c, got last herdr call: %q", herdrLines[len(herdrLines)-1])
+	// The compensation sends C-c to the pane and then closes it (plan
+	// 2026-10-22-seat-spawn-close, AC1), so the log ends with those two calls.
+	if n := len(herdrLines); n < 2 || herdrLines[n-2] != "pane send-keys "+last.PaneID+" C-c" || herdrLines[n-1] != "pane close "+last.PaneID {
+		t.Errorf("expected the herdr log to end with the C-c to %s and then its close, got %v", last.PaneID, herdrLines)
+	}
+	if !strings.Contains(last.Details, "compensation=ctrl_c=ok pane=closed") {
+		t.Errorf("expected Details to record the C-c and the close, got %q", last.Details)
 	}
 }
 

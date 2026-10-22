@@ -49,6 +49,15 @@ const (
 	// seat's herdr pane could not be closed, so the seat stays active in the
 	// roster and a later stop picks it up again. Details say what failed.
 	EventStopFailed = "stop_failed"
+	// EventSpawnCloseFailed is a non-state event (deliberately absent from
+	// stateEvents and activeEvents below): Spawn records it instead of
+	// `spawn_failed` when a step failed after tab_create and the pane that
+	// spawn made could not be closed (failStepWithNote), so the seat's latest
+	// state event stays the spawn_step that recorded the pane_id, the seat
+	// stays active in the roster, and a later stop closes that pane. It
+	// mirrors stop_failed (spec FR-2). Details say which step failed, why,
+	// and what the compensation did.
+	EventSpawnCloseFailed = "spawn_close_failed"
 	// EventScopeReserved is an org-level, non-state event (SeatID empty,
 	// absent from stateEvents below): a leader spawn with
 	// SpawnParams.Reserve records the org's reservation with it, Details

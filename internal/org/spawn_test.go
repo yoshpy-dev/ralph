@@ -107,6 +107,13 @@ type fakeHerdr struct {
 	agentWaitUntil    [][]string // until states AgentWait was invoked with, in order
 	agentWaitTimeouts []int      // timeoutMS AgentWait was invoked with, in order
 
+	// sendKeysCtxs / paneCloseCtxs record what each PaneSendKeys / PaneClose
+	// call saw of its ctx when it was made, in call order (ctxAtCall), so a
+	// test can show that a failed spawn's compensation got a live, bounded
+	// context of its own after the spawn's own deadline had passed.
+	sendKeysCtxs  []callCtx
+	paneCloseCtxs []callCtx
+
 	paneCloseCalls      []string // paneIDs PaneClose was invoked with, in order
 	workspaceCloseCalls []string // workspaceIDs WorkspaceClose was invoked with, in order
 	tabCreateWorkspaces []string // workspaceIDs TabCreate was invoked with, in order
@@ -120,6 +127,18 @@ type fakeHerdr struct {
 // fakeTabID is the tab id fakeHerdr's TabCreate gives the tab holding
 // paneID.
 func fakeTabID(paneID string) string { return "tab-" + paneID }
+
+// callCtx is what a fake saw of the ctx one call received, at the moment of
+// the call: whether it carried a deadline, and ctx.Err() (nil while live).
+type callCtx struct {
+	hasDeadline bool
+	err         error
+}
+
+func ctxAtCall(ctx context.Context) callCtx {
+	_, ok := ctx.Deadline()
+	return callCtx{hasDeadline: ok, err: ctx.Err()}
+}
 
 // setLabel records id -> label in *m, making the map on first use.
 func setLabel(m *map[string]string, id, label string) {
@@ -275,6 +294,7 @@ func (f *fakeHerdr) PaneSendKeys(ctx context.Context, paneID string, keys ...str
 	f.calls = append(f.calls, "pane_send_keys")
 	f.sendKeysCalls = append(f.sendKeysCalls, paneID)
 	f.sendKeysKeys = append(f.sendKeysKeys, keys)
+	f.sendKeysCtxs = append(f.sendKeysCtxs, ctxAtCall(ctx))
 	block := f.paneSendKeysBlock
 	err := f.paneSendKeysErr
 	f.mu.Unlock()
@@ -289,6 +309,7 @@ func (f *fakeHerdr) PaneClose(ctx context.Context, paneID string) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, "pane_close")
 	f.paneCloseCalls = append(f.paneCloseCalls, paneID)
+	f.paneCloseCtxs = append(f.paneCloseCtxs, ctxAtCall(ctx))
 	block := f.paneCloseBlock
 	err := f.paneCloseErrs[paneID]
 	f.mu.Unlock()
@@ -323,11 +344,20 @@ type fakeAgmsg struct {
 	mu      sync.Mutex
 	calls   []string
 	sendErr error
+	// sendBlock, when true, makes Send record the call and then not return
+	// until ctx is done, returning ctx.Err() -- a HELLO that runs past the
+	// spawn's deadline (see leaveBlock). joinBlocks does the same for the
+	// Join of each agentID set in it.
+	sendBlock  bool
+	joinBlocks map[string]bool
 
 	joinErrs   map[string]error
 	joinCalls  []joinCall
 	leaveErr   error
 	leaveCalls []leaveCall
+	// leaveCtxs records what each Leave call saw of its ctx (ctxAtCall), in
+	// call order.
+	leaveCtxs []callCtx
 	// leaveBlock, when true, makes Leave record the call and then not
 	// return until ctx is done, returning ctx.Err() -- an agmsg that never
 	// answers (see fakeHerdr's paneCloseBlock).
@@ -346,30 +376,38 @@ type leaveCall struct {
 	team, agentID string
 }
 
-func (f *fakeAgmsg) Send(_ context.Context, _, _, _, _ string) error {
+func (f *fakeAgmsg) Send(ctx context.Context, _, _, _, _ string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "send")
-	return f.sendErr
+	block := f.sendBlock
+	err := f.sendErr
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
 }
 
-func (f *fakeAgmsg) Join(_ context.Context, team, agentID, agmsgType, projectPath string) error {
+func (f *fakeAgmsg) Join(ctx context.Context, team, agentID, agmsgType, projectPath string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, "join:"+agentID)
 	f.joinCalls = append(f.joinCalls, joinCall{team: team, agentID: agentID, agmsgType: agmsgType, projectPath: projectPath})
-	if f.joinErrs != nil {
-		if err, ok := f.joinErrs[agentID]; ok {
-			return err
-		}
+	block := f.joinBlocks[agentID]
+	err := f.joinErrs[agentID]
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return ctx.Err()
 	}
-	return nil
+	return err
 }
 
 func (f *fakeAgmsg) Leave(ctx context.Context, team, agentID string) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, "leave")
 	f.leaveCalls = append(f.leaveCalls, leaveCall{team: team, agentID: agentID})
+	f.leaveCtxs = append(f.leaveCtxs, ctxAtCall(ctx))
 	block := f.leaveBlock
 	err := f.leaveErr
 	hook := f.leaveHook
@@ -1265,8 +1303,8 @@ func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensationAttempted(t *te
 	if result.Err == nil {
 		t.Fatal("expected non-nil Err on saga failure")
 	}
-	if len(h.sendKeysCalls) != 0 {
-		t.Fatalf("expected no compensation attempt when no pane was ever created, got %v", h.sendKeysCalls)
+	if len(h.sendKeysCalls) != 0 || len(h.paneCloseCalls) != 0 {
+		t.Fatalf("expected no compensation attempt when no pane was ever created, got C-c %v close %v", h.sendKeysCalls, h.paneCloseCalls)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -1277,7 +1315,7 @@ func TestOrgSpawn_FailureInjection_WorkspaceCreate_NoCompensationAttempted(t *te
 	if last.Event != EventSpawnFailed {
 		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "step=workspace_create", "no pane to compensate")
+	assertDetailsContains(t, last.Details, "step=workspace_create", "compensation=no pane to compensate")
 }
 
 func TestOrgSpawn_FailureInjection_TabCreate_NoCompensationAttempted(t *testing.T) {
@@ -1288,8 +1326,8 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensationAttempted(t *testing.
 	if result.Outcome != SpawnOutcomeFailed {
 		t.Fatalf("expected SpawnOutcomeFailed, got %v", result.Outcome)
 	}
-	if len(h.sendKeysCalls) != 0 {
-		t.Fatalf("expected no compensation attempt: tab_create itself never returned a pane id, got %v", h.sendKeysCalls)
+	if len(h.sendKeysCalls) != 0 || len(h.paneCloseCalls) != 0 {
+		t.Fatalf("expected no compensation attempt: tab_create itself never returned a pane id, got C-c %v close %v", h.sendKeysCalls, h.paneCloseCalls)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -1300,7 +1338,7 @@ func TestOrgSpawn_FailureInjection_TabCreate_NoCompensationAttempted(t *testing.
 	if last.Event != EventSpawnFailed {
 		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "step=tab_create")
+	assertDetailsContains(t, last.Details, "step=tab_create", "compensation=no pane to compensate")
 }
 
 func TestOrgSpawn_FailureInjection_AgentStart_CompensatesExistingPane(t *testing.T) {
@@ -1314,6 +1352,9 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesExistingPane(t *testing
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected exactly one compensation C-c to pane-1 (created by tab_create before the failure), got %v", h.sendKeysCalls)
 	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the compensation to close pane-1, got %v", h.paneCloseCalls)
+	}
 
 	rr, err := o.Manifest.Read()
 	if err != nil {
@@ -1326,7 +1367,7 @@ func TestOrgSpawn_FailureInjection_AgentStart_CompensatesExistingPane(t *testing
 	if last.PaneID != "pane-1" {
 		t.Fatalf("expected orphaned pane_id pane-1 to remain traceable on the spawn_failed event, got %q", last.PaneID)
 	}
-	assertDetailsContains(t, last.Details, "step=agent_start", "C-c sent")
+	assertDetailsContains(t, last.Details, "step=agent_start", "compensation=ctrl_c=ok pane=closed")
 }
 
 func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesExistingPane(t *testing.T) {
@@ -1340,6 +1381,9 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesExistingPane(t *testing.
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected exactly one compensation C-c to pane-1, got %v", h.sendKeysCalls)
 	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the compensation to close pane-1, got %v", h.paneCloseCalls)
+	}
 
 	rr, err := o.Manifest.Read()
 	if err != nil {
@@ -1352,7 +1396,7 @@ func TestOrgSpawn_FailureInjection_AgmsgSend_CompensatesExistingPane(t *testing.
 	if last.PaneID != "pane-1" {
 		t.Fatalf("expected orphaned pane_id pane-1 to remain traceable, got %q", last.PaneID)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_announce", "leader_join=ok")
+	assertDetailsContains(t, last.Details, "step=agmsg_announce", "compensation=ctrl_c=ok pane=closed", "leader_join=ok")
 }
 
 func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPane(t *testing.T) {
@@ -1369,6 +1413,9 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected exactly one compensation C-c to pane-1, got %v", h.sendKeysCalls)
 	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the compensation to close pane-1, got %v", h.paneCloseCalls)
+	}
 	if len(a.calls) != 2 || a.calls[0] != "join:leader" || a.calls[1] != "join:seat-1" {
 		t.Fatalf("expected leader Join then seat Join (no Send attempted after seat Join fails), got %v", a.calls)
 	}
@@ -1384,7 +1431,401 @@ func TestOrgSpawn_FailureInjection_AgmsgJoin_SeatJoinFails_CompensatesExistingPa
 	if last.PaneID != "pane-1" {
 		t.Fatalf("expected orphaned pane_id pane-1 to remain traceable, got %q", last.PaneID)
 	}
-	assertDetailsContains(t, last.Details, "step=agmsg_join", "C-c sent")
+	assertDetailsContains(t, last.Details, "step=agmsg_join", "compensation=ctrl_c=ok pane=closed")
+}
+
+// --- plan 2026-10-22-seat-spawn-close: the pane of a failed spawn ----------
+
+// assertLiveBoundedCtxs fails the test unless there was at least one call
+// and every call in ctxs got a context that was still live and carried a
+// deadline: a compensating call's own driverCallTimeout one, not the
+// spawn's expired ctx and not a context with no deadline.
+func assertLiveBoundedCtxs(t *testing.T, what string, ctxs []callCtx) {
+	t.Helper()
+	if len(ctxs) == 0 {
+		t.Fatalf("expected a %s call", what)
+	}
+	for i, c := range ctxs {
+		if c.err != nil || !c.hasDeadline {
+			t.Errorf("%s call %d got ctx err=%v deadline=%v, want a live ctx with a deadline of its own", what, i, c.err, c.hasDeadline)
+		}
+	}
+}
+
+// spawnWithin runs o.Spawn(p) and fails the test if it has not returned
+// within bound, for the tests where a driver call never answers: a call
+// left without its own deadline fails the test instead of hanging it.
+func spawnWithin(t *testing.T, o *Org, p SpawnParams, bound time.Duration) SpawnResult {
+	t.Helper()
+	done := make(chan SpawnResult, 1)
+	go func() { done <- o.Spawn(p) }()
+	select {
+	case r := <-done:
+		return r
+	case <-time.After(bound):
+		t.Fatalf("Spawn did not return within %v: an unanswered call was not bounded", bound)
+		return SpawnResult{}
+	}
+}
+
+// spawnLeavingPaneOpen spawns orgID/seatID on pane with the HELLO failing
+// and then the pane's close failing, so the spawn records
+// spawn_close_failed and leaves the seat active (plan AC3), then clears
+// both injected failures, as herdr and agmsg answering again would. It
+// returns the pane_id the seat's latest spawn_step recorded, which the test
+// checks equals pane.
+func spawnLeavingPaneOpen(t *testing.T, o *Org, h *fakeHerdr, a *fakeAgmsg, orgID, seatID, pane string) string {
+	t.Helper()
+	h.paneID = pane
+	h.paneCloseErrs = map[string]error{pane: errors.New("herdr pane close: connect: connection refused")}
+	a.sendErr = errors.New("stub failure: agmsg send")
+	if r := o.Spawn(mustSpawnParams(orgID, seatID)); r.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected spawn %s/%s to fail, got %+v", orgID, seatID, r)
+	}
+	delete(h.paneCloseErrs, pane)
+	a.sendErr = nil
+
+	events := mustReadEvents(t, o)
+	if last := events[len(events)-1]; last.Event != EventSpawnCloseFailed || last.OrgID != orgID || last.SeatID != seatID {
+		t.Fatalf("expected the failed spawn to end with spawn_close_failed for %s/%s, got %+v", orgID, seatID, last)
+	}
+	var recorded string
+	for _, ev := range events {
+		if ev.OrgID == orgID && ev.SeatID == seatID && ev.Event == EventSpawnStep {
+			recorded = ev.PaneID
+		}
+	}
+	if recorded != pane {
+		t.Fatalf("expected the seat's latest spawn_step to record pane %s, got %q", pane, recorded)
+	}
+	return recorded
+}
+
+// TestOrgSpawn_FailureAfterPane_SendsCtrlCThenClosesPane covers plan AC1:
+// for every step after tab_create (agent_start, prompt_file, agmsg_join,
+// agmsg_announce), a failed spawn sends C-c to the pane it made and then
+// closes it, records spawn_failed with the pane and pane=closed, and leaves
+// the seat inactive.
+func TestOrgSpawn_FailureAfterPane_SendsCtrlCThenClosesPane(t *testing.T) {
+	cause := errors.New("stub failure")
+	for _, tc := range []struct {
+		step   string
+		inject func(t *testing.T, o *Org, h *fakeHerdr, a *fakeAgmsg, p *SpawnParams)
+	}{
+		{"agent_start", func(_ *testing.T, _ *Org, h *fakeHerdr, _ *fakeAgmsg, _ *SpawnParams) { h.agentStartErr = cause }},
+		{"prompt_file", func(t *testing.T, o *Org, _ *fakeHerdr, _ *fakeAgmsg, p *SpawnParams) {
+			// A regular file where the prompts directory goes makes the
+			// write of reviewer.md's prompt file fail, as in
+			// TestOrgSpawn_PromptFileWriteFailure_FailsStepPromptFile.
+			if err := os.WriteFile(filepath.Join(filepath.Dir(o.Manifest.Path()), "prompts"), []byte("not a directory"), 0o644); err != nil {
+				t.Fatalf("seed prompts-as-file: %v", err)
+			}
+			p.Role = "reviewer"
+		}},
+		{"agmsg_join", func(_ *testing.T, _ *Org, _ *fakeHerdr, a *fakeAgmsg, _ *SpawnParams) {
+			a.joinErrs = map[string]error{"seat-1": cause}
+		}},
+		{"agmsg_announce", func(_ *testing.T, _ *Org, _ *fakeHerdr, a *fakeAgmsg, _ *SpawnParams) { a.sendErr = cause }},
+	} {
+		t.Run(tc.step, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			p := mustSpawnParams("org-a", "seat-1")
+			tc.inject(t, o, h, a, &p)
+
+			result := o.Spawn(p)
+			if result.Outcome != SpawnOutcomeFailed || result.Err == nil {
+				t.Fatalf("expected SpawnOutcomeFailed with an error, got %+v", result)
+			}
+			if !strings.Contains(result.Err.Error(), "spawn step "+tc.step+" failed") {
+				t.Fatalf("expected the error to name step %s, got %v", tc.step, result.Err)
+			}
+			if tc.step != "prompt_file" && !errors.Is(result.Err, cause) {
+				t.Fatalf("expected the error to wrap the step's cause, got %v", result.Err)
+			}
+			if strings.Contains(result.Err.Error(), "not closed") {
+				t.Fatalf("expected no close failure in the error, got %v", result.Err)
+			}
+			if n := len(h.calls); n < 2 || !slices.Equal(h.calls[n-2:], []string{"pane_send_keys", "pane_close"}) {
+				t.Fatalf("expected the herdr calls to end with the C-c and then the close, got %v", h.calls)
+			}
+			if !slices.Equal(h.sendKeysCalls, []string{"pane-1"}) || !slices.Equal(h.sendKeysKeys[0], []string{"C-c"}) {
+				t.Fatalf("expected one C-c to pane-1, got panes %v keys %v", h.sendKeysCalls, h.sendKeysKeys)
+			}
+			if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+				t.Fatalf("expected one close of pane-1, got %v", h.paneCloseCalls)
+			}
+
+			events := mustReadEvents(t, o)
+			last := events[len(events)-1]
+			if last.Event != EventSpawnFailed || last.PaneID != "pane-1" {
+				t.Fatalf("expected spawn_failed recording pane-1 last, got %+v", last)
+			}
+			assertDetailsContains(t, last.Details, "step="+tc.step+" ", "compensation=ctrl_c=ok pane=closed")
+			if got := eventsNamed(events, EventSpawnCloseFailed); len(got) != 0 {
+				t.Fatalf("expected no spawn_close_failed after a closed pane, got %+v", got)
+			}
+			if active := activeRealSeats(t, o); len(active) != 0 {
+				t.Fatalf("expected no active seat after the failed spawn, got %v", active)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_FailureAfterSpawnDeadline_ClosesPaneUnderFreshDeadlines
+// covers plan AC1's deadline rule: the seat's agmsg Join does not answer
+// before the spawn's deadline, so that deadline has passed when the
+// compensation runs, and the C-c and the close still go out, each with a
+// live context that carries a deadline of its own.
+func TestOrgSpawn_FailureAfterSpawnDeadline_ClosesPaneUnderFreshDeadlines(t *testing.T) {
+	o, h, a := testOrg(t)
+	a.joinBlocks = map[string]bool{"seat-1": true}
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 50
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Fatalf("expected the seat's Join to run out the spawn's deadline, got %+v", result)
+	}
+	if !slices.Equal(h.sendKeysCalls, []string{"pane-1"}) || !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected a C-c and a close of pane-1, got C-c %v close %v", h.sendKeysCalls, h.paneCloseCalls)
+	}
+	assertLiveBoundedCtxs(t, "C-c", h.sendKeysCtxs)
+	assertLiveBoundedCtxs(t, "close", h.paneCloseCtxs)
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected spawn_failed last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "step=agmsg_join ", "context deadline exceeded", "compensation=ctrl_c=ok pane=closed")
+}
+
+// TestOrgSpawn_HelloTimeout_LeavesThenClosesPane covers plan AC2 and D4: a
+// HELLO that runs past the spawn's deadline (whether it reached the leader
+// or not) fails the spawn at agmsg_announce, and the compensation runs in
+// the order Leave, C-c, close, each with a live context of its own. The
+// pane is closed and spawn_failed records it.
+func TestOrgSpawn_HelloTimeout_LeavesThenClosesPane(t *testing.T) {
+	o, h, a := testOrg(t)
+	a.sendBlock = true
+	var herdrAtLeave []string
+	a.leaveHook = func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		herdrAtLeave = slices.Clone(h.calls)
+	}
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 50
+
+	result := o.Spawn(p)
+	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Fatalf("expected the HELLO to run out the spawn's deadline, got %+v", result)
+	}
+	if want := []string{"workspace_create", "tab_create", "agent_start"}; !slices.Equal(herdrAtLeave, want) {
+		t.Fatalf("herdr calls at the Leave = %v, want %v: the Leave comes before the C-c and the close", herdrAtLeave, want)
+	}
+	if want := []string{"workspace_create", "tab_create", "agent_start", "pane_send_keys", "pane_close"}; !slices.Equal(h.calls, want) {
+		t.Fatalf("herdr calls = %v, want %v", h.calls, want)
+	}
+	if want := []leaveCall{{team: "ralph-org-a", agentID: "seat-1"}}; !slices.Equal(a.leaveCalls, want) {
+		t.Fatalf("Leave calls = %+v, want %+v", a.leaveCalls, want)
+	}
+	assertLiveBoundedCtxs(t, "Leave", a.leaveCtxs)
+	assertLiveBoundedCtxs(t, "C-c", h.sendKeysCtxs)
+	assertLiveBoundedCtxs(t, "close", h.paneCloseCtxs)
+
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed || last.PaneID != "pane-1" {
+		t.Fatalf("expected spawn_failed recording pane-1 last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "step=agmsg_announce ", "context deadline exceeded", "compensation=ctrl_c=ok pane=closed", "leave=ok")
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected no active seat after the failed spawn, got %v", active)
+	}
+}
+
+// TestOrgSpawn_HelloFailure_UnansweredLeave_TimesOut covers plan AC2's
+// bound on the Leave: an agmsg Leave that never answers is cut off by
+// DriverCallTimeout, long before the spawn's own deadline, so the spawn
+// returns, still closes the pane, and records the Leave's failure.
+func TestOrgSpawn_HelloFailure_UnansweredLeave_TimesOut(t *testing.T) {
+	o, h, a := testOrg(t)
+	o.DriverCallTimeout = 20 * time.Millisecond
+	a.sendErr = errors.New("stub failure: agmsg send")
+	a.leaveBlock = true
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 60000
+
+	result := spawnWithin(t, o, p, 10*time.Second)
+	if result.Outcome != SpawnOutcomeFailed {
+		t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the close of pane-1 after the timed-out Leave, got %v", h.paneCloseCalls)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected spawn_failed last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "compensation=ctrl_c=ok pane=closed", "leave=failed: context deadline exceeded")
+}
+
+// TestOrgSpawn_FailureAfterPane_PaneNotFound_CountsAsClosed covers plan
+// AC1's not-found rule: herdr's not-found reply to the close means the pane
+// is gone already, so the spawn records spawn_failed with pane=already
+// closed and the seat is not left active.
+func TestOrgSpawn_FailureAfterPane_PaneNotFound_CountsAsClosed(t *testing.T) {
+	o, h, _ := testOrg(t)
+	h.agentStartErr = errors.New("stub failure: agent start")
+	h.paneCloseErrs = map[string]error{"pane-1": herdrPaneCloseNotFound("pane-1")}
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed || strings.Contains(result.Err.Error(), "not closed") {
+		t.Fatalf("expected a plain step failure, got %+v", result)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected spawn_failed last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "compensation=ctrl_c=ok pane=already closed")
+	if got := eventsNamed(events, EventSpawnCloseFailed); len(got) != 0 {
+		t.Fatalf("expected no spawn_close_failed for a pane herdr does not know, got %+v", got)
+	}
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected no active seat, got %v", active)
+	}
+}
+
+// TestOrgSpawn_FailureAfterPane_CtrlCFails_CloseStillCloses: a failed C-c
+// is recorded, but the close still runs, and a pane that closed makes the
+// failure an ordinary spawn_failed.
+func TestOrgSpawn_FailureAfterPane_CtrlCFails_CloseStillCloses(t *testing.T) {
+	o, h, _ := testOrg(t)
+	h.agentStartErr = errors.New("stub failure: agent start")
+	h.paneSendKeysErr = errors.New("stub: send-keys refused")
+
+	result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+	if result.Outcome != SpawnOutcomeFailed || strings.Contains(result.Err.Error(), "not closed") {
+		t.Fatalf("expected a plain step failure, got %+v", result)
+	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the close of pane-1 after the failed C-c, got %v", h.paneCloseCalls)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnFailed {
+		t.Fatalf("expected spawn_failed last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "compensation=ctrl_c=failed: stub: send-keys refused pane=closed")
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected no active seat, got %v", active)
+	}
+}
+
+// TestOrgSpawn_FailureAfterPane_CloseFails_RecordsSpawnCloseFailed covers
+// plan AC3: a close that fails with anything but not-found makes the spawn
+// record spawn_close_failed (the seat fields, the pane_id, the agmsg team
+// once the seat had joined, and Details with the step, the error and the
+// compensation) and no spawn_failed, so the seat stays active on its latest
+// spawn_step. The error wraps the step's cause and the close's error and
+// says how to close the pane.
+func TestOrgSpawn_FailureAfterPane_CloseFails_RecordsSpawnCloseFailed(t *testing.T) {
+	cause := errors.New("stub failure")
+	closeErr := errors.New("herdr pane close: connect: connection refused")
+	for _, tc := range []struct {
+		step     string
+		inject   func(h *fakeHerdr, a *fakeAgmsg)
+		wantTeam string
+		wantNote string
+	}{
+		{"agent_start", func(h *fakeHerdr, _ *fakeAgmsg) { h.agentStartErr = cause }, "", "agent_start_retries=0"},
+		{"agmsg_announce", func(_ *fakeHerdr, a *fakeAgmsg) { a.sendErr = cause }, "ralph-org-a", "leave=ok"},
+	} {
+		t.Run(tc.step, func(t *testing.T) {
+			o, h, a := testOrg(t)
+			h.paneID = "pane-7"
+			h.paneCloseErrs = map[string]error{"pane-7": closeErr}
+			tc.inject(h, a)
+
+			result := o.Spawn(mustSpawnParams("org-a", "seat-1"))
+			if result.Outcome != SpawnOutcomeFailed {
+				t.Fatalf("expected SpawnOutcomeFailed, got %+v", result)
+			}
+			if !errors.Is(result.Err, cause) || !errors.Is(result.Err, closeErr) {
+				t.Fatalf("expected the error to wrap the step's cause and the close's error, got %v", result.Err)
+			}
+			for _, want := range []string{"spawn step " + tc.step + " failed", `pane "pane-7" not closed`, "herdr pane close pane-7", "ralph org stop --org-id org-a --seat seat-1"} {
+				if !strings.Contains(result.Err.Error(), want) {
+					t.Errorf("expected the error to contain %q, got %v", want, result.Err)
+				}
+			}
+			if !slices.Equal(h.paneCloseCalls, []string{"pane-7"}) {
+				t.Fatalf("expected one close of pane-7, got %v", h.paneCloseCalls)
+			}
+
+			events := mustReadEvents(t, o)
+			if failed := eventsNamed(events, EventSpawnFailed); len(failed) != 0 {
+				t.Fatalf("expected no spawn_failed while the pane is open, got %+v", failed)
+			}
+			last := events[len(events)-1]
+			if last.Event != EventSpawnCloseFailed {
+				t.Fatalf("expected spawn_close_failed last, got %+v", last)
+			}
+			if last.OrgID != "org-a" || last.SeatID != "seat-1" || last.Role != "worker" || last.Driver != "claude" || last.Model != "sonnet" ||
+				last.Worktree != "/tmp/seat" || last.PaneID != "pane-7" || last.AgmsgTeam != tc.wantTeam || last.DryRun {
+				t.Errorf("expected spawn_close_failed to carry the seat fields, pane-7 and team %q, got %+v", tc.wantTeam, last)
+			}
+			assertDetailsContains(t, last.Details, "step="+tc.step+" ", "error=stub failure ",
+				"compensation=ctrl_c=ok pane=close failed: herdr pane close: connect: connection refused", tc.wantNote)
+			if isStateEvent(EventSpawnCloseFailed) || isActiveEvent(EventSpawnCloseFailed) {
+				t.Fatal("spawn_close_failed must be neither a state event nor an active one")
+			}
+			seat, ok := seatFromEvents(events, "org-a", "seat-1")
+			if !ok || !seat.Active || seat.Event != EventSpawnStep || seat.PaneID != "pane-7" {
+				t.Fatalf("expected seat-1 active on its spawn_step with pane-7, got %+v (found %v)", seat, ok)
+			}
+			statusResult, err := o.Status("org-a", false)
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if len(statusResult.Seats) != 1 || !statusResult.Seats[0].Active || statusResult.Seats[0].PaneID != "pane-7" {
+				t.Fatalf("expected status to show seat-1 active on pane-7, got %+v", statusResult.Seats)
+			}
+		})
+	}
+}
+
+// TestOrgSpawn_FailureAfterPane_CloseTimesOut_RecordsSpawnCloseFailed
+// covers plan AC3's timeout case: a close that never answers is cut off by
+// DriverCallTimeout, long before the spawn's own deadline, and counts as
+// not closed: spawn_close_failed, the seat active, and the error says so.
+func TestOrgSpawn_FailureAfterPane_CloseTimesOut_RecordsSpawnCloseFailed(t *testing.T) {
+	o, h, _ := testOrg(t)
+	o.DriverCallTimeout = 20 * time.Millisecond
+	h.agentStartErr = errors.New("stub failure: agent start")
+	h.paneCloseBlock = true
+	p := mustSpawnParams("org-a", "seat-1")
+	p.TimeoutMS = 60000
+
+	result := spawnWithin(t, o, p, 10*time.Second)
+	if result.Outcome != SpawnOutcomeFailed || !errors.Is(result.Err, context.DeadlineExceeded) {
+		t.Fatalf("expected a timed-out close in the error, got %+v", result)
+	}
+	if !strings.Contains(result.Err.Error(), "herdr pane close pane-1") {
+		t.Errorf("expected the error to say how to close pane-1, got %v", result.Err)
+	}
+	events := mustReadEvents(t, o)
+	last := events[len(events)-1]
+	if last.Event != EventSpawnCloseFailed || last.PaneID != "pane-1" {
+		t.Fatalf("expected spawn_close_failed recording pane-1 last, got %+v", last)
+	}
+	assertDetailsContains(t, last.Details, "pane=close failed: context deadline exceeded")
+	if active := activeRealSeats(t, o); !slices.Equal(active, []OrgSeat{{"org-a", "seat-1"}}) {
+		t.Fatalf("expected seat-1 left active, got %v", active)
+	}
 }
 
 func TestOrgSpawn_EnsureLeaderJoined_ErrorDoesNotFailSaga_WhenSeatJoinAndSendSucceed(t *testing.T) {
@@ -1672,6 +2113,9 @@ func TestOrgSpawn_PromptFileWriteFailure_FailsStepPromptFile(t *testing.T) {
 	if len(h.sendKeysCalls) != 1 || h.sendKeysCalls[0] != "pane-1" {
 		t.Fatalf("expected a compensation C-c to the already-created pane, got %v", h.sendKeysCalls)
 	}
+	if !slices.Equal(h.paneCloseCalls, []string{"pane-1"}) {
+		t.Fatalf("expected the compensation to close the already-created pane, got %v", h.paneCloseCalls)
+	}
 
 	rr, err := o.Manifest.Read()
 	if err != nil {
@@ -1681,7 +2125,7 @@ func TestOrgSpawn_PromptFileWriteFailure_FailsStepPromptFile(t *testing.T) {
 	if last.Event != EventSpawnFailed {
 		t.Fatalf("expected last event to be spawn_failed, got %q", last.Event)
 	}
-	assertDetailsContains(t, last.Details, "step=prompt_file")
+	assertDetailsContains(t, last.Details, "step=prompt_file", "compensation=ctrl_c=ok pane=closed")
 }
 
 func TestOrgSpawn_DryRun_RoleTemplate_RecordsPromptFilePathWithoutWriting(t *testing.T) {
@@ -2236,8 +2680,9 @@ func TestOrgSpawn_DryRun_PromptFilePathError_FailsStep(t *testing.T) {
 	// swallows RenderRolePrompt's and promptFilePath's errors"): a
 	// promptFilePath failure must fail the dry run the same way it would
 	// fail a real spawn at the "prompt_file" step, not silently report
-	// success.
-	o, _, _ := testOrg(t)
+	// success. A dry run has no pane, so the failure makes no herdr call at
+	// all: no C-c and no close.
+	o, h, _ := testOrg(t)
 	orig := absPath
 	absPath = func(string) (string, error) { return "", errors.New("stub: abs failed") }
 	defer func() { absPath = orig }()
@@ -2248,6 +2693,9 @@ func TestOrgSpawn_DryRun_PromptFilePathError_FailsStep(t *testing.T) {
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeFailed {
 		t.Fatalf("expected dry-run spawn to fail when promptFilePath errors, got %+v", result)
+	}
+	if len(h.calls) != 0 {
+		t.Fatalf("expected no herdr call for a failed dry run, got %v", h.calls)
 	}
 
 	rr, err := o.Manifest.Read()
@@ -2261,7 +2709,7 @@ func TestOrgSpawn_DryRun_PromptFilePathError_FailsStep(t *testing.T) {
 	if !last.DryRun {
 		t.Fatalf("expected the dry-run failure event to carry dry_run: true, got %+v", last)
 	}
-	assertDetailsContains(t, last.Details, "step=prompt_file", "stub: abs failed")
+	assertDetailsContains(t, last.Details, "step=prompt_file", "stub: abs failed", "compensation=no pane to compensate")
 }
 
 func TestOrgSpawn_DryRun_PromptFilePathError_NoManifestEventForRealSeat(t *testing.T) {

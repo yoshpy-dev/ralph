@@ -257,6 +257,38 @@ func TestOrgStopAll_OneSeatFails_OthersStoppedThenRetryStopsIt(t *testing.T) {
 	}
 }
 
+// TestOrgStopAll_StopsSeatLeftActiveBySpawnCloseFailure covers plan
+// 2026-10-22-seat-spawn-close AC3's follow-up through --all: a seat a
+// failed spawn left active (spawn_close_failed) is stopped along with the
+// other active seats, its pane closed by the pane_id its spawn_step
+// recorded.
+func TestOrgStopAll_StopsSeatLeftActiveBySpawnCloseFailure(t *testing.T) {
+	o, h, a := testOrg(t)
+	spawnSeatIn(t, o, h, "org-a", "seat-1", "ws-a", "pane-a1")
+	h.workspaceID = "ws-b"
+	pane := spawnLeavingPaneOpen(t, o, h, a, "org-b", "seat-1", "pane-b1")
+	closesBefore := len(h.paneCloseCalls)
+
+	result := o.StopAll(StopAllParams{})
+	if len(result.Errs) != 0 || len(result.FailedSeats) != 0 {
+		t.Fatalf("expected a clean stop of both seats, got %+v", result)
+	}
+	if !slices.Equal(result.StoppedSeats, []OrgSeat{{"org-a", "seat-1"}, {"org-b", "seat-1"}}) {
+		t.Fatalf("StoppedSeats = %v, want org-a/seat-1 and org-b/seat-1", result.StoppedSeats)
+	}
+	if got := h.paneCloseCalls[closesBefore:]; !slices.Equal(got, []string{"pane-a1", pane}) {
+		t.Fatalf("pane closes = %v, want pane-a1 and the recorded %s", got, pane)
+	}
+	for _, ev := range eventsNamed(mustReadEvents(t, o), EventStopped) {
+		if ev.OrgID == "org-b" && ev.PaneID != pane {
+			t.Fatalf("expected org-b/seat-1's stopped to record %s, got %+v", pane, ev)
+		}
+	}
+	if active := activeRealSeats(t, o); len(active) != 0 {
+		t.Fatalf("expected no active seat after StopAll, got %v", active)
+	}
+}
+
 // TestOrgStopAll_Force_RecordsPastCloseFailure covers plan AC10 through
 // --all: with Force, a seat whose pane could not be closed is recorded
 // stopped (forced) and comes back as a Forced failure, with no error.
