@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Plan: docs/plans/active/2026-10-22-split-preamble.md(/pr で archive に移す)
-- PR: 未定(PR を作ったあとに番号を書く)
+- PR: #251
 - Branch: fix/split-preamble(base a7bdc884、この walkthrough の前の HEAD b59ca7df。22 commits、29 files、+1244/-96)
 - 読む範囲: コードは Go の 5 files(+81/-25)で、本体は `internal/org/split.go`、`internal/org/feature.go`、`internal/cli/org.go`。`prompts.go` と `spawn.go` は doc コメントだけ。leader の雛形 `internal/org/prompts/leader.md`(+16/-5)。テストは 4 files(+408/-3)で、`split_test.go`、`feature_test.go`、`prompts_test.go`、`internal/cli/org_feature_test.go`。文書は `/org` と `/director` の skill の 4 写しずつ(8 files)、README、仕様、根拠の表。残りは tech-debt、計画、後工程の報告 5 本(cross-review は triage)、insight event
 - 後工程は 1 回(cycle 1)で終え、cross-review の指摘は 0 件
