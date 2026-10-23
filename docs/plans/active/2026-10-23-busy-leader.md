@@ -108,7 +108,7 @@
 - [x] AC4: `/director` skill(4 写し)の「答える順」と「計画の承認」の 3、`/org` skill(4 写し)の `send` の行、「受信箱」節の答える順、leader の agmsg の受信箱の段落が、Scope の送り方と待ち方を書く。写しはバイト一致。director の送り方(`run_in_background`、`--timeout-ms 1500000`、同じ leader への send は 1 本ずつ、切れたら resolve しない、終了コード 0 のあとも `ralph org read` で DECISION が送られたことを確かめてから resolve する)をテストが 4 写しで固める
 - [x] AC5: 実機の確かめ (a)〜(f) と disband のあとの `ps` を分離した herdr server と本物の claude haiku で打ち、結果を `docs/evidence/busy-leader-2026-10-23.md` に残す。ユーザーの herdr server と `~/.config/herdr` に触れず、本物の osascript を打たない(PATH の shim)。記録には pane の id、session の id、token の値を書かず、`$HOME` は `~` と書く
 - [x] AC6: 記録を合わせる。(a)〜(c) が通れば FR-5 を `[x]` にし、印(2026-10-23)の注で Codex の leader の欠けを NFR ツール非依存に結ぶ。根拠の表の F7・FR-5・NFR ツール非依存の行と「確かめていないこと」、仕様の Status の節の数、tech-debt の F7 の行(D10)を直す。F7(a) の tech-debt の行を足す。「fix/watch-escalation-inbox」を「#252」に直し、PR 一覧を 35 本にする(#252 が MERGED であることを `gh pr view 252 --json state --jq .state` で読む)。この PR は `fix/busy-leader` で書く
-- [ ] AC7: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
+- [x] AC7: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
 
@@ -172,6 +172,9 @@
   - S6: 1183b08e(self-review の LOW の F1・F2・F4・F5・F7 を直した。親がいなくなったときにループが終わるテストを足し、新しい leader の受信箱のテストを `internal/org/prompts_leader_inbox_test.go` に移し、大きいファイルの行を tech-debt に足した)
   - S7: 36725559(inline の小さな直し。親の sh が固定の 1 秒ではなく目印のファイルを待つようにし、移したテストのファイル名を 5 か所の記録で直した(再レビューの F8))
 - [x] Review artifact created(self-review: Merge OK、LOW 1 件(F3、`/pr` で PR 本文に書く)。c2c7bf9d)
-- [ ] Verification artifact created
-- [ ] Test artifact created
+  - 1d088f87: verify のテストの欠け(`ralph org send --help` の段落)を `internal/cli/org_send_help_test.go` で固めた(inline の小さな直し)
+- [x] Verification artifact created(verify: pass、LOW 2 件(README と quality-gates の答える順、根拠の表の古いファイル名)は `/sync-docs` で直す。6478fe25。insight event の low は 0 で書かれていたので 2 に直した)
+- [x] Test artifact created(test: pass。run-test.sh が 1d088f87 で rc 0(844 秒)、go1.25.8 の internal/org と internal/cli が rc 0。89ce30ea)
+  - AC7: run-verify.sh が 81f30f43 で rc 0、HEAD では run-test.sh(1d088f87)と run-static-verify.sh(89ce30ea、19 秒)がどちらも rc 0。1d088f87 のあとに変わったのは test の report だけ
+  - test の穴 1(mutant V4: `--timeout-ms` が 0 以下のときの hint の ms)は、既定の 30 秒を待つか継ぎ目が要るので、テストにせず PR の Known gaps に書く
 - [ ] PR created
