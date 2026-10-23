@@ -350,6 +350,7 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		return nil, fmt.Errorf("org: load config: %w", err)
 	}
 	runner := driver.ExecRunner{}
+	agmsgHome := driver.ResolveAgmsgHome(orgCfg.AgmsgHome)
 	rt := &org.Org{
 		Config:   orgCfg,
 		Manifest: org.NewManifestStoreAtPath(org.ManifestPathIn(resolvedStateDir)),
@@ -359,7 +360,10 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		// its herdr agent (finding F3), and RALPH_WIP_CHECKPOINT=off, so the
 		// seat's Claude Code session makes no wip: commit (finding F11).
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
-		Agmsg: driver.Agmsg{R: runner, Home: driver.ResolveAgmsgHome(orgCfg.AgmsgHome)},
+		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
+		// The leader's role prompt names the same home's scripts in its
+		// inbox commands ({{AGMSG_SCRIPTS}}).
+		AgmsgHome: agmsgHome,
 		// Inbox, EscalationsPath, and DesktopNotify are set below by
 		// wireOrgInbox, which newOrgEscalateFallbackRuntime shares.
 		InboxPollInterval: orgInboxPollIntervalOverride,
@@ -1123,6 +1127,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"tries to confirm the seat left idle/done. It never presses Enter a\n" +
 			"second time: if the submit cannot be confirmed, it prints a warning\n" +
 			"instead of guessing -- see --enter-delay-ms below.\n" +
+			"\n" +
+			"Before typing, send waits up to --timeout-ms for the seat to be idle or\n" +
+			"done. A seat in the middle of a turn (waiting in the foreground on a\n" +
+			"loop, `ralph org wait`, or a gate) does not get the message until the\n" +
+			"turn ends. When the wait runs out, nothing is typed and the error says\n" +
+			"the seat's turn did not end and how to send again. The submit check only\n" +
+			"sees the seat's turn go working or blocked, so a turn the seat started on\n" +
+			"its own (a Claude Code leader woken by its Monitor, say) also reads as\n" +
+			"confirmed; `ralph org read` shows whether the message arrived.\n" +
 			"\n" +
 			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
 			"included, is refused while no long-running `ralph org watch --all`\n" +

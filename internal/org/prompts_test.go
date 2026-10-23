@@ -644,7 +644,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 		{"3. (per-plan)", "承認を求める QUESTION を `ralph org escalate` で上げる"},
 		{"3. (per-plan)", "「件を上げる」の節のとおりファイルに書いて渡す"},
 		{"3. (per-plan)", "`PLAN: <worktree からの計画の相対パス> sha256:<digest>` と `VISUAL: <worktree からの図解ページの相対パス>` を 1 行ずつ書く"},
-		{"3. (per-plan)", "上げたら返事を待つ。返事が来るまで implementer は spawn しない"},
+		{"3. (per-plan)", "上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて返事を待つ。返事が来るまで implementer は spawn しない"},
 		{"3. (per-plan)", "reviewer は承認の前に spawn してよく、計画のレビューを TASK で頼める"},
 		{"4. (per-plan)", "`PLAN:` のヘッダが手順 3 で上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす"},
 		{"4. (per-plan)", "計画の先頭の 2 行を `- Status: Approved` と `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え"},
@@ -751,8 +751,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 // default branch (read the way the gate reads it; a conflict goes to the
 // implementer as a TASK, with PLAN: under per-plan, and back to review),
 // commits only the report, then the plan's archive as a separate commit, runs the
-// secret scan, then `ralph org gate` (in the background with its output in a
-// file under .harness/state/, or with a long timeout; no commits after it),
+// secret scan, then `ralph org gate` (with its output in a file under
+// .harness/state/: under run_in_background, the file read on the completion
+// notice, for a Claude Code leader, in the foreground with a long timeout for
+// a Codex one; no commits after it),
 // stops the seats after the gate, pushes only the gate's HEAD:, and copies the
 // gate's HEAD: and BASE: into the RESULT, whose example escalate accepts.
 // Every TASK to the implementer after the archive commit, on GATE: fail or
@@ -825,10 +827,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		{"10. `ralph org report", "このあとの手順で implementer に TASK を送ることになったら(手順 12 の `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき)"},
 		{"10. `ralph org report", "送る前に、rebase の途中なら `git rebase --abort` で戻し、archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す。そのあとで TASK を送る"},
 		{"10. `ralph org report", "per-plan では、承認の記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で断られる"},
-		{"12. `ralph org gate", "数分かかるので、バックグラウンドで走らせ、stdout と stderr を `.harness/state/` の下のファイルに書く"},
+		{"12. `ralph org gate", "数分かかるので、stdout と stderr を `.harness/state/` の下のファイルに書く"},
 		{"12. `ralph org gate", "`mkdir -p .harness/state` を打ってから `ralph org gate --org-id org-a --state-dir <台帳> > .harness/state/gate-org-a.out 2>&1` を打つ"},
-		{"12. `ralph org gate", "終わるのを待ってから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む"},
-		{"12. `ralph org gate", "前景で打つなら、ツールの timeout を gate にかかる時間より長くする"},
+		{"12. `ralph org gate", "Bash ツールの `run_in_background` があるとき(Claude Code)は、このコマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが来てから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む(「agmsg の受信箱の運用」の節)"},
+		{"12. `ralph org gate", "ないとき(Codex)は前面で打ち、ツールの timeout を gate にかかる時間より長くする(そのあいだ `ralph org send` は届かない)"},
 		{"12. `ralph org gate", "ツールに切られた gate は何も記録しない。打ち直す前に、前の gate のスクリプトが終わるのを待つ"},
 		{"12. `ralph org gate", "gate が殺されたあとも動き続けることがある"},
 		{"12. `ralph org gate", "gate のあとにコミットを足さず、足したら gate を打ち直す"},
@@ -1347,7 +1349,7 @@ func TestRenderRolePrompt_Leader_NamesWhichInbox(t *testing.T) {
 		t.Errorf("expected no '## 受信箱の運用' section (it is about agmsg), got:\n%s", text)
 	}
 	section, found := markdownSection(text, "## agmsg の受信箱の運用")
-	if !found || !containsPhrase(section, "agmsg 経由で届く座席からのメッセージは能動的に確認してください") {
+	if !found || !containsPhrase(section, "座席のメッセージ(HELLO・RESULT・BLOCKED・QUESTION など)と見張りの ALERT は、agmsg の受信箱に届きます") {
 		t.Errorf("expected a '## agmsg の受信箱の運用' section about the seat messages, got section:\n%s", section)
 	}
 	star, found := markdownSection(text, "## スター型トポロジのルール")

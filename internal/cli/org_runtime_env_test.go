@@ -57,6 +57,43 @@ func TestNewOrgRuntimeAt_AgmsgRunnerAddsSelfNameOff(t *testing.T) {
 	}
 }
 
+// TestNewOrgRuntimeAt_AgmsgHomeIsTheAgmsgDriversHome pins AC2 of plan
+// 2026-10-23-busy-leader on the wiring side: the runtime the org verbs build
+// (spawn and start among them) sets Org.AgmsgHome, which the leader's role
+// prompt names, to the home its agmsg driver runs the scripts from, the one
+// driver.ResolveAgmsgHome reads from RALPH_ORG_AGMSG_HOME, else from
+// [org].agmsg_home.
+func TestNewOrgRuntimeAt_AgmsgHomeIsTheAgmsgDriversHome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  string
+		toml string // [org].agmsg_home of a ralph.toml given with --config; "" means none
+		want string
+	}{
+		{"RALPH_ORG_AGMSG_HOME", "/env/agmsg", "/toml/agmsg", "/env/agmsg"},
+		{"[org].agmsg_home", "", "/toml/agmsg", "/toml/agmsg"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(driver.AgmsgHomeEnv, tc.env)
+			configPath := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(configPath, []byte("[org]\nagmsg_home = \""+tc.toml+"\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			rt, err := newOrgRuntimeAt(filepath.Join(t.TempDir(), "state"), configPath)
+			if err != nil {
+				t.Fatalf("newOrgRuntimeAt: %v", err)
+			}
+			agmsg, ok := rt.Agmsg.(driver.Agmsg)
+			if !ok {
+				t.Fatalf("rt.Agmsg is %T; want a driver.Agmsg", rt.Agmsg)
+			}
+			if rt.AgmsgHome != tc.want || agmsg.Home != tc.want {
+				t.Fatalf("rt.AgmsgHome = %q, rt.Agmsg's Home = %q; want both %q", rt.AgmsgHome, agmsg.Home, tc.want)
+			}
+		})
+	}
+}
+
 // orgRuntimeEnvHerdrStub is a stand-in herdr (a plain sh script, not herdr)
 // that logs its argv, answers `tab create --help` with a help listing --env
 // as herdr 0.7.5 does, and answers anything else with a tab create envelope.

@@ -314,6 +314,13 @@ func (e taskNotSentError) Unwrap() error { return e.refusal }
 // after the idle/done wait and the second approval check below), so that
 // case never types anything and leaves Progress at its
 // SendProgressNothingSent zero value.
+//
+// A failed idle/done wait also types nothing and leaves Progress at
+// SendProgressNothingSent. Its error is "org: send: wait for seat %q
+// idle/done: " and the cause; when the wait ended because the --timeout-ms
+// deadline ran out (the seat's turn did not end, as with a leader waiting in
+// the foreground), sendWaitDeadlineHint follows the cause and says why and
+// how to send again. Any other failure of the wait gets no hint.
 func (o *Org) Send(p SendParams) SendResult {
 	msg, parseErr := protocol.Parse(p.Text)
 	if !p.Raw {
@@ -385,7 +392,14 @@ func (o *Org) Send(p SendParams) SendResult {
 	// finished), not "idle" -- waiting on "idle" alone times out against a
 	// perfectly receptive seat (found by the PR③ live smoke).
 	if _, err := o.Herdr.AgentWait(ctx, name, []string{"idle", "done"}, timeoutMS); err != nil {
-		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done: %w", p.To, err)}
+		// Timed out is read from ctx, not from err's text: herdr's own
+		// --timeout gets the same ms but starts after ctx, so ctx has
+		// expired by the time either one ends the wait.
+		hint := ""
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			hint = sendWaitDeadlineHint(timeoutMS)
+		}
+		return SendResult{Err: fmt.Errorf("org: send: wait for seat %q idle/done: %w%s", p.To, err, hint)}
 	}
 
 	// The approval check again, now that the seat is idle: the plan may have
@@ -494,6 +508,14 @@ func (o *Org) Send(p SendParams) SendResult {
 // check alike.
 func sendSeatNotFoundErr(p SendParams) error {
 	return fmt.Errorf("org: send: seat %q not found in org_id %q", p.To, p.OrgID)
+}
+
+// sendWaitDeadlineHint is what Send adds to the error of its idle/done wait,
+// right after the wait's cause, when the wait ended because Send's deadline
+// ran out (plan 2026-10-23-busy-leader, D7). timeoutMS is p.TimeoutMS after
+// Send defaulted it, so the hint names the value the send ran with.
+func sendWaitDeadlineHint(timeoutMS int) string {
+	return fmt.Sprintf(" (the seat's turn did not end within the --timeout-ms deadline of %d ms; nothing was typed; a seat busy in the foreground with a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; send it again later, or with a larger --timeout-ms)", timeoutMS)
 }
 
 // checkSendApproval is sendApprovalErr of p against the manifest as it is

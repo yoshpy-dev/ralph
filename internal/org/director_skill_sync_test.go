@@ -31,7 +31,8 @@ import (
 )
 
 // directorSkillRepoRoot resolves the repository root from this source file's
-// location: internal/org/ -> ../../ (as sendDefaultsRepoRoot does).
+// location: internal/org/ -> ../../ (as sendDefaultsRepoRoot does). The /org
+// skill tests (org_skill_send_sync_test.go) use it too.
 func directorSkillRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -183,11 +184,17 @@ var (
 // matches however its paragraph is wrapped.
 func withSingleSpaces(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// directorSkillWaitSubsection returns the skill's subsection ### wait で待つ:
-// its heading line and the lines after it, up to the next line that starts
-// with "#" or the end of the text. It returns "" when the text has no such
-// heading.
+// directorSkillWaitSubsection returns the skill's subsection ### wait で待つ
+// (directorSkillSubsection).
 func directorSkillWaitSubsection(text string) string {
+	return directorSkillSubsection(text, "### wait で待つ")
+}
+
+// directorSkillSubsection returns the subsection of text whose heading line
+// is heading: that line and the lines after it, up to the next line that
+// starts with "#" or the end of the text. It returns "" when the text has no
+// such heading. The /org skill tests (org_skill_send_sync_test.go) use it too.
+func directorSkillSubsection(text, heading string) string {
 	lines := strings.Split(text, "\n")
 	start := -1
 	for i, line := range lines {
@@ -197,7 +204,7 @@ func directorSkillWaitSubsection(text string) string {
 		if start >= 0 {
 			return strings.Join(lines[start:i], "\n")
 		}
-		if strings.TrimSpace(line) == "### wait で待つ" {
+		if strings.TrimSpace(line) == heading {
 			start = i
 		}
 	}
@@ -624,6 +631,165 @@ func TestDirectorSkill_PinsTheClaudeCodeWaitRules(t *testing.T) {
 					t.Errorf("%s: %s does not contain %q -- see this test's doc comment for what to update", rel, in.name, fragment)
 				}
 			}
+		}
+	}
+}
+
+// directorSkillSendWaitTimeoutPhrase is the words of sendWaitDeadlineHint
+// that the /director skill's ### 答える順 names, in backquotes, for the
+// director to tell a send whose wait for the leader ran out (nothing typed,
+// send it again) from other failures.
+const directorSkillSendWaitTimeoutPhrase = "the seat's turn did not end within the --timeout-ms deadline"
+
+// directorSkillAnswerOrderSteps are fragments of the /director skill's
+// subsection ### 答える順, in the order the skill has them, each the words of
+// one rule plan 2026-10-23-busy-leader.md gave the director's send of a
+// DECISION to a leader (D8 and D12): send waits for the leader's turn to
+// end; a Claude Code director runs it with --timeout-ms 1500000 under Bash's
+// run_in_background and handles other items meanwhile, a Codex director
+// bounds it; one send to the same leader at a time; a send whose wait ran
+// out typed nothing, is not resolved, and is sent again; exit 0 alone does
+// not count as sent, the director reads the leader's pane, takes a DECISION
+// Claude Code queued as sent, and presses Enter once only for one left in the
+// input box; and the resolve comes only after that check in the pane.
+var directorSkillAnswerOrderSteps = []string{
+	"`idle` か `done` と報告するのを `--timeout-ms`(既定 30 秒)まで待ってから打つ",
+	"Claude Code: send に `--timeout-ms 1500000` を付け、Bash の `run_in_background` で走らせる",
+	"走っているあいだも受信箱のほかの件を処理し",
+	"Codex: `--timeout-ms 300000` のように時間を区切って打ち",
+	"同じ leader への send は 1 本ずつにし、前の send が終わってから次を打つ",
+	"`" + directorSkillSendWaitTimeoutPhrase + "` を含むときは",
+	"pane には何も打っていない。resolve せず、あとで打ち直すか、`--timeout-ms` を長くして打ち直す",
+	"終了コード 0 でも、それだけでは送れたとしない",
+	"`ralph org read --org-id <org> --seat leader` で leader の pane を読み",
+	"入力欄に `Press up to edit queued messages` が出ていれば",
+	"`herdr pane send-keys <pane> Enter` で Enter を 1 回だけ送り、もう一度読む",
+	"pane で送れたことを確かめてから、`ralph org inbox resolve <id> --note <ポインタ>` を打つ",
+	"send が失敗したら resolve せず",
+}
+
+// directorSkillApprovalSendStep are fragments of step 3 of the /director
+// skill's subsection ### 計画の承認, in order: the send approve prints is run
+// as step 2 of ### 答える順 says, with --timeout-ms 1500000 under
+// run_in_background in Claude Code, and its resolve only after the leader's
+// pane shows the DECISION's body line `approved` sent.
+var directorSkillApprovalSendStep = []string{
+	"出た send は、上の「答える順」の 2 のとおりに打つ",
+	"`--timeout-ms 1500000` を足して Bash の `run_in_background` で走らせ",
+	"leader の pane で DECISION の本文の `approved` の行",
+	"確かめてから、出た resolve を打つ",
+}
+
+// skillOrderedFragmentProblems returns one line per fragment of fragments
+// that text does not contain after the fragment before it, compared with
+// spaces and line breaks removed (withoutSpaces). where names text in the
+// lines. It returns nil when every fragment is there in order.
+func skillOrderedFragmentProblems(text, where string, fragments []string) []string {
+	var problems []string
+	s := withoutSpaces(text)
+	at := 0
+	for _, fragment := range fragments {
+		want := withoutSpaces(fragment)
+		i := strings.Index(s[at:], want)
+		if i < 0 {
+			problems = append(problems, fmt.Sprintf("%s does not contain %q after the fragments before it", where, fragment))
+			continue
+		}
+		at += i + len(want)
+	}
+	return problems
+}
+
+// directorSkillNumberedStep returns step n of a numbered list in section:
+// the line that starts "<n>. " and the lines after it, up to the next line
+// that is not blank and does not start with a space (the next step, or a
+// paragraph after the list) or the end of section. It returns "" when
+// section has no such line.
+func directorSkillNumberedStep(section string, n int) string {
+	lines := strings.Split(section, "\n")
+	prefix := strconv.Itoa(n) + ". "
+	start := -1
+	for i, line := range lines {
+		if start >= 0 {
+			if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") {
+				return strings.Join(lines[start:i], "\n")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, prefix) {
+			start = i
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	return strings.Join(lines[start:], "\n")
+}
+
+// TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck pins how the
+// /director skill sends a DECISION to a leader and when it resolves the item
+// (AC4 of plan 2026-10-23-busy-leader.md). Send waits for the leader's turn
+// to end, so a leader busy in the foreground gets nothing until it does, and
+// Send's submit check reads a turn the leader's Monitor started as confirmed
+// even when the DECISION is still in the input box, so the skill's text is
+// all that keeps a director from resolving an item whose answer never
+// arrived. Each copy's subsection ### 答える順 must contain every fragment of
+// directorSkillAnswerOrderSteps in order, and step 3 of its subsection
+// ### 計画の承認 every fragment of directorSkillApprovalSendStep in order.
+// The phrase the skill names for a send whose wait ran out must also stay in
+// sendWaitDeadlineHint, the text Send adds to that error.
+// scripts/check-skill-sync.sh keeps the copies identical but does not read Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order (and keep
+// directorSkillSendWaitTimeoutPhrase a part of sendWaitDeadlineHint in
+// verbs.go); otherwise restore the text in .claude/skills/director/SKILL.md
+// and templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck(t *testing.T) {
+	if hint := sendWaitDeadlineHint(defaultSendTimeoutMS); !strings.Contains(hint, directorSkillSendWaitTimeoutPhrase) {
+		t.Fatalf("sendWaitDeadlineHint(%d) = %q; want it to contain %q, the phrase the /director skill names", defaultSendTimeoutMS, hint, directorSkillSendWaitTimeoutPhrase)
+	}
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's answer-order check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		approval := directorSkillNumberedStep(directorSkillSubsection(text, "### 計画の承認"), 3)
+		for _, in := range []struct {
+			name      string
+			text      string
+			fragments []string
+		}{
+			{"the subsection ### 答える順", directorSkillSubsection(text, "### 答える順"), directorSkillAnswerOrderSteps},
+			{"step 3 of the subsection ### 計画の承認", approval, directorSkillApprovalSendStep},
+		} {
+			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+	}
+}
+
+// TestDirectorSkillNumberedStep runs directorSkillNumberedStep on a list
+// whose steps hold an indented line, a blank line, and a fenced block, ends
+// at a paragraph, and has no step 4.
+func TestDirectorSkillNumberedStep(t *testing.T) {
+	section := "### x\n\n1. one\n   more\n\n   ```\n   code\n   ```\n2. two\n   2b\n3. three\n\nafter\n"
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{1, "1. one\n   more\n\n   ```\n   code\n   ```"},
+		{2, "2. two\n   2b"},
+		{3, "3. three\n"},
+		{4, ""},
+	} {
+		if got := directorSkillNumberedStep(section, tc.n); got != tc.want {
+			t.Errorf("directorSkillNumberedStep(section, %d) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
 }

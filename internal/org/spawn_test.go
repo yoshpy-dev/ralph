@@ -3307,6 +3307,51 @@ func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing
 	}
 }
 
+// TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile pins AC2 of plan
+// 2026-10-23-busy-leader at the spawn: the leader's role prompt file names
+// the Org's agmsg home's scripts directory, single-quoted, in its inbox.sh
+// and history.sh commands, and an Org with no agmsg home names the one
+// driver.ResolveAgmsgHome("") reads (here RALPH_ORG_AGMSG_HOME).
+func TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, home, env, want string
+	}{
+		{"the Org's agmsg home", "/opt/agmsg home", "/env/other", "'/opt/agmsg home/scripts'"},
+		{"no agmsg home on the Org", "", "/env/agmsg", "'/env/agmsg/scripts'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(driver.AgmsgHomeEnv, tc.env)
+			o, h, _ := testOrg(t)
+			o.AgmsgHome = tc.home
+			p := mustSpawnParams("org-a", LeaderIdentity)
+			p.Role = LeaderIdentity
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			if len(h.agentStartArgs) != 1 {
+				t.Fatalf("expected exactly 1 AgentStart call, got %d", len(h.agentStartArgs))
+			}
+			promptArg := h.agentStartArgs[0][len(h.agentStartArgs[0])-1]
+			data, err := os.ReadFile(strings.TrimPrefix(promptArg, "役割指示を読み込んで従ってください: "))
+			if err != nil {
+				t.Fatalf("read the leader's prompt file: %v", err)
+			}
+			prompt := string(data)
+			for _, want := range []string{
+				"do bash " + tc.want + "/inbox.sh ralph-org-a leader --quiet 2>&1",
+				"`bash " + tc.want + "/history.sh ralph-org-a leader 50`",
+			} {
+				if !strings.Contains(prompt, want) {
+					t.Errorf("expected the leader's prompt file to contain %q, got:\n%s", want, prompt)
+				}
+			}
+			if strings.Contains(prompt, "{{") {
+				t.Errorf("expected no placeholder left in the leader's prompt file, got:\n%s", prompt)
+			}
+		})
+	}
+}
+
 // --- AC-9: concurrent spawn TOCTOU (manifest flock) -------------------------
 
 func TestOrgSpawn_ConcurrentSpawns_MaxSeatsNeverExceeded(t *testing.T) {
