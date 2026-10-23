@@ -10,8 +10,12 @@ The steps come from the setup and cleanup of the two-org trial of
 2026-10-20 (`docs/evidence/org-trial-2026-10-20.md`: Setup, Findings F1 and
 F2, Cleanup) and of the live checks after it
 (`docs/evidence/busy-leader-2026-10-23.md` and the checks of 2026-10-22),
-all on macOS with herdr 0.7.5, Claude Code 2.1.291, and agmsg 1.5.1. They
-were not run end to end again after they were written down here.
+all on macOS with herdr 0.7.5, Claude Code 2.1.291, and agmsg 1.5.1. The
+herdr facts below come from earlier live checks, also with herdr 0.7.5
+(`docs/evidence/org-send-enter-timing-2026-09-19.md`,
+`docs/evidence/org-plan-approval-live-2026-10-13.md`, and
+`docs/evidence/herdr-pane-close-2026-10-07.md`). The steps were not run end
+to end again after they were written down here.
 
 The examples use `/tmp/ralph-iso` as the dedicated directory. Any short
 path directly under `/tmp` works (see the socket path limit below).
@@ -22,18 +26,21 @@ path directly under `/tmp` works (see the socket path limit below).
   send every herdr command of this recipe to the dedicated socket.
   `pgrep -fl 'herdr server'` lists every herdr server on the machine, yours
   included.
-- herdr keeps its config, its logs, and the `session.json` it restores
-  workspaces from in its XDG directories. A server started with only
-  `HERDR_SOCKET_PATH` changed restores the workspaces of your own
-  `session.json` and writes to your own herdr log. Point all three at the
-  dedicated directory: `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and
-  `HERDR_SOCKET_PATH`.
-- Moving `HOME` instead does not work for claude: on macOS claude reads its
-  login from the keychain under the real `$HOME/Library/Keychains`, so
-  `HOME` stays the real one.
-- A unix socket path has a length limit, about 104 bytes on macOS. Keep the
-  directory short and directly under `/tmp`; a session scratch directory or
-  macOS's per-user `$TMPDIR` gives a long path.
+- herdr does not switch its config and state directories when `HOME`
+  changes. In an earlier live check, a server started with only `HOME` and
+  `HERDR_SOCKET_PATH` changed read the user's own
+  `~/.config/herdr/session.json`, restored the user's workspaces, and
+  appended its startup lines to the user's `herdr-server.log`. Point these
+  three at the dedicated directory instead: `XDG_CONFIG_HOME`,
+  `XDG_STATE_HOME`, and `HERDR_SOCKET_PATH`.
+- Keep `HOME` the real one. Changing it does not move herdr's directories,
+  and on macOS claude reads its login from the keychain under the real
+  `$HOME/Library/Keychains`: a claude seat on a server with a fake `HOME`
+  was "Not logged in".
+- A unix socket path must fit in `sun_path`, 104 bytes on macOS: in one
+  check, a socket path of over 150 characters under a scratch directory
+  kept herdr from starting. Keep the directory short and directly under
+  `/tmp`.
 - A server started from inside a Claude Code session, or from any terminal,
   passes that session's variables on to every pane: `CLAUDE_CODE_*`, the
   terminal's own variables, and the herdr pane variables of a session that
@@ -88,6 +95,11 @@ through it. `/tmp/ralph-iso/run`:
 #!/bin/sh
 # Run one command in the isolated environment.
 D=/tmp/ralph-iso
+# F1, below. Keep this line only when your git settings are in
+# ~/.config/git/config; delete it when they are in ~/.gitconfig.
+set -- GIT_CONFIG_GLOBAL="$HOME/.config/git/config" "$@"
+# F1, below. Keep this line only when gh keeps its config in ~/.config/gh.
+set -- GH_CONFIG_DIR="$HOME/.config/gh" "$@"
 exec env -i \
   HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
   SHELL=/bin/bash LANG="$LANG" TERM=xterm-256color TMPDIR="$TMPDIR" \
@@ -95,11 +107,12 @@ exec env -i \
   XDG_CONFIG_HOME="$D/xdg-config" \
   XDG_STATE_HOME="$D/xdg-state" \
   HERDR_SOCKET_PATH="$D/h.sock" \
-  GIT_CONFIG_GLOBAL="$HOME/.config/git/config" \
-  GH_CONFIG_DIR="$HOME/.config/gh" \
   CLAUDE_ENV_FILE="$D/claude-env" \
   "$@"
 ```
+
+The two `set --` lines put their assignment in front of the command, where
+`env` reads it like the others.
 
 ```sh
 mkdir -p /tmp/ralph-iso/bin /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state
@@ -120,18 +133,20 @@ binaries themselves, not of a version manager's shims.
 | `PATH` | `/tmp/ralph-iso/bin` first, then the directories above | the server, the panes, the watch, and the seats' commands find their binaries here |
 | `XDG_CONFIG_HOME`, `XDG_STATE_HOME` | under `/tmp/ralph-iso` | herdr's config, logs, and session state |
 | `HERDR_SOCKET_PATH` | `/tmp/ralph-iso/h.sock` | the dedicated server's socket |
-| `GIT_CONFIG_GLOBAL`, `GH_CONFIG_DIR` | your git and gh config | only when they live under `~/.config` (F1, below) |
+| `GIT_CONFIG_GLOBAL`, `GH_CONFIG_DIR` | your git and gh config, each only when it lives under `~/.config` | git and gh in the panes find your config (F1, below) |
 | `CLAUDE_ENV_FILE` | `/tmp/ralph-iso/claude-env` | the `PATH` of claude's Bash tool in a pane (F2, below) |
 
 Add any other variable the seats' commands need; the trial added
 `GOFLAGS=-timeout=30m` for the gate of a Go repository. `env -i` drops
-everything else, among them `CLAUDE_CODE_*`, the herdr pane variables, and
+everything else, among them `CLAUDE_CODE_*`, the herdr variables of a pane
+(`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`), and
 `RALPH_ORG_AGMSG_HOME` (which would override `[org].agmsg_home`).
 
-To see that herdr picks up the dedicated directories, run
+As a first check before the server starts, run
 `/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. herdr 0.7.5
 prints the config and log paths it would use, here under
-`/tmp/ralph-iso/xdg-config`, without reaching any server.
+`/tmp/ralph-iso/xdg-config`, without reaching any server. What the server
+really opens is checked with `lsof` (see "Checks before the first start").
 
 ### git and gh config (trial finding F1)
 
@@ -142,13 +157,15 @@ under `~/.config`. git reads `~/.gitconfig` and
 `user.name` and gh was not logged in; seats in that state cannot commit or
 open a PR.
 
-- Keep `GIT_CONFIG_GLOBAL` when your git settings are in
-  `~/.config/git/config`, and point it at that file. git then reads it
-  instead of both `~/.gitconfig` and the XDG file, so leave the variable
-  out when your settings are in `~/.gitconfig`: git still finds that file,
-  since `HOME` is the real one.
-- Point `GH_CONFIG_DIR` at the directory your gh uses: `~/.config/gh`,
-  unless you set `GH_CONFIG_DIR` or `XDG_CONFIG_HOME` yourself.
+- Keep the wrapper's `GIT_CONFIG_GLOBAL` line only when your git settings
+  are in `~/.config/git/config`. git then reads that file instead of both
+  `~/.gitconfig` and the XDG file, so with your settings in `~/.gitconfig`
+  the variable would make git skip them: delete the line, and git finds
+  `~/.gitconfig` by itself, since `HOME` is the real one.
+- Keep the `GH_CONFIG_DIR` line only when gh keeps its config in
+  `~/.config/gh` (its default when you set neither `GH_CONFIG_DIR` nor
+  `XDG_CONFIG_HOME` yourself). If you set `GH_CONFIG_DIR` in your shell,
+  put that value in the line instead.
 - Any other tool the seats run that reads `$XDG_CONFIG_HOME` loses its
   config the same way.
 
@@ -333,9 +350,9 @@ cd /tmp/ralph-iso/work
 Run every `ralph` and `herdr` command through the wrapper, from the
 repository. The watch that `ralph org start` launches when none runs, like
 the one `ralph org watch --all --detach` launches, keeps the environment of
-the command that launched it, apart from herdr's pane, tab, and workspace
-ids. Launched from the wrapper, it uses the dedicated socket, the shim, and
-the F1 variables.
+the command that launched it, apart from `HERDR_PANE_ID`, `HERDR_TAB_ID`,
+`HERDR_WORKSPACE_ID`, and `HERDR_ENV`. Launched from the wrapper, it uses
+the dedicated socket, the shim, and the F1 variables.
 
 A promoted director, an interactive session outside the server, has to run
 its `ralph` and `herdr` commands through the wrapper too, or at least with
@@ -349,7 +366,11 @@ the server's environment.
 
 In this order:
 
-1. Stop the orgs and the director. Disband each org that still runs
+1. Stop the orgs and the director. `ralph org disband` writes no org
+   report, so to keep one, run `ralph org report --org-id <id>` first,
+   from the repository's main checkout (the trial's leader ran it in its
+   feature worktree, and the report ended up in a commit on the feature
+   branch). Disband each org that still runs
    (`ralph org disband --org-id <id>`), stop a headless director
    (`ralph org director stop --id <id>`) or detach a promoted one
    (`ralph org director detach --id <id>`), and look in `ralph org inbox`
@@ -359,8 +380,10 @@ In this order:
    prints `org watch: not running` (with the time it stopped), that
    `pgrep -fl /tmp/ralph-iso` lists no process (the detached watch's
    command line names its ledger, which is under the dedicated directory),
-   and that `lsof -a -d cwd -c claude | grep /tmp/ralph-iso` finds no
-   claude still working there.
+   and that `lsof +D /tmp/ralph-iso` lists no process other than the
+   dedicated herdr server. `lsof +D` lists every process whose working
+   directory or an open file is under the directory, whatever its process
+   name, so it also finds a claude that runs under another name.
 
    If `--stop` exits 1 because the watch did not stop within its 30 s, the
    stop request stays in the ledger, and the watch stops once its current
@@ -369,10 +392,14 @@ In this order:
    directory until `ralph status` prints `org watch: not running`.
 3. Stop the dedicated server: `/tmp/ralph-iso/run herdr server stop`.
    Check that `pgrep -fl 'herdr server'` no longer lists its pid (your own
-   server, if it runs, is still listed) and that `/tmp/ralph-iso/h.sock`
-   is gone.
+   server, if it runs, is still listed), that `/tmp/ralph-iso/h.sock`
+   is gone, and that `lsof +D /tmp/ralph-iso` lists no process.
 4. Copy what you keep as evidence, `cd` out of the directory, and
    `rm -rf /tmp/ralph-iso`.
+
+`rm -rf` removes only the local copies. When the orgs of a dedicated clone
+pushed branches or opened PRs, those stay on origin; close or delete the
+ones you do not keep there.
 
 Left outside the dedicated directory, in your own stores:
 
@@ -392,8 +419,10 @@ tokens, pane ids, or session ids, and write your home directory as `~`.
 ## Running again
 
 - Before you start the dedicated server again, delete its `session.json`
-  (`find /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state -name session.json`):
-  the dedicated server restores its own workspaces, too.
+  (`find /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state -name session.json`).
+  A server restores the workspaces saved there, the dedicated one
+  included, and a restarted server whose `session.json` was left continued
+  its workspace numbering from it.
 - Use new org ids. A seat whose herdr agent name (`<org>_<seat>`) is still
   taken from the earlier run fails with `agent_name_taken`.
 
