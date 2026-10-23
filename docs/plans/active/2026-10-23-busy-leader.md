@@ -168,7 +168,10 @@
   - S3: 4f9babac(実機の確かめ (a)〜(f) と disband はすべて通った。雛形の直しは要らなかった。(d) は Claude Code が前面の `sleep 90` を断るので、perl の 90 秒の待ちで確かめた。(f) の 2 回目で、待ち行列に入った DECISION も submit の確かめを通ることを確かめ、D12 の pane の確かめが要ることが分かった)
   - S4: 460e341c(director と org の skill の送り方、`ralph org send --help`。org skill の `approve` の行と「機能の計画の承認」の 4・5 も director に合わせた)
   - S5: 2df13dfd(仕様の FR-5 を `[x]`、根拠の表、tech-debt の F7 の行を Codex の leader に限る文に、F7(a) の行、#252 の書き換え)
-- [ ] Review artifact created
+  - run-verify: 81f30f43 で rc 0(887 秒)
+  - S6: 1183b08e(self-review の LOW の F1・F2・F4・F5・F7 を直した。親がいなくなったときにループが終わるテストを足し、新しい leader の受信箱のテストを `internal/org/prompts_leader_inbox_test.go` に移し、大きいファイルの行を tech-debt に足した)
+  - S7: 36725559(inline の小さな直し。親の sh が固定の 1 秒ではなく目印のファイルを待つようにし、移したテストのファイル名を 5 か所の記録で直した(再レビューの F8))
+- [x] Review artifact created(self-review: Merge OK、LOW 1 件(F3、`/pr` で PR 本文に書く)。c2c7bf9d)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
