@@ -309,7 +309,8 @@ func runLeaderMonitorCommand(t *testing.T, shell string) {
 // parent check of D11 of plan 2026-10-23-busy-leader: the rendered Monitor
 // command, run with bash and with zsh (-f, as in
 // TestRenderRolePrompt_Leader_MonitorCommandRuns) in the background of a
-// /bin/sh that exits a second later, ends because its parent is gone
+// /bin/sh that exits once the stand-in inbox.sh has run (it creates a mark
+// file, so the loop has read $PPID by then), ends because its parent is gone
 // (kill -0 "$p" fails), not by its deadline: the stand-in date always reads
 // 1000, so the 1500-second deadline never comes. Go's Cmd.Wait reaps the
 // exited sh before it waits for the EOF of the output pipes, which the loop
@@ -334,21 +335,22 @@ func runLeaderMonitorCommandUnderAnExitingParent(t *testing.T, shell string) {
 	t.Helper()
 	dir := t.TempDir()
 	home := filepath.Join(dir, "agmsg")
-	writeTestExecutable(t, filepath.Join(home, "scripts", "inbox.sh"), "printf '%s\\n' \"args: $*\"\n")
+	writeTestExecutable(t, filepath.Join(home, "scripts", "inbox.sh"), "printf '%s\\n' \"args: $*\"\n: > \"$MONITOR_MARK\"\n")
 	stubs := filepath.Join(dir, "bin")
 	writeTestExecutable(t, filepath.Join(stubs, "date"), "#!/bin/sh\necho 1000\n")
 	writeTestExecutable(t, filepath.Join(stubs, "sleep"), "#!/bin/sh\n/bin/sleep 0.1\n")
 
 	command := leaderMonitorCommand(t, renderLeaderWithAgmsgHome(t, home))
-	monitor := `"$MONITOR_SHELL" -c "$MONITOR_CMD" & /bin/sleep 1`
+	flags := "-c"
 	if filepath.Base(shell) == "zsh" {
-		monitor = `"$MONITOR_SHELL" -f -c "$MONITOR_CMD" & /bin/sleep 1`
+		flags = "-f -c"
 	}
+	monitor := `"$MONITOR_SHELL" ` + flags + ` "$MONITOR_CMD" & while [ ! -e "$MONITOR_MARK" ]; do /bin/sleep 0.05; done`
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", monitor)
 	cmd.Env = append(os.Environ(), "PATH="+stubs+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"MONITOR_SHELL="+shell, "MONITOR_CMD="+command)
+		"MONITOR_SHELL="+shell, "MONITOR_CMD="+command, "MONITOR_MARK="+filepath.Join(dir, "inbox-ran"))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
