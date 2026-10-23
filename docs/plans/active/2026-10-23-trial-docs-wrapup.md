@@ -143,7 +143,10 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 - 承認: ユーザーの常設の指示「作成したプランは自動承認します」により自動承認した
 - [x] Implementation started
 - 実装(2026-10-23): S1 は e9884d9b・493e4ce8・e07bf30b(recipe と写し)、S2 は be8acda8(skill の 8 つの写し、leader の雛形、`TestOrgSkill_ResultExampleFollowsTheReviewerTemplate`)、S3 は 63e629a3(仕様・根拠の表・tech-debt)。S3 のあと、仕様の Status の FR-10 の理由を根拠の表の FR-10 の行の言い方にそろえた(orchestrator の 1 文の直し)。watcher の時間切れの行は、計画の「高い負荷のあいだに起き」とせず、負荷の読みがある時刻だけを書いた(03:38Z〜03:52Z の 4 回には読みがない)
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created
+- self-review(2026-10-23、58ca93cc): Merge yes、LOW 8・INFO 3。5ac0af89 で直し、再レビュー(16cc451b)の LOW 2・INFO 1 を f15b696c で直し、最後の再レビュー(edf04ef7)は新しい LOW 以上なし。INFO の N4(template の recipe が出典にする `docs/evidence/` は scaffold に配られない)は既存の 3 つの recipe と同じ形なので、この PR では直さない
+- [x] Verification artifact created
+- verify(2026-10-23、c6d98b0a): pass、INFO 4。INFO-1(`ps` が環境を読めないとき)、INFO-2(RESULT の例の SUMMARY を雛形の severity 別件数の形に)、INFO-3(repo の外の `--cwd` の信頼は推論で未確認と書く)、INFO-4(この印)を、tester の前に直した
+- [x] AC6 の run-verify: f310e994 で rc 0(`docs/evidence/verify-2026-10-23-050654.log`、gitignore の対象)。`GOTOOLCHAIN=go1.25.8 go test ./internal/org/...` は ok
 - [ ] Test artifact created
 - [ ] PR created

@@ -305,7 +305,9 @@ command, so the saved pid is the server's. Check that
   prints the server's command and then the names of its environment
   variables, one to a line: only the wrapper's variables should appear.
   `cut` drops the values, so a token you added to the wrapper does not
-  reach your terminal or a session record.
+  reach your terminal or a session record. When no name follows the
+  command, `ps` could not read the environment and the check tells you
+  nothing; the `lsof` check above still applies.
 - The `herdr --help` check under "The environment".
 
 ### Folder trust, and a probe in a throwaway pane
@@ -346,7 +348,8 @@ claude does not ask again under a trusted directory: in the trial, a claude
 started in a new git worktree under the trusted clone's `.claude/worktrees/`
 showed no dialog, and neither did the two feature worktrees (Claude Code
 2.1.291; another version may behave differently). A seat whose `--cwd` is
-outside the repository needs its own answer. claude records the trust in
+outside the repository needs its own answer (inferred, since that directory
+is not under a trusted one; not checked). claude records the trust in
 `~/.claude.json` under the resolved path (`/private/tmp/...` on macOS,
 where `/tmp` is a link). codex's trust screen was not checked here; for
 codex seats see `docs/recipes/codex-setup.md` (`codex trust .`). The rest

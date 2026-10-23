@@ -54,7 +54,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   下にできる機能の worktree では画面が出ない(2 つの機能の org を走らせた
   試行で、Claude Code 2.1.291 で確かめた。版が変われば変わりうる)。repo の
   外のディレクトリを `--cwd` に渡す座席には、そのディレクトリでも同じことを
-  する。画面が出ているあいだ herdr は座席を `blocked` と報告し、
+  する(信頼したディレクトリの外なので画面が出るはず、という推論で、実機では
+  確かめていない)。画面が出ているあいだ herdr は座席を `blocked` と報告し、
   `ralph org send` は座席が idle か done になるのを待つので届かない。
   `ralph org read --org-id <id> --seat <seat>` で画面を読み、人が herdr で
   その pane に入って答える。director はこの画面にキーを送らない。codex の
@@ -1338,7 +1339,7 @@ GATE: pass
 HEAD: <検証した commit の SHA>
 BASE: <検証した base の SHA>
 
-SUMMARY: internal/foo/bar.go のレビューを完了。CRITICAL なし。
+SUMMARY: internal/foo/bar.go のレビューを完了。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 2。
 EVIDENCE: docs/reports/review-<YYYY-MM-DD>-<org_id>-<seat_id>.md
 ```
 
