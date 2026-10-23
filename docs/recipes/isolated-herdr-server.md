@@ -18,7 +18,17 @@ herdr facts below come from earlier live checks, also with herdr 0.7.5
 to end again after they were written down here.
 
 The examples use `/tmp/ralph-iso` as the dedicated directory. Any short
-path directly under `/tmp` works (see the socket path limit below).
+path directly under `/tmp` works (see the socket path limit below). Create
+it first, open to you only and without `-p` (`/tmp` is shared by every user
+of the machine); the later steps create its subdirectories with `mkdir -p`:
+
+```sh
+mkdir -m 700 /tmp/ralph-iso
+```
+
+When that `mkdir` fails because the directory exists, do not reuse it: the
+wrapper, the shim in `bin/`, and `claude-env` there are run. Remove your
+own leftover from an earlier run, or pick another short name.
 
 ## Why isolate, and what has to move
 
@@ -32,9 +42,8 @@ path directly under `/tmp` works (see the socket path limit below).
   (`docs/evidence/org-send-enter-timing-2026-09-19.md`), a server started
   with only `HOME` and `HERDR_SOCKET_PATH` changed read the user's own
   `~/.config/herdr/session.json`, restored the user's workspaces, and
-  appended its startup lines to the user's `herdr-server.log`. herdr
-  0.7.5's `--help`, for its part, prints config and log paths under the
-  `HOME` it is given. Either way, this recipe does not move `HOME`.
+  appended its startup lines to the user's `herdr-server.log`. This recipe
+  does not move `HOME`.
 - Keep `HOME` the real one: on macOS claude reads its login from the
   keychain under the real `$HOME/Library/Keychains`, and in the same
   2026-09-19 run a claude seat on a server with a fake `HOME` was "Not
@@ -47,6 +56,10 @@ path directly under `/tmp` works (see the socket path limit below).
   passes that session's variables on to every pane: `CLAUDE_CODE_*`, the
   terminal's own variables, and the herdr pane variables of a session that
   itself runs in herdr. Start it with `env -i` and an explicit list.
+
+The isolation keeps herdr's state, the socket, and the ledger apart from
+yours. It is not a sandbox: the seats run with your real `HOME`, your gh
+login, and, under the `autonomous` permission mode, claude's bypass mode.
 
 ## A repository with its own ledger
 
@@ -142,13 +155,21 @@ Add any other variable the seats' commands need; the trial added
 `GOFLAGS=-timeout=30m` for the gate of a Go repository. `env -i` drops
 everything else, among them `CLAUDE_CODE_*`, the herdr variables of a pane
 (`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`), and
-`RALPH_ORG_AGMSG_HOME` (which would override `[org].agmsg_home`).
+`RALPH_ORG_AGMSG_HOME` (which would override `[org].agmsg_home`). It also
+drops `SSH_AUTH_SOCK` and `GH_TOKEN`: add them to the wrapper when your
+pushes or gh need them. The checks before the first start do not test a
+push.
 
 As a first check before the server starts, run
-`/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. herdr 0.7.5
-prints the config and log paths it would use, here under
-`/tmp/ralph-iso/xdg-config`, without reaching any server. What the server
-really opens is checked with `lsof` (see "Checks before the first start").
+`/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. Both lines
+should name paths under `/tmp/ralph-iso/xdg-config/herdr/` (in herdr 0.7.5
+the logs too are under the config directory), and the check reaches no
+server. With herdr 0.7.5, `XDG_CONFIG_HOME=<S>/xc`, `XDG_STATE_HOME=<S>/xs`,
+and `HERDR_SOCKET_PATH=<S>/h.sock` for a scratch directory `<S>`, it
+printed `Config: <S>/xc/herdr/config.toml` and
+`Logs:   <S>/xc/herdr/herdr.log (plus herdr-client.log, herdr-server.log)`,
+and it created nothing under `<S>`. What the server really opens is checked
+with `lsof` (see "Checks before the first start").
 
 ### git and gh config (trial finding F1)
 
@@ -279,9 +300,10 @@ command, so the saved pid is the server's. Check that
   binary, the system libraries, and devices such as `/dev/null`, the files
   and sockets the server has open are under `/tmp/ralph-iso`, and none is
   under your own herdr config directory.
-- `ps -E -o command= -p "$(cat /tmp/ralph-iso/herdr-server.pid)"` (macOS)
-  prints the server's environment after its command: only the wrapper's
-  variables.
+- `ps eww -o command= -p "$(cat /tmp/ralph-iso/herdr-server.pid)" | tr ' ' '\n'`
+  (macOS; `ww` keeps a terminal from cutting the line at the window width)
+  prints the server's command and then its environment, one word to a line:
+  only the wrapper's variables should appear.
 - The `herdr --help` check under "The environment".
 
 ### Folder trust, and a probe in a throwaway pane
@@ -356,36 +378,47 @@ the command that launched it, apart from `HERDR_PANE_ID`, `HERDR_TAB_ID`,
 `HERDR_WORKSPACE_ID`, and `HERDR_ENV`. Launched from the wrapper, it uses
 the dedicated socket, the shim, and the F1 variables.
 
-A promoted director, an interactive session outside the server, has to run
-its `ralph` and `herdr` commands through the wrapper too, or at least with
-the same `HERDR_SOCKET_PATH`, `PATH`, and F1 variables (the trial's director
-set the same `HERDR_SOCKET_PATH` and `PATH` on each of its commands). A
-headless director started through the wrapper
-(`ralph org director start`) runs in a pane of the dedicated server and has
-the server's environment.
+A promoted director, an interactive session outside the server, runs its
+`ralph` and `gh` commands through the wrapper too, or at least with the
+same `HERDR_SOCKET_PATH`, `PATH`, and F1 variables (the trial's director set
+the same `HERDR_SOCKET_PATH` and `PATH` on each of its commands). The
+`herdr` commands of this recipe (the server, the throwaway pane, the trust
+answer) are the human's: the /director skill
+(`.claude/skills/director/SKILL.md`) limits a director to `ralph` and `gh`
+and does not let it send keys to a pane. A headless director started
+through the wrapper (`ralph org director start`) runs in a pane of the
+dedicated server and has the server's environment.
 
 ## Clean up
 
-In this order:
+Every `ralph` and `herdr` command of this section runs through the
+wrapper, as written below: a bare `ralph org disband` has no
+`HERDR_SOCKET_PATH` and calls the herdr of your own server. In this order:
 
 1. Stop the orgs and the director. `ralph org disband` writes no org
-   report, so to keep one, run `ralph org report --org-id <id>` first,
-   from the repository's main checkout (the trial's leader ran it in its
-   feature worktree, and the report ended up in a commit on the feature
-   branch). Disband each org that still runs
-   (`ralph org disband --org-id <id>`), stop a headless director
-   (`ralph org director stop --id <id>`) or detach a promoted one
-   (`ralph org director detach --id <id>`), and look in `ralph org inbox`
-   for items still open.
-2. Stop the ledger's watch with `ralph org watch --all --stop`. The watch
-   does not stop when the orgs are gone. Then check that `ralph status`
-   prints `org watch: not running` (with the time it stopped), that
-   `pgrep -fl /tmp/ralph-iso` lists no process (the detached watch's
-   command line names its ledger, which is under the dedicated directory),
-   and that `lsof +D /tmp/ralph-iso` lists no process other than the
-   dedicated herdr server. `lsof +D` lists every process whose working
-   directory or an open file is under the directory, whatever its process
-   name, so it also finds a claude that runs under another name.
+   report, so to keep one, run
+   `/tmp/ralph-iso/run ralph org report --org-id <id>` first, from the
+   repository's main checkout (the trial's leader ran it in its feature
+   worktree, and the report ended up in a commit on the feature branch).
+   Disband each org that still runs
+   (`/tmp/ralph-iso/run ralph org disband --org-id <id>`), stop a headless
+   director (`/tmp/ralph-iso/run ralph org director stop --id <id>`) or
+   detach a promoted one
+   (`/tmp/ralph-iso/run ralph org director detach --id <id>`), and look in
+   `/tmp/ralph-iso/run ralph org inbox` for items still open.
+2. Stop the ledger's watch with
+   `/tmp/ralph-iso/run ralph org watch --all --stop`. The watch does not
+   stop when the orgs are gone. Then check, from the repository, that
+   `/tmp/ralph-iso/run ralph status` prints `org watch: not running` (with
+   the time it stopped). Next, `cd ~`, out of the directory, so that the
+   checks below list neither your own shell nor the `lsof` itself. From
+   there, check that `pgrep -fl /tmp/ralph-iso` lists no process (the
+   detached watch's command line names its ledger, which is under the
+   dedicated directory), and that `lsof +D /tmp/ralph-iso` lists no
+   process other than the dedicated herdr server. `lsof +D` lists every
+   process whose working directory or an open file is under the directory,
+   whatever its process name, so it also finds a claude that runs under
+   another name.
 
    If `--stop` exits 1 because the watch did not stop within its 30 s, the
    stop request stays in the ledger, and the watch stops once its current
@@ -396,8 +429,8 @@ In this order:
    Check that `pgrep -fl 'herdr server'` no longer lists its pid (your own
    server, if it runs, is still listed), that `/tmp/ralph-iso/h.sock`
    is gone, and that `lsof +D /tmp/ralph-iso` lists no process.
-4. Copy what you keep as evidence, `cd` out of the directory, and
-   `rm -rf /tmp/ralph-iso`.
+4. From outside the directory, copy what you keep as evidence out of it,
+   and `rm -rf /tmp/ralph-iso`.
 
 `rm -rf` removes only the local copies. When the orgs of a dedicated clone
 pushed branches or opened PRs, those stay on origin; close or delete the
@@ -420,9 +453,10 @@ tokens, pane ids, or session ids, and write your home directory as `~`.
 
 ## Running again
 
-- Before you start the dedicated server again, delete its `session.json`
-  (`find /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state -name session.json`).
-  A server restores the workspaces saved there, the dedicated one
+- Before you start the dedicated server again, remove the `session.json`
+  files that
+  `find /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state -name session.json`
+  lists. A server restores the workspaces saved there, the dedicated one
   included, and a restarted server whose `session.json` was left continued
   its workspace numbering from it.
 - Use new org ids. A seat whose herdr agent name (`<org>_<seat>`) is still

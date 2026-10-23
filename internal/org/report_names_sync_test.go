@@ -247,8 +247,13 @@ const orgSkillResultExampleLead = "RESULT の例"
 // protocol section is a reviewer seat's report written the way the reviewer
 // template (prompts/reviewer.md, its RESULT example and レポート契約) writes
 // one. The example passes protocol.Parse and protocol.Validate as a RESULT,
-// carries the header lines GATE: pass, HEAD: and BASE:, and names in its
-// EVIDENCE the reviewer's report, whose name starts with reviewerReportPrefix.
+// carries the header lines GATE: pass, HEAD: and BASE:, and has the EVIDENCE
+// line "EVIDENCE: " + reviewerReportPrefix + "<YYYY-MM-DD>-<org_id>-<seat_id>.md"
+// exactly, in that placeholder form; an example with real names needs this
+// test changed. The test does not read prompts/reviewer.md, and the header
+// names are spelled here: it ties the example to the template through
+// reviewerReportPrefix, which TestReportNames_DocsMatchConstants pins in the
+// template's レポート契約.
 // The example used to name docs/reports/self-review-foo.md, while the
 // reviewer template says a self-review- name is read as the /self-review
 // report and must not be used.
