@@ -168,13 +168,13 @@
   - S3: 4f9babac(実機の確かめ (a)〜(f) と disband はすべて通った。雛形の直しは要らなかった。(d) は Claude Code が前面の `sleep 90` を断るので、perl の 90 秒の待ちで確かめた。(f) の 2 回目で、待ち行列に入った DECISION も submit の確かめを通ることを確かめ、D12 の pane の確かめが要ることが分かった)
   - S4: 460e341c(director と org の skill の送り方、`ralph org send --help`。org skill の `approve` の行と「機能の計画の承認」の 4・5 も director に合わせた)
   - S5: 2df13dfd(仕様の FR-5 を `[x]`、根拠の表、tech-debt の F7 の行を Codex の leader に限る文に、F7(a) の行、#252 の書き換え)
-  - run-verify: 81f30f43 で rc 0(887 秒)
+  - run-verify: d4922368 から打ち、rc 0(887 秒)。走っているあいだのコミットは self-review の報告(81f30f43)だけ
   - S6: 1183b08e(self-review の LOW の F1・F2・F4・F5・F7 を直した。親がいなくなったときにループが終わるテストを足し、新しい leader の受信箱のテストを `internal/org/prompts_leader_inbox_test.go` に移し、大きいファイルの行を tech-debt に足した)
   - S7: 36725559(inline の小さな直し。親の sh が固定の 1 秒ではなく目印のファイルを待つようにし、移したテストのファイル名を 5 か所の記録で直した(再レビューの F8))
 - [x] Review artifact created(self-review: Merge OK、LOW 1 件(F3、`/pr` で PR 本文に書く)。c2c7bf9d)
   - 1d088f87: verify のテストの欠け(`ralph org send --help` の段落)を `internal/cli/org_send_help_test.go` で固めた(inline の小さな直し)
 - [x] Verification artifact created(verify: pass、LOW 2 件(README と quality-gates の答える順、根拠の表の古いファイル名)は `/sync-docs` で直す。6478fe25。insight event の low は 0 で書かれていたので 2 に直した)
 - [x] Test artifact created(test: pass。run-test.sh が 1d088f87 で rc 0(844 秒)、go1.25.8 の internal/org と internal/cli が rc 0。89ce30ea)
-  - AC7: run-verify.sh が 81f30f43 で rc 0、HEAD では run-test.sh(1d088f87)と run-static-verify.sh(89ce30ea、19 秒)がどちらも rc 0。1d088f87 のあとに変わったのは test の report だけ
+  - AC7: run-verify.sh が d4922368 から打って rc 0、HEAD では run-test.sh(1d088f87)と run-static-verify.sh(89ce30ea、19 秒)がどちらも rc 0。1d088f87 のあとに変わったのは文書と報告だけで、Go とスクリプトは変わっていない(e5910d90 の README と quality-gates の変更は、どの run にも入っていない。CI が最後の確かめになる)
   - test の穴 1(mutant V4: `--timeout-ms` が 0 以下のときの hint の ms)は、既定の 30 秒を待つか継ぎ目が要るので、テストにせず PR の Known gaps に書く
 - [ ] PR created
