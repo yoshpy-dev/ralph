@@ -178,7 +178,7 @@ leader の claude の session で走った hook は、ユーザーの設定に�
 - Monitor の知らせで始まった手番は、入力欄の文を取り込まない。DECISION の文は入力欄に残り、手番が終わってから Enter が来れば、ふつうの入力として送られる。手番の途中に Enter が来れば、Claude Code は待ち行列に入れ、手番が終わってから送る。どちらの場合も DECISION は失われなかった。
 - 一方で、submit の確かめは 2 回目でも「確かめた」になった。見た `working` は Monitor の手番のもので、そのとき DECISION は待ち行列にあった。send が終わる直前(00:31:07.0)の pane では、DECISION はまだ扱われていなかった。待ち行列の DECISION も、pane には送られた入力と同じ `❯ TYPE: DECISION` の形で出て、違いは入力欄の `Press up to edit queued messages` だけだった。submit の確かめは Monitor の手番の `working` でも通るので、この確かめでは起きなかったが、DECISION が入力欄に残った場合とも見分けられない。director が resolve の前に `ralph org read` で読む手順(計画の D12)は要る。待ち行列に入った DECISION は手番のあとに扱われるので、入力欄に残っていなければ送れたと読んでよい。
 - Claude Code の Bash ツールは、前面の `sleep 90` を自分で断り、Monitor か `run_in_background` を使うよう返す。それでも、前面で長くかかる別のコマンドは断られず、そのあいだ send は届かない。この確かめでは perl の 90 秒の待ちを使った。試行の leader の 9 秒ごとのループや gate も同じ形になる。新しいエラーの文は、手番が終わらなかったこと、何も打っていないこと、打ち直し方を伝える。
-- haiku の leader は、最初の Monitor の呼び出しで必須の `description` を付けずに断られ、自分で付け直した。雛形は `description` に触れていない。
+- haiku の leader は、最初の Monitor の呼び出しで必須の `description` を付けずに断られ、自分で付け直した。雛形は `description` に触れていない(この確かめの雛形、3d1946d6 の話である。そのあとの 02e27384 が雛形に `description` の文を足した。その雛形では、実機を打ち直していない)。
 
 ## 確かめていないもの
 
