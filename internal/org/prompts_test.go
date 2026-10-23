@@ -827,7 +827,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		{"10. `ralph org report", "このあとの手順で implementer に TASK を送ることになったら(手順 12 の `GATE: fail` のときと、gate の断りを直すのに implementer の手が要るとき)"},
 		{"10. `ralph org report", "送る前に、rebase の途中なら `git rebase --abort` で戻し、archive のコミットを作っていれば `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に戻す。そのあとで TASK を送る"},
 		{"10. `ralph org report", "per-plan では、承認の記録は元のパスを指すので、戻さないと implementer への TASK が承認の検査で断られる"},
-		{"12. `ralph org gate", "数分かかるので、stdout と stderr を `.harness/state/` の下のファイルに書く"},
+		{"12. `ralph org gate", "repo のテストの量とマシンの負荷によっては数十分かかるので、stdout と stderr を `.harness/state/` の下のファイルに書く"},
 		{"12. `ralph org gate", "`mkdir -p .harness/state` を打ってから `ralph org gate --org-id org-a --state-dir <台帳> > .harness/state/gate-org-a.out 2>&1` を打つ"},
 		{"12. `ralph org gate", "Bash ツールの `run_in_background` があるとき(Claude Code)は、このコマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが来てから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む(「agmsg の受信箱の運用」の節)"},
 		{"12. `ralph org gate", "ないとき(Codex)は前面で打ち、ツールの timeout を gate にかかる時間より長くする(そのあいだ `ralph org send` は届かない)"},

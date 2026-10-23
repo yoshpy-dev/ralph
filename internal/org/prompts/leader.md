@@ -226,8 +226,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
 12. `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。gate は
     worktree と rebase を確かめてから `./scripts/run-static-verify.sh` と
-    `./scripts/run-test.sh` を走らせ、結果を台帳に記録する。数分かかるので、
-    stdout と stderr を `.harness/state/` の下のファイルに書く
+    `./scripts/run-test.sh` を走らせ、結果を台帳に記録する。repo のテストの
+    量とマシンの負荷によっては数十分かかるので、stdout と stderr を
+    `.harness/state/` の下のファイルに書く
     (`mkdir -p .harness/state` を打ってから
     `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳> > .harness/state/gate-{{ORG_ID}}.out 2>&1`
     を打つ)。Bash ツールの `run_in_background` があるとき(Claude Code)は、
