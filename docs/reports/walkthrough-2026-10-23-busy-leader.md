@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Plan: docs/plans/active/2026-10-23-busy-leader.md(/pr で archive に移す)
-- PR: 作成後に番号を書く
+- PR: #253
 - Branch: fix/busy-leader(base a58f7c64、この walkthrough の前の HEAD d05c1477。22 commits、35 files、+2323/-211)
 - Base: a58f7c64(origin/main、「Merge pull request #252」)
 - 読む範囲: コードは Go の 4 files(+81/-6)で、`internal/org/prompts.go`(+33)、`internal/org/verbs.go`(+23/-1)、`internal/org/spawn.go`(+11/-4)、`internal/cli/org.go`(+14/-1)。leader の雛形 `internal/org/prompts/leader.md`(+63/-17)。テストは 8 files(+891/-13)で、新しい `internal/org/prompts_leader_inbox_test.go`(+381)、`director_skill_sync_test.go`(+172/-6)、`org_skill_send_sync_test.go`(+123)、`verbs_test.go`(+92)が大半。文書は `/org` と `/director` の skill の 4 写しずつ(8 files、+352/-144)、README、`docs/quality/quality-gates.md` の 2 写し、仕様、根拠の表、tech-debt、実機の記録(+200)。残りは計画、後工程の報告 5 本(cross-review は triage)、insight event
