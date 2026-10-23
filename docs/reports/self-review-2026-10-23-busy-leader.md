@@ -3,7 +3,7 @@
 - Date: 2026-10-23
 - Plan: `docs/plans/active/2026-10-23-busy-leader.md`(D1〜D12、AC1〜AC7)
 - Reviewer: reviewer サブエージェント(`/self-review`、pipeline cycle 1/2)
-- Scope: `git diff a58f7c64...HEAD`(HEAD d4922368、24 ファイル、+1673/-206)。S1 24e99eb1・10e284af・02e27384(leader の雛形の待ち方、`{{AGMSG_SCRIPTS}}`、`Org.AgmsgHome` と CLI の配線)、S2 f0961a8b・3d1946d6(`Send` の時間切れの文)、S3 4f9babac(実機の記録)、S4 460e341c(skill 4 写し × 2、`ralph org send --help`、skill の文を固めるテスト 2 つ)、S5 2df13dfd・d4922368(仕様、根拠の表、tech-debt、plan の印)。差分の質だけを見た。再レビュー(「Re-review of 1183b08e (S6)」の節)は S6 の 1183b08e(`git diff 81f30f43 1183b08e`、5 ファイル、+389/-301)までを見る
+- Scope: `git diff a58f7c64...HEAD`(HEAD d4922368、24 ファイル、+1673/-206)。S1 24e99eb1・10e284af・02e27384(leader の雛形の待ち方、`{{AGMSG_SCRIPTS}}`、`Org.AgmsgHome` と CLI の配線)、S2 f0961a8b・3d1946d6(`Send` の時間切れの文)、S3 4f9babac(実機の記録)、S4 460e341c(skill 4 写し × 2、`ralph org send --help`、skill の文を固めるテスト 2 つ)、S5 2df13dfd・d4922368(仕様、根拠の表、tech-debt、plan の印)。差分の質だけを見た。再レビュー(「Re-review of 1183b08e (S6)」の節)は S6 の 1183b08e(`git diff 81f30f43 1183b08e`、5 ファイル、+389/-301)まで、「Re-review of 36725559 (S7)」の節は S7 の 36725559(`git diff c1151828 36725559`、4 ファイル、+12/-10)までを見る
 
 ## Evidence reviewed
 
@@ -82,7 +82,7 @@ _(初回のレビューは、依頼どおりこの報告書以外のファイル
 
 ### F1 の読み
 
-新しいテストの `/bin/sh -c '"$MONITOR_SHELL" -c "$MONITOR_CMD" & /bin/sleep 1'` の形を、全文と照らして読んだ。
+新しいテストの `/bin/sh -c '"$MONITOR_SHELL" -c "$MONITOR_CMD" & /bin/sleep 1'` の形を、全文と照らして読んだ(1183b08e の形。親を待たせる部分は 36725559 で mark ファイルを待つ形に変わった。「Re-review of 36725559 (S7)」の節)。
 
 - 期限では終われない。stub の `date` は 1000 を返し続けるので、`end` は来ない。ループが終わる道は `kill -0 "$p"` が偽になることだけ
 - sh がゾンビで残らない。`Cmd.Wait` は `Process.Wait`(刈り取り)のあとでパイプの EOF を待つ(`$GOROOT/src/os/exec/exec.go:930`、`:948`、go1.26.0)。ループがパイプを持ち続けるあいだも sh は刈り取り済みで、`kill -0` は pid が消えたとして失敗する。doc の説明はこの順と合う
@@ -91,15 +91,49 @@ _(初回のレビューは、依頼どおりこの報告書以外のファイル
 - `p=$PPID` を `p=$$` にする変更と、`kill -0 "$p"` の項を外す変更は、どちらも親の確認を失ってループが期限なしで回るので、30 秒で落ちる。これは読んで確かめた(実行はしていない)。実装者の報告(`p=$$` で 2 つのサブテストが 30 秒で落ちた)と合う。初回に自分で打った親が先に終わる形の probe(約 11 秒、残らない)と、テストの形は同じ
 - 対象は darwin と linux(`.goreleaser.yml`)で、`syscall.Kill`・`Setpgid` を使うテストは既存にある(`director_cmd_test.go`、`gate_test.go`、`mergeorder_test.go`)ので、build tag は要らない
 
-観察(指摘にしない): 新しい補助 `runLeaderMonitorCommandUnderAnExitingParent` と、`runLeaderMonitorCommand` は、`bash`・`zsh` を回すラッパー、stub の置き場、zsh の `-f` の分岐を写している(十数行)。分けた理由(1 つは deadline、1 つは親の死)が違うので、共通にするほどではない。もう 1 つ、親の sh が 1 秒で終わるので、負荷が極端に高く Monitor の shell が 1 秒以内に `p=$PPID` を読めないと、`args:` の行がなくて落ちる。誤って通る向きではなく、起きる見込みは小さい
+観察(指摘にしない): 新しい補助 `runLeaderMonitorCommandUnderAnExitingParent` と、`runLeaderMonitorCommand` は、`bash`・`zsh` を回すラッパー、stub の置き場、zsh の `-f` の分岐を写している(十数行)。分けた理由(1 つは deadline、1 つは親の死)が違うので、共通にするほどではない。もう 1 つ、(1183b08e の形では)親の sh が 1 秒で終わるので、負荷が極端に高く Monitor の shell が 1 秒以内に `p=$PPID` を読めないと、`args:` の行がなくて落ちる。誤って通る向きではなく、起きる見込みは小さい。この 2 つめは 36725559 が解いた(下の S7 の節)
 
 ### 新しい指摘
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW (F8) | maintainability | 1183b08e がテストを `prompts_test.go` から `prompts_leader_inbox_test.go` に動かしたが、動かしたテストの置き場所を `internal/org/prompts_test.go` と書く 5 か所が古いまま残った。テスト名は合い、ファイル名だけが違う。新しい register の行(352)は新しい名前で書いてあるので、同じ commit の中で 2 つの書き方が並ぶ。`/sync-docs` の範囲にも入るが、この commit が作った食い違いなので、ここで挙げる | `docs/specs/2026-10-07-org-multi-org-director.md:92`(FR-5 の印)と `:151`(NFR ツール非依存の印)、`docs/evidence/org-spec-evidence-2026-10-21.md:51`(FR-5 の行)と `:59`(NFR ツール非依存の行)、`docs/tech-debt/README.md:326`(F7 の RESOLVED コメントの「Tests:」)。どれも `TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn`(と、spec 92・evidence 51・register 326 では `MonitorCommandRuns`)の前に `internal/org/prompts_test.go` を置く。新しい場所は `internal/org/prompts_leader_inbox_test.go:74`、`:258` | その 5 か所の `internal/org/prompts_test.go` を `internal/org/prompts_leader_inbox_test.go` に直す(同じ行にある別のテスト、たとえば evidence の 50・57 行の `TestRenderRolePrompt_Leader_FeatureOrgProcedure` と `EscalatesThroughRalphOrgEscalate` は動いていないので触らない)。この修正は spec・根拠の表・register の本文なので、`post-implementation-pipeline.md` の記録だけの例外の対象ではない |
+| LOW (F8)<br>fixed in 36725559 | maintainability | 1183b08e がテストを `prompts_test.go` から `prompts_leader_inbox_test.go` に動かしたが、動かしたテストの置き場所を `internal/org/prompts_test.go` と書く 5 か所が古いまま残った。テスト名は合い、ファイル名だけが違う。新しい register の行(352)は新しい名前で書いてあるので、同じ commit の中で 2 つの書き方が並ぶ。`/sync-docs` の範囲にも入るが、この commit が作った食い違いなので、ここで挙げる | `docs/specs/2026-10-07-org-multi-org-director.md:92`(FR-5 の印)と `:151`(NFR ツール非依存の印)、`docs/evidence/org-spec-evidence-2026-10-21.md:51`(FR-5 の行)と `:59`(NFR ツール非依存の行)、`docs/tech-debt/README.md:326`(F7 の RESOLVED コメントの「Tests:」)。どれも `TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn`(と、spec 92・evidence 51・register 326 では `MonitorCommandRuns`)の前に `internal/org/prompts_test.go` を置く。新しい場所は `internal/org/prompts_leader_inbox_test.go:74`、`:258` | その 5 か所の `internal/org/prompts_test.go` を `internal/org/prompts_leader_inbox_test.go` に直す(同じ行にある別のテスト、たとえば evidence の 50・57 行の `TestRenderRolePrompt_Leader_FeatureOrgProcedure` と `EscalatesThroughRalphOrgEscalate` は動いていないので触らない)。この修正は spec・根拠の表・register の本文なので、`post-implementation-pipeline.md` の記録だけの例外の対象ではない |
+
+## Re-review of 36725559 (S7)
+
+範囲は `git diff c1151828 36725559`(4 ファイル、+12/-10)。差分の質だけを見た。テストは走らせていない(実行の結果は、依頼の本文にある orchestrator の記録による)。S7 は orchestrator が小さい直しとして inline で入れた。
+
+### 指摘の扱い
+
+| ID | 扱い | 根拠 |
+| --- | --- | --- |
+| F8 | fixed | 5 か所とも `internal/org/prompts_test.go` が `internal/org/prompts_leader_inbox_test.go` に直った。下の「F8 の確かめ」 |
+| F1 の観察 2(親の sh の 1 秒) | fixed | 親の sh が固定の 1 秒ではなく、スタンドインの `inbox.sh` が作る mark ファイルを待つ形になった。下の「テストの読み」 |
+
+### F8 の確かめ
+
+- 変わった行は 5 つだけで、どれも `internal/org/prompts_test.go` の 1 か所が `internal/org/prompts_leader_inbox_test.go` に変わった(行ごとに旧と新の出現数を数えた。`prompts_test.go` は 1 → 0、`prompts_leader_inbox_test.go` は 0 → 1)。`docs/specs/2026-10-07-org-multi-org-director.md:92` と `:151`、`docs/evidence/org-spec-evidence-2026-10-21.md:51` と `:59`、`docs/tech-debt/README.md:326`
+- 取りこぼしの掃き出し。`AgmsgInboxWaitsByEndingTheTurn` と `MonitorCommandRuns` を `docs/` 全体で grep し、各出現の前にある最も近いファイル名を読んだ。すべて `prompts_leader_inbox_test.go`(register の 326 行目は、同じ行の `verbs_test.go` と `director_skill_sync_test.go` も合う)。`prompts_test.go` の直後に動かしたテスト名が続く形は、この報告書を除いて 0 件(`WaitsPointAtTheAgmsgInboxSection` と `AgmsgScriptsIsTheQuotedScriptsDir` も同じ検査で 0 件)
+- 同じ行の別のテスト(動いていないもの)は触っていない。evidence の 50・57 行目の `FeatureOrgProcedure` などは差分に入っていない
+
+### テストの読み
+
+変わった `runLeaderMonitorCommandUnderAnExitingParent` と doc を、前後と照らして読んだ。
+
+- スタンドインの `inbox.sh` が `printf` のあとに `: > "$MONITOR_MARK"` を打ち、親の sh は `while [ ! -e "$MONITOR_MARK" ]; do /bin/sleep 0.05; done` のあとで終わる。`inbox.sh` が走るのはループの最初の `kill -0 "$p"` のあとなので、`p=$PPID` を読み終えてから親が消える。固定の待ちより確かで、遅い機械でも時間に頼らない
+- mark が作られない場合(`bash` が見つからない、`MONITOR_MARK` が渡らない)は、親が待ち続けるので、30 秒の `ctx` で sh が殺され、テストの `select` が `Kill(-pgid)` でグループを殺して `Fatalf` する。ハングにならない
+- `MONITOR_MARK` は `cmd.Env` で渡り、sh → bash か zsh(`-f`)→ `inbox.sh` の順に継承される。sh 起動の文字列に入る `flags`(`-c` か `-f -c`)は引用符なしの語で、`$MONITOR_SHELL`・`$MONITOR_CMD`・`$MONITOR_MARK` は引用符つき
+- 出力の検査(`args: ralph-org-a leader --quiet` が含まれ、最後の行が終わりの 1 行)は変わらない。mark は `printf` のあとに作られるので、`args:` の行は先に出ている。mark が `inbox.sh` の実行を示すので、`args:` の検査は mark の検査と重なるが、出力が grep を通っていることの確かめとして残してよい
+- doc の最初の文が新しい形(`exits once the stand-in inbox.sh has run (it creates a mark file, so the loop has read $PPID by then)`)に合い、`a second later` や固定の秒数の言い回しは残っていない(ファイルの `second` の grep で確認)。失敗の文(`still ran 30 seconds after it started`)は合う
+- inline で入れた直しの 3 つの輪を確かめた。編集した所の上のコメント(更新済み)、そのテストを数え上げる所(register・spec・根拠の表は、この新しいテストの名前を挙げていない。F8 の 5 か所は動いたテストの置き場所だけ)、最も近い兄弟の `runLeaderMonitorCommand`(変わっていない)。見つかった食い違いはない
+
+観察(指摘にしない): register の 326 行目の RESOLVED コメントは、ループが「leader の claude がいなくなってから約 10 秒で終わる」と書き、その根拠のテストは `MonitorCommandRuns` だけを挙げる。この文を単体で見ているテストは、S6 の `MonitorCommandEndsWhenItsParentIsGone` なので、「Tests:」の並びに足してもよい。文は実機の記録(8 秒)に基づいていて、誤りではない。`git diff c1151828 36725559 --check` は空、U+FFFD は 0 件
+
+### 新しい指摘
+
+なし。
 
 ## Recommendation
 
-- Merge: OK(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2 件が未了: F3(`/pr` の手順)と F8(新規、S6 が動かしたテストを指す文書 5 か所)。F1・F2・F4・F5・F7 は 1183b08e で直り、F6 は取り下げ。初回は LOW 7)
-- Follow-ups: 未了は F3 と F8 の 2 件で、どちらも LOW。F8 は 5 か所の文字の置き換え(`internal/org/prompts_test.go` → `internal/org/prompts_leader_inbox_test.go`、同じ行の別のテストは触らない)で、spec・根拠の表・register の本文なので、`post-implementation-pipeline.md` の記録だけの例外の対象ではない。直すなら `/sync-docs` の範囲として扱うか、`/self-review` から回し直す。F3 は `/pr` の手順(PR の本文と release の issue の 1 行)。この PR が足す register の行(800 行の行、試行の所見 F7 の Codex の leader、self-review F7(a))に閉じ損ないはない。insight event は未実行(依頼が report 以外を変えないとしたため。F8 を直さずに進めるなら `--low 2`、直したあとなら `--low 1`): `./scripts/insights-append.sh --slug busy-leader --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 2 --cycle auto --source skill || true`
+- Merge: OK(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 1 件が未了: F3(`/pr` の手順)。F1・F2・F4・F5・F7 は 1183b08e、F8 は 36725559 で直り、F6 は取り下げ。初回は LOW 7、S6 の再レビューで F8 が加わり 8)
+- Follow-ups: 未了は F3 の 1 件(LOW)で、`/pr` の手順(PR の本文と release の issue の 1 行)。コードとコードの文字列に残る指摘はない。この PR が足す register の行(800 行の行、試行の所見 F7 の Codex の leader、self-review F7(a))に閉じ損ないはない。insight event は未実行(依頼が report 以外を変えないとしたため。最終の LOW は 1): `./scripts/insights-append.sh --slug busy-leader --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 1 --cycle auto --source skill || true`
