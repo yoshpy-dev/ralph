@@ -31,7 +31,8 @@ import (
 )
 
 // directorSkillRepoRoot resolves the repository root from this source file's
-// location: internal/org/ -> ../../ (as sendDefaultsRepoRoot does).
+// location: internal/org/ -> ../../ (as sendDefaultsRepoRoot does). The /org
+// skill tests (org_skill_send_sync_test.go) use it too.
 func directorSkillRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -192,7 +193,7 @@ func directorSkillWaitSubsection(text string) string {
 // directorSkillSubsection returns the subsection of text whose heading line
 // is heading: that line and the lines after it, up to the next line that
 // starts with "#" or the end of the text. It returns "" when the text has no
-// such heading.
+// such heading. The /org skill tests (org_skill_send_sync_test.go) use it too.
 func directorSkillSubsection(text, heading string) string {
 	lines := strings.Split(text, "\n")
 	start := -1

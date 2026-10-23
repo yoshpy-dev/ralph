@@ -114,6 +114,11 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		scope = defaultScopeText
 	}
 	text := string(data)
+	agmsgScripts := ""
+	// Only prompts/leader.md has it; its value reads the env, $HOME, and the cwd.
+	if strings.Contains(text, "{{AGMSG_SCRIPTS}}") {
+		agmsgScripts = agmsgScriptsWord(vars.AgmsgHome)
+	}
 	replacer := strings.NewReplacer(
 		"{{ORG_ID}}", vars.OrgID,
 		"{{SEAT_ID}}", vars.SeatID,
@@ -126,7 +131,7 @@ func RenderRolePrompt(role string, vars RolePromptVars) (string, bool, error) {
 		"{{PLAN_PATH}}", vars.PlanPath,
 		"{{TASK}}", vars.Task,
 		"{{ENVELOPE}}", vars.Envelope,
-		"{{AGMSG_SCRIPTS}}", agmsgScriptsWord(vars.AgmsgHome),
+		"{{AGMSG_SCRIPTS}}", agmsgScripts,
 	)
 	return replacer.Replace(text), true, nil
 }
