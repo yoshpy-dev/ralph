@@ -1,0 +1,413 @@
+# Running the org runtime on an isolated herdr server
+
+A live check or a trial of the org runtime (`ralph org ...`) should not
+touch your own herdr server, your agmsg database, your desktop
+notifications, or a ledger that other orgs use. This recipe runs the org
+runtime on a headless herdr server of its own, in a repository with its own
+ledger, from a minimal environment.
+
+The steps come from the setup and cleanup of the two-org trial of
+2026-10-20 (`docs/evidence/org-trial-2026-10-20.md`: Setup, Findings F1 and
+F2, Cleanup) and of the live checks after it
+(`docs/evidence/busy-leader-2026-10-23.md` and the checks of 2026-10-22),
+all on macOS with herdr 0.7.5, Claude Code 2.1.291, and agmsg 1.5.1. They
+were not run end to end again after they were written down here.
+
+The examples use `/tmp/ralph-iso` as the dedicated directory. Any short
+path directly under `/tmp` works (see the socket path limit below).
+
+## Why isolate, and what has to move
+
+- Your own herdr server may be running. Leave it alone: never stop it, and
+  send every herdr command of this recipe to the dedicated socket.
+  `pgrep -fl 'herdr server'` lists every herdr server on the machine, yours
+  included.
+- herdr keeps its config, its logs, and the `session.json` it restores
+  workspaces from in its XDG directories. A server started with only
+  `HERDR_SOCKET_PATH` changed restores the workspaces of your own
+  `session.json` and writes to your own herdr log. Point all three at the
+  dedicated directory: `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and
+  `HERDR_SOCKET_PATH`.
+- Moving `HOME` instead does not work for claude: on macOS claude reads its
+  login from the keychain under the real `$HOME/Library/Keychains`, so
+  `HOME` stays the real one.
+- A unix socket path has a length limit, about 104 bytes on macOS. Keep the
+  directory short and directly under `/tmp`; a session scratch directory or
+  macOS's per-user `$TMPDIR` gives a long path.
+- A server started from inside a Claude Code session, or from any terminal,
+  passes that session's variables on to every pane: `CLAUDE_CODE_*`, the
+  terminal's own variables, and the herdr pane variables of a session that
+  itself runs in herdr. Start it with `env -i` and an explicit list.
+
+## A repository with its own ledger
+
+The org runtime keeps its ledger (the manifest, the inbox, the watch's lock
+and liveness mark) in the main worktree root's `.harness/state/org/`, and
+every linked worktree of a repository uses that same ledger. A linked
+worktree of a repository whose ledger other orgs use is therefore not
+isolated. Use one of these, under the dedicated directory:
+
+- A dedicated clone, for a run whose orgs push branches and open PRs (the
+  trial).
+- A scratch git repository, for a check that opens no PR (the live
+  checks). The latest ones gave it a base commit on `main`, `user.name` and
+  `user.email` in the repository's own config, `core.hooksPath` pointing at
+  an empty directory (so that your own git hooks do not run), and
+  `.harness/state/` and `.harness/logs/` in `.gitignore`:
+
+  ```sh
+  mkdir -p /tmp/ralph-iso/work /tmp/ralph-iso/no-hooks
+  cd /tmp/ralph-iso/work
+  git init -b main
+  git config user.name '<name>'
+  git config user.email '<email>'
+  git config core.hooksPath /tmp/ralph-iso/no-hooks
+  printf '.harness/state/\n.harness/logs/\n' > .gitignore
+  # write the run's ralph.toml here
+  git add .gitignore ralph.toml
+  git commit -m 'chore: base'
+  ```
+
+Put the run's settings in that repository's `ralph.toml`.
+
+`ralph org start` and `ralph org watch --all --detach` launch a watch only
+when none runs on the ledger. When one already accepts work there, they use
+it without comparing its herdr server or its environment with theirs. A
+watch started on the ledger from your normal shell would then watch the
+isolated orgs through your own herdr socket and run the real `osascript`.
+Before the first start, check that the ledger has no watch (see "Checks
+before the first start").
+
+## The environment
+
+Write a wrapper that runs one command in the isolated environment, and run
+every `ralph`, `herdr`, and `claude` command of the rest of this recipe
+through it. `/tmp/ralph-iso/run`:
+
+```sh
+#!/bin/sh
+# Run one command in the isolated environment.
+D=/tmp/ralph-iso
+exec env -i \
+  HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
+  SHELL=/bin/bash LANG="$LANG" TERM=xterm-256color TMPDIR="$TMPDIR" \
+  PATH="$D/bin:<the directories of ralph, claude, codex, node, git, gh, herdr, jq>:/usr/bin:/bin:/usr/sbin:/sbin" \
+  XDG_CONFIG_HOME="$D/xdg-config" \
+  XDG_STATE_HOME="$D/xdg-state" \
+  HERDR_SOCKET_PATH="$D/h.sock" \
+  GIT_CONFIG_GLOBAL="$HOME/.config/git/config" \
+  GH_CONFIG_DIR="$HOME/.config/gh" \
+  CLAUDE_ENV_FILE="$D/claude-env" \
+  "$@"
+```
+
+```sh
+mkdir -p /tmp/ralph-iso/bin /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state
+chmod +x /tmp/ralph-iso/run
+```
+
+Replace the placeholder with the absolute directories that hold those
+commands on your machine, and leave out the ones a run does not use. The
+trial and the latest live check named the directories of the installed
+binaries themselves, not of a version manager's shims.
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `HOME` | the real one | claude's login on macOS is in the keychain under it |
+| `USER`, `LOGNAME`, `LANG`, `TMPDIR` | as in your shell | the basic login environment |
+| `SHELL` | a shell whose startup files add no flags to `claude` or `codex` | herdr starts each pane's shell from it (see "Shell aliases") |
+| `TERM` | `xterm-256color` | the terminal type of the panes |
+| `PATH` | `/tmp/ralph-iso/bin` first, then the directories above | the server, the panes, the watch, and the seats' commands find their binaries here |
+| `XDG_CONFIG_HOME`, `XDG_STATE_HOME` | under `/tmp/ralph-iso` | herdr's config, logs, and session state |
+| `HERDR_SOCKET_PATH` | `/tmp/ralph-iso/h.sock` | the dedicated server's socket |
+| `GIT_CONFIG_GLOBAL`, `GH_CONFIG_DIR` | your git and gh config | only when they live under `~/.config` (F1, below) |
+| `CLAUDE_ENV_FILE` | `/tmp/ralph-iso/claude-env` | the `PATH` of claude's Bash tool in a pane (F2, below) |
+
+Add any other variable the seats' commands need; the trial added
+`GOFLAGS=-timeout=30m` for the gate of a Go repository. `env -i` drops
+everything else, among them `CLAUDE_CODE_*`, the herdr pane variables, and
+`RALPH_ORG_AGMSG_HOME` (which would override `[org].agmsg_home`).
+
+To see that herdr picks up the dedicated directories, run
+`/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. herdr 0.7.5
+prints the config and log paths it would use, here under
+`/tmp/ralph-iso/xdg-config`, without reaching any server.
+
+### git and gh config (trial finding F1)
+
+With `XDG_CONFIG_HOME` moved, git and gh in the panes lose a config kept
+under `~/.config`. git reads `~/.gitconfig` and
+`$XDG_CONFIG_HOME/git/config`; gh reads `$GH_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/gh`. In the trial's setup probe a pane had no
+`user.name` and gh was not logged in; seats in that state cannot commit or
+open a PR.
+
+- Keep `GIT_CONFIG_GLOBAL` when your git settings are in
+  `~/.config/git/config`, and point it at that file. git then reads it
+  instead of both `~/.gitconfig` and the XDG file, so leave the variable
+  out when your settings are in `~/.gitconfig`: git still finds that file,
+  since `HOME` is the real one.
+- Point `GH_CONFIG_DIR` at the directory your gh uses: `~/.config/gh`,
+  unless you set `GH_CONFIG_DIR` or `XDG_CONFIG_HOME` yourself.
+- Any other tool the seats run that reads `$XDG_CONFIG_HOME` loses its
+  config the same way.
+
+### PATH in claude's Bash tool (trial finding F2)
+
+A herdr pane runs its shell as a login shell. For bash on macOS,
+`/etc/profile` runs `path_helper`, which puts the system directories,
+`/usr/bin` among them, ahead of the server's `PATH`. A command that has a
+copy there then resolves to that copy in the pane and in claude's Bash
+tool: in the trial, `command -v osascript` printed the real
+`/usr/bin/osascript` instead of the shim. `BASH_ENV` did not help. A file
+that exports the `PATH`, named by `CLAUDE_ENV_FILE`, did:
+
+```sh
+# /tmp/ralph-iso/claude-env
+export PATH="/tmp/ralph-iso/bin:<the same directories as in run>:/usr/bin:/bin:/usr/sbin:/sbin"
+```
+
+- This is for claude seats, and it fixes claude's Bash tool only. The
+  pane's own shell keeps the `path_helper` order. codex seats were not
+  checked for this.
+- Claude Code reads the file when a session starts. The trial inferred
+  this and then checked it on one command each from a seat started before
+  a change to the file and one started after it. Write the file before the
+  server starts any claude; a change reaches only sessions started later.
+- ralph creates seat panes with
+  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
+  when the herdr has `--env` (herdr 0.7.5 does), so the file needs neither
+  value. With a herdr that has no `--env`, ralph warns on stderr and the
+  panes get neither; the trial, run before ralph set the value, exported
+  `AGMSG_SELF_NAME=off` in this file.
+
+### Shell aliases
+
+herdr types a seat's command into the pane's interactive shell, so an
+alias for `claude` or `codex` in that shell's startup files is expanded. A
+`codex` alias that adds `--model` makes the seat fail to start, and a
+`claude` alias that adds flags changes how the seat runs; the /org skill's
+prerequisites (`.claude/skills/org/SKILL.md`) list each case. Choose
+`SHELL` so that the pane's startup files define no such alias. The trial
+and the latest live check used `/bin/bash`. Then:
+
+- Run `/tmp/ralph-iso/run ralph doctor` in the repository and read its
+  "Shell aliases (codex/claude)" check. It reports such aliases with the
+  file and line, from the zsh, bash, and fish startup files under your home
+  directory, whichever `SHELL` you chose; a finding in a file of a shell
+  the panes do not run does not reach them.
+- In the throwaway pane below, `type claude codex` prints a path for each,
+  and `alias` lists no alias for them.
+
+## Optional: a private agmsg and a notification shim
+
+The latest live checks used both; the trial used the shim with the user's
+own agmsg.
+
+- A private copy of agmsg. Copy `scripts`, `plugins`, `types`, `SKILL.md`,
+  and `VERSION` from your agmsg home (`~/.agents/skills/agmsg` by default)
+  into the dedicated directory, without `db`, `teams`, `run`, or `agents`,
+  and point ralph at the copy with an absolute path in the repository's
+  `ralph.toml`:
+
+  ```sh
+  mkdir -p /tmp/ralph-iso/agmsg
+  cd ~/.agents/skills/agmsg
+  cp -R scripts plugins types SKILL.md VERSION /tmp/ralph-iso/agmsg/
+  ```
+
+  ```toml
+  [org]
+  agmsg_home = "/tmp/ralph-iso/agmsg"
+  ```
+
+  agmsg creates a new database and new teams under the copy, so the run's
+  messages and role-session marks stay out of your own agmsg home.
+  (`ralph org director start --config` refuses a relative `agmsg_home`.)
+- An `osascript` shim. ralph runs `osascript` by `PATH` lookup for its
+  desktop notifications to the human (from the watch, and from
+  `ralph org escalate` when it sends an item at once). A shim first on
+  `PATH` that logs its arguments and exits 0 keeps them off your desktop,
+  and its log holds every call:
+
+  ```sh
+  #!/bin/sh
+  # /tmp/ralph-iso/bin/osascript
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> /tmp/ralph-iso/osascript.log
+  exit 0
+  ```
+
+  Make it executable. Inside a pane it reaches claude's Bash tool only
+  through `CLAUDE_ENV_FILE` (F2).
+
+## Start the server
+
+```sh
+cd /tmp/ralph-iso
+nohup /tmp/ralph-iso/run herdr server > /tmp/ralph-iso/herdr-server.out 2>&1 &
+echo $! > /tmp/ralph-iso/herdr-server.pid
+```
+
+`nohup`, the wrapper, and `env` each replace themselves with the next
+command, so the saved pid is the server's. Check that
+`pgrep -fl 'herdr server'` lists it.
+
+## Checks before the first start
+
+### The server
+
+- `lsof -p "$(cat /tmp/ralph-iso/herdr-server.pid)"`: apart from its
+  binary, the system libraries, and devices such as `/dev/null`, the files
+  and sockets the server has open are under `/tmp/ralph-iso`, and none is
+  under your own herdr config directory.
+- `ps -E -o command= -p "$(cat /tmp/ralph-iso/herdr-server.pid)"` (macOS)
+  prints the server's environment after its command: only the wrapper's
+  variables.
+- The `herdr --help` check under "The environment".
+
+### Folder trust, and a probe in a throwaway pane
+
+In a repository claude has not seen, claude shows a folder-trust dialog
+with the cursor on "No, exit". Answer it once yourself, in a throwaway
+pane, before the first start, and use the same pane to check what a seat's
+shell and claude's Bash tool resolve:
+
+```sh
+R=/tmp/ralph-iso/run
+REPO=/tmp/ralph-iso/work
+$R herdr workspace create --cwd "$REPO" --label probe | jq -r .result.workspace.workspace_id
+$R herdr tab create --workspace <workspace-id> --cwd "$REPO" --label probe | jq -r .result.root_pane.pane_id
+$R herdr pane run <pane-id> 'type claude codex; alias'
+$R herdr pane read <pane-id> --source recent --lines 40 --format text
+$R herdr pane run <pane-id> 'claude --model haiku'
+```
+
+1. The shell: `type claude codex` names the binaries you meant, and
+   `alias` lists no alias for them.
+2. Trust: read the pane, move the cursor to "Yes, I trust this folder",
+   and press Enter. The trial and the latest live check sent the Down key,
+   then Enter, to the pane.
+3. The probe: have claude run `command -v git gh ralph claude osascript`
+   (without `osascript` when there is no shim), `git config user.name`,
+   and `gh auth status` with its Bash tool. Type the request with
+   `$R herdr pane send-text <pane-id> '<request>'`, then
+   `$R herdr pane send-keys <pane-id> Enter`, and read the pane. Each
+   `command -v` line names the binary you meant (for `osascript`, the
+   shim), `git config user.name` prints your name, and `gh auth status`
+   shows the account you expect as logged in. Approve the commands if
+   claude asks.
+4. Exit claude with `/exit`, then close the workspace:
+   `$R herdr workspace close <workspace-id>`.
+
+claude does not ask again under a trusted directory: in the trial, a claude
+started in a new git worktree under the trusted clone's `.claude/worktrees/`
+showed no dialog, and neither did the two feature worktrees (Claude Code
+2.1.291; another version may behave differently). A seat whose `--cwd` is
+outside the repository needs its own answer. claude records the trust in
+`~/.claude.json` under the resolved path (`/private/tmp/...` on macOS,
+where `/tmp` is a link). codex's trust screen was not checked here; for
+codex seats see `docs/recipes/codex-setup.md` (`codex trust .`). The rest
+of the prerequisites, the one-time consent to claude's bypass mode among
+them, are in the /org skill's prerequisites (`.claude/skills/org/SKILL.md`).
+
+### ralph doctor and ralph status
+
+In the repository:
+
+```sh
+cd /tmp/ralph-iso/work
+/tmp/ralph-iso/run ralph doctor
+/tmp/ralph-iso/run ralph status
+```
+
+- `ralph doctor`: the herdr and agmsg checks pass, and "Shell aliases
+  (codex/claude)" reports nothing that reaches the panes.
+- `ralph status`: the state directory it prints is the repository's
+  `.harness/state/org`, and its watch line begins with
+  `org watch: not running`. If a watch runs there, stop it
+  (`/tmp/ralph-iso/run ralph org watch --all --stop`), so that the first
+  start launches a new one from the wrapper.
+
+## Run
+
+Run every `ralph` and `herdr` command through the wrapper, from the
+repository. The watch that `ralph org start` launches when none runs, like
+the one `ralph org watch --all --detach` launches, keeps the environment of
+the command that launched it, apart from herdr's pane, tab, and workspace
+ids. Launched from the wrapper, it uses the dedicated socket, the shim, and
+the F1 variables.
+
+A promoted director, an interactive session outside the server, has to run
+its `ralph` and `herdr` commands through the wrapper too, or at least with
+the same `HERDR_SOCKET_PATH`, `PATH`, and F1 variables (the trial's director
+set the same `HERDR_SOCKET_PATH` and `PATH` on each of its commands). A
+headless director started through the wrapper
+(`ralph org director start`) runs in a pane of the dedicated server and has
+the server's environment.
+
+## Clean up
+
+In this order:
+
+1. Stop the orgs and the director. Disband each org that still runs
+   (`ralph org disband --org-id <id>`), stop a headless director
+   (`ralph org director stop --id <id>`) or detach a promoted one
+   (`ralph org director detach --id <id>`), and look in `ralph org inbox`
+   for items still open.
+2. Stop the ledger's watch with `ralph org watch --all --stop`. The watch
+   does not stop when the orgs are gone. Then check that `ralph status`
+   prints `org watch: not running` (with the time it stopped), that
+   `pgrep -fl /tmp/ralph-iso` lists no process (the detached watch's
+   command line names its ledger, which is under the dedicated directory),
+   and that `lsof -a -d cwd -c claude | grep /tmp/ralph-iso` finds no
+   claude still working there.
+
+   If `--stop` exits 1 because the watch did not stop within its 30 s, the
+   stop request stays in the ledger, and the watch stops once its current
+   cycle, or its wait for an in-flight watcher call, ends; the error also
+   says how to stop it at once. Do not stop the server or remove the
+   directory until `ralph status` prints `org watch: not running`.
+3. Stop the dedicated server: `/tmp/ralph-iso/run herdr server stop`.
+   Check that `pgrep -fl 'herdr server'` no longer lists its pid (your own
+   server, if it runs, is still listed) and that `/tmp/ralph-iso/h.sock`
+   is gone.
+4. Copy what you keep as evidence, `cd` out of the directory, and
+   `rm -rf /tmp/ralph-iso`.
+
+Left outside the dedicated directory, in your own stores:
+
+- a trust entry for the repository in `~/.claude.json` (under
+  `/private/tmp/...`). Every Claude Code session writes that file, so the
+  live checks left the entry rather than edit the file by hand;
+- Claude Code's session-record directories under `~/.claude/projects/`,
+  one for each directory a claude ran in (the repository and each feature
+  worktree, for example), and whatever else your Claude Code setup
+  writes per session, such as history lines and plugin data;
+- when you use your own agmsg instead of a copy, the role-session marks of
+  the run's seats under the agmsg home's `run/`.
+
+In the evidence you write about the run, do not copy gh or git config,
+tokens, pane ids, or session ids, and write your home directory as `~`.
+
+## Running again
+
+- Before you start the dedicated server again, delete its `session.json`
+  (`find /tmp/ralph-iso/xdg-config /tmp/ralph-iso/xdg-state -name session.json`):
+  the dedicated server restores its own workspaces, too.
+- Use new org ids. A seat whose herdr agent name (`<org>_<seat>`) is still
+  taken from the earlier run fails with `agent_name_taken`.
+
+## What this recipe does not cover
+
+- codex seats: the `PATH` of their shell commands (F2 was checked for
+  claude's Bash tool only), codex's trust screen, and the agmsg writable
+  root of a sandboxed codex seat (`docs/recipes/codex-seat-permissions.md`).
+- A login zsh as the pane shell. macOS's `/etc/zprofile` runs `path_helper`
+  as well, so such a pane probably reorders `PATH` the same way. Not
+  checked.
+- Linux. The keychain and `path_helper` are macOS's, and the steps were
+  not tried on Linux.
+- An end-to-end run of these steps as written. They were put together from
+  the trial and the live checks, which differed in details (the trial used
+  a dedicated clone and the user's own agmsg, the live checks a scratch
+  repository and a private copy), and were not run again together.
