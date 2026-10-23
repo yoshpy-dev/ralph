@@ -93,7 +93,7 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 - [x] AC3 RESULT の例: `/org` skill の RESULT の例が `GATE: pass`・`HEAD:`・`BASE:` のヘッダを持ち、EVIDENCE が `docs/reports/review-` で始まる。Go のテストが、例を skill から読み、typed protocol の検査(`internal/org/protocol` の `Parse` と `Validate`)を通ること、`GATE`・`HEAD`・`BASE` のヘッダがあること、EVIDENCE が reviewer のレポートの名前の形であることを確かめる。例を `self-review-foo.md` に戻すとテストが落ちる
 - [x] AC4 所要時間: `grep -rn '数分' .claude/skills/org .claude/skills/director .agents/skills/org .agents/skills/director templates/base/.claude/skills/org templates/base/.claude/skills/director templates/base/.agents/skills/org templates/base/.agents/skills/director internal/org/prompts` が gate と regate について 0 件。新しい文が、テストの量とマシンの負荷で数十分かかりうることを言う。`internal/org/prompts_test.go` の固定の文が新しい文に合う
 - [x] AC5 記録: `grep -rn 'fix/busy-leader' docs/specs docs/evidence docs/tech-debt` が 0 件(main の 3c1cd14b では仕様 3 件、根拠の表 6 件、tech-debt 2 件)。仕様の一覧が 36 本で、#253 を `gh pr view 253` で読んだ結果を根拠の表に書く。F1・F2・folder trust の行がこの PR で直したと書き、tech-debt の 2 行が RESOLVED。watcher の時間切れの行が所見の表と tech-debt にある。仕様の Status の節と根拠の表の「予定の順」が系列の終わりと開いたまま残る行を書く
-- [ ] AC6 `./scripts/run-verify.sh` が 0 で終わる。`go test ./internal/org/... -timeout 30m` が、手元の Go と `GOTOOLCHAIN=go1.25.8` の両方で通る
+- [x] AC6 `./scripts/run-verify.sh` が 0 で終わる。`go test ./internal/org/... -timeout 30m` が、手元の Go と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
 
@@ -148,5 +148,6 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 - [x] Verification artifact created
 - verify(2026-10-23、c6d98b0a): pass、INFO 4。INFO-1(`ps` が環境を読めないとき)、INFO-2(RESULT の例の SUMMARY を雛形の severity 別件数の形に)、INFO-3(repo の外の `--cwd` の信頼は推論で未確認と書く)、INFO-4(この印)を、tester の前に直した
 - [x] AC6 の run-verify: f310e994 で rc 0(`docs/evidence/verify-2026-10-23-050654.log`、gitignore の対象)。`GOTOOLCHAIN=go1.25.8 go test ./internal/org/...` は ok
-- [ ] Test artifact created
+- [x] Test artifact created
+- test(2026-10-23、6053ab00): pass。run-test.sh は rc 0、`go test ./internal/org/... ./internal/cli/...` は go1.26.0 と `GOTOOLCHAIN=go1.25.8` の両方で rc 0、新しいテストの変異 8 つはすべて落ちた。テストの穴は、skill の 3 か所の「数十分」を固定するテストがないこと(AC4 は grep で見る)
 - [ ] PR created
