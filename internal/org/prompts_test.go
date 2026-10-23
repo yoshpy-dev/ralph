@@ -1458,7 +1458,7 @@ func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 	}
 	for _, c := range []struct{ marker, want string }{
 		{"- Monitor ツールがあるとき(Claude Code)", "agmsg の受信箱を Monitor で見張り、張ったら手番を終えます"},
-		{"- Monitor ツールがあるとき(Claude Code)", "`timeout_ms` には 1800000 を渡します"},
+		{"- Monitor ツールがあるとき(Claude Code)", "`timeout_ms` には 1800000 を、`description` には「agmsg の受信箱の見張り」を渡します(`description` は省けません)"},
 		{"- Monitor ツールがあるとき(Claude Code)", "10 秒ごとに未読のメッセージを読み、空でない行を出します"},
 		{"- Monitor ツールがあるとき(Claude Code)", "メッセージが届くと Monitor の知らせで次の手番が始まる"},
 		{"- Monitor ツールがあるとき(Claude Code)", "25 分たつと終わり、あなたの claude のプロセスがなくなったときも 10 秒ほどで終わります(Monitor の期限の 30 分より先に終わる)"},

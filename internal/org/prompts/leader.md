@@ -414,7 +414,8 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
 
 - Monitor ツールがあるとき(Claude Code): agmsg の受信箱を Monitor で見張り、
   張ったら手番を終えます。Monitor のコマンドには次の 1 行を、`timeout_ms`
-  には 1800000 を渡します。
+  には 1800000 を、`description` には「agmsg の受信箱の見張り」を渡します
+  (`description` は省けません)。
 
   ```
   p=$PPID; end=$(( $(date +%s) + 1500 )); while kill -0 "$p" 2>/dev/null && [ "$(date +%s)" -lt "$end" ]; do bash {{AGMSG_SCRIPTS}}/inbox.sh {{TEAM}} leader --quiet 2>&1 | grep --line-buffered -v '^[[:space:]]*$'; sleep 10; done; echo 'agmsg の見張りが終わった。history.sh で読み直してから張り直す'
