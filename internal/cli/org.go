@@ -1128,6 +1128,15 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"second time: if the submit cannot be confirmed, it prints a warning\n" +
 			"instead of guessing -- see --enter-delay-ms below.\n" +
 			"\n" +
+			"Before typing, send waits up to --timeout-ms for the seat to be idle or\n" +
+			"done. A seat in the middle of a turn (waiting in the foreground on a\n" +
+			"loop, `ralph org wait`, or a gate) does not get the message until the\n" +
+			"turn ends. When the wait runs out, nothing is typed and the error says\n" +
+			"the seat's turn did not end and how to send again. The submit check only\n" +
+			"sees the seat's turn go working or blocked, so a turn the seat started on\n" +
+			"its own (a Claude Code leader woken by its Monitor, say) also reads as\n" +
+			"confirmed; `ralph org read` shows whether the message arrived.\n" +
+			"\n" +
 			"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run\n" +
 			"included, is refused while no long-running `ralph org watch --all`\n" +
 			"(not stopping, not a --once run) runs on the ledger.\n" +
