@@ -65,3 +65,35 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
   - 直した場合は pipeline cycle 2 の `/self-review` から回す(記録だけの修正の例外は、recipe・skill・テストの直しには使えない)。
   - insight event は、次の 1 行で `docs/insights/events/2026-10-23-trial-docs-wrapup.jsonl` に追記する:
     `./scripts/insights-append.sh --slug trial-docs-wrapup --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 8 --cycle auto --source skill`
+
+## Re-review (5ac0af89)
+
+`git diff 58ca93cc 5ac0af89`(recipe とその templates の写し、`internal/org/report_names_sync_test.go` のコメント、tech-debt の 1 行)を読んだ。recipe の 2 つの写しは `cmp` で一致した。herdr と recipe のコマンドは打っていない。`check-sync` と 3 つのテストの合格はリードの報告で、私は確かめていない。
+
+### cycle 1 の指摘の扱い
+
+| 指摘 | 結果 | 確かめたこと |
+| --- | --- | --- |
+| F1 | 直った | 「Clean up」の冒頭が、この節のコマンドはすべて wrapper を通すと言い、素の `ralph org disband` が自分の server の herdr を呼ぶ理由を書く。1・2 のコマンドはすべて `/tmp/ralph-iso/run` 付きになった。節の中に素の `ralph`・`herdr` のコマンドは、下の N1 の 1 か所(427 行の説明文)を除いて残っていない |
+| F2 | 直った | 2 で `ralph status` を repo から打ってから `cd ~` し、`pgrep` と `lsof +D` をそこから打つ。3 の `lsof +D` も同じ場所で打つ。4 は「外から写して消す」になり、確かめより前に出る順になった |
+| F3 | 直った(実機は未確認) | repo の前例と同じ `ps eww -o command= -p ... \| tr ' ' '\n'` になり、`ww` の理由も書いた。この sandbox では環境が出ないので、出力は `/verify` が sandbox の外で見る |
+| F4 | 直った | 先頭に `mkdir -m 700 /tmp/ralph-iso`(`-p` なし)を置き、既にあれば使い回さないと書いた。後の `mkdir -p` は subdirectory だけを作る。「Running again」(自分で残した directory の再利用)とは、時点が違うので食い違わない |
+| F5 | 直った | 出典のない「HOME の下を出す」の文を消し、`--help` の段落は、`XDG_CONFIG_HOME`・`XDG_STATE_HOME`・`HERDR_SOCKET_PATH` を scratch に向けた herdr 0.7.5 の出力(`Config:` と `Logs:`)と「何も作らない」を書く形になった。出典は下の N3 |
+| F6 | 直った | 昇格した director は `ralph` と `gh` を wrapper で打ち、recipe の `herdr` のコマンドは人のものだと書き、`/director` skill(`.claude/skills/director/SKILL.md:954`、`:962`)を指す。recipe の中で director に herdr を打たせる文は残っていない(`grep -n director` で確かめた) |
+| F7 | 直った(名前は変えず、コメントで限界を言う) | doc コメントが、EVIDENCE は placeholder の形の完全一致で、実名の例ならテストを変える必要があり、雛形は読まず `reviewerReportPrefix` を通して `TestReportNames_DocsMatchConstants` に結ぶと言う。この結びは `report_names_sync_test.go:105` の既存の検査と合う |
+| F8 | 直った | 「does not change the watcher or `watcherInvokeTimeout`」になり、PR が Go のテストと雛形の文を変えることと矛盾しない。row の他のセルは変わっていない(字単位で比べた) |
+| I1 | 直った | 「Why isolate」の終わりに「sandbox ではない」の段落。`autonomous` で claude の bypass mode という説明は、`/org` skill の前提と合う |
+| I2 | 直った(ただし N2) | `SSH_AUTH_SOCK` と `GH_TOKEN` を落とすことと、start 前の確かめが push を試さないことを書いた |
+| I3 | 直った | 「`find` が出した `session.json` を消す」に直った |
+
+### 新しい指摘
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW (N1) | readability | 「Clean up」2 の 30 秒の分岐の段落が、`cd ~` のあとに「`ralph status` が `org watch: not running` と言うまで server を止めない」と書く。コマンドは素の形で、どこで打つかも書かない。冒頭の「すべて wrapper を通す」と食い違い、読む人は `~` のまま打つ。`ralph status` は repo の外では別の台帳を見るので、動いている見張りに対して `not running` と出て、server の停止と `rm -rf` に進みうる(見張りが残るだけで壊れるものはないが、この段落は、止まるまで消さないための歯止めである) | `docs/recipes/isolated-herdr-server.md:423-427`(`cd ~` は 413 行)。`internal/org/statedir.go:52-54`(git の作業木の外では cwd の下の `.harness/state/org` が台帳になる) | 段落の `ralph status` を `/tmp/ralph-iso/run ralph status`(repo から)にする。または `cd ~` を段落のあとに移す |
+| LOW (N2) | security | I2 の直しは、必要なら `GH_TOKEN` を wrapper に足せと言い、F3 の直しは `ps eww ... \| tr ' ' '\n'` で server の環境をそのまま端末に出させる。足した人の `GH_TOKEN=<値>` が端末とその履歴(Claude Code などのセッションなら記録)に出る。同じ recipe が末尾の近くで、token を evidence に写すなと言う | `docs/recipes/isolated-herdr-server.md:158-161`(I2)、`:303-306`(F3)、`:451-452`(token を写さない) | 確かめたいのは変数の名前だけなので、`... \| tr ' ' '\n' \| cut -d= -f1` にして名前だけを出させる |
+| INFO (N3) | maintainability | 新しい `--help` の段落は、herdr 0.7.5 が実際に打った出力(`Config: <S>/xc/herdr/config.toml`、`Logs: <S>/xc/herdr/herdr.log (plus ...)`)と「何も作らなかった」を、直接の観測として書く。観測は 2026-10-23 のオーケストレーターの 1 回の実行で、recipe の冒頭が挙げる記録のどれにもなく、`docs/evidence/` にもない。私は herdr を動かせないので確かめていない | `docs/recipes/isolated-herdr-server.md:163-173`、冒頭の出典の段落(9〜18 行) | `/verify` の report に出力を写すか、冒頭の出典に「`--help` の出力は 2026-10-23 の実行」を足す |
+
+### 判定
+
+cycle 1 の 8 件の LOW と 3 件の INFO は、すべて直った。直しが足した新しい LOW は 2 件(N1、N2)、INFO は 1 件(N3)で、どれも recipe の文言を 1 行直すだけで済む。CRITICAL・HIGH・MEDIUM はない。Merge の行(yes)は変えない。cycle 1 の insight event の件数(low 8)も変えず、N1・N2 はこの節にだけ書く。pipeline のこの cycle で直すか、`/pr` で既知の穴として残すかはリードが決める。直す場合は、N1・N2 とも recipe の本文と templates の写しの 2 か所を同じに直す(`cmp` を保つ)。
