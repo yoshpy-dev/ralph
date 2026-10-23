@@ -102,12 +102,12 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: leader の雛形の `## agmsg の受信箱の運用` の節が、Scope の待ち方を書く。前面で長く待たない理由(`Send` は idle か done を待つ)、Claude Code の Monitor のコマンド(`{{AGMSG_SCRIPTS}}` と `{{TEAM}}` を使い、空行を落とし、10 秒ごと、1500 秒の期限、`kill -0 $PPID` の親の確かめ、終わりの 1 行)と `timeout_ms` 1800000 と張り直し、手番を終えること、張り直す前の `history.sh` での読み直し、長いコマンドの `run_in_background`、Codex の leader には待つあいだ届かないこと、返事だけを待つときは手番を終えること。「能動的に確認してください」と「適当な間隔で」の文はない。使命の 4、件を上げたあとの待ち、手順 12 の gate の待ちがこの節に合う。prompts_test.go が節の文と、ほかの待ちの文を固める
-- [ ] AC2: `{{AGMSG_SCRIPTS}}` は、`Org` の agmsg の置き場所の `scripts` を単一引用符で囲んだ値に置き換わる。置き場所が空なら既定の置き場所を使う。描いた leader の雛形に `{{` が残らない。spawn が書く leader の role prompt に、渡した置き場所の `scripts` が入る(spawn_test.go)。CLI の配線は `driver.ResolveAgmsgHome` の値を渡す
-- [ ] AC3: `Send` の idle/done の待ちが ctx の期限で切れると、エラーは `org: send: wait for seat "<seat>" idle/done:` で始まり、手番が `--timeout-ms` のうちに終わらなかったこと、何も打っていないこと、前面で待つ座席には手番が終わるまで届かないこと、`--timeout-ms` を長くして打ち直せることを言う。Progress は `SendProgressNothingSent` で、`sent` の event は増えない。時間切れでない失敗の文には足さない(verbs_test.go)
-- [ ] AC4: `/director` skill(4 写し)の「答える順」と「計画の承認」の 3、`/org` skill(4 写し)の `send` の行、「受信箱」節の答える順、leader の agmsg の受信箱の段落が、Scope の送り方と待ち方を書く。写しはバイト一致。director の送り方(`run_in_background`、`--timeout-ms 1500000`、同じ leader への send は 1 本ずつ、切れたら resolve しない、終了コード 0 のあとも `ralph org read` で DECISION が送られたことを確かめてから resolve する)をテストが 4 写しで固める
-- [ ] AC5: 実機の確かめ (a)〜(f) と disband のあとの `ps` を分離した herdr server と本物の claude haiku で打ち、結果を `docs/evidence/busy-leader-2026-10-23.md` に残す。ユーザーの herdr server と `~/.config/herdr` に触れず、本物の osascript を打たない(PATH の shim)。記録には pane の id、session の id、token の値を書かず、`$HOME` は `~` と書く
-- [ ] AC6: 記録を合わせる。(a)〜(c) が通れば FR-5 を `[x]` にし、印(2026-10-23)の注で Codex の leader の欠けを NFR ツール非依存に結ぶ。根拠の表の F7・FR-5・NFR ツール非依存の行と「確かめていないこと」、仕様の Status の節の数、tech-debt の F7 の行(D10)を直す。F7(a) の tech-debt の行を足す。「fix/watch-escalation-inbox」を「#252」に直し、PR 一覧を 35 本にする(#252 が MERGED であることを `gh pr view 252 --json state --jq .state` で読む)。この PR は `fix/busy-leader` で書く
+- [x] AC1: leader の雛形の `## agmsg の受信箱の運用` の節が、Scope の待ち方を書く。前面で長く待たない理由(`Send` は idle か done を待つ)、Claude Code の Monitor のコマンド(`{{AGMSG_SCRIPTS}}` と `{{TEAM}}` を使い、空行を落とし、10 秒ごと、1500 秒の期限、`kill -0 $PPID` の親の確かめ、終わりの 1 行)と `timeout_ms` 1800000 と張り直し、手番を終えること、張り直す前の `history.sh` での読み直し、長いコマンドの `run_in_background`、Codex の leader には待つあいだ届かないこと、返事だけを待つときは手番を終えること。「能動的に確認してください」と「適当な間隔で」の文はない。使命の 4、件を上げたあとの待ち、手順 12 の gate の待ちがこの節に合う。prompts_test.go が節の文と、ほかの待ちの文を固める
+- [x] AC2: `{{AGMSG_SCRIPTS}}` は、`Org` の agmsg の置き場所の `scripts` を単一引用符で囲んだ値に置き換わる。置き場所が空なら既定の置き場所を使う。描いた leader の雛形に `{{` が残らない。spawn が書く leader の role prompt に、渡した置き場所の `scripts` が入る(spawn_test.go)。CLI の配線は `driver.ResolveAgmsgHome` の値を渡す
+- [x] AC3: `Send` の idle/done の待ちが ctx の期限で切れると、エラーは `org: send: wait for seat "<seat>" idle/done:` で始まり、手番が `--timeout-ms` のうちに終わらなかったこと、何も打っていないこと、前面で待つ座席には手番が終わるまで届かないこと、`--timeout-ms` を長くして打ち直せることを言う。Progress は `SendProgressNothingSent` で、`sent` の event は増えない。時間切れでない失敗の文には足さない(verbs_test.go)
+- [x] AC4: `/director` skill(4 写し)の「答える順」と「計画の承認」の 3、`/org` skill(4 写し)の `send` の行、「受信箱」節の答える順、leader の agmsg の受信箱の段落が、Scope の送り方と待ち方を書く。写しはバイト一致。director の送り方(`run_in_background`、`--timeout-ms 1500000`、同じ leader への send は 1 本ずつ、切れたら resolve しない、終了コード 0 のあとも `ralph org read` で DECISION が送られたことを確かめてから resolve する)をテストが 4 写しで固める
+- [x] AC5: 実機の確かめ (a)〜(f) と disband のあとの `ps` を分離した herdr server と本物の claude haiku で打ち、結果を `docs/evidence/busy-leader-2026-10-23.md` に残す。ユーザーの herdr server と `~/.config/herdr` に触れず、本物の osascript を打たない(PATH の shim)。記録には pane の id、session の id、token の値を書かず、`$HOME` は `~` と書く
+- [x] AC6: 記録を合わせる。(a)〜(c) が通れば FR-5 を `[x]` にし、印(2026-10-23)の注で Codex の leader の欠けを NFR ツール非依存に結ぶ。根拠の表の F7・FR-5・NFR ツール非依存の行と「確かめていないこと」、仕様の Status の節の数、tech-debt の F7 の行(D10)を直す。F7(a) の tech-debt の行を足す。「fix/watch-escalation-inbox」を「#252」に直し、PR 一覧を 35 本にする(#252 が MERGED であることを `gh pr view 252 --json state --jq .state` で読む)。この PR は `fix/busy-leader` で書く
 - [ ] AC7: `GOFLAGS=-timeout=30m ./scripts/run-verify.sh` が rc 0。変えたパッケージの Go のテストが `GOTOOLCHAIN=go1.25.8` でも通る
 
 ## Implementation outline
@@ -162,7 +162,12 @@
 - [x] Plan reviewed
 - [x] Plan approved(ユーザーの常設の指示「作成したプランは自動承認します」による自動承認、2026-10-23)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1: 24e99eb1(雛形の待ち方と `{{AGMSG_SCRIPTS}}`)、10e284af(consult の助言で、見張りを重ねない 1 文、`history.sh` の 50 件、zsh でもコマンドを走らせるテスト。zsh は `-f` で走らせる。この機械の `/etc/zshenv` が `ZDOTDIR` を戻すため)、02e27384(S3 の (a) で haiku が Monitor の必須の `description` を付けずに 1 回断られたので、雛形に書いた)
+  - S2: f0961a8b(待ちの時間切れの文)、3d1946d6(英語の言い回しの直し)
+  - S3: 4f9babac(実機の確かめ (a)〜(f) と disband はすべて通った。雛形の直しは要らなかった。(d) は Claude Code が前面の `sleep 90` を断るので、perl の 90 秒の待ちで確かめた。(f) の 2 回目で、待ち行列に入った DECISION も submit の確かめを通ることを確かめ、D12 の pane の確かめが要ることが分かった)
+  - S4: 460e341c(director と org の skill の送り方、`ralph org send --help`。org skill の `approve` の行と「機能の計画の承認」の 4・5 も director に合わせた)
+  - S5: 2df13dfd(仕様の FR-5 を `[x]`、根拠の表、tech-debt の F7 の行を Codex の leader に限る文に、F7(a) の行、#252 の書き換え)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
