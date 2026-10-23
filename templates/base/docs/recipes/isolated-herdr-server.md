@@ -26,17 +26,19 @@ path directly under `/tmp` works (see the socket path limit below).
   send every herdr command of this recipe to the dedicated socket.
   `pgrep -fl 'herdr server'` lists every herdr server on the machine, yours
   included.
-- herdr does not switch its config and state directories when `HOME`
-  changes. In an earlier live check, a server started with only `HOME` and
-  `HERDR_SOCKET_PATH` changed read the user's own
+- Move herdr with three variables, all pointing at the dedicated
+  directory: `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and `HERDR_SOCKET_PATH`.
+  The live checks isolated herdr this way. In a run on 2026-09-19
+  (`docs/evidence/org-send-enter-timing-2026-09-19.md`), a server started
+  with only `HOME` and `HERDR_SOCKET_PATH` changed read the user's own
   `~/.config/herdr/session.json`, restored the user's workspaces, and
-  appended its startup lines to the user's `herdr-server.log`. Point these
-  three at the dedicated directory instead: `XDG_CONFIG_HOME`,
-  `XDG_STATE_HOME`, and `HERDR_SOCKET_PATH`.
-- Keep `HOME` the real one. Changing it does not move herdr's directories,
-  and on macOS claude reads its login from the keychain under the real
-  `$HOME/Library/Keychains`: a claude seat on a server with a fake `HOME`
-  was "Not logged in".
+  appended its startup lines to the user's `herdr-server.log`. herdr
+  0.7.5's `--help`, for its part, prints config and log paths under the
+  `HOME` it is given. Either way, this recipe does not move `HOME`.
+- Keep `HOME` the real one: on macOS claude reads its login from the
+  keychain under the real `$HOME/Library/Keychains`, and in the same
+  2026-09-19 run a claude seat on a server with a fake `HOME` was "Not
+  logged in".
 - A unix socket path must fit in `sun_path`, 104 bytes on macOS: in one
   check, a socket path of over 150 characters under a scratch directory
   kept herdr from starting. Keep the directory short and directly under
