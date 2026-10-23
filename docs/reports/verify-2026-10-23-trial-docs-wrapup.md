@@ -93,3 +93,24 @@ LOW 以上はない。self-review の N4(templates の写しの recipe が挙げ
 - Partially verified: AC6 は、f310e994 での run-verify(Mode all、scope full)が rc 0 であることと、HEAD での静的解析まで。F3 の recipe の形は、非 Apple の binary で変数の名前が出ることまで確かめ、herdr の server では打っていない
 - Not verified: テストの実行(go1.26 と go1.25.8)と mutant、recipe の通しの実行
 - Findings: INFO 4 件。LOW 以上はない。依頼の外で `herdr --version` を 1 回打った(Observational checks)
+
+## Re-verify (eed46c2c)
+
+`git show eed46c2c`(c6d98b0a の上、8 ファイル、+28/-15: recipe と templates の写し、`/org` skill の 4 写し、根拠の表の 1 行、計画の Progress)を読んだ。herdr もテストも打っていない。上の節の行番号は c6d98b0a のもので、`/org` skill は `:57` より後が 1 行、recipe は `:308` より後が 2 行、`:351` より後が 3 行ずれた。
+
+| 指摘 | 結果 | 確かめたこと |
+| --- | --- | --- |
+| INFO-1 | 直った | recipe の `ps eww` の項(`:303-310`)に、コマンドのあとに名前が 1 つも出なければ ps が環境を読めておらず確かめにならないこと、すぐ上の `lsof` の確かめは使えることが足された。上の F3 の probe(Apple の binary では名前が出ない)と合う |
+| INFO-2 | 直った | `/org` skill の RESULT の例の SUMMARY(`:1342`)が「CRITICAL 0、HIGH 0、MEDIUM 1、LOW 2。」になり、reviewer の雛形の「severity 別件数」(`internal/org/prompts/reviewer.md:119-120`)の形になった。ヘッダ 3 行と EVIDENCE の行は変わっていないので、AC3 のテストが見る所は動いていない(テストの実行は `/test`)。「CRITICAL なし」は `docs/reports`・`docs/evidence`・`docs/plans/archive` の外に残っていない |
+| INFO-3 | 直った | `/org` skill の folder trust の項(`:56-58`)、recipe(`:350-352`)、根拠の表の「確かめていないこと」の「文書のまとめ」の項(`docs/evidence/org-spec-evidence-2026-10-21.md:122`)の 3 か所が、repo の外の `--cwd` の信頼を推論で実機では確かめていないと書く。3 つの言い方は同じ中身である |
+| INFO-4 | 直った | 計画の Progress の「Review artifact created」と「Verification artifact created」が `[x]` になり、self-review と verify の結果の行が足された。Acceptance criteria の AC6 は `[ ]` のままで、`/test` の前なので正しい。`./scripts/plan-visual.sh digest` は `932bafc59d5c` のままで、承認の digest と同じ。Progress の「`GOTOOLCHAIN=go1.25.8 go test ./internal/org/...` は ok」はリードの報告で、私は確かめていない |
+
+AC2 と AC3 をもう一度見た。AC2: folder trust の項の中身(人が答える、main のチェックアウトで一度、`.claude/worktrees/` の下は聞かれない、codex は未確認と `codex trust .`、`blocked` と `ralph org read`)は残り、推論の注が足されただけである。bypass の項と `/director` skill の禁止の項は変わっていない。AC3: 例のヘッダと EVIDENCE は c6d98b0a のときと同じである。
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(scope changed、HEAD eed46c2c) | rc 0 | `check-sync.sh` は IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0。`check-skill-sync.sh` は 14 skill が一致。`check-template-purity.sh` は PASS。Go の pack は gofmt ok、golangci-lint 0 issues。`secret-scan-branch.sh` は `3c1cd14b..eed46c2c` で clean。ログは `docs/evidence/verify-2026-10-23-061554.log`(git が無視する場所) |
+| `cmp`(recipe 2 つ、`/org` と `/director` の 4 写しずつ) | どれも rc 0 | root と `templates/base`、`.claude` と `.agents` のすべての組 |
+| `git diff --check c6d98b0a eed46c2c` | 出力なし | U+FFFD も 0 件 |
+
+新しい指摘はない。上の Verdict(pass)は変えない。
