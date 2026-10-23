@@ -164,9 +164,9 @@ As a first check before the server starts, run
 `/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. Both lines
 should name paths under `/tmp/ralph-iso/xdg-config/herdr/` (in herdr 0.7.5
 the logs too are under the config directory), and the check reaches no
-server. With herdr 0.7.5, `XDG_CONFIG_HOME=<S>/xc`, `XDG_STATE_HOME=<S>/xs`,
-and `HERDR_SOCKET_PATH=<S>/h.sock` for a scratch directory `<S>`, it
-printed `Config: <S>/xc/herdr/config.toml` and
+server. On 2026-10-23, with herdr 0.7.5, `XDG_CONFIG_HOME=<S>/xc`,
+`XDG_STATE_HOME=<S>/xs`, and `HERDR_SOCKET_PATH=<S>/h.sock` for a scratch
+directory `<S>`, it printed `Config: <S>/xc/herdr/config.toml` and
 `Logs:   <S>/xc/herdr/herdr.log (plus herdr-client.log, herdr-server.log)`,
 and it created nothing under `<S>`. What the server really opens is checked
 with `lsof` (see "Checks before the first start").
@@ -300,10 +300,12 @@ command, so the saved pid is the server's. Check that
   binary, the system libraries, and devices such as `/dev/null`, the files
   and sockets the server has open are under `/tmp/ralph-iso`, and none is
   under your own herdr config directory.
-- `ps eww -o command= -p "$(cat /tmp/ralph-iso/herdr-server.pid)" | tr ' ' '\n'`
+- `ps eww -o command= -p "$(cat /tmp/ralph-iso/herdr-server.pid)" | tr ' ' '\n' | cut -d= -f1`
   (macOS; `ww` keeps a terminal from cutting the line at the window width)
-  prints the server's command and then its environment, one word to a line:
-  only the wrapper's variables should appear.
+  prints the server's command and then the names of its environment
+  variables, one to a line: only the wrapper's variables should appear.
+  `cut` drops the values, so a token you added to the wrapper does not
+  reach your terminal or a session record.
 - The `herdr --help` check under "The environment".
 
 ### Folder trust, and a probe in a throwaway pane
@@ -424,7 +426,10 @@ wrapper, as written below: a bare `ralph org disband` has no
    stop request stays in the ledger, and the watch stops once its current
    cycle, or its wait for an in-flight watcher call, ends; the error also
    says how to stop it at once. Do not stop the server or remove the
-   directory until `ralph status` prints `org watch: not running`.
+   directory until `/tmp/ralph-iso/run ralph status`, run from the
+   repository, prints `org watch: not running`. Outside a git work tree,
+   ralph reads the ledger under the current directory, so from `~` it
+   would print `not running` for a watch that still runs.
 3. Stop the dedicated server: `/tmp/ralph-iso/run herdr server stop`.
    Check that `pgrep -fl 'herdr server'` no longer lists its pid (your own
    server, if it runs, is still listed), that `/tmp/ralph-iso/h.sock`
