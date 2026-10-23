@@ -88,11 +88,11 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 
 ## Acceptance criteria
 
-- [ ] AC1 recipe: `docs/recipes/isolated-herdr-server.md` と `templates/base/docs/recipes/isolated-herdr-server.md` があり、中身が同じ(`cmp`)。Scope の recipe の項目(分離する理由、最小の環境、F1、F2、shell の alias、任意の分離、台帳を分けることと最初の start の前に見張りが動いていないことの確かめ、同じ環境で打つこと、start の前の確かめ、folder trust、片付け)をすべて含む。片付けは、見張りを止めて止まったことを確かめる手順が `herdr server stop` と専用の場所の削除より前にあり、止まらなかったときは消さない分岐を持つ。利用者に固有のパス(`mise`、`/tmp/ot`、利用者の名前)を含まない。`/org` skill の前提から指されている
-- [ ] AC2 folder trust: `/org` skill の前提に folder trust の項目があり、人が答えること、main のチェックアウトで一度、`.claude/worktrees/` の下は聞かれない(試行で確かめた)、repo の外の `--cwd`、codex は確かめていないことと `codex trust .`、画面で止まった座席の見え方と答え方を書く。bypass の項目の主語が人。`/director` skill の「してはいけないこと」に、trust と bypass の画面にキーを送らないこと。4 つの写しが揃う(`scripts/check-skill-sync.sh` が 0)
-- [ ] AC3 RESULT の例: `/org` skill の RESULT の例が `GATE: pass`・`HEAD:`・`BASE:` のヘッダを持ち、EVIDENCE が `docs/reports/review-` で始まる。Go のテストが、例を skill から読み、typed protocol の検査(`internal/org/protocol` の `Parse` と `Validate`)を通ること、`GATE`・`HEAD`・`BASE` のヘッダがあること、EVIDENCE が reviewer のレポートの名前の形であることを確かめる。例を `self-review-foo.md` に戻すとテストが落ちる
-- [ ] AC4 所要時間: `grep -rn '数分' .claude/skills/org .claude/skills/director .agents/skills/org .agents/skills/director templates/base/.claude/skills/org templates/base/.claude/skills/director templates/base/.agents/skills/org templates/base/.agents/skills/director internal/org/prompts` が gate と regate について 0 件。新しい文が、テストの量とマシンの負荷で数十分かかりうることを言う。`internal/org/prompts_test.go` の固定の文が新しい文に合う
-- [ ] AC5 記録: `grep -rn 'fix/busy-leader' docs/specs docs/evidence docs/tech-debt` が 0 件(main の 3c1cd14b では仕様 3 件、根拠の表 6 件、tech-debt 2 件)。仕様の一覧が 36 本で、#253 を `gh pr view 253` で読んだ結果を根拠の表に書く。F1・F2・folder trust の行がこの PR で直したと書き、tech-debt の 2 行が RESOLVED。watcher の時間切れの行が所見の表と tech-debt にある。仕様の Status の節と根拠の表の「予定の順」が系列の終わりと開いたまま残る行を書く
+- [x] AC1 recipe: `docs/recipes/isolated-herdr-server.md` と `templates/base/docs/recipes/isolated-herdr-server.md` があり、中身が同じ(`cmp`)。Scope の recipe の項目(分離する理由、最小の環境、F1、F2、shell の alias、任意の分離、台帳を分けることと最初の start の前に見張りが動いていないことの確かめ、同じ環境で打つこと、start の前の確かめ、folder trust、片付け)をすべて含む。片付けは、見張りを止めて止まったことを確かめる手順が `herdr server stop` と専用の場所の削除より前にあり、止まらなかったときは消さない分岐を持つ。利用者に固有のパス(`mise`、`/tmp/ot`、利用者の名前)を含まない。`/org` skill の前提から指されている
+- [x] AC2 folder trust: `/org` skill の前提に folder trust の項目があり、人が答えること、main のチェックアウトで一度、`.claude/worktrees/` の下は聞かれない(試行で確かめた)、repo の外の `--cwd`、codex は確かめていないことと `codex trust .`、画面で止まった座席の見え方と答え方を書く。bypass の項目の主語が人。`/director` skill の「してはいけないこと」に、trust と bypass の画面にキーを送らないこと。4 つの写しが揃う(`scripts/check-skill-sync.sh` が 0)
+- [x] AC3 RESULT の例: `/org` skill の RESULT の例が `GATE: pass`・`HEAD:`・`BASE:` のヘッダを持ち、EVIDENCE が `docs/reports/review-` で始まる。Go のテストが、例を skill から読み、typed protocol の検査(`internal/org/protocol` の `Parse` と `Validate`)を通ること、`GATE`・`HEAD`・`BASE` のヘッダがあること、EVIDENCE が reviewer のレポートの名前の形であることを確かめる。例を `self-review-foo.md` に戻すとテストが落ちる
+- [x] AC4 所要時間: `grep -rn '数分' .claude/skills/org .claude/skills/director .agents/skills/org .agents/skills/director templates/base/.claude/skills/org templates/base/.claude/skills/director templates/base/.agents/skills/org templates/base/.agents/skills/director internal/org/prompts` が gate と regate について 0 件。新しい文が、テストの量とマシンの負荷で数十分かかりうることを言う。`internal/org/prompts_test.go` の固定の文が新しい文に合う
+- [x] AC5 記録: `grep -rn 'fix/busy-leader' docs/specs docs/evidence docs/tech-debt` が 0 件(main の 3c1cd14b では仕様 3 件、根拠の表 6 件、tech-debt 2 件)。仕様の一覧が 36 本で、#253 を `gh pr view 253` で読んだ結果を根拠の表に書く。F1・F2・folder trust の行がこの PR で直したと書き、tech-debt の 2 行が RESOLVED。watcher の時間切れの行が所見の表と tech-debt にある。仕様の Status の節と根拠の表の「予定の順」が系列の終わりと開いたまま残る行を書く
 - [ ] AC6 `./scripts/run-verify.sh` が 0 で終わる。`go test ./internal/org/... -timeout 30m` が、手元の Go と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
@@ -141,7 +141,8 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 - [x] Branch created
 - Codex plan advisory(2026-10-23): 2 件。[HIGH] 台帳と見張りを分離していない、[MEDIUM] 片付けで見張りを止めていない。どちらも Scope の recipe の項目と AC1 に足した(ユーザーの常設の指示により聞かずに直した)
 - 承認: ユーザーの常設の指示「作成したプランは自動承認します」により自動承認した
-- [ ] Implementation started
+- [x] Implementation started
+- 実装(2026-10-23): S1 は e9884d9b・493e4ce8・e07bf30b(recipe と写し)、S2 は be8acda8(skill の 8 つの写し、leader の雛形、`TestOrgSkill_ResultExampleFollowsTheReviewerTemplate`)、S3 は 63e629a3(仕様・根拠の表・tech-debt)。S3 のあと、仕様の Status の FR-10 の理由を根拠の表の FR-10 の行の言い方にそろえた(orchestrator の 1 文の直し)。watcher の時間切れの行は、計画の「高い負荷のあいだに起き」とせず、負荷の読みがある時刻だけを書いた(03:38Z〜03:52Z の 4 回には読みがない)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

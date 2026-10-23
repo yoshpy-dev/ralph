@@ -28,7 +28,7 @@
 
 FR・非機能要件・受け入れ条件の印は、根拠の表 `docs/evidence/org-spec-evidence-2026-10-21.md` の判定に合わせた。2026-10-23 の時点で、3 項目(FR-3、FR-10、ツール非依存)は `[ ]` のまま残る。試行の所見(「leader への ALERT」)と食い違う項目(FR-3)と、codex で動かした実機が足りない項目(FR-10 とツール非依存。Open questions)で、どちらも理由を項目の下の「印(2026-10-21)」に書いた。ツール非依存には、Codex の leader が前面で待つあいだは `ralph org send` が届かない欠けもあり、「印(2026-10-23)」に書いた。段が終わったことと項目の印は分けて扱う。
 
-試行の所見の直しは、この節と印を付けた PR(ブランチ `docs/org-spec-complete`)のあとの別々の PR で入れた(作業名と予定の順は根拠の表の「試行の所見」の節)。それぞれの PR は、直した所見に結びつく項目の印、この節の数と所見の一覧、根拠の表を、同じ PR で更新した。系列は予定の順に進み、ブランチ `docs/trial-docs-wrapup` の PR で終わった。直せる所見はすべて直した。開いたまま残る行は 3 つある。leader への ALERT(原因が分からず FR-3 が `[ ]`。tech-debt の "The watch's ALERTs to the leaders failed")、Codex の leader(ツール非依存が `[ ]`。"A Codex leader that waits for its seats")、watcher の時間切れ(試行の `watch.log` に 6 回。原因は調べておらず、直していない。仕様の項目とは結びつかない。tech-debt の "The on-demand watcher of the cross-org watch timed out")である。FR-10 も、codex の director の実機が足りないために `[ ]` のままである。
+試行の所見の直しは、この節と印を付けた PR(ブランチ `docs/org-spec-complete`)のあとの別々の PR で入れた(作業名と予定の順は根拠の表の「試行の所見」の節)。それぞれの PR は、直した所見に結びつく項目の印、この節の数と所見の一覧、根拠の表を、同じ PR で更新した。系列は予定の順に進み、ブランチ `docs/trial-docs-wrapup` の PR で終わった。直せる所見はすべて直した。開いたまま残る行は 3 つある。leader への ALERT(原因が分からず FR-3 が `[ ]`。tech-debt の "The watch's ALERTs to the leaders failed")、Codex の leader(ツール非依存が `[ ]`。"A Codex leader that waits for its seats")、watcher の時間切れ(試行の `watch.log` に 6 回。原因は調べておらず、直していない。仕様の項目とは結びつかない。tech-debt の "The on-demand watcher of the cross-org watch timed out")である。FR-10 も、codex の director が timeout 付きの wait を繰り返す pull を実機で動かしていないために `[ ]` のままである。
 
 2026-10-21 の時点で最新のタグは v5.1.0(2026-08-24)で、この仕様の段を含む release は切っていない。人が `/release` で切る。
 
