@@ -150,4 +150,5 @@ Critical forks: None。consult(consult-plan-wrapup)が 4 点とも次の案で�
 - [x] AC6 の run-verify: f310e994 で rc 0(`docs/evidence/verify-2026-10-23-050654.log`、gitignore の対象)。`GOTOOLCHAIN=go1.25.8 go test ./internal/org/...` は ok
 - [x] Test artifact created
 - test(2026-10-23、6053ab00): pass。run-test.sh は rc 0、`go test ./internal/org/... ./internal/cli/...` は go1.26.0 と `GOTOOLCHAIN=go1.25.8` の両方で rc 0、新しいテストの変異 8 つはすべて落ちた。テストの穴は、skill の 3 か所の「数十分」を固定するテストがないこと(AC4 は grep で見る)
-- [ ] PR created
+- [x] PR created
+- PR(2026-10-23): ブランチ `docs/trial-docs-wrapup` の PR を作った。cross-review(454df239)は指摘 0、walkthrough は 4f484799。系列の最後の PR なので、記録に番号は書き足さない(D3)
