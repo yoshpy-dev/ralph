@@ -97,3 +97,23 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_
 ### 判定
 
 cycle 1 の 8 件の LOW と 3 件の INFO は、すべて直った。直しが足した新しい LOW は 2 件(N1、N2)、INFO は 1 件(N3)で、どれも recipe の文言を 1 行直すだけで済む。CRITICAL・HIGH・MEDIUM はない。Merge の行(yes)は変えない。cycle 1 の insight event の件数(low 8)も変えず、N1・N2 はこの節にだけ書く。pipeline のこの cycle で直すか、`/pr` で既知の穴として残すかはリードが決める。直す場合は、N1・N2 とも recipe の本文と templates の写しの 2 か所を同じに直す(`cmp` を保つ)。
+
+## Re-review (f15b696c)
+
+`git diff 16cc451b f15b696c`(recipe とその templates の写しだけ、24 行足して 14 行消した)を読んだ。2 つの写しは `cmp` で一致した。herdr と recipe のコマンドは打っていない。`check-sync` の合格はリードの報告で、私は確かめていない。
+
+| 指摘 | 結果 | 確かめたこと |
+| --- | --- | --- |
+| N1 | 直った | 30 秒の分岐の段落が `/tmp/ralph-iso/run ralph status`(repo から)になり、「git の作業木の外では cwd の下の台帳を読むので、`~` からは動いている見張りにも `not running` と出る」と理由を書いた。この理由は `internal/org/statedir.go:52-54` と合う。recipe の本文は `internal/` の path を出していないので、templates に写しても downstream で切れない。節の中の素の `ralph`・`herdr` のコマンドは、もう残っていない |
+| N2 | 直った | `... \| tr ' ' '\n' \| cut -d= -f1` で、変数の名前だけを出す。`cut` は区切りのない行(コマンドの語)をそのまま出すので、`herdr` と `server` も出る。値に空白がある変数だと、空白のあとの断片が名前の形で出るが、token に空白はないので、この確かめの目的(名前の確認)に影響しない。`cut` が値を落とす理由も書いた |
+| N3 | 直った | 観測の文が「On 2026-10-23, with herdr 0.7.5, ...」と日付を持った。観測そのものは `docs/evidence/` にないままだが、日付があれば後から探せる(私の勧めた 2 案のうち、出典に日付を足す側) |
+
+### 新しい指摘
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| INFO (N4) | maintainability | recipe は `docs/evidence/` の 5 つのファイル(`org-trial-2026-10-20.md`、`busy-leader-2026-10-23.md`、`org-send-enter-timing-2026-09-19.md`、`org-plan-approval-live-2026-10-13.md`、`herdr-pane-close-2026-10-07.md`)を出典に挙げる。`docs/evidence/` は `check-sync.sh` の ROOT_ONLY で、scaffold した project には届かないので、templates の写しではこの出典が切れる。cycle 1 で私が見落とした。同じ形は既存の template recipe 3 つ(`codex-seat-permissions.md:12`、`director-wake.md:284`、`director-launch-cmd.md:342`)にあるので、この repo の既存の扱いに従っている | `templates/base/docs/recipes/isolated-herdr-server.md:10-17`、`:42`。`scripts/check-sync.sh:65` | 直さなくてよい。直すなら、3 つの既存の recipe と一緒に「出典はメタ repo の記録」と 1 文で書く、別の PR の仕事 |
+
+### 判定
+
+N1〜N3 は直った。新しい指摘は INFO が 1 件(N4、直しではなく cycle 1 の見落とし)で、LOW 以上はない。CRITICAL・HIGH・MEDIUM・新しい LOW はなく、Merge の行(yes)は変えない。cycle 1 の insight event の件数(low 8)も変えない。
