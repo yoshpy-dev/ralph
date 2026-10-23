@@ -905,9 +905,10 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 (`/org` skill の動詞リファレンスの `regate` の行と「merge してよい順」)。
 
 1. 1 本ずつ打つ。regate は台帳ごとに 1 つしか走らない。gate のスクリプトが
-   走るので数分かかる。Claude Code では Bash の `run_in_background` で
-   走らせ、stdout と stderr を cwd の `.harness/state/regate-<名前>.out` に
-   書き、終わってから終了コードと `GATE:`・`HEAD:`・`PUSHED:` の行を読む。
+   走るので、repo のテストの量とマシンの負荷によっては数十分かかる。
+   Claude Code では Bash の `run_in_background` で走らせ、stdout と stderr
+   を cwd の `.harness/state/regate-<名前>.out` に書き、終わってから
+   終了コードと `GATE:`・`HEAD:`・`PUSHED:` の行を読む。
    `<名前>` はブランチ名の `/` を `-` にしたもの(`feat/auth-token` なら
    `feat-auth-token`)にする。`/` が残ると、ないディレクトリへの書き込みに
    なって失敗する。前景で打つなら、ツールの timeout を regate にかかる時間
@@ -958,6 +959,9 @@ send が断られる。
 - ALERT の件を理由に、座席や org を自分の判断で止めない(`ralph org stop` も
   `ralph org disband` も、人に頼まれないまま打たない)。止めるかは人が決める。
 - 自分の判断で承認しない(分割計画の 2 行も `ralph org approve` も)。
+- 座席の pane のフォルダ信頼の画面と bypass の承諾の画面に、キーを送って
+  答えない(`herdr pane send-keys` も `ralph org send` も使わない)。画面で
+  止まった座席は人に伝え、人が答える(`/org` skill の「前提」)。
 - `auto_merge = false` なら、自分の判断で merge せず、`ralph org regate` も
   打たない。どちらの値でも、`gh pr merge` を直接打たず、`--admin` と
   `--auto` を使わず、断られたか失敗した merge と regate を、人に頼まれない
