@@ -1195,6 +1195,11 @@ func TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent(t *testing.T) {
 	if !strings.Contains(result.Err.Error(), "wait for seat") {
 		t.Errorf("expected the error to name the idle/done wait, got %v", result.Err)
 	}
+	// The wait failed before the --timeout-ms deadline, so the error is
+	// today's text with no timeout hint (plan 2026-10-23-busy-leader, AC3).
+	if got, want := result.Err.Error(), `org: send: wait for seat "seat-1" idle/done: stub: idle/done wait failed`; got != want {
+		t.Errorf("expected the error of a wait that did not time out to carry no timeout hint:\n got %q\nwant %q", got, want)
+	}
 	if result.Progress != SendProgressNothingSent {
 		t.Errorf("expected Progress SendProgressNothingSent: PaneSendText is never reached when the idle/done wait fails, got %v", result.Progress)
 	}
@@ -1206,6 +1211,93 @@ func TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent(t *testing.T) {
 	}
 	if got := len(mustReadEvents(t, o)); got != eventsBefore {
 		t.Fatalf("expected no new manifest event when the idle/done wait fails, %d -> %d", eventsBefore, got)
+	}
+}
+
+// deadlineWaitHerdr is fakeHerdr whose first AgentWait, Send's wait for the
+// seat to go idle, does not return until ctx is done and then returns
+// waitErr(ctx): a seat whose turn does not end within --timeout-ms, such as
+// a leader waiting in the foreground.
+type deadlineWaitHerdr struct {
+	*fakeHerdr
+	waitErr func(ctx context.Context) error
+	waited  bool
+}
+
+func (h *deadlineWaitHerdr) AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error) {
+	out, err := h.fakeHerdr.AgentWait(ctx, target, until, timeoutMS)
+	if h.waited {
+		return out, err
+	}
+	h.waited = true
+	<-ctx.Done()
+	return "", h.waitErr(ctx)
+}
+
+// TestOrgSend_IdleDoneWaitTimesOut_SaysWhyAndHowToRetry covers AC3 of plan
+// 2026-10-23-busy-leader: when Send's idle/done wait ends because the
+// --timeout-ms deadline ran out, the error keeps the "org: send: wait for
+// seat %q idle/done: " prefix and the cause, then says the seat's turn did
+// not end within the deadline (with its ms), nothing was typed, a seat
+// waiting in the foreground cannot receive a message until its turn ends,
+// and how to send again. Both ways the wait can end at the deadline get the
+// hint: the driver wrapping ctx's deadline (the stage 9 trial's text), and
+// herdr's own --timeout, whose error does not wrap
+// context.DeadlineExceeded but comes after ctx expired. Nothing is typed and
+// no event is recorded. A failure before the deadline gets no hint
+// (TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent).
+func TestOrgSend_IdleDoneWaitTimesOut_SaysWhyAndHowToRetry(t *testing.T) {
+	const hint = " (the seat's turn did not end within the --timeout-ms deadline of 50 ms; nothing was typed; " +
+		"a seat waiting in the foreground on a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; " +
+		"send it again later, or with a larger --timeout-ms)"
+	cases := []struct {
+		name             string
+		waitErr          func(ctx context.Context) error
+		cause            string
+		deadlineExceeded bool // errors.Is(result.Err, context.DeadlineExceeded)
+	}{
+		{"the driver wraps ctx's deadline",
+			func(ctx context.Context) error { return fmt.Errorf("herdr: timed out: %w", ctx.Err()) },
+			"herdr: timed out: context deadline exceeded", true},
+		{"herdr's own --timeout ends the wait after ctx expired",
+			func(context.Context) error { return errors.New("stub: herdr agent wait --timeout ran out") },
+			"stub: herdr agent wait --timeout ran out", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			if r := o.Spawn(mustSpawnParams("org-a", "seat-1")); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			o.Herdr = &deadlineWaitHerdr{fakeHerdr: h, waitErr: tc.waitErr}
+			eventsBefore := len(mustReadEvents(t, o))
+			callsBefore := len(h.calls)
+
+			msg := "TYPE: DECISION\n\ngo ahead"
+			result := o.Send(SendParams{OrgID: "org-a", To: "seat-1", Text: msg, TimeoutMS: 50})
+			if result.Err == nil {
+				t.Fatal("expected a non-nil Err when the idle/done wait runs out of --timeout-ms")
+			}
+			want := `org: send: wait for seat "seat-1" idle/done: ` + tc.cause + hint
+			if got := result.Err.Error(); got != want {
+				t.Errorf("error of a timed-out idle/done wait:\n got %q\nwant %q", got, want)
+			}
+			if got := errors.Is(result.Err, context.DeadlineExceeded); got != tc.deadlineExceeded {
+				t.Errorf("errors.Is(err, context.DeadlineExceeded) = %v, want %v: the cause stays wrapped", got, tc.deadlineExceeded)
+			}
+			if result.Progress != SendProgressNothingSent {
+				t.Errorf("expected Progress SendProgressNothingSent, got %v", result.Progress)
+			}
+			if result.PaneID != "" {
+				t.Errorf("expected empty PaneID: PaneSendText was never attempted, got %q", result.PaneID)
+			}
+			if got, want := h.calls[callsBefore:], []string{"agent_wait"}; !slices.Equal(got, want) {
+				t.Fatalf("expected only the idle/done AgentWait call after Send (nothing typed), got %v", got)
+			}
+			if got := len(mustReadEvents(t, o)); got != eventsBefore {
+				t.Fatalf("expected no new manifest event when the idle/done wait times out, %d -> %d", eventsBefore, got)
+			}
+		})
 	}
 }
 
