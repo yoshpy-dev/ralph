@@ -1248,7 +1248,7 @@ func (h *deadlineWaitHerdr) AgentWait(ctx context.Context, target string, until 
 // (TestOrgSend_IdleDoneWaitFails_ErrorsBeforeAnyTypingOrEvent).
 func TestOrgSend_IdleDoneWaitTimesOut_SaysWhyAndHowToRetry(t *testing.T) {
 	const hint = " (the seat's turn did not end within the --timeout-ms deadline of 50 ms; nothing was typed; " +
-		"a seat waiting in the foreground on a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; " +
+		"a seat busy in the foreground with a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; " +
 		"send it again later, or with a larger --timeout-ms)"
 	cases := []struct {
 		name             string

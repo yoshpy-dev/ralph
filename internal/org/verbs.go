@@ -515,7 +515,7 @@ func sendSeatNotFoundErr(p SendParams) error {
 // ran out (plan 2026-10-23-busy-leader, D7). timeoutMS is p.TimeoutMS after
 // Send defaulted it, so the hint names the value the send ran with.
 func sendWaitDeadlineHint(timeoutMS int) string {
-	return fmt.Sprintf(" (the seat's turn did not end within the --timeout-ms deadline of %d ms; nothing was typed; a seat waiting in the foreground on a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; send it again later, or with a larger --timeout-ms)", timeoutMS)
+	return fmt.Sprintf(" (the seat's turn did not end within the --timeout-ms deadline of %d ms; nothing was typed; a seat busy in the foreground with a loop, `ralph org wait`, or a gate cannot receive a message until its turn ends; send it again later, or with a larger --timeout-ms)", timeoutMS)
 }
 
 // checkSendApproval is sendApprovalErr of p against the manifest as it is
