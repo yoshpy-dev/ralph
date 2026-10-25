@@ -98,3 +98,7 @@ evidence の `sh` ブロック 29 個は、worktree の root で 1 つずつ `sh
 - Partially verified: AC3 は表の 12 行と写しから出る数までを確かめ、load average、終了コード、pane の読みは notes による。AC8 は、順の記録と写しの痕(`detached`、`stopped`、`end=watch`、`ralph status` の停止の行)が合うことまでで、各段の実行は確かめられない
 - Not verified: 上の Coverage gaps。archive のあと 4 個の参照が `docs/plans/active/` のまま切れることは、前例と同じ扱いとして記録した
 - Findings: LOW 1 件(LOW-1、self-review の F3 の直しの残り)、INFO 4 件。LOW-1 は根拠の表の 1 文で、直すには cycle 2 の `/self-review` から回し直すか(上限 2 回のうち 2 回目)、PR の本文に既知の穴として書く
+
+## 直したもの(verify のあと)
+
+- LOW-1: 直した。根拠の表の RC11 の行の「食い違う」の欄を「watcher の多くの回(今回は 13 回のうち 12 回)で通知が 1 つずつ出ることになる(確かめていない)」にし、手順書、tech-debt、evidence の言い方にそろえた。コミットはこの節を足したものと同じ。INFO-1〜INFO-4 は直していない(INFO-3 は計画の進捗で別に印を付ける)。
