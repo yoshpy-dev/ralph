@@ -330,3 +330,92 @@ func TestCodexShippedHookEventsMatchesShippedHooksJSON(t *testing.T) {
 		}
 	}
 }
+
+// hooksJSONWithPostToolUseMatcher returns validHooksJSON with the first
+// PostToolUse matcher group's "matcher" replaced by matcher, or removed when
+// remove is true.
+func hooksJSONWithPostToolUseMatcher(t *testing.T, matcher any, remove bool) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(validHooksJSON), &doc); err != nil {
+		t.Fatalf("unmarshal validHooksJSON: %v", err)
+	}
+	group := doc["hooks"].(map[string]any)["PostToolUse"].([]any)[0].(map[string]any)
+	if remove {
+		delete(group, "matcher")
+	} else {
+		group["matcher"] = matcher
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return out
+}
+
+// TestValidateCodexHooksJSON_MatcherType asserts that a matcher group's
+// "matcher" yields a finding only when present and not a string.
+func TestValidateCodexHooksJSON_MatcherType(t *testing.T) {
+	const want = "hooks.json PostToolUse[0].matcher must be a string"
+	cases := []struct {
+		name      string
+		matcher   any
+		remove    bool
+		wantFound bool
+	}{
+		{name: "absent", remove: true},
+		{name: "string", matcher: "Edit|Write"},
+		{name: "empty string", matcher: ""},
+		{name: "number", matcher: 1, wantFound: true},
+		{name: "array", matcher: []any{"Edit"}, wantFound: true},
+		{name: "object", matcher: map[string]any{"a": "b"}, wantFound: true},
+		{name: "bool", matcher: true, wantFound: true},
+		{name: "null", matcher: nil, wantFound: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := validateCodexHooksJSON(hooksJSONWithPostToolUseMatcher(t, tc.matcher, tc.remove))
+			found := false
+			for _, f := range findings {
+				if f == want {
+					found = true
+				}
+			}
+			if found != tc.wantFound {
+				t.Errorf("findings = %v, want matcher finding present=%v", findings, tc.wantFound)
+			}
+		})
+	}
+}
+
+// TestCheckCodexEffectiveConfig_HooksTableCoexistence asserts that the
+// config.toml [hooks] coexistence warning is skipped when the table's only
+// child key is "state" (Codex's own trust record) and kept otherwise.
+func TestCheckCodexEffectiveConfig_HooksTableCoexistence(t *testing.T) {
+	const warning = "both representations exist"
+	cases := []struct {
+		name     string
+		toml     string
+		wantWarn bool
+	}{
+		{name: "no hooks table", toml: "model = \"gpt-5.5\"\n"},
+		{name: "state only", toml: "[hooks.state.\"/repo\"]\ntrusted = true\n"},
+		{name: "empty hooks table", toml: "[hooks]\n", wantWarn: false},
+		{name: "state and other key", toml: "[hooks.state.\"/repo\"]\ntrusted = true\n\n[[hooks.PostToolUse]]\ncommand = \"x\"\n", wantWarn: true},
+		{name: "other key only", toml: "[[hooks.PostToolUse]]\ncommand = \"x\"\n", wantWarn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeCodexConfigToml(t, dir, tc.toml)
+			writeCodexHooksJSON(t, dir, validHooksJSON)
+			r := checkCodexEffectiveConfig(dir)
+			if got := strings.Contains(r.Detail, warning); got != tc.wantWarn {
+				t.Errorf("detail = %q, want coexistence warning=%v", r.Detail, tc.wantWarn)
+			}
+			if !tc.wantWarn && r.Status != "pass" {
+				t.Errorf("status = %q, want pass (detail=%q)", r.Status, r.Detail)
+			}
+		})
+	}
+}
