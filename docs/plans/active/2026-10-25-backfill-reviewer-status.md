@@ -1,7 +1,7 @@
 # backfill: read the cross-review Reviewer status
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-25 sha256:1d3a60a7cd8b
 - Owner: Claude Code (org backfill-na leader)
 - Date: 2026-10-25
 - Related request: split plan recheck, feature backfill-na (/private/tmp/ralph-iso/ralph/.harness/state/org/splits/recheck.md, digest 4f955a6f4269)
