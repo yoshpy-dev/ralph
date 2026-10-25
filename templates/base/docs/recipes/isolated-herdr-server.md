@@ -14,8 +14,14 @@ all on macOS with herdr 0.7.5, Claude Code 2.1.291, and agmsg 1.5.1. The
 herdr facts below come from earlier live checks, also with herdr 0.7.5
 (`docs/evidence/org-send-enter-timing-2026-09-19.md`,
 `docs/evidence/org-plan-approval-live-2026-10-13.md`, and
-`docs/evidence/herdr-pane-close-2026-10-07.md`). The steps were not run end
-to end again after they were written down here.
+`docs/evidence/herdr-pane-close-2026-10-07.md`). On 2026-10-24 and
+2026-10-25 the steps were run end to end, also on macOS, in a dedicated
+clone with two feature orgs at once and a promoted director, up to the
+merge of both PRs with `ralph org merge`
+(`docs/evidence/org-recheck-2026-10-24.md`: its Setup goes through this
+recipe section by section, and its "Trial deviations" lists where the run
+departed from the steps). This version includes the corrections from that
+run.
 
 The examples use `/tmp/ralph-iso` as the dedicated directory. Any short
 path directly under `/tmp` works (see the socket path limit below). Create
@@ -70,7 +76,12 @@ worktree of a repository whose ledger other orgs use is therefore not
 isolated. Use one of these, under the dedicated directory:
 
 - A dedicated clone, for a run whose orgs push branches and open PRs (the
-  trial).
+  trial and the run of 2026-10-24). A `ralph.toml` that the clone does not
+  track shows in its main checkout's `git status`. To keep it out, list it
+  in the clone's `.git/info/exclude`, and create `.git/info` first
+  (`mkdir -p .git/info`) when the clone has none: a git template can leave
+  it out, and the clone of 2026-10-24 had none. The settings in such a
+  `ralph.toml` do not reach the feature worktrees (see "The environment").
 - A scratch git repository, for a check that opens no PR (the live
   checks). The latest ones gave it a base commit on `main`, `user.name` and
   `user.email` in the repository's own config, `core.hooksPath` pointing at
@@ -160,6 +171,20 @@ drops `SSH_AUTH_SOCK` and `GH_TOKEN`: add them to the wrapper when your
 pushes or gh need them. The checks before the first start do not test a
 push.
 
+A run that uses the private agmsg copy (below) from a dedicated clone adds
+`RALPH_ORG_AGMSG_HOME=/tmp/ralph-iso/agmsg` to the wrapper's `env -i` list,
+as the run of 2026-10-24 did. A `ralph.toml` that the clone does not track
+is not in the feature worktrees that `ralph org start --plan` creates, and
+a leader's spawn there reads that worktree's own `ralph.toml`, so
+`[org].agmsg_home` in the clone's untracked `ralph.toml` would reach ralph's
+commands in the main checkout but not the leader's spawns (inferred from
+the code, not checked). ralph reads the variable before `[org].agmsg_home`
+(`ResolveAgmsgHome` in the ralph repository's
+`internal/org/driver/agmsg.go`). With the variable in the wrapper, the
+server, the panes, the watch, and the director's commands all get the same
+value. In a scratch repository whose committed `ralph.toml` sets
+`agmsg_home`, either way works.
+
 As a first check before the server starts, run
 `/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. Both lines
 should name paths under `/tmp/ralph-iso/xdg-config/herdr/` (in herdr 0.7.5
@@ -247,8 +272,10 @@ own agmsg.
 - A private copy of agmsg. Copy `scripts`, `plugins`, `types`, `SKILL.md`,
   and `VERSION` from your agmsg home (`~/.agents/skills/agmsg` by default)
   into the dedicated directory, without `db`, `teams`, `run`, or `agents`,
-  and point ralph at the copy with an absolute path in the repository's
-  `ralph.toml`:
+  and point ralph at the copy with an absolute path: in a scratch
+  repository, in its committed `ralph.toml` as below; in a dedicated clone,
+  with `RALPH_ORG_AGMSG_HOME` in the wrapper (see "The environment" for
+  why):
 
   ```sh
   mkdir -p /tmp/ralph-iso/agmsg
@@ -261,8 +288,23 @@ own agmsg.
   agmsg_home = "/tmp/ralph-iso/agmsg"
   ```
 
-  agmsg creates a new database and new teams under the copy, so the run's
-  messages and role-session marks stay out of your own agmsg home.
+  The copy reaches ralph's own agmsg calls only: the leader's join to the
+  org's team, each seat's join and HELLO at its spawn, the watch's ALERTs
+  to the leader, and the leader's inbox and history commands (the leader's
+  role prompt names the copy's scripts directory). A claude seat's own
+  session sends its messages with its agmsg skill, which runs the scripts
+  of your own agmsg home (`~/.agents/skills/agmsg` by default). In the run
+  of 2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1) that home
+  had no team of the run, so the seats' sends failed with "Team not found".
+  One seat's message reached its leader through agmsg (that seat found the
+  copy's path in `RALPH_ORG_AGMSG_HOME`); the others went through
+  `ralph org send` or were not sent, and one leader read its reviewer's
+  committed report instead. Your own agmsg database was not written (its
+  `messages.db` and `messages.db-wal` kept their times). So for a run whose
+  seats report to their leader, which is any feature org, leave the copy
+  out and use your own agmsg, as the trial of 2026-10-20 did, until ralph
+  gives the seats the path (tracked in `docs/tech-debt/README.md`, RC1).
+  The copy suits checks whose seats send no messages.
   (`ralph org director start --config` refuses a relative `agmsg_home`.)
 - An `osascript` shim. ralph runs `osascript` by `PATH` lookup for its
   desktop notifications to the human (from the watch, and from
@@ -280,6 +322,15 @@ own agmsg.
   Make it executable. Inside a pane it reaches claude's Bash tool only
   through `CLAUDE_ENV_FILE` (F2).
 
+  The shim also receives the `osascript` calls of your own Claude Code
+  hooks in the sessions the run starts. In the run of 2026-10-24 all 12
+  shim lines came from a Stop hook (a desktop notification of the
+  session's last message) in the on-demand watcher's `claude -p` sessions,
+  with the title "Claude Code" (RC11; the hook is named from the run's
+  notes, and the hook itself was not read). ralph's own notifications carry
+  the title "ralph org watch" or "ralph org escalate". Outside isolation,
+  each watcher run would post such a notification.
+
 ## Start the server
 
 ```sh
@@ -290,7 +341,9 @@ echo $! > /tmp/ralph-iso/herdr-server.pid
 
 `nohup`, the wrapper, and `env` each replace themselves with the next
 command, so the saved pid is the server's. Check that
-`pgrep -fl 'herdr server'` lists it.
+`pgrep -fl 'herdr server'` lists it. Run that check as a command of its
+own: in a compound command whose own text contains those words, `pgrep`
+lists that shell too (seen in the run of 2026-10-24).
 
 ## Checks before the first start
 
@@ -330,8 +383,17 @@ $R herdr pane run <pane-id> 'claude --model haiku'
 1. The shell: `type claude codex` names the binaries you meant, and
    `alias` lists no alias for them.
 2. Trust: read the pane, move the cursor to "Yes, I trust this folder",
-   and press Enter. The trial and the latest live check sent the Down key,
-   then Enter, to the pane.
+   and press Enter. To answer it yourself, run `/tmp/ralph-iso/run herdr`
+   in your own terminal: it opens herdr's interface on the dedicated
+   server (the wrapper gives it `HERDR_SOCKET_PATH`), where you go to the
+   probe pane. In the run of 2026-10-24 the human answered the dialog
+   there (`docs/evidence/org-recheck-2026-10-24.md`, RC7), since a director
+   does not send keys to a pane (the /director skill). The trial and the latest live check sent the Down
+   key, then Enter, to the pane. Running `cd <the repository> && claude`
+   in your own terminal instead did not work in the run of 2026-10-24: it
+   showed no trust dialog and left no trust entry in `~/.claude.json`,
+   although the throwaway pane showed the dialog afterwards (why was not
+   found). Answer the dialog in the pane.
 3. The probe: have claude run `command -v git gh ralph claude osascript`
    (without `osascript` when there is no shim), `git config user.name`,
    and `gh auth status` with its Bash tool. Type the request with
@@ -341,6 +403,18 @@ $R herdr pane run <pane-id> 'claude --model haiku'
    shim), `git config user.name` prints your name, and `gh auth status`
    shows the account you expect as logged in. Approve the commands if
    claude asks.
+
+   A way without typing keys, which the run of 2026-10-24 used after the
+   trust answer and `/exit`: run
+   `$R herdr pane run <pane-id> "claude -p '<request>' --model haiku --allowedTools Bash"`
+   and read the pane for the answer. The request must come right after
+   `-p`: `--allowedTools` takes every word after it as a tool name, and
+   with the request after it claude exits with "Input must be provided
+   either through stdin or as a prompt argument when using --print"
+   (RC8). In that run the shim came first in the `-p` session's Bash tool.
+   That fits a `-p` session reading `CLAUDE_ENV_FILE` too, but it is not
+   confirmed: the pane's own shell was not checked, so it is not known
+   that `path_helper` had put `/usr/bin` first in that pane (F2).
 4. Exit claude with `/exit`, then close the workspace:
    `$R herdr workspace close <workspace-id>`.
 
@@ -454,7 +528,9 @@ Left outside the dedicated directory, in your own stores:
   worktree, for example), and whatever else your Claude Code setup
   writes per session, such as history lines and plugin data;
 - when you use your own agmsg instead of a copy, the role-session marks of
-  the run's seats under the agmsg home's `run/`.
+  the run's seats under the agmsg home's `run/`. With the copy, the seats'
+  agmsg skill still uses your own agmsg home (RC1), though in the run of
+  2026-10-24 it wrote nothing there.
 
 In the evidence you write about the run, do not copy gh or git config,
 tokens, pane ids, or session ids, and write your home directory as `~`.
@@ -480,7 +556,11 @@ tokens, pane ids, or session ids, and write your home directory as `~`.
   checked.
 - Linux. The keychain and `path_helper` are macOS's, and the steps were
   not tried on Linux.
-- An end-to-end run of these steps as written. They were put together from
-  the trial and the live checks, which differed in details (the trial used
-  a dedicated clone and the user's own agmsg, the live checks a scratch
-  repository and a private copy), and were not run again together.
+- What the end-to-end run of 2026-10-24
+  (`docs/evidence/org-recheck-2026-10-24.md`) did not exercise: the scratch
+  repository (it used a dedicated clone), a headless director started with
+  `ralph org director start` inside the dedicated server (its director was
+  a promoted one), stopping and restarting an org or the watch, the steps
+  of "Running again", and the seats of a feature org working with the
+  private agmsg copy (they did not; see "Optional: a private agmsg and a
+  notification shim").
