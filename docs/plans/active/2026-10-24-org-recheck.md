@@ -74,9 +74,9 @@ Critical forks: None asked. ユーザーの 3 つの決定(org は 2 つ、`ralp
 
 ## Acceptance criteria
 
-- [ ] AC1(環境): evidence に、binary を build したコミット、道具の版、wrapper の変数の名前(値は token を含まないものだけ)、shim、agmsg の写し、models を書く。手順書の各節を書いてあるとおりに打てたか、打てなかった所(deviation)とその理由を節ごとに書く。`$HOME` のパス、token、pane id、session id、ランダムな hex を含まない
-- [ ] AC2(2 つの org): manifest に、承認された 1 つの分割計画から立った 2 つの機能の org があり、動いていた時間が重なる。それぞれが PR を 1 本開き、evidence が 2 本の PR を名指す
-- [ ] AC3(所見の直しの効き): evidence の表に、次の各項目について、期待、見たこと、読んだ場所(ファイルとコマンド)、判定(効いた、効かなかった、起きなかったので確かめられない)を 1 行ずつ書く
+- [x] AC1(環境): evidence に、binary を build したコミット、道具の版、wrapper の変数の名前(値は token を含まないものだけ)、shim、agmsg の写し、models を書く。手順書の各節を書いてあるとおりに打てたか、打てなかった所(deviation)とその理由を節ごとに書く。`$HOME` のパス、token、pane id、session id、ランダムな hex を含まない
+- [x] AC2(2 つの org): manifest に、承認された 1 つの分割計画から立った 2 つの機能の org があり、動いていた時間が重なる。それぞれが PR を 1 本開き、evidence が 2 本の PR を名指す
+- [x] AC3(所見の直しの効き): evidence の表に、次の各項目について、期待、見たこと、読んだ場所(ファイルとコマンド)、判定(効いた、効かなかった、起きなかったので確かめられない)を 1 行ずつ書く
   - F3: `agent_not_found` で失敗した send がない。実行の終わりの前に `herdr agent list` が出す座席の agent の名前が `<org>_<seat>` のまま
   - F4: spawn の失敗があれば、その pane が閉じている(`spawn_failed` か `spawn_close_failed`)。なければ「起きなかった」
   - F5: 両方の機能の計画に `## 全機能の座席に適用する決まり` があり、分割計画の前文が写っている。`spawn_started` の model が、implementer は opus、reviewer は sonnet
@@ -87,12 +87,12 @@ Critical forks: None asked. ユーザーの 3 つの決定(org は 2 つ、`ralp
   - 開いたまま残る行: `watch.log` の、見張りから leader への ALERT の時間切れの回数と、watcher の時間切れの回数。その前後の load average(director が 30 分ごとに `uptime` を notes に書く)
   - gate と regate の所要時間(gate の記録の開始と終わり)
   - フォルダ信頼: 機能の worktree の座席で trust の画面が出なかった(座席の pane の読み)
-- [ ] AC4(merge): 1 本目の merge の前に、両方の org の `gate_passed` が同じ base の SHA を持ち、両方が disband していた。2 本の PR が `ralph org merge` で merge された(1 本目はユーザーの指示、2 本目は `auto_merge` で)。2 本目は 1 本目の merge のあと `ralph org merge-order` で `rebase` と出て、`ralph org regate` が `via=regate` の `gate_passed` を記録してから merge された。または、どこかで止まったなら、その断りか失敗を動詞自身の理由とともに記録した
-- [ ] AC5(数値と前回との比較): evidence に、介入、承認待ち、受信箱の処理、費用の表を前回と同じ形で書き、前回の値と並べる。どの数もファイルかコマンドを名指し、台帳の数は写しから evidence の `jq` で出し直せる
-- [ ] AC6(記録): tech-debt の 145 行と 126 行が PR の番号付きで RESOLVED。今回の所見のうち直さないものには tech-debt の行がある。開いたまま残る 2 行(ALERT の時間切れ、watcher の時間切れ)に今回の回数を書き足す。仕様の Status と根拠の表に、通しの確かめの結果と evidence への参照がある
-- [ ] AC7(手順書): 手順書の「The steps were not run end to end again」と「An end-to-end run of these steps as written」の文を、今回の実行に合わせて直す。agmsg の写しを機能の org で使うときの渡し方(D2)を書く。今回の deviation のうち手順書の穴にあたるものを直す。root と `templates/base` の写しが同じバイト列(`scripts/check-sync.sh`)
-- [ ] AC8(片付け): 途中でやめたときも、次の順で済ませる。機能の org を disband する、D12 の 1 回目の写しを取る、director の登録を detach する、見張りを `ralph org watch --all --stop` で止めて `ralph status` が `org watch: not running` を出し `pgrep -fl /tmp/ralph-iso` が何も出さない、clone の機能の worktree を片付ける、分離した herdr server を止める、D12 の最後の写しを取って通知の数と停止の行を照らし合わせる、そのあとで `/tmp/ralph-iso` を消す。利用者の herdr server には触れていない。shim のログに、実行で打たれた osascript がすべてある
-- [ ] AC9(写し): `docs/evidence/org-recheck-2026-10-24/` に D12 の伏せ字の写しがある。evidence の `jq` を写しに打つと evidence の表になる。grep で `/Users/` のパス、pane id、session id、token が見つからない
+- [x] AC4(merge): 1 本目の merge の前に、両方の org の `gate_passed` が同じ base の SHA を持ち、両方が disband していた。2 本の PR が `ralph org merge` で merge された(1 本目はユーザーの指示、2 本目は `auto_merge` で)。2 本目は 1 本目の merge のあと `ralph org merge-order` で `rebase` と出て、`ralph org regate` が `via=regate` の `gate_passed` を記録してから merge された。または、どこかで止まったなら、その断りか失敗を動詞自身の理由とともに記録した
+- [x] AC5(数値と前回との比較): evidence に、介入、承認待ち、受信箱の処理、費用の表を前回と同じ形で書き、前回の値と並べる。どの数もファイルかコマンドを名指し、台帳の数は写しから evidence の `jq` で出し直せる
+- [x] AC6(記録): tech-debt の 145 行と 126 行が PR の番号付きで RESOLVED。今回の所見のうち直さないものには tech-debt の行がある。開いたまま残る 2 行(ALERT の時間切れ、watcher の時間切れ)に今回の回数を書き足す。仕様の Status と根拠の表に、通しの確かめの結果と evidence への参照がある
+- [x] AC7(手順書): 手順書の「The steps were not run end to end again」と「An end-to-end run of these steps as written」の文を、今回の実行に合わせて直す。agmsg の写しを機能の org で使うときの渡し方(D2)を書く。今回の deviation のうち手順書の穴にあたるものを直す。root と `templates/base` の写しが同じバイト列(`scripts/check-sync.sh`)
+- [x] AC8(片付け): 途中でやめたときも、次の順で済ませる。機能の org を disband する、D12 の 1 回目の写しを取る、director の登録を detach する、見張りを `ralph org watch --all --stop` で止めて `ralph status` が `org watch: not running` を出し `pgrep -fl /tmp/ralph-iso` が何も出さない、clone の機能の worktree を片付ける、分離した herdr server を止める、D12 の最後の写しを取って通知の数と停止の行を照らし合わせる、そのあとで `/tmp/ralph-iso` を消す。利用者の herdr server には触れていない。shim のログに、実行で打たれた osascript がすべてある
+- [x] AC9(写し): `docs/evidence/org-recheck-2026-10-24/` に D12 の伏せ字の写しがある。evidence の `jq` を写しに打つと evidence の表になる。grep で `/Users/` のパス、pane id、session id、token が見つからない
 
 ## Implementation outline
 
@@ -152,7 +152,8 @@ repo の変更は記録と手順書だけ。戻すときはこの計画の PR �
 - [x] S5(implementer、opus): 29b54de0(手順書の 8 か所)。59779049(director、inline): 専用の clone の機能の worktree の片付けを Clean up に足した(S5 の報告の範囲外の指摘)
 - [x] S6(implementer): 59964c5c。計画は sonnet としたが、仕様の印の判断が入るので opus にした。Affected areas にない `docs/evidence/org-trial-2026-10-20.md` に Correction の段落を足した(consult の指摘。RC11 が前回の通知の出どころの記述を覆すため)。印の規則に照らし、RC2 で FR-4 と受け入れ条件 5 を `[ ]` に戻した(consult も同じ判定)
 - 所見の番号は RC1〜RC12(既存の F・G・N などと重ならないもの)。tech-debt の行は RC1〜RC6、RC9〜RC11。RC7 は手順書で直し、RC8 と RC12 は repo の欠陥ではないので行を作らない(evidence の Findings に理由)
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-26-org-recheck.md`、2b399912。Merge yes、LOW 6・INFO 4。implementer が a688fcf0 で 10 件とも直し、7f004c11 で報告に追記)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-26-org-recheck.md`、0c0a6a6e。pass、LOW 1・INFO 4。LOW-1(根拠の表の RC11 の行の「1 回ごとに通知」)は director が inline で直した。INFO-1・INFO-2・INFO-4 は直さない。INFO-2(/org skill のフォルダ信頼の項)は skill の直しで、この記録のブランチの範囲外)
+- AC の印(verify のあと): AC1、AC2、AC4〜AC7、AC9 は verify が repo で確かめた。AC3 は表と写しから出る数まで確かめ、load average、終了コード、pane の読みは director の notes による。AC8 は順の記録と写しの痕(`detached`、`stopped`、`end=watch`、`ralph status` の停止の行)が合う。見張りを止めた直後の確かめは、notes に「~ から pgrep で ralph の見張りがない」とだけあって pattern を書いておらず、`pgrep -fl /tmp/ralph-iso` そのものは `rm -rf` のあと(evidence の Cleanup の 8 段目、終了コード 1)にしか記録がない
 - [ ] Test artifact created
 - [ ] PR created
