@@ -178,12 +178,10 @@ is not in the feature worktrees that `ralph org start --plan` creates, and
 a leader's spawn there reads that worktree's own `ralph.toml`, so
 `[org].agmsg_home` in the clone's untracked `ralph.toml` would reach ralph's
 commands in the main checkout but not the leader's spawns (inferred from
-the code, not checked). ralph reads the variable before `[org].agmsg_home`
-(`ResolveAgmsgHome` in the ralph repository's
-`internal/org/driver/agmsg.go`). With the variable in the wrapper, the
-server, the panes, the watch, and the director's commands all get the same
-value. In a scratch repository whose committed `ralph.toml` sets
-`agmsg_home`, either way works.
+the code, not checked). ralph reads the variable before `[org].agmsg_home`.
+With the variable in the wrapper, the server, the panes, the watch, and the
+director's commands all get the same value. In a scratch repository whose
+committed `ralph.toml` sets `agmsg_home`, either way works.
 
 As a first check before the server starts, run
 `/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. Both lines
@@ -288,6 +286,8 @@ own agmsg.
   agmsg_home = "/tmp/ralph-iso/agmsg"
   ```
 
+  (`ralph org director start --config` refuses a relative `agmsg_home`.)
+
   The copy reaches ralph's own agmsg calls only: the leader's join to the
   org's team, each seat's join and HELLO at its spawn, the watch's ALERTs
   to the leader, and the leader's inbox and history commands (the leader's
@@ -305,7 +305,6 @@ own agmsg.
   out and use your own agmsg, as the trial of 2026-10-20 did, until ralph
   gives the seats the path (tracked in `docs/tech-debt/README.md`, RC1).
   The copy suits checks whose seats send no messages.
-  (`ralph org director start --config` refuses a relative `agmsg_home`.)
 - An `osascript` shim. ralph runs `osascript` by `PATH` lookup for its
   desktop notifications to the human (from the watch, and from
   `ralph org escalate` when it sends an item at once). A shim first on
@@ -323,13 +322,14 @@ own agmsg.
   through `CLAUDE_ENV_FILE` (F2).
 
   The shim also receives the `osascript` calls of your own Claude Code
-  hooks in the sessions the run starts. In the run of 2026-10-24 all 12
-  shim lines came from a Stop hook (a desktop notification of the
-  session's last message) in the on-demand watcher's `claude -p` sessions,
-  with the title "Claude Code" (RC11; the hook is named from the run's
-  notes, and the hook itself was not read). ralph's own notifications carry
-  the title "ralph org watch" or "ralph org escalate". Outside isolation,
-  each watcher run would post such a notification.
+  hooks in the sessions the run starts. In the run of 2026-10-24
+  (`docs/evidence/org-recheck-2026-10-24.md`, RC11) all 12 shim lines had
+  the title "Claude Code". Per the director's notes (the hook itself was
+  not read), they came from a Stop hook (a desktop notification of the
+  session's last message) in the on-demand watcher's `claude -p` sessions.
+  ralph's own notifications carry the title "ralph org watch" or
+  "ralph org escalate". Outside isolation, most watcher runs would post
+  such a notification (12 of the 13 in that run).
 
 ## Start the server
 
@@ -388,12 +388,12 @@ $R herdr pane run <pane-id> 'claude --model haiku'
    server (the wrapper gives it `HERDR_SOCKET_PATH`), where you go to the
    probe pane. In the run of 2026-10-24 the human answered the dialog
    there (`docs/evidence/org-recheck-2026-10-24.md`, RC7), since a director
-   does not send keys to a pane (the /director skill). The trial and the latest live check sent the Down
-   key, then Enter, to the pane. Running `cd <the repository> && claude`
-   in your own terminal instead did not work in the run of 2026-10-24: it
-   showed no trust dialog and left no trust entry in `~/.claude.json`,
-   although the throwaway pane showed the dialog afterwards (why was not
-   found). Answer the dialog in the pane.
+   does not send keys to a pane (the /director skill). The trial and the
+   latest live check sent the Down key, then Enter, to the pane. Running
+   `cd <the repository> && claude` in your own terminal instead did not
+   work in the run of 2026-10-24: it showed no trust dialog and left no
+   trust entry in `~/.claude.json`, although the throwaway pane showed the
+   dialog afterwards (why was not found). Answer the dialog in the pane.
 3. The probe: have claude run `command -v git gh ralph claude osascript`
    (without `osascript` when there is no shim), `git config user.name`,
    and `gh auth status` with its Bash tool. Type the request with
@@ -407,14 +407,18 @@ $R herdr pane run <pane-id> 'claude --model haiku'
    A way without typing keys, which the run of 2026-10-24 used after the
    trust answer and `/exit`: run
    `$R herdr pane run <pane-id> "claude -p '<request>' --model haiku --allowedTools Bash"`
-   and read the pane for the answer. The request must come right after
-   `-p`: `--allowedTools` takes every word after it as a tool name, and
-   with the request after it claude exits with "Input must be provided
-   either through stdin or as a prompt argument when using --print"
-   (RC8). In that run the shim came first in the `-p` session's Bash tool.
-   That fits a `-p` session reading `CLAUDE_ENV_FILE` too, but it is not
-   confirmed: the pane's own shell was not checked, so it is not known
-   that `path_helper` had put `/usr/bin` first in that pane (F2).
+   and read the pane for the answer. Write the request yourself:
+   `--allowedTools Bash` lets that session run any Bash command. The
+   request must come right after `-p`: `--allowedTools` takes every word
+   after it as a tool name, and with the request after it claude exits
+   with "Input must be provided either through stdin or as a prompt
+   argument when using --print"
+   (`docs/evidence/org-recheck-2026-10-24.md`, RC8). In that run the shim
+   came first in the `-p` session's Bash tool. That fits a `-p` session
+   reading `CLAUDE_ENV_FILE` too. The pane's own shell did not print its
+   `command -v osascript`, so whether `path_helper` had put `/usr/bin`
+   first in that pane (F2) was not confirmed, and the answer stays an
+   inference.
 4. Exit claude with `/exit`, then close the workspace:
    `$R herdr workspace close <workspace-id>`.
 
@@ -537,8 +541,9 @@ Left outside the dedicated directory, in your own stores:
   writes per session, such as history lines and plugin data;
 - when you use your own agmsg instead of a copy, the role-session marks of
   the run's seats under the agmsg home's `run/`. With the copy, the seats'
-  agmsg skill still uses your own agmsg home (RC1), though in the run of
-  2026-10-24 it wrote nothing there.
+  agmsg skill still uses your own agmsg home, though in the run of
+  2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1) it wrote
+  nothing there.
 
 In the evidence you write about the run, do not copy gh or git config,
 tokens, pane ids, or session ids, and write your home directory as `~`.

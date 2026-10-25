@@ -7,9 +7,10 @@ before the fixes of its findings). This run used a binary built from main at
 ffb3e271, which holds every fix of the trial's findings (#244 to #254), and
 followed `docs/recipes/isolated-herdr-server.md` from its first step. It ran
 from the start of S1 (2026-10-24T09:40:43Z) to the final snapshot
-(2026-10-25T14:24:59Z); the orgs ran from their start (02:23:54Z) to the
-second merge (14:22:31Z). All times are UTC, and a time without a date is on
-2026-10-25.
+(2026-10-25T14:24:59Z). The run, from the orgs' start (02:23:54Z) to the
+second merge (14:22:31Z), held the orgs' work until they disbanded
+(03:10:18Z and 03:16:47Z), then the wait for the human (I3) and the two
+merges. All times are UTC, and a time without a date is on 2026-10-25.
 
 The plan's own session (Claude Code) was the director, promoted with the
 `/director` skill. The user was the human: they answered the folder trust,
@@ -61,20 +62,20 @@ herdr server, so `director.jsonl` has its `detached` line and
 | `setup/agmsg-VERSION`, `setup/herdr-server.out`, `setup/scratch-automerge.toml` | the private agmsg copy's `VERSION`, the server's startup output, and the scratch `ralph.toml` of D7's check |
 
 Not committed: the three gate logs (about 347 KB each; `gate-excerpts.md`
-has their headers, start times, verdict lines, and check-sync lines); the herdr server log (its
-`WARN` lines were only about agents of herdr's remote manifest that it does
-not know, qwen, muse, and letta, every 30 min, per the notes); the split
-plan's visual page `recheck.html` that the human saw at I1 (its source,
-`splits/recheck.md`, is committed); and the first copy. Compared with `cmp`,
-the first copy's ledger files equal the final ones except `director.jsonl`
-(no `detached` line), `director-wait.json`, and `watch-alive.json` (still
-`running`). The role prompts ralph wrote under `prompts/` were not copied.
-The final copy has no `escalations.jsonl`: ralph writes a line there only
-when it sends something to the human (an item sent at once, a deadline's
-send, `ralph org inbox notify`, or an escalation the inbox could not take;
-the help of `ralph org escalate`, `ralph org watch`, and
-`ralph org inbox notify`, and `internal/org/deadline.go`), and nothing went
-to the human (Fix effects, F6 and F13).
+has their headers, start times, verdict lines, and check-sync lines); the
+herdr server log (its `WARN` lines were only about agents of herdr's remote
+manifest that it does not know, qwen, muse, and letta, every 30 min, per the
+notes); the split plan's visual page `recheck.html` that the human saw at I1
+(its source, `splits/recheck.md`, is committed); and the first copy.
+Compared with `cmp`, the first copy's ledger files equal the final ones
+except `director.jsonl` (no `detached` line), `director-wait.json`, and
+`watch-alive.json` (still `running`). The role prompts ralph wrote under
+`prompts/` were not copied. The final copy has no `escalations.jsonl`: ralph
+writes a line there only when it sends something to the human (an item sent
+at once, a deadline's send, `ralph org inbox notify`, or an escalation the
+inbox could not take; the help of `ralph org escalate`, `ralph org watch`,
+and `ralph org inbox notify`, and `internal/org/deadline.go`), and nothing
+went to the human (Fix effects, F6 and F13).
 
 Sanitizing, done with a script kept outside the repository by plain text
 substitution, so each JSON line stays as ralph wrote it:
@@ -313,8 +314,8 @@ Each section of `docs/recipes/isolated-herdr-server.md` as the run met it
   `git -C /tmp/ralph-iso/ralph push --dry-run origin HEAD:refs/heads/org-recheck-probe`
   printed `* [new branch] HEAD -> org-recheck-probe` (no ref is made). The
   shim coming first in the `claude -p` session's Bash tool fits a `-p`
-  session reading `CLAUDE_ENV_FILE` too (the plan's open question), but the
-  pane's own shell did not print its `command -v osascript`, so that
+  session reading `CLAUDE_ENV_FILE` too (the plan's open question). The
+  pane's own shell did not print its `command -v osascript`, so whether
   `path_helper` had put `/usr/bin` first in this pane (F2) was not
   confirmed, and the answer stays an inference.
   The workspace was closed (`workspace list` empty). The recipe's step 3
@@ -424,7 +425,7 @@ docs/evidence/org-recheck-2026-10-24/plans/2026-10-25-hooks-matcher.md: - Approv
 
 | Item | Expected | Observed | Where read | Verdict |
 |------|----------|----------|------------|---------|
-| F3 | no send fails with `agent_not_found`; the seats' herdr agents keep the names `<org>_<seat>` | the six agents were named `<org>_<seat>` at the watch's last cycle of each org; no manifest line names `agent_not_found`; every director send exited 0 | `watch-status-<org>.json` (the second table under Snapshot), `manifest.jsonl` (command B), notes. The director read the watch's `agent_get` records instead of `herdr agent list` | effective |
+| F3 | no send fails with `agent_not_found`; the seats' herdr agents keep the names `<org>_<seat>` | the six agents were named `<org>_<seat>` at the watch's last cycle of each org (03:09:50Z and 03:16:20Z); each of the director's 10 sends exited 0. No manifest line names `agent_not_found` (command B), but a send that fails writes nothing to the manifest (F7), so that count does not see failed sends, and the verdict does not rest on it | `watch-status-<org>.json` (the second table under Snapshot), notes (the exit codes). The director read the watch's `agent_get` records instead of `herdr agent list` | effective |
 | F4 | a failed spawn closes its pane (`spawn_failed`, or `spawn_close_failed` when the close fails) | no `spawn_failed` and no `spawn_close_failed`. The four `rejected` spawns (RC2) were refused before a pane was made: none has a pane or a `spawn_step` | `manifest.jsonl` (command B) | did not occur, so not checked |
 | F5 | both feature plans hold `## 全機能の座席に適用する決まり` with the split's preamble; `spawn_started` has the implementer on opus and the reviewer on sonnet | both plans hold the section with all four rules of the preamble, in a code block (hooks-matcher's at the top, backfill-na's after Open questions); implementer opus and reviewer sonnet in both orgs | `plans/*.md` (command C), `manifest.jsonl` (the models table under Setup) | effective |
 | F6 | each watchdog escalation becomes a TYPE ALERT item of the inbox, left to the director | the watch's 8 escalations (8 `WATCHDOG ESCALATION` lines in `watch.log`, each naming its item) are the 8 ALERT items e3 to e10, each with the headers ORG_ID, SEAT, CONDITION, REASON, ALERT_ID, and ALERT_TS and `delivery: deadline`; the director acked each in 6 to 15 s and resolved it in 30 to 128 s | `inbox.jsonl` (Numbers), `watch.log` (command F) | effective |
@@ -954,11 +955,11 @@ Ids RC1 to RC12 are this run's; F1 to F14 are the trial's.
   The last column counts the messages whose `read_at` is NULL: 0 in every
   row, so the receiver read each of the 34. The database went with
   `/tmp/ralph-iso`, so the snapshot can recompute the table from the TSV
-  only, not the TSV from the database. The HELLOs are ralph's (spawn sends them), and the
-  TASKs and DECISIONs to seats do not go through agmsg (`ralph org send`
-  types them into the pane). Cause: the implementer and reviewer role prompts
-  tell the seat to report to the leader with a RESULT or BLOCKED message
-  (`internal/org/prompts/implementer.md:102`,
+  only, not the TSV from the database. The HELLOs are ralph's (spawn sends
+  them), and the TASKs and DECISIONs to seats do not go through agmsg
+  (`ralph org send` types them into the pane). Cause: the implementer and
+  reviewer role prompts tell the seat to report to the leader with a RESULT
+  or BLOCKED message (`internal/org/prompts/implementer.md:102`,
   `internal/org/prompts/reviewer.md:119`) but give no command or agmsg path;
   only the leader's prompt gets the scripts directory of the agmsg ralph uses
   (`{{AGMSG_SCRIPTS}}`, `internal/org/prompts.go:62-71`, used at
@@ -987,10 +988,13 @@ Ids RC1 to RC12 are this run's; F1 to F14 are the trial's.
   02:31:57Z), the reviewers after them (02:32:12Z and 02:32:13Z). The scopes,
   from the `spawned` details: the reservation for the implementers and for
   backfill-na's reviewer, `review hooks-matcher; writes docs/reports/ only`
-  for hooks-matcher's reviewer. This is the default path of every feature
-  org. The trial's manifest has no `rejected` event. Impact: one wasted round
-  per seat, and the four receipts of RC10. Tech-debt row: yes (added by this
-  PR)
+  for hooks-matcher's reviewer. A leader that spawns its seats as the
+  template says is refused: in this run, all four spawns of the two orgs
+  were. The trial's leaders added `--scope` though the template lacked it
+  then too (`internal/org/prompts/leader.md` at f0668004 names no
+  `--scope`), and the trial's manifest has no `rejected` event. Impact: one
+  wasted round per seat for such a leader, and the four receipts of RC10.
+  Tech-debt row: yes (added by this PR)
 - RC3 In a feature org the three seats share one worktree, so the watch's
   `scope_change` (the worktree's `git status --porcelain` differs from the
   last cycle) fires for all three seats on every edit inside the reservation,
@@ -1008,13 +1012,14 @@ Ids RC1 to RC12 are this run's; F1 to F14 are the trial's.
   編集しない」, the rule of the `/org` skill's example
   (`.claude/skills/org/SKILL.md:529`, 「予約の外のファイルは編集しない」).
   Read literally, it conflicts with the files the feature-org steps of the
-  leader template have the seats write outside the reservation: the feature plan, the reviewer's report, and the
-  org report. No seat stopped over it, but the director's answers to e7, e9,
-  and e10 had to cite the template's steps. Also, hooks-matcher's leader
-  rewrote its plan's `Status` and `Approved` lines with `sed -i ''` (notes);
-  the repository's rule is to edit tracked files with the Edit and Write
-  tools (`.claude/rules/ralph/ralph-workflow.md`). Tech-debt row: yes (one
-  row for both, added by this PR)
+  leader template have the seats write outside the reservation: the feature
+  plan, the reviewer's report, and the org report. No seat stopped over it,
+  but the director's answers to e7, e9, and e10 had to cite the template's
+  steps. Also, hooks-matcher's leader rewrote its plan's `Status` and
+  `Approved` lines with `sed -i ''` (notes); the repository's rule is to
+  edit tracked files with the Edit and Write tools
+  (`.claude/rules/ralph/ralph-workflow.md`). Tech-debt row: yes (one row
+  for both, added by this PR)
 - RC5 Both PR titles are in English, and so is #255's body (#256's body is in
   Japanese). The `/pr` skill says the title and body must be in Japanese
   (`.claude/skills/pr/SKILL.md:31`). The leader template says to follow the
@@ -1098,9 +1103,10 @@ Ids RC1 to RC12 are this run's; F1 to F14 are the trial's.
   the watch's `PATH`) about 3 s before 12 of the 13 receipts, with the first
   line of the watcher's answer, `` ```json ``, as its text (Numbers, the
   pairing table). The first run (02:34:54Z) has no shim line; why was not
-  checked. Outside isolation, each watcher run would post one desktop
-  notification to the user. The director's note during S3 put these lines on
-  the seats' sessions; that was wrong, and the director corrected it at S7.
+  checked. Outside isolation, most watcher runs (12 of the 13 here) would
+  post one desktop notification to the user. The director's note during S3
+  put these lines on the seats' sessions; that was wrong, and the director
+  corrected it at S7.
   The trial's 20 "Claude Code" lines most likely had the same cause, not the
   seats' own Claude Code that its evidence names (the user's Notification
   hook, per that director's notes): 18 of them fall within 10 s before a
@@ -1144,7 +1150,7 @@ checked against the panes.
 | shim lines from ralph | 29 | 0 | `osascript.log` |
 | shim lines "Claude Code" | 20 | 12 (RC11) | `osascript.log` |
 | failed ALERTs to a leader, watcher errors | 10, 6 | 0, 0 | `watch.log` |
-| `agent_not_found` sends | yes (F3) | none | notes, manifest |
+| `agent_not_found` sends | yes (F3) | none | notes (the exit codes), `watch-status-<org>.json` |
 | refused spawns (`rejected`) | 0 | 4 (RC2) | manifest |
 | failed spawns (`spawn_failed`) | 4 | 0 | manifest |
 | gates and regates | 6, 3 failed (F8, F9, F10) | 3, none failed | Gates |
