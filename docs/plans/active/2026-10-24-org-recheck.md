@@ -146,7 +146,12 @@ repo の変更は記録と手順書だけ。戻すときはこの計画の PR �
 - [x] Plan reviewed
 - [x] Plan approved(2026-10-24。ユーザーの決まり「作成したプランは自動承認します」による自動承認。Codex の計画助言 3 件(regate の待ち、通知の照らし合わせ、最後の写し)は承認の前に直した)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+- [x] S1〜S3、S7(director、inline): 2026-10-24 09:40Z〜2026-10-25 14:24Z。機能の PR #255 と #256 を `ralph org merge` で main に merge(536271a2、98d38391)。`/tmp/ralph-iso` は消した。記録は scratchpad の notes から S4 が evidence に写した
+- [x] S4(implementer、opus): bcb9db16(evidence と伏せ字の写し)、77badb04(agmsg の未読の列。director が consult の指摘で probe の文を弱めた分も同じコミット)。f7ad239d(director、inline): 利用者の global gitignore の `*.log` で漏れた写しの 3 本を `git add -f` で足した(前回の試行の写しと同じ扱い)
+- [x] S5(implementer、opus): 29b54de0(手順書の 8 か所)。59779049(director、inline): 専用の clone の機能の worktree の片付けを Clean up に足した(S5 の報告の範囲外の指摘)
+- [x] S6(implementer): 59964c5c。計画は sonnet としたが、仕様の印の判断が入るので opus にした。Affected areas にない `docs/evidence/org-trial-2026-10-20.md` に Correction の段落を足した(consult の指摘。RC11 が前回の通知の出どころの記述を覆すため)。印の規則に照らし、RC2 で FR-4 と受け入れ条件 5 を `[ ]` に戻した(consult も同じ判定)
+- 所見の番号は RC1〜RC12(既存の F・G・N などと重ならないもの)。tech-debt の行は RC1〜RC6、RC9〜RC11。RC7 は手順書で直し、RC8 と RC12 は repo の欠陥ではないので行を作らない(evidence の Findings に理由)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
