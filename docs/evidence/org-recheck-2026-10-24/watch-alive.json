@@ -1,0 +1,9 @@
+{
+  "state": "stopped",
+  "pid": 18252,
+  "started_at": "2026-10-25T02:17:13.429425Z",
+  "ts": "2026-10-25T14:23:34Z",
+  "interval_seconds": 30,
+  "deadman_minutes": 10,
+  "stopped_at": "2026-10-25T14:23:34Z"
+}

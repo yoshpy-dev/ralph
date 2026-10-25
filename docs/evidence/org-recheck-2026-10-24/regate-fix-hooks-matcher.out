@@ -1,0 +1,6 @@
+GATE: pass
+MERGED: 77c631b2a635faaa7f79600302da08b925770c58 (origin/main into b31e623ac24761ca652b08e36c26c0e140f2ce5e)
+HEAD: 77c631b2a635faaa7f79600302da08b925770c58
+BASE: 536271a2c0a274be93b124905a3f622c1ea73ad0
+LOG: /private/tmp/ralph-iso/ralph/.harness/state/org/gates/hooks-matcher-20261025T140359Z.log
+PUSHED: 77c631b2a635faaa7f79600302da08b925770c58 to origin's fix/hooks-matcher

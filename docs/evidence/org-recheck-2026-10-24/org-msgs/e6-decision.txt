@@ -1,0 +1,4 @@
+TYPE: DECISION
+
+SUMMARY: 受信箱の e6(見張りの ALERT、leader の stall)への答え。leader は reviewer の t-2 を待っていて、reviewer は run-test.sh の終わりを待っている。止まっているのではないので、対応は要らない。このまま待つ。
+EVIDENCE: ralph org read --org-id backfill-na --seat reviewer

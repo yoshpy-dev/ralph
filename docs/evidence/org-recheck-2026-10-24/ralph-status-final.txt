@@ -1,0 +1,17 @@
+state-dir: /private/tmp/ralph-iso/ralph/.harness/state/org (source: git-main-worktree)
+org watch: not running (stopped at 2026-10-25T14:23:34Z)
+director: not attached -- inbox items reach the human at the ack deadline of ralph org watch --all, or at once while no watch accepts work; once attached, a director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking ([org.director].auto_merge = true)
+merge guarantee: github_protection (main of github.com/yoshpy-dev/ralph, checked 2026-10-25T02:17:31Z): main, the default branch of origin's repository yoshpy-dev/ralph, requires its 2 required status checks to pass on a head with the latest main before a PR merges: a ruleset requires branches to be up to date before merging
+org_id: backfill-na (active 0/3)
+  SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+  implementer	implementer	claude	opus	stopped	pane-4
+  leader	leader	claude	opus	stopped	pane-1
+  reviewer	reviewer	claude	sonnet	stopped	pane-6
+  watch: last heartbeat 2026-10-25T03:09:50Z (cycle 89), pending alerts: 0
+
+org_id: hooks-matcher (active 0/3)
+  SEAT_ID	ROLE	DRIVER	MODEL	STATE	PANE_ID
+  implementer	implementer	claude	opus	stopped	pane-3
+  leader	leader	claude	opus	stopped	pane-2
+  reviewer	reviewer	claude	sonnet	stopped	pane-5
+  watch: last heartbeat 2026-10-25T03:16:20Z (cycle 102), pending alerts: 0

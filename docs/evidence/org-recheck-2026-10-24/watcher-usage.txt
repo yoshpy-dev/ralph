@@ -1,0 +1,11 @@
+# Usage outside the seats' worktrees: ~/.claude/projects/-private-tmp-ralph-iso-ralph (the clone's root), 15 sessions: 13 one-message sessions of the on-demand watcher, 1 two-message S1 probe, and 1 session with no assistant message (the human's folder-trust session, I0b).
+# Classified by each session's first user message: "Use your Bash tool to run exactly these commands ..." = the S1 probe (not part of the run's cost); the on-demand watcher prompt of `ralph org watch` = watcher.
+# Message ids deduplicated; tokens: input, cache write 1h, cache write 5m, cache read, output.
+watcher claude-haiku-4-5-20251001 msgs=13 input=117 cache_write_1h=470182 cache_write_5m=0 cache_read=238017 output=25918 first=2026-10-25T02:34:49.350Z last=2026-10-25T03:04:33.907Z
+probe   claude-haiku-4-5-20251001 msgs=2  input=18  cache_write_1h=55074  cache_write_5m=0 cache_read=53304  output=1083  first=2026-10-25T02:15:20.618Z last=2026-10-25T02:15:36.830Z
+# Seats (seat-usage.tsv): every cache write is a 1h write (usage.cache_creation.ephemeral_1h_input_tokens): opus 434318, sonnet 226322; 5m writes 0.
+# Prices read on 2026-10-25 from https://platform.claude.com/docs/en/about-claude/pricing (USD per million tokens: base input / 5m cache write / 1h cache write / cache hit / output), the same as on 2026-10-20:
+#   Claude Opus 5.5    4 / 5    / 8 / 0.20 / 20
+#   Claude Sonnet 5.5  2 / 2.50 / 4 / 0.10 / 10
+#   Claude Haiku 4.5   1 / 1.25 / 2 / 0.10 / 5
+# The director's own cost (this Claude Code session) is not separable and is left out.

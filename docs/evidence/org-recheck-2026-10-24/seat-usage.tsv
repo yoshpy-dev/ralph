@@ -1,0 +1,7 @@
+org	seat	session_label	model	msgs	input	cache_write	cache_read	output	first	last
+backfill-na	implementer	implementer-1	claude-opus-5-5	20	40	86610	2052139	6132	2026-10-25T02:32:06.077Z	2026-10-25T03:03:00.217Z
+backfill-na	leader	leader-1	claude-opus-5-5	48	96	128814	6561751	17180	2026-10-25T02:24:03.483Z	2026-10-25T03:10:15.556Z
+backfill-na	reviewer	reviewer-1	claude-sonnet-5-5	19	38	114462	1868510	5595	2026-10-25T02:32:30.784Z	2026-10-25T02:53:53.041Z
+hooks-matcher	implementer	implementer-1	claude-opus-5-5	23	46	91932	2368194	7395	2026-10-25T02:32:02.526Z	2026-10-25T02:42:59.881Z
+hooks-matcher	leader	leader-1	claude-opus-5-5	50	100	126962	6845784	16224	2026-10-25T02:24:16.314Z	2026-10-25T03:16:44.154Z
+hooks-matcher	reviewer	reviewer-1	claude-sonnet-5-5	14	28	111860	1329011	4988	2026-10-25T02:32:29.573Z	2026-10-25T03:00:09.917Z

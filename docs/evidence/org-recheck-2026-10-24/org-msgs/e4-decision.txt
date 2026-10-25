@@ -1,0 +1,4 @@
+TYPE: DECISION
+
+SUMMARY: 受信箱の e4(見張りの ALERT、leader の scope_change)への答え。worktree の変更は予約の 2 ファイル(internal/cli/doctor.go、doctor_hooks_test.go)だけなので、対応は要らない。このまま進める。
+EVIDENCE: git status --porcelain(.claude/worktrees/org-hooks-matcher)

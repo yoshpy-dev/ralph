@@ -1,0 +1,54 @@
+{
+  "org_id": "backfill-na",
+  "last_cycle_ts": "2026-10-25T03:09:50Z",
+  "cycles": 89,
+  "watchdog_joined": true,
+  "conditions": {
+    "backfill-na/implementer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T02:53:49Z"
+    },
+    "backfill-na/implementer/stall": {
+      "active": true,
+      "first_ts": "2026-10-25T03:04:14Z"
+    },
+    "backfill-na/leader/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T02:53:49Z"
+    },
+    "backfill-na/leader/stall": {
+      "active": false,
+      "first_ts": "2026-10-25T02:52:17Z"
+    },
+    "backfill-na/reviewer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T02:53:49Z"
+    },
+    "backfill-na/reviewer/stall": {
+      "active": true,
+      "first_ts": "2026-10-25T02:54:56Z"
+    }
+  },
+  "escalated": {
+    "backfill-na/leader/scope_change@1792895658809646000": true,
+    "backfill-na/leader/scope_change@1792896829250344000": true,
+    "backfill-na/leader/stall@1792896737509141000": true
+  },
+  "seat_snapshots": {
+    "implementer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-1\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"interactive_ready\":true,\"name\":\"backfill-na_implementer\",\"pane_id\":\"pane-4\",\"revision\":225,\"state_change_seq\":102,\"tab_id\":\"tab-4\",\"terminal_id\":\"term-4\",\"terminal_title\":\"✳ Backfill NA implementer\",\"terminal_title_stripped\":\"Backfill NA implementer\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "leader": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-2\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"interactive_ready\":true,\"name\":\"backfill-na_leader\",\"pane_id\":\"pane-1\",\"revision\":471,\"state_change_seq\":105,\"tab_id\":\"tab-1\",\"terminal_id\":\"term-1\",\"terminal_title\":\"◑ Backfill NA leader\",\"terminal_title_stripped\":\"◑ Backfill NA leader\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "reviewer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-3\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-backfill-na\",\"interactive_ready\":true,\"name\":\"backfill-na_reviewer\",\"pane_id\":\"pane-6\",\"revision\":851,\"state_change_seq\":77,\"tab_id\":\"tab-6\",\"terminal_id\":\"term-6\",\"terminal_title\":\"✳ Backfill NA reviewer\",\"terminal_title_stripped\":\"Backfill NA reviewer\",\"workspace_id\":\"ws-1\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    }
+  }
+}
