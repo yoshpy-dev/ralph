@@ -52,7 +52,7 @@ herdr server, so `director.jsonl` has its `detached` line and
 | `merge-fix-backfill-na.out`, `regate-fix-hooks-matcher.out`, `merge-fix-hooks-matcher.out` | the output of the first merge, of the regate, and of the second merge |
 | `ralph-status-final.txt` | `ralph status` after the watch stop |
 | `osascript.log` | the notification shim's log, 12 calls |
-| `agmsg-summary.tsv` | the private agmsg's 34 messages, counted by team, sender, receiver, and TYPE line (RC1) |
+| `agmsg-summary.tsv` | the private agmsg's 34 messages, counted by team, sender, receiver, and TYPE line, with the unread count (RC1) |
 | `seat-usage.tsv` | tokens per seat session, from the Claude Code session records (message ids deduplicated) |
 | `watcher-usage.txt` | tokens of the watcher and of the S1 probe, the cache-write split, and the list prices used |
 | `interventions.log` | the director's intervention log, I0a, I0b, and I1 to I3 |
@@ -311,8 +311,12 @@ Each section of `docs/recipes/isolated-herdr-server.md` as the run met it
   `/tmp/ralph-iso/bin/ralph`, claude's binary, and the shim; `git config
   user.name` printed the user's name; gh showed `yoshpy-dev` active;
   `git -C /tmp/ralph-iso/ralph push --dry-run origin HEAD:refs/heads/org-recheck-probe`
-  printed `* [new branch] HEAD -> org-recheck-probe` (no ref is made). A
-  `claude -p` session reads `CLAUDE_ENV_FILE` too (the plan's open question).
+  printed `* [new branch] HEAD -> org-recheck-probe` (no ref is made). The
+  shim coming first in the `claude -p` session's Bash tool fits a `-p`
+  session reading `CLAUDE_ENV_FILE` too (the plan's open question), but the
+  pane's own shell did not print its `command -v osascript`, so that
+  `path_helper` had put `/usr/bin` first in this pane (F2) was not
+  confirmed, and the answer stays an inference.
   The workspace was closed (`workspace list` empty). The recipe's step 3
   types the request into an interactive claude with `send-text`; the probe
   ran `claude -p` through `pane run` instead (D8)
@@ -925,22 +929,32 @@ Ids RC1 to RC12 are this run's; F1 to F14 are the trial's.
   leader read the committed review report instead (e12's body says so). So
   one seat message reached the private agmsg:
 
-  | Team | From | To | TYPE line | Messages | First | Last |
-  |------|------|----|-----------|----------|-------|------|
-  | ralph-hooks-matcher | implementer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:11Z | 2026-10-25T02:32:11Z |
-  | ralph-backfill-na | implementer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:13Z | 2026-10-25T02:32:13Z |
-  | ralph-hooks-matcher | reviewer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:33Z | 2026-10-25T02:32:33Z |
-  | ralph-backfill-na | reviewer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:34Z | 2026-10-25T02:32:34Z |
-  | ralph-backfill-na | watchdog | leader | TYPE: ALERT | 12 | 2026-10-25T02:34:22Z | 2026-10-25T03:04:15Z |
-  | ralph-hooks-matcher | watchdog | leader | TYPE: ALERT | 17 | 2026-10-25T02:34:46Z | 2026-10-25T03:02:10Z |
-  | ralph-hooks-matcher | implementer | leader | TYPE: RESULT | 1 | 2026-10-25T02:42:53Z | 2026-10-25T02:42:53Z |
+  | Team | From | To | TYPE line | Messages | First | Last | Unread |
+  |------|------|----|-----------|----------|-------|------|--------|
+  | ralph-hooks-matcher | implementer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:11Z | 2026-10-25T02:32:11Z | 0 |
+  | ralph-backfill-na | implementer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:13Z | 2026-10-25T02:32:13Z | 0 |
+  | ralph-hooks-matcher | reviewer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:33Z | 2026-10-25T02:32:33Z | 0 |
+  | ralph-backfill-na | reviewer | leader | TYPE: HELLO | 1 | 2026-10-25T02:32:34Z | 2026-10-25T02:32:34Z | 0 |
+  | ralph-backfill-na | watchdog | leader | TYPE: ALERT | 12 | 2026-10-25T02:34:22Z | 2026-10-25T03:04:15Z | 0 |
+  | ralph-hooks-matcher | watchdog | leader | TYPE: ALERT | 17 | 2026-10-25T02:34:46Z | 2026-10-25T03:02:10Z | 0 |
+  | ralph-hooks-matcher | implementer | leader | TYPE: RESULT | 1 | 2026-10-25T02:42:53Z | 2026-10-25T02:42:53Z | 0 |
 
   ```sh
-  awk -F'\t' '{printf "| %s | %s | %s | %s | %d | %s | %s |\n", $1, $2, $3, $4, $5, $6, $7}' docs/evidence/org-recheck-2026-10-24/agmsg-summary.tsv
+  awk -F'\t' '{printf "| %s | %s | %s | %s | %d | %s | %s | %d |\n", $1, $2, $3, $4, $5, $6, $7, $8}' docs/evidence/org-recheck-2026-10-24/agmsg-summary.tsv
   ```
 
-  (`agmsg-summary.tsv` has an eighth column, 0 in every row; the notes do
-  not say what it counts.) The HELLOs are ralph's (spawn sends them), and the
+  The director made `agmsg-summary.tsv` at S7 from the private copy's
+  `messages.db`, opened with `sqlite3 -readonly`, with this query (the
+  expression it used for the first line of the body is not recorded here):
+
+  ```text
+  select team, from_agent, to_agent, <the first line of the body>, count(*), min(created_at), max(created_at), sum(read_at is null) from messages group by 1,2,3,4 order by 6
+  ```
+
+  The last column counts the messages whose `read_at` is NULL: 0 in every
+  row, so the receiver read each of the 34. The database went with
+  `/tmp/ralph-iso`, so the snapshot can recompute the table from the TSV
+  only, not the TSV from the database. The HELLOs are ralph's (spawn sends them), and the
   TASKs and DECISIONs to seats do not go through agmsg (`ralph org send`
   types them into the pane). Cause: the implementer and reviewer role prompts
   tell the seat to report to the leader with a RESULT or BLOCKED message
