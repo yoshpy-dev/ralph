@@ -63,3 +63,18 @@ _(行は足していない。)_
   - RC9 の「読む順序のために exit 4 になった」は、コードと時刻からの推論のまま(evidence と tech-debt の行も推論と書いている)。確かめるテストは行の trigger がすでに求めている。この PR では足さない。
   - insight event は、次の 1 行で `docs/insights/events/2026-10-26-org-recheck.jsonl` に追記する(この報告のコミットには入れていない):
     `./scripts/insights-append.sh --slug org-recheck --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 6 --cycle auto --source skill`
+
+## 直したもの(cycle 1、レビューのあと)
+
+- F1: 直した(a688fcf0)。evidence の RC2 と、tech-debt の RC2 の行のセル 1・セル 2 を、「雛形のとおりに spawn を打った leader は断られる(今回は 2 org の 4 回すべて。試行の leader は雛形になくても `--scope` を付け、0 回)」の形にした。evidence には、f0668004 の `internal/org/prompts/leader.md` にも `--scope` がないことを括弧で足した。仕様の Status の段落と `docs/evidence/org-spec-evidence-2026-10-21.md` の RC2 の行は、「両方の org の 4 回」か「雛形のとおりに spawn を打つ機能の org では」と書いていて言い切りがなかったので、変えていない。FR-4 と受け入れ条件 5 の `[ ]` もそのまま。
+- F2: 直した(a688fcf0)。F3 の行の読み先から command B を外し、観測の列に、command B は失敗した send を見ない(失敗した send は manifest に何も書かない。F7 の行)ので判定はそれによらない、と書いた。判定は、notes の終了コード(director の send 10 件)と、座席の agent 名が watch の最後の cycle(03:09:50Z と 03:16:20Z)まで `<org>_<seat>` だったことによる。比較表の行の読み先も「notes (the exit codes), `watch-status-<org>.json`」にした。command B のブロックは F4 の根拠でもあるので残し、出力は変わらない。
+- F3: 直した(a688fcf0)。手順書の 2 つの写しと tech-debt の RC11 の行のセル 2 を、「watcher の run の多く(今回は 13 回のうち 12 回)」にした。手順書では、Stop hook と読んだのが director の notes によることと、hook を読んでいないことを、その文の頭に動かした。evidence の RC11 にも「each watcher run would post」と同じ言い切りがあったので、「most watcher runs (12 of the 13 here)」にそろえた。推奨が挙げた場所の外だが、handoff のファイルの中の同じ所見なので直した。
+- F4: 直した(a688fcf0)。手順書から `ResolveAgmsgHome` と `internal/org/driver/agmsg.go` を落とし、「ralph reads the variable before `[org].agmsg_home`.」だけにした。裸の RC11・RC8・RC1 の 3 か所には、RC1 と RC7 の既存の引用と同じ形で `docs/evidence/org-recheck-2026-10-24.md` を添えた。手順書が引く evidence のファイルは異なりで 6 のままなので、tech-debt の 362 行目の「6」は変えていない。同じ行の「cited four times」は、引用が 7 回になったので「seven after the fixes of the recheck's self-review」と足した。
+- F5: 直した(a688fcf0)。`ralph org director start --config` が相対 path の `agmsg_home` を断るという注を、toml の囲みのすぐ次の 1 行の段落に動かした。2 つの写しで同じ。
+- F6: 直した(a688fcf0)。evidence の冒頭を「The run, from the orgs' start (02:23:54Z) to the second merge (14:22:31Z), held the orgs' work until they disbanded (03:10:18Z and 03:16:47Z), then the wait for the human (I3) and the two merges.」にした。
+- N1: 直した(a688fcf0)。手順書(2 つの写し)の trust の項、evidence の「Not committed」の段落、RC1 の Cause の前後、RC4 の段落を、語を変えずに 76 字までで組み直した。組み直しだけの箇所に語の変更がないことは `git diff --word-diff` で見た。
+- N2: 直した(a688fcf0)。手順書の `claude -p` の確かめに、「Write the request yourself: `--allowedTools Bash` lets that session run any Bash command.」を足した。2 つの写しで同じ。`--allowedTools` の値は絞っていない。
+- N3: 直した(a688fcf0)。evidence と手順書の `path_helper` の文を 2 文に分けた。1 文目は、shim が先に出たことが `-p` の session が `CLAUDE_ENV_FILE` を読んだことと合うという文。2 文目は、pane の shell が `command -v osascript` を出していないので、`path_helper` が `/usr/bin` を先にしたかは確かめておらず推論のまま、という文。
+- N4: 直した(a688fcf0)。仕様の Status の段落を「F11(push したコミットについて)」にした。
+
+確かめたこと: 手順書の 2 つの写しは `cmp` で一致し、`./scripts/check-sync.sh` は PASS(DRIFTED 0、ROOT_ONLY 0)、`git diff --check` は空、5 ファイルの U+FFFD は 0 件、tech-debt の 362・364・371 行目はどれも 5 セル。evidence の `sh` ブロック 29 個を worktree の root で `sh -c` で打ち直し、29 個とも直上の表か直下の `text` ブロックと全行で一致した(Setup の models の表と、Numbers の shim の表のブロックは、表と `text` の両方と一致)。
