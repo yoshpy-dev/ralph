@@ -617,3 +617,72 @@ func TestAppendBackfillEvent_JSONStructure(t *testing.T) {
 		t.Error("JSON missing source_report_path field")
 	}
 }
+
+// writeCrossReviewReport writes body as a cross-review-triage report under
+// t.TempDir() and returns the events ParseReport derives from it.
+func writeCrossReviewReport(t *testing.T, body string) []BackfillEvent {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cross-review-triage-status-check.md")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	bevs, err := ParseReport(path)
+	if err != nil {
+		t.Fatalf("ParseReport: %v", err)
+	}
+	return bevs
+}
+
+func TestParseReport_CrossReview_IncompleteReviewerIsNA(t *testing.T) {
+	bevs := writeCrossReviewReport(t, `# Cross-review triage
+
+- Reviewer: codex
+- Reviewer status: incomplete (timeout)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`)
+	if len(bevs) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bevs))
+	}
+	if bevs[0].ParseMiss {
+		t.Errorf("ParseMiss = true: %s", bevs[0].ParseMissReason)
+	}
+	if bevs[0].Verdict != "n/a" {
+		t.Errorf("verdict = %q, want n/a", bevs[0].Verdict)
+	}
+}
+
+func TestParseReport_CrossReview_CompleteReviewerZeroCountsIsPass(t *testing.T) {
+	bevs := writeCrossReviewReport(t, `# Cross-review triage
+
+- Reviewer status: complete
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`)
+	if len(bevs) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bevs))
+	}
+	if bevs[0].Verdict != "pass" {
+		t.Errorf("verdict = %q, want pass", bevs[0].Verdict)
+	}
+}
+
+func TestParseReport_CrossReview_OnlyLaterCycleIncomplete(t *testing.T) {
+	bevs := writeCrossReviewReport(t, `# Cross-review triage
+
+- Reviewer status: complete
+- After triage: ACTION_REQUIRED=1, WORTH_CONSIDERING=0, DISMISSED=0
+
+## Cycle 2 (2026-10-25)
+
+- Reviewer status: Incomplete (codex exited 1)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`)
+	if len(bevs) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(bevs))
+	}
+	if bevs[0].Cycle != 1 || bevs[0].Verdict != "action_required" {
+		t.Errorf("cycle 1 = (%d, %q), want (1, action_required)", bevs[0].Cycle, bevs[0].Verdict)
+	}
+	if bevs[1].Cycle != 2 || bevs[1].Verdict != "n/a" {
+		t.Errorf("cycle 2 = (%d, %q), want (2, n/a)", bevs[1].Cycle, bevs[1].Verdict)
+	}
+}
