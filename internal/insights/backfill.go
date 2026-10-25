@@ -156,7 +156,13 @@ func ParseReport(path string) ([]BackfillEvent, error) {
 		for _, entry := range entries {
 			ev := makeBase(entry.cycle)
 			ev.Triage = entry.triage
-			ev.Verdict = crossReviewVerdict(entry.triage)
+			if entry.incomplete {
+				// The reviewer did not finish, so the counts do not say
+				// whether the cycle passed: same verdict as an unreadable report.
+				ev.Verdict = "n/a"
+			} else {
+				ev.Verdict = crossReviewVerdict(entry.triage)
+			}
 			evs = append(evs, ev)
 		}
 		return evs, nil
@@ -381,6 +387,9 @@ func parseTestVerdict(path string) (string, bool, string) {
 type crossReviewCycleEntry struct {
 	cycle  int
 	triage Triage
+	// incomplete is true when the cycle's "Reviewer status:" line starts
+	// with "incomplete" (the reviewer did not finish).
+	incomplete bool
 }
 
 // parseCrossReviewAllCycles extracts triage counts for every pipeline cycle
@@ -398,6 +407,10 @@ type crossReviewCycleEntry struct {
 //     been seen since the previous triage line, the occurrence counter (starting at 1)
 //     determines the cycle number.
 //
+// A "Reviewer status:" line belongs to the next "After triage:" line and is
+// reset after it, like a pending "## Cycle N" heading. When it starts with
+// "incomplete", the entry is marked incomplete so its verdict becomes "n/a".
+//
 // Explicit markers are preferred over occurrence counting because they are
 // author-stated and survive future format changes or section reordering.
 func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, string) {
@@ -411,6 +424,8 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 	triageRe := regexp.MustCompile(`(?i)After triage:\s*ACTION_REQUIRED=(\d+),\s*WORTH_CONSIDERING=(\d+),\s*DISMISSED=(\d+)`)
 	// Match: "## Cycle N" or "## Cycle N (date)" — explicit cycle section headings.
 	cycleHeadingRe := regexp.MustCompile(`(?i)^##\s+Cycle\s+(\d+)`)
+	// Match: "Reviewer status: <value>" — the reviewer's completion state.
+	reviewerStatusRe := regexp.MustCompile(`(?i)Reviewer status:\s*(\S*)`)
 
 	var entries []crossReviewCycleEntry
 	occurrenceCount := 0
@@ -418,6 +433,9 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 	// heading seen since the last "After triage:" line. 0 means no explicit
 	// heading has been seen; in that case occurrence counting is used.
 	pendingCycle := 0
+	// pendingIncomplete is true when the most recent "Reviewer status:" line
+	// since the last "After triage:" line starts with "incomplete".
+	pendingIncomplete := false
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -427,6 +445,12 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 		if m := cycleHeadingRe.FindStringSubmatch(line); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			pendingCycle = n
+			continue
+		}
+
+		// Check for a "Reviewer status:" line.
+		if m := reviewerStatusRe.FindStringSubmatch(line); m != nil {
+			pendingIncomplete = strings.HasPrefix(strings.ToLower(m[1]), "incomplete")
 			continue
 		}
 
@@ -444,9 +468,12 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 			}
 			// Reset pending heading after consuming it.
 			pendingCycle = 0
+			incomplete := pendingIncomplete
+			pendingIncomplete = false
 
 			entries = append(entries, crossReviewCycleEntry{
-				cycle: cycle,
+				cycle:      cycle,
+				incomplete: incomplete,
 				triage: Triage{
 					ActionRequired:   ar,
 					WorthConsidering: wc,

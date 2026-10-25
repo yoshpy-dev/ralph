@@ -373,7 +373,9 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 
 	// A surviving config.toml [hooks]/[[hooks.*]] table is a stale
 	// duplicate representation now that hooks.json is the source of truth.
-	if _, ok := raw["hooks"].(map[string]any); ok {
+	// Codex itself records hook trust under [hooks.state...], so a [hooks]
+	// table whose only child key is "state" is not a stale duplicate.
+	if hooksTable, ok := raw["hooks"].(map[string]any); ok && hasNonStateHooksKey(hooksTable) {
 		findings = append(findings, "both representations exist; hooks.json is the source of truth — remove the config.toml [hooks] entries")
 	}
 
@@ -397,6 +399,17 @@ func checkCodexEffectiveConfig(targetDir string) checkResult {
 	r.Status = "pass"
 	r.Detail = "hooks.json wired; confirm `codex trust .` ran for this project"
 	return r
+}
+
+// hasNonStateHooksKey reports whether a config.toml [hooks] table has any
+// child key other than "state" (Codex's own trust record).
+func hasNonStateHooksKey(hooksTable map[string]any) bool {
+	for k := range hooksTable {
+		if k != "state" {
+			return true
+		}
+	}
+	return false
 }
 
 // hookScriptBasenameRe extracts "*.sh" basenames out of a hooks.json command
@@ -484,6 +497,12 @@ func validateCodexHooksJSON(hooksJSONData []byte) []string {
 			if !ok {
 				findings = append(findings, fmt.Sprintf("hooks.json %s[%d] must be an object with a \"hooks\" array", eventName, i))
 				continue
+			}
+			// "matcher" is optional; when present it must be a string (a regex).
+			if matcherRaw, present := group["matcher"]; present {
+				if _, isString := matcherRaw.(string); !isString {
+					findings = append(findings, fmt.Sprintf("hooks.json %s[%d].matcher must be a string", eventName, i))
+				}
 			}
 			handlersRaw, ok := group["hooks"]
 			if !ok {
