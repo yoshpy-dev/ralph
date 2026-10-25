@@ -518,6 +518,14 @@ wrapper, as written below: a bare `ralph org disband` has no
 pushed branches or opened PRs, those stay on origin; close or delete the
 ones you do not keep there.
 
+The feature worktrees that `ralph org start --plan` made
+(`.claude/worktrees/org-<org_id>` under the main checkout) and their local
+branches go with the clone. To keep the clone, remove them first, from the
+clone's main checkout:
+`./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch`.
+The 2026-10-24 run did so for both orgs after their PRs were merged, before
+it stopped the server.
+
 Left outside the dedicated directory, in your own stores:
 
 - a trust entry for the repository in `~/.claude.json` (under
