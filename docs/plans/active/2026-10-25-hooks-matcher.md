@@ -1,7 +1,7 @@
 # hooks-matcher: checkCodexEffectiveConfig の既知の限界 2 件を直す
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-25 sha256:fc16043d3a2d
 - Owner: Claude Code (org leader hooks-matcher)
 - Date: 2026-10-25
 - Related request: 分割計画 recheck(digest 4f955a6f4269)の機能 hooks-matcher
