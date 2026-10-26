@@ -85,12 +85,12 @@ Critical forks: None(ユーザーの選択で範囲が決まり、残りは下�
 
 ## Acceptance criteria
 
-- [ ] AC1(RC2): `featureLeaderTask` の `- 予約したパス:` の行が、`shellQuote` で引用した `--scope` の引数を括弧の中に持つ。leader の雛形の手順 5 が、implementer と reviewer の spawn のどちらにもその引数を書き換えずに付けると書く。手順 3 の承認前の reviewer の spawn も手順 5 と同じ flag を使うと書く。「ミッション」の 2 が `--scope` で担当範囲を渡すこと(`autonomous` では必須)を書く
-- [ ] AC1b: `$`、バッククォート、単一引用符、二重引用符を含む予約と複数のパスの予約で、行の `--scope` の引数を `/bin/sh` に読ませると、展開されずに元の値(パスを `, ` でつないだもの)と同じ 1 つの引数になる(テストで確かめる)
-- [ ] AC2(RC5): 手順 14 が、`/pr` skill があればその手順(`.claude/skills/pr/SKILL.md`、Codex では `.agents/skills/pr/SKILL.md`)の題と本文の決まり(言語を含む)と `template.md` に合わせ、`/pr` skill そのものは実行しないと書く
-- [ ] AC3: `/org` skill の機能ごとの org の spawn の手順と leader の PR の文が、AC1・AC2 と同じ向きになっている。4 写しが同じで `scripts/check-skill-sync.sh` が通る
-- [ ] AC4: `internal/org/prompts_test.go` が AC1 と AC2 の文を固定し、既存の pin を残している。文を元に戻すとテストが落ちる(手で 1 回ずつ戻して確かめる)
-- [ ] AC5: tech-debt の RC2・RC5 の行が取り消し線の RESOLVED で、ブランチ名を書いている。仕様の FR-4 と受け入れ条件 5 は `[ ]` のままで、印(2026-10-26)がある。根拠の表の RC2・RC5 の「直す PR」がブランチ名になっている
+- [x] AC1(RC2): `featureLeaderTask` の `- 予約したパス:` の行が、`shellQuote` で引用した `--scope` の引数を括弧の中に持つ。leader の雛形の手順 5 が、implementer と reviewer の spawn のどちらにもその引数を書き換えずに付けると書く。手順 3 の承認前の reviewer の spawn も手順 5 と同じ flag を使うと書く。「ミッション」の 2 が `--scope` で担当範囲を渡すこと(`autonomous` では必須)を書く
+- [x] AC1b: `$`、バッククォート、単一引用符、二重引用符を含む予約と複数のパスの予約で、行の `--scope` の引数を `/bin/sh` に読ませると、展開されずに元の値(パスを `, ` でつないだもの)と同じ 1 つの引数になる(テストで確かめる)
+- [x] AC2(RC5): 手順 14 が、`/pr` skill があればその手順(`.claude/skills/pr/SKILL.md`、Codex では `.agents/skills/pr/SKILL.md`)の題と本文の決まり(言語を含む)と `template.md` に合わせ、`/pr` skill そのものは実行しないと書く
+- [x] AC3: `/org` skill の機能ごとの org の spawn の手順と leader の PR の文が、AC1・AC2 と同じ向きになっている。4 写しが同じで `scripts/check-skill-sync.sh` が通る
+- [x] AC4: `internal/org/prompts_test.go` が AC1 と AC2 の文を固定し、既存の pin を残している。文を元に戻すとテストが落ちる(手で 1 回ずつ戻して確かめる)
+- [x] AC5: tech-debt の RC2・RC5 の行が取り消し線の RESOLVED で、ブランチ名を書いている。仕様の FR-4 と受け入れ条件 5 は `[ ]` のままで、印(2026-10-26)がある。根拠の表の RC2・RC5 の「直す PR」がブランチ名になっている
 - [ ] AC6: `./scripts/run-verify.sh` が通り、Go のテストが手元の版と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
@@ -137,7 +137,11 @@ Critical forks: None(ユーザーの選択で範囲が決まり、残りは下�
 - [x] Plan reviewed(consult の計画の相談 consult-plan-rc2rc5 の 3 点と、Codex の計画助言 1 件(HIGH、予約のパスの引用)を承認の前に入れた)
 - [x] Plan approved(2026-10-26。ユーザーの決まり「作成したプランは自動承認します」による自動承認)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1・S2・S4(efddd301): `featureLeaderTask` の行、leader の雛形のミッションの 2 と手順 3・5・14、`feature_test.go` と `prompts_test.go`。Go のテストは go1.26.0 と go1.25.8 の両方で通り、文を 1 つずつ戻すとテストが落ちた(AC4、`go test -overlay` で写しを差し替えた)
+  - S3(c654d596): `/org` skill の leader のサイクルの手順 2 と「org の終わり方」の手順 6、4 写し。`check-skill-sync.sh` と `check-sync.sh` が通った。`go test ./internal/org/... ./internal/cli/...` の 1 回目は `TestOrgRegate_InterruptUndoesTheMergeAndRecordsNothing/SIGTERM` が load average 約 12 の下で 10 秒の待ちを切らして落ち、2 回目は通った(この slice は Go のコードを変えていない)
+  - S5(7d51236d): tech-debt の RC2・RC5 の行、仕様の FR-4 と受け入れ条件 5 の印(2026-10-26)と Status、根拠の表。`run-verify.sh` は S2 と S5 のあとでどちらも通った
+  - AC6 の Go のテストを 2 つの版で通すことは、test の段で確かめる
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
