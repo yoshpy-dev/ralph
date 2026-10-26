@@ -64,6 +64,10 @@ const (
 	// whose TASKs the approval check covers. Spawn and Send compare a seat's
 	// role with it, not its seat id.
 	implementerRole = "implementer"
+	// reviewerRole is the role (prompts/reviewer.md) that, in a feature org,
+	// runs `ralph org gate` at the leader's gate TASK. codexWritableRootArgs
+	// compares a seat's role with it, not its seat id.
+	reviewerRole = "reviewer"
 )
 
 // contentHashPattern is the shape of PlanContentHash: 64 lowercase hex digits.
