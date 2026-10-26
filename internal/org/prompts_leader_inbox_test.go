@@ -70,7 +70,9 @@ func leaderMonitorCommand(t *testing.T, text string) string {
 // does not come, since inbox.sh --quiet marks what it prints read; it runs
 // the long commands under run_in_background. For a Codex leader the section
 // says send does not reach it while it waits for seats, bounded or not, and
-// to end the turn when it waits for a reply only. The old sentences are gone.
+// to end the turn when it waits for a reply only. The old sentences are gone,
+// and so is the gate from both items, since the leader of a feature org asks
+// the reviewer for it (plan 2026-10-26-reviewer-runs-gate).
 func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 	text := renderLeaderWithAgmsgHome(t, "/opt/agmsg")
 	const scripts, team = "'/opt/agmsg/scripts'", "ralph-org-a"
@@ -105,10 +107,10 @@ func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 		{"- `inbox.sh --quiet` は", "出したメッセージを既読にします"},
 		{"- `inbox.sh --quiet` は", "張り直す前と、届くはずのメッセージ(座席の RESULT など)が来ないときは、`bash " + scripts + "/history.sh " + team + " leader 50` で直近の 50 件を読み、まだ扱っていないものを扱います"},
 		{"- `inbox.sh --quiet` は", "あなたが送った TASK も 50 件に入るので、足りなければ数を増やします"},
-		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "`ralph org gate` や `ralph org wait` のように終わるまで時間のかかるコマンドは、`run_in_background` で走らせて手番を終えます"},
+		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "`ralph org wait` のように終わるまで時間のかかるコマンドは、`run_in_background` で走らせて手番を終えます"},
 		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "終わると知らせが来て、次の手番が始まります"},
 		{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "`ralph org status` と `ralph org read` はすぐ返るので、前面で打ってかまいません"},
-		{"- Monitor ツールがないとき(Codex)", "座席を待つあいだ(前面のループ、`ralph org wait`、gate)は手番が終わらないので、`ralph org send` は届きません"},
+		{"- Monitor ツールがないとき(Codex)", "座席を待つあいだ(前面のループ、`ralph org wait`)は手番が終わらないので、`ralph org send` は届きません"},
 		{"- Monitor ツールがないとき(Codex)", "待つ時間を区切っても、待っているあいだは届きません"},
 		{"- Monitor ツールがないとき(Codex)", "`bash " + scripts + "/inbox.sh " + team + " leader --quiet` で読みます"},
 		{"- Monitor ツールがないとき(Codex)", "返事(DECISION)だけを待つときは、座席を待たずに手番を終えてください"},
@@ -116,6 +118,13 @@ func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 	} {
 		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {
 			t.Errorf("expected the agmsg inbox item naming %q to contain %q, got item:\n%s", c.marker, c.want, item)
+		}
+	}
+	// Neither the run_in_background item nor the Codex item names the gate
+	// among the leader's waits.
+	for _, marker := range []string{"- Bash ツールの `run_in_background` があるとき(Claude Code)", "- Monitor ツールがないとき(Codex)"} {
+		if item, _ := markdownItem(section, marker); strings.Contains(item, "gate") {
+			t.Errorf("expected the agmsg inbox item naming %q not to name the gate, which the reviewer runs, got item:\n%s", marker, item)
 		}
 	}
 	// The end line the prose names is the one the command echoes.
@@ -132,11 +141,14 @@ func TestRenderRolePrompt_Leader_AgmsgInboxWaitsByEndingTheTurn(t *testing.T) {
 // TestRenderRolePrompt_Leader_WaitsPointAtTheAgmsgInboxSection pins the rest
 // of AC1 of plan 2026-10-23-busy-leader: every other wait of the leader
 // template (the mission's observing item, the QUESTION and BLOCKED of the
-// feature org's steps 3 and 7, the gate of step 12, a raised item's reply,
-// and the BLOCKEDs of the 運用規律 items) points at the agmsg inbox section,
-// and `ralph org wait` is named only there and in the mission's item, which
-// says to run it the section's way, so no text has the leader run it in the
-// foreground.
+// feature org's steps 3 and 7, the reviewer's answer to the gate TASK of
+// step 12, a raised item's reply, and the BLOCKEDs of the 運用規律 items)
+// points at the agmsg inbox section, and `ralph org wait` is named only there
+// and in the mission's item, which says to run it the section's way, so no
+// text has the leader run it in the foreground. Since plan
+// 2026-10-26-reviewer-runs-gate the reviewer runs the gate, so how it waits
+// for the gate's file is pinned by
+// TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand.
 func TestRenderRolePrompt_Leader_WaitsPointAtTheAgmsgInboxSection(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	const pointer = "「agmsg の受信箱の運用」の節"
@@ -152,7 +164,7 @@ func TestRenderRolePrompt_Leader_WaitsPointAtTheAgmsgInboxSection(t *testing.T) 
 		{"## ミッション", "4. `ralph org status`", "座席の RESULT や返事は前面で待たず、" + pointer + "のとおり手番を終えて待つ(`ralph org wait` もその節のとおりに走らせる)"},
 		{"## 機能ごとの org", "3. (per-plan)", "上げたら、" + pointer + "のとおり手番を終えて返事を待つ"},
 		{"## 機能ごとの org", "7. (per-plan)", "返事が来るまで implementer の spawn と TASK を打たずに待つ(待ち方は" + pointer + ")"},
-		{"## 機能ごとの org", "12. `ralph org gate", "終わりの知らせが来てから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む(" + pointer + ")"},
+		{"## 機能ごとの org", step12Marker, "結果が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えをしない)、implementer に TASK を送らない(待ち方は" + pointer + ")"},
 		{"## 件を上げる(`ralph org escalate`)", "BLOCKED と QUESTION を上げたら", "返事の DECISION は手番を終えた pane に届くので、" + pointer + "のとおり手番を終えて待つ"},
 		{"## 運用規律", "TASK の `ralph org send` が", "返事が来るまで spawn と TASK の送信を打たずに待ってください(待ち方は" + pointer + ")"},
 		{"## 運用規律", "stdout に `spawn failed:` の行が", "返事が来るまでその座席の spawn を打たずに待ってください(待ち方は" + pointer + ")"},
@@ -161,21 +173,6 @@ func TestRenderRolePrompt_Leader_WaitsPointAtTheAgmsgInboxSection(t *testing.T) 
 			t.Errorf("expected the %s item naming %q to contain %q, got item:\n%s", c.section, c.marker, c.want, item)
 		}
 	}
-	// Step 12 starts the gate under run_in_background, ends the turn, and
-	// reads the file only on the completion notice.
-	if item, ok := markdownItem(sections["## 機能ごとの org"], "12. `ralph org gate"); ok {
-		s, at := squashSpace(item), -1
-		order := []string{"> .harness/state/gate-org-a.out 2>&1", "`run_in_background` で走らせて手番を終え", "終わりの知らせが来てから", "の行を読む"}
-		for _, step := range order {
-			i := strings.Index(s, squashSpace(step))
-			if i < 0 || i < at {
-				t.Errorf("expected step 12 to say %q in this order, but %q is missing or out of order, got item:\n%s", order, step, item)
-				break
-			}
-			at = i
-		}
-	}
-
 	const wait = "ralph org wait"
 	mission4, _ := markdownItem(sections["## ミッション"], "4. `ralph org status`")
 	all := strings.Count(squashSpace(text), squashSpace(wait))
