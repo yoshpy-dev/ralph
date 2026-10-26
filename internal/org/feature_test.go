@@ -506,11 +506,13 @@ func TestStartFeature_SlugAtTheLengthLimit(t *testing.T) {
 }
 
 // TestFeatureLeaderTask pins the leader's task text: the lines naming the
-// split plan, feature, worktree, branch, reserved paths, dependencies,
-// approval mode, procedure and ledger, then the feature's body after a blank
-// line; no dependency reads なし, and an empty body adds nothing. The ledger
-// line's --state-dir is one POSIX shell word, also for a path with a space
-// or a single quote.
+// split plan, feature, worktree, branch, reserved paths with the seats'
+// --scope, dependencies, approval mode, procedure and ledger, then the
+// feature's body after a blank line; no dependency reads なし, and an empty
+// body adds nothing. The ledger line's --state-dir is one POSIX shell word,
+// also for a path with a space or a single quote, and so is the reserved
+// paths line's --scope, also for two paths and for a path with a single
+// quote.
 func TestFeatureLeaderTask(t *testing.T) {
 	plan := &SplitPlan{ID: "auth-split", Path: "/state/splits/auth-split.md", Digest: "0123456789ab"}
 	head := func(slug, worktree, branch, reserve, deps, approval, ledger string) string {
@@ -529,18 +531,30 @@ func TestFeatureLeaderTask(t *testing.T) {
 		DependsOn: []string{"auth-core", "auth-api"}, Body: "Objective: document it.\n\n- [ ] AC1",
 	}
 	got := featureLeaderTask(plan, withBody, "/repo/.harness/state/org", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", config.ApprovalModePerPlan)
-	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs", "docs/auth/, docs/x.md", "auth-core, auth-api", "per-plan",
+	want := head("auth-docs", "/repo/.claude/worktrees/org-auth-docs", "feat/auth-docs",
+		"docs/auth/, docs/x.md(座席の spawn には --scope 'docs/auth/, docs/x.md' を付ける)", "auth-core, auth-api", "per-plan",
 		"/repo/.harness/state/org(ralph org のコマンドには必ず --state-dir '/repo/.harness/state/org' を付ける)") +
 		"\n\nObjective: document it.\n\n- [ ] AC1"
 	if got != want {
 		t.Errorf("task =\n%s\nwant\n%s", got, want)
 	}
 	bare := SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"internal/auth/"}}
-	for _, c := range []struct{ stateDir, approval, ledger string }{
-		{"/my ledgers/org", config.ApprovalModeSplit, "/my ledgers/org(ralph org のコマンドには必ず --state-dir '/my ledgers/org' を付ける)"},
-		{"/it's/org", config.ApprovalModePerPlan, `/it's/org(ralph org のコマンドには必ず --state-dir '/it'\''s/org' を付ける)`},
+	quoted := SplitFeature{Slug: "auth-core", Type: "fix", Reserve: []string{"it's/auth.md"}}
+	for _, c := range []struct {
+		f                                   SplitFeature
+		stateDir, approval, reserve, ledger string
+	}{
+		{bare, "/my ledgers/org", config.ApprovalModeSplit,
+			"internal/auth/(座席の spawn には --scope 'internal/auth/' を付ける)",
+			"/my ledgers/org(ralph org のコマンドには必ず --state-dir '/my ledgers/org' を付ける)"},
+		{bare, "/it's/org", config.ApprovalModePerPlan,
+			"internal/auth/(座席の spawn には --scope 'internal/auth/' を付ける)",
+			`/it's/org(ralph org のコマンドには必ず --state-dir '/it'\''s/org' を付ける)`},
+		{quoted, "/state", config.ApprovalModePerPlan,
+			`it's/auth.md(座席の spawn には --scope 'it'\''s/auth.md' を付ける)`,
+			"/state(ralph org のコマンドには必ず --state-dir '/state' を付ける)"},
 	} {
-		if got, want := featureLeaderTask(plan, bare, c.stateDir, "/wt", "fix/auth-core", c.approval), head("auth-core", "/wt", "fix/auth-core", "internal/auth/", "なし", c.approval, c.ledger); got != want {
+		if got, want := featureLeaderTask(plan, c.f, c.stateDir, "/wt", "fix/auth-core", c.approval), head("auth-core", "/wt", "fix/auth-core", c.reserve, "なし", c.approval, c.ledger); got != want {
 			t.Errorf("task =\n%s\nwant\n%s", got, want)
 		}
 	}
@@ -565,6 +579,54 @@ func TestFeatureLeaderTask_StateDirIsOneShellWord(t *testing.T) {
 		}
 		if want := "1|" + dir; string(got) != want {
 			t.Errorf("--state-dir %s reads in sh as %q, want %q", word, got, want)
+		}
+	}
+}
+
+// TestFeatureLeaderTask_ScopeIsOneShellWord pins AC1b of plan
+// 2026-10-26-leader-spawn-pr-rules: the --scope argument of the reserved
+// paths line, run through /bin/sh, is the reserved paths joined with ", " as
+// one argument, for one path and for several, and for paths with a `$`, a
+// backtick, a single quote, a double quote, a backslash and a glob, which
+// normalizeReservePath lets through and the shell would otherwise expand or
+// split.
+func TestFeatureLeaderTask_ScopeIsOneShellWord(t *testing.T) {
+	plan := &SplitPlan{ID: "s", Path: "/state/splits/s.md", Digest: "0123456789ab"}
+	const line, lead, tail = "- 予約したパス: ", "(座席の spawn には --scope ", " を付ける)"
+	for _, reserve := range [][]string{
+		{"a/"},
+		{"docs/auth/", "docs/x.md"},
+		{"app/routes/$slug.tsx"},
+		{"a/`id`/"},
+		{"it's/x.md"},
+		{`say"hi"/`},
+		{"app/$HOME/", "b'c/", "d\"e`f`/", `g\h`, "internal/*.go"},
+	} {
+		for _, p := range reserve {
+			if got, err := normalizeReservePath(p); err != nil || got != p {
+				t.Fatalf("fixture %q is not a reserve path as it is: normalizeReservePath = %q, %v", p, got, err)
+			}
+		}
+		want := strings.Join(reserve, ", ")
+		task := featureLeaderTask(plan, SplitFeature{Slug: "a", Type: "feat", Reserve: reserve}, "/state", "/wt", "feat/a", config.ApprovalModePerPlan)
+		var reserveLine string
+		for l := range strings.SplitSeq(task, "\n") {
+			if strings.HasPrefix(l, line) {
+				reserveLine = l
+				break
+			}
+		}
+		rest, ok := strings.CutPrefix(reserveLine, line+want+lead)
+		arg, ok2 := strings.CutSuffix(rest, tail)
+		if !ok || !ok2 || arg == "" {
+			t.Fatalf("no %s%s%s<arg>%s line in the task:\n%s", line, want, lead, tail, task)
+		}
+		got, err := exec.Command("/bin/sh", "-c", "set -- "+arg+`; printf '%s|%s' "$#" "$1"`).Output()
+		if err != nil {
+			t.Fatalf("/bin/sh with %s: %v", arg, err)
+		}
+		if string(got) != "1|"+want {
+			t.Errorf("--scope %s reads in /bin/sh as %q, want %q", arg, got, "1|"+want)
 		}
 	}
 }

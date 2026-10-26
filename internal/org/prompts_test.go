@@ -471,7 +471,13 @@ func TestRenderRolePrompt_Leader_ReportThenDisbandAsLastCommand(t *testing.T) {
 // TestRenderRolePrompt_Leader_FeatureOrgGate). A failed secret scan,
 // push, or gh pr create is escalated as a BLOCKED, and the opened PR as a
 // RESULT with the org_id for its TASK_ID (plan 2026-10-10-org-inbox-escalate,
-// AC8). The retired formation patterns are mentioned nowhere.
+// AC8). The retired formation patterns are mentioned nowhere. Since the
+// default autonomous permission mode refuses a seat spawned with no --scope,
+// the mission's spawn item passes one, and steps 3 and 5 pass the --scope of
+// the reserved paths line featureLeaderTask writes, as it is, to both seats;
+// step 14 matches the PR's title and body to the rules for them in the /pr
+// skill's procedure (its language among them) and to its template.md (plan
+// 2026-10-26-leader-spawn-pr-rules, AC1, AC2 and AC4).
 func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 
@@ -481,6 +487,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 	}
 	if !strings.Contains(mission, "implementer 1 席と reviewer 1 席を既定") {
 		t.Errorf("expected the leader mission to make one implementer and one reviewer seat the default, got section:\n%s", mission)
+	}
+	const missionScope = "`--scope` で座席の担当範囲を渡す(既定の permission mode `autonomous` では必須で、ないと spawn が断られる。" +
+		"機能ごとの org では、タスクの `- 予約したパス:` の行の括弧にある引数を使う。「機能ごとの org」の節の手順 5)"
+	if item, ok := markdownItem(mission, "implementer 1 席と reviewer 1 席を既定"); !ok || !containsPhrase(item, missionScope) {
+		t.Errorf("expected the leader mission's spawn item to say %q, got item:\n%s", missionScope, item)
 	}
 
 	// The template routes on the first line of the task start --plan builds.
@@ -539,10 +550,23 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		!containsPhrase(intro, "start と別の台帳を使うことがあります") {
 		t.Errorf("expected the 機能ごとの org intro to have every ralph org command carry the --state-dir of the task's `%s` line, and why, got section:\n%s", ledgerLine, section)
 	}
+	// The seats' spawns carry the --scope in the brackets of the task's
+	// reserved paths line, one shell word ralph quotes
+	// (TestFeatureLeaderTask_ScopeIsOneShellWord).
+	const reserveLine = "- 予約したパス:"
+	if !strings.Contains(task, "\n"+reserveLine+" a/(座席の spawn には --scope 'a/' を付ける)\n") {
+		t.Fatalf("featureLeaderTask no longer writes the %q line with the --scope the leader template points to; got:\n%s", reserveLine, task)
+	}
 	for _, c := range []struct{ marker, want string }{
 		{"1 席ずつ spawn する", "`--id` は `implementer` と `reviewer` にする"},
+		{"1 席ずつ spawn する", "どちらにも `--cwd .`(この worktree)と `--model` を渡し、タスクの `" + reserveLine +
+			"` の行の括弧にある `--scope` の引数を書き換えずに付ける(引数は ralph が shell 用に引用したものなので、引用符を足したり外したりしない)"},
+		{"1 席ずつ spawn する", "既定の permission mode `autonomous` では、`--scope` のない spawn は断られる"},
+		{"1 席ずつ spawn する", "implementer の雛形は scope の中のパスだけを `git add` し、reviewer の雛形は report と gate の生成物を scope の外でも書いてよいので、どちらの `--scope` も予約にそろえる"},
+		{"3. (per-plan)", "spawn のほかの flag も手順 5 と同じにし、`--cwd .`・`--model`・`--scope`(タスクの `" + reserveLine + "` の行の括弧にある引数)を付ける"},
 		{"./scripts/archive-plan.sh <", "merge のあとの後始末(この節の 15)が止まる"},
 		{"secret-scan-branch.sh --strict", "push せずに止まり、`ralph org escalate` で BLOCKED を上げる"},
+		{"gh pr create` で PR", "`/pr` skill があれば、その手順(`.claude/skills/pr/SKILL.md`。Codex では `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、タイトルの prefix など)と、本文の雛形 `template.md` に合わせる"},
 		{"gh pr create` で PR", "`/pr` skill そのものは実行しない"},
 		{"gh pr create` で PR", "エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
 		{"gh pr create` で PR", "PR ができたら、PR の URL を EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は `org-a`)"},

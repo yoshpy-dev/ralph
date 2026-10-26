@@ -376,10 +376,11 @@ const featurePreambleLead = "全機能の座席に適用する決まり(分割�
 
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
-// the branch, the reserved paths, the features it depends on, the approval
-// mode recorded in the binding (approval), the procedure to follow, and the
-// ledger stateDir with the --state-dir to pass to every `ralph org`
-// command; then, when plan.Preamble is not blank, a blank line, the line
+// the branch, the reserved paths with the --scope to pass to every seat's
+// spawn, the features it depends on, the approval mode recorded in the
+// binding (approval), the procedure to follow, and the ledger stateDir with
+// the --state-dir to pass to every `ralph org` command; then, when
+// plan.Preamble is not blank, a blank line, the line
 // featurePreambleLead and the preamble as the plan has it in a code fence
 // (fenceFor), so that its `## ` headings are not read as sections of the
 // role prompt; then a blank line and f's body as the plan has it. A blank
@@ -390,17 +391,25 @@ const featurePreambleLead = "全機能の座席に適用する決まり(分割�
 // commands cannot count on either; the line names the ledger always, the
 // default one too, so that a pane whose ralph resolves the default ledger
 // otherwise (an older release) stays on start's ledger as well.
+// Under the default autonomous permission mode spawn refuses a seat with no
+// --scope (autonomousScopeGateErr), so the reserved paths line names the
+// reservation as the --scope for the seats. Like the ledger line's
+// --state-dir, it is one shell word (shellQuote) for the leader to copy as
+// it is: normalizeReservePath lets a `$`, a backtick and quotes through, and
+// the paths are joined with ", ", so a value the leader quoted itself could
+// be split or expanded by the shell.
 func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval string) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
 		deps = strings.Join(f.DependsOn, ", ")
 	}
+	reserve := strings.Join(f.Reserve, ", ")
 	task := strings.Join([]string{
 		fmt.Sprintf("- 分割計画: %s(%s、承認の digest %s)", plan.ID, plan.Path, plan.Digest),
 		"- 機能: " + f.Slug,
 		fmt.Sprintf("- worktree: %s(leader の cwd)", worktree),
 		"- ブランチ: " + branch,
-		"- 予約したパス: " + strings.Join(f.Reserve, ", "),
+		fmt.Sprintf("- 予約したパス: %s(座席の spawn には --scope %s を付ける)", reserve, shellQuote(reserve)),
 		"- 依存する機能: " + deps,
 		"- 承認方式: " + approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",

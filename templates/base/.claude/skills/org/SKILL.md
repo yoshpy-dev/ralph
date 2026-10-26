@@ -999,13 +999,15 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
    gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも
    `git log` を打つ)。HEAD が違えば 4 の gate を打ち直し、同じなら
    `git push -u origin <type>/<slug>` と `gh pr create` で PR を 1 本作る。
-   タイトルと本文は `/pr` skill の雛形に合わせてよいが、`/pr` skill は実行
-   しない(PR のあと task worktree と local branch を消すので、leader の cwd が
-   消える)。push か `gh pr create` が失敗したら(ネットワークのない sandbox
-   など)、打ち直さずにエラーを本文に書いて `ralph org escalate` で `BLOCKED`
-   を上げる。PR ができたら、gate の `HEAD:` と `BASE:` の 2 行をヘッダに写し、
-   PR の URL を EVIDENCE に書いて `RESULT` を escalate する(TASK_ID は
-   org_id)。
+   `/pr` skill があれば、その手順(`.claude/skills/pr/SKILL.md`。Codex では
+   `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
+   タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
+   `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
+   ので、leader の cwd が消える)。push か `gh pr create` が失敗したら
+   (ネットワークのない sandbox など)、打ち直さずにエラーを本文に書いて
+   `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、gate の `HEAD:`
+   と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて `RESULT`
+   を escalate する(TASK_ID は org_id)。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
 gate のあとにコミットを足さない。足したら gate を打ち直す。座席を gate の
@@ -1301,8 +1303,14 @@ receipts / 役割雛形)を使うため、手順は共通。
 2. 座席を `spawn` する(役割別プロンプト雛形が自動展開される)。既定は
    implementer 1 席と reviewer 1 席。`--model` を明示する(前文のブロックに
    driver と model があれば、それを `--driver` と `--model` に使う)。
+   `--scope` で座席の担当範囲を渡す(既定の permission mode `autonomous` では、
+   `--scope` のない spawn は断られる)。機能ごとの org では、implementer にも
+   reviewer にも、タスクの `- 予約したパス:` の行の括弧にある `--scope` の
+   引数を書き換えずに付ける(ralph が shell 用に引用したものなので、引用符を
+   足したり外したりしない)。
    per-plan の機能の org では、implementer は承認のあとに立てる(reviewer は
-   承認の前に立てて計画のレビューを頼んでよい)。
+   承認の前に立てて計画のレビューを頼んでよい。そのときも `--model` と
+   `--scope` は上と同じにする)。
 3. `send` で TASK を委譲する。per-plan の機能の org では、implementer への TASK に
    承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
 4. `wait` / `status` / `read` で座席の状態を観察する。leader が手番の途中に
