@@ -663,7 +663,12 @@ ID が 20 を超えると、最初の 20 のあとに ` plus <数> more` が付�
      こと)。`ralph status`、`ralph org read --org-id <org> --seat leader`、
      `ralph org report --org-id <org> --out .harness/state/org-reports` で
      org の様子を読み、leader に知らせるか、`ralph org inbox notify <id>` で
-     人に送るかを決める。leader に知らせるときは、下の「答える順」のとおりに
+     人に送るかを決める。leader が reviewer に gate を頼んでいる間は、gate が
+     長いと reviewer の停滞の件(`SEAT: reviewer`、`CONDITION: stall`)が出る
+     ことがある(Codex の reviewer は gate を前面で打つので、画面が長く
+     変わらない)。`ralph org read --org-id <org> --seat reviewer` で reviewer の
+     画面を読み、gate が走っていれば待ち、終わってから上のとおり決める。
+     leader に知らせるときは、下の「答える順」のとおりに
      DECISION を送り、resolve する。人に送ったときは、人の判断を待って
      resolve する。座席や org を止めるか(`ralph org stop`、
      `ralph org disband`)は人が決める。
@@ -705,7 +710,7 @@ ALERT の項のどちらか(leader に知らせるか、人に送るか)を済�
 2. `ralph org send --org-id <org> --to leader --text "$(cat <ファイル>)"` で
    leader に送る。send は、leader の手番が終わって herdr が `idle` か `done`
    と報告するのを `--timeout-ms`(既定 30 秒)まで待ってから打つ。座席を
-   前面で待っている leader(前面のループ、`ralph org wait`、gate)には、
+   前面で待っている leader(前面のループ、`ralph org wait`)には、
    その手番が終わるまで届かない。
 
    - Claude Code: send に `--timeout-ms 1500000` を付け、Bash の
@@ -929,7 +934,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
    あとに、人に頼まれないまま打ち直さない。直すのは人か、立て直した機能の
    org。
 4. 理由の欄が `ralph org gate --org-id <org>` を名指すブランチ(機能の org が
-   走っている)には打たない。そのブランチは leader が gate を打つ。同じ
+   走っている)には打たない。そのブランチは、leader が reviewer に頼んで
+   gate を打たせる。同じ
    org_id が別の機能で走っているブランチも、その org が disband するまで
    打たない。
 
