@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -104,6 +106,63 @@ func notIgnoredSignals(sigs ...os.Signal) []os.Signal {
 		}
 	}
 	return kept
+}
+
+// signalCauseContext returns a copy of parent that the first of sigs cancels
+// with the cause "<signal> signal received" ("terminated signal received" for
+// SIGTERM), as signal.NotifyContext does; when parent ends first, the cause
+// stays parent's. received returns the first of sigs that the goroutine took,
+// which cancelled ctx unless ctx had just ended, or nil when it took none (no
+// signal came, or parent or stop ended ctx first). stop cancels ctx (cause
+// context.Canceled), waits for the goroutine to end, then unregisters sigs, so
+// once stop has returned, received no longer changes. The goroutine ends at
+// the first signal or when ctx ends, but sigs stay registered with
+// signal.Notify until stop runs, so a later signal is caught too (and dropped
+// once the channel's one slot is full) and does not end the process.
+//
+// signal.NotifyContext is not used because it does not say which signal
+// arrived, and the director's wait raises that signal again
+// (orgDirectorWaitReraise). With no sigs it registers none, since
+// signal.Notify with no signals would relay every signal (SIGCHLD and SIGURG
+// too); the director's wait drops the ones that were ignored when ralph
+// started (notIgnoredSignals).
+func signalCauseContext(parent context.Context, sigs ...os.Signal) (ctx context.Context, received func() os.Signal, stop func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+	ch := make(chan os.Signal, 1)
+	if len(sigs) > 0 {
+		signal.Notify(ch, sigs...)
+	}
+	var (
+		mu  sync.Mutex
+		got os.Signal
+	)
+	ended := make(chan struct{})
+	if ctx.Err() == nil {
+		go func() {
+			defer close(ended)
+			select {
+			case s := <-ch:
+				mu.Lock()
+				got = s
+				mu.Unlock()
+				cancel(errors.New(s.String() + " signal received"))
+			case <-ctx.Done():
+			}
+		}()
+	} else {
+		close(ended)
+	}
+	received = func() os.Signal {
+		mu.Lock()
+		defer mu.Unlock()
+		return got
+	}
+	stop = func() {
+		cancel(nil)
+		<-ended
+		signal.Stop(ch)
+	}
+	return ctx, received, stop
 }
 
 // orgDirectorWaitReraise ends the process by sig, the signal that ended a

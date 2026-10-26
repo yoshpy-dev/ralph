@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -93,13 +92,14 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				parent = context.Background()
 			}
 			// The first SIGINT, SIGTERM, or SIGHUP cancels ctx with a cause
-			// that names it (gateSignalContext), and Gate stops the running
+			// that names it ("<signal> signal received", signal.NotifyContext),
+			// which Gate's interrupt error prints, and Gate stops the running
 			// script's process group (SIGTERM, then SIGKILL after its grace):
 			// the group is not ralph's, so a signal to ralph's group or a
 			// closed terminal does not reach it. Later ones are caught too
 			// until stop runs, so a second Ctrl-C cannot end ralph before the
 			// group is stopped.
-			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			// Dir is left empty: Gate reads os.Getwd().
 			res, err := rt.Gate(ctx, org.GateParams{OrgID: *orgID, Env: os.Environ()})
@@ -109,78 +109,6 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			return printGateResult(cmd.OutOrStdout(), res)
 		},
 	}
-}
-
-// gateSignalContext returns a copy of parent that the first of sigs cancels
-// with the cause "<signal> signal received" ("interrupt signal received" for
-// SIGINT, "terminated signal received" for SIGTERM, "hangup signal received"
-// for SIGHUP), and a stop that cancels it (cause context.Canceled) and
-// unregisters sigs. When parent ends first, the cause stays parent's
-// ("context canceled" for the command's context). Gate's interrupt error
-// prints the cause, so it names the signal.
-//
-// It does what signal.NotifyContext does from Go 1.26. NotifyContext itself
-// is not used: it sets that cause only from Go 1.26, and go.mod allows Go
-// 1.25.8, which the release build uses; there the cause is only "context
-// canceled" (PR #225's CI).
-//
-// The goroutine ends at the first signal or when ctx ends, but sigs stay
-// registered with signal.Notify until stop runs, so a later signal is caught
-// too (and dropped once the channel's one slot is full) and does not end
-// ralph.
-//
-// It is signalCauseContext without its second result, the signal that
-// arrived, which only `ralph org wait --inbox --director` reads.
-func gateSignalContext(parent context.Context, sigs ...os.Signal) (context.Context, func()) {
-	ctx, _, stop := signalCauseContext(parent, sigs...)
-	return ctx, stop
-}
-
-// signalCauseContext is gateSignalContext with one more result: received
-// returns the first of sigs that the goroutine took, which cancelled ctx
-// unless ctx had just ended, or nil when it took none (no signal came, or
-// parent or stop ended ctx first). stop waits for the goroutine to end, so
-// once stop has returned, received no longer changes. With no sigs it
-// registers none, since signal.Notify with no signals would relay every
-// signal (SIGCHLD and SIGURG too); the director's wait drops the ones that
-// were ignored when ralph started (notIgnoredSignals).
-func signalCauseContext(parent context.Context, sigs ...os.Signal) (ctx context.Context, received func() os.Signal, stop func()) {
-	ctx, cancel := context.WithCancelCause(parent)
-	ch := make(chan os.Signal, 1)
-	if len(sigs) > 0 {
-		signal.Notify(ch, sigs...)
-	}
-	var (
-		mu  sync.Mutex
-		got os.Signal
-	)
-	ended := make(chan struct{})
-	if ctx.Err() == nil {
-		go func() {
-			defer close(ended)
-			select {
-			case s := <-ch:
-				mu.Lock()
-				got = s
-				mu.Unlock()
-				cancel(errors.New(s.String() + " signal received"))
-			case <-ctx.Done():
-			}
-		}()
-	} else {
-		close(ended)
-	}
-	received = func() os.Signal {
-		mu.Lock()
-		defer mu.Unlock()
-		return got
-	}
-	stop = func() {
-		cancel(nil)
-		<-ended
-		signal.Stop(ch)
-	}
-	return ctx, received, stop
 }
 
 // gateFailedScripts names, for the gate_failed reasons that come from a
