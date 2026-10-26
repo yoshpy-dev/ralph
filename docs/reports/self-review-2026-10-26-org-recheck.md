@@ -61,7 +61,7 @@ _(行は足していない。)_
   - 直すなら、F1〜F6 と N1〜N4 はすべて evidence、手順書、tech-debt、仕様のいずれかで、「この task の pipeline の記録」(`docs/reports/` の task の報告と insight event)ではない。`.claude/rules/ralph/post-implementation-pipeline.md` の記録だけの修正の例外は使えず、cycle 2 の `/self-review` から回す(上限の 2 回のうちの 2 回目)。F4・F5・N1 は手順書と `templates/base/` の写しを同じバイト列で直す。直さずに `/pr` で既知の穴として残す場合は、F1〜F3 の 3 件を PR の本文に書く(読み手が数を信じて使う箇所)。
   - `/verify` で、手順書の 2 つの写しが `scripts/check-sync.sh` を通ること(`cmp` は一致を確認済み)、`docs/plans/active/` を指す参照が `/pr` の archive で rewrite されるのは tech-debt の行だけで、evidence の冒頭・仕様の Status・根拠の表の参照は rewrite されないこと(前例あり。`director-liveness-livefire`)を見る。
   - RC9 の「読む順序のために exit 4 になった」は、コードと時刻からの推論のまま(evidence と tech-debt の行も推論と書いている)。確かめるテストは行の trigger がすでに求めている。この PR では足さない。
-  - insight event は、次の 1 行で `docs/insights/events/2026-10-26-org-recheck.jsonl` に追記する(この報告のコミットには入れていない):
+  - insight event は、次の 1 行で `docs/insights/events/2026-10-26-org-recheck.jsonl` に追記する(この報告のコミットには入れていない。sync-docs で訂正: `insights-append.sh` は UTC の日付でファイルを選ぶので、実際の追記先は `2026-10-25-org-recheck.jsonl` だった(1b4d2ae1)):
     `./scripts/insights-append.sh --slug org-recheck --flow standard --phase self_review --verdict pass --critical 0 --high 0 --medium 0 --low 6 --cycle auto --source skill`
 
 ## 直したもの(cycle 1、レビューのあと)
