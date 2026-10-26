@@ -48,3 +48,44 @@ _(行を足していないので `docs/tech-debt/` への追記はない。)_
 
 - Merge: OK(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3)
 - Follow-ups: 任意。LOW の 1 件目と 3 件目は文言の直し、2 件目は次にそのテストファイルを編集するときに分ける。直しはどれも `.go` の編集なので、直す場合は `/self-review` から回し直す。
+
+## Run 2
+
+- Date: 2026-10-27
+- Reviewer: reviewer サブエージェント(`/self-review`)。post-implementation pipeline の 2 回目で、cycle は 1 のまま。cross-review ではなく、`/test` が出したテストの穴(G1・G2)を塞ぐ追加(S4・S5)で回し直した。
+- Scope: run 1 以降の `git diff f6725ebf..HEAD -- internal/ docs/tech-debt/` を精読し、`git diff origin/main...HEAD`(HEAD 7ddf3c36、17 ファイル、+994/-166)の全体を文脈として読み直した。run 1 以降の Go の変更は 3afc1a81 の `internal/cli/org_wait_director_test.go` だけで、`cmd/` と `internal/cli/org_gate.go`・`org_merge.go`・`org_regate.go` には触れていない。診断の対象は diff の品質だけで、テスト、静的検査、spec 適合、文書のずれは見ていない。
+
+### Evidence reviewed (run 2)
+
+- 3afc1a81(`internal/cli/org_wait_director_test.go:590-609` の新しい段)を `signalCauseContext`(`internal/cli/org_wait_director.go:129-166`)と照らした。親が呼ぶ前に終わっていると `ctx.Err() != nil` の枝(152-154 行)で goroutine を起こさず `ended` を閉じ、`stop` は `cancel(nil)`、閉じた `ended` からの受信、`signal.Stop` の順で返る。段の期待(`ctx.Err()` が `context.Canceled`、`context.Cause` が親の原因、`stop` が 5 秒以内に返る、`received()` が nil)はこの枝の挙動と合う。`defer stop()`(577 行)は最初の `stop` に束縛済みで、593 行の再代入で変わらない。`cancelEnded` は呼んでいて、`go vet` の lostcancel には当たらない形。`stop` が返らない場合は goroutine を 1 つ残して `t.Fatal` が文を出して終わる。
+- 564-571 行の doc comment は「後で終わる親」「先に終わっていた親」「`stop`」の 3 つを言い、`received` が nil になるのも 3 つで、段の数と合う。
+- bceca742(`docs/tech-debt/README.md:236`)は `|` が 6 個(5 欄)で 235 行と同じ形。名指しの `newOrgGateCmd`・`newOrgMergeCmd`・`newOrgRegateCmd` は `org_gate.go:24`・`org_merge.go:35`・`org_regate.go:28` にある。「gate の呼び出しのコメントは 2 発目の Ctrl-C を言い、merge と regate のコメントは `stop` まで後の signal を捕まえるとだけ言う」は `org_gate.go:99-101` と、`org_merge.go:194-196`・`org_regate.go:143-145` のとおり。「the SIGKILL row above」は 231 行。Evidence 欄の `docs/reports/test-2026-10-27-go-1-27.md`(probe 3 と G1)と `docs/evidence/test-2026-10-27-go-1-27.txt`(254 行の Probe 3: 23 本が通る行、使い捨てのテストが 3 回通る行)は実在し、本文の「23 tests」と合う。
+- 計画の Progress 行(S4 は 3afc1a81、S5 は bceca742、「235 行の次に 1 行」)は実物と一致する。
+- 確かめていない: テストと静的検査の実行、`close(ended)` を消す mutant の再現、probe 3 の merge・regate 側(行自身が「未確認」と書く)。
+
+### Findings (run 2)
+
+新しい指摘はない。run 1 の LOW 3 件は次のとおり。
+
+| Run 1 の LOW | 状態 | 根拠 |
+| --- | --- | --- |
+| 1: gate のコメントの括弧の読み(`org_gate.go:95-96`) | 未修正、変化なし | 新しいコミットは `org_gate.go` に触れていない。95-96 行は run 1 のまま |
+| 2: `org_wait_director_test.go` が 800 行を超える | 未修正、超過が広がった | 844 行から 866 行になった(`wc -l`)。S4 の段(590-609 行)が `TestOrgWaitDirector_SignalCauseContextParentCauseAndStop`(572 行)に入ったため。signal の 3 つのテストは 572・634・684 行、env 定数は 624・678 行で、まとまりは変わらない。重さは LOW のまま(分ける案は run 1 のとおり) |
+| 3: 落ちたときの文が `devel` の Go で読みどおりにできない(`cmd/ralph/toolchain_test.go:48-49`、`:72-73`) | 未修正、変化なし | `cmd/` は run 1 以降の diff にない |
+
+### Known gaps (run 2)
+
+- run 1 の Known gap(gate・merge・regate の「後の signal は `stop` まで捕まえる」を repo のテストが固定していない)は、bceca742 で `docs/tech-debt/README.md:236` に行として記録された。上の Evidence のとおり、行の記述に実物との食い違いは見つからなかった。テストを足すかどうかは `/test` とトリアージの判断。
+
+### Tech debt identified (run 2)
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| 今回の run で足す行はない。run 1 の「なし」は、`docs/tech-debt/README.md:236`(bceca742、`/test` の G1 を実装側が記録)で置き換わっている | - | - | - | - |
+
+_(この run では `docs/tech-debt/` に追記していない。)_
+
+### Recommendation (run 2, current)
+
+- Merge: OK(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。run 2 の新しい指摘は 0 で、LOW 3 は run 1 の 3 件が未修正のまま残っている)
+- Follow-ups: 任意。内容は run 1 の Follow-ups のまま。LOW の 2 件目は、次にこのファイルへ手を入れる人が signal の 3 つのテストを `org_wait_director_signal_test.go` に分ける形が収まりがよい。
