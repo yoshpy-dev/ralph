@@ -1,0 +1,56 @@
+{
+  "org_id": "hooks-matcher",
+  "last_cycle_ts": "2026-10-25T03:16:20Z",
+  "cycles": 102,
+  "watchdog_joined": true,
+  "conditions": {
+    "hooks-matcher/implementer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T02:43:02Z"
+    },
+    "hooks-matcher/implementer/stall": {
+      "active": true,
+      "first_ts": "2026-10-25T02:49:10Z"
+    },
+    "hooks-matcher/leader/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T03:01:41Z"
+    },
+    "hooks-matcher/leader/stall": {
+      "active": false,
+      "first_ts": "2026-10-25T02:58:30Z"
+    },
+    "hooks-matcher/reviewer/scope_change": {
+      "active": false,
+      "first_ts": "2026-10-25T03:01:41Z"
+    },
+    "hooks-matcher/reviewer/stall": {
+      "active": true,
+      "first_ts": "2026-10-25T03:01:10Z"
+    }
+  },
+  "escalated": {
+    "hooks-matcher/leader/scope_change@1792895674859264000": true,
+    "hooks-matcher/leader/scope_change@1792896182134197000": true,
+    "hooks-matcher/leader/scope_change@1792897206219204000": true,
+    "hooks-matcher/leader/scope_change@1792897301698804000": true,
+    "hooks-matcher/leader/stall@1792897110079317000": true
+  },
+  "seat_snapshots": {
+    "implementer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-4\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"interactive_ready\":true,\"name\":\"hooks-matcher_implementer\",\"pane_id\":\"pane-3\",\"revision\":698,\"state_change_seq\":48,\"tab_id\":\"tab-3\",\"terminal_id\":\"term-3\",\"terminal_title\":\"✳ Hooks matcher implementer\",\"terminal_title_stripped\":\"Hooks matcher implementer\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "leader": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-5\"},\"agent_status\":\"working\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"interactive_ready\":true,\"name\":\"hooks-matcher_leader\",\"pane_id\":\"pane-2\",\"revision\":506,\"state_change_seq\":106,\"tab_id\":\"tab-2\",\"terminal_id\":\"term-2\",\"terminal_title\":\"◑ Hooks matcher leader\",\"terminal_title_stripped\":\"◑ Hooks matcher leader\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    },
+    "reviewer": {
+      "agent_get": "{\"id\":\"cli:agent:get\",\"result\":{\"agent\":{\"agent\":\"claude\",\"agent_session\":{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"session-6\"},\"agent_status\":\"done\",\"cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"focused\":false,\"foreground_cwd\":\"/private/tmp/ralph-iso/ralph/.claude/worktrees/org-hooks-matcher\",\"interactive_ready\":true,\"name\":\"hooks-matcher_reviewer\",\"pane_id\":\"pane-5\",\"revision\":777,\"state_change_seq\":90,\"tab_id\":\"tab-5\",\"terminal_id\":\"term-5\",\"terminal_title\":\"✳ Hooks-matcher reviewer\",\"terminal_title_stripped\":\"Hooks-matcher reviewer\",\"workspace_id\":\"ws-2\"},\"type\":\"agent_info\"}}",
+      "agent_get_seen": true,
+      "git_status_seen": true
+    }
+  }
+}

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run one command in the isolated environment.
+D=/tmp/ralph-iso
+# F1, below. Keep this line only when your git settings are in
+# ~/.config/git/config; delete it when they are in ~/.gitconfig.
+set -- GIT_CONFIG_GLOBAL="$HOME/.config/git/config" "$@"
+# F1, below. Keep this line only when gh keeps its config in ~/.config/gh.
+set -- GH_CONFIG_DIR="$HOME/.config/gh" "$@"
+# org-recheck D2: the private agmsg copy, for every process of the run
+# (the feature worktrees do not get the clone's untracked ralph.toml).
+set -- RALPH_ORG_AGMSG_HOME="$D/agmsg" "$@"
+# org-recheck D1: the gate's go test has no -timeout (as in the trial).
+set -- GOFLAGS=-timeout=30m "$@"
+exec env -i \
+  HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
+  SHELL=/bin/bash LANG="$LANG" TERM=xterm-256color TMPDIR="$TMPDIR" \
+  PATH="$D/bin:$HOME/.local/share/mise/installs/npm-anthropic-ai-claude-code/latest/node_modules/.bin:$HOME/.local/share/mise/installs/node/24/bin:$HOME/.local/share/mise/installs/python/3.12/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  XDG_CONFIG_HOME="$D/xdg-config" \
+  XDG_STATE_HOME="$D/xdg-state" \
+  HERDR_SOCKET_PATH="$D/h.sock" \
+  CLAUDE_ENV_FILE="$D/claude-env" \
+  "$@"

@@ -1,0 +1,4 @@
+TYPE: DECISION
+PLAN: docs/plans/active/2026-10-25-hooks-matcher.md sha256:fc16043d3a2d
+
+approved

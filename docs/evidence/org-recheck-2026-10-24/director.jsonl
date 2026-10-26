@@ -1,0 +1,2 @@
+{"ts":"2026-10-25T02:17:22Z","id":"d1","event":"attached","driver":"claude","wake":["pull"],"user":"user-1","cwd":"/private/tmp/ralph-iso/ralph","herdr_pane":false}
+{"ts":"2026-10-25T14:23:22Z","id":"d1","event":"detached","user":"user-1","cwd":"/private/tmp/ralph-iso/ralph","herdr_pane":false}

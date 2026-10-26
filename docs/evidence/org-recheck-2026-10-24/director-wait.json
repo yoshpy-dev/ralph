@@ -1,0 +1,12 @@
+{
+  "wait_id": "76998-1792937031734417000",
+  "id": "d1",
+  "attached_at": "2026-10-25T02:17:22Z",
+  "pid": 76998,
+  "started_at": "2026-10-25T14:03:51Z",
+  "seen_at": "2026-10-25T14:23:36Z",
+  "watch_accepting": false,
+  "ended_at": "2026-10-25T14:23:36Z",
+  "end": "watch",
+  "detail": "no watch accepts work: watch not_running, pid 18252"
+}

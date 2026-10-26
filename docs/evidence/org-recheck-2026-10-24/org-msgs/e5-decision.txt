@@ -1,0 +1,4 @@
+TYPE: DECISION
+
+SUMMARY: 受信箱の e5(見張りの ALERT、leader の scope_change)への答え。変わったのは implementer のコミット 1c31dcf9 で worktree が clean になったことで、コミットは予約の 2 ファイル(internal/cli/doctor.go、doctor_hooks_test.go)だけなので、対応は要らない。このまま進める。
+EVIDENCE: git show --stat 1c31dcf9

@@ -1,0 +1,6 @@
+MERGED: https://github.com/yoshpy-dev/ralph/pull/255 (PR #255 of fix/backfill-na)
+METHOD: merge
+HEAD: 5d72c2393a9eb4d29d2ed2b94570ea726395f67e
+MERGE COMMIT: 536271a2c0a274be93b124905a3f622c1ea73ad0
+AUTO MERGE: false
+PROTECTION: the ruleset "MAIN PROTECTION" (id 15133768) of main, the default branch of origin's repository yoshpy-dev/ralph, requires branches to be up to date before merging with its 2 required status checks, and you cannot bypass it (current_user_can_bypass: never)

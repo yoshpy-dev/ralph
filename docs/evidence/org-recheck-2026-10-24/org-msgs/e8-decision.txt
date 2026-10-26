@@ -1,0 +1,4 @@
+TYPE: DECISION
+
+SUMMARY: 受信箱の e8(見張りの ALERT、leader の stall)への答え。leader は reviewer の結果を待っていて、reviewer はテストのスクリプトの終わりを待っている(go test が走っている)。止まっているのではないので、対応は要らない。このまま待つ。
+EVIDENCE: ralph org read --org-id hooks-matcher --seat reviewer

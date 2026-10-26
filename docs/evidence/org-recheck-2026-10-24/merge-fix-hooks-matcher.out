@@ -1,0 +1,8 @@
+org: merge: PR #256 has checks pending, so ralph org merge waits for them for up to 1h0m0s (--wait-checks 1h0m0s), with regate.lock released, reading gh pr checks 256 -R github.com/yoshpy-dev/ralph every 30s
+org: merge: stopped waiting for the checks of PR #256 after 3m10s: the checks passed; running every check again
+MERGED: https://github.com/yoshpy-dev/ralph/pull/256 (PR #256 of fix/hooks-matcher)
+METHOD: merge
+HEAD: 77c631b2a635faaa7f79600302da08b925770c58
+MERGE COMMIT: 98d38391c908eeceb865ad88ff921e4e45b14cae
+AUTO MERGE: true
+PROTECTION: the ruleset "MAIN PROTECTION" (id 15133768) of main, the default branch of origin's repository yoshpy-dev/ralph, requires branches to be up to date before merging with its 2 required status checks, and you cannot bypass it (current_user_can_bypass: never)

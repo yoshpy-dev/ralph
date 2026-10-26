@@ -1,0 +1,4 @@
+TYPE: DECISION
+
+SUMMARY: 受信箱の e9(見張りの ALERT、leader の scope_change)への答え。変わったのは reviewer のレポート docs/reports/review-2026-10-25-hooks-matcher-reviewer.md が書かれたことで、役割指示の手順 9 のレポートなので、対応は要らない。このまま進める。
+EVIDENCE: git status --porcelain(.claude/worktrees/org-hooks-matcher)
