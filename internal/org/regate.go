@@ -17,7 +17,8 @@ import (
 // The `ralph org regate` verb (Regate), stage 8a-3b of plan
 // docs/plans/active/2026-10-16-org-regate.md (FR-7 of
 // docs/specs/2026-10-07-org-multi-org-director.md). While a feature org runs,
-// its leader runs ralph org gate; once the org has opened its PR and been
+// its reviewer runs ralph org gate at the leader's TASK (plan
+// 2026-10-26-reviewer-runs-gate); once the org has opened its PR and been
 // disbanded, Gate refuses it, so a branch that ralph org merge-order lists as
 // rebase or regate after another feature's PR was merged had no ralph verb to
 // bring it back to ready. Regate is that verb, named by the branch, as
@@ -452,10 +453,10 @@ func (b regateBranch) passedOn(t gateTarget) bool {
 // (readRegateBranch), and returns the refusal of a branch no complete binding
 // names or whose org runs; for an org that runs another feature now
 // (regateBranch.runsOn), the refusal names that feature's branch instead of
-// the leader's ralph org gate. When the checks pass it writes lock's marker
-// before the manifest lock is released: the binding's org, branch, and
-// worktree, so a spawn of that org that comes after it refuses (D9). A
-// refusal leaves the marker empty.
+// the ralph org gate its reviewer runs. When the checks pass it writes
+// lock's marker before the manifest lock is released: the binding's org,
+// branch, and worktree, so a spawn of that org that comes after it refuses
+// (D9). A refusal leaves the marker empty.
 func (o *Org) regateFirstCheck(ctx context.Context, branch string, lock *heldFileLock) (regateBranch, string, error) {
 	var b regateBranch
 	var refused string
@@ -477,9 +478,9 @@ func (o *Org) regateFirstCheck(ctx context.Context, branch string, lock *heldFil
 				b.runsOn, branch)
 			return nil
 		case b.running:
-			refused = fmt.Sprintf("org: regate: the branch %s is bound to org_id %q, which is running: while it runs, its leader "+
-				"runs ralph org gate --org-id %s in the feature worktree, so wait for the org to be disbanded and run ralph org "+
-				"regate --branch %s then", branch, b.orgID, b.orgID, branch)
+			refused = fmt.Sprintf("org: regate: the branch %s is bound to org_id %q, which is running: while it runs, its reviewer "+
+				"runs ralph org gate --org-id %s in the feature worktree at its leader's TASK, so wait for the org to be disbanded "+
+				"and run ralph org regate --branch %s then", branch, b.orgID, b.orgID, branch)
 			return nil
 		}
 		return writeRegateMarker(lock.f, &regateMarker{OrgID: b.orgID, Branch: branch, Worktree: b.binding.Worktree, PID: os.Getpid()})

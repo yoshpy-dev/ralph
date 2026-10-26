@@ -87,9 +87,15 @@ skill's prerequisites give the full order and the exceptions, such as the
 worktrees of a bare repository). A leader whose cwd is a linked worktree
 therefore writes the ledger outside its own cwd, which
 `--sandbox workspace-write` refuses. ralph adds `--add-dir <state dir>` right
-after the sandbox flags of a codex leader seat when the seat runs in edits or
-autonomous mode and the state directory is not inside the seat's `--cwd`.
-Only the leader gets it: seats of every other role (implementer, reviewer,
+after the sandbox flags of a codex leader seat, and of the codex reviewer
+seat of a feature org (an org started with `ralph org start --plan`), when
+the seat runs in edits or autonomous mode and the state directory is not
+inside the seat's `--cwd`. The leader runs `ralph org` verbs; a feature
+org's reviewer runs `ralph org gate` at the leader's TASK and so writes the
+gate record and the gate log to the ledger. Like the leader, that reviewer can
+then write the whole ledger (the manifest, the inbox, the seats' prompt files),
+and only its role prompt limits it to the gate's records. Seats of every
+other role (the implementer, the reviewer of an org with no feature binding,
 or a role with no template that runs from `--prompt`) report to the leader
 over agmsg and do not write the ledger, and the flag would let them rewrite
 the manifest, the receipts, and other seats' prompt files. Guarded codex
@@ -100,9 +106,9 @@ whatever `codex_verified` says, because under `workspace-write` codex keeps
 `.git` read-only and the director could not run `git worktree add` to start
 a feature org, so a codex director runs guarded only. The flag covers only
 the state directory; the agmsg database still needs the writable root
-above. The procedure below spawns reviewer seats, so their child process
-arguments carry no `--add-dir` even when the scratch `--state-dir` lies
-outside `<scratch-cwd>`.
+above. The procedure below spawns reviewer seats in orgs with no feature
+binding, so their child process arguments carry no `--add-dir` even when
+the scratch `--state-dir` lies outside `<scratch-cwd>`.
 
 Checked on 2026-10-07 with codex-cli 0.160.0 on macOS, with the cwd and
 the target directory both outside `/tmp`, `$TMPDIR`, and the repository:

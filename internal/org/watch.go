@@ -1343,28 +1343,41 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    binary while that alert is pending then reads one higher and clears
 //	    it.
 //	(c) ev.Event is EventGatePassed or EventGateFailed. `ralph org gate`
-//	    and `ralph org regate` write them. The leader template has a
-//	    feature org's leader run the gate, so a gate's record counts as the
-//	    leader acting. Regate writes one only for an org that does not run:
-//	    it refuses a running org at its first check and again under the
-//	    manifest lock right before it records (regateFirstCheck,
+//	    and `ralph org regate` write them. The leader template has the
+//	    reviewer seat run a feature org's gate at the leader's TASK (plan
+//	    2026-10-26-reviewer-runs-gate). The gate starts from the leader's
+//	    `sent` TASK, so its record counts as a sign that the work the
+//	    leader asked for moved on. Regate writes one only for an org that
+//	    does not run: it refuses a running org at its first check and again
+//	    under the manifest lock right before it records (regateFirstCheck,
 //	    recordRegate), and while it runs a spawn or start of that org is
 //	    refused (regateSpawnErr). The watch pulses only running orgs, so a
 //	    regate record never lands while the watch counts that org's
 //	    activity; one written between two lives of the org follows the stop
 //	    or disband that ended the earlier one, which counts too, so the
-//	    count stays the leader's. A codex seat other than the leader cannot
-//	    write the ledger (it gets no --add-dir), but a claude seat can
-//	    (claude has no such sandbox, permissions.go), so a seat that ran the
-//	    gate would be counted as leader activity too. A gate records nothing
-//	    while its scripts run, so it counts when it ends. The watchdog
-//	    exclusion of (b) does not apply: no gate record is a watchdog
-//	    write. ralph releases before `ralph org gate` never write them, so
-//	    the stop_failed exception above applies the same way: an older
-//	    `ralph org watch` saves a pending alert whose baseline lacks a gate
-//	    record a newer gate wrote, and restarting watch on the
-//	    newer binary while that alert is pending reads one higher and clears
-//	    it. An older watch that keeps running does not count them at all.
+//	    count stays the leader's. Of the codex seats, only the leader and,
+//	    in a feature org, the reviewer get --add-dir and so can write the
+//	    ledger from a cwd outside it (codexWritableRootArgs, permissions.go);
+//	    a claude seat has no such sandbox, so a claude seat of any role that
+//	    ran the gate would be counted as leader activity too. The count is
+//	    kept as it was when the leader ran the gate itself: a pending alert
+//	    stores the count as its baseline (watchPendingAlert.ManifestLen) in
+//	    the status file, and checkDeadman compares the count with it across
+//	    watch restarts, so changing what counts would shift that baseline
+//	    across an upgrade or a rollback. A side effect is that a reviewer's
+//	    gate record can clear a pending alert about a seat other than the
+//	    leader. An ALERT whose subject is the leader escalates whatever the
+//	    activity (checkDeadman clears an alert only when there is activity
+//	    and the subject is not the leader, !subjectIsLeader), so a stalled
+//	    leader is not missed. A gate records nothing while its scripts run,
+//	    so it counts when it ends. The watchdog exclusion of (b) does not
+//	    apply: no gate record is a watchdog write. ralph releases before
+//	    `ralph org gate` never write them, so the stop_failed exception
+//	    above applies the same way: an older `ralph org watch` saves a
+//	    pending alert whose baseline lacks a gate record a newer gate
+//	    wrote, and restarting watch on the newer binary while that alert is
+//	    pending reads one higher and clears it. An older watch that keeps
+//	    running does not count them at all.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

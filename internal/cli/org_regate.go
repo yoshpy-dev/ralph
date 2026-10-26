@@ -34,13 +34,14 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"ready in ralph org merge-order after another feature's PR was merged:\n" +
 			"in the org's feature worktree, it merges origin's default branch into\n" +
 			"the branch when the branch lacks it, runs the gate there, records the\n" +
-			"outcome, and pushes the branch. While a feature org runs, its leader\n" +
-			"runs ralph org gate; once the org has opened its PR and been\n" +
-			"disbanded, ralph org gate refuses it, and regate takes its place. Name\n" +
-			"the branch as merge-order lists it: regate reads the org and the\n" +
-			"feature worktree from the branch's latest complete feature binding, so\n" +
-			"--org-id is refused, and it works in that worktree whatever the current\n" +
-			"directory, which only picks the ledger, as for every org verb.\n" +
+			"outcome, and pushes the branch. While a feature org runs, its reviewer\n" +
+			"runs ralph org gate at its leader's TASK; once the org has opened its\n" +
+			"PR and been disbanded, ralph org gate refuses it, and regate takes its\n" +
+			"place. Name the branch as merge-order lists it: regate reads the org\n" +
+			"and the feature worktree from the branch's latest complete feature\n" +
+			"binding, so --org-id is refused, and it works in that worktree\n" +
+			"whatever the current directory, which only picks the ledger, as for\n" +
+			"every org verb.\n" +
 			"\n" +
 			"First, regate checks that no other ralph org regate or merge runs on\n" +
 			"the ledger (one runs at a time; it waits up to 1 s for the lock), that\n" +

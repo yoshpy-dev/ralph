@@ -27,11 +27,12 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 		Use:   "gate",
 		Short: "Run the verification scripts on a feature org's head and record gate_passed or gate_failed",
 		Long: "ralph org gate records which head of a feature org passed the\n" +
-			"verification scripts on which base. The leader of an org started with\n" +
-			"`ralph org start --plan` runs it in the org's feature worktree (or a\n" +
-			"directory under it), on the head it pushes: after it rebases the\n" +
-			"feature branch on the default branch and commits everything, and\n" +
-			"before it pushes and opens the PR.\n" +
+			"verification scripts on which base. In an org started with\n" +
+			"`ralph org start --plan`, the reviewer seat runs it at the leader's\n" +
+			"TASK, in the org's feature worktree (or a directory under it), on the\n" +
+			"head the leader pushes: after the leader rebases the feature branch on\n" +
+			"the default branch and commits everything, and before it pushes and\n" +
+			"opens the PR. A person may run it too.\n" +
 			"\n" +
 			"First, gate checks that the org holds a complete feature binding and\n" +
 			"is running. It checks that the current directory is in the binding's\n" +
@@ -66,10 +67,13 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"refused.\n" +
 			"\n" +
 			"On a pass, gate prints GATE: pass, HEAD: <sha>, BASE: <sha> and\n" +
-			"LOG: <path> on stdout and exits 0. The leader copies the HEAD: and\n" +
-			"BASE: lines into its RESULT. On a failure, it prints GATE: fail,\n" +
-			"REASON: <reason>, HEAD:, BASE: and LOG:, then the failing script's last\n" +
-			"20 lines of output, or the files the scripts left, and exits 1.\n" +
+			"LOG: <path> on stdout and exits 0. The reviewer writes the output to\n" +
+			"the file the leader's TASK names (.harness/state/gate-<org_id>.out in\n" +
+			"the worktree) and copies the HEAD: and BASE: lines into its RESULT,\n" +
+			"and the leader checks them against that file and HEAD before it\n" +
+			"pushes. On a failure, gate prints GATE: fail, REASON: <reason>, HEAD:,\n" +
+			"BASE: and LOG:, then the failing script's last 20 lines of output, or\n" +
+			"the files the scripts left, and exits 1.\n" +
 			"\n" +
 			"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and\n" +
 			"records nothing. Processes a script leaves running when it exits are\n" +

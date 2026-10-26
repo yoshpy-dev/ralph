@@ -16,13 +16,15 @@ import (
 // The `ralph org gate` verb (Gate), stage 7b of plan
 // docs/plans/active/2026-10-13-org-gate.md (FR-7 of
 // docs/specs/2026-10-07-org-multi-org-director.md). A feature org's leader
-// rebases its branch on the default branch and runs the gate in the feature
-// worktree, on the head it pushes, before it opens the PR. The gate checks
-// the org's binding, the worktree, and that HEAD contains the default
-// branch's tip, runs scripts/run-static-verify.sh and then
-// scripts/run-test.sh there (gate_run.go), and records the outcome with the
-// head and base SHAs as one org-level gate_passed or gate_failed event
-// (gateRecord, gate_record.go). Stage 7c's merge order reads that record.
+// rebases its branch on the default branch and has the reviewer seat run the
+// gate in the feature worktree, at a TASK, on the head the leader pushes,
+// before it opens the PR (plan 2026-10-26-reviewer-runs-gate); a person may
+// run it too. Gate does not check who runs it. The gate checks the org's
+// binding, the worktree, and that HEAD contains the default branch's tip,
+// runs scripts/run-static-verify.sh and then scripts/run-test.sh there
+// (gate_run.go), and records the outcome with the head and base SHAs as one
+// org-level gate_passed or gate_failed event (gateRecord, gate_record.go).
+// Stage 7c's merge order reads that record.
 //
 // A refusal before the scripts run records nothing and writes no log (B7).
 // The gate never fetches, pushes, or calls herdr or agmsg. Neither the watch

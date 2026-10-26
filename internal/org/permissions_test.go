@@ -169,14 +169,16 @@ func TestPermissionArgsForDriver_Codex_VerifiedUnlocksMapping(t *testing.T) {
 	})
 }
 
-// TestCodexWritableRootArgs pins AC8 (plan 2026-10-07-org-state-dir-common):
-// a workspace-write codex leader seat (autonomous or edits) gets --add-dir
-// <state dir> only when the state dir is outside its cwd, compared with
-// symlinks resolved; implementer, reviewer, and unknown roles, guarded codex
-// seats, and claude seats never get it. Role director never gets it either,
-// in any mode (plan 2026-10-15-org-director-start, D12 and AC6):
-// StartDirector refuses a codex director in autonomous and edits, so it
-// never runs under workspace-write.
+// TestCodexWritableRootArgs pins AC8 (plan 2026-10-07-org-state-dir-common)
+// for an org with no feature binding (featureOrg false): a workspace-write
+// codex leader seat (autonomous or edits) gets --add-dir <state dir> only
+// when the state dir is outside its cwd, compared with symlinks resolved;
+// implementer, reviewer, and unknown roles, guarded codex seats, and claude
+// seats never get it. Role director never gets it either, in any mode (plan
+// 2026-10-15-org-director-start, D12 and AC6): StartDirector refuses a codex
+// director in autonomous and edits, so it never runs under workspace-write.
+// TestCodexWritableRootArgs_FeatureOrgReviewerGetsAddDir covers a feature
+// org.
 func TestCodexWritableRootArgs(t *testing.T) {
 	root := t.TempDir()
 	mainWT := filepath.Join(root, "main")
@@ -226,8 +228,8 @@ func TestCodexWritableRootArgs(t *testing.T) {
 		{"leader claude edits, state dir outside cwd", leader, "claude", PermissionModeEdits, linkedWT, stateDir, nil},
 		{"implementer codex autonomous, state dir outside cwd", "implementer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
 		{"implementer codex edits, state dir outside cwd", "implementer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
-		{"reviewer codex autonomous, state dir outside cwd", "reviewer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
-		{"reviewer codex edits, state dir outside cwd", "reviewer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"reviewer of an org with no feature binding codex autonomous, state dir outside cwd", "reviewer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"reviewer of an org with no feature binding codex edits, state dir outside cwd", "reviewer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
 		{"unknown role codex autonomous, state dir outside cwd", "worker", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
 		{"empty role codex autonomous, state dir outside cwd", "", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
 		{"director codex autonomous, state dir outside cwd", DirectorRole, "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
@@ -240,9 +242,64 @@ func TestCodexWritableRootArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := codexWritableRootArgs(tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir)
+			got := codexWritableRootArgs(tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, false)
 			if !slices.Equal(got, tc.want) {
-				t.Fatalf("codexWritableRootArgs(%q, %q, %q, %q, %q) = %v, want %v", tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, got, tc.want)
+				t.Fatalf("codexWritableRootArgs(%q, %q, %q, %q, %q, false) = %v, want %v", tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexWritableRootArgs_FeatureOrgReviewerGetsAddDir pins D5 and AC1 of
+// plan 2026-10-26-reviewer-runs-gate: in a feature org (featureOrg true) a
+// workspace-write codex reviewer seat gets --add-dir <state dir> like the
+// leader, because it runs `ralph org gate` at the leader's TASK and so writes
+// the ledger, under the same conditions (codex, autonomous or edits, state
+// dir outside cwd). The implementer, unknown and empty roles, and the
+// director of a feature org still get nil, as does a guarded or claude
+// reviewer.
+func TestCodexWritableRootArgs_FeatureOrgReviewerGetsAddDir(t *testing.T) {
+	root := t.TempDir()
+	mainWT := filepath.Join(root, "main")
+	linkedWT := filepath.Join(mainWT, ".claude", "worktrees", "org-auth")
+	stateDir := filepath.Join(mainWT, ".harness", "state", "org")
+	for _, d := range []string{linkedWT, stateDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	addDir := []string{"--add-dir", stateDir}
+
+	cases := []struct {
+		name     string
+		role     string
+		driver   string
+		mode     string
+		cwd      string
+		stateDir string
+		want     []string
+	}{
+		{"feature-org reviewer codex autonomous, state dir outside cwd", "reviewer", "codex", PermissionModeAutonomous, linkedWT, stateDir, addDir},
+		{"feature-org reviewer codex edits, state dir outside cwd", "reviewer", "codex", PermissionModeEdits, linkedWT, stateDir, addDir},
+		{"feature-org reviewer codex autonomous, state dir under cwd", "reviewer", "codex", PermissionModeAutonomous, mainWT, stateDir, nil},
+		{"feature-org reviewer codex edits, state dir under cwd", "reviewer", "codex", PermissionModeEdits, mainWT, stateDir, nil},
+		{"feature-org reviewer codex guarded, state dir outside cwd", "reviewer", "codex", PermissionModeGuarded, linkedWT, stateDir, nil},
+		{"feature-org reviewer claude autonomous, state dir outside cwd", "reviewer", "claude", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org reviewer claude edits, state dir outside cwd", "reviewer", "claude", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"feature-org Reviewer (wrong case) codex autonomous, state dir outside cwd", "Reviewer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org leader codex autonomous, state dir outside cwd", LeaderIdentity, "codex", PermissionModeAutonomous, linkedWT, stateDir, addDir},
+		{"feature-org implementer codex autonomous, state dir outside cwd", "implementer", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org implementer codex edits, state dir outside cwd", "implementer", "codex", PermissionModeEdits, linkedWT, stateDir, nil},
+		{"feature-org unknown role codex autonomous, state dir outside cwd", "worker", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org empty role codex autonomous, state dir outside cwd", "", "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org director codex autonomous, state dir outside cwd", DirectorRole, "codex", PermissionModeAutonomous, linkedWT, stateDir, nil},
+		{"feature-org director codex edits, state dir outside cwd", DirectorRole, "codex", PermissionModeEdits, linkedWT, stateDir, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := codexWritableRootArgs(tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, true)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("codexWritableRootArgs(%q, %q, %q, %q, %q, true) = %v, want %v", tc.role, tc.driver, tc.mode, tc.cwd, tc.stateDir, got, tc.want)
 			}
 		})
 	}

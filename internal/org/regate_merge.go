@@ -67,10 +67,10 @@ func regateMergeEnv(env []string) []string {
 // then (a person's merge of the default branch tip, whose parents are those
 // of Regate's, among them), so once origin's branch was put back under that
 // head (a force push), pushing it again would undo what someone did to
-// origin. For a pass with no via (ralph org gate, the leader's), any HEAD
-// with originHead under it will do: the leader's push of its gated head may
-// have failed. Otherwise it refuses with regateCheckOriginHead's reason and
-// regateResetHint's.
+// origin. For a pass with no via (ralph org gate, run while the org ran),
+// any HEAD with originHead under it will do: the leader's push of the gated
+// head may have failed. Otherwise it refuses with regateCheckOriginHead's
+// reason and regateResetHint's.
 func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, originHead string, env []string, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	if b.passedOn(t) {
@@ -109,9 +109,9 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 // of a head that was origin's tip when it was gated. The hint is the git
 // reset --keep that drops that commit, and running Regate again, which
 // merges anew. For any other HEAD it is "": the reset could drop commits
-// nobody pushed, a leader's gated head among them, or a commit origin had
-// until its branch was put back under it, such as a person's merge of the
-// default branch tip with the conflicts it resolved.
+// nobody pushed, a head the org's gate passed among them, or a commit origin
+// had until its branch was put back under it, such as a person's merge of
+// the default branch tip with the conflicts it resolved.
 func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHead string, w gateWording) (string, error) {
 	g := b.gate
 	if g == nil || !g.readable || b.corruptAfterGate || g.record.Head != t.head || g.record.Via != gateViaRegate {

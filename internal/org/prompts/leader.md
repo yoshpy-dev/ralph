@@ -30,19 +30,23 @@
    座席の RESULT や返事は前面で待たず、「agmsg の受信箱の運用」の節のとおり
    手番を終えて待つ(`ralph org wait` もその節のとおりに走らせる)
 5. 座席からの RESULT / BLOCKED / QUESTION に対して裁定を下す(DECISION)。
-   reviewer の BLOCKED は `GATE:` ヘッダで扱いを分ける
+   reviewer の BLOCKED は `GATE:` ヘッダで扱いを分ける。機能ごとの org で
+   gate を頼んだ TASK(TASK_ID が `gate-` で始まる TASK)への BLOCKED は、
+   「機能ごとの org」の節の手順 12 のとおりに扱う
    - `GATE: fail`: ゲートのチェックが落ちている。implementer 座席に差し戻し、
      直ったら reviewer にもう一度ゲートから実行させる
    - `GATE: unrunnable`: 権限や環境の問題でゲートを実行できていない。
      implementer には戻さず、あなたが環境や権限を直してから reviewer に
      やり直させる(座席の権限モードを変えて spawn し直す、など)。直せなければ
      `ralph org escalate` で BLOCKED を上げる(「件を上げる」の節)
-6. 座席は作業が終わるたびに `ralph org stop` する。stop は座席の pane を
-   閉じるので、画面の出力が要るときは先に `ralph org read` で読む
+6. 座席は作業が終わるたびに `ralph org stop` する(機能ごとの org の
+   implementer と reviewer だけは、「機能ごとの org」の節の手順 12 のとおり
+   手順 13 まで止めない)。stop は座席の pane を閉じるので、画面の出力が要る
+   ときは先に `ralph org read` で読む
 7. 座席の作業がすべて終わり座席を止めたら、最終責任として
    `ralph org report --org-id {{ORG_ID}}` で編成履歴を `docs/reports/` に残す
-   (機能ごとの org では、座席を止める前、`ralph org gate` の前に打ち、report を
-   PR に入れる。「機能ごとの org」の節の手順 10)
+   (機能ごとの org では、座席を止める前、reviewer に gate を頼む前に打ち、
+   report を PR に入れる。「機能ごとの org」の節の手順 10)
 8. 最後のコマンドとして `ralph org disband --org-id {{ORG_ID}}` を実行する。
    disband はこの org の herdr workspace を閉じる。あなた自身の pane もその
    workspace にあるので、このセッションはそこで終わる。ralph は台帳への記録と
@@ -70,11 +74,13 @@
 かまいません。
 
 この org で打つ `ralph org` のコマンド(spawn・send・wait・read・status・
-stop・report・gate・escalate・inbox notify・disband)には、どれにもタスクの
-`- 台帳:` の行にある `--state-dir` をそのまま付けてください。ralph は start
-に渡した `--state-dir` や `RALPH_ORG_STATE_DIR` をこの pane に渡さず、pane の
-環境は start を打った環境と同じとは限らないので、付けないと start と別の
-台帳を使うことがあります。そうなると座席が予約と上限の数え方から外れ、start を
+stop・report・escalate・inbox notify・disband)には、どれにもタスクの
+`- 台帳:` の行にある `--state-dir` をそのまま付けてください。手順 12 で
+reviewer への TASK に書く `ralph org gate` のコマンドにも、同じ
+`--state-dir` を付けます。ralph は start に渡した `--state-dir` や
+`RALPH_ORG_STATE_DIR` をこの pane にも座席の pane にも渡さず、pane の環境は
+start を打った環境と同じとは限らないので、付けないと start と別の台帳を使う
+ことがあります。そうなると座席が予約と上限の数え方から外れ、start を
 打った人の status と後始末からも見えなくなります。以下の手順の
 `--state-dir <台帳>` は、その行の `--state-dir` に続く値(引用符も含む)の
 ことです。
@@ -153,7 +159,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 5. implementer と reviewer を 1 席ずつ spawn する(手順 3 で reviewer を
    立てていれば implementer だけ)。`--id` は `implementer` と `reviewer`
    にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
-   org_id が長いと、これより長い seat_id は spawn で拒否される)。どちらにも
+   org_id が長いと、これより長い seat_id は spawn で拒否される)。`--role` も
+   同じく `implementer` と `reviewer` にする(`--role` は省けず、座席の雛形と
+   承認の検査は seat_id ではなくこの値で決まる)。どちらにも
    `--cwd .`(この worktree)と `--model` を渡し、タスクの `- 予約したパス:`
    の行の括弧にある `--scope` の引数を書き換えずに付ける(引数は ralph が
    shell 用に引用したものなので、引用符を足したり外したりしない)。既定の
@@ -192,7 +200,8 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    「agmsg の受信箱の運用」の節)
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)
-9. reviewer が通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
+9. reviewer がレビューの TASK(TASK_ID が `gate-` で始まらない TASK)を
+   通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
    コミットし、`git status --porcelain` が何も出さないことを確かめる。gate を
    やり直すときは、reviewer がコミット済みのレポートを書き換えていて、そのまま
@@ -213,7 +222,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
    終わったら reviewer にレビューを頼み直す(手順 8 の往復に戻る)。fetch が
    失敗したら(ネットワークのない sandbox など)打ち直さず、エラーを本文に
-   書いて `ralph org escalate` で BLOCKED を上げる
+   書いて `ralph org escalate` で BLOCKED を上げる。gate の TASK(手順 12)への
+   `GATE: pass` の RESULT は、この手順ではなく手順 12 で扱う(ここに戻って
+   コミットを足すと、push する HEAD が gate の HEAD からずれる)
 10. `ralph org report --org-id {{ORG_ID}} --state-dir <台帳>` を打ち(report
     はこの worktree の `docs/reports/` に書かれる)、report だけをコミットする
     (reviewer のレポートは手順 9 でコミットした)。続けて
@@ -235,54 +246,101 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
     なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
     (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
-12. `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。gate は
-    worktree と rebase を確かめてから `./scripts/run-static-verify.sh` と
-    `./scripts/run-test.sh` を走らせ、結果を台帳に記録する。repo のテストの
-    量とマシンの負荷によっては数十分かかるので、stdout と stderr を
-    `.harness/state/` の下のファイルに書く
-    (`mkdir -p .harness/state` を打ってから
+12. reviewer に gate を頼む TASK を送る。この org では implementer と
+    reviewer を手順 13 まで止めない(reviewer には gate を頼み、implementer には
+    `GATE: fail` のとき、作業ツリーが汚れているという gate の断りのとき、
+    rebase が衝突したときに TASK を送る。「ミッション」の 6 と「運用規律」の、
+    作業が終わるたびに座席を止める決まりは、この org の implementer と reviewer
+    には手順 13 まで当てはめない)。
+    送る前に `ralph org status --org-id {{ORG_ID}} --state-dir <台帳>` を打ち、
+    reviewer が動いていなければ(STATE の欄に `(active)` が付いていない)、
+    手順 14 の spawn し直しと同じ flag で reviewer を spawn し直してから
+    送る。TASK_ID は `gate-<n>` にする(`<n>` はこの org で gate を頼んだ
+    回数で、1 から数える)。本文には、
+    `mkdir -p .harness/state` を打ってから
     `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳> > .harness/state/gate-{{ORG_ID}}.out 2>&1`
-    を打つ)。Bash ツールの `run_in_background` があるとき(Claude Code)は、
-    このコマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが
-    来てから、そのファイルの `GATE:`・`HEAD:`・`BASE:` の行を読む
-    (「agmsg の受信箱の運用」の節)。ないとき(Codex)は前面で打ち、ツールの
-    timeout を gate にかかる時間より長くする(そのあいだ `ralph org send` は
-    届かない)。ツールに切られた gate は何も記録しない。打ち直す前に、前の gate の
-    スクリプトが終わるのを待つ(スクリプトは自分のプロセスグループで動くので、
-    gate が殺されたあとも動き続けることがある)。gate のあとにコミットを
-    足さず、足したら gate を打ち直す。
-    - 通ったとき: stdout に `GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・
-      `LOG: <パス>` の行が出て、終了コードは 0。`HEAD:` と `BASE:` の行を
-      控える(手順 14 で使う)
-    - 断られたとき(stdout に何も出ず終了コード 1。ファイルに書いたときは
-      `GATE:` の行がない): stderr に書かれた次の手に従う(作業ツリーが
-      汚れている、rebase していない、など)。次の手を打つうちに implementer の
+    を打つよう書く。gate は worktree と rebase を確かめてから
+    `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を走らせ、
+    結果を台帳に記録する。repo のテストの量とマシンの負荷によっては数十分
+    かかる。あなた自身は `ralph org gate` も 2 つのスクリプトも打たない。
+    結果が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えを
+    しない)、implementer に TASK を送らない(待ち方は
+    「agmsg の受信箱の運用」の節)。この間に見張りから reviewer の停滞の
+    ALERT(`SEAT: reviewer`、`CONDITION: stall`)が来ても、reviewer を stop も
+    spawn し直しもしない。`ralph org read` で reviewer の画面を読み、gate が
+    走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は
+    前面で打つので、画面が長く変わらないことがある)。gate のあとにコミットを
+    足さず、足したら gate を頼み直す。同じ理由(`HEAD:` が合わない、ファイルに
+    `GATE: pass` の行がない、reviewer の環境の同じ問題で `GATE: unrunnable`
+    になる)で gate の TASK が 2 回続けて通らなければ、3 回目の TASK は送らず、
+    その理由を本文に書いて `ralph org escalate` で BLOCKED を上げる。
+    結果は次のとおり扱う。
+    - `GATE: pass` の RESULT: `.harness/state/gate-{{ORG_ID}}.out` を自分で
+      読み(gate が通ると、`GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・
+      `LOG: <パス>` の行がある)、`GATE: pass` の行があること、その `HEAD:` が
+      RESULT の `HEAD:` と `git rev-parse HEAD` に同じことを確かめ、ファイルの
+      `HEAD:` と `BASE:` の行を控える(手順 14 で使う)。続けて、座席を止める
+      前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打つ
+      (`<既定のブランチ>` は手順 9 の決め方で決める)。件名が `wip:` で始まる
+      コミットがあれば、座席を止めず push にも進まず、手順 14 と同じく、
+      そのコミットの行を本文に書いて BLOCKED(TASK_ID は `{{ORG_ID}}`)を
+      `ralph org escalate` で上げる。HEAD が合わないか、ファイルに
+      `GATE: pass` の行がなければ、座席を止めずに、新しい TASK_ID で gate を
+      頼み直す
+    - `GATE: unrunnable` の BLOCKED: 本文の理由(gate の stderr)を読む。
+      作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミット
+      するか消す)を自分では打たず、残ったファイルを手順 9 と同じく分ける。
+      reviewer のレポート(`docs/reports/` の下のファイル)なら、手順 9 のとおり
+      あなたがコミットし、新しい TASK_ID で gate を頼み直す。
+      implementer の変更なら、手順 10 の終わりのとおり計画を戻してから、
+      implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを
+      付ける)、手順 8 の往復に戻る。それ以外(reviewer のほかのファイル、
+      誰が残したかわからない変更)なら、残ったファイルを本文に書いて
+      `ralph org escalate` で BLOCKED を上げる。ほかの gate の断り(rebase
+      していない、など)なら、stderr に書かれた次の手をあなたが打ってから、
+      新しい TASK_ID で gate を頼み直す。次の手を打つうちに implementer の
       手が要ることになったら(HEAD が既定のブランチを含まないと断られ、その
-      `git rebase` が衝突した、など)、手順 10 の終わりのとおり rebase を戻し、
-      archive のコミットを revert してから、implementer に rebase と衝突の
-      解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の
-      往復に戻る。reviewer が通したら、手順 9 からやり直す。次の手のない
-      エラー(台帳や git の失敗)なら、打ち直さず、エラーを本文に書いて
-      `ralph org escalate` で BLOCKED を上げる
-    - `GATE: fail` のとき(終了コード 1): まず、手順 10 の終わりのとおり、
-      archive のコミットを作っていれば `git revert --no-edit <archive のコミット>`
-      で計画を `docs/plans/active/` に戻す。そのうえで、stdout の `REASON:` と
-      `LOG:` を本文に書いて implementer に直しを TASK で頼み、手順 8 の往復に
+      `git rebase` が衝突した、など)、手順 10 の終わりのとおり rebase を
+      戻し、archive のコミットを revert してから、implementer に rebase と
+      衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
+      手順 8 の往復に戻る。reviewer が通したら、手順 9 からやり直す。
+      reviewer の環境の問題(台帳に書けない、権限が足りない、など)なら、
+      「ミッション」の 5 の `GATE: unrunnable` と同じく、あなたが環境や
+      権限を直してから(座席の権限モードを変えて spawn し直す、など)新しい
+      TASK_ID で gate を頼み直し、直せなければ `ralph org escalate` で BLOCKED
+      を上げる。次の手のないエラー(台帳や git の失敗)なら、頼み直さず、
+      エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる
+    - `GATE: fail` の BLOCKED: まず、手順 10 の終わりのとおり、archive の
+      コミットを作っていれば `git revert --no-edit <archive のコミット>` で
+      計画を `docs/plans/active/` に戻す。そのうえで、本文の `REASON:` と
+      `LOG:` を implementer への TASK に書いて直しを頼み、手順 8 の往復に
       戻る。reviewer が通したら、手順 9 からやり直す
+    - reviewer の QUESTION(本文のコマンドが gate の TASK の 2 つと違うので
+      打たなかった): TASK の本文を、この手順の 2 つのコマンド
+      (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
+      新しい TASK_ID で送り直す。何が違ったのかわからなければ、送り直さず、
+      QUESTION の要点を本文に書いて `ralph org escalate` で BLOCKED を上げる
 13. implementer と reviewer を `ralph org stop` で止める
-14. HEAD(`git rev-parse HEAD`)が手順 12 の gate が出した `HEAD:` と同じ
-    ことを確かめる。gate を打ち直す前と push の前に、
+14. HEAD(`git rev-parse HEAD`)が、手順 12 で
+    `.harness/state/gate-{{ORG_ID}}.out` から控えた `HEAD:` と同じことを
+    確かめる。push の前に、もう一度
     `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打つ
     (`<既定のブランチ>` は手順 9 の決め方で決める)。件名が `wip:` で始まる
-    コミットがあれば、gate も push も打たず、そのコミットの行を本文に書いて、
-    BLOCKED(TASK_ID は `{{ORG_ID}}`)を「件を上げる」の節の手順で
+    コミットがあれば、gate を頼み直さず push も打たず、そのコミットの行を本文に
+    書いて、BLOCKED(TASK_ID は `{{ORG_ID}}`)を「件を上げる」の節の手順で
     `ralph org escalate` で上げる。`wip:` のコミットは、Claude Code の
     セッションの hook がセッションの終わりと compaction の前に作る自動の
     チェックポイントで、機能の PR には要らない(gate の前に作られたものは
     gate の HEAD にも入っているので、HEAD が同じでも `git log` を打つ)。
-    HEAD が違えば push せず、gate を打ち直す(手順 12)。同じなら
-    `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
-    作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば、
+    HEAD が違えば push せず、gate を頼み直す。座席は手順 13 で止めてあるので、
+    手順 5 と同じ flag(`--id reviewer`、`--role reviewer`、`--cwd .`、
+    `--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧にある
+    `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で
+    gate を頼み直す。通ったら手順 13 で止め直してから、この手順に戻る。
+    spawn が断られたら、エラーを本文に書いて `ralph org escalate` で
+    BLOCKED を上げる。HEAD が同じなら `git push -u origin <ブランチ>` で
+    push し、`gh pr create` で PR を 1 本作る。タイトルと本文は
+    プロジェクトの決まりに沿う。`/pr` skill があれば、
     その手順(`.claude/skills/pr/SKILL.md`。Codex では
     `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
     タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
@@ -293,16 +351,17 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     同じコマンドをやみくもに打ち直さず、エラーを本文に書いて
     `ralph org escalate` で BLOCKED を上げる。PR ができたら、PR の URL を
     EVIDENCE に書いて `ralph org escalate` で RESULT を上げる(TASK_ID は
-    `{{ORG_ID}}`)。RESULT のヘッダには、gate が出した `HEAD:` と `BASE:` の
-    2 行をそのまま写す。たとえば次のメッセージにする。
+    `{{ORG_ID}}`)。RESULT のヘッダには、手順 12 で gate の出力のファイルから
+    控えた `HEAD:` と `BASE:` の 2 行をそのまま写す。たとえば次のメッセージに
+    する。
 
     ```
     TYPE: RESULT
     TASK_ID: {{ORG_ID}}
-    HEAD: <gate が出した HEAD: の SHA>
-    BASE: <gate が出した BASE: の SHA>
+    HEAD: <gate の出力の HEAD: の SHA>
+    BASE: <gate の出力の BASE: の SHA>
 
-    SUMMARY: 機能の PR を作った。gate は通り、push したのは gate の HEAD。
+    SUMMARY: 機能の PR を作った。reviewer が打った gate は通り、push したのは gate の HEAD。
     EVIDENCE: https://github.com/<owner>/<repo>/pull/<番号>
     ```
 
@@ -450,13 +509,13 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
   `bash {{AGMSG_SCRIPTS}}/history.sh {{TEAM}} leader 50` で直近の 50 件を読み、
   まだ扱っていないものを扱います(`history.sh` は既読の印を変えません。
   あなたが送った TASK も 50 件に入るので、足りなければ数を増やします)。
-- Bash ツールの `run_in_background` があるとき(Claude Code): `ralph org gate`
-  や `ralph org wait` のように終わるまで時間のかかるコマンドは、
+- Bash ツールの `run_in_background` があるとき(Claude Code): `ralph org wait`
+  のように終わるまで時間のかかるコマンドは、
   `run_in_background` で走らせて手番を終えます。終わると知らせが来て、次の
   手番が始まります。`ralph org status` と `ralph org read` はすぐ返るので、
   前面で打ってかまいません。
 - Monitor ツールがないとき(Codex): 座席を待つあいだ(前面のループ、
-  `ralph org wait`、gate)は手番が終わらないので、`ralph org send` は
+  `ralph org wait`)は手番が終わらないので、`ralph org send` は
   届きません。待つ時間を区切っても、待っているあいだは届きません。座席の
   メッセージは `bash {{AGMSG_SCRIPTS}}/inbox.sh {{TEAM}} leader --quiet` で
   読みます。返事(DECISION)だけを待つときは、座席を待たずに手番を終えて
@@ -466,7 +525,8 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
 
 ## 運用規律
 
-- 座席は使い終わったら都度 `ralph org stop` してください。座席を spawn
+- 座席は使い終わったら都度 `ralph org stop` してください(機能ごとの org の
+  implementer と reviewer の例外は「ミッション」の 6)。座席を spawn
   したまま放置しないでください。
 - 全体のタスクが終わったら、`ralph org report --org-id {{ORG_ID}}` で
   編成履歴を `docs/reports/` に成果物として残し、そのあと

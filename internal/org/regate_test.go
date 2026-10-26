@@ -578,10 +578,10 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 
 // TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns covers AC1's refusal
 // of a branch whose org runs, word for word: while the org runs bound to
-// the branch, the refusal names the leader's ralph org gate; once the org_id
-// was started again for another feature, its leader's gate checks that
-// feature's branch, so the refusal names that branch instead and only says
-// to wait for the disband.
+// the branch, the refusal names the ralph org gate its reviewer runs at its
+// leader's TASK; once the org_id was started again for another feature, its
+// gate checks that feature's branch, so the refusal names that branch
+// instead and only says to wait for the disband.
 func TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -591,9 +591,9 @@ func TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns(t *testing.T) {
 		{"the org runs bound to the branch", func(t *testing.T, fx *regateFixture) {
 			fx.appendEvents(t, boundReserveEvent("auth", fx.f, "internal/auth/"))
 			seedSeat(t, fx.o, "auth", LeaderIdentity, LeaderIdentity, "pane-2")
-		}, `org: regate: the branch feat/auth is bound to org_id "auth", which is running: while it runs, its leader runs ralph ` +
-			"org gate --org-id auth in the feature worktree, so wait for the org to be disbanded and run ralph org regate --branch " +
-			"feat/auth then"},
+		}, `org: regate: the branch feat/auth is bound to org_id "auth", which is running: while it runs, its reviewer runs ralph ` +
+			"org gate --org-id auth in the feature worktree at its leader's TASK, so wait for the org to be disbanded and run ralph " +
+			"org regate --branch feat/auth then"},
 		{"the org_id runs again for another feature", func(t *testing.T, fx *regateFixture) {
 			fx.appendEvents(t, boundReserveEvent("auth", testFeature("split-2", "billing", "0123456789ab"), "internal/billing/"))
 		}, `org: regate: the branch feat/auth is bound to org_id "auth", which is running, but now for another feature, on the ` +

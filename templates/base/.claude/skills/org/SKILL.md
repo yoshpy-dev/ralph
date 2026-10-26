@@ -218,9 +218,9 @@ toplevel、cwd の順で決まる。「前提」節を参照)、`ralph org statu
 | `escalate` | leader が受信箱に件を上げる(「受信箱」節)。`--text` は typed message で、TYPE は `QUESTION`(判断がほしい)・`BLOCKED`(進めない)・`RESULT`(終わった)のどれか。`BLOCKED` と `RESULT` は TASK_ID が必須で、org 全体の件には org_id を入れる。`ALERT` は断る(ALERT の件を書くのは横断の見張りだけ)。本文は 2,000 文字まで。検査に通らなければ終了コード 1 で、何も書かない。通れば件を記録して stdout に `escalated <id> (org=<org_id> type=<TYPE>)` を出す(ID は `e1`、`e2`、…)。件を人にすぐ送るか、記録だけにして director と ack の期限に任せるかは、`[org.director].enabled`(既定 true)と横断の見張りで決まる(「受信箱」節の届き方の項)。記録だけにした件は、stderr に `ORG ESCALATION RECORDED: ...` の 1 行を出して終了コード 0。すぐ送る件で、記録はできたが通知が終わらなかったときは、ID を出したうえで終了コード 1 になる。そのときは `inbox notify <id>` で送り直す(escalate を打ち直すと別の件が増える)。受信箱に書けなかったときも、`ralph.toml` を読めなかったときも、stderr の表示とデスクトップ通知を出してから終了コード 1 になる(ID は出ない)。メッセージのファイルの置き場所と書き方は「受信箱」節。 | `ralph org escalate --org-id X --text "$(cat .harness/state/escalate-X.txt)"` |
 | `inbox` | 受信箱の件を一覧する。既定は open と acked、`--all` で resolved も、`--json` で機械向けの形。列は `ID` / `STATE` / `ORG` / `TYPE` / `TASK_ID` / `ESCALATED_AT` / `NOTIFIED` / `SUMMARY`(本文の 1 行目)。`NOTIFIED` は、人に送った件が `yes`、escalate か横断の見張りが記録だけにしてまだ人に送っていない件が `deferred`、人への通知が終わらなかった件が `no`(resolved の件は `yes` か `no`)。`--json`(一覧と `show`)の件には `delivery`(記録だけにした件は `deadline`、すぐ送った件は `now`)と、見張りが push の director に知らせたかの `woken` と `woken_at` が入る(`woken` は状態を変えず、期限も止めない)。見張りの ALERT の件には `alert_id` も入る。読めない行と無視したイベントは数を stderr に出す。`inbox show <id>` は件の欄・本文・履歴を出す(`--json` も可)。一覧と `show` のテキストの出力は、制御文字を `\x1b` のようにエスケープする。`inbox ack <id>` は open を acked にする(acked にもう一度打つと何もせず終了コード 0)。`inbox resolve <id> --note <ポインタ>` は open か acked を resolved にする。note は必須で、report のパスや PR の URL のようなポインタを 1 行、500 文字まで、制御文字なしで書く。`inbox notify <id>` は件を同じ ID のまま今すぐ人に送り、理由 `inbox_manual_notify` の `notified` を記録する(通知が終わらなかった件の送り直しと、`deferred` の件を ack の期限を待たずに送るときに使う)。`show` は知らない ID で、`ack` / `resolve` / `notify` は知らない ID と resolved の件で、終了コード 1 になる。受信箱は台帳の全 org が共有するので、`inbox` の動詞は `--org-id` を拒否する。 | `ralph org inbox`、`ralph org inbox show e3`、`ralph org inbox resolve e3 --note docs/reports/org-manifest-X-<date>.md` |
 | `approve` | 機能の org の leader が計画の承認を求めて受信箱に上げた QUESTION について、人の承認を台帳に記録する(「機能の計画の承認」節)。引数は受信箱の件の ID で、1 つ以上。件ごとに、件があって resolved でない QUESTION であること、`PLAN: <path> sha256:<digest>` のヘッダがちょうど 1 行あること、件の org が `start --plan` の結びつきを持ち、そのあと disband されていないこと、パスが機能の worktree の中の普通のファイルであること(絶対パス、`..`、worktree の外を指す symlink は断る)、今のファイルの digest がヘッダの digest と一致することを確かめる。1 つでも通らなければ、どの件も記録せず、通らなかった件と理由を並べて終了コード 1。すべて通れば、件ごとに manifest に `plan_approved`(パス、digest、ファイルの全文のハッシュ、件の ID と、打った人の `USER`、`HERDR_PANE_ID` の有無、cwd)を書き、`approved <ID> (org=<org> plan=<path> sha256:<digest>)` の行、leader に知らせる `ralph org send` の DECISION のコマンド、送れたあとに打つ `ralph org inbox resolve <ID> --note 'approved <path> sha256:<digest>'` のコマンドを、この順に出す。approve は記録するだけで、leader に送らず、件を resolve せず、計画のファイルも書き換えない。出た send を打って終了コード 0 と leader の pane を確かめてから、出た resolve を打つ(「機能の計画の承認」節)。承認を記録済みの件(この org の今の命に、その件の ID の `plan_approved` がある)をもう一度 approve すると、何も記録せずに終了コード 1 で断り、エラーに send と resolve のコマンドをもう一度出す。approve が受信箱を読んだあとにほかの誰かが件を resolve していたときは、承認は記録したうえで、その件の resolve のコマンドを出さずに終了コード 1 になり、その人が直しを求めたかもしれないので、leader への承認の DECISION はまだ送らず、先に `ralph org inbox show <ID>` で resolve の note を読むよう言う。`HERDR_PANE_ID` が動いている座席の pane と同じなら、何も読まずに断る(座席の pane から打った approve を止める仕掛けで、境界ではない)。org は件から決まるので `--org-id` は断る(`--state-dir` と `--config` は使える)。承認方式が `split` の org の件も記録し、stderr にそう出す。 | `ralph org approve e3 e5` |
-| `gate` | 機能の org の PR の head が、どの base の上で検証のスクリプトを通ったかを台帳に記録する(「機能ごとの org」節の「gate の記録」)。打つのは `start --plan` で立てた org の leader で、打つ場所は機能の worktree(その下のディレクトリでもよい)。既定のブランチに rebase してすべてをコミットしたあと、push と PR の前に、push する head で打つ。走らせる前に、org が完全な結びつきを持って走っていること、打った場所が結びつきの worktree の中で、結びつきのブランチにいること(detached HEAD は断る)、作業ツリーがきれいなこと(`git status --porcelain --untracked-files=all` が何も出さない。ignore されたファイルは数えない)、既定のブランチ(`refs/remotes/origin/HEAD` が指す先、なければ `main`、それもなければ `master`)の base ref(`refs/remotes/origin/<名前>`、なければ `refs/heads/<名前>`)の先頭を HEAD が含むこと、worktree のルートに `scripts/run-static-verify.sh` と `scripts/run-test.sh` が実行できるファイルとしてあることを確かめる。1 つでも通らなければ、何も走らせず何も記録せず、stdout には何も出さずに、理由と次の手を 1 つ stderr に出して終了コード 1。gate は fetch も push もしないので、`git fetch` と `git rebase` は先に打つ。確かめ終えたら、worktree のルートで `./scripts/run-static-verify.sh` を、それが通れば `./scripts/run-test.sh` を走らせる。スクリプトには、打った側の環境から名前が `RALPH_VERIFY_` か `HARNESS_VERIFY_` で始まる変数を除き、`RALPH_VERIFY_SCOPE=full` を足して渡す(差分で検証の範囲を狭めない)。出力は台帳の下の `gates/<org_id>-<UTC の時刻>.log` に書き、worktree には書かない。repo のテストの量とマシンの負荷によっては数十分かかるので、バックグラウンドで走らせて stdout と stderr を `.harness/state/` の下のファイルに書き、終わってから `GATE:`・`HEAD:`・`BASE:` の行を読む(前景で打つなら、ツールの timeout を gate にかかる時間より長くする)。スクリプトを走らせている間は manifest のロックを持たない。両方が通り、HEAD と作業ツリーが走らせる前のままなら manifest に `gate_passed` を、そうでなければ `gate_failed`(`reason=` は `static_failed`・`test_failed`・`head_moved`・`tree_changed` のどれか)を、org 全体の event として 1 行書く。どちらの記録も `head`・`base`・`base_ref`・`branch`・`by`(`USER`)・`herdr_pane`(`HERDR_PANE_ID` があれば `set`、なければ `unset`)・`log` を持ち、座席の状態は変えない。走らせている間に org が disband されたか立て直されたら、何も記録せずに断る。通れば stdout に `GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・`LOG: <パス>` の 4 行を出して終了コード 0(leader は `HEAD:` と `BASE:` の行を RESULT に写す)。落ちれば `GATE: fail`・`REASON: <理由>`・`HEAD:`・`BASE:`・`LOG:` と、落ちたスクリプトの出力の最後の 20 行(`tree_changed` ではスクリプトが残したファイル)を出して終了コード 1。SIGINT・SIGTERM・SIGHUP では走っているスクリプトを止め、何も記録しない。スクリプトが終わったときにプロセスを残していれば、それも止めて log に 1 行書く(結果は変えない)。新しい自律の作業を始めないので、見張りも承認された計画も要らない。 | `ralph org gate --org-id X --state-dir <台帳>` |
+| `gate` | 機能の org の PR の head が、どの base の上で検証のスクリプトを通ったかを台帳に記録する(「機能ごとの org」節の「gate の記録」)。打つのは機能の org の reviewer 座席で、leader が TASK で頼む(人が打ってもよい)。打つ場所は機能の worktree(その下のディレクトリでもよい)。既定のブランチに rebase してすべてをコミットしたあと、push と PR の前に、push する head で打つ。走らせる前に、org が完全な結びつきを持って走っていること、打った場所が結びつきの worktree の中で、結びつきのブランチにいること(detached HEAD は断る)、作業ツリーがきれいなこと(`git status --porcelain --untracked-files=all` が何も出さない。ignore されたファイルは数えない)、既定のブランチ(`refs/remotes/origin/HEAD` が指す先、なければ `main`、それもなければ `master`)の base ref(`refs/remotes/origin/<名前>`、なければ `refs/heads/<名前>`)の先頭を HEAD が含むこと、worktree のルートに `scripts/run-static-verify.sh` と `scripts/run-test.sh` が実行できるファイルとしてあることを確かめる。1 つでも通らなければ、何も走らせず何も記録せず、stdout には何も出さずに、理由と次の手を 1 つ stderr に出して終了コード 1。gate は fetch も push もしないので、`git fetch` と `git rebase` は先に打つ。確かめ終えたら、worktree のルートで `./scripts/run-static-verify.sh` を、それが通れば `./scripts/run-test.sh` を走らせる。スクリプトには、打った側の環境から名前が `RALPH_VERIFY_` か `HARNESS_VERIFY_` で始まる変数を除き、`RALPH_VERIFY_SCOPE=full` を足して渡す(差分で検証の範囲を狭めない)。出力は台帳の下の `gates/<org_id>-<UTC の時刻>.log` に書き、worktree には書かない。repo のテストの量とマシンの負荷によっては数十分かかるので、バックグラウンドで走らせて stdout と stderr を `.harness/state/` の下のファイルに書き、終わってから `GATE:`・`HEAD:`・`BASE:` の行を読む(前景で打つなら、ツールの timeout を gate にかかる時間より長くする)。スクリプトを走らせている間は manifest のロックを持たない。両方が通り、HEAD と作業ツリーが走らせる前のままなら manifest に `gate_passed` を、そうでなければ `gate_failed`(`reason=` は `static_failed`・`test_failed`・`head_moved`・`tree_changed` のどれか)を、org 全体の event として 1 行書く。どちらの記録も `head`・`base`・`base_ref`・`branch`・`by`(`USER`)・`herdr_pane`(`HERDR_PANE_ID` があれば `set`、なければ `unset`)・`log` を持ち、座席の状態は変えない。走らせている間に org が disband されたか立て直されたら、何も記録せずに断る。通れば stdout に `GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・`LOG: <パス>` の 4 行を出して終了コード 0(reviewer が `HEAD:` と `BASE:` の行を RESULT に写し、leader が出力のファイルと HEAD と照らす)。落ちれば `GATE: fail`・`REASON: <理由>`・`HEAD:`・`BASE:`・`LOG:` と、落ちたスクリプトの出力の最後の 20 行(`tree_changed` ではスクリプトが残したファイル)を出して終了コード 1。SIGINT・SIGTERM・SIGHUP では走っているスクリプトを止め、何も記録しない。スクリプトが終わったときにプロセスを残していれば、それも止めて log に 1 行書く(結果は変えない)。新しい自律の作業を始めないので、見張りも承認された計画も要らない。 | `ralph org gate --org-id X --state-dir <台帳>` |
 | `merge-order` | 機能の PR のうち、今 merge してよいものとその順を出す(「機能ごとの org」節の「merge してよい順」)。単位はブランチで、対象は台帳の `start --plan` の結びつき(disband 済みの org の分も含む。dry-run の記録と完全でない結びつきは数えない)のブランチと、gate の記録が名指すブランチ。ブランチごとに、最新の結びつきの org_id と機能を添える。台帳の結びつきと gate の記録を読んだあと、打った場所の repo で `git ls-remote --symref origin HEAD 'refs/heads/*'` を 1 回打ち(30 秒まで。`GIT_TERMINAL_PROMPT=0` を付ける)、origin の `HEAD` の symref が指すブランチを今の既定のブランチとし、その先頭と各ブランチの先頭を読む。`gh` が PATH にあれば、ブランチごとに同じ場所で `gh pr list --head <ブランチ> --state all --limit 1000` を打ち(1 回 15 秒まで)、fork でない PR のうち番号が最大のものを採る(返った 1000 本がすべて fork の PR なら、PR を使わずに注記で言う)。PR は、URL の repository が origin のもの(`git remote get-url origin` で読む)と同じときだけ使い、違えば(fork の作業場所で `gh` が upstream を引くときなど)PR を使わずに、改名なら origin を新しい名前に向け(`git remote set-url origin`)、そうでなければ `gh repo set-default` を打つよう注記で言う(GitHub で改名した repository は、origin が古い URL のままだと PR の URL の名前が違い、別の repository と見分けられない)。確かめない場合が 3 つある: origin の URL に owner/repo がないとき(ローカルのパス、`file://`、`git+ssh://` など)は確かめずに `gh` の PR を使い、host は比べず、`gh` が別の repository を読んでそこにそのブランチの PR がなければ、PR がないのと同じ結果になって注記も出ない。分類は上から順に、最初に当てはまるもの: `merged` / `closed`(`gh` で分かった PR が merge 済み、または merge されずに閉じた。`--all` のときだけ出す)、`unreadable`(最新の gate の記録が読めない、またはそのあとに manifest の壊れた行があり、新しい記録かもしれない。前の記録が通っていても `ready` にしない)、`no_gate`(gate の記録がない)、`failed`(最新の記録が `gate_failed`。理由を出す)、`no_remote`(origin にそのブランチがない。push していないか、merge のあとに消された。見分けるのは `gh` があるときだけ)、`regate`(origin のブランチの先頭が、gate が検証した head と違う。gate のあとに push された、または gate の head が push されていない(push が落ちた `ralph org regate` のあと))、`wrong_base`(`gh` で分かった PR の統合先が origin の今の既定のブランチと違う)、`rebase`(gate のあとに既定のブランチが進んだ、または gate が検証したのとは別のブランチが今の既定になった)、`ready`(どれにも当てはまらない)。並びは `ready`・`rebase`・`wrong_base`・`regate`・`unreadable`・`failed`・`no_remote`・`no_gate` で、`--all` のときはそのあとに `merged`・`closed`。同じ分類の中は gate の記録の古い順で、gate の記録のないブランチは結びつきの順。理由の欄の次の手は、機能の org が走っているブランチでは `ralph org gate --org-id <org>`(gate は org が走っている間だけ打てる)を、走っていない(disband 済みの)org のブランチでは `ralph org regate --branch <ブランチ>` を名指す。org_id が別の機能で立て直されて走っているときは、その org が別のブランチで走っていることと、その org の disband のあとに regate を打つことを言う。最新の記録が regate の書いた `gate_failed`(`via=regate`)なら、gate を走らせた head(origin のブランチの先頭か、regate が作った merge commit)と log のパスも言う。テキストは `origin/<既定のブランチ> <先頭の 12 桁> (listed <ls-remote の時刻>)` の行で始まり、次に merge の時点の保証を言う `merge guarantee:` の行(`ralph doctor` が台帳に書いたキャッシュを読む。「merge してよい順」)、1 行に 1 ブランチ(順位・分類・ブランチ・PR の番号と URL・gate の head と base の 12 桁・org_id と機能・理由と次の手)を出し、最後に `note:` の行で注記を出す。注記は、`ready` が 2 本以上なら 1 本 merge するとほかが `rebase` になること(その中に disband 済みの org のブランチがあれば、それは `ralph org regate` で取り直すことも)、`gh` がなければ merged と closed と PR の統合先を見分けないこと、順は ls-remote の時点のもので保証ではないこと、などを言う。`--json` は同じ中身を同じ順で JSON にし、保証は `merge_guarantee` に入れる(regate が書いた gate の記録には `"via": "regate"` が入る)。`--json` の entry には、テキストに出ない `pr_lookup` もあり、そのブランチの PR を `gh` でどう読めたかを言う: `found`(その PR を使った)、`none`(`gh` が PR を返さなかったか、返したのが 1000 本に満たない fork の PR だけ)、`failed`(`gh` がそのブランチで落ちた。理由は注記)、`limit_forks`(`gh` が返した 1000 本がすべて fork の PR)、`skipped`(全ブランチ。`gh` がないか、`gh` が origin と別の repository を読んだか、PR の repository を確かめられなかったので、PR をすべて使わなかった)。`ralph org merge` は `found` のブランチだけを merge する。分類によらず終了コード 0 で、`gh` がないか失敗したときも PR の欄を空にして注記で言うだけで 0。manifest が読めないとき、ls-remote が失敗したか 30 秒で終わらないとき、origin の `HEAD` の symref から既定のブランチが分からないときは、何も分類せず、stdout には何も出さずに、理由を stderr に出して終了コード 1。台帳に対象のブランチがなければ、ls-remote も `gh` も打たずに、保証の行を先頭に、続けて注記を出して終了コード 0(打つのは、保証のキャッシュが新しいときのローカルの `git remote get-url origin` だけ)。台帳の全 org のブランチを並べるので `--org-id` は断る。読むだけの動詞で、台帳にもほかの場所にも何も書かず、ロックを取らず、fetch・rebase・gate・merge をしない。新しい作業を始めないので、見張りも承認された計画も要らない。 | `ralph org merge-order [--json] [--all] --state-dir <台帳>` |
-| `regate` | ほかの機能の PR が merge されたあとで、disband 済みの機能の org のブランチを `merge-order` の `ready` に戻す(「機能ごとの org」節の「merge してよい順」)。`--branch <ブランチ>` が必須で、merge-order が出すブランチの名前を渡す。org と機能の worktree は、そのブランチを名指す最新の完全な結びつきから読むので、`--org-id` は断る。作業はその worktree でするので、打つ場所は台帳を決めるだけで、どの worktree で打ってもよい。走らせる前に、台帳でほかの regate か `merge` が走っていないこと(台帳ごとに 1 つ。ロックは 1 秒まで待つ)、ブランチを名指す完全な結びつきがあり、その org が走っていないこと(走っている間は leader が `gate` を打つ)、worktree があり、そのブランチにいること(detached HEAD、rebase か merge の途中は断る)、作業ツリーがきれいなこと(`git status --porcelain --untracked-files=all` が何も出さない)、既定のブランチ(`gate` と同じ決め方)があること、`scripts/run-static-verify.sh` と `scripts/run-test.sh` が実行できるファイルとしてあることを確かめる。続けて origin から既定のブランチとそのブランチを、それぞれ明示の refspec で fetch し(`GIT_TERMINAL_PROMPT=0` を付け、1 回 120 秒まで)、HEAD が origin のそのブランチの先頭と同じことを確かめる(regate は origin にある head だけを gate する。例外は下の push の打ち直し)。どれかが通らない、fetch が落ちた、origin にそのブランチがない(merge のあとに消された)ときは、何も記録せず、worktree も origin も変えずに、理由と次の手を stderr に出して終了コード 1。HEAD が origin の先頭と違って断るとき、HEAD が前の regate の作った push していない merge commit なら(最新の gate の記録が読めて、そのあとに manifest の壊れた行がなく、その HEAD の `via=regate` の記録で、HEAD の親がちょうど 2 つ、第 1 親が origin の先頭、第 2 親がその記録の base、件名が regate の書く `Merge origin/<既定のブランチ> <base の 12 桁> into <ブランチ>`)、`git -C <worktree> reset --keep refs/remotes/origin/<ブランチ>` で落としてから打ち直す手も出す。HEAD が既定のブランチの先頭を含み、最新の gate の記録が読める、その HEAD とその先頭の `gate_passed` なら(そのあとに manifest の壊れた行があるときは除く)、何も走らせず記録も push もせずに `UP_TO_DATE:`・`HEAD:`・`BASE:`・その gate の `LOG:` を出して終了コード 0。先頭を含んでいて、そうした記録がなければ、merge せずに HEAD で gate を走らせる(push は要らない)。含まなければ、先に `git merge --no-ff --no-edit -m 'Merge origin/<既定のブランチ> <12 桁> into <ブランチ>'` で先頭を merge commit で取り込み(打った人の git の名前と hook で動く)、その merge commit で gate を走らせる。rebase も force push もしない。衝突した、hook が止めたときは commit を作らず、途中の merge を `git merge --abort` で戻し、何も記録せずに、衝突したファイルを出して終了コード 1。merge の前には、merge commit を作る名前を `git var GIT_AUTHOR_IDENT` と `git var GIT_COMMITTER_IDENT` で確かめ、どちらかが通らない(`user.name` か `user.email` がない)ときは、merge も記録もせずに、設定の仕方を出して終了コード 1。merge が書くパス(`git merge-tree --write-tree` の木のうち HEAD が追跡していないもの)に、ignored のファイルか、追跡していないものを含むディレクトリが作業ツリーにある(そのパスの上のディレクトリの場所にファイルがある場合も)ときは、git merge が黙って上書きするので、merge も記録もせずに、worktree の外へ退かすパスを 10 件まで(残りは件数で)出して終了コード 1。スクリプトの走らせ方、ログ(台帳の下の `gates/`)、落ちた理由は `gate` と同じで、結びつきの org の org_id で `gate_passed` か `gate_failed` を `via=regate` 付きで記録する。スクリプトが走っている間にブランチの結びつきか org が変わったら、何も記録せずに断る。merge commit が通れば force なしで origin のブランチに push し、`GATE: pass`・`MERGED:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:` を出して終了コード 0。origin のままの HEAD が通ったときは push せず、`GATE: pass`・`HEAD:`・`BASE:`・`LOG:` を出して終了コード 0。落ちれば `GATE: fail`・`REASON:`・(merge したなら)`MERGED:`・`HEAD:`・`BASE:`・`LOG:` と、落ちたスクリプトの出力の最後の 20 行(`tree_changed` ではスクリプトが残したファイル)を出し、push せずに終了コード 1。`static_failed` と `test_failed` では merge commit を戻し(origin のブランチの先頭へ `git reset --keep`。戻した merge commit は reflog にだけ残る)、`head_moved` と `tree_changed` では、戻すとその間の commit を消すか残ったファイルを持ち越すので戻さず、戻すコマンドを出す。何も記録しなかったとき(記録を断られた、記録の前に中断された)も merge commit を戻す。戻すのは、HEAD がまだその merge commit で、作業ツリーがきれいなときだけ。`gate_passed` を記録したあとは、push がどうなっても記録と merge commit を残す。push が落ちた、120 秒で終わらない、中断されたときは、`PUSHED:` の前までの行と理由を出して終了コード 1。打ち直すと、push が届いていなければ HEAD の push だけをし(`PUSH_ONLY:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:`、終了コード 0)、届いていれば `UP_TO_DATE:` になる。push だけをするのは、最新の gate の記録が、その HEAD と既定のブランチの先頭の読める `gate_passed` で、origin のそのブランチの先頭が HEAD の祖先のときだけ。regate が書いた記録(`via=regate`)では、そのうえで HEAD が上の regate 自身の merge commit の形でなければならない。hook が件名を変えた merge commit は形に当たらないので、push も `reset --keep` の手も出さずに断り、HEAD を自分で push するよう言う(push したあとの regate は `UP_TO_DATE:`)。leader の記録(`via` なし)は、origin のそのブランチの先頭が HEAD の祖先であればよい。その間に origin の既定のブランチかそのブランチが進んでいれば、何が変わったかを言って断る。SIGINT・SIGTERM・SIGHUP では、走っている fetch・スクリプト・push を止める(merge、その abort、その戻しは終えてから止まる。その途中で中断を受けると、git が終わるのを最大 120 秒待つことを stderr に 1 行出す)。終了コードは、`UP_TO_DATE:`、通ったとき、届いた push で 0、断り・失敗・落ちた push・中断・ほかのエラーで 1。regate が走っている間は、その org の `spawn`(`--dry-run` を除く)と `start`(どちらの形も)が断られる(ほかの org は止めない)。新しい自律の作業を始めないので、見張りも承認された計画も要らない。 | `ralph org regate --branch feat/auth-token --state-dir <台帳>` |
+| `regate` | ほかの機能の PR が merge されたあとで、disband 済みの機能の org のブランチを `merge-order` の `ready` に戻す(「機能ごとの org」節の「merge してよい順」)。`--branch <ブランチ>` が必須で、merge-order が出すブランチの名前を渡す。org と機能の worktree は、そのブランチを名指す最新の完全な結びつきから読むので、`--org-id` は断る。作業はその worktree でするので、打つ場所は台帳を決めるだけで、どの worktree で打ってもよい。走らせる前に、台帳でほかの regate か `merge` が走っていないこと(台帳ごとに 1 つ。ロックは 1 秒まで待つ)、ブランチを名指す完全な結びつきがあり、その org が走っていないこと(走っている間は reviewer が leader の TASK で `gate` を打つ)、worktree があり、そのブランチにいること(detached HEAD、rebase か merge の途中は断る)、作業ツリーがきれいなこと(`git status --porcelain --untracked-files=all` が何も出さない)、既定のブランチ(`gate` と同じ決め方)があること、`scripts/run-static-verify.sh` と `scripts/run-test.sh` が実行できるファイルとしてあることを確かめる。続けて origin から既定のブランチとそのブランチを、それぞれ明示の refspec で fetch し(`GIT_TERMINAL_PROMPT=0` を付け、1 回 120 秒まで)、HEAD が origin のそのブランチの先頭と同じことを確かめる(regate は origin にある head だけを gate する。例外は下の push の打ち直し)。どれかが通らない、fetch が落ちた、origin にそのブランチがない(merge のあとに消された)ときは、何も記録せず、worktree も origin も変えずに、理由と次の手を stderr に出して終了コード 1。HEAD が origin の先頭と違って断るとき、HEAD が前の regate の作った push していない merge commit なら(最新の gate の記録が読めて、そのあとに manifest の壊れた行がなく、その HEAD の `via=regate` の記録で、HEAD の親がちょうど 2 つ、第 1 親が origin の先頭、第 2 親がその記録の base、件名が regate の書く `Merge origin/<既定のブランチ> <base の 12 桁> into <ブランチ>`)、`git -C <worktree> reset --keep refs/remotes/origin/<ブランチ>` で落としてから打ち直す手も出す。HEAD が既定のブランチの先頭を含み、最新の gate の記録が読める、その HEAD とその先頭の `gate_passed` なら(そのあとに manifest の壊れた行があるときは除く)、何も走らせず記録も push もせずに `UP_TO_DATE:`・`HEAD:`・`BASE:`・その gate の `LOG:` を出して終了コード 0。先頭を含んでいて、そうした記録がなければ、merge せずに HEAD で gate を走らせる(push は要らない)。含まなければ、先に `git merge --no-ff --no-edit -m 'Merge origin/<既定のブランチ> <12 桁> into <ブランチ>'` で先頭を merge commit で取り込み(打った人の git の名前と hook で動く)、その merge commit で gate を走らせる。rebase も force push もしない。衝突した、hook が止めたときは commit を作らず、途中の merge を `git merge --abort` で戻し、何も記録せずに、衝突したファイルを出して終了コード 1。merge の前には、merge commit を作る名前を `git var GIT_AUTHOR_IDENT` と `git var GIT_COMMITTER_IDENT` で確かめ、どちらかが通らない(`user.name` か `user.email` がない)ときは、merge も記録もせずに、設定の仕方を出して終了コード 1。merge が書くパス(`git merge-tree --write-tree` の木のうち HEAD が追跡していないもの)に、ignored のファイルか、追跡していないものを含むディレクトリが作業ツリーにある(そのパスの上のディレクトリの場所にファイルがある場合も)ときは、git merge が黙って上書きするので、merge も記録もせずに、worktree の外へ退かすパスを 10 件まで(残りは件数で)出して終了コード 1。スクリプトの走らせ方、ログ(台帳の下の `gates/`)、落ちた理由は `gate` と同じで、結びつきの org の org_id で `gate_passed` か `gate_failed` を `via=regate` 付きで記録する。スクリプトが走っている間にブランチの結びつきか org が変わったら、何も記録せずに断る。merge commit が通れば force なしで origin のブランチに push し、`GATE: pass`・`MERGED:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:` を出して終了コード 0。origin のままの HEAD が通ったときは push せず、`GATE: pass`・`HEAD:`・`BASE:`・`LOG:` を出して終了コード 0。落ちれば `GATE: fail`・`REASON:`・(merge したなら)`MERGED:`・`HEAD:`・`BASE:`・`LOG:` と、落ちたスクリプトの出力の最後の 20 行(`tree_changed` ではスクリプトが残したファイル)を出し、push せずに終了コード 1。`static_failed` と `test_failed` では merge commit を戻し(origin のブランチの先頭へ `git reset --keep`。戻した merge commit は reflog にだけ残る)、`head_moved` と `tree_changed` では、戻すとその間の commit を消すか残ったファイルを持ち越すので戻さず、戻すコマンドを出す。何も記録しなかったとき(記録を断られた、記録の前に中断された)も merge commit を戻す。戻すのは、HEAD がまだその merge commit で、作業ツリーがきれいなときだけ。`gate_passed` を記録したあとは、push がどうなっても記録と merge commit を残す。push が落ちた、120 秒で終わらない、中断されたときは、`PUSHED:` の前までの行と理由を出して終了コード 1。打ち直すと、push が届いていなければ HEAD の push だけをし(`PUSH_ONLY:`・`HEAD:`・`BASE:`・`LOG:`・`PUSHED:`、終了コード 0)、届いていれば `UP_TO_DATE:` になる。push だけをするのは、最新の gate の記録が、その HEAD と既定のブランチの先頭の読める `gate_passed` で、origin のそのブランチの先頭が HEAD の祖先のときだけ。regate が書いた記録(`via=regate`)では、そのうえで HEAD が上の regate 自身の merge commit の形でなければならない。hook が件名を変えた merge commit は形に当たらないので、push も `reset --keep` の手も出さずに断り、HEAD を自分で push するよう言う(push したあとの regate は `UP_TO_DATE:`)。`gate` の記録(`via` なし)は、origin のそのブランチの先頭が HEAD の祖先であればよい。その間に origin の既定のブランチかそのブランチが進んでいれば、何が変わったかを言って断る。SIGINT・SIGTERM・SIGHUP では、走っている fetch・スクリプト・push を止める(merge、その abort、その戻しは終えてから止まる。その途中で中断を受けると、git が終わるのを最大 120 秒待つことを stderr に 1 行出す)。終了コードは、`UP_TO_DATE:`、通ったとき、届いた push で 0、断り・失敗・落ちた push・中断・ほかのエラーで 1。regate が走っている間は、その org の `spawn`(`--dry-run` を除く)と `start`(どちらの形も)が断られる(ほかの org は止めない)。新しい自律の作業を始めないので、見張りも承認された計画も要らない。 | `ralph org regate --branch feat/auth-token --state-dir <台帳>` |
 | `merge` | `merge-order` が `ready` と出したブランチの PR を、merge の拠り所を GitHub でもう一度確かめてから `gh` で 1 本 merge する(「機能ごとの org」節の「merge してよい順」)。`--branch <ブランチ>` が必須で、merge-order が出すブランチの名前を渡す。org はそのブランチを名指す最新の完全な結びつき(なければ最新の gate の記録)から読むので、`--org-id` は断る。merge 先は origin の repository で、`git remote get-url origin` から host と owner/repo を読み(ローカルのパスなど、読めない origin は断る)、gh はすべてそれに固定する(`gh pr` は `-R <host>/<owner>/<repo>`、`gh repo view` は引数、`gh api` は `--hostname <host>`)ので、`gh repo set-default` や upstream の remote があっても別の repository を読まない。merge の前に確かめることは次のとおりで、最初に通らなかったもので断る(全項目と順は `ralph org merge --help`): 台帳でほかの regate か merge が走っていない(`regate.lock` を 1 秒まで待つ)、origin の repository でブランチの PR が見つかる(merge-order の `pr_lookup` が `found`)、merge-order の分類が `ready`、その org が走っていない(leader がまだ push しうる。受信箱の RESULT を処理し、org が disband してから打ち直す)、`gh pr view` で PR が OPEN で、head が gate の通した head、base が origin の既定のブランチ、auto-merge の予約がない(断りは予約を外す `gh pr merge <番号> --disable-auto -R <repo>` を出す)、`gh pr checks` の検査がすべて `pass` か `skipping` で、`pass` が 1 つ以上、既定のブランチの保護、merge の方式(`gh repo view` の `viewerDefaultMergeMethod`。MERGE・SQUASH・REBASE)、最後に打ち直した ls-remote で既定のブランチとブランチの先頭が gate のときのまま。保護は `ralph doctor` のキャッシュを使わずに `gh api` で読み、merge queue がなく、merge の時点で base が最新であることを打つ本人にも強いるときだけ進む。進むのは、up-to-date の rule(Require branches to be up to date before merging)が自前の required status checks を持ち、`current_user_can_bypass` が `never` の ruleset か、strict で required check を持ち、`enforce_admins` が有効な classic の保護ブランチ(打つ本人が admin でなくても求める。無効なら admin と、保護を迂回する権限を持つカスタムロールが最新でない head を merge できる。classic の strict は admin でないと読めないので、断りは ruleset を使うよう言う)。どれかが通らないか、git か gh が落ちたら、merge も記録もせず、理由と次の手を stderr に出して終了コード 1。`--wait-checks <時間>`(Go の時間の書き方。既定 0 で待たない。負の値と 6 時間を超える値は何も読まずに断る)を付けると、断りがその org がまだ走っていること(leader は RESULT のあとに disband する)か、検査の `pending` か検査が 0 件(`gh pr checks` が `no checks reported on the '<ブランチ>' branch` を出して終了コード 1 で終わるときを含む)のときだけ、断らずに `regate.lock` を外して待つ。org なら 30 秒ごとに台帳だけを読み直し(git と gh は打たない)、org が disband するか、ほかの機能で走り出すか(結びつきのあるブランチでだけ見分ける。gate の記録だけのブランチでは、disband か時間切れまで待つ)、台帳が読めなくなるまで待つ。検査なら 30 秒ごとに `gh pr checks` だけを読み直し、`pending` がなくなるか、`gh` が落ちるまで待つ。どちらも時間が切れたら待ちを終え、ロックを取り直して確かめを最初から打つ(待つ間に動いたブランチはそこで断り、また org が走っているか `pending` なら、時間の残りでまた待つ。2 つの待ちは同じ時間を分け合う)。ほかの機能で走っている org(結びつきのあるブランチのとき)、`fail` か `cancel` が 1 つでもある検査(`pending` が残っていても)、`skipping` だけの検査、ほかの断りでは待たない。時間が切れてもまだ `pending` か 0 件なら、待った時間を添えて断る。org が走ったままなら、待った時間と `ralph org status --org-id <org>` を添えて断る(org を disband するかは人が決める)。待ちに入るときと終えるときに stderr に 1 行ずつ出す。待つ間の中断は何も merge せず終了コード 1。CI のない repo では、0 件のまま時間が切れるまで待つ。通れば `gh pr merge <番号> --merge\|--squash\|--rebase --match-head-commit <gate の head> -R <repo>` を 1 回(60 秒まで)打ち、`--auto`・`--admin`・`--delete-branch` は付けない。その終了コードによらず `gh pr view` で PR を head と base も含めて 1 回読み直す。MERGED で、merge された head が gate の head、merge 先の base が origin の既定のブランチなら、台帳に org の記録 `pr_merged` を書き、`MERGED:`(PR の url)・`METHOD:`・`HEAD:`・`MERGE COMMIT:`・`AUTO MERGE:`・`PROTECTION:`(merge を最新に保つ設定)と、`gh pr merge` が落ちたか時間切れでも merge されていたときは `NOTE:` を出して終了コード 0。MERGED でも、merge された head が gate の head でないか読めない(検査のあとに誰かが新しい head を push して merge したかもしれない)か、base が既定のブランチでないか読めなければ(検査のあとに誰かが PR の base を変えたかもしれない。`--match-head-commit` は head しか縛らない)、何も記録せず、`MERGED:` も出さず、merge された head か base を stderr に名指して終了コード 1(merge-order を打ち直し、ほかのブランチは続け、その merge は人が確かめる)。MERGED でなければ何も記録せず、`gh pr merge` が落ちていればその error の末尾を添えて終了コード 1。GitHub が merge の代わりに auto-merge を予約していれば `--disable-auto` で外し、外せなければ外すコマンドを出す。読み直しが落ちたら merge されたかは分からないので、何も記録せず、確かめる `gh pr view` を出して終了コード 1。merge したのに `pr_merged` を記録できないとき、`gh pr merge` を打ったあとに中断された(SIGINT・SIGTERM・SIGHUP)ときも、読み直しと予約の外しか記録を 1 回済ませ、merge されていれば上の行を出して終了コード 1。終了コード 0 は記録した merge だけ。`regate` と同じ `regate.lock` を持つので、merge の間は台帳の regate とほかの merge が断られる(`--wait-checks` で待つ間は持たない)。worktree を変えないので、その org の `spawn` と `start` は断られない。新しい自律の作業を始めないので、見張りも承認された計画も要らない。`[org.director].auto_merge` は `AUTO MERGE:` と `pr_merged` に出すだけで、merge は値によらず打てる(人に聞かずに打ってよいかは `/director` skill が読む)。 | `ralph org merge --branch feat/auth-token [--wait-checks 60m] --state-dir <台帳>` |
 | `director` | 台帳の director の登録を書き、読む。director は、人が `/director` で昇格させた対話セッションか、`director start` で立てる headless のセッションで、台帳のすべての org を受け持つ(手順は `/director` skill)。登録は台帳の下の `director.jsonl` に `attached` と `detached` を追記したもの(headless の director は `workspace_created`・`pane_created`・`launched`・`stopped` も)で、書き込みは `director.lock` のロックの下で行う。`director attach --driver <claude\|codex>` はセッションを登録し、stdout に登録の `id` を出す(`attached d1 (driver=claude)`)。ほかの登録があるときは断られ、`--replace` なら今の登録を外して新しい登録を書く。今の登録が headless の director で断られたときは、エラーの末尾に、見張りが最後に確かめた結果と、`starting` なら登録を書いた start のプロセスを今 ps で読んだ結果が付き、どちらかが ended なら `director start` が片付けてから立てることも案内される。attach は herdr を打たず、片付けもしない。`[org.director].enabled = false` なら何も書かずに断られる。見張りが仕事を受け付けていなければ、登録はしたうえで stderr に警告を出す。`--wake <pull\|push\|pull,push>`(省くと `[org.director].wake`、既定 `["pull"]`)は受信箱の新しい件の知り方を登録に書き、push なら見張りが `[org.director].wake_cmd` でその director に 1 行を送る。wake_cmd が `{target}` を含むなら送り先を `--wake-target` で渡す。push で wake_cmd が空のとき、wake_cmd が `{target}` を含むのに `--wake-target` がないとき、push でないのに `--wake-target` があるとき、`--wake-target` が空・制御文字を含む・256 文字を超える・`-` で始まるときは、何も書かずに断られる(例は `docs/recipes/director-wake.md`)。`director detach --id <id>` は登録を外す。`id` が今の登録と違えば(`--replace` で入れ替えられた)、何も書かずに断られる。`--force` は `id` を見ずに今の登録を外す(人の後始末用で、`--id` とは併用できない)。`director status` は今の登録と `enabled` と `auto_merge` を出す(`--json` も可。登録の `wake` と、attach に渡した `wake_target` も。headless の director なら、状態の `starting` か `running`、pane、workspace、model と、見張りの確かめの結果(`--json` では `check`)も。`[org.director].launch_cmd` で立てたものは pane と workspace の代わりに `launch cmd`、端末の名前、pid)。`enabled` と `auto_merge` は escalate と同じ規則で読む(「受信箱」節)。`auto_merge`(既定 false)は、director が人に聞かずに `merge` と `regate` を打ってよいかの印で、`/director` skill が読む。動詞はこの値を強いない。`director start --driver <claude\|codex> [--model <モデル>]` は headless の director を立てる。herdr の外の端末で打ち(`HERDR_PANE_ID` があると断られる)、見張りがなければ起動する。`attached` を先に書き(start は自分の pid と起動時刻を `starter_pid` と `starter_start_time` に書く)、herdr に label `ralph_director_<token>` の workspace と `director_<token>` の tab を作って、役割の雛形付きで agent を起動し、`started d1 (driver=..., model=..., permission=..., pane=..., workspace=...)` を出す。`[org.director].launch_cmd`(引数の配列。既定は空)を設定すると herdr を打たず、`HERDR_PANE_ID` でも断らない。`attached`(`launch = "cmd"`)を書いてから台帳の下に起動スクリプト `launch/director_<token>.sh` を書き、`{script}`・`{script_sh}`・`{name}`・`{cwd}` を置き換えた launch_cmd をシェルを通さずに打つ(10 秒まで)。開いた端末でスクリプトが check-in(pid と起動時刻を記録)してから agent を exec し、start は check-in を `--timeout-ms` まで待って `started d1 (driver=..., model=..., permission=..., launch=cmd, name=director_<token>, pid=...)` を出す(例は `docs/recipes/director-launch-cmd.md`)。登録を書いた start のプロセスがもう終わっていれば(pid のプロセスがない、zombie、起動時刻が違う)、check-in は断られ、スクリプトは agent を起動せずに終わる。ps がその pid を読めないときと、start のプロセスが記録されていないときは受け付ける。start は `[org.director].wake` を登録に書く。push なら、herdr の director には wake_cmd がなくても見張りが pane に 1 行を打ち込み、launch_cmd の director には wake_cmd が要る(`{target}` は `director_<token>`。push で wake_cmd が空の launch_cmd の start は断られる)。`enabled = false` のときと、昇格したセッションが登録されているときは、何も書かず herdr も launch_cmd も打たずに断られ、`--replace` はない。今の登録が headless の director(`starting` も含む)なら、start は見張りを確かめる前に、その場でそれがまだ動いているかを見張りと同じ方法で確かめる。alive か unknown なら、同じく何も書かずに断られ、エラーの末尾に確かめた結果と `director stop --id <id>` が出る。ended なら stop と同じ片付けをする。閉じるのは確かめたときに登録が記録していたものだけで、herdr で立てたものは label を確かめた pane と workspace を閉じ、launch_cmd で立てたものは終わったプロセスに何も送らない。`stopped` を記録したら、stdout に `cleaned up d1, which had ended (agent_ended): ...` のような 1 行を出して先へ進む(そのあとで start がほかの理由で断られても、この 1 行は残る)。片付けを終えられないとき(label が合わない、close が失敗した、確かめたあとで登録が変わった)は、何も記録せず新しい director も立てずに終了コード 1 で断られ、片付けを終える `director stop --id <id>`(label が合わないときは `--force` 付き)が出る。登録のあとで失敗すると、作った pane と workspace を閉じて(launch_cmd なら check-in したプロセスを止めて)`stopped` を書き、終了コード 1 になる。permission mode は `[org.permissions.roles].director`、なければ `[org.permissions].default`。codex の director は `guarded` でしか立たず、`autonomous` と `edits` は `codex_verified` によらず断られる(`--sandbox workspace-write` では `.git` が読み取り専用になり、director が `ralph org start --plan` で機能の org を立てられない。`guarded` でも人の codex の設定が workspace-write なら同じ壁に当たる)。`--config` を渡した start は、その絶対パスを、雛形の中で director が打つ `ralph org` のコマンドに付ける(`ralph status` と人に頼む stop には付けない)。その設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでもなければ、director と見張りが別の場所から解きうるので、start はどこで打っても断る。人の shell の `RALPH_ORG_AGMSG_HOME` は director の pane に届かないので、設定されていれば警告を 1 行出して続ける(launch_cmd では起動スクリプトが export するので届き、警告しない)。`director stop --id <id> [--force]` は、pane と workspace の label がその起動のものであることを確かめてから、C-c を送って両方を閉じ、`stopped` を書く(今の登録なら同じ書き込みで `detached` も)。label が合わない・確かめられない・閉じられないときは断られ、`--force` ならそのまま `stopped` を記録する(閉じていないものを出す)。director の pane か workspace の中からの stop は、`--force` でも断られる。launch_cmd の director では herdr を打たず、記録した pid の起動時刻が check-in のものと同じときだけ SIGTERM を送り、終わるのを 10 秒まで待って `stopped` を書く(プロセスがない・zombie・起動時刻が違う・pid の記録がない(check-in の前の)ときは何も送らずに書く)。ps を読めない・終わらないときは何も書かずに断られ(SIGKILL は送らない)、`--force` なら、それ以上は何も送らずに記録する。director の中(env の `RALPH_DIRECTOR_TOKEN` が登録の token と同じ)からの stop は `--force` でも断られる。launch_cmd が開いた端末は閉じない。stop が登録を読んだあとで、動いている start が workspace か pane を記録したとき(launch_cmd なら check-in が pid を記録したとき)も、何も書かずに断られ、打ち直す stop が出る。stop が閉じているあいだに start の後始末か別の stop が先に `stopped` を記録したときは、何も足さずに終了コード 0 で終わる。headless の director は座席ではないので manifest には書かれず、`stop --all` も止めない(開いているものは `note:` の 1 行で示す)。手順は `/director` skill の「headless の director」節。昇格したセッションの登録は、そのセッションが動いていることを表さない。`wait --inbox --director <id>` で待つ director なら、`director status` の `wait:` の行(昇格したセッションなら `ralph status` の `director:` の行も)が、その wait の印(いつ始まり、最後にいつ印を書いたか、いつどう終わったか、または印がないこと)を出す。印は wait が書いたことで、セッションが動いていることは表さない。headless の director がまだ動いているかは、横断の見張りが各サイクルで確かめる(`watch` の行)。登録があるかどうかで escalate の動きは変わらない。台帳全体のものなので `--org-id` は拒否する。 | `ralph org director attach --driver claude`、`ralph org director detach --id d1`、`ralph org director status`、`ralph org director start --driver codex --model <slug>`、`ralph org director stop --id d1` |
 
@@ -660,7 +660,8 @@ main worktree からでも linked worktree からでも打てる。`--plan` の�
 タスクの `- 台帳:` の行には、start が使った台帳の絶対パスと、それを指す
 `--state-dir`(シェルの単一引用符で囲んだもの)が入る。leader は
 `ralph org` のコマンド(spawn・send・wait・read・status・stop・report・
-gate・escalate・inbox notify・disband)のすべてにこの `--state-dir` を付ける。
+escalate・inbox notify・disband)のすべてにこの `--state-dir` を付け、reviewer
+への gate の TASK に書く `ralph org gate` のコマンドにも同じものを付ける。
 leader の pane は herdr サーバーの環境で動き、start を打った環境と同じとは
 限らない。ralph は start に渡した `--state-dir` も `RALPH_ORG_STATE_DIR` も
 pane に渡さないので、leader の側では当てにできない。付けないと leader の
@@ -941,11 +942,11 @@ approve について、次のことに気をつける。
 
 ### org の終わり方
 
-leader は reviewer が通したら、次の順で締める(leader の雛形の「機能ごとの
-org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコミットし、per-plan
-なら人の承認を受けてから座席を立て、TASK と RESULT を往復する。「機能の計画の
-承認」)。下の `ralph org` のコマンドにも、タスクの `- 台帳:` の行の
-`--state-dir` を付ける。
+leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらない TASK)を
+通したら、次の順で締める(leader の雛形の「機能ごとの org」の手順 9〜16 と
+同じ。その前の手順は、計画を書いてコミットし、per-plan なら人の承認を受けて
+から座席を立て、TASK と RESULT を往復する。「機能の計画の承認」)。下の
+`ralph org` のコマンドにも、タスクの `- 台帳:` の行の `--state-dir` を付ける。
 
 1. reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、
    `docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が
@@ -973,31 +974,90 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
 3. `scripts/secret-scan-branch.sh` があれば `--strict` を付けて打ち、終了
    コードが 0 でなければ push せずに止まり、`ralph org escalate` で
    `BLOCKED` を上げる(TASK_ID は org_id。「受信箱」節)。
-4. `ralph org gate --org-id <org_id>` を打つ(動詞リファレンスの `gate` の
-   行)。バックグラウンドで走らせて stdout と stderr を `.harness/state/` の下の
-   ファイルに書き、終わってから `GATE:`・`HEAD:`・`BASE:` の行を読む。ツールに
-   切られた gate は何も記録しない。打ち直す前に、前の gate のスクリプトが
-   終わるのを待つ(スクリプトは自分のプロセスグループで動くので、gate が
-   殺されたあとも動き続けることがある)。断られたら、stderr の次の手に従う。
-   `GATE: fail` なら、`REASON:` と `LOG:` を本文に書いて implementer に直しを
-   TASK で頼み、reviewer が通したら 1 からやり直す。
-   archive のコミットのあとに implementer に TASK を頼むときは(`GATE: fail`
-   のときと、断りを直すのに implementer の手が要るとき。たとえば HEAD が既定の
-   ブランチを含まないと断られ、その rebase が衝突したとき)、先に、rebase の
-   途中なら `git rebase --abort` で戻し、archive のコミットがあれば
-   `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に
-   戻してから TASK を送る。per-plan の org では、承認の記録は計画の元のパスを
-   指すので、移したままだと implementer への TASK は `PLAN:` のパスにファイルが
-   なくて断られる。revert は同じ中身を元のパスに戻すので、承認の検査はそのまま
-   通る。
+4. reviewer に gate を頼む TASK を送る(動詞リファレンスの `gate` の行)。
+   leader は implementer と reviewer を 5 まで止めない(reviewer には gate を
+   頼み、implementer には `GATE: fail` のとき、作業ツリーが汚れているという
+   gate の断りのとき、rebase が衝突したときに TASK を送る。leader の雛形の
+   「ミッション」の 6 と「運用規律」の、作業が終わるたびに座席を止める決まりは、
+   機能ごとの org の implementer と reviewer には 5 まで当てはめない)。送る前に
+   `ralph org status --org-id <org_id> --state-dir <台帳>` を打ち、reviewer が
+   動いていなければ(STATE の欄に `(active)` が付いていない)、6 の spawn
+   し直しと同じ flag で reviewer を spawn し直してから送る。TASK_ID は
+   `gate-<n>`(この org で gate を頼んだ回数で、1 から数える)にし、本文には、
+   `mkdir -p .harness/state` を打ってから
+   `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
+   を打つよう書く。leader は `ralph org gate` も 2 つのスクリプトも打たない。
+   reviewer は本文のコマンドをそのまま打ち、コマンドがこの 2 つと違えば打たずに
+   `QUESTION` で leader に聞く(打ち方と返し方は「役割」節の reviewer)。
+   結果が来るまで、leader は worktree を変えず(コミット・rebase・ファイルの
+   書き換えをしない)、implementer に TASK を送らない。この間に見張りから
+   reviewer の停滞の `ALERT`(`SEAT: reviewer`、`CONDITION: stall`)が来ても、
+   reviewer を stop も spawn し直しもせず、`ralph org read` で reviewer の画面を
+   読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の
+   reviewer は前面で打つので、画面が長く変わらないことがある)。gate の TASK への
+   `GATE: pass` の `RESULT` は 1 ではなくここで扱う(1 に戻ってコミットを足すと、
+   push する HEAD が gate の HEAD からずれる)。同じ理由(`HEAD:` が合わない、
+   ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
+   `GATE: unrunnable` になる)で gate の TASK が 2 回続けて通らなければ、
+   3 回目の TASK は送らず、その理由を本文に書いて `BLOCKED` を escalate する。
+   結果は次のとおり扱う。
+   - `GATE: pass` の `RESULT`: `.harness/state/gate-<org_id>.out` を自分で読み、
+     `GATE: pass` の行があること、その `HEAD:` が RESULT の `HEAD:` と
+     `git rev-parse HEAD` に同じことを確かめ、ファイルの `HEAD:` と `BASE:` の
+     行を控える(6 で使う)。続けて、座席を止める前に
+     `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打ち、件名が
+     `wip:` で始まるコミットがあれば、座席を止めず push にも進まず、その
+     コミットを本文に書いて `BLOCKED` を escalate する。HEAD が合わないか、
+     ファイルに `GATE: pass` の行がなければ、座席を止めずに、新しい TASK_ID で
+     gate を頼み直す。
+   - `GATE: unrunnable` の `BLOCKED`: 本文の理由(gate の stderr)を読む。
+     作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミット
+     するか消す)を leader は自分では打たず、残ったファイルを 1 と同じく
+     分ける。reviewer のレポート(`docs/reports/` の下のファイル)なら、
+     leader が 1 のとおりコミットし、新しい TASK_ID で gate を頼み直す。
+     implementer の変更なら、下の archive の項のとおりにしてから
+     implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを
+     付ける)、reviewer にレビューを頼み直す。それ以外(reviewer のほかの
+     ファイル、誰が残したかわからない変更)なら、`BLOCKED` を escalate する。
+     ほかの gate の断り(rebase していない、など)なら、stderr の次の手を
+     leader が打ってから、新しい TASK_ID で gate を頼み直す。
+     次の手に implementer の手が要るとき(HEAD が既定のブランチを含まないと
+     断られ、その rebase が衝突した、など)は、下の archive の項のとおりにして
+     から implementer に頼み、reviewer が通したら 1 からやり直す。reviewer の
+     環境の問題(台帳に書けない、権限が足りない、など)なら、環境や権限を
+     直してから(座席の権限モードを変えて spawn し直す、など)頼み直し、直せ
+     なければ `BLOCKED` を escalate する。次の手のないエラー(台帳や git の
+     失敗)なら、頼み直さずに `BLOCKED` を escalate する。
+   - `GATE: fail` の `BLOCKED`: `REASON:` と `LOG:` を本文に書いて implementer
+     に直しを TASK で頼み、reviewer が通したら 1 からやり直す。
+   - reviewer の `QUESTION`(本文のコマンドが gate の TASK の 2 つと違うので
+     打たなかった): TASK の本文を、この項の 2 つのコマンド
+     (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
+     新しい TASK_ID で送り直す。何が違ったのかわからなければ、送り直さず、
+     `QUESTION` の要点を本文に書いて `BLOCKED` を escalate する。
+   - archive のコミットのあとに implementer に TASK を頼むときは(`GATE: fail`
+     のときと、断りを直すのに implementer の手が要るとき)、先に、rebase の
+     途中なら `git rebase --abort` で戻し、archive のコミットがあれば
+     `git revert --no-edit <archive のコミット>` で計画を `docs/plans/active/` に
+     戻してから TASK を送る。per-plan の org では、承認の記録は計画の元のパスを
+     指すので、移したままだと implementer への TASK は `PLAN:` のパスにファイルが
+     なくて断られる。revert は同じ中身を元のパスに戻すので、承認の検査はそのまま
+     通る。
 5. implementer と reviewer を `stop` する。
-6. HEAD が gate の出した `HEAD:` と同じことを確かめる。gate の打ち直しと
-   push の前に `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を
-   打ち、件名が `wip:` で始まるコミットがあれば、どちらも打たずにそのコミット
-   を本文に書いて `BLOCKED` を escalate する(`wip:` は Claude Code の
+6. HEAD が 4 で `.harness/state/gate-<org_id>.out` から控えた `HEAD:` と同じ
+   ことを確かめる。push の前に、もう一度
+   `git log --format='%h %s' origin/<既定のブランチ>..HEAD` を打ち、件名が
+   `wip:` で始まるコミットがあれば、gate を頼み直さず push も打たずに、その
+   コミットを本文に書いて `BLOCKED` を escalate する(`wip:` は Claude Code の
    セッションの hook が作る自動のチェックポイントで、機能の PR には要らない。
    gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも
-   `git log` を打つ)。HEAD が違えば 4 の gate を打ち直し、同じなら
+   `git log` を打つ)。HEAD が違えば push せず、gate を頼み直す。座席は 5 で
+   止めてあるので、leader の雛形の手順 5 と同じ flag(`--id reviewer`、
+   `--role reviewer`、`--cwd .`、`--driver`、`--model`、
+   タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を
+   spawn し直し、4 から新しい TASK_ID で gate を頼み直し、通ったら 5 で
+   止め直してからこの手順に戻る。spawn が断られたら、
+   エラーを本文に書いて `BLOCKED` を escalate する。HEAD が同じなら
    `git push -u origin <type>/<slug>` と `gh pr create` で PR を 1 本作る。
    `/pr` skill があれば、その手順(`.claude/skills/pr/SKILL.md`。Codex では
    `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
@@ -1005,15 +1065,15 @@ org」の手順 9〜16 と同じ。その前の手順は、計画を書いてコ
    `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
    ので、leader の cwd が消える)。push か `gh pr create` が失敗したら
    (ネットワークのない sandbox など)、打ち直さずにエラーを本文に書いて
-   `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、gate の `HEAD:`
-   と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて `RESULT`
-   を escalate する(TASK_ID は org_id)。
+   `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
+   `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて
+   `RESULT` を escalate する(TASK_ID は org_id)。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
-gate のあとにコミットを足さない。足したら gate を打ち直す。座席を gate の
-あとまで止めないのは、gate が落ちたときに implementer に直しを頼むため。その
-ため report は座席を止める前に打ち、report には座席の `stopped` と org の
-`disbanded` が載らない。
+gate のあとにコミットを足さない。足したら gate を頼み直す。座席を gate の
+あとまで止めないのは、gate を reviewer が打ち、gate が落ちたときに implementer
+に直しを頼むため。そのため report は座席を止める前に打ち、report には座席の
+`stopped` と org の `disbanded` が載らない。
 
 report をコミットせずに残すと worktree に未追跡のファイルが残り、gate に
 断られ、後始末の `cleanup` も止まる。そのため report は gate の前にコミット
@@ -1030,8 +1090,9 @@ worktree・ブランチ・記録を消す。merge の前には消さない(ほ�
 打ち直す。
 
 codex の headless leader が sandbox の中から `git fetch`・`git push`・
-`gh pr create` を打てるか、gate のスクリプト(Go のビルドのキャッシュや
-ネットワークを使うもの)を sandbox の中で走らせられるかは未確認。
+`gh pr create` を打てるか、codex の reviewer が gate のスクリプト(Go の
+ビルドのキャッシュやネットワークを使うもの)を sandbox の中で走らせられるかは
+未確認。
 
 ### gate の記録
 
@@ -1048,7 +1109,10 @@ codex の headless leader が sandbox の中から `git fetch`・`git push`・
 - どちらも続けて `head`(走らせる前の HEAD)・`base`(base ref の先頭)・
   `base_ref`・`branch`・`by`・`herdr_pane`・`log` を持つ。座席の状態
   (`ralph status`、`ralph org status`)は変えず、見張りは leader の動きとして
-  数える。
+  数える。機能の org の gate は reviewer が打つが、leader が TASK で頼んだ
+  仕事なので、記録はその仕事が進んだ印として数える。数え方は leader が gate を
+  打っていたときと同じなので、更新をまたいでも、保留中の `ALERT` が残した
+  基準の数はそのまま使える。
 - 走らせる前に断った gate と、中断された gate は何も記録しない。同じ head で
   通ったあとに落ちれば(テストの揺れなど)、最新の記録は落ちたほうになる。
 - `ralph org regate`(動詞リファレンスの `regate` の行)も同じ形の記録を、
@@ -1128,10 +1192,10 @@ ralph org merge-order --all --json
   - origin が fork なら、doctor が読むのは fork の保護で、PR の統合先の
     保護ではない。
 - 各行の理由の欄が、その分類になった理由と次の手を言う。機能の org が
-  走っているブランチでは、次の手は leader の `ralph org gate` になる。走って
-  いない(disband 済みの)org のブランチでは、`ralph org gate` の代わりに
-  `ralph org regate --branch <ブランチ>` を名指す(下の手順)。`ready` 以外の
-  分類が求めることは次のとおり。
+  走っているブランチでは、次の手は、leader が reviewer に頼む
+  `ralph org gate` になる。走っていない(disband 済みの)org のブランチでは、
+  `ralph org gate` の代わりに `ralph org regate --branch <ブランチ>` を名指す
+  (下の手順)。`ready` 以外の分類が求めることは次のとおり。
   - `rebase`: ブランチを `origin/<既定のブランチ>` に rebase し、gate を
     打ち直す。disband 済みの org のブランチでは regate を打つ(rebase の
     代わりに、既定のブランチを merge commit で取り込む)。
@@ -1247,10 +1311,33 @@ reviewer はゲートの実行を安いモデルの子サブエージェント�
   チェックが落ちたら `GATE: fail`、権限や環境の問題で実行できなければ
   `GATE: unrunnable` の BLOCKED を返し、差分レビューに進まない。通したときの
   RESULT のヘッダには、`GATE: pass` と、検証した commit の `HEAD:` と base の
-  `BASE:` を書く(ralph はこの 2 行を読まない。機能の PR の記録は leader の
-  `ralph org gate` が残す)。ゲートを実行するので、claude の座席を `guarded`
-  にすると許可待ちで止まる
-  (codex の座席は codex 自身の承認設定に従う。止まるかは未確認)。
+  `BASE:` を書く(ralph はこの 2 行を読まない。機能の PR の記録は、下の gate の
+  TASK で打つ `ralph org gate` が残す)。ゲートを実行するので、claude の座席を
+  `guarded` にすると許可待ちで止まる(codex の座席は codex 自身の承認設定に
+  従う。止まるかは未確認)。機能の org では、leader の gate の TASK(TASK_ID が
+  `gate-` で始まる)も受ける。
+  - 差分レビューも 2 つのスクリプトの素の実行もせず、本文の
+    `mkdir -p .harness/state` と
+    `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
+    をそのまま打つ。gate の TASK で台帳に書いてよいのは `ralph org gate` が
+    書く分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや
+    `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が自分の
+    org_id でない、出力の先が `.harness/state/gate-<org_id>.out` でない、
+    など)、打たずに `QUESTION` で leader に聞く。
+  - この TASK で書くのは、gate が台帳に書く記録とログと、`.out` のファイル
+    だけで、worktree のファイルは書き換えず、コミットもしない。
+  - Claude Code の reviewer は `run_in_background` で走らせて手番を終え、
+    Codex の reviewer は前面で打ち、ツールの timeout を gate にかかる時間より
+    長くする(そのあいだ leader の `ralph org send` は届かない)。
+  - ツールに切られた gate は何も記録しないので、前の gate のスクリプトが
+    終わるのを待ってから 1 回だけ打ち直し(スクリプトは自分のプロセス
+    グループで動くので、gate が殺されたあとも動き続けることがある)、2 回目も
+    切られたら `GATE: unrunnable` で返す。
+  - 返すのは、ファイルに `GATE: pass` があれば `GATE: pass` とファイルの
+    `HEAD:`・`BASE:` を写した RESULT、`GATE: fail` があれば `REASON:` と
+    `LOG:` を書いた `GATE: fail` の BLOCKED、`GATE:` の行がなければ(gate の
+    断り、台帳や git のエラー)stderr の理由と次の手を書いた
+    `GATE: unrunnable` の BLOCKED で、次の手は自分で打たず leader に任せる。
 
 上記 3 役割以外(未知の role)を割り当てたい場合は、`--role` に対応する雛形
 が無いため `--prompt` で初期プロンプトを直指定する。E2E テストや探索的
@@ -1324,8 +1411,9 @@ receipts / 役割雛形)を使うため、手順は共通。
    成果物化する(最終責任)。機能ごとの org では、reviewer が通したら先に
    reviewer のレポートをコミットして既定のブランチに rebase し、座席を止める
    前に report を打って、report の
-   コミット・計画の archive のコミット・secret scan・`gate` のあとに座席を
-   止め、push・`gh pr create` で PR を作る(「org の終わり方」)。
+   コミット・計画の archive のコミット・secret scan のあとに reviewer に
+   `gate` を TASK で頼み(leader は自分では打たない)、通ったら座席を止め、
+   push・`gh pr create` で PR を作る(「org の終わり方」)。
 8. 最後に `disband` で組織を解散する。disband は org の herdr workspace を
    閉じるので、その中で動く headless の leader では、disband がそのセッション
    の最後のコマンドになる(ralph は記録と出力を済ませてから閉じる)。
@@ -1356,8 +1444,10 @@ headless の leader(経路 B)は、agmsg の受信箱を leader の雛形の「a
 待ってから入力するので、leader は座席を前面で長く待たない。Claude Code の
 leader は agmsg の受信箱を Monitor で見張って手番を終えるので、director の
 `ralph org send --to leader` が届く。Codex の leader には Monitor がなく、
-座席を待つあいだ(前面のループ、`ralph org wait`、gate)は手番が終わらない
-ので、`ralph org send` が届かない。現セッション昇格(経路 A)の leader には
+座席を待つあいだ(前面のループ、`ralph org wait`)は手番が終わらない
+ので、`ralph org send` が届かない(gate は leader ではなく reviewer が打ち、
+Codex の reviewer は前面で打つので、そのあいだは reviewer に
+`ralph org send` が届かない)。現セッション昇格(経路 A)の leader には
 雛形が渡らないので、agmsg の受信箱の確認は `/agmsg` skill の手順に従う
 (未導入環境では `ralph org read` / `ralph org wait` で代替)。スター型のため、
 非 leader 座席宛てのメッセージや座席間で回覧されたメッセージは観察対象の
@@ -1397,12 +1487,15 @@ leader は agmsg の受信箱を Monitor で見張って手番を終えるので
   座席はすでに書けており、warn はその旨を示す。作業ディレクトリが
   保存先を含まない座席(task worktree など)には writable root が
   引き続き必要。org の台帳はこれとは別で、edits / autonomous
-  (`--sandbox workspace-write`)の codex の leader 座席の cwd の下に台帳の
+  (`--sandbox workspace-write`)の codex の leader 座席と、機能の org
+  (`start --plan` で立てた org)の codex の reviewer 座席の cwd の下に台帳の
   ディレクトリがないとき(linked worktree で動くときなど)、ralph が起動の
-  引数に `--add-dir <台帳のディレクトリ>` を足して、leader が共通の台帳に
-  書けるようにする。leader 以外の役割の座席には足さない。座席のうち台帳を
-  書くのは leader だけで、ほかの座席は結果を agmsg で leader に送るので、
-  台帳に書く権限は要らない。headless の director も台帳に書くが、
+  引数に `--add-dir <台帳のディレクトリ>` を足して、その座席が共通の台帳に
+  書けるようにする。leader は `ralph org` の動詞を打ち、機能の org の
+  reviewer は leader の TASK で `ralph org gate` を打って gate の記録とログを
+  台帳に書く。implementer、機能に結びつかない org の reviewer、ほかの役割の
+  座席には足さない。これらの座席は結果を agmsg で leader に送るので、台帳に
+  書く権限は要らない。headless の director も台帳に書くが、
   `--add-dir` は受けない(codex の director は guarded でしか立たず、edits と
   autonomous は start が断る)。agmsg の DB はこの対象に入らないので、上の
   writable root の設定はそのまま要る。
@@ -1467,10 +1560,10 @@ leader は agmsg の受信箱を Monitor で見張って手番を終えるので
   で成果物化 → 組織を `disband`、の順で締める。機能ごとの org では順が違い、
   reviewer のレポートのコミット → rebase → report → report と計画の移動の
   コミット → secret scan →
-  `ralph org gate` → 座席の `stop` → push・`gh pr create` → `disband` の順に
-  なる(「org の終わり方」)。disband は org の herdr
-  workspace を閉じるので最後に打つ。止めた座席の pane と org の workspace は
-  ralph が閉じるので、herdr を見て回る必要はほぼない。ただし
+  reviewer が leader の TASK で打つ `ralph org gate` → 座席の `stop` →
+  push・`gh pr create` → `disband` の順になる(「org の終わり方」)。disband は
+  org の herdr workspace を閉じるので最後に打つ。止めた座席の pane と org の
+  workspace は ralph が閉じるので、herdr を見て回る必要はほぼない。ただし
   `ralph org status --org-id <id>` に active な座席がないことは確かめる
   (headless の leader は disband で終わるので、起動した側が確かめる)。
   自分の pane や workspace を最後に閉じる close が失敗したときは、先に
@@ -1489,11 +1582,11 @@ leader は agmsg の受信箱を Monitor で見張って手番を終えるので
   既定のブランチに rebase 済みで、report のコミットと計画の移動のコミットが
   あり、worktree の `git status --porcelain` が空
 - [ ] 機能ごとの org では、secret scan(`scripts/secret-scan-branch.sh` が
-  あれば `--strict`)が通り、`ralph org gate` が `gate_passed` を記録した
-  あとに座席を止め、gate の `HEAD:` と同じ head を push し、`gh pr create` で
-  PR を作り、gate の `HEAD:` と `BASE:` をヘッダに写した `RESULT` で PR の URL を
-  escalate した。worktree とブランチは消さずに残っている(merge のあとに
-  `cleanup` で消す)
+  あれば `--strict`)が通り、reviewer が leader の TASK で打った
+  `ralph org gate` が `gate_passed` を記録したあとに座席を止め、gate の
+  `HEAD:` と同じ head を push し、`gh pr create` で PR を作り、gate の `HEAD:`
+  と `BASE:` をヘッダに写した `RESULT` で PR の URL を escalate した。worktree
+  とブランチは消さずに残っている(merge のあとに `cleanup` で消す)
 - [ ] 最後に `disband` を打ち、`ralph org status --org-id <id>` に active な
   座席が存在しない
 - [ ] herdr に残留がない: ralph が台帳に記録した pane と workspace は
