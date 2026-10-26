@@ -178,4 +178,4 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
 - [x] Review artifact created(`docs/reports/self-review-2026-10-26-reviewer-runs-gate.md`、3 回、Merge OK)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-26-reviewer-runs-gate.md`、pass。LOW の V1 は `/sync-docs` で tech-debt の持ち越しの注を足す)
 - [x] Test artifact created(`docs/reports/test-2026-10-26-reviewer-runs-gate.md`、pass。HEAD ad1a5c64 で Go のテストを go1.27.3 と go1.25.8 の両方で、shell のテストを `verify.local.sh` の test モードで。`run-verify.sh` は 6182cb2e で go1.25.8 の通しが rc 0、そのあとの静的検査は verify が c9caf03a で、implementer が各直しで打った)
-- [ ] PR created
+- [x] PR created(#259)
