@@ -561,10 +561,11 @@ func TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone(t *testing
 	}
 }
 
-// signalCauseContext when no signal comes: a parent that ends first keeps its
-// own cause (the command's context gives "context canceled", as
-// TestOrgWaitDirector_AContextThatEndsWritesSignalAndRaisesNothing checks),
-// stop cancels with context.Canceled, and received returns nil in both cases.
+// signalCauseContext when no signal comes: a parent that ends after the call
+// keeps its own cause (the command's context gives "context canceled", as
+// TestOrgWaitDirector_AContextThatEndsWritesSignalAndRaisesNothing checks), a
+// parent that ended before the call keeps it too and stop still returns, stop
+// cancels with context.Canceled, and received returns nil in all three cases.
 // The signal side runs in
 // TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught
 // and through the command in TestOrgWaitDirector_ASignalEndsTheProcessByIt.
@@ -584,6 +585,27 @@ func TestOrgWaitDirector_SignalCauseContextParentCauseAndStop(t *testing.T) {
 	stop()
 	if sig := received(); sig != nil {
 		t.Errorf("after the parent ended: received = %v; want nil", sig)
+	}
+
+	errEnded := errors.New("the ended parent's cause")
+	ended, cancelEnded := context.WithCancelCause(context.Background())
+	cancelEnded(errEnded)
+	ctx, received, stop = signalCauseContext(ended, syscall.SIGHUP)
+	if !errors.Is(ctx.Err(), context.Canceled) || context.Cause(ctx) != errEnded {
+		t.Errorf("with a parent that had ended: ctx.Err() = %v, cause = %v; want context.Canceled and the parent's cause %q", ctx.Err(), context.Cause(ctx), errEnded)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		stop()
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not return within 5s for a parent that had ended before the call")
+	}
+	if sig := received(); sig != nil {
+		t.Errorf("with a parent that had ended: received = %v; want nil", sig)
 	}
 
 	ctx, received, stop = signalCauseContext(context.Background(), syscall.SIGHUP)
