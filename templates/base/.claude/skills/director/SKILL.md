@@ -935,9 +935,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
    org。
 4. 理由の欄が `ralph org gate --org-id <org>` を名指すブランチ(機能の org が
    走っている)には打たない。そのブランチは、leader が reviewer に頼んで
-   gate を打たせる。同じ
-   org_id が別の機能で走っているブランチも、その org が disband するまで
-   打たない。
+   gate を打たせる。同じ org_id が別の機能で走っているブランチも、その org が
+   disband するまで打たない。
 
 ## 終わり
 

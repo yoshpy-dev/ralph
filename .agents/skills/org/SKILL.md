@@ -975,8 +975,14 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    コードが 0 でなければ push せずに止まり、`ralph org escalate` で
    `BLOCKED` を上げる(TASK_ID は org_id。「受信箱」節)。
 4. reviewer に gate を頼む TASK を送る(動詞リファレンスの `gate` の行)。
-   TASK_ID は `gate-<n>`(この org で gate を頼んだ回数で、1 から数える)に
-   し、本文には、`mkdir -p .harness/state` を打ってから
+   leader は reviewer を 5 まで止めない(leader の雛形の「ミッション」の 6 と
+   「運用規律」の、作業が終わるたびに座席を止める決まりは、機能ごとの org の
+   reviewer には 5 まで当てはめない)。送る前に
+   `ralph org status --org-id <org_id> --state-dir <台帳>` を打ち、reviewer が
+   動いていなければ(STATE の欄に `(active)` が付いていない)、6 の spawn
+   し直しと同じ flag で reviewer を spawn し直してから送る。TASK_ID は
+   `gate-<n>`(この org で gate を頼んだ回数で、1 から数える)にし、本文には、
+   `mkdir -p .harness/state` を打ってから
    `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
    を打つよう書く。leader は `ralph org gate` も 2 つのスクリプトも打たない。
    reviewer は本文のコマンドをそのまま打ち、コマンドがこの 2 つと違えば打たずに
@@ -988,7 +994,10 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の
    reviewer は前面で打つので、画面が長く変わらないことがある)。gate の TASK への
    `GATE: pass` の `RESULT` は 1 ではなくここで扱う(1 に戻ってコミットを足すと、
-   push する HEAD が gate の HEAD からずれる)。結果は次のとおり扱う。
+   push する HEAD が gate の HEAD からずれる)。頼み直しが同じ理由(`HEAD:` が
+   合わない、ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
+   `GATE: unrunnable` になる)で 2 回続けて通らなければ、3 回目は頼まず、その
+   理由を本文に書いて `BLOCKED` を escalate する。結果は次のとおり扱う。
    - `GATE: pass` の `RESULT`: `.harness/state/gate-<org_id>.out` を自分で読み、
      `GATE: pass` の行があること、その `HEAD:` が RESULT の `HEAD:` と
      `git rev-parse HEAD` に同じことを確かめ、ファイルの `HEAD:` と `BASE:` の
@@ -999,8 +1008,14 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
      ファイルに `GATE: pass` の行がなければ、座席を止めずに、新しい TASK_ID で
      gate を頼み直す。
    - `GATE: unrunnable` の `BLOCKED`: 本文の理由(gate の stderr)を読む。
-     gate の断り(作業ツリーが汚れている、rebase していない、など)なら、
-     stderr の次の手を leader が打ってから、新しい TASK_ID で gate を頼み直す。
+     作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミット
+     するか消す)を leader は自分では打たず、残ったファイルを 1 と同じく
+     分ける。implementer の変更なら、下の archive の項のとおりにしてから
+     implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを
+     付ける)、reviewer にレビューを頼み直す。それ以外(reviewer のほかの
+     ファイル、誰が残したかわからない変更)なら、`BLOCKED` を escalate する。
+     ほかの gate の断り(rebase していない、など)なら、stderr の次の手を
+     leader が打ってから、新しい TASK_ID で gate を頼み直す。
      次の手に implementer の手が要るとき(HEAD が既定のブランチを含まないと
      断られ、その rebase が衝突した、など)は、下の archive の項のとおりにして
      から implementer に頼み、reviewer が通したら 1 からやり直す。reviewer の
@@ -1010,6 +1025,11 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
      失敗)なら、頼み直さずに `BLOCKED` を escalate する。
    - `GATE: fail` の `BLOCKED`: `REASON:` と `LOG:` を本文に書いて implementer
      に直しを TASK で頼み、reviewer が通したら 1 からやり直す。
+   - reviewer の `QUESTION`(本文のコマンドが gate の TASK の 2 つと違うので
+     打たなかった): TASK の本文を、この項の 2 つのコマンド
+     (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
+     新しい TASK_ID で送り直す。何が違ったのかわからなければ、送り直さず、
+     `QUESTION` の要点を本文に書いて `BLOCKED` を escalate する。
    - archive のコミットのあとに implementer に TASK を頼むときは(`GATE: fail`
      のときと、断りを直すのに implementer の手が要るとき)、先に、rebase の
      途中なら `git rebase --abort` で戻し、archive のコミットがあれば
@@ -1028,9 +1048,10 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    gate の前に作られたものは gate の HEAD にも入っているので、HEAD が同じでも
    `git log` を打つ)。HEAD が違えば push せず、gate を頼み直す。座席は 5 で
    止めてあるので、leader の雛形の手順 5 と同じ flag(`--id reviewer`、
-   `--cwd .`、`--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧に
-   ある `--scope`)で reviewer を spawn し直し、4 から新しい TASK_ID で gate を
-   頼み直し、通ったら 5 で止め直してからこの手順に戻る。spawn が断られたら、
+   `--role reviewer`、`--cwd .`、`--driver`、`--model`、
+   タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を
+   spawn し直し、4 から新しい TASK_ID で gate を頼み直し、通ったら 5 で
+   止め直してからこの手順に戻る。spawn が断られたら、
    エラーを本文に書いて `BLOCKED` を escalate する。HEAD が同じなら
    `git push -u origin <type>/<slug>` と `gh pr create` で PR を 1 本作る。
    `/pr` skill があれば、その手順(`.claude/skills/pr/SKILL.md`。Codex では
@@ -1046,9 +1067,8 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
 
 gate のあとにコミットを足さない。足したら gate を頼み直す。座席を gate の
 あとまで止めないのは、gate を reviewer が打ち、gate が落ちたときに implementer
-に直しを頼むため。その
-ため report は座席を止める前に打ち、report には座席の `stopped` と org の
-`disbanded` が載らない。
+に直しを頼むため。そのため report は座席を止める前に打ち、report には座席の
+`stopped` と org の `disbanded` が載らない。
 
 report をコミットせずに残すと worktree に未追跡のファイルが残り、gate に
 断られ、後始末の `cleanup` も止まる。そのため report は gate の前にコミット
@@ -1287,30 +1307,32 @@ reviewer はゲートの実行を安いモデルの子サブエージェント�
   `GATE: unrunnable` の BLOCKED を返し、差分レビューに進まない。通したときの
   RESULT のヘッダには、`GATE: pass` と、検証した commit の `HEAD:` と base の
   `BASE:` を書く(ralph はこの 2 行を読まない。機能の PR の記録は、下の gate の
-  TASK で打つ `ralph org gate` が残す)。機能の org では、leader の gate の
-  TASK(TASK_ID が `gate-` で始まる)も受ける。差分レビューも 2 つの
-  スクリプトの素の実行もせず、本文の `mkdir -p .harness/state` と
-  `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
-  をそのまま打つ。gate の TASK で台帳に書いてよいのは `ralph org gate` が書く
-  分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや
-  `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が自分の
-  org_id でない、出力の先が `.harness/state/gate-<org_id>.out` でない、など)、
-  打たずに `QUESTION` で leader に聞く。この TASK で書くのは、gate が台帳に
-  書く記録とログと、`.out` のファイルだけで、worktree のファイルは書き換えず、
-  コミットもしない。Claude Code の reviewer は `run_in_background` で走らせて
-  手番を終え、Codex の reviewer は前面で打ち、ツールの timeout を gate に
-  かかる時間より長くする(そのあいだ leader の `ralph org send` は届かない)。ツールに
-  切られた gate は何も記録しないので、前の gate のスクリプトが終わるのを
-  待ってから 1 回だけ打ち直し(スクリプトは自分のプロセスグループで動くので、
-  gate が殺されたあとも動き続けることがある)、2 回目も切られたら
-  `GATE: unrunnable` で返す。返すのは、ファイルに
-  `GATE: pass` があれば `GATE: pass` とファイルの `HEAD:`・`BASE:` を写した
-  RESULT、`GATE: fail` があれば `REASON:` と `LOG:` を書いた `GATE: fail` の
-  BLOCKED、`GATE:` の行がなければ(gate の断り、台帳や git のエラー)stderr の
-  理由と次の手を書いた `GATE: unrunnable` の BLOCKED で、次の手は自分で打たず
-  leader に任せる。ゲートを実行するので、claude の座席を `guarded`
-  にすると許可待ちで止まる
-  (codex の座席は codex 自身の承認設定に従う。止まるかは未確認)。
+  TASK で打つ `ralph org gate` が残す)。ゲートを実行するので、claude の座席を
+  `guarded` にすると許可待ちで止まる(codex の座席は codex 自身の承認設定に
+  従う。止まるかは未確認)。機能の org では、leader の gate の TASK(TASK_ID が
+  `gate-` で始まる)も受ける。
+  - 差分レビューも 2 つのスクリプトの素の実行もせず、本文の
+    `mkdir -p .harness/state` と
+    `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
+    をそのまま打つ。gate の TASK で台帳に書いてよいのは `ralph org gate` が
+    書く分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや
+    `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が自分の
+    org_id でない、出力の先が `.harness/state/gate-<org_id>.out` でない、
+    など)、打たずに `QUESTION` で leader に聞く。
+  - この TASK で書くのは、gate が台帳に書く記録とログと、`.out` のファイル
+    だけで、worktree のファイルは書き換えず、コミットもしない。
+  - Claude Code の reviewer は `run_in_background` で走らせて手番を終え、
+    Codex の reviewer は前面で打ち、ツールの timeout を gate にかかる時間より
+    長くする(そのあいだ leader の `ralph org send` は届かない)。
+  - ツールに切られた gate は何も記録しないので、前の gate のスクリプトが
+    終わるのを待ってから 1 回だけ打ち直し(スクリプトは自分のプロセス
+    グループで動くので、gate が殺されたあとも動き続けることがある)、2 回目も
+    切られたら `GATE: unrunnable` で返す。
+  - 返すのは、ファイルに `GATE: pass` があれば `GATE: pass` とファイルの
+    `HEAD:`・`BASE:` を写した RESULT、`GATE: fail` があれば `REASON:` と
+    `LOG:` を書いた `GATE: fail` の BLOCKED、`GATE:` の行がなければ(gate の
+    断り、台帳や git のエラー)stderr の理由と次の手を書いた
+    `GATE: unrunnable` の BLOCKED で、次の手は自分で打たず leader に任せる。
 
 上記 3 役割以外(未知の role)を割り当てたい場合は、`--role` に対応する雛形
 が無いため `--prompt` で初期プロンプトを直指定する。E2E テストや探索的

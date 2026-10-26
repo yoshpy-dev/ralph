@@ -92,9 +92,9 @@ seat of a feature org (an org started with `ralph org start --plan`), when
 the seat runs in edits or autonomous mode and the state directory is not
 inside the seat's `--cwd`. The leader runs `ralph org` verbs; a feature
 org's reviewer runs `ralph org gate` at the leader's TASK and so writes the
-gate record and the gate log to the ledger. This widens the leader-only
-choice of 2026-10-07 (the ralph repository's plan
-`2026-10-26-reviewer-runs-gate`). Seats of every
+gate record and the gate log to the ledger. Like the leader, that reviewer can
+then write the whole ledger (the manifest, the inbox, the seats' prompt files),
+and only its role prompt limits it to the gate's records. Seats of every
 other role (the implementer, the reviewer of an org with no feature binding,
 or a role with no template that runs from `--prompt`) report to the leader
 over agmsg and do not write the ledger, and the flag would let them rewrite
