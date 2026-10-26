@@ -169,7 +169,10 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
 - [x] Plan reviewed(consult で TASK_ID の分け方、停滞の ALERT の扱い、FR-7 を `[ ]` に戻すことを確かめた。Codex の計画助言の MEDIUM 2 件を入れた: 座席を止めたあとの HEAD の不一致で reviewer を spawn し直す道、見張りの数え方を変える D6 の取り下げ)
 - [x] Plan approved(ユーザーの常設の指示「作成したプランは自動承認します」による)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(S1 e67152da、S2 5e8f5b50、S3 ce85125a、S4 8902cbf0 と 480b8781、S5 097a8c66 と 12e4b9d5。S4 と S5 は計画の S5 と S6 にあたる)
+  - 計画からの逸れ 1: reviewer の雛形の「gate の TASK」は、本文のコマンドを「そのまま打つ」だけでなく、決まった 2 つと違えば打たずに QUESTION で leader に聞く(8902cbf0、`TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand` で固定)。gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、consult の勧めで足した。`/org` skill の reviewer の役割にも同じ文を書いた
+  - 計画からの逸れ 2: 計画の影響範囲になかった `.claude/rules/ralph/git-commit-strategy.md` と template の写しの 1 文を直した(12e4b9d5)。leader が `wip:` を確かめるのは「gate を打ち直す前と push の前」ではなく、「reviewer の gate が通ったあとと push の前」(雛形の手順 12 と 14)になったため
+  - sync-docs で判断すること: Codex の reviewer が gate を前面で打つあいだは `ralph org send` が reviewer に届かない(reviewer.md の「gate の TASK」)。tech-debt には Codex の leader の同じ仕組みの行しかない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
