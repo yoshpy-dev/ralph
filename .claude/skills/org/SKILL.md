@@ -975,9 +975,11 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    コードが 0 でなければ push せずに止まり、`ralph org escalate` で
    `BLOCKED` を上げる(TASK_ID は org_id。「受信箱」節)。
 4. reviewer に gate を頼む TASK を送る(動詞リファレンスの `gate` の行)。
-   leader は reviewer を 5 まで止めない(leader の雛形の「ミッション」の 6 と
-   「運用規律」の、作業が終わるたびに座席を止める決まりは、機能ごとの org の
-   reviewer には 5 まで当てはめない)。送る前に
+   leader は implementer と reviewer を 5 まで止めない(reviewer には gate を
+   頼み、implementer には `GATE: fail` のとき、作業ツリーが汚れているという
+   gate の断りのとき、rebase が衝突したときに TASK を送る。leader の雛形の
+   「ミッション」の 6 と「運用規律」の、作業が終わるたびに座席を止める決まりは、
+   機能ごとの org の implementer と reviewer には 5 まで当てはめない)。送る前に
    `ralph org status --org-id <org_id> --state-dir <台帳>` を打ち、reviewer が
    動いていなければ(STATE の欄に `(active)` が付いていない)、6 の spawn
    し直しと同じ flag で reviewer を spawn し直してから送る。TASK_ID は
@@ -994,10 +996,11 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の
    reviewer は前面で打つので、画面が長く変わらないことがある)。gate の TASK への
    `GATE: pass` の `RESULT` は 1 ではなくここで扱う(1 に戻ってコミットを足すと、
-   push する HEAD が gate の HEAD からずれる)。頼み直しが同じ理由(`HEAD:` が
-   合わない、ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
-   `GATE: unrunnable` になる)で 2 回続けて通らなければ、3 回目は頼まず、その
-   理由を本文に書いて `BLOCKED` を escalate する。結果は次のとおり扱う。
+   push する HEAD が gate の HEAD からずれる)。同じ理由(`HEAD:` が合わない、
+   ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
+   `GATE: unrunnable` になる)で gate の TASK が 2 回続けて通らなければ、
+   3 回目の TASK は送らず、その理由を本文に書いて `BLOCKED` を escalate する。
+   結果は次のとおり扱う。
    - `GATE: pass` の `RESULT`: `.harness/state/gate-<org_id>.out` を自分で読み、
      `GATE: pass` の行があること、その `HEAD:` が RESULT の `HEAD:` と
      `git rev-parse HEAD` に同じことを確かめ、ファイルの `HEAD:` と `BASE:` の
@@ -1010,7 +1013,9 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
    - `GATE: unrunnable` の `BLOCKED`: 本文の理由(gate の stderr)を読む。
      作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミット
      するか消す)を leader は自分では打たず、残ったファイルを 1 と同じく
-     分ける。implementer の変更なら、下の archive の項のとおりにしてから
+     分ける。reviewer のレポート(`docs/reports/` の下のファイル)なら、
+     leader が 1 のとおりコミットし、新しい TASK_ID で gate を頼み直す。
+     implementer の変更なら、下の archive の項のとおりにしてから
      implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを
      付ける)、reviewer にレビューを頼み直す。それ以外(reviewer のほかの
      ファイル、誰が残したかわからない変更)なら、`BLOCKED` を escalate する。

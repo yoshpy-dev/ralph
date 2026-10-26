@@ -40,9 +40,9 @@
      やり直させる(座席の権限モードを変えて spawn し直す、など)。直せなければ
      `ralph org escalate` で BLOCKED を上げる(「件を上げる」の節)
 6. 座席は作業が終わるたびに `ralph org stop` する(機能ごとの org の
-   reviewer だけは、「機能ごとの org」の節の手順 12 のとおり手順 13 まで
-   止めない)。stop は座席の pane を閉じるので、画面の出力が要るときは先に
-   `ralph org read` で読む
+   implementer と reviewer だけは、「機能ごとの org」の節の手順 12 のとおり
+   手順 13 まで止めない)。stop は座席の pane を閉じるので、画面の出力が要る
+   ときは先に `ralph org read` で読む
 7. 座席の作業がすべて終わり座席を止めたら、最終責任として
    `ralph org report --org-id {{ORG_ID}}` で編成履歴を `docs/reports/` に残す
    (機能ごとの org では、座席を止める前、reviewer に gate を頼む前に打ち、
@@ -246,9 +246,12 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     `./scripts/secret-scan-branch.sh --strict` を打つ。終了コードが 0 で
     なければ push せずに止まり、`ralph org escalate` で BLOCKED を上げる
     (EVIDENCE には引っかかったファイルと行を書き、出力をそのまま貼らない)
-12. reviewer に gate を頼む TASK を送る。この org では reviewer を手順 13 まで
-    止めない(「ミッション」の 6 と「運用規律」の、作業が終わるたびに座席を
-    止める決まりは、この org の reviewer には手順 13 まで当てはめない)。
+12. reviewer に gate を頼む TASK を送る。この org では implementer と
+    reviewer を手順 13 まで止めない(reviewer には gate を頼み、implementer には
+    `GATE: fail` のとき、作業ツリーが汚れているという gate の断りのとき、
+    rebase が衝突したときに TASK を送る。「ミッション」の 6 と「運用規律」の、
+    作業が終わるたびに座席を止める決まりは、この org の implementer と reviewer
+    には手順 13 まで当てはめない)。
     送る前に `ralph org status --org-id {{ORG_ID}} --state-dir <台帳>` を打ち、
     reviewer が動いていなければ(STATE の欄に `(active)` が付いていない)、
     手順 14 の spawn し直しと同じ flag で reviewer を spawn し直してから
@@ -267,9 +270,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     spawn し直しもしない。`ralph org read` で reviewer の画面を読み、gate が
     走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は
     前面で打つので、画面が長く変わらないことがある)。gate のあとにコミットを
-    足さず、足したら gate を頼み直す。頼み直しが同じ理由(`HEAD:` が合わない、
-    ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で
-    `GATE: unrunnable` になる)で 2 回続けて通らなければ、3 回目は頼まず、
+    足さず、足したら gate を頼み直す。同じ理由(`HEAD:` が合わない、ファイルに
+    `GATE: pass` の行がない、reviewer の環境の同じ問題で `GATE: unrunnable`
+    になる)で gate の TASK が 2 回続けて通らなければ、3 回目の TASK は送らず、
     その理由を本文に書いて `ralph org escalate` で BLOCKED を上げる。
     結果は次のとおり扱う。
     - `GATE: pass` の RESULT: `.harness/state/gate-{{ORG_ID}}.out` を自分で
@@ -287,6 +290,8 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     - `GATE: unrunnable` の BLOCKED: 本文の理由(gate の stderr)を読む。
       作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミット
       するか消す)を自分では打たず、残ったファイルを手順 9 と同じく分ける。
+      reviewer のレポート(`docs/reports/` の下のファイル)なら、手順 9 のとおり
+      あなたがコミットし、新しい TASK_ID で gate を頼み直す。
       implementer の変更なら、手順 10 の終わりのとおり計画を戻してから、
       implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを
       付ける)、手順 8 の往復に戻る。それ以外(reviewer のほかのファイル、
@@ -521,7 +526,7 @@ agmsg の受信箱に届きます。director の DECISION と STOP は、`ralph 
 ## 運用規律
 
 - 座席は使い終わったら都度 `ralph org stop` してください(機能ごとの org の
-  reviewer の例外は「ミッション」の 6)。座席を spawn
+  implementer と reviewer の例外は「ミッション」の 6)。座席を spawn
   したまま放置しないでください。
 - 全体のタスクが終わったら、`ralph org report --org-id {{ORG_ID}}` で
   編成履歴を `docs/reports/` に成果物として残し、そのあと
