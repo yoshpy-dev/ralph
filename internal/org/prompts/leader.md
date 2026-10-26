@@ -21,7 +21,10 @@
    `ralph org spawn` で座席を spawn する(役割別プロンプト雛形が自動展開
    されます)。`--model` は必ず明示する。省略するとプール先頭(claude は
    `fable`)へ警告付きでフォールバックするが、コストとモデル選択の意図が
-   記録されないため運用ルールとして省略しない
+   記録されないため運用ルールとして省略しない。`--scope` で座席の担当範囲を
+   渡す(既定の permission mode `autonomous` では必須で、ないと spawn が
+   断られる。機能ごとの org では、タスクの `- 予約したパス:` の行の括弧に
+   ある引数を使う。「機能ごとの org」の節の手順 5)
 3. `ralph org send` で typed message を送り、作業を委譲する
 4. `ralph org status` / `ralph org read` で座席の状態を観察し、統括する。
    座席の RESULT や返事は前面で待たず、「agmsg の受信箱の運用」の節のとおり
@@ -135,7 +138,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    spawn も TASK も断られる)。reviewer は承認の前に spawn してよく、計画の
    レビューを TASK で頼める。ここで reviewer を spawn するときも、タスクに
    「全機能の座席に適用する決まり」があれば、そこに書かれた driver と model を
-   `--driver` と `--model` に使う(手順 5)
+   `--driver` と `--model` に使う(手順 5)。spawn のほかの flag も手順 5 と
+   同じにし、`--cwd .`・`--model`・`--scope`(タスクの `- 予約したパス:` の
+   行の括弧にある引数)を付ける
 4. (per-plan)leader 宛ての DECISION のうち、`PLAN:` のヘッダが手順 3 で
    上げた QUESTION と同じで、本文が `approved` で始まるものを承認とみなす
    (人の承認が `ralph org approve` で台帳に記録されてから届く)。受けたら、
@@ -149,7 +154,13 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    立てていれば implementer だけ)。`--id` は `implementer` と `reviewer`
    にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
    org_id が長いと、これより長い seat_id は spawn で拒否される)。どちらにも
-   `--cwd .`(この worktree)と `--model` を渡す。TASK には機能の計画の
+   `--cwd .`(この worktree)と `--model` を渡し、タスクの `- 予約したパス:`
+   の行の括弧にある `--scope` の引数を書き換えずに付ける(引数は ralph が
+   shell 用に引用したものなので、引用符を足したり外したりしない)。既定の
+   permission mode `autonomous` では、`--scope` のない spawn は断られる。
+   implementer の雛形は scope の中のパスだけを `git add` し、reviewer の
+   雛形は report と gate の生成物を scope の外でも書いてよいので、どちらの
+   `--scope` も予約にそろえる。TASK には機能の計画の
    パスを書く。タスクに「全機能の座席に適用する決まり」があれば、そこに
    書かれた driver と model を spawn の `--driver` と `--model` に使う。
    ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は
@@ -271,8 +282,11 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     gate の HEAD にも入っているので、HEAD が同じでも `git log` を打つ)。
     HEAD が違えば push せず、gate を打ち直す(手順 12)。同じなら
     `git push -u origin <ブランチ>` で push し、`gh pr create` で PR を 1 本
-    作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば
-    タイトルと本文をその雛形に合わせるが、`/pr` skill そのものは実行しない
+    作る。タイトルと本文はプロジェクトの決まりに沿う。`/pr` skill があれば、
+    その手順(`.claude/skills/pr/SKILL.md`。Codex では
+    `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
+    タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
+    `/pr` skill そのものは実行しない
     (`/pr` は PR を作ったあと task worktree と local branch を消すので、
     あなたの cwd であるこの worktree とブランチが消える)。push か
     `gh pr create` が失敗したとき(ネットワークのない sandbox など)は、
