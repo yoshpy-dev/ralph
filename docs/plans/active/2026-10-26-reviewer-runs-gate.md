@@ -111,13 +111,13 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
 
 ## Acceptance criteria
 
-- [ ] AC1(S1): codex で permission mode が autonomous か edits の座席のうち、leader と、機能の org の reviewer の argv に、台帳が cwd の下にないとき `--add-dir <state dir>` が permission の flag のすぐあと、`--model` の前に入る。機能の org の implementer、結びつきのない org の reviewer、未知の役割、director の argv には入らない(表のテストと spawn の argv のテストで確かめる)
-- [ ] AC2(S2): `leaderActivityEventCount` の数え方は変わらず(`gate_passed` と `gate_failed` を 1 つずつ数える)、(c) のコメントが D6 の理由を言う。regate の断りの文、`ralph org gate` の help、`gate.go` の冒頭のコメントが、機能の org の gate を reviewer が leader の TASK で打つと言う
-- [ ] AC3(S3、leader): leader の雛形の手順 12 が、reviewer に TASK_ID `gate-<n>` の TASK を送ってコマンドを本文に書くこと、結果が来るまで worktree を変えず implementer に TASK を送らないこと、reviewer の停滞の ALERT で stop も spawn もしないこと、3 つの結果(`GATE: pass` の RESULT、`GATE: unrunnable` と `GATE: fail` の BLOCKED)の扱いを書く。`GATE: pass` では `.harness/state/gate-{{ORG_ID}}.out` の `GATE: pass` と `HEAD:` を RESULT と `git rev-parse HEAD` に照らし、座席を止める前に `wip:` の確かめを済ませる。手順 9 はレビューの TASK(TASK_ID が `gate-` で始まらない)への RESULT で始まる。手順 14 は手順 12 で控えた `HEAD:` と照らし、違えば手順 5 と同じ flag で reviewer を spawn し直して手順 12 からやり直す。leader 自身が `ralph org gate` を打つ文が雛形にない
-- [ ] AC4(S3、reviewer): reviewer の雛形の「gate の TASK」の節が、TASK_ID の見分け、差分レビューと素の実行をしないこと、TASK のコマンドをそのまま打つこと、Claude Code と Codex の待ち方、3 つの返し方、打ち直しは 1 回、`ralph org gate` のほかの動詞を打たず台帳を直接書かないことを書く。前文の書いてよいものに台帳の gate の記録とログと `.out` が入っている。例の RESULT と BLOCKED が typed protocol の検査を通る
-- [ ] AC5(S4): AC1〜AC4 の文と動きがテストで固定され、既存の pin は意図を残して新しい文になっている。変えた文を 1 つずつ元に戻すと、対応するテストが落ちる(手で確かめる)
-- [ ] AC6(S5): `/org` と `/director` skill、recipe、README、quality-gates が AC1〜AC4 と食い違わない。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
-- [ ] AC7(S6): 仕様の FR-7 が `[ ]` で、印(2026-10-26)と注「2026-10-26 に決めたこと」がある。Status と根拠の表の判定の数が `[x]` 25、`[ ]` 6 になっている。tech-debt の codex の gate の行が reviewer を指す
+- [x] AC1(S1): codex で permission mode が autonomous か edits の座席のうち、leader と、機能の org の reviewer の argv に、台帳が cwd の下にないとき `--add-dir <state dir>` が permission の flag のすぐあと、`--model` の前に入る。機能の org の implementer、結びつきのない org の reviewer、未知の役割、director の argv には入らない(表のテストと spawn の argv のテストで確かめる)
+- [x] AC2(S2): `leaderActivityEventCount` の数え方は変わらず(`gate_passed` と `gate_failed` を 1 つずつ数える)、(c) のコメントが D6 の理由を言う。regate の断りの文、`ralph org gate` の help、`gate.go` の冒頭のコメントが、機能の org の gate を reviewer が leader の TASK で打つと言う
+- [x] AC3(S3、leader): leader の雛形の手順 12 が、reviewer に TASK_ID `gate-<n>` の TASK を送ってコマンドを本文に書くこと、結果が来るまで worktree を変えず implementer に TASK を送らないこと、reviewer の停滞の ALERT で stop も spawn もしないこと、3 つの結果(`GATE: pass` の RESULT、`GATE: unrunnable` と `GATE: fail` の BLOCKED)の扱いを書く。`GATE: pass` では `.harness/state/gate-{{ORG_ID}}.out` の `GATE: pass` と `HEAD:` を RESULT と `git rev-parse HEAD` に照らし、座席を止める前に `wip:` の確かめを済ませる。手順 9 はレビューの TASK(TASK_ID が `gate-` で始まらない)への RESULT で始まる。手順 14 は手順 12 で控えた `HEAD:` と照らし、違えば手順 5 と同じ flag で reviewer を spawn し直して手順 12 からやり直す。leader 自身が `ralph org gate` を打つ文が雛形にない
+- [x] AC4(S3、reviewer): reviewer の雛形の「gate の TASK」の節が、TASK_ID の見分け、差分レビューと素の実行をしないこと、TASK のコマンドをそのまま打つこと、Claude Code と Codex の待ち方、3 つの返し方、打ち直しは 1 回、`ralph org gate` のほかの動詞を打たず台帳を直接書かないことを書く。前文の書いてよいものに台帳の gate の記録とログと `.out` が入っている。例の RESULT と BLOCKED が typed protocol の検査を通る
+- [x] AC5(S4): AC1〜AC4 の文と動きがテストで固定され、既存の pin は意図を残して新しい文になっている。変えた文を 1 つずつ元に戻すと、対応するテストが落ちる(手で確かめる)
+- [x] AC6(S5): `/org` と `/director` skill、recipe、README、quality-gates が AC1〜AC4 と食い違わない。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
+- [x] AC7(S6): 仕様の FR-7 が `[ ]` で、印(2026-10-26)と注「2026-10-26 に決めたこと」がある。Status と根拠の表の判定の数が `[x]` 25、`[ ]` 6 になっている。tech-debt の codex の gate の行が reviewer を指す
 - [ ] AC8: `./scripts/run-verify.sh` が通り、Go のテストが手元の版と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
@@ -173,7 +173,8 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
   - 計画からの逸れ 1: reviewer の雛形の「gate の TASK」は、本文のコマンドを「そのまま打つ」だけでなく、決まった 2 つと違えば打たずに QUESTION で leader に聞く(8902cbf0、`TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand` で固定)。gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、consult の勧めで足した。`/org` skill の reviewer の役割にも同じ文を書いた
   - 計画からの逸れ 2: 計画の影響範囲になかった `.claude/rules/ralph/git-commit-strategy.md` と template の写しの 1 文を直した(12e4b9d5)。leader が `wip:` を確かめるのは「gate を打ち直す前と push の前」ではなく、「reviewer の gate が通ったあとと push の前」(雛形の手順 12 と 14)になったため
   - sync-docs で判断すること: Codex の reviewer が gate を前面で打つあいだは `ralph org send` が reviewer に届かない(reviewer.md の「gate の TASK」)。tech-debt には Codex の leader の同じ仕組みの行しかない
-- [ ] Review artifact created
-- [ ] Verification artifact created
+  - self-review の直し: 1 回目の F1〜F8 と N1 を 286f3d28、64f36f3f、67f3609d で、2 回目の F9・F10・N3 を d3c8e337 で直した(機能の org の implementer と reviewer を手順 13 まで止めない、頼み直しは同じ理由で gate の TASK 2 回まで、reviewer の QUESTION の枝、作業ツリーの汚れの断りは手順 9 と同じく分ける、spawn に `--role`、`reviewerRole` の定数)。直しで、影響範囲の表にない `internal/org/approval.go`(`reviewerRole`)にも触れた。3 回目の LOW の F11(手順 14 で reviewer だけを立て直した gate が落ちたとき、implementer を立て直す手がない)は直さず、`/sync-docs` で tech-debt の行にする。INFO の N2(`watch.go` のコメント (c) の段落分け)は直さない
+- [x] Review artifact created(`docs/reports/self-review-2026-10-26-reviewer-runs-gate.md`、3 回、Merge OK)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-26-reviewer-runs-gate.md`、pass。LOW の V1 は `/sync-docs` で tech-debt の持ち越しの注を足す)
 - [ ] Test artifact created
 - [ ] PR created
