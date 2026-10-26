@@ -870,7 +870,9 @@ func TestOrgGateHelp(t *testing.T) {
 	}
 	help := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
-		"The leader of an org started with `ralph org start --plan` runs it in the org's feature worktree (or a directory under it), on the head it pushes",
+		"In an org started with `ralph org start --plan`, the reviewer seat runs it at the leader's TASK, in the org's feature " +
+			"worktree (or a directory under it), on the head the leader pushes",
+		"A person may run it too.",
 		"the org holds a complete feature binding and is running",
 		"on the binding's branch (a detached HEAD is refused)",
 		"git status --porcelain --untracked-files=all prints nothing (ignored files do not count)",
@@ -885,6 +887,8 @@ func TestOrgGateHelp(t *testing.T) {
 		"gate_failed with a reason: static_failed, test_failed, head_moved",
 		"Both records hold the head, the base, base_ref, the branch, who ran it (by=<USER>, and herdr_pane=set or unset",
 		"GATE: pass, HEAD: <sha>, BASE: <sha> and LOG: <path> on stdout and exits 0",
+		"The reviewer writes the output to the file the leader's TASK names (.harness/state/gate-<org_id>.out in the worktree) " +
+			"and copies the HEAD: and BASE: lines into its RESULT, and the leader checks them against that file and HEAD before it pushes",
 		"GATE: fail, REASON: <reason>, HEAD:, BASE: and LOG:",
 		"An interrupt (SIGINT, SIGTERM, or SIGHUP) stops the running script and records nothing",
 		"Processes a script leaves running when it exits are stopped too, and the log says so",
