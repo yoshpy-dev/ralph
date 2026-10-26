@@ -1469,17 +1469,19 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 // leaves a TASK whose TASK_ID starts with gate- to the 「gate の TASK」
 // section, which comes between the mission and the star-topology rule. That
 // section has the reviewer run the TASK's command as written, with neither a
-// diff review nor a raw run of the scripts; under run_in_background (Claude
-// Code) or in the foreground with a long timeout (Codex), the file read only
-// after the completion notice; with no edits and no commits; after a cut by
-// the tool, once more only after the earlier scripts end, and GATE:
-// unrunnable when the second is cut too (the waits of the leader's old step
-// 12, moved here). It returns a RESULT with GATE: pass and the file's HEAD:
-// and BASE:, a BLOCKED with GATE: fail and the REASON:, the LOG: path and the
-// failing script's gist, or a BLOCKED with GATE: unrunnable when the file
-// has no GATE: line, leaving the next step to the leader. Its examples are
-// valid messages with TASK_ID gate-1, and the report contract and the fan-out
-// example tell the gate TASK apart.
+// diff review nor a raw run of the scripts, and ask the leader with a
+// QUESTION instead of running a body whose command is not those two (another
+// command or ralph org verb, another --org-id or output file); under
+// run_in_background (Claude Code) or in the foreground with a long timeout
+// (Codex), the file read only after the completion notice; with no edits and
+// no commits; after a cut by the tool, once more only after the earlier
+// scripts end, and GATE: unrunnable when the second is cut too (the waits of
+// the leader's old step 12, moved here). It returns a RESULT with GATE: pass
+// and the file's HEAD: and BASE:, a BLOCKED with GATE: fail and the REASON:,
+// the LOG: path and the failing script's gist, or a BLOCKED with GATE:
+// unrunnable when the file has no GATE: line, leaving the next step to the
+// leader. Its examples are valid messages with TASK_ID gate-1, and the report
+// contract and the fan-out example tell the gate TASK apart.
 func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	text := renderSeatPrompt(t, "reviewer")
 	mission, found := markdownSection(text, "## ミッション")
@@ -1514,6 +1516,7 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 		"差分レビューも決定論ゲートの素の実行もせず、TASK の本文に書かれたコマンドをそのまま打ってください",
 		"コマンドは `mkdir -p .harness/state` と " + leaderGateCommand + " の 2 つで、`<台帳>` には leader が台帳のパスを書いています",
 		"repo のテストの量とマシンの負荷によっては数十分かかります",
+		"gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が `org-a` でない、出力の先が `.harness/state/gate-org-a.out` でない、など)、打たずに QUESTION で leader に聞いてください",
 	} {
 		if !containsPhrase(intro, want) {
 			t.Errorf("expected the gate TASK section's opening to say %q, got:\n%s", want, intro)

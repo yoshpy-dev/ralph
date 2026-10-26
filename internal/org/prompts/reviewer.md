@@ -54,6 +54,12 @@ PR を作る前に送ります。差分レビューも決定論ゲートの素�
 `./scripts/run-test.sh` を走らせ、結果を台帳に記録します。repo のテストの量と
 マシンの負荷によっては数十分かかります。
 
+gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、本文の
+コマンドがこの 2 つと違えば(ほかのコマンドや `ralph org gate` のほかの
+`ralph org` の動詞がある、`--org-id` が `{{ORG_ID}}` でない、出力の先が
+`.harness/state/gate-{{ORG_ID}}.out` でない、など)、打たずに QUESTION で
+leader に聞いてください。
+
 - Bash ツールの `run_in_background` があるとき(Claude Code)は、gate の
   コマンドを `run_in_background` で走らせて手番を終え、終わりの知らせが来て
   から、`.harness/state/gate-{{ORG_ID}}.out` を読む。ないとき(Codex)は前面で
