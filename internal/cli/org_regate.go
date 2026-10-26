@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"syscall"
 
@@ -20,10 +21,10 @@ import (
 // branch into it in the feature worktree when it lacks it, runs the gate
 // scripts there, records the outcome with via=regate, and pushes a pass; this
 // command passes it the branch and the process environment, cancels its
-// context on SIGINT, SIGTERM, or SIGHUP (gateSignalContext), and prints the
-// result (printRegateResult). Regate reads the org from the branch's binding
-// (D1), so --org-id is refused before anything is read, as merge-order
-// refuses it, and so is a missing --branch.
+// context on SIGINT, SIGTERM, or SIGHUP (signal.NotifyContext), and prints
+// the result (printRegateResult). Regate reads the org from the branch's
+// binding (D1), so --org-id is refused before anything is read, as
+// merge-order refuses it, and so is a missing --branch.
 func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 	var branch string
 
@@ -142,7 +143,7 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			// As for ralph org gate (newOrgGateCmd): the first SIGINT,
 			// SIGTERM, or SIGHUP cancels ctx with a cause that names it, and
 			// later ones are caught until stop runs.
-			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			res, err := rt.Regate(ctx, org.RegateParams{Branch: branch, Env: os.Environ(), Stderr: cmd.ErrOrStderr()})
 			return printRegateResult(cmd.OutOrStdout(), res, err)

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -557,6 +558,137 @@ func TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone(t *testing
 	stop()
 	if sig := received(); sig != nil {
 		t.Errorf("received = %v; want nil", sig)
+	}
+}
+
+// signalCauseContext when no signal comes: a parent that ends first keeps its
+// own cause (the command's context gives "context canceled", as
+// TestOrgWaitDirector_AContextThatEndsWritesSignalAndRaisesNothing checks),
+// stop cancels with context.Canceled, and received returns nil in both cases.
+// The signal side runs in
+// TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught
+// and through the command in TestOrgWaitDirector_ASignalEndsTheProcessByIt.
+func TestOrgWaitDirector_SignalCauseContextParentCauseAndStop(t *testing.T) {
+	errParent := errors.New("the parent's cause")
+	parent, cancelParent := context.WithCancelCause(context.Background())
+	defer cancelParent(nil)
+	ctx, received, stop := signalCauseContext(parent, syscall.SIGHUP)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("ctx.Err() = %v before anything ended; want nil", err)
+	}
+	cancelParent(errParent)
+	if !errors.Is(ctx.Err(), context.Canceled) || context.Cause(ctx) != errParent {
+		t.Errorf("after the parent ended: ctx.Err() = %v, cause = %v; want context.Canceled and the parent's cause %q", ctx.Err(), context.Cause(ctx), errParent)
+	}
+	stop()
+	if sig := received(); sig != nil {
+		t.Errorf("after the parent ended: received = %v; want nil", sig)
+	}
+
+	ctx, received, stop = signalCauseContext(context.Background(), syscall.SIGHUP)
+	stop()
+	if !errors.Is(ctx.Err(), context.Canceled) || context.Cause(ctx) != context.Canceled {
+		t.Errorf("after stop: ctx.Err() = %v, cause = %v; want context.Canceled for both", ctx.Err(), context.Cause(ctx))
+	}
+	if sig := received(); sig != nil {
+		t.Errorf("after stop: received = %v; want nil", sig)
+	}
+}
+
+// signalCauseChildEnv makes
+// TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught
+// run its child side.
+const signalCauseChildEnv = "RALPH_TEST_SIGNAL_CAUSE_CHILD"
+
+// signalCauseContext with signals: the first one (SIGHUP) cancels the context
+// with the cause "hangup signal received" and is what received returns, and a
+// later one (SIGTERM) changes neither and does not end the process, as a
+// second Ctrl-C must not end ralph before the director's wait has written its
+// end. The signals go to a child copy of the test binary, because a signal
+// nothing catches ends the process that gets it; the child sends SIGTERM
+// 100ms after SIGHUP cancelled the context, and prints the cause and the
+// signal received and exits 0 when it is still alive 200ms after that.
+func TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught(t *testing.T) {
+	if os.Getenv(signalCauseChildEnv) == "1" {
+		ctx, received, stop := signalCauseContext(context.Background(), syscall.SIGHUP, syscall.SIGTERM)
+		defer stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP to the child: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("SIGHUP did not cancel the context within 5s")
+		}
+		// The pause lets whatever the helper does after the first signal
+		// finish before the second one comes, as a second Ctrl-C would, so
+		// a helper that unregisters right after the cancel lets SIGTERM end
+		// the child and fails the test.
+		time.Sleep(100 * time.Millisecond)
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			t.Fatalf("send SIGTERM to the child: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		fmt.Printf("cause: %v\n", context.Cause(ctx))
+		fmt.Printf("received: %v\n", received())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught$", "-test.count=1")
+	child.Env = append(os.Environ(), signalCauseChildEnv+"=1")
+	out, err := child.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the child that got SIGHUP, then SIGTERM, failed or was ended by a signal: %v\n%s", err, out)
+	}
+	for _, line := range []string{"cause: hangup signal received", "received: hangup"} {
+		if !strings.Contains(string(out), line+"\n") {
+			t.Errorf("the child printed:\n%s\nwant the line %q", out, line)
+		}
+	}
+}
+
+// signalCauseStopChildEnv makes
+// TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals run its
+// child side.
+const signalCauseStopChildEnv = "RALPH_TEST_SIGNAL_CAUSE_STOP_CHILD"
+
+// signalCauseContext's stop unregisters sigs: after it, a SIGHUP ends the
+// process as it would with no handler instead of being swallowed. The child
+// copy of the test binary calls stop, sends itself SIGHUP, and prints
+// "survived" and exits 0 only when it is still alive 300ms later.
+func TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals(t *testing.T) {
+	if os.Getenv(signalCauseStopChildEnv) == "1" {
+		_, _, stop := signalCauseContext(context.Background(), syscall.SIGHUP)
+		stop()
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatalf("send SIGHUP to the child: %v", err)
+		}
+		time.Sleep(300 * time.Millisecond)
+		fmt.Println("survived")
+		return
+	}
+
+	// A channel of the test's own for SIGHUP makes the child start with
+	// SIGHUP at its default action even when this test binary was started
+	// with it ignored (nohup): a child keeps the signals its parent ignores
+	// ignored, and starts with the ones its parent catches at their default.
+	caught := make(chan os.Signal, 1)
+	signal.Notify(caught, syscall.SIGHUP)
+	defer signal.Stop(caught)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals$", "-test.count=1")
+	child.Env = append(os.Environ(), signalCauseStopChildEnv+"=1")
+	out, err := child.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("the child that called stop, then got SIGHUP = %v; want it ended by SIGHUP\n%s", err, out)
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGHUP {
+		t.Fatalf("the child that called stop, then got SIGHUP, ended with %v; want it ended by SIGHUP\n%s", exitErr, out)
 	}
 }
 

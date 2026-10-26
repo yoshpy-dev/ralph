@@ -687,7 +687,7 @@ func TestOrgMerge_RefusedWhileALegacyLedgerHasActiveSeats(t *testing.T) {
 	}
 }
 
-// The command's context reaches Merge through gateSignalContext: with it
+// The command's context reaches Merge through signal.NotifyContext: with it
 // done before the merge, the command exits 1 saying it was interrupted,
 // with nothing on stdout, no gh call, and nothing recorded.
 func TestOrgMerge_InterruptedBeforeTheMergeMergesNothing(t *testing.T) {

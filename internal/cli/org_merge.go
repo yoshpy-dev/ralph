@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"syscall"
 	"time"
@@ -25,7 +26,7 @@ import (
 // (withMainWorktreeDirectorEnabled), passes it with the branch, runs git and
 // gh in the current directory (Dir left empty, Exec and LookPath nil, so the
 // real commands, with the default timeouts), cancels its context on SIGINT,
-// SIGTERM, or SIGHUP (gateSignalContext), and prints the result
+// SIGTERM, or SIGHUP (signal.NotifyContext), and prints the result
 // (printMergeResult). Merge reads the org from the branch's binding or gate
 // record (D4), so --org-id is refused before anything is read, as regate
 // refuses it, and so are a missing --branch and a --wait-checks out of range
@@ -193,7 +194,7 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			// As for ralph org gate (newOrgGateCmd): the first SIGINT,
 			// SIGTERM, or SIGHUP cancels ctx with a cause that names it, and
 			// later ones are caught until stop runs.
-			ctx, stop := gateSignalContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+			ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 			defer stop()
 			res, err := rt.Merge(ctx, org.MergeParams{Branch: branch, AutoMerge: rt.Config.Director.AutoMerge, WaitChecks: waitChecks,
 				Progress: cmd.ErrOrStderr()})
