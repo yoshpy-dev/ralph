@@ -63,10 +63,11 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 // fail-closed の実機検証") and live-verified on 2026-09-18 (see the doc
 // comment on permissionArgsForDriver below); CodexVerified is the operator's
 // explicit acknowledgement that they have repeated that verification for
-// their installed codex version and config. For a leader seat, Spawn
-// follows either set with codexWritableRootArgs (below) when the org state
-// dir is outside the seat's cwd. StartDirector refuses a codex headless
-// director in either mode (plan 2026-10-15-org-director-start, D12).
+// their installed codex version and config. For a leader seat, and for a
+// reviewer seat of a feature org, Spawn follows either set with
+// codexWritableRootArgs (below) when the org state dir is outside the seat's
+// cwd. StartDirector refuses a codex headless director in either mode (plan
+// 2026-10-15-org-director-start, D12).
 var (
 	codexAutonomousArgs = []string{"--sandbox", "workspace-write", "--ask-for-approval", "never"}
 	codexEditsArgs      = []string{"--sandbox", "workspace-write"}
@@ -78,10 +79,10 @@ var (
 // passes no sandbox flag, so codex follows the human's own config. This is
 // the one place that set of modes is spelled: checkDirectorStart refuses a
 // codex director in them (plan 2026-10-15-org-director-start, D12),
-// codexWritableRootArgs gives a codex leader in them --add-dir, and ralph
-// doctor's agmsg writable-root check counts the seat roles that resolve to
-// them. permissionArgsForDriver keeps its own switch, as it picks different
-// flags per mode.
+// codexWritableRootArgs gives a codex leader, and the codex reviewer of a
+// feature org, in them --add-dir, and ralph doctor's agmsg writable-root
+// check counts the seat roles that resolve to them. permissionArgsForDriver
+// keeps its own switch, as it picks different flags per mode.
 func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 	return mode == PermissionModeAutonomous || mode == PermissionModeEdits
 }
@@ -153,26 +154,32 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 }
 
 // codexWritableRootArgs returns `--add-dir <stateDir>` for a codex leader
-// seat (role == LeaderIdentity) whose permission mode runs it under
+// seat (role == LeaderIdentity), or a codex reviewer seat (role "reviewer")
+// of a feature org (featureOrg: the org has an active binding,
+// ActiveFeature), whose permission mode runs it under
 // `--sandbox workspace-write` (CodexModeRunsUnderWorkspaceWrite: autonomous
 // or edits; Spawn only reaches this after permissionArgsForDriver has
 // accepted that mode, i.e. once cfg.Permissions.CodexVerified is true) when
 // the org state directory is not inside the seat's cwd, and nil otherwise.
 // workspace-write leaves only cwd (plus temp roots) writable, so a codex
-// leader whose cwd is a linked worktree could not append to the shared
+// seat whose cwd is a linked worktree could not append to the shared
 // ledger under the main worktree's .harness/state/org without it (plan
 // 2026-10-07-org-state-dir-common, AC8). guarded passes no sandbox flag at
 // all and claude has no such sandbox, so both get nil.
 //
-// Only the leader gets the flag because only the leader runs `ralph org`
-// verbs and so writes the ledger; implementer, reviewer, and every other
-// role (including one with no embedded template that runs from --prompt)
-// report to the leader over agmsg. Making the state dir writable for them
-// would let any seat rewrite the manifest, the model receipts, and other
-// seats' prompt files under <state-dir>/prompts/. The headless director
-// also writes the ledger, but StartDirector refuses a codex director in
-// autonomous and edits (plan 2026-10-15-org-director-start, D12), so it
-// never runs under workspace-write and never needs the flag.
+// The leader gets the flag because it runs `ralph org` verbs and so writes
+// the ledger. In a feature org the reviewer gets it too: it runs
+// `ralph org gate` at the leader's TASK and so writes the gate record and
+// the gate log to the ledger (plan 2026-10-26-reviewer-runs-gate, D5). The
+// implementer, the reviewer of an org with no feature binding, and every
+// other role (including one with no embedded template that runs from
+// --prompt) report to the leader over agmsg and get nil. Making the state
+// dir writable for them would let any seat rewrite the manifest, the model
+// receipts, and other seats' prompt files under <state-dir>/prompts/. The
+// headless director also writes the ledger, but StartDirector refuses a
+// codex director in autonomous and edits (plan
+// 2026-10-15-org-director-start, D12), so it never runs under
+// workspace-write and never needs the flag.
 //
 // The containment test compares both paths made absolute and resolved
 // through symlinks (resolvedOrClean, statedir.go: macOS's /var is a symlink
@@ -184,8 +191,9 @@ func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]strin
 // cwd (/var/... against /private/var/...) and count as outside. The flag
 // carries the absolute, unresolved state dir -- the same path the runtime
 // itself writes to.
-func codexWritableRootArgs(role, driver, mode, cwd, stateDir string) []string {
-	if role != LeaderIdentity || driver != "codex" || !CodexModeRunsUnderWorkspaceWrite(mode) {
+func codexWritableRootArgs(role, driver, mode, cwd, stateDir string, featureOrg bool) []string {
+	writesLedger := role == LeaderIdentity || (featureOrg && role == "reviewer")
+	if !writesLedger || driver != "codex" || !CodexModeRunsUnderWorkspaceWrite(mode) {
 		return nil
 	}
 	stateDir = mustAbs(stateDir)

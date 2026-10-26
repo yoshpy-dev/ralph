@@ -3819,6 +3819,93 @@ func TestOrgSpawn_Codex_WorkspaceWrite_AddDirWhenStateDirOutsideCwd(t *testing.T
 	}
 }
 
+// TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir pins AC1 of
+// plan 2026-10-26-reviewer-runs-gate at the AgentStart argv: in a feature org
+// (its leader spawned with a binding, so the manifest Spawn reads under its
+// lock has one, ActiveFeature), a codex reviewer seat whose --cwd is the
+// feature worktree, a linked worktree outside the state dir, gets --add-dir
+// <state dir> right after the sandbox flags and before --model, because it
+// runs `ralph org gate` at the leader's TASK (D5). A codex implementer of the
+// same org, and a codex reviewer of an org whose leader reserved the same
+// paths with no binding, get the sandbox flags alone.
+func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T) {
+	cases := []struct {
+		name      string
+		bound     bool
+		role      string
+		wantFlags bool
+	}{
+		{"reviewer of a feature org", true, "reviewer", true},
+		{"implementer of a feature org", true, "implementer", false},
+		{"reviewer of an org with no feature binding", false, "reviewer", false},
+	}
+	for _, mode := range []string{PermissionModeAutonomous, PermissionModeEdits} {
+		sandbox := codexEditsArgs
+		if mode == PermissionModeAutonomous {
+			sandbox = codexAutonomousArgs
+		}
+		for _, tc := range cases {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				root := t.TempDir()
+				mainWT := filepath.Join(root, "main")
+				linkedWT := filepath.Join(mainWT, ".claude", "worktrees", "org-auth")
+				stateDir := filepath.Join(mainWT, ".harness", "state", "org")
+				if err := os.MkdirAll(linkedWT, 0o755); err != nil {
+					t.Fatalf("mkdir linked worktree: %v", err)
+				}
+
+				o, h, _ := testOrg(t)
+				o.Manifest = NewManifestStoreAtPath(ManifestPathIn(stateDir))
+				o.Config.Permissions = config.OrgPermissionsConfig{Default: mode, CodexVerified: true}
+
+				// The leader runs claude, so only the seat under test runs
+				// codex. A split-mode binding lets the implementer spawn
+				// with no plan approval; the reservation is the same with or
+				// without the binding.
+				leader := leaderParams("org-a", "internal/auth/")
+				leader.Cwd = linkedWT
+				if tc.bound {
+					f := testFeature("split-1", "auth", "0123456789ab")
+					f.Worktree = linkedWT
+					f.Approval = config.ApprovalModeSplit
+					leader.Feature = f
+				}
+				h.workspaceID, h.paneID = "ws-1", "pane-leader"
+				if r := o.Spawn(leader); r.Outcome != SpawnOutcomeSpawned {
+					t.Fatalf("leader spawn failed: %+v", r)
+				}
+				if got := ActiveFeature(mustReadEvents(t, o), "org-a") != nil; got != tc.bound {
+					t.Fatalf("ActiveFeature(org-a) != nil is %v, want %v", got, tc.bound)
+				}
+
+				p := mustSpawnParams("org-a", tc.role)
+				p.Role = tc.role
+				p.Driver = "codex"
+				p.Model = "gpt-5-codex"
+				p.Cwd = linkedWT
+				h.paneID = "pane-" + tc.role
+				if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+					t.Fatalf("expected the %s spawn to succeed, got %+v", tc.role, r)
+				}
+
+				// Both roles render an embedded template long enough to go
+				// through the prompt file, so the pointer is the last arg.
+				pointer := PromptFilePointer(filepath.Join(stateDir, "prompts", "org-a_"+tc.role+".md"))
+				want := slices.Concat(sandbox, []string{"--model", "gpt-5-codex", pointer})
+				if tc.wantFlags {
+					want = slices.Concat(sandbox, []string{"--add-dir", stateDir, "--model", "gpt-5-codex", pointer})
+				}
+				if len(h.agentStartArgs) != 2 {
+					t.Fatalf("expected 2 AgentStart calls (leader, %s), got %v", tc.role, h.agentStartArgs)
+				}
+				if got := h.agentStartArgs[1]; !slices.Equal(got, want) {
+					t.Fatalf("AgentStart args of the %s = %v, want %v", tc.role, got, want)
+				}
+			})
+		}
+	}
+}
+
 // --- codex model observation (plan Scope row 3, AC-2/AC-2b/AC-2c/AC-3/AC-4) ---
 
 // codexGuardedOrg returns testOrg(t) with role guarded under codex's

@@ -1039,10 +1039,16 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 	// mode behavior. A workspace-write codex leader seat whose cwd does not
 	// contain the state dir (the manifest store's directory, as in
 	// promptFilePath) also gets codexWritableRootArgs' --add-dir right after
-	// permArgs, still before --model; other roles never do (plan
-	// 2026-10-07-org-state-dir-common, AC8).
+	// permArgs, still before --model (plan 2026-10-07-org-state-dir-common,
+	// AC8), and so does a reviewer seat of a feature org, which runs
+	// `ralph org gate` at the leader's TASK (plan
+	// 2026-10-26-reviewer-runs-gate, D5). Whether the org is a feature org
+	// comes from events, the read taken under the manifest lock above (the
+	// same events spawnFeatureSeatErr checked); other roles, and the reviewer
+	// of an org with no feature binding, never get it.
 	agentArgs := append([]string{}, permArgs...)
-	agentArgs = append(agentArgs, codexWritableRootArgs(p.Role, p.Driver, resolvedPermMode, p.Cwd, filepath.Dir(o.Manifest.Path()))...)
+	featureOrg := ActiveFeature(events, p.OrgID) != nil
+	agentArgs = append(agentArgs, codexWritableRootArgs(p.Role, p.Driver, resolvedPermMode, p.Cwd, filepath.Dir(o.Manifest.Path()), featureOrg)...)
 	agentArgs = append(agentArgs, "--model", p.Model)
 	agentStartedDetails := "agent_started"
 	// promptPath is hoisted to this outer scope (rather than declared
