@@ -53,9 +53,9 @@ When a session ends or context compaction occurs on a feature branch:
   session does not commit a feature org's uncommitted work in the worktree
   the seats share. A herdr whose `tab create` has no `--env` creates the
   panes without it, and ralph warns on stderr. Either way, a feature org's
-  leader looks for `wip:` commits on its branch before it re-runs the gate
-  or pushes, and raises a BLOCKED instead when it finds one (step 14 of its
-  role prompt)
+  leader looks for `wip:` commits on its branch after its reviewer's gate
+  passes and again before it pushes, and raises a BLOCKED instead when it
+  finds one (steps 12 and 14 of its role prompt)
 
 ## Safety Bracket (Guidance)
 
