@@ -316,3 +316,152 @@ go test does not instrument _test.go files; its 8 table rows are the measure.
 ## After the runs
 - git status --porcelain --ignored without .harness/cache/: the same as before the runs
 - no 'go: downloading' line in any output; no herdr, agmsg, ralph-org, cli.test, or 'sleep 30' process left
+
+# Run 2
+
+- HEAD: 3705581e (branch build/go-1-27), base origin/main 5ef14b1a. Run 1 ran at 31c35458; its report is 963cb50a
+- go version go1.27.3 darwin/arm64; GOTOOLCHAIN not set (go env GOTOOLCHAIN = auto); no GOENV file
+- Times are JST 2026-10-27, 04:43-04:58. 1-minute load average 5.4-6.9 at the checks (other sessions)
+- Every command ran in the foreground from <worktree>
+
+## Changed since run 1
+$ git diff --name-only 963cb50a..HEAD
+docs/insights/events/2026-10-26-go-1-27.jsonl
+docs/plans/active/2026-10-27-go-1-27.md
+docs/reports/self-review-2026-10-27-go-1-27.md
+docs/reports/verify-2026-10-27-go-1-27.md
+docs/tech-debt/README.md
+internal/cli/org_wait_director_test.go
+$ git diff --name-only 963cb50a..HEAD -- tests scripts
+(empty)
+What reads them:
+- internal/cli/org_wait_director_test.go is compiled only into the internal/cli test binary -> Run B2
+- Go tests outside internal/cli that read repo files at run time (grep of *_test.go for ReadFile/Glob on the repo root):
+  internal/org TestPlanDigest_MatchesScript globs docs/plans/active/*.md and docs/plans/archive/*.md -> Run F2.
+  The others read skills under .claude/ and .agents/, templates/base, docs/recipes/codex-seat-permissions.md,
+  docs/reports/README.md, scripts/check-sync.sh, .claude/hooks, testdata, and go.mod; none of those changed.
+  No Go test reads docs/tech-debt/README.md, docs/insights/events, or the two reports at run time (the grep hits are
+  comments and one error message).
+- Shell: grep -l -E 'tech-debt|plans/active' tests/test-*.sh -> 10 suites, run whole (Run D2).
+  grep -l -E 'docs/reports|insights/events|docs/evidence|git ls-files' tests/test-*.sh adds test-check-sync,
+  test-codex-exec-invocation, test-gc-artifacts, and test-hook-wiring: their hits are comments or paths inside mktemp
+  fixture trees. Every suite that runs git diff, log, rev-list, or merge-base also runs git init or mktemp -d (a grep
+  check, not a read of each call): they run on repos of their own, which the new commits on this branch do not reach.
+Not re-run, run 1's result holds (none of the files they read changed): internal/org except TestPlanDigest_*,
+. (no test files), internal/config, internal/insights, internal/org/driver, internal/org/protocol, internal/scaffold,
+internal/upgrade, and the other 34 shell suites.
+
+## Run B2: go test -count=1 -timeout 30m -json ./internal/cli/  (04:43:23-04:50:49, rc=0, wall 446s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	445.246s
+github.com/yoshpy-dev/ralph/internal/cli pass elapsed=445.247s top: pass=827 fail=0 skip=0 | sub: pass=919 fail=0 skip=0
+failed tests:
+skipped tests:
+
+## Run C2: go test -count=1 -timeout 30m -json ./cmd/...  (rc=0, wall 2s; C2, E3, and F2 ran in one call, 04:51:02-04:51:14)
+PASS
+ok  	github.com/yoshpy-dev/ralph/cmd/ralph	0.713s
+github.com/yoshpy-dev/ralph/cmd/ralph pass elapsed=0.713s top: pass=2 fail=0 skip=0 | sub: pass=8 fail=0 skip=0
+failed tests:
+skipped tests:
+
+## Run E3: go test -count=3 -timeout 30m -json -run 'SignalCauseContext' ./internal/cli/  (rc=0, wall 3s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	2.724s
+github.com/yoshpy-dev/ralph/internal/cli pass elapsed=2.724s top: pass=12 fail=0 skip=0 | sub: pass=0 fail=0 skip=0
+failed tests:
+skipped tests:
+   3 TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught
+   3 TestOrgWaitDirector_SignalCauseContextParentCauseAndStop
+   3 TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+   3 TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone
+
+## Run F2: go test -count=1 -timeout 30m -json -run '^TestPlanDigest_' ./internal/org/  (rc=0, wall 6s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	5.849s
+github.com/yoshpy-dev/ralph/internal/org pass elapsed=5.849s top: pass=2 fail=0 skip=0 | sub: pass=160 fail=0 skip=0
+failed tests:
+skipped tests:
+the changed plan's subtest:
+  pass TestPlanDigest_MatchesScript/active/2026-10-27-go-1-27.md
+
+## Run D2: the 10 shell suites, each file alone (rc and seconds)
+Mode check: all 10 executable, git index mode 100755 for all
+batch of 9 (04:52:41, wall 112s), guard suite alone (04:54:41, 170s)
+tests/test-archive-plan.sh rc=0 7s
+tests/test-branch-name.sh rc=0 4s
+tests/test-insights-append.sh rc=0 5s
+tests/test-new-feature-plan.sh rc=0 2s
+tests/test-no-loop-references.sh rc=0 1s
+tests/test-plan-visual.sh rc=0 19s
+tests/test-post-edit-verify.sh rc=0 1s
+tests/test-secret-scan.sh rc=0 68s
+tests/test-template-purity.sh rc=0 5s
+tests/test-pre-bash-guard.sh rc=0 170s
+Each file's summary line(s):
+test-archive-plan: archive-plan tests: 22 passed, 0 failed, 22 total
+test-branch-name: branch-name tests: 26 passed, 0 failed, 26 total
+test-insights-append: insights-append tests: 51 passed, 0 failed
+test-new-feature-plan: new-feature-plan tests: 21 passed, 0 failed, 21 total
+test-no-loop-references: PASS: no live references to the retired Ralph Loop execution system outside historical documents
+test-plan-visual: plan-visual tests: 243 passed, 0 failed, 243 total
+test-post-edit-verify:  PASS: 24 FAIL: 0
+test-pre-bash-guard:  PASS: 2227 FAIL: 0 SKIP: 0
+test-secret-scan:  PASS: 123 FAIL: 0
+test-template-purity:  PASS: 10 FAIL: 0
+Sum of the counts above: 2747 passing checks in 9 files, plus test-no-loop-references' single PASS line
+Lines starting with FAIL that are not 'FAIL: 0', across the 10 outputs: 0
+
+## G2 check: the else branch of signalCauseContext (internal/cli/org_wait_director.go:152-154)
+$ go test -count=1 -coverprofile=<cov> -run 'SignalCauseContext' ./internal/cli/ ; go tool cover -func=<cov>
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:101:		notIgnoredSignals			0.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:129:		signalCauseContext			83.3%
+blocks of signalCauseContext with their counts (set mode: 1 = reached):
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:130.2,132.19 3 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:133.3,134.1 1 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:135.2,140.22 3 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:141.3,141.13 1 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:142.4,143.11 2 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:145.5,148.56 4 0
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:149.22,149.22 0 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:153.3,154.1 1 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:155.2,155.30 1 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:156.3,159.1 3 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:160.2,160.16 1 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:161.3,164.1 3 1
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:165.2,165.28 1 1
+(153.3,154.1 is the else branch, close(ended). 145.5,148.56 is the case for a received signal: it runs in the
+ child process that ...CancelsOnTheFirstSignalAndKeepsLaterOnesCaught starts, which the parent's profile does not record)
+$ the same with run 1's -run 'SignalCauseContext|^TestOrgWaitDirector_ASignal'
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:101:		notIgnoredSignals			100.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:129:		signalCauseContext			100.0%
+blocks of signalCauseContext with count 0: 0 (run 1: 95.8%, 153.3,154.1 count 0)
+$ go test -count=1 -coverprofile=<cov> -run '^TestOrgWaitDirector_SignalCauseContextParentCauseAndStop$' ./internal/cli/
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:153.3,154.1 1 1
+(the new stage of that test reaches the else branch)
+
+## m5 mutant: close(ended) removed from the else branch
+<scratch>/test-run2/m5.go is HEAD's internal/cli/org_wait_director.go without line 153:
+$ diff internal/cli/org_wait_director.go <scratch>/test-run2/m5.go
+153d152
+< 		close(ended)
+$ go test -count=1 -timeout 4m -overlay <scratch>/test-run2/m5.json -run 'SignalCauseContext' -v ./internal/cli/  (rc=1, wall 7s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone (0.22s)
+    org_wait_director_test.go:605: stop did not return within 5s for a parent that had ended before the call
+--- FAIL: TestOrgWaitDirector_SignalCauseContextParentCauseAndStop (5.00s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught (0.35s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.04s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	6.249s
+FAIL
+'panic: test timed out' lines: 0
+Control: the same command with control.json (an unmodified copy of HEAD's file)  (rc=0, wall 2s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone (0.22s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextParentCauseAndStop (0.00s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught (0.33s)
+--- PASS: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.03s)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	1.045s
+
+## After run 2
+- git status --porcelain --ignored without .harness/cache/: the same before and after the run 2 commands
+- no 'go: downloading' line in any output; no herdr, agmsg, ralph-org, cli.test, or 'sleep 30' process left
