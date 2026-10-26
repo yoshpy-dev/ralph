@@ -118,7 +118,7 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
 - [x] AC5(S4): AC1〜AC4 の文と動きがテストで固定され、既存の pin は意図を残して新しい文になっている。変えた文を 1 つずつ元に戻すと、対応するテストが落ちる(手で確かめる)
 - [x] AC6(S5): `/org` と `/director` skill、recipe、README、quality-gates が AC1〜AC4 と食い違わない。`scripts/check-skill-sync.sh` と `scripts/check-sync.sh` が通る
 - [x] AC7(S6): 仕様の FR-7 が `[ ]` で、印(2026-10-26)と注「2026-10-26 に決めたこと」がある。Status と根拠の表の判定の数が `[x]` 25、`[ ]` 6 になっている。tech-debt の codex の gate の行が reviewer を指す
-- [ ] AC8: `./scripts/run-verify.sh` が通り、Go のテストが手元の版と `GOTOOLCHAIN=go1.25.8` の両方で通る
+- [x] AC8: `./scripts/run-verify.sh` が通り、Go のテストが手元の版と `GOTOOLCHAIN=go1.25.8` の両方で通る
 
 ## Implementation outline
 
@@ -176,5 +176,5 @@ Critical forks: なし(ユーザーの指示で、計画の分かれ目は自分
   - self-review の直し: 1 回目の F1〜F8 と N1 を 286f3d28、64f36f3f、67f3609d で、2 回目の F9・F10・N3 を d3c8e337 で直した(機能の org の implementer と reviewer を手順 13 まで止めない、頼み直しは同じ理由で gate の TASK 2 回まで、reviewer の QUESTION の枝、作業ツリーの汚れの断りは手順 9 と同じく分ける、spawn に `--role`、`reviewerRole` の定数)。直しで、影響範囲の表にない `internal/org/approval.go`(`reviewerRole`)にも触れた。3 回目の LOW の F11(手順 14 で reviewer だけを立て直した gate が落ちたとき、implementer を立て直す手がない)は直さず、`/sync-docs` で tech-debt の行にする。INFO の N2(`watch.go` のコメント (c) の段落分け)は直さない
 - [x] Review artifact created(`docs/reports/self-review-2026-10-26-reviewer-runs-gate.md`、3 回、Merge OK)
 - [x] Verification artifact created(`docs/reports/verify-2026-10-26-reviewer-runs-gate.md`、pass。LOW の V1 は `/sync-docs` で tech-debt の持ち越しの注を足す)
-- [ ] Test artifact created
+- [x] Test artifact created(`docs/reports/test-2026-10-26-reviewer-runs-gate.md`、pass。HEAD ad1a5c64 で Go のテストを go1.27.3 と go1.25.8 の両方で、shell のテストを `verify.local.sh` の test モードで。`run-verify.sh` は 6182cb2e で go1.25.8 の通しが rc 0、そのあとの静的検査は verify が c9caf03a で、implementer が各直しで打った)
 - [ ] PR created
