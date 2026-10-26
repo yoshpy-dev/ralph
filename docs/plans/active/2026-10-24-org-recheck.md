@@ -156,4 +156,5 @@ repo の変更は記録と手順書だけ。戻すときはこの計画の PR �
 - [x] Verification artifact created(`docs/reports/verify-2026-10-26-org-recheck.md`、0c0a6a6e。pass、LOW 1・INFO 4。LOW-1(根拠の表の RC11 の行の「1 回ごとに通知」)は director が inline で直した。INFO-1・INFO-2・INFO-4 は直さない。INFO-2(/org skill のフォルダ信頼の項)は skill の直しで、この記録のブランチの範囲外)
 - AC の印(verify のあと): AC1、AC2、AC4〜AC7、AC9 は verify が repo で確かめた。AC3 は表と写しから出る数まで確かめ、load average、終了コード、pane の読みは director の notes による。AC8 は順の記録と写しの痕(`detached`、`stopped`、`end=watch`、`ralph status` の停止の行)が合う。見張りを止めた直後の確かめは、notes に「~ から pgrep で ralph の見張りがない」とだけあって pattern を書いておらず、`pgrep -fl /tmp/ralph-iso` そのものは `rm -rf` のあと(evidence の Cleanup の 8 段目、終了コード 1)にしか記録がない
 - [x] Test artifact created(`docs/reports/test-2026-10-26-org-recheck.md`、124ac68e。pass。HEAD f5bc474b で run-test.sh rc 0(shell 44 本、scope docs_only)、go test が go1.26.0 と go1.25.8 でどちらも rc 0。変わった文書を読む Go のテストはない)
+- sync-docs(`docs/reports/sync-docs-2026-10-26-org-recheck.md`、0341b929): ブランチの外の文書のずれなし。verify の INFO-4(self-review の報告の event のファイル名)はここで直した。cross-review(`docs/reports/cross-review-triage-org-recheck.md`、109fb3f9): codex、cycle 1/2、指摘 0。walkthrough は 73f0eaf2
 - [ ] PR created
