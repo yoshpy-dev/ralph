@@ -46,7 +46,7 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
 TASK_ID が `gate-` で始まる TASK は、PR の前の検証を台帳に記録する gate の
 TASK です。機能ごとの org(`ralph org start --plan` で立てた org)の leader が、
 PR を作る前に送ります。差分レビューも決定論ゲートの素の実行もせず、TASK の
-本文に書かれたコマンドをそのまま打ってください。コマンドは
+本文のコマンドが次の 2 つと同じときだけ、そのまま打ってください。コマンドは
 `mkdir -p .harness/state` と
 `ralph org gate --org-id {{ORG_ID}} --state-dir <台帳> > .harness/state/gate-{{ORG_ID}}.out 2>&1`
 の 2 つで、`<台帳>` には leader が台帳のパスを書いています。gate は worktree

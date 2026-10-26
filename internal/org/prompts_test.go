@@ -800,9 +800,15 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanApproval(t *testing.T) {
 // the gate. Every TASK to the implementer after the archive commit, on
 // GATE: fail or for a refusal whose fix needs the implementer (a rebase that
 // conflicts), first undoes a rebase in progress and reverts the archive
-// commit (B11). The steps the section refers to by number are the steps it
-// means, and the mission's report item says it runs before the seats stop
-// and before the reviewer is asked for the gate.
+// commit (B11). A refusal because the worktree is dirty is not met with the
+// "commit or remove" the gate prints: the leader sorts the leftover files the
+// way step 9 does, the implementer's changes going to the implementer as a
+// TASK after the plan is restored and anything else to a BLOCKED; every
+// other refusal still has the leader run the next step stderr names
+// (self-review F4 of plan 2026-10-26-reviewer-runs-gate). The steps the
+// section refers to by number are the steps it means, and the mission's
+// report item says it runs before the seats stop and before the reviewer is
+// asked for the gate.
 func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
@@ -834,6 +840,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		"- `GATE: pass` の RESULT:",
 		"- `GATE: unrunnable` の BLOCKED:",
 		"- `GATE: fail` の BLOCKED:",
+		gateQuestionMarker,
 		"implementer と reviewer を `ralph org stop` で止める",
 		"`.harness/state/gate-org-a.out` から控えた `HEAD:` と同じことを確かめる",
 		"git push -u origin <ブランチ>",
@@ -877,7 +884,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 		{step12Marker, "gate のあとにコミットを足さず、足したら gate を頼み直す"},
 		{gatePassMarker, "(gate が通ると、`GATE: pass`・`HEAD: <sha>`・`BASE: <sha>`・`LOG: <パス>` の行がある)"},
 		{gateUnrunnableMarker, "本文の理由(gate の stderr)を読む"},
-		{gateUnrunnableMarker, "gate の断り(作業ツリーが汚れている、rebase していない、など)なら、stderr に書かれた次の手をあなたが打ってから、新しい TASK_ID で gate を頼み直す"},
+		{gateUnrunnableMarker, "作業ツリーが汚れているという gate の断りなら、stderr の次の手(コミットするか消す)を自分では打たず、残ったファイルを手順 9 と同じく分ける"},
+		{gateUnrunnableMarker, "implementer の変更なら、手順 10 の終わりのとおり計画を戻してから、implementer にコミットを TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る"},
+		{gateUnrunnableMarker, "それ以外(reviewer のほかのファイル、誰が残したかわからない変更)なら、残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる"},
+		{gateUnrunnableMarker, "ほかの gate の断り(rebase していない、など)なら、stderr に書かれた次の手をあなたが打ってから、新しい TASK_ID で gate を頼み直す"},
 		{gateUnrunnableMarker, "次の手を打つうちに implementer の手が要ることになったら(HEAD が既定のブランチを含まないと断られ、その `git rebase` が衝突した、など)、手順 10 の終わりのとおり rebase を戻し、archive のコミットを revert してから、implementer に rebase と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、手順 8 の往復に戻る"},
 		{gateUnrunnableMarker, "reviewer が通したら、手順 9 からやり直す"},
 		{gateUnrunnableMarker, "reviewer の環境の問題(台帳に書けない、権限が足りない、など)なら、「ミッション」の 5 の `GATE: unrunnable` と同じく、あなたが環境や権限を直してから(座席の権限モードを変えて spawn し直す、など)新しい TASK_ID で gate を頼み直し、直せなければ `ralph org escalate` で BLOCKED を上げる"},
@@ -904,6 +914,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 	}{
 		{"10. `ralph org report", "step 10's rule", []string{"`git rebase --abort` で戻し", "`git revert --no-edit <archive のコミット>`", "そのあとで TASK を送る"}},
 		{gateUnrunnableMarker, "the GATE: unrunnable item", []string{"rebase を戻し", "archive のコミットを revert してから", "解消を TASK で頼み"}},
+		{gateUnrunnableMarker, "the GATE: unrunnable item's dirty-tree refusal", []string{"作業ツリーが汚れているという gate の断りなら", "計画を戻してから", "implementer にコミットを TASK で頼み", "ほかの gate の断り"}},
 		{gateFailMarker, "the GATE: fail item", []string{"git revert --no-edit", "implementer への TASK に書いて直しを頼み"}},
 	} {
 		item, ok := markdownItem(section, c.marker)
@@ -935,6 +946,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgGate(t *testing.T) {
 			}
 			at = i
 		}
+	}
+	// The next step the dirty-tree refusal names, which the GATE: unrunnable
+	// item tells the leader not to run itself, is the one the gate prints.
+	if refusal := gateDirtyRefusal("/wt", []string{"?? x.txt"}, gateWords); !strings.Contains(refusal, "commit or remove them") {
+		t.Errorf("expected the gate's dirty-tree refusal to name commit or remove as its next step, which the GATE: unrunnable item of step 12 refers to, got:\n%s", refusal)
 	}
 	if item, ok := markdownItem(section, "10. `ralph org report"); ok && containsPhrase(item, "report と reviewer のレポート") {
 		t.Errorf("expected step 10 to commit only the report, the reviewer's reports being committed in step 9, got item:\n%s", item)
@@ -1014,6 +1030,7 @@ const (
 	gatePassMarker       = "- `GATE: pass` の RESULT:"
 	gateUnrunnableMarker = "- `GATE: unrunnable` の BLOCKED:"
 	gateFailMarker       = "- `GATE: fail` の BLOCKED:"
+	gateQuestionMarker   = "- reviewer の QUESTION("
 )
 
 // leaderGateCommand is the gate command step 12 of the leader template has
@@ -1036,6 +1053,15 @@ const leaderGateCommand = "`ralph org gate --org-id org-a --state-dir <台帳> >
 // been stopped in step 13, the leader spawns the reviewer again with step 5's
 // flags, asks again from step 12 with a new TASK_ID, stops it again in step
 // 13 and comes back, escalating a BLOCKED when the spawn is refused (R8).
+// Since the gate needs the reviewer, step 12 first keeps it up until step 13
+// (the mission's item 6 and the 運用規律 rule that stop every seat after its
+// work point at this exception) and spawns it again with step 14's flags,
+// --role reviewer among them, when ralph org status shows it is not active
+// (self-review F2 and F5). A re-ask that fails twice in a row for the same
+// reason ends in a BLOCKED instead of a third (F3a), and a QUESTION from the
+// reviewer about the TASK's command gets the TASK again with only the two
+// commands under a new TASK_ID, or a BLOCKED when the leader cannot tell
+// what differed (F3b).
 func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
@@ -1050,6 +1076,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 	}{
 		{step12Marker, []string{
 			"reviewer に gate を頼む TASK を送る",
+			"この org では reviewer を手順 13 まで止めない(「ミッション」の 6 と「運用規律」の、作業が終わるたびに座席を止める決まりは、この org の reviewer には手順 13 まで当てはめない)",
+			"送る前に `ralph org status --org-id org-a --state-dir <台帳>` を打ち、reviewer が動いていなければ(STATE の欄に `(active)` が付いていない)、手順 14 の spawn し直しと同じ flag で reviewer を spawn し直してから送る",
 			"TASK_ID は `gate-<n>` にする(`<n>` はこの org で gate を頼んだ回数で、1 から数える)",
 			"本文には、`mkdir -p .harness/state` を打ってから " + leaderGateCommand + " を打つよう書く",
 			"gate は worktree と rebase を確かめてから `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を走らせ、結果を台帳に記録する",
@@ -1057,6 +1085,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 			"結果が来るまで worktree を変えず(コミット・rebase・ファイルの書き換えをしない)、implementer に TASK を送らない",
 			"この間に見張りから reviewer の停滞の " + stallAlert + "が来ても、reviewer を stop も spawn し直しもしない",
 			"`ralph org read` で reviewer の画面を読み、gate が走っていれば待つ(gate は走っているあいだ何も記録せず、Codex の reviewer は前面で打つので、画面が長く変わらないことがある)",
+			"頼み直しが同じ理由(`HEAD:` が合わない、ファイルに `GATE: pass` の行がない、reviewer の環境の同じ問題で `GATE: unrunnable` になる)で 2 回続けて通らなければ、3 回目は頼まず、その理由を本文に書いて `ralph org escalate` で BLOCKED を上げる",
 			"結果は次のとおり扱う",
 		}},
 		{gatePassMarker, []string{
@@ -1064,9 +1093,14 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 			"`GATE: pass` の行があること、その `HEAD:` が RESULT の `HEAD:` と `git rev-parse HEAD` に同じことを確かめ、ファイルの `HEAD:` と `BASE:` の行を控える(手順 14 で使う)",
 			"HEAD が合わないか、ファイルに `GATE: pass` の行がなければ、座席を止めずに、新しい TASK_ID で gate を頼み直す",
 		}},
+		{gateQuestionMarker, []string{
+			"reviewer の QUESTION(本文のコマンドが gate の TASK の 2 つと違うので打たなかった)",
+			"TASK の本文を、この手順の 2 つのコマンド(`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、新しい TASK_ID で送り直す",
+			"何が違ったのかわからなければ、送り直さず、QUESTION の要点を本文に書いて `ralph org escalate` で BLOCKED を上げる",
+		}},
 		{"14. HEAD(", []string{
 			"HEAD が違えば push せず、gate を頼み直す",
-			"座席は手順 13 で止めてあるので、手順 5 と同じ flag(`--id reviewer`、`--cwd .`、`--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で gate を頼み直す",
+			"座席は手順 13 で止めてあるので、手順 5 と同じ flag(`--id reviewer`、`--role reviewer`、`--cwd .`、`--driver`、`--model`、タスクの `- 予約したパス:` の行の括弧にある `--scope`)で reviewer を spawn し直し、手順 12 から新しい TASK_ID で gate を頼み直す",
 			"通ったら手順 13 で止め直してから、この手順に戻る",
 			"spawn が断られたら、エラーを本文に書いて `ralph org escalate` で BLOCKED を上げる",
 			"HEAD が同じなら `git push -u origin <ブランチ>` で push し",
@@ -1089,11 +1123,27 @@ func TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate(t *testing.
 	}
 
 	// The seat id the stall ALERT names is the reviewer's of step 5, and the
-	// flags step 14 respawns it with are the ones step 5 gives it.
+	// flags step 14 respawns it with are the ones step 5 gives it, --role
+	// among them: the CLI requires it, and the approval check reads the role,
+	// not the seat id.
 	if item, ok := markdownItem(section, "5. implementer と reviewer を"); !ok ||
 		!containsPhrase(item, "`--id` は `implementer` と `"+reviewerSeat+"` にする") ||
+		!containsPhrase(item, "`--role` も同じく `"+implementerRole+"` と `"+reviewerSeat+"` にする(`--role` は省けず、座席の雛形と承認の検査は seat_id ではなくこの値で決まる)") ||
 		!containsPhrase(item, "どちらにも `--cwd .`(この worktree)と `--model` を渡し、タスクの `- 予約したパス:` の行の括弧にある `--scope` の引数を書き換えずに付ける") {
-		t.Errorf("expected step 5 to spawn the reviewer as %q with --cwd ., --model and the reserved paths' --scope, which step 14 respawns it with, got item:\n%s", reviewerSeat, item)
+		t.Errorf("expected step 5 to spawn the reviewer as %q with --role %q, --cwd ., --model and the reserved paths' --scope, which step 14 respawns it with, got item:\n%s", reviewerSeat, reviewerSeat, item)
+	}
+
+	// The rules that stop every seat after its work point at step 12's
+	// exception for a feature org's reviewer.
+	mission, _ := markdownSection(text, "## ミッション")
+	if item, ok := markdownItem(mission, "6. 座席は作業が終わるたびに"); !ok ||
+		!containsPhrase(item, "(機能ごとの org の reviewer だけは、「機能ごとの org」の節の手順 12 のとおり手順 13 まで止めない)") {
+		t.Errorf("expected the mission's item 6 to point at step 12's exception for a feature org's reviewer, got item:\n%s", item)
+	}
+	discipline, _ := markdownSection(text, "## 運用規律")
+	if item, ok := markdownItem(discipline, "- 座席は使い終わったら都度"); !ok ||
+		!containsPhrase(item, "(機能ごとの org の reviewer の例外は「ミッション」の 6)") {
+		t.Errorf("expected the 運用規律 stop rule to point at the mission's item 6 for a feature org's reviewer, got item:\n%s", item)
 	}
 
 	// The command the leader writes is the one the reviewer runs.
@@ -1468,8 +1518,10 @@ func TestRenderRolePrompt_Reviewer_ResultCarriesHeadAndBase(t *testing.T) {
 // other ralph org verb and writes no ledger file itself; its first item
 // leaves a TASK whose TASK_ID starts with gate- to the 「gate の TASK」
 // section, which comes between the mission and the star-topology rule. That
-// section has the reviewer run the TASK's command as written, with neither a
-// diff review nor a raw run of the scripts, and ask the leader with a
+// section has the reviewer run the TASK's command as written only when it is
+// the two commands the section names (the opening paragraph says so before
+// the exception, self-review N1), with neither a diff review nor a raw run
+// of the scripts, and ask the leader with a
 // QUESTION instead of running a body whose command is not those two (another
 // command or ralph org verb, another --org-id or output file); under
 // run_in_background (Claude Code) or in the foreground with a long timeout
@@ -1513,7 +1565,7 @@ func TestRenderRolePrompt_Reviewer_GateTaskRunsTheTaskCommand(t *testing.T) {
 	intro, _, _ := strings.Cut(section, "\n- ")
 	for _, want := range []string{
 		"TASK_ID が `gate-` で始まる TASK は、PR の前の検証を台帳に記録する gate の TASK です",
-		"差分レビューも決定論ゲートの素の実行もせず、TASK の本文に書かれたコマンドをそのまま打ってください",
+		"差分レビューも決定論ゲートの素の実行もせず、TASK の本文のコマンドが次の 2 つと同じときだけ、そのまま打ってください",
 		"コマンドは `mkdir -p .harness/state` と " + leaderGateCommand + " の 2 つで、`<台帳>` には leader が台帳のパスを書いています",
 		"repo のテストの量とマシンの負荷によっては数十分かかります",
 		"gate の TASK で台帳に書いてよいのは `ralph org gate` が書く分だけなので、本文のコマンドがこの 2 つと違えば(ほかのコマンドや `ralph org gate` のほかの `ralph org` の動詞がある、`--org-id` が `org-a` でない、出力の先が `.harness/state/gate-org-a.out` でない、など)、打たずに QUESTION で leader に聞いてください",
