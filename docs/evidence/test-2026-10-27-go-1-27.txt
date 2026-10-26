@@ -1,0 +1,318 @@
+# /test evidence: go-1-27
+
+- HEAD: 31c35458 (branch build/go-1-27), base origin/main 5ef14b1a
+- go version go1.27.3 darwin/arm64; GOTOOLCHAIN not set (go env GOTOOLCHAIN = auto); no GOENV file
+- Times are JST 2026-10-27. Load from other sessions: 1-minute load average 5.3-7.7 at the checks, 5-minute average 17.4 at 04:14
+- Every command ran in the foreground from <worktree> (internal/cli for probe 2)
+
+## go list ./...
+github.com/yoshpy-dev/ralph
+github.com/yoshpy-dev/ralph/cmd/ralph
+github.com/yoshpy-dev/ralph/internal/cli
+github.com/yoshpy-dev/ralph/internal/config
+github.com/yoshpy-dev/ralph/internal/insights
+github.com/yoshpy-dev/ralph/internal/org
+github.com/yoshpy-dev/ralph/internal/org/driver
+github.com/yoshpy-dev/ralph/internal/org/protocol
+github.com/yoshpy-dev/ralph/internal/scaffold
+github.com/yoshpy-dev/ralph/internal/upgrade
+
+## Run A: go test -count=1 -timeout 30m -json ./internal/org/  (03:29:24-03:38:34, rc=0, wall 550s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org	549.091s
+github.com/yoshpy-dev/ralph/internal/org pass elapsed=549.093s top: pass=1197 fail=0 skip=0 | sub: pass=2840 fail=0 skip=0
+failed tests:
+skipped tests:
+
+## Run B: go test -count=1 -timeout 30m -json ./internal/cli/  (03:38:58-03:46:43, rc=0, wall 465s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	464.622s
+github.com/yoshpy-dev/ralph/internal/cli pass elapsed=464.622s top: pass=827 fail=0 skip=0 | sub: pass=919 fail=0 skip=0
+failed tests:
+skipped tests:
+
+## Run C: go test -count=1 -timeout 30m -json . ./cmd/... ./internal/config/ ./internal/insights/ ./internal/org/driver/ ./internal/org/protocol/ ./internal/scaffold/ ./internal/upgrade/  (03:46:53-03:46:59, rc=0, wall 6s)
+(. added: go list names the root package, which has no test files)
+?   	github.com/yoshpy-dev/ralph	[no test files]
+PASS
+ok  	github.com/yoshpy-dev/ralph/cmd/ralph	0.631s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/config	1.290s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/insights	1.783s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	2.713s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	3.014s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	3.224s
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	4.696s
+github.com/yoshpy-dev/ralph skip elapsed=0s top: pass=0 fail=0 skip=0 | sub: pass=0 fail=0 skip=0
+github.com/yoshpy-dev/ralph/cmd/ralph pass elapsed=0.632s top: pass=2 fail=0 skip=0 | sub: pass=8 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/config pass elapsed=1.29s top: pass=56 fail=0 skip=0 | sub: pass=115 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/insights pass elapsed=1.784s top: pass=39 fail=0 skip=0 | sub: pass=7 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/org/driver pass elapsed=3.014s top: pass=70 fail=0 skip=0 | sub: pass=134 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/org/protocol pass elapsed=2.713s top: pass=15 fail=0 skip=0 | sub: pass=56 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/scaffold pass elapsed=3.224s top: pass=30 fail=0 skip=2 | sub: pass=0 fail=0 skip=0
+github.com/yoshpy-dev/ralph/internal/upgrade pass elapsed=4.697s top: pass=114 fail=0 skip=0 | sub: pass=13 fail=0 skip=0
+failed tests:
+skipped tests:
+  github.com/yoshpy-dev/ralph/internal/scaffold TestBaseFS_WithMockFS
+  github.com/yoshpy-dev/ralph/internal/scaffold TestAvailablePacks_WithMockFS
+skip reason (internal/scaffold/embed_test.go:20,35): EmbeddedFS not initialized (only available when built from cmd/ralph/)
+
+## Run D: shell part of ./scripts/run-test.sh
+run-test.sh -> run-verify.sh (HARNESS_VERIFY_MODE=test) -> scripts/verify.local.sh run_hook_tests (every tests/test-*.sh),
+then packs/languages/golang/verify.sh (go test ./..., covered by runs A-C); .ralph/local/test.d has only .gitkeep.
+Mode check of run_hook_tests: all 44 files executable, git index mode 100755 for all.
+Run as three foreground batches (each file alone, rc and seconds):
+batch 1 (03:47:39, wall 188s), batch 2 (03:50:59, wall 402s), guard suite alone (03:57:50, 242s)
+tests/test-agent-models.sh rc=0 18s
+tests/test-agent-phase-boundaries.sh rc=0 1s
+tests/test-archive-plan.sh rc=0 9s
+tests/test-branch-name.sh rc=0 5s
+tests/test-check-mojibake.sh rc=0 5s
+tests/test-check-skill-sync.sh rc=0 13s
+tests/test-check-sync.sh rc=0 3s
+tests/test-check-template.sh rc=0 31s
+tests/test-codex-exec-invocation.sh rc=0 1s
+tests/test-detect-changed-languages.sh rc=0 21s
+tests/test-detect-languages-terraform.sh rc=0 1s
+tests/test-ensure-pr-ready.sh rc=0 3s
+tests/test-ensure-pr-title-prefix.sh rc=0 4s
+tests/test-gc-artifacts.sh rc=0 10s
+tests/test-golang-pack-test-timeout.sh rc=0 7s
+tests/test-hook-wiring.sh rc=0 1s
+tests/test-insights-append.sh rc=0 5s
+tests/test-language-pack-monorepo-roots.sh rc=0 8s
+tests/test-lib-json.sh rc=0 15s
+tests/test-new-feature-plan.sh rc=0 2s
+tests/test-no-loop-references.sh rc=0 1s
+tests/test-plan-visual.sh rc=0 23s
+tests/test-post-edit-verify.sh rc=0 2s
+tests/test-pr-owner-lookup.sh rc=0 0s
+tests/test-ralph-config.sh rc=0 1s
+tests/test-ralph-dispatch.sh rc=0 20s
+tests/test-ralph-worktree.sh rc=0 61s
+tests/test-run-verify-branch-secret-scan.sh rc=0 16s
+tests/test-run-verify-concurrency.sh rc=0 20s
+tests/test-run-verify-scope.sh rc=0 14s
+tests/test-secret-scan-branch.sh rc=0 105s
+tests/test-secret-scan.sh rc=0 68s
+tests/test-self-review-scope.sh rc=0 2s
+tests/test-skill-insight-cycle.sh rc=0 1s
+tests/test-sync-skills.sh rc=0 13s
+tests/test-template-purity.sh rc=0 5s
+tests/test-terraform-gitignore.sh rc=0 2s
+tests/test-terraform-pack-verify.sh rc=0 7s
+tests/test-terraform-rule-frontmatter.sh rc=0 1s
+tests/test-verify-local-hook-tests.sh rc=0 5s
+tests/test-verify-mode-split.sh rc=0 7s
+tests/test-wip-checkpoint-hooks.sh rc=0 33s
+tests/test-xreview-helpers.sh rc=0 18s
+tests/test-pre-bash-guard.sh rc=0 242s
+
+Each file's summary line(s) (last lines of its output):
+test-agent-models:  PASS: 47 / 47 FAIL: 0 
+test-agent-phase-boundaries:  PASS: 44 / 44 FAIL: 0 
+test-archive-plan: archive-plan tests: 22 passed, 0 failed, 22 total 
+test-branch-name: branch-name tests: 26 passed, 0 failed, 26 total 
+test-check-mojibake:  PASS: 15 FAIL: 0 
+test-check-skill-sync:  PASS: 13 FAIL: 0 
+test-check-sync:  PASS: 16 / 16 FAIL: 0 
+test-check-template: test-check-template: 60 passed, 0 failed, 0 skipped 
+test-codex-exec-invocation: Results: 144/144 passed 
+test-detect-changed-languages:  PASS: 83 / 83 FAIL: 0 
+test-detect-languages-terraform:  PASS: 8 / 8 FAIL: 0 
+test-ensure-pr-ready: ensure-pr-ready tests: 7 passed, 0 failed, 7 total 
+test-ensure-pr-title-prefix: ensure-pr-title-prefix tests: 13 passed, 0 failed, 13 total 
+test-gc-artifacts: gc-artifacts tests: 11 passed, 0 failed, 11 total 
+test-golang-pack-test-timeout:  PASS: 34 / 34 FAIL: 0 
+test-hook-wiring:  PASS: 68 FAIL: 0 
+test-insights-append: insights-append tests: 51 passed, 0 failed 
+test-language-pack-monorepo-roots:  PASS: 29 / 29 FAIL: 0 
+test-lib-json:  PASS: 126 FAIL: 0 SKIP: 0 
+test-new-feature-plan: new-feature-plan tests: 21 passed, 0 failed, 21 total 
+test-no-loop-references: PASS: no live references to the retired Ralph Loop execution system outside historical documents
+test-plan-visual: plan-visual tests: 243 passed, 0 failed, 243 total 
+test-post-edit-verify:  PASS: 24 FAIL: 0 
+test-pr-owner-lookup: pr-owner-lookup tests: 20 passed, 0 failed, 20 total 
+test-pre-bash-guard:  PASS: 2227 FAIL: 0 SKIP: 0 
+test-ralph-config: Results: 19/19 passed 
+test-ralph-dispatch:  PASS: 33 FAIL: 0 
+test-ralph-worktree: ralph-worktree tests: 143 passed, 0 failed, 143 total 
+test-run-verify-branch-secret-scan:  PASS: 32 FAIL: 0 
+test-run-verify-concurrency:  PASS: 37 / 37 FAIL: 0 
+test-run-verify-scope:  PASS: 19 / 19 FAIL: 0 
+test-secret-scan-branch:  PASS: 246 FAIL: 0 
+test-secret-scan:  PASS: 123 FAIL: 0 
+test-self-review-scope:  PASS: 64 / 64 FAIL: 0 
+test-skill-insight-cycle: skill-insight-cycle tests: 20 passed, 0 failed, 20 total 
+test-sync-skills:  PASS: 22 FAIL: 0 
+test-template-purity:  PASS: 10 FAIL: 0 
+test-terraform-gitignore:  PASS: 47 FAIL: 0 TOTAL: 47 
+test-terraform-pack-verify:  PASS: 36 / 36 FAIL: 0 
+test-terraform-rule-frontmatter:  PASS: 11 / 11 FAIL: 0 
+test-verify-local-hook-tests: verify-local-hook-tests tests: 5 passed, 0 failed, 5 total 
+test-verify-mode-split:  PASS: 59 / 59 FAIL: 0 
+test-wip-checkpoint-hooks: wip-checkpoint hook tests: 156 passed, 0 failed, 156 total 
+test-xreview-helpers:  PASS: 29 FAIL: 0 
+Sum of the counts above: 4464 passing checks in 44 files
+Lines starting with FAIL that are not 'FAIL: 0', across all 44 outputs: 0
+Worktree status (git status --porcelain --ignored, without .harness/cache/) before and after the shell runs: identical
+
+## Run E: targeted, -count=3
+$ go test -list <R> ./internal/cli/   (R = 'SignalCauseContext|^TestOrgGate_InterruptStopsTheScriptAndRecordsNothing$|^TestOrgMerge_InterruptedBeforeTheMergeMergesNothing$|^TestOrgRegate_InterruptUndoesTheMergeAndRecordsNothing$|^TestOrgRegate_AnInterruptDuringTheMergeSaysOnStderrThatItWaits$|^TestOrgWaitDirector_ASignalWritesItsEndThenRaisesItAgain$|^TestOrgWaitDirector_ASignalEndsTheProcessByIt$')
+   3 TestOrgGate_InterruptStopsTheScriptAndRecordsNothing
+   3 TestOrgMerge_InterruptedBeforeTheMergeMergesNothing
+   3 TestOrgRegate_AnInterruptDuringTheMergeSaysOnStderrThatItWaits
+   3 TestOrgRegate_InterruptUndoesTheMergeAndRecordsNothing
+   3 TestOrgWaitDirector_ASignalEndsTheProcessByIt
+   3 TestOrgWaitDirector_ASignalWritesItsEndThenRaisesItAgain
+   3 TestOrgWaitDirector_SignalCauseContextCancelsOnTheFirstSignalAndKeepsLaterOnesCaught
+   3 TestOrgWaitDirector_SignalCauseContextParentCauseAndStop
+   3 TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+   3 TestOrgWaitDirector_SignalCauseContextWithNoSignalsRegistersNone
+$ go test -count=3 -timeout 30m -json -run <R> ./internal/cli/   (04:02:37, rc=0, wall 75s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	74.083s
+github.com/yoshpy-dev/ralph/internal/cli pass elapsed=74.083s top: pass=30 fail=0 skip=0 | sub: pass=39 fail=0 skip=0
+failed tests:
+skipped tests:
+
+$ go test -count=3 -v -run '^(TestCheckGoModToolchain|TestTheTestsRunOnTheGoThatGoModNames)$' ./cmd/ralph/   (rc=0)
+   3     --- PASS: TestCheckGoModToolchain/a_devel_build
+   3     --- PASS: TestCheckGoModToolchain/a_minor_release_apart
+   3     --- PASS: TestCheckGoModToolchain/a_patch_release_apart
+   3     --- PASS: TestCheckGoModToolchain/an_experiment_suffix_after_the_version
+   3     --- PASS: TestCheckGoModToolchain/neither_a_go_line_nor_a_toolchain_line
+   3     --- PASS: TestCheckGoModToolchain/the_running_Go_is_the_go_line's_version
+   3     --- PASS: TestCheckGoModToolchain/the_toolchain_line_matches_and_the_go_line_is_older
+   3     --- PASS: TestCheckGoModToolchain/the_toolchain_line_wins_over_a_go_line_that_matches
+   3 --- PASS: TestCheckGoModToolchain
+   3 --- PASS: TestTheTestsRunOnTheGoThatGoModNames
+PASS
+ok  	github.com/yoshpy-dev/ralph/cmd/ralph	0.531s
+
+## Probe 1: TestTheTestsRunOnTheGoThatGoModNames with a go.mod naming another patch release
+Copy of cmd/ralph/toolchain_test.go, overlaid (go test -overlay); diff against the tracked file:
+100c100
+< 	goMod, err := os.ReadFile("../../go.mod")
+---
+> 	goMod, err := os.ReadFile(os.Getenv("PROBE_GOMOD"))
+Temp go.mod files: a copy of go.mod (gomod-1.27.3), and the same with the go line changed (diff go.mod gomod-1.27.4):
+3c3
+< go 1.27.3
+---
+> go 1.27.4
+$ PROBE_GOMOD=<scratch>/test-probe/p1/gomod-1.27.4 go test -count=1 -overlay <scratch>/test-probe/p1/overlay.json -run '^TestTheTestsRunOnTheGoThatGoModNames$' -v ./cmd/ralph/
+=== RUN   TestTheTestsRunOnTheGoThatGoModNames
+    toolchain_test.go:105: the tests run on go1.27.3, but go.mod's go line names go1.27.4, the Go that CI and the release build install (setup-go's go-version-file); raise that line to the running version in a PR, or run the tests with GOTOOLCHAIN=go1.27.4
+--- FAIL: TestTheTestsRunOnTheGoThatGoModNames (0.00s)
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/cmd/ralph	0.953s
+FAIL
+$ PROBE_GOMOD=<scratch>/test-probe/p1/gomod-1.27.3 go test -count=1 -overlay <scratch>/test-probe/p1/overlay.json -run '^TestTheTestsRunOnTheGoThatGoModNames$' -v ./cmd/ralph/
+=== RUN   TestTheTestsRunOnTheGoThatGoModNames
+--- PASS: TestTheTestsRunOnTheGoThatGoModNames (0.00s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/cmd/ralph	0.359s
+rc: 1 for 1.27.4, 0 for 1.27.3 (control)
+
+## Probe 2: the stop-unregisters test with the test binary started with SIGHUP ignored
+$ go test -c -o <scratch>/test-probe/p2/cli.test ./internal/cli/   (rc=0)
+Sensitivity copy cli-nocatch.test: org_wait_director_test.go overlaid without the parent's SIGHUP channel:
+678,680c678
+< 	caught := make(chan os.Signal, 1)
+< 	signal.Notify(caught, syscall.SIGHUP)
+< 	defer signal.Stop(caught)
+---
+> 	_ = signal.Ignored // probe: the parent no longer catches SIGHUP
+From internal/cli: [nohup] <scratch>/test-probe/p2/<bin> -test.run '^TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals$' -test.count=1 -test.v > <scratch file> 2>&1
+--- cli.test, nohup:
+=== RUN   TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+--- PASS: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.03s)
+PASS
+--- cli.test, plain:
+=== RUN   TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+--- PASS: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.03s)
+PASS
+--- cli-nocatch.test, nohup:
+=== RUN   TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+    org_wait_director_test.go:686: the child that called stop, then got SIGHUP = <nil>; want it ended by SIGHUP
+        survived
+        PASS
+--- FAIL: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.33s)
+FAIL
+--- cli-nocatch.test, plain:
+=== RUN   TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals
+--- PASS: TestOrgWaitDirector_SignalCauseContextStopUnregistersTheSignals (0.03s)
+PASS
+rc: cli.test nohup 0, plain 0; cli-nocatch.test nohup 1, plain 0
+
+## Probe 3: org_gate.go that ends the signal registration at the first signal
+Overlay copy of internal/cli/org_gate.go; diff against the tracked file:
+103a104
+> 			go func() { <-ctx.Done(); stop() }() // probe 3: the registration ends at the first signal
+$ go test -list 'OrgGate|Interrupt|Signal' ./internal/cli/ | grep -c '^Test'
+23
+$ go test -count=1 -timeout 30m -json -overlay <scratch>/test-probe/p3/overlay.json -run 'OrgGate|Interrupt|Signal' ./internal/cli/   (rc=0, 77s)
+PASS
+ok  	github.com/yoshpy-dev/ralph/internal/cli	72.962s
+github.com/yoshpy-dev/ralph/internal/cli pass elapsed=72.963s top: pass=23 fail=0 skip=0 | sub: pass=28 fail=0 skip=0
+failed tests:
+skipped tests:
+=> no test in ./internal/cli/ that the filter selects fails: the mutant survives
+
+Non-equivalence check: throwaway test file <scratch>/test-probe/p3/zz_probe3_test.go, overlaid at the path
+internal/cli/zz_probe3_test.go (which does not exist). A child copy of the test binary runs gate with a static
+script that ignores SIGTERM (so gate waits its 5s kill grace), sends itself SIGINT, 500ms later SIGINT again,
+and prints 'survived' when gate returns; the child registers no signal of its own. The parent SIGKILLs the
+script's group afterwards.
+--- overlay-head-probe.json (probe file only), go test -count=3 -timeout 10m -run '^TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate$' -v ./internal/cli/:
+        gate returned: org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $TMPDIR/<test temp dir>/state/gates/a-20261026T190902Z.log
+        survived
+--- PASS: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+        gate returned: org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $TMPDIR/<test temp dir>/state/gates/a-20261026T190908Z.log
+        survived
+--- PASS: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+        gate returned: org: gate: interrupted (interrupt signal received): the scripts were stopped and nothing was recorded; the output so far is in $TMPDIR/<test temp dir>/state/gates/a-20261026T190916Z.log
+        survived
+--- PASS: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+ok  	github.com/yoshpy-dev/ralph/internal/cli	21.640s
+--- overlay-mutant-probe.json (probe file + the mutant org_gate.go), go test -count=3 -timeout 10m -run '^TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate$' -v ./internal/cli/:
+    zz_probe3_test.go:65: the child gate that got SIGINT twice: err = signal: interrupt; want it alive to the end
+--- FAIL: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+    zz_probe3_test.go:65: the child gate that got SIGINT twice: err = signal: interrupt; want it alive to the end
+--- FAIL: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+    zz_probe3_test.go:65: the child gate that got SIGINT twice: err = signal: interrupt; want it alive to the end
+--- FAIL: TestProbe3_ASecondSIGINTDuringTheStopDoesNotEndGate
+FAIL
+FAIL	github.com/yoshpy-dev/ralph/internal/cli	10.357s
+FAIL
+rc: head 0 (3/3 pass), mutant 1 (3/3 fail: the child ended by SIGINT). No 'sleep 30' process left afterwards.
+
+## Coverage of the moved helper
+$ go test -count=1 -coverprofile=<cov> -run 'SignalCauseContext|^TestOrgWaitDirector_ASignal' ./internal/cli/ ; go tool cover -func=<cov>
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:101:		notIgnoredSignals			100.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:129:		signalCauseContext			95.8%
+$ the same with -run over every test in exitcode_test.go, org_director_check_line_test.go, org_director_test.go,
+  org_director_wait_line_test.go, org_director_wake_test.go, org_wait_director_test.go (56 tests)
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:129:		signalCauseContext			95.8%
+blocks with count 0 in signalCauseContext:
+github.com/yoshpy-dev/ralph/internal/cli/org_wait_director.go:153.3,154.1 1 0
+(org_wait_director.go:153-154 is the else branch: close(ended) when parent has already ended at the call)
+Base origin/main 5ef14b1a, git archive copy in scratch, same go:
+$ go test -count=1 -coverprofile=<cov> -run 'OrgGate|OrgMerge_Interrupt|OrgRegate_Interrupt|OrgRegate_AnInterrupt|OrgWait' ./internal/cli/
+github.com/yoshpy-dev/ralph/internal/cli/org_gate.go:134:			gateSignalContext			100.0%
+github.com/yoshpy-dev/ralph/internal/cli/org_gate.go:147:			signalCauseContext			100.0%
+the base's else branch (org_gate.go:171) is reached by -run 'OrgMerge_Interrupt' (count 1), not by 'OrgGate', 'OrgWait',
+or 'OrgRegate_Interrupt|OrgRegate_AnInterrupt' (count 0 each)
+
+cmd/ralph: go test -coverprofile reports 0.0% of statements: checkGoModToolchain lives in toolchain_test.go, and
+go test does not instrument _test.go files; its 8 table rows are the measure.
+
+## After the runs
+- git status --porcelain --ignored without .harness/cache/: the same as before the runs
+- no 'go: downloading' line in any output; no herdr, agmsg, ralph-org, cli.test, or 'sleep 30' process left
