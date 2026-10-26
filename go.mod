@@ -1,6 +1,6 @@
 module github.com/yoshpy-dev/ralph
 
-go 1.25.8
+go 1.27.3
 
 require (
 	charm.land/huh/v2 v2.0.3

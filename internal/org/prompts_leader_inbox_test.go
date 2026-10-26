@@ -363,9 +363,9 @@ func runLeaderMonitorCommandUnderAnExitingParent(t *testing.T, shell string) {
 		}
 	case <-ctx.Done():
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		t.Fatalf("the %s Monitor command still ran 30 seconds after it started, so it did not end when its parent sh was gone (stdout %q)",
-			filepath.Base(shell), stdout.String())
+		err := <-done
+		t.Fatalf("the %s Monitor command still ran 30 seconds after it started, so it did not end when its parent sh was gone (wait after SIGKILL: %v, stdout %q)",
+			filepath.Base(shell), err, stdout.String())
 	}
 	out := stdout.String()
 	if !strings.Contains(out, "args: ralph-org-a leader --quiet\n") {
