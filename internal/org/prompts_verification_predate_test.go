@@ -189,6 +189,7 @@ func TestRenderRolePrompt_Leader_ResendsAStoppedSliceWithAResumeLine(t *testing.
 			"止まった TASK がコミットせずに残した scope の中のパスを、BLOCKED と `git status --porcelain` から拾って本文の " + resumeLine + " の行に並べる",
 		"(例: `RESUME: internal/foo/bar.go internal/foo/bar_test.go`。`VERIFY:` と同じく本文の行で、ヘッダにはしない)",
 		"implementer はそのパスの変更を引き継いで続ける",
+		"スライスを狭めるときも、残したパスはすべて並べ、外すパスの変更は元に戻すよう TASK に書く(並べなかったパスは前からあった変更として残り、implementer がまた止まる)",
 		"秘密情報で止まったあとは、送る前に `git diff HEAD -- <パス>...`(未追跡のファイルは中身を読む)で、その値が作業ツリーから消えたことを確かめる",
 		"消えていないとき、また BLOCKED が秘密情報を" + implementerPredatingChanges + "(止まった TASK より前の変更。implementer は触らない)にあると書いたときは、" +
 			"再開せず `ralph org escalate` で BLOCKED を上げる(コードは自分で直さない)",
