@@ -237,6 +237,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    `./scripts/run-static-verify.sh` がなければ、静的検査が通ったことは
    確かめられていないので、手順 9 に進まず、新しい TASK_ID で、`CHECKS:` の
    行を付けたレビューの TASK を送り直す。
+   この理由でレビューの TASK が 2 回続けて通らなければ(送り直した TASK の
+   RESULT にも、`./scripts/run-static-verify.sh` のある `CHECKS:` の行が
+   なければ)、3 回目の TASK は送らず、その理由を本文に書いて
+   `ralph org escalate` で BLOCKED を上げる。
    `./scripts/run-test.sh` も並んでいれば、reviewer は既定の 2 つを打った。
    時間がかかっただけなので、`GATE:` はそのまま扱ってよい
 9. reviewer がレビューの TASK(TASK_ID が `gate-` で始まらない TASK)を
