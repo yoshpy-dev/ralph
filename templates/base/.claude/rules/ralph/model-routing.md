@@ -14,8 +14,9 @@ tasks. Delegation timing/order lives in `subagent-policy.md`.
 
 Quality is preserved by plan artifacts, not by model tier: when delegating,
 the prompt must carry acceptance criteria, exact verification commands, and a
-report contract (changed files, key decisions, verification evidence). A
-cheaper model with a precise plan beats an expensive model with a vague one.
+report contract (changed files, key decisions, verification evidence, the
+mechanical self-check result). A cheaper model with a precise plan beats an
+expensive model with a vague one.
 
 ## Standard flow delegation (/implement)
 
@@ -33,12 +34,13 @@ itself.
 | Slice objective | single-sentence goal |
 | Acceptance criteria | the ACs this slice addresses |
 | Files in scope | exact list; implementer stages only these paths |
-| Exact verification commands | copy-paste ready |
+| Exact verification commands | the slice's command from the plan's `## Implementation outline` (the narrowest check that covers the slice's files), copy-paste ready |
 | Commit message format | conventional format string |
 
 **Report contract (implementer → orchestrator):** changed files, decisions/deviations,
-verification evidence, commit-boundary evidence (`git status --porcelain` +
-`git show --stat HEAD` output), commit SHA.
+verification evidence, the mechanical self-check result (unnecessary changes,
+typos, debug leftovers, secrets, files outside the handoff), commit-boundary
+evidence (`git status --porcelain` + `git show --stat HEAD` output), commit SHA.
 
 **Inline exceptions** (no subagent dispatch needed):
 
