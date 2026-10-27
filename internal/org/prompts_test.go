@@ -560,6 +560,203 @@ func TestRenderRolePrompt_Reviewer_MissionRunsGateFirstAndBlocksWithoutReviewing
 	}
 }
 
+// reviewerStaticChecksLine is the CHECKS: body line of a review RESULT or
+// BLOCKED in a feature org, whose leader names only the static script.
+const reviewerStaticChecksLine = "CHECKS: ./scripts/run-static-verify.sh"
+
+// reviewerDiffReviewItems are the ten items of the reviewer's diff review, in
+// the template's order (plan 2026-10-27-org-narrow-verification, D3).
+var reviewerDiffReviewItems = []string{"命名", "読みやすさ", "不要な変更", "誤字とコピペの誤り", "null の扱い", "デバッグの残り", "秘密情報", "例外処理", "security", "保守性"}
+
+// TestRenderRolePrompt_Reviewer_ReviewTaskRunsExactlyTheNamedCommands pins
+// the reviewer half of AC3 of plan 2026-10-27-org-narrow-verification: the
+// mission's first item has the reviewer run exactly the commands a review
+// TASK names, adding and dropping none; says a feature org's leader names
+// only the static script and that org's full test runs once, before the PR,
+// in the gate TASK through ralph org gate; and keeps both scripts as the
+// default for a TASK that names no command. That default is the safety
+// property of D6: a leader that forgets to name commands, or an older leader
+// template that never names them, still gets the tests run (later, never
+// skipped). The item is checked on its own, because the mission's fifth item
+// names both scripts too, in its CHECKS: example, and would mask a default
+// cut back to the static script alone. The fan-out example has a sub-agent
+// run the same commands.
+func TestRenderRolePrompt_Reviewer_ReviewTaskRunsExactlyTheNamedCommands(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "1. レビューの TASK"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the reviewer mission to have an item starting %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"leader の TASK にコマンドの指示があればそれを、なければ `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する",
+		"指示があるときは、指示されたコマンドだけを打ち、足しも削りもしない",
+		"機能ごとの org(`ralph org start --plan` で立てた org)の leader は、レビューの TASK に `./scripts/run-static-verify.sh` だけを指示する",
+		"その org のフルの test は、PR の前に下の「gate の TASK」で `ralph org gate` が 1 回走らせる",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the reviewer mission item %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	fanOut, found := markdownSection(text, "## 座席内 fan-out")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## 座席内 fan-out' section, got:\n%s", text)
+	}
+	if item, ok := markdownItem(fanOut, "ゲートの実行"); !ok ||
+		!containsPhrase(item, "レビューの TASK のゲートの実行(TASK が指示したコマンド、指示がなければ `run-static-verify.sh` と `run-test.sh`)を安いモデルの子サブエージェントに任せ、子にも同じコマンドだけを打たせる") {
+		t.Errorf("expected the fan-out example to hand a sub-agent the commands the review TASK names, or both scripts when it names none, and only those, got item:\n%s", item)
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_GateMeansTheCommandsOnTheChecksLine pins D5
+// of plan 2026-10-27-org-narrow-verification: the mission's fifth item says
+// the GATE: of a review RESULT or BLOCKED is the result of the first item's
+// commands, which go on a CHECKS: line of the body in the order run (the
+// static script alone, or both scripts when the TASK named none), so in a
+// feature org GATE: pass means the static checks passed and the full test's
+// result is the gate TASK's GATE:; the typed protocol section keeps CHECKS:
+// out of the header block; and the report contract asks for the line in a
+// review RESULT and BLOCKED.
+func TestRenderRolePrompt_Reviewer_GateMeansTheCommandsOnTheChecksLine(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "5. 2〜4 で返す RESULT と BLOCKED"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the reviewer mission to have an item starting %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"2〜4 で返す RESULT と BLOCKED の `GATE:` は、1 のコマンドの結果を指す",
+		"1 のコマンドは、本文の `CHECKS:` の行に打った順に書く",
+		"(例: `" + reviewerStaticChecksLine + "`。指示がなかったときは `CHECKS: ./scripts/run-static-verify.sh、./scripts/run-test.sh`)",
+		"機能ごとの org のレビューでは静的検査だけを打つので、`GATE: pass` は静的検査が通ったことを指す(フルの test の結果は、gate の TASK で返す `GATE:` が指す)",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the reviewer mission item %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	protocolSection, found := markdownSection(text, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## typed protocol' section, got:\n%s", text)
+	}
+	if !containsPhrase(protocolSection, "`CHECKS:` はヘッダではなく、本文(空行のあと)の行に書く") {
+		t.Errorf("expected the reviewer's typed protocol section to put CHECKS: in the body, not the header block, got section:\n%s", protocolSection)
+	}
+
+	contract, found := markdownSection(text, "## レポート契約")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## レポート契約' section, got:\n%s", text)
+	}
+	if item, ok := markdownItem(contract, "leader へは RESULT"); !ok ||
+		!containsPhrase(item, "レビューの RESULT と BLOCKED の本文には、ゲートで打ったコマンドを `CHECKS:` の行で書いてください") {
+		t.Errorf("expected the reviewer's report contract to ask for the CHECKS: line in a review RESULT and BLOCKED, got item:\n%s", item)
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_DiffReviewCoversTenItemsAndTheCriteria pins
+// D3 of plan 2026-10-27-org-narrow-verification: inside the mission's fourth
+// item (the review after a passing gate), one bullet lists exactly the ten
+// items of reviewerDiffReviewItems, in that order, and another checks the
+// spec's or plan's acceptance criteria; the old four-point list is gone.
+func TestRenderRolePrompt_Reviewer_DiffReviewCoversTenItemsAndTheCriteria(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	_, review, found := strings.Cut(mission, "\n4. ゲートが通ったら差分レビューに進む\n")
+	if !found {
+		t.Fatalf("expected the reviewer mission to have an item 4. ゲートが通ったら差分レビューに進む, got section:\n%s", mission)
+	}
+	review, _, _ = strings.Cut(review, "\n5. ")
+
+	const itemsMarker = "- 差分を次の"
+	itemsWant := "- 差分を次の 10 項目で確かめる: " + strings.Join(reviewerDiffReviewItems, "、")
+	if item, ok := markdownItem(review, itemsMarker); !ok || squashSpace(item) != squashSpace(itemsWant) {
+		t.Errorf("expected the mission's item 4 to have the bullet %q and nothing more, got item:\n%s", itemsWant, item)
+	}
+	const criteria = "spec / plan の受け入れ基準に照らして充足しているか確認する"
+	if item, ok := markdownItem(review, "- spec / plan の"); !ok || !containsPhrase(item, criteria) {
+		t.Errorf("expected the mission's item 4 to check the acceptance criteria (%q), got item 4:\n%s", criteria, review)
+	}
+	if containsPhrase(text, "差分品質(可読性・命名・責務分離・エラー処理)") {
+		t.Errorf("expected the reviewer template to drop the old four-point diff review, got:\n%s", text)
+	}
+}
+
+// TestRenderRolePrompt_Reviewer_ReviewExamplesCarryTheChecksLine pins the
+// examples of D5 of plan 2026-10-27-org-narrow-verification: the review
+// RESULT and the BLOCKED for a failing gate in the typed protocol section are
+// valid messages for TASK_ID t-42 that keep their headers (GATE: pass, HEAD:
+// and BASE: for the RESULT, GATE: fail for the BLOCKED) and an EVIDENCE:
+// line, and carry reviewerStaticChecksLine in the body, not the header block.
+// The BLOCKED's failure is a static check's from run-static-verify.sh,
+// matching that line; it no longer blames run-test.sh, which a feature org's
+// review does not run, and still says the diff review was not done.
+func TestRenderRolePrompt_Reviewer_ReviewExamplesCarryTheChecksLine(t *testing.T) {
+	text := renderSeatPrompt(t, "reviewer")
+	protocolSection, found := markdownSection(text, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the reviewer template to contain a '## typed protocol' section, got:\n%s", text)
+	}
+	const blockedLead = "ゲートが落ちたときの BLOCKED の例"
+	bodies := map[string]string{}
+	for _, c := range []struct {
+		lead    string
+		typ     string
+		headers map[string]string
+	}{
+		{"RESULT の例", protocol.TypeResult, map[string]string{"GATE": "pass", "HEAD": "", "BASE": ""}},
+		{blockedLead, protocol.TypeBlocked, map[string]string{"GATE": "fail"}},
+	} {
+		msg, found := codeBlockAfterLine(protocolSection, c.lead)
+		if !found {
+			t.Errorf("expected the reviewer's typed protocol section to show a code block after a line starting with %q, got section:\n%s", c.lead, protocolSection)
+			continue
+		}
+		m, err := protocol.Parse(msg)
+		if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != c.typ || m.TaskID != "t-42" {
+			t.Errorf("expected the example after %q to be a valid %s with TASK_ID t-42, got %+v, err %v; message:\n%s", c.lead, c.typ, m, err, msg)
+			continue
+		}
+		for key, want := range c.headers {
+			if got := protocol.HeaderValues(msg, key); len(got) != 1 || (want != "" && got[0] != want) {
+				t.Errorf("expected the example after %q to carry one %s: header (%q), got %q; message:\n%s", c.lead, key, want, got, msg)
+			}
+		}
+		if got := protocol.HeaderValues(msg, "CHECKS"); len(got) != 0 {
+			t.Errorf("expected CHECKS: in the body of the example after %q, not its header block, got header values %q; message:\n%s", c.lead, got, msg)
+		}
+		if !hasLine(m.Body, reviewerStaticChecksLine) {
+			t.Errorf("expected the body of the example after %q to have the line %s, got body:\n%s", c.lead, reviewerStaticChecksLine, m.Body)
+		}
+		if !slices.ContainsFunc(strings.Split(m.Body, "\n"), func(line string) bool { return strings.HasPrefix(line, "EVIDENCE: ") }) {
+			t.Errorf("expected the body of the example after %q to keep an EVIDENCE: line, got body:\n%s", c.lead, m.Body)
+		}
+		bodies[c.lead] = m.Body
+	}
+
+	if body, ok := bodies[blockedLead]; ok {
+		if strings.Contains(body, "run-test.sh") {
+			t.Errorf("expected the example after %q not to blame run-test.sh, which a feature org's review does not run, got body:\n%s", blockedLead, body)
+		}
+		for _, want := range []string{"SUMMARY: run-static-verify.sh の", "差分レビューは行っていない"} {
+			if !containsPhrase(body, want) {
+				t.Errorf("expected the body of the example after %q to say %q, got body:\n%s", blockedLead, want, body)
+			}
+		}
+	}
+}
+
 func TestRenderRolePrompt_Leader_MissionRoutesGateBlocked(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	mission, found := markdownSection(text, "## ミッション")
