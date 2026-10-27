@@ -180,7 +180,7 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - self-review の 2 回目 f2d075c8: 1 回目の 8 件はすべて解消、新しい LOW 2、Merge yes
   - 直し F3 8cda482e(implementer): 複数スライスの RESULT はスライスごとに名前付きの `COMMIT:`・`VERIFY:`・`SELF-CHECK:`、reviewer が指示とみなすのは TASK の本文の `CHECKS:` の行だけ(行がなければ既定の両方。散文の指示を受け入れる文を外した。打つ検査が増える側にしか動かない)。skill の 4 つの写しも同じに。テスト 2 本を `internal/org/prompts_verification_multi_test.go` に足し、変異 6 つがそれぞれ落ちることを確かめた。機械的な確かめ: 不要な変更 fixed(テストのコメントの折り直しを戻した)、誤字とコピペの誤り fixed(重言)、ほかの 3 項目は clean
   - 残り(sync-docs に渡す): tech-debt の「org runtime FR-7 quality gate is prompt-instructed, not hook-enforced.」の行にも「The reviewer seat re-runs `run-static-verify.sh` / `run-test.sh`」という古い文がある。trigger は「The next change to the org quality pipeline」で、この計画も当たる。払わずに繰り越す注記を、2026-10-26 の reviewer-runs-gate のときと同じ形で足す
-- [ ] Review artifact created
-- [ ] Verification artifact created
+- [x] Verification artifact created(verify 584f8103: pass、AC1〜AC5 を満たし、AC6 は静的な半分。self-review の 2 回目の LOW 2 件は F3 で解消を確認。所見は LOW 1(director の仕様 2026-10-07 の FR-7 の「テストは review と gate の 2 回」が古い)と既知 1(tech-debt の 157 行目)で、どちらも sync-docs に渡す)
+  - 逸れ: テストは AC6 と S1 が名指す `internal/org/prompts_test.go` ではなく、F2 と F3 で `internal/org/prompts_verification_test.go` と `internal/org/prompts_verification_multi_test.go` に置いた(`prompts_test.go` は main の版のまま)
 - [ ] Test artifact created
 - [ ] PR created
