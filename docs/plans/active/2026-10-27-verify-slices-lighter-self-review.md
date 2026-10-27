@@ -117,7 +117,13 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
 - [x] Plan reviewed(Codex の計画助言 3 件(MEDIUM)を D4〜D6 として反映)
 - [x] Plan approved(自動承認。2026-10-11 のユーザー指示「作成したプランは自動承認します」と、2026-10-27 の「最後まで止まらずに」による)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(5 スライスをすべて implementer に委譲)
+  - S1 168c3950: 雛形の例のコマンドを `test -z "$(gofmt -l …)"` にした(`gofmt -l` は未整形のファイルを一覧しても終了コード 0 のため)
+  - S2 dd7d4070: 委譲したスライスの確認項目にも「self-check の結果がある」を足した
+  - S3 f1c68ebd: self-review から外れたのは 4 項目で、5 つ目(handoff の外のファイル)はもともと self-review の観点でないと書き分けた
+  - S4 d501efad: scope テストの照合を太字の見出しにした(大文字小文字を区別しない grep が description にも当たるため)
+  - S5 c77b12c9: 84 件。subagent-policy の検査も足し、変異 5 種で落ちることを確かめた
+  - `ralph-workflow.md` の「成功を言う前に run-verify.sh か同等の検査」は、`/verify` と `/test` がそれに当たるので残した
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
