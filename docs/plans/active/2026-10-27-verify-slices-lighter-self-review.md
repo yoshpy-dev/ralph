@@ -140,4 +140,6 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
 - [x] Cycle 2 の self-review 1 回目(2478fd5d: LOW 3、Merge yes)。範囲を絞って外したファイルを `git restore -- <file>` で戻しても、新規のファイルとステージ済みの変更は戻らない。秘密情報の報告に値を書かない指示がない。handoff の表と手順 6 に再開がない
   - 直し d33bb358(implementer): 再開の前にまず秘密情報を作業ツリーから出す(`wip:` のチェックポイントが `git add -A` で全部ステージするため)。戻し方は追跡中のファイルなら `git restore --staged --worktree -- <file>`、新規のファイルなら削除。秘密情報はファイルと行で報告し、値は書かない。model-routing の表に Resume の行、手順 6 に再開の例外。検証: check-sync PASS、check-skill-sync ok、slice 148/148、scope 206/206、agent-models 47/47。機械的な確かめは 5 項目とも clean
   - Cycle 2 の self-review 2 回目(3affffb0): 所見 0、Merge yes
+- [x] Cycle 2 の verify(b8efab76: pass、AC1〜AC6 Met、AC7 は静的の半分、LOW 2)
+  - inline の直し 6741f9d6: `.codex/README.md` の 5 項目の並びに「and」を足して正本の語にそろえ(root と template)、model-routing の段落を「まず秘密情報を作業ツリーから出し、必要なら絞る」の順にした(root と template)。README の並びを固める検査を `tests/test-slice-verification.sh` に足した。検証: check-sync PASS、check-skill-sync ok、slice 150/150、scope 206/206、shellcheck と `git diff --check` OK。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
 - [ ] PR created
