@@ -37,6 +37,18 @@
    1 つの TASK で複数のスライスを頼むときは、`VERIFY:` の行をスライスごとに
    1 行ずつ書き、各行をスライスの名前で始める(例: `VERIFY: S1: <コマンド>`)。
    スライスが 1 つなら `VERIFY: <コマンド>` の形のままでよい。
+   implementer がコミットせずに BLOCKED で止まり、止まった原因を取り除いて
+   (またはスライスを狭めて)同じスライスをもう一度頼むときは、止まった TASK
+   がコミットせずに残した scope の中のパスを、BLOCKED と
+   `git status --porcelain` から拾って本文の `RESUME:` の行に並べる(例:
+   `RESUME: internal/foo/bar.go internal/foo/bar_test.go`。`VERIFY:` と同じく
+   本文の行で、ヘッダにはしない)。implementer はそのパスの変更を引き継いで
+   続ける(この行がないと、前の TASK の変更を見て止まる)。秘密情報で止まった
+   あとは、送る前に `git diff HEAD -- <パス>...`(未追跡のファイルは中身を
+   読む)で、その値が作業ツリーから消えたことを確かめる。消えていないとき、
+   また BLOCKED が秘密情報を前からあった変更(止まった TASK より前の変更。
+   implementer は触らない)にあると書いたときは、再開せず
+   `ralph org escalate` で BLOCKED を上げる(コードは自分で直さない)。
    機能ごとの org でなければ、reviewer へのレビューの TASK には打つ
    コマンドを書かず、reviewer の既定(`./scripts/run-static-verify.sh` と
    `./scripts/run-test.sh` の両方)に任せる(機能ごとの org は

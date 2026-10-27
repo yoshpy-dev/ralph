@@ -1336,7 +1336,10 @@ reviewer は、レビューの TASK のゲート(TASK が指示したコマン�
   BLOCKED を返す(値は書かない)。直すのはそのスライスの変更だけで、前から
   あった変更(TASK ごとに、最初の編集の前の `git status --porcelain` に出て
   いた変更)の秘密情報や、その中で stage 済みの scope の外のパスには触らず、
-  コミットせずに BLOCKED を返す。RESULT には commit SHA と証拠のポインタの
+  コミットせずに BLOCKED を返す。TASK の本文に `RESUME:` の行があれば、
+  そこに挙がったパスのコミットされていない変更は前からあった変更ではなく、
+  このスライスの変更として引き継ぐ(scope の外のパスがあれば、引き継がずに
+  BLOCKED を返す)。RESULT には commit SHA と証拠のポインタの
   ほかに、打った検証のコマンドとその結果、5 項目それぞれの確かめの結果を
   書く。複数のスライスを頼む TASK では、`COMMIT:`・`VERIFY:`・`SELF-CHECK:`
   の行をスライスごとに書き、各行をスライスの名前で始める(例:
@@ -1451,8 +1454,12 @@ receipts / 役割雛形)を使うため、手順は共通。
    検査)を本文の `VERIFY:` の行で書く(機能ごとの org での検証の分け方は
    「org の終わり方」の冒頭)。1 つの TASK で複数のスライスを頼むときは、
    `VERIFY:` の行をスライスごとに 1 行ずつ書き、各行をスライスの名前で始める
-   (`VERIFY: S1: <コマンド>`)。per-plan の機能の org では、implementer への
-   TASK に承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
+   (`VERIFY: S1: <コマンド>`)。implementer がコミットせずに BLOCKED で
+   止まったスライスをもう一度頼むときは、止まった TASK がコミットせずに
+   残した scope の中のパスを本文の `RESUME:` の行に並べる(秘密情報で
+   止まったあとは、値が作業ツリーから消えたことを先に確かめる)。
+   per-plan の機能の org では、implementer への TASK に承認された計画の
+   `PLAN: <path> sha256:<digest>` のヘッダを付ける。
 4. `wait` / `status` / `read` で座席の状態を観察する。leader が手番の途中に
    いるあいだは `ralph org send` が届かないので、headless の leader は `wait` を
    前面で長く打たない(待ち方は「typed protocol」節の agmsg の受信箱の段落)。
