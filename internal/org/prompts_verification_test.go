@@ -527,8 +527,11 @@ func TestRenderRolePrompt_GoSliceCheckKeepsThePackTimeoutAndEntersANestedModule(
 // of the same fix: the ## 役割 section's implementer bullet names
 // implementerGoSliceCheck for a Go slice with no VERIFY: line and wraps it in
 // (cd <module> && …) for a package in a nested module, in short, as the
-// implementer's mission does. Like the other ## 役割 tests, it reads the root
-// copy only.
+// implementer's mission does; and step 3 of the leader cycle in ## Leader 運用
+// 2 経路, which a leader promoted from the current session reads instead of
+// the leader template, sends a Go slice's VERIFY: line in that bullet's form,
+// with the GOFLAGS timeout and the nested-module wrap. Like the other tests of
+// those sections, it reads the root copy only.
 func TestOrgSkill_ImplementerBulletNamesTheGoSliceCheck(t *testing.T) {
 	const rel = ".claude/skills/org/SKILL.md"
 	text := readRepoFileOrSkip(t, rel)
@@ -548,6 +551,20 @@ func TestOrgSkill_ImplementerBulletNamesTheGoSliceCheck(t *testing.T) {
 		if !containsPhrase(item, want) {
 			t.Errorf("%s: expected the ## 役割 bullet %q to say %q, got item:\n%s", rel, marker, want, item)
 		}
+	}
+
+	const leaderHeader, leaderMarker = "## Leader 運用 2 経路", "3. `send` で TASK を委譲する"
+	cycle, found := markdownSection(text, leaderHeader)
+	if !found {
+		t.Fatalf("%s: expected a %q section, found none", rel, leaderHeader)
+	}
+	step, ok := markdownItem(cycle, leaderMarker)
+	if !ok {
+		t.Fatalf("%s: expected the %s section to have an item starting %q, got section:\n%s", rel, leaderHeader, leaderMarker, cycle)
+	}
+	const want = "Go なら「役割」の節の implementer の項の形で、`GOFLAGS` の timeout と、入れ子の module のパッケージの `(cd <module> && …)` の包みもそのまま使う"
+	if !containsPhrase(step, want) {
+		t.Errorf("%s: expected the %s item %q to say %q, got item:\n%s", rel, leaderHeader, leaderMarker, want, step)
 	}
 }
 

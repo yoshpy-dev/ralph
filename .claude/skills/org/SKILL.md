@@ -1455,7 +1455,9 @@ receipts / 役割雛形)を使うため、手順は共通。
    `--scope` は上と同じにする)。
 3. `send` で TASK を委譲する。implementer への TASK には、どの org でも、
    そのスライスの検証コマンド(スライスが触ったファイルを覆う、いちばん狭い
-   検査)を本文の `VERIFY:` の行で書く(機能ごとの org での検証の分け方は
+   検査。Go なら「役割」の節の implementer の項の形で、`GOFLAGS` の timeout
+   と、入れ子の module のパッケージの `(cd <module> && …)` の包みもそのまま
+   使う)を本文の `VERIFY:` の行で書く(機能ごとの org での検証の分け方は
    「org の終わり方」の冒頭)。1 つの TASK で複数のスライスを頼むときは、
    `VERIFY:` の行をスライスごとに 1 行ずつ書き、各行をスライスの名前で始める
    (`VERIFY: S1: <コマンド>`)。implementer がコミットせずに BLOCKED で
