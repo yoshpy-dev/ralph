@@ -207,4 +207,6 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - cycle 2 の self-review 3 回目(ea7a6a5b: LOW 3、Merge yes。triage の 2 件は解消、F8 も読んで R2-1〜R2-4 の解消を確認)
   - 直し 246c7432(inline、3 ファイルの数行): R3-3。雛形の「呼び手が」を「環境の `GOFLAGS` か `go env -w` で timeout が決めてあれば」にし、テストの定数と崩れていたコメントを直した。検証: `gofmt`・`go vet` と雛形のテストが通過。HEAD の古い文を `-overlay` で差し込むとテストが落ちることを確かめた。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
   - R3-1(`prompts_verification_test.go` が 890 行になった)と R3-2(plan の雛形の理由の文を shell の pin が固定しない)は、sync-docs で tech-debt の R2-5 の行に足す。self-review はここで止め、最終の diff は verify と cross-review が見る
+  - verify の回し直し(bbb02949: pass、LOW 1)。現セッションから昇格した leader は skill だけを読むが、skill の「Leader 運用 2 経路」の手順 3 には Go の形も「役割」の箇条への参照もない。triage の 1 と 2 の「leader が書くコマンド」に当たるので直す
+  - 直し F12 d721ed7d(implementer): 手順 3 の括弧に「Go なら「役割」の節の implementer の項の形で、`GOFLAGS` の timeout と、入れ子の module の `(cd <module> && …)` の包みもそのまま使う」を足した(skill の 4 つの写し)。`TestOrgSkill_ImplementerBulletNamesTheGoSliceCheck` に手順 3 の照合を足し、句を消すと落ちることを確かめた。機械的な確かめは 5 項目とも clean
 - [ ] PR created
