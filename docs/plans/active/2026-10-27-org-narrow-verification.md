@@ -195,4 +195,7 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 - [x] Cycle 2 の self-review 2 回目(bd21c5fd: LOW 5、Merge yes。前回の 1〜3 は解消、5 は一部)
   - 直し F8 28d83b96(implementer): R2-1 複数スライスの `RESUME:` の行にもスライス名を付け、その名前のスライスのコミットに入れる。R2-2 skill の leader の手順 3 に、値が消えていなければ escalate と、狭めるときの文。R2-3 leader の「前からあった変更」の説明を implementer の定義にそろえた。R2-4 「止まった TASK がコミットせずに残したパス」と明記し、折り返しを直した。変異 5 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
   - R2-5(テストの整理: 同じ文を 2 か所で固定、ファイル名が `predate` のまま再開のテストも入る、順序の照合が 2 通り、テスト名の語)は、前回の所見 4(標準フローの面)と一緒に、sync-docs で tech-debt に記録する。直すたびに新しい LOW が出ているので、self-review はここで止め、最終の diff は verify と cross-review が見る
+- [x] Cycle 2 の verify(verify 7458318d: pass。AC1〜AC5 を満たし、AC6 は静的な半分。cross-review の指摘と self-review の R2-1〜R2-4 の解消を確認。所見は LOW 1(仕様 2 つに `RESUME:` の行と片付けの境界がない)と既知 1(tech-debt に R2-5 と標準フローの片付けの 2 行)で、どちらもこの cycle の sync-docs で扱った)
+- [x] Cycle 2 の test(test 1637025d: pass。`run-test.sh` は rc 1 で、落ちたのは前からある不安定な `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` 1 本だけ。`internal/org` を `-count=1` で打ち直すと通った。雛形の組のトップレベル 72 本と `TestStartFeature` 27 本が通過。変異 a、b1、b2、c1、c2、d はそれぞれ 1 本のテストが落とし、対照は通った。座席の実機は確かめていない)
+- [x] Cycle 2 の sync-docs(この commit: 仕様 2 つの 2026-10-27 の項に `RESUME:` の行と片付けの境界を足した。tech-debt に R2-5 の行と標準フローの片付けの行を足し、不安定なテストの行に 3 回目を足した)
 - [ ] PR created
