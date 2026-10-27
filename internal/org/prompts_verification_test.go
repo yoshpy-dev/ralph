@@ -10,9 +10,25 @@ import (
 
 // implementerGoSliceCheck is the narrowest check the implementer template
 // names for a Go slice with no VERIFY: line, <dir> standing for the touched
-// package's directory. The templates' prose writes it in backticks, and
-// their examples run it on internal/foo.
-const implementerGoSliceCheck = `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`
+// package's directory. Its go test puts the Go pack's -timeout=30m first in
+// GOFLAGS (goSliceCheckTimeoutSentences). The templates' prose writes it in
+// backticks, and their examples run it on internal/foo.
+const implementerGoSliceCheck = `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./<dir>/`
+
+// goSliceCheckTimeoutSentences say, after implementerGoSliceCheck in the
+// implementer's mission and in item 3 of the leader's mission, why
+// -timeout=30m goes first in GOFLAGS: it is the Go pack's default, so a
+// package whose tests take over ten minutes is not cut off by go test's own
+// default, and a timeout the caller set comes later and wins.
+var goSliceCheckTimeoutSentences = []string{
+	"`-timeout=30m` は Go の言語パックの既定(`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする",
+	"`GOFLAGS` の先頭に置くので、呼び手が `GOFLAGS` か `go env -w` で決めた timeout があれば、そちらがあとに並んで効く",
+}
+
+// goSliceCheckNestedModuleSentence is the sentence of the same two places that
+// runs implementerGoSliceCheck inside a nested module's root, since Go does
+// not enter a module with its own go.mod below the repository root.
+const goSliceCheckNestedModuleSentence = "パッケージがリポジトリの root の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>` からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(Go は入れ子の module に自分では入らない)"
 
 // implementerSelfCheckItems are the five items of the implementer's
 // mechanical self-check, in the template's order. They mirror the standard
@@ -456,6 +472,80 @@ func TestRenderRolePrompt_Leader_MissionPutsTheSliceCommandOnAVerifyLine(t *test
 	if reviewerItem, ok := markdownItem(reviewerMission, "1. レビューの TASK"); !ok ||
 		!containsPhrase(reviewerItem, "なければ `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する") {
 		t.Errorf("expected the reviewer template to run both scripts for a review TASK that names no command, got item:\n%s", reviewerItem)
+	}
+}
+
+// TestRenderRolePrompt_GoSliceCheckKeepsThePackTimeoutAndEntersANestedModule
+// pins the fix of cross-review cycle 2 of plan
+// 2026-10-27-org-narrow-verification: the item of the implementer's mission
+// that picks implementerGoSliceCheck and item 3 of the leader's mission, which
+// writes it on a VERIFY: line, both say why -timeout=30m goes first in
+// GOFLAGS (goSliceCheckTimeoutSentences) and wrap the command in
+// (cd <module> && …) for a package in a nested module
+// (goSliceCheckNestedModuleSentence). The Go pack whose default the first
+// sentence names still puts -timeout=30m first in GOFLAGS in its run_tests.
+func TestRenderRolePrompt_GoSliceCheckKeepsThePackTimeoutAndEntersANestedModule(t *testing.T) {
+	for _, c := range []struct{ role, marker string }{
+		{"implementer", "作業はスライス単位で進める"},
+		{"leader", "3. `ralph org send`"},
+	} {
+		t.Run(c.role, func(t *testing.T) {
+			text := renderSeatPrompt(t, c.role)
+			mission, found := markdownSection(text, "## ミッション")
+			if !found {
+				t.Fatalf("expected the %s template to contain a '## ミッション' section, got:\n%s", c.role, text)
+			}
+			item, ok := markdownItem(mission, c.marker)
+			if !ok {
+				t.Fatalf("expected the %s mission to have an item starting %q, got section:\n%s", c.role, c.marker, mission)
+			}
+			if !containsPhrase(item, "`"+implementerGoSliceCheck+"`") {
+				t.Errorf("expected the %s mission item %q to name %s, got item:\n%s", c.role, c.marker, implementerGoSliceCheck, item)
+			}
+			for _, want := range append(slices.Clone(goSliceCheckTimeoutSentences), goSliceCheckNestedModuleSentence) {
+				if !containsPhrase(item, want) {
+					t.Errorf("expected the %s mission item %q to say %q, got item:\n%s", c.role, c.marker, want, item)
+				}
+			}
+		})
+	}
+
+	t.Run("packs/languages/golang/verify.sh", func(t *testing.T) {
+		const rel = "packs/languages/golang/verify.sh"
+		body := readRepoFileOrSkip(t, rel)
+		_, runTests, found := strings.Cut(body, "\nrun_tests() {\n")
+		runTests, _, closed := strings.Cut(runTests, "\n}\n")
+		if !found || !closed || !strings.Contains(runTests, `GOFLAGS="-timeout=30m`) {
+			t.Errorf("expected %s's run_tests, whose default the templates name, to put -timeout=30m first in GOFLAGS, got function body:\n%s", rel, runTests)
+		}
+	})
+}
+
+// TestOrgSkill_ImplementerBulletNamesTheGoSliceCheck pins the /org skill side
+// of the same fix: the ## 役割 section's implementer bullet names
+// implementerGoSliceCheck for a Go slice with no VERIFY: line and wraps it in
+// (cd <module> && …) for a package in a nested module, in short, as the
+// implementer's mission does. Like the other ## 役割 tests, it reads the root
+// copy only.
+func TestOrgSkill_ImplementerBulletNamesTheGoSliceCheck(t *testing.T) {
+	const rel = ".claude/skills/org/SKILL.md"
+	text := readRepoFileOrSkip(t, rel)
+	roles, found := markdownSection(text, "## 役割")
+	if !found {
+		t.Fatalf("%s: expected a '## 役割' section, found none", rel)
+	}
+	const marker = "- **implementer**:"
+	item, ok := markdownItem(roles, marker)
+	if !ok {
+		t.Fatalf("%s: expected the ## 役割 section to have a bullet %q, got section:\n%s", rel, marker, roles)
+	}
+	for _, want := range []string{
+		"Go なら、触ったパッケージのディレクトリを `<dir>` として `" + implementerGoSliceCheck + "`",
+		"root より下に自分の `go.mod` を持つ module のパッケージなら、`<dir>` をその `go.mod` のディレクトリ `<module>` からの相対のパスにして、全体を `(cd <module> && …)` で包む",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("%s: expected the ## 役割 bullet %q to say %q, got item:\n%s", rel, marker, want, item)
+		}
 	}
 }
 

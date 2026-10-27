@@ -36,9 +36,18 @@
   実装後に、そのスライスの名前の行のコマンドを打つ。TASK に `VERIFY:` の
   行がなければ、そのスライスが触ったファイルを覆う、いちばん狭い検査を
   選ぶ。Go なら、触ったパッケージのディレクトリを `<dir>` として
-  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`
+  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./<dir>/`
   を打つ(`gofmt -l` はファイルを挙げても終了コード 0 なので、`test -z` で
-  包む)。ほかの言語なら、言語パックのパッケージごとの検査にする。
+  包む)。`-timeout=30m` は Go の言語パックの既定
+  (`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より
+  長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする。
+  `GOFLAGS` の先頭に置くので、呼び手が `GOFLAGS` か `go env -w` で決めた
+  timeout があれば、そちらがあとに並んで効く。パッケージがリポジトリの root
+  の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、
+  その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>`
+  からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(Go は
+  入れ子の module に自分では入らない)。ほかの言語なら、言語パックの
+  パッケージごとの検査にする。
   `RALPH_VERIFY_SCOPE=changed` では絞れない(走らせる言語パックを選ぶだけで、
   Go では `go test ./...` を全部走らせる)。`./scripts/run-verify.sh` は、
   それより狭い検査ではスライスのファイルを覆えないときだけ使う。打った
@@ -115,7 +124,7 @@ TASK_ID: t-7
 
 COMMIT: <commit-sha>
 EVIDENCE: docs/reports/verify-<slug>.md
-VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && go test ./internal/foo/ → pass
+VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/foo/ → pass
 SELF-CHECK: 不要な変更 clean / 誤字とコピペの誤り clean / デバッグの残り clean / 秘密情報 clean / scope の外のファイル clean
 SUMMARY: internal/foo/bar.go にスライス1を実装し検証済み。差分は
   `git show --stat <commit-sha>` を参照。

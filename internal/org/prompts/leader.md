@@ -31,9 +31,18 @@
    「typed protocol」の節)。コマンドは、スライスが触ったファイルを覆う、
    いちばん狭い検査にする。Go なら、触ったパッケージのディレクトリを
    `<dir>` として
-   `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`
+   `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./<dir>/`
    にする(implementer の雛形が、`VERIFY:` の行のない TASK で選ぶものと
-   同じ)。ほかの言語なら、言語パックのパッケージごとの検査にする。
+   同じ)。`-timeout=30m` は Go の言語パックの既定
+   (`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より
+   長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする。
+   `GOFLAGS` の先頭に置くので、呼び手が `GOFLAGS` か `go env -w` で決めた
+   timeout があれば、そちらがあとに並んで効く。パッケージがリポジトリの root
+   の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、
+   その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>`
+   からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(Go は
+   入れ子の module に自分では入らない)。ほかの言語なら、言語パックの
+   パッケージごとの検査にする。
    1 つの TASK で複数のスライスを頼むときは、`VERIFY:` の行をスライスごとに
    1 行ずつ書き、各行をスライスの名前で始める(例: `VERIFY: S1: <コマンド>`)。
    スライスが 1 つなら `VERIFY: <コマンド>` の形のままでよい。
@@ -491,7 +500,7 @@ TASK_ID: t-2
 
 SUMMARY: 計画のスライス 1 を internal/foo/ に実装し、コミットして RESULT で
   返してください。scope は internal/foo/** に限定。
-VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && go test ./internal/foo/
+VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/foo/
 ```
 
 ## 件を上げる(`ralph org escalate`)

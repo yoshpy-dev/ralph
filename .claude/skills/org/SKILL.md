@@ -1327,7 +1327,10 @@ reviewer は、レビューの TASK のゲート(TASK が指示したコマン�
   スライスの名前で始まるそのスライスの行。例: `VERIFY: S1: <コマンド>`)。
   `VERIFY:` の行がなければ、スライスが触ったファイルを覆う、いちばん狭い
   検査を選ぶ(Go なら、触ったパッケージのディレクトリを `<dir>` として
-  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`)。
+  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./<dir>/`。
+  root より下に自分の `go.mod` を持つ module のパッケージなら、`<dir>` を
+  その `go.mod` のディレクトリ `<module>` からの相対のパスにして、全体を
+  `(cd <module> && …)` で包む)。
   `./scripts/run-verify.sh` は、それより狭い検査ではスライスのファイルを
   覆えないときだけ使う。コミットの前には毎回、stage した差分
   (`git diff --cached`)で 5 項目の機械的な確かめ(不要な変更、誤字と
