@@ -166,7 +166,11 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 - [x] Plan reviewed(consult の判定は「進めてよい」。S4 の検証コマンドの `-run` を実在のテスト名に直し、`CHECKS:` の行を足した。Codex の計画助言は HIGH 1 件で、D6 の向きを逆にして反映した。reviewer の既定は今のまま両方にし、機能ごとの org の leader だけが静的検査を指示する)
 - [x] Plan approved(自動承認。2026-10-11 のユーザー指示「作成したプランは自動承認します」と、2026-10-27 の「最後まで止まらずに」による)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(スライスは implementer に委譲)
+  - S1 8ee986bd: implementer の雛形。`VERIFY:` の行、いちばん狭い検査、5 項目の確かめ、秘密情報の BLOCKED、RESULT の例の `VERIFY:` と `SELF-CHECK:` の行。テスト 3 本を足し、変異 6 つがそれぞれ落ちることを確かめた。検証: 雛形のテスト 40 本が通過、`gofmt`・`go vet` OK。機械的な確かめは 5 項目とも clean
+  - 逸れ(S3 に足す): RESULT の例と TASK の `VERIFY:` の行には `$(gofmt -l …)` が入る。座席が本文をコマンドの引数に二重引用符で直接書くと、shell が展開してしまう(consult の指摘)。leader の雛形は受信箱の節でだけ、ファイルに書いて `--text "$(cat <ファイル>)"` で渡すよう書いている。S3 で、leader の TASK と implementer の RESULT の本文もファイルに書いて渡す 1 文を足す。S3 の範囲に `internal/org/prompts/implementer.md` を加える
+  - S2 3478cb68: reviewer の雛形。指示があればそれだけを打つ(既定は両方のまま)、機能ごとの org の leader は静的検査だけを指示する、ミッションの 5 に `GATE:` と `CHECKS:`、10 項目、例に `CHECKS:` の行、BLOCKED の例を静的検査の失敗に。typed protocol の節に「`CHECKS:` は本文の行」、fan-out の例に「子にも同じコマンドだけ」を足した(handoff の外の小さな追加)。テスト 4 本を足し、変異 14 個がそれぞれ落ちることを確かめた。検証: 雛形のテスト 44 本と `OrgSkill|ReportNames` の 3 本が通過。機械的な確かめは 5 項目とも clean
+  - 逸れ(S5 に足す): `docs/tech-debt/README.md` の「A feature org's PR runs the tests twice」の行は、この計画で解消する。S5 で解決済みにし、「The reviewer seat runs the same scripts」と書くほかの行も確かめる
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
