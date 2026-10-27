@@ -204,4 +204,7 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - skill のとおり cap を上げて回し直す(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`、`cycle-count.json` は 2 のまま)。直しは F9(org の雛形、skill の 4 つの写し、Go のテスト)と F10(plan の雛形の 6 つの写しと `tests/test-slice-verification.sh`)の 2 スライス
   - 直し F9 3c64d65d(implementer): implementer と leader の雛形のコマンドと例を新しい形にし、timeout の理由と入れ子の module の `(cd <module> && …)` の文を足した。skill の 4 つの写しの implementer の箇条も同じに。テスト 2 本を足し(1 本は言語パックの `run_tests` が今も `-timeout=30m` で始まることも確かめる)、変異 11 個がそれぞれ狙ったテストだけで落ちることを確かめた。検証: 雛形と skill のテストが通過、check-skill-sync と check-sync が通過。機械的な確かめは 5 項目とも clean
   - 直し F10 662d3e47(implementer): plan の雛形の 6 つの写しの例を同じ形にし、timeout の理由と入れ子の module の例を足した。`tests/test-slice-verification.sh` に写しごとの pin を 2 本ずつ足した(162 本が通過)。雛形の括弧書きを「root に `go.work` がなければ、Go は root から入れ子の module に入らない」に直した(consult の任意の指摘)。変異 3 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
+  - cycle 2 の self-review 3 回目(ea7a6a5b: LOW 3、Merge yes。triage の 2 件は解消、F8 も読んで R2-1〜R2-4 の解消を確認)
+  - 直し 246c7432(inline、3 ファイルの数行): R3-3。雛形の「呼び手が」を「環境の `GOFLAGS` か `go env -w` で timeout が決めてあれば」にし、テストの定数と崩れていたコメントを直した。検証: `gofmt`・`go vet` と雛形のテストが通過。HEAD の古い文を `-overlay` で差し込むとテストが落ちることを確かめた。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
+  - R3-1(`prompts_verification_test.go` が 890 行になった)と R3-2(plan の雛形の理由の文を shell の pin が固定しない)は、sync-docs で tech-debt の R2-5 の行に足す。self-review はここで止め、最終の diff は verify と cross-review が見る
 - [ ] PR created
