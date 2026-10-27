@@ -26,9 +26,10 @@ var goSliceCheckTimeoutSentences = []string{
 }
 
 // goSliceCheckNestedModuleSentence is the sentence of the same two places that
-// runs implementerGoSliceCheck inside a nested module's root, since Go does
-// not enter a module with its own go.mod below the repository root.
-const goSliceCheckNestedModuleSentence = "パッケージがリポジトリの root の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>` からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(Go は入れ子の module に自分では入らない)"
+// runs implementerGoSliceCheck inside a nested module's root, since without a
+// root go.work Go does not enter, from the root, a module with its own go.mod
+// below the repository root.
+const goSliceCheckNestedModuleSentence = "パッケージがリポジトリの root の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>` からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(root に `go.work` がなければ、Go は root から入れ子の module に入らない)"
 
 // implementerSelfCheckItems are the five items of the implementer's
 // mechanical self-check, in the template's order. They mirror the standard
