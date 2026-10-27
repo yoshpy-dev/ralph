@@ -45,7 +45,10 @@ every other mention repeats word for word: unnecessary changes, typos and
 copy-paste errors, debug leftovers, secrets, and files outside the slice. The
 result says, for each item, clean, fixed (what), or found and not fixed (what
 and why). When an item is found and not fixed, the orchestrator has it fixed
-as its own slice before the next slice (`/implement` step 7).
+as its own slice before the next slice (`/implement` step 7). For the last
+slice, that happens before step 13. A secret that cannot be removed within
+scope is never committed: the implementer stops without a commit, and the
+orchestrator removes the secret or narrows the slice and dispatches it again.
 
 **Inline exceptions** (no subagent dispatch needed):
 

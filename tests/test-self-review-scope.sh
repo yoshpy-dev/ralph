@@ -75,7 +75,9 @@ assert_joined_contains_exact() {
   _desc="$1"
   _needle="$2"
   _file="$3"
-  if join_lines < "$_file" | grep -Fq -- "$_needle"; then
+  if [ ! -f "$_file" ]; then
+    record_fail "$_desc (no such file: $_file)"
+  elif join_lines < "$_file" | grep -Fq -- "$_needle"; then
     record_pass "$_desc"
   else
     record_fail "$_desc (missing: $_needle in $_file)"

@@ -126,8 +126,8 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
   - `ralph-workflow.md` の「成功を言う前に run-verify.sh か同等の検査」は、`/verify` と `/test` がそれに当たるので残した
 - [x] Review artifact created(self-review 90f4ecca: MEDIUM 1・LOW 6、Merge yes)
   - 所見の直し cb094ae8(implementer): 5 項目の正本を model-routing に置き各所を同じ語にした、found and not fixed は次のスライスの前に直させる、inline の順序(stage のあとに確かめる)、Completion gate に /verify と /test、テストの穴をふさいだ
-  - inline の追加(このコミット): 範囲内で消せない秘密情報はコミットせずに止める、を implementer の定義に足し、scope テストで固めた。検証: check-sync PASS、scope 198/198、agent-models 47/47、shellcheck と toml の読み込み OK。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
-- [ ] Review artifact created
+  - inline の追加(bc56cc4f): 範囲内で消せない秘密情報はコミットせずに止める、を implementer の定義に足し、scope テストで固めた。検証: check-sync PASS、scope 198/198、agent-models 47/47、shellcheck と toml の読み込み OK。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
+  - 2 回目の self-review d87d250a: 前回の 7 件はすべて解決、新しい LOW 3 件。3 件とも inline で直した(最後のスライスと、秘密情報で止まったときの orchestrator の動きを手順 7 と model-routing に足す、Progress checklist の重複行、scope テストの helper のファイル欠けの扱い)
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created

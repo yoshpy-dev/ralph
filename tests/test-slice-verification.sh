@@ -169,6 +169,12 @@ for file in $implement_skill_files; do
   assert_block_contains_exact "$file delegated gate fixes an item found and not fixed first" \
     "$file" "$delegated_start" "$inline_start" \
     "If an item is found and not fixed, have it fixed as its own slice (a new handoff and a new commit) before the next slice."
+  assert_block_contains_exact "$file delegated gate covers the last slice" \
+    "$file" "$delegated_start" "$inline_start" \
+    "For the last slice, do it before step 13."
+  assert_block_contains_exact "$file delegated gate handles a stop on a secret" \
+    "$file" "$delegated_start" "$inline_start" \
+    "If the implementer stopped without committing because a secret in the staged diff could not be removed within scope, there is no new commit to check: remove the secret or narrow the slice, then dispatch the slice again."
 
   assert_block_contains_exact "$file inline slices run the plan's command" \
     "$file" "$inline_start" "$inline_stop" \
@@ -181,7 +187,7 @@ for file in $implement_skill_files; do
     "If the check changed anything, re-run the verification command and re-stage."
   assert_block_contains_exact "$file inline slices note each item under Progress checklist" \
     "$file" "$inline_start" "$inline_stop" \
-    "Note the result for each item (clean, fixed, or found and not fixed) under the plan's \`## Progress checklist\`; fix an item found and not fixed as its own slice before the next slice. Then commit"
+    "Note the result for each item (clean, fixed, or found and not fixed) under the plan's \`## Progress checklist\`; fix an item found and not fixed as its own slice before the next slice (for the last slice, before step 13). If a secret cannot be removed within scope, do not commit: unstage it and stop. Then commit"
   assert_joined_lacks_any_case "$file drops the self-check before staging" \
     "Then stage the slice's files and commit" "$file"
 
@@ -241,6 +247,8 @@ for file in $model_routing_files; do
     "The result says, for each item, clean, fixed (what), or found and not fixed (what and why)." "$file"
   assert_joined_contains_exact "$file report contract fixes an item found and not fixed first" \
     "When an item is found and not fixed, the orchestrator has it fixed as its own slice before the next slice (\`/implement\` step 7)." "$file"
+  assert_joined_contains_exact "$file report contract covers the last slice and a secret" \
+    "For the last slice, that happens before step 13. A secret that cannot be removed within scope is never committed: the implementer stops without a commit, and the orchestrator removes the secret or narrows the slice and dispatches it again." "$file"
   assert_joined_lacks_any_case "$file drops the old item wording" \
     "files outside the handoff)" "$file"
   assert_joined_contains_exact "$file handoff row points at the plan's Implementation outline" \
