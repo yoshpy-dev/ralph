@@ -177,6 +177,8 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 - [x] Review artifact created(self-review 06f60e10: LOW 8、Merge yes)
   - 直し F1 0ea899f5(implementer): レビューの TASK のコマンドを本文の `CHECKS:` の行にし、返った `CHECKS:` の行が欠けたら送り直す。implementer の scope の例外、1 つの TASK で複数スライスのときは `VERIFY: S1: …` の行をスライスごとに、コミットの前の確かめの順。テスト 3 本を足し、変異 11 個がそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
   - 直し F2 f0870d6e(implementer): 送り直しに上限(2 回続けて通らなければ BLOCKED)、`/org` skill の 4 つの写しを F1 にそろえた(`CHECKS:` の形、送り直し、複数スライス、`send` の例を `.harness/state/` に)。このブランチで足したテストを `internal/org/prompts_verification_test.go` に移し(`prompts_test.go` は main の版と同じに戻った)、補助を読みやすくした。テスト 53 本は移す前後で同じ。機械的な確かめは 5 項目とも clean
+  - self-review の 2 回目 f2d075c8: 1 回目の 8 件はすべて解消、新しい LOW 2、Merge yes
+  - 直し F3 8cda482e(implementer): 複数スライスの RESULT はスライスごとに名前付きの `COMMIT:`・`VERIFY:`・`SELF-CHECK:`、reviewer が指示とみなすのは TASK の本文の `CHECKS:` の行だけ(行がなければ既定の両方。散文の指示を受け入れる文を外した。打つ検査が増える側にしか動かない)。skill の 4 つの写しも同じに。テスト 2 本を `internal/org/prompts_verification_multi_test.go` に足し、変異 6 つがそれぞれ落ちることを確かめた。機械的な確かめ: 不要な変更 fixed(テストのコメントの折り直しを戻した)、誤字とコピペの誤り fixed(重言)、ほかの 3 項目は clean
   - 残り(sync-docs に渡す): tech-debt の「org runtime FR-7 quality gate is prompt-instructed, not hook-enforced.」の行にも「The reviewer seat re-runs `run-static-verify.sh` / `run-test.sh`」という古い文がある。trigger は「The next change to the org quality pipeline」で、この計画も当たる。払わずに繰り越す注記を、2026-10-26 の reviewer-runs-gate のときと同じ形で足す
 - [ ] Review artifact created
 - [ ] Verification artifact created
