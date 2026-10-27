@@ -261,7 +261,7 @@ for file in $model_routing_files; do
   assert_joined_contains_exact "$file report contract fixes an item found and not fixed first" \
     "When an item is found and not fixed, the orchestrator has it fixed as its own slice before the next slice (\`/implement\` step 7)." "$file"
   assert_joined_contains_exact "$file report contract covers the last slice and a resume after a secret" \
-    "For the last slice, that happens before step 13. A secret that cannot be removed within scope is never committed: the implementer stops without a commit, and the orchestrator removes the secret or narrows the slice and dispatches it again as a resume, whose handoff names the uncommitted changes the stopped slice left in the files in scope as the slice's own (\`/implement\` step 7)." "$file"
+    "For the last slice, that happens before step 13. A secret that cannot be removed within scope is never committed: the implementer stops without a commit, and the orchestrator first takes the secret out of the worktree, narrows the slice if needed, and dispatches it again as a resume, whose handoff names the uncommitted changes the stopped slice left in the files in scope as the slice's own (\`/implement\` step 7)." "$file"
   assert_joined_lacks_any_case "$file drops the old item wording" \
     "files outside the handoff)" "$file"
   assert_joined_contains_exact "$file handoff row points at the plan's Implementation outline" \
@@ -282,6 +282,17 @@ for file in $subagent_policy_files; do
     "exact verification commands (the slice's command from the plan's \`## Implementation outline\`)" "$file"
   assert_joined_contains_exact "$file implementer report includes the mechanical self-check" \
     "The implementer returns: changed files, decisions/deviations, verification evidence, the mechanical self-check result, commit-boundary evidence, and commit SHA." "$file"
+done
+
+# The Codex README's implementer row repeats the five items word for word.
+codex_readme_files="
+.codex/README.md
+templates/base/.codex/README.md
+"
+
+for file in $codex_readme_files; do
+  assert_joined_contains_exact "$file implementer row lists the five items in the canonical words" \
+    "does a mechanical self-check on the staged diff ($mechanical_items)" "$file"
 done
 
 printf '\n-- Summary --\n'
