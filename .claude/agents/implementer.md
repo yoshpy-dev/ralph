@@ -37,7 +37,7 @@ Never use `git add -A`, `git add -u`, or `git add .`.
 - secrets: hardcoded keys, tokens, passwords, or other credentials
 - files outside the slice: any path in `git diff --cached --name-only` that is not in the handoff's files in scope
 
-Fix what you find within scope, then re-run the verification commands and re-stage. When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason. These are the checks `/self-review` leaves to the implementing side, so do not skip them.
+Fix what you find within scope, then re-run the verification commands and re-stage. When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason. The one exception is a secret: if a secret in the staged diff cannot be removed within scope, do not commit; unstage it and stop, and report it. These are the checks `/self-review` leaves to the implementing side, so do not skip them.
 
 **Commit:** use the handoff-provided conventional commit message format.
 
