@@ -34,6 +34,9 @@
    `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`
    にする(implementer の雛形が、`VERIFY:` の行のない TASK で選ぶものと
    同じ)。ほかの言語なら、言語パックのパッケージごとの検査にする。
+   1 つの TASK で複数のスライスを頼むときは、`VERIFY:` の行をスライスごとに
+   1 行ずつ書き、各行をスライスの名前で始める(例: `VERIFY: S1: <コマンド>`)。
+   スライスが 1 つなら `VERIFY: <コマンド>` の形のままでよい。
    機能ごとの org でなければ、reviewer へのレビューの TASK には打つ
    コマンドを書かず、reviewer の既定(`./scripts/run-static-verify.sh` と
    `./scripts/run-test.sh` の両方)に任せる(機能ごとの org は
@@ -195,7 +198,8 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    `## 全機能の座席に適用する決まり` の節に従うよう TASK に書く。
    implementer への TASK では、頼むスライスの計画の `— verify:` の
    コマンドを、書き換えずに本文の `VERIFY:` の行に写す(「ミッション」の 3)。
-   per-plan では、implementer への TASK にいつも
+   複数のスライスを頼むときは、スライスごとの行に、スライスの名前を付けて
+   写す。per-plan では、implementer への TASK にいつも
    `PLAN: <計画のパス> sha256:<digest>` のヘッダ(最後に承認された digest。
    計画の `- Approved:` の行の digest)を 1 行付ける。ヘッダは `TASK_ID:` の
    次の行に書く(空行のあとの本文に書いたものはヘッダとして読まれない)。
@@ -222,12 +226,17 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
    (reviewer の `GATE:` の扱いを含む)。この org では、reviewer への
    レビューの TASK(TASK_ID が `gate-` で始まらない TASK)の本文に、打つ
-   コマンドとして `./scripts/run-static-verify.sh` の 1 つだけを書く。
+   コマンドを `CHECKS: ./scripts/run-static-verify.sh` の 1 行で書く
+   (`VERIFY:` と同じく本文の行で、ヘッダにはしない)。
    フルの test は手順 12 の gate の TASK で 1 回走るので、レビューでは
    打たせない。そのため、レビューの `GATE: pass` は静的検査が通ったこと
    だけを指す(テストの結果は、手順 12 の gate の TASK の `GATE:` で見る)。
    reviewer は打ったコマンドを RESULT と BLOCKED の本文の `CHECKS:` の行で
    返すので、その行で、`GATE:` がどのコマンドの結果かを確かめる。
+   レビューの RESULT に `CHECKS:` の行がないか、その行に
+   `./scripts/run-static-verify.sh` がなければ、静的検査が通ったことは
+   確かめられていないので、手順 9 に進まず、新しい TASK_ID で、`CHECKS:` の
+   行を付けたレビューの TASK を送り直す。
    `./scripts/run-test.sh` も並んでいれば、reviewer は既定の 2 つを打った。
    時間がかかっただけなので、`GATE:` はそのまま扱ってよい
 9. reviewer がレビューの TASK(TASK_ID が `gate-` で始まらない TASK)を

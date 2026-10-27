@@ -18,6 +18,10 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
    始まる TASK は、レビューの TASK ではなく、下の「gate の TASK」の節のとおりに
    扱う)。leader の TASK にコマンドの指示があればそれを、なければ
    `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する。
+   コマンドの指示は、TASK の本文の `CHECKS:` の行にある(例:
+   `CHECKS: ./scripts/run-static-verify.sh`)。`CHECKS:` の行がなくても、
+   TASK が打つコマンドをはっきり指示していれば、それも指示として扱う
+   (`CHECKS:` の行を書かない leader もある)。
    指示があるときは、指示されたコマンドだけを打ち、足しも削りもしない。
    機能ごとの org(`ralph org start --plan` で立てた org)の leader は、
    レビューの TASK に `./scripts/run-static-verify.sh` だけを指示する。その
@@ -50,6 +54,9 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
    1 のコマンドは、本文の `CHECKS:` の行に打った順に書く(例:
    `CHECKS: ./scripts/run-static-verify.sh`。指示がなかったときは
    `CHECKS: ./scripts/run-static-verify.sh、./scripts/run-test.sh`)。
+   `CHECKS:` の行は、2〜4 で返すどの RESULT と BLOCKED にも付ける。
+   `GATE: unrunnable` の BLOCKED では、打とうとしたコマンドを書き、どれを
+   打てなかったかは 3 のとおり本文の理由に書く。
    機能ごとの org のレビューでは静的検査だけを打つので、`GATE: pass` は
    静的検査が通ったことを指す(フルの test の結果は、gate の TASK で返す
    `GATE:` が指す)
@@ -211,7 +218,7 @@ SUMMARY: run-static-verify.sh の golangci-lint が internal/foo/bar.go:42 で
   または BLOCKED(`GATE: fail` /
   `GATE: unrunnable`。理由とレポートパスを付ける)で返信してください。
   レビューの RESULT と BLOCKED の本文には、ゲートで打ったコマンドを
-  `CHECKS:` の行で書いてください。生の diff やログ全文を本文に含めないで
-  ください。
+  `CHECKS:` の行で書いてください(`GATE: unrunnable` では、打とうとした
+  コマンドを書きます)。生の diff やログ全文を本文に含めないでください。
 - gate の TASK(TASK_ID が `gate-` で始まる)には、レポートを書かず、
   「gate の TASK」の節の形で RESULT か BLOCKED を返してください。
