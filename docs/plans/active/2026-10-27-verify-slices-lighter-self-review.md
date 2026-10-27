@@ -67,13 +67,13 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
 
 ## Acceptance criteria
 
-- [ ] AC1: 計画の雛形(2 つとその写し)の `## Implementation outline` に、スライスごとの検証コマンドの書き方と `RALPH_VERIFY_SCOPE=changed` の注意がある
-- [ ] AC2: `/plan` の手順 7 が、スライスごとの検証コマンドを書くことを求めている
-- [ ] AC3: `/implement` の handoff と inline のスライスが計画の検証コマンドを使い、手順 12 と Completion gate にフルの `run-verify.sh` がない。検証コマンドのない計画の扱い(D4)と、inline のスライスの機械的な確かめ(D6)が書かれている
-- [ ] AC4: Validation Gate、model-routing の handoff と報告の契約、subagent-policy が新しい形に合っている
-- [ ] AC5: implementer(Claude Code と Codex)の定義に、機械的な確かめと、その結果を報告に書くことがある
-- [ ] AC6: `/self-review` の観点が 6 項目で、外した 4 項目は implementer の確かめにある。reviewer の定義と report の Area も合っている
-- [ ] AC7: `scripts/check-skill-sync.sh`、`scripts/check-sync.sh`、`tests/test-agent-models.sh`、`tests/test-self-review-scope.sh`、`tests/test-new-feature-plan.sh`、`tests/test-slice-verification.sh` が通る
+- [x] AC1: 計画の雛形(2 つとその写し)の `## Implementation outline` に、スライスごとの検証コマンドの書き方と `RALPH_VERIFY_SCOPE=changed` の注意がある
+- [x] AC2: `/plan` の手順 7 が、スライスごとの検証コマンドを書くことを求めている
+- [x] AC3: `/implement` の handoff と inline のスライスが計画の検証コマンドを使い、手順 12 と Completion gate にフルの `run-verify.sh` がない。検証コマンドのない計画の扱い(D4)と、inline のスライスの機械的な確かめ(D6)が書かれている
+- [x] AC4: Validation Gate、model-routing の handoff と報告の契約、subagent-policy が新しい形に合っている
+- [x] AC5: implementer(Claude Code と Codex)の定義に、機械的な確かめと、その結果を報告に書くことがある
+- [x] AC6: `/self-review` の観点が 6 項目で、外した 4 項目は implementer の確かめにある。reviewer の定義と report の Area も合っている
+- [x] AC7: `scripts/check-skill-sync.sh`、`scripts/check-sync.sh`、`tests/test-agent-models.sh`、`tests/test-self-review-scope.sh`、`tests/test-new-feature-plan.sh`、`tests/test-slice-verification.sh` が通る
 
 ## Implementation outline
 
@@ -128,6 +128,10 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
   - 所見の直し cb094ae8(implementer): 5 項目の正本を model-routing に置き各所を同じ語にした、found and not fixed は次のスライスの前に直させる、inline の順序(stage のあとに確かめる)、Completion gate に /verify と /test、テストの穴をふさいだ
   - inline の追加(bc56cc4f): 範囲内で消せない秘密情報はコミットせずに止める、を implementer の定義に足し、scope テストで固めた。検証: check-sync PASS、scope 198/198、agent-models 47/47、shellcheck と toml の読み込み OK。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
   - 2 回目の self-review d87d250a: 前回の 7 件はすべて解決、新しい LOW 3 件。3 件とも inline で直した(最後のスライスと、秘密情報で止まったときの orchestrator の動きを手順 7 と model-routing に足す、Progress checklist の重複行、scope テストの helper のファイル欠けの扱い)
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created(verify 395b9bd8: pass、AC1〜AC6 Met、AC7 は静的の半分。所見は情報 5 件で CRITICAL〜LOW なし)
+- [x] Test artifact created(test 869dcab4: pass、`run-test.sh` は full に落ちて shell 45/45 と Go 9 パッケージ ok。slice のテストは 130 件、scope は 198 件、agent-models 47、new-feature-plan 21)
+  - 逸れ(Scope の「テスト」の項): implementer の定義の機械的な確かめの文を固める検査は、`tests/test-slice-verification.sh` ではなく S4 の `tests/test-self-review-scope.sh` にある。中身は固められている
+  - 上の S5 の 84 件と bc56cc4f の scope 198/198 は、その時点の数。slice のテストは cb094ae8 と 804d05f9 の検査の追加で 130 件になった
+  - テストの穴(LOW): 手順 6 の検査の文字列が「the narrowest check that covers the slice's files」の手前で終わり、4 つの写しを一緒に「broadest」にしても通る。`docs/tech-debt/README.md` に記録した
+  - sync-docs: 文書のドリフトなし(`.codex/README.md` の implementer の行に機械的な確かめを足した)。hook の「Run ./scripts/run-verify.sh before claiming done」2 か所は計画の外なので `docs/tech-debt/README.md` に記録した
 - [ ] PR created
