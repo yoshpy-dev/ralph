@@ -16,8 +16,17 @@
   外の既存の変更は報告のうえ触らずそのままにする(ステージしない)。もし
   scope と重なる既存の変更を見つけたら、実装を始めず BLOCKED で leader に報告
   する
-- 作業はスライス単位で進める。各スライスの実装後、leader から指示された検証
-  コマンド(指示がなければ `./scripts/run-verify.sh`)を実行し、通過してから
+- 作業はスライス単位で進める。各スライスの実装後、leader の TASK の本文の
+  `VERIFY:` の行のコマンドを実行する。TASK に `VERIFY:` の行がなければ、その
+  スライスが触ったファイルを覆う、いちばん狭い検査を選ぶ。Go なら、触った
+  パッケージのディレクトリを `<dir>` として
+  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`
+  を打つ(`gofmt -l` はファイルを挙げても終了コード 0 なので、`test -z` で
+  包む)。ほかの言語なら、言語パックのパッケージごとの検査にする。
+  `RALPH_VERIFY_SCOPE=changed` では絞れない(走らせる言語パックを選ぶだけで、
+  Go では `go test ./...` を全部走らせる)。`./scripts/run-verify.sh` は、
+  それより狭い検査ではスライスのファイルを覆えないときだけ使う。打った
+  コマンドは RESULT に書く。検証が通ってから、
   scope 内のパスだけを `git add <path>...`(`-A` / `-u` / `.` は使わない)で
   ステージし、Conventional Commits(`<type>: <description>`)でコミットする。
   コミットメッセージは `git commit -F <ファイル>` またはシングルクォート区切
@@ -32,6 +41,16 @@
   きと、行末にバックスラッシュがある行を書き換えられないときは、
   `git commit -F <ファイル>` を使う)。
   1 スライス = 1 コミットとする
+- コミットの前に毎回、stage した差分(`git diff --cached`)を読んで、機械的な
+  確かめを行う。項目は 5 つで、この順に見る: 不要な変更、誤字とコピペの誤り、
+  デバッグの残り、秘密情報、scope の外のファイル(`git diff --cached --name-only`
+  に出る、scope にないパス)。見つけたものは scope の中で直し、検証のコマンド
+  を打ち直してから stage し直す。scope の中で直せない項目はそのまま残し、
+  RESULT に found and not fixed として理由とともに書く。例外は秘密情報だけで、
+  stage した差分の秘密情報を scope の中で消せなければ、コミットしない。
+  unstage し、作業ツリーからも出し(値を消す。その値を持つのが新しい未追跡の
+  ファイルなら、ファイルを消す)、BLOCKED を leader に返す。BLOCKED には
+  秘密情報のファイルと行を書き、値は書かない
 - 検証が失敗した状態のままコミットしない。テストやチェックを弱めて通す
   ことは禁止する
 
@@ -60,6 +79,8 @@ TASK_ID: t-7
 
 COMMIT: <commit-sha>
 EVIDENCE: docs/reports/verify-<slug>.md
+VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && go test ./internal/foo/ → pass
+SELF-CHECK: 不要な変更 clean / 誤字とコピペの誤り clean / デバッグの残り clean / 秘密情報 clean / scope の外のファイル clean
 SUMMARY: internal/foo/bar.go にスライス1を実装し検証済み。差分は
   `git show --stat <commit-sha>` を参照。
 ```
@@ -95,9 +116,13 @@ SUMMARY: internal/foo/bar.go にスライス1を実装し検証済み。差分�
 
 ## レポート契約
 
-- 変更したファイル一覧・決定事項や逸脱・検証結果・コミット境界の証跡
-  (`git status --porcelain` と `git show --stat <sha>`)・コミット SHA を
-  RESULT メッセージに含めてください。生の diff やログ全文を本文に含めない
-  でください。
+- 変更したファイル一覧・決定事項や逸脱・検証結果・機械的な確かめの結果・
+  コミット境界の証跡(`git status --porcelain` と `git show --stat <sha>`)・
+  コミット SHA を RESULT メッセージに含めてください。検証結果には、打った
+  検証のコマンドとその結果を書き、そのコマンドが leader の `VERIFY:` の行の
+  ものか、自分で選んだものかも書きます。機械的な確かめの結果には、5 つの
+  項目それぞれについて clean、fixed(直したもの)、found and not fixed
+  (残したものと、scope の中で直せない理由)のどれかを書きます。生の diff
+  やログ全文を本文に含めないでください。
 - leader へは RESULT(成功時)または BLOCKED(進められない場合)メッセージで
   報告してください。

@@ -230,6 +230,176 @@ func TestRenderRolePrompt_Implementer_AllKnownVarsSubstituted(t *testing.T) {
 	}
 }
 
+// implementerGoSliceCheck is the narrowest check the implementer template
+// names for a Go slice with no VERIFY: line, <dir> standing for the touched
+// package's directory.
+const implementerGoSliceCheck = "`test -z \"$(gofmt -l <dir>)\" && go vet ./<dir>/ && go test ./<dir>/`"
+
+// implementerSelfCheckItems are the five items of the implementer's
+// mechanical self-check, in the template's order. They mirror the standard
+// flow's list (unnecessary changes, typos and copy-paste errors, debug
+// leftovers, secrets, files outside the slice).
+var implementerSelfCheckItems = []string{"不要な変更", "誤字とコピペの誤り", "デバッグの残り", "秘密情報", "scope の外のファイル"}
+
+// TestRenderRolePrompt_Implementer_MissionRunsTheSliceCommand pins the
+// verification half of AC2 of plan 2026-10-27-org-narrow-verification: after
+// each slice the implementer runs the command on the VERIFY: line of the
+// leader's TASK body; with no VERIFY: line it picks the narrowest check that
+// covers the slice's files (for Go, the touched package's gofmt, vet and test,
+// with test -z around gofmt -l), says RALPH_VERIFY_SCOPE=changed does not
+// narrow, and keeps ./scripts/run-verify.sh for when nothing narrower covers
+// the files; it writes the command in the RESULT and stages only after the
+// check passes. ./scripts/run-verify.sh is named nowhere else in the
+// template, so the old default (指示がなければ `./scripts/run-verify.sh`)
+// cannot come back elsewhere.
+func TestRenderRolePrompt_Implementer_MissionRunsTheSliceCommand(t *testing.T) {
+	text := renderSeatPrompt(t, "implementer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the implementer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "作業はスライス単位で進める"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the implementer mission to have an item starting %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"各スライスの実装後、leader の TASK の本文の `VERIFY:` の行のコマンドを実行する",
+		"TASK に `VERIFY:` の行がなければ、そのスライスが触ったファイルを覆う、いちばん狭い検査を選ぶ",
+		"Go なら、触ったパッケージのディレクトリを `<dir>` として " + implementerGoSliceCheck + " を打つ",
+		"(`gofmt -l` はファイルを挙げても終了コード 0 なので、`test -z` で包む)",
+		"ほかの言語なら、言語パックのパッケージごとの検査にする",
+		"`RALPH_VERIFY_SCOPE=changed` では絞れない(走らせる言語パックを選ぶだけで、Go では `go test ./...` を全部走らせる)",
+		"`./scripts/run-verify.sh` は、それより狭い検査ではスライスのファイルを覆えないときだけ使う",
+		"打ったコマンドは RESULT に書く",
+		"検証が通ってから、scope 内のパスだけを `git add <path>...`",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the implementer mission item %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+	if containsPhrase(text, "指示がなければ `./scripts/run-verify.sh`") {
+		t.Errorf("expected the implementer template to drop ./scripts/run-verify.sh as the default for a TASK with no command, got:\n%s", text)
+	}
+	const fullCheck = "./scripts/run-verify.sh"
+	if inText, inItem := strings.Count(text, fullCheck), strings.Count(item, fullCheck); inText != inItem {
+		t.Errorf("expected the implementer template to name %s only in the mission's last-resort sentence, found %d mentions, %d of them in that item:\n%s", fullCheck, inText, inItem, text)
+	}
+}
+
+// TestRenderRolePrompt_Implementer_MechanicalSelfCheckBeforeEachCommit pins
+// the self-check half of AC2 of plan 2026-10-27-org-narrow-verification
+// (D2): between the staging bullet and the no-commit-on-failure bullet, the
+// mission has the implementer read the staged diff before each commit and
+// check the five items in order, the fifth against git diff --cached
+// --name-only; fix within scope, verify and stage again; leave what cannot be
+// fixed within scope and report it as found and not fixed with the reason;
+// and for a secret it cannot remove within scope, not commit, take it out of
+// the index and the worktree, and return a BLOCKED naming the file and line,
+// never the value.
+func TestRenderRolePrompt_Implementer_MechanicalSelfCheckBeforeEachCommit(t *testing.T) {
+	text := renderSeatPrompt(t, "implementer")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the implementer template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "コミットの前に毎回、stage した差分"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the implementer mission to have an item starting %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"コミットの前に毎回、stage した差分(`git diff --cached`)を読んで、機械的な確かめを行う",
+		"項目は 5 つで、この順に見る: " + strings.Join(implementerSelfCheckItems, "、") + "(`git diff --cached --name-only` に出る、scope にないパス)",
+		"見つけたものは scope の中で直し、検証のコマンドを打ち直してから stage し直す",
+		"scope の中で直せない項目はそのまま残し、RESULT に found and not fixed として理由とともに書く",
+		"例外は秘密情報だけで、stage した差分の秘密情報を scope の中で消せなければ、コミットしない",
+		"unstage し、作業ツリーからも出し(値を消す。その値を持つのが新しい未追跡のファイルなら、ファイルを消す)、BLOCKED を leader に返す",
+		"BLOCKED には秘密情報のファイルと行を書き、値は書かない",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the implementer self-check item to say %q, got item:\n%s", want, item)
+		}
+	}
+	s := squashSpace(mission)
+	stageAt := strings.Index(s, squashSpace("1 スライス = 1 コミットとする"))
+	checkAt := strings.Index(s, squashSpace(marker))
+	failAt := strings.Index(s, squashSpace("検証が失敗した状態のままコミットしない"))
+	if stageAt < 0 || checkAt < stageAt || failAt < checkAt {
+		t.Errorf("expected the self-check item between the staging bullet and the no-commit-on-failure bullet, got section:\n%s", mission)
+	}
+}
+
+// TestRenderRolePrompt_Implementer_ResultCarriesVerifyAndSelfCheck pins the
+// RESULT half of AC2 of plan 2026-10-27-org-narrow-verification: the example
+// RESULT is a valid message whose body (not its header block) has a VERIFY:
+// line with the mission's Go check run on internal/foo and its result, and a
+// SELF-CHECK: line with the five items in order, each clean; and the
+// report contract asks for the command, where it came from and its result,
+// and for each item's clean, fixed or found and not fixed.
+func TestRenderRolePrompt_Implementer_ResultCarriesVerifyAndSelfCheck(t *testing.T) {
+	text := renderSeatPrompt(t, "implementer")
+	protocolSection, found := markdownSection(text, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the implementer template to contain a '## typed protocol' section, got:\n%s", text)
+	}
+	const lead = "RESULT の例"
+	msg, found := codeBlockAfterLine(protocolSection, lead)
+	if !found {
+		t.Fatalf("expected the implementer's typed protocol section to show a code block after a line starting with %q, got section:\n%s", lead, protocolSection)
+	}
+	m, err := protocol.Parse(msg)
+	if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != protocol.TypeResult || m.TaskID != "t-7" {
+		t.Fatalf("expected the example to be a valid RESULT with TASK_ID t-7, got %+v, err %v; message:\n%s", m, err, msg)
+	}
+	bodyLine := func(key string) string {
+		t.Helper()
+		if got := protocol.HeaderValues(msg, key); len(got) != 0 {
+			t.Errorf("expected %s: in the example RESULT's body, not its header block, got header values %q; message:\n%s", key, got, msg)
+		}
+		for line := range strings.SplitSeq(m.Body, "\n") {
+			if value, ok := strings.CutPrefix(line, key+": "); ok {
+				return value
+			}
+		}
+		t.Errorf("expected the example RESULT's body to have a %s: line, got body:\n%s", key, m.Body)
+		return ""
+	}
+
+	goCheck := strings.ReplaceAll(strings.Trim(implementerGoSliceCheck, "`"), "<dir>", "internal/foo")
+	if verify := bodyLine("VERIFY"); verify != goCheck+" → pass" {
+		t.Errorf("expected the example's VERIFY: line to be the mission's Go check on internal/foo and its result, %q, got %q", goCheck+" → pass", verify)
+	}
+	selfCheck, at := bodyLine("SELF-CHECK"), -1
+	for _, name := range implementerSelfCheckItems {
+		i := strings.Index(selfCheck, name+" clean")
+		if i < 0 || i < at {
+			t.Errorf("expected the example's SELF-CHECK: line to give %q clean, in the mission's order %q, got %q", name, implementerSelfCheckItems, selfCheck)
+			break
+		}
+		at = i
+	}
+
+	contract, found := markdownSection(text, "## レポート契約")
+	if !found {
+		t.Fatalf("expected the implementer template to contain a '## レポート契約' section, got:\n%s", text)
+	}
+	const marker = "変更したファイル一覧"
+	item, ok := markdownItem(contract, marker)
+	if !ok {
+		t.Fatalf("expected the implementer's report contract to have an item starting %q, got section:\n%s", marker, contract)
+	}
+	for _, want := range []string{
+		"変更したファイル一覧・決定事項や逸脱・検証結果・機械的な確かめの結果・コミット境界の証跡",
+		"検証結果には、打った検証のコマンドとその結果を書き、そのコマンドが leader の `VERIFY:` の行のものか、自分で選んだものかも書きます",
+		"機械的な確かめの結果には、5 つの項目それぞれについて clean、fixed(直したもの)、found and not fixed(残したものと、scope の中で直せない理由)のどれかを書きます",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the implementer's report contract to say %q, got item:\n%s", want, item)
+		}
+	}
+}
+
 func TestRenderRolePrompt_QA_NoTemplate(t *testing.T) {
 	// The qa seat template was retired: its deterministic-gate re-run moved
 	// into the reviewer template, so "qa" is an ordinary role with no template.
