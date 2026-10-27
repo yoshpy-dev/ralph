@@ -68,6 +68,38 @@ for file in $self_review_files; do
   assert_not_contains "$file must not call run-verify.sh" "run-verify.sh" "$file"
 done
 
+# /self-review checks six areas; the four mechanical ones moved to the
+# implementing side (the implementer's mechanical self-check before commit).
+self_review_skill_files="
+.agents/skills/self-review/SKILL.md
+.claude/skills/self-review/SKILL.md
+templates/base/.agents/skills/self-review/SKILL.md
+templates/base/.claude/skills/self-review/SKILL.md
+"
+
+for file in $self_review_skill_files; do
+  assert_not_contains "$file drops the unnecessary-changes area" "**Unnecessary changes**" "$file"
+  assert_not_contains "$file drops the typos area" "**Typos and copy-paste errors**" "$file"
+  assert_not_contains "$file drops the debug-code area" "**Debug code**" "$file"
+  assert_not_contains "$file drops the secrets area" "**Secrets and credentials**" "$file"
+
+  # The bold headings, not the bare words: assert_contains ignores case, and
+  # the frontmatter description also says "null safety, exception handling".
+  assert_contains "$file keeps the null safety area" "**Null safety and defensive checks**" "$file"
+  assert_contains "$file keeps the exception handling area" "**Exception handling**" "$file"
+done
+
+implementer_files="
+.claude/agents/implementer.md
+templates/base/.claude/agents/implementer.md
+.codex/agents/implementer.toml
+templates/base/.codex/agents/implementer.toml
+"
+
+for file in $implementer_files; do
+  assert_contains "$file runs the mechanical self-check" "Mechanical self-check before commit" "$file"
+done
+
 printf '\n-- Summary --\n'
 printf '  PASS: %d / %d\n' "$_pass" "$_total"
 printf '  FAIL: %d\n' "$_fail"
