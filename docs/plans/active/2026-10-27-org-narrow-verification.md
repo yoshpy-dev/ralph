@@ -183,4 +183,8 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 - [x] Verification artifact created(verify 584f8103: pass、AC1〜AC5 を満たし、AC6 は静的な半分。self-review の 2 回目の LOW 2 件は F3 で解消を確認。所見は LOW 1(director の仕様 2026-10-07 の FR-7 の「テストは review と gate の 2 回」が古い)と既知 1(tech-debt の 157 行目)で、どちらも sync-docs に渡す)
   - 逸れ: テストは AC6 と S1 が名指す `internal/org/prompts_test.go` ではなく、F2 と F3 で `internal/org/prompts_verification_test.go` と `internal/org/prompts_verification_multi_test.go` に置いた(`prompts_test.go` は main の版のまま)
 - [x] Test artifact created(test 3afdd03a: pass。`run-test.sh` が rc 0、1,572 秒で、shell 45 本と Go のテストのある 9 パッケージがすべて通過。名指しの雛形のテスト 66 本と `TestStartFeature` 27 本が通過。変異 a〜d(c は 3 つの形)はそれぞれ落ち、対照は通った。座席の実機は確かめていない)
+- [x] Cross-review 1 回目(triage 8438af88: ACTION_REQUIRED 1)。implementer の秘密情報の片付けが、座席が始める前から stage されていた scope の外の変更まで消しうる
+  - 直し F4 ffafc9d2(implementer): 直すのはこのスライスの変更だけ。前からあった変更(stage 済みを含む)は書き換えも削除も unstage もしない。前からあった変更の秘密情報と、前から stage されていた scope の外のパスは、コミットせずに BLOCKED。skill の 4 つの写しも同じに。テスト 2 本を足し、変異 7 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
+  - 隣の件(sync-docs に渡す): 標準フローの `/implement` 手順 7 も、止まった slice の秘密情報を「新しい未追跡のファイルなら消す」としている。止まった slice が作ったファイルに限る文がないので、同じ形の穴がある。#261 で merge 済みの文で、この計画の範囲の外なので、tech-debt に記録する
+  - cycle を 2 にして、/self-review から回し直す
 - [ ] PR created
