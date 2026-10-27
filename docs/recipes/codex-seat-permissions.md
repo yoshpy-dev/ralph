@@ -217,10 +217,10 @@ ralph org spawn --org-id perm-auto --id reviewer --role reviewer --driver codex 
   The seat is spawned with `--role reviewer` so that the
   `[org.permissions.roles] reviewer` override in `ralph-edits.toml` applies
   to it. The reviewer role template
-  starts a task by re-running the deterministic gate
-  (`run-static-verify.sh` / `run-test.sh`) and returns BLOCKED, without
-  doing the work, when the gate fails or cannot run. The first paragraph of
-  the TASK keeps that out of this probe, so leave it in.
+  starts a review task by running the commands the TASK names, or both
+  `run-static-verify.sh` and `run-test.sh` when it names none, and returns
+  BLOCKED, without doing the work, when they fail or cannot run. The first
+  paragraph of the TASK keeps that out of this probe, so leave it in.
 
 - Send it. Every follow-up verb needs the same `--org-id`, `--config`, and
   `--state-dir` as the spawn, otherwise it fails with
