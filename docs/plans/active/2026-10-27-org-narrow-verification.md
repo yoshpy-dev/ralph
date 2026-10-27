@@ -187,4 +187,9 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - 直し F4 ffafc9d2(implementer): 直すのはこのスライスの変更だけ。前からあった変更(stage 済みを含む)は書き換えも削除も unstage もしない。前からあった変更の秘密情報と、前から stage されていた scope の外のパスは、コミットせずに BLOCKED。skill の 4 つの写しも同じに。テスト 2 本を足し、変異 7 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
   - 隣の件(sync-docs に渡す): 標準フローの `/implement` 手順 7 も、止まった slice の秘密情報を「新しい未追跡のファイルなら消す」としている。止まった slice が作ったファイルに限る文がないので、同じ形の穴がある。#261 で merge 済みの文で、この計画の範囲の外なので、tech-debt に記録する
   - cycle を 2 にして、/self-review から回し直す
+- [x] Cycle 2 の self-review 1 回目(dd2ffa05: LOW 5、Merge yes。cross-review の指摘は解消)
+  - 直し F5 a7d879d9(implementer): 「前からあった変更」を TASK ごとの記録で 1 度だけ定義し、呼び方をそろえた。コミットしない 3 つの場合を 1 文で並べた。unstage はパスを指定した `git restore --staged -- <パス>` にし、パスなしの `git reset` を禁じた。F4 のテストを `internal/org/prompts_verification_predate_test.go` に移し、テストを 1 本足した。変異 3 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
+  - LOW 4(標準フローの implementer の定義と `/implement` の手順 7 の unstage と削除)は、#261 の文でこの計画の範囲の外なので、sync-docs で tech-debt に記録する。Claude と Codex の agent 定義、skill、それぞれの `templates/base/` の写しを名指す
+  - 直し F6 854be9db(implementer): 止まったスライスの再開。leader は頼み直す TASK の本文の `RESUME:` の行に、止まった TASK が残したパスを並べ、秘密情報で止まったあとは値が消えたことを確かめる(消えていない、または前からあった変更にあるなら escalate)。implementer は `RESUME:` のパスの変更を引き継ぎ、scope の外なら BLOCKED。skill の 4 つの写しも同じに。テスト 3 本を足し、変異 3 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
+  - 直し 51cf59e2(inline): F6 の implementer が挙げた穴。スライスを狭めるときも残したパスはすべて `RESUME:` に並べ、外すパスの変更は元に戻すよう TASK に書く(leader はコードに触れないため)。検証: `gofmt`・`go vet` と雛形のテストが通過。この文を消すとテストが落ちることを `-overlay` で確かめた。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
 - [ ] PR created
