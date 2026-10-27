@@ -142,4 +142,7 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
   - Cycle 2 の self-review 2 回目(3affffb0): 所見 0、Merge yes
 - [x] Cycle 2 の verify(b8efab76: pass、AC1〜AC6 Met、AC7 は静的の半分、LOW 2)
   - inline の直し 6741f9d6: `.codex/README.md` の 5 項目の並びに「and」を足して正本の語にそろえ(root と template)、model-routing の段落を「まず秘密情報を作業ツリーから出し、必要なら絞る」の順にした(root と template)。README の並びを固める検査を `tests/test-slice-verification.sh` に足した。検証: check-sync PASS、check-skill-sync ok、slice 150/150、scope 206/206、shellcheck と `git diff --check` OK。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
+- [x] Cycle 2 の verify 2 回目(9c7186ba: pass、AC1〜AC6 Met、AC7 は静的の半分、LOW 0)。前回の LOW 2 件(README の並びの「and」、model-routing の順序)は解決。情報 4 件(model-routing は計画を直す道を書かないが手順 7 を指す、README の要約に再開がない、hook の文は tech-debt に記録済み、この Progress の遅れ)。上の b8efab76 の行は置き換えられた前の report を指す
+- [x] Cycle 2 の test(42dc81dc: pass)。`run-test.sh` は full に落ちて shell 45/45 と Go 9 パッケージ ok、`(cached)` だった 6 パッケージも `-count=1` で打ち直して ok。slice 150、scope 206、new-feature-plan 21、agent-models 47、check-skill-sync 13、sync-skills 22
+  - 変異 4 つ(a: 手順 7 の「as a resume」を消す、b: implementer の定義 4 本から再開の文を消す、c: README の 5 項目の「and」を消す、d: 手順 6 の「narrowest」を「broadest」にする)は、どれも受け持ちのテストが写しごとに 1 件ずつ落とした(146/150、202/206、148/150、146/150)。cycle 1 の「narrowest」の穴はふさがった
 - [ ] PR created

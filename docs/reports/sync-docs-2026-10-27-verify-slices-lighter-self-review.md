@@ -1,68 +1,64 @@
 # sync-docs report: verify-slices-lighter-self-review
 
 - Date: 2026-10-27
-- Plan: `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md`(承認の digest `bd5c0d0ce1bb` はこの run の前後で同じ。`./scripts/plan-visual.sh digest` で確かめた。この run が変えたのは AC の `[ ]` と `## Progress checklist` だけ)
-- Pipeline cycle: 1(`.harness/state/standard-pipeline/cycle-count.json` の値。上限は 2)。base は `44c14b97`、branch は `refactor/verify-slices-lighter-self-review`。run 開始時の HEAD は `869dcab4`(この report を含む commit の SHA ではない)
-- 先行 report: `docs/reports/self-review-2026-10-27-verify-slices-lighter-self-review.md`(2 回目まで Merge yes、MEDIUM 1 と LOW 6 は解決、新しい LOW 3 も inline で解決)、`docs/reports/verify-2026-10-27-verify-slices-lighter-self-review.md`(pass、AC1〜AC6 Met、AC7 は静的の半分)、`docs/reports/test-2026-10-27-verify-slices-lighter-self-review.md`(pass、AC7 のテスト側を満たす、test gap 1 件)
-- 差分の大きさ(`git diff 44c14b97...HEAD --shortstat`、この run の前): 43 ファイル、+1109/-118。walkthrough を書くかどうかは `/pr` が決める
+- Plan: `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md`(承認の digest `bd5c0d0ce1bb` はこの run の前後で同じ。`./scripts/plan-visual.sh digest` で確かめた。この run が変えたのは `## Progress checklist` の 2 項目の追加だけ)
+- Pipeline cycle: 2(`.harness/state/standard-pipeline/cycle-count.json` の値。上限は 2)。base は `44c14b97`、branch は `refactor/verify-slices-lighter-self-review`。run 開始時の HEAD は `42dc81dc`(この report を含む commit の SHA ではない)。この report は cycle 1 の report(f2f0333c)を置き換える
+- 先行 report: `docs/reports/self-review-2026-10-27-verify-slices-lighter-self-review.md`(cycle 2 の 2 回目、所見 0、Merge yes)、`docs/reports/verify-2026-10-27-verify-slices-lighter-self-review.md`(cycle 2 の 2 回目、pass、9c7186ba、LOW 0、前回の LOW 2 件は解決)、`docs/reports/test-2026-10-27-verify-slices-lighter-self-review.md`(cycle 2、pass、42dc81dc)
+- 差分の大きさ(`git diff 44c14b97...HEAD --shortstat`、この run の前): 48 ファイル、+1280/-122。walkthrough を書くかどうかは `/pr` が決める
 
 ## Summary
 
-差分は、スライスごとの検証コマンドを計画の `## Implementation outline` に書かせ、`/implement` の手順 6 と 7 がそれを使い、手順 12 のフルの `./scripts/run-verify.sh` を外す変更である。implementer は commit の前に 5 項目の機械的な確かめをし、`/self-review` は 6 項目(命名、読みやすさ、null safety、例外処理、security、保守性)に絞られた。
+cycle 1 の sync(f2f0333c)のあとに振る舞いの文を変えたのは 3 コミットである。dba1c20f は、コミットせずに止まったスライスを resume として出し直し、implementer が範囲内の未コミットの変更を引き継ぐ。d33bb358 は、resume の前に orchestrator がまず秘密情報を作業ツリーから出し(`wip:` のチェックポイントが `git add -A` で全部をステージするため)、秘密情報はファイルと行で報告して値は書かない、と決めた。handoff の表に Resume の行を足し、手順 6 に例外を足した。6741f9d6 は model-routing の段落の順序を手順 7 にそろえ、`.codex/README.md` の 5 項目の並びを正本の語にした。
 
-root と `templates/base/` を洗い、旧い言い方が残る文書を探した。矛盾する文はなかった。足りなかったのは `.codex/README.md` の implementer の行だけで、これを root と template の両方で直した。skill と agent の frontmatter の description は、この差分がすでに 6 項目に直している。計画の外にある hook の文 2 つと、テストの穴 1 つは `docs/tech-debt/README.md` に記録した。
+resume と止まる道を書く面を root と `templates/base/` で洗い直した。矛盾する文はなく、この run で直した文書はない。変えたのは計画の `## Progress checklist` に verify 2 回目と cycle 2 の test の 2 項目を足したことだけである。`docs/tech-debt/README.md` は、hook の文の行が開いたまま正確で、「narrowest」の穴の行が解決済みであることを確かめた。新しい行は足していない。
 
 ## Changes made
 
 | File | Change |
 |------|--------|
-| `.codex/README.md`、`templates/base/.codex/README.md` | `## Agent roles` の implementer の行に、計画のスライスの検証コマンド、staged diff への機械的な確かめ(5 項目)、報告に確かめの結果が入ることを足した。2 つは同一のまま(`check-sync.sh` で確認) |
-| `docs/tech-debt/README.md` | 末尾に 2 行を足した。(1) hook の「Run ./scripts/run-verify.sh before claiming done」(`post_edit_verify.sh` の `code` の文、`session_start_context.sh` の SessionStart の文、`templates/base/` の写し 2 つ)。(2) `tests/test-slice-verification.sh` の手順 6 の検査が「the narrowest check that covers the slice's files」を固めていない穴(LOW) |
-| `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md` | AC1〜AC7 を `[x]` にした(verify と test の report が満たすと示している。AC7 は verify の静的の半分と test のテスト側で 6 つ)。`## Progress checklist` の「Verification artifact created」「Test artifact created」を `[x]` にし、結果と逸れ 3 件(テストの置き場、数の更新、テストの穴)を子の項目に書いた。それ以外の本文は触れていない |
-| `docs/reports/sync-docs-2026-10-27-verify-slices-lighter-self-review.md` | 新規(この report) |
+| `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md` | `## Progress checklist` に 2 項目を足した。(1) Cycle 2 の verify 2 回目(9c7186ba: pass、AC1〜AC6 Met、AC7 は静的の半分、LOW 0、前回の LOW 2 件は解決、情報 4 件)。(2) Cycle 2 の test(42dc81dc: pass。shell 45/45、Go 9 パッケージ ok、`(cached)` の 6 パッケージも `-count=1` で ok。slice 150、scope 206、new-feature-plan 21、agent-models 47、check-skill-sync 13、sync-skills 22)と、子の項目に変異 4 つ(a〜d)がどれも受け持ちのテストで落ちたこと。それ以外の節は触れていない(digest は同じ) |
+| `docs/reports/sync-docs-2026-10-27-verify-slices-lighter-self-review.md` | cycle 1 の report を cycle 2 の内容に置き換えた(この report) |
 
 ## Surfaces checked for drift
 
+cycle 1 の report が洗った面(`/self-review` の観点の文、reviewer の定義、`/implement` の旧い検証の文、README、`ralph-workflow.md`、`AGENTS.override.md`、`docs/quality/*.md`、repo-map、`AGENTS.md` 系)は、cycle 1 のあとに変わっていない。下の表は cycle 2 の 3 コミットが触れる resume と止まる道、秘密情報の扱いについて洗った面である。
+
 | Surface | 結果 | 根拠 |
 |---------|------|------|
-| `.claude/skills/self-review/SKILL.md` の frontmatter `description`(`.agents/skills/`、`templates/base/.claude/skills/`、`templates/base/.agents/skills/` の写しを含む) | 変更なし | 「Covers naming, readability, null safety, exception handling, security, and maintainability.」に直っている(`git diff 44c14b97...HEAD`)。skill 一覧に出る文はこの 6 項目 |
-| `.claude/agents/reviewer.md` の frontmatter `description`、`.codex/agents/reviewer.toml` の `description`(`templates/base/` の写しを含む) | 変更なし | 2 つとも 6 項目に直っている。本文の「Focus on diff quality only」の行と、実装の側が見る 5 項目の文も合っている |
-| `.claude/skills/self-review/template.md` の Area の値 | 変更なし | `naming, readability, null-safety, exception-handling, security, maintainability`。過去の report にある `unnecessary-change` と `typo` は履歴 |
-| `/self-review` の旧い項目を並べた文(`Debug code`、`unnecessary changes`、`typos`、`Secrets and credentials`、`unnecessary-change`) | 変更なし | 履歴(`docs/reports`、`docs/plans/archive`)を除くと、残るのは実装の側の 5 項目として書いた文(model-routing、implement、self-review、implementer、reviewer の定義)と、復活を禁じる `tests/test-self-review-scope.sh` の検査だけ。`README.md`(220 行は「diff quality artifact」)、`AGENTS.md`、`.ralph/core/AGENTS.core.md`、`docs/quality/*.md`、`docs/architecture/repo-map.md`(49 行は「self-review diff quality」)に観点を並べた文はない |
-| `/implement` が各スライス、または手順 12 でフルの `run-verify.sh` を打つと書く文(root、`templates/base/`、`.agents/`) | 変更なし | `grep -rn run-verify` を履歴(`docs/reports`、`docs/plans/archive`、`docs/evidence`、`docs/specs`、`docs/insights`)とテスト、`internal/`、`packs/` を除いて読んだ。手順 6・7・12・Completion gate は新しい形で、旧い形は復活を禁じる `tests/test-slice-verification.sh` にだけ残る。`.claude/rules/ralph/git-commit-strategy.md` の Validation Gate(手順 2)、`model-routing.md`(handoff の表と報告の契約)、`subagent-policy.md`(implementer の報告)は差分が直している。`model-routing.md` の root と template の差は KNOWN_DIFF の org receipts の 3 か所だけ |
-| `README.md`(103 行「Before claiming a task is done: `./scripts/run-verify.sh`」) | 変更なし | タスク全体の完了の話。`/verify` と `/test` が包みのスクリプトを通して同じ検査を打つので、スライスの検証とは食い違わない。依頼で、この種の一般的な文は残すことになっている |
-| `.claude/rules/ralph/ralph-workflow.md` の「Run `./scripts/run-verify.sh` or an equivalent deterministic check before claiming success」(`templates/base/` の写しを含む) | 変更なし | 同じ理由。計画の Progress にも残した理由が書かれている |
-| `.codex/AGENTS.override.md` の「Do not bypass `./scripts/run-verify.sh` before claiming work is done」(`templates/base/` の写しを含む) | 変更なし | 計画の Non-goals が残すと決めている |
-| `docs/quality/definition-of-done.md`(`templates/base/` の写しを含む) | 変更なし | 「Each implementation slice is individually committed (see `git-commit-strategy.md`)」は Validation Gate を指し、その手順 2 が新しい形に直っている。self-review の行は「diff quality only」で、観点の個数は書かない。フェーズの境界の段落も新しい分担と食い違わない |
-| `docs/quality/quality-gates.md`(`templates/base/` の写しを含む) | 変更なし | 「Must pass locally before done」はタスク全体の検査で、`run-static-verify.sh` と `run-test.sh` の分担を書く。スライスの検証コマンドには触れない |
-| `docs/architecture/repo-map.md`、`docs/recipes/adding-a-language-pack.md`(61 行) | 変更なし | repo-map は skill を 1 行で述べるだけ。recipe の `./scripts/run-verify.sh` は言語パックを入れた直後の通し確認で、スライスの話ではない |
-| `AGENTS.md`、`.ralph/core/AGENTS.core.md`、`templates/base/AGENTS.md`、`CLAUDE.md` | 変更なし | 手順の列(Implement、Self-review の 1 行)は変わらない。検証の中身は書いていない |
-| `.codex/README.md` の implementer の行(`templates/base/` の写しを含む) | 直した | 「runs verification, and returns a report with commit-boundary evidence」は、計画のコマンドを使い、機械的な確かめをし、確かめの結果を報告に入れる、という契約より狭かった。model-routing の報告の契約に合わせて書き直した。この文を固める検査はない |
-| `.claude/hooks/post_edit_verify.sh`、`.claude/hooks/session_start_context.sh`(`templates/base/` の写しを含む) | tech-debt に記録 | 「Run ./scripts/run-verify.sh before claiming done」が残る。hook は計画の範囲外。PostToolUse の文はコードのファイルを編集するたびに出るので、スライスごとにフルの検査を読む余地がある。implementer の定義の「run the handoff's verification commands exactly as given」が優先するので、矛盾ではなく後続の候補 |
-| `internal/org/prompts/implementer.md`(20 行「指示がなければ `./scripts/run-verify.sh`」)、`git-commit-strategy.md` の「Org runtime seats commit the same way as the standard flow above」 | 範囲外(#262) | org の座席の検証は計画の Non-goals で #262 に渡されている。verify report の Documentation drift にも同じ記録がある |
-| `docs/tech-debt/README.md` の追加 2 行 | 同期 | 5 欄(`' | '` で分けて 5 つ)。`file:line` の参照はなく、名前と文で引いた。引いた計画は `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md` で、存在する(`archive-plan.sh` が `/pr` で書き換える)。`docs/plans/(active|archive)/` の参照はすべて存在する |
+| `.claude/rules/ralph/subagent-policy.md` の「Implementation slices」(`templates/base/` の写しを含む) | 変更なし | handoff の必須項目の一覧(plan path、slice objective、acceptance criteria、files in scope、exact verification commands、commit message format)は resume の行を含まない。Resume は止まったスライスを出し直すときだけの欄で、model-routing の表が「only when dispatching a stopped slice again」と書く。一覧は必須項目の話なので食い違わない。報告の契約の一覧は止まったときの報告(commit SHA なし)を扱わないが、これは cycle 1 の秘密情報の停止で入った形のまま |
+| `.claude/rules/ralph/git-commit-strategy.md` の Validation Gate と「Delegated slices」の段落(`templates/base/` の写しを含む) | 変更なし | 「implementer runs the verification and owns the commit; the orchestrator adjudicates ... instead of re-staging or re-committing」は、手順 7 の「Do not re-stage or re-commit the slice; one slice = one commit, owned by the implementer」と resume の道に合う。resume も新しい implementer が新しいコミットを作る |
+| `.claude/rules/ralph/git-commit-strategy.md` の「End-of-Session / Pre-Compaction WIP Commits」 | 変更なし | 手順 7 が「`wip:` のチェックポイントは `git add -A` で全部をステージする」と書く根拠を確かめた。`.claude/hooks/session_end_summary.sh:43` と `.claude/hooks/precompact_checkpoint.sh:46` が `git add -A` を打つ。この節は hook の挙動を書いていて、その挙動と食い違わない |
+| `.claude/rules/ralph/model-routing.md` の handoff の表、報告の契約(root と `templates/base/`) | 変更なし | 6741f9d6 までで確定した形。root と template の差は KNOWN_DIFF の org receipts の 3 hunk だけ(`check-sync.sh` で確認) |
+| `.codex/README.md` の implementer の行(`templates/base/` の写しを含む) | 変更なし | 5 項目の並びは 6741f9d6 で正本の語になった。行は要約で、resume と「秘密情報は値を書かない」を書かない。定義の本文(`.codex/agents/implementer.toml`)にあるので食い違いではない。verify の情報にも同じ記録がある |
+| `.codex/AGENTS.override.md`(`templates/base/` の写しを含む) | 変更なし | 「dispatch each slice to the `implementer` subagent ... with the structured handoff defined in `.claude/rules/ralph/model-routing.md`」は、handoff の正本を指すだけで、項目を並べない。Resume の行は正本に入った |
+| `README.md`(219 行の Implement)、`AGENTS.md`、`.ralph/core/AGENTS.core.md`、`CLAUDE.md` | 変更なし | `/implement` が slice を `implementer` に委譲する、と述べる 1 行で、handoff の項目、止まる道、秘密情報の扱いは書いていない |
+| `docs/quality/definition-of-done.md`、`docs/quality/quality-gates.md`、`docs/architecture/*.md`、`docs/recipes/*.md`(`templates/base/` の写しを含む) | 変更なし | implementer の handoff と止まる道を書く文はない(`implementer` で当たるのは `docs/recipes/codex-seat-permissions.md:98` の org の座席の話だけで、標準フローの implementer ではない)。`uncommitted changes` で当たる文は worktree 作成と hook の話で、スライスの resume とは無関係 |
+| `internal/org/prompts/implementer.md` と org の座席の秘密情報の扱い | 範囲外(#262) | org の座席の検証と報告は計画の Non-goals で #262 に渡されている。verify report の Documentation drift にも同じ記録がある |
+| `.claude/hooks/post_edit_verify.sh:129`、`.claude/hooks/session_start_context.sh:20`(`templates/base/` の写し 2 つを含む) | tech-debt の行は開いたまま、正確 | 「Run ./scripts/run-verify.sh before claiming done」が 4 か所に残ることを grep で確かめた。cycle 2 の 3 コミットは hook に触れていない。implementer の定義の「run the handoff's verification commands exactly as given」が優先する、という行の説明も変わっていない |
+| `docs/tech-debt/README.md` の「narrowest」の行 | 解決済みで正確 | 行は取り消し線と `RESOLVED 2026-10-27` の注釈になっている。注釈の数(変異 m2 が 134/138 で 4 FAIL、全部の「narrowest」を変えると 130/138)は dba1c20f の時点の値で、今回の test の変異 (d) も 4 つの写しで 1 件ずつ落ちて合う |
+| `docs/tech-debt/README.md` の新しい行 | なし | test report の Test gaps(d33bb358 の needle を 1 つずつは変異で落としていない、resume を実際の `/implement` で使った結果は確かめられない、Codex の custom agent の振る舞いは確かめていない)は、既存の記録と同じ種類の確認の穴で、直す対象のある負債ではない。verify の情報 4 件(model-routing が計画を直す道を書かないが手順 7 を指す、README の要約に resume がない、hook の文は記録済み、Progress の遅れ)のうち、Progress の遅れはこの run で解消し、残りは負債にしない |
 
 ## Plan drift notes
 
-- Scope の「テスト」の項は、implementer の定義の機械的な確かめの文を固める検査を `tests/test-slice-verification.sh` に置くと書く。実際は S4(`d501efad`)から `tests/test-self-review-scope.sh` にあり、slice のテストには入っていない。verify report が情報として挙げていた逸れで、Progress checklist には書かれていなかったので、「Test artifact created」の子の項目に足した。中身は固められている
-- Progress の S5 の「84 件」と bc56cc4f の「scope 198/198」は、その時点の数である。slice のテストは `cb094ae8` と `804d05f9` の検査の追加で 130 件になった(test report の実行)。これも同じ子の項目に書いた
-- 計画の Acceptance criteria は AC1〜AC7 を `[x]` にした。残る `[ ]` は Progress の「PR created」だけで、`/pr` が付ける
+- cycle 1 で `## Progress checklist` に書いた逸れ(テストの置き場、数の更新、テストの穴)は、cycle 2 でも有効である。テストの穴(LOW)は dba1c20f で閉じ、その結果を Cross-review 1 回目の項目に書いてある。
+- Progress の「Cycle 2 の verify(b8efab76 ...)」は、2 回目の verify が置き換えた前の report を指す。新しい項目に「上の b8efab76 の行は置き換えられた前の report を指す」と書いた。
+- 計画の Acceptance criteria は AC1〜AC7 の `[x]` のまま変わらない。残る `[ ]` は Progress の「PR created」だけで、`/pr` が付ける。
 
 ## `/pr` と release に渡すこと
 
-- 新しい文を実際の `/implement` の実行で使った結果(implementer が 5 項目の結果を返すか、検証コマンドのない計画で orchestrator が Progress に書くか)は、この PR では確かめられない。今回の 5 スライスと直しのスライスの記録(Progress checklist の bc56cc4f の行)が 1 件の実例になる
-- scaffold 先には次の release の `ralph upgrade` で届く。skills と agents は core、雛形の `docs/plans/templates/feature-plan.md` は seed なので upgrade は advisory を出すだけ(計画の Rollout)。release のノートに「雛形は seed なので、更新するにはユーザーが `feature-plan.md` に検証コマンドの欄を足す」と書くと分かりやすい。release はユーザーが切る
-- scaffold 先で `/implement` を使う人には、手順 12 でフルの `run-verify.sh` が走らなくなる変更が届く。`/verify` と `/test` が直後に走る(計画の R2)
+- 新しい文(resume、秘密情報の扱い、5 項目の確かめ)を実際の `/implement` の実行で使った結果は、この PR では確かめられない(verify と test の Coverage gaps / Test gaps にも同じ記録がある)。implementer が resume の handoff を読んで止まらずに引き継ぐか、5 項目の結果を返すかは、次に `/implement` を使うときの観測になる。
+- release ノートに 1 行必要である。この branch の commit は `docs:` が 26 件、`test:` が 1 件で、`.goreleaser.yml` の changelog は `^docs:`、`^test:`、`^chore:` を除くので、自動の changelog にこの変更は載らない。次の文を release ノートに手で足す。
+  - 「計画の雛形が、スライスごとの検証コマンドを `## Implementation outline` に書くよう求めるようになった。`/implement` は全体の `run-verify.sh` ではなくそのコマンドをスライスごとに打ち、implementer は commit の前に 5 項目(unnecessary changes、typos and copy-paste errors、debug leftovers、secrets、files outside the slice)の機械的な確かめをする。`/self-review` は命名、読みやすさ、null safety、例外処理、security、保守性の 6 項目になった。雛形 `docs/plans/templates/feature-plan.md` は seed のファイルで、`ralph upgrade` は advisory を出すだけなので、使う人が自分の `feature-plan.md` に検証コマンドの欄を足す。」
+- skills と agents は core なので、次の release の `ralph upgrade` で scaffold 先に届く。scaffold 先で `/implement` を使う人には、手順 12 でフルの `run-verify.sh` が走らなくなる変更も届く。`/verify` と `/test` が直後に走る(計画の R2)。release はユーザーが切る。
 
 ## Verification
 
 | Check | Result |
 |-------|--------|
-| `./scripts/check-sync.sh` | rc 0。IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5。`PASS: all files in sync.`(`.codex/README.md` を root と template で直したあと) |
+| `./scripts/check-sync.sh` | rc 0。IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5。`PASS: all files in sync.` |
 | `./scripts/check-skill-sync.sh` | rc 0。`[ok] check-skill-sync: 14 skill(s) in lock-step`(skill は触れていないので `sync-skills.sh` は打っていない) |
-| `sh tests/test-self-review-scope.sh` | rc 0。PASS 198 / 198 |
-| `sh tests/test-slice-verification.sh` | rc 0。PASS 130 / 130 |
-| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md` | `bd5c0d0ce1bb`(`- Approved:` 行の値と同じ。AC の `[x]` と Progress の変更の前後で同じ) |
-| tech-debt の計画参照(`check_tech_debt_plan_refs` と同じ grep) | 欠けた参照なし。追加した 2 行は 5 欄 |
-| テスト | 上の 2 本のほかは打っていない(`/test` の範囲。この run が変えたのは文書だけで、コードとスクリプトには触れていない) |
+| `sh tests/test-slice-verification.sh` | rc 0。PASS 150 / 150、FAIL 0 |
+| `sh tests/test-self-review-scope.sh` | rc 0。PASS 206 / 206、FAIL 0 |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md` | `bd5c0d0ce1bb`(`- Approved:` 行の値と同じ。Progress の追加の前後で同じ) |
+| テスト | 上の 2 本のほかは打っていない(`/test` の範囲。この run が変えたのは計画の Progress と report だけで、コードとスクリプトには触れていない) |
 | insight event | `./scripts/insights-append.sh --slug verify-slices-lighter-self-review --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で追記する(`docs/insights/events/2026-10-27-verify-slices-lighter-self-review.jsonl`) |
