@@ -2,62 +2,61 @@
 
 - Date: 2026-10-27
 - Plan: `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md`(D1〜D6、AC1〜AC7、Progress checklist の記録)
-- Reviewer: reviewer サブエージェント(`/self-review`、2 回目。1 回目は 90f4ecca)
-- Scope: `git diff 44c14b97...HEAD`(HEAD bc56cc4f、41 ファイル、+918/-118、10 コミット)。前回の所見への直し cb094ae8 と bc56cc4f を先に読み、そのあとで diff 全体をこの PR 自身が絞った 6 項目(naming、readability、null safety、exception handling、security、maintainability)で見直した。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、範囲外のファイル)は implementer が各スライスで確かめた前提で、目に入った分だけ載せる。テスト、静的検査、spec 適合、文書のずれは見ていない(`/verify`・`/test`・`/sync-docs` の範囲)。
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 2 / 2。cross-review の ACTION_REQUIRED を直したあとの回し直し。cycle 1 は 2 回走った: 90f4ecca と d87d250a)
+- Scope: `git diff 44c14b97...HEAD`(HEAD a9b63c8a、48 ファイル、+1252/-122、18 コミット)。先に直しのコミット dba1c20f(13 ファイル)を通読し、そのあとで cycle 1 の所見が解決したままかを確かめ、diff 全体をこの PR 自身が絞った 6 項目(naming、readability、null safety、exception handling、security、maintainability)で見直した。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、範囲外のファイル)は implementer が各スライスで確かめた前提で、目に入った分だけ載せる。テスト、静的検査、spec 適合、文書のずれは見ていない(`/verify`・`/test`・`/sync-docs` の範囲)。
 
 ## Previous findings
 
-前回は MEDIUM 1、LOW 6(1 回目の report は 90f4ecca)。7 件とも直っている。直しの過程で出た新しい指摘は、下の Findings の 3 件。
+cycle 1 の 1 回目(MEDIUM 1、LOW 6)と 2 回目(LOW 3)の計 10 件は、cycle 2 でも解決したまま。直しの dba1c20f が戻したものはない。
 
-| 前回の所見 | 状態 | 根拠 |
+| cycle 1 の所見 | 状態 | 根拠 |
 | --- | --- | --- |
-| MEDIUM: 手順 7 が implementer の self-check の中身を見ない(`or report it` だけで、直らなかった指摘の行き先がない) | 解決 | `.claude/skills/implement/SKILL.md:42` が「mechanical self-check result present, with a result for each of its five items and no item found and not fixed」と中身まで言い、「found and not fixed」は別スライスで直してから次へ進む。`.claude/agents/implementer.md:40,48` と `.codex/agents/implementer.toml` は結果を clean / fixed / found and not fixed の 3 状態にし、`or report it` を消した。`.claude/rules/ralph/model-routing.md:43-48` が orchestrator の動きを書く。2 つのテストが各文を固める。残った穴は Findings の 1 行目(秘密情報で止めたとき) |
-| LOW: 手順 6 の `before dispatching` と手順 7 の inline の順序(stage 前に `git diff --cached` が使えない) | 解決 | 手順 6 は `(for an inline slice, before implementing it)` を足した。手順 7 の inline は「検証 → stage → `git diff --cached` で確かめる → 直したら検証を打ち直して stage し直す → 結果を Progress checklist に書く → commit」の順で implementer と同じになった(`SKILL.md:43`)。テストが文を固め、「Then stage the slice's files and commit」の復活を禁じる |
-| LOW: implementer の定義の「`/self-review` no longer checks the first four items」 | 解決 | 「These are the checks `/self-review` leaves to the implementing side, so do not skip them.」に変わり、履歴の言い方も位置の指定もない(`implementer.md:40`、`.toml` も同じ)。`no longer` と `first four` が戻らないよう `assert_not_contains_any_case` がある |
-| LOW: Completion gate に `/verify` と `/test` の verdict がない、末尾の文がどの検証か不明 | 解決 | gate に `- [ ] /verify and /test (step 13) passed` を足し、末尾は `If a slice's verification or the pipeline's checks have not run, say so explicitly`(`SKILL.md:80-90`)。旧い文の復活も禁じるテストがある |
-| LOW: 「機械的な 5 項目」の言い方が場所ごとに違う | 解決 | model-routing の report contract が正本で、各所が同じ並びで繰り返す。全文検索で `typos` / `debug leftover` / `files outside` を洗い、implementer(`.md`・`.toml`)、reviewer(`.md`・`.toml`)、`self-review/SKILL.md`、手順 7 の inline が正本と一語違わない。折り返しは `join_lines` が吸収する。正本の文自体と各所の文は 2 つのテストが同じ定数で固める |
-| LOW: 6 項目のテストの範囲が狭い(reviewer の定義、report の Area、implementer の報告の欄、手順 7 の委譲側) | 解決 | `review_areas` / `area_values` が SKILL.md・reviewer.md・reviewer.toml・template.md の 3 形式を読み、旧 4 項目の語(`unnecessary typo debug secret`)を大文字小文字を区別せずに禁じる。implementer 4 ファイルの報告の欄、手順 7 の委譲側 2 文も固めた。`assert_part_lacks_any_case` は part が空なら失敗にするので、マーカー行を直し忘れても通らない |
-| LOW: 同名の `assert_contains` / `assert_not_contains` が 2 つのテストで大文字小文字の向きが逆 | 解決 | `test-slice-verification.sh` の関数を `*_exact` / `*_any_case` に改名し、冒頭のコメントに向きの違いを書いた。`test-self-review-scope.sh` の既存の 2 つ(基準の 44c14b97 から同じ向き)は変えず、新しい関数を挙動で名付けてコメントで区別した。ほかの tests の同名の関数(`test-plan-visual.sh` など)も向きが違うので、コメントの「other tests」は正しい |
+| 1 回目 MEDIUM: 手順 7 が self-check の中身を見ない | 解決のまま | `.claude/skills/implement/SKILL.md:42` の「a result for each of its five items and no item found and not fixed」が残り、dba1c20f はその文の後ろに再開の文を足しただけ |
+| 1 回目 LOW 6 件(inline の順序、`no longer` の履歴語、Completion gate、5 項目の言い方、6 項目のテストの範囲、同名 helper の向き) | 解決のまま | dba1c20f の差分はこれらの文を触っていない。5 項目の正本(`model-routing.md:43-47`)と各所の語は変わらず、テストの定数も同じ |
+| 2 回目 LOW: 秘密情報で止まったときと最後のスライスが orchestrator 側に届いていない | 解決のまま | 804d05f9 が手順 7 の delegated・inline と model-routing に足した。dba1c20f はその文を「再開として出し直す」に進めた(下の Findings の 1〜3 行目は、この進めた文への所見) |
+| 2 回目 LOW: Progress checklist の `Review artifact created` が 2 行 | 解決のまま | 計画に該当行は 127 行目の 1 行だけ。「このコミット」は SHA(bc56cc4f、d87d250a、dba1c20f)に置き換わり、a9b63c8a の追記も同じ形 |
+| 2 回目 LOW: 2 つのテストの `assert_joined_contains_exact` の guard の差 | 解決のまま | `tests/test-self-review-scope.sh:74-84` と `tests/test-slice-verification.sh:47-57` の両方に `[ ! -f ]` の分岐があり、本体が同じ |
+
+cross-review の指摘(秘密情報で止まったスライスを出し直すと、新しい implementer が「Before any edit」で止まる)は、dba1c20f で直った。`.claude/agents/implementer.md:21` と `.codex/agents/implementer.toml:22-25` に再開の例外が入り、手順 7 と model-routing が出し直しを「再開」と呼んで handoff に未コミットの変更を名指しさせる。例外の条件は「再開である」と「範囲内の未コミットの変更を、そのスライス自身のものとして名指ししている」の両方なので、名指しのない範囲内の変更では今も止まる。
 
 ## Evidence reviewed
 
-- 直しの 2 コミット(`git diff 90f4ecca bc56cc4f`)を root の定義・skill・rules・テストで通読した。`templates/base/` と `.agents/` の写しは `cmp` / `diff` で比べた
-  - `.claude/agents/{implementer,reviewer}.md`、`.claude/skills/implement/SKILL.md`、`.codex/agents/{implementer,reviewer}.toml` は `templates/base/` の同名と完全に一致した
-  - `.claude/rules/ralph/model-routing.md` は KNOWN_DIFFS の箇所(org receipts の節)だけが違う。cb094ae8 の hunk は root と `templates/base/` で同一
-  - `.claude/skills/{implement,plan,self-review}` の `SKILL.md` と `template.md` は `.agents/skills/` と `templates/base/` の両方の写しと一致した。`self-review/SKILL.md` の違いは `allowed-tools` の 1 行だけ(`.agents` 側の生成の既存の挙動)
-- 5 項目の語の洗い出し: `typos` / `debug leftover` / `files outside` を `.claude`・`.codex`・`.agents`・`docs/plans/templates`・`scripts` で grep し、すべての言及が正本と同じ並びだった。旧い `checked and clean` は残っていない
-- TOML: `.codex/agents/implementer.toml` と `reviewer.toml` にバックスラッシュはなく、`"""` は開始と終了の 2 つだけ。`git diff 44c14b97...HEAD --check` は空
-- 2 つのテストの helper(`review_areas`、`area_values`、`block`、`join_lines`、`assert_part_*`)の動きを awk の前方一致、`tr -s ' '`、`-F` の固定文字列で追った。reviewer.md は 1 行の Focus 行、reviewer.toml は `- ` の箇条書き、SKILL.md は番号付きで、いずれも 1 つの awk で同じ範囲に収まる
-- 計画: bc56cc4f が変えたのは `## Progress checklist` だけ(digest が読まない節)
-- 確かめていない: テストと静的検査の実行(計画の記録では scope 198/198、agent-models 47/47)、各テストの変異の再現
+- 直しの dba1c20f と、cycle 1 の直し 804d05f9 を `git show` で通読した
+- 写しの一致: `.claude/agents/implementer.md`、`.codex/agents/implementer.toml`、`.claude/skills/implement/SKILL.md` は `templates/base/` と `.agents/skills/` の同名と `cmp` で一致した。`model-routing.md` は KNOWN_DIFFS の箇所(org receipts の節)を除き、この PR の hunk が root と `templates/base/` で同一(`git diff … | grep '^[+-]'` の突き合わせ)
+- `git diff 44c14b97...HEAD --check` は空
+- 再開の文の置き場所を `grep -rn 'stopped without\|as a resume\|resumes a slice'` で洗った: implementer の定義 4 本(.md 2、.toml 2)、`implement/SKILL.md` の 4 写し(`.claude`、`.agents`、`templates/base/.claude`、`templates/base/.agents`)、model-routing の 2 本。「重なる変更では止まる」を言う場所は、`grep -rn -i 'overlap\|pre-existing\|unambiguous baseline\|in-flight'` で implementer の定義と `implement/SKILL.md` の手順 6・7 のほかになかった
+- `git restore -- <file>` の挙動は、scratchpad の使い捨てリポジトリで確かめた(下の 1 行目)
+- tech-debt の台帳: dba1c20f が閉じた行(手順 6 の「narrowest」の検査の穴)は、この PR の f2f0333c が足した行。閉じ方は台帳の既存の形(`<!-- RESOLVED … Row preserved for traceability. -->` の行と取り消し線の行、5 セル)で、パイプは 6 本。逆向き(この PR が invalidate したのに開いたままの行)は見つからなかった。hook の通知文の行(`run-verify.sh before claiming done`)は計画の Non-goals どおり開いたまま
+- 計画: a9b63c8a が足したのは `## Progress checklist` の 3 行だけ(digest が読まない節)
+- 確かめていない: テストと静的検査の実行(計画の記録では slice 138/138、scope 202/202、agent-models 47/47)、各テストの変異の再現
 
 ## Findings
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| LOW | maintainability | 「範囲内で消せない秘密情報はコミットせずに止める」例外(bc56cc4f)が implementer の定義にしかなく、orchestrator 側の文に届いていない。(1) 手順 7 の delegated と model-routing は「found and not fixed は別スライスで直してから次へ」とだけ言い、前提はコミット済みの指摘。止めたときはコミットがなく、「commit SHA が新しい `HEAD`」の確認も implementer の報告の commit SHA の欄も成り立たない。orchestrator が何をするか(別の handoff で消すか、人に聞くか)が書かれていない。(2) 手順 7 の inline は「別スライスで直す」のあとに `Then commit` と続くので、読んだ順に動くと秘密情報を含むままコミットできる。inline は orchestrator 自身が消せるので実害は小さいが、向きが implementer と逆。(3) `before the next slice` は最後のスライスでは参照先がない | `.claude/agents/implementer.md:40`(`do not commit; unstage it and stop`)、`.codex/agents/implementer.toml:50-52`。`.claude/skills/implement/SKILL.md:42`(delegated)・`:43`(inline、`fix an item found and not fixed as its own slice before the next slice. Then commit`)。`.claude/rules/ralph/model-routing.md:46-48`。報告の欄は `.claude/agents/implementer.md:48,50`(`mechanical self-check result` と `commit SHA`) | 手順 7 の delegated に 1 文足す。例: 「implementer が秘密情報でコミットせずに止めたとき(commit なし)は、同じく別の handoff で消すまで次へ進まない」。inline は「秘密情報は found and not fixed のままコミットしない」と一言足す。`before the next slice` は `(or step 12, after the last slice)` を足す。model-routing の 1 文と、テストで固める文もそろえる |
-| LOW | readability | 計画の `## Progress checklist` に「Review artifact created」が 2 行ある。bc56cc4f が足した `[x]` の行(127 行目)の下に、元の `[ ]` の行(130 行目)が残っている。Completion gate の「progress checklist is fully updated」を満たさない形で、`[ ]` の行は review が未実施に読める。また 129 行目の「(このコミット)」は、計画が `/pr` で archive されたあとは参照先がない | `docs/plans/active/2026-10-27-verify-slices-lighter-self-review.md:127,130,129` | 元の `[ ]` の行を `[x]` にして 127 行目の説明をそこへ移し、127 行目を消す。「このコミット」は SHA に置き換える(今回の直しのコミットを待って書く) |
-| LOW | maintainability | `join_lines` と `assert_joined_contains_exact` が 2 つのテストに同じ名前である。中身は同じではない: `test-slice-verification.sh` の版は `[ ! -f "$_file" ]` の分岐を持ち「no such file」と出すが、`test-self-review-scope.sh` の版は持たない。ファイルが消えたときは shell の redirect のエラーと「missing: 文」が出るだけで、原因が文の欠けに読める。前回の LOW(同名で向きが逆)と同じ種類の罠が、向きでなく guard の有無で残った | `tests/test-self-review-scope.sh:68-83`、`tests/test-slice-verification.sh:41-60` | `test-self-review-scope.sh` の版にも `[ ! -f ]` の分岐を足してそろえる。共有の helper ファイルは tests にまだないので、まずコピーの内容をそろえるだけでよい |
+| LOW | maintainability | 手順 7 の「範囲を絞って落とすファイルは `git restore -- <file>` で戻す」は、止まり方によっては何も戻さず、新規ファイルではエラーになる。使い捨てリポジトリでの結果: tracked でステージなし → 戻る(rc 0)。新規の untracked ファイル → `error: pathspec 'new.txt' did not match any file(s) known to git`(rc 1)。tracked でステージ済み → rc 0 だが index から戻すので変更がそのまま残る(`M  tracked.txt`)。秘密情報で止まった implementer は「unstage it」するので、新規ファイルなら untracked になり、`git restore` が失敗して秘密情報がディスクに残る。検証の失敗で止まった implementer は unstage を求められておらず(「report the failure clearly」)、ステージ済みなら `git restore` が効かない。末尾の「either way, no secret stays in the worktree」は事実の言い方だが、2 つ目の選択(変更を別スライスにする)では、そのスライスがコミットするまで秘密情報が worktree に残る。残ると、セッション終了と圧縮前の hook が feature branch の未コミットの変更を `wip:` でコミットする(`git-commit-strategy.md:43-45`)ので、履歴に入りうる | `.claude/skills/implement/SKILL.md:42`(4 写し)。固める検査は `tests/test-slice-verification.sh:182-184`。秘密情報での stop は `.claude/agents/implementer.md:40`、`.codex/agents/implementer.toml:55-56` | 手順 7 の文を、追跡中のファイルは `git restore --staged --worktree -- <file>`、新規のファイルは削除、と書き分ける。「no secret stays in the worktree」は「次の dispatch の前に秘密情報が worktree に残らないようにする」の命令にする。4 写しとテストの needle を同じ文にそろえる |
+| LOW | security | 秘密情報で止まるときの「report it」に、値を書かない指示がない。implementer の報告は「found and not fixed (what you found, …)」を求め、inline の手順は各項目の結果を計画の `## Progress checklist`(追跡されるファイル)に書くよう求める。「what」に秘密情報の値を入れると、orchestrator の会話と、コミットされる計画に値が入る。このリポジトリの他の契約は証拠を値でなく指す形に寄せている(`agent-messaging.md` の EVIDENCE-as-pointers) | `.claude/agents/implementer.md:40,48`、`.codex/agents/implementer.toml:55-56`、`.claude/skills/implement/SKILL.md:43`(inline)、`.claude/rules/ralph/model-routing.md:43-47`(report contract) | 秘密情報の項目だけ「ファイルと行を書き、値は書かない」と一言足す(implementer の定義 2 形式、inline の手順、model-routing の 1 文)。テストで固める文もそろえる |
+| LOW | maintainability | 再開の handoff の中身(「止まったスライスの未コミットの変更をそのスライス自身のものとして名指しする」)は、手順 7、model-routing の report contract の段落、implementer の「Before any edit」にしか書かれていない。handoff の契約として読まれる 2 か所には載っていない。(1) model-routing の「Structured handoff must carry」の表は 6 欄で、再開の欄がない。implementer の「Required handoff fields」も同じ。(2) 手順 6 の「Before dispatching, commit any outstanding plan/bookkeeping edits (or confirm they do not overlap the slice's files in scope) so the implementer starts from an unambiguous baseline」は、再開では重なりがあって当然なのに例外を持たない。止まる規則(implementer 側)に例外を足したのに、同じ規則を向こう側から言う手順 6 に足していない | `.claude/skills/implement/SKILL.md:40`(手順 6 の末尾)、`.claude/rules/ralph/model-routing.md:29-38`(表)と `:51-53`(段落)、`.claude/agents/implementer.md:11-17` | 表に「Resume(止まったスライスを出し直すときだけ): 範囲内の未コミットの変更の名指し」の行を足し、手順 6 の括弧に「(a resume of a stopped slice excepted: step 7)」を足す。表に足せば、段落の文は手順 7 を指すだけにできる |
 
 ## Positive notes
 
-- 5 項目の語は model-routing の正本から implementer(2 形式)、reviewer(2 形式)、self-review の skill、手順 7 まで同じ並びで届き、2 つのテストが同じ定数で固めている。1 か所だけ語を変えると落ちる
-- 前回の MEDIUM の直しは、clean / fixed / found and not fixed の 3 状態を implementer の定義・手順 7・model-routing・テストの全部に同じ向きで置いた。`or report it` のような抜け道が文面から消えた
-- `review_areas` は 3 形式の定義(SKILL.md、reviewer.md、reviewer.toml)を 1 つの awk で同じ範囲に切り出し、`assert_part_lacks_any_case` が空の part を失敗にする。マーカー行を直し忘れて何も照合しないまま通る、という穴がない
-- `no longer` と `first four` を禁じる検査が、文の直しだけでなく、履歴を前提にした書き方の復活も防ぐ
-- 今回の 2 コミットが触ったのはこの PR の範囲(定義、skill、rules、2 つのテスト、計画の Progress checklist)だけで、範囲外のファイルはない
-- 前回から続く良い点: root と写しが KNOWN_DIFFS 以外で一致している、`/self-review` を絞った理由が skill・reviewer・report の雛形に同じ向きで書かれスクリプト名がない(D5)
+- 直しは 4 つの implementer 定義、`implement/SKILL.md` の 4 写し、model-routing の 2 本に同時に届き、写しは `cmp` で一致している。cycle 1 の所見の型だった「例外が片方の定義にしか届かない」は起きていない
+- 再開の例外は条件が二重(再開であること、変更を名指ししていること)で、名指しのない範囲内の変更では今も止まる。「他人の進行中の変更を吸収しない」という元の保護は残っている
+- 検証の失敗で止まる場合を含め、例外を秘密情報に限らず「コミットせずに止まったスライスの再開」に広げた。implementer の定義(「Never commit failing state」)と手順 7 の stop の対象が合っている
+- 再開に関する 5 つの文(implementer の定義の例外、手順 7 の stop の範囲、手順 7 の再開、手順 7 の片付け、model-routing の段落)をすべてテストが固め、手順 6 の「narrowest」を 4 写しとも変える変異が落ちる検査も同じコミットで入った。台帳の行の閉じ方は既存の形に従い、計画の Progress checklist に一緒に閉じたことが書いてある(a9b63c8a)
+- 前回までの良い点が続いている: 5 項目の語が正本から同じ並びで届く、`/self-review` を絞った理由が履歴を前提にしない書き方で書かれている
 
 ## Tech debt identified
 
+このパイプラインは cap(2 回)の最後の回なので、下の LOW 3 件を直さずに `/pr` へ進めば、計画が archive されたあとに残るのは台帳の行だけになる。依頼されたコミットの範囲はこの report と insight event だけなので、`docs/tech-debt/README.md` には足していない。直さずに進める場合は、次の 1 行を足す(1 行にまとめた)。
+
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
+| 再開の手順の穴 3 つ(verify-slices-lighter-self-review の cycle 2 の self-review): (1) `/implement` 手順 7 の「`git restore -- <file>` で戻す」は新規(untracked)ファイルでエラー、ステージ済みなら何も戻さない。「either way, no secret stays in the worktree」は 2 つ目の選択では成り立たない。(2) 秘密情報で止まる指示に「値を報告や計画に書かない」がない。(3) handoff の表と手順 6 が再開を知らない | 秘密情報で止まった新規ファイルを落とすと、`git restore` が失敗してディスクに残り、セッション終了の `wip:` コミットで履歴に入りうる。値を報告に書けば、inline では計画に入る | cap の最後の回に見つかり、直すと手順 6・7、model-routing、implementer の定義 4 本、写し、2 つのテストの再実行になる。どれも止まったスライスの再開という稀な経路 | 次に `/implement` 手順 7 か implementer の定義を触るとき、または止まったスライスの再開を実際に行うとき: 3 点を直し、needle をそろえる | `docs/reports/self-review-2026-10-27-verify-slices-lighter-self-review.md`(Findings の 1〜3 行目)、`docs/reports/cross-review-triage-verify-slices-lighter-self-review.md` |
 
-なし(サイクル 1 の中。LOW 3 件は `/verify` の前に 1 コミットで直せる。直さずに進める場合は triage に回す)。
-
-_(If any rows were added above, also append them to `docs/tech-debt/`.)_
+_(台帳には足していない。足す場合は上の 1 行を `docs/tech-debt/README.md` の末尾に追記する。)_
 
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 3 件で、どれも文言と計画の記録とテストの helper の直し)
-- Follow-ups: 表の 1 行目(秘密情報で止めたとき)は、実装側の例外が orchestrator 側と食い違う点なので、`/verify` に進む前に直す価値がある。2 行目と 3 行目は同じコミットで直せる。`.goreleaser.yml:36-39` の changelog は `docs:` と `test:` を落とし、この PR の 10 コミットはすべてその 2 種なので、downstream に届く skill と agent の変更は自動の changelog に Merge 行しか出ない。計画の Rollout は release ノートを約束していないが、`/pr` の本文と release の issue に 1 行(「`/implement` がフルの検査を打たない」「`/self-review` が 6 項目になった」)を足す価値がある
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 3 件で、どれも稀な再開の経路の文言)
+- Follow-ups: cross-review の指摘そのもの(再開できない)は直っており、cycle 1 の 10 件も解決したまま。LOW 3 件は cap の最後の回の発見なので、直すなら cap を上げて全体を回し直す(または文書だけの直しとして扱えるか判断する)ことになり、直さないなら上の 1 行を台帳に足す。`.goreleaser.yml` の changelog は `docs:` と `test:` を落とし、この PR の 18 コミットはすべてその 2 種なので、downstream に届く skill と agent の変更は自動の changelog に Merge 行しか出ない。`/pr` の本文と release の issue に 1 行(「`/implement` がフルの検査を打たない」「`/self-review` が 6 項目になった」「止まったスライスは再開として出し直す」)を足す価値がある
