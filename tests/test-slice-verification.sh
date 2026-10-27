@@ -163,6 +163,9 @@ for file in $implement_skill_files; do
   assert_block_contains_exact "$file step 6 writes the picked command under Progress checklist" \
     "$file" "$step6" "$step7" \
     "pick the narrowest command that covers the slice's files and write it under the plan's \`## Progress checklist\` before dispatching (for an inline slice, before implementing it)"
+  assert_block_contains_exact "$file step 6 lets a resume hand over uncommitted changes" \
+    "$file" "$step6" "$step7" \
+    "so the implementer starts from an unambiguous baseline; the uncommitted changes a resume hands over (step 7) are the one exception."
 
   assert_block_contains_exact "$file delegated gate reads a result per self-check item" \
     "$file" "$delegated_start" "$inline_start" \
@@ -176,12 +179,15 @@ for file in $implement_skill_files; do
   assert_block_contains_exact "$file delegated gate covers a stop without a commit on a failure or a secret" \
     "$file" "$delegated_start" "$inline_start" \
     "If the implementer stopped without committing (a verification failure it could not fix within scope, or a secret in the staged diff it could not remove within scope), there is no new commit to check"
+  assert_block_contains_exact "$file delegated gate takes a secret out of the worktree first" \
+    "$file" "$delegated_start" "$inline_start" \
+    "First take a secret out of the worktree (edit the value out, or delete a new untracked file that holds it): the session-end and pre-compaction \`wip:\` checkpoints stage everything with \`git add -A\`."
   assert_block_contains_exact "$file delegated gate dispatches a stopped slice again as a resume" \
     "$file" "$delegated_start" "$inline_start" \
-    "then dispatch the slice again as a resume, with a handoff that names the uncommitted changes the stopped implementer left in the files in scope as the slice's own"
-  assert_block_contains_exact "$file delegated gate leaves no secret in a file dropped by narrowing" \
+    "Then narrow the slice or revise the plan (step 10) if needed, and dispatch the slice again as a resume, with a handoff that names the uncommitted changes the stopped implementer left in the files in scope as the slice's own, so the new implementer takes them over instead of stopping at its check for pre-existing changes."
+  assert_block_contains_exact "$file delegated gate discards a dropped file's changes in index and worktree" \
     "$file" "$delegated_start" "$inline_start" \
-    "When narrowing drops a file from the slice, restore it (\`git restore -- <file>\`) or give its changes a slice of their own; either way, no secret stays in the worktree."
+    "When narrowing drops a file from the slice, discard its changes (\`git restore --staged --worktree -- <file>\` for a tracked file; delete an untracked one) or give them a slice of their own."
 
   assert_block_contains_exact "$file inline slices run the plan's command" \
     "$file" "$inline_start" "$inline_stop" \
@@ -192,9 +198,9 @@ for file in $implement_skill_files; do
   assert_block_contains_exact "$file inline slices re-run the command after a fix" \
     "$file" "$inline_start" "$inline_stop" \
     "If the check changed anything, re-run the verification command and re-stage."
-  assert_block_contains_exact "$file inline slices note each item under Progress checklist" \
+  assert_block_contains_exact "$file inline slices note each item, a secret by file and line, and take a secret out of the worktree" \
     "$file" "$inline_start" "$inline_stop" \
-    "Note the result for each item (clean, fixed, or found and not fixed) under the plan's \`## Progress checklist\`; fix an item found and not fixed as its own slice before the next slice (for the last slice, before step 13). If a secret cannot be removed within scope, do not commit: unstage it and stop. Then commit"
+    "Note the result for each item (clean, fixed, or found and not fixed; name a secret by its file and line, never by its value) under the plan's \`## Progress checklist\`; fix an item found and not fixed as its own slice before the next slice (for the last slice, before step 13). If a secret cannot be removed within scope, do not commit: unstage it, take it out of the worktree as for a delegated slice, and stop. Then commit"
   assert_joined_lacks_any_case "$file drops the self-check before staging" \
     "Then stage the slice's files and commit" "$file"
 
@@ -250,8 +256,8 @@ for file in $model_routing_files; do
     "**Report contract (implementer → orchestrator):** changed files, decisions/deviations, verification evidence, the mechanical self-check result, commit-boundary evidence" "$file"
   assert_joined_contains_exact "$file report contract holds the canonical list" \
     "The mechanical self-check has five items, and this is the canonical list that every other mention repeats word for word: $mechanical_items." "$file"
-  assert_joined_contains_exact "$file report contract gives a result per item" \
-    "The result says, for each item, clean, fixed (what), or found and not fixed (what and why)." "$file"
+  assert_joined_contains_exact "$file report contract gives a result per item and names a secret by file and line" \
+    "The result says, for each item, clean, fixed (what), or found and not fixed (what and why), and names a secret by its file and line, never by its value." "$file"
   assert_joined_contains_exact "$file report contract fixes an item found and not fixed first" \
     "When an item is found and not fixed, the orchestrator has it fixed as its own slice before the next slice (\`/implement\` step 7)." "$file"
   assert_joined_contains_exact "$file report contract covers the last slice and a resume after a secret" \
@@ -260,6 +266,8 @@ for file in $model_routing_files; do
     "files outside the handoff)" "$file"
   assert_joined_contains_exact "$file handoff row points at the plan's Implementation outline" \
     "| Exact verification commands | the slice's command from the plan's \`## Implementation outline\`" "$file"
+  assert_joined_contains_exact "$file handoff table has the resume row" \
+    "| Resume (only when dispatching a stopped slice again) | the uncommitted changes the stopped slice left in the files in scope, named as the slice's own (\`/implement\` step 7) |" "$file"
   assert_joined_lacks_any_case "$file drops the bare copy-paste handoff row" \
     "| Exact verification commands | copy-paste ready |" "$file"
 done

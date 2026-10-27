@@ -36,6 +36,7 @@ itself.
 | Files in scope | exact list; implementer stages only these paths |
 | Exact verification commands | the slice's command from the plan's `## Implementation outline` (the narrowest check that covers the slice's files), copy-paste ready |
 | Commit message format | conventional format string |
+| Resume (only when dispatching a stopped slice again) | the uncommitted changes the stopped slice left in the files in scope, named as the slice's own (`/implement` step 7) |
 
 **Report contract (implementer → orchestrator):** changed files, decisions/deviations,
 verification evidence, the mechanical self-check result, commit-boundary
@@ -44,7 +45,8 @@ The mechanical self-check has five items, and this is the canonical list that
 every other mention repeats word for word: unnecessary changes, typos and
 copy-paste errors, debug leftovers, secrets, and files outside the slice. The
 result says, for each item, clean, fixed (what), or found and not fixed (what
-and why). When an item is found and not fixed, the orchestrator has it fixed
+and why), and names a secret by its file and line, never by its value. When
+an item is found and not fixed, the orchestrator has it fixed
 as its own slice before the next slice (`/implement` step 7). For the last
 slice, that happens before step 13. A secret that cannot be removed within
 scope is never committed: the implementer stops without a commit, and the

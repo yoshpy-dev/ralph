@@ -262,9 +262,11 @@ for file in $implementer_files; do
   assert_joined_contains_exact "$file reports an item it cannot fix" \
     "When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason." "$file"
   assert_joined_contains_exact "$file stops before committing a secret it cannot remove" \
-    "if a secret in the staged diff cannot be removed within scope, do not commit; unstage it and stop, and report it." "$file"
+    "if a secret in the staged diff cannot be removed within scope, do not commit; unstage it and stop, and report its file and line, never its value." "$file"
   assert_joined_contains_exact "$file report contract gives a result per item" \
     "mechanical self-check result: for each of the five items, one of clean, fixed (what you fixed), or found and not fixed (what you found, and why it could not be fixed within scope)" "$file"
+  assert_joined_contains_exact "$file report contract names a secret by file and line, not by value" \
+    "why it could not be fixed within scope); name a secret by its file and line, never by its value" "$file"
   assert_joined_contains_exact "$file says why the checks matter without history" \
     "These are the checks \`/self-review\` leaves to the implementing side, so do not skip them." "$file"
   assert_joined_contains_exact "$file takes over a stopped slice's changes on a resume" \

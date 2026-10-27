@@ -37,7 +37,7 @@ Never use `git add -A`, `git add -u`, or `git add .`.
 - secrets: hardcoded keys, tokens, passwords, or other credentials
 - files outside the slice: any path in `git diff --cached --name-only` that is not in the handoff's files in scope
 
-Fix what you find within scope, then re-run the verification commands and re-stage. When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason. The one exception is a secret: if a secret in the staged diff cannot be removed within scope, do not commit; unstage it and stop, and report it. These are the checks `/self-review` leaves to the implementing side, so do not skip them.
+Fix what you find within scope, then re-run the verification commands and re-stage. When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason. The one exception is a secret: if a secret in the staged diff cannot be removed within scope, do not commit; unstage it and stop, and report its file and line, never its value. These are the checks `/self-review` leaves to the implementing side, so do not skip them.
 
 **Commit:** use the handoff-provided conventional commit message format.
 
@@ -45,6 +45,6 @@ Fix what you find within scope, then re-run the verification commands and re-sta
 - changed files (list)
 - key decisions or deviations from the handoff (or "none")
 - verification evidence: each command run and its outcome
-- mechanical self-check result: for each of the five items, one of clean, fixed (what you fixed), or found and not fixed (what you found, and why it could not be fixed within scope)
+- mechanical self-check result: for each of the five items, one of clean, fixed (what you fixed), or found and not fixed (what you found, and why it could not be fixed within scope); name a secret by its file and line, never by its value
 - commit-boundary evidence: `git status --porcelain` output after commit + `git show --stat HEAD` output
 - commit SHA
