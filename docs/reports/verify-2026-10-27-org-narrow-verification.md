@@ -1,21 +1,21 @@
 # Verify report: org-narrow-verification
 
 - Date: 2026-10-28
-- Plan: `docs/plans/active/2026-10-27-org-narrow-verification.md`(AC1〜AC6、D1〜D6、Verify plan、Progress checklist の S1〜S5 と直し F1〜F3)。issue #262 の受け入れ条件 4 つ
-- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 1 / 2)
-- Scope: `git diff 622cdcfb...HEAD`(HEAD 063f2ceb、18 ファイル、+1602/-100、15 コミット)。Go のコードの変更はテストのファイル 2 つだけで、ほかは役割雛形 3 本(go:embed)、`/org` skill の 4 つの写し、文書。self-review の 2 回目の LOW 2 件は、直し F3(8cda482e)に照らして HEAD で読んだ。テストは打っていない(`/test` の範囲)
-- Evidence: `docs/evidence/verify-2026-10-27-org-narrow-verification.log`(gitignore。`run-static-verify.sh` の全出力、digest の計算、写しの `cmp`、gate の節の base と HEAD の `cmp`、drift の grep、`gofmt` と `go vet`)
+- Plan: `docs/plans/active/2026-10-27-org-narrow-verification.md`(AC1〜AC6、D1〜D6、Verify plan、Progress checklist の S1〜S5、直し F1〜F8)。issue #262 の受け入れ条件 4 つ
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 2 / 2。cross-review の ACTION_REQUIRED を直したあとの回し直し)
+- Scope: `git diff 622cdcfb...HEAD`(HEAD 844655c1、24 ファイル、+2440/-105)。cycle 1 の verify(584f8103)のあとに入ったのは、直し F4 ffafc9d2・F5 a7d879d9・F6 854be9db と 51cf59e2・F8 28d83b96、sync-docs 02afccd2、記録のコミット。`git diff 584f8103..HEAD` は 16 ファイル、+838/-88。Go のコードの変更は、今回もテストのファイル 3 つだけ。cycle 2 の self-review(bd21c5fd)は F8 の前の HEAD 2f884ae1 を読んだもので、計画の Progress(`:197`)は F8 の diff の確認を verify と cross-review に任せている。そのため F8 の diff は全部読んだ。テストは打っていない(`/test` の範囲)
+- Evidence: `docs/evidence/verify-2026-10-27-org-narrow-verification.log`(gitignore。`run-static-verify.sh` の全出力、`check-sync.sh` と `check-skill-sync.sh`、digest、写しの `cmp`、gate の節の base と HEAD の `cmp`、語の数え上げ、古い言い方の grep、`gofmt` と `go vet`)
 
 ## Spec compliance
 
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
-| AC1 leader の TASK の例に `VERIFY:` の行があり、機能ごとの org の手順 1 にスライスごとの検証コマンドと `RALPH_VERIFY_SCOPE=changed` の注意がある | Met | TASK の例は `internal/org/prompts/leader.md:463-474`(本文の `VERIFY: test -z "$(gofmt -l internal/foo)" && …`)。`VERIFY:` を本文の行にする決まりは `:449-451`(D4)。手順 1 は `:119-125`(「— verify: `<コマンド>`」、いちばん狭い検査、`RALPH_VERIFY_SCOPE=changed` は Go では `go test ./...` を全部走らせるので絞り込みに使わない)。ミッションの 3(`:28-43`)はどの org にも `VERIFY:` の行を求める。手順 5(`:199-202`)は計画の `— verify:` を書き換えずに写す |
-| AC2 implementer の RESULT の契約に 5 項目の結果と検証コマンドの結果があり、既定が `run-verify.sh` ではなく、いちばん狭い検査 | Met | 既定は `internal/org/prompts/implementer.md:23-31`(`VERIFY:` の行がなければ触ったパッケージの `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`、`run-verify.sh` は狭い検査で覆えないときだけ)。5 項目の確かめは `:48-57`(stage した差分、この順、範囲内で消せない秘密情報はコミットせず BLOCKED、値は書かない)。契約は `:133-145`、例は `:93-96`(`VERIFY: … → pass`、`SELF-CHECK:` の 5 項目)。stage → 確かめ → コミットの順は `:33-35` |
-| AC3 機能ごとの org のレビューの TASK は `run-test.sh` を打たない。指示があればそれだけ、なければ両方。gate の TASK は今のまま | Met | leader の手順 8(`leader.md:226-245`)がレビューの TASK の本文に `CHECKS: ./scripts/run-static-verify.sh` の 1 行だけを書く。reviewer のミッションの 1(`internal/org/prompts/reviewer.md:17-29`)は、指示を本文の `CHECKS:` の行だけから取り、指示があれば足しも削りもせず、行がなければ両方を打つ(D6)。機能ごとでない org の leader はコマンドを書かない(`leader.md:40-43`)。gate の TASK: reviewer の「## gate の TASK」の節(67 行)と leader の手順 9〜12(120 行)は、base 622cdcfb と HEAD で `cmp` が一致した。`*.go` のうちテストでないファイルの変更は 0 件で、`ralph org gate` と `ralph org regate` のコードは変わっていない |
-| AC4 `/org` skill の「役割」と「座席内 fan-out」が S1〜S3 と食い違わず、4 つの写しが一致する | Met | 「役割」の implementer は `.claude/skills/org/SKILL.md:1324-1340`、reviewer は `:1341-1363`。fan-out の例は `:1312-1316`。「org の終わり方」の冒頭の段落 `:951-965` と「Leader 運用 2 経路」の手順 3(`:1446-1452`)も雛形と同じ語。`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` は `cmp` で同一 |
-| AC5 quality-gates・recipe・仕様の reviewer の記述が S2 と食い違わない | Met(S5 の範囲) | `docs/quality/quality-gates.md:82` と `templates/base/docs/quality/quality-gates.md:81` は、同じ文で「レビューの TASK が名指すコマンド、既定は両方、機能ごとの org は静的検査だけで、フルの test は gate で 1 回」(2 つの差は KNOWN_DIFF の「(see docs/tech-debt)」だけ)。recipe は `docs/recipes/codex-seat-permissions.md:220-223`、写しと `cmp` で同一。仕様は `docs/specs/2026-08-01-org-runtime.md:33-39` の「2026-10-27 改訂」(a)〜(d) と FR-7 の印。S5 が名指さない `docs/specs/2026-10-07-org-multi-org-director.md` に古い文が残る(下の Documentation drift の 1 行目) |
-| AC6 雛形のテストと skill の同期の検査が通る | Partially(静的の半分) | `check-skill-sync.sh`(14 skill が一致)と `check-sync.sh`(DRIFTED 0)は通った。`go vet ./internal/org/` はテストのファイルを含めて rc 0 で、2 つの新しいテストのファイルはコンパイルできる。テストの実行(`TestRenderRolePrompt_*`、`TestOrgSkill_*`、`*_sync_test.go`)は `/test` に残す。足したテストは AC の文が名指す `prompts_test.go` ではなく `prompts_verification_test.go`(799 行、16 本)と `prompts_verification_multi_test.go`(90 行、2 本)にある(F2 と F3。Progress に記録済み)。`prompts_test.go` は base と同一 |
+| AC1 leader の TASK の例に `VERIFY:` の行があり、機能ごとの org の手順 1 にスライスごとの検証コマンドと `RALPH_VERIFY_SCOPE=changed` の注意がある | Met | implementer への TASK の例は `internal/org/prompts/leader.md:484-495`(本文の `VERIFY: test -z "$(gofmt -l internal/foo)" && …` は `:494`)。`VERIFY:` を本文の行にする決まりは `:470-472`(D4)。手順 1 は `:140-146`(「— verify: `<コマンド>`」、いちばん狭い検査、`RALPH_VERIFY_SCOPE=changed` は Go では `go test ./...` を全部走らせるので絞り込みに使わない)。ミッションの 3(`:28-39`)は、どの org でも `VERIFY:` の行を書くよう求める。cycle 1 から変わっていない |
+| AC2 implementer の RESULT の契約に 5 項目の結果と検証コマンドの結果があり、既定が `run-verify.sh` ではなく、いちばん狭い検査 | Met | 既定は `internal/org/prompts/implementer.md:32-45`(`VERIFY:` の行がなければ、触ったパッケージの `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`。`run-verify.sh` は狭い検査でスライスのファイルを覆えないときだけ)。5 項目の確かめは `:61-80`(stage した差分を読み、この順に見る)。契約は `:156-170`、例は `:112-122`(`VERIFY: … → pass` と `SELF-CHECK:` の 5 項目)。F4・F5 は `:61-80` の秘密情報の扱いを書き換えたが、5 項目の名前と順は変わっていない |
+| AC3 機能ごとの org のレビューの TASK は `run-test.sh` を打たない。指示があればそれだけ、なければ両方。gate の TASK は今のまま | Met | leader の手順 8(`leader.md:247-266`)が、レビューの TASK の本文に `CHECKS: ./scripts/run-static-verify.sh` の 1 行だけを書く。reviewer のミッションの 1(`internal/org/prompts/reviewer.md:17-29`)は、指示を本文の `CHECKS:` の行だけから取り、指示があれば足しも削りもせず、行がなければ両方を打つ(D6)。機能ごとでない org の leader はコマンドを書かない(`leader.md:61-64`)。`reviewer.md` は 584f8103 から変わっていない。gate の TASK: reviewer の「## gate の TASK」の節(67 行)、leader の手順 9〜12(120 行)と 9〜16(170 行)、skill の reviewer の gate の TASK の箇条(41 行)は、base 622cdcfb と HEAD で `cmp` が一致した。skill の「org の終わり方」の手順から「merge してよい順」までも一致した(続く「座席内 fan-out」の例は S4 で変えた分)。テストでない `*.go` の変更は 0 件で、`internal/org/gate*.go`、`regate*.go`、`internal/cli/` の差分は 0 行 |
+| AC4 `/org` skill の「役割」と「座席内 fan-out」が S1〜S3 と食い違わず、4 つの写しが一致する | Met | 「役割」の implementer は `.claude/skills/org/SKILL.md:1324-1347`、reviewer は `:1348-1370`、fan-out の例は `:1312-1316`。cycle 2 で足した文(前からあった変更の扱い `:1336-1339`、`RESUME:` の引き継ぎ `:1339-1343`、leader 運用の手順 3 の再開 `:1458-1466`)は雛形と同じ語で書かれている(下の「4 つの面の突き合わせ」)。`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` は root と `cmp` で同一 |
+| AC5 quality-gates・recipe・仕様の reviewer の記述が S2 と食い違わない | Met(S5 の範囲) | `docs/quality/quality-gates.md`、`templates/base/docs/quality/quality-gates.md`、`docs/recipes/codex-seat-permissions.md` と写し、`docs/specs/2026-08-01-org-runtime.md` は 584f8103 から変わっていない(`git diff --quiet` が rc 0)。cycle 1 で LOW とした `docs/specs/2026-10-07-org-multi-org-director.md` の FR-7 には、sync-docs 02afccd2 が「2026-10-27 に決めたこと」と「印(2026-10-27)」を足した(`:127-128`)。中身はレビューの `CHECKS:` の行、gate の 1 回の test、D6 の既定で、雛形と合う。印が挙げるテスト 5 本はどれも `internal/org/prompts_verification_test.go` にある |
+| AC6 雛形のテストと skill の同期の検査が通る | Partially(静的の半分) | `check-skill-sync.sh`(14 skill が一致)と `check-sync.sh`(DRIFTED 0)は通った。`go vet ./internal/org/` はテストのファイルを含めて rc 0 で、テストのファイル 3 つ(`prompts_verification_test.go`、`…_multi_test.go`、`…_predate_test.go`)はコンパイルできる。テストの実行は `/test` に残す。足したテストは AC の文が名指す `prompts_test.go` ではなく、この 3 つのファイルにある(F2・F3・F5 で Progress に記録済み)。`prompts_test.go` は base と同一 |
 
 issue #262 の受け入れ条件:
 
@@ -26,16 +26,37 @@ issue #262 の受け入れ条件:
 | 3. reviewer のレビューの TASK が `run-test.sh` を打たない | Met(機能ごとの org) | AC3 と同じ。D6 のとおり、指示のないレビュー(機能ごとでない org、古い leader)では両方を打つ |
 | 4. 雛形のテストと同期の検査が通る | Partially | AC6 と同じ。テストは `/test` |
 
-雛形 3 つの突き合わせ(Verify plan の spec compliance):
+cross-review の指摘(triage の ACTION_REQUIRED #1)の解消:
 
-- leader が書く `VERIFY:` の行(`leader.md:28-39`、`:199-202`、例 `:473`)を、implementer は TASK の本文から読む(`implementer.md:19-23`)。複数のスライスの形 `VERIFY: S1: <コマンド>` は leader に 1 回、implementer に 2 回(受け取りと RESULT)、skill に 3 回、同じ文字列で出る。Go のいちばん狭い検査の文字列は、leader、implementer、skill に 1 回ずつ同じ形で出る
-- 機能ごとの org のレビューの TASK の `CHECKS: ./scripts/run-static-verify.sh`(`leader.md:229`)を、reviewer は本文の行として読み(`reviewer.md:21-24`、`:148-149`)、同じ形で RESULT と BLOCKED に返す(`:53-59`、例 `:160`、`:173`、契約 `:220-222`)。leader は返った行に `./scripts/run-static-verify.sh` があるかを見て、なければ 2 回まで送り直し、3 回目は送らず escalate する(`leader.md:236-243`)。`./scripts/run-test.sh` も並んでいれば既定を打っただけとして扱う(`:244-245`)
-- `GATE:` の意味: reviewer のミッションの 5(`reviewer.md:53-62`)と leader の手順 8(`leader.md:232-233`)が、機能ごとの org のレビューの `GATE: pass` は静的検査だけを指し、test の結果は gate の TASK の `GATE:` で見る、と同じことを言う
+- 解消した。指摘は、implementer の秘密情報の片付けが、座席が始める前から stage されていた scope の外の変更まで unstage し、中身を消すかファイルを消しうる、というもの。HEAD の `implementer.md` では次のとおりになっている
+  - 「前からあった変更」を TASK ごとの記録で 1 度だけ定義する(`:15-18`。stage 済みのものも含む)
+  - 直すのはこのスライスの変更だけで、前からあった変更は stage 済みのものも含めて、書き換えも削除も unstage もしない(`:66-68`)
+  - unstage はパスを付けた `git restore --staged -- <このスライスのパス>...` で行い、パスのない `git reset` は打たない(`:68-70`)
+  - コミットしないのは 3 つの場合で、どれも BLOCKED を返す。(1) このスライスの変更にある秘密情報を scope の中で消せない、(2) 前からあった変更に秘密情報がある、(3) stage 済みの前からあった変更に scope の外のパスがある(`:70-74`)
+  - ファイルを消すのは (1) で、そのファイルが「このスライスで作った未追跡のファイル」のときだけ。(2) と (3) では何も触らない(`:74-77`)
+- triage が挙げた例(scope の外に前から stage された認証情報のファイル)は (2) か (3) に当たり、座席はそれに触らずに BLOCKED で止まる
+- 古い言い方(「例外は秘密情報だけ」「新しい未追跡のファイルなら」「秘密情報を scope の中で消せなければ」「座席が始める前」「既存の変更」)は、雛形、skill の 4 つの写し、`docs/specs/`、`docs/recipes/`、`docs/quality/` のどこにも残っていない。テストの中に、それが戻らないことを確かめる照合として残るだけ(`prompts_verification_predate_test.go:47`、`:108`、`:139`)
+- skill の implementer の箇条(`SKILL.md:1336-1339`)も同じ境界を書く。前からあった変更の秘密情報と、その中で stage 済みの scope の外のパスには触らず、コミットせずに BLOCKED を返す
 
-self-review の 2 回目の LOW 2 件(F3 8cda482e で直した分):
+4 つの面(雛形 3 つと `/org` skill)の突き合わせ(空白を詰めて数えた。証拠のログの「phrase counts」):
 
-- LOW 1(複数のスライスの RESULT の形): 解消。`implementer.md:139-145` が `COMMIT:`・`VERIFY:`・`SELF-CHECK:` の行をスライスごとに名前付きで書くと決め、例(`:85-87`)がその節を指す。skill は `SKILL.md:1338-1340`。テスト `TestRenderRolePrompt_Implementer_ResultOfSeveralSlicesNamesEachSlice`(`prompts_verification_multi_test.go:20`)が足された
-- LOW 2(`CHECKS:` の行のない TASK の散文を指示とみなす文): 解消。`reviewer.md:21-24` は「指示とみなすのはこの行だけ」で、行がなければ両方を打つ。消えた文(「を書かない leader もある」)は、雛形、skill の 4 つの写しのどこにも残っていない(残るのは self-review の report だけ)。skill は `SKILL.md:1344-1346`。テストは `prompts_verification_test.go:248` でこの文が戻らないことを確かめる
+| 語 | implementer | leader | reviewer | skill | 読み |
+| --- | --- | --- | --- | --- | --- |
+| `VERIFY: S1: <コマンド>`(複数スライス) | 2 | 1 | 0 | 3 | leader が書き(`leader.md:38`)、implementer が受け取りと RESULT の形で読む(`implementer.md:35`、`:168`)。skill は手順 3、「役割」、「org の終わり方」に 1 回ずつ書く。reviewer は扱わない |
+| `VERIFY: <コマンド>`(1 スライス) | 0 | 1 | 0 | 0 | leader だけが形を書き(`:39`)、ほかは例(`implementer.md:118`、`leader.md:494`)と散文で示す。食い違いはない |
+| `CHECKS: ./scripts/run-static-verify.sh` | 0 | 1 | 5 | 3 | leader の手順 8(`:250`)が書き、reviewer が本文の行として読み(`reviewer.md:21-24`)、同じ形で返す(`:54-57`、例 `:160`、`:173`)。skill は「org の終わり方」の冒頭、「役割」の reviewer、RESULT の例(`:1505`)。cycle 1 から変わっていない |
+| `RESUME: S1: <パス>...`(複数スライス) | 1 | 1 | 0 | 1 | F8 で 3 つの面にそろった(`implementer.md:24`、`leader.md:47`、`SKILL.md:1462`)。implementer はその名前のスライスのコミットに入れる(`:24-26`)。skill の「役割」は散文で同じことを書く(`:1341-1343`) |
+| `RESUME: <パス>...`(1 スライス) | 0 | 1 | 0 | 0 | leader が形を書き(`:47-48`)、例は `:44`。implementer と skill は「`RESUME:` の行に挙がったパス」と散文で書く |
+| 「前からあった変更」 | 11 | 2 | 0 | 3 | 定義は implementer の 1 か所(`:15-18`)。leader の説明(`:56-59`。止まった TASK の始めの記録に出ていて、その TASK の `RESUME:` の行になかった変更)はこの定義と同じ集合を指す。skill の説明(`:1336-1338`。TASK ごとに、最初の編集の前の記録に出ていた変更)も同じ |
+| コミットしない 3 つの場合 | 3 つを並べる | — | — | 3 つを 1 文で書く | implementer は `:70-74`、skill は `:1335-1339`(「scope の中で消せない秘密情報」「前からあった変更の秘密情報」「その中で stage 済みの scope の外のパス」)。leader は秘密情報の 2 つについて、再開か escalate かを決める(`leader.md:53-60`) |
+
+self-review の cycle 2 の 2 回目(bd21c5fd、HEAD 2f884ae1 を読んだ)の所見を、F8 28d83b96 に照らして HEAD で読んだ:
+
+- R2-1(複数スライスの `RESUME:` に名前がない): 解消。上の表の行のとおり、3 つの面が `RESUME: S1: <パス>...` を書く。テストは `resumeLineOfOneOfSeveralSlices`(`prompts_verification_predate_test.go:149-152`)で 3 つの面を照合する
+- R2-2(skill の leader 手順 3 に escalate と狭めるときの文がない): 解消。`SKILL.md:1462-1466` に、狭めるときも残したパスをすべて並べて元に戻すパスを書く文と、値が消えていないとき、または前からあった変更の秘密情報のときに escalate する文がある
+- R2-3(leader の「前からあった変更」の説明が implementer の定義と違う): 解消。`leader.md:56-59` の括弧は implementer の定義と同じ集合を言う。古い括弧(「止まった TASK より前の変更」)は消え、テストがそれの戻りを照合する
+- R2-4(「残したパス」が 2 通りに読める、折り返し): leader の側は解消。`leader.md:50-53` は「止まった TASK がコミットせずに残したパスは、狭めたスライスから外すものも含めてすべて」と書き、折り返しも直った。R2-4 が添えた `implementer.md` の短い行(F6 の挿入による)は `:160`(「パスを書きます。検証結果には、打った」)に残る。Markdown の段落としては同じ文に読めるので、意味は変わらない(Info)
+- R2-5(テストの整理)と、1 回目の所見 4(標準フローの implementer の片付け): 計画の決定(`:192`、`:197`)のとおり、sync-docs で tech-debt に記録する。HEAD の `docs/tech-debt/README.md` にはまだない。self-review の報告の「案 B」の行は R2-1〜R2-5 を並べているが、R2-1〜R2-4 は HEAD で解消しているので、台帳に足すのは R2-5 だけでよい(下の Documentation drift)
 
 計画の digest: `./scripts/plan-visual.sh digest` が `97abe345a188` を返し、`- Approved: 2026-10-27 sha256:97abe345a188` と一致する。
 
@@ -43,10 +64,10 @@ self-review の 2 回目の LOW 2 件(F3 8cda482e で直した分):
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `./scripts/run-static-verify.sh` | rc 0 | changed scope、言語は golang だけ。golang の pack は gofmt ok、`go vet` は出力なし、golangci-lint `0 issues.`、staticcheck は出力なし。local verifier の shellcheck、hook の `sh -n`、guard の awk の構文、settings の `jq`、Codex の hook の検査 3 つ、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の計画参照はすべて OK。secret scan は 622cdcfb..063f2ceb で clean |
+| `./scripts/run-static-verify.sh` | rc 0 | changed scope、言語は golang だけ。golang の pack は `gofmt: ok`、`go vet` は出力なし、golangci-lint は `0 issues.`、staticcheck は出力なし。local verifier の shellcheck、hook の `sh -n`(root と template の 10 本ずつ)、guard の awk の構文、settings の `jq`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の計画参照はすべて OK。secret scan は 622cdcfb..844655c1 で clean。wrapper 自身のログは `docs/evidence/verify-2026-10-27-195522.log` |
 | `./scripts/check-skill-sync.sh` | rc 0 | 14 skill が一致 |
-| `./scripts/check-sync.sh` | PASS | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5 |
-| `test -z "$(gofmt -l internal/org)"` と `go vet ./internal/org/` | rc 0 | テストのファイル 2 つを含む |
+| `./scripts/check-sync.sh` | rc 0、PASS | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 11、KNOWN_DIFF 5 |
+| `test -z "$(gofmt -l internal/org)"` と `go vet ./internal/org/` | rc 0 | テストのファイル 3 つを含む。go1.27.3(go.mod と同じ) |
 | `git diff --check 622cdcfb...HEAD` | rc 0 | 出力なし |
 | 変更したファイルの U+FFFD | 0 件 | `grep -l` の rc 1 |
 
@@ -54,29 +75,34 @@ self-review の 2 回目の LOW 2 件(F3 8cda482e で直した分):
 
 | Doc / contract | In sync? | Notes |
 | --- | --- | --- |
-| `docs/specs/2026-10-07-org-multi-org-director.md` FR-7 | No(LOW、`/sync-docs` へ) | `:124` の「2026-10-26 に決めたこと」が「テストは今までどおり review と gate の 2 回走り、2 回とも reviewer が走らせる」と言い、`:121` の 7b の注も「テストは review と gate の 2 回走る」と言う。このブランチのあと、機能ごとの org ではレビューが静的検査だけになり、test は gate の 1 回になる。この仕様は古い決定を書き換えず、日付の付いた「決めたこと」を足す(2026-10-26 の reviewer-runs-gate は FR-7 の項目と Status の段落 `:39` を足した)。計画の S5 はこの仕様を名指していないので AC5 の範囲の外だが、Verify plan の `docs/` の grep の範囲には入る。FR-7 はすでに `[ ]` なので、印の変更は要らない |
-| `docs/tech-debt/README.md:157`(FR-7 の gate が雛形の指示による、の行) | No(既知、`/sync-docs` へ) | 「The reviewer seat re-runs `run-static-verify.sh` / `run-test.sh`」が残る。計画の Progress(`:182`)が、trigger に当たるが払わずに繰り越す注記を足す作業として sync-docs に渡している |
-| `templates/base/ralph.toml:99` | Yes(情報) | 「the reviewer re-runs run-static-verify.sh / run-test.sh, so a guarded claude reviewer stops at the permission prompt」。機能ごとの org の reviewer もレビューで `run-static-verify.sh` を、gate の TASK で `ralph org gate`(中で `run-test.sh`)を打つので、guarded で許可待ちになるという注意は今も正しい |
-| `docs/tech-debt/README.md:224-225`(tests twice の行) | Yes | RESOLVED の注記と打ち消し線。gate が静的検査をもう 1 回打つこと、指示のないレビューは両方を打つこと(D6)も書いてある。`:233` の reviewer の文は「(and, outside a feature org, its `run-test.sh`)」に直った。tech-debt の計画参照の検査は OK |
-| `.claude/rules/ralph/git-commit-strategy.md:27`(Org runtime seats commit the same way as the standard flow above) | Yes | #261 の verify が「org の座席にはまだ当てはまらない(#262)」とした文。org の implementer がスライスのコマンド(TASK の `VERIFY:`、なければいちばん狭い検査)を打つようになったので、手順 2 と合う |
-| README の `ralph org gate` の段落(`README.md:264`)と `/org` skill の gate の節(`SKILL.md:1113-1136` の「gate の記録」) | Yes | gate は今のまま 2 つのスクリプトを走らせる。「After the reviewer passes its review」はレビューの中身を言わない |
-| implementer の既定を `run-verify.sh` とする文 | Yes | 雛形、skill、`docs/`、`.claude/rules/` の `run-verify.sh` で座席に触れるのは、狭い検査で覆えないときだけ使うと書いた 3 か所(`implementer.md:30`、`SKILL.md:1331`、仕様の改訂 (a))だけ |
-| reviewer がレビューで必ず `run-test.sh` を打つと読める文 | Yes(上の 2 行を除く) | 記録(`docs/reports`、`docs/plans/archive`、`docs/evidence`、`docs/insights`)の外で `run-test.sh` を含むファイルを全部見た。reviewer の文は上の仕様と台帳の 2 行のほか、既定の両方を言うもの(D6)か gate のものだけ |
-| 計画の記録 | 情報 | AC6 と S1 は `internal/org/prompts_test.go` を名指すが、テストは新しいファイル 2 つにある(F2・F3 で Progress に記録済み)。Progress の `:183` に、`:177` の `[x] Review artifact created` と重なる `[ ] Review artifact created` の行が残る。digest は一致しており、この 2 点は承認の検査に関係しない |
+| `docs/specs/2026-08-01-org-runtime.md` の「2026-10-27 改訂」(a)、`docs/specs/2026-10-07-org-multi-org-director.md` の FR-7「2026-10-27 に決めたこと」 | 一部(LOW、`/sync-docs` へ) | 2 つの仕様は、本文の行 `VERIFY:` と `CHECKS:` を契約として書いている。cycle 2 の直しで増えた 2 つは書いていない。1 つは leader から implementer への本文の行 `RESUME:`(止まったスライスの再開。複数スライスでは名前付き)、もう 1 つは implementer の片付けの境界(このスライスの変更だけを直し、前からあった変更には触らず、コミットしない 3 つの場合は BLOCKED)である。triage は影響するファイルに改訂 (a) を挙げたが、F4〜F8 は仕様を触っていない。改訂 (a) は前から秘密情報の片付けを書いていなかったので、偽になった文はない。そのため食い違いではなく欠けとして LOW にした。足すなら改訂 (a) に 1〜2 文(`RESUME:` の行と片付けの境界)。FR-7 の印は `[ ]` のままでよい |
+| `docs/tech-debt/README.md`(R2-5 と、1 回目の所見 4 の行) | 未記録(既知、`/sync-docs` へ) | 計画の Progress(`:192`、`:197`)が sync-docs に渡した 2 行は、cycle 2 の sync-docs がまだ走っていないので HEAD にない。self-review の報告の「案 A」(標準フローの implementer の片付け)はそのまま使える。「案 B」は R2-1〜R2-5 を並べるが、R2-1〜R2-4 は F8 で解消したので、R2-5(同じ文を 2 か所で固定、`predate` のファイルに再開のテスト、順序の照合が 2 通り、テスト名の語)に絞る |
+| `docs/tech-debt/README.md:157`(FR-7 の gate が雛形の指示による、の行) | Yes | cycle 1 で既知とした古い文(「The reviewer seat re-runs `run-static-verify.sh` / `run-test.sh`」)は、sync-docs 02afccd2 が「runs the commands its review TASK names」に直し、2026-10-27 の繰り越しの注記を足した。列の数は 5 のまま。cycle 2 の直しは座席が打つコマンドを変えていないので、この注記は今も正しい |
+| `docs/quality/quality-gates.md:82`、`templates/base/docs/quality/quality-gates.md:81`、`docs/recipes/codex-seat-permissions.md:220-223` と写し | Yes | 584f8103 から変わっていない。quality-gates の「impl exit checks (the slice's verification command from the leader's TASK and a mechanical self-check on the staged diff)」は、秘密情報の片付けを書いていないので、F4〜F8 と食い違わない。recipe の写しは `cmp` で同一 |
+| `.claude/rules/ralph/agent-messaging.md` | Yes | ralph が検証するヘッダの契約だけを書く rule で、`VERIFY:`・`CHECKS:` と同じく、本文の行 `RESUME:` も書かない(cycle 1 の sync-docs の判断と同じ)。`RESUME:` は D4 のとおり本文の行で(`leader.md:44-45`)、ralph は読まない |
+| `RESUME:` の行が出る所 | Yes(上の仕様の行を除く) | 記録(`docs/reports`、`docs/plans/archive`、`docs/insights`、`docs/evidence`)の外では、雛形 2 つ、skill の 4 つの写し、計画、テストだけ |
+| README の `ralph org gate` の段落と `/org` skill の gate の節 | Yes | gate の節は base と同一(AC3 の行)。cycle 2 の直しは gate に触れていない |
+| 計画の記録 | 情報 | Progress の F4〜F8 の記録は HEAD の差分と合う(コミットの SHA、触ったファイル)。cycle 1 で情報とした `[ ] Review artifact created` の重なりは消えている。残る `[ ]` は `PR created` だけ。digest は一致 |
 
 ## Observational checks
 
-- 版が混ざったときの道(雛形を読んだだけで、動かしていない): 新しい leader と古い reviewer の機能ごとの org では、古い reviewer も「指示があればそれ」なので静的検査だけを打つ(D6 の分析のとおり)。ただし古い reviewer は `CHECKS:` の行を返さないので、新しい leader は手順 8 のとおり 2 回送り直し、3 回目は送らずに escalate で BLOCKED を上げる。test を走らせずに先へ進むことはないので、安全側に止まる。D6 はこの組み合わせを F1 の送り直しの規則より前に書いた。leader は reviewer をその時点の PATH の binary で立てるので、reviewer が leader より古くなるのは binary を戻したときだけで、通常の手順ではこの道に入らない
+- 版が混ざったときの道は cycle 1 の分析のままで、cycle 2 の直しで変わらない。直しは implementer と leader の雛形だけを変え、reviewer の雛形と `CHECKS:` の扱いには触れていない
+- 片付けの境界を、雛形の文で読んで確かめた(動かしていない)
+  - scope の外の前からあった変更は、始めに触らずに残す(`implementer.md:29-30`)
+  - それが stage 済みなら、コミットの時点で 3 つ目の場合として BLOCKED になる
+  - scope と重なる前からあった変更は、実装を始める前に BLOCKED になる(`:30-31`)
+  - このため `RESUME:` に並ぶ scope の中のパスは、止まった TASK(またはそれより前に止まって並べられた TASK)が残したものに限られる。ほかの作業の変更をこのスライスの変更として引き継ぐ道は、雛形の上ではない
+- 3 つ目の場合(前から stage されていた scope の外のパス)で止まったあと、leader の再開の段落(`leader.md:40-41`)は「止まった原因を取り除いて」と書くが、その stage を誰が外すかは書いていない。leader はコードを直さないので、多くは escalate に倒れる。安全側に止まる道で、AC の範囲の外なので所見にしていない
 - 座席の実機の起動は確かめていない(計画の Test plan の Integration tests と同じ)
 
 ## Coverage gaps
 
-- テストの実行(雛形のテスト、`*_sync_test.go`、`go test ./internal/org/` の全体)は `/test` に残す。計画の Test plan の変異(reviewer のミッションに `run-test.sh` を戻すと落ちる、など)も `/test` の範囲
-- 雛形の文に座席がそのとおり従うことは、文の確かめでしか見ていない。leader が `VERIFY:` と `CHECKS:` を書くこと、reviewer が `CHECKS:` を返すことの実機の記録はない
+- テストの実行(雛形のテスト、`*_sync_test.go`、`go test ./internal/org/` の全体)と、変異が落ちることの確かめは `/test` に残す。cycle 2 で足した `prompts_verification_predate_test.go` の 6 本はコンパイルまでしか見ていない
+- 雛形の文に座席がそのとおり従うことは、文の確かめでしか見ていない。leader が `VERIFY:`・`CHECKS:`・`RESUME:` を書くこと、implementer が前からあった変更に触らずに BLOCKED で止まることの実機の記録はない
 
 ## Verdict
 
-- Verified: AC1〜AC5(AC5 は S5 の範囲)、issue の受け入れ条件 1〜3、雛形 3 つの突き合わせ、gate の TASK の節と `ralph org gate`/`regate` が変わっていないこと、self-review の LOW 2 件の解消、計画の digest、`run-static-verify.sh`・`check-sync.sh`・`check-skill-sync.sh` の通過
+- Verified: AC1〜AC5(AC5 は S5 の範囲)、issue の受け入れ条件 1〜3、cross-review の指摘の解消、4 つの面の `VERIFY:`・`CHECKS:`・`RESUME:`(1 スライスと複数スライスの形)・「前からあった変更」・コミットしない 3 つの場合の一致、skill の 4 つの写しの一致、gate の TASK の節と `ralph org gate`/`regate` が変わっていないこと、self-review の R2-1〜R2-4 の解消(R2-4 は `implementer.md:160` の短い行を除く)、計画の digest、`run-static-verify.sh`・`check-sync.sh`・`check-skill-sync.sh` の通過
 - Partially verified: AC6 と issue の受け入れ条件 4(同期の検査と `go vet` は通った。テストは `/test`)
 - Not verified: 座席の実機の振る舞い、版が混ざったときの道
-- Result: pass。`/sync-docs` への渡し: `docs/specs/2026-10-07-org-multi-org-director.md` の FR-7 に「2026-10-27 に決めたこと」を足す(LOW)、`docs/tech-debt/README.md:157` の繰り越しの注記(計画の Progress の渡し)
+- Result: pass。所見は LOW 1(仕様 2 つに `RESUME:` の行と片付けの境界がない)と、既知の渡し 1(tech-debt に R2-5 と 1 回目の所見 4 の 2 行。案 B は R2-5 に絞る)。どちらも cycle 2 の `/sync-docs` に渡す。Info 1(`implementer.md:160` の短い行)
