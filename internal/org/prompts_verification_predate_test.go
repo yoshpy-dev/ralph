@@ -146,6 +146,11 @@ func TestOrgSkill_ImplementerBulletLeavesChangesThatPredateTheSlice(t *testing.T
 // implementer takes their changes over instead of stopping at them.
 const resumeLine = "`RESUME:`"
 
+// resumeLineOfOneOfSeveralSlices is the example the leader and implementer
+// templates and the /org skill give of one slice's resumeLine in a TASK that
+// asks for several slices, named like verifyLineOfOneOfSeveralSlices.
+const resumeLineOfOneOfSeveralSlices = "`RESUME: S1: <パス>...`"
+
 // phrasesInOrder returns the first of phrases that text does not say after the
 // phrase before it, ignoring white space as containsPhrase does, or "" when
 // text says them all in that order.
@@ -169,10 +174,21 @@ func phrasesInOrder(text string, phrases []string) string {
 // after the implementer stopped with a BLOCKED and no commit, list on a
 // resumeLine of the TASK body (a body line, like VERIFY:, not a header) the
 // paths in scope the stopped TASK left uncommitted, taken from the BLOCKED and
-// git status --porcelain. After a secret stop it first checks the value is
-// gone from the worktree, and when it is not, or the BLOCKED says the secret
-// is in implementerPredatingChanges, it escalates a BLOCKED instead of
-// resuming, without fixing the code itself.
+// git status --porcelain. A TASK that asks for several slices has one such
+// line per slice it sends again, each starting with the slice's name
+// (resumeLineOfOneOfSeveralSlices), and a single slice keeps the form without
+// a name; the implementer takes the paths over as the changes of the line's
+// slice. When it narrows the slice, it still lists every path the stopped TASK
+// left uncommitted, the ones it drops too, and names in the TASK body the ones
+// to revert. After a secret stop it first checks the value is gone from the
+// worktree, and when it is not, or the BLOCKED says the secret is in
+// implementerPredatingChanges, it escalates a BLOCKED instead of resuming,
+// without fixing the code itself. It explains implementerPredatingChanges as
+// the implementer defines them: what the record the implementer took at the
+// start of the stopped TASK shows, minus that TASK's resumeLine, so they
+// include what an earlier stopped TASK left and the leader did not list. The
+// old wording, which read them as the changes before the stopped TASK and had
+// "the paths left" read two ways, must not come back.
 func TestRenderRolePrompt_Leader_ResendsAStoppedSliceWithAResumeLine(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	mission, found := markdownSection(text, "## ミッション")
@@ -188,14 +204,25 @@ func TestRenderRolePrompt_Leader_ResendsAStoppedSliceWithAResumeLine(t *testing.
 		"implementer がコミットせずに BLOCKED で止まり、止まった原因を取り除いて(またはスライスを狭めて)同じスライスをもう一度頼むときは、" +
 			"止まった TASK がコミットせずに残した scope の中のパスを、BLOCKED と `git status --porcelain` から拾って本文の " + resumeLine + " の行に並べる",
 		"(例: `RESUME: internal/foo/bar.go internal/foo/bar_test.go`。`VERIFY:` と同じく本文の行で、ヘッダにはしない)",
-		"implementer はそのパスの変更を引き継いで続ける",
-		"スライスを狭めるときも、残したパスはすべて並べ、外すパスの変更は元に戻すよう TASK に書く(並べなかったパスは前からあった変更として残り、implementer がまた止まる)",
+		"1 つの TASK で複数のスライスを頼むときは、" + resumeLine + " の行も、もう一度頼むスライスごとに 1 行ずつ書き、" +
+			"各行をそのスライスの名前で始める(例: " + resumeLineOfOneOfSeveralSlices + ")",
+		"スライスが 1 つなら `RESUME: <パス>...` の形のままでよい",
+		"implementer はそのパスの変更を、その行のスライスの変更として引き継いで続ける",
+		"スライスを狭めるときも、止まった TASK がコミットせずに残したパスは、狭めたスライスから外すものも含めてすべて " + resumeLine +
+			" の行に並べ、そのうち元に戻すパスを TASK の本文に書く(並べなかったパスは前からあった変更として残り、implementer がまた止まる)",
 		"秘密情報で止まったあとは、送る前に `git diff HEAD -- <パス>...`(未追跡のファイルは中身を読む)で、その値が作業ツリーから消えたことを確かめる",
-		"消えていないとき、また BLOCKED が秘密情報を" + implementerPredatingChanges + "(止まった TASK より前の変更。implementer は触らない)にあると書いたときは、" +
+		"消えていないとき、また BLOCKED が秘密情報を" + implementerPredatingChanges +
+			"(止まった TASK の始めに implementer が記録した `git status --porcelain` に出ていて、その TASK の " + resumeLine +
+			" の行になかった変更。それより前に止まった TASK が残して並べなかったパスも入る。implementer は触らない)にあると書いたときは、" +
 			"再開せず `ralph org escalate` で BLOCKED を上げる(コードは自分で直さない)",
 	}
 	if missing := phrasesInOrder(item, steps); missing != "" {
 		t.Errorf("expected the leader mission item %q to say %q in the order %q, but it is missing or out of order, got item:\n%s", marker, missing, steps, item)
+	}
+	for _, old := range []string{"止まった TASK より前の変更", "残したパスはすべて並べ"} {
+		if containsPhrase(item, old) {
+			t.Errorf("expected the leader mission item %q to drop the old wording %q, got item:\n%s", marker, old, item)
+		}
 	}
 }
 
@@ -204,7 +231,10 @@ func TestRenderRolePrompt_Leader_ResendsAStoppedSliceWithAResumeLine(t *testing.
 // implementerPredatingChanges, which include what an earlier TASK left
 // uncommitted, it takes the uncommitted changes at the paths a resumeLine of
 // the TASK body lists over as this slice's own (continuing from them, staging
-// and self-checking them with the rest of the slice). A listed path outside
+// and self-checking them with the rest of the slice). In a TASK that asks for
+// several slices, each resumeLine starts with a slice's name
+// (resumeLineOfOneOfSeveralSlices), and the seat takes its paths over as that
+// slice's changes, into that slice's commit. A listed path outside
 // the scope is not taken over: the seat starts nothing and returns a BLOCKED
 // naming it. The changes at paths the line does not list stay
 // implementerPredatingChanges. The report contract has the RESULT's decisions
@@ -224,6 +254,9 @@ func TestRenderRolePrompt_Implementer_TakesOverThePathsOfAResumeLine(t *testing.
 		"前の TASK がコミットせずに残した変更も" + implementerPredatingChanges + "に入る",
 		"ただし TASK の本文に " + resumeLine + " の行があれば、その行に挙がったパスのコミットされていない変更は" + implementerPredatingChanges +
 			"に入れず、このスライスの変更として引き継ぐ(そこから続け、スライスのほかの変更と一緒に stage して機械的な確かめを行う)",
+		"1 つの TASK が複数のスライスを頼むときは、" + resumeLine + " の行は引き継ぐスライスごとに 1 行ずつあり、" +
+			"各行はスライスの名前で始まる(例: " + resumeLineOfOneOfSeveralSlices + ")",
+		"そのときは、各行のパスの変更を、その名前のスライスの変更として引き継ぎ、そのスライスのコミットに入れる",
 		resumeLine + " の行に scope の外のパスがあれば、引き継がずに実装を始めず、そのパスを書いた BLOCKED を leader に返す",
 		resumeLine + " の行に挙がっていないパスの変更は、" + implementerPredatingChanges + "のままとする",
 	}
@@ -244,30 +277,52 @@ func TestRenderRolePrompt_Implementer_TakesOverThePathsOfAResumeLine(t *testing.
 
 // TestOrgSkill_ImplementerBulletAndLeaderCycleCarryTheResumeLine pins the /org
 // skill side of the same resume: the ## 役割 section's implementer bullet
-// takes over the changes at the paths of a resumeLine as the slice's own and
-// returns a BLOCKED for one outside the scope, and step 3 of the leader cycle
-// in ## Leader 運用 2 経路 lists on that line the paths in scope a stopped
-// TASK left uncommitted, after checking that the value of a secret stop is
-// gone. Like TestOrgSkill_RoleBulletsNameEachSliceAndReadOnlyTheChecksLine, it
-// reads the root copy only.
+// takes over the changes at the paths of a resumeLine as the slice's own (in
+// a TASK that asks for several slices, as the changes of the slice the line
+// names) and returns a BLOCKED for one outside the scope, and step 3 of the
+// leader cycle in ## Leader 運用 2 経路, which a leader promoted from the
+// current session reads instead of the leader template, carries the same
+// resume as the template's mission item 3: it lists on that line the paths in
+// scope a stopped TASK left uncommitted, one line per slice named like
+// resumeLineOfOneOfSeveralSlices in a TASK that asks for several, still lists
+// every one of them when it narrows the slice and names the ones to revert,
+// and after a secret stop checks that the value is gone and escalates a
+// BLOCKED instead of resuming when it is not or the secret is in
+// implementerPredatingChanges. Like
+// TestOrgSkill_RoleBulletsNameEachSliceAndReadOnlyTheChecksLine, it reads the
+// root copy only.
 func TestOrgSkill_ImplementerBulletAndLeaderCycleCarryTheResumeLine(t *testing.T) {
 	const rel = ".claude/skills/org/SKILL.md"
 	text := readRepoFileOrSkip(t, rel)
-	for _, c := range []struct{ header, marker, want string }{
-		{"## 役割", "- **implementer**:",
+	for _, c := range []struct {
+		header, marker string
+		steps          []string
+	}{
+		{"## 役割", "- **implementer**:", []string{
 			"TASK の本文に " + resumeLine + " の行があれば、そこに挙がったパスのコミットされていない変更は" + implementerPredatingChanges +
-				"ではなく、このスライスの変更として引き継ぐ(scope の外のパスがあれば、引き継がずに BLOCKED を返す)"},
-		{"## Leader 運用 2 経路", "3. `send` で TASK を委譲する",
+				"ではなく、このスライスの変更として引き継ぐ(複数のスライスを頼む TASK では、各行はスライスの名前で始まり、" +
+				"その名前のスライスの変更として引き継ぐ。scope の外のパスがあれば、引き継がずに BLOCKED を返す)",
+		}},
+		{"## Leader 運用 2 経路", "3. `send` で TASK を委譲する", []string{
 			"implementer がコミットせずに BLOCKED で止まったスライスをもう一度頼むときは、止まった TASK がコミットせずに残した scope の中のパスを本文の " +
-				resumeLine + " の行に並べる(秘密情報で止まったあとは、値が作業ツリーから消えたことを先に確かめる)"},
+				resumeLine + " の行に並べる(複数のスライスを頼む TASK では、スライスごとの行をスライスの名前で始める。例: " + resumeLineOfOneOfSeveralSlices + ")",
+			"スライスを狭めるときも、止まった TASK がコミットせずに残したパスは外すものも含めてすべて並べ、元に戻すパスを TASK の本文に書く",
+			"秘密情報で止まったあとは、値が作業ツリーから消えたことを先に確かめ、消えていないとき、または BLOCKED が秘密情報を" +
+				implementerPredatingChanges + "にあると書いたときは、再開せず `escalate` で BLOCKED を上げる",
+		}},
 	} {
 		section, found := markdownSection(text, c.header)
 		if !found {
 			t.Errorf("%s: expected a %q section, found none", rel, c.header)
 			continue
 		}
-		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {
-			t.Errorf("%s: expected the %s item %q to say %q, got item:\n%s", rel, c.header, c.marker, c.want, item)
+		item, ok := markdownItem(section, c.marker)
+		if !ok {
+			t.Errorf("%s: expected the %s section to have an item starting %q, got section:\n%s", rel, c.header, c.marker, section)
+			continue
+		}
+		if missing := phrasesInOrder(item, c.steps); missing != "" {
+			t.Errorf("%s: expected the %s item %q to say %q in the order %q, but it is missing or out of order, got item:\n%s", rel, c.header, c.marker, missing, c.steps, item)
 		}
 	}
 }
