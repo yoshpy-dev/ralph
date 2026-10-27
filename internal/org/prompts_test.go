@@ -757,6 +757,296 @@ func TestRenderRolePrompt_Reviewer_ReviewExamplesCarryTheChecksLine(t *testing.T
 	}
 }
 
+// TestRenderRolePrompt_Leader_MissionPutsTheSliceCommandOnAVerifyLine pins
+// the mission half of AC1 of plan 2026-10-27-org-narrow-verification (S3,
+// D4): the mission's item 3 has the leader of every org, a feature org or
+// not, write the slice's verification command on a VERIFY: line of an
+// implementer TASK's body, not in its header block; the command is the
+// narrowest check that covers the slice's files, for Go the string the
+// implementer template picks for a TASK with no VERIFY: line
+// (implementerGoSliceCheck); and an org that is not a feature org names no
+// command in a review TASK, leaving the reviewer's default of both scripts
+// (D6). The implementer template reads that line, and the reviewer template
+// keeps that default, so the three templates agree.
+func TestRenderRolePrompt_Leader_MissionPutsTheSliceCommandOnAVerifyLine(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	mission, found := markdownSection(text, "## ミッション")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## ミッション' section, got:\n%s", text)
+	}
+	const marker = "3. `ralph org send`"
+	item, ok := markdownItem(mission, marker)
+	if !ok {
+		t.Fatalf("expected the leader mission to have an item starting %q, got section:\n%s", marker, mission)
+	}
+	for _, want := range []string{
+		"どの org でも(機能ごとの org でなくても)、implementer への TASK には、そのスライスの検証コマンドを本文の `VERIFY:` の行で書く(ヘッダにはしない。「typed protocol」の節)",
+		"コマンドは、スライスが触ったファイルを覆う、いちばん狭い検査にする",
+		"Go なら、触ったパッケージのディレクトリを `<dir>` として " + implementerGoSliceCheck + " にする(implementer の雛形が、`VERIFY:` の行のない TASK で選ぶものと同じ)",
+		"ほかの言語なら、言語パックのパッケージごとの検査にする",
+		"機能ごとの org でなければ、reviewer へのレビューの TASK には打つコマンドを書かず、reviewer の既定(`./scripts/run-static-verify.sh` と `./scripts/run-test.sh` の両方)に任せる(機能ごとの org は「機能ごとの org」の節の手順 8)",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the leader mission item %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+
+	implementer := renderSeatPrompt(t, "implementer")
+	implementerMission, _ := markdownSection(implementer, "## ミッション")
+	if implementerItem, ok := markdownItem(implementerMission, "作業はスライス単位で進める"); !ok ||
+		!containsPhrase(implementerItem, "leader の TASK の本文の `VERIFY:` の行のコマンドを実行する") ||
+		!containsPhrase(implementerItem, implementerGoSliceCheck) {
+		t.Errorf("expected the implementer template to run the VERIFY: line of the leader's TASK body and to pick %s with none, got item:\n%s", implementerGoSliceCheck, implementerItem)
+	}
+	reviewer := renderSeatPrompt(t, "reviewer")
+	reviewerMission, _ := markdownSection(reviewer, "## ミッション")
+	if reviewerItem, ok := markdownItem(reviewerMission, "1. レビューの TASK"); !ok ||
+		!containsPhrase(reviewerItem, "なければ `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する") {
+		t.Errorf("expected the reviewer template to run both scripts for a review TASK that names no command, got item:\n%s", reviewerItem)
+	}
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgPlanCarriesTheSliceCommands pins the
+// feature org half of AC1 of plan 2026-10-27-org-narrow-verification (S3):
+// step 1 of the 機能ごとの org section has every slice of the feature plan's
+// ## Implementation outline end with its verification command, in the form
+// the repo's plan template (docs/plans/templates/feature-plan.md) gives its
+// outline item, the narrowest check of the mission's item 3, and says
+// RALPH_VERIFY_SCOPE=changed does not narrow it (in Go it still runs
+// go test ./...); step 5 copies the slice's command, unchanged, to the
+// VERIFY: line of the implementer TASK's body.
+func TestRenderRolePrompt_Leader_FeatureOrgPlanCarriesTheSliceCommands(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+	const verifyForm = "— verify: `<コマンド>`"
+	for _, c := range []struct{ marker, want string }{
+		{"1. 機能の計画を", "計画の `## Implementation outline` では、スライスごとの項目の終わりに、そのスライスの検証コマンドを「" + verifyForm + "」の形で書く(雛形にこの欄があればそれに沿う)"},
+		{"1. 機能の計画を", "コマンドは「ミッション」の 3 のとおり、スライスが触ったファイルを覆う、いちばん狭い検査にする(Go なら触ったパッケージの gofmt・vet・test)"},
+		{"1. 機能の計画を", "`RALPH_VERIFY_SCOPE=changed` は絞り込みに使わない(走らせる言語パックを選ぶだけで、Go では `go test ./...` を全部走らせる)"},
+		{"5. implementer と reviewer を", "implementer への TASK では、頼むスライスの計画の `— verify:` のコマンドを、書き換えずに本文の `VERIFY:` の行に写す(「ミッション」の 3)"},
+	} {
+		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {
+			t.Errorf("expected the 機能ごとの org item naming %q to contain %q, got item:\n%s", c.marker, c.want, item)
+		}
+	}
+
+	t.Run("docs/plans/templates/feature-plan.md", func(t *testing.T) {
+		const rel = "docs/plans/templates/feature-plan.md"
+		body, ok, err := readRepoFile(reportNamesRepoRoot(t), rel)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !ok {
+			t.Skipf("%s not found -- skipping the check of its outline item", rel)
+		}
+		want := "1. <slice> " + strings.Replace(verifyForm, "<コマンド>", "<command>", 1)
+		if outline, found := markdownSection(body, "## Implementation outline"); !found || !hasLine(outline, want) {
+			t.Errorf("expected %s's ## Implementation outline to have the item %q, whose form step 1 of the leader template names, got section:\n%s", rel, want, outline)
+		}
+	})
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgReviewTaskNamesOnlyTheStaticScript
+// pins the leader half of AC3 of plan 2026-10-27-org-narrow-verification (S3,
+// D5, D6): step 8 of the 機能ごとの org section has the leader write one
+// command, the static script, in the body of a review TASK (a TASK_ID that
+// does not start with gate-), since the full test runs once in step 12's gate
+// TASK; says a review's GATE: pass then means the static checks passed; and
+// has the leader read the reviewer's CHECKS: line to see which commands a
+// GATE: is the result of, ./scripts/run-test.sh on it meaning the reviewer
+// ran its default. Step 12 still has the gate run both scripts (its whole
+// wording is pinned by
+// TestRenderRolePrompt_Leader_FeatureOrgAsksTheReviewerForTheGate), and the
+// reviewer template says a feature org's leader names the static script alone
+// and returns it on the CHECKS: line step 8 reads (reviewerStaticChecksLine).
+func TestRenderRolePrompt_Leader_FeatureOrgReviewTaskNamesOnlyTheStaticScript(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+	static := strings.TrimPrefix(reviewerStaticChecksLine, "CHECKS: ")
+	const marker = "8. TASK・RESULT・レビューの往復"
+	item, ok := markdownItem(section, marker)
+	if !ok {
+		t.Fatalf("expected the 機能ごとの org section to have an item starting %q, got section:\n%s", marker, section)
+	}
+	for _, want := range []string{
+		"この org では、reviewer へのレビューの TASK(TASK_ID が `gate-` で始まらない TASK)の本文に、打つコマンドとして `" + static + "` の 1 つだけを書く",
+		"フルの test は手順 12 の gate の TASK で 1 回走るので、レビューでは打たせない",
+		"レビューの `GATE: pass` は静的検査が通ったことだけを指す(テストの結果は、手順 12 の gate の TASK の `GATE:` で見る)",
+		"reviewer は打ったコマンドを RESULT と BLOCKED の本文の `CHECKS:` の行で返すので、その行で、`GATE:` がどのコマンドの結果かを確かめる",
+		"`./scripts/run-test.sh` も並んでいれば、reviewer は既定の 2 つを打った",
+	} {
+		if !containsPhrase(item, want) {
+			t.Errorf("expected the 機能ごとの org item %q to say %q, got item:\n%s", marker, want, item)
+		}
+	}
+	if step12, ok := markdownItem(section, step12Marker); !ok ||
+		!containsPhrase(step12, "gate は worktree と rebase を確かめてから `"+static+"` と `./scripts/run-test.sh` を走らせ") {
+		t.Errorf("expected step 12's gate to run both scripts, the full test step 8 leaves to it, got item:\n%s", step12)
+	}
+
+	reviewer := renderSeatPrompt(t, "reviewer")
+	reviewerMission, _ := markdownSection(reviewer, "## ミッション")
+	if reviewerItem, ok := markdownItem(reviewerMission, "1. レビューの TASK"); !ok ||
+		!containsPhrase(reviewerItem, "機能ごとの org(`ralph org start --plan` で立てた org)の leader は、レビューの TASK に `"+static+"` だけを指示する") {
+		t.Errorf("expected the reviewer template to say a feature org's leader names %s alone in a review TASK, got item:\n%s", static, reviewerItem)
+	}
+}
+
+// leaderNamesStaticScriptAlone reports the sentences of text
+// (templateSentences) that name the static script without
+// ./scripts/run-test.sh, or say 静的検査だけ: the instruction step 8 of the
+// 機能ごとの org section gives for a feature org's review TASK.
+func leaderNamesStaticScriptAlone(text string) []string {
+	static := squashSpace(strings.TrimPrefix(reviewerStaticChecksLine, "CHECKS: "))
+	var bad []string
+	for _, s := range templateSentences(text) {
+		if (strings.Contains(s, static) && !strings.Contains(s, "./scripts/run-test.sh")) || strings.Contains(s, "静的検査だけ") {
+			bad = append(bad, s)
+		}
+	}
+	return bad
+}
+
+// TestRenderRolePrompt_Leader_OnlyAFeatureOrgNamesTheStaticScriptAlone pins
+// D6 of plan 2026-10-27-org-narrow-verification for an org that is not a
+// feature org: outside the 機能ごとの org section, every sentence of the
+// leader template that names the static script names ./scripts/run-test.sh
+// with it, and none says 静的検査だけ, so no such org asks for a review that
+// drops the test. The mission's item 3, which leaves the reviewer's default
+// of both scripts, is such a sentence, so the check is not vacuous, and the
+// check flags step 8's instruction, so it does not pass on any text.
+func TestRenderRolePrompt_Leader_OnlyAFeatureOrgNamesTheStaticScriptAlone(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	section, found := markdownSection(text, "## 機能ごとの org")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
+	}
+	outside := strings.Replace(text, section, "", 1)
+	if bad := leaderNamesStaticScriptAlone(outside); len(bad) > 0 {
+		t.Errorf("expected no sentence outside the 機能ごとの org section to name the static script without ./scripts/run-test.sh, got:\n%s", strings.Join(bad, "\n"))
+	}
+	static := squashSpace(strings.TrimPrefix(reviewerStaticChecksLine, "CHECKS: "))
+	if !slices.ContainsFunc(templateSentences(outside), func(s string) bool { return strings.Contains(s, static) }) {
+		t.Errorf("expected a sentence outside the 機能ごとの org section (the mission's item 3) to name the static script with ./scripts/run-test.sh, got:\n%s", outside)
+	}
+	if step8, ok := markdownItem(section, "8. TASK・RESULT・レビューの往復"); !ok || len(leaderNamesStaticScriptAlone(step8)) == 0 {
+		t.Errorf("expected the check to flag step 8's instruction to name the static script alone, got item:\n%s", step8)
+	}
+}
+
+// TestRenderRolePrompt_Leader_ImplementerTaskExampleCarriesTheVerifyLine pins
+// the example of AC1 of plan 2026-10-27-org-narrow-verification (D4): the
+// typed protocol section puts VERIFY: in the body, not the header block, and
+// shows an implementer TASK example that is a valid TASK whose body (not its
+// header block) has a SUMMARY: line and a VERIFY: line with the mission's Go
+// check run on internal/foo, a $(...) the shell would expand in a
+// double-quoted argument (TestRenderRolePrompt_SeatsSendMessagesFromAFile).
+// The review TASK example stays a valid TASK that names no command: the review
+// TASK of an org that is not a feature org (D6).
+func TestRenderRolePrompt_Leader_ImplementerTaskExampleCarriesTheVerifyLine(t *testing.T) {
+	text := renderSeatPrompt(t, "leader")
+	protocolSection, found := markdownSection(text, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## typed protocol' section, got:\n%s", text)
+	}
+	if !containsPhrase(protocolSection, "`VERIFY:` はヘッダではなく、本文(空行のあと)の行に書きます") {
+		t.Errorf("expected the leader's typed protocol section to put VERIFY: in the body, not the header block, got section:\n%s", protocolSection)
+	}
+
+	const lead = "implementer への TASK の例"
+	msg, found := codeBlockAfterLine(protocolSection, lead)
+	if !found {
+		t.Fatalf("expected the leader's typed protocol section to show a code block after a line starting with %q, got section:\n%s", lead, protocolSection)
+	}
+	m, err := protocol.Parse(msg)
+	if err != nil || protocol.Validate(m, protocol.DefaultMaxBodyChars) != nil || m.Type != protocol.TypeTask || m.TaskID != "t-2" {
+		t.Fatalf("expected the example after %q to be a valid TASK with TASK_ID t-2, got %+v, err %v; message:\n%s", lead, m, err, msg)
+	}
+	if got := protocol.HeaderValues(msg, "VERIFY"); len(got) != 0 {
+		t.Errorf("expected VERIFY: in the body of the example after %q, not its header block, got header values %q; message:\n%s", lead, got, msg)
+	}
+	goCheck := strings.ReplaceAll(strings.Trim(implementerGoSliceCheck, "`"), "<dir>", "internal/foo")
+	if !hasLine(m.Body, "VERIFY: "+goCheck) {
+		t.Errorf("expected the body of the example after %q to have the line %q, got body:\n%s", lead, "VERIFY: "+goCheck, m.Body)
+	}
+	if !strings.HasPrefix(m.Body, "SUMMARY: ") {
+		t.Errorf("expected the body of the example after %q to start with a SUMMARY: line, got body:\n%s", lead, m.Body)
+	}
+
+	const reviewLead = "TASK の例("
+	review, found := codeBlockAfterLine(protocolSection, reviewLead)
+	if !found {
+		t.Fatalf("expected the leader's typed protocol section to show a code block after a line starting with %q, got section:\n%s", reviewLead, protocolSection)
+	}
+	rm, err := protocol.Parse(review)
+	if err != nil || protocol.Validate(rm, protocol.DefaultMaxBodyChars) != nil || rm.Type != protocol.TypeTask {
+		t.Errorf("expected the example after %q to be a valid TASK, got %+v, err %v; message:\n%s", reviewLead, rm, err, review)
+	}
+	for _, banned := range []string{"./scripts/", "VERIFY:", "CHECKS:"} {
+		if strings.Contains(review, banned) {
+			t.Errorf("expected the review TASK example after %q to name no command (%q), as an org that is not a feature org writes it, got message:\n%s", reviewLead, banned, review)
+		}
+	}
+}
+
+// TestRenderRolePrompt_SeatsSendMessagesFromAFile pins the sending rule of S3
+// of plan 2026-10-27-org-narrow-verification (consult's finding on S1): a
+// VERIFY: line holds a $(...), which the shell expands inside a double-quoted
+// argument, so the leader's typed protocol section has every message it sends
+// with ralph org send --text written to a file first and passed as
+// --text "$(cat <file>)", the form and the file rules of the 件を上げる
+// section's escalate, and the implementer's typed protocol section has its
+// RESULT and BLOCKED written to a file under .harness/state/, outside its
+// scope if need be, and passed as "$(cat <file>)".
+func TestRenderRolePrompt_SeatsSendMessagesFromAFile(t *testing.T) {
+	const fromFile = "`--text \"$(cat <ファイル>)\"`"
+	leader := renderSeatPrompt(t, "leader")
+	protocolSection, found := markdownSection(leader, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the leader template to contain a '## typed protocol' section, got:\n%s", leader)
+	}
+	for _, want := range []string{
+		"`ralph org send --text` で送るメッセージ(TASK・DECISION・STOP)も、「件を上げる」の節の escalate のメッセージと同じく、ファイルに書き、" + fromFile + " で渡してください",
+		"メッセージを `--text \"...\"` の二重引用符の中に直接書くと、implementer への TASK の `VERIFY:` の行にある `$(gofmt -l …)` のような `$(...)` を shell が展開してしまいます",
+		"ファイルの置き場所と書き方(cwd の `.harness/state/` の下、書く前に `mkdir -p .harness/state`、Write ツールか `<<'EOF'` の heredoc)は「件を上げる」の節と同じです",
+	} {
+		if !containsPhrase(protocolSection, want) {
+			t.Errorf("expected the leader's typed protocol section to say %q, got section:\n%s", want, protocolSection)
+		}
+	}
+	escalate, _ := markdownSection(leader, "## 件を上げる(`ralph org escalate`)")
+	for _, want := range []string{
+		"メッセージはファイルに書き、" + fromFile + " で渡してください",
+		"ファイルは cwd の `.harness/state/` の下に置きます",
+		"書く前に `mkdir -p .harness/state` を打ちます",
+		"`cat > .harness/state/escalate-org-a.txt <<'EOF'` の heredoc で書きます",
+	} {
+		if !containsPhrase(escalate, want) {
+			t.Errorf("expected the 件を上げる section, whose file rules the typed protocol section points at, to say %q, got section:\n%s", want, escalate)
+		}
+	}
+
+	implementer := renderSeatPrompt(t, "implementer")
+	implementerProtocol, found := markdownSection(implementer, "## typed protocol")
+	if !found {
+		t.Fatalf("expected the implementer template to contain a '## typed protocol' section, got:\n%s", implementer)
+	}
+	for _, want := range []string{
+		"RESULT と BLOCKED のメッセージは、cwd の `.harness/state/` の下のファイルに書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所なので、scope の外でも書いてよい)、送るコマンドの本文の引数には `\"$(cat <ファイル>)\"` を渡してください",
+		"(二重引用符の引数に直接書くと、`VERIFY:` の行の `$(gofmt -l …)` のような `$(...)` を shell が展開してしまいます)",
+	} {
+		if !containsPhrase(implementerProtocol, want) {
+			t.Errorf("expected the implementer's typed protocol section to say %q, got section:\n%s", want, implementerProtocol)
+		}
+	}
+}
+
 func TestRenderRolePrompt_Leader_MissionRoutesGateBlocked(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	mission, found := markdownSection(text, "## ミッション")

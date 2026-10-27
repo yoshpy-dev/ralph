@@ -71,6 +71,13 @@
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
+RESULT と BLOCKED のメッセージは、cwd の `.harness/state/` の下のファイルに
+書き(なければ `mkdir -p .harness/state` で作る。git が無視する場所なので、
+scope の外でも書いてよい)、送るコマンドの本文の引数には
+`"$(cat <ファイル>)"` を渡してください(二重引用符の引数に直接書くと、
+`VERIFY:` の行の `$(gofmt -l …)` のような `$(...)` を shell が展開して
+しまいます)。
+
 RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
 
 ```
