@@ -48,7 +48,9 @@ and why). When an item is found and not fixed, the orchestrator has it fixed
 as its own slice before the next slice (`/implement` step 7). For the last
 slice, that happens before step 13. A secret that cannot be removed within
 scope is never committed: the implementer stops without a commit, and the
-orchestrator removes the secret or narrows the slice and dispatches it again.
+orchestrator removes the secret or narrows the slice and dispatches it again
+as a resume, whose handoff names the uncommitted changes the stopped slice
+left in the files in scope as the slice's own (`/implement` step 7).
 
 **Inline exceptions** (no subagent dispatch needed):
 

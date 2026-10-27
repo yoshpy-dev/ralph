@@ -267,6 +267,8 @@ for file in $implementer_files; do
     "mechanical self-check result: for each of the five items, one of clean, fixed (what you fixed), or found and not fixed (what you found, and why it could not be fixed within scope)" "$file"
   assert_joined_contains_exact "$file says why the checks matter without history" \
     "These are the checks \`/self-review\` leaves to the implementing side, so do not skip them." "$file"
+  assert_joined_contains_exact "$file takes over a stopped slice's changes on a resume" \
+    "If the handoff says it resumes a slice that stopped without a commit and names the uncommitted changes in your files in scope as that slice's own, those changes are yours: note them in your report and continue from them instead of stopping; they are staged and self-checked with the rest of the slice." "$file"
   assert_not_contains_any_case "$file has no change-history wording" "no longer" "$file"
   assert_not_contains_any_case "$file does not point at items by position" "first four" "$file"
 done

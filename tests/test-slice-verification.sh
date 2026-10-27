@@ -3,8 +3,9 @@
 # and /plan step 7 ask for each slice's verification command, /implement hands
 # that command to the implementer (or picks one for a plan that has none) and
 # runs no full ./scripts/run-verify.sh in step 12 or the Completion gate, its
-# step 7 reads the mechanical self-check result item by item, and the
-# Validation Gate, model-routing, and subagent-policy say the same.
+# step 7 reads the mechanical self-check result item by item and dispatches a
+# slice that stopped without a commit again as a resume, and the Validation
+# Gate, model-routing, and subagent-policy say the same.
 # Added by the verify-slices-lighter-self-review plan (issue #261).
 #
 # Each check reads the file with its line breaks folded into spaces, so
@@ -153,9 +154,9 @@ inline_start="   - **Inline slices**"
 inline_stop="   - If verification fails"
 
 for file in $implement_skill_files; do
-  assert_block_contains_exact "$file step 6 takes the slice command from the plan" \
+  assert_block_contains_exact "$file step 6 takes the slice command from the plan, the narrowest check" \
     "$file" "$step6" "$step7" \
-    "The exact verification commands are the slice's command from the plan's \`## Implementation outline\`"
+    "The exact verification commands are the slice's command from the plan's \`## Implementation outline\` (the item's \"— verify: \`<command>\`\"), the narrowest check that covers the slice's files."
   assert_block_contains_exact "$file step 6 covers a plan with no command for the slice" \
     "$file" "$step6" "$step7" \
     "If the plan has no command for the slice (a plan approved before the template asked for one)"
@@ -172,9 +173,15 @@ for file in $implement_skill_files; do
   assert_block_contains_exact "$file delegated gate covers the last slice" \
     "$file" "$delegated_start" "$inline_start" \
     "For the last slice, do it before step 13."
-  assert_block_contains_exact "$file delegated gate handles a stop on a secret" \
+  assert_block_contains_exact "$file delegated gate covers a stop without a commit on a failure or a secret" \
     "$file" "$delegated_start" "$inline_start" \
-    "If the implementer stopped without committing because a secret in the staged diff could not be removed within scope, there is no new commit to check: remove the secret or narrow the slice, then dispatch the slice again."
+    "If the implementer stopped without committing (a verification failure it could not fix within scope, or a secret in the staged diff it could not remove within scope), there is no new commit to check"
+  assert_block_contains_exact "$file delegated gate dispatches a stopped slice again as a resume" \
+    "$file" "$delegated_start" "$inline_start" \
+    "then dispatch the slice again as a resume, with a handoff that names the uncommitted changes the stopped implementer left in the files in scope as the slice's own"
+  assert_block_contains_exact "$file delegated gate leaves no secret in a file dropped by narrowing" \
+    "$file" "$delegated_start" "$inline_start" \
+    "When narrowing drops a file from the slice, restore it (\`git restore -- <file>\`) or give its changes a slice of their own; either way, no secret stays in the worktree."
 
   assert_block_contains_exact "$file inline slices run the plan's command" \
     "$file" "$inline_start" "$inline_stop" \
@@ -247,8 +254,8 @@ for file in $model_routing_files; do
     "The result says, for each item, clean, fixed (what), or found and not fixed (what and why)." "$file"
   assert_joined_contains_exact "$file report contract fixes an item found and not fixed first" \
     "When an item is found and not fixed, the orchestrator has it fixed as its own slice before the next slice (\`/implement\` step 7)." "$file"
-  assert_joined_contains_exact "$file report contract covers the last slice and a secret" \
-    "For the last slice, that happens before step 13. A secret that cannot be removed within scope is never committed: the implementer stops without a commit, and the orchestrator removes the secret or narrows the slice and dispatches it again." "$file"
+  assert_joined_contains_exact "$file report contract covers the last slice and a resume after a secret" \
+    "For the last slice, that happens before step 13. A secret that cannot be removed within scope is never committed: the implementer stops without a commit, and the orchestrator removes the secret or narrows the slice and dispatches it again as a resume, whose handoff names the uncommitted changes the stopped slice left in the files in scope as the slice's own (\`/implement\` step 7)." "$file"
   assert_joined_lacks_any_case "$file drops the old item wording" \
     "files outside the handoff)" "$file"
   assert_joined_contains_exact "$file handoff row points at the plan's Implementation outline" \
