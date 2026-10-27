@@ -82,7 +82,9 @@ scope の外でも書いてよい)、送るコマンドの本文の引数には
 `VERIFY:` の行の `$(gofmt -l …)` のような `$(...)` を shell が展開して
 しまいます)。
 
-RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
+RESULT の例(スライスが 1 つの TASK への RESULT。複数のスライスのときの行の
+形は「レポート契約」の節。EVIDENCE はポインタのみ、コードや長いログをそのまま
+貼らない):
 
 ```
 TYPE: RESULT
@@ -134,7 +136,12 @@ SUMMARY: internal/foo/bar.go にスライス1を実装し検証済み。差分�
   検証のコマンドとその結果を書き、そのコマンドが leader の `VERIFY:` の行の
   ものか、自分で選んだものかも書きます。機械的な確かめの結果には、5 つの
   項目それぞれについて clean、fixed(直したもの)、found and not fixed
-  (残したものと、scope の中で直せない理由)のどれかを書きます。生の diff
-  やログ全文を本文に含めないでください。
+  (残したものと、scope の中で直せない理由)のどれかを書きます。1 つの
+  TASK が複数のスライスを頼んだときは、`COMMIT:`・`VERIFY:`・`SELF-CHECK:`
+  の行をスライスごとに 1 行ずつ書き、各行を TASK の `VERIFY:` の行と同じく
+  スライスの名前で始めます(例: `COMMIT: S1: <commit-sha>`、
+  `VERIFY: S1: <コマンド> → pass`、`SELF-CHECK: S1: 不要な変更 clean / …`)。
+  スライスが 1 つなら、「typed protocol」の節の例のとおり、名前を付けずに
+  書きます。生の diff やログ全文を本文に含めないでください。
 - leader へは RESULT(成功時)または BLOCKED(進められない場合)メッセージで
   報告してください。

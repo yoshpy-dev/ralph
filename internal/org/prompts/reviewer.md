@@ -19,9 +19,9 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
    扱う)。leader の TASK にコマンドの指示があればそれを、なければ
    `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する。
    コマンドの指示は、TASK の本文の `CHECKS:` の行にある(例:
-   `CHECKS: ./scripts/run-static-verify.sh`)。`CHECKS:` の行がなくても、
-   TASK が打つコマンドをはっきり指示していれば、それも指示として扱う
-   (`CHECKS:` の行を書かない leader もある)。
+   `CHECKS: ./scripts/run-static-verify.sh`)。指示とみなすのはこの行だけで、
+   `CHECKS:` の行のない TASK は、本文のほかの所にコマンドの名前があっても、
+   指示のない TASK として扱い、両方のスクリプトを打つ。
    指示があるときは、指示されたコマンドだけを打ち、足しも削りもしない。
    機能ごとの org(`ralph org start --plan` で立てた org)の leader は、
    レビューの TASK に `./scripts/run-static-verify.sh` だけを指示する。その

@@ -211,8 +211,8 @@ var reviewerDiffReviewItems = []string{"命名", "読みやすさ", "不要な�
 // mission's first item has the reviewer run exactly the commands a review
 // TASK names, adding and dropping none; says the TASK names them on a CHECKS:
 // line of its body, the line step 8 of the leader template writes
-// (reviewerStaticChecksLine), and that a TASK with no such line that plainly
-// names the commands still names them; says a feature org's leader names
+// (reviewerStaticChecksLine), and only there (a TASK without one gets the
+// default even if it names a command); says a feature org's leader names
 // only the static script and that org's full test runs once, before the PR,
 // in the gate TASK through ralph org gate; and keeps both scripts as the
 // default for a TASK that names no command. That default is the safety
@@ -236,7 +236,7 @@ func TestRenderRolePrompt_Reviewer_ReviewTaskRunsExactlyTheNamedCommands(t *test
 	for _, want := range []string{
 		"leader の TASK にコマンドの指示があればそれを、なければ `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する",
 		"コマンドの指示は、TASK の本文の `CHECKS:` の行にある(例: `" + reviewerStaticChecksLine + "`)",
-		"`CHECKS:` の行がなくても、TASK が打つコマンドをはっきり指示していれば、それも指示として扱う(`CHECKS:` の行を書かない leader もある)",
+		"指示とみなすのはこの行だけで、`CHECKS:` の行のない TASK は、本文のほかの所にコマンドの名前があっても、指示のない TASK として扱い、両方のスクリプトを打つ",
 		"指示があるときは、指示されたコマンドだけを打ち、足しも削りもしない",
 		"機能ごとの org(`ralph org start --plan` で立てた org)の leader は、レビューの TASK に `./scripts/run-static-verify.sh` だけを指示する",
 		"その org のフルの test は、PR の前に下の「gate の TASK」で `ralph org gate` が 1 回走らせる",
@@ -244,6 +244,9 @@ func TestRenderRolePrompt_Reviewer_ReviewTaskRunsExactlyTheNamedCommands(t *test
 		if !containsPhrase(item, want) {
 			t.Errorf("expected the reviewer mission item %q to say %q, got item:\n%s", marker, want, item)
 		}
+	}
+	if containsPhrase(text, "`CHECKS:` の行がなくても") {
+		t.Errorf("expected the reviewer template to take a review TASK's commands only from its CHECKS: line, not from the prose of a TASK without one, got:\n%s", text)
 	}
 
 	fanOut, found := markdownSection(text, "## 座席内 fan-out")

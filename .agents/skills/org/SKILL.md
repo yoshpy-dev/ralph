@@ -1335,12 +1335,15 @@ reviewer は、レビューの TASK のゲート(TASK が指示したコマン�
   scope の中で消せない秘密情報があればコミットせず、ファイルと行を書いた
   BLOCKED を返す(値は書かない)。RESULT には commit SHA と証拠のポインタの
   ほかに、打った検証のコマンドとその結果、5 項目それぞれの確かめの結果を
-  書く。
+  書く。複数のスライスを頼む TASK では、`COMMIT:`・`VERIFY:`・`SELF-CHECK:`
+  の行をスライスごとに書き、各行をスライスの名前で始める(例:
+  `COMMIT: S1: <sha>`)。
 - **reviewer**: 実装者以外の立場で決定論ゲートを最初に再実行し、通れば差分と
   仕様適合をレビューする座席。レビューの TASK では、TASK が指示したコマンド
   だけを打ち(足しも削りもしない)、指示がなければ `run-static-verify.sh` と
-  `run-test.sh` の両方を打つ。指示は TASK の本文の `CHECKS:` の行で来る
-  (その行がなくても、TASK がはっきり指示したコマンドは指示として扱う)。
+  `run-test.sh` の両方を打つ。指示は TASK の本文の `CHECKS:` の行で来て、
+  指示とみなすのはその行だけ(`CHECKS:` の行がなければ、本文にコマンドの
+  名前があっても両方を打つ)。
   機能ごとの org の leader はレビューの TASK に
   `CHECKS: ./scripts/run-static-verify.sh` の行で静的検査だけを指示し、その
   org のフルの test は、下の gate の TASK で `ralph org gate` が 1 回走らせる。
