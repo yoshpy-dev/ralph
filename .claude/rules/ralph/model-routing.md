@@ -38,9 +38,14 @@ itself.
 | Commit message format | conventional format string |
 
 **Report contract (implementer → orchestrator):** changed files, decisions/deviations,
-verification evidence, the mechanical self-check result (unnecessary changes,
-typos, debug leftovers, secrets, files outside the handoff), commit-boundary
+verification evidence, the mechanical self-check result, commit-boundary
 evidence (`git status --porcelain` + `git show --stat HEAD` output), commit SHA.
+The mechanical self-check has five items, and this is the canonical list that
+every other mention repeats word for word: unnecessary changes, typos and
+copy-paste errors, debug leftovers, secrets, and files outside the slice. The
+result says, for each item, clean, fixed (what), or found and not fixed (what
+and why). When an item is found and not fixed, the orchestrator has it fixed
+as its own slice before the next slice (`/implement` step 7).
 
 **Inline exceptions** (no subagent dispatch needed):
 

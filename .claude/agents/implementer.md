@@ -30,14 +30,14 @@ git add <path1> <path2> ...
 ```
 Never use `git add -A`, `git add -u`, or `git add .`.
 
-**Mechanical self-check before commit:** after staging, read the staged diff (`git diff --cached`) and check:
-- no unnecessary changes: unrelated edits, formatting-only churn, accidental includes
-- no typos or copy-paste errors
-- no debug leftovers: print/console.log/debugger calls, TODO markers added by this slice, commented-out code
-- no secrets or credentials: hardcoded keys, tokens, passwords
-- no files outside the handoff's files in scope (`git diff --cached --name-only`)
+**Mechanical self-check before commit:** after staging, read the staged diff (`git diff --cached`) and check five items: unnecessary changes, typos and copy-paste errors, debug leftovers, secrets, and files outside the slice (the handoff's files in scope).
+- unnecessary changes: unrelated edits, formatting-only churn, accidental includes
+- typos and copy-paste errors: misspellings, wrong names or values pasted from elsewhere
+- debug leftovers: print/console.log/debugger calls, TODO markers added by this slice, commented-out code
+- secrets: hardcoded keys, tokens, passwords, or other credentials
+- files outside the slice: any path in `git diff --cached --name-only` that is not in the handoff's files in scope
 
-Fix what you find within scope (then re-run the verification commands and re-stage), or report it. `/self-review` no longer checks the first four items, so do not skip them.
+Fix what you find within scope, then re-run the verification commands and re-stage. When an item cannot be fixed within scope, leave it and report it as found and not fixed, with the reason. These are the checks `/self-review` leaves to the implementing side, so do not skip them.
 
 **Commit:** use the handoff-provided conventional commit message format.
 
@@ -45,6 +45,6 @@ Fix what you find within scope (then re-run the verification commands and re-sta
 - changed files (list)
 - key decisions or deviations from the handoff (or "none")
 - verification evidence: each command run and its outcome
-- mechanical self-check result: for each of the five items, checked and clean, or what was found and how it was fixed
+- mechanical self-check result: for each of the five items, one of clean, fixed (what you fixed), or found and not fixed (what you found, and why it could not be fixed within scope)
 - commit-boundary evidence: `git status --porcelain` output after commit + `git show --stat HEAD` output
 - commit SHA

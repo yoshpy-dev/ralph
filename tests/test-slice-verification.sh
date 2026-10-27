@@ -2,13 +2,17 @@
 # Regression guard for the per-slice verification wording: the plan template
 # and /plan step 7 ask for each slice's verification command, /implement hands
 # that command to the implementer (or picks one for a plan that has none) and
-# runs no full ./scripts/run-verify.sh in step 12 or the Completion gate, and
-# the Validation Gate, model-routing, and subagent-policy say the same.
+# runs no full ./scripts/run-verify.sh in step 12 or the Completion gate, its
+# step 7 reads the mechanical self-check result item by item, and the
+# Validation Gate, model-routing, and subagent-policy say the same.
 # Added by the verify-slices-lighter-self-review plan (issue #261).
 #
 # Each check reads the file with its line breaks folded into spaces, so
-# re-wrapping a sentence does not break it. assert_contains is case-sensitive;
-# assert_not_contains ignores case, so an old sentence stays out in either case.
+# re-wrapping a sentence does not break it. The helper names say the case
+# handling: *_exact is case-sensitive, *_any_case ignores case (so an old
+# sentence stays out in either case). tests/test-self-review-scope.sh has
+# helpers named assert_contains and assert_not_contains whose case handling
+# differs; do not copy across under those names.
 
 set -eu
 
@@ -38,7 +42,8 @@ join_lines() {
   tr '\n' ' ' | tr -s ' '
 }
 
-assert_contains() {
+# assert_joined_contains_exact: case-sensitive, on the joined file.
+assert_joined_contains_exact() {
   _desc="$1"
   _needle="$2"
   _file="$3"
@@ -51,7 +56,8 @@ assert_contains() {
   fi
 }
 
-assert_not_contains() {
+# assert_joined_lacks_any_case: ignores case, on the joined file.
+assert_joined_lacks_any_case() {
   _desc="$1"
   _needle="$2"
   _file="$3"
@@ -74,9 +80,10 @@ block() {
   ' "$1"
 }
 
-# assert_block_contains DESC FILE START STOP NEEDLE: NEEDLE is in that block
-# (one step, bullet, or section), not only somewhere else in the file.
-assert_block_contains() {
+# assert_block_contains_exact DESC FILE START STOP NEEDLE: case-sensitive;
+# NEEDLE is in that block (one step, bullet, or section), not only somewhere
+# else in the file.
+assert_block_contains_exact() {
   _desc="$1"
   _file="$2"
   _start="$3"
@@ -102,11 +109,11 @@ templates/base/.agents/skills/plan/template.md
 "
 
 for file in $plan_template_files; do
-  assert_contains "$file shows a slice item that ends with its verify command" \
+  assert_joined_contains_exact "$file shows a slice item that ends with its verify command" \
     "1. <slice> — verify: \`<command>\`" "$file"
-  assert_contains "$file says not to narrow with RALPH_VERIFY_SCOPE=changed" \
+  assert_joined_contains_exact "$file says not to narrow with RALPH_VERIFY_SCOPE=changed" \
     "Do not narrow with RALPH_VERIFY_SCOPE=changed" "$file"
-  assert_contains "$file wraps gofmt -l in test -z" \
+  assert_joined_contains_exact "$file wraps gofmt -l in test -z" \
     "test -z \"\$(gofmt -l" "$file"
 done
 
@@ -119,13 +126,18 @@ templates/base/.agents/skills/plan/SKILL.md
 "
 
 for file in $plan_skill_files; do
-  assert_block_contains "$file step 7 asks for each slice's verification command" \
+  assert_block_contains_exact "$file step 7 asks for each slice's verification command" \
     "$file" "7. Fill in:" "8. " \
     "implementation outline: one item per slice, each ending with that slice's verification command"
 done
 
+# The five mechanical items, worded as in the canonical list in
+# model-routing.md's report contract.
+mechanical_items="unnecessary changes, typos and copy-paste errors, debug leftovers, secrets, and files outside the slice"
+
 # AC3: /implement takes the slice command from the plan (D4 when there is
-# none), inline slices do the mechanical self-check (D6), and step 12 and the
+# none), the gate reads the implementer's self-check result, inline slices do
+# the mechanical self-check on the staged diff (D6), and step 12 and the
 # Completion gate run no full run-verify.sh.
 implement_skill_files="
 .claude/skills/implement/SKILL.md
@@ -136,42 +148,63 @@ templates/base/.agents/skills/implement/SKILL.md
 
 step6="6. Implement in small slices"
 step7="7. **Commit gate"
+delegated_start="   - **Delegated slices**"
 inline_start="   - **Inline slices**"
 inline_stop="   - If verification fails"
 
 for file in $implement_skill_files; do
-  assert_block_contains "$file step 6 takes the slice command from the plan" \
+  assert_block_contains_exact "$file step 6 takes the slice command from the plan" \
     "$file" "$step6" "$step7" \
     "The exact verification commands are the slice's command from the plan's \`## Implementation outline\`"
-  assert_block_contains "$file step 6 covers a plan with no command for the slice" \
+  assert_block_contains_exact "$file step 6 covers a plan with no command for the slice" \
     "$file" "$step6" "$step7" \
     "If the plan has no command for the slice (a plan approved before the template asked for one)"
-  assert_block_contains "$file step 6 writes the picked command under Progress checklist" \
+  assert_block_contains_exact "$file step 6 writes the picked command under Progress checklist" \
     "$file" "$step6" "$step7" \
-    "pick the narrowest command that covers the slice's files and write it under the plan's \`## Progress checklist\` before dispatching"
+    "pick the narrowest command that covers the slice's files and write it under the plan's \`## Progress checklist\` before dispatching (for an inline slice, before implementing it)"
 
-  assert_block_contains "$file inline slices run the plan's command" \
+  assert_block_contains_exact "$file delegated gate reads a result per self-check item" \
+    "$file" "$delegated_start" "$inline_start" \
+    "mechanical self-check result present, with a result for each of its five items and no item found and not fixed"
+  assert_block_contains_exact "$file delegated gate fixes an item found and not fixed first" \
+    "$file" "$delegated_start" "$inline_start" \
+    "If an item is found and not fixed, have it fixed as its own slice (a new handoff and a new commit) before the next slice."
+
+  assert_block_contains_exact "$file inline slices run the plan's command" \
     "$file" "$inline_start" "$inline_stop" \
     "run the slice's verification command from the plan (step 6)"
-  assert_block_contains "$file inline slices do the mechanical self-check" \
+  assert_block_contains_exact "$file inline slices stage, then self-check the staged diff" \
     "$file" "$inline_start" "$inline_stop" \
-    "then do the same mechanical self-check the implementer does before it commits"
-  assert_block_contains "$file inline slices note the self-check under Progress checklist" \
+    "then stage the slice's files and do the same mechanical self-check the implementer does on the staged diff (\`git diff --cached\`): $mechanical_items."
+  assert_block_contains_exact "$file inline slices re-run the command after a fix" \
     "$file" "$inline_start" "$inline_stop" \
-    "and note the result under the plan's \`## Progress checklist\`"
+    "If the check changed anything, re-run the verification command and re-stage."
+  assert_block_contains_exact "$file inline slices note each item under Progress checklist" \
+    "$file" "$inline_start" "$inline_stop" \
+    "Note the result for each item (clean, fixed, or found and not fixed) under the plan's \`## Progress checklist\`; fix an item found and not fixed as its own slice before the next slice. Then commit"
+  assert_joined_lacks_any_case "$file drops the self-check before staging" \
+    "Then stage the slice's files and commit" "$file"
 
-  assert_block_contains "$file step 12 does not run the full run-verify.sh" \
+  assert_block_contains_exact "$file step 12 does not run the full run-verify.sh" \
     "$file" "12. Before presenting completion" "13. " \
     "Do not run the full \`./scripts/run-verify.sh\` here"
-  assert_block_contains "$file Completion gate checks each slice's command" \
+  assert_block_contains_exact "$file Completion gate checks each slice's command" \
     "$file" "## Completion gate" "## " \
     "- [ ] Every slice's verification command passed"
+  assert_block_contains_exact "$file Completion gate checks /verify and /test" \
+    "$file" "## Completion gate" "## " \
+    "- [ ] \`/verify\` and \`/test\` (step 13) passed"
+  assert_block_contains_exact "$file Completion gate names both kinds of checks" \
+    "$file" "## Completion gate" "## " \
+    "If a slice's verification or the pipeline's checks have not run, say so explicitly instead of claiming done."
+  assert_joined_lacks_any_case "$file drops the ambiguous closing sentence" \
+    "If verification has not run, say so explicitly" "$file"
 
-  assert_not_contains "$file drops run-verify.sh as the inline slice check" \
+  assert_joined_lacks_any_case "$file drops run-verify.sh as the inline slice check" \
     "run \`./scripts/run-verify.sh\` (or equivalent)" "$file"
-  assert_not_contains "$file drops the full run-verify.sh from step 12" \
+  assert_joined_lacks_any_case "$file drops the full run-verify.sh from step 12" \
     "Before presenting completion, run \`./scripts/run-verify.sh\`" "$file"
-  assert_not_contains "$file drops run-verify.sh from the Completion gate" \
+  assert_joined_lacks_any_case "$file drops run-verify.sh from the Completion gate" \
     "\`./scripts/run-verify.sh\` exits 0" "$file"
 done
 
@@ -182,13 +215,13 @@ templates/base/.claude/rules/ralph/git-commit-strategy.md
 "
 
 for file in $commit_strategy_files; do
-  assert_block_contains "$file Validation Gate runs the slice's command from the plan" \
+  assert_block_contains_exact "$file Validation Gate runs the slice's command from the plan" \
     "$file" "## Validation Gate" "## " \
     "2. Run the slice's verification command from the plan: the narrowest check that covers the files the slice touches"
-  assert_block_contains "$file Validation Gate leaves the full checks to /verify and /test" \
+  assert_block_contains_exact "$file Validation Gate leaves the full checks to /verify and /test" \
     "$file" "## Validation Gate" "## " \
     "The full static and test checks run later, in \`/verify\` and \`/test\`"
-  assert_not_contains "$file drops run-verify.sh as the slice check" \
+  assert_joined_lacks_any_case "$file drops run-verify.sh as the slice check" \
     "Run \`./scripts/run-verify.sh\` (or equivalent)" "$file"
 done
 
@@ -198,13 +231,21 @@ templates/base/.claude/rules/ralph/model-routing.md
 "
 
 for file in $model_routing_files; do
-  assert_contains "$file delegation prompt asks for the mechanical self-check result" \
+  assert_joined_contains_exact "$file delegation prompt asks for the mechanical self-check result" \
     "report contract (changed files, key decisions, verification evidence, the mechanical self-check result)" "$file"
-  assert_contains "$file report contract lists the mechanical self-check" \
-    "**Report contract (implementer → orchestrator):** changed files, decisions/deviations, verification evidence, the mechanical self-check result (unnecessary changes, typos, debug leftovers, secrets, files outside the handoff)" "$file"
-  assert_contains "$file handoff row points at the plan's Implementation outline" \
+  assert_joined_contains_exact "$file report contract asks for the mechanical self-check" \
+    "**Report contract (implementer → orchestrator):** changed files, decisions/deviations, verification evidence, the mechanical self-check result, commit-boundary evidence" "$file"
+  assert_joined_contains_exact "$file report contract holds the canonical list" \
+    "The mechanical self-check has five items, and this is the canonical list that every other mention repeats word for word: $mechanical_items." "$file"
+  assert_joined_contains_exact "$file report contract gives a result per item" \
+    "The result says, for each item, clean, fixed (what), or found and not fixed (what and why)." "$file"
+  assert_joined_contains_exact "$file report contract fixes an item found and not fixed first" \
+    "When an item is found and not fixed, the orchestrator has it fixed as its own slice before the next slice (\`/implement\` step 7)." "$file"
+  assert_joined_lacks_any_case "$file drops the old item wording" \
+    "files outside the handoff)" "$file"
+  assert_joined_contains_exact "$file handoff row points at the plan's Implementation outline" \
     "| Exact verification commands | the slice's command from the plan's \`## Implementation outline\`" "$file"
-  assert_not_contains "$file drops the bare copy-paste handoff row" \
+  assert_joined_lacks_any_case "$file drops the bare copy-paste handoff row" \
     "| Exact verification commands | copy-paste ready |" "$file"
 done
 
@@ -214,9 +255,9 @@ templates/base/.claude/rules/ralph/subagent-policy.md
 "
 
 for file in $subagent_policy_files; do
-  assert_contains "$file handoff takes the slice command from the plan" \
+  assert_joined_contains_exact "$file handoff takes the slice command from the plan" \
     "exact verification commands (the slice's command from the plan's \`## Implementation outline\`)" "$file"
-  assert_contains "$file implementer report includes the mechanical self-check" \
+  assert_joined_contains_exact "$file implementer report includes the mechanical self-check" \
     "The implementer returns: changed files, decisions/deviations, verification evidence, the mechanical self-check result, commit-boundary evidence, and commit SHA." "$file"
 done
 
