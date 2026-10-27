@@ -192,4 +192,7 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - LOW 4(標準フローの implementer の定義と `/implement` の手順 7 の unstage と削除)は、#261 の文でこの計画の範囲の外なので、sync-docs で tech-debt に記録する。Claude と Codex の agent 定義、skill、それぞれの `templates/base/` の写しを名指す
   - 直し F6 854be9db(implementer): 止まったスライスの再開。leader は頼み直す TASK の本文の `RESUME:` の行に、止まった TASK が残したパスを並べ、秘密情報で止まったあとは値が消えたことを確かめる(消えていない、または前からあった変更にあるなら escalate)。implementer は `RESUME:` のパスの変更を引き継ぎ、scope の外なら BLOCKED。skill の 4 つの写しも同じに。テスト 3 本を足し、変異 3 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
   - 直し 51cf59e2(inline): F6 の implementer が挙げた穴。スライスを狭めるときも残したパスはすべて `RESUME:` に並べ、外すパスの変更は元に戻すよう TASK に書く(leader はコードに触れないため)。検証: `gofmt`・`go vet` と雛形のテストが通過。この文を消すとテストが落ちることを `-overlay` で確かめた。機械的な確かめ: unnecessary changes clean / typos and copy-paste errors clean / debug leftovers clean / secrets clean / files outside the slice clean
+- [x] Cycle 2 の self-review 2 回目(bd21c5fd: LOW 5、Merge yes。前回の 1〜3 は解消、5 は一部)
+  - 直し F8 28d83b96(implementer): R2-1 複数スライスの `RESUME:` の行にもスライス名を付け、その名前のスライスのコミットに入れる。R2-2 skill の leader の手順 3 に、値が消えていなければ escalate と、狭めるときの文。R2-3 leader の「前からあった変更」の説明を implementer の定義にそろえた。R2-4 「止まった TASK がコミットせずに残したパス」と明記し、折り返しを直した。変異 5 つがそれぞれ落ちることを確かめた。機械的な確かめは 5 項目とも clean
+  - R2-5(テストの整理: 同じ文を 2 か所で固定、ファイル名が `predate` のまま再開のテストも入る、順序の照合が 2 通り、テスト名の語)は、前回の所見 4(標準フローの面)と一緒に、sync-docs で tech-debt に記録する。直すたびに新しい LOW が出ているので、self-review はここで止め、最終の diff は verify と cross-review が見る
 - [ ] PR created
