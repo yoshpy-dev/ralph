@@ -95,12 +95,12 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 
 ## Acceptance criteria
 
-- [ ] AC1: leader の雛形の TASK の例に検証コマンド(`VERIFY:` の行)があり、機能ごとの org の手順 1 に、計画のスライスごとの検証コマンドと `RALPH_VERIFY_SCOPE=changed` の注意がある(issue の受け入れ条件 1)
-- [ ] AC2: implementer の雛形の RESULT の契約に、機械的な確かめ(5 項目それぞれの結果)と、打った検証コマンドとその結果がある。TASK にコマンドがないときの既定が `run-verify.sh` ではなく、いちばん狭い検査になっている(issue の受け入れ条件 2)
-- [ ] AC3: 機能ごとの org では、reviewer のレビューの TASK が `run-test.sh` を打たない。leader の雛形の手順 8 が `./scripts/run-static-verify.sh` だけを指示し、reviewer の雛形は指示があればそれだけを打つ(足しも削りもしない)。指示がないときの reviewer の既定は、今のまま両方。gate の TASK は今のまま `ralph org gate` を打つ(issue の受け入れ条件 3、D6)
-- [ ] AC4: `/org` skill の「役割」と「座席内 fan-out」が S1〜S3 と食い違わず、4 つの写しが一致する
-- [ ] AC5: quality-gates・recipe・仕様の reviewer の記述が S2 と食い違わない
-- [ ] AC6: 雛形のテスト(`internal/org/prompts_test.go`)と skill の同期の検査(`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`、`internal/org` の `*_sync_test.go`)が通る(issue の受け入れ条件 4)
+- [x] AC1: leader の雛形の TASK の例に検証コマンド(`VERIFY:` の行)があり、機能ごとの org の手順 1 に、計画のスライスごとの検証コマンドと `RALPH_VERIFY_SCOPE=changed` の注意がある(issue の受け入れ条件 1)
+- [x] AC2: implementer の雛形の RESULT の契約に、機械的な確かめ(5 項目それぞれの結果)と、打った検証コマンドとその結果がある。TASK にコマンドがないときの既定が `run-verify.sh` ではなく、いちばん狭い検査になっている(issue の受け入れ条件 2)
+- [x] AC3: 機能ごとの org では、reviewer のレビューの TASK が `run-test.sh` を打たない。leader の雛形の手順 8 が `./scripts/run-static-verify.sh` だけを指示し、reviewer の雛形は指示があればそれだけを打つ(足しも削りもしない)。指示がないときの reviewer の既定は、今のまま両方。gate の TASK は今のまま `ralph org gate` を打つ(issue の受け入れ条件 3、D6)
+- [x] AC4: `/org` skill の「役割」と「座席内 fan-out」が S1〜S3 と食い違わず、4 つの写しが一致する
+- [x] AC5: quality-gates・recipe・仕様の reviewer の記述が S2 と食い違わない
+- [x] AC6: 雛形のテスト(`internal/org/prompts_test.go`)と skill の同期の検査(`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`、`internal/org` の `*_sync_test.go`)が通る(issue の受け入れ条件 4)
 
 ## Implementation outline
 
@@ -182,5 +182,5 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
   - 残り(sync-docs に渡す): tech-debt の「org runtime FR-7 quality gate is prompt-instructed, not hook-enforced.」の行にも「The reviewer seat re-runs `run-static-verify.sh` / `run-test.sh`」という古い文がある。trigger は「The next change to the org quality pipeline」で、この計画も当たる。払わずに繰り越す注記を、2026-10-26 の reviewer-runs-gate のときと同じ形で足す
 - [x] Verification artifact created(verify 584f8103: pass、AC1〜AC5 を満たし、AC6 は静的な半分。self-review の 2 回目の LOW 2 件は F3 で解消を確認。所見は LOW 1(director の仕様 2026-10-07 の FR-7 の「テストは review と gate の 2 回」が古い)と既知 1(tech-debt の 157 行目)で、どちらも sync-docs に渡す)
   - 逸れ: テストは AC6 と S1 が名指す `internal/org/prompts_test.go` ではなく、F2 と F3 で `internal/org/prompts_verification_test.go` と `internal/org/prompts_verification_multi_test.go` に置いた(`prompts_test.go` は main の版のまま)
-- [ ] Test artifact created
+- [x] Test artifact created(test 3afdd03a: pass。`run-test.sh` が rc 0、1,572 秒で、shell 45 本と Go のテストのある 9 パッケージがすべて通過。名指しの雛形のテスト 66 本と `TestStartFeature` 27 本が通過。変異 a〜d(c は 3 つの形)はそれぞれ落ち、対照は通った。座席の実機は確かめていない)
 - [ ] PR created
