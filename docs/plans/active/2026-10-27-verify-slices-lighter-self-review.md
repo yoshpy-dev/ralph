@@ -137,4 +137,7 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
 - [x] Cross-review 1 回目(triage 68d8312c: ACTION_REQUIRED 1)。秘密情報で止まったスライスを新しい implementer に出し直すと、その implementer は範囲内の未コミットの変更を見て止まる。consult の判定で、例外は秘密情報に限らず「コミットせずに止まったスライスの再開」にした(範囲内で直せない検証の失敗でも止まるため)
   - 直し dba1c20f(implementer): implementer の定義 4 本に再開の例外、手順 7 に出し直し方と範囲を絞ったときの片付け、model-routing の 2 本に同じ文。テストの穴(LOW)もこのコミットで閉じ、tech-debt の行を解決済みにした。検証: check-sync PASS、check-skill-sync ok、slice 138/138、scope 202/202、agent-models 47/47。機械的な確かめは 5 項目とも clean。「the narrowest check」だけを変える変異は、新しいテストで 4 件落ちる
   - cycle を 2 にして、/self-review から回し直す
+- [x] Cycle 2 の self-review 1 回目(2478fd5d: LOW 3、Merge yes)。範囲を絞って外したファイルを `git restore -- <file>` で戻しても、新規のファイルとステージ済みの変更は戻らない。秘密情報の報告に値を書かない指示がない。handoff の表と手順 6 に再開がない
+  - 直し d33bb358(implementer): 再開の前にまず秘密情報を作業ツリーから出す(`wip:` のチェックポイントが `git add -A` で全部ステージするため)。戻し方は追跡中のファイルなら `git restore --staged --worktree -- <file>`、新規のファイルなら削除。秘密情報はファイルと行で報告し、値は書かない。model-routing の表に Resume の行、手順 6 に再開の例外。検証: check-sync PASS、check-skill-sync ok、slice 148/148、scope 206/206、agent-models 47/47。機械的な確かめは 5 項目とも clean
+  - Cycle 2 の self-review 2 回目(3affffb0): 所見 0、Merge yes
 - [ ] PR created
