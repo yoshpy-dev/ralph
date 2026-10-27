@@ -94,8 +94,8 @@ func TestRenderRolePrompt_Implementer_MechanicalSelfCheckBeforeEachCommit(t *tes
 		"項目は 5 つで、この順に見る: " + strings.Join(implementerSelfCheckItems, "、") + "(`git diff --cached --name-only` に出る、scope にないパス)",
 		"見つけたものは scope の中で直し、検証のコマンドを打ち直してから stage し直す",
 		"scope の中で直せない項目はそのまま残し、RESULT に found and not fixed として理由とともに書く",
-		"例外は 2 つで、どちらもコミットしない(コミットには stage してあるものがすべて入る)",
-		"1 つ目は秘密情報で、このスライスの変更にある秘密情報を scope の中で消せなければ、このスライスのパスを unstage し、作業ツリーからも出し(値を消す。その値を持つのがこのスライスで作った未追跡のファイルなら、ファイルを消す)、BLOCKED を leader に返す",
+		"コミットしないのは次の 3 つのときで(コミットには stage してあるものがすべて入る)、どれも BLOCKED を leader に返す: このスライスの変更にある秘密情報を scope の中で消せないとき",
+		"1 つ目では、このスライスのパスを unstage し、作業ツリーからも出す(値を消す。その値を持つのがこのスライスで作った未追跡のファイルなら、ファイルを消す)",
 		"BLOCKED には秘密情報のファイルと行を書き、値は書かない",
 	} {
 		if !containsPhrase(item, want) {
