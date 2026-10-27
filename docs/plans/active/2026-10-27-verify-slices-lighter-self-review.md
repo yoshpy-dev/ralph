@@ -134,4 +134,7 @@ Critical forks: None(方針はユーザーと issue #261 で決めた。D1〜D3 
   - 上の S5 の 84 件と bc56cc4f の scope 198/198 は、その時点の数。slice のテストは cb094ae8 と 804d05f9 の検査の追加で 130 件になった
   - テストの穴(LOW): 手順 6 の検査の文字列が「the narrowest check that covers the slice's files」の手前で終わり、4 つの写しを一緒に「broadest」にしても通る。`docs/tech-debt/README.md` に記録した
   - sync-docs: 文書のドリフトなし(`.codex/README.md` の implementer の行に機械的な確かめを足した)。hook の「Run ./scripts/run-verify.sh before claiming done」2 か所は計画の外なので `docs/tech-debt/README.md` に記録した
+- [x] Cross-review 1 回目(triage 68d8312c: ACTION_REQUIRED 1)。秘密情報で止まったスライスを新しい implementer に出し直すと、その implementer は範囲内の未コミットの変更を見て止まる。consult の判定で、例外は秘密情報に限らず「コミットせずに止まったスライスの再開」にした(範囲内で直せない検証の失敗でも止まるため)
+  - 直し dba1c20f(implementer): implementer の定義 4 本に再開の例外、手順 7 に出し直し方と範囲を絞ったときの片付け、model-routing の 2 本に同じ文。テストの穴(LOW)もこのコミットで閉じ、tech-debt の行を解決済みにした。検証: check-sync PASS、check-skill-sync ok、slice 138/138、scope 202/202、agent-models 47/47。機械的な確かめは 5 項目とも clean。「the narrowest check」だけを変える変異は、新しいテストで 4 件落ちる
+  - cycle を 2 にして、/self-review から回し直す
 - [ ] PR created
