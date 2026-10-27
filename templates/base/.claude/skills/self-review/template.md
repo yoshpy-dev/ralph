@@ -9,8 +9,8 @@
 
 ## Findings
 
-<!-- Area recommended values: naming, readability, unnecessary-change, typo,
-     null-safety, debug-code, secrets, exception-handling, security, maintainability -->
+<!-- Area recommended values: naming, readability, null-safety,
+     exception-handling, security, maintainability -->
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |

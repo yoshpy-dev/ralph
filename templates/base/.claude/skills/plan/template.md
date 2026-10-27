@@ -35,7 +35,11 @@
 
 ## Implementation outline
 
-1.
+<!-- One numbered item per slice. End each item with that slice's verification command, written as "— verify: `<command>`". /implement copies the command into the implementer handoff. -->
+<!-- The command is the narrowest check that covers the files the slice touches. For a Go package, its format, vet, and tests: `test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && go test ./internal/foo/` (gofmt -l exits 0 even when it lists files, hence test -z). For other languages, the language pack's per-package checks. -->
+<!-- Do not narrow with RALPH_VERIFY_SCOPE=changed: it only selects which language packs run, and inside a pack (Go) it still runs the whole module (`go test ./...`). The full static and test checks run once, in /verify and /test. -->
+
+1. <slice> — verify: `<command>`
 
 ## Verify plan
 

@@ -38,7 +38,8 @@ worktree.
    - affected files or systems
    - visual review (filled in step 10)
    - acceptance criteria
-   - implementation outline
+   - implementation outline: one item per slice, each ending with that slice's verification command, the narrowest check that covers the slice's files
+     (see the comment in the template's `## Implementation outline`)
    - verify plan (static analysis checks, spec compliance criteria, documentation drift checks, evidence to capture)
    - test plan (unit tests, integration tests, regression tests, edge cases, evidence to capture)
    - risk register

@@ -14,8 +14,9 @@ tasks. Delegation timing/order lives in `subagent-policy.md`.
 
 Quality is preserved by plan artifacts, not by model tier: when delegating,
 the prompt must carry acceptance criteria, exact verification commands, and a
-report contract (changed files, key decisions, verification evidence). A
-cheaper model with a precise plan beats an expensive model with a vague one.
+report contract (changed files, key decisions, verification evidence, the
+mechanical self-check result). A cheaper model with a precise plan beats an
+expensive model with a vague one.
 
 ## Standard flow delegation (/implement)
 
@@ -33,12 +34,26 @@ itself.
 | Slice objective | single-sentence goal |
 | Acceptance criteria | the ACs this slice addresses |
 | Files in scope | exact list; implementer stages only these paths |
-| Exact verification commands | copy-paste ready |
+| Exact verification commands | the slice's command from the plan's `## Implementation outline` (the narrowest check that covers the slice's files), copy-paste ready |
 | Commit message format | conventional format string |
+| Resume (only when dispatching a stopped slice again) | the uncommitted changes the stopped slice left in the files in scope, named as the slice's own (`/implement` step 7) |
 
 **Report contract (implementer → orchestrator):** changed files, decisions/deviations,
-verification evidence, commit-boundary evidence (`git status --porcelain` +
-`git show --stat HEAD` output), commit SHA.
+verification evidence, the mechanical self-check result, commit-boundary
+evidence (`git status --porcelain` + `git show --stat HEAD` output), commit SHA.
+The mechanical self-check has five items, and this is the canonical list that
+every other mention repeats word for word: unnecessary changes, typos and
+copy-paste errors, debug leftovers, secrets, and files outside the slice. The
+result says, for each item, clean, fixed (what), or found and not fixed (what
+and why), and names a secret by its file and line, never by its value. When
+an item is found and not fixed, the orchestrator has it fixed
+as its own slice before the next slice (`/implement` step 7). For the last
+slice, that happens before step 13. A secret that cannot be removed within
+scope is never committed: the implementer stops without a commit, and the
+orchestrator first takes the secret out of the worktree, narrows the slice if
+needed, and dispatches it again as a resume, whose handoff names the
+uncommitted changes the stopped slice left in the files in scope as the
+slice's own (`/implement` step 7).
 
 **Inline exceptions** (no subagent dispatch needed):
 

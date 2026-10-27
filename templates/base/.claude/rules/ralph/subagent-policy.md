@@ -52,9 +52,11 @@ to the `implementer` subagent:
 The orchestrator authors the structured handoff (defined in
 `model-routing.md` — "Standard flow delegation (/implement)") and does not write
 slice code itself. The handoff must carry: plan path, slice objective,
-acceptance criteria, files in scope, exact verification commands, and commit
-message format. The implementer returns: changed files, decisions/deviations,
-verification evidence, commit-boundary evidence, and commit SHA.
+acceptance criteria, files in scope, exact verification commands (the slice's
+command from the plan's `## Implementation outline`), and commit message
+format. The implementer returns: changed files, decisions/deviations,
+verification evidence, the mechanical self-check result, commit-boundary
+evidence, and commit SHA.
 
 **Inline exceptions** (dispatch not required):
 

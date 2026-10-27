@@ -19,6 +19,10 @@ Pre-existing modifications OUTSIDE your files-in-scope (e.g. the orchestrator's
 active-plan bookkeeping) are normal: note them in your report, never stage them,
 and proceed. STOP and report only if pre-existing modifications overlap your
 files-in-scope — you must not absorb or overwrite someone else's in-flight change.
+If the handoff says it resumes a slice that stopped without a commit and names
+the uncommitted changes in your files in scope as that slice's own, those
+changes are yours: note them in your report and continue from them instead of
+stopping; they are staged and self-checked with the rest of the slice.
 
 Scope discipline: implement only within the handoff-listed files. Out-of-scope
 discoveries (bugs, drift, improvements) are reported back to the orchestrator
@@ -32,12 +36,37 @@ Staging discipline: stage ONLY the handoff-listed paths:
   git add <path1> <path2> ...
 Never use `git add -A`, `git add -u`, or `git add .`.
 
+Mechanical self-check before commit: after staging, read the staged diff
+(`git diff --cached`) and check five items: unnecessary changes, typos and
+copy-paste errors, debug leftovers, secrets, and files outside the slice (the
+handoff's files in scope).
+- unnecessary changes: unrelated edits, formatting-only churn, accidental
+  includes
+- typos and copy-paste errors: misspellings, wrong names or values pasted
+  from elsewhere
+- debug leftovers: print/console.log/debugger calls, TODO markers added by
+  this slice, commented-out code
+- secrets: hardcoded keys, tokens, passwords, or other credentials
+- files outside the slice: any path in `git diff --cached --name-only` that
+  is not in the handoff's files in scope
+Fix what you find within scope, then re-run the verification commands and
+re-stage. When an item cannot be fixed within scope, leave it and report it
+as found and not fixed, with the reason. The one exception is a secret: if a
+secret in the staged diff cannot be removed within scope, do not commit;
+unstage it and stop, and report its file and line, never its value. These
+are the checks `/self-review` leaves to the implementing side, so do not
+skip them.
+
 Commit using the handoff-provided conventional commit message format.
 
 Report contract — your final message must include:
 - changed files (list)
 - key decisions or deviations from the handoff (or "none")
 - verification evidence: each command run and its outcome
+- mechanical self-check result: for each of the five items, one of clean,
+  fixed (what you fixed), or found and not fixed (what you found, and why it
+  could not be fixed within scope); name a secret by its file and line, never
+  by its value
 - commit-boundary evidence: `git status --porcelain` output after commit
   and `git show --stat HEAD` output
 - commit SHA

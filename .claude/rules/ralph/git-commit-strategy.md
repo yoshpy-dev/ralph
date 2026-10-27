@@ -7,7 +7,10 @@ Single source of truth for when and how to commit in all flows.
 Commit after each slice passes verification, not at the end:
 
 1. Implement a slice (one or more acceptance criteria)
-2. Run `./scripts/run-verify.sh` (or equivalent)
+2. Run the slice's verification command from the plan: the narrowest check
+   that covers the files the slice touches (see `## Implementation outline`
+   in the plan template, `docs/plans/templates/feature-plan.md`). The full
+   static and test checks run later, in `/verify` and `/test`
 3. If verification passes → stage and commit with conventional format
 4. If verification fails → fix before committing
 5. Repeat for the next slice

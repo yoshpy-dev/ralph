@@ -1,6 +1,6 @@
 ---
 name: self-review
-description: Self-review the diff for code quality before formal verification. Covers naming, readability, unnecessary changes, typos, null safety, debug code, secrets, exception handling, security, and maintainability. Invoke automatically after /implement completes or when significant code changes are staged.
+description: Self-review the diff for code quality before formal verification. Covers naming, readability, null safety, exception handling, security, and maintainability. Invoke automatically after /implement completes or when significant code changes are staged.
 ---
 Perform a self-review of the current diff and write a report to `docs/reports/`.
 
@@ -12,16 +12,19 @@ spec-compliance verification, documentation drift checks, or broad unrelated
 repo audits. Use `git diff` and targeted file reads only.
 
 Evaluate the diff for:
-1. **Unnecessary changes** — unrelated modifications, formatting-only diffs, accidental includes
-2. **Naming** — clarity, consistency with surrounding code, grep-ability
-3. **Readability** — function length, nesting depth, comment quality
-4. **Typos and copy-paste errors**
-5. **Null safety and defensive checks** — missing guards at boundaries
-6. **Debug code** — leftover console.log, print, TODO markers, commented-out code
-7. **Secrets and credentials** — hardcoded keys, tokens, passwords
-8. **Exception handling** — swallowed errors, generic catches, missing error paths
-9. **Security** — injection risks, XSS, CSRF, unsafe deserialization, path traversal
-10. **Maintainability** — tight coupling, hidden side effects, magic numbers
+1. **Naming** — clarity, consistency with surrounding code, grep-ability
+2. **Readability** — function length, nesting depth, comment quality
+3. **Null safety and defensive checks** — missing guards at boundaries
+4. **Exception handling** — swallowed errors, generic catches, missing error paths
+5. **Security** — injection risks, XSS, CSRF, unsafe deserialization, path traversal
+6. **Maintainability** — tight coupling, hidden side effects, magic numbers
+
+The implementing side (the implementer, or the orchestrator for an inline
+slice; `/implement` step 7) checks unnecessary changes, typos and copy-paste
+errors, debug leftovers, secrets, and files outside the slice before each
+commit. Secrets are also scanned by `/verify`'s branch secret scan and CI's
+secret scan. Do not search for these here, but report one if you happen to
+see it in the diff.
 
 ## Review method
 
