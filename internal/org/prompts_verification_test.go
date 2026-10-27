@@ -19,16 +19,17 @@ const implementerGoSliceCheck = `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ 
 // implementer's mission and in item 3 of the leader's mission, why
 // -timeout=30m goes first in GOFLAGS: it is the Go pack's default, so a
 // package whose tests take over ten minutes is not cut off by go test's own
-// default, and a timeout the caller set comes later and wins.
+// default, and a timeout already set in the environment's GOFLAGS or with
+// go env -w comes later and wins.
 var goSliceCheckTimeoutSentences = []string{
 	"`-timeout=30m` は Go の言語パックの既定(`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする",
-	"`GOFLAGS` の先頭に置くので、呼び手が `GOFLAGS` か `go env -w` で決めた timeout があれば、そちらがあとに並んで効く",
+	"`GOFLAGS` の先頭に置くので、環境の `GOFLAGS` か `go env -w` で timeout が決めてあれば、そちらがあとに並んで効く",
 }
 
-// goSliceCheckNestedModuleSentence is the sentence of the same two places that
-// runs implementerGoSliceCheck inside a nested module's root, since without a
-// root go.work Go does not enter, from the root, a module with its own go.mod
-// below the repository root.
+// goSliceCheckNestedModuleSentence is the sentence, in the same two places,
+// that runs implementerGoSliceCheck inside a nested module's root. Without a
+// root go.work, Go run from the repository root does not enter a module that
+// has its own go.mod below the root.
 const goSliceCheckNestedModuleSentence = "パッケージがリポジトリの root の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>` からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(root に `go.work` がなければ、Go は root から入れ子の module に入らない)"
 
 // implementerSelfCheckItems are the five items of the implementer's

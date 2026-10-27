@@ -41,8 +41,8 @@
   包む)。`-timeout=30m` は Go の言語パックの既定
   (`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より
   長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする。
-  `GOFLAGS` の先頭に置くので、呼び手が `GOFLAGS` か `go env -w` で決めた
-  timeout があれば、そちらがあとに並んで効く。パッケージがリポジトリの root
+  `GOFLAGS` の先頭に置くので、環境の `GOFLAGS` か `go env -w` で timeout が
+  決めてあれば、そちらがあとに並んで効く。パッケージがリポジトリの root
   の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、
   その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>`
   からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(root に
