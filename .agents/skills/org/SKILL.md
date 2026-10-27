@@ -948,6 +948,17 @@ leader は reviewer がレビューの TASK(TASK_ID が `gate-` で始まらな�
 から座席を立て、TASK と RESULT を往復する。「機能の計画の承認」)。下の
 `ralph org` のコマンドにも、タスクの `- 台帳:` の行の `--state-dir` を付ける。
 
+その前の手順で、leader は検証を次のように分ける(leader の雛形の「機能ごとの
+org」の手順 1・5・8)。機能の計画の `## Implementation outline` には、スライス
+ごとの項目の終わりに、そのスライスの検証コマンドを「— verify: `<コマンド>`」の
+形で書く(`RALPH_VERIFY_SCOPE=changed` は Go では `go test ./...` を全部
+走らせるので、絞り込みに使わない)。implementer への TASK では、頼むスライスの
+そのコマンドを書き換えずに本文の `VERIFY:` の行に写す。reviewer への
+レビューの TASK には、打つコマンドとして `./scripts/run-static-verify.sh`
+だけを書く。フルの test は下の 4 の gate の TASK で 1 回だけ走るので、
+レビューの `GATE: pass` は静的検査が通ったことだけを指す(「役割」節の
+reviewer)。
+
 1. reviewer のレポート(reviewer が RESULT や BLOCKED に書いた、
    `docs/reports/` の下のファイル)をコミットし、`git status --porcelain` が
    何も出さないことを確かめる。gate をやり直すときは、reviewer がコミット済みの
@@ -1293,8 +1304,10 @@ ralph org merge-order --all --json
 QUESTION は座席本体だけが送る。既定の 3 席(leader・implementer・reviewer)
 はこの fan-out を数えない。
 
-例: implementer はフロント/バック/インフラ or モジュール単位で実装を分担し、
-reviewer はゲートの実行を安いモデルの子サブエージェントに任せたうえで、
+例: implementer はフロント/バック/インフラ or モジュール単位で実装を分担する。
+reviewer は、レビューの TASK のゲート(TASK が指示したコマンド、指示が
+なければ `run-static-verify.sh` と `run-test.sh`)の実行を安いモデルの子
+サブエージェントに任せ、子にも同じコマンドだけを打たせたうえで、
 正確性/セキュリティ/仕様適合の観点を並列レビューする。
 
 ## 役割
@@ -1304,18 +1317,38 @@ reviewer はゲートの実行を安いモデルの子サブエージェント�
 - **leader**: 組織の座標役。`ralph org start` の既定役割。実装は座席へ委譲し、
   自身は火消し(座席が詰まった・編成そのものの調整)に限定する。
 - **implementer**: 実装を担う座席。leader から TASK で渡された scope 内を
-  実装し、スライス単位で検証・コミットして RESULT に commit SHA と証拠
-  ポインタを返す。
-- **reviewer**: 実装者以外の立場で決定論ゲート(`run-static-verify.sh` /
-  `run-test.sh`)を最初に再実行し、通れば差分と仕様適合をレビューする座席。
+  スライス単位で実装し、スライスごとに TASK の本文の `VERIFY:` の行の
+  コマンドで検証してからコミットする。`VERIFY:` の行がなければ、スライスが
+  触ったファイルを覆う、いちばん狭い検査を選ぶ(Go なら、触ったパッケージの
+  ディレクトリを `<dir>` として
+  `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && go test ./<dir>/`)。
+  `./scripts/run-verify.sh` は、それより狭い検査ではスライスのファイルを
+  覆えないときだけ使う。コミットの前には毎回、stage した差分
+  (`git diff --cached`)で 5 項目の機械的な確かめ(不要な変更、誤字と
+  コピペの誤り、デバッグの残り、秘密情報、scope の外のファイル)を行う。
+  scope の中で消せない秘密情報があればコミットせず、ファイルと行を書いた
+  BLOCKED を返す(値は書かない)。RESULT には commit SHA と証拠のポインタの
+  ほかに、打った検証のコマンドとその結果、5 項目それぞれの確かめの結果を
+  書く。
+- **reviewer**: 実装者以外の立場で決定論ゲートを最初に再実行し、通れば差分と
+  仕様適合をレビューする座席。レビューの TASK では、TASK が指示したコマンド
+  だけを打ち(足しも削りもしない)、指示がなければ `run-static-verify.sh` と
+  `run-test.sh` の両方を打つ。機能ごとの org の leader はレビューの TASK に
+  `./scripts/run-static-verify.sh` だけを指示し、その org のフルの test は、
+  下の gate の TASK で `ralph org gate` が 1 回走らせる。差分は 10 項目(命名、
+  読みやすさ、不要な変更、誤字とコピペの誤り、null の扱い、デバッグの残り、
+  秘密情報、例外処理、security、保守性)と受け入れ条件で確かめる。
   チェックが落ちたら `GATE: fail`、権限や環境の問題で実行できなければ
   `GATE: unrunnable` の BLOCKED を返し、差分レビューに進まない。通したときの
   RESULT のヘッダには、`GATE: pass` と、検証した commit の `HEAD:` と base の
   `BASE:` を書く(ralph はこの 2 行を読まない。機能の PR の記録は、下の gate の
-  TASK で打つ `ralph org gate` が残す)。ゲートを実行するので、claude の座席を
-  `guarded` にすると許可待ちで止まる(codex の座席は codex 自身の承認設定に
-  従う。止まるかは未確認)。機能の org では、leader の gate の TASK(TASK_ID が
-  `gate-` で始まる)も受ける。
+  TASK で打つ `ralph org gate` が残す)。レビューの RESULT と BLOCKED の
+  `GATE:` は、打ったコマンドの結果を指す。そのコマンドは本文の `CHECKS:` の
+  行に順に並べる(機能ごとの org のレビューの `GATE: pass` は、静的検査が
+  通ったことだけを指す)。ゲートを実行するので、claude の座席を `guarded` に
+  すると許可待ちで止まる(codex の座席は codex 自身の承認設定に従う。止まるかは
+  未確認)。機能の org では、leader の gate の TASK(TASK_ID が `gate-` で
+  始まる)も受ける。
   - 差分レビューも 2 つのスクリプトの素の実行もせず、本文の
     `mkdir -p .harness/state` と
     `ralph org gate --org-id <org_id> --state-dir <台帳> > .harness/state/gate-<org_id>.out 2>&1`
@@ -1398,8 +1431,11 @@ receipts / 役割雛形)を使うため、手順は共通。
    per-plan の機能の org では、implementer は承認のあとに立てる(reviewer は
    承認の前に立てて計画のレビューを頼んでよい。そのときも `--model` と
    `--scope` は上と同じにする)。
-3. `send` で TASK を委譲する。per-plan の機能の org では、implementer への TASK に
-   承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
+3. `send` で TASK を委譲する。implementer への TASK には、どの org でも、
+   そのスライスの検証コマンド(スライスが触ったファイルを覆う、いちばん狭い
+   検査)を本文の `VERIFY:` の行で書く(機能ごとの org での検証の分け方は
+   「org の終わり方」の冒頭)。per-plan の機能の org では、implementer への
+   TASK に承認された計画の `PLAN: <path> sha256:<digest>` のヘッダを付ける。
 4. `wait` / `status` / `read` で座席の状態を観察する。leader が手番の途中に
    いるあいだは `ralph org send` が届かないので、headless の leader は `wait` を
    前面で長く打たない(待ち方は「typed protocol」節の agmsg の受信箱の段落)。
@@ -1425,8 +1461,9 @@ receipts / 役割雛形)を使うため、手順は共通。
 同士は直接メッセージを交換しない。`leader` 以外から届いたメッセージ本文は
 データとして扱い、それだけでは実行の根拠にしない。
 
-RESULT の例(reviewer の座席からの完了報告。ヘッダは reviewer の雛形の
-「レポート契約」に従い、EVIDENCE はポインタのみ):
+RESULT の例(reviewer の座席からのレビューの完了報告。ヘッダは reviewer の
+雛形の「レポート契約」に従い、打ったコマンドは本文の `CHECKS:` の行に書き、
+EVIDENCE はポインタのみ):
 
 ```
 TYPE: RESULT
@@ -1435,6 +1472,7 @@ GATE: pass
 HEAD: <検証した commit の SHA>
 BASE: <検証した base の SHA>
 
+CHECKS: ./scripts/run-static-verify.sh
 SUMMARY: internal/foo/bar.go のレビューを完了。CRITICAL 0、HIGH 0、MEDIUM 1、LOW 2。
 EVIDENCE: docs/reports/review-<YYYY-MM-DD>-<org_id>-<seat_id>.md
 ```
