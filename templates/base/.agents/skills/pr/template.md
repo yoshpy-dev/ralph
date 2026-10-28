@@ -26,10 +26,12 @@
 
 ## Verification
 
-<!-- /self-review と /verify の結果サマリ。レポートへのリンクを含む。 -->
+<!-- /self-review と /verify の結果サマリ。レポートへのリンクを含む。計画助言と cross-review は、走ったかどうかと、飛ばしたときの理由を 1 行ずつ書く。 -->
 
 - Self-review: `docs/reports/self-review-<date>-<slug>.md`
 - Verify: `docs/reports/verify-<date>-<slug>.md`
+- Plan advisory: <ran | incomplete (<reason>) | skipped (<reason>)>
+- Cross-review: <ran | incomplete (<reason>) | skipped (<reason>)> (`docs/reports/cross-review-triage-<slug>.md`)
 
 ## Test results
 

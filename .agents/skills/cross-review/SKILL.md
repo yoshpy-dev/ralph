@@ -1,14 +1,19 @@
 ---
 name: cross-review
 description: >
-  Optional cross-model second opinion on the current diff. Calls the CLI other
-  than the one currently driving (Claude → Codex; Codex → Claude). Runs inline
-  in the main context (not delegated as subagent) after /sync-docs completes.
-  If the reviewer CLI is unavailable, silently skips and proceeds to /pr.
+  Cross-model second opinion on the current diff, run when the
+  [standard].cross_review switch is on and the reviewer CLI is available.
+  Calls the CLI other than the one currently driving (Claude → Codex; Codex →
+  Claude). Runs inline in the main context (not delegated as subagent) after
+  /sync-docs completes. When the switch is off or the reviewer CLI is
+  unavailable, records the skip in the triage report and proceeds to /pr.
   Findings are triaged by the driving CLI using implementation context before
   presentation to the user.
 ---
 Provide a cross-model second opinion on the current diff before PR creation.
+The review runs when `[standard].cross_review` is on (step 0) and the
+reviewer CLI is available (step 3). Otherwise the skill writes a triage report
+that records the skip and why, and hands off to `/pr`.
 
 ## Goals
 
@@ -18,6 +23,14 @@ Provide a cross-model second opinion on the current diff before PR creation.
 - Present findings as advisory — never auto-apply
 
 ## Steps
+
+0. **Read the switch (`[standard].cross_review`)**: from the repository root (the task worktree root, so `ralph` reads its `./ralph.toml`), run `ralph config get standard.cross_review` and read its exit code, stdout, and stderr.
+   - Exit 0 and `true`: continue. Exit 0 and `false`: skip, with the reason `off: [standard].cross_review`.
+   - Exit 1 with `unknown command "config"` on stderr (a ralph that predates the verb): skip, with the reason `ralph without config get; treated as off`.
+   - Exit 127 (`ralph` is not on PATH): skip, with the reason `ralph not found; treated as off`.
+   - Anything else (exit 2, 3, any other 1, or exit 0 with neither `true` nor `false`): stop and report the error to the user. Do not treat it as off.
+
+   A skip does not call the reviewer: run steps 1 and 2 (the report header needs the cycle, the driver, and the reviewer), leave out steps 3 to 5, and write the skipped report in step 6.
 
 1. **Resolve active plan identity and read cycle counter** (standard flow cap enforcement):
    a. Read `.harness/state/standard-pipeline/active-plan.json` to get the pinned plan path.
@@ -33,25 +46,18 @@ Provide a cross-model second opinion on the current diff before PR creation.
 2. **Resolve driver and reviewer CLIs**:
    The skill must call the CLI other than the one currently driving the work.
 
-   a. **Determine driver**:
-      - **Explicit override**: read env `RALPH_PRIMARY_CLI`. Accepts `claude` or `codex` (case-insensitive). Anything else falls through to auto-detect.
-      - **Auto-detect** (when no override):
-        - If `which codex` succeeds AND `which claude` does not → driver = `codex`.
-        - If `which claude` succeeds AND `which codex` does not → driver = `claude`.
-        - If both succeed → driver = `claude` (back-compat default; the skill body originally only ran in Claude).
-        - If neither succeeds → skip with note "no review CLI available — proceeding to /pr".
+   a. **Determine driver**: the driver is the CLI running this skill (Claude Code → `claude`, Codex → `codex`). `RALPH_PRIMARY_CLI` set to `claude` or `codex` (case-insensitive) overrides it; any other value is ignored. Do not infer the driver from `which`.
    b. **Determine reviewer**: source `scripts/xreview-helpers.sh` and call `pick_reviewer` with the driver from step 2.a to get the opposite CLI: `. scripts/xreview-helpers.sh; REVIEWER=$(pick_reviewer "$DRIVER")`. This keeps the "reviewer is always the driver's opposite" mapping in one grep-able, unit-tested place (`tests/test-xreview-helpers.sh`) instead of duplicating it inline.
 
    Record the resolved driver and reviewer for the rest of the skill. Both must be reported in the triage report header.
 
-3. **Check reviewer availability**:
-   - reviewer = `codex`: run `./scripts/codex-check.sh`. If exit 1: note "Codex not available — skipping to /pr" and invoke /pr.
-   - reviewer = `claude`: run `command -v claude` via Bash. If not found: note "Claude CLI not available — skipping to /pr" and invoke /pr.
+3. **Check reviewer availability**: check that the reviewer's CLI exists: `./scripts/codex-check.sh` exits 0 for `codex`, `command -v claude` succeeds for `claude`. If it does not, skip, with the reason `<reviewer> not available` (for example `codex not available`): leave out steps 4 and 5 and write the skipped report in step 6.
 
 4. **Invoke reviewer**:
    - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
    - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
-   - **reviewer = `codex`**: The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. Define `<scratch>` once: the agent's scratchpad directory when the tool provides one, else `$(mktemp -d)`. Source `./scripts/ralph-config.sh` and re-derive `$BASE` in the same Bash call as the launch below (a Bash tool keeps no shell state between calls), then run it in the background (Claude Code: Bash `run_in_background`). A watchdog in the same background shell enforces the 20-minute bound directly — the same `sleep 1200` shape as `/plan` step 11.c — instead of relying on a completion notification a hung codex would never send:
+   - **Save the git state** the reviewer must not change. Define `<scratch>` once: the agent's scratchpad directory when the tool provides one, else `$(mktemp -d)`. From the repository root, run the command of `/plan` step 11.c with this run's file name: `{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > <scratch>/cross-review-<slug>-c<cycle>-git-before.txt` (HEAD, the index, and the work tree with its untracked files).
+   - **reviewer = `codex`**: The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. Source `./scripts/ralph-config.sh` and re-derive `$BASE` in the same Bash call as the launch below (a Bash tool keeps no shell state between calls), then run it in the background (Claude Code: Bash `run_in_background`). A watchdog in the same background shell enforces the 20-minute bound directly — the same `sleep 1200` shape as `/plan` step 11.c — instead of relying on a completion notification a hung codex would never send:
      ```
      . ./scripts/ralph-config.sh; . scripts/xreview-helpers.sh; BASE=$(detect_base_branch)
      rm -f <scratch>/cross-review-<slug>-c<cycle>-last.md; command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" -c sandbox_mode=read-only exec review --ignore-rules --base "$BASE" -o <scratch>/cross-review-<slug>-c<cycle>-last.md </dev/null > <scratch>/cross-review-<slug>-c<cycle>.log 2>&1 & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "codex rc=$rc"
@@ -59,7 +65,8 @@ Provide a cross-model second opinion on the current diff before PR creation.
      (`</dev/null` / `command` reasons: see `/plan` step 11.c.) `-c sandbox_mode=read-only` runs the commands the reviewer executes in a sandbox that blocks file writes and, by default, network access: the project's `.codex/config.toml` sets `sandbox_mode = "danger-full-access"` and `codex exec` never asks for approval, so without the override an instruction hidden in the diff under review could run any command (`exec review` has no `--sandbox` flag). Keep every `-c` before `exec`: on codex-cli 0.154.0 a `-c` placed after `exec` makes codex discard all the `-c` options given before it, this one and the reasoning effort included. `--ignore-rules` stops an `allow` rule in a user or project execpolicy `.rules` file from running a matching command outside that sandbox. Neither covers MCP servers from the user's config, which still start and whose tools run outside the sandbox, and the reviewer can still read files outside the repository. `rm -f` before launch means a leftover file from an earlier cycle cannot be mistaken for this run's output. (Watchdog shape rationale: see `/plan` step 11.c — `wait` only works on the calling shell's own direct children, so `sleep`, `codex`, and the poll loop are all backgrounded as direct siblings instead of nesting `sleep`+`kill` inside one subshell.)
 
      **Completion contract**: wait for the task's completion notification, then read `codex rc=` from its output; read the findings from the `-o` file, not the log. Treat the reviewer as complete only when `rc=0` and the `-o` file is non-empty. Otherwise (non-zero `rc`, or the `-o` file missing/empty): write `Reviewer status: incomplete (<reason>)` in the triage report header (instead of `Reviewer status: complete`), skip Step 5 triage, and in Step 8 do not use Cases A–C — instead ask (`AskUserQuestion` under Claude, numbered options under Codex) with (1) re-run the reviewer, (2) proceed to `/pr` recording "cross-review incomplete" as a known gap, (3) abort. A `sleep 1200` timeout kill commonly still reports `rc=0` (codex shuts down gracefully on the signal), so the `-o` file check — not `rc` — is what actually catches a timeout; do not treat `rc=0` alone as sufficient.
-   - **reviewer = `claude`**: `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file). (the variable is read from the environment — set it directly or source `scripts/ralph-config.sh`, which exports it; unset falls back to `opus`). Complete only when `claude -p` exits 0 and returns a non-empty result; otherwise the same incomplete path above applies (status line, no triage, the Step 8 dialog).
+   - **reviewer = `claude`**: `RALPH_WIP_CHECKPOINT=off claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` with a prompt that instructs Claude to act as an adversarial diff reviewer (see prompt template at the end of this file). (the variable is read from the environment — set it directly or source `scripts/ralph-config.sh`, which exports it; unset falls back to `opus`). The reviewer may run `git diff` to read the diff, so this call keeps the tools that `/plan` step 11.c takes away, and the project's hooks load with it: `RALPH_WIP_CHECKPOINT=off` keeps ralph's SessionEnd hook from committing the branch's uncommitted changes as a `wip:` commit, and the git-state check below catches any other change. Complete only when `claude -p` exits 0 and returns a non-empty result; otherwise the same incomplete path above applies (status line, no triage, the Step 8 dialog).
+   - **Check the git state**: once the reviewer's run has ended, complete or not, write the git state again with the same command to `<scratch>/cross-review-<slug>-c<cycle>-git-after.txt` and `cmp` it with `-git-before.txt`. If they differ, stop: show the user the `diff` of the two files and do not go on to step 5, since something changed the repository while the reviewer ran.
 
    Both paths must produce findings with: severity (HIGH/MEDIUM/LOW), affected file/line refs, what-can-go-wrong, recommended fix.
 
@@ -101,8 +108,8 @@ Provide a cross-model second opinion on the current diff before PR creation.
 6. **Write triage report**:
    Write the triage report to `docs/reports/cross-review-triage-<plan-slug>.md` using the template at `docs/reports/templates/cross-review-triage-report.md`. Include:
    - Header line `Driver: <claude|codex>  Reviewer: <claude|codex>` so the report is self-describing.
-   - Header line `Reviewer status: complete` (or `incomplete (<reason>)` per Step 4's completion contract, for either reviewer, when the call did not finish cleanly).
-   - For an incomplete run: still write the canonical `- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` line (so `count_triage_findings` and the insights backfill can still parse the file), and state in the Triage context section that the review did not run.
+   - Header line `Reviewer status: complete`, or `incomplete (<reason>)` per Step 4's completion contract (for either reviewer, when the call did not finish cleanly), or `skipped (<reason>)` when step 0 or step 3 skipped the review, with the reason that step gives (for example `Reviewer status: skipped (off: [standard].cross_review)`).
+   - For an incomplete or skipped run: still write the canonical `- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` line (so `count_triage_findings` and the insights backfill can still parse the file), and state in the Triage context section that the review did not run and why. A skipped run also writes `Total reviewer findings: 0` and the cycle as usual.
    - All findings in their classified sections (ACTION_REQUIRED, WORTH_CONSIDERING, DISMISSED)
    - Triage rationale (1-2 sentences per finding to limit token cost)
    - Dismissal reasons with category for all DISMISSED findings
@@ -110,6 +117,8 @@ Provide a cross-model second opinion on the current diff before PR creation.
    - Current cycle and cap (from Step 1) in the header, e.g. `Cycle: 2/2 (cap reached)`
 
    **Verify the counts**: after writing the report, source `scripts/xreview-helpers.sh` and re-derive each category's count from the file just written — `. scripts/xreview-helpers.sh; count_triage_findings docs/reports/cross-review-triage-<slug>.md ACTION_REQUIRED` (repeat for `WORTH_CONSIDERING` and `DISMISSED`) — and confirm the three numbers match the summary line above before Step 7/8 branch on them. This reuses the same parser `tests/test-xreview-helpers.sh` pins, so a mismatch means the header line or table formatting drifted from `docs/reports/templates/cross-review-triage-report.md`.
+
+   **Skipped run** (step 0 or step 3): after the count check, append the insight event with `--verdict n/a` (see "Insight event" below) and invoke `/pr`. Steps 7 and 8 do not apply, and `cycle-count.json` is not incremented.
 
 7. **Present triaged findings**:
    Display findings grouped by classification:
@@ -160,6 +169,7 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 9. **Proceed**:
    - **Incomplete review** (Step 4's incomplete path, chosen via Step 8's alternate dialog): "re-run the reviewer" returns to Step 4 and leaves `cycle-count.json` unchanged — no review happened, so no cycle was consumed. "Proceed to `/pr`" and "abort" follow the same branches as below.
+   - **Skipped review** (step 0 or step 3): invoke /pr as Step 6 says, with no Step 8 dialog; `cycle-count.json` is not incremented, since no review happened.
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
    - **Cap-reached Option 1** ("Raise the cap temporarily and re-run"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
    - **Fix records only** (Case A / Case B, with or without `CAP_REACHED`): make the fix commit, check it, and record the result exactly as `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records") says: the fix commit leaves the triage report alone, and the result goes into the triage report in a separate append-only commit. If every check there passes, do **NOT** increment `cycle-count.json`, and invoke /pr, stating in the PR body that the exception was used. If any fails, the fix needs the full pipeline: take the non-cap re-run path above, or, when `CAP_REACHED`, the cap-reached Option 1 path.
@@ -170,27 +180,27 @@ Provide a cross-model second opinion on the current diff before PR creation.
 
 | Aspect | Claude Code (driver = claude) | Codex (driver = codex) |
 |--------|-------------------------------|------------------------|
-| Reviewer invocation | `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" -c sandbox_mode=read-only exec review --ignore-rules --base "$BASE" -o <scratch>/cross-review-<slug>-c<cycle>-last.md </dev/null` (background with a 20-minute watchdog; see Step 4) | `claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` (adversarial reviewer prompt; complete only on exit 0 with a non-empty result) |
+| Reviewer invocation | `command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" -c sandbox_mode=read-only exec review --ignore-rules --base "$BASE" -o <scratch>/cross-review-<slug>-c<cycle>-last.md </dev/null` (background with a 20-minute watchdog and the git-state check; see Step 4) | `RALPH_WIP_CHECKPOINT=off claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --permission-mode auto --output-format json` (adversarial reviewer prompt; complete only on exit 0 with a non-empty result; the git-state check of Step 4) |
 | Step 8 user dialog | Structured choices via `AskUserQuestion` | Numbered options printed to stdout, awaiting a digit 1–4 |
 | Triage execution | inline (main context) | inline — chained within a single agent |
 | Output file | `docs/reports/cross-review-triage-<slug>.md` | Same |
 
-Driver / reviewer detection reuses the Step 2 logic, which sources `scripts/xreview-helpers.sh` and calls `pick_reviewer` to compute the reviewer from the resolved driver. Exporting `RALPH_PRIMARY_CLI` makes the choice unambiguous. Step 6's count verification sources the same file's `count_triage_findings` (fake-CLI-free regression coverage for both helpers lives in `tests/test-xreview-helpers.sh`).
+Driver / reviewer detection follows Step 2, the same rule as `/plan` step 11.b: the driver is the CLI running the skill, `RALPH_PRIMARY_CLI` overrides it, and `which` is not used to infer it; `pick_reviewer` from `scripts/xreview-helpers.sh` then computes the reviewer from the driver. `.codex/AGENTS.override.md` has Codex set `RALPH_PRIMARY_CLI=codex`. Step 6's count verification sources the same file's `count_triage_findings` (fake-CLI-free regression coverage for both helpers lives in `tests/test-xreview-helpers.sh`).
 
 ## Insight event (best-effort)
 
 After writing the triage report (Step 6), append one insight event (errors are non-fatal):
 ```
 ./scripts/insights-append.sh --slug <slug> --flow standard --phase cross_review \
-  --verdict <pass|action_required> --action-required <N> --worth-considering <N> \
+  --verdict <pass|action_required|n/a> --action-required <N> --worth-considering <N> \
   --dismissed <N> --cycle auto --source skill || true
 ```
-Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1, the same rule as Step 1.
+Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) or skipped (step 0 or step 3) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1, the same rule as Step 1.
 
 ## What /cross-review does NOT do
 
 - **Auto-fix**: Findings are advisory only. No code changes.
-- **Block the flow**: If the reviewer CLI is unavailable, flow continues silently.
+- **Block the flow on a skip**: If the switch is off or the reviewer CLI is unavailable, the flow continues to /pr, and the triage report records the skip (`Reviewer status: skipped (<reason>)`). Only an error from `ralph config get` (step 0) or a repository change during the review (step 4) stops it.
 - **Replace /self-review**: Self-review (/self-review) and cross-review are complementary.
 - **Suppress findings**: All findings (including DISMISSED) are recorded in the triage report for transparency.
 

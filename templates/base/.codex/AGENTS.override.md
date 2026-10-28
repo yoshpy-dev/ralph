@@ -21,10 +21,11 @@ ignores it.
 - **Interactive prompts**: when a skill needs the operator to choose between
   options, present a numbered list and ask the operator to reply with a single
   digit. Treat that as the equivalent of Claude Code's `AskUserQuestion`.
-- **Cross-model review**: the `/cross-review` skill runs `claude -p` to get a
-  Claude second opinion when Codex is the primary driver. Set
-  `RALPH_PRIMARY_CLI=codex` before invoking the post-implementation pipeline so
-  the skill picks the correct reviewer side.
+- **Cross-model review**: `/plan`'s plan advisory (step 11) and the
+  `/cross-review` skill run `claude -p` to get a Claude second opinion when
+  Codex is the primary driver. Set `RALPH_PRIMARY_CLI=codex` before invoking
+  `/plan` and before the post-implementation pipeline, so both pick the
+  correct reviewer side.
 - **Pull requests**: when creating a PR from Codex, create a ready-for-review
   PR by default. Do not pass `--draft` and do not use draft PR creation unless
   the operator explicitly asks for a draft; if a connector creates a draft
