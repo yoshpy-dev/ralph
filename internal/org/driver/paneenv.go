@@ -38,8 +38,9 @@ func SeatPaneEnv() []string {
 // picks codex, and /cross-review does the same when both CLIs are installed.
 // Of the reviews, /cross-review and a feature org leader's plan advisory (the
 // 計画助言 subsection of the 機能ごとの org section of
-// internal/org/prompts/leader.md) read it; the leader names its own CLI in
-// place of the missing value.
+// internal/org/prompts/leader.md) read it. The advisory uses the leader's own
+// CLI only when the variable is unset, so a value the pane takes from the
+// herdr server's environment wins over it.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
@@ -67,7 +68,7 @@ func paneEnvConsequence(entry string) string {
 	case strings.HasPrefix(entry, PrimaryCLIEnv+"="):
 		return "a seat's cross-review may pick the wrong CLI as its other model " +
 			"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude), " +
-			"and so may a feature org leader's plan advisory if the leader does not name its own CLI"
+			"and so may a feature org leader's plan advisory"
 	}
 	return ""
 }

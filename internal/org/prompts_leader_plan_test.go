@@ -500,18 +500,19 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 // no scripts/xreview-helpers.sh or scripts/ralph-config.sh, picks the
 // reviewer with pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the
 // pane, or on the leader's own CLI, which the leader writes in place of
-// <あなたの CLI>, when the pane has none (a herdr with no --env; self-review
-// L5), and skips when that CLI is not on PATH. The command, run with bash
-// and zsh from the repository root on its scripts/xreview-helpers.sh, picks
-// codex for a claude pane, claude for a codex pane, the pane's value over
-// the leader's, and, with no RALPH_PRIMARY_CLI in the pane, codex for a
-// claude leader and claude for a codex leader.
+// <あなたの CLI>, when the pane has none (a herdr with no --env whose server
+// has none either; self-review L5 and L7), and skips when that CLI is not on
+// PATH. The command, run with bash and zsh from the repository root on its
+// scripts/xreview-helpers.sh, picks codex for a claude pane, claude for a
+// codex pane, the pane's value over the leader's, and, with no
+// RALPH_PRIMARY_CLI in the pane, codex for a claude leader and claude for a
+// codex leader.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"頼むときは、worktree に `scripts/xreview-helpers.sh` と `scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)",
 		"`" + leaderAdvisoryPickCommand + "` が出す名前(`codex` か `claude`)を相手にする",
 		"`" + leaderAdvisorySelfCLI + "` は、あなたが Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ",
-		"(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れるが、`--env` のない herdr が作った pane にはなく、そのときはこの値で選ぶ)",
+		"(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れる。`--env` のない herdr が作った pane には入らないが、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときだけ)",
 		"`command -v <相手>` が何も出さなければ飛ばす",
 	})
 

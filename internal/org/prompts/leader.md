@@ -510,8 +510,10 @@ off とみなさず、エラーを本文に書いて BLOCKED(TASK_ID は `{{ORG_
 `. ./scripts/xreview-helpers.sh && pick_reviewer "${RALPH_PRIMARY_CLI:-<あなたの CLI>}"`
 が出す名前(`codex` か `claude`)を相手にする。`<あなたの CLI>` は、あなたが
 Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ(ralph は pane に
-`RALPH_PRIMARY_CLI` を入れるが、`--env` のない herdr が作った pane にはなく、
-そのときはこの値で選ぶ)。`command -v <相手>` が何も出さなければ飛ばす。
+`RALPH_PRIMARY_CLI` を入れる。`--env` のない herdr が作った pane には入らない
+が、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で
+選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときだけ)。
+`command -v <相手>` が何も出さなければ飛ばす。
 相手には次の指示文を渡す(下のコマンドの `<指示文>`)。英語のまま変えず、
 最後の `<計画のパス>` だけを worktree からの計画の相対パスにする。
 
