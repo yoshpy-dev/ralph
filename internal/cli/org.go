@@ -208,7 +208,7 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // without asking), both taken from <main worktree root>/ralph.toml, by the
 // rule withMainWorktreeOrgLimits follows: only when configPath is empty and
 // the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
-// built-in defaults (true and false) when that file does not exist. A
+// built-in defaults (both true) when that file does not exist. A
 // feature org's leader escalates from its feature worktree, whose ralph.toml
 // it can change, so that copy does not choose whether its items are left to
 // the director (plan 2026-10-14-org-director-attach, D6), nor whether the
