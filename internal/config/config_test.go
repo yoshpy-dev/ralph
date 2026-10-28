@@ -13,11 +13,12 @@ import (
 
 func TestDefault(t *testing.T) {
 	cfg := Default()
-	if !cfg.Doctor.RequireClaudeCLI {
-		t.Error("require_claude_cli should be true by default")
+	// Neither agent CLI is required by default, so a project with only
+	// claude or only codex installed does not see `ralph doctor` exit
+	// non-zero.
+	if cfg.Doctor.RequireClaudeCLI {
+		t.Error("require_claude_cli should default to false")
 	}
-	// Codex is opt-in: defaults to false so projects without Codex
-	// installed do not see `ralph doctor` exit non-zero.
 	if cfg.Doctor.RequireCodexCLI {
 		t.Error("require_codex_cli should default to false")
 	}
@@ -29,8 +30,8 @@ func TestLoad_MissingFile(t *testing.T) {
 		t.Fatalf("expected nil error for missing file, got: %v", err)
 	}
 	// Should return defaults.
-	if !cfg.Doctor.RequireClaudeCLI {
-		t.Error("require_claude_cli should be true by default")
+	if cfg.Doctor.RequireClaudeCLI {
+		t.Error("require_claude_cli should default to false")
 	}
 }
 
@@ -112,6 +113,21 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	}
 	if len(cfg.Org.Director.WakeCmd) != 0 {
 		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
+	}
+	// The same holds for [doctor]'s require_claude_cli and require_codex_cli:
+	// ralph.toml is a seed that ralph upgrade does not overwrite, so a
+	// scaffolded project keeps the values the template writes, not Default()'s.
+	if !strings.Contains(string(data), "\nrequire_claude_cli = false\n") {
+		t.Error("templates/base/ralph.toml does not set require_claude_cli = false in [doctor]")
+	}
+	if got, want := cfg.Doctor.RequireClaudeCLI, Default().Doctor.RequireClaudeCLI; got != want {
+		t.Errorf("templates/base/ralph.toml doctor.require_claude_cli = %v, want Default()'s %v", got, want)
+	}
+	if !strings.Contains(string(data), "\nrequire_codex_cli = false\n") {
+		t.Error("templates/base/ralph.toml does not set require_codex_cli = false in [doctor]")
+	}
+	if got, want := cfg.Doctor.RequireCodexCLI, Default().Doctor.RequireCodexCLI; got != want {
+		t.Errorf("templates/base/ralph.toml doctor.require_codex_cli = %v, want Default()'s %v", got, want)
 	}
 }
 
