@@ -188,6 +188,9 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
   - S4b 111c62a2(consult の勧めで足したスライス): regate と merge の `regate.lock` の断り、その help と注釈に cleanup を足した(「another ralph org regate, merge, or cleanup runs」)。`internal/org/feature.go:538-539` は変えていない。同じ org_id の別の start の断りが片付けのコマンドを案内しないことを `feature_test.go` が意図して固定しているため。検証: `Regate|Merge|StartFeature|Lock` と cli の `OrgRegate|OrgMerge` が 2 回とも通過。機械的な確かめは clean(折り返しの直しを 3 回 fixed)
   - S5 に渡すこと: README.md の 252 行(merge のあとも人が script で消す)と 266・268 行(「regate or merge」)、`docs/recipes/isolated-herdr-server.md:529` と template の写し
   - 既知の穴(PR に書く): `runWorktreeScript` は script を時間の上限なしで打つ(S1 から。`git worktree remove` と `git branch -D` はローカルの操作)
+  - S5 c0383ffe と 7d3e3f9f: 仕様の FR-8 に「merge のあとの後始末(#263)で決めたこと」の注(4 段目と 8a-3a の注がどう変わったかも 1 文ずつ)、AGENTS.md の地図に `cleanup.go`、README の 252・266・268 行と `ralph org cleanup` の段落(268 行の「spawn と start を止めない」も、片付けの間だけ止めると直した)、herdr の recipe とその写し。7d3e3f9f は consult の遅れた返事で、仕様の注の閉じた PR の案内を「ブランチが要らないと確かめたら `--force-branch`」の形にした(README と skill に合わせた。recipe は clone ごと捨てる文脈なので無条件のまま)
+    - 検証: `./scripts/check-sync.sh && git diff --check` が両方のコミットで通過、recipe の 2 つは byte で同じ。機械的な確かめは 5 項目とも clean
+    - `/org` skill に残る `cleanup --id org-` の 727・729・777 行は start の失敗の案内、1137 行は閉じた PR の案内で、直すものはない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
