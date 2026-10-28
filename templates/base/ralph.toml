@@ -1,10 +1,14 @@
 # ralph.toml — project-level configuration for the ralph CLI.
 
 [doctor]
-require_claude_cli = true
-# Codex is optional by default — set to true to fail `ralph doctor` when
-# the codex binary is missing. The accompanying `.codex/config.toml` is loaded
-# only when `codex trust .` has been run for this project; see .codex/README.md.
+# `ralph doctor` passes when either the claude or the codex CLI is usable.
+# When only one is usable, doctor warns about the other: the plan advisory
+# and cross-review steps that call it do not run. When neither is usable,
+# doctor fails. Set require_claude_cli or require_codex_cli to true to make
+# doctor fail when that CLI is not usable, whether or not the other one is.
+require_claude_cli = false
+# Codex loads the project's `.codex/config.toml` only after `codex trust .`
+# has been run for this project; see .codex/README.md.
 require_codex_cli = false
 require_go = false
 

@@ -1555,6 +1555,59 @@ func TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam(t *testing.T) {
 	}
 }
 
+// TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr is
+// WarnsThroughTheSeam with no herdr on PATH. A missing herdr reports warn, so
+// runDoctorOpts tells checkShellAliases that herdr is present only when
+// herdr's line is "pass", not merely when it is not "info"; a codex alias
+// finding then stays info and carries the herdr-not-installed suffix.
+func TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No herdr stub, so herdr is absent and a codex finding must not warn.
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+
+	homeDir := t.TempDir()
+	writeAliasRc(t, filepath.Join(homeDir, ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	orig := doctorShellAliasEnv
+	doctorShellAliasEnv = shellAliasTestEnv(homeDir)
+	t.Cleanup(func() { doctorShellAliasEnv = orig })
+
+	var out string
+	err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })
+	if err != nil {
+		t.Fatalf("runDoctorOpts returned error with only warn/info findings: %v\noutput:\n%s", err, out)
+	}
+	if status, _, ok := doctorLine(out, "herdr"); !ok || status != "warn" {
+		t.Errorf("herdr status = %q (line found: %v), want warn in output:\n%s", status, ok, out)
+	}
+	status, detail, ok := doctorLine(out, "Shell aliases (codex/claude)")
+	if !ok {
+		t.Fatalf("no Shell aliases (codex/claude) line in output:\n%s", out)
+	}
+	if status != "info" {
+		t.Errorf("Shell aliases (codex/claude) status = %q, want info with herdr absent in output:\n%s", status, out)
+	}
+	if !strings.Contains(detail, "(herdr not installed, so no seat is affected today)") {
+		t.Errorf("Shell aliases (codex/claude) detail = %q, want the herdr-not-installed suffix in output:\n%s", detail, out)
+	}
+}
+
 // TestParseAliasWords_NoDefinition pins the two early returns that yield no
 // definition: an alias statement made only of options (`alias -g`), and the
 // fish form with a name but no value (`alias codex`, which merely prints the

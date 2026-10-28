@@ -535,7 +535,7 @@ type OrgApprovalConfig struct {
 func Default() Config {
 	return Config{
 		Doctor: DoctorConfig{
-			RequireClaudeCLI: true,
+			RequireClaudeCLI: false,
 			RequireCodexCLI:  false,
 			RequireGo:        false,
 		},
