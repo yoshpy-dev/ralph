@@ -87,14 +87,14 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
 
 ## Acceptance criteria
 
-- [ ] AC1: 対話のフォームの言語パックの選択肢に skip がある。skip だけを選ぶと、言語パックを入れずに init が終わる(`manifest.Meta.Packs` が空、`packs/languages/` と `.claude/rules/ralph/<lang>.md` を作らない、終わりに `ralph pack add` の案内が出る)。skip がパックの名前として manifest に残らない
-- [ ] AC2: skip とほかの言語を一緒に選んだとき、何も選ばなかったとき、確かめの関数がエラーを返し、言語パックの問いは次へ進まない
-- [ ] AC3: 対象のディレクトリの直下に、上の表の手がかりのファイルがある言語の選択肢に「(Recommended)」が付く。値はパックの名前のまま
-- [ ] AC4: 対話のフォームでは、`--pack` を渡さなければ、最初は何も選ばれていない
-- [ ] AC5: `--yes` だけでは言語パックが入らず、終わりの表示に `ralph pack add` の案内が出る
-- [ ] AC6: `--yes --pack golang` のように、flag で言語パックを入れられる。繰り返しとカンマ区切りの両方を受け付ける。知らない名前と空の名前は、`--yes` の有無によらず、何も書かずにエラーで止まる
-- [ ] AC7: `tests/test-check-template.sh` の G が、`--pack` ですべてのパックを入れた scaffold で通る
-- [ ] AC8: README のコマンドの表、雛形の recipe、init の help と `--yes` の説明が新しい振る舞いを書く
+- [x] AC1: 対話のフォームの言語パックの選択肢に skip がある。skip だけを選ぶと、言語パックを入れずに init が終わる(`manifest.Meta.Packs` が空、`packs/languages/` と `.claude/rules/ralph/<lang>.md` を作らない、終わりに `ralph pack add` の案内が出る)。skip がパックの名前として manifest に残らない
+- [x] AC2: skip とほかの言語を一緒に選んだとき、何も選ばなかったとき、確かめの関数がエラーを返し、言語パックの問いは次へ進まない
+- [x] AC3: 対象のディレクトリの直下に、上の表の手がかりのファイルがある言語の選択肢に「(Recommended)」が付く。値はパックの名前のまま
+- [x] AC4: 対話のフォームでは、`--pack` を渡さなければ、最初は何も選ばれていない
+- [x] AC5: `--yes` だけでは言語パックが入らず、終わりの表示に `ralph pack add` の案内が出る
+- [x] AC6: `--yes --pack golang` のように、flag で言語パックを入れられる。繰り返しとカンマ区切りの両方を受け付ける。知らない名前と空の名前は、`--yes` の有無によらず、何も書かずにエラーで止まる
+- [x] AC7: `tests/test-check-template.sh` の G が、`--pack` ですべてのパックを入れた scaffold で通る
+- [x] AC8: README のコマンドの表、雛形の recipe、init の help と `--yes` の説明が新しい振る舞いを書く
 
 ## Implementation outline
 
@@ -163,7 +163,7 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
   - self-review Run 1(7eca2cb1): LOW 5 件(L1 `--pack` を `--yes` なしで渡したときの説明がない、L2 一覧の高さの式、L3 `AvailablePacks` を 1 回の init で 3 回読む、L4 テストの冗長な半分、L5 コメントの symlink の記述)。5 件とも f495bb23(implementer)で直した。L3 は `initConfig` に `AvailablePacks` を持たせ、`RunE` で 1 回だけ読んで両方の経路に渡す形にし、`runInitInteractive` の 2 回目の読み出しと案内の側のエラーの握りつぶしを消した。案内の一覧が空のときのテストを足した。`runInitInteractive` が `cfg.AvailablePacks` を入れ忘れてもフォームの先なので単体テストでは捕まらず、pty で skip だけを選んで案内に一覧が出ることを確かめた。verify rc=0(12s)、check-sync rc=0。self-check 5 項目 clean
   - self-review Run 2(a89381e4): 所見なし、Merge yes。ただし L3 の直しで、対話の経路の `AvailablePacks: availPacks` の 1 行がフォームの先になり、単体テストの外に出たと指摘した(前は `executeInit` が一覧を読み直していた)。consult(consult-plan-initpack)の案のとおり、`RunE` で `initConfig`(ProjectName、Packs、AvailablePacks)を 1 回だけ組んで両方の経路に渡す形にした(dbc5afaf、implementer)。`--yes` の経路の `RunE` のテストが共有の代入を押さえ、`go test -overlay` でその代入を消すと `TestInitCmd_YesAloneInstallsNoPackAndPrintsTheHint` が落ちる。help の「the packs --pack names」の 2 回目を「those packs」にした。verify rc=0(14s)、`golangci-lint run ./internal/cli/` 0 issues。self-check 5 項目 clean
   - self-review Run 3(e697e86c): LOW 2 件(L6 help の「those packs」の指す先が 3 文前の別の段落、L7 `AvailablePacks` 欄のコメントが問いの選択肢に使うことを書いていない)。init.go の文言だけの直しなので inline で直した(「Trivial single-file edits」の例外)。help は README と同じ「--pack が名前を挙げない限り言語パックは入らない」の形にした。verify(gofmt、vet、`go test ./internal/cli/ -run 'Init|Pack'`)rc=0、help の行は最長 79 桁。self-check: 不要な変更 clean、誤字とコピペ clean、デバッグの残り clean、秘密情報 clean、範囲外のファイル clean(stage は init.go だけ)
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — self-review 7eca2cb1(Run 1、LOW 5 件)から f9df1718(Run 4)まで 4 回。Run 4 は新しい所見なしで Merge yes。L1〜L7 は f495bb23・dbc5afaf・80a2eb28 で直した。
+- [x] Verification artifact created — verify 63ccc8c8(cycle 1、pass、AC1〜AC8 を満たす、AC7 の G の実行は test、情報 D-1・V-1)。D-1(help と雛形の recipe が空の名前に触れない)は /sync-docs で雛形の recipe に「or empty」を足した。help は Go の変更なので直していない。V-1(`--pack` なしで問いに入ると確かめの文言が先に赤く出る)は huh の仕様で、PR の Notes for reviewers に書く。
+- [x] Test artifact created — test 2a4294c4(cycle 1、pass。`go test ./internal/cli/ -run 'Init|Pack'` 49 本、`tests/test-check-template.sh` 60/60 で G と H が PASS、mutant 20 個のうち 14 個が落ち、生き残った 6 個は `runInitInteractive` のフォームの先と guard の条件で計画の既知の穴、pty の 12 実行、`run-test.sh` の 2 回目 rc 0)。1 回目の `TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint` の失敗は負荷による時間切れで、この branch の変更に由来しない(HEAD と origin/main で単独に 20 回ずつ通った)。lead の判断は ea7dce08。
 - [ ] PR created

@@ -34,8 +34,8 @@ which packs to install: the packs `--pack <name>` names are selected at first
 target directory is labeled "(Recommended)", and "skip" installs no pack. For
 non-interactive use, `ralph init --yes` installs only the packs `--pack` names,
 and none without it (repeat the flag or separate names with commas), for
-example `ralph init --yes --pack golang,python`. An unknown name fails before
-anything is written.
+example `ralph init --yes --pack golang,python`. An unknown or empty name
+fails before anything is written.
 
 ## How the rule content works
 
