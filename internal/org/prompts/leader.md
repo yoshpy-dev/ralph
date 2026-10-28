@@ -141,6 +141,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 次の順で進めます。
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
+   書く前に、worktree の AGENTS.md(あれば CLAUDE.md も)と `.claude/rules/`
+   の下の rule(Codex では、あれば `.codex/AGENTS.override.md` も)を読み、
+   計画が触るコードを読む。計画のスライス・検証のコマンド・してはいけない
+   ことは、読んだ決まりと今のコードに合わせる。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
    沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。タスクに
    「全機能の座席に適用する決まり」の囲みがあれば、計画に
@@ -158,6 +162,20 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    それを使う)。`/plan` skill は使わない
    (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
    per-plan の承認は手順 3 の QUESTION で求める)
+
+   計画を書くときは、機能の内側の分かれ目(この機能の中だけで決まる、
+   どの案で作るかの選択)を探す。分かれ目は、次の 3 つをすべて満たす選択に
+   限る(標準フローの `/plan` が人に聞く分かれ目と同じ)。案によって、
+   リスク・費用・戻しやすさが大きく違う。コード・rules・文書・妥当な既定値の
+   どれでも決まらない。実装の途中で変えると、およそ 1 スライスを作り直す
+   より高くつく。機能をまたぐ分かれ目(ほかの機能の org と合わせて決める
+   選択)は、分割計画で決めるものなので扱わず、手順 3 の `FORK` の行にも
+   書かない。分かれ目ごとに、計画の `## Design decisions` の節(雛形に
+   なければ作る)に 2〜4 の案と推奨の案とその理由を書き、計画のほかの部分は
+   推奨の案で書く。分かれ目がなければ、その節に `Critical forks: None` と
+   書く。per-plan では、分かれ目を手順 3 の QUESTION で人に聞く。split では
+   人に聞かずに推奨の案を採り、分かれ目ごとに、承認方式が split なので推奨の
+   案を採ったことを `## Design decisions` に書く
 2. (per-plan)図解ページを、`/plan` skill の `diagrams.md` と
    `visual-template.html`(`.claude/skills/plan/` の下。Codex では
    `.agents/skills/plan/` の下)に沿って、worktree の
@@ -180,7 +198,13 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    「件を上げる」の節のとおりファイルに書いて渡す。ヘッダには
    `PLAN: <worktree からの計画の相対パス> sha256:<digest>` と
    `VISUAL: <worktree からの図解ページの相対パス>` を 1 行ずつ書く。
-   たとえば次のメッセージにする。
+   手順 1 の分かれ目は、空行のあとの本文に、1 つ 1 行で
+   `FORK <番号>: <問い> / a <案>(推奨) / b <案>` の形ですべて書く(推奨の
+   案を a にし、案が 3 つ以上なら `/ c <案>` と続ける。番号は
+   `## Design decisions` の順に 1 から振る)。数が多くても打ち切らない。
+   `FORK` の行に理由は書かず、計画の `## Design decisions` に任せる。本文が
+   2,000 字に収まらなければ、各行の問いと案を短く言い直し、行は削らない。
+   分かれ目がなければ `FORK` の行は書かない。たとえば次のメッセージにする。
 
    ```
    TYPE: QUESTION
@@ -188,8 +212,16 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    VISUAL: .harness/state/plan-visual/auth-token.html
 
    SUMMARY: 機能 auth-token の計画の承認を求める。図解ページは shot で撮って確かめた。
+   FORK 1: token の保存先 / a OS の keychain(推奨) / b 暗号化した設定ファイル
+   FORK 2: 古い token の移し方 / a 初めの起動で移す(推奨) / b 移さずにログインし直してもらう
    EVIDENCE: docs/plans/active/2026-10-12-auth-token.md
    ```
+
+   推奨と違う案を選んだ直しの依頼(手順 4)で計画を直し、QUESTION を上げ
+   直すときは、その依頼で決まった分かれ目を
+   `FORK <番号>: <問い> → <決まった案>(決定済み)` の 1 行にし、案を
+   並べない(director は `(決定済み)` の行を人に聞かない)。直しで新しく
+   出た分かれ目は、上の形で案を並べる。
 
    上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて返事を待つ。
    返事が来るまで implementer は spawn しない(承認の前は
@@ -205,9 +237,15 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    計画の先頭の 2 行を `- Status: Approved` と
    `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え、
    `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
-   ことを確かめ、コミットする。それ以外の DECISION(直しの依頼)なら、
+   ことを確かめ、コミットする。分かれ目があれば、この承認は、すべての
+   分かれ目が推奨の案で決まったことも表すので、`## Design decisions` は
+   書き換えない(手順 6)。それ以外の DECISION(直しの依頼)なら、
    計画を直してコミットし、図解ページを描き直し、新しい digest で新しい
-   QUESTION を上げる(手順 2 と 3 をやり直す)
+   QUESTION を上げる(手順 2 と 3 をやり直す)。分かれ目で推奨と違う案を
+   選んだ答えも、本文が `approved` で始まらないので、この直しの依頼として
+   届く。そのときは、計画の `## Design decisions` に人が選んだ案を書き、
+   計画のほかの部分(スライス・受け入れ条件・リスクなど)もその案に合わせて
+   直し、上のとおりコミットして手順 2 と 3 をやり直す
 5. implementer と reviewer を 1 席ずつ spawn する(手順 3 で reviewer を
    立てていれば implementer だけ)。`--id` は `implementer` と `reviewer`
    にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
