@@ -5,15 +5,17 @@ description: >
   [standard].cross_review switch is on and the reviewer CLI is available.
   Calls the CLI other than the one currently driving (Claude → Codex; Codex →
   Claude). Runs inline in the main context (not delegated as subagent) after
-  /sync-docs completes. When the switch is off or the reviewer CLI is
-  unavailable, records the skip in the triage report and proceeds to /pr.
+  /sync-docs completes. When the switch is off, the reviewer CLI is
+  unavailable, or the diff is empty, records the skip in the triage report
+  and proceeds to /pr.
   Findings are triaged by the driving CLI using implementation context before
   presentation to the user.
 ---
 Provide a cross-model second opinion on the current diff before PR creation.
-The review runs when `[standard].cross_review` is on (step 0) and the
-reviewer CLI is available (step 3). Otherwise the skill writes a triage report
-that records the skip and why, and hands off to `/pr`.
+The review runs when `[standard].cross_review` is on (step 0), the reviewer
+CLI is available (step 3), and the diff against the base branch is not empty
+(step 4). Otherwise the skill writes a triage report that records the skip
+and why, and hands off to `/pr`.
 
 ## Goals
 
@@ -47,7 +49,11 @@ that records the skip and why, and hands off to `/pr`.
    The skill must call the CLI other than the one currently driving the work.
 
    a. **Determine driver**: the driver is the CLI running this skill (Claude Code → `claude`, Codex → `codex`). `RALPH_PRIMARY_CLI` set to `claude` or `codex` (case-insensitive) overrides it; any other value is ignored. Do not infer the driver from `which`.
-   b. **Determine reviewer**: source `scripts/xreview-helpers.sh` and call `pick_reviewer` with the driver from step 2.a to get the opposite CLI: `. scripts/xreview-helpers.sh; REVIEWER=$(pick_reviewer "$DRIVER")`. This keeps the "reviewer is always the driver's opposite" mapping in one grep-able, unit-tested place (`tests/test-xreview-helpers.sh`) instead of duplicating it inline.
+   b. **Determine reviewer**: source `scripts/xreview-helpers.sh` and call `pick_reviewer` with the driver from step 2.a to get the opposite CLI. Work out the driver and the reviewer in one Bash call, with `<claude|codex>` replaced by the CLI running this skill:
+      ```
+      . scripts/xreview-helpers.sh; DRIVER=<claude|codex>; override=$(printf '%s' "${RALPH_PRIMARY_CLI:-}" | tr '[:upper:]' '[:lower:]'); case "$override" in claude|codex) DRIVER=$override ;; esac; REVIEWER=$(pick_reviewer "$DRIVER"); echo "driver=$DRIVER reviewer=$REVIEWER"
+      ```
+      A Bash tool keeps no shell state between calls, so `$DRIVER` and `$REVIEWER` are gone once this call ends; the later steps use the two printed values, not the variables. `pick_reviewer` keeps the "reviewer is always the driver's opposite" mapping in one grep-able, unit-tested place (`tests/test-xreview-helpers.sh`) instead of duplicating it inline.
 
    Record the resolved driver and reviewer for the rest of the skill. Both must be reported in the triage report header.
 
@@ -55,7 +61,7 @@ that records the skip and why, and hands off to `/pr`.
 
 4. **Invoke reviewer**:
    - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
-   - Check the diff is non-empty: `git diff "$BASE"...HEAD --quiet` — if exit 0 (no diff), skip with a note and proceed to /pr.
+   - Check the diff is non-empty, in the same Bash call as the base branch above (`$BASE` does not outlive a call, and with an empty `$BASE` the check always sees no diff): `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch); git diff "$BASE"...HEAD --quiet; echo "rc=$?"`. `rc=0` means no diff: skip, with the reason `empty diff`, leave out the rest of this step and step 5, and write the skipped report in step 6.
    - **Save the git state** the reviewer must not change. Define `<scratch>` once: the agent's scratchpad directory when the tool provides one, else `$(mktemp -d)`. From the repository root, run the command of `/plan` step 11.c with this run's file name: `{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > <scratch>/cross-review-<slug>-c<cycle>-git-before.txt` (HEAD, the index, and the work tree with its untracked files).
    - **reviewer = `codex`**: The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. Source `./scripts/ralph-config.sh` and re-derive `$BASE` in the same Bash call as the launch below (a Bash tool keeps no shell state between calls), then run it in the background (Claude Code: Bash `run_in_background`). A watchdog in the same background shell enforces the 20-minute bound directly — the same `sleep 1200` shape as `/plan` step 11.c — instead of relying on a completion notification a hung codex would never send:
      ```
@@ -108,7 +114,7 @@ that records the skip and why, and hands off to `/pr`.
 6. **Write triage report**:
    Write the triage report to `docs/reports/cross-review-triage-<plan-slug>.md` using the template at `docs/reports/templates/cross-review-triage-report.md`. Include:
    - Header line `Driver: <claude|codex>  Reviewer: <claude|codex>` so the report is self-describing.
-   - Header line `Reviewer status: complete`, or `incomplete (<reason>)` per Step 4's completion contract (for either reviewer, when the call did not finish cleanly), or `skipped (<reason>)` when step 0 or step 3 skipped the review, with the reason that step gives (for example `Reviewer status: skipped (off: [standard].cross_review)`).
+   - Header line `Reviewer status: complete`, or `incomplete (<reason>)` per Step 4's completion contract (for either reviewer, when the call did not finish cleanly), or `skipped (<reason>)` when step 0, step 3, or step 4 (an empty diff) skipped the review, with the reason that step gives (for example `Reviewer status: skipped (off: [standard].cross_review)` or `Reviewer status: skipped (empty diff)`).
    - For an incomplete or skipped run: still write the canonical `- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0` line (so `count_triage_findings` and the insights backfill can still parse the file), and state in the Triage context section that the review did not run and why. A skipped run also writes `Total reviewer findings: 0` and the cycle as usual.
    - All findings in their classified sections (ACTION_REQUIRED, WORTH_CONSIDERING, DISMISSED)
    - Triage rationale (1-2 sentences per finding to limit token cost)
@@ -118,7 +124,7 @@ that records the skip and why, and hands off to `/pr`.
 
    **Verify the counts**: after writing the report, source `scripts/xreview-helpers.sh` and re-derive each category's count from the file just written — `. scripts/xreview-helpers.sh; count_triage_findings docs/reports/cross-review-triage-<slug>.md ACTION_REQUIRED` (repeat for `WORTH_CONSIDERING` and `DISMISSED`) — and confirm the three numbers match the summary line above before Step 7/8 branch on them. This reuses the same parser `tests/test-xreview-helpers.sh` pins, so a mismatch means the header line or table formatting drifted from `docs/reports/templates/cross-review-triage-report.md`.
 
-   **Skipped run** (step 0 or step 3): after the count check, append the insight event with `--verdict n/a` (see "Insight event" below) and invoke `/pr`. Steps 7 and 8 do not apply, and `cycle-count.json` is not incremented.
+   **Skipped run** (step 0, step 3, or step 4's empty diff): after the count check, append the insight event with `--verdict n/a` (see "Insight event" below) and invoke `/pr`. Steps 7 and 8 do not apply, and `cycle-count.json` is not incremented.
 
 7. **Present triaged findings**:
    Display findings grouped by classification:
@@ -169,7 +175,7 @@ that records the skip and why, and hands off to `/pr`.
 
 9. **Proceed**:
    - **Incomplete review** (Step 4's incomplete path, chosen via Step 8's alternate dialog): "re-run the reviewer" returns to Step 4 and leaves `cycle-count.json` unchanged — no review happened, so no cycle was consumed. "Proceed to `/pr`" and "abort" follow the same branches as below.
-   - **Skipped review** (step 0 or step 3): invoke /pr as Step 6 says, with no Step 8 dialog; `cycle-count.json` is not incremented, since no review happened.
+   - **Skipped review** (step 0, step 3, or step 4's empty diff): invoke /pr as Step 6 says, with no Step 8 dialog; `cycle-count.json` is not incremented, since no review happened.
    - **Non-cap re-run** (Case A / Case B, `CAP_REACHED = false`): If `active-plan.json` exists, increment `cycle-count.json` (`cycle += 1`), then guide the user back to `/self-review`. The incremented cycle represents "the pass the user is about to enter".
    - **Cap-reached Option 1** ("Raise the cap temporarily and re-run"): Do **NOT** increment `cycle-count.json`. Instruct the user to `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=<current cycle + 1>` (or higher) before re-running, so the unchanged `cycle` falls below the new cap. Then guide them back to `/self-review`.
    - **Fix records only** (Case A / Case B, with or without `CAP_REACHED`): make the fix commit, check it, and record the result exactly as `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records") says: the fix commit leaves the triage report alone, and the result goes into the triage report in a separate append-only commit. If every check there passes, do **NOT** increment `cycle-count.json`, and invoke /pr, stating in the PR body that the exception was used. If any fails, the fix needs the full pipeline: take the non-cap re-run path above, or, when `CAP_REACHED`, the cap-reached Option 1 path.
@@ -195,12 +201,12 @@ After writing the triage report (Step 6), append one insight event (errors are n
   --verdict <pass|action_required|n/a> --action-required <N> --worth-considering <N> \
   --dismissed <N> --cycle auto --source skill || true
 ```
-Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) or skipped (step 0 or step 3) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1, the same rule as Step 1.
+Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict n/a` when the reviewer was incomplete (Step 4) or skipped (step 0, step 3, or step 4's empty diff) — the review did not run, so it is neither a pass nor a fail; `pass` otherwise. `--cycle auto` reads the pipeline cycle from `.harness/state/standard-pipeline/` and falls back to 1, the same rule as Step 1.
 
 ## What /cross-review does NOT do
 
 - **Auto-fix**: Findings are advisory only. No code changes.
-- **Block the flow on a skip**: If the switch is off or the reviewer CLI is unavailable, the flow continues to /pr, and the triage report records the skip (`Reviewer status: skipped (<reason>)`). Only an error from `ralph config get` (step 0) or a repository change during the review (step 4) stops it.
+- **Block the flow on a skip**: If the switch is off, the reviewer CLI is unavailable, or the diff is empty, the flow continues to /pr, and the triage report records the skip (`Reviewer status: skipped (<reason>)`). Only an error from `ralph config get` (step 0) or a repository change during the review (step 4) stops it.
 - **Replace /self-review**: Self-review (/self-review) and cross-review are complementary.
 - **Suppress findings**: All findings (including DISMISSED) are recorded in the triage report for transparency.
 

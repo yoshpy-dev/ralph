@@ -30,8 +30,8 @@
 
 - Self-review: `docs/reports/self-review-<date>-<slug>.md`
 - Verify: `docs/reports/verify-<date>-<slug>.md`
-- Plan advisory: <ran | incomplete (<reason>) | skipped (<reason>)>
-- Cross-review: <ran | incomplete (<reason>) | skipped (<reason>)> (`docs/reports/cross-review-triage-<slug>.md`)
+- Plan advisory: <ran (<reviewer>) | incomplete (<reason>) | skipped (<reason>) | not recorded>
+- Cross-review: <ran (<reviewer>) | incomplete (<reason>) | skipped (<reason>) | not recorded> (`docs/reports/cross-review-triage-<slug>.md`)
 
 ## Test results
 
