@@ -395,10 +395,10 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 // key and no other: changing the key's field in a Default() copy, changing
 // its value in the template, and removing it from the template each give
 // exactly one drift line, naming the key. Two keys with the same default
-// (max_orgs and deadman_minutes, watcher_enabled and director.enabled)
-// swapped on either side fail here, which a single real-template
-// comparison would miss. The rows must cover every toml key of
-// orgTemplateProbe, so a key added to the probe needs a row.
+// (max_orgs and deadman_minutes, watcher_enabled and director.enabled,
+// codex_verified and auto_merge) swapped on either side fail here, which a
+// single real-template comparison would miss. The rows must cover every
+// toml key of orgTemplateProbe, so a key added to the probe needs a row.
 func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
