@@ -1,7 +1,7 @@
 # init-pack-choice
 
-- Status: Draft
-- Approved: TBD
+- Status: Approved
+- Approved: 2026-10-28 sha256:614133eca51f
 - Owner: Claude Code
 - Date: 2026-10-28
 - Related request: ralph init: 言語パックに skip を足し、推定した言語に Recommended を添える
@@ -16,8 +16,8 @@
 ## Scope
 
 - S1 `--pack` の flag と `--yes` の既定(`internal/cli/init.go`)
-  - `--pack <名前>` を足す。繰り返しても、カンマで区切ってもよい(cobra の `StringSliceVar`)。重なった名前は 1 つにまとめる
-  - 名前の検査は `RunE` で、`--yes` の有無によらず、フォームを出す前と何かを書く前に行う。知らない名前はエラーで止める(終了コードは 0 以外)。エラーの文には使える名前の一覧を入れる。`executeInit` は知らないパックを警告して続ける(`init.go:188-191`)ので、その手前で止める
+  - `--pack <名前>` を足す。繰り返しても、カンマで区切ってもよい。flag は `StringArrayVar` で受け、カンマで分けるのは自分で行う。`StringSliceVar` は CSV として読むので、空の値(`--pack ''`)を黙って捨て、検査で拾えないため(pflag の `stringSliceValue.Set` は `readAsCSV("")` の空の結果を足すだけ)。重なった名前は 1 つにまとめる
+  - 名前の検査は `RunE` で、`--yes` の有無によらず、フォームを出す前と何かを書く前に行う。知らない名前と空の名前(`--pack ''`、`--pack golang,` の末尾の空)はエラーで止める(終了コードは 0 以外)。エラーの文には使える名前の一覧を入れる。`executeInit` は知らないパックを警告して続け、manifest にはその名前を残す(`init.go:187-201`)ので、その手前で止める
   - `--yes` だけのときは言語パックを入れない。`--yes --pack golang` なら golang だけを入れる
   - `--yes` の flag の説明(`init.go:50` の「use defaults」)を、言語パックを入れないことが分かる文に変える
   - 言語パックを 1 つも入れなかったときは、終わりの表示に「あとから `ralph pack add <language>` で入れられる」と、使える名前の一覧を出す
@@ -28,7 +28,8 @@
   - 選択肢の最後に skip(言語パックを入れない)を足す
   - 対象のディレクトリのルートに手がかりのファイルがある言語は、選択肢の表示に「(Recommended)」を添える。値(パックの名前)は変えない
   - skip とほかの言語を一緒に選んだときと、何も選ばなかったときは、選択を確かめる関数(huh の `Validate`)がエラーを返し、フォームが同じ問いにとどまる(もう一度聞く)
-  - 推定、選択肢の組み立て、選択の確かめ、言語パックの問い(`*huh.MultiSelect`)の組み立ては、フォームの外の関数にしてテストする
+  - フォームの選択を `executeInit` に渡す前に、入れるパックの一覧に直す。skip だけの選択は空の一覧にする。skip の値がパックの名前として `executeInit` に届くと、パックの書き出しは警告だけで続き、manifest に skip が残る(`init.go:187-201`)ため
+  - 推定、選択肢の組み立て、選択の確かめ、選択から入れるパックへの直し、言語パックの問い(`*huh.MultiSelect`)の組み立ては、フォームの外の関数にしてテストする
 - S4 文書
   - `README.md` のコマンドの表の `ralph init` の行
   - `templates/base/docs/recipes/adding-a-language-pack.md` の「init のときに選べる」の段落に `--pack` を足す
@@ -81,16 +82,17 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
 - D2(F2、`--pack` を `--yes` なしで渡したとき): 対話のフォームで、その名前を選んだ状態から始める。flag は既定値を与えるだけにする。フォームの形が条件で変わらないので、#277 で質問が増えても崩れない。「最初は何も選ばない」は、flag を渡さないときの話として扱う
 - D3(F3、手がかりのファイル): issue の表と `has_project_marker` の和を取り、terraform は `classify_language` の行を使う(上の表)。issue が「判定に合わせる」と書いているため。表はテストにも置く
 - D4(F4、skip の位置): 選択肢の最後に置く。パックの並び(`AvailablePacks` の名前順)を変えない
-- Critical forks: 上の 4 つ。どれも consult に聞いて、推奨案を選んだ(ユーザーの指示)
+- D5(Codex の計画助言 MEDIUM 2 件を反映): `--pack` は `StringArrayVar` で受けてカンマを自分で分け、空の要素をエラーにする。フォームの選択は、skip を空の一覧に直してから `executeInit` に渡す
+- Critical forks: D1〜D4。どれも consult に聞いて、推奨案を選んだ(ユーザーの指示)
 
 ## Acceptance criteria
 
-- [ ] AC1: 対話のフォームの言語パックの選択肢に skip がある。skip だけを選ぶと、言語パックを入れずに init が終わる(`manifest.Meta.Packs` が空、`packs/languages/` を作らない)
+- [ ] AC1: 対話のフォームの言語パックの選択肢に skip がある。skip だけを選ぶと、言語パックを入れずに init が終わる(`manifest.Meta.Packs` が空、`packs/languages/` と `.claude/rules/ralph/<lang>.md` を作らない、終わりに `ralph pack add` の案内が出る)。skip がパックの名前として manifest に残らない
 - [ ] AC2: skip とほかの言語を一緒に選んだとき、何も選ばなかったとき、確かめの関数がエラーを返し、言語パックの問いは次へ進まない
 - [ ] AC3: 対象のディレクトリの直下に、上の表の手がかりのファイルがある言語の選択肢に「(Recommended)」が付く。値はパックの名前のまま
 - [ ] AC4: 対話のフォームでは、`--pack` を渡さなければ、最初は何も選ばれていない
 - [ ] AC5: `--yes` だけでは言語パックが入らず、終わりの表示に `ralph pack add` の案内が出る
-- [ ] AC6: `--yes --pack golang` のように、flag で言語パックを入れられる。繰り返しとカンマ区切りの両方を受け付ける。知らない名前は、`--yes` の有無によらず、何も書かずにエラーで止まる
+- [ ] AC6: `--yes --pack golang` のように、flag で言語パックを入れられる。繰り返しとカンマ区切りの両方を受け付ける。知らない名前と空の名前は、`--yes` の有無によらず、何も書かずにエラーで止まる
 - [ ] AC7: `tests/test-check-template.sh` の G が、`--pack` ですべてのパックを入れた scaffold で通る
 - [ ] AC8: README のコマンドの表、雛形の recipe、init の help と `--yes` の説明が新しい振る舞いを書く
 
@@ -115,10 +117,11 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
   - 選択肢: `--pack` がなければどれも選ばれていない。推定した言語の表示に「(Recommended)」が付き、値はパックの名前のまま。最後に skip がある
   - 選択の確かめ: skip だけ → nil、言語だけ → nil、skip と言語 → エラー、何も選ばない → エラー
   - 問いの配線: 言語パックの問いを組み立て、選んだ状態を作って `Blur()` を呼び、`Error()` が上の確かめと同じ結果になる
-  - `--pack` の名前: 重なりを 1 つに、知らない名前はエラーで、使える名前を挙げる
-- Integration tests: `newInitCmd` に `--yes`、`--yes --pack golang`、`--yes --pack golang,python`、`--yes --pack golang --pack golang`、`--yes --pack nosuch`、`--pack nosuch`(`--yes` なし)を渡す。manifest の `Packs`、`packs/languages/` と `.claude/rules/ralph/<lang>.md` の有無、終わりの表示を確かめる。知らない名前ではエラーになり、対象のディレクトリに何も書かれないこと(`--yes` なしでもフォームを出す前に止まること)を確かめる
+  - 選択から入れるパックへの直し: skip だけ → 空、言語だけ → その名前のまま
+  - `--pack` の名前: 重なりを 1 つに、カンマで分ける、知らない名前と空の名前はエラーで、使える名前を挙げる
+- Integration tests: `newInitCmd` に `--yes`、`--yes --pack golang`、`--yes --pack golang,python`、`--yes --pack golang --pack golang`、`--yes --pack nosuch`、`--pack nosuch`(`--yes` なし)、`--yes --pack ''`、`--yes --pack golang --pack ''`、`--yes --pack '' --pack golang`、`--yes --pack golang,` を渡す。manifest の `Packs`、`packs/languages/` と `.claude/rules/ralph/<lang>.md` の有無、終わりの表示を確かめる。知らない名前と空の名前ではエラー(終了コードは 0 以外)になり、対象のディレクトリに何も書かれないこと(`--yes` なしでもフォームを出す前に止まること)を確かめる。skip だけの選択を直した結果で `executeInit` を通し、manifest の `Packs` が空、パックのファイルなし、`ralph pack add` の案内ありを確かめる
 - Regression tests: `tests/test-check-template.sh` の G(すべてのパック)と H1(パックなし)。既存の `TestExecuteInit_V2_*` と `TestRunInitInteractive*`(`cli_test.go:263` の、既存の project で upgrade の案内に入る確かめ)が通り続ける
-- Edge cases: `--pack` だけ(`--yes` なし)は、その名前を選んだ状態の選択肢になる(D2)。`--pack skip` は知らない名前としてエラー。`--pack ''` のような空の名前もエラー
+- Edge cases: `--pack` だけ(`--yes` なし)は、その名前を選んだ状態の選択肢になる(D2)。`--pack skip` は知らない名前としてエラー。空の名前は単独でも、ほかの名前の前後に混ざっても、カンマの末尾でもエラー
 - Evidence to capture: `go test` の出力、`run-test.sh` の結果
 
 ## Risks and mitigations
@@ -139,8 +142,8 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
 
 ## Progress checklist
 
-- [ ] Plan reviewed
-- [ ] Plan approved
+- [x] Plan reviewed(consult-plan-initpack: 判定「直してから進める」。F1〜F4 は案のとおり。手がかりのファイルの出どころを言語ごとの表にし、`--pack` の検査を `RunE` で両方の経路の前に置き、`--yes` の説明と `cfg.Packs` の初期値を直した。Codex の計画助言: MEDIUM 2 件(skip を空の一覧に直す処理、空の `--pack` を `StringSliceVar` が捨てる)を聞かずに反映した(D5))
+- [x] Plan approved(自動承認(ユーザーの指示)。2026-10-28、digest sha256:614133eca51f)
 - [x] Branch created
 - [ ] Implementation started
 - [ ] Review artifact created
