@@ -1,58 +1,60 @@
 # sync-docs report: codex-verified-auto-merge-on
 
-- Date: 2026-10-29(JST。insight event の ts は 2026-10-28T16:52Z)
+- Date: 2026-10-29(JST)
 - Plan: `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md`(issue #274。承認の digest `85ba56ccca6a` はこの run の前後で同じ。`./scripts/plan-visual.sh digest` で確かめた。この run が変えたのは `## Progress checklist` に足した 1 行だけ)
-- Pipeline cycle: 1(`.harness/state/standard-pipeline/cycle-count.json` の値)。base は `ae64da70`、branch は `feat/codex-verified-auto-merge-on`。run 開始時の HEAD は `495c5982`(この report を含む commit の SHA ではない)
-- 先行 report: `docs/reports/self-review-2026-10-28-codex-verified-auto-merge-on.md`(b49fd6c2 が 1 回目、修正スライス F1 のあとの再 run は 7ca29c41、Merge yes、所見 0)、`docs/reports/verify-2026-10-28-codex-verified-auto-merge-on.md`(e802b228、pass、LOW D-1・D-2、INFO D-3〜D-5)、`docs/reports/test-2026-10-28-codex-verified-auto-merge-on.md`(9d78a1c3、pass)
-- 差分の大きさ(`git diff ae64da70...HEAD --shortstat`、この run の前): 40 ファイル、+1115/-317。walkthrough を書くかどうかは `/pr` が決める
+- Pipeline cycle: 2(`.harness/state/standard-pipeline/cycle-count.json` の値)。この report は cycle 1(e3363a99)の内容を、cycle 2 の結果で置き換えた。base は `ae64da70`、branch は `feat/codex-verified-auto-merge-on`。run 開始時の HEAD は `de11b865`(この report を含む commit の SHA ではない)。cycle 1 のあとに origin/main の #282(init-pack-choice、`09dc0260`)を `aa4ec8d3` で merge している
+- 先行 report(cycle 2): `docs/reports/self-review-2026-10-28-codex-verified-auto-merge-on.md`(run 3、7dbd0858、Merge yes、所見 0)、`docs/reports/verify-2026-10-28-codex-verified-auto-merge-on.md`(90f5c80a、pass、LOW D-9、INFO D-3・D-4・D-7・D-8)、`docs/reports/test-2026-10-28-codex-verified-auto-merge-on.md`(de11b865、pass)、`docs/reports/cross-review-triage-codex-verified-auto-merge-on.md`(fe22fbf2、cycle 1、ACTION_REQUIRED 1 件を F2 aea6b494 が閉じた)
+- 差分の大きさ(この run の前): この PR の分は `git diff 09dc0260...HEAD --shortstat` で 42 ファイル、+1482/-343。`git diff ae64da70...HEAD` は 55 ファイル、+3165/-383 になるが、#282 の分(`ae64da70..09dc0260`)を含む。walkthrough を書くかどうかは `/pr` が決める
 
 ## Summary
 
-この branch は `[org.permissions].codex_verified` と `[org.director].auto_merge` の既定を false から true に変えた(`config.Default()` と `templates/base/ralph.toml`)。false を書いた `ralph.toml` の動きは変えていない。skill 4 つの写し、recipe 2 本とその写し、`README.md`、spec、Go のコメントは、S4 までに新しい既定へ直してある。`ralph status` は `ralph.toml` が読めないとき auto_merge を false と出す(F1)。
+この branch は `[org.permissions].codex_verified` と `[org.director].auto_merge` の既定を false から true に変えた(`config.Default()` と `templates/base/ralph.toml`)。false を書いた `ralph.toml` の動きは変えていない。cycle 1 のあと、cross-review の ACTION_REQUIRED を受けて F2(aea6b494)が入った。`resolveOrgConfig` は、`--config` がなければ `ralph.toml` を `config.Load` に渡し、`fs.ErrNotExist` のときだけ既定にする。`./ralph.toml` があるのに読めない(権限のないディレクトリへの symlink など)ときは、前の版のように既定へ倒さず、エラーを返す。
 
-verify が残した LOW の D-1 と D-2 を直した。どちらも `docs/tech-debt/README.md:136` の 1 行(doctor の shell alias の行)で、true が人の書く opt-in だった頃の言い方が残っていた。
+verify の LOW D-9 を直した。cycle 1 の release ノートは F2 の前に書いたので、(1) F2 の動きの項がなく、(2) changelog に載る commit を 2 件と数え、(3) 直った D-6 を PR の Notes に回す INFO に挙げていた。この report の「Release notes」と「`/pr` に渡すこと」を直してある。
 
-そのほかの面を洗った結果、直す文書はほかに見つからなかった。「既定では guarded だけ」「director は既定で merge しない」と書いた文書は、履歴の印がついた spec の文を除いて残っていない。
+F2 で変わった動きに食い違う文書を洗い直したが、直す文書は見つからなかった。ただ 1 か所、`docs/tech-debt/README.md:148` の行の Trigger に、F2 が `resolveOrgConfig` を変えたことの跡がなかった。同じ行の先例にならって 1 文を足した(下の Changes made)。
 
 ## Changes made
 
 | File | Change |
 |------|--------|
-| `docs/tech-debt/README.md`(136 行、Debt item の欄) | doctor の Detail の文の引用 `("… once codex_verified = true … a guarded seat runs with the alias's value …")` を、`internal/cli/doctor_shell_alias.go:714-719` の現在の文に合わせて `("… only while [org.permissions].codex_verified is true, the default … a guarded seat silently runs with the alias's sandbox …")` に差し替えた。引用の 2 つの断片は、コードの文字列から一字違わず取った(D-1) |
-| `docs/tech-debt/README.md`(136 行、Impact の欄) | 書き出しの「An operator who has already set `codex_verified = true` and assigned a `guarded` role …」を「An operator whose `[org.permissions].codex_verified` is `true` (the default since #274, whether written or left out) and who assigned a `guarded` role …」に直した。この行のほかの語は変えていない。表は別のセッションの PR と共有なので、2 か所の置換だけにした(D-2) |
-| `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md` | `## Progress checklist` に「Sync-docs report created」の 1 行を足した。ほかの節は触れていない(digest は同じ) |
-| `docs/reports/sync-docs-2026-10-28-codex-verified-auto-merge-on.md` | この report |
-| `docs/insights/events/2026-10-28-codex-verified-auto-merge-on.jsonl` | sync_docs の event を 1 行追記(下の Verification) |
+| `docs/reports/sync-docs-2026-10-28-codex-verified-auto-merge-on.md` | この report。cycle 2 の結果で書き直し、D-9 の 3 点を直した |
+| `docs/tech-debt/README.md`(148 行、Trigger の欄と Related の欄) | 行の Trigger が挙げる「any change to `resolveOrgConfig`」に F2 が当たったので、Trigger の末尾に、同じ欄にある `withMainWorktreeOrgLimits` の先例(feat/org-feature-worktree)と同じ形で 1 文を足した。「`resolveOrgConfig` changed in feat/codex-verified-auto-merge-on (F2, commit aea6b494: a `./ralph.toml` that exists but cannot be read … is now an error instead of the built-in default, so it blocks the teardown verbs the way a validation error does), which met that part of this trigger too and left the open part as it was」。Related に計画の `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md`(Progress, F2)を足した。行は 5 欄のまま、`~~` は 0 個。行のほかの語は変えていない |
+| `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md` | `## Progress checklist` の「Sync-docs report created」の下に、cycle 2 の 1 行を足した。ほかの節は触れていない(digest は同じ) |
+| `docs/insights/events/2026-10-28-codex-verified-auto-merge-on.jsonl` | sync_docs の event を cycle 2 として 1 行追記(下の Verification) |
 
-D-3(`ralph status --help` に、読めないときの false を足すか)と D-4(`internal/org/permissions.go` のエラー文の「until then … first」)は、依頼どおり直していない。どちらも PR の Notes に回る。
+cycle 1(e3363a99)の変更は、`docs/tech-debt/README.md:136`(D-1、D-2)と計画の Progress の 1 行、report、insight event の 1 行で、cycle 2 では触っていない。
+
+D-3(`ralph status --help` に、読めないときの false を足すか)、D-4(`internal/org/permissions.go` のエラー文の「until then … first」)、D-7、D-8 は、依頼どおり直していない。PR の Notes に回る。コードは触っていない。
 
 ## Surfaces checked for drift
 
+cycle 1 の e3363a99 のあとに変わった文書は `README.md` と `templates/base/docs/recipes/adding-a-language-pack.md` だけで、どちらも #282 の `ralph init` の分(`README.md` は `ralph init` の行 1 本)。2 つの設定を言う文書は変わっていない。F2 の変更点(`os.Stat` の分岐を消し、読めない `./ralph.toml` をエラーにする)について、「ない」と「読めない」の扱いを書いた箇所を洗い直した。
+
 | Surface | 結果 | 根拠 |
 |---------|------|------|
-| `docs/tech-debt/README.md:136` | 直した | 上の D-1、D-2。Debt item の「nor whether `[org.permissions].codex_verified` is really `true` on this project」は、false を書いた project があるので今も正しい |
-| `docs/tech-debt/README.md:144`(b) | 変更なし(同期済み) | 「falls back to the built-in defaults (`codex_verified = true` since #274)」に S4 で直っている |
-| `docs/tech-debt/README.md:241-249`、`:260`、`:268`、`:270` | 変更なし | どれも `auto_merge = true` や `codex_verified` を条件にした文、またはテンプレートの `default = "autonomous"` と codex の director が guarded に限られること(この PR で変わらない)の話 |
-| `README.md:124`、`:125`、`:258`、`:266`、`:268` | 変更なし(同期済み) | `:124` は「(default true)」。`:125`、`:258`、`:266`、`:268` は `auto_merge` の true と false の両方を条件つきで説明し、既定が false だとは言っていない |
-| `README.md:226`、`AGENTS.md:39`、`.ralph/core/AGENTS.core.md:28` の「CI + human merge」 | 変更なし | 開発 harness の標準フローの 10 段目で、人が PR を merge する話。`[org.director].auto_merge` は org runtime の director だけを決めるので、関係しない |
-| `AGENTS.md` の Repo map、`CLAUDE.md`、`.claude/rules/ralph/`、`docs/quality/`、`docs/architecture/`、`.ralph/core/`、role prompt(`internal/org/prompts/`)、`docs/specs/2026-08-01-org-runtime.md` | 変更なし | 2 つの設定の名前を含む行が 0 件(`git grep` で確かめた)。「ralph.toml parser with defaults」のような値を言わない文だけ |
-| `/org` skill(`.claude/skills/org/SKILL.md:131-134`、`:1541-1546` など、写し 3 つ) | 変更なし(同期済み) | 「`codex_verified = true`(既定)」「false では `guarded` 以外を拒否」。`check-skill-sync.sh` は 14 skill が一致 |
-| `/director` skill(`.claude/skills/director/SKILL.md:813-826`、写し 3 つ) | 変更なし(同期済み) | 「`auto_merge = true`(既定)」。「2 つの値が違えば false」の規則(D4)は変えていない |
-| `docs/recipes/codex-seat-permissions.md`、`docs/recipes/codex-setup.md` | 変更なし(同期済み) | 既定 true、確かめて通らなければ false。ルートとテンプレートの写しは `cmp` で byte 一致 |
-| `docs/specs/2026-10-07-org-multi-org-director.md`(`:129`、`:132`、`:193`、`:310`) | 変更なし(同期済み) | 旧文は残し、2026-10-28 の印と「2026-10-28 に決めたこと」の注で新しい既定を言う。計画の AC3 が除く履歴の文 |
-| `templates/base/ralph.toml` のコメント | 変更なし(同期済み) | 「true (default)」「An absent codex_verified loads as true」ほか。`TestDefaultsLockStep` の確認は `/test` が済ませた |
-| `internal/cli/org.go:206-228`(`withMainWorktreeDirectorEnabled` の doc comment) | INFO D-6 | 「`ralph status` warns about before it shows the built-in defaults (statusDirectorConfig)」は、F1 のあと `AutoMerge` だけ false を出すので、`AutoMerge` についてはやや不正確。`statusDirectorConfig` 自身の doc comment は正確で、動きも `ralph status` の warning も正しい。Go のコメントなので、依頼どおり直していない |
+| `internal/cli/org.go:604-612`(`resolveOrgConfig` の doc comment) | 変更なし(F2 で直っている) | 「ない」は `fs.ErrNotExist` だけ、読めない file はエラーで既定にしない、と書く |
+| `--config` の help(`internal/cli/org.go:58`)、`orgWideLimitsHelp`(`:699`) | 変更なし(同期済み) | 「default: ./ralph.toml if present, else built-in defaults」「built-in defaults when it has none」。ない場合だけ既定と読め、読めない file を既定にするとは書いていない |
+| `internal/cli/org.go:218-224`(`withMainWorktreeDirectorEnabled` の doc comment、D-6) | 変更なし(a91f6694 で直っている) | 「built-in Enabled with AutoMerge false」。`status.go:299` と合う |
+| `internal/cli/status.go:249-261`、`org_inbox.go:62-76`、`org_merge.go:157-163` の help と doc comment | 変更なし(同期済み) | どれも「ないときは既定、読めない(does not load)ときはエラー(`ralph status` は warning)」の形 |
+| `/org` skill(`.claude/skills/org/SKILL.md:190`、`:272`、`:405-413`、写し 3 つ) | 変更なし(同期済み) | `:190` は「`ralph org` の動詞はどれも設定(`--config`、省略時は cwd の `./ralph.toml`)を読む」、`:272` は「`--config` のファイル(なければ打った場所の `./ralph.toml`)」、`:406-412` は「`ralph.toml` を読めないときは終了コード 1」。F2 の前は、権限のないディレクトリへの symlink の `./ralph.toml` がこの文に反して既定になっていた |
+| `/director` skill(`.claude/skills/director/SKILL.md:252-257`、`:820`、写し 3 つ) | 変更なし(同期済み) | 「読めない `ralph.toml` はエラーになる」。`:820` の「2 つの値が違えば false」(D4)も変わらない |
+| `README.md`、`docs/recipes/`、`docs/specs/`、`docs/quality/`、`docs/architecture/`、`AGENTS.md`、`CLAUDE.md`、`.claude/rules/` | 変更なし | `ralph.toml` が読めないときに既定を使う、と書いた文はない。「if present」「built-in default」「unreadable」「cannot be read」「does not load」「読めない」「ない」で `git grep` した。当たりは skill の上の 2 本と spec の履歴の文だけ |
+| `docs/tech-debt/README.md:148` | Trigger に跡を足した | 本文の「Config: `--config`, else only the cwd's `./ralph.toml`, else the built-in default」は、ないときの話で今も正しい。「every verb, the teardown verbs `status`/`stop`/`disband` included, goes through `newOrgRuntime` → `resolveOrgConfig`, so any `ralph.toml` validation error … blocks stopping seats」と Impact の「A broken `ralph.toml` leaves running seats reachable only after the file is fixed or a fixed copy is passed with `--config`」は、F2 のあと読めない file にも当てはまり、偽にはならない。Trigger は「any change to `resolveOrgConfig`」を挙げ、F2 が当たったので、跡を足した(上の Changes made)。行の開いた部分(設定の探索が main worktree と git の toplevel を無視すること)は F2 で変わらない |
+| `docs/tech-debt/README.md:136`、`:144`、`:241-249`、`:260`、`:268`、`:270` | 変更なし(同期済み) | cycle 1 のとおり。`:136` は e3363a99 で直し、verify cycle 2 が確かめた |
 | `internal/cli/status.go:66-71`(`ralph status --help`) | INFO D-3(未修正) | 「read by the same rule as enabled」で、読めないときの false は warning が言う |
 | `internal/org/permissions.go:147`、`:152`(実行時のエラー文) | INFO D-4(未修正) | false を明示した project だけが見る条件つきの文で、偽ではない |
+| `--config` で名指した file がないとき(`internal/config/config.go:640-645`、`TestLoad_MissingFile`) | INFO D-7(未修正) | `config.Load` の契約で、F2 の前からある。`--config` の path の打ち間違いは、既定が true になったので `ralph.toml` のない project と同じ true で動く |
+| `ralph doctor`(`internal/cli/doctor.go:93-101`) | INFO D-8(未修正) | 読めない `ralph.toml` を「parse error … using defaults」と呼び、ほかの検査を既定で判定する。既定が true になったので、要らない warn が出うる。何も動かさない |
 
 ## Plan drift notes
 
-- Deviation M1(`ralph status` が読めない `ralph.toml` で auto_merge を false と出す)は、計画の Progress に F1 の記録がある。計画の本文(digest の対象)には書いていないが、手を入れていない。
-- 計画の Acceptance criteria は AC4 だけが `[ ]` で、PR の本文が要るため `/pr` の分。AC1〜AC3、AC5〜AC7 の `[x]` は verify と test の report が根拠になっている(verify の D-5 は、AC のチェックボックスが `[ ]` のままという指摘だった。現在は `[x]`)。Progress の残る `[ ]` は「PR created」だけ。
+- Deviation M1(`ralph status` が読めない `ralph.toml` で auto_merge を false と出す)と F2 は、計画の Progress に記録がある。計画の本文(digest の対象)には書いていないので、手を入れていない。
+- 計画の Acceptance criteria は AC4 だけが `[ ]` で、PR の本文が要るため `/pr` の分。AC1〜AC3、AC5〜AC7 は `[x]`。Progress の残る `[ ]` は「PR created」だけ。
 
 ## Release notes
 
-PR の本文の release ノートの項(計画の AC4)に使う文。下の枠が本文。
+PR の本文の release ノートの項(計画の AC4)に使う文。下の枠が本文。cycle 1 の枠に、F2 の動きの項を「そのほか」に足した。
 
 ```
 ### [org.permissions].codex_verified と [org.director].auto_merge の既定を true にした (#274)
@@ -77,21 +79,32 @@ ralph doctor
 
 そのほか
 - ralph status は、ralph.toml が読めないとき、director の行の auto_merge を false と出す(既定の true ではない)。stderr の warning が理由を言う。
+- --config なしの ralph org の動詞と ralph status は、./ralph.toml があるのに読めない(権限のないディレクトリへの symlink、輪になった symlink など)とき、既定で動かずにエラーにする(ralph status は warning を出し、auto_merge を false と出す)。前の版は既定で動いていた。ralph.toml がないときは今までどおり既定。
 ```
 
-自動の changelog(`.goreleaser.yml` は `^docs:`、`^test:`、`^chore:` を除く)に載るのは、この branch の次の 2 件。
+自動の changelog(`.goreleaser.yml` は `^docs:`、`^test:`、`^chore:` を除く)に載るこの PR の commit は、次の 3 件。`git log --no-merges 09dc0260..HEAD`(この PR の分。#282 の merge `09dc0260` より後)で数えた。
 
 - `cb8d258e feat: default codex_verified and auto_merge to true`
 - `958d9bff fix: show auto_merge as false when ralph status cannot read ralph.toml`
+- `aea6b494 fix: return an error for an unreadable ralph.toml instead of the defaults`
 
-ほかの 16 件(`docs:` が 14 件、`test:` が 2 件)は載らない。skill、recipe、`README.md`、spec の更新(`f99ac82d`)と Go のコメントの更新(`920a4dcb`)は `docs:` なので、changelog からは読み取れない。`feat:` の題は既存の project への影響を言わないので、上の release ノートを手で足す。squash merge にすると、載るのは PR の題 1 件になる。
+ほかの 25 件(`docs:` が 23 件、`test:` が 2 件)は載らない。run 開始時の HEAD `de11b865` までの 28 件で、この run の `docs:` の commit が 1 件加わる。skill、recipe、`README.md`、spec の更新(`f99ac82d`)と Go のコメントの更新(`920a4dcb`、`a91f6694`)は `docs:` なので、changelog からは読み取れない。`feat:` の題は既存の project への影響を言わないので、上の release ノートを手で足す。squash merge にすると、載るのは PR の題 1 件になる。
+
+`ae64da70..HEAD` で数えると 55 件(`docs:` 44、`test:` 3、`feat:` 3、`fix:` 4、`refactor:` 1)で、`feat:` `fix:` `refactor:` の 8 件が載る。差は #282(init-pack-choice)の 5 件で、同じ release の changelog には #282 の分も載る。#282 の 5 件は次のとおり。
+
+- `baa66655 feat: add --pack to ralph init and install no pack with --yes alone`
+- `d1c756de feat: ask for language packs with skip and Recommended in ralph init`
+- `f495bb23 fix: tighten the init help and pack listing from the self-review`
+- `80a2eb28 fix: clarify the --yes help sentence and the AvailablePacks comment`
+- `dbc5afaf refactor: build the init config once before either init path`
 
 ## `/pr` に渡すこと
 
 - 上の release ノートを PR の本文に置く(AC4)。
-- PR の Notes に書く未修正の INFO: D-3(`ralph status --help` に読めないときの false がない)、D-4(`internal/org/permissions.go` のエラー文の「until then … first」)、D-6(`internal/cli/org.go` の doc comment の「built-in defaults」)。いずれも文言で、動作は正しい。
+- PR の Notes に書く未修正の INFO は 4 件。D-3(`ralph status --help` に、読めないときの false がない)、D-4(`internal/org/permissions.go` のエラー文の「until then … first」)、D-7(`--config` で名指した file がないときも既定、つまり true で動く。`config.Load` の契約で、この PR の前からある)、D-8(`ralph doctor` は読めない `ralph.toml` を既定で判定する)。いずれも文言か、この PR の前からの契約で、動作はこの PR の意図どおり。D-6(`internal/cli/org.go` の doc comment)は a91f6694 で直ったので、Notes から外した。
 - この repo にはルートの `ralph.toml` がないので、この PR のあと、この repo の `ralph org` も auto_merge true、codex の座席は autonomous の既定で動く(計画の Assumptions が受け入れた動き)。
-- `docs/tech-debt/README.md` は別のセッションの PR と共有している。merge の衝突は両方の変更を残して解く。この run の変更は 136 行の 2 か所だけ。
+- `docs/tech-debt/README.md` は別のセッションの PR と共有している。merge の衝突は両方の変更を残して解く。この PR の変更は 136 行の 2 か所と、148 行の Trigger と Related の 2 か所。
+- 148 行の Related に計画の `docs/plans/active/` の path を書いた。`/pr` の `archive-plan.sh` が `archive/` に書き換える。`run-static-verify.sh` は tech-debt の plan 参照の存在を見る(verify cycle 2 で OK)。
 
 ## Verification
 
@@ -101,8 +114,8 @@ ralph doctor
 | `./scripts/check-skill-sync.sh` | rc 0。`[ok] check-skill-sync: 14 skill(s) in lock-step` |
 | `./scripts/check-template-purity.sh` | rc 0。`PASS: no meta-repo-specific references found in templates.` |
 | `git diff --check` | 出力なし |
-| `cmp`(recipe 2 本のルートとテンプレート) | byte 一致 |
-| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md` | `85ba56ccca6a`(`- Approved:` 行の値と同じ) |
-| 引用の一致 | 差し替えた 2 つの断片(`only while [org.permissions].codex_verified is true, the default`、`a guarded seat silently runs with the alias's sandbox`)は `internal/cli/doctor_shell_alias.go:714-719` の文字列と同じ |
-| テスト、`go vet`、golangci-lint、`run-verify.sh` ほか | 打っていない(依頼で止められた)。この run が変えたのは tech-debt の 1 行の 2 か所、計画の Progress、この report、insight event で、コードの動きは変わらない |
-| insight event | `./scripts/insights-append.sh --slug codex-verified-auto-merge-on --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で追記する(`docs/insights/events/2026-10-28-codex-verified-auto-merge-on.jsonl`) |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md` | `85ba56ccca6a`(`- Approved:` 行の値と同じ。Progress の編集の前後で同じ) |
+| `docs/tech-debt/README.md:148` | 5 欄のまま(`(?<!\\) \| ` で分けて確かめた)、`~~` は 0 個。Related の計画の path は存在する |
+| commit の数 | `git log --no-merges 09dc0260..HEAD`: 28 件(`docs:` 23、`test:` 2、`feat:` 1、`fix:` 2)。`ae64da70..HEAD`: 55 件(`docs:` 44、`test:` 3、`feat:` 3、`fix:` 4、`refactor:` 1) |
+| テスト、`go vet`、golangci-lint、`run-verify.sh` ほか | 打っていない(依頼で止められた)。この run が変えたのは tech-debt の 1 行、計画の Progress、この report、insight event で、コードの動きは変わらない |
+| insight event | `./scripts/insights-append.sh --slug codex-verified-auto-merge-on --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で追記する(`docs/insights/events/2026-10-28-codex-verified-auto-merge-on.jsonl`。`--cycle auto` は cycle-count.json の 2 を読む) |
