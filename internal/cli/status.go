@@ -254,13 +254,19 @@ func mergeGuaranteeLine(g org.MergeGuarantee) string {
 // deadman_minutes (a mark of an older version), and statusDirectorConfig
 // starts from it. status only reads, so a ralph.toml that does not load
 // falls back to the built-in defaults with one warning on stderr instead of
-// failing the command; loaded is false then.
+// failing the command; loaded is false then. The fallback's
+// Director.AutoMerge is false, not the default true: the file that does not
+// load may say auto_merge = false, and status must not show the director
+// merging without asking on the strength of a file it could not read. The
+// warning says so.
 func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 	cfg, err := resolveOrgConfig("")
 	if err != nil {
 		fallback := config.Default().Org
+		fallback.Director.AutoMerge = false
 		_, _ = fmt.Fprintf(stderr, "warning: status: load ralph.toml: %v; judging the org watch by the default deadman_minutes (%d) "+
-			"and showing the director by the default [org.director].enabled (%t) and auto_merge (%t)\n",
+			"and showing the director by the default [org.director].enabled (%t) and auto_merge as %t (not the default), "+
+			"because ralph.toml could not be read\n",
 			err, fallback.DeadmanMinutes, fallback.Director.Enabled, fallback.Director.AutoMerge)
 		return fallback, false
 	}
@@ -273,24 +279,28 @@ func statusOrgConfig(stderr io.Writer) (cfg config.OrgConfig, loaded bool) {
 // statusOrgConfig loaded from ./ralph.toml, with
 // withMainWorktreeDirectorEnabled's main worktree rule for the ledger at
 // stateDir. When ./ralph.toml did not load (loaded false, and
-// statusOrgConfig has warned), they are the built-in defaults and the main
-// worktree's ralph.toml is not read, so the same broken file is not reported
-// twice. status only reads, so a main worktree ralph.toml that does not load
-// falls back to the built-in defaults too, with its own warning on stderr,
-// instead of failing the command. Only Enabled and AutoMerge of the result
-// follow that rule, and readOrgDirectorReport reads only those two: its other
-// fields (AckMinutes, ResolveMinutes, LaunchCmd, Wake, WakeCmd) are
-// ./ralph.toml's or the built-in defaults, never the main worktree's. The
-// wake the director: line shows is the registration's, recorded at attach or
-// start (plan 2026-10-18-org-director-wake, D3), not Wake.
+// statusOrgConfig has warned), they are statusOrgConfig's fallback (Enabled
+// the built-in default, AutoMerge false) and the main worktree's ralph.toml
+// is not read, so the same broken file is not reported twice. status only
+// reads, so a main worktree ralph.toml that does not load falls back the
+// same way, to the built-in defaults with AutoMerge false for the reason
+// statusOrgConfig gives, with its own warning on stderr, instead of failing
+// the command. Only Enabled and AutoMerge of the result follow that rule,
+// and readOrgDirectorReport reads only those two: its other fields
+// (AckMinutes, ResolveMinutes, LaunchCmd, Wake, WakeCmd) are ./ralph.toml's
+// or the built-in defaults, never the main worktree's. The wake the
+// director: line shows is the registration's, recorded at attach or start
+// (plan 2026-10-18-org-director-wake, D3), not Wake.
 func statusDirectorConfig(stderr io.Writer, cfg config.OrgConfig, loaded bool, stateDir, stateDirSource string) config.OrgDirectorConfig {
 	if !loaded {
 		return cfg.Director
 	}
 	fallback := config.Default().Org.Director
+	fallback.AutoMerge = false
 	cfg, err := withMainWorktreeDirectorEnabled(cfg, "", stateDir, stateDirSource)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t) and auto_merge (%t)\n",
+		_, _ = fmt.Fprintf(stderr, "warning: status: %v; showing the director by the default [org.director].enabled (%t) "+
+			"and auto_merge as %t (not the default), because the main worktree's ralph.toml could not be read\n",
 			err, fallback.Enabled, fallback.AutoMerge)
 		return fallback
 	}

@@ -61,9 +61,10 @@ func ResolvePermissionMode(cfg config.OrgConfig, role string) string {
 // confirmation. These flag shapes were first stated as an assumption in
 // docs/plans/archive/2026-08-02-org-runtime-watchdog.md ("codex 権限
 // fail-closed の実機検証") and live-verified on 2026-09-18 (see the doc
-// comment on permissionArgsForDriver below); CodexVerified is the operator's
-// explicit acknowledgement that they have repeated that verification for
-// their installed codex version and config. For a leader seat, and for a
+// comment on permissionArgsForDriver below). CodexVerified is true by
+// default; an operator whose installed codex version or config does not pass
+// the check in docs/recipes/codex-seat-permissions.md sets it to false, which
+// keeps codex seats fail-closed to guarded. For a leader seat, and for a
 // reviewer seat of a feature org, Spawn follows either set with
 // codexWritableRootArgs (below) when the org state dir is outside the seat's
 // cwd. StartDirector refuses a codex headless director in either mode (plan
@@ -101,23 +102,27 @@ func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 // prompts for other tool calls), guarded needs no flag (claude's own
 // interactive default already behaves like "guarded").
 //
-// codex is fail-closed by default (Codex advisory 2, plan Design decisions
-// "codex は fail-closed"): anything other than guarded (no flag -- codex's
-// own CLI default) is rejected outright unless cfg.Permissions.CodexVerified
-// is true. The alternative -- silently emitting a stub argv that looks like
-// it applied autonomous/edits but doesn't -- is worse than a loud error: a
-// fail-closed codex seat is at least honest about running guarded.
+// codex is fail-closed when cfg.Permissions.CodexVerified is false (Codex
+// advisory 2, plan Design decisions "codex は fail-closed"): anything other
+// than guarded (no flag -- codex's own CLI default) is then rejected
+// outright. CodexVerified is true by default, so a project that does not set
+// it gets the mapping below. The alternative -- silently emitting a stub
+// argv that looks like it applied autonomous/edits but doesn't -- is worse
+// than a loud error: a fail-closed codex seat is at least honest about
+// running guarded.
 //
 // The mapping was live-verified on 2026-09-18 against codex-cli 0.154.0
 // (docs/evidence/codex-seat-permissions-2026-09-18.md): autonomous runs
 // with no approval prompt and the sandbox rejects writes outside its
 // writable roots (cwd plus /tmp-style temp roots -- see evidence P4); edits
 // auto-accepts in-cwd edits and prompts only when the model requests an
-// escalation. The default stays false by design rather than for lack of
-// verification: the flags inherit the operator's own ~/.codex/config.toml
-// (approval_policy, sandbox writable_roots -- the agmsg DB directory must be
-// writable or seats cannot send RESULT), so each machine opts in after
-// running docs/recipes/codex-seat-permissions.md.
+// escalation. That verification, on one machine, is the evidence for the
+// mapping, not the reason for the default: the default is true by the human
+// decision of issue #274. The flags inherit the operator's own
+// ~/.codex/config.toml (approval_policy, sandbox writable_roots -- the
+// agmsg DB directory must be writable or seats cannot send RESULT), so a
+// machine where docs/recipes/codex-seat-permissions.md does not pass sets
+// it to false.
 func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":

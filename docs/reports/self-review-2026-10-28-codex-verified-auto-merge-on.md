@@ -1,0 +1,131 @@
+# Self-review report: codex-verified-auto-merge-on
+
+- Date: 2026-10-29
+- Plan: `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md`(issue #274、D1〜D5、AC1〜AC7、Progress の S1〜S4)
+- Reviewer: reviewer サブエージェント(`/self-review`。run 1 は b49fd6c2 の report、run 2 は修正スライス F1 958d9bff のあとの再 run(パイプラインの cycle 1)、run 3 は cross-review の ACTION_REQUIRED の修正 F2 aea6b494 のあとの再 run(パイプラインの cycle 2)で、この file を同じ場所で更新した)
+- Run 3 の scope: F2 aea6b494(3 ファイル、+117/-27)の全体と、run 2 のあとに入った a91f6694(`internal/cli/org.go` の doc comment)、e3363a99(`docs/tech-debt/README.md:136`)。HEAD は 4de8e31e(`git diff ae64da70...HEAD` は 25 コミット、42 ファイル、+1391/-343。report と記録のコミットを含む)。run 1、run 2 の本文は下にそのまま残し、その後は「Run 3」「Run 2」の節にまとめた。
+- Run 2 の scope: F1 958d9bff(8 ファイル、+89/-64)の全体と、M1〜L4 がそれぞれ閉じたか。HEAD は b955cbcf(`git diff ae64da70...HEAD` は 13 コミット、38 ファイル、+840/-317)。run 1 の本文は下にそのまま残し、その後は「Run 2」の節にまとめた。
+- Run 1 の scope: `git diff ae64da70...HEAD`(9 コミット、32 ファイル、+701/-263)。中心は S1 29fd179e(`internal/config/defaults_sync_test.go` の表のテスト)、S2 cb8d258e と ce6e972d(既定を true に、`internal/config` と `internal/cli` のテスト)、S3 920a4dcb(Go のコメント)、S4 f99ac82d(skill・recipe・README・spec・tech-debt)。diff quality だけを見た。
+- 実行したもの: `go test ./internal/config/ -count=1`(run 1、run 2 とも通過、0.6 s)、run 3 では `go test ./internal/cli/ -run 'TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults|TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad' -count=1`(通過、1.3 s)と、標準ライブラリだけの使い捨てプログラム(repo の外)による `os.ReadFile` の挙動の確認。変異と静的検査は回していない。
+- ID: run 1 の所見は M1、L1〜L4(run 2、run 3 も同じ ID で状態を追う)。run 2、run 3 で新しく立てた所見はない。
+
+## Run 3
+
+cross-review の ACTION_REQUIRED 1 件(`resolveOrgConfig` が読めない `./ralph.toml` を「ない」とみなして既定の true を返す)を、F2 aea6b494 が閉じたかを見た。
+
+### F2 は穴を閉じたか
+
+閉じた。`resolveOrgConfig`(`internal/cli/org.go:613-623`)は `--config` がなければ `"ralph.toml"` をそのまま `config.Load` に渡し、`os.Stat` の分岐と `os` の import を消した。`config.Load` は `os.ReadFile` の `fs.ErrNotExist` だけを既定にし、ほかの読み取りのエラーは返す(`internal/config/config.go:643-649`)。これで [org] を読む経路はすべて `config.Load` を通る。確かめた範囲は、`ralph.toml` を `os.Stat` する cli のコードが残っていないこと(`git grep` の結果)、`loadMainWorktreeOrgConfig`(`org.go:332`)と `doctor.go:93` が元から `config.Load` を直接呼ぶこと。
+
+端の場合を、F2 の前(`os.Stat` が通れば `config.Load`、通らなければ既定)と後で並べた。`os.ReadFile` の挙動は、標準ライブラリだけの使い捨てプログラム(repo の外)で確かめた。
+
+| `./ralph.toml` の状態 | F2 の前 | F2 のあと |
+| --- | --- | --- |
+| ない | 既定 | 既定(変わらず) |
+| 読める | 読む | 読む(変わらず) |
+| 0o000 のファイル | `os.Stat` は通り、`config.Load` が EACCES を返す。エラー | エラー(変わらず)。テストの 2 つ目のケースは修正の前後で結果が同じで、追加の確認として置いてある |
+| 権限のないディレクトリへの symlink | `os.Stat` が EACCES を返し、「ない」とみなして既定(穴) | `ReadFile` の EACCES がそのまま返る。`errors.Is(err, fs.ErrPermission)` |
+| 輪になった symlink | `os.Stat` が ELOOP を返し、既定 | ELOOP のエラー(`too many levels of symbolic links`) |
+| ディレクトリ | `os.Stat` は通り、`config.Load` が EISDIR を返す。エラー | エラー(変わらず) |
+| 行き先のない symlink(dangling) | `os.Stat` が ENOENT を返し、既定 | `ReadFile` が ENOENT を返す。`errors.Is(err, fs.ErrNotExist)` が true で、既定(変わらず) |
+
+行き先のない symlink は、ない file と同じ扱いのまま残る。file の中身を誰も読めず、`config.Load` の契約(`fs.ErrNotExist` だけが既定)と同じで、`ralph.toml` のない project と露出が変わらないので、所見にはしない。`resolveOrgConfig` の doc comment は「権限」と「入れないディレクトリへの symlink」を挙げているので、行き先のない symlink は既定になる、の 1 文を足すとさらに正確になる(任意)。
+
+F1 の `ralph status` の fail-closed と組み合わさることも確かめた。`statusOrgConfig` は `resolveOrgConfig("")` のエラーで fallback に入るので、F2 のあとは「読めない」file でも off の行、`--json` の `auto_merge` false、warning 1 行が出る。名指しで実行したテストが、`--state-dir` を git の外に指す setup と main checkout の setup の 2 つ × 「parse できない」「読めない」の 4 つで通った。
+
+### 新しいテストは root の skip と権限の後片付けを正しく行っているか
+
+- root の skip: 正しい。`os.Geteuid() == 0` で skip する。`status_test.go` は `broken.permissions` の軸の subtest の中だけで skip するので、parse できない側は root でも走る。`org_test.go` の `TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults` は test の先頭で skip するため、権限のビットに頼らない最初の 2 つの確認(ない → 既定、読める false のまま)も root では走らない。2 つは `internal/config` と他の cli のテストが受け持つので失うものは小さい。skip を 2 つの subtest の中に移すと status 側と揃う(任意)。
+- 後片付け: 正しい。`writeRalphTomlBehindLockedDir` は `t.TempDir()` を先に呼び、`t.Cleanup(chmod 0o755)` を `os.Chmod(locked, 0)` の成功のあとに登録する。Cleanup は後入れ先出しなので、chmod が先に走り、そのあと `t.TempDir()` の削除が `locked` を消せる。`os.Chmod(locked, 0)` が失敗したときは Cleanup が未登録でも `locked` は 0o755 のままなので消せる。0o000 のファイルは親のディレクトリが書けるので削除できる。`t.Chdir` の戻しも後入れ先出しで、cwd の TempDir の削除より先に走る。
+- 判別力: symlink のケースは、F2 の前の `os.Stat` の分岐だと `(既定, nil)` を返し、`errors.Is(err, fs.ErrPermission)` で落ちる。この点はコードを読んで確かめた。変異の実行は回していない(進捗欄の `-overlay` の結果は implementer の報告)。
+
+### run 2 の自分の判断の訂正
+
+run 2 で「cli でほかに `config.Default()` を fallback に使うのは `org.go:615` だけで、`ralph.toml` が存在しない場合の既定であり、読めない場合ではない」と書いたのは誤りだった。その分岐は `os.Stat` のエラーを権限のエラーも含めてすべて「ない」と読んでいて、cross-review の指摘のとおり穴だった。run 2 は「ない」の判定方法(`os.Stat` か `errors.Is(err, fs.ErrNotExist)` か)を見ていなかった。
+
+### cycle 1 のあとのほかの変更
+
+- a91f6694(`org.go` の `withMainWorktreeDirectorEnabled` の doc comment): 「`ralph status` は built-in の Enabled と AutoMerge false を出す」と F1 の挙動に合う。正確。
+- e3363a99(`docs/tech-debt/README.md:136`): doctor の Detail の引用を「only while [org.permissions].codex_verified is true, the default」に直し、「already set」を「whose … is `true` (the default since #274, whether written or left out)」にした。run 2 で渡した 2 点が閉じている。
+
+### 所見
+
+なし。run 1 の M1、L1〜L4 は run 2 で閉じたままで、F2 は触っていない。
+
+## Run 2
+
+### M1〜L4 のその後
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 解決 | `statusOrgConfig`(`status.go:265-266`)と `statusDirectorConfig`(`:298-299`)の 2 つの fallback で、`Default()` の値を取ったあとに `AutoMerge = false` を入れる。`Enabled` は既定の true のまま。`./ralph.toml` が読めない場合は `statusOrgConfig` の fallback が `loaded == false` で `statusDirectorConfig` の先頭の `return cfg.Director` から出るので、2 つで両方の経路を覆う。ほかに `config.Default()` を fallback に使う cli のコードは `org.go:615`(`ralph.toml` が存在しない場合の既定で、読めない場合ではない)だけで、`ralph org merge` と `ralph org director status` は読めない file をエラーにする(`org.go:348-351`、`org_director.go:394-401`)ため、`ralph status` が唯一の fallback だった。doc comment は 2 関数とも例外を書いた。 |
+| L1 | 解決 | `permissions.go:119-126` が「検証は 1 台の証拠であって既定の理由ではなく、既定は #274 の人の決定」と分けた。 |
+| L2 | 解決 | `testOrgConfig()` が `Permissions: config.OrgPermissionsConfig{CodexVerified: false}` と理由の 4 行のコメントを持ち、`codexGuardedOrg` も `CodexVerified: false` を明示する。`spawn_test.go` の 3 つのコメントは「codex_verified false」を名指す。`permissions_test.go` の `config.OrgConfig{}` は、テスト名が「when codex_verified is false」なので残してよい。 |
+| L3 | 解決 | `doctor_shell_alias.go:714-719` が「gets only while `[org.permissions].codex_verified` is true, the default」になり、固定していたテスト 4 か所(`doctor_shell_alias_test.go:574`、`:599`、`:1328`、`:1330`)が同じ文言に合う。 |
+| L4 | 解決 | `defaults_sync_test.go` の「19」が 3 か所とも消えた(`grep -n 19 internal/config/defaults_sync_test.go` に当たりなし)。同じ既定値の組は「for example」付きで、`ack_minutes` を 10 の組(max_orgs・deadman_minutes と同じ)に、`interval_seconds` を 30 の組(max_total_seats と同じ)に入れ、true の 4 キーも事実と合う。 |
+
+### F1 が入れた新しい問題の有無
+
+見つからなかった。確かめた点は次のとおり。
+
+- `fallback := config.Default().Org` の `Director` は値渡しの struct なので、`fallback.Director.AutoMerge = false` は `Default()` の返り値を汚さない(`Wake` の slice は `Default()` が呼ぶたびに作る)。
+- 2 つ目の warning(`status.go:302-305`)の「main worktree の ralph.toml を読めなかった」は正確。`withMainWorktreeDirectorEnabled` が返すエラーの出どころは `loadMainWorktreeOrgConfig` の `config.Load` だけ(`org.go:332-335`)で、git が main worktree を名指せないときは `LedgerMainWorktreeRoot` が `ok=false` を返し(`statedir.go:105-118`)、main の file は読まれずエラーにもならない。
+- `status_test.go` は 2 つの fallback を、off の行、`--json` の `auto_merge` false、warning の全文で固定する。`wantSuffix` は 3 つの setup(main checkout、linked worktree、`--json`)に効き、stderr の行数が 1 であることも保つ。
+- `--json` の `director.auto_merge` は fallback の false と明示した false を区別できないが、知らせは stderr の warning にあり、安全側に倒れるので受け入れられる。
+- `enabled` の fallback を true のまま残したのは、計画の Deviation(M1)の記述どおりで、`ralph org escalate` の読み方(読めなければエラー)とは別に status が「表示だけ」であることとも矛盾しない。
+
+### 次の段へ渡すもの(所見ではない)
+
+- `docs/tech-debt/README.md:136` は doctor の Detail の文を「"… once codex_verified = true …"」と引用して言い換えている。F1 の L3 でその文が「only while … is true, the default」に変わったので、引用は文字どおりではなくなった。文書と実装のずれなので /verify の対象。同じ行の「An operator who has already set `codex_verified = true`」も、既定が true の project には当たらない言い方になっている(run 1 から同じ)。
+- `ralph status --help`(`status.go:66-71`)は `auto_merge` を「enabled と同じ規則で読む」と書くが、読めないときの false の fallback は書かない。warning の文が説明するので足りる。必要なら /sync-docs で 1 文足す。
+
+## Run 1
+
+### Evidence reviewed
+
+- `internal/config/defaults_sync_test.go` の追加部分の全体。`TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`(`:402-495`、94 行のうち表が 35 行)、`tomlKeys`、`editTemplateKey`。
+  - 表の行は 19 で、`orgTemplateProbe`(`:114-142`)の toml のタグの数と合う。`tomlKeys` は struct を表として下り、`*[]string` や `*[]OrgModelPoolEntry` はポインタなので葉になる。probe の表はすべて非ポインタの struct なので取りこぼさない。
+  - `editTemplateKey` は、見出しの正規表現が `# [org.permissions.roles]` のようなコメントに当たらず(行頭 `^\[`)、`[[...]]` はテンプレートにない。`keyLine` は `^key\s*=` なので `wake` が `wake_cmd` に当たらない。`found != 1` が改名と二重定義を Fatal にする。`model_pool` の複数行は括弧の深さで消すが、テンプレートの該当 10 行(`templates/base/ralph.toml:33-42`)の中に `[` `]` を含む文字列やコメントはない。
+  - bool の行はテンプレート側の値を `!Default()` から作るので、S2 の前後どちらでも vacuous にならない。(i) `Default()` のコピーの 1 field、(ii) テンプレートの値、(iii) テンプレートのキーの削除、の 3 つがどれも「そのキーを名指す 1 行」を求めるので、同じ既定値のキーの取り違えが両側で落ちる。
+- `internal/config/config_test.go` の追加と書き換え。`TestLoad_CodexVerifiedAndAutoMergeDefaultToTrue`、`TestLoad_TemplateWithBothKeysFalse`(`reflect.DeepEqual` は同じテンプレートを `Load` した 2 つなので、2 field だけの差を見る)、`TestLoad_OrgPermissionsCodexVerifiedRoundTrip` の false/true 両方、`TestLoad_OrgDirectorRoundTrip` の false への入れ替え。default-flip の定番(新しい既定を明示して読み返すだけの vacuous なテスト)は、false の半分が残っているため、どの組も実質の確認を失っていない。
+- `internal/cli` のテスト 9 ファイル。D2 の規則(false の動きのテストは false を明示して残し、既定そのものを見るテストだけ true にする)は守られている。false を明示して残したもの: `writeCodexOrgConfig` の `codex_verified = false`、`TestOrgDirector_StatusShowsAutoMerge` と `TestStatusCmd_DirectorLineShowsAutoMerge` の false の組、`TestOrgDirector_AutoMergeFromTheMainWorktreeRalphToml` の「worktree が false → 既定の true」への組み替え、`directorNotAttachedOffLine` / `directorDisabledOffLine` の新設。
+- `internal/config/config.go`、`internal/org/permissions.go`、`internal/cli/doctor_shell_alias.go`、`internal/cli/org.go` のコメント。`templates/base/ralph.toml` の 2 つのキーの前のコメント。
+- skill 2 つ(`.claude/skills/org/SKILL.md`、`.claude/skills/director/SKILL.md`)、recipe `codex-seat-permissions.md` と `codex-setup.md`、`README.md:124`、spec の FR-8・受け入れ条件・Security の印、`docs/tech-debt/README.md:144` の語単位の diff。写し(`.agents/`、`templates/base/`)はルート側と `diff` が一致する(recipe と org skill を確認)。
+- 残った false 既定の記述の探索。`git grep -E 'codex_verified|auto_merge'` を Go 以外のファイルに掛け、`fail-closed|opt.in|unlock|既定|default` と組み合わせた。Go は `git grep -nE "codex_verified|CodexVerified|AutoMerge|auto_merge" -- 'internal/*.go' ':!*_test.go'` の全行を読んだ。
+- `internal/cli/status.go:258-296` の読み込み失敗時の fallback と、`/director` skill の「merge と auto_merge」節(`:813-830`)。
+- 見ていないもの: `docs/tech-debt/README.md:136` の「An operator who has already set `codex_verified = true`」(進捗欄のとおり /verify で見る)、仕様との適合、テストの網羅。
+
+### Findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| M1 | MEDIUM | exception-handling / security | `ralph status` は `ralph.toml` が読めないとき、読み取りだけなので失敗させず `config.Default()` の値で director の行を出す。`auto_merge` の既定が false から true に変わったため、この fallback が安全側から開いた側に反転した。人が `auto_merge = false` と書いた file が壊れていても、`ralph status` の `director:` の行は「人に聞かずに merge する(`auto_merge = true`)」と出し、知らせは stderr の warning 1 行だけになる。`/director` skill は merge の前にこの行を読んで決める。 | `internal/cli/status.go:261-265`(`fallback := config.Default().Org` と `fallback.Director.AutoMerge`)、`:290-295`(main worktree の `ralph.toml` が読めないときも `config.Default().Org.Director`)。テストが新しい値を固定している: `status_test.go:1164`、`:1186`(`auto_merge (true)`)。`/director` skill `:813-821` は値を `ralph status` の行か `ralph org director status` の `auto_merge:` の行から読む。2 つの食い違いの規則は `--config` を使う headless の場合だけで、warning の扱いは書いていない。一方 `ralph org director status` は読めない `ralph.toml` をエラーにする(`org_director.go:394-401`)ので、同じ状況で 1 つはエラー、もう 1 つは true と答える。 | 2 つの fallback で `AutoMerge` だけ false に固定し(`enabled` は既定の true のまま。warning の文も `auto_merge (false)` にする)、`status_test.go:1164`、`:1186` の期待を合わせる。コードを触らないなら、`/director` skill に「`ralph status` が `warning: status: load ralph.toml` を出したら `auto_merge` は false として扱い、人に伝える」の 1 文と PR の Notes を足す。skill は LLM が stderr を読むことに頼るので、前者を勧める。どちらにするかは orchestrator が決める。 |
+| L1 | LOW | maintainability(コメントの主張が根拠を超える) | `permissions.go` の `permissionArgsForDriver` の doc comment が「既定は true。その検証があるから」と書く。検証は 2026-09-18 に 1 台、codex-cli 0.154.0 で行ったもので、置き換えた前の文は「検証が足りないから false なのではなく、flag が利用者の `~/.codex/config.toml` を引き継ぐから false」と、検証は理由でないと明言していた。既定を true にした理由は、計画の Assumptions のとおり 2026-10-27 の人の決定(#274)で、引き継ぎの性質は変わっていない。 | `internal/org/permissions.go:119-121`「The default is true because of that verification (issue #274).」。計画 `Assumptions` の「既定の値は 2026-10-27 にユーザーが決めた(issue #274)」。`config.go:119-123` は「and the default is true (issue #274)」と並べるだけで、この主張はない。 | 「The default is true by the maintainer's decision (issue #274); the verification above is the evidence for the mapping on one machine.」のように、決定と証拠を分ける。 |
+| L2 | LOW | maintainability(テストの前提が暗黙) | `internal/org` のテストは false の動きを `config.OrgConfig{}` と `testOrgConfig()` の zero value で確かめている。動作は変わらず通るが、コメントとテスト名が「既定」の動きとして書いてあり、この PR のあとは偽になる。D2 の「false の動きは false を明示する」にも当たらない。`testOrgConfig()` は `MaxOrgs` だけ `config.Default()` から取っているので、同じ形で `Permissions` も `Default()` から取る変更が入ると、これらのテストが原因の分かりにくい形で落ちる。 | `internal/org/envelope_test.go:10-25`(`Permissions` を設定しない)。`spawn_test.go:3643-3648`「a codex seat under the default (autonomous) config is rejected」、`:3720`「fail-closed under the default autonomous mode」、`:3912-3916`「under codex's fail-closed autonomous default」。テスト名 `TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt`。`permissions_test.go:92` は名前が「when codex_verified is false」なので誤りではないが、`config.OrgConfig{}` に頼る。 | `testOrgConfig()` に `Permissions: config.OrgPermissionsConfig{CodexVerified: false}` と「zero value であり `Default()` の true ではない。codex の fail-closed のテストが頼る」の 1 行を足す。3 つのコメントの「the default」を「codex_verified false」に直す。テスト名の変更は任意。 |
+| L3 | LOW | readability(利用者に見える文) | doctor の「Shell aliases」の Detail が、codex の flag の説明に「(modes a codex seat gets only once `[org.permissions].codex_verified = true`)」と書く。既定が true になったので、既定の project でも読み手には「まだ true にしていない」と読める。文は条件として偽ではない。S3 は同じ関数の上の doc comment(`:571-579`)を直したが、この 2 つの出力の文は残っている。 | `internal/cli/doctor_shell_alias.go:714-715`、`:718-719`。テストはこの括弧の文言を固定していない(`git grep "gets only once"` は実装の 2 行のみ)。 | 「modes a codex seat gets unless `codex_verified = false`」のように、既定の true を前提にした書き方に直す。S3 の範囲を超えるなら、PR の Notes に残して次に doctor を触るときに直す。 |
+| L4 | LOW | maintainability(コメント) | 新しいテストが数えているのは reflect の key の集合なのに、キーの数「19」がコメントに 3 回残っている。キーを足すと表の行は強制されるが、この数は黙って古くなる(計画が閉じたかった「数がコメントにしかない」の残り)。また新しいテストの doc comment は、既定値が同じキーの組を 3 つ挙げて全部のように読めるが、`ack_minutes`(10)は `max_orgs` と `deadman_minutes` の組に入り、`interval_seconds` と `max_total_seats` は 30 で同じ。 | `internal/config/defaults_sync_test.go:10`、`:109`、`:147`(「19 [org] keys」)。`:397-399`(「Two keys with the same default (max_orgs and deadman_minutes, ...)」)。 | 「19」は消して「every [org] key of orgTemplateProbe」と書く(進捗欄の「19 は残した」を、この PR で閉じるか台帳に送る)。同じ既定値の組は「for example」を付けるか、組を数えずに「keys that share a default」とだけ書く。 |
+
+### 依頼された観点への答え
+
+- 表のテストの論理(`TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`、`tomlKeys`、`editTemplateKey`): 欠陥は見つからなかった。上の Evidence に確かめた境界を書いた。L4 はコメントだけ。
+- D2: 守られている。false の動きのテストは消えずに、false を明示する形で残っている。既定そのものを見る期待だけが true になった。`internal/org` のテストは別の問題(L2)。
+- 既定 true の記述の正確さ: skill、recipe、README、template の comment、spec の印、`tech-debt:144` に false 既定の言い方は残っていない。残っていたのは L1(理由の書き方)と L3(利用者に見える文)で、どちらも偽の既定を書いてはいない。
+- 既知として再提起しないもの: `permissions.go` の実行時エラー文(`codex_verified=true` を求める文)、spec の旧文の履歴、D4 の「違えば false」の規則。M1 は D4 の規則が覆わない別の経路(読み込み失敗の fallback)。
+
+### Positive notes
+
+- 表のテストは、比較の「どちらの側の取り違え」かを別々の変異で落とす。bool の行を `!Default()` から作る点は、この PR が既定を 2 つ反転しても通るので S1 を先に足す順が活きた。
+- `editTemplateKey` が「表の範囲内で 1 回だけ」でなければ Fatal にするので、テンプレートの書き換えで行が vacuous にならない。
+- `TestLoad_TemplateWithBothKeysFalse` は、戻し方の手順(2 行を手で false にする)をそのまま再現し、2 field 以外の値が変わらないことまで見る。
+- テンプレートの comment と `config.go` の field comment が、既定、false にする条件、キーがないときの値を同じ順で書いていて、読み比べやすい。
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| なし(台帳に足さない) | — | run 1 の M1、L1〜L4 は F1 ですべて直った。run 2 で新しく立てた所見はない。 | — | — |
+
+## Recommendation
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の MEDIUM 1、LOW 4 は F1 958d9bff で解決し、cross-review の ACTION_REQUIRED は F2 aea6b494 で解決。run 3 で新しく立てた所見はない)
+- Follow-ups: パイプラインの上限(2 回)に達したので、次は /pr に進む。(1) `resolveOrgConfig` の doc comment に「行き先のない symlink は既定になる」の 1 文を足すか(任意)。(2) `TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults` の root の skip を 2 つの subtest の中に移すか(任意)。どちらも直さなくてよく、直す場合は文言とテストの位置だけで挙動は変わらない。(3) verify の D-3(`ralph status --help` に読めないときの false がない)と D-4(`permissions.go` のエラー文の「until then … first」)は、計画の進捗欄のとおり PR の Notes に書く。

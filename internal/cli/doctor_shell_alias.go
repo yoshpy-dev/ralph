@@ -571,11 +571,12 @@ const (
 // gets none of the three permission-class flags, so that class's alias
 // value applies unopposed on a guarded seat. codex's two permission-class
 // flags additionally require [org.permissions].codex_verified = true
-// (internal/config/config.go's CodexVerified, default false):
-// permissionArgsForDriver fails codex edits/autonomous closed until an
-// operator sets it, and Spawn rejects such a seat outright rather than
-// downgrading it, so on a default project guarded is the only mode a codex
-// seat can start in.
+// (internal/config/config.go's CodexVerified, default true):
+// permissionArgsForDriver fails codex edits/autonomous closed when an
+// operator sets it to false, and Spawn rejects such a seat outright rather
+// than downgrading it, so with codex_verified = false guarded is the only
+// mode a codex seat can start in, while on a default project edits and
+// autonomous start too.
 func shellAliasFlagClass(label string) string {
 	switch label {
 	case "--model", "--model (-m)":
@@ -710,12 +711,12 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 		clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
 	}
 	if hasSandbox {
-		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only once "+
-			"[org.permissions].codex_verified = true), so those spawns fail while a guarded seat silently runs with the alias's sandbox")
+		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only while "+
+			"[org.permissions].codex_verified is true, the default), so those spawns fail while a guarded seat silently runs with the alias's sandbox")
 	}
 	if hasApproval {
-		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only once "+
-			"[org.permissions].codex_verified = true), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
+		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only while "+
+			"[org.permissions].codex_verified is true, the default), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
 	}
 	clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
 	sentence := strings.Join(clauses, "; ")

@@ -116,6 +116,86 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	}
 }
 
+// TestLoad_CodexVerifiedAndAutoMergeDefaultToTrue verifies that a project
+// with no ralph.toml, and one whose ralph.toml leaves out
+// [org.permissions].codex_verified and [org.director].auto_merge, loads both
+// as true (issue #274; plan 2026-10-28-codex-verified-auto-merge-on, AC1).
+func TestLoad_CodexVerifiedAndAutoMergeDefaultToTrue(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string // "" writes no ralph.toml
+	}{
+		{name: "no ralph.toml"},
+		{name: "a ralph.toml without [org]", content: "[doctor]\nrequire_go = false\n"},
+		{name: "both tables without the keys", content: "[org.permissions]\ndefault = \"edits\"\n\n[org.director]\nack_minutes = 5\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if c.content != "" {
+				if err := os.WriteFile(path, []byte(c.content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !cfg.Org.Permissions.CodexVerified {
+				t.Error("permissions.codex_verified = false, want true")
+			}
+			if !cfg.Org.Director.AutoMerge {
+				t.Error("director.auto_merge = false, want true")
+			}
+		})
+	}
+}
+
+// TestLoad_TemplateWithBothKeysFalse verifies the opt-out, which is also how
+// a project goes back to the old behavior (plan
+// 2026-10-28-codex-verified-auto-merge-on, AC7 and its rollback note):
+// templates/base/ralph.toml with its codex_verified = true and
+// auto_merge = true lines rewritten to false loads both as false, and every
+// other value as the unchanged template does.
+func TestLoad_TemplateWithBothKeysFalse(t *testing.T) {
+	templatePath := filepath.Join(repoRoot(t), "templates", "base", "ralph.toml")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
+	}
+	text := string(data)
+	for _, key := range []string{"codex_verified", "auto_merge"} {
+		old := "\n" + key + " = true\n"
+		if n := strings.Count(text, old); n != 1 {
+			t.Fatalf("templates/base/ralph.toml contains %q %d times, want exactly 1", old, n)
+		}
+		text = strings.Replace(text, old, "\n"+key+" = false\n", 1)
+	}
+	path := filepath.Join(t.TempDir(), "ralph.toml")
+	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(the template with both keys false): %v", err)
+	}
+	if cfg.Org.Permissions.CodexVerified {
+		t.Error("permissions.codex_verified = true, want false")
+	}
+	if cfg.Org.Director.AutoMerge {
+		t.Error("director.auto_merge = true, want false")
+	}
+	want, err := Load(templatePath)
+	if err != nil {
+		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
+	}
+	want.Org.Permissions.CodexVerified = false
+	want.Org.Director.AutoMerge = false
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("config = %+v,\nwant the template's with only the two keys false = %+v", cfg, want)
+	}
+}
+
 // TestLoad_RequireAgentCLIs verifies require_claude_cli and require_codex_cli
 // round-trip with true, the value that differs from Default(). The doctor
 // command reads them to fail when that CLI is not usable, instead of warning
@@ -442,7 +522,8 @@ max_fix_rounds = 2
 }
 
 // TestDefault_OrgPermissions verifies [org.permissions] defaults: every
-// role uses "autonomous" and no per-role override exists out of the box.
+// role uses "autonomous", no per-role override exists out of the box, and
+// codex_verified is true (issue #274).
 func TestDefault_OrgPermissions(t *testing.T) {
 	p := Default().Org.Permissions
 	if p.Default != "autonomous" {
@@ -451,8 +532,8 @@ func TestDefault_OrgPermissions(t *testing.T) {
 	if len(p.Roles) != 0 {
 		t.Errorf("permissions.roles = %v, want empty", p.Roles)
 	}
-	if p.CodexVerified {
-		t.Errorf("permissions.codex_verified = %v, want false (fail-closed default)", p.CodexVerified)
+	if !p.CodexVerified {
+		t.Errorf("permissions.codex_verified = %v, want true (the default since issue #274)", p.CodexVerified)
 	}
 }
 
@@ -489,7 +570,7 @@ leader = "autonomous"
 
 // TestLoad_OrgPermissionsMissingSectionBackfillsDefault verifies AC-1
 // compatibility: a ralph.toml without [org.permissions] at all loads with
-// the "autonomous" default and no error.
+// the "autonomous" default, codex_verified true, and no error.
 func TestLoad_OrgPermissionsMissingSectionBackfillsDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -506,29 +587,29 @@ model = "opus"
 	if cfg.Org.Permissions.Default != "autonomous" {
 		t.Errorf("permissions.default = %q, want autonomous", cfg.Org.Permissions.Default)
 	}
-	if cfg.Org.Permissions.CodexVerified {
-		t.Errorf("permissions.codex_verified = %v, want false", cfg.Org.Permissions.CodexVerified)
+	if !cfg.Org.Permissions.CodexVerified {
+		t.Errorf("permissions.codex_verified = %v, want true", cfg.Org.Permissions.CodexVerified)
 	}
 }
 
 // TestLoad_OrgPermissionsCodexVerifiedRoundTrip verifies AC-8's config gate:
-// an explicit [org.permissions].codex_verified = true round-trips through
-// Load() unchanged, and an absent key keeps the fail-closed false default.
+// an explicit [org.permissions].codex_verified round-trips through Load()
+// unchanged, false (the opt-out that keeps codex seats fail-closed to
+// guarded) as well as true.
 func TestLoad_OrgPermissionsCodexVerifiedRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "ralph.toml")
-	content := `[org.permissions]
-codex_verified = true
-`
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !cfg.Org.Permissions.CodexVerified {
-		t.Errorf("permissions.codex_verified = %v, want true", cfg.Org.Permissions.CodexVerified)
+	for _, want := range []bool{false, true} {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		content := fmt.Sprintf("[org.permissions]\ncodex_verified = %t\n", want)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Org.Permissions.CodexVerified != want {
+			t.Errorf("codex_verified = %t: permissions.codex_verified = %v, want %v", want, cfg.Org.Permissions.CodexVerified, want)
+		}
 	}
 }
 
@@ -825,17 +906,17 @@ watcher_model = ""
 }
 
 // TestDefault_OrgDirector verifies the [org.director] defaults: the director
-// switch enabled is true, auto_merge is false (merges stay the human's), the
-// inbox deadlines are ack_minutes 10 and resolve_minutes 60, launch_cmd is
-// empty (start uses herdr), wake is ["pull"] (the director waits on the inbox
-// itself), and wake_cmd is empty.
+// switch enabled is true, auto_merge is true (the director merges ready PRs
+// without asking, issue #274), the inbox deadlines are ack_minutes 10 and
+// resolve_minutes 60, launch_cmd is empty (start uses herdr), wake is
+// ["pull"] (the director waits on the inbox itself), and wake_cmd is empty.
 func TestDefault_OrgDirector(t *testing.T) {
 	d := Default().Org.Director
 	if !d.Enabled {
 		t.Error("director.enabled = false, want true")
 	}
-	if d.AutoMerge {
-		t.Error("director.auto_merge = true, want false")
+	if !d.AutoMerge {
+		t.Error("director.auto_merge = false, want true")
 	}
 	if d.AckMinutes != 10 {
 		t.Errorf("director.ack_minutes = %d, want 10", d.AckMinutes)
@@ -862,7 +943,8 @@ func TestDefault_OrgDirector(t *testing.T) {
 
 // TestLoad_OrgDirectorMissingSectionBackfillsDefault verifies a ralph.toml
 // without [org.director] (but with other [org] tables) loads with the full
-// Director defaults and no error, enabled = true included.
+// Director defaults and no error, enabled = true and auto_merge = true
+// included.
 func TestLoad_OrgDirectorMissingSectionBackfillsDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
@@ -885,24 +967,23 @@ stall_minutes = 20
 	if !cfg.Org.Director.Enabled {
 		t.Error("director.enabled = false, want true for an absent [org.director]")
 	}
-	if cfg.Org.Director.AutoMerge {
-		t.Error("director.auto_merge = true, want false for an absent [org.director]")
+	if !cfg.Org.Director.AutoMerge {
+		t.Error("director.auto_merge = false, want true for an absent [org.director]")
 	}
 }
 
 // TestLoad_OrgDirectorRoundTrip verifies explicit [org.director] values
 // round-trip through Load() unchanged, including a resolve_minutes shorter
 // than ack_minutes (the two deadlines are independent), enabled = false, and
-// auto_merge = true, and that setting one key leaves the others at their
-// defaults (a section without enabled loads as true, one without auto_merge
-// as false).
+// auto_merge = false, and that setting one key leaves the others at their
+// defaults (a section without enabled or auto_merge loads it as true).
 func TestLoad_OrgDirectorRoundTrip(t *testing.T) {
 	t.Run("all keys", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "ralph.toml")
 		content := `[org.director]
 enabled = false
-auto_merge = true
+auto_merge = false
 ack_minutes = 25
 resolve_minutes = 5
 `
@@ -916,8 +997,8 @@ resolve_minutes = 5
 		if cfg.Org.Director.Enabled {
 			t.Error("director.enabled = true, want false")
 		}
-		if !cfg.Org.Director.AutoMerge {
-			t.Error("director.auto_merge = false, want true")
+		if cfg.Org.Director.AutoMerge {
+			t.Error("director.auto_merge = true, want false")
 		}
 		if cfg.Org.Director.AckMinutes != 25 {
 			t.Errorf("director.ack_minutes = %d, want 25", cfg.Org.Director.AckMinutes)
@@ -949,8 +1030,8 @@ ack_minutes = 1
 		if !cfg.Org.Director.Enabled {
 			t.Error("director.enabled = false, want true for a section without enabled")
 		}
-		if cfg.Org.Director.AutoMerge {
-			t.Error("director.auto_merge = true, want false for a section without auto_merge")
+		if !cfg.Org.Director.AutoMerge {
+			t.Error("director.auto_merge = false, want true for a section without auto_merge")
 		}
 	})
 
@@ -960,8 +1041,8 @@ ack_minutes = 1
 		wantEnabled   bool
 		wantAutoMerge bool
 	}{
-		{"enabled = true", "[org.director]\nenabled = true\n", true, false},
-		{"enabled = false alone", "[org.director]\nenabled = false\n", false, false},
+		{"enabled = true", "[org.director]\nenabled = true\n", true, true},
+		{"enabled = false alone", "[org.director]\nenabled = false\n", false, true},
 		{"auto_merge = true alone", "[org.director]\nauto_merge = true\n", true, true},
 		{"auto_merge = false alone", "[org.director]\nauto_merge = false\n", true, false},
 	}

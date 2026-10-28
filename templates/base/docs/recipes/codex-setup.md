@@ -200,5 +200,5 @@ full write-up and what evidence to capture if it happens again.
 ## See also
 
 - [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat
-  permission modes (autonomous / edits) on this machine before enabling
-  `[org.permissions].codex_verified`.
+  permission modes (autonomous / edits) on this machine; if they do not pass,
+  set `[org.permissions].codex_verified` (default `true`) to `false`.

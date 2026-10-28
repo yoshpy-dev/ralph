@@ -3642,10 +3642,11 @@ func TestOrgSpawn_MinimumControlGate_DryRun_AppliesSameGate(t *testing.T) {
 
 // TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt is the
 // AC-2 fail-closed end-to-end test: a codex seat under the default
-// (autonomous) config is rejected with a `rejected` manifest event and an
-// honored=false receipt -- unlike the AC-2b gate rejection above, this is a
-// permissionArgsForDriver error, reached only after the gate itself passes
-// (mustSpawnParams sets a non-empty Scope by default).
+// (autonomous) permission mode with codex_verified false (testOrgConfig) is
+// rejected with a `rejected` manifest event and an honored=false receipt --
+// unlike the AC-2b gate rejection above, this is a permissionArgsForDriver
+// error, reached only after the gate itself passes (mustSpawnParams sets a
+// non-empty Scope by default).
 func TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt(t *testing.T) {
 	o, h, a := testOrg(t)
 
@@ -3717,7 +3718,7 @@ func TestOrgSpawn_Reject_ReceiptsAppendFailureLeavesModelReceiptZero(t *testing.
 
 	p := mustSpawnParams("org-a", "seat-1")
 	p.Driver = "codex"
-	p.Model = "gpt-5-codex" // fail-closed under the default autonomous mode, routing through reject()
+	p.Model = "gpt-5-codex" // fail-closed under the autonomous mode with codex_verified false, routing through reject()
 
 	result := o.Spawn(p)
 	if result.Outcome != SpawnOutcomeRejected {
@@ -3908,16 +3909,16 @@ func TestOrgSpawn_Codex_WorkspaceWrite_FeatureOrgReviewerGetsAddDir(t *testing.T
 
 // --- codex model observation (plan Scope row 3, AC-2/AC-2b/AC-2c/AC-3/AC-4) ---
 
-// codexGuardedOrg returns testOrg(t) with role guarded under codex's
-// fail-closed autonomous default (permissionArgsForDriver rejects a codex
-// seat under autonomous mode -- see
-// TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt
+// codexGuardedOrg returns testOrg(t) with role guarded, as codex is
+// fail-closed under the autonomous mode with codex_verified false
+// (permissionArgsForDriver rejects a codex seat under autonomous mode then
+// -- see TestOrgSpawn_Codex_AutonomousDefault_RejectedFailClosed_WithReceipt
 // above), so every model-observation test below can reach
 // SpawnOutcomeSpawned without also exercising that unrelated gate.
 func codexGuardedOrg(t *testing.T, role string) (*Org, *fakeHerdr, *fakeAgmsg) {
 	t.Helper()
 	o, h, a := testOrg(t)
-	o.Config.Permissions = config.OrgPermissionsConfig{Roles: map[string]string{role: PermissionModeGuarded}}
+	o.Config.Permissions = config.OrgPermissionsConfig{Roles: map[string]string{role: PermissionModeGuarded}, CodexVerified: false}
 	return o, h, a
 }
 

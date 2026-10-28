@@ -47,10 +47,10 @@ func directorWakeToml(wake, wakeCmd string) string {
 }
 
 // directorAttachedTail is what follows the parentheses of an attached
-// director: line of a promoted session with [org.director].auto_merge false
-// and no mark of its wait --inbox --director.
+// director: line of a promoted session with [org.director].auto_merge at its
+// default, true, and no mark of its wait --inbox --director.
 const directorAttachedTail = " -- the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
-	"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+	"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 
 // directorNotCheckedClause is what the director: line says of a headless
 // registration the watch has not checked yet (plan
@@ -59,8 +59,8 @@ const directorNotCheckedClause = "not checked yet: ralph org watch --all checks 
 
 // directorNotCheckedTail is directorAttachedTail for a headless registration
 // the watch has not checked yet: what follows the parentheses of its
-// director: line, with [org.director].auto_merge false.
-const directorNotCheckedTail = " -- " + directorNotCheckedClause + "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+// director: line, with [org.director].auto_merge at its default, true.
+const directorNotCheckedTail = " -- " + directorNotCheckedClause + "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 
 // directorWakeCmdNeededText is the reason of ErrDirectorWakeCmdNeeded at
 // attach, after "(wake <wake>)".
@@ -621,7 +621,7 @@ func TestOrgDirectorStatus_ShowsWhereAPushWakeIsSent(t *testing.T) {
 		stateDir, ev := attach(t, directorWakeCmdWithTarget, "--wake", "pull,push", "--wake-target", "term-1")
 		wantLine := "director: attached d1 (driver=claude, attached at " + ev.TS + ", by alice, wake=pull,push to term-1)" + directorAttachedTail
 		stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
-		want := wantLine + "\nenabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull,push\nwake_target: term-1\nattached_at: " + ev.TS +
+		want := wantLine + "\nenabled: true\nauto_merge: true\nid: d1\ndriver: claude\nwake: pull,push\nwake_target: term-1\nattached_at: " + ev.TS +
 			"\nuser: alice\ncwd: " + cwd + "\nherdr_pane: no\n" + directorNoWaitMarkLine + "\n"
 		if stdout != want {
 			t.Errorf("director status =\n%s\nwant\n%s", stdout, want)

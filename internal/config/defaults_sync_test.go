@@ -7,10 +7,10 @@ package config
 //  1. templates/base/ralph.toml — declarative project config
 //  2. config.Default()          — Go CLI defaults
 //
-// For each of the 19 [org] keys, orgTemplateDrift checks that the template
-// sets the key and that its value equals Default()'s. The template is not
-// read with Load: Load starts from Default(), so a key the template leaves
-// out would keep Default()'s value and pass.
+// For each [org] key of orgTemplateProbe, orgTemplateDrift checks that the
+// template sets the key and that its value equals Default()'s. The template
+// is not read with Load: Load starts from Default(), so a key the template
+// leaves out would keep Default()'s value and pass.
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
 // defaults, VAR="${VAR:-value}" idiom). org.agmsg_home, the one [org] key
@@ -37,9 +37,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -104,8 +106,8 @@ func mustShell(t *testing.T, m map[string]string, varName string) string {
 	return v
 }
 
-// orgTemplateProbe holds the 19 [org] keys that templates/base/ralph.toml
-// sets, with pointer fields: go-toml/v2 leaves a pointer nil when its key is
+// orgTemplateProbe holds the [org] keys that templates/base/ralph.toml sets,
+// with pointer fields: go-toml/v2 leaves a pointer nil when its key is
 // absent, so a key the template leaves out is told apart from one set to its
 // zero value, such as auto_merge = false (the idiom of orgPoolKeysPresent in
 // config.go).
@@ -142,7 +144,7 @@ type orgTemplateProbe struct {
 }
 
 // orgTemplateDrift reads templateData (a ralph.toml) into orgTemplateProbe
-// once and compares each of its 19 [org] keys with def. It returns one line
+// once and compares each of its [org] keys with def. It returns one line
 // per key that the template does not set or sets to another value, naming
 // the dotted key; none means the two agree.
 func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
@@ -307,9 +309,9 @@ func TestDefaultsLockStep(t *testing.T) {
 
 // TestOrgTemplateDrift_DetectsChangedAndMissingKeys pins that
 // orgTemplateDrift catches both kinds of drift in a copy of the real
-// template: a changed value, and a removed key, including one whose default
-// is the zero value (auto_merge, codex_verified), which reading through Load
-// would miss. Each case replaces text that must occur exactly once, so a
+// template: a changed value, and a removed key (auto_merge, codex_verified),
+// which reading through Load would miss because Load backfills Default()'s
+// value. Each case replaces text that must occur exactly once, so a
 // rewording of the template fails the case instead of making it vacuous.
 func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
@@ -336,16 +338,16 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			wantPrefix: "org.max_seats: template = 6, Default() = 5",
 		},
 		{
-			name:       "a removed auto_merge, whose default is false",
-			old:        "\nauto_merge = false\n",
+			name:       "a removed auto_merge, whose default is true",
+			old:        "\nauto_merge = true\n",
 			new:        "\n",
-			wantPrefix: "org.director.auto_merge: missing from the template (Default() = false)",
+			wantPrefix: "org.director.auto_merge: missing from the template (Default() = true)",
 		},
 		{
-			name:       "a removed codex_verified, whose default is false",
-			old:        "\ncodex_verified = false\n",
+			name:       "a removed codex_verified, whose default is true",
+			old:        "\ncodex_verified = true\n",
 			new:        "\n",
-			wantPrefix: "org.permissions.codex_verified: missing from the template (Default() = false)",
+			wantPrefix: "org.permissions.codex_verified: missing from the template (Default() = true)",
 		},
 		{
 			name:       "a removed wake",
@@ -386,4 +388,172 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOrgTemplateDrift_EachKeyIsComparedOnBothSides pins, for every key
+// orgTemplateDrift compares, that each side reaches the comparison of that
+// key and no other: changing the key's field in a Default() copy, changing
+// its value in the template, and removing it from the template each give
+// exactly one drift line, naming the key. Two keys with the same default
+// (for example max_orgs, deadman_minutes, and ack_minutes, all 10;
+// max_total_seats and interval_seconds, both 30; watcher_enabled,
+// director.enabled, codex_verified, and auto_merge, all true) swapped on
+// either side fail here, which a single real-template comparison would
+// miss. The rows must cover every toml key of orgTemplateProbe, so a key
+// added to the probe needs a row.
+func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("templates/base/ralph.toml not found (%v)", err)
+	}
+	if err != nil {
+		t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
+	}
+	template := string(data)
+	if drift, err := orgTemplateDrift(data, Default()); err != nil || len(drift) != 0 {
+		t.Fatalf("the real template must match Default() first (TestDefaultsLockStep): drift = %q, err = %v", drift, err)
+	}
+
+	defaults := Default()
+	// Bool values are negated, so a row keeps differing from the template
+	// whichever default it has. Other values are ones no default uses.
+	rows := []struct {
+		key        string        // dotted, as orgTemplateDrift's lines name it
+		tmplValue  string        // a TOML value for the template, unlike its own
+		setDefault func(*Config) // changes only this key's field
+	}{
+		{"org.driver_pool", `["changed"]`, func(c *Config) { c.Org.DriverPool = append(c.Org.DriverPool, "changed") }},
+		{"org.model_pool", `[{ driver = "claude", model = "changed" }]`, func(c *Config) {
+			c.Org.ModelPool = append(c.Org.ModelPool, OrgModelPoolEntry{Driver: "claude", Model: "changed"})
+		}},
+		{"org.max_seats", "987", func(c *Config) { c.Org.MaxSeats++ }},
+		{"org.max_orgs", "987", func(c *Config) { c.Org.MaxOrgs++ }},
+		{"org.max_total_seats", "987", func(c *Config) { c.Org.MaxTotalSeats++ }},
+		{"org.deadman_minutes", "987", func(c *Config) { c.Org.DeadmanMinutes++ }},
+		{"org.agmsg_home", `"changed"`, func(c *Config) { c.Org.AgmsgHome += "-changed" }},
+		{"org.permissions.default", `"changed"`, func(c *Config) { c.Org.Permissions.Default += "-changed" }},
+		{"org.permissions.codex_verified", strconv.FormatBool(!defaults.Org.Permissions.CodexVerified), func(c *Config) {
+			c.Org.Permissions.CodexVerified = !c.Org.Permissions.CodexVerified
+		}},
+		{"org.watchdog.interval_seconds", "987", func(c *Config) { c.Org.Watchdog.IntervalSeconds++ }},
+		{"org.watchdog.stall_minutes", "987", func(c *Config) { c.Org.Watchdog.StallMinutes++ }},
+		{"org.watchdog.watcher_enabled", strconv.FormatBool(!defaults.Org.Watchdog.WatcherEnabled), func(c *Config) {
+			c.Org.Watchdog.WatcherEnabled = !c.Org.Watchdog.WatcherEnabled
+		}},
+		{"org.watchdog.watcher_model", `"changed"`, func(c *Config) { c.Org.Watchdog.WatcherModel += "-changed" }},
+		{"org.director.enabled", strconv.FormatBool(!defaults.Org.Director.Enabled), func(c *Config) {
+			c.Org.Director.Enabled = !c.Org.Director.Enabled
+		}},
+		{"org.director.ack_minutes", "987", func(c *Config) { c.Org.Director.AckMinutes++ }},
+		{"org.director.resolve_minutes", "987", func(c *Config) { c.Org.Director.ResolveMinutes++ }},
+		{"org.director.auto_merge", strconv.FormatBool(!defaults.Org.Director.AutoMerge), func(c *Config) {
+			c.Org.Director.AutoMerge = !c.Org.Director.AutoMerge
+		}},
+		{"org.director.wake", `["changed"]`, func(c *Config) { c.Org.Director.Wake = append(c.Org.Director.Wake, "changed") }},
+		{"org.approval.mode", `"changed"`, func(c *Config) { c.Org.Approval.Mode += "-changed" }},
+	}
+
+	var rowKeys []string
+	for _, r := range rows {
+		rowKeys = append(rowKeys, r.key)
+	}
+	probeKeys := tomlKeys(reflect.TypeFor[orgTemplateProbe](), "")
+	if got, want := slices.Sorted(slices.Values(rowKeys)), slices.Sorted(slices.Values(probeKeys)); !slices.Equal(got, want) {
+		t.Fatalf("row keys = %q,\nwant the toml keys of orgTemplateProbe = %q", got, want)
+	}
+
+	for _, r := range rows {
+		t.Run(r.key, func(t *testing.T) {
+			dot := strings.LastIndex(r.key, ".")
+			table, key := r.key[:dot], r.key[dot+1:]
+			wantOneLine := func(mutation, templateText string, def Config, wantPrefix string) {
+				t.Helper()
+				drift, err := orgTemplateDrift([]byte(templateText), def)
+				if err != nil {
+					t.Fatalf("%s: orgTemplateDrift: %v", mutation, err)
+				}
+				if len(drift) != 1 || !strings.HasPrefix(drift[0], wantPrefix) {
+					t.Errorf("%s: drift = %q, want one line starting with %q", mutation, drift, wantPrefix)
+				}
+			}
+
+			changedDef := Default()
+			r.setDefault(&changedDef)
+			wantOneLine("Default() changed", template, changedDef, r.key+": template = ")
+
+			changed, err := editTemplateKey(template, table, key, r.tmplValue)
+			if err != nil {
+				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
+			}
+			wantOneLine("template value changed", changed, Default(), r.key+": template = ")
+
+			removed, err := editTemplateKey(template, table, key, "")
+			if err != nil {
+				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
+			}
+			wantOneLine("template key removed", removed, Default(), r.key+": missing from the template")
+		})
+	}
+}
+
+// tomlKeys returns the dotted toml key of each field of t that is not a
+// struct, under prefix, reading a struct field as the table of its keys.
+func tomlKeys(t reflect.Type, prefix string) []string {
+	var keys []string
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("toml"), ",")
+		if prefix != "" {
+			name = prefix + "." + name
+		}
+		if f.Type.Kind() == reflect.Struct {
+			keys = append(keys, tomlKeys(f.Type, name)...)
+			continue
+		}
+		keys = append(keys, name)
+	}
+	return keys
+}
+
+// editTemplateKey returns template with the statement that sets key inside
+// [table] replaced by `key = value`, or removed when value is "". The
+// statement is the key's line and, for an array written over several lines
+// (model_pool), the lines up to the one that closes its brackets. The same
+// key can be set in other tables (enabled, default), so only [table] is
+// searched, from its header to the next one. It is an error unless [table]
+// sets key exactly once, so a key renamed in the template fails the caller
+// instead of leaving nothing to compare.
+func editTemplateKey(template, table, key, value string) (string, error) {
+	header := regexp.MustCompile(`^\[([A-Za-z0-9_.]+)\]\s*(#.*)?$`)
+	keyLine := regexp.MustCompile(`^` + regexp.QuoteMeta(key) + `\s*=`)
+	lines := strings.SplitAfter(template, "\n")
+	var out []string
+	section, found := "", 0
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSuffix(lines[i], "\n")
+		if m := header.FindStringSubmatch(line); m != nil {
+			section = m[1]
+		}
+		if section != table || !keyLine.MatchString(line) {
+			out = append(out, lines[i])
+			continue
+		}
+		found++
+		// A bracket inside a string would miscount; the template's values
+		// have none, and a miscount fails the caller's drift check.
+		for depth := strings.Count(line, "[") - strings.Count(line, "]"); depth > 0; {
+			i++
+			if i == len(lines) {
+				return "", fmt.Errorf("[%s] %s: the array is not closed", table, key)
+			}
+			depth += strings.Count(lines[i], "[") - strings.Count(lines[i], "]")
+		}
+		if value != "" {
+			out = append(out, key+" = "+value+"\n")
+		}
+	}
+	if found != 1 {
+		return "", fmt.Errorf("[%s] sets %s %d times, want exactly 1", table, key, found)
+	}
+	return strings.Join(out, ""), nil
 }

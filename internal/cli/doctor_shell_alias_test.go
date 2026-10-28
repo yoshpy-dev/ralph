@@ -571,7 +571,7 @@ func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testin
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox", "codex_verified = true"} {
+	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox", "codex_verified is true, the default"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -596,7 +596,7 @@ func TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly(t *test
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy", "codex_verified = true"} {
+	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy", "codex_verified is true, the default"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -1325,9 +1325,9 @@ func TestShellAliasCodexSentence(t *testing.T) {
 		{"model-only", items, true, false, false, true,
 			[]string{"every spawn fails"}, []string{"alias's sandbox", "approval policy", "herdr not installed"}},
 		{"sandbox-only", items, false, true, false, true,
-			[]string{"alias's sandbox", "codex_verified = true"}, []string{"every spawn fails", "approval policy"}},
+			[]string{"alias's sandbox", "codex_verified is true, the default"}, []string{"every spawn fails", "approval policy"}},
 		{"approval-only", items, false, false, true, true,
-			[]string{"approval policy", "codex_verified = true"}, []string{"every spawn fails", "alias's sandbox"}},
+			[]string{"approval policy", "codex_verified is true, the default"}, []string{"every spawn fails", "alias's sandbox"}},
 		{"all three", items, true, true, true, true,
 			[]string{"every spawn fails", "alias's sandbox", "approval policy"}, nil},
 		{"herdr absent appends the suffix", items, true, false, false, false,
