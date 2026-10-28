@@ -196,6 +196,9 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - F3(inline、この記録と同じコミット): `docs/tech-debt/README.md` に 2 行(L5 の 800 行を越えたテストのファイル 4 つ、L6 の既知の穴 2 件)。機械的な確かめは 5 項目とも clean
     - F1 に渡すこと: M2(確かめ 3・4・5・6 の断りから Manual を外す。5 は「要るものを別のブランチに置き、ブランチを head に戻してから打ち直す」の文に)、L1(`cleanupFirstCheck` で org_id を `ValidateIdentifier` に照らす)、L2(断りの文の中のコマンドのパスを quote)
     - F2 に渡すこと: M1(`/director` skill の「skipped なら何も消していない」を直す)、L3(main worktree が見つからないときの文)、L4(`/director` skill の手順 1 と 3 のぶつかり)、仕様 FR-8 の注の確かめ 3 の理由
+    - F1 a3af6114(M2・L1・L2): 確かめ 3・4・5・6 の断りから Manual を外した。確かめ 5 の文は場面ごとに戻し方を名指す(worktree がブランチにいれば `reset --hard`、別のブランチか detached なら `branch -f`、worktree_gone なら `branch -f`、登録だけ残るなら `update-ref`。git 2.49.0 で `branch -f` が登録の残る worktree のブランチを断ることを確かめた)。Manual を残すのは記録なし・記録違い・ブランチがなく worktree だけ・Failed。org_id を `ValidateIdentifier` に照らし、通らなければ marker を書かずに断る。文の中のコマンドを `cleanupGitCmd` と `cleanupShellWord` で quote し、空白を含む repo で文のコマンドを `sh -c` で打つテストを足した。検証: 指定のコマンドが 2 回通過、変異 4 つが落ちる。機械的な確かめは clean(注釈の typo を fixed)。consult は妥当とした
+    - F2 cbaa92f4(M1・L3・L4 と文): `/director` skill の skipped の読み方(断りか途中の失敗、MANUAL がなければ打ち直し)と「GitHub で merge した PR の後始末」を 5 手順に(SKIPPED のブランチは人が直したと言うまで打ち直さない)、`/org` skill、merge と cleanup の help、README、仕様 FR-8 の注(確かめ 3 の理由、D3 の skipped)、main worktree が見つからないときの文を定数 `orgMainWorktreeMissing` に、merge の中断の断りのブランチを quote。leader の雛形は同じ趣旨の文がなく変えていない。検証: 指定のコマンドが通過(679 秒)、壊した版 7 つで落ちる。機械的な確かめは clean
+    - F2b 794aee4d(consult の遅れた勧め): CLI の文の中のブランチ(`mergeCleanupRoot`、`cleanupNamedStep`)を `shellQuoteIfNeeded` で quote。検証: cli の `OrgMerge|OrgCleanup` が通過(559 秒)、壊した版で 3 行ずつ落ちる。機械的な確かめは clean。範囲外: `internal/cli/org_regate.go:203` の regate の文もブランチが素のまま(この PR の前から。触らない)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
