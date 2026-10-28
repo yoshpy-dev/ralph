@@ -137,3 +137,45 @@
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2: L6、L7)
 - Follow-ups: 動作の変更は見つからなかった。L6 と L7 は help の 1 文とコメントの 1 句の直しで、直すなら `init.go` を触るので `/verify` へ進む(record-only の例外には当たらない)。直さずに受け入れても `/verify` へ進める。O3 は直さなくてよい。cycle 1 のため、残した所見の台帳への登録は今回は不要。
+
+## Run 4
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review` の 4 回目。Run 3 の LOW L6、L7 の直しのあと、パイプラインの cycle 1)
+- Scope: コミット 80a2eb28(`fix: clarify the --yes help sentence and the AvailablePacks comment`)。`git diff e697e86c..HEAD -- internal/ README.md templates/ tests/` は `internal/cli/init.go` の 1 ファイル(+7/-6)だけ。`git diff --name-only e697e86c..HEAD` に出るのは `init.go` と計画ファイル(Progress に Run 3 の記録を 1 行足しただけ、所見の対象外)で、README、templates、tests に変更はない。観点と範囲の外は Run 1 と同じ(テスト、静的検査、spec 適合は実行も評価もしていない)。
+- ID: Run 3 の L6、L7 を引き継ぐ。Run 4 の新しい所見はない。所見の重さに届かない確認事項は Run 3 の O3 に続けて O4。
+
+### Run 3 の所見の確認
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| L6 | 直った | 「those packs」は消え、新しい文は「With --yes nothing is asked, and no language pack is installed unless --pack names one.」(`init.go:41-42`)。文の中で完結していて、別の段落に戻らなくても指す先が分かる。`--yes` フラグの説明(`:83`「install no language pack unless --pack names one」)と同じ言い回しにそろった。README(`:120`「installs only the `--pack` packs」)と recipe(`adding-a-language-pack.md:35-36`「installs only the packs `--pack` names, and none without it」)とは、`--pack` が挙げた名前だけが入り、挙げなければ何も入らないという意味が同じ。言い回しは 3 か所で違う(O4)。`those packs` / `only those packs` / `unless --pack` を repo 全体(reports と archive の計画を除く)で探すと、残りは `init.go:41`(新しい文)と `:83`(フラグの説明)だけで、古い言い回しは残っていない。 |
+| L7 | 直った | コメント(`init.go:119-122`)は読み手を 2 つとも名指した: 問いの選択肢(`:152` の `newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), ...)`、`newPackQuestion` は `packOptions(available, ...)` で option を作る `:271`)と、`executeInit` の案内(`:435-436`)。「when Packs is empty」は `:432` の `len(cfg.Packs) == 0` と合う。`runInitInteractive` のコメント(`:125-128`)と矛盾しない。 |
+
+### 動作が変わらないことの確認
+
+- 差分は `Long` の文 1 つとコメント 1 つだけで、コードの行、import、定数の変更はない。`Long` は raw string(バッククォート)で、新しい文にバッククォートは含まれないので、文字列は閉じたまま。
+- `Long` 全体を読み直した。段落 1(問いの初期の選択、「(Recommended)」、「skip」、あとから `ralph pack add`)から段落 2(`--yes` の場合、`--pack` の書き方、不明な名前の失敗、`TERM=dumb`)へ、対話の話から `--yes` の話へ順に移る。段落 2 は冒頭で「With --yes nothing is asked」と主題を言い直しているので、段落をまたいで読んでも迷わない。末尾の「needs --yes」は `TERM=dumb` のエラー文(`:144`、「run ralph init --yes (with --pack <name> to install a language pack)」)と矛盾しない。`Long` の行は 80 桁以内(`awk 'length>80'` で `:83` 以降の `Long` の外の行だけが出る)。
+
+### Findings
+
+なし(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0)。
+
+### Observations(所見の重さに届かないもの)
+
+- O4: 計画の Progress(Run 3 の行)は「help は README と同じ「--pack が名前を挙げない限り言語パックは入らない」の形にした」と書くが、README(`:120`)の文は「installs only the `--pack` packs」で、「unless」の形ではない。実際の help の文は `--yes` フラグの説明(`:83`)の「unless --pack names one」にそろっている。「README と同じ」は「意味が同じ」と読めば合っていて、計画は所見の対象外なので、直さなくてよい。
+
+### Positive notes
+
+- L6 の直しは、Run 3 が挙げた 2 案(元の形に戻す、README の形にする)のどちらでもなく、`--yes` フラグの説明とそろえる形を選んだ。同じ repo の `--help` で `--yes` の説明と `Long` が別の言い方をする状態がなくなった。
+- L7 の直しは読み手を 2 つとも書いたので、`AvailablePacks` を入れ忘れたときの影響がフォームの選択肢にも及ぶことがコメントから読める。
+- コミットは `init.go` の 1 ファイルで、文言とコメントだけに収まっている。
+
+### Coverage gaps
+
+- `Long` の文言を固定するテストはない(`only those packs`、`those packs`、`unless --pack` を `*_test.go` で探して 0 件)。help と README、recipe の一致は人の目で保っている。文字列とコメントだけの変更なので動作の退行はなく、この 4 回目でのテスト上の穴は増えていない。
+
+## Recommendation (Run 4)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 3 の LOW L6、L7 は 2 件とも直っている)
+- Follow-ups: 変更は `init.go` の文言とコメントだけだが、コードのファイルを触っているので `/verify` へ進む(record-only の例外には当たらない)。O4 は直さなくてよい。cycle 1 のため、残した所見はなく、台帳への登録は不要。
