@@ -127,7 +127,8 @@ None (設定のキー、読み出しの動詞、pane の環境変数を 1 つ足
 - [x] Plan reviewed — consult-plan-reviewswitch: 進めてよい(D1〜D5 に同意)。指摘 3 つを反映: 上限の名前を `max_cross_review_cycles` に、`max_cross_review_cycles` と `RALPH_STANDARD_MAX_PIPELINE_CYCLES` の照合を AC2 と Scope に、新しい binary が要ることを release のノートに、D4 の issue からの外れを明記。Codex plan advisory: MEDIUM 1 件を反映(「0 以外は off」は古い binary と設定の誤りを区別しない → D6 で終了コードを分け、AC4 に回帰テスト)。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest は Approved の行。Critical forks は D1・D2 で、consult の判定に従って選んだ
 - [x] Branch created (feat/review-switches-config, worktree .claude/worktrees/review-switches-config)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 eff0340d(impl-265-s1): `StandardConfig`(`[standard]`)と `OrgReviewConfig`(`[org.review]`)、既定値、`max_cross_review_cycles >= 1` の検証。テンプレートの `[standard]` は `[doctor]` と `[org]` の間、`[org.review]` は `[org.approval]` の後。照合の表のループを `checkEachKeyIsComparedOnBothSides` に切り出し、`[standard]` の `standardTemplateProbe`・`standardTemplateDrift`・表のテストを足した(org の行は HEAD と同じ)。`shell_and_skills` に上限と `RALPH_STANDARD_MAX_PIPELINE_CYCLES` の照合。未知のキーを含む `ralph.toml` が読めるテスト。検証コマンド rc 0。変異(テンプレートの写しを読ませる形)で、上限のキーの削除、`[standard].cross_review` の削除、既定の 2 → 3、検証の `< 1` → `< 0` がそれぞれ落ちた。consult の遅れた指摘(LOW): テンプレートの `[org.review]` のコメント「an org started with `ralph org start --plan`」は座席を基準に書くほうが #267・#269 の範囲を先に固めない。S4 でルートの `ralph.toml` を作る前に直す。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
