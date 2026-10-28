@@ -109,7 +109,7 @@
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
-| `TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint`(`internal/cli/org_spawn_timeout_test.go:67`、5 だけ、3.05 秒) | `expected the error to name the agmsg_announce step and the hint …, got org: spawn step workspace_create failed: herdr: timed out: context deadline exceeded (the spawn's --timeout-ms deadline of 3000 ms, …)` | 負荷による時間切れ。テストは `--timeout-ms 3000` の期限の中で stub の herdr の step を済ませ、HELLO で期限が切れることを期待するが、5 では最初の step(`workspace_create`)の時点で 3000 ms を使い切った。この branch は `internal/org` と spawn のコードを変えておらず、`internal/cli` で変えたのは init の 3 ファイルである。`internal/cli` のテストに `t.Parallel` はなく、新しいテストが spawn のテストと同時に走ることはない。6 で単独に 20 回ずつ打つと HEAD も origin/main も 20/20 で通った(1 回 3.13〜4.94 秒)。`docs/tech-debt/` に、このテストの不安定さの行はない(seat-spawn-close の解決済みの行が名前を挙げるだけ) | この branch では直さない。7 の打ち直しで `internal/cli` は通った(432.198 秒)。lead の指示が打ち直しを認める 2 つの原因(30 分の時間切れ、`TestStopDirectorProcess_…`)のどちらでもないので、打ち直しを verdict に数えてよいかは lead が決める。テストの docstring は「3000 ms は負荷のある機械でも HELLO の前の step に足りる」と書くが、5 はそれが足りない場合を示した。tech-debt の行を足すか、期限を延ばすか、HELLO の前の step の所要時間を測るかを別の作業で決める |
+| `TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint`(`internal/cli/org_spawn_timeout_test.go:67`、5 だけ、3.05 秒) | `expected the error to name the agmsg_announce step and the hint …, got org: spawn step workspace_create failed: herdr: timed out: context deadline exceeded (the spawn's --timeout-ms deadline of 3000 ms, …)` | 負荷による時間切れ。テストは `--timeout-ms 3000` の期限の中で stub の herdr の step を済ませ、HELLO で期限が切れることを期待するが、5 では最初の step(`workspace_create`)の時点で 3000 ms を使い切った。この branch は `internal/org` と spawn のコードを変えておらず、`internal/cli` で変えたのは init の 3 ファイルである。`internal/cli` のテストに `t.Parallel` はなく、新しいテストが spawn のテストと同時に走ることはない。6 で単独に 20 回ずつ打つと HEAD も origin/main も 20/20 で通った(1 回 3.13〜4.94 秒)。`docs/tech-debt/` に、このテストの不安定さの行はない(seat-spawn-close の解決済みの行が名前を挙げるだけ) | この branch では直さない。7 の打ち直しで `internal/cli` は通った(432.198 秒)。lead の指示が初めに挙げた打ち直しの原因(30 分の時間切れ、`TestStopDirectorProcess_…`)には当たらないので lead に知らせ、lead は時間切れと同じ扱いで 1 回の打ち直しを認めた。HEAD と origin/main で単独に打って、この branch が原因でないことを確かめるよう指示された(6)。前からある既知の不安定さとして記録する。テストの docstring は「3000 ms は負荷のある機械でも HELLO の前の step に足りる」と書くが、5 はそれが足りない場合を示した。tech-debt の行を足すか、期限を延ばすか、HELLO の前の step の所要時間を測るかを別の作業で決める |
 
 ## Regression checks
 
@@ -131,6 +131,6 @@
 ## Verdict
 
 - Pass: 1(トップレベル 49、サブテスト 75)、2(60/60、G PASS)、lead が名指しした mutant a〜f のすべて(ほかに i〜o の 8 つ)、pty の確認 12 実行、`./scripts/run-test.sh` の 2 回目(rc 0、shell 45 本、Go 9 パッケージ)
-- Fail: なし。1 回目の `run-test.sh` の `internal/cli` の失敗は、この branch が変えていない spawn のテストの負荷による時間切れで、単独の 20 回(HEAD と origin/main)と 2 回目の全体で通った。lead の指示に挙がった打ち直しの原因ではないことを Failure analysis に書いた
+- Fail: なし。1 回目の `run-test.sh` の `internal/cli` の失敗は、この branch が変えていない spawn のテストの負荷による時間切れで、単独の 20 回(HEAD と origin/main)と 2 回目の全体で通った。lead が時間切れと同じ扱いで認めた 1 回の打ち直しで、前からある既知の不安定さとして記録した(Failure analysis)
 - Blocked: なし
 - Verdict: pass
