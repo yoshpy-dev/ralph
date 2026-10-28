@@ -88,7 +88,8 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
 	}
 	// TestDefaultsLockStep checks the [org] keys orgTemplateDrift reads
-	// (auto_merge and wake included) against Default(). It does not read
+	// (auto_merge and wake included) and the [standard] keys
+	// standardTemplateDrift reads against Default(). It does not read
 	// [org.roles], [org.permissions].roles, or launch_cmd; wake_cmd is below.
 	if len(cfg.Org.Director.WakeCmd) != 0 {
 		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
@@ -1827,6 +1828,133 @@ func TestLoad_OrgApproval(t *testing.T) {
 				t.Errorf("approval.mode = %q, want %q", cfg.Org.Approval.Mode, tt.wantMode)
 			}
 		})
+	}
+}
+
+// TestDefault_ReviewSwitches verifies the defaults of the review switches
+// (issue #265): [standard].plan_advisory and cross_review and
+// [org.review].plan_advisory and cross_review are false, and
+// [org.review].max_cross_review_cycles is 2.
+func TestDefault_ReviewSwitches(t *testing.T) {
+	cfg := Default()
+	if cfg.Standard.PlanAdvisory {
+		t.Error("standard.plan_advisory = true, want false")
+	}
+	if cfg.Standard.CrossReview {
+		t.Error("standard.cross_review = true, want false")
+	}
+	if cfg.Org.Review.PlanAdvisory {
+		t.Error("org.review.plan_advisory = true, want false")
+	}
+	if cfg.Org.Review.CrossReview {
+		t.Error("org.review.cross_review = true, want false")
+	}
+	if got := cfg.Org.Review.MaxCrossReviewCycles; got != 2 {
+		t.Errorf("org.review.max_cross_review_cycles = %d, want 2", got)
+	}
+}
+
+// TestLoad_ReviewSwitches covers [standard] and [org.review] through Load():
+// no file, a file without the tables, and the tables without their keys keep
+// the defaults, and values unlike the defaults load as written.
+func TestLoad_ReviewSwitches(t *testing.T) {
+	def := Default()
+	tests := []struct {
+		name         string
+		content      string // "" writes no ralph.toml
+		wantStandard StandardConfig
+		wantReview   OrgReviewConfig
+	}{
+		{"no ralph.toml", "", def.Standard, def.Org.Review},
+		{"a ralph.toml without the tables", "[doctor]\nrequire_go = false\n\n[org]\nmax_seats = 3\n", def.Standard, def.Org.Review},
+		{"the tables without their keys", "[standard]\n\n[org.review]\n", def.Standard, def.Org.Review},
+		{
+			"every key unlike its default",
+			"[standard]\nplan_advisory = true\ncross_review = true\n\n" +
+				"[org.review]\nplan_advisory = true\ncross_review = true\nmax_cross_review_cycles = 5\n",
+			StandardConfig{PlanAdvisory: true, CrossReview: true},
+			OrgReviewConfig{PlanAdvisory: true, CrossReview: true, MaxCrossReviewCycles: 5},
+		},
+		{"one key set leaves the others at default", "[org.review]\ncross_review = true\n", def.Standard,
+			OrgReviewConfig{PlanAdvisory: false, CrossReview: true, MaxCrossReviewCycles: 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if tt.content != "" {
+				if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Standard != tt.wantStandard {
+				t.Errorf("standard = %+v, want %+v", cfg.Standard, tt.wantStandard)
+			}
+			if cfg.Org.Review != tt.wantReview {
+				t.Errorf("org.review = %+v, want %+v", cfg.Org.Review, tt.wantReview)
+			}
+		})
+	}
+}
+
+// TestLoad_OrgReviewMaxCrossReviewCyclesBoundary verifies the >= 1 boundary
+// of [org.review].max_cross_review_cycles: an explicit 0 or negative value is
+// rejected with an error naming the key, and 1 is accepted.
+func TestLoad_OrgReviewMaxCrossReviewCyclesBoundary(t *testing.T) {
+	for _, bad := range []int{0, -1} {
+		t.Run(fmt.Sprintf("%d rejected", bad), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			content := fmt.Sprintf("[org.review]\nmax_cross_review_cycles = %d\n", bad)
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path)
+			want := fmt.Sprintf("[org.review].max_cross_review_cycles must be >= 1, got %d", bad)
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Load: err = %v, want an error containing %q", err, want)
+			}
+		})
+	}
+	t.Run("one accepted", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "ralph.toml")
+		if err := os.WriteFile(path, []byte("[org.review]\nmax_cross_review_cycles = 1\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: unexpected error for max_cross_review_cycles = 1: %v", err)
+		}
+		if got := cfg.Org.Review.MaxCrossReviewCycles; got != 1 {
+			t.Errorf("org.review.max_cross_review_cycles = %d, want 1", got)
+		}
+	})
+}
+
+// TestLoad_IgnoresUnknownReviewSwitchKeys verifies that a ralph.toml whose
+// [standard] and [org.review] carry keys this binary does not know still
+// loads, with the known keys as written: go-toml/v2's Unmarshal ignores
+// unknown keys, so a seed that a later release writes with more keys in
+// these tables does not break this binary (plan
+// 2026-10-29-review-switches-config, D1).
+func TestLoad_IgnoresUnknownReviewSwitchKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ralph.toml")
+	content := "[standard]\ncross_review = true\nfuture_key = 1\n\n" +
+		"[org.review]\nfuture_key = \"x\"\n\n[org.review.future_table]\nkey = true\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: expected unknown keys to be ignored, got error: %v", err)
+	}
+	if !cfg.Standard.CrossReview {
+		t.Error("standard.cross_review = false, want true as written")
+	}
+	if cfg.Org.Review != Default().Org.Review {
+		t.Errorf("org.review = %+v, want the defaults %+v", cfg.Org.Review, Default().Org.Review)
 	}
 }
 

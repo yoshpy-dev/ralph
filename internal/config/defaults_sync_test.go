@@ -1,23 +1,27 @@
 package config
 
 // TestDefaultsLockStep verifies that defaults written in more than one file
-// stay in lock-step. Its "org" sub-test compares the [org] defaults on two
-// surfaces:
+// stay in lock-step. Its "org" and "standard" sub-tests compare the [org]
+// and [standard] defaults on two surfaces:
 //
 //  1. templates/base/ralph.toml — declarative project config
 //  2. config.Default()          — Go CLI defaults
 //
 // For each [org] key of orgTemplateProbe, orgTemplateDrift checks that the
-// template sets the key and that its value equals Default()'s. The template
-// is not read with Load: Load starts from Default(), so a key the template
-// leaves out would keep Default()'s value and pass.
+// template sets the key and that its value equals Default()'s, and
+// standardTemplateDrift does the same for the [standard] keys of
+// standardTemplateProbe. The template is not read with Load: Load starts
+// from Default(), so a key the template leaves out would keep Default()'s
+// value and pass.
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
 // defaults, VAR="${VAR:-value}" idiom). org.agmsg_home, the one [org] key
 // the shell file still carries (RALPH_ORG_AGMSG_HOME, #276), is compared
 // there with Default(); with the "org" sub-test's template check, that
-// keeps all three surfaces equal. It also checks that the /plan and
-// /cross-review SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
+// keeps all three surfaces equal. org.review.max_cross_review_cycles is
+// compared with RALPH_STANDARD_MAX_PIPELINE_CYCLES's default, the standard
+// flow's cap it follows. It also checks that the /plan and /cross-review
+// SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
 // RALPH_CODEX_REVIEWER_MODEL, and RALPH_CODEX_REASONING_EFFORT match the
 // shell defaults.
 //
@@ -140,6 +144,11 @@ type orgTemplateProbe struct {
 		Approval struct {
 			Mode *string `toml:"mode"`
 		} `toml:"approval"`
+		Review struct {
+			PlanAdvisory         *bool `toml:"plan_advisory"`
+			CrossReview          *bool `toml:"cross_review"`
+			MaxCrossReviewCycles *int  `toml:"max_cross_review_cycles"`
+		} `toml:"review"`
 	} `toml:"org"`
 }
 
@@ -173,6 +182,34 @@ func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
 		valueDrift("org.director.auto_merge", p.Director.AutoMerge, d.Director.AutoMerge),
 		listDrift("org.director.wake", p.Director.Wake, d.Director.Wake),
 		valueDrift("org.approval.mode", p.Approval.Mode, d.Approval.Mode),
+		valueDrift("org.review.plan_advisory", p.Review.PlanAdvisory, d.Review.PlanAdvisory),
+		valueDrift("org.review.cross_review", p.Review.CrossReview, d.Review.CrossReview),
+		valueDrift("org.review.max_cross_review_cycles", p.Review.MaxCrossReviewCycles, d.Review.MaxCrossReviewCycles),
+	), nil
+}
+
+// standardTemplateProbe holds the [standard] keys that
+// templates/base/ralph.toml sets, with pointer fields, as orgTemplateProbe
+// does for [org]: both keys default to false, so only a nil pointer tells a
+// key the template leaves out from one it sets to false.
+type standardTemplateProbe struct {
+	Standard struct {
+		PlanAdvisory *bool `toml:"plan_advisory"`
+		CrossReview  *bool `toml:"cross_review"`
+	} `toml:"standard"`
+}
+
+// standardTemplateDrift is orgTemplateDrift for the [standard] keys of
+// standardTemplateProbe.
+func standardTemplateDrift(templateData []byte, def Config) ([]string, error) {
+	var probe standardTemplateProbe
+	if err := toml.Unmarshal(templateData, &probe); err != nil {
+		return nil, err
+	}
+	p, d := probe.Standard, def.Standard
+	return slices.Concat(
+		valueDrift("standard.plan_advisory", p.PlanAdvisory, d.PlanAdvisory),
+		valueDrift("standard.cross_review", p.CrossReview, d.CrossReview),
 	), nil
 }
 
@@ -205,26 +242,36 @@ func TestDefaultsLockStep(t *testing.T) {
 	root := repoRoot(t)
 	tomlPath := filepath.Join(root, "templates", "base", "ralph.toml")
 
-	// ── [org] defaults: templates/base/ralph.toml vs config.Default() ─────────
-	t.Run("org", func(t *testing.T) {
-		data, err := os.ReadFile(tomlPath)
-		if errors.Is(err, fs.ErrNotExist) {
-			t.Skipf("templates/base/ralph.toml not found (%v) — skipping the [org] lock-step check", err)
-		}
-		if err != nil {
-			t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
-		}
-		drift, err := orgTemplateDrift(data, Default())
-		if err != nil {
-			t.Fatalf("templates/base/ralph.toml: %v", err)
-		}
-		if len(drift) != 0 {
-			t.Errorf("lock-step mismatch between templates/base/ralph.toml and config.Default():\n  %s",
-				strings.Join(drift, "\n  "))
-		}
-	})
+	// ── [org] and [standard] defaults: templates/base/ralph.toml vs
+	// config.Default() ──────────────────────────────────────────────────────
+	for _, table := range []struct {
+		name  string // the sub-test and the toml table
+		drift func([]byte, Config) ([]string, error)
+	}{
+		{"org", orgTemplateDrift},
+		{"standard", standardTemplateDrift},
+	} {
+		t.Run(table.name, func(t *testing.T) {
+			data, err := os.ReadFile(tomlPath)
+			if errors.Is(err, fs.ErrNotExist) {
+				t.Skipf("templates/base/ralph.toml not found (%v) — skipping the [%s] lock-step check", err, table.name)
+			}
+			if err != nil {
+				t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
+			}
+			drift, err := table.drift(data, Default())
+			if err != nil {
+				t.Fatalf("templates/base/ralph.toml: %v", err)
+			}
+			if len(drift) != 0 {
+				t.Errorf("lock-step mismatch between templates/base/ralph.toml and config.Default():\n  %s",
+					strings.Join(drift, "\n  "))
+			}
+		})
+	}
 
-	// ── scripts/ralph-config.sh: org.agmsg_home and SKILL.md fallbacks ────────
+	// ── scripts/ralph-config.sh: org.agmsg_home, org.review's cycle cap, and
+	// SKILL.md fallbacks ────────────────────────────────────────────────────
 	t.Run("shell_and_skills", func(t *testing.T) {
 		shellPath := filepath.Join(root, "scripts", "ralph-config.sh")
 		if _, err := os.Stat(shellPath); err != nil {
@@ -240,6 +287,18 @@ func TestDefaultsLockStep(t *testing.T) {
 		if agmsgShell != agmsgDefault {
 			t.Errorf("lock-step mismatch for org.agmsg_home:\n  scripts/ralph-config.sh RALPH_ORG_AGMSG_HOME default = %q\n  config.Default() = %q",
 				agmsgShell, agmsgDefault)
+		}
+
+		// org.review.max_cross_review_cycles: a feature org's cap on
+		// cross-review fix cycles starts from the standard flow's pipeline
+		// cap, so Default()'s value is RALPH_STANDARD_MAX_PIPELINE_CYCLES's
+		// default. The template against Default() is again the "org"
+		// sub-test's job.
+		cyclesShell := mustShell(t, shell, "RALPH_STANDARD_MAX_PIPELINE_CYCLES")
+		cyclesDefault := strconv.Itoa(Default().Org.Review.MaxCrossReviewCycles)
+		if cyclesShell != cyclesDefault {
+			t.Errorf("lock-step mismatch for org.review.max_cross_review_cycles:\n  scripts/ralph-config.sh RALPH_STANDARD_MAX_PIPELINE_CYCLES default = %q\n  config.Default() = %q",
+				cyclesShell, cyclesDefault)
 		}
 
 		// ── SKILL.md fallback tokens match shell defaults ─────────────────────
@@ -390,18 +449,22 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 	}
 }
 
-// TestOrgTemplateDrift_EachKeyIsComparedOnBothSides pins, for every key
-// orgTemplateDrift compares, that each side reaches the comparison of that
-// key and no other: changing the key's field in a Default() copy, changing
-// its value in the template, and removing it from the template each give
-// exactly one drift line, naming the key. Two keys with the same default
-// (for example max_orgs, deadman_minutes, and ack_minutes, all 10;
-// max_total_seats and interval_seconds, both 30; watcher_enabled,
-// director.enabled, codex_verified, and auto_merge, all true) swapped on
-// either side fail here, which a single real-template comparison would
-// miss. The rows must cover every toml key of orgTemplateProbe, so a key
-// added to the probe needs a row.
-func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
+// templateKeyRow is one key that a template drift function compares, as a
+// row of checkEachKeyIsComparedOnBothSides.
+type templateKeyRow struct {
+	key        string        // dotted, as the drift function's lines name it
+	tmplValue  string        // a TOML value for the template, unlike its own
+	setDefault func(*Config) // changes only this key's field
+}
+
+// checkEachKeyIsComparedOnBothSides pins, for every row, that each side
+// reaches drift's comparison of the row's key and no other: changing the
+// key's field in a Default() copy, changing its value in the template, and
+// removing it from the template each give exactly one drift line, naming the
+// key. The rows must cover every toml key of probe, the struct drift reads
+// the template into, so a key added to the probe needs a row.
+func checkEachKeyIsComparedOnBothSides(t *testing.T, drift func([]byte, Config) ([]string, error), probe reflect.Type, rows []templateKeyRow) {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
 	if errors.Is(err, fs.ErrNotExist) {
 		t.Skipf("templates/base/ralph.toml not found (%v)", err)
@@ -410,18 +473,66 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		t.Fatalf("cannot read templates/base/ralph.toml: %v", err)
 	}
 	template := string(data)
-	if drift, err := orgTemplateDrift(data, Default()); err != nil || len(drift) != 0 {
-		t.Fatalf("the real template must match Default() first (TestDefaultsLockStep): drift = %q, err = %v", drift, err)
+	if got, err := drift(data, Default()); err != nil || len(got) != 0 {
+		t.Fatalf("the real template must match Default() first (TestDefaultsLockStep): drift = %q, err = %v", got, err)
 	}
 
+	var rowKeys []string
+	for _, r := range rows {
+		rowKeys = append(rowKeys, r.key)
+	}
+	probeKeys := tomlKeys(probe, "")
+	if got, want := slices.Sorted(slices.Values(rowKeys)), slices.Sorted(slices.Values(probeKeys)); !slices.Equal(got, want) {
+		t.Fatalf("row keys = %q,\nwant the toml keys of %s = %q", got, probe.Name(), want)
+	}
+
+	for _, r := range rows {
+		t.Run(r.key, func(t *testing.T) {
+			dot := strings.LastIndex(r.key, ".")
+			table, key := r.key[:dot], r.key[dot+1:]
+			wantOneLine := func(mutation, templateText string, def Config, wantPrefix string) {
+				t.Helper()
+				got, err := drift([]byte(templateText), def)
+				if err != nil {
+					t.Fatalf("%s: %s: %v", mutation, probe.Name(), err)
+				}
+				if len(got) != 1 || !strings.HasPrefix(got[0], wantPrefix) {
+					t.Errorf("%s: drift = %q, want one line starting with %q", mutation, got, wantPrefix)
+				}
+			}
+
+			changedDef := Default()
+			r.setDefault(&changedDef)
+			wantOneLine("Default() changed", template, changedDef, r.key+": template = ")
+
+			changed, err := editTemplateKey(template, table, key, r.tmplValue)
+			if err != nil {
+				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
+			}
+			wantOneLine("template value changed", changed, Default(), r.key+": template = ")
+
+			removed, err := editTemplateKey(template, table, key, "")
+			if err != nil {
+				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
+			}
+			wantOneLine("template key removed", removed, Default(), r.key+": missing from the template")
+		})
+	}
+}
+
+// TestOrgTemplateDrift_EachKeyIsComparedOnBothSides runs
+// checkEachKeyIsComparedOnBothSides on orgTemplateDrift. Two keys with the
+// same default (for example max_orgs, deadman_minutes, and ack_minutes, all
+// 10; max_total_seats and interval_seconds, both 30; watcher_enabled,
+// director.enabled, codex_verified, and auto_merge, all true;
+// review.plan_advisory and review.cross_review, both false) swapped on
+// either side fail here, which a single real-template comparison would
+// miss.
+func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	defaults := Default()
 	// Bool values are negated, so a row keeps differing from the template
 	// whichever default it has. Other values are ones no default uses.
-	rows := []struct {
-		key        string        // dotted, as orgTemplateDrift's lines name it
-		tmplValue  string        // a TOML value for the template, unlike its own
-		setDefault func(*Config) // changes only this key's field
-	}{
+	rows := []templateKeyRow{
 		{"org.driver_pool", `["changed"]`, func(c *Config) { c.Org.DriverPool = append(c.Org.DriverPool, "changed") }},
 		{"org.model_pool", `[{ driver = "claude", model = "changed" }]`, func(c *Config) {
 			c.Org.ModelPool = append(c.Org.ModelPool, OrgModelPoolEntry{Driver: "claude", Model: "changed"})
@@ -451,49 +562,32 @@ func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 		}},
 		{"org.director.wake", `["changed"]`, func(c *Config) { c.Org.Director.Wake = append(c.Org.Director.Wake, "changed") }},
 		{"org.approval.mode", `"changed"`, func(c *Config) { c.Org.Approval.Mode += "-changed" }},
+		{"org.review.plan_advisory", strconv.FormatBool(!defaults.Org.Review.PlanAdvisory), func(c *Config) {
+			c.Org.Review.PlanAdvisory = !c.Org.Review.PlanAdvisory
+		}},
+		{"org.review.cross_review", strconv.FormatBool(!defaults.Org.Review.CrossReview), func(c *Config) {
+			c.Org.Review.CrossReview = !c.Org.Review.CrossReview
+		}},
+		{"org.review.max_cross_review_cycles", "987", func(c *Config) { c.Org.Review.MaxCrossReviewCycles++ }},
 	}
+	checkEachKeyIsComparedOnBothSides(t, orgTemplateDrift, reflect.TypeFor[orgTemplateProbe](), rows)
+}
 
-	var rowKeys []string
-	for _, r := range rows {
-		rowKeys = append(rowKeys, r.key)
+// TestStandardTemplateDrift_EachKeyIsComparedOnBothSides runs
+// checkEachKeyIsComparedOnBothSides on standardTemplateDrift: plan_advisory
+// and cross_review, both false by default, swapped on either side fail here.
+// The bool values are negated, as in the [org] rows.
+func TestStandardTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
+	defaults := Default()
+	rows := []templateKeyRow{
+		{"standard.plan_advisory", strconv.FormatBool(!defaults.Standard.PlanAdvisory), func(c *Config) {
+			c.Standard.PlanAdvisory = !c.Standard.PlanAdvisory
+		}},
+		{"standard.cross_review", strconv.FormatBool(!defaults.Standard.CrossReview), func(c *Config) {
+			c.Standard.CrossReview = !c.Standard.CrossReview
+		}},
 	}
-	probeKeys := tomlKeys(reflect.TypeFor[orgTemplateProbe](), "")
-	if got, want := slices.Sorted(slices.Values(rowKeys)), slices.Sorted(slices.Values(probeKeys)); !slices.Equal(got, want) {
-		t.Fatalf("row keys = %q,\nwant the toml keys of orgTemplateProbe = %q", got, want)
-	}
-
-	for _, r := range rows {
-		t.Run(r.key, func(t *testing.T) {
-			dot := strings.LastIndex(r.key, ".")
-			table, key := r.key[:dot], r.key[dot+1:]
-			wantOneLine := func(mutation, templateText string, def Config, wantPrefix string) {
-				t.Helper()
-				drift, err := orgTemplateDrift([]byte(templateText), def)
-				if err != nil {
-					t.Fatalf("%s: orgTemplateDrift: %v", mutation, err)
-				}
-				if len(drift) != 1 || !strings.HasPrefix(drift[0], wantPrefix) {
-					t.Errorf("%s: drift = %q, want one line starting with %q", mutation, drift, wantPrefix)
-				}
-			}
-
-			changedDef := Default()
-			r.setDefault(&changedDef)
-			wantOneLine("Default() changed", template, changedDef, r.key+": template = ")
-
-			changed, err := editTemplateKey(template, table, key, r.tmplValue)
-			if err != nil {
-				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
-			}
-			wantOneLine("template value changed", changed, Default(), r.key+": template = ")
-
-			removed, err := editTemplateKey(template, table, key, "")
-			if err != nil {
-				t.Fatalf("templates/base/ralph.toml: %v — update this row", err)
-			}
-			wantOneLine("template key removed", removed, Default(), r.key+": missing from the template")
-		})
-	}
+	checkEachKeyIsComparedOnBothSides(t, standardTemplateDrift, reflect.TypeFor[standardTemplateProbe](), rows)
 }
 
 // tomlKeys returns the dotted toml key of each field of t that is not a

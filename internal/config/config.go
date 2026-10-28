@@ -14,8 +14,9 @@ import (
 
 // Config represents the ralph.toml project configuration.
 type Config struct {
-	Doctor DoctorConfig `toml:"doctor"`
-	Org    OrgConfig    `toml:"org"`
+	Doctor   DoctorConfig   `toml:"doctor"`
+	Standard StandardConfig `toml:"standard"`
+	Org      OrgConfig      `toml:"org"`
 }
 
 // DoctorConfig holds doctor check settings.
@@ -25,12 +26,28 @@ type DoctorConfig struct {
 	RequireGo        bool `toml:"require_go"`
 }
 
+// StandardConfig holds the `[standard]` table: the settings of the standard
+// flow (/plan, /implement, and the post-implementation pipeline). The skills
+// read them with `ralph config get <key>` (they start to in issue #266), and
+// the other standard-flow settings join this table in issue #276. Their
+// defaults are kept in lock-step with templates/base/ralph.toml
+// (defaults_sync_test.go).
+type StandardConfig struct {
+	// PlanAdvisory switches the plan advisory of /plan on. False, the
+	// default, leaves it off.
+	PlanAdvisory bool `toml:"plan_advisory"`
+	// CrossReview switches /cross-review on. False, the default, leaves it
+	// off.
+	CrossReview bool `toml:"cross_review"`
+}
+
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
 // `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
 // validates the fields, and their defaults are kept in lock-step with
 // templates/base/ralph.toml; AgmsgHome's is also compared with
-// RALPH_ORG_AGMSG_HOME in scripts/ralph-config.sh (both checks are in
-// defaults_sync_test.go). The org runtime's design is
+// RALPH_ORG_AGMSG_HOME in scripts/ralph-config.sh, and
+// Review.MaxCrossReviewCycles's with RALPH_STANDARD_MAX_PIPELINE_CYCLES there
+// (the checks are in defaults_sync_test.go). The org runtime's design is
 // docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
@@ -93,6 +110,9 @@ type OrgConfig struct {
 	// Approval holds how a feature org's plan is approved. See
 	// OrgApprovalConfig's doc comment.
 	Approval OrgApprovalConfig `toml:"approval"`
+	// Review holds the review switches of a feature org. See
+	// OrgReviewConfig's doc comment.
+	Review OrgReviewConfig `toml:"review"`
 }
 
 // OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
@@ -534,6 +554,24 @@ type OrgApprovalConfig struct {
 	Mode string `toml:"mode"`
 }
 
+// OrgReviewConfig holds the `[org.review]` settings of a feature org's
+// reviews: the leader's plan advisory, the reviewer seat's cross-review, and
+// the cap on cross-review fix cycles. The leader and the reviewer read them
+// with `ralph config get <key>` (they start to in issues #267 and #269).
+type OrgReviewConfig struct {
+	// PlanAdvisory switches the plan advisory of a feature org's leader on.
+	// False, the default, leaves it off.
+	PlanAdvisory bool `toml:"plan_advisory"`
+	// CrossReview switches the cross-review of a feature org's reviewer seat
+	// on. False, the default, leaves it off.
+	CrossReview bool `toml:"cross_review"`
+	// MaxCrossReviewCycles caps the cross-review fix cycles of a feature org,
+	// as RALPH_STANDARD_MAX_PIPELINE_CYCLES caps the standard flow's pipeline
+	// runs. Its default, 2, is that variable's default in
+	// scripts/ralph-config.sh. Load refuses a value below 1.
+	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
+}
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
@@ -541,6 +579,10 @@ func Default() Config {
 			RequireClaudeCLI: false,
 			RequireCodexCLI:  false,
 			RequireGo:        false,
+		},
+		Standard: StandardConfig{
+			PlanAdvisory: false,
+			CrossReview:  false,
 		},
 		Org: OrgConfig{
 			DriverPool: []string{"claude", "codex"},
@@ -580,6 +622,11 @@ func Default() Config {
 			},
 			Approval: OrgApprovalConfig{
 				Mode: ApprovalModePerPlan,
+			},
+			Review: OrgReviewConfig{
+				PlanAdvisory:         false,
+				CrossReview:          false,
+				MaxCrossReviewCycles: 2,
 			},
 		},
 	}
@@ -801,6 +848,15 @@ func Load(path string) (Config, error) {
 	// backfilled: it is an error, like any value other than the two modes.
 	if mode := cfg.Org.Approval.Mode; mode != ApprovalModePerPlan && mode != ApprovalModeSplit {
 		return cfg, fmt.Errorf("[org.approval].mode %q must be %q or %q", mode, ApprovalModePerPlan, ApprovalModeSplit)
+	}
+
+	// [org.review] validation. Same strict pattern as [org.director] above:
+	// an absent [org.review] section (or an absent key within a present one)
+	// keeps Default()'s value. plan_advisory and cross_review need no check
+	// here, like [org.director].enabled. [standard] holds only bools, so it
+	// has no validation.
+	if cfg.Org.Review.MaxCrossReviewCycles < 1 {
+		return cfg, fmt.Errorf("[org.review].max_cross_review_cycles must be >= 1, got %d", cfg.Org.Review.MaxCrossReviewCycles)
 	}
 
 	return cfg, nil

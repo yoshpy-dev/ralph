@@ -12,6 +12,22 @@ require_claude_cli = false
 require_codex_cli = false
 require_go = false
 
+# [standard] — switches of the standard flow (/plan, /implement, and the
+# pipeline after it). plan_advisory = true turns on the plan advisory of
+# /plan, and cross_review = true turns on /cross-review. Both are off by
+# default.
+# The skills read a value with `ralph config get <key>`, such as
+# `ralph config get standard.cross_review`. Exit 0 prints the value. An
+# older ralph without that command fails with exit 1 and
+# `unknown command "config"`, which the skills treat as off. Exit 2 (an
+# unknown key) and exit 3 (this file cannot be read, or any of its values is
+# invalid, not only the ones below) stop the skill, which reports it instead
+# of treating the switch as off. The skills start reading these switches in
+# a later release.
+[standard]
+plan_advisory = false
+cross_review = false
+
 # [org] — the envelope and settings of the `ralph org` verbs (spawn, send,
 # start, watch, escalate, and the rest) and of `ralph doctor`'s org checks:
 # which drivers and models seats may run, how many seats and orgs may run,
@@ -222,3 +238,18 @@ wake = ["pull"]
 # mode = "split" to keep the behavior from before this setting.
 [org.approval]
 mode = "per-plan"
+
+# [org.review] sets the reviews of an org started with
+# `ralph org start --plan`. plan_advisory = true turns on the plan advisory
+# of the org's leader, and cross_review = true turns on the cross-review of
+# its reviewer seat; both are off by default. max_cross_review_cycles caps
+# the cross-review fix cycles, as the standard flow caps its pipeline runs
+# (default 2; it must be >= 1). The leader and the reviewer read these values
+# with `ralph config get <key>`, such as
+# `ralph config get org.review.cross_review`, and treat the exit codes as the
+# skills do with [standard] above. They start reading them in a later
+# release.
+[org.review]
+plan_advisory = false
+cross_review = false
+max_cross_review_cycles = 2
