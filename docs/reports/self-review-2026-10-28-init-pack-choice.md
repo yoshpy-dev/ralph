@@ -95,3 +95,45 @@
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の LOW L1〜L5 は 5 件とも直っている)
 - Follow-ups: O1、O2 は直さなくてよい。コードの変更を含む(`init.go`、テスト)ので `/verify` へ進む(record-only の例外には当たらない)。cycle 1 のため、残した所見はなく、台帳への登録は不要。
+
+## Run 3
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review` の 3 回目。Run 2 が挙げた「`AvailablePacks` の 1 行がフォームの先になった」への対応のあと、パイプラインの cycle 1)
+- Scope: コミット dbc5afaf(`refactor: build the init config once before either init path`)。`git diff a89381e4..HEAD -- internal/` は 3 ファイルだけ(`internal/cli/init.go`、`internal/cli/init_packs_test.go`、`internal/cli/cli_test.go`)。`git diff --name-only a89381e4..HEAD` に出るのは、この 3 つと計画ファイル(Progress の記録、所見の対象外)だけで、コミット 4fe8c2a4 は計画ファイルの 1 行だけを足している。観点と範囲の外は Run 1 と同じ(テスト、静的検査、spec 適合は実行も評価もしていない)。
+- ID: Run 1 の L1〜L5 に続けて L6、L7。所見の重さに届かない確認事項は Run 2 の O1、O2 に続けて O3。
+
+### 動作が変わらないことの確認
+
+- 順序: `runInitInteractive` の先頭は既存 project の判定のまま(`init.go:133-136`)、`TERM=dumb` のガードがその次(`:142-144`)で、どちらも `cfg` を読む前に返る。`cli_test.go:285` が `initConfig{}` で呼ぶのは、判定が `cfg` を読まないことを示す形になっている。フォームのあとは `cfg.Packs = packsFromSelection(cfg.Packs)`、`executeInit`(`:159-160`)の順で、前と同じ。
+- プロジェクト名: 前は両経路が `filepath.Base(targetDir)` で、`targetDir` は `RunE` の `absDir`。今は `RunE` の `filepath.Base(absDir)`(`:72`)で同じ値になる。`runInitInteractive` と `runInitNonInteractive` を非テストの Go から呼ぶのは `RunE` だけ(`:77`、`:79`)。
+- 初期の選択: `Packs: packs` は `cfg.Packs` として入り、`newPackQuestion` が `*selection` から選択済みの option を作る(`:151`、`:270`)。名前入力の束縛は `&cfg.ProjectName`(`:150`)で、初期値は `cfg.ProjectName`。
+- 値渡しの aliasing: `cfg` は引数のコピーで、`&cfg.ProjectName` と `&cfg.Packs` はそのコピーを指す。`RunE` の `cfg` はフォームの結果を受けないが、`RunE` は渡したあと `cfg` を読まない。huh v2.0.3 は選択を新しい slice で書き込み(`field_multiselect.go:540-547` の `updateValue` が `make([]T, 0)` に集めて `accessor.Set`)、`Accessor`(`:82-90`)は読むだけなので、`RunE` の `packs` と共有する配列に書き込む経路はない。前も `Packs: packs` で同じ配列を共有していたので、これで新しい共有は生まれていない。ポインタで渡す理由はない。
+- 非対話の経路: 前は `runInitNonInteractive` が同じ 3 フィールドで `cfg` を作って `executeInit` に渡していた。今は渡された `cfg` をそのまま渡す。値は同じ。
+
+### Findings
+
+| ID | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| L6 | LOW | readability | `Long` の「only the packs --pack names are installed」を「only those packs are installed」に変えたため、「those packs」の指す先が別の段落になった。直前の文は「A pack can be added later with ralph pack add <language>.」(単数)で、複数形の「packs」は 3 文前(前の段落の頭の文)の「the packs --pack names」まで戻る。読み手は直後の「(none without --pack)」から復元できるが、`--help` は単独で読まれ、前の言い回しは文の中で完結していた。この変更は `refactor:` のコミット(本文なし)に含まれ、計画の Progress に「2 回目を「those packs」にした」とあるだけで、理由は書かれていない。README(`:120`「installs only the `--pack` packs」)と recipe(`:35`「installs only the packs `--pack` names」)は元の形のまま。 | `init.go:35`(指す先)と `:41-42`(変更後の文)、`git show dbc5afaf`(本文が空)、`README.md:120`、`templates/base/docs/recipes/adding-a-language-pack.md:35` | 元の「only the packs --pack names are installed」に戻すか、README の形にそろえて「only the --pack packs are installed (none without --pack)」にする。同じ言い回しの繰り返しを避ける意図だったとしても、2 つの文は段落が違うので、元の形が戻っても読みの妨げにはならない |
+| L7 | LOW | comment accuracy | `initConfig.AvailablePacks` のコメントは読み手を `executeInit` の案内だけと書くが、この変更で `runInitInteractive` も同じ欄を読んで問いの選択肢と(Recommended)の判定を作るようになった。前は対話の経路が別の引数 `availPacks` を持っていて、欄を読むのは `executeInit` だけだったので、Run 2 の時点ではコメントが合っていた。この変更で読み手が 2 つに増えたのに、コメントは 1 つのままで、欄を消したり入れ忘れたりしたときの影響が案内の文だけに見える。 | `init.go:119-121`(コメント)、`:151`(`newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), ...)`)、`:434-435`(`executeInit` の読み出し) | 「It is also the list of packs the init form offers.」のような 1 句を足す。例: 「AvailablePacks is what scaffold.AvailablePacks listed: the packs the init form offers, and the list executeInit names in its ralph pack add hint when Packs is empty.」 |
+
+### Observations(所見の重さに届かないもの)
+
+- O3: `runInitNonInteractive` は `return executeInit(targetDir, cfg, force)` だけの関数になった。呼ぶのは `RunE` の 1 か所で、テストからは呼ばれていない(`runInitNonInteractive` を `internal/` と `cmd/` で探した)。`RunE` から `executeInit` を直接呼んでも読み順は変わらない。`runInitInteractive` と対の名前で残す考えもあり、`.claude/rules/ralph/architecture.md` の grep しやすさの側に立つなら残してよい。どちらでも動作は変わらないので直さなくてよい。
+
+### Positive notes
+
+- `ProjectName`・`Packs`・`AvailablePacks` の代入が `RunE` の 1 か所になり、`runInitInteractive` が `AvailablePacks` を入れ忘れる経路(Run 2 の Coverage gaps)が構造として消えた。呼び出し元が 2 つの経路に別々の引数を並べる形も、それに合わせた引数の順の取り違えも起きなくなる。
+- `cli_test.go:285` の `initConfig{}` は、前の `nil, nil` と同じ意味を保ったまま、型の名前で何を渡しているかが読める。`init_packs_test.go:560` は `ProjectName` と `AvailablePacks` を埋めた現実の形の `cfg` を使い、`ProjectName` は `filepath.Join(t.TempDir(), "project")` の末尾と一致する。
+- `RunE` の追加コメント(「Both paths start from the same config; the form lets the user change the project name and the packs.」)は、`cfg` の役割(初期値)と、フォームがそれを変える側であることを言っていて、実際の流れと合っている。
+
+### Coverage gaps
+
+- Run 2 が挙げた `AvailablePacks: availPacks` の 1 行は、組み立てが `RunE` の 1 か所になったので、`--yes` の経路を通る `TestInitCmd_YesAloneInstallsNoPackAndPrintsTheHint` が同じ代入を押さえる。計画は、その代入を `go test -overlay` で消すとこのテストが落ちると書いている(私は再現していない)。
+- 残るのは、フォームの中で `cfg.AvailablePacks` と `cfg.Packs` を読む `:151` と、`packsFromSelection` の呼び出し(`:159`)で、前と同じく TTY が要る。`/test` の判断。
+
+## Recommendation (Run 3)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 2: L6、L7)
+- Follow-ups: 動作の変更は見つからなかった。L6 と L7 は help の 1 文とコメントの 1 句の直しで、直すなら `init.go` を触るので `/verify` へ進む(record-only の例外には当たらない)。直さずに受け入れても `/verify` へ進める。O3 は直さなくてよい。cycle 1 のため、残した所見の台帳への登録は今回は不要。
