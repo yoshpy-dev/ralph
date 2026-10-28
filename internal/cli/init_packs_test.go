@@ -256,25 +256,12 @@ func useRepositoryTemplates(t *testing.T) {
 	scaffold.EmbeddedFS = os.DirFS(filepath.Join("..", ".."))
 }
 
+// TestSkipPackValue_IsNoPackName checks skipPackValue holds a "/". That is
+// enough: scaffold.AvailablePacks lists the directory names of
+// templates/packs/, and no directory name holds a "/".
 func TestSkipPackValue_IsNoPackName(t *testing.T) {
 	if !strings.Contains(skipPackValue, "/") {
 		t.Errorf("skipPackValue = %q, want a \"/\" in it so that no pack directory can have its name", skipPackValue)
-	}
-
-	setupTestEmbedFS(t)
-	testPacks, err := scaffold.AvailablePacks()
-	if err != nil {
-		t.Fatalf("AvailablePacks (test templates): %v", err)
-	}
-	useRepositoryTemplates(t)
-	packs, err := scaffold.AvailablePacks()
-	if err != nil {
-		t.Fatalf("AvailablePacks (repository templates): %v", err)
-	}
-	for _, available := range [][]string{testPacks, packs} {
-		if slices.Contains(available, skipPackValue) {
-			t.Errorf("AvailablePacks() = %q holds skipPackValue %q", available, skipPackValue)
-		}
 	}
 }
 
@@ -570,7 +557,7 @@ func TestRunInitInteractive_DumbTermWithoutTerminalStopsBeforeTheForm(t *testing
 	target := filepath.Join(t.TempDir(), "project")
 
 	done := make(chan error, 1)
-	go func() { done <- runInitInteractive(target, nil, false) }()
+	go func() { done <- runInitInteractive(target, testAvailablePacks, nil, false) }()
 	select {
 	case err := <-done:
 		_ = stdinWrite.Close()
@@ -592,7 +579,7 @@ func TestExecuteInit_SkipAloneInstallsNoPackAndPrintsTheHint(t *testing.T) {
 	Version = "0.1.0-test"
 	target := filepath.Join(t.TempDir(), "project")
 
-	cfg := initConfig{ProjectName: "project", Packs: packsFromSelection([]string{skipPackValue})}
+	cfg := initConfig{ProjectName: "project", Packs: packsFromSelection([]string{skipPackValue}), AvailablePacks: testAvailablePacks}
 	var out string
 	if err := captureStdoutText(t, &out, func() error { return executeInit(target, cfg, false) }); err != nil {
 		t.Fatalf("executeInit: %v\noutput:\n%s", err, out)
@@ -605,6 +592,22 @@ func TestExecuteInit_SkipAloneInstallsNoPackAndPrintsTheHint(t *testing.T) {
 	}
 	if warning := "⚠ pack " + skipPackValue; strings.Contains(out, warning) {
 		t.Errorf("output should not carry %q: skip's value reached executeInit as a pack; got:\n%s", warning, out)
+	}
+}
+
+func TestExecuteInit_HintWithNoAvailablePacksLeavesOutTheList(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+	target := filepath.Join(t.TempDir(), "project")
+
+	var out string
+	if err := captureStdoutText(t, &out, func() error { return executeInit(target, initConfig{ProjectName: "project"}, false) }); err != nil {
+		t.Fatalf("executeInit: %v\noutput:\n%s", err, out)
+	}
+
+	wantHint := "  ralph pack add <language> to add a language pack later\n"
+	if !strings.Contains(out, wantHint) {
+		t.Errorf("output should contain the hint %q with no list; got:\n%s", wantHint, out)
 	}
 }
 

@@ -32,15 +32,16 @@ func newInitCmd() *cobra.Command {
 		Long: `Scaffolds a project with Claude Code configurations, hooks, skills,
 agents, rules, and org-runtime config. Supports both new and existing projects.
 
-The language-pack question starts with nothing selected. A pack whose marker
-files (go.mod, package.json, ...) sit directly in the target directory is
-labeled "(Recommended)", and "skip" installs no language pack. A pack can be
-added later with ralph pack add <language>.
+The language-pack question starts with the packs --pack names selected, or
+with nothing selected without --pack. A pack whose marker files (go.mod,
+package.json, ...) sit directly in the target directory is labeled
+"(Recommended)", and "skip" installs no language pack. A pack can be added
+later with ralph pack add <language>.
 
-With --yes nothing is asked and no language pack is installed unless --pack
-names one. --pack can be repeated or take comma-separated names, and an unknown
-name fails before anything is written. When TERM=dumb and stdin is not a
-terminal, ralph init cannot ask its questions and needs --yes.`,
+With --yes nothing is asked, and only the packs --pack names are installed
+(none without --pack). --pack can be repeated or take comma-separated names,
+and an unknown name fails before anything is written. When TERM=dumb and stdin
+is not a terminal, ralph init cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check the --pack names before the form and before anything is
@@ -66,9 +67,9 @@ terminal, ralph init cannot ask its questions and needs --yes.`,
 			}
 
 			if nonInteractive {
-				return runInitNonInteractive(absDir, packs, force)
+				return runInitNonInteractive(absDir, availPacks, packs, force)
 			}
-			return runInitInteractive(absDir, packs, force)
+			return runInitInteractive(absDir, availPacks, packs, force)
 		},
 	}
 
@@ -77,7 +78,7 @@ terminal, ralph init cannot ask its questions and needs --yes.`,
 	// StringArrayVar, not StringSliceVar: a slice flag reads each value as
 	// CSV and drops an empty one (--pack ''), so parsePackFlag could not
 	// refuse it. parsePackFlag splits the commas itself.
-	cmd.Flags().StringArrayVar(&packNames, "pack", nil, "language pack to install; repeat the flag or separate names with commas (see ralph pack list)")
+	cmd.Flags().StringArrayVar(&packNames, "pack", nil, "language pack to install (preselected in the question without --yes); repeat the flag or separate names with commas (see ralph pack list)")
 
 	return cmd
 }
@@ -108,12 +109,15 @@ func parsePackFlag(values, available []string) ([]string, error) {
 type initConfig struct {
 	ProjectName string
 	Packs       []string
+	// AvailablePacks is what scaffold.AvailablePacks listed. executeInit
+	// names them in its ralph pack add hint when Packs is empty.
+	AvailablePacks []string
 }
 
-// runInitInteractive asks for the project name and the language packs, with
-// the packs parsePackFlag returned for --pack selected at the start (none
-// without --pack).
-func runInitInteractive(targetDir string, packs []string, force bool) error {
+// runInitInteractive asks for the project name and the language packs of
+// availPacks, with the packs parsePackFlag returned for --pack selected at the
+// start (none without --pack).
+func runInitInteractive(targetDir string, availPacks, packs []string, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
 	// path. executeInit retains the same check as a safety net for
@@ -125,14 +129,10 @@ func runInitInteractive(targetDir string, packs []string, force bool) error {
 
 	defaultName := filepath.Base(targetDir)
 
-	availPacks, err := scaffold.AvailablePacks()
-	if err != nil {
-		return fmt.Errorf("listing packs: %w", err)
-	}
-
 	cfg := initConfig{
-		ProjectName: defaultName,
-		Packs:       packs,
+		ProjectName:    defaultName,
+		Packs:          packs,
+		AvailablePacks: availPacks,
 	}
 
 	// With TERM=dumb huh asks in accessible mode (huh.NewForm) and reads the
@@ -203,7 +203,10 @@ func recommendedPacks(targetDir string, available []string) []string {
 }
 
 // isPackMarker reports whether name, an entry of dir, matches one of patterns
-// and is a regular file or a symlink to one, as test -f sees it.
+// and is a regular file or a symlink to one, for every pattern. The shell
+// differs for two globs: has_project_marker checks its fixed names with
+// test -f, which follows a symlink, but finds tsconfig.*.json and
+// requirements-*.txt with find -type f, which does not.
 func isPackMarker(dir, name string, patterns []string) bool {
 	for _, pattern := range patterns {
 		// The patterns of packMarkers are well formed, so Match returns no error.
@@ -265,6 +268,9 @@ const packQuestionDescription = "(Recommended): the directory has a project file
 // back to it; packsFromSelection turns that into the packs to install.
 func newPackQuestion(available, recommended []string, selection *[]string) *huh.MultiSelect[string] {
 	options := packOptions(available, recommended, *selection)
+	titleLines := 1
+	descriptionLines := strings.Count(packQuestionDescription, "\n") + 1
+	optionLines := len(options)
 	return huh.NewMultiSelect[string]().
 		Title("Language packs").
 		Description(packQuestionDescription).
@@ -273,17 +279,18 @@ func newPackQuestion(available, recommended []string, selection *[]string) *huh.
 		// height, huh sizes the list to the options minus the title and
 		// description lines, which hides the last options (skip among them)
 		// until the cursor scrolls down to them.
-		Height(1 + strings.Count(packQuestionDescription, "\n") + 1 + len(options)).
+		Height(titleLines + descriptionLines + optionLines).
 		Validate(validatePackSelection).
 		Value(selection)
 }
 
 // runInitNonInteractive installs the packs parsePackFlag returned for --pack;
 // with no --pack it installs no language pack.
-func runInitNonInteractive(targetDir string, packs []string, force bool) error {
+func runInitNonInteractive(targetDir string, availPacks, packs []string, force bool) error {
 	cfg := initConfig{
-		ProjectName: filepath.Base(targetDir),
-		Packs:       packs,
+		ProjectName:    filepath.Base(targetDir),
+		Packs:          packs,
+		AvailablePacks: availPacks,
 	}
 
 	return executeInit(targetDir, cfg, force)
@@ -428,11 +435,10 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 	}
 	fmt.Printf("  Edit AGENTS.md to describe your project\n")
 	if len(cfg.Packs) == 0 {
-		// No language pack was installed. The list is left out when it
-		// cannot be read; ralph pack list reports that error.
+		// No language pack was installed.
 		hint := "  ralph pack add <language> to add a language pack later"
-		if avail, err := scaffold.AvailablePacks(); err == nil && len(avail) > 0 {
-			hint += " (available: " + strings.Join(avail, ", ") + ")"
+		if len(cfg.AvailablePacks) > 0 {
+			hint += " (available: " + strings.Join(cfg.AvailablePacks, ", ") + ")"
 		}
 		fmt.Println(hint)
 	}
