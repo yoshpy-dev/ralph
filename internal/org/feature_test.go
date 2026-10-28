@@ -1531,8 +1531,9 @@ func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 // spawn, whose error says that the worktree stays.
 func TestStartFeature_RefusedWhileRegateRunsOnTheOrg(t *testing.T) {
 	regateRefusal := func(st *featureStart) string {
-		return `org: org_id "auth" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(st.stateDir) +
-			` holds the regate's marker): wait for the regate to end and run the same command again`
+		return `org: org_id "auth" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup removes ` +
+			`its merged feature worktree (` + regateLockPathIn(st.stateDir) + ` holds the marker of that org): wait for it to end ` +
+			`and run the same command again`
 	}
 	t.Run("before ensure", func(t *testing.T) {
 		fx := newRegateSpawnFixture(t)

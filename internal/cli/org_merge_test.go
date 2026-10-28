@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -103,6 +105,19 @@ func newMergeCLIFixture(t *testing.T, mainLedger bool) *mergeCLIFixture {
 // disbanded: it still runs the feature of feat/a.
 func newMergeCLIFixtureOrgRunning(t *testing.T, mainLedger bool) *mergeCLIFixture {
 	t.Helper()
+	fx := newMergeCLIFixtureRepo(t, mainLedger)
+	fx.main = fx.tip(t, "main")
+	fx.head = fx.branch(t, "feat/a")
+	fx.push(t, "feat/a")
+	fx.bind(t, "a", "a", "feat/a")
+	fx.gateAndReply(t)
+	return fx
+}
+
+// newMergeCLIFixtureRepo is the repository, its bare origin, and the fake gh
+// of a mergeCLIFixture, with no feat/a and nothing in the ledger yet.
+func newMergeCLIFixtureRepo(t *testing.T, mainLedger bool) *mergeCLIFixture {
+	t.Helper()
 	fx := &mergeCLIFixture{mergeOrderFixture: newMergeOrderFixture(t, false)}
 	if mainLedger {
 		fx.stateDir = filepath.Join(fx.work, ".harness", "state", "org")
@@ -115,11 +130,14 @@ func newMergeCLIFixtureOrgRunning(t *testing.T, mainLedger bool) *mergeCLIFixtur
 	t.Setenv("MERGE_CLI_GH_REPLIES", fx.replies)
 	t.Setenv("MERGE_CLI_GH_LOG", fx.ghLog)
 	t.Setenv("MERGE_ORDER_ORIGIN_URL", "https://github.com/o/r.git")
+	return fx
+}
 
-	fx.main = fx.tip(t, "main")
-	fx.head = fx.branch(t, "feat/a")
-	fx.push(t, "feat/a")
-	fx.bind(t, "a", "a", "feat/a")
+// gateAndReply records org a's gate_passed of fx.head on fx.main for feat/a
+// and gives the fake gh the replies under which ralph org merge merges PR #7
+// of feat/a at fx.head.
+func (fx *mergeCLIFixture) gateAndReply(t *testing.T) {
+	t.Helper()
 	fx.gate(t, "a", "feat/a", "", fx.head, fx.main)
 
 	fx.reply(t, "pr-list", `[{"number":7,"state":"OPEN","url":"https://github.com/o/r/pull/7","headRefOid":"`+fx.head+
@@ -135,7 +153,90 @@ func newMergeCLIFixtureOrgRunning(t *testing.T, mainLedger bool) *mergeCLIFixtur
 	fx.reply(t, "repo-view", `{"viewerDefaultMergeMethod":"MERGE"}`)
 	fx.reply(t, "pr-read-back", `{"state":"MERGED","headRefOid":"`+fx.head+`","baseRefName":"main","mergeCommit":{"oid":"`+
 		mergeCLIMergeCommit+`"},"autoMergeRequest":null}`)
-	return fx
+}
+
+// newMergeCLIWorktreeFixture is newMergeCLIFixture with the ledger of the
+// main worktree (work) and feat/a made the way ralph org start --plan makes
+// it (plan docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): work's main
+// holds this repo's scripts/ralph-worktree.sh and scripts/ralph-common.sh and
+// a .gitignore for .claude/worktrees/ and .harness/, pushed to origin; the
+// script's ensure made the feature worktree org-a on feat/a, whose one commit
+// is pushed to origin; and org a's binding names that worktree. PATH gets the
+// tools the script needs after the fixture's bin, so git and gh are still the
+// fixture's. It returns the fixture and the worktree.
+func newMergeCLIWorktreeFixture(t *testing.T) (*mergeCLIFixture, string) {
+	t.Helper()
+	path := os.Getenv("PATH")
+	for _, tool := range []string{"bash", "git", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Fatalf("%s is needed to run scripts/ralph-worktree.sh: %v", tool, err)
+		}
+	}
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file location via runtime.Caller")
+	}
+	source := filepath.Join(filepath.Dir(thisFile), "..", "..", "scripts")
+
+	fx := newMergeCLIFixtureRepo(t, true)
+	t.Setenv("PATH", fx.bin+string(os.PathListSeparator)+path)
+	if err := os.MkdirAll(filepath.Join(fx.work, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ralph-worktree.sh", "ralph-common.sh"} {
+		data, err := os.ReadFile(filepath.Join(source, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(fx.work, "scripts", name), data, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTestFile(t, filepath.Join(fx.work, ".gitignore"), ".claude/worktrees/\n.harness/\n")
+	runLedgerTestGit(t, "-C", fx.work, "add", ".")
+	gateCLICommit(t, fx.work, "the scripts")
+	fx.push(t, "main")
+	fx.main = fx.tip(t, "main")
+
+	lines := outputLines(fx.worktreeScript(t, "ensure", "--id", "org-a", "--kind", "org", "--branch", "feat/a", "--path",
+		".claude/worktrees/org-a", "--canonical-ref", "split:/plans/demo.md#a", "--cleanup-policy", "manual"))
+	wt := filepath.Join(fx.work, ".claude", "worktrees", "org-a")
+	if len(lines) == 0 || lines[len(lines)-1] != wt {
+		t.Fatalf("ensure printed %q, want the worktree %s last", lines, wt)
+	}
+	gateCLIAddCommit(t, wt, "internal/a/a.go")
+	fx.head = gateCLIGitOut(t, wt, "rev-parse", "HEAD")
+	fx.push(t, "feat/a")
+
+	appendSeedEvent(t, fx.stateDir, org.ManifestEvent{
+		OrgID: "a", Event: org.EventScopeReserved, Worktree: wt,
+		Details: "paths=internal/a/ split=demo feature=a digest=0123456789ab branch=feat/a approval=per-plan",
+	})
+	fx.gateAndReply(t)
+	appendSeedEvent(t, fx.stateDir, org.ManifestEvent{OrgID: "a", Event: org.EventDisbanded})
+	return fx, wt
+}
+
+// worktreeScript runs `bash scripts/ralph-worktree.sh args...` in work and
+// returns its stdout, failing the test with its stderr when it fails.
+func (fx *mergeCLIFixture) worktreeScript(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{"scripts/ralph-worktree.sh"}, args...)...)
+	cmd.Dir = fx.work
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("ralph-worktree.sh %q: %v\n%s", args, err, stderr.String())
+	}
+	return string(out)
+}
+
+// worktreeRecord is the file of the ralph-worktree.sh record org-a in work,
+// "<absent>" when there is none.
+func (fx *mergeCLIFixture) worktreeRecord(t *testing.T) string {
+	t.Helper()
+	return fileBytesOrAbsent(t, strings.TrimSpace(fx.worktreeScript(t, "state-path", "org-a")))
 }
 
 // reply makes the fake gh print out for the call it names name.
@@ -194,6 +295,17 @@ func mergeCLILines(head string, autoMerge bool, note string) string {
 	return s
 }
 
+// noScriptCleanup is the CLEANUP: line that follows mergeCLILines once the
+// merge is recorded: the fixture's main worktree has no
+// scripts/ralph-worktree.sh, so the cleanup cannot read the worktree record
+// and removes nothing, and it names no command by hand.
+func (fx *mergeCLIFixture) noScriptCleanup() string {
+	return "CLEANUP: skipped (scripts/ralph-worktree.sh cannot be run in " + fx.work + " (org: " + fx.work +
+		"/scripts/ralph-worktree.sh does not exist: start --plan makes the feature worktree with it; ralph init ships it into " +
+		"the repo; restore it and run start again), so the worktree record org-a cannot be read and nothing is removed: restore " +
+		"the script and run ralph org cleanup --branch feat/a again)\n"
+}
+
 // mergeCLIDetails are the Details of the fixture's pr_merged at head with
 // autoMerge.
 func mergeCLIDetails(head string, autoMerge bool) string {
@@ -207,7 +319,11 @@ func mergeCLIDetails(head string, autoMerge bool) string {
 // MERGE COMMIT: unknown without one, and exits 0; a merge with an error (the
 // record failed, or an interrupt came after the merge started) prints the
 // lines and returns the error; an error without a merge prints nothing; and
-// a result with no outcome is an error, not exit 0.
+// a result with no outcome is an error, not exit 0. The cleanup after a
+// recorded merge adds CLEANUP: done, with what it resumed from and an error
+// of its record, or CLEANUP: skipped with its refusal, failure, or error,
+// and CLEANUP MANUAL: with a command by hand, escaped, and never turns exit 0
+// into an error.
 func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	merged := org.MergeResult{
 		Merged: true, Recorded: true, Branch: "feat/a", OrgID: "a", PRNumber: 7, PRURL: "https://github.com/o/r/pull/7",
@@ -229,6 +345,20 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	}
 	escaped := merged
 	escaped.Protection = "a ruleset \x1b[31mnamed red"
+	// The cleanup after the merge (plan
+	// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): its outcome adds
+	// the CLEANUP: lines and never the error.
+	const manual = "cd /r && ./scripts/ralph-worktree.sh cleanup --id org-a --force-branch"
+	withCleanup := func(c org.CleanupResult, cleanupErr string) org.MergeResult {
+		res := merged
+		res.Cleanup, res.CleanupErr = &c, cleanupErr
+		return res
+	}
+	const cleanedNotRecorded = "org: cleanup: the feature worktree /w of the branch feat/a and its record org-a were removed, but " +
+		"worktree_cleaned could not be recorded (denied)"
+	const gitFailed = "org: cleanup: git worktree list --porcelain in /r: exit 128: fatal: not a git repository"
+	cleanupInterrupted := withCleanup(org.CleanupResult{Refused: "ralph org merge was interrupted (SIGINT) once pr_merged was " +
+		"recorded, so the feature worktree of the branch feat/a was not cleaned up: run ralph org cleanup --branch feat/a"}, "")
 
 	for _, tc := range []struct {
 		name       string
@@ -254,6 +384,26 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 		{"no outcome", org.MergeResult{Branch: "feat/a"}, nil, "",
 			"org: merge: ralph org merge ended with no outcome for the branch feat/a (merged=false, recorded=false), so whether its PR " +
 				"was merged is unknown: run ralph org merge-order to see the branch"},
+		{"cleaned up", withCleanup(org.CleanupResult{Cleaned: true, Recorded: true}, ""), nil, lines + "CLEANUP: done\n", ""},
+		{"cleaned up from what an earlier cleanup left", withCleanup(org.CleanupResult{Cleaned: true, Recorded: true,
+			Resumed: org.CleanupResumedWorktreeGone}, ""), nil, lines + "CLEANUP: done (resumed: worktree_gone)\n", ""},
+		{"cleaned up, worktree_cleaned not recorded", withCleanup(org.CleanupResult{Cleaned: true,
+			Resumed: org.CleanupResumedRecordOnly}, cleanedNotRecorded), nil, lines + "CLEANUP: done (resumed: record_only; " +
+			cleanedNotRecorded + ")\n", ""},
+		{"cleanup refused, with the command by hand", withCleanup(org.CleanupResult{Refused: "the feature worktree /w has an \x1b " +
+			"untracked file", Manual: manual}, ""), nil, lines + `CLEANUP: skipped (the feature worktree /w has an \x1b untracked file)` +
+			"\nCLEANUP MANUAL: " + manual + "\n", ""},
+		{"cleanup refused, no command by hand", withCleanup(org.CleanupResult{Refused: "the org runs"}, ""), nil,
+			lines + "CLEANUP: skipped (the org runs)\n", ""},
+		{"cleanup failed", withCleanup(org.CleanupResult{Failed: "scripts/ralph-worktree.sh cleanup --id org-a --force-branch failed",
+			Manual: manual}, ""), nil, lines + "CLEANUP: skipped (scripts/ralph-worktree.sh cleanup --id org-a --force-branch failed)\n" +
+			"CLEANUP MANUAL: " + manual + "\n", ""},
+		{"cleanup error", withCleanup(org.CleanupResult{}, gitFailed), nil, lines + "CLEANUP: skipped (" + gitFailed + ")\n", ""},
+		{"cleanup with no outcome", withCleanup(org.CleanupResult{}, ""), nil,
+			lines + "CLEANUP: skipped (the cleanup ended with no outcome)\n", ""},
+		{"interrupted once the merge was recorded", cleanupInterrupted, errors.New("org: merge: interrupted (SIGINT) once gh pr " +
+			"merge had started, and then: merged"), lines + "CLEANUP: skipped (" + cleanupInterrupted.Cleanup.Refused + ")\n",
+			"org: merge: interrupted (SIGINT) once gh pr merge had started, and then: merged"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
@@ -276,11 +426,12 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 // AC6 through the CLI: a ready branch whose PR passes every check is merged
 // with one gh pr merge at the gate's head with the method's flag and
 // origin's -R, and no --auto, --admin, or --delete-branch; stdout gets the
-// lines, stderr nothing, exit 0, and the ledger exactly one pr_merged with
-// D4's Details. Every gh pr call names origin's repository with -R, every gh
-// api call --hostname, and regate.lock is free afterwards. When gh pr merge
-// fails but the read-back finds the PR MERGED, the merge is recorded the same
-// way and NOTE: quotes gh's last lines.
+// lines, then the CLEANUP: line of a main worktree with no
+// ralph-worktree.sh, stderr nothing, exit 0, and the ledger exactly one
+// pr_merged with D4's Details. Every gh pr call names origin's repository
+// with -R, every gh api call --hostname, and regate.lock is free afterwards.
+// When gh pr merge fails but the read-back finds the PR MERGED, the merge is
+// recorded the same way and NOTE: quotes gh's last lines.
 func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -302,7 +453,7 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			if want := mergeCLILines(fx.head, false, tc.wantNote); stdout != want {
+			if want := mergeCLILines(fx.head, false, tc.wantNote) + fx.noScriptCleanup(); stdout != want {
 				t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 			}
 			events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
@@ -415,8 +566,9 @@ func TestOrgMerge_NotMergedExitsOneWithNothingOnStdout(t *testing.T) {
 }
 
 // AC8's last case through the CLI: when the PR merged but pr_merged cannot
-// be appended (the manifest is read-only), stdout still gets the lines and
-// the command exits 1 saying the merge stands and was not recorded.
+// be appended (the manifest is read-only), stdout still gets the lines, with
+// no CLEANUP: line since no cleanup runs, and the command exits 1 saying the
+// merge stands and was not recorded.
 func TestOrgMerge_RecordThatFailsPrintsTheLinesAndExitsOne(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores read-only permission bits")
@@ -438,6 +590,122 @@ func TestOrgMerge_RecordThatFailsPrintsTheLinesAndExitsOne(t *testing.T) {
 	}
 	if got := fx.prMergedEvents(t); len(got) != 0 {
 		t.Errorf("pr_merged recorded: %+v", got)
+	}
+}
+
+// AC1 and AC3 through the CLI and the real scripts/ralph-worktree.sh (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): once the merge of
+// feat/a is recorded, merge removes the feature worktree org-a, its
+// registration, the local branch, and the record with the script's cleanup
+// --force-branch, though main does not contain feat/a, which git branch -d
+// refuses; the ledger gets worktree_cleaned with via=merge right after
+// pr_merged, stdout ends with CLEANUP: done, and the command exits 0. With an
+// untracked file in the worktree, merge prints CLEANUP: skipped with the
+// reason and CLEANUP MANUAL: with the script's cleanup, removes nothing,
+// records no worktree_cleaned, and still exits 0.
+func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
+	t.Run("cleaned up", func(t *testing.T) {
+		fx, wt := newMergeCLIWorktreeFixture(t)
+		if err := exec.Command("git", "-C", fx.work, "merge-base", "--is-ancestor", "feat/a", "main").Run(); err == nil {
+			t.Fatal("main contains feat/a; want a branch git branch -d refuses")
+		}
+		if fx.worktreeRecord(t) == "<absent>" {
+			t.Fatal("no record org-a before the merge")
+		}
+
+		stdout, stderr, err := fx.merge(t)
+		if err != nil || stderr != "" {
+			t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
+		}
+		if want := mergeCLILines(fx.head, false, "") + "CLEANUP: done\n"; stdout != want {
+			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+		if _, err := os.Stat(wt); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the worktree %s is still there (stat: %v)", wt, err)
+		}
+		if list := gateCLIGitOut(t, fx.work, "worktree", "list", "--porcelain"); strings.Contains(list, wt) {
+			t.Errorf("git still lists the worktree:\n%s", list)
+		}
+		if got := gateCLIGitOut(t, fx.work, "branch", "--list", "feat/a"); got != "" {
+			t.Errorf("the branch feat/a is still there: %q", got)
+		}
+		if got := fx.worktreeRecord(t); got != "<absent>" {
+			t.Errorf("the record org-a is still there:\n%s", got)
+		}
+		events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
+		want := "branch=feat/a head=" + fx.head + " via=merge worktree=" + strconv.Quote(wt)
+		if n := len(events); n < 2 || events[n-2].Event != org.EventPRMerged || events[n-1].Event != org.EventWorktreeCleaned ||
+			events[n-1].OrgID != "a" || events[n-1].SeatID != "" || events[n-1].Details != want {
+			t.Errorf("the ledger ends with %+v; want pr_merged, then org a's worktree_cleaned with %q", events[max(0, n-2):], want)
+		}
+		holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
+	})
+	t.Run("an untracked file", func(t *testing.T) {
+		fx, wt := newMergeCLIWorktreeFixture(t)
+		writeTestFile(t, filepath.Join(wt, "stray.txt"), "x\n")
+		record := fx.worktreeRecord(t)
+
+		stdout, stderr, err := fx.merge(t)
+		if err != nil || stderr != "" {
+			t.Fatalf("merge: err %v, stderr %q (stdout %q); want exit 0", err, stderr, stdout)
+		}
+		want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
+			"change(s) or untracked file(s) (?? stray.txt), which removing it would lose: move what you need out of the worktree, " +
+			"remove the rest, and run ralph org cleanup --branch feat/a again)\nCLEANUP MANUAL: cd " + fx.work +
+			" && ./scripts/ralph-worktree.sh cleanup --id org-a --force-branch\n"
+		if stdout != want {
+			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+		}
+		if info, err := os.Stat(filepath.Join(wt, "stray.txt")); err != nil || !info.Mode().IsRegular() {
+			t.Errorf("the untracked file is gone (stat: %v)", err)
+		}
+		if got := gateCLIGitOut(t, fx.work, "rev-parse", "refs/heads/feat/a"); got != fx.head {
+			t.Errorf("feat/a is at %s, want %s", got, fx.head)
+		}
+		if got := fx.worktreeRecord(t); got != record {
+			t.Errorf("the record changed:\n%s\n->\n%s", record, got)
+		}
+		events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
+		if last := events[len(events)-1]; last.Event != org.EventPRMerged || slices.ContainsFunc(events, func(ev org.ManifestEvent) bool {
+			return ev.Event == org.EventWorktreeCleaned
+		}) {
+			t.Errorf("the ledger ends with %+v; want pr_merged and no worktree_cleaned", last)
+		}
+	})
+}
+
+// D3 through the CLI: when the main worktree cannot be found (the ledger is
+// chosen with --state-dir and the current directory is in no repository, its
+// origin a path to the bare origin), merge merges and records as before,
+// runs no cleanup, prints CLEANUP: skipped with the reason, and exits 0.
+func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
+	fx := newMergeCLIFixture(t, false)
+	outside := filepath.Join(filepath.Dir(fx.work), "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fx.bare, filepath.Join(outside, "origin")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(outside))
+	t.Chdir(outside)
+
+	stdout, stderr, err := fx.merge(t)
+	if err != nil || stderr != "" {
+		t.Fatalf("merge: err %v, stderr %q (stdout %q); want exit 0", err, stderr, stdout)
+	}
+	want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
+		"the feature worktree, was not found (org: start --plan makes the feature worktree from the main worktree of a git " +
+		"repository, and the current directory is not in one: run it from the main worktree or one of its linked worktrees), so " +
+		"the feature worktree of the branch feat/a was not cleaned up: run ralph org cleanup --branch feat/a from the main worktree)\n"
+	if stdout != want {
+		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
+	}
+	if got := fx.prMergedEvents(t); len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, false) {
+		t.Errorf("pr_merged = %+v; want one with %q", got, mergeCLIDetails(fx.head, false))
+	}
+	if got := fileBytesOrAbsent(t, filepath.Join(fx.stateDir, "regate.lock")); got != "" {
+		t.Errorf("regate.lock holds %q; want no marker, since no cleanup ran", got)
 	}
 }
 
@@ -550,7 +818,7 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 	t.Run("6h is taken", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "6h")
-		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, false, "") {
+		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, false, "")+fx.noScriptCleanup() {
 			t.Fatalf("merge --wait-checks 6h: err %v, stderr %q, stdout %q; want the merge", err, stderr, stdout)
 		}
 	})
@@ -647,7 +915,7 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge from the linked worktree: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			if want := mergeCLILines(fx.head, tc.want, ""); stdout != want {
+			if want := mergeCLILines(fx.head, tc.want, "") + fx.noScriptCleanup(); stdout != want {
 				t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 			}
 			got := fx.prMergedEvents(t)
@@ -750,7 +1018,23 @@ func TestOrgMerge_Help(t *testing.T) {
 			"The read-back and the removal run in a process group of their own, so a Ctrl-C or hangup the terminal sends does " +
 				"not stop them",
 			"it needs no running watch and no approved plan",
-			"but ralph org spawn and start of the branch's org are not, since merge changes no worktree",
+			"ralph org spawn and start of the branch's org are refused only while merge cleans up its feature worktree, since the " +
+				"merge itself changes no worktree.",
+			// The cleanup after a recorded merge (plan
+			// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2).
+			"Once pr_merged is recorded, merge cleans up the branch's feature worktree, the one ralph org start --plan made, with " +
+				"regate.lock still held: it runs ./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch in the main " +
+				"worktree (found as start --plan finds it), which removes the worktree, the local branch, and the script's record, " +
+				"and records worktree_cleaned in the ledger.",
+			"that the worktree has no uncommitted change or untracked file and no rebase or merge in progress (files .gitignore " +
+				"names do not count and go with the worktree); that the local branch is at the head the gate passed; and that the " +
+				"worktree has that branch checked out at that head. When a check fails, it removes nothing.",
+			"After the lines above, merge prints CLEANUP: done, with (resumed: <what was left>) when it went on from such a " +
+				"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by CLEANUP MANUAL: <the command that cleans up " +
+				"by hand once the reason is checked>; ralph org cleanup --branch <branch> cleans up later. The cleanup never " +
+				"changes the exit code.",
+			"an interrupt once pr_merged is recorded skips the cleanup or stops it, and the CLEANUP: line says how it ended.",
+			"Exit codes: 0 for a merge that was recorded, whatever the cleanup did;",
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",
 			"Without --config, it is read from the main worktree's ralph.toml when the ledger is the main worktree's",
 			"--branch string",

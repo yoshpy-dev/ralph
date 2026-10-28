@@ -88,6 +88,11 @@ type MergeParams struct {
 	// Progress gets the line a wait writes when it starts and the one it
 	// writes when it ends; nil discards them.
 	Progress io.Writer
+	// RepoRoot is the root of the main worktree (FeatureRepoRoot), where the
+	// cleanup of the merged branch's feature worktree runs
+	// scripts/ralph-worktree.sh once pr_merged is recorded (merge_run.go,
+	// cleanup.go); empty means no cleanup. The checks do not read it.
+	RepoRoot string
 
 	// waitTest replaces the wait's interval, clock, and sleep in a test.
 	waitTest mergeWaitTest
@@ -211,8 +216,8 @@ func newMergeCheck(p MergeParams) *mergeCheck {
 // disband the wait reads in the ledger, and for step 10 what steps 2 to 9
 // read, the PR whose checks the wait reads; r is empty with any other
 // refusal. The error is for a manifest that cannot be read and for ctx done;
-// nothing was merged then either. p.AutoMerge, p.WaitChecks, and p.Progress
-// are not read.
+// nothing was merged then either. p.AutoMerge, p.WaitChecks, p.Progress, and
+// p.RepoRoot are not read.
 func (o *Org) checkMerge(ctx context.Context, p MergeParams) (r mergeReady, refused string, kind mergeRefusalKind, err error) {
 	if p.Branch == "" {
 		return mergeReady{}, mergePrefix + "no branch named, so nothing was merged: name the feature branch to merge (ralph " +

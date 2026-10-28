@@ -573,8 +573,9 @@ func TestCleanupFeatureWorktree_MarkerRefusesSpawnOfTheOrg(t *testing.T) {
 	if err != nil || !res.Cleaned || !reached {
 		t.Fatalf("cleanup = %+v, %v (hook reached %v); want it cleaned through the hook", res, err, reached)
 	}
-	want := `org: org_id "auth" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(fx.stateDir) +
-		` holds the regate's marker): wait for the regate to end and run the same command again`
+	want := `org: org_id "auth" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup removes ` +
+		`its merged feature worktree (` + regateLockPathIn(fx.stateDir) + ` holds the marker of that org): wait for it to end and ` +
+		`run the same command again`
 	if sameErr == nil || sameErr.Error() != want || otherErr != nil {
 		t.Errorf("regateSpawnErr during the cleanup = %v for auth, %v for other; want %q and nil", sameErr, otherErr, want)
 	}
