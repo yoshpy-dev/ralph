@@ -56,8 +56,10 @@ const (
 	featureWorktreeDir = ".claude/worktrees"
 	// featureWorktreeKind and featureWorktreeCleanupPolicy are the --kind
 	// and --cleanup-policy StartFeature passes to ralph-worktree.sh ensure.
-	// The worktree outlives disband and the PR, so nothing removes it but
-	// `ralph-worktree.sh cleanup`.
+	// The worktree outlives disband and stays until its PR is merged;
+	// then `ralph org merge` or `ralph org cleanup` removes it (both
+	// through `ralph-worktree.sh cleanup`). For a PR closed without a
+	// merge nothing removes it but `ralph-worktree.sh cleanup` by hand.
 	featureWorktreeKind          = "org"
 	featureWorktreeCleanupPolicy = "manual"
 	// worktreeScriptRel is ralph-worktree.sh relative to the repo root.

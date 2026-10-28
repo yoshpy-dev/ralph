@@ -89,8 +89,8 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   `<worktree>/.harness/state/org/manifest.jsonl` が残っている worktree から
   打つと、その台帳に動いている座席がある間(台帳が読めないときも)、台帳を
   書き換える動詞(`spawn`(`--dry-run` を含む)/ `start` / `send` / `stop` /
-  `disband` / `watch` / `gate` / `regate` / `merge` / `escalate` / `approve` / `inbox ack` /
-  `inbox resolve` / `inbox notify` / `director attach` / `director detach` /
+  `disband` / `watch` / `gate` / `regate` / `merge` / `cleanup` / `escalate` / `approve` /
+  `inbox ack` / `inbox resolve` / `inbox notify` / `director attach` / `director detach` /
   `director start` / `director stop` / `director launched`(launch_cmd の
   起動スクリプトだけが打つ隠れた動詞))は
   終了コード 1 で止まり、古い台帳と共通の台帳のパスを示す。動いている座席が
@@ -1640,8 +1640,8 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   見張りは herdr の外で動かす)。見張りの拒否で断られた leader は
   `escalate` で BLOCKED を上げて止まるので、人は見張りを起動し直してから
   返事をする。`stop`・`disband`(どちらも `--all` を含む)・`escalate`・
-  `inbox` の動詞・`approve`・`gate`・`regate`・`merge`・`wait`・`read`・`status`・`report`・
-  `merge-order`・`watch`・`director` の動詞(`director start` を除く)は、
+  `inbox` の動詞・`approve`・`gate`・`regate`・`merge`・`cleanup`・`wait`・`read`・
+  `status`・`report`・`merge-order`・`watch`・`director` の動詞(`director start` を除く)は、
   見張りがなくても使える(見張りがないと、escalate は件をすぐ人に送り、
   `director attach` は登録したうえで警告を出す)。`director start` は
   `ralph org start` と同じく、見張りがなければ起動してから director を
