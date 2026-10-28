@@ -2,10 +2,11 @@
 
 - Date: 2026-10-29
 - Plan: `docs/plans/active/2026-10-29-review-switches-skills.md`(issue #266、D1〜D5、AC1〜AC9、Progress の S1〜S4)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は baa2f400 の report、run 2 は修正スライス F1 08b2ceba のあとの再 run で、この file を同じ場所で更新した。run 1 の本文は下にそのまま残し、その後は「Run 2」の節にまとめた)
+- Run 2 の scope: `git show 08b2ceba`(F1、20 ファイル、+130/-90)と、`git diff 9837f744...HEAD`(HEAD 2ac4da3f)の全体の見直し。de036988 と 2ac4da3f は計画の Progress だけ。
 - Scope: `git diff 9837f744...HEAD`(HEAD 4a2200c4、9 コミット、55 ファイル、+662/-256)。中心は S1 07cf95f8(backfill の `skipped`、ルートの `ralph.toml` の test)、S2 93dec2cc(`/plan` 手順 11)、S3 9e233825(`/cross-review` 手順 0、`/pr`、`/implement`、Codex の上書き)、S4 f88561b8(文書とコメント)。計画ファイルと Progress だけのコミットは読んだが所見の対象にしていない。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
 - 既定の判断(依頼どおり欠陥として扱わない): `/cross-review` の claude の道が `--permission-mode auto` のままであること、codex の道が利用者の MCP server を止めないこと、`templates/base/ralph.toml:28-29` の「in a later release」と `docs/tech-debt/README.md:31`・`:154` が /sync-docs 待ちであること、この環境の PATH の `ralph` が v6.0.0 で `config get` を持たないこと。
-- ID: 所見は L1〜L6(すべて LOW)。
+- ID: run 1 の所見は L1〜L6(すべて LOW)。run 2 も同じ ID で状態を追い、新しく立てた所見は N1・N2(LOW)。
 
 ## Evidence reviewed
 
@@ -51,6 +52,49 @@
 - git の状態が変わって「止まる」(11.d、手順 4)と、`diff` を見せたあとの手順が書かれていない。`.codex/config.toml` が codex の実行の前後で書き換わる未特定の事象(memory の `project_codex_config_rewrite`)は、この確かめが初めて捕まえる。起きたとき、人が `diff` を見て戻す前提で書かれているので、足りないとは言わない。
 - `ralph config get` は cwd の `./ralph.toml` を読むので、skill が repo の root から打つ前提(両方の skill に書いてある)が要る。task worktree の root でなく main の checkout で打つと、ほかの branch の `ralph.toml` を読む。skill の括弧書き(「the task worktree root」)が止めている。
 
+## Run 2: 修正スライス F1 のあと(L1〜L6 のその後と、F1 の差分の確認)
+
+読んだもの: `git show 08b2ceba` の全体(skill は `.claude/` 側を読み、`.agents/` と `templates/base/` の写しは `cmp`)、`internal/config/config.go`、`scripts/xreview-helpers.sh` と写し、`templates/base/ralph.toml`、`git diff baa2f400..HEAD` の全ファイル名(F1 と計画の Progress だけ)、全体の `git diff 9837f744...HEAD`(HEAD 2ac4da3f)の見直し。確かめていない: テスト、静的検査(走らせていない)。
+
+手で確かめたこと:
+- driver と reviewer を決める snippet を、そのまま取り出して bash・zsh・sh で、`DRIVER` の既定 2 通り × `RALPH_PRIMARY_CLI` 6 通り(未設定、`claude`、`CODEX`、末尾に空白のある `Codex `、`gemini`、`x y`)の 36 通りで走らせた。上書きは小文字化したあとの `claude`・`codex` だけが効き(`CODEX` は driver codex、reviewer claude になる)、空白つきと知らない値は無視されて「skill を動かしている CLI」が残る。3 つの shell で同じ出力。`DRIVER` が空になる経路はなく、L2 の誤り(空の driver が codex を返す)は起きない。
+- `/plan` 11 と `/cross-review` の手順 2 以降で、`$DRIVER`・`$REVIEWER` を shell の変数として使う箇所を `grep` した。残りは snippet 自身と、「呼び出しが終われば消える。後の手順は表示された値を使う」と断る文だけ。`$BASE` は、codex の起動、空の差分の確かめの 2 か所で同じ呼び出しの中で導出し直している(下の N1 に claude の道)。
+- `git diff nonexistentref...HEAD --quiet` は rc 128、`git diff HEAD...HEAD --quiet` は rc 0(F1 の確かめの文面は「rc=0 は差分なし」だけを定める。Notes)。
+- 写し: `plan`・`cross-review`・`pr`・`implement` の `SKILL.md` と `pr/template.md` で、root と `templates/base/` の `.claude/`・`.agents/` が一致。`.claude/` と `.agents/` の違いは `cross-review` の `allowed-tools` 1 行だけ(元から)。`scripts/xreview-helpers.sh` と写しも一致。折り直したコメントの行は 77 字以内で、同じ file の 78 字前後の行に収まる。
+
+### 所見のその後
+
+| ID | その後 | 確かめたこと |
+| --- | --- | --- |
+| L1 (a) | 閉じた | `config.go` の `[standard]` の説明が「The /plan and /cross-review skills read them with `ralph config get <key>`」と現在形。残る `#276` は、まだ起きていない移行への正しい参照 |
+| L1 (b) | 閉じた | テンプレートの `[standard]` の注が、exit 1 の `unknown command "config"` と、shell が返す 127 の 2 つを「these two, and only these」として off にし、それ以外(ほかの exit 1、2、3)で止まると書く。skill の分岐(0、1+`unknown command`、127、それ以外)と合う。「in a later release」の文も消えた。`[org.review]` 側の同じ文(`templates/base/ralph.toml:255-256`)は #267・#269 まで正しいので残っている |
+| L1 (c) | 据え置き(依頼どおり) | `paneenv.go:66-67` の警告は変わらず。test が固定している |
+| L2 | 閉じた | 上の 36 通り |
+| L3 | 閉じた | 手順 4 が `skipped (empty diff)` の report を書く流れが、description、冒頭の段落、手順 4、手順 6(`Reviewer status:` の例を含む)、手順 6 の「Skipped run」、手順 9、「Insight event」、「What /cross-review does NOT do」の 8 か所で同じ。「残りの手順 4 と手順 5 を飛ばす」は git の状態の保存(手順 4 の後ろの bullet)の前で止まるので、保存した file が残らない。さらに F1 は、空の差分の確かめが前の呼び出しの `$BASE` に頼っていて、`BASE=` のとき `git diff ...HEAD --quiet` の rc が 0 になり「差分なし」と誤る、という私が 1 回目に見落とした欠陥も、`detect_base_branch` と同じ呼び出しにまとめて直している |
+| L4 | 閉じた | `/pr` の対応表: `ran with` と `no findings` は `ran (<reviewer>)`、`Reviewer status: complete` は report の `Reviewer:` header から `ran (<reviewer>)`、`incomplete` と `skipped` は理由ごとそのまま、記録がなければ `not recorded`。雛形の 2 行も同じ 4 値。`/plan` 11 は記録するときに `- [x] Plan reviewed` を付け、「この step が済んだことを表す」と理由を書く |
+| L5 | PR の Known gaps(依頼どおり) | 変更なし |
+| L6 | 閉じた | `xreview-helpers.sh` と写しのコメントを折り直した |
+
+### 新しい所見
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | exception-handling | N1 F1 は、空の差分の確かめが前の呼び出しの `$BASE` に頼る欠陥を直したが、同じ型が claude の道に残る。手順 4 の最初の bullet は `BASE=$(detect_base_branch)` を打つだけで値を出さず、F1 の確かめは `echo "rc=$?"` だけを出す。codex の道は起動と同じ呼び出しで導出し直すが、claude の道(driver が Codex)には起動の形の記述がなく、prompt の雛形が `origin/$BASE` と `git diff $BASE...HEAD` を使う。agent は `$BASE` が何かを、どの出力からも知らない(まず `main` だろうと推すことになる)。旧い版からの形だが、この PR が同じ型を直した場所の隣にある。 | `cross-review/SKILL.md:64`(最初の bullet、値を出さない)、`:65`(`echo "rc=$?"` だけ)、`:230`・`:238`(雛形の `$BASE`)、`:67`(codex だけが「re-derive `$BASE` in the same Bash call」) | 空の差分の確かめを `git diff "$BASE"...HEAD --quiet; echo "base=$BASE rc=$?"` にして、claude の雛形の `$BASE` は「ここで表示された base」と書く。直さないなら L5 と同じ Known gaps の行にまとめる(claude の道の形が `/plan` の形とそろっていないこと)。 |
+| LOW | maintainability | N2 driver の上書き(小文字化、`claude`・`codex` だけを採る)が、skill の本文に 1 行の snippet として入った。`/plan` 11.b と `/cross-review` の 2.b で同じ文字列が、それぞれ 4 つの写しにあるので 8 か所。同じ段落が `pick_reviewer` について言う「mapping を 1 つの grep できる、test のある場所に置き、inline で重複させない」と、上書きの部分は逆になる。`tests/test-xreview-helpers.sh` が固定するのは `pick_reviewer` だけで、この snippet の挙動(上の 36 通り)を固定する test はない。片方の skill だけを直しても `check-skill-sync.sh` は通る(root と写しの一致しか見ない)。 | `plan/SKILL.md:81`、`cross-review/SKILL.md:55`、`tests/test-xreview-helpers.sh`(`pick_reviewer` だけ、`1a`〜`1i`) | `scripts/xreview-helpers.sh` に `resolve_driver <cli-running-the-skill>`(上書きを読んで driver を出す)を足し、skill は `DRIVER=$(resolve_driver claude); REVIEWER=$(pick_reviewer "$DRIVER")` と短くする。test は今の 1d〜1i の隣に 36 通りの一部を足せる。#276 で `RALPH_PRIMARY_CLI` を `ralph.toml` に移すなら、そのときにまとめてもよい。 |
+
+### Run 2 の Notes(所見にしないもの)
+
+- 空の差分の確かめで rc が 0 でも 1 でもない場合(base が解決できない 128 など)の扱いは、F1 の文面にない。旧い版にもなかった。reviewer が失敗して「incomplete」に落ちるので黙って通ることはない。
+- スキップの条件を数え上げている文書(`definition-of-done.md:30`、`post-implementation-pipeline.md:13`、`ralph-workflow.md`、`subagent-policy.md`、README、`AGENTS.md`、`repo-map.md`、`implement/SKILL.md` の 13.e、`cross-review/SKILL.md` の description の 1 文目)は、「switch が on で、相手の CLI がある」の 2 条件で、3 つ目の「差分が空でない」を言わない。ほとんどは「そうでなければ記録して飛ばす」と続くので矛盾しない。差分が空になる branch は commit がないときだけで、まず起きない。直すかどうかは /sync-docs の判断でよい。
+- `/pr` の対応表は、triage の report が複数の cycle を持つとき、どの `Reviewer status:` を使うかを言わない(cycle 1 が complete、cycle 2 が incomplete など)。switch が cycle の途中で変わる場合に限る。「最後の cycle の行」が自然な読み方。
+- `templates/base/ralph.toml` の「stop on any other exit 1 / exit 2 / exit 3」は例示で、skill の「Anything else」(126 や 130 など、`true`・`false` でない exit 0)より狭く読める。矛盾はしない。
+
+### Run 2 の Positive notes
+
+- F1 は私の所見の範囲を超えて、同じ型の欠陥(`$BASE` が呼び出しをまたぐと空になり、`git diff` が rc 0 を返して「差分なし」と誤る)を見つけて直している。1 回目に気づけなかったもので、F1 の報告に原因が書かれている。
+- driver の snippet が、値を `echo` で表示し、「後の手順は変数でなく表示された値を使う」と断っている。Bash tool の性質(呼び出しの間で状態を持たない)に合わせた書き方で、`/plan` と `/cross-review` が同一の文面。
+- `/pr` の対応表が、欠けた記録を `not recorded` と書く 4 つ目の値にして、雛形と skill の文面を同じ語彙にしている。
+
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
@@ -61,9 +105,10 @@ _(If any rows were added above, also append them to `docs/tech-debt/`.)_ 上の 
 
 ## Recommendation
 
-- Merge: OK(CRITICAL・HIGH・MEDIUM なし、LOW 6 件)
+- Merge: OK(Run 2。CRITICAL・HIGH・MEDIUM なし。開いている LOW は 4 件: L1 (c)、L5、N1、N2。L1 (a)(b)、L2、L3、L4、L6 は F1 で閉じた)
 - Follow-ups:
-  - 直すと安上がりなもの: L2(2 つの skill の 1 行ずつ、4 つの写しは `sync-skills.sh`)、L3(1 bullet)、L4(2 文)、L6(コメントの折り直し)。L2 と L3 は skill の動作に効くので、直すなら先にやる。
-  - /sync-docs の待ちに足すもの: L1 の (a) `internal/config/config.go:30-31` と (b) `templates/base/ralph.toml:23-25`。(c) と help の「only that」は直さないなら Known gaps の 1 行。
-  - L5 は PR の Known gaps に書くのが最小。
+  - N1 は 1 行(空の差分の確かめに `base=$BASE` を表示する)。直すなら F1 と同じ型の skill の直しで、4 つの写しは `sync-skills.sh`。直さないなら L5 と同じ Known gaps の行に「claude の道の形」としてまとめる。
+  - N2 は直すと `scripts/xreview-helpers.sh` に helper と test が増えるので、この PR の範囲を超えるなら PR の Known gaps か tech-debt の 1 行にする。登録するなら: 「driver の上書きの snippet が `/plan` 11.b と `/cross-review` 2.b の 8 か所にあり、挙動を固定する test がない。trigger: #276 で `RALPH_PRIMARY_CLI` を触るとき、または片方の skill だけ直った報告」。
+  - L1 (c) と L5 は依頼どおり(据え置き、Known gaps)。tech-debt の 2 行(`:31`、`:154`)は /sync-docs。
+  - Run 2 の Notes のうち、スキップ条件を数え上げる文書に「差分が空でない」を足すかは /sync-docs の判断。
   - 直したときは skill の写しの一致(`check-skill-sync.sh`、`check-sync.sh`)と、skill の文を固定する test を通し直す。
