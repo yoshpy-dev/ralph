@@ -1555,12 +1555,12 @@ func TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam(t *testing.T) {
 	}
 }
 
-// TestRunDoctorOpts_ShellAliasesCheck_HerdrAbsentStaysInfo is
-// WarnsThroughTheSeam with no herdr on PATH. herdr's own line is now warn
-// (it used to be info), so runDoctorOpts must compare herdr's status against
-// "pass" to tell checkShellAliases that herdr is absent; a codex finding then
-// stays info and carries the herdr-not-installed suffix.
-func TestRunDoctorOpts_ShellAliasesCheck_HerdrAbsentStaysInfo(t *testing.T) {
+// TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr is
+// WarnsThroughTheSeam with no herdr on PATH. A missing herdr reports warn, so
+// runDoctorOpts tells checkShellAliases that herdr is present only when
+// herdr's line is "pass", not merely when it is not "info"; a codex alias
+// finding then stays info and carries the herdr-not-installed suffix.
+func TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "0.1.0-test"
 
@@ -1588,28 +1588,23 @@ func TestRunDoctorOpts_ShellAliasesCheck_HerdrAbsentStaysInfo(t *testing.T) {
 	doctorShellAliasEnv = shellAliasTestEnv(homeDir)
 	t.Cleanup(func() { doctorShellAliasEnv = orig })
 
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	err := runDoctorOpts(dir, false)
-	_ = w.Close()
-	os.Stdout = origStdout
-	out, _ := io.ReadAll(r)
-
+	var out string
+	err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })
 	if err != nil {
 		t.Fatalf("runDoctorOpts returned error with only warn/info findings: %v\noutput:\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "herdr: warn") {
-		t.Errorf("expected herdr's own line to be warn in output:\n%s", out)
+	if status, _, ok := doctorLine(out, "herdr"); !ok || status != "warn" {
+		t.Errorf("herdr status = %q (line found: %v), want warn in output:\n%s", status, ok, out)
 	}
-	if !strings.Contains(string(out), "Shell aliases (codex/claude): info") {
-		t.Errorf("expected an info-level Shell aliases (codex/claude) line in output:\n%s", out)
+	status, detail, ok := doctorLine(out, "Shell aliases (codex/claude)")
+	if !ok {
+		t.Fatalf("no Shell aliases (codex/claude) line in output:\n%s", out)
 	}
-	if strings.Contains(string(out), "Shell aliases (codex/claude): warn") {
-		t.Errorf("expected no warn-level Shell aliases (codex/claude) line with herdr absent:\n%s", out)
+	if status != "info" {
+		t.Errorf("Shell aliases (codex/claude) status = %q, want info with herdr absent in output:\n%s", status, out)
 	}
-	if !strings.Contains(string(out), "(herdr not installed, so no seat is affected today)") {
-		t.Errorf("expected the herdr-not-installed suffix in the Shell aliases detail:\n%s", out)
+	if !strings.Contains(detail, "(herdr not installed, so no seat is affected today)") {
+		t.Errorf("Shell aliases (codex/claude) detail = %q, want the herdr-not-installed suffix in output:\n%s", detail, out)
 	}
 }
 
