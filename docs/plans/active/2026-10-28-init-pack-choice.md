@@ -158,6 +158,7 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
     - 計画になかった追加 3: `TERM=dumb` で stdin が端末でないときは、フォームの前に何も書かずにエラーで止める。huh は `TERM=dumb` で accessible モードになり、EOF を確定として読むので、D1 の確かめがエラーを返す間ずっと問いを出し続ける(`TERM=dumb ralph init dir < /dev/null` が約 70 秒で 675 MB を出して終わらなかった。変更前は全パックを入れて exit 0)。エラーの文は `--yes`(と `--pack`)を勧める。consult(consult-plan-initpack)は異論なし。release のノートに書く
     - 自動テストで捕まえられない穴: `runInitInteractive` の中の 3 行(初期の選択、推定の結果を問いに渡すこと、`packsFromSelection` の呼び出し)は `form.Run()` の先で TTY が要るので、mutant が生き残る。pty での確認で代えた
     - 対話の経路では、huh が選択を選択肢の並び(名前順)で書き戻すので、`--yes` なしの `--pack typescript --pack golang` の manifest の順は名前順になる(`--yes` の経路は flag の順)。受け入れ条件には関わらない
+  - S4(411a3499、implementer): init の `Long` の help(問い、(Recommended)、skip、`ralph pack add`、`--yes` と `--pack`、知らない名前、`TERM=dumb` で端末がないときは `--yes`)、README のコマンドの表の行、雛形の recipe の段落(`ralph init --yes --pack golang,python` の例)。verify: grep 2 つ rc=0、`./scripts/check-sync.sh` rc=0(DRIFTED 0)、gofmt・vet・`go test ./internal/cli/ -run 'Init|Pack'` rc=0。`go run ./cmd/ralph init --help` の出力を確かめた。self-check 5 項目 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
