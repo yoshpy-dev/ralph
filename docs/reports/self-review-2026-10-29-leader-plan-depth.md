@@ -3,7 +3,7 @@
 - Date: 2026-10-29
 - Plan: `docs/plans/active/2026-10-29-leader-plan-depth.md`(issue #267、S1〜S4、D1〜D7、AC1〜AC8、Progress の S2 の逸れ `--disable plugins`)
 - Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
-- Scope: `git diff origin/main...HEAD`(base 9837f744、HEAD 80d88e96、11 コミット、15 ファイル、+1552/-53)。中心は `internal/org/prompts/leader.md` の「機能ごとの org」の手順 1・3・4、新しい `internal/org/prompts_leader_plan_test.go`、`/director` skill の「計画の承認」と `/org` skill(それぞれ 4 つの写し)、`director_skill_sync_test.go`、コメントだけの `templates/base/ralph.toml`・`internal/config/config.go`・`internal/org/driver/paneenv.go`。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- Scope: `git diff origin/main...6099187d`(base 9837f744、12 コミット、15 ファイル、+1570/-53)。依頼の HEAD は 80d88e96 だったが、レビューの途中で 6099187d(古い codex が `--disable plugins` を知らないときに飛ばすことを雛形に書き、test に `STUB_OLD` の case を足したもの)が積まれ、雛形と test はそのあとの版を読んだ。中心は `internal/org/prompts/leader.md` の「機能ごとの org」の手順 1・3・4、新しい `internal/org/prompts_leader_plan_test.go`、`/director` skill の「計画の承認」と `/org` skill(それぞれ 4 つの写し)、`director_skill_sync_test.go`、コメントだけの `templates/base/ralph.toml`・`internal/config/config.go`・`internal/org/driver/paneenv.go`。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
 - ID: 所見は L1〜L6(すべて LOW)。
 
 ## Evidence reviewed
