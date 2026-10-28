@@ -206,7 +206,7 @@ func TestDirectorLine_ShowsTheWatchsCheckOfAHeadlessDirector(t *testing.T) {
 			tc.write(t, stateDir, reg)
 
 			o := readDirectorCheckOutputs(t, stateDir)
-			want := head + tc.clause(stateDir) + "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+			want := head + tc.clause(stateDir) + "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 			if o.statusLine != want {
 				t.Errorf("status director line:\n got %q\nwant %q", o.statusLine, want)
 			}
@@ -279,7 +279,7 @@ func TestDirectorLine_EdgeCasesOfTheCheck(t *testing.T) {
 
 		o := readDirectorCheckOutputs(t, stateDir)
 		want := "director: attached d1 (driver=codex, headless stopped, model=m, pane p-1, workspace w-1, attached at " + ts + ", by u) -- " +
-			"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+			"the registration does not tell whether its session is still running; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 		if o.statusLine != want || o.directorLine != want {
 			t.Errorf("director lines:\n status          %q\n director status %q\nwant %q", o.statusLine, o.directorLine, want)
 		}
@@ -292,7 +292,8 @@ func TestDirectorLine_EdgeCasesOfTheCheck(t *testing.T) {
 		stateDir := t.TempDir()
 		reg := seedHeadless(t, stateDir, "codex", "gpt-6-astra", "w-1", "p-1", true)
 		suffix := " --state-dir '" + stateDir + "'"
-		head := "director: disabled ([org.director].enabled = false; registration d1 is still recorded, headless running, pane p-1, workspace w-1: " +
+		head := "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; " +
+			"registration d1 is still recorded, headless running, pane p-1, workspace w-1: " +
 			"stop it with ralph org director stop --id d1" + suffix + "; "
 		const end = ") -- ralph org escalate sends every item to the human at once"
 

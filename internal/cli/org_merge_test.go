@@ -302,7 +302,7 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			if want := mergeCLILines(fx.head, false, tc.wantNote); stdout != want {
+			if want := mergeCLILines(fx.head, true, tc.wantNote); stdout != want {
 				t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 			}
 			events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
@@ -310,8 +310,8 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 				t.Fatalf("the ledger got %d events; want exactly one: %+v", len(events)-before, events[before:])
 			}
 			if ev := events[before]; ev.Event != org.EventPRMerged || ev.OrgID != "a" || ev.SeatID != "" ||
-				ev.Details != mergeCLIDetails(fx.head, false) {
-				t.Errorf("recorded %+v; want pr_merged of org a with %q", ev, mergeCLIDetails(fx.head, false))
+				ev.Details != mergeCLIDetails(fx.head, true) {
+				t.Errorf("recorded %+v; want pr_merged of org a with %q", ev, mergeCLIDetails(fx.head, true))
 			}
 
 			want := []string{"GH_PROMPT_DISABLED=1 pr merge 7 --merge --match-head-commit " + fx.head + " -R " + mergeCLIRepoArg}
@@ -433,7 +433,7 @@ func TestOrgMerge_RecordThatFailsPrintsTheLinesAndExitsOne(t *testing.T) {
 		mergeCLIMergeCommit+") but pr_merged could not be recorded") {
 		t.Fatalf("merge err = %v; want that the merge stands and pr_merged was not recorded", err)
 	}
-	if want := mergeCLILines(fx.head, false, ""); stdout != want {
+	if want := mergeCLILines(fx.head, true, ""); stdout != want {
 		t.Errorf("stdout:\n%s\nwant the lines of the merge:\n%s", stdout, want)
 	}
 	if got := fx.prMergedEvents(t); len(got) != 0 {
@@ -550,7 +550,7 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 	t.Run("6h is taken", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "6h")
-		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, false, "") {
+		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, true, "") {
 			t.Fatalf("merge --wait-checks 6h: err %v, stderr %q, stdout %q; want the merge", err, stderr, stdout)
 		}
 	})

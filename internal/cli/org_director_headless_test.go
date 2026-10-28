@@ -1484,7 +1484,7 @@ func TestOrgDirectorStatus_ShowsHeadlessDirectors(t *testing.T) {
 
 	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	want := "director: attached d1 (driver=codex, headless starting, model=gpt-6-astra, workspace w-1, attached at " + ts + ", by alice)" + tail + "\n" +
-		"enabled: true\nauto_merge: false\nid: d1\ndriver: codex\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
+		"enabled: true\nauto_merge: true\nid: d1\ndriver: codex\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
 		"launch: herdr\nstate: starting\nmodel: gpt-6-astra\npermission_mode: autonomous\ntoken: " + d1.Token + "\nworkspace_id: w-1\n" +
 		directorNoWaitMarkLine + "\n"
 	if stdout != want {
@@ -2790,7 +2790,7 @@ func TestOrgDirectorStatus_ShowsLaunchCmdDirectors(t *testing.T) {
 	checkInDirector(t, stateDir, d1, 4242, directorTestStartTime)
 	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir)
 	want := "director: attached d1 (driver=claude, headless running, model=opus, launch cmd, name " + name + ", pid 4242, attached at " + ts + ", by alice)" + tail + "\n" +
-		"enabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
+		"enabled: true\nauto_merge: true\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ts + "\nuser: alice\ncwd: /work\nherdr_pane: no\n" +
 		"launch: cmd\nstate: running\nmodel: opus\npermission_mode: autonomous\ntoken: " + d1.Token + "\npid: 4242\nstart_time: " + directorTestStartTime +
 		"\nterminal_name: " + name + "\n" + directorNoWaitMarkLine + "\n"
 	if stdout != want {

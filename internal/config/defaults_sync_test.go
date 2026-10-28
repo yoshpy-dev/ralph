@@ -309,9 +309,9 @@ func TestDefaultsLockStep(t *testing.T) {
 
 // TestOrgTemplateDrift_DetectsChangedAndMissingKeys pins that
 // orgTemplateDrift catches both kinds of drift in a copy of the real
-// template: a changed value, and a removed key, including one whose default
-// is the zero value (auto_merge, codex_verified), which reading through Load
-// would miss. Each case replaces text that must occur exactly once, so a
+// template: a changed value, and a removed key (auto_merge, codex_verified),
+// which reading through Load would miss because Load backfills Default()'s
+// value. Each case replaces text that must occur exactly once, so a
 // rewording of the template fails the case instead of making it vacuous.
 func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
@@ -338,16 +338,16 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 			wantPrefix: "org.max_seats: template = 6, Default() = 5",
 		},
 		{
-			name:       "a removed auto_merge, whose default is false",
-			old:        "\nauto_merge = false\n",
+			name:       "a removed auto_merge, whose default is true",
+			old:        "\nauto_merge = true\n",
 			new:        "\n",
-			wantPrefix: "org.director.auto_merge: missing from the template (Default() = false)",
+			wantPrefix: "org.director.auto_merge: missing from the template (Default() = true)",
 		},
 		{
-			name:       "a removed codex_verified, whose default is false",
-			old:        "\ncodex_verified = false\n",
+			name:       "a removed codex_verified, whose default is true",
+			old:        "\ncodex_verified = true\n",
 			new:        "\n",
-			wantPrefix: "org.permissions.codex_verified: missing from the template (Default() = false)",
+			wantPrefix: "org.permissions.codex_verified: missing from the template (Default() = true)",
 		},
 		{
 			name:       "a removed wake",

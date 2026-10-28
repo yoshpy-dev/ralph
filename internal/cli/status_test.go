@@ -723,7 +723,7 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 			check: func(t *testing.T, _ string, line string) {
 				want := "director: attached d4 (driver=codex, attached at " + ts + ", pane %7) -- " +
 					"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
-					"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+					"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 				if line != want {
 					t.Errorf("director line:\n got %q\nwant %q", line, want)
 				}
@@ -742,7 +742,8 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 		{
 			name: "disabled with a registration left", disabled: true, setup: attach,
 			check: func(t *testing.T, _ string, line string) {
-				want := "director: disabled ([org.director].enabled = false; registration d1 is still recorded) -- ralph org escalate sends every item to the human at once"
+				want := "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; registration d1 is still recorded) " +
+					"-- ralph org escalate sends every item to the human at once"
 				if line != want {
 					t.Errorf("director line:\n got %q\nwant %q", line, want)
 				}
@@ -761,7 +762,8 @@ func TestStatusCmd_DirectorLinePerState(t *testing.T) {
 		{
 			name: "disabled and unreadable", disabled: true, setup: unreadable,
 			check: func(t *testing.T, stateDir, line string) {
-				if !strings.HasPrefix(line, "director: disabled ([org.director].enabled = false; director.jsonl cannot be read: "+readErrPrefix(stateDir)) ||
+				if !strings.HasPrefix(line, "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; "+
+					"director.jsonl cannot be read: "+readErrPrefix(stateDir)) ||
 					!strings.HasSuffix(line, ") -- ralph org escalate sends every item to the human at once") {
 					t.Errorf("director line = %q; want disabled naming the read error", line)
 				}
@@ -824,6 +826,7 @@ func TestStatusCmd_DirectorLineShowsAutoMerge(t *testing.T) {
 	const (
 		ts           = "2026-10-15T09:00:00Z"
 		on           = "[org.director]\nauto_merge = true\n"
+		off          = "[org.director]\nauto_merge = false\n"
 		attachedTail = " -- the registration does not tell whether its session is still running" + directorNoWaitMarkClause + "; inbox items it does not ack reach the human at the ack deadline"
 		disabledEnd  = ") -- ralph org escalate sends every item to the human at once"
 		noEffect     = "[org.director].enabled = false, so [org.director].auto_merge = true has no effect"
@@ -855,17 +858,19 @@ func TestStatusCmd_DirectorLineShowsAutoMerge(t *testing.T) {
 		wantLine      func(stateDir string) string // "" checks only that the line is unreadable
 		wantAutoMerge bool
 	}{
-		{"not attached, no ralph.toml", "", none, func(string) string { return directorNotAttachedLine }, false},
-		{"not attached, auto_merge = false", "[org.director]\nauto_merge = false\n", none, func(string) string { return directorNotAttachedLine }, false},
+		{"not attached, no ralph.toml", "", none, func(string) string { return directorNotAttachedLine }, true},
+		{"not attached, auto_merge = false", off, none, func(string) string { return directorNotAttachedOffLine }, false},
 		{"not attached, auto_merge = true", on, none, func(string) string { return directorNotAttachedBase + directorAutoMergeOnNotAttached }, true},
 		{"not attached with an open headless director, auto_merge = true", on, openHeadless, func(stateDir string) string {
 			return directorNotAttachedBase + directorAutoMergeOnNotAttached + openNote(stateDir)
 		}, true},
-		{"attached, auto_merge = false", "", attach, func(string) string { return directorAttachedLine("d1", "claude", ts, "alice") }, false},
+		{"attached, auto_merge = false", off, attach, func(string) string {
+			return "director: attached d1 (driver=claude, attached at " + ts + ", by alice)" + attachedTail + directorAutoMergeOff
+		}, false},
 		{"attached, auto_merge = true", on, attach, func(string) string {
 			return "director: attached d1 (driver=claude, attached at " + ts + ", by alice)" + attachedTail + directorAutoMergeOnAttached
 		}, true},
-		{"disabled, auto_merge = false", "[org.director]\nenabled = false\n", none, func(string) string { return directorDisabledLine }, false},
+		{"disabled, auto_merge = false", "[org.director]\nenabled = false\nauto_merge = false\n", none, func(string) string { return directorDisabledOffLine }, false},
 		{"disabled, auto_merge = true", "[org.director]\nenabled = false\nauto_merge = true\n", none, func(string) string {
 			return "director: disabled (" + noEffect + disabledEnd
 		}, true},
@@ -978,7 +983,8 @@ func TestStatusCmd_DirectorLineShowsHeadlessDirectors(t *testing.T) {
 			}
 
 			writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
-			want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless starting, workspace w-2: " +
+			want = "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; " +
+				"registration d2 is still recorded, headless starting, workspace w-2: " +
 				"stop it with ralph org director stop --id d2" + suffix + "; " + directorNotCheckedClause + ") -- ralph org escalate sends every item to the human at once" + d1Note
 			if got := line(); got != want {
 				t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
@@ -1063,7 +1069,8 @@ func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
 	}
 
 	writeTestFile(t, "ralph.toml", "[org.director]\nenabled = false\n")
-	want = "director: disabled ([org.director].enabled = false; registration d2 is still recorded, headless running, launch cmd, name " + name2 + ", pid 4343: " +
+	want = "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; " +
+		"registration d2 is still recorded, headless running, launch cmd, name " + name2 + ", pid 4343: " +
 		"stop it with ralph org director stop --id d2" + suffix + "; " + directorNotCheckedClause + ") -- ralph org escalate sends every item to the human at once" + d1Note
 	if got := line(); got != want {
 		t.Errorf("director line with the switch off:\n got %q\nwant %q", got, want)
@@ -1154,7 +1161,7 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 			t.Fatalf("status %v with a broken main ralph.toml: %v (stderr %s)", extra, err, stderr)
 		}
 		for _, want := range []string{"warning: status: org: load [org.director] from the main worktree's " + mainToml,
-			"showing the director by the default [org.director].enabled (true) and auto_merge (false)\n"} {
+			"showing the director by the default [org.director].enabled (true) and auto_merge (true)\n"} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("status %v stderr does not contain %q:\n%s", extra, want, stderr)
 			}
@@ -1176,7 +1183,7 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 // org-director-attach), also in a main checkout, where ./ralph.toml is the
 // main worktree's file the switch would be read from, and with --json.
 func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *testing.T) {
-	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true) and auto_merge (false)\n"
+	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true) and auto_merge (true)\n"
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) []string // chdirs and returns status's extra args

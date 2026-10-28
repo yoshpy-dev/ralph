@@ -21,13 +21,13 @@ import (
 // checkout, and none runs herdr or osascript.
 
 // directorAutoMergeOff is the end of the attached and not attached director:
-// lines with [org.director].auto_merge false, the default (plan
+// lines with [org.director].auto_merge = false written out (plan
 // 2026-10-17-org-auto-merge, AC2).
 const directorAutoMergeOff = "; merges are left to the human ([org.director].auto_merge = false)"
 
 // directorAutoMergeOnAttached and directorAutoMergeOnNotAttached are the
 // ends of the attached and the not attached director: lines with
-// [org.director].auto_merge true.
+// [org.director].auto_merge true, the default (issue #274).
 const (
 	directorAutoMergeOnAttached = "; the director merges the PRs ralph org merge-order lists as ready with ralph org merge, without asking " +
 		"([org.director].auto_merge = true)"
@@ -41,16 +41,25 @@ const directorNotAttachedBase = "director: not attached -- inbox items reach the
 	"or at once while no watch accepts work"
 
 // directorNotAttachedLine is the director: line with no registration, the
-// switch on, and auto_merge off.
-const directorNotAttachedLine = directorNotAttachedBase + directorAutoMergeOff
+// switch on, and auto_merge at its default, true.
+const directorNotAttachedLine = directorNotAttachedBase + directorAutoMergeOnNotAttached
 
-// directorDisabledLine is the director: line with the switch off and no
-// registration.
-const directorDisabledLine = "director: disabled ([org.director].enabled = false) -- ralph org escalate sends every item to the human at once"
+// directorNotAttachedOffLine is the director: line with no registration, the
+// switch on, and auto_merge = false.
+const directorNotAttachedOffLine = directorNotAttachedBase + directorAutoMergeOff
+
+// directorDisabledLine is the director: line with the switch off, auto_merge
+// at its default, true, and no registration.
+const directorDisabledLine = "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect) " +
+	"-- ralph org escalate sends every item to the human at once"
+
+// directorDisabledOffLine is the director: line with the switch off,
+// auto_merge = false, and no registration.
+const directorDisabledOffLine = "director: disabled ([org.director].enabled = false) -- ralph org escalate sends every item to the human at once"
 
 // directorAttachedLine is the director: line of a registration with id,
-// driver, attach time ts, and user, and no pane, with auto_merge off and no
-// mark of its wait --inbox --director.
+// driver, attach time ts, and user, and no pane, with auto_merge at its
+// default, true, and no mark of its wait --inbox --director.
 func directorAttachedLine(id, driver, ts, user string) string {
 	by := ""
 	if user != "" {
@@ -58,7 +67,7 @@ func directorAttachedLine(id, driver, ts, user string) string {
 	}
 	return "director: attached " + id + " (driver=" + driver + ", attached at " + ts + by + ") -- " +
 		"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
-		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 }
 
 // directorFileOrAbsent returns director.jsonl in stateDir, or "<absent>"
@@ -158,7 +167,7 @@ func TestOrgDirector_AttachReplaceAndDetachByID(t *testing.T) {
 
 	statusOut, _ := runInboxOK(t, append([]string{"director", "status"}, ledger...)...)
 	wantStatus := directorAttachedLine("d1", "claude", ev.TS, "alice") + "\n" +
-		"enabled: true\nauto_merge: false\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ev.TS + "\nuser: alice\ncwd: " + cwd + "\nherdr_pane: yes\n" +
+		"enabled: true\nauto_merge: true\nid: d1\ndriver: claude\nwake: pull\nattached_at: " + ev.TS + "\nuser: alice\ncwd: " + cwd + "\nherdr_pane: yes\n" +
 		directorNoWaitMarkLine + "\n"
 	if statusOut != wantStatus {
 		t.Errorf("director status =\n%s\nwant\n%s", statusOut, wantStatus)
@@ -579,25 +588,28 @@ func TestOrgDirector_StatusShowsAutoMerge(t *testing.T) {
 		return []string{"--state-dir", stateDir, "--config", path}
 	}
 
-	// No ralph.toml at all: the built-in default, false.
-	if line, autoMerge := directorStatusAutoMerge(t, "--state-dir", stateDir); autoMerge || line != directorNotAttachedLine {
-		t.Errorf("with no ralph.toml: auto_merge %v, line %q; want false and %q", autoMerge, line, directorNotAttachedLine)
+	// No ralph.toml at all: the built-in default, true.
+	if line, autoMerge := directorStatusAutoMerge(t, "--state-dir", stateDir); !autoMerge || line != directorNotAttachedLine {
+		t.Errorf("with no ralph.toml: auto_merge %v, line %q; want true and %q", autoMerge, line, directorNotAttachedLine)
 	}
 	on := withConfig(t, "[org.director]\nauto_merge = true\n")
-	if line, autoMerge := directorStatusAutoMerge(t, on...); !autoMerge || line != directorNotAttachedBase+directorAutoMergeOnNotAttached {
-		t.Errorf("not attached, auto_merge = true: auto_merge %v, line %q; want true and %q", autoMerge, line, directorNotAttachedBase+directorAutoMergeOnNotAttached)
+	if line, autoMerge := directorStatusAutoMerge(t, on...); !autoMerge || line != directorNotAttachedLine {
+		t.Errorf("not attached, auto_merge = true: auto_merge %v, line %q; want true and %q", autoMerge, line, directorNotAttachedLine)
+	}
+	off := withConfig(t, "[org.director]\nauto_merge = false\n")
+	if line, autoMerge := directorStatusAutoMerge(t, off...); autoMerge || line != directorNotAttachedOffLine {
+		t.Errorf("not attached, auto_merge = false: auto_merge %v, line %q; want false and %q", autoMerge, line, directorNotAttachedOffLine)
 	}
 
 	t.Setenv("USER", "alice")
 	runInboxOK(t, "director", "attach", "--driver", "claude", "--state-dir", stateDir)
 	ts := directorEventsIn(t, stateDir)[0].TS
-	attachedOn := strings.TrimSuffix(directorAttachedLine("d1", "claude", ts, "alice"), directorAutoMergeOff) + directorAutoMergeOnAttached
-	if line, autoMerge := directorStatusAutoMerge(t, on...); !autoMerge || line != attachedOn {
-		t.Errorf("attached, auto_merge = true: auto_merge %v, line %q; want true and %q", autoMerge, line, attachedOn)
+	if line, autoMerge := directorStatusAutoMerge(t, on...); !autoMerge || line != directorAttachedLine("d1", "claude", ts, "alice") {
+		t.Errorf("attached, auto_merge = true: auto_merge %v, line %q; want true and %q", autoMerge, line, directorAttachedLine("d1", "claude", ts, "alice"))
 	}
-	off := withConfig(t, "[org.director]\nauto_merge = false\n")
-	if line, autoMerge := directorStatusAutoMerge(t, off...); autoMerge || line != directorAttachedLine("d1", "claude", ts, "alice") {
-		t.Errorf("attached, auto_merge = false: auto_merge %v, line %q; want false and %q", autoMerge, line, directorAttachedLine("d1", "claude", ts, "alice"))
+	attachedOff := strings.TrimSuffix(directorAttachedLine("d1", "claude", ts, "alice"), directorAutoMergeOnAttached) + directorAutoMergeOff
+	if line, autoMerge := directorStatusAutoMerge(t, off...); autoMerge || line != attachedOff {
+		t.Errorf("attached, auto_merge = false: auto_merge %v, line %q; want false and %q", autoMerge, line, attachedOff)
 	}
 
 	disabledOn := withConfig(t, "[org.director]\nenabled = false\nauto_merge = true\n")
@@ -606,7 +618,7 @@ func TestOrgDirector_StatusShowsAutoMerge(t *testing.T) {
 	if line, autoMerge := directorStatusAutoMerge(t, disabledOn...); !autoMerge || line != want {
 		t.Errorf("disabled, auto_merge = true: auto_merge %v, line %q; want true and %q", autoMerge, line, want)
 	}
-	disabledOff := withConfig(t, "[org.director]\nenabled = false\n")
+	disabledOff := withConfig(t, "[org.director]\nenabled = false\nauto_merge = false\n")
 	want = "director: disabled ([org.director].enabled = false; registration d1 is still recorded) -- ralph org escalate sends every item to the human at once"
 	if line, autoMerge := directorStatusAutoMerge(t, disabledOff...); autoMerge || line != want {
 		t.Errorf("disabled, auto_merge = false: auto_merge %v, line %q; want false and %q", autoMerge, line, want)
@@ -633,7 +645,7 @@ func TestOrgDirector_AutoMergeFromTheMainWorktreeRalphToml(t *testing.T) {
 	}{
 		{"main says true, the worktree says false", on, off, func(*testing.T, legacyLedgerRepo) []string { return nil }, true, true},
 		{"main says false, the worktree says true", off, on, func(*testing.T, legacyLedgerRepo) []string { return nil }, false, true},
-		{"no main ralph.toml, the worktree says true", "", on, func(*testing.T, legacyLedgerRepo) []string { return nil }, false, true},
+		{"no main ralph.toml, the worktree says false", "", off, func(*testing.T, legacyLedgerRepo) []string { return nil }, true, true},
 		{"main says true, --state-dir names the shared ledger", on, off, func(_ *testing.T, r legacyLedgerRepo) []string {
 			return []string{"--state-dir", r.sharedDir}
 		}, true, true},
@@ -657,8 +669,8 @@ func TestOrgDirector_AutoMergeFromTheMainWorktreeRalphToml(t *testing.T) {
 			}
 			extra := tc.extra(t, r)
 			wantLine := directorNotAttachedLine
-			if tc.wantAutoMerge {
-				wantLine = directorNotAttachedBase + directorAutoMergeOnNotAttached
+			if !tc.wantAutoMerge {
+				wantLine = directorNotAttachedOffLine
 			}
 
 			if line, autoMerge := directorStatusAutoMerge(t, extra...); autoMerge != tc.wantAutoMerge || line != wantLine {
@@ -895,7 +907,7 @@ func TestOrgDirector_StatusWarnsAboutDamageAndEscapesValues(t *testing.T) {
 	}
 	wantLine := `director: attached d2 (driver=claude, attached at 2026-10-15T09:00:00Z, by eve\x1b[2J\ndirector: forged, pane %7\r) -- ` +
 		"the registration does not tell whether its session is still running" + directorNoWaitMarkClause +
-		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+		"; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 	lines := strings.Split(stdout, "\n")
 	if lines[0] != wantLine {
 		t.Errorf("director line:\n got %q\nwant %q", lines[0], wantLine)
@@ -949,7 +961,8 @@ func TestOrgDirector_StatusOfAnUnreadableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ralph.toml")
 	writeTestFile(t, path, "[org.director]\nenabled = false\n")
 	got = directorStatusLine(t, "--state-dir", stateDir, "--config", path)
-	if !strings.HasPrefix(got, "director: disabled ([org.director].enabled = false; director.jsonl cannot be read: "+readErr) ||
+	if !strings.HasPrefix(got, "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; "+
+		"director.jsonl cannot be read: "+readErr) ||
 		!strings.HasSuffix(got, ") -- ralph org escalate sends every item to the human at once") {
 		t.Errorf("director line with the switch off = %q; want disabled naming the read error", got)
 	}
@@ -969,8 +982,9 @@ func TestOrgDirector_StatusDisabledNamesALeftRegistration(t *testing.T) {
 	writeTestFile(t, path, "[org.director]\nenabled = false\n")
 
 	stdout, _ := runInboxOK(t, "director", "status", "--state-dir", stateDir, "--config", path)
-	want := "director: disabled ([org.director].enabled = false; registration d1 is still recorded) -- ralph org escalate sends every item to the human at once\n" +
-		"enabled: false\nauto_merge: false\nid: d1\n"
+	want := "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; registration d1 is still recorded) " +
+		"-- ralph org escalate sends every item to the human at once\n" +
+		"enabled: false\nauto_merge: true\nid: d1\n"
 	if !strings.HasPrefix(stdout, want) {
 		t.Errorf("director status =\n%s\nwant it to start with\n%s", stdout, want)
 	}

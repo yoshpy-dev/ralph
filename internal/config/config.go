@@ -100,8 +100,9 @@ type OrgConfig struct {
 // per-role. Default applies to every role without an explicit entry in
 // Roles. internal/org maps the resolved mode to driver-native CLI flags
 // (e.g. claude: --permission-mode bypassPermissions); codex seats accept
-// only guarded until the operator sets CodexVerified after verifying the
-// codex flag mapping on their machine (docs/recipes/codex-seat-permissions.md).
+// every mode while CodexVerified is true (the default), and only guarded
+// once the operator sets it to false because the codex flag mapping does
+// not hold on their machine (docs/recipes/codex-seat-permissions.md).
 type OrgPermissionsConfig struct {
 	// Default is the permission mode every role uses unless overridden in
 	// Roles. One of "autonomous" | "edits" | "guarded".
@@ -115,10 +116,11 @@ type OrgPermissionsConfig struct {
 	// workspace-write`) instead of fail-closed-rejecting them (PR④ AC-8,
 	// docs/plans/archive/2026-08-02-org-runtime-watchdog.md). The mapping was
 	// live-verified on 2026-09-18 against codex-cli 0.154.0
-	// (docs/evidence/codex-seat-permissions-2026-09-18.md), but the flags
-	// inherit the operator's own ~/.codex/config.toml (approval_policy,
-	// sandbox writable_roots), so the default stays false by design: each
-	// machine opts in after running docs/recipes/codex-seat-permissions.md.
+	// (docs/evidence/codex-seat-permissions-2026-09-18.md), and the default
+	// is true (issue #274). The flags inherit the operator's own
+	// ~/.codex/config.toml (approval_policy, sandbox writable_roots), so a
+	// machine where docs/recipes/codex-seat-permissions.md does not pass sets
+	// it to false, which keeps codex seats fail-closed to guarded.
 	CodexVerified bool `toml:"codex_verified"`
 }
 
@@ -179,11 +181,11 @@ type OrgDirectorConfig struct {
 	// AutoMerge is the mark the /director skill reads for whether it may,
 	// without asking, merge each PR `ralph org merge-order` lists as ready
 	// with `ralph org merge` and re-gate the rest with `ralph org regate`
-	// (spec FR-8). When false (the default), the director only reports the
-	// merge order, and merges are the human's. `ralph org merge` runs the
-	// same checks whichever value is set (plan 2026-10-17-org-auto-merge,
-	// D1). It is read from the main worktree's ralph.toml by the same rule
-	// as Enabled.
+	// (spec FR-8). True is the default (issue #274). When false, the
+	// director only reports the merge order, and merges are the human's.
+	// `ralph org merge` runs the same checks whichever value is set (plan
+	// 2026-10-17-org-auto-merge, D1). It is read from the main worktree's
+	// ralph.toml by the same rule as Enabled.
 	AutoMerge bool `toml:"auto_merge"`
 	// AckMinutes is the ack deadline: an open inbox item that has not been
 	// sent to the human yet is sent once this long after it was escalated.
@@ -561,7 +563,7 @@ func Default() Config {
 			Permissions: OrgPermissionsConfig{
 				Default:       "autonomous",
 				Roles:         map[string]string{},
-				CodexVerified: false,
+				CodexVerified: true,
 			},
 			Watchdog: OrgWatchdogConfig{
 				IntervalSeconds: 30,
@@ -571,7 +573,7 @@ func Default() Config {
 			},
 			Director: OrgDirectorConfig{
 				Enabled:        true,
-				AutoMerge:      false,
+				AutoMerge:      true,
 				AckMinutes:     10,
 				ResolveMinutes: 60,
 				Wake:           []string{DirectorWakePull},

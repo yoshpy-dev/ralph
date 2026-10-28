@@ -1234,13 +1234,15 @@ const (
 
 // writeCodexOrgConfig writes a ralph.toml with an [org] section that allows
 // the codex driver (one [[org.model_pool]] entry,
-// codexOrgTestCommandedModel) and, when guardedRole is non-empty, maps that
-// role to guarded permission mode -- codex's fail-closed autonomous default
-// (permissionArgsForDriver) would otherwise reject every codex spawn in
-// this file outright, the same gate internal/org/spawn_test.go's
-// codexGuardedOrg works around for the library-level tests. An empty
-// guardedRole deliberately leaves every role on the autonomous default, for
-// the one test that needs that fail-closed rejection.
+// codexOrgTestCommandedModel), sets [org.permissions].codex_verified =
+// false (the default is true), and, when guardedRole is non-empty, maps that
+// role to guarded permission mode -- with codex_verified false, codex's
+// fail-closed autonomous check (permissionArgsForDriver) would otherwise
+// reject every codex spawn in this file outright, the same gate
+// internal/org/spawn_test.go's codexGuardedOrg works around for the
+// library-level tests. An empty guardedRole deliberately leaves every role
+// on the autonomous default, for the one test that needs that fail-closed
+// rejection.
 func writeCodexOrgConfig(t *testing.T, dir string, maxSeats int, guardedRole string) string {
 	t.Helper()
 	path := filepath.Join(dir, "ralph.toml")
@@ -1251,7 +1253,8 @@ func writeCodexOrgConfig(t *testing.T, dir string, maxSeats int, guardedRole str
 		"driver = \"codex\"\n" +
 		"model = \"" + codexOrgTestCommandedModel + "\"\n\n" +
 		"[org.permissions]\n" +
-		"default = \"autonomous\"\n"
+		"default = \"autonomous\"\n" +
+		"codex_verified = false\n"
 	if guardedRole != "" {
 		content += "\n[org.permissions.roles]\n" + guardedRole + " = \"guarded\"\n"
 	}
