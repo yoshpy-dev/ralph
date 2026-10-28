@@ -30,7 +30,17 @@ func newInitCmd() *cobra.Command {
 		Use:   "init [directory]",
 		Short: "Initialize a new project with harness engineering scaffold",
 		Long: `Scaffolds a project with Claude Code configurations, hooks, skills,
-agents, rules, and org-runtime config. Supports both new and existing projects.`,
+agents, rules, and org-runtime config. Supports both new and existing projects.
+
+The language-pack question starts with nothing selected. A pack whose marker
+files (go.mod, package.json, ...) sit directly in the target directory is
+labeled "(Recommended)", and "skip" installs no language pack. A pack can be
+added later with ralph pack add <language>.
+
+With --yes nothing is asked and no language pack is installed unless --pack
+names one. --pack can be repeated or take comma-separated names, and an unknown
+name fails before anything is written. When TERM=dumb and stdin is not a
+terminal, ralph init cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check the --pack names before the form and before anything is

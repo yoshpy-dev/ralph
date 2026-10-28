@@ -28,7 +28,13 @@ git-clean precondition, `y`/`N` confirmation — `--yes`/`--dry-run` available)
 before you can add a pack.
 
 Packs can also be selected up front, at `ralph init` time, if you already
-know which languages the project needs.
+know which languages the project needs. The interactive `ralph init` asks
+which packs to install: nothing is selected at first, a pack whose marker
+files sit directly in the target directory is labeled "(Recommended)", and
+"skip" installs no pack. For non-interactive use, `ralph init --yes` installs
+no pack unless `--pack <name>` names one (repeat the flag or separate names
+with commas), for example `ralph init --yes --pack golang,python`. An unknown
+name fails before anything is written.
 
 ## How the rule content works
 

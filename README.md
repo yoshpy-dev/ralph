@@ -117,7 +117,7 @@ Before claiming a task is done:
 
 | Command | Purpose |
 |---------|---------|
-| `ralph init [name]` | Scaffold a new project (interactive: language packs). |
+| `ralph init [name]` | Scaffold a new project. Interactive: asks which language packs to install (none selected at first, marker-file matches labeled "(Recommended)", plus a "skip" option). `--yes` asks nothing and installs no pack unless `--pack <name>` names one (repeatable or comma-separated); `ralph pack add` adds one later. |
 | `ralph upgrade` | Non-interactively pull template updates; auto-migrates legacy (pre-v2) layouts first (see [`ralph upgrade`](#ralph-upgrade)). |
 | `ralph eject <path>` | Convert a core-owned scaffold path into a user-owned fork (zero disk writes); upgrade stops replacing it. |
 | `ralph adopt <path>\|--all` | Reset a fork or drifted core path back to `owner=core`, overwriting it with the current embedded template. |
