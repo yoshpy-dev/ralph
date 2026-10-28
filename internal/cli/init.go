@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
@@ -57,7 +58,7 @@ agents, rules, and org-runtime config. Supports both new and existing projects.`
 			if nonInteractive {
 				return runInitNonInteractive(absDir, packs, force)
 			}
-			return runInitInteractive(absDir, force)
+			return runInitInteractive(absDir, packs, force)
 		},
 	}
 
@@ -99,7 +100,10 @@ type initConfig struct {
 	Packs       []string
 }
 
-func runInitInteractive(targetDir string, force bool) error {
+// runInitInteractive asks for the project name and the language packs, with
+// the packs parsePackFlag returned for --pack selected at the start (none
+// without --pack).
+func runInitInteractive(targetDir string, packs []string, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
 	// path. executeInit retains the same check as a safety net for
@@ -118,13 +122,15 @@ func runInitInteractive(targetDir string, force bool) error {
 
 	cfg := initConfig{
 		ProjectName: defaultName,
-		Packs:       availPacks, // Default: all packs selected.
+		Packs:       packs,
 	}
 
-	// Build multi-select options with all packs pre-selected.
-	packOptions := make([]huh.Option[string], len(availPacks))
-	for i, p := range availPacks {
-		packOptions[i] = huh.NewOption(p, p).Selected(true)
+	// With TERM=dumb huh asks in accessible mode (huh.NewForm) and reads the
+	// answers from stdin. At the end of a stdin that is not a terminal it
+	// takes each answer as "confirm" and, while validatePackSelection refuses
+	// the empty selection, asks the pack question again without end.
+	if os.Getenv("TERM") == "dumb" && !term.IsTerminal(os.Stdin.Fd()) {
+		return errors.New("TERM=dumb and stdin is not a terminal, so ralph init cannot ask its questions; run ralph init --yes (with --pack <name> to install a language pack)")
 	}
 
 	form := huh.NewForm(
@@ -132,10 +138,7 @@ func runInitInteractive(targetDir string, force bool) error {
 			huh.NewInput().
 				Title("Project name").
 				Value(&cfg.ProjectName),
-			huh.NewMultiSelect[string]().
-				Title("Language packs").
-				Options(packOptions...).
-				Value(&cfg.Packs),
+			newPackQuestion(availPacks, recommendedPacks(targetDir, availPacks), &cfg.Packs),
 		),
 	)
 
@@ -143,7 +146,126 @@ func runInitInteractive(targetDir string, force bool) error {
 		return fmt.Errorf("interactive form: %w", err)
 	}
 
+	cfg.Packs = packsFromSelection(cfg.Packs)
 	return executeInit(targetDir, cfg, force)
+}
+
+// skipPackValue is the value of the pack question's skip option. A pack name
+// is a directory name under templates/packs/, which cannot hold a "/", so no
+// pack can be named this. packsFromSelection drops it before executeInit,
+// which would warn about it as a missing pack and keep it in the manifest.
+const skipPackValue = "/skip"
+
+// packMarkers lists, per language pack, the files that mark the pack
+// (Recommended) in the init form when one sits directly in the target
+// directory: a file name or a filepath.Match pattern. It follows
+// has_project_marker in scripts/detect-changed-languages.sh, plus setup.cfg
+// and, for terraform (which has_project_marker does not check), the names
+// classify_language gives to terraform.
+var packMarkers = map[string][]string{
+	"golang":     {"go.mod"},
+	"typescript": {"package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json", "tsconfig.*.json"},
+	"python":     {"pyproject.toml", "requirements.txt", "requirements-*.txt", "setup.py", "setup.cfg", "tox.ini"},
+	"rust":       {"Cargo.toml"},
+	"dart":       {"pubspec.yaml"},
+	"terraform":  {"*.tf", "*.tofu", "*.tftest.hcl", ".terraform.lock.hcl"},
+}
+
+// recommendedPacks returns the packs of available, in available's order,
+// whose marker (packMarkers) is a regular file, or a symlink to one, directly
+// in targetDir. A target directory that does not exist yet, or cannot be
+// read, gives none: the mark only labels an option, and executeInit reports a
+// directory it cannot use.
+func recommendedPacks(targetDir string, available []string) []string {
+	entries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return nil
+	}
+	var recommended []string
+	for _, pack := range available {
+		if slices.ContainsFunc(entries, func(entry os.DirEntry) bool {
+			return isPackMarker(targetDir, entry.Name(), packMarkers[pack])
+		}) {
+			recommended = append(recommended, pack)
+		}
+	}
+	return recommended
+}
+
+// isPackMarker reports whether name, an entry of dir, matches one of patterns
+// and is a regular file or a symlink to one, as test -f sees it.
+func isPackMarker(dir, name string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// The patterns of packMarkers are well formed, so Match returns no error.
+		if matched, _ := filepath.Match(pattern, name); matched {
+			info, err := os.Stat(filepath.Join(dir, name))
+			return err == nil && info.Mode().IsRegular()
+		}
+	}
+	return false
+}
+
+// packOptions returns the options of the pack question: one per pack of
+// available, in its order, labeled "<name> (Recommended)" when the pack is in
+// recommended, and a last option to skip. An option is selected when its
+// value is in initial.
+func packOptions(available, recommended, initial []string) []huh.Option[string] {
+	options := make([]huh.Option[string], 0, len(available)+1)
+	for _, pack := range available {
+		label := pack
+		if slices.Contains(recommended, pack) {
+			label += " (Recommended)"
+		}
+		options = append(options, huh.NewOption(label, pack).Selected(slices.Contains(initial, pack)))
+	}
+	return append(options, huh.NewOption("skip (no language pack)", skipPackValue).Selected(slices.Contains(initial, skipPackValue)))
+}
+
+// validatePackSelection keeps the form on the pack question unless the
+// selection is skip alone or one or more packs without skip.
+func validatePackSelection(selection []string) error {
+	switch {
+	case len(selection) == 0:
+		return errors.New("choose at least one language pack, or skip")
+	case len(selection) > 1 && slices.Contains(selection, skipPackValue):
+		return errors.New("choose skip alone, or language packs without skip")
+	}
+	return nil
+}
+
+// packsFromSelection returns the packs to install for the pack question's
+// selection: every value but skip's, so skip alone installs none.
+func packsFromSelection(selection []string) []string {
+	var packs []string
+	for _, value := range selection {
+		if value != skipPackValue {
+			packs = append(packs, value)
+		}
+	}
+	return packs
+}
+
+// packQuestionDescription explains the pack question's labels, one short line
+// each so that neither wraps in an 80-column terminal.
+const packQuestionDescription = "(Recommended): the directory has a project file of the language.\n" +
+	"skip: install no language pack (ralph pack add adds one later)."
+
+// newPackQuestion returns the language pack question of the init form. It
+// starts with the values in *selection selected and writes the selection
+// back to it; packsFromSelection turns that into the packs to install.
+func newPackQuestion(available, recommended []string, selection *[]string) *huh.MultiSelect[string] {
+	options := packOptions(available, recommended, *selection)
+	return huh.NewMultiSelect[string]().
+		Title("Language packs").
+		Description(packQuestionDescription).
+		Options(options...).
+		// Room for the title, the description, and every option. Without a
+		// height, huh sizes the list to the options minus the title and
+		// description lines, which hides the last options (skip among them)
+		// until the cursor scrolls down to them.
+		Height(1 + strings.Count(packQuestionDescription, "\n") + 1 + len(options)).
+		Validate(validatePackSelection).
+		Value(selection)
 }
 
 // runInitNonInteractive installs the packs parsePackFlag returned for --pack;
