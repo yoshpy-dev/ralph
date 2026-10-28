@@ -40,8 +40,11 @@
 #      skills listing find fails, unlike an unreadable child directory,
 #      which the SKILL.md check reports) is reported instead of silently
 #      passing (the last three skipped when running as root).
-#   G. fresh scaffold: `go run ./cmd/ralph init --yes <tmp>` (when `go` is
-#      available) passes check-template.sh with no FAIL line.
+#   G. fresh scaffold: `go run ./cmd/ralph init --yes --pack <every pack under
+#      templates/packs/ except _template> <tmp>` (when `go` is available)
+#      installs packs/languages/<name>/ for each of them and passes
+#      check-template.sh with no FAIL line. --yes alone installs no pack, so
+#      the packs are named explicitly to keep checking their files.
 #   H. a project missing a whole search root (`packs/`, `.claude/agents/`,
 #      or `.claude/skills/`) passes with no FAIL line; a missing root is
 #      skipped, not reported.
@@ -580,12 +583,27 @@ run_case_f() {
   trap - EXIT
 }
 
-# --- G. fresh scaffold: go run ./cmd/ralph init --yes <tmp> -----------------
+# --- G. fresh scaffold: go run ./cmd/ralph init --yes --pack <all packs> <tmp> -
 run_case_g() {
-  local fresh init_output output rc
+  local fresh init_output output rc pack_dir pack_name packs missing
 
   if ! command -v go >/dev/null 2>&1; then
     skip "G. fresh scaffold check skipped (go is unavailable)"
+    return
+  fi
+
+  # Every pack under templates/packs/ except _template, as one comma
+  # separated --pack value, so a pack added later is scaffolded without
+  # editing this test.
+  packs=""
+  for pack_dir in "$REPO_ROOT"/templates/packs/*/; do
+    [ -d "$pack_dir" ] || continue
+    pack_name="$(basename "$pack_dir")"
+    [ "$pack_name" = "_template" ] && continue
+    packs="${packs:+$packs,}$pack_name"
+  done
+  if [ -z "$packs" ]; then
+    fail "G. no language pack found under $REPO_ROOT/templates/packs/; the fresh scaffold would install none"
     return
   fi
 
@@ -595,9 +613,22 @@ run_case_g() {
   }
   trap 'rm -rf "$fresh"' EXIT
 
-  if ! init_output="$(cd "$REPO_ROOT" && go run ./cmd/ralph init --yes "$fresh" 2>&1)"; then
-    fail "G. go run ./cmd/ralph init --yes $fresh failed"
+  if ! init_output="$(cd "$REPO_ROOT" && go run ./cmd/ralph init --yes --pack "$packs" "$fresh" 2>&1)"; then
+    fail "G. go run ./cmd/ralph init --yes --pack $packs $fresh failed"
     printf '%s\n' "$init_output" | sed 's/^/    /'
+    rm -rf "$fresh"
+    trap - EXIT
+    return
+  fi
+
+  # --yes alone installs no pack, so prove each named pack landed before
+  # check-template.sh is expected to cover its files.
+  missing=""
+  for pack_name in $(printf '%s' "$packs" | tr ',' ' '); do
+    [ -d "$fresh/packs/languages/$pack_name" ] || missing="$missing $pack_name"
+  done
+  if [ -n "$missing" ]; then
+    fail "G. the fresh scaffold has no packs/languages/<name>/ for:$missing"
     rm -rf "$fresh"
     trap - EXIT
     return
