@@ -5,6 +5,7 @@
 - Verifier: verifier サブエージェント(`/verify`、cycle 1)
 - Scope: `git diff 15e301c8...HEAD`(HEAD d1a09d01、11 ファイル、+648/-84)。テストは打っていない(`/test` の範囲)。観察のため、worktree から `go build` した binary で scratchpad の project に `ralph doctor` を 7 通り打った。`go test` は打っていない
 - Evidence: `docs/evidence/verify-2026-10-28-doctor-either-agent-cli.log`(gitignore。`run-static-verify.sh` の全出力、`git diff --check`・`gofmt`・`go vet`、doctor の probe の出力、文書の grep)
+- Re-run: HEAD bf29f451 で回し直した(追加のスライス S5 のあと、cycle 1 のまま)。結果は下の「Re-run(HEAD bf29f451)」の節で、`## Verdict` の最初の行がこの回の判定。上の Spec compliance から Coverage gaps までは 1 回目(HEAD d1a09d01)の記録で、書き換えていない
 
 ## Spec compliance
 
@@ -91,7 +92,62 @@ herdr と agmsg の行は 7 ケースすべてで warn と `(the standard flow i
 - 本物の claude と codex の CLI での doctor は打っていない(stub だけ)。`probeBinary` は今回変わっていない
 - Codex の driver で cross-review が `claude -p` を呼ばずに止まることは、skill の文(`.claude/skills/cross-review/SKILL.md:50`)を読んだだけ
 
+## Re-run(HEAD bf29f451)
+
+- Date: 2026-10-28。`.harness/state/standard-pipeline/cycle-count.json` は 1 のまま(cross-review の前の追加スライスなので cycle を増やさない。計画の Progress の S5)
+- Scope: `git diff --stat 322bfe18..HEAD` は 5 ファイル、+263/-0。コードは `internal/cli/doctor_shell_alias_test.go` の +53 だけで、8408b30c でテストを 1 本足し、ee5b3bda で名前と確かめ方を直した。残りは計画の Progress の 3 行、self-review の報告(Run 3・Run 4)、test の報告(1b9798b1 で新規)、insight event の 2 行。本体のコード(テスト以外)と文書の本文は変わっていないので、1 回目の AC1〜AC5・AC7 の確かめと Observational checks はそのまま当てはまる。go test は打っていない
+- Evidence: `docs/evidence/verify-2026-10-28-doctor-either-agent-cli.log` の末尾に `Re-run (HEAD bf29f451)` の節を足した(gitignore)。wrapper 自身のログは `docs/evidence/verify-2026-10-28-113535.log`
+
+### Static analysis(re-run)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | rc 0 | 1 回で通った(51.2 秒、20:35:34〜20:36:26 +0900、時間切れなし、打ち直しは要らなかった)。範囲は 1 回目と同じく `unclassified:templates/base/ralph.toml` で full に倒れ、pack は golang。`gofmt: ok`、golangci-lint は `0 issues.`、`go vet` と staticcheck は出力なし(Skipping の行はない)。shellcheck、hook の `sh -n`(root と template の 10 本ずつ)、guard の awk、settings の `jq`、`check-sync.sh`(DRIFTED 0)、`check-pipeline-sync.sh`、`check-skill-sync.sh`(14 skill)、`check-template-purity.sh`、tech-debt の計画参照も通った。secret scan は `15e301c8..bf29f451` で clean |
+| `git diff --check 15e301c8...HEAD` と `git diff --check 322bfe18..HEAD` | rc 0 | どちらも出力なし |
+| `test -z "$(gofmt -l internal/cli internal/config)"` | rc 0 | |
+| `go vet ./internal/cli/ ./internal/config/` | rc 0 | テストのファイルを含む。go1.27.3 |
+
+### AC6 と Test plan の edge case(re-run)
+
+| 項目 | Status | Evidence |
+| --- | --- | --- |
+| Test plan の Edge cases「herdr がないときも Check 8b(alias)は herdr を pass と見なさない」 | Met(テストを読み、本体の分岐と照らした。実行は `/test`) | `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr`(`internal/cli/doctor_shell_alias_test.go:1558-1609`)は、兄弟の `WarnsThroughTheSeam`(`:1514`)と同じ組み立てで、PATH に claude・codex・go の stub だけを置き、herdr を置かない(`:1577-1581`)。rc に `alias codex="codex -m x"` を書いて `runDoctorOpts` を通し、エラーがないこと(`:1593`)、`herdr` の行が warn であること、`Shell aliases (codex/claude)` の行が info で、detail に `(herdr not installed, so no seat is affected today)` が入ること(`:1599-1608`)を見る。行は `doctorLine`(`doctor_agent_cli_test.go:166`)で名前ごとに取り出すので、出力全体への `Contains` ではない |
+| 期待と本体の対応 | Yes | herdr がないと `checkHerdrAvailable` は warn(`doctor.go:780-790`)。`doctor.go:134` は `herdrResult.Status == "pass"` を `checkShellAliases` に渡す。herdrPresent が false なら codex の finding は status の switch(`doctor_shell_alias.go:944` の次の case)で info になり、`shellAliasCodexSentence`(`:723`)が句を足す |
+| mutant P9(`== "pass"` を `!= "info"` に)を落とすか | 落ちる見込み(分岐から読んだ。走らせていない) | P9 では herdr の warn が「ある」と読まれ、`doctor_shell_alias.go:944` の case で codex の finding が warn になり、句も付かない。テストの status と detail の 2 つの確かめが落ちる。overlay で走らせて落ちたことは、計画の Progress の S5 の 2 行(139・140 行)に implementer の記録としてある |
+| 計画の Assumptions(`runDoctor*` を呼ぶテストは claude と codex の stub を置く) | Yes | 新しい呼び出し(`:1592`)も claude と codex の stub を置く |
+| AC6 | Met のまま(有無と中身。実行は `/test`) | 1 回目の内容に、herdr がないときの alias の行の配線を `runDoctorOpts` の通しで見るテストが加わった |
+
+### Documentation drift(re-run)
+
+| Doc / contract | In sync? | Notes |
+| --- | --- | --- |
+| 旧テスト名 `HerdrAbsentStaysInfo` | Yes | `git grep` のヒットは 4 か所で、すべて履歴の記録。計画の Progress の 139 行(S5 の結果。直後の 140 行が改名を記録)、self-review の報告の 93 行(Run 3 の Scope)、113 行(Run 3 の N1)、143 行(Run 4 の「Run 3 の所見の扱い」で、N1 の解決として旧名を引く)。コードと、今の状態を書く文書にはない。`docs/evidence/` にもない |
+| 新テスト名 `CodexAliasStaysInfoWithoutHerdr` | Yes | `internal/cli/doctor_shell_alias_test.go:1558`・`:1563` と計画の 140 行 |
+| 新しいテストの doc comment | Yes | 「A missing herdr reports warn」「present only when herdr's line is "pass", not merely when it is not "info"」「a codex alias finding then stays info and carries the herdr-not-installed suffix」は、`doctor.go:783`、`:134`、`doctor_shell_alias.go:723`・`:944` と合う。「WarnsThroughTheSeam with no herdr on PATH」も、stub の並びと確かめを除けば組み立てが同じなので合う |
+| 本体の文書(README、雛形のコメント、tech-debt の (h)、recipe、skill) | Yes | `322bfe18..HEAD` で変わっていない。1 回目の Documentation drift がそのまま当てはまる |
+
+Info(re-run、直さなくてよい):
+
+7. `docs/reports/test-2026-10-28-doctor-either-agent-cli.md` は HEAD 322bfe18 の記録で、Test gaps の 1 と Verdict に「P9 を固めるテストがない」「1 本足すかはリードの判断に任せる」とある。S5 でそのテストを足したので、今の状態としては古い。`/test` の回し直しで更新される見込み
+8. 計画の AC1〜AC7 と、Progress の「Review artifact created」「Verification artifact created」「Test artifact created」はまだ `[ ]`(1 回目の Info 6 と同じチェックボックスの遅れ)
+
+### Plan digest(re-run)
+
+`./scripts/plan-visual.sh digest docs/plans/active/2026-10-28-doctor-either-agent-cli.md` は `0a45c27ac33e`(rc 0)で、4 行目の `- Approved: 2026-10-28 sha256:0a45c27ac33e` と一致する。`322bfe18..HEAD` の計画の変更は Progress の 3 行の追加だけ。
+
+### Coverage gaps(re-run)
+
+- 新しいテストを走らせた結果と、P9 を当てたときに落ちることは `/test` の範囲で、ここでは打っていない。P9 で落ちることは本体の分岐から読んだだけ
+- 1 回目の Coverage gaps の残り(テストの実行、本物の CLI での doctor、Codex の driver の cross-review)は変わらない
+
 ## Verdict
+
+- Verdict: pass(re-run、HEAD bf29f451)
+- Verified(re-run): 静的解析(`run-static-verify.sh` rc 0、`git diff --check`・`gofmt`・`go vet` rc 0)、新しいテストが Test plan の edge case を固める作りであること(本体の分岐と照らして読んだ)、旧テスト名が履歴の記録にしか残らないこと、計画の digest の一致。本体のコードと文書は 322bfe18 から変わっていないので、1 回目の確かめはそのまま当てはまる
+- Partially verified(re-run): AC6(新しいテストの有無と中身。実行と P9 で落ちることは `/test`)
+- Not verified(re-run): テストの実行結果(`/test`)
+
+### Run 1(HEAD d1a09d01)
 
 - Verified: AC1〜AC5 と AC7(コードを読み、ビルドした binary の doctor で 7 通りを観察)。静的解析(`run-static-verify.sh` rc 0、`git diff --check`・`gofmt`・`go vet` rc 0)。文書の同期(README の 2 か所、雛形のコメント、tech-debt の (h)、recipe と skill の doctor の記述)
 - Partially verified: AC6(テストの有無と中身は確かめた。実行は `/test`)
