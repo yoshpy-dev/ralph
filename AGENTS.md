@@ -28,13 +28,13 @@ This project ships two independent execution surfaces:
 The development harness:
 
 1. Spec (auto, optional — refines vague ideas into detailed specifications via decision-tree questioning, codebase exploration, web research, and user clarification)
-2. Plan (auto — ensures a clean-base task worktree, creates plan, shows a visual review page and asks for approval: Approve / Needs changes) [+ optional Codex plan advisory]
+2. Plan (auto — ensures a clean-base task worktree, creates plan, shows a visual review page and asks for approval: Approve / Needs changes) [+ other-model plan advisory when `[standard].plan_advisory` is on and the other CLI is available; a skip is recorded]
 3. Implement (auto — resumes task worktree, checks the plan's approval digest, interactive implementation)
 4. Self-review (auto — via `reviewer` subagent, or pipeline-internal)
 5. Verify (auto — via `verifier` subagent, or pipeline-internal)
 6. Test (auto — via `tester` subagent, or pipeline-internal)
 7. Sync-docs (auto — via `doc-maintainer` subagent, or pipeline-internal)
-8. Cross-review (auto, optional — cross-model second opinion via the other agent: Claude → Codex; Codex → Claude)
+8. Cross-review (auto — cross-model second opinion via the other agent: Claude → Codex; Codex → Claude; calls it only when `[standard].cross_review` is on and that CLI is available, otherwise records the skip)
 9. PR (auto — includes hand-off)
 10. CI verify + human merge
 

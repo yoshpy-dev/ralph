@@ -82,7 +82,7 @@ In Claude Code, follow the loop with slash commands:
 ```
 /spec (optional) → /plan → /implement
 → /self-review → /verify → /test → /sync-docs
-→ /cross-review (optional) → /pr
+→ /cross-review (switch-gated) → /pr
 ```
 
 In Codex, the same flow runs via skill mention syntax (`/spec` collides with
@@ -91,8 +91,15 @@ Codex built-in slash commands — use `$skill-name` or the `/skills` menu):
 ```
 $spec (optional) → $plan → $implement
 → $self-review → $verify → $test → $sync-docs
-→ $cross-review (optional) → $pr
+→ $cross-review (switch-gated) → $pr
 ```
+
+`/plan`'s plan advisory and `/cross-review` ask the other CLI (Claude Code →
+Codex, Codex → `claude -p`) for a second opinion only when
+`[standard].plan_advisory` / `[standard].cross_review` in `ralph.toml` is on
+(both default off) and that CLI is available. Otherwise the step is skipped,
+and the skip is recorded on the plan's Progress checklist, in the
+cross-review triage report, and in the PR body.
 
 For autonomous multi-seat execution outside this interactive loop, see
 [Org runtime](#org-runtime-autonomous-multi-seat-execution).
@@ -208,7 +215,7 @@ flowchart LR
     E --> F["/verify"]
     F --> G["/test"]
     G --> H["/sync-docs"]
-    H --> I["/cross-review<br/>(optional)"]
+    H --> I["/cross-review<br/>(switch-gated)"]
     I --> J["/pr"]
     J --> K["CI +<br/>human merge"]
 ```
@@ -222,7 +229,7 @@ Every step in the loop, including `/spec`, is auto-invoked. `/release` is the on
 5. **Verify** (auto — `/verify`) — spec compliance + static analysis.
 6. **Test** (auto — `/test`) — behavioral tests must pass before PR.
 7. **Sync docs** (auto — `/sync-docs`) — alignment across AGENTS.md / CLAUDE.md / rules / README.
-8. **Cross-review** (auto, optional — `/cross-review`) — cross-model second opinion via the other agent: Claude Code calls Codex; Codex calls `claude -p`. Silently skipped if the reviewer side is unavailable.
+8. **Cross-review** (auto — `/cross-review`) — cross-model second opinion via the other agent: Claude Code calls Codex; Codex calls `claude -p`. It calls the reviewer only when `[standard].cross_review` in `ralph.toml` is on (default off) and the reviewer's CLI is available; otherwise it records the skip in the triage report (`Reviewer status: skipped (<reason>)`) and the PR body, and the flow goes on to `/pr`.
 9. **PR** (auto — `/pr`) — structured PR (with the plan's overview diagram attached when `gh` supports `--attach`), plan archival, hand-off, and task worktree/local branch cleanup.
 10. **CI + human merge**.
 
