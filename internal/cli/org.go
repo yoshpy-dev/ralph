@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -603,17 +602,18 @@ func shellQuoteIfNeeded(s string) string {
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
-// to ./ralph.toml when configPath is empty and that file exists, and to
-// config.Default().Org when neither is present -- matching the plan's
-// documented --config default.
+// to ./ralph.toml when configPath is empty, and to config.Default().Org
+// when the file it reads does not exist -- matching the plan's documented
+// --config default. config.Load decides what "does not exist" means: only
+// fs.ErrNotExist. A ./ralph.toml that exists but cannot be read (no
+// permission, or a symlink into a directory it may not enter) is an error,
+// not the defaults: the defaults would turn a file that says
+// codex_verified = false or auto_merge = false into true (cross-review
+// cycle 1 of codex-verified-auto-merge-on).
 func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 	path := configPath
 	if path == "" {
-		if _, err := os.Stat("ralph.toml"); err == nil {
-			path = "ralph.toml"
-		} else {
-			return config.Default().Org, nil
-		}
+		path = "ralph.toml"
 	}
 	cfg, err := config.Load(path)
 	if err != nil {

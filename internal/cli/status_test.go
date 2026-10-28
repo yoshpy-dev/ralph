@@ -1182,7 +1182,10 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 // status only reads, so a ./ralph.toml that does not load warns and shows
 // the built-in default of the switch instead of failing, with auto_merge
 // false, not its default true, as the file may say false (self-review M1 of
-// codex-verified-auto-merge-on). status reads the file once, for the
+// codex-verified-auto-merge-on). A ./ralph.toml that does not parse and one
+// that cannot be read, here a symlink into a directory with no permissions
+// whose file says auto_merge = false, both fail to load (cross-review cycle 1
+// of codex-verified-auto-merge-on). status reads the file once, for the
 // watch's deadman_minutes and the switch, so stderr holds exactly one
 // warning line about it (self-review L1 of org-director-attach), also in a
 // main checkout, where ./ralph.toml is the main worktree's file the switch
@@ -1205,26 +1208,38 @@ func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *test
 			return nil
 		}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := append([]string{"status"}, tc.setup(t)...)
-			writeTestFile(t, "ralph.toml", "[org\n")
-			for _, extra := range [][]string{nil, {"--json"}} {
-				stdout, stderr, err := runRootCmdSplit(t, append(args, extra...)...)
-				if err != nil {
-					t.Fatalf("status %v: %v (stderr %s)", extra, err, stderr)
+		for _, broken := range []struct {
+			name        string
+			permissions bool // relies on permission bits, which root ignores
+			write       func(t *testing.T)
+		}{
+			{"ralph.toml does not parse", false, func(t *testing.T) { writeTestFile(t, "ralph.toml", "[org\n") }},
+			{"ralph.toml cannot be read", true, func(t *testing.T) { writeRalphTomlBehindLockedDir(t, "[org.director]\nauto_merge = false\n") }},
+		} {
+			t.Run(tc.name+", "+broken.name, func(t *testing.T) {
+				if broken.permissions && os.Geteuid() == 0 {
+					t.Skip("root ignores the permission bits")
 				}
-				if extra == nil {
-					if got := statusDirectorLine(t, stdout); got != directorNotAttachedOffLine {
-						t.Errorf("director line = %q; want %q", got, directorNotAttachedOffLine)
+				args := append([]string{"status"}, tc.setup(t)...)
+				broken.write(t)
+				for _, extra := range [][]string{nil, {"--json"}} {
+					stdout, stderr, err := runRootCmdSplit(t, append(args, extra...)...)
+					if err != nil {
+						t.Fatalf("status %v: %v (stderr %s)", extra, err, stderr)
 					}
-				} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled || got.AutoMerge {
-					t.Errorf("director = %+v; want enabled, auto_merge false, not_attached", got)
+					if extra == nil {
+						if got := statusDirectorLine(t, stdout); got != directorNotAttachedOffLine {
+							t.Errorf("director line = %q; want %q", got, directorNotAttachedOffLine)
+						}
+					} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled || got.AutoMerge {
+						t.Errorf("director = %+v; want enabled, auto_merge false, not_attached", got)
+					}
+					if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
+						t.Errorf("status %v stderr = %q; want exactly one load warning ending %q", extra, stderr, wantSuffix)
+					}
 				}
-				if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
-					t.Errorf("status %v stderr = %q; want exactly one load warning ending %q", extra, stderr, wantSuffix)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 

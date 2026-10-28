@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1094,6 +1097,78 @@ func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T
 			t.Errorf("expected seat-1 (spawned) from the env-resolved state dir, got: %s", out)
 		}
 	})
+}
+
+// writeRalphTomlBehindLockedDir makes ./ralph.toml a symlink to a file
+// holding content in a directory with no permissions, so os.Stat and
+// os.ReadFile of ralph.toml both fail with a permission error, not
+// fs.ErrNotExist. The directory gets its permissions back in t.Cleanup so
+// t.TempDir can remove it. Callers skip under root, which ignores the
+// permission bits.
+func writeRalphTomlBehindLockedDir(t *testing.T, content string) {
+	t.Helper()
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(locked, "ralph.toml")
+	writeTestFile(t, target, content)
+	if err := os.Symlink(target, "ralph.toml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+}
+
+// Without --config, resolveOrgConfig reads ./ralph.toml with config.Load,
+// so only a ralph.toml that does not exist means the built-in defaults. One
+// that exists but cannot be read is an error (cross-review cycle 1 of
+// codex-verified-auto-merge-on): codex_verified and auto_merge are true by
+// default, so the defaults would read a file that says false as true. The
+// symlink into a directory with no permissions is the case an os.Stat check
+// took for no file; a file with no permissions passes os.Stat and fails to
+// read.
+func TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permission bits")
+	}
+	const saysFalse = "[org.permissions]\ncodex_verified = false\n\n[org.director]\nauto_merge = false\n"
+
+	t.Chdir(t.TempDir())
+	cfg, err := resolveOrgConfig("")
+	if err != nil || !reflect.DeepEqual(cfg, config.Default().Org) {
+		t.Fatalf("resolveOrgConfig(\"\") with no ralph.toml = %+v, %v; want the built-in defaults and no error", cfg, err)
+	}
+	writeTestFile(t, "ralph.toml", saysFalse)
+	if cfg, err = resolveOrgConfig(""); err != nil || cfg.Permissions.CodexVerified || cfg.Director.AutoMerge {
+		t.Fatalf("resolveOrgConfig(\"\") with a readable ralph.toml = codex_verified %t, auto_merge %t, %v; want false, false, no error",
+			cfg.Permissions.CodexVerified, cfg.Director.AutoMerge, err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		write func(t *testing.T)
+	}{
+		{"a symlink into a directory with no permissions", func(t *testing.T) { writeRalphTomlBehindLockedDir(t, saysFalse) }},
+		{"a file with no permissions", func(t *testing.T) {
+			writeTestFile(t, "ralph.toml", saysFalse)
+			if err := os.Chmod("ralph.toml", 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			tc.write(t)
+			cfg, err := resolveOrgConfig("")
+			if !errors.Is(err, fs.ErrPermission) {
+				t.Errorf("resolveOrgConfig(\"\") = codex_verified %t, auto_merge %t, %v; want a permission error, not the defaults",
+					cfg.Permissions.CodexVerified, cfg.Director.AutoMerge, err)
+			}
+		})
+	}
 }
 
 func TestOrgCmd_RequiresOrgID(t *testing.T) {
