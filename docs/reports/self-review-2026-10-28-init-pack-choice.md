@@ -46,3 +46,52 @@
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5)
 - Follow-ups: 修正を必須とする所見はない。(1) L1 は文言だけの直しで小さく、`--pack` の効き方が help から読めるようになるので、直すのを勧める。(2) L2・L4・L5 はコメントか名前の直しで、動作は変わらない。(3) L3 は引数の形を変えるので、範囲が広がるなら受け入れてよい。直した場合も受け入れた場合も、コードの変更を含むので `/verify` へ進む(record-only の例外には当たらない)。cycle 1 のため、残した所見の台帳への登録は今回は不要。
+
+## Run 2
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review` の 2 回目。Run 1 の LOW L1〜L5 の直しのあと、パイプラインの cycle 1)
+- Scope: コミット f495bb23(`fix: tighten the init help and pack listing from the self-review`)。`git diff 7eca2cb1..HEAD -- internal/ README.md templates/` は 5 ファイルだけ(`internal/cli/init.go`、`internal/cli/init_packs_test.go`、`internal/cli/cli_test.go`、`README.md`、`templates/base/docs/recipes/adding-a-language-pack.md`)。`git diff --name-only 7eca2cb1..HEAD` に出るのは、この 5 つと計画ファイル(Progress の記録、所見の対象外)だけで、`scripts/`、`tests/`、`internal/scaffold/` には変更がない。Run 1 のほかの部分は読み直していない。観点と範囲の外は Run 1 と同じ(テスト、静的検査、spec 適合は実行も評価もしていない)。
+- ID: Run 1 の L1〜L5 を引き継ぐ。Run 2 の新しい所見はない。所見の重さに届かない確認事項は O1、O2 として書く。
+
+### Run 1 の所見の確認
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| L1 | 直った | 言及のあった 4 か所がそろって変わっている: `Long`(`init.go:35-44`)、`--pack` の説明(`:81`)、`README.md:120`、recipe の段落(`adding-a-language-pack.md:30-38`)。ほかに「何も選ばれていない」と書く場所がないかを、`nothing selected` / `installs no pack` / `no pack unless` ほかの言い回しで repo 全体から探した(計画と reports を除く)。残りは `--yes` の説明(`:76`、「install no language pack unless --pack names one」で今も正しい)と `tests/test-check-template.sh` の `--yes` だけの話で、どちらも `--pack` を含めて正しい。 |
+| L2 | 直った | `titleLines`、`descriptionLines`、`optionLines` の 3 変数になり(`init.go:271-273`)、`Height` の式は和だけ(`:282`)。値は前と同じ(1、`Count + 1`、`len(options)`)。`Height` の理由のコメントは式の上に残っている。 |
+| L3 | 直った | 下の「L3 の確認」。 |
+| L4 | 直った | `TestSkipPackValue_IsNoPackName`(`init_packs_test.go:259-266`)は `/` を含むことだけを確かめ、なぜそれで足りるかをコメントに書いた(`AvailablePacks` はディレクトリ名を返し、`internal/scaffold/embed.go:41-44` が `e.IsDir()` の名前だけを集める)。外した後半は前半から導かれるので、確かめる範囲は狭まっていない。`slices` と `scaffold` の import は同じファイルのほかのテストが使っている。`useRepositoryTemplates` も `TestPackMarkers_NameEveryRepositoryPack` が使うので、孤児にならない。 |
+| L5 | 直った | `isPackMarker` のコメント(`init.go:205-209`)の主張を `scripts/detect-changed-languages.sh` の `has_name_in_dir`(`:309`)と `has_project_marker`(`:316-352`)と突き合わせた。固定名(`package.json`、`go.mod` ほか)は `[ -f ]` で symlink をたどる。`tsconfig.*.json` と `requirements-*.txt` だけが `has_name_in_dir`(`find -maxdepth 1 -type f -name`)で、`-type f` は symlink をたどらない。コメントはこの 2 つの glob を名指していて、挙動は変わっていない(`os.Stat` のまま)。 |
+
+### L3 の確認
+
+- `scaffold.AvailablePacks()` の呼び出しは `init.go` の中で `RunE`(`:50`)の 1 回だけになった(`grep -n "scaffold.AvailablePacks" internal/cli/init.go` の非コメントの行)。`runInitInteractive` の `listing packs` の分岐と、案内側の `err == nil` の握りつぶしは消えている。
+- `executeInit` を呼ぶ本番のコードは `runInitInteractive`(`:160`)と `runInitNonInteractive`(`:296`)の 2 か所だけ。非テストの Go を `executeInit(` で探して確かめた。2 つとも `cfg.AvailablePacks` を入れている(`:135`、`:293`)。`AvailablePacks` が空のままになる経路は、既存 project の早期 return(`:126-128`、案内を出さない)と、テストが `initConfig` を直接作る場合だけ。後者の `Packs: nil` の既存テストは案内の文言を確かめていない(`pack add <language>`、`(available:` の文言を含むテストは `init_packs_test.go` だけ)ので、案内の一覧が消えても落ちない側の変化はない。
+- 空でない一覧の案内は `TestInitCmd_YesAloneInstallsNoPackAndPrintsTheHint`(`RunE` から `runInitNonInteractive` を通る)が固定する。`runInitNonInteractive` が `AvailablePacks` を入れ忘れる退行、`RunE` が引数を取り違える退行のどちらでも、`want: available: golang, typescript` の行が出ず落ちる。空の一覧の案内は新しい `TestExecuteInit_HintWithNoAvailablePacksLeavesOutTheList`(`:598-612`)が固定する。期待は `later\n` で終わるので、`len > 0` の判定が外れて ` (available: )` が出る退行を捕まえる。空振りしない。
+- `initConfig.AvailablePacks` のコメント(`:112-113`)は使い道(案内)を言っていて、実際の読み手は `executeInit` の 1 か所だけなので合っている。`runInitInteractive` のコメントも新しい引数に合わせて直してある。`filepath.Abs` より前に一覧を読む順序は Run 1 と同じ。
+- `cfg.AvailablePacks` と `newPackQuestion` の引数が同じ `availPacks` の slice を共有するが、どちらも読むだけで書き換えない(`packOptions` は新しい slice を作る)。
+
+### Findings
+
+なし(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0)。
+
+### Observations(所見の重さに届かないもの)
+
+- O1: `--pack` の説明「language pack to install (preselected in the question without --yes)」(`init.go:81`)の括弧の中は、「the question without --yes」が読みにくい。「preselected in the interactive question」のほうが読みやすい。意味は正しく、`Long` の文が正確に言い直しているので、直さなくてよい。
+- O2: `isPackMarker` のコメントの「a symlink to one, for every pattern」(`init.go:206`)の「for every pattern」は、直後の「The shell differs for two globs」を読むまで掛かり先が分からない。「(Go follows a symlink for every pattern.)」のように分けると読み切りで通じる。直さなくてよい。
+
+### Positive notes
+
+- L3 の直しは、Run 1 の推奨のうち「`initConfig` に持たせる」を選び、読み出しを入口の 1 回にまとめた。呼び出し元が一覧を持っているので、案内側のエラーの握りつぶしと、同じ `listing packs` の文言の重複がなくなった。動作(案内の文言と順序)は変わらない。
+- 空の一覧の案内に専用のテストがあり、期待の末尾の `\n` で判定の退行を区別している。
+- L4 の直しは、テストを消すだけでなく、なぜ足りるかをコメントに残している。計画の Progress の記述も合わせて直してある。
+
+### Coverage gaps
+
+- `runInitInteractive` の `AvailablePacks: availPacks`(`init.go:135`)の 1 行が、Run 1 で挙げた 3 行に加わる。L3 の前は、フォームのあとの案内が `executeInit` の中で一覧を読み直していたので、skip だけを選ぶ対話の経路の案内は `TestExecuteInit_SkipAloneInstallsNoPackAndPrintsTheHint` が実際の経路に近い形で確かめていた。今は同じテストが `AvailablePacks` を手で渡すので、`runInitInteractive` がこの 1 行を落としても単体テストは通る。実装側は pty で、skip だけを選んで案内に一覧が出ることを確かめたと計画に書いている(未確認、私は pty を動かしていない)。`/test` の判断。
+
+## Recommendation (Run 2)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の LOW L1〜L5 は 5 件とも直っている)
+- Follow-ups: O1、O2 は直さなくてよい。コードの変更を含む(`init.go`、テスト)ので `/verify` へ進む(record-only の例外には当たらない)。cycle 1 のため、残した所見はなく、台帳への登録は不要。
