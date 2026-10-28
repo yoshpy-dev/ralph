@@ -181,6 +181,13 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - `TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature` はエントリの JSON 全体を比べていたので、BoundTo の値を先に確かめてから空にして比べる形に直した(比べること自体は残した)
     - 検証: 指定のコマンド(計画の S3 のコマンドを org 層の `Cleanup|MergeOrder` と cli の `OrgMerge_|Help` まで広げたもの)が 2 回目で通過(1 回目は上の JSON のテストで落ちた。org 76 秒、cli 133 秒)。変異 6 つが落ちる。機械的な確かめは 5 項目とも clean。consult は判断 8 点を妥当とした
   - S4・S5 に渡すこと(S3 の報告から): `ralph org merge-order --help` は `--json` の `pr_lookup` を説明しているが `bound_to` に触れていない。AGENTS.md の地図と `/org` skill に `ralph org cleanup` がまだない
+  - S4 cb7ed292: leader の手順 15、`/org` skill(動詞の表、start の節、merge してよい順、「org の終わり方」、完了条件)、`/director` skill(`CLEANUP:` の読み方、「GitHub で merge した PR の後始末」の小節、「してはいけないこと」に MANUAL のコマンドを頼まれずに打たない)、start・spawn・merge-order の help、regate の案内(merge 済みなら `ralph org cleanup --branch`、閉じた PR なら script の cleanup に `--force-branch`)
+    - `featureWorktreeCleanup` は変えない(start の失敗の案内では `-d` が merge されていないコミットを守る)。regate の案内は呼ぶ側で `--force-branch` を足した。Affected areas の「`featureWorktreeCleanup` の案内」はこの判断で満たす
+    - 片付けの script がないときの断りから `errWorktreeScriptMissing` の「run start again」を外した。`noScriptCleanup()` は前置きと「MANUAL の行がない」を確かめる `assertNoScriptCleanup` にした
+    - 検証: 指定のコマンド(計画の S4 のコマンドを `Cleanup`、cli の `Help|OrgMerge|OrgCleanup` まで広げたもの)が通過(744 秒)。新しいテスト 4 つは壊した版 4 つで落ちる。機械的な確かめは 5 項目とも clean。consult は判断 8 点を妥当とした
+  - S4b 111c62a2(consult の勧めで足したスライス): regate と merge の `regate.lock` の断り、その help と注釈に cleanup を足した(「another ralph org regate, merge, or cleanup runs」)。`internal/org/feature.go:538-539` は変えていない。同じ org_id の別の start の断りが片付けのコマンドを案内しないことを `feature_test.go` が意図して固定しているため。検証: `Regate|Merge|StartFeature|Lock` と cli の `OrgRegate|OrgMerge` が 2 回とも通過。機械的な確かめは clean(折り返しの直しを 3 回 fixed)
+  - S5 に渡すこと: README.md の 252 行(merge のあとも人が script で消す)と 266・268 行(「regate or merge」)、`docs/recipes/isolated-herdr-server.md:529` と template の写し
+  - 既知の穴(PR に書く): `runWorktreeScript` は script を時間の上限なしで打つ(S1 から。`git worktree remove` と `git branch -D` はローカルの操作)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
