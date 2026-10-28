@@ -17,8 +17,9 @@ one you prefer and the standard flow is identical.
 cd <project>
 codex trust .                  # required: only then are .codex/config.toml
                                # and .codex/hooks.json actually loaded
-ralph doctor                   # confirms Claude Code/Codex presence,
-                               # hooks=true, hooks.json dispatcher wiring
+ralph doctor                   # confirms Claude Code or Codex is usable
+                               # (either one passes), hooks=true,
+                               # hooks.json dispatcher wiring
 ```
 
 `ralph doctor` warns if the project is unwritten / untrusted, if
@@ -30,7 +31,9 @@ hook trust, though: Codex hooks separately require a one-time approval
 inside an interactive `codex` session (per-command-hash — `codex exec`
 silently skips an unapproved hook). See `.codex/README.md`'s Hooks section
 for the full trust UX. Resolve every doctor warning before relying on
-hook-driven safety.
+hook-driven safety, except one: on a machine that has only Codex, the
+`Claude Code CLI` line is a `warn` and doctor still passes. It only means the
+plan advisory and cross-review steps that call claude will not run.
 
 ## Daily flow
 
