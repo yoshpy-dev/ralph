@@ -62,7 +62,7 @@ and why, and hands off to `/pr`.
 
 4. **Invoke reviewer**:
    - Determine base branch via Bash: `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch)` — resolution order: (1) `$RALPH_XREVIEW_BASE` if set and non-empty (explicit override); (2) `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with leading `origin/` stripped (repo default branch); (3) `main` if `refs/heads/main` exists, else `master`.
-   - Check the diff is non-empty, in the same Bash call as the base branch above (`$BASE` does not outlive a call, and with an empty `$BASE` the check always sees no diff): `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch); git diff "$BASE"...HEAD --quiet; echo "rc=$?"`. `rc=0` means no diff: skip, with the reason `empty diff`, leave out the rest of this step and step 5, and write the skipped report in step 6.
+   - Check the diff is non-empty, in the same Bash call as the base branch above (`$BASE` does not outlive a call, and with an empty `$BASE` the check always sees no diff): `. scripts/xreview-helpers.sh; BASE=$(detect_base_branch); git diff "$BASE"...HEAD --quiet; echo "base=$BASE rc=$?"`. Record the printed base: later calls (the reviewer prompt below) use that value, not a shell variable. `rc=0` means no diff: skip, with the reason `empty diff`, leave out the rest of this step and step 5, and write the skipped report in step 6.
    - **Save the git state** the reviewer must not change. Define `<scratch>` once: the agent's scratchpad directory when the tool provides one, else `$(mktemp -d)`. From the repository root, run the command of `/plan` step 11.c with this run's file name: `{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > <scratch>/cross-review-<slug>-c<cycle>-git-before.txt` (HEAD, the index, and the work tree with its untracked files).
    - **reviewer = `codex`**: The native reviewer analyzes the full diff and returns structured findings with severity, affected files, and recommendations. Source `./scripts/ralph-config.sh` and re-derive `$BASE` in the same Bash call as the launch below (a Bash tool keeps no shell state between calls), then run it in the background (Claude Code: Bash `run_in_background`). A watchdog in the same background shell enforces the 20-minute bound directly — the same `sleep 1200` shape as `/plan` step 11.c — instead of relying on a completion notification a hung codex would never send:
      ```
@@ -222,12 +222,13 @@ Use `--verdict action_required` when ACTION_REQUIRED findings exist; `--verdict 
 
 ## Claude reviewer prompt template
 
-When `reviewer = claude`, run `claude -p` with a prompt similar to:
+When `reviewer = claude`, run `claude -p` with a prompt similar to the one
+below, with `<base>` replaced by the base step 4 printed (`base=<base>`):
 
 ```
 You are an adversarial diff reviewer. Default to skepticism — assume the diff
 can fail in subtle, high-cost ways until evidence says otherwise. Review the
-diff between origin/$BASE and HEAD for: (1) correctness issues, (2) security
+diff between <base> and HEAD for: (1) correctness issues, (2) security
 concerns, (3) error handling gaps, (4) logic errors, (5) missing test coverage,
 (6) blind spots specific to the change. Report each finding with severity
 [HIGH/MEDIUM/LOW], affected file:line, what can go wrong, why it is vulnerable,
@@ -235,4 +236,4 @@ likely impact, and concrete change to reduce the risk. Prefer one strong
 finding over several weak ones. If the diff looks solid, say so directly.
 ```
 
-Pipe the diff via stdin or fetch it inside the prompt with `git diff $BASE...HEAD`.
+Pipe the diff via stdin or fetch it inside the prompt with `git diff <base>...HEAD`.
