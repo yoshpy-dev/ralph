@@ -152,7 +152,17 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
 - [x] Plan reviewed(consult の判定は「進めてよい」。足したのは 3 点で、`regate.lock` の marker に org_id を書くこと(D2 の 0)、確かめの git を `regateBoundedGit` で打つこと、CLI の repo root を `org.FeatureRepoRoot` で求めること。Codex の計画助言は 2 件で、どちらも反映した。HIGH は worktree の HEAD とブランチの確かめ(D2 の 6、AC3)、MEDIUM は途中で止まったあとの再開(D2 の再開、AC3b、リスクの表)。図解の詳細 2 も直し、lint と撮り直しを確かめた)
 - [x] Plan approved(自動承認。2026-10-11 のユーザー指示「作成したプランは自動承認します」と、2026-10-27 の「最後まで止まらずに」による)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(スライスは implementer に委譲)
+  - S1 e49cddb5: `internal/org/cleanup.go`。入口は 2 つで、`CleanupFeatureWorktree` は `regate.lock` を自分で取り(S3 用)、`cleanupFeatureWorktreeLocked` は lock を持った呼び手が使う(S2 用)。ほかに `FeatureWorktrees.Cleanup`(script の `--force-branch`)と `EventWorktreeCleaned` を足した
+    - 確かめ 1 を manifest のロックの下で通したときに、marker に org_id を書く
+    - 結果は `Refused`(確かめで止まった)・`Failed`(削除の失敗)・`Manual`(どこからでも打てる 1 行)で返す
+    - 登録だけ残った worktree は、そのパスだけに `git worktree remove` を打って外す(prune は使わない)
+    - `worktree_cleaned` の詳細は `branch= head= via= worktree=`。パスは quote して最後に置く
+    - 検証: 指定のテストが通過(76 秒)、regate・merge・spawn の回帰も通過、変異 5 つが落ちる。機械的な確かめは 5 項目とも clean
+    - consult は、判断 7 点を妥当とした
+  - S2 に渡すこと: marker の注釈 3 か所と `regateSpawnErr` の断りの文(片付けの最中も「regate が走っている」と言う)。`Org.Worktrees` の注釈。`Refused` と `Failed` はどちらも `CLEANUP: skipped` にする
+  - S4 に渡すこと: `featureWorktreeCleanup` に `--force-branch` を足すなら、`cleanupRun.scriptCmd` で二重にならないようにする
+  - 既知の穴: `StartFeature` の `regateSpawnErr` は manifest のロックの外で打たれる(`internal/org/feature.go:208-218`)。Regate と同じ窓で、この計画では直さない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
