@@ -150,6 +150,8 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
   - S1(baa66655、implementer): `--pack`(`StringArrayVar`、カンマを自分で分ける、重なりを 1 つに、空と知らない名前はエラー)、`RunE` の先頭での検査、`--yes` だけではパックなし、0 個のときの `ralph pack add` の案内、`--yes` の説明。verify rc=0(8s)。`go test -overlay` の mutant 5 種(検査が `--yes` の経路だけ、`StringSliceVar`、`--yes` で全部入る、案内なし、重なりを残す)がすべて落ちる。組み立てた binary で `--yes`、`--yes --pack golang`、知らない名前・空の名前(`--yes` の有無とも)を打って確かめた。self-check 5 項目 clean
     - 計画になかった追加: 名前の前後の空白を取る(`TrimSpace`)。`--pack "golang, typescript"` を受け付け、空白だけの名前は空としてエラーにする
     - S3 までの中間の状態: 対話の経路では `--pack` を検査するが、フォームにはまだ渡さない(S3 で選んだ状態にする)
+  - S2(b1b244de、implementer): G は `templates/packs/` の下のパック(`_template` を除く)をカンマでつないだ 1 つの `--pack` で渡し、init のあと各 `packs/languages/<name>/` があることを確かめてから check-template を通す。一覧が空なら G を fail にする。verify は `./tests/test-check-template.sh` で rc=0(60 passed、G は PASS)。mutant 2 つ(`--pack` を外す、一覧の場所を変える)で G が fail する。self-check 5 項目 clean
+    - 計画の検証コマンドの直し: 計画の S2 の `sh tests/test-check-template.sh` は macOS の `/bin/sh`(POSIX モードの bash 3.2)では、前からある `diff <(...)` で構文エラーになり rc=2(変更前の HEAD でも同じ)。shebang の bash で動く `./tests/test-check-template.sh` で確かめた。以後この形で打つ
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
