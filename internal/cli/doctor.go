@@ -101,11 +101,11 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 		})
 	}
 
-	// Check 1: Claude Code CLI.
-	results = append(results, checkClaudeCLI(cfg))
-
-	// Check 2: Codex.
-	results = append(results, checkCodexCLI(cfg))
+	// Checks 1 and 2: Claude Code CLI and Codex. Both are probed before
+	// either line is decided, because doctor needs only one of them unless
+	// [doctor].require_*_cli says otherwise -- see checkAgentCLIs.
+	claudeResult, codexResult := checkAgentCLIs(cfg)
+	results = append(results, claudeResult, codexResult)
 
 	// Check 3: Codex hook wiring ([features] hooks; hooks.json schema + dispatcher routing; stale config.toml [hooks] table).
 	results = append(results, checkCodexEffectiveConfig(targetDir))
@@ -266,39 +266,51 @@ func probeBinary(bin string) (version string, err error) {
 	return "", fmt.Errorf("%s --version produced no output", bin)
 }
 
-func checkClaudeCLI(cfg config.Config) checkResult {
-	r := checkResult{Name: "Claude Code CLI"}
-	version, err := probeBinary("claude")
-	if err != nil {
-		if cfg.Doctor.RequireClaudeCLI {
-			r.Status = "fail"
-			r.Detail = fmt.Sprintf("claude unusable: %v", err)
-		} else {
-			r.Status = "warn"
-			r.Detail = fmt.Sprintf("claude unusable (not required): %v", err)
-		}
-		return r
-	}
-	r.Status = "pass"
-	r.Detail = version
-	return r
+// agentCLIProbe is what probeBinary returned for one agent CLI.
+type agentCLIProbe struct {
+	Version string
+	Err     error
 }
 
-func checkCodexCLI(cfg config.Config) checkResult {
-	r := checkResult{Name: "Codex"}
-	version, err := probeBinary("codex")
-	if err != nil {
-		if cfg.Doctor.RequireCodexCLI {
-			r.Status = "fail"
-			r.Detail = fmt.Sprintf("codex unusable: %v", err)
-		} else {
-			r.Status = "warn"
-			r.Detail = fmt.Sprintf("codex unusable (not required): %v", err)
-		}
-		return r
+// checkAgentCLIs is Checks 1 and 2: it probes claude and codex once each,
+// then decides both lines with agentCLIResults.
+func checkAgentCLIs(cfg config.Config) (claude, codex checkResult) {
+	var claudeProbe, codexProbe agentCLIProbe
+	claudeProbe.Version, claudeProbe.Err = probeBinary("claude")
+	codexProbe.Version, codexProbe.Err = probeBinary("codex")
+	return agentCLIResults(cfg.Doctor, claudeProbe, codexProbe)
+}
+
+// agentCLIResults decides the "Claude Code CLI" and "Codex" lines from the
+// two probes and [doctor]. ralph runs on either CLI, so one that is not
+// usable fails only when its require_*_cli is true or when the other one is
+// not usable either; otherwise it warns that the plan advisory and
+// cross-review that call it will not run.
+func agentCLIResults(doctor config.DoctorConfig, claude, codex agentCLIProbe) (claudeResult, codexResult checkResult) {
+	claudeResult = agentCLIResult("Claude Code CLI", "claude", claude, doctor.RequireClaudeCLI, "codex", codex.Err == nil)
+	codexResult = agentCLIResult("Codex", "codex", codex, doctor.RequireCodexCLI, "claude", claude.Err == nil)
+	return claudeResult, codexResult
+}
+
+// agentCLIResult decides one line of agentCLIResults: probe and required
+// are this CLI's, otherBin and otherUsable the other CLI's.
+func agentCLIResult(name, bin string, probe agentCLIProbe, required bool, otherBin string, otherUsable bool) checkResult {
+	r := checkResult{Name: name}
+	switch {
+	case probe.Err == nil:
+		r.Status = "pass"
+		r.Detail = probe.Version
+	case required:
+		r.Status = "fail"
+		r.Detail = fmt.Sprintf("%s unusable: %v", bin, probe.Err)
+	case otherUsable:
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("%s unusable (not required): %v — %s is usable, so ralph runs, but the plan advisory and cross-review that call %s will not run",
+			bin, probe.Err, otherBin, bin)
+	default:
+		r.Status = "fail"
+		r.Detail = fmt.Sprintf("%s unusable: %v — neither claude nor codex is usable, and ralph needs at least one of them", bin, probe.Err)
 	}
-	r.Status = "pass"
-	r.Detail = version
 	return r
 }
 
@@ -760,14 +772,16 @@ func checkGo(cfg config.Config) checkResult {
 }
 
 // checkHerdrAvailable reports whether the herdr CLI (org runtime seat driver)
-// is on PATH. Org runtime is purely additive (AC-9): a project that never
-// runs `ralph org` has no reason to install herdr, so absence is reported as
-// "info", not "warn"/"fail" — it must never change runDoctorOpts' exit code.
+// is on PATH. Absence is reported as "warn" so that an operator notices it
+// before `ralph org` needs herdr, never as "fail": org runtime is purely
+// additive (AC-9), and a project that never runs `ralph org` has no reason to
+// install herdr. A warn, like an info, never changes runDoctorOpts' exit code
+// (countFailed counts only "fail").
 func checkHerdrAvailable() checkResult {
 	r := checkResult{Name: "herdr"}
 	if err := driver.HerdrAvailable(); err != nil {
-		r.Status = "info"
-		r.Detail = "herdr not installed — org runtime seats unavailable (solo execution unaffected)"
+		r.Status = "warn"
+		r.Detail = "herdr not installed — org runtime seats unavailable (the standard flow is unaffected)"
 		return r
 	}
 	r.Status = "pass"
@@ -786,6 +800,8 @@ const agmsgTestedVersion = "1.1.13"
 // script collection. Unlike herdr, agmsg is NOT a single binary on PATH --
 // home is the resolved agmsg home directory (driver.ResolveAgmsgHome), and
 // availability is decided by the presence of home's scripts/send.sh.
+// Absence is a "warn" for the same reason as herdr's; a VERSION other than
+// agmsgTestedVersion stays an "info" (see agmsgTestedVersion).
 // checkAgmsgAvailable's Detail always names home explicitly (both the
 // not-installed and available branches) -- tech-debt fix: this check used
 // to discard driver.AgmsgAvailable's resolved home in favor of a fixed
@@ -796,8 +812,8 @@ const agmsgTestedVersion = "1.1.13"
 func checkAgmsgAvailable(home string) checkResult {
 	r := checkResult{Name: "agmsg"}
 	if err := driver.AgmsgAvailable(home); err != nil {
-		r.Status = "info"
-		r.Detail = fmt.Sprintf("agmsg not installed at %s — org runtime seats unavailable (solo execution unaffected)", home)
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("agmsg not installed at %s — org runtime seats unavailable (the standard flow is unaffected)", home)
 		return r
 	}
 	r.Status = "pass"

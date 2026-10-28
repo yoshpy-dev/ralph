@@ -62,15 +62,17 @@ func writeAgmsgHome(t *testing.T, dir, version string) {
 	}
 }
 
-// TestCheckHerdrAgmsgAvailable_AbsentIsInfo pins AC-9: with herdr absent from
-// PATH and agmsg's home missing scripts/send.sh, both checks must report
-// "info" (not "warn"/"fail") so runDoctorOpts' exit code stays unaffected.
-func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
+// TestCheckHerdrAgmsgAvailable_AbsentIsWarn pins AC4 (issue #272): with herdr
+// absent from PATH and agmsg's home missing scripts/send.sh, both checks must
+// report "warn" (not "info", so the operator notices; not "fail", so
+// runDoctorOpts' exit code stays unaffected) and say the standard flow is
+// unaffected, not the retired Solo formation's "solo execution" wording.
+func TestCheckHerdrAgmsgAvailable_AbsentIsWarn(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty PATH — nothing resolvable.
 
 	hr := checkHerdrAvailable()
-	if hr.Status != "info" {
-		t.Errorf("herdr status = %q, want info", hr.Status)
+	if hr.Status != "warn" {
+		t.Errorf("herdr status = %q, want warn", hr.Status)
 	}
 	if !strings.Contains(hr.Detail, "herdr not installed") {
 		t.Errorf("herdr detail = %q, want mention of 'herdr not installed'", hr.Detail)
@@ -78,11 +80,19 @@ func TestCheckHerdrAgmsgAvailable_AbsentIsInfo(t *testing.T) {
 
 	noSuchHome := filepath.Join(t.TempDir(), "no-such-agmsg-home")
 	ar := checkAgmsgAvailable(noSuchHome)
-	if ar.Status != "info" {
-		t.Errorf("agmsg status = %q, want info", ar.Status)
+	if ar.Status != "warn" {
+		t.Errorf("agmsg status = %q, want warn", ar.Status)
 	}
 	if !strings.Contains(ar.Detail, "agmsg not installed") {
 		t.Errorf("agmsg detail = %q, want mention of 'agmsg not installed'", ar.Detail)
+	}
+	for name, detail := range map[string]string{"herdr": hr.Detail, "agmsg": ar.Detail} {
+		if !strings.Contains(detail, "org runtime seats unavailable (the standard flow is unaffected)") {
+			t.Errorf("%s detail = %q, want it to say the org runtime seats are unavailable and the standard flow is unaffected", name, detail)
+		}
+		if strings.Contains(detail, "solo execution") {
+			t.Errorf("%s detail = %q, still uses the retired 'solo execution' wording", name, detail)
+		}
 	}
 	// AC-10a (tech-debt fix): the not-installed detail must also name the
 	// resolved home directory doctor actually checked, so a misconfigured
@@ -126,8 +136,8 @@ func TestCheckAgmsgAvailable_PathBootstrapperNotHome(t *testing.T) {
 	t.Setenv("PATH", dir)
 
 	emptyHome := t.TempDir() // no scripts/send.sh.
-	if r := checkAgmsgAvailable(emptyHome); r.Status != "info" {
-		t.Errorf("agmsg status = %q, want info despite agmsg on PATH (detail=%q)", r.Status, r.Detail)
+	if r := checkAgmsgAvailable(emptyHome); r.Status != "warn" {
+		t.Errorf("agmsg status = %q, want warn (not installed) despite agmsg on PATH (detail=%q)", r.Status, r.Detail)
 	}
 }
 
@@ -181,10 +191,10 @@ func TestCheckOrgEnvelope_ReportsPoolSizeAndMaxSeats(t *testing.T) {
 }
 
 // TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected is the integration
-// pin for AC-9: a fully-initialized project with claude/codex/go stubbed on
-// PATH (so the pre-existing required checks pass) but herdr/agmsg absent
-// must still return a nil error from runDoctorOpts — informational findings
-// must not flip the doctor exit code.
+// pin for AC4 (issue #272; AC-9 before it): a fully-initialized project with
+// claude/codex/go stubbed on PATH (so their checks pass) but herdr/agmsg
+// absent must still return a nil error from runDoctorOpts — the warn
+// findings for herdr and agmsg must not flip the doctor exit code.
 func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "0.1.0-test"
@@ -199,7 +209,7 @@ func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// claude/codex/go present (required-by-default checks); herdr/agmsg
+	// claude/codex/go present so their checks pass; herdr/agmsg
 	// deliberately absent.
 	for _, bin := range []string{"claude", "codex", "go"} {
 		writeStubBin(t, binDir, bin, "")
@@ -219,20 +229,20 @@ func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 	out, _ := io.ReadAll(r)
 
 	if err != nil {
-		t.Fatalf("runDoctorOpts returned error with only informational herdr/agmsg findings: %v\noutput:\n%s", err, out)
+		t.Fatalf("runDoctorOpts returned error with only warn herdr/agmsg findings: %v\noutput:\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "herdr: info") {
-		t.Errorf("expected herdr info line in output:\n%s", out)
+	if !strings.Contains(string(out), "herdr: warn") {
+		t.Errorf("expected herdr warn line in output:\n%s", out)
 	}
-	if !strings.Contains(string(out), "agmsg: info") {
-		t.Errorf("expected agmsg info line in output:\n%s", out)
+	if !strings.Contains(string(out), "agmsg: warn") {
+		t.Errorf("expected agmsg warn line in output:\n%s", out)
 	}
 }
 
 // TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess confirms that without
 // --probe-models, no model-probe subprocess is ever launched. The stub
 // claude binary logs every invocation's argv; runDoctorOpts' pre-existing
-// Check 1 (checkClaudeCLI) legitimately invokes `claude --version`, so the
+// Check 1 (checkAgentCLIs) legitimately invokes `claude --version`, so the
 // assertion targets the "--model" flag specifically — that flag only ever
 // appears in a driver.ProbeModel call, never in the --version probe.
 func TestRunDoctorOpts_ProbeModelsFalse_NoSubprocess(t *testing.T) {
