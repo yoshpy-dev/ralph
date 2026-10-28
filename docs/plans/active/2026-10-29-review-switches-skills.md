@@ -90,7 +90,7 @@ None (skill の手順と文書の書き換えが中心で、新しい仕組み�
 - [x] AC4: `internal/insights` の backfill が `Reviewer status: skipped …` の cycle を verdict n/a として読む(テスト)。
 - [x] AC5: ルートの `ralph.toml` を知らないキーを拒む読み方で読むテストがあり、4 つの実施有無が true であることを確かめる。キーを 1 つ改名した写しで落ちる。
 - [x] AC6: `RALPH_CLAUDE_REVIEWER_MODEL` の plan skill の fallback と `scripts/ralph-config.sh` の既定の照合が `TestDefaultsLockStep` にある。
-- [ ] AC7: 「optional」の文が、Scope に挙げた文書で「設定が on で相手の CLI があるときに走る。そうでなければ飛ばして記録する」の意味になっている(`git grep` で確かめる)。
+- [x] AC7: 「optional」の文が、Scope に挙げた文書で「設定が on で相手の CLI があるときに走る。そうでなければ飛ばして記録する」の意味になっている(`git grep` で確かめる)。
 - [x] AC8: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`go test ./internal/config/ ./internal/insights/`、skill の文を固定するテスト(`tests/test-check-skill-sync.sh`、`tests/test-slice-verification.sh` など、実装で洗い出す)が通る。
 
 ## Implementation outline
@@ -151,4 +151,5 @@ None (skill の手順と文書の書き換えが中心で、新しい仕組み�
 - [x] Verification artifact created — verify f0290dc4(cycle 1、pass。`run-static-verify.sh` rc 0、golangci-lint 0 件。AC1〜AC3・AC9 を満たす、AC4〜AC6 は読んで満たす(実行は /test)、AC7 は満たすが V1〜V4 が残る。PATH の ralph 6.0.0 は 2 つのキーとも rc 1 と `unknown command "config"` で off の分岐、build した binary は root で `true`、知らないキー 2、型の誤り 3、ralph なし 127 を実測)。LOW の V1(README:135 が off にする失敗を古い ralph だけと書く)、V2(tech-debt:31)、V3(tech-debt:154)、V4(飛ばす条件に空の差分を挙げない十分条件の文 3 か所: implement 13.e、ralph-workflow.md:41-42、codex-setup.md:65-66、と写し)は /sync-docs で直す。issue の「判別の順に which」を D5 で外したことは PR の本文に書く。
 - [x] Test artifact created — test cd97750e(cycle 1、pass。`run-test.sh` rc 0、shell 45 本、Go 9 パッケージ、cli 368 s・org 476 s。名指しのテストと shell の 6 本が通った。変異 7 個中 6 個が落ちた。生き残った a3(`After triage:` のあとの `pendingNoReview` のリセットを消す)は base でも生き残る既存の穴で、PR の Known gaps に書く。driver の snippet は 8 つの写しで同じ 1 行で、bash と zsh で 28 通りが期待どおり。base の行は差分ありで rc=1、差分なしで rc=0、ref の誤りで rc=128(この場合は reviewer を呼んで失敗し incomplete になる)。skipped の report 5 通りは `count_triage_findings` で 0/0/0、HEAD の binary の backfill は n/a と読み、base の binary は pass と読んだ)
 - [x] Sync-docs report created — `docs/reports/sync-docs-2026-10-29-review-switches-skills.md`(cycle 1。verify の V1〜V4 を直した: README の `ralph config get` の行に exit 127 を足した、tech-debt の `pick_reviewer` の行と `/cross-review` の claude の道の行を今の呼び手と呼び出しに合わせた、空の差分を言わない十分条件の文を `/implement` 13.e・ralph-workflow.md・codex-setup.md・definition-of-done.md(と写し)で直した。sweep で codex-setup.md の `origin/$BASE` も local の base に直した。release ノートの本文は report の「Release notes」)
+- [x] Cross-review — 5634ccca(codex、cycle 1/2、指摘 0、Case C。PATH の ralph が v6.0.0 なので、main の版の skill で回した)。AC7 は sync-docs 67410c6f で V1〜V4 を直したので `[x]` にした。consult-plan-switchskills の完了判定: 進めてよい(release のノートに claude の `--restricted` の版の下限を足す)。
 - [ ] PR created
