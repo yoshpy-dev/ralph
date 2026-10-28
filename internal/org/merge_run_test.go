@@ -991,6 +991,24 @@ func TestMerge_RunsTheCleanupOnlyAfterARecordedMerge(t *testing.T) {
 	})
 }
 
+// The refusal of the cleanup Merge skips once interrupted names the branch in
+// its command as one shell word (cleanupShellWord), as the cleanup's own
+// refusals do: a branch with a character the shell reads specially, which
+// git accepts (git check-ref-format --branch feat/a;b), is quoted there, a
+// plain one is not, and the branch named in words is left as it is.
+func TestMergeCleanupInterrupted_QuotesTheBranchInItsCommand(t *testing.T) {
+	const prefix = "ralph org merge was interrupted (test stopped) once pr_merged was recorded, so the feature worktree of " +
+		"the branch "
+	for _, tc := range []struct{ branch, want string }{
+		{"feat/a", prefix + "feat/a was not cleaned up: run ralph org cleanup --branch feat/a"},
+		{"feat/a;b", prefix + "feat/a;b was not cleaned up: run ralph org cleanup --branch 'feat/a;b'"},
+	} {
+		if got := mergeCleanupInterrupted(errors.New("test stopped"), tc.branch); got != tc.want {
+			t.Errorf("mergeCleanupInterrupted(%q) =\n%q\nwant\n%q", tc.branch, got, tc.want)
+		}
+	}
+}
+
 // TestMerge_CleanupOutcomesWithFakeWorktrees covers the cleanup's outcomes
 // that reach MergeResult, with fakeWorktrees, the merge recorded and no error
 // from Merge in each: an earlier cleanup left the record alone (no worktree,

@@ -702,9 +702,9 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 		t.Fatalf("merge: err %v, stderr %q (stdout %q); want exit 0", err, stderr, stdout)
 	}
 	want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
-		"the feature worktree, was not found (org: start --plan makes the feature worktree from the main worktree of a git " +
-		"repository, and the current directory is not in one: run it from the main worktree or one of its linked worktrees), so " +
-		"the feature worktree of the branch feat/a was not cleaned up: run ralph org cleanup --branch feat/a from the main worktree)\n"
+		"the feature worktree, was not found (the current directory is in no git repository, or in one with no main worktree, " +
+		"such as a linked worktree of a bare repository), so the feature worktree of the branch feat/a was not cleaned up: run " +
+		"ralph org cleanup --branch feat/a from the main worktree)\n"
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 	}
@@ -1037,8 +1037,10 @@ func TestOrgMerge_Help(t *testing.T) {
 				"worktree has that branch checked out at that head. When a check fails, it removes nothing.",
 			"After the lines above, merge prints CLEANUP: done, with (resumed: <what was left>) when it went on from such a " +
 				"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by CLEANUP MANUAL: <the command that cleans up " +
-				"by hand once the reason is checked>; ralph org cleanup --branch <branch> cleans up later. The cleanup never " +
-				"changes the exit code.",
+				"by hand once the reason is checked>. Only a cleanup ralph cannot go on with by itself has such a command (the " +
+				"record is gone or is not the binding's, the worktree is left with no local branch, or the removal itself " +
+				"failed); after any other skip, fix what the reason says and run ralph org cleanup --branch <branch> again. The " +
+				"cleanup never changes the exit code.",
 			"an interrupt once pr_merged is recorded skips the cleanup or stops it, and the CLEANUP: line says how it ended.",
 			"Exit codes: 0 for a merge that was recorded, whatever the cleanup did;",
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",

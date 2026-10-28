@@ -131,13 +131,17 @@ func TestOrgSkill_SendRowSaysItWaitsForIdleBeforeTyping(t *testing.T) {
 // docs/plans/active/2026-10-28-org-merge-cleanup.md, S4: AC5), by where they
 // are, each list in the skill's order: the verb-table row of cleanup (what it
 // removes, where it runs, which branches it counts, the checks, the script it
-// runs, its lines, its exit codes); the row of merge (the cleanup once
-// pr_merged is recorded, its CLEANUP: lines, the exit code it leaves alone,
-// and the spawn and start it refuses meanwhile); the rows of spawn and start
-// (refused while merge or cleanup removes the org's worktree); and the
-// subsection ### org の終わり方 (who cleans up after a merge, what stops it,
-// that ignored files go with the worktree, that --force-branch is safe after
-// a squash merge, and the script by hand for a PR closed without a merge).
+// runs, its lines, what a SKIPPED: line covers and when a MANUAL: line comes,
+// its exit codes); the row of merge (the cleanup once pr_merged is recorded,
+// its CLEANUP: lines, what skipped covers, the exit code it leaves alone, the
+// rerun of a skipped one, when a command by hand comes, and the spawn and
+// start it refuses meanwhile); the rows of spawn and start (refused while
+// merge or cleanup removes the org's worktree); and the subsection
+// ### org の終わり方 (who cleans up after a merge, what stops it, that the
+// next step is most often the rerun and a command by hand comes only where
+// ralph cannot go on by itself, that ignored files go with the worktree,
+// that --force-branch is safe after a squash merge, and the script by hand
+// for a PR closed without a merge).
 var orgSkillCleanupRules = []struct {
 	name      string
 	section   func(text string) string
@@ -156,6 +160,11 @@ var orgSkillCleanupRules = []struct {
 		"その org の `spawn` と `start` が断られる",
 		"`CLEANED: <ブランチ> org-<org_id>`",
 		"`nothing to clean up`",
+		"`SKIPPED:` は片付けが終わっていないことで、断り(何も消していない)と、script の途中の失敗(消した分は消えたまま)と、" +
+			"PR を読めなかったブランチを含む",
+		"`MANUAL:` が出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
+			"ブランチがなく worktree だけがある、消す途中で失敗した)で、ほかの `SKIPPED:` のブランチは、理由を直してから " +
+			"`--branch` で打ち直せば続きから片付く",
 		"`SKIPPED:` が 1 本でもあれば 1",
 		"`--org-id` は断る",
 	}},
@@ -163,7 +172,11 @@ var orgSkillCleanupRules = []struct {
 		"`pr_merged` を記録したら、`regate.lock` を持ったまま、ブランチの機能の worktree を片付ける",
 		"`worktree_cleaned` を `via=merge` で記録する",
 		"`CLEANUP: done` か、`CLEANUP: skipped (<理由>)` と、手で消すコマンドがあれば `CLEANUP MANUAL: <コマンド>` を出す",
+		"`skipped` は片付けが終わっていないことで、断り(何も消していない)と、script の途中の失敗(消した分は消えたまま)の両方を含む",
 		"片付けは終了コードを変えない",
+		"片付かなかったブランチは、理由を直してから `ralph org cleanup --branch <ブランチ>` で片付ける",
+		"手で消すコマンドが出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
+			"ブランチがなく worktree だけがある、消す途中で失敗した)",
 		"その org の `spawn` と `start` は、merge の続きの片付けの間だけ断られる",
 	}},
 	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
@@ -177,12 +190,16 @@ var orgSkillCleanupRules = []struct {
 		"PR が merge されたら、`ralph org merge` か `ralph org cleanup` が",
 		"`ralph org merge` で merge した PR は、merge の続きで片付き、結果は `CLEANUP:` の行で出る。片付けは終了コードを変えない",
 		"人が GitHub で直接 merge した PR は、main のチェックアウトから `ralph org cleanup` で片付ける",
-		"どちらも、次のどれかに当たれば何も消さず、理由と、あれば手で消すコマンドを出す",
+		"どちらも、次のどれかに当たれば何も消さず、理由と次の手を出す",
 		"worktree に未コミットの変更か未追跡のファイルがある",
 		"ローカルのブランチの先頭か worktree の HEAD が、merge された PR の head と違う",
 		"worktree が detached HEAD か、別のブランチにいる",
 		"記録 `org-<org_id>` が結びつきと合わない",
 		"ralph をその worktree の中から打った",
+		"次の手はたいてい、理由を直してから `ralph org cleanup --branch <ブランチ>` を打ち直すことで、打ち直せば残ったものから片付く",
+		"手で消すコマンド(`CLEANUP MANUAL:` と `MANUAL:` の行)は、ralph が先に進めず人の判断が要るときだけ出る",
+		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、消す途中で script が" +
+			"失敗したとき(消した分は消えたまま)の 3 つ",
 		"gitignore されたファイル",
 		"止める理由にならず、worktree と一緒に消える",
 		"squash merge のあとにリモートのブランチが消えていても止まらない",

@@ -129,8 +129,11 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"done, with (resumed: <what was left>) when it went on from such a\n" +
 			"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by\n" +
 			"CLEANUP MANUAL: <the command that cleans up by hand once the reason is\n" +
-			"checked>; ralph org cleanup --branch <branch> cleans up later. The\n" +
-			"cleanup never changes the exit code.\n" +
+			"checked>. Only a cleanup ralph cannot go on with by itself has such a\n" +
+			"command (the record is gone or is not the binding's, the worktree is\n" +
+			"left with no local branch, or the removal itself failed); after any\n" +
+			"other skip, fix what the reason says and run ralph org cleanup\n" +
+			"--branch <branch> again. The cleanup never changes the exit code.\n" +
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
@@ -239,17 +242,25 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 	return cmd
 }
 
+// orgMainWorktreeMissing is why ralph org merge and ralph org cleanup find no
+// main worktree when org.FeatureRepoRoot fails, said in place of its error,
+// which names start --plan and where to run it: it fails only when the
+// current directory is in no git repository, or in one where git names no
+// main worktree (a linked worktree of a bare repository has none).
+const orgMainWorktreeMissing = "the current directory is in no git repository, or in one with no main worktree, such as a " +
+	"linked worktree of a bare repository"
+
 // mergeCleanupRoot is the main worktree root merge passes as
 // MergeParams.RepoRoot for the cleanup of the merged branch's feature
 // worktree, found as ralph org start --plan finds it (org.FeatureRepoRoot).
 // When it cannot be found, root is "", so Merge runs no cleanup, and skipped
-// is the reason the CLEANUP: line gives instead.
+// is the reason the CLEANUP: line gives instead (orgMainWorktreeMissing).
 func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch string) (root, skipped string) {
 	root, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 	if err != nil {
 		return "", org.PrintableInboxText(fmt.Sprintf("the main worktree, where scripts/ralph-worktree.sh removes the feature "+
-			"worktree, was not found (%v), so the feature worktree of the branch %s was not cleaned up: run ralph org cleanup "+
-			"--branch %s from the main worktree", err, branch, branch), false)
+			"worktree, was not found (%s), so the feature worktree of the branch %s was not cleaned up: run ralph org cleanup "+
+			"--branch %s from the main worktree", orgMainWorktreeMissing, branch, branch), false)
 	}
 	return root, ""
 }

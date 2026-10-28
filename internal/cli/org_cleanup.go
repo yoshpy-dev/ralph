@@ -79,12 +79,17 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"(resumed: <what was left>) when it went on from a cleanup that stopped\n" +
 			"part way, or SKIPPED: <branch> <why>, followed, when there is one, by\n" +
 			"MANUAL: <the command that cleans up by hand once the reason is\n" +
-			"checked>. With no such line, it prints nothing to clean up. Exit codes:\n" +
-			"0 when every branch was cleaned up or there was nothing to clean up; 1\n" +
-			"when a branch was skipped, gh is not on PATH (whether a PR was merged\n" +
-			"cannot be told, so nothing is removed), the main worktree is not found,\n" +
-			"--branch is refused, for an interrupt (SIGINT, SIGTERM, or SIGHUP; what\n" +
-			"was cleaned up before it stays cleaned up), and for any other error.\n" +
+			"checked>. With no such line, it prints nothing to clean up. Only a\n" +
+			"branch ralph cannot go on with by itself gets a MANUAL: line (the\n" +
+			"record is gone or is not the binding's, the worktree is left with no\n" +
+			"local branch, or the removal itself failed); after any other SKIPPED:\n" +
+			"line, fix what the reason says and run ralph org cleanup --branch\n" +
+			"<branch> again. Exit codes: 0 when every branch was cleaned up or\n" +
+			"there was nothing to clean up; 1 when a branch was skipped, gh is not\n" +
+			"on PATH (whether a PR was merged cannot be told, so nothing is\n" +
+			"removed), the main worktree is not found, --branch is refused, for an\n" +
+			"interrupt (SIGINT, SIGTERM, or SIGHUP; what was cleaned up before it\n" +
+			"stays cleaned up), and for any other error.\n" +
 			"\n" +
 			"cleanup starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. It reads the branches of every org in the ledger, so\n" +
@@ -116,8 +121,10 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			defer stop()
 			repoRoot, err := org.FeatureRepoRoot(resolvedStateDir, stateDirSource)
 			if err != nil {
-				return fmt.Errorf("org: cleanup: the main worktree, where scripts/ralph-worktree.sh removes the feature worktrees, "+
-					"was not found (%w), so nothing was read or removed: run ralph org cleanup from the main worktree", err)
+				// err is one of the two cases orgMainWorktreeMissing says.
+				return errors.New("org: cleanup: the main worktree, where scripts/ralph-worktree.sh removes the feature worktrees, " +
+					"was not found (" + orgMainWorktreeMissing + "), so nothing was read or removed: run ralph org cleanup from the " +
+					"main worktree")
 			}
 			res, err := rt.MergeOrder(ctx, org.MergeOrderParams{All: true})
 			if err != nil {

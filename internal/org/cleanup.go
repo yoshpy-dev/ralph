@@ -31,7 +31,8 @@ import (
 //  2. the record org-<org_id> exists and is the binding's: its branch,
 //     worktree_path, and kind org (checkRecord), so that a worktree another
 //     feature made on the same org_id is never removed;
-//  3. the caller does not run inside the worktree;
+//  3. the caller does not run inside the worktree, so that no shell of the
+//     caller is left in the directory the cleanup removes;
 //  4. the worktree is the root of a git worktree, with no rebase or merge in
 //     progress and nothing uncommitted or untracked (a file .gitignore names
 //     does not count and goes with the worktree, D6);

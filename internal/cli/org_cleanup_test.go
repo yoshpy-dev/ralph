@@ -331,9 +331,8 @@ func TestOrgCleanup_NoMainWorktreeReadsNothing(t *testing.T) {
 
 	stdout, _, err := runOrgCmdStreams(t, "cleanup", "--state-dir", fx.stateDir)
 	const want = "org: cleanup: the main worktree, where scripts/ralph-worktree.sh removes the feature worktrees, was not found " +
-		"(org: start --plan makes the feature worktree from the main worktree of a git repository, and the current directory is " +
-		"not in one: run it from the main worktree or one of its linked worktrees), so nothing was read or removed: run ralph org " +
-		"cleanup from the main worktree"
+		"(the current directory is in no git repository, or in one with no main worktree, such as a linked worktree of a bare " +
+		"repository), so nothing was read or removed: run ralph org cleanup from the main worktree"
 	if err == nil || err.Error() != want || stdout != "" {
 		t.Errorf("cleanup outside a repository: err %v, stdout %q; want the error %q", err, stdout, want)
 	}
@@ -644,6 +643,9 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"CLEANED: <branch> org-<org_id>, with (resumed: <what was left>)",
 			"SKIPPED: <branch> <why>, followed, when there is one, by MANUAL: <the command that cleans up by hand once the reason is checked>",
 			"With no such line, it prints nothing to clean up.",
+			"Only a branch ralph cannot go on with by itself gets a MANUAL: line (the record is gone or is not the binding's, " +
+				"the worktree is left with no local branch, or the removal itself failed); after any other SKIPPED: line, fix " +
+				"what the reason says and run ralph org cleanup --branch <branch> again.",
 			"Exit codes: 0 when every branch was cleaned up or there was nothing to clean up; 1 when a branch was skipped, gh is " +
 				"not on PATH (whether a PR was merged cannot be told, so nothing is removed), the main worktree is not found, " +
 				"--branch is refused,",

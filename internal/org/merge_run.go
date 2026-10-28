@@ -259,9 +259,8 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	case err != nil || !res.Recorded || p.RepoRoot == "":
 		// No cleanup: the merge was not recorded, or no repo root was given.
 	case ctx.Err() != nil:
-		res.Cleanup = &CleanupResult{Branch: res.Branch, Head: res.Head, Refused: PrintableInboxText(fmt.Sprintf("ralph org merge "+
-			"was interrupted (%v) once pr_merged was recorded, so the feature worktree of the branch %s was not cleaned up: "+
-			"run ralph org cleanup --branch %s", context.Cause(ctx), res.Branch, res.Branch), false)}
+		res.Cleanup = &CleanupResult{Branch: res.Branch, Head: res.Head, Refused: mergeCleanupInterrupted(context.Cause(ctx),
+			res.Branch)}
 	default:
 		res.Cleanup, res.CleanupErr = o.mergeCleanup(ctx, lock, p, res)
 	}
@@ -269,6 +268,16 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
 	return res, nil, err
+}
+
+// mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it
+// was interrupted (cause) once pr_merged was recorded for branch, escaped,
+// with the branch in its command as one shell word (cleanupShellWord), as in
+// the cleanup's own refusals (cleanupAgain).
+func mergeCleanupInterrupted(cause error, branch string) string {
+	return PrintableInboxText(fmt.Sprintf("ralph org merge was interrupted (%v) once pr_merged was recorded, so the feature "+
+		"worktree of the branch %s was not cleaned up: run ralph org cleanup --branch %s", cause, branch,
+		cleanupShellWord(branch)), false)
 }
 
 // mergeCleanup is the cleanup of the feature worktree of res.Branch once

@@ -862,11 +862,14 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   `resumed: <kind>` があれば、前に途中で止まった片付けの続きを済ませた。
   括弧にそれ以外の文があれば、台帳への `worktree_cleaned` の追記だけが
   失敗した(消す作業は済んでいる)。行が `CLEANUP: skipped (<理由>)` なら
-  何も消していないので、理由と、続く `CLEANUP MANUAL:` のコマンドを
-  そのまま人に伝える。手のコマンド(`git branch -D` などを含む)は、人に
-  頼まれないまま打たない。理由を直したあとは、
-  `ralph org cleanup --branch <ブランチ>` で続きから片付く(下の
-  「GitHub で merge した PR の後始末」)。
+  片付けは終わっていない。断られて何も消していないか、script が途中で
+  止まった(消した分は消えたままで、次の片付けが続きから進む)かの
+  どちらか。どちらでも、理由と、続く `CLEANUP MANUAL:` の行があればその
+  コマンドを、そのまま人に伝える。`CLEANUP MANUAL:` の行がない断りは、理由を
+  直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く
+  (下の「GitHub で merge した PR の後始末」)。`CLEANUP MANUAL:` の行は、
+  ralph が先に進めず人の判断が要るときだけ出る。手のコマンド
+  (`git branch -D` などを含む)は、人に頼まれないまま打たない。
 - repo の保護が merge の時点で base を最新に保たないという断り(up-to-date
   の ruleset がない、merge queue がある、打つ本人が保護を迂回できる)は、
   repo の設定のことなので、どのブランチも `ralph org merge` では merge
@@ -958,18 +961,25 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 `cleanup` の行と「org の終わり方」)。merge 済みで失うもののないものだけを
 消すので、`auto_merge` の値によらず打ってよい。
 
-1. 人が GitHub で merge したと言ったとき、または
-   `ralph org merge-order --all` に `merged` のブランチが出たときに、main の
-   チェックアウトから `ralph org cleanup` を打つ(1 本だけなら
+1. 人が GitHub で merge したと言ったとき、または前の報告のあとに
+   `ralph org merge-order --all` に新しい `merged` のブランチが出たときに、
+   main のチェックアウトから `ralph org cleanup` を打つ(1 本だけなら
    `--branch <ブランチ>` を付ける)。片付け済みのブランチと、同じ org_id が
-   のちに別のブランチに結びつけ直された古いブランチは数えないので、何度
-   打ってもよい。
+   のちに別のブランチに結びつけ直された古いブランチは数えず、行も出さない。
 2. 終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up`
    なら報告は要らない。
-3. 終了コード 1 なら、`SKIPPED:` の理由と `MANUAL:` のコマンド、stderr の
-   文をそのまま人に伝える。人に頼まれないまま打ち直さず、手のコマンドも
-   打たない。`gh` がないと merge されたかを判定できないので、何も消さずに
-   終了コード 1 で終わる。
+3. 終了コード 1 なら、`SKIPPED:` の行のブランチは片付けが終わっていない。
+   `CLEANUP: skipped` と同じく、断られて何も消していないか、script が途中で
+   止まったかのどちらかで、PR を読めなかったブランチもこの行になる。
+   `SKIPPED:` の理由と、続く `MANUAL:` の行があればそのコマンド、stderr の
+   文をそのまま人に伝える。`MANUAL:` の行がない断りは、理由を直して
+   `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く。
+4. `SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、
+   手のコマンドも人に頼まれないまま打たない。そのブランチが残っている間に
+   ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出る
+   ので、そのときは新しいブランチを `--branch` で名指して打つ。
+5. `gh` がないと merge されたかを判定できないので、何も消さずに終了コード 1
+   で終わる。
 
 ## 終わり
 

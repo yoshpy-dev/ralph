@@ -841,36 +841,55 @@ func TestDirectorSkillBullet(t *testing.T) {
 // cleanup did; a line that starts CLEANUP: done is a cleanup that ended,
 // resumed: in its parentheses one that went on from an earlier stop, and any
 // other words there a worktree_cleaned that could not be appended; CLEANUP:
-// skipped removed nothing, and its reason and the CLEANUP MANUAL: command go
-// to the human as they are; the director runs no command by hand unasked;
-// and ralph org cleanup --branch goes on once the reason is fixed.
+// skipped is a cleanup that did not end, either a refusal that removed
+// nothing or a script that stopped part way (what it removed stays removed,
+// and the next cleanup goes on), and either way its reason and the CLEANUP
+// MANUAL: command, when there is one, go to the human as they are; a refusal
+// with no CLEANUP MANUAL: line goes on with ralph org cleanup --branch once
+// the reason is fixed, since that line comes only where ralph cannot go on
+// by itself; and the director runs no command by hand unasked.
 var directorSkillMergeCleanupRules = []string{
 	"merge は済んでいる。片付けがどうなっても、記録した merge の終了コードは 0 のまま",
 	"行が `CLEANUP: done` で始まれば片付いた",
 	"括弧に `resumed: <kind>` があれば、前に途中で止まった片付けの続きを済ませた",
 	"括弧にそれ以外の文があれば、台帳への `worktree_cleaned` の追記だけが失敗した(消す作業は済んでいる)",
-	"行が `CLEANUP: skipped (<理由>)` なら何も消していないので、理由と、続く `CLEANUP MANUAL:` のコマンドをそのまま人に伝える",
+	"行が `CLEANUP: skipped (<理由>)` なら片付けは終わっていない",
+	"断られて何も消していないか、script が途中で止まった(消した分は消えたままで、次の片付けが続きから進む)かのどちらか",
+	"どちらでも、理由と、続く `CLEANUP MANUAL:` の行があればそのコマンドを、そのまま人に伝える",
+	"`CLEANUP MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
+	"`CLEANUP MANUAL:` の行は、ralph が先に進めず人の判断が要るときだけ出る",
 	"手のコマンド(`git branch -D` などを含む)は、人に頼まれないまま打たない",
-	"`ralph org cleanup --branch <ブランチ>` で続きから片付く",
 }
 
 // directorSkillGitHubMergeCleanupSteps are fragments of the /director
 // skill's subsection ### GitHub で merge した PR の後始末, in order: ralph org
 // cleanup cleans up a PR merged on GitHub whatever auto_merge says, run from
 // the main checkout when the human says so or merge-order --all lists a
-// merged branch, as often as needed; exit 0 is reported with its CLEANED:
-// lines, and nothing to clean up needs no report; exit 1 goes to the human
-// as it is, with no rerun and no command by hand unasked; and with no gh it
-// removes nothing and exits 1.
+// merged branch that is new since the last report, and branches cleaned up
+// already get no line; exit 0 is reported with its CLEANED: lines, and
+// nothing to clean up needs no report; on exit 1 a SKIPPED: line is read as
+// CLEANUP: skipped is, its reason and the MANUAL: command, when there is
+// one, go to the human with stderr as they are, and a refusal with no
+// MANUAL: line goes on with ralph org cleanup --branch once the reason is
+// fixed; a branch SKIPPED: stopped is not run again until the human says
+// the reason is fixed, no command by hand is run unasked, and a new branch
+// is named with --branch meanwhile, since a run without it prints the same
+// SKIPPED: again; and with no gh it removes nothing and exits 1.
 var directorSkillGitHubMergeCleanupSteps = []string{
 	"人が GitHub で直接 merge した PR の機能の worktree・ローカルのブランチ・記録は、`ralph org cleanup` で片付ける",
 	"`auto_merge` の値によらず打ってよい",
-	"人が GitHub で merge したと言ったとき、または `ralph org merge-order --all` に `merged` のブランチが出たときに、main の" +
-		"チェックアウトから `ralph org cleanup` を打つ",
-	"何度打ってもよい",
+	"人が GitHub で merge したと言ったとき、または前の報告のあとに `ralph org merge-order --all` に新しい `merged` のブランチが" +
+		"出たときに、main のチェックアウトから `ralph org cleanup` を打つ",
+	"片付け済みのブランチと、同じ org_id がのちに別のブランチに結びつけ直された古いブランチは数えず、行も出さない",
 	"終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up` なら報告は要らない",
-	"終了コード 1 なら、`SKIPPED:` の理由と `MANUAL:` のコマンド、stderr の文をそのまま人に伝える。人に頼まれないまま打ち直さず、" +
-		"手のコマンドも打たない",
+	"終了コード 1 なら、`SKIPPED:` の行のブランチは片付けが終わっていない",
+	"`CLEANUP: skipped` と同じく、断られて何も消していないか、script が途中で止まったかのどちらかで、PR を読めなかったブランチも" +
+		"この行になる",
+	"`SKIPPED:` の理由と、続く `MANUAL:` の行があればそのコマンド、stderr の文をそのまま人に伝える",
+	"`MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
+	"`SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、手のコマンドも人に頼まれないまま打たない",
+	"ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出るので、そのときは新しいブランチを `--branch` で" +
+		"名指して打つ",
 	"`gh` がないと merge されたかを判定できないので、何も消さずに終了コード 1 で終わる",
 }
 
