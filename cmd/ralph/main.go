@@ -28,7 +28,11 @@ func main() {
 		// cross-org watch stopped accepting work and 5 when its registration
 		// is not the current one, so the director can tell both from a
 		// failed wait (plan docs/plans/active/2026-10-19-org-director-wait.md,
-		// D4). Any other error exits 1.
+		// D4). `ralph config get` exits 2 for a key that is not a key of one
+		// value in ralph.toml and 3 when ralph.toml cannot be read or is
+		// invalid, so a skill can tell both from an older ralph without the
+		// verb (plan 2026-10-29-review-switches-config, D6). Any other error
+		// exits 1.
 		os.Exit(cli.ExitCode(err))
 	}
 }
