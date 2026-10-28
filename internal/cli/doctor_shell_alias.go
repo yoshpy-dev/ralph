@@ -711,12 +711,12 @@ func shellAliasCodexSentence(items []string, hasModel, hasSandbox, hasApproval, 
 		clauses = append(clauses, "ralph org spawn always passes --model, so every spawn fails")
 	}
 	if hasSandbox {
-		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only once "+
-			"[org.permissions].codex_verified = true), so those spawns fail while a guarded seat silently runs with the alias's sandbox")
+		clauses = append(clauses, "ralph passes --sandbox to edits and autonomous seats (modes a codex seat gets only while "+
+			"[org.permissions].codex_verified is true, the default), so those spawns fail while a guarded seat silently runs with the alias's sandbox")
 	}
 	if hasApproval {
-		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only once "+
-			"[org.permissions].codex_verified = true), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
+		clauses = append(clauses, "ralph passes --ask-for-approval to autonomous seats only (a mode a codex seat gets only while "+
+			"[org.permissions].codex_verified is true, the default), so those spawns fail while edits and guarded seats silently run with the alias's approval policy")
 	}
 	clauses = append(clauses, "remove the alias or start herdr from an alias-free rc (docs/recipes/codex-seat-permissions.md)")
 	sentence := strings.Join(clauses, "; ")

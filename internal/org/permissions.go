@@ -116,11 +116,13 @@ func CodexModeRunsUnderWorkspaceWrite(mode string) bool {
 // with no approval prompt and the sandbox rejects writes outside its
 // writable roots (cwd plus /tmp-style temp roots -- see evidence P4); edits
 // auto-accepts in-cwd edits and prompts only when the model requests an
-// escalation. The default is true because of that verification (issue
-// #274). The flags inherit the operator's own ~/.codex/config.toml
-// (approval_policy, sandbox writable_roots -- the agmsg DB directory must be
-// writable or seats cannot send RESULT), so a machine where
-// docs/recipes/codex-seat-permissions.md does not pass sets it to false.
+// escalation. That verification, on one machine, is the evidence for the
+// mapping, not the reason for the default: the default is true by the human
+// decision of issue #274. The flags inherit the operator's own
+// ~/.codex/config.toml (approval_policy, sandbox writable_roots -- the
+// agmsg DB directory must be writable or seats cannot send RESULT), so a
+// machine where docs/recipes/codex-seat-permissions.md does not pass sets
+// it to false.
 func permissionArgsForDriver(cfg config.OrgConfig, driver, mode string) ([]string, error) {
 	switch driver {
 	case "claude":

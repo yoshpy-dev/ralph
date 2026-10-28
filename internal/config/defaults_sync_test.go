@@ -7,10 +7,10 @@ package config
 //  1. templates/base/ralph.toml — declarative project config
 //  2. config.Default()          — Go CLI defaults
 //
-// For each of the 19 [org] keys, orgTemplateDrift checks that the template
-// sets the key and that its value equals Default()'s. The template is not
-// read with Load: Load starts from Default(), so a key the template leaves
-// out would keep Default()'s value and pass.
+// For each [org] key of orgTemplateProbe, orgTemplateDrift checks that the
+// template sets the key and that its value equals Default()'s. The template
+// is not read with Load: Load starts from Default(), so a key the template
+// leaves out would keep Default()'s value and pass.
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
 // defaults, VAR="${VAR:-value}" idiom). org.agmsg_home, the one [org] key
@@ -106,8 +106,8 @@ func mustShell(t *testing.T, m map[string]string, varName string) string {
 	return v
 }
 
-// orgTemplateProbe holds the 19 [org] keys that templates/base/ralph.toml
-// sets, with pointer fields: go-toml/v2 leaves a pointer nil when its key is
+// orgTemplateProbe holds the [org] keys that templates/base/ralph.toml sets,
+// with pointer fields: go-toml/v2 leaves a pointer nil when its key is
 // absent, so a key the template leaves out is told apart from one set to its
 // zero value, such as auto_merge = false (the idiom of orgPoolKeysPresent in
 // config.go).
@@ -144,7 +144,7 @@ type orgTemplateProbe struct {
 }
 
 // orgTemplateDrift reads templateData (a ralph.toml) into orgTemplateProbe
-// once and compares each of its 19 [org] keys with def. It returns one line
+// once and compares each of its [org] keys with def. It returns one line
 // per key that the template does not set or sets to another value, naming
 // the dotted key; none means the two agree.
 func orgTemplateDrift(templateData []byte, def Config) ([]string, error) {
@@ -395,10 +395,12 @@ func TestOrgTemplateDrift_DetectsChangedAndMissingKeys(t *testing.T) {
 // key and no other: changing the key's field in a Default() copy, changing
 // its value in the template, and removing it from the template each give
 // exactly one drift line, naming the key. Two keys with the same default
-// (max_orgs and deadman_minutes, watcher_enabled and director.enabled,
-// codex_verified and auto_merge) swapped on either side fail here, which a
-// single real-template comparison would miss. The rows must cover every
-// toml key of orgTemplateProbe, so a key added to the probe needs a row.
+// (for example max_orgs, deadman_minutes, and ack_minutes, all 10;
+// max_total_seats and interval_seconds, both 30; watcher_enabled,
+// director.enabled, codex_verified, and auto_merge, all true) swapped on
+// either side fail here, which a single real-template comparison would
+// miss. The rows must cover every toml key of orgTemplateProbe, so a key
+// added to the probe needs a row.
 func TestOrgTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(repoRoot(t), "templates", "base", "ralph.toml"))
 	if errors.Is(err, fs.ErrNotExist) {

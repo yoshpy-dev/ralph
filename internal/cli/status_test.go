@@ -1139,8 +1139,10 @@ func TestStatusCmd_DirectorStopCommandRepeatsTheStateDir(t *testing.T) {
 // AC5, AC6: with no --state-dir in a linked worktree, `ralph status` reads
 // the switch from the main worktree's ralph.toml, as escalate does, whatever
 // the worktree's ralph.toml says. A main worktree ralph.toml that does not
-// load warns on stderr and shows the built-in default (true); status still
-// exits 0 and --json stays one JSON document.
+// load warns on stderr and shows the built-in default of the switch (true)
+// with auto_merge false, not its default true, as the file may say false
+// (self-review M1 of codex-verified-auto-merge-on); status still exits 0
+// and --json stays one JSON document.
 func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 	r := newLegacyLedgerRepo(t)
 	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), "[org.director]\nenabled = false\n")
@@ -1161,29 +1163,33 @@ func TestStatusCmd_DirectorEnabledFromTheMainWorktree(t *testing.T) {
 			t.Fatalf("status %v with a broken main ralph.toml: %v (stderr %s)", extra, err, stderr)
 		}
 		for _, want := range []string{"warning: status: org: load [org.director] from the main worktree's " + mainToml,
-			"showing the director by the default [org.director].enabled (true) and auto_merge (true)\n"} {
+			"showing the director by the default [org.director].enabled (true) and auto_merge as false (not the default), " +
+				"because the main worktree's ralph.toml could not be read\n"} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("status %v stderr does not contain %q:\n%s", extra, want, stderr)
 			}
 		}
 		if extra == nil {
-			if got := statusDirectorLine(t, stdout); got != directorNotAttachedLine {
-				t.Errorf("director line with a broken main ralph.toml = %q; want %q", got, directorNotAttachedLine)
+			if got := statusDirectorLine(t, stdout); got != directorNotAttachedOffLine {
+				t.Errorf("director line with a broken main ralph.toml = %q; want %q", got, directorNotAttachedOffLine)
 			}
-		} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled {
-			t.Errorf("director with a broken main ralph.toml = %+v; want enabled, not_attached", got)
+		} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled || got.AutoMerge {
+			t.Errorf("director with a broken main ralph.toml = %+v; want enabled, auto_merge false, not_attached", got)
 		}
 	}
 }
 
 // status only reads, so a ./ralph.toml that does not load warns and shows
-// the built-in default of the switch instead of failing. status reads the
-// file once, for the watch's deadman_minutes and the switch, so stderr holds
-// exactly one warning line about it (self-review L1 of
-// org-director-attach), also in a main checkout, where ./ralph.toml is the
-// main worktree's file the switch would be read from, and with --json.
+// the built-in default of the switch instead of failing, with auto_merge
+// false, not its default true, as the file may say false (self-review M1 of
+// codex-verified-auto-merge-on). status reads the file once, for the
+// watch's deadman_minutes and the switch, so stderr holds exactly one
+// warning line about it (self-review L1 of org-director-attach), also in a
+// main checkout, where ./ralph.toml is the main worktree's file the switch
+// would be read from, and with --json.
 func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *testing.T) {
-	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true) and auto_merge (true)\n"
+	const wantSuffix = "; judging the org watch by the default deadman_minutes (10) and showing the director by the default [org.director].enabled (true) " +
+		"and auto_merge as false (not the default), because ralph.toml could not be read\n"
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T) []string // chdirs and returns status's extra args
@@ -1208,11 +1214,11 @@ func TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad(t *test
 					t.Fatalf("status %v: %v (stderr %s)", extra, err, stderr)
 				}
 				if extra == nil {
-					if got := statusDirectorLine(t, stdout); got != directorNotAttachedLine {
-						t.Errorf("director line = %q; want %q", got, directorNotAttachedLine)
+					if got := statusDirectorLine(t, stdout); got != directorNotAttachedOffLine {
+						t.Errorf("director line = %q; want %q", got, directorNotAttachedOffLine)
 					}
-				} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled {
-					t.Errorf("director = %+v; want enabled, not_attached", got)
+				} else if got := statusDirectorJSONOf(t, stdout); got.State != "not_attached" || !got.Enabled || got.AutoMerge {
+					t.Errorf("director = %+v; want enabled, auto_merge false, not_attached", got)
 				}
 				if !strings.HasPrefix(stderr, "warning: status: load ralph.toml: ") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "\n") != 1 {
 					t.Errorf("status %v stderr = %q; want exactly one load warning ending %q", extra, stderr, wantSuffix)

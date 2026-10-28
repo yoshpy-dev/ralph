@@ -22,6 +22,10 @@ func testOrgConfig() config.OrgConfig {
 		// in a test that does not set them lower itself.
 		MaxOrgs:       config.Default().Org.MaxOrgs,
 		MaxTotalSeats: config.Default().Org.MaxTotalSeats,
+		// codex_verified false, not config.Default's true (issue #274): the
+		// codex fail-closed tests reach permissionArgsForDriver's rejection
+		// through this config.
+		Permissions: config.OrgPermissionsConfig{CodexVerified: false},
 	}
 }
 
