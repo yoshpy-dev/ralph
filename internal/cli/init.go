@@ -38,10 +38,10 @@ package.json, ...) sit directly in the target directory is labeled
 "(Recommended)", and "skip" installs no language pack. A pack can be added
 later with ralph pack add <language>.
 
-With --yes nothing is asked, and only those packs are installed (none
-without --pack). --pack can be repeated or take comma-separated names,
-and an unknown name fails before anything is written. When TERM=dumb and stdin
-is not a terminal, ralph init cannot ask its questions and needs --yes.`,
+With --yes nothing is asked, and no language pack is installed unless --pack
+names one. --pack can be repeated or take comma-separated names, and an
+unknown name fails before anything is written. When TERM=dumb and stdin is
+not a terminal, ralph init cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Check the --pack names before the form and before anything is
@@ -116,8 +116,9 @@ func parsePackFlag(values, available []string) ([]string, error) {
 type initConfig struct {
 	ProjectName string
 	Packs       []string
-	// AvailablePacks is what scaffold.AvailablePacks listed. executeInit
-	// names them in its ralph pack add hint when Packs is empty.
+	// AvailablePacks is what scaffold.AvailablePacks listed. The language-pack
+	// question offers them as its options, and executeInit names them in its
+	// ralph pack add hint when Packs is empty.
 	AvailablePacks []string
 }
 
