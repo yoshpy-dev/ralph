@@ -63,9 +63,9 @@ var mergeTestHooks struct {
 type MergeResult struct {
 	// Refused is set when Merge refused before gh pr merge ran: a
 	// --wait-checks out of range (MergeWaitChecksRefusal), no branch named,
-	// another ralph org regate or merge holding regate.lock, or a check of
-	// checkMerge that failed. It says why and one next step. Nothing was
-	// merged or recorded, and every other field is empty.
+	// another ralph org regate, merge, or cleanup holding regate.lock, or a
+	// check of checkMerge that failed. It says why and one next step. Nothing
+	// was merged or recorded, and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
 	// view read it back, is MERGED at a head that is not the gate's or with no
@@ -129,18 +129,19 @@ type MergeResult struct {
 // Merge runs `ralph org merge --branch <p.Branch>`. It refuses
 // (MergeResult.Refused, nothing merged or recorded) when p.WaitChecks is out
 // of range (MergeWaitChecksRefusal) or p.Branch is empty, before any lock or
-// command; when another ralph org regate or merge of the ledger holds
-// regate.lock after regateLockWait (D3); and when a check of checkMerge fails.
-// Once it holds the lock it empties the marker an earlier regate left there
-// and writes none until pr_merged is recorded: the merge changes no worktree,
-// so a spawn of the branch's org goes on while it runs (regateSpawnErr); the
-// cleanup that follows writes the org's marker. With p.WaitChecks, a refusal
-// for checks that are pending or not reported yet, or for the branch's org
-// that still runs (not another feature, which only a branch with a binding
-// tells: runningRefusal), is waited out instead, with the lock released;
-// after the wait the lock is taken again and every check runs again
-// (mergeWait, D5, D13). It then runs gh pr merge once (mergeRun.merge) and,
-// whatever that returned, reads the PR back once (mergeRun.readBack, D6):
+// command; when another ralph org regate, merge, or cleanup of the ledger
+// holds regate.lock after regateLockWait (D3); and when a check of checkMerge
+// fails. Once it holds the lock it empties the marker an earlier regate left
+// there and writes none until pr_merged is recorded: the merge changes no
+// worktree, so a spawn of the branch's org goes on while it runs
+// (regateSpawnErr); the cleanup that follows writes the org's marker. With
+// p.WaitChecks, a refusal for checks that are pending or not reported yet, or
+// for the branch's org that still runs (not another feature, which only a
+// branch with a binding tells: runningRefusal), is waited out instead, with
+// the lock released; after the wait the lock is taken again and every check
+// runs again (mergeWait, D5, D13). It then runs gh pr merge once
+// (mergeRun.merge) and, whatever that returned, reads the PR back once
+// (mergeRun.readBack, D6):
 //
 //   - MERGED at the gate's head into the default branch: it appends pr_merged
 //     (recordMerge, D4) and sets Merged and Recorded; Note says how gh pr
@@ -216,7 +217,7 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
-		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate or merge runs on this "+
+		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate, merge, or cleanup runs on this "+
 			"ledger (%s is held): one runs at a time, so wait for it to end and run ralph org merge --branch %s again",
 			regateLockPathIn(stateDir), p.Branch), false)}, nil, nil
 	case err != nil:

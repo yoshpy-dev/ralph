@@ -44,14 +44,14 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"whatever the current directory, which only picks the ledger, as for\n" +
 			"every org verb.\n" +
 			"\n" +
-			"First, regate checks that no other ralph org regate or merge runs on\n" +
-			"the ledger (one runs at a time; it waits up to 1 s for the lock), that\n" +
-			"a complete binding names the branch and its org is not running, that\n" +
-			"the feature worktree exists and has the branch checked out (not\n" +
-			"detached, no rebase or merge in progress), that it is clean (git status\n" +
-			"--porcelain --untracked-files=all prints nothing), that a default\n" +
-			"branch is found (the one refs/remotes/origin/HEAD names, else main,\n" +
-			"else master), and that ./scripts/run-static-verify.sh and\n" +
+			"First, regate checks that no other ralph org regate, merge, or cleanup\n" +
+			"runs on the ledger (one runs at a time; it waits up to 1 s for the\n" +
+			"lock), that a complete binding names the branch and its org is not\n" +
+			"running, that the feature worktree exists and has the branch checked\n" +
+			"out (not detached, no rebase or merge in progress), that it is clean\n" +
+			"(git status --porcelain --untracked-files=all prints nothing), that a\n" +
+			"default branch is found (the one refs/remotes/origin/HEAD names, else\n" +
+			"main, else master), and that ./scripts/run-static-verify.sh and\n" +
 			"./scripts/run-test.sh are executable files there. Then it fetches\n" +
 			"origin's default branch and the branch, each with its own refspec, with\n" +
 			"GIT_TERMINAL_PROMPT=0 and up to 120 s each, and checks that HEAD is\n" +

@@ -629,7 +629,7 @@ func TestRegate_RefusedWhileAnotherRegateHoldsTheLock(t *testing.T) {
 	if took := time.Since(begin); took < time.Second {
 		t.Errorf("regate refused after %s; want it to retry the lock for 1s (D7)", took)
 	}
-	if err != nil || !strings.Contains(res.Refused, "org: regate: another ralph org regate or merge runs on this ledger ("+
+	if err != nil || !strings.Contains(res.Refused, "org: regate: another ralph org regate, merge, or cleanup runs on this ledger ("+
 		regateLockPathIn(fx.stateDir)+" is held): one runs at a time, so wait for it to end and run ralph org regate "+
 		"--branch feat/auth again") || !reflect.DeepEqual(res, RegateResult{Refused: res.Refused}) {
 		t.Fatalf("regate = %+v, %v; want the held-lock refusal", res, err)

@@ -24,11 +24,12 @@ import (
 // bring it back to ready. Regate is that verb, named by the branch, as
 // merge-order lists them (D1):
 //
-//   - under regate.lock, which one Regate or Merge of a ledger holds at a
-//     time (D7), it reads the branch's latest complete feature binding and
-//     latest gate record under the manifest lock (D2), refuses a branch no
-//     complete binding names or whose org runs, and marks the lock with the
-//     org it works on, so a spawn of that org is refused until it ends (D9);
+//   - under regate.lock, which one Regate, Merge, or cleanup of a ledger
+//     holds at a time (D7), it reads the branch's latest complete feature
+//     binding and latest gate record under the manifest lock (D2), refuses a
+//     branch no complete binding names or whose org runs, and marks the lock
+//     with the org it works on, so a spawn of that org is refused until it
+//     ends (D9);
 //   - in the binding's feature worktree it makes Gate's checks of the branch,
 //     the tree, and the scripts (regateCheckWorktree);
 //   - it fetches origin's default branch and the branch (regateFetch, D8),
@@ -92,10 +93,10 @@ const (
 	// (mergeLocked, merge_run.go) holds it too, from its checks through gh pr
 	// merge and the record, and empties the marker and writes none, since a
 	// merge changes no worktree (plan
-	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate or
-	// Merge holds it on a ledger at a time. Once the merge is recorded, Merge
-	// cleans up the branch's feature worktree with the lock still held, and
-	// ralph org cleanup takes the lock for the same cleanup (cleanup.go,
+	// docs/plans/active/2026-10-17-org-auto-merge.md, D3): one Regate, Merge,
+	// or cleanup holds it on a ledger at a time. Once the merge is recorded,
+	// Merge cleans up the branch's feature worktree with the lock still held,
+	// and ralph org cleanup takes the lock for the same cleanup (cleanup.go,
 	// plan docs/plans/active/2026-10-28-org-merge-cleanup.md, D2): either
 	// writes the marker of the org whose worktree it cleans up, as Regate
 	// does. A Merge with --wait-checks releases it for every wait in
@@ -247,7 +248,7 @@ type RegateResult struct {
 // unchanged) when a check fails:
 //
 //   - p.Branch is not empty;
-//   - no other Regate or Merge of the ledger holds regate.lock after
+//   - no other Regate, Merge, or cleanup of the ledger holds regate.lock after
 //     regateLockWait (D7); once it holds the lock, it empties the marker an
 //     earlier Regate left there (D9);
 //   - under the manifest lock, a complete feature binding names p.Branch,
@@ -305,7 +306,7 @@ func (o *Org) Regate(ctx context.Context, p RegateParams) (RegateResult, error) 
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
-		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate or merge runs on this ledger (%s is held): "+
+		return RegateResult{Refused: fmt.Sprintf("org: regate: another ralph org regate, merge, or cleanup runs on this ledger (%s is held): "+
 			"one runs at a time, so wait for it to end and %s", regateLockPathIn(stateDir), words.again)}, nil
 	case err != nil:
 		return RegateResult{}, err

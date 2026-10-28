@@ -716,7 +716,7 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 // AC3 and AC10 through the CLI: a refusal of the runtime is the error, with
 // nothing on stdout, no gh pr merge, and the ledger as it was: a branch the
 // ledger does not name, gh missing from PATH, a check still pending, and
-// regate.lock held by another regate or merge.
+// regate.lock held by another regate, merge, or cleanup.
 func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -738,7 +738,7 @@ func TestOrgMerge_RefusalsGoToStderrWithNothingMerged(t *testing.T) {
 		}, "feat/a", "org: merge: 1 of the 2 checks of PR #7 are not pass or skipping: ci / e2e (pending, IN_PROGRESS)"},
 		{"regate.lock held", func(t *testing.T, fx *mergeCLIFixture) {
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
-		}, "feat/a", "org: merge: another ralph org regate or merge runs on this ledger (" +
+		}, "feat/a", "org: merge: another ralph org regate, merge, or cleanup runs on this ledger (" +
 			"%STATE%/regate.lock is held): one runs at a time, so wait for it to end and run ralph org merge --branch feat/a again"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -995,7 +995,7 @@ func TestOrgMerge_Help(t *testing.T) {
 			"ralph org merge merges, with gh, the PR of one feature branch that ralph org merge-order lists as ready",
 			"so --org-id is refused",
 			"gh pr with -R <host>/<owner>/<repo>, gh repo view with that as its argument, and gh api with --hostname <host>",
-			"that no other ralph org regate or merge runs on the ledger (one runs at a time; it waits up to 1 s for regate.lock)",
+			"that no other ralph org regate, merge, or cleanup runs on the ledger (one runs at a time; it waits up to 1 s for regate.lock)",
 			"that the branch's org is not running", "and no auto-merge request",
 			"that every check gh pr checks lists is pass or skipping, and at least one is pass",
 			"shows no merge queue", "whose current_user_can_bypass is never",

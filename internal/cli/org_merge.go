@@ -56,17 +56,17 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"upstream remote makes gh read another repository.\n" +
 			"\n" +
 			"First, merge checks, in this order, and refuses at the first check that\n" +
-			"fails: that no other ralph org regate or merge runs on the ledger (one\n" +
-			"runs at a time; it waits up to 1 s for regate.lock); that origin's URL\n" +
-			"names a host and owner/repo; that gh is on PATH; that a feature binding\n" +
-			"or a gate record in the ledger names the branch; that git ls-remote\n" +
-			"reads origin; that gh pr list finds the branch's PR in origin's\n" +
-			"repository (pr_lookup found, in merge-order's terms) and its url names\n" +
-			"that repository; that merge-order classifies the branch as ready; that\n" +
-			"the branch's org is not running (its leader may still push: handle the\n" +
-			"org's RESULT in the inbox, and once the org is disbanded, run merge\n" +
-			"again); that gh pr view reads the PR as OPEN, with the head the gate\n" +
-			"passed as its head, origin's default branch as its base, and no\n" +
+			"fails: that no other ralph org regate, merge, or cleanup runs on the\n" +
+			"ledger (one runs at a time; it waits up to 1 s for regate.lock); that\n" +
+			"origin's URL names a host and owner/repo; that gh is on PATH; that a\n" +
+			"feature binding or a gate record in the ledger names the branch; that\n" +
+			"git ls-remote reads origin; that gh pr list finds the branch's PR in\n" +
+			"origin's repository (pr_lookup found, in merge-order's terms) and its\n" +
+			"url names that repository; that merge-order classifies the branch as\n" +
+			"ready; that the branch's org is not running (its leader may still push:\n" +
+			"handle the org's RESULT in the inbox, and once the org is disbanded, run\n" +
+			"merge again); that gh pr view reads the PR as OPEN, with the head the\n" +
+			"gate passed as its head, origin's default branch as its base, and no\n" +
 			"auto-merge request (the refusal names gh pr merge <n> --disable-auto -R\n" +
 			"<repo>, which removes one); that every check gh pr checks lists is pass\n" +
 			"or skipping, and at least one is pass; that GitHub's protection of the\n" +

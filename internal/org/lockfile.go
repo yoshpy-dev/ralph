@@ -143,8 +143,8 @@ var errFileLockHeld = errors.New("the lock is held")
 // fileLockHeld check finds the lock held (regateSpawnErr). ralph org merge
 // holds regate.lock too, from its checks through gh pr merge and the record
 // (merge_run.go's mergeLocked), with the marker emptied and none written, so
-// one regate or merge holds it on a ledger at a time and a spawn goes on
-// while a merge runs. Once the merge is recorded, merge cleans up the
+// one regate, merge, or cleanup holds it on a ledger at a time and a spawn
+// goes on while a merge runs. Once the merge is recorded, merge cleans up the
 // branch's feature worktree with the lock still held, and ralph org cleanup
 // takes the lock for its cleanup (cleanup.go); either writes the marker of
 // the org whose worktree it cleans up, so a spawn of that org is refused

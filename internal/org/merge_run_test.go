@@ -648,7 +648,7 @@ func TestMerge_SharesRegateLockWithRegate(t *testing.T) {
 		if took := time.Since(begin); took < regateLockWait {
 			t.Errorf("Merge refused after %s; want it to retry the lock for %s", took, regateLockWait)
 		}
-		want := MergeResult{Refused: "org: merge: another ralph org regate or merge runs on this ledger (" + path + " is held): one " +
+		want := MergeResult{Refused: "org: merge: another ralph org regate, merge, or cleanup runs on this ledger (" + path + " is held): one " +
 			"runs at a time, so wait for it to end and run ralph org merge --branch feat/a again"}
 		if err != nil || res != want {
 			t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, want)
