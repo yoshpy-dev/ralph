@@ -1,7 +1,7 @@
 # org-merge-cleanup
 
 - Status: Approved
-- Approved: 2026-10-28 sha256:25aae0c272fe
+- Approved: 2026-10-28 sha256:810337822bb7
 - Owner: Claude Code
 - Date: 2026-10-28
 - Related request: https://github.com/yoshpy-dev/ralph/issues/263(org: 機能の worktree を merge のあとに自動で片付ける)
@@ -63,11 +63,11 @@
 ## Design decisions
 
 - D1 片付けの本体は org 層の 1 つの関数にまとめ、`ralph org merge` と `ralph org cleanup` の両方から呼ぶ。消す操作は `ralph-worktree.sh cleanup --id org-<org_id> --force-branch` に任せる(記録の場所と worktree の消し方を script と二重に持たない)。Go の側は、消す前の確かめと台帳の記録だけを持つ
-- D2 消す前の確かめ。どれかが通らなければ消さず、理由と手で消すときのコマンドを返す
+- D2 消す前の確かめ。どれかが通らなければ消さず、理由と次の手を返す。理由を直して片付けを打ち直せば続く断り(3・4・5・6)では、次の手は打ち直しだけで、手で消すコマンドは返さない。手で消すコマンド(`--force-branch` の script や `git branch -D`)は、ralph が先に進めず人の判断が要るとき(記録がない、記録が binding と合わない、ブランチがなく worktree だけがある、script が途中で止まった)だけ返す。確かめ 5 と 6 より前の断りで `--force-branch` の script を渡すと、push していないコミットのあるブランチまで消えるため(self-review の M2)
   0. `regate.lock` を持ち、その marker に片付ける org の org_id を書く(merge は持ったまま呼ぶ。`ralph org cleanup` は merge と同じく取る。取れなければ regate か merge が走っているので断る)。merge は今 marker を空にするだけで(`internal/org/merge_run.go:203`)、`regateSpawnErr`(`internal/org/spawn.go:1464-1479`)は marker が空なら spawn と start を通すので、marker を書かないと、片付けの最中に同じ org_id の `ralph org start --plan` が worktree を作り直しにかかる(`internal/org/feature.go:216`)。「merge は worktree を変えないので marker を書かない」という注釈 3 か所(`internal/org/lockfile.go:143-149`、`internal/org/regate.go:91-98`、`internal/org/spawn.go:1456-1461`)も直す
   1. 台帳にそのブランチの binding があり、その org が走っていない(`RunningOrgs`)
   2. `ralph-worktree.sh` の記録 `org-<org_id>` があり、その branch と worktree_path と kind(`org`)が binding と一致する(同じ org_id を別の機能で立て直したとき、別の機能の worktree を消さないため)
-  3. ralph を打ったディレクトリがその worktree の中にない(script は中から打つとブランチを残して記録だけ消すため)
+  3. ralph を打ったディレクトリがその worktree の中にない(消す worktree の中に、打った人の shell を残さないため。ralph は script を main worktree で打つので、script を中から打ったときの動きは関わらない)
   4. worktree に未コミットの変更も未追跡のファイルもない(`git -C <worktree> status --porcelain` が空)。rebase や merge の途中でない
   5. ローカルのブランチの先頭が、merge された PR の head と一致する(`ralph org merge` では gate の head、`ralph org cleanup` では gh の `headRefOid`)。一致しなければ、push していないコミットがありうるので消さない
   6. worktree が名前のブランチ(記録の branch)にいて(`git -C <worktree> symbolic-ref --short HEAD`)、その HEAD も merge された head と一致する。detached HEAD や別のブランチに切り替えた worktree では、そこで足したコミットへの参照が worktree と一緒に消えるので、消さない(Codex の計画助言 1)
@@ -79,7 +79,7 @@
   どの段で止まっても、もう一度の `ralph org merge` の続きか `ralph org cleanup` で片付くことをテストで確かめる。断りの文で `gc --prune` は勧めない
 
   確かめの git(`status --porcelain`、`rev-parse`)は、regate と同じ時間の上限つきの git(`regateBoundedGit`、`internal/org/regate_git.go:173`)で打ち、`MergeParams.Exec` は使わない。merge のテストの「打つコマンドはすべて `/repo` で origin に固定」という検査(`internal/org/merge_fake_test.go:464`)と分けるため
-- D3 `ralph org merge` は、片付けが断られても失敗しても終了コードを変えない(exit 0 は記録した merge、`internal/cli/org_merge.go:236-238`)。stdout に `CLEANUP: done` か `CLEANUP: skipped (<理由>)` の 1 行を足し、skipped のときは手で消すコマンドを `NOTE:` と同じ形で出す。片付けは `MergeParams` で opt-in にし(repo root が空なら呼ばない)、CLI だけが渡す(org 層の今のテストは script のない `/repo` を使うため)。CLI の repo root は、`ralph org start --plan` と同じく `org.FeatureRepoRoot`(`internal/cli/org.go:1087`、`internal/org/statedir.go:128`)で求める
+- D3 `ralph org merge` は、片付けが断られても失敗しても終了コードを変えない(exit 0 は記録した merge、`internal/cli/org_merge.go:236-238`)。stdout に `CLEANUP: done` か `CLEANUP: skipped (<理由>)` の 1 行を足し、skipped のときは、手で消すコマンドがあればそれを `NOTE:` と同じ形で出す(D2 のとおり、打ち直せば続く断りにはない)。skipped は片付けが終わっていないことで、断り(何も消していない)と、script が途中で止まった失敗(消した分は消えたまま、次の片付けが続きから進む)の両方を含む。人と director の次の手はどちらも同じなので、行の形は分けない(self-review の M1)。片付けは `MergeParams` で opt-in にし(repo root が空なら呼ばない)、CLI だけが渡す(org 層の今のテストは script のない `/repo` を使うため)。CLI の repo root は、`ralph org start --plan` と同じく `org.FeatureRepoRoot`(`internal/cli/org.go:1087`、`internal/org/statedir.go:128`)で求める
 - D4 動詞の名前は `ralph org cleanup`。`--branch` を付けるとそのブランチだけ、付けなければ merge 済みで記録の残るすべてのブランチを片付ける。1 本ごとに `CLEANED: <ブランチ> org-<org_id>` か `SKIPPED: <ブランチ> <理由>` の行を出す。終了コードは、すべて片付いたか片付けるものがなければ 0、1 本でも残れば 1。gh がないか PR を読めないときは、merge 済みを判定できないと言って 1 で終わる。`--branch` のブランチが `merged` でなければ断る。binding がなく gate の記録だけのブランチは対象にしない(機能の worktree は `ralph org start --plan` の org にしかなく、binding がなければ消すものを特定できない)。`--branch` なしでは、片付け済みで何も残っていないブランチ(記録も worktree もローカルのブランチもない)と、同じ org_id がのちに別のブランチに結びつけ直された古い binding は、数えず行も出さない。前者は org 層の結果 `NothingLeft` で、後者は merge-order の binding の `BoundTo`(org の最新の binding が別のブランチのとき、そのブランチ)で見分ける。結びつけ直しが通った時点で古い記録と worktree はもうないので(`checkFeatureWorktreeReuse`、`internal/org/feature.go:225`)、残りうる古いローカルのブランチは `--branch` で名指ししたときだけ扱う(S3 の consult による)
 - D5 片付けたら、台帳に org の記録 `worktree_cleaned`(`branch=`、`worktree=`、`head=`、`via=merge|cleanup`)を書く。`ralph org report` と人が台帳で後始末を追えるようにするため。`RunningOrgs` と Roster の状態には入らない(`pr_merged` と同じ扱い)
 - D6 gitignore されたファイル(feature worktree の `.harness/state/` や `docs/evidence/` の log)は、止める理由にしない。script と `git worktree remove` が今もそう扱い、merge のあとの worktree の中の生成物だから。リスクの表に書き、skill の後始末の節にも 1 文書く
@@ -90,7 +90,7 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
 
 - [ ] AC1 `ralph org merge` で merge したあと、その機能の worktree・ローカルのブランチ・`ralph-worktree.sh` の記録が消え、台帳に `worktree_cleaned` があり、stdout に `CLEANUP: done` が出る。squash merge でリモートのブランチが消えたあとも止まらない(issue の受け入れ条件 1)
 - [ ] AC2 GitHub で直接 merge したブランチを `ralph org cleanup` で片付けられる。`--branch` なしなら merge 済みで記録の残るすべてのブランチ、`--branch` ならそのブランチだけ(issue の受け入れ条件 2)
-- [ ] AC3 未コミットの変更か未追跡のファイルがあるとき、ローカルのブランチの先頭が merge された head と違うとき、worktree が detached HEAD か別のブランチにいるとき、記録が binding と一致しないとき、ralph をその worktree の中から打ったときは、何も消さずに理由と手で消すコマンドを出す。`ralph org merge` の終了コードは 0 のまま(issue の受け入れ条件 3)
+- [ ] AC3 未コミットの変更か未追跡のファイルがあるとき、ローカルのブランチの先頭が merge された head と違うとき、worktree が detached HEAD か別のブランチにいるとき、記録が binding と一致しないとき、ralph をその worktree の中から打ったときは、何も消さずに理由と次の手(打ち直し、または D2 の場合だけ手で消すコマンド)を出す。`ralph org merge` の終了コードは 0 のまま(issue の受け入れ条件 3)
 - [ ] AC3b 片付けが途中で止まった状態(worktree だけが消えた、記録だけが残った)から、もう一度の `ralph org cleanup` で残りが片付く。記録がないときは何も消さず、手で消すコマンドを出す
 - [ ] AC4 org が走っているブランチと、regate か merge が走っているとき(`regate.lock` が取れない)は消さない(issue の受け入れ条件 4)
 - [ ] AC5 `/org` と `/director` の skill の後始末の節、leader の雛形の手順 15、`ralph org start --help`、regate の案内が新しい動きに合い、写しが一致する(issue の受け入れ条件 5)
@@ -191,6 +191,11 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
   - S5 c0383ffe と 7d3e3f9f: 仕様の FR-8 に「merge のあとの後始末(#263)で決めたこと」の注(4 段目と 8a-3a の注がどう変わったかも 1 文ずつ)、AGENTS.md の地図に `cleanup.go`、README の 252・266・268 行と `ralph org cleanup` の段落(268 行の「spawn と start を止めない」も、片付けの間だけ止めると直した)、herdr の recipe とその写し。7d3e3f9f は consult の遅れた返事で、仕様の注の閉じた PR の案内を「ブランチが要らないと確かめたら `--force-branch`」の形にした(README と skill に合わせた。recipe は clone ごと捨てる文脈なので無条件のまま)
     - 検証: `./scripts/check-sync.sh && git diff --check` が両方のコミットで通過、recipe の 2 つは byte で同じ。機械的な確かめは 5 項目とも clean
     - `/org` skill に残る `cleanup --id org-` の 727・729・777 行は start の失敗の案内、1137 行は閉じた PR の案内で、直すものはない
+  - self-review cycle 1(97ea508b): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6。consult の勧めで全部を直すか台帳に書く
+    - 計画の本文を直した(digest を取り直して自動承認、2026-10-28 sha256:810337822bb7): D2 の頭に「打ち直せば続く断り(3・4・5・6)には手で消すコマンドを返さない」(M2)、D2 の 3 の理由を「消す worktree の中に人の shell を残さないため」に(report の Follow-ups)、D3 に「skipped は断りと script の途中の失敗の両方を含み、行は分けない」(M1)、AC3 の「手で消すコマンド」を「次の手」に。図解は overview と詳細 2 の文を「理由と次の手」に直し、lint 0、2 枚を撮って読んだ(はみ出しなし)
+    - F3(inline、この記録と同じコミット): `docs/tech-debt/README.md` に 2 行(L5 の 800 行を越えたテストのファイル 4 つ、L6 の既知の穴 2 件)。機械的な確かめは 5 項目とも clean
+    - F1 に渡すこと: M2(確かめ 3・4・5・6 の断りから Manual を外す。5 は「要るものを別のブランチに置き、ブランチを head に戻してから打ち直す」の文に)、L1(`cleanupFirstCheck` で org_id を `ValidateIdentifier` に照らす)、L2(断りの文の中のコマンドのパスを quote)
+    - F2 に渡すこと: M1(`/director` skill の「skipped なら何も消していない」を直す)、L3(main worktree が見つからないときの文)、L4(`/director` skill の手順 1 と 3 のぶつかり)、仕様 FR-8 の注の確かめ 3 の理由
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
