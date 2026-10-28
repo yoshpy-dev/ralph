@@ -166,4 +166,4 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
 - [x] Review artifact created — self-review 7eca2cb1(Run 1、LOW 5 件)から f9df1718(Run 4)まで 4 回。Run 4 は新しい所見なしで Merge yes。L1〜L7 は f495bb23・dbc5afaf・80a2eb28 で直した。
 - [x] Verification artifact created — verify 63ccc8c8(cycle 1、pass、AC1〜AC8 を満たす、AC7 の G の実行は test、情報 D-1・V-1)。D-1(help と雛形の recipe が空の名前に触れない)は /sync-docs で雛形の recipe に「or empty」を足した。help は Go の変更なので直していない。V-1(`--pack` なしで問いに入ると確かめの文言が先に赤く出る)は huh の仕様で、PR の Notes for reviewers に書く。
 - [x] Test artifact created — test 2a4294c4(cycle 1、pass。`go test ./internal/cli/ -run 'Init|Pack'` 49 本、`tests/test-check-template.sh` 60/60 で G と H が PASS、mutant 20 個のうち 14 個が落ち、生き残った 6 個は `runInitInteractive` のフォームの先と guard の条件で計画の既知の穴、pty の 12 実行、`run-test.sh` の 2 回目 rc 0)。1 回目の `TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint` の失敗は負荷による時間切れで、この branch の変更に由来しない(HEAD と origin/main で単独に 20 回ずつ通った)。lead の判断は ea7dce08。
-- [ ] PR created
+- [x] PR created(#282)
