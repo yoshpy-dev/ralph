@@ -43,14 +43,14 @@ RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
 RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
 
 # ═══════════════════════════════════════════════════════════════════
-# [org] default — RALPH_ORG_AGMSG_HOME only. The line stays so
-# internal/config/defaults_sync_test.go can compare its default with
-# config.Default() and templates/base/ralph.toml; ralph issue #276 decides
-# what happens to it. The other [org] defaults live only in
-# internal/config/config.go and templates/base/ralph.toml: no `ralph org`
-# verb ever read shell copies of them, so this file no longer carries any.
-# Unlike those, RALPH_ORG_AGMSG_HOME is read from the environment by the Go
-# binary (driver.ResolveAgmsgHome), which is why it is not exported below.
+# [org] default — RALPH_ORG_AGMSG_HOME only, which the ralph binary reads
+# from the environment (driver.ResolveAgmsgHome). The line below is not
+# exported; the note above the export line says why.
+# internal/config/defaults_sync_test.go (ralph repository source) compares
+# its default with config.Default(). This file sets no other [org]
+# default: those are config.Default()'s values, also written in the
+# ralph.toml that `ralph init` scaffolds, and no `ralph org` verb reads
+# them from the shell.
 # ═══════════════════════════════════════════════════════════════════
 
 RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"

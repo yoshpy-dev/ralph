@@ -14,9 +14,10 @@ package config
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
 // defaults, VAR="${VAR:-value}" idiom). org.agmsg_home, the one [org] key
-// the shell file still carries (RALPH_ORG_AGMSG_HOME, #276), is compared on
-// all three surfaces. It also checks that the /plan and /cross-review
-// SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
+// the shell file still carries (RALPH_ORG_AGMSG_HOME, #276), is compared
+// there with Default(); with the "org" sub-test's template check, that
+// keeps all three surfaces equal. It also checks that the /plan and
+// /cross-review SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
 // RALPH_CODEX_REVIEWER_MODEL, and RALPH_CODEX_REASONING_EFFORT match the
 // shell defaults.
 //
@@ -25,8 +26,8 @@ package config
 // working directory.  Files are resolved relative to the repo root
 // (two directories above internal/config/).
 //
-// If a file is absent (e.g. the package is vendored), the sub-test that
-// needs it is skipped with an explanatory message so the test does not break
+// If a file is absent (e.g. the package is vendored), the checks that need
+// it are skipped with an explanatory message so the test does not break
 // in downstream repos that embed internal/config without the meta-repo tree.
 
 import (
@@ -229,34 +230,14 @@ func TestDefaultsLockStep(t *testing.T) {
 		}
 		shell := parseShellDefaults(t, shellPath)
 
-		data, err := os.ReadFile(tomlPath)
-		if err != nil {
-			t.Skipf("templates/base/ralph.toml not readable (%v) — skipping lock-step check", err)
-		}
-		var probe orgTemplateProbe
-		if err := toml.Unmarshal(data, &probe); err != nil {
-			t.Fatalf("templates/base/ralph.toml: %v", err)
-		}
-
-		// org.agmsg_home on all three surfaces.
-		shellVal := mustShell(t, shell, "RALPH_ORG_AGMSG_HOME")
-		goVal := Default().Org.AgmsgHome
-		if shellVal != goVal {
+		// org.agmsg_home: the shell default against Default(). The template
+		// against Default() is the "org" sub-test's job, so when both pass
+		// the three surfaces agree, and this sub-test needs no template.
+		agmsgShell := mustShell(t, shell, "RALPH_ORG_AGMSG_HOME")
+		agmsgDefault := Default().Org.AgmsgHome
+		if agmsgShell != agmsgDefault {
 			t.Errorf("lock-step mismatch for org.agmsg_home:\n  scripts/ralph-config.sh RALPH_ORG_AGMSG_HOME default = %q\n  config.Default() = %q",
-				shellVal, goVal)
-		}
-		if probe.Org.AgmsgHome == nil {
-			t.Errorf("lock-step mismatch for org.agmsg_home:\n  templates/base/ralph.toml does not set it\n  config.Default() = %q", goVal)
-		} else {
-			tomlVal := *probe.Org.AgmsgHome
-			if tomlVal != goVal {
-				t.Errorf("lock-step mismatch for org.agmsg_home:\n  templates/base/ralph.toml = %q\n  config.Default() = %q",
-					tomlVal, goVal)
-			}
-			if shellVal != tomlVal {
-				t.Errorf("lock-step mismatch for org.agmsg_home:\n  scripts/ralph-config.sh RALPH_ORG_AGMSG_HOME default = %q\n  templates/base/ralph.toml = %q",
-					shellVal, tomlVal)
-			}
+				agmsgShell, agmsgDefault)
 		}
 
 		// ── SKILL.md fallback tokens match shell defaults ─────────────────────
