@@ -1,7 +1,7 @@
 # org-merge-cleanup
 
 - Status: Approved
-- Approved: 2026-10-28 sha256:c01f38eeab5d
+- Approved: 2026-10-28 sha256:25aae0c272fe
 - Owner: Claude Code
 - Date: 2026-10-28
 - Related request: https://github.com/yoshpy-dev/ralph/issues/263(org: 機能の worktree を merge のあとに自動で片付ける)
@@ -80,7 +80,7 @@
 
   確かめの git(`status --porcelain`、`rev-parse`)は、regate と同じ時間の上限つきの git(`regateBoundedGit`、`internal/org/regate_git.go:173`)で打ち、`MergeParams.Exec` は使わない。merge のテストの「打つコマンドはすべて `/repo` で origin に固定」という検査(`internal/org/merge_fake_test.go:464`)と分けるため
 - D3 `ralph org merge` は、片付けが断られても失敗しても終了コードを変えない(exit 0 は記録した merge、`internal/cli/org_merge.go:236-238`)。stdout に `CLEANUP: done` か `CLEANUP: skipped (<理由>)` の 1 行を足し、skipped のときは手で消すコマンドを `NOTE:` と同じ形で出す。片付けは `MergeParams` で opt-in にし(repo root が空なら呼ばない)、CLI だけが渡す(org 層の今のテストは script のない `/repo` を使うため)。CLI の repo root は、`ralph org start --plan` と同じく `org.FeatureRepoRoot`(`internal/cli/org.go:1087`、`internal/org/statedir.go:128`)で求める
-- D4 動詞の名前は `ralph org cleanup`。`--branch` を付けるとそのブランチだけ、付けなければ merge 済みで記録の残るすべてのブランチを片付ける。1 本ごとに `CLEANED: <ブランチ> org-<org_id>` か `SKIPPED: <ブランチ> <理由>` の行を出す。終了コードは、すべて片付いたか片付けるものがなければ 0、1 本でも残れば 1。gh がないか PR を読めないときは、merge 済みを判定できないと言って 1 で終わる。`--branch` のブランチが `merged` でなければ断る。binding がなく gate の記録だけのブランチは対象にしない(機能の worktree は `ralph org start --plan` の org にしかなく、binding がなければ消すものを特定できない)
+- D4 動詞の名前は `ralph org cleanup`。`--branch` を付けるとそのブランチだけ、付けなければ merge 済みで記録の残るすべてのブランチを片付ける。1 本ごとに `CLEANED: <ブランチ> org-<org_id>` か `SKIPPED: <ブランチ> <理由>` の行を出す。終了コードは、すべて片付いたか片付けるものがなければ 0、1 本でも残れば 1。gh がないか PR を読めないときは、merge 済みを判定できないと言って 1 で終わる。`--branch` のブランチが `merged` でなければ断る。binding がなく gate の記録だけのブランチは対象にしない(機能の worktree は `ralph org start --plan` の org にしかなく、binding がなければ消すものを特定できない)。`--branch` なしでは、片付け済みで何も残っていないブランチ(記録も worktree もローカルのブランチもない)と、同じ org_id がのちに別のブランチに結びつけ直された古い binding は、数えず行も出さない。前者は org 層の結果 `NothingLeft` で、後者は merge-order の binding の `BoundTo`(org の最新の binding が別のブランチのとき、そのブランチ)で見分ける。結びつけ直しが通った時点で古い記録と worktree はもうないので(`checkFeatureWorktreeReuse`、`internal/org/feature.go:225`)、残りうる古いローカルのブランチは `--branch` で名指ししたときだけ扱う(S3 の consult による)
 - D5 片付けたら、台帳に org の記録 `worktree_cleaned`(`branch=`、`worktree=`、`head=`、`via=merge|cleanup`)を書く。`ralph org report` と人が台帳で後始末を追えるようにするため。`RunningOrgs` と Roster の状態には入らない(`pr_merged` と同じ扱い)
 - D6 gitignore されたファイル(feature worktree の `.harness/state/` や `docs/evidence/` の log)は、止める理由にしない。script と `git worktree remove` が今もそう扱い、merge のあとの worktree の中の生成物だから。リスクの表に書き、skill の後始末の節にも 1 文書く
 
@@ -174,6 +174,7 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - `regateLockWait` の注釈が「Regate and Merge retry」のまま
     - `ralph org --help` の merge の説明に片付けがない
     - `/director` skill に「`CLEANUP: done` で始まれば片付いた」と読む 1 文(`resumed: record_only; <err>` は台帳の追記だけが失敗した形)
+  - S3 の前に D4 へ 1 文足した(計画の本文の変更): 片付け済みで何も残らないブランチ(`NothingLeft`)と、結びつけ直された古い binding(`BoundTo`)は、`--branch` なしでは数えない。片付け済みのブランチも merge-order の `merged` に残り続け、S1 はそれを `Refused` で返すため、そのままでは `--branch` なしの動詞が毎回 exit 1 になる。consult の勧めで、結びつけ直しの判定は CLI でなく `collectMergeTargets` に置く(同じ秒の 2 つの binding で順序が決まらないのを避ける)。図解は「merge-order の merged のブランチごと」としか描いていないので直す図はなく、digest を取り直して自動承認した(2026-10-28 sha256:25aae0c272fe)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
