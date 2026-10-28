@@ -772,14 +772,16 @@ func checkGo(cfg config.Config) checkResult {
 }
 
 // checkHerdrAvailable reports whether the herdr CLI (org runtime seat driver)
-// is on PATH. Org runtime is purely additive (AC-9): a project that never
-// runs `ralph org` has no reason to install herdr, so absence is reported as
-// "info", not "warn"/"fail" — it must never change runDoctorOpts' exit code.
+// is on PATH. Absence is reported as "warn" so that an operator notices it
+// before `ralph org` needs herdr, never as "fail": org runtime is purely
+// additive (AC-9), and a project that never runs `ralph org` has no reason to
+// install herdr. A warn, like an info, never changes runDoctorOpts' exit code
+// (countFailed counts only "fail").
 func checkHerdrAvailable() checkResult {
 	r := checkResult{Name: "herdr"}
 	if err := driver.HerdrAvailable(); err != nil {
-		r.Status = "info"
-		r.Detail = "herdr not installed — org runtime seats unavailable (solo execution unaffected)"
+		r.Status = "warn"
+		r.Detail = "herdr not installed — org runtime seats unavailable (the standard flow is unaffected)"
 		return r
 	}
 	r.Status = "pass"
@@ -798,6 +800,8 @@ const agmsgTestedVersion = "1.1.13"
 // script collection. Unlike herdr, agmsg is NOT a single binary on PATH --
 // home is the resolved agmsg home directory (driver.ResolveAgmsgHome), and
 // availability is decided by the presence of home's scripts/send.sh.
+// Absence is a "warn" for the same reason as herdr's; a VERSION other than
+// agmsgTestedVersion stays an "info" (see agmsgTestedVersion).
 // checkAgmsgAvailable's Detail always names home explicitly (both the
 // not-installed and available branches) -- tech-debt fix: this check used
 // to discard driver.AgmsgAvailable's resolved home in favor of a fixed
@@ -808,8 +812,8 @@ const agmsgTestedVersion = "1.1.13"
 func checkAgmsgAvailable(home string) checkResult {
 	r := checkResult{Name: "agmsg"}
 	if err := driver.AgmsgAvailable(home); err != nil {
-		r.Status = "info"
-		r.Detail = fmt.Sprintf("agmsg not installed at %s — org runtime seats unavailable (solo execution unaffected)", home)
+		r.Status = "warn"
+		r.Detail = fmt.Sprintf("agmsg not installed at %s — org runtime seats unavailable (the standard flow is unaffected)", home)
 		return r
 	}
 	r.Status = "pass"
