@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # ralph-config.sh — shared configuration for the standard-flow development
-# harness's /plan and /cross-review codex calls, and the [org] envelope
-# lock-step surfaces.
+# harness's /plan and /cross-review codex calls, plus one [org] default kept
+# for a lock-step test (see the [org] block below).
 #
 # The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
 # scripts, the per-phase CLI driver, and the legacy shell CLI) was removed;
@@ -43,71 +43,17 @@ RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
 RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
 
 # ═══════════════════════════════════════════════════════════════════
-# [org] envelope defaults — mirror internal/config/config.go OrgConfig
-# and templates/base/ralph.toml [org]. Must change in lock-step (see
-# .claude/rules/ralph/model-routing.md and defaults_sync_test.go). Except for
-# RALPH_ORG_AGMSG_HOME below (which the Go binary's
-# driver.ResolveAgmsgHome DOES read directly, as the runtime override for
-# [org].agmsg_home), no `ralph org` verb reads these shell vars — the Go
-# config (internal/config) is the runtime source; the rest exist only so
-# the three surfaces agree.
+# [org] default — RALPH_ORG_AGMSG_HOME only. The line stays so
+# internal/config/defaults_sync_test.go can compare its default with
+# config.Default() and templates/base/ralph.toml; ralph issue #276 decides
+# what happens to it. The other [org] defaults live only in
+# internal/config/config.go and templates/base/ralph.toml: no `ralph org`
+# verb ever read shell copies of them, so this file no longer carries any.
+# Unlike those, RALPH_ORG_AGMSG_HOME is read from the environment by the Go
+# binary (driver.ResolveAgmsgHome), which is why it is not exported below.
 # ═══════════════════════════════════════════════════════════════════
 
-RALPH_ORG_DRIVER_POOL="${RALPH_ORG_DRIVER_POOL:-claude,codex}"
-RALPH_ORG_MODEL_POOL="${RALPH_ORG_MODEL_POOL:-claude:fable,claude:opus,claude:sonnet,claude:haiku,codex:gpt-6-astra,codex:gpt-5.6-sol,codex:gpt-5.6-terra,codex:gpt-5.6-luna}"
-RALPH_ORG_MAX_SEATS="${RALPH_ORG_MAX_SEATS:-5}"
-RALPH_ORG_MAX_ORGS="${RALPH_ORG_MAX_ORGS:-10}"
-RALPH_ORG_MAX_TOTAL_SEATS="${RALPH_ORG_MAX_TOTAL_SEATS:-30}"
-RALPH_ORG_DEADMAN_MINUTES="${RALPH_ORG_DEADMAN_MINUTES:-10}"
 RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
-# RALPH_ORG_PERMISSION_DEFAULT mirrors [org.permissions].default. Kept
-# unexported for the same reason as RALPH_ORG_AGMSG_HOME above: nothing in
-# this file's export block should risk shadowing a value the Go config
-# (internal/config) is the sole runtime source for. This var exists only so
-# the three lock-step surfaces agree on the default string; no `ralph org`
-# verb reads it from the environment.
-RALPH_ORG_PERMISSION_DEFAULT="${RALPH_ORG_PERMISSION_DEFAULT:-autonomous}"
-# RALPH_ORG_PERMISSIONS_CODEX_VERIFIED mirrors
-# [org.permissions].codex_verified (PR④ AC-8): false keeps codex seats
-# fail-closed to guarded; an operator flips it on per machine after running
-# docs/recipes/codex-seat-permissions.md (the codex flag mapping inherits
-# that machine's codex config). Kept unexported for the same reason as
-# RALPH_ORG_PERMISSION_DEFAULT above: nothing in this file's export block
-# should risk shadowing a value the Go config (internal/config) is the sole
-# runtime source for. This var exists only so the three lock-step surfaces
-# agree on the default value; no `ralph org` verb reads it from the
-# environment.
-RALPH_ORG_PERMISSIONS_CODEX_VERIFIED="${RALPH_ORG_PERMISSIONS_CODEX_VERIFIED:-false}"
-# RALPH_ORG_WATCHDOG_* mirror [org.watchdog] (interval_seconds/stall_minutes/
-# watcher_enabled/watcher_model). Kept unexported for the same reason as
-# RALPH_ORG_AGMSG_HOME above: nothing in this file's export block should risk
-# shadowing a value the Go config (internal/config) is the sole runtime
-# source for. These vars exist only so the three lock-step surfaces agree on
-# the default values; no `ralph org` verb reads them from the environment.
-RALPH_ORG_WATCHDOG_INTERVAL_SECONDS="${RALPH_ORG_WATCHDOG_INTERVAL_SECONDS:-30}"
-RALPH_ORG_WATCHDOG_STALL_MINUTES="${RALPH_ORG_WATCHDOG_STALL_MINUTES:-15}"
-RALPH_ORG_WATCHDOG_WATCHER_ENABLED="${RALPH_ORG_WATCHDOG_WATCHER_ENABLED:-true}"
-RALPH_ORG_WATCHDOG_WATCHER_MODEL="${RALPH_ORG_WATCHDOG_WATCHER_MODEL:-haiku}"
-# RALPH_ORG_DIRECTOR_* mirror [org.director] (enabled, the director switch of
-# `ralph org escalate`; ack_minutes/resolve_minutes, the inbox deadlines of
-# `ralph org watch --all`; auto_merge, the mark the /director skill reads
-# before it merges with `ralph org merge` without asking; wake, pull and/or
-# push, the wake `ralph org director attach` and `start` record, comma-joined
-# like RALPH_ORG_DRIVER_POOL). launch_cmd and wake_cmd have no var. Kept
-# unexported for the same reason as RALPH_ORG_AGMSG_HOME above. These vars
-# exist only so the three lock-step surfaces agree on the default values; no
-# `ralph org` verb reads them from the environment.
-RALPH_ORG_DIRECTOR_ENABLED="${RALPH_ORG_DIRECTOR_ENABLED:-true}"
-RALPH_ORG_DIRECTOR_ACK_MINUTES="${RALPH_ORG_DIRECTOR_ACK_MINUTES:-10}"
-RALPH_ORG_DIRECTOR_RESOLVE_MINUTES="${RALPH_ORG_DIRECTOR_RESOLVE_MINUTES:-60}"
-RALPH_ORG_DIRECTOR_AUTO_MERGE="${RALPH_ORG_DIRECTOR_AUTO_MERGE:-false}"
-RALPH_ORG_DIRECTOR_WAKE="${RALPH_ORG_DIRECTOR_WAKE:-pull}"
-# RALPH_ORG_APPROVAL_MODE mirrors [org.approval].mode (per-plan|split, how
-# the plan of an org from `ralph org start --plan` is approved). Kept
-# unexported for the same reason as RALPH_ORG_AGMSG_HOME above. This var
-# exists only so the three lock-step surfaces agree on the default value; no
-# `ralph org` verb reads it from the environment.
-RALPH_ORG_APPROVAL_MODE="${RALPH_ORG_APPROVAL_MODE:-per-plan}"
 
 # Export so values reach any grandchild processes.
 #
@@ -122,9 +68,6 @@ RALPH_ORG_APPROVAL_MODE="${RALPH_ORG_APPROVAL_MODE:-per-plan}"
 # unexported so `defaults_sync_test.go` (which parses this file's text via
 # regex) still sees the same default value.
 export RALPH_CLAUDE_REVIEWER_MODEL RALPH_CODEX_REVIEWER_MODEL RALPH_CODEX_REASONING_EFFORT
-export RALPH_ORG_DRIVER_POOL RALPH_ORG_MODEL_POOL RALPH_ORG_MAX_SEATS
-export RALPH_ORG_MAX_ORGS RALPH_ORG_MAX_TOTAL_SEATS
-export RALPH_ORG_DEADMAN_MINUTES
 
 # ═══════════════════════════════════════════════════════════════════
 # Validation helpers
