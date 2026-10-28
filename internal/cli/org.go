@@ -220,9 +220,9 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // to load is an error, which `ralph org escalate` handles like a ralph.toml
 // that does not load, `ralph org director attach` and `status` and `ralph
 // org merge` return, and `ralph status` warns about before it shows the
-// built-in defaults (statusDirectorConfig). A verb that reports or acts on
-// the switch or on auto_merge reads it through this function, so it sees the
-// value escalate and the director go by.
+// built-in Enabled with AutoMerge false (statusDirectorConfig). A verb that
+// reports or acts on the switch or on auto_merge reads it through this
+// function, so it sees the value escalate and the director go by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
