@@ -62,11 +62,11 @@ None (テストの照合先を 3 面から 2 面に減らし、読まれない s
 
 ## Acceptance criteria
 
-- [ ] AC1: `scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh` に、`RALPH_ORG_AGMSG_HOME` を除く `RALPH_ORG_*` の代入と export がない(`grep -n 'RALPH_ORG_' scripts/ralph-config.sh | grep -v RALPH_ORG_AGMSG_HOME` が何も出さない)。2 つのファイルは byte 一致している。
-- [ ] AC2: `Default()` と `templates/base/ralph.toml` の `[org]` の既定値が 1 つでもずれると、`go test ./internal/config/` が落ちる。値を変えたテンプレートと、キーを消したテンプレートの両方で落ちることを、比較関数の単体テストで固定している。
-- [ ] AC3: `org.agmsg_home` の 3 面の照合と、SKILL.md の fallback の照合が残っている。
-- [ ] AC4: `scripts/check-sync.sh`、`tests/test-ralph-config.sh`、`go test ./internal/config/` が通る。
-- [ ] AC5: 写しの存在を前提にしたコメントと文書(Scope に挙げたもの)が、新しい形に合っている。履歴の文書を除き、`git grep` で消した変数名が残っていない。spec の FR-2 は 2 面の照合を述べている(変数名ではなくファイル名の言及なので、grep とは別に読んで確かめる)。
+- [x] AC1: `scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh` に、`RALPH_ORG_AGMSG_HOME` を除く `RALPH_ORG_*` の代入と export がない(`grep -n 'RALPH_ORG_' scripts/ralph-config.sh | grep -v RALPH_ORG_AGMSG_HOME` が何も出さない)。2 つのファイルは byte 一致している。
+- [x] AC2: `Default()` と `templates/base/ralph.toml` の `[org]` の既定値が 1 つでもずれると、`go test ./internal/config/` が落ちる。値を変えたテンプレートと、キーを消したテンプレートの両方で落ちることを、比較関数の単体テストで固定している。
+- [x] AC3: `org.agmsg_home` の 3 面の照合と、SKILL.md の fallback の照合が残っている。
+- [x] AC4: `scripts/check-sync.sh`、`tests/test-ralph-config.sh`、`go test ./internal/config/` が通る。
+- [x] AC5: 写しの存在を前提にしたコメントと文書(Scope に挙げたもの)が、新しい形に合っている。履歴の文書を除き、`git grep` で消した変数名が残っていない。spec の FR-2 は 2 面の照合を述べている(変数名ではなくファイル名の言及なので、grep とは別に読んで確かめる)。
 
 ## Implementation outline
 
@@ -110,7 +110,11 @@ None (テストの照合先を 3 面から 2 面に減らし、読まれない s
 - [x] Plan reviewed (consult-plan-orgshell: 直してから進める → FR-2 を Scope に足し、D1 を probe struct に改めた。Codex plan advisory: no findings)
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest は Approved の行
 - [x] Branch created (refactor/drop-org-shell-defaults, worktree .claude/worktrees/drop-org-shell-defaults)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 e948b85d(impl-273-s1): `orgTemplateDrift` と probe struct、`TestDefaultsLockStep` を `org` と `shell_and_skills` に分割、変異の単体テスト 6 件(handoff にない「wake の行を消す」を足した)。`TestLoad_TemplateRalphToml` の auto_merge と wake の確認を畳んだ(PR の本文に書く)。テンプレートの変異(max_orgs 10→11)で `TestDefaultsLockStep/org` が落ちることを確認。
+  - S2 76c7595d(impl-273-s2): 18 変数と export の 3 行を削除、テンプレートの写しと byte 一致。S2 のあと `go test -run TestDefaultsLockStep -v` で `shell_and_skills` が `RALPH_ORG_AGMSG_HOME` の 1 行で通ることを orchestrator が確認。
+  - S3 c56fa63c(impl-273-s3): config.go のコメント、defaults_sync_test.go:64 のコメント(S2 が見つけた範囲外のずれを含めた)、spec の注記 (a) と FR-2 の印、tech-debt:149、model-routing.md。消した変数名の git grep は履歴の外で 0 件。
+  - 各スライスの検証コマンドはすべて通った(各 implementer の報告)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
