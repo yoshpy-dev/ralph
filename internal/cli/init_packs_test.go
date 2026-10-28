@@ -557,7 +557,8 @@ func TestRunInitInteractive_DumbTermWithoutTerminalStopsBeforeTheForm(t *testing
 	target := filepath.Join(t.TempDir(), "project")
 
 	done := make(chan error, 1)
-	go func() { done <- runInitInteractive(target, testAvailablePacks, nil, false) }()
+	cfg := initConfig{ProjectName: "project", AvailablePacks: testAvailablePacks}
+	go func() { done <- runInitInteractive(target, cfg, false) }()
 	select {
 	case err := <-done:
 		_ = stdinWrite.Close()

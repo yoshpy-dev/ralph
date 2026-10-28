@@ -282,7 +282,7 @@ func TestRunInitInteractive_ExistingProjectSkipsForm(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runInitInteractive(dir, nil, nil, false); err != nil {
+	if err := runInitInteractive(dir, initConfig{}, false); err != nil {
 		t.Fatalf("runInitInteractive on existing project: %v", err)
 	}
 

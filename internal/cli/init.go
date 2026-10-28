@@ -38,8 +38,8 @@ package.json, ...) sit directly in the target directory is labeled
 "(Recommended)", and "skip" installs no language pack. A pack can be added
 later with ralph pack add <language>.
 
-With --yes nothing is asked, and only the packs --pack names are installed
-(none without --pack). --pack can be repeated or take comma-separated names,
+With --yes nothing is asked, and only those packs are installed (none
+without --pack). --pack can be repeated or take comma-separated names,
 and an unknown name fails before anything is written. When TERM=dumb and stdin
 is not a terminal, ralph init cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
@@ -66,10 +66,17 @@ is not a terminal, ralph init cannot ask its questions and needs --yes.`,
 				return fmt.Errorf("resolving directory: %w", err)
 			}
 
-			if nonInteractive {
-				return runInitNonInteractive(absDir, availPacks, packs, force)
+			// Both paths start from the same config; the form lets the user
+			// change the project name and the packs.
+			cfg := initConfig{
+				ProjectName:    filepath.Base(absDir),
+				Packs:          packs,
+				AvailablePacks: availPacks,
 			}
-			return runInitInteractive(absDir, availPacks, packs, force)
+			if nonInteractive {
+				return runInitNonInteractive(absDir, cfg, force)
+			}
+			return runInitInteractive(absDir, cfg, force)
 		},
 	}
 
@@ -114,10 +121,11 @@ type initConfig struct {
 	AvailablePacks []string
 }
 
-// runInitInteractive asks for the project name and the language packs of
-// availPacks, with the packs parsePackFlag returned for --pack selected at the
+// runInitInteractive asks for the project name, starting from
+// cfg.ProjectName, and the language packs of cfg.AvailablePacks, with
+// cfg.Packs (the packs parsePackFlag returned for --pack) selected at the
 // start (none without --pack).
-func runInitInteractive(targetDir string, availPacks, packs []string, force bool) error {
+func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
 	// path. executeInit retains the same check as a safety net for
@@ -125,14 +133,6 @@ func runInitInteractive(targetDir string, availPacks, packs []string, force bool
 	manifestPath := filepath.Join(targetDir, ".ralph", "manifest.toml")
 	if _, err := os.Stat(manifestPath); err == nil {
 		return handleExistingProjectInit(manifestPath)
-	}
-
-	defaultName := filepath.Base(targetDir)
-
-	cfg := initConfig{
-		ProjectName:    defaultName,
-		Packs:          packs,
-		AvailablePacks: availPacks,
 	}
 
 	// With TERM=dumb huh asks in accessible mode (huh.NewForm) and reads the
@@ -148,7 +148,7 @@ func runInitInteractive(targetDir string, availPacks, packs []string, force bool
 			huh.NewInput().
 				Title("Project name").
 				Value(&cfg.ProjectName),
-			newPackQuestion(availPacks, recommendedPacks(targetDir, availPacks), &cfg.Packs),
+			newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), &cfg.Packs),
 		),
 	)
 
@@ -284,15 +284,9 @@ func newPackQuestion(available, recommended []string, selection *[]string) *huh.
 		Value(selection)
 }
 
-// runInitNonInteractive installs the packs parsePackFlag returned for --pack;
-// with no --pack it installs no language pack.
-func runInitNonInteractive(targetDir string, availPacks, packs []string, force bool) error {
-	cfg := initConfig{
-		ProjectName:    filepath.Base(targetDir),
-		Packs:          packs,
-		AvailablePacks: availPacks,
-	}
-
+// runInitNonInteractive installs cfg.Packs, the packs parsePackFlag returned
+// for --pack; with no --pack it installs no language pack.
+func runInitNonInteractive(targetDir string, cfg initConfig, force bool) error {
 	return executeInit(targetDir, cfg, force)
 }
 
