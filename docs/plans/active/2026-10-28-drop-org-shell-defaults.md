@@ -115,7 +115,10 @@ None (テストの照合先を 3 面から 2 面に減らし、読まれない s
   - S2 76c7595d(impl-273-s2): 18 変数と export の 3 行を削除、テンプレートの写しと byte 一致。S2 のあと `go test -run TestDefaultsLockStep -v` で `shell_and_skills` が `RALPH_ORG_AGMSG_HOME` の 1 行で通ることを orchestrator が確認。
   - S3 c56fa63c(impl-273-s3): config.go のコメント、defaults_sync_test.go:64 のコメント(S2 が見つけた範囲外のずれを含めた)、spec の注記 (a) と FR-2 の印、tech-debt:149、model-routing.md。消した変数名の git grep は履歴の外で 0 件。
   - 各スライスの検証コマンドはすべて通った(各 implementer の報告)。
-- [ ] Review artifact created
+- [x] Review artifact created — self-review 5de4cc6a(LOW 5 件、Merge: yes)。L1・L2・L3・L5 を修正スライス 7d59e278(impl-273-f1)で直し、再実行 6e02c5e1 で LOW 1 件(L4、Merge: yes)。L4(19 キーの数がコメントにしかない、組み直し前からの穴)は PR の Known gaps に書く。
+  - Deviation(D2・AC3): `org.agmsg_home` の 3 面の照合は、直接の 3 者比較から「`shell_and_skills` の shell 対 `Default()`」と「`org` の テンプレート対 `Default()`」の合成に変わった(7d59e278、L3)。どの 1 面がずれても、どちらかのサブテストが面の名前つきで落ちる。テンプレートがないときも SKILL.md の照合が走るようになった(L2)。
+  - Deviation(L1): `scripts/ralph-config.sh` のコメントに issue の URL を書かなかった。`scripts/check-template-purity.sh` が `templates/` の中で `yoshpy-dev` を禁じており、写しが下流に配られるため。
+  - 2026-10-28 08:30Z ごろ、同じ Mac の stoic-app のセッションから「ローカル CI を約 90 分流すので重い処理の開始を控えて」と依頼があった。修正スライスは `internal/config` の 1 パッケージだけで検証した。/verify と /test は再開の連絡を待ってから回す。
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
