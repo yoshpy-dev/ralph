@@ -121,4 +121,7 @@ None (テストの照合先を 3 面から 2 面に減らし、読まれない s
   - 2026-10-28 08:30Z ごろ、同じ Mac の stoic-app のセッションから「ローカル CI を約 90 分流すので重い処理の開始を控えて」と依頼があった。修正スライスは `internal/config` の 1 パッケージだけで検証した。/verify と /test は再開の連絡を待ってから回す。
 - [x] Verification artifact created — verify ecf31b75(cycle 1、pass、AC1・AC3・AC5 は満たす、AC2・AC4 は静的の部分だけ、情報 D-1〜D-4)。D-1(`tests/test-ralph-config.sh` の列挙)と D-2(「各キー」と読める 2 文)は /sync-docs でコメントと rule の文だけ直した。D-3(spec の注記 (c))は誤りではないので残し、D-4(「2 行の export」と実際の 3 行)は S2 の行の記録のままにした。
 - [x] Test artifact created — test 339e465f(cycle 1、pass。`go test ./internal/config/` の対象 3 本、`tests/test-ralph-config.sh` 19/19、AC2 の変異 2 つがキー名つきで落ちる、`run-test.sh` 2 回目 rc 0)。1 回目の `internal/org` の失敗は tech-debt に記録のある既知の不安定なテストで、2 回目に通った。
+- [x] Sync-docs — 097c7f35(D-1・D-2 を直した)
+- [x] Cross-review — d980f66b(codex、cycle 1/2、指摘 0。Case C)。tester の Test gaps(既定値が同じキーの配線の取り違え、比較行の削除がすり抜ける)は consult-plan-testgap の判定 B に従い、#273 では足さない。HEAD の 19 キーの配線は tester の使い捨ての probe と consult の読みで正しいと確かめた。19 行の表のテストは #274 の計画に入れる(L4 も同じ表で閉じる)。PR の Known gaps に書く。
+- [x] main の取り込み — fe093132 で origin/main(4389396f、#280)を merge。衝突はなかったが、#280 が `TestLoad_TemplateRalphToml` に足した `[doctor]` の確認が、この branch で外した `data` を使っていて build が落ちた。1f9dd1b6 でテンプレートを読む行を戻し、注記を直した。`go vet ./internal/config/`、`go test ./internal/config/ -count=1`、`check-sync.sh` は通った(別のセッションの CI 中のため、全体の検査は GitHub の CI に任せる)。
 - [ ] PR created
