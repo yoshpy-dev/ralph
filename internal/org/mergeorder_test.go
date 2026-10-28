@@ -710,7 +710,8 @@ func TestMergeOrder_DetailsOfARunningOrgOrNoBindingAreUnchanged(t *testing.T) {
 // run ralph org regate --branch <branch> once the org is disbanded, with
 // regate's wording of each class, as for a branch whose org is not running.
 // ready keeps its text, and the entry's JSON is the one of the same branch
-// while the org runs bound to it, apart from Detail.
+// while the org runs bound to it, apart from Detail and its binding's
+// BoundTo, which names the branch the org runs now.
 func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
 	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
 	moved := moListing("main", "main", moMain2, "feat/auth", moHeadA)
@@ -777,7 +778,15 @@ func TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature(t *testing.T) {
 			if tc.class != MergeClassReady && !strings.Contains(bound.Detail, "run ralph org gate --org-id org-a ") {
 				t.Fatalf("feat/auth while org-a runs bound to it = %q; want ralph org gate --org-id org-a", bound.Detail)
 			}
+			// The binding's BoundTo names the branch org-a runs now (plan
+			// docs/plans/active/2026-10-28-org-merge-cleanup.md, S3), and none
+			// while org-a runs bound to feat/auth.
+			if e.Binding == nil || e.Binding.BoundTo != "feat/other" || bound.Binding == nil || bound.Binding.BoundTo != "" {
+				t.Fatalf("bindings = %+v and %+v; want BoundTo feat/other, and none while org-a runs bound to feat/auth", e.Binding,
+					bound.Binding)
+			}
 			e.Detail, bound.Detail = "", ""
+			e.Binding.BoundTo = ""
 			got, err := json.Marshal(e)
 			if err != nil {
 				t.Fatal(err)
@@ -1156,6 +1165,72 @@ func TestMergeOrder_SameBranchBoundTwiceShowsTheLatestBinding(t *testing.T) {
 	want := MergeOrderBinding{OrgID: "org-b", Feature: "auth2", Split: "split-2", TS: "2026-10-14T08:59:00Z"}
 	if b := res.Entries[0].Binding; b == nil || *b != want {
 		t.Fatalf("binding = %+v, want the latest %+v", b, want)
+	}
+}
+
+// TestMergeOrder_BindingBoundToNamesTheOrgsLaterBranch covers BoundTo (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S3): the binding of a
+// branch whose org_id was bound to another branch later names that branch,
+// whether the org was disbanded since (org-a) or runs that feature now
+// (org-b), and the binding that is its org's latest names none (feat/two,
+// feat/y, feat/solo). In --json, bound_to is there only when set.
+func TestMergeOrder_BindingBoundToNamesTheOrgsLaterBranch(t *testing.T) {
+	fx := newMOFixture(t)
+	fx.add(t,
+		moBind("org-a", "one"), moDisbanded("org-a"), moBind("org-a", "two"), moDisbanded("org-a"),
+		moBind("org-b", "x"), moDisbanded("org-b"), moBind("org-b", "y"),
+		moBind("org-c", "solo"), moDisbanded("org-c"),
+		moPassed("org-g", "feat/orphan", moHeadA, moMain),
+	)
+	fx.exec.lsOut = moListing("main", "main", moMain)
+	res := fx.run(t, true)
+	if running := RunningOrgs(mustReadEvents(t, fx.o)); !slices.Equal(running, []string{"org-b"}) {
+		t.Fatalf("RunningOrgs = %q, want org-b alone", running)
+	}
+	for branch, want := range map[string]string{
+		"feat/one": "feat/two", "feat/two": "",
+		"feat/x": "feat/y", "feat/y": "",
+		"feat/solo": "",
+	} {
+		if e := moEntry(t, res, branch); e.Binding == nil || e.Binding.BoundTo != want {
+			t.Errorf("%s binding = %+v, want BoundTo %q", branch, e.Binding, want)
+		}
+	}
+	if e := moEntry(t, res, "feat/orphan"); e.Binding != nil {
+		t.Errorf("feat/orphan binding = %+v, want none", e.Binding)
+	}
+	if e := moEntry(t, res, "feat/x"); !strings.Contains(e.Detail, "org_id org-b now runs another feature, on the branch feat/y") {
+		t.Errorf("feat/x detail = %q; want it to say org-b runs feat/y now, as before BoundTo", e.Detail)
+	}
+	if e := moEntry(t, res, "feat/one"); strings.Contains(e.Detail, "now runs another feature") {
+		t.Errorf("feat/one detail = %q; want no running org named, since org-a is disbanded", e.Detail)
+	}
+
+	b, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Entries []struct {
+			Branch  string                     `json:"branch"`
+			Binding map[string]json.RawMessage `json:"binding"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range got.Entries {
+		raw, ok := e.Binding["bound_to"]
+		switch e.Branch {
+		case "feat/one":
+			if string(raw) != `"feat/two"` {
+				t.Errorf("feat/one bound_to = %s (present %v), want \"feat/two\"", raw, ok)
+			}
+		case "feat/two", "feat/solo":
+			if ok {
+				t.Errorf("%s has bound_to %s, want the key left out", e.Branch, raw)
+			}
+		}
 	}
 }
 

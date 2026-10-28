@@ -316,6 +316,47 @@ func TestCleanupFeatureWorktreeLocked_KeepsTheCallersLock(t *testing.T) {
 	fx.assertCleaned(t, res, err, "", CleanupViaMerge)
 }
 
+// TestCleanupFeatureWorktreeLocked_RefusalKeepsTheMarkerWhileTheLockIsHeld
+// covers the same entry when a check after the first one refuses (an
+// untracked file): nothing is removed or recorded, and while the caller still
+// holds regate.lock its marker names the org the first check found, so a
+// spawn of that org is refused until the caller releases the lock.
+func TestCleanupFeatureWorktreeLocked_RefusalKeepsTheMarkerWhileTheLockIsHeld(t *testing.T) {
+	fx := newWorktreeCleanupFixture(t)
+	writeGateFile(t, fx.worktree, "stray.txt", "x\n", 0o644)
+	lock, err := acquireHeldFileLock(fx.stateDir, regateLockFile, "regate", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.release() }()
+	before := fx.snapshot(t)
+	p := fx.params()
+	p.Via = CleanupViaMerge
+	res, err := fx.o.cleanupFeatureWorktreeLocked(context.Background(), lock, p)
+	if err != nil || res.Refused == "" || res.Cleaned || res.Recorded || res.OrgID != "auth" {
+		t.Fatalf("cleanup = %+v, %v; want a refusal past the first check", res, err)
+	}
+	assertCleanupRefusal(t, res, "has 1 uncommitted change(s) or untracked file(s) (?? stray.txt)", fx.scriptCmd())
+	if after := fx.snapshot(t); after != before {
+		t.Errorf("a refused cleanup changed something:\n%s\n->\n%s", before, after)
+	}
+	if held, heldErr := fileLockHeld(regateLockPathIn(fx.stateDir)); heldErr != nil || !held {
+		t.Errorf("regate.lock held = %v (%v) after the cleanup returned; want the caller still holding it", held, heldErr)
+	}
+	if orgID, ok := readRegateMarker(regateLockPathIn(fx.stateDir)); !ok || orgID != "auth" {
+		t.Errorf("marker = %q (%v) after the refusal; want auth's while the lock is held", orgID, ok)
+	}
+	if err := regateSpawnErr(fx.stateDir, "auth"); err == nil {
+		t.Error("regateSpawnErr = nil while the caller holds the lock; want the spawn of auth refused")
+	}
+	if err := lock.release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := regateSpawnErr(fx.stateDir, "auth"); err != nil {
+		t.Errorf("regateSpawnErr after the release = %v; want nil", err)
+	}
+}
+
 // TestCleanupFeatureWorktree_RefusedInTheWorktree covers AC3's checks of the
 // worktree and the branch (D2's 3 to 6) through the real script and git:
 // each refuses with its reason and the script's cleanup as the command by
@@ -464,13 +505,16 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 // TestCleanupFeatureWorktree_RecordGoneRemovesNothing covers AC3b's missing
 // record: nothing is removed, and Manual removes by hand what git still has
 // of the worktree and the branch, the reason saying to check the branch
-// first.
+// first. Only with nothing left at all (no record, no worktree or
+// registration of it, no branch) is NothingLeft set, with the refusal and no
+// Manual (plan docs/plans/active/2026-10-28-org-merge-cleanup.md, S3).
 func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		setup  func(t *testing.T, fx *worktreeCleanupFixture)
-		want   func(fx *worktreeCleanupFixture) string
-		manual func(fx *worktreeCleanupFixture) string
+		name        string
+		setup       func(t *testing.T, fx *worktreeCleanupFixture)
+		want        func(fx *worktreeCleanupFixture) string
+		manual      func(fx *worktreeCleanupFixture) string
+		nothingLeft bool
 	}{
 		{"the branch left", func(t *testing.T, fx *worktreeCleanupFixture) {
 			runGit(t, "-C", fx.root, "worktree", "remove", fx.worktree)
@@ -478,19 +522,31 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			return "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left " +
 				"is this feature's and removes nothing: the branch feat/auth at " + fx.head + " left; remove it by hand once you " +
 				"have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head + "..feat/auth"
-		}, func(fx *worktreeCleanupFixture) string { return "git -C " + fx.root + " branch -D feat/auth" }},
+		}, func(fx *worktreeCleanupFixture) string { return "git -C " + fx.root + " branch -D feat/auth" }, false},
 		{"the worktree and the branch left", nil, func(fx *worktreeCleanupFixture) string {
 			return "removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head + " left"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
-		}},
+		}, false},
+		{"only the registration left", func(t *testing.T, fx *worktreeCleanupFixture) {
+			if err := os.RemoveAll(fx.worktree); err != nil {
+				t.Fatal(err)
+			}
+			// git branch -D refuses a branch a registered worktree has checked
+			// out, even one whose directory is gone.
+			runGit(t, "-C", fx.root, "update-ref", "-d", "refs/heads/"+cleanupTestBranch)
+		}, func(fx *worktreeCleanupFixture) string {
+			return "removes nothing: the feature worktree " + fx.worktree + " left; remove it by hand"
+		}, func(fx *worktreeCleanupFixture) string {
+			return "git -C " + fx.root + " worktree remove " + fx.worktree
+		}, false},
 		{"nothing left", func(t *testing.T, fx *worktreeCleanupFixture) {
 			runGit(t, "-C", fx.root, "worktree", "remove", fx.worktree)
 			runGit(t, "-C", fx.root, "branch", "--quiet", "-D", cleanupTestBranch)
 		}, func(fx *worktreeCleanupFixture) string {
 			return "the worktree record org-auth of the branch feat/auth does not exist, and neither its feature worktree " +
 				fx.worktree + " nor the branch is left: nothing is left to clean up"
-		}, func(*worktreeCleanupFixture) string { return "" }},
+		}, func(*worktreeCleanupFixture) string { return "" }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newWorktreeCleanupFixture(t)
@@ -503,6 +559,9 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			before := fx.snapshot(t)
 			res, err := fx.cleanup(fx.params())
 			fx.assertRefused(t, res, err, before, tc.want(fx), tc.manual(fx))
+			if res.NothingLeft != tc.nothingLeft {
+				t.Errorf("NothingLeft = %v, want %v", res.NothingLeft, tc.nothingLeft)
+			}
 		})
 	}
 }
@@ -703,8 +762,8 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 			tc.setup(t, fx, &p)
 			manifest := fileOrAbsent(t, fx.o.Manifest.Path())
 			res, err := fx.o.CleanupFeatureWorktree(context.Background(), p)
-			if err != nil || res.Refused == "" || res.Failed != "" || res.Cleaned || res.Recorded {
-				t.Fatalf("cleanup = %+v, %v; want a refusal", res, err)
+			if err != nil || res.Refused == "" || res.Failed != "" || res.Cleaned || res.Recorded || res.NothingLeft {
+				t.Fatalf("cleanup = %+v, %v; want a refusal with something left", res, err)
 			}
 			manual := ""
 			if tc.manual != nil {

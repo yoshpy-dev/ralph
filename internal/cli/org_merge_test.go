@@ -1064,7 +1064,7 @@ func TestOrgMerge_Help(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",
 			"`ralph org merge` merges, with gh, the PR of a branch merge-order lists as ready",
-			"stop --all, disband --all, merge-order, merge, regate,",
+			"stop --all, disband --all, merge-order, merge, cleanup, regate,",
 			"merge reads auto_merge",
 		}},
 	} {

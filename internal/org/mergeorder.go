@@ -248,6 +248,12 @@ type MergeOrderBinding struct {
 	Feature string `json:"feature"`
 	Split   string `json:"split"`
 	TS      string `json:"ts"`
+	// BoundTo is the branch of OrgID's latest complete binding when that is
+	// another branch (the org_id was started again for another feature
+	// after this binding), whether the org runs now or not; "" when the
+	// latest is this one. ralph org cleanup leaves such a branch out unless
+	// --branch names it.
+	BoundTo string `json:"bound_to,omitempty"`
 }
 
 // MergeOrder runs `ralph org merge-order`. It reads the manifest line by line
@@ -419,7 +425,8 @@ func (t *mergeTarget) pos() int {
 // unattached. A branch's gate is the latest record attached to it. A branch
 // with a binding is orgRunning when its binding's org is in RunningOrgs of
 // l's events, read once, and has orgRunsOn when that org's latest complete
-// binding, read in the same walk, is of another branch.
+// binding, read in the same walk, is of another branch. Its binding's
+// BoundTo is that other branch too, whether the org runs or not.
 func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int) {
 	byBranch := make(map[string]*mergeTarget)
 	target := func(branch string) *mergeTarget {
@@ -489,6 +496,9 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 		t.orgRunning = t.binding != nil && slices.Contains(running, t.binding.OrgID)
 		if t.orgRunning && boundBranch[t.binding.OrgID] != t.branch {
 			t.orgRunsOn = boundBranch[t.binding.OrgID]
+		}
+		if t.binding != nil && boundBranch[t.binding.OrgID] != t.branch {
+			t.binding.BoundTo = boundBranch[t.binding.OrgID]
 		}
 	}
 	return targets, unattached

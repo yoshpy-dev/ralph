@@ -130,6 +130,12 @@ type CleanupResult struct {
 	// Resumed is set with Cleaned when an earlier cleanup had stopped part
 	// way: CleanupResumedWorktreeGone or CleanupResumedRecordOnly.
 	Resumed string
+	// NothingLeft is set with Refused when nothing was left and so there was
+	// nothing to remove: the record org-<org_id>, the feature worktree, git's
+	// registration of it, and the local branch are all gone, as a cleanup
+	// that ended leaves them. ralph org cleanup does not count such a branch
+	// as left.
+	NothingLeft bool
 	// OrgID and Worktree are the org and the feature worktree of the branch's
 	// binding, set once the first check passed; Branch and Head are
 	// CleanupParams'.
@@ -340,7 +346,8 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 		return res, err
 	}
 	if !ok {
-		reason, manual := c.recordGone(st)
+		reason, manual, nothingLeft := c.recordGone(st)
+		res.NothingLeft = nothingLeft
 		return refuse(reason, manual)
 	}
 	var resumed, reason, manual string
@@ -404,8 +411,9 @@ func (c *cleanupRun) readState(ctx context.Context) (cleanupState, error) {
 // left, so nothing is removed. Manual removes by hand what git still has of
 // the binding's worktree and branch: the worktree, or its registration when
 // its directory is gone (git worktree remove takes a missing directory too),
-// and the branch, whose tip the reason says to check first.
-func (c *cleanupRun) recordGone(st cleanupState) (string, string) {
+// and the branch, whose tip the reason says to check first. nothingLeft
+// reports that git has neither (CleanupResult.NothingLeft), with no Manual.
+func (c *cleanupRun) recordGone(st cleanupState) (reason, manual string, nothingLeft bool) {
 	var left, cmds []string
 	if st.dirExists || st.registered {
 		left = append(left, "the feature worktree "+c.f.Worktree)
@@ -418,15 +426,15 @@ func (c *cleanupRun) recordGone(st cleanupState) (string, string) {
 	gone := fmt.Sprintf("the worktree record %s of the branch %s does not exist", c.id(), c.f.Branch)
 	if len(left) == 0 {
 		return gone + fmt.Sprintf(", and neither its feature worktree %s nor the branch is left: nothing is left to clean up",
-			c.f.Worktree), ""
+			c.f.Worktree), "", true
 	}
-	reason := gone + fmt.Sprintf(", so ralph cannot tell that what is left is this feature's and removes nothing: %s left; "+
+	reason = gone + fmt.Sprintf(", so ralph cannot tell that what is left is this feature's and removes nothing: %s left; "+
 		"remove it by hand", strings.Join(left, " and "))
 	if st.branchTip != "" {
 		reason += fmt.Sprintf(" once you have checked that the branch holds nothing that was not merged (git -C %s log %s..%s "+
 			"lists what %s, the head its PR merged, does not have)", c.root, c.p.Head, c.f.Branch, c.p.Head)
 	}
-	return reason, strings.Join(cmds, " && ")
+	return reason, strings.Join(cmds, " && "), false
 }
 
 // checkRecord is D2's check 2: rec, the record org-<org_id>, has the
