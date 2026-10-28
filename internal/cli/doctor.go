@@ -309,7 +309,7 @@ func agentCLIResult(name, bin string, probe agentCLIProbe, required bool, otherB
 			bin, probe.Err, otherBin, bin)
 	default:
 		r.Status = "fail"
-		r.Detail = fmt.Sprintf("%s unusable: %v — neither claude nor codex is usable, and at least one of them is required", bin, probe.Err)
+		r.Detail = fmt.Sprintf("%s unusable: %v — neither claude nor codex is usable, and ralph needs at least one of them", bin, probe.Err)
 	}
 	return r
 }

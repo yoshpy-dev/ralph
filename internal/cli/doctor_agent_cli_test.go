@@ -15,7 +15,8 @@ import (
 // claude and codex lines for every combination of the two probes and the two
 // [doctor].require_*_cli flags (issue #272): a usable CLI passes; one that is
 // not usable fails when it is required, warns when it is not and the other
-// one is usable, and fails with the "at least one" wording when neither is.
+// one is usable, and fails with the "ralph needs at least one" wording when
+// neither is.
 func TestAgentCLIResults_EveryCombination(t *testing.T) {
 	const (
 		claudeVersion = "2.1.0 (Claude Code)"
@@ -32,7 +33,7 @@ func TestAgentCLIResults_EveryCombination(t *testing.T) {
 	// the version; the others carry the probe error text.
 	const (
 		notRequired = "unusable (not required): "
-		atLeastOne  = "neither claude nor codex is usable, and at least one of them is required"
+		atLeastOne  = "neither claude nor codex is usable, and ralph needs at least one of them"
 	)
 	warnClaude := []string{"claude " + notRequired + claudeErrText, "codex is usable, so ralph runs", "plan advisory", "cross-review that call claude will not run"}
 	warnCodex := []string{"codex " + notRequired + codexErrText, "claude is usable, so ralph runs", "plan advisory", "cross-review that call codex will not run"}
@@ -95,7 +96,7 @@ func TestAgentCLIResults_EveryCombination(t *testing.T) {
 			wantCodexStatus: "pass", wantCodexDetail: []string{codexVersion}},
 
 		// Neither usable: both fail. A required side keeps the required
-		// wording; a side that is not required says at least one is needed.
+		// wording; a side that is not required says ralph needs at least one.
 		{name: "neither, nothing required", claude: claudeMissing, codex: codexMissing,
 			wantClaudeStatus: "fail", wantClaudeDetail: neitherClaude, wantClaudeNotDetail: []string{notRequired, "plan advisory"},
 			wantCodexStatus: "fail", wantCodexDetail: neitherCodex, wantCodexNotDetail: []string{notRequired, "plan advisory"}},
@@ -207,8 +208,8 @@ func TestRunDoctorOpts_AgentCLIs(t *testing.T) {
 			wantClaude: "warn", wantClaudeDetail: []string{"claude unusable (not required): claude not found in PATH", "codex is usable, so ralph runs", "plan advisory and cross-review that call claude will not run"},
 			wantCodex: "pass"},
 		{name: "neither", wantErr: true, wantFailLines: 2,
-			wantClaude: "fail", wantClaudeDetail: []string{"claude not found in PATH", "neither claude nor codex is usable, and at least one of them is required"},
-			wantCodex: "fail", wantCodexDetail: []string{"codex not found in PATH", "neither claude nor codex is usable, and at least one of them is required"}},
+			wantClaude: "fail", wantClaudeDetail: []string{"claude not found in PATH", "neither claude nor codex is usable, and ralph needs at least one of them"},
+			wantCodex: "fail", wantCodexDetail: []string{"codex not found in PATH", "neither claude nor codex is usable, and ralph needs at least one of them"}},
 		{name: "codex required and absent", ralphToml: []byte("[doctor]\nrequire_codex_cli = true\n"), bins: []string{"claude"},
 			wantErr: true, wantFailLines: 1,
 			wantClaude: "pass",

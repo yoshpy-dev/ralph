@@ -131,15 +131,16 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	}
 }
 
-// TestLoad_RequireCodexCLI verifies the new toml field round-trips. The doctor
-// command relies on this knob to switch between warn (default) and fail when
-// the codex binary is missing.
-func TestLoad_RequireCodexCLI(t *testing.T) {
+// TestLoad_RequireAgentCLIs verifies require_claude_cli and require_codex_cli
+// round-trip with true, the value that differs from Default(). The doctor
+// command reads them to fail when that CLI is not usable, instead of warning
+// or deferring to the other CLI.
+func TestLoad_RequireAgentCLIs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")
 
 	content := `[doctor]
-require_claude_cli = false
+require_claude_cli = true
 require_codex_cli = true
 require_go = false
 `
@@ -154,8 +155,8 @@ require_go = false
 	if !cfg.Doctor.RequireCodexCLI {
 		t.Error("require_codex_cli = false after loading explicit true")
 	}
-	if cfg.Doctor.RequireClaudeCLI {
-		t.Error("require_claude_cli = true after loading explicit false")
+	if !cfg.Doctor.RequireClaudeCLI {
+		t.Error("require_claude_cli = false after loading explicit true")
 	}
 }
 
