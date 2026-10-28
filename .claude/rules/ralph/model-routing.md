@@ -145,7 +145,7 @@ seats are not observed and stay `unknown`.
 - `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
   `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh, and that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`)
+- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh, and that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` is covered), that `standardTemplateDrift` finds the two `[standard]` keys set in the template with `Default()`'s values, and that `[org.review].max_cross_review_cycles` defaults to the same value as `RALPH_STANDARD_MAX_PIPELINE_CYCLES` in ralph-config.sh
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root
   and `templates/base/` sides

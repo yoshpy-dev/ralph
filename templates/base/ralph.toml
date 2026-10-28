@@ -20,11 +20,13 @@ require_go = false
 # `ralph config get standard.cross_review`. Exit 0 prints the value: a key
 # this file does not set prints its built-in default, and so does every key
 # when this file does not exist. An older ralph without that command fails
-# with exit 1 and `unknown command "config"`, which the skills treat as off.
-# Exit 2 (an unknown key) and exit 3 (this file exists but cannot be read,
-# or any of its values is invalid, not only the ones below) stop the skill,
-# which reports it instead of treating the switch as off. The skills start
-# reading these switches in a later release.
+# with exit 1 and `unknown command "config"` on stderr; the skills treat
+# that, and only that, as off, and record that they did. They stop on any
+# other exit 1, on exit 2 (the key is not a key of one value: unknown, or a
+# table or an array), and on exit 3 (this file exists but cannot be read, or
+# any of its values is invalid, not only the ones below), and report it
+# instead of treating the switch as off. The skills start reading these
+# switches in a later release.
 [standard]
 plan_advisory = false
 cross_review = false
