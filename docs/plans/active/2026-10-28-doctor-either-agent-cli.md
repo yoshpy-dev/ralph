@@ -137,6 +137,7 @@
   - 別のセッション(stoic-app)から、この Mac で 90 分の local CI を流すので重い処理を始めないよう頼まれた(2026-10-28 17:2x)。/verify と /test は「再開してよい」の連絡のあとに回す
   - S5(追加のスライス、implementer): /test(1b9798b1)の mutant P9 で、Test plan の Edge cases の「herdr がないときも Check 8b(alias)は herdr を pass と見なさない」を固めるテストがないと分かった。`doctor.go:134` の `== "pass"` を `!= "info"` に変えても `internal/cli` 全体が通る(herdr がないときが warn になったため、この比べ方が初めて結果を左右する)。`internal/cli/doctor_shell_alias_test.go` に herdr の stub を置かない `runDoctorOpts` のテストを 1 本足す。consult(consult-plan-p9)の判定は A「cross-review の前に足し、/self-review → /verify → /test を cycle 1 のまま全部回し直す」。cycle を増やすのは cross-review の ACTION_REQUIRED のあとだけなので、cycle-count.json は 1 のまま — verify: `test -z "$(gofmt -l internal/cli)" && go vet ./internal/cli/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/cli/ -run 'Doctor|Herdr|Agmsg|ShellAlias'`
     - 結果(8408b30c、implementer): `TestRunDoctorOpts_ShellAliasesCheck_HerdrAbsentStaysInfo` を足した。verify rc=0(64s)。`go test -overlay` で `!= "info"` の mutant を当てると新しいテストが落ちる(info・warn なし・detail の 3 つ)。doctor.go は触っていない。self-check 5 項目 clean
+    - self-review Run 3(4e884503): LOW 3 件(N1 名前と doc comment、N2 stdout の取り込みの重複、N3 出力全体への Contains)。新しいテストの中だけで直した(ee5b3bda、implementer)。テスト名は `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` に変えた。stdout の取り込みは `captureStdoutText`、確かめは `doctorLine` に替えた。N2 のうち兄弟のテストと共通の準備は、兄弟のテストに触るので残した。verify rc=0(100s)。overlay の mutant で新しいテストが落ちる。self-check 5 項目 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
