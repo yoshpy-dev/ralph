@@ -175,6 +175,12 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - `ralph org --help` の merge の説明に片付けがない
     - `/director` skill に「`CLEANUP: done` で始まれば片付いた」と読む 1 文(`resumed: record_only; <err>` は台帳の追記だけが失敗した形)
   - S3 の前に D4 へ 1 文足した(計画の本文の変更): 片付け済みで何も残らないブランチ(`NothingLeft`)と、結びつけ直された古い binding(`BoundTo`)は、`--branch` なしでは数えない。片付け済みのブランチも merge-order の `merged` に残り続け、S1 はそれを `Refused` で返すため、そのままでは `--branch` なしの動詞が毎回 exit 1 になる。consult の勧めで、結びつけ直しの判定は CLI でなく `collectMergeTargets` に置く(同じ秒の 2 つの binding で順序が決まらないのを避ける)。図解は「merge-order の merged のブランチごと」としか描いていないので直す図はなく、digest を取り直して自動承認した(2026-10-28 sha256:25aae0c272fe)
+  - S3 87b6e72d: 動詞 `ralph org cleanup [--branch]`(`internal/cli/org_cleanup.go`)。merge-order を `--all` で読み、対象を選び(`cleanupSteps`、`--branch` は `cleanupNamedStep`)、1 本ずつ `CleanupFeatureWorktree` を打つ(`runCleanupSteps`)。行は `CLEANED:`、`SKIPPED:`、`MANUAL:`、`nothing to clean up`
+    - org 層に `CleanupResult.NothingLeft`(`recordGone` の何も残らない道)と `MergeOrderBinding.BoundTo`(`collectMergeTargets`)を足した
+    - `--org-id` の説明の一覧に `cleanup` を足した。approve と director の help のテストは、固定している部分にこの箇所が入らないので変えていない
+    - `TestMergeOrder_DetailsOfABranchWhoseOrgRunsAnotherFeature` はエントリの JSON 全体を比べていたので、BoundTo の値を先に確かめてから空にして比べる形に直した(比べること自体は残した)
+    - 検証: 指定のコマンド(計画の S3 のコマンドを org 層の `Cleanup|MergeOrder` と cli の `OrgMerge_|Help` まで広げたもの)が 2 回目で通過(1 回目は上の JSON のテストで落ちた。org 76 秒、cli 133 秒)。変異 6 つが落ちる。機械的な確かめは 5 項目とも clean。consult は判断 8 点を妥当とした
+  - S4・S5 に渡すこと(S3 の報告から): `ralph org merge-order --help` は `--json` の `pr_lookup` を説明しているが `bound_to` に触れていない。AGENTS.md の地図と `/org` skill に `ralph org cleanup` がまだない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
