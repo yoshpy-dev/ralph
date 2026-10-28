@@ -145,7 +145,11 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
 - [x] Plan reviewed(consult-plan-initpack: 判定「直してから進める」。F1〜F4 は案のとおり。手がかりのファイルの出どころを言語ごとの表にし、`--pack` の検査を `RunE` で両方の経路の前に置き、`--yes` の説明と `cfg.Packs` の初期値を直した。Codex の計画助言: MEDIUM 2 件(skip を空の一覧に直す処理、空の `--pack` を `StringSliceVar` が捨てる)を聞かずに反映した(D5))
 - [x] Plan approved(自動承認(ユーザーの指示)。2026-10-28、digest sha256:614133eca51f)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - 別のセッション(stoic-app)の local CI の間(2026-10-28 21:43 から約 90 分)は Go のテストを打たず、計画と図解だけを進めた。S1 は予備のタイマーが切れたあとに始めた
+  - S1(baa66655、implementer): `--pack`(`StringArrayVar`、カンマを自分で分ける、重なりを 1 つに、空と知らない名前はエラー)、`RunE` の先頭での検査、`--yes` だけではパックなし、0 個のときの `ralph pack add` の案内、`--yes` の説明。verify rc=0(8s)。`go test -overlay` の mutant 5 種(検査が `--yes` の経路だけ、`StringSliceVar`、`--yes` で全部入る、案内なし、重なりを残す)がすべて落ちる。組み立てた binary で `--yes`、`--yes --pack golang`、知らない名前・空の名前(`--yes` の有無とも)を打って確かめた。self-check 5 項目 clean
+    - 計画になかった追加: 名前の前後の空白を取る(`TrimSpace`)。`--pack "golang, typescript"` を受け付け、空白だけの名前は空としてエラーにする
+    - S3 までの中間の状態: 対話の経路では `--pack` を検査するが、フォームにはまだ渡さない(S3 で選んだ状態にする)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
