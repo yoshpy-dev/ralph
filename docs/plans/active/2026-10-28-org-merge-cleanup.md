@@ -202,6 +202,8 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - self-review の run 2(report は fb214c0d): CRITICAL・HIGH・MEDIUM は 0、LOW が 8(R2-L1〜R2-L8)。consult と相談し、8 つとも F3 の 1 コミットで直すことにした
     - F3 5ddf5532(R2-L1〜R2-L8): 断りの文が安全なコマンドを名指す(記録の path か kind が違うときの `git log` と `git status`、別のブランチへの退避は `git -C <root> branch <branch>-unmerged <branch>`)。PR の head が手元にないときは `git -C <root> fetch origin refs/pull/<n>/head` を先に出す(番号がなければ SHA で取る。`CleanupParams.PRNumber` を merge と cleanup から渡す)。regate の `ralph org cleanup --branch` の quote。Failed の出どころを 2 つと書いた(script の途中と、その前の `git worktree remove`)。`/director` skill が exit 1 の混在でも CLEANED の行を報告する。tech-debt の行も足した。検証: handoff のコマンドが exit 0(internal/org 1001 秒、internal/cli 394 秒)、check-skill-sync と check-sync が PASS、壊した版 8 つがすべて落ちる。機械的な確かめは、director skill の行のつながりを fixed、ほかは clean
     - 計画の本文を直した(digest を取り直して自動承認、2026-10-28 sha256:0f38a9718a8b): D2 の手で消すコマンドを返す場面の「script が途中で止まった」を「消す途中で失敗した」に、D3 の skipped の失敗に、script の前の登録の外しの失敗(何も消していない)を足した。仕様 FR-8 の注も同じ形に直した(F3 の R2-L6 に合わせる。図解ページは「途中で止まったら」のままで食い違わない)
+    - self-review の run 3(report は 3303f4cb、F3 と計画の直しだけを読んだ): CRITICAL・HIGH・MEDIUM は 0、LOW が 3。run 3 の LOW は台帳に書いて verify に進む方針だが、R3-L1(確かめ 5 の文が退避に名指す `<branch>-unmerged` は名前が固定で、すでにあると失敗し、文の次の手の reset が merge されていないコミットをブランチから外す)は、ツールの文のとおりに打つとコミットが外れる道なので、consult と相談して例外として F4 で直す(名前に tip の短い SHA を入れる)。R3-L2(fetch の案内は確かめ 5 にだけある)と R3-L3(`cleanup.go` が 800 行を越えた)は台帳に 2 行を足した
+    - 重い処理の一時停止(2026-10-28): 別のセッション(stoic-app)が local CI を流すあいだ、go test・go build・run-verify・run-test を控えるよう頼まれた。F4 の検証と verify・test は再開の知らせのあとに回す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
