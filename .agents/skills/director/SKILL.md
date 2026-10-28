@@ -764,7 +764,10 @@ open か acked のままなので、resolve の期限で人にも届く。
 1. 機能の worktree(`.claude/worktrees/org-<org_id>`)で
    `./scripts/plan-visual.sh open <VISUAL のパス>` を打って図解ページを開き、
    `PLAN:` の計画を読んで要点を人に伝え、承認するかを聞く(本文に `FORK` の
-   行があれば、2 のとおり分かれ目と一緒に聞く)。人が会話にいなければ、
+   行があれば、2 のとおり分かれ目と一緒に聞く)。本文に `ADVISORY:` の行が
+   あれば、その要約(相手のモデルの計画助言が何を見つけ、leader がどう
+   扱ったか。飛ばしたときは、飛ばしたことと理由)も計画の要点と一緒に人に
+   伝える。人が会話にいなければ、
    AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3
    のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする。
 2. QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く。

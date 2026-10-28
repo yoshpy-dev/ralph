@@ -788,20 +788,24 @@ var directorSkillForkLineForms = []string{
 // directorSkillApprovalForkSteps are fragments of numbered steps of the
 // /director skill's subsection ### 計画の承認, in order within each step: the
 // rules plan 2026-10-29-leader-plan-depth.md gave the director for a QUESTION
-// with FORK lines (AC3, D1, D3). Step 1 sends the item to the human with
-// inbox notify when no human is in the conversation. Step 2 skips the
-// (決定済み) lines, asks one question per FORK line with the recommended
-// option first plus one approval question, all in one AskUserQuestion for up
-// to 3 forks and in batches of 4 with the approval last for more, runs no
-// approve until every answer is in, and sends a change request instead of
-// approving when any fork got a non-recommended option. Steps 3 and 6 are
-// the approve and the change request step 2 points to by number.
+// with FORK lines (AC3, D1, D3). Step 1 tells the human the summary on the
+// body's ADVISORY: line, which step 3 of the leader template writes there
+// (self-review L2 of that plan), with the plan's points, and sends the item
+// to the human with inbox notify when no human is in the conversation. Step 2
+// skips the (決定済み) lines, asks one question per FORK line with the
+// recommended option first plus one approval question, all in one
+// AskUserQuestion for up to 3 forks and in batches of 4 with the approval
+// last for more, runs no approve until every answer is in, and sends a
+// change request instead of approving when any fork got a non-recommended
+// option. Steps 3 and 6 are the approve and the change request step 2 points
+// to by number.
 var directorSkillApprovalForkSteps = []struct {
 	step      int
 	fragments []string
 }{
 	{1, []string{
 		"承認するかを聞く(本文に `FORK` の行があれば、2 のとおり分かれ目と一緒に聞く)",
+		"本文に `ADVISORY:` の行があれば、その要約(相手のモデルの計画助言が何を見つけ、leader がどう扱ったか。飛ばしたときは、飛ばしたことと理由)も計画の要点と一緒に人に伝える",
 		"人が会話にいなければ、AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする",
 	}},
 	{2, []string{

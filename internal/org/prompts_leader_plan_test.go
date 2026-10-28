@@ -2,6 +2,8 @@ package org
 
 import (
 	"context"
+	"go/scanner"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,15 +19,37 @@ import (
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
 
-// leaderFeatureOrgItem renders the leader template and returns the item of its
-// 機能ごとの org section that contains marker.
-func leaderFeatureOrgItem(t *testing.T, marker string) string {
+// The markers of the 機能ごとの org steps the tests below read, and the
+// heading of the subsection that holds the plan advisory (self-review L6 of
+// plan 2026-10-29-leader-plan-depth moved it out of step 1).
+const (
+	leaderStep1Marker         = "1. 機能の計画を"
+	leaderStep3Marker         = "3. (per-plan)"
+	leaderPlanAdvisoryHeading = "### 計画助言"
+	leaderAdvisoryWhere       = "the 計画助言 subsection of the 機能ごとの org section"
+)
+
+// leaderAdvisoryPointer is the sentence that ends step 1 and points at the
+// 計画助言 subsection.
+const leaderAdvisoryPointer = "計画をコミットしたら、次に進む前に、この節の終わりの「計画助言」のとおりに計画助言を扱う"
+
+// leaderFeatureOrgSection renders the leader template and returns its
+// 機能ごとの org section.
+func leaderFeatureOrgSection(t *testing.T) string {
 	t.Helper()
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
 	if !found {
 		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
 	}
+	return section
+}
+
+// leaderFeatureOrgItem renders the leader template and returns the item of its
+// 機能ごとの org section that contains marker.
+func leaderFeatureOrgItem(t *testing.T, marker string) string {
+	t.Helper()
+	section := leaderFeatureOrgSection(t)
 	item, ok := markdownItem(section, marker)
 	if !ok {
 		t.Fatalf("expected the 機能ごとの org section to have an item naming %q, got section:\n%s", marker, section)
@@ -33,19 +57,83 @@ func leaderFeatureOrgItem(t *testing.T, marker string) string {
 	return item
 }
 
-// assertPhrasesInOrder fails the test unless item contains every phrase of
-// order, ignoring white space (containsPhrase), each after the one before it.
-func assertPhrasesInOrder(t *testing.T, item, marker string, order []string) {
+// leaderItemWhere names the 機能ごとの org item naming marker in a failure
+// message.
+func leaderItemWhere(marker string) string {
+	return "the 機能ごとの org item naming " + strconv.Quote(marker)
+}
+
+// leaderPlanAdvisory returns the 計画助言 subsection of the 機能ごとの org
+// section: the text after its heading line up to the next "### " line or the
+// end of the section.
+func leaderPlanAdvisory(t *testing.T) string {
 	t.Helper()
-	s, at := squashSpace(item), -1
+	section := leaderFeatureOrgSection(t)
+	_, body, found := strings.Cut(section, "\n"+leaderPlanAdvisoryHeading+"\n")
+	if !found {
+		t.Fatalf("expected the 機能ごとの org section to have the subsection %q, got section:\n%s", leaderPlanAdvisoryHeading, section)
+	}
+	body, _, _ = strings.Cut(body, "\n### ")
+	return body
+}
+
+// assertPhrasesInOrder fails the test unless text contains every phrase of
+// order, ignoring white space (containsPhrase), each after the one before it.
+// where names text in the failure message.
+func assertPhrasesInOrder(t *testing.T, text, where string, order []string) {
+	t.Helper()
+	s, at := squashSpace(text), -1
 	for _, want := range order {
 		i := strings.Index(s, squashSpace(want))
 		if i < 0 || i < at {
-			t.Errorf("expected the 機能ごとの org item naming %q to say %q in this order, but %q is missing or out of order, got item:\n%s", marker, order, want, item)
+			t.Errorf("expected %s to say %q in this order, but %q is missing or out of order, got:\n%s", where, order, want, text)
 			return
 		}
 		at = i
 	}
+}
+
+// fencedBlockAfter returns the first fenced code block of text that opens
+// after the line holding lead, each line without the fence's indentation (a
+// block inside a list item is indented with the item, one in the 計画助言
+// subsection is not). where names text in the failure message.
+func fencedBlockAfter(t *testing.T, text, lead, where string) string {
+	t.Helper()
+	at := strings.Index(text, lead)
+	if at < 0 {
+		t.Fatalf("expected %s to have the sentence %q, got:\n%s", where, lead, text)
+	}
+	lines := strings.Split(text[at:], "\n")
+	if open := slices.IndexFunc(lines, func(l string) bool { return strings.TrimSpace(l) == "```" }); open >= 0 {
+		indent := strings.TrimSuffix(lines[open], "```")
+		if n := slices.Index(lines[open+1:], indent+"```"); n >= 0 {
+			block := slices.Clone(lines[open+1 : open+1+n])
+			for i, line := range block {
+				block[i] = strings.TrimPrefix(line, indent)
+			}
+			return strings.Join(block, "\n")
+		}
+	}
+	t.Fatalf("expected a fenced code block after %q in %s, got:\n%s", lead, where, text)
+	return ""
+}
+
+// leaderQuestionExample returns step 3's item and its example QUESTION as
+// escalate reads it (the item's code block, its indentation removed), with
+// the message escalate parsed. It fails the test unless escalate accepts the
+// example as a QUESTION and ParsePlanHeader reads its PLAN: header.
+func leaderQuestionExample(t *testing.T) (item, msg string, m protocol.Message) {
+	t.Helper()
+	item = leaderFeatureOrgItem(t, leaderStep3Marker)
+	msg = fencedBlockAfter(t, item, leaderStep3Marker, leaderItemWhere(leaderStep3Marker))
+	m, err := validateEscalation("org-a", msg)
+	if err != nil || m.Type != protocol.TypeQuestion {
+		t.Fatalf("expected escalate to accept the example as a QUESTION, got TYPE %q, err %v; message:\n%s", m.Type, err, msg)
+	}
+	if _, err := ParsePlanHeader(msg); err != nil {
+		t.Errorf("ParsePlanHeader(example QUESTION) = %v; message:\n%s", err, msg)
+	}
+	return item, msg, m
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanReadsTheRulesAndCodeFirst pins
@@ -54,9 +142,8 @@ func assertPhrasesInOrder(t *testing.T, item, marker string, order []string) {
 // .claude/rules/ (and, under Codex, .codex/AGENTS.override.md) and the code
 // the plan touches before it writes the plan, ahead of the rest of the step.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanReadsTheRulesAndCodeFirst(t *testing.T) {
-	const marker = "1. 機能の計画を"
-	item := leaderFeatureOrgItem(t, marker)
-	assertPhrasesInOrder(t, item, marker, []string{
+	item := leaderFeatureOrgItem(t, leaderStep1Marker)
+	assertPhrasesInOrder(t, item, leaderItemWhere(leaderStep1Marker), []string{
 		"機能の計画を worktree の `docs/plans/active/` に書き、コミットする",
 		"書く前に、worktree の AGENTS.md(あれば CLAUDE.md も)と `.claude/rules/` の下の rule(Codex では、あれば `.codex/AGENTS.override.md` も)を読み、計画が触るコードを読む",
 		"計画のスライス・検証のコマンド・してはいけないことは、読んだ決まりと今のコードに合わせる",
@@ -75,9 +162,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanReadsTheRulesAndCodeFirst(t *test
 // QUESTION of step 3, and under split takes the recommendation without
 // asking and records that it did.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanListsTheForksInsideTheFeature(t *testing.T) {
-	const marker = "1. 機能の計画を"
-	item := leaderFeatureOrgItem(t, marker)
-	assertPhrasesInOrder(t, item, marker, []string{
+	item := leaderFeatureOrgItem(t, leaderStep1Marker)
+	assertPhrasesInOrder(t, item, leaderItemWhere(leaderStep1Marker), []string{
 		"機能の内側の分かれ目(この機能の中だけで決まる、どの案で作るかの選択)を探す",
 		"分かれ目は、次の 3 つをすべて満たす選択に限る(標準フローの `/plan` が人に聞く分かれ目と同じ)",
 		"案によって、リスク・費用・戻しやすさが大きく違う",
@@ -91,20 +177,26 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanListsTheForksInsideTheFeature(t *
 	})
 }
 
+// leaderForkCountCap matches wording that caps the number of forks, compared
+// with white space removed: a count followed by つまで, つ目から, and the like.
+var leaderForkCountCap = regexp.MustCompile(`[0-9一二三四五六七八九十]+(つ|件|個|行)(目から|目以降|まで)`)
+
 // TestRenderRolePrompt_Leader_FeatureOrgQuestionListsEveryFork pins AC2 of
 // plan 2026-10-29-leader-plan-depth for step 3: every fork goes into the
 // QUESTION's body, one line each in the FORK form with the recommended option
 // first, with no cap on their number (D3: the director asks them all); a body
 // over the 2,000-character cap shortens the lines instead of dropping any;
 // and the QUESTION raised again after a change request lists the forks that
-// request decided as (決定済み) lines with no options.
+// request decided as (決定済み) lines with no options. The no-cap check reads
+// step 1's fork paragraph and step 3 only, for a count before つまで or
+// つ目から, so an ordinary 「返事を待つまで」 elsewhere does not trip it
+// (self-review L3).
 func TestRenderRolePrompt_Leader_FeatureOrgQuestionListsEveryFork(t *testing.T) {
-	const marker = "3. (per-plan)"
-	item := leaderFeatureOrgItem(t, marker)
+	item := leaderFeatureOrgItem(t, leaderStep3Marker)
 	if protocol.DefaultMaxBodyChars != 2000 {
 		t.Fatalf("protocol.DefaultMaxBodyChars = %d, but step 3 of the leader template says the QUESTION's body is capped at 2,000 characters", protocol.DefaultMaxBodyChars)
 	}
-	assertPhrasesInOrder(t, item, marker, []string{
+	assertPhrasesInOrder(t, item, leaderItemWhere(leaderStep3Marker), []string{
 		"手順 1 の分かれ目は、空行のあとの本文に、1 つ 1 行で `FORK <番号>: <問い> / a <案>(推奨) / b <案>` の形ですべて書く",
 		"推奨の案を a にし、案が 3 つ以上なら `/ c <案>` と続ける。番号は `## Design decisions` の順に 1 から振る",
 		"数が多くても打ち切らない",
@@ -114,12 +206,32 @@ func TestRenderRolePrompt_Leader_FeatureOrgQuestionListsEveryFork(t *testing.T) 
 		"推奨と違う案を選んだ直しの依頼(手順 4)で計画を直し、QUESTION を上げ直すときは、その依頼で決まった分かれ目を `FORK <番号>: <問い> → <決まった案>(決定済み)` の 1 行にし、案を並べない(director は `(決定済み)` の行を人に聞かない)",
 		"直しで新しく出た分かれ目は、上の形で案を並べる",
 	})
+
 	// D3: no cap on the number of forks, so no wording that stops at some
 	// count or takes the recommendation from some fork on.
-	text := renderSeatPrompt(t, "leader")
-	for _, banned := range []string{"つ目から", "つまで"} {
-		if strings.Contains(squashSpace(text), banned) {
-			t.Errorf("expected the leader template to put every fork in the QUESTION, with no count cap, but it says %q:\n%s", banned, text)
+	for _, s := range []struct {
+		text string
+		caps bool
+	}{
+		{"分かれ目は 3 つまで書く", true}, {"4 つ目からは推奨の案を採る", true}, {"5 件まで並べる", true},
+		{"返事を待つまで", false}, {"案が 3 つ以上なら", false}, {"1 つ 1 行で", false},
+	} {
+		if got := leaderForkCountCap.MatchString(squashSpace(s.text)); got != s.caps {
+			t.Fatalf("leaderForkCountCap.MatchString(%q) = %v, want %v", s.text, got, s.caps)
+		}
+	}
+	var forks string
+	for _, p := range strings.Split(leaderFeatureOrgItem(t, leaderStep1Marker), "\n\n") {
+		if containsPhrase(p, "計画を書くときは、機能の内側の分かれ目") {
+			forks = p
+		}
+	}
+	if forks == "" {
+		t.Fatalf("expected step 1 to have the fork paragraph")
+	}
+	for _, c := range []struct{ where, text string }{{"the fork paragraph of step 1", forks}, {"step 3", item}} {
+		if found := leaderForkCountCap.FindString(squashSpace(c.text)); found != "" {
+			t.Errorf("expected %s to put every fork in the QUESTION, with no count cap, but it says %q:\n%s", c.where, found, c.text)
 		}
 	}
 }
@@ -136,26 +248,7 @@ var forkLine = regexp.MustCompile(`^FORK (\d+): \S[^/]* / a \S[^/]*\(推奨\)( /
 // in the header block, numbered from 1, each in the FORK form with only
 // option a marked (推奨), and none of them is a (決定済み) line.
 func TestRenderRolePrompt_Leader_FeatureOrgQuestionExampleCarriesForks(t *testing.T) {
-	item := leaderFeatureOrgItem(t, "3. (per-plan)")
-	const fence = "\n   ```\n"
-	_, rest, ok := strings.Cut(item, fence)
-	block, _, closed := strings.Cut(rest, fence)
-	if !ok || !closed {
-		t.Fatalf("expected step 3 to show the example QUESTION in an indented code block, got item:\n%s", item)
-	}
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimPrefix(line, "   ")
-	}
-	msg := strings.Join(lines, "\n")
-
-	m, err := validateEscalation("org-a", msg)
-	if err != nil || m.Type != protocol.TypeQuestion {
-		t.Fatalf("expected escalate to accept the example as a QUESTION, got TYPE %q, err %v; message:\n%s", m.Type, err, msg)
-	}
-	if _, err := ParsePlanHeader(msg); err != nil {
-		t.Errorf("ParsePlanHeader(example QUESTION) = %v; message:\n%s", err, msg)
-	}
+	_, msg, m := leaderQuestionExample(t)
 	// "FORK 1" has a space, so it is never a header key: a FORK line in the
 	// header block would end the block and start the body itself. The
 	// blank line has to end the block before the first FORK line.
@@ -202,7 +295,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgQuestionExampleCarriesForks(t *testin
 func TestRenderRolePrompt_Leader_FeatureOrgNonRecommendedForkIsAChangeRequest(t *testing.T) {
 	const marker = "4. (per-plan)"
 	item := leaderFeatureOrgItem(t, marker)
-	assertPhrasesInOrder(t, item, marker, []string{
+	assertPhrasesInOrder(t, item, leaderItemWhere(marker), []string{
 		"本文が `approved` で始まるものを承認とみなす",
 		"分かれ目があれば、この承認は、すべての分かれ目が推奨の案で決まったことも表すので、`## Design decisions` は書き換えない(手順 6)",
 		"それ以外の DECISION(直しの依頼)なら、計画を直してコミットし、図解ページを描き直し、新しい digest で新しい QUESTION を上げる(手順 2 と 3 をやり直す)",
@@ -211,12 +304,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgNonRecommendedForkIsAChangeRequest(t 
 	})
 }
 
-// TestRenderRolePrompt_Leader_ForkWordingStaysInTheFeatureOrgSection pins
-// that the plan reading and the fork rules of plan
-// 2026-10-29-leader-plan-depth live in the 機能ごとの org section only: an
-// org that is not a split plan's feature follows its task, and the template
-// keeps that split.
-func TestRenderRolePrompt_Leader_ForkWordingStaysInTheFeatureOrgSection(t *testing.T) {
+// TestRenderRolePrompt_Leader_PlanWordingStaysInTheFeatureOrgSection pins
+// that the plan reading, the fork rules, and the plan advisory of plan
+// 2026-10-29-leader-plan-depth live in the 機能ごとの org section only (the
+// advisory in its 計画助言 subsection, which markdownSection keeps in the
+// section): an org that is not a split plan's feature follows its task, and
+// the template keeps that split.
+func TestRenderRolePrompt_Leader_PlanWordingStaysInTheFeatureOrgSection(t *testing.T) {
 	text := renderSeatPrompt(t, "leader")
 	section, found := markdownSection(text, "## 機能ごとの org")
 	if !found {
@@ -226,29 +320,77 @@ func TestRenderRolePrompt_Leader_ForkWordingStaysInTheFeatureOrgSection(t *testi
 		t.Fatalf("expected the 機能ごとの org section's text once in the template, got %d", n)
 	}
 	outside := strings.Replace(text, section, "", 1)
-	for _, word := range []string{"AGENTS.md", "AGENTS.override.md", "分かれ目", "FORK", "(推奨)", "(決定済み)", "Design decisions", "Critical forks"} {
-		if !strings.Contains(section, word) {
-			t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", word, section)
+	for _, c := range []struct {
+		name  string
+		words []string
+	}{
+		{"the plan reading and the forks", []string{"AGENTS.md", "AGENTS.override.md", "分かれ目", "FORK", "(推奨)", "(決定済み)", "Design decisions", "Critical forks"}},
+		{"the plan advisory", []string{"plan_advisory", "計画助言", "pick_reviewer", "adversarial plan reviewer", "mcp_servers", "--disable plugins", "claude -p", "plan-advisory", "ADVISORY:"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for _, word := range c.words {
+				if !strings.Contains(section, word) {
+					t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", word, section)
+				}
+				if strings.Contains(outside, word) {
+					t.Errorf("expected %q only in the 機能ごとの org section, but the rest of the template has it:\n%s", word, outside)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_PlanAdvisoryIsASubsectionAfterTheSteps pins
+// self-review L6 of plan 2026-10-29-leader-plan-depth: the plan advisory is
+// the subsection ### 計画助言 at the end of the 機能ごとの org section, after
+// step 16, and every line from step 1 to it that starts at column 0 starts
+// a numbered step, so the steps stay one markdown list. Step 1 ends with the
+// one sentence that points at the subsection and holds none of the advisory;
+// the subsection holds the advisory's commands.
+func TestRenderRolePrompt_Leader_PlanAdvisoryIsASubsectionAfterTheSteps(t *testing.T) {
+	section := leaderFeatureOrgSection(t)
+	first, last := strings.Index(section, "\n"+leaderStep1Marker), strings.Index(section, "\n16. ")
+	sub := strings.Index(section, "\n"+leaderPlanAdvisoryHeading+"\n")
+	if first < 0 || last < first || sub < last {
+		t.Fatalf("expected steps 1 to 16 and then the subsection %q in the 機能ごとの org section (at %d, %d, %d), got section:\n%s", leaderPlanAdvisoryHeading, first, last, sub, section)
+	}
+	for _, line := range strings.Split(section[first+1:sub], "\n") {
+		if line != "" && !strings.HasPrefix(line, " ") && !numberedItemStart.MatchString(line) {
+			t.Errorf("expected every line between step 1 and the subsection %q to be in a numbered step, but %q starts at column 0", leaderPlanAdvisoryHeading, line)
 		}
-		if strings.Contains(outside, word) {
-			t.Errorf("expected %q only in the 機能ごとの org section, but the rest of the template has it:\n%s", word, outside)
+	}
+
+	step1 := leaderFeatureOrgItem(t, leaderStep1Marker)
+	if !strings.HasSuffix(squashSpace(step1), squashSpace(leaderAdvisoryPointer)) {
+		t.Errorf("expected step 1 to end with %q, got item:\n%s", leaderAdvisoryPointer, step1)
+	}
+	advisory := leaderPlanAdvisory(t)
+	for _, word := range []string{"plan_advisory", "pick_reviewer", "adversarial plan reviewer", "mcp_servers", "claude -p", "ADVISORY:", "```"} {
+		if strings.Contains(step1, word) {
+			t.Errorf("expected step 1 to leave %q to the subsection %q, got item:\n%s", word, leaderPlanAdvisoryHeading, step1)
+		}
+		if !strings.Contains(advisory, word) {
+			t.Errorf("expected the subsection %q to contain %q, got:\n%s", leaderPlanAdvisoryHeading, word, advisory)
 		}
 	}
 }
 
-// The plan advisory of plan 2026-10-29-leader-plan-depth (AC4, AC5, S2) is
-// the last part of step 1 of the 機能ごとの org section. The leads below are
-// the sentences each of its three code blocks follows.
+// The leads below are the sentences each of the three code blocks of the
+// 計画助言 subsection follows.
 const (
-	leaderStep1Marker        = "1. 機能の計画を"
 	leaderAdvisoryPromptLead = "相手には次の指示文を渡す"
 	leaderAdvisoryCodexLead  = "相手が codex なら次のコマンドを打つ"
 	leaderAdvisoryClaudeLead = "相手が claude なら次のコマンドを打つ"
 )
 
-// leaderAdvisoryPickCommand is the command step 1 picks the other CLI with:
-// pick_reviewer reads the driver ralph puts in the pane.
-const leaderAdvisoryPickCommand = `. ./scripts/xreview-helpers.sh && pick_reviewer "$` + driver.PrimaryCLIEnv + `"`
+// leaderAdvisorySelfCLI is the placeholder of the pick command that the
+// leader replaces with its own CLI, claude or codex (self-review L5).
+const leaderAdvisorySelfCLI = "<あなたの CLI>"
+
+// leaderAdvisoryPickCommand is the command the 計画助言 subsection picks the
+// other CLI with: pick_reviewer reads the driver ralph puts in the pane, and
+// the leader's own CLI when the pane has none.
+const leaderAdvisoryPickCommand = `. ./scripts/xreview-helpers.sh && pick_reviewer "${` + driver.PrimaryCLIEnv + `:-` + leaderAdvisorySelfCLI + `}"`
 
 // leaderAdvisoryGitState is the command both advisory commands write the git
 // state with before and after the call: the form of /plan step 11 of #266
@@ -261,27 +403,11 @@ const leaderAdvisoryGitState = "{ git rev-parse HEAD; git status --porcelain=v1 
 const leaderAdvisoryWatchdog = ` & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & ` +
 	`wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "`
 
-// leaderStep1CodeBlock returns the code block of step 1 of the 機能ごとの org
-// section that comes first after the line holding lead, with the item's
-// indentation removed.
-func leaderStep1CodeBlock(t *testing.T, lead string) string {
+// leaderAdvisoryCodeBlock returns the code block of the 計画助言 subsection
+// that comes first after the line holding lead.
+func leaderAdvisoryCodeBlock(t *testing.T, lead string) string {
 	t.Helper()
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	at := strings.Index(item, lead)
-	if at < 0 {
-		t.Fatalf("expected step 1 to have the sentence %q, got item:\n%s", lead, item)
-	}
-	const fence = "\n   ```\n"
-	_, rest, opened := strings.Cut(item[at:], fence)
-	block, _, closed := strings.Cut(rest, fence)
-	if !opened || !closed {
-		t.Fatalf("expected an indented code block after %q in step 1, got item:\n%s", lead, item)
-	}
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimPrefix(line, "   ")
-	}
-	return strings.Join(lines, "\n")
+	return fencedBlockAfter(t, leaderPlanAdvisory(t), lead, leaderAdvisoryWhere)
 }
 
 // readRepoText reads rel under the repository root, skipping the test when it
@@ -295,21 +421,48 @@ func readRepoText(t *testing.T, rel string) string {
 	return string(data)
 }
 
+// goStringLiterals returns the values of the string literals of the Go
+// source src, in order and joined, so a test can read a help text whatever
+// its literals' quoting, concatenation, and line breaks.
+func goStringLiterals(t *testing.T, src string) string {
+	t.Helper()
+	var s scanner.Scanner
+	s.Init(token.NewFileSet().AddFile("src.go", -1, len(src)), []byte(src), nil, 0)
+	var b strings.Builder
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return b.String()
+		}
+		if tok == token.STRING {
+			v, err := strconv.Unquote(lit)
+			if err != nil {
+				t.Fatalf("strconv.Unquote(%s): %v", lit, err)
+			}
+			b.WriteString(v)
+		}
+	}
+}
+
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst pins
-// AC4 of plan 2026-10-29-leader-plan-depth: after the forks paragraph, step 1
-// asks the other model for a plan advisory only when
-// [org.review].plan_advisory is on, before step 2 under per-plan and before
-// the implementer's spawn of step 5 under split (D6), once. The leader reads
-// the switch with ralph config get and sorts its exit code the way that
-// verb's help promises (D5): 0 uses the value, false calls nothing; an older
-// ralph's unknown command "config" is off and recorded; any other code is a
-// BLOCKED, never off. The help in internal/cli/config.go still promises those
-// codes.
+// AC4 of plan 2026-10-29-leader-plan-depth: step 1 ends, after the forks
+// paragraph, with the pointer to the 計画助言 subsection, which asks the other
+// model for a plan advisory only when [org.review].plan_advisory is on,
+// before step 2 under per-plan and before the implementer's spawn of step 5
+// under split (D6), once. The leader reads the switch with ralph config get
+// and sorts its exit code the way that verb's help promises (D5): 0 uses the
+// value, false calls nothing; an older ralph's unknown command "config" is
+// off and recorded; any other code is a BLOCKED, never off. The help in
+// internal/cli/config.go still promises those codes, read from its string
+// literals with white space removed, so rewrapping the help keeps the check
+// green (self-review L3).
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, leaderStep1Marker), leaderItemWhere(leaderStep1Marker), []string{
 		"split では人に聞かずに推奨の案を採り",
-		"計画をコミットしたら、`[org.review].plan_advisory` が on のときだけ、相手のモデルに計画助言を頼む(claude の leader は codex に、codex の leader は claude に、計画を読むだけの形で)",
+		leaderAdvisoryPointer,
+	})
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
+		"手順 1 で計画をコミットしたら、`[org.review].plan_advisory` が on のときだけ、相手のモデルに計画助言を頼む(claude の leader は codex に、codex の leader は claude に、計画を読むだけの形で)",
 		"per-plan では手順 2 の前に、split では手順 5 で implementer を spawn する前に済ませる",
 		"頼むのは 1 回で、手順 4 と 6 で計画を直して手順 2 からやり直すときは頼み直さない",
 		"まず worktree で `ralph config get org.review.plan_advisory` を打ち、終了コードで分ける(`ralph config get --help` の約束)",
@@ -319,33 +472,46 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 		"頼むときは、worktree に",
 	})
 
-	help := readRepoText(t, filepath.Join("internal", "cli", "config.go"))
+	// The check reads the help's words, not its Go literals: the same words
+	// split into other literals pass too.
+	const sample = "Treat that, and only that, as off."
+	for _, src := range []string{"Long: \"Treat that, and only that, as\\n\" +\n\t\"     off.\"", "Long: `Treat that,\n and only that, as off.`"} {
+		if got := squashSpace(goStringLiterals(t, src)); got != squashSpace(sample) {
+			t.Fatalf("goStringLiterals(%q) = %q, want %q with white space removed", src, got, sample)
+		}
+	}
+	help := squashSpace(goStringLiterals(t, readRepoText(t, filepath.Join("internal", "cli", "config.go"))))
 	for _, promise := range []string{
-		`"  0  the value was printed: use it.\n"`,
-		`unknown command \"config\" on stderr. Treat that, and only that, as\n`,
-		`any other exit 1.`,
-		`"  2  the key is not a key of ralph.toml`,
-		`"  3  ralph.toml cannot be read`,
+		"0 the value was printed: use it.",
+		`1 an older ralph without this verb exits 1 with unknown command "config" on stderr. Treat that, and only that, as off`,
+		"Stop and report any other exit 1.",
+		"2 the key is not a key of ralph.toml",
+		"3 ralph.toml cannot be read",
+		"stop and report it, do not treat it as off.",
 	} {
-		if !strings.Contains(help, promise) {
-			t.Errorf("internal/cli/config.go no longer has %s in the help of ralph config get, whose exit codes step 1 of the leader template sorts", promise)
+		if !strings.Contains(help, squashSpace(promise)) {
+			t.Errorf("the help of ralph config get in internal/cli/config.go no longer says %q, an exit code the 計画助言 subsection of the leader template sorts", promise)
 		}
 	}
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI pins the
-// reviewer choice of AC5: step 1 skips when the worktree has no
-// scripts/xreview-helpers.sh or scripts/ralph-config.sh, picks the reviewer
-// with pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the pane, and
-// skips when that CLI is not on PATH. The command, run with bash and zsh from
-// the repository root on its scripts/xreview-helpers.sh, picks codex for a
-// claude pane, claude for a codex pane, and codex when the pane has no
-// RALPH_PRIMARY_CLI (the edge case of the plan's test plan).
+// reviewer choice of AC5: the 計画助言 subsection skips when the worktree has
+// no scripts/xreview-helpers.sh or scripts/ralph-config.sh, picks the
+// reviewer with pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the
+// pane, or on the leader's own CLI, which the leader writes in place of
+// <あなたの CLI>, when the pane has none (a herdr with no --env; self-review
+// L5), and skips when that CLI is not on PATH. The command, run with bash
+// and zsh from the repository root on its scripts/xreview-helpers.sh, picks
+// codex for a claude pane, claude for a codex pane, the pane's value over
+// the leader's, and, with no RALPH_PRIMARY_CLI in the pane, codex for a
+// claude leader and claude for a codex leader.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"頼むときは、worktree に `scripts/xreview-helpers.sh` と `scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)",
-		"`" + leaderAdvisoryPickCommand + "` が出す名前(`codex` か `claude`)を相手にする(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れる)",
+		"`" + leaderAdvisoryPickCommand + "` が出す名前(`codex` か `claude`)を相手にする",
+		"`" + leaderAdvisorySelfCLI + "` は、あなたが Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ",
+		"(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れるが、`--env` のない herdr が作った pane にはなく、そのときはこの値で選ぶ)",
 		"`command -v <相手>` が何も出さなければ飛ばす",
 	})
 
@@ -358,12 +524,15 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testi
 		if err != nil {
 			continue
 		}
-		for _, tc := range []struct{ pane, want string }{
-			{driver.PrimaryCLIEntry("claude"), "codex"},
-			{driver.PrimaryCLIEntry("codex"), "claude"},
-			{"", "codex"},
+		for _, tc := range []struct{ pane, self, want string }{
+			{driver.PrimaryCLIEntry("claude"), "claude", "codex"},
+			{driver.PrimaryCLIEntry("codex"), "codex", "claude"},
+			{driver.PrimaryCLIEntry("codex"), "claude", "claude"},
+			{"", "claude", "codex"},
+			{"", "codex", "claude"},
 		} {
-			args := []string{"-c", leaderAdvisoryPickCommand}
+			command := strings.Replace(leaderAdvisoryPickCommand, leaderAdvisorySelfCLI, tc.self, 1)
+			args := []string{"-c", command}
 			if shell == "zsh" {
 				args = append([]string{"-f"}, args...)
 			}
@@ -375,7 +544,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testi
 			}
 			out, err := cmd.Output()
 			if got := strings.TrimSpace(string(out)); err != nil || got != tc.want {
-				t.Errorf("%s -c %q with pane env %q = %q, err %v; want %q", shell, leaderAdvisoryPickCommand, tc.pane, got, err, tc.want)
+				t.Errorf("%s -c %q with pane env %q = %q, err %v; want %q", shell, command, tc.pane, got, err, tc.want)
 			}
 		}
 	}
@@ -387,12 +556,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testi
 // and nothing in it that would end or expand inside the double quotes of
 // "<指示文>". The watchdog both commands use is /plan's too.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPromptIsThePlanSkills(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"相手には次の指示文を渡す(下のコマンドの `<指示文>`)",
 		"英語のまま変えず、最後の `<計画のパス>` だけを worktree からの計画の相対パスにする",
 	})
-	prompt := leaderStep1CodeBlock(t, leaderAdvisoryPromptLead)
+	prompt := leaderAdvisoryCodeBlock(t, leaderAdvisoryPromptLead)
 	if strings.Contains(prompt, "\n") || !strings.HasSuffix(prompt, "Here is the plan file to review: <計画のパス>") {
 		t.Errorf("expected the instruction to be one line ending with the plan path, got:\n%s", prompt)
 	}
@@ -414,14 +582,14 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPromptIsThePlanSkills(t *
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell pins how
-// step 1 runs either command: in one shell call, under run_in_background with
-// the turn ended in Claude Code and in the foreground with a tool timeout
-// over 20 minutes in Codex; each stops the reviewer after 20 minutes,
-// compares the git state from before and after the call, and writes its files
-// under the ignored .harness/state/ so the gate does not refuse a dirty tree.
+// the 計画助言 subsection runs either command: in one shell call, under
+// run_in_background with the turn ended in Claude Code and in the foreground
+// with a tool timeout over 20 minutes in Codex; each stops the reviewer after
+// 20 minutes, compares the git state from before and after the call, and
+// writes its files under the ignored .harness/state/ so the gate does not
+// refuse a dirty tree.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"相手ごとに下のコマンドのどちらかを、まとめて 1 回の shell で打つ(Bash ツールは shell の状態を次の呼び出しに持ち越さない)",
 		"Bash ツールの `run_in_background` があるとき(Claude Code)は `run_in_background` で走らせて手番を終え、終わりの知らせが来てから出力を読む",
 		"ないとき(Codex)は前面で打ち、ツールの timeout を 20 分より長くする(そのあいだ `ralph org send` は届かない)",
@@ -430,7 +598,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 		leaderAdvisoryCodexLead,
 	})
 	for _, lead := range []string{leaderAdvisoryCodexLead, leaderAdvisoryClaudeLead} {
-		block := leaderStep1CodeBlock(t, lead)
+		block := leaderAdvisoryCodeBlock(t, lead)
 		lines := strings.Split(block, "\n")
 		const head = `. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"`
 		before := leaderAdvisoryGitState + ` > "$s/plan-advisory-git-before.txt"`
@@ -448,26 +616,28 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff pins the
 // codex command of AC5 and D7: it disables plugins, whose MCP servers
 // -c mcp_servers.<name>.enabled=false cannot turn off (an older codex that
-// cannot read the list with it skips), reads the names of the
-// enabled servers one line at a time into -c overrides (no word splitting),
-// checks with the same arguments that no server is enabled, and only then
-// runs codex exec with them, read-only and with --ignore-rules, its findings
-// in -o; otherwise it says mcp: not off and calls nothing. The model and
-// effort fall back to the defaults of scripts/ralph-config.sh.
+// cannot read the list with it skips), reads the names of the servers whose
+// enabled is not false one line at a time into -c overrides (no word
+// splitting), checks with the same arguments and the same filter that no such
+// server is left, and only then runs codex exec with them, read-only and
+// with --ignore-rules, its findings in -o; otherwise it says mcp: not off and
+// calls nothing. A list entry with no enabled field, or a null one, counts as
+// enabled in both lists (self-review L1). The model and effort fall back to
+// the defaults of scripts/ralph-config.sh.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryCodexLead,
 		"`--sandbox read-only` と `--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の server を止めてから codex を呼ぶ",
 		"plugin が持ち込む MCP の server は `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、codex を呼ばずに飛ばす)",
 		"`codex --disable plugins mcp list --json` で有効な server の名前を読み、1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のときだけ codex を呼ぶ",
+		"`enabled` が `false` でない server(欄がない、`null` のものを含む)はどちらの一覧でも有効と数えるので、codex が `false` と答えない server が残れば呼ばない",
 		leaderAdvisoryClaudeLead,
 	})
-	block := leaderStep1CodeBlock(t, leaderAdvisoryCodexLead)
+	block := leaderAdvisoryCodeBlock(t, leaderAdvisoryCodexLead)
 	for _, want := range []string{
-		`command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled) | .name' > "$s/plan-advisory-mcp.txt"`,
+		`command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"`,
 		`set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"`,
-		`n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled)] | length')`,
+		`n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')`,
 		`if [ "$n" = 0 ]; then command codex "$@" -m "${RALPH_CODEX_REVIEWER_MODEL:-`,
 		`-c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-`,
 		` exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1` + leaderAdvisoryWatchdog + `codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi`,
@@ -493,12 +663,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testi
 // after --output-format text (--tools and --disallowedTools take a list), and
 // RALPH_WIP_CHECKPOINT=off for a hook that runs anyway.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		leaderAdvisoryClaudeLead,
 		"`--restricted` は設定ファイルとその hook を読まず、`--tools Read,Grep,Glob` は読む道具だけを残し、`--permission-mode dontAsk` は許可の要るものを断り、`--strict-mcp-config` と `--disallowedTools \"mcp__*\"` は MCP の server を立てずその道具も使わせない",
 	})
-	block := leaderStep1CodeBlock(t, leaderAdvisoryClaudeLead)
+	block := leaderAdvisoryCodeBlock(t, leaderAdvisoryClaudeLead)
 	const call = `RALPH_WIP_CHECKPOINT=off command claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --restricted --strict-mcp-config ` +
 		`--disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" ` +
 		`</dev/null > "$s/plan-advisory-out.md" 2> "$s/plan-advisory.log"` + leaderAdvisoryWatchdog + `claude rc=$rc"`
@@ -511,18 +680,18 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly(t *testin
 	}
 }
 
-// TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes pins how step 1
-// reads the end of either command (AC5, D4): a changed git state is a BLOCKED
-// with the two state files and a stop, mcp: not off a skip, the advisory is
-// complete only on rc 0 with a non-empty output file, and anything else is a
-// skip. The leader judges the findings, reflects HIGH and MEDIUM ones or
-// writes why not, commits the plan, and puts a one- or two-sentence summary
-// (or the skip and its reason) on the QUESTION's ADVISORY: line under
-// per-plan and in ## Design decisions under split. Every line and file the
-// paragraph names is one the commands print or write.
+// TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes pins how the
+// 計画助言 subsection reads the end of either command (AC5, D4): a changed git
+// state is a BLOCKED with the two state files and a stop, mcp: not off a
+// skip, the advisory is complete only on rc 0 with a non-empty output file,
+// and anything else is a skip. The leader judges the findings, reflects HIGH
+// and MEDIUM ones or writes why not, commits the plan, and puts a one- or
+// two-sentence summary (or the skip and its reason) on the QUESTION's
+// ADVISORY: line under per-plan and in ## Design decisions under split.
+// Every line and file the paragraph names is one the commands print or
+// write.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes(t *testing.T) {
-	item := leaderFeatureOrgItem(t, leaderStep1Marker)
-	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
+	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"打ち終わったら、出力の行で分ける",
 		"`git: changed` なら(相手を呼ぶ前と後で git の状態が違う)、変わった worktree のまま先に進まず、`.harness/state/plan-advisory-git-before.txt` と `.harness/state/plan-advisory-git-after.txt` を EVIDENCE に書いて BLOCKED(TASK_ID は `org-a`)を `ralph org escalate` で上げ、返事が来るまで止まる",
 		"`mcp: not off` なら(jq がない、一覧が読めない、止めても有効な server が残る)、codex は呼ばれていないので飛ばす",
@@ -537,57 +706,32 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes(t *testing.T) {
 		"所見の数と扱いを 1〜2 文に要約し、per-plan では手順 3 の QUESTION の本文の `ADVISORY:` の行に、split では計画の `## Design decisions` に書く(split ではそれもコミットする)",
 		"飛ばしたときと、古い ralph で off とみなしたときも、そのことと理由を同じ場所に書く",
 	})
-	codex, claude := leaderStep1CodeBlock(t, leaderAdvisoryCodexLead), leaderStep1CodeBlock(t, leaderAdvisoryClaudeLead)
+	codex, claude := leaderAdvisoryCodeBlock(t, leaderAdvisoryCodexLead), leaderAdvisoryCodeBlock(t, leaderAdvisoryClaudeLead)
 	for _, c := range []struct{ block, line string }{
 		{codex, `echo 'git: changed'`}, {claude, `echo 'git: changed'`},
 		{codex, `echo "mcp: not off`}, {codex, `echo "codex rc=$rc"`}, {claude, `echo "claude rc=$rc"`},
 		{codex, `s=.harness/state;`}, {claude, `s=.harness/state;`},
 	} {
 		if !strings.Contains(c.block, c.line) {
-			t.Errorf("expected an advisory command to have %s, which step 1 reads, got:\n%s", c.line, c.block)
+			t.Errorf("expected an advisory command to have %s, which the 計画助言 subsection reads, got:\n%s", c.line, c.block)
 		}
 	}
-}
-
-// leaderQuestionExample returns the example QUESTION of step 3 as escalate
-// reads it: the code block of the item, with its indentation removed.
-func leaderQuestionExample(t *testing.T) (item, msg string) {
-	t.Helper()
-	item = leaderFeatureOrgItem(t, "3. (per-plan)")
-	const fence = "\n   ```\n"
-	_, rest, ok := strings.Cut(item, fence)
-	block, _, closed := strings.Cut(rest, fence)
-	if !ok || !closed {
-		t.Fatalf("expected step 3 to show the example QUESTION in an indented code block, got item:\n%s", item)
-	}
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimPrefix(line, "   ")
-	}
-	return item, strings.Join(lines, "\n")
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgQuestionExampleCarriesTheAdvisory pins
 // the per-plan summary of AC5: step 3 puts the advisory's summary, or the
 // skip and its reason, on one ADVISORY: line of the body, and none when
-// plan_advisory is false. The example QUESTION still parses (escalate and
-// ParsePlanHeader), and its one ADVISORY: line is in the body, not the header
-// block, and says what happened to the HIGH and MEDIUM findings.
+// plan_advisory is false, and names the 計画助言 subsection the summary
+// comes from. The example QUESTION still parses (escalate and
+// ParsePlanHeader), and its one ADVISORY: line is in the body, not the
+// header block, and says what happened to the HIGH and MEDIUM findings.
 func TestRenderRolePrompt_Leader_FeatureOrgQuestionExampleCarriesTheAdvisory(t *testing.T) {
-	const marker = "3. (per-plan)"
-	item, msg := leaderQuestionExample(t)
-	assertPhrasesInOrder(t, item, marker, []string{
+	item, msg, m := leaderQuestionExample(t)
+	assertPhrasesInOrder(t, item, leaderItemWhere(leaderStep3Marker), []string{
 		"分かれ目がなければ `FORK` の行は書かない",
-		"手順 1 の計画助言の要約(飛ばしたときはそのことと理由)は、本文の `ADVISORY:` で始まる 1 行に書く(`plan_advisory` が `false` で頼まなかったときは書かない)",
+		"計画助言の要約(この節の終わりの「計画助言」。飛ばしたときはそのことと理由)は、本文の `ADVISORY:` で始まる 1 行に書く(`plan_advisory` が `false` で頼まなかったときは書かない)",
 		"たとえば次のメッセージにする",
 	})
-	m, err := validateEscalation("org-a", msg)
-	if err != nil || m.Type != protocol.TypeQuestion {
-		t.Fatalf("expected escalate to accept the example as a QUESTION, got TYPE %q, err %v; message:\n%s", m.Type, err, msg)
-	}
-	if _, err := ParsePlanHeader(msg); err != nil {
-		t.Errorf("ParsePlanHeader(example QUESTION) = %v; message:\n%s", err, msg)
-	}
 	if v := protocol.HeaderValues(msg, "ADVISORY"); len(v) != 0 {
 		t.Errorf("expected no ADVISORY: header in the example, got %q", v)
 	}
@@ -599,26 +743,6 @@ func TestRenderRolePrompt_Leader_FeatureOrgQuestionExampleCarriesTheAdvisory(t *
 	}
 	if len(advisory) != 1 || !strings.Contains(advisory[0], "HIGH") || !strings.Contains(advisory[0], "MEDIUM") {
 		t.Errorf("expected one ADVISORY: line in the example's body naming how the HIGH and MEDIUM findings were handled, got %q in body:\n%s", advisory, m.Body)
-	}
-}
-
-// TestRenderRolePrompt_Leader_PlanAdvisoryStaysInTheFeatureOrgSection pins
-// that the plan advisory is part of the 機能ごとの org section only: an org
-// that is not a split plan's feature follows its task.
-func TestRenderRolePrompt_Leader_PlanAdvisoryStaysInTheFeatureOrgSection(t *testing.T) {
-	text := renderSeatPrompt(t, "leader")
-	section, found := markdownSection(text, "## 機能ごとの org")
-	if !found {
-		t.Fatalf("expected the leader template to contain a '## 機能ごとの org' section, got:\n%s", text)
-	}
-	outside := strings.Replace(text, section, "", 1)
-	for _, word := range []string{"plan_advisory", "計画助言", "pick_reviewer", "adversarial plan reviewer", "mcp_servers", "--disable plugins", "claude -p", "plan-advisory", "ADVISORY:"} {
-		if !strings.Contains(section, word) {
-			t.Errorf("expected the 機能ごとの org section to contain %q, got section:\n%s", word, section)
-		}
-		if strings.Contains(outside, word) {
-			t.Errorf("expected %q only in the 機能ごとの org section, but the rest of the template has it:\n%s", word, outside)
-		}
 	}
 }
 
@@ -636,10 +760,13 @@ func advisoryTestEnv() []string {
 // "has space" (enabled) and gone (disabled), plus the plugin server plug
 // unless --disable plugins is given; an override of a server outside the
 // config fails the load, as codex 0.163.0 does for a plugin's server.
-// STUB_STUCK=1 keeps alpha enabled whatever the overrides. STUB_OLD=1 knows
-// no feature flag, as codex rejects one it does not know (exit 1). exec
-// writes a finding to its -o file; STUB_WRITES=1 also changes tracked.txt,
-// and STUB_HANG=1 makes it hang instead.
+// STUB_STUCK=1 keeps alpha enabled whatever the overrides. STUB_NOFIELD=1
+// adds the config servers bare, whose entry has no enabled field, and blank,
+// whose enabled is null, whatever the overrides (a codex whose list does not
+// say enabled: false). STUB_OLD=1 knows no feature flag, as codex rejects
+// one it does not know (exit 1). exec writes a finding to its -o file;
+// STUB_WRITES=1 also changes tracked.txt, and STUB_HANG=1 makes it hang
+// instead.
 const advisoryCodexStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
 printf '%s\n' '--end--' >> "$STUB_LOG"
@@ -653,7 +780,7 @@ while [ $# -gt 0 ]; do
 		case $2 in
 		mcp_servers.*.enabled=false)
 			n=${2#mcp_servers.}; n=${n%.enabled=false}; off="$off$n|"
-			case $n in alpha|'has space'|gone) ;; *) bad=1 ;; esac ;;
+			case $n in alpha|'has space'|gone|bare|blank) ;; *) bad=1 ;; esac ;;
 		esac
 		shift 2 ;;
 	-m) shift 2 ;;
@@ -668,6 +795,7 @@ case $mode in
 mcp)
 	a=$(on alpha); [ "$STUB_STUCK" = 1 ] && a=true
 	printf '[{"name":"alpha","enabled":%s},{"name":"has space","enabled":%s},{"name":"gone","enabled":false}' "$a" "$(on 'has space')"
+	if [ "$STUB_NOFIELD" = 1 ]; then printf ',{"name":"bare"},{"name":"blank","enabled":null}'; fi
 	if [ "$plugins" = on ]; then printf ',{"name":"plug","enabled":true}'; fi
 	printf ']\n' ;;
 exec)
@@ -803,20 +931,22 @@ func advisoryShells(t *testing.T, needJQ bool) []string {
 // place of <指示文>, the plan path filled in, and the instruction.
 func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 	t.Helper()
-	prompt = strings.Replace(leaderStep1CodeBlock(t, leaderAdvisoryPromptLead), "<計画のパス>", "docs/plans/active/2026-10-29-x.md", 1)
-	return strings.Replace(leaderStep1CodeBlock(t, lead), "<指示文>", prompt, 1), prompt
+	prompt = strings.Replace(leaderAdvisoryCodeBlock(t, leaderAdvisoryPromptLead), "<計画のパス>", "docs/plans/active/2026-10-29-x.md", 1)
+	return strings.Replace(leaderAdvisoryCodeBlock(t, lead), "<指示文>", prompt, 1), prompt
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns runs the
-// codex command of step 1 with bash and zsh against a stand-in codex (D7,
-// AC5). With a config server whose name has a space and a plugin server, it
-// lists the servers with plugins disabled, turns every enabled one off with
-// one -c each (the name with a space kept whole), finds none enabled with
-// the same arguments, and runs exec with them, read-only, --ignore-rules,
-// its -o file under .harness/state/ and the instruction last; the output
-// says codex rc=0 and git: same, and the work tree stays clean. A server
-// that stays on prints mcp: not off and runs no exec, and so does a codex
-// that rejects --disable plugins as an unknown feature; a reviewer that edits
+// codex command of the 計画助言 subsection with bash and zsh against a
+// stand-in codex (D7, AC5). With a config server whose name has a space and
+// a plugin server, it lists the servers with plugins disabled, turns every
+// enabled one off with one -c each (the name with a space kept whole), finds
+// none enabled with the same arguments, and runs exec with them, read-only,
+// --ignore-rules, its -o file under .harness/state/ and the instruction
+// last; the output says codex rc=0 and git: same, and the work tree stays
+// clean. A server that stays on prints mcp: not off and runs no exec, and so
+// do servers whose list entry has no enabled field or a null one, which are
+// turned off too but never reported off (self-review L1), and a codex that
+// rejects --disable plugins as an unknown feature; a reviewer that edits
 // tracked.txt prints git: changed; a reviewer that hangs is stopped by the
 // watchdog (sleep 1200 shortened to one second) with a non-zero rc and no
 // output file. The cases run in parallel, each in its own repository.
@@ -878,6 +1008,26 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 				t.Errorf("output file = %q, want none", got)
 			}
 		})
+		t.Run(name+"/servers with no enabled field", func(t *testing.T) {
+			t.Parallel()
+			fx := newAdvisoryFixture(t)
+			out := fx.run(t, shell, block, append(env, "STUB_NOFIELD=1")...)
+			if !strings.Contains(out, "mcp: not off (enabled: 2)\n") || strings.Contains(out, "codex rc=") || !strings.HasSuffix(out, "git: same\n") {
+				t.Errorf("output = %q; want mcp: not off (enabled: 2), no codex rc and git: same", out)
+			}
+			calls := fx.calls(t)
+			if len(calls) != 2 || slices.Contains(calls[1], "exec") {
+				t.Fatalf("codex ran %q; want the list and the check only", calls)
+			}
+			for _, server := range []string{"bare", "blank"} {
+				if !slices.Contains(calls[1], "mcp_servers."+server+".enabled=false") {
+					t.Errorf("check call = %q, want it to turn %s off too: an entry that does not say enabled: false counts as enabled", calls[1], server)
+				}
+			}
+			if got := fx.read(t, ".harness/state/plan-advisory-out.md"); got != "" {
+				t.Errorf("output file = %q, want none", got)
+			}
+		})
 		t.Run(name+"/a codex with no plugins feature", func(t *testing.T) {
 			t.Parallel()
 			fx := newAdvisoryFixture(t)
@@ -913,9 +1063,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeCommandRuns runs
-// the claude command of step 1 with bash and zsh against a stand-in claude
-// (D2, AC5): claude gets the read-only flags in the #266 form with the
-// instruction last, right after --output-format text, and
+// the claude command of the 計画助言 subsection with bash and zsh against a
+// stand-in claude (D2, AC5): claude gets the read-only flags in the #266 form
+// with the instruction last, right after --output-format text, and
 // RALPH_WIP_CHECKPOINT=off over the pane's value; its stdout is the output
 // file and its stderr the log; the output says claude rc=0 and git: same, and
 // the work tree stays clean.
