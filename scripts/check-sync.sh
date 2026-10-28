@@ -109,6 +109,10 @@ KNOWN_DIFFS=(
   # only here); template frames the same recipe for a reader without those
   # paths (overlay-scaffold-v2-p5 Slice 5)
   "docs/recipes/adding-a-language-pack.md"
+  # ralph.toml: root turns on the four review switches of [standard] and
+  # [org.review] (issue #265); the template keeps them off. #264 also writes
+  # this file
+  "ralph.toml"
 )
 
 # AGENTS.md is block-aware, not whole-file compared (see check_agents_md_block
