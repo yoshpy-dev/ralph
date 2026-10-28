@@ -2,11 +2,55 @@
 
 - Date: 2026-10-29
 - Plan: `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md`(issue #274、D1〜D5、AC1〜AC7、Progress の S1〜S4)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は b49fd6c2 の report、run 2 は修正スライス F1 958d9bff のあとの再 run で、この file を同じ場所で更新した)
+- Reviewer: reviewer サブエージェント(`/self-review`。run 1 は b49fd6c2 の report、run 2 は修正スライス F1 958d9bff のあとの再 run(パイプラインの cycle 1)、run 3 は cross-review の ACTION_REQUIRED の修正 F2 aea6b494 のあとの再 run(パイプラインの cycle 2)で、この file を同じ場所で更新した)
+- Run 3 の scope: F2 aea6b494(3 ファイル、+117/-27)の全体と、run 2 のあとに入った a91f6694(`internal/cli/org.go` の doc comment)、e3363a99(`docs/tech-debt/README.md:136`)。HEAD は 4de8e31e(`git diff ae64da70...HEAD` は 25 コミット、42 ファイル、+1391/-343。report と記録のコミットを含む)。run 1、run 2 の本文は下にそのまま残し、その後は「Run 3」「Run 2」の節にまとめた。
 - Run 2 の scope: F1 958d9bff(8 ファイル、+89/-64)の全体と、M1〜L4 がそれぞれ閉じたか。HEAD は b955cbcf(`git diff ae64da70...HEAD` は 13 コミット、38 ファイル、+840/-317)。run 1 の本文は下にそのまま残し、その後は「Run 2」の節にまとめた。
 - Run 1 の scope: `git diff ae64da70...HEAD`(9 コミット、32 ファイル、+701/-263)。中心は S1 29fd179e(`internal/config/defaults_sync_test.go` の表のテスト)、S2 cb8d258e と ce6e972d(既定を true に、`internal/config` と `internal/cli` のテスト)、S3 920a4dcb(Go のコメント)、S4 f99ac82d(skill・recipe・README・spec・tech-debt)。diff quality だけを見た。
-- 実行したもの: `go test ./internal/config/ -count=1`(run 1、run 2 とも通過、0.6 s)だけ。変異と静的検査は回していない。
-- ID: run 1 の所見は M1、L1〜L4(run 2 も同じ ID で状態を追う)。run 2 で新しく立てた所見はない。
+- 実行したもの: `go test ./internal/config/ -count=1`(run 1、run 2 とも通過、0.6 s)、run 3 では `go test ./internal/cli/ -run 'TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults|TestStatusCmd_DirectorFallsBackToTheDefaultWhenRalphTomlDoesNotLoad' -count=1`(通過、1.3 s)と、標準ライブラリだけの使い捨てプログラム(repo の外)による `os.ReadFile` の挙動の確認。変異と静的検査は回していない。
+- ID: run 1 の所見は M1、L1〜L4(run 2、run 3 も同じ ID で状態を追う)。run 2、run 3 で新しく立てた所見はない。
+
+## Run 3
+
+cross-review の ACTION_REQUIRED 1 件(`resolveOrgConfig` が読めない `./ralph.toml` を「ない」とみなして既定の true を返す)を、F2 aea6b494 が閉じたかを見た。
+
+### F2 は穴を閉じたか
+
+閉じた。`resolveOrgConfig`(`internal/cli/org.go:613-623`)は `--config` がなければ `"ralph.toml"` をそのまま `config.Load` に渡し、`os.Stat` の分岐と `os` の import を消した。`config.Load` は `os.ReadFile` の `fs.ErrNotExist` だけを既定にし、ほかの読み取りのエラーは返す(`internal/config/config.go:643-649`)。これで [org] を読む経路はすべて `config.Load` を通る。確かめた範囲は、`ralph.toml` を `os.Stat` する cli のコードが残っていないこと(`git grep` の結果)、`loadMainWorktreeOrgConfig`(`org.go:332`)と `doctor.go:93` が元から `config.Load` を直接呼ぶこと。
+
+端の場合を、F2 の前(`os.Stat` が通れば `config.Load`、通らなければ既定)と後で並べた。`os.ReadFile` の挙動は、標準ライブラリだけの使い捨てプログラム(repo の外)で確かめた。
+
+| `./ralph.toml` の状態 | F2 の前 | F2 のあと |
+| --- | --- | --- |
+| ない | 既定 | 既定(変わらず) |
+| 読める | 読む | 読む(変わらず) |
+| 0o000 のファイル | `os.Stat` は通り、`config.Load` が EACCES を返す。エラー | エラー(変わらず)。テストの 2 つ目のケースは修正の前後で結果が同じで、追加の確認として置いてある |
+| 権限のないディレクトリへの symlink | `os.Stat` が EACCES を返し、「ない」とみなして既定(穴) | `ReadFile` の EACCES がそのまま返る。`errors.Is(err, fs.ErrPermission)` |
+| 輪になった symlink | `os.Stat` が ELOOP を返し、既定 | ELOOP のエラー(`too many levels of symbolic links`) |
+| ディレクトリ | `os.Stat` は通り、`config.Load` が EISDIR を返す。エラー | エラー(変わらず) |
+| 行き先のない symlink(dangling) | `os.Stat` が ENOENT を返し、既定 | `ReadFile` が ENOENT を返す。`errors.Is(err, fs.ErrNotExist)` が true で、既定(変わらず) |
+
+行き先のない symlink は、ない file と同じ扱いのまま残る。file の中身を誰も読めず、`config.Load` の契約(`fs.ErrNotExist` だけが既定)と同じで、`ralph.toml` のない project と露出が変わらないので、所見にはしない。`resolveOrgConfig` の doc comment は「権限」と「入れないディレクトリへの symlink」を挙げているので、行き先のない symlink は既定になる、の 1 文を足すとさらに正確になる(任意)。
+
+F1 の `ralph status` の fail-closed と組み合わさることも確かめた。`statusOrgConfig` は `resolveOrgConfig("")` のエラーで fallback に入るので、F2 のあとは「読めない」file でも off の行、`--json` の `auto_merge` false、warning 1 行が出る。名指しで実行したテストが、`--state-dir` を git の外に指す setup と main checkout の setup の 2 つ × 「parse できない」「読めない」の 4 つで通った。
+
+### 新しいテストは root の skip と権限の後片付けを正しく行っているか
+
+- root の skip: 正しい。`os.Geteuid() == 0` で skip する。`status_test.go` は `broken.permissions` の軸の subtest の中だけで skip するので、parse できない側は root でも走る。`org_test.go` の `TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults` は test の先頭で skip するため、権限のビットに頼らない最初の 2 つの確認(ない → 既定、読める false のまま)も root では走らない。2 つは `internal/config` と他の cli のテストが受け持つので失うものは小さい。skip を 2 つの subtest の中に移すと status 側と揃う(任意)。
+- 後片付け: 正しい。`writeRalphTomlBehindLockedDir` は `t.TempDir()` を先に呼び、`t.Cleanup(chmod 0o755)` を `os.Chmod(locked, 0)` の成功のあとに登録する。Cleanup は後入れ先出しなので、chmod が先に走り、そのあと `t.TempDir()` の削除が `locked` を消せる。`os.Chmod(locked, 0)` が失敗したときは Cleanup が未登録でも `locked` は 0o755 のままなので消せる。0o000 のファイルは親のディレクトリが書けるので削除できる。`t.Chdir` の戻しも後入れ先出しで、cwd の TempDir の削除より先に走る。
+- 判別力: symlink のケースは、F2 の前の `os.Stat` の分岐だと `(既定, nil)` を返し、`errors.Is(err, fs.ErrPermission)` で落ちる。この点はコードを読んで確かめた。変異の実行は回していない(進捗欄の `-overlay` の結果は implementer の報告)。
+
+### run 2 の自分の判断の訂正
+
+run 2 で「cli でほかに `config.Default()` を fallback に使うのは `org.go:615` だけで、`ralph.toml` が存在しない場合の既定であり、読めない場合ではない」と書いたのは誤りだった。その分岐は `os.Stat` のエラーを権限のエラーも含めてすべて「ない」と読んでいて、cross-review の指摘のとおり穴だった。run 2 は「ない」の判定方法(`os.Stat` か `errors.Is(err, fs.ErrNotExist)` か)を見ていなかった。
+
+### cycle 1 のあとのほかの変更
+
+- a91f6694(`org.go` の `withMainWorktreeDirectorEnabled` の doc comment): 「`ralph status` は built-in の Enabled と AutoMerge false を出す」と F1 の挙動に合う。正確。
+- e3363a99(`docs/tech-debt/README.md:136`): doctor の Detail の引用を「only while [org.permissions].codex_verified is true, the default」に直し、「already set」を「whose … is `true` (the default since #274, whether written or left out)」にした。run 2 で渡した 2 点が閉じている。
+
+### 所見
+
+なし。run 1 の M1、L1〜L4 は run 2 で閉じたままで、F2 は触っていない。
 
 ## Run 2
 
@@ -83,5 +127,5 @@
 
 ## Recommendation
 
-- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の MEDIUM 1、LOW 4 はすべて F1 958d9bff で解決)
-- Follow-ups: /verify に進んでよい。(1) `docs/tech-debt/README.md:136` が引用する doctor の Detail の文は F1 の L3 で変わったので、/verify の文書のずれの確認で、その行の引用と「already set」の言い方を直す。(2) `ralph status --help` に fallback の false を書くかは /sync-docs で決める(warning の文が説明しているので必須ではない)。
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の MEDIUM 1、LOW 4 は F1 958d9bff で解決し、cross-review の ACTION_REQUIRED は F2 aea6b494 で解決。run 3 で新しく立てた所見はない)
+- Follow-ups: パイプラインの上限(2 回)に達したので、次は /pr に進む。(1) `resolveOrgConfig` の doc comment に「行き先のない symlink は既定になる」の 1 文を足すか(任意)。(2) `TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults` の root の skip を 2 つの subtest の中に移すか(任意)。どちらも直さなくてよく、直す場合は文言とテストの位置だけで挙動は変わらない。(3) verify の D-3(`ralph status --help` に読めないときの false がない)と D-4(`permissions.go` のエラー文の「until then … first」)は、計画の進捗欄のとおり PR の Notes に書く。
