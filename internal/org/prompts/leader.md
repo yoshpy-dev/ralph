@@ -25,7 +25,52 @@
    渡す(既定の permission mode `autonomous` では必須で、ないと spawn が
    断られる。機能ごとの org では、タスクの `- 予約したパス:` の行の括弧に
    ある引数を使う。「機能ごとの org」の節の手順 5)
-3. `ralph org send` で typed message を送り、作業を委譲する
+3. `ralph org send` で typed message を送り、作業を委譲する。どの org でも
+   (機能ごとの org でなくても)、implementer への TASK には、そのスライスの
+   検証コマンドを本文の `VERIFY:` の行で書く(ヘッダにはしない。
+   「typed protocol」の節)。コマンドは、スライスが触ったファイルを覆う、
+   いちばん狭い検査にする。Go なら、触ったパッケージのディレクトリを
+   `<dir>` として
+   `test -z "$(gofmt -l <dir>)" && go vet ./<dir>/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./<dir>/`
+   にする(implementer の雛形が、`VERIFY:` の行のない TASK で選ぶものと
+   同じ)。`-timeout=30m` は Go の言語パックの既定
+   (`packs/languages/golang/verify.sh` の `run_tests`)で、テストに 10 分より
+   長くかかるパッケージが `go test` の既定の 10 分で打ち切られないようにする。
+   `GOFLAGS` の先頭に置くので、環境の `GOFLAGS` か `go env -w` で timeout が
+   決めてあれば、そちらがあとに並んで効く。パッケージがリポジトリの root
+   の module ではなく、root より下に自分の `go.mod` を持つ module にあるときは、
+   その `go.mod` のディレクトリを `<module>` とし、`<dir>` を `<module>`
+   からの相対のパスにして、コマンド全体を `(cd <module> && …)` で包む(root に
+   `go.work` がなければ、Go は root から入れ子の module に入らない)。ほかの
+   言語なら、言語パックのパッケージごとの検査にする。
+   1 つの TASK で複数のスライスを頼むときは、`VERIFY:` の行をスライスごとに
+   1 行ずつ書き、各行をスライスの名前で始める(例: `VERIFY: S1: <コマンド>`)。
+   スライスが 1 つなら `VERIFY: <コマンド>` の形のままでよい。
+   implementer がコミットせずに BLOCKED で止まり、止まった原因を取り除いて
+   (またはスライスを狭めて)同じスライスをもう一度頼むときは、止まった TASK
+   がコミットせずに残した scope の中のパスを、BLOCKED と
+   `git status --porcelain` から拾って本文の `RESUME:` の行に並べる(例:
+   `RESUME: internal/foo/bar.go internal/foo/bar_test.go`。`VERIFY:` と同じく
+   本文の行で、ヘッダにはしない)。1 つの TASK で複数のスライスを頼むときは、
+   `RESUME:` の行も、もう一度頼むスライスごとに 1 行ずつ書き、各行をその
+   スライスの名前で始める(例: `RESUME: S1: <パス>...`)。スライスが 1 つなら
+   `RESUME: <パス>...` の形のままでよい。implementer はそのパスの変更を、
+   その行のスライスの変更として引き継いで続ける(この行がないと、前の TASK
+   の変更を見て止まる)。スライスを狭めるときも、止まった TASK がコミット
+   せずに残したパスは、狭めたスライスから外すものも含めてすべて `RESUME:`
+   の行に並べ、そのうち元に戻すパスを TASK の本文に書く(並べなかったパスは
+   前からあった変更として残り、implementer がまた止まる)。秘密情報で
+   止まったあとは、送る前に `git diff HEAD -- <パス>...`(未追跡のファイルは
+   中身を読む)で、その値が作業ツリーから消えたことを確かめる。消えて
+   いないとき、また BLOCKED が秘密情報を前からあった変更(止まった TASK の
+   始めに implementer が記録した `git status --porcelain` に出ていて、その
+   TASK の `RESUME:` の行になかった変更。それより前に止まった TASK が残して
+   並べなかったパスも入る。implementer は触らない)にあると書いたときは、
+   再開せず `ralph org escalate` で BLOCKED を上げる(コードは自分で直さない)。
+   機能ごとの org でなければ、reviewer へのレビューの TASK には打つ
+   コマンドを書かず、reviewer の既定(`./scripts/run-static-verify.sh` と
+   `./scripts/run-test.sh` の両方)に任せる(機能ごとの org は
+   「機能ごとの org」の節の手順 8)
 4. `ralph org status` / `ralph org read` で座席の状態を観察し、統括する。
    座席の RESULT や返事は前面で待たず、「agmsg の受信箱の運用」の節のとおり
    手番を終えて待つ(`ralph org wait` もその節のとおりに走らせる)
@@ -101,7 +146,14 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    「全機能の座席に適用する決まり」の囲みがあれば、計画に
    `## 全機能の座席に適用する決まり` の節を作り、その囲みを、囲みの行も
    含めて中身ごと原文のまま写す(言い換えず、削らない。座席はこの節を読む。
-   手順 5)。計画の先頭(最初の `## ` の見出しより前)には
+   手順 5)。計画の `## Implementation outline` では、スライスごとの項目の
+   終わりに、そのスライスの検証コマンドを「— verify: `<コマンド>`」の形で
+   書く(雛形にこの欄があればそれに沿う)。コマンドは「ミッション」の 3 の
+   とおり、スライスが触ったファイルを覆う、いちばん狭い検査にする(Go なら
+   触ったパッケージの gofmt・vet・test)。`RALPH_VERIFY_SCOPE=changed` は
+   絞り込みに使わない(走らせる言語パックを選ぶだけで、Go では
+   `go test ./...` を全部走らせる)。
+   計画の先頭(最初の `## ` の見出しより前)には
    `- Status: Draft` と `- Approved: TBD` の行を 1 つずつ置く(雛形にあれば
    それを使う)。`/plan` skill は使わない
    (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
@@ -174,7 +226,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    ほかの決まり(してはいけないことなど)は TASK の本文に写さず(本文は
    2,000 字までで、長い決まりは入らない)、計画の
    `## 全機能の座席に適用する決まり` の節に従うよう TASK に書く。
-   per-plan では、implementer への TASK にいつも
+   implementer への TASK では、頼むスライスの計画の `— verify:` の
+   コマンドを、書き換えずに本文の `VERIFY:` の行に写す(「ミッション」の 3)。
+   複数のスライスを頼むときは、スライスごとの行に、スライスの名前を付けて
+   写す。per-plan では、implementer への TASK にいつも
    `PLAN: <計画のパス> sha256:<digest>` のヘッダ(最後に承認された digest。
    計画の `- Approved:` の行の digest)を 1 行付ける。ヘッダは `TASK_ID:` の
    次の行に書く(空行のあとの本文に書いたものはヘッダとして読まれない)。
@@ -199,7 +254,25 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    implementer の spawn と TASK を打たずに待つ(待ち方は
    「agmsg の受信箱の運用」の節)
 8. TASK・RESULT・レビューの往復は「ミッション」の 3〜5 のとおりに進める
-   (reviewer の `GATE:` の扱いを含む)
+   (reviewer の `GATE:` の扱いを含む)。この org では、reviewer への
+   レビューの TASK(TASK_ID が `gate-` で始まらない TASK)の本文に、打つ
+   コマンドを `CHECKS: ./scripts/run-static-verify.sh` の 1 行で書く
+   (`VERIFY:` と同じく本文の行で、ヘッダにはしない)。
+   フルの test は手順 12 の gate の TASK で 1 回走るので、レビューでは
+   打たせない。そのため、レビューの `GATE: pass` は静的検査が通ったこと
+   だけを指す(テストの結果は、手順 12 の gate の TASK の `GATE:` で見る)。
+   reviewer は打ったコマンドを RESULT と BLOCKED の本文の `CHECKS:` の行で
+   返すので、その行で、`GATE:` がどのコマンドの結果かを確かめる。
+   レビューの RESULT に `CHECKS:` の行がないか、その行に
+   `./scripts/run-static-verify.sh` がなければ、静的検査が通ったことは
+   確かめられていないので、手順 9 に進まず、新しい TASK_ID で、`CHECKS:` の
+   行を付けたレビューの TASK を送り直す。
+   この理由でレビューの TASK が 2 回続けて通らなければ(送り直した TASK の
+   RESULT にも、`./scripts/run-static-verify.sh` のある `CHECKS:` の行が
+   なければ)、3 回目の TASK は送らず、その理由を本文に書いて
+   `ralph org escalate` で BLOCKED を上げる。
+   `./scripts/run-test.sh` も並んでいれば、reviewer は既定の 2 つを打った。
+   時間がかかっただけなので、`GATE:` はそのまま扱ってよい
 9. reviewer がレビューの TASK(TASK_ID が `gate-` で始まらない TASK)を
    通したら(`GATE: pass` の RESULT)、まず reviewer のレポート
    (reviewer が RESULT や BLOCKED に書いた、`docs/reports/` の下のファイル)を
@@ -394,6 +467,19 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本文の
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
+`ralph org send --text` で送るメッセージ(TASK・DECISION・STOP)も、
+「件を上げる」の節の escalate のメッセージと同じく、ファイルに書き、
+`--text "$(cat <ファイル>)"` で渡してください。メッセージを
+`--text "..."` の二重引用符の中に直接書くと、implementer への TASK の
+`VERIFY:` の行にある `$(gofmt -l …)` のような `$(...)` を shell が
+展開してしまいます。ファイルの置き場所と書き方(cwd の `.harness/state/` の
+下、書く前に `mkdir -p .harness/state`、Write ツールか `<<'EOF'` の
+heredoc)は「件を上げる」の節と同じです。
+
+`VERIFY:` はヘッダではなく、本文(空行のあと)の行に書きます。ヘッダは
+ralph が読む行で(機能ごとの org の `PLAN:` など)、`VERIFY:` は ralph が
+読まず、implementer が読みます。
+
 TASK の例(座席への作業委譲、EVIDENCE はポインタのみ):
 
 ```
@@ -402,6 +488,19 @@ TASK_ID: t-1
 
 SUMMARY: internal/foo/bar.go の差分をレビューし、所見を RESULT で返してく
   ださい。scope は internal/foo/** に限定。
+```
+
+implementer への TASK の例(本文の `VERIFY:` の行に、そのスライスの検証
+コマンド。機能ごとの org の per-plan では、`TASK_ID:` の次の行に `PLAN:` の
+ヘッダも付ける):
+
+```
+TYPE: TASK
+TASK_ID: t-2
+
+SUMMARY: 計画のスライス 1 を internal/foo/ に実装し、コミットして RESULT で
+  返してください。scope は internal/foo/** に限定。
+VERIFY: test -z "$(gofmt -l internal/foo)" && go vet ./internal/foo/ && GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test ./internal/foo/
 ```
 
 ## 件を上げる(`ralph org escalate`)

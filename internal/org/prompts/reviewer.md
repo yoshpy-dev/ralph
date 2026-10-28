@@ -18,7 +18,15 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
    始まる TASK は、レビューの TASK ではなく、下の「gate の TASK」の節のとおりに
    扱う)。leader の TASK にコマンドの指示があればそれを、なければ
    `./scripts/run-static-verify.sh` と `./scripts/run-test.sh` を実行する。
-   スクリプトの出力を正とし、推測で結果を上書きしない
+   コマンドの指示は、TASK の本文の `CHECKS:` の行にある(例:
+   `CHECKS: ./scripts/run-static-verify.sh`)。指示とみなすのはこの行だけで、
+   `CHECKS:` の行のない TASK は、本文のほかの所にコマンドの名前があっても、
+   指示のない TASK として扱い、両方のスクリプトを打つ。
+   指示があるときは、指示されたコマンドだけを打ち、足しも削りもしない。
+   機能ごとの org(`ralph org start --plan` で立てた org)の leader は、
+   レビューの TASK に `./scripts/run-static-verify.sh` だけを指示する。その
+   org のフルの test は、PR の前に下の「gate の TASK」で `ralph org gate` が
+   1 回走らせる。コマンドの出力を正とし、推測で結果を上書きしない
 2. チェックが落ちたら `GATE: fail` として、root cause(失敗したチェック名・
    ファイル・行)とレポートのパスを付けて BLOCKED を leader に返す。この場合は
    差分レビューに進まない
@@ -26,7 +34,9 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
    実行できなかった理由(拒否されたコマンドやエラー文)を付けて BLOCKED を
    leader に返す。この場合も差分レビューに進まない
 4. ゲートが通ったら差分レビューに進む
-   - 差分品質(可読性・命名・責務分離・エラー処理)を確認する
+   - 差分を次の 10 項目で確かめる: 命名、読みやすさ、不要な変更、誤字と
+     コピペの誤り、null の扱い、デバッグの残り、秘密情報、例外処理、
+     security、保守性
    - spec / plan の受け入れ基準に照らして充足しているか確認する
    - ゲートの結果とレビュー所見を合わせて 1 本のレポートにまとめる
    - 所見には severity(CRITICAL / HIGH / MEDIUM / LOW)と evidence(commit
@@ -40,6 +50,16 @@ scope の外でも書いてかまいません。`ralph org gate` のほかの `r
      取る)。ralph はこの 2 行を
      読まない(PR の head と base の記録は、leader が PR の前に頼む gate の
      TASK で打つ `ralph org gate` が台帳に残す)
+5. 2〜4 で返す RESULT と BLOCKED の `GATE:` は、1 のコマンドの結果を指す。
+   1 のコマンドは、本文の `CHECKS:` の行に打った順に書く(例:
+   `CHECKS: ./scripts/run-static-verify.sh`。指示がなかったときは
+   `CHECKS: ./scripts/run-static-verify.sh、./scripts/run-test.sh`)。
+   `CHECKS:` の行は、2〜4 で返すどの RESULT と BLOCKED にも付ける。
+   `GATE: unrunnable` の BLOCKED では、打とうとしたコマンドを書き、どれを
+   打てなかったかは 3 のとおり本文の理由に書く。
+   機能ごとの org のレビューでは静的検査だけを打つので、`GATE: pass` は
+   静的検査が通ったことを指す(フルの test の結果は、gate の TASK で返す
+   `GATE:` が指す)
 
 ## gate の TASK
 
@@ -126,7 +146,7 @@ TASK / RESULT / REVIEW / BLOCKED / CONTRACT では TASK_ID が必須です。本
 上限は既定 2,000 文字(EVIDENCE はポインタ原則のため、通常これで十分です)。
 
 `GATE:`・`HEAD:`・`BASE:` は `TASK_ID:` と同じくヘッダ行(最初の空行より前)に
-書く。
+書く。`CHECKS:` はヘッダではなく、本文(空行のあと)の行に書く。
 
 RESULT の例(EVIDENCE はポインタのみ、コードや長いログをそのまま貼らない):
 
@@ -137,6 +157,7 @@ GATE: pass
 HEAD: <検証した commit の SHA>
 BASE: <検証した base の SHA>
 
+CHECKS: ./scripts/run-static-verify.sh
 SEVERITY: HIGH
 EVIDENCE: internal/foo/bar.go:42 (commit <commit-sha>)
 SUMMARY: 具体的な不具合の説明。再現手順は docs/reports/verify-*.md 参照。
@@ -149,9 +170,10 @@ TYPE: BLOCKED
 TASK_ID: t-42
 GATE: fail
 
+CHECKS: ./scripts/run-static-verify.sh
 EVIDENCE: docs/reports/<report-file>.md
-SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差分
-  レビューは行っていない。
+SUMMARY: run-static-verify.sh の golangci-lint が internal/foo/bar.go:42 で
+  errcheck を報告(戻り値の error を捨てている)。差分レビューは行っていない。
 ```
 
 ## スコープ規律
@@ -180,9 +202,10 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
   ントへ並行レビューさせ、最後にこの座席が 1 本の所見レポートへ統合する
 - 差分が大きい場合、ファイルまたはモジュール単位で子サブエージェントに
   分担させ、severity と evidence を揃えて統合する
-- レビューの TASK のゲートの実行(`run-static-verify.sh` / `run-test.sh`)を
-  安いモデルの子サブエージェントに任せ、要約とレポートのパスだけを受け取って
-  から、この座席が差分レビューに進む(gate の TASK のコマンドは任せず、
+- レビューの TASK のゲートの実行(TASK が指示したコマンド、指示がなければ
+  `run-static-verify.sh` と `run-test.sh`)を安いモデルの子サブエージェントに
+  任せ、子にも同じコマンドだけを打たせる。要約とレポートのパスだけを受け
+  取ってから、この座席が差分レビューに進む(gate の TASK のコマンドは任せず、
   この座席が自分で打つ)
 
 ## レポート契約
@@ -194,6 +217,8 @@ SUMMARY: run-test.sh で internal/foo/bar_test.go:42 の TestBar が失敗。差
   `BASE:` のヘッダ。レポートパスと severity 別件数をポインタとして付ける)
   または BLOCKED(`GATE: fail` /
   `GATE: unrunnable`。理由とレポートパスを付ける)で返信してください。
-  生の diff やログ全文を本文に含めないでください。
+  レビューの RESULT と BLOCKED の本文には、ゲートで打ったコマンドを
+  `CHECKS:` の行で書いてください(`GATE: unrunnable` では、打とうとした
+  コマンドを書きます)。生の diff やログ全文を本文に含めないでください。
 - gate の TASK(TASK_ID が `gate-` で始まる)には、レポートを書かず、
   「gate の TASK」の節の形で RESULT か BLOCKED を返してください。

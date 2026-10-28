@@ -116,6 +116,13 @@ for file in $plan_template_files; do
     "Do not narrow with RALPH_VERIFY_SCOPE=changed" "$file"
   assert_joined_contains_exact "$file wraps gofmt -l in test -z" \
     "test -z \"\$(gofmt -l" "$file"
+  # The Go example keeps the Go pack's -timeout=30m first in GOFLAGS and runs
+  # a nested module's check inside its root, as the org templates do
+  # (cross-review cycle 2 of plan 2026-10-27-org-narrow-verification).
+  assert_joined_contains_exact "$file keeps the Go pack's -timeout=30m first in GOFLAGS" \
+    "go vet ./internal/foo/ && GOFLAGS=\"-timeout=30m \$(go env GOFLAGS)\" go test ./internal/foo/" "$file"
+  assert_joined_contains_exact "$file runs a nested module's check inside its root" \
+    "(cd service && test -z \"\$(gofmt -l pkg)\" && go vet ./pkg/ && GOFLAGS=\"-timeout=30m \$(go env GOFLAGS)\" go test ./pkg/)" "$file"
 done
 
 # AC2: /plan step 7 asks for each slice's verification command.
