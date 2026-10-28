@@ -190,7 +190,7 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
   - 既知の穴(PR に書く): `runWorktreeScript` は script を時間の上限なしで打つ(S1 から。`git worktree remove` と `git branch -D` はローカルの操作)
   - S5 c0383ffe と 7d3e3f9f: 仕様の FR-8 に「merge のあとの後始末(#263)で決めたこと」の注(4 段目と 8a-3a の注がどう変わったかも 1 文ずつ)、AGENTS.md の地図に `cleanup.go`、README の 252・266・268 行と `ralph org cleanup` の段落(268 行の「spawn と start を止めない」も、片付けの間だけ止めると直した)、herdr の recipe とその写し。7d3e3f9f は consult の遅れた返事で、仕様の注の閉じた PR の案内を「ブランチが要らないと確かめたら `--force-branch`」の形にした(README と skill に合わせた。recipe は clone ごと捨てる文脈なので無条件のまま)
     - 検証: `./scripts/check-sync.sh && git diff --check` が両方のコミットで通過、recipe の 2 つは byte で同じ。機械的な確かめは 5 項目とも clean
-    - `/org` skill に残る `cleanup --id org-` の 727・729・777 行は start の失敗の案内、1137 行は閉じた PR の案内で、直すものはない
+    - `/org` skill に残る `cleanup --id org-` の 727・729・777 行は start の失敗の案内、1143 行は閉じた PR の案内で、直すものはない
   - self-review cycle 1(97ea508b): CRITICAL 0、HIGH 0、MEDIUM 2、LOW 6。consult の勧めで全部を直すか台帳に書く
     - 計画の本文を直した(digest を取り直して自動承認、2026-10-28 sha256:810337822bb7): D2 の頭に「打ち直せば続く断り(3・4・5・6)には手で消すコマンドを返さない」(M2)、D2 の 3 の理由を「消す worktree の中に人の shell を残さないため」に(report の Follow-ups)、D3 に「skipped は断りと script の途中の失敗の両方を含み、行は分けない」(M1)、AC3 の「手で消すコマンド」を「次の手」に。図解は overview と詳細 2 の文を「理由と次の手」に直し、lint 0、2 枚を撮って読んだ(はみ出しなし)
     - F3(inline、この記録と同じコミット): `docs/tech-debt/README.md` に 2 行(L5 の 800 行を越えたテストのファイル 4 つ、L6 の既知の穴 2 件)。機械的な確かめは 5 項目とも clean
@@ -205,7 +205,8 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
     - self-review の run 3(report は 3303f4cb、F3 と計画の直しだけを読んだ): CRITICAL・HIGH・MEDIUM は 0、LOW が 3。run 3 の LOW は台帳に書いて verify に進む方針だが、R3-L1(確かめ 5 の文が退避に名指す `<branch>-unmerged` は名前が固定で、すでにあると失敗し、文の次の手の reset が merge されていないコミットをブランチから外す)は、ツールの文のとおりに打つとコミットが外れる道なので、consult と相談して例外として F4 で直す(名前に tip の短い SHA を入れる)。R3-L2(fetch の案内は確かめ 5 にだけある)と R3-L3(`cleanup.go` が 800 行を越えた)は台帳に 2 行を足した
     - 重い処理の一時停止(2026-10-28): 別のセッション(stoic-app)が local CI を流すあいだ、go test・go build・run-verify・run-test を控えるよう頼まれた。F4 の検証と verify・test は再開の知らせのあとに回す。同じ日の夜、F4 を渡す前に再開の知らせが届いた
     - F4 3dfd434e(R3-L1): 確かめ 5 の断りが名指す退避を `<branch>-unmerged-<tip の先頭 7 文字>` にした。起点はブランチ名のまま(断りのあとに足したコミットも退避に入り、reset で外れない)。新しいテスト `TestCleanupFeatureWorktree_MovedBranchKeptUnderItsTip` は、同じ tip のあいだは同じ名前で、退避を打ち直すと失敗しても退避がその tip にあること、次のコミットで名前が変わることを見る。検証: handoff のコマンドが exit 0(internal/org 670 秒、internal/cli 234 秒)、壊した版 2 つ(名前を固定に戻した版、起点を tip にした版)で新しいテストが落ちる。機械的な確かめは 5 項目とも clean。consult の判定どおり run 4 は回さず、self-review の report に F4 の追記を 1 段足して verify に進む
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created(`docs/reports/self-review-2026-10-28-org-merge-cleanup.md`、run 3 と F4 の追記まで)
+- [x] Verification artifact created(`docs/reports/verify-2026-10-28-org-merge-cleanup.md`、pass、所見は LOW 1 つ)
+- [x] Test artifact created(`docs/reports/test-2026-10-28-org-merge-cleanup.md`、pass)
+- [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-28-org-merge-cleanup.md`。verify の LOW-1 の列挙 2 つと Info の注釈 1 つを 7e72d11e で直した。動詞を並べる文書に `cleanup` を足した: README の動詞の表、quality-gates の watch gate の行と template の写し)
 - [ ] PR created
