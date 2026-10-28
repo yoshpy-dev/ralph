@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -21,6 +22,7 @@ func newInitCmd() *cobra.Command {
 	var (
 		nonInteractive bool
 		force          bool
+		packNames      []string
 	)
 
 	cmd := &cobra.Command{
@@ -30,6 +32,18 @@ func newInitCmd() *cobra.Command {
 agents, rules, and org-runtime config. Supports both new and existing projects.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check the --pack names before the form and before anything is
+			// written: executeInit only warns about a pack it cannot find and
+			// keeps the name in the manifest.
+			availPacks, err := scaffold.AvailablePacks()
+			if err != nil {
+				return fmt.Errorf("listing packs: %w", err)
+			}
+			packs, err := parsePackFlag(packNames, availPacks)
+			if err != nil {
+				return err
+			}
+
 			targetDir := "."
 			if len(args) > 0 {
 				targetDir = args[0]
@@ -41,16 +55,43 @@ agents, rules, and org-runtime config. Supports both new and existing projects.`
 			}
 
 			if nonInteractive {
-				return runInitNonInteractive(absDir, force)
+				return runInitNonInteractive(absDir, packs, force)
 			}
 			return runInitInteractive(absDir, force)
 		},
 	}
 
-	cmd.Flags().BoolVar(&nonInteractive, "yes", false, "skip interactive prompts, use defaults")
+	cmd.Flags().BoolVar(&nonInteractive, "yes", false, "skip interactive prompts; install no language pack unless --pack names one")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing files without prompting")
+	// StringArrayVar, not StringSliceVar: a slice flag reads each value as
+	// CSV and drops an empty one (--pack ''), so parsePackFlag could not
+	// refuse it. parsePackFlag splits the commas itself.
+	cmd.Flags().StringArrayVar(&packNames, "pack", nil, "language pack to install; repeat the flag or separate names with commas (see ralph pack list)")
 
 	return cmd
+}
+
+// parsePackFlag turns the --pack values into the packs to install. A value
+// may name several packs separated by commas, and a name given more than once
+// is kept once, in first-seen order. An empty name (an empty value, or the
+// one after the comma of --pack golang,) or a name not in available is an
+// error that lists available.
+func parsePackFlag(values, available []string) ([]string, error) {
+	var packs []string
+	for _, value := range values {
+		for _, name := range strings.Split(value, ",") {
+			name = strings.TrimSpace(name)
+			switch {
+			case name == "":
+				return nil, fmt.Errorf("empty language pack name in --pack %q (available: %s)", value, strings.Join(available, ", "))
+			case !slices.Contains(available, name):
+				return nil, fmt.Errorf("unknown language pack %q in --pack (available: %s)", name, strings.Join(available, ", "))
+			case !slices.Contains(packs, name):
+				packs = append(packs, name)
+			}
+		}
+	}
+	return packs, nil
 }
 
 type initConfig struct {
@@ -105,15 +146,12 @@ func runInitInteractive(targetDir string, force bool) error {
 	return executeInit(targetDir, cfg, force)
 }
 
-func runInitNonInteractive(targetDir string, force bool) error {
-	availPacks, err := scaffold.AvailablePacks()
-	if err != nil {
-		return fmt.Errorf("listing packs: %w", err)
-	}
-
+// runInitNonInteractive installs the packs parsePackFlag returned for --pack;
+// with no --pack it installs no language pack.
+func runInitNonInteractive(targetDir string, packs []string, force bool) error {
 	cfg := initConfig{
 		ProjectName: filepath.Base(targetDir),
-		Packs:       availPacks,
+		Packs:       packs,
 	}
 
 	return executeInit(targetDir, cfg, force)
@@ -257,6 +295,15 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		fmt.Printf("  cd %s\n", targetDir)
 	}
 	fmt.Printf("  Edit AGENTS.md to describe your project\n")
+	if len(cfg.Packs) == 0 {
+		// No language pack was installed. The list is left out when it
+		// cannot be read; ralph pack list reports that error.
+		hint := "  ralph pack add <language> to add a language pack later"
+		if avail, err := scaffold.AvailablePacks(); err == nil && len(avail) > 0 {
+			hint += " (available: " + strings.Join(avail, ", ") + ")"
+		}
+		fmt.Println(hint)
+	}
 	fmt.Printf("  ralph doctor to verify setup\n")
 
 	return nil
