@@ -138,7 +138,8 @@ None (skill の手順と文書の書き換えが中心で、新しい仕組み�
 - [x] Plan reviewed — consult-plan-switchskills: 直してから進める(D2 に MCP の拒否、Scope に triage の雛形・`/plan` の手順 12 の名前・`/cross-review` の「silently skips」、D4 は Load でなく Decoder で読む、R2 に `go run` は代わりにならないこと)。Codex plan advisory: HIGH 1(claude の呼び出しで project の SessionEnd の hook が `git add -A` で WIP コミットしうる → D2 に `--restricted`・`RALPH_WIP_CHECKPOINT=off`・前後の git の状態の比較、`/cross-review` の claude の道にも)、MEDIUM 1(両方の CLI があると Codex の driver でも codex を相手に選ぶ → D5 で driver を skill を動かす CLI 自身にし、`.codex/AGENTS.override.md` を直す)。どちらも反映(AC1 と AC9)。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest は Approved の行。Critical forks: None
 - [x] Branch created (feat/review-switches-skills, worktree .claude/worktrees/review-switches-skills)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 07cf95f8(impl-266-s1): backfill の field と変数を `incomplete` から `noReview` に改め、`incomplete` か `skipped` で始まる status を verdict n/a にした。テスト 2 つ(skipped の report、cycle 1 は complete で cycle 2 は Skipped)。`internal/config/root_ralph_toml_test.go` の `TestRootRalphToml_KnownKeysAndReviewSwitchesOn` は、ゼロ値の `Config` に `DisallowUnknownFields` で読み(ファイル自身が 4 つを true に書いていることを確かめるため)、ファイルがないときは Fatal(追跡しているファイルで、消すと 4 つが黙って off に戻るため)。写しで、キーの改名・false・削除がそれぞれ落ち、backfill の `skipped` の判定を消すと新しい 2 つのテストが落ちた。検証コマンド rc 0(orchestrator も `-count=1` で打ち直した)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
