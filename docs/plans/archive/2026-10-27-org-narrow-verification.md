@@ -213,4 +213,4 @@ Critical forks: None。分かれ目はどれも、issue #262 の方針か #261 �
 - [x] Cycle 2 の回し直し(cap 3)の sync-docs(この commit: tech-debt の R2-5 の行に (e) R3-1 と (f) R3-2 を足し、不安定なテストの行に 4 回目を足した。仕様 2 つ、quality-gates、標準フローの slice の検査を指す文書は古くなっておらず変えていない。report の release ノートの行に、いちばん狭い Go の検査が言語パックの 30 分の timeout と入れ子の module の root を保つことを足した)
 - [x] Cross-review の回し直し(triage 1b678012: 指摘 0 件、cycle 2/3)
   - consult(done)の判定は「進めてよい」。F12 は verify の回し直しのあとに入ったので、HEAD 1b678012 で `./scripts/run-static-verify.sh` を打ち直した(rc 0、gofmt・vet・golangci-lint・staticcheck・shellcheck・sync 系・secret scan)。PR の本文に、cap を 3 に上げたこと、D6 の読み(機能ごとの org の leader だけが静的検査を指示し、reviewer の既定は両方のまま)、test の判定と `run-test.sh` の rc 1 の関係、`fix:` の 4 コミットがこのブランチの直しであることを書く
-- [ ] PR created
+- [x] PR created(#279)
