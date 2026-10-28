@@ -126,7 +126,8 @@ None (2 つの設定の既定値を入れ替え、文書をそれに合わせる
 - [x] Plan reviewed — consult-plan-defaultstrue: 直してから進める。D2 に共有定数・status の warn・main 優先のテスト・codex の 2 テストの扱いを書き、Scope に `/org` skill 1541 行付近と tech-debt:144 を足し、S2 の検証を `internal/config` と `internal/cli` に絞り、AC3 の grep の語を足し、release のノートに doctor の warn を足した。Codex plan advisory: MEDIUM 2 件をどちらも反映(1: revert で `ralph.toml` の true が戻らない → 戻し方の手順、R6、AC7。2: `Default()` 側だけの変異ではテンプレート側の取り違えを捕まえない → D3 と AC5 を 3 つの変異に)。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest は Approved の行。Critical forks: None(consult も同意、ユーザーに聞く分かれ目なし)
 - [x] Branch created (feat/codex-verified-auto-merge-on, worktree .claude/worktrees/codex-verified-auto-merge-on)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 29fd179e(impl-274-s1): `TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`(19 行、3 つの変異)、`tomlKeys`(reflect で probe の点つきの名前)、`editTemplateKey`(表の範囲の中で 1 行だけ書き換えか削除、複数行の配列も扱う)。表の名前と素のキーは点つきの名前から作る。bool の行のテンプレート側の値は `!Default()` から作るので、S2 のあとも直さずに通る。`go test -overlay` の写しで変異 m1〜m6(`Default()` 側とテンプレート側の取り違え、比較の 1 行の削除、toml タグの取り違え、表の 1 行の削除)がすべて落ちることを確かめた。指定の検証コマンドは通り、orchestrator も `-run 'EachKey|DetectsChanged|LockStep' -count=1` で確かめた。コメントの「19」は残した(S2 か後の直しで扱う)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
