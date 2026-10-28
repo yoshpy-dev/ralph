@@ -842,19 +842,22 @@ func TestDirectorSkillBullet(t *testing.T) {
 // resumed: in its parentheses one that went on from an earlier stop, and any
 // other words there a worktree_cleaned that could not be appended; CLEANUP:
 // skipped is a cleanup that did not end, either a refusal that removed
-// nothing or a script that stopped part way (what it removed stays removed,
-// and the next cleanup goes on), and either way its reason and the CLEANUP
-// MANUAL: command, when there is one, go to the human as they are; a refusal
-// with no CLEANUP MANUAL: line goes on with ralph org cleanup --branch once
-// the reason is fixed, since that line comes only where ralph cannot go on
-// by itself; and the director runs no command by hand unasked.
+// nothing or a removal that failed (in the script, part way, what it removed
+// staying removed, or before it, in the removal of a missing worktree's
+// registration, nothing removed; either way the next cleanup goes on), and
+// either way its reason and the CLEANUP MANUAL: command, when there is one,
+// go to the human as they are; a refusal with no CLEANUP MANUAL: line goes
+// on with ralph org cleanup --branch once the reason is fixed, since that
+// line comes only where ralph cannot go on by itself; and the director runs
+// no command by hand unasked.
 var directorSkillMergeCleanupRules = []string{
 	"merge は済んでいる。片付けがどうなっても、記録した merge の終了コードは 0 のまま",
 	"行が `CLEANUP: done` で始まれば片付いた",
 	"括弧に `resumed: <kind>` があれば、前に途中で止まった片付けの続きを済ませた",
 	"括弧にそれ以外の文があれば、台帳への `worktree_cleaned` の追記だけが失敗した(消す作業は済んでいる)",
 	"行が `CLEANUP: skipped (<理由>)` なら片付けは終わっていない",
-	"断られて何も消していないか、script が途中で止まった(消した分は消えたままで、次の片付けが続きから進む)かのどちらか",
+	"断られて何も消していないか、消す作業が失敗した(script が途中で止まったなら消した分は消えたまま、script の前の、" +
+		"ディレクトリのない worktree の登録の外しで止まったなら何も消していない。どちらも次の片付けが続きから進む)かのどちらか",
 	"どちらでも、理由と、続く `CLEANUP MANUAL:` の行があればそのコマンドを、そのまま人に伝える",
 	"`CLEANUP MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
 	"`CLEANUP MANUAL:` の行は、ralph が先に進めず人の判断が要るときだけ出る",
@@ -868,10 +871,14 @@ var directorSkillMergeCleanupRules = []string{
 // merged branch that is new since the last report, and branches cleaned up
 // already get no line; exit 0 is reported with its CLEANED: lines, and
 // nothing to clean up needs no report; on exit 1 a SKIPPED: line is read as
-// CLEANUP: skipped is, its reason and the MANUAL: command, when there is
-// one, go to the human with stderr as they are, and a refusal with no
-// MANUAL: line goes on with ralph org cleanup --branch once the reason is
-// fixed; a branch SKIPPED: stopped is not run again until the human says
+// CLEANUP: skipped is (a refusal, or a removal that failed in the script or
+// in the removal of the registration before it), its reason and the MANUAL:
+// command, when there is one, go to the human with stderr as they are, a
+// refusal with no MANUAL: line goes on with ralph org cleanup --branch once
+// the reason is fixed, and the CLEANED: lines of the same run, one branch
+// cleaned up and another refused, are reported as on exit 0 (R2-L7 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md); a branch
+// SKIPPED: stopped is not run again until the human says
 // the reason is fixed, no command by hand is run unasked, and a new branch
 // is named with --branch meanwhile, since a run without it prints the same
 // SKIPPED: again; and with no gh it removes nothing and exits 1.
@@ -883,10 +890,12 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 	"片付け済みのブランチと、同じ org_id がのちに別のブランチに結びつけ直された古いブランチは数えず、行も出さない",
 	"終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up` なら報告は要らない",
 	"終了コード 1 なら、`SKIPPED:` の行のブランチは片付けが終わっていない",
-	"`CLEANUP: skipped` と同じく、断られて何も消していないか、script が途中で止まったかのどちらかで、PR を読めなかったブランチも" +
-		"この行になる",
+	"`CLEANUP: skipped` と同じく、断られて何も消していないか、消す作業(script か、その前の登録の外し)が失敗したかの" +
+		"どちらかで、PR を読めなかったブランチもこの行になる",
 	"`SKIPPED:` の理由と、続く `MANUAL:` の行があればそのコマンド、stderr の文をそのまま人に伝える",
 	"`MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
+	"同じ実行に `CLEANED:` の行もあれば(`--branch` なしで打ち、1 本を片付けて別の 1 本で断られたとき)、そのブランチは" +
+		"片付いたので、手順 2 と同じく人に報告する",
 	"`SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、手のコマンドも人に頼まれないまま打たない",
 	"ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出るので、そのときは新しいブランチを `--branch` で" +
 		"名指して打つ",

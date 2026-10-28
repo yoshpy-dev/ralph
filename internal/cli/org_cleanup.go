@@ -146,10 +146,11 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 }
 
 // cleanupStep is one branch ralph org cleanup deals with: cleaned up at head,
-// the head its PR merged, or, when unknown is set, only reported with that
-// reason, since gh did not tell whether its PR was merged.
+// the head its PR (number pr) merged, or, when unknown is set, only reported
+// with that reason, since gh did not tell whether its PR was merged.
 type cleanupStep struct {
 	branch, head, unknown string
+	pr                    int
 }
 
 // cleanupSteps picks from res, merge-order's result with All, the branches
@@ -186,7 +187,7 @@ func cleanupSteps(res org.MergeOrderResult, branch string) ([]cleanupStep, error
 		}
 		switch {
 		case e.Class == org.MergeClassMerged && e.PR != nil:
-			steps = append(steps, cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid})
+			steps = append(steps, cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid, pr: e.PR.Number})
 		case e.PRLookup != org.MergeOrderPRLookupFound && e.PRLookup != org.MergeOrderPRLookupNone:
 			steps = append(steps, cleanupStep{branch: e.Branch, unknown: "whether its PR was merged is not known (" +
 				cleanupLookupWhy(e.PRLookup) + "; the notes of ralph org merge-order --all say more), so nothing was removed: " +
@@ -223,7 +224,7 @@ func cleanupNamedStep(res org.MergeOrderResult, branch string) (cleanupStep, err
 			"cleanup removes the feature worktree of a branch whose PR was merged", e.PR.Number, b,
 			org.PrintableInboxText(e.PR.State, false))
 	}
-	return cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid}, nil
+	return cleanupStep{branch: e.Branch, head: e.PR.HeadRefOid, pr: e.PR.Number}, nil
 }
 
 // cleanupNotInLedger is the refusal of a --branch the ledger does not name.
@@ -262,8 +263,8 @@ func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []
 				"were not cleaned up, and the lines above say what was; run ralph org cleanup again", context.Cause(ctx),
 				org.PrintableInboxText(s.branch, false))
 		}
-		res, err := rt.CleanupFeatureWorktree(ctx, org.CleanupParams{Branch: s.branch, Head: s.head, RepoRoot: repoRoot,
-			Via: org.CleanupViaCleanup})
+		res, err := rt.CleanupFeatureWorktree(ctx, org.CleanupParams{Branch: s.branch, Head: s.head, PRNumber: s.pr,
+			RepoRoot: repoRoot, Via: org.CleanupViaCleanup})
 		if err := p.result(s.branch, res, err); err != nil {
 			return err
 		}

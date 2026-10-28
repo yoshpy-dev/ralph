@@ -587,17 +587,22 @@ func orgReadCommandHint(orgID, seat, resolvedStateDir string, stateDirFlagSet bo
 }
 
 // shellSafeUnquoted matches the characters that need no quoting in a POSIX
-// shell word -- shellQuoteIfNeeded's sole caller only ever passes a
-// filesystem path, so this set (alphanumerics plus the handful of
-// characters a path commonly contains) is deliberately narrow rather than
+// shell word -- shellQuoteIfNeeded's callers pass a state dir path
+// (orgReadCommandHint, the legacy-ledger messages) or a branch name (the
+// ralph org cleanup --branch commands that ralph org merge and ralph org
+// cleanup print), so this set (alphanumerics plus the handful of characters
+// a path or a branch commonly contains) is deliberately narrow rather than
 // attempting to cover every shell-safe character in general.
+// internal/org's cleanupShellWord, which quotes the commands of the
+// cleanup's own refusals, leaves more characters unquoted.
 var shellSafeUnquoted = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 
 // shellQuoteIfNeeded returns s unchanged when it contains only
 // shellSafeUnquoted characters; otherwise it wraps s in single quotes,
 // escaping any embedded single quote the POSIX way (close the quote, emit
-// an escaped literal quote, reopen), so a path containing a space or other
-// shell metacharacter stays copy-paste-safe in a printed recovery command.
+// an escaped literal quote, reopen), so a path or a branch containing a
+// space or other shell metacharacter stays copy-paste-safe in a printed
+// recovery command.
 func shellQuoteIfNeeded(s string) string {
 	if shellSafeUnquoted.MatchString(s) {
 		return s

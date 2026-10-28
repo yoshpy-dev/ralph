@@ -567,7 +567,8 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 			"runs only there: when the branch's PR is merged, ralph org cleanup --branch %s cleans up what is left; when it is "+
 			"closed, clean up what is left with %s --force-branch in the main checkout once the branch is not needed; otherwise "+
 			"make the worktree again (git worktree prune, then git worktree add %s %s, in the main checkout) and %s",
-			orgID, f.Worktree, f.Branch, f.Branch, featureWorktreeCleanup(orgID), f.Worktree, f.Branch, w.again), nil
+			orgID, f.Worktree, f.Branch, cleanupShellWord(f.Branch), featureWorktreeCleanup(orgID), f.Worktree, f.Branch,
+			w.again), nil
 	case err != nil:
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s cannot be read (%s): restore it and %s",
 			orgID, f.Worktree, pathErrorCause(err), w.again), nil

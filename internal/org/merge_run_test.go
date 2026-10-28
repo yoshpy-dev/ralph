@@ -1014,12 +1014,19 @@ func TestMergeCleanupInterrupted_QuotesTheBranchInItsCommand(t *testing.T) {
 // from Merge in each: an earlier cleanup left the record alone (no worktree,
 // no branch in a repo root that git reads), which goes on and records
 // worktree_cleaned (Resumed record_only); a repo root git cannot run in,
-// whose error is CleanupErr with nothing removed or recorded; and a record on
-// another branch, a refusal whose Manual deletes only the binding's branch.
+// whose error is CleanupErr with nothing removed or recorded; a record on
+// another branch, a refusal whose Manual deletes only the binding's branch;
+// and a local branch at another commit than the gate's head, which git does
+// not have here, a refusal that names the fetch of the head of the PR Merge
+// merged, #7 (R2-L3 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md).
 func TestMerge_CleanupOutcomesWithFakeWorktrees(t *testing.T) {
 	isolateGitEnv(t)
 	gitRoot := resolvedOrClean(t.TempDir())
 	runGit(t, "init", "--quiet", "-b", "main", gitRoot)
+	movedRoot := resolvedOrClean(t.TempDir())
+	runGit(t, "init", "--quiet", "-b", "main", movedRoot)
+	gateCommit(t, movedRoot, "init")
+	runGit(t, "-C", movedRoot, "branch", "feat/a")
 	missing := filepath.Join(resolvedOrClean(t.TempDir()), "missing")
 	id := featureWorktreeID("org-a")
 	for _, tc := range []struct {
@@ -1052,6 +1059,15 @@ func TestMerge_CleanupOutcomesWithFakeWorktrees(t *testing.T) {
 			}
 			assertCleanupRefusal(t, c, `the worktree record org-org-a records branch "feat/a-2", not "feat/a"`,
 				"git -C "+cleanupShellWord(gitRoot)+" branch -D feat/a")
+		}, []string{"lookup:" + id}, ""},
+		{"the gate's head not here", movedRoot, func(*fakeWorktrees) {}, func(t *testing.T, c CleanupResult, cleanupErr string) {
+			if c.Cleaned || cleanupErr != "" {
+				t.Errorf("cleanup = %+v, %q; want a refusal", c, cleanupErr)
+			}
+			assertCleanupRefusal(t, c, ", not at "+moHeadA+", the head its PR merged, which git does not have in "+movedRoot+
+				" (a commit made on GitHub or pushed from another clone), so whether the branch holds commits that were not merged "+
+				"cannot be told yet: fetch the head (git -C "+cleanupShellWord(movedRoot)+" fetch origin refs/pull/7/head), then "+
+				"look at them", "")
 		}, []string{"lookup:" + id}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

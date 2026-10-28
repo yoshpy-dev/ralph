@@ -578,6 +578,28 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 	}
 }
 
+// TestRegateCheckWorktree_QuotesTheBranchInTheCleanupCommand covers R2-L4 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md: the refusal of a
+// feature worktree that does not exist names ralph org cleanup --branch for a
+// merged PR, and a person pastes it, so the branch is one shell word there
+// (cleanupShellWord), as in the cleanup's own refusals: a branch with a
+// character the shell reads specially, which git accepts (git
+// check-ref-format --branch feat/a;b), is quoted, and a plain one is not.
+func TestRegateCheckWorktree_QuotesTheBranchInTheCleanupCommand(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	for _, tc := range []struct{ branch, word string }{
+		{"feat/a", "feat/a"},
+		{"feat/a;b", "'feat/a;b'"},
+	} {
+		f := &FeatureBinding{Branch: tc.branch, Worktree: missing}
+		_, refused, err := regateCheckWorktree(context.Background(), "auth", f, regateWords(tc.branch))
+		want := "when the branch's PR is merged, ralph org cleanup --branch " + tc.word + " cleans up what is left;"
+		if err != nil || !strings.Contains(refused, want) {
+			t.Errorf("regateCheckWorktree(%q) = %q, %v; want it to say %q", tc.branch, refused, err, want)
+		}
+	}
+}
+
 // TestRegate_RefusalOfARunningOrgNamesTheBranchItRuns covers AC1's refusal
 // of a branch whose org runs, word for word: while the org runs bound to
 // the branch, the refusal names the ralph org gate its reviewer runs at its

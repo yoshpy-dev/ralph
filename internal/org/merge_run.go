@@ -283,13 +283,13 @@ func mergeCleanupInterrupted(cause error, branch string) string {
 // mergeCleanup is the cleanup of the feature worktree of res.Branch once
 // Merge recorded its merge, with lock, regate.lock, still held:
 // cleanupFeatureWorktreeLocked at res.Head, the head the gate passed and the
-// PR merged, in p.RepoRoot, from the current directory, via merge. It writes
-// the org's marker in lock and leaves it there until Merge releases the lock.
-// The cleanup's error is returned as text, escaped, for
-// MergeResult.CleanupErr.
+// PR merged, of PR res.PRNumber, in p.RepoRoot, from the current directory,
+// via merge. It writes the org's marker in lock and leaves it there until
+// Merge releases the lock. The cleanup's error is returned as text, escaped,
+// for MergeResult.CleanupErr.
 func (o *Org) mergeCleanup(ctx context.Context, lock *heldFileLock, p MergeParams, res MergeResult) (*CleanupResult, string) {
-	c, err := o.cleanupFeatureWorktreeLocked(ctx, lock, CleanupParams{Branch: res.Branch, Head: res.Head, RepoRoot: p.RepoRoot,
-		Via: CleanupViaMerge})
+	c, err := o.cleanupFeatureWorktreeLocked(ctx, lock, CleanupParams{Branch: res.Branch, Head: res.Head, PRNumber: res.PRNumber,
+		RepoRoot: p.RepoRoot, Via: CleanupViaMerge})
 	if err != nil {
 		return &c, PrintableInboxText(err.Error(), false)
 	}

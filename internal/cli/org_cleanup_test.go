@@ -265,6 +265,56 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 	}
 }
 
+// R2-L3 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md through
+// the CLI: the head gh reads (headRefOid) is a commit made on GitHub, which
+// origin has only under refs/pull/7/head (the branch deleted on merge) and
+// work does not have, so cleanup, with --branch and without it, skips feat/a,
+// exit 1 with nothing removed, with a reason that names the fetch of the head
+// of PR #7, the number merge-order read for the branch. With the reason's
+// commands run with sh as it writes them, the next cleanup cleans feat/a up
+// at that head, and the branch kept is where feat/a was.
+func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
+	fx := newCleanupCLIFixture(t)
+	head := gateCLIGitOut(t, fx.bare, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", fx.head, "-m",
+		"update the branch, on GitHub", fx.head+"^{tree}")
+	runLedgerTestGit(t, "-C", fx.bare, "update-ref", "refs/pull/7/head", head)
+	runLedgerTestGit(t, "-C", fx.bare, "update-ref", "-d", "refs/heads/feat/a")
+	fx.prs(t, "feat/a", cleanupCLIPR(7, "MERGED", head))
+	before := fx.snapshot(t)
+
+	fetch, keep := "git -C "+fx.work+" fetch origin refs/pull/7/head", "git -C "+fx.work+" branch feat/a-unmerged feat/a"
+	reset := "git -C " + fx.wt + " reset --hard " + head
+	want := "SKIPPED: feat/a the local branch feat/a is at " + fx.head + ", not at " + head + ", the head its PR merged, which git " +
+		"does not have in " + fx.work + " (a commit made on GitHub or pushed from another clone), so whether the branch holds " +
+		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + fx.work +
+		" log " + head + "..feat/a), keep what you need on another branch made from the main worktree, not by switching branches " +
+		"in the feature worktree (" + keep + "), put the branch back at the head its PR merged (" + reset + "), and run ralph org " +
+		"cleanup --branch feat/a again\n"
+	for _, extra := range [][]string{{"--branch", "feat/a"}, nil} {
+		stdout, stderr, err := fx.cleanup(t, extra...)
+		if err == nil || err.Error() != cleanupLeftErr(1) || stderr != "" || stdout != want {
+			t.Errorf("cleanup %q: err %v, stderr %q, stdout:\n%s\nwant exit 1 with %q and:\n%s", extra, err, stderr, stdout,
+				cleanupLeftErr(1), want)
+		}
+	}
+	if after := fx.snapshot(t); after != before {
+		t.Errorf("a skipped cleanup changed something:\n%s\n->\n%s", before, after)
+	}
+
+	for _, cmd := range []string{fetch, keep, reset} {
+		if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
+			t.Fatalf("%s: %v\n%s", cmd, err, out)
+		}
+	}
+	stdout, stderr, err := fx.cleanup(t)
+	if err != nil || stderr != "" || stdout != "CLEANED: feat/a org-a\n" {
+		t.Fatalf("cleanup after the fetch: err %v, stderr %q, stdout %q; want feat/a cleaned", err, stderr, stdout)
+	}
+	if got := fx.tip(t, "feat/a-unmerged"); got != fx.head {
+		t.Errorf("feat/a-unmerged is at %s, want %s, where feat/a was", got, fx.head)
+	}
+}
+
 // D4's branches left out without --branch: a branch cleaned up already, with
 // nothing left of it (NothingLeft), and the old branch of an org_id bound to
 // another branch since (BoundTo), whose local branch is left, get no line,
@@ -469,7 +519,7 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 	}
 	steps, err := cleanupSteps(res, "")
 	want := []cleanupStep{
-		{branch: "feat/merged", head: head},
+		{branch: "feat/merged", head: head, pr: 7},
 		{branch: "feat/failed", unknown: unknown("gh pr list failed for the branch")},
 		{branch: "feat/forks", unknown: unknown("gh returned its limit of PRs for the branch, all from forks")},
 		{branch: "feat/skipped", unknown: unknown("no answer of gh was used")},
@@ -491,8 +541,8 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 		want    []cleanupStep
 		wantErr string
 	}{
-		{"a merged branch", res, "feat/merged", []cleanupStep{{branch: "feat/merged", head: head}}, ""},
-		{"an old binding named", res, "feat/rebound", []cleanupStep{{branch: "feat/rebound", head: head}}, ""},
+		{"a merged branch", res, "feat/merged", []cleanupStep{{branch: "feat/merged", head: head, pr: 7}}, ""},
+		{"an old binding named", res, "feat/rebound", []cleanupStep{{branch: "feat/rebound", head: head, pr: 7}}, ""},
 		{"a branch not in the ledger", res, "feat/nope", nil, gone},
 		{"gate records only", res, "feat/gate-only", nil, "org: cleanup: no complete feature binding in the ledger names the " +
 			"branch feat/gate-only, only a gate record, so it has no feature worktree to clean up and nothing was removed: " +

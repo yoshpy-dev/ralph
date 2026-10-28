@@ -95,6 +95,10 @@ type CleanupParams struct {
 	// ralph org merge, gh's headRefOid for ralph org cleanup. The local branch
 	// and the worktree must be at it (D2's 5 and 6).
 	Head string
+	// PRNumber is the number of the branch's PR, 0 when it is not known. When
+	// git does not have Head here, the refusal of a branch that moved names
+	// how to fetch it, as refs/pull/<PRNumber>/head when it is known.
+	PRNumber int
 	// RepoRoot is the root of the main worktree, where
 	// scripts/ralph-worktree.sh runs (FeatureRepoRoot).
 	RepoRoot string
@@ -115,7 +119,9 @@ type CleanupResult struct {
 	// caller can put it in a line of its own, and it holds no line break.
 	Refused string
 	// Failed is set when every check passed but the removal failed: what
-	// failed. What the script removed before it stopped stays removed, and
+	// failed. Either git worktree remove of a missing worktree's registration,
+	// run before the script, failed, and nothing was removed, or the script
+	// failed, and what it removed before it stopped stays removed. Either way
 	// the next cleanup goes on from what is left. Nothing was recorded.
 	Failed string
 	// Manual is the shell command that cleans up by hand, set with Refused or
@@ -321,8 +327,10 @@ type cleanupState struct {
 // id is the ralph-worktree.sh record id of the binding's org.
 func (c *cleanupRun) id() string { return featureWorktreeID(c.orgID) }
 
-// scriptCmd is the Manual of a record that is the binding's: the script's
-// cleanup, run in the main worktree.
+// scriptCmd is the Manual of a record org-<org_id> on the binding's branch,
+// whether it is the binding's or only its path or kind differs: the script's
+// cleanup, run in the main worktree, which removes the record's worktree and
+// deletes that branch.
 func (c *cleanupRun) scriptCmd() string {
 	return "cd " + cleanupShellWord(c.root) + " && " + featureWorktreeCleanup(c.orgID) + " --force-branch"
 }
@@ -394,7 +402,7 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 		if st.registered {
 			reset = c.gitCmd("update-ref", "refs/heads/"+c.f.Branch, c.p.Head)
 		}
-		reason, manual = c.checkBranchTip(st.branchTip, reset)
+		reason, manual, err = c.checkBranchTip(ctx, st.branchTip, reset)
 	default:
 		resumed = CleanupResumedRecordOnly
 	}
@@ -477,8 +485,9 @@ func (c *cleanupRun) recordGone(st cleanupState) (reason, manual string, nothing
 // kind org. Otherwise it may be the record of another feature started on the
 // same org_id after this one, so nothing is removed; when it is on another
 // branch, Manual deletes only the binding's branch, and when only its path
-// or kind differs, Manual is the script's cleanup, once the record has been
-// checked.
+// or kind differs, Manual is the script's cleanup, to run once the record,
+// the branch's commits the PR did not merge, and the worktree at the
+// record's path, which the script removes, have been checked.
 func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 	var diffs []string
 	if rec.Branch != c.f.Branch {
@@ -501,8 +510,10 @@ func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 			"nothing that was not merged (%s)", c.f.Branch, c.root, c.gitCmd("log", c.p.Head+".."+c.f.Branch))
 		return reason, c.gitCmd("branch", "-D", c.f.Branch)
 	}
-	return reason + fmt.Sprintf(": check the record (%s state-path %s names its file) and, once it is this feature's, "+
-		"clean up by hand", worktreeScriptRel, c.id()), c.scriptCmd()
+	return reason + fmt.Sprintf(": check the record (%s state-path %s names its file), and clean up by hand only once it is "+
+		"this feature's, the branch holds nothing that was not merged (%s), and the worktree at the record's path holds nothing "+
+		"you need (%s)", worktreeScriptRel, c.id(), c.gitCmd("log", c.p.Head+".."+c.f.Branch),
+		cleanupGitCmd(rec.WorktreePath, "status")), c.scriptCmd()
 }
 
 // checkWorktree is D2's checks 3 to 6 of the feature worktree, whose
@@ -548,8 +559,8 @@ func (c *cleanupRun) checkWorktree(ctx context.Context, tip string) (reason, man
 	if branch == c.f.Branch {
 		reset = cleanupGitCmd(wt, "reset", "--hard", c.p.Head)
 	}
-	if reason, manual = c.checkBranchTip(tip, reset); reason != "" {
-		return reason, manual, nil
+	if reason, manual, err = c.checkBranchTip(ctx, tip, reset); err != nil || reason != "" {
+		return reason, manual, err
 	}
 	reason, err = c.checkCheckout(ctx, branch)
 	return reason, "", err
@@ -595,25 +606,59 @@ func (c *cleanupRun) checkClean(ctx context.Context) (string, error) {
 
 // checkBranchTip is D2's check 5 of tip, the local branch's tip ("" for no
 // such branch): it is the head the PR merged. A branch at another commit is
-// refused with no Manual: its reason says to look at the commits the PR did
-// not merge, keep what is needed on another branch, put the branch back at
-// the head with reset, the command for where the branch is checked out
-// (checkWorktree, run), and clean up again. With no such branch ralph cannot
-// go on, since only the worktree can tell what was not merged, so Manual is
-// the script's cleanup, once that has been checked.
-func (c *cleanupRun) checkBranchTip(tip, reset string) (string, string) {
+// refused with no Manual: its reason gives the steps of branchMovedSteps,
+// with reset, the command that puts the branch back for where it is checked
+// out (checkWorktree, run). When git does not have the head here (git
+// cat-file -e), as for a PR head made on GitHub or pushed from another clone,
+// those steps cannot run yet, so the reason names how to fetch it first
+// (fetchHeadCmd). With no such branch ralph cannot go on, since only the
+// worktree can tell what was not merged, so Manual is the script's cleanup,
+// once that has been checked. The error is for a git that cannot run.
+func (c *cleanupRun) checkBranchTip(ctx context.Context, tip, reset string) (string, string, error) {
 	switch tip {
 	case c.p.Head:
-		return "", ""
+		return "", "", nil
 	case "":
 		return fmt.Sprintf("the local branch %s does not exist in %s, though its feature worktree %s does: check what the "+
 			"worktree has checked out (%s) and keep what you need of it elsewhere before it is removed", c.f.Branch, c.root,
-			c.f.Worktree, cleanupGitCmd(c.f.Worktree, "status")), c.scriptCmd()
+			c.f.Worktree, cleanupGitCmd(c.f.Worktree, "status")), c.scriptCmd(), nil
 	}
-	return fmt.Sprintf("the local branch %s is at %s, not at %s, the head its PR merged, so it may hold commits that were not "+
-		"merged, which git branch -D would delete: look at them (%s), keep what you need on another branch, put the branch "+
-		"back at the head its PR merged (%s), and %s", c.f.Branch, tip, c.p.Head, c.gitCmd("log", c.p.Head+".."+c.f.Branch),
-		reset, cleanupAgain(c.p.Branch)), ""
+	moved := fmt.Sprintf("the local branch %s is at %s, not at %s, the head its PR merged", c.f.Branch, tip, c.p.Head)
+	r, err := cleanupGit(ctx, c.root, "cat-file", "-e", c.p.Head+"^{commit}")
+	switch {
+	case err != nil:
+		return "", "", err
+	case r.code != 0:
+		return fmt.Sprintf("%s, which git does not have in %s (a commit made on GitHub or pushed from another clone), so whether "+
+			"the branch holds commits that were not merged cannot be told yet: fetch the head (%s), then %s", moved, c.root,
+			c.fetchHeadCmd(), c.branchMovedSteps(reset)), "", nil
+	}
+	return fmt.Sprintf("%s, so it may hold commits that were not merged, which git branch -D would delete: %s", moved,
+		c.branchMovedSteps(reset)), "", nil
+}
+
+// branchMovedSteps are the steps of check 5's refusal of a branch that moved
+// from the head the PR merged: look at the commits the PR did not merge, keep
+// what is needed on a new branch made in the main worktree's repository
+// (<branch>-unmerged at the branch's tip), which leaves the feature worktree
+// where it is, so that reset still moves the branch and not the one kept, put
+// the branch back at the head with reset, and clean up again.
+func (c *cleanupRun) branchMovedSteps(reset string) string {
+	return fmt.Sprintf("look at them (%s), keep what you need on another branch made from the main worktree, not by switching "+
+		"branches in the feature worktree (%s), put the branch back at the head its PR merged (%s), and %s",
+		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", c.f.Branch+"-unmerged", c.f.Branch), reset,
+		cleanupAgain(c.p.Branch))
+}
+
+// fetchHeadCmd is the command that fetches the head the PR merged from
+// origin into the main worktree's repository: refs/pull/<n>/head, which
+// GitHub keeps after the merge even once the branch is deleted, when the PR's
+// number is known, else the head by its SHA.
+func (c *cleanupRun) fetchHeadCmd() string {
+	if c.p.PRNumber > 0 {
+		return c.gitCmd("fetch", "origin", "refs/pull/"+strconv.Itoa(c.p.PRNumber)+"/head")
+	}
+	return c.gitCmd("fetch", "origin", c.p.Head)
 }
 
 // checkedOut is the branch the feature worktree has checked out (git

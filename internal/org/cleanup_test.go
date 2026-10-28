@@ -214,6 +214,25 @@ func (fx *worktreeCleanupFixture) assertCleaned(t *testing.T, res CleanupResult,
 	assertCleanupUnlocked(t, fx.stateDir)
 }
 
+// cleanupMovedRefusal is check 5's refusal of feat/auth at tip, not at head,
+// the head its PR merged, which git has in root, the main worktree; reset
+// puts the branch back (checkBranchTip).
+func cleanupMovedRefusal(root, tip, head, reset string) string {
+	return "the local branch feat/auth is at " + tip + ", not at " + head + ", the head its PR merged, so it may hold commits " +
+		"that were not merged, which git branch -D would delete: " + cleanupMovedSteps(root, head, reset)
+}
+
+// cleanupMovedSteps are the steps of check 5's refusal of feat/auth
+// (branchMovedSteps), with root, head, and reset as cleanupMovedRefusal's:
+// the branch that keeps what is needed is made from the main worktree, so
+// the feature worktree stays where it is and reset moves feat/auth.
+func cleanupMovedSteps(root, head, reset string) string {
+	return "look at them (git -C " + root + " log " + head + "..feat/auth), keep what you need on another branch made from the " +
+		"main worktree, not by switching branches in the feature worktree (git -C " + root + " branch feat/auth-unmerged " +
+		"feat/auth), put the branch back at the head its PR merged (" + reset + "), and run ralph org cleanup --branch feat/auth " +
+		"again"
+}
+
 // countCalls counts call in calls.
 func countCalls(calls []string, call string) int {
 	n := 0
@@ -417,10 +436,7 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 		{"the branch moved past the merged head", func(t *testing.T, fx *worktreeCleanupFixture, _ *CleanupParams) {
 			gateCommit(t, fx.worktree, "not merged")
 		}, func(fx *worktreeCleanupFixture) string {
-			return "the local branch feat/auth is at " + fx.branchTip() + ", not at " + fx.head + ", the head its PR merged, " +
-				"so it may hold commits that were not merged, which git branch -D would delete: look at them (git -C " + fx.root +
-				" log " + fx.head + "..feat/auth), keep what you need on another branch, put the branch back at the head its PR " +
-				"merged (git -C " + fx.worktree + " reset --hard " + fx.head + "), and run ralph org cleanup --branch feat/auth again"
+			return cleanupMovedRefusal(fx.root, fx.branchTip(), fx.head, "git -C "+fx.worktree+" reset --hard "+fx.head)
 		}, false},
 		{"the branch moved, another branch checked out", func(t *testing.T, fx *worktreeCleanupFixture, _ *CleanupParams) {
 			gateCommit(t, fx.worktree, "not merged")
@@ -475,6 +491,65 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 	}
 }
 
+// TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch covers R2-L3 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md: the head ralph
+// org cleanup reads from gh (headRefOid) can be a commit made on GitHub that
+// this repository does not have, so check 5 refuses the local branch, at that
+// head's parent, with a reason that first names how to fetch the head:
+// refs/pull/<n>/head, which GitHub keeps after a merge even once the branch
+// is deleted, when the PR's number is known, else the head by its SHA. Origin
+// has the head only under refs/pull/7/head, as after a merge that deleted the
+// branch. With the reason's commands run with sh as it writes them, the next
+// cleanup cleans up at that head, and the branch kept is where the local
+// branch was.
+func TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pr    int
+		fetch func(fx *worktreeCleanupFixture, head string) string
+	}{
+		{"the PR's number known", 7, func(fx *worktreeCleanupFixture, _ string) string {
+			return "git -C " + fx.root + " fetch origin refs/pull/7/head"
+		}},
+		{"the PR's number not known", 0, func(fx *worktreeCleanupFixture, head string) string {
+			return "git -C " + fx.root + " fetch origin " + head
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFixture(t)
+			local := fx.head
+			head := gitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", local, "-m",
+				"update the branch, on GitHub", local+"^{tree}")
+			runGit(t, "-C", fx.origin, "update-ref", "refs/pull/7/head", head)
+			runGit(t, "-C", fx.origin, "update-ref", "-d", "refs/heads/"+cleanupTestBranch)
+			if err := exec.Command("git", "-C", fx.root, "cat-file", "-e", head+"^{commit}").Run(); err == nil {
+				t.Fatalf("the main worktree has %s; want a head only origin has", head)
+			}
+			p := fx.params()
+			p.Head, p.PRNumber = head, tc.pr
+			before := fx.snapshot(t)
+			res, err := fx.cleanup(p)
+			fetch, reset := tc.fetch(fx, head), "git -C "+fx.worktree+" reset --hard "+head
+			fx.assertRefused(t, res, err, before, "the local branch feat/auth is at "+local+", not at "+head+", the head its PR "+
+				"merged, which git does not have in "+fx.root+" (a commit made on GitHub or pushed from another clone), so whether "+
+				"the branch holds commits that were not merged cannot be told yet: fetch the head ("+fetch+"), then "+
+				cleanupMovedSteps(fx.root, head, reset), "")
+			for _, cmd := range []string{fetch, "git -C " + fx.root + " log " + head + "..feat/auth",
+				"git -C " + fx.root + " branch feat/auth-unmerged feat/auth", reset} {
+				if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v\n%s", cmd, err, out)
+				}
+			}
+			fx.head = head
+			res, err = fx.cleanup(p)
+			fx.assertCleaned(t, res, err, "", CleanupViaCleanup)
+			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != local {
+				t.Errorf("feat/auth-unmerged is at %s; want %s, where the local branch was", kept, local)
+			}
+		})
+	}
+}
+
 // TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft covers AC3b
 // (D2's resume): from what a script that stopped part way leaves, the next
 // cleanup removes the rest and records it, with the checks of what is left.
@@ -513,10 +588,11 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 		fx.assertCleaned(t, res, err, CleanupResumedRecordOnly, CleanupViaCleanup)
 	})
 	// A branch that moved is refused with no command by hand; the reason
-	// names how to put the branch back, which differs with git's
-	// registration of the missing worktree left (git branch -f refuses a
-	// branch it has checked out), and once that command runs as the reason
-	// writes it, the next cleanup goes on.
+	// names how to keep what it holds and how to put the branch back, which
+	// differs with git's registration of the missing worktree left (git
+	// branch -f refuses a branch it has checked out), and once those
+	// commands run as the reason writes them, the next cleanup goes on and
+	// the branch kept is still where the branch had moved.
 	for _, tc := range []struct {
 		name   string
 		remove func(t *testing.T, fx *worktreeCleanupFixture)
@@ -541,19 +617,21 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 			runGit(t, "-C", fx.root, "update-ref", "refs/heads/"+cleanupTestBranch, "main")
 			before := fx.snapshot(t)
 			res, err := fx.cleanup(fx.params())
-			reset := tc.reset(fx)
-			fx.assertRefused(t, res, err, before, "the local branch feat/auth is at "+fx.branchTip()+", not at "+fx.head+", the "+
-				"head its PR merged, so it may hold commits that were not merged, which git branch -D would delete: look at them "+
-				"(git -C "+fx.root+" log "+fx.head+"..feat/auth), keep what you need on another branch, put the branch back at the "+
-				"head its PR merged ("+reset+"), and run ralph org cleanup --branch feat/auth again", "")
+			reset, moved := tc.reset(fx), fx.branchTip()
+			fx.assertRefused(t, res, err, before, cleanupMovedRefusal(fx.root, moved, fx.head, reset), "")
 			if res.Resumed != "" {
 				t.Errorf("Resumed = %q on a refusal; want none", res.Resumed)
 			}
-			if out, err := exec.Command("sh", "-c", reset).CombinedOutput(); err != nil {
-				t.Fatalf("%s: %v\n%s", reset, err, out)
+			for _, cmd := range []string{"git -C " + fx.root + " branch feat/auth-unmerged feat/auth", reset} {
+				if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v\n%s", cmd, err, out)
+				}
 			}
 			res, err = fx.cleanup(fx.params())
 			fx.assertCleaned(t, res, err, CleanupResumedWorktreeGone, CleanupViaCleanup)
+			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != moved {
+				t.Errorf("feat/auth-unmerged is at %s after the cleanup; want %s, where feat/auth had moved", kept, moved)
+			}
 		})
 	}
 }
@@ -865,6 +943,51 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 	}
 }
 
+// TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks covers
+// R2-L1 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md: a record
+// on the binding's branch whose path or kind is not the binding's is refused
+// with the script's cleanup as Manual, which removes the worktree at the
+// record's path and deletes the branch with git branch -D (the script refuses
+// only an uncommitted change), so the reason names, as the refusals of a
+// record that is gone or on another branch do, what to check before it runs:
+// the commits the PR did not merge and the worktree at the record's path.
+func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(rec *WorktreeRecord)
+		diff   func(fx *worktreeCleanupFakeFixture) string
+		path   func(fx *worktreeCleanupFakeFixture) string // the record's worktree_path
+	}{
+		{"another path", func(rec *WorktreeRecord) { rec.WorktreePath = "/elsewhere/org auth" },
+			func(fx *worktreeCleanupFakeFixture) string {
+				return `worktree_path "/elsewhere/org auth", not "` + fx.f.Worktree + `"`
+			}, func(*worktreeCleanupFakeFixture) string { return "'/elsewhere/org auth'" }},
+		{"another kind", func(rec *WorktreeRecord) { rec.Kind = "task" },
+			func(*worktreeCleanupFakeFixture) string { return `kind "task", not "org"` },
+			func(fx *worktreeCleanupFakeFixture) string { return cleanupShellWord(fx.f.Worktree) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFakeFixture(t)
+			rec := fx.wt.records[cleanupTestID]
+			tc.change(&rec)
+			fx.wt.records[cleanupTestID] = rec
+			res, err := fx.o.CleanupFeatureWorktree(context.Background(), fx.params())
+			root := cleanupShellWord(fx.root)
+			want := "the worktree record org-auth records " + tc.diff(fx) + `: it is not the record of the feature worktree org_id ` +
+				`"auth" had for the branch feat/auth and may be another feature's on the same org_id, so nothing is removed: check ` +
+				"the record (scripts/ralph-worktree.sh state-path org-auth names its file), and clean up by hand only once it is " +
+				"this feature's, the branch holds nothing that was not merged (git -C " + root + " log " + cleanupTestHead +
+				"..feat/auth), and the worktree at the record's path holds nothing you need (git -C " + tc.path(fx) + " status)"
+			if err != nil || res.Cleaned || res.Refused != want {
+				t.Fatalf("cleanup = %+v, %v\nwant the refusal %q", res, err, want)
+			}
+			if manual := "cd " + root + " && ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch"; res.Manual != manual {
+				t.Errorf("Manual = %q, want %q", res.Manual, manual)
+			}
+		})
+	}
+}
+
 // TestCleanupFeatureWorktree_RefusedWhileRegateLockIsHeld covers AC4's
 // regate or merge that runs: with regate.lock held by another, the cleanup
 // that takes the lock itself refuses after regateLockWait, reads nothing, and
@@ -946,8 +1069,11 @@ func TestCleanupFeatureWorktree_FakeScriptFailure(t *testing.T) {
 // path holds a space: each path is one shell word, so each command, run with
 // sh as the reason writes it, does what the reason says, and with the steps
 // of each refusal in turn done, the next cleanup passes every check. The
-// feature worktree is git's own and fakeWorktrees holds its record, so the
-// script never runs: the cleanup stops right before the removal.
+// branch a refusal of a moved branch has made to keep what it holds, from the
+// main worktree, still holds the commit the PR did not merge (R2-L2): putting
+// the branch back moved the branch, not the one kept. The feature worktree is
+// git's own and fakeWorktrees holds its record, so the script never runs: the
+// cleanup stops right before the removal.
 func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -962,14 +1088,15 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 		{"the branch moved past the merged head", func(t *testing.T, wt string) {
 			gateCommit(t, wt, "not merged")
 		}, func(root, wt, head string) [][]string {
-			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + wt + " reset --hard " + head}}
+			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch feat/auth-unmerged feat/auth",
+				"git -C " + wt + " reset --hard " + head}}
 		}},
 		{"the branch moved, another branch checked out", func(t *testing.T, wt string) {
 			gateCommit(t, wt, "not merged")
 			runGit(t, "-C", wt, "switch", "--quiet", "-c", "other")
 		}, func(root, wt, head string) [][]string {
-			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch -f feat/auth " + head},
-				{"git -C " + wt + " switch feat/auth"}}
+			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch feat/auth-unmerged feat/auth",
+				"git -C " + root + " branch -f feat/auth " + head}, {"git -C " + wt + " switch feat/auth"}}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -983,6 +1110,7 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 			p := fx.params()
 			p.Head = gitOut(t, wt, "rev-parse", "HEAD")
 			tc.setup(t, wt)
+			moved := gitOut(t, fx.root, "rev-parse", "refs/heads/"+cleanupTestBranch)
 			for _, cmds := range tc.steps(shellQuote(fx.root), shellQuote(wt), p.Head) {
 				res, err := fx.o.CleanupFeatureWorktree(context.Background(), p)
 				if err != nil || res.Refused == "" || res.Manual != "" {
@@ -995,6 +1123,13 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 					if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
 						t.Fatalf("%s: %v\n%s", cmd, err, out)
 					}
+				}
+			}
+			// The commit the PR did not merge is on the branch kept, which
+			// putting feat/auth back did not move.
+			if moved != p.Head {
+				if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != moved {
+					t.Errorf("feat/auth-unmerged is at %s; want %s, the commit that was not merged", kept, moved)
 				}
 			}
 			ctx, cancel := context.WithCancel(context.Background())

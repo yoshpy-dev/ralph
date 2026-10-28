@@ -160,8 +160,8 @@ var orgSkillCleanupRules = []struct {
 		"その org の `spawn` と `start` が断られる",
 		"`CLEANED: <ブランチ> org-<org_id>`",
 		"`nothing to clean up`",
-		"`SKIPPED:` は片付けが終わっていないことで、断り(何も消していない)と、script の途中の失敗(消した分は消えたまま)と、" +
-			"PR を読めなかったブランチを含む",
+		"`SKIPPED:` は片付けが終わっていないことで、断り(何も消していない)と、消す作業の失敗(script の途中なら消した分は" +
+			"消えたまま、script の前の登録の外しなら何も消していない)と、PR を読めなかったブランチを含む",
 		"`MANUAL:` が出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
 			"ブランチがなく worktree だけがある、消す途中で失敗した)で、ほかの `SKIPPED:` のブランチは、理由を直してから " +
 			"`--branch` で打ち直せば続きから片付く",
@@ -172,7 +172,8 @@ var orgSkillCleanupRules = []struct {
 		"`pr_merged` を記録したら、`regate.lock` を持ったまま、ブランチの機能の worktree を片付ける",
 		"`worktree_cleaned` を `via=merge` で記録する",
 		"`CLEANUP: done` か、`CLEANUP: skipped (<理由>)` と、手で消すコマンドがあれば `CLEANUP MANUAL: <コマンド>` を出す",
-		"`skipped` は片付けが終わっていないことで、断り(何も消していない)と、script の途中の失敗(消した分は消えたまま)の両方を含む",
+		"`skipped` は片付けが終わっていないことで、断り(何も消していない)と、消す作業の失敗(script の途中なら消した分は" +
+			"消えたまま、script の前の登録の外しなら何も消していない)の両方を含む",
 		"片付けは終了コードを変えない",
 		"片付かなかったブランチは、理由を直してから `ralph org cleanup --branch <ブランチ>` で片付ける",
 		"手で消すコマンドが出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
@@ -198,8 +199,9 @@ var orgSkillCleanupRules = []struct {
 		"ralph をその worktree の中から打った",
 		"次の手はたいてい、理由を直してから `ralph org cleanup --branch <ブランチ>` を打ち直すことで、打ち直せば残ったものから片付く",
 		"手で消すコマンド(`CLEANUP MANUAL:` と `MANUAL:` の行)は、ralph が先に進めず人の判断が要るときだけ出る",
-		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、消す途中で script が" +
-			"失敗したとき(消した分は消えたまま)の 3 つ",
+		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、消す作業が失敗した" +
+			"とき(script が途中で止まったなら消した分は消えたまま、script の前の、ディレクトリのない worktree の登録の外しで" +
+			"止まったなら何も消していない)の 3 つ",
 		"gitignore されたファイル",
 		"止める理由にならず、worktree と一緒に消える",
 		"squash merge のあとにリモートのブランチが消えていても止まらない",
