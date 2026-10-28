@@ -165,3 +165,9 @@ run 1 の Follow-ups の「`/verify` 向け」(仕様 FR-8 の注と計画 D2 �
   - 方針どおり、LOW だけなので直さず、R3-L1〜R3-L3 を `docs/tech-debt/README.md` に 1 行で記録して `/verify` に進める(上の Tech debt の表。行は orchestrator が足す)。cycle 2 の再実行は、LOW を直すためには起こさない。
   - 3 つのうち R3-L1 だけは、人が失敗を見ても続けて打ったときに merge されていないコミットが外れる道で、R2-L2 の直しが持ち込んだもの。文の一言(退避が作れなければ止まる)か、退避の名前に先頭の短い SHA を入れる 1 行で閉じられる。ledger に入れるか、`/verify` の前に 1 slice で直すかは orchestrator が決める。直すなら、確かめ 5 の断りの期待文(`internal/org/cleanup_test.go` の `cleanupMovedSteps`、`internal/cli/org_cleanup_test.go` の `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead`、`internal/org/merge_run_test.go`)と、`branch <branch>-unmerged` を打つテストの手も変わる。
   - `/verify` と `/test` は、この run が打たなかった `go test`・`go vet`・`golangci-lint`・`run-static-verify.sh`・`run-test.sh` を打つ。この run が読みで確かめたのは、文の中のコマンドの quote、`cat-file` の分岐、`PRNumber` の 0 の扱い、skill の 8 つの写しの一致(`cmp`)、`Failed` の 2 つの出どころの言い方。
+
+## run 3 のあとの直し(F4)
+
+- F4(3dfd434e)で R3-L1 を直した。確かめ 5 の断りが名指す退避は `git -C <root> branch <branch>-unmerged-<tip の先頭 7 文字> <branch>` になった。同じ名前のブランチがすでにあれば同じ tip から退避したものなので、`git branch` が失敗しても何も失わない。ブランチがまた動けば名前も変わる。起点はブランチ名のままで、断りのあとに足したコミットも退避に入る。
+- 差分は `branchMovedSteps` の名前と注釈、テストの期待文、新しいテスト `TestCleanupFeatureWorktree_MovedBranchKeptUnderItsTip` だけ(3 ファイル、+124/-41)。
+- run 3 の LOW は台帳に書いて進む方針だった。R3-L1 だけは、文のとおりに打つと merge されていないコミットがブランチから外れる道なので、例外として直した。差分が名前と期待文に限られるため run 4 は回さず、`/verify` と `/test` が通しで確かめる。上の verdict(HEAD afe9c1ed について)と `Merge:` の行は書き換えていない。台帳の行は R3-L2 と R3-L3 の 2 つで、R3-L1 の行は足していない。
