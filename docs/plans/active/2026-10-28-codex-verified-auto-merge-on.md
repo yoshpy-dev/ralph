@@ -128,6 +128,8 @@ None (2 つの設定の既定値を入れ替え、文書をそれに合わせる
 - [x] Branch created (feat/codex-verified-auto-merge-on, worktree .claude/worktrees/codex-verified-auto-merge-on)
 - [x] Implementation started
   - S1 29fd179e(impl-274-s1): `TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`(19 行、3 つの変異)、`tomlKeys`(reflect で probe の点つきの名前)、`editTemplateKey`(表の範囲の中で 1 行だけ書き換えか削除、複数行の配列も扱う)。表の名前と素のキーは点つきの名前から作る。bool の行のテンプレート側の値は `!Default()` から作るので、S2 のあとも直さずに通る。`go test -overlay` の写しで変異 m1〜m6(`Default()` 側とテンプレート側の取り違え、比較の 1 行の削除、toml タグの取り違え、表の 1 行の削除)がすべて落ちることを確かめた。指定の検証コマンドは通り、orchestrator も `-run 'EachKey|DetectsChanged|LockStep' -count=1` で確かめた。コメントの「19」は残した(S2 か後の直しで扱う)。
+  - S2 cb8d258e(impl-274-s2): `Default()` とテンプレートの 2 つの値を true に、コメントを新しい既定に。`internal/config` に `TestLoad_CodexVerifiedAndAutoMergeDefaultToTrue`(AC1: ralph.toml なし、[org] なし、表はあってキーなしの 3 つ)と `TestLoad_TemplateWithBothKeysFalse`(AC7)を足した。`internal/cli` のテスト 9 本を D2 で直した。false を明示して残したもの: `writeCodexOrgConfig`(`codex_verified = false`)、`TestOrgDirector_StatusShowsAutoMerge` と `TestStatusCmd_DirectorLineShowsAutoMerge` の false の場合、main 優先のテストを「worktree が false → true」に組み替え、config の round trip。期待を true にしたもの: 共有の定数と、ralph.toml のないテスト、status の warn の文、merge の 3 本、doctor の hermetic のテスト(warn に。hermetic の確認は残る)。disabled 系のテストは既定の文(has no effect 付き)に変え、false を名乗る 2 件(status_test の "disabled, auto_merge = false" と StatusShowsAutoMerge の disabledOff)だけ `auto_merge = false` を明示した(consult-plan-defaultstrue が 14:56Z に同意)。検証コマンドは rc 0(14:30Z 以降に実行、orchestrator の確かめではキャッシュの通過)。
+  - ce6e972d(impl-274-s2): S1 のテストの doc comment の「既定値が同じキーの例」に `codex_verified` と `auto_merge` を足した(consult の任意の提案)。コメントだけの別コミット。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
