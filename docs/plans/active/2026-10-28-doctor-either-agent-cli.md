@@ -127,7 +127,14 @@
 - [x] Plan reviewed(consult: 判定「直してから進める」。S1 の統合テストが既定値の変更より前に走る点と、tech-debt の (h) の trigger に当たる点を直した。Codex の計画助言: MEDIUM 1 件(雛形の値をテストが読まない)を反映し、既定値のスライスを先に回した)
 - [x] Plan approved(自動承認(ユーザーの指示)。2026-10-28、digest sha256:0a45c27ac33e)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - S1(a6ad522e、implementer): 既定値を両方 false、雛形のコメント、`TestLoad_TemplateRalphToml` の確かめ。verify rc=0(`internal/config` ok、`internal/scaffold` ok)。雛形と `Default()` を戻すとテストが落ちることを写しで確かめた。self-check 5 項目 clean
+  - S2(c9148ae9、implementer): `checkAgentCLIs` と純関数 `agentCLIResults`、`internal/cli/doctor_agent_cli_test.go`(判定の表と統合 7 件。claude だけ・codex だけ・両方あり・壊れた shim は雛形の `ralph.toml` を写す)。verify rc=0(100s)。mutation 4 種がすべて落ちる。self-check: 誤字 1 件 fixed(テストの doc comment)、ほか clean
+  - S3(17ba114b、implementer): herdr と agmsg がないときを warn、detail を「(the standard flow is unaffected)」に、tech-debt の (h) を閉じた。verify rc=0(66s)、`git grep "solo execution unaffected" -- internal/` はヒットなし。self-check 5 項目 clean
+    - 計画からの逸脱: Scope S3 は `internal/cli/doctor_codex_writable_root_test.go` の `checkAgmsgAvailable` の確かめを warn に直すと書いたが、その確かめ(`TestCheckCodexAgmsgWritableRoot_AgmsgVersionMismatch_StillGraded`)は agmsg の版が違うときの前提で、D6 どおり info のままが正しいので変えなかった
+    - 範囲内の追加: `TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected` の「required-by-default」のコメント(S1 で古くなった)と、消した `checkClaudeCLI` を名指ししていたコメントを直した
+  - S4(d171e3e6、inline: README の 2 か所だけの変更): verify `grep -n "ralph doctor" README.md` で 60 行と 127 行の新しい文を確かめた。self-check: 不要な変更 clean、誤字とコピペ clean、デバッグの残り clean、秘密情報 clean、範囲外のファイル clean(stage は README.md だけ)
+  - 別のセッション(stoic-app)から、この Mac で 90 分の local CI を流すので重い処理を始めないよう頼まれた(2026-10-28 17:2x)。/verify と /test は「再開してよい」の連絡のあとに回す
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
