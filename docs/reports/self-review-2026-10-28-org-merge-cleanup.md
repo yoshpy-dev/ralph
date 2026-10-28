@@ -2,15 +2,32 @@
 
 - Date: 2026-10-28
 - Plan: `docs/plans/active/2026-10-28-org-merge-cleanup.md`(D1〜D6、AC1〜AC6 と AC3b、Progress checklist の S1〜S5 と「self-review cycle 1」の F1〜F3 の記録)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は実装の review、run 2 は run 1 の所見の直しの review)
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は実装の review、run 2 は run 1 の所見の直しの review、run 3 は run 2 の所見の直しの review)
 - Scope:
+  - run 3: `git diff fb214c0d..afe9c1ed`(HEAD afe9c1ed、23 ファイル、+460/-146)。コミットは 5ddf5532(F3: R2-L1〜R2-L8、21 ファイル)と afe9c1ed(計画の D2・D3 と仕様 FR-8 の注の文)。run 2 の所見 R2-L1〜R2-L8 の直しが所見どおりか、直しが新しい問題を持ち込んでいないかを見た。
   - run 2: `git diff 97ea508b..HEAD`(HEAD e316d081、22 ファイル、+666/-239)。コミットは 5442c872(計画の D2・D3・AC3 と台帳の 2 行)、a3af6114(F1: M2・L1・L2)、cbaa92f4(F2: M1・L3・L4 と skill・help・README・仕様の文)、794aee4d(F2b: CLI の文の中のブランチの quote)、e316d081(計画の記録)。
   - run 1: `git diff 15e301c8...c55819e9`(44 ファイル、+4684/-263)。
-  - どちらも、命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。テストと静的解析は打っていない。
+  - どれも、命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。テストと静的解析は打っていない(run 3 は、別のセッションが local CI を流しているため、`go test`・`go build`・`go vet`・`golangci-lint`・`run-*.sh` も打たず、読むことと `git`・`cmp`・scratchpad の小さな git の実験だけで確かめた)。
 
-この report の verdict(下の「Findings」の先頭の表と「Recommendation」の `Merge:` の行)は HEAD e316d081 のブランチについてのもの。run 1 の所見は、その下に run 1 の時点の文のまま残し、扱いを別の表にした。run 2 の所見の ID は run 1 の L1〜L6 と取り違えないよう `R2-L<n>` にした。
+この report の verdict(下の「Findings」の先頭の表と「Recommendation」の `Merge:` の行)は HEAD afe9c1ed のブランチについてのもの。run 1・run 2 の所見は、その下に当時の文のまま残し、扱いを別の表にした。run 2 の所見の ID は run 1 の L1〜L6 と取り違えないよう `R2-L<n>`、run 3 は `R3-L<n>` にした。
 
 ## Evidence reviewed
+
+### run 3(HEAD afe9c1ed)
+
+- R2-L1。`checkRecord` の最後の断り(`internal/org/cleanup.go:513-516`)は、記録のブランチが binding と同じでパスか kind だけが違うとき、`git log <head>..<branch>` と `git -C <記録のパス> status` を、`--force-branch` の Manual の前に確かめるよう言う。記録のパスは `cleanupGitCmd` を通り、空白を含むパスは単引用符で囲まれる(`TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks` の `'/elsewhere/org auth'`)。`scriptCmd` の注釈(`:330-333`)は「binding のブランチの記録」に直った。記録の `worktree_path` が空の記録なら `git -C '' status` になり、git は空の `-C` を無視して打った場所の status を出す。記録は script が絶対パスで書くので、手で壊した記録に限る話で、所見にしていない。
+- R2-L2。確かめ 5 の文(`branchMovedSteps`、`:640-651`)は、退避を「main worktree から作る別のブランチ」にし、`git -C <root> branch <branch>-unmerged <branch>` を名指して、feature worktree でブランチを切り替えないよう言う。退避を feature worktree の外で作るので、worktree がそのブランチにいても別のブランチにいても、続く戻し方(`reset --hard` か `branch -f`、登録が残るなら `update-ref`)が動かすのは `<branch>` で、退避のブランチではない。この退避の名前は固定で、すでにあるときの扱いは R3-L1。
+- R2-L3。`checkBranchTip`(`:617-638`)は、ブランチの先頭が head と違うとき、`git cat-file -e <head>^{commit}` を `c.root` で打つ。`cleanupGit` は git が走れなかった・`regateGitTimeout` を越えた・signal で終わった・ctx が済んだときに error を返し(`:808-819`)、`checkBranchTip` はそれを `return "", "", err` で返す(`:629-630`)。`checkWorktree`(`:562-564`)と `run`(`:405`、`:409-414`)も error を落とさず返す。git が走ったうえで終わりが 0 でないときだけ「手元にない」の断りになる。scratchpad の repo(git 2.49.0)で打ち、`git cat-file -e <無い SHA>^{commit}`、commit でない object への `^{commit}`、壊れた(空の)loose object は、どれも exit 128 だった。`git rev-parse --verify --quiet` に替えても、無い SHA も壊れた object も exit 1 で、終わりの番号では「無い」と「読めない」を分けられない。repo そのものが使えない場合(所有者違い、repo でない)は、先に走る `readState` の `rev-parse` が error にする(`:440-448`)ので、ここまで来ない。残るのは壊れた object を「無い」と読む場合だけで、断りは何も消さず、文は fetch を勧めるだけなので所見にしていない。
+- 番号。`fetchHeadCmd`(`:657-662`)は `c.p.PRNumber > 0` のときだけ `refs/pull/<n>/head` を出し、0 でも負でも head の SHA で fetch する(`TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch` の「番号なし」)。`strconv.Itoa` の数字だけで、head は `gitObjectPattern`(`^[0-9a-f]{40}([0-9a-f]{24})?$`、`gate_record.go:18`)に通った SHA。番号の渡し方は、CLI の 2 か所(`cleanupSteps` の merged、`cleanupNamedStep`、`internal/cli/org_cleanup.go:190`、`:227`)と merge の 1 か所(`mergeCleanup`、`internal/org/merge_run.go:291`、`res.PRNumber`)で、`CleanupParams{` を作る呼び手はこの 3 つだけ。PR を読めなかったブランチの step(`unknown`)は番号が 0 のままだが、片付けの呼び出しに届かない。
+- R2-L4。`regate.go:567` の `ralph org cleanup --branch` は `cleanupShellWord(f.Branch)` を通り、テスト(`TestRegateCheckWorktree_QuotesTheBranchInTheCleanupCommand`)は `feat/a;b` を `'feat/a;b'` にすることを見る。同じ文の `git worktree add %s %s`(`f.Worktree` と `f.Branch`)は素のままだが、base の 15e301c8 の時点からある(`git show 15e301c8:internal/org/regate.go` の 555 行)ので、この PR の取りこぼしではない。
+- R2-L5。`shellSafeUnquoted` の注釈(`internal/cli/org.go:589-598`)の呼び手の数え方を、呼び手 5 つ(`orgReadCommandHint` と `org_legacy_ledger.go:53-73` がパス、`org_cleanup.go:221` と `org_merge.go:263` がブランチ)と照らした。合っている。2 つの関数が残る件は、台帳の 1 行(`docs/tech-debt/README.md:385`)が受けた。行の主張(`cleanupShellWord` が `[A-Za-z0-9_./:@+,-]`、`shellQuoteIfNeeded` が `[A-Za-z0-9_./-]`、CLI の 2 つの文)は、`cleanup.go:80` と `org.go:598`、`org_cleanup.go:221`、`org_merge.go:263` に合う。
+- R2-L6。`Failed` の 2 つの出どころは `remove`(`:720-739`)の `res.Failed` の 2 行(`:726`: 登録の外しの失敗、`so nothing was removed`、`:734`: script の失敗、`what it removed before it stopped stays removed`)。`CleanupResult.Failed` の注釈(`:122-127`)、`/director` skill の 2 か所(`:862-873`、`:973-981`)、`/org` skill の 3 か所(merge の行、cleanup の行、後始末の節)、README(`:268`)、仕様 FR-8 の注、計画の D2・D3 と、固定の断片(`director_skill_sync_test.go` の `directorSkillMergeCleanupRules` と `directorSkillGitHubMergeCleanupSteps`、`org_skill_send_sync_test.go` の `orgSkillCleanupRules`)が、どれも 2 つを言い分けている。skill の 8 つの写し(`/director` と `/org` の `.claude`・`.agents`・`templates/base` の 2 つずつ)は `cmp` で同一。merge と cleanup の help は「the removal itself failed」で 2 つを含む。「script が途中で止まった」だけを言う文は、skill・README・仕様・計画の現行の文にもう残っていない(残るのは計画の Progress の当時の記録だけ)。「A cleanup that stopped part way goes on from what is left」の help は、前の片付けが残したものの再開の話で、登録の外しの失敗はその「残したもの」を作らないので当たらない。
+- R2-L7。`/director` skill の手順 3(`.claude/skills/director/SKILL.md:973-981`)に、同じ実行の `CLEANED:` を手順 2 と同じく報告する文が入った。`internal/cli/org_cleanup.go:254-269` のブランチごとに続ける作りと、`:342-351` の「1 本でも残れば終了コード 1」に合う。
+- R2-L8。台帳の行(`docs/tech-debt/README.md:383`)から行数が消えた。
+- ファイルの行数。`internal/org/cleanup.go` は fb214c0d の 796 行から 841 行になり、800 行を越えた(R3-L3)。`internal/cli/org_cleanup_test.go` は 750 から 800、`internal/org/cleanup_test.go` は 1030 から 1165。
+- 確かめ 5 の文の安全。名指されるコマンドの組み立ては `cleanupGitCmd`・`c.gitCmd` で、引数ごとに `cleanupShellWord` を通る。`git -C <root> branch <branch>-unmerged <branch>` は、結合した 1 語を通すので、`'` を含むブランチでも `'a'\''b-unmerged'` の形になる。`git -C <root> fetch origin refs/pull/<n>/head` と SHA の fetch は、語が `[A-Za-z0-9_./:@+,-]` だけで素のまま。退避の名前がすでにあるときの `git branch` の失敗は scratchpad で打ち、`fatal: a branch named 'feat/auth-unmerged' already exists`(exit 128)で、ブランチは動かない(R3-L1)。`reset --hard` は repo の hook が打たせないので打っていない。
+- R2-L1 の文と R2-L3 の直しの範囲。`git log <head>..<branch>` を名指す文は 4 か所(`:478`、`:510`、`:515`、確かめ 5 の `branchMovedSteps`)あり、手元にない head への備えは確かめ 5 の 1 か所だけ(R3-L2)。
+- F3 の implementer が範囲外として挙げた 3 点(orchestrator 経由)。(1) `cat-file` の非 0 を全部「head が手元にない」と読む件は、上の R2-L3 の項のとおり、終わりの番号では「無い」と「読めない」を分けられない(`cat-file` も `rev-parse --verify --quiet` も壊れた object を 128 か 1 にする)ので、所見にしていない。残る手触りは、壊れた object のときに fetch しても次の片付けが同じ断りを返す点で、断りの文に git の stderr を足せば見分けられるが、repo の壊れが前提で何も消えないため LOW にも立てない。(2) 確かめ 2 の断りの `git log` は R3-L2 に含めている(`:478`、`:510`、`:515`)。(3) `regate.go:567` の同じ文の `git worktree add %s %s` は、base の 15e301c8 の 555 行からある文言で、この PR の diff は `cleanup --branch` の節だけを足した。この PR の取りこぼしではないので所見にしない。直すなら、`internal/cli/org_regate.go:203` の regate の文(計画 F2b が範囲外とした行)と一緒に、`cleanupShellWord` を通す別の変更にする。
 
 ### run 2(HEAD e316d081)
 
@@ -41,7 +58,30 @@
 
 ## Findings
 
-### HEAD の所見(run 2)
+### HEAD の所見(run 3)
+
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(HEAD afe9c1ed について)。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | security | R3-L1: R2-L2 の直しで、確かめ 5 の文が退避に名指す `git -C <root> branch <branch>-unmerged <branch>` の名前は固定で、すでにあるときの扱いを文が言わない。`<branch>-unmerged` がすでにあると `git branch` は `fatal: a branch named ... already exists`(exit 128)で止まり、何も作らない。文の次の手は `reset --hard <head>` か `branch -f <branch> <head>` で、退避が作られないまま打つと merge されていないコミットはどのブランチからもたどれなくなる(reflog には残る)。エラーは出るので、人が続けて打つ場合に限る。名前がぶつかるのは、同じブランチ名の機能を前に片付けようとして退避を残したままのとき。テストは名前がまだないときの道だけを通す | `internal/org/cleanup.go:646-651`(`c.f.Branch+"-unmerged"` が固定)、`:640-645`(注釈)、probe: 同名のブランチがあるときの `git branch feat/auth-unmerged feat/auth` は exit 128 で、`feat/auth` は動かない(git 2.49.0)。テスト `internal/org/cleanup_test.go` の `TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten` と `…ResumesWhatAnEarlierCleanupLeft` は新しい repo | 退避の名前に、ブランチの先頭の短い SHA を入れる(`<branch>-unmerged-<tip の先頭 7 桁>`。すでにあるなら、同じ先頭を残してあるので、そのまま次へ進んでよい)。または、文に「退避が作れなければ、次の手を打たずに止まる」を足す |
+| LOW | exception-handling | R3-L2: R2-L3 の直し(手元にない head のときの `fetchHeadCmd`)は確かめ 5 の断りにだけ入った。`git log <head>..<branch>` を名指す文はほかに 3 か所あり、R2-L1 の直しが 1 か所足した。どれも `<head>` が手元になければ `fatal: Invalid revision range` で終わり、fetch を勧めない。head が手元にないのは `ralph org cleanup` の head が gh の `headRefOid` のとき(GitHub 上で足されたコミット)で、確かめ 2 の断りも同じ場面で出うる。何も消さず、エラーも出るので、先に進めないだけ | `internal/org/cleanup.go:478`(`recordGone`)、`:510`(`checkRecord`、記録のブランチが違う)、`:515`(`checkRecord`、R2-L1 で足した文)、対して `:632-634`(確かめ 5 の fetch)。probe: 手元にない SHA の `git log <sha>..<branch>` は `fatal: Invalid revision range`(run 2 の R2-L3 の probe) | `cat-file` の確かめと fetch の文を小さな関数(たとえば `headFetchNote`)に出し、4 か所で使う。または台帳に「確かめ 2 の断りの `git log` は head が手元にあることを前提にする」と残す |
+| LOW | maintainability | R3-L3: F3 で `internal/org/cleanup.go` が 796 行から 841 行になり、800 行を越えた(新しいファイルで、base にはない)。台帳の行 383 は、800 行を越えたテストの 4 ファイルだけを挙げ、`cleanup.go` は入っていない。`internal/cli/org_cleanup_test.go` は 750 から 800 行で、境界にある | `internal/org/cleanup.go` の `wc -l`(fb214c0d は 796、HEAD は 841)、`docs/tech-debt/README.md:383`、`internal/cli/org_cleanup_test.go`(800) | 台帳の行 383 に `internal/org/cleanup.go`(841)を足す。切り出すなら、git を打つ道具(`cleanupGit`・`cleanupGitOutput`・`cleanupInProgress`・`cleanupShellWord`・`cleanupGitCmd`)を `cleanup_git.go` に移す |
+
+### run 2 の所見の扱い(HEAD afe9c1ed で確かめた)
+
+| ID | run 2 の重さ | 扱い | 状態 |
+| --- | --- | --- | --- |
+| R2-L1 | LOW | 確かめ 2 で記録のパスか kind だけが違う断りの文に、`git log <head>..<branch>` と、記録のパスへの `git -C <path> status` を足し、`scriptCmd` の注釈を直した(`internal/org/cleanup.go:513-516`、`:330-333`、`:483-490`)。パスは `cleanupGitCmd` で quote される。テストは空白を含むパスの文を見る | 解消。文の中の `git log` が手元にない head のとき動かない点は R3-L2 |
+| R2-L2 | LOW | 退避を main worktree から作る別のブランチにし、feature worktree でブランチを切り替えないよう文で言う(`:640-651`)。名指すのは `git -C <root> branch <branch>-unmerged <branch>`。テストは、名指したコマンドを打ってから片付けが終わるまでを通し、退避が動いていないことも見る | 解消。退避の名前がすでにあるときの扱いは R3-L1 |
+| R2-L3 | LOW | 確かめ 5 の前に `git cat-file -e <head>^{commit}` を打ち、手元になければ、fetch(`refs/pull/<n>/head`、番号がなければ SHA)を先に出す断りにした(`:617-638`、`:657-662`)。`CleanupParams.PRNumber` を merge と cleanup の呼び手が渡し、0 と負は SHA の fetch にする。git の失敗は error で返る | 解消(確かめ 5)。ほかの `git log` の文は R3-L2 |
+| R2-L4 | LOW | `regate.go:567` の `ralph org cleanup --branch` を `cleanupShellWord` に通した。テストは `feat/a;b` を見る | 解消 |
+| R2-L5 | LOW | `shellSafeUnquoted` の注釈を「パスとブランチ名」に直し、2 つの関数が残る件を台帳に足した(`internal/cli/org.go:589-598`、`docs/tech-debt/README.md:385`) | 注釈は解消、関数が 2 つの件は繰り越し(台帳あり) |
+| R2-L6 | LOW | `Failed` の 2 つの出どころを、`Failed` の注釈、skill の 8 つの写し、README、仕様 FR-8 の注、計画の D2・D3、固定の断片に書いた。コードの `remove` の 2 つの `res.Failed` と合う | 解消 |
+| R2-L7 | LOW | `/director` skill の手順 3 に、同じ実行の `CLEANED:` を報告する文を足し、固定の断片を足した | 解消 |
+| R2-L8 | LOW | 台帳の行 383 から行数を消した | 解消。台帳の行は `cleanup.go` を挙げていない点が R3-L3 |
+
+### run 2 の所見(e316d081 の時点の文のまま。行番号もその時点のもの)
 
 | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
@@ -55,6 +95,8 @@
 | LOW | maintainability | R2-L8: L5 の台帳の行(5442c872 で追加)の行数が HEAD と合わない。その行を書いたあとの F1・F2 がテストを足したため。`internal/cli/org_merge_test.go` は行の 1085 に対して HEAD で 1119、`internal/org/merge_run_test.go` は 1077 に対して 1091、`internal/org/director_skill_sync_test.go` は 936 に対して 955、`internal/org/cleanup_test.go` は 885 に対して 1030 | `docs/tech-debt/README.md:383`、HEAD の `wc -l` | HEAD の数に直すか、数を書かずに「800 行を越えた」とだけ書く(このあとのコミットでもずれない) |
 
 ### run 1 の所見の扱い(HEAD e316d081 で確かめた)
+
+状態の欄が R2-L<n> へ繰り越したものは、HEAD afe9c1ed では上の「run 2 の所見の扱い」の表で閉じている(L5 の台帳の行は R2-L8 と R3-L3)。
 
 | ID | run 1 の重さ | 扱い | 状態 |
 | --- | --- | --- | --- |
@@ -84,6 +126,13 @@ run 1 の Follow-ups の「`/verify` 向け」(仕様 FR-8 の注と計画 D2 �
 
 ## Positive notes
 
+### run 3
+
+- 手元にない head の道を、origin に `refs/pull/7/head` だけがある repo で作り、断りの文のコマンド(fetch、`log`、退避、`reset --hard`)を `sh -c` で文のとおり打ってから、次の片付けが通ることまで見るテストがある(`TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch`、CLI の `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead`)。番号がある場合とない場合の 2 つの fetch を両方通している。
+- `cat-file` の失敗を「手元にない」と取り違えない作りになっている。git が走れない・時間切れ・ctx の取り消しは error で返り、`checkBranchTip` から `checkWorktree` と `run` まで落とさずに運ばれる。
+- R2-L2 の直しは、退避を feature worktree の外で作るという決め方で、戻し方の 3 つ(`reset --hard`、`branch -f`、`update-ref`)を変えずに済ませている。テストは退避が戻し方で動かないことを、退避の先を見て確かめる。
+- Failed の 2 つの出どころの言い直しが、skill の 8 つの写し、固定の断片 3 つ、README、仕様、計画で同じ形にそろっている。`remove` の 2 つの `res.Failed` の文(「nothing was removed」と「what it removed ... stays removed」)をそのまま日本語にしている。
+
 ### run 2
 
 - 確かめ 5 の文が名指すコマンドを、空白を含むパスの repo で `sh -c` に文のとおり渡して打ち、そのあとの片付けがすべての確かめを通ることまで確かめるテストがある(`TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten`)。文の中のコマンドが動くことを、文字列の一致でなく実行で押さえている。
@@ -101,18 +150,18 @@ run 1 の Follow-ups の「`/verify` 向け」(仕様 FR-8 の注と計画 D2 �
 
 ## Tech debt identified
 
-run 1 で挙げた 3 行(L5 と L6 の 2 件)は 5442c872 で台帳に入った(`docs/tech-debt/README.md:383-384`)。383 行の行数は R2-L8 のとおり HEAD と合わない。
+台帳に入っている行は 3 つ。run 1 の L5(800 行を越えたテスト 4 ファイル)と L6(2 つの窓)は 5442c872 で入り(`docs/tech-debt/README.md:383-384`)、L5 の行の行数は F3 で消えた(R2-L8)。run 2 の R2-L5(quote の関数が 2 つ)は F3 の 5ddf5532 で入った(`:385`)。
 
-この run のコミットはレポートと insight event に限るので、台帳には書いていない。R2-L1〜R2-L8 を直さずに進めるなら、次の 1 行にまとめて足す。
+この run のコミットはレポートと insight event に限るので、台帳には書いていない。R3-L1〜R3-L3 を直さずに進めるなら、次の 1 行を台帳に足す(行 383 の `cleanup.go` の分は、その行を直して足してもよい)。
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| merge のあとの片付け(#263)の文の残り。確かめ 2 の記録のパスか kind の違いの断りが `--force-branch` を渡すのに `git log` の確かめを言わない(R2-L1)、確かめ 5 の戻し方が断った時点の worktree の場所に依る(R2-L2)、PR の head が手元にないと確かめ 5 の文のコマンドが動かない(R2-L3)、`regate.go` の `cleanup --branch` が素(R2-L4)、quote の関数が 2 つ(R2-L5)、`Failed` の 2 つ目の出どころが skill と README にない(R2-L6)、`/director` の手順 3 が混じった実行の `CLEANED:` を報告しない(R2-L7)、L5 の行の行数(R2-L8) | R2-L1 と R2-L2 は、人が文のとおりに打つと merge されていないコミットを失いうる。ほかは文のとおりに打っても進めないか、表記がそろわないだけ | この run は報告だけで、直しは orchestrator が決める | 次に `internal/org/cleanup.go` の確かめ 2 か 5 の文、または `/director` skill の後始末の節を変えるとき | `docs/plans/active/2026-10-28-org-merge-cleanup.md`、この report の R2-L1〜R2-L8 |
+| merge のあとの片付け(#263)の断りの文の残り(self-review cycle 1 run 3)。(a) 確かめ 5 の文が退避に名指す `git branch <branch>-unmerged <branch>` の名前は固定で、すでにあると失敗し、文の次の手の `reset --hard` か `branch -f` が merge されていないコミットをブランチから外す(R3-L1)。(b) 手元にない head への fetch の案内は確かめ 5 の断りにだけあり、`git log <head>..<branch>` を名指す確かめ 2 の 2 つの断りと `recordGone` の断りにはない(R3-L2)。(c) `internal/org/cleanup.go` が 841 行で、800 行の目安を越えた(R3-L3) | (a) 人が失敗を見ても続けて打ったときだけ、reflog にしか残らなくなる。(b) head が手元にないと `git log` が `Invalid revision range` で終わり、先に進めないだけで何も消えない。(c) 読みにくくなるだけ | run 3 の所見が LOW だけなので、直さずに台帳へ記録して `/verify` に進める方針(#262 と同じ扱い) | 次に `internal/org/cleanup.go` の確かめ 2 か 5 の文を変えるとき。(a) は退避の名前に先頭の短い SHA を入れる、(b) は fetch の案内を小さな関数にして 4 か所で使う、(c) は git を打つ道具を `cleanup_git.go` に移す | `docs/plans/active/2026-10-28-org-merge-cleanup.md`、この report の R3-L1〜R3-L3 |
 
 ## Recommendation
 
-- Merge: 可(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 8。HEAD e316d081 について)。run 1 の M1・M2・L1〜L4 は解消、L5・L6 は台帳に繰り越した。
+- Merge: 可(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。HEAD afe9c1ed について)。run 2 の R2-L1〜R2-L8 は、R2-L5 の関数が 2 つの件を台帳に繰り越した以外は解消した。run 1 の M1・M2・L1〜L4 は解消、L5・L6 は台帳に繰り越している。
 - Follow-ups:
-  - R2-L1 と R2-L2 は、人が文のとおりに打つと push していないコミットを失いうる道で、M2 と同じ種類。どちらも `internal/org/cleanup.go` の文の直しで済むので、R2-L3 と合わせて 1 つの slice で直すことを勧める。R2-L2 を `switch -C` で直すなら、確かめ 5 の断りの表(`internal/org/cleanup_test.go` の `TestCleanupFeatureWorktree_RefusedInTheWorktree` と `TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten`)の期待する文が変わる。
-  - R2-L4 と R2-L5 は quote の 1 行と注釈の直し。R2-L6 と R2-L7 は skill の文で、4 つの写しと固定の断片(`internal/org/director_skill_sync_test.go`、`internal/org/org_skill_send_sync_test.go`)も合わせる。
-  - R2-L8 は台帳の 1 行の直し。直さずに進めるなら、上の 1 行を台帳に足す。
+  - 方針どおり、LOW だけなので直さず、R3-L1〜R3-L3 を `docs/tech-debt/README.md` に 1 行で記録して `/verify` に進める(上の Tech debt の表。行は orchestrator が足す)。cycle 2 の再実行は、LOW を直すためには起こさない。
+  - 3 つのうち R3-L1 だけは、人が失敗を見ても続けて打ったときに merge されていないコミットが外れる道で、R2-L2 の直しが持ち込んだもの。文の一言(退避が作れなければ止まる)か、退避の名前に先頭の短い SHA を入れる 1 行で閉じられる。ledger に入れるか、`/verify` の前に 1 slice で直すかは orchestrator が決める。直すなら、確かめ 5 の断りの期待文(`internal/org/cleanup_test.go` の `cleanupMovedSteps`、`internal/cli/org_cleanup_test.go` の `TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead`、`internal/org/merge_run_test.go`)と、`branch <branch>-unmerged` を打つテストの手も変わる。
+  - `/verify` と `/test` は、この run が打たなかった `go test`・`go vet`・`golangci-lint`・`run-static-verify.sh`・`run-test.sh` を打つ。この run が読みで確かめたのは、文の中のコマンドの quote、`cat-file` の分岐、`PRNumber` の 0 の扱い、skill の 8 つの写しの一致(`cmp`)、`Failed` の 2 つの出どころの言い方。
