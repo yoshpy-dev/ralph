@@ -78,8 +78,8 @@ None (設定のキー、読み出しの動詞、pane の環境変数を 1 つ足
 
 - [ ] AC1: `ralph.toml` に `[standard].plan_advisory`、`[standard].cross_review`、`[org.review].plan_advisory`、`[org.review].cross_review`、`[org.review].max_cross_review_cycles` があり、既定値(false、false、false、false、2)が `internal/config` のテストで固定されている。`max_cross_review_cycles` が 0 以下なら `Load` がエラーを返す。
 - [ ] AC2: `templates/base/ralph.toml` が 5 つのキーを既定値で書き、`TestDefaultsLockStep` と照合の表のテストが新しいキーも見る(テンプレートからキーを消すと落ちる)。`Default()` の `max_cross_review_cycles` と `RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定がずれると `TestDefaultsLockStep` が落ちる。
-- [ ] AC3: この repo のルートの `ralph.toml` で 4 つが true になっている。`./scripts/check-sync.sh` が通る(`KNOWN_DIFFS` に `ralph.toml`)。
-- [ ] AC4: `ralph config get <key>` が値を出す。キーのない `ralph.toml` と `ralph.toml` のない場合は既定(false、2)を出す。知らないキーと表は終了コード 2、読めない・parse できない・検証で落ちる `ralph.toml` は終了コード 3。`standard.cross_review = true` と正しくない `[org]` の設定(例: `max_seats = 0`)が同じ `ralph.toml` にあるとき、`ralph config get standard.cross_review` は 0 で `false` を出すことも 1 で終わることもなく、3 で終わる(回帰テスト)。help に D6 の約束(1 と `unknown command "config"` だけを off、2 と 3 は止まる)がある。
+- [x] AC3: この repo のルートの `ralph.toml` で 4 つが true になっている。`./scripts/check-sync.sh` が通る(`KNOWN_DIFFS` に `ralph.toml`)。
+- [x] AC4: `ralph config get <key>` が値を出す。キーのない `ralph.toml` と `ralph.toml` のない場合は既定(false、2)を出す。知らないキーと表は終了コード 2、読めない・parse できない・検証で落ちる `ralph.toml` は終了コード 3。`standard.cross_review = true` と正しくない `[org]` の設定(例: `max_seats = 0`)が同じ `ralph.toml` にあるとき、`ralph config get standard.cross_review` は 0 で `false` を出すことも 1 で終わることもなく、3 で終わる(回帰テスト)。help に D6 の約束(1 と `unknown command "config"` だけを off、2 と 3 は止まる)がある。
 - [ ] AC5: `ralph org spawn` が、claude の座席には `RALPH_PRIMARY_CLI=claude`、codex の座席には `RALPH_PRIMARY_CLI=codex` を `tab create --env` で渡す(leader を含む)。`--env` のない herdr では env なしで作り、stderr に warn する。`internal/org` のテストで確かめる。
 - [ ] AC6: `go test ./internal/config/ ./internal/cli/ ./internal/org/ ./internal/org/driver/`、`./scripts/check-sync.sh`、`./scripts/check-skill-sync.sh` が通る。`internal/config/defaults_sync_test.go` の同期の検査が通る。
 
@@ -140,6 +140,6 @@ None (設定のキー、読み出しの動詞、pane の環境変数を 1 つ足
   - reviewer の注(所見ではない): `ralph config get` は cwd の `./ralph.toml` を読み、ないときは黙って既定(off)を返す。#266 の skill は repo の root から打つ前提を書く(#266 の計画に入れる)。
   - F1 10a05dfe と 2a6cb022(impl-265-f1): ルートの `ralph.toml` は 4 つの実施有無と先頭の注だけ(古い全文の写しと新しいルートを Load して、どちらも `Default()` に 4 つを on にしたものと等しいことを `-overlay` の一時テストで確かめた)。`check-sync.sh` の注、L1 の言い回し(警告文、herdr_test・org_runtime_env_test の固定する文、`/org` skill の 4 写し、README、recipe の 2 写し、spec の注、`spawn.go` のコメント)、L2(`org.go` の `NewHerdr` のコメント)、L3(テンプレート、`config.go`、skill、spec の数え方)、L4(`config get` の型の名前の冠詞、知らないキーの文、help)、L5(help の照合は空白をつぶして、既定は `Default()` と比べる、冒頭のコメント)。検証コマンド rc 0。`2a6cb022` は orchestrator の返事が commit のあとに届いたぶんの `spawn.go` のコメントで、amend せずに別のコミット。
   - orchestrator がインラインで直した(5bc435de、コメントだけの 1 ファイル): `internal/config/defaults_sync_test.go` の `shell_and_skills` のコメントの L3 の古い言い回し。`gofmt`、`go vet ./internal/config/`、`-run LockStep` が通った。機械的な確かめ: 5 項目とも clean。
-- [ ] Verification artifact created
+- [x] Verification artifact created — verify 5f38f0c9(cycle 1、pass。`run-static-verify.sh` rc 0、golangci-lint 0 件。ルートで 4 つが true、`max_cross_review_cycles` 2、`org.max_seats` は既定、build した binary で exit 2・3・0 を実測。da9d1b3a の古い binary は `unknown command "config" for "ralph"` で rc 1、古い `config.Load` は新しいテンプレートとルートを読める。AC3・AC4 を満たす。AC1・AC2・AC5 はテストの実行を /test で)。LOW の V1(PATH に `ralph` がないとき、exit 127 の扱いが help の約束にない)は #266 の計画で決める(PR の Known gaps)。V5(seed なので、既存の project は表ごと書き足す)は release のノートに入れる。
 - [ ] Test artifact created
 - [ ] PR created
