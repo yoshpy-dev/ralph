@@ -156,9 +156,10 @@ func ParseReport(path string) ([]BackfillEvent, error) {
 		for _, entry := range entries {
 			ev := makeBase(entry.cycle)
 			ev.Triage = entry.triage
-			if entry.incomplete {
-				// The reviewer did not finish, so the counts do not say
-				// whether the cycle passed: same verdict as an unreadable report.
+			if entry.noReview {
+				// The reviewer did not finish or did not run, so the counts do
+				// not say whether the cycle passed: same verdict as an
+				// unreadable report.
 				ev.Verdict = "n/a"
 			} else {
 				ev.Verdict = crossReviewVerdict(entry.triage)
@@ -387,9 +388,10 @@ func parseTestVerdict(path string) (string, bool, string) {
 type crossReviewCycleEntry struct {
 	cycle  int
 	triage Triage
-	// incomplete is true when the cycle's "Reviewer status:" line starts
-	// with "incomplete" (the reviewer did not finish).
-	incomplete bool
+	// noReview is true when the cycle's "Reviewer status:" line starts
+	// with "incomplete" (the reviewer did not finish) or "skipped" (the
+	// reviewer did not run, e.g. [standard].cross_review is off).
+	noReview bool
 }
 
 // parseCrossReviewAllCycles extracts triage counts for every pipeline cycle
@@ -409,7 +411,8 @@ type crossReviewCycleEntry struct {
 //
 // A "Reviewer status:" line belongs to the next "After triage:" line and is
 // reset after it, like a pending "## Cycle N" heading. When it starts with
-// "incomplete", the entry is marked incomplete so its verdict becomes "n/a".
+// "incomplete" or "skipped", the entry is marked noReview so its verdict
+// becomes "n/a".
 //
 // Explicit markers are preferred over occurrence counting because they are
 // author-stated and survive future format changes or section reordering.
@@ -433,9 +436,10 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 	// heading seen since the last "After triage:" line. 0 means no explicit
 	// heading has been seen; in that case occurrence counting is used.
 	pendingCycle := 0
-	// pendingIncomplete is true when the most recent "Reviewer status:" line
-	// since the last "After triage:" line starts with "incomplete".
-	pendingIncomplete := false
+	// pendingNoReview is true when the most recent "Reviewer status:" line
+	// since the last "After triage:" line starts with "incomplete" or
+	// "skipped".
+	pendingNoReview := false
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -450,7 +454,8 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 
 		// Check for a "Reviewer status:" line.
 		if m := reviewerStatusRe.FindStringSubmatch(line); m != nil {
-			pendingIncomplete = strings.HasPrefix(strings.ToLower(m[1]), "incomplete")
+			status := strings.ToLower(m[1])
+			pendingNoReview = strings.HasPrefix(status, "incomplete") || strings.HasPrefix(status, "skipped")
 			continue
 		}
 
@@ -468,12 +473,12 @@ func parseCrossReviewAllCycles(path string) ([]crossReviewCycleEntry, bool, stri
 			}
 			// Reset pending heading after consuming it.
 			pendingCycle = 0
-			incomplete := pendingIncomplete
-			pendingIncomplete = false
+			noReview := pendingNoReview
+			pendingNoReview = false
 
 			entries = append(entries, crossReviewCycleEntry{
-				cycle:      cycle,
-				incomplete: incomplete,
+				cycle:    cycle,
+				noReview: noReview,
 				triage: Triage{
 					ActionRequired:   ar,
 					WorthConsidering: wc,
