@@ -292,8 +292,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		// org.review.max_cross_review_cycles: an org's cap on cross-review
 		// runs (the first one included) counts as the standard flow's
 		// pipeline cap does, so Default()'s value is
-		// RALPH_STANDARD_MAX_PIPELINE_CYCLES's default. The template against Default() is again the "org"
-		// sub-test's job.
+		// RALPH_STANDARD_MAX_PIPELINE_CYCLES's default. The template against
+		// Default() is again the "org" sub-test's job.
 		cyclesShell := mustShell(t, shell, "RALPH_STANDARD_MAX_PIPELINE_CYCLES")
 		cyclesDefault := strconv.Itoa(Default().Org.Review.MaxCrossReviewCycles)
 		if cyclesShell != cyclesDefault {

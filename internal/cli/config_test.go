@@ -13,9 +13,10 @@ import (
 )
 
 // Tests for `ralph config get` (plan 2026-10-29-review-switches-config, D2,
-// D3, D6 and AC4). None of them runs in parallel. Those that run the verb on
-// a key chdir into a temp directory first, so that ./ralph.toml is the
-// test's own, with t.Chdir, which a parallel test may not call.
+// D3, D6 and AC4). Those that run the verb on a key first chdir into a temp
+// directory with t.Chdir, so that ./ralph.toml is the test's own. t.Chdir
+// cannot be called from a parallel test, so none of these tests runs in
+// parallel.
 
 // runConfigGet runs `ralph config get <key>` with extra flags in-process and
 // returns its stdout, its stderr, and the exit code main would use.
