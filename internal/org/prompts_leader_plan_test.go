@@ -447,7 +447,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryRunsInOneShell(t *testing
 
 // TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff pins the
 // codex command of AC5 and D7: it disables plugins, whose MCP servers
-// -c mcp_servers.<name>.enabled=false cannot turn off, reads the names of the
+// -c mcp_servers.<name>.enabled=false cannot turn off (an older codex that
+// cannot read the list with it skips), reads the names of the
 // enabled servers one line at a time into -c overrides (no word splitting),
 // checks with the same arguments that no server is enabled, and only then
 // runs codex exec with them, read-only and with --ignore-rules, its findings
@@ -458,7 +459,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff(t *testi
 	assertPhrasesInOrder(t, item, leaderStep1Marker, []string{
 		leaderAdvisoryCodexLead,
 		"`--sandbox read-only` と `--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の server を止めてから codex を呼ぶ",
-		"plugin が持ち込む server は `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を読めなくなる)ので、`--disable plugins` で plugin ごと外す",
+		"plugin が持ち込む MCP の server は `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、codex を呼ばずに飛ばす)",
 		"`codex --disable plugins mcp list --json` で有効な server の名前を読み、1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のときだけ codex を呼ぶ",
 		leaderAdvisoryClaudeLead,
 	})
@@ -635,16 +636,19 @@ func advisoryTestEnv() []string {
 // "has space" (enabled) and gone (disabled), plus the plugin server plug
 // unless --disable plugins is given; an override of a server outside the
 // config fails the load, as codex 0.163.0 does for a plugin's server.
-// STUB_STUCK=1 keeps alpha enabled whatever the overrides. exec writes a
-// finding to its -o file; STUB_WRITES=1 also changes tracked.txt, and
-// STUB_HANG=1 makes it hang instead.
+// STUB_STUCK=1 keeps alpha enabled whatever the overrides. STUB_OLD=1 knows
+// no feature flag, as codex rejects one it does not know (exit 1). exec
+// writes a finding to its -o file; STUB_WRITES=1 also changes tracked.txt,
+// and STUB_HANG=1 makes it hang instead.
 const advisoryCodexStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
 printf '%s\n' '--end--' >> "$STUB_LOG"
 off='|' plugins=on out= mode= bad=
 while [ $# -gt 0 ]; do
 	case $1 in
-	--disable) [ "$2" = plugins ] && plugins=off; shift 2 ;;
+	--disable)
+		if [ "$STUB_OLD" = 1 ]; then echo "Error: Unknown feature flag: $2" >&2; exit 1; fi
+		[ "$2" = plugins ] && plugins=off; shift 2 ;;
 	-c)
 		case $2 in
 		mcp_servers.*.enabled=false)
@@ -811,7 +815,8 @@ func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 // the same arguments, and runs exec with them, read-only, --ignore-rules,
 // its -o file under .harness/state/ and the instruction last; the output
 // says codex rc=0 and git: same, and the work tree stays clean. A server
-// that stays on prints mcp: not off and runs no exec; a reviewer that edits
+// that stays on prints mcp: not off and runs no exec, and so does a codex
+// that rejects --disable plugins as an unknown feature; a reviewer that edits
 // tracked.txt prints git: changed; a reviewer that hangs is stopped by the
 // watchdog (sleep 1200 shortened to one second) with a non-zero rc and no
 // output file. The cases run in parallel, each in its own repository.
@@ -871,6 +876,17 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 			}
 			if got := fx.read(t, ".harness/state/plan-advisory-out.md"); got != "" {
 				t.Errorf("output file = %q, want none", got)
+			}
+		})
+		t.Run(name+"/a codex with no plugins feature", func(t *testing.T) {
+			t.Parallel()
+			fx := newAdvisoryFixture(t)
+			out := fx.run(t, shell, block, append(env, "STUB_OLD=1")...)
+			if !strings.Contains(out, "mcp: not off (enabled: )\n") || strings.Contains(out, "codex rc=") || !strings.HasSuffix(out, "git: same\n") {
+				t.Errorf("output = %q; want mcp: not off with no count, no codex rc and git: same", out)
+			}
+			if calls := fx.calls(t); len(calls) != 2 || slices.Contains(calls[len(calls)-1], "exec") {
+				t.Errorf("codex ran %q; want the list and the check only", calls)
 			}
 		})
 		t.Run(name+"/a reviewer that edits", func(t *testing.T) {

@@ -218,9 +218,11 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 
    相手が codex なら次のコマンドを打つ。`--sandbox read-only` と
    `--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の
-   server を止めてから codex を呼ぶ。plugin が持ち込む server は
+   server を止めてから codex を呼ぶ。plugin が持ち込む MCP の server は
    `-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を
-   読めなくなる)ので、`--disable plugins` で plugin ごと外す。そのうえで
+   読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の
+   機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、
+   codex を呼ばずに飛ばす)。そのうえで
    `codex --disable plugins mcp list --json` で有効な server の名前を読み、
    1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の
    語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のとき
