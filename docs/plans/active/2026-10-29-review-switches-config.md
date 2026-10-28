@@ -138,6 +138,8 @@ None (設定のキー、読み出しの動詞、pane の環境変数を 1 つ足
   - L3 の決定: `max_cross_review_cycles` は `RALPH_STANDARD_MAX_PIPELINE_CYCLES` と同じく、最初の review を含む全部の回数(2 = 最初の review と、直したあとの review 1 回)。テンプレートと Go のコメントに書く。
   - L6 は直さない: 後続の issue の番号は、どの変更でその設定を読み始めるかを grep できる印として残す。merge のあとも、issue の番号は閉じても指すものが変わらない。
   - reviewer の注(所見ではない): `ralph config get` は cwd の `./ralph.toml` を読み、ないときは黙って既定(off)を返す。#266 の skill は repo の root から打つ前提を書く(#266 の計画に入れる)。
+  - F1 10a05dfe と 2a6cb022(impl-265-f1): ルートの `ralph.toml` は 4 つの実施有無と先頭の注だけ(古い全文の写しと新しいルートを Load して、どちらも `Default()` に 4 つを on にしたものと等しいことを `-overlay` の一時テストで確かめた)。`check-sync.sh` の注、L1 の言い回し(警告文、herdr_test・org_runtime_env_test の固定する文、`/org` skill の 4 写し、README、recipe の 2 写し、spec の注、`spawn.go` のコメント)、L2(`org.go` の `NewHerdr` のコメント)、L3(テンプレート、`config.go`、skill、spec の数え方)、L4(`config get` の型の名前の冠詞、知らないキーの文、help)、L5(help の照合は空白をつぶして、既定は `Default()` と比べる、冒頭のコメント)。検証コマンド rc 0。`2a6cb022` は orchestrator の返事が commit のあとに届いたぶんの `spawn.go` のコメントで、amend せずに別のコミット。
+  - orchestrator がインラインで直した(0b… の次のコミット、コメントだけの 1 ファイル): `internal/config/defaults_sync_test.go` の `shell_and_skills` のコメントの L3 の古い言い回し。`gofmt`、`go vet ./internal/config/`、`-run LockStep` が通った。機械的な確かめ: 5 項目とも clean。
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
