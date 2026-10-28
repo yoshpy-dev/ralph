@@ -152,6 +152,12 @@ issue の表、`scripts/detect-changed-languages.sh` の `has_project_marker`(31
     - S3 までの中間の状態: 対話の経路では `--pack` を検査するが、フォームにはまだ渡さない(S3 で選んだ状態にする)
   - S2(b1b244de、implementer): G は `templates/packs/` の下のパック(`_template` を除く)をカンマでつないだ 1 つの `--pack` で渡し、init のあと各 `packs/languages/<name>/` があることを確かめてから check-template を通す。一覧が空なら G を fail にする。verify は `./tests/test-check-template.sh` で rc=0(60 passed、G は PASS)。mutant 2 つ(`--pack` を外す、一覧の場所を変える)で G が fail する。self-check 5 項目 clean
     - 計画の検証コマンドの直し: 計画の S2 の `sh tests/test-check-template.sh` は macOS の `/bin/sh`(POSIX モードの bash 3.2)では、前からある `diff <(...)` で構文エラーになり rc=2(変更前の HEAD でも同じ)。shebang の bash で動く `./tests/test-check-template.sh` で確かめた。以後この形で打つ
+  - S3(d1c756de、implementer): `runInitInteractive` に `--pack` の一覧を渡し、初期の選択にした(なければ空)。手がかりの表 `packMarkers` と推定 `recommendedPacks`(直下の通常ファイルだけ、symlink はたどる)、選択肢 `packOptions`(名前順、(Recommended) は表示だけ、最後に skip)、確かめ `validatePackSelection`、直し `packsFromSelection`(skip の値は必ず取り除く)、問い `newPackQuestion`。verify rc=0(11s)、`golangci-lint run ./internal/cli/` 0 issues。`go test -overlay` の mutant 12 種が落ちる。組み立てた binary を pty で動かし、(Recommended)、空の確定と skip+言語の確定で同じ問いに残ること、skip だけでパックなしと案内、`--pack golang` が選ばれた状態を確かめた。self-check: 不要な変更 fixed(テストの冗長な比較)、誤字とコピペ fixed(出力の検査の文字列を絞った)、ほか clean
+    - 計画になかった追加 1: skip の値は `/skip`(パックの名前はディレクトリ名なので `/` を含まない)。テストで AvailablePacks に含まれないことを確かめる
+    - 計画になかった追加 2: 問いに `Height` を付けた。huh v2.0.3 は `Height` がないと一覧の高さを「選択肢の行数 − タイトルと説明の行数」にするので、末尾の選択肢が隠れる(pty で、変更前の HEAD は typescript が、`Height` なしの新しい版は typescript と skip が見えなかった)
+    - 計画になかった追加 3: `TERM=dumb` で stdin が端末でないときは、フォームの前に何も書かずにエラーで止める。huh は `TERM=dumb` で accessible モードになり、EOF を確定として読むので、D1 の確かめがエラーを返す間ずっと問いを出し続ける(`TERM=dumb ralph init dir < /dev/null` が約 70 秒で 675 MB を出して終わらなかった。変更前は全パックを入れて exit 0)。エラーの文は `--yes`(と `--pack`)を勧める。consult(consult-plan-initpack)は異論なし。release のノートに書く
+    - 自動テストで捕まえられない穴: `runInitInteractive` の中の 3 行(初期の選択、推定の結果を問いに渡すこと、`packsFromSelection` の呼び出し)は `form.Run()` の先で TTY が要るので、mutant が生き残る。pty での確認で代えた
+    - 対話の経路では、huh が選択を選択肢の並び(名前順)で書き戻すので、`--yes` なしの `--pack typescript --pack golang` の manifest の順は名前順になる(`--yes` の経路は flag の順)。受け入れ条件には関わらない
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
