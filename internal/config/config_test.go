@@ -86,8 +86,9 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
 	}
-	// TestDefaultsLockStep checks that the template sets each [org] default,
-	// auto_merge and wake included, to Default()'s value.
+	// TestDefaultsLockStep checks the [org] keys orgTemplateDrift reads
+	// (auto_merge and wake included) against Default(). It does not read
+	// [org.roles], [org.permissions].roles, or launch_cmd; wake_cmd is below.
 	if len(cfg.Org.Director.WakeCmd) != 0 {
 		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
 	}

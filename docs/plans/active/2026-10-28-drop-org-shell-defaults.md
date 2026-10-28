@@ -119,6 +119,6 @@ None (テストの照合先を 3 面から 2 面に減らし、読まれない s
   - Deviation(D2・AC3): `org.agmsg_home` の 3 面の照合は、直接の 3 者比較から「`shell_and_skills` の shell 対 `Default()`」と「`org` の テンプレート対 `Default()`」の合成に変わった(7d59e278、L3)。どの 1 面がずれても、どちらかのサブテストが面の名前つきで落ちる。テンプレートがないときも SKILL.md の照合が走るようになった(L2)。
   - Deviation(L1): `scripts/ralph-config.sh` のコメントに issue の URL を書かなかった。`scripts/check-template-purity.sh` が `templates/` の中で `yoshpy-dev` を禁じており、写しが下流に配られるため。
   - 2026-10-28 08:30Z ごろ、同じ Mac の stoic-app のセッションから「ローカル CI を約 90 分流すので重い処理の開始を控えて」と依頼があった。修正スライスは `internal/config` の 1 パッケージだけで検証した。/verify と /test は再開の連絡を待ってから回す。
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Verification artifact created — verify ecf31b75(cycle 1、pass、AC1・AC3・AC5 は満たす、AC2・AC4 は静的の部分だけ、情報 D-1〜D-4)。D-1(`tests/test-ralph-config.sh` の列挙)と D-2(「各キー」と読める 2 文)は /sync-docs でコメントと rule の文だけ直した。D-3(spec の注記 (c))は誤りではないので残し、D-4(「2 行の export」と実際の 3 行)は S2 の行の記録のままにした。
+- [x] Test artifact created — test 339e465f(cycle 1、pass。`go test ./internal/config/` の対象 3 本、`tests/test-ralph-config.sh` 19/19、AC2 の変異 2 つがキー名つきで落ちる、`run-test.sh` 2 回目 rc 0)。1 回目の `internal/org` の失敗は tech-debt に記録のある既知の不安定なテストで、2 回目に通った。
 - [ ] PR created
