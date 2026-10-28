@@ -36,8 +36,8 @@ func SeatPaneEnv() []string {
 // on, its driver (claude or codex, case-insensitive), to call the other one
 // as the reviewer. Without it pick_reviewer treats the driver as claude and
 // picks codex, and /cross-review does the same when both CLIs are installed.
-// Of the reviews, only /cross-review reads it today: /plan's advisory calls
-// codex directly.
+// Of the reviews, /cross-review and a feature org leader's plan advisory (the
+// 機能ごとの org step 1 of internal/org/prompts/leader.md) read it.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
