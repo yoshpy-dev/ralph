@@ -282,8 +282,8 @@ func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
 	fx.prs(t, "feat/a", cleanupCLIPR(7, "MERGED", head))
 	before := fx.snapshot(t)
 
-	fetch, keep := "git -C "+fx.work+" fetch origin refs/pull/7/head", "git -C "+fx.work+" branch feat/a-unmerged feat/a"
-	reset := "git -C " + fx.wt + " reset --hard " + head
+	kept, reset := "feat/a-unmerged-"+fx.head[:7], "git -C "+fx.wt+" reset --hard "+head
+	fetch, keep := "git -C "+fx.work+" fetch origin refs/pull/7/head", "git -C "+fx.work+" branch "+kept+" feat/a"
 	want := "SKIPPED: feat/a the local branch feat/a is at " + fx.head + ", not at " + head + ", the head its PR merged, which git " +
 		"does not have in " + fx.work + " (a commit made on GitHub or pushed from another clone), so whether the branch holds " +
 		"commits that were not merged cannot be told yet: fetch the head (" + fetch + "), then look at them (git -C " + fx.work +
@@ -310,8 +310,8 @@ func TestOrgCleanup_HeadNotHereNamesTheFetchOfThePRsHead(t *testing.T) {
 	if err != nil || stderr != "" || stdout != "CLEANED: feat/a org-a\n" {
 		t.Fatalf("cleanup after the fetch: err %v, stderr %q, stdout %q; want feat/a cleaned", err, stderr, stdout)
 	}
-	if got := fx.tip(t, "feat/a-unmerged"); got != fx.head {
-		t.Errorf("feat/a-unmerged is at %s, want %s, where feat/a was", got, fx.head)
+	if got := fx.tip(t, kept); got != fx.head {
+		t.Errorf("%s is at %s, want %s, where feat/a was", kept, got, fx.head)
 	}
 }
 

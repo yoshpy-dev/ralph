@@ -219,18 +219,26 @@ func (fx *worktreeCleanupFixture) assertCleaned(t *testing.T, res CleanupResult,
 // puts the branch back (checkBranchTip).
 func cleanupMovedRefusal(root, tip, head, reset string) string {
 	return "the local branch feat/auth is at " + tip + ", not at " + head + ", the head its PR merged, so it may hold commits " +
-		"that were not merged, which git branch -D would delete: " + cleanupMovedSteps(root, head, reset)
+		"that were not merged, which git branch -D would delete: " + cleanupMovedSteps(root, tip, head, reset)
 }
 
-// cleanupMovedSteps are the steps of check 5's refusal of feat/auth
+// cleanupMovedSteps are the steps of check 5's refusal of feat/auth at tip
 // (branchMovedSteps), with root, head, and reset as cleanupMovedRefusal's:
-// the branch that keeps what is needed is made from the main worktree, so
-// the feature worktree stays where it is and reset moves feat/auth.
-func cleanupMovedSteps(root, head, reset string) string {
+// the branch that keeps what is needed, cleanupKeptBranch of tip, is made
+// from the main worktree, so the feature worktree stays where it is and reset
+// moves feat/auth.
+func cleanupMovedSteps(root, tip, head, reset string) string {
 	return "look at them (git -C " + root + " log " + head + "..feat/auth), keep what you need on another branch made from the " +
-		"main worktree, not by switching branches in the feature worktree (git -C " + root + " branch feat/auth-unmerged " +
-		"feat/auth), put the branch back at the head its PR merged (" + reset + "), and run ralph org cleanup --branch feat/auth " +
-		"again"
+		"main worktree, not by switching branches in the feature worktree (git -C " + root + " branch " + cleanupKeptBranch(tip) +
+		" feat/auth), put the branch back at the head its PR merged (" + reset + "), and run ralph org cleanup --branch " +
+		"feat/auth again"
+}
+
+// cleanupKeptBranch is the branch check 5's refusal of feat/auth at tip
+// names to keep what feat/auth holds: feat/auth-unmerged- and tip's first 7
+// characters.
+func cleanupKeptBranch(tip string) string {
+	return "feat/auth-unmerged-" + tip[:7]
 }
 
 // countCalls counts call in calls.
@@ -533,9 +541,10 @@ func TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch(t *testing.T) {
 			fx.assertRefused(t, res, err, before, "the local branch feat/auth is at "+local+", not at "+head+", the head its PR "+
 				"merged, which git does not have in "+fx.root+" (a commit made on GitHub or pushed from another clone), so whether "+
 				"the branch holds commits that were not merged cannot be told yet: fetch the head ("+fetch+"), then "+
-				cleanupMovedSteps(fx.root, head, reset), "")
+				cleanupMovedSteps(fx.root, local, head, reset), "")
+			keep := cleanupKeptBranch(local)
 			for _, cmd := range []string{fetch, "git -C " + fx.root + " log " + head + "..feat/auth",
-				"git -C " + fx.root + " branch feat/auth-unmerged feat/auth", reset} {
+				"git -C " + fx.root + " branch " + keep + " feat/auth", reset} {
 				if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
 					t.Fatalf("%s: %v\n%s", cmd, err, out)
 				}
@@ -543,10 +552,76 @@ func TestCleanupFeatureWorktree_HeadNotHereNamesItsFetch(t *testing.T) {
 			fx.head = head
 			res, err = fx.cleanup(p)
 			fx.assertCleaned(t, res, err, "", CleanupViaCleanup)
-			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != local {
-				t.Errorf("feat/auth-unmerged is at %s; want %s, where the local branch was", kept, local)
+			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/"+keep); kept != local {
+				t.Errorf("%s is at %s; want %s, where the local branch was", keep, kept, local)
 			}
 		})
+	}
+}
+
+// TestCleanupFeatureWorktree_MovedBranchKeptUnderItsTip covers R3-L1 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md: check 5's refusal
+// of a branch that moved names the branch that keeps what it holds after the
+// branch's tip, feat/auth-unmerged- and the tip's first 7 characters. A fixed
+// name failed once a branch of that name was kept from an earlier move, and
+// the reset the refusal names next then took the commits not merged off
+// feat/auth. With the branch made as the refusal writes it and feat/auth not
+// put back, the next cleanup is refused again with the same name, whose git
+// branch fails on the branch kept, still at the tip; once feat/auth moves
+// again, the refusal names another branch, which its command makes at the new
+// tip.
+func TestCleanupFeatureWorktree_MovedBranchKeptUnderItsTip(t *testing.T) {
+	fx := newWorktreeCleanupFixture(t)
+	reset := "git -C " + fx.worktree + " reset --hard " + fx.head
+	// refused checks that the cleanup refuses feat/auth at tip and returns
+	// the command its reason names to keep what feat/auth holds.
+	refused := func(tip string) string {
+		t.Helper()
+		before := fx.snapshot(t)
+		res, err := fx.cleanup(fx.params())
+		fx.assertRefused(t, res, err, before, cleanupMovedRefusal(fx.root, tip, fx.head, reset), "")
+		keep := "git -C " + fx.root + " branch feat/auth-unmerged-" + tip[:7] + " feat/auth"
+		if !strings.Contains(res.Refused, "("+keep+")") {
+			t.Fatalf("refusal %q does not name %s", res.Refused, keep)
+		}
+		return keep
+	}
+	keptAt := func(tip string) string {
+		t.Helper()
+		return gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged-"+tip[:7])
+	}
+
+	gateCommit(t, fx.worktree, "not merged")
+	first := fx.branchTip()
+	keepFirst := refused(first)
+	if out, err := exec.Command("sh", "-c", keepFirst).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", keepFirst, err, out)
+	}
+	if again := refused(first); again != keepFirst {
+		t.Errorf("the refusal after the keep names %s; want %s, the same branch", again, keepFirst)
+	}
+	// The same command succeeded above, so it fails now on the branch it made.
+	if out, err := exec.Command("sh", "-c", keepFirst).CombinedOutput(); err == nil {
+		t.Errorf("%s succeeded again; want it refused, the branch kept already there:\n%s", keepFirst, out)
+	}
+	if kept := keptAt(first); kept != first {
+		t.Errorf("the branch kept is at %s; want %s, the tip the refusal saw", kept, first)
+	}
+
+	gateCommit(t, fx.worktree, "not merged either")
+	second := fx.branchTip()
+	keepSecond := refused(second)
+	if keepSecond == keepFirst {
+		t.Fatalf("the refusal after feat/auth moved again names %s, the branch kept before; want another", keepSecond)
+	}
+	if out, err := exec.Command("sh", "-c", keepSecond).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", keepSecond, err, out)
+	}
+	if kept := keptAt(second); kept != second {
+		t.Errorf("the branch kept after the second move is at %s; want %s, the new tip", kept, second)
+	}
+	if kept := keptAt(first); kept != first {
+		t.Errorf("the branch kept first is at %s after the second keep; want %s", kept, first)
 	}
 }
 
@@ -622,15 +697,16 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 			if res.Resumed != "" {
 				t.Errorf("Resumed = %q on a refusal; want none", res.Resumed)
 			}
-			for _, cmd := range []string{"git -C " + fx.root + " branch feat/auth-unmerged feat/auth", reset} {
+			keep := cleanupKeptBranch(moved)
+			for _, cmd := range []string{"git -C " + fx.root + " branch " + keep + " feat/auth", reset} {
 				if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
 					t.Fatalf("%s: %v\n%s", cmd, err, out)
 				}
 			}
 			res, err = fx.cleanup(fx.params())
 			fx.assertCleaned(t, res, err, CleanupResumedWorktreeGone, CleanupViaCleanup)
-			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != moved {
-				t.Errorf("feat/auth-unmerged is at %s after the cleanup; want %s, where feat/auth had moved", kept, moved)
+			if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/"+keep); kept != moved {
+				t.Errorf("%s is at %s after the cleanup; want %s, where feat/auth had moved", keep, kept, moved)
 			}
 		})
 	}
@@ -1079,24 +1155,25 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 		name  string
 		setup func(t *testing.T, wt string)
 		// steps are the commands each refusal in turn names, for root, wt
-		// (both shell-quoted), and head.
-		steps func(root, wt, head string) [][]string
+		// (both shell-quoted), head, and tip, where feat/auth is after setup.
+		steps func(root, wt, head, tip string) [][]string
 	}{
 		{"a detached HEAD", func(t *testing.T, wt string) {
 			runGit(t, "-C", wt, "checkout", "--quiet", "--detach")
-		}, func(_, wt, _ string) [][]string { return [][]string{{"git -C " + wt + " switch feat/auth"}} }},
+		}, func(_, wt, _, _ string) [][]string { return [][]string{{"git -C " + wt + " switch feat/auth"}} }},
 		{"the branch moved past the merged head", func(t *testing.T, wt string) {
 			gateCommit(t, wt, "not merged")
-		}, func(root, wt, head string) [][]string {
-			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch feat/auth-unmerged feat/auth",
-				"git -C " + wt + " reset --hard " + head}}
+		}, func(root, wt, head, tip string) [][]string {
+			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch " +
+				cleanupKeptBranch(tip) + " feat/auth", "git -C " + wt + " reset --hard " + head}}
 		}},
 		{"the branch moved, another branch checked out", func(t *testing.T, wt string) {
 			gateCommit(t, wt, "not merged")
 			runGit(t, "-C", wt, "switch", "--quiet", "-c", "other")
-		}, func(root, wt, head string) [][]string {
-			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch feat/auth-unmerged feat/auth",
-				"git -C " + root + " branch -f feat/auth " + head}, {"git -C " + wt + " switch feat/auth"}}
+		}, func(root, wt, head, tip string) [][]string {
+			return [][]string{{"git -C " + root + " log " + head + "..feat/auth", "git -C " + root + " branch " +
+				cleanupKeptBranch(tip) + " feat/auth", "git -C " + root + " branch -f feat/auth " + head},
+				{"git -C " + wt + " switch feat/auth"}}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1111,7 +1188,7 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 			p.Head = gitOut(t, wt, "rev-parse", "HEAD")
 			tc.setup(t, wt)
 			moved := gitOut(t, fx.root, "rev-parse", "refs/heads/"+cleanupTestBranch)
-			for _, cmds := range tc.steps(shellQuote(fx.root), shellQuote(wt), p.Head) {
+			for _, cmds := range tc.steps(shellQuote(fx.root), shellQuote(wt), p.Head, moved) {
 				res, err := fx.o.CleanupFeatureWorktree(context.Background(), p)
 				if err != nil || res.Refused == "" || res.Manual != "" {
 					t.Fatalf("cleanup = %+v, %v; want a refusal with no command by hand", res, err)
@@ -1128,8 +1205,9 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 			// The commit the PR did not merge is on the branch kept, which
 			// putting feat/auth back did not move.
 			if moved != p.Head {
-				if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/feat/auth-unmerged"); kept != moved {
-					t.Errorf("feat/auth-unmerged is at %s; want %s, the commit that was not merged", kept, moved)
+				keep := cleanupKeptBranch(moved)
+				if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/"+keep); kept != moved {
+					t.Errorf("%s is at %s; want %s, the commit that was not merged", keep, kept, moved)
 				}
 			}
 			ctx, cancel := context.WithCancel(context.Background())

@@ -631,23 +631,28 @@ func (c *cleanupRun) checkBranchTip(ctx context.Context, tip, reset string) (str
 	case r.code != 0:
 		return fmt.Sprintf("%s, which git does not have in %s (a commit made on GitHub or pushed from another clone), so whether "+
 			"the branch holds commits that were not merged cannot be told yet: fetch the head (%s), then %s", moved, c.root,
-			c.fetchHeadCmd(), c.branchMovedSteps(reset)), "", nil
+			c.fetchHeadCmd(), c.branchMovedSteps(tip, reset)), "", nil
 	}
 	return fmt.Sprintf("%s, so it may hold commits that were not merged, which git branch -D would delete: %s", moved,
-		c.branchMovedSteps(reset)), "", nil
+		c.branchMovedSteps(tip, reset)), "", nil
 }
 
 // branchMovedSteps are the steps of check 5's refusal of a branch that moved
-// from the head the PR merged: look at the commits the PR did not merge, keep
-// what is needed on a new branch made in the main worktree's repository
-// (<branch>-unmerged at the branch's tip), which leaves the feature worktree
-// where it is, so that reset still moves the branch and not the one kept, put
-// the branch back at the head with reset, and clean up again.
-func (c *cleanupRun) branchMovedSteps(reset string) string {
+// from the head the PR merged to tip: look at the commits the PR did not
+// merge, keep what is needed on a new branch made in the main worktree's
+// repository, which leaves the feature worktree where it is, so that reset
+// still moves the branch and not the one kept, put the branch back at the
+// head with reset, and clean up again. The new branch is
+// <branch>-unmerged-<the first 7 characters of tip>: a branch of that name
+// already there was kept from the same tip, so git branch failing on it loses
+// nothing, and a branch that moves again gets another name. It is made from
+// the branch, not from tip, so that it also keeps a commit made on the branch
+// after the refusal, which reset would otherwise take off.
+func (c *cleanupRun) branchMovedSteps(tip, reset string) string {
+	keep := c.f.Branch + "-unmerged-" + tip[:min(len(tip), 7)]
 	return fmt.Sprintf("look at them (%s), keep what you need on another branch made from the main worktree, not by switching "+
 		"branches in the feature worktree (%s), put the branch back at the head its PR merged (%s), and %s",
-		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", c.f.Branch+"-unmerged", c.f.Branch), reset,
-		cleanupAgain(c.p.Branch))
+		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", keep, c.f.Branch), reset, cleanupAgain(c.p.Branch))
 }
 
 // fetchHeadCmd is the command that fetches the head the PR merged from
