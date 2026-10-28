@@ -85,3 +85,45 @@ _(足した行はない。)_
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の LOW 4 件は 3 件が解決、1 件が理由つきで受け入れ)
 - Follow-ups: 台帳に足す行はない。`/verify` では、`TestLoad_RequireAgentCLIs` への改名と、雛形のコメントの移動を `git grep` で確かめる文書のずれの検査に入れる
+
+## Run 3 (extra slice S5, 8408b30c)
+
+- Date: 2026-10-28
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の 3 回目の run。追加のスライス S5 のあとの回し直しで、cycle は増えない)
+- Scope: `git diff d1a09d01..HEAD -- internal/`(1 ファイル、+58/-0)。コードの変更は 8408b30c の `TestRunDoctorOpts_ShellAliasesCheck_HerdrAbsentStaysInfo` だけ。`git diff 15e301c8...HEAD --stat`(14 ファイル)と `git diff d1a09d01..HEAD --stat`(5 ファイル)を突き合わせ、Run 2 のあとにコードで変わったのがこの 1 ファイルだけで、残りは計画・verify・test の report と insight event であることを確かめた。観点と、実行しないもの(テスト、ビルド、lint、run-verify)は Run 1 と同じ
+
+### Run 1 の所見の扱い
+
+Run 2 で L1〜L3 は解決、L4 は受け入れとした。Run 2 のあとに `doctor.go`、`config.go`、雛形は変わっていないので、扱いは Run 2 のまま。
+
+### Evidence reviewed
+
+- 追加のテスト全文(`internal/cli/doctor_shell_alias_test.go:1558-1614`)と、直前の `TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam`(1514-1556)。2 本は herdr の stub の有無と確かめる文字列だけが違い、前半の準備と stdout の取り込みは同じ
+- 確かめている対象のコード。`doctor.go:134` の `checkShellAliases(doctorShellAliasEnv, herdrResult.Status == "pass")`、`doctor_shell_alias.go:817-` の状態の `switch`(`herdrPresent && (codexFound || claudeHasPermissionMode)` で warn)、`doctor_shell_alias.go:723` の「(herdr not installed, so no seat is affected today)」。この句は codex の finding があるときだけ付く
+- 既存の補助。`captureStdoutText`(`doctor_scaffold_test.go:851`。これと、これを包む `captureStdout` は他のテストから 13 回呼ばれる)、`doctorLine`(`doctor_agent_cli_test.go:166`、S2 で足した行単位の読み取り)
+- `driver.HerdrAvailable` は `lookPath` だけを見る(`internal/org/driver/driver.go:134`)ので、`PATH` を stub の dir だけにすれば herdr は確実にない
+- 確かめていない: テストと静的検査の実行、`!= "info"` の mutant を実際に当てること(計画の S5 の結果欄の記述を読んだだけ)
+
+### Run 3 の新しい所見
+
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。動作を変えるものはない。行の最初の cell を重大度の語にすると backfill が数え直すので、Run 2 と同じく番号を先に置く。
+
+| 番号 | Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- | --- |
+| N1 | LOW | naming | テスト名の `HerdrAbsentStaysInfo` が、同じテストの `herdr: warn` の確かめと食い違って読める。この PR で herdr の行は info から warn になったので、「Herdr Absent … Info」は herdr の行が info のままと読める。`Info` の主語は Shell aliases の行。doc comment も「herdr's own line is now warn (it used to be info)」と、この PR の前後を基準に書いてあり、merge のあとに読む人には「now」「used to」の基準がない | `internal/cli/doctor_shell_alias_test.go:1558-1563`(名前と doc comment)、1602 行(`herdr: warn` の確かめ) | 主語を名前に入れる(例: `..._CodexAliasStaysInfoWithoutHerdr`)。doc comment は変更前後ではなく不変条件で書く(「herdr がないと herdr の行は warn になるので、`herdrPresent` は `Status != "info"` ではなく `Status == "pass"` から決める。codex の alias の finding は info のまま、herdr がない旨の句が付く」) |
+| N2 | LOW | maintainability | 新しいテストは `WarnsThroughTheSeam` と準備が約 30 行同じで、stdout の取り込みを手で書く 3 本目になった(1492・1543・1592 行)。同じ package に `captureStdoutText` があり、こちらは `os.Pipe()` のエラーを `t.Fatalf` で扱う。手書きの 3 本は `r, w, _ := os.Pipe()` でエラーを捨てる。同じファイルの兄弟 2 本と同じ書き方なので、この diff だけが外れているわけではない | `internal/cli/doctor_shell_alias_test.go:1543`・`1592`、`internal/cli/doctor_scaffold_test.go:851-865` | 新しいテストだけでも `captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })` に替える(7 行が 1 文になる)。もう一歩進めるなら、準備(embed FS、init、bin dir、PATH、agmsg home、alias の rc、seam の差し替えと Cleanup)を「置く bin の一覧」を引数にした補助に出し、2 本の違いを bin の一覧と確かめる文字列だけにする |
+| N3 | LOW | readability | 確かめが 4 つとも出力全体への `Contains` で、1 つの行の話として読めない。`Shell aliases (codex/claude): warn` が「ない」ことを確かめる文は、同じ行に `: info` が「ある」確かめと内容が重なる(1 行の status は 1 つ)。強さは足りている(計画の結果欄によれば、`!= "info"` の mutant で info・warn なし・句の 3 つが落ちる)ので、読みやすさの指摘 | `internal/cli/doctor_shell_alias_test.go:1605-1613`、`internal/cli/doctor_agent_cli_test.go:166`(`doctorLine`) | 直すなら `doctorLine(string(out), "Shell aliases (codex/claude)")` で status が `info`、detail に句、を同じ行で確かめ、否定の確かめを消す。N2 の補助に寄せるなら、その中で |
+
+### 確かめたこと(問題なし)
+
+- 確かめの強さ: `doctor.go:134` を `!= "info"` にすると、herdr の行が warn なので `herdrPresent` が true になり、`checkShellAliases` が codex の finding を warn にする。新しいテストの `: info` と句の 2 つがここで落ちる。`herdrPresent` を常に true にしても同じ。常に false にする変更は `WarnsThroughTheSeam` が落とす。この 2 本で `herdrPresent` の両側が固定される
+- info の理由: 句(`doctor_shell_alias.go:723`)は codex の finding があるときだけ付くので、rc が読めないなど別の理由の info ではこのテストは通らない。alias が見つかったことは句で裏づく
+- 前提の確かめ: `herdr: warn` の確かめが、herdr がないという前提そのものを固定している。herdr の stub が紛れ込んだ場合は、ここで落ちるので、前提が崩れたまま通ることはない
+- 後始末: `doctorShellAliasEnv` は `orig` を先に取って `t.Cleanup` で戻す。`PATH` と `RALPH_ORG_AGMSG_HOME` は `t.Setenv`。`os.Stdout` は panic のときに戻らず、`Version` の代入も戻していないが、兄弟 2 本が同じなので、このテストで増えた問題ではない
+- stdout の取り込みの安全: 出力は 20 行ほどで、pipe の buffer を超えて書き手が止まる量ではない見込み(未測定)。兄弟と同じ構造
+- 配置: 新しい関数は `WarnsThroughTheSeam` の直後、`TestParseAliasWords_NoDefinition` の doc comment の前に入り、既存の関数の doc comment を切り離していない
+
+### Recommendation (Run 3)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3)
+- Follow-ups: LOW 3 件はどれもテストの読みやすさで、動作とテストの強さは変わらない。N1 と N2 は同じ関数の中の直しなので、直すなら 1 commit。直すとテストのコードの変更になり、記録だけの修正の例外には入らないので、`/verify` と `/test` から回し直す。直さずに進めるなら、cycle 1 は上限(既定 2)に余裕があるので deferral にはならない。cap に届いたあとも残るなら、台帳に 1 行にまとめて足す
