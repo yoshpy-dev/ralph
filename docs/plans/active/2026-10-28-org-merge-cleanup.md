@@ -163,6 +163,17 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
   - S2 に渡すこと: marker の注釈 3 か所と `regateSpawnErr` の断りの文(片付けの最中も「regate が走っている」と言う)。`Org.Worktrees` の注釈。`Refused` と `Failed` はどちらも `CLEANUP: skipped` にする
   - S4 に渡すこと: `featureWorktreeCleanup` に `--force-branch` を足すなら、`cleanupRun.scriptCmd` で二重にならないようにする
   - 既知の穴: `StartFeature` の `regateSpawnErr` は manifest のロックの外で打たれる(`internal/org/feature.go:208-218`)。Regate と同じ窓で、この計画では直さない
+  - S2 b8209a37: `ralph org merge` は `pr_merged` を記録したあと、`regate.lock` を持ったまま `cleanupFeatureWorktreeLocked` を打つ。`MergeParams.RepoRoot` が空なら片付けない
+    - 結果は `MergeResult.Cleanup`(nil は呼んでいない)と `CleanupErr` に入る。merge のエラーは片付けでは立たない
+    - 記録のあと片付けの前に割り込まれたら、片付けは打たずに `Refused` に `ralph org cleanup --branch` の打ち方を入れ、exit 1 で終わる
+    - CLI の行は `CLEANUP: done`、`CLEANUP: done (resumed: <kind>[; <err>])`、`CLEANUP: skipped (<理由>)`、続けて `CLEANUP MANUAL: <コマンド>`。repo root は `org.FeatureRepoRoot` で求め、見つからなければ skipped で理由を出す
+    - spawn の断りの文は「regate が走っているか、merge か cleanup が片付けている」に直した。`ralph org merge --help` に片付けの段落を足した
+    - 検証: 指定のコマンドが通過(internal/org 229 秒、internal/cli 70 秒)。断りの文を固定するテストの組は 1 回目に 30 分の timeout に当たり、回し直しで通過(552 秒、原因は未確認)。変異 9 つが落ちる。機械的な確かめは 5 項目とも clean
+  - S4 に渡すこと(S2 の報告から):
+    - `errWorktreeScriptMissing`(`internal/org/feature.go:622`)の「run start again」が片付けの断りに混ざる。文を直し、`internal/cli/org_merge_test.go` の `noScriptCleanup()` の固定は `CLEANUP: skipped (scripts/ralph-worktree.sh cannot be run in ` までにして、`CLEANUP MANUAL:` が出ないことは別に確かめる(consult の勧め)
+    - `regateLockWait` の注釈が「Regate and Merge retry」のまま
+    - `ralph org --help` の merge の説明に片付けがない
+    - `/director` skill に「`CLEANUP: done` で始まれば片付いた」と読む 1 文(`resumed: record_only; <err>` は台帳の追記だけが失敗した形)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
