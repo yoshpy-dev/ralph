@@ -331,8 +331,11 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 	rec, ok, err := c.worktrees.Lookup(c.root, c.id())
 	switch {
 	case errors.Is(err, errWorktreeScriptMissing):
-		return refuse(fmt.Sprintf("%s cannot be run in %s (%v), so the worktree record %s cannot be read and nothing is removed: "+
-			"restore the script and %s", worktreeScriptRel, c.root, err, c.id(), cleanupAgain(c.p.Branch)), "")
+		// err ends with start's next step, not the cleanup's, so it is not
+		// quoted.
+		return refuse(fmt.Sprintf("%s is missing from %s (ralph init ships it into the repo), so the worktree record %s cannot "+
+			"be read and nothing is removed: restore the script and %s", worktreeScriptRel, c.root, c.id(),
+			cleanupAgain(c.p.Branch)), "")
 	case err != nil:
 		return refuse(fmt.Sprintf("the worktree record %s cannot be read (%v), so nothing is removed: fix it and %s", c.id(), err,
 			cleanupAgain(c.p.Branch)), "")

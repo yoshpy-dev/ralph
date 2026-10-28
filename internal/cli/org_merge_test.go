@@ -295,15 +295,21 @@ func mergeCLILines(head string, autoMerge bool, note string) string {
 	return s
 }
 
-// noScriptCleanup is the CLEANUP: line that follows mergeCLILines once the
-// merge is recorded: the fixture's main worktree has no
-// scripts/ralph-worktree.sh, so the cleanup cannot read the worktree record
-// and removes nothing, and it names no command by hand.
-func (fx *mergeCLIFixture) noScriptCleanup() string {
-	return "CLEANUP: skipped (scripts/ralph-worktree.sh cannot be run in " + fx.work + " (org: " + fx.work +
-		"/scripts/ralph-worktree.sh does not exist: start --plan makes the feature worktree with it; ralph init ships it into " +
-		"the repo; restore it and run start again), so the worktree record org-a cannot be read and nothing is removed: restore " +
-		"the script and run ralph org cleanup --branch feat/a again)\n"
+// assertNoScriptCleanup checks the stdout of a recorded merge in the
+// fixture: lines (mergeCLILines), then one CLEANUP: skipped line about
+// scripts/ralph-worktree.sh, which the fixture's main worktree does not have,
+// so the cleanup cannot read the worktree record and removes nothing. The
+// line names no step of start, and no CLEANUP MANUAL: line follows, since the
+// cleanup names no command by hand. internal/org's cleanup tests pin the
+// reason's words.
+func assertNoScriptCleanup(t *testing.T, stdout, lines string) {
+	t.Helper()
+	rest, ok := strings.CutPrefix(stdout, lines)
+	if !ok || !strings.HasPrefix(rest, "CLEANUP: skipped (scripts/ralph-worktree.sh ") || !strings.HasSuffix(rest, ")\n") ||
+		strings.Count(rest, "\n") != 1 || strings.Contains(rest, "start again") || strings.Contains(stdout, "CLEANUP MANUAL:") {
+		t.Errorf("stdout:\n%s\nwant:\n%sCLEANUP: skipped (scripts/ralph-worktree.sh ...), on one line, naming no step of start, "+
+			"with no CLEANUP MANUAL: line", stdout, lines)
+	}
 }
 
 // mergeCLIDetails are the Details of the fixture's pr_merged at head with
@@ -453,9 +459,7 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			if want := mergeCLILines(fx.head, false, tc.wantNote) + fx.noScriptCleanup(); stdout != want {
-				t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
-			}
+			assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, false, tc.wantNote))
 			events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
 			if len(events) != before+1 {
 				t.Fatalf("the ledger got %d events; want exactly one: %+v", len(events)-before, events[before:])
@@ -818,9 +822,10 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 	t.Run("6h is taken", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)
 		stdout, stderr, err := fx.merge(t, "--wait-checks", "6h")
-		if err != nil || stderr != "" || stdout != mergeCLILines(fx.head, false, "")+fx.noScriptCleanup() {
+		if err != nil || stderr != "" {
 			t.Fatalf("merge --wait-checks 6h: err %v, stderr %q, stdout %q; want the merge", err, stderr, stdout)
 		}
+		assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, false, ""))
 	})
 	t.Run("the time is up with checks pending", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)
@@ -915,9 +920,7 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge from the linked worktree: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			if want := mergeCLILines(fx.head, tc.want, "") + fx.noScriptCleanup(); stdout != want {
-				t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
-			}
+			assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, tc.want, ""))
 			got := fx.prMergedEvents(t)
 			if len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, tc.want) {
 				t.Errorf("pr_merged in the main worktree's ledger = %+v; want one with %q", got, mergeCLIDetails(fx.head, tc.want))

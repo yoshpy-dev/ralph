@@ -727,7 +727,8 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 		}, "the worktree record org-auth cannot be read (org: /x/org-auth.json is not a JSON record), so nothing is removed", nil,
 			[]string{"lookup:" + cleanupTestID}, true},
 		{"no script to run", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) { fx.o.Worktrees = nil },
-			"scripts/ralph-worktree.sh cannot be run in ", nil, nil, true},
+			" (ralph init ships it into the repo), so the worktree record org-auth cannot be read and nothing is removed: restore " +
+				"the script and run ralph org cleanup --branch feat/auth again", nil, nil, true},
 		{"a record on another branch", func(_ *testing.T, fx *worktreeCleanupFakeFixture, _ *CleanupParams) {
 			rec := fx.wt.records[cleanupTestID]
 			rec.Branch = "feat/auth-2"
@@ -770,6 +771,11 @@ func TestCleanupFeatureWorktree_RefusedAtTheLedgerAndTheRecord(t *testing.T) {
 				manual = tc.manual(fx)
 			}
 			assertCleanupRefusal(t, res, tc.want, manual)
+			// The error of a missing script ends with start's next step,
+			// which no refusal of the cleanup names.
+			if strings.Contains(res.Refused, "start again") {
+				t.Errorf("refusal %q names start's next step", res.Refused)
+			}
 			if !slices.Equal(fx.wt.calls, tc.calls) {
 				t.Errorf("worktree calls = %q, want %q", fx.wt.calls, tc.calls)
 			}

@@ -665,3 +665,53 @@ func TestOrgCleanup_Help(t *testing.T) {
 		}
 	}
 }
+
+// The help of start, spawn, and merge-order follows the cleanup after a
+// merge (plan docs/plans/active/2026-10-28-org-merge-cleanup.md, S4: AC5):
+// start says that merge and cleanup remove a merged feature org's worktree
+// and that the script removes a closed PR's by hand, no longer that the
+// script removes it after a merge; start and spawn say they are refused while
+// merge or cleanup removes the org's worktree, as regateSpawnErr refuses
+// them; and merge-order says what bound_to in --json is.
+func TestOrgStartSpawnAndMergeOrder_HelpFollowTheCleanupAfterAMerge(t *testing.T) {
+	for _, tc := range []struct {
+		args            []string
+		wants, notWants []string
+	}{
+		{[]string{"start", "--help"}, []string{
+			"`ralph org disband` leaves the worktree and the branch, which `ralph org regate` works in until the PR is merged.",
+			"Once the PR is merged, `ralph org merge` removes the worktree, the branch, and the record of " +
+				"scripts/ralph-worktree.sh right after its merge, and `ralph org cleanup` does the same for a PR merged on GitHub",
+			"For a PR closed without a merge, run `./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch` in the " +
+				"main worktree once the branch is not needed.",
+			"Both forms are refused, with nothing recorded, while `ralph org regate` works on the org's branch, or while " +
+				"`ralph org merge` or `ralph org cleanup` removes the org's merged feature worktree; run start again once it ends.",
+		}, []string{"`./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes them", "run start again once the regate ends"}},
+		{[]string{"spawn", "--help"}, []string{
+			"A spawn (not a --dry-run) into an org is refused, with nothing recorded, while `ralph org regate` works on that " +
+				"org's branch, or while `ralph org merge` or `ralph org cleanup` removes that org's merged feature worktree; run " +
+				"the spawn again once it ends.",
+		}, []string{"run the spawn again once the regate ends"}},
+		{[]string{"merge-order", "--help"}, []string{
+			"Each --json entry with a binding also has bound_to in it, which the text does not show either: the branch of the " +
+				"org's latest complete binding when that is another branch",
+			"ralph org cleanup leaves such a branch out unless --branch names it.",
+		}, nil},
+	} {
+		out, err := runOrgCmd(t, tc.args...)
+		if err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		help := strings.Join(strings.Fields(out), " ")
+		for _, want := range tc.wants {
+			if !strings.Contains(help, want) {
+				t.Errorf("%v does not say %q:\n%s", tc.args, want, out)
+			}
+		}
+		for _, old := range tc.notWants {
+			if strings.Contains(help, old) {
+				t.Errorf("%v still says %q:\n%s", tc.args, old, out)
+			}
+		}
+	}
+}

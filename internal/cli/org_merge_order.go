@@ -101,6 +101,13 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"is not on PATH, or its PRs were left out because gh read another\n" +
 			"repository than origin's or the check could not be made.\n" +
 			"\n" +
+			"Each --json entry with a binding also has bound_to in it, which the\n" +
+			"text does not show either: the branch of the org's latest complete\n" +
+			"binding when that is another branch (the org_id was started again for\n" +
+			"another feature later), whether the org runs now or not, and no\n" +
+			"bound_to when the latest binding is this one. ralph org cleanup leaves\n" +
+			"such a branch out unless --branch names it.\n" +
+			"\n" +
 			"The merge guarantee line says what makes sure, when a PR merges into\n" +
 			"origin's default branch, that its required checks passed on a head\n" +
 			"with the latest default branch, as ralph doctor last found it and\n" +

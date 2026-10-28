@@ -762,8 +762,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"file. Either refusal, --dry-run included, is recorded as `rejected`.\n" +
 			"\n" +
 			"A spawn (not a --dry-run) into an org is refused, with nothing\n" +
-			"recorded, while `ralph org regate` works on that org's branch; run\n" +
-			"the spawn again once the regate ends.",
+			"recorded, while `ralph org regate` works on that org's branch, or\n" +
+			"while `ralph org merge` or `ralph org cleanup` removes that org's\n" +
+			"merged feature worktree; run the spawn again once it ends.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -930,8 +931,14 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"task argument are refused. Running the same start again reuses the\n" +
 			"worktree; a start into a running org that was not started for that\n" +
 			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
-			"branch; `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes\n" +
-			"them. The org's approval mode, [org.approval].mode (per-plan by\n" +
+			"branch, which `ralph org regate` works in until the PR is merged.\n" +
+			"Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
+			"branch, and the record of scripts/ralph-worktree.sh right after its\n" +
+			"merge, and `ralph org cleanup` does the same for a PR merged on\n" +
+			"GitHub (see their --help for what they check first). For a PR closed\n" +
+			"without a merge, run `./scripts/ralph-worktree.sh cleanup --id\n" +
+			"org-<org_id> --force-branch` in the main worktree once the branch is\n" +
+			"not needed. The org's approval mode, [org.approval].mode (per-plan by\n" +
 			"default, or split), is read from the same ralph.toml as max_orgs and\n" +
 			"max_total_seats below, recorded with the org's binding to the feature\n" +
 			"and named in the leader's task, so a change to the setting applies to\n" +
@@ -953,8 +960,9 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"lock but is stale, stopping, or a --once run.\n" +
 			"\n" +
 			"Both forms are refused, with nothing recorded, while\n" +
-			"`ralph org regate` works on the org's branch; run start again once\n" +
-			"the regate ends.\n" +
+			"`ralph org regate` works on the org's branch, or while `ralph org\n" +
+			"merge` or `ralph org cleanup` removes the org's merged feature\n" +
+			"worktree; run start again once it ends.\n" +
 			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {

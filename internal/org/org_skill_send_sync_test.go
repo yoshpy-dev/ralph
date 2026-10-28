@@ -46,9 +46,13 @@ var orgSkillInboxAnswerRules = []string{
 
 // orgSkillSendRow returns the line of text that starts the verb-table row of
 // send, "" when there is none.
-func orgSkillSendRow(text string) string {
+func orgSkillSendRow(text string) string { return orgSkillVerbRow(text, "send") }
+
+// orgSkillVerbRow returns the line of text that starts the verb-table row of
+// verb, "" when there is none.
+func orgSkillVerbRow(text, verb string) string {
 	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "| `send` |") {
+		if strings.HasPrefix(line, "| `"+verb+"` |") {
 			return line
 		}
 	}
@@ -117,6 +121,120 @@ func TestOrgSkill_SendRowSaysItWaitsForIdleBeforeTyping(t *testing.T) {
 		} {
 			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
 				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+	}
+}
+
+// orgSkillCleanupRules are fragments of the /org skill on the cleanup of a
+// merged feature org's worktree (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S4: AC5), by where they
+// are, each list in the skill's order: the verb-table row of cleanup (what it
+// removes, where it runs, which branches it counts, the checks, the script it
+// runs, its lines, its exit codes); the row of merge (the cleanup once
+// pr_merged is recorded, its CLEANUP: lines, the exit code it leaves alone,
+// and the spawn and start it refuses meanwhile); the rows of spawn and start
+// (refused while merge or cleanup removes the org's worktree); and the
+// subsection ### org の終わり方 (who cleans up after a merge, what stops it,
+// that ignored files go with the worktree, that --force-branch is safe after
+// a squash merge, and the script by hand for a PR closed without a merge).
+var orgSkillCleanupRules = []struct {
+	name      string
+	section   func(text string) string
+	fragments []string
+}{
+	{"the verb-table row of cleanup", func(text string) string { return orgSkillVerbRow(text, "cleanup") }, []string{
+		"GitHub で(ブラウザか `gh pr merge` で)merge された PR の機能の worktree・ローカルのブランチ・`scripts/ralph-worktree.sh` の記録を消す",
+		"打つ場所は main worktree(機能の worktree の中から打つと断られる)",
+		"PR の head(`headRefOid`)で片付ける",
+		"merge されたか分からないので `SKIPPED:` の行を出す",
+		"数えず行も出さない",
+		"何も消さずに断る",
+		"gitignore されたファイルは数えず、worktree と一緒に消える",
+		"`./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch` を打ち、`worktree_cleaned` を `via=cleanup` で記録する",
+		"打ち直すと残ったものから続ける",
+		"その org の `spawn` と `start` が断られる",
+		"`CLEANED: <ブランチ> org-<org_id>`",
+		"`nothing to clean up`",
+		"`SKIPPED:` が 1 本でもあれば 1",
+		"`--org-id` は断る",
+	}},
+	{"the verb-table row of merge", func(text string) string { return orgSkillVerbRow(text, "merge") }, []string{
+		"`pr_merged` を記録したら、`regate.lock` を持ったまま、ブランチの機能の worktree を片付ける",
+		"`worktree_cleaned` を `via=merge` で記録する",
+		"`CLEANUP: done` か、`CLEANUP: skipped (<理由>)` と、手で消すコマンドがあれば `CLEANUP MANUAL: <コマンド>` を出す",
+		"片付けは終了コードを変えない",
+		"その org の `spawn` と `start` は、merge の続きの片付けの間だけ断られる",
+	}},
+	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
+		"`ralph org merge` か `ralph org cleanup` がその org の merge された機能の worktree を消している間は、`--dry-run` でない spawn は何も記録せずに断られる",
+	}},
+	{"the verb-table row of start", func(text string) string { return orgSkillVerbRow(text, "start") }, []string{
+		"`ralph org merge` か `ralph org cleanup` がその org の merge された機能の worktree を消している間は、何も記録せずに断られる",
+	}},
+	{"the subsection ### org の終わり方", func(text string) string { return directorSkillSubsection(text, "### org の終わり方") }, []string{
+		"disband は worktree とブランチを消さない",
+		"PR が merge されたら、`ralph org merge` か `ralph org cleanup` が",
+		"`ralph org merge` で merge した PR は、merge の続きで片付き、結果は `CLEANUP:` の行で出る。片付けは終了コードを変えない",
+		"人が GitHub で直接 merge した PR は、main のチェックアウトから `ralph org cleanup` で片付ける",
+		"どちらも、次のどれかに当たれば何も消さず、理由と、あれば手で消すコマンドを出す",
+		"worktree に未コミットの変更か未追跡のファイルがある",
+		"ローカルのブランチの先頭か worktree の HEAD が、merge された PR の head と違う",
+		"worktree が detached HEAD か、別のブランチにいる",
+		"記録 `org-<org_id>` が結びつきと合わない",
+		"ralph をその worktree の中から打った",
+		"gitignore されたファイル",
+		"止める理由にならず、worktree と一緒に消える",
+		"squash merge のあとにリモートのブランチが消えていても止まらない",
+		"PR が merge されずに閉じられたときは、ralph は片付けない",
+		"`./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消す",
+		"ブランチが要らないと確かめたうえで `--force-branch` を足す",
+	}},
+}
+
+// orgSkillOldCleanupWords are what the /org skill said before ralph cleaned
+// up a merged feature org's worktree: a human ran the script after every
+// merge, and merge refused no spawn or start.
+var orgSkillOldCleanupWords = []string{
+	"PR が merge されたら、人が main のチェックアウトから `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で worktree・ブランチ・記録を消す",
+	"そのときは `--force-branch` を足して打ち直す",
+	"worktree を変えないので、その org の `spawn` と `start` は断られない",
+	"merge のあとに `cleanup` で消す",
+}
+
+// TestOrgSkill_PinsTheCleanupAfterAMerge pins what the /org skill says about
+// the cleanup of a merged feature org's worktree (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S4: AC5). A leader, a
+// director, and a human read the verb table and ### org の終わり方 to know
+// that ralph org merge and ralph org cleanup remove the worktree once the PR
+// is merged, what stops them, and when the script is still run by hand, so
+// each copy must have every fragment of orgSkillCleanupRules where it says,
+// in order, and none of orgSkillOldCleanupWords, compared with spaces and
+// line breaks removed (withoutSpaces). scripts/check-skill-sync.sh keeps the
+// copies identical but does not read Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/org/SKILL.md and
+// templates/base/.claude/skills/org/SKILL.md and run scripts/sync-skills.sh
+// for the two .agents copies, as for the test above.
+func TestOrgSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's cleanup check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		for _, in := range orgSkillCleanupRules {
+			for _, p := range skillOrderedFragmentProblems(in.section(text), in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+		squashed := withoutSpaces(text)
+		for _, old := range orgSkillOldCleanupWords {
+			if strings.Contains(squashed, withoutSpaces(old)) {
+				t.Errorf("%s still says %q -- see this test's doc comment for what to update", rel, old)
 			}
 		}
 	}

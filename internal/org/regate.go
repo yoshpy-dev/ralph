@@ -101,9 +101,10 @@ const (
 	// does. A Merge with --wait-checks releases it for every wait in
 	// merge_wait.go (D13), so a Regate or another Merge can run meanwhile.
 	regateLockFile = "regate.lock"
-	// regateLockWait is how long Regate and Merge retry regate.lock before
-	// they refuse: a spawn's check holds the lock shared for a moment (D9),
-	// which must not make either fail.
+	// regateLockWait is how long Regate, Merge, and the cleanup of a merged
+	// feature worktree (CleanupFeatureWorktree) retry regate.lock before they
+	// refuse: a spawn's check holds the lock shared for a moment (D9), which
+	// must not make any of them fail.
 	regateLockWait = time.Second
 	// regateGitWaitDelay is regateBoundedGit's exec.Cmd.WaitDelay: how long
 	// after the kill, or after git exited, it waits for the output pipes,
@@ -562,9 +563,10 @@ func regateCheckWorktree(ctx context.Context, orgID string, f *FeatureBinding, w
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s of the branch %s does not exist, and regate "+
-			"runs only there: when the branch's PR is merged or closed, clean up what is left with %s in the main checkout; "+
-			"otherwise make the worktree again (git worktree prune, then git worktree add %s %s, in the main checkout) and %s",
-			orgID, f.Worktree, f.Branch, featureWorktreeCleanup(orgID), f.Worktree, f.Branch, w.again), nil
+			"runs only there: when the branch's PR is merged, ralph org cleanup --branch %s cleans up what is left; when it is "+
+			"closed, clean up what is left with %s --force-branch in the main checkout once the branch is not needed; otherwise "+
+			"make the worktree again (git worktree prune, then git worktree add %s %s, in the main checkout) and %s",
+			orgID, f.Worktree, f.Branch, f.Branch, featureWorktreeCleanup(orgID), f.Worktree, f.Branch, w.again), nil
 	case err != nil:
 		return gateTarget{}, w.prefix + fmt.Sprintf("org_id %q's feature worktree %s cannot be read (%s): restore it and %s",
 			orgID, f.Worktree, pathErrorCause(err), w.again), nil

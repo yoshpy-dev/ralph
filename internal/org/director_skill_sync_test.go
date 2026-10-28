@@ -793,3 +793,144 @@ func TestDirectorSkillNumberedStep(t *testing.T) {
 		}
 	}
 }
+
+// directorSkillBullet returns the bullet of section that starts with start:
+// that line and the lines after it, up to the next line that is not blank
+// and does not start with a space (the next bullet at the same indent, or a
+// paragraph) or the end of section. It returns "" when no line starts with
+// start.
+func directorSkillBullet(section, start string) string {
+	lines := strings.Split(section, "\n")
+	first := -1
+	for i, line := range lines {
+		if first >= 0 {
+			if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, " ") {
+				return strings.Join(lines[first:i], "\n")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, start) {
+			first = i
+		}
+	}
+	if first < 0 {
+		return ""
+	}
+	return strings.Join(lines[first:], "\n")
+}
+
+// TestDirectorSkillBullet runs directorSkillBullet on bullets that wrap,
+// one followed by a paragraph, and a start no line has.
+func TestDirectorSkillBullet(t *testing.T) {
+	section := "### x\n\n- one\n  more\n- two\n  2b\n\nafter\n"
+	for _, tc := range []struct{ start, want string }{
+		{"- one", "- one\n  more"},
+		{"- two", "- two\n  2b\n"},
+		{"- three", ""},
+	} {
+		if got := directorSkillBullet(section, tc.start); got != tc.want {
+			t.Errorf("directorSkillBullet(section, %q) = %q, want %q", tc.start, got, tc.want)
+		}
+	}
+}
+
+// directorSkillMergeCleanupRules are fragments of the /director skill's
+// bullet on the CLEANUP: line of ralph org merge (its section merge と
+// auto_merge), in order (plan docs/plans/active/2026-10-28-org-merge-cleanup.md,
+// S4: AC5): the merge is done and its exit code stays 0 whatever the
+// cleanup did; a line that starts CLEANUP: done is a cleanup that ended,
+// resumed: in its parentheses one that went on from an earlier stop, and any
+// other words there a worktree_cleaned that could not be appended; CLEANUP:
+// skipped removed nothing, and its reason and the CLEANUP MANUAL: command go
+// to the human as they are; the director runs no command by hand unasked;
+// and ralph org cleanup --branch goes on once the reason is fixed.
+var directorSkillMergeCleanupRules = []string{
+	"merge は済んでいる。片付けがどうなっても、記録した merge の終了コードは 0 のまま",
+	"行が `CLEANUP: done` で始まれば片付いた",
+	"括弧に `resumed: <kind>` があれば、前に途中で止まった片付けの続きを済ませた",
+	"括弧にそれ以外の文があれば、台帳への `worktree_cleaned` の追記だけが失敗した(消す作業は済んでいる)",
+	"行が `CLEANUP: skipped (<理由>)` なら何も消していないので、理由と、続く `CLEANUP MANUAL:` のコマンドをそのまま人に伝える",
+	"手のコマンド(`git branch -D` などを含む)は、人に頼まれないまま打たない",
+	"`ralph org cleanup --branch <ブランチ>` で続きから片付く",
+}
+
+// directorSkillGitHubMergeCleanupSteps are fragments of the /director
+// skill's subsection ### GitHub で merge した PR の後始末, in order: ralph org
+// cleanup cleans up a PR merged on GitHub whatever auto_merge says, run from
+// the main checkout when the human says so or merge-order --all lists a
+// merged branch, as often as needed; exit 0 is reported with its CLEANED:
+// lines, and nothing to clean up needs no report; exit 1 goes to the human
+// as it is, with no rerun and no command by hand unasked; and with no gh it
+// removes nothing and exits 1.
+var directorSkillGitHubMergeCleanupSteps = []string{
+	"人が GitHub で直接 merge した PR の機能の worktree・ローカルのブランチ・記録は、`ralph org cleanup` で片付ける",
+	"`auto_merge` の値によらず打ってよい",
+	"人が GitHub で merge したと言ったとき、または `ralph org merge-order --all` に `merged` のブランチが出たときに、main の" +
+		"チェックアウトから `ralph org cleanup` を打つ",
+	"何度打ってもよい",
+	"終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up` なら報告は要らない",
+	"終了コード 1 なら、`SKIPPED:` の理由と `MANUAL:` のコマンド、stderr の文をそのまま人に伝える。人に頼まれないまま打ち直さず、" +
+		"手のコマンドも打たない",
+	"`gh` がないと merge されたかを判定できないので、何も消さずに終了コード 1 で終わる",
+}
+
+// TestDirectorSkill_PinsTheCleanupAfterAMerge pins what the /director skill
+// says about the cleanup of a merged feature org's worktree (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S4: AC5). ralph org
+// merge exits 0 for a recorded merge whatever its cleanup did, and the
+// cleanup's manual commands delete branches, so the skill's text is all that
+// keeps a director from reading a skipped cleanup as a failed merge or from
+// running such a command unasked. Each copy must have, in ### merge と
+// auto_merge, the CLEANUP: line among what a merge's report carries and the
+// bullet on that line with every fragment of directorSkillMergeCleanupRules
+// in order; the subsection ### GitHub で merge した PR の後始末 with every
+// fragment of directorSkillGitHubMergeCleanupSteps in order; the
+// merge-order bullet of ## 進捗の報告 pointing --all's merged branches to
+// that subsection; and the rule of ## してはいけないこと on the commands by
+// hand, compared with spaces and line breaks removed (withoutSpaces).
+// scripts/check-skill-sync.sh keeps the copies identical but does not read
+// Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's cleanup check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		merge := directorSkillSubsection(text, "### merge と auto_merge")
+		for _, in := range []struct {
+			name      string
+			text      string
+			fragments []string
+		}{
+			{"the report of a merge in ### merge と auto_merge", merge, []string{
+				"merge なら `MERGED:` の行、`METHOD:`、`MERGE COMMIT:`、出ていれば `NOTE:` と、`CLEANUP:` の行(下の箇条の読み方)を",
+			}},
+			{"the bullet of ### merge と auto_merge on the CLEANUP: line",
+				directorSkillBullet(merge, "- `ralph org merge` の `CLEANUP:` の行は"), directorSkillMergeCleanupRules},
+			{"the subsection ### GitHub で merge した PR の後始末", directorSkillSubsection(text, "### GitHub で merge した PR の後始末"),
+				directorSkillGitHubMergeCleanupSteps},
+			{"the merge-order bullet of ## 進捗の報告",
+				directorSkillBullet(directorSkillSubsection(text, "## 進捗の報告"), "- `ralph org merge-order`:"), []string{
+					"`--all` を付けると merge 済みのブランチ(`merged`)も出る",
+					"その機能の worktree の後始末は「GitHub で merge した PR の後始末」に従う",
+				}},
+			{"the section ## してはいけないこと", directorSkillSubsection(text, "## してはいけないこと"), []string{
+				"`ralph org merge` と `ralph org cleanup` が出した手で消すコマンド(`CLEANUP MANUAL:` と `MANUAL:` の行)を、人に" +
+					"頼まれないまま打たない",
+			}},
+		} {
+			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+	}
+}

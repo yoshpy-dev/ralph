@@ -444,7 +444,9 @@ func TestRegate_RefusedBeforeTheFetch(t *testing.T) {
 			},
 			want: func(fx *regateFixture) []string {
 				return []string{`org_id "auth"'s feature worktree ` + fx.worktree + " of the branch feat/auth does not exist",
-					"clean up what is left with ./scripts/ralph-worktree.sh cleanup --id org-auth in the main checkout",
+					"when the branch's PR is merged, ralph org cleanup --branch feat/auth cleans up what is left",
+					"when it is closed, clean up what is left with ./scripts/ralph-worktree.sh cleanup --id org-auth --force-branch " +
+						"in the main checkout once the branch is not needed",
 					"git worktree add " + fx.worktree + " feat/auth", "run ralph org regate --branch feat/auth again"}
 			}},
 		{name: "the worktree is a file",
