@@ -504,19 +504,26 @@ type regateMarker struct {
 // writeRegateMarker replaces the content of f, the open regate.lock, with m
 // as a JSON line, or with nothing when m is nil.
 func writeRegateMarker(f *os.File, m *regateMarker) error {
+	return writeLockMarker(regatePrefix, f, m)
+}
+
+// writeLockMarker is writeRegateMarker with its errors starting with prefix,
+// the verb that holds regate.lock: regatePrefix for Regate, cleanupPrefix
+// for the cleanup of a merged feature worktree (cleanup.go).
+func writeLockMarker(prefix string, f *os.File, m *regateMarker) error {
 	var data []byte
 	if m != nil {
 		line, err := json.Marshal(m)
 		if err != nil {
-			return fmt.Errorf("org: regate: encode the marker of %s: %w", f.Name(), err)
+			return fmt.Errorf("%sencode the marker of %s: %w", prefix, f.Name(), err)
 		}
 		data = append(line, '\n')
 	}
 	if err := f.Truncate(0); err != nil {
-		return fmt.Errorf("org: regate: write the marker of %s: %w", f.Name(), err)
+		return fmt.Errorf("%swrite the marker of %s: %w", prefix, f.Name(), err)
 	}
 	if _, err := f.WriteAt(data, 0); err != nil {
-		return fmt.Errorf("org: regate: write the marker of %s: %w", f.Name(), err)
+		return fmt.Errorf("%swrite the marker of %s: %w", prefix, f.Name(), err)
 	}
 	return nil
 }
