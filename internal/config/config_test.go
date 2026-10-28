@@ -93,9 +93,15 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if len(cfg.Org.Director.WakeCmd) != 0 {
 		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
 	}
-	// The same holds for [doctor]'s require_claude_cli and require_codex_cli:
-	// ralph.toml is a seed that ralph upgrade does not overwrite, so a
-	// scaffolded project keeps the values the template writes, not Default()'s.
+	// [doctor]'s require_claude_cli and require_codex_cli must be written out
+	// in the template: ralph.toml is a seed that ralph upgrade does not
+	// overwrite, so a scaffolded project keeps the values the template writes,
+	// not Default()'s. Load keeps Default()'s value for a key the template
+	// leaves out, so the raw text is checked as well.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(string(data), "\nrequire_claude_cli = false\n") {
 		t.Error("templates/base/ralph.toml does not set require_claude_cli = false in [doctor]")
 	}
