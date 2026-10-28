@@ -2,9 +2,10 @@
 
 - Date: 2026-10-28
 - Plan: `docs/plans/active/2026-10-28-drop-org-shell-defaults.md`(D1〜D3、AC1〜AC5、Progress の S1〜S3)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
-- Scope: `git diff 15e301c8...HEAD`(5 コミット、10 ファイル、+458/-315)。中心は S1 e948b85d(`internal/config/defaults_sync_test.go` の組み直しと `config_test.go` の畳み)、S2 76c7595d(`scripts/ralph-config.sh` とテンプレートの写しから 18 変数と export を削除)、S3 c56fa63c(コメントと文書)。計画ファイルと f94c072b(Progress だけ)は読んだが所見の対象にしていない。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
-- ID: この run の所見は L1〜L5。
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は 5de4cc6a の report、run 2 は直し 7d59e278 のあとの再 run で、この file を同じ場所で更新した)
+- Run 2 の scope: 直しの commit 7d59e278(5 ファイル、+34/-51)の全体と、直しが触れていない所見(L4)の再確認。run 1 の本文は下にそのまま残し、L1〜L5 のその後は「Run 2」の節にまとめた。
+- Scope: `git diff 15e301c8...HEAD`(run 1 の時点で 5 コミット、10 ファイル、+458/-315)。中心は S1 e948b85d(`internal/config/defaults_sync_test.go` の組み直しと `config_test.go` の畳み)、S2 76c7595d(`scripts/ralph-config.sh` とテンプレートの写しから 18 変数と export を削除)、S3 c56fa63c(コメントと文書)。計画ファイルと f94c072b(Progress だけ)は読んだが所見の対象にしていない。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- ID: run 1 の所見は L1〜L5(run 2 も同じ ID で状態を追う)。run 2 で新しく立てた所見はない。
 
 ## Evidence reviewed
 
@@ -38,6 +39,26 @@
 | LOW | maintainability | 「19 キー」という数が 3 つのコメントに書かれ、コードにも test にも固定されていない。`Config.Org` に 20 個目のキーを足して probe と `orgTemplateDrift` に足し忘れても、`TestDefaultsLockStep` は通り続ける(`probe` にない key は誰も見ない)。この穴は組み直し前の手書きの `check(...)` 列にもあった(足し忘れが同じ形で素通りした)ので今回の退行ではないが、計画のリスク R2(「キーが消えても気づけない」)の守りは、この 19 個の列挙の正しさに寄っている。 | `defaults_sync_test.go:10`、`:106`、`:144`(コメントの「19」)。probe の 19 field と `orgTemplateDrift` の 19 行は今は一致 | 数をコメントから外すのが最小。守るなら、`reflect` で `OrgConfig` の葉(`Roles` / `LaunchCmd` / `WakeCmd` のように shell にも既定の写しにもない除外を明示)を数えて probe の field 数と比べる 1 本のテスト。やるなら tech-debt の 1 行にして次の `[org]` キー追加(#274 など)を trigger にするのが小さい |
 | LOW | maintainability | 「2 面」と書いた説明が、`org.agmsg_home` だけ 3 面のまま残る事実を言っていない。テストの冒頭コメント(`defaults_sync_test.go:15-18`)と shell の見出し(`ralph-config.sh:46-48`)は正しく例外を書いているが、`config.go` の `OrgConfig` のコメントと spec の FR-2 の印は例外なしで、FR-2 の `照合から外し` は `scripts/ralph-config.sh` が `RALPH_ORG_AGMSG_HOME` の照合にまだ使われている以上、言い過ぎ。`agmsg_home` の既定値を変える人が `config.go` のコメントだけを読むと、shell の行が要ることに気づかず、テストの失敗で初めて知る(失敗は surface 名つきなので損は小さい)。 | `internal/config/config.go:31-32`(`kept in lock-step with templates/base/ralph.toml (defaults_sync_test.go)`)、`docs/specs/2026-08-01-org-runtime.md:74`(`(2026-10-28 #273 で照合から外し、config.go と templates/base/ralph.toml の 2 面にした)`)。同 spec の注記 (a)(`:45`)は model_pool の話なので 2 面で正しい | `config.go` のコメントに「`agmsg_home` は `scripts/ralph-config.sh` の `RALPH_ORG_AGMSG_HOME` とも(#276 まで)」を足す。FR-2 の印は「`RALPH_ORG_AGMSG_HOME` を除いて」を足す。#276 が片付けば両方とも消えるので、その issue の完了条件に入れておくと忘れない |
 
+## Run 2: 直し 7d59e278 のあと(L1〜L5 のその後と、直しの差分の確認)
+
+読んだもの: `git show 7d59e278` の全体、直し後の `scripts/ralph-config.sh:36-80`、`cmp scripts/ralph-config.sh templates/base/scripts/ralph-config.sh`(一致)、`internal/config/defaults_sync_test.go:1-306`、`internal/config/config.go:26-36`、`docs/specs/2026-08-01-org-runtime.md:74`。確かめていない: テスト、静的検査(skill の規則と依頼どおり、走らせていない)。
+
+### 所見のその後
+
+| ID | 状態 | 確認したこと |
+| --- | --- | --- |
+| L1 | 直った(7d59e278) | 両方の `ralph-config.sh` で `#276` と `no longer carries` が消え、非 export の理由は `:60-69` の 1 か所になった(run 1 の本文の `:60-67` は `:60-69` が正しい)。見出し(`:46-53`)は「下の行は export しない。理由は export の行の上の注記」と指すだけで、理由を繰り返さない。両方の写しは `cmp` で一致。`#[0-9]{2,4}` の grep は当たりなし。`templates/base/scripts` の `internal/` は、この file の `:49` の 1 件と `plan-visual.sh:401` の 1 件(別件)で、PR の前の同じ file は 5 件だった。 |
+| L2 | 直った(7d59e278) | `shell_and_skills` はテンプレートを読まなくなり、`ralph.toml` がなくても `SKILL.md` の照合は走る。Skip は shell file がないとき(`:228`)と `.claude/skills` がないとき(`:260`)だけで、`:29-31` と `:253-258` のコメントと合う。`tomlPath`、`toml`、`errors`、`fs` は `org` サブテストと `TestOrgTemplateDrift_…` がまだ使うので、未使用の宣言と import は生じない。 |
+| L3 | 直った(7d59e278) | 外側の `shellVal` / `goVal` は `agmsgShell` / `agmsgDefault` になり、ループの `shellVal`(`:296`)と衝突しない。テンプレート対 `Default()` の重複した報告も消えた。 |
+| L4 | 残す(直しの対象外) | 「19 キー」は `defaults_sync_test.go:10`、`:107`、`:145` のコメントのままで、probe の field 数(19)と `orgTemplateDrift` の行数(19)は今も一致。組み直し前からある穴で、直しの commit は触れていない。計画の判断(`known gaps` へ)に従う。 |
+| L5 | 直った(7d59e278) | `config.go:28-34` が「`AgmsgHome` の既定値は `scripts/ralph-config.sh` の `RALPH_ORG_AGMSG_HOME` とも比べる」と書き、FR-2 の印(`org-runtime.md:74`)が「`agmsg_home` のほかは」に変わった。テストの冒頭コメント(`:15-19`)、shell の見出し、`config.go`、spec の 4 か所の言い方が互いに食い違わない。 |
+
+### 依頼された判断
+
+- (a) L1 でテンプレート側の comment に issue の URL を使わなかったこと: 妥当。`check-template-purity.sh` の `FIXED_PATTERNS` が `yoshpy-dev` と `github.com/yoshpy-dev` を `templates/` 全体に禁じているので、URL は書けない。run 1 の L1 は番号も履歴もコメントから外す案で、issue の番号は plan とテスト(`defaults_sync_test.go:17`)に残るので、追跡できる場所は減っていない。
+- (b) L3 で shell 対テンプレートの比較を落としたこと: 妥当。`shell == Default()`(`shell_and_skills`)と `template == Default()`(`org`)が両方通れば shell == テンプレートは導ける。テンプレートがなければ、前の版でもこの比較は Skip だったので、失った検査はない。失ったのは、shell とテンプレートが直接ずれたときの「shell 対テンプレート」という 1 行の文面だけで、ずれた側は `Default()` と並べて名指しされる。`-run '…/shell_and_skills'` だけを打つとテンプレートは見ないが、そのことは `:17-19` のコメントが書いている。計画 D2 は「3 面の照合は残す」と書いていて、残し方が「直接の 3 者比較」から「2 つのサブテストの合成」に変わったので、計画の Deviation notes に 1 行あると `/verify` が迷わない。
+- 直しの差分の新しい問題: なし。見出しの「`internal/config/defaults_sync_test.go` … compares its default」の「its」は、文の主語(テスト)とも読めるが、run 1 の前の版も同じ言い方で、前後の文脈から `RALPH_ORG_AGMSG_HOME` と読める。所見にはしない。
+
 ## Positive notes
 
 - テンプレートを `Load` を通さず probe に読み、nil と値のずれを分ける設計(D1)は、`Load` が `Default()` から始まるせいで「キーを消しても一致する」という穴を正しく塞いでいる。`codex_verified = false` や `auto_merge = false` のようにゼロ値が既定のキーも、ポインタだから有無が分かる。
@@ -51,11 +72,11 @@
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| なし | - | - | - | - |
+| L4(未登録): 「19 キー」の数がコメントにしかなく、`Config.Org` に 20 個目のキーを足して probe と `orgTemplateDrift` に足し忘れても `TestDefaultsLockStep` が通り続ける | 新しい `[org]` キーの既定値のずれが、テンプレートとの照合から漏れる。組み直し前の手書きの列にも同じ穴があり、今回の PR が作った退行ではない | 組み直し前からの穴で、この PR の範囲(shell の写しを外し、照合を `Default()` とテンプレートに絞る)の外。run 2 の時点で pipeline は cycle 1 で、オーケストレーターは `/pr` の known gaps に書くと決めた | 次に `[org]` のキーを足す変更(#274 など)。`reflect` で `OrgConfig` の葉を数えて probe の field 数と比べる 1 本のテストか、コメントから数を外す | 本 report の L4、`docs/plans/active/2026-10-28-drop-org-shell-defaults.md` の R2 |
 
-_(L1〜L5 はこの PR の中で直せる大きさで、先送りする作業ではない。L4 の「新しい `[org]` キーの足し忘れを検知する仕組みがない」は組み直し前からの穴で、今回の PR が作ったものではない。台帳に足すかどうかは Follow-ups を参照。)_
+_(L1〜L3、L5 は 7d59e278 で直った。L4 は上のとおり。`docs/tech-debt/README.md` には、この commit では足していない。`/pr` で known gaps にするか、台帳の 1 行にするかはオーケストレーターが決める。)_
 
 ## Recommendation
 
-- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 5)
-- Follow-ups: すべて動作を変えない。直すなら優先は L1(両方の `ralph-config.sh` の見出しの 1 か所、下流に届く)、L5(`config.go` のコメントと FR-2 の印)、L2、L3、L4 の順。L1 は core の file なので、直すなら `scripts/ralph-config.sh` と `templates/base/scripts/ralph-config.sh` を同じ内容にして `cmp` を取る。L1 と L5 を直すとコメントと文書だけが動くので、record-only ではなく通常の再 run になる(`post-implementation-pipeline.md` の例外は report と insight の記録だけが対象)。回し直しの費用が気になるなら、L1〜L5 を残したまま `/verify` へ進めて、`/pr` の known gaps に書くか、#276 の作業で一緒に直すのが小さい(L1 と L5 は #276 が `RALPH_ORG_AGMSG_HOME` を片付けると自然に消える)。
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 1)
+- Follow-ups: 残る所見は L4(動作を変えない、pre-existing)だけ。L1〜L3、L5 は 7d59e278 で直り、直しの差分に新しい所見はない。(1) L4 は `/pr` の known gaps に書くか、次の `[org]` キーの追加を trigger に台帳へ 1 行足す。(2) L3 の判断(shell 対テンプレートの直接比較を、`shell == Default()` と `template == Default()` の合成に変えた)は、計画 D2 の「3 面の照合は残す」の残し方が変わるので、計画の Deviation notes に 1 行足すと `/verify` が迷わない。(3) 7d59e278 はコードのコメントとテストの構成を変えたので、通常どおり `/verify` へ進む(record-only の例外には当たらない)。
