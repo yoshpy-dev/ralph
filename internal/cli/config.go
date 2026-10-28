@@ -51,7 +51,7 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"--config names, else ./ralph.toml. The key is the dotted toml name, such\n" +
 			"as standard.plan_advisory or org.review.max_cross_review_cycles. A key\n" +
 			"the file does not set prints its built-in default, and so does every key\n" +
-			"when the file does not exist. The value is one line on stdout: true or\n" +
+			"when the file does not exist. It prints the value on stdout: true or\n" +
 			"false, a decimal number, or a string as written.\n" +
 			"\n" +
 			"Exit codes, for the skills and seats that read a setting with it:\n" +
@@ -84,10 +84,11 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 	}
 }
 
-// configValue returns the value of key, a dotted toml name, in cfg as one
-// line: it walks cfg's structs by their toml tags and formats the bool, int,
-// or string it ends at. A key that is not a field, or that ends at or goes
-// through a table or an array, is an ErrConfigKey.
+// configValue returns the value of key, a dotted toml name, in cfg as text:
+// it walks cfg's structs by their toml tags and formats the bool, int, or
+// string it ends at (a string as it is, line breaks included). A key that is
+// not a field, or that ends at or goes through a table or an array, is an
+// ErrConfigKey.
 func configValue(cfg config.Config, key string) (string, error) {
 	v := reflect.ValueOf(cfg)
 	segments := strings.Split(key, ".")
@@ -97,7 +98,7 @@ func configValue(cfg config.Config, key string) (string, error) {
 		}
 		field, ok := configField(v, segment)
 		if !ok {
-			return "", fmt.Errorf("config get: %s: %w: ralph.toml has no such key", key, ErrConfigKey)
+			return "", fmt.Errorf("config get: %s: %w: no such key", key, ErrConfigKey)
 		}
 		v = field
 	}
@@ -125,14 +126,22 @@ func configField(v reflect.Value, name string) (reflect.Value, bool) {
 	return reflect.Value{}, false
 }
 
-// configKindName names kind the way ralph.toml's reader sees it.
+// configKindName names kind the way ralph.toml's reader sees it, with its
+// article. A kind no field of config.Config has today is named by Go's name
+// for it.
 func configKindName(kind reflect.Kind) string {
 	switch kind {
 	case reflect.Struct, reflect.Map:
 		return "a table"
 	case reflect.Slice, reflect.Array:
 		return "an array"
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "an integer"
+	case reflect.String:
+		return "a string"
 	default:
-		return "a " + kind.String() + " value"
+		return "a value of Go kind " + kind.String()
 	}
 }

@@ -29,24 +29,24 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   herdr の agent の名前を変えないようにする。2 つ目の値は、pane の中の
   Claude Code のセッションの hook が、セッションの終わりと compaction の前に
   未コミットの変更を `wip:` でコミットしないようにする。3 つ目の値は座席の
-  driver(`claude` か `codex`)で、座席の計画助言と cross-review が
-  `scripts/xreview-helpers.sh` の `pick_reviewer` でもう一方の CLI を選べる
-  ようにする。`--env` のない herdr でも動くが、
+  driver(`claude` か `codex`)で、座席の cross-review がもう一方の CLI を
+  選ぶときに使う `scripts/xreview-helpers.sh` の `pick_reviewer` に、座席の
+  driver を読ませる。`--env` のない herdr でも動くが、
   `warning: herdr tab create has no --env flag` で始まる警告が stderr に
   1 行出て、どの値も付かない。そのときは、座席の
   agmsg が名前を変えると ralph が座席に届かなくなることがあり
   (`agent_not_found`)、座席のセッションが `wip:` のコミットを作ることが
   ある(機能の org の leader は、ブランチにそのコミットがあれば push せずに
   BLOCKED を上げる)。また `pick_reviewer` は driver を claude とみなすので、
-  codex の座席の計画助言と cross-review がもう一方の CLI を取り違えることが
-  ある。ralph 自身が打つ agmsg には、herdr の版によらず
+  codex の座席の cross-review がもう一方の CLI を取り違えることがある。
+  ralph 自身が打つ agmsg には、herdr の版によらず
   `AGMSG_SELF_NAME=off` が付く。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
   `max_orgs` / `max_total_seats` / `permissions`)が意図通り設定されて
   いること。未設定の場合は既定値
   (`permissions.default = "autonomous"`)で動作する。`[org.review]` は
   leader の計画助言と reviewer 座席の cross-review の有無(既定はどちらも
-  off)と、cross-review の直しの回数の上限で、座席は値を
+  off)と、cross-review を回す回数の上限(最初の 1 回を含む)で、座席は値を
   `ralph config get <key>`(例: `ralph config get org.review.cross_review`)で
   読む。座席が読み始めるのは後の版から。
 - **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード

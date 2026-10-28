@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // Tests for `ralph config get` (plan 2026-10-29-review-switches-config, D2,
-// D3, D6 and AC4). Each test chdirs into a temp directory, so none of them
-// runs in parallel.
+// D3, D6 and AC4). None of them runs in parallel. Those that run the verb on
+// a key chdir into a temp directory first, so that ./ralph.toml is the
+// test's own, with t.Chdir, which a parallel test may not call.
 
 // runConfigGet runs `ralph config get <key>` with extra flags in-process and
 // returns its stdout, its stderr, and the exit code main would use.
@@ -23,17 +27,19 @@ func runConfigGet(t *testing.T, key string, flags ...string) (stdout, stderr str
 }
 
 // With no ralph.toml, every key prints its built-in default: the review
-// switches are off and the cross-review cap is 2.
+// switches are off and the cross-review cap is 2. An integer and a string
+// key from outside this plan's tables print config.Default()'s values.
 func TestConfigGet_NoRalphTomlPrintsTheDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
+	defaults := config.Default()
 	for _, tc := range []struct{ key, want string }{
 		{"standard.plan_advisory", "false\n"},
 		{"standard.cross_review", "false\n"},
 		{"org.review.plan_advisory", "false\n"},
 		{"org.review.cross_review", "false\n"},
 		{"org.review.max_cross_review_cycles", "2\n"},
-		{"org.max_seats", "5\n"},
-		{"org.approval.mode", "per-plan\n"},
+		{"org.max_seats", strconv.Itoa(defaults.Org.MaxSeats) + "\n"},
+		{"org.approval.mode", defaults.Org.Approval.Mode + "\n"},
 	} {
 		stdout, stderr, code := runConfigGet(t, tc.key)
 		if code != 0 || stdout != tc.want || stderr != "" {
@@ -90,11 +96,11 @@ func TestConfigGet_ConfigFlagReadsThatFile(t *testing.T) {
 func TestConfigGet_KeyThatIsNotOneValueExits2(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, tc := range []struct{ key, want string }{
-		{"nope.key", "ralph.toml has no such key"},
-		{"standard.nope", "ralph.toml has no such key"},
-		{"Standard.plan_advisory", "ralph.toml has no such key"},
-		{"", "ralph.toml has no such key"},
-		{"standard.", "ralph.toml has no such key"},
+		{"nope.key", "not a key of one value in ralph.toml: no such key"},
+		{"standard.nope", "not a key of one value in ralph.toml: no such key"},
+		{"Standard.plan_advisory", "not a key of one value in ralph.toml: no such key"},
+		{"", "not a key of one value in ralph.toml: no such key"},
+		{"standard.", "not a key of one value in ralph.toml: no such key"},
 		{"standard", "it is a table"},
 		{"org.review", "it is a table"},
 		{"org.roles", "it is a table"},
@@ -102,7 +108,9 @@ func TestConfigGet_KeyThatIsNotOneValueExits2(t *testing.T) {
 		{"org.model_pool", "it is an array"},
 		{"org.roles.leader", "org.roles is a table"},
 		{"org.driver_pool.claude", "org.driver_pool is an array"},
-		{"standard.plan_advisory.x", "standard.plan_advisory is a bool value"},
+		{"standard.plan_advisory.x", "standard.plan_advisory is a boolean"},
+		{"org.max_seats.x", "org.max_seats is an integer"},
+		{"org.approval.mode.x", "org.approval.mode is a string"},
 	} {
 		stdout, _, err := runRootCmdSplit(t, "config", "get", tc.key)
 		if code := ExitCode(err); code != 2 || stdout != "" {
@@ -204,20 +212,23 @@ func TestConfigGet_CommandLineErrorsExit1(t *testing.T) {
 
 // The help of get states the contract of D6 for the skills and seats: exit
 // 0 is the value, exit 1 with unknown command "config" (and only that) is
-// off, and exits 2 and 3 stop.
+// off, and exits 2 and 3 stop. Each phrase is matched with runs of white
+// space, line breaks included, read as one space, so re-wrapping the help
+// keeps the test green.
 func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
 	if err != nil {
 		t.Fatalf("config get --help: %v", err)
 	}
+	help := strings.Join(strings.Fields(stdout), " ")
 	for _, want := range []string{
-		"A key\nthe file does not set prints its built-in default",
-		"  0  the value was printed: use it.",
-		"unknown command \"config\" on stderr. Treat that, and only that, as\n     off, and record that the setting was treated as off.",
-		"  2  the key is not a key of ralph.toml, or names a table or an array\n     rather than one value: stop and report it, do not treat it as off.",
-		"  3  ralph.toml cannot be read, cannot be parsed, or fails validation:\n     stop and report it, do not treat it as off.",
+		"A key the file does not set prints its built-in default",
+		"0 the value was printed: use it.",
+		"unknown command \"config\" on stderr. Treat that, and only that, as off, and record that the setting was treated as off.",
+		"2 the key is not a key of ralph.toml, or names a table or an array rather than one value: stop and report it, do not treat it as off.",
+		"3 ralph.toml cannot be read, cannot be parsed, or fails validation: stop and report it, do not treat it as off.",
 	} {
-		if !strings.Contains(stdout, want) {
+		if !strings.Contains(help, want) {
 			t.Errorf("config get --help lacks %q:\n%s", want, stdout)
 		}
 	}

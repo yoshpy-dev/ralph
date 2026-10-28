@@ -243,8 +243,10 @@ mode = "per-plan"
 # [org.review] — switches of the reviews that org seats run.
 # plan_advisory = true turns on the plan advisory of an org's leader, and
 # cross_review = true turns on the cross-review of an org's reviewer seat;
-# both are off by default. max_cross_review_cycles caps the cross-review fix
-# cycles, as the standard flow caps its pipeline runs (default 2; it must
+# both are off by default. max_cross_review_cycles caps the number of
+# cross-review runs in all, the first one included, counted the way
+# RALPH_STANDARD_MAX_PIPELINE_CYCLES counts the standard flow's pipeline runs:
+# the default 2 is the first review and one review after a fix (it must
 # be >= 1). The leader and the reviewer read these values with
 # `ralph config get <key>`, such as
 # `ralph config get org.review.cross_review`, and treat the exit codes as the

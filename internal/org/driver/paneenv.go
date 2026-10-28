@@ -33,9 +33,11 @@ func SeatPaneEnv() []string {
 
 // PrimaryCLIEnv is the variable /cross-review (its step 2) and
 // scripts/xreview-helpers.sh's pick_reviewer read as the CLI a session runs
-// on (claude or codex, case-insensitive), to call the other one as the
-// reviewer. Without it pick_reviewer takes claude, and so does /cross-review
-// when both CLIs are installed.
+// on, its driver (claude or codex, case-insensitive), to call the other one
+// as the reviewer. Without it pick_reviewer treats the driver as claude and
+// picks codex, and /cross-review does the same when both CLIs are installed.
+// Of the reviews, only /cross-review reads it today: /plan's advisory calls
+// codex directly.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
@@ -61,8 +63,8 @@ func paneEnvConsequence(entry string) string {
 		return "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 			"at its session end or context compaction (its WIP-checkpoint hooks)"
 	case strings.HasPrefix(entry, PrimaryCLIEnv+"="):
-		return "a seat's plan advisory or cross-review may pick the wrong CLI as its other model " +
-			"(scripts/xreview-helpers.sh pick_reviewer falls back to claude)"
+		return "a seat's cross-review may pick the wrong CLI as its other model " +
+			"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude)"
 	}
 	return ""
 }

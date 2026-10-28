@@ -171,7 +171,7 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // It runs the verbs as main does, with os.Stdout and os.Stderr swapped, so
 // it does not run in parallel.
 func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
-	const primaryCLIClause = "may pick the wrong CLI as its other model"
+	const primaryCLIClause = "a seat's cross-review may pick the wrong CLI as its other model"
 	for _, tc := range []struct {
 		name       string
 		setup      func(t *testing.T) (herdrLog string, args []string)

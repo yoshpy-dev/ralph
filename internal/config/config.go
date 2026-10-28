@@ -556,7 +556,7 @@ type OrgApprovalConfig struct {
 
 // OrgReviewConfig holds the `[org.review]` settings of a feature org's
 // reviews: the leader's plan advisory, the reviewer seat's cross-review, and
-// the cap on cross-review fix cycles. The leader and the reviewer read them
+// the cap on cross-review runs. The leader and the reviewer read them
 // with `ralph config get <key>` (they start to in issues #267 and #269).
 type OrgReviewConfig struct {
 	// PlanAdvisory switches the plan advisory of a feature org's leader on.
@@ -565,10 +565,12 @@ type OrgReviewConfig struct {
 	// CrossReview switches the cross-review of a feature org's reviewer seat
 	// on. False, the default, leaves it off.
 	CrossReview bool `toml:"cross_review"`
-	// MaxCrossReviewCycles caps the cross-review fix cycles of a feature org,
-	// as RALPH_STANDARD_MAX_PIPELINE_CYCLES caps the standard flow's pipeline
-	// runs. Its default, 2, is that variable's default in
-	// scripts/ralph-config.sh. Load refuses a value below 1.
+	// MaxCrossReviewCycles caps the number of cross-review runs of a feature
+	// org in all, the first one included, counted the way
+	// RALPH_STANDARD_MAX_PIPELINE_CYCLES counts the standard flow's pipeline
+	// runs: 2 is the first review and one review after a fix. Its default, 2,
+	// is that variable's default in scripts/ralph-config.sh. Load refuses a
+	// value below 1.
 	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
 }
 

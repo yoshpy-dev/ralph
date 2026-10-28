@@ -109,9 +109,10 @@ KNOWN_DIFFS=(
   # only here); template frames the same recipe for a reader without those
   # paths (overlay-scaffold-v2-p5 Slice 5)
   "docs/recipes/adding-a-language-pack.md"
-  # ralph.toml: root turns on the four review switches of [standard] and
-  # [org.review] (issue #265); the template keeps them off. #264 also writes
-  # this file
+  # ralph.toml: root holds only the four review switches of [standard] and
+  # [org.review], turned on (issue #265), and leaves every other key to the
+  # built-in default; the template keeps the full file with them off. Other
+  # changes that need a repository-only value add their table to root
   "ralph.toml"
 )
 

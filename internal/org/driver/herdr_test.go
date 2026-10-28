@@ -417,16 +417,17 @@ func TestHerdr_TabCreate_PaneEnvWithoutEnvFlagWarnsOnce(t *testing.T) {
 	}
 }
 
-// The clauses warnNoPaneEnv writes for AgmsgSelfNameOff and for
-// WIPCheckpointOff, and the advice that ends every warning line, written out
-// here so that a change to paneEnvConsequence's text fails the tests.
+// The clauses warnNoPaneEnv writes for AgmsgSelfNameOff, for
+// WIPCheckpointOff, and for a PrimaryCLIEnv entry, and the advice that ends
+// every warning line, written out here so that a change to
+// paneEnvConsequence's text fails the tests.
 const (
 	agmsgSelfNameClause = "an agmsg run inside such a pane (a seat's or a headless director's) may rename the pane's herdr agent, " +
 		"and ralph may then fail to reach it (agent_not_found)"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
-	primaryCLIClause = "a seat's plan advisory or cross-review may pick the wrong CLI as its other model " +
-		"(scripts/xreview-helpers.sh pick_reviewer falls back to claude)"
+	primaryCLIClause = "a seat's cross-review may pick the wrong CLI as its other model " +
+		"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude)"
 	noPaneEnvAdvice = ". Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
 )
 
