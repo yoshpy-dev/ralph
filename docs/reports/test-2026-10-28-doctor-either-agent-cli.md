@@ -6,6 +6,7 @@
 - Scope: HEAD 322bfe18(base 15e301c8)。behavioral test だけを実行した(静的解析は /verify の担当で、verify の報告は pass)。環境は macOS(Darwin 25.5.0、arm64)、go1.27.3、`go env GOFLAGS` は空。ほかのセッションと CPU を分けており、1 分の load average は始まりが 7.4、`run-test.sh` の終わりが 111.0、最後の実行の終わりが 74.4
 - Evidence: `docs/evidence/test-2026-10-28-doctor-either-agent-cli.log`(`run-test.sh` の出力すべて、名指しの実行、coverage、mutant のスクリプトと落ちたテストの行、組み立てた binary の doctor の出力)。gitignore の対象で、コミットしない
 - 追跡しているファイルは、この報告のほかは変えていない。mutant は `git archive HEAD` の scratchpad の写しで試し、試すたびに元へ戻して `cmp` で HEAD と同じことを確かめた。`run-test.sh` のあとの `git status --porcelain` は空だった
+- 再実行: 2026-10-28(JST 20:44〜21:27)、HEAD 80fdce33。S5 でテストを 1 本足したあとの実行で、結果は「再実行(HEAD 80fdce33)」の節にある。「Test execution」から「Regression checks」までの節は 322bfe18 での 1 回目の記録で、書き換えていない。Test gaps と Verdict は再実行に合わせて直した
 
 ## Test execution
 
@@ -110,15 +111,51 @@
 | 既存の doctor のテスト(scaffold の strict、merge guarantee、codex sandbox、shell alias、retired role key) | 1b の `internal/cli` 全体で通過 | 1b |
 | 既存の project の `require_claude_cli = true` が今までどおり fail する(計画の D5) | 統合の claude required and absent、表の required の 8 通りで fail | 3 |
 
+## 再実行(HEAD 80fdce33)
+
+- Scope: HEAD 80fdce33(base 15e301c8)。1 回目の報告のコミット 1b9798b1 からのコードの変更は `internal/cli/doctor_shell_alias_test.go` の 53 行の追加だけ(`git diff --stat 1b9798b1..HEAD`)。8408b30c と ee5b3bda が `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` を足した。ほかに変わった 4 ファイルは、計画、self-review と verify の報告、insight の記録
+- 環境は 1 回目と同じ(macOS、go1.27.3)。1 分の load average は、始まりが 31.2、20:47 に 139.6、`run-test.sh` の終わりが 5.5
+- Evidence: `docs/evidence/test-2026-10-28-doctor-either-agent-cli-rerun.log`(全実行の出力、mutant の置き換えのスクリプトと overlay、落ちたテストの行)。gitignore の対象で、コミットしない
+- product code は変えていない。mutant は `go test -overlay` で scratchpad の写しを読ませ、`internal/cli/doctor.go` には手を付けていない。実行のあとの `git diff --quiet -- internal/cli/doctor.go` は rc 0、`git status --porcelain` は空だった
+
+| # | Suite / Command | Tests | Passed | Failed | Skipped | rc と時間 |
+| --- | --- | --- | --- | --- | --- | --- |
+| R1 | `./scripts/run-test.sh`(既定の changed。1 回目と同じく `templates/base/ralph.toml` で full に広がり、pack は golang だけ) | 下の R1a と R1b | すべて | 0 | 1 件 | rc 0、2,541 秒(20:44:05〜21:26:26) |
+| R1a | R1 の shell の部分(`verify.local.sh` の test モード、`tests/test-*.sh`) | 45 本 | 45 | 0 | 1 件(1 回目と同じ `tests/test-secret-scan-branch.sh` の事例) | R1 に含む |
+| R1b | R1 の Go の部分(`go test ./...`) | テストのある 9 パッケージ | 9 | 0 | - | `internal/cli` 902.7 秒、`internal/org` 1,077.7 秒、`internal/config` 1.25 秒。ほかの 6 つは `(cached)` |
+| R1c | R1b で `(cached)` だった 6 パッケージ(`cmd/ralph`、`internal/insights`、`internal/org/driver`、`internal/org/protocol`、`internal/scaffold`、`internal/upgrade`)を `-count=1` で | 6 パッケージ | 6 | 0 | - | rc 0、5 秒(各 0.53〜3.10 秒) |
+| R2 | `go test ./internal/cli/ -run 'AgentCLI\|Doctor\|HerdrAgmsg\|ShellAlias' -count=1`(`-v` を足して数えた) | トップレベル 91、サブテストを含めて 197 | 197 | 0 | 0 | rc 0、45 秒(パッケージ 43.9 秒) |
+| R3 | `go test ./internal/config/ -count=1`(`-v` を足して数えた) | トップレベル 56、サブテストを含めて 171 | 171 | 0 | 0 | rc 0、3 秒(パッケージ 1.50 秒) |
+| R4 | mutant P9 を overlay で読ませ、R2 と同じ `-run` | トップレベル 91 | 90 | 1 | 0 | rc 1、53 秒(パッケージ 50.5 秒) |
+
+- R1a の 45 本は `tests/test-*.sh` の集合と同じで、どの本も `OK` で終わった
+- R1b の `(cached)` の 6 つは、1 回目からテストの入力が変わっていない。Go の変更は `internal/cli` の `_test.go` だけで、`cmd/ralph` が読む `internal/cli` の本体は同じ。cache に頼らないよう R1c で `-count=1` でも走らせ、通った
+- R1 は 1 回目(1,491 秒)より長い。`internal/org` の 1,077.7 秒は、30 分の上限の 6 割にあたる。ほかのセッションで load average が 139.6 まで上がったためとみられるが、未確認です
+- 打ち直しはない。30 分の timeout による失敗も、`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` の失敗も起きなかった
+- R2 で新しい `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` は通った(2.07 秒)。R2 のトップレベルが 1 回目の 3 の 19 本より多いのは、`-run` に `ShellAlias` を足したため
+- R3 で `TestDefault`、`TestLoad_MissingFile`、`TestLoad_TemplateRalphToml`、`TestLoad_RequireAgentCLIs` は通った
+
+### mutant P9 の再試行
+
+`internal/cli/doctor.go` の写しを scratchpad に作り、1 回だけ現れる `herdrResult.Status == "pass"` を `herdrResult.Status != "info"` に置き換えた(1 回目と同じ perl の置き換え)。`{"Replace":{"<worktree>/internal/cli/doctor.go":"<写し>"}}` の overlay を渡して `go test -overlay <overlay.json> ./internal/cli/ -run 'ShellAlias|Doctor|HerdrAgmsg|AgentCLI' -count=1 -v` を打った。build の失敗はない。
+
+| mutant | 変更 | 1 回目(322bfe18) | 再実行(80fdce33) |
+| --- | --- | --- | --- |
+| P9 | Check 8b の配線 `herdrResult.Status == "pass"` を `!= "info"` に | 生き残った | 落ちた: `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` だけ |
+
+- 落ちた行は `internal/cli/doctor_shell_alias_test.go:1604`(`Shell aliases (codex/claude) status = "warn", want info with herdr absent`)と `:1607`(detail に `(herdr not installed, so no seat is affected today)` がない)。herdr の行が warn であることを見る `:1596` は通った。ほかのトップレベル 90 本は通った
+- HEAD の R2 では同じテストが通る。このテストは、herdr がないときに配線が herdr を「ある」と見なさないことを固める。Test gaps の 1 はこれで閉じた
+- P1〜P8 は再実行していない。本体と、それらを落としたテストは 1 回目から変わっていない(このブランチの差分はテストの追加だけ)
+
 ## Test gaps
 
-1. P9: 計画の Test plan の Edge cases にある「herdr がないときも Check 8b(alias)は herdr を pass と見なさない」を固めるテストがない。`internal/cli/doctor.go:134` の `herdrResult.Status == "pass"` を `!= "info"` に変えても、`internal/cli` の全体が通る。このブランチで herdr がないときの状態が info から warn に変わったため、この比べ方が初めて結果を左右するようになった。足すなら、`TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam` と同じ組み立てで herdr の stub を置かない 1 本(alias の rc あり、`Shell aliases (codex/claude): info` と `herdr not installed` を見る)で P9 を落とせる見込み。足して P9 が落ちるかは試していない
+1. 閉じた(再実行の R4)。新しい `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` が mutant P9 を落とす。1 回目の記述は次のとおり。P9: 計画の Test plan の Edge cases にある「herdr がないときも Check 8b(alias)は herdr を pass と見なさない」を固めるテストがない。`internal/cli/doctor.go:134` の `herdrResult.Status == "pass"` を `!= "info"` に変えても、`internal/cli` の全体が通る。このブランチで herdr がないときの状態が info から warn に変わったため、この比べ方が初めて結果を左右するようになった。足すなら、`TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam` と同じ組み立てで herdr の stub を置かない 1 本(alias の rc あり、`Shell aliases (codex/claude): info` と `herdr not installed` を見る)で P9 を落とせる見込み。足して P9 が落ちるかは試していない
 2. 本物の claude と codex の CLI では試していない(どれも stub の `--version`)
 3. `TestRunDoctor_Passes`(`cli_test.go:345`)は doctor の戻り値を見ない。前からの形で、このブランチの変更とは関係しない
 4. `docs/recipes/codex-setup.md` と `.claude/skills/org/SKILL.md` の文は、behavioral test の対象ではない(/verify と /sync-docs の担当)
 
 ## Verdict
 
-- Pass: pass。HEAD 322bfe18 で `./scripts/run-test.sh` は rc 0(1,491 秒。shell 45 本、Go 9 パッケージ、`(cached)` なし)。名指しの `internal/config` と `internal/cli` の実行も rc 0 で、`TestDefault`、`TestLoad_TemplateRalphToml`、`TestLoad_RequireAgentCLIs` は通った。既存の 21 か所の doctor の呼び出しは、どれも claude と codex の両方を stub で置いており、意図の弱まったテストはない。統合の 5 件はリポジトリの雛形を読み、雛形を戻すと落ちる。本体の mutant は 9 のうち 8 が落ちた。生き残った P9 は計画の edge case 1 つで、HEAD の binary の振る舞いは正しい。/pr の前に 1 本足すかはリードの判断に任せる(Test gaps の 1)
+- Pass: pass(再実行、HEAD 80fdce33)。`./scripts/run-test.sh` は rc 0(2,541 秒。shell 45 本、Go 9 パッケージ。`(cached)` だった 6 パッケージも `-count=1` で通った)。名指しの `internal/cli`(トップレベル 91 本)と `internal/config`(トップレベル 56 本)の実行も rc 0。1 回目に生き残った mutant P9 は、新しい `TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr` で落ちるようになり、Test gaps の 1 は閉じた。打ち直しはない。1 回目(HEAD 322bfe18)も pass で、本体の mutant 9 のうち P9 を除く 8 が落ちた。その記録は上の節にある
 - Fail: なし
 - Blocked: なし
