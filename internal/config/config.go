@@ -556,8 +556,9 @@ type OrgApprovalConfig struct {
 
 // OrgReviewConfig holds the `[org.review]` settings of a feature org's
 // reviews: the leader's plan advisory, the reviewer seat's cross-review, and
-// the cap on cross-review runs. The leader and the reviewer read them
-// with `ralph config get <key>` (they start to in issues #267 and #269).
+// the cap on cross-review runs. The leader reads PlanAdvisory with
+// `ralph config get org.review.plan_advisory`, and the reviewer seat starts
+// to read the other two in issue #269.
 type OrgReviewConfig struct {
 	// PlanAdvisory switches the plan advisory of a feature org's leader on.
 	// False, the default, leaves it off.

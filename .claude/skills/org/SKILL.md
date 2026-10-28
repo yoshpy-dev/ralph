@@ -48,7 +48,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   leader の計画助言と reviewer 座席の cross-review の有無(既定はどちらも
   off)と、cross-review を回す回数の上限(最初の 1 回を含む)で、座席は値を
   `ralph config get <key>`(例: `ralph config get org.review.cross_review`)で
-  読む。座席が読み始めるのは後の版から。
+  読む。機能ごとの org の leader は、役割の雛形の機能ごとの org の手順で
+  `plan_advisory` を読んで計画助言を頼む。reviewer 座席が `cross_review` を
+  読み始めるのは後の版から。
 - **bypass 初回承諾(マシンごと 1 回)**: claude の autonomous モード
   (`--permission-mode bypassPermissions`)は初回起動時に承諾ダイアログを
   表示する。最初の autonomous 座席を spawn したら、人が herdr で pane を

@@ -802,7 +802,7 @@ var directorSkillApprovalForkSteps = []struct {
 }{
 	{1, []string{
 		"承認するかを聞く(本文に `FORK` の行があれば、2 のとおり分かれ目と一緒に聞く)",
-		"人が会話にいなければ、問いを出して答えを待たずに、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送る",
+		"人が会話にいなければ、AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする",
 	}},
 	{2, []string{
 		"QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く",

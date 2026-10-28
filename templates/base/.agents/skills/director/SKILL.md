@@ -765,8 +765,8 @@ open か acked のままなので、resolve の期限で人にも届く。
    `./scripts/plan-visual.sh open <VISUAL のパス>` を打って図解ページを開き、
    `PLAN:` の計画を読んで要点を人に伝え、承認するかを聞く(本文に `FORK` の
    行があれば、2 のとおり分かれ目と一緒に聞く)。人が会話にいなければ、
-   問いを出して答えを待たずに、「件の処理」の 3 のとおり
-   `ralph org inbox notify <件の ID>` で人に送る。
+   AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3
+   のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする。
 2. QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く。
    `FORK` の行は、leader が計画の `## Design decisions` に書いた機能の内側の
    分かれ目で、1 行が 1 つの分かれ目になる
