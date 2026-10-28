@@ -217,7 +217,7 @@ func cleanupNamedStep(res org.MergeOrderResult, branch string) (cleanupStep, err
 	case e.PR == nil:
 		return cleanupStep{}, fmt.Errorf("org: cleanup: whether the PR of the branch %s was merged is not known (%s; the notes "+
 			"of ralph org merge-order --all say more), so nothing was removed: once gh reads its PR, run ralph org cleanup "+
-			"--branch %s again", b, cleanupLookupWhy(e.PRLookup), b)
+			"--branch %s again", b, cleanupLookupWhy(e.PRLookup), shellQuoteIfNeeded(b))
 	case e.Class != org.MergeClassMerged:
 		return cleanupStep{}, fmt.Errorf("org: cleanup: PR #%d of the branch %s is %s, not MERGED, so nothing was removed: "+
 			"cleanup removes the feature worktree of a branch whose PR was merged", e.PR.Number, b,

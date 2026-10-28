@@ -716,6 +716,35 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 	}
 }
 
+// The reason mergeCleanupRoot gives when the main worktree cannot be found
+// ends with the command to run by hand, and a person pastes it: a branch name
+// may hold ;, &, |, $, ', and (, so the command has the branch as one shell
+// word, while the sentence before it names the branch as it is. A plain
+// branch is as it was.
+func TestOrgMerge_CleanupRootQuotesTheBranchInTheCommand(t *testing.T) {
+	outside := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(outside))
+	t.Chdir(outside)
+	stateDir := filepath.Join(outside, "state")
+
+	for _, tc := range []struct{ name, branch, word string }{
+		{"a plain branch", "feat/a", "feat/a"},
+		{"a semicolon", "feat/a;b", "'feat/a;b'"},
+		{"a command substitution", "feat/$(x)", "'feat/$(x)'"},
+		{"a single quote", "feat/a'b", `'feat/a'\''b'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, skipped := mergeCleanupRoot(stateDir, "flag", tc.branch)
+			want := "the main worktree, where scripts/ralph-worktree.sh removes the feature worktree, was not found (" +
+				orgMainWorktreeMissing + "), so the feature worktree of the branch " + tc.branch + " was not cleaned up: run " +
+				"ralph org cleanup --branch " + tc.word + " from the main worktree"
+			if root != "" || skipped != want {
+				t.Errorf("mergeCleanupRoot = %q, %q; want an empty root and %q", root, skipped, want)
+			}
+		})
+	}
+}
+
 // AC3 and AC10 through the CLI: a refusal of the runtime is the error, with
 // nothing on stdout, no gh pr merge, and the ledger as it was: a branch the
 // ledger does not name, gh missing from PATH, a check still pending, and

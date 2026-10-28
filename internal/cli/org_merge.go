@@ -260,7 +260,7 @@ func mergeCleanupRoot(resolvedStateDir, stateDirSource, branch string) (root, sk
 	if err != nil {
 		return "", org.PrintableInboxText(fmt.Sprintf("the main worktree, where scripts/ralph-worktree.sh removes the feature "+
 			"worktree, was not found (%s), so the feature worktree of the branch %s was not cleaned up: run ralph org cleanup "+
-			"--branch %s from the main worktree", orgMainWorktreeMissing, branch, branch), false)
+			"--branch %s from the main worktree", orgMainWorktreeMissing, branch, shellQuoteIfNeeded(branch)), false)
 	}
 	return root, ""
 }

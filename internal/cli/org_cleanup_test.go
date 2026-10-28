@@ -526,6 +526,33 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 	}
 }
 
+// The refusal for a branch whose PR gh did not read ends with the command to
+// run again, and a person pastes it: a branch name may hold ;, &, |, $, ', and
+// (, so the command has the branch as one shell word, while the sentence
+// before it names the branch as it is. A plain branch is as it was.
+func TestOrgCleanup_NamedStepQuotesTheBranchInTheCommand(t *testing.T) {
+	for _, tc := range []struct{ name, branch, word string }{
+		{"a plain branch", "feat/a", "feat/a"},
+		{"a semicolon", "feat/a;b", "'feat/a;b'"},
+		{"a command substitution", "feat/$(x)", "'feat/$(x)'"},
+		{"a single quote", "feat/a'b", `'feat/a'\''b'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := org.MergeOrderResult{GHAvailable: true, Entries: []org.MergeOrderEntry{{
+				Branch: tc.branch, Class: org.MergeClassNoGate, PRLookup: org.MergeOrderPRLookupFailed,
+				Binding: &org.MergeOrderBinding{OrgID: "a", Feature: "f", Split: "s", TS: "t"},
+			}}}
+			_, err := cleanupNamedStep(res, tc.branch)
+			want := "org: cleanup: whether the PR of the branch " + tc.branch + " was merged is not known (gh pr list failed " +
+				"for the branch; the notes of ralph org merge-order --all say more), so nothing was removed: once gh reads " +
+				"its PR, run ralph org cleanup --branch " + tc.word + " again"
+			if err == nil || err.Error() != want {
+				t.Errorf("cleanupNamedStep error = %v; want %q", err, want)
+			}
+		})
+	}
+}
+
 // cleanupPrinter over the outcomes of a run, fed as runCleanupSteps feeds
 // them: CLEANED: with what it resumed from and an error of its record (which
 // stops the run with that error), SKIPPED: with the refusal, the failure, or
