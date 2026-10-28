@@ -127,3 +127,42 @@ CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。動作を変えるものはない。行
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3)
 - Follow-ups: LOW 3 件はどれもテストの読みやすさで、動作とテストの強さは変わらない。N1 と N2 は同じ関数の中の直しなので、直すなら 1 commit。直すとテストのコードの変更になり、記録だけの修正の例外には入らないので、`/verify` と `/test` から回し直す。直さずに進めるなら、cycle 1 は上限(既定 2)に余裕があるので deferral にはならない。cap に届いたあとも残るなら、台帳に 1 行にまとめて足す
+
+## Run 4 (fix ee5b3bda)
+
+- Date: 2026-10-28
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の 4 回目の run。Run 3 の LOW 3 件を直したあとの回し直しで、cycle は増えない)
+- Scope: `git diff 4e884503..HEAD -- internal/`(1 ファイル、+17/-22)。`git diff 4e884503..HEAD --stat` は 2 ファイルで、もう 1 つは計画の progress 行 1 行(+1、b6cc68f4)。コードの変更は ee5b3bda の `internal/cli/doctor_shell_alias_test.go` だけ。観点と、実行しないもの(テスト、ビルド、lint、run-verify)は Run 1 と同じ
+
+### Run 3 の所見の扱い
+
+行の最初の cell を重大度の語にすると backfill が所見として数え直すので、Run 2・3 と同じく番号を先に置く。
+
+| 番号 | 状態 | 根拠 |
+| --- | --- | --- |
+| N1(テスト名の `HerdrAbsentStaysInfo` と doc comment の「now」「used to」) | 解決 | `internal/cli/doctor_shell_alias_test.go:1558-1563`。名前は `..._CodexAliasStaysInfoWithoutHerdr` になり、`Info` の主語が codex の alias の finding だと名前から読める。doc comment は「A missing herdr reports warn, so runDoctorOpts tells checkShellAliases that herdr is present only when herdr's line is "pass", not merely when it is not "info"; a codex alias finding then stays info and carries the herdr-not-installed suffix」で、変更前後の言い方がない。3 つの主張は読んで合う: 不在は warn(`doctor.go:781-784`)、`herdrResult.Status == "pass"`(`doctor.go:134`)、句は `doctor_shell_alias.go:723`。旧名は `git grep` で計画の 139 行(8408b30c の結果欄、日付つきの履歴で、直後の 140 行が改名を記録している)と Run 3 の引用にしか残らない |
+| N2(stdout の取り込みの重複、約 30 行の共通の準備) | 前半は解決、後半は受け入れ | 前半: `:1591-1592` が `captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })` になり、`os.Pipe()` のエラーを `t.Fatalf` で扱う。`out` が string になり、失敗文と `strings.Contains` から `string(out)` が消えた。`io` は兄弟 2 本(`:1497`、`:1548`)がまだ使うので import は余らない。後半(`WarnsThroughTheSeam` と共通の準備)は残した。計画の記録の理由は「兄弟のテストに触るから」。Run 3 でこの後半は「もう一歩進めるなら」の任意項目だった。このファイルの `runDoctorOpts` の統合テストは 3 本で、`setupTestEmbedFS` も 3 回、手書きの `os.Pipe()` は兄弟の 2 本(`:1492`、`:1543`)に残る。この diff が触らないテストに及ぶ直しなので、同意する。台帳には足さない(cycle 1 で上限 2 に余裕がある)。cross-review の ACTION_REQUIRED で cycle 2 が最後の run になり、そのときも残っているなら deferral なので、1 行にまとめて足す |
+| N3(出力全体への `Contains` 4 つ) | 解決 | `:1596-1608`。herdr は `doctorLine(out, "herdr")` の status が `warn`、alias は `doctorLine(out, "Shell aliases (codex/claude)")` の status が `info` で、句は同じ行の detail に対して確かめる。否定の `: warn` の確かめを消してよいのは、`checkShellAliases` が `checkResult` を 1 つ返し(`doctor_shell_alias.go:817-818`)、`doctor.go:206` が 1 結果につき 1 行を出すため。status が `info` なら `warn` は同じ行に入らない。`doctorLine` は icon のあとの名前を完全に比べるので、herdr の確かめは旧 `Contains("herdr: warn")` より狭い |
+
+### Run 4 の新しい所見
+
+なし(CRITICAL・HIGH・MEDIUM・LOW とも 0 件)。
+
+### 確かめたこと(確かめの強さが落ちていないか)
+
+`checkShellAliases` の状態の `switch` に対して、Run 3 と同じ mutant を新しいテストの 3 つの確かめに当てて読んだ。
+
+- `doctor.go:134` を `!= "info"` にする: herdr の行が warn なので `herdrPresent` が true になり、codex の finding が warn になる。`status != "info"` と、detail の句の不在の 2 つが落ちる。Run 3 の 3 つのうち、否定の確かめが 1 つ減っただけで、落ちる条件は変わらない
+- `herdrPresent` を常に true にする: 同じ。常に false にする変更は `WarnsThroughTheSeam`(herdr の stub あり、warn を期待)が落とす。2 本で両側が固定される
+- 前提が崩れる(herdr の stub が PATH に紛れ込む): herdr の行が pass になり、`herdr status = "pass" ... want warn` が最初に落ちる。前提は固定されたまま
+- info の理由が別(rc が読めないなど): 句は codex の finding があるときだけ付くので、`strings.Contains(detail, ...)` が落ちる
+- 行が出ない: herdr は `Errorf` で続行し、alias の行は `Fatalf` で止める。後者は detail を読むので止める必要がある
+- 書式: `Errorf` / `Fatalf` の 5 か所(`:1594`・`1597`・`1601`・`1604`・`1607`)は動詞と引数の数が合う(`%v %s` / `%q %v %s` / `%s` / `%q %s` / `%q %s`)。`status, _, ok :=` は `if` の中だけの変数で、関数の階層の `status, detail, ok :=` と `err :=` は新しい宣言になり、再宣言にならない(読んだだけで、ビルドしていない)
+- `captureStdoutText` の動き: 手書きの 7 行と同じ順(`os.Stdout` を差し替え、`fn()`、`Close`、復元、`ReadAll`)。書き手が止まる量(pipe の buffer 超え)を出さない点も兄弟と同じで、出力は 20 行ほど
+- 計画の progress 行(b6cc68f4)は、改名と N2 の残した範囲を書いていて、diff と合う。`verify rc=0(100s)` と mutant の記述は実装側の記録で、ここでは再実行していない
+- 確かめていない: テストと静的検査の実行、overlay の mutant を当て直すこと
+
+### Recommendation (Run 4)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 3 の LOW 3 件は N1・N3 が解決、N2 は前半が解決で、後半(兄弟のテストと共通の準備)は理由つきで受け入れ)
+- Follow-ups: 台帳に足す行はない。コードの変更はテストの 1 ファイルだけで、`/verify` と `/test` はこの commit を含めて回し直す。cross-review が ACTION_REQUIRED を返して最後の cycle に入った場合は、N2 の後半(共通の準備 2 本分と、手書きの `os.Pipe()` 2 か所)を 1 行にまとめて台帳に足す
