@@ -61,7 +61,8 @@ func repoRoot(t *testing.T) string {
 //
 //	VARNAME="${VARNAME:-default_value}"
 //
-// are captured.  The idiom is documented in scripts/ralph-config.sh.
+// are captured.  This is the idiom scripts/ralph-config.sh uses for its
+// defaults.
 //
 // Go's regexp package does not support backreferences, so we match the full
 // pattern with two named groups and verify post-match that the variable name

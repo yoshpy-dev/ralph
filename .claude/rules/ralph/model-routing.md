@@ -145,7 +145,7 @@ seats are not observed and stay `unknown`.
 - `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
   `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh
+- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh, and that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` (each key set, same value)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root
   and `templates/base/` sides
