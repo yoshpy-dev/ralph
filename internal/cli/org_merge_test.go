@@ -353,8 +353,11 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 	escaped.Protection = "a ruleset \x1b[31mnamed red"
 	// The cleanup after the merge (plan
 	// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): its outcome adds
-	// the CLEANUP: lines and never the error.
+	// the CLEANUP: lines and never the error. A command by hand comes only
+	// with a refusal ralph cannot go on from, such as a missing record, and
+	// with a failure.
 	const manual = "cd /r && ./scripts/ralph-worktree.sh cleanup --id org-a --force-branch"
+	const branchDelete = "git -C /r branch -D feat/a"
 	withCleanup := func(c org.CleanupResult, cleanupErr string) org.MergeResult {
 		res := merged
 		res.Cleanup, res.CleanupErr = &c, cleanupErr
@@ -396,9 +399,10 @@ func TestPrintMergeResult_EachOutcome(t *testing.T) {
 		{"cleaned up, worktree_cleaned not recorded", withCleanup(org.CleanupResult{Cleaned: true,
 			Resumed: org.CleanupResumedRecordOnly}, cleanedNotRecorded), nil, lines + "CLEANUP: done (resumed: record_only; " +
 			cleanedNotRecorded + ")\n", ""},
-		{"cleanup refused, with the command by hand", withCleanup(org.CleanupResult{Refused: "the feature worktree /w has an \x1b " +
-			"untracked file", Manual: manual}, ""), nil, lines + `CLEANUP: skipped (the feature worktree /w has an \x1b untracked file)` +
-			"\nCLEANUP MANUAL: " + manual + "\n", ""},
+		{"cleanup refused, with the command by hand", withCleanup(org.CleanupResult{Refused: "the worktree record org-a of the " +
+			"branch feat/a does not exist, so ralph removes nothing: the branch feat/a at \x1b left", Manual: branchDelete}, ""), nil,
+			lines + `CLEANUP: skipped (the worktree record org-a of the branch feat/a does not exist, so ralph removes nothing: ` +
+				`the branch feat/a at \x1b left)` + "\nCLEANUP MANUAL: " + branchDelete + "\n", ""},
 		{"cleanup refused, no command by hand", withCleanup(org.CleanupResult{Refused: "the org runs"}, ""), nil,
 			lines + "CLEANUP: skipped (the org runs)\n", ""},
 		{"cleanup failed", withCleanup(org.CleanupResult{Failed: "scripts/ralph-worktree.sh cleanup --id org-a --force-branch failed",
@@ -605,8 +609,8 @@ func TestOrgMerge_RecordThatFailsPrintsTheLinesAndExitsOne(t *testing.T) {
 // refuses; the ledger gets worktree_cleaned with via=merge right after
 // pr_merged, stdout ends with CLEANUP: done, and the command exits 0. With an
 // untracked file in the worktree, merge prints CLEANUP: skipped with the
-// reason and CLEANUP MANUAL: with the script's cleanup, removes nothing,
-// records no worktree_cleaned, and still exits 0.
+// reason and no CLEANUP MANUAL: line (ralph org cleanup goes on once the file
+// is gone), removes nothing, records no worktree_cleaned, and still exits 0.
 func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 	t.Run("cleaned up", func(t *testing.T) {
 		fx, wt := newMergeCLIWorktreeFixture(t)
@@ -655,8 +659,7 @@ func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 		}
 		want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
 			"change(s) or untracked file(s) (?? stray.txt), which removing it would lose: move what you need out of the worktree, " +
-			"remove the rest, and run ralph org cleanup --branch feat/a again)\nCLEANUP MANUAL: cd " + fx.work +
-			" && ./scripts/ralph-worktree.sh cleanup --id org-a --force-branch\n"
+			"remove the rest, and run ralph org cleanup --branch feat/a again)\n"
 		if stdout != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 		}

@@ -850,23 +850,23 @@ func TestMerge_CleansUpTheFeatureWorktreeOnceRecorded(t *testing.T) {
 // file in the worktree or for the branch's org spawned again while gh pr
 // merge ran (no marker kept that spawn out), removes nothing and records no
 // worktree_cleaned, and Merge still returns the recorded merge with no
-// error, the refusal and the command by hand in Cleanup.
+// error and the refusal in Cleanup. Neither names a command by hand: the
+// next cleanup goes on from each once its cause is gone.
 func TestMerge_RefusedCleanupKeepsTheMerge(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		setup  func(t *testing.T, fx *mcFixture)
-		want   string
-		manual bool     // Manual is the script's cleanup; else none
-		calls  []string // the worktree calls
+		name  string
+		setup func(t *testing.T, fx *mcFixture)
+		want  string
+		calls []string // the worktree calls
 	}{
 		{"an untracked file", func(t *testing.T, fx *mcFixture) {
 			writeGateFile(t, fx.worktree, "stray.txt", "x\n", 0o644)
-		}, "has 1 uncommitted change(s) or untracked file(s) (?? stray.txt), which removing it would lose", true,
+		}, "has 1 uncommitted change(s) or untracked file(s) (?? stray.txt), which removing it would lose",
 			[]string{"lookup:" + cleanupTestID}},
 		{"the org spawned again during gh pr merge", func(t *testing.T, fx *mcFixture) {
 			fx.ex.inMerge = func(context.Context) { seedSeat(t, fx.o, "auth", "worker", "worker", "pane-2") }
 		}, `the branch feat/auth is bound to org_id "auth", which is running and may still use its feature worktree ` +
-			"%WORKTREE%: wait for the org to be disbanded and run ralph org cleanup --branch feat/auth again", false, nil},
+			"%WORKTREE%: wait for the org to be disbanded and run ralph org cleanup --branch feat/auth again", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newMCFixture(t)
@@ -877,11 +877,7 @@ func TestMerge_RefusedCleanupKeepsTheMerge(t *testing.T) {
 				res.Cleanup.Cleaned || res.Cleanup.Recorded || res.Cleanup.Failed != "" {
 				t.Fatalf("Merge = %+v, %v (cleanup %+v); want a recorded merge whose cleanup refused", res, err, res.Cleanup)
 			}
-			manual := ""
-			if tc.manual {
-				manual = fx.scriptCmd()
-			}
-			assertCleanupRefusal(t, *res.Cleanup, strings.ReplaceAll(tc.want, "%WORKTREE%", fx.worktree), manual)
+			assertCleanupRefusal(t, *res.Cleanup, strings.ReplaceAll(tc.want, "%WORKTREE%", fx.worktree), "")
 			if !slices.Equal(fx.spy.calls, tc.calls) {
 				t.Errorf("worktree calls = %q, want %q", fx.spy.calls, tc.calls)
 			}

@@ -210,10 +210,11 @@ func TestOrgCleanup_BranchWhosePRIsNotMergedIsRefused(t *testing.T) {
 	}
 }
 
-// AC3 and AC4 through the CLI: a refusal of the cleanup is a SKIPPED: line,
-// with MANUAL: when it names a command by hand, and exit 1 with nothing
-// removed or recorded: an untracked file in the worktree, regate.lock held by
-// a regate, a merge, or another cleanup, and the branch's org running.
+// AC3 and AC4 through the CLI: a refusal of the cleanup is a SKIPPED: line
+// and exit 1 with nothing removed or recorded: an untracked file in the
+// worktree, regate.lock held by a regate, a merge, or another cleanup, and
+// the branch's org running. The next cleanup goes on from each once its
+// cause is gone, so none is followed by a MANUAL: line.
 func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -225,8 +226,7 @@ func TestOrgCleanup_RefusalsAreSkippedLines(t *testing.T) {
 		}, func(fx *cleanupCLIFixture) string {
 			return "SKIPPED: feat/a the feature worktree " + fx.wt + " has 1 uncommitted change(s) or untracked file(s) (?? " +
 				"stray.txt), which removing it would lose: move what you need out of the worktree, remove the rest, and run ralph " +
-				"org cleanup --branch feat/a again\nMANUAL: cd " + fx.work + " && ./scripts/ralph-worktree.sh cleanup --id org-a " +
-				"--force-branch\n"
+				"org cleanup --branch feat/a again\n"
 		}},
 		{"regate.lock held", func(t *testing.T, fx *cleanupCLIFixture) {
 			holdMergeOrderLock(t, filepath.Join(fx.stateDir, "regate.lock"))
@@ -540,7 +540,10 @@ func TestCleanupPrinter_EachOutcome(t *testing.T) {
 		res     org.CleanupResult
 		err     error
 	}
+	// A command by hand comes only with a refusal ralph cannot go on from,
+	// such as a missing record, and with a failure.
 	const manual = "cd /r && ./scripts/ralph-worktree.sh cleanup --id org-a --force-branch"
+	const branchDelete = "git -C /r branch -D feat/a"
 	cleaned := org.CleanupResult{Cleaned: true, Recorded: true, OrgID: "a"}
 	resumed := cleaned
 	resumed.Resumed = org.CleanupResumedWorktreeGone
@@ -565,9 +568,10 @@ func TestCleanupPrinter_EachOutcome(t *testing.T) {
 		{"cleaned up, worktree_cleaned not recorded", []outcome{{branch: "feat/a", res: notRecorded, err: recordErr},
 			{branch: "feat/b", res: cleaned}}, "CLEANED: feat/a org-a (resumed: record_only; " + recordErr.Error() + ")\n",
 			recordErr.Error()},
-		{"refused, with the command by hand", []outcome{{branch: "feat/a", res: org.CleanupResult{Refused: "the feature " +
-			"worktree /w has an \x1b untracked file", Manual: manual}}},
-			`SKIPPED: feat/a the feature worktree /w has an \x1b untracked file` + "\nMANUAL: " + manual + "\n", cleanupLeftErr(1)},
+		{"refused, with the command by hand", []outcome{{branch: "feat/a", res: org.CleanupResult{Refused: "the worktree record " +
+			"org-a of the branch feat/a does not exist, so ralph removes nothing: the branch feat/a at \x1b left",
+			Manual: branchDelete}}}, `SKIPPED: feat/a the worktree record org-a of the branch feat/a does not exist, so ralph ` +
+			`removes nothing: the branch feat/a at \x1b left` + "\nMANUAL: " + branchDelete + "\n", cleanupLeftErr(1)},
 		{"refused, no command by hand", []outcome{{branch: "feat/a", res: org.CleanupResult{Refused: "the org runs"}}},
 			"SKIPPED: feat/a the org runs\n", cleanupLeftErr(1)},
 		{"failed", []outcome{{branch: "feat/a", res: org.CleanupResult{Failed: "scripts/ralph-worktree.sh cleanup --id org-a " +
