@@ -164,6 +164,8 @@
     - 計画からの逸れ(D7): codex の MCP の止め方に `--disable plugins` を足した。plugin が持ち込む MCP の server は `~/.codex/config.toml` に表がなく、`-c mcp_servers.<名前>.enabled=false` を付けると codex 0.163.0 が設定を読めなくなる(rc=1、invalid transport)ため。名前は `codex --disable plugins mcp list --json` から読み、同じ引数で後確認と exec を打つ。古い codex でその機能名がなく一覧が読めなければ、呼ばずに飛ばす(D7 の「止められなければ呼ばない」は変わらない)。私が承認した
     - AC8(モデルは呼んでいない。雛形の codex 塊の行を zsh と bash で打って数だけを出した): server 20、上書きなしで enabled 18、plugin を止めて読んだ名前 14、後確認の enabled 0、codex を呼ぶ判定は yes(zsh・bash とも rc=0)。`-c ...enabled=false` だけの形では一覧が読めず、呼ばずに飛ばす側に倒れる
   - inline の直し(コメント 1 か所): `internal/org/driver/paneenv.go` の `PrimaryCLIEnv` の doc comment「Of the reviews, only /cross-review reads it today」を、機能の org の leader の計画助言も読む形に直した(S2 の implementer が範囲外で見つけた)。verify: gofmt、`go vet ./internal/org/driver/`、`go test ./internal/org/driver/ -run 'PaneEnv|PrimaryCLI'` rc=0。self-check 5 項目 clean(stage は paneenv.go だけ)
+  - S2 の追加(6099187d、S2 の implementer。私が頼んだ 1 文): codex の段落に「plugin が持ち込む MCP の server は `-c ...enabled=false` では止まらないので `--disable plugins` で plugin ごと外す。`plugins` の機能名を知らない古い codex で一覧が読めなければ `mcp: not off` で呼ばずに飛ばす」を書き、stand-in の codex に `STUB_OLD=1`(知らない feature flag を exit 1 で断る)の case を bash と zsh で足した。verify rc=0(21s)
+  - self-review Run 1(16fdfc2e、d38abd1e。reviewer は opus): LOW 6 件、Merge yes。L1 `select(.enabled)` が `enabled` のない server を止めも数えもしない、L2 director が `ADVISORY:` の行を人に伝えない、L3 テストの `つまで` の禁止が全文にかかる・config.go の help を Go のリテラルのまま照合、L4 テストの切り出しと確かめの重複、L5 `--env` のない herdr では codex の leader が codex を選ぶ・paneenv.go の警告文、L6 手順 1 が 135 行。6 件とも直しのスライスに出した(L6 は計画助言を `### 計画助言` の小見出しに移す。計画の本文の「手順 1 の最後」の記述は digest を変えないため直さず、ここに記録する)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
