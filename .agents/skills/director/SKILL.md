@@ -820,10 +820,10 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 `--config` なしの `ralph.toml` を読む。2 つの値が違えば `false` として扱い、
 そのことを人に伝える。
 
-- `auto_merge = false`(既定): merge するかどうかは人が決める。director は
+- `auto_merge = false`: merge するかどうかは人が決める。director は
   merge してよい順を報告し、merge も regate も人に頼まれたときだけ打つ。
   merge は `ralph org merge --branch <ブランチ>` で 1 本ずつ打つ。
-- `auto_merge = true`: 人に聞かずに、次の順で 1 本ずつ打つ。
+- `auto_merge = true`(既定): 人に聞かずに、次の順で 1 本ずつ打つ。
   1. `ralph org merge-order` を打つ。
   2. 先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge
      する。`--wait-checks 60m` を付けて background で打ち、終わってから
