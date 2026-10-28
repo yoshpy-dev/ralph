@@ -87,11 +87,11 @@ None (skill の手順と文書の書き換えが中心で、新しい仕組み�
 - [x] AC9: `.codex/AGENTS.override.md` と写しが、`/plan` の計画助言と cross-review の前にも `RALPH_PRIMARY_CLI=codex` を渡すと書いている。`/cross-review` の手順 2 の driver の判別も AC1 と同じ。`/cross-review` が claude を呼ぶ道にも `RALPH_WIP_CHECKPOINT=off` と前後の git の状態の確かめがある。triage の雛形に `skipped (<reason>)` がある。
 - [x] AC2: `/plan` と `/cross-review` が、最初に repo の root で `ralph config get standard.plan_advisory` / `standard.cross_review` を打ち、読み方の約束(0 の true/false、1 と `unknown command "config"`、127、それ以外は止まる)に従う。off、古い ralph、ralph がない、相手の CLI がないときは飛ばし、計画の Progress checklist(`/plan`)と triage の report の `Reviewer status: skipped (<理由>)`(`/cross-review`)に理由を残す。`/pr` が PR の本文にその理由を書く。
 - [x] AC3: 設定が on で相手の CLI がないときは、今までどおり飛ばして記録する(`/cross-review` は report を書く形に変わる)。
-- [ ] AC4: `internal/insights` の backfill が `Reviewer status: skipped …` の cycle を verdict n/a として読む(テスト)。
-- [ ] AC5: ルートの `ralph.toml` を知らないキーを拒む読み方で読むテストがあり、4 つの実施有無が true であることを確かめる。キーを 1 つ改名した写しで落ちる。
-- [ ] AC6: `RALPH_CLAUDE_REVIEWER_MODEL` の plan skill の fallback と `scripts/ralph-config.sh` の既定の照合が `TestDefaultsLockStep` にある。
+- [x] AC4: `internal/insights` の backfill が `Reviewer status: skipped …` の cycle を verdict n/a として読む(テスト)。
+- [x] AC5: ルートの `ralph.toml` を知らないキーを拒む読み方で読むテストがあり、4 つの実施有無が true であることを確かめる。キーを 1 つ改名した写しで落ちる。
+- [x] AC6: `RALPH_CLAUDE_REVIEWER_MODEL` の plan skill の fallback と `scripts/ralph-config.sh` の既定の照合が `TestDefaultsLockStep` にある。
 - [ ] AC7: 「optional」の文が、Scope に挙げた文書で「設定が on で相手の CLI があるときに走る。そうでなければ飛ばして記録する」の意味になっている(`git grep` で確かめる)。
-- [ ] AC8: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`go test ./internal/config/ ./internal/insights/`、skill の文を固定するテスト(`tests/test-check-skill-sync.sh`、`tests/test-slice-verification.sh` など、実装で洗い出す)が通る。
+- [x] AC8: `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、`go test ./internal/config/ ./internal/insights/`、skill の文を固定するテスト(`tests/test-check-skill-sync.sh`、`tests/test-slice-verification.sh` など、実装で洗い出す)が通る。
 
 ## Implementation outline
 
@@ -149,5 +149,5 @@ None (skill の手順と文書の書き換えが中心で、新しい仕組み�
   - self-review baa2f400(1 回目): Merge: OK、LOW 6。L2(`$DRIVER` を同じ Bash の呼び出しの中で定めていない。空だと `pick_reviewer` は codex を返し、D5 が直そうとした誤りと同じ形になる)と L3(`/cross-review` の手順 4 の空の差分だけが report を書かずに進む)は skill の動きに効くので、修正スライス F1 で直す。L4(`/pr` の雛形の語彙と記録の語彙の対応、`Plan reviewed` の box を付ける手順)、L6(コメントの折り返し)、L1 の (a)(`config.go:31` の「start to in issue #266」)と (b)(テンプレートの `[standard]` の「only that」が exit 127 の扱いより狭い)も F1 で直し、S4 の持ち越しの `templates/base/ralph.toml:28-29` の古い 1 文も F1 に入れる。L1 の (c)(`paneenv.go` の warning)は consult の判定どおり据え置き。L5(`/cross-review` の claude の道の形)は PR の Known gaps。tech-debt の 2 行は /sync-docs。F1 のあと self-review をもう 1 回回す(cycle-count は増やさない)。
   - F1 08b2ceba(impl-266-f1): L2 は driver と reviewer を 1 回の Bash で決める snippet(`DRIVER=<claude|codex>`、`RALPH_PRIMARY_CLI` を小文字にして claude/codex のときだけ上書き、`pick_reviewer`、値を表示)と「後の手順は表示された値を使う」。両 skill で同じ。L3 は空の差分も `skipped (empty diff)` の report を書く。空の差分の確かめも前の呼び出しの `$BASE` に頼っていて、`BASE=` のとき rc 0 で「差分なし」と誤るので、`detect_base_branch` と同じ 1 回の呼び出しにまとめた(L3 の範囲に入れたずれ)。L4 は `/pr` の記録と Verification の行の対応(`ran (<reviewer>)`、incomplete、skipped、`not recorded`)、`/plan` 11 は記録するとき `Plan reviewed` の box も付ける。L6 はコメントの折り直し。L1 (a) `config.go` のコメント、(b) テンプレートの `[standard]` のコメント(later release の文を消し、exit 127 も off として記録する、と足した)。snippet を bash と zsh の新しい shell で 8 通り走らせ、期待どおりの driver と reviewer。検証コマンド rc 0。
 - [x] Verification artifact created — verify f0290dc4(cycle 1、pass。`run-static-verify.sh` rc 0、golangci-lint 0 件。AC1〜AC3・AC9 を満たす、AC4〜AC6 は読んで満たす(実行は /test)、AC7 は満たすが V1〜V4 が残る。PATH の ralph 6.0.0 は 2 つのキーとも rc 1 と `unknown command "config"` で off の分岐、build した binary は root で `true`、知らないキー 2、型の誤り 3、ralph なし 127 を実測)。LOW の V1(README:135 が off にする失敗を古い ralph だけと書く)、V2(tech-debt:31)、V3(tech-debt:154)、V4(飛ばす条件に空の差分を挙げない十分条件の文 3 か所: implement 13.e、ralph-workflow.md:41-42、codex-setup.md:65-66、と写し)は /sync-docs で直す。issue の「判別の順に which」を D5 で外したことは PR の本文に書く。
-- [ ] Test artifact created
+- [x] Test artifact created — test cd97750e(cycle 1、pass。`run-test.sh` rc 0、shell 45 本、Go 9 パッケージ、cli 368 s・org 476 s。名指しのテストと shell の 6 本が通った。変異 7 個中 6 個が落ちた。生き残った a3(`After triage:` のあとの `pendingNoReview` のリセットを消す)は base でも生き残る既存の穴で、PR の Known gaps に書く。driver の snippet は 8 つの写しで同じ 1 行で、bash と zsh で 28 通りが期待どおり。base の行は差分ありで rc=1、差分なしで rc=0、ref の誤りで rc=128(この場合は reviewer を呼んで失敗し incomplete になる)。skipped の report 5 通りは `count_triage_findings` で 0/0/0、HEAD の binary の backfill は n/a と読み、base の binary は pass と読んだ)
 - [ ] PR created
