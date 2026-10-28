@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -293,16 +294,16 @@ func (f *paneEnvFakeRunner) Run(ctx context.Context, name string, args ...string
 	return f.help, f.helpErr
 }
 
-// tabCreateTwice runs TabCreate through h and through a copy of h held as a
-// HerdrClient-shaped interface, the way org.Org holds it, and checks that
-// both return the pane id of realTabCreateEnvelope.
-func tabCreateTwice(t *testing.T, h Herdr) {
+// tabCreateTwice runs TabCreate with extraEnv through h and through a copy of
+// h held as a HerdrClient-shaped interface, the way org.Org holds it, and
+// checks that both return the pane id of realTabCreateEnvelope.
+func tabCreateTwice(t *testing.T, h Herdr, extraEnv ...string) {
 	t.Helper()
 	var copied interface {
-		TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error)
+		TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error)
 	} = h
-	for i, create := range []func(ctx context.Context, workspaceID, cwd, label string) (string, error){h.TabCreate, copied.TabCreate} {
-		got, err := create(context.Background(), "w3", "/tmp/cwd", "worker-1")
+	for i, create := range []func(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error){h.TabCreate, copied.TabCreate} {
+		got, err := create(context.Background(), "w3", "/tmp/cwd", "worker-1", extraEnv...)
 		if err != nil {
 			t.Fatalf("TabCreate #%d: unexpected error: %v", i+1, err)
 		}
@@ -424,6 +425,8 @@ const (
 		"and ralph may then fail to reach it (agent_not_found)"
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
+	primaryCLIClause = "a seat's plan advisory or cross-review may pick the wrong CLI as its other model " +
+		"(scripts/xreview-helpers.sh pick_reviewer falls back to claude)"
 	noPaneEnvAdvice = ". Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
 )
 
@@ -438,9 +441,11 @@ func noPaneEnvWarning(reason string) string {
 // plan 2026-10-22-seat-wip-checkpoint: on a herdr without --env the one
 // warning line lists every PaneEnv entry and adds, in PaneEnv's order, the
 // clause of each entry the driver knows; an entry it does not know adds no
-// clause. The clauses are joined with "; " and the advice follows as a
-// sentence of its own, so it does not read as one more clause. With
-// AgmsgSelfNameOff alone the line is the one of plan
+// clause. Every RALPH_PRIMARY_CLI entry, whatever its value, has the clause
+// of PrimaryCLIEntry (AC5 of plan 2026-10-29-review-switches-config); a
+// longer name that starts with it has none. The clauses are joined with "; "
+// and the advice follows as a sentence of its own, so it does not read as
+// one more clause. With AgmsgSelfNameOff alone the line is the one of plan
 // 2026-10-22-seat-agmsg-self-name except that the advice starts ". Use"
 // where that line had "; use".
 func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) {
@@ -464,6 +469,12 @@ func TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence(t *testing.T) 
 			head + "X=1" + noPaneEnvAdvice},
 		"an unknown entry and WIPCheckpointOff": {[]string{"X=1", WIPCheckpointOff},
 			head + "X=1 --env RALPH_WIP_CHECKPOINT=off: " + wipCheckpointClause + noPaneEnvAdvice},
+		"PrimaryCLIEntry of codex alone": {[]string{PrimaryCLIEntry("codex")},
+			head + "RALPH_PRIMARY_CLI=codex: " + primaryCLIClause + noPaneEnvAdvice},
+		"RALPH_PRIMARY_CLI with any value": {[]string{"RALPH_PRIMARY_CLI="},
+			head + "RALPH_PRIMARY_CLI=: " + primaryCLIClause + noPaneEnvAdvice},
+		"a longer name that starts with RALPH_PRIMARY_CLI": {[]string{"RALPH_PRIMARY_CLI_X=claude"},
+			head + "RALPH_PRIMARY_CLI_X=claude" + noPaneEnvAdvice},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv}
@@ -558,6 +569,117 @@ func TestHerdr_TabCreate_PaneEnvKeepsOrder(t *testing.T) {
 	want := append(append([]string{}, tabCreateArgv...), "--env", "A=1", "--env", "B=2", "--env", "A=3")
 	if !reflect.DeepEqual(f.tabCalls, [][]string{want}) {
 		t.Fatalf("tab create argv = %v; want %v", f.tabCalls, want)
+	}
+}
+
+// TestPrimaryCLIEntry pins the variable spawn passes to a seat's pane, the
+// one scripts/xreview-helpers.sh's pick_reviewer reads, and its entry.
+func TestPrimaryCLIEntry(t *testing.T) {
+	if PrimaryCLIEnv != "RALPH_PRIMARY_CLI" {
+		t.Fatalf("PrimaryCLIEnv = %q; want RALPH_PRIMARY_CLI", PrimaryCLIEnv)
+	}
+	for driverName, want := range map[string]string{"claude": "RALPH_PRIMARY_CLI=claude", "codex": "RALPH_PRIMARY_CLI=codex"} {
+		if got := PrimaryCLIEntry(driverName); got != want {
+			t.Fatalf("PrimaryCLIEntry(%q) = %q; want %q", driverName, got, want)
+		}
+	}
+}
+
+// TestHerdr_TabCreate_ExtraEnvFollowsPaneEnv pins AC5 of plan
+// 2026-10-29-review-switches-config at the driver: with a herdr whose help
+// lists --env, TabCreate adds an --env for each PaneEnv entry and then for
+// each extraEnv entry, and a Herdr with no PaneEnv adds the extraEnv
+// entries alone. extraEnv is for one call: a later call without it gets
+// PaneEnv alone, and PaneEnv itself is left as it was.
+func TestHerdr_TabCreate_ExtraEnvFollowsPaneEnv(t *testing.T) {
+	for name, tt := range map[string]struct {
+		build     func(r Runner) Herdr
+		extraEnv  []string
+		wantEnv   []string // the --env values of the calls with extraEnv
+		wantLater []string // the --env values of the call without it
+		wantHelp  int
+	}{
+		"SeatPaneEnv and a codex seat": {
+			build:     func(r Runner) Herdr { return NewHerdr(r, SeatPaneEnv()...) },
+			extraEnv:  []string{PrimaryCLIEntry("codex")},
+			wantEnv:   []string{"AGMSG_SELF_NAME=off", "RALPH_WIP_CHECKPOINT=off", "RALPH_PRIMARY_CLI=codex"},
+			wantLater: []string{"AGMSG_SELF_NAME=off", "RALPH_WIP_CHECKPOINT=off"},
+			wantHelp:  1,
+		},
+		"two extra entries keep their order": {
+			build:     func(r Runner) Herdr { return NewHerdr(r, "A=1") },
+			extraEnv:  []string{"B=2", "A=3"},
+			wantEnv:   []string{"A=1", "B=2", "A=3"},
+			wantLater: []string{"A=1"},
+			wantHelp:  1,
+		},
+		"a literal with no PaneEnv": {
+			build:    func(r Runner) Herdr { return Herdr{R: r} },
+			extraEnv: []string{PrimaryCLIEntry("claude")},
+			wantEnv:  []string{"RALPH_PRIMARY_CLI=claude"},
+			wantHelp: 2, // a literal checks on every call that has env; the later call has none
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &paneEnvFakeRunner{help: herdrTabCreateHelp}
+			var warn bytes.Buffer
+			h := tt.build(f)
+			h.Warn = &warn
+			paneEnv := slices.Clone(h.PaneEnv)
+
+			tabCreateTwice(t, h, tt.extraEnv...)
+			if _, err := h.TabCreate(context.Background(), "w3", "/tmp/cwd", "worker-1"); err != nil {
+				t.Fatalf("TabCreate without extraEnv: %v", err)
+			}
+
+			withEnv := func(env []string) []string {
+				argv := slices.Clone(tabCreateArgv)
+				for _, kv := range env {
+					argv = append(argv, "--env", kv)
+				}
+				return argv
+			}
+			want := [][]string{withEnv(tt.wantEnv), withEnv(tt.wantEnv), withEnv(tt.wantLater)}
+			if !reflect.DeepEqual(f.tabCalls, want) {
+				t.Fatalf("tab create argv = %v; want %v", f.tabCalls, want)
+			}
+			if f.helpCalls != tt.wantHelp {
+				t.Fatalf("help ran %d times; want %d", f.helpCalls, tt.wantHelp)
+			}
+			if !slices.Equal(h.PaneEnv, paneEnv) {
+				t.Fatalf("PaneEnv = %q after the calls; want it unchanged, %q", h.PaneEnv, paneEnv)
+			}
+			if warn.Len() != 0 {
+				t.Fatalf("warning = %q; want none", warn.String())
+			}
+		})
+	}
+}
+
+// TestHerdr_TabCreate_ExtraEnvWithoutEnvFlagWarnsWithItsClause pins AC5 of
+// plan 2026-10-29-review-switches-config for a herdr without --env: the tab
+// of a seat is created with no --env at all, and the one warning line lists
+// the PaneEnv entries, then the seat's RALPH_PRIMARY_CLI, each with its
+// clause, in that order.
+func TestHerdr_TabCreate_ExtraEnvWithoutEnvFlagWarnsWithItsClause(t *testing.T) {
+	f := &paneEnvFakeRunner{help: herdrTabCreateHelpNoEnv}
+	var warn bytes.Buffer
+	h := NewHerdr(f, SeatPaneEnv()...)
+	h.Warn = &warn
+
+	tabCreateTwice(t, h, PrimaryCLIEntry("claude"))
+
+	if !reflect.DeepEqual(f.tabCalls, [][]string{tabCreateArgv, tabCreateArgv}) {
+		t.Fatalf("tab create argv = %v; want %v twice, with no --env", f.tabCalls, tabCreateArgv)
+	}
+	if f.helpCalls != 1 {
+		t.Fatalf("help ran %d times; want 1, the result cached", f.helpCalls)
+	}
+	want := "warning: herdr tab create has no --env flag, so ralph creates herdr panes without " +
+		"--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude: " +
+		agmsgSelfNameClause + "; " + wipCheckpointClause + "; " + primaryCLIClause + noPaneEnvAdvice
+	if warn.String() != want {
+		t.Fatalf("warning =\n%q\nwant exactly one line\n%q", warn.String(), want)
 	}
 }
 

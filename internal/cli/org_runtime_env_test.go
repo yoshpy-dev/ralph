@@ -165,14 +165,19 @@ func TestOrgRuntimes_HerdrPaneEnvIsSeatPaneEnv(t *testing.T) {
 // herdr in mode ORG_STUB_TAB_CREATE_HELP=noenv, whose `tab create --help`
 // lists no --env, `ralph org spawn` and `ralph org director start` succeed,
 // create their tab without --env, and write the one warning line to the
-// process's stderr (the CLI builds its Herdr with Warn nil). It runs the
-// verbs as main does, with os.Stdout and os.Stderr swapped, so it does not
-// run in parallel.
+// process's stderr (the CLI builds its Herdr with Warn nil). The seat's line
+// also names its RALPH_PRIMARY_CLI and that entry's clause, and the
+// director's names neither (plan 2026-10-29-review-switches-config, AC5).
+// It runs the verbs as main does, with os.Stdout and os.Stderr swapped, so
+// it does not run in parallel.
 func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
+	const primaryCLIClause = "may pick the wrong CLI as its other model"
 	for _, tc := range []struct {
-		name    string
-		setup   func(t *testing.T) (herdrLog string, args []string)
-		wantOut string // the start of stdout
+		name       string
+		setup      func(t *testing.T) (herdrLog string, args []string)
+		wantOut    string // the start of stdout
+		wantEnv    string // the entries the warning lists, after "without --env "
+		primaryCLI bool   // whether the line has primaryCLIClause
 	}{
 		{
 			name: "spawn",
@@ -182,7 +187,9 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 					"--driver", "claude", "--model", "sonnet", "--cwd", t.TempDir(),
 					"--scope", "test-scope", "--state-dir", filepath.Join(t.TempDir(), "state")}
 			},
-			wantOut: `spawned seat "seat-1" `,
+			wantOut:    `spawned seat "seat-1" `,
+			wantEnv:    "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude",
+			primaryCLI: true,
 		},
 		{
 			name: "director start",
@@ -192,6 +199,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				return herdrLog, []string{"director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir}
 			},
 			wantOut: "started d1 ",
+			wantEnv: "AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,7 +222,7 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 					t.Fatalf("herdr call %q has --env; want none on a herdr without it", l)
 				}
 			}
-			const warning = "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off: "
+			warning := "warning: herdr tab create has no --env flag, so ralph creates herdr panes without --env " + tc.wantEnv + ": "
 			if !strings.HasPrefix(stderr, warning) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stderr, "\n") {
 				t.Fatalf("stderr = %q; want exactly the one line that starts with %q", stderr, warning)
 			}
@@ -224,6 +232,9 @@ func TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr(t *testing.T) {
 				if !strings.Contains(stderr, clause) {
 					t.Fatalf("stderr = %q; want it to say %q", stderr, clause)
 				}
+			}
+			if got := strings.Contains(stderr, primaryCLIClause); got != tc.primaryCLI {
+				t.Fatalf("stderr = %q; has %q = %v, want %v", stderr, primaryCLIClause, got, tc.primaryCLI)
 			}
 		})
 	}

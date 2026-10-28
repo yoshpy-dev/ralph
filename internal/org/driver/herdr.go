@@ -32,7 +32,8 @@ import (
 // test fakes), callers fall back to the trimmed raw string unchanged.
 //
 // Build a Herdr that sets PaneEnv with NewHerdr. A literal Herdr{R: r}, as
-// test fakes use, runs every command exactly as before PaneEnv existed.
+// test fakes use, runs every command exactly as before PaneEnv existed, as
+// long as no TabCreate is given extraEnv.
 type Herdr struct {
 	R Runner
 	// PaneEnv holds KEY=VALUE entries TabCreate adds to `herdr tab create`
@@ -45,12 +46,14 @@ type Herdr struct {
 	// AgmsgSelfNameOff, so an agmsg run inside such a pane cannot rename the
 	// pane's herdr agent (finding F3; the same evidence, (e)), and
 	// WIPCheckpointOff, so the WIP-checkpoint hooks of a Claude Code session
-	// in it make no wip: commit (finding F11). The values appear in the
-	// `herdr tab create` argv, which ps shows, and in the warning line, so
-	// never put a secret in PaneEnv.
+	// in it make no wip: commit (finding F11). An entry whose value depends
+	// on the pane is not here but TabCreate's extraEnv: spawn passes a seat's
+	// PrimaryCLIEntry that way. The values appear in the `herdr tab create`
+	// argv, which ps shows, and in the warning line, so never put a secret in
+	// PaneEnv or extraEnv.
 	PaneEnv []string
 	// Warn receives the warning line TabCreate writes when it cannot add
-	// PaneEnv; nil means os.Stderr.
+	// PaneEnv and extraEnv; nil means os.Stderr.
 	Warn io.Writer
 	// envProbe is the --env check NewHerdr sets up. It is a pointer because
 	// Herdr has value receivers and is copied into org.Org's Herdr field, so
@@ -236,15 +239,18 @@ func (h Herdr) WorkspaceCreate(ctx context.Context, cwd, label string) (string, 
 }
 
 // TabCreate runs `herdr tab create --workspace ID --cwd CWD --label LABEL`,
-// followed by `--env KEY=VALUE` for each PaneEnv entry when the herdr has
-// --env (paneEnvSupported), and returns the created pane id, extracted from
-// the envelope's result.root_pane.pane_id. Non-JSON output (unit-test fakes)
-// falls back to the trimmed raw stdout. On a herdr without --env it creates
-// the pane without PaneEnv and warns (warnNoPaneEnv) rather than fail.
-func (h Herdr) TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error) {
+// followed by `--env KEY=VALUE` for each PaneEnv entry and then for each
+// extraEnv entry, the entries of this one pane (a seat's PrimaryCLIEntry),
+// when the herdr has --env (paneEnvSupported), and returns the created pane
+// id, extracted from the envelope's result.root_pane.pane_id. Non-JSON
+// output (unit-test fakes) falls back to the trimmed raw stdout. On a herdr
+// without --env it creates the pane without PaneEnv and extraEnv and warns
+// (warnNoPaneEnv) rather than fail.
+func (h Herdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
 	args := []string{"tab", "create", "--workspace", workspaceID, "--cwd", cwd, "--label", label}
-	if len(h.PaneEnv) > 0 && h.paneEnvSupported(ctx) {
-		for _, kv := range h.PaneEnv {
+	env := append(append([]string(nil), h.PaneEnv...), extraEnv...)
+	if len(env) > 0 && h.paneEnvSupported(ctx, env) {
+		for _, kv := range env {
 			args = append(args, "--env", kv)
 		}
 	}
@@ -279,11 +285,12 @@ func (h Herdr) TabCreate(ctx context.Context, workspaceID, cwd, label string) (s
 // refuse the tab create (`unknown option: --env`), so a failed or timed-out
 // help counts as no --env too (plan 2026-10-22-seat-agmsg-self-name, D3).
 // The result, a failure included, is cached in envProbe and warned about
-// once there. A failure while the caller's ctx has ended is not cached: it
-// says nothing about the herdr, and the tab create fails on that ctx anyway.
-// A Herdr built as a literal has no envProbe, so it checks, and warns, on
-// every call that has PaneEnv.
-func (h Herdr) paneEnvSupported(ctx context.Context) bool {
+// once there, naming env, the entries of the call that checked. A failure
+// while the caller's ctx has ended is not cached: it says nothing about the
+// herdr, and the tab create fails on that ctx anyway. A Herdr built as a
+// literal has no envProbe, so it checks, and warns, on every call that has
+// PaneEnv or extraEnv.
+func (h Herdr) paneEnvSupported(ctx context.Context, env []string) bool {
 	p := h.envProbe
 	if p == nil {
 		p = &paneEnvProbe{}
@@ -302,22 +309,23 @@ func (h Herdr) paneEnvSupported(ctx context.Context) bool {
 	p.done = true
 	p.supported = err == nil && herdrHelpEnvFlag.MatchString(out)
 	if !p.supported {
-		h.warnNoPaneEnv(err)
+		h.warnNoPaneEnv(err, env)
 	}
 	return p.supported
 }
 
 // warnNoPaneEnv writes to Warn (os.Stderr when nil) the one warning line for
-// a herdr whose TabCreate cannot add PaneEnv. probeErr is the help call's
-// error, nil when the help just does not list --env. The line starts with
-// "warning: " as the CLI's other warnings do and lists every PaneEnv entry.
-// For each entry this driver knows (paneEnvConsequence: AgmsgSelfNameOff and
-// WIPCheckpointOff, the entries of SeatPaneEnv that production passes for
-// the panes of seats and of a headless director) it names, in PaneEnv's
-// order, what a pane created without it may do; an entry it does not know
-// adds no clause. The clauses are joined with "; ", and the advice to use a
-// herdr with --env follows as a sentence of its own, after ". ".
-func (h Herdr) warnNoPaneEnv(probeErr error) {
+// a herdr whose TabCreate cannot add env, the PaneEnv and extraEnv entries
+// of the call that checked. probeErr is the help call's error, nil when the
+// help just does not list --env. The line starts with "warning: " as the
+// CLI's other warnings do and lists every entry of env. For each entry this
+// driver knows (paneEnvConsequence: AgmsgSelfNameOff and WIPCheckpointOff,
+// the entries of SeatPaneEnv that production passes for the panes of seats
+// and of a headless director, and a seat's PrimaryCLIEntry) it names, in
+// env's order, what a pane created without it may do; an entry it does not
+// know adds no clause. The clauses are joined with "; ", and the advice to
+// use a herdr with --env follows as a sentence of its own, after ". ".
+func (h Herdr) warnNoPaneEnv(probeErr error, env []string) {
 	w := h.Warn
 	if w == nil {
 		w = os.Stderr
@@ -328,7 +336,7 @@ func (h Herdr) warnNoPaneEnv(probeErr error) {
 			strings.Join(strings.Fields(probeErr.Error()), " ") + ")"
 	}
 	var consequences []string
-	for _, kv := range h.PaneEnv {
+	for _, kv := range env {
 		if c := paneEnvConsequence(kv); c != "" {
 			consequences = append(consequences, c)
 		}
@@ -339,7 +347,7 @@ func (h Herdr) warnNoPaneEnv(probeErr error) {
 	}
 	_, _ = fmt.Fprintf(w, "warning: %s, so ralph creates herdr panes without --env %s%s. "+
 		"Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n",
-		reason, strings.Join(h.PaneEnv, " --env "), what)
+		reason, strings.Join(env, " --env "), what)
 }
 
 // AgentStart runs

@@ -84,7 +84,8 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // `tab create --help` answers a help that lists --env, as herdr 0.7.5 does,
 // unlogged and with no id handed out, so driver.Herdr's --env check leaves
 // the log and the ids as they were and each `tab create` ends with
-// `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`.
+// `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`, followed for a
+// seat by `--env RALPH_PRIMARY_CLI=<driver>`.
 // ORG_STUB_TAB_CREATE_HELP=noenv makes the help list --envelope instead of
 // --env, as a herdr without --env would, so each `tab create` has no --env
 // and driver.Herdr warns.
@@ -424,11 +425,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 		t.Fatalf("expected 2 'tab create' calls (one per seat), got %d (log: %v)", n, herdrLines)
 	}
 	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
-	// 2026-10-22-seat-agmsg-self-name, AC3) and RALPH_WIP_CHECKPOINT=off
-	// (plan 2026-10-22-seat-wip-checkpoint, AC2).
+	// 2026-10-22-seat-agmsg-self-name, AC3), RALPH_WIP_CHECKPOINT=off
+	// (plan 2026-10-22-seat-wip-checkpoint, AC2), and its driver as
+	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5).
+	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude"
 	for _, l := range herdrLines {
-		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off") {
-			t.Fatalf("tab create call %q does not end with --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off", l)
+		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, paneEnv) {
+			t.Fatalf("tab create call %q does not end with%s", l, paneEnv)
 		}
 	}
 
