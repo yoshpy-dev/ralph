@@ -62,15 +62,17 @@ trigger the wrong handler. Use `$skill-name` mention syntax or pick from the
 ## Cross-review pairing
 
 Codex-driven flow uses Claude as the cross-reviewer when
-`[standard].cross_review` in `ralph.toml` is on (default off) and `claude` is
-available; otherwise `$cross-review` records the skip in its triage report.
-`$plan`'s plan advisory pairs the same way under `[standard].plan_advisory`.
+`[standard].cross_review` in `ralph.toml` is on (default off), `claude` is
+available, and the diff is not empty; otherwise `$cross-review` records the
+skip in its triage report. `$plan`'s plan advisory pairs the same way under
+`[standard].plan_advisory`, with no diff condition.
 
 1. `$cross-review` takes the CLI running it, codex, as the driver
    (`RALPH_PRIMARY_CLI` overrides it; `.codex/AGENTS.override.md` tells
    Codex to set `RALPH_PRIMARY_CLI=codex`).
 2. The skill calls `claude -p` with an adversarial reviewer prompt and feeds
-   the diff between `origin/$BASE` and `HEAD`.
+   the diff between the local base branch (`git diff <base>...HEAD`) and
+   `HEAD`.
 3. Findings are triaged in the same Codex session and written to
    `docs/reports/cross-review-triage-<slug>.md`. The triage report header
    carries `Driver: codex  Reviewer: claude` so the artifact is

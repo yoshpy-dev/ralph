@@ -39,9 +39,10 @@ workflow guidance formerly in CLAUDE.md.
   `/cross-review` ask the other CLI (Claude Code → Codex, Codex → Claude) for
   a second opinion when `[standard].plan_advisory` / `[standard].cross_review`
   in `ralph.toml` is on (default off; read with `ralph config get`) and that
-  CLI is available. Otherwise the step is skipped and the skip is recorded
-  (the plan's Progress checklist, the cross-review triage report, the PR
-  body's Verification); the flow continues.
+  CLI is available (for `/cross-review`, also when the diff is not empty).
+  Otherwise the step is skipped and the skip is recorded (the plan's
+  Progress checklist, the cross-review triage report, the PR body's
+  Verification); the flow continues.
 - The other model's findings are presented to the user for judgment — never
   auto-applied.
 - `/pr` creates the pull request (attaching the plan's overview diagram when
