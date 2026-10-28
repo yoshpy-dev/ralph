@@ -52,3 +52,36 @@ _(足した行はない。)_
 
 - Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 4)
 - Follow-ups: LOW 4 件はどれも動作を変えない。直すなら 1 番目(`TestLoad_RequireCodexCLI` の確かめ。テストの意図が静かに弱くなっている)を優先し、3 番目は文言と 3 か所の句を同時に変える。2 番目と 4 番目は好みの範囲で、直さなくてよい。直す場合は、`/self-review` から回し直すかどうかを cycle の上限(既定 2 回)に照らして決める。直さない場合は、台帳に 1 行で足す
+
+## Run 2 (fix 60602f73)
+
+- Date: 2026-10-28
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の 2 回目の run。Run 1 は e9915a39)
+- Scope: `git diff e9915a39 60602f73`(4 ファイル、+17/-15)。Run 1 の LOW 4 件のうち、1〜3 番目を直すコミットだけを見た。観点と、実行しないもの(テスト、ビルド、lint、run-verify)は Run 1 と同じ
+
+### Run 1 の所見の扱い
+
+行の最初の cell を重大度の語にすると、`ralph insights` の backfill が所見として数え直すため、この表は L1〜L4 の番号で始める。
+
+| 番号 | 状態 | 根拠 |
+| --- | --- | --- |
+| L1(`TestLoad_RequireCodexCLI` の claude 側が何も確かめない) | 解決 | `internal/config/config_test.go:133-161`。関数名は `TestLoad_RequireAgentCLIs` になり、fixture は `require_claude_cli = true` と `require_codex_cli = true` を書き、claude 側の確かめは `!cfg.Doctor.RequireClaudeCLI` で落ちる。既定が false のままでは通らないので、`Load` がキーを読み飛ばせば落ちる。doc comment は「true で往復する」「その CLI が使えないときに fail にする」と今の意味に合う。2 つのキーが同じ値になったので、このテストだけでは 2 つのキーの取り違えを見分けられないが、`TestLoad_FullRoundTrip`(claude を true、go を false)が claude のキーを、このテストが codex のキーを固定するので、組で足りる |
+| L2(雛形で `codex trust` の 2 行が規則の段落の末尾に付いた) | 解決 | `templates/base/ralph.toml:10-11`。2 行が `require_claude_cli = false` のすぐあと、`require_codex_cli = false` の直前に戻った。「Codex loads the project's `.codex/config.toml` only after `codex trust .` has been run ...」と主語を Codex にしたので、前の行の規則と切り離されて読める。`TestLoad_TemplateRalphToml` の `\nrequire_claude_cli = false\n` と `\nrequire_codex_cli = false\n` は、どちらもキーの行が単独の行のままなので、コメント行が間に入っても影響しない |
+| L3(「at least one of them is required」の "required") | 解決 | `internal/cli/doctor.go:312` が「ralph needs at least one of them」になった。同じ句を持つのは `doctor_agent_cli_test.go:36` の `atLeastOne`、211-212 行の統合テストの 2 か所、doc comment と表の上のコメント 2 行で、すべて同じ commit で直っている。`git grep 'at least one of them is required'` は、計画と Run 1 の report の引用以外にヒットしない。表の `wantNotDetail` が `atLeastOne` を「入っていない」ことの確かめに使う行(required の側)は、新しい句でも `requiredClaude`/`requiredCodex` の文に含まれないので、空振りにならない |
+| L4(`agentCLIResult` の位置引数 6 つ) | 受け入れ | 直さない。理由は「`"claude"` と `"codex"` を入れ替えると、16 行の表のテストが `Name` と detail の CLI 名で落ちるため。struct にすると保てる量より増えるコードが多い」。Run 1 でも「直さなくてよい」側に置いた項目で、`doctor.go:290-291` の 2 行の呼び出しに閉じており、同意する。台帳には足さない |
+
+### Run 2 の新しい所見
+
+なし(CRITICAL・HIGH・MEDIUM・LOW とも 0 件)。
+
+確かめたこと:
+
+- `TestLoad_RequireCodexCLI` の旧名: コードと文書に残りはない。ヒットは `docs/evidence/test-2026-10-13-*-go-test.txt` の過去のテスト出力 4 件(履歴)と Run 1 の本文の引用だけ
+- 新しい雛形のコメントは `templates/base/ralph.toml` にだけある。この diff は root 側の `ralph.toml` を触っていない(計画の前提どおり、まだない)
+- fix のコミットは、動作を変える行を `doctor.go:312` の文字列 1 つだけにしている。判定の `switch` と他の枝の文は変わっていない
+- 確かめていない: テストと静的検査の実行(Run 1 と同じ理由で見送り)
+
+### Recommendation (Run 2)
+
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の LOW 4 件は 3 件が解決、1 件が理由つきで受け入れ)
+- Follow-ups: 台帳に足す行はない。`/verify` では、`TestLoad_RequireAgentCLIs` への改名と、雛形のコメントの移動を `git grep` で確かめる文書のずれの検査に入れる
