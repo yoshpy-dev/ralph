@@ -668,7 +668,7 @@ var directorSkillAnswerOrderSteps = []string{
 	"send が失敗したら resolve せず",
 }
 
-// directorSkillApprovalSendStep are fragments of step 3 of the /director
+// directorSkillApprovalSendStep are fragments of step 4 of the /director
 // skill's subsection ### 計画の承認, in order: the send approve prints is run
 // as step 2 of ### 答える順 says, with --timeout-ms 1500000 under
 // run_in_background in Claude Code, and its resolve only after the leader's
@@ -734,7 +734,7 @@ func directorSkillNumberedStep(section string, n int) string {
 // even when the DECISION is still in the input box, so the skill's text is
 // all that keeps a director from resolving an item whose answer never
 // arrived. Each copy's subsection ### 答える順 must contain every fragment of
-// directorSkillAnswerOrderSteps in order, and step 3 of its subsection
+// directorSkillAnswerOrderSteps in order, and step 4 of its subsection
 // ### 計画の承認 every fragment of directorSkillApprovalSendStep in order.
 // The phrase the skill names for a send whose wait ran out must also stay in
 // sendWaitDeadlineHint, the text Send adds to that error.
@@ -758,16 +758,114 @@ func TestDirectorSkill_PinsTheAnswerOrderSendAndPaneCheck(t *testing.T) {
 			t.Skipf("%s not found (%v) -- skipping the skill's answer-order check (vendored repo?)", rel, err)
 		}
 		text := string(data)
-		approval := directorSkillNumberedStep(directorSkillSubsection(text, "### 計画の承認"), 3)
+		approval := directorSkillNumberedStep(directorSkillSubsection(text, "### 計画の承認"), 4)
 		for _, in := range []struct {
 			name      string
 			text      string
 			fragments []string
 		}{
 			{"the subsection ### 答える順", directorSkillSubsection(text, "### 答える順"), directorSkillAnswerOrderSteps},
-			{"step 3 of the subsection ### 計画の承認", approval, directorSkillApprovalSendStep},
+			{"step 4 of the subsection ### 計画の承認", approval, directorSkillApprovalSendStep},
 		} {
 			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+	}
+}
+
+// directorSkillForkLineForms are the two forms of a FORK line in a feature
+// org leader's approval QUESTION, as step 3 of the section 機能ごとの org of
+// prompts/leader.md writes them: a fork the human still has to answer, its
+// recommended option a first, and a fork an earlier change request settled.
+// The /director skill's ### 計画の承認 names both, to ask the first and skip
+// the second.
+var directorSkillForkLineForms = []string{
+	"`FORK <番号>: <問い> / a <案>(推奨) / b <案>`",
+	"`FORK <番号>: <問い> → <決まった案>(決定済み)`",
+}
+
+// directorSkillApprovalForkSteps are fragments of numbered steps of the
+// /director skill's subsection ### 計画の承認, in order within each step: the
+// rules plan 2026-10-29-leader-plan-depth.md gave the director for a QUESTION
+// with FORK lines (AC3, D1, D3). Step 1 sends the item to the human with
+// inbox notify when no human is in the conversation. Step 2 skips the
+// (決定済み) lines, asks one question per FORK line with the recommended
+// option first plus one approval question, all in one AskUserQuestion for up
+// to 3 forks and in batches of 4 with the approval last for more, runs no
+// approve until every answer is in, and sends a change request instead of
+// approving when any fork got a non-recommended option. Steps 3 and 6 are
+// the approve and the change request step 2 points to by number.
+var directorSkillApprovalForkSteps = []struct {
+	step      int
+	fragments []string
+}{
+	{1, []string{
+		"承認するかを聞く(本文に `FORK` の行があれば、2 のとおり分かれ目と一緒に聞く)",
+		"人が会話にいなければ、問いを出して答えを待たずに、「件の処理」の 3 のとおり `ralph org inbox notify <件の ID>` で人に送る",
+	}},
+	{2, []string{
+		"QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く",
+		directorSkillForkLineForms[0] + "。推奨の案はいつも a",
+		directorSkillForkLineForms[1] + " の行は聞かず、数えもしない",
+		"AskUserQuestion(Codex では番号つきの選択肢)で、聞く `FORK` の行 1 つを 1 問にし",
+		"選択肢を行の順(推奨の a が最初)に並べ、承認するかの問いを 1 つ足す",
+		"分かれ目が 3 つまでなら、分かれ目の問いと承認の問いを 1 回の AskUserQuestion(4 問まで)で聞く",
+		"4 つ以上なら、分かれ目の問いを 4 問ずつに分けて先にすべて聞き、すべての答えがそろってから承認の問いを聞く",
+		"答えがそろうまで `ralph org approve` を打たない",
+		"人が承認し、すべての分かれ目で推奨の案を選んだら、3 に進む",
+		"推奨と違う案が 1 つでもあれば、承認と答えていても approve を打たず、6 のとおり直しの DECISION を送る",
+		"本文には分かれ目ごとに、推奨の案を選んだものも含めて、選んだ案を",
+	}},
+	{3, []string{
+		"人が承認したら(`FORK` の行があれば、2 のとおりすべての分かれ目で推奨の案が選ばれたときだけ)、`ralph org approve <件の ID>` を打つ",
+	}},
+	{6, []string{
+		"人が直しを求めたら approve を打たず、同じ `PLAN:` のヘッダを付けて",
+		"(本文を `approved` で始めない)",
+	}},
+}
+
+// TestDirectorSkill_PinsTheApprovalForkSteps pins how the /director skill
+// asks the forks of a feature plan with its approval (AC3 of plan
+// 2026-10-29-leader-plan-depth.md). ralph org approve records the approval
+// whatever the human chose, and the leader reads a DECISION starting with
+// `approved` as every fork settled with its recommended option, so the
+// skill's text is all that keeps a director from approving a plan the human
+// wants built another way. prompts/leader.md must contain both forms of
+// directorSkillForkLineForms, and each copy's subsection ### 計画の承認 must
+// contain, in each step of directorSkillApprovalForkSteps, every fragment of
+// that step in order, compared with spaces and line breaks removed
+// (withoutSpaces). scripts/check-skill-sync.sh keeps the copies identical but
+// does not read Go or the leader template.
+//
+// If this test fails after a deliberate change to a rule or to the FORK line
+// forms, put the new words, short and verbatim, in the fragments (and keep
+// the forms the same in prompts/leader.md and the skill); otherwise restore
+// the text in .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheApprovalForkSteps(t *testing.T) {
+	leader, err := promptFS.ReadFile("prompts/leader.md")
+	if err != nil {
+		t.Fatalf("read prompts/leader.md: %v", err)
+	}
+	for _, form := range directorSkillForkLineForms {
+		if !strings.Contains(withoutSpaces(string(leader)), withoutSpaces(form)) {
+			t.Errorf("prompts/leader.md does not contain %s, a FORK line form the /director skill names -- see this test's doc comment for what to update", form)
+		}
+	}
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's approval-fork check (vendored repo?)", rel, err)
+		}
+		section := directorSkillSubsection(string(data), "### 計画の承認")
+		for _, s := range directorSkillApprovalForkSteps {
+			where := fmt.Sprintf("step %d of the subsection ### 計画の承認", s.step)
+			for _, p := range skillOrderedFragmentProblems(directorSkillNumberedStep(section, s.step), where, s.fragments) {
 				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
 			}
 		}

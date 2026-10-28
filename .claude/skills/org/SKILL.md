@@ -912,6 +912,19 @@ per-plan の org では、次の検査がかかる。
 ralph org approve e3 e5
 ```
 
+leader は、機能の内側の分かれ目(この機能の中だけで決まる、どの案で作るかの
+選択)を、計画の `## Design decisions` に推奨の案とその理由と一緒に書く。
+per-plan では、承認を求める QUESTION の本文に、分かれ目を 1 つ 1 行の
+`FORK <番号>: <問い> / a <案>(推奨) / b <案>` の形ですべて載せる(推奨の案は
+いつも a)。director は分かれ目を承認と一緒に人に聞き、すべての分かれ目で
+推奨の案が選ばれて承認されたときだけ approve を打つ。推奨と違う案が 1 つでも
+選ばれたら、approve を打たずに、選んだ案を本文に書いた上の 5 の直しの
+DECISION を送る(`/director` skill の「計画の承認」)。leader は計画をその案で
+直し、決まった分かれ目を `FORK <番号>: <問い> → <決まった案>(決定済み)` の
+行にした新しい QUESTION を上げる。本文が `approved` の DECISION は、すべての
+分かれ目が推奨の案で決まったことも表す。split の org では、leader は人に
+聞かずに推奨の案を採り、そのことを計画の `## Design decisions` に書く。
+
 approve について、次のことに気をつける。
 
 - approve は、その時点のファイルを記録する(全文のハッシュ)。approve の
