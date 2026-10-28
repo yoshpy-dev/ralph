@@ -104,6 +104,7 @@ type fakeHerdr struct {
 	sendKeysKeys      [][]string // keys PaneSendKeys was invoked with, in order (e.g. asserting exactly one "Enter")
 	agentStartNames   []string   // agent names AgentStart was invoked with, in order
 	agentStartArgs    [][]string // agentArgs AgentStart was invoked with, in order (AC-4 argv assertions)
+	tabCreateEnvs     [][]string // extraEnv TabCreate was invoked with, in order (nil for none)
 	agentWaitTargets  []string   // targets AgentWait was invoked with, in order
 	agentWaitUntil    [][]string // until states AgentWait was invoked with, in order
 	agentWaitTimeouts []int      // timeoutMS AgentWait was invoked with, in order
@@ -164,12 +165,13 @@ func (f *fakeHerdr) WorkspaceCreate(_ context.Context, cwd, label string) (strin
 	return f.workspaceID, nil
 }
 
-func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string) (string, error) {
+func (f *fakeHerdr) TabCreate(_ context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "tab_create")
 	f.tabCreateWorkspaces = append(f.tabCreateWorkspaces, workspaceID)
 	f.tabCreateCwds = append(f.tabCreateCwds, cwd)
+	f.tabCreateEnvs = append(f.tabCreateEnvs, extraEnv)
 	if f.tabCreateErr != nil {
 		return "", f.tabCreateErr
 	}
@@ -3750,6 +3752,37 @@ func TestOrgSpawn_Codex_GuardedRoleOverride_Spawns(t *testing.T) {
 	args := h.agentStartArgs[0]
 	if len(args) != 2 || args[0] != "--model" {
 		t.Fatalf("expected no permission flags for guarded mode, got %v", args)
+	}
+}
+
+// TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver pins AC5 of plan
+// 2026-10-29-review-switches-config at the org layer: spawn passes the
+// seat's driver to its pane as RALPH_PRIMARY_CLI, the one extraEnv entry of
+// its TabCreate, for a claude and a codex seat, leaders included, so
+// pick_reviewer in the seat takes the other CLI. The fixed entries every
+// pane gets are driver.Herdr's PaneEnv, not spawn's to pass.
+func TestOrgSpawn_PaneGetsRalphPrimaryCLIOfItsDriver(t *testing.T) {
+	for _, tc := range []struct {
+		name, seat, role, driver, model string
+	}{
+		{"claude worker", "seat-1", "worker", "claude", "sonnet"},
+		{"codex worker", "seat-1", "worker", "codex", "gpt-5-codex"},
+		{"claude leader", LeaderIdentity, LeaderIdentity, "claude", "sonnet"},
+		{"codex leader", LeaderIdentity, LeaderIdentity, "codex", "gpt-5-codex"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, h, _ := testOrg(t)
+			o.Config.Permissions = config.OrgPermissionsConfig{Default: PermissionModeAutonomous, CodexVerified: true}
+			p := mustSpawnParams("org-a", tc.seat)
+			p.Role, p.Driver, p.Model = tc.role, tc.driver, tc.model
+			if r := o.Spawn(p); r.Outcome != SpawnOutcomeSpawned {
+				t.Fatalf("spawn failed: %+v", r)
+			}
+			want := []string{"RALPH_PRIMARY_CLI=" + tc.driver}
+			if len(h.tabCreateEnvs) != 1 || !slices.Equal(h.tabCreateEnvs[0], want) {
+				t.Fatalf("TabCreate extraEnv per call = %q; want one call with %q", h.tabCreateEnvs, want)
+			}
+		})
 	}
 }
 

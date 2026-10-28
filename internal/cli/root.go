@@ -34,6 +34,7 @@ org-runtime execution (ralph org).`,
 		newOrgCmd(),
 		newEjectCmd(),
 		newAdoptCmd(),
+		newConfigCmd(),
 	)
 
 	return root

@@ -83,7 +83,7 @@ and protocol contract.
 ## Repo map
 
 - `cmd/ralph/` — Go entrypoint for the ralph CLI (cobra root, ldflags injection, go:embed wiring)
-- `internal/cli/` — cobra subcommands (init, upgrade, eject, adopt, status, doctor, pack, insights, org, version)
+- `internal/cli/` — cobra subcommands (init, upgrade, eject, adopt, status, doctor, pack, insights, org, config, version)
 - `internal/scaffold/` — go:embed template system, manifest TOML (v3 ownership fields: `layout`/`owner` core|fork|seed|block/`forked_from_version`, opt-in write API, legacy read compat), file render with SHA256 hashes
 - `internal/upgrade/` — overlay engine wired into `ralph upgrade` for v2 layouts: core replace planner with ordered ops + commit barrier, managed block engine, `.claude/settings.json` 3-way merge against the `.ralph/core/settings.ralph.json` snapshot, advisory diff, upgrade report writer (`docs/reports/upgrade-*.md`); legacy layouts migrate via a confirmed one-time flow (internal/cli/migrate.go) before chaining into this engine (spec: docs/specs/2026-08-17-overlay-scaffold-v2.md)
 - `internal/config/` — ralph.toml parser with defaults

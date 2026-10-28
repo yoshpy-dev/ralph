@@ -1120,6 +1120,8 @@ func (r *directorStartRun) createWorkspaceAndTab() error {
 	}
 	err = o.callWithTimeout(func(ctx context.Context) error {
 		var err error
+		// No extraEnv: the director is not a seat, so its pane gets the
+		// fixed PaneEnv only, not a seat's RALPH_PRIMARY_CLI.
 		r.reg.PaneID, err = o.Herdr.TabCreate(ctx, r.reg.WorkspaceID, p.Cwd, DirectorTabLabel(token))
 		return err
 	})

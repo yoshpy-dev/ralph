@@ -60,7 +60,7 @@ func (f *fakeWatchHerdr) WorkspaceCreate(_ context.Context, _, _ string) (string
 	return "ws-1", nil
 }
 
-func (f *fakeWatchHerdr) TabCreate(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeWatchHerdr) TabCreate(_ context.Context, _, _, _ string, _ ...string) (string, error) {
 	return "pane-1", nil
 }
 

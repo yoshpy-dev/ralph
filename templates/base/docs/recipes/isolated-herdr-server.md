@@ -237,12 +237,16 @@ export PATH="/tmp/ralph-iso/bin:<the same directories as in run>:/usr/bin:/bin:/
   this and then checked it on one command each from a seat started before
   a change to the file and one started after it. Write the file before the
   server starts any claude; a change reaches only sessions started later.
-- ralph creates seat panes with
-  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
-  when the herdr has `--env` (herdr 0.7.5 does), so the file needs neither
-  value. With a herdr that has no `--env`, ralph warns on stderr and the
-  panes get neither; the trial, run before ralph set the value, exported
-  `AGMSG_SELF_NAME=off` in this file.
+- ralph creates seat panes, leaders included, with
+  `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=<driver>`
+  when the herdr has `--env` (herdr 0.7.5 does), so the file needs none of
+  these values. The third is the seat's driver (`claude` or `codex`), so
+  that `pick_reviewer` (`scripts/xreview-helpers.sh`), with which the
+  seat's cross-review picks the other CLI, sees the seat's driver instead of
+  treating it as claude. With a herdr that has no
+  `--env`, ralph warns on stderr and the panes get none of them; the trial,
+  run before ralph set the value, exported `AGMSG_SELF_NAME=off` in this
+  file.
 
 ### Shell aliases
 

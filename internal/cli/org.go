@@ -358,6 +358,9 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		// AGMSG_SELF_NAME=off, so an agmsg a seat runs itself cannot rename
 		// its herdr agent (finding F3), and RALPH_WIP_CHECKPOINT=off, so the
 		// seat's Claude Code session makes no wip: commit (finding F11).
+		// Those are the Herdr's fixed PaneEnv; after them spawn appends
+		// RALPH_PRIMARY_CLI=<the seat's driver> as TabCreate's extraEnv
+		// (driver.PrimaryCLIEntry).
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
 		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
 		// The leader's role prompt names the same home's scripts in its

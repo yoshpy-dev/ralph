@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // defaultSpawnTimeoutMS is applied when a caller passes TimeoutMS <= 0, so
@@ -96,7 +97,11 @@ const EventOrgWorkspaceClosed = "org_workspace_closed"
 // driver.ExecRunner, is assigned directly to Org.Herdr.
 type HerdrClient interface {
 	WorkspaceCreate(ctx context.Context, cwd, label string) (string, error)
-	TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error)
+	// TabCreate adds extraEnv to the new pane's environment after the
+	// fixed entries every pane gets (driver.Herdr's PaneEnv). Spawn passes
+	// the seat's driver.PrimaryCLIEntry; a headless director's start passes
+	// none.
+	TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error)
 	AgentStart(ctx context.Context, name, kind, paneID string, timeoutMS int, agentArgs []string) (string, error)
 	AgentWait(ctx context.Context, target string, until []string, timeoutMS int) (string, error)
 	PaneRead(ctx context.Context, paneID string, lines int) (string, error)
@@ -985,7 +990,12 @@ func (o *Org) Spawn(p SpawnParams) SpawnResult {
 		return o.failStep(p, "workspace_create", err, ctx.Err(), "")
 	}
 
-	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID)
+	// The seat's pane gets RALPH_PRIMARY_CLI=<its driver> after the Herdr's
+	// fixed PaneEnv, so pick_reviewer, with which the seat's cross-review picks
+	// the other CLI, sees the seat's driver instead of treating it as claude
+	// (plan 2026-10-29-review-switches-config, D5). p.Driver is claude or
+	// codex: permissionArgsForDriver refused any other above.
+	paneID, err := o.Herdr.TabCreate(ctx, workspaceID, p.Cwd, p.SeatID, driver.PrimaryCLIEntry(p.Driver))
 	if err != nil {
 		return o.failStep(p, "tab_create", err, ctx.Err(), "")
 	}

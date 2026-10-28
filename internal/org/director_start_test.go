@@ -54,8 +54,8 @@ func (h *directorHerdr) WorkspaceCreate(ctx context.Context, cwd, label string) 
 	return id, err
 }
 
-func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string) (string, error) {
-	id, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label)
+func (h *directorHerdr) TabCreate(ctx context.Context, workspaceID, cwd, label string, extraEnv ...string) (string, error) {
+	id, err := h.fakeHerdr.TabCreate(ctx, workspaceID, cwd, label, extraEnv...)
 	if err != nil && h.failedCreateOutput != "" {
 		return h.failedCreateOutput, err
 	}
@@ -256,6 +256,12 @@ func TestStartDirector_LaunchesInAWorkspaceOfItsOwn(t *testing.T) {
 			}
 			if !slices.Equal(h.workspaceCreateCwds, []string{f.cwd}) || !slices.Equal(h.tabCreateCwds, []string{f.cwd}) || !slices.Equal(h.tabCreateWorkspaces, []string{"ws-1"}) {
 				t.Fatalf("workspace cwds %v, tab cwds %v, tab workspaces %v, want the pane cwd and ws-1", h.workspaceCreateCwds, h.tabCreateCwds, h.tabCreateWorkspaces)
+			}
+			// The director is not a seat: its pane gets no RALPH_PRIMARY_CLI,
+			// only the fixed PaneEnv of driver.Herdr (plan
+			// 2026-10-29-review-switches-config, R4).
+			if len(h.tabCreateEnvs) != 1 || h.tabCreateEnvs[0] != nil {
+				t.Fatalf("TabCreate extraEnv per call = %q, want one call with none", h.tabCreateEnvs)
 			}
 			if !slices.Equal(h.agentStartNames, []string{"director_" + token}) || !slices.Equal(h.agentStartKinds, []string{tc.driver}) ||
 				!slices.Equal(h.agentStartPanes, []string{"pane-1"}) || !slices.Equal(h.agentStartTimeouts, []int{5000}) {

@@ -1,0 +1,147 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
+)
+
+// ErrConfigKey is returned by `ralph config get` when its key is not a key of
+// ralph.toml or names a table or an array rather than one value. ExitCode
+// maps it to 2.
+var ErrConfigKey = errors.New("not a key of one value in ralph.toml")
+
+// ErrConfigLoad is returned by `ralph config get` when ralph.toml cannot be
+// read, cannot be parsed, or fails config.Load's validation. ExitCode maps it
+// to 3.
+var ErrConfigLoad = errors.New("cannot be read or is invalid")
+
+func newConfigCmd() *cobra.Command {
+	var configPath string
+
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Read ralph.toml settings",
+		Long: "ralph config reads the settings of ralph.toml. `ralph config get <key>`\n" +
+			"prints one value, for the skills and seats that read a setting.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml; a file that does not exist gives the built-in defaults)")
+
+	cmd.AddCommand(newConfigGetCmd(&configPath))
+
+	return cmd
+}
+
+func newConfigGetCmd(configPath *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "get <key>",
+		Short: "Print the value of one ralph.toml key",
+		Long: "ralph config get prints the value of one key of ralph.toml: the file\n" +
+			"--config names, else ./ralph.toml. The key is the dotted toml name, such\n" +
+			"as standard.plan_advisory or org.review.max_cross_review_cycles. A key\n" +
+			"the file does not set prints its built-in default, and so does every key\n" +
+			"when the file does not exist. It prints the value on stdout: true or\n" +
+			"false, a decimal number, or a string as written.\n" +
+			"\n" +
+			"Exit codes, for the skills and seats that read a setting with it:\n" +
+			"  0  the value was printed: use it.\n" +
+			"  1  an older ralph without this verb exits 1 with\n" +
+			"     unknown command \"config\" on stderr. Treat that, and only that, as\n" +
+			"     off, and record that the setting was treated as off. Stop and report\n" +
+			"     any other exit 1.\n" +
+			"  2  the key is not a key of ralph.toml, or names a table or an array\n" +
+			"     rather than one value: stop and report it, do not treat it as off.\n" +
+			"  3  ralph.toml cannot be read, cannot be parsed, or fails validation:\n" +
+			"     stop and report it, do not treat it as off.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := *configPath
+			if path == "" {
+				path = "ralph.toml"
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				return fmt.Errorf("config get: %s: %w: %w", path, ErrConfigLoad, err)
+			}
+			value, err := configValue(cfg, args[0])
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), value)
+			return err
+		},
+	}
+}
+
+// configValue returns the value of key, a dotted toml name, in cfg as text:
+// it walks cfg's structs by their toml tags and formats the bool, int, or
+// string it ends at (a string as it is, line breaks included). A key that is
+// not a field, or that ends at or goes through a table or an array, is an
+// ErrConfigKey.
+func configValue(cfg config.Config, key string) (string, error) {
+	v := reflect.ValueOf(cfg)
+	segments := strings.Split(key, ".")
+	for i, segment := range segments {
+		if v.Kind() != reflect.Struct {
+			return "", fmt.Errorf("config get: %s: %w: %s is %s", key, ErrConfigKey, strings.Join(segments[:i], "."), configKindName(v.Kind()))
+		}
+		field, ok := configField(v, segment)
+		if !ok {
+			return "", fmt.Errorf("config get: %s: %w: no such key", key, ErrConfigKey)
+		}
+		v = field
+	}
+	switch v.Kind() {
+	case reflect.Bool:
+		return strconv.FormatBool(v.Bool()), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10), nil
+	case reflect.String:
+		return v.String(), nil
+	default:
+		return "", fmt.Errorf("config get: %s: %w: it is %s", key, ErrConfigKey, configKindName(v.Kind()))
+	}
+}
+
+// configField returns the field of the struct v whose toml tag names name.
+func configField(v reflect.Value, name string) (reflect.Value, bool) {
+	t := v.Type()
+	for i := range t.NumField() {
+		tag, _, _ := strings.Cut(t.Field(i).Tag.Get("toml"), ",")
+		if tag == name && tag != "" && tag != "-" {
+			return v.Field(i), true
+		}
+	}
+	return reflect.Value{}, false
+}
+
+// configKindName names kind the way ralph.toml's reader sees it, with its
+// article. A kind no field of config.Config has today is named by Go's name
+// for it.
+func configKindName(kind reflect.Kind) string {
+	switch kind {
+	case reflect.Struct, reflect.Map:
+		return "a table"
+	case reflect.Slice, reflect.Array:
+		return "an array"
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return "an integer"
+	case reflect.String:
+		return "a string"
+	default:
+		return "a value of Go kind " + kind.String()
+	}
+}
