@@ -154,7 +154,9 @@
 - [x] Plan reviewed(consult-plan-leaderplan: 判定「直してから進める」。F1〜F5 は案のとおり。D2 を #266 の形に書き換え、S2 を最後に回し、呼ぶ前後の git の比べ、2 往復目の `(決定済み)`、headless の director の notify を足した。#266 の担当(セッション B、ralph-6d)に claude の打ち方を問い合わせ、`--restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk` と `RALPH_WIP_CHECKPOINT=off` の形を聞いた。B の S2 で確定したら知らせてもらう。Codex の計画助言: HIGH 1 件(助言者の MCP が止まらない)と MEDIUM 1 件(4 つ目からの分かれ目を自動で決める)を聞かずに反映した(D7 と D3 の見直し、AC8)。codex の MCP は `-c mcp_servers={}` では止まらず、`-c mcp_servers.<名前>.enabled=false` なら止まることを `codex-cli 0.163.0` の `codex mcp list --json` で確かめた(server 1 つで試した。全部を止める確かめは S2 の AC8))
 - [x] Plan approved(自動承認(ユーザーの指示)。2026-10-29、digest sha256:fac3038a3706)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started
+  - #266 の claude の計画助言の形が確定した(B から、2026-10-29、B のコミット 93dec2cc)。`RALPH_WIP_CHECKPOINT=off command claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<prompt>" </dev/null > <出力> 2> <log>`、20 分の watchdog、rc 0 かつ出力が空でないときだけ完了。git の確かめは `{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; }` を前後で取って cmp する。S2 はこの形で書く
+  - S1(95ad1e11、implementer): 手順 1 の書き出しに読み込み(AGENTS.md と CLAUDE.md、`.claude/rules/`、Codex は `.codex/AGENTS.override.md`、計画が触るコード)、手順 1 の最後に分かれ目の段落(3 条件、機能の内側、`## Design decisions` に 2〜4 の案と推奨と理由、分かれ目がなければ `Critical forks: None`、split は推奨を採って記録)、手順 3 に `FORK` の行(推奨はいつも a、理由は書かない、数で打ち切らない、2,000 字に収まらなければ言い直す)と例の 2 行、2 往復目の `(決定済み)`、手順 4 に「`approved` はすべて推奨で決まった意味も持ち、`## Design decisions` は書き換えない。推奨と違う答えは直しの依頼」。手順の番号は振り直していない。新しいテスト 6 本。verify rc=0(9s)。`go test -overlay` で leader.md を HEAD の版にすると新しい 6 本がすべて落ちる。self-check 5 項目 clean
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
