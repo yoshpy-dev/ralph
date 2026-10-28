@@ -28,8 +28,9 @@ type DoctorConfig struct {
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
 // `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
 // validates the fields, and their defaults are kept in lock-step with
-// templates/base/ralph.toml and scripts/ralph-config.sh
-// (defaults_sync_test.go). The org runtime's design is
+// templates/base/ralph.toml; AgmsgHome's is also compared with
+// RALPH_ORG_AGMSG_HOME in scripts/ralph-config.sh (both checks are in
+// defaults_sync_test.go). The org runtime's design is
 // docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may

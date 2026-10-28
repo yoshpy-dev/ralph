@@ -87,36 +87,21 @@ func TestLoad_TemplateRalphToml(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(templates/base/ralph.toml): %v", err)
 	}
-	// TestDefaultsLockStep compares [org.director].auto_merge in this template
-	// with RALPH_ORG_DIRECTOR_AUTO_MERGE in scripts/ralph-config.sh and with
-	// Default(), but reads the template with Load, which keeps Default()'s
-	// value for a key the template leaves out: so this test checks that the
-	// template states the default explicitly, and that it loads as Default()'s
-	// value.
+	// TestDefaultsLockStep checks the [org] keys orgTemplateDrift reads
+	// (auto_merge and wake included) against Default(). It does not read
+	// [org.roles], [org.permissions].roles, or launch_cmd; wake_cmd is below.
+	if len(cfg.Org.Director.WakeCmd) != 0 {
+		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
+	}
+	// [doctor]'s require_claude_cli and require_codex_cli must be written out
+	// in the template: ralph.toml is a seed that ralph upgrade does not
+	// overwrite, so a scaffolded project keeps the values the template writes,
+	// not Default()'s. Load keeps Default()'s value for a key the template
+	// leaves out, so the raw text is checked as well.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "\nauto_merge = false\n") {
-		t.Error("templates/base/ralph.toml does not set auto_merge = false in [org.director]")
-	}
-	if got, want := cfg.Org.Director.AutoMerge, Default().Org.Director.AutoMerge; got != want {
-		t.Errorf("templates/base/ralph.toml director.auto_merge = %v, want Default()'s %v", got, want)
-	}
-	// The same holds for [org.director].wake, which TestDefaultsLockStep
-	// compares with RALPH_ORG_DIRECTOR_WAKE.
-	if !strings.Contains(string(data), "\nwake = [\"pull\"]\n") {
-		t.Error(`templates/base/ralph.toml does not set wake = ["pull"] in [org.director]`)
-	}
-	if got, want := cfg.Org.Director.Wake, Default().Org.Director.Wake; !slices.Equal(got, want) {
-		t.Errorf("templates/base/ralph.toml director.wake = %q, want Default()'s %q", got, want)
-	}
-	if len(cfg.Org.Director.WakeCmd) != 0 {
-		t.Errorf("templates/base/ralph.toml director.wake_cmd = %q, want empty (the example stays a comment)", cfg.Org.Director.WakeCmd)
-	}
-	// The same holds for [doctor]'s require_claude_cli and require_codex_cli:
-	// ralph.toml is a seed that ralph upgrade does not overwrite, so a
-	// scaffolded project keeps the values the template writes, not Default()'s.
 	if !strings.Contains(string(data), "\nrequire_claude_cli = false\n") {
 		t.Error("templates/base/ralph.toml does not set require_claude_cli = false in [doctor]")
 	}
