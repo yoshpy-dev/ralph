@@ -2,11 +2,42 @@
 
 - Date: 2026-10-29
 - Plan: `docs/plans/active/2026-10-28-codex-verified-auto-merge-on.md`(issue #274、D1〜D5、AC1〜AC7、Progress の S1〜S4)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
-- Scope: `git diff ae64da70...HEAD`(9 コミット、32 ファイル、+701/-263)。中心は S1 29fd179e(`internal/config/defaults_sync_test.go` の表のテスト)、S2 cb8d258e と ce6e972d(既定を true に、`internal/config` と `internal/cli` のテスト)、S3 920a4dcb(Go のコメント)、S4 f99ac82d(skill・recipe・README・spec・tech-debt)。diff quality だけを見た。実行したのは `go test ./internal/config/ -count=1`(通過、0.6 s)の 1 回だけで、変異と静的検査は回していない。
-- ID: M1、L1〜L4
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は b49fd6c2 の report、run 2 は修正スライス F1 958d9bff のあとの再 run で、この file を同じ場所で更新した)
+- Run 2 の scope: F1 958d9bff(8 ファイル、+89/-64)の全体と、M1〜L4 がそれぞれ閉じたか。HEAD は b955cbcf(`git diff ae64da70...HEAD` は 13 コミット、38 ファイル、+840/-317)。run 1 の本文は下にそのまま残し、その後は「Run 2」の節にまとめた。
+- Run 1 の scope: `git diff ae64da70...HEAD`(9 コミット、32 ファイル、+701/-263)。中心は S1 29fd179e(`internal/config/defaults_sync_test.go` の表のテスト)、S2 cb8d258e と ce6e972d(既定を true に、`internal/config` と `internal/cli` のテスト)、S3 920a4dcb(Go のコメント)、S4 f99ac82d(skill・recipe・README・spec・tech-debt)。diff quality だけを見た。
+- 実行したもの: `go test ./internal/config/ -count=1`(run 1、run 2 とも通過、0.6 s)だけ。変異と静的検査は回していない。
+- ID: run 1 の所見は M1、L1〜L4(run 2 も同じ ID で状態を追う)。run 2 で新しく立てた所見はない。
 
-## Evidence reviewed
+## Run 2
+
+### M1〜L4 のその後
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| M1 | 解決 | `statusOrgConfig`(`status.go:265-266`)と `statusDirectorConfig`(`:298-299`)の 2 つの fallback で、`Default()` の値を取ったあとに `AutoMerge = false` を入れる。`Enabled` は既定の true のまま。`./ralph.toml` が読めない場合は `statusOrgConfig` の fallback が `loaded == false` で `statusDirectorConfig` の先頭の `return cfg.Director` から出るので、2 つで両方の経路を覆う。ほかに `config.Default()` を fallback に使う cli のコードは `org.go:615`(`ralph.toml` が存在しない場合の既定で、読めない場合ではない)だけで、`ralph org merge` と `ralph org director status` は読めない file をエラーにする(`org.go:348-351`、`org_director.go:394-401`)ため、`ralph status` が唯一の fallback だった。doc comment は 2 関数とも例外を書いた。 |
+| L1 | 解決 | `permissions.go:119-126` が「検証は 1 台の証拠であって既定の理由ではなく、既定は #274 の人の決定」と分けた。 |
+| L2 | 解決 | `testOrgConfig()` が `Permissions: config.OrgPermissionsConfig{CodexVerified: false}` と理由の 4 行のコメントを持ち、`codexGuardedOrg` も `CodexVerified: false` を明示する。`spawn_test.go` の 3 つのコメントは「codex_verified false」を名指す。`permissions_test.go` の `config.OrgConfig{}` は、テスト名が「when codex_verified is false」なので残してよい。 |
+| L3 | 解決 | `doctor_shell_alias.go:714-719` が「gets only while `[org.permissions].codex_verified` is true, the default」になり、固定していたテスト 4 か所(`doctor_shell_alias_test.go:574`、`:599`、`:1328`、`:1330`)が同じ文言に合う。 |
+| L4 | 解決 | `defaults_sync_test.go` の「19」が 3 か所とも消えた(`grep -n 19 internal/config/defaults_sync_test.go` に当たりなし)。同じ既定値の組は「for example」付きで、`ack_minutes` を 10 の組(max_orgs・deadman_minutes と同じ)に、`interval_seconds` を 30 の組(max_total_seats と同じ)に入れ、true の 4 キーも事実と合う。 |
+
+### F1 が入れた新しい問題の有無
+
+見つからなかった。確かめた点は次のとおり。
+
+- `fallback := config.Default().Org` の `Director` は値渡しの struct なので、`fallback.Director.AutoMerge = false` は `Default()` の返り値を汚さない(`Wake` の slice は `Default()` が呼ぶたびに作る)。
+- 2 つ目の warning(`status.go:302-305`)の「main worktree の ralph.toml を読めなかった」は正確。`withMainWorktreeDirectorEnabled` が返すエラーの出どころは `loadMainWorktreeOrgConfig` の `config.Load` だけ(`org.go:332-335`)で、git が main worktree を名指せないときは `LedgerMainWorktreeRoot` が `ok=false` を返し(`statedir.go:105-118`)、main の file は読まれずエラーにもならない。
+- `status_test.go` は 2 つの fallback を、off の行、`--json` の `auto_merge` false、warning の全文で固定する。`wantSuffix` は 3 つの setup(main checkout、linked worktree、`--json`)に効き、stderr の行数が 1 であることも保つ。
+- `--json` の `director.auto_merge` は fallback の false と明示した false を区別できないが、知らせは stderr の warning にあり、安全側に倒れるので受け入れられる。
+- `enabled` の fallback を true のまま残したのは、計画の Deviation(M1)の記述どおりで、`ralph org escalate` の読み方(読めなければエラー)とは別に status が「表示だけ」であることとも矛盾しない。
+
+### 次の段へ渡すもの(所見ではない)
+
+- `docs/tech-debt/README.md:136` は doctor の Detail の文を「"… once codex_verified = true …"」と引用して言い換えている。F1 の L3 でその文が「only while … is true, the default」に変わったので、引用は文字どおりではなくなった。文書と実装のずれなので /verify の対象。同じ行の「An operator who has already set `codex_verified = true`」も、既定が true の project には当たらない言い方になっている(run 1 から同じ)。
+- `ralph status --help`(`status.go:66-71`)は `auto_merge` を「enabled と同じ規則で読む」と書くが、読めないときの false の fallback は書かない。warning の文が説明するので足りる。必要なら /sync-docs で 1 文足す。
+
+## Run 1
+
+### Evidence reviewed
 
 - `internal/config/defaults_sync_test.go` の追加部分の全体。`TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`(`:402-495`、94 行のうち表が 35 行)、`tomlKeys`、`editTemplateKey`。
   - 表の行は 19 で、`orgTemplateProbe`(`:114-142`)の toml のタグの数と合う。`tomlKeys` は struct を表として下り、`*[]string` や `*[]OrgModelPoolEntry` はポインタなので葉になる。probe の表はすべて非ポインタの struct なので取りこぼさない。
@@ -20,7 +51,7 @@
 - `internal/cli/status.go:258-296` の読み込み失敗時の fallback と、`/director` skill の「merge と auto_merge」節(`:813-830`)。
 - 見ていないもの: `docs/tech-debt/README.md:136` の「An operator who has already set `codex_verified = true`」(進捗欄のとおり /verify で見る)、仕様との適合、テストの網羅。
 
-## Findings
+### Findings
 
 | ID | Severity | Area | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- | --- |
@@ -30,14 +61,14 @@
 | L3 | LOW | readability(利用者に見える文) | doctor の「Shell aliases」の Detail が、codex の flag の説明に「(modes a codex seat gets only once `[org.permissions].codex_verified = true`)」と書く。既定が true になったので、既定の project でも読み手には「まだ true にしていない」と読める。文は条件として偽ではない。S3 は同じ関数の上の doc comment(`:571-579`)を直したが、この 2 つの出力の文は残っている。 | `internal/cli/doctor_shell_alias.go:714-715`、`:718-719`。テストはこの括弧の文言を固定していない(`git grep "gets only once"` は実装の 2 行のみ)。 | 「modes a codex seat gets unless `codex_verified = false`」のように、既定の true を前提にした書き方に直す。S3 の範囲を超えるなら、PR の Notes に残して次に doctor を触るときに直す。 |
 | L4 | LOW | maintainability(コメント) | 新しいテストが数えているのは reflect の key の集合なのに、キーの数「19」がコメントに 3 回残っている。キーを足すと表の行は強制されるが、この数は黙って古くなる(計画が閉じたかった「数がコメントにしかない」の残り)。また新しいテストの doc comment は、既定値が同じキーの組を 3 つ挙げて全部のように読めるが、`ack_minutes`(10)は `max_orgs` と `deadman_minutes` の組に入り、`interval_seconds` と `max_total_seats` は 30 で同じ。 | `internal/config/defaults_sync_test.go:10`、`:109`、`:147`(「19 [org] keys」)。`:397-399`(「Two keys with the same default (max_orgs and deadman_minutes, ...)」)。 | 「19」は消して「every [org] key of orgTemplateProbe」と書く(進捗欄の「19 は残した」を、この PR で閉じるか台帳に送る)。同じ既定値の組は「for example」を付けるか、組を数えずに「keys that share a default」とだけ書く。 |
 
-## 依頼された観点への答え
+### 依頼された観点への答え
 
 - 表のテストの論理(`TestOrgTemplateDrift_EachKeyIsComparedOnBothSides`、`tomlKeys`、`editTemplateKey`): 欠陥は見つからなかった。上の Evidence に確かめた境界を書いた。L4 はコメントだけ。
 - D2: 守られている。false の動きのテストは消えずに、false を明示する形で残っている。既定そのものを見る期待だけが true になった。`internal/org` のテストは別の問題(L2)。
 - 既定 true の記述の正確さ: skill、recipe、README、template の comment、spec の印、`tech-debt:144` に false 既定の言い方は残っていない。残っていたのは L1(理由の書き方)と L3(利用者に見える文)で、どちらも偽の既定を書いてはいない。
 - 既知として再提起しないもの: `permissions.go` の実行時エラー文(`codex_verified=true` を求める文)、spec の旧文の履歴、D4 の「違えば false」の規則。M1 は D4 の規則が覆わない別の経路(読み込み失敗の fallback)。
 
-## Positive notes
+### Positive notes
 
 - 表のテストは、比較の「どちらの側の取り違え」かを別々の変異で落とす。bool の行を `!Default()` から作る点は、この PR が既定を 2 つ反転しても通るので S1 を先に足す順が活きた。
 - `editTemplateKey` が「表の範囲内で 1 回だけ」でなければ Fatal にするので、テンプレートの書き換えで行が vacuous にならない。
@@ -48,9 +79,9 @@
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| なし(この cycle では台帳に足さない) | — | M1、L1〜L4 はいずれもこの PR の中で直せる。直さずに受け入れるものがあれば、PR の Notes か、最後の cycle で 1 行にまとめて足す。 | — | — |
+| なし(台帳に足さない) | — | run 1 の M1、L1〜L4 は F1 ですべて直った。run 2 で新しく立てた所見はない。 | — | — |
 
 ## Recommendation
 
-- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 4)
-- Follow-ups: (1) M1 は直すか、skill と PR の Notes に書いて受け入れるかを /verify の前に決める。直すなら 2 つの fallback と `status_test.go` の 2 か所の期待だけで済み、`ralph org merge` の動きは変わらない。(2) L2 は `testOrgConfig()` の 1 行と 3 つのコメント。(3) L1、L3、L4 は文言だけ。直したら、コード・コメントの変更なので /self-review から回し直す。直しが記録だけに収まる場合は `post-implementation-pipeline.md` の例外を使える。
+- Merge: yes(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 0。Run 1 の MEDIUM 1、LOW 4 はすべて F1 958d9bff で解決)
+- Follow-ups: /verify に進んでよい。(1) `docs/tech-debt/README.md:136` が引用する doctor の Detail の文は F1 の L3 で変わったので、/verify の文書のずれの確認で、その行の引用と「already set」の言い方を直す。(2) `ralph status --help` に fallback の false を書くかは /sync-docs で決める(warning の文が説明しているので必須ではない)。
