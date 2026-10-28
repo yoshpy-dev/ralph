@@ -116,3 +116,51 @@
 
 - Merge: yes(Run 2。CRITICAL・HIGH・MEDIUM なし。Run 1 の L1〜L6 は直った。新しい所見は L7 の LOW 1 件)
 - Follow-ups: L7 は文の 2 か所(雛形の括弧と警告文、`herdr_test.go` の定数)の直しで済む。直さないなら tech-debt に 1 行送る。
+
+## Run 3: Run 2 の L7 の直し(cf0e5836)のあと
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1 の 3 回目)
+- Scope: `git diff 4dcaeb27..cf0e5836`(L7 の直し、4 ファイル、+17/-13)。依頼の HEAD ba66ae9c は、その上に計画の Progress へ直しの記録を 2 行足しただけ(`git diff 4dcaeb27..ba66ae9c --stat` の 5 ファイルは、この 4 ファイルと計画)。触ったのは `internal/org/prompts/leader.md`、`internal/org/driver/paneenv.go`、`internal/org/driver/herdr_test.go`、`internal/org/prompts_leader_plan_test.go` で、どれも L7 に当たる。
+- ID: Run 3 の新しい所見は L8(LOW)。L1〜L7 と番号は重ならない。
+
+### Run 2 の所見のその後
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| L7 | 直った | (1) 雛形の括弧(`leader.md:512-515`)は、ralph が pane に値を入れること、`--env` のない herdr の pane には入らないこと、その場合も herdr の server の環境に同じ変数があれば pane がその値を引き継いでその値で選ぶこと、書き換えた自分の CLI が使われるのは変数がないときだけ、を順に書く。Run 2 の勧めた文のとおり。(2) 警告文(`paneenv.go:69-71`)は `and so may a feature org leader's plan advisory` で終わり、条件の句がない。`herdr_test.go:429-431` の `primaryCLIClause` と、連結した字面が同じ。`org_runtime_env_test.go:174` が固定する前半 `a seat's cross-review may pick the wrong CLI as its other model` は変わっていない。(3) `PrimaryCLIEnv` の doc comment(`paneenv.go:39-43`)は、計画助言が自分の CLI を使うのは変数がないときで、pane が server の環境から得た値はそれに勝つ、と書く(「unset」の字面は L8)。(4) test の pin(`prompts_leader_plan_test.go:515`)は雛形の括弧と字面が同じで、doc comment(`:503-509`)も「server にもない」場合を足した。pane の値が leader の CLI に勝つ行(`:531`、pane `codex`・leader `claude` → `claude`)は直し前からあり、今の文が言う動きを bash と zsh で固定している。 |
+
+### Evidence reviewed
+
+- `git diff 4dcaeb27..cf0e5836` の全体と、HEAD の `leader.md:490-535`、`paneenv.go:20-80`、`herdr_test.go:420-435`、`prompts_leader_plan_test.go:495-560`、`org_runtime_env_test.go:174`、`scripts/xreview-helpers.sh` の `pick_reviewer`。
+- 手で確かめたこと(worktree には何も書いていない): `pick_reviewer "${RALPH_PRIMARY_CLI:-codex}"` を bash で、変数が unset のときと空のときに打つと、どちらも `claude`(leader の CLI の `codex` が使われる)。値が `claude` のときは `codex`(Run 2 の確かめと同じ)。L8 の根拠。
+- `git grep -n 'does not name its own CLI'` は、計画の Progress の 2 行(`:169` は Run 1 の直しの記録、`:171` はそれが当時の文だと書いた行)と report だけに残る。コード、test、雛形、skill には残っていない。直しの前の括弧の句 `pane にはなく` は repo のどこにも残っていない。
+- 確かめていない: テスト、静的検査(skill の規則と依頼どおり、走らせていない)。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | L8 `PrimaryCLIEnv` の doc comment の「only when the variable is unset」は、変数が空のときに当たらない。コマンドの `${RALPH_PRIMARY_CLI:-<あなたの CLI>}` は `:-` なので、unset のときだけでなく空のときも leader の CLI に落ちる。server を起動した人の環境に `RALPH_PRIMARY_CLI=` が空で入っている pane は、この comment からは pane の値が勝つように読めるが、実際は leader の CLI が使われる。害はない(落ちた先は leader 自身の CLI で、いつもの選び方になる)。雛形の「変数がないときだけ」は「ない」が空を含むとも読めるので、ここでは足りている。 | `internal/org/driver/paneenv.go:42`。bash の確かめ: unset と空のどちらでも `pick_reviewer "${RALPH_PRIMARY_CLI:-codex}"` は `claude`。`prompts_leader_plan_test.go:531-533` に空の値の行はない | comment を「only when the variable is unset or empty」にする。雛形は変えない(pin を動かさずに済む)。直さないなら対応は要らない。 |
+
+### Positive notes
+
+- 直しは Run 2 の勧めを最小の形で入れた。警告文の条件を外し、雛形の括弧に足し、comment と定数と pin を 1 つずつ合わせている。触ったのは L7 の 4 ファイルだけで、test の表は変えていない(pane の値が勝つ行は最初からあった)。
+- 警告文の字面を持つ 3 か所(`paneenv.go`、`herdr_test.go` の定数、`org_runtime_env_test.go` の前半)のうち、前半だけを見る 1 か所は変わらず、全文を見る 1 か所は合わせて直っている。
+- 直しの前の言い回し(`pane にはなく`、`if the leader does not name its own CLI`)は、計画の Progress の `:171` が「当時の文」と明記した 1 行を除いて残っていない。
+
+### Notes(所見にしないもの)
+
+- 警告文の `and so may a feature org leader's plan advisory` は、前の節の理由(`pick_reviewer` が seat の driver を claude とみなす)をそのまま受けるが、計画助言が外れるのは別の理由(server の環境から残った値)による。leader は変数がないとき自分の CLI を書くので、警告が出ても server に値がなければ計画助言は外れない。「may」の範囲に入るので直さない。Run 2 で私が勧めた形でもある。
+- 計画の Progress の `:171` は、括弧の文を「」で引くが逐語ではない(「書いた CLI が使われるのは変数がないときだけ」。雛形は「書き換えたあなたの CLI が使われるのは、変数がないときだけ」)。引用符の使い方の問題で、読み違えは起きない。
+- 雛形の括弧は 512-515 行で、行頭が `が、` になる行がある。この file は日本語の文を行の途中で折る(`:512` も同じ)ので、描画も pin(空白を除いて照合)も影響を受けない。
+
+### Coverage gaps
+
+- Run 1・Run 2 と同じ(本物の codex と claude での通し、Codex の leader の sandbox から `claude -p` が通るか)。
+- L7 の前提(`--env` のない herdr の pane に、herdr の server の環境の `RALPH_PRIMARY_CLI` が残る)は、Run 2 のとおり repo の記述(`feature.go:388`、recipe の login shell の段落)から導いたもので、herdr では確かめていない。雛形はこれを事実として書いている。
+
+### Recommendation(Run 3)
+
+- Merge: yes(Run 3。CRITICAL・HIGH・MEDIUM なし。Run 2 の L7 は直った。新しい所見は L8 の LOW 1 件)
+- Follow-ups: L8 は `paneenv.go:42` の comment 1 語(`unset or empty`)の直し。直さないなら対応は要らない。`/sync-docs` に渡すもの(README の director の段落、`/org` skill の 31〜34 行、`isolated-herdr-server.md` の 240〜249 行)は Run 2 のとおり。
