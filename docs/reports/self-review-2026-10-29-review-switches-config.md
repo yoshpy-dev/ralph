@@ -2,10 +2,11 @@
 
 - Date: 2026-10-29
 - Plan: `docs/plans/active/2026-10-29-review-switches-config.md`(issue #265、D1〜D6、AC1〜AC6、Progress の S1〜S4)
-- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
-- Scope: `git diff da9d1b3a...HEAD`(HEAD 79fb9d65、9 コミット、31 ファイル、+1565/-200)。中心は S1 eff0340d(`[standard]` と `[org.review]`、テンプレート、lock-step の test)、S2 8e51e1c9(`ralph config get`、終了コード 2 と 3)、S3 33d859bb(`TabCreate` の `extraEnv` と `RALPH_PRIMARY_CLI`)、S4 98e19052(ルートの `ralph.toml`、`KNOWN_DIFFS`、文書)。計画ファイルと Progress だけのコミットは読んだが所見の対象にしていない。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1。run 1 は 0a5aa556 の report、run 2 は修正スライス F1 のあとの再 run で、この file を同じ場所で更新した)
+- Run 2 の scope: `git diff 07a18eab..5bc435de`(F1 の 10a05dfe と 2a6cb022、orchestrator のコメントの直し 5bc435de。20 ファイル、+125/-334)と、`git diff da9d1b3a...HEAD`(HEAD 552b0636)の全体の見直し。552b0636 は計画の Progress だけ。run 1 の本文は下にそのまま残し、M1 と L1〜L6 のその後は「Run 2」の節にまとめた。
+- Scope(run 1): `git diff da9d1b3a...HEAD`(HEAD 79fb9d65、9 コミット、31 ファイル、+1565/-200)。中心は S1 eff0340d(`[standard]` と `[org.review]`、テンプレート、lock-step の test)、S2 8e51e1c9(`ralph config get`、終了コード 2 と 3)、S3 33d859bb(`TabCreate` の `extraEnv` と `RALPH_PRIMARY_CLI`)、S4 98e19052(ルートの `ralph.toml`、`KNOWN_DIFFS`、文書)。計画ファイルと Progress だけのコミットは読んだが所見の対象にしていない。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
 - 既定の判断(依頼どおり欠陥として扱わない): skill がまだ設定を読まないこと(#266、D4)、headless の director の pane に `RALPH_PRIMARY_CLI` を渡さないこと(D5)、終了コード 3 を `ralph upgrade` と分け合うこと(D6)、存在しない `--config` のパスが既定になること。
-- ID: M1(MEDIUM)、L1〜L6(LOW)。cycle 2 以降はこの ID で状態を追う。
+- ID: run 1 の所見は M1(MEDIUM)、L1〜L6(LOW)。run 2 も同じ ID で状態を追い、新しく立てた所見は N1。
 
 ## Evidence reviewed
 
@@ -46,15 +47,44 @@
 - Go の panic も exit 2 で終わる。help の「2 は止まって報告」と同じ動きになるので、取り違えても害はない。
 - 将来 `Config` に pointer や float の field が足されると、`config get` はその key を exit 2(`a ptr value`)にする。黙って出さない向きなので、足す人が気づける。
 
+## Run 2: 修正スライス F1 のあと(M1 と L1〜L6 のその後と、F1 の差分の確認)
+
+読んだもの: `git diff 07a18eab..5bc435de` の全体(コードは `internal/cli/config.go`、`org.go`、`internal/config/config.go`、`defaults_sync_test.go`、`internal/org/spawn.go`、`internal/org/driver/paneenv.go`、test は `config_test.go`、`org_runtime_env_test.go`、`herdr_test.go`)、ルートの `ralph.toml`(15 行)、`scripts/check-sync.sh:112-116`、`/org` skill と recipe の 4 つの写しのうち `.claude/` 側と `cmp`(root と `templates/base/` で一致、`.agents/` も一致)、計画の Progress。確かめていない: テスト、静的検査(skill の規則と依頼どおり、走らせていない)。
+
+手で確かめたこと:
+- 一時の overlay(`go run -overlay`、worktree には何も書いていない)で、`79fb9d65` の全文のルート(`git show` で取り出したもの)と今のルートを `config.Load` し、(1) 2 つの `Config` が `reflect.DeepEqual` で等しい、(2) どちらも「`Default()` に 4 つの実施有無を true にしたもの」と等しい、を見た。ルートを縮めても、この repo の `ralph org` と `ralph doctor` が読む値は変わらない。
+- build した binary(`go build` のみ)で、ルートに対して `standard.plan_advisory`、`org.review.cross_review` は `true`、`org.review.max_cross_review_cycles` は `2`、`org.max_seats` は `5`。メッセージは `org.max_seats is an integer`、`org.approval.mode is a string`、`standard.plan_advisory is a boolean`、`not a key of one value in ralph.toml: no such key`。help は `It prints the value on stdout: …` になっている。
+- `git grep` で旧い言い方の残り: `falls back to claude`、`plan advisory (or|and) cross-review`(`RALPH_PRIMARY_CLI` に絡むもの)、`fix cycles`、`直しの回数`、`has no such key`、`a bool value`、`as one line`。当たりは `ralph doctor` の「plan advisory and cross-review that call …」(README:127、`doctor.go:308`、`codex-setup.md:36` とその写し。別件で、事実として正しい)と、`[standard]` と `[org.review]` の設定そのものの説明(`config.go:36`、`:562`、テンプレート)だけ。
+
+### 所見のその後
+
+| ID | 状態 | 確認したこと |
+| --- | --- | --- |
+| M1 | 直った(10a05dfe) | ルートは 4 つの実施有無と先頭の注だけ。`check-sync.sh:112-116` のコメント(「root holds only the four review switches … leaves every other key to the built-in default」)は、ルートの実物と合う。`#264 also writes this file` は消えた。ルートに `model_pool` や `codex_verified` のような既定と同じ値を固定する行がなくなったので、次の `Default()` の変更がルートに隠れることはない。`KNOWN_DIFFS` は path 単位の全面抑止のままだが、ルートが 2 つの表だけなので、ずれる中身がない。ほかの値をルートに足す人は、コメントの「add their table to root」に従って、その値だけを足す。計画は Progress に Deviation(M1)として、Scope の「テンプレートの写し」をやめたことを書いた。Scope と R2 の本文は「写し」のままで、Deviation の行が訂正を持つ。 |
+| L1 | 直った(10a05dfe、2a6cb022) | 警告文は `a seat's cross-review may pick the wrong CLI as its other model (… pick_reviewer treats the seat's driver as claude)` になり(`paneenv.go:66-67`)、`herdr_test.go:429-430` の定数と `org_runtime_env_test.go:174` の部分文字列がそれに合う。`PrimaryCLIEnv` の doc(`paneenv.go:34-40`)は「Of the reviews, only /cross-review reads it today: /plan's advisory calls codex directly」と、現状を書く。`spawn.go:993-997` のコメント、`/org` skill の 4 つの写し(`:31-34`、`:40-41`)、README の pane の env の文、recipe の 2 つの写し(`:243-246`)、spec の注も「cross-review が `pick_reviewer` に座席の driver を読ませる」に絞られ、「値がないと driver を claude とみなす」が全部に入った。`falls back to claude` の曖昧さも消えた。 |
+| L2 | 直った(10a05dfe) | `internal/cli/org.go:361-363` に「Those are the Herdr's fixed PaneEnv; after them spawn appends RALPH_PRIMARY_CLI=<the seat's driver> as TabCreate's extraEnv (driver.PrimaryCLIEntry)」が入った。`SeatPaneEnv` を説明するほかの箇所(`org_director_headless.go:786`、`director_cmd.go:277`)は director の pane の話で、変更は要らない。 |
+| L3 | 直った(10a05dfe、5bc435de) | 「最初の run を含む全部の回数。2 は最初の review と直したあとの review 1 回」が、`config.go:559` と `:568-573`、テンプレート `:246-250`、`defaults_sync_test.go:292-295`、`/org` skill の 4 つの写し(`:49`、「最初の 1 回を含む」)、spec の注に入った。`fix cycles` と `直しの回数` は repo に残っていない。数え方は `post-implementation-pipeline.md` の「2 total runs」と合う。 |
+| L4 | 直った(10a05dfe) | (a) 型名が `an integer` / `a boolean` / `a string` で、未知の kind は `a value of Go kind <kind>`(今の `Config` にはない)。(b) 知らないキーの文は `…in ralph.toml: no such key`。(c) help の「The value is one line」は「It prints the value on stdout」になり、`configValue` の doc も「a string as it is, line breaks included」に変わった。README の行も `on stdout: … a string as written` で合う。新しい `org.max_seats.x` と `org.approval.mode.x` のケースが (a) を固定する。 |
+| L5 | 直った(10a05dfe) | (a) help の照合は `strings.Fields` を `" "` で連ねた文字列に対して行うので、`Long` を折り直しても落ちない。(b) `org.max_seats` と `org.approval.mode` は `config.Default()` の値と比べる。(c) 冒頭のコメントは「None of them runs in parallel. Those that run the verb on a key chdir …」に変わった(文の作りは N1)。 |
+| L6 | 残す(直さない判断) | 計画の Progress は、issue の番号を「どの変更でその設定を読み始めるかを grep できる印」として残す理由を書いた。`check-sync.sh` の `#264` は M1 で消えた。残るのは `config.go:31` と `:560` の `#266`、`#267`、`#269` の参照。`scripts/ralph-config.sh:3-4` の見出しが、`RALPH_STANDARD_MAX_PIPELINE_CYCLES` に `[org.review].max_cross_review_cycles` の照合ができたことを言わない点は、計画の理由に入っていない(Non-goals の範囲で、test の失敗の文面は両側を名指しする)。 |
+
+### 新しい所見
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | N1 コメントの折り返しと文の作りが 2 か所で崩れている。(a) `defaults_sync_test.go:295` が 1 行 100 字ほどで、前後の行は 30〜70 字。5bc435de の直しで言い回しを差し替えたときに、折り返しを直さなかった(`… default. The template against Default() is again the "org"` の次の行が `// sub-test's job.` だけ)。(b) `config_test.go:15-18` の冒頭は、「並列にならない」ことと「`t.Chdir` で `./ralph.toml` をその test のものにする」ことを 1 文に混ぜていて、「with t.Chdir, which a parallel test may not call」が何にかかるか読みにくい。 | `internal/config/defaults_sync_test.go:292-296`、`internal/cli/config_test.go:15-18` | (a) は 70 字前後で折り直す。(b) は「None of them runs in parallel: those that run the verb on a key call t.Chdir to a temp directory first, so that ./ralph.toml is the test's own.」のように、理由を 1 つにする。 |
+
+F1 の差分に、ほかの新しい問題はない。確かめた点: `configKindName` の `default` 枝のコメントが「`config.Config` に今ない kind」と正確、L1 の警告文の定数が 3 か所(`paneenv.go`、`herdr_test.go`、`org_runtime_env_test.go`)で一致、4 つの `/org` skill と 2 つの recipe が root と `templates/base/` で一致、F1 のコメントに `file:line` の参照が入っていない(行がずれても壊れない)、`docs/tech-debt/README.md` は F1 で変わっていない(M1 を tech-debt に回さず直したので、run 1 の「M1 の行」は不要になった)。
+
 ## Tech debt identified
 
 | Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
 | --- | --- | --- | --- | --- |
-| M1 を直さずに merge する場合: ルートの `ralph.toml` が `KNOWN_DIFFS` の全面抑止の下で、テンプレートの全キーを明示したまま `Default()` から離れうる | 次の既定値の変更が、この repo の `ralph org` と `ralph doctor` に届かない | 計画 R2 が「今は同じ値」で受けた | 次に `Default()` かテンプレートのキーを変える PR、または #264 のルート `ralph.toml` | 計画 `2026-10-29-review-switches-config` R2、この報告の M1 |
+| L6 の後半: `scripts/ralph-config.sh` の見出し(`:3-4`)と `RALPH_STANDARD_MAX_PIPELINE_CYCLES` の行(`:30`)が、`[org.review].max_cross_review_cycles` との照合を言わない | 既定値 2 を変える人が、シェル側から照合に気づけない。気づくのは test の失敗からで、文面は両側を名指しする | 計画の Non-goals が `ralph-config.sh` の変更を外している | `RALPH_STANDARD_MAX_PIPELINE_CYCLES` の既定を変える変更、または #276 | 計画 `2026-10-29-review-switches-config`、この報告の L6 |
 
-_(行は docs/tech-debt/README.md に足していない。M1 を直すか、tech-debt に回すかは依頼元が決める。回すなら上の行をそのまま足す。)_
+_(行は docs/tech-debt/README.md に足していない。pipeline が最後の cycle に着いて L6 と N1 が残るなら、N1 は直し、L6 の行をこのまま足す。今は cap に着いていない。)_
 
 ## Recommendation
 
-- Merge: OK(CRITICAL と HIGH はなし。MEDIUM が 1 件)。M1 は直すか tech-debt に回すかの判断が要る。LOW の 6 件は、修正の cycle を回すなら一緒に直せる。
-- Follow-ups: L1 は 11 か所に及ぶが、実行時の挙動には効かず、警告文の 1 句と文書の言い回しで済む。L3 は seed に残るキーの意味なので、#269 の前に決めておくと安い。/verify は `ralph.toml` のルートとテンプレートの差が 3 か所だけ(M1 の前提)であることと、`go run ./cmd/ralph config get standard.plan_advisory` が `true` を返すことを実測で見てほしい。
+- Merge: OK(Run 2。CRITICAL、HIGH、MEDIUM はなし。run 1 の M1 と L1〜L5 は直った。残りは L6 と新しい N1 の LOW 2 件で、どちらも挙動に効かない)。
+- Follow-ups: N1 は 2 か所のコメントの折り直しで済む。L6 は計画の判断どおり残してよく、シェル側の見出しだけが未決。/verify は、ルートの `ralph.toml` が `go run ./cmd/ralph config get standard.plan_advisory` で `true` を返すことと、`check-sync.sh` の `KNOWN_DIFFS` の `ralph.toml` がルートの実物と合うことを、実測で見てほしい(この run の確認は、`Load` した値の比較と build した binary による)。
