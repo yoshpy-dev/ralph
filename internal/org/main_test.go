@@ -21,10 +21,10 @@ import (
 //
 // It also pins driver.AgmsgHomeOverride to an agmsg home that does not
 // exist, so no test reaches the developer's real agmsg (the default
-// ~/.agents/skills/agmsg, or the one the environment names): a role prompt
-// rendered with no AgmsgHome reads driver.ResolveAgmsgHome(""), which
-// returns the override first. A test of how ResolveAgmsgHome reads the
-// environment clears it (setAgmsgHomeOverride).
+// ~/.agents/skills/agmsg): a role prompt rendered with no AgmsgHome reads
+// driver.ResolveAgmsgHome(""), which returns the override first. A test of
+// how ResolveAgmsgHome("") falls back to the default home clears it
+// (setAgmsgHomeOverride).
 func TestMain(m *testing.M) {
 	if err := os.Setenv(config.LocalConfigEnv, "off"); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
@@ -36,8 +36,8 @@ func TestMain(m *testing.M) {
 
 // setAgmsgHomeOverride points driver.AgmsgHomeOverride at home until the
 // test ends, when the value it had comes back. An empty home clears the
-// override, so driver.ResolveAgmsgHome reads the environment as it does
-// outside the tests.
+// override, so driver.ResolveAgmsgHome returns [org].agmsg_home, else the
+// default home, as it does outside the tests.
 func setAgmsgHomeOverride(t *testing.T, home string) {
 	t.Helper()
 	old := driver.AgmsgHomeOverride
