@@ -459,3 +459,9 @@ CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(HEAD f18d63b0 について)。
   - CI は `ubuntu-latest` だけなので、大文字小文字の subtest 6 つは CI では skip になる。`pathWithin` を名前だけの比べに戻しても CI は通り、C3-M1 の戻りに気づけるのは、大文字小文字を区別しない volume で打つ手元の `go test` だけ。Linux で root なしに同じディレクトリを別の名前で見せる手(bind mount、casefold)は、たぶん CI では使えない(未確認)。PR の本文の Known gaps に書くことを勧める。
   - NFC と NFD の違いはテストにない。scratchpad の写しでは、どちらの向きも true だった。
   - 記録の `worktree_path` が空か相対の、手で壊した記録では、`pathWithin` は打った場所に対して比べる。
+
+### 追記: cycle 3 run 2 の LOW の扱い(orchestrator)
+
+- C3R2-L1 と C3R2-L3 は 7f91e08f(inline)で直した。`ledgerMoveStep` の条件は「once no org on the ledger runs and no ralph org command runs on it」になり、注釈に、走っている org が古いパスに台帳を作り直す理由を足した。期待文 2 か所(`internal/org/cleanup_test.go`、`internal/cli/org_merge_test.go`)を合わせた。`pathWithinDir` の注釈に、別の書き方を見る確かめには `pathWithin` を使うと足した。検証: `gofmt -l` は出力なし、`go vet ./internal/org/ ./internal/cli/` は rc 0、`go test ./internal/org/ -run 'Cleanup|Permission|AddDir'` は ok(126 秒)、`go test ./internal/cli/ -run 'OrgMerge_AutoMerge|OrgCleanup'` は ok(122 秒)。
+- C3R2-L2 は台帳の R3-L3 の行の一覧を「such as」の例にして `ledgerMoveStep` を足した(この追記と同じコミット)。
+- cycle 1 の F4 と同じく、文と注釈だけの直しなので self-review の run は回さず、`/verify` に進む。
