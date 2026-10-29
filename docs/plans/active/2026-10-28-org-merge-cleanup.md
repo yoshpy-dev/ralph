@@ -209,4 +209,8 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
 - [x] Verification artifact created(`docs/reports/verify-2026-10-28-org-merge-cleanup.md`、pass、所見は LOW 1 つ)
 - [x] Test artifact created(`docs/reports/test-2026-10-28-org-merge-cleanup.md`、pass)
 - [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-28-org-merge-cleanup.md`。verify の LOW-1 の列挙 2 つと Info の注釈 1 つを 7e72d11e で直した。動詞を並べる文書に `cleanup` を足した: README の動詞の表、quality-gates の watch gate の行と template の写し)
+- [x] origin/main(#280〜#285)を b164744f で merge した。衝突は main が `auto_merge` の既定を true にした行と、このブランチが `cleanup` を足した行の重なり。このブランチの文に main の変更を当て、このブランチが足した CLI の merge のテストの期待を `AUTO MERGE: true` に直した。build・vet・check-skill-sync・check-sync と絞ったテストが通った(`internal/org` の `TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge` が load 10〜12 の下で 1 回落ち、単独では 5 回とも通る。このブランチはこのテストを変えていない)
+- [x] cross-review cycle 1(triage は a7801152): ACTION_REQUIRED 2、WORTH_CONSIDERING 0、DISMISSED 0。consult(判定: 進めてよい)と相談して、2 つとも直して cycle 2 で /self-review から回し直す
+  - S-X1(指摘 1): `ralph org cleanup` の PR の読み方を origin に固定する。merge の `readOrigin` から origin の host と owner/repo を読む部分を共通の関数に切り出し、merge-order の PR の読み方に、固定した repository を受ける欄を足す。欄があると `gh pr list` に `-R` を渡し、PR の url を host と owner/repo で origin と比べる。cleanup だけがこの欄を渡し、merge-order の一覧の動きは変えない。origin が GitHub の repository を名指さないとき、cleanup は何も消さずに断る(merge と同じ)。PR を使えなかった理由は cleanup の行が自分で出す
+  - S-X2(指摘 2): worktree のディレクトリがなく git の登録だけが残るとき、登録の `branch`/`detached` を読み、登録が binding のブランチにいるときだけ進む(D2 の確かめ 6 を登録に延ばす)。detached、別のブランチ、ブランチの消えた登録は、何も消さずに断る。断りの文は登録の HEAD を示して退避の打ち方を出し、ralph が先へ進めないので手で消すコマンドも出す
 - [ ] PR created
