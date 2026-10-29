@@ -14,6 +14,7 @@ import (
 
 	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // TestMain pins the shell-alias check's environment resolver
@@ -102,6 +103,15 @@ import (
 // TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit) see
 // the calls they did before the personal file existed. A test of the
 // personal file sets it to "" (t.Setenv), which reads the file.
+//
+// It also pins driver.AgmsgHomeOverride to an agmsg home that does not
+// exist, so no test reaches the developer's real agmsg (the default
+// ~/.agents/skills/agmsg, or the one the environment or a ralph.toml
+// names): every agmsg call of a runOrg*-based test and the agmsg checks of
+// runDoctor* go through driver.ResolveAgmsgHome, which returns the
+// override first. setupOrgStubPATH points it at its stub agmsg, a test that
+// needs another home sets its own (setAgmsgHomeOverride), and a test of how
+// ResolveAgmsgHome reads the environment or [org].agmsg_home clears it.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -111,6 +121,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
 		os.Exit(1)
 	}
+	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "agmsg")
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
 	}
@@ -146,6 +157,17 @@ func TestMain(m *testing.M) {
 		return "", errors.New("a test asked for the ralph executable of a launch_cmd director; set orgDirectorRalphExecutable to a wrapper (setDirectorLaunchSeams)")
 	}
 	os.Exit(m.Run())
+}
+
+// setAgmsgHomeOverride points driver.AgmsgHomeOverride at home until the
+// test ends, when the value it had comes back. An empty home clears the
+// override, so driver.ResolveAgmsgHome reads the environment and
+// [org].agmsg_home as it does outside the tests.
+func setAgmsgHomeOverride(t *testing.T, home string) {
+	t.Helper()
+	old := driver.AgmsgHomeOverride
+	t.Cleanup(func() { driver.AgmsgHomeOverride = old })
+	driver.AgmsgHomeOverride = home
 }
 
 // disableGitAutoMaintenance sets maintenance.auto=false and gc.auto=0 for

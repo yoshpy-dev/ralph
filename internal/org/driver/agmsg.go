@@ -143,12 +143,27 @@ const defaultAgmsgHome = "~/.agents/skills/agmsg"
 // headless director) set it under this name.
 const AgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
 
+// AgmsgHomeOverride is the agmsg home ResolveAgmsgHome returns before
+// anything else when it is not empty; empty means unset. Production code
+// never sets it. Only tests do: the TestMains of internal/cli and
+// internal/org pin it to a path that does not exist, and their helpers
+// point it at a stub agmsg, so that no test reaches the developer's real
+// agmsg whatever the environment or a ralph.toml says. It lives here, not
+// in the CLI, because internal/org calls ResolveAgmsgHome("") itself
+// (prompts.go). Like a variable a test sets with t.Setenv, a test that sets
+// it must not run in parallel.
+var AgmsgHomeOverride string
+
 // ResolveAgmsgHome resolves the agmsg home directory used to build script
-// paths. Precedence: env RALPH_ORG_AGMSG_HOME (AgmsgHomeEnv) > cfgValue (the
-// loaded [org].agmsg_home config value) > defaultAgmsgHome. A leading "~/"
-// is expanded via os.UserHomeDir; other paths are returned unchanged.
+// paths. Precedence: AgmsgHomeOverride (tests only) > env
+// RALPH_ORG_AGMSG_HOME (AgmsgHomeEnv) > cfgValue (the loaded
+// [org].agmsg_home config value) > defaultAgmsgHome. A leading "~/" is
+// expanded via os.UserHomeDir; other paths are returned unchanged.
 func ResolveAgmsgHome(cfgValue string) string {
-	home := os.Getenv(AgmsgHomeEnv)
+	home := AgmsgHomeOverride
+	if home == "" {
+		home = os.Getenv(AgmsgHomeEnv)
+	}
 	if home == "" {
 		home = cfgValue
 	}

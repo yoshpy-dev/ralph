@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // Tests for `ralph org start` launching the cross-org watch (plan
@@ -685,7 +686,8 @@ func TestOrgStart_TheWatchRunsInTheMainWorktreeWithoutTheHerdrPaneEnv(t *testing
 // subdirectory, as its one RALPH_ORG_AGMSG_HOME: the variable's value, or,
 // with the variable unset, the agmsg_home of the --config given. The
 // relative home names the stub agmsg home from the subdirectory, so the
-// leader is spawned through it.
+// leader is spawned through it (with setupOrgStubPATH's
+// driver.AgmsgHomeOverride cleared, which would otherwise win).
 func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -698,7 +700,8 @@ func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			useRealOrgWatchGate(t)
 			setupOrgStubPATH(t)
-			stubHome := os.Getenv(orgAgmsgHomeEnv)
+			stubHome := driver.AgmsgHomeOverride
+			setAgmsgHomeOverride(t, "")
 			root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
 			sub := filepath.Join(root, "pkg", "sub")
 			if err := os.MkdirAll(sub, 0o755); err != nil {

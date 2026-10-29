@@ -210,10 +210,12 @@ func TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir(t *testing.T) {
 			return "rel/agmsg", "'" + filepath.Join(wd, "rel", "agmsg", "scripts") + "'"
 		}},
 		{"an empty home reads RALPH_ORG_AGMSG_HOME", func(t *testing.T) (string, string) {
+			setAgmsgHomeOverride(t, "")
 			t.Setenv(driver.AgmsgHomeEnv, "/env/agmsg")
 			return "", "'/env/agmsg/scripts'"
 		}},
 		{"an empty home with no RALPH_ORG_AGMSG_HOME is the default home", func(t *testing.T) (string, string) {
+			setAgmsgHomeOverride(t, "")
 			t.Setenv(driver.AgmsgHomeEnv, "")
 			t.Setenv("HOME", "/home/u")
 			return "", "'/home/u/.agents/skills/agmsg/scripts'"

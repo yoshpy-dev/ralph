@@ -1486,7 +1486,7 @@ func TestRunDoctorOpts_ShellAliasesCheck_HermeticByDefault(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -1530,7 +1530,7 @@ func TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	homeDir := t.TempDir()
 	writeAliasRc(t, filepath.Join(homeDir, ".zshrc"), `alias codex="codex -m x"`+"\n")
@@ -1579,7 +1579,7 @@ func TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr(t *test
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	homeDir := t.TempDir()
 	writeAliasRc(t, filepath.Join(homeDir, ".zshrc"), `alias codex="codex -m x"`+"\n")

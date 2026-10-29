@@ -34,7 +34,7 @@ func TestNewOrgRuntimeAt_AgmsgRunnerAddsSelfNameOff(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "scripts", "team.sh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(driver.AgmsgHomeEnv, home)
+	setAgmsgHomeOverride(t, home)
 	t.Setenv("AGMSG_SELF_NAME", "on")
 
 	rt, err := newOrgRuntimeAt(filepath.Join(t.TempDir(), "state"), "")
@@ -74,6 +74,7 @@ func TestNewOrgRuntimeAt_AgmsgHomeIsTheAgmsgDriversHome(t *testing.T) {
 		{"[org].agmsg_home", "", "/toml/agmsg", "/toml/agmsg"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			setAgmsgHomeOverride(t, "")
 			t.Setenv(driver.AgmsgHomeEnv, tc.env)
 			configPath := filepath.Join(t.TempDir(), "ralph.toml")
 			if err := os.WriteFile(configPath, []byte("[org]\nagmsg_home = \""+tc.toml+"\"\n"), 0o644); err != nil {

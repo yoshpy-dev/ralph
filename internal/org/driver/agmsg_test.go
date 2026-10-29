@@ -313,6 +313,29 @@ func TestAgmsg_DeliverySet_InvalidModeRejectedBeforeRunEnv(t *testing.T) {
 func TestResolveAgmsgHome_Precedence(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	setOverride := func(t *testing.T, home string) {
+		t.Helper()
+		old := AgmsgHomeOverride
+		t.Cleanup(func() { AgmsgHomeOverride = old })
+		AgmsgHomeOverride = home
+	}
+
+	t.Run("override takes precedence over env, config, and default", func(t *testing.T) {
+		setOverride(t, "/override/agmsg-home")
+		t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg-home")
+		if got := ResolveAgmsgHome("/config/agmsg-home"); got != "/override/agmsg-home" {
+			t.Fatalf("got %q, want %q", got, "/override/agmsg-home")
+		}
+	})
+
+	t.Run("tilde in override value is expanded", func(t *testing.T) {
+		setOverride(t, "~/override/agmsg")
+		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
+		want := filepath.Join(homeDir, "override", "agmsg")
+		if got := ResolveAgmsgHome(""); got != want {
+			t.Fatalf("got %q, want %q", got, want)
+		}
+	})
 
 	t.Run("env takes precedence over config and default", func(t *testing.T) {
 		t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg-home")

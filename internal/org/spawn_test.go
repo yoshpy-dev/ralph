@@ -3322,6 +3322,7 @@ func TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile(t *testing.T) {
 		{"no agmsg home on the Org", "", "/env/agmsg", "'/env/agmsg/scripts'"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			setAgmsgHomeOverride(t, "")
 			t.Setenv(driver.AgmsgHomeEnv, tc.env)
 			o, h, _ := testOrg(t)
 			o.AgmsgHome = tc.home

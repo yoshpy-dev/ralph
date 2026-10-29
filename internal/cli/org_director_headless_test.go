@@ -46,10 +46,11 @@ func directorStartLedger(t *testing.T) (stateDir, herdrLog, cwd string) {
 	return t.TempDir(), herdrLog, cwd
 }
 
-// unsetOrgAgmsgHomeEnv unsets RALPH_ORG_AGMSG_HOME, which setupOrgStubPATH
-// points at the stub agmsg: director start runs no agmsg and warns on
-// stderr while the variable is set (D13), so its tests run without it
-// unless they test that warning.
+// unsetOrgAgmsgHomeEnv unsets RALPH_ORG_AGMSG_HOME, in case the environment
+// the tests run in sets it (setupOrgStubPATH points the stub agmsg through
+// driver.AgmsgHomeOverride, not the variable): director start runs no agmsg
+// and warns on stderr while the variable is set (D13), so its tests run
+// without it unless they test that warning.
 func unsetOrgAgmsgHomeEnv(t *testing.T) {
 	t.Helper()
 	setOrUnsetEnv(t, orgAgmsgHomeEnv, "", true)

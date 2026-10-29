@@ -234,10 +234,10 @@ const agmsgVersionStub = "1.1.13\n"
 
 // setupOrgStubPATH writes a stub herdr binary to a fresh temp dir and
 // prepends it to PATH, and writes a stub agmsg-home directory
-// (scripts/send.sh + VERSION) pointed at via RALPH_ORG_AGMSG_HOME -- the
-// real agmsg interface is a script collection under an "agmsg home", not a
-// PATH-resident binary. Returns the log file paths so tests can assert on
-// recorded argv.
+// (scripts/send.sh + VERSION) pointed at via driver.AgmsgHomeOverride
+// (setAgmsgHomeOverride) -- the real agmsg interface is a script collection
+// under an "agmsg home", not a PATH-resident binary. Returns the log file
+// paths so tests can assert on recorded argv.
 func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -259,7 +259,7 @@ func setupOrgStubPATH(t *testing.T) (herdrLog, agmsgLog string) {
 		t.Fatalf("write agmsg VERSION: %v", err)
 	}
 	agmsgLog = filepath.Join(dir, "agmsg.log")
-	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+	setAgmsgHomeOverride(t, agmsgHome)
 	t.Setenv("ORG_AGMSG_LOG", agmsgLog)
 
 	t.Setenv("ORG_STUB_FAIL", "")
