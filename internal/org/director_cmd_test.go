@@ -304,7 +304,7 @@ func TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime(t *testi
 	// a loaded machine send the SIGTERM before the trap, and sh ended.
 	ready := filepath.Join(t.TempDir(), "ready")
 	p := startTestProcess(t, "/bin/sh", "-c", "trap '' TERM; : > "+shellQuote(ready)+"; exec "+shellQuote(sleepPath(t))+" 30")
-	waitForFileWithin(t, ready, 5*time.Second)
+	waitForFileWithin(t, ready, 10*time.Second)
 	reg := cmdRegistrationOf(t, p)
 	o := &Org{DirectorStopWait: 300 * time.Millisecond}
 	start := time.Now()
