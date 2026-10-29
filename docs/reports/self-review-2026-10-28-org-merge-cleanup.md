@@ -11,7 +11,7 @@
 
 この report の verdict(下の「Findings」の先頭の表と「Recommendation」の `Merge:` の行)は HEAD afe9c1ed のブランチについてのもの。run 1・run 2 の所見は、その下に当時の文のまま残し、扱いを別の表にした。run 2 の所見の ID は run 1 の L1〜L6 と取り違えないよう `R2-L<n>`、run 3 は `R3-L<n>` にした。
 
-パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 33b78f8c)の review は、末尾の「cycle 2(HEAD 33b78f8c)」の節にある。その所見の直しの review は、さらに後ろの「cycle 2 run 2(HEAD 21785882)」の節にある。いまのブランチの verdict は「cycle 2 run 2」の節の `Merge:` の行で、上の verdict は cycle 1 の記録として、「cycle 2(HEAD 33b78f8c)」の verdict はその run の記録として残している。cycle 2 の所見の ID は `C2-L<n>`、run 2 の所見は `C2R2-L<n>`。
+パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 33b78f8c)の review は、末尾の「cycle 2(HEAD 33b78f8c)」の節にある。その所見の直しの review は、さらに後ろの「cycle 2 run 2(HEAD 21785882)」の節にあり、cross-review cycle 2 の指摘の直し(S-X3)の review は、最後の「cycle 2 の再実行(cycle 3、HEAD 514f59cd)」の節にある。いまのブランチの verdict は最後の節の `Merge:` の行で、上の verdict は cycle 1 の記録として、「cycle 2(HEAD 33b78f8c)」と「cycle 2 run 2」の verdict はそれぞれの run の記録として残している。cycle 2 の所見の ID は `C2-L<n>`、run 2 の所見は `C2R2-L<n>`、最後の節の所見は `C3-M<n>` と `C3-L<n>`。
 
 ## Evidence reviewed
 
@@ -317,3 +317,72 @@ CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(HEAD 21785882 について)。
   - 手で壊した登録(HEAD にない object の SHA を書くと `HEAD deadbeef…` と `detached` が出る)では、退避のコマンドを打つと失敗する。何も消えない。手で壊した repo の形なので、所見にしない。
   - 手で HEAD を `ref: refs/tags/v1` にした登録は `branch refs/tags/v1` と出て、文は「the branch refs/tags/v1」と言う。tag は片付けのあとも残るので、言うことは合う。
   - 括弧のあとの「once gh reads its PR, run ralph org cleanup again」は、origin の PR でない場合にも残る(上の Evidence)。
+
+## cycle 2 の再実行(cycle 3、HEAD 514f59cd)
+
+- Scope: `git diff 5ea1df3f..514f59cd`(6 ファイル、+275/-10)。コミットは 4d7cbfd8(S-X3: cross-review cycle 2 の指摘 1・2 の直し)と 514f59cd(計画の Progress の 1 行)。S-X3 が指摘どおりか、新しい問題を持ち込んでいないかだけを見た。ブランチの残りは読み直していない。台帳の L5・L6・R2-*・R3-*・C2R2-* の件は挙げ直していない。
+- パイプラインは cycle 2 で上限(既定 2)に届いていた。2026-10-27 の方針どおり上限を `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げ、`.harness/state/standard-pipeline/cycle-count.json` は 2 のまま増やしていない。この run は cross-review cycle 2 のあとの再実行で、insight event も `--cycle auto` が読む 2 で記録される。
+- 命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。テスト、静的解析、文書のずれの確かめは打っていない。確かめたのは、読むことと `git` の読み取り、scratchpad の小さな Go と git の実験(git 2.49.0、macOS の既定の APFS の volume)だけ。
+- 行番号は HEAD 514f59cd のもの。
+
+### Evidence reviewed(cycle 2 の再実行)
+
+- 確かめの置き場所。`checkLedger`(`internal/org/cleanup.go:463-474`)は `run` の頭(`:389-391`)にあり、記録の `Lookup` より前に走る。`run` に入る道は 2 つで、`CleanupFeatureWorktree`(`:181`。`ralph org cleanup` が `--branch` の有無にかかわらず `internal/cli/org_cleanup.go:341` から呼ぶ)と `cleanupFeatureWorktreeLocked`(`:218`。merge が `internal/org/merge_run.go:291` から呼ぶ)。どちらも `c.run` に入る。`run` より前の断り(`checkCleanupParams`、regate.lock が取れない、確かめ 1)は消すコマンドを名指さない。`checkLedger` のあとで名指される消すコマンドは、`recordGone` の `git worktree remove <binding の worktree>`、`checkRegistration` と `checkBranchTip` の登録の外しとブランチの戻し、`checkRecord` の 2 つ(ブランチが違えば `git branch -D`、パスか kind だけが違えば script の片付け)。このうち binding のでない worktree(記録の `worktree_path`)を消すのは最後の 1 つだけ(C3-L2)。ralph 自身が打つ script の片付け(`:905`)は、`checkRecord` が記録のパスと binding のパスの一致を確かめたあとにしか走らないので、`checkLedger` が見たパスを消す。
+- 比べ方。`resolvedOrClean(mustAbs(dir))` と `resolvedOrClean(c.f.Worktree)` を文字列で比べ、一致するか `wt + "/"` で始まるかを見る。symlink(テストの「through a symlink」)と macOS の `/tmp` → `/private/tmp` は `EvalSymlinks` が吸収する。台帳が worktree の根と同じ場合は `ledger != wt` の否定で断る。台帳が worktree を中に持つ場合(`--state-dir` に main worktree の根を渡すなど)は断らない。script が消すのはその下の worktree だけで台帳のファイルは残るので、これで合う。大文字小文字や Unicode の正規化が違う書き方は通ってしまう(C3-M1)。
+- 台帳のディレクトリがまだない場合。`CleanupFeatureWorktree` は `checkLedger` より前に同じディレクトリで regate.lock を取り、`acquireHeldFileLock` はディレクトリを作る(`internal/org/lockfile.go:162-163`)。merge も同じディレクトリの lock を持ったまま呼ぶ。確かめ 1 は manifest から binding を読めたときだけ通る。どの道でもディレクトリはあるので、`EvalSymlinks` が失敗して `/var` と `/private/var` が食い違う形には届かない。
+- 相対の `--state-dir`。CLI は `ResolveOrgStateDir` で打った場所に対する絶対パスにしてから Org をつくるので、`checkLedger` の `mustAbs` は CLI からの呼び出しでは何もしない。絶対パスにするときの `os.Getwd` は、`$PWD` が `.` と同じファイルなら `$PWD` をそのまま返す。そのため shell で打った大文字小文字が残り、git が出す disk の上の書き方とずれることがある(C3-M1 の probe)。
+- 断りの文(`:469-473`)。台帳の場所、worktree、消えるもの、何も消していないこと、次の手(台帳を動かすか別の台帳を選び、`--state-dir` か `RALPH_ORG_STATE_DIR` で打ち直す)を 1 行で言い、`refuse` の `PrintableInboxText` を通る。Manual はなく、先頭の注釈の「原因を直せば次の片付けが進む断りには手のコマンドを付けない」(`:60-65`)に合う。次の手の後半は C3-L1。
+- 割り込み(`internal/cli/org_cleanup.go:347-350`)。ループのあとに `ctx.Err()` を見て、`p.finish()` より先に割り込みのエラー(exit 1)を返す。printer は 1 行ずつその場で書くので、それまでの `CLEANED:` と `SKIPPED:` の行は残る。SKIPPED の数のエラーより割り込みを先にするのは、どちらも exit 1 で、割り込みのほうが何が起きたかを言うので、この順でよい。形はループの中の割り込み(`:336-340`)と同じ `org: cleanup: interrupted (...)`。最後の片付けが確かめの途中で割り込まれた場合は片付けが error を返し(`cleanupFeatureWorktreeLocked` の注釈の「ctx done before the removal」)、`p.result` がそれを返すので、ループのあとの確かめには来ない。step がない場合と `SKIPPED:` だけの場合は C3-L3。
+- テストが意図を見ているか。
+  - `TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger`(`internal/org/cleanup_test.go:609`)。fixture の `.gitignore` に `.harness/state/` が入り(`:61`)、根以外のケースでは台帳を動かしたあとの `git status --porcelain --untracked-files=all` が空であることを確かめてから打つ。確かめ 4 が通る形を作っている。理由を全文で比べ、`worktrees` の呼び出しが 0 で、台帳のファイルの中身が変わらず、`worktree_cleaned` がないことも見る。根のケースは台帳のファイルが untracked なので確かめ 4 でも断られるが、期待文が `checkLedger` の理由なので区別できる。記録がないケースは、確かめがなければ `recordGone` の `git worktree remove` が Manual に出るので落ちる。merge の入り口(`viaMergeLock`)も 1 ケースある。大文字小文字の違うパスのケースはない(C3-M1)。
+  - fixture の `.gitignore` の変更がほかのテストの意味を変えるか。`internal/org/cleanup_test.go` で `.harness` を使うのはこの新しいテストだけだった(`grep`)。
+  - `TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne`(`internal/cli/org_cleanup_test.go:634`)。bin の git が script の `git branch -D`(worktree はもう消えている)で止まり、テストが ctx を cancel してから先に進める。`fired` が false なら Fatal にするので、割り込みが片付けの途中に入らなかったときに素通りしない。直す前のコードでは `p.finish()` が nil を返して exit 0 になるので落ちる。待ちは 20 秒で切れる。`--branch` の有無の 2 ケースがある。
+  - merge のテスト(`internal/cli/org_merge_test.go:937`)の期待の変更。fixture の binding は main worktree を feature worktree に名指し(`internal/cli/org_merge_order_test.go:198`)、台帳は main worktree の中にある(`internal/cli/org_merge_test.go:123`)。新しい確かめが先に断るのは正しい。テストの主題(`auto_merge` をどの `ralph.toml` から読むか)は `pr_merged` の details で見続けている。script がないときの断りは、`assertNoScriptCleanup` を使う残りの 2 つのテスト(`:466`、`:860`)が見続けるので、見なくなった形はない。ただし新しい期待は、この fixture で理由の「the default one」が断っている台帳そのものを名指す文を通してしまう(C3-L1)。
+- 行数(5ea1df3f → HEAD)。`internal/org/cleanup.go` 979 → 1013、`internal/org/cleanup_test.go` 1528 → 1648、`internal/cli/org_cleanup.go` 424 → 431、`internal/cli/org_cleanup_test.go` 994 → 1083、`internal/cli/org_merge_test.go` 1122 → 1136。800 行を越えるものは、どれも台帳の行(L5、R3-L3)が受けている。
+
+### cycle 2 の再実行の所見
+
+CRITICAL 0、HIGH 0、MEDIUM 1、LOW 4(HEAD 514f59cd について)。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | security | C3-M1: `checkLedger` はパスを文字列で比べるので、同じディレクトリの別の書き方を見落とす。macOS の既定の APFS は大文字小文字と Unicode の正規化を区別せず、`EvalSymlinks` は symlink だけを解いて、打たれた書き方をそのまま返す。binding の worktree は git が出す disk の上の書き方(たとえば `MyDev`)で、台帳は人が打った `--state-dir` か `RALPH_ORG_STATE_DIR`、または相対パスを `$PWD` に足したもの(`cd ~/mydev/...` した shell なら `mydev`)。2 つがずれると確かめは通る。確かめ 4 も `.harness/state/` が ignore されているので通り、script が台帳ごと worktree を消す。cross-review cycle 2 の指摘 1 が挙げた場面(feature worktree で始めた shell の相対パス)で起こり、失うのは全 org の台帳 | `internal/org/cleanup.go:465-468`。probe(scratchpad、macOS の APFS): `Repo/wt` に対して、`repo/wt/.harness/state/org` と `Repo/WT/.harness/state/org` は `os.Stat` で同じディレクトリ(祖先の `os.SameFile` が true)だが、前置の比べは false。NFD で作った「が」のディレクトリを NFC で書いても同じ。`cd repo/GITCASE`(disk の上は `Repo/gitcase`)した shell から、Go の `os.Getwd` と `filepath.Abs` は `repo/GITCASE` を返し、`git rev-parse --show-toplevel` は `Repo/gitcase` を返した | ファイルの同一性で比べる。worktree を `os.Stat` し(なければ中に台帳はないので通す)、台帳のディレクトリから根まで祖先を 1 つずつ `os.Stat` して `os.SameFile` で比べる。今の文字の比べは残してもよい。テストには、`t.TempDir()` を大文字に変えたパスが同じファイルに解ける volume(大文字小文字を区別しない)でだけ、大文字小文字を変えた書き方で台帳を名指すケースを足す。同じ関数は `checkWorktree` の cwd の比べ(`:610`、cycle 1 からの作りで、この差分の外)にも使える |
+| LOW | readability | C3-L1: 断りの次の手の 2 つ目「or pick another one outside it, such as the default one, the main worktree's <root>/.harness/state/org」は、たいてい先に進めない。`checkLedger` に来た時点で、確かめ 1 は中の台帳にこのブランチの binding があることを確かめている。別の台帳には binding がないので、文のとおり `ralph org cleanup --branch <branch>` を打つと「no feature binding or gate record in the ledger names the branch」で断られ、worktree は残る。binding が main worktree を名指す台帳(merge のテストの fixture)では、「the default one」は断っている台帳そのもの。「such as the default one」を動かす先と読むと、既にある既定の台帳に manifest.jsonl などを重ねて上書きする手順にもなる | `internal/org/cleanup.go:469-473`、`internal/cli/org_cleanup.go:295-298`。`internal/cli/org_merge_order_test.go:198`、`internal/cli/org_merge_test.go:123`、`:964-966`(前置と末尾しか比べないので、この文を通す) | 次の手を 1 つにする(たとえば「while nothing uses it, move the ledger's directory to a place outside the worktree where no ledger is, and run … again with --state-dir or RALPH_ORG_STATE_DIR naming the new place」)。「pick another one」と既定の台帳の例を消す。期待文は `internal/org/cleanup_test.go:668-672` の 1 か所。merge のテストは、binding を main worktree でないパスにするか、理由を全文で比べる |
+| LOW | maintainability | C3-L2: `run` の注釈は「so that no refusal names a command that would remove the ledger with the worktree」と言うが、`checkRecord` の最後の断り(記録のブランチは binding と同じで、パスか kind が違う)の Manual は script の片付け(`scriptCmd`)で、消すのは記録の `worktree_path` の worktree。`checkLedger` が比べるのは binding の worktree だけなので、台帳が記録のパスの worktree の中にあれば、Manual は台帳ごと消す。理由の文が勧める `git -C <記録のパス> status` は ignore された台帳を出さない。記録と binding のパスが違い、さらに台帳がその中にある形で、手で作らないとまず起こらない | `internal/org/cleanup.go:378-383`(注釈)、`:592-597`(Manual)、`:357-359`(`scriptCmd`) | `checkLedger` の比べをパスを受ける関数にし、`checkRecord` のパス違いの分かれでも記録のパスに使う。中にあれば Manual を付けず、台帳の理由で断る。直さないなら、注釈を「the binding's worktree」に狭める |
+| LOW | readability | C3-L3: step がないまま ctx が済むと(merge-order のあとに割り込みが来て、片付けるブランチがなかった場合)、エラーは「the lines above say what was cleaned up; run ralph org cleanup again for what is left」と言うが、上に行は 1 つもない。`p.finish()` を呼ばないので「nothing to clean up」も出ない。`SKIPPED:` の行だけのときも「what was cleaned up」と言う。exit 1 は help の「1 … for an interrupt」に合う | `internal/cli/org_cleanup.go:347-350`、`:422-431` | `p.printed == 0` のときは「nothing was cleaned up」と言う。あるいは「the lines above say what was done」のように、片付けたものに限らない言い方にする |
+| LOW | readability | C3-L4: `checkLedger` の注釈「…, and the record of worktree_cleaned would then make a manifest that holds nothing else, so nothing is removed.」の「so nothing is removed」は、直前の仮定(記録が中身のない manifest をつくる)の結果と読める。意図は「だから断って何も消さない」。理由の文も、台帳が worktree の根と同じ場合に「is inside the feature worktree」と言う | `internal/org/cleanup.go:454-462`、`:469`。根のケースの期待文は `internal/org/cleanup_test.go:668` | 注釈を「… holds nothing else. So the cleanup refuses, and nothing is removed.」のように 2 文に分ける。理由は「is the feature worktree or inside it」にするか、今のままでもよい |
+
+### cross-review cycle 2 の指摘の扱い(HEAD 514f59cd で確かめた)
+
+| ID | 扱い | 状態 |
+| --- | --- | --- |
+| 指摘 1(P1) | `checkLedger` を `run` の頭に置き、台帳のディレクトリが binding の worktree かその中なら(symlink を解いて比べる)Manual なしで断る。merge と cleanup の両方の入り口、記録がない形、根と symlink のケースをテストが見る | 一部解消。同じディレクトリの別の書き方(大文字小文字、Unicode の正規化)は通る(C3-M1)。記録のパスが違う断りの Manual は残る(C3-L2) |
+| 指摘 2(P2) | `runCleanupSteps` がループのあとに ctx を見て、`p.finish()` より先に割り込みのエラー(exit 1)を返す。テストは `git branch -D` で止めて cancel し、`CLEANED:` の行、消えた worktree とブランチ、`worktree_cleaned` 1 つ、exit 1 を `--branch` の有無で見る | 解消。行がないときの文は C3-L3 |
+
+### Positive notes(cycle 2 の再実行)
+
+- 確かめを記録を読む前に置いたので、記録がない形の Manual(`git worktree remove`)まで止まる。テストもこの形を 1 ケースとして持つ。
+- 新しいテストは、確かめ 4 が通る形(`.gitignore` の `.harness/state/` と、空の `git status`)を作ってから打ち、確かめを外すと script が走る形で落ちる。
+- CLI のテストは、割り込みが片付けの途中に入ったことを `fired` で確かめてから結果を見る。割り込みが入らなかったときに素通りしない。
+- merge のテストの注釈が、期待を変えた理由(fixture の binding が main worktree を名指し、台帳がその中にある)を書いている。
+
+### Tech debt identified(cycle 2 の再実行)
+
+この run の変更はこの report と insight event だけで、台帳は書き換えていない。C3-M1 は直すことを勧める(下の Recommendation)。LOW のうち直さないものは、`/pr` のあとに運ぶ場所が台帳しかないので、次の 1 行を足す。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| merge のあとの片付け(#263)の台帳の確かめ(S-X3)の残り。(a) 断りの次の手の「pick another one outside it, such as the default one」は、binding のない台帳を名指し、binding が main worktree を名指す台帳では断っている台帳そのものを名指す(C3-L1)。(b) `checkRecord` のパス違いの断りの Manual は、記録のパスの worktree の中の台帳を確かめない(C3-L2)。(c) 割り込みのエラーは、行が 1 つもないときも「the lines above say what was cleaned up」と言う(C3-L3)。(d) `checkLedger` の注釈の「so nothing is removed」が仮定の結果と読める(C3-L4) | (a) 文のとおりに打っても断られ、worktree が残る。(b) 手で作った記録の形でだけ、人が Manual を打つと台帳が消える。(c)(d) 読み違えるだけ | cycle の上限を上げた run の LOW で、どれも ralph が自分で消す道ではない | 次に `internal/org/cleanup.go` の断りの文か `runCleanupSteps` を変えるとき | `docs/plans/active/2026-10-28-org-merge-cleanup.md`、この report の C3-L1〜C3-L4 |
+
+### Recommendation(cycle 2 の再実行)
+
+- Merge: 可(CRITICAL 0、HIGH 0、MEDIUM 1、LOW 4。HEAD 514f59cd について)。ただし C3-M1 は cross-review cycle 2 の指摘 1 の取りこぼしで、全 org の台帳を消す道なので、`/verify` の前に 1 slice で直すことを勧める。cross-review cycle 2 の指摘 2 は解消、指摘 1 は一部解消。
+- Follow-ups:
+  - C3-M1 の直しは `checkLedger` の比べ(数行)と、大文字小文字を区別しない volume でだけ走るテストのケース 1 つ。直したら、この run と同じく直しだけを読む短い run を回す。
+  - C3-L1 は理由の文と期待文 1 か所。C3-M1 と同じ slice で直せる。C3-L2 は C3-M1 の関数をパスを受ける形にすれば同じ slice に入る。
+  - `/verify` と `/test` は、この run が打たなかった `go test`・`go vet`・`golangci-lint`・`run-static-verify.sh`・`run-test.sh` を打つ。
+  - sync-docs に渡すことは計画の Progress の行にある(`ralph org cleanup --help` の「Before it removes anything, cleanup checks...」の一覧と、skill の一覧に台帳の場所を足す)。この run は文書のずれを見ていない。
+- Known gaps(所見にしていないもの):
+  - `checkWorktree` の cwd の比べ(`internal/org/cleanup.go:610`)も文字の比べで、C3-M1 と同じ書き方の違いを見落とす。cycle 1 からの作りでこの差分の外。見落とすと shell が消えたディレクトリに残る。
+  - ralph が feature worktree の中から打たれ、台帳もその中にあると、台帳の断りのあとに cwd の断りがもう一度来る。どちらも理由が次の手を言うので、2 回で進める。
+  - 台帳のファイル 1 つ(たとえば `manifest.jsonl`)だけを worktree の中への symlink にした形は、ディレクトリの比べでは見えない。ralph はその形を作らないので、所見にしていない。
