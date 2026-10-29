@@ -388,9 +388,12 @@ const (
 const leaderAdvisorySelfCLI = "<あなたの CLI>"
 
 // leaderAdvisoryPickCommand is the command the 計画助言 subsection picks the
-// other CLI with: pick_reviewer reads the driver ralph puts in the pane, and
-// the leader's own CLI when the pane has none.
-const leaderAdvisoryPickCommand = `. ./scripts/xreview-helpers.sh && pick_reviewer "${` + driver.PrimaryCLIEnv + `:-` + leaderAdvisorySelfCLI + `}"`
+// other CLI with, the driver reading of /plan step 11.b (self-review L10):
+// pick_reviewer reads the driver ralph puts in the pane when it is claude or
+// codex, case-insensitive, and the leader's own CLI otherwise.
+const leaderAdvisoryPickCommand = `. ./scripts/xreview-helpers.sh && DRIVER=` + leaderAdvisorySelfCLI +
+	`; override=$(printf '%s' "${` + driver.PrimaryCLIEnv + `:-}" | tr '[:upper:]' '[:lower:]'); ` +
+	`case "$override" in claude|codex) DRIVER=$override ;; esac; pick_reviewer "$DRIVER"`
 
 // leaderAdvisoryGitState is the command both advisory commands write the git
 // state with before and after the call: the form of /plan step 11 of #266
@@ -452,10 +455,11 @@ func goStringLiterals(t *testing.T, src string) string {
 // under split (D6), once. The leader reads the switch with ralph config get
 // and sorts its exit code the way that verb's help promises (D5): 0 uses the
 // value, false calls nothing; an older ralph's unknown command "config" is
-// off and recorded; any other code is a BLOCKED, never off. The help in
-// internal/cli/config.go still promises those codes, read from its string
-// literals with white space removed, so rewrapping the help keeps the check
-// green (self-review L3).
+// off and recorded; and, as /plan step 11.a has it, the shell's 127 for a
+// ralph not on PATH is off and recorded too (self-review L9); any other code
+// is a BLOCKED, never off. The help in internal/cli/config.go still promises
+// the codes other than 127, read from its string literals with white space
+// removed, so rewrapping the help keeps the check green (self-review L3).
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, leaderStep1Marker), leaderItemWhere(leaderStep1Marker), []string{
 		"split では人に聞かずに推奨の案を採り",
@@ -465,9 +469,10 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 		"手順 1 で計画をコミットしたら、`[org.review].plan_advisory` が on のときだけ、相手のモデルに計画助言を頼む(claude の leader は codex に、codex の leader は claude に、計画を読むだけの形で)",
 		"per-plan では手順 2 の前に、split では手順 5 で implementer を spawn する前に済ませる",
 		"頼むのは 1 回で、手順 4 と 6 で計画を直して手順 2 からやり直すときは頼み直さない",
-		"まず worktree で `ralph config get org.review.plan_advisory` を打ち、終了コードで分ける(`ralph config get --help` の約束)",
+		"まず worktree で `ralph config get org.review.plan_advisory` を打ち、終了コードで分ける(127 のほかは `ralph config get --help` の約束)",
 		"0 なら出た値を使い、`true` なら頼み、`false` なら頼まずに次へ進む(記録も要らない)",
 		"1 で stderr に `unknown command \"config\"` があれば(この動詞のない古い ralph)、off とみなして頼まず、off とみなしたことを下の要約と同じ場所に書く",
+		"127 なら(`ralph` が PATH になく、shell が返す値)、同じく off とみなして頼まず、`ralph` が見つからず off とみなしたことを同じ場所に書く",
 		"それ以外(ほかの 1、2、3、0 で `true` でも `false` でもない値)は off とみなさず、エラーを本文に書いて BLOCKED(TASK_ID は `org-a`)を「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで先に進まない(待ち方は「agmsg の受信箱の運用」の節)",
 		"頼むときは、worktree に",
 	})
@@ -499,20 +504,24 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryReadsTheSwitchFirst(t *te
 // reviewer choice of AC5: the 計画助言 subsection skips when the worktree has
 // no scripts/xreview-helpers.sh or scripts/ralph-config.sh, picks the
 // reviewer with pick_reviewer on the RALPH_PRIMARY_CLI ralph puts in the
-// pane, or on the leader's own CLI, which the leader writes in place of
-// <あなたの CLI>, when the pane has none (a herdr with no --env whose server
-// has none either; self-review L5 and L7), and skips when that CLI is not on
-// PATH. The command, run with bash and zsh from the repository root on its
-// scripts/xreview-helpers.sh, picks codex for a claude pane, claude for a
-// codex pane, the pane's value over the leader's, and, with no
-// RALPH_PRIMARY_CLI in the pane, codex for a claude leader and claude for a
-// codex leader.
+// pane when it is claude or codex, case-insensitive, or on the leader's own
+// CLI, which the leader writes in place of <あなたの CLI>, when the pane has
+// none (a herdr with no --env whose server has none either; self-review L5
+// and L7) or another value (self-review L10, the reading of /plan step
+// 11.b), and skips when that CLI is not on PATH. The command, run with bash
+// and zsh from the repository root on its scripts/xreview-helpers.sh, picks
+// codex for a claude pane, claude for a codex pane, the pane's value over the
+// leader's, whatever its case, and, with no RALPH_PRIMARY_CLI in the pane or
+// one that is neither claude nor codex (gemini, or claude with a trailing
+// space), codex for a claude leader and claude for a codex leader.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testing.T) {
 	assertPhrasesInOrder(t, leaderPlanAdvisory(t), leaderAdvisoryWhere, []string{
 		"頼むときは、worktree に `scripts/xreview-helpers.sh` と `scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)",
 		"`" + leaderAdvisoryPickCommand + "` が出す名前(`codex` か `claude`)を相手にする",
 		"`" + leaderAdvisorySelfCLI + "` は、あなたが Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ",
-		"(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れる。`--env` のない herdr が作った pane には入らないが、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときだけ)",
+		"`" + driver.PrimaryCLIEnv + "` が `claude` か `codex`(大文字と小文字は区別しない)ならその値があなたの CLI に代わり、ほかの値は無視する",
+		"(ralph は pane に `" + driver.PrimaryCLIEnv + "` を入れる。`--env` のない herdr が作った pane には入らないが、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で選ぶ。" +
+			"書き換えたあなたの CLI が使われるのは、変数がないときと、値が `claude` でも `codex` でもないときだけ)",
 		"`command -v <相手>` が何も出さなければ飛ばす",
 	})
 
@@ -529,8 +538,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryPicksTheOtherCLI(t *testi
 			{driver.PrimaryCLIEntry("claude"), "claude", "codex"},
 			{driver.PrimaryCLIEntry("codex"), "codex", "claude"},
 			{driver.PrimaryCLIEntry("codex"), "claude", "claude"},
+			{driver.PrimaryCLIEntry("CODEX"), "claude", "claude"},
 			{"", "claude", "codex"},
 			{"", "codex", "claude"},
+			{driver.PrimaryCLIEntry("gemini"), "codex", "claude"},
+			{driver.PrimaryCLIEntry("claude "), "codex", "claude"},
 		} {
 			command := strings.Replace(leaderAdvisoryPickCommand, leaderAdvisorySelfCLI, tc.self, 1)
 			args := []string{"-c", command}
@@ -705,7 +717,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryOutcomes(t *testing.T) {
 		"LOW はあなたの判断で扱う",
 		"計画を変えたらコミットする",
 		"所見の数と扱いを 1〜2 文に要約し、per-plan では手順 3 の QUESTION の本文の `ADVISORY:` の行に、split では計画の `## Design decisions` に書く(split ではそれもコミットする)",
-		"飛ばしたときと、古い ralph で off とみなしたときも、そのことと理由を同じ場所に書く",
+		"飛ばしたときと、古い ralph か `ralph` が見つからないことで off とみなしたときも、そのことと理由を同じ場所に書く",
 	})
 	codex, claude := leaderAdvisoryCodeBlock(t, leaderAdvisoryCodexLead), leaderAdvisoryCodeBlock(t, leaderAdvisoryClaudeLead)
 	for _, c := range []struct{ block, line string }{
@@ -766,7 +778,7 @@ func advisoryTestEnv() []string {
 // whose enabled is null, whatever the overrides (a codex whose list does not
 // say enabled: false). STUB_OLD=1 knows no feature flag, as codex rejects
 // one it does not know (exit 1). exec writes a finding to its -o file and
-// changes the work tree as STUB_WRITES says (advisoryStubWrites);
+// changes the work tree as STUB_WRITES says (advisoryStubWriteScript);
 // STUB_HANG=<seconds> makes it sleep that long instead.
 const advisoryCodexStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
@@ -804,23 +816,23 @@ exec)
 	if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
 	printf '1. [MEDIUM] stub finding\n' > "$out" ;;
 esac
-` + advisoryStubWrites
+` + advisoryStubWriteScript
 
 // advisoryClaudeStub stands in for claude: it logs its arguments like
 // advisoryCodexStub, then the RALPH_WIP_CHECKPOINT it got, prints a finding
 // on stdout and a line on stderr, and changes the work tree as STUB_WRITES
-// says (advisoryStubWrites).
+// says (advisoryStubWriteScript).
 const advisoryClaudeStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
 printf 'RALPH_WIP_CHECKPOINT=%s\n' "$RALPH_WIP_CHECKPOINT" >> "$STUB_LOG"
 printf '%s\n' '--end--' >> "$STUB_LOG"
 printf '1. [LOW] stub finding\n'
 echo 'stub log line' >&2
-` + advisoryStubWrites
+` + advisoryStubWriteScript
 
-// advisoryStubWrites ends both stand-ins' review: it changes the work tree as
-// STUB_WRITES names (advisoryWrites) and exits 0.
-const advisoryStubWrites = `case $STUB_WRITES in
+// advisoryStubWriteScript ends both stand-ins' review: it changes the work
+// tree as STUB_WRITES names (advisoryWrites) and exits 0.
+const advisoryStubWriteScript = `case $STUB_WRITES in
 tracked) echo two >> tracked.txt ;;
 new) echo one > new.txt ;;
 untracked) echo two >> untracked.txt ;;

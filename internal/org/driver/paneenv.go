@@ -39,9 +39,9 @@ func SeatPaneEnv() []string {
 // without a driver reads it too, and treats the driver as claude and picks
 // codex when it is unset. A feature org leader's plan advisory (the 計画助言
 // subsection of the 機能ごとの org section of internal/org/prompts/leader.md)
-// reads it as well, and uses the leader's own CLI only when the variable is
-// unset or empty, so a value the pane takes from the herdr server's
-// environment wins over it.
+// reads it the same way, and uses the leader's own CLI only when the
+// variable is unset, empty, or neither claude nor codex, so a claude or codex
+// value the pane takes from the herdr server's environment wins over it.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn

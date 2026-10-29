@@ -496,23 +496,28 @@ claude に、計画を読むだけの形で)。per-plan では手順 2 の前に
 手順 5 で implementer を spawn する前に済ませる。頼むのは 1 回で、手順 4 と 6
 で計画を直して手順 2 からやり直すときは頼み直さない。
 まず worktree で `ralph config get org.review.plan_advisory` を打ち、
-終了コードで分ける(`ralph config get --help` の約束)。0 なら出た値を
-使い、`true` なら頼み、`false` なら頼まずに次へ進む(記録も要らない)。
+終了コードで分ける(127 のほかは `ralph config get --help` の約束)。0 なら
+出た値を使い、`true` なら頼み、`false` なら頼まずに次へ進む(記録も要らない)。
 1 で stderr に `unknown command "config"` があれば(この動詞のない古い
 ralph)、off とみなして頼まず、off とみなしたことを下の要約と同じ場所に
-書く。それ以外(ほかの 1、2、3、0 で `true` でも `false` でもない値)は
+書く。127 なら(`ralph` が PATH になく、shell が返す値)、同じく off と
+みなして頼まず、`ralph` が見つからず off とみなしたことを同じ場所に書く。
+それ以外(ほかの 1、2、3、0 で `true` でも `false` でもない値)は
 off とみなさず、エラーを本文に書いて BLOCKED(TASK_ID は `{{ORG_ID}}`)を
 「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで
 先に進まない(待ち方は「agmsg の受信箱の運用」の節)。
 
 頼むときは、worktree に `scripts/xreview-helpers.sh` と
 `scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)、
-`. ./scripts/xreview-helpers.sh && pick_reviewer "${RALPH_PRIMARY_CLI:-<あなたの CLI>}"`
+`. ./scripts/xreview-helpers.sh && DRIVER=<あなたの CLI>; override=$(printf '%s' "${RALPH_PRIMARY_CLI:-}" | tr '[:upper:]' '[:lower:]'); case "$override" in claude|codex) DRIVER=$override ;; esac; pick_reviewer "$DRIVER"`
 が出す名前(`codex` か `claude`)を相手にする。`<あなたの CLI>` は、あなたが
-Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ(ralph は pane に
+Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ。
+`RALPH_PRIMARY_CLI` が `claude` か `codex`(大文字と小文字は区別しない)なら
+その値があなたの CLI に代わり、ほかの値は無視する(ralph は pane に
 `RALPH_PRIMARY_CLI` を入れる。`--env` のない herdr が作った pane には入らない
 が、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で
-選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときだけ)。
+選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときと、値が `claude`
+でも `codex` でもないときだけ)。
 `command -v <相手>` が何も出さなければ飛ばす。
 相手には次の指示文を渡す(下のコマンドの `<指示文>`)。英語のまま変えず、
 最後の `<計画のパス>` だけを worktree からの計画の相対パスにする。
@@ -591,8 +596,8 @@ HIGH と MEDIUM の所見は、計画に反映するか、反映しない理由�
 コミットする。所見の数と扱いを 1〜2 文に要約し、per-plan では手順 3 の
 QUESTION の本文の `ADVISORY:` の行に、split では計画の
 `## Design decisions` に書く(split ではそれもコミットする)。飛ばした
-ときと、古い ralph で off とみなしたときも、そのことと理由を同じ場所に
-書く。
+ときと、古い ralph か `ralph` が見つからないことで off とみなしたときも、
+そのことと理由を同じ場所に書く。
 
 ## タスク
 
