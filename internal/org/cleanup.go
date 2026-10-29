@@ -36,7 +36,8 @@ import (
 //     directory is not inside it either (checkLedger, made before 2), so that
 //     the cleanup does not remove the ledger it runs on with the worktree: 4
 //     does not catch that, since the .gitignore ralph init ships names
-//     .harness/state/;
+//     .harness/state/. Both compare by file identity (pathWithin), so another
+//     spelling of the worktree's path counts too;
 //  4. the worktree is the root of a git worktree, with no rebase or merge in
 //     progress and nothing uncommitted or untracked (a file .gitignore names
 //     does not count and goes with the worktree, D6);
@@ -136,16 +137,17 @@ type CleanupResult struct {
 	// Manual is the shell command that cleans up by hand, set with Refused or
 	// Failed only where ralph cannot go on by itself, to run only once the
 	// reason has been checked: ralph-worktree.sh cleanup --force-branch in
-	// RepoRoot when the record's path or kind is not the binding's, when the
-	// worktree is left with no local branch, and when the removal failed; git
-	// worktree remove and git branch -D of what git still has when the record
-	// is gone; git branch -D of the binding's branch alone when the record is
-	// on another branch; and git worktree remove of git's registration of a
-	// missing worktree, then the script's cleanup, when the registration is
-	// not on the binding's branch or that branch is gone. A refusal the next
-	// cleanup can go on from once its cause is fixed (D2's 3 to 6 of a
-	// worktree that is there) has none: its reason names the fix and the next
-	// cleanup, which runs the checks a command by hand would skip.
+	// RepoRoot when the record's path or kind is not the binding's (unless
+	// the worktree at the record's path holds the ledger's directory), when
+	// the worktree is left with no local branch, and when the removal failed;
+	// git worktree remove and git branch -D of what git still has when the
+	// record is gone; git branch -D of the binding's branch alone when the
+	// record is on another branch; and git worktree remove of git's
+	// registration of a missing worktree, then the script's cleanup, when the
+	// registration is not on the binding's branch or that branch is gone. A
+	// refusal the next cleanup can go on from once its cause is fixed (D2's 3
+	// to 6 of a worktree that is there) has none: its reason names the fix and
+	// the next cleanup, which runs the checks a command by hand would skip.
 	Manual string
 	// Cleaned reports that the script removed the worktree, the branch, and
 	// the record, or what of them was left.
@@ -379,8 +381,12 @@ func cleanupGitCmd(dir string, args ...string) string {
 // the top of this file), then the removal. res holds what the first check
 // found. The check of the ledger's directory (checkLedger) comes first,
 // before the record is read, so that no refusal names a command that would
-// remove the ledger with the worktree, such as the git worktree remove of a
-// record that is gone (recordGone).
+// remove the ledger with a worktree: each command a refusal names that
+// removes a worktree removes the binding's, such as the git worktree remove
+// of a record that is gone (recordGone), which checkLedger has compared with
+// the ledger, but the script's cleanup of a record at another path, which
+// checkRecord names only when the worktree at that path does not hold the
+// ledger either.
 func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult, error) {
 	refuse := func(reason, manual string) (CleanupResult, error) {
 		res.Refused, res.Manual = PrintableInboxText(reason, false), PrintableInboxText(manual, false)
@@ -453,24 +459,74 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 
 // checkLedger is the part of D2's check 3 that run makes first: the ledger's
 // directory, the manifest's, is neither the feature worktree nor inside it,
-// compared with symlinks resolved as checkWorktree compares the caller's
-// working directory. Otherwise the script would remove the ledger with the
-// worktree, ignored files and all (D6), and the record of worktree_cleaned
-// would then make a manifest that holds nothing else, so nothing is removed.
-// Check 4 does not catch it, since the .gitignore ralph init ships names
-// .harness/state/. The refusal has no Manual: its reason names the next
-// cleanup, with a ledger outside the worktree.
+// compared by file identity as checkWorktree compares the caller's working
+// directory (pathWithin). Otherwise the script would remove the ledger with
+// the worktree, ignored files and all (D6), and the record of
+// worktree_cleaned would then make a manifest that holds nothing else. So
+// the check refuses such a ledger, and nothing is removed. Check 4 does not
+// catch it, since the .gitignore ralph init ships names .harness/state/. The
+// refusal has no Manual: its reason names the next step, moving the ledger
+// out of the worktree and cleaning up again with it there (ledgerMoveStep).
 func (c *cleanupRun) checkLedger() string {
-	dir := filepath.Dir(c.o.Manifest.Path())
-	ledger, wt := resolvedOrClean(mustAbs(dir)), resolvedOrClean(c.f.Worktree)
-	if ledger != wt && !strings.HasPrefix(ledger, wt+string(filepath.Separator)) {
+	dir := c.ledgerDir()
+	if !pathWithin(dir, c.f.Worktree) {
 		return ""
 	}
 	return fmt.Sprintf("the ledger's directory %s is inside the feature worktree %s, which the cleanup removes with the files "+
-		".gitignore names, so the ledger would be removed with it, and nothing is removed: move the ledger out of the worktree "+
-		"while nothing uses it, or pick another one outside it, such as the default one, the main worktree's %s, and %s with "+
-		"--state-dir or %s naming it", dir, c.f.Worktree, filepath.Join(c.root, defaultOrgStateDirRelPath),
-		cleanupAgain(c.p.Branch), EnvOrgStateDir)
+		".gitignore names, so the ledger would be removed with it, and nothing is removed: %s", dir, c.f.Worktree,
+		c.ledgerMoveStep())
+}
+
+// ledgerDir is the ledger's directory, the manifest's, as the Org names it.
+func (c *cleanupRun) ledgerDir() string {
+	return filepath.Dir(c.o.Manifest.Path())
+}
+
+// ledgerMoveStep is the next step of a refusal of a ledger whose directory is
+// inside a worktree a cleanup would remove: the binding is in this ledger, so
+// no other ledger can clean the branch up, and the way on is to move this
+// one, while nothing uses it, to a place where no other ledger is, which it
+// would otherwise overwrite, and to clean up again with it there.
+func (c *cleanupRun) ledgerMoveStep() string {
+	return fmt.Sprintf("while no ralph org command runs on the ledger, move its directory to a place outside the worktree "+
+		"where no other ledger is, and %s with --state-dir or %s naming the new place", cleanupAgain(c.p.Branch), EnvOrgStateDir)
+}
+
+// pathWithin reports whether child is dir or inside it, compared by file
+// identity: with both made absolute and their symlinks resolved
+// (resolvedOrClean), names that say so match without a stat, and otherwise
+// child and each of its ancestors in turn are compared with dir by
+// os.SameFile, so a spelling the file system does not tell apart from dir's,
+// such as another case of a letter or another Unicode normalization on
+// macOS's default APFS volume, matches too (pathWithinDir compares the names
+// alone). A dir that cannot be stat'd, such as a worktree whose directory is
+// gone, holds nothing, so that is no match. A stat of child or of an ancestor
+// that fails ends the walk with no match. That is safe for the callers, whose
+// child exists: the ledger's directory, whose manifest check 1 read, and the
+// working directory. A stat needs search permission on the ancestors only, so
+// every ancestor of a child that can be stat'd can be stat'd too, and the walk
+// ends that way only for a child removed or moved meanwhile.
+func pathWithin(child, dir string) bool {
+	child, dir = resolvedOrClean(mustAbs(child)), resolvedOrClean(mustAbs(dir))
+	if child == dir || strings.HasPrefix(child, dir+string(filepath.Separator)) {
+		return true
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	for p := child; ; p = filepath.Dir(p) {
+		info, err := os.Stat(p)
+		if err != nil {
+			return false
+		}
+		if os.SameFile(info, dirInfo) {
+			return true
+		}
+		if filepath.Dir(p) == p {
+			return false
+		}
+	}
 }
 
 // readState reads cleanupState: the worktree's path with os.Stat, git
@@ -568,7 +624,12 @@ func (c *cleanupRun) recordGone(st cleanupState) (reason, manual string, nothing
 // branch, Manual deletes only the binding's branch, and when only its path
 // or kind differs, Manual is the script's cleanup, to run once the record,
 // the branch's commits the PR did not merge, and the worktree at the
-// record's path, which the script removes, have been checked.
+// record's path, which the script removes, have been checked. When that
+// worktree holds the ledger's directory (pathWithin), which checkLedger,
+// comparing with the binding's worktree, does not see, the script would
+// remove the ledger with it, so there is no Manual, and the reason names the
+// move of the ledger first (ledgerMoveStep), after which the next cleanup
+// names the script's cleanup.
 func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 	var diffs []string
 	if rec.Branch != c.f.Branch {
@@ -591,6 +652,11 @@ func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 			"nothing that was not merged (%s)", c.f.Branch, c.root, c.gitCmd("log", c.p.Head+".."+c.f.Branch))
 		return reason, c.gitCmd("branch", "-D", c.f.Branch)
 	}
+	if dir := c.ledgerDir(); pathWithin(dir, rec.WorktreePath) {
+		return reason + fmt.Sprintf(": the worktree at the record's path %s holds the ledger's directory %s, so cleaning it up "+
+			"by hand would remove the ledger with it: check the record (%s state-path %s names its file), then, %s",
+			rec.WorktreePath, dir, worktreeScriptRel, c.id(), c.ledgerMoveStep()), ""
+	}
 	return reason + fmt.Sprintf(": check the record (%s state-path %s names its file), and clean up by hand only once it is "+
 		"this feature's, the branch holds nothing that was not merged (%s), and the worktree at the record's path holds nothing "+
 		"you need (%s)", worktreeScriptRel, c.id(), c.gitCmd("log", c.p.Head+".."+c.f.Branch),
@@ -607,7 +673,7 @@ func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 // out is read, which picks the way its refusal puts the branch back.
 func (c *cleanupRun) checkWorktree(ctx context.Context, tip string) (reason, manual string, err error) {
 	wt, again := c.f.Worktree, cleanupAgain(c.p.Branch)
-	if resolved := resolvedOrClean(wt); c.cwd == resolved || strings.HasPrefix(c.cwd, resolved+string(filepath.Separator)) {
+	if pathWithin(c.cwd, wt) {
 		return fmt.Sprintf("ralph runs in %s, inside the feature worktree %s, which the cleanup removes: run ralph org cleanup "+
 			"--branch %s from outside it, such as from the main worktree %s", c.cwd, wt, cleanupShellWord(c.p.Branch),
 			c.root), "", nil

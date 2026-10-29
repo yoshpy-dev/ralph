@@ -933,7 +933,7 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 // worktree (finding 1 of cross-review cycle 2,
 // docs/reports/cross-review-triage-org-merge-cleanup.md; S-X3 of plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md), with no CLEANUP
-// MANUAL: line. internal/org's cleanup tests pin the reason's words.
+// MANUAL: line. The line is pinned in full, its next step included.
 func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 	const (
 		on  = "[org.director]\nauto_merge = true\n"
@@ -959,13 +959,16 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge from the linked worktree: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			lines := mergeCLILines(fx.head, tc.want, "")
-			rest, ok := strings.CutPrefix(stdout, lines)
-			if !ok || !strings.HasPrefix(rest, "CLEANUP: skipped (the ledger's directory "+fx.stateDir+" is inside the feature "+
-				"worktree "+fx.work+", ") || !strings.HasSuffix(rest, ")\n") || strings.Count(rest, "\n") != 1 ||
-				strings.Contains(stdout, "CLEANUP MANUAL:") {
-				t.Errorf("stdout:\n%s\nwant:\n%sCLEANUP: skipped (the ledger's directory %s is inside the feature worktree %s, ...), "+
-					"on one line, with no CLEANUP MANUAL: line", stdout, lines, fx.stateDir, fx.work)
+			// The next step is the move of the ledger alone: the binding is in
+			// this ledger, which is also the main worktree's default one here
+			// (C3-L1 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md).
+			want := mergeCLILines(fx.head, tc.want, "") + "CLEANUP: skipped (the ledger's directory " + fx.stateDir + " is " +
+				"inside the feature worktree " + fx.work + ", which the cleanup removes with the files .gitignore names, so the " +
+				"ledger would be removed with it, and nothing is removed: while no ralph org command runs on the ledger, move its " +
+				"directory to a place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/a " +
+				"again with --state-dir or RALPH_ORG_STATE_DIR naming the new place)\n"
+			if stdout != want {
+				t.Errorf("stdout:\n%s\nwant:\n%s(the CLEANUP: skipped line, with no CLEANUP MANUAL: line)", stdout, want)
 			}
 			got := fx.prMergedEvents(t)
 			if len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, tc.want) {

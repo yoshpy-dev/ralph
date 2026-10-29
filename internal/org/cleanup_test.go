@@ -482,6 +482,14 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 		}, func(fx *worktreeCleanupFixture) string {
 			return "ralph runs in " + filepath.Join(fx.worktree, "internal", "auth") + ", inside the feature worktree"
 		}, false},
+		// C3-M1 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md:
+		// the same directory, on a case-insensitive volume.
+		{"run in the worktree, another case of a letter", func(t *testing.T, fx *worktreeCleanupFixture, p *CleanupParams) {
+			p.Cwd = filepath.Join(cleanupOtherCase(t, fx.worktree), "internal")
+		}, func(fx *worktreeCleanupFixture) string {
+			return "ralph runs in " + filepath.Join(filepath.Dir(fx.worktree), "Org-auth", "internal") + ", inside the feature " +
+				"worktree " + fx.worktree + ", which the cleanup removes"
+		}, false},
 		{"an uncommitted change", func(t *testing.T, fx *worktreeCleanupFixture, _ *CleanupParams) {
 			writeGateFile(t, fx.worktree, "internal/auth/auth.go", "package auth // changed\n", 0o644)
 		}, func(fx *worktreeCleanupFixture) string {
@@ -570,6 +578,41 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 	}
 }
 
+// cleanupLedgerMoveStep is the next step of a refusal of a ledger inside a
+// worktree the cleanup of feat/auth would remove (ledgerMoveStep).
+const cleanupLedgerMoveStep = "while no ralph org command runs on the ledger, move its directory to a place outside the " +
+	"worktree where no other ledger is, and run ralph org cleanup --branch feat/auth again with --state-dir or " +
+	"RALPH_ORG_STATE_DIR naming the new place"
+
+// cleanupOtherCase is path with the first ASCII letter of its last element in
+// the other case, when the file system finds the same directory under that
+// spelling, as a case-insensitive volume such as macOS's default APFS one
+// does; on a case-sensitive one, where no other spelling names it, the test
+// is skipped.
+func cleanupOtherCase(t *testing.T, path string) string {
+	t.Helper()
+	dir, base := filepath.Split(path)
+	i := strings.IndexFunc(base, func(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' })
+	if i < 0 {
+		t.Fatalf("%s has no ASCII letter in its last element", path)
+	}
+	letter := base[i : i+1]
+	other := strings.ToUpper(letter)
+	if other == letter {
+		other = strings.ToLower(letter)
+	}
+	alt := dir + base[:i] + other + base[i+1:]
+	want, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Stat(alt); err != nil || !os.SameFile(got, want) {
+		t.Skipf("the file system tells %s from %s (stat: %v): a case-sensitive volume, where no other case names the same "+
+			"directory", alt, path, err)
+	}
+	return alt
+}
+
 // moveLedger moves every file of the fixture's ledger into dir, and the Org
 // then reads the ledger as named, dir or a path to it through a symlink. It
 // returns the files moved, by name, with what each holds.
@@ -603,9 +646,14 @@ func (fx *worktreeCleanupFixture) moveLedger(t *testing.T, dir, named string) ma
 // before it reads the record (no worktree call), with no Manual, through
 // CleanupFeatureWorktree and through the entry ralph org merge uses with
 // regate.lock held, for a ledger below the worktree, at its root, through a
-// symlink, and with the record gone, whose refusal would otherwise name git
-// worktree remove: the worktree, the branch, the record, and every file of
-// the ledger stay, with no worktree_cleaned.
+// symlink, named with another case of a letter in the worktree's path on a
+// case-insensitive volume (C3-M1 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md: the same
+// directory, which a comparison of the names misses), and with the record
+// gone, whose refusal would otherwise name git worktree remove: the
+// worktree, the branch, the record, and every file of the ledger stay, with
+// no worktree_cleaned. The reason's next step is the move of the ledger
+// alone (C3-L1).
 func TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger(t *testing.T) {
 	below := func(_ *testing.T, fx *worktreeCleanupFixture) (string, string) {
 		dir := filepath.Join(fx.worktree, ".harness", "state", "org")
@@ -630,6 +678,10 @@ func TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger(t *testing.
 				t.Fatal(err)
 			}
 			return filepath.Join(fx.worktree, ".harness", "state", "org"), filepath.Join(link, ".harness", "state", "org")
+		}, false, false},
+		{"another case of a letter in the worktree's path", func(t *testing.T, fx *worktreeCleanupFixture) (string, string) {
+			return filepath.Join(fx.worktree, ".harness", "state", "org"),
+				filepath.Join(cleanupOtherCase(t, fx.worktree), ".harness", "state", "org")
 		}, false, false},
 		{"the record gone", below, true, false},
 	} {
@@ -666,10 +718,8 @@ func TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger(t *testing.
 				res, err = fx.cleanup(p)
 			}
 			want := "the ledger's directory " + named + " is inside the feature worktree " + fx.worktree + ", which the cleanup " +
-				"removes with the files .gitignore names, so the ledger would be removed with it, and nothing is removed: move the " +
-				"ledger out of the worktree while nothing uses it, or pick another one outside it, such as the default one, the " +
-				"main worktree's " + fx.root + "/.harness/state/org, and run ralph org cleanup --branch feat/auth again with " +
-				"--state-dir or RALPH_ORG_STATE_DIR naming it"
+				"removes with the files .gitignore names, so the ledger would be removed with it, and nothing is removed: " +
+				cleanupLedgerMoveStep
 			fx.assertRefused(t, res, err, before, want, "")
 			if res.Refused != want || res.OrgID != "auth" || res.Worktree != fx.worktree {
 				t.Errorf("cleanup = %+v; want only the refusal %q, for org auth and the worktree %s", res, want, fx.worktree)
@@ -1469,6 +1519,63 @@ func TestCleanupFeatureWorktree_RecordOfAnotherPathOrKindNamesTheChecks(t *testi
 	}
 }
 
+// TestCleanupFeatureWorktree_RecordWhoseWorktreeHoldsTheLedgerNamesNoManual
+// covers C3-L2 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md:
+// the ledger's directory is inside the worktree at the path of a record on
+// the binding's branch, not the binding's worktree, so checkLedger passes,
+// and the script's cleanup, the Manual of such a record, would remove the
+// ledger with that worktree. The refusal names no Manual, and its reason says
+// that the record's worktree holds the ledger and names the move of the
+// ledger, also with the record's path spelled with another case of a letter
+// on a case-insensitive volume. Nothing is recorded, and only the record is
+// read.
+func TestCleanupFeatureWorktree_RecordWhoseWorktreeHoldsTheLedgerNamesNoManual(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path func(t *testing.T, other string) string // the record's worktree_path, for the worktree other
+	}{
+		{"the record's path", func(_ *testing.T, other string) string { return other }},
+		{"another case of a letter in the record's path", func(t *testing.T, other string) string {
+			return cleanupOtherCase(t, other)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFakeFixture(t)
+			other := filepath.Join(resolvedOrClean(t.TempDir()), "org-auth")
+			ledger := filepath.Join(other, ".harness", "state", "org")
+			if err := os.MkdirAll(filepath.Dir(ledger), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(fx.stateDir, ledger); err != nil {
+				t.Fatal(err)
+			}
+			fx.stateDir = ledger
+			fx.o.Manifest = NewManifestStoreAtPath(ManifestPathIn(ledger))
+			rec := fx.wt.records[cleanupTestID]
+			rec.WorktreePath = tc.path(t, other)
+			fx.wt.records[cleanupTestID] = rec
+			manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+
+			res, err := fx.o.CleanupFeatureWorktree(context.Background(), fx.params())
+			want := `the worktree record org-auth records worktree_path "` + rec.WorktreePath + `", not "` + fx.f.Worktree +
+				`": it is not the record of the feature worktree org_id "auth" had for the branch feat/auth and may be another ` +
+				"feature's on the same org_id, so nothing is removed: the worktree at the record's path " + rec.WorktreePath +
+				" holds the ledger's directory " + ledger + ", so cleaning it up by hand would remove the ledger with it: check " +
+				"the record (scripts/ralph-worktree.sh state-path org-auth names its file), then, " + cleanupLedgerMoveStep
+			if err != nil || res.Cleaned || res.Refused != want || res.Manual != "" {
+				t.Fatalf("cleanup = %+v, %v\nwant the refusal %q with no Manual", res, err, want)
+			}
+			if want := []string{"lookup:" + cleanupTestID}; !slices.Equal(fx.wt.calls, want) {
+				t.Errorf("worktree calls = %q, want %q", fx.wt.calls, want)
+			}
+			if now := fileOrAbsent(t, fx.o.Manifest.Path()); now != manifest {
+				t.Errorf("a refused cleanup changed the manifest:\n%s\n->\n%s", manifest, now)
+			}
+			assertCleanupUnlocked(t, fx.stateDir)
+		})
+	}
+}
+
 // TestCleanupFeatureWorktree_RefusedWhileRegateLockIsHeld covers AC4's
 // regate or merge that runs: with regate.lock held by another, the cleanup
 // that takes the lock itself refuses after regateLockWait, reads nothing, and
@@ -1623,6 +1730,60 @@ func TestCleanupFeatureWorktree_RefusalCommandsRunAsWritten(t *testing.T) {
 			res, err := fx.o.CleanupFeatureWorktree(ctx, p)
 			if !passed || err == nil || !strings.Contains(err.Error(), "after the checks passed, before anything was removed") {
 				t.Fatalf("cleanup = %+v, %v (checks passed %v); want every check passed", res, err, passed)
+			}
+		})
+	}
+}
+
+// TestCleanupPathWithin_ComparesByFileIdentity covers pathWithin, which
+// checkLedger, checkRecord, and checkWorktree compare with (C3-M1 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md): a path is within
+// a directory when it is the directory or below it, also spelled through a
+// symlinked ancestor or, on a case-insensitive volume, with another case of
+// a letter, which names the same directory; a sibling whose name starts with
+// the directory's name is not, nor is the directory's parent, nor anything
+// within a directory that is gone.
+func TestCleanupPathWithin_ComparesByFileIdentity(t *testing.T) {
+	tmp := resolvedOrClean(t.TempDir())
+	wt := filepath.Join(tmp, "wt")
+	below := filepath.Join(wt, ".harness", "state", "org")
+	sibling := filepath.Join(tmp, "wt2", "state")
+	for _, dir := range []string{below, sibling} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(tmp, "link")
+	if err := os.Symlink(wt, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		child, dir func(t *testing.T) string
+		want       bool
+	}{
+		{"the same path", func(*testing.T) string { return wt }, func(*testing.T) string { return wt }, true},
+		{"below it", func(*testing.T) string { return below }, func(*testing.T) string { return wt }, true},
+		{"below it through a symlinked ancestor", func(*testing.T) string { return filepath.Join(link, ".harness", "state", "org") },
+			func(*testing.T) string { return wt }, true},
+		{"below it, the directory named through a symlink", func(*testing.T) string { return below },
+			func(*testing.T) string { return link }, true},
+		{"below it, another case of a letter in the directory's name", func(t *testing.T) string {
+			return filepath.Join(cleanupOtherCase(t, wt), ".harness", "state", "org")
+		}, func(*testing.T) string { return wt }, true},
+		{"below it, the directory named with another case of a letter", func(*testing.T) string { return below },
+			func(t *testing.T) string { return cleanupOtherCase(t, wt) }, true},
+		{"a sibling with a common prefix", func(*testing.T) string { return sibling }, func(*testing.T) string { return wt }, false},
+		{"a sibling with a common prefix, another case of a letter", func(*testing.T) string { return sibling },
+			func(t *testing.T) string { return cleanupOtherCase(t, wt) }, false},
+		{"the directory's parent", func(*testing.T) string { return tmp }, func(*testing.T) string { return wt }, false},
+		{"a directory that is gone", func(*testing.T) string { return below },
+			func(*testing.T) string { return filepath.Join(tmp, "gone") }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child, dir := tc.child(t), tc.dir(t)
+			if got := pathWithin(child, dir); got != tc.want {
+				t.Errorf("pathWithin(%s, %s) = %v, want %v", child, dir, got, tc.want)
 			}
 		})
 	}

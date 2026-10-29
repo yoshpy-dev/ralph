@@ -675,8 +675,8 @@ func TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne(t *testing.T) {
 			if !<-fired {
 				t.Fatalf("the script's git branch -D did not run, so nothing was interrupted: err %v, stdout %q", err, stdout)
 			}
-			const want = "org: cleanup: interrupted (test stopped) before the run ended: the lines above say what was cleaned up; " +
-				"run ralph org cleanup again for what is left"
+			const want = "org: cleanup: interrupted (test stopped) before the run ended: the lines above say what was cleaned up " +
+				"or skipped; run ralph org cleanup again for what is left"
 			if err == nil || err.Error() != want || ExitCode(err) != 1 {
 				t.Errorf("cleanup interrupted at git branch -D: err %v (exit %d); want %q, exit 1", err, ExitCode(err), want)
 			}
@@ -962,6 +962,50 @@ func TestCleanupPrinter_EachOutcome(t *testing.T) {
 				t.Errorf("err = %v; want nil (exit 0)", err)
 			case tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr):
 				t.Errorf("err = %v; want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// C3-L3 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md: with the
+// command's context done, runCleanupSteps exits 1 with an interruption that
+// says what the run did so far, after the steps or before a cleanup. With no
+// line printed, as when no branch is left to deal with, it says that no
+// branch was cleaned up, not that the lines above say what was, and prints
+// no nothing to clean up line; with only SKIPPED: lines, it says what was
+// cleaned up or skipped. No cleanup runs, so the runtime is nil.
+func TestRunCleanupSteps_InterruptionSaysWhatTheRunDid(t *testing.T) {
+	const why = "whether its PR was merged is not known (gh pr list failed for the branch)"
+	unknown := cleanupStep{branch: "feat/a", unknown: why}
+	merged := cleanupStep{branch: "feat/b", head: "0123456789abcdef0123456789abcdef01234567", pr: 2}
+	for _, tc := range []struct {
+		name       string
+		steps      []cleanupStep
+		wantStdout string
+		wantErr    string
+	}{
+		{"no branch", nil, "", "org: cleanup: interrupted (test stopped) before the run ended: no branch was cleaned up; run " +
+			"ralph org cleanup again for what is left"},
+		{"only a PR not known to be merged", []cleanupStep{unknown}, "SKIPPED: feat/a " + why + "\n", "org: cleanup: " +
+			"interrupted (test stopped) before the run ended: the lines above say what was cleaned up or skipped; run ralph org " +
+			"cleanup again for what is left"},
+		{"before the first cleanup", []cleanupStep{merged}, "", "org: cleanup: interrupted (test stopped) before the cleanup " +
+			"of the branch feat/b: it and the branches after it were not cleaned up, and no branch was cleaned up before it; run " +
+			"ralph org cleanup again"},
+		{"before a cleanup after a SKIPPED: line", []cleanupStep{unknown, merged}, "SKIPPED: feat/a " + why + "\n",
+			"org: cleanup: interrupted (test stopped) before the cleanup of the branch feat/b: it and the branches after it were " +
+				"not cleaned up, and the lines above say what was cleaned up or skipped before it; run ralph org cleanup again"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(context.Background())
+			cancel(errors.New("test stopped"))
+			var out strings.Builder
+			err := runCleanupSteps(ctx, nil, "/r", tc.steps, &cleanupPrinter{w: &out})
+			if err == nil || err.Error() != tc.wantErr || ExitCode(err) != 1 {
+				t.Errorf("err = %v (exit %d); want %q, exit 1", err, ExitCode(err), tc.wantErr)
+			}
+			if out.String() != tc.wantStdout {
+				t.Errorf("stdout:\n%q\nwant:\n%q", out.String(), tc.wantStdout)
 			}
 		})
 	}

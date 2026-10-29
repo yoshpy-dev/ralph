@@ -326,7 +326,8 @@ func cleanupLookupWhy(e org.MergeOrderEntry) string {
 // done. ctx done once the steps are dealt with, as when the interrupt comes
 // while the last cleanup removes or records (it runs to its end, and its
 // line is printed), is an interruption too, which comes before p.finish()'s
-// count of the branches left; otherwise it returns p.finish().
+// count of the branches left; otherwise it returns p.finish(). An
+// interruption's error says what the run did so far (p.soFar).
 func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []cleanupStep, p *cleanupPrinter) error {
 	for _, s := range steps {
 		if s.unknown != "" {
@@ -335,8 +336,8 @@ func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []
 		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("org: cleanup: interrupted (%v) before the cleanup of the branch %s: it and the branches after it "+
-				"were not cleaned up, and the lines above say what was; run ralph org cleanup again", context.Cause(ctx),
-				org.PrintableInboxText(s.branch, false))
+				"were not cleaned up, and %s before it; run ralph org cleanup again", context.Cause(ctx),
+				org.PrintableInboxText(s.branch, false), p.soFar())
 		}
 		res, err := rt.CleanupFeatureWorktree(ctx, org.CleanupParams{Branch: s.branch, Head: s.head, PRNumber: s.pr,
 			RepoRoot: repoRoot, Via: org.CleanupViaCleanup})
@@ -345,8 +346,8 @@ func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []
 		}
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("org: cleanup: interrupted (%v) before the run ended: the lines above say what was cleaned up; run "+
-			"ralph org cleanup again for what is left", context.Cause(ctx))
+		return fmt.Errorf("org: cleanup: interrupted (%v) before the run ended: %s; run ralph org cleanup again for what is left",
+			context.Cause(ctx), p.soFar())
 	}
 	return p.finish()
 }
@@ -414,6 +415,17 @@ func (p *cleanupPrinter) skipped(branch, why, manual string) {
 	}
 	p.printed++
 	p.left++
+}
+
+// soFar is what an interruption's error says of the run so far: the lines
+// printed say what was cleaned up or skipped, or, with none printed (no
+// branch dealt with, or only branches with nothing left), no branch was
+// cleaned up.
+func (p *cleanupPrinter) soFar() string {
+	if p.printed == 0 {
+		return "no branch was cleaned up"
+	}
+	return "the lines above say what was cleaned up or skipped"
 }
 
 // finish prints nothing to clean up when no line was printed, and returns
