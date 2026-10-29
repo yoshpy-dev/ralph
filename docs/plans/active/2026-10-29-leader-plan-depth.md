@@ -178,6 +178,8 @@
   - self-review Run 4(d27fcf40、reviewer は sonnet): merge の解き方とテストの直しに所見なし。L8 は直った。新しい所見 LOW 2 件(L9: main の skill は `ralph config get` の 127 を off とみなすのに、雛形は BLOCKED にしていた。L10: `/plan` の手順 11.b は `RALPH_PRIMARY_CLI` が `claude` か `codex` 以外なら無視するのに、雛形は値をそのまま `pick_reviewer` に渡していた)と naming の nit
   - 直し(1aaadb12、implementer): 127 は off とみなして記録する。driver は `/plan` の 11.b と同じ `case` の形(`claude` か `codex` のときだけ pane の値が代わり、ほかの値は無視する)。run の表を 8 件にし(大文字、`gemini`、末尾の空白)、paneenv.go の doc comment も合わせた。helper は `advisoryStubWriteScript` に改名。verify rc=0(66s)。変異 4 つ(127 を BLOCKED に戻す、素の値を渡す 3 通り)がどれも落ちる。self-check 5 項目 clean
     - 計画の本文(Scope の S2、D5、AC4・AC5、Test plan、Edge cases)には古い動き(`unknown command` の 1 だけ off、`pick_reviewer "$RALPH_PRIMARY_CLI"`、変数のない pane は claude とみなす)が残る。digest を変えないため本文は直さず、ここで読み替える: 終了コードは 0(true/false)、`unknown command "config"` の 1 と 127 は off と記録、ほかは BLOCKED。driver は leader 自身の CLI で、`RALPH_PRIMARY_CLI` が `claude` か `codex` のときだけそれに代わる
+  - self-review Run 5(bbbd1ad8、reviewer は sonnet): L9、L10、nit は直った。新しい所見は LOW 1 件(L11: driver の `case` の `claude` の枝を外す変異を落とす行が run の表にない。テストの doc comment も `gemini` と末尾の空白の行が codex の leader だけで走ることを書いていない)。直さず PR の Known gaps に書く。理由: テストの網の 1 行の追加で、雛形の動きは `/plan` 11.b と同じ形であることを reviewer が bash・zsh・sh の 7 通りで確かめている。self-review の LOW は直すかを選べる(ユーザーの指示は CRITICAL と HIGH を直す、MEDIUM は直すか理由を書く)。直すと self-review から回し直しになり、LOW の直しごとに次の LOW が出る流れが続いているため、ここで止める
+    - /sync-docs に渡すもの(追加): `scripts/xreview-helpers.sh:63`(root と `templates/base/`)の「Both skills pass the driver they resolved」は、leader の雛形が 3 つ目の呼び手になった
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
