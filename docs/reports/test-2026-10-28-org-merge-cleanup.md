@@ -6,7 +6,7 @@
 - Scope: `git diff 15e301c8...HEAD`(HEAD 44f13b7f)。Go は `internal/org` と `internal/cli`、ほかに skill・文書・template。`./scripts/run-test.sh` は changed scope のまま打ち、選ばれた pack は golang で、`go test ./...` が 9 パッケージを `(cached)` なしで打った。テストの関数はこの diff で 47 本増え、消えたものはない
 - Evidence: `docs/evidence/test-2026-10-28-org-merge-cleanup.log`(gitignore。`run-test.sh` の全出力、変異の表と各回の結果、coverage の数字。wrapper 自身の写しは `docs/evidence/verify-2026-10-28-113631.log`)
 
-この下の「Test execution」から「Test gaps」までは cycle 1(HEAD 44f13b7f)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 9a6ae47c)の test は、「Test gaps」と「Verdict」の間の「cycle 2(HEAD 9a6ae47c)」の節にある。いまのブランチの verdict は「Verdict」の節の先頭の cycle 2 の行で、cycle 1 の verdict はその下の「cycle 1(HEAD 44f13b7f)」に残している。cycle 2 の変異の ID は `C2-M<n>`。
+この下の「Test execution」から「Test gaps」までは cycle 1(HEAD 44f13b7f)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 9a6ae47c)の test は、「Test gaps」と「Verdict」の間の「cycle 2(HEAD 9a6ae47c)」の節にある。その次の「cycle 3(HEAD be6415c2)」の節は、cross-review cycle 2 の指摘の直し(上限を 3 に上げた回。`cycle-count.json` は 2 のまま)の test。いまのブランチの verdict は「Verdict」の節の先頭の cycle 3 の行で、cycle 2 と cycle 1 の verdict はその下に残している。cycle 2 の変異の ID は `C2-M<n>`、cycle 3 は `X-M<n>`。
 
 ## Test execution
 
@@ -234,9 +234,110 @@ cycle 2 の判定をテストが本当に見ているかを、cycle 1 と同じ�
 
 どれも cycle 2 の判定(登録の確かめ 6、origin への固定、origin の断り)を変えない道で、変異で確かめた判定はすべてテストに固定されている。
 
+## cycle 3(HEAD be6415c2)
+
+- Date: 2026-10-30
+- Tester: tester サブエージェント(`/test`、cross-review cycle 2 の直しのあとのパイプラインの再実行。上限は 3 に上げてあり、`cycle-count.json` は 2 のまま)
+- Scope: cycle 2 の test(HEAD 9a6ae47c)のあとにコードが変わったのは 4 コミットと main の merge。65a7b067(origin/main の #286 の merge: leader の雛形、`internal/org/prompts_leader_plan_test.go`、`scripts/ralph-config.sh`、`scripts/xreview-helpers.sh` ほか)、4d7cbfd8(S-X3: `checkLedger` を `run` の頭に置く、`runCleanupSteps` がループのあとに ctx を見る)、9dd79b94(S-X4: `pathWithin` がファイルの同一性で比べる、`ledgerMoveStep`、記録のパスの worktree が台帳を持つときは Manual なし、割り込みの文を出した行の数で言い分ける `soFar`)、7f91e08f(台帳を動かす手順の文に「走っている org がない」を足す)。68636a9c(sync-docs)は help の文とその固定のテスト。テストの関数は `9a6ae47c..HEAD` で 23 本増え、消えたものはない。このブランチの分は 5 本(`internal/org/cleanup_test.go` 3、`internal/cli/org_cleanup_test.go` 2)で、残りの 18 本は main の merge で入った。`./scripts/run-test.sh` は changed scope のまま打ち、shell のテストと golang の pack が選ばれた
+- Evidence: `docs/evidence/test-2026-10-28-org-merge-cleanup-cycle3.log`(gitignore、6,285 行。`run-test.sh` の全出力、新しいテストの PASS の行、変異 10 個の差分と各回の FAIL の行、基準の絞った回の PASS の行と coverage、前後の `git status`)。wrapper 自身の写しは `docs/evidence/verify-2026-10-29-171606.log`。cycle 1 と cycle 2 の証拠のログは書き換えていない
+
+### Test execution(cycle 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 9 パッケージ | shell 45 本 OK(PASS を含む行 4,796)、Go 9 パッケージ ok | 0 | 1(cycle 1・2 と同じ `test-secret-scan-branch.sh` の「git 2.41 より古い実物の git」の行) | 1,369 秒(02:16:05〜02:38:54 JST)。開始時の 1 分の load 23.4、終了時 5.8、途中で見た最大は 42.5 |
+| └ Go: `internal/org` | 1,281 本(トップレベル、HEAD の `go test -list`) | ok | 0 | 0 | 552.7 秒 |
+| └ Go: `internal/cli` | 880 本(同) | ok | 0 | 0 | 463.6 秒 |
+| └ Go: `cmd/ralph`、`internal/{config,insights,org/driver,scaffold}` | — | ok | 0 | 0 | 0.8〜3.0 秒 |
+| └ Go: `internal/{org/protocol,upgrade}` | — | ok(`(cached)`) | 0 | 0 | — |
+| 新しいテストの回: `go test -count=1 -v -run 'TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger\|…RecordWhoseWorktreeHoldsTheLedgerNamesNoManual\|TestCleanupPathWithin_ComparesByFileIdentity\|…RefusedInTheWorktree' ./internal/org/` | 4(サブテスト込み 35) | 4 | 0 | 0 | 39 秒 |
+| 新しいテストの回: `go test -count=1 -v -run 'TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne\|TestRunCleanupSteps_InterruptionSaysWhatTheRunDid\|TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml\|TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing' ./internal/cli/` | 4(サブテスト込み 12) | 4 | 0 | 0 | 23 秒 |
+| 基準の絞った回(coverage 付き): `go test -count=1 -v -coverprofile -run 'Cleanup\|^TestMerge' ./internal/org/` | 161(サブテスト込み 662) | 161 | 0 | 0 | 115 秒 |
+| 基準の絞った回(coverage 付き): `go test -count=1 -v -coverprofile -run 'OrgCleanup\|CleanupSteps\|CleanupPrinter\|OrgMerge\|PrintMergeResult' ./internal/cli/` | 53(サブテスト込み 155) | 53 | 0 | 0 | 191 秒 |
+| 変異 10 個(`go test -overlay`、下の Regression checks) | 10(打った回は 11) | 10 個とも落ちた | — | — | 1 回 72〜368 秒 |
+
+`run-test.sh` は、Bash の道具の 600 秒の上限を越えるので、perl の fork と setsid で切り離して起動した。INT・HUP・QUIT・TERM は DEFAULT に戻し、標準入出力は `/dev/null` にした。shell のテストの SKIP は cycle 2 と同じ 1 行で、信号を使うテストが飛ばされてはいない。終わりは開始と終了の時刻と rc を書く meta のファイルで確かめた。
+
+負荷は、同じマシンの別の session の Xcode のビルドとシミュレータ(`swift-frontend`、`STExtractionService` など)だった。この回の始めには 1 分の load が 218 あり、新しいテストの絞った 2 回を打つあいだに 23 まで下がったところで `run-test.sh` を起動した。変異は `run-test.sh` の間に 1 本ずつ順に打った。時間切れや負荷による失敗はなく、lead が挙げた既知の flaky な 2 本(`TestStartDirector_ACleanupThatCannotConfirmTheEndWritesNothingOnceItIsNotCurrent/an_attach_--replace`、`TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge/while_a_script_runs`)も、`run-test.sh` の `internal/org` の中で通ったので、打ち直していない。`internal/org/protocol` と `internal/upgrade` の `(cached)` は、`go list -deps -test` でどちらも `internal/org` と `internal/cli` に依らないことを確かめた。
+
+大文字小文字の行は、この Mac の TempDir が大文字小文字を区別しないので、飛ばされずに打たれた。新しいテストの回と基準の絞った回の `--- SKIP` は 0 行。
+
+### Coverage(cycle 3)
+
+- Statement: 基準の絞った回の profile で、`internal/org/cleanup.go` 300/335(89.6%。cycle 2 は 277/311)、`internal/cli/org_cleanup.go` 121/126(96.0%)
+- Function: cycle 3 で足した、または変えた関数のうち、`checkLedger`(`internal/org/cleanup.go:470`)、`ledgerDir`、`ledgerMoveStep`(`:494`)、`checkRecord`(`:638`)、CLI の `soFar`(`internal/cli/org_cleanup.go:424`)と `finish` が 100%。`pathWithin`(`internal/org/cleanup.go:514`)92.9%、`run` 93.9%、`checkWorktree`(`:679`)87.0%、`runCleanupSteps`(`internal/cli/org_cleanup.go:331`)91.7%
+- Branch: 計測なし(Go の道具は statement だけ)
+- Notes: cycle 3 の変更に入る打たれていないブロックは 2 つ。`pathWithin` の祖先をたどる途中で `os.Stat` が失敗する道(`internal/org/cleanup.go:525-527`)は、関数の注釈のとおり、その間に child が消えるか動いたときだけ起きる。`runCleanupSteps` の `p.result` が誤りを返す道(`internal/cli/org_cleanup.go:345-346`)は cycle 1 の Test gaps の 4 と同じで、この回の変更ではない。`checkWorktree` の残りは cycle 1 からある道
+
+### Failure analysis(cycle 3)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (なし) | — | — | — |
+
+`run-test.sh`、新しいテストの回、基準の回で失敗はなく、打ち直しもしていない。
+
+### cycle 3 の変更とテストの対応
+
+S-X3(台帳を持つ worktree の断り、最後の片付けの途中の割り込み):
+
+| 変更 | テスト |
+| --- | --- |
+| 台帳のディレクトリが機能の worktree の下、worktree の根、symlink 越し、worktree のパスの大文字小文字が違う名前、記録がない場合に、記録を読む前に Manual なしで断り、worktree・ブランチ・記録・台帳のファイルがすべて残り、`worktree_cleaned` を書かない。`ralph org merge` の入り口(`regate.lock` を持った `cleanupFeatureWorktreeLocked`)も同じ | `TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger`(`internal/org/cleanup_test.go:657`、6 つ) |
+| 唯一のブランチの片付けが script の `git branch -D` にいるあいだに割り込みが来ると、その片付けは終わって `CLEANED:` の行を出すが、exit 1 になる(`--branch` ありとなし) | `TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne`(`internal/cli/org_cleanup_test.go:634`、2 つ) |
+| fixture が main worktree を機能の worktree として結び、main worktree が台帳を持つので、merge のあとの片付けは記録を読む前に `CLEANUP: skipped` の 1 行で断り、`CLEANUP MANUAL:` の行は出ない。行は次の手まで全文で固定 | `TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml`(`internal/cli/org_merge_test.go:937`、2 つ) |
+
+S-X4 と 7f91e08f(ファイルの同一性での比べ、Manual のない断り、割り込みの文):
+
+| 変更 | テスト |
+| --- | --- |
+| `pathWithin`: 同じパス、下、symlink の祖先越し、ディレクトリを symlink で名指す、ディレクトリの名前の大文字小文字が違う 2 通りは中。前置が同じ兄弟(大文字小文字を変えても)、親、消えたディレクトリは中でない | `TestCleanupPathWithin_ComparesByFileIdentity`(`internal/org/cleanup_test.go:1746`、10 行) |
+| 確かめ 3: 大文字小文字の違う worktree のパスから打っても断る | `TestCleanupFeatureWorktree_RefusedInTheWorktree/run in the worktree, another case of a letter`(`:487`) |
+| 記録のパスの worktree が台帳を持つとき(大文字小文字の違う記録のパスも)、理由は台帳を動かす手順を先に言い、Manual を出さない | `TestCleanupFeatureWorktree_RecordWhoseWorktreeHoldsTheLedgerNamesNoManual`(`:1532`、2 つ) |
+| 割り込みの文: 何も出していない、PR の merge が分からない行だけ、最初の片付けの前、`SKIPPED:` の行のあとの片付けの前で、「no branch was cleaned up」と「the lines above say …」を言い分ける | `TestRunCleanupSteps_InterruptionSaysWhatTheRunDid`(`internal/cli/org_cleanup_test.go:977`、4 つ) |
+| 断りの次の手 `ledgerMoveStep` の文(「走っている org がなく、ralph org のコマンドが走っていないあいだに」) | 上の `RefusesTheWorktreeThatHoldsItsLedger`、`RecordWhoseWorktreeHoldsTheLedgerNamesNoManual`、`TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml` が理由の全文で固定する |
+
+前からあるテスト: 基準の絞った 2 回で、cleanup と merge のテストすべて(org 161 本、CLI 53 本)が通った。main の merge で入った leader の計画の助言のテスト(`internal/org/prompts_leader_plan_test.go`)と、変わった shell の script のテストは `run-test.sh` の中で通った。
+
+### Regression checks(cycle 3)
+
+cycle 3 の判定をテストが本当に見ているかを、cycle 1・2 と同じやり方の変異で確かめた。worktree のファイルは変えず、1 か所だけの文字列の置き換え(出てくるのが 1 回だけであることを確かめてから)を `go test -overlay` で渡した。`internal/org/cleanup.go` の変異は `-run 'Cleanup|^TestMerge' ./internal/org/`、`internal/cli/org_cleanup.go` の変異は `-run 'OrgCleanup|CleanupSteps|CleanupPrinter' ./internal/cli/` で打った。X-M2 は CLI の側でも落ちることを見るため、`-run 'OrgMerge|OrgCleanup' ./internal/cli/` でも打った。build の失敗はどの回にもない。前後の `git status --porcelain --ignored`(`.harness/cache/` を除く)の違いは、この回の 2 つの証拠のログ(gitignore)だけで、`git status --porcelain` は空のまま。
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| X-M1 `pathWithin` を名前の前置の比べだけに戻す(`os.Stat(dir)` のあとの `if err != nil` を `\|\| true` に) | 落ちた | `ComparesByFileIdentity` の大文字小文字の 2 行、`RefusesTheWorktreeThatHoldsItsLedger/another case of a letter in the worktree's path`、`RefusedInTheWorktree/run in the worktree, another case of a letter`、`RecordWhoseWorktreeHoldsTheLedgerNamesNoManual/another case of a letter in the record's path` |
+| X-M2 `run` が `checkLedger` を通さない | 落ちた | `RefusesTheWorktreeThatHoldsItsLedger` の 6 つすべて。CLI の `TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml` の 2 つ |
+| X-M3 `runCleanupSteps` がループのあとに ctx を見ない | 落ちた | `TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne` の 2 つ、`InterruptionSaysWhatTheRunDid/no branch`、`/only a PR not known to be merged` |
+| X-M4 `checkRecord` が記録のパスの worktree が台帳を持つかを見ない | 落ちた | `RecordWhoseWorktreeHoldsTheLedgerNamesNoManual` の 2 つ |
+| X-M5 `soFar` が出した行の数を見ない(いつも「the lines above …」) | 落ちた | `InterruptionSaysWhatTheRunDid/no branch`、`/before the first cleanup` |
+| X-M6 `checkLedger` が名前だけで比べる(`pathWithin` を `pathWithinDir` に) | 落ちた | `RefusesTheWorktreeThatHoldsItsLedger/through a symlink`、`/another case of a letter in the worktree's path` |
+| X-M7 確かめ 3 の作業ディレクトリの比べを S-X4 の前の文字列の比べに戻す | 落ちた | `RefusedInTheWorktree/run in the worktree, another case of a letter` |
+| X-M8 `pathWithin` が祖先をたどらない(child そのものを比べたら終える) | 落ちた | X-M1 と同じ 5 つ |
+| X-M9 `pathWithin` が stat できないディレクトリを「中にある」とする | 落ちた | 36 件。`ComparesByFileIdentity/a directory that is gone`、worktree のない道(再開、記録がない、ディレクトリの消えた登録)、`RefusedAtTheLedgerAndTheRecord` の 5 つ、`TestMerge_CleanupOutcomesWithFakeWorktrees` の 4 つほか。消えた worktree が台帳を持つと読み、すべてを台帳の断りにする |
+| X-M10 記録のパスの worktree が台帳を持つときも Manual を出す | 落ちた | `RecordWhoseWorktreeHoldsTheLedgerNamesNoManual` の 2 つ |
+
+X-M1 と X-M8 は、大文字小文字の行だけが落とす。X-M6 も、大文字小文字の行のほかに落とすのは symlink の行だけ。
+
+### Test gaps(cycle 3)
+
+1. 大文字小文字の行は、大文字小文字を区別するボリュームでは `t.Skipf` で飛ばされる(`internal/org/cleanup_test.go:610`)。CI は `ubuntu-latest`(`.github/workflows/verify.yml:6`)なので、CI では X-M1・X-M7・X-M8 を落とす行が打たれず、X-M6 を落とすのは symlink の行だけになる。これらの変異が落ちることは、この回のような macOS での実行だけが確かめる。Linux では名前の比べとファイルの同一性の比べが違うのは bind mount のような場合だけで、それを打つテストはない
+2. `pathWithin` の注釈が挙げる Unicode の正規化の違い(NFC と NFD)で同じディレクトリを名指す行はない。大文字小文字の行と同じ `os.SameFile` の道を通るので振る舞いは同じと読む。未確認です
+3. `pathWithin` の祖先をたどる途中の stat の失敗(`internal/org/cleanup.go:525-527`)は打たれていない(Coverage の Notes)
+4. 台帳の断りの次の手(台帳を worktree の外に動かし、`--state-dir` か `RALPH_ORG_STATE_DIR` で打ち直す)を、その文のとおりに打って片付くことを確かめるテストはない。テストは文を全文で固定する。「走っている org がない」ことも文の条件で、ralph は確かめない(C3R2-L1 の直しの範囲どおり)
+5. `runCleanupSteps` の `p.result` が誤りを返す道(`internal/cli/org_cleanup.go:345-346`)は cycle 1 の Test gaps の 4 のまま
+6. cycle 1 の Test gaps の 1〜7 と cycle 2 の 1〜4 は、この回の変更で変わっていない。cycle 2 の 5(`internal/cli` の coverage)は、この回に `org_cleanup.go` を測った
+
+どれも cycle 3 の判定(台帳を持つ worktree の断り、ファイルの同一性での比べ、割り込みの exit 1)を変えない道で、変異で確かめた判定はすべてテストに固定されている。1 は CI では一部の判定が固定されないという意味の穴で、手元の macOS の実行では固定されている。
+
 ## Verdict
 
-- Verdict(cycle 2、HEAD 9a6ae47c): pass
+- Verdict(cycle 3、HEAD be6415c2): pass
+- Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 9 パッケージ ok、`internal/org` と `internal/cli` は `(cached)` なし)。cycle 3 の新しいテスト 5 本と増えた行(大文字小文字の行を含め、飛ばされずに打たれた)、変わった `TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml`、前からある cleanup と merge のテストが通った。変異 10 個はすべて落ちた
+- Fail: 0
+- Blocked: 0
+
+### cycle 2(HEAD 9a6ae47c)
+
 - Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 9 パッケージ ok、`internal/org` と `internal/cli` は `(cached)` なし)。cycle 2 の新しいテスト 10 本と、前からある再開のテストが通った。変異 13 個はすべて落ちた
 - Fail: 0
 - Blocked: 0
