@@ -6,6 +6,8 @@
 - Scope: `git diff 15e301c8...HEAD`(HEAD ef9c348a、47 ファイル、+5693/-268)。テストは打っていない(`/test` の範囲)。観察の確かめとして、HEAD の binary を scratchpad に `go build` して help を読み、使い捨ての repo で git だけの probe を打った。`go test` は打っていない
 - Evidence: `docs/evidence/verify-2026-10-28-org-merge-cleanup.log`(gitignore。`run-static-verify.sh` の全出力、`git diff --check`、U+FFFD、写しの `cmp`、計画の digest、git の probe とそのスクリプト、help の本文、文書の grep)。wrapper 自身のログは `docs/evidence/verify-2026-10-28-111201.log`
 
+この下の「Spec compliance」から「Coverage gaps」までは cycle 1(HEAD ef9c348a)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 09e1e93b)の verify は、「Coverage gaps」と「Verdict」の間の「cycle 2(HEAD 09e1e93b)」の節にある。いまのブランチの verdict は「Verdict」の節の先頭の cycle 2 の行で、cycle 1 の verdict はその下の「cycle 1(HEAD ef9c348a)」に残している。cycle 2 の所見の ID は `C2-D<n>`。
+
 ## Spec compliance
 
 | Acceptance criterion | Status | Evidence |
@@ -92,7 +94,103 @@ issue #263 の受け入れ条件:
 - 実機の director と leader が、新しい手順 15 と skill の文のとおりに動くことは確かめていない
 - 古い binary の leader の雛形が「人が消す」のままであることの影響は、計画のリスクの表のとおり(片付けは merge の側がするので結果は同じ)。確かめていない
 
+## cycle 2(HEAD 09e1e93b)
+
+- Date: 2026-10-29
+- Verifier: verifier サブエージェント(`/verify`、cycle 2)
+- Scope: cycle 2 で変わったのは、cross-review cycle 1 の指摘 2 つの直し(8e46db0f S-X1、d3452a9d S-X2)、self-review cycle 2 の直し(54fa6351 C2-F、060102bb C2-L5)、記録のコミット(33b78f8c、04c83f5c、21785882、fdb9ee67、09e1e93b)。受け入れ条件はブランチ全体(`git diff main...HEAD`、merge-base 7522835c、57 ファイル、+7359/-335)に照らし直した。cycle 1 の verify のあとの /test・/sync-docs・main の merge(b164744f)・triage のコミットは、それぞれの report が扱うので読み直していない。テストは打っていない。観察の確かめは、HEAD から作った binary の help と、使い捨ての repo での git の probe 1 つだけ
+- Evidence: `docs/evidence/verify-2026-10-28-org-merge-cleanup-cycle2.log`(gitignore、653 行。`run-static-verify.sh` の全出力、単独で打った同期の検査 2 つ、`git diff --check`、U+FFFD、写しの `cmp`、計画の digest、git の probe とそのスクリプト、help の本文、文書の grep。scratchpad で組んで `cp` し、`cmp` で同じことを確かめた)。wrapper 自身のログは `docs/evidence/verify-2026-10-29-114658.log`。cycle 1 の証拠のログは書き換えていない
+
+### Static analysis(cycle 2)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | rc 0 | 言語の範囲は changed で、選ばれた pack は golang だけ。`gofmt: ok`、`go vet ./...` は出力なし、golangci-lint は `0 issues.`、staticcheck は出力なし。local verifier の shellcheck、hook の `sh -n`、settings の `jq`、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の計画参照がすべて通った。secret scan は 7522835c..09e1e93b で clean。所要 91 秒(20:46:58 から 20:48:29) |
+| `./scripts/check-skill-sync.sh`(単独) | rc 0 | 14 skill が一致 |
+| `./scripts/check-sync.sh`(単独) | rc 0、PASS | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6。cycle 1 の 11 と 5 から変わったのは、merge した main の `scripts/check-sync.sh` が root の `ralph.toml` を KNOWN_DIFFS に足したため(issue #265)で、このブランチの変更ではない |
+| `git diff --check main...HEAD -- ':!docs/evidence'` | rc 0 | 出力なし |
+| 変更したファイルの U+FFFD | 0 件 | `git diff --name-only main...HEAD` の全ファイル |
+| `cmp`(`/org` と `/director` の skill の 3 つの写し、recipe の写し) | 7 つとも rc 0 | |
+| `./scripts/plan-visual.sh digest` | `0f38a9718a8b` | `- Approved:` の行(`:4`)と一致。cycle 2 の計画の変更は Progress checklist の hunk(`:209` から)だけ |
+| `go build -o <scratchpad>/ralph-c2 ./cmd/ralph` | rc 0 | help を読むためだけに作った。go1.27.3、git 2.49.0 |
+
+### Spec compliance(cycle 2)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | Met(静的) | cycle 2 は `internal/org/merge_run.go` と `internal/cli/org_merge.go` を変えていない。merge の片付けも `cleanupRun.run`(`internal/org/cleanup.go:375`)を通るので、S-X2 の登録の確かめは merge の続きにもかかる。merge の `readOrigin`(`internal/org/merge.go:360`)は `ReadMergeOrigin`(`internal/org/mergeorigin.go:89`)を使う形になり、断りの 3 つの文は diff で変わっていない。`isOriginsPR`(`internal/org/merge.go:136`)は `MergeOrigin.hasPR` に任せ、比べ方(host と owner/repo、大文字小文字を無視)は同じ |
+| AC2 | Met(静的) | cleanup は merge-order を読む前に origin を読み(`cleanupReadOrigin`、`internal/cli/org_cleanup.go:168`)、`MergeOrderParams.Origin` を渡す(`:145`)。merge-order は `gh pr list` に `-R <host>/<owner>/<repo>` を付け、PR の url の host と owner/repo が origin と違えば全ブランチで PR を使わない(`lookupMergePRs`、`internal/org/mergeorder.go:646`、`:662`、`:684-688`)。`ralph org merge-order` の CLI(`internal/cli/org_merge_order.go:155`)は Origin を渡さず、一覧の動きは変わらない。足した `PRLookupWhy` は `json:"-"`(`internal/org/mergeorder.go:227`)で、`--json` も変わらない。前提が 1 つ増え、origin が GitHub の repository を名指さないか読めなければ何も消さずに exit 1 で断る(`cleanupOriginRefusal`、`internal/cli/org_cleanup.go:182`)。AC2 は GitHub で merge したブランチについての条件で、この断りは Non-goals の「gh のない環境で merge 済みを判定する道」と同じく判定できないときに消さない側にあるので、AC2 と食い違わない。テストは `TestOrgCleanup_CleansUpABranchMergedOnGitHub`(`internal/cli/org_cleanup_test.go:118`。gh の呼び出しを `-R github.com/o/r` 付きの 1 回と見る、`:154`)、`TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing`(`:232`)、`TestOrgCleanup_OriginThatNamesNoGitHubRepositoryIsRefused`(`:279`)、`TestOrgCleanup_OriginRefusalForEachProblem`(`:751`)、`TestMergeOrder_PinnedOriginReadsThePRsInItsRepository`(`internal/org/mergeorder_test.go:2224`)、`TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository`(`:2264`)、`TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot`(`internal/org/merge_test.go:636`) |
+| AC3 | Met(静的) | 確かめ 6 が、ディレクトリのない worktree の登録にも延びた(`checkRegistration`、`internal/org/cleanup.go:778`。`run` の `:412-424`)。登録が detached、別のブランチ、消えたブランチの上、HEAD が読めない、のどれかなら何も消さず、理由は登録の HEAD と、退避のコマンドか reflog の場所を名指す(`registrationAtRisk`、`:812`)。この断りは打ち直しても通らない(登録はそのまま残る)ので、D2 の原則(ralph が先に進めず人の判断が要るとき)どおり Manual(`git worktree remove <worktree> && <script>`、`:790`)を返す。ブランチが残っていれば、理由の文は Manual の前に `git log <head>..<branch>` で確かめるよう言う(`:785-788`)。記録が違うときの Manual と同じ並びで、`--force-branch` の script を確かめなしに渡す道にはならない。merge の終了コードは `printMergeResult`(`internal/cli/org_merge.go:299`)が片付けの結果を読まないことで変わらない(cycle 2 の変更なし)。テストは `TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing`(`internal/org/cleanup_test.go:805`、4 つの場面)と `TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead`(`:1008`、ディレクトリが残る場合と消えた場合) |
+| AC3b | Met(静的) | script の止まり方で残る 2 つの状態は、今も続きから片付く。script が worktree を消したあと(登録も一緒に消える)は `case st.branchTip != ""`(`internal/org/cleanup.go:425-429`)、記録だけなら `default`(`:430-431`)。ディレクトリを人が消し、登録がブランチの上に残っているときも、`checkRegistration` が何も返さず確かめ 5 に進む。新しく断るのは、登録が残ったままブランチが消えた状態で、cycle 1 は記録だけの再開として登録を外していた(計画 `:217` の「挙動の変化」)。この状態は script の止まり方では生じない。script はディレクトリがあるときだけ `git worktree remove` を打ち、それが登録も外す(`scripts/ralph-worktree.sh:390-394`、probe の (d))。登録が残る間は `git branch -D` が rc 1 で断る(probe の (b))ので、ブランチを消すには `git update-ref -d` のような直の操作が要る(probe の (c)。そのとき登録の HEAD はゼロになり、branch の行は残る)。AC3b の「途中で止まった状態」は狭まっていない。テストは `TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft`(`internal/org/cleanup_test.go:705`)の 3 つの道とブランチが動いた 2 つの道で、cycle 2 で消えたケースはない(d3452a9d と 54fa6351 のテストのファイルに、`t.Run` やケースの削除行はない)。記録がないときは今も何も消さず、手で消すコマンドを出す(`recordGone`、`:502`)。登録が危ない形なら、同じ退避の文を足す(`:519-521`) |
+| AC4 | Met(静的) | cycle 2 は `CleanupFeatureWorktree`、`cleanupFirstCheck`、`regate.lock` の扱いを変えていない(`internal/org/cleanup.go` の diff の hunk は注釈、`CleanupResult`、`cleanupState`、`run`、`readState`、`recordGone`、`branchMovedSteps`、新しい関数だけ)。origin の読み取りは lock の前に打ち、何も書かない |
+| AC5 | Partially(/sync-docs) | leader の手順 15、`ralph org start --help`、regate の案内は cycle 2 の変更に関わらない。`ralph org cleanup --help` は origin への固定と断りの段落を足した(`internal/cli/org_cleanup.go:66-73`、終了コードの `:101-102`)。一方、cycle 2 の 2 つの動き(origin への固定と断り、登録の断りの Manual)が、`/org` skill の動詞の表と「org の終わり方」(と 3 つの写し)、README、仕様の注、2 つの help の Manual の列挙にまだない(下の C2-D1、C2-D2)。写しは一致する |
+| AC6 | Partially(静的の半分) | `check-skill-sync.sh` と `check-sync.sh` は通った。`go vet ./...`(テストのファイルを含む)、golangci-lint、staticcheck が通り、テストはコンパイルできる。テストの実行は `/test` に残す |
+
+issue #263 の受け入れ条件: 1(AC1)、2(AC2。origin が GitHub の repository を名指すことが前提に加わった)、3(AC3)、4(AC4)は Met。5 は AC5 と同じく Partially で、/sync-docs で直す。
+
+設計判断との照合(cycle 2 の差分):
+
+- D1: 消すのは今も script の `cleanup --force-branch` だけ。登録の断りの Manual も script を打つ
+- D2: 確かめ 6 を登録に延ばしたことで、計画の本文の再開の文(「3・4・6 は worktree がないのでかけず、1・2・5 だけ」「worktree もブランチもなく、記録だけが残る: 1・2 だけ」、`:76-77`)と、登録が残る場合に食い違う。承認後に本文を変えない運用で、Progress(`:215`、`:217`)に指摘と挙動の変化が書いてある。記録された逸脱で、所見にしない(Info)。Manual の場面の列挙(`:66`)は括弧の中の例で、新しい場面は原則の文(ralph が先に進めず人の判断が要るとき)に合う
+- D3: 変わらない。登録の断りは `CLEANUP: skipped (<理由>)` と `CLEANUP MANUAL:` で出る
+- D4: 「gh がないか PR を読めないときは、merge 済みを判定できないと言って 1 で終わる」に、origin が GitHub の repository を名指さないか読めないときの 1 が加わった。判定できなければ消さないという D4 の方針の延長。SKIPPED の行と `--branch` の断りは、PR を使えなかった理由を括弧で出す(`cleanupLookupWhy`、`internal/cli/org_cleanup.go:300`)
+- D5、D6: 変わらない
+
+仕様 FR-8 との照合: FR-8 の要件の行(`docs/specs/2026-10-07-org-multi-org-director.md:130`)は merge の既定、`auto_merge`、merge してよい順についてで、cycle 2 の変更はそれに触れない。古くなったのはこの PR が足した注(`:133`)の 3 か所で、C2-D1 と C2-D2 に入れた。
+
+### Documentation drift(cycle 2)
+
+/sync-docs に渡す所見。直していない。
+
+所見 C2-D1(LOW): cleanup の PR の読み方の文が、origin への固定と origin の断りを書いていない。
+
+- `.claude/skills/org/SKILL.md:234`(cleanup の行)と 3 つの写し(`.agents/skills/org/SKILL.md`、`templates/base/.claude/skills/org/SKILL.md`、`templates/base/.agents/skills/org/SKILL.md` の同じ行)。「`merge-order --all` と同じく台帳のブランチを読み」とだけ書き、`-R <host>/<owner>/<repo>` と、別の repository の PR が返れば全ブランチで PR を使わないことがない。終了コード 1 の列挙にも、origin が GitHub の repository を名指さないか読めないときがない
+- `README.md:278`。「reads the ledger's branches as `merge-order --all` does」と、終了コード 1 の列挙(skip と gh がないとき)
+- `docs/specs/2026-10-07-org-multi-org-director.md:133`。「merge-order を `--all` と同じに読み」と「gh がなければ…1 で断る」
+- `.claude/skills/director/SKILL.md:986-987`(「GitHub で merge した PR の後始末」の手順 5)と 3 つの写し。何も消さずに 1 で終わる場面として gh がないときだけを挙げる。手順 3 の「stderr の文をそのまま人に伝える」で補えるので、ここは Info 寄り
+- help は在り(`internal/cli/org_cleanup.go:66-73`)。`:53` の「as ralph org merge-order --all does」は、続く段落が補う
+- 関連: tech-debt の ssh の別名の行(`docs/tech-debt/README.md:247`)は、merge が断るので「the human merges in GitHub」と書く。cycle 2 から cleanup も origin の host を `-R` に渡すので、ssh の別名の origin(`github.com.emu` など)では gh が失敗し、全ブランチが SKIPPED になる。計画 `:216` が「PR の既知の穴」と書いているが、`/pr` で計画が archive されたあとも追えるよう、この行に cleanup も足すとよい。cycle 1 の cleanup は `-R` なしで gh に repository を選ばせていたので、ssh の別名でも PR を読めたかもしれない。おそらくそうだが、gh の別名の解き方は確かめていない
+
+所見 C2-D2(LOW): 手で消すコマンドが出る場面の列挙に、cycle 2 の登録の断りがない。
+
+- 列挙は「記録がないか結びつきと合わない、ブランチがなく worktree だけがある、消す途中で失敗した」。cycle 2 で、ディレクトリのない worktree の登録が binding のブランチにいない(detached、別のブランチ、HEAD が読めない)ときにも Manual が出るようになった(`internal/org/cleanup.go:790`)。登録が binding のブランチにいてそのブランチが消えた場合は、「ブランチがなく worktree だけがある」と読める
+- `internal/cli/org_cleanup.go:94-96`(`ralph org cleanup --help`)。固定するテストは `internal/cli/org_cleanup_test.go:913`(`TestOrgCleanup_Help`)
+- `internal/cli/org_merge.go:133-134`(`ralph org merge --help`)。テストは `internal/cli/org_merge_test.go:1070`(`TestOrgMerge_Help`)
+- `.claude/skills/org/SKILL.md:233`(merge の行)、`:234`(cleanup の行)、`:1138-1142`(「org の終わり方」。「の 3 つ」と数を書く)と 3 つの写し。テストは `internal/org/org_skill_send_sync_test.go:166`、`:180`、`:202-204`
+- `README.md:278`、`docs/specs/2026-10-07-org-multi-org-director.md:133`
+- 影響: director は `CLEANUP MANUAL:` と `MANUAL:` の行をそのまま人に伝える(`.claude/skills/director/SKILL.md:869`、`:976-977`)ので、列挙が古くても行は人に届く。読み手が「Manual が出るのは 3 つの場面だけ」と受け取る
+- 直すと help と skill の文を固定するテストも変わるので、記録だけの修正の例外には当たらない
+
+所見 C2-D3(Info): 確かめ 6 の言い方。skill の cleanup の行(`:234`)、README `:278`、2 つの help、仕様 `:133` の「worktree がそのブランチをその head でチェックアウトしている」と、「org の終わり方」の断りの一覧の「worktree が detached HEAD か、別のブランチにいる」(`.claude/skills/org/SKILL.md:1130`)は、ディレクトリのない worktree の登録にも同じ確かめがかかることを言わない。誤りではないので、C2-D2 を直すときに一緒に足す程度でよい。
+
+所見 C2-D4(Info): AGENTS.md の地図(`:90`)は `cleanup.go` を挙げ、merge と cleanup が共有する origin の読み取り `internal/org/mergeorigin.go` を挙げない。地図はすべてのファイルを挙げる形ではないので、足すかは任意。
+
+所見 C2-D5(Info): 計画の Progress は、self-review cycle 2 run 2 の結果(fdb9ee67。LOW 3、Merge 可)と台帳の行(09e1e93b)をまだ書いていない(`:218-221`)。`/pr` の前に足せばよい。
+
+在るもの: `ralph org cleanup --help` の origin の段落と終了コード、`/director` skill の `CLEANUP:` の読み方(行をそのまま伝え、Manual のない断りは打ち直す)、recipe、leader の手順 15、`ralph org start --help`、regate の案内。tech-debt の #263 の 6 行(`docs/tech-debt/README.md:383-388`)は、self-review の report の R3-L2・R3-L3・C2R2-L1〜C2R2-L3 の扱いと合う。
+
+### Observational checks(cycle 2)
+
+- git の probe(git 2.49.0、使い捨ての repo。スクリプトと出力は証拠のログの 4 節): (a) ディレクトリを消した worktree 2 つについて、`git worktree list --porcelain` はブランチの上のものに `HEAD <sha>` と `branch refs/heads/feat/a`、detached のものに `HEAD <sha>` と `detached` を、どちらも `prunable` の行と一緒に出す(`readState`、`internal/org/cleanup.go:459-477` が頼る形)。(b) その登録がチェックアウトしているブランチへの `git branch -D` は rc 1。(c) `git update-ref -d` は rc 0 で、そのあと登録は `HEAD 0000…` と branch の行を出す(`registrationAtRisk` のゼロの分かれ)。(d) ディレクトリがあれば `git worktree remove` は登録も外し、ブランチは残る(script の順)
+- help の本文は HEAD から作った binary で読んだ(証拠のログの 5 節)
+
+### Coverage gaps(cycle 2)
+
+- テストの実行(cycle 2 の新しいテストと既存のテスト)と、変異が落ちることの確かめは `/test` に残す
+- 実際の gh で cleanup を打つ確かめ(`-R` の値を gh が受けること、別の host の PR の url)はしていない。テストは偽の gh で見る
+- ssh の別名の origin で cleanup が全ブランチを SKIPPED にすることは、計画 `:216` の記録とコードを読んだだけで、確かめていない
+- cleanup は origin を打った場所で読み、消すのは state dir から引いた main worktree の下(self-review cycle 2 の Known gaps)。`--state-dir` で別の repo の台帳を指したときの組み合わせは確かめていない
+- 実機の director と leader の振る舞いは cycle 1 と同じく確かめていない
+
 ## Verdict
+
+- Verdict(cycle 2、HEAD 09e1e93b): pass
+- Verified: AC1〜AC4 と AC3b(静的)、issue の受け入れ条件 1〜4、D1〜D6 の cycle 2 の差分、`ralph org merge-order` の一覧と `--json` が変わらないこと、merge の origin の断りの文が変わらないこと、script の止まり方で残る状態が新しい断りに入らないこと(git の probe)、`run-static-verify.sh`・`check-skill-sync.sh`・`check-sync.sh` の通過、写しの一致、計画の digest
+- Partially verified: AC5 と issue の受け入れ条件 5(C2-D1・C2-D2 の文書と help の残り)、AC6(同期の検査と静的解析は通った。テストは `/test`)
+- Not verified: テストの実行、実際の gh での cleanup、ssh の別名の origin での cleanup、実機の座席と director の振る舞い
+- Result: pass。動きが受け入れ条件と食い違う所見はない。所見は LOW 2 つ(C2-D1: cleanup の PR の読み方の文に origin への固定と断りがない。C2-D2: 手で消すコマンドの場面の列挙に登録の断りがない)と Info 3 つ(C2-D3〜C2-D5)で、どれも /sync-docs に渡す。C2-D2 は help と skill を固定するテストも変わる
+
+### cycle 1(HEAD ef9c348a)
 
 - Verified: AC1〜AC5(静的)、issue の受け入れ条件 1〜5、D1〜D6、`ralph org merge` の「exit 0 は記録した merge」が変わっていないこと、`--force-branch` の前に head の照合があること、help と仕様の注と README と AGENTS.md の一致、写しの一致、計画の digest、git の動きの 3 つ、`run-static-verify.sh`・`check-sync.sh`・`check-skill-sync.sh` の通過
 - Partially verified: AC6(同期の検査、`go vet`・golangci-lint・staticcheck は通った。テストは `/test`)
