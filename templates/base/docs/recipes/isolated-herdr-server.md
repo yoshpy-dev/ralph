@@ -81,7 +81,8 @@ isolated. Use one of these, under the dedicated directory:
   in the clone's `.git/info/exclude`, and create `.git/info` first
   (`mkdir -p .git/info`) when the clone has none: a git template can leave
   it out, and the clone of 2026-10-24 had none. The settings in such a
-  `ralph.toml` do not reach the feature worktrees (see "The environment").
+  `ralph.toml` do not reach the feature worktrees; those in the clone's
+  `ralph.local.toml` do (see "The environment").
 - A scratch git repository, for a check that opens no PR (the live
   checks). The latest ones gave it a base commit on `main`, `user.name` and
   `user.email` in the repository's own config, `core.hooksPath` pointing at
@@ -164,24 +165,28 @@ binaries themselves, not of a version manager's shims.
 
 Add any other variable the seats' commands need; the trial added
 `GOFLAGS=-timeout=30m` for the gate of a Go repository. `env -i` drops
-everything else, among them `CLAUDE_CODE_*`, the herdr variables of a pane
-(`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`), and
-`RALPH_ORG_AGMSG_HOME` (which would override `[org].agmsg_home`). It also
-drops `SSH_AUTH_SOCK` and `GH_TOKEN`: add them to the wrapper when your
-pushes or gh need them. The checks before the first start do not test a
-push.
+everything else, among them `CLAUDE_CODE_*` and the herdr variables of a
+pane (`HERDR_PANE_ID`, `HERDR_TAB_ID`, `HERDR_WORKSPACE_ID`, `HERDR_ENV`).
+It also drops `SSH_AUTH_SOCK` and `GH_TOKEN`: add them to the wrapper when
+your pushes or gh need them. The checks before the first start do not test
+a push.
 
-A run that uses the private agmsg copy (below) from a dedicated clone adds
-`RALPH_ORG_AGMSG_HOME=/tmp/ralph-iso/agmsg` to the wrapper's `env -i` list,
-as the run of 2026-10-24 did. A `ralph.toml` that the clone does not track
-is not in the feature worktrees that `ralph org start --plan` creates, and
-a leader's spawn there reads that worktree's own `ralph.toml`, so
-`[org].agmsg_home` in the clone's untracked `ralph.toml` would reach ralph's
-commands in the main checkout but not the leader's spawns (inferred from
-the code, not checked). ralph reads the variable before `[org].agmsg_home`.
-With the variable in the wrapper, the server, the panes, the watch, and the
-director's commands all get the same value. In a scratch repository whose
-committed `ralph.toml` sets `agmsg_home`, either way works.
+A run that uses the private agmsg copy (below) from a dedicated clone
+writes `agmsg_home` under `[org]` in `ralph.local.toml` at the clone's root,
+ralph's personal config file, whose keys override `ralph.toml`'s. ralph
+reads that file from the root of the repository's main worktree wherever
+it runs in the repository, so the leader's spawns in the feature worktrees
+that `ralph org start --plan` creates, the watch, and the director's
+commands all get the same value. ralph's tests check that
+`ralph config get org.agmsg_home` gives the same value in the main
+worktree, a linked worktree, and a subdirectory; no live run has used the
+file yet. The clone's untracked `ralph.toml` would not do this: it is not
+in the feature worktrees, and a leader's spawn there reads that worktree's
+own `ralph.toml`. git ignores `ralph.local.toml` when the clone's
+`.gitignore` has ralph's managed block with that entry; otherwise list it
+in `.git/info/exclude` too. The run of 2026-10-24 passed the path in an
+environment variable, which ralph no longer reads. In a scratch repository
+whose committed `ralph.toml` sets `agmsg_home`, either file works.
 
 As a first check before the server starts, run
 `/tmp/ralph-iso/run herdr --help | grep -E '^(Config|Logs):'`. Both lines
@@ -276,10 +281,9 @@ own agmsg.
 - A private copy of agmsg. Copy `scripts`, `plugins`, `types`, `SKILL.md`,
   and `VERSION` from your agmsg home (`~/.agents/skills/agmsg` by default)
   into the dedicated directory, without `db`, `teams`, `run`, or `agents`,
-  and point ralph at the copy with an absolute path: in a scratch
-  repository, in its committed `ralph.toml` as below; in a dedicated clone,
-  with `RALPH_ORG_AGMSG_HOME` in the wrapper (see "The environment" for
-  why):
+  and point ralph at the copy with an absolute path, as below: in a scratch
+  repository, in its committed `ralph.toml`; in a dedicated clone, in the
+  `ralph.local.toml` at the clone's root (see "The environment" for why):
 
   ```sh
   mkdir -p /tmp/ralph-iso/agmsg
@@ -292,7 +296,9 @@ own agmsg.
   agmsg_home = "/tmp/ralph-iso/agmsg"
   ```
 
-  (`ralph org director start --config` refuses a relative `agmsg_home`.)
+  (ralph refuses a relative `agmsg_home` in `ralph.local.toml`, and in a
+  `--config` given to `ralph org director start` or to a command that
+  launches the watch.)
 
   The copy reaches ralph's own agmsg calls only: the leader's join to the
   org's team, each seat's join and HELLO at its spawn, the watch's ALERTs
@@ -303,7 +309,8 @@ own agmsg.
   of 2026-10-24 (`docs/evidence/org-recheck-2026-10-24.md`, RC1) that home
   had no team of the run, so the seats' sends failed with "Team not found".
   One seat's message reached its leader through agmsg (that seat found the
-  copy's path in `RALPH_ORG_AGMSG_HOME`); the others went through
+  copy's path in the environment variable the run used, which ralph no
+  longer reads); the others went through
   `ralph org send` or were not sent, and one leader read its reviewer's
   committed report instead. Your own agmsg database was not written (its
   `messages.db` and `messages.db-wal` kept their times). So for a run whose

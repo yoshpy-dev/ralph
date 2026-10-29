@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
 // The cleanup of a merged feature org's worktree (CleanupFeatureWorktree), S1
@@ -557,7 +559,7 @@ func (c *cleanupRun) readState(ctx context.Context) (cleanupState, error) {
 	ours := false
 	for line := range strings.SplitSeq(list, "\n") {
 		if path, ok := strings.CutPrefix(line, "worktree "); ok {
-			ours = samePath(path, c.f.Worktree)
+			ours = gitroot.SamePath(path, c.f.Worktree)
 			st.registered = st.registered || ours
 			continue
 		}
@@ -640,7 +642,7 @@ func (c *cleanupRun) checkRecord(rec WorktreeRecord) (string, string) {
 	if rec.Branch != c.f.Branch {
 		diffs = append(diffs, fmt.Sprintf("branch %q, not %q", rec.Branch, c.f.Branch))
 	}
-	if !samePath(rec.WorktreePath, c.f.Worktree) {
+	if !gitroot.SamePath(rec.WorktreePath, c.f.Worktree) {
 		diffs = append(diffs, fmt.Sprintf("worktree_path %q, not %q", rec.WorktreePath, c.f.Worktree))
 	}
 	if rec.Kind != featureWorktreeKind {
@@ -687,7 +689,7 @@ func (c *cleanupRun) checkWorktree(ctx context.Context, tip string) (reason, man
 	if err != nil {
 		return "", "", err
 	}
-	if top := strings.TrimSuffix(r.stdout, "\n"); r.code != 0 || !samePath(top, wt) {
+	if top := strings.TrimSuffix(r.stdout, "\n"); r.code != 0 || !gitroot.SamePath(top, wt) {
 		said := top
 		if r.code != 0 {
 			said = r.stderr

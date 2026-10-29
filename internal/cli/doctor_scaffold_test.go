@@ -142,7 +142,7 @@ func TestRunDoctorFull_StrictFlipsExitCode_DriftedCore(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(target, "no-such-agmsg-home"))
 
 	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
 	if nonStrictErr != nil {
@@ -447,7 +447,7 @@ func TestCheckScaffoldIntegrity_CorruptManifest_StrictFails(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	// Both runs keep doctor's output for the failure messages, so a failure
 	// names the check that failed.
@@ -509,7 +509,7 @@ func TestCheckScaffoldIntegrity_OwnershipPlanningError_StrictFails(t *testing.T)
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(target, "no-such-agmsg-home"))
 
 	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
 	if nonStrictErr != nil {
@@ -700,7 +700,7 @@ func TestCheckScaffoldIntegrity_SettingsSnapshotCorrupt_StrictFails(t *testing.T
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(target, "no-such-agmsg-home"))
 
 	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
 	if nonStrictErr != nil {
@@ -754,7 +754,7 @@ func TestCheckScaffoldIntegrity_GitignoreTemplateMarkersBroken_ManagedBlocksStri
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(target, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(target, "no-such-agmsg-home"))
 
 	nonStrictErr := captureStdout(t, func() error { return runDoctorFull(target, false, false) })
 	if nonStrictErr != nil {

@@ -17,9 +17,9 @@ import (
 // maps it to 2.
 var ErrConfigKey = errors.New("not a key of one value in ralph.toml")
 
-// ErrConfigLoad is returned by `ralph config get` when ralph.toml cannot be
-// read, cannot be parsed, or fails config.Load's validation. ExitCode maps it
-// to 3.
+// ErrConfigLoad is returned by `ralph config get` when ralph.toml or the
+// personal ralph.local.toml cannot be read, cannot be parsed, or fails
+// config.Load's validation. ExitCode maps it to 3.
 var ErrConfigLoad = errors.New("cannot be read or is invalid")
 
 func newConfigCmd() *cobra.Command {
@@ -53,6 +53,15 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"the file does not set prints its built-in default, and so does every key\n" +
 			"when the file does not exist. It prints the value on stdout: true or\n" +
 			"false, a decimal number, or a string as written.\n" +
+			"\n" +
+			"ralph.local.toml, the git-ignored personal file, is applied on top of\n" +
+			"ralph.toml key by key: a key it sets prints its value, also when\n" +
+			"ralph.toml does not exist. It is read from the main worktree root of the\n" +
+			"git repository the config file's directory is in, so a linked worktree\n" +
+			"and a subdirectory read the same file, and from that directory itself\n" +
+			"outside git. RALPH_LOCAL_CONFIG=off skips it. A ralph.local.toml that\n" +
+			"cannot be read, cannot be parsed, or fails validation exits 3, like\n" +
+			"ralph.toml.\n" +
 			"\n" +
 			"Exit codes, for the skills and seats that read a setting with it:\n" +
 			"  0  the value was printed: use it.\n" +

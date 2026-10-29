@@ -4,11 +4,13 @@
 // manifest, and tri-state model receipts. It has no cobra wiring, which
 // lives in internal/cli/org.go, and reaches herdr and agmsg only through
 // the adapters in internal/org/driver. It runs a few other commands itself
-// with exec.Command: git (statedir.go, watch.go, feature.go, gate.go,
+// with exec.Command: git (watch.go, feature.go, gate.go,
 // regate_git.go for Regate's fetches, merge, and push and for the checks of
 // the cleanup of a merged feature worktree (cleanup.go), `git ls-remote`, plus
 // `git remote get-url origin` once gh returned a PR, in mergeorder.go, `git
-// remote get-url origin` in mergeguarantee.go, and both in merge.go),
+// remote get-url origin` in mergeguarantee.go, and both in merge.go; the
+// git calls with which statedir.go finds the main worktree and the toplevel
+// are in internal/gitroot),
 // scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
 // scripts/run-test.sh of a feature worktree (gate_run.go), osascript
 // (watch.go), gh (mergeorder.go, mergeguarantee.go, mergeenforce.go,

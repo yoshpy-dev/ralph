@@ -51,9 +51,11 @@ func newOrgGateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"./scripts/run-test.sh, in the worktree's root. The scripts get the\n" +
 			"caller's environment without the RALPH_VERIFY_* and HARNESS_VERIFY_*\n" +
 			"variables and with RALPH_VERIFY_SCOPE=full, so no diff narrows what\n" +
-			"they check. Their output goes to a log under <state dir>/gates/, not\n" +
-			"to the worktree. They can take minutes: give the command a long\n" +
-			"timeout, or run it in the background and wait for it.\n" +
+			"they check, and with RALPH_LOCAL_CONFIG=off whatever the caller set,\n" +
+			"so no ralph.local.toml changes it either. Their output goes to a log\n" +
+			"under <state dir>/gates/, not to the worktree. They can take minutes:\n" +
+			"give the command a long timeout, or run it in the background and wait\n" +
+			"for it.\n" +
 			"\n" +
 			"When both scripts pass and HEAD and the worktree are as before, gate\n" +
 			"records gate_passed in the manifest. Otherwise it records gate_failed\n" +

@@ -382,7 +382,7 @@ func doctorMGProject(t *testing.T) (dir, binDir string) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 	return dir, binDir
 }
 

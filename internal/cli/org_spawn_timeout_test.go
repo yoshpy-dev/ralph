@@ -1,12 +1,12 @@
 package cli
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // TestOrgSpawnAndStart_TimeoutMSHelp_DescribesTheWholeSpawnDeadline pins
@@ -50,7 +50,7 @@ func TestOrgSpawnAndStart_TimeoutMSHelp_DescribesTheWholeSpawnDeadline(t *testin
 // loaded machine.
 func TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint(t *testing.T) {
 	_, _ = setupOrgStubPATH(t)
-	writeStubScript(t, filepath.Join(os.Getenv("RALPH_ORG_AGMSG_HOME"), "scripts", "send.sh"), "#!/bin/sh\nexec sleep 30\n")
+	writeStubScript(t, filepath.Join(driver.AgmsgHomeOverride, "scripts", "send.sh"), "#!/bin/sh\nexec sleep 30\n")
 	stateDir := filepath.Join(t.TempDir(), "state")
 
 	stdout, _, err := runOrgCmdStreams(t,

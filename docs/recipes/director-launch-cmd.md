@@ -128,9 +128,8 @@ Then, in this order:
 The launch script, run by the terminal, single-quotes every value and:
 
 1. goes to `{cwd}` (it exits 1 if it cannot);
-2. exports `RALPH_DIRECTOR_TOKEN`, `RALPH_ORG_AGMSG_HOME` when it was set
-   where start ran (a relative value made absolute from there),
-   `AGMSG_SELF_NAME=off`, and `RALPH_WIP_CHECKPOINT=off`;
+2. exports `RALPH_DIRECTOR_TOKEN`, `AGMSG_SELF_NAME=off`, and
+   `RALPH_WIP_CHECKPOINT=off`;
 3. checks in with `<ralph> org director launched --id <id> --token <token>
    --pid "$$" --state-dir <ledger>`, where `<ralph>` is the absolute path of
    the ralph that ran start, and exits 1 if the check-in fails;
@@ -246,22 +245,14 @@ nothing changes.
 
 - `RALPH_DIRECTOR_TOKEN`: the launch token, which stop compares to refuse a
   stop run from inside the director.
-- `RALPH_ORG_AGMSG_HOME`: exported by the launch script when it was set
-  where start ran, so the director's `ralph org` commands use the agmsg
-  install it names. A relative value is made absolute from where start ran,
-  as for the watch start launches, since the script first goes to `{cwd}`.
-  A herdr director does not get it (its pane has the herdr server's
-  environment, plus the `AGMSG_SELF_NAME` and `RALPH_WIP_CHECKPOINT` below),
-  and start warns there; with `launch_cmd` it does not warn.
-- `AGMSG_SELF_NAME`: exported as `off` by the launch script, whether or not
-  `RALPH_ORG_AGMSG_HOME` is set. By default agmsg 1.5.1 renames the herdr
-  agent and pane an agmsg command runs in, which can leave ralph unable to
-  reach that agent (`agent_not_found`); `off` stops it for the commands the
-  director runs.
-- `RALPH_WIP_CHECKPOINT`: exported as `off` by the launch script, whether or
-  not `RALPH_ORG_AGMSG_HOME` is set. A Claude Code director's session-end
-  and pre-compaction hooks then make no `wip:` commit of a feature branch's
-  uncommitted changes (they still write their summary); see
+- `AGMSG_SELF_NAME`: exported as `off` by the launch script. By default
+  agmsg 1.5.1 renames the herdr agent and pane an agmsg command runs in,
+  which can leave ralph unable to reach that agent (`agent_not_found`);
+  `off` stops it for the commands the director runs.
+- `RALPH_WIP_CHECKPOINT`: exported as `off` by the launch script. A Claude
+  Code director's session-end and pre-compaction hooks then make no `wip:`
+  commit of a feature branch's uncommitted changes (they still write their
+  summary); see
   `.claude/rules/ralph/git-commit-strategy.md`. A herdr director's pane gets
   both values from
   `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`,
@@ -269,9 +260,15 @@ nothing changes.
   does). With an older herdr, start creates the pane without them and prints
   one line on stderr that begins `warning: herdr tab create has no --env flag`.
 
-Apart from its directory and these four variables, the director's
+Apart from its directory and these three variables, the director's
 environment is the terminal's (for the tmux example, the `-L ralph`
 server's).
+
+No variable chooses the agmsg install. The director's `ralph org` commands
+use `[org].agmsg_home` of `ralph.toml`, which `ralph.local.toml` at the main
+worktree's root overrides key by key, the same value a herdr director and
+the watch use. Write a value for your machine only there, as an absolute
+path or one that starts with `~/`.
 
 ## Troubleshooting
 
@@ -322,12 +319,12 @@ server's).
   message goes into the command. `{script_sh}` is single-quoted for the
   shell you hand it to.
 - The launch script single-quotes every value, and it and its directory are
-  0700. It holds the absolute paths and the `RALPH_ORG_AGMSG_HOME` value, and
-  start does not remove it after the director stops; a check-in from it
-  later is refused.
+  0700. It holds the absolute paths, and start does not remove it after the
+  director stops; a check-in from it later is refused.
 - Without `--config`, when the ledger is the main worktree's, the command
-  comes from the main worktree's `ralph.toml`, so a leader cannot change it
-  by editing its feature worktree's `ralph.toml`.
+  comes from the main worktree's `ralph.toml` (and the `ralph.local.toml`
+  beside it), so a leader cannot change it by editing its feature
+  worktree's `ralph.toml`.
 
 ## What was verified
 

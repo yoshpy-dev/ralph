@@ -249,18 +249,16 @@ func DirectorLaunchScriptPath(stateDir, token string) string {
 // directorLaunchScript is the launch script of a launch cmd (plan D3): the
 // registration ID and launch Token; StateDir, the ledger (absolute), whose
 // launch/ it goes in and which the check-in names as --state-dir; Cwd
-// (absolute), where the agent runs; AgmsgHome, start's
-// RALPH_ORG_AGMSG_HOME ("" exports none), absolute or starting with "~/"
-// (which driver.ResolveAgmsgHome expands), since the script cds to Cwd
-// before it exports it and a relative value would name a directory from
-// there; RalphPath and AgentPath, the absolute paths of the ralph that ran
-// start (os.Executable) and of the driver's agent (exec.LookPath in start's
-// environment); and the agent's PermArgs, Model, and PromptPointer
-// (PromptFilePointer of the prompt file).
+// (absolute), where the agent runs; RalphPath and AgentPath, the absolute
+// paths of the ralph that ran start (os.Executable) and of the driver's
+// agent (exec.LookPath in start's environment); and the agent's PermArgs,
+// Model, and PromptPointer (PromptFilePointer of the prompt file). It
+// passes no agmsg home: the director reads [org].agmsg_home of the
+// ralph.toml it reads, as every ralph command does (plan
+// 2026-10-29-local-config-org).
 type directorLaunchScript struct {
 	ID, Token     string
 	StateDir, Cwd string
-	AgmsgHome     string
 	RalphPath     string
 	AgentPath     string
 	PermArgs      []string
@@ -269,21 +267,19 @@ type directorLaunchScript struct {
 }
 
 // text is the script s describes, or an error naming what is not usable:
-// an id or token not of their form, a path that is not absolute, an agmsg
-// home that is neither absolute nor starts with "~/", an empty model or
-// prompt pointer, or a value holding a NUL byte, which no shell word can
-// hold. It cds to Cwd (exit 1 when it cannot), exports
-// RALPH_DIRECTOR_TOKEN, RALPH_ORG_AGMSG_HOME when AgmsgHome is set, and each
-// entry of driver.SeatPaneEnv, in its order (AGMSG_SELF_NAME=off, then
-// RALPH_WIP_CHECKPOINT=off), runs the check-in
+// an id or token not of their form, a path that is not absolute, an empty
+// model or prompt pointer, or a value holding a NUL byte, which no shell
+// word can hold. It cds to Cwd (exit 1 when it cannot), exports
+// RALPH_DIRECTOR_TOKEN and each entry of driver.SeatPaneEnv, in its order
+// (AGMSG_SELF_NAME=off, then RALPH_WIP_CHECKPOINT=off), runs the check-in
 // `<ralph> org director launched --id <id> --token <token> --pid "$$"
 // --state-dir <state dir>` and exits 1 when it fails, so a refused check-in
 // starts no agent, and then execs the agent with PermArgs, --model, Model,
 // and PromptPointer, in the order herdr's agent start gets them. Every
 // value is single-quoted (shellQuote), whatever it holds. The SeatPaneEnv
-// entries are exported whatever AgmsgHome is: the terminal launch_cmd opens
-// is not a pane ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does
-// not reach it. Without AGMSG_SELF_NAME=off an agmsg the director runs in a
+// entries are exported because the terminal launch_cmd opens is not a pane
+// ralph creates, so herdr's --env (driver.Herdr.PaneEnv) does not reach it.
+// Without AGMSG_SELF_NAME=off an agmsg the director runs in a
 // herdr pane would rename that pane's agent (finding F3), and without
 // RALPH_WIP_CHECKPOINT=off the WIP-checkpoint hooks of the director's
 // Claude Code session may commit a feature branch's uncommitted changes as
@@ -303,14 +299,12 @@ func (s directorLaunchScript) text() (string, error) {
 		}
 	}
 	switch {
-	case s.AgmsgHome != "" && !filepath.IsAbs(s.AgmsgHome) && !strings.HasPrefix(s.AgmsgHome, "~/"):
-		return "", fmt.Errorf("launch script: the agmsg home %q is not absolute and does not start with ~/", s.AgmsgHome)
 	case s.Model == "":
 		return "", errors.New("launch script: the model is empty")
 	case s.PromptPointer == "":
 		return "", errors.New("launch script: the prompt pointer is empty")
 	}
-	for _, v := range append([]string{s.StateDir, s.Cwd, s.AgmsgHome, s.RalphPath, s.AgentPath, s.Model, s.PromptPointer}, s.PermArgs...) {
+	for _, v := range append([]string{s.StateDir, s.Cwd, s.RalphPath, s.AgentPath, s.Model, s.PromptPointer}, s.PermArgs...) {
 		if strings.ContainsRune(v, 0) {
 			return "", fmt.Errorf("launch script: the value %q holds a NUL byte", v)
 		}
@@ -321,9 +315,6 @@ func (s directorLaunchScript) text() (string, error) {
 	b.WriteString("# It checks in with ralph, which records its pid, and only then execs the agent in its place.\n")
 	b.WriteString("cd " + shellQuote(s.Cwd) + " || exit 1\n")
 	b.WriteString(directorTokenEnv + "=" + shellQuote(s.Token) + "\nexport " + directorTokenEnv + "\n")
-	if s.AgmsgHome != "" {
-		b.WriteString(driver.AgmsgHomeEnv + "=" + shellQuote(s.AgmsgHome) + "\nexport " + driver.AgmsgHomeEnv + "\n")
-	}
 	for _, kv := range driver.SeatPaneEnv() {
 		name, value, _ := strings.Cut(kv, "=")
 		b.WriteString(name + "=" + shellQuote(value) + "\nexport " + name + "\n")
@@ -544,12 +535,12 @@ func (o *Org) directorCheckInPollInterval() time.Duration {
 // herdr call. In this order:
 //  1. writePrompt: the prompt file, rendered for launch cmd, at
 //     <state dir>/prompts/director_<token>.md, as for herdr
-//  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN,
-//     RALPH_ORG_AGMSG_HOME when p.AgmsgHome is set, and the entries of
-//     driver.SeatPaneEnv (AGMSG_SELF_NAME=off, RALPH_WIP_CHECKPOINT=off),
-//     the check-in with c.ralphPath, and the exec of c.agentPath with the
-//     permission flags, --model, and the prompt file's PromptFilePointer, in
-//     the order herdr's agent start gets them
+//  2. writeDirectorLaunchScript: cd to p.Cwd, RALPH_DIRECTOR_TOKEN and the
+//     entries of driver.SeatPaneEnv (AGMSG_SELF_NAME=off,
+//     RALPH_WIP_CHECKPOINT=off), the check-in with c.ralphPath, and the
+//     exec of c.agentPath with the permission flags, --model, and the
+//     prompt file's PromptFilePointer, in the order herdr's agent start
+//     gets them
 //  3. directorLaunchArgv: launch_cmd with its placeholders replaced
 //  4. runDirectorLaunchCmd in p.Cwd, under driverCallTimeout (the bound
 //     callWithTimeout gives each herdr call)
@@ -565,7 +556,7 @@ func (r *directorStartRun) startCmd(c directorStartChecks) (DirectorStartResult,
 		return DirectorStartResult{}, r.abortCmd(err)
 	}
 	scriptPath, err := writeDirectorLaunchScript(directorLaunchScript{
-		ID: id, Token: token, StateDir: r.stateDir, Cwd: r.p.Cwd, AgmsgHome: r.p.AgmsgHome,
+		ID: id, Token: token, StateDir: r.stateDir, Cwd: r.p.Cwd,
 		RalphPath: c.ralphPath, AgentPath: c.agentPath, PermArgs: c.permArgs, Model: r.p.Model, PromptPointer: PromptFilePointer(promptPath),
 	})
 	if err != nil {
