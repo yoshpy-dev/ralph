@@ -4,7 +4,7 @@
 - Plan: `docs/plans/active/2026-10-29-local-config-org.md`(issue #276 の 1 本目 A1、S1〜S5、D1〜D13、AC1〜AC13)
 - Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
 - Scope: `git diff origin/main...HEAD`(HEAD bea2993e、70 ファイル、+2519/-968)。中心は S1 `internal/gitroot`、S2 `internal/config/local.go` と `Load` の重ね合わせ、S3 の `.gitignore` と gate の env と TestMain、S4a の `driver.AgmsgHomeOverride`、S4b の `RALPH_ORG_AGMSG_HOME` の撤去(`org_watch.go`、`org_director_headless.go`、`director_cmd.go`、`doctor.go`)。S5 の文書は、コードの挙動を言い切っている箇所だけ突き合わせた。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
-- ID: 所見は L1〜L4(すべて LOW)。
+- ID: 所見は L1〜L6(すべて LOW)。L1〜L4 は上の範囲(bea2993e まで)、L5・L6 は S6 の再実行(321203dc、末尾近くの「Re-run after S6」)で足した。
 
 ## Evidence reviewed
 
@@ -29,6 +29,8 @@
 | LOW | maintainability | L2 「空、絶対パス、`~/` 始まりのどれでもない値は相対」という判定が 2 つのパッケージに別々に書かれ、理由の説明も別々にある。`config.checkLocalAgmsgHome` は否定形(`home == "" \|\| IsAbs \|\| HasPrefix "~/"` なら通す)、`cli.agmsgHomeIsRelative` は肯定形で、今は補集合になっている。`cli` 側の doc comment は「`config.Load` は個人用のファイルの相対を断る」と他方の存在を指すが、2 つを結ぶ test はない。`driver.expandTilde` の `~/` も 3 つ目の書き方。D5 と D7 は同じ事情(読むプロセスの cwd がどこか分からない)から出た規則で、片方だけ変わる(例: `~user/` を許す)と、`--config` では通って個人用のファイルでは断られる値が黙って生まれる。 | `internal/config/local.go:101`、`internal/cli/org_watch.go:441-443`(doc comment は `:432-440`)、`internal/org/driver/agmsg.go:171-179` | `config` に `AgmsgHomeIsRelative(home string) bool` を 1 つ出し、`checkLocalAgmsgHome` と `agmsgHomeIsRelative` の両方がそれを呼ぶ。出さないなら、`local_test.go` の拒否・許可の一覧(`TestLoad_LocalAgmsgHome`)と `org_watch_test.go` の一覧を同じ値の表にして、2 つの判定が一致することを test で固定する。 |
 | LOW | exception handling | L3 個人用のファイルの失敗が、変えていない doctor の枠を通り、ラベルと文が合わなくなる。`runDoctorFull` は `config.Load` の error を `Name: "ralph.toml"`、`parse error: %v — using defaults` で出す。個人用のファイルの error は Detail にパスが入るので原因は読めるが、名前は `ralph.toml` のまま。また `Load` は error のとき個人用の値を重ねた `cfg` を返す(`checkLocalAgmsgHome` は `Unmarshal` のあと)ので、相対の `agmsg_home` を断られた doctor は、`using defaults` と言いながら次の agmsg の check(`doctor.go:137`)で断られた相対の値を使う。ralph.toml の validation error でも前から同じ(`validateLoaded` の途中の `cfg`)だが、個人用のファイルが入ったことで、手で書く人が増える種類の error になった。 | `internal/cli/doctor.go:93-101` と `:137`(この diff では未変更)、`internal/config/config.go` の `Load`(`toml.Unmarshal(local.data, &cfg)` → `checkLocalAgmsgHome` → `return cfg, err`)、`internal/config/config.go:735`(`checkLocalAgmsgHome(local)` の呼び出し)と `internal/config/local.go:81-102` | doctor の warn の Name を、error の文にパスがあるとき `ralph.local.toml` にするか、Detail の頭に「ralph.toml または ralph.local.toml」と書く。`using defaults` を本当にするなら、`cfgErr` のとき `cfg = config.Default()` に替える(挙動が変わるので doctor の test の確認が要る)。どちらも直さないなら、`runDoctorOpts` に個人用のファイルが相対の `agmsg_home` を断る場合の test を 1 本足し、いまの出力を固定する。 |
 | LOW | maintainability | L4 `AgmsgHomeOverride` が本番の経路に漏れないことは、いまは grep で言えるが、守っているのは doc comment の 1 文だけ。`driver` の export された package 変数なので、同じ module のどのコードからも代入でき、`go vet` も test も止めない。計画の AC6(「`internal/` と `cmd/` の production のコードで `RALPH_ORG_AGMSG_HOME` を読むのは doctor の warn だけ」)も同じで、行為は test で見ているが、「ソースにこの名前が戻る」ことを見る test がない。この repo は「繰り返す規則は test か hook に上げる」を方針にしている。 | `internal/org/driver/agmsg.go:139-148`、`git grep -n AgmsgHomeOverride -- ':!*_test.go'` が `agmsg.go:148` と `:158` の 2 行、`internal/config/skill_frontmatter_test.go` に repo を歩く test の前例がある | `driver` かどこかに、`internal/` と `cmd/` の `_test.go` 以外の `.go` を歩き、(a) `AgmsgHomeOverride` が `agmsg.go` 以外にないこと、(b) `"RALPH_ORG_AGMSG_HOME"` の文字列が `doctor.go` 以外にないこと、を確かめる test を 1 本足す。10 行ほどで、AC6 の後半も固定できる。 |
+| LOW | maintainability | L5 (S6) 新しい待ちの組み立てを、同じ package の `startFakeAgent(t, true)` がすでにやっている。`startFakeAgent` は `/bin/sh -c "trap '' TERM; : > <marker>; exec sleep 600"` を起こして marker を 10 s 待つ helper で、S6 のテストはその 1 行を手書きし直している(違いは `sleep 30` と 600、marker の名前、待ちの上限)。上限は S6 が 5 s、helper と `director_stop_test.go:1223`、`director_cmd_test.go:1073` の同じ種類の待ちが 10 s。S6 の目的は固定時間の賭けを外すことだが、tech-debt の行が記録する load(1 分 load average 204、`internal/org` が 931 s)では、shell の起動が 5 s を超えるかどうかは確かめていない。超えたときの失敗は `ready did not appear within 5s` で、行が直したい種類の負荷依存の失敗になる。helper を使わなかった理由に読めるのは helper の末尾の `time.Sleep(100 * time.Millisecond)`(exec に着くのを待つ)だが、それは marker のあとなので trap は済んでおり、このテストの正しさには関わらない。 | `internal/org/director_cmd_test.go:305-307`(S6)、`internal/org/director_stop_test.go:1115-1131`(helper)と `:1320`(`startFakeAgent(t, true)` の呼び出し)、`:1223`、`internal/org/director_cmd_test.go:1073` | `p := startFakeAgent(t, true)` に替える。「marker は trap のあとに作られるので、SIGTERM の時点で TERM は無視されている」の 1 文はテストに残す。手書きを残すなら上限を 10 s にそろえる。 |
+| LOW | maintainability | L6 (S6) 閉じた行の形が、register の主な形と違う。S6 の行(`docs/tech-debt/README.md:287`)は Debt の欄だけに `~~...~~ (RESOLVED ...)` を付け、Trigger の欄を取り消さずに残した(取り消しの位置で書くと `S----`)。`<!-- RESOLVED ... -->` の下にある 78 行のうち、61 行は Debt と Trigger を取り消す `S--S-`、15 行が `S----`(同じ branch の 270 行を含む)、2 行が取り消しなし。S6 の Trigger の欄は「次の失敗、または `director_cmd_test.go` の次の変更: `ps` がプロセスの `sleep` の実行を示すまで待つ」と今も命令形で、S6 が選ばなかった直し方を指している(選ばなかった理由は 286 行の HTML コメントにあり、描画した表には出ない)。`director_cmd_test.go` を次に触る人が Trigger を grep すると、直った行が開いた行に見える。 | `docs/tech-debt/README.md:286-287`、行の形の数え方は `<!-- RESOLVED` の直後の `\|` 行の各欄が `~~` で始まるかどうか(python で数えた)、主な形の例は 239・263・289 行 | 287 行の Trigger の欄を `~~...~~` で取り消して主な形にそろえる。残すなら、Trigger の末尾に「S6 は `ps` ではなく marker file で直した」の 1 文を足す。 |
 
 ## Positive notes
 
@@ -53,7 +55,34 @@
 - 実機の herdr と本物の agmsg での通しは打っていない(計画の範囲外)。
 - git の `safe.directory` で断られる環境と、`GIT_DIR` を継承する git hook の中から `ralph` を打つ場合は、コードを読んだだけで動かしていない(N2)。
 
+## Re-run after S6 (321203dc)
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の再実行。cross-review の前なので cycle は 1 のまま)
+- Scope: `git diff 64a20f69..321203dc`。コードは `internal/org/director_cmd_test.go` の 1 hunk(+7/-3、`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`)と `docs/tech-debt/README.md` の 286-287 行。同じ範囲の `docs/plans/active/2026-10-29-local-config-org.md`、`docs/reports/test-2026-10-29-local-config-org.md`、jsonl は記録なので、tech-debt の行が引く事実との突き合わせだけをした。64a20f69 までの差分は読み直していない。L1〜L4 は S6 が触らないので、そのまま残る。
+- 新しい所見: L5・L6(どちらも LOW)。上の Findings の表に足した。
+
+### 確かめたこと
+
+- 待ちの正しさ。sh の順は `trap '' TERM` → `: > ready`(redirect の open で ready ができる)→ `exec sleep`。ready ができた時点で TERM は無視されていて、exec の前でも後でも変わらない(無視は exec で引き継がれる)。`cmdRegistrationOf` が読むのは `ps -o stat=,lstart=` だけ(`director_cmd.go:81` の `ReadDirectorProcess`)で、コマンド名を見ないため、sh の間も sleep になったあとも同じ値を返す。start time は exec で変わらない。ready が出ないとき(sh が先に死ぬ、redirect に失敗する)は 5 s で `waitForFileWithin` が `t.Fatalf` するので、静かに通ることはない。scratchpad の 15 行ほどの shell で「ready が出たらすぐ TERM」を 150 回打ち、150 回とも sleep は生き残った(Darwin、`/bin/sh`)。Go のテストそのものは走らせていない。
+- 後始末の順。`t.TempDir()`(`director_cmd_test.go:305`)が `startTestProcess`(`:306`)より先なので、cleanup は後入れ先出しで「kill と wait」のあとに TempDir が消える。`: >` の fd は redirect のあとすぐ閉じるので、sh も sleep も TempDir 内の fd を持たない。
+- 引用。`shellQuote`(`feature.go:449`)が ready のパスと sleep のパスの両方を 1 語にする。TempDir のパスに空白や `'` があっても壊れない。
+- comment。「ready は trap のあとに作られる」「無視は exec を越える」「固定 sleep では trap の前に TERM が届きうる」の 3 点は、上の確認と一致する。最後の文は前の版を語るが、「なぜ sleep にしないか」の理由として残る価値があり、直しは求めない。
+- tech-debt の行。Debt の欄の `~~...~~ (RESOLVED 2026-10-29 in feat/local-config-org)` の書き方は 17・19 行と同じで、HTML コメントが直上(286 行)にあり「Row preserved for traceability.」で終わる。コメントの事実を突き合わせた: load average `16.48 39.03 47.15` と「1 回の打ち直しで通った」は test report の表と Failure analysis に一致(53・120 行)、sighting の数は行の既存の 4 回に続く 5 回目、Related に足した `docs/reports/test-2026-10-29-local-config-org.md (Failure analysis)` は実在し見出しも合う。`director_cmd_test.go` を Trigger に持つほかの開いた行は register にない(366 行は Why の欄に試験名があるだけで、Trigger は `org_watch_test.go`)。
+- 取り消しの形の数え方と L6 の根拠は、`<!-- RESOLVED` の直後の表の行について、各欄が `~~` で始まるかを python で数えた(61 / 15 / 2)。
+
+### Notes(所見にしないもの)
+
+- N6 コメントの「macOS prints the full path, Linux only `sleep`」は単純化している。この Darwin で `ps -o comm=` は exec したときの argv[0] をそのまま出す(`sleep 5` は `sleep`、`/bin/sleep 5` は `/bin/sleep`)。このテストは `sleepPath(t)` の絶対パスで exec するので macOS では full path に見え、結論(名前で待つ直し方は 2 つの形を扱う必要がある)は変わらない。見えない HTML コメントの中なので直しは求めない。
+- N7 366 行の `TestOrgWatchDetach_...` の行は Why の欄で「`TestStopDirectorProcess_...` の行と同じ形の race」と言う(「row above」と書くが、実際は 79 行上)。S6 が閉じたので、いまその参照先は RESOLVED の行で、直し方(marker を trap のあとに作る)は 366 行の Trigger が書くものと同じ。次にその行を触るとき、S6 の版を手本として指せる。
+- N8 `startFakeAgent` の末尾の `time.Sleep(100 * time.Millisecond)` は固定時間の待ちだが、marker のあとにあり、trap より前の競合ではない。呼び出し側(TERM を無視する `:1320` を含む)は sh のままでも sleep になったあとでも結果が変わらない。S6 の対象外。
+
+### Coverage gaps(再実行)
+
+- テスト、静的検査は走らせていない(skill の規則)。`TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` が負荷の下で通ることは、このレポートでは確かめていない。それは /test の範囲。
+- L5・L6 は `docs/tech-debt/` に足していない。この再実行のコミットは report と jsonl だけで、直すか送るかは orchestrator が決める。
+
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 4 件)
-- Follow-ups: L1 は 9 か所の置き換えで済み、この PR の理由づけが事実と違っているので、この PR の中で直すのがよい。L2 は述語を 1 か所にするか、2 つを結ぶ test を足す。L3 と L4 は直すか tech-debt に送るかを orchestrator が決める。
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 6 件: L1〜L4 は前の範囲、L5・L6 は S6)
+- Follow-ups: L1 は 9 か所の置き換えで済み、この PR の理由づけが事実と違っているので、この PR の中で直すのがよい。L2 は述語を 1 か所にするか、2 つを結ぶ test を足す。L3 と L4 は直すか tech-debt に送るかを orchestrator が決める。L5 は `startFakeAgent(t, true)` に替えるのが 1 行で済む(手書きを残すなら上限を 10 s に)。L6 は 287 行の Trigger の欄に取り消し線を足す。L5・L6 はどちらも S6 の 2 ファイルだけで直る。
