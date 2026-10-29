@@ -178,7 +178,10 @@ Critical forks: 人には聞かず、ユーザーの指示どおり consult(cons
   - consult(consult-plan-settingstoml)の最後の要点「シェルテストにも off を渡す」は、A1 には設定を読むシェルテストがないので B で扱うと Scope に書いた。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest sha256:1609f175543b。分かれ目は consult(consult-plan-settingstoml、2 回)に聞いて推奨案を選び、理由は Design decisions に書いた。
 - [x] Branch created — feat/local-config-org(worktree `.claude/worktrees/local-config-org`、state id `plan-local-config-org`)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 ab012b7d(impl-276a1-s1): `internal/gitroot`(MainWorktree・Toplevel・SamePath・ResolvedOrClean)。検証 rc=0(gitroot 4s、org 655s)。self-check は 5 項目とも clean。`resolvedOrClean` は範囲外の permissions.go・split.go・feature_test.go・feature.go も使うので、statedir.go に gitroot を呼ぶ 1 行の wrapper を残した(実装は gitroot の 1 つだけ)。
+  - S5 で直す古い参照(S1 の報告): `internal/cli/status_merge_guarantee_test.go:336` の注釈の `gitMainWorktree`、`internal/org/seat.go:7` の package doc の「git (statedir.go, ...)」、`docs/tech-debt/README.md` の 170 行と 198 行の `samePath`。
+  - S2 の handoff に入れる(consult が S1 の implementer に返した点): `-C` に渡す dir は `filepath.Abs` してから渡す。gitroot の package doc(config が ralph.local.toml を探すのに使う)と食い違わない形にする。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
