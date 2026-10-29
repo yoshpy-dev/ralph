@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # ralph-config.sh — shared configuration for the standard-flow development
-# harness's /plan and /cross-review codex calls, plus one [org] default kept
+# harness's /plan and /cross-review reviewer calls, plus one [org] default kept
 # for a lock-step test (see the [org] block below).
 #
 # The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
@@ -14,7 +14,7 @@
 # the claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), and the
 # codex-as-reviewer model/effort fallbacks (RALPH_CODEX_REVIEWER_MODEL,
 # RALPH_CODEX_REASONING_EFFORT); and /plan (.claude/skills/plan/SKILL.md),
-# whose Codex plan advisory reads the same two codex-side variables. All
+# whose other-model plan advisory reads the same three reviewer variables. All
 # three reviewer model/effort vars are exported, so setting them directly in
 # the environment also works without sourcing this file.
 #
@@ -30,15 +30,15 @@
 RALPH_STANDARD_MAX_PIPELINE_CYCLES="${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}"
 
 # RALPH_CLAUDE_REVIEWER_MODEL is the model used by `claude -p` when it plays
-# adversarial reviewer in /cross-review's reviewer-inversion path (driver =
-# codex, reviewer = claude).
+# adversarial reviewer (driver = codex, reviewer = claude) in /plan's plan
+# advisory and /cross-review.
 RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 
 # RALPH_CODEX_REVIEWER_MODEL and RALPH_CODEX_REASONING_EFFORT are the model
 # and reasoning effort passed as `-m` / `-c model_reasoning_effort=` to
-# `codex exec` by /plan (Codex plan advisory) and /cross-review (reviewer =
-# codex). Explicit so the call does not depend on .codex/config.toml's model
-# or a shell alias.
+# `codex exec` when codex is the reviewer (driver = claude) in /plan's plan
+# advisory and /cross-review. Explicit so the call does not depend on
+# .codex/config.toml's model or a shell alias.
 RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
 RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
 

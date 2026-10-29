@@ -15,7 +15,10 @@ phase-specific subagents below:
 | 4 | `doc-maintainer` | `/sync-docs` | Documentation sync |
 
 Steps 1–3 run sequentially (output of one informs the next). Step 4 runs after
-tests pass. After step 4, `/cross-review` runs inline (optional), then `/pr`.
+tests pass. After step 4, `/cross-review` runs inline, then `/pr`;
+`/cross-review` calls the other CLI's reviewer only when
+`[standard].cross_review` is on and that CLI is available, and otherwise
+records the skip in its triage report.
 Claude Code uses the Task tool with `subagent_type` matching the agent name.
 Codex uses the matching `.codex/agents/` custom agents. Do not fan out steps
 1–3 in parallel; verifier output may rely on self-review context, and tester
@@ -73,7 +76,7 @@ whether slices were delegated or implemented inline.
 
 ## Planning — always inline
 
-`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, critical-fork resolution during drafting, Codex advisory response, the visual review approval gate). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
+`/plan` runs in the main context because it relies heavily on `AskUserQuestion` for user interaction (task type selection, objective confirmation, critical-fork resolution during drafting, plan advisory response, the visual review approval gate). Subagent execution would add indirection without benefit. No agent definition exists for this skill.
 
 ## Cross-review triage — always inline
 

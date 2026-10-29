@@ -6,8 +6,8 @@
 # `codex exec` calls launched from an agent's Bash tool used to hang waiting
 # for stdin ("Reading additional input from stdin...", #153) and could 400
 # when a shell alias injected a conflicting `-m` (#162). The fix pins every
-# codex invocation line inside the /plan (Codex plan advisory) and
-# /cross-review (reviewer = codex) skill bodies to a fixed shape:
+# codex invocation line inside the /plan (plan advisory, reviewer = codex)
+# and /cross-review (reviewer = codex) skill bodies to a fixed shape:
 #
 #   command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-<default>}" \
 #     -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-<default>}" \
