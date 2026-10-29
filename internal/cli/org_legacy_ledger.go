@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,14 @@ const (
 	orgLedgerMutating
 )
 
+// errOrgLedgerUnresolved marks resolveOrgLedger's error when
+// org.ResolveOrgStateDir could not resolve the ledger, so a caller can tell
+// it from guardLegacyOrgStateDir's refusal with errors.Is: `ralph org
+// escalate` still tells the human then, writing to no ledger
+// (newOrgEscalateCmd). Its text is the middle of the error, between the
+// command and org.ResolveOrgStateDir's error.
+var errOrgLedgerUnresolved = errors.New("cannot resolve the org ledger")
+
 // resolveOrgLedger resolves the org ledger of cmd's invocation with
 // org.ResolveOrgStateDir and then runs guardLegacyOrgStateDir on it with
 // access. explicit is the --state-dir value; whether it was passed is
@@ -40,12 +49,13 @@ const (
 // be read or parsed, or whose [org].state_dir is neither absolute nor starts
 // with "~/") is an error that names the command and, through
 // org.ResolveOrgStateDir's error, the file, so the verb exits 1 instead of
-// falling back to another ledger (D4). guardLegacyOrgStateDir's error is
-// returned as it is.
+// falling back to another ledger (D4). That error is marked with
+// errOrgLedgerUnresolved. guardLegacyOrgStateDir's error is returned as it
+// is, unmarked.
 func resolveOrgLedger(cmd *cobra.Command, explicit string, access orgLedgerAccess) (dir, source string, err error) {
 	dir, source, err = org.ResolveOrgStateDir(explicit, cmd.Flags().Changed("state-dir"))
 	if err != nil {
-		return "", "", fmt.Errorf("%s: cannot resolve the org ledger: %w", cmd.CommandPath(), err)
+		return "", "", fmt.Errorf("%s: %w: %w", cmd.CommandPath(), errOrgLedgerUnresolved, err)
 	}
 	if err := guardLegacyOrgStateDir(cmd, dir, source, access); err != nil {
 		return "", "", err

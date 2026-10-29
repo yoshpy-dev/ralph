@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -25,8 +26,10 @@ import (
 // built because ralph.toml (or the main worktree's ralph.toml that enabled
 // is read from) does not load, the item still reaches the human as not
 // recorded ((*org.Org).EscalateNotRecorded), the same outcome as an inbox
-// that cannot be written; a legacy ledger is refused like every mutating
-// verb.
+// that cannot be written. It does too when the ledger cannot be resolved
+// (resolveOrgLedger's errOrgLedgerUnresolved: the personal file's
+// [org].state_dir without --state-dir), with nothing written to any ledger;
+// a legacy ledger is refused like every mutating verb.
 func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 	var text string
 
@@ -73,7 +76,10 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"1: run `ralph org inbox notify <id>` then, not escalate again, which\n"+
 			"would record a second item. When the inbox cannot record the item, or\n"+
 			"ralph.toml does not load, the banner and the desktop notification still\n"+
-			"go out, nothing is recorded, and the command exits 1.",
+			"go out, nothing is recorded, and the command exits 1. The same holds,\n"+
+			"with nothing written to any ledger, when without --state-dir the ledger\n"+
+			"cannot be resolved because the personal ralph.local.toml cannot be read\n"+
+			"or its [org].state_dir is neither absolute nor starts with ~/.",
 			protocol.DefaultMaxBodyChars),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,13 +89,17 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			if strings.TrimSpace(text) == "" {
 				return fmt.Errorf("org: escalate: --text is required")
 			}
-			// newOrgRuntime's steps, split so that a ralph.toml that does
-			// not load can still reach the human below.
+			// newOrgRuntime's steps, split so that a ledger that cannot be
+			// resolved, or a ralph.toml that does not load, can still reach
+			// the human below.
+			params := org.EscalateParams{OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr()}
 			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if errors.Is(err, errOrgLedgerUnresolved) {
+				return newOrgEscalateFallbackRuntime("").EscalateNotRecorded(params, err).Err
+			}
 			if err != nil {
 				return err
 			}
-			params := org.EscalateParams{OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr()}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)
 			if err == nil {
 				rt.Config, err = withMainWorktreeDirectorEnabled(rt.Config, *configPath, resolvedStateDir, stateDirSource)
@@ -346,9 +356,15 @@ func orgInboxHintStateDir(cmd *cobra.Command, resolvedStateDir string) string {
 // tell the human about an item it could not record because newOrgRuntimeAt
 // failed (ralph.toml does not load): only the fields of newOrgRuntimeAt's
 // org.Org that (*org.Org).EscalateNotRecorded uses, which need no config,
-// set by the same wireOrgInbox.
+// set by the same wireOrgInbox. With resolvedStateDir "" (the ledger could
+// not be resolved) only DesktopNotify is set, as wireOrgInbox sets it: no
+// Inbox and no EscalationsPath, so nothing is written to any ledger.
 func newOrgEscalateFallbackRuntime(resolvedStateDir string) *org.Org {
 	rt := &org.Org{}
+	if resolvedStateDir == "" {
+		rt.DesktopNotify = orgDesktopNotifyOverride
+		return rt
+	}
 	wireOrgInbox(rt, resolvedStateDir)
 	return rt
 }

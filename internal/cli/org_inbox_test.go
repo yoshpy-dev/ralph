@@ -760,6 +760,8 @@ func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
 			"Whether a director is attached does not change this.", "inbox_no_watch", "it is a --once run",
 			"inbox_director_disabled", "Without --config, enabled is read from the main worktree's ralph.toml",
 			"A main worktree ralph.toml that does not load is handled like a ralph.toml that does not load",
+			// Plan 2026-10-30-org-state-dir-local, S2b.
+			"The same holds, with nothing written to any ledger, when without --state-dir the ledger cannot be resolved",
 		}},
 		{[]string{"inbox", "--help"}, []string{"deferred for one escalate or the cross-org watch left to the director", "A resolved item is yes or no."}},
 		{[]string{"inbox", "notify", "--help"}, []string{"reason inbox_manual_notify", "(NOTIFIED deferred)"}},
@@ -1430,13 +1432,17 @@ func TestOrgInbox_LinkedWorktreeSharesTheMainCheckoutsInbox(t *testing.T) {
 
 // escalate, ack, resolve, and notify change the ledger, so a legacy
 // worktree ledger with active seats refuses them; the list, show, and wait
-// --inbox only read it and print the note.
+// --inbox only read it and print the note. The refusal is a plain error:
+// unlike for a ledger that cannot be resolved, escalate sends no banner and
+// no desktop notification then (plan 2026-10-30-org-state-dir-local, S2b).
 func TestOrgInbox_LegacyLedgerGuard(t *testing.T) {
 	setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
 	escalateOK(t, r.sharedDir, "org-a", inboxQuestion("seeded"))
 	spawnLedgerSeat(t, r.legacyDir, "seat-1")
 	before := readFileBytes(t, org.InboxPathIn(r.sharedDir))
+	escalationsBefore := readFileBytes(t, org.EscalationsPathIn(r.sharedDir))
+	rec := recordDesktopNotify(t, nil)
 
 	for _, args := range [][]string{
 		{"escalate", "--org-id", "org-a", "--text", inboxQuestion("refused")},
@@ -1444,16 +1450,25 @@ func TestOrgInbox_LegacyLedgerGuard(t *testing.T) {
 		{"inbox", "resolve", "e1", "--note", "docs/reports/x.md"},
 		{"inbox", "notify", "e1"},
 	} {
-		stdout, _, err := runOrgCmdStreams(t, args...)
-		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") {
+		stdout, stderr, err := runOrgCmdStreams(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") || errors.Is(err, errOrgLedgerUnresolved) {
 			t.Errorf("%v error = %v; want the legacy-ledger refusal", args, err)
 		}
 		if stdout != "" {
 			t.Errorf("%v stdout = %q; want nothing", args, stdout)
 		}
+		if strings.Contains(stderr, "ESCALATION") {
+			t.Errorf("%v stderr = %q; want no banner for a refusal", args, stderr)
+		}
+	}
+	if calls := rec.calls(); len(calls) != 0 {
+		t.Errorf("a refused verb sent desktop notifications %q, want none", calls)
 	}
 	if after := readFileBytes(t, org.InboxPathIn(r.sharedDir)); !bytes.Equal(before, after) {
 		t.Errorf("a refused verb wrote to the inbox:\nbefore: %s\nafter:  %s", before, after)
+	}
+	if after := readFileBytes(t, org.EscalationsPathIn(r.sharedDir)); !bytes.Equal(escalationsBefore, after) {
+		t.Errorf("a refused verb wrote to escalations.jsonl:\nbefore: %s\nafter:  %s", escalationsBefore, after)
 	}
 
 	for _, args := range [][]string{{"inbox"}, {"inbox", "show", "e1"}, {"wait", "--inbox", "--timeout-ms", "1000"}} {

@@ -179,6 +179,74 @@ func TestOrgLedger_UnparsablePersonalFileNamesItsPath(t *testing.T) {
 	}
 }
 
+// TestOrgEscalate_LedgerThatCannotBeResolvedStillReachesTheHuman covers S2b:
+// without --state-dir, a personal file that is not TOML, or whose
+// [org].state_dir is relative, leaves `ralph org escalate` with no ledger
+// (D4), and the item still reaches the human as not recorded: exit 1, no
+// ID, the banner naming the cause, and one desktop notification. A message
+// escalate refuses is refused first, with no banner and no notification.
+// Neither writes an inbox.jsonl or an escalations.jsonl anywhere in the
+// repository's temp tree.
+func TestOrgEscalate_LedgerThatCannotBeResolvedStillReachesTheHuman(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, causeTail string
+	}{
+		{"not TOML", "[org\nstate_dir = \"/ledger\"\n", ": "},
+		{"relative state_dir", "[org]\nstate_dir = \"ledger\"\n", `: [org].state_dir "ledger" must be an absolute path or start with ~/`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLegacyLedgerRepo(t)
+			t.Setenv(config.LocalConfigEnv, "")
+			path := filepath.Join(r.mainRoot, config.LocalConfigFileName)
+			writeTestFile(t, path, tc.body)
+			cause := "ralph org escalate: cannot resolve the org ledger: " + path
+
+			rec := recordDesktopNotify(t, nil)
+			stdout, stderr, err := runRootCmdSplit(t, "org", "escalate", "--org-id", "org-a", "--text", "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck")
+			if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) ||
+				!strings.Contains(err.Error(), "org: escalate: the item could not be recorded: "+cause) {
+				t.Errorf("escalate = exit %d, %v; want exit 1, the item could not be recorded, naming %q", code, err, cause)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q; want no ID for an item that was not recorded", stdout)
+			}
+			banner := "ORG ESCALATION (NOT RECORDED): org=org-a type=BLOCKED -- the item is not in any inbox: " + cause + tc.causeTail
+			if !strings.Contains(stderr, banner) || strings.Count(stderr, "ORG ESCALATION") != 1 {
+				t.Errorf("stderr = %q; want one not-recorded banner with %q", stderr, banner)
+			}
+			if calls := rec.calls(); len(calls) != 1 || !strings.Contains(calls[0], "org-a") || strings.Contains(calls[0], "stuck") {
+				t.Errorf("desktop notifications = %q; want one naming org-a without the body", calls)
+			}
+
+			rec = recordDesktopNotify(t, nil)
+			stdout, stderr, err = runRootCmdSplit(t, "org", "escalate", "--org-id", "org-a", "--text", "TYPE: ALERT\n\nstuck")
+			if code := ExitCode(err); code != 1 || !strings.Contains(err.Error(), "TYPE ALERT cannot be escalated") {
+				t.Errorf("escalate of an ALERT = exit %d, %v; want exit 1 with the TYPE refusal", code, err)
+			}
+			if stdout != "" || strings.Contains(stderr, "ORG ESCALATION") || len(rec.calls()) != 0 {
+				t.Errorf("a refusal printed stdout %q, stderr %q, notified %q", stdout, stderr, rec.calls())
+			}
+
+			if _, err := os.Stat(r.sharedDir); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the default ledger %s exists (stat: %v), want nothing written", r.sharedDir, err)
+			}
+			inboxName, escalationsName := filepath.Base(org.InboxPathIn(r.sharedDir)), filepath.Base(org.EscalationsPathIn(r.sharedDir))
+			err = filepath.WalkDir(filepath.Dir(r.mainRoot), func(p string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.Name() == inboxName || d.Name() == escalationsName {
+					t.Errorf("escalate wrote %s, want no ledger file anywhere", p)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("walk the temp tree: %v", err)
+			}
+		})
+	}
+}
+
 // TestRunDoctorFull_PersonalFileThatCannotResolveTheLedgerIsAFailLine covers
 // AC5 for doctor (D4): a personal file whose [org].state_dir is relative, or
 // that is not TOML, gives one fail line naming the file, doctor runs its
