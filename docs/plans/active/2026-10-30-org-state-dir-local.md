@@ -173,7 +173,9 @@ PR は `Refs #276` です。3 本目(B)が標準フローの値とスクリプ�
   2. [MEDIUM] `--state-dir` を渡しても、`newOrgRuntimeAt` の `config.Load` が同じ個人用のファイルを検査するので逃げ道にならない → 相対の `state_dir` を断るのは `LocalOrgStateDir`(台帳を決める側)だけにし、Load は値を検査しない(D2)。AC3・AC5 と Test plan に、CLI の経路で逃げ道を確かめるテスト(相対の値と、TOML として読めないファイル)を足した。
 - [x] Plan approved — 自動承認(ユーザーの指示)。digest sha256:1ea27c42968f。分かれ目は consult(consult-plan-statedir276a2)に聞いて推奨案を選び、理由は Design decisions に書いた。
 - [x] Branch created — feat/org-state-dir-local(worktree `.claude/worktrees/org-state-dir-local`、state id `plan-org-state-dir-local`、base e3a3fbf7)
-- [ ] Implementation started
+- [x] Implementation started
+  - S1 e2e7b7f1(impl-276a2-s1): `OrgConfig.StateDir`、`config.LocalOnlyKeys()`(関数。ralph.toml の文書だけを map で読み、ドット区切りのキーをたどる。値が空でもキーがあればエラー、`RALPH_LOCAL_CONFIG=off` でもエラー)、`LocalOrgStateDir(dir) (value, path string, err error)`(`dir` が "" なら cwd、off なら ("", "", nil) で git なし、`~/` は `os.UserHomeDir()` で展開し失敗はエラー、絶対は Clean)。Load は値を検査しない(D2)。`config get org.state_dir` は reflect で引けるので配線なし、cli のテスト 2 本で固定。drift の検査は手書きの probe なので除外は要らず、`TestTemplateDriftProbesHoldNoLocalOnlyKey` を足した。検証 rc=0(18 秒、load 5〜7)、golangci-lint 0 件、変異 7 つはすべてテストが落とした。self-check は 5 項目とも clean。
+  - S5 か /sync-docs に回すもの(S1 の報告): `.claude/rules/ralph/model-routing.md` の「Where the values live」の drift の説明に local-only のキーを書くか。`ralph config get --help` の exit 3 の説明は local-only のキーを名指していない(help を固定するテストあり)。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
