@@ -165,6 +165,14 @@ type MergeOrderParams struct {
 	// the `git remote get-url origin` lookupMergePRs runs with them. Zero or
 	// less means 30 s and 15 s.
 	LsRemoteTimeout, GHTimeout time.Duration
+	// Origin, when it names a repository (ReadMergeOrigin), pins gh's PR
+	// lookup to it, as ralph org merge pins its own; ralph org cleanup passes
+	// it. gh pr list then gets -R <Origin.Arg()>, a PR whose url names another
+	// host or owner/repo than Origin's leaves every PR out, as a PR of another
+	// repository does without it, and lookupMergePRs runs no `git remote
+	// get-url origin`. The zero MergeOrigin leaves the repository to gh and
+	// checks the owner/repo of its PRs against origin's URL (mergeOriginRepo).
+	Origin MergeOrigin
 }
 
 // MergeOrderResult is what MergeOrder found. The CLI prints it, or marshals
@@ -211,6 +219,12 @@ type MergeOrderEntry struct {
 	// MergeOrderPRLookupFailed, MergeOrderPRLookupLimitForks and
 	// MergeOrderPRLookupSkipped: why PR is nil, when it is.
 	PRLookup string `json:"pr_lookup"`
+	// PRLookupWhy says why gh's answer for the branch was not used: with
+	// PRLookup failed, gh's error, and with skipped, why no answer of gh was
+	// used for any branch (gh was not found, or it returned a PR of another
+	// repository than origin's); "" otherwise. It is not in the JSON, whose
+	// notes say it: ralph org cleanup puts it in its lines.
+	PRLookupWhy string `json:"-"`
 	// Gate is the branch's latest gate record, nil when it has none.
 	Gate *MergeOrderGate `json:"gate,omitempty"`
 	// Binding is the latest complete feature binding of the branch, nil
@@ -267,7 +281,8 @@ type MergeOrderBinding struct {
 // guarantee unknown when the cache was checked for another default branch
 // (ForDefaultBranch), asks gh for each branch's PR and keeps it only when it
 // is from origin's repository (lookupMergePRs, which runs `git remote get-url
-// origin` once, when gh first returns a PR), classifies each branch
+// origin` once, when gh first returns a PR, unless p.Origin pins the lookup
+// to the repository it names), classifies each branch
 // (classifyMergeTarget) and orders them (orderMergeEntries).
 //
 // The error is for a manifest that cannot be read, an ls-remote that fails,
@@ -369,8 +384,9 @@ type mergeTarget struct {
 	orgRunsOn string
 	pr        *MergeOrderPR
 	// prLookup is what gh's PR lookup gave for the branch
-	// (MergeOrderPRLookup*), set by lookupMergePRs.
-	prLookup string
+	// (MergeOrderPRLookup*), and prWhy why its answer was not used
+	// (MergeOrderEntry.PRLookupWhy), both set by lookupMergePRs.
+	prLookup, prWhy string
 }
 
 // regates reports whether t has a binding and its org is not running
@@ -609,7 +625,10 @@ type ghPullRequest struct {
 }
 
 // lookupMergePRs asks gh for each target's PR, in target order, and sets
-// target.pr (C5) when the PR is from origin's repository (mergeOriginRepo).
+// target.pr (C5) when the PR is from origin's repository: with p.Origin, the
+// one gh pr list reads with -R and the PR's url names (MergeOrigin.hasPR),
+// else the one origin's URL names (mergeOriginRepo). target.prWhy says why
+// gh's answer for the branch was not used (MergeOrderEntry.PRLookupWhy).
 // It sets target.prLookup to what gh gave for the branch: every target starts
 // as MergeOrderPRLookupSkipped, and each one gh answers for becomes found (its
 // PR is used), none, failed or limit_forks. available is false when gh is not
@@ -629,29 +648,30 @@ func lookupMergePRs(ctx context.Context, p MergeOrderParams, run MergeOrderExec,
 	if timeout <= 0 {
 		timeout = defaultMergeOrderGHTimeout
 	}
-	skipAll := func() {
+	skipAll := func(why string) {
 		for _, t := range targets {
-			t.pr, t.prLookup = nil, MergeOrderPRLookupSkipped
+			t.pr, t.prLookup, t.prWhy = nil, MergeOrderPRLookupSkipped, why
 		}
 	}
-	skipAll()
+	skipAll("")
 	var failed mergeGHFailures
 	var limitFull []string // the branches gh returned mergeOrderGHLimit fork PRs for
 	withNotes := func(more ...string) []string {
 		return append(append(failed.notes(), mergeGHLimitNotes(limitFull)...), more...)
 	}
+	repoArg := p.Origin.Arg()
 	var origin mergeOriginRepo
 	for _, t := range targets {
-		pr, limitFullOfForks, err := lookupMergePR(ctx, p.Dir, run, timeout, "", t.branch)
+		pr, limitFullOfForks, err := lookupMergePR(ctx, p.Dir, run, timeout, repoArg, t.branch)
 		switch {
 		case ctx.Err() != nil:
 			return false, nil, mergeOrderInterrupted(ctx, "gh ran")
 		case errors.Is(err, exec.ErrNotFound):
-			skipAll()
+			skipAll("gh was not found")
 			return false, withNotes("gh was not found, so no PR was read: " + mergeOrderNoPRs), nil
 		case err != nil:
 			failed.add(err.Error(), t.branch)
-			t.prLookup = MergeOrderPRLookupFailed
+			t.prLookup, t.prWhy = MergeOrderPRLookupFailed, err.Error()
 			continue
 		case limitFullOfForks:
 			limitFull = append(limitFull, t.branch)
@@ -661,13 +681,20 @@ func lookupMergePRs(ctx context.Context, p MergeOrderParams, run MergeOrderExec,
 			t.prLookup = MergeOrderPRLookupNone
 			continue
 		}
-		stop, err := origin.check(ctx, p.Dir, run, timeout, t.branch, pr)
-		if err != nil {
-			return false, nil, err
-		}
-		if stop != "" {
-			skipAll()
-			return true, withNotes(stop), nil
+		if repoArg != "" {
+			if why := p.Origin.foreignPRWhy(t.branch, pr); why != "" {
+				skipAll(why)
+				return true, withNotes(why + ": no PR is used, so " + mergeOrderNoPRs), nil
+			}
+		} else {
+			stop, err := origin.check(ctx, p.Dir, run, timeout, t.branch, pr)
+			if err != nil {
+				return false, nil, err
+			}
+			if stop != "" {
+				skipAll(stop)
+				return true, withNotes(stop), nil
+			}
 		}
 		t.pr, t.prLookup = pr, MergeOrderPRLookupFound
 	}
@@ -898,7 +925,8 @@ func mergeHostRepoFromPRURL(s string) (host string, repo mergeRepo, ok bool) {
 // timeout, and returns the PR pickMergePR picks from its output, nil when
 // there is none. When repo ([HOST/]OWNER/REPO) is not empty, `-R <repo>` is
 // added after the other arguments, so gh reads that repository instead of the
-// one it picks itself; merge-order passes "". limitFullOfForks reports that
+// one it picks itself; merge-order passes MergeOrderParams.Origin.Arg(), ""
+// unless the caller pinned the lookup to origin. limitFullOfForks reports that
 // there is none and gh returned mergeOrderGHLimit PRs, all from forks, so the
 // branch's own PR may be past the limit.
 func lookupMergePR(ctx context.Context, dir string, run MergeOrderExec, timeout time.Duration, repo, branch string) (pr *MergeOrderPR, limitFullOfForks bool, _ error) {
@@ -974,7 +1002,7 @@ func mergeEntryFor(t *mergeTarget, remote mergeRemote) MergeOrderEntry {
 	class, detail := classifyMergeTarget(t, remote)
 	e := MergeOrderEntry{
 		Class: class, Branch: t.branch, RemoteHead: remote.heads[t.branch], Detail: detail, PR: t.pr, PRLookup: t.prLookup,
-		Binding: t.binding,
+		PRLookupWhy: t.prWhy, Binding: t.binding,
 	}
 	if g := t.gate; g != nil {
 		e.Gate = &MergeOrderGate{

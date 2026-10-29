@@ -2194,6 +2194,162 @@ func TestMergeOrder_PRLookupWithARepoPassesDashR(t *testing.T) {
 	}
 }
 
+// moPinnedOrigin is o/r on github.com, the repository moPR's urls name, as
+// MergeOrderParams.Origin.
+var moPinnedOrigin = MergeOrigin{apiHost: "github.com", repo: mergeRepo{owner: "o", name: "r"}}
+
+// moPinnedParams is fx.params(false) with the lookup pinned to
+// moPinnedOrigin.
+func moPinnedParams(fx *moFixture) MergeOrderParams {
+	p := fx.params(false)
+	p.Origin = moPinnedOrigin
+	return p
+}
+
+// moNoGetURL fails the test when fx's exec ran any git command but the
+// ls-remote.
+func moNoGetURL(t *testing.T, fx *moFixture) {
+	t.Helper()
+	if git := fx.exec.callsOf("git"); len(git) != 1 || git[0].args[0] != "ls-remote" {
+		t.Errorf("git calls = %+v, want the ls-remote only", git)
+	}
+}
+
+// TestMergeOrder_PinnedOriginReadsThePRsInItsRepository covers S-X1 of plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md (ralph org cleanup's
+// lookup): with Origin, every gh pr list gets -R github.com/o/r after
+// merge-order's own arguments, no `git remote get-url origin` runs, and a PR
+// whose url names o/r on github.com, in any case, is used, though origin's URL
+// names acme/app, which the lookup without Origin would check it against.
+func TestMergeOrder_PinnedOriginReadsThePRsInItsRepository(t *testing.T) {
+	upper := moPR(8, "OPEN", "main")
+	upper.URL = "https://GitHub.com/O/R/pull/8"
+	fx := moLookupFixture(t, "git@github.com:acme/app.git", "a", "b", "c")
+	fx.exec.setPR("feat/a", moPRs(moPR(7, "OPEN", "main")))
+	fx.exec.setPR("feat/b", moPRs(upper))
+	res, err := fx.o.MergeOrder(context.Background(), moPinnedParams(fx))
+	if err != nil {
+		t.Fatalf("MergeOrder: %v", err)
+	}
+	want := map[string]string{"feat/a": MergeOrderPRLookupFound, "feat/b": MergeOrderPRLookupFound, "feat/c": MergeOrderPRLookupNone}
+	if got := moLookups(res); !maps.Equal(got, want) {
+		t.Fatalf("pr_lookup = %v, want %v", got, want)
+	}
+	if a, b := moEntry(t, res, "feat/a"), moEntry(t, res, "feat/b"); a.PR == nil || a.PR.Number != 7 || b.PR == nil || b.PR.Number != 8 {
+		t.Errorf("PRs = %+v and %+v, want #7 and #8", a.PR, b.PR)
+	}
+	for _, c := range fx.exec.callsOf("gh") {
+		want := []string{"pr", "list", "--head", c.args[3], "--state", "all", "--limit", "1000", "--json",
+			"number,state,url,headRefOid,baseRefName,isCrossRepository", "-R", "github.com/o/r"}
+		if !slices.Equal(c.args, want) {
+			t.Errorf("gh %q, want %q", c.args, want)
+		}
+	}
+	if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+		t.Errorf("gh asked about %q, want every branch", got)
+	}
+	moNoGetURL(t, fx)
+}
+
+// TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository covers
+// S-X1's check of a PR's url against Origin, by its host and its owner/repo
+// as ralph org merge checks it (MergeOrigin.hasPR): a PR of another owner, of
+// another repository name, of o/r on another host, with an http url, or with
+// a url that names no repository leaves every branch skipped with no PR, a
+// branch found or failed before it and one gh was never asked about included,
+// each with the same PRLookupWhy, which names the PR, and a note with it. gh
+// is not run again, and no get-url runs.
+func TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"another owner", "https://github.com/x/r/pull/9"},
+		{"another repository name", "https://github.com/o/x/pull/9"},
+		{"o/r on another host", "https://ghe.example.com/o/r/pull/9"},
+		{"an http url", "http://github.com/o/r/pull/9"},
+		{"a url that names no repository", "https://github.com/pull/9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			foreign := moPR(9, "MERGED", "main")
+			foreign.URL = tc.url
+			fx := moLookupFixture(t, moOriginURL, "a", "b", "c", "d")
+			fx.exec.ghErr = map[string]error{"feat/a": errors.New("exit status 1: HTTP 502")}
+			fx.exec.setPR("feat/b", moPRs(moPR(7, "OPEN", "main")))
+			fx.exec.setPR("feat/c", moPRs(foreign))
+			res, err := fx.o.MergeOrder(context.Background(), moPinnedParams(fx))
+			if err != nil {
+				t.Fatalf("MergeOrder: %v", err)
+			}
+			why := "gh pr list --head feat/c -R github.com/o/r returned PR #9 with the url " + strconv.Quote(tc.url) +
+				", which is not a PR of origin's repository github.com/o/r"
+			for _, e := range res.Entries {
+				if e.PRLookup != MergeOrderPRLookupSkipped || e.PR != nil || e.PRLookupWhy != why {
+					t.Errorf("%s: pr_lookup %q, PR %+v, PRLookupWhy %q; want skipped, no PR, and %q", e.Branch, e.PRLookup, e.PR,
+						e.PRLookupWhy, why)
+				}
+			}
+			if len(res.Entries) != 4 || !res.GHAvailable {
+				t.Errorf("entries = %+v, GHAvailable %v; want all four, and gh available", res.Entries, res.GHAvailable)
+			}
+			if moNoteWith(res, why+": no PR is used, so "+mergeOrderNoPRs) == "" {
+				t.Errorf("notes = %q, want one that says %q", res.Notes, why)
+			}
+			if got := moGHBranches(fx); !slices.Equal(got, []string{"feat/a", "feat/b", "feat/c"}) {
+				t.Errorf("gh asked about %q, want feat/a to feat/c", got)
+			}
+			moNoGetURL(t, fx)
+		})
+	}
+}
+
+// TestMergeOrder_PRLookupWhySaysWhyGHsAnswerWasNotUsed: PRLookupWhy is gh's
+// error for a failed branch and "" for found, none, and limit_forks; when no
+// answer of gh is used, every branch has why: gh was not found, or the note
+// of a PR of another repository than origin's URL names. It is not in the
+// JSON, whose notes say it.
+func TestMergeOrder_PRLookupWhySaysWhyGHsAnswerWasNotUsed(t *testing.T) {
+	whys := func(res MergeOrderResult) map[string]string {
+		out := make(map[string]string)
+		for _, e := range res.Entries {
+			out[e.Branch] = e.PRLookupWhy
+		}
+		return out
+	}
+	t.Run("each branch's own", func(t *testing.T) {
+		fx := moLookupFixture(t, moOriginURL, "found", "none", "limit", "failed")
+		fx.exec.setPR("feat/found", moPRs(moPR(7, "OPEN", "main")))
+		fx.exec.setPR("feat/limit", moPRs(moForkPRs(100, mergeOrderGHLimit)...))
+		fx.exec.ghErr = map[string]error{"feat/failed": errors.New("exit status 1: HTTP 401: Bad credentials")}
+		res := fx.run(t, false)
+		want := map[string]string{"feat/found": "", "feat/none": "", "feat/limit": "", "feat/failed": "exit status 1: HTTP 401: Bad credentials"}
+		if got := whys(res); !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want %q", got, want)
+		}
+		b, err := json.Marshal(res.Entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(b), "Bad credentials") || strings.Contains(string(b), "PRLookupWhy") {
+			t.Errorf("the entries marshal with PRLookupWhy: %s", b)
+		}
+	})
+	t.Run("gh not found", func(t *testing.T) {
+		fx := moLookupFixture(t, moOriginURL, "a", "b")
+		fx.exec.ghMissing = true
+		res := fx.run(t, false)
+		if got, want := whys(res), map[string]string{"feat/a": "gh was not found", "feat/b": "gh was not found"}; !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want %q", got, want)
+		}
+	})
+	t.Run("a PR of another repository than origin's URL names", func(t *testing.T) {
+		fx := moLookupFixture(t, "git@github.com:acme/app.git", "a", "b")
+		fx.exec.setPR("feat/a", moPRs(moPR(7, "OPEN", "main")))
+		res := fx.run(t, false)
+		note := moNoteWith(res, "gh reads o/r, not origin's acme/app: no PR is used")
+		if got, want := whys(res), map[string]string{"feat/a": note, "feat/b": note}; note == "" || !maps.Equal(got, want) {
+			t.Errorf("PRLookupWhy = %q, want the repository note %q for both", got, note)
+		}
+	})
+}
+
 // TestMergeOrder_ReadsTheLsRemoteListing covers the ls-remote half of C7:
 // branch names with several slashes, a branch called HEAD
 // (refs/heads/HEAD, which the pattern HEAD matches too) that is not taken

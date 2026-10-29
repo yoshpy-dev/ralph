@@ -624,3 +624,96 @@ func TestCheckMerge_ManifestThatCannotBeReadIsAnError(t *testing.T) {
 		t.Errorf("commands = %q, want the get-url only", got)
 	}
 }
+
+// TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot covers the reading
+// of origin that ralph org merge (readOrigin) and ralph org cleanup share
+// (S-X1 of plan docs/plans/active/2026-10-28-org-merge-cleanup.md): an https,
+// scp-like, or ssh URL gives its host, lowercased, with ssh.github.com read as
+// github.com, and its owner/repo, as Arg <host>/<owner>/<repo>, from a
+// get-url run in dir with GIT_TERMINAL_PROMPT=0; a local path, a file URL, a
+// path with no owner, and a host, owner or repo that starts with "-" are
+// MergeOriginNoRepository, with the zero MergeOrigin, whose Arg is "".
+func TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, wantArg string
+		wantProblem        MergeOriginProblem
+	}{
+		{"https", "https://github.com/o/r.git", "github.com/o/r", MergeOriginRead},
+		{"scp-like", "git@github.com:o/r.git", "github.com/o/r", MergeOriginRead},
+		{"ssh.github.com", "ssh://git@ssh.github.com:443/o/r.git", "github.com/o/r", MergeOriginRead},
+		{"GitHub Enterprise in other case", "git@GHE.example.com:Team/App.git", "ghe.example.com/Team/App", MergeOriginRead},
+		{"a local path", "/srv/git/r.git", "", MergeOriginNoRepository},
+		{"a file URL", "file:///srv/o/r.git", "", MergeOriginNoRepository},
+		{"no owner", "https://github.com/o", "", MergeOriginNoRepository},
+		{"a host that starts with -", "ssh://git@-x.example.com/o/r.git", "", MergeOriginNoRepository},
+		{"an owner that starts with -", "git@github.com:-o/r.git", "", MergeOriginNoRepository},
+		{"a repo that starts with -", "https://github.com/o/-r.git", "", MergeOriginNoRepository},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &moExec{origin: tc.url}
+			o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, time.Second)
+			if problem != tc.wantProblem || o.Arg() != tc.wantArg || err != nil {
+				t.Errorf("ReadMergeOrigin = %q, %d, %v; want %q, %d, no error", o.Arg(), problem, err, tc.wantArg, tc.wantProblem)
+			}
+			if problem != MergeOriginRead && o != (MergeOrigin{}) {
+				t.Errorf("origin = %+v with problem %d, want the zero MergeOrigin", o, problem)
+			}
+			calls := e.callsOf("git")
+			if len(calls) != 1 || !slices.Equal(calls[0].args, []string{"remote", "get-url", "origin"}) || calls[0].dir != "/repo" ||
+				!slices.Equal(calls[0].env, []string{"GIT_TERMINAL_PROMPT=0"}) {
+				t.Errorf("git calls = %+v, want one git remote get-url origin in /repo with GIT_TERMINAL_PROMPT=0", calls)
+			}
+		})
+	}
+}
+
+// TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted: a get-url that
+// fails is MergeOriginGetURLFailed with its error; one that runs past timeout
+// is MergeOriginTimedOut with its error after "timed out after <timeout>: ";
+// ctx done is MergeOriginInterrupted with no error; each with the zero
+// MergeOrigin. A timeout of zero or less is 15 s.
+func TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted(t *testing.T) {
+	block := func(ctx context.Context, _ string, _ []string, _ string, _ ...string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	t.Run("fails", func(t *testing.T) {
+		gitErr := errors.New("exit status 2: error: No such remote 'origin'")
+		e := &moExec{originErr: gitErr}
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", e.run, time.Second)
+		if problem != MergeOriginGetURLFailed || !errors.Is(err, gitErr) || o != (MergeOrigin{}) {
+			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginGetURLFailed, %v", o, problem, err, gitErr)
+		}
+	})
+	t.Run("times out", func(t *testing.T) {
+		o, problem, err := ReadMergeOrigin(context.Background(), "/repo", block, 20*time.Millisecond)
+		if problem != MergeOriginTimedOut || err == nil || err.Error() != "timed out after 20ms: context deadline exceeded" ||
+			!errors.Is(err, context.DeadlineExceeded) || o != (MergeOrigin{}) {
+			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginTimedOut, and the timeout", o, problem, err)
+		}
+	})
+	t.Run("interrupted", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		o, problem, err := ReadMergeOrigin(ctx, "/repo", block, time.Second)
+		if problem != MergeOriginInterrupted || err != nil || o != (MergeOrigin{}) {
+			t.Errorf("ReadMergeOrigin = %+v, %d, %v; want the zero MergeOrigin, MergeOriginInterrupted, no error", o, problem, err)
+		}
+	})
+	for _, timeout := range []time.Duration{0, -time.Second} {
+		t.Run(fmt.Sprintf("timeout %s", timeout), func(t *testing.T) {
+			var deadline time.Time
+			run := func(ctx context.Context, _ string, _ []string, _ string, _ ...string) (string, error) {
+				deadline, _ = ctx.Deadline()
+				return moOriginURL + "\n", nil
+			}
+			start := time.Now()
+			if _, problem, err := ReadMergeOrigin(context.Background(), "/repo", run, timeout); problem != MergeOriginRead || err != nil {
+				t.Fatalf("ReadMergeOrigin = %d, %v; want origin read", problem, err)
+			}
+			if end := time.Now(); deadline.Before(start.Add(15*time.Second)) || deadline.After(end.Add(15*time.Second)) {
+				t.Errorf("deadline %v is not 15 s after the start (%v..%v)", deadline, start, end)
+			}
+		})
+	}
+}

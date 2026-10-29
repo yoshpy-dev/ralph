@@ -132,10 +132,9 @@ type mergeReady struct {
 
 // isOriginsPR reports whether u is the url of a PR of r's repository: its
 // host is r.apiHost and its owner/repo is r.repo, without case
-// (mergeHostRepoFromPRURL).
+// (MergeOrigin.hasPR).
 func (r mergeReady) isOriginsPR(u string) bool {
-	host, repo, ok := mergeHostRepoFromPRURL(u)
-	return ok && strings.EqualFold(host, r.apiHost) && repo.same(r.repo)
+	return MergeOrigin{apiHost: r.apiHost, repo: r.repo}.hasPR(u)
 }
 
 // mergeCheck is one checkMerge while it runs: its MergeParams with the
@@ -355,37 +354,27 @@ func mergeInterrupted(ctx context.Context, step string) error {
 }
 
 // readOrigin is step 2 of checkMerge (D10): origin's host and owner/repo from
-// `git remote get-url origin`, bounded by the gh timeout, into r, or the
-// refusal of an origin that cannot be read, names none, or names a host,
-// owner or repo that starts with "-".
+// `git remote get-url origin` (ReadMergeOrigin, bounded by the gh timeout)
+// into r, or the refusal of an origin that cannot be read, names none, or
+// names a host, owner or repo that starts with "-".
 func (m *mergeCheck) readOrigin(ctx context.Context, r *mergeReady) (string, error) {
-	getCtx, cancel := context.WithTimeout(ctx, m.ghTimeout)
-	defer cancel()
-	line, err := getMergeOriginURL(getCtx, m.dir, m.run)
-	switch {
-	case ctx.Err() != nil:
+	origin, problem, err := ReadMergeOrigin(ctx, m.dir, m.run, m.ghTimeout)
+	switch problem {
+	case MergeOriginInterrupted:
 		return "", mergeInterrupted(ctx, mergeGuaranteeGetURL+" ran")
-	case err != nil && getCtx.Err() != nil:
+	case MergeOriginTimedOut:
 		return fmt.Sprintf(mergePrefix+"%s timed out after %s, so origin's repository is unknown and nothing was merged: check "+
 			"the repository's git config and %s", mergeGuaranteeGetURL, m.ghTimeout, m.again()), nil
-	case err != nil:
+	case MergeOriginGetURLFailed:
 		return fmt.Sprintf(mergePrefix+"%s failed (%s), so origin's repository is unknown and nothing was merged: ralph org "+
 			"merge merges only into origin's repository, so add origin (git remote add origin <URL>) and %s",
 			mergeGuaranteeGetURL, mergeGuaranteeErrText(err), m.again()), nil
-	}
-	host, repo, ok := mergeOriginFromURL(line)
-	// A host, owner or repo that starts with "-" is refused as no host and
-	// owner/repo: gh repo view takes <host>/<owner>/<repo> as an argument,
-	// where gh would read a leading "-" as a flag. merge-order's reading of
-	// origin does not check this.
-	dashed := strings.HasPrefix(host, "-") || strings.HasPrefix(repo.owner, "-") || strings.HasPrefix(repo.name, "-")
-	if !ok || dashed {
+	case MergeOriginNoRepository:
 		return fmt.Sprintf(mergePrefix+"origin's URL names no host and owner/repo (a local path, file://, or a scheme other "+
 			"than https, http, ssh and git), so there is no GitHub repository to merge in and nothing was merged: point origin "+
 			"at the GitHub repository (git remote set-url origin <URL>) and %s", m.again()), nil
 	}
-	r.apiHost, r.repo = mergeGuaranteeAPIHost(host), repo
-	r.repoArg = r.apiHost + "/" + repo.String()
+	r.apiHost, r.repo, r.repoArg = origin.apiHost, origin.repo, origin.Arg()
 	return "", nil
 }
 

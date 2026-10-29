@@ -20,18 +20,20 @@ import (
 // Tests for `ralph org cleanup` (plan
 // docs/plans/active/2026-10-28-org-merge-cleanup.md, S3: AC2, AC4 and AC6 at
 // the command line). The checks before the removal are covered by
-// internal/org/cleanup_test.go. These unit-test cleanupSteps and
-// cleanupPrinter, and run the command with the real git and
-// scripts/ralph-worktree.sh against a bare origin (newCleanupCLIFixture, on
-// merge's newMergeCLIWorktreeFixture) and the fake gh of merge-order
-// (mergeOrderFakeGH), which answers gh pr list per branch, so no test runs a
-// real gh or reaches a network. None runs in parallel: they set PATH and
-// chdir.
+// internal/org/cleanup_test.go. These unit-test cleanupSteps,
+// cleanupOriginRefusal, and cleanupPrinter, and run the command with the real
+// git and scripts/ralph-worktree.sh against a bare origin
+// (newCleanupCLIFixture, on merge's newMergeCLIWorktreeFixture) and the fake
+// gh of merge-order (mergeOrderFakeGH), which answers gh pr list per branch,
+// so no test runs a real gh or reaches a network. None runs in parallel: they
+// set PATH and chdir.
 
 // cleanupCLIFixture is merge's worktree fixture (the main worktree work with
 // the ledger, feat/a's feature worktree org-a made by the script's ensure,
 // org a's binding, gate_passed, and disband) with merge-order's fake gh, which
-// prints <ghPRs>/<branch>.json for gh pr list --head <branch>.
+// prints <ghPRs>/<branch>.json for gh pr list --head <branch> whatever its -R.
+// git remote get-url origin prints https://github.com/o/r.git
+// ($MERGE_ORDER_ORIGIN_URL), so cleanup reads the PRs with -R github.com/o/r.
 type cleanupCLIFixture struct {
 	*mergeCLIFixture
 	wt string // feat/a's feature worktree
@@ -99,13 +101,20 @@ func cleanupLeftErr(n int) string {
 		"to do next"
 }
 
+// cleanupGHCall is the fake gh's log line for cleanup's PR lookup of branch:
+// merge-order's, in origin's repository o/r (S-X1 of the plan).
+func cleanupGHCall(branch string) string {
+	return mergeOrderGHCall(branch) + " -R github.com/o/r"
+}
+
 // AC2 through the CLI and the real scripts/ralph-worktree.sh: after a squash
 // merge on GitHub and the deletion of origin's feat/a, which git branch -d
 // refuses, cleanup removes the feature worktree org-a, its registration, the
 // local branch, and the record, records one worktree_cleaned with
 // via=cleanup, prints CLEANED:, exits 0, releases regate.lock, and runs no gh
-// but gh pr list. Run again, with nothing left of feat/a, it prints nothing
-// to clean up and exits 0 with the ledger as it was, with --branch feat/a too.
+// but gh pr list, in origin's repository. Run again, with nothing left of
+// feat/a, it prints nothing to clean up and exits 0 with the ledger as it
+// was, with --branch feat/a too.
 func TestOrgCleanup_CleansUpABranchMergedOnGitHub(t *testing.T) {
 	fx := newCleanupCLIFixture(t)
 	fx.squashMergeOnGitHub(t)
@@ -142,8 +151,8 @@ func TestOrgCleanup_CleansUpABranchMergedOnGitHub(t *testing.T) {
 		t.Errorf("the ledger ends with %+v (%d worktree_cleaned); want org a's one worktree_cleaned with %q", last,
 			len(fx.cleanedEvents(t)), want)
 	}
-	if got := fx.ghCalls(t); !slices.Equal(got, []string{mergeOrderGHCall("feat/a")}) {
-		t.Errorf("gh calls = %q; want only merge-order's gh pr list of feat/a", got)
+	if got := fx.ghCalls(t); !slices.Equal(got, []string{cleanupGHCall("feat/a")}) {
+		t.Errorf("gh calls = %q; want only merge-order's gh pr list of feat/a, with -R github.com/o/r", got)
 	}
 	t.Run("again, with nothing left", func(t *testing.T) {
 		before := fileBytesOrAbsent(t, org.ManifestPathIn(fx.stateDir))
@@ -207,6 +216,115 @@ func TestOrgCleanup_BranchWhosePRIsNotMergedIsRefused(t *testing.T) {
 	}
 	if after := fx.snapshot(t); after != before {
 		t.Errorf("cleanup of an open PR's branch changed something:\n%s\n->\n%s", before, after)
+	}
+}
+
+// Finding 1 of docs/reports/cross-review-triage-org-merge-cleanup.md (S-X1 of
+// the plan): gh's PR lookup is pinned to origin's repository o/r, as ralph org
+// merge pins its own, so a MERGED PR at feat/a's head that gh returns with the
+// url of another owner/name, or of o/r on another host, is not used: cleanup
+// skips feat/a with a SKIPPED: line that names the PR gh returned, exit 1, and
+// --branch feat/a is refused with the same reason and nothing on stdout. Both
+// gh calls carry -R github.com/o/r, and nothing is removed or recorded.
+func TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"another owner/name", "https://github.com/x/r/pull/7"},
+		{"o/r on another host", "https://ghe.example.com/o/r/pull/7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newCleanupCLIFixture(t)
+			fx.squashMergeOnGitHub(t)
+			pr := cleanupCLIPR(7, "MERGED", fx.head)
+			pr.URL = tc.url
+			fx.prs(t, "feat/a", pr)
+			before := fx.snapshot(t)
+
+			why := "no answer of gh was used: gh pr list --head feat/a -R github.com/o/r returned PR #7 with the url " +
+				strconv.Quote(tc.url) + ", which is not a PR of origin's repository github.com/o/r"
+			stdout, stderr, err := fx.cleanup(t)
+			want := "SKIPPED: feat/a whether its PR was merged is not known (" + why + "), so nothing was removed: once gh reads " +
+				"its PR, run ralph org cleanup again\n"
+			if err == nil || err.Error() != cleanupLeftErr(1) || stderr != "" || stdout != want {
+				t.Errorf("cleanup: err %v, stderr %q, stdout:\n%s\nwant exit 1 with %q and:\n%s", err, stderr, stdout,
+					cleanupLeftErr(1), want)
+			}
+			stdout, _, err = fx.cleanup(t, "--branch", "feat/a")
+			wantErr := "org: cleanup: whether the PR of the branch feat/a was merged is not known (" + why + "), so nothing was " +
+				"removed: once gh reads its PR, run ralph org cleanup --branch feat/a again"
+			if err == nil || err.Error() != wantErr || stdout != "" {
+				t.Errorf("cleanup --branch feat/a: err %v, stdout %q; want the error %q and nothing on stdout", err, stdout, wantErr)
+			}
+			if got := fx.ghCalls(t); !slices.Equal(got, []string{cleanupGHCall("feat/a"), cleanupGHCall("feat/a")}) {
+				t.Errorf("gh calls = %q; want gh pr list of feat/a with -R github.com/o/r, twice", got)
+			}
+			if after := fx.snapshot(t); after != before {
+				t.Errorf("cleanup on another repository's PR changed something:\n%s\n->\n%s", before, after)
+			}
+		})
+	}
+}
+
+// S-X1's origin: when origin's URL names no GitHub repository (the bare
+// origin's local path, a file URL) or git remote get-url origin fails,
+// cleanup is refused before it runs gh, without --branch and with it, as
+// ralph org merge refuses such an origin: exit 1 with the reason and the
+// command to run again, nothing on stdout, and nothing removed or recorded.
+// The other origins that name no repository are
+// TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot's (internal/org), and
+// the wording of each problem TestOrgCleanup_OriginRefusalForEachProblem's.
+func TestOrgCleanup_OriginThatNamesNoGitHubRepositoryIsRefused(t *testing.T) {
+	const only = "ralph org cleanup removes a feature worktree only once the PR of its branch in origin's repository is merged"
+	noRepo := "org: cleanup: origin's URL names no host and owner/repo (a local path, file://, or a scheme other than https, " +
+		"http, ssh and git), so there is no GitHub repository to read the PRs in and nothing was removed: " + only + ", so " +
+		"point origin at the GitHub repository (git remote set-url origin <URL>) and "
+	for _, tc := range []struct {
+		name   string
+		origin string // $MERGE_ORDER_ORIGIN_URL; "" leaves git remote get-url origin to the real git
+		// noRemote removes origin, so git remote get-url origin fails.
+		noRemote bool
+		// With suffix empty, the refusal is prefix and then the command to run
+		// again; else prefix, git's error, suffix, and then that command.
+		prefix, suffix string
+	}{
+		{"the bare origin's local path", "", false, noRepo, ""},
+		{"a file URL", "file:///srv/o/r.git", false, noRepo, ""},
+		{"no remote origin", "", true, "org: cleanup: git remote get-url origin failed (exit status ",
+			"), so origin's repository is unknown and nothing was removed: " + only + ", so add origin (git remote add origin " +
+				"<URL>) and "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newCleanupCLIFixture(t)
+			fx.squashMergeOnGitHub(t)
+			t.Setenv("MERGE_ORDER_ORIGIN_URL", tc.origin)
+			if tc.noRemote {
+				runLedgerTestGit(t, "-C", fx.work, "remote", "remove", "origin")
+			}
+			before := fx.snapshot(t)
+
+			for _, run := range []struct {
+				extra []string
+				again string
+			}{
+				{nil, "run ralph org cleanup again"},
+				{[]string{"--branch", "feat/a"}, "run ralph org cleanup --branch feat/a again"},
+			} {
+				stdout, _, err := fx.cleanup(t, run.extra...)
+				refused := err != nil && err.Error() == tc.prefix+run.again
+				if tc.suffix != "" {
+					refused = err != nil && strings.HasPrefix(err.Error(), tc.prefix) && strings.HasSuffix(err.Error(), tc.suffix+run.again)
+				}
+				if !refused || stdout != "" {
+					t.Errorf("cleanup %q: err %v, stdout %q; want the error %q...%q and nothing on stdout", run.extra, err, stdout,
+						tc.prefix, tc.suffix+run.again)
+				}
+			}
+			if got := fx.ghCalls(t); len(got) != 0 {
+				t.Errorf("gh ran: %q", got)
+			}
+			if after := fx.snapshot(t); after != before {
+				t.Errorf("a refused cleanup changed something:\n%s\n->\n%s", before, after)
+			}
+		})
 	}
 }
 
@@ -460,9 +578,11 @@ func TestOrgCleanup_RefusedWhileALegacyLedgerHasActiveSeats(t *testing.T) {
 	}
 }
 
-// The command's context reaches merge-order: with it done before the
-// command runs, cleanup exits 1 with merge-order's interruption, nothing on
-// stdout, and nothing removed or recorded.
+// The command's context reaches the reads before the removal: with it done
+// before the command runs, cleanup exits 1 with the interruption of the first
+// of them, the read of origin (S-X1 of the plan), nothing on stdout, and
+// nothing removed or recorded. merge-order's own interruption is
+// TestMergeOrder_InterruptedWhileGHRunsIsAnError's.
 func TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing(t *testing.T) {
 	fx := newCleanupCLIFixture(t)
 	fx.squashMergeOnGitHub(t)
@@ -471,10 +591,12 @@ func TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing(t *testing.T) {
 	cancel()
 
 	stdout, _, err := runOrgCmdStreamsContext(ctx, "cleanup", "--state-dir", fx.stateDir)
-	const want = "org: cleanup: nothing was removed, since the feature branches could not be read as ralph org merge-order " +
-		"--all reads them: org: merge-order: interrupted ("
-	if err == nil || !strings.HasPrefix(err.Error(), want) || stdout != "" {
-		t.Errorf("cleanup with its context done: err %v, stdout %q; want it to start with %q and nothing on stdout", err, stdout, want)
+	const want = "org: cleanup: interrupted (context canceled) while git remote get-url origin ran: nothing was removed"
+	if err == nil || err.Error() != want || stdout != "" {
+		t.Errorf("cleanup with its context done: err %v, stdout %q; want the error %q and nothing on stdout", err, stdout, want)
+	}
+	if got := fx.ghCalls(t); len(got) != 0 {
+		t.Errorf("gh ran: %q", got)
 	}
 	if after := fx.snapshot(t); after != before {
 		t.Errorf("an interrupted cleanup changed something:\n%s\n->\n%s", before, after)
@@ -484,10 +606,11 @@ func TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing(t *testing.T) {
 // cleanupSteps over merge-order's results: without --branch, only a branch
 // with a binding that is its org's latest is dealt with, cleaned up at its PR's
 // head when the PR is merged and reported when gh did not tell (failed,
-// limit_forks, skipped); with --branch, that branch alone, its BoundTo
-// ignored, or the refusal of a branch not in the ledger, with no binding, no
-// PR, a PR gh did not read, or a PR that is not merged. No entry is nothing
-// to do without --branch, and gh not found is refused either way.
+// limit_forks, skipped), with merge-order's PRLookupWhy (S-X1 of the plan)
+// when it has one; with --branch, that branch alone, its BoundTo ignored, or
+// the refusal of a branch not in the ledger, with no binding, no PR, a PR gh
+// did not read (its PRLookupWhy escaped), or a PR that is not merged. No entry
+// is nothing to do without --branch, and gh not found is refused either way.
 func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 	const head = "0123456789abcdef0123456789abcdef01234567"
 	bind := func(boundTo string) *org.MergeOrderBinding {
@@ -499,6 +622,15 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 	entry := func(branch, class string, p *org.MergeOrderPR, lookup string, b *org.MergeOrderBinding) org.MergeOrderEntry {
 		return org.MergeOrderEntry{Branch: branch, Class: class, PR: p, PRLookup: lookup, Binding: b}
 	}
+	withWhy := func(e org.MergeOrderEntry, why string) org.MergeOrderEntry {
+		e.PRLookupWhy = why
+		return e
+	}
+	const (
+		failedWhy  = "exit status 1: HTTP 502\x1b[31m"
+		skippedWhy = `gh pr list --head feat/x -R github.com/o/r returned PR #9 with the url "https://github.com/x/r/pull/9", ` +
+			"which is not a PR of origin's repository github.com/o/r"
+	)
 	found := org.MergeOrderPRLookupFound
 	res := org.MergeOrderResult{GHAvailable: true, Entries: []org.MergeOrderEntry{
 		entry("feat/open", org.MergeClassReady, pr("OPEN"), found, bind("")),
@@ -507,22 +639,22 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 		entry("feat/gate-only", org.MergeClassMerged, pr("MERGED"), found, nil),
 		entry("feat/closed", org.MergeClassClosed, pr("CLOSED"), found, bind("")),
 		entry("feat/none", org.MergeClassNoGate, nil, org.MergeOrderPRLookupNone, bind("")),
-		entry("feat/failed", org.MergeClassNoGate, nil, org.MergeOrderPRLookupFailed, bind("")),
+		withWhy(entry("feat/failed", org.MergeClassNoGate, nil, org.MergeOrderPRLookupFailed, bind("")), failedWhy),
 		entry("feat/forks", org.MergeClassNoGate, nil, org.MergeOrderPRLookupLimitForks, bind("")),
-		entry("feat/skipped", org.MergeClassNoGate, nil, org.MergeOrderPRLookupSkipped, bind("")),
+		withWhy(entry("feat/skipped", org.MergeClassNoGate, nil, org.MergeOrderPRLookupSkipped, bind("")), skippedWhy),
 		entry("feat/failed-rebound", org.MergeClassNoGate, nil, org.MergeOrderPRLookupFailed, bind("feat/merged")),
 		entry("feat/failed-gate-only", org.MergeClassNoGate, nil, org.MergeOrderPRLookupFailed, nil),
 	}}
 	unknown := func(why string) string {
-		return "whether its PR was merged is not known (" + why + "; the notes of ralph org merge-order --all say more), so " +
-			"nothing was removed: once gh reads its PR, run ralph org cleanup again"
+		return "whether its PR was merged is not known (" + why + "), so nothing was removed: once gh reads its PR, run ralph " +
+			"org cleanup again"
 	}
 	steps, err := cleanupSteps(res, "")
 	want := []cleanupStep{
 		{branch: "feat/merged", head: head, pr: 7},
-		{branch: "feat/failed", unknown: unknown("gh pr list failed for the branch")},
+		{branch: "feat/failed", unknown: unknown("gh pr list failed for the branch: " + failedWhy)},
 		{branch: "feat/forks", unknown: unknown("gh returned its limit of PRs for the branch, all from forks")},
-		{branch: "feat/skipped", unknown: unknown("no answer of gh was used")},
+		{branch: "feat/skipped", unknown: unknown("no answer of gh was used: " + skippedWhy)},
 	}
 	if err != nil || !reflect.DeepEqual(steps, want) {
 		t.Errorf("cleanupSteps without --branch = %+v, %v; want %+v", steps, err, want)
@@ -550,8 +682,11 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 		{"no PR", res, "feat/none", nil, "org: cleanup: gh found no PR for the branch feat/none, so nothing was removed: cleanup " +
 			"removes the feature worktree of a branch whose PR was merged"},
 		{"a PR gh did not read", res, "feat/failed", nil, "org: cleanup: whether the PR of the branch feat/failed was merged is " +
-			"not known (gh pr list failed for the branch; the notes of ralph org merge-order --all say more), so nothing was " +
-			"removed: once gh reads its PR, run ralph org cleanup --branch feat/failed again"},
+			`not known (gh pr list failed for the branch: exit status 1: HTTP 502\x1b[31m), so nothing was removed: once gh reads ` +
+			"its PR, run ralph org cleanup --branch feat/failed again"},
+		{"a PR gh did not use", res, "feat/skipped", nil, "org: cleanup: whether the PR of the branch feat/skipped was merged is " +
+			"not known (no answer of gh was used: " + skippedWhy + "), so nothing was removed: once gh reads its PR, run ralph org " +
+			"cleanup --branch feat/skipped again"},
 		{"an open PR", res, "feat/open", nil, "org: cleanup: PR #7 of the branch feat/open is OPEN, not MERGED, so nothing was " +
 			"removed: cleanup removes the feature worktree of a branch whose PR was merged"},
 		{"a closed PR", res, "feat/closed", nil, "org: cleanup: PR #7 of the branch feat/closed is CLOSED, not MERGED, so " +
@@ -594,10 +729,56 @@ func TestOrgCleanup_NamedStepQuotesTheBranchInTheCommand(t *testing.T) {
 			}}}
 			_, err := cleanupNamedStep(res, tc.branch)
 			want := "org: cleanup: whether the PR of the branch " + tc.branch + " was merged is not known (gh pr list failed " +
-				"for the branch; the notes of ralph org merge-order --all say more), so nothing was removed: once gh reads " +
-				"its PR, run ralph org cleanup --branch " + tc.word + " again"
+				"for the branch), so nothing was removed: once gh reads its PR, run ralph org cleanup --branch " + tc.word + " again"
 			if err == nil || err.Error() != want {
 				t.Errorf("cleanupNamedStep error = %v; want %q", err, want)
+			}
+		})
+	}
+}
+
+// cleanupOriginRefusal over each problem org.ReadMergeOrigin returns (S-X1 of
+// the plan): none for a repository read; the interruption with ctx's cause; and
+// for a get-url that timed out or failed, or an origin with no GitHub
+// repository, a refusal worded as ralph org merge's, git's error escaped,
+// that says the cleanup removes only on the word of origin's PR, with the
+// command to run again, --branch quoted as one shell word. A problem it does
+// not know is refused too.
+func TestOrgCleanup_OriginRefusalForEachProblem(t *testing.T) {
+	const only = "ralph org cleanup removes a feature worktree only once the PR of its branch in origin's repository is merged"
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(errors.New("test stopped"))
+	for _, tc := range []struct {
+		name    string
+		problem org.MergeOriginProblem
+		err     error
+		branch  string
+		want    string // "" for no refusal
+	}{
+		{"read", org.MergeOriginRead, nil, "", ""},
+		{"interrupted", org.MergeOriginInterrupted, nil, "",
+			"org: cleanup: interrupted (test stopped) while git remote get-url origin ran: nothing was removed"},
+		{"timed out", org.MergeOriginTimedOut, errors.New("timed out after 15s: signal: killed"), "",
+			"org: cleanup: git remote get-url origin failed (timed out after 15s: signal: killed), so origin's repository is " +
+				"unknown and nothing was removed: check the repository's git config and run ralph org cleanup again"},
+		{"get-url failed", org.MergeOriginGetURLFailed, errors.New("exit status 2: error: No such remote 'origin'\n\x1b[31m"),
+			"feat/a", `org: cleanup: git remote get-url origin failed (exit status 2: error: No such remote 'origin'\n\x1b[31m), so ` +
+				"origin's repository is unknown and nothing was removed: " + only + ", so add origin (git remote add origin <URL>) " +
+				"and run ralph org cleanup --branch feat/a again"},
+		{"no repository", org.MergeOriginNoRepository, nil, "feat/a;b",
+			"org: cleanup: origin's URL names no host and owner/repo (a local path, file://, or a scheme other than https, http, " +
+				"ssh and git), so there is no GitHub repository to read the PRs in and nothing was removed: " + only + ", so point " +
+				"origin at the GitHub repository (git remote set-url origin <URL>) and run ralph org cleanup --branch 'feat/a;b' again"},
+		{"a problem it does not know", org.MergeOriginProblem(99), nil, "",
+			"org: cleanup: origin's repository could not be read (problem 99), so nothing was removed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := cleanupOriginRefusal(ctx, tc.problem, tc.err, tc.branch)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("refusal = %v; want none", err)
+			case tc.want != "" && (err == nil || err.Error() != tc.want):
+				t.Errorf("refusal = %v;\nwant %q", err, tc.want)
 			}
 		})
 	}
@@ -712,6 +893,11 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"A branch whose PR gh could not read (pr_lookup failed, limit_forks, or skipped in merge-order's --json) gets a SKIPPED: line",
 			"The old branch of an org_id that was bound again to another branch later is handled only when --branch names it.",
 			"refuses, removing nothing, when the ledger does not name it, it has no feature binding, gh does not read its PR, or the PR is not MERGED",
+			"As ralph org merge does, cleanup reads the PRs in origin's repository only: gh pr list gets -R <host>/<owner>/<repo>, " +
+				"read from git remote get-url origin, and when gh returns a PR whose url names another host or owner/repo, no PR is " +
+				"used for any branch",
+			"When origin's URL names no GitHub repository (a local path, file://, or another scheme) or git remote get-url origin " +
+				"fails, cleanup refuses before it reads the ledger, and removes nothing.",
 			"that the worktree has no uncommitted change or untracked file and no rebase or merge in progress (files .gitignore " +
 				"names do not count and go with the worktree); that the local branch is at the head the PR merged; and that the " +
 				"worktree has that branch checked out at that head",
@@ -726,6 +912,7 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"Exit codes: 0 when every branch was cleaned up or there was nothing to clean up; 1 when a branch was skipped, gh is " +
 				"not on PATH (whether a PR was merged cannot be told, so nothing is removed), the main worktree is not found, " +
 				"--branch is refused,",
+			"--branch is refused, origin names no GitHub repository or cannot be read, for an interrupt",
 			"so --org-id is refused",
 			"--branch string",
 		}},
