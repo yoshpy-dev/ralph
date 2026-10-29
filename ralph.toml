@@ -1,10 +1,11 @@
 # ralph.toml — project-level configuration for the ralph CLI.
 # This repository's file writes only what differs from the template
 # (templates/base/ralph.toml, which lists every key and what it does): the
-# four review switches below, which the template keeps off. Every other value
-# is the built-in default, since `ralph config get`, `ralph doctor`, and the
-# `ralph org` verbs read this file with config.Load, which starts from the
-# defaults.
+# four review switches below, which the template keeps off, and
+# [org.gate].regate_checks = "ci", where the template keeps "local". Every
+# other value is the built-in default, since `ralph config get`,
+# `ralph doctor`, and the `ralph org` verbs read this file with config.Load,
+# which starts from the defaults.
 
 [standard]
 plan_advisory = true
@@ -13,3 +14,6 @@ cross_review = true
 [org.review]
 plan_advisory = true
 cross_review = true
+
+[org.gate]
+regate_checks = "ci"

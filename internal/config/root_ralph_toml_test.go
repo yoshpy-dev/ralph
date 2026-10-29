@@ -13,14 +13,17 @@ import (
 )
 
 // TestRootRalphToml_KnownKeysAndReviewSwitchesOn reads this repository's own
-// ralph.toml strictly: every key must name a Config field, and the four
-// review switches must be on. Load cannot check this, since it ignores keys
-// with no field (TestLoad_IgnoresRetiredOrgBudgetTable), so a misspelled
-// switch would load as the default, off, without an error.
+// ralph.toml strictly: every key must name a Config field, the four review
+// switches must be on, and [org.gate].regate_checks must be ci (issue #264).
+// Load cannot check this, since it ignores keys with no field
+// (TestLoad_IgnoresRetiredOrgBudgetTable), so a misspelled switch would load
+// as the default, off, and a misspelled regate_checks as local, without an
+// error.
 //
 // The file is decoded into a zero Config, not Default(), so each switch is
-// true only when the file itself sets it. A missing file fails the test:
-// the file is tracked, and without it the switches fall back to off.
+// true, and regate_checks is ci, only when the file itself sets it. A
+// missing file fails the test: the file is tracked, and without it the
+// switches fall back to off.
 func TestRootRalphToml_KnownKeysAndReviewSwitchesOn(t *testing.T) {
 	path := filepath.Join(repoRoot(t), "ralph.toml")
 	data, err := os.ReadFile(path)
@@ -56,5 +59,8 @@ func TestRootRalphToml_KnownKeysAndReviewSwitchesOn(t *testing.T) {
 		if !s.on {
 			t.Errorf("%s: %s is not true", path, s.key)
 		}
+	}
+	if got := cfg.Org.Gate.RegateChecks; got != RegateChecksCI {
+		t.Errorf("%s: org.gate.regate_checks = %q, want %q", path, got, RegateChecksCI)
 	}
 }

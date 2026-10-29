@@ -1958,6 +1958,61 @@ func TestLoad_IgnoresUnknownReviewSwitchKeys(t *testing.T) {
 	}
 }
 
+// TestDefault_OrgGate verifies the [org.gate] default (issue #264): local,
+// the gate scripts on this machine, as regate ran them before the setting.
+func TestDefault_OrgGate(t *testing.T) {
+	if got := Default().Org.Gate.RegateChecks; got != "local" {
+		t.Errorf("gate.regate_checks = %q, want %q", got, "local")
+	}
+	if RegateChecksLocal != "local" || RegateChecksCI != "ci" {
+		t.Errorf("RegateChecksLocal, RegateChecksCI = %q, %q, want local, ci", RegateChecksLocal, RegateChecksCI)
+	}
+}
+
+// TestLoad_OrgGate covers [org.gate].regate_checks through Load(): an absent
+// section or an absent key keeps the default local, local and ci load as
+// written, and any other value, the empty string and another case included,
+// is an error naming the key, the value, and the two values.
+func TestLoad_OrgGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		wantChecks string // "" means Load must fail
+		wantErr    string
+	}{
+		{"no file content", "", RegateChecksLocal, ""},
+		{"absent section with other [org] tables", "[org]\nmax_seats = 3\n\n[org.review]\ncross_review = true\n", RegateChecksLocal, ""},
+		{"section without the key", "[org.gate]\n", RegateChecksLocal, ""},
+		{"local", "[org.gate]\nregate_checks = \"local\"\n", RegateChecksLocal, ""},
+		{"ci", "[org.gate]\nregate_checks = \"ci\"\n", RegateChecksCI, ""},
+		{"empty string", "[org.gate]\nregate_checks = \"\"\n", "", `[org.gate].regate_checks "" must be "local" or "ci"`},
+		{"unknown value", "[org.gate]\nregate_checks = \"remote\"\n", "", `[org.gate].regate_checks "remote" must be "local" or "ci"`},
+		{"another case", "[org.gate]\nregate_checks = \"CI\"\n", "", `[org.gate].regate_checks "CI" must be`},
+		{"surrounding space", "[org.gate]\nregate_checks = \"ci \"\n", "", `[org.gate].regate_checks "ci " must be`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ralph.toml")
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if tt.wantChecks == "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Load: err = %v, want an error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: unexpected error: %v", err)
+			}
+			if cfg.Org.Gate.RegateChecks != tt.wantChecks {
+				t.Errorf("gate.regate_checks = %q, want %q", cfg.Org.Gate.RegateChecks, tt.wantChecks)
+			}
+		})
+	}
+}
+
 // TestLoad_DriverPoolOnlyOverride_FiltersInheritedDefaultModelPool verifies
 // that a ralph.toml overriding only [org].driver_pool (leaving model_pool
 // unset) inherits the default model_pool filtered down to the declared
