@@ -320,9 +320,13 @@ func TestResolveAgmsgHome_Precedence(t *testing.T) {
 		AgmsgHomeOverride = home
 	}
 
-	t.Run("override takes precedence over env, config, and default", func(t *testing.T) {
+	// Every case sets RALPH_ORG_AGMSG_HOME, which ralph no longer reads (plan
+	// 2026-10-29-local-config-org, AC6): the result is the same as without
+	// it.
+	t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg-home")
+
+	t.Run("override takes precedence over config and default", func(t *testing.T) {
 		setOverride(t, "/override/agmsg-home")
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg-home")
 		if got := ResolveAgmsgHome("/config/agmsg-home"); got != "/override/agmsg-home" {
 			t.Fatalf("got %q, want %q", got, "/override/agmsg-home")
 		}
@@ -330,45 +334,34 @@ func TestResolveAgmsgHome_Precedence(t *testing.T) {
 
 	t.Run("tilde in override value is expanded", func(t *testing.T) {
 		setOverride(t, "~/override/agmsg")
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
 		want := filepath.Join(homeDir, "override", "agmsg")
 		if got := ResolveAgmsgHome(""); got != want {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
 
-	t.Run("env takes precedence over config and default", func(t *testing.T) {
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg-home")
-		if got := ResolveAgmsgHome("/config/agmsg-home"); got != "/env/agmsg-home" {
-			t.Fatalf("got %q, want %q", got, "/env/agmsg-home")
-		}
-	})
-
-	t.Run("config takes precedence over default when env unset", func(t *testing.T) {
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
+	t.Run("config takes precedence over default and the env is not read", func(t *testing.T) {
 		if got := ResolveAgmsgHome("/config/agmsg-home"); got != "/config/agmsg-home" {
 			t.Fatalf("got %q, want %q", got, "/config/agmsg-home")
 		}
 	})
 
-	t.Run("default used when env and config both unset", func(t *testing.T) {
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
+	t.Run("default used when config unset, whatever the env says", func(t *testing.T) {
 		want := filepath.Join(homeDir, ".agents", "skills", "agmsg")
 		if got := ResolveAgmsgHome(""); got != want {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
 
-	t.Run("tilde in env value is expanded", func(t *testing.T) {
+	t.Run("default used with the env set to a ~/ value", func(t *testing.T) {
 		t.Setenv("RALPH_ORG_AGMSG_HOME", "~/custom/agmsg")
-		want := filepath.Join(homeDir, "custom", "agmsg")
+		want := filepath.Join(homeDir, ".agents", "skills", "agmsg")
 		if got := ResolveAgmsgHome(""); got != want {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
 
 	t.Run("tilde in config value is expanded", func(t *testing.T) {
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
 		want := filepath.Join(homeDir, "config-agmsg")
 		if got := ResolveAgmsgHome("~/config-agmsg"); got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -376,7 +369,6 @@ func TestResolveAgmsgHome_Precedence(t *testing.T) {
 	})
 
 	t.Run("non-tilde absolute path is unchanged", func(t *testing.T) {
-		t.Setenv("RALPH_ORG_AGMSG_HOME", "")
 		if got := ResolveAgmsgHome("/abs/agmsg-home"); got != "/abs/agmsg-home" {
 			t.Fatalf("got %q, want %q", got, "/abs/agmsg-home")
 		}

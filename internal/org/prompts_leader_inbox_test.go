@@ -10,8 +10,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // leaderMonitorEndLine is the line the leader's Monitor command echoes when
@@ -188,9 +186,10 @@ func TestRenderRolePrompt_Leader_WaitsPointAtTheAgmsgInboxSection(t *testing.T) 
 // home's scripts directory as one single-quoted shell word (a single quote
 // in it closed, escaped, and reopened), a trailing / dropped, a relative home
 // made absolute against the working directory, and an empty home read as
-// driver.ResolveAgmsgHome(""): RALPH_ORG_AGMSG_HOME, else the default home
-// under $HOME. Every inbox.sh and history.sh command of the rendered leader
-// template has it, and no placeholder is left.
+// driver.ResolveAgmsgHome(""): the default home under $HOME, also when
+// RALPH_ORG_AGMSG_HOME, which ralph no longer reads, names another (plan
+// 2026-10-29-local-config-org, AC6). Every inbox.sh and history.sh command
+// of the rendered leader template has it, and no placeholder is left.
 func TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -209,14 +208,15 @@ func TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir(t *testing.T) {
 			}
 			return "rel/agmsg", "'" + filepath.Join(wd, "rel", "agmsg", "scripts") + "'"
 		}},
-		{"an empty home reads RALPH_ORG_AGMSG_HOME", func(t *testing.T) (string, string) {
+		{"an empty home with RALPH_ORG_AGMSG_HOME set is still the default home", func(t *testing.T) (string, string) {
 			setAgmsgHomeOverride(t, "")
-			t.Setenv(driver.AgmsgHomeEnv, "/env/agmsg")
-			return "", "'/env/agmsg/scripts'"
+			t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg")
+			t.Setenv("HOME", "/home/u")
+			return "", "'/home/u/.agents/skills/agmsg/scripts'"
 		}},
 		{"an empty home with no RALPH_ORG_AGMSG_HOME is the default home", func(t *testing.T) (string, string) {
 			setAgmsgHomeOverride(t, "")
-			t.Setenv(driver.AgmsgHomeEnv, "")
+			t.Setenv("RALPH_ORG_AGMSG_HOME", "")
 			t.Setenv("HOME", "/home/u")
 			return "", "'/home/u/.agents/skills/agmsg/scripts'"
 		}},

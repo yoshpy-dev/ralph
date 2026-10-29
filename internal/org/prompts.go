@@ -65,9 +65,8 @@ type RolePromptVars struct {
 	// is its scripts directory, made absolute and given as one shell word
 	// (shellQuote), so the inbox.sh and history.sh commands of
 	// prompts/leader.md, the only template that references it, read the
-	// team's store ralph writes to even when [org].agmsg_home or
-	// RALPH_ORG_AGMSG_HOME names another agmsg. Empty means
-	// driver.ResolveAgmsgHome("").
+	// team's store ralph writes to even when [org].agmsg_home names another
+	// agmsg. Empty means driver.ResolveAgmsgHome("") (the default home).
 	AgmsgHome string
 }
 

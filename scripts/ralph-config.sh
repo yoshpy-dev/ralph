@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 # ralph-config.sh — shared configuration for the standard-flow development
-# harness's /plan and /cross-review reviewer calls, plus one [org] default kept
-# for a lock-step test (see the [org] block below).
+# harness's /plan and /cross-review reviewer calls.
 #
 # The Ralph Loop autonomous execution system (its batch orchestrator/pipeline
 # scripts, the per-phase CLI driver, and the legacy shell CLI) was removed;
@@ -42,31 +41,7 @@ RALPH_CLAUDE_REVIEWER_MODEL="${RALPH_CLAUDE_REVIEWER_MODEL:-opus}"
 RALPH_CODEX_REVIEWER_MODEL="${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}"
 RALPH_CODEX_REASONING_EFFORT="${RALPH_CODEX_REASONING_EFFORT:-xhigh}"
 
-# ═══════════════════════════════════════════════════════════════════
-# [org] default — RALPH_ORG_AGMSG_HOME only, which the ralph binary reads
-# from the environment (driver.ResolveAgmsgHome). The line below is not
-# exported; the note above the export line says why.
-# internal/config/defaults_sync_test.go (ralph repository source) compares
-# its default with config.Default(). This file sets no other [org]
-# default: those are config.Default()'s values, also written in the
-# ralph.toml that `ralph init` scaffolds, and no `ralph org` verb reads
-# them from the shell.
-# ═══════════════════════════════════════════════════════════════════
-
-RALPH_ORG_AGMSG_HOME="${RALPH_ORG_AGMSG_HOME:-~/.agents/skills/agmsg}"
-
 # Export so values reach any grandchild processes.
-#
-# RALPH_ORG_AGMSG_HOME is deliberately NOT exported here. The Go binary's
-# driver.ResolveAgmsgHome treats env as the highest-precedence override of
-# `[org].agmsg_home` (env > toml > default). If this default assignment
-# were exported unconditionally, every `ralph org` process launched from a
-# shell that merely sourced this file would see the env var "set" and
-# silently ignore a user-configured `[org].agmsg_home` in ralph.toml — env
-# should only win when the *user* actually set it, not because a pipeline
-# script sourced defaults. The default-assignment line above is kept
-# unexported so `defaults_sync_test.go` (which parses this file's text via
-# regex) still sees the same default value.
 export RALPH_CLAUDE_REVIEWER_MODEL RALPH_CODEX_REVIEWER_MODEL RALPH_CODEX_REASONING_EFFORT
 
 # ═══════════════════════════════════════════════════════════════════

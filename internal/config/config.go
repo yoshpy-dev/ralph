@@ -44,10 +44,9 @@ type StandardConfig struct {
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
 // `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
 // validates the fields, and their defaults are kept in lock-step with
-// templates/base/ralph.toml; AgmsgHome's is also compared with
-// RALPH_ORG_AGMSG_HOME in scripts/ralph-config.sh, and
-// Review.MaxCrossReviewCycles's with RALPH_STANDARD_MAX_PIPELINE_CYCLES there
-// (the checks are in defaults_sync_test.go). The org runtime's design is
+// templates/base/ralph.toml; Review.MaxCrossReviewCycles's is also compared
+// with RALPH_STANDARD_MAX_PIPELINE_CYCLES in scripts/ralph-config.sh (the
+// checks are in defaults_sync_test.go). The org runtime's design is
 // docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
@@ -89,8 +88,9 @@ type OrgConfig struct {
 	// AgmsgHome is the agmsg installation directory (a collection of
 	// scripts, not a single binary -- see internal/org/driver/agmsg.go).
 	// The runtime-effective value is resolved by
-	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which lets env
-	// RALPH_ORG_AGMSG_HOME override this config value.
+	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which uses this config
+	// value (ralph.local.toml's when it sets one) and else the default; no
+	// environment variable overrides it.
 	AgmsgHome string `toml:"agmsg_home"`
 	// Permissions holds the role-scoped seat permission-mode envelope
 	// (internal/org's ResolvePermissionMode/permissionArgsForDriver consume

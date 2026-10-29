@@ -8,10 +8,9 @@ set -eu
 # RALPH_*_MODEL, RALPH_MAX_* iteration caps) were removed along with the
 # Ralph Loop execution system. The surviving surface is the standard-flow
 # pipeline cycle cap (RALPH_STANDARD_MAX_PIPELINE_CYCLES), the
-# claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), the
+# claude-as-reviewer model fallback (RALPH_CLAUDE_REVIEWER_MODEL), and the
 # codex-as-reviewer model and effort fallbacks (RALPH_CODEX_REVIEWER_MODEL,
-# RALPH_CODEX_REASONING_EFFORT), and the one [org] default the ralph
-# binary reads from the environment (RALPH_ORG_AGMSG_HOME, unexported).
+# RALPH_CODEX_REASONING_EFFORT).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

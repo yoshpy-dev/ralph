@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
-	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // newOrgWatchCmd wires `ralph org watch` (PR④ pulse layer, AC-3/3b/3c/4/5;
@@ -377,10 +376,6 @@ func orgWatchChildArgs(cmd *cobra.Command, resolvedStateDir, configPath string, 
 // ones that can point herdr at an isolated server.
 var orgWatchChildDroppedEnv = []string{"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID", "HERDR_ENV"}
 
-// orgAgmsgHomeEnv is driver.AgmsgHomeEnv, the variable
-// driver.ResolveAgmsgHome reads before the [org].agmsg_home config value.
-const orgAgmsgHomeEnv = driver.AgmsgHomeEnv
-
 // orgWatchChild returns the detached watch that --detach and `ralph org
 // start` launch (plan 2026-10-12-org-watch-gate, F6): orgWatchChildArgs,
 // logging to watch.log of the state dir, run in the main worktree root of
@@ -390,12 +385,24 @@ const orgAgmsgHomeEnv = driver.AgmsgHomeEnv
 // main worktree (a --state-dir outside the repository) keeps this process's
 // working directory. The environment is this process's less
 // orgWatchChildDroppedEnv, with PWD set to the new working directory, as
-// os/exec sets it for a nil Env. When the working directory changes, a
-// relative agmsg home is passed made absolute in RALPH_ORG_AGMSG_HOME
-// (orgWatchChildAgmsgHome; cross-review cycle 2 #1 of org-watch-gate), so it
-// names the directory it named here. cfgAgmsgHome is the agmsg_home of the
-// config loaded from configPath.
+// os/exec sets it for a nil Env; nothing else in it changes.
+//
+// A relative [org].agmsg_home of a --config that was given (cfgAgmsgHome,
+// the agmsg_home of the config loaded from configPath; agmsgHomeIsRelative)
+// is refused before anything is built (plan 2026-10-29-local-config-org,
+// D7): the child resolves it from the main worktree root, not from this
+// directory, and no variable carries a value made absolute here to it any
+// more. It is refused wherever this process runs, as director start refuses
+// it (checkStartAgmsgHome, D13), so one rule covers both. ensureOrgWatch
+// calls this only when it launches a watch, so the refusal comes before
+// anything is launched or written, and a --detach or start that finds a
+// watch running is not refused. Without --config (or with an empty one) the
+// child reads the main worktree root's ralph.toml, whose relative
+// agmsg_home names a directory from that root, and nothing is refused.
 func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath, cfgAgmsgHome string, intervalSeconds int) (orgWatchLaunchRequest, error) {
+	if cmd.Flags().Changed("config") && configPath != "" && agmsgHomeIsRelative(cfgAgmsgHome) {
+		return orgWatchLaunchRequest{}, relativeAgmsgHomeError(cfgAgmsgHome, "the --config file "+configPath, "the watch runs")
+	}
 	args, err := orgWatchChildArgs(cmd, resolvedStateDir, configPath, intervalSeconds)
 	if err != nil {
 		return orgWatchLaunchRequest{}, err
@@ -404,17 +411,11 @@ func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configP
 	if root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource); ok {
 		req.dir = root
 	}
-	agmsgHome := ""
-	if req.dir != "" {
-		if agmsgHome, err = orgWatchChildAgmsgHome(cmd, configPath, cfgAgmsgHome); err != nil {
-			return orgWatchLaunchRequest{}, err
-		}
-	}
 	environ := os.Environ()
-	req.env = make([]string, 0, len(environ)+2)
+	req.env = make([]string, 0, len(environ)+1)
 	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
-		if slices.Contains(orgWatchChildDroppedEnv, name) || (req.dir != "" && name == "PWD") || (agmsgHome != "" && name == orgAgmsgHomeEnv) {
+		if slices.Contains(orgWatchChildDroppedEnv, name) || (req.dir != "" && name == "PWD") {
 			continue
 		}
 		req.env = append(req.env, kv)
@@ -422,53 +423,31 @@ func orgWatchChild(cmd *cobra.Command, resolvedStateDir, stateDirSource, configP
 	if req.dir != "" {
 		req.env = append(req.env, "PWD="+req.dir)
 	}
-	if agmsgHome != "" {
-		req.env = append(req.env, orgAgmsgHomeEnv+"="+agmsgHome)
-	}
 	return req, nil
 }
 
-// orgWatchChildAgmsgHome returns the agmsg home a detached watch that runs in
-// another working directory gets in RALPH_ORG_AGMSG_HOME, or "" when its
-// environment keeps what it inherits. driver.ResolveAgmsgHome reads the
-// variable, else the config's agmsg_home, and leaves a relative value
-// relative to the working directory. So a relative value of the variable, or
-// else (the variable empty or unset) a relative cfgAgmsgHome of a --config
-// that was given, is made absolute from this process's working directory.
-// Nothing else changes: without --config (or with an empty one) the child
-// reads the main worktree root's ralph.toml, whose relative agmsg_home names
-// a directory from that root, and an absolute value, or one that starts with
-// "~/", names the same directory from anywhere.
-func orgWatchChildAgmsgHome(cmd *cobra.Command, configPath, cfgAgmsgHome string) (string, error) {
-	home := os.Getenv(orgAgmsgHomeEnv)
-	if home == "" {
-		if !cmd.Flags().Changed("config") || configPath == "" {
-			return "", nil
-		}
-		home = cfgAgmsgHome
-	}
-	if !agmsgHomeIsRelative(home) {
-		return "", nil
-	}
-	abs, err := filepath.Abs(home)
-	if err != nil {
-		return "", fmt.Errorf("make the agmsg home %s absolute: %w", home, err)
-	}
-	return abs, nil
-}
-
 // agmsgHomeIsRelative reports whether home, an agmsg home as
-// RALPH_ORG_AGMSG_HOME or [org].agmsg_home spells it, names a directory
-// relative to the working directory of the process that reads it: it is
-// not empty, not absolute, and does not start with "~/", which
-// driver.ResolveAgmsgHome expands against the user's home (a bare "~" is
-// not expanded, so it counts as relative). orgWatchChildAgmsgHome makes such
-// a value absolute for a watch that runs in another directory, and director
-// start refuses one in a --config (plan 2026-10-15-org-director-start, D13)
-// and makes one in RALPH_ORG_AGMSG_HOME absolute for the launch script of a
-// launch_cmd director (plan 2026-10-16-org-director-launch-cmd).
+// [org].agmsg_home spells it, names a directory relative to the working
+// directory of the process that reads it: it is not empty, not absolute,
+// and does not start with "~/", which driver.ResolveAgmsgHome expands
+// against the user's home (a bare "~" is not expanded, so it counts as
+// relative). The watch that --detach and start launch (orgWatchChild, plan
+// 2026-10-29-local-config-org, D7) and director start (checkStartAgmsgHome,
+// plan 2026-10-15-org-director-start, D13) refuse such a value in a
+// --config; config.Load refuses one in ralph.local.toml.
 func agmsgHomeIsRelative(home string) bool {
 	return home != "" && !filepath.IsAbs(home) && !strings.HasPrefix(home, "~/")
+}
+
+// relativeAgmsgHomeError is the refusal of the relative agmsg home home
+// that file (such as "the --config file ralph.toml") sets, by a command
+// whose runs ("the watch runs", "the director and the watch run") says what
+// runs in the ledger's main worktree root. orgWatchChild and director start
+// (checkStartAgmsgHome) give it with their own prefix.
+func relativeAgmsgHomeError(home, file, runs string) error {
+	return fmt.Errorf("[org].agmsg_home %q in %s is a relative path: %s in the ledger's main worktree root when the ledger has one, not in this directory, "+
+		"so the path may name another directory there than here, and so another agmsg install; it is refused wherever ralph runs; "+
+		"give an absolute path (or one that starts with ~/)", home, file, runs)
 }
 
 // launchOrgWatch is orgWatchLaunch in production: the running ralph binary

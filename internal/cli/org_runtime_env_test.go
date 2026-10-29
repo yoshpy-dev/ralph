@@ -61,21 +61,25 @@ func TestNewOrgRuntimeAt_AgmsgRunnerAddsSelfNameOff(t *testing.T) {
 // 2026-10-23-busy-leader on the wiring side: the runtime the org verbs build
 // (spawn and start among them) sets Org.AgmsgHome, which the leader's role
 // prompt names, to the home its agmsg driver runs the scripts from, the one
-// driver.ResolveAgmsgHome reads from RALPH_ORG_AGMSG_HOME, else from
-// [org].agmsg_home.
+// driver.ResolveAgmsgHome reads from [org].agmsg_home, else the default
+// under $HOME. RALPH_ORG_AGMSG_HOME, which ralph no longer reads (plan
+// 2026-10-29-local-config-org, AC6), changes neither.
 func TestNewOrgRuntimeAt_AgmsgHomeIsTheAgmsgDriversHome(t *testing.T) {
+	homeDir := t.TempDir()
 	for _, tc := range []struct {
 		name string
-		env  string
+		env  string // RALPH_ORG_AGMSG_HOME
 		toml string // [org].agmsg_home of a ralph.toml given with --config; "" means none
 		want string
 	}{
-		{"RALPH_ORG_AGMSG_HOME", "/env/agmsg", "/toml/agmsg", "/env/agmsg"},
+		{"[org].agmsg_home with RALPH_ORG_AGMSG_HOME set", "/env/agmsg", "/toml/agmsg", "/toml/agmsg"},
 		{"[org].agmsg_home", "", "/toml/agmsg", "/toml/agmsg"},
+		{"no [org].agmsg_home with RALPH_ORG_AGMSG_HOME set", "/env/agmsg", "", filepath.Join(homeDir, ".agents", "skills", "agmsg")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setAgmsgHomeOverride(t, "")
-			t.Setenv(driver.AgmsgHomeEnv, tc.env)
+			t.Setenv("RALPH_ORG_AGMSG_HOME", tc.env)
+			t.Setenv("HOME", homeDir)
 			configPath := filepath.Join(t.TempDir(), "ralph.toml")
 			if err := os.WriteFile(configPath, []byte("[org]\nagmsg_home = \""+tc.toml+"\"\n"), 0o644); err != nil {
 				t.Fatal(err)

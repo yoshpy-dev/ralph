@@ -3313,17 +3313,21 @@ func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing
 // 2026-10-23-busy-leader at the spawn: the leader's role prompt file names
 // the Org's agmsg home's scripts directory, single-quoted, in its inbox.sh
 // and history.sh commands, and an Org with no agmsg home names the one
-// driver.ResolveAgmsgHome("") reads (here RALPH_ORG_AGMSG_HOME).
+// driver.ResolveAgmsgHome("") returns: the default home under $HOME, with
+// RALPH_ORG_AGMSG_HOME set to another directory, which ralph no longer
+// reads (plan 2026-10-29-local-config-org, AC6).
 func TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile(t *testing.T) {
+	homeDir := t.TempDir()
 	for _, tc := range []struct {
-		name, home, env, want string
+		name, home, want string
 	}{
-		{"the Org's agmsg home", "/opt/agmsg home", "/env/other", "'/opt/agmsg home/scripts'"},
-		{"no agmsg home on the Org", "", "/env/agmsg", "'/env/agmsg/scripts'"},
+		{"the Org's agmsg home", "/opt/agmsg home", "'/opt/agmsg home/scripts'"},
+		{"no agmsg home on the Org", "", shellQuote(filepath.Join(homeDir, ".agents", "skills", "agmsg", "scripts"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setAgmsgHomeOverride(t, "")
-			t.Setenv(driver.AgmsgHomeEnv, tc.env)
+			t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg")
+			t.Setenv("HOME", homeDir)
 			o, h, _ := testOrg(t)
 			o.AgmsgHome = tc.home
 			p := mustSpawnParams("org-a", LeaderIdentity)

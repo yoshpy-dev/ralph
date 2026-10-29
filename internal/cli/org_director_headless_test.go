@@ -32,28 +32,16 @@ import (
 // the stub herdr on PATH and a working directory of its own with no
 // ralph.toml, which the director runs in (the ledger is not a main
 // worktree's). It returns the state dir, the herdr stub's log, and that
-// directory as os.Getwd spells it. RALPH_ORG_AGMSG_HOME is unset
-// (unsetOrgAgmsgHomeEnv).
+// directory as os.Getwd spells it.
 func directorStartLedger(t *testing.T) (stateDir, herdrLog, cwd string) {
 	t.Helper()
 	herdrLog, _ = setupOrgStubPATH(t)
-	unsetOrgAgmsgHomeEnv(t)
 	t.Chdir(t.TempDir())
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return t.TempDir(), herdrLog, cwd
-}
-
-// unsetOrgAgmsgHomeEnv unsets RALPH_ORG_AGMSG_HOME, in case the environment
-// the tests run in sets it (setupOrgStubPATH points the stub agmsg through
-// driver.AgmsgHomeOverride, not the variable): director start runs no agmsg
-// and warns on stderr while the variable is set (D13), so its tests run
-// without it unless they test that warning.
-func unsetOrgAgmsgHomeEnv(t *testing.T) {
-	t.Helper()
-	setOrUnsetEnv(t, orgAgmsgHomeEnv, "", true)
 }
 
 // writeDirectorConfig writes content as a ralph.toml under t.TempDir() and
@@ -493,7 +481,6 @@ func TestOrgDirectorStart_ReadsTheMainWorktreeRalphToml(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			herdrLog, _ := setupOrgStubPATH(t)
-			unsetOrgAgmsgHomeEnv(t)
 			r := newLegacyLedgerRepo(t)
 			writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), tc.mainToml)
 			if tc.wtToml != "" {
@@ -608,7 +595,7 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused(t *testing.T) {
 				}
 				return
 			}
-			if want := relativeAgmsgHomeRefusal(home, configPath); err == nil || err.Error() != want {
+			if want := directorRelativeAgmsgHomeRefusal(home, configPath); err == nil || err.Error() != want {
 				t.Fatalf("director start with agmsg_home %q = %v; want %q", home, err, want)
 			}
 			if stdout != "" || stderr != "" {
@@ -627,13 +614,23 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeInTheConfigIsRefused(t *testing.T) {
 	}
 }
 
-// relativeAgmsgHomeRefusal is start's whole error for the relative
-// [org].agmsg_home home of the --config file configPath (D13).
-func relativeAgmsgHomeRefusal(home, configPath string) string {
-	return fmt.Sprintf("org: director start: [org].agmsg_home %q in the --config file %s is a relative path: "+
-		"the director and the watch may resolve it from different directories and so use different agmsg installs "+
-		"(the director runs in the ledger's main worktree root when the ledger has one, while the watch resolves it from this directory), "+
-		"so start refuses it wherever it runs; give an absolute path (or one that starts with ~/)", home, configPath)
+// relativeAgmsgHomeRefusal is the whole error, after prefix, for the
+// relative [org].agmsg_home home of the --config file configPath: director
+// start's (D13; runs "the director and the watch run") and the watch
+// launch's of --detach and `ralph org start` (plan
+// 2026-10-29-local-config-org, D7; runs "the watch runs"), one sentence for
+// both.
+func relativeAgmsgHomeRefusal(prefix, runs, home, configPath string) string {
+	return fmt.Sprintf("%s[org].agmsg_home %q in the --config file %s is a relative path: "+
+		"%s in the ledger's main worktree root when the ledger has one, not in this directory, "+
+		"so the path may name another directory there than here, and so another agmsg install; it is refused wherever ralph runs; "+
+		"give an absolute path (or one that starts with ~/)", prefix, home, configPath, runs)
+}
+
+// directorRelativeAgmsgHomeRefusal is director start's whole error for the
+// relative [org].agmsg_home home of the --config file configPath (D13).
+func directorRelativeAgmsgHomeRefusal(home, configPath string) string {
+	return relativeAgmsgHomeRefusal("org: director start: ", "the director and the watch run", home, configPath)
 }
 
 // AC15 through the CLI (D13): the refusal of a relative [org].agmsg_home in
@@ -665,7 +662,6 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns(t *testin
 				args = append(args, "--state-dir", stateDir)
 			} else {
 				herdrLog, _ = setupOrgStubPATH(t)
-				unsetOrgAgmsgHomeEnv(t)
 				r := newLegacyLedgerRepo(t)
 				if tc.directorInCwd {
 					t.Chdir(r.mainRoot)
@@ -682,7 +678,7 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns(t *testin
 
 			relative := writeDirectorConfig(t, "[org]\nagmsg_home = \"agmsg/home\"\n")
 			stdout, stderr, err := runOrgCmdStreams(t, slices.Concat(args, []string{"--config", relative})...)
-			if want := relativeAgmsgHomeRefusal("agmsg/home", relative); err == nil || err.Error() != want {
+			if want := directorRelativeAgmsgHomeRefusal("agmsg/home", relative); err == nil || err.Error() != want {
 				t.Fatalf("director start with a relative agmsg_home = %v (stdout: %s stderr: %s); want %q", err, stdout, stderr, want)
 			}
 			if got := directorFileOrAbsent(t, stateDir); got != "<absent>" {
@@ -708,7 +704,6 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWhereverStartRuns(t *testin
 // the watch both read that file and resolve it from that root.
 func TestOrgDirectorStart_ARelativeAgmsgHomeWithoutConfigIsNotRefused(t *testing.T) {
 	setupOrgStubPATH(t)
-	unsetOrgAgmsgHomeEnv(t)
 	r := newLegacyLedgerRepo(t)
 	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), "[org]\nagmsg_home = \"agmsg/home\"\n")
 
@@ -721,21 +716,20 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeWithoutConfigIsNotRefused(t *testing
 	}
 }
 
-// AC15 through the CLI (D13): with RALPH_ORG_AGMSG_HOME set, start warns
-// once on stderr that the director's herdr pane does not get it and names
-// [org].agmsg_home, then starts the director.
-func TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector(t *testing.T) {
+// AC8 of plan 2026-10-29-local-config-org through the CLI: with
+// RALPH_ORG_AGMSG_HOME set, which ralph no longer reads, start with herdr
+// warns about nothing (the D13 warning that the director's pane does not
+// get the variable is gone) and starts the director.
+func TestOrgDirectorStart_TheAgmsgHomeVariableGetsNoWarning(t *testing.T) {
 	stateDir, _, _ := directorStartLedger(t)
-	t.Setenv(orgAgmsgHomeEnv, filepath.Join(t.TempDir(), "agmsg"))
+	t.Setenv(legacyAgmsgHomeEnv, filepath.Join(t.TempDir(), "agmsg"))
 
 	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir)
 	if err != nil {
 		t.Fatalf("director start: %v (stdout: %s stderr: %s)", err, stdout, stderr)
 	}
-	want := "warning: director start: RALPH_ORG_AGMSG_HOME is set here, but the director's herdr pane has the herdr server's environment, " +
-		"so the director does not get it from here; [org].agmsg_home in the ralph.toml the director reads (the --config file, when given) reaches it\n"
-	if stderr != want {
-		t.Errorf("stderr = %q; want %q", stderr, want)
+	if stderr != "" {
+		t.Errorf("stderr = %q; want nothing", stderr)
 	}
 	if !strings.HasPrefix(stdout, "started d1 (driver=claude, ") {
 		t.Errorf("stdout = %q; want d1 started", stdout)
@@ -744,14 +738,14 @@ func TestOrgDirectorStart_WarnsThatTheAgmsgHomeVariableDoesNotReachTheDirector(t
 
 // The help of director start states D12 (a codex director runs guarded
 // only, why, the two ways out, and the guarded caveat) and D13 (the
-// relative agmsg_home refusal, wherever start runs, and the
-// RALPH_ORG_AGMSG_HOME note), and no longer says that codex_verified unlocks
-// autonomous and edits, nor that the director and the watch always use
-// different agmsg installs. "Without --config, those settings" follows the
-// sentence on the permission mode and the model it refers to. The
-// RALPH_ORG_AGMSG_HOME note is herdr's, and with [org.director].launch_cmd
-// the variable reaches the director through the launch script, with no
-// warning (plan 2026-10-16-org-director-launch-cmd, D3): the help says both.
+// relative agmsg_home refusal, wherever start runs, since the director and
+// the watch run in the ledger's main worktree root), and no longer says that
+// codex_verified unlocks autonomous and edits, nor that the director and
+// the watch always use different agmsg installs. "Without --config, those
+// settings" follows the sentence on the permission mode and the model it
+// refers to. It says nothing of RALPH_ORG_AGMSG_HOME, which ralph no longer
+// reads (plan 2026-10-29-local-config-org, AC8): neither the herdr warning
+// nor the launch script's export.
 func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 	out, err := runOrgCmd(t, "director", "start", "--help")
 	if err != nil {
@@ -764,20 +758,19 @@ func TestOrgDirectorStart_HelpStatesTheCodexAndAgmsgHomeRules(t *testing.T) {
 			"(ralph org start --plan runs git worktree add).",
 		`Set [org.permissions.roles].director = "guarded" and let your codex config (~/.codex/config.toml) write .git and reach the network, or use --driver claude;`,
 		`a guarded codex director follows that config, so under sandbox_mode = "workspace-write" it meets the same wall.`,
-		"With herdr, RALPH_ORG_AGMSG_HOME set where start runs does not reach the director, whose herdr pane has the herdr server's environment: start warns when it is set",
-		"With launch_cmd it does reach the director, as the launch script exports it " +
-			"(a relative value made absolute from where start runs, as for the watch start launches), and start does not warn.",
-		"exports RALPH_DIRECTOR_TOKEN (and RALPH_ORG_AGMSG_HOME when it is set where start runs)",
+		"exports RALPH_DIRECTOR_TOKEN, checks in, and then execs the agent start found on its PATH",
 		"for a codex director in autonomous or edits, when the --config file's [org].agmsg_home is a relative path (neither absolute nor starting with ~/",
-		"(neither absolute nor starting with ~/: the director runs in the ledger's main worktree root when the ledger has one and the watch resolves it " +
-			"from where start runs, so the two may resolve it from different directories, and start refuses it wherever it runs; give an absolute path)",
+		"(neither absolute nor starting with ~/: the director and the watch run in the ledger's main worktree root when the ledger has one, " +
+			"not where start runs, so the path may name another directory there than here and another agmsg install, " +
+			"and start refuses it wherever it runs; give an absolute path)",
 		"with the first model_pool entry for --driver that it allows, and a warning. Without --config, those settings and [org.director].enabled are read",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("director start --help does not say %q:\n%s", want, out)
 		}
 	}
-	for _, stale := range []string{"need [org.permissions].codex_verified", "would use different agmsg installs"} {
+	for _, stale := range []string{"need [org.permissions].codex_verified", "would use different agmsg installs", "RALPH_ORG_AGMSG_HOME",
+		"the watch resolves it from where start runs"} {
 		if strings.Contains(help, stale) {
 			t.Errorf("director start --help still says %q:\n%s", stale, out)
 		}
@@ -2032,7 +2025,8 @@ func waitForDirectorAgentMarker(t *testing.T, path string) []string {
 // script in the background, as a terminal would, and returns at once. Like
 // a terminal, which has its own environment, the script does not get
 // RALPH_ORG_AGMSG_HOME from start's, so the agent has it only when the
-// script exports it.
+// script exports it, which it must not (plan 2026-10-29-local-config-org,
+// AC8).
 const directorLaunchCmdToml = "[org.director]\nlaunch_cmd = [\"sh\", \"-c\", 'env -u RALPH_ORG_AGMSG_HOME nohup sh \"$1\" >/dev/null 2>&1 &', \"sh\", \"{script}\"]\n"
 
 // directorTouchingLaunchCmdToml is a ralph.toml whose launch_cmd runs no
@@ -2045,13 +2039,13 @@ func directorTouchingLaunchCmdToml(path string) string {
 // with it, waits for the launch script's check-in, and prints the
 // registration with launch=cmd, the terminal's name, and the pid the script
 // checked in with, where to talk to the director, and the stop command with
-// --state-dir. RALPH_ORG_AGMSG_HOME set here gets no warning (D3): the launch
-// script exports it, so the agent runs with it, and with the permission
-// flags, --model, and the prompt pointer. No herdr is called.
+// --state-dir. RALPH_ORG_AGMSG_HOME set here gets no warning, and the launch
+// script does not export it (plan 2026-10-29-local-config-org, AC8), so the
+// agent runs without it, with the permission flags, --model, and the prompt
+// pointer. No herdr is called.
 func TestOrgDirectorStart_LaunchCmdOpensTheTerminal(t *testing.T) {
 	stateDir, herdrLog, _ := directorStartLedger(t)
-	const agmsgHome = "/agmsg home/it's"
-	t.Setenv(orgAgmsgHomeEnv, agmsgHome)
+	t.Setenv(legacyAgmsgHomeEnv, "/agmsg home/it's")
 	fakes := setDirectorLaunchSeams(t)
 	killDirectorLaunchedProcesses(t, stateDir)
 	configPath := writeDirectorConfig(t, directorLaunchCmdToml)
@@ -2076,10 +2070,10 @@ func TestOrgDirectorStart_LaunchCmdOpensTheTerminal(t *testing.T) {
 		t.Errorf("stdout =\n%s\nwant\n%s", stdout, wantOut)
 	}
 	if stderr != "" {
-		t.Errorf("stderr = %q; want nothing (no RALPH_ORG_AGMSG_HOME warning with launch_cmd)", stderr)
+		t.Errorf("stderr = %q; want nothing (no RALPH_ORG_AGMSG_HOME warning)", stderr)
 	}
 	prompt := filepath.Join(stateDir, "prompts", "director_"+tok+".md")
-	want := []string{"pid=" + fmt.Sprint(launched.PID), "agmsg=" + agmsgHome,
+	want := []string{"pid=" + fmt.Sprint(launched.PID), "agmsg=<unset>",
 		"arg=--permission-mode", "arg=bypassPermissions", "arg=--model", "arg=opus", "arg=" + org.PromptFilePointer(prompt)}
 	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); !slices.Equal(got, want) {
 		t.Errorf("the agent recorded\n%q\nwant\n%q", got, want)
@@ -2177,7 +2171,7 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWithALaunchCmd(t *testing.T
 	configPath := writeDirectorConfig(t, "[org]\nagmsg_home = \"agmsg/home\"\n\n"+directorTouchingLaunchCmdToml(ran))
 
 	stdout, stderr, err := runOrgCmdStreams(t, "director", "start", "--driver", "claude", "--model", "opus", "--state-dir", stateDir, "--config", configPath)
-	if want := relativeAgmsgHomeRefusal("agmsg/home", configPath); err == nil || err.Error() != want {
+	if want := directorRelativeAgmsgHomeRefusal("agmsg/home", configPath); err == nil || err.Error() != want {
 		t.Fatalf("director start = %v; want %q", err, want)
 	}
 	if stdout != "" || stderr != "" {
@@ -2194,15 +2188,15 @@ func TestOrgDirectorStart_ARelativeAgmsgHomeIsRefusedWithALaunchCmd(t *testing.T
 	}
 }
 
-// D3 through the CLI: a relative RALPH_ORG_AGMSG_HOME set where start runs
-// (here a linked worktree) reaches the director made absolute from there,
-// as the watch start launches gets it. The launch script cds to the main
-// worktree root before it exports the variable, so the value as set here
-// would name a directory from that root instead.
-func TestOrgDirectorStart_LaunchCmdMakesARelativeAgmsgHomeAbsolute(t *testing.T) {
+// AC8 of plan 2026-10-29-local-config-org through the CLI: a relative
+// RALPH_ORG_AGMSG_HOME set where start runs (here a linked worktree), which
+// start used to make absolute and pass on, no longer reaches the director
+// launched with launch_cmd: the launch script names no RALPH_ORG_AGMSG_HOME,
+// the agent has none, and start says nothing on stderr.
+func TestOrgDirectorStart_LaunchCmdPassesTheDirectorNoAgmsgHomeVariable(t *testing.T) {
 	setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
-	t.Setenv(orgAgmsgHomeEnv, "agmsg/home")
+	t.Setenv(legacyAgmsgHomeEnv, "agmsg/home")
 	fakes := setDirectorLaunchSeams(t)
 	killDirectorLaunchedProcesses(t, r.sharedDir)
 	writeTestFile(t, filepath.Join(r.mainRoot, "ralph.toml"), directorLaunchCmdToml)
@@ -2214,9 +2208,16 @@ func TestOrgDirectorStart_LaunchCmdMakesARelativeAgmsgHomeAbsolute(t *testing.T)
 	if _, err := os.Stat(org.DirectorPathIn(r.sharedDir)); err != nil {
 		t.Fatalf("the main worktree's ledger has no director.jsonl (%v), so the cleanup would not find the agent", err)
 	}
-	want := "agmsg=" + filepath.Join(r.worktree, "agmsg", "home")
-	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); len(got) < 2 || got[1] != want {
-		t.Fatalf("the agent recorded %q; want %q (not from the main worktree root %s)", got, want, r.mainRoot)
+	if got := waitForDirectorAgentMarker(t, fakes.agentMarker); len(got) < 2 || got[1] != "agmsg=<unset>" {
+		t.Fatalf("the agent recorded %q; want agmsg=<unset>", got)
+	}
+	tok := directorEventsIn(t, r.sharedDir)[0].Token
+	script, err := os.ReadFile(filepath.Join(r.sharedDir, "launch", "director_"+tok+".sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(script), legacyAgmsgHomeEnv) {
+		t.Errorf("the launch script names %s; want none:\n%s", legacyAgmsgHomeEnv, script)
 	}
 }
 
@@ -2240,7 +2241,6 @@ func TestOrgDirectorStart_ReadsLaunchCmdFromTheMainWorktree(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			herdrLog, _ := setupOrgStubPATH(t)
-			unsetOrgAgmsgHomeEnv(t)
 			setDirectorLaunchSeams(t)
 			r := newLegacyLedgerRepo(t)
 			marks := t.TempDir()

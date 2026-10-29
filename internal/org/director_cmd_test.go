@@ -425,7 +425,6 @@ func testLaunchScript(base string) directorLaunchScript {
 		ID: "d7", Token: directorTestToken,
 		StateDir:      filepath.Join(base, "st'ate dir"),
 		Cwd:           filepath.Join(base, "it's $HOME"),
-		AgmsgHome:     filepath.Join(base, "a g'm"),
 		RalphPath:     filepath.Join(base, "bin dir's", "ralph"),
 		AgentPath:     filepath.Join(base, "bin dir's", "cl'aude"),
 		PermArgs:      []string{"--permission-mode", "bypassPermissions"},
@@ -434,12 +433,13 @@ func testLaunchScript(base string) directorLaunchScript {
 	}
 }
 
-// AC2: the launch script cds to the cwd, exports RALPH_DIRECTOR_TOKEN,
-// RALPH_ORG_AGMSG_HOME (only when given), and AGMSG_SELF_NAME=off and
-// RALPH_WIP_CHECKPOINT=off (always, in that order, right before the
-// check-in; plan 2026-10-22-seat-wip-checkpoint, AC3), checks in, and execs
-// the agent with the permission flags, --model, and the prompt pointer in
-// that order, every value single-quoted.
+// AC2: the launch script cds to the cwd, exports RALPH_DIRECTOR_TOKEN, and
+// AGMSG_SELF_NAME=off and RALPH_WIP_CHECKPOINT=off (always, in that order,
+// right before the check-in; plan 2026-10-22-seat-wip-checkpoint, AC3),
+// checks in, and execs the agent with the permission flags, --model, and the
+// prompt pointer in that order, every value single-quoted. It exports no
+// RALPH_ORG_AGMSG_HOME (plan 2026-10-29-local-config-org, AC8): the whole
+// text is pinned.
 func TestDirectorLaunchScript_TextQuotesEveryValue(t *testing.T) {
 	s := testLaunchScript("/b")
 	text, err := s.text()
@@ -452,8 +452,6 @@ func TestDirectorLaunchScript_TextQuotesEveryValue(t *testing.T) {
 cd '/b/it'\''s $HOME' || exit 1
 RALPH_DIRECTOR_TOKEN='0123456789ab'
 export RALPH_DIRECTOR_TOKEN
-RALPH_ORG_AGMSG_HOME='/b/a g'\''m'
-export RALPH_ORG_AGMSG_HOME
 AGMSG_SELF_NAME='off'
 export AGMSG_SELF_NAME
 RALPH_WIP_CHECKPOINT='off'
@@ -465,27 +463,16 @@ exec '/b/bin dir'\''s/cl'\''aude' '--permission-mode' 'bypassPermissions' '--mod
 		t.Fatalf("launch script =\n%s\nwant\n%s", text, want)
 	}
 
-	// An agmsg home starting with ~/ is written as it is, for
-	// driver.ResolveAgmsgHome to expand.
-	s.AgmsgHome = "~/a g"
-	if text, err = s.text(); err != nil || !strings.Contains(text, "\nRALPH_ORG_AGMSG_HOME='~/a g'\nexport RALPH_ORG_AGMSG_HOME\n") {
-		t.Fatalf("text with the agmsg home ~/a g = %v:\n%s", err, text)
-	}
-
-	s.AgmsgHome, s.PermArgs = "", nil
+	s.PermArgs = nil
 	text, err = s.text()
 	if err != nil {
 		t.Fatalf("text: %v", err)
 	}
-	if strings.Contains(text, "RALPH_ORG_AGMSG_HOME") {
-		t.Fatalf("a script with no agmsg home exports one:\n%s", text)
-	}
-	// AC5: AGMSG_SELF_NAME=off and RALPH_WIP_CHECKPOINT=off do not depend on
-	// the agmsg home, and they are exported before the check-in line (and so
-	// before the exec).
+	// AC5: AGMSG_SELF_NAME=off and RALPH_WIP_CHECKPOINT=off are exported
+	// before the check-in line (and so before the exec).
 	if !strings.Contains(text, "\nexport RALPH_DIRECTOR_TOKEN\nAGMSG_SELF_NAME='off'\nexport AGMSG_SELF_NAME\n"+
 		"RALPH_WIP_CHECKPOINT='off'\nexport RALPH_WIP_CHECKPOINT\n'/b/bin dir'\\''s/ralph' org director launched ") {
-		t.Fatalf("a script with no agmsg home does not export AGMSG_SELF_NAME=off and RALPH_WIP_CHECKPOINT=off right before the check-in:\n%s", text)
+		t.Fatalf("a script with no permission flags does not export AGMSG_SELF_NAME=off and RALPH_WIP_CHECKPOINT=off right before the check-in:\n%s", text)
 	}
 	if !strings.Contains(text, "\nexec '/b/bin dir'\\''s/cl'\\''aude' '--model' 'op$us `x`' '役割指示") {
 		t.Fatalf("with no permission flags the exec line is not the agent, --model, and the pointer:\n%s", text)
@@ -549,13 +536,14 @@ func readLines(t *testing.T, path string) []string {
 // AC2 and AC3 run through sh: the check-in gets the id, the token, the
 // script's pid, and the state dir as written; its parent is that pid, which
 // the agent then keeps (exec), so the pid the check-in records is the
-// agent's. The agent runs in the cwd with the token and the agmsg home
-// exported and its arguments as written. Without an agmsg home the agent
-// gets none. A check-in that fails starts no agent and the script exits 1.
+// agent's. The agent runs in the cwd with the token exported, no
+// RALPH_ORG_AGMSG_HOME (the terminal passes none and the script exports
+// none; plan 2026-10-29-local-config-org, AC8), and its arguments as
+// written. A check-in that fails starts no agent and the script exits 1.
 // AC5: the terminal's environment has AGMSG_SELF_NAME=on and
 // RALPH_WIP_CHECKPOINT=on, and both the check-in and the agent see the off
-// the script exports for each, with or without an agmsg home, and also when
-// the terminal passes neither (plan 2026-10-22-seat-wip-checkpoint, AC3).
+// the script exports for each, and also when the terminal passes neither
+// (plan 2026-10-22-seat-wip-checkpoint, AC3).
 func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 	env := []string{"PATH=/usr/bin:/bin", "AGMSG_SELF_NAME=on", "RALPH_WIP_CHECKPOINT=on"}
 	t.Run("the check-in passes", func(t *testing.T) {
@@ -589,34 +577,10 @@ func TestDirectorLaunchScript_ChecksInThenExecsTheAgent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"pid=" + pid, "pwd=" + cwd, "token=" + directorTestToken, "agmsg=" + s.AgmsgHome, "selfname=off", "wipcheckpoint=off",
+		want := []string{"pid=" + pid, "pwd=" + cwd, "token=" + directorTestToken, "agmsg=<unset>", "selfname=off", "wipcheckpoint=off",
 			"arg=--permission-mode", "arg=bypassPermissions", "arg=--model", "arg=" + s.Model, "arg=" + s.PromptPointer}
 		if got := readLines(t, agentOut); !slices.Equal(got, want) {
 			t.Fatalf("the agent recorded\n%q\nwant\n%q", got, want)
-		}
-	})
-	t.Run("no agmsg home", func(t *testing.T) {
-		dir := t.TempDir()
-		s, _, _, ralphPaneEnv, agentOut := launchScriptFakes(t, dir, 0)
-		s.AgmsgHome = ""
-		path, err := writeDirectorLaunchScript(s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if code := runLaunchScript(t, path, env); code != 0 {
-			t.Fatalf("the launch script exited %d, want 0", code)
-		}
-		if got := readLines(t, agentOut)[3]; got != "agmsg=<unset>" {
-			t.Fatalf("the agent got %q, want no RALPH_ORG_AGMSG_HOME", got)
-		}
-		if got := readLines(t, ralphPaneEnv); !slices.Equal(got, launchScriptPaneEnvOff) {
-			t.Fatalf("with no agmsg home the check-in's environment = %q, want %q", got, launchScriptPaneEnvOff)
-		}
-		if got := readLines(t, agentOut)[4]; got != "selfname=off" {
-			t.Fatalf("with no agmsg home the agent got %q, want selfname=off", got)
-		}
-		if got := readLines(t, agentOut)[5]; got != "wipcheckpoint=off" {
-			t.Fatalf("with no agmsg home the agent got %q, want wipcheckpoint=off", got)
 		}
 	})
 	// The values the terminal passes reach the children even without an
@@ -728,8 +692,6 @@ func TestDirectorLaunchScript_RefusesValuesItCannotWrite(t *testing.T) {
 		{"a relative cwd", func(s *directorLaunchScript) { s.Cwd = "." }, `the cwd path "." is not absolute`},
 		{"a relative ralph", func(s *directorLaunchScript) { s.RalphPath = "ralph" }, `the ralph executable path "ralph" is not absolute`},
 		{"a relative agent", func(s *directorLaunchScript) { s.AgentPath = "claude" }, `the agent path "claude" is not absolute`},
-		{"a relative agmsg home", func(s *directorLaunchScript) { s.AgmsgHome = "agmsg/home" }, `the agmsg home "agmsg/home" is not absolute and does not start with ~/`},
-		{"an agmsg home of a bare ~", func(s *directorLaunchScript) { s.AgmsgHome = "~" }, `the agmsg home "~" is not absolute and does not start with ~/`},
 		{"no model", func(s *directorLaunchScript) { s.Model = "" }, "the model is empty"},
 		{"no prompt pointer", func(s *directorLaunchScript) { s.PromptPointer = "" }, "the prompt pointer is empty"},
 		{"a NUL byte", func(s *directorLaunchScript) { s.PermArgs = []string{"a\x00b"} }, "holds a NUL byte"},
@@ -1165,7 +1127,8 @@ func wantNoFile(t *testing.T, path, what string) {
 // background, as a terminal would, and returns at once. Like a terminal,
 // which has its own environment, the script does not get
 // RALPH_ORG_AGMSG_HOME from the test's, so the agent has it only when the
-// script exports it.
+// script exports it, which it must not (plan 2026-10-29-local-config-org,
+// AC8).
 var launchCmdInBackground = []string{"sh", "-c", `env -u RALPH_ORG_AGMSG_HOME nohup sh "$1" >/dev/null 2>&1 &`, "sh", "{script}"}
 
 // launchCmdFailingOnceExists is a launch_cmd that runs the launch script in
@@ -1211,39 +1174,39 @@ func launchedEvent(t *testing.T, s *DirectorStore) DirectorEvent {
 // and the launch script (0700), runs launch_cmd, and waits for the check-in,
 // which records launched with the pid of the script and its start time. The
 // agent then runs in its place (same pid) with the permission flags,
-// --model, and the prompt pointer, the token exported,
-// RALPH_ORG_AGMSG_HOME exported only when start was given one, and
+// --model, and the prompt pointer, the token exported, and
 // AGMSG_SELF_NAME=off (AC5) and RALPH_WIP_CHECKPOINT=off (plan
 // 2026-10-22-seat-wip-checkpoint, AC3) over the on of the environment
-// launch_cmd passes on. start asks for the driver's binary by its name,
-// calls no herdr (HERDR_PANE_ID set does not refuse it, D9), and writes no
-// manifest or receipt.
+// launch_cmd passes on. With RALPH_ORG_AGMSG_HOME set in start's
+// environment, the script names no RALPH_ORG_AGMSG_HOME and the agent has
+// none (plan 2026-10-29-local-config-org, AC8). start asks for the driver's
+// binary by its name, calls no herdr (HERDR_PANE_ID set does not refuse it,
+// D9), and writes no manifest or receipt.
 func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 	cases := []struct {
 		name, driver, model string
 		perms               config.OrgPermissionsConfig
-		agmsgHome           string
 		inHerdr             bool
 		wantMode            string
 		wantPerm            []string
 	}{
-		{"claude autonomous", DirectorDriverClaude, "opus", config.OrgPermissionsConfig{}, "", false, PermissionModeAutonomous,
+		{"claude autonomous", DirectorDriverClaude, "opus", config.OrgPermissionsConfig{}, false, PermissionModeAutonomous,
 			[]string{"--permission-mode", "bypassPermissions"}},
-		{"codex guarded, with an agmsg home, inside herdr", DirectorDriverCodex, "gpt-5-codex",
-			config.OrgPermissionsConfig{Roles: map[string]string{DirectorRole: PermissionModeGuarded}}, "/agmsg home/it's", true, PermissionModeGuarded, nil},
+		{"codex guarded, inside herdr", DirectorDriverCodex, "gpt-5-codex",
+			config.OrgPermissionsConfig{Roles: map[string]string{DirectorRole: PermissionModeGuarded}}, true, PermissionModeGuarded, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCmdStartFixture(t, launchCmdInBackground, cmdStartOptions{})
 			t.Setenv("AGMSG_SELF_NAME", "on")
 			t.Setenv("RALPH_WIP_CHECKPOINT", "on")
+			t.Setenv("RALPH_ORG_AGMSG_HOME", "/agmsg home/it's")
 			f.o.Config.Permissions = tc.perms
 			if tc.inHerdr {
 				f.env[herdrPaneIDEnv] = "pane-9"
 			}
 			p := f.params(tc.driver, tc.model)
 			p.TimeoutMS = 30000
-			p.AgmsgHome = tc.agmsgHome
 			res, err := f.o.StartDirector(p)
 			if err != nil {
 				t.Fatalf("StartDirector: %v", err)
@@ -1277,11 +1240,7 @@ func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			agmsg := tc.agmsgHome
-			if agmsg == "" {
-				agmsg = "<unset>"
-			}
-			want := []string{"pid=" + strconv.Itoa(reg.PID), "pwd=" + cwd, "token=" + token, "agmsg=" + agmsg, "selfname=off", "wipcheckpoint=off"}
+			want := []string{"pid=" + strconv.Itoa(reg.PID), "pwd=" + cwd, "token=" + token, "agmsg=<unset>", "selfname=off", "wipcheckpoint=off"}
 			for _, arg := range append(slices.Clone(tc.wantPerm), "--model", tc.model, PromptFilePointer(wantPrompt)) {
 				want = append(want, "arg="+arg)
 			}
@@ -1302,8 +1261,8 @@ func TestStartDirector_LaunchCmdOpensTheTerminalAndChecksIn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Contains(string(script), "export RALPH_ORG_AGMSG_HOME"); got != (tc.agmsgHome != "") {
-				t.Fatalf("the launch script exports RALPH_ORG_AGMSG_HOME: %v, want %v:\n%s", got, tc.agmsgHome != "", script)
+			if strings.Contains(string(script), "RALPH_ORG_AGMSG_HOME") {
+				t.Fatalf("the launch script names RALPH_ORG_AGMSG_HOME, which start's environment sets; want none:\n%s", script)
 			}
 			prompt, err := os.ReadFile(wantPrompt)
 			if err != nil || !strings.Contains(string(prompt), "人とはこの端末で話す。") || strings.Contains(string(prompt), "pane") {

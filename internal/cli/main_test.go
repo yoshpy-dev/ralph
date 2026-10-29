@@ -106,12 +106,19 @@ import (
 //
 // It also pins driver.AgmsgHomeOverride to an agmsg home that does not
 // exist, so no test reaches the developer's real agmsg (the default
-// ~/.agents/skills/agmsg, or the one the environment or a ralph.toml
-// names): every agmsg call of a runOrg*-based test and the agmsg checks of
-// runDoctor* go through driver.ResolveAgmsgHome, which returns the
-// override first. setupOrgStubPATH points it at its stub agmsg, a test that
-// needs another home sets its own (setAgmsgHomeOverride), and a test of how
-// ResolveAgmsgHome reads the environment or [org].agmsg_home clears it.
+// ~/.agents/skills/agmsg, or the one a ralph.toml names): every agmsg call
+// of a runOrg*-based test and the agmsg checks of runDoctor* go through
+// driver.ResolveAgmsgHome, which returns the override first.
+// setupOrgStubPATH points it at its stub agmsg, a test that needs another
+// home sets its own (setAgmsgHomeOverride), and a test of how
+// ResolveAgmsgHome reads [org].agmsg_home clears it.
+//
+// It also unsets RALPH_ORG_AGMSG_HOME (legacyAgmsgHomeEnv), which ralph no
+// longer reads but `ralph doctor` warns about while it is set
+// (checkLegacyAgmsgHomeEnv): a developer whose shell still sets it would
+// otherwise see one more warn line in every runDoctor*-based test. A test of
+// that warning, or of a command that must not read the variable, sets it
+// with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -119,6 +126,10 @@ func TestMain(m *testing.M) {
 	}
 	if err := os.Setenv(config.LocalConfigEnv, "off"); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
+		os.Exit(1)
+	}
+	if err := os.Unsetenv(legacyAgmsgHomeEnv); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", legacyAgmsgHomeEnv, err)
 		os.Exit(1)
 	}
 	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "agmsg")
@@ -161,8 +172,8 @@ func TestMain(m *testing.M) {
 
 // setAgmsgHomeOverride points driver.AgmsgHomeOverride at home until the
 // test ends, when the value it had comes back. An empty home clears the
-// override, so driver.ResolveAgmsgHome reads the environment and
-// [org].agmsg_home as it does outside the tests.
+// override, so driver.ResolveAgmsgHome reads [org].agmsg_home as it does
+// outside the tests.
 func setAgmsgHomeOverride(t *testing.T, home string) {
 	t.Helper()
 	old := driver.AgmsgHomeOverride

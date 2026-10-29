@@ -136,6 +136,11 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 9: agmsg availability (org runtime driver adapter).
 	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))
 
+	// Check 9b: RALPH_ORG_AGMSG_HOME, which ralph no longer reads, still set
+	// in the environment. Only then is there a line -- see
+	// checkLegacyAgmsgHomeEnv.
+	results = append(results, checkLegacyAgmsgHomeEnv(os.Getenv(legacyAgmsgHomeEnv))...)
+
 	// Check 10: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
 
@@ -805,8 +810,8 @@ const agmsgTestedVersion = "1.1.13"
 // checkAgmsgAvailable's Detail always names home explicitly (both the
 // not-installed and available branches) -- tech-debt fix: this check used
 // to discard driver.AgmsgAvailable's resolved home in favor of a fixed
-// string, so a misconfigured 3-surface `agmsg_home` (env/config/default)
-// gave no clue which directory doctor actually checked
+// string, so a misconfigured `agmsg_home` gave no clue which directory
+// doctor actually checked
 // (docs/tech-debt/README.md, "checkAgmsgAvailable discards the resolved
 // agmsg home from driver.AgmsgAvailable's error").
 func checkAgmsgAvailable(home string) checkResult {
@@ -829,6 +834,33 @@ func checkAgmsgAvailable(home string) checkResult {
 			home, version, agmsgTestedVersion)
 	}
 	return r
+}
+
+// legacyAgmsgHomeEnv is the variable that named the agmsg home before
+// [org].agmsg_home and ralph.local.toml took its place (plan
+// 2026-10-29-local-config-org, D8). ralph no longer reads it for the agmsg
+// home; checkLegacyAgmsgHomeEnv is the only reader, and only to say so.
+const legacyAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
+
+// checkLegacyAgmsgHomeEnv is `ralph doctor`'s migration hint for value, the
+// legacyAgmsgHomeEnv of doctor's environment: nothing when it is empty or
+// unset, and otherwise one warn that names the value, says that ralph no
+// longer reads it, and says where the value goes now: [org].agmsg_home of
+// ralph.local.toml, as an absolute path or one that starts with "~/" (the
+// only forms config.Load accepts there). Without the hint, a user who set
+// the variable would see the seats reach another agmsg with no word why. It
+// never fails: the variable changes nothing.
+func checkLegacyAgmsgHomeEnv(value string) []checkResult {
+	if value == "" {
+		return nil
+	}
+	return []checkResult{{
+		Name:   legacyAgmsgHomeEnv,
+		Status: "warn",
+		Detail: fmt.Sprintf("set to %q, but ralph no longer reads it; write the value in [org].agmsg_home of %s "+
+			"(next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, and unset %s",
+			value, config.LocalConfigFileName, legacyAgmsgHomeEnv),
+	}}
 }
 
 // checkOrgEnvelope summarizes the loaded [org] envelope (model_pool size,
