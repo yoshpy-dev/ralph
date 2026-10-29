@@ -24,7 +24,12 @@ import (
 // passed into origin's default branch (D4). Its gh calls run through
 // MergeOrderExec with GH_PROMPT_DISABLED=1, pinned to origin's repository
 // with -R, as checkMerge's are; the read-back and the removal run, for the
-// real commands, in a process group of their own (ghAfterStart).
+// real commands, in a process group of their own (ghAfterStart). Once
+// pr_merged is recorded, with MergeParams.RepoRoot set and regate.lock still
+// held, it cleans up the branch's feature worktree (mergeCleanup, S2 of plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md): the cleanup's git runs
+// with boundedGit and its removal with scripts/ralph-worktree.sh, not through
+// MergeOrderExec, and its outcome never makes the merge fail.
 
 const (
 	// defaultMergeTimeout bounds gh pr merge when MergeParams.MergeTimeout is
@@ -58,9 +63,9 @@ var mergeTestHooks struct {
 type MergeResult struct {
 	// Refused is set when Merge refused before gh pr merge ran: a
 	// --wait-checks out of range (MergeWaitChecksRefusal), no branch named,
-	// another ralph org regate or merge holding regate.lock, or a check of
-	// checkMerge that failed. It says why and one next step. Nothing was
-	// merged or recorded, and every other field is empty.
+	// another ralph org regate, merge, or cleanup holding regate.lock, or a
+	// check of checkMerge that failed. It says why and one next step. Nothing
+	// was merged or recorded, and every other field is empty.
 	Refused string
 	// Failed is set when gh pr merge ran but the PR is not MERGED as gh pr
 	// view read it back, is MERGED at a head that is not the gate's or with no
@@ -107,22 +112,36 @@ type MergeResult struct {
 	// Protection is CheckMergeEnforcement's Detail: why GitHub keeps the
 	// merge up to date (D11).
 	Protection string
+	// Cleanup is the outcome of the cleanup of the branch's feature worktree
+	// (mergeCleanup), set with Recorded when MergeParams.RepoRoot is set: as
+	// cleanupFeatureWorktreeLocked returned it, or with only its Refused set
+	// when ctx was done once pr_merged was recorded, and the cleanup did not
+	// run. nil when the cleanup was not called: no RepoRoot, or a merge that
+	// was refused, failed, or not recorded.
+	Cleanup *CleanupResult
+	// CleanupErr is the error the cleanup returned, escaped
+	// (PrintableInboxText), set with Cleanup. The merge stands, and Merge's
+	// error is not set by it: with Cleanup.Cleaned only worktree_cleaned
+	// could not be recorded, and without it the script's cleanup did not run.
+	CleanupErr string
 }
 
 // Merge runs `ralph org merge --branch <p.Branch>`. It refuses
 // (MergeResult.Refused, nothing merged or recorded) when p.WaitChecks is out
 // of range (MergeWaitChecksRefusal) or p.Branch is empty, before any lock or
-// command; when another ralph org regate or merge of the ledger holds
-// regate.lock after regateLockWait (D3); and when a check of checkMerge fails.
-// Once it holds the lock it empties the marker an earlier regate left there
-// and writes none: a merge changes no worktree, so a spawn of the branch's org
-// goes on while it runs (regateSpawnErr). With p.WaitChecks, a refusal for
-// checks that are pending or not reported yet, or for the branch's org that
-// still runs (not another feature, which only a branch with a binding tells:
-// runningRefusal), is waited out instead, with the lock released; after the
-// wait the lock is taken again and every check runs again (mergeWait, D5,
-// D13). It then runs gh pr merge once (mergeRun.merge) and, whatever that
-// returned, reads the PR back once (mergeRun.readBack, D6):
+// command; when another ralph org regate, merge, or cleanup of the ledger
+// holds regate.lock after regateLockWait (D3); and when a check of checkMerge
+// fails. Once it holds the lock it empties the marker an earlier regate left
+// there and writes none until pr_merged is recorded: the merge changes no
+// worktree, so a spawn of the branch's org goes on while it runs
+// (regateSpawnErr); the cleanup that follows writes the org's marker. With
+// p.WaitChecks, a refusal for checks that are pending or not reported yet, or
+// for the branch's org that still runs (not another feature, which only a
+// branch with a binding tells: runningRefusal), is waited out instead, with
+// the lock released; after the wait the lock is taken again and every check
+// runs again (mergeWait, D5, D13). It then runs gh pr merge once
+// (mergeRun.merge) and, whatever that returned, reads the PR back once
+// (mergeRun.readBack, D6):
 //
 //   - MERGED at the gate's head into the default branch: it appends pr_merged
 //     (recordMerge, D4) and sets Merged and Recorded; Note says how gh pr
@@ -141,6 +160,15 @@ type MergeResult struct {
 //     merging a PR that cannot be merged yet: it removes the request with gh
 //     pr merge --disable-auto, and Failed says whether that worked;
 //   - not MERGED otherwise, or a read that failed: Failed says what happened.
+//
+// Once pr_merged is recorded, and only then, with p.RepoRoot set and ctx not
+// done, it cleans up the branch's feature worktree with the lock still held
+// (mergeCleanup): MergeResult.Cleanup and CleanupErr say how that went, and
+// neither a refusal nor an error of the cleanup makes Merge refuse, fail, or
+// return an error. With ctx done once pr_merged is recorded, the cleanup does
+// not run, and Cleanup holds only a Refused that says so; with ctx done during
+// the cleanup, the cleanup ends as it does on ctx done. Either way Merge
+// returns the interruption's error below.
 //
 // Failed records nothing. The read, the removal, and the record run with
 // ctx's cancellation dropped, under the gh timeout and the manifest lock's
@@ -176,19 +204,20 @@ func (o *Org) Merge(ctx context.Context, p MergeParams) (MergeResult, error) {
 }
 
 // mergeLocked is Merge with regate.lock held, which it takes and releases:
-// the checks and, when they pass, the merge. When checkMerge refuses with a
-// kind that w may still wait for (mergeRefusalKind.waits, mergeWait.left):
-// the branch's org that still runs, or checks pending or none, it returns only
-// wait, what to wait for, with the lock released, for Merge to wait and call
-// it again; a refusal of that kind once w's time is used up says how long w
-// waited, and for an org that still runs, how to see what it does
-// (mergeWait.waitedOut).
+// the checks and, when they pass, the merge, then, once pr_merged is recorded
+// with p.RepoRoot set, the cleanup (mergeCleanup). When checkMerge refuses
+// with a kind that w may still wait for (mergeRefusalKind.waits,
+// mergeWait.left): the branch's org that still runs, or checks pending or
+// none, it returns only wait, what to wait for, with the lock released, for
+// Merge to wait and call it again; a refusal of that kind once w's time is
+// used up says how long w waited, and for an org that still runs, how to see
+// what it does (mergeWait.waitedOut).
 func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res MergeResult, wait *mergeWaitFor, err error) {
 	stateDir := filepath.Dir(o.Manifest.Path())
 	lock, err := acquireHeldFileLock(stateDir, regateLockFile, "regate", regateLockWait)
 	switch {
 	case errors.Is(err, errFileLockHeld):
-		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate or merge runs on this "+
+		return MergeResult{Refused: PrintableInboxText(fmt.Sprintf(mergePrefix+"another ralph org regate, merge, or cleanup runs on this "+
 			"ledger (%s is held): one runs at a time, so wait for it to end and run ralph org merge --branch %s again",
 			regateLockPathIn(stateDir), p.Branch), false)}, nil, nil
 	case err != nil:
@@ -197,7 +226,8 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	}
 	defer func() { _ = lock.release() }()
 	// D3: the marker an earlier regate left goes at once, and Merge writes
-	// none, so no spawn of that org is refused while the merge runs. Emptying
+	// none, so no spawn of that org is refused while the merge runs; only the
+	// cleanup after a recorded merge writes the org's (mergeCleanup). Emptying
 	// it is what writeRegateMarker(lock.f, nil) does, a truncation; Merge
 	// truncates itself so that its error is merge's, not regate's.
 	if err := lock.f.Truncate(0); err != nil {
@@ -225,10 +255,45 @@ func (o *Org) mergeLocked(ctx context.Context, p MergeParams, w *mergeWait) (res
 	run := mergeRun{m: newMergeCheck(p), r: r}
 	res, err = o.mergeAndRecord(ctx, run, MergeResult{Branch: r.branch, OrgID: r.orgID, PRNumber: r.prNumber, PRURL: r.prURL,
 		Method: r.method, Head: r.head, AutoMerge: p.AutoMerge, Protection: r.protection})
+	switch {
+	case err != nil || !res.Recorded || p.RepoRoot == "":
+		// No cleanup: the merge was not recorded, or no repo root was given.
+	case ctx.Err() != nil:
+		res.Cleanup = &CleanupResult{Branch: res.Branch, Head: res.Head, Refused: mergeCleanupInterrupted(context.Cause(ctx),
+			res.Branch)}
+	default:
+		res.Cleanup, res.CleanupErr = o.mergeCleanup(ctx, lock, p, res)
+	}
 	if ctx.Err() != nil {
 		return res, nil, mergeInterruptedAfterStart(ctx, res, err)
 	}
 	return res, nil, err
+}
+
+// mergeCleanupInterrupted is the Refused of the cleanup Merge skips when it
+// was interrupted (cause) once pr_merged was recorded for branch, escaped,
+// with the branch in its command as one shell word (cleanupShellWord), as in
+// the cleanup's own refusals (cleanupAgain).
+func mergeCleanupInterrupted(cause error, branch string) string {
+	return PrintableInboxText(fmt.Sprintf("ralph org merge was interrupted (%v) once pr_merged was recorded, so the feature "+
+		"worktree of the branch %s was not cleaned up: run ralph org cleanup --branch %s", cause, branch,
+		cleanupShellWord(branch)), false)
+}
+
+// mergeCleanup is the cleanup of the feature worktree of res.Branch once
+// Merge recorded its merge, with lock, regate.lock, still held:
+// cleanupFeatureWorktreeLocked at res.Head, the head the gate passed and the
+// PR merged, of PR res.PRNumber, in p.RepoRoot, from the current directory,
+// via merge. It writes the org's marker in lock and leaves it there until
+// Merge releases the lock. The cleanup's error is returned as text, escaped,
+// for MergeResult.CleanupErr.
+func (o *Org) mergeCleanup(ctx context.Context, lock *heldFileLock, p MergeParams, res MergeResult) (*CleanupResult, string) {
+	c, err := o.cleanupFeatureWorktreeLocked(ctx, lock, CleanupParams{Branch: res.Branch, Head: res.Head, PRNumber: res.PRNumber,
+		RepoRoot: p.RepoRoot, Via: CleanupViaMerge})
+	if err != nil {
+		return &c, PrintableInboxText(err.Error(), false)
+	}
+	return &c, ""
 }
 
 // mergeRun is one Merge once its checks passed: the settings of its checks
