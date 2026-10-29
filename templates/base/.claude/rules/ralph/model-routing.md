@@ -71,8 +71,11 @@ slice.
 path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
 `gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
 plan advisory reads the same three variables, with the same fallbacks, for
-whichever reviewer it calls. Keep these fallback defaults in sync when
-changing any of the three vars in `scripts/ralph-config.sh`.
+whichever reviewer it calls, and so does the plan advisory of a feature org's
+leader (its role prompt, `internal/org/prompts/leader.md` in the `ralph`
+repository source, not part of a scaffolded project). Keep these fallback
+defaults in sync when changing any of the three vars in
+`scripts/ralph-config.sh`.
 
 ## Rules
 

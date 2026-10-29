@@ -29,9 +29,10 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   herdr の agent の名前を変えないようにする。2 つ目の値は、pane の中の
   Claude Code のセッションの hook が、セッションの終わりと compaction の前に
   未コミットの変更を `wip:` でコミットしないようにする。3 つ目の値は座席の
-  driver(`claude` か `codex`)で、座席の cross-review がもう一方の CLI を
-  選ぶときに使う `scripts/xreview-helpers.sh` の `pick_reviewer` に、座席の
-  driver を読ませる。`--env` のない herdr でも動くが、
+  driver(`claude` か `codex`)で、座席の cross-review と機能の org の leader
+  の計画助言がもう一方の CLI を選ぶときに使う `scripts/xreview-helpers.sh`
+  の `pick_reviewer` に、座席の driver を読ませる。`--env` のない herdr でも
+  動くが、
   `warning: herdr tab create has no --env flag` で始まる警告が stderr に
   1 行出て、どの値も付かない。そのときは、座席の
   agmsg が名前を変えると ralph が座席に届かなくなることがあり
@@ -39,6 +40,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   ある(機能の org の leader は、ブランチにそのコミットがあれば push せずに
   BLOCKED を上げる)。また `pick_reviewer` は driver を claude とみなすので、
   codex の座席の cross-review がもう一方の CLI を取り違えることがある。
+  leader の計画助言は、変数がなければ leader 自身の CLI で相手を選ぶので、
+  取り違えるのは、herdr の server の環境に `claude` か `codex` の値の同じ
+  変数があって pane がそれを引き継ぐときだけになる。
   ralph 自身が打つ agmsg には、herdr の版によらず
   `AGMSG_SELF_NAME=off` が付く。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
@@ -48,7 +52,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   leader の計画助言と reviewer 座席の cross-review の有無(既定はどちらも
   off)と、cross-review を回す回数の上限(最初の 1 回を含む)で、座席は値を
   `ralph config get <key>`(例: `ralph config get org.review.cross_review`)で
-  読む。座席が読み始めるのは後の版から。自分の機械だけの値(agmsg の場所
+  読む。機能ごとの org の leader は、役割の雛形の機能ごとの org の手順で
+  `plan_advisory` を読んで計画助言を頼む。reviewer 座席が `cross_review` を
+  読み始めるのは後の版から。自分の機械だけの値(agmsg の場所
   `[org].agmsg_home` など)は、main worktree のルートの `ralph.local.toml`
   (git が無視する個人用の設定ファイル)に書く。`ralph.toml` の値をキーごとに
   上書きし、linked worktree やサブディレクトリから打っても同じファイルが
@@ -915,6 +921,29 @@ per-plan の org では、次の検査がかかる。
 ```sh
 ralph org approve e3 e5
 ```
+
+leader は、機能の内側の分かれ目(この機能の中だけで決まる、どの案で作るかの
+選択)を、計画の `## Design decisions` に推奨の案とその理由と一緒に書く。
+per-plan では、承認を求める QUESTION の本文に、分かれ目を 1 つ 1 行の
+`FORK <番号>: <問い> / a <案>(推奨) / b <案>` の形ですべて載せる(推奨の案は
+いつも a)。director は分かれ目を承認と一緒に人に聞き、すべての分かれ目で
+推奨の案が選ばれて承認されたときだけ approve を打つ。推奨と違う案が 1 つでも
+選ばれたら、approve を打たずに、選んだ案を本文に書いた上の 5 の直しの
+DECISION を送る(`/director` skill の「計画の承認」)。leader は計画をその案で
+直し、決まった分かれ目を `FORK <番号>: <問い> → <決まった案>(決定済み)` の
+行にした新しい QUESTION を上げる。本文が `approved` の DECISION は、すべての
+分かれ目が推奨の案で決まったことも表す。split の org では、leader は人に
+聞かずに推奨の案を採り、そのことを計画の `## Design decisions` に書く。
+
+`[org.review].plan_advisory` が on のとき、leader は承認の QUESTION の前
+(split では implementer を spawn する前)に、相手のモデル(claude の leader
+は codex、codex の leader は claude)に、計画を読むだけの形で助言を頼む
+(1 回、最長 20 分。助言者の MCP の server は止め、止められなければ呼ばずに
+飛ばす。呼ぶ前後で git の状態が変わっていれば BLOCKED を上げる)。所見と
+leader の扱いの要約は、QUESTION の本文の `ADVISORY:` で始まる 1 行に書き
+(飛ばしたときは、そのことと理由。off のときは頼まず、この行も書かない)、
+director が計画の要点と一緒に人に伝える。split では計画の
+`## Design decisions` に書く。
 
 approve について、次のことに気をつける。
 

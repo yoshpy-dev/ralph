@@ -427,7 +427,8 @@ const (
 	wipCheckpointClause = "a Claude Code session in such a pane may commit a feature branch's uncommitted changes as 'wip:' " +
 		"at its session end or context compaction (its WIP-checkpoint hooks)"
 	primaryCLIClause = "a seat's cross-review may pick the wrong CLI as its other model " +
-		"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude)"
+		"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude), " +
+		"and so may a feature org leader's plan advisory"
 	noPaneEnvAdvice = ". Use a herdr whose 'herdr tab create --help' lists --env (0.7.5 has it)\n"
 )
 

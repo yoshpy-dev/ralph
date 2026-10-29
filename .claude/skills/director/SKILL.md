@@ -762,24 +762,51 @@ open か acked のままなので、resolve の期限で人にも届く。
 
 1. 機能の worktree(`.claude/worktrees/org-<org_id>`)で
    `./scripts/plan-visual.sh open <VISUAL のパス>` を打って図解ページを開き、
-   `PLAN:` の計画を読んで要点を人に伝え、承認するかを聞く。
-2. 人が承認したら、`ralph org approve <件の ID>` を打つ。打つのは人か、人が
-   はっきり承認と答えたときの director。approve は承認を台帳に記録する
-   だけで、leader に知らせず、件も resolve しない。herdr の pane の中の
-   セッションで断られたら、herdr の外の端末で人に打ってもらう。
-3. approve は件ごとに、leader に DECISION を送る `ralph org send` の打ち方を
+   `PLAN:` の計画を読んで要点を人に伝え、承認するかを聞く(本文に `FORK` の
+   行があれば、2 のとおり分かれ目と一緒に聞く)。本文に `ADVISORY:` の行が
+   あれば、その要約(相手のモデルの計画助言が何を見つけ、leader がどう
+   扱ったか。飛ばしたときは、飛ばしたことと理由)も計画の要点と一緒に人に
+   伝える。人が会話にいなければ、
+   AskUserQuestion(Codex では番号つきの選択肢)は使わず、「件の処理」の 3
+   のとおり `ralph org inbox notify <件の ID>` で人に送るだけにする。
+2. QUESTION の本文に `FORK` の行があれば、承認と一緒に分かれ目も聞く。
+   `FORK` の行は、leader が計画の `## Design decisions` に書いた機能の内側の
+   分かれ目で、1 行が 1 つの分かれ目になる
+   (`FORK <番号>: <問い> / a <案>(推奨) / b <案>`。推奨の案はいつも a)。
+   - `FORK <番号>: <問い> → <決まった案>(決定済み)` の行は聞かず、数えも
+     しない。前の直しの依頼で決まった分かれ目で、計画はその案で直してある。
+   - AskUserQuestion(Codex では番号つきの選択肢)で、聞く `FORK` の行 1 つを
+     1 問にし、選択肢を行の順(推奨の a が最初)に並べ、承認するかの問いを
+     1 つ足す。
+   - 分かれ目が 3 つまでなら、分かれ目の問いと承認の問いを 1 回の
+     AskUserQuestion(4 問まで)で聞く。
+   - 4 つ以上なら、分かれ目の問いを 4 問ずつに分けて先にすべて聞き、
+     すべての答えがそろってから承認の問いを聞く。答えがそろうまで
+     `ralph org approve` を打たない。
+   - 人が承認し、すべての分かれ目で推奨の案を選んだら、3 に進む。推奨と
+     違う案が 1 つでもあれば、承認と答えていても approve を打たず、6 の
+     とおり直しの DECISION を送る。本文には分かれ目ごとに、推奨の案を
+     選んだものも含めて、選んだ案を `FORK <番号>: <記号> <案>` の形で
+     1 行ずつ書く。leader は計画をその案で直し、決まった分かれ目を
+     `(決定済み)` の行にした新しい QUESTION を上げる。
+3. 人が承認したら(`FORK` の行があれば、2 のとおりすべての分かれ目で推奨の
+   案が選ばれたときだけ)、`ralph org approve <件の ID>` を打つ。打つのは
+   人か、人がはっきり承認と答えたときの director。approve は承認を台帳に
+   記録するだけで、leader に知らせず、件も resolve しない。herdr の pane の
+   中のセッションで断られたら、herdr の外の端末で人に打ってもらう。
+4. approve は件ごとに、leader に DECISION を送る `ralph org send` の打ち方を
    出し、続けて、送れたあとに打つ `ralph org inbox resolve` の打ち方を出す。
    出た send は、上の「答える順」の 2 のとおりに打つ。Claude Code では
    `--timeout-ms 1500000` を足して Bash の `run_in_background` で走らせ、
    Codex では `--timeout-ms 300000` のように区切る。終了コード 0 のあと、
    leader の pane で DECISION の本文の `approved` の行が送られた入力として
    出ていて、入力欄に残っていないことを確かめてから、出た resolve を打つ。
-4. 承認を記録済みの件にもう一度 approve を打つと断られ、エラーに 2 つの
+5. 承認を記録済みの件にもう一度 approve を打つと断られ、エラーに 2 つの
    打ち方がもう一度出る。send の前で止まったときは、これで読み直せる。
-5. 人が直しを求めたら approve を打たず、同じ `PLAN:` のヘッダを付けて、
+6. 人が直しを求めたら approve を打たず、同じ `PLAN:` のヘッダを付けて、
    直すところを本文に書いた DECISION を「答える順」のとおりに送り(本文を
    `approved` で始めない)、件を resolve する。
-6. approve が受信箱を読んだあとにほかの誰かが件を resolve していたら、
+7. approve が受信箱を読んだあとにほかの誰かが件を resolve していたら、
    approve は承認を記録したうえでそう言い、resolve の打ち方は出さない。
    resolve した人が直しを求めたかもしれないので、DECISION を送る前に
    `ralph org inbox show <件の ID>` で resolve の note を読み、人に確かめる。

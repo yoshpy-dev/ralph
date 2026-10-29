@@ -247,8 +247,10 @@ export PATH="/tmp/ralph-iso/bin:<the same directories as in run>:/usr/bin:/bin:/
   when the herdr has `--env` (herdr 0.7.5 does), so the file needs none of
   these values. The third is the seat's driver (`claude` or `codex`), so
   that `pick_reviewer` (`scripts/xreview-helpers.sh`), with which the
-  seat's cross-review picks the other CLI, sees the seat's driver instead of
-  treating it as claude. With a herdr that has no
+  seat's cross-review and a feature org leader's plan advisory pick the
+  other CLI, sees the seat's driver instead of treating it as claude (a
+  leader's plan advisory uses the CLI the leader names for itself when the
+  variable is missing). With a herdr that has no
   `--env`, ralph warns on stderr and the panes get none of them; the trial,
   run before ralph set the value, exported `AGMSG_SELF_NAME=off` in this
   file.

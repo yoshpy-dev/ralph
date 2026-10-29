@@ -257,8 +257,10 @@ mode = "per-plan"
 # be >= 1). The leader and the reviewer read these values with
 # `ralph config get <key>`, such as
 # `ralph config get org.review.cross_review`, and treat the exit codes as the
-# skills do with [standard] above. They start reading them in a later
-# release.
+# skills do with [standard] above. A feature org's leader reads
+# plan_advisory (`ralph config get org.review.plan_advisory`) for its plan
+# advisory; the reviewer seat starts reading cross_review and
+# max_cross_review_cycles in a later release.
 [org.review]
 plan_advisory = false
 cross_review = false
