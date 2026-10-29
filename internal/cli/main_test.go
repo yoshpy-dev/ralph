@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // TestMain pins the shell-alias check's environment resolver
@@ -89,11 +91,48 @@ import (
 // repository while the test walks it: snapshotDirHashes then fails with
 // lstat ... no such file or directory (TestRunMigrateLegacy_ConfirmUX in
 // PR #220's CI, TestRunEjectIO_LegacyManifest_FailsClosed in PR #232's).
+//
+// It also sets RALPH_LOCAL_CONFIG (config.LocalConfigEnv) to off, so
+// config.Load reads no personal ralph.local.toml, for two reasons. A test
+// whose working directory or config path is inside this repository would
+// otherwise read the developer's ralph.local.toml at the main worktree's
+// root (config.LocalPath), and its result would depend on that file. And
+// with off, Load does not look for the file and runs no git for it, so the
+// tests that count the git calls of a command
+// (TestStatusCmd_MergeGuaranteeRunsNoGH,
+// TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit) see
+// the calls they did before the personal file existed. A test of the
+// personal file sets it to "" (t.Setenv), which reads the file.
+//
+// It also pins driver.AgmsgHomeOverride to an agmsg home that does not
+// exist, so no test reaches the developer's real agmsg (the default
+// ~/.agents/skills/agmsg, or the one a ralph.toml names): every agmsg call
+// of a runOrg*-based test and the agmsg checks of runDoctor* go through
+// driver.ResolveAgmsgHome, which returns the override first.
+// setupOrgStubPATH points it at its stub agmsg, a test that needs another
+// home sets its own (setAgmsgHomeOverride), and a test of how
+// ResolveAgmsgHome reads [org].agmsg_home clears it.
+//
+// It also unsets RALPH_ORG_AGMSG_HOME (legacyAgmsgHomeEnv), which ralph no
+// longer reads but `ralph doctor` warns about while it is set
+// (checkLegacyAgmsgHomeEnv): a developer whose shell still sets it would
+// otherwise see one more warn line in every runDoctor*-based test. A test of
+// that warning, or of a command that must not read the variable, sets it
+// with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if err := os.Setenv(config.LocalConfigEnv, "off"); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
+		os.Exit(1)
+	}
+	if err := os.Unsetenv(legacyAgmsgHomeEnv); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", legacyAgmsgHomeEnv, err)
+		os.Exit(1)
+	}
+	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "agmsg")
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
 		return shellAliasEnv{Home: filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")}, nil
 	}
@@ -129,6 +168,17 @@ func TestMain(m *testing.M) {
 		return "", errors.New("a test asked for the ralph executable of a launch_cmd director; set orgDirectorRalphExecutable to a wrapper (setDirectorLaunchSeams)")
 	}
 	os.Exit(m.Run())
+}
+
+// setAgmsgHomeOverride points driver.AgmsgHomeOverride at home until the
+// test ends, when the value it had comes back. An empty home clears the
+// override, so driver.ResolveAgmsgHome reads [org].agmsg_home as it does
+// outside the tests.
+func setAgmsgHomeOverride(t *testing.T, home string) {
+	t.Helper()
+	old := driver.AgmsgHomeOverride
+	t.Cleanup(func() { driver.AgmsgHomeOverride = old })
+	driver.AgmsgHomeOverride = home
 }
 
 // disableGitAutoMaintenance sets maintenance.auto=false and gc.auto=0 for

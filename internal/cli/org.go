@@ -46,14 +46,16 @@ func newOrgCmd() *cobra.Command {
 			"another PR's merge moved behind is ready again. `ralph org merge`\n" +
 			"merges, with gh, the PR of a branch merge-order lists as ready, once it\n" +
 			"has checked the PR, its checks, and GitHub's protection of the default\n" +
-			"branch again, and records the merge. `ralph org director`\n" +
+			"branch again, records the merge, and then cleans up the branch's\n" +
+			"feature worktree. `ralph org cleanup` cleans up the feature worktree of\n" +
+			"a branch whose PR was merged on GitHub. `ralph org director`\n" +
 			"registers the interactive session the human talks to as the director\n" +
 			"of the ledger, or launches a headless director in herdr (ralph org\n" +
 			"director start), or with [org.director].launch_cmd in the terminal\n" +
 			"that command opens.",
 	}
 
-	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
+	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
@@ -76,6 +78,7 @@ func newOrgCmd() *cobra.Command {
 		newOrgRegateCmd(&stateDir, &configPath),
 		newOrgMergeOrderCmd(&stateDir, &configPath),
 		newOrgMergeCmd(&stateDir, &configPath),
+		newOrgCleanupCmd(&stateDir, &configPath),
 	)
 
 	return cmd
@@ -163,7 +166,8 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 
 // withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
 // Approval taken from <main worktree root>/ralph.toml (built-in defaults when
-// that file does not exist, as config.Load reads it) when configPath is empty
+// that file does not exist, with the ralph.local.toml of that root applied
+// on top, as config.Load reads them) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
 // --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
@@ -313,7 +317,8 @@ func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, re
 
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
 // root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
+// exist, with the ralph.local.toml of that root applied on top) for
+// withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
 // withMainWorktreeDirectorStartConfig, and
 // withMainWorktreeDirectorWakeConfigFrom.
 // ok is false, with nothing loaded, when configPath is set or the ledger is
@@ -586,17 +591,22 @@ func orgReadCommandHint(orgID, seat, resolvedStateDir string, stateDirFlagSet bo
 }
 
 // shellSafeUnquoted matches the characters that need no quoting in a POSIX
-// shell word -- shellQuoteIfNeeded's sole caller only ever passes a
-// filesystem path, so this set (alphanumerics plus the handful of
-// characters a path commonly contains) is deliberately narrow rather than
+// shell word -- shellQuoteIfNeeded's callers pass a state dir path
+// (orgReadCommandHint, the legacy-ledger messages) or a branch name (the
+// ralph org cleanup --branch commands that ralph org merge and ralph org
+// cleanup print), so this set (alphanumerics plus the handful of characters
+// a path or a branch commonly contains) is deliberately narrow rather than
 // attempting to cover every shell-safe character in general.
+// internal/org's cleanupShellWord, which quotes the commands of the
+// cleanup's own refusals, leaves more characters unquoted.
 var shellSafeUnquoted = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 
 // shellQuoteIfNeeded returns s unchanged when it contains only
 // shellSafeUnquoted characters; otherwise it wraps s in single quotes,
 // escaping any embedded single quote the POSIX way (close the quote, emit
-// an escaped literal quote, reopen), so a path containing a space or other
-// shell metacharacter stays copy-paste-safe in a printed recovery command.
+// an escaped literal quote, reopen), so a path or a branch containing a
+// space or other shell metacharacter stays copy-paste-safe in a printed
+// recovery command.
 func shellQuoteIfNeeded(s string) string {
 	if shellSafeUnquoted.MatchString(s) {
 		return s
@@ -607,7 +617,8 @@ func shellQuoteIfNeeded(s string) string {
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
 // to ./ralph.toml when configPath is empty, and to config.Default().Org
 // when the file it reads does not exist -- matching the plan's documented
-// --config default. config.Load decides what "does not exist" means: only
+// --config default -- with ralph.local.toml (config.LocalPath) applied on
+// top either way. config.Load decides what "does not exist" means: only
 // fs.ErrNotExist. A ./ralph.toml that exists but cannot be read (no
 // permission, or a symlink into a directory it may not enter) is an error,
 // not the defaults: the defaults would turn a file that says
@@ -762,8 +773,9 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"file. Either refusal, --dry-run included, is recorded as `rejected`.\n" +
 			"\n" +
 			"A spawn (not a --dry-run) into an org is refused, with nothing\n" +
-			"recorded, while `ralph org regate` works on that org's branch; run\n" +
-			"the spawn again once the regate ends.",
+			"recorded, while `ralph org regate` works on that org's branch, or\n" +
+			"while `ralph org merge` or `ralph org cleanup` removes that org's\n" +
+			"merged feature worktree; run the spawn again once it ends.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireOrgID(*orgID); err != nil {
 				return err
@@ -930,8 +942,14 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"task argument are refused. Running the same start again reuses the\n" +
 			"worktree; a start into a running org that was not started for that\n" +
 			"feature is refused. `ralph org disband` leaves the worktree and the\n" +
-			"branch; `./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes\n" +
-			"them. The org's approval mode, [org.approval].mode (per-plan by\n" +
+			"branch, which `ralph org regate` works in until the PR is merged.\n" +
+			"Once the PR is merged, `ralph org merge` removes the worktree, the\n" +
+			"branch, and the record of scripts/ralph-worktree.sh right after its\n" +
+			"merge, and `ralph org cleanup` does the same for a PR merged on\n" +
+			"GitHub (see their --help for what they check first). For a PR closed\n" +
+			"without a merge, run `./scripts/ralph-worktree.sh cleanup --id\n" +
+			"org-<org_id> --force-branch` in the main worktree once the branch is\n" +
+			"not needed. The org's approval mode, [org.approval].mode (per-plan by\n" +
 			"default, or split), is read from the same ralph.toml as max_orgs and\n" +
 			"max_total_seats below, recorded with the org's binding to the feature\n" +
 			"and named in the leader's task, so a change to the setting applies to\n" +
@@ -950,11 +968,15 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"launches one as `ralph org watch --all --detach` does (in the ledger's\n" +
 			"main worktree root when it has one, logging to <state dir>/watch.log)\n" +
 			"and waits up to 10s for it, and it is refused when a watch holds the\n" +
-			"lock but is stale, stopping, or a --once run.\n" +
+			"lock but is stale, stopping, or a --once run. When it would launch\n" +
+			"one, a --config whose [org].agmsg_home is a relative path is refused\n" +
+			"before the launch, wherever start runs, and no leader is started: the\n" +
+			"watch may resolve it from that root, not from here.\n" +
 			"\n" +
 			"Both forms are refused, with nothing recorded, while\n" +
-			"`ralph org regate` works on the org's branch; run start again once\n" +
-			"the regate ends.\n" +
+			"`ralph org regate` works on the org's branch, or while `ralph org\n" +
+			"merge` or `ralph org cleanup` removes the org's merged feature\n" +
+			"worktree; run start again once it ends.\n" +
 			"\n" +
 			orgWideLimitsHelp,
 		Args: func(cmd *cobra.Command, args []string) error {

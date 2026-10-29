@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
 // `ralph org start --plan <split plan> --feature <slug>` (plan
@@ -56,8 +57,10 @@ const (
 	featureWorktreeDir = ".claude/worktrees"
 	// featureWorktreeKind and featureWorktreeCleanupPolicy are the --kind
 	// and --cleanup-policy StartFeature passes to ralph-worktree.sh ensure.
-	// The worktree outlives disband and the PR, so nothing removes it but
-	// `ralph-worktree.sh cleanup`.
+	// The worktree outlives disband and stays until its PR is merged;
+	// then `ralph org merge` or `ralph org cleanup` removes it (both
+	// through `ralph-worktree.sh cleanup`). For a PR closed without a
+	// merge nothing removes it but `ralph-worktree.sh cleanup` by hand.
 	featureWorktreeKind          = "org"
 	featureWorktreeCleanupPolicy = "manual"
 	// worktreeScriptRel is ralph-worktree.sh relative to the repo root.
@@ -106,8 +109,10 @@ type StartFeatureResult struct {
 	Split    *SplitPlan // the split plan read; nil when it could not be read
 }
 
-// FeatureWorktrees is what StartFeature needs from scripts/ralph-worktree.sh
-// and git. Org.Worktrees holds one; nil means scriptFeatureWorktrees.
+// FeatureWorktrees is what StartFeature and the cleanup of a merged feature
+// worktree (CleanupFeatureWorktree, cleanup.go) need from
+// scripts/ralph-worktree.sh and git. Org.Worktrees holds one; nil means
+// scriptFeatureWorktrees.
 type FeatureWorktrees interface {
 	// Lookup returns the ralph-worktree.sh state record for id, read in
 	// repoRoot; ok is false when there is none. A record that exists but
@@ -119,6 +124,12 @@ type FeatureWorktrees interface {
 	// CurrentBranch returns the branch the worktree at path has checked out
 	// (`git -C <path> branch --show-current`), "" for a detached HEAD.
 	CurrentBranch(path string) (string, error)
+	// Cleanup runs `ralph-worktree.sh cleanup --id <id> --force-branch` in
+	// repoRoot, which removes the recorded worktree when its directory is
+	// there (git worktree remove, with no --force), then deletes the branch
+	// with git branch -D, then the record. It stops at the first step that
+	// fails, and the steps before it stay done.
+	Cleanup(repoRoot, id string) error
 }
 
 // WorktreeRecord is the part of a ralph-worktree.sh state record
@@ -232,7 +243,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	if err != nil {
 		return refuse(ensureFailureErr(err, root, orgID, worktree, branch))
 	}
-	if !samePath(made, worktree) {
+	if !gitroot.SamePath(made, worktree) {
 		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf(
 			"org: %s ensure --id %s printed the worktree %q, not %s; the leader is not started",
 			worktreeScriptRel, featureWorktreeID(orgID), made, worktree)}
@@ -572,7 +583,7 @@ func featureWorktreeMismatch(worktrees FeatureWorktrees, rec, want WorktreeRecor
 	if rec.CanonicalRef != want.CanonicalRef {
 		diffs = append(diffs, fmt.Sprintf("canonical_ref %q, not %q", rec.CanonicalRef, want.CanonicalRef))
 	}
-	if !samePath(rec.WorktreePath, want.WorktreePath) {
+	if !gitroot.SamePath(rec.WorktreePath, want.WorktreePath) {
 		diffs = append(diffs, fmt.Sprintf("worktree_path %q, not %q", rec.WorktreePath, want.WorktreePath))
 	}
 	if rec.Branch != want.Branch {
@@ -668,6 +679,13 @@ func (scriptFeatureWorktrees) CurrentBranch(path string) (string, error) {
 		return "", fmt.Errorf("org: git -C %s branch --show-current: %w", path, err)
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// Cleanup runs `ralph-worktree.sh cleanup --id <id> --force-branch`. Its
+// stdout (git's "Deleted branch" line) is not read.
+func (scriptFeatureWorktrees) Cleanup(repoRoot, id string) error {
+	_, err := runWorktreeScript(repoRoot, "cleanup", "--id", id, "--force-branch")
+	return err
 }
 
 // runWorktreeScript runs `bash <repoRoot>/scripts/ralph-worktree.sh <args>`

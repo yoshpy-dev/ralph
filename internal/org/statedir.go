@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
 // EnvOrgStateDir is the environment variable that overrides the org
@@ -36,7 +37,7 @@ const defaultOrgStateDirRelPath = ".harness/state/org"
 //  2. env RALPH_ORG_STATE_DIR ("env") -- consulted only when the flag was
 //     not explicitly set.
 //  3. git main worktree ("git-main-worktree") -- the root of the
-//     repository's main worktree (see gitMainWorktree), joined with
+//     repository's main worktree (see gitroot.MainWorktree), joined with
 //     ".harness/state/org". This is what fixes the leader/operator
 //     cwd-split, including across worktrees: every org verb invoked from
 //     anywhere inside the main checkout or any of its linked worktrees
@@ -63,10 +64,10 @@ func ResolveOrgStateDir(explicit string, explicitSet bool) (dir string, source s
 	if env := strings.TrimSpace(os.Getenv(EnvOrgStateDir)); env != "" {
 		return mustAbs(env), "env"
 	}
-	if root, ok := gitMainWorktree(); ok {
+	if root, ok := gitroot.MainWorktree(""); ok {
 		return filepath.Join(root, defaultOrgStateDirRelPath), "git-main-worktree"
 	}
-	if top, err := gitToplevel(); err == nil && top != "" {
+	if top, err := gitroot.Toplevel(""); err == nil && top != "" {
 		return filepath.Join(top, defaultOrgStateDirRelPath), "git-toplevel"
 	}
 	return mustAbs(defaultOrgStateDirRelPath), "cwd"
@@ -96,12 +97,12 @@ func MainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 // resolvedDir is: MainWorktreeRoot for source "git-main-worktree", and for
 // a ledger named by --state-dir or RALPH_ORG_STATE_DIR (source "flag" or
 // "env") the main worktree of the repository containing the current working
-// directory (gitMainWorktree), when resolvedDir is that root's
-// .harness/state/org (compared with samePath). The leader of a feature org
-// passes --state-dir for the ledger start used (featureLeaderTask), so its
-// spawns from the feature worktree still find the main worktree this way.
-// ok is false for any other directory or source, and when git names no main
-// worktree.
+// directory (gitroot.MainWorktree), when resolvedDir is that root's
+// .harness/state/org (compared with gitroot.SamePath). The leader of a
+// feature org passes --state-dir for the ledger start used
+// (featureLeaderTask), so its spawns from the feature worktree still find
+// the main worktree this way. ok is false for any other directory or
+// source, and when git names no main worktree.
 func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	switch source {
 	case "git-main-worktree":
@@ -110,8 +111,8 @@ func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 	default:
 		return "", false
 	}
-	root, ok = gitMainWorktree()
-	if !ok || !samePath(resolvedDir, filepath.Join(root, defaultOrgStateDirRelPath)) {
+	root, ok = gitroot.MainWorktree("")
+	if !ok || !gitroot.SamePath(resolvedDir, filepath.Join(root, defaultOrgStateDirRelPath)) {
 		return "", false
 	}
 	return root, true
@@ -122,17 +123,17 @@ func LedgerMainWorktreeRoot(resolvedDir, source string) (root string, ok bool) {
 // returned as resolvedDir and source: MainWorktreeRoot when it names one,
 // otherwise (a ledger chosen with --state-dir or RALPH_ORG_STATE_DIR) the
 // main worktree of the repository containing the current working directory
-// (gitMainWorktree). Outside a git working tree, and in a repository with no
-// main worktree to name (a linked worktree of a bare repository), it is an
-// error.
+// (gitroot.MainWorktree). Outside a git working tree, and in a repository
+// with no main worktree to name (a linked worktree of a bare repository), it
+// is an error.
 func FeatureRepoRoot(resolvedDir, source string) (string, error) {
 	if root, ok := MainWorktreeRoot(resolvedDir, source); ok {
 		return root, nil
 	}
-	if root, ok := gitMainWorktree(); ok {
+	if root, ok := gitroot.MainWorktree(""); ok {
 		return root, nil
 	}
-	if top, err := gitToplevel(); err == nil && top != "" {
+	if top, err := gitroot.Toplevel(""); err == nil && top != "" {
 		return "", fmt.Errorf("org: start --plan makes the feature worktree from the main worktree, and git names none for %s "+
 			"(a linked worktree of a bare repository has none): run it from a repository with a main worktree", top)
 	}
@@ -159,7 +160,7 @@ func LegacyWorktreeStateDir(resolvedDir, source string) (legacyDir string, activ
 	if source != "git-main-worktree" {
 		return "", 0, nil
 	}
-	top, topErr := gitToplevel()
+	top, topErr := gitroot.Toplevel("")
 	if topErr != nil || top == "" {
 		return "", 0, nil
 	}
@@ -171,7 +172,7 @@ func LegacyWorktreeStateDir(resolvedDir, source string) (legacyDir string, activ
 		}
 		return "", 0, fmt.Errorf("org: stat %s: %w", manifestPath, statErr)
 	}
-	if samePath(candidate, resolvedDir) {
+	if gitroot.SamePath(candidate, resolvedDir) {
 		return "", 0, nil
 	}
 	seats, readErr := NewManifestStoreAtPath(manifestPath).Roster(RosterOptions{})
@@ -186,101 +187,11 @@ func LegacyWorktreeStateDir(resolvedDir, source string) (legacyDir string, activ
 	return candidate, activeSeats, nil
 }
 
-// gitMainWorktree returns the root of the main worktree of the repository
-// containing the current working directory. ok is false when there is none
-// to name (not in git, a bare repository, a git failure), and
-// ResolveOrgStateDir falls through to the git-toplevel tier.
-//
-// In the main worktree itself (git dir == common dir) the root is
-// `git rev-parse --show-toplevel`: `git worktree list` names the main
-// worktree after its common dir minus "/.git", which for a repository made
-// with `git init --separate-git-dir <elsewhere>/.git <worktree>` is
-// <elsewhere>, not the worktree. In a linked worktree the root is the first
-// record of `git worktree list --porcelain` (see parseMainWorktreeRecord),
-// skipped when that path is the common dir itself (a separated git dir not
-// named .git, so git has no worktree path for it) or is not an existing
-// directory. A linked worktree of a separate-git-dir repository whose git
-// dir is named .git still resolves under <elsewhere>: git reports that path
-// and nothing in the repository records the real main worktree.
-func gitMainWorktree() (string, bool) {
-	out, err := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").Output()
-	if err != nil {
-		return "", false
-	}
-	dirs := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(dirs) != 2 {
-		return "", false
-	}
-	gitDir, commonDir := dirs[0], dirs[1]
-	if samePath(gitDir, commonDir) {
-		top, topErr := gitToplevel()
-		if topErr != nil || top == "" {
-			return "", false
-		}
-		return top, true
-	}
-	list, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
-	if err != nil {
-		return "", false
-	}
-	root, ok := parseMainWorktreeRecord(string(list))
-	if !ok || samePath(root, commonDir) {
-		return "", false
-	}
-	if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
-		return "", false
-	}
-	return root, true
-}
-
-// parseMainWorktreeRecord reads the first record of `git worktree list
-// --porcelain` output (the lines up to the first blank line), which git
-// always emits for the main worktree. It returns that record's
-// `worktree <path>` value, with ok false when the record is marked `bare`,
-// has no `worktree` line, or names a relative path.
-func parseMainWorktreeRecord(porcelain string) (path string, ok bool) {
-	bare := false
-	for _, line := range strings.Split(porcelain, "\n") {
-		if line == "" {
-			break
-		}
-		switch {
-		case strings.HasPrefix(line, "worktree "):
-			path = strings.TrimPrefix(line, "worktree ")
-		case line == "bare":
-			bare = true
-		}
-	}
-	if bare || path == "" || !filepath.IsAbs(path) {
-		return "", false
-	}
-	return path, true
-}
-
-// gitToplevel runs `git rev-parse --show-toplevel` in the current working
-// directory. A non-git cwd (or any other git failure) returns a non-nil
-// error -- ResolveOrgStateDir treats that as "fall through to the cwd
-// default", not as a fatal condition.
-func gitToplevel() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// samePath reports whether a and b name the same location, comparing with
-// symlinks resolved where the path exists (macOS's /var is a symlink to
-// /private/var, and git prints resolved paths) and cleaned otherwise.
-func samePath(a, b string) bool {
-	return resolvedOrClean(a) == resolvedOrClean(b)
-}
-
+// resolvedOrClean is gitroot.ResolvedOrClean (symlinks resolved where p
+// exists, cleaned otherwise) under the name the rest of this package
+// (feature.go, permissions.go, split.go) calls it by.
 func resolvedOrClean(p string) string {
-	if resolved, err := filepath.EvalSymlinks(p); err == nil {
-		return resolved
-	}
-	return filepath.Clean(p)
+	return gitroot.ResolvedOrClean(p)
 }
 
 // mustAbs resolves p to an absolute path against the current working

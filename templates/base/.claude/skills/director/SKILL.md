@@ -226,10 +226,9 @@ director も守る(「headless の director」節)。
   断る。あれば `attached`(`launch = "cmd"`)を書いてから、台帳の下に起動
   スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
 - 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
-  `RALPH_DIRECTOR_TOKEN` を export し(start を打った環境に
-  `RALPH_ORG_AGMSG_HOME` があればそれも)、`AGMSG_SELF_NAME=off` と
-  `RALPH_WIP_CHECKPOINT=off` を export する(agmsg home の有無によらない。
-  1 つ目は agmsg が herdr の agent や pane の名前を変えないようにし、2 つ目は
+  `RALPH_DIRECTOR_TOKEN` を export し、`AGMSG_SELF_NAME=off` と
+  `RALPH_WIP_CHECKPOINT=off` を export する(1 つ目は agmsg が herdr の
+  agent や pane の名前を変えないようにし、2 つ目は
   director の Claude Code のセッションの hook が、セッションの終わりと
   compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を
   打った ralph の絶対パスで check-in(隠れた動詞 `ralph org director launched`)
@@ -252,7 +251,8 @@ start の設定と、director が動く場所は次のとおり。
 - `--config` がなく、台帳が main worktree のものなら、
   `[org.director].enabled`、`[org.director].launch_cmd`、`wake`、`wake_cmd`、
   `[org.permissions]`、`[org.roles]`、`model_pool` を main worktree の
-  `ralph.toml` から読む。feature worktree の `ralph.toml` では選べない
+  `ralph.toml`(とそのルートの `ralph.local.toml`)から読む。feature
+  worktree の `ralph.toml` では選べない
   (ralph が打つ launch_cmd も変えられない)。読めない `ralph.toml` は
   エラーになる。
 - start は `[org.director].wake` を登録に書く(start に `--wake` はない)。
@@ -279,18 +279,17 @@ start の設定と、director が動く場所は次のとおり。
   当たる。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
   この skill の指示だけで、permission では止まらない。
 - `--config` の設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでも
-  なければ、start は断る。相対の値を director は自分が動く場所(次の項)から
-  解き、見張りは start を打った場所から解く。2 つの場所が違えば別の agmsg を
-  使ってしまうので、start は場所を比べず、どこで打っても断る。絶対パスで書く。
-  この断りは launch_cmd で立てるときも同じ。
-- 人の shell の `RALPH_ORG_AGMSG_HOME` は、herdr で立てた director には届かない
-  (herdr の pane の環境は herdr server のもので、ralph が足す
-  `AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off` だけが加わる)。
-  設定されていれば start は警告を 1 行出して続ける。herdr の director に
-  届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。launch_cmd で
-  立てた director には、起動スクリプトがその値を export するので届き、start は
-  警告しない。相対の値は、start が起こす見張りと同じく、start を打った場所から
-  絶対パスにして渡す。
+  なければ、start は断る。director と、start が起こす見張りは、台帳が main
+  worktree のものならそのルートで動き(この節の最後の項)、相対の値をそこから
+  解く。start を打った場所から解いたときとは別の agmsg を指しうるので、start
+  は場所を比べず、どこで打っても断る。絶対パスで書く。この断りは launch_cmd
+  で立てるときも同じ。
+- director が使う agmsg は、herdr で立てても launch_cmd で立てても、設定の
+  `[org].agmsg_home` で決まる。人の shell の環境変数では変わらない。自分の
+  機械だけの場所は、main worktree のルートの `ralph.local.toml`(git が無視
+  する個人用の設定ファイル)の `[org].agmsg_home` に、絶対パスか `~/` で
+  始まる値で書く。ralph は、どの worktree やサブディレクトリで動いても、
+  main worktree のルートの `ralph.local.toml` を読む。
 - herdr で立てる director の pane は、ralph が
   `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
   で作る。1 つ目は、agmsg が pane の agent の名前を変えると、ralph がその
@@ -829,7 +828,9 @@ open か acked のままなので、resolve の期限で人にも届く。
   (merge の時点の保証)の行。
 - `ralph org inbox`: open と acked の件(`--all` で resolved も)。
 - `ralph org merge-order`: 今 merge してよい PR とその順(`/org` skill の
-  「merge してよい順」)。先頭に `merge guarantee:` の行が出る。
+  「merge してよい順」)。先頭に `merge guarantee:` の行が出る。`--all` を
+  付けると merge 済みのブランチ(`merged`)も出る。その機能の worktree の
+  後始末は「GitHub で merge した PR の後始末」に従う。
 - 終わった org の編成の履歴は
   `ralph org report --org-id <org> --out .harness/state/org-reports` で
   書き出す。既定の出力先は cwd の `docs/reports/` なので、main の
@@ -866,8 +867,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   断りか失敗で止めたブランチ(下の箇条)を除いて、`ready` のブランチも
   regate を名指すブランチもなくなったら終わる。merge と regate のたびに、
   結果を人に報告する。merge なら `MERGED:` の行、`METHOD:`、
-  `MERGE COMMIT:` と、出ていれば `NOTE:` を、regate なら `GATE:`・`HEAD:`・
-  `PUSHED:` の行を伝える。
+  `MERGE COMMIT:`、出ていれば `NOTE:` と、`CLEANUP:` の行(下の箇条の
+  読み方)を、regate なら `GATE:`・`HEAD:`・`PUSHED:` の行を伝える。
 
 どちらの値でも、次のことは変わらない。
 
@@ -881,6 +882,26 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 - 終了コード 1 でも `MERGED:` の行が出ていれば、PR は merge されている
   (`pr_merged` を記録できなかったか、merge の途中で中断された)。merge した
   ことを人に伝え、merge-order を打ち直す。
+- `ralph org merge` の `CLEANUP:` の行は、merge のあとの機能の worktree の
+  片付けの結果で、merge は済んでいる。片付けがどうなっても、記録した merge の
+  終了コードは 0 のまま。行が `CLEANUP: done` で始まれば片付いた。括弧に
+  `resumed: <kind>` があれば、前に途中で止まった片付けの続きを済ませた。
+  括弧にそれ以外の文があれば、台帳への `worktree_cleaned` の追記だけが
+  失敗した(消す作業は済んでいる)。行が `CLEANUP: skipped (<理由>)` なら
+  片付けは終わっていない。断られて何も消していないか、消す作業が失敗した
+  (script が途中で止まったなら消した分は消えたまま、script の前の、
+  ディレクトリのない worktree の登録の外しで止まったなら何も消していない。
+  どちらも次の片付けが続きから進む)かのどちらか。どちらでも、理由と、続く
+  `CLEANUP MANUAL:` の行があればそのコマンドを、そのまま人に伝える。
+  `CLEANUP MANUAL:` の行がない断りは、理由を直して
+  `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く
+  (下の「GitHub で merge した PR の後始末」)。ただし、台帳のディレクトリが
+  機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち
+  直しには `--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。
+  `CLEANUP MANUAL:` の行は、
+  ralph が先に進めず人の判断が要るときだけ出る。手のコマンド
+  (`git branch -D` などを含む)は、人に頼まれないまま打たない。台帳を動かす
+  手も同じ。
 - repo の保護が merge の時点で base を最新に保たないという断り(up-to-date
   の ruleset がない、merge queue がある、打つ本人が保護を迂回できる)は、
   repo の設定のことなので、どのブランチも `ralph org merge` では merge
@@ -965,6 +986,43 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
    gate を打たせる。同じ org_id が別の機能で走っているブランチも、その org が
    disband するまで打たない。
 
+### GitHub で merge した PR の後始末
+
+人が GitHub で直接 merge した PR の機能の worktree・ローカルのブランチ・
+記録は、`ralph org cleanup` で片付ける(`/org` skill の動詞リファレンスの
+`cleanup` の行と「org の終わり方」)。merge 済みで失うもののないものだけを
+消すので、`auto_merge` の値によらず打ってよい。
+
+1. 人が GitHub で merge したと言ったとき、または前の報告のあとに
+   `ralph org merge-order --all` に新しい `merged` のブランチが出たときに、
+   main のチェックアウトから `ralph org cleanup` を打つ(1 本だけなら
+   `--branch <ブランチ>` を付ける)。片付け済みのブランチと、同じ org_id が
+   のちに別のブランチに結びつけ直された古いブランチは数えず、行も出さない。
+2. 終了コード 0 なら、`CLEANED:` の行を人に報告する。`nothing to clean up`
+   なら報告は要らない。
+3. 終了コード 1 なら、`SKIPPED:` の行のブランチは片付けが終わっていない。
+   `CLEANUP: skipped` と同じく、断られて何も消していないか、消す作業
+   (script か、その前の登録の外し)が失敗したかのどちらかで、PR を
+   読めなかったブランチもこの行になる。`SKIPPED:` の理由と、続く `MANUAL:`
+   の行があればそのコマンド、stderr の文をそのまま人に伝える。`MANUAL:` の
+   行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を
+   打ち直せば続きから片付く。同じ実行に `CLEANED:` の行もあれば(`--branch`
+   なしで打ち、1 本を片付けて別の 1 本で断られたとき)、そのブランチは
+   片付いたので、手順 2 と同じく人に報告する。台帳のディレクトリが機能の
+   worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには
+   `--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。台帳を動かす手
+   も、人に頼まれないまま打たない。stderr の文が中断と言うときは(最後の
+   ブランチの片付けの途中でも終了コード 1 になる)、`CLEANED:` の行を手順 2 と
+   同じく報告し、残りは `ralph org cleanup` を打ち直せば続きから片付く。
+4. `SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、
+   手のコマンドも人に頼まれないまま打たない。そのブランチが残っている間に
+   ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出る
+   ので、そのときは新しいブランチを `--branch` で名指して打つ。
+5. `gh` がないと merge されたかを判定できないので、何も消さずに終了コード 1
+   で終わる。origin が GitHub の repository を名指さない(ローカルのパスなど)か
+   読めないときも、台帳を読む前に何も消さず 1 で終わる。どちらも stderr の文を
+   人に伝える。
+
 ## 終わり
 
 昇格した director の終わり方。headless の director は detach を打たず、
@@ -999,6 +1057,8 @@ send が断られる。
   `--auto` を使わず、断られたか失敗した merge と regate を、人に頼まれない
   まま打ち直さない。regate が返した衝突と失敗を、git で直さない(merge、
   commit、push を自分で打たない)。
+- `ralph org merge` と `ralph org cleanup` が出した手で消すコマンド
+  (`CLEANUP MANUAL:` と `MANUAL:` の行)を、人に頼まれないまま打たない。
 - resolve を、その答えの DECISION が leader に届いたことを pane で確かめる
   前に打たない(「答える順」)。
 - wait が終了コード 4 か見張りがないという `note:` で知らせた見張りを、自分の

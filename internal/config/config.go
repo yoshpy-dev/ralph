@@ -44,10 +44,9 @@ type StandardConfig struct {
 // OrgConfig holds the `[org]` table: the envelope and the settings that the
 // `ralph org` verbs (internal/org) and `ralph doctor`'s org checks read. Load
 // validates the fields, and their defaults are kept in lock-step with
-// templates/base/ralph.toml; AgmsgHome's is also compared with
-// RALPH_ORG_AGMSG_HOME in scripts/ralph-config.sh, and
-// Review.MaxCrossReviewCycles's with RALPH_STANDARD_MAX_PIPELINE_CYCLES there
-// (the checks are in defaults_sync_test.go). The org runtime's design is
+// templates/base/ralph.toml; Review.MaxCrossReviewCycles's is also compared
+// with RALPH_STANDARD_MAX_PIPELINE_CYCLES in scripts/ralph-config.sh (the
+// checks are in defaults_sync_test.go). The org runtime's design is
 // docs/specs/2026-08-01-org-runtime.md.
 type OrgConfig struct {
 	// ModelPool is the allowlist of driver/model pairs `ralph org spawn` may
@@ -89,8 +88,9 @@ type OrgConfig struct {
 	// AgmsgHome is the agmsg installation directory (a collection of
 	// scripts, not a single binary -- see internal/org/driver/agmsg.go).
 	// The runtime-effective value is resolved by
-	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which lets env
-	// RALPH_ORG_AGMSG_HOME override this config value.
+	// driver.ResolveAgmsgHome(cfg.Org.AgmsgHome), which uses this config
+	// value (ralph.local.toml's when it sets one) and else the default; no
+	// environment variable overrides it.
 	AgmsgHome string `toml:"agmsg_home"`
 	// Permissions holds the role-scoped seat permission-mode envelope
 	// (internal/org's ResolvePermissionMode/permissionArgsForDriver consume
@@ -715,32 +715,78 @@ func filterModelPoolByDrivers(pool []OrgModelPoolEntry, drivers []string) []OrgM
 	return filtered
 }
 
-// Load reads ralph.toml from the given path, falling back to defaults.
+// Load reads ralph.toml from the given path, applies the personal file
+// ralph.local.toml on top of it (LocalPath; skipped when LocalConfigEnv is
+// "off"), and validates the result once. Either file may be missing: with
+// neither, Load returns Default() as it is. An error of the personal file
+// names its path, and so does a validation error once the personal file was
+// applied, since the value at fault may be its.
 func Load(path string) (Config, error) {
 	cfg := Default()
 
 	data, err := os.ReadFile(path)
+	found := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return cfg, err
+	}
+	local, err := readLocalConfig(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return cfg, nil
+		return cfg, err
+	}
+	if !found && local == nil {
+		return cfg, nil
+	}
+
+	var driverPoolSet, modelPoolSet bool
+	if found {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return cfg, err
+		}
+		if driverPoolSet, modelPoolSet, err = orgPoolKeysPresent(data); err != nil {
+			return cfg, err
+		}
+	}
+	if local != nil {
+		// A second Unmarshal into the same Config sets only the keys the
+		// personal document has: a table merges key by key, and an array (an
+		// array of tables included) is replaced, not appended to
+		// (local_test.go checks both). A pool key counts as set when either
+		// document sets it.
+		if err := toml.Unmarshal(local.data, &cfg); err != nil {
+			return cfg, fmt.Errorf("%s: %w", local.path, err)
+		}
+		localDriverPoolSet, localModelPoolSet, err := orgPoolKeysPresent(local.data)
+		if err != nil {
+			return cfg, fmt.Errorf("%s: %w", local.path, err)
+		}
+		driverPoolSet = driverPoolSet || localDriverPoolSet
+		modelPoolSet = modelPoolSet || localModelPoolSet
+		if err := checkLocalAgmsgHome(local); err != nil {
+			return cfg, err
+		}
+	}
+
+	if err := validateLoaded(&cfg, driverPoolSet, modelPoolSet); err != nil {
+		if local != nil {
+			return cfg, fmt.Errorf("%w (with %s applied)", err, local.path)
 		}
 		return cfg, err
 	}
+	return cfg, nil
+}
 
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return cfg, err
-	}
-
-	driverPoolSet, modelPoolSet, err := orgPoolKeysPresent(data)
-	if err != nil {
-		return cfg, err
-	}
+// validateLoaded finishes cfg, the config Load read: it filters the
+// inherited default model_pool to a driver_pool set without a model_pool,
+// backfills the string defaults written as "", and checks the [org] values.
+// driverPoolSet and modelPoolSet say whether a document Load read sets
+// [org].driver_pool and [org].model_pool (orgPoolKeysPresent).
+func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	if driverPoolSet && !modelPoolSet {
-		// The document narrows [org].driver_pool but leaves [org].model_pool
-		// unset, so cfg.Org.ModelPool is still Default()'s pool (including
-		// any driver Default()'s driver_pool covers but this document's
-		// narrower driver_pool doesn't). Inherit the default pool filtered to
-		// the drivers this document actually declared, so e.g.
+		// A document narrows [org].driver_pool and neither sets
+		// [org].model_pool, so cfg.Org.ModelPool is still Default()'s pool
+		// (including any driver Default()'s driver_pool covers but this
+		// document's narrower driver_pool doesn't). Inherit the default pool
+		// filtered to the drivers this document actually declared, so e.g.
 		// `driver_pool = ["claude"]` alone keeps loading even as Default()
 		// grows more non-claude default model_pool entries over time.
 		cfg.Org.ModelPool = filterModelPoolByDrivers(Default().Org.ModelPool, cfg.Org.DriverPool)
@@ -748,7 +794,7 @@ func Load(path string) (Config, error) {
 			// Name the key the document actually wrote: the empty pool is a
 			// consequence of this driver_pool, not of a model_pool the
 			// document never set.
-			return cfg, fmt.Errorf("[org].driver_pool %v has no default [org].model_pool entries; set [org].model_pool explicitly", cfg.Org.DriverPool)
+			return fmt.Errorf("[org].driver_pool %v has no default [org].model_pool entries; set [org].model_pool explicitly", cfg.Org.DriverPool)
 		}
 	}
 
@@ -769,7 +815,7 @@ func Load(path string) (Config, error) {
 	// = 0`, or an explicit model_pool entry naming a driver outside
 	// driver_pool) can trigger a validation error here.
 	if len(cfg.Org.ModelPool) == 0 {
-		return cfg, fmt.Errorf("[org].model_pool must not be empty")
+		return fmt.Errorf("[org].model_pool must not be empty")
 	}
 	orgDriverSet := make(map[string]bool, len(cfg.Org.DriverPool))
 	for _, d := range cfg.Org.DriverPool {
@@ -779,11 +825,11 @@ func Load(path string) (Config, error) {
 	validOrgModels := make(map[string]bool, len(cfg.Org.ModelPool))
 	for _, entry := range cfg.Org.ModelPool {
 		if !orgDriverSet[entry.Driver] {
-			return cfg, fmt.Errorf("[org].model_pool entry driver %q not present in [org].driver_pool %v", entry.Driver, cfg.Org.DriverPool)
+			return fmt.Errorf("[org].model_pool entry driver %q not present in [org].driver_pool %v", entry.Driver, cfg.Org.DriverPool)
 		}
 		key := entry.Driver + ":" + entry.Model
 		if seenModelPoolEntries[key] {
-			return cfg, fmt.Errorf("[org].model_pool duplicate entry %q", key)
+			return fmt.Errorf("[org].model_pool duplicate entry %q", key)
 		}
 		seenModelPoolEntries[key] = true
 		validOrgModels[entry.Model] = true
@@ -791,18 +837,18 @@ func Load(path string) (Config, error) {
 	for role, models := range cfg.Org.Roles {
 		for _, m := range models {
 			if !validOrgModels[m] {
-				return cfg, fmt.Errorf("[org.roles].%s references model %q not present in [org].model_pool", role, m)
+				return fmt.Errorf("[org.roles].%s references model %q not present in [org].model_pool", role, m)
 			}
 		}
 	}
 	if cfg.Org.MaxSeats < 1 {
-		return cfg, fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
+		return fmt.Errorf("[org].max_seats must be >= 1, got %d", cfg.Org.MaxSeats)
 	}
 	if cfg.Org.MaxOrgs < 1 {
-		return cfg, fmt.Errorf("[org].max_orgs must be >= 1, got %d", cfg.Org.MaxOrgs)
+		return fmt.Errorf("[org].max_orgs must be >= 1, got %d", cfg.Org.MaxOrgs)
 	}
 	if cfg.Org.MaxTotalSeats < 1 {
-		return cfg, fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
+		return fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
 	}
 	// AgmsgHome is a string default, so (unlike the strict-validation fields
 	// above) it follows the same explicit zero-value backfill pattern as
@@ -823,11 +869,11 @@ func Load(path string) (Config, error) {
 		cfg.Org.Permissions.Default = Default().Org.Permissions.Default
 	}
 	if !orgPermissionModeAllowed[cfg.Org.Permissions.Default] {
-		return cfg, fmt.Errorf("[org.permissions].default %q must be one of autonomous, edits, or guarded", cfg.Org.Permissions.Default)
+		return fmt.Errorf("[org.permissions].default %q must be one of autonomous, edits, or guarded", cfg.Org.Permissions.Default)
 	}
 	for role, mode := range cfg.Org.Permissions.Roles {
 		if !orgPermissionModeAllowed[mode] {
-			return cfg, fmt.Errorf("[org.permissions.roles].%s %q must be one of autonomous, edits, or guarded", role, mode)
+			return fmt.Errorf("[org.permissions.roles].%s %q must be one of autonomous, edits, or guarded", role, mode)
 		}
 	}
 
@@ -837,13 +883,13 @@ func Load(path string) (Config, error) {
 	// within a present one) never reaches these checks with a zero/invalid
 	// value.
 	if cfg.Org.Watchdog.IntervalSeconds < 1 {
-		return cfg, fmt.Errorf("[org.watchdog].interval_seconds must be >= 1, got %d", cfg.Org.Watchdog.IntervalSeconds)
+		return fmt.Errorf("[org.watchdog].interval_seconds must be >= 1, got %d", cfg.Org.Watchdog.IntervalSeconds)
 	}
 	if cfg.Org.Watchdog.StallMinutes < 1 {
-		return cfg, fmt.Errorf("[org.watchdog].stall_minutes must be >= 1, got %d", cfg.Org.Watchdog.StallMinutes)
+		return fmt.Errorf("[org.watchdog].stall_minutes must be >= 1, got %d", cfg.Org.Watchdog.StallMinutes)
 	}
 	if cfg.Org.Watchdog.WatcherEnabled && cfg.Org.Watchdog.WatcherModel == "" {
-		return cfg, fmt.Errorf("[org.watchdog].watcher_model must be non-empty when watcher_enabled is true")
+		return fmt.Errorf("[org.watchdog].watcher_model must be non-empty when watcher_enabled is true")
 	}
 
 	// [org.director] validation. Same strict pattern as [org.watchdog]
@@ -859,19 +905,19 @@ func Load(path string) (Config, error) {
 	// be pushed). enabled and auto_merge need no check here: toml.Unmarshal
 	// already refuses a value that is not a bool.
 	if cfg.Org.Director.AckMinutes < 1 {
-		return cfg, fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
+		return fmt.Errorf("[org.director].ack_minutes must be >= 1, got %d", cfg.Org.Director.AckMinutes)
 	}
 	if cfg.Org.Director.ResolveMinutes < 1 {
-		return cfg, fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
+		return fmt.Errorf("[org.director].resolve_minutes must be >= 1, got %d", cfg.Org.Director.ResolveMinutes)
 	}
 	if err := ValidateDirectorLaunchCmd(cfg.Org.Director.LaunchCmd); err != nil {
-		return cfg, err
+		return err
 	}
 	if err := ValidateDirectorWake(cfg.Org.Director.Wake); err != nil {
-		return cfg, err
+		return err
 	}
 	if err := ValidateDirectorWakeCmd(cfg.Org.Director.WakeCmd); err != nil {
-		return cfg, err
+		return err
 	}
 
 	// [org.approval] validation. Same strict pattern as [org.director]
@@ -879,7 +925,7 @@ func Load(path string) (Config, error) {
 	// Default()'s per-plan. Unlike AgmsgHome, an explicit `mode = ""` is not
 	// backfilled: it is an error, like any value other than the two modes.
 	if mode := cfg.Org.Approval.Mode; mode != ApprovalModePerPlan && mode != ApprovalModeSplit {
-		return cfg, fmt.Errorf("[org.approval].mode %q must be %q or %q", mode, ApprovalModePerPlan, ApprovalModeSplit)
+		return fmt.Errorf("[org.approval].mode %q must be %q or %q", mode, ApprovalModePerPlan, ApprovalModeSplit)
 	}
 
 	// [org.review] validation. Same strict pattern as [org.director] above:
@@ -888,7 +934,7 @@ func Load(path string) (Config, error) {
 	// here, like [org.director].enabled. [standard] holds only bools, so it
 	// has no validation.
 	if cfg.Org.Review.MaxCrossReviewCycles < 1 {
-		return cfg, fmt.Errorf("[org.review].max_cross_review_cycles must be >= 1, got %d", cfg.Org.Review.MaxCrossReviewCycles)
+		return fmt.Errorf("[org.review].max_cross_review_cycles must be >= 1, got %d", cfg.Org.Review.MaxCrossReviewCycles)
 	}
 
 	// [org.gate] validation. Same strict pattern as [org.approval] above: an
@@ -896,8 +942,8 @@ func Load(path string) (Config, error) {
 	// local, and an explicit `regate_checks = ""` is an error, like any value
 	// other than the two.
 	if checks := cfg.Org.Gate.RegateChecks; checks != RegateChecksLocal && checks != RegateChecksCI {
-		return cfg, fmt.Errorf("[org.gate].regate_checks %q must be %q or %q", checks, RegateChecksLocal, RegateChecksCI)
+		return fmt.Errorf("[org.gate].regate_checks %q must be %q or %q", checks, RegateChecksLocal, RegateChecksCI)
 	}
 
-	return cfg, nil
+	return nil
 }

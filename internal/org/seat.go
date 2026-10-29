@@ -4,10 +4,13 @@
 // manifest, and tri-state model receipts. It has no cobra wiring, which
 // lives in internal/cli/org.go, and reaches herdr and agmsg only through
 // the adapters in internal/org/driver. It runs a few other commands itself
-// with exec.Command: git (statedir.go, watch.go, feature.go, gate.go,
-// regate_git.go for Regate's fetches, merge, and push, `git ls-remote`, plus
+// with exec.Command: git (watch.go, feature.go, gate.go,
+// regate_git.go for Regate's fetches, merge, and push and for the checks of
+// the cleanup of a merged feature worktree (cleanup.go), `git ls-remote`, plus
 // `git remote get-url origin` once gh returned a PR, in mergeorder.go, `git
-// remote get-url origin` in mergeguarantee.go, and both in merge.go),
+// remote get-url origin` in mergeguarantee.go, and both in merge.go; the
+// git calls with which statedir.go finds the main worktree and the toplevel
+// are in internal/gitroot),
 // scripts/ralph-worktree.sh (feature.go), scripts/run-static-verify.sh and
 // scripts/run-test.sh of a feature worktree (gate_run.go), osascript
 // (watch.go), gh (mergeorder.go, mergeguarantee.go, mergeenforce.go,
@@ -114,6 +117,23 @@ const (
 	// watch does not count it as leader activity (leaderActivityEventCount).
 	// ralph org merge-order does not read it.
 	EventPRMerged = "pr_merged"
+	// EventWorktreeCleaned is an org-level, non-state event (SeatID empty,
+	// absent from stateEvents below) that only the cleanup of a merged
+	// feature worktree writes (CleanupFeatureWorktree, cleanup.go), for ralph
+	// org merge after its merge (via=merge) and for ralph org cleanup
+	// (via=cleanup): scripts/ralph-worktree.sh cleanup --force-branch removed
+	// the feature worktree of a branch, its local branch, and its
+	// ralph-worktree.sh record, once the checks found nothing there that
+	// would be lost. It is written once per cleanup, under the org of the
+	// branch's latest binding, Details `branch=<branch> head=<the head the PR
+	// merged> via=<merge or cleanup> worktree=<quoted path>`, the worktree
+	// last since its value is strconv.Quote'd and may hold spaces, as a gate
+	// record's log is. A refusal and a removal that failed record none.
+	// Roster skips it like every org-level event; it makes no org count as
+	// running (RunningOrgs) nor a target of disband --all (orgsToDisband),
+	// and the watch does not count it as leader activity
+	// (leaderActivityEventCount).
+	EventWorktreeCleaned = "worktree_cleaned"
 )
 
 // stateEvents are the event types that drive seat status derivation

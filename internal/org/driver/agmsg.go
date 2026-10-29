@@ -131,24 +131,31 @@ func (a Agmsg) DeliverySet(ctx context.Context, mode, agmsgType, projectPath str
 	return err
 }
 
-// defaultAgmsgHome is used when neither RALPH_ORG_AGMSG_HOME nor
-// [org].agmsg_home supply a value. It must stay in lock-step with
-// config.Default().Org.AgmsgHome, templates/base/ralph.toml, and
-// scripts/ralph-config.sh (see internal/config/defaults_sync_test.go).
+// defaultAgmsgHome is used when [org].agmsg_home supplies no value. It must
+// stay in lock-step with config.Default().Org.AgmsgHome and
+// templates/base/ralph.toml (see internal/config/defaults_sync_test.go).
 const defaultAgmsgHome = "~/.agents/skills/agmsg"
 
-// AgmsgHomeEnv is the variable ResolveAgmsgHome reads before the
-// [org].agmsg_home config value. The commands that pass an agmsg home on to
-// another process (the CLI's detached watch, the launch script of a
-// headless director) set it under this name.
-const AgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
+// AgmsgHomeOverride is the agmsg home ResolveAgmsgHome returns before
+// anything else when it is not empty; empty means unset. Production code
+// never sets it. Only tests do: the TestMains of internal/cli and
+// internal/org pin it to a path that does not exist, and their helpers
+// point it at a stub agmsg, so that no test reaches the developer's real
+// agmsg whatever a ralph.toml says. It lives here, not in the CLI, because
+// internal/org calls ResolveAgmsgHome("") itself (prompts.go). Like a
+// variable a test sets with t.Setenv, a test that sets it must not run in
+// parallel.
+var AgmsgHomeOverride string
 
 // ResolveAgmsgHome resolves the agmsg home directory used to build script
-// paths. Precedence: env RALPH_ORG_AGMSG_HOME (AgmsgHomeEnv) > cfgValue (the
-// loaded [org].agmsg_home config value) > defaultAgmsgHome. A leading "~/"
-// is expanded via os.UserHomeDir; other paths are returned unchanged.
+// paths. Precedence: AgmsgHomeOverride (tests only) > cfgValue (the loaded
+// [org].agmsg_home config value, which ralph.local.toml may override) >
+// defaultAgmsgHome. No environment variable takes part: ralph no longer
+// reads RALPH_ORG_AGMSG_HOME (plan 2026-10-29-local-config-org), and
+// `ralph doctor` warns when it is still set. A leading "~/" is expanded via
+// os.UserHomeDir; other paths are returned unchanged.
 func ResolveAgmsgHome(cfgValue string) string {
-	home := os.Getenv(AgmsgHomeEnv)
+	home := AgmsgHomeOverride
 	if home == "" {
 		home = cfgValue
 	}

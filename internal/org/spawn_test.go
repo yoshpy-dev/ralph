@@ -3313,16 +3313,21 @@ func TestOrgSpawn_LeaderRole_TaskAndEnvelopeSubstitutedIntoPromptFile(t *testing
 // 2026-10-23-busy-leader at the spawn: the leader's role prompt file names
 // the Org's agmsg home's scripts directory, single-quoted, in its inbox.sh
 // and history.sh commands, and an Org with no agmsg home names the one
-// driver.ResolveAgmsgHome("") reads (here RALPH_ORG_AGMSG_HOME).
+// driver.ResolveAgmsgHome("") returns: the default home under $HOME, with
+// RALPH_ORG_AGMSG_HOME set to another directory, which ralph no longer
+// reads (plan 2026-10-29-local-config-org, AC6).
 func TestOrgSpawn_LeaderRole_AgmsgHomeQuotedIntoPromptFile(t *testing.T) {
+	homeDir := t.TempDir()
 	for _, tc := range []struct {
-		name, home, env, want string
+		name, home, want string
 	}{
-		{"the Org's agmsg home", "/opt/agmsg home", "/env/other", "'/opt/agmsg home/scripts'"},
-		{"no agmsg home on the Org", "", "/env/agmsg", "'/env/agmsg/scripts'"},
+		{"the Org's agmsg home", "/opt/agmsg home", "'/opt/agmsg home/scripts'"},
+		{"no agmsg home on the Org", "", shellQuote(filepath.Join(homeDir, ".agents", "skills", "agmsg", "scripts"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(driver.AgmsgHomeEnv, tc.env)
+			setAgmsgHomeOverride(t, "")
+			t.Setenv("RALPH_ORG_AGMSG_HOME", "/env/agmsg")
+			t.Setenv("HOME", homeDir)
 			o, h, _ := testOrg(t)
 			o.AgmsgHome = tc.home
 			p := mustSpawnParams("org-a", LeaderIdentity)
@@ -5893,9 +5898,9 @@ func assertRegateRefusedSpawn(t *testing.T, r SpawnResult, orgID, stateDir strin
 		t.Fatalf("spawn of %s while a regate runs on it = %+v; want a rejection", orgID, r)
 	}
 	for _, want := range []string{
-		`org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(stateDir) +
-			` holds the regate's marker)`,
-		"wait for the regate to end and run the same command again",
+		`org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup ` +
+			`removes its merged feature worktree (` + regateLockPathIn(stateDir) + ` holds the marker of that org)`,
+		"wait for it to end and run the same command again",
 	} {
 		if !strings.Contains(r.Err.Error(), want) {
 			t.Errorf("error %q does not say %q", r.Err, want)

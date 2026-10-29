@@ -190,7 +190,7 @@ type Org struct {
 	// prompt (RolePromptVars.AgmsgHome), so the leader's inbox commands read
 	// the store ralph's agmsg calls write to. The CLI sets it to the same
 	// driver.ResolveAgmsgHome value it gives driver.Agmsg's Home. Empty (the
-	// field's default) means driver.ResolveAgmsgHome("").
+	// field's default) means driver.ResolveAgmsgHome(""), the default home.
 	AgmsgHome string
 	// AgentStartRetryInterval overrides the wait between agent_pane_busy
 	// retries in agentStartWithRetry. Zero (the field's default) means "use
@@ -252,9 +252,12 @@ type Org struct {
 	Getenv func(string) string
 	// Worktrees reads and makes the feature worktrees of StartFeature
 	// (feature.go): the records and `ensure` of scripts/ralph-worktree.sh,
-	// and the branch a worktree has checked out. nil (the field's default)
-	// means the script-backed implementation, scriptFeatureWorktrees; tests
-	// set a fake.
+	// and the branch a worktree has checked out. The cleanup of a merged
+	// feature worktree, by ralph org merge and ralph org cleanup
+	// (cleanup.go), reads the record through it too and removes the
+	// worktree, its branch, and the record with the script's `cleanup
+	// --force-branch`. nil (the field's default) means the script-backed
+	// implementation, scriptFeatureWorktrees; tests set a fake.
 	Worktrees FeatureWorktrees
 	// Inbox is the org inbox (inbox.go) Escalate records to and
 	// NotifyInboxItem reads (escalate.go); WaitInbox and
@@ -1468,9 +1471,15 @@ func checkCapacityAndStart(o *Org, p SpawnParams, req SpawnRequest, events []Man
 // during the waits of --wait-checks (merge_wait.go), with the marker empty,
 // since a merge changes no worktree (plan
 // docs/plans/active/2026-10-17-org-auto-merge.md, D3): a spawn finds no
-// marker then and goes on while the merge runs. A lock that cannot be
-// checked refuses too. Spawn calls it under the manifest lock
-// (checkCapacityAndStart), and StartFeature once before ensure.
+// marker then and goes on while the merge runs. The cleanup of a merged
+// feature worktree, by ralph org merge once it recorded the merge and by
+// ralph org cleanup (cleanup.go, plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, D2), writes the marker
+// of the worktree's org the way a regate does, so a spawn of that org is
+// refused while the worktree may be removed, and one of another org goes on.
+// A lock that cannot be checked refuses too. Spawn calls it under the
+// manifest lock (checkCapacityAndStart), and StartFeature once before
+// ensure.
 func regateSpawnErr(stateDir, orgID string) error {
 	path := regateLockPathIn(stateDir)
 	held, err := fileLockHeld(path)
@@ -1484,8 +1493,9 @@ func regateSpawnErr(stateDir, orgID string) error {
 	if marked, ok := readRegateMarker(path); !ok || marked != orgID {
 		return nil
 	}
-	return fmt.Errorf("org: org_id %q is not spawned while ralph org regate runs on its branch (%s holds the regate's marker): "+
-		"wait for the regate to end and run the same command again", orgID, path)
+	return fmt.Errorf("org: org_id %q is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup "+
+		"removes its merged feature worktree (%s holds the marker of that org): wait for it to end and run the same command again",
+		orgID, path)
 }
 
 // spawnCapacityErr runs, against events, every check of a new seat that

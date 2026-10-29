@@ -431,54 +431,6 @@ esac
 	}
 }
 
-func TestParseMainWorktreeRecord(t *testing.T) {
-	cases := []struct {
-		name      string
-		porcelain string
-		wantPath  string
-		wantOK    bool
-	}{
-		{
-			name:      "main record followed by a linked record",
-			porcelain: "worktree /repo/main\nHEAD 1111\nbranch refs/heads/main\n\nworktree /repo/linked\nHEAD 2222\nbranch refs/heads/feat\n\n",
-			wantPath:  "/repo/main",
-			wantOK:    true,
-		},
-		{
-			name:      "bare main record",
-			porcelain: "worktree /repo/project\nbare\n\nworktree /repo/project/wt\nHEAD 2222\nbranch refs/heads/feat\n\n",
-		},
-		{
-			name:      "empty output",
-			porcelain: "",
-		},
-		{
-			name:      "garbled output",
-			porcelain: "fatal: not a git repository\n",
-		},
-		{
-			name:      "first record without a worktree line",
-			porcelain: "HEAD 1111\nbranch refs/heads/main\n\nworktree /repo/linked\n\n",
-		},
-		{
-			name:      "leading blank line ends the first record",
-			porcelain: "\nworktree /repo/main\n\n",
-		},
-		{
-			name:      "relative path",
-			porcelain: "worktree repo/main\nHEAD 1111\n\n",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			gotPath, gotOK := parseMainWorktreeRecord(tc.porcelain)
-			if gotPath != tc.wantPath || gotOK != tc.wantOK {
-				t.Errorf("parseMainWorktreeRecord(%q) = (%q, %v), want (%q, %v)", tc.porcelain, gotPath, gotOK, tc.wantPath, tc.wantOK)
-			}
-		})
-	}
-}
-
 // appendLedgerEvents writes events to the manifest under stateDir with the
 // same ManifestStore the org verbs use.
 func appendLedgerEvents(t *testing.T, stateDir string, events ...ManifestEvent) {

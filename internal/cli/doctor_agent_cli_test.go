@@ -251,7 +251,7 @@ func TestRunDoctorOpts_AgentCLIs(t *testing.T) {
 				writeFailingStubBin(t, binDir, bin, bin+": entry script missing")
 			}
 			t.Setenv("PATH", binDir)
-			t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+			setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 			var out string
 			err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })

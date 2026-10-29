@@ -29,14 +29,17 @@ import (
 // script: it returns a recorded worktree with the same path, branch and kind
 // as it is (canonical_ref untouched), refuses a record that differs, and
 // otherwise records a new one and makes its directory for real, so
-// StartFeature's directory check sees it.
+// StartFeature's directory check sees it. Cleanup forgets the record and its
+// checkout and removes the directory Ensure made (an empty one; it runs no
+// git, so a branch stays).
 type fakeWorktrees struct {
 	records   map[string]WorktreeRecord // state id -> record
 	checkouts map[string]string         // worktree path -> branch checked out ("" detached)
 
-	lookupErr error
-	ensureErr error
-	branchErr error
+	lookupErr  error
+	ensureErr  error
+	branchErr  error
+	cleanupErr error
 	// ensureHook, when non-nil, runs first in Ensure: a racing spawn that
 	// changes the manifest after StartFeature's unlocked pre-check.
 	ensureHook func()
@@ -47,9 +50,9 @@ type fakeWorktrees struct {
 	// returns, as a cleanup run right after it would.
 	ensureDrops bool
 
-	calls   []string // "lookup:<id>", "ensure:<id>", "branch:<path>", in order
+	calls   []string // "lookup:<id>", "ensure:<id>", "branch:<path>", "cleanup:<id>", in order
 	ensured []EnsureWorktree
-	roots   []string // repoRoot of each Lookup and Ensure call, in order
+	roots   []string // repoRoot of each Lookup, Ensure and Cleanup call, in order
 }
 
 func newFakeWorktrees() *fakeWorktrees {
@@ -107,6 +110,24 @@ func (f *fakeWorktrees) CurrentBranch(path string) (string, error) {
 		return "", fmt.Errorf("fatal: not a git repository: %s", path)
 	}
 	return branch, nil
+}
+
+func (f *fakeWorktrees) Cleanup(repoRoot, id string) error {
+	f.calls = append(f.calls, "cleanup:"+id)
+	f.roots = append(f.roots, repoRoot)
+	if f.cleanupErr != nil {
+		return f.cleanupErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return fmt.Errorf("ralph-worktree: state not found for id: %s", id)
+	}
+	if err := os.Remove(rec.WorktreePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	delete(f.records, id)
+	delete(f.checkouts, rec.WorktreePath)
+	return nil
 }
 
 // featureStart is a StartFeature fixture: an Org on fake drivers and fake
@@ -1510,8 +1531,9 @@ func TestStartFeature_SpawnFailureKeepsWorktree(t *testing.T) {
 // spawn, whose error says that the worktree stays.
 func TestStartFeature_RefusedWhileRegateRunsOnTheOrg(t *testing.T) {
 	regateRefusal := func(st *featureStart) string {
-		return `org: org_id "auth" is not spawned while ralph org regate runs on its branch (` + regateLockPathIn(st.stateDir) +
-			` holds the regate's marker): wait for the regate to end and run the same command again`
+		return `org: org_id "auth" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup removes ` +
+			`its merged feature worktree (` + regateLockPathIn(st.stateDir) + ` holds the marker of that org): wait for it to end ` +
+			`and run the same command again`
 	}
 	t.Run("before ensure", func(t *testing.T) {
 		fx := newRegateSpawnFixture(t)
@@ -1904,6 +1926,11 @@ func (s *spyWorktrees) Ensure(repoRoot string, req EnsureWorktree) (string, erro
 func (s *spyWorktrees) CurrentBranch(path string) (string, error) {
 	s.calls = append(s.calls, "branch:"+path)
 	return s.scriptFeatureWorktrees.CurrentBranch(path)
+}
+
+func (s *spyWorktrees) Cleanup(repoRoot, id string) error {
+	s.calls = append(s.calls, "cleanup:"+id)
+	return s.scriptFeatureWorktrees.Cleanup(repoRoot, id)
 }
 
 // featureWorktreeState is what the org of a feature worktree owns, read

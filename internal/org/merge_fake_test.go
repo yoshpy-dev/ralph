@@ -548,6 +548,52 @@ func mrNoRawControl(t *testing.T, s string) {
 	}
 }
 
+// mcFixture is the merge of feat/auth, whose feature worktree
+// worktreeCleanupFixture made with the real scripts/ralph-worktree.sh
+// (cleanup_test.go), with the cleanup that follows it (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2): its ledger gets a
+// gate_passed of the worktree's head on moMain, and mrExec answers checkMerge
+// and the calls Merge adds for feat/auth at that head (origin with main at
+// moMain and feat/auth at the head, PR #7 of feat/auth open at it, read back
+// MERGED at it). The cleanup's git and script run for real, apart from mrExec.
+type mcFixture struct {
+	*worktreeCleanupFixture
+	ex *mrExec
+}
+
+func newMCFixture(t *testing.T) *mcFixture {
+	t.Helper()
+	wc := newWorktreeCleanupFixture(t)
+	gate := moPassed("auth", cleanupTestBranch, wc.head, moMain)
+	gate.TS = wc.o.now()
+	appendCleanupEvents(t, wc.o, gate)
+	pr := ghPullRequest{Number: 7, State: "OPEN", URL: "https://github.com/o/r/pull/7", HeadRefOid: wc.head, BaseRefName: "main"}
+	mx := newMXExec()
+	mx.ls = []mgReply{{out: moListing("main", "main", moMain, cleanupTestBranch, wc.head)}}
+	mx.replies[mxPRList] = mgReply{out: moPRs(pr)}
+	mx.replies[mxPRView] = mgReply{out: mxPRViewJSON("OPEN", wc.head, "main", pr.URL, "null")}
+	return &mcFixture{worktreeCleanupFixture: wc, ex: &mrExec{mxExec: mx, reread: mgReply{out: mrReadBackAt("MERGED", wc.head, mrOID,
+		"null")}}}
+}
+
+// mergeParams is the merge of feat/auth with the main worktree as RepoRoot.
+func (fx *mcFixture) mergeParams() MergeParams {
+	return MergeParams{Branch: cleanupTestBranch, Dir: "/repo", Exec: fx.ex.run, LookPath: mgFound, RepoRoot: fx.root}
+}
+
+// merge runs Merge with mergeParams and fails the test unless the commands
+// that ran through mrExec are a merge's (mrMerged), in /repo and pinned to
+// origin's repository (mxAssertPinned): the cleanup adds none.
+func (fx *mcFixture) merge(t *testing.T) (MergeResult, error) {
+	t.Helper()
+	res, err := fx.o.Merge(context.Background(), fx.mergeParams())
+	mxAssertPinned(t, fx.ex.mxExec, "github.com", mxRepoArg)
+	if got := fx.ex.keys(); !slices.Equal(got, mrMerged) {
+		t.Errorf("commands = %q\nwant %q", got, mrMerged)
+	}
+	return res, err
+}
+
 // mwMaxSleeps is how many sleeps mwClock allows before it ends the wait.
 const mwMaxSleeps = 50
 

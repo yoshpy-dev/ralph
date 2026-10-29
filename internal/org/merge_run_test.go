@@ -2,6 +2,7 @@ package org
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -647,7 +648,7 @@ func TestMerge_SharesRegateLockWithRegate(t *testing.T) {
 		if took := time.Since(begin); took < regateLockWait {
 			t.Errorf("Merge refused after %s; want it to retry the lock for %s", took, regateLockWait)
 		}
-		want := MergeResult{Refused: "org: merge: another ralph org regate or merge runs on this ledger (" + path + " is held): one " +
+		want := MergeResult{Refused: "org: merge: another ralph org regate, merge, or cleanup runs on this ledger (" + path + " is held): one " +
 			"runs at a time, so wait for it to end and run ralph org merge --branch feat/a again"}
 		if err != nil || res != want {
 			t.Fatalf("Merge = %+v, %v\nwant %+v", res, err, want)
@@ -787,4 +788,320 @@ func TestRealMergeDetachedExec_CtxDoneKillsTheGroup(t *testing.T) {
 	if _, err := os.Stat(alive); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the command's child still ran after ctx was done (%s: %v); want the whole group killed", alive, err)
 	}
+}
+
+// The cleanup after a recorded merge (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S2: AC1, AC3, and AC4 for
+// ralph org merge at the org layer).
+
+// mcSpawnRefusal is regateSpawnErr's refusal of a spawn of orgID while the
+// ledger in stateDir holds orgID's marker in a held regate.lock.
+func mcSpawnRefusal(stateDir, orgID string) string {
+	return `org: org_id "` + orgID + `" is not spawned while ralph org regate runs on its branch or ralph org merge or cleanup ` +
+		`removes its merged feature worktree (` + regateLockPathIn(stateDir) + ` holds the marker of that org): wait for it to end ` +
+		`and run the same command again`
+}
+
+// TestMerge_CleansUpTheFeatureWorktreeOnceRecorded covers AC1 through the
+// real scripts/ralph-worktree.sh: once pr_merged is recorded, Merge cleans up
+// feat/auth's feature worktree with regate.lock still held and the org's
+// marker in it, so a spawn of that org is refused meanwhile and one of
+// another org is not; the worktree, its registration, the branch, and the
+// record go with one run of the script's cleanup, worktree_cleaned with
+// via=merge follows pr_merged in the ledger, the cleanup runs nothing through
+// MergeOrderExec, and Merge returns the merge with no error.
+func TestMerge_CleansUpTheFeatureWorktreeOnceRecorded(t *testing.T) {
+	fx := newMCFixture(t)
+	path := regateLockPathIn(fx.stateDir)
+	var held, reached bool
+	var marked string
+	var sameErr, otherErr error
+	cleanupTestHooks.beforeScript = func() {
+		reached = true
+		held, _ = fileLockHeld(path)
+		marked, _ = readRegateMarker(path)
+		sameErr, otherErr = regateSpawnErr(fx.stateDir, "auth"), regateSpawnErr(fx.stateDir, "other")
+	}
+	t.Cleanup(func() { cleanupTestHooks.beforeScript = nil })
+
+	res, err := fx.merge(t)
+	if err != nil || !res.Merged || !res.Recorded || res.Failed != "" || res.Refused != "" || res.Cleanup == nil ||
+		res.CleanupErr != "" || !reached {
+		t.Fatalf("Merge = %+v, %v (hook reached %v); want a recorded merge cleaned up through the hook", res, err, reached)
+	}
+	fx.assertCleaned(t, *res.Cleanup, nil, "", CleanupViaMerge)
+	events := mustReadEvents(t, fx.o)
+	if prev := events[len(events)-2]; prev.Event != EventPRMerged || prev.OrgID != "auth" ||
+		!strings.HasPrefix(prev.Details, "branch=feat/auth pr=7 head="+fx.head+" ") {
+		t.Errorf("the event before worktree_cleaned is %+v; want feat/auth's pr_merged", prev)
+	}
+	if want := mcSpawnRefusal(fx.stateDir, "auth"); !held || marked != "auth" || sameErr == nil || sameErr.Error() != want ||
+		otherErr != nil {
+		t.Errorf("during the cleanup: lock held %v, marker %q, regateSpawnErr = %v for auth, %v for other; want held, auth, %q, "+
+			"and nil", held, marked, sameErr, otherErr, want)
+	}
+	if err := regateSpawnErr(fx.stateDir, "auth"); err != nil {
+		t.Errorf("regateSpawnErr after the merge = %v; want nil", err)
+	}
+}
+
+// TestMerge_RefusedCleanupKeepsTheMerge covers AC3 and AC4 for ralph org
+// merge, through the real script: a cleanup that refuses, for an untracked
+// file in the worktree or for the branch's org spawned again while gh pr
+// merge ran (no marker kept that spawn out), removes nothing and records no
+// worktree_cleaned, and Merge still returns the recorded merge with no
+// error and the refusal in Cleanup. Neither names a command by hand: the
+// next cleanup goes on from each once its cause is gone.
+func TestMerge_RefusedCleanupKeepsTheMerge(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, fx *mcFixture)
+		want  string
+		calls []string // the worktree calls
+	}{
+		{"an untracked file", func(t *testing.T, fx *mcFixture) {
+			writeGateFile(t, fx.worktree, "stray.txt", "x\n", 0o644)
+		}, "has 1 uncommitted change(s) or untracked file(s) (?? stray.txt), which removing it would lose",
+			[]string{"lookup:" + cleanupTestID}},
+		{"the org spawned again during gh pr merge", func(t *testing.T, fx *mcFixture) {
+			fx.ex.inMerge = func(context.Context) { seedSeat(t, fx.o, "auth", "worker", "worker", "pane-2") }
+		}, `the branch feat/auth is bound to org_id "auth", which is running and may still use its feature worktree ` +
+			"%WORKTREE%: wait for the org to be disbanded and run ralph org cleanup --branch feat/auth again", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMCFixture(t)
+			tc.setup(t, fx)
+			record := fileOrAbsent(t, fx.recordFile(t))
+			res, err := fx.merge(t)
+			if err != nil || !res.Merged || !res.Recorded || res.Failed != "" || res.Cleanup == nil || res.CleanupErr != "" ||
+				res.Cleanup.Cleaned || res.Cleanup.Recorded || res.Cleanup.Failed != "" {
+				t.Fatalf("Merge = %+v, %v (cleanup %+v); want a recorded merge whose cleanup refused", res, err, res.Cleanup)
+			}
+			assertCleanupRefusal(t, *res.Cleanup, strings.ReplaceAll(tc.want, "%WORKTREE%", fx.worktree), "")
+			if !slices.Equal(fx.spy.calls, tc.calls) {
+				t.Errorf("worktree calls = %q, want %q", fx.spy.calls, tc.calls)
+			}
+			if info, err := os.Stat(fx.worktree); err != nil || !info.IsDir() {
+				t.Errorf("the worktree %s is gone (%v)", fx.worktree, err)
+			}
+			if tip := fx.branchTip(); tip != fx.head {
+				t.Errorf("the branch %s is at %q, want %s", cleanupTestBranch, tip, fx.head)
+			}
+			if now := fileOrAbsent(t, fx.recordFile(t)); now != record || now == "<absent>" {
+				t.Errorf("the record changed:\n%s\n->\n%s", record, now)
+			}
+			events := mustReadEvents(t, fx.o)
+			if last := events[len(events)-1]; last.Event != EventPRMerged || len(cleanedEvents(events)) != 0 {
+				t.Errorf("manifest ends with %+v (%d worktree_cleaned); want pr_merged and no worktree_cleaned", last,
+					len(cleanedEvents(events)))
+			}
+			assertCleanupUnlocked(t, fx.stateDir)
+		})
+	}
+}
+
+// mcFakeFixture is newMRFixture's ledger, whose binding of feat/a to org-a
+// names the worktree /repo/.claude/worktrees/org-a, with fakeWorktrees
+// holding that binding's record.
+func mcFakeFixture(t *testing.T) (*mrFixture, *fakeWorktrees) {
+	t.Helper()
+	fx := newMRFixture(t, nil)
+	wt := newFakeWorktrees()
+	wt.records[featureWorktreeID("org-a")] = WorktreeRecord{WorktreePath: "/repo/.claude/worktrees/org-a", Branch: "feat/a",
+		Kind: featureWorktreeKind}
+	fx.mo.o.Worktrees = wt
+	return fx, wt
+}
+
+// TestMerge_RunsTheCleanupOnlyAfterARecordedMerge covers D3's opt-in and the
+// merges that are not followed by a cleanup, with fakeWorktrees: with no
+// RepoRoot a recorded merge runs none and leaves regate.lock with no marker,
+// as before; with RepoRoot, a merge that is refused, is not MERGED, or whose
+// pr_merged cannot be appended runs none either. Each has Cleanup nil and no
+// worktree call. An interruption once gh pr merge started, with the merge
+// recorded, runs none and says so in Cleanup's Refused.
+func TestMerge_RunsTheCleanupOnlyAfterARecordedMerge(t *testing.T) {
+	recorded := mrResult("merge")
+	recorded.Merged, recorded.Recorded, recorded.MergeCommit = true, true, mrOID
+	t.Run("no repo root", func(t *testing.T) {
+		fx, wt := mcFakeFixture(t)
+		res, err := fx.merge(context.Background(), t, fx.params())
+		if err != nil || res != recorded {
+			t.Fatalf("Merge = %+v, %v\nwant    %+v", res, err, recorded)
+		}
+		if len(wt.calls) != 0 {
+			t.Errorf("worktree calls = %q, want none", wt.calls)
+		}
+		if got := fileOrAbsent(t, regateLockPathIn(fx.mo.stateDir)); got != "" {
+			t.Errorf("regate.lock holds %q after the merge; want no marker", got)
+		}
+	})
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, fx *mrFixture)
+		check func(res MergeResult, err error) bool
+	}{
+		{"a refused merge", func(_ *testing.T, fx *mrFixture) { fx.exec.replies[mxPRList] = mgReply{out: "[]"} },
+			func(res MergeResult, err error) bool { return err == nil && res.Refused != "" }},
+		{"a merge that is not MERGED", func(_ *testing.T, fx *mrFixture) {
+			fx.ex.reread = mgReply{out: mrReadBack("OPEN", "", "null")}
+		}, func(res MergeResult, err error) bool { return err == nil && res.Failed != "" && !res.Merged }},
+		{"a pr_merged that cannot be appended", func(t *testing.T, fx *mrFixture) {
+			if os.Geteuid() == 0 {
+				t.Skip("root can append to a read-only manifest")
+			}
+			if err := os.Chmod(fx.mo.path, 0o444); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(fx.mo.path, 0o644) })
+		}, func(res MergeResult, err error) bool { return err != nil && res.Merged && !res.Recorded }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx, wt := mcFakeFixture(t)
+			tc.setup(t, fx)
+			p := fx.params()
+			p.RepoRoot = "/repo"
+			res, err := fx.merge(context.Background(), t, p)
+			if !tc.check(res, err) || res.Cleanup != nil || res.CleanupErr != "" {
+				t.Fatalf("Merge = %+v, %v; want no cleanup", res, err)
+			}
+			if len(wt.calls) != 0 {
+				t.Errorf("worktree calls = %q, want none", wt.calls)
+			}
+		})
+	}
+	t.Run("interrupted once gh pr merge started", func(t *testing.T) {
+		fx, wt := mcFakeFixture(t)
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		fx.ex.inMerge = func(context.Context) { cancel(errors.New("test stopped")) }
+		p := fx.params()
+		p.RepoRoot = "/repo"
+		res, err := fx.merge(ctx, t, p)
+		want := "org: merge: interrupted (test stopped) once gh pr merge had started, and then: PR #7 " +
+			"(https://github.com/o/r/pull/7) was merged (merge commit " + mrOID + ") and pr_merged was recorded"
+		cleanup := CleanupResult{Branch: "feat/a", Head: moHeadA, Refused: "ralph org merge was interrupted (test stopped) once " +
+			"pr_merged was recorded, so the feature worktree of the branch feat/a was not cleaned up: run ralph org cleanup --branch feat/a"}
+		if err == nil || err.Error() != want || !res.Recorded || res.Cleanup == nil || *res.Cleanup != cleanup || res.CleanupErr != "" {
+			t.Fatalf("Merge = %+v, %v (cleanup %+v)\nwant the error %q and the cleanup %+v", res, err, res.Cleanup, want, cleanup)
+		}
+		if len(wt.calls) != 0 {
+			t.Errorf("worktree calls = %q, want none", wt.calls)
+		}
+	})
+}
+
+// The refusal of the cleanup Merge skips once interrupted names the branch in
+// its command as one shell word (cleanupShellWord), as the cleanup's own
+// refusals do: a branch with a character the shell reads specially, which
+// git accepts (git check-ref-format --branch feat/a;b), is quoted there, a
+// plain one is not, and the branch named in words is left as it is.
+func TestMergeCleanupInterrupted_QuotesTheBranchInItsCommand(t *testing.T) {
+	const prefix = "ralph org merge was interrupted (test stopped) once pr_merged was recorded, so the feature worktree of " +
+		"the branch "
+	for _, tc := range []struct{ branch, want string }{
+		{"feat/a", prefix + "feat/a was not cleaned up: run ralph org cleanup --branch feat/a"},
+		{"feat/a;b", prefix + "feat/a;b was not cleaned up: run ralph org cleanup --branch 'feat/a;b'"},
+	} {
+		if got := mergeCleanupInterrupted(errors.New("test stopped"), tc.branch); got != tc.want {
+			t.Errorf("mergeCleanupInterrupted(%q) =\n%q\nwant\n%q", tc.branch, got, tc.want)
+		}
+	}
+}
+
+// TestMerge_CleanupOutcomesWithFakeWorktrees covers the cleanup's outcomes
+// that reach MergeResult, with fakeWorktrees, the merge recorded and no error
+// from Merge in each: an earlier cleanup left the record alone (no worktree,
+// no branch in a repo root that git reads), which goes on and records
+// worktree_cleaned (Resumed record_only); a repo root git cannot run in,
+// whose error is CleanupErr with nothing removed or recorded; a record on
+// another branch, a refusal whose Manual deletes only the binding's branch;
+// and a local branch at another commit than the gate's head, which git does
+// not have here, a refusal that names the fetch of the head of the PR Merge
+// merged, #7 (R2-L3 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md).
+func TestMerge_CleanupOutcomesWithFakeWorktrees(t *testing.T) {
+	isolateGitEnv(t)
+	gitRoot := resolvedOrClean(t.TempDir())
+	runGit(t, "init", "--quiet", "-b", "main", gitRoot)
+	movedRoot := resolvedOrClean(t.TempDir())
+	runGit(t, "init", "--quiet", "-b", "main", movedRoot)
+	gateCommit(t, movedRoot, "init")
+	runGit(t, "-C", movedRoot, "branch", "feat/a")
+	missing := filepath.Join(resolvedOrClean(t.TempDir()), "missing")
+	id := featureWorktreeID("org-a")
+	for _, tc := range []struct {
+		name    string
+		root    string
+		setup   func(wt *fakeWorktrees)
+		check   func(t *testing.T, c CleanupResult, cleanupErr string)
+		calls   []string
+		cleaned string // the Details of the worktree_cleaned appended after pr_merged; "" for none
+	}{
+		{"the record alone is left", gitRoot, func(*fakeWorktrees) {}, func(t *testing.T, c CleanupResult, cleanupErr string) {
+			if !c.Cleaned || !c.Recorded || c.Resumed != CleanupResumedRecordOnly || c.Refused != "" || c.Failed != "" || cleanupErr != "" {
+				t.Errorf("cleanup = %+v, %q; want it cleaned, resumed from the record alone", c, cleanupErr)
+			}
+		}, []string{"lookup:" + id, "cleanup:" + id},
+			"branch=feat/a head=" + moHeadA + ` via=merge worktree="/repo/.claude/worktrees/org-a"`},
+		{"a repo root git cannot run in", missing, func(*fakeWorktrees) {}, func(t *testing.T, c CleanupResult, cleanupErr string) {
+			if c.Cleaned || c.Refused != "" || c.Failed != "" ||
+				!strings.HasPrefix(cleanupErr, "org: cleanup: git worktree list --porcelain in "+missing+": exit ") {
+				t.Errorf("cleanup = %+v, %q; want the error of git worktree list in %s", c, cleanupErr, missing)
+			}
+		}, []string{"lookup:" + id}, ""},
+		{"a record on another branch", gitRoot, func(wt *fakeWorktrees) {
+			rec := wt.records[id]
+			rec.Branch = "feat/a-2"
+			wt.records[id] = rec
+		}, func(t *testing.T, c CleanupResult, cleanupErr string) {
+			if c.Cleaned || cleanupErr != "" {
+				t.Errorf("cleanup = %+v, %q; want a refusal", c, cleanupErr)
+			}
+			assertCleanupRefusal(t, c, `the worktree record org-org-a records branch "feat/a-2", not "feat/a"`,
+				"git -C "+cleanupShellWord(gitRoot)+" branch -D feat/a")
+		}, []string{"lookup:" + id}, ""},
+		{"the gate's head not here", movedRoot, func(*fakeWorktrees) {}, func(t *testing.T, c CleanupResult, cleanupErr string) {
+			if c.Cleaned || cleanupErr != "" {
+				t.Errorf("cleanup = %+v, %q; want a refusal", c, cleanupErr)
+			}
+			assertCleanupRefusal(t, c, ", not at "+moHeadA+", the head its PR merged, which git does not have in "+movedRoot+
+				" (a commit made on GitHub or pushed from another clone), so whether the branch holds commits that were not merged "+
+				"cannot be told yet: fetch the head (git -C "+cleanupShellWord(movedRoot)+" fetch origin refs/pull/7/head), then "+
+				"look at them", "")
+		}, []string{"lookup:" + id}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx, wt := mcFakeFixture(t)
+			tc.setup(wt)
+			p := fx.params()
+			p.RepoRoot = tc.root
+			res, err := fx.merge(context.Background(), t, p)
+			if err != nil || !res.Merged || !res.Recorded || res.Failed != "" || res.Cleanup == nil {
+				t.Fatalf("Merge = %+v, %v; want a recorded merge with its cleanup", res, err)
+			}
+			tc.check(t, *res.Cleanup, res.CleanupErr)
+			if !slices.Equal(wt.calls, tc.calls) {
+				t.Errorf("worktree calls = %q, want %q", wt.calls, tc.calls)
+			}
+			want := mrRecord(t, "branch=feat/a pr=7 head="+moHeadA+" method=merge merge_commit="+mrOID+" auto_merge=false")
+			if tc.cleaned != "" {
+				want += mcCleanedRecord(t, tc.cleaned)
+			}
+			if got := fx.appended(t); got != want {
+				t.Errorf("appended %q\nwant     %q", got, want)
+			}
+			mrAssertLockFree(t, fx.mo.stateDir)
+		})
+	}
+}
+
+// mcCleanedRecord is the manifest line of org-a's worktree_cleaned with
+// details, at mrFixture's clock.
+func mcCleanedRecord(t *testing.T, details string) string {
+	t.Helper()
+	b, err := json.Marshal(ManifestEvent{TS: mergeOrderTestListedAt, OrgID: "org-a", Event: EventWorktreeCleaned, Details: details})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b) + "\n"
 }

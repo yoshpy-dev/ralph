@@ -1299,24 +1299,33 @@ func TestGate_LogDirCannotBeMade(t *testing.T) {
 // TestGate_ScriptEnvironmentIsFixed covers AC11's environment half: the
 // scripts get the caller's environment without any RALPH_VERIFY_* or
 // HARNESS_VERIFY_* variable and with RALPH_VERIFY_SCOPE=full, and keep the
-// rest, a name that only contains RALPH_VERIFY_ included.
+// rest, a name that only contains RALPH_VERIFY_ included. It also covers
+// AC4 of plan 2026-10-29-local-config-org: the caller's RALPH_LOCAL_CONFIG=on
+// reaches them as RALPH_LOCAL_CONFIG=off.
 func TestGate_ScriptEnvironmentIsFixed(t *testing.T) {
 	fx := newGateFixture(t)
 	fx.env = append(fx.env, "RALPH_VERIFY_BASE=HEAD", "RALPH_VERIFY_SCOPE=changed", "RALPH_VERIFY_PROJECT_ROOTS=nowhere",
-		"RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1", "HARNESS_VERIFY_MODE=all", "HARNESS_VERIFY_EXTRA=1", "KEEP_RALPH_VERIFY_BASE=kept")
+		"RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN=1", "HARNESS_VERIFY_MODE=all", "HARNESS_VERIFY_EXTRA=1", "KEEP_RALPH_VERIFY_BASE=kept",
+		"RALPH_LOCAL_CONFIG=on")
 	if res := fx.gate(t); !res.Passed {
 		t.Fatalf("gate = %+v; want a pass", res)
 	}
 	for _, name := range []string{"static", "test"} {
-		var verify []string
+		var verify, local []string
 		vars := strings.Split(strings.TrimSpace(fileOrAbsent(t, filepath.Join(fx.out, "env-"+name))), "\n")
 		for _, kv := range vars {
 			if strings.HasPrefix(kv, "RALPH_VERIFY_") || strings.HasPrefix(kv, "HARNESS_VERIFY_") {
 				verify = append(verify, kv)
 			}
+			if strings.HasPrefix(kv, "RALPH_LOCAL_CONFIG=") {
+				local = append(local, kv)
+			}
 		}
 		if !slices.Equal(verify, []string{"RALPH_VERIFY_SCOPE=full"}) {
 			t.Errorf("%s got the verify variables %v; want only RALPH_VERIFY_SCOPE=full", name, verify)
+		}
+		if !slices.Equal(local, []string{"RALPH_LOCAL_CONFIG=off"}) {
+			t.Errorf("%s got %v; want only RALPH_LOCAL_CONFIG=off", name, local)
 		}
 		for _, keep := range []string{"KEEP_RALPH_VERIFY_BASE=kept", "GATE_TEST_OUT=" + fx.out, "USER=alice"} {
 			if !slices.Contains(vars, keep) {
@@ -1327,17 +1336,28 @@ func TestGate_ScriptEnvironmentIsFixed(t *testing.T) {
 }
 
 // TestGateScriptEnv pins gateScriptEnv on its own: the order of what is
-// kept, the prefixes matched on the name only, and RALPH_VERIFY_SCOPE=full
+// kept, the prefixes matched on the name only, RALPH_LOCAL_CONFIG matched
+// on the whole name, and RALPH_VERIFY_SCOPE=full then RALPH_LOCAL_CONFIG=off
 // last.
 func TestGateScriptEnv(t *testing.T) {
 	got := gateScriptEnv([]string{"PATH=/bin", "RALPH_VERIFY_BASE=HEAD", "X=RALPH_VERIFY_BASE=1", "HARNESS_VERIFY_MODE=test",
-		"RALPH_VERIFY_=x", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_VERIFY_SCOPE=changed"})
-	want := []string{"PATH=/bin", "X=RALPH_VERIFY_BASE=1", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_VERIFY_SCOPE=full"}
+		"RALPH_VERIFY_=x", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_VERIFY_SCOPE=changed",
+		"RALPH_LOCAL_CONFIG=on", "RALPH_LOCAL_CONFIGX=1", "X=RALPH_LOCAL_CONFIG=on"})
+	want := []string{"PATH=/bin", "X=RALPH_VERIFY_BASE=1", "RALPH_VERIFYX=1", "NOEQUALS", "RALPH_LOCAL_CONFIGX=1",
+		"X=RALPH_LOCAL_CONFIG=on", "RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("gateScriptEnv = %q; want %q", got, want)
 	}
-	if got := gateScriptEnv(nil); !slices.Equal(got, []string{"RALPH_VERIFY_SCOPE=full"}) {
+	if got := gateScriptEnv(nil); !slices.Equal(got, []string{"RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"}) {
 		t.Fatalf("gateScriptEnv(nil) = %q", got)
+	}
+	// AC4: whatever RALPH_LOCAL_CONFIG the caller has, off included, the
+	// scripts get exactly one, RALPH_LOCAL_CONFIG=off.
+	for _, inherited := range []string{"RALPH_LOCAL_CONFIG=on", "RALPH_LOCAL_CONFIG=", "RALPH_LOCAL_CONFIG=off", "RALPH_LOCAL_CONFIG"} {
+		got := gateScriptEnv([]string{"PATH=/bin", inherited})
+		if want := []string{"PATH=/bin", "RALPH_VERIFY_SCOPE=full", "RALPH_LOCAL_CONFIG=off"}; !slices.Equal(got, want) {
+			t.Errorf("gateScriptEnv with %q = %q; want %q", inherited, got, want)
+		}
 	}
 }
 

@@ -483,8 +483,13 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     EVIDENCE: https://github.com/<owner>/<repo>/pull/<番号>
     ```
 
-15. worktree とブランチは消さない。merge のあとに人が main のチェックアウト
-    から `./scripts/ralph-worktree.sh cleanup --id org-{{ORG_ID}}` で消す
+15. worktree とブランチは消さない。PR が merge されたら、director か人が
+    main のチェックアウトから打つ `ralph org merge`(merge の続きで消す)か
+    `ralph org cleanup`(GitHub で merge したとき)が、この worktree と
+    ブランチと `ralph-worktree.sh` の記録 `org-{{ORG_ID}}` を消す。worktree に
+    未コミットの変更か未追跡のファイルが残っていると、この後始末は断られる。
+    手順 9・10 のとおりコミットし、手順 12・14 のとおり gate のあとにコミットを
+    足さず、worktree に何も残さない
 16. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
     最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
 

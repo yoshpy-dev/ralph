@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/yoshpy-dev/ralph/internal/config"
 )
 
 // How Gate (gate.go) and Regate (regate.go) run the gate scripts: the log
@@ -41,6 +43,14 @@ const (
 	// gateScopeEnv is the one verification variable the scripts get (B9):
 	// the full language scope, never narrowed by a diff.
 	gateScopeEnv = "RALPH_VERIFY_SCOPE=full"
+	// gateLocalConfigEnv keeps the scripts off the developer's personal
+	// ralph.local.toml (config.LocalConfigEnv), for the reason the
+	// RALPH_VERIFY_* variables are dropped (B9): what the gate's `go test`
+	// checks, and any value the scripts read from ralph's config, must not
+	// change with that file. Gate drops an inherited RALPH_LOCAL_CONFIG
+	// first, so this is the one the scripts get whatever the caller has
+	// (plan 2026-10-29-local-config-org, AC4).
+	gateLocalConfigEnv = config.LocalConfigEnv + "=off"
 )
 
 // gateStrippedEnvPrefixes are the prefixes of the variable names Gate drops
@@ -55,13 +65,14 @@ var gateStrippedEnvPrefixes = []string{"RALPH_VERIFY_", "HARNESS_VERIFY_"}
 var gateKillGrace = 5 * time.Second
 
 // gateScriptEnv is the environment the gate scripts get (B9): env without
-// every variable whose name starts with RALPH_VERIFY_ or HARNESS_VERIFY_,
-// then RALPH_VERIFY_SCOPE=full.
+// every variable whose name starts with RALPH_VERIFY_ or HARNESS_VERIFY_
+// and without RALPH_LOCAL_CONFIG, then RALPH_VERIFY_SCOPE=full and
+// RALPH_LOCAL_CONFIG=off.
 func gateScriptEnv(env []string) []string {
-	out := make([]string, 0, len(env)+1)
+	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		stripped := false
+		stripped := name == config.LocalConfigEnv
 		for _, prefix := range gateStrippedEnvPrefixes {
 			stripped = stripped || strings.HasPrefix(name, prefix)
 		}
@@ -69,7 +80,7 @@ func gateScriptEnv(env []string) []string {
 			out = append(out, kv)
 		}
 	}
-	return append(out, gateScopeEnv)
+	return append(out, gateScopeEnv, gateLocalConfigEnv)
 }
 
 // gateEnvValue returns key's value in env, the last entry winning as it does

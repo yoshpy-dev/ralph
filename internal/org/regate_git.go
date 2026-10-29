@@ -172,6 +172,14 @@ func (e regateGitSignaled) Error() string {
 // darwin and linux only, where Setpgid and kill(-pgid) exist.
 func regateBoundedGit(ctx context.Context, dir string, env []string, ownGroup bool, args ...string) (r gitResult, timedOut bool,
 	err error) {
+	return boundedGit(ctx, regatePrefix, dir, env, ownGroup, args...)
+}
+
+// boundedGit is regateBoundedGit with its errors starting with prefix, the
+// verb that ran git: regatePrefix for Regate, cleanupPrefix for the checks of
+// the cleanup of a merged feature worktree (cleanup.go).
+func boundedGit(ctx context.Context, prefix, dir string, env []string, ownGroup bool, args ...string) (r gitResult, timedOut bool,
+	err error) {
 	gitCtx, cancel := context.WithTimeout(ctx, regateGitTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(gitCtx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
@@ -195,16 +203,16 @@ func regateBoundedGit(ctx context.Context, dir string, env []string, ownGroup bo
 	}
 	switch {
 	case ctx.Err() != nil:
-		return r, false, fmt.Errorf("org: regate: git %s in %s: %w", strings.Join(args, " "), dir, context.Cause(ctx))
+		return r, false, fmt.Errorf("%sgit %s in %s: %w", prefix, strings.Join(args, " "), dir, context.Cause(ctx))
 	case gitCtx.Err() != nil:
 		return r, true, nil
 	case runErr == nil, errors.Is(runErr, exec.ErrWaitDelay):
 	case exitErr != nil && exitErr.ExitCode() > 0:
 		r.code = exitErr.ExitCode()
 	case exitErr != nil && status.Signaled():
-		return r, false, fmt.Errorf("org: regate: git %s in %s %w", strings.Join(args, " "), dir, regateGitSignaled{status.Signal()})
+		return r, false, fmt.Errorf("%sgit %s in %s %w", prefix, strings.Join(args, " "), dir, regateGitSignaled{status.Signal()})
 	default:
-		return r, false, fmt.Errorf("org: regate: git %s in %s: %w", strings.Join(args, " "), dir, runErr)
+		return r, false, fmt.Errorf("%sgit %s in %s: %w", prefix, strings.Join(args, " "), dir, runErr)
 	}
 	return r, false, nil
 }
