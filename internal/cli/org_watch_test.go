@@ -1337,8 +1337,11 @@ func TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog(t
 	setOrgWatchDuration(t, &orgWatchChildStopGrace, 200*time.Millisecond)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "child.sh")
-	body := "echo \"out $1\"\necho err >&2\nif read -r line; then echo \"stdin: $line\"; else echo 'stdin: eof'; fi\n" +
-		"if [ \"$2\" = ignore-term ]; then trap '' TERM; fi\nexec sleep 30\n"
+	// The ignore-term run sets its trap before it writes the stdin line the
+	// test waits for, so a SIGTERM sent once that line is in the log cannot
+	// come before the trap on a loaded machine.
+	body := "if [ \"$2\" = ignore-term ]; then trap '' TERM; fi\n" +
+		"echo \"out $1\"\necho err >&2\nif read -r line; then echo \"stdin: $line\"; else echo 'stdin: eof'; fi\nexec sleep 30\n"
 	if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
