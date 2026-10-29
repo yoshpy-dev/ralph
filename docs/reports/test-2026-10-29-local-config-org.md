@@ -1,18 +1,18 @@
 # Test report: local-config-org
 
-- Date: 2026-10-29(JST 22:03〜23:27)
+- Date: 2026-10-29(JST 22:03〜23:27)。再実行は 2026-10-30(JST 00:50〜01:23、末尾の節)
 - Plan: `docs/plans/active/2026-10-29-local-config-org.md`(AC1〜AC13、Test plan)
 - Tester: tester サブエージェント(Claude Opus 5.5)。パイプラインの cycle 1
-- Scope: HEAD 64a20f69(merge-base は origin/main 5eba4013)。振る舞いのテストだけを実行した。静的解析は /verify が済ませている。環境は macOS(Darwin 25.5.0、arm64)、go1.27.3、git 2.50.1。このマシンはほかのセッションと CPU を分け合っており、1 分の load average は 4.85〜82.24 の間で動いた
-- Evidence: `docs/evidence/test-2026-10-29-local-config-org.log`(gitignore の対象で、コミットしない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-29-130548.log`(1 回目)と `docs/evidence/verify-2026-10-29-133021.log`(2 回目)
-- Insight event: `docs/insights/events/2026-10-29-local-config-org.jsonl` に test の行を 1 行足した(`--verdict pass --cycle auto`、cycle 1)
+- Scope: HEAD 64a20f69(merge-base は origin/main 5eba4013)。再実行は HEAD 33b567e7 で、64a20f69 からのコードの変更はテスト 2 本の直しだけ(末尾の節)。振る舞いのテストだけを実行した。静的解析は /verify が済ませている。環境は macOS(Darwin 25.5.0、arm64)、go1.27.3、git 2.50.1。このマシンはほかのセッションと CPU を分け合っており、1 分の load average は 4.85〜82.24 の間で動いた
+- Evidence: `docs/evidence/test-2026-10-29-local-config-org.log`(gitignore の対象で、コミットしない)。`run-test.sh` 自身のログは `docs/evidence/verify-2026-10-29-130548.log`(1 回目)と `docs/evidence/verify-2026-10-29-133021.log`(2 回目)、`docs/evidence/verify-2026-10-29-155410.log`(再実行。名前の日付は UTC)。evidence の log には再実行の節(2026-10-30)を足した
+- Insight event: `docs/insights/events/2026-10-29-local-config-org.jsonl` に test の行を 1 行足した(`--verdict pass --cycle auto`、cycle 1)。再実行でももう 1 行足した
 - 追跡しているファイルは、この報告と insight event のほかは変えていない。隔離の確かめは scratchpad に置いた HEAD の clone で行い、テストのコードの差し替えは `go test -overlay` で scratchpad の写しを当てた
 
 ## Test execution
 
 | # | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `GOFLAGS=-count=1 ./scripts/run-test.sh`(1 回目) | shell 45 本 + Go 10 パッケージ | shell 45 本(`PASS` の行 4,796)、Go 9 パッケージ | Go 1 パッケージ(`internal/org` の 1 本、既知の不安定なテスト) | shell の 1 行(前からある git 2.41 の行) | rc 1、1,438 秒(22:05:48〜22:29:46) |
+| 1 | `GOFLAGS=-count=1 ./scripts/run-test.sh`(1 回目) | shell 45 本 + Go 10 パッケージ | shell 45 本(`PASS` の行 4,796)、Go 9 パッケージ | Go 1 パッケージ(`internal/org` の 1 本。当時は既知の不安定なテストで、S6 で直った) | shell の 1 行(前からある git 2.41 の行) | rc 1、1,438 秒(22:05:48〜22:29:46) |
 | 2 | `go test -count=1 -run '^TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime$' -v ./internal/org/` | 1 | 1 | 0 | 0 | rc 0、1.0 秒 |
 | 3 | `GOFLAGS=-count=1 ./scripts/run-test.sh`(規則どおり 1 回だけ打ち直した) | shell 45 本 + Go 10 パッケージ | すべて | 0 | shell の 1 行(同上) | rc 0、1,229 秒(22:30:21〜22:50:50) |
 | 4 | `go test -count=1 -v -cover ./internal/config/ ./internal/gitroot/ ./internal/org/driver/` | トップレベル 159(サブテスト 356) | 159(356) | 0 | 0 | rc 0、8.4 秒 / 4.6 秒 / 2.7 秒 |
@@ -117,7 +117,7 @@ lead の指示は、テストが本物の agmsg と開発機の `ralph.local.tom
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
-| `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`(`internal/org`、1 の 1 回目だけ) | `director_cmd_test.go:310: stopDirectorProcess = {outcome:ended signalled:true note:process=ended after SIGTERM err:<nil>}, want not ended within 300ms` | 既知の不安定なテスト(`docs/tech-debt/README.md:286`)。`sh -c "trap '' TERM; exec sleep 30"` が trap を置く前に、固定の 100 ms の待ちのあとの SIGTERM が届くと sh が終わる。失敗したときの load average は 16.48 39.03 47.15 だった。単独の実行(2)は 0.48 秒で通り、打ち直した 3 も通った。この PR は `stopDirectorProcess`(`internal/org/director_cmd.go:199`)もこのテスト(`director_cmd_test.go:299-318`)も変えていない(`director_cmd.go` の差分は 249 行以降) | テストのコードは直していない。tech-debt の行が示す直し方は、固定の `time.Sleep(100 * time.Millisecond)` をやめ、`ps` でプロセスが `sleep` を実行していること(exec が済み、無視した TERM を受け継いでいること)を確かめてから SIGTERM を送ること。この PR は `director_cmd_test.go` を変えており、行の Trigger(「次の失敗」と「`director_cmd_test.go` の次の変更」)の両方に当たる。この PR で直すか、行に持ち越しの注を足すかは lead が決める |
+| `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime`(`internal/org`、1 の 1 回目だけ) | `director_cmd_test.go:310: stopDirectorProcess = {outcome:ended signalled:true note:process=ended after SIGTERM err:<nil>}, want not ended within 300ms` | 64a20f69 の時点では既知の不安定なテストで、tech-debt に行があった(いまは `docs/tech-debt/README.md:287` の取り消し線の行と、その上の RESOLVED の注)。当時のテストは `sh -c "trap '' TERM; exec sleep 30"` を起こして固定の 100 ms だけ待っていたので、trap を置く前に SIGTERM が届くと sh が終わった。失敗したときの load average は 16.48 39.03 47.15 だった。単独の実行(2)は 0.48 秒で通り、打ち直した 3 も通った。64a20f69 の差分は `stopDirectorProcess`(`internal/org/director_cmd.go:199`)もこのテストも変えていなかった(`director_cmd.go` の差分は 249 行以降)ので、この PR のコードの不具合ではない | この報告のあと、この PR の S6(321203dc、140ed1d2)が直した。固定の 100 ms をやめ、sh が trap の直後に作る marker(`trap '' TERM; : > <ready>; exec sleep 30`)を 10 s まで待ってから SIGTERM を送る(`director_cmd_test.go:307`)。tech-debt の行は RESOLVED になった。33b567e7 では `-count=20` で 20/20 通った(末尾の節) |
 
 ## Regression checks
 
@@ -140,9 +140,55 @@ lead の指示は、テストが本物の agmsg と開発機の `ralph.local.tom
 
 ## Verdict
 
-1 回目は既知の不安定なテスト 1 本で rc 1。lead の規則どおり 1 回だけ打ち直し、2 回目は rc 0 だった。
+ブランチの今の HEAD 33b567e7 の判定は pass。根拠は末尾の節の再実行で、1 回目の rc 0 で、打ち直しはしていない。64a20f69 では、1 回目が当時の既知の不安定なテスト 1 本で rc 1 になり、lead の規則どおり 1 回だけ打ち直した 2 回目が rc 0 だった。そのテストは S6 で直った。
 
-- Pass: 3(`run-test.sh` の打ち直しで shell 45 本と Go 10 パッケージが rc 0)、2・4〜6 の名指しの実行(SKIP 0)、7〜9 の隔離の確かめ(カナリアの呼び出し 0 件)、10 の感度の確かめ 3 つ(どれも想定どおり)
-- Fail: 0(1 回目の `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` は単独と打ち直しで通った。この PR のコードとは関係しない)
+- Pass: 3 つの実行(33b567e7)。R1 の `run-test.sh` で shell 45 本と Go 10 パッケージが rc 0、R2・R3 で直した 2 本を含む 2 つの系統を `-count=20`、すべて通った。64a20f69 では 3(`run-test.sh` の打ち直しが rc 0)、2・4〜6 の名指しの実行(SKIP 0)、7〜9 の隔離の確かめ(カナリアの呼び出し 0 件)、10 の感度の確かめ 3 つ(どれも想定どおり)
+- Fail: 0(64a20f69 の 1 回目の `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` は、単独と打ち直しで通り、S6 で直った。33b567e7 で落ちたテストはない)
 - Blocked: 0
 - Verdict: pass
+
+## Re-run after S6 and the V3 fix (33b567e7)
+
+2026-10-30 に HEAD 33b567e7 で打ち直した。148d542e(この報告の最初の版)のあとのコードの変更は、テストの 2 か所だけである。
+
+- S6 321203dc と 140ed1d2(`internal/org/director_cmd_test.go`): `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` は固定の 100 ms の待ちをやめ、sh が trap の直後に作る marker を 10 s まで待つ
+- c7095378(`internal/cli/org_watch_test.go`、verify の V3): `TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の子のスクリプトは、1 行目で `trap '' TERM` を張ってから log を書く
+- tech-debt の 2 つの行(`docs/tech-debt/README.md:287` と `:367`)は取り消し線になり、RESOLVED の注が付いた。ほかのコミットは計画、self-review、verify の報告と insight の行だけ
+
+### 打つ前の待ち
+
+lead の指示どおり、1 分と 5 分の load average がともに 30 を切るまで、前景で `sleep 60` を繰り返して `sysctl -n vm.loadavg` を読んだ。00:50:34 に 36.85 45.34 43.64 から始め、00:53:54 に 12.73 28.01 36.49 になった。待った時間は 3 分 20 秒。
+
+### 実行
+
+| # | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- | --- |
+| R1 | `GOFLAGS=-count=1 ./scripts/run-test.sh` | shell 45 本 + Go 10 パッケージ | shell 45 本(`PASS` の行 4,796)、Go 10 パッケージ | 0 | shell の 1 行(前からある git 2.41 の行) | rc 0、1,602 秒(00:54:10〜01:20:52) |
+| R2 | `go test ./internal/org/ -run '^TestStopDirectorProcess_' -count=20 -timeout=10m -v` | トップレベル 4 × 20 | 80 | 0 | 0 | rc 0、58.0 秒 |
+| R3 | `go test ./internal/cli/ -run '^TestOrgWatchDetach_StartDetachedProcess_' -count=20 -timeout=10m -v` | トップレベル 2 × 20 | 40 | 0 | 0 | rc 0、13.3 秒 |
+
+- R1 の Go(どれも `-count=1` で、`(cached)` はない): `cmd/ralph` 0.759 秒、`internal/cli` 774.684 秒、`internal/config` 13.380 秒、`internal/gitroot` 4.778 秒、`internal/insights` 1.973 秒、`internal/org` 937.513 秒、`internal/org/driver` 5.852 秒、`internal/org/protocol` 3.017 秒、`internal/scaffold` 4.923 秒、`internal/upgrade` 5.374 秒。`tests/test-ralph-config.sh` は 19/19、`tests/test-xreview-helpers.sh` は PASS 29・FAIL 0
+- R1 は 1 回目で rc 0 だったので、打ち直していない。30 分の timeout に届いたパッケージはない。implementer が S6 の検証で負荷 126〜428 のときに落ちたと報告した 2 本(`TestStartDirector_ACleanupThatCannotConfirmTheEndWritesNothingOnceItIsNotCurrent/an_attach_--replace` と `TestWakeDirector_AFailedWakeIsNotTriedAgainForFiveMinutes/no_return_in_time`)は、R1 では落ちなかった(`internal/org` が ok)。単独の実行はしていない
+- R2 の 4 本は `TestStopDirectorProcess_` の系統のすべてで、直した `AProcessThatIgnoresSIGTERMIsNotEndedInTime` は 20/20 通った。1 回の時間は 0.43〜2.01 秒、中央値 0.74 秒で、marker の待ちの上限 10 s に届いた回はない
+- R3 の 2 本は `TestOrgWatchDetach_StartDetachedProcess_` の系統のすべてで、直した `NewSessionDevNullStdinAppendedLog` は 20/20 通った
+- R1 は 600 秒を超えるので、`run_in_background` を使わず、perl の `fork` と `setsid` で切り離して起こし、前景の `caffeinate -w <pid>`(1 回 570 秒まで)で終わりを待った。切り離す前に INT・HUP・QUIT・TERM を既定の扱いに戻した。shell の SKIP の行は前と同じ 1 行で、signal を使う検査が無視された signal のために SKIP になることはなかった
+- R1 のあと、worktree の `git status --porcelain` は空だった。親が 1 のプロセスで `sleep`・ralph・herdr・agmsg・`go test` のものは残っていなかった
+
+### load average(`sysctl -n vm.loadavg` と `uptime`)
+
+| 時点 | load average |
+| --- | --- |
+| 待ちの開始(00:50:34) | 36.85 45.34 43.64 |
+| 待ちの終わり(00:53:54) | 12.73 28.01 36.49 |
+| R1 の開始(00:54:10) | 11.64 27.04 35.99 |
+| R1 の途中(01:03:57) | 4.98 8.57 20.84 |
+| R1 の途中(01:13:36) | 11.43 9.90 15.28 |
+| R1 の終わり(01:20:52) | 6.99 8.17 12.16 |
+| R2 の開始と終わり(01:21:29、01:22:28) | 5.83 7.74 11.84、14.67 9.52 12.20 |
+| R3 の開始と終わり(01:22:45、01:23:00) | 12.44 9.28 12.07、11.20 9.16 11.98 |
+
+load は低かったが、`internal/cli` と `internal/org` は 64a20f69 の 2 回目(480 秒と 580 秒)より長くかかった。間の load を 10 分ごとにしか読んでいないので、理由は確かめていない。
+
+### 打ち直さなかったもの
+
+AC ごとの名指しの実行(4〜6)、隔離の確かめ(7〜9)、感度の確かめ(10)は打ち直していない。64a20f69 からのコードの変更は上の 2 つのテストの直しだけで、production のコードと、それらの実行が見ていたテストは変わっていない。R1 では、それらのテストを含む全パッケージが `-count=1` で通った。Test gaps の 5 つはどれもこの変更で変わらず、残っている。
