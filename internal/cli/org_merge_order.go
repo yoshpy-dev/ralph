@@ -32,10 +32,12 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 		Short: "List the feature branches in the order their PRs may be merged now",
 		Long: "ralph org merge-order lists the feature branches in the ledger in the\n" +
 			"order their PRs may be merged now. A branch is ready when its latest\n" +
-			"gate record (`ralph org gate`) is a gate_passed whose head is the\n" +
-			"branch's tip on origin and whose base is the tip of origin's default\n" +
-			"branch now. The gate records are the only evidence it reads: a\n" +
-			"reviewer's or a leader's word does not count.\n" +
+			"gate record (`ralph org gate`, or `ralph org regate`) is a gate_passed,\n" +
+			"or a gate_ci_passed that regate records from the checks of the\n" +
+			"branch's PR under [org.gate].regate_checks = \"ci\" (via=regate_ci),\n" +
+			"whose head is the branch's tip on origin and whose base is the tip of\n" +
+			"origin's default branch now. The gate records are the only evidence it\n" +
+			"reads: a reviewer's or a leader's word does not count.\n" +
 			"\n" +
 			"The branches are those of every feature binding `ralph org start\n" +
 			"--plan` recorded, disbanded orgs included, and those a gate record\n" +
@@ -66,8 +68,9 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			"  unreadable      its latest gate record cannot be read, or a corrupt\n" +
 			"                  manifest line follows it and may be a newer one\n" +
 			"  no_gate         it has no gate record\n" +
-			"  failed          its latest gate record is a gate_failed (the reason\n" +
-			"                  is shown)\n" +
+			"  failed          its latest gate record is a gate_failed, or a\n" +
+			"                  gate_ci_failed (reason ci_failed); the reason is\n" +
+			"                  shown\n" +
 			"  no_remote       origin has no such branch: not pushed, or deleted\n" +
 			"                  after a merge (told apart only with gh)\n" +
 			"  regate          origin's tip of the branch is not the head the gate\n" +
