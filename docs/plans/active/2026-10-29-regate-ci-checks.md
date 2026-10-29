@@ -181,7 +181,10 @@ gate の記録を選ぶ箇所(merge-order の収集 `mergeorder.go:458`、regate
 - [x] Plan reviewed(consult の判定は「直してから進める」。直したのは、PushOnly で `regate_ci` を断ると書くこと(D7、AC10)、pending を `CHECKS: pending` の行と終了コード 6 で出すこと(D4、S6、S7)、事前の確かめを merge の `findPR` と同じ読み方にすること(D2、S3)、S1 を #263 の merge を待たずに始めること(outline)。plan advisory: ran with codex。HIGH 1 件(revert して古い binary に戻すと、`regate_ci` の passed を普通の passed と読み、意図して戻された origin のコミットを PushOnly で押し直しうる)は、CI の記録を新しい event `gate_ci_passed`・`gate_ci_failed` で書き、古い binary に見えないようにして反映した(D4、D7、AC2、AC4、リスクの表、Rollback、Test plan)。MEDIUM 1 件(push の応答が失われ origin が進んでいるときに、公開済みの merge を外す)は、D3 を読み返した先頭で 3 つに分け、外すのは push の前と同じときだけにして反映した(D3、AC7、リスクの表、Test plan))
 - [x] Plan approved(自動承認。2026-10-11 のユーザー指示「作成したプランは自動承認します」と、2026-10-27 の「最後まで止まらずに」による。2026-10-29 のユーザーの問い「#263を待たないといけないの？」を受け、#263 のパイプラインと並べて計画した。S1 は #263 を待たずに始め、S2 からは #263 の merge のあとに main を取り込んでから始める)
 - [x] Branch created
-- [ ] Implementation started
+- [x] Implementation started(スライスは implementer に委譲)
+  - S1 3a55f6d1: `OrgGateConfig`(toml `gate`)と `RegateChecksLocal`・`RegateChecksCI`、`Default()` は local、`Load` は local と ci 以外(空も)を断る。template の末尾に `[org.gate]` とコメント、ルートの `ralph.toml` に `regate_checks = "ci"`(ヘッダのコメントも直した)、ずれの検査と `check-sync.sh` のコメント、`ralph config get` のテストに 2 行。検証: handoff のコマンドが通過(`internal/config`、`internal/cli -run Config` 12 秒、check-sync PASS)、検証・既定・ずれの行・template・ルートの値をそれぞれ外した版で新しいテストが落ちる。scaffold・upgrade・`cmd/ralph` のテストと check-template-purity も通過し、変えるテストはなかった。機械的な確かめは 5 項目とも clean
+  - sync-docs に渡すこと: `.claude/rules/ralph/model-routing.md:151` の、defaults_sync_test が見るキーの一覧に `[org.gate]` を足す
+  - S2 からは #263 の PR の merge のあと、main を取り込んでから始める(outline の 2)
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
