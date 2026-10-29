@@ -37,7 +37,11 @@ func SeatPaneEnv() []string {
 // skill, and the skill passes the driver to scripts/xreview-helpers.sh's
 // pick_reviewer to call the other one as the reviewer. pick_reviewer called
 // without a driver reads it too, and treats the driver as claude and picks
-// codex when it is unset.
+// codex when it is unset. A feature org leader's plan advisory (the 計画助言
+// subsection of the 機能ごとの org section of internal/org/prompts/leader.md)
+// reads it the same way, and uses the leader's own CLI only when the
+// variable is unset, empty, or neither claude nor codex, so a claude or codex
+// value the pane takes from the herdr server's environment wins over it.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn
@@ -64,7 +68,8 @@ func paneEnvConsequence(entry string) string {
 			"at its session end or context compaction (its WIP-checkpoint hooks)"
 	case strings.HasPrefix(entry, PrimaryCLIEnv+"="):
 		return "a seat's cross-review may pick the wrong CLI as its other model " +
-			"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude)"
+			"(scripts/xreview-helpers.sh pick_reviewer treats the seat's driver as claude), " +
+			"and so may a feature org leader's plan advisory"
 	}
 	return ""
 }

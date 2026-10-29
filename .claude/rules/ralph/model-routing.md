@@ -71,8 +71,11 @@ slice.
 path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
 `gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
 plan advisory reads the same three variables, with the same fallbacks, for
-whichever reviewer it calls. Keep these fallback defaults in sync when
-changing any of the three vars in `scripts/ralph-config.sh`.
+whichever reviewer it calls, and so does the plan advisory of a feature org's
+leader (its role prompt, `internal/org/prompts/leader.md` in the `ralph`
+repository source, not part of a scaffolded project). Keep these fallback
+defaults in sync when changing any of the three vars in
+`scripts/ralph-config.sh`.
 
 ## Rules
 
@@ -146,6 +149,7 @@ seats are not observed and stay `unknown`.
   `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
   `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
 - `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh, and that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` is covered), that `standardTemplateDrift` finds the two `[standard]` keys set in the template with `Default()`'s values, and that `[org.review].max_cross_review_cycles` defaults to the same value as `RALPH_STANDARD_MAX_PIPELINE_CYCLES` in ralph-config.sh
+- `internal/org/prompts_leader_plan_test.go` — asserts the feature org leader's plan advisory commands fall back to the values `scripts/ralph-config.sh` sets for `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and `RALPH_CLAUDE_REVIEWER_MODEL` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root
   and `templates/base/` sides

@@ -55,15 +55,19 @@ detect_base_branch() {
 }
 
 # pick_reviewer [driver] — return the *opposite* CLI of the active driver, so
-# /plan's plan advisory and /cross-review always use a different model than
-# the one doing the work. Prints "codex" or "claude" on stdout.
+# /plan's plan advisory, /cross-review, and a feature org leader's plan
+# advisory always use a different model than the one doing the work. Prints
+# "codex" or "claude" on stdout.
 #
 # Args: $1 (optional) = driver ("claude"|"codex", case-insensitive). When
 # omitted, falls back to $RALPH_PRIMARY_CLI, then to "claude" if that is also
-# unset. Both skills pass the driver they resolved: the CLI running the
-# skill, which RALPH_PRIMARY_CLI (case-insensitive) overrides (see
-# .claude/skills/plan/SKILL.md step 11.b and
-# .claude/skills/cross-review/SKILL.md Step 2). The driver value is
+# unset. All three callers pass the driver they resolved: the CLI running the
+# skill (for a feature org leader, the CLI the leader names for itself), which
+# RALPH_PRIMARY_CLI (case-insensitive) overrides (see
+# .claude/skills/plan/SKILL.md step 11.b,
+# .claude/skills/cross-review/SKILL.md Step 2, and the plan advisory
+# subsection of internal/org/prompts/leader.md in the ralph repository
+# source). The driver value is
 # normalized to lowercase before the case branch so "CODEX"/"Claude"/etc.
 # resolve to the same reviewer as their lowercase form (AR-2 fix) instead of
 # silently falling through to the "unrecognized driver" default.

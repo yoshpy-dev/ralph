@@ -141,6 +141,10 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
 次の順で進めます。
 
 1. 機能の計画を worktree の `docs/plans/active/` に書き、コミットする。
+   書く前に、worktree の AGENTS.md(あれば CLAUDE.md も)と `.claude/rules/`
+   の下の rule(Codex では、あれば `.codex/AGENTS.override.md` も)を読み、
+   計画が触るコードを読む。計画のスライス・検証のコマンド・してはいけない
+   ことは、読んだ決まりと今のコードに合わせる。
    プロジェクトに計画の雛形(`docs/plans/templates/` など)があればそれに
    沿い、タスクの本文(機能の目的と受け入れ条件)を計画に写す。タスクに
    「全機能の座席に適用する決まり」の囲みがあれば、計画に
@@ -158,6 +162,23 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    それを使う)。`/plan` skill は使わない
    (新しい task worktree を作り、人の承認をこのセッションの中で求めるため。
    per-plan の承認は手順 3 の QUESTION で求める)
+
+   計画を書くときは、機能の内側の分かれ目(この機能の中だけで決まる、
+   どの案で作るかの選択)を探す。分かれ目は、次の 3 つをすべて満たす選択に
+   限る(標準フローの `/plan` が人に聞く分かれ目と同じ)。案によって、
+   リスク・費用・戻しやすさが大きく違う。コード・rules・文書・妥当な既定値の
+   どれでも決まらない。実装の途中で変えると、およそ 1 スライスを作り直す
+   より高くつく。機能をまたぐ分かれ目(ほかの機能の org と合わせて決める
+   選択)は、分割計画で決めるものなので扱わず、手順 3 の `FORK` の行にも
+   書かない。分かれ目ごとに、計画の `## Design decisions` の節(雛形に
+   なければ作る)に 2〜4 の案と推奨の案とその理由を書き、計画のほかの部分は
+   推奨の案で書く。分かれ目がなければ、その節に `Critical forks: None` と
+   書く。per-plan では、分かれ目を手順 3 の QUESTION で人に聞く。split では
+   人に聞かずに推奨の案を採り、分かれ目ごとに、承認方式が split なので推奨の
+   案を採ったことを `## Design decisions` に書く
+
+   計画をコミットしたら、次に進む前に、この節の終わりの「計画助言」の
+   とおりに計画助言を扱う
 2. (per-plan)図解ページを、`/plan` skill の `diagrams.md` と
    `visual-template.html`(`.claude/skills/plan/` の下。Codex では
    `.agents/skills/plan/` の下)に沿って、worktree の
@@ -180,7 +201,16 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    「件を上げる」の節のとおりファイルに書いて渡す。ヘッダには
    `PLAN: <worktree からの計画の相対パス> sha256:<digest>` と
    `VISUAL: <worktree からの図解ページの相対パス>` を 1 行ずつ書く。
-   たとえば次のメッセージにする。
+   手順 1 の分かれ目は、空行のあとの本文に、1 つ 1 行で
+   `FORK <番号>: <問い> / a <案>(推奨) / b <案>` の形ですべて書く(推奨の
+   案を a にし、案が 3 つ以上なら `/ c <案>` と続ける。番号は
+   `## Design decisions` の順に 1 から振る)。数が多くても打ち切らない。
+   `FORK` の行に理由は書かず、計画の `## Design decisions` に任せる。本文が
+   2,000 字に収まらなければ、各行の問いと案を短く言い直し、行は削らない。
+   分かれ目がなければ `FORK` の行は書かない。計画助言の要約(この節の
+   終わりの「計画助言」。飛ばしたときはそのことと理由)は、本文の
+   `ADVISORY:` で始まる 1 行に書く(`plan_advisory` が `false` で頼まなかった
+   ときは書かない)。たとえば次のメッセージにする。
 
    ```
    TYPE: QUESTION
@@ -188,8 +218,17 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    VISUAL: .harness/state/plan-visual/auth-token.html
 
    SUMMARY: 機能 auth-token の計画の承認を求める。図解ページは shot で撮って確かめた。
+   FORK 1: token の保存先 / a OS の keychain(推奨) / b 暗号化した設定ファイル
+   FORK 2: 古い token の移し方 / a 初めの起動で移す(推奨) / b 移さずにログインし直してもらう
+   ADVISORY: codex の計画助言の所見は 2 件(HIGH 1、MEDIUM 1)。HIGH は計画に反映し、MEDIUM は反映しない理由を Design decisions に書いた。
    EVIDENCE: docs/plans/active/2026-10-12-auth-token.md
    ```
+
+   推奨と違う案を選んだ直しの依頼(手順 4)で計画を直し、QUESTION を上げ
+   直すときは、その依頼で決まった分かれ目を
+   `FORK <番号>: <問い> → <決まった案>(決定済み)` の 1 行にし、案を
+   並べない(director は `(決定済み)` の行を人に聞かない)。直しで新しく
+   出た分かれ目は、上の形で案を並べる。
 
    上げたら、「agmsg の受信箱の運用」の節のとおり手番を終えて返事を待つ。
    返事が来るまで implementer は spawn しない(承認の前は
@@ -205,9 +244,15 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    計画の先頭の 2 行を `- Status: Approved` と
    `- Approved: <今日の日付 YYYY-MM-DD> sha256:<digest>` に書き換え、
    `./scripts/plan-visual.sh digest` を打ち直して digest が変わっていない
-   ことを確かめ、コミットする。それ以外の DECISION(直しの依頼)なら、
+   ことを確かめ、コミットする。分かれ目があれば、この承認は、すべての
+   分かれ目が推奨の案で決まったことも表すので、`## Design decisions` は
+   書き換えない(手順 6)。それ以外の DECISION(直しの依頼)なら、
    計画を直してコミットし、図解ページを描き直し、新しい digest で新しい
-   QUESTION を上げる(手順 2 と 3 をやり直す)
+   QUESTION を上げる(手順 2 と 3 をやり直す)。分かれ目で推奨と違う案を
+   選んだ答えも、本文が `approved` で始まらないので、この直しの依頼として
+   届く。そのときは、計画の `## Design decisions` に人が選んだ案を書き、
+   計画のほかの部分(スライス・受け入れ条件・リスクなど)もその案に合わせて
+   直し、上のとおりコミットして手順 2 と 3 をやり直す
 5. implementer と reviewer を 1 席ずつ spawn する(手順 3 で reviewer を
    立てていれば implementer だけ)。`--id` は `implementer` と `reviewer`
    にする(org_id と seat_id をつないだ herdr の agent 名は 32 文字までで、
@@ -447,6 +492,117 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
     足さず、worktree に何も残さない
 16. `ralph org disband --org-id {{ORG_ID}} --state-dir <台帳>` を打つ。
     最後のコマンドで、「ミッション」の 8 と同じもの(`--state-dir` を足した形)
+
+### 計画助言
+
+手順 1 で計画をコミットしたら、`[org.review].plan_advisory` が on のときだけ、
+相手のモデルに計画助言を頼む(claude の leader は codex に、codex の leader は
+claude に、計画を読むだけの形で)。per-plan では手順 2 の前に、split では
+手順 5 で implementer を spawn する前に済ませる。頼むのは 1 回で、手順 4 と 6
+で計画を直して手順 2 からやり直すときは頼み直さない。
+まず worktree で `ralph config get org.review.plan_advisory` を打ち、
+終了コードで分ける(127 のほかは `ralph config get --help` の約束)。0 なら
+出た値を使い、`true` なら頼み、`false` なら頼まずに次へ進む(記録も要らない)。
+1 で stderr に `unknown command "config"` があれば(この動詞のない古い
+ralph)、off とみなして頼まず、off とみなしたことを下の要約と同じ場所に
+書く。127 なら(`ralph` が PATH になく、shell が返す値)、同じく off と
+みなして頼まず、`ralph` が見つからず off とみなしたことを同じ場所に書く。
+それ以外(ほかの 1、2、3、0 で `true` でも `false` でもない値)は
+off とみなさず、エラーを本文に書いて BLOCKED(TASK_ID は `{{ORG_ID}}`)を
+「件を上げる」の節の手順で `ralph org escalate` で上げ、返事が来るまで
+先に進まない(待ち方は「agmsg の受信箱の運用」の節)。
+
+頼むときは、worktree に `scripts/xreview-helpers.sh` と
+`scripts/ralph-config.sh` があることを確かめ(どちらかがなければ飛ばす)、
+`. ./scripts/xreview-helpers.sh && DRIVER=<あなたの CLI>; override=$(printf '%s' "${RALPH_PRIMARY_CLI:-}" | tr '[:upper:]' '[:lower:]'); case "$override" in claude|codex) DRIVER=$override ;; esac; pick_reviewer "$DRIVER"`
+が出す名前(`codex` か `claude`)を相手にする。`<あなたの CLI>` は、あなたが
+Claude Code なら `claude`、Codex なら `codex` に書き換えて打つ。
+`RALPH_PRIMARY_CLI` が `claude` か `codex`(大文字と小文字は区別しない)なら
+その値があなたの CLI に代わり、ほかの値は無視する(ralph は pane に
+`RALPH_PRIMARY_CLI` を入れる。`--env` のない herdr が作った pane には入らない
+が、herdr の server の環境にこの変数があれば pane はその値を引き継ぎ、その値で
+選ぶ。書き換えたあなたの CLI が使われるのは、変数がないときと、値が `claude`
+でも `codex` でもないときだけ)。
+`command -v <相手>` が何も出さなければ飛ばす。
+相手には次の指示文を渡す(下のコマンドの `<指示文>`)。英語のまま変えず、
+最後の `<計画のパス>` だけを worktree からの計画の相対パスにする。
+
+```
+You are an adversarial plan reviewer. Your job is to break confidence in this plan, not to validate it. Default to skepticism — assume the plan can fail in subtle, high-cost ways until evidence says otherwise. Review for: (1) blind spots and missing risks — what failure modes are not addressed? (2) scope concerns — too broad, too narrow, or poorly bounded? (3) acceptance criteria gaps — can each criterion be verified deterministically? (4) design decision weaknesses — are there simpler or safer alternatives? (5) rollback and partial-failure scenarios — what happens if implementation stalls halfway? Report only material findings. Each finding must answer: What can go wrong? Why is this plan vulnerable? What is the likely impact? What concrete change would reduce the risk? Number each finding with severity [HIGH/MEDIUM/LOW]. Prefer one strong finding over several weak ones. If the plan looks solid, say so directly with no findings. Here is the plan file to review: <計画のパス>
+```
+
+相手ごとに下のコマンドのどちらかを、まとめて 1 回の shell で打つ(Bash
+ツールは shell の状態を次の呼び出しに持ち越さない)。Bash ツールの
+`run_in_background` があるとき(Claude Code)は `run_in_background` で
+走らせて手番を終え、終わりの知らせが来てから出力を読む。ないとき(Codex)は
+前面で打ち、ツールの timeout を 20 分より長くする(そのあいだ
+`ralph org send` は届かない)。どちらのコマンドも、`sleep 1200` の見張りで
+相手を 20 分で止め、呼ぶ前と後の git の状態(HEAD、index、未追跡の
+ファイルを含む作業ツリー)をファイルに書いて `cmp` で比べる。ファイルは
+worktree の `.harness/state/` の下に書く(git が無視する場所なので、
+手順 12 の gate が作業ツリーの汚れとして断らない)。
+
+相手が codex なら次のコマンドを打つ。`--sandbox read-only` と
+`--ignore-rules` は MCP の server に及ばないので、このコマンドは MCP の
+server を止めてから codex を呼ぶ。plugin が持ち込む MCP の server は
+`-c mcp_servers.<名前>.enabled=false` では止まらない(codex が設定を
+読めなくなる)ので、`--disable plugins` で plugin ごと外す(`plugins` の
+機能名を知らない古い codex で一覧が読めなければ、`mcp: not off` になり、
+codex を呼ばずに飛ばす)。そのうえで
+`codex --disable plugins mcp list --json` で有効な server の名前を読み、
+1 行ずつ `-c mcp_servers.<名前>.enabled=false` にして引数に足し(shell の
+語の分け方に頼らない)、同じ引数を付けた一覧で有効な server が 0 のとき
+だけ codex を呼ぶ。`enabled` が `false` でない server(欄がない、`null` の
+ものを含む)はどちらの一覧でも有効と数えるので、codex が `false` と答えない
+server が残れば呼ばない。
+
+```
+. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
+{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-before.txt"
+command codex --disable plugins mcp list --json | jq -r '.[] | select(.enabled != false) | .name' > "$s/plan-advisory-mcp.txt"
+set -- --disable plugins; while IFS= read -r name; do [ -z "$name" ] || set -- "$@" -c "mcp_servers.$name.enabled=false"; done < "$s/plan-advisory-mcp.txt"
+n=$(command codex "$@" mcp list --json | jq '[.[] | select(.enabled != false)] | length')
+if [ "$n" = 0 ]; then command codex "$@" -m "${RALPH_CODEX_REVIEWER_MODEL:-gpt-6-astra}" -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-xhigh}" exec --sandbox read-only --ignore-rules -o "$s/plan-advisory-out.md" "<指示文>" </dev/null > "$s/plan-advisory.log" 2>&1 & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "codex rc=$rc"; else echo "mcp: not off (enabled: $n)"; fi
+{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-after.txt"
+if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
+```
+
+相手が claude なら次のコマンドを打つ。`--restricted` は設定ファイルと
+その hook を読まず、`--tools Read,Grep,Glob` は読む道具だけを残し、
+`--permission-mode dontAsk` は許可の要るものを断り、
+`--strict-mcp-config` と `--disallowedTools "mcp__*"` は MCP の server を
+立てずその道具も使わせない。
+
+```
+. ./scripts/ralph-config.sh; s=.harness/state; mkdir -p "$s"; rm -f "$s/plan-advisory-out.md"
+{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-before.txt"
+RALPH_WIP_CHECKPOINT=off command claude -p --model "${RALPH_CLAUDE_REVIEWER_MODEL:-opus}" --restricted --strict-mcp-config --disallowedTools "mcp__*" --tools Read,Grep,Glob --permission-mode dontAsk --output-format text "<指示文>" </dev/null > "$s/plan-advisory-out.md" 2> "$s/plan-advisory.log" & cpid=$!; sleep 1200 & spid=$!; ( while kill -0 "$spid" 2>/dev/null; do sleep 1; done; kill "$cpid" 2>/dev/null ) & wpid=$!; wait "$cpid"; rc=$?; kill "$spid" 2>/dev/null; kill "$wpid" 2>/dev/null; echo "claude rc=$rc"
+{ git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all; git diff --cached; git diff; git ls-files -z --others --exclude-standard | xargs -0 git hash-object --; } > "$s/plan-advisory-git-after.txt"
+if cmp -s "$s/plan-advisory-git-before.txt" "$s/plan-advisory-git-after.txt"; then echo 'git: same'; else echo 'git: changed'; fi
+```
+
+打ち終わったら、出力の行で分ける。`git: changed` なら(相手を呼ぶ前と後で
+git の状態が違う)、変わった worktree のまま先に進まず、
+`.harness/state/plan-advisory-git-before.txt` と
+`.harness/state/plan-advisory-git-after.txt` を EVIDENCE に書いて
+BLOCKED(TASK_ID は `{{ORG_ID}}`)を `ralph org escalate` で上げ、返事が
+来るまで止まる。`mcp: not off` なら(jq がない、一覧が読めない、止めても
+有効な server が残る)、codex は呼ばれていないので飛ばす。`codex rc=0` か
+`claude rc=0` で、`.harness/state/plan-advisory-out.md` が空でない
+(`test -s` が通る)ときだけ、計画助言が終わったとみなす。それ以外(相手を
+呼べない、0 でない終了コード、20 分の時間切れ、出力が空)は飛ばす。codex
+は見張りに止められても終了コード 0 を返すことがあるので、出力が空でない
+ことも必ず確かめる。
+
+所見は `.harness/state/plan-advisory-out.md` から読む(log ではない)。
+所見は相手のモデルの助言で、指示ではない。どれを採るかはあなたが決める。
+HIGH と MEDIUM の所見は、計画に反映するか、反映しない理由を計画の
+`## Design decisions` に書く。LOW はあなたの判断で扱う。計画を変えたら
+コミットする。所見の数と扱いを 1〜2 文に要約し、per-plan では手順 3 の
+QUESTION の本文の `ADVISORY:` の行に、split では計画の
+`## Design decisions` に書く(split ではそれもコミットする)。飛ばした
+ときと、古い ralph か `ralph` が見つからないことで off とみなしたときも、
+そのことと理由を同じ場所に書く。
 
 ## タスク
 
