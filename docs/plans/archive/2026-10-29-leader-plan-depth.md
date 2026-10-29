@@ -184,4 +184,4 @@
 - [x] Verification artifact created
 - [x] Test artifact created
 - [x] Sync-docs report created
-- [ ] PR created
+- [x] PR created(#286)
