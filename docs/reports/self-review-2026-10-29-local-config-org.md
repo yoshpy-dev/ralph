@@ -91,7 +91,33 @@
 - 上の「確かめたこと」の「5 s で `t.Fatalf`」と L5 の本文の「5 s」は、321203dc の時点の値。
 - Coverage gaps: テスト、静的検査は走らせていない。140ed1d2 は test のコードの定数を 1 つ変えるだけだが、後続の step を回し直すかどうかは orchestrator が決める。
 
+## Re-run after the V3 fix (c7095378)
+
+- Date: 2026-10-30
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の再実行)
+- Scope: `git diff 77a415c9..c7095378`。コードは `internal/cli/org_watch_test.go` の 1 hunk(+5/-2、`TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の子のスクリプト)、記録は `docs/tech-debt/README.md` の 366-367 行(HTML コメント 1 行と行の置き換え)。HEAD の 90f126e9 は c7095378 の次で、変えたのは計画の Progress checklist だけ。前の範囲は読み直していない。
+- 新しい所見: なし。L1〜L4 は残り(S6 と V3 の修正は触らない)、L5・L6 は 140ed1d2 で直ったまま。
+
+### 確かめたこと
+
+- 待ちの意味。子のスクリプトの 1 行目が `if [ "$2" = ignore-term ]; then trap '' TERM; fi` になり、`out`・`err`・`stdin:` のどの行よりも前にある。テストが待つ `stdin: eof`(`waitForFileContains`)がログに出た時点で、ignore-term の run の trap は済んでいる。以前は trap が `stdin:` の行のあとで、その間に SIGTERM が届きえた。
+- mode が空の run。条件が偽なので trap は置かれず、ログに出る行とその順は変わらない(`out run-N`、`err`、`stdin: eof`)。条件の行は何も書かないので、位置が前に出ても `want := "out run-1\nerr\nstdin: eof\nout run-2\nerr\nstdin: eof\n"` に影響しない。`"$2"` は run 1 で空文字として渡る(`args: []string{script, "run-1", ""}`)のも以前と同じ。
+- probe。scratchpad に同じ 5 行のスクリプトを置き、`/bin/sh`、stdin は `/dev/null`、stdout と stderr を同じログに追記して走らせた。両 mode のログが期待の 3 行と一致。ignore-term は `stdin: eof` が出た直後に TERM を送って 100 回とも生き残り、mode 空は 100 回とも TERM で終わった(Darwin)。Go のテストそのものは走らせていない。
+- 注釈。テストの comment は「ignore-term の run は、テストが待つ stdin の行より前に trap を置く」で、コードと一致する。実際はそれより強い(`out`・`err` より前)が、言っていることは偽でない。
+- 影響範囲。`ignore-term` を使うのはこのテストだけ(`org_watch_test.go:1340`、`:1343`、`:1350`、`:1366`)。`body` を使うほかのテストはない。
+- tech-debt の行。欄は 5 のままで、変わったのは Debt・Trigger・Related の 3 欄。形は主な形 `S--S-`(数え直し: `S--S-` 63、`S----` 14、取り消しなし 2)で、Debt は `~~...~~ (RESOLVED 2026-10-30 in feat/local-config-org)`、Trigger は `~~...~~ — RESOLVED: ...`、直上に HTML コメントがあり「Row preserved for traceability.」で終わる。コメントと取り消しの文の事実を突き合わせた: S4b(1c530966)が `org_watch_test.go` を変えた(`git log origin/main..HEAD -- internal/cli/org_watch_test.go` は 1c530966 と c7095378)、V3 は verify report の 61 行にある、Related の `docs/reports/verify-2026-10-29-local-config-org.md (V3)` は実在し見出しも合う、「as the Trigger cell says」は Trigger の文(trap を `stdin:` の行の前に)と矛盾しない。直し方は Trigger より強く(1 行目)、コメントはそう書いている。`org_watch_test.go` またはこのテスト名を持つ別の行は register にない。
+- 隣の行。Why の欄の「`TestStopDirectorProcess_...` の行と同じ形の race」の参照先(287 行)も S6 で閉じていて、2 行とも閉じた状態になった。
+
+### Notes(所見にしないもの)
+
+- N9 RESOLVED の日付が、同じ branch の 2 行で 1 日違う。S6 の行(286 行)は `2026-10-29`、この行は `2026-10-30`。コミットは 321203dc が 2026-10-30 00:09 +0900、c7095378 が 00:40 +0900 で、UTC ではどちらも 10-29。どちらの書き方も事実と合う。register がどの時刻帯で日付を書くかの規則は、見た範囲(行の書き方)では見つからなかった。直しは求めない。
+- N10 この行は HTML コメントが入って 366 行から 367 行になった。S6 の行(287 行)より下なので、レポートの L6 とその直しの行番号は動かない。上の N7 の「366 行」は、いまは 367 行。
+
+### Coverage gaps(再実行)
+
+- テスト、静的検査は走らせていない。このテストが負荷の下で通ることは確かめていない(/test の範囲)。行の記録にある overlay の結果(`sleep 0.3` を挟むと 3 回中 3 回失敗、trap を先頭に動かすと 10 回中 10 回通る)は、行の記載を読んだだけで再現していない。
+
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW は 6 件出して、L5・L6 は 140ed1d2 で直った。残るのは L1〜L4 の 4 件)
-- Follow-ups: L1 は 9 か所の置き換えで済み、この PR の理由づけが事実と違っているので、この PR の中で直すのがよい。L2 は述語を 1 か所にするか、2 つを結ぶ test を足す。L3 と L4 は直すか tech-debt に送るかを orchestrator が決める。L5 と L6 は対応済みで、残る作業はない。
+- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW は L1〜L6 の 6 件を出して、L5・L6 は 140ed1d2 で直った。V3 の直し(c7095378)に所見はなく、残るのは L1〜L4 の 4 件)
+- Follow-ups: L1 は 9 か所の置き換えで済み、この PR の理由づけが事実と違っているので、この PR の中で直すのがよい。L2 は述語を 1 か所にするか、2 つを結ぶ test を足す。L3 と L4 は直すか tech-debt に送るかを orchestrator が決める。L5 と L6 は対応済みで、V3 の直しに残る作業はない。
