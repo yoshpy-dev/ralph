@@ -950,8 +950,10 @@ func TestDirectorSkillBullet(t *testing.T) {
 // either way its reason and the CLEANUP MANUAL: command, when there is one,
 // go to the human as they are; a refusal with no CLEANUP MANUAL: line goes
 // on with ralph org cleanup --branch once the reason is fixed, since that
-// line comes only where ralph cannot go on by itself; and the director runs
-// no command by hand unasked.
+// line comes only where ralph cannot go on by itself, but for a ledger inside
+// the feature worktree, whose reason says to move the ledger first and to name
+// the new place with --state-dir or RALPH_ORG_STATE_DIR; and the director runs
+// no command by hand unasked, moving the ledger included.
 var directorSkillMergeCleanupRules = []string{
 	"merge は済んでいる。片付けがどうなっても、記録した merge の終了コードは 0 のまま",
 	"行が `CLEANUP: done` で始まれば片付いた",
@@ -962,8 +964,10 @@ var directorSkillMergeCleanupRules = []string{
 		"ディレクトリのない worktree の登録の外しで止まったなら何も消していない。どちらも次の片付けが続きから進む)かのどちらか",
 	"どちらでも、理由と、続く `CLEANUP MANUAL:` の行があればそのコマンドを、そのまま人に伝える",
 	"`CLEANUP MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
+	"ただし、台帳のディレクトリが機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには " +
+		"`--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す",
 	"`CLEANUP MANUAL:` の行は、ralph が先に進めず人の判断が要るときだけ出る",
-	"手のコマンド(`git branch -D` などを含む)は、人に頼まれないまま打たない",
+	"手のコマンド(`git branch -D` などを含む)は、人に頼まれないまま打たない。台帳を動かす手も同じ",
 }
 
 // directorSkillGitHubMergeCleanupSteps are fragments of the /director
@@ -979,7 +983,11 @@ var directorSkillMergeCleanupRules = []string{
 // refusal with no MANUAL: line goes on with ralph org cleanup --branch once
 // the reason is fixed, and the CLEANED: lines of the same run, one branch
 // cleaned up and another refused, are reported as on exit 0 (R2-L7 of
-// docs/reports/self-review-2026-10-28-org-merge-cleanup.md); a branch
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md), and so are those
+// of a run an interrupt ended, even one that came while the last branch was
+// cleaned up, the rest being cleaned up by running it again; a refusal of a
+// ledger inside the feature worktree names the move of the ledger as its next
+// step, which the director does not run unasked; a branch
 // SKIPPED: stopped is not run again until the human says
 // the reason is fixed, no command by hand is run unasked, and a new branch
 // is named with --branch meanwhile, since a run without it prints the same
@@ -999,6 +1007,10 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 	"`MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
 	"同じ実行に `CLEANED:` の行もあれば(`--branch` なしで打ち、1 本を片付けて別の 1 本で断られたとき)、そのブランチは" +
 		"片付いたので、手順 2 と同じく人に報告する",
+	"台帳のディレクトリが機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには " +
+		"`--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。台帳を動かす手も、人に頼まれないまま打たない",
+	"stderr の文が中断と言うときは(最後のブランチの片付けの途中でも終了コード 1 になる)、`CLEANED:` の行を手順 2 と同じく報告し、" +
+		"残りは `ralph org cleanup` を打ち直せば続きから片付く",
 	"`SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、手のコマンドも人に頼まれないまま打たない",
 	"ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出るので、そのときは新しいブランチを `--branch` で" +
 		"名指して打つ",

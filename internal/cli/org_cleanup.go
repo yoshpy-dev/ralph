@@ -73,17 +73,22 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"ledger, and removes nothing.\n" +
 			"\n" +
 			"Before it removes anything, cleanup checks that the branch's org is not\n" +
-			"running; that the record is the binding's (its branch, path, and kind\n" +
+			"running; that the ledger's directory (the org state dir) is not the\n" +
+			"feature worktree or inside it, since the ledger would go with the\n" +
+			"worktree; that the record is the binding's (its branch, path, and kind\n" +
 			"org); that ralph does not run inside the worktree; that the worktree has\n" +
 			"no uncommitted change or untracked file and no rebase or merge in\n" +
 			"progress (files .gitignore names do not count and go with the\n" +
-			"worktree); that the local branch is at the head the PR merged; and that\n" +
-			"the worktree has that branch checked out at that head, so that no\n" +
-			"commit that was not merged is lost. For a worktree whose directory is\n" +
-			"gone but which git still registers, that last check is made on the\n" +
-			"registration: it must be on that branch, and the branch must still\n" +
-			"exist. When a check fails, it removes nothing. A cleanup that stopped\n" +
-			"part way goes on from what is left.\n" +
+			"worktree, but for the ledger's directory); that the local branch is at\n" +
+			"the head the PR merged; and that the worktree has that branch checked\n" +
+			"out at that head, so that no commit that was not merged is lost. For a\n" +
+			"worktree whose directory is gone but which git still registers, that\n" +
+			"last check is made on the registration: it must be on that branch, and\n" +
+			"the branch must still exist. The ledger's directory and the working\n" +
+			"directory are compared with the worktree by file identity, so another\n" +
+			"spelling of the same directory counts too. When a check fails, it\n" +
+			"removes nothing. A cleanup that stopped part way goes on from what is\n" +
+			"left.\n" +
 			"While it cleans up a branch, ralph org regate, ralph org merge, and\n" +
 			"another cleanup are refused on the ledger (one runs at a time; it waits\n" +
 			"up to 1 s for regate.lock), and so are ralph org spawn and start of the\n" +
@@ -99,13 +104,25 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"local branch, the worktree's directory is gone while git's registration\n" +
 			"of it has a HEAD that removing it would drop, or the removal itself\n" +
 			"failed); after any other SKIPPED: line, fix what the reason says and\n" +
-			"run ralph org cleanup --branch <branch> again. Exit codes: 0 when every branch was cleaned up or\n" +
+			"run ralph org cleanup --branch <branch> again. A ledger whose\n" +
+			"directory is inside the feature worktree gets no MANUAL: line either,\n" +
+			"since cleaning up by hand would remove the ledger with it: the reason\n" +
+			"says to move the ledger's directory out of the worktree, to a place\n" +
+			"where no other ledger is, once no org on the ledger runs and no ralph\n" +
+			"org command runs on it, and to run ralph org cleanup --branch <branch>\n" +
+			"again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So\n" +
+			"does a record that is not the binding's (its path or kind) when the\n" +
+			"worktree at the record's path holds the ledger; after the ledger is\n" +
+			"moved, that cleanup is refused with the MANUAL: line above.\n" +
+			"\n" +
+			"Exit codes: 0 when every branch was cleaned up or\n" +
 			"there was nothing to clean up; 1 when a branch was skipped, gh is not\n" +
 			"on PATH (whether a PR was merged cannot be told, so nothing is\n" +
 			"removed), the main worktree is not found, --branch is refused, origin\n" +
 			"names no GitHub repository or cannot be read, for an interrupt (SIGINT,\n" +
-			"SIGTERM, or SIGHUP; what was cleaned up before it stays cleaned up),\n" +
-			"and for any other error.\n" +
+			"SIGTERM, or SIGHUP; what was cleaned up before it stays cleaned up,\n" +
+			"and an interrupt while the last branch is cleaned up still exits 1,\n" +
+			"after the lines printed), and for any other error.\n" +
 			"\n" +
 			"cleanup starts no autonomous work, so it needs no running watch and no\n" +
 			"approved plan. It reads the branches of every org in the ledger, so\n" +

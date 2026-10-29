@@ -1079,9 +1079,14 @@ func TestOrgMerge_Help(t *testing.T) {
 				"regate.lock still held: it runs ./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch in the main " +
 				"worktree (found as start --plan finds it), which removes the worktree, the local branch, and the script's record, " +
 				"and records worktree_cleaned in the ledger.",
+			"Before that it checks that the branch's org is not running; that the ledger's directory (the org state dir) is not " +
+				"the feature worktree or inside it, since the ledger would go with the worktree; that the record is the " +
+				"binding's (its branch, path, and kind org)",
 			"that the worktree has no uncommitted change or untracked file and no rebase or merge in progress (files .gitignore " +
-				"names do not count and go with the worktree); that the local branch is at the head the gate passed; and that the " +
-				"worktree has that branch checked out at that head. When a check fails, it removes nothing. For a worktree " +
+				"names do not count and go with the worktree, but for the ledger's directory); that the local branch is at the " +
+				"head the gate passed; and that the worktree has that branch checked out at that head. The ledger's directory " +
+				"and the working directory are compared with the worktree by file identity, so another spelling of the same " +
+				"directory counts too. When a check fails, it removes nothing. For a worktree " +
 				"whose directory is gone but which git still registers, that last check is made on the registration: it must be " +
 				"on that branch, and the branch must still exist.",
 			"After the lines above, merge prints CLEANUP: done, with (resumed: <what was left>) when it went on from such a " +
@@ -1091,6 +1096,13 @@ func TestOrgMerge_Help(t *testing.T) {
 				"gone while git's registration of it has a HEAD that removing it would drop, or the removal itself " +
 				"failed); after any other skip, fix what the reason says and run ralph org cleanup --branch <branch> again. The " +
 				"cleanup never changes the exit code.",
+			// A ledger inside the worktree (cross-review cycle 2, finding 1) and a record whose worktree holds it.
+			"A skip because the ledger's directory is inside the feature worktree has no CLEANUP MANUAL: either, since cleaning " +
+				"up by hand would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, " +
+				"to a place where no other ledger is, once no org on the ledger runs and no ralph org command runs on it, and to " +
+				"run ralph org cleanup --branch <branch> again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So " +
+				"does a record that is not the binding's (its path or kind) when the worktree at the record's path holds the " +
+				"ledger; after the ledger is moved, that ralph org cleanup is refused with a MANUAL: line.",
 			"an interrupt once pr_merged is recorded skips the cleanup or stops it, and the CLEANUP: line says how it ended.",
 			"Exit codes: 0 for a merge that was recorded, whatever the cleanup did;",
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in pr_merged: merge merges whatever it is.",
@@ -1103,7 +1115,7 @@ func TestOrgMerge_Help(t *testing.T) {
 				"value or one over 6h is refused before anything is read), merge waits instead of refusing when the only refusal is " +
 				"that the branch's org is still running (its leader disbands it after its RESULT), that a check is pending, or that " +
 				"gh pr checks reports no checks yet.",
-			"It releases regate.lock, so a ralph org regate or another merge can run meanwhile.",
+			"It releases regate.lock, so a ralph org regate, another merge, or a ralph org cleanup can run meanwhile.",
 			"For the org, it reads only the ledger every 30 s, with no git and no gh, until the org is disbanded, runs another " +
 				"feature (told apart only on a branch with a feature binding; on a branch with only a gate record, the wait goes " +
 				"on until the org is disbanded or the time is up), or the ledger cannot be read; for the checks, it reads only " +
@@ -1117,7 +1129,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"stderr gets one line when a wait starts and one when it ends.",
 			"An interrupt while merge waits merges nothing and exits 1.",
 			"In a repository with no CI, the checks stay at none, and merge waits until the time is up.",
-			"While it runs, except while it waits, ralph org regate and another ralph org merge are refused",
+			"While it runs, except while it waits, ralph org regate, another ralph org merge, and ralph org cleanup are refused " +
+				"on the ledger.",
 		}},
 		{[]string{"--help"}, []string{
 			"merge Merge, with gh, the PR of a feature branch ralph org merge-order lists as ready",

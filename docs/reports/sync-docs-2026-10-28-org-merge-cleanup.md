@@ -176,3 +176,85 @@ help、`/org` skill、`/director` skill、README、仕様の注、tech-debt の�
 - release ノートの新しい 1 行は要らない。cleanup は同じ PR で足す新しい動詞で、origin への固定と登録の断りはその動きの一部である。cycle 1 の release ノート案(上の cycle 1 の節)の「新しい `ralph org cleanup [--branch <ブランチ>]` で消せる」に、origin の repository だけで PR を読むことを 1 文足すと、ssh の別名の origin で使えない理由が読める
 - PR の本文の既知の穴に、ssh の別名の origin では cleanup が全ブランチを `SKIPPED:` にすることを足す(tech-debt の ssh の別名の行に記録した。コードを読んだだけで、実際の gh では確かめていない)
 - 記録だけの修正の例外は使っていない
+
+## cycle 3(HEAD f3884999)
+
+- Date: 2026-10-30
+- Plan: `docs/plans/active/2026-10-28-org-merge-cleanup.md`(承認の digest `0f38a9718a8b` はこの run の前後で同じ。変えたのは `## Progress checklist` の 1 行だけ)
+- Pipeline cycle: パイプラインの 3 回目の run(上限は `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上がり、`.harness/state/standard-pipeline/cycle-count.json` の値は 2)。run 開始時の HEAD は `f3884999`(この report を含む commit の SHA ではない)
+- 対象の変更: cross-review cycle 2 の直し。S-X3(4d7cbfd8)と S-X4(9dd79b94)で、cleanup は(`ralph org merge` の続きも `ralph org cleanup` も)記録を読む前に、台帳のディレクトリが機能の worktree かその中にあれば、何も消さず `MANUAL` なしで断る。比べはファイルの同一性(`pathWithin`)で、確かめ 3 の作業ディレクトリの比べも同じ。記録のパスかの種類が合わず、その記録のパスの worktree が台帳を持つ断りにも `MANUAL` がない。次の手は、台帳を使うものがなくなってから台帳のディレクトリを worktree の外へ動かし、`--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指して打ち直すこと(7f91e08f が「走っている org」を条件に足した)。`ralph org cleanup` は、最後のブランチの片付けの途中の中断も exit 1 で終わる
+- 先行 report: `docs/reports/verify-2026-10-28-org-merge-cleanup.md`(cycle 3 は pass。この run に渡された所見は C3-D1〜C3-D5)、`docs/reports/test-2026-10-28-org-merge-cleanup.md`(cycle 3 は pass、commit `f3884999`)
+
+### Summary
+
+verify の cycle 3 が渡した所見のうち、C3-D1(LOW)と C3-D2〜C3-D4(Info)を直した。C3-D5(Info、計画の本文の D2・D6 が台帳の確かめを書かない)は、承認のあとに本文を変えない運用の記録された逸脱なので、本文は変えず、Progress に 1 行足して解消した。
+
+台帳の確かめは、確かめの一覧のどれにも入っていなかった。さらに「gitignore されたファイルは数えず、worktree と一緒に消える」の文は、台帳の既定の場所が `.harness/state/org` なので、台帳も一緒に消えると読めた。この例外を、一覧と gitignore の文の両方に足した。ふつうの台帳は main worktree にあり、機能の worktree の外なので当たらない、とも書いた。
+
+`MANUAL` の出る場面の文と「MANUAL のない断りは理由を直して打ち直せば続く」の文(C3-D2)は、台帳の断りに合わなかった。この断りは MANUAL がなく、次の手は台帳を動かすこと、動かしたあとの打ち直しは記録の断りになって MANUAL が付くこと、を例外の文として足した。既存の文は、固定するテストの断片が変わらないよう、そのまま残した。
+
+コードの動作は変えていない。変えた Go は help の文字列とテストの期待だけ。
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `internal/cli/org_cleanup.go`(`ralph org cleanup --help`) | 確かめの一覧に台帳の確かめを足し(C3-D1)、gitignore の括弧に台帳のディレクトリの例外を足した。台帳と作業ディレクトリがファイルの同一性で比べられることを 1 文足した。MANUAL の段落に、台帳の断りと記録の断りの例外を足した(C3-D2)。終了コードの中断の括弧に、最後のブランチの片付けの途中でも 1 で、出した行は残ることを足した(C3-D3)。「Exit codes」は段落を分けた |
+| `internal/cli/org_merge.go`(`ralph org merge --help`) | 同じ確かめと例外(C3-D1)、`CLEANUP MANUAL` の例外(C3-D2)。「While it runs ... are refused on the ledger」に cleanup を足した(C3-D4)。`--wait-checks` の「regate.lock を外すので走れる」の文にも cleanup がなかったので足した(同じ古い抜けで、verify の所見にはない追加) |
+| `internal/cli/org_cleanup_test.go`、`internal/cli/org_merge_test.go` | `TestOrgCleanup_Help` と `TestOrgMerge_Help` の期待を新しい文にした。確かめの一覧(台帳の確かめ、gitignore の括弧)、台帳と作業ディレクトリの比べ、MANUAL の例外、cleanup の終了コードの中断を足し、merge の 2 つの「走れる」「断られる」の文を直した |
+| `.claude/skills/org/SKILL.md` | `cleanup` の行(240 行目)に、確かめの一覧の台帳の確かめ、gitignore の括弧の例外、MANUAL の例外(次の手と、記録の断りの場合)、中断が最後のブランチの途中でも 1 であることを足した。`merge` の行(239 行目)の手で消すコマンドの文に、台帳の断りには出ないことを足した。「org の終わり方」は、断りの一覧に台帳の項を足し、MANUAL の段落のあとに台帳の断りの段落を足し、gitignore の段落に例外を足した |
+| `.claude/skills/director/SKILL.md` | `CLEANUP:` の行の読み方(`merge と auto_merge` の節)に、台帳の断りは理由が先に台帳を動かす手を言うこと、その手も人に頼まれないまま打たないことを足した(C3-D2)。「GitHub で merge した PR の後始末」の手順 3 に同じ例外と、中断の読み方(`CLEANED:` の行だけで exit 1、報告して残りは打ち直す)を足した(C3-D3) |
+| `.agents/skills/{org,director}/SKILL.md` | `./scripts/sync-skills.sh` で作り直した |
+| `templates/base/.claude/skills/{org,director}/SKILL.md`、`templates/base/.agents/skills/{org,director}/SKILL.md` | `sync-skills.sh` は `.agents/skills` だけを作り直すので、4 つとも `cp` で写した。root の 4 つと `cmp` で同一 |
+| `internal/org/org_skill_send_sync_test.go` | `/org` skill の固定(cleanup の行、merge の行、「org の終わり方」)に、台帳の確かめ、gitignore の例外、MANUAL の例外 3 つ、中断、merge の行の例外、終わり方の項と段落を足した。gitignore の断片は例外の句まで含めた |
+| `internal/org/director_skill_sync_test.go` | `/director` skill の固定に、`CLEANUP:` の行の例外と「台帳を動かす手も同じ」、後始末の手順 3 の例外と中断の読み方の断片を足し、2 つの注釈を直した |
+| `README.md`(276、278 行目) | merge の段落の MANUAL の文に台帳の断りの例外を足した(C3-D2)。cleanup の段落に台帳の確かめ、gitignore の括弧の例外、MANUAL の例外、中断の exit 1 を足した(C3-D1、C3-D2、C3-D3) |
+| `docs/specs/2026-10-07-org-multi-org-director.md`(134 行目の FR-8 の注) | 確かめの一覧、MANUAL の例外、gitignore の例外、終了コードの中断を足した |
+| `docs/plans/active/2026-10-28-org-merge-cleanup.md` | `## Progress checklist` に sync-docs cycle 3 の 1 行を足した(C3-D5)。本文の D2・D6 は変えていない。digest の範囲の外 |
+| `docs/insights/events/2026-10-29-org-merge-cleanup.jsonl` | `sync_docs` の cycle 2 の event を 1 行追記した(下の Verification。ファイル名は UTC の日付) |
+| `docs/reports/sync-docs-2026-10-28-org-merge-cleanup.md` | この節 |
+
+### Surfaces checked for drift(cycle 3)
+
+| Surface | 結果 | 根拠 |
+|---------|------|------|
+| `docs/tech-debt/README.md` の R3-L3 の行 | 変更なし(正確) | 「800 行の目安を越えた」とだけ書き、行数は引かない。この run の変更後も `cleanup.go` 1084 行、`org_cleanup_test.go` 1142 行(`wc -l`) |
+| `internal/org/prompts/leader.md` の手順 15、`ralph org --help`(`internal/cli/org.go`)、`ralph org start --help` | 変更なし | 確かめの一覧も MANUAL の場面の一覧も書かない。verify も当たらないと確かめた |
+| `AGENTS.md` の地図、`.claude/rules/ralph/`、`docs/recipes/` | 変更なし | `git grep` で、確かめの一覧や「先に進めず人の判断が要る」を書いた文は、この run が直した 4 種類のファイルのほかにない |
+| README の merge の段落の `regate.lock` の文(「one regate, merge, or cleanup runs per ledger」)、`/org` skill の merge の行 | 変更なし(正確) | cleanup をすでに挙げている。merge の help の 2 文だけが挙げていなかった |
+| `/director` skill の `CLEANUP:` の行を読む節(861〜874 行目)と手順 5 | 変更なし(正確) | MANUAL の場面を列挙せず、「ralph が先に進めず人の判断が要るときだけ」と書く。台帳の断りもこれに入る |
+
+### Decisions on the verify items
+
+| 所見 | 扱い |
+|------|------|
+| C3-D1(LOW)台帳の確かめが一覧になく、gitignore の文に例外がない | 直した。2 つの help、`/org` skill の cleanup の行と「org の終わり方」(一覧の項と gitignore の段落)、README の cleanup の段落、仕様の注。固定するテストも変えた。merge の行は「cleanup の行と同じ確かめ」と書くので、一覧は足していない |
+| C3-D2(Info)MANUAL の場面の文が、記録のパスの worktree が台帳を持つ断りに合わない | 直した。例外の文を足し、既存の文は残した(固定の断片が変わらない)。2 つの help、`/org` skill の cleanup と merge の行と「org の終わり方」、`/director` skill の 2 か所、README の 2 か所、仕様の注 |
+| C3-D3(Info)中断と「すべて片付いたら 0」のどちらが先か | 直した。「最後のブランチの片付けの途中でも 1 で、`CLEANED:` の行は出る」を cleanup の help、`/org` skill の cleanup の行、README、仕様の注、`/director` skill の手順 3 に足した |
+| C3-D4(Info)merge の help の「regate と別の merge が断られる」に cleanup がない | 直した。同じ help の「待つ間に regate.lock を外すので走れる」の文も同じ抜けだったので足した |
+| C3-D5(Info)計画の本文の D2・D6 が台帳の確かめを書かない | 本文は変えない(承認のあとに本文を変えない運用)。Progress の 1 行で解消した。PR の本文には 1 文書く(下) |
+
+### Verification(cycle 3)
+
+| Check | Result |
+|-------|--------|
+| `gofmt -l internal/org internal/cli` | 出力なし(rc 0) |
+| `go vet ./internal/org/ ./internal/cli/` | rc 0 |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/cli/ -run 'OrgCleanup\|OrgMerge\|Help'` | `ok`、353.4 s |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill\|Prompt'` | `ok`、18.3 s |
+| `./scripts/sync-skills.sh` | rc 0。14 skill を `.agents/skills` に写した。template の 4 つの写しは `cp` で写した(`cmp` で root と同一) |
+| `./scripts/check-skill-sync.sh` | rc 0。`[ok] check-skill-sync: 14 skill(s) in lock-step` |
+| `./scripts/check-sync.sh` | rc 0。IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6。`PASS: all files in sync.`(cycle 2 と同じ数) |
+| `git diff --check` | rc 0、出力なし |
+| 変えたファイルの U+FFFD | 0 件 |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-28-org-merge-cleanup.md` | `0f38a9718a8b`(`- Approved:` 行の `sha256:0f38a9718a8b` と同じ。Progress の編集のあとも同じ) |
+| 範囲外 | `go test ./...` の全体、`run-verify.sh`、`run-static-verify.sh`、`run-test.sh` は打っていない。この run が変えた Go のファイルは help の文字列とテストの期待だけで、動作は変わらない。コードの検査は `/verify` と `/test` の cycle 3 の結果(pass)のまま |
+| 手順の逸れ | `internal/org/org_skill_send_sync_test.go` の固定の断片 7 か所は、Edit ではなく 1 回限りの Python 書き換えで入れた(PostToolUse の hook を通っていない)。書き換えのあとに U+FFFD 0 件、gofmt の出力なし、`go test` の通過、`git diff` の目視で確かめた。ほかのファイルは Edit で書いた |
+| `/natural-japanese` の lint(この report、`uv run --quiet ~/.claude/skills/natural-japanese/scripts/lint.py <report> --json`、1 回) | 指摘は 1 件で、和欧文間の半角空白(warn、33 行)。直さず残した。この run の前の report にも同じ指摘が 24 行あり(cycle 1・2 と同じ書き方)、`run`・`digest`・`merge` などの英単語やコード片と日本語の間の空白は語の切れ目を示すために揃えている |
+| insight event | `./scripts/insights-append.sh --slug org-merge-cleanup --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` を実行した(rc 0)。cycle 2、`2026-10-29-org-merge-cleanup.jsonl` への追記 |
+
+### `/pr` と release に渡すこと
+
+- release ノートの新しい 1 行は要らない。台帳の断りと中断の exit 1 は、同じ PR で足す新しい動詞 `cleanup` の動きの一部で、cycle 1 のノート案の「新しい `ralph org cleanup` で消せる」に含まれる
+- PR の本文に書くこと: (1) 台帳のディレクトリが機能の worktree の中にあると、cleanup(`merge` の続きも)は何も消さずに断る。ふつうの台帳は main worktree の `.harness/state/org` にあるので当たらない。(2) 計画の本文の D2(確かめ 0〜6)と D6(gitignore されたファイルは止める理由にしない)は、台帳の確かめと D6 の例外を書いていない。承認のあとに本文を変えない運用で、Progress が記録している。(3) 大文字小文字の subtest は CI の `ubuntu-latest` では skip になる。(4) 記録だけの修正の例外は使っていない
+- 台帳を動かしたあとの打ち直し(`--state-dir` か `RALPH_ORG_STATE_DIR`)が確かめ 4 以降に進むことは、コードを読んだだけで、打っては確かめていない(verify の Coverage gaps と同じ)

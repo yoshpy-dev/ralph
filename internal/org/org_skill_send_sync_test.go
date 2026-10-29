@@ -132,7 +132,10 @@ func TestOrgSkill_SendRowSaysItWaitsForIdleBeforeTyping(t *testing.T) {
 // are, each list in the skill's order: the verb-table row of cleanup (what it
 // removes, where it runs, which branches it counts, the checks, the script it
 // runs, its lines, what a SKIPPED: line covers and when a MANUAL: line comes,
-// its exit codes); the row of merge (the cleanup once pr_merged is recorded,
+// its exit codes, the interrupt of the last branch's cleanup among them; the
+// ledger's directory inside the worktree: a check, an exception to the ignored
+// files, and a refusal with no MANUAL: line whose reason moves the ledger);
+// the row of merge (the cleanup once pr_merged is recorded,
 // its CLEANUP: lines, what skipped covers, the exit code it leaves alone, the
 // rerun of a skipped one, when a command by hand comes, and the spawn and
 // start it refuses meanwhile); the rows of spawn and start (refused while
@@ -157,7 +160,9 @@ var orgSkillCleanupRules = []struct {
 			"その PR を使わず",
 		"数えず行も出さない",
 		"何も消さずに断る",
-		"gitignore されたファイルは数えず、worktree と一緒に消える",
+		"台帳のディレクトリ(org の state dir)が機能の worktree かその中にない(あれば台帳が worktree と一緒に消える。" +
+			"パスの綴りでなくファイルの同一性で比べる)",
+		"gitignore されたファイルは数えず、worktree と一緒に消える。台帳のディレクトリだけは上の確かめで断る",
 		"ディレクトリのない worktree は、git に残る登録がそのブランチにいて、ブランチが残っている",
 		"`./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch` を打ち、`worktree_cleaned` を `via=cleanup` で記録する",
 		"打ち直すと残ったものから続ける",
@@ -169,9 +174,15 @@ var orgSkillCleanupRules = []struct {
 		"`MANUAL:` が出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
 			"ブランチがなく worktree だけがある、ディレクトリのない worktree の登録に消すと失う HEAD がある、消す途中で失敗した)で、" +
 			"ほかの `SKIPPED:` のブランチは、理由を直してから `--branch` で打ち直せば続きから片付く",
+		"ただし台帳のディレクトリが機能の worktree かその中にある断りには `MANUAL:` が出ない(手で消すと台帳が消える)",
+		"台帳で走る org も `ralph org` のコマンドもなくなってから、台帳のディレクトリを worktree の外の、ほかの台帳がない場所へ動かし、" +
+			"`--state-dir` か `RALPH_ORG_STATE_DIR` に新しい場所を指して `--branch` で打ち直す",
+		"その記録のパスの worktree が台帳を持つときも `MANUAL:` が出ず、次の手は同じで、台帳を動かしたあとの打ち直しは記録の断りになり" +
+			" `MANUAL:` が付く",
 		"`SKIPPED:` が 1 本でもあれば 1",
 		"origin が GitHub の repository を名指さないか(ローカルのパスなど)`git remote get-url origin` が落ちるか時間切れになるとき" +
 			"(台帳を読む前に、何も消さず断る",
+		"中断(SIGINT・SIGTERM・SIGHUP。それまでに片付けたものはそのまま。最後のブランチの片付けの途中でも 1 で、その `CLEANED:` の行は出る)",
 		"`--org-id` は断る",
 	}},
 	{"the verb-table row of merge", func(text string) string { return orgSkillVerbRow(text, "merge") }, []string{
@@ -184,6 +195,7 @@ var orgSkillCleanupRules = []struct {
 		"片付かなかったブランチは、理由を直してから `ralph org cleanup --branch <ブランチ>` で片付ける",
 		"手で消すコマンドが出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
 			"ブランチがなく worktree だけがある、ディレクトリのない worktree の登録に消すと失う HEAD がある、消す途中で失敗した)",
+		"台帳のディレクトリが機能の worktree かその中にある断りには出ず、理由が先に台帳を動かす手を言う(`cleanup` の行)",
 		"その org の `spawn` と `start` は、merge の続きの片付けの間だけ断られる",
 	}},
 	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
@@ -204,6 +216,7 @@ var orgSkillCleanupRules = []struct {
 		"ディレクトリのない worktree は、git に残る登録の HEAD がそうなっているか、そのブランチが消えている",
 		"記録 `org-<org_id>` が結びつきと合わない",
 		"ralph をその worktree の中から打った",
+		"台帳のディレクトリが機能の worktree かその中にある(台帳が worktree と一緒に消える)",
 		"次の手はたいてい、理由を直してから `ralph org cleanup --branch <ブランチ>` を打ち直すことで、打ち直せば残ったものから片付く",
 		"手で消すコマンド(`CLEANUP MANUAL:` と `MANUAL:` の行)は、ralph が先に進めず人の判断が要るときだけ出る",
 		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、ディレクトリのない " +
@@ -212,8 +225,14 @@ var orgSkillCleanupRules = []struct {
 		"登録の断りは、消すと登録の HEAD と reflog を失うので何も消さず、理由が HEAD を残す方法を出し",
 		"手で消すコマンドは `git worktree remove` と script の cleanup になる",
 		"打ち直しても同じ断りになる",
+		"台帳のディレクトリが機能の worktree かその中にあると、台帳が worktree と一緒に消えるので、何も消さず断る",
+		"この断りに `MANUAL:` は出ず、理由が次の手を言う",
+		"`--state-dir` か `RALPH_ORG_STATE_DIR` に新しい場所を指して `ralph org cleanup --branch <ブランチ>` を打ち直す",
+		"その記録のパスの worktree が台帳を持つときも、`MANUAL:` は出ず、次の手は同じ",
+		"台帳を動かしたあとの打ち直しは記録の断りになり、`MANUAL:` が付く",
 		"gitignore されたファイル",
 		"止める理由にならず、worktree と一緒に消える",
+		"台帳のディレクトリが機能の worktree の中にあるときは、台帳が消えるので上の確かめで断る",
 		"squash merge のあとにリモートのブランチが消えていても止まらない",
 		"PR が merge されずに閉じられたときは、ralph は片付けない",
 		"`./scripts/ralph-worktree.sh cleanup --id org-<org_id>` で消す",

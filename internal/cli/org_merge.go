@@ -118,12 +118,17 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"--force-branch in the main worktree (found as start --plan finds it),\n" +
 			"which removes the worktree, the local branch, and the script's record,\n" +
 			"and records worktree_cleaned in the ledger. Before that it checks that\n" +
-			"the branch's org is not running; that the record is the binding's (its\n" +
+			"the branch's org is not running; that the ledger's directory (the org\n" +
+			"state dir) is not the feature worktree or inside it, since the ledger\n" +
+			"would go with the worktree; that the record is the binding's (its\n" +
 			"branch, path, and kind org); that ralph does not run inside the\n" +
 			"worktree; that the worktree has no uncommitted change or untracked file\n" +
 			"and no rebase or merge in progress (files .gitignore names do not count\n" +
-			"and go with the worktree); that the local branch is at the head the gate\n" +
-			"passed; and that the worktree has that branch checked out at that head.\n" +
+			"and go with the worktree, but for the ledger's directory); that the\n" +
+			"local branch is at the head the gate passed; and that the worktree has\n" +
+			"that branch checked out at that head. The ledger's directory and the\n" +
+			"working directory are compared with the worktree by file identity, so\n" +
+			"another spelling of the same directory counts too.\n" +
 			"When a check fails, it removes nothing. For a worktree whose directory\n" +
 			"is gone but which git still registers, that last check is made on the\n" +
 			"registration: it must be on that branch, and the branch must still\n" +
@@ -138,7 +143,16 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"registration of it has a HEAD that removing it would drop, or the\n" +
 			"removal itself failed); after any other skip, fix what the reason says\n" +
 			"and run ralph org cleanup --branch <branch> again. The cleanup never\n" +
-			"changes the exit code.\n" +
+			"changes the exit code. A skip because the ledger's directory is inside\n" +
+			"the feature worktree has no CLEANUP MANUAL: either, since cleaning up\n" +
+			"by hand would remove the ledger with it: the reason says to move the\n" +
+			"ledger's directory out of the worktree, to a place where no other\n" +
+			"ledger is, once no org on the ledger runs and no ralph org command\n" +
+			"runs on it, and to run ralph org cleanup --branch <branch> again with\n" +
+			"--state-dir or RALPH_ORG_STATE_DIR naming the new place. So does a\n" +
+			"record that is not the binding's (its path or kind) when the worktree\n" +
+			"at the record's path holds the ledger; after the ledger is moved, that\n" +
+			"ralph org cleanup is refused with a MANUAL: line.\n" +
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
@@ -146,19 +160,20 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"the only refusal is that the branch's org is still running (its leader\n" +
 			"disbands it after its RESULT), that a check is pending, or that gh pr\n" +
 			"checks reports no checks yet. It releases regate.lock, so a ralph org\n" +
-			"regate or another merge can run meanwhile. For the org, it reads only\n" +
-			"the ledger every 30 s, with no git and no gh, until the org is\n" +
-			"disbanded, runs another feature (told apart only on a branch with a\n" +
-			"feature binding; on a branch with only a gate record, the wait goes on\n" +
-			"until the org is disbanded or the time is up), or the ledger cannot be\n" +
-			"read; for the checks, it reads only gh pr checks <n> -R <repo> every\n" +
-			"30 s, until no check is pending any more or gh pr checks fails. Either\n" +
-			"wait also ends when the time is up. Then merge takes regate.lock again\n" +
-			"and runs every check above from the start, so a branch that moved\n" +
-			"meanwhile is refused, and an org still running or checks pending again\n" +
-			"are waited for again, all within the one duration. An org that runs\n" +
-			"another feature now (on a branch with a feature binding), a check that\n" +
-			"failed or was cancelled, checks that are all skipping, and every other\n" +
+			"regate, another merge, or a ralph org cleanup can run meanwhile. For\n" +
+			"the org, it reads only the ledger every 30 s, with no git and no gh,\n" +
+			"until the org is disbanded, runs another feature (told apart only on a\n" +
+			"branch with a feature binding; on a branch with only a gate record, the\n" +
+			"wait goes on until the org is disbanded or the time is up), or the\n" +
+			"ledger cannot be read; for the checks, it reads only gh pr checks <n>\n" +
+			"-R <repo> every 30 s, until no check is pending any more or gh pr\n" +
+			"checks fails. Either wait also ends when the time is up. Then merge\n" +
+			"takes regate.lock again and runs every check above from the start, so a\n" +
+			"branch that moved meanwhile is refused, and an org still running or\n" +
+			"checks pending again are waited for again, all within the one duration.\n" +
+			"An org that runs another feature now (on a branch with a feature\n" +
+			"binding), a check that failed or was cancelled, checks that are all\n" +
+			"skipping, and every other\n" +
 			"refusal are not waited for. When the time is up and the org still\n" +
 			"runs or the checks are still pending or none, merge refuses as without\n" +
 			"the flag and adds how long it waited; for the org, it also names ralph\n" +
@@ -183,8 +198,9 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"default branch, an interrupt, and any other error.\n" +
 			"\n" +
 			"merge starts no autonomous work, so it needs no running watch and no\n" +
-			"approved plan. While it runs, except while it waits, ralph org regate\n" +
-			"and another ralph org merge are refused on the ledger. ralph org spawn\n" +
+			"approved plan. While it runs, except while it waits, ralph org regate,\n" +
+			"another ralph org merge, and ralph org cleanup are refused on the\n" +
+			"ledger. ralph org spawn\n" +
 			"and start of the branch's org are refused only while merge cleans up\n" +
 			"its feature worktree, since the merge itself changes no worktree.\n" +
 			"[org.director].auto_merge is only reported, in AUTO MERGE: and in\n" +

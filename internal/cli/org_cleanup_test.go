@@ -1035,9 +1035,14 @@ func TestOrgCleanup_Help(t *testing.T) {
 				"used for any branch",
 			"When origin's URL names no GitHub repository (a local path, file://, or another scheme) or git remote get-url origin " +
 				"fails, cleanup refuses before it reads the ledger, and removes nothing.",
+			"that the branch's org is not running; that the ledger's directory (the org state dir) is not the feature worktree or " +
+				"inside it, since the ledger would go with the worktree; that the record is the binding's (its branch, path, and " +
+				"kind org)",
 			"that the worktree has no uncommitted change or untracked file and no rebase or merge in progress (files .gitignore " +
-				"names do not count and go with the worktree); that the local branch is at the head the PR merged; and that the " +
-				"worktree has that branch checked out at that head",
+				"names do not count and go with the worktree, but for the ledger's directory); that the local branch is at the " +
+				"head the PR merged; and that the worktree has that branch checked out at that head",
+			"The ledger's directory and the working directory are compared with the worktree by file identity, so another " +
+				"spelling of the same directory counts too.",
 			"ralph org regate, ralph org merge, and another cleanup are refused on the ledger (one runs at a time; it waits up to " +
 				"1 s for regate.lock), and so are ralph org spawn and start of the org whose feature worktree it removes",
 			"CLEANED: <branch> org-<org_id>, with (resumed: <what was left>)",
@@ -1049,10 +1054,20 @@ func TestOrgCleanup_Help(t *testing.T) {
 				"the worktree is left with no local branch, the worktree's directory is gone while git's registration of it " +
 				"has a HEAD that removing it would drop, or the removal itself failed); after any other SKIPPED: line, fix " +
 				"what the reason says and run ralph org cleanup --branch <branch> again.",
+			// A ledger inside the worktree (cross-review cycle 2, finding 1) and a record whose worktree holds it.
+			"A ledger whose directory is inside the feature worktree gets no MANUAL: line either, since cleaning up by hand " +
+				"would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, to a place " +
+				"where no other ledger is, once no org on the ledger runs and no ralph org command runs on it, and to run ralph " +
+				"org cleanup --branch <branch> again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So does a " +
+				"record that is not the binding's (its path or kind) when the worktree at the record's path holds the ledger; " +
+				"after the ledger is moved, that cleanup is refused with the MANUAL: line above.",
 			"Exit codes: 0 when every branch was cleaned up or there was nothing to clean up; 1 when a branch was skipped, gh is " +
 				"not on PATH (whether a PR was merged cannot be told, so nothing is removed), the main worktree is not found, " +
 				"--branch is refused,",
 			"--branch is refused, origin names no GitHub repository or cannot be read, for an interrupt",
+			// The interrupt of the last branch's cleanup (cross-review cycle 2, finding 2).
+			"for an interrupt (SIGINT, SIGTERM, or SIGHUP; what was cleaned up before it stays cleaned up, and an interrupt " +
+				"while the last branch is cleaned up still exits 1, after the lines printed), and for any other error.",
 			"so --org-id is refused",
 			"--branch string",
 		}},
