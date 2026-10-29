@@ -338,7 +338,10 @@ type RegateResult struct {
 //   - both fetches pass (regateFetch, D8);
 //   - with p.Checks config.RegateChecksCI, origin names a GitHub repository,
 //     gh is on PATH, and the branch has an open PR of that repository into
-//     the default branch (regateCIPreCheck);
+//     the default branch (regateCIPreCheck). This check runs right after the
+//     fetches, before every path below, so a ci Regate that ends
+//     RegateOutcomeUpToDate or RegateOutcomePushOnly, and reads no checks,
+//     needs gh and the open PR too;
 //   - HEAD is origin's tip of the branch (regateCheckOriginHead, D4), unless
 //     the branch's latest gate record lets Regate push HEAD and nothing else
 //     (regateHeadNotOnOrigin: RegateOutcomePushOnly, or a refusal that names

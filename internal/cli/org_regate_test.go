@@ -471,6 +471,10 @@ func TestOrgRegate_PrintRegateResult(t *testing.T) {
 			"GATE: fail\nREASON: head_moved\nMERGED: m (origin/main into p)\nHEAD: m\nBASE: b\nLOG: /l\n\nHEAD moved while the scripts " +
 				"ran: commit, reset, or switch nothing in the feature worktree while regate runs, and run it again\n\n" + notUndone + "\n",
 			"org: regate: recorded gate_failed (reason=head_moved) of the merge commit m, which was not undone; nothing was pushed"},
+		{"an outcome the command does not print yet: no GATE: line, exit 1", merged(func(r *org.RegateResult) {
+			r.Outcome, r.LogPath, r.Pushed, r.PR, r.ChecksPending = org.RegateOutcomeChecksPending, "", true, 7, "PR #7's head is p, not m"
+		}), nil, "HEAD: m\nBASE: b\nPUSHED: m to origin's feat/a\n",
+			"org: regate: the regate of feat/a ended with the outcome checks_pending, which this command does not print"},
 		{"a refusal before the scripts", org.RegateResult{Refused: "org: regate: no branch named"}, nil, "", "org: regate: no branch named"},
 		{"a refusal at the record, after a merge", merged(func(r *org.RegateResult) {
 			r.Outcome, r.Refused, r.Undone = "", "org: regate: nothing was recorded, since ...; the merge commit m was undone", true
