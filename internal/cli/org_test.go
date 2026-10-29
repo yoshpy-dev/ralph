@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -81,7 +84,8 @@ func runOrgCmd(t *testing.T, args ...string) (string, error) {
 // `tab create --help` answers a help that lists --env, as herdr 0.7.5 does,
 // unlogged and with no id handed out, so driver.Herdr's --env check leaves
 // the log and the ids as they were and each `tab create` ends with
-// `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`.
+// `--env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`, followed for a
+// seat by `--env RALPH_PRIMARY_CLI=<driver>`.
 // ORG_STUB_TAB_CREATE_HELP=noenv makes the help list --envelope instead of
 // --env, as a herdr without --env would, so each `tab create` has no --env
 // and driver.Herdr warns.
@@ -421,11 +425,13 @@ func TestOrgSpawn_HappyPath_EventSequenceReceiptAndWorkspaceReuse(t *testing.T) 
 		t.Fatalf("expected 2 'tab create' calls (one per seat), got %d (log: %v)", n, herdrLines)
 	}
 	// Each seat's pane carries AGMSG_SELF_NAME=off (plan
-	// 2026-10-22-seat-agmsg-self-name, AC3) and RALPH_WIP_CHECKPOINT=off
-	// (plan 2026-10-22-seat-wip-checkpoint, AC2).
+	// 2026-10-22-seat-agmsg-self-name, AC3), RALPH_WIP_CHECKPOINT=off
+	// (plan 2026-10-22-seat-wip-checkpoint, AC2), and its driver as
+	// RALPH_PRIMARY_CLI (plan 2026-10-29-review-switches-config, AC5).
+	const paneEnv = " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off --env RALPH_PRIMARY_CLI=claude"
 	for _, l := range herdrLines {
-		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, " --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off") {
-			t.Fatalf("tab create call %q does not end with --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off", l)
+		if strings.HasPrefix(l, "tab create") && !strings.HasSuffix(l, paneEnv) {
+			t.Fatalf("tab create call %q does not end with%s", l, paneEnv)
 		}
 	}
 
@@ -1096,6 +1102,78 @@ func TestOrgStatus_ConfigFlagRecoversAfterDefaultPoolDropsRoleModel(t *testing.T
 	})
 }
 
+// writeRalphTomlBehindLockedDir makes ./ralph.toml a symlink to a file
+// holding content in a directory with no permissions, so os.Stat and
+// os.ReadFile of ralph.toml both fail with a permission error, not
+// fs.ErrNotExist. The directory gets its permissions back in t.Cleanup so
+// t.TempDir can remove it. Callers skip under root, which ignores the
+// permission bits.
+func writeRalphTomlBehindLockedDir(t *testing.T, content string) {
+	t.Helper()
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(locked, "ralph.toml")
+	writeTestFile(t, target, content)
+	if err := os.Symlink(target, "ralph.toml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+}
+
+// Without --config, resolveOrgConfig reads ./ralph.toml with config.Load,
+// so only a ralph.toml that does not exist means the built-in defaults. One
+// that exists but cannot be read is an error (cross-review cycle 1 of
+// codex-verified-auto-merge-on): codex_verified and auto_merge are true by
+// default, so the defaults would read a file that says false as true. The
+// symlink into a directory with no permissions is the case an os.Stat check
+// took for no file; a file with no permissions passes os.Stat and fails to
+// read.
+func TestResolveOrgConfig_UnreadableRalphTomlIsAnErrorNotTheDefaults(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permission bits")
+	}
+	const saysFalse = "[org.permissions]\ncodex_verified = false\n\n[org.director]\nauto_merge = false\n"
+
+	t.Chdir(t.TempDir())
+	cfg, err := resolveOrgConfig("")
+	if err != nil || !reflect.DeepEqual(cfg, config.Default().Org) {
+		t.Fatalf("resolveOrgConfig(\"\") with no ralph.toml = %+v, %v; want the built-in defaults and no error", cfg, err)
+	}
+	writeTestFile(t, "ralph.toml", saysFalse)
+	if cfg, err = resolveOrgConfig(""); err != nil || cfg.Permissions.CodexVerified || cfg.Director.AutoMerge {
+		t.Fatalf("resolveOrgConfig(\"\") with a readable ralph.toml = codex_verified %t, auto_merge %t, %v; want false, false, no error",
+			cfg.Permissions.CodexVerified, cfg.Director.AutoMerge, err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		write func(t *testing.T)
+	}{
+		{"a symlink into a directory with no permissions", func(t *testing.T) { writeRalphTomlBehindLockedDir(t, saysFalse) }},
+		{"a file with no permissions", func(t *testing.T) {
+			writeTestFile(t, "ralph.toml", saysFalse)
+			if err := os.Chmod("ralph.toml", 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			tc.write(t)
+			cfg, err := resolveOrgConfig("")
+			if !errors.Is(err, fs.ErrPermission) {
+				t.Errorf("resolveOrgConfig(\"\") = codex_verified %t, auto_merge %t, %v; want a permission error, not the defaults",
+					cfg.Permissions.CodexVerified, cfg.Director.AutoMerge, err)
+			}
+		})
+	}
+}
+
 func TestOrgCmd_RequiresOrgID(t *testing.T) {
 	out, err := runOrgCmd(t, "status")
 	if err == nil {
@@ -1234,13 +1312,15 @@ const (
 
 // writeCodexOrgConfig writes a ralph.toml with an [org] section that allows
 // the codex driver (one [[org.model_pool]] entry,
-// codexOrgTestCommandedModel) and, when guardedRole is non-empty, maps that
-// role to guarded permission mode -- codex's fail-closed autonomous default
-// (permissionArgsForDriver) would otherwise reject every codex spawn in
-// this file outright, the same gate internal/org/spawn_test.go's
-// codexGuardedOrg works around for the library-level tests. An empty
-// guardedRole deliberately leaves every role on the autonomous default, for
-// the one test that needs that fail-closed rejection.
+// codexOrgTestCommandedModel), sets [org.permissions].codex_verified =
+// false (the default is true), and, when guardedRole is non-empty, maps that
+// role to guarded permission mode -- with codex_verified false, codex's
+// fail-closed autonomous check (permissionArgsForDriver) would otherwise
+// reject every codex spawn in this file outright, the same gate
+// internal/org/spawn_test.go's codexGuardedOrg works around for the
+// library-level tests. An empty guardedRole deliberately leaves every role
+// on the autonomous default, for the one test that needs that fail-closed
+// rejection.
 func writeCodexOrgConfig(t *testing.T, dir string, maxSeats int, guardedRole string) string {
 	t.Helper()
 	path := filepath.Join(dir, "ralph.toml")
@@ -1251,7 +1331,8 @@ func writeCodexOrgConfig(t *testing.T, dir string, maxSeats int, guardedRole str
 		"driver = \"codex\"\n" +
 		"model = \"" + codexOrgTestCommandedModel + "\"\n\n" +
 		"[org.permissions]\n" +
-		"default = \"autonomous\"\n"
+		"default = \"autonomous\"\n" +
+		"codex_verified = false\n"
 	if guardedRole != "" {
 		content += "\n[org.permissions.roles]\n" + guardedRole + " = \"guarded\"\n"
 	}

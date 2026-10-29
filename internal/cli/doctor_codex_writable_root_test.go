@@ -1764,9 +1764,9 @@ func TestCodexSandboxReasonClause(t *testing.T) {
 // seam (main_test.go) works end to end: without any test-local override,
 // checkCodexAgmsgWritableRoot resolves through doctorCodexSandboxEnv, which
 // TestMain has pinned to a non-existent config path -- so with the
-// default project config (codex_verified = false, no sandbox_mode), the
-// check reads pass/"not needed" regardless of the developer's real
-// ~/.codex/config.toml.
+// default project config (codex_verified = true, codex in driver_pool, the
+// autonomous default), the check warns that this config does not exist
+// regardless of the developer's real ~/.codex/config.toml.
 func TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault(t *testing.T) {
 	setupTestEmbedFS(t)
 	Version = "0.1.0-test"
@@ -1801,11 +1801,11 @@ func TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDoctorOpts returned error: %v\noutput:\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "Codex sandbox (agmsg writable root): pass") {
-		t.Errorf("expected a pass-level Codex sandbox line in output:\n%s", out)
+	if !strings.Contains(string(out), "Codex sandbox (agmsg writable root): warn") {
+		t.Errorf("expected a warn-level Codex sandbox line in output:\n%s", out)
 	}
-	if !strings.Contains(string(out), "not needed") {
-		t.Errorf("expected the not-needed detail in output:\n%s", out)
+	if !strings.Contains(string(out), "~/.codex/config.toml does not exist, so no writable root covers the agmsg store") {
+		t.Errorf("expected the detail to say the pinned config does not exist in output:\n%s", out)
 	}
 }
 

@@ -686,3 +686,42 @@ func TestParseReport_CrossReview_OnlyLaterCycleIncomplete(t *testing.T) {
 		t.Errorf("cycle 2 = (%d, %q), want (2, n/a)", bevs[1].Cycle, bevs[1].Verdict)
 	}
 }
+
+func TestParseReport_CrossReview_SkippedReviewerIsNA(t *testing.T) {
+	bevs := writeCrossReviewReport(t, `# Cross-review triage
+
+- Reviewer status: skipped (off: [standard].cross_review)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`)
+	if len(bevs) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(bevs))
+	}
+	if bevs[0].ParseMiss {
+		t.Errorf("ParseMiss = true: %s", bevs[0].ParseMissReason)
+	}
+	if bevs[0].Verdict != "n/a" {
+		t.Errorf("verdict = %q, want n/a", bevs[0].Verdict)
+	}
+}
+
+func TestParseReport_CrossReview_OnlyLaterCycleSkipped(t *testing.T) {
+	bevs := writeCrossReviewReport(t, `# Cross-review triage
+
+- Reviewer status: complete
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=1, DISMISSED=2
+
+## Cycle 2 (2026-10-29)
+
+- Reviewer status: Skipped (off: [standard].cross_review)
+- After triage: ACTION_REQUIRED=0, WORTH_CONSIDERING=0, DISMISSED=0
+`)
+	if len(bevs) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(bevs))
+	}
+	if bevs[0].Cycle != 1 || bevs[0].Verdict != "pass" {
+		t.Errorf("cycle 1 = (%d, %q), want (1, pass)", bevs[0].Cycle, bevs[0].Verdict)
+	}
+	if bevs[1].Cycle != 2 || bevs[1].Verdict != "n/a" {
+		t.Errorf("cycle 2 = (%d, %q), want (2, n/a)", bevs[1].Cycle, bevs[1].Verdict)
+	}
+}

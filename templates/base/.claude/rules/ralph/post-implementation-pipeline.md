@@ -10,6 +10,8 @@ Single source of truth for the post-implementation pipeline (standard flow, `/im
 
 No step may be skipped. If any step triggers a fix-and-revalidate cycle (e.g., cross-review ACTION_REQUIRED), the **full pipeline** re-runs from `/self-review` onwards, except for the record-only fixes below.
 
+`/cross-review` always runs, but it calls the other CLI's reviewer only when `[standard].cross_review` in `ralph.toml` is on (default off; read with `ralph config get`) and that CLI is available. Otherwise it writes a triage report that records the skip (`Reviewer status: skipped (<reason>)`) and hands off to `/pr`, which carries the outcome into the PR body's Verification.
+
 ### Exception: fixes confined to this task's pipeline records
 
 A fix skips the full re-run only when all three of these hold:

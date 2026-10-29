@@ -463,14 +463,14 @@ func TestOrgMerge_MergesAReadyBranchAndRecordsPRMerged(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, false, tc.wantNote))
+			assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, true, tc.wantNote))
 			events := readManifestEvents(t, org.ManifestPathIn(fx.stateDir))
 			if len(events) != before+1 {
 				t.Fatalf("the ledger got %d events; want exactly one: %+v", len(events)-before, events[before:])
 			}
 			if ev := events[before]; ev.Event != org.EventPRMerged || ev.OrgID != "a" || ev.SeatID != "" ||
-				ev.Details != mergeCLIDetails(fx.head, false) {
-				t.Errorf("recorded %+v; want pr_merged of org a with %q", ev, mergeCLIDetails(fx.head, false))
+				ev.Details != mergeCLIDetails(fx.head, true) {
+				t.Errorf("recorded %+v; want pr_merged of org a with %q", ev, mergeCLIDetails(fx.head, true))
 			}
 
 			want := []string{"GH_PROMPT_DISABLED=1 pr merge 7 --merge --match-head-commit " + fx.head + " -R " + mergeCLIRepoArg}
@@ -593,7 +593,7 @@ func TestOrgMerge_RecordThatFailsPrintsTheLinesAndExitsOne(t *testing.T) {
 		mergeCLIMergeCommit+") but pr_merged could not be recorded") {
 		t.Fatalf("merge err = %v; want that the merge stands and pr_merged was not recorded", err)
 	}
-	if want := mergeCLILines(fx.head, false, ""); stdout != want {
+	if want := mergeCLILines(fx.head, true, ""); stdout != want {
 		t.Errorf("stdout:\n%s\nwant the lines of the merge:\n%s", stdout, want)
 	}
 	if got := fx.prMergedEvents(t); len(got) != 0 {
@@ -625,7 +625,7 @@ func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 		if err != nil || stderr != "" {
 			t.Fatalf("merge: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 		}
-		if want := mergeCLILines(fx.head, false, "") + "CLEANUP: done\n"; stdout != want {
+		if want := mergeCLILines(fx.head, true, "") + "CLEANUP: done\n"; stdout != want {
 			t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 		}
 		if _, err := os.Stat(wt); !errors.Is(err, fs.ErrNotExist) {
@@ -657,7 +657,7 @@ func TestOrgMerge_CleansUpTheFeatureWorktree(t *testing.T) {
 		if err != nil || stderr != "" {
 			t.Fatalf("merge: err %v, stderr %q (stdout %q); want exit 0", err, stderr, stdout)
 		}
-		want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
+		want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the feature worktree " + wt + " has 1 uncommitted " +
 			"change(s) or untracked file(s) (?? stray.txt), which removing it would lose: move what you need out of the worktree, " +
 			"remove the rest, and run ralph org cleanup --branch feat/a again)\n"
 		if stdout != want {
@@ -701,15 +701,15 @@ func TestOrgMerge_NoMainWorktreeSkipsTheCleanup(t *testing.T) {
 	if err != nil || stderr != "" {
 		t.Fatalf("merge: err %v, stderr %q (stdout %q); want exit 0", err, stderr, stdout)
 	}
-	want := mergeCLILines(fx.head, false, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
+	want := mergeCLILines(fx.head, true, "") + "CLEANUP: skipped (the main worktree, where scripts/ralph-worktree.sh removes " +
 		"the feature worktree, was not found (the current directory is in no git repository, or in one with no main worktree, " +
 		"such as a linked worktree of a bare repository), so the feature worktree of the branch feat/a was not cleaned up: run " +
 		"ralph org cleanup --branch feat/a from the main worktree)\n"
 	if stdout != want {
 		t.Errorf("stdout:\n%s\nwant:\n%s", stdout, want)
 	}
-	if got := fx.prMergedEvents(t); len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, false) {
-		t.Errorf("pr_merged = %+v; want one with %q", got, mergeCLIDetails(fx.head, false))
+	if got := fx.prMergedEvents(t); len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, true) {
+		t.Errorf("pr_merged = %+v; want one with %q", got, mergeCLIDetails(fx.head, true))
 	}
 	if got := fileBytesOrAbsent(t, filepath.Join(fx.stateDir, "regate.lock")); got != "" {
 		t.Errorf("regate.lock holds %q; want no marker, since no cleanup ran", got)
@@ -857,7 +857,7 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 		if err != nil || stderr != "" {
 			t.Fatalf("merge --wait-checks 6h: err %v, stderr %q, stdout %q; want the merge", err, stderr, stdout)
 		}
-		assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, false, ""))
+		assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, true, ""))
 	})
 	t.Run("the time is up with checks pending", func(t *testing.T) {
 		fx := newMergeCLIFixture(t, false)

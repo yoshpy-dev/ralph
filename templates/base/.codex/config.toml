@@ -20,8 +20,8 @@ model = "gpt-5.6-sol"
 # approval_policy below sets when an interactive session asks for approval
 # before running a command (`codex --help`, --ask-for-approval). `codex exec`
 # never asks for approval, even with "on-request" (its run header shows
-# `approval: never`), so the `codex exec` calls in the /plan skill (Codex
-# plan advisory) and the /cross-review skill (codex reviewer) pass a
+# `approval: never`), so the `codex exec` calls in the /plan skill (plan
+# advisory, codex reviewer) and the /cross-review skill (codex reviewer) pass a
 # read-only sandbox explicitly.
 sandbox_mode = "danger-full-access"
 

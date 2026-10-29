@@ -49,7 +49,7 @@
 - `.claude/skills/self-review/`: self-review diff quality (auto)
 - `.claude/skills/verify/`: spec compliance and static analysis (auto)
 - `.claude/skills/test/`: behavioral tests (auto)
-- `.claude/skills/cross-review/`: cross-model second opinion via the other agent (Claude → Codex; Codex → Claude) (auto, optional)
+- `.claude/skills/cross-review/`: cross-model second opinion via the other agent (Claude → Codex; Codex → Claude) (auto; calls the reviewer only when `[standard].cross_review` is on and that CLI is available, otherwise records the skip)
 - `.claude/skills/pr/`: create PRs, archive plans, hand off (auto)
 - `.claude/skills/sync-docs/`: documentation sync (auto)
 - `.claude/skills/audit-harness/`: harness consistency audit (auto)

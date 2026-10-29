@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/yoshpy-dev/ralph/internal/scaffold"
@@ -21,15 +23,39 @@ func newInitCmd() *cobra.Command {
 	var (
 		nonInteractive bool
 		force          bool
+		packNames      []string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "init [directory]",
 		Short: "Initialize a new project with harness engineering scaffold",
 		Long: `Scaffolds a project with Claude Code configurations, hooks, skills,
-agents, rules, and org-runtime config. Supports both new and existing projects.`,
+agents, rules, and org-runtime config. Supports both new and existing projects.
+
+The language-pack question starts with the packs --pack names selected, or
+with nothing selected without --pack. A pack whose marker files (go.mod,
+package.json, ...) sit directly in the target directory is labeled
+"(Recommended)", and "skip" installs no language pack. A pack can be added
+later with ralph pack add <language>.
+
+With --yes nothing is asked, and no language pack is installed unless --pack
+names one. --pack can be repeated or take comma-separated names, and an
+unknown name fails before anything is written. When TERM=dumb and stdin is
+not a terminal, ralph init cannot ask its questions and needs --yes.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check the --pack names before the form and before anything is
+			// written: executeInit only warns about a pack it cannot find and
+			// keeps the name in the manifest.
+			availPacks, err := scaffold.AvailablePacks()
+			if err != nil {
+				return fmt.Errorf("listing packs: %w", err)
+			}
+			packs, err := parsePackFlag(packNames, availPacks)
+			if err != nil {
+				return err
+			}
+
 			targetDir := "."
 			if len(args) > 0 {
 				targetDir = args[0]
@@ -40,25 +66,67 @@ agents, rules, and org-runtime config. Supports both new and existing projects.`
 				return fmt.Errorf("resolving directory: %w", err)
 			}
 
-			if nonInteractive {
-				return runInitNonInteractive(absDir, force)
+			// Both paths start from the same config; the form lets the user
+			// change the project name and the packs.
+			cfg := initConfig{
+				ProjectName:    filepath.Base(absDir),
+				Packs:          packs,
+				AvailablePacks: availPacks,
 			}
-			return runInitInteractive(absDir, force)
+			if nonInteractive {
+				return runInitNonInteractive(absDir, cfg, force)
+			}
+			return runInitInteractive(absDir, cfg, force)
 		},
 	}
 
-	cmd.Flags().BoolVar(&nonInteractive, "yes", false, "skip interactive prompts, use defaults")
+	cmd.Flags().BoolVar(&nonInteractive, "yes", false, "skip interactive prompts; install no language pack unless --pack names one")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite existing files without prompting")
+	// StringArrayVar, not StringSliceVar: a slice flag reads each value as
+	// CSV and drops an empty one (--pack ''), so parsePackFlag could not
+	// refuse it. parsePackFlag splits the commas itself.
+	cmd.Flags().StringArrayVar(&packNames, "pack", nil, "language pack to install (preselected in the question without --yes); repeat the flag or separate names with commas (see ralph pack list)")
 
 	return cmd
+}
+
+// parsePackFlag turns the --pack values into the packs to install. A value
+// may name several packs separated by commas, and a name given more than once
+// is kept once, in first-seen order. An empty name (an empty value, or the
+// one after the comma of --pack golang,) or a name not in available is an
+// error that lists available.
+func parsePackFlag(values, available []string) ([]string, error) {
+	var packs []string
+	for _, value := range values {
+		for _, name := range strings.Split(value, ",") {
+			name = strings.TrimSpace(name)
+			switch {
+			case name == "":
+				return nil, fmt.Errorf("empty language pack name in --pack %q (available: %s)", value, strings.Join(available, ", "))
+			case !slices.Contains(available, name):
+				return nil, fmt.Errorf("unknown language pack %q in --pack (available: %s)", name, strings.Join(available, ", "))
+			case !slices.Contains(packs, name):
+				packs = append(packs, name)
+			}
+		}
+	}
+	return packs, nil
 }
 
 type initConfig struct {
 	ProjectName string
 	Packs       []string
+	// AvailablePacks is what scaffold.AvailablePacks listed. The language-pack
+	// question offers them as its options, and executeInit names them in its
+	// ralph pack add hint when Packs is empty.
+	AvailablePacks []string
 }
 
-func runInitInteractive(targetDir string, force bool) error {
+// runInitInteractive asks for the project name, starting from
+// cfg.ProjectName, and the language packs of cfg.AvailablePacks, with
+// cfg.Packs (the packs parsePackFlag returned for --pack) selected at the
+// start (none without --pack).
+func runInitInteractive(targetDir string, cfg initConfig, force bool) error {
 	// Detect an existing project up front so the user is not asked for a
 	// project name and language packs that will be ignored by the upgrade
 	// path. executeInit retains the same check as a safety net for
@@ -68,22 +136,12 @@ func runInitInteractive(targetDir string, force bool) error {
 		return handleExistingProjectInit(manifestPath)
 	}
 
-	defaultName := filepath.Base(targetDir)
-
-	availPacks, err := scaffold.AvailablePacks()
-	if err != nil {
-		return fmt.Errorf("listing packs: %w", err)
-	}
-
-	cfg := initConfig{
-		ProjectName: defaultName,
-		Packs:       availPacks, // Default: all packs selected.
-	}
-
-	// Build multi-select options with all packs pre-selected.
-	packOptions := make([]huh.Option[string], len(availPacks))
-	for i, p := range availPacks {
-		packOptions[i] = huh.NewOption(p, p).Selected(true)
+	// With TERM=dumb huh asks in accessible mode (huh.NewForm) and reads the
+	// answers from stdin. At the end of a stdin that is not a terminal it
+	// takes each answer as "confirm" and, while validatePackSelection refuses
+	// the empty selection, asks the pack question again without end.
+	if os.Getenv("TERM") == "dumb" && !term.IsTerminal(os.Stdin.Fd()) {
+		return errors.New("TERM=dumb and stdin is not a terminal, so ralph init cannot ask its questions; run ralph init --yes (with --pack <name> to install a language pack)")
 	}
 
 	form := huh.NewForm(
@@ -91,10 +149,7 @@ func runInitInteractive(targetDir string, force bool) error {
 			huh.NewInput().
 				Title("Project name").
 				Value(&cfg.ProjectName),
-			huh.NewMultiSelect[string]().
-				Title("Language packs").
-				Options(packOptions...).
-				Value(&cfg.Packs),
+			newPackQuestion(cfg.AvailablePacks, recommendedPacks(targetDir, cfg.AvailablePacks), &cfg.Packs),
 		),
 	)
 
@@ -102,20 +157,137 @@ func runInitInteractive(targetDir string, force bool) error {
 		return fmt.Errorf("interactive form: %w", err)
 	}
 
+	cfg.Packs = packsFromSelection(cfg.Packs)
 	return executeInit(targetDir, cfg, force)
 }
 
-func runInitNonInteractive(targetDir string, force bool) error {
-	availPacks, err := scaffold.AvailablePacks()
+// skipPackValue is the value of the pack question's skip option. A pack name
+// is a directory name under templates/packs/, which cannot hold a "/", so no
+// pack can be named this. packsFromSelection drops it before executeInit,
+// which would warn about it as a missing pack and keep it in the manifest.
+const skipPackValue = "/skip"
+
+// packMarkers lists, per language pack, the files that mark the pack
+// (Recommended) in the init form when one sits directly in the target
+// directory: a file name or a filepath.Match pattern. It follows
+// has_project_marker in scripts/detect-changed-languages.sh, plus setup.cfg
+// and, for terraform (which has_project_marker does not check), the names
+// classify_language gives to terraform.
+var packMarkers = map[string][]string{
+	"golang":     {"go.mod"},
+	"typescript": {"package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json", "tsconfig.*.json"},
+	"python":     {"pyproject.toml", "requirements.txt", "requirements-*.txt", "setup.py", "setup.cfg", "tox.ini"},
+	"rust":       {"Cargo.toml"},
+	"dart":       {"pubspec.yaml"},
+	"terraform":  {"*.tf", "*.tofu", "*.tftest.hcl", ".terraform.lock.hcl"},
+}
+
+// recommendedPacks returns the packs of available, in available's order,
+// whose marker (packMarkers) is a regular file, or a symlink to one, directly
+// in targetDir. A target directory that does not exist yet, or cannot be
+// read, gives none: the mark only labels an option, and executeInit reports a
+// directory it cannot use.
+func recommendedPacks(targetDir string, available []string) []string {
+	entries, err := os.ReadDir(targetDir)
 	if err != nil {
-		return fmt.Errorf("listing packs: %w", err)
+		return nil
 	}
-
-	cfg := initConfig{
-		ProjectName: filepath.Base(targetDir),
-		Packs:       availPacks,
+	var recommended []string
+	for _, pack := range available {
+		if slices.ContainsFunc(entries, func(entry os.DirEntry) bool {
+			return isPackMarker(targetDir, entry.Name(), packMarkers[pack])
+		}) {
+			recommended = append(recommended, pack)
+		}
 	}
+	return recommended
+}
 
+// isPackMarker reports whether name, an entry of dir, matches one of patterns
+// and is a regular file or a symlink to one, for every pattern. The shell
+// differs for two globs: has_project_marker checks its fixed names with
+// test -f, which follows a symlink, but finds tsconfig.*.json and
+// requirements-*.txt with find -type f, which does not.
+func isPackMarker(dir, name string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// The patterns of packMarkers are well formed, so Match returns no error.
+		if matched, _ := filepath.Match(pattern, name); matched {
+			info, err := os.Stat(filepath.Join(dir, name))
+			return err == nil && info.Mode().IsRegular()
+		}
+	}
+	return false
+}
+
+// packOptions returns the options of the pack question: one per pack of
+// available, in its order, labeled "<name> (Recommended)" when the pack is in
+// recommended, and a last option to skip. An option is selected when its
+// value is in initial.
+func packOptions(available, recommended, initial []string) []huh.Option[string] {
+	options := make([]huh.Option[string], 0, len(available)+1)
+	for _, pack := range available {
+		label := pack
+		if slices.Contains(recommended, pack) {
+			label += " (Recommended)"
+		}
+		options = append(options, huh.NewOption(label, pack).Selected(slices.Contains(initial, pack)))
+	}
+	return append(options, huh.NewOption("skip (no language pack)", skipPackValue).Selected(slices.Contains(initial, skipPackValue)))
+}
+
+// validatePackSelection keeps the form on the pack question unless the
+// selection is skip alone or one or more packs without skip.
+func validatePackSelection(selection []string) error {
+	switch {
+	case len(selection) == 0:
+		return errors.New("choose at least one language pack, or skip")
+	case len(selection) > 1 && slices.Contains(selection, skipPackValue):
+		return errors.New("choose skip alone, or language packs without skip")
+	}
+	return nil
+}
+
+// packsFromSelection returns the packs to install for the pack question's
+// selection: every value but skip's, so skip alone installs none.
+func packsFromSelection(selection []string) []string {
+	var packs []string
+	for _, value := range selection {
+		if value != skipPackValue {
+			packs = append(packs, value)
+		}
+	}
+	return packs
+}
+
+// packQuestionDescription explains the pack question's labels, one short line
+// each so that neither wraps in an 80-column terminal.
+const packQuestionDescription = "(Recommended): the directory has a project file of the language.\n" +
+	"skip: install no language pack (ralph pack add adds one later)."
+
+// newPackQuestion returns the language pack question of the init form. It
+// starts with the values in *selection selected and writes the selection
+// back to it; packsFromSelection turns that into the packs to install.
+func newPackQuestion(available, recommended []string, selection *[]string) *huh.MultiSelect[string] {
+	options := packOptions(available, recommended, *selection)
+	titleLines := 1
+	descriptionLines := strings.Count(packQuestionDescription, "\n") + 1
+	optionLines := len(options)
+	return huh.NewMultiSelect[string]().
+		Title("Language packs").
+		Description(packQuestionDescription).
+		Options(options...).
+		// Room for the title, the description, and every option. Without a
+		// height, huh sizes the list to the options minus the title and
+		// description lines, which hides the last options (skip among them)
+		// until the cursor scrolls down to them.
+		Height(titleLines + descriptionLines + optionLines).
+		Validate(validatePackSelection).
+		Value(selection)
+}
+
+// runInitNonInteractive installs cfg.Packs, the packs parsePackFlag returned
+// for --pack; with no --pack it installs no language pack.
+func runInitNonInteractive(targetDir string, cfg initConfig, force bool) error {
 	return executeInit(targetDir, cfg, force)
 }
 
@@ -257,6 +429,14 @@ func executeInit(targetDir string, cfg initConfig, force bool) error {
 		fmt.Printf("  cd %s\n", targetDir)
 	}
 	fmt.Printf("  Edit AGENTS.md to describe your project\n")
+	if len(cfg.Packs) == 0 {
+		// No language pack was installed.
+		hint := "  ralph pack add <language> to add a language pack later"
+		if len(cfg.AvailablePacks) > 0 {
+			hint += " (available: " + strings.Join(cfg.AvailablePacks, ", ") + ")"
+		}
+		fmt.Println(hint)
+	}
 	fmt.Printf("  ralph doctor to verify setup\n")
 
 	return nil

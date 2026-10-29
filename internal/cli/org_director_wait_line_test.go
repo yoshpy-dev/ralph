@@ -223,7 +223,7 @@ func directorWaitReadError(stateDir, what string) string {
 func TestDirectorWaitLine_ShowsTheMarkOfAPromotedSessionsWait(t *testing.T) {
 	const (
 		head    = "director: attached d1 (driver=claude, attached at 2026-10-19T09:00:00Z, by alice) -- the registration does not tell whether its session is still running"
-		tail    = "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+		tail    = "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 		started = "(pid 4242) started at 2026-10-19T09:50:00Z and last wrote its mark at "
 	)
 	running := func(seenAgo time.Duration) func(*org.DirectorWaitMark) {
@@ -484,7 +484,8 @@ func TestDirectorWaitLine_DisabledNotAttachedAndOpenHeadless(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		const want = "director: disabled ([org.director].enabled = false; registration d1 is still recorded) -- ralph org escalate sends every item to the human at once"
+		const want = "director: disabled ([org.director].enabled = false, so [org.director].auto_merge = true has no effect; registration d1 is still recorded) " +
+			"-- ralph org escalate sends every item to the human at once"
 		mark := directorWaitMarkOf(reg, 30*time.Second)
 		writeDirectorWaitMark(t, stateDir, mark)
 
@@ -547,7 +548,7 @@ func TestDirectorWaitLine_EndToEndWithARealWait(t *testing.T) {
 	ev := attachD1(t, stateDir)
 	pid := strconv.Itoa(os.Getpid())
 	head := "director: attached d1 (driver=claude, attached at " + ev.TS + ", by alice) -- the registration does not tell whether its session is still running"
-	const tail = "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOff
+	const tail = "; inbox items it does not ack reach the human at the ack deadline" + directorAutoMergeOnAttached
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

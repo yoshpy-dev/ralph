@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -211,7 +210,7 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // without asking), both taken from <main worktree root>/ralph.toml, by the
 // rule withMainWorktreeOrgLimits follows: only when configPath is empty and
 // the ledger is the main worktree's (org.LedgerMainWorktreeRoot), with the
-// built-in defaults (true and false) when that file does not exist. A
+// built-in defaults (both true) when that file does not exist. A
 // feature org's leader escalates from its feature worktree, whose ralph.toml
 // it can change, so that copy does not choose whether its items are left to
 // the director (plan 2026-10-14-org-director-attach, D6), nor whether the
@@ -223,9 +222,9 @@ func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDi
 // to load is an error, which `ralph org escalate` handles like a ralph.toml
 // that does not load, `ralph org director attach` and `status` and `ralph
 // org merge` return, and `ralph status` warns about before it shows the
-// built-in defaults (statusDirectorConfig). A verb that reports or acts on
-// the switch or on auto_merge reads it through this function, so it sees the
-// value escalate and the director go by.
+// built-in Enabled with AutoMerge false (statusDirectorConfig). A verb that
+// reports or acts on the switch or on auto_merge reads it through this
+// function, so it sees the value escalate and the director go by.
 func withMainWorktreeDirectorEnabled(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
@@ -362,6 +361,9 @@ func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 		// AGMSG_SELF_NAME=off, so an agmsg a seat runs itself cannot rename
 		// its herdr agent (finding F3), and RALPH_WIP_CHECKPOINT=off, so the
 		// seat's Claude Code session makes no wip: commit (finding F11).
+		// Those are the Herdr's fixed PaneEnv; after them spawn appends
+		// RALPH_PRIMARY_CLI=<the seat's driver> as TabCreate's extraEnv
+		// (driver.PrimaryCLIEntry).
 		Herdr: driver.NewHerdr(runner, driver.SeatPaneEnv()...),
 		Agmsg: driver.Agmsg{R: runner, Home: agmsgHome},
 		// The leader's role prompt names the same home's scripts in its
@@ -611,17 +613,18 @@ func shellQuoteIfNeeded(s string) string {
 }
 
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
-// to ./ralph.toml when configPath is empty and that file exists, and to
-// config.Default().Org when neither is present -- matching the plan's
-// documented --config default.
+// to ./ralph.toml when configPath is empty, and to config.Default().Org
+// when the file it reads does not exist -- matching the plan's documented
+// --config default. config.Load decides what "does not exist" means: only
+// fs.ErrNotExist. A ./ralph.toml that exists but cannot be read (no
+// permission, or a symlink into a directory it may not enter) is an error,
+// not the defaults: the defaults would turn a file that says
+// codex_verified = false or auto_merge = false into true (cross-review
+// cycle 1 of codex-verified-auto-merge-on).
 func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 	path := configPath
 	if path == "" {
-		if _, err := os.Stat("ralph.toml"); err == nil {
-			path = "ralph.toml"
-		} else {
-			return config.Default().Org, nil
-		}
+		path = "ralph.toml"
 	}
 	cfg, err := config.Load(path)
 	if err != nil {

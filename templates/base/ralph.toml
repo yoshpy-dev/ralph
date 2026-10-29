@@ -1,12 +1,35 @@
 # ralph.toml — project-level configuration for the ralph CLI.
 
 [doctor]
-require_claude_cli = true
-# Codex is optional by default — set to true to fail `ralph doctor` when
-# the codex binary is missing. The accompanying `.codex/config.toml` is loaded
-# only when `codex trust .` has been run for this project; see .codex/README.md.
+# `ralph doctor` passes when either the claude or the codex CLI is usable.
+# When only one is usable, doctor warns about the other: the plan advisory
+# and cross-review steps that call it do not run. When neither is usable,
+# doctor fails. Set require_claude_cli or require_codex_cli to true to make
+# doctor fail when that CLI is not usable, whether or not the other one is.
+require_claude_cli = false
+# Codex loads the project's `.codex/config.toml` only after `codex trust .`
+# has been run for this project; see .codex/README.md.
 require_codex_cli = false
 require_go = false
+
+# [standard] — switches of the standard flow (/plan, /implement, and the
+# pipeline after it). plan_advisory = true turns on the plan advisory of
+# /plan, and cross_review = true turns on /cross-review. Both are off by
+# default.
+# The skills read a value with `ralph config get <key>`, such as
+# `ralph config get standard.cross_review`. Exit 0 prints the value: a key
+# this file does not set prints its built-in default, and so does every key
+# when this file does not exist. An older ralph without that command fails
+# with exit 1 and `unknown command "config"` on stderr, and the shell exits
+# 127 when `ralph` is not on PATH; the skills treat these two, and only
+# these, as off, and record that they did. They stop on any other exit 1,
+# on exit 2 (the key is not a key of one value: unknown, or a table or an
+# array), and on exit 3 (this file exists but cannot be read, or any of its
+# values is invalid, not only the ones below), and report it instead of
+# treating the switch as off.
+[standard]
+plan_advisory = false
+cross_review = false
 
 # [org] — the envelope and settings of the `ralph org` verbs (spawn, send,
 # start, watch, escalate, and the rest) and of `ralph doctor`'s org checks:
@@ -74,21 +97,23 @@ agmsg_home = "~/.agents/skills/agmsg"
 # flags at spawn time (claude: --permission-mode bypassPermissions|
 # acceptEdits|<none>). Modes: autonomous (no interactive prompts) | edits
 # (auto-accept file edits, still prompts otherwise) | guarded (the driver
-# CLI's own interactive default). codex seats accept only guarded until
-# codex_verified below is set -- the codex flag mapping depends on the codex
-# CLI version and on your ~/.codex/config.toml, so verify it per machine
-# first (docs/recipes/codex-seat-permissions.md).
+# CLI's own interactive default). codex seats accept every mode while
+# codex_verified below is true, and only guarded once it is false -- the
+# codex flag mapping depends on the codex CLI version and on your
+# ~/.codex/config.toml, so check it per machine
+# (docs/recipes/codex-seat-permissions.md).
 [org.permissions]
 default = "autonomous"
 # codex_verified gates codex seats' autonomous/edits permission modes:
-# false (default) keeps codex fail-closed to guarded. Flip to true only after
-# running docs/recipes/codex-seat-permissions.md on this machine: it unlocks
-# autonomous -> `--sandbox workspace-write --ask-for-approval never` and
-# edits -> `--sandbox workspace-write`. Both inherit the rest of your codex
-# config (approval_policy, sandbox writable_roots); in particular the agmsg
-# DB directory must be a writable root or seats cannot send RESULT. Re-verify
-# after a codex upgrade or a config change.
-codex_verified = false
+# true (default) maps autonomous -> `--sandbox workspace-write
+# --ask-for-approval never` and edits -> `--sandbox workspace-write`. Both
+# inherit the rest of your codex config (approval_policy, sandbox
+# writable_roots); in particular the agmsg DB directory must be a writable
+# root or seats cannot send RESULT. Check the mapping on this machine with
+# docs/recipes/codex-seat-permissions.md, and again after a codex upgrade or
+# a config change; if it does not pass, set false, which keeps codex
+# fail-closed to guarded. An absent codex_verified loads as true.
+codex_verified = true
 
 # [org.permissions.roles] overrides the default mode per role. A role
 # absent from this table uses [org.permissions].default.
@@ -146,15 +171,15 @@ watcher_model = "haiku"
 enabled = true
 ack_minutes = 10
 resolve_minutes = 60
-# auto_merge = true: the director merges, without asking, each PR that
-# `ralph org merge-order` lists as ready, with `ralph org merge`, and
-# re-gates the other branches with `ralph org regate`. auto_merge = false
-# (default): the director only reports the merge order, and the merges are
-# yours; you can still ask the director to merge one PR with
-# `ralph org merge`. Whichever value is set, `ralph org merge` checks the
-# PR, its checks, and the branch protection before it merges. An absent
-# auto_merge loads as false. It is read from the same ralph.toml as enabled.
-auto_merge = false
+# auto_merge = true (default): the director merges, without asking, each PR
+# that `ralph org merge-order` lists as ready, with `ralph org merge`, and
+# re-gates the other branches with `ralph org regate`. auto_merge = false:
+# the director only reports the merge order, and the merges are yours; you
+# can still ask the director to merge one PR with `ralph org merge`.
+# Whichever value is set, `ralph org merge` checks the PR, its checks, and
+# the branch protection before it merges. An absent auto_merge loads as
+# true. It is read from the same ralph.toml as enabled.
+auto_merge = true
 # launch_cmd (empty by default: `ralph org director start` opens a herdr
 # workspace) is the command start runs instead to open a terminal for the
 # headless director. It is an array of arguments that ralph runs without a
@@ -216,3 +241,20 @@ wake = ["pull"]
 # mode = "split" to keep the behavior from before this setting.
 [org.approval]
 mode = "per-plan"
+
+# [org.review] — switches of the reviews that org seats run.
+# plan_advisory = true turns on the plan advisory of an org's leader, and
+# cross_review = true turns on the cross-review of an org's reviewer seat;
+# both are off by default. max_cross_review_cycles caps the number of
+# cross-review runs in all, the first one included, counted the way
+# RALPH_STANDARD_MAX_PIPELINE_CYCLES counts the standard flow's pipeline runs:
+# the default 2 is the first review and one review after a fix (it must
+# be >= 1). The leader and the reviewer read these values with
+# `ralph config get <key>`, such as
+# `ralph config get org.review.cross_review`, and treat the exit codes as the
+# skills do with [standard] above. They start reading them in a later
+# release.
+[org.review]
+plan_advisory = false
+cross_review = false
+max_cross_review_cycles = 2

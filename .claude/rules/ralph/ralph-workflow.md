@@ -32,13 +32,19 @@ workflow guidance formerly in CLAUDE.md.
   `ralph org director start` (same skill, ended with `director stop`).
 - After `/implement`, the post-implementation pipeline runs via subagents
   (`/self-review` → `/verify` → `/test` → `/sync-docs`), then `/cross-review`
-  (optional, inline), then `/pr`.
+  (inline, switch-gated), then `/pr`.
 - `/self-review` is diff quality only. `/verify` is spec compliance + static
   analysis. `/test` is behavioral tests. Each produces a separate report.
-- Codex advisory is optional. If the `codex` binary is available, `/plan` and
-  `/cross-review` invoke Codex for second-opinion feedback. If unavailable, the
-  step is silently skipped and the flow continues unchanged.
-- Codex findings are presented to the user for judgment — never auto-applied.
+- The other-model reviews are switch-gated. `/plan`'s plan advisory and
+  `/cross-review` ask the other CLI (Claude Code → Codex, Codex → Claude) for
+  a second opinion when `[standard].plan_advisory` / `[standard].cross_review`
+  in `ralph.toml` is on (default off; read with `ralph config get`) and that
+  CLI is available (for `/cross-review`, also when the diff is not empty).
+  Otherwise the step is skipped and the skip is recorded (the plan's
+  Progress checklist, the cross-review triage report, the PR body's
+  Verification); the flow continues.
+- The other model's findings are presented to the user for judgment — never
+  auto-applied.
 - `/pr` creates the pull request (attaching the plan's overview diagram when
   `gh` supports `--attach`), archives the plan, cleans up the task
   worktree/local branch, and completes the hand-off. A task is "done" when the

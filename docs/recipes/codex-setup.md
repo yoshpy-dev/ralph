@@ -17,8 +17,9 @@ one you prefer and the standard flow is identical.
 cd <project>
 codex trust .                  # required: only then are .codex/config.toml
                                # and .codex/hooks.json actually loaded
-ralph doctor                   # confirms Claude Code/Codex presence,
-                               # hooks=true, hooks.json dispatcher wiring
+ralph doctor                   # confirms Claude Code or Codex is usable
+                               # (either one passes), hooks=true,
+                               # hooks.json dispatcher wiring
 ```
 
 `ralph doctor` warns if the project is unwritten / untrusted, if
@@ -30,7 +31,9 @@ hook trust, though: Codex hooks separately require a one-time approval
 inside an interactive `codex` session (per-command-hash — `codex exec`
 silently skips an unapproved hook). See `.codex/README.md`'s Hooks section
 for the full trust UX. Resolve every doctor warning before relying on
-hook-driven safety.
+hook-driven safety, except one: on a machine that has only Codex, the
+`Claude Code CLI` line is a `warn` and doctor still passes. It only means the
+plan advisory and cross-review steps that call claude will not run.
 
 ## Daily flow
 
@@ -58,19 +61,25 @@ trigger the wrong handler. Use `$skill-name` mention syntax or pick from the
 
 ## Cross-review pairing
 
-Codex-driven flow uses Claude as the cross-reviewer:
+Codex-driven flow uses Claude as the cross-reviewer when
+`[standard].cross_review` in `ralph.toml` is on (default off), `claude` is
+available, and the diff is not empty; otherwise `$cross-review` records the
+skip in its triage report. `$plan`'s plan advisory pairs the same way under
+`[standard].plan_advisory`, with no diff condition.
 
-1. `$cross-review` resolves the driver via `RALPH_PRIMARY_CLI=codex` (or
-   auto-detects when only `codex` is on `$PATH`).
+1. `$cross-review` takes the CLI running it, codex, as the driver
+   (`RALPH_PRIMARY_CLI` overrides it; `.codex/AGENTS.override.md` tells
+   Codex to set `RALPH_PRIMARY_CLI=codex`).
 2. The skill calls `claude -p` with an adversarial reviewer prompt and feeds
-   the diff between `origin/$BASE` and `HEAD`.
+   the diff between the local base branch (`git diff <base>...HEAD`) and
+   `HEAD`.
 3. Findings are triaged in the same Codex session and written to
    `docs/reports/cross-review-triage-<slug>.md`. The triage report header
    carries `Driver: codex  Reviewer: claude` so the artifact is
    self-describing.
 
-If the user wants Codex to review a Claude-driven flow, set
-`RALPH_PRIMARY_CLI=claude` before running the post-implementation pipeline.
+A Claude Code-driven flow asks Codex the same way (driver claude, reviewer
+codex), with no variable to set.
 
 ## Subagents
 
@@ -87,7 +96,7 @@ default.
 
 ## Running `codex exec` from an agent's Bash tool
 
-`/plan`'s Codex plan advisory and `/cross-review`'s codex reviewer path both
+`/plan`'s plan advisory and `/cross-review`, when codex is the reviewer, both
 call `codex exec` from a Bash tool, not an interactive session. Close stdin
 with `</dev/null` so codex never blocks on "Reading additional input from
 stdin...". Run `command codex` (not a bare `codex`) so a shell alias that
@@ -197,5 +206,5 @@ full write-up and what evidence to capture if it happens again.
 ## See also
 
 - [codex-seat-permissions.md](codex-seat-permissions.md) — verify codex seat
-  permission modes (autonomous / edits) on this machine before enabling
-  `[org.permissions].codex_verified`.
+  permission modes (autonomous / edits) on this machine; if they do not pass,
+  set `[org.permissions].codex_verified` (default `true`) to `false`.

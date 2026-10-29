@@ -571,7 +571,7 @@ func TestCheckShellAliases_CodexSandboxOnly_WarnsWithSandboxClauseOnly(t *testin
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox", "codex_verified = true"} {
+	for _, want := range []string{"to edits and autonomous seats", "alias's sandbox", "codex_verified is true, the default"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -596,7 +596,7 @@ func TestCheckShellAliases_CodexApprovalOnly_WarnsWithApprovalClauseOnly(t *test
 	if r.Status != "warn" {
 		t.Fatalf("expected warn, got %s (%s)", r.Status, r.Detail)
 	}
-	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy", "codex_verified = true"} {
+	for _, want := range []string{"to autonomous seats only", "edits and guarded seats silently run with the alias's approval policy", "codex_verified is true, the default"} {
 		if !strings.Contains(r.Detail, want) {
 			t.Errorf("expected detail to contain %q, got: %s", want, r.Detail)
 		}
@@ -1325,9 +1325,9 @@ func TestShellAliasCodexSentence(t *testing.T) {
 		{"model-only", items, true, false, false, true,
 			[]string{"every spawn fails"}, []string{"alias's sandbox", "approval policy", "herdr not installed"}},
 		{"sandbox-only", items, false, true, false, true,
-			[]string{"alias's sandbox", "codex_verified = true"}, []string{"every spawn fails", "approval policy"}},
+			[]string{"alias's sandbox", "codex_verified is true, the default"}, []string{"every spawn fails", "approval policy"}},
 		{"approval-only", items, false, false, true, true,
-			[]string{"approval policy", "codex_verified = true"}, []string{"every spawn fails", "alias's sandbox"}},
+			[]string{"approval policy", "codex_verified is true, the default"}, []string{"every spawn fails", "alias's sandbox"}},
 		{"all three", items, true, true, true, true,
 			[]string{"every spawn fails", "alias's sandbox", "approval policy"}, nil},
 		{"herdr absent appends the suffix", items, true, false, false, false,
@@ -1552,6 +1552,59 @@ func TestRunDoctorOpts_ShellAliasesCheck_WarnsThroughTheSeam(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "Shell aliases (codex/claude): warn") {
 		t.Errorf("expected a warn-level Shell aliases (codex/claude) line in output:\n%s", out)
+	}
+}
+
+// TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr is
+// WarnsThroughTheSeam with no herdr on PATH. A missing herdr reports warn, so
+// runDoctorOpts tells checkShellAliases that herdr is present only when
+// herdr's line is "pass", not merely when it is not "info"; a codex alias
+// finding then stays info and carries the herdr-not-installed suffix.
+func TestRunDoctorOpts_ShellAliasesCheck_CodexAliasStaysInfoWithoutHerdr(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+
+	dir := t.TempDir()
+	cfg := initConfig{ProjectName: "test", Packs: []string{"golang"}}
+	if err := executeInit(dir, cfg, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No herdr stub, so herdr is absent and a codex finding must not warn.
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+
+	homeDir := t.TempDir()
+	writeAliasRc(t, filepath.Join(homeDir, ".zshrc"), `alias codex="codex -m x"`+"\n")
+
+	orig := doctorShellAliasEnv
+	doctorShellAliasEnv = shellAliasTestEnv(homeDir)
+	t.Cleanup(func() { doctorShellAliasEnv = orig })
+
+	var out string
+	err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) })
+	if err != nil {
+		t.Fatalf("runDoctorOpts returned error with only warn/info findings: %v\noutput:\n%s", err, out)
+	}
+	if status, _, ok := doctorLine(out, "herdr"); !ok || status != "warn" {
+		t.Errorf("herdr status = %q (line found: %v), want warn in output:\n%s", status, ok, out)
+	}
+	status, detail, ok := doctorLine(out, "Shell aliases (codex/claude)")
+	if !ok {
+		t.Fatalf("no Shell aliases (codex/claude) line in output:\n%s", out)
+	}
+	if status != "info" {
+		t.Errorf("Shell aliases (codex/claude) status = %q, want info with herdr absent in output:\n%s", status, out)
+	}
+	if !strings.Contains(detail, "(herdr not installed, so no seat is affected today)") {
+		t.Errorf("Shell aliases (codex/claude) detail = %q, want the herdr-not-installed suffix in output:\n%s", detail, out)
 	}
 }
 

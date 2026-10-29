@@ -1,12 +1,13 @@
-# Codex seat permission modes: verify per machine, then opt in
+# Codex seat permission modes: verify per machine, opt out if it fails
 
-`[org.permissions].codex_verified` defaults to `false`: codex seats accept only
-`guarded` (the codex CLI's own interactive default) and reject `autonomous` /
-`edits` with a fail-closed error. Setting it to `true` enables the mapping
-autonomous → `--sandbox workspace-write --ask-for-approval never` and
+`[org.permissions].codex_verified` defaults to `true`, which enables the
+mapping autonomous → `--sandbox workspace-write --ask-for-approval never` and
 edits → `--sandbox workspace-write`. How those flags behave depends on the
-installed codex CLI version and on your own `~/.codex/config.toml`, so verify
-them **on each machine** with this recipe before flipping the flag.
+installed codex CLI version and on your own `~/.codex/config.toml`, so check
+them **on each machine** with this recipe. If the check does not pass, set
+the flag to `false`: codex seats then accept only `guarded` (the codex CLI's
+own interactive default) and reject `autonomous` / `edits` with a
+fail-closed error.
 
 The meta-repo's own run (codex-cli 0.154.0, herdr 0.7.5, agmsg 1.1.13) is
 recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
@@ -310,7 +311,7 @@ Repeat with `perm-edits` / `ralph-edits.toml` / `<scratch>/state-edits`.
 if either exits 1, run it again once herdr answers. Then confirm
 `herdr agent list` is empty and no throwaway file is left under `$HOME`.
 
-## Verdicts and opt-in
+## Verdicts and opt-out
 
 - autonomous: no approval prompt + outside write denied + RESULT delivered →
   **pass**
@@ -320,12 +321,16 @@ if either exits 1, run it again once herdr answers. Then confirm
   no benefit over autonomous in that configuration; use autonomous or change
   the config).
 - Either mode **inconclusive** (the seat never reaches the tool call, the
-  pane cannot be read) → keep `codex_verified = false`.
+  pane cannot be read) → set `codex_verified = false`.
 
-After a pass, set `[org.permissions] codex_verified = true` in your
-`ralph.toml`. The opt-in is tied to the codex version and the effective
-`~/.codex/config.toml` you verified with; re-run this recipe after upgrading
-codex or changing `approval_policy`, `sandbox_mode`, or `writable_roots`.
+After a pass, keep `codex_verified = true` (the default, and what
+`ralph init` writes). Earlier versions of `ralph init` wrote `false`, and
+`ralph upgrade` leaves that line alone; set it to `true` by hand once this
+recipe passes. When either mode fails or is inconclusive, set
+`[org.permissions] codex_verified = false` in your `ralph.toml`, which keeps
+every codex seat fail-closed to `guarded`. A pass holds only for the codex
+version and the effective `~/.codex/config.toml` you checked with; re-run
+this recipe after upgrading codex or changing `approval_policy`, `sandbox_mode`, or `writable_roots`.
 `ralph doctor` does not validate `codex_verified`.
 
 ## Result on the meta-repo machine (2026-09-18)
