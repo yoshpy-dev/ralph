@@ -765,9 +765,9 @@ func advisoryTestEnv() []string {
 // adds the config servers bare, whose entry has no enabled field, and blank,
 // whose enabled is null, whatever the overrides (a codex whose list does not
 // say enabled: false). STUB_OLD=1 knows no feature flag, as codex rejects
-// one it does not know (exit 1). exec writes a finding to its -o file;
-// STUB_WRITES=1 also changes tracked.txt, and STUB_HANG=1 makes it hang
-// instead.
+// one it does not know (exit 1). exec writes a finding to its -o file and
+// changes the work tree as STUB_WRITES says (advisoryStubWrites);
+// STUB_HANG=<seconds> makes it sleep that long instead.
 const advisoryCodexStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
 printf '%s\n' '--end--' >> "$STUB_LOG"
@@ -798,25 +798,47 @@ mcp)
 	printf '[{"name":"alpha","enabled":%s},{"name":"has space","enabled":%s},{"name":"gone","enabled":false}' "$a" "$(on 'has space')"
 	if [ "$STUB_NOFIELD" = 1 ]; then printf ',{"name":"bare"},{"name":"blank","enabled":null}'; fi
 	if [ "$plugins" = on ]; then printf ',{"name":"plug","enabled":true}'; fi
-	printf ']\n' ;;
+	printf ']\n'
+	exit 0 ;;
 exec)
-	if [ "$STUB_HANG" = 1 ]; then exec /bin/sleep 30; fi
-	printf '1. [MEDIUM] stub finding\n' > "$out"
-	if [ "$STUB_WRITES" = 1 ]; then echo two >> tracked.txt; fi ;;
+	if [ -n "$STUB_HANG" ]; then exec /bin/sleep "$STUB_HANG"; fi
+	printf '1. [MEDIUM] stub finding\n' > "$out" ;;
 esac
-exit 0
-`
+` + advisoryStubWrites
 
 // advisoryClaudeStub stands in for claude: it logs its arguments like
-// advisoryCodexStub, then the RALPH_WIP_CHECKPOINT it got, and prints a
-// finding on stdout and a line on stderr.
+// advisoryCodexStub, then the RALPH_WIP_CHECKPOINT it got, prints a finding
+// on stdout and a line on stderr, and changes the work tree as STUB_WRITES
+// says (advisoryStubWrites).
 const advisoryClaudeStub = `#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$STUB_LOG"
 printf 'RALPH_WIP_CHECKPOINT=%s\n' "$RALPH_WIP_CHECKPOINT" >> "$STUB_LOG"
 printf '%s\n' '--end--' >> "$STUB_LOG"
 printf '1. [LOW] stub finding\n'
 echo 'stub log line' >&2
+` + advisoryStubWrites
+
+// advisoryStubWrites ends both stand-ins' review: it changes the work tree as
+// STUB_WRITES names (advisoryWrites) and exits 0.
+const advisoryStubWrites = `case $STUB_WRITES in
+tracked) echo two >> tracked.txt ;;
+new) echo one > new.txt ;;
+untracked) echo two >> untracked.txt ;;
+esac
+exit 0
 `
+
+// advisoryWrites lists the work tree changes a stand-in reviewer makes with
+// STUB_WRITES, each with git status after the run (trimmed, as gitOut
+// returns it). An advisory command reports each of them as git: changed.
+// untracked edits untracked.txt, which runWriting writes before the run, so
+// git status shows the same ?? line before and after it, and only the hashes
+// of the untracked files' contents in the git state see the change.
+var advisoryWrites = []struct{ name, mode, status string }{
+	{"a reviewer that edits", "tracked", "M tracked.txt"},
+	{"a reviewer that adds an untracked file", "new", "?? new.txt"},
+	{"a reviewer that edits an untracked file", "untracked", "?? untracked.txt"},
+}
 
 // advisorySleepStub shortens the watchdog's sleep 1200 to one second and runs
 // every other sleep as it is.
@@ -855,12 +877,18 @@ func newAdvisoryFixture(t *testing.T) advisoryFixture {
 	return fx
 }
 
+// advisoryRunTimeout bounds one run of an advisory command. A run took up to
+// 33.5 seconds with a dozen of them in parallel on a host with a load of
+// about 15, so the bound stays well above that.
+const advisoryRunTimeout = 120 * time.Second
+
 // run runs block with shell (zsh with -f) in the fixture's repository, the
 // stand-ins first on PATH, and returns its combined output. A run still
-// going after 60 seconds is killed with its process group.
+// going after advisoryRunTimeout is killed with its process group, and the
+// test fails.
 func (fx advisoryFixture) run(t *testing.T, shell, block string, env ...string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), advisoryRunTimeout)
 	defer cancel()
 	args := []string{"-c", block}
 	if filepath.Base(shell) == "zsh" {
@@ -873,10 +901,31 @@ func (fx advisoryFixture) run(t *testing.T, shell, block string, env ...string) 
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 10 * time.Second
 	out, err := cmd.CombinedOutput()
+	if err != nil && ctx.Err() != nil {
+		t.Fatalf("%s -c <advisory command> was still running after %v and was killed: %v\n%s", filepath.Base(shell), advisoryRunTimeout, err, out)
+	}
 	if err != nil {
 		t.Fatalf("%s -c <advisory command>: %v\n%s", filepath.Base(shell), err, out)
 	}
 	return string(out)
+}
+
+// runWriting runs block like run with a stand-in that makes the work tree
+// change mode of advisoryWrites, writing untracked.txt first for untracked,
+// and fails the test unless git status after the run is status, so the
+// stand-in did make the change. It returns the run's output.
+func (fx advisoryFixture) runWriting(t *testing.T, shell, block, mode, status string, env ...string) string {
+	t.Helper()
+	if mode == "untracked" {
+		if err := os.WriteFile(filepath.Join(fx.repo, "untracked.txt"), []byte("one\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := fx.run(t, shell, block, append(slices.Clone(env), "STUB_WRITES="+mode)...)
+	if got := gitOut(t, fx.repo, "status", "--porcelain", "--untracked-files=all"); got != status {
+		t.Errorf("git status after a run with STUB_WRITES=%s = %q, want %q", mode, got, status)
+	}
+	return out
 }
 
 // calls returns the stand-ins' logged calls, each its arguments (and, for
@@ -948,9 +997,12 @@ func advisoryCommand(t *testing.T, lead string) (block, prompt string) {
 // do servers whose list entry has no enabled field or a null one, which are
 // turned off too but never reported off (self-review L1), and a codex that
 // rejects --disable plugins as an unknown feature; a reviewer that edits
-// tracked.txt prints git: changed; a reviewer that hangs is stopped by the
-// watchdog (sleep 1200 shortened to one second) with a non-zero rc and no
-// output file. The cases run in parallel, each in its own repository.
+// tracked.txt, adds an untracked file, or edits an untracked file prints
+// git: changed; a reviewer that hangs is stopped by the watchdog (sleep 1200
+// shortened to one second) with rc 143, the SIGTERM of its kill, and no
+// output file. The stand-in hangs for twice advisoryRunTimeout, so a
+// watchdog that does not kill it keeps the run going until run kills it and
+// fails the test. The cases run in parallel, each in its own repository.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testing.T) {
 	block, prompt := advisoryCommand(t, leaderAdvisoryCodexLead)
 	env := []string{"RALPH_CODEX_REVIEWER_MODEL=stub-model", "RALPH_CODEX_REASONING_EFFORT=stub-effort"}
@@ -1040,21 +1092,23 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 				t.Errorf("codex ran %q; want the list and the check only", calls)
 			}
 		})
-		t.Run(name+"/a reviewer that edits", func(t *testing.T) {
-			t.Parallel()
-			fx := newAdvisoryFixture(t)
-			if out := fx.run(t, shell, block, append(env, "STUB_WRITES=1")...); !strings.Contains(out, "codex rc=0\n") || !strings.HasSuffix(out, "git: changed\n") {
-				t.Errorf("output = %q; want codex rc=0 and git: changed", out)
-			}
-		})
+		for _, w := range advisoryWrites {
+			t.Run(name+"/"+w.name, func(t *testing.T) {
+				t.Parallel()
+				fx := newAdvisoryFixture(t)
+				if out := fx.runWriting(t, shell, block, w.mode, w.status, env...); !strings.Contains(out, "codex rc=0\n") || !strings.HasSuffix(out, "git: changed\n") {
+					t.Errorf("output = %q; want codex rc=0 and git: changed", out)
+				}
+			})
+		}
 		t.Run(name+"/a reviewer that hangs", func(t *testing.T) {
 			t.Parallel()
 			fx := newAdvisoryFixture(t)
 			writeTestExecutable(t, filepath.Join(fx.bin, "sleep"), advisorySleepStub)
 			start := time.Now()
-			out := fx.run(t, shell, block, append(env, "STUB_HANG=1")...)
-			if strings.Contains(out, "codex rc=0") || !strings.Contains(out, "codex rc=") || !strings.HasSuffix(out, "git: same\n") || time.Since(start) > 20*time.Second {
-				t.Errorf("output = %q after %v; want a non-zero codex rc from the watchdog, soon, and git: same", out, time.Since(start))
+			out := fx.run(t, shell, block, append(env, "STUB_HANG="+strconv.Itoa(int(2*advisoryRunTimeout/time.Second)))...)
+			if !strings.Contains(out, "codex rc=143\n") || !strings.HasSuffix(out, "git: same\n") {
+				t.Errorf("output = %q after %v; want codex rc=143 from the watchdog's kill and git: same", out, time.Since(start))
 			}
 			if got := fx.read(t, ".harness/state/plan-advisory-out.md"); got != "" {
 				t.Errorf("output file = %q, want none", got)
@@ -1069,14 +1123,18 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexCommandRuns(t *testi
 // with the instruction last, right after --output-format text, and
 // RALPH_WIP_CHECKPOINT=off over the pane's value; its stdout is the output
 // file and its stderr the log; the output says claude rc=0 and git: same, and
-// the work tree stays clean.
+// the work tree stays clean. A reviewer that edits tracked.txt, adds an
+// untracked file, or edits an untracked file prints claude rc=0 and
+// git: changed. The cases run in parallel, each in its own repository.
 func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeCommandRuns(t *testing.T) {
 	block, prompt := advisoryCommand(t, leaderAdvisoryClaudeLead)
+	env := []string{"RALPH_CLAUDE_REVIEWER_MODEL=stub-claude", "RALPH_WIP_CHECKPOINT=on"}
 	for _, shell := range advisoryShells(t, false) {
-		t.Run(filepath.Base(shell), func(t *testing.T) {
+		name := filepath.Base(shell)
+		t.Run(name+"/a clean review", func(t *testing.T) {
 			t.Parallel()
 			fx := newAdvisoryFixture(t)
-			out := fx.run(t, shell, block, "RALPH_CLAUDE_REVIEWER_MODEL=stub-claude", "RALPH_WIP_CHECKPOINT=on")
+			out := fx.run(t, shell, block, env...)
 			if !strings.Contains(out, "claude rc=0\n") || !strings.HasSuffix(out, "git: same\n") {
 				t.Errorf("output = %q; want claude rc=0 and git: same", out)
 			}
@@ -1096,5 +1154,14 @@ func TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeCommandRuns(t *test
 				t.Errorf("git status after the advisory = %q, want a clean tree", status)
 			}
 		})
+		for _, w := range advisoryWrites {
+			t.Run(name+"/"+w.name, func(t *testing.T) {
+				t.Parallel()
+				fx := newAdvisoryFixture(t)
+				if out := fx.runWriting(t, shell, block, w.mode, w.status, env...); !strings.Contains(out, "claude rc=0\n") || !strings.HasSuffix(out, "git: changed\n") {
+					t.Errorf("output = %q; want claude rc=0 and git: changed", out)
+				}
+			})
+		}
 	}
 }
