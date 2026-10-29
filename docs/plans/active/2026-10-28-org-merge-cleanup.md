@@ -88,13 +88,13 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
 
 ## Acceptance criteria
 
-- [ ] AC1 `ralph org merge` で merge したあと、その機能の worktree・ローカルのブランチ・`ralph-worktree.sh` の記録が消え、台帳に `worktree_cleaned` があり、stdout に `CLEANUP: done` が出る。squash merge でリモートのブランチが消えたあとも止まらない(issue の受け入れ条件 1)
-- [ ] AC2 GitHub で直接 merge したブランチを `ralph org cleanup` で片付けられる。`--branch` なしなら merge 済みで記録の残るすべてのブランチ、`--branch` ならそのブランチだけ(issue の受け入れ条件 2)
-- [ ] AC3 未コミットの変更か未追跡のファイルがあるとき、ローカルのブランチの先頭が merge された head と違うとき、worktree が detached HEAD か別のブランチにいるとき、記録が binding と一致しないとき、ralph をその worktree の中から打ったときは、何も消さずに理由と次の手(打ち直し、または D2 の場合だけ手で消すコマンド)を出す。`ralph org merge` の終了コードは 0 のまま(issue の受け入れ条件 3)
-- [ ] AC3b 片付けが途中で止まった状態(worktree だけが消えた、記録だけが残った)から、もう一度の `ralph org cleanup` で残りが片付く。記録がないときは何も消さず、手で消すコマンドを出す
-- [ ] AC4 org が走っているブランチと、regate か merge が走っているとき(`regate.lock` が取れない)は消さない(issue の受け入れ条件 4)
-- [ ] AC5 `/org` と `/director` の skill の後始末の節、leader の雛形の手順 15、`ralph org start --help`、regate の案内が新しい動きに合い、写しが一致する(issue の受け入れ条件 5)
-- [ ] AC6 新しいテストと既存のテストが通る(`internal/org`、`internal/cli` の該当するテスト、`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`)
+- [x] AC1 `ralph org merge` で merge したあと、その機能の worktree・ローカルのブランチ・`ralph-worktree.sh` の記録が消え、台帳に `worktree_cleaned` があり、stdout に `CLEANUP: done` が出る。squash merge でリモートのブランチが消えたあとも止まらない(issue の受け入れ条件 1)
+- [x] AC2 GitHub で直接 merge したブランチを `ralph org cleanup` で片付けられる。`--branch` なしなら merge 済みで記録の残るすべてのブランチ、`--branch` ならそのブランチだけ(issue の受け入れ条件 2)
+- [x] AC3 未コミットの変更か未追跡のファイルがあるとき、ローカルのブランチの先頭が merge された head と違うとき、worktree が detached HEAD か別のブランチにいるとき、記録が binding と一致しないとき、ralph をその worktree の中から打ったときは、何も消さずに理由と次の手(打ち直し、または D2 の場合だけ手で消すコマンド)を出す。`ralph org merge` の終了コードは 0 のまま(issue の受け入れ条件 3)
+- [x] AC3b 片付けが途中で止まった状態(worktree だけが消えた、記録だけが残った)から、もう一度の `ralph org cleanup` で残りが片付く。記録がないときは何も消さず、手で消すコマンドを出す
+- [x] AC4 org が走っているブランチと、regate か merge が走っているとき(`regate.lock` が取れない)は消さない(issue の受け入れ条件 4)
+- [x] AC5 `/org` と `/director` の skill の後始末の節、leader の雛形の手順 15、`ralph org start --help`、regate の案内が新しい動きに合い、写しが一致する(issue の受け入れ条件 5)
+- [x] AC6 新しいテストと既存のテストが通る(`internal/org`、`internal/cli` の該当するテスト、`scripts/check-skill-sync.sh`、`scripts/check-sync.sh`)
 
 ## Implementation outline
 
@@ -215,7 +215,7 @@ Critical forks: なし。issue が方針(merge の続きで消す、直接 merge
   - S-X2(指摘 2): worktree のディレクトリがなく git の登録だけが残るとき、登録の `branch`/`detached` を読み、登録が binding のブランチにいるときだけ進む(D2 の確かめ 6 を登録に延ばす)。detached、別のブランチ、ブランチの消えた登録は、何も消さずに断る。断りの文は登録の HEAD を示して退避の打ち方を出し、ralph が先へ進めないので手で消すコマンドも出す
   - S-X1 8e46db0f: `internal/org/mergeorigin.go` に `MergeOrigin`(host と owner/repo、`Arg()` が `-R` の値)と `ReadMergeOrigin` を足し、merge の `readOrigin` と `isOriginsPR` もこれを使う。`MergeOrderParams.Origin` があると merge-order は `-R` で引き、PR の url を host と owner/repo で比べ、origin の get-url は打たない。cleanup は先に origin を読み、読めなければ何も消さずに exit 1(`cleanupOriginRefusal`)。SKIPPED の行と `--branch` の断りは、PR を使えなかった理由を括弧で出す。`ralph org cleanup --help` に固定した読み方の段落。consult は設計を「変更なし」とした。ssh の alias の origin は merge と同じく SKIPPED になる(PR の既知の穴)
   - S-X2 d3452a9d: `readState` が登録の `HEAD` と `branch`/`detached` を読み、`run` は登録の残る場合に `checkRegistration` を先に通す。detached、別のブランチ、ブランチの消えた登録、HEAD を読めない登録は、何も消さずに断る。断りは登録の HEAD と退避のコマンド(`keptBranch` の `<branch>-unmerged-<sha7>`、`branchMovedSteps` と共通)を出し、HEAD がコミットを指さない(ゼロ)ときは退避のコマンドを出さずに `git rev-parse --git-common-dir` の下の worktrees/ の logs/HEAD を指す(handoff からの逸脱、案 C)。文は「手で片付ける。登録が残るので次の cleanup も断る」で終わり、Manual は `git worktree remove <wt> && <script>`。挙動の変化: ブランチだけ消えて登録が残る場合は、これまで記録だけの再開として外していたが、今は断る。検証: handoff のコマンドが exit 0(internal/org 206 秒、internal/cli 173 秒)、`checkRegistration` を外した版で新しいテストの 4 ケースが落ちる。機械的な確かめは 5 項目とも clean。`internal/org/cleanup.go` は 935 行(R3-L3 の台帳の行)
-- [ ] パイプライン cycle 2
+- [x] パイプライン cycle 2(上限を 3 に上げた回し直しを含む。cross-review の最後の run は ACTION_REQUIRED 0、WORTH_CONSIDERING 2 で、triage は 052b9b73 と根拠の訂正 49aee225。consult(判定: 直してから進める。直したのは triage の根拠だけ)と相談して Case B の「PR を作る」を選び、2 つは PR の既知の穴に書く。walkthrough は eb84752f)
   - self-review cycle 2(report は 04c83f5c、reviewer は opus): CRITICAL・HIGH・MEDIUM は 0、LOW が 6(C2-L1〜C2-L6)、Merge 可。consult(判定: 進めてよい)と相談して 6 つとも直し、reviewer に直しだけを読ませる短い run を回す。C2-L3 は R3-L1 と同じく、文のとおりに打つとコミットが外れる道
   - C2-L5 060102bb(inline): 台帳の R3-L2 の行に `checkRegistration` の断りを足し、R3-L3 の行を `internal/cli/org_cleanup_test.go` も 800 行を越えたと直した
   - C2-F 54fa6351(C2-L1・L2・L3・L4・L6): 登録の断りの一文を `registrationAtRisk` にまとめ、`checkRegistration` と `recordGone` の両方が使う。記録がないときも、登録が binding のブランチにいなければ(ディレクトリが残っていても消えていても)HEAD と退避の打ち方を出す(C2-L3)。HEAD がゼロの登録の案内は `rev-parse --path-format=absolute --git-common-dir` と「gitdir が `<worktree>/.git` のディレクトリ」(C2-L1)。別のブランチの登録は退避を出さず、そのブランチは残り消えるのは reflog だけと言う(C2-L6、reflog の場所も出す)。`foreignPRWhy` に「check origin (git remote get-url origin)」(C2-L2、原因は書かない)。テストの注釈 2 か所に cross-review cycle 1 と書いた(C2-L4)。検証: handoff のコマンドが exit 0(internal/org 223 秒、internal/cli 351 秒)、変更前のコードに差し替えた版で、文の変わったケースと新しいテスト `TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead` の 2 ケースが落ちる。機械的な確かめは 5 項目とも clean
