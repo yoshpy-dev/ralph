@@ -225,3 +225,58 @@
 
 - Merge: yes(Run 4。CRITICAL・HIGH・MEDIUM なし。Run 3 の L8 は直った。新しい所見は L9・L10 の LOW 2 件)
 - Follow-ups: L9 は雛形の 1 文と pin の 1 句の足しで、同じ PR で直すのがよい。L10 は直さないなら comment 1 句。どちらも直さないなら、`docs/tech-debt/README.md` に 1 行(この PR は register を触っていない)。直しは雛形と test を動かすので、記録だけの例外には当たらず、`/self-review` からの再実行になる。cap の 2 回に収まるかどうかは orchestrator が決める。
+
+## Run 5: Run 4 の L9・L10 の直し(1aaadb12)のあと
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1 の 5 回目)
+- Scope: `git diff d27fcf40..1aaadb12`(3 ファイル、+53/-36)。`--name-only` が出すのは `internal/org/driver/paneenv.go`、`internal/org/prompts/leader.md`、`internal/org/prompts_leader_plan_test.go` だけで、依頼どおり。依頼の HEAD 59619a8b は、その上に計画の Progress へ 3 行足しただけ(`git diff 1aaadb12..59619a8b --stat` は計画の 1 ファイル)。レビュー中に HEAD は動いていない。
+- ID: Run 5 の新しい所見は L11(LOW)。L1〜L10 と番号は重ならない。
+
+### Run 4 の所見のその後
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| L9 | 直った | `leader.md:498-508` は、0 の `true` / `false`、`unknown command "config"` つきの 1、127 を順に書き、127 は 1 と同じく「off とみなして頼まず、そのことを書く」。`/plan` の 11.a(`.claude/skills/plan/SKILL.md:73-78`)の 4 つの分け方と一致する。「それ以外(ほかの 1、2、3、0 で `true` でも `false` でもない値)」の文は `git diff` に +/- が出ず、1 字も動いていない。書く先の最後の文(`leader.md:599-600`)も「古い ralph か `ralph` が見つからないことで off とみなしたとき」に揃った。`templates/base/ralph.toml:22-25` と `:254-255`、`README.md:135` の「off は 2 つ、127 を含む」と、雛形の動きが合った。 |
+| L10 | 直った | 打つ行(`leader.md:512`)は `/plan` の 11.b(`SKILL.md:81`)と同じ `DRIVER=…; override=$(printf … \| tr …); case "$override" in claude\|codex) DRIVER=$override ;; esac` で、違うのは 3 点。`<claude\|codex>` が `<あなたの CLI>`、`REVIEWER=$(…); echo` がなく `pick_reviewer "$DRIVER"` を直接打つ(leader に要るのは名前だけ)、`.` のあとが `;` でなく `&&`。下の「手で確かめたこと」で bash・`zsh -f`・`/bin/sh` の結果が `/plan` の読みと一致した。括弧の文(`leader.md:516-520`)は、`claude` か `codex` のときだけ pane の値が代わり、ほかは無視する、書き換えた CLI は変数がないときと値がそのどちらでもないときだけ使う、と言い、`PrimaryCLIEnv` の comment(`paneenv.go:40-43`)の「unset, empty, or neither claude nor codex」と合う(空の値は「どちらでもない」に入る)。 |
+| 名前の nit | 直った | `advisoryStubWrites` は `advisoryStubWriteScript`(`prompts_leader_plan_test.go:835`)になった。`git grep` で旧名の残りはなく、参照 5 か所(`:781`、`:824`、`:833` の comment と、`:819`、`:831` の連結)が新名に揃った。`advisoryWrites`(case の表)との 1 語違いは解けた。 |
+
+### Evidence reviewed
+
+- `git diff d27fcf40..1aaadb12` の全体(3 ファイル)。`git status` は clean。
+- 127 の枝: `leader.md:498-508` を `/plan` の 11.a(`SKILL.md:73-78`)、`templates/base/ralph.toml:19-29` と `:252-258`、`README.md:135`、`ralph config get --help` の約束(`prompts_leader_plan_test.go:490-495` が固定する 6 句)と突き合わせた。help は 127 を言えない(shell が返す値)ので、括弧の「127 のほかは `ralph config get --help` の約束」は正しい範囲を言っている。`ReadsTheSwitchFirst` の pin(`:472-476`)は 127 の文を「1 で …」の文と「それ以外 …」の文のあいだに順序つきで置く。ほかの file に同じ分け方を書いた所はない(`internal/org/prompts/*.md`、`/org` と `/director` の skill を `ralph config get` と `off とみなし` で検索。`/org` の `SKILL.md:50` は「雛形の手順で読む」とだけ書く)。
+- driver の行: `/plan` の 11.b と並べて読み、上の表のとおり。置き換えの文字列 `<あなたの CLI>` は行の中に 1 回だけで、test の `strings.Replace(…, 1)` と合う。`$override` に入った値は `case` で `claude` か `codex` に絞られてから `DRIVER` に入るので、pane の値が `pick_reviewer` の引数や shell の語に届く道はない(前の形は生の値を渡していた)。
+- 日本語の指示: 手順は「確かめる → 打つ行 → 書き換え → 上書きの規則 → 括弧の補足 → `command -v`」の順で、1 文が 1 つの規則を言う。上書きの規則(`leader.md:515-516`)と括弧の最後の句(`:519-520`)は同じ規則を 2 度言うが、後者は「書き換えた CLI が使われる条件」と向きが逆で、読み手が括弧の中だけ読んでも迷わない。
+- run の表(`prompts_leader_plan_test.go:538-545`)と pin: 8 行を、`leaderAdvisoryPickCommand`(`:394-396`)を bash と `zsh -f` で打つ形で読んだ。旧形(生の値を渡す)なら `gemini` と `claude ` の行が、`tr` がなければ `CODEX` の行が、pane の値を使わなければ `codex`/`claude` の行が落ちる。pin の文字列 3 つ(`:520-524`)は、行そのものと括弧の 2 文を `leader.md` の文面どおりに固定している。mutation は L11 に書いた。
+- `paneenv.go:34-45` の `PrimaryCLIEnv` の comment: 前半(`/plan` と `/cross-review` が読む、skill が driver を `pick_reviewer` に渡す、引数なしの `pick_reviewer` は未設定を claude とみなす)は `/plan` 11.b・`/cross-review` の手順 2・`xreview-helpers.sh:57-78` と合う。後半は雛形と合う。`paneEnvConsequence`(`:62-75`)の警告文は動いておらず、leader の計画助言を含んだまま。
+- 手で確かめたこと(scratchpad のみ、worktree には何も書いていない): `leader.md:512` の行を取り出して `<あなたの CLI>` を `claude` と `codex` に置き、pane の値を「未設定、空、`claude`、`codex`、`CODEX`、`Codex`、`gemini`、`claude `、` codex`」にして bash と `/bin/sh` で、「未設定、空、`claude`、`codex`、`CODEX`、`gemini`、`claude `」にして `zsh -f` で打った。結果は `/plan` の 11.b の読みと同じ(`claude` と `codex` だけが自分の CLI に代わり、大文字は同じ、前後に空白のある値と `gemini` は無視)。`<あなたの CLI>` を置き換えないまま打つと、bash は rc 2、zsh は rc 1 の構文エラーになる(旧形は黙って `codex` を選んだので、書き換え忘れが見えるようになった)。ヘルパーの file がないときは `pick_reviewer: command not found` の rc 127 で、旧形と同じ(雛形が先に file の有無を確かめさせている)。
+- 確かめていない: テスト、静的検査(依頼どおり走らせていない)。implementer の記録(plan の Progress `:179`)にある verify rc=0 と変異 4 つは読んだだけ。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | L11 `PicksTheOtherCLI` の表(8 行)は、`claude` の pane の値を leader が `claude` のときにしか打たない。`case "$override" in claude\|codex)` から `claude` の枝を落とす mutation は、どの行も落とさない(`claude` の pane と `claude` の leader は、枝があってもなくても `codex` になる)。`codex` の枝を落とす mutation は 2 行(`codex`/`claude` と `CODEX`/`claude`)で落ちる。つまり 2 つの枝のうち 1 つしか守られていない。同じ test の doc comment(`:503-516`)は、`claude` でも `codex` でもない値について「`codex` for a claude leader and claude for a codex leader」と両方向を言うが、表はそのどちらも `codex` の leader でしか打たない(`claude` の leader では無視してもしなくても `codex` で、区別できないので正しい選び方ではある)。 | `prompts_leader_plan_test.go:538-545`。scratchpad で `leader.md:512` の行の `case` を `codex) DRIVER=…` に変えて 8 行を打ち直すと、0 行が落ちる(`claude)` に変えると 2 行、`tr` を外すと `CODEX` の 1 行が落ちる)。 | 行を 1 つ足す: `{driver.PrimaryCLIEnv の claude, "codex", "codex"}`(`claude` の pane が `codex` の leader に勝つ)。doc comment に「`gemini` と `claude ` の行は、`codex` の leader でしか区別できない」と 1 句足す。足すのは test の行 1 つと comment だけで、雛形と実行時の動きは変わらない。 |
+
+### Positive notes
+
+- 直しは 3 ファイルに閉じ、L9 と L10 の推奨をそのまま入れた。127 を「それ以外」の BLOCKED に入れたままにせず、文書側(`ralph.toml` の説明と README)を弱めずに雛形を合わせたので、利用者の file に入る約束が動きと一致した。
+- 打つ行を `/plan` の 11.b の `case` にそろえたことで、pane の値の読みが 3 つの呼び出し(`/plan`、`/cross-review`、leader)で同じになった。pane の値は `case` で絞られてから使うので、前の形にあった「検証されない env の値を渡す」道も閉じた。
+- 表の `gemini` と `claude ` の 2 行は、旧形で落ちる値を選んでいる(`codex` の leader で、旧形は `codex` を、新形は `claude` を選ぶ)。comment と pin が、L10 の根拠(`/plan` 11.b)を名指しする。
+
+### Notes(所見にしないもの)
+
+- `.` のあとの `&&` は、`/plan` の `;` と違って `DRIVER=<あなたの CLI>` の代入だけにかかる。ヘルパーの file がないときは代入が飛ぶが、どのみち `pick_reviewer` が見つからず出力は空で、`;` と挙動は変わらない。旧形の `. … && pick_reviewer …` の `&&` が残ったもの。
+- pane の値が `codex` + 改行のとき、`$(printf … | tr …)` が末尾の改行を落とすので `codex` として読まれる。`/plan` の 11.b も同じ式で、同じ動き。
+- 上書きの規則と括弧の最後の句が同じ規則を 2 度言う点(Evidence)は、pin が両方を固定しているので、どちらかを直すと test が落ちて気づく。所見にしない。
+- `/sync-docs` に渡すもの: Run 2〜4 の分に加えて 1 つ。`scripts/xreview-helpers.sh:63-66` の header は「Both skills pass the driver they resolved」と呼び手を 2 つの skill だけ挙げる。leader の雛形が 3 つ目の呼び手で、同じ読み(`claude`/`codex` だけが override)で driver を渡すようになった。root と `templates/base/` の両方に同じ文がある。`PrimaryCLIEnv` を言い換える README の director の段落(`README.md:266`)は Run 2 で渡した分に入っている。
+
+### Coverage gaps
+
+- Run 1〜4 と同じ(本物の codex と claude での通し、Codex の leader の sandbox から `claude -p` が通るか、herdr の server の環境に `RALPH_PRIMARY_CLI` が残る pane)。
+- 1aaadb12 の mutation は打っていない。上の mutation は scratchpad で行を取り出して打った読みの確かめで、test の実行ではない。
+
+### Recommendation(Run 5)
+
+- Merge: yes(Run 5。CRITICAL・HIGH・MEDIUM なし。Run 4 の L9・L10 と名前の nit は直った。新しい所見は L11 の LOW 1 件)
+- Follow-ups: L11 は test の行 1 つと comment 1 句。直すと test が動くので、記録だけの例外には当たらず `/self-review` からの再実行になる(cycle の cap 内かは orchestrator が決める)。直さないなら、`/pr` の known gaps に「`claude` の枝を落とす mutation が表で落ちない」と 1 行写す。
