@@ -45,15 +45,18 @@ import (
 // stops at the first step that fails. The next cleanup goes on from what is
 // left (D2's resume), with the checks of what is left: with the worktree's
 // directory gone and the branch left, 1, 2, and 5, and git's registration of
-// the missing worktree, if any, is removed alone (git worktree remove of its
-// path; git worktree prune would remove every other missing worktree's too);
-// with only the record left, 1 and 2. With the record gone, nothing is
-// removed: what is left cannot be told from what another feature left. A
-// refusal removes nothing and says why and what to do next. When the next
-// cleanup can go on once the cause is fixed (3 to 6), what to do is that fix
-// and the next cleanup, with no command that cleans up by hand, since one
-// would skip the checks after the one that refused; only where ralph cannot
-// go on by itself does the refusal give such a command (CleanupResult.Manual).
+// the missing worktree, if any, must be on that branch (6 of the
+// registration, checkRegistration) and is removed alone (git worktree remove
+// of its path; git worktree prune would remove every other missing
+// worktree's too); with only the record left, 1 and 2. A registration left
+// with the branch gone, which the script's order never leaves, is refused.
+// With the record gone, nothing is removed: what is left cannot be told from
+// what another feature left. A refusal removes nothing and says why and what
+// to do next. When the next cleanup can go on once the cause is fixed (3 to 6
+// of a worktree that is there), what to do is that fix and the next cleanup,
+// with no command that cleans up by hand, since one would skip the checks
+// after the one that refused; only where ralph cannot go on by itself does
+// the refusal give such a command (CleanupResult.Manual).
 
 const (
 	// CleanupViaMerge and CleanupViaCleanup are the values of
@@ -130,10 +133,13 @@ type CleanupResult struct {
 	// RepoRoot when the record's path or kind is not the binding's, when the
 	// worktree is left with no local branch, and when the removal failed; git
 	// worktree remove and git branch -D of what git still has when the record
-	// is gone; and git branch -D of the binding's branch alone when the record
-	// is on another branch. A refusal the next cleanup can go on from once its
-	// cause is fixed (D2's 3 to 6) has none: its reason names the fix and the
-	// next cleanup, which runs the checks a command by hand would skip.
+	// is gone; git branch -D of the binding's branch alone when the record is
+	// on another branch; and git worktree remove of git's registration of a
+	// missing worktree, then the script's cleanup, when the registration is
+	// not on the binding's branch or that branch is gone. A refusal the next
+	// cleanup can go on from once its cause is fixed (D2's 3 to 6 of a
+	// worktree that is there) has none: its reason names the fix and the next
+	// cleanup, which runs the checks a command by hand would skip.
 	Manual string
 	// Cleaned reports that the script removed the worktree, the branch, and
 	// the record, or what of them was left.
@@ -322,6 +328,13 @@ type cleanupState struct {
 	notDir     bool   // something that is not a directory is at its path
 	registered bool   // git worktree list names a worktree at its path
 	branchTip  string // the local branch's tip; "" when there is no such branch
+	// regHead, regBranch, and regDetached are what git worktree list records
+	// of that registration: its HEAD (zeros when HEAD names no commit), the
+	// branch it is on, short, and whether its HEAD is detached. A HEAD git
+	// cannot read has neither a branch nor detached.
+	regHead     string
+	regBranch   string
+	regDetached bool
 }
 
 // id is the ralph-worktree.sh record id of the binding's org.
@@ -392,17 +405,24 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 			c.f.Worktree, cleanupAgain(c.p.Branch))
 	case st.dirExists:
 		reason, manual, err = c.checkWorktree(ctx, st.branchTip)
+	case st.registered:
+		// The worktree's directory is gone, and git still has its
+		// registration, which remove takes away with its HEAD and reflog, so
+		// the registration is checked first.
+		reason, manual = c.checkRegistration(st)
+		if reason == "" {
+			resumed = CleanupResumedWorktreeGone
+			// The branch is put back from the main worktree. git branch -f
+			// refuses a branch a registered worktree has checked out, even one
+			// whose directory is gone; git update-ref moves it, and no working
+			// tree of it is left to fall behind.
+			reason, manual, err = c.checkBranchTip(ctx, st.branchTip, c.gitCmd("update-ref", "refs/heads/"+c.f.Branch, c.p.Head))
+		}
 	case st.branchTip != "":
 		resumed = CleanupResumedWorktreeGone
-		// The worktree's directory is gone, so the branch is put back from the
-		// main worktree. git branch -f refuses a branch a registered worktree
-		// has checked out, even one whose directory is gone; git update-ref
-		// moves it, and no working tree of it is left to fall behind.
-		reset := c.gitCmd("branch", "-f", c.f.Branch, c.p.Head)
-		if st.registered {
-			reset = c.gitCmd("update-ref", "refs/heads/"+c.f.Branch, c.p.Head)
-		}
-		reason, manual, err = c.checkBranchTip(ctx, st.branchTip, reset)
+		// The worktree and its registration are gone, so the branch is put
+		// back from the main worktree.
+		reason, manual, err = c.checkBranchTip(ctx, st.branchTip, c.gitCmd("branch", "-f", c.f.Branch, c.p.Head))
 	default:
 		resumed = CleanupResumedRecordOnly
 	}
@@ -416,8 +436,8 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 }
 
 // readState reads cleanupState: the worktree's path with os.Stat, git
-// worktree list --porcelain in the main worktree for its registration, and
-// the local branch's tip there.
+// worktree list --porcelain in the main worktree for its registration and
+// what that records, and the local branch's tip there.
 func (c *cleanupRun) readState(ctx context.Context) (cleanupState, error) {
 	var st cleanupState
 	info, err := os.Stat(c.f.Worktree)
@@ -432,9 +452,24 @@ func (c *cleanupRun) readState(ctx context.Context) (cleanupState, error) {
 	if err != nil {
 		return st, err
 	}
+	// Each registration's lines run from its worktree line to the next one:
+	// HEAD <sha>, then branch refs/heads/<name> or detached, which git prints
+	// for a missing worktree too, next to prunable.
+	ours := false
 	for line := range strings.SplitSeq(list, "\n") {
-		if path, ok := strings.CutPrefix(line, "worktree "); ok && samePath(path, c.f.Worktree) {
-			st.registered = true
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			ours = samePath(path, c.f.Worktree)
+			st.registered = st.registered || ours
+			continue
+		}
+		switch {
+		case !ours:
+		case line == "detached":
+			st.regDetached = true
+		case strings.HasPrefix(line, "HEAD "):
+			st.regHead = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			st.regBranch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
 		}
 	}
 	r, err := cleanupGit(ctx, c.root, "rev-parse", "--verify", "--quiet", "refs/heads/"+c.f.Branch+"^{commit}")
@@ -642,17 +677,23 @@ func (c *cleanupRun) checkBranchTip(ctx context.Context, tip, reset string) (str
 // merge, keep what is needed on a new branch made in the main worktree's
 // repository, which leaves the feature worktree where it is, so that reset
 // still moves the branch and not the one kept, put the branch back at the
-// head with reset, and clean up again. The new branch is
-// <branch>-unmerged-<the first 7 characters of tip>: a branch of that name
-// already there was kept from the same tip, so git branch failing on it loses
-// nothing, and a branch that moves again gets another name. It is made from
-// the branch, not from tip, so that it also keeps a commit made on the branch
-// after the refusal, which reset would otherwise take off.
+// head with reset, and clean up again. The new branch is keptBranch of tip.
+// It is made from the branch, not from tip, so that it also keeps a commit
+// made on the branch after the refusal, which reset would otherwise take off.
 func (c *cleanupRun) branchMovedSteps(tip, reset string) string {
-	keep := c.f.Branch + "-unmerged-" + tip[:min(len(tip), 7)]
 	return fmt.Sprintf("look at them (%s), keep what you need on another branch made from the main worktree, not by switching "+
 		"branches in the feature worktree (%s), put the branch back at the head its PR merged (%s), and %s",
-		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", keep, c.f.Branch), reset, cleanupAgain(c.p.Branch))
+		c.gitCmd("log", c.p.Head+".."+c.f.Branch), c.gitCmd("branch", c.keptBranch(tip), c.f.Branch), reset,
+		cleanupAgain(c.p.Branch))
+}
+
+// keptBranch is the branch a refusal names to keep a commit at tip on:
+// <branch>-unmerged-<the first 7 characters of tip>. A branch of that name
+// already there was kept from the same tip, so git branch failing on it loses
+// nothing, and another tip, such as that of a branch that moved again, gets
+// another name.
+func (c *cleanupRun) keptBranch(tip string) string {
+	return c.f.Branch + "-unmerged-" + tip[:min(len(tip), 7)]
 }
 
 // fetchHeadCmd is the command that fetches the head the PR merged from
@@ -708,6 +749,54 @@ func (c *cleanupRun) checkCheckout(ctx context.Context, branch string) (string, 
 			"branch and %s", head, wt, c.p.Head, again), nil
 	}
 	return "", nil
+}
+
+// checkRegistration is D2's check 6 of git's registration of the feature
+// worktree, whose directory is gone (st, readState): it is on the binding's
+// branch, and that branch is there, so its HEAD is the branch's tip, which
+// check 5 compares next with the head the PR merged. Otherwise nothing is
+// removed, since git worktree remove would drop the registration's HEAD and
+// reflog, which may be the last references to a commit made there on a
+// detached HEAD or another branch. A registration on a branch that is gone
+// has a HEAD that names no commit (zeros), so the reason names no command to
+// keep it, only where to look: the commit is only in the registration's
+// reflog, which git reflog and git log -g do not read while its HEAD names
+// no commit. The registration stays as it is, with no directory to change it
+// from, so the next cleanup would refuse it again: Manual is the removal by
+// hand, git worktree remove of the registration and the script's cleanup, as
+// remove's when that git fails.
+func (c *cleanupRun) checkRegistration(st cleanupState) (reason, manual string) {
+	var on string
+	switch {
+	case st.regDetached:
+		on = "is detached, not on the branch " + c.f.Branch
+	case st.regBranch == "":
+		on = "is on no branch git can read"
+	case st.regBranch != c.f.Branch:
+		on = "is on the branch " + st.regBranch + ", not " + c.f.Branch
+	case st.branchTip == "":
+		on = "is on the branch " + c.f.Branch + ", which no longer exists"
+	default:
+		return "", ""
+	}
+	reason = fmt.Sprintf("the directory of the feature worktree %s is gone, but git still has its registration, whose HEAD %s %s",
+		c.f.Worktree, st.regHead, on)
+	if gitObjectPattern.MatchString(st.regHead) && strings.Trim(st.regHead, "0") != "" {
+		reason += fmt.Sprintf(": removing the registration would drop its HEAD and reflog, which may be the last references to a "+
+			"commit made there, so nothing is removed: keep what you need on another branch made from the main worktree (%s)",
+			c.gitCmd("branch", c.keptBranch(st.regHead), st.regHead))
+	} else {
+		reason += fmt.Sprintf(": that HEAD names no commit, and removing the registration would drop its reflog, which may be the "+
+			"last record of a commit made there, so nothing is removed: keep what you need on another branch made from the main "+
+			"worktree once you have found it in that reflog (logs/HEAD of this worktree's directory under worktrees/ in git's "+
+			"common directory, which %s prints)", c.gitCmd("rev-parse", "--git-common-dir"))
+	}
+	if st.branchTip != "" {
+		reason += fmt.Sprintf(", check that the branch %s holds nothing that was not merged (%s)", c.f.Branch,
+			c.gitCmd("log", c.p.Head+".."+c.f.Branch))
+	}
+	reason += ", then clean up by hand: the registration stays as it is, so the next cleanup would refuse it again"
+	return reason, c.gitCmd("worktree", "remove", c.f.Worktree) + " && " + c.scriptCmd()
 }
 
 // remove is the removal once the checks of st passed: with the worktree's

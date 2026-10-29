@@ -712,6 +712,150 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 	}
 }
 
+// TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
+// covers S-X2 of plan docs/plans/active/2026-10-28-org-merge-cleanup.md
+// (finding 2 of docs/reports/cross-review-triage-org-merge-cleanup.md): with
+// the feature worktree's directory deleted and git's registration of it left,
+// git worktree remove would drop the registration's HEAD and reflog, so the
+// registration is checked first (D2's 6 of the registration). One on a
+// detached HEAD with a commit the PR did not merge, on another branch, on the
+// binding's branch once that branch was deleted, or with a HEAD git cannot
+// read is refused: the registration, the branch, and the record stay, and
+// nothing is recorded. The reason gives the registered HEAD and, when it
+// names a commit, the command that keeps it, which runs as written, else
+// where the reflog that holds the branch's last commit is. The next
+// cleanup would refuse the registration again, so the reason does not say to
+// run it again, and Manual, run as written, removes the registration, the
+// branch, and the record by hand.
+func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing(t *testing.T) {
+	zeros := strings.Repeat("0", 40)
+	for _, tc := range []struct {
+		name string
+		// inWorktree runs before the worktree's directory is deleted, inGit
+		// after, with admin, git's directory of the registration; nil for none.
+		inWorktree func(t *testing.T, fx *worktreeCleanupFixture)
+		inGit      func(t *testing.T, fx *worktreeCleanupFixture, admin string)
+		on         string // what the reason says of the registration's HEAD
+		named      bool   // the registration's HEAD names a commit, which the reason says how to keep
+		branchLeft bool   // feat/auth is left, which the reason says to check
+	}{
+		{"a detached HEAD with a commit the PR did not merge", func(t *testing.T, fx *worktreeCleanupFixture) {
+			runGit(t, "-C", fx.worktree, "checkout", "--quiet", "--detach")
+			gateCommit(t, fx.worktree, "on a detached HEAD")
+		}, nil, "is detached, not on the branch feat/auth", true, true},
+		{"another branch", func(t *testing.T, fx *worktreeCleanupFixture) {
+			runGit(t, "-C", fx.worktree, "switch", "--quiet", "-c", "other")
+			gateCommit(t, fx.worktree, "on another branch")
+		}, nil, "is on the branch other, not feat/auth", true, true},
+		{"the binding's branch, deleted", nil, func(t *testing.T, fx *worktreeCleanupFixture, _ string) {
+			// git branch -D refuses a branch a registered worktree has checked
+			// out, even one whose directory is gone.
+			runGit(t, "-C", fx.root, "update-ref", "-d", "refs/heads/"+cleanupTestBranch)
+		}, "is on the branch feat/auth, which no longer exists", false, false},
+		{"a HEAD git cannot read", nil, func(t *testing.T, _ *worktreeCleanupFixture, admin string) {
+			writeGateFile(t, admin, "HEAD", "not a ref\n", 0o644)
+		}, "is on no branch git can read", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFixture(t)
+			if tc.inWorktree != nil {
+				tc.inWorktree(t, fx)
+			}
+			head, admin := zeros, gitOut(t, fx.worktree, "rev-parse", "--absolute-git-dir")
+			if tc.named {
+				head = gitOut(t, fx.worktree, "rev-parse", "HEAD")
+			}
+			if err := os.RemoveAll(fx.worktree); err != nil {
+				t.Fatal(err)
+			}
+			if tc.inGit != nil {
+				tc.inGit(t, fx, admin)
+			}
+			registration := "worktree " + fx.worktree + "\n"
+			if list := gitOut(t, fx.root, "worktree", "list", "--porcelain") + "\n"; !strings.Contains(list, registration) {
+				t.Fatalf("git does not list the registration of %s:\n%s", fx.worktree, list)
+			}
+			before, tip := fx.snapshot(t), fx.branchTip()
+
+			res, err := fx.cleanup(fx.params())
+			keep := "git -C " + fx.root + " branch " + cleanupKeptBranch(head) + " " + head
+			want := "the directory of the feature worktree " + fx.worktree + " is gone, but git still has its registration, whose " +
+				"HEAD " + head + " " + tc.on
+			if tc.named {
+				want += ": removing the registration would drop its HEAD and reflog, which may be the last references to a commit " +
+					"made there, so nothing is removed: keep what you need on another branch made from the main worktree (" + keep + ")"
+			} else {
+				want += ": that HEAD names no commit, and removing the registration would drop its reflog, which may be the last " +
+					"record of a commit made there, so nothing is removed: keep what you need on another branch made from the main " +
+					"worktree once you have found it in that reflog (logs/HEAD of this worktree's directory under worktrees/ in " +
+					"git's common directory, which git -C " + fx.root + " rev-parse --git-common-dir prints)"
+			}
+			if tc.branchLeft {
+				want += ", check that the branch feat/auth holds nothing that was not merged (git -C " + fx.root + " log " + fx.head +
+					"..feat/auth)"
+			}
+			want += ", then clean up by hand: the registration stays as it is, so the next cleanup would refuse it again"
+			manual := "git -C " + fx.root + " worktree remove " + fx.worktree + " && " + fx.scriptCmd()
+			fx.assertRefused(t, res, err, before, want, manual)
+			if res.Refused != want || res.Resumed != "" || strings.Contains(res.Refused, "run ralph org cleanup --branch") {
+				t.Errorf("refusal %q (resumed %q); want exactly %q, which names no re-run", res.Refused, res.Resumed, want)
+			}
+			if list := gitOut(t, fx.root, "worktree", "list", "--porcelain") + "\n"; !strings.Contains(list, registration) {
+				t.Errorf("the registration of %s is gone after the refusal:\n%s", fx.worktree, list)
+			}
+			if now := fx.branchTip(); now != tip || (now == "") == tc.branchLeft {
+				t.Errorf("feat/auth is at %q after the refusal; want %q", now, tip)
+			}
+			if record := fileOrAbsent(t, fx.recordFile(t)); record == "<absent>" {
+				t.Error("the record org-auth is gone after the refusal")
+			}
+			if events := cleanedEvents(mustReadEvents(t, fx.o)); len(events) != 0 {
+				t.Errorf("the refusal recorded %+v", events)
+			}
+
+			if tc.named {
+				if out, err := exec.Command("sh", "-c", keep).CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v\n%s", keep, err, out)
+				}
+			} else {
+				// The reflog the reason points at is under the directory its
+				// command prints, and holds the branch's last commit.
+				out, err := exec.Command("sh", "-c", "git -C "+fx.root+" rev-parse --git-common-dir").Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				common := strings.TrimSpace(string(out))
+				if !filepath.IsAbs(common) {
+					common = filepath.Join(fx.root, common)
+				}
+				if dir := filepath.Join(resolvedOrClean(common), "worktrees"); filepath.Dir(admin) != dir {
+					t.Errorf("git's directory of the registration is %s; want it under %s", admin, dir)
+				}
+				if log := fileOrAbsent(t, filepath.Join(admin, "logs", "HEAD")); !strings.Contains(log, fx.head) {
+					t.Errorf("the registration's reflog does not hold %s:\n%s", fx.head, log)
+				}
+			}
+			if out, err := exec.Command("sh", "-c", manual).CombinedOutput(); err != nil {
+				t.Fatalf("%s: %v\n%s", manual, err, out)
+			}
+			if list := gitOut(t, fx.root, "worktree", "list", "--porcelain") + "\n"; strings.Contains(list, registration) {
+				t.Errorf("git still lists the registration of %s after the Manual:\n%s", fx.worktree, list)
+			}
+			if now := fx.branchTip(); now != "" {
+				t.Errorf("feat/auth is still at %s after the Manual", now)
+			}
+			if record := fileOrAbsent(t, fx.recordFile(t)); record != "<absent>" {
+				t.Errorf("the record is still there after the Manual:\n%s", record)
+			}
+			if tc.named {
+				if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/"+cleanupKeptBranch(head)); kept != head {
+					t.Errorf("%s is at %s; want %s, the registration's HEAD", cleanupKeptBranch(head), kept, head)
+				}
+			}
+		})
+	}
+}
+
 // TestCleanupFeatureWorktree_RecordGoneRemovesNothing covers AC3b's missing
 // record: nothing is removed, and Manual removes by hand what git still has
 // of the worktree and the branch, the reason saying to check the branch
