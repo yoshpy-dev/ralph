@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -89,9 +90,25 @@ import (
 // repository while the test walks it: snapshotDirHashes then fails with
 // lstat ... no such file or directory (TestRunMigrateLegacy_ConfirmUX in
 // PR #220's CI, TestRunEjectIO_LegacyManifest_FailsClosed in PR #232's).
+//
+// It also sets RALPH_LOCAL_CONFIG (config.LocalConfigEnv) to off, so
+// config.Load reads no personal ralph.local.toml, for two reasons. A test
+// whose working directory or config path is inside this repository would
+// otherwise read the developer's ralph.local.toml at the main worktree's
+// root (config.LocalPath), and its result would depend on that file. And
+// with off, Load does not look for the file and runs no git for it, so the
+// tests that count the git calls of a command
+// (TestStatusCmd_MergeGuaranteeRunsNoGH,
+// TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit) see
+// the calls they did before the personal file existed. A test of the
+// personal file sets it to "" (t.Setenv), which reads the file.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := os.Setenv(config.LocalConfigEnv, "off"); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
 		os.Exit(1)
 	}
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
