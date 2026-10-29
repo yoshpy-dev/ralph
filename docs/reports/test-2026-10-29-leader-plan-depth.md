@@ -1,14 +1,70 @@
 # Test report: leader-plan-depth
 
-- Date: 2026-10-29(全体の実行は JST 09:01〜09:23、この報告の実行は JST 15:04〜15:40)
+- Date: 2026-10-29(1 回目: 全体の実行は JST 09:01〜09:23、残りの実行は JST 15:04〜15:40。再実行: JST 18:03〜18:45)
 - Plan: `docs/plans/active/2026-10-29-leader-plan-depth.md`(Test plan、AC1〜AC8、Progress checklist の slice の注記)
-- Tester: tester サブエージェント(Claude Opus 5.5)。pipeline の cycle 1。利用上限で途中で止まった前の tester の続きで、前の tester が済ませた `run-test.sh` の結果を引き継ぎ、残りをこの報告で行った
-- Scope: HEAD f35db909(base 9837f744、この branch の変更は `git diff origin/main...HEAD`)。behavioral test だけを実行した(静的解析は /verify の担当)。環境は macOS(Darwin 25.5.0、arm64)、go1.27.3、bash 3.2.57、zsh 5.9、jq 1.7.1-apple、git 2.50.1
-- Evidence: `docs/evidence/test-2026-10-29-leader-plan-depth.log`(1〜8 の節: 全体の実行が HEAD のものである根拠、`run-test.sh` の出力、名指しの実行、mutant ごとの差分と落ちたテスト、skill の mutant、隔離の確かめ、待ち切りのテストの時間)。gitignore の対象で、コミットしない
-- Insight event: `./scripts/insights-append.sh` は今日の UTC の日付で `2026-10-29-leader-plan-depth.jsonl` を新しく作るので、`--events-dir` で scratchpad に書かせた 1 行(`phase` が `test`、`verdict` が `pass`、`cycle` が 1)を、既存の `docs/insights/events/2026-10-28-leader-plan-depth.jsonl` の末尾に手で足した
-- 追跡しているファイルは、この報告と insight event のほかは変えていない。mutant は `go test -overlay` で scratchpad の写しに置き換えるか、scratchpad に置いた `git archive f35db909` の写しで走らせた
+- Tester: tester サブエージェント(Claude Opus 5.5)。pipeline の cycle 1。1 回目は、利用上限で途中で止まった前の tester の続きで、前の tester が済ませた `run-test.sh` の結果を引き継いだ。再実行は別の tester で、cycle 1 の中で /test を打ち直した(下の「再実行」の節)
+- Scope: 1 回目は HEAD f35db909(base 9837f744)、再実行は HEAD ff8404cf(origin/main 7522835c を d59966a9 で取り込み済み)。この branch の変更は `git diff origin/main...HEAD`。behavioral test だけを実行した(静的解析は /verify の担当)。環境は macOS(Darwin 25.5.0、arm64)、go1.27.3、bash 3.2.57、zsh 5.9、jq 1.7.1-apple、git 2.50.1
+- Evidence: `docs/evidence/test-2026-10-29-leader-plan-depth.log`。1 回目は 1〜8 の節(全体の実行が HEAD のものである根拠、`run-test.sh` の出力、名指しの実行、mutant ごとの差分と落ちたテスト、skill の mutant、隔離の確かめ、待ち切りのテストの時間)。再実行は末尾の R1〜R4 の節(全体の実行、名指しの実行、mutant の差分と落ちたテスト、隔離の確かめ)。gitignore の対象で、コミットしない
+- Insight event: `./scripts/insights-append.sh` は今日の UTC の日付で `2026-10-29-leader-plan-depth.jsonl` を新しく作るので、`--events-dir` で scratchpad に書かせた 1 行(`phase` が `test`、`verdict` が `pass`、`cycle` が 1)を、既存の `docs/insights/events/2026-10-28-leader-plan-depth.jsonl` の末尾に手で足した。再実行の 1 行(`ts` 2026-10-29T09:43:21Z)も同じやり方で足した
+- 追跡しているファイルは、この報告と insight event のほかは変えていない。mutant は `go test -overlay` で scratchpad の写しに置き換えるか、scratchpad に置いた `git archive f35db909` の写しで走らせた(再実行は overlay だけ)
 
-## Test execution
+## 再実行: HEAD ff8404cf(cycle 1 の中の 2 回目)
+
+1 回目(f35db909)のあとに入った変更は、main の取り込み(d59966a9、#266)、テストの直し(92554f77: hang の case の外側の上限を 120 秒にし、codex と claude の両方に作業ツリーを書き換える 3 通りの case を足した)、self-review L9 と L10 の直し(1aaadb12: `ralph config get` の 127 を off とみなす、driver の読み方を `/plan` の 11.b と同じ `case` にする)と、記録のコミットである。この節の数はすべて HEAD ff8404cf で取った。全体の実行の開始時に `git rev-parse HEAD` を記録し、実行のあとも追跡しているファイルの `git status --porcelain` は空だった。
+
+### 実行
+
+| # | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- | --- |
+| R1 | `RALPH_VERIFY_SCOPE=full ./scripts/run-test.sh` | shell 45 本 + Go 9 パッケージ | shell 45 本(`PASS` で始まる行 4,796)、Go 9 パッケージ | 0 | shell の 1 行(前からある git 2.41 の行) | rc 0、2,287 秒(18:04:11〜18:42:18 JST) |
+| R2 | `go test ./internal/org/ -run 'RenderRolePrompt_Leader\|DirectorSkill\|Skill' -count=1 -v` | トップレベル 58(サブテスト 56) | 58(56) | 0 | 0 | rc 0、24 秒 |
+| R3 | `go test ./internal/org/ -run 'RenderRolePrompt_Leader_FeatureOrgPlanAdvisory' -count=3 -v` | トップレベル 9 × 3(サブテスト 24 × 3) | 27(72) | 0 | 0 | rc 0、78 秒 |
+| R4 | `go test ./internal/org/driver/ -count=1 -cover` | パッケージ全体 | ok | 0 | - | rc 0、6 秒、coverage 95.3% |
+| R5 | `go test ./internal/config/ -count=1 -cover` | パッケージ全体 | ok | 0 | - | rc 0、2 秒、coverage 97.0% |
+| R6 | `go test ./internal/cli/ -run 'HerdrWithoutEnvFlag\|OrgVerbs\|ConfigGet' -count=1 -v` | トップレベル 11(サブテスト 7) | 11(7) | 0 | 0 | rc 0、8 秒 |
+| R7 | `go test ./internal/org/protocol/ ./internal/upgrade/ -count=1` | 2 パッケージ | 2 | 0 | - | rc 0、2 秒 |
+| R8 | mutant 9 個(変種を入れて 13 実行)と対照 1 実行、生き残りを落とす行の確かめ 2 実行 | 16 実行 | 対照はトップレベル 85(サブテスト 65)が通り、SKIP 0。mutant で生き残ったのは d の 1 つの変種だけ | - | - | 1 回 34〜54 秒(e1 だけ 190 秒) |
+| R9 | 隔離の確かめと、その感度を見る PATH 漏れの mutant | 2 実行 | HEAD は 85 が通り、カナリアの呼び出し 0。漏れの mutant は FAIL 26 行、カナリアの呼び出し 40 | - | 0 | 27 秒と 32 秒 |
+
+- R1 の Go: `cmd/ralph` 0.814 秒、`internal/cli` 618.386 秒、`internal/config` 1.698 秒、`internal/insights` 1.339 秒、`internal/org` 743.330 秒、`internal/org/driver` 3.191 秒、`internal/org/protocol` `(cached)`、`internal/scaffold` 2.601 秒、`internal/upgrade` `(cached)`。`run-test.sh` は worktree の `.harness/cache/go-build` を Go の cache に使うので、2 つの `(cached)` はこの worktree の前の実行の結果である。R7 でその 2 つを `-count=1` で打ち直し、どちらも通った
+- R1 の実行中に R2〜R9 を並べて走らせたので、1 分の load average は 7〜67 まで動いた(ほかのセッションのジョブも走っていた)。`internal/cli` と `internal/org` が 1 回目(353 秒と 464 秒)より長いのはこのためとみられる。30 分の timeout には届かず、落ちたテストはなく、打ち直しもしていない(lead が名指しした負荷に弱い 2 本、`internal/org` の `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` と `internal/cli` の `TestOrgSpawn_HelloPastTimeoutMS_PrintsTheDeadlineHint` も、R1 のパッケージの結果が ok で、落ちていない)
+- R1 のあと `git status --porcelain --ignored` で増えたのは、`.harness/cache/go-build/` の cache と、`run-test.sh` が書いた `docs/evidence/verify-2026-10-29-090411.log` だけだった
+- R2 のトップレベルは 1 回目と同じ 58 本で、サブテストは 46 から 56 に増えた。92554f77 で、codex の書き換えの case が 1 通りから 3 通りに(bash と zsh で +4)、claude の書き換えの case が 3 通り新しく(bash と zsh で +6)なった
+- hang の case(`CodexCommandRuns/{bash,zsh}/a_reviewer_that_hangs`)は、この節で HEAD と同じ codex の塊を打った 34 回(R2、R3、対照、codex の塊を変えない mutant、R9 の HEAD)がすべて通った。時間は 6.1〜18.5 秒、中央値 12.3 秒で、上限の 120 秒(`advisoryRunTimeout`)の 6 分の 1 に収まる
+
+### mutant(lead の (a)〜(f) と追加の g)
+
+`leader.md` は go:embed なので、scratchpad の写しを perl で置き換え(置き換える字面の数が想定と違えば止める)、`go test -overlay` で差し替えた。b〜d はテストが実際に打つのがテストの定数 `leaderAdvisoryPickCommand` なので、`leader.md` だけを変える変種(「雛形だけ」)と、`leader.md` と定数を同じに変える変種(「雛形と定数」、文の pin は通り、run の表だけが落とせる)の 2 つを走らせた。対照(両方のファイルを置き換えずに写しただけの overlay)は rc 0、トップレベル 85(サブテスト 65)、SKIP 0 だった。build の失敗は 0 件。絞り込みはどれも `-run 'RenderRolePrompt|Skill'`。
+
+| id | 変更 | 変種 | 落としたテスト |
+| --- | --- | --- | --- |
+| a | 127 を BLOCKED の側に戻す(127 の文を消し、「それ以外(ほかの 1、2、3、127、0 で…」にし、「127 のほかは」を外す) | 雛形だけ | `PlanAdvisoryReadsTheSwitchFirst`(文の pin。終了コードの分け方は文なので、打つテストはない) |
+| b1 | `pick_reviewer "$DRIVER"` を `pick_reviewer "${RALPH_PRIMARY_CLI:-$DRIVER}"` にする | 雛形だけ | `PicksTheOtherCLI`(文の pin) |
+| b1 | 同上 | 雛形と定数 | `PicksTheOtherCLI` の run の表: codex の leader で pane が `gemini` と `claude `(末尾の空白)の行、bash と zsh で 4 行 |
+| b2 | `pick_reviewer "$RALPH_PRIMARY_CLI"` にする | 雛形だけ | `PicksTheOtherCLI`(文の pin) |
+| b2 | 同上 | 雛形と定数 | `PicksTheOtherCLI` の run の表: codex の leader で pane が空、`gemini`、`claude ` の行、bash と zsh で 6 行 |
+| c | `case` の `codex` の枝を外す(`claude) DRIVER=$override`) | 雛形だけ | `PicksTheOtherCLI`(文の pin) |
+| c | 同上 | 雛形と定数 | `PicksTheOtherCLI` の run の表: claude の leader で pane が `codex` と `CODEX` の行、bash と zsh で 4 行 |
+| d | `case` の `claude` の枝を外す(`codex) DRIVER=$override`) | 雛形だけ | `PicksTheOtherCLI`(文の pin) |
+| d | 同上 | 雛形と定数 | なし(生き残り。トップレベル 85 がすべて通った。self-review L11 のとおり) |
+| e1 | codex の塊の見張りから `kill "$cpid" 2>/dev/null` を外す | 雛形だけ | `RunsInOneShell`、`CodexTurnsMCPOff`(文の pin)、`CodexCommandRuns/{bash,zsh}/a_reviewer_that_hangs`(`was still running after 2m0s and was killed`、サブテストは 127.6 秒と 121.1 秒) |
+| e2 | claude の塊の見張りから同じ kill を外す | 雛形だけ | `RunsInOneShell`、`ClaudeReadsOnly`(文の pin だけ。止まらない claude を打つ case はない) |
+| f | 4 つの git の状態から `git ls-files -z --others --exclude-standard \| xargs -0 git hash-object --; ` を外す | 雛形だけ | `RunsInOneShell`(文の pin)、`CodexCommandRuns/{bash,zsh}/a_reviewer_that_edits_an_untracked_file`、`ClaudeCommandRuns/{bash,zsh}/a_reviewer_that_edits_an_untracked_file` |
+| g | claude の塊の最後の行(`cmp`)を `echo 'git: same'` にする(1 回目の d2、追加) | 雛形だけ | `RunsInOneShell`、`Outcomes`(文の pin)、`ClaudeCommandRuns/{bash,zsh}/` の書き換えの 3 通り(6 本) |
+
+- lead の (a)〜(c)、(e)、(f) はすべて落ちた。(d) は、雛形だけを変えれば文の pin が落とすが、テストの定数も同じに変えると run の表のどの行も落とさない。self-review L11 の生き残りを確かめた
+- d を落とす行: run の表に `{driver.PrimaryCLIEntry("claude"), "codex", "codex"}`(pane が `claude` で leader が codex なら、相手は codex)を足した写しを overlay で当て、`-run 'PicksTheOtherCLI'` で走らせると、HEAD では `PicksTheOtherCLI` が通り、d の「雛形と定数」では bash と zsh の 2 行が `= "claude" … want "codex"` で落ちた。この 1 行で L11 の穴はふさがる
+- e1 は、lead の言う「hang の case が 120 秒の上限の中で落ちる」を確かめた。`fx.run` が 120 秒で process group ごと止め、`t.Fatalf` で落とす。e1 の実行のあと、親が 1 の `sleep` も `sleep 240` も残っていなかった
+- 1 回目の Test gaps の 2 つ目(claude の塊の `git: changed`)と 3 つ目(未追跡のファイル)は、g と f が run の case で落ちることで、92554f77 で埋まったことを確かめた
+
+### 隔離の確かめ
+
+- 本物の codex と claude を呼ばないこと: ログを書いて exit 0 で終わるだけのカナリアの `codex` と `claude` を受け継ぐ `PATH` の先頭に置き、`HOME` と `TMPDIR` を空の scratch にし、`CODEX_HOME` を外して(Go の cache と module の場所は元の値を渡した)、HEAD で `-run 'RenderRolePrompt|Skill'` を走らせた。85 本が通り、カナリアの呼び出しは 0 だった。感度の確かめとして、`fx.run` の `PATH` から stand-in の `fx.bin` を外す overlay を当てると、FAIL が 26 行出て、カナリアに 40 回届いた(`codex --disable plugins mcp list --json` 32 回、`claude -p …` 8 回)。1 回目(26 回)より多いのは、92554f77 で増えた書き換えの case の分である
+- `~/.codex` に触れないこと: 上の 2 回とも、走ったあとの scratch の `HOME` にあったのは go のツールの telemetry の数え(`Library/Application Support/go/telemetry/`)だけで、`.codex` はなかった
+- 一時ファイル: 2 回とも、scratch の `TMPDIR` の中身は 0 個だった。worktree の `git status --porcelain --ignored` は、それぞれの実行の前と後で同じだった
+- 残るプロセス: すべての実行のあと、親が 1 のプロセスで `sleep`・`codex`・`claude`・shell のものは、8 日前からの `mysqld_safe` のほかになかった。`pgrep -f 'sleep (240|1200)'` も 0 件だった
+
+## Test execution(1 回目、HEAD f35db909)
 
 | # | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -29,7 +85,9 @@
 - 2 の 58 本のうち、この branch で足したのは `prompts_leader_plan_test.go` の 17 本(サブテスト 16: `PlanWordingStaysInTheFeatureOrgSection` 2、`CodexCommandRuns` 12、`ClaudeCommandRuns` 2)と `TestDirectorSkill_PinsTheApprovalForkSteps` で、残りは既存の `TestRenderRolePrompt_Leader_*` 27 本と skill のテストである。前の tester の同じ 4 つの実行(09:03)も通っていたが、この報告の数は 2〜5 の打ち直しのものである
 - 1 分の load average は、2〜10 の間 9〜23 だった。ほかのセッションの `go test` と codex の実行が並んで走っていた
 
-## Test plan の項目
+## Test plan の項目(1 回目、HEAD f35db909)
+
+再実行の R2 でも、下のテストはすべて通った。HEAD ff8404cf では、`PicksTheOtherCLI` が bash と zsh で 8 行ずつ(大文字、`gemini`、末尾の空白の行が増えた)、`CodexCommandRuns` が 8 つずつ、`ClaudeCommandRuns` が 4 つずつ(書き換えの 3 通りが増えた)になり、`ReadsTheSwitchFirst` は 127 を off とみなす文も pin する。
 
 | Test plan の項目 | テスト | 結果 |
 | --- | --- | --- |
@@ -44,7 +102,7 @@
 | Edge: 分かれ目がない、4 つ以上、MCP の server を止められない、`RALPH_PRIMARY_CLI` がない pane | 分かれ目なしと 4 つ以上は上の文の pin。止められないときは `CodexCommandRuns` の 3 つの case。変数のない pane は `PicksTheOtherCLI` の 2 行 | PASS |
 | Manual check(AC8: 実機の codex で MCP を止める) | この報告では打っていない。実機の codex は呼ばない方針で、計画の Progress checklist に implementer の結果(server 20、止めたあとの enabled 0)がある | 対象外 |
 
-## mutant
+## mutant(1 回目、HEAD f35db909)
 
 ### `internal/org/prompts/leader.md`
 
@@ -92,7 +150,7 @@
 
 `paneEnvConsequence` の警告文から「, and so may a feature org leader's plan advisory」を外すと、`TestHerdr_TabCreate_PaneEnvWarningNamesEachEntrysConsequence` と `TestHerdr_TabCreate_ExtraEnvWithoutEnvFlagWarnsWithItsClause` が落ちた。`internal/cli` の `TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr` は文の前半だけを pin するので通る(設計どおり)。
 
-## 隔離の確かめ
+## 隔離の確かめ(1 回目、HEAD f35db909)
 
 - 本物の codex と claude を呼ばないこと: ログを書いて exit 0 で終わるだけのカナリアの `codex` と `claude` を、受け継ぐ `PATH` の先頭に置いて、`-run 'RenderRolePrompt|Skill'` を走らせた。85 本が通り、カナリアの呼び出しは 0 だった。感度の確かめとして、`fx.run` の `PATH` から stand-in の `fx.bin` を外す overlay を当てると、FAIL が 16 行出て、カナリアに 26 回届いた(`codex --disable plugins mcp list --json` 24 回、`claude -p …` 2 回)。漏れればこのカナリアで分かる
 - `~/.codex` に触れないこと: 同じ 2 回を `HOME` を空の scratch にし、`CODEX_HOME` を外して走らせた(Go の cache と module の場所は元の値を渡した)。走ったあとの scratch の `HOME` にあったのは、go のツールの telemetry の数え(`Library/Application Support/go/telemetry/`)だけで、`.codex` も `.gitconfig` もなかった。テストの source に `HOME`、`UserHomeDir`、`CODEX_HOME` の参照はない。本物の `~/.codex` は、ほかのセッションと Codex のアプリが書き続けているので、更新時刻の比べは根拠にしていない
@@ -101,14 +159,16 @@
 
 ## Coverage
 
-- Statement: `internal/org/driver` 95.3%、`internal/config` 97.0%(この branch がこの 2 つで変えたのは doc comment と警告文の文字列だけ)。`internal/org` は、変わったのが go:embed の雛形の文とテストで、パッケージ全体の実行に 8 分かかるため測っていない
+- Statement: `internal/org/driver` 95.3%、`internal/config` 97.0%(この branch がこの 2 つで変えたのは doc comment と警告文の文字列だけ)。再実行の R4 と R5 でも同じ値だった。`internal/org` は、変わったのが go:embed の雛形の文とテストで、パッケージ全体の実行に 8〜12 分かかるため測っていない
 - Branch: 測っていない
 - Function: 測っていない
-- Notes: 雛形と skill の文は statement coverage に現れないので、上の mutant(雛形 17、skill 7、警告文 1)で代えた。生き残りは 0 個
+- Notes: 雛形と skill の文は statement coverage に現れないので、mutant で代えた。1 回目は 25 個(雛形 17、skill 7、警告文 1)で生き残り 0 個。再実行は 9 個(変種を入れて 13 実行)で、生き残りは d の「雛形と定数」の変種 1 つ(self-review L11)
 
 ## Failure analysis
 
-HEAD の実行で落ちたテストはない。mutant の実行で 1 回、変更と関係のない落ち方があったので記録する。
+再実行(HEAD ff8404cf)では、HEAD の実行で落ちたテストはなく、mutant の実行で落ちたのも mutant が狙ったテストだけだった。下の表は 1 回目の記録で、その直し(92554f77)は再実行の節で確かめた(hang の case 34 回が 6.1〜18.5 秒で通り、e1 は 120 秒の上限で落ちる)。
+
+1 回目: HEAD の実行で落ちたテストはない。mutant の実行で 1 回、変更と関係のない落ち方があったので記録する。
 
 | Test | Error | Root cause | Proposed fix |
 | --- | --- | --- | --- |
@@ -118,25 +178,38 @@ HEAD の実行で落ちたテストはない。mutant の実行で 1 回、変�
 
 | Previously broken behavior | Status | Evidence |
 | --- | --- | --- |
-| 既存の `TestRenderRolePrompt_Leader_*` 27 本(`FeatureOrgPlanApproval`、`FeatureOrgProcedure` を含む) | 通る | 1、2 |
-| 既存の `director_skill_sync_test.go` のテスト(`PinsTheAnswerOrderSendAndPaneCheck` など 7 本)と `/org` skill のテスト | 通る | 1、2 |
-| `tests/test-check-skill-sync.sh`、`tests/test-sync-skills.sh` | 通る | 1 |
-| `--env` のない herdr の警告(`TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr` と driver の警告のテスト) | 通る | 1、3、5、警告文の mutant |
-| 機能ごとでない org の節に、計画の読み込み・分かれ目・計画助言の文が漏れない | 通る | `PlanWordingStaysInTheFeatureOrgSection` |
+| 既存の `TestRenderRolePrompt_Leader_*` 27 本(`FeatureOrgPlanApproval`、`FeatureOrgProcedure` を含む) | 通る | 1 回目の 1、2。再実行の R1、R2 |
+| 既存の `director_skill_sync_test.go` のテスト(`PinsTheAnswerOrderSendAndPaneCheck` など 7 本)と `/org` skill のテスト | 通る | 1 回目の 1、2。再実行の R1、R2 |
+| `tests/test-check-skill-sync.sh`、`tests/test-sync-skills.sh` | 通る | 1 回目の 1。再実行の R1 |
+| `--env` のない herdr の警告(`TestOrgVerbs_HerdrWithoutEnvFlagWarnsOnStderr` と driver の警告のテスト) | 通る | 1 回目の 1、3、5、警告文の mutant。再実行の R1、R4、R6 |
+| `ralph config get` の終了コードの約束(`TestConfigGet_*` 8 本と `TestExitCode_ConfigGet`。main の #266 から来たもので、雛形がこの約束を読む) | 通る | 再実行の R1、R6 |
+| 機能ごとでない org の節に、計画の読み込み・分かれ目・計画助言の文が漏れない | 通る | `PlanWordingStaysInTheFeatureOrgSection`(1 回目と再実行の R2) |
 
 ## Test gaps
 
-- `a_reviewer_that_hangs` の 20 秒の上限は負荷に弱い(Failure analysis)。CI の runner は手元より遅いことがあるので、直すか tech-debt に記録するかを決める必要がある
-- claude の塊の `git: changed` の経路は、実際に打つテストがない。`ClaudeCommandRuns` には書き換える助言者の case がなく、mutant d2(claude の塊の `cmp` を外す)を落としたのは文の pin(`RunsInOneShell` が両方の塊の最後の 2 行を同じ文字列に固定する)だけである。固定された行は codex の側で実際に打って確かめているので、危険は小さい
-- 未追跡のファイルと index の変化は、実際に打つテストで起こしていない。stand-in の助言者は追跡しているファイルに書くだけで、mutant d4(未追跡のファイルの hash を外す)を落としたのは `RunsInOneShell` の行の完全一致だけである
+1 回目の穴のうち 3 つは 92554f77 で埋まり、再実行で確かめた。
+
+- 埋まった: `a_reviewer_that_hangs` の 20 秒の上限が負荷に弱かった点。上限は 120 秒になり、再実行の 34 回は 6.1〜18.5 秒で通った。見張りの kill を外す e1 は、120 秒の上限で落ちる
+- 埋まった: claude の塊の `git: changed` の経路。`ClaudeCommandRuns` に書き換えの 3 通りが入り、claude の塊の `cmp` を外す g を 6 本が落とす
+- 埋まった: 未追跡のファイルの変化。codex と claude の両方に、未追跡のファイルを足す case と書き換える case が入り、未追跡のファイルの hash を外す f を 4 本が落とす
+
+残る穴:
+
+- self-review L11: driver の `case` の `claude` の枝を外す変異(d の「雛形と定数」)を落とす行が、`PicksTheOtherCLI` の run の表にない。雛形の文だけを変えれば文の pin が落とすので、テストの定数と雛形が同じに変わったときだけ抜ける。`{driver.PrimaryCLIEntry("claude"), "codex", "codex"}` の 1 行を足せば落ちることを overlay で確かめた(HEAD では通る)。計画の Progress checklist のとおり、直さずに PR の Known gaps に書く扱いである
+- 止まらない claude を打つ case がない。claude の塊の見張りの kill を外す e2 を落とすのは文の pin(`RunsInOneShell` が見張りの定数を 1 回含むことを確かめる)だけである。見張りの定数は codex の塊と同じ文字列で、codex の側は hang の case で実際に打っているので、危険は小さい
+- `ralph config get` の終了コードの分け方(127 を off とみなすことを含む)は雛形の文で、打つテストはない。a を落とすのは `ReadsTheSwitchFirst` の文の pin だけである(`internal/cli/config.go` の help の約束との照合は 127 のほかの値に限る)
 - stand-in の codex は codex-cli 0.163.0 の振る舞い(plugin の server の上書きで設定を読めない、知らない機能名で exit 1)をまねている。本物の codex と claude の flag は、計画の Non-goals のとおりテストでは打っていない。AC8 の実機の確かめは implementer の記録(計画の Progress checklist)にあり、この報告では打ち直していない
-- 走らせたのは macOS の bash 3.2.57 と zsh 5.9 だけである。CI(ubuntu-latest)では bash 5 になり、zsh がなければ zsh の行は飛ばされる。runner に zsh が入っているかは未確認
+- 走らせたのは macOS の bash 3.2.57 と zsh 5.9 だけである。CI(ubuntu-latest)では bash 5 になり、zsh がなければ zsh の行は飛ばされる(`advisoryShells` は zsh がなければ bash だけで走り、`PicksTheOtherCLI` は見つからない shell を飛ばす)。runner に zsh が入っているかは未確認
 - leader と director を実機で通す確かめはしていない(計画の Non-goals)
 - この branch とは別の既存の性質: `tests/test-sync-skills.sh:239` が本物の root で `scripts/sync-skills.sh` を打つので、`run-test.sh` のたびに `.agents/skills/` の更新時刻が変わる(中身は変わらない)
+- この branch とは別の観察: 負荷の高いとき(再実行の R1 は load 7〜67)、`internal/org` は 743 秒、`internal/cli` は 618 秒かかった。30 分の timeout には余裕があるが、Go の既定の 10 分の timeout で走らせると `internal/org` は届く
 
 ## Verdict
 
-- Pass: 1(`run-test.sh` rc 0、shell 45 本、Go 9 パッケージ。前の tester の実行で、HEAD f35db909 のものと確かめた)、2〜5 の名指しの実行(rc 0)、mutant 25 個(雛形 17、skill 7、警告文 1)がすべて落ちた、隔離の確かめ(カナリアの呼び出し 0、感度の確かめで 26)、10 の `-count=8`
+再実行(HEAD ff8404cf)の結果。1 回目(HEAD f35db909)も pass だった。
+
+- Pass: 9(R1 の `run-test.sh` rc 0 で shell 45 本と Go 9 パッケージ、R2〜R7 の名指しの実行 6 つがすべて rc 0、R8 の mutant は lead の (a)〜(c)、(e)、(f) と追加の g がすべて落ち、R9 の隔離の確かめはカナリアの呼び出し 0 で感度の確かめは 40)
 - Fail: 0
 - Blocked: 0
+- Verdict: pass(self-review L11 の生き残り(d)を確かめ、Test gaps に残した。直す 1 行も確かめてある)
 - Verdict: pass(`a_reviewer_that_hangs` の時間の上限が負荷に弱いことを Test gaps に残した)
