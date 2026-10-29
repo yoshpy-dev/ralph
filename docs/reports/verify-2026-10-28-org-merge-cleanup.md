@@ -6,7 +6,7 @@
 - Scope: `git diff 15e301c8...HEAD`(HEAD ef9c348a、47 ファイル、+5693/-268)。テストは打っていない(`/test` の範囲)。観察の確かめとして、HEAD の binary を scratchpad に `go build` して help を読み、使い捨ての repo で git だけの probe を打った。`go test` は打っていない
 - Evidence: `docs/evidence/verify-2026-10-28-org-merge-cleanup.log`(gitignore。`run-static-verify.sh` の全出力、`git diff --check`、U+FFFD、写しの `cmp`、計画の digest、git の probe とそのスクリプト、help の本文、文書の grep)。wrapper 自身のログは `docs/evidence/verify-2026-10-28-111201.log`
 
-この下の「Spec compliance」から「Coverage gaps」までは cycle 1(HEAD ef9c348a)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 09e1e93b)の verify は、「Coverage gaps」と「Verdict」の間の「cycle 2(HEAD 09e1e93b)」の節にある。いまのブランチの verdict は「Verdict」の節の先頭の cycle 2 の行で、cycle 1 の verdict はその下の「cycle 1(HEAD ef9c348a)」に残している。cycle 2 の所見の ID は `C2-D<n>`。
+この下の「Spec compliance」から「Coverage gaps」までは cycle 1(HEAD ef9c348a)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 09e1e93b)の verify は「cycle 2(HEAD 09e1e93b)」の節に、3 回目の run(cross-review cycle 2 の指摘の直し、HEAD 995f8b51)の verify は「cycle 3(HEAD 995f8b51)」の節にある。どちらも「Coverage gaps」と「Verdict」の間に置いた。いまのブランチの verdict は「Verdict」の節の先頭の cycle 3 の行で、cycle 2 と cycle 1 の verdict はその下に残している。所見の ID は cycle 2 が `C2-D<n>`、cycle 3 が `C3-D<n>`。
 
 ## Spec compliance
 
@@ -182,9 +182,108 @@ issue #263 の受け入れ条件: 1(AC1)、2(AC2。origin が GitHub の reposit
 - cleanup は origin を打った場所で読み、消すのは state dir から引いた main worktree の下(self-review cycle 2 の Known gaps)。`--state-dir` で別の repo の台帳を指したときの組み合わせは確かめていない
 - 実機の director と leader の振る舞いは cycle 1 と同じく確かめていない
 
+## cycle 3(HEAD 995f8b51)
+
+- Date: 2026-10-30
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの 3 回目の run)。上限は `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上がり、`cycle-count.json` は 2 のまま。insight event は lead の指示どおり `--cycle auto` と `--low 1` で打ち、`docs/insights/events/2026-10-29-org-merge-cleanup.jsonl`(UTC の日付)に `"cycle":2` で記録された
+- Scope: cycle 2 の verify(HEAD 09e1e93b)のあとの first-parent のコミット 14 本。コードが変わったのは S-X3(4d7cbfd8)、S-X4(9dd79b94)、7f91e08f の 3 本で、`internal/org/cleanup.go`、`internal/org/permissions.go`(注釈だけ)、`internal/cli/org_cleanup.go` とそれぞれのテスト、`internal/cli/org_merge_test.go`。ほかは sync-docs(68636a9c)、origin/main(#286)の merge(65a7b067)、triage と report と計画の記録。受け入れ条件はブランチ全体に照らし直した(`git diff main...HEAD`。local の main は origin/main と同じ 5eba4013 で、merge-base も 5eba4013。58 ファイル、+8436/-337)。#286 とこのブランチの両方が触ったファイルは 15 個(skill の 8 つ、recipe の 2 つ、仕様、tech-debt、`internal/org/director_skill_sync_test.go`、leader の雛形、README)で、衝突なしに merge されている。これは写しの一致と同期の検査で確かめ、文の中身は下の drift の確かめの範囲だけを読んだ。テストは打っていない。観察の確かめは、HEAD から作った binary の help だけ
+- Evidence: `docs/evidence/verify-2026-10-28-org-merge-cleanup-cycle3.log`(gitignore、815 行。`run-static-verify.sh` の全出力、単独で打った同期の検査 2 つ、`git diff --check`、U+FFFD、写しの `cmp`、計画の digest、help の本文、文書の grep。scratchpad で組んで `cp` し、`cmp` で同じことを確かめた)。wrapper 自身のログは `docs/evidence/verify-2026-10-29-165704.log`。前の 2 つの証拠のログは書き換えていない
+- 行番号は HEAD 995f8b51 のもの
+
+### Static analysis(cycle 3)
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | rc 0 | 言語の範囲は changed で、選ばれた pack は golang だけ。`gofmt: ok`、`go vet ./...` は出力なし、golangci-lint は `0 issues.`、staticcheck は出力なし。local verifier の shellcheck、hook の `sh -n`、settings の `jq`、Codex の hook の検査、`check-sync.sh`、`check-pipeline-sync.sh`、`check-skill-sync.sh`、`check-template-purity.sh`、tech-debt の計画参照がすべて通った。secret scan は 5eba4013..995f8b51 で clean。所要 114 秒(01:57:02 から 01:58:56、JST) |
+| `./scripts/check-skill-sync.sh`(単独) | rc 0 | 14 skill が一致 |
+| `./scripts/check-sync.sh`(単独) | rc 0、PASS | IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6(cycle 2 と同じ) |
+| `git diff --check main...HEAD -- ':!docs/evidence'` と `git diff --check 09e1e93b..HEAD` | どちらも rc 0 | 出力なし |
+| 変更したファイルの U+FFFD | 0 件 | `git diff --name-only main...HEAD` の 58 ファイル |
+| `cmp`(`/org` と `/director` の skill の 3 つの写し、recipe の写し) | 7 つとも rc 0 | |
+| `./scripts/plan-visual.sh digest` | `0f38a9718a8b` | `- Approved:` の行(`:4`)と一致。09e1e93b のあとの計画の変更は Progress checklist の 10 行の追記だけ |
+| `go build -o <scratchpad>/ralph-c3 ./cmd/ralph` | rc 0 | help を読むためだけに作った。go1.27.3、git 2.49.0 |
+
+### Spec compliance(cycle 3)
+
+| Acceptance criterion | Status | Evidence |
+| --- | --- | --- |
+| AC1 | Met(静的) | merge の続きも `cleanupFeatureWorktreeLocked` から `cleanupRun.run` に入り、その頭で `checkLedger` を通る(呼び出しは `internal/org/cleanup.go:395`、本体は `:470`)。ふつうの形(台帳は main worktree の `.harness/state/org`、機能の worktree は `.claude/worktrees/org-<org_id>`)では、`pathWithin`(`:514`)は名前で一致せず、台帳のディレクトリから根までの祖先に機能の worktree がないので false を返す。片付けは前と同じに進む。`TestOrgMerge_CleansUpTheFeatureWorktree`(`internal/cli/org_merge_test.go:614`)の fixture がこの形。merge の側のコード(`internal/org/merge_run.go`、`internal/cli/org_merge.go`)は cycle 3 で変わっていない |
+| AC2 | Met(静的) | `runCleanupSteps` の変更は、ループのあとの割り込みの確かめ(`internal/cli/org_cleanup.go:348-351`)と、割り込みの文の `soFar`(`:424`)だけ。対象の選び方(`cleanupSteps`、`cleanupNamedStep`)と origin への固定は変わっていない |
+| AC3 | Met(静的) | 新しい断り(台帳のディレクトリが機能の worktree かその中にある)は AC3 の形に合う。(1) 何も消さない: `checkLedger` は記録の `Lookup` より前にあり(`internal/org/cleanup.go:395-397`)、`refuse(reason, "")` で返す。`TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger`(`internal/org/cleanup_test.go:657`、6 つの場面)が、worktree の呼び出しが 0、台帳のファイルの中身が変わらない、`worktree_cleaned` がない、を見る。(2) 理由と次の手: 理由は台帳の場所、worktree、消えてしまうもの、何も消していないことを言う。次の手は `ledgerMoveStep`(`:494`)の 1 つで、台帳で走る org も `ralph org` のコマンドもないときに、台帳のディレクトリを worktree の外のほかの台帳がない場所へ動かし、`--state-dir` か `RALPH_ORG_STATE_DIR` で `ralph org cleanup --branch <ブランチ>` を打ち直す。Manual はなく、原因を直せば次の片付けが進む断りに手のコマンドを付けない、という D2 の原則に合う。動かしたあとの打ち直しは、台帳が外にあるので `checkLedger` を通り、ignore された台帳が worktree から出たので確かめ 4 以降に進む(読んで確かめた。打ってはいない)。(3) merge の終了コード 0: CLI のテスト(`internal/cli/org_merge_test.go:937`)が `err == nil` と、`CLEANUP: skipped (...)` の 1 行を全文で見る。cleanup では `SKIPPED:` の行になり、D4 の「1 本でも残れば 1」で exit 1。記録のパスの worktree が台帳を持つ断り(`checkRecord` の `:660`)も Manual なしで同じ次の手を言う(`TestCleanupFeatureWorktree_RecordWhoseWorktreeHoldsTheLedgerNamesNoManual`、`internal/org/cleanup_test.go:1532`)。確かめ 3 の作業ディレクトリの比べも `pathWithin` に変わり(`:681`)、同じディレクトリの別の書き方(macOS の APFS の大文字小文字など)でも断る(`TestCleanupPathWithin_ComparesByFileIdentity`、`:1746`)。この断りは AC3 と D2 の列挙にない新しい場面で、計画の本文は変えず、Progress(`:227`)が「計画の本文の D2 は変えない」と書いている。記録された逸脱なので所見にしない(C3-D5) |
+| AC3b | Met(静的) | `checkLedger` は再開の分かれより前にあるが、worktree のディレクトリがない状態では `pathWithin` が `os.Stat(dir)` の失敗で false を返す(`:514` の注釈「A dir that cannot be stat'd ... holds nothing」)。worktree だけ消えた状態と記録だけ残った状態の再開は、前と同じに進む。名前で一致すれば stat の前に true を返すが、台帳は確かめ 1 が manifest を読んだディレクトリなので、名前で worktree の下にあるなら worktree のパスもある |
+| AC4 | Met(静的) | `CleanupFeatureWorktree`、`cleanupFirstCheck`、`regate.lock` の扱いは cycle 3 で変わっていない(`internal/org/cleanup.go` の diff の hunk は、先頭の注釈、`CleanupResult.Manual` と `CleanupFeatureWorktree` の注釈、`run`、新しい関数 4 つ(`checkLedger`、`ledgerDir`、`ledgerMoveStep`、`pathWithin`)、`checkRecord`、`checkWorktree` の比べだけ) |
+| AC5 | Partially(/sync-docs) | 新しい断りが、help・skill・README・仕様の確かめの一覧になく、gitignore されたファイルの文にも例外がない(C3-D1)。leader の手順 15、`ralph org start --help`、regate の案内は台帳の確かめに関わらない。写しは一致する |
+| AC6 | Partially(静的の半分) | `check-skill-sync.sh` と `check-sync.sh` は通った。`go vet ./...`(テストのファイルを含む)、golangci-lint、staticcheck が通り、テストはコンパイルできる。テストの実行は `/test` に残す |
+
+割り込みの終了コードと文書の照合: `ralph org cleanup --help` の終了コード(`internal/cli/org_cleanup.go:102-108`)は「1 ... for an interrupt (SIGINT, SIGTERM, or SIGHUP; what was cleaned up before it stays cleaned up)」と書く。cycle 2 までは、最後のブランチの片付けの途中に割り込まれると `p.finish()` が nil を返して exit 0 になり、この行と食い違っていた(cross-review cycle 2 の指摘 2)。今は `:348-351` が `p.finish()` より先に割り込みのエラーを返し、`ExitCode` の既定の 1 になる。`TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne`(`internal/cli/org_cleanup_test.go:634`)が `--branch` の有無で exit 1 と `CLEANED:` の行を、`TestRunCleanupSteps_InterruptionSaysWhatTheRunDid`(`:977`)が 4 つの形の文を見る。`/org` skill の cleanup の行の「中断 ... も 1」とも合う。割り込まれた片付けは最後まで走って `CLEANED:` の行を出すので、help の「what was cleaned up before it stays cleaned up」にも反しない。ただし「0 when every branch was cleaned up」と「1 for an interrupt」のどちらが先かは、help に書いていない(C3-D3)。`ralph org merge` の終了コード(片付けは終了コードを変えない)は cycle 3 で変わっていない。
+
+`TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml` の期待の変更: このテストの主題は、`--config` なしで linked worktree から main worktree の台帳で打つと、`[org.director].auto_merge` が main worktree の `ralph.toml` から `AUTO MERGE:` と `pr_merged` の `auto_merge=` に入る(両方向)こと。新しい期待(`internal/cli/org_merge_test.go:962-978`)は、stdout の全文を `mergeCLILines(fx.head, tc.want, "")`(`AUTO MERGE: <want>` を含む)と台帳の断りの 1 行の連結と比べ、`pr_merged` の details を `mergeCLIDetails(fx.head, tc.want)`(`auto_merge=<want>` を含む)と比べる。2 つの subtest は main と linked worktree の `ralph.toml` を逆の値にしているので、どちらの `ralph.toml` を読んだかを今も見分ける。前の `assertNoScriptCleanup` も `mergeCLILines` を前置として比べていたので `AUTO MERGE:` の比べは弱くなっておらず、stdout の残りが全文の比べになった分だけ強くなった。期待が変わったのは、fixture の binding が main worktree(`fx.work`)を機能の worktree に名指し(`internal/cli/org_merge_order_test.go:198`)、台帳が `fx.work/.harness/state/org`(`internal/cli/org_merge_test.go:123`)にあるためで、新しい確かめが先に断るのは正しい。script がないときの断りは、`assertNoScriptCleanup` を使う残りの 2 つのテスト(`:466`、`:860`。どちらも台帳を一時ディレクトリに置く `newMergeCLIFixture(t, false)`)が見続ける。このテストの AC は今もカバーされている。
+
+issue #263 の受け入れ条件: 1(AC1)、2(AC2)、4(AC4)は Met。3(AC3)も Met で、新しい断りも「消さず、理由と次の手を出す」の形をとる。5 は AC5 と同じく Partially で、/sync-docs で直す。
+
+設計判断との照合(cycle 3 の差分):
+
+- D1: 変わらない。新しい 2 つの断りは消すコマンドを名指さない
+- D2: コードは台帳の確かめを「確かめ 3 の一部で、2 より前に打つ」と書く(`internal/org/cleanup.go:34-40`)。計画の本文の確かめ 0〜6 には入っていない。Progress に記録がある(C3-D5)。Manual の原則(ralph が先に進めず人の判断が要るときだけ)は守られている
+- D3: merge は台帳の断りを `CLEANUP: skipped (<理由>)` の 1 行で出し、`CLEANUP MANUAL:` は出さず、終了コードは 0
+- D4: 台帳の断りは `SKIPPED:` の行と exit 1。割り込みは、最後のブランチのあとでも exit 1
+- D5: 変わらない
+- D6: 「gitignore されたファイルは止める理由にしない」に例外が 1 つ加わった(台帳のディレクトリ)。止めるのは確かめ 4(未追跡のファイル)ではなく `checkLedger` で、ほかの ignore されたファイルの扱いは変わらない。計画の本文は変えていない(C3-D5)。文書の側は C3-D1
+
+### Documentation drift(cycle 3)
+
+/sync-docs に渡す所見。直していない。
+
+所見 C3-D1(LOW): 台帳の断りが確かめの一覧になく、gitignore されたファイルの文に例外がない。
+
+- `ralph org cleanup --help` の「Before it removes anything, cleanup checks that ...」(`internal/cli/org_cleanup.go:75-86`)と、その中の「(files .gitignore names do not count and go with the worktree)」(`:79-80`)。HEAD の binary の help でも、台帳の確かめを言う文はない(証拠のログの 3 節)
+- `ralph org merge --help` の「Before that it checks that ...」(`internal/cli/org_merge.go:120-126`)と、`:124-125` の同じ括弧
+- `/org` skill の cleanup の行(`.claude/skills/org/SKILL.md:240`)の「消す前に、… を順に確かめ」と「gitignore されたファイルは数えず、worktree と一緒に消える」。merge の行(`:239`)は「`cleanup` の行と同じ確かめ」と書くので、cleanup の行を直せば足りる。「org の終わり方」の「どちらも、次のどれかに当たれば何も消さず」の一覧(`:1153-1165`)と、「gitignore されたファイル(`.harness/state/` の下のファイルや …)は止める理由にならず、worktree と一緒に消える」(`:1179-1183`)。台帳の既定の場所は `.harness/state/org` なので、この文は台帳も worktree と一緒に消えると読める。どれも 3 つの写しにも同じ文がある
+- README `:278` の「Before it removes anything it checks ...」と「(files `.gitignore` names do not count and go with the worktree)」
+- 仕様 `docs/specs/2026-10-07-org-multi-org-director.md:134` の「確かめは、…」の一覧と、「gitignore されたファイル(feature worktree の `.harness/state/` …)は止める理由にせず、worktree と一緒に消える」
+- 固定しているテスト: `internal/org/org_skill_send_sync_test.go:160`(「gitignore されたファイルは数えず、worktree と一緒に消える」)、`:206`(「ralph をその worktree の中から打った」)、`:215`。help の確かめの一覧を固定するテストはない
+- 影響: 断りの文そのものが台帳の場所と次の手を言うので、打った人と director には届く。一覧を読む人は、`--state-dir` か `RALPH_ORG_STATE_DIR` で機能の worktree の中の台帳を名指しても片付けが進む(台帳ごと消える)と読みうる
+- 直すと skill を固定するテストも変わるので、記録だけの修正の例外には当たらない
+- `/director` skill は確かめを列挙しないので当たらない。leader の手順 15(`internal/org/prompts/leader.md:486-492`)は未コミットと未追跡の断りだけを言う。leader が使う台帳はふつう main worktree の台帳なので、直さなくてよい。`.claude/rules/ralph/` に cleanup を書いた文はない(`grep`)
+
+所見 C3-D2(Info): MANUAL の出る場面の文が、記録のパスの worktree が台帳を持つ断りに合わない(self-review cycle 3 run 2 の Recommendation が挙げた 2 文)。
+
+- 文書は「記録が結びつきと合わない」を MANUAL の出る場面に挙げ、「MANUAL のない断りは理由を直して打ち直せば続きから片付く」と言う。`checkRecord` の新しい分かれ(`internal/org/cleanup.go:660`)は、記録が結びつきと合わないのに Manual がない。台帳を動かしたあとの次の片付けは、記録の違いの断り(Manual 付き)になる
+- 場所: `ralph org cleanup --help`(`internal/cli/org_cleanup.go:96-102`)、`ralph org merge --help`(`internal/cli/org_merge.go:135-140`)、`/org` skill の cleanup の行(`:240`)と「org の終わり方」(`:1167-1176`)、`/director` skill(`.claude/skills/director/SKILL.md:897-899`、`:1004-1006`)、それぞれの 3 つの写し、README `:276` と `:278`、仕様 `:134`。固定しているテストは `internal/org/org_skill_send_sync_test.go:169`、`:208`、`internal/org/director_skill_sync_test.go:964`、`:999`
+- 影響: 記録と binding のパスが違い、さらに台帳がその中にある形だけで、手で作らないとまず起こらない。断りの文が次の手を言い、director はそれをそのまま人に伝える。直すなら Manual の場面の括弧に「記録のパスの worktree が台帳を持つときは、先に台帳を動かす」程度を足す。残してもよい
+
+所見 C3-D3(Info): 割り込みと「すべて片付いたら 0」のどちらが先か。
+
+- コードは、最後のブランチまで片付いたあとでも、割り込みがあれば exit 1 を返す(`internal/cli/org_cleanup.go:348-351`)。help(`:102-108`)と `/org` skill の cleanup の行(`:240`)は、0 の条件と「中断も 1」を並べるだけで、どちらが先かを言わない
+- README `:278` は「exits 0 when every branch was cleaned or there was nothing to clean, and 1 when a branch was skipped, `gh` is not on PATH, ..., or origin names no GitHub repository ...」で、1 の場面に割り込みを挙げない(main worktree が見つからないときと `--branch` の断りも挙げていない。cycle 1 からの書き方)。仕様 `:134` は「すべて片付いたか片付けるものがなければ 0、1 本でも残れば 1」で、割り込みに触れない
+- `/director` skill の手順 3(`.claude/skills/director/SKILL.md:1000-1008`)は exit 1 を `SKIPPED:` の行で説明し、`CLEANED:` の行だけで exit 1 になる形(割り込み)を挙げない。同じ手順の「stderr の文をそのまま人に伝える」と「`CLEANED:` の行もあれば報告する」で補える
+- 直すなら、help と skill に「割り込みがあれば、すべて片付いたあとでも 1」と 1 句足す
+
+所見 C3-D4(Info): `ralph org merge --help` の「While it runs, except while it waits, ralph org regate and another ralph org merge are refused on the ledger」(`internal/cli/org_merge.go:186-187`)は cleanup を挙げない。cleanup も `regate.lock` を取るので、merge の間は断られる(merge の help の確かめの最初の項目 `:59` と cleanup の help の `:87-90` は、lock を共有する 3 つの動詞を挙げる)。この文は main の `internal/cli/org_merge.go:154` からあり、このブランチが後ろの文を変えたときに残った。cycle 3 の変更ではなく、cycle 1・2 の verify が見落としていた。README `:276` の「one regate, merge, or cleanup runs per ledger」は合っている。
+
+所見 C3-D5(Info): 計画の本文の D2(確かめ 0〜6)と D6 は、台帳の確かめと D6 の例外を書いていない。Progress(`:227`)が「新しい確かめは `run` の頭に置き、計画の本文の D2 は変えない」と決めており、承認のあとに本文を変えない運用の、記録された逸脱。Progress には、この verify の結果がまだない(`/pr` の前に足せばよい)。
+
+在るもの: `checkLedger` の断りの文そのもの(台帳の場所、消えるもの、次の手)、`ledgerMoveStep` の条件(走る org と `ralph org` のコマンドの両方)、`pathWithinDir` の注釈(`internal/org/permissions.go:215-220`)の `pathWithin` への指し示し、`ralph org cleanup --help` と `/org` skill の「中断も 1」、tech-debt の R3-L3 の行(`docs/tech-debt/README.md` の `ledgerMoveStep` を含む「such as」の一覧。HEAD の `wc -l` は `internal/org/cleanup.go` 1084 行、`internal/cli/org_cleanup_test.go` 1127 行で、800 行を越えるという記述と合う)、AGENTS.md の地図、recipe、leader の手順 15。
+
+### Coverage gaps(cycle 3)
+
+- テストの実行(cycle 3 の新しいテストと既存のテスト)と、変異が落ちることの確かめは `/test` に残す
+- 台帳を動かしたあとの打ち直しが確かめ 4 以降に進むことは、コードを読んだだけで、打っては確かめていない
+- 大文字小文字の subtest(self-review の数えで 6 つ)は、CI の `ubuntu-latest` では skip になる(self-review cycle 3 run 2 の Known gaps)。この Mac の volume で走るかは `/test` が見る
+- #286 の merge で両方が触った 15 ファイルは、同期の検査と写しの一致と、上の drift の確かめの範囲でしか読んでいない
+- 実際の gh、ssh の別名の origin、実機の座席と director の振る舞いは、cycle 2 と同じく確かめていない
+
 ## Verdict
 
-- Verdict(cycle 2、HEAD 09e1e93b): pass
+- Verdict(cycle 3、HEAD 995f8b51): pass
+- Verified: AC1〜AC4 と AC3b(静的)、issue の受け入れ条件 1〜4、新しい 2 つの台帳の断りが AC3 の形(何も消さない、理由と次の手、merge は exit 0)に合うこと、最後のブランチの片付けの途中の割り込みが help の「1 for an interrupt」に合うこと、`TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml` が今もその AC(main worktree の `ralph.toml` の `auto_merge`)を両方向で見ること、`run-static-verify.sh`・`check-skill-sync.sh`・`check-sync.sh` の通過、`git diff --check`、U+FFFD、写しの一致、計画の digest
+- Partially verified: AC5 と issue の受け入れ条件 5(C3-D1 の文書と help の残り)、AC6(同期の検査と静的解析は通った。テストは `/test`)
+- Not verified: テストの実行、台帳を動かしたあとの打ち直し(読んだだけ)、実際の gh、ssh の別名の origin、実機の座席と director の振る舞い
+- Result: pass。動きが受け入れ条件と食い違う所見はない。所見は LOW 1 つ(C3-D1: 台帳の断りが help・skill・README・仕様の確かめの一覧になく、gitignore されたファイルの文に例外がない)と Info 4 つ(C3-D2〜C3-D5)で、どれも /sync-docs に渡す。C3-D1 は skill を固定するテストも変わる
+
+### cycle 2(HEAD 09e1e93b)
+
+- Verdict: pass
 - Verified: AC1〜AC4 と AC3b(静的)、issue の受け入れ条件 1〜4、D1〜D6 の cycle 2 の差分、`ralph org merge-order` の一覧と `--json` が変わらないこと、merge の origin の断りの文が変わらないこと、script の止まり方で残る状態が新しい断りに入らないこと(git の probe)、`run-static-verify.sh`・`check-skill-sync.sh`・`check-sync.sh` の通過、写しの一致、計画の digest
 - Partially verified: AC5 と issue の受け入れ条件 5(C2-D1・C2-D2 の文書と help の残り)、AC6(同期の検査と静的解析は通った。テストは `/test`)
 - Not verified: テストの実行、実際の gh での cleanup、ssh の別名の origin での cleanup、実機の座席と director の振る舞い
