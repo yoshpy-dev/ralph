@@ -6,6 +6,8 @@
 - Scope: `git diff 15e301c8...HEAD`(HEAD 44f13b7f)。Go は `internal/org` と `internal/cli`、ほかに skill・文書・template。`./scripts/run-test.sh` は changed scope のまま打ち、選ばれた pack は golang で、`go test ./...` が 9 パッケージを `(cached)` なしで打った。テストの関数はこの diff で 47 本増え、消えたものはない
 - Evidence: `docs/evidence/test-2026-10-28-org-merge-cleanup.log`(gitignore。`run-test.sh` の全出力、変異の表と各回の結果、coverage の数字。wrapper 自身の写しは `docs/evidence/verify-2026-10-28-113631.log`)
 
+この下の「Test execution」から「Test gaps」までは cycle 1(HEAD 44f13b7f)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 9a6ae47c)の test は、「Test gaps」と「Verdict」の間の「cycle 2(HEAD 9a6ae47c)」の節にある。いまのブランチの verdict は「Verdict」の節の先頭の cycle 2 の行で、cycle 1 の verdict はその下の「cycle 1(HEAD 44f13b7f)」に残している。cycle 2 の変異の ID は `C2-M<n>`。
+
 ## Test execution
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
@@ -130,7 +132,116 @@ M20 の回だけ、2 件が落ちたあとに時間切れになった。M21〜M2
 
 1〜6 は、どれも確かめ 0〜6 と「exit 0 は記録した merge」の判定を変えない道で、変異で確かめた主な判定はすべてテストに固定されている。
 
+## cycle 2(HEAD 9a6ae47c)
+
+- Date: 2026-10-29
+- Tester: tester サブエージェント(`/test`、cycle 2)
+- Scope: cycle 2 でコードが変わったのは 3 コミット。8e46db0f(S-X1: cleanup の PR の読み方を origin の repository に固定する。`internal/org/mergeorigin.go`、`MergeOrderParams.Origin`、CLI の origin の断り)、d3452a9d(S-X2: ディレクトリの消えた worktree の登録が binding のブランチにいなければ断る `checkRegistration`)、54fa6351(C2-F: `registrationAtRisk` を `checkRegistration` と `recordGone` が共有し、`foreignPRWhy` が origin を確かめるよう言う)。テストの関数は `732529d9..HEAD` で 10 本増え(`internal/org/cleanup_test.go` 2、`internal/org/merge_test.go` 2、`internal/org/mergeorder_test.go` 3、`internal/cli/org_cleanup_test.go` 3)、消えたものはない。ほかは文書と report。`./scripts/run-test.sh` は changed scope のまま打ち、選ばれた pack は golang だった
+- Evidence: `docs/evidence/test-2026-10-28-org-merge-cleanup-cycle2.log`(gitignore、5,599 行。`run-test.sh` の全出力、基準の絞った回の PASS の行、変異 13 個の差分と各回の FAIL の行)。wrapper 自身の写しは `docs/evidence/verify-2026-10-29-120824.log`。cycle 1 の証拠のログは書き換えていない
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 9 パッケージ | shell 45 本 OK(PASS を含む行 4,796)、Go 9 パッケージ ok | 0 | 1(cycle 1 と同じ `test-secret-scan-branch.sh` の「git 2.41 より古い実物の git」の行) | 1,782 秒(21:08:24〜21:38:06 JST)。開始時の load 14.0、終了時 13.9、途中で 51 まで上がった |
+| └ Go: `internal/org` | 1,260 本(トップレベル、HEAD の `go test -list`) | ok | 0 | 0 | 959.0 秒 |
+| └ Go: `internal/cli` | 878 本(同。cycle 1 の 845 本との差には main の merge の分も入る) | ok | 0 | 0 | 790.5 秒 |
+| └ Go: `cmd/ralph`、`internal/{config,insights,org/driver,scaffold}` | — | ok | 0 | 0 | 0.8〜3.7 秒 |
+| └ Go: `internal/{org/protocol,upgrade}` | — | ok(`(cached)`) | 0 | 0 | — |
+| 基準の絞った回: `go test -count=1 -v -run 'Cleanup\|MergeOrder\|MergeOrigin\|^TestMerge' ./internal/org/` | 158(サブテスト込み 640) | 158 | 0 | 0 | 185 秒 |
+| 基準の絞った回: `go test -count=1 -v -run 'OrgCleanup\|CleanupSteps\|OrgMerge\|PrintMergeResult' ./internal/cli/` | 50(サブテスト込み 133) | 50 | 0 | 0 | 282 秒 |
+| 変異 13 個(`go test -overlay`、下の Regression checks) | 13 | 13 個とも落ちた | — | — | 1 個 28〜299 秒 |
+| coverage の回: `go test -count=1 -coverprofile -run 'Cleanup\|MergeOrder\|MergeOrigin\|^TestMerge\|CheckMerge' ./internal/org/` | — | ok | 0 | 0 | 286 秒(終わったときの load 158) |
+
+負荷は、同じマシンの別の session の Xcode のビルドとシミュレータ(`swift-frontend` など)だった。変異と基準の回は、`run-test.sh` の間に 1 本ずつ順に打った。時間切れや負荷による失敗はなく、lead が挙げた既知の flaky な 2 本(`TestStartDirector_ACleanupThatCannotConfirmTheEndWritesNothingOnceItIsNotCurrent/an_attach_--replace`、`TestRegate_AnInterruptBeforeTheRecordUndoesTheMerge/while_a_script_runs`)も、`run-test.sh` の中で通った。`internal/org/protocol` と `internal/upgrade` の `(cached)` は、`go list -deps -test` でどちらも `internal/org` と `internal/cli` に依らないことを確かめた。
+
+### Coverage(cycle 2)
+
+- Statement: coverage の回の profile で、`internal/org/cleanup.go` 277/311(89.1%。cycle 1 は 243/277)、`internal/org/mergeorigin.go` 22/23(95.7%)
+- Function: cycle 2 で足した、または変えた関数のうち、`checkRegistration`、`registrationAtRisk`、`recordGone`、`keptBranch`、`lookupMergePRs`、`MergeOrigin.Arg`・`hasPR`・`foreignPRWhy` が 100%、`run` 93.5%、`readState` 87.5%、`ReadMergeOrigin` 93.3%
+- Branch: 計測なし(Go の道具は statement だけ)
+- Notes: 打たれていないブロックのうち cycle 2 の変更に入るのは、`ReadMergeOrigin` の `run == nil`(`internal/org/mergeorigin.go:91-92`)だけ。絞った org の回は偽の exec を渡すためで、nil を渡す CLI の道は `TestOrgCleanup_OriginThatNamesNoGitHubRepositoryIsRefused` などが実 git で打つ。`run` と `readState` の残りは cycle 1 からある道(パスがディレクトリでない、`os.Stat` や `rev-parse` の失敗)。`internal/cli` の profile は、org の coverage の回が終わったとき load が 150 を越えていたので取らなかった。CLI の新しい関数 `cleanupReadOrigin`・`cleanupOriginRefusal`・`cleanupLookupWhy` は、下の変異 C2-M12・C2-M13 と `TestOrgCleanup_OriginRefusalForEachProblem`(問題の値 6 つ)が見る
+
+### Failure analysis(cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (なし) | — | — | — |
+
+`run-test.sh`、基準の回、coverage の回で失敗はなく、打ち直しもしていない。
+
+### cycle 2 の変更とテストの対応
+
+S-X1(PR の読み方を origin に固定):
+
+| 変更 | テスト |
+| --- | --- |
+| origin の URL の読み方: https、scp の形、ssh.github.com、大文字の GHE は読む。ローカルパス、file URL、owner なし、`-` で始まる host・owner・repo は repository なし | `TestMergeOrigin_ReadsOriginsRepositoryOrSaysWhyNot`(`internal/org/merge_test.go:636`、10 行) |
+| get-url の失敗、時間切れ、中断、timeout 0 と負 | `TestMergeOrigin_GetURLThatFailsTimesOutOrIsInterrupted`(`:675`、5 つ) |
+| `Origin` があると gh に `-R github.com/o/r`、get-url を打たない、大文字の url の PR も使う | `TestMergeOrder_PinnedOriginReadsThePRsInItsRepository`(`internal/org/mergeorder_test.go:2224`) |
+| 別の owner、別の repository 名、別の host、http、repository を名指さない url の PR で、全ブランチが PR なしの skipped になり、同じ `PRLookupWhy` と note を持つ。gh は打ち直さない | `TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository`(`:2264`、5 つ) |
+| `PRLookupWhy`: failed は gh の誤り、found・none・limit_forks は空、gh がないとき、origin の URL と違う repository のとき。JSON には出ない | `TestMergeOrder_PRLookupWhySaysWhyGHsAnswerWasNotUsed`(`:2310`、3 つ) |
+| CLI: 別の owner/name、別の host の MERGED の PR は SKIPPED と exit 1、`--branch` も同じ理由で断る。gh の呼び出しはどれも `-R` 付き | `TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing`(`internal/cli/org_cleanup_test.go:232`、2 つ) |
+| CLI: origin がローカルパス、file URL、origin がないとき、gh を打たずに断る(`--branch` ありとなし) | `TestOrgCleanup_OriginThatNamesNoGitHubRepositoryIsRefused`(`:279`、3 つ) |
+| CLI: 問題ごとの断りの文 | `TestOrgCleanup_OriginRefusalForEachProblem`(`:751`、6 つ) |
+| merge の `readOrigin` を `ReadMergeOrigin` に置き換えても、merge の断りが変わらない | 前からある `TestCheckMerge_*` と `^TestMerge` のテスト(coverage の回と基準の回で通過) |
+
+S-X2 と C2-F(ディレクトリの消えた登録の確かめ):
+
+| 変更 | テスト |
+| --- | --- |
+| ディレクトリの消えた登録が、detached(PR が merge していないコミット)、別のブランチ、消えた binding のブランチ(HEAD がゼロ)、読めない HEAD(ゼロ)のどれかなら何も消さない。理由は登録の HEAD と、退避のコマンドか reflog の場所を出す。Manual をそのまま打つと登録・ブランチ・記録が消え、別のブランチは残る | `TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing`(`internal/org/cleanup_test.go:805`、4 つ) |
+| 記録がなく、登録が detached で、ディレクトリが残る場合と消えた場合: 同じ文で HEAD と退避を出す。退避と Manual をそのまま打つと、コミットは退避のブランチに残る | `TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead`(`:1008`、2 つ) |
+| 記録がなく、登録だけが残り、ブランチが消えた(HEAD がゼロ) | `TestCleanupFeatureWorktree_RecordGoneRemovesNothing/only the registration left`(`:959`) |
+| 再開の道は変わらない(worktree を消した、ディレクトリを消して登録が binding のブランチに残る、記録だけ、ブランチが動いた 2 つ) | `TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft`(`:705`、5 つ。どれも基準の回で通過) |
+
+lead が挙げた端の場面:
+
+- ゼロの HEAD: `GoneWorktreeRegisteredOffItsBranchRemovesNothing` の `the binding's branch, deleted` と `a HEAD git cannot read`(どちらも登録の HEAD は 0 が 40 個)、`RecordGoneRemovesNothing/only the registration left`
+- 別のブランチ: `GoneWorktreeRegisteredOffItsBranchRemovesNothing/another branch`(Manual のあとも `other` が登録の HEAD に残ることを見る)
+- ディレクトリが残る場合と消えた場合: `RecordGoneNamesADetachedRegistrationsHead` の 2 つ。ディレクトリがあり記録もあるときは cycle 1 からある確かめ 6 の道(`RefusedInTheWorktree/a detached HEAD with a commit`、`another branch`)
+- GitHub の repository を名指さない origin: `OriginThatNamesNoGitHubRepositoryIsRefused` の 3 つ、`ReadsOriginsRepositoryOrSaysWhyNot` の repository なしの 6 行
+- 別の host や owner の PR: `MergedPROfAnotherRepositoryRemovesNothing` の 2 つ、`PinnedOriginLeavesEveryPROutForAPROfAnotherRepository` の 5 つ。merge の側は `TestCheckMerge_RefusesWithNothingAfterTheFailingCheck` の別の host と別の owner/repo の 4 行
+
+### Regression checks(cycle 2)
+
+cycle 2 の判定をテストが本当に見ているかを、cycle 1 と同じやり方の変異で確かめた。worktree のファイルは変えず、1 か所だけの文字列の置き換えを `go test -overlay` で渡した。`cleanup.go` の変異は `-run 'Cleanup' ./internal/org/`、`mergeorigin.go` と `mergeorder.go` の変異は `-run 'MergeOrder|MergeOrigin|^TestMerge' ./internal/org/`、CLI の変異は `-run 'OrgCleanup|CleanupSteps' ./internal/cli/` で打った。C2-M8 と C2-M9 は、merge の側と CLI の側でも落ちることを見るため、`-run 'CheckMerge' ./internal/org/` と CLI の `-run 'TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing'` でも打った。前後の `git status --porcelain --ignored`(`.harness/cache/` を除く)は同じで、`git status --porcelain` は空のまま。
+
+| Previously broken behavior | Status | Evidence |
+| --- | --- | --- |
+| C2-M1 `run` が `checkRegistration` を通さない(ディレクトリの消えた登録をそのまま外す) | 落ちた | `GoneWorktreeRegisteredOffItsBranchRemovesNothing` の 4 つすべて |
+| C2-M2 `recordGone` が `registrationAtRisk` の文を足さない(`why != "" && false`) | 落ちた | `RecordGoneNamesADetachedRegistrationsHead` の 2 つ、`RecordGoneRemovesNothing/only the registration left` |
+| C2-M3 `readState` が登録の `detached` を記録しない | 落ちた(文で) | `GoneWorktreeRegisteredOffItsBranchRemovesNothing/a detached HEAD with a commit the PR did not merge`、`RecordGoneNamesADetachedRegistrationsHead` の 2 つ。この変異でも登録は「読めるブランチがない」として断られ、退避のコマンドも同じなので、落ちたのは理由の文の違いによる |
+| C2-M4 `registrationAtRisk` が binding のブランチの消えた登録を通す | 落ちた | `GoneWorktreeRegisteredOffItsBranchRemovesNothing/the binding's branch, deleted`、`RecordGoneRemovesNothing/only the registration left` |
+| C2-M5 ゼロの HEAD をコミットとして扱い、退避のコマンドを出す | 落ちた | `the binding's branch, deleted`、`a HEAD git cannot read`、`only the registration left` |
+| C2-M6 別のブランチの登録にも退避のコマンドを出す | 落ちた | `GoneWorktreeRegisteredOffItsBranchRemovesNothing/another branch` |
+| C2-M7 `readState` の「この worktree の登録」の印が次の登録に持ち越される(`ours = ours \|\| samePath(...)`) | 落ちた | `ResumesWhatAnEarlierCleanupLeft/the directory deleted, its registration left` だけ。あとに並ぶ別のなくなった worktree の `branch other` を読み、別のブランチの登録として断った |
+| C2-M8 `MergeOrigin.hasPR` が host を比べない | 落ちた | `PinnedOriginLeavesEveryPROutForAPROfAnotherRepository/o/r on another host`、`TestCheckMerge_RefusesWithNothingAfterTheFailingCheck` の別の host の 2 行(merge の `isOriginsPR` も同じ関数を使う)、CLI の `MergedPROfAnotherRepositoryRemovesNothing/o/r on another host` |
+| C2-M9 `hasPR` が owner/repo を比べない | 落ちた | `PinnedOriginLeavesEveryPROutForAPROfAnotherRepository/another owner`、`/another repository name`、`TestCheckMerge_RefusesWithNothingAfterTheFailingCheck` の別の owner/repo の 2 行、CLI の `/another owner/name` |
+| C2-M10 `Origin` があっても gh に `-R` を渡さない | 落ちた | `TestMergeOrder_PinnedOriginReadsThePRsInItsRepository` |
+| C2-M11 `Origin` があるとき、別の repository の PR を使う(`foreignPRWhy` を見ない) | 落ちた | `PinnedOriginLeavesEveryPROutForAPROfAnotherRepository` の 5 つすべて |
+| C2-M12 CLI が `Origin` を merge-order に渡さない | 落ちた | `TestOrgCleanup_CleansUpABranchMergedOnGitHub`(gh の呼び出しに `-R` がない)、`MergedPROfAnotherRepositoryRemovesNothing` の 2 つ |
+| C2-M13 CLI が GitHub の repository を名指さない origin を通す | 落ちた | `OriginThatNamesNoGitHubRepositoryIsRefused` のローカルパスと file URL、`OriginRefusalForEachProblem/no repository` |
+
+### Test gaps(cycle 2)
+
+1. 実際の gh が `-R <host>/<owner>/<repo>` を受けて、GHE の PR の url をテストの形で返すことは確かめていない。テストは偽の gh で見る(verify の cycle 2 と同じ)
+2. ssh の別名の origin(`~/.ssh/config` の Host)で cleanup が全ブランチを SKIPPED にすることを打つテストはない。計画 `:216` の記録どおり PR の既知の穴
+3. git 2.48 以降の `worktree.useRelativePaths=true` では gitdir が相対パスになり、C2-L1 の文の `<worktree>/.git` と文字では合わない。テストは絶対パスの既定だけを打つ(self-review cycle 2 run 2 の、所見にしていない穴)
+4. C2-M7 を落とすのは `ResumesWhatAnEarlierCleanupLeft/the directory deleted, its registration left` の 1 つだけで、git が別の登録をこの worktree の登録のあとに並べることに依る。並びが逆の環境ではこの変異は残るかもしれない。未確認です
+5. `internal/cli` の cycle 2 の coverage は測っていない(上の Coverage の Notes)
+6. cycle 1 の Test gaps の 1〜7 は、cycle 2 の変更で変わっていない
+
+どれも cycle 2 の判定(登録の確かめ 6、origin への固定、origin の断り)を変えない道で、変異で確かめた判定はすべてテストに固定されている。
+
 ## Verdict
+
+- Verdict(cycle 2、HEAD 9a6ae47c): pass
+- Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 9 パッケージ ok、`internal/org` と `internal/cli` は `(cached)` なし)。cycle 2 の新しいテスト 10 本と、前からある再開のテストが通った。変異 13 個はすべて落ちた
+- Fail: 0
+- Blocked: 0
+
+### cycle 1(HEAD 44f13b7f)
 
 - Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 9 パッケージ ok、`internal/org` と `internal/cli` は `(cached)` なし)。計画の Test plan の項目すべてに対応するテストがあり、「`regate.lock` を別のプロセスが持つ」だけは同じプロセスの別の fd で代えている。変異 26 個のうち 25 個が落ち、残った 1 個は等価
 - Fail: なし
