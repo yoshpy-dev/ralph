@@ -164,3 +164,64 @@
 
 - Merge: yes(Run 3。CRITICAL・HIGH・MEDIUM なし。Run 2 の L7 は直った。新しい所見は L8 の LOW 1 件)
 - Follow-ups: L8 は `paneenv.go:42` の comment 1 語(`unset or empty`)の直し。直さないなら対応は要らない。`/sync-docs` に渡すもの(README の director の段落、`/org` skill の 31〜34 行、`isolated-herdr-server.md` の 240〜249 行)は Run 2 のとおり。
+
+## Run 4: main の取り込み(d59966a9)と test の直し(92554f77)のあと
+
+- Date: 2026-10-29
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1 の 4 回目)
+- Scope: `git diff 436e5896..a1f0f40a`(Run 3 のあとに積まれた分)。読んだ head は依頼どおり a1f0f40a で、レビュー中に動いていない。中身は 3 つ。(1) 取り込みの merge commit d59966a9。衝突は `internal/org/driver/paneenv.go` の 1 か所だけで、`git show d59966a9 -- internal/org/driver/paneenv.go` を読み、main 側の変更(`/plan` の計画助言、`/cross-review`、`ralph config get` の説明)がこの branch の file に届いているかを、branch 固有の差分 `git diff origin/main...HEAD` と突き合わせた。(2) 92554f77 の `internal/org/prompts_leader_plan_test.go`(+96/-29)。(3) a1f0f40a の plan の Progress 5 行(読んだだけ)。main から入った file そのものの出来は見ていない。
+- ID: Run 4 の新しい所見は L9・L10(どちらも LOW)。L1〜L8 と番号は重ならない。
+
+### Run 3 の所見のその後
+
+| ID | 状態 | 確かめたこと |
+| --- | --- | --- |
+| L8 | 直った | `internal/org/driver/paneenv.go:34-43` の `PrimaryCLIEnv` の doc comment は、leader の計画助言が自分の CLI を使うのは変数が「unset or empty」のときだけで、pane が herdr の server の環境から得た値はそれに勝つ、と書く。雛形の `${RALPH_PRIMARY_CLI:-<あなたの CLI>}`(`leader.md:510`)の `:-` と合う。bash で `pick_reviewer "${RALPH_PRIMARY_CLI:-codex}"` を、空のとき `claude`、`CODEX` のとき `claude` で確かめた(空でも leader の CLI に落ちる)。 |
+
+### Evidence reviewed
+
+- 依頼の 1(merge の解決)
+  - `paneenv.go:34-43` の全文を、main の `/plan` の手順 11.b(`.claude/skills/plan/SKILL.md:79-83`)、`/cross-review` の手順 2(`.claude/skills/cross-review/SKILL.md:52-55`)、`scripts/xreview-helpers.sh:57-78` の `pick_reviewer` と突き合わせた。main 由来の前半(「`/plan` の手順 11.b と `/cross-review` の手順 2 が読み、skill が driver を `pick_reviewer` に渡す」)は、2 つの skill の書き方と合う。足した後半(leader の計画助言も読む、`unset or empty` のときだけ leader 自身の CLI)は雛形の 計画助言 と合い、見出しの名前(`## 機能ごとの org` の `### 計画助言`)も `leader.md:110` と `:491` にある。
+  - 衝突の外では、`git diff 436e5896..HEAD --stat -- internal/org internal/cli` が `paneenv.go` と `prompts_leader_plan_test.go` の 2 file だけを出す。main は `leader.md`、`/org` skill、`/director` skill、`director_skill_sync_test.go`、`internal/cli/config.go` を触っていない。`internal/config` の 3 file(`config.go` の `StandardConfig` の comment、`defaults_sync_test.go`、新しい `root_ralph_toml_test.go`)と `internal/insights` は main の変更で、branch が書き換えた `OrgReviewConfig` の comment(「leader は `org.review.plan_advisory` を読む」)とは矛盾しない。雛形が `/plan` の手順 11.c の指示文と見張りを写している部分は、`prompts_leader_plan_test.go:556-582` が main の SKILL.md に当たって通る(orchestrator の記録どおり)。
+  - main が書き換えた `ralph config get` の失敗の扱い(`templates/base/ralph.toml:19-29`、`README.md:135`、`/plan` の 11.a、`/cross-review` の手順 1)を、雛形の手順 `leader.md:498-506` と、branch が足した `[org.review]` の説明(`templates/base/ralph.toml:252-258`)に突き合わせた。L9。
+  - 雛形が `pick_reviewer` に渡す値を、main の 11.b の `case "$override" in claude|codex) ... esac` と比べた。L10。
+- 依頼の 2(92554f77)
+  - 差分の全体と、HEAD の `prompts_leader_plan_test.go:752-935`(stub、`advisoryWrites`、`advisorySleepStub`、`newAdvisoryFixture`、`run`、`runWriting`)と `:985-1168`(codex と claude の 2 本)。`gitOut` は `strings.TrimSpace` を返すので、`advisoryWrites` の `M tracked.txt` は ` M tracked.txt` の先頭の空白を落とした形。
+  - hang の case: stand-in は `exec /bin/sleep 240` で、`$!` はその sleep そのもの。見張りの `kill "$cpid"` は SIGTERM で、`wait` が 143 を返す。外側の期限(`advisoryRunTimeout` 120 秒)に先に当たると、`run` が process group ごと SIGKILL して `t.Fatalf` するので、`codex rc=143` はシェルが生きたまま TERM を受けたときにしか出ない。見張りの kill を外すと 120 秒で落ち、`advisorySleepStub` が効かず本物の `sleep 1200` が走っても落ちる。どちらの失敗も 120 秒+`WaitDelay` 10 秒で終わり、suite は止まらない。
+  - 書き換えの case: 追跡のファイルの書き換え(`git diff` の項)、新しい未追跡のファイル(`git status` の項と hash の項)、前から未追跡のファイルの書き換え(`git status` の行は前後で同じ `?? untracked.txt` で、hash の項だけが変わる)の 3 つは、それぞれ別の項に依る。codex の塊の `cmp` を外すと codex の書き換え 6 本(3 つ × bash と zsh)が、hash の項を外すと未追跡の 2 本が落ち、claude の塊も同じ。いつも `git: changed` にすると clean の case が `git: same` の確かめで落ちる。`runWriting` は stand-in が実際に変更したことを `git status` で先に確かめるので、stand-in が書けなかった case が通ることはない。これは読みの推論で、mutation は打っていない(implementer の結果は plan の Progress `:177`)。
+  - `mcp)` の枝の `exit 0` は、一覧の呼び出しが末尾の `STUB_WRITES` の書き込みに落ちないための行。外しても before の snapshot が先に取られているので test は通るとみられる(読みのみ、未確認)。実害のない冗長さで終わる。
+  - 後始末: 子は `Setpgid` の別 group で、`Cancel` が group ごと SIGKILL する。fixture は `t.TempDir()` で、書き換えの case が作る `new.txt` と `untracked.txt` もその中。ほかの file に触れない。
+- 手で確かめたこと(scratchpad のみ、worktree には何も書いていない): `bash` で `. ./scripts/xreview-helpers.sh; pick_reviewer "${RALPH_PRIMARY_CLI:-codex}"` を打った結果は、`gemini` が `codex`、末尾に空白のある `claude ` が `codex`、`CODEX` が `claude`、空が `claude`。leader が claude のとき(`:-claude`)の `gemini` も `codex`。L10 の根拠。
+- 確かめていない: テスト、静的検査、92554f77 の mutation(依頼どおり走らせていない)。
+
+### Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | L9 取り込んだ main は「`ralph config get` の失敗のうち off とみなすのは 2 つ(古い ralph の exit 1 と `unknown command "config"`、`ralph` が PATH にないときの shell の 127)」と決め、shipped の `templates/base/ralph.toml` の `[standard]` の説明、`README.md` の `ralph config get` の行、`/plan` の 11.a、`/cross-review` の手順 1 がそう書く。この branch が足した `[org.review]` の説明は、leader と reviewer が「exit code を `[standard]` の skill と同じに扱う」と書き、同じ段落で leader が `plan_advisory` を読むと言う。ところが leader の雛形は `ralph config get --help` の約束(`unknown command "config"` の exit 1 だけが off)に従うので、127 は「それ以外」になり、BLOCKED を上げて返事が来るまで止まる。BLOCKED を上げる `ralph org escalate` も `ralph` なので、`ralph` が PATH にない pane では上げられない。起きにくい(leader は `ralph org start` が作る pane で動く)が、利用者の `ralph.toml` に入る説明が、雛形の動きと食い違った。 | `templates/base/ralph.toml:22-25`(127 を off)と `:254-255`(「skills do with [standard] above」)、`internal/org/prompts/leader.md:498-506`(127 に当たる枝がない)、`README.md:135`、`.claude/skills/plan/SKILL.md:77`、`.claude/skills/cross-review/SKILL.md:33`。`prompts_leader_plan_test.go:459-495` は `ralph config get --help` の文だけを固定するので、どちらの動きでも通る。`internal/cli/config.go` の help は 127 に触れない(shell が返す値で、ralph は出せない)。 | 雛形の手順に「`ralph` が PATH になく shell が 127 を返したときも、off とみなして頼まず、そのことを書く」を足し、`ReadsTheSwitchFirst` の文の pin に 1 句入れる(README の「skills and seats」と `[org.review]` の説明が、そのまま正しくなる)。leader だけ厳しくするなら、`[org.review]` の説明に「leader は 127 を off とみなさない」と書く。 |
+| LOW | maintainability | L10 main の `/plan` 11.b と `/cross-review` の手順 2 は、`RALPH_PRIMARY_CLI` が `claude` か `codex` 以外なら無視して、自分の CLI を driver にする(`case "$override" in claude\|codex)`)。leader の雛形は `pick_reviewer "${RALPH_PRIMARY_CLI:-<あなたの CLI>}"` で値をそのまま渡すので、別の値は `pick_reviewer` の未知の driver の枝で `codex` になる。claude の leader には合うが、codex の leader は自分と同じ codex を相手に選ぶ。ralph が pane に入れる値は `claude` か `codex` だけ(spawn が検証する)なので、この値が来るのは herdr の server の環境に残った場合に限り、害も L5 と同じ(MCP を止める確かめは効き、相手のモデルの助言にならないだけ)。ただ `PrimaryCLIEnv` の comment は「reads it as well」と、`/plan` と同じ読み方に見える書き方をし、main が直した `xreview-helpers.sh` の header は「Both skills pass the driver they resolved」と言う。leader は 3 つ目の呼び方で、どちらにも出てこない。 | `internal/org/prompts/leader.md:510`、`.claude/skills/plan/SKILL.md:79-83`、`scripts/xreview-helpers.sh:63-64` と `:70-77`、`internal/org/driver/paneenv.go:39-43`。bash の確かめは上の Evidence | 直すなら雛形の括弧に「`claude` と `codex` 以外の値は無視する」と書き、打つ形を `/plan` の 11.b の `case` に揃える(`PicksTheOtherCLI` の表に 1 行足す)。直さないなら `PrimaryCLIEnv` の comment に「別の値は `pick_reviewer` にそのまま渡り、`codex` が選ばれる」と 1 句足し、L9 と一緒に tech-debt に 1 行送る。 |
+
+### Positive notes
+
+- 衝突の解決は main の文を土台にし、足したのは leader の計画助言と `unset or empty` の 2 点だけ。main 側が直した前半(「skill が driver を `pick_reviewer` に渡す」)を壊していない。`herdr_test.go` と `org_runtime_env_test.go` が固定する警告文は、この merge で動いていない。
+- 92554f77 は、/test が挙げた 3 つの穴(hang の case の 20 秒の上限、claude の塊の `git: changed`、未追跡のファイルの hash)をそれぞれ別の case で埋めた。hang の case は時間の上限を外し、見張りが TERM で止めたことを rc の値で見る形に替えたので、負荷で遅くなっても落ちず、見張りが欠ければ 120 秒で落ちる。
+- `runWriting` が stand-in の書き込みを `git status` で先に確かめるので、書けなかった case が「`git: changed` になるはず」の側で偽に通る道がない。`advisoryWrites` の comment が、未追跡のファイルの書き換えだけ `git status` の行が変わらず hash の項だけが見ることを書いている。
+- 変更は `prompts_leader_plan_test.go` の中だけで、共有の helper や他の test に触れていない。renamed した subtest(claude の `bash` / `zsh` が `bash/a clean review` などに)を名指しする file は repo にない(`git grep CommandRuns` で確認)。
+
+### Notes(所見にしないもの)
+
+- `paneenv.go:38-39` の main の文「`pick_reviewer` called without a driver ... picks codex when it is unset」は、同じ `:-` の展開で空のときも `claude` になる(上の bash の確かめ)。同じ comment の中で、この文は「unset」、足した文は「unset or empty」と書き分けている。前の文は main の書き方で、害はない。
+- `advisoryWrites`(case の表)と `advisoryStubWrites`(stub の末尾の shell)は名前が 1 語違いで、後者は stub の末尾そのものなので、`advisoryStubTail` のほうが探しやすい。どちらも comment で説明されているので所見にはしない。
+- stand-in は `Setpgid` で test 本体と別の group にある。test の binary が途中で殺された(`go test -timeout` の panic、Ctrl-C)ときは、走っていた run の本物の `sleep 1200` が最大 20 分残る。hang の case の `sleep 240` は見張りが 1 秒後に止めるので残らない。前からある性質で、92554f77 で増えたものではない。
+- `/test` の report(`docs/reports/test-2026-10-29-leader-plan-depth.md:129-131`)の Test gaps 3 件は、92554f77 が埋めた。report はその前の版のまま「pass(…時間の上限が負荷に弱いことを Test gaps に残した)」と書く。/test を回し直すなら自然に更新される。回し直さないなら、/pr の known gaps に写す前に閉じた旨を 1 行足す。
+- `/sync-docs` に渡すもの(Run 2・3 の 3 か所に加えて): `scripts/ralph-config.sh:10-18`(「two live consumers」として `/cross-review` と `/plan` だけを挙げる)と `.claude/rules/ralph/model-routing.md` の「Cross-review sync note」は、reviewer の model と effort の 3 変数の読み手に、機能の org の leader の雛形(`leader.md` の 計画助言、fallback は `prompts_leader_plan_test.go:650-680` が固定)を数えていない。
+
+### Coverage gaps
+
+- Run 1〜3 と同じ(本物の codex と claude での通し、Codex の leader の sandbox から `claude -p` が通るか、herdr の server の環境に `RALPH_PRIMARY_CLI` が残る pane)。
+- 92554f77 の mutation と stand-in の実行は、依頼どおり打っていない。implementer の記録(`-count=5` で 120 本 PASS、変異 3 つ)は plan の Progress `:177` にある。
+
+### Recommendation(Run 4)
+
+- Merge: yes(Run 4。CRITICAL・HIGH・MEDIUM なし。Run 3 の L8 は直った。新しい所見は L9・L10 の LOW 2 件)
+- Follow-ups: L9 は雛形の 1 文と pin の 1 句の足しで、同じ PR で直すのがよい。L10 は直さないなら comment 1 句。どちらも直さないなら、`docs/tech-debt/README.md` に 1 行(この PR は register を触っていない)。直しは雛形と test を動かすので、記録だけの例外には当たらず、`/self-review` からの再実行になる。cap の 2 回に収まるかどうかは orchestrator が決める。
