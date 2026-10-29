@@ -545,6 +545,24 @@ func moRegateGate(orgID, branch, head, base, reason string) ManifestEvent {
 // moRegateLog is the log of moRegateGate's records.
 const moRegateLog = "/state/gates/org-a-20261014T080000Z.log"
 
+// moCIGate is moRegateGate as ralph org regate records it from the PR's
+// checks (plan docs/plans/active/2026-10-29-regate-ci-checks.md, D4):
+// via=regate_ci, the log moRegateCILog, and the event gate_ci_passed when
+// reason is empty and gate_ci_failed otherwise, named here rather than by
+// gateRecord.event, which TestGateRecordDetails_CIRecord covers.
+func moCIGate(orgID, branch, head, base, reason string) ManifestEvent {
+	r := gateRecord{Reason: reason, Head: head, Base: base, BaseRef: "refs/remotes/origin/main", Branch: branch, By: "alice",
+		Via: gateViaRegateCI, Log: moRegateCILog}
+	event := EventGateCIPassed
+	if reason != "" {
+		event = EventGateCIFailed
+	}
+	return ManifestEvent{OrgID: orgID, Event: event, Details: r.details()}
+}
+
+// moRegateCILog is the log of moCIGate's records.
+const moRegateCILog = "/state/gates/org-a-20261029T080000Z.log"
+
 // TestMergeOrder_DetailsNameRegateForABranchWhoseOrgIsNotRunning covers
 // AC10 of plan docs/plans/active/2026-10-16-org-regate.md: for a branch whose
 // latest binding's org was disbanded, every Detail that tells the reader to
@@ -858,6 +876,93 @@ func TestMergeOrder_GateViaIsInTheEntryAndItsJSON(t *testing.T) {
 		if via, ok := keys["via"]; (want == "") == ok || (ok && string(via) != `"regate"`) {
 			t.Errorf("%s's gate JSON = %s; want \"via\":\"regate\" only for the record regate wrote", branch, b)
 		}
+	}
+}
+
+// TestMergeOrder_ReadsTheCIRecordsOfRegate covers AC2 to AC4 of plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md on merge-order's side
+// (D7): a gate_ci_passed is classified as a gate_passed is (ready when its
+// head and base are origin's tips, else regate or rebase), and a
+// gate_ci_failed as failed, whose Detail for a branch whose org is not
+// running says that CI failed on the head regate pushed, names the log of
+// the checks, says there is nothing to reset, and names ralph org regate
+// again; while the org runs bound to the branch it keeps the gate's wording.
+// A CI record and a local one read in the ledger's order, so the newer one
+// wins either way. A CI record's Details under a gate_passed name, a local
+// record's under a gate_ci_passed name, and a gate_ci_failed that cannot be
+// read are unreadable.
+func TestMergeOrder_ReadsTheCIRecordsOfRegate(t *testing.T) {
+	bind, gone := moBind("org-a", "auth"), moDisbanded("org-a")
+	onMain := moListing("main", "main", moMain, "feat/auth", moHeadA)
+	moved := moListing("main", "main", moMain2, "feat/auth", moHeadA)
+	ciPass, ciFail := moCIGate("org-a", "feat/auth", moHeadA, moMain, ""), moCIGate("org-a", "feat/auth", moHeadA, moMain, GateReasonCIFailed)
+	const ready = "the gate passed on aaaaaaaaaaaa, origin's tip of the branch, with base 111111111111, origin/main's tip"
+	const ciFailed = "CI failed (ci_failed) on aaaaaaaaaaaa, the head ralph org regate pushed to origin's branch or found there; the " +
+		"checks it read are in " + moRegateCILog + ", and with the head on origin there is nothing to reset: "
+	const next = "fix it in the feature worktree, push it, and run ralph org regate --branch feat/auth again"
+	for _, tc := range []struct {
+		name    string
+		lines   []any
+		listing string
+		class   string
+		detail  string // %s is the TS of the branch's latest gate record
+		event   string // the entry's Gate.Event
+		via     string // the entry's Gate.Via; "" also for a record that cannot be read
+	}{
+		{"ready: a gate_ci_passed of origin's tips", []any{bind, gone, ciPass}, onMain, MergeClassReady, ready, EventGateCIPassed,
+			gateViaRegateCI},
+		{"rebase: origin/main moved after the gate_ci_passed", []any{bind, gone, ciPass}, moved, MergeClassRebase,
+			"origin/main moved: gate base 111111111111, now 222222222222: run ralph org regate --branch feat/auth, which merges " +
+				"origin/main in and runs the gate again", EventGateCIPassed, gateViaRegateCI},
+		{"regate: origin's tip is not the gate_ci_passed's head", []any{bind, gone, moCIGate("org-a", "feat/auth", moHeadB, moMain, "")},
+			onMain, MergeClassRegate, "pushed after the gate, or the gate's head was not pushed: origin has aaaaaaaaaaaa, the gate " +
+				"checked bbbbbbbbbbbb: run ralph org regate --branch feat/auth", EventGateCIPassed, gateViaRegateCI},
+		{"failed: a gate_ci_failed", []any{bind, gone, ciFail}, onMain, MergeClassFailed, ciFailed + next, EventGateCIFailed,
+			gateViaRegateCI},
+		{"failed: a gate_ci_failed, with the org running another feature", []any{bind, ciFail, gone,
+			moBindTo("org-a", "split-1", "other", "feat/other")}, onMain, MergeClassFailed, ciFailed + "org_id org-a now runs " +
+			"another feature, on the branch feat/other: fix it in the feature worktree, push it, and once org-a is disbanded, run " +
+			"ralph org regate --branch feat/auth again", EventGateCIFailed, gateViaRegateCI},
+		{"failed: a gate_ci_failed while the org runs bound to the branch keeps the gate's wording", []any{bind, ciFail}, onMain,
+			MergeClassFailed, "the gate failed (ci_failed): fix it and run ralph org gate --org-id org-a again" + moGateClause,
+			EventGateCIFailed, gateViaRegateCI},
+		{"a gate_ci_passed after a gate_failed is ready", []any{bind, moFailed("org-a", "feat/auth", moHeadA, moMain,
+			GateReasonTestFailed), gone, ciPass}, onMain, MergeClassReady, ready, EventGateCIPassed, gateViaRegateCI},
+		{"a gate_ci_failed after a gate_passed is failed", []any{bind, moPassed("org-a", "feat/auth", moHeadA, moMain), gone, ciFail},
+			onMain, MergeClassFailed, ciFailed + next, EventGateCIFailed, gateViaRegateCI},
+		{"a gate_passed via regate after a gate_ci_failed is ready", []any{bind, gone, ciFail,
+			moRegateGate("org-a", "feat/auth", moHeadA, moMain, "")}, onMain, MergeClassReady, ready, EventGatePassed, gateViaRegate},
+		{"a CI record named gate_passed is unreadable", []any{bind, gone,
+			ManifestEvent{OrgID: "org-a", Event: EventGatePassed, Details: ciPass.Details}}, onMain, MergeClassUnreadable,
+			"the latest gate record (gate_passed at %s) cannot be read: run ralph org regate --branch feat/auth to record a new one",
+			EventGatePassed, ""},
+		{"a gate_passed's Details named gate_ci_passed are unreadable", []any{bind, gone,
+			ManifestEvent{OrgID: "org-a", Event: EventGateCIPassed, Details: moPassed("org-a", "feat/auth", moHeadA, moMain).Details}},
+			onMain, MergeClassUnreadable, "the latest gate record (gate_ci_passed at %s) cannot be read: run ralph org regate --branch " +
+				"feat/auth to record a new one", EventGateCIPassed, ""},
+		{"a gate_ci_failed that cannot be read after a pass is unreadable", []any{bind, gone, ciPass, moGarbled("org-a", EventGateCIFailed)},
+			onMain, MergeClassUnreadable, "the latest gate record (gate_ci_failed at %s) cannot be read: run ralph org regate --branch " +
+				"feat/auth to record a new one", EventGateCIFailed, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newMOFixture(t)
+			fx.add(t, tc.lines...)
+			fx.exec.lsOut = tc.listing
+			e := moEntry(t, fx.run(t, false), "feat/auth")
+			if e.Gate == nil {
+				t.Fatalf("feat/auth = %+v; want a gate record", e)
+			}
+			want := tc.detail
+			if strings.Contains(want, "%s") {
+				want = fmt.Sprintf(want, e.Gate.TS)
+			}
+			if e.Class != tc.class || e.Detail != want {
+				t.Fatalf("feat/auth = %s\n%q\nwant %s\n%q", e.Class, e.Detail, tc.class, want)
+			}
+			if e.Gate.Event != tc.event || e.Gate.Via != tc.via || e.Gate.Readable != (tc.class != MergeClassUnreadable) {
+				t.Errorf("gate = %+v; want the event %s, via %q, readable unless unreadable", e.Gate, tc.event, tc.via)
+			}
+		})
 	}
 }
 

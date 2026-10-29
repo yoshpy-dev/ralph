@@ -1096,6 +1096,57 @@ func TestRegate_GatesWhenNoRecordLetsItStop(t *testing.T) {
 	}
 }
 
+// TestRegate_ReadsACIRecordAsTheBranchsLatestRecord covers D7 of plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md on regate's side: with
+// HEAD origin's tip of feat/auth and containing origin's main, a
+// gate_ci_passed of HEAD on that tip as the branch's latest record, also
+// after a gate_failed of it, lets Regate stop as a gate_passed does
+// (RegateOutcomeUpToDate, with the CI record's log), and a gate_ci_failed of
+// HEAD after a gate_passed of it does not: Regate runs the scripts and records
+// a gate_passed via=regate, since [org.gate].regate_checks is local here.
+func TestRegate_ReadsACIRecordAsTheBranchsLatestRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines func(head, tip string) []any
+		stops bool // Regate stops at RegateOutcomeUpToDate
+	}{
+		{"a gate_ci_passed", func(head, tip string) []any { return []any{moCIGate("auth", "feat/auth", head, tip, "")} }, true},
+		{"a gate_ci_passed after a gate_failed", func(head, tip string) []any {
+			return []any{moGate("auth", "feat/auth", head, tip, "refs/remotes/origin/main", GateReasonTestFailed),
+				moCIGate("auth", "feat/auth", head, tip, "")}
+		}, true},
+		{"a gate_ci_failed after a gate_passed", func(head, tip string) []any {
+			return []any{moGate("auth", "feat/auth", head, tip, "refs/remotes/origin/main", ""),
+				moCIGate("auth", "feat/auth", head, tip, GateReasonCIFailed)}
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			head, tip := fx.tips(t)
+			fx.appendLines(t, tc.lines(head, tip)...)
+			before := fx.snapshot(t)
+			res := fx.mustRegate(t)
+			if !tc.stops {
+				if res.Outcome != RegateOutcomeGated || !res.Passed || res.Head != head || !slices.Equal(fx.calls(t), []string{"static", "test"}) {
+					t.Fatalf("regate = %+v, scripts run %v; want the scripts run and a pass recorded on %s", res, fx.calls(t), head)
+				}
+				if last := lastEvent(t, fx.o); last.Event != EventGatePassed || !strings.Contains(last.Details, " via=regate log=") {
+					t.Fatalf("last event = %+v; want a gate_passed via regate", last)
+				}
+				return
+			}
+			want := RegateResult{Outcome: RegateOutcomeUpToDate, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: head,
+				Base: tip, BaseRef: "refs/remotes/origin/main", LogPath: moRegateCILog}
+			if !reflect.DeepEqual(res, want) {
+				t.Fatalf("regate = %+v\nwant     %+v", res, want)
+			}
+			if after := fx.snapshot(t); after != before || fx.calls(t) != nil {
+				t.Fatalf("an up-to-date regate ran %v or changed %+v\nto %+v", fx.calls(t), before, after)
+			}
+		})
+	}
+}
+
 // TestRegate_GateOnlyRecordsAGatePassedViaRegate covers AC9's record: one
 // org-level gate_passed of the binding's org, the Details of Gate's record
 // with via=regate before log=, the log under <state-dir>/gates/ named after

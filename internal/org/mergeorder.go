@@ -23,7 +23,8 @@ import (
 // docs/specs/2026-10-07-org-multi-org-director.md). It lists the feature
 // branches of the ledger in the order their PRs may be merged now. A branch is
 // ready when its latest gate record (gate_record.go's gateRecord) is a
-// gate_passed whose head is the branch's tip on origin and whose base is the
+// gate_passed (or a gate_ci_passed, a regate's record of its PR's checks)
+// whose head is the branch's tip on origin and whose base is the
 // tip of origin's default branch now. The gate records are the only evidence
 // it reads: a reviewer's or the leader's word does not count.
 //
@@ -69,7 +70,8 @@ const (
 	// MergeClassUnreadable: the branch's latest gate record cannot be read, or
 	// a corrupt manifest line follows it and may be a newer one.
 	MergeClassUnreadable = "unreadable"
-	// MergeClassFailed: the branch's latest gate record is a gate_failed.
+	// MergeClassFailed: the branch's latest gate record is a gate_failed or
+	// a gate_ci_failed.
 	MergeClassFailed = "failed"
 	// MergeClassNoRemote: origin has no such branch.
 	MergeClassNoRemote = "no_remote"
@@ -244,14 +246,15 @@ type MergeOrderPR struct {
 // MergeOrderGate is a branch's latest gate record. Head, Base, BaseRef,
 // Reason and Via are empty when it cannot be read.
 type MergeOrderGate struct {
-	Event    string `json:"event"` // gate_passed or gate_failed
+	Event    string `json:"event"` // gate_passed, gate_failed, gate_ci_passed or gate_ci_failed
 	Readable bool   `json:"readable"`
 	Head     string `json:"head"`
 	Base     string `json:"base"`
 	BaseRef  string `json:"base_ref"`
-	Reason   string `json:"reason"` // GateReason*, "" on gate_passed
-	// Via is "regate" for a record ralph org regate wrote, left out for one
-	// ralph org gate wrote.
+	Reason   string `json:"reason"` // GateReason*, "" on a pass
+	// Via is "regate" for a record ralph org regate wrote ("regate_ci" for
+	// one it wrote from the PR's checks), left out for one ralph org gate
+	// wrote.
 	Via string `json:"via,omitempty"`
 	TS  string `json:"ts"`
 }
@@ -429,11 +432,14 @@ func (t *mergeTarget) pos() int {
 // the target branches in the order they first appear (C3, C8). A complete
 // binding (a scope_reserved read the way reserve.go reads it) makes its
 // branch a target and becomes the branch's binding and its org's latest one.
-// A gate record is readable when gateRecordFromDetails reads it and its event
-// name agrees with its reason; it attaches to its branch= branch, which it
+// A gate record (a gate_passed or gate_failed, or a gate_ci_passed or
+// gate_ci_failed, read as a pass and a failure the same way: plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7) is readable when
+// gateRecordFromDetails reads it and its event name agrees with its reason
+// and its via (gateRecord.event); it attaches to its branch= branch, which it
 // makes a target. One that is not attaches to every branch its org had a
 // complete binding or a readable gate record for before it, so that none of
-// them falls back to an older gate_passed (C8): ralph org gate runs only on
+// them falls back to an older pass (C8): ralph org gate runs only on
 // the branch of the org's latest binding, but ralph org regate records under
 // the org of a branch's binding while the org_id may be bound to another
 // branch later (plan docs/plans/active/2026-10-16-org-regate.md, D2), so the
@@ -478,7 +484,7 @@ func collectMergeTargets(l mergeLedger) (targets []*mergeTarget, unattached int)
 			t.bindingPos = i
 			boundBranch[ev.OrgID] = f.Branch
 			addOrgBranch(ev.OrgID, f.Branch)
-		case EventGatePassed, EventGateFailed:
+		case EventGatePassed, EventGateFailed, EventGateCIPassed, EventGateCIFailed:
 			g := &mergeGateRecord{pos: i, ev: ev}
 			g.record, g.readable = gateRecordFromDetails(ev.Details)
 			g.readable = g.readable && g.record.event() == ev.Event
@@ -1094,10 +1100,18 @@ func mergeRegateNext(t *mergeTarget, steps, purpose string) string {
 // or test_failed and kept in the feature worktree after head_moved or
 // tree_changed. A branch pushed after a gate-only regate failed on origin's
 // tip reads as the second too: merge-order reads no commits, so it cannot
-// tell the two apart.
+// tell the two apart. When regate wrote r from the PR's checks
+// (via=regate_ci, a gate_ci_failed), it says that CI failed on r's head, the
+// head regate pushed to origin's branch (or found there), names r's log,
+// which holds the checks regate read, and says there is nothing to reset,
+// since that head is on origin.
 func mergeRegateFailedDetail(t *mergeTarget, r gateRecord, remote mergeRemote) string {
 	next := mergeRegateNext(t, "fix it in the feature worktree, push it, and ", "")
 	switch {
+	case r.Via == gateViaRegateCI:
+		return fmt.Sprintf("CI failed (%s) on %s, the head ralph org regate pushed to origin's branch or found there; the checks it "+
+			"read are in %s, and with the head on origin there is nothing to reset: %s again", r.Reason, shortMergeSHA(r.Head), r.Log,
+			next)
 	case r.Via != gateViaRegate:
 		return fmt.Sprintf("the gate failed (%s): %s", r.Reason, next)
 	case remote.heads[t.branch] == r.Head:
@@ -1128,7 +1142,8 @@ func mergeGateCommand(t *mergeTarget) string {
 }
 
 // classifyGatePassed is classifyMergeTarget for a branch whose latest gate
-// record r is a readable gate_passed: no_remote, regate, wrong_base, rebase
+// record r is a readable gate_passed or gate_ci_passed, read the same way
+// whatever r's via: no_remote, regate, wrong_base, rebase
 // or ready. A base_ref that is neither refs/remotes/origin/<name> nor
 // refs/heads/<name> matches no default branch, so it is rebase. For a branch
 // whose Details name ralph org regate (mergeTarget.namesRegate), regate also

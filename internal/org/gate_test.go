@@ -1504,17 +1504,65 @@ func TestGateRecordDetails_Via(t *testing.T) {
 	}
 }
 
+// TestGateRecordDetails_CIRecord covers the record ralph org regate writes
+// from the PR's checks (plan docs/plans/active/2026-10-29-regate-ci-checks.md,
+// D4): a pass and a ci_failed with via=regate_ci have the Details of every
+// gate record, via=regate_ci right before log=, read back as written (the
+// reason ci_failed reads), and event() names them gate_ci_passed and
+// gate_ci_failed, never the gate_passed and gate_failed a binary older than
+// them reads. A record with via=regate keeps those names.
+func TestGateRecordDetails_CIRecord(t *testing.T) {
+	sha1, sha1b := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	r := gateRecord{Head: sha1, Base: sha1b, BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", By: "alice",
+		Via: gateViaRegateCI, Log: "/state/gates/auth-20261029T120000Z.log"}
+	const fields = " base_ref=refs/remotes/origin/main branch=feat/auth by=alice herdr_pane=unset via=regate_ci " +
+		`log="/state/gates/auth-20261029T120000Z.log"`
+	for _, tc := range []struct {
+		reason, event, details string
+	}{
+		{"", EventGateCIPassed, "head=" + sha1 + " base=" + sha1b + fields},
+		{GateReasonCIFailed, EventGateCIFailed, "reason=ci_failed head=" + sha1 + " base=" + sha1b + fields},
+	} {
+		r.Reason = tc.reason
+		if got := r.details(); got != tc.details {
+			t.Errorf("details of %+v = %q\nwant %q", r, got, tc.details)
+		}
+		if got, ok := gateRecordFromDetails(tc.details); !ok || got != r {
+			t.Errorf("details %q read back as %+v (%v); want %+v", tc.details, got, ok, r)
+		}
+		if got := r.event(); got != tc.event {
+			t.Errorf("event() of %+v = %s; want %s", r, got, tc.event)
+		}
+	}
+	if EventGateCIPassed != "gate_ci_passed" || EventGateCIFailed != "gate_ci_failed" {
+		t.Fatalf("the CI events are %s and %s; want gate_ci_passed and gate_ci_failed, which no older binary reads",
+			EventGateCIPassed, EventGateCIFailed)
+	}
+	r.Via = gateViaRegate
+	for reason, want := range map[string]string{"": EventGatePassed, GateReasonTestFailed: EventGateFailed} {
+		if r.Reason = reason; r.event() != want {
+			t.Errorf("event() of %+v = %s; want %s", r, r.event(), want)
+		}
+	}
+}
+
 // TestGateEvents_AreNotASeat covers AC6's second half: a manifest with
-// gate_passed and gate_failed lines reads as before for the roster, the
-// status, the report's roster, the running orgs, and disband --all's
-// targets.
+// gate_passed and gate_failed lines, and the gate_ci_passed and
+// gate_ci_failed of a regate that read the PR's checks (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D4), reads as before for
+// the roster, the status, the report's roster, the running orgs, and disband
+// --all's targets.
 func TestGateEvents_AreNotASeat(t *testing.T) {
 	leader := ManifestEvent{TS: "2026-10-13T11:00:00Z", OrgID: "org-a", SeatID: LeaderIdentity, Event: EventSpawned, Role: "leader", PaneID: "p-1"}
 	r := gateRecord{Head: strings.Repeat("a", 40), Base: strings.Repeat("b", 40), BaseRef: "refs/remotes/origin/main", Branch: "feat/auth", By: "alice", Log: "/l"}
 	passed := ManifestEvent{TS: "2026-10-13T12:00:00Z", OrgID: "org-a", Event: EventGatePassed, Details: r.details()}
 	r.Reason = GateReasonTestFailed
 	failed := ManifestEvent{TS: "2026-10-13T12:01:00Z", OrgID: "org-a", Event: EventGateFailed, Details: r.details()}
-	withLines := []ManifestEvent{leader, passed, failed}
+	r.Reason, r.Via = "", gateViaRegateCI
+	ciPassed := ManifestEvent{TS: "2026-10-13T12:02:00Z", OrgID: "org-a", Event: EventGateCIPassed, Details: r.details()}
+	r.Reason = GateReasonCIFailed
+	ciFailed := ManifestEvent{TS: "2026-10-13T12:03:00Z", OrgID: "org-a", Event: EventGateCIFailed, Details: r.details()}
+	withLines := []ManifestEvent{leader, passed, failed, ciPassed, ciFailed}
 
 	for _, opts := range []RosterOptions{{}, {IncludeDryRun: true}} {
 		roster := Roster(withLines, opts)
@@ -1522,10 +1570,10 @@ func TestGateEvents_AreNotASeat(t *testing.T) {
 			t.Fatalf("Roster(%+v) = %+v, want only the active leader", opts, roster)
 		}
 	}
-	if got := RunningOrgs([]ManifestEvent{passed, failed}); len(got) != 0 {
+	if got := RunningOrgs([]ManifestEvent{passed, failed, ciPassed, ciFailed}); len(got) != 0 {
 		t.Fatalf("RunningOrgs = %q, want gate events alone not to make an org run", got)
 	}
-	if got := orgsToDisband([]ManifestEvent{passed, failed}); len(got) != 0 {
+	if got := orgsToDisband([]ManifestEvent{passed, failed, ciPassed, ciFailed}); len(got) != 0 {
 		t.Fatalf("orgsToDisband = %q, want gate events alone not to make a target", got)
 	}
 	report := BuildOrgReport(withLines, nil, "org-a", "2026-10-13", 0)
@@ -1548,7 +1596,9 @@ func TestGateEvents_AreNotASeat(t *testing.T) {
 // TestLeaderActivityEventCount_GateEvents covers AC6's first half: each
 // gate_passed and gate_failed of the watched org counts one, also one whose
 // Details hold reason=watchdog_ (no gate record is a watchdog write), and
-// another org's does not.
+// another org's does not. The gate_ci_passed and gate_ci_failed only ralph
+// org regate writes do not count (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7).
 func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 	gateEvent := func(orgID, event, details string) ManifestEvent {
 		return ManifestEvent{TS: "2026-10-13T12:00:00Z", OrgID: orgID, Event: event, Details: details}
@@ -1564,6 +1614,8 @@ func TestLeaderActivityEventCount_GateEvents(t *testing.T) {
 		{"gate_failed in the watched org counts", gateEvent("org-a", EventGateFailed, "reason=test_failed head=a"), 1},
 		{"a gate event whose Details hold reason=watchdog_ counts", gateEvent("org-a", EventGateFailed, `log="/reason=watchdog_x"`), 1},
 		{"gate_passed in another org does not count", gateEvent("org-b", EventGatePassed, "head=a"), 0},
+		{"gate_ci_passed in the watched org does not count", gateEvent("org-a", EventGateCIPassed, "head=a via=regate_ci"), 0},
+		{"gate_ci_failed in the watched org does not count", gateEvent("org-a", EventGateCIFailed, "reason=ci_failed head=a via=regate_ci"), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

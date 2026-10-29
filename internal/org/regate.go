@@ -38,7 +38,8 @@ import (
 //     branch under it whose gate_passed on origin's default branch tip is
 //     the branch's latest record is pushed (for a record Regate wrote,
 //     via=regate, only when HEAD is Regate's own merge commit,
-//     regateIsOwnMerge), and nothing else is done (regateHeadNotOnOrigin,
+//     regateIsOwnMerge, and never for one it wrote from the PR's checks,
+//     via=regate_ci), and nothing else is done (regateHeadNotOnOrigin,
 //     RegateOutcomePushOnly);
 //   - when HEAD contains origin's default branch tip and the branch's latest
 //     gate record is a readable gate_passed of HEAD on that tip, it stops
@@ -442,8 +443,8 @@ func readRegateBranch(l mergeLedger, branch string) regateBranch {
 // base tip, which lets Regate stop before the scripts (AC3) and, for a HEAD
 // that is not origin's tip of the branch, push it and nothing else (D4): it is
 // readable, no corrupt line follows it (either could hide a newer record), and
-// it is a gate_passed of t's HEAD whose base is t's base tip and whose
-// base_ref names t's default branch.
+// it is a gate_passed or gate_ci_passed of t's HEAD whose base is t's base tip
+// and whose base_ref names t's default branch.
 func (b regateBranch) passedOn(t gateTarget) bool {
 	g := b.gate
 	if g == nil || !g.readable || b.corruptAfterGate || g.record.Reason != "" {

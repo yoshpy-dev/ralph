@@ -1483,6 +1483,91 @@ func TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset(t *testing.T) 
 	}
 }
 
+// TestRegate_ACIPassIsNotPushedAgainOnceOriginMovedOff covers AC10 of plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md (D7): a gate_ci_passed of
+// HEAD on origin's main is written only once HEAD is on origin, so when
+// origin's feat/auth was put back under HEAD (a force push to its parent) or
+// moved to another commit, running Regate again is no push-only retry. It
+// refuses with the reason that someone moved origin's branch and the commands
+// to check origin, pushes nothing (origin's feat/auth stays where it was put),
+// runs and records nothing, and names no git reset --keep.
+func TestRegate_ACIPassIsNotPushedAgainOnceOriginMovedOff(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		move func(t *testing.T, fx *regateFixture, head string) string // origin's feat/auth after the move
+	}{
+		{"put back under HEAD", func(t *testing.T, fx *regateFixture, head string) string {
+			parent := gitOut(t, fx.worktree, "rev-parse", head+"^")
+			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", parent)
+			return parent
+		}},
+		{"moved to another commit", func(t *testing.T, fx *regateFixture, head string) string {
+			other := gitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", head+"^", "-m",
+				"another", head+"^{tree}")
+			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", other)
+			return other
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			head, tip := fx.tips(t)
+			fx.appendEvents(t, moCIGate("auth", "feat/auth", head, tip, ""))
+			moved := tc.move(t, fx, head)
+			before := fx.snapshot(t)
+			res, err := fx.regate(context.Background())
+			fx.assertRefused(t, res, err, before, []string{"org: regate: the latest gate record of feat/auth is a pass of the PR's " +
+				"checks (via=regate_ci) of HEAD " + head + " in " + fx.worktree + ", recorded after its push reached origin, but " +
+				"origin's tip of the branch is now " + moved + ": someone moved origin's branch since (with a force push, for one), " +
+				"and pushing HEAD again would undo that; check origin (git -C " + fx.worktree + " fetch origin, then git -C " +
+				fx.worktree + " log --oneline --graph HEAD refs/remotes/origin/feat/auth) and run ralph org regate --branch " +
+				"feat/auth again once HEAD and origin's tip agree"}, []string{"reset --keep"})
+			if got := fx.originBranch(t); got != moved {
+				t.Fatalf("origin's feat/auth = %s; want it left at %s", got, moved)
+			}
+		})
+	}
+}
+
+// TestRegate_ACIRecordNamesNoResetKeep covers regateResetHint for a record
+// Regate wrote from the PR's checks (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7): its head was on
+// origin, so its merge commit was pushed. With HEAD Regate's own merge commit
+// whose push failed, a gate_ci_failed of it, or a gate_ci_passed of it after
+// origin's main moved on (no push-only retry), as the branch's latest record,
+// running Regate again refuses with regateCheckOriginHead's reason only and
+// names no git reset --keep, which it names for the same HEAD after a
+// gate_passed via=regate (TestRegate_AFailedPushIsNotRetriedPastWhatChanged).
+func TestRegate_ACIRecordNamesNoResetKeep(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+		moveOn bool // origin's main moves on after the record
+	}{
+		{"a gate_ci_failed", GateReasonCIFailed, false},
+		{"a gate_ci_passed after origin's main moved", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newRegateFixture(t)
+			pre, _ := fx.tips(t)
+			tip := fx.pushToOrigin(t, "main")
+			allow := fx.rejectPushes(t)
+			first := fx.mustRegate(t)
+			if first.Outcome != RegateOutcomeMerged || !first.Passed || first.PushFailed == "" || first.Merge == "" {
+				t.Fatalf("regate = %+v; want a merge commit that passed and whose push failed", first)
+			}
+			allow()
+			fx.appendEvents(t, moCIGate("auth", "feat/auth", first.Merge, tip, tc.reason))
+			if tc.moveOn {
+				fx.pushToOrigin(t, "main")
+			}
+			callsBefore, before := fx.calls(t), fx.snapshot(t)
+			res, err := fx.regate(context.Background())
+			fx.assertRefusedAgain(t, res, err, before, callsBefore, []string{"HEAD " + first.Merge + " of feat/auth in " + fx.worktree +
+				" has commits that origin's tip " + pre + " of the branch does not"}, []string{"reset --keep", "regate_ci"})
+		})
+	}
+}
+
 // excludeLocally makes the main checkout and its worktrees ignore each
 // pattern, in the repository's own .git/info/exclude: a local ignore that no
 // commit carries.
