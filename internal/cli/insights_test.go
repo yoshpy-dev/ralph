@@ -295,6 +295,60 @@ func TestInsightsCmd_ReceiptsExplicitFlagOverridesDefault(t *testing.T) {
 	}
 }
 
+// appendInsightsReceipt appends one honored receipt for orgID's seatID to
+// the receipts file at path.
+func appendInsightsReceipt(t *testing.T, path, orgID, seatID string) {
+	t.Helper()
+	if err := org.NewReceiptStoreAtPath(path).Append(org.Receipt{
+		TS:             "2026-10-30T00:00:00Z",
+		OrgID:          orgID,
+		SeatID:         seatID,
+		Driver:         "claude",
+		CommandedModel: "opus",
+		Honored:        org.HonoredTrue,
+	}); err != nil {
+		t.Fatalf("append a receipt to %s: %v", path, err)
+	}
+}
+
+// TestInsightsCmd_StateDirFlagNamesTheReceiptsLedger pins that, without
+// --receipts, --state-dir names the ledger whose model-receipts.jsonl is
+// read (plan 2026-10-30-org-state-dir-local, AC7).
+func TestInsightsCmd_StateDirFlagNamesTheReceiptsLedger(t *testing.T) {
+	stateDir := t.TempDir()
+	receiptsPath := org.ReceiptsPathIn(stateDir)
+	appendInsightsReceipt(t, receiptsPath, "demo", "lead")
+
+	out := runInsightsCmd(t, "--events-dir", filepath.Join(t.TempDir(), "events"), "--state-dir", stateDir)
+
+	if !strings.Contains(out, "ORG demo  SEAT lead") {
+		t.Errorf("expected the receipts of --state-dir's ledger to be read, got:\n%s", out)
+	}
+	if !strings.Contains(out, "=== Receipts (org runtime model-receipts: "+receiptsPath+") ===") {
+		t.Errorf("expected the receipts path %q in the section header, got:\n%s", receiptsPath, out)
+	}
+}
+
+// TestInsightsCmd_ReceiptsFlagOverridesStateDir pins that --receipts wins
+// over --state-dir: the explicit file is read, and the ledger's receipts
+// are not (plan 2026-10-30-org-state-dir-local, AC7).
+func TestInsightsCmd_ReceiptsFlagOverridesStateDir(t *testing.T) {
+	stateDir := t.TempDir()
+	appendInsightsReceipt(t, org.ReceiptsPathIn(stateDir), "demo", "lead")
+	explicitPath := filepath.Join(t.TempDir(), "explicit-receipts.jsonl")
+	appendInsightsReceipt(t, explicitPath, "acme", "reviewer")
+
+	out := runInsightsCmd(t, "--events-dir", filepath.Join(t.TempDir(), "events"),
+		"--state-dir", stateDir, "--receipts", explicitPath)
+
+	if !strings.Contains(out, "ORG acme  SEAT reviewer") || !strings.Contains(out, explicitPath) {
+		t.Errorf("expected the --receipts file %s to be read, got:\n%s", explicitPath, out)
+	}
+	if ledgerReceipts := org.ReceiptsPathIn(stateDir); strings.Contains(out, "ORG demo") || strings.Contains(out, ledgerReceipts) {
+		t.Errorf("expected --state-dir's receipts %s to be ignored when --receipts is passed, got:\n%s", ledgerReceipts, out)
+	}
+}
+
 // TestInsightsCmd_ReceiptsTextContractExample pins the exact text-output
 // contract from the plan (AC-3): "ORG demo  SEAT lead  commanded=opus
 // honored: true=3 false=1 unknown=2  rate=75% (unknown 2 excluded)".

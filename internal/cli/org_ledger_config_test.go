@@ -14,9 +14,9 @@ import (
 
 // Tests for the personal file's [org].state_dir as a tier of the ledger
 // resolution, through the real CLI path (resolveOrgLedger), for plan
-// 2026-10-30-org-state-dir-local (AC1, AC2, AC3, AC5). TestMain turns the
-// personal file off (config.LocalConfigEnv), so each test turns it back on.
-// Every test chdirs, so none of them runs in parallel.
+// 2026-10-30-org-state-dir-local (AC1, AC2, AC3, AC5, AC7). TestMain turns
+// the personal file off (config.LocalConfigEnv), so each test turns it back
+// on. Every test chdirs, so none of them runs in parallel.
 
 // newOrgLedgerConfigRepo is newLegacyLedgerRepo (the test runs in its linked
 // worktree) with the personal file at the main worktree's root naming
@@ -266,13 +266,7 @@ func TestRunDoctorFull_PersonalFileThatCannotResolveTheLedgerIsAFailLine(t *test
 	if err := os.MkdirAll(ledger, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	e := newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection)
-	fake := doctorMGEnv(e, true, "")
-	useDoctorMGEnv(t, func(targetDir string) (org.MergeGuaranteeParams, string, error) {
-		params, _, _ := fake(targetDir)
-		_, stateDir, err := mergeGuaranteeEnvFromOS(targetDir)
-		return params, stateDir, err
-	})
+	useDoctorMGEnvResolvingTheLedger(t, newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection))
 
 	for _, tc := range []struct {
 		name, body, wantLedgerLine string
@@ -316,6 +310,146 @@ func TestRunDoctorFull_PersonalFileThatCannotResolveTheLedgerIsAFailLine(t *test
 			}
 			if !errors.Is(cacheErr, os.ErrNotExist) {
 				t.Errorf("merge-guarantee.json was written into %s (stat: %v), want no cache", ledger, cacheErr)
+			}
+		})
+	}
+}
+
+// TestDoctor_StateDirFlagChoosesTheLedgerOverThePersonalFile covers AC7 for
+// doctor: `ralph doctor --state-dir <dir>` caches the merge guarantee in
+// <dir>, not in the ledger the default tiers name, and a personal file whose
+// [org].state_dir is relative, or that is not TOML, gives no Org ledger fail
+// line, since the flag names the ledger. Without the flag the same broken
+// file gives that fail line, and with no personal file the cache goes into
+// the default ledger, which is what makes both absences mean something.
+func TestDoctor_StateDirFlagChoosesTheLedgerOverThePersonalFile(t *testing.T) {
+	dir, _ := doctorMGProject(t)
+	t.Chdir(dir)
+	t.Setenv(config.LocalConfigEnv, "")
+	path := config.LocalPath("ralph.toml")
+	defaultLedger, _, err := org.ResolveOrgStateDir("", false)
+	if err != nil {
+		t.Fatalf("resolve the default ledger: %v", err)
+	}
+	if err := os.MkdirAll(defaultLedger, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := t.TempDir()
+	useDoctorMGEnvResolvingTheLedger(t, newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection))
+	runDoctorCmd := func(args ...string) (string, error) {
+		var out string
+		err := captureStdoutText(t, &out, func() error {
+			_, _, err := runRootCmdSplit(t, append([]string{"doctor"}, args...)...)
+			return err
+		})
+		return out, err
+	}
+
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{"relative state_dir", "[org]\nstate_dir = \"ledger\"\n"},
+		{"not TOML", "[org\n"},
+		{"no personal file", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, d := range []string{defaultLedger, stateDir} {
+				_ = os.Remove(org.MergeGuaranteePathIn(d))
+			}
+			if tc.body == "" {
+				if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+			} else {
+				writeTestFile(t, path, tc.body)
+			}
+
+			out, err := runDoctorCmd("--state-dir", stateDir)
+			if err != nil || strings.Contains(out, "Org ledger") {
+				t.Errorf("ralph doctor --state-dir = %v; want no error and no Org ledger line:\n%s", err, out)
+			}
+			if want := "Merge guarantee: pass — github_protection: "; !strings.Contains(out, want) {
+				t.Errorf("output has no %q line:\n%s", want, out)
+			}
+			if want := "; cached in " + org.MergeGuaranteePathIn(stateDir) + "\n"; !strings.Contains(out, want) {
+				t.Errorf("the merge guarantee line does not end with %q:\n%s", want, out)
+			}
+			if _, err := os.Stat(org.MergeGuaranteePathIn(defaultLedger)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("merge-guarantee.json was written into the default ledger %s (stat: %v), want it only in %s", defaultLedger, err, stateDir)
+			}
+
+			out, _ = runDoctorCmd()
+			if tc.body != "" {
+				if !strings.Contains(out, "  ✗ Org ledger: fail — cannot resolve the org ledger: "+path+": ") {
+					t.Errorf("ralph doctor without --state-dir has no Org ledger fail line naming %s:\n%s", path, out)
+				}
+				return
+			}
+			if _, err := os.Stat(org.MergeGuaranteePathIn(defaultLedger)); err != nil {
+				t.Errorf("ralph doctor without --state-dir wrote no cache into the default ledger %s: %v\n%s", defaultLedger, err, out)
+			}
+		})
+	}
+}
+
+// TestInsights_PersonalFileNamesTheReceiptsLedger covers AC1 and AC7 for
+// `ralph insights`: from the linked worktree, with neither --state-dir nor
+// --receipts, it reads model-receipts.jsonl from the ledger the personal
+// file names, and --state-dir wins over the personal file.
+func TestInsights_PersonalFileNamesTheReceiptsLedger(t *testing.T) {
+	_, ledger := newOrgLedgerConfigRepo(t)
+	appendInsightsReceipt(t, org.ReceiptsPathIn(ledger), "demo", "lead")
+	other := t.TempDir()
+	appendInsightsReceipt(t, org.ReceiptsPathIn(other), "acme", "reviewer")
+	eventsDir := filepath.Join(t.TempDir(), "events")
+
+	out := runInsightsCmd(t, "--events-dir", eventsDir)
+	if !strings.Contains(out, "ORG demo  SEAT lead") || !strings.Contains(out, org.ReceiptsPathIn(ledger)) {
+		t.Errorf("ralph insights did not read the receipts of the personal file's ledger %s:\n%s", ledger, out)
+	}
+
+	out = runInsightsCmd(t, "--events-dir", eventsDir, "--state-dir", other)
+	if !strings.Contains(out, "ORG acme  SEAT reviewer") || strings.Contains(out, "ORG demo") {
+		t.Errorf("ralph insights --state-dir %s did not read only that ledger's receipts:\n%s", other, out)
+	}
+}
+
+// TestInsights_BrokenPersonalFileFailsUntilStateDirOrReceiptsIsPassed
+// covers AC5 and AC7 for `ralph insights`: a personal file whose
+// [org].state_dir is relative, or that is not TOML, makes insights with
+// neither flag exit 1 naming the file. insights runs no config.Load, so with
+// --state-dir it reads that ledger's receipts, and with --receipts it
+// resolves no ledger at all.
+func TestInsights_BrokenPersonalFileFailsUntilStateDirOrReceiptsIsPassed(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{"relative state_dir", "[org]\nstate_dir = \"ledger\"\n"},
+		{"not TOML", "[org\nstate_dir = \"/ledger\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLegacyLedgerRepo(t)
+			t.Setenv(config.LocalConfigEnv, "")
+			path := filepath.Join(r.mainRoot, config.LocalConfigFileName)
+			writeTestFile(t, path, tc.body)
+			eventsDir := filepath.Join(t.TempDir(), "events")
+
+			_, _, err := runRootCmdSplit(t, "insights", "--events-dir", eventsDir)
+			want := "ralph insights: cannot resolve the org ledger: " + path + ": "
+			if code := ExitCode(err); code != 1 || !strings.Contains(err.Error(), want) {
+				t.Errorf("ralph insights = exit %d, %v; want exit 1 with %q", code, err, want)
+			}
+
+			stateDir := t.TempDir()
+			appendInsightsReceipt(t, org.ReceiptsPathIn(stateDir), "demo", "lead")
+			if out := runInsightsCmd(t, "--events-dir", eventsDir, "--state-dir", stateDir); !strings.Contains(out, "ORG demo  SEAT lead") {
+				t.Errorf("ralph insights --state-dir did not read %s's receipts:\n%s", stateDir, out)
+			}
+
+			receipts := filepath.Join(t.TempDir(), "receipts.jsonl")
+			appendInsightsReceipt(t, receipts, "acme", "reviewer")
+			if out := runInsightsCmd(t, "--events-dir", eventsDir, "--receipts", receipts); !strings.Contains(out, "ORG acme  SEAT reviewer") {
+				t.Errorf("ralph insights --receipts did not read %s:\n%s", receipts, out)
 			}
 		})
 	}

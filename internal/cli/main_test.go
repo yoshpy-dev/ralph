@@ -31,12 +31,12 @@ import (
 //
 // It also pins the merge-guarantee check's resolver (doctorMergeGuaranteeEnv)
 // to an Exec that runs nothing and fails, a gh lookup that always fails, and
-// a state dir that does not exist, for the same reason: without this seam,
-// every runDoctor*-based test would silently start running the real `git
-// remote get-url origin` and `gh api` against GitHub, and writing
-// merge-guarantee.json into the repository's own org ledger whenever that
-// ledger exists. A test of the check sets its own resolver and restores
-// this one.
+// a state dir that does not exist, whatever doctor's --state-dir names, for
+// the same reason: without this seam, every runDoctor*-based test would
+// silently start running the real `git remote get-url origin` and `gh api`
+// against GitHub, and writing merge-guarantee.json into the repository's
+// own org ledger whenever that ledger exists. A test of the check sets its
+// own resolver and restores this one.
 //
 // It also raises probeBinary's bound (doctorProbeTimeout) to a minute: the
 // stub binaries' `--version` can take more than 5 s on a heavily loaded
@@ -140,7 +140,7 @@ func TestMain(m *testing.M) {
 		noSuchHome := filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")
 		return codexSandboxEnv{Home: noSuchHome, ConfigPath: filepath.Join(noSuchHome, ".codex", "config.toml")}, nil
 	}
-	doctorMergeGuaranteeEnv = func(targetDir string) (org.MergeGuaranteeParams, string, error) {
+	doctorMergeGuaranteeEnv = func(targetDir, _ string, _ bool) (org.MergeGuaranteeParams, string, error) {
 		return org.MergeGuaranteeParams{
 			Dir: targetDir,
 			Exec: func(_ context.Context, _ string, _ []string, name string, args ...string) (string, error) {

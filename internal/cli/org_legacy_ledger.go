@@ -40,10 +40,9 @@ var errOrgLedgerUnresolved = errors.New("cannot resolve the org ledger")
 // resolveOrgLedger resolves the org ledger of cmd's invocation with
 // org.ResolveOrgStateDir and then runs guardLegacyOrgStateDir on it with
 // access. explicit is the --state-dir value; whether it was passed is
-// cmd.Flags().Changed("state-dir"), false for a command without that flag
-// (`ralph insights`). Every verb that resolves the ledger from --state-dir
-// and its defaults goes through this function once per invocation (plan
-// 2026-10-30-org-state-dir-local, D6).
+// cmd.Flags().Changed("state-dir"). Every verb that resolves the ledger
+// from --state-dir and its defaults goes through this function once per
+// invocation (plan 2026-10-30-org-state-dir-local, D6).
 //
 // A ledger that cannot be resolved (a personal ralph.local.toml that cannot
 // be read or parsed, or whose [org].state_dir is neither absolute nor starts
@@ -101,14 +100,8 @@ func guardLegacyOrgStateDir(cmd *cobra.Command, resolvedDir, source string, acce
 			"Pass --state-dir %s to manage the seats in the older ledger, or --state-dir %s to use the shared one",
 			legacyDir, activeSeats, resolvedDir, shellQuoteIfNeeded(legacyDir), shellQuoteIfNeeded(resolvedDir))
 	}
-	// `ralph insights` has no --state-dir flag; the env var is how it picks
-	// a state dir.
-	useLegacy := "set " + org.EnvOrgStateDir + "=" + shellQuoteIfNeeded(legacyDir)
-	if cmd.Flags().Lookup("state-dir") != nil {
-		useLegacy = "pass --state-dir " + shellQuoteIfNeeded(legacyDir)
-	}
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-		"note: this linked worktree has an older org ledger at %s (%d active seat(s)); ralph now uses the ledger shared by every worktree at %s. To use the older one, %s.\n",
-		legacyDir, activeSeats, resolvedDir, useLegacy)
+		"note: this linked worktree has an older org ledger at %s (%d active seat(s)); ralph now uses the ledger shared by every worktree at %s. To use the older one, pass --state-dir %s.\n",
+		legacyDir, activeSeats, resolvedDir, shellQuoteIfNeeded(legacyDir))
 	return nil
 }

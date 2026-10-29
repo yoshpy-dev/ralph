@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -143,11 +144,25 @@ func readDoctorMGCache(t *testing.T, stateDir string) org.MergeGuaranteeCheck {
 
 // useDoctorMGEnv sets doctorMergeGuaranteeEnv to env for the test, and puts
 // TestMain's pin back afterwards.
-func useDoctorMGEnv(t *testing.T, env func(string) (org.MergeGuaranteeParams, string, error)) {
+func useDoctorMGEnv(t *testing.T, env func(targetDir, stateDir string, stateDirSet bool) (org.MergeGuaranteeParams, string, error)) {
 	t.Helper()
 	orig := doctorMergeGuaranteeEnv
 	doctorMergeGuaranteeEnv = env
 	t.Cleanup(func() { doctorMergeGuaranteeEnv = orig })
+}
+
+// useDoctorMGEnvResolvingTheLedger is useDoctorMGEnv with e for git and gh
+// (gh found) and the ledger the production resolver,
+// mergeGuaranteeEnvFromOS, names for doctor's --state-dir, so doctor's real
+// ledger resolution runs while no real git remote or gh call does.
+func useDoctorMGEnvResolvingTheLedger(t *testing.T, e *doctorMGExec) {
+	t.Helper()
+	fake := doctorMGEnv(e, true, "")
+	useDoctorMGEnv(t, func(targetDir, stateDir string, stateDirSet bool) (org.MergeGuaranteeParams, string, error) {
+		params, _, _ := fake(targetDir)
+		_, ledger, err := mergeGuaranteeEnvFromOS(targetDir, stateDir, stateDirSet)
+		return params, ledger, err
+	})
 }
 
 // TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached:
@@ -360,7 +375,7 @@ func TestMergeGuaranteeResult_EscapesControlCharacters(t *testing.T) {
 func TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv(org.EnvOrgStateDir, stateDir)
-	params, got, err := mergeGuaranteeEnvFromOS("some/project")
+	params, got, err := mergeGuaranteeEnvFromOS("some/project", "", false)
 	if err != nil {
 		t.Fatalf("mergeGuaranteeEnvFromOS: %v", err)
 	}
@@ -369,6 +384,43 @@ func TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir(t *testing.T
 	}
 	if want, _ := filepath.Abs(stateDir); got != want {
 		t.Errorf("state dir = %q, want %q", got, want)
+	}
+}
+
+// TestMergeGuaranteeEnvFromOS_StateDirFlagNamesTheLedgerWithoutGit: with
+// doctor's --state-dir, the production resolver returns that dir made
+// absolute, runs no git, and does not read the personal file, so one whose
+// [org].state_dir is relative, which fails the same call without the flag,
+// is no error (plan 2026-10-30-org-state-dir-local, AC7). The git on PATH
+// is a stub that logs every run.
+func TestMergeGuaranteeEnvFromOS_StateDirFlagNamesTheLedgerWithoutGit(t *testing.T) {
+	r := newLegacyLedgerRepo(t)
+	t.Setenv(config.LocalConfigEnv, "")
+	path := filepath.Join(r.mainRoot, config.LocalConfigFileName)
+	writeTestFile(t, path, "[org]\nstate_dir = \"ledger\"\n")
+	if _, _, err := mergeGuaranteeEnvFromOS("some/project", "", false); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("without --state-dir: err = %v; want the personal file's error naming %s", err, path)
+	}
+
+	binDir := t.TempDir()
+	gitLog := filepath.Join(binDir, "git.log")
+	writeStubBin(t, binDir, "git", gitLog)
+	t.Setenv("PATH", binDir)
+	absLedger := filepath.Join(t.TempDir(), "ledger")
+	for _, tc := range []struct{ flag, want string }{
+		{absLedger, absLedger},
+		{"rel/ledger", filepath.Join(r.worktree, "rel", "ledger")},
+	} {
+		params, got, err := mergeGuaranteeEnvFromOS("some/project", tc.flag, true)
+		if err != nil || got != tc.want {
+			t.Errorf("--state-dir %s: state dir = %q, %v; want %q and no error", tc.flag, got, err, tc.want)
+		}
+		if params.Dir != "some/project" || params.Exec != nil || params.LookPath != nil {
+			t.Errorf("--state-dir %s: params = %+v, want Dir some/project and real git and gh", tc.flag, params)
+		}
+	}
+	if runs, err := os.ReadFile(gitLog); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("git ran with --state-dir (log read: %v):\n%s", err, runs)
 	}
 }
 
@@ -415,7 +467,7 @@ func TestRunDoctorFull_PrintsTheMergeGuarantee(t *testing.T) {
 			stateDir := t.TempDir()
 			env := doctorMGEnv(e, tc.ghFound, stateDir)
 			var gotDir string
-			useDoctorMGEnv(t, func(targetDir string) (org.MergeGuaranteeParams, string, error) {
+			useDoctorMGEnv(t, func(targetDir, _ string, _ bool) (org.MergeGuaranteeParams, string, error) {
 				gotDir = targetDir
 				return env(targetDir)
 			})
@@ -456,7 +508,7 @@ func TestRunDoctor_TestMainPinRunsNoGitOrGh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	params, stateDir, err := doctorMergeGuaranteeEnv(dir)
+	params, stateDir, err := doctorMergeGuaranteeEnv(dir, "", false)
 	if err != nil {
 		t.Fatalf("TestMain's pin returned an error: %v", err)
 	}

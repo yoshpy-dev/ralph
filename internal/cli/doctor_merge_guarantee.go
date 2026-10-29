@@ -27,21 +27,24 @@ const orgLedgerCheckName = "Org ledger"
 // mergeGuaranteeEnvFromOS is the production resolver for
 // checkMergeGuarantee: real git and gh (nil Exec and LookPath) run in
 // targetDir, and the cache goes into the org state dir
-// org.ResolveOrgStateDir("", false) names (RALPH_ORG_STATE_DIR, else the
-// personal file's [org].state_dir, else the main worktree's
-// .harness/state/org, found with git rev-parse). That state dir is resolved
-// from the process's working directory, not from targetDir; the CLI always
-// passes ".", so both name the same repository. err is
-// org.ResolveOrgStateDir's (a personal file that cannot be read, or whose
-// state_dir is not absolute), and stateDir is "" with it.
-func mergeGuaranteeEnvFromOS(targetDir string) (params org.MergeGuaranteeParams, stateDir string, err error) {
-	stateDir, _, err = org.ResolveOrgStateDir("", false)
+// org.ResolveOrgStateDir(explicitStateDir, explicitSet) names: doctor's
+// --state-dir when explicitSet is true (explicitStateDir, made absolute;
+// neither git nor the personal file is read then), else
+// RALPH_ORG_STATE_DIR, else the personal file's [org].state_dir, else the
+// main worktree's .harness/state/org, found with git rev-parse. That state
+// dir is resolved from the process's working directory, not from
+// targetDir; the CLI always passes ".", so both name the same repository.
+// err is org.ResolveOrgStateDir's (a personal file that cannot be read, or
+// whose state_dir is not absolute), and stateDir is "" with it.
+func mergeGuaranteeEnvFromOS(targetDir, explicitStateDir string, explicitSet bool) (params org.MergeGuaranteeParams, stateDir string, err error) {
+	stateDir, _, err = org.ResolveOrgStateDir(explicitStateDir, explicitSet)
 	return org.MergeGuaranteeParams{Dir: targetDir}, stateDir, err
 }
 
-// doctorMergeGuaranteeEnv is the resolver runDoctorFull hands to
-// checkMergeGuarantee. It is a package variable (rather than a direct call
-// to mergeGuaranteeEnvFromOS) so internal/cli's TestMain (main_test.go) can
+// doctorMergeGuaranteeEnv is the resolver runDoctorStateDir hands to
+// checkMergeGuarantee, with doctor's --state-dir value and whether it was
+// passed. It is a package variable (rather than a direct call to
+// mergeGuaranteeEnvFromOS) so internal/cli's TestMain (main_test.go) can
 // pin it to an Exec and a gh lookup that run nothing and a state dir that
 // does not exist, keeping every runDoctor*-based test from running the real
 // git and gh against GitHub and from writing merge-guarantee.json into the

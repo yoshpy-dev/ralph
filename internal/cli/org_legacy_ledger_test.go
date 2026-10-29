@@ -296,9 +296,7 @@ func TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue(t *testing.T) {
 		// neither git nor gh (setupOrgStubPATH keeps the developer's PATH).
 		{"org_merge_order", []string{"org", "merge-order"}, false, stateDirHint},
 		{"org_merge_order_json", []string{"org", "merge-order", "--json"}, true, stateDirHint},
-		// insights has no --state-dir flag; the note names the env var.
-		{"insights_json", []string{"insights", "--json", "--events-dir", t.TempDir()}, true,
-			org.EnvOrgStateDir + "=" + shellQuoteIfNeeded(r.legacyDir)},
+		{"insights_json", []string{"insights", "--json", "--events-dir", t.TempDir()}, true, stateDirHint},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
