@@ -103,19 +103,19 @@ Critical forks: 人には聞かず、ユーザーの指示どおり consult(cons
 
 ## Acceptance criteria
 
-- [ ] AC1 `ralph.local.toml` が config のファイルの隣にあれば、`config.Load` はその値で `ralph.toml` の値をキーごとに上書きする(表はキーごと、配列は置き換え)。`ralph.toml` がなくても読む。`ralph config get` は上書きした値を返す。
-- [ ] AC2 config のファイルの dir が git の作業ツリーの中なら、主 worktree の root の `ralph.local.toml` を読む。linked worktree やサブディレクトリに同名のファイルがあっても、それは読まない。差し替え口を外した状態で、主 worktree の root、linked worktree の root、サブディレクトリから打った `ralph config get org.agmsg_home` が同じ値を返す。
-- [ ] AC3 読めない、または正しくない `ralph.local.toml` は Load のエラーになり、文にそのファイルのパスが入る。`ralph config get` は exit 3。
-- [ ] AC4 `RALPH_LOCAL_CONFIG=off` のときは個人用のファイルを読まない。`ralph org gate` のスクリプトは、呼んだ側の値にかかわらず `RALPH_LOCAL_CONFIG=off` で走る。
-- [ ] AC5 ルートと `templates/base/` の `.gitignore` の管理ブロックに `ralph.local.toml`(先頭の `/` なし)があり、2 つの管理ブロックは同じ。`git check-ignore` が `ralph.local.toml` と `config/ralph.local.toml` の両方で通る。
-- [ ] AC6 `RALPH_ORG_AGMSG_HOME` を設定しても、`ralph org` の各 verb と `ralph doctor` が使う agmsg の場所は変わらない。agmsg の場所は `[org].agmsg_home`(個人用のファイルで上書き)、なければ既定。`internal/` と `cmd/` の production のコードで、この名前を読むのは doctor の warn だけ。
-- [ ] AC7 個人用のファイルの相対の `[org].agmsg_home` は Load が断る。`--config` の相対の `agmsg_home` は、watch の起動(`--detach` と `ralph org start`)でも director start と同じ文で断る。
-- [ ] AC8 launch_cmd の起動スクリプトは `RALPH_ORG_AGMSG_HOME` を export しない。director start は env についての警告を出さない。
-- [ ] AC9 `ralph doctor` は、環境に `RALPH_ORG_AGMSG_HOME` があれば warn を出す。
-- [ ] AC10 テストは本物の agmsg と開発機の個人用のファイルに触れない。`internal/cli` と `internal/org` の TestMain が `driver.AgmsgHomeOverride` を存在しないパスに固定する。`internal/cli`、`internal/org`、`internal/config` の TestMain が `RALPH_LOCAL_CONFIG` を off に固定する。
-- [ ] AC11 org の ledger の決まり方は変わらない(`internal/gitroot` に移したあとも `statedir_test.go` が通る)。config と org は同じ helper を使う。
-- [ ] AC12 README、`templates/base/ralph.toml`、`/org` と `/director` skill、recipe 2 本、`AGENTS.md` が新しい決まりを書き、`RALPH_ORG_AGMSG_HOME` を設定の手段として書いていない。
-- [ ] AC13 `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、Go のテスト、`./scripts/run-verify.sh` が通る。
+- [x] AC1 `ralph.local.toml` が config のファイルの隣にあれば、`config.Load` はその値で `ralph.toml` の値をキーごとに上書きする(表はキーごと、配列は置き換え)。`ralph.toml` がなくても読む。`ralph config get` は上書きした値を返す。
+- [x] AC2 config のファイルの dir が git の作業ツリーの中なら、主 worktree の root の `ralph.local.toml` を読む。linked worktree やサブディレクトリに同名のファイルがあっても、それは読まない。差し替え口を外した状態で、主 worktree の root、linked worktree の root、サブディレクトリから打った `ralph config get org.agmsg_home` が同じ値を返す。
+- [x] AC3 読めない、または正しくない `ralph.local.toml` は Load のエラーになり、文にそのファイルのパスが入る。`ralph config get` は exit 3。
+- [x] AC4 `RALPH_LOCAL_CONFIG=off` のときは個人用のファイルを読まない。`ralph org gate` のスクリプトは、呼んだ側の値にかかわらず `RALPH_LOCAL_CONFIG=off` で走る。
+- [x] AC5 ルートと `templates/base/` の `.gitignore` の管理ブロックに `ralph.local.toml`(先頭の `/` なし)があり、2 つの管理ブロックは同じ。`git check-ignore` が `ralph.local.toml` と `config/ralph.local.toml` の両方で通る。
+- [x] AC6 `RALPH_ORG_AGMSG_HOME` を設定しても、`ralph org` の各 verb と `ralph doctor` が使う agmsg の場所は変わらない。agmsg の場所は `[org].agmsg_home`(個人用のファイルで上書き)、なければ既定。`internal/` と `cmd/` の production のコードで、この名前を読むのは doctor の warn だけ。
+- [x] AC7 個人用のファイルの相対の `[org].agmsg_home` は Load が断る。`--config` の相対の `agmsg_home` は、watch の起動(`--detach` と `ralph org start`)でも director start と同じ文で断る。
+- [x] AC8 launch_cmd の起動スクリプトは `RALPH_ORG_AGMSG_HOME` を export しない。director start は env についての警告を出さない。
+- [x] AC9 `ralph doctor` は、環境に `RALPH_ORG_AGMSG_HOME` があれば warn を出す。
+- [x] AC10 テストは本物の agmsg と開発機の個人用のファイルに触れない。`internal/cli` と `internal/org` の TestMain が `driver.AgmsgHomeOverride` を存在しないパスに固定する。`internal/cli`、`internal/org`、`internal/config` の TestMain が `RALPH_LOCAL_CONFIG` を off に固定する。
+- [x] AC11 org の ledger の決まり方は変わらない(`internal/gitroot` に移したあとも `statedir_test.go` が通る)。config と org は同じ helper を使う。
+- [x] AC12 README、`templates/base/ralph.toml`、`/org` と `/director` skill、recipe 2 本、`AGENTS.md` が新しい決まりを書き、`RALPH_ORG_AGMSG_HOME` を設定の手段として書いていない。
+- [x] AC13 `./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh`、Go のテスト、`./scripts/run-verify.sh` が通る。
 
 ## Implementation outline
 
@@ -208,4 +208,5 @@ Critical forks: 人には聞かず、ユーザーの指示どおり consult(cons
   - S6 321203dc(impl-276a1-s6): 固定の 100 ms の待ちをやめ、`sh` が trap の直後に作る marker のファイルを `waitForFileWithin` で待つ。`ps` で待つ案は comm の出し方が macOS と Linux で違うので採らなかった。tech-debt の行は RESOLVED にした。検証: gofmt と vet rc=0、`-run '^TestStopDirectorProcess_' -count=30` ok、`-run 'Director'` は 1 回目に差分の外の 2 本が固定の期限(20 s と 3 s)を負荷 126〜428 で越えて落ち、load 16〜25 に下がってから 1 回だけ打ち直して ok。感度: 待ちを外すと load 538〜562 で 50 回中 7 回落ち、今の版は 50/50 通った。self-check は 5 項目とも clean。
   - self-review の回し直し d7f09f81(review-276a1-r2、LOW 2 件を追加、Merge yes)。L5(待ちの上限 5 s が同じ package の marker の待ち 10 s とそろっていない)と L6(閉じた tech-debt の行の Trigger の欄が取り消されていない)を、インラインの小さい変更 140ed1d2 で直した(1 行の変更と同じ行の文書なので handoff にしなかった)。検証: gofmt と `go vet ./internal/org/` rc=0、`go test ./internal/org/ -run '^TestStopDirectorProcess_' -count=10` ok(load 17〜38)、行の列数は 5 のまま。self-check: 不要な変更 clean、誤字と貼り間違い clean、デバッグの残り clean、secret clean、スライス外のファイル clean(2 ファイルだけ)。
   - verify の回し直し 77a415c9(verify-276a1-r2、pass)。新しい所見は V3・V4(LOW)と I5・I6(INFO)。V3: tech-debt 366 行(`TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の trap の競合)の Trigger「`org_watch_test.go` の次の変更」に S4b が当たっていた。286 行と同じ形で、consult(consult-plan-techdebt276a1)の判定と同じ理由(Trigger に当たり、持ち越しの理由がない)で、インラインの小さい変更 c7095378 で直した。子のスクリプトの 1 行目で trap を張り、行は RESOLVED にした。検証: gofmt と `go vet ./internal/cli/` rc=0、`go test ./internal/cli/ -run '^TestOrgWatchDetach_StartDetachedProcess_' -count=20` ok(load 10〜12)、行の列数は 5。self-check は 5 項目とも clean(2 ファイルだけ)。V4(Trigger に当たったのに注がない 144・235・316・364・367 行と 177 行の (b))と 272 行は /sync-docs で注を付ける(177 の (b) は main の 216b2cdd で済んでいるので取り消す)。I5(286 行の注の「other marker waits」は 4 つのうち 3 つ)と I6(170・171・294・362 行)も /sync-docs で見る。
+- [x] Sync-docs report created — `docs/reports/sync-docs-2026-10-29-local-config-org.md`(run 開始時の HEAD は c9e83864)。AC1〜AC13 を `[x]` にした(verify が AC1〜AC9・AC12 を満たし、AC10・AC11 を静的に満たすと判定し、/test の実行が AC10・AC11 の実行側と AC13 の test の部分を満たした。AC13 の `run-verify.sh` は既定のモードを 1 回では打たず、static の半分と test の半分がそれぞれ rc 0)。tech-debt は 16 行を直し(Trigger に当たった 12 行に持ち越しの注、L1 の理由の書き直し、`isolateGitEnv` の行に写し 2 つの注、RESOLVED の注 2 行の直し。177 行は (b) を取り消した)、新しい 2 行(負荷に弱い 2 本のテスト、test report の Test gaps 2 つ)を足した。multi-org spec に 2026-10-30 の箇条を 2 つ(FR-6、FR-9)、org-runtime spec の FR-2 に注を 1 つ、README に個人用のファイルの空の `agmsg_home` の 1 文を足した。計画の digest は前後で 1609f175543b。
 - [ ] PR created
