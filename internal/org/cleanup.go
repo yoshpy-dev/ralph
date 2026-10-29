@@ -32,7 +32,11 @@ import (
 //     worktree_path, and kind org (checkRecord), so that a worktree another
 //     feature made on the same org_id is never removed;
 //  3. the caller does not run inside the worktree, so that no shell of the
-//     caller is left in the directory the cleanup removes;
+//     caller is left in the directory the cleanup removes, and the ledger's
+//     directory is not inside it either (checkLedger, made before 2), so that
+//     the cleanup does not remove the ledger it runs on with the worktree: 4
+//     does not catch that, since the .gitignore ralph init ships names
+//     .harness/state/;
 //  4. the worktree is the root of a git worktree, with no rebase or merge in
 //     progress and nothing uncommitted or untracked (a file .gitignore names
 //     does not count and goes with the worktree, D6);
@@ -171,7 +175,9 @@ type CleanupResult struct {
 // holds the lock. Once it holds the lock it empties the marker an earlier
 // Regate left there, as Regate does, and goes on as
 // cleanupFeatureWorktreeLocked. ralph org cleanup calls it; ralph org merge,
-// which holds the lock already, calls cleanupFeatureWorktreeLocked.
+// which holds the lock already, calls cleanupFeatureWorktreeLocked. Neither
+// removes the ledger o runs on: a feature worktree that holds the ledger's
+// directory is refused before its record is read (checkLedger).
 func (o *Org) CleanupFeatureWorktree(ctx context.Context, p CleanupParams) (CleanupResult, error) {
 	res := CleanupResult{Branch: p.Branch, Head: p.Head}
 	if refused, err := checkCleanupParams(p); err != nil || refused != "" {
@@ -371,11 +377,17 @@ func cleanupGitCmd(dir string, args ...string) string {
 
 // run is D2's checks 2 to 6, or those of what an earlier cleanup left (see
 // the top of this file), then the removal. res holds what the first check
-// found.
+// found. The check of the ledger's directory (checkLedger) comes first,
+// before the record is read, so that no refusal names a command that would
+// remove the ledger with the worktree, such as the git worktree remove of a
+// record that is gone (recordGone).
 func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult, error) {
 	refuse := func(reason, manual string) (CleanupResult, error) {
 		res.Refused, res.Manual = PrintableInboxText(reason, false), PrintableInboxText(manual, false)
 		return res, nil
+	}
+	if reason := c.checkLedger(); reason != "" {
+		return refuse(reason, "")
 	}
 	rec, ok, err := c.worktrees.Lookup(c.root, c.id())
 	switch {
@@ -437,6 +449,28 @@ func (c *cleanupRun) run(ctx context.Context, res CleanupResult) (CleanupResult,
 		return refuse(reason, manual)
 	}
 	return c.remove(ctx, st, resumed, res)
+}
+
+// checkLedger is the part of D2's check 3 that run makes first: the ledger's
+// directory, the manifest's, is neither the feature worktree nor inside it,
+// compared with symlinks resolved as checkWorktree compares the caller's
+// working directory. Otherwise the script would remove the ledger with the
+// worktree, ignored files and all (D6), and the record of worktree_cleaned
+// would then make a manifest that holds nothing else, so nothing is removed.
+// Check 4 does not catch it, since the .gitignore ralph init ships names
+// .harness/state/. The refusal has no Manual: its reason names the next
+// cleanup, with a ledger outside the worktree.
+func (c *cleanupRun) checkLedger() string {
+	dir := filepath.Dir(c.o.Manifest.Path())
+	ledger, wt := resolvedOrClean(mustAbs(dir)), resolvedOrClean(c.f.Worktree)
+	if ledger != wt && !strings.HasPrefix(ledger, wt+string(filepath.Separator)) {
+		return ""
+	}
+	return fmt.Sprintf("the ledger's directory %s is inside the feature worktree %s, which the cleanup removes with the files "+
+		".gitignore names, so the ledger would be removed with it, and nothing is removed: move the ledger out of the worktree "+
+		"while nothing uses it, or pick another one outside it, such as the default one, the main worktree's %s, and %s with "+
+		"--state-dir or %s naming it", dir, c.f.Worktree, filepath.Join(c.root, defaultOrgStateDirRelPath),
+		cleanupAgain(c.p.Branch), EnvOrgStateDir)
 }
 
 // readState reads cleanupState: the worktree's path with os.Stat, git

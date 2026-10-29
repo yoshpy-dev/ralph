@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
@@ -604,6 +605,94 @@ func TestOrgCleanup_InterruptedBeforeItRunsRemovesNothing(t *testing.T) {
 	}
 	if after := fx.snapshot(t); after != before {
 		t.Errorf("an interrupted cleanup changed something:\n%s\n->\n%s", before, after)
+	}
+}
+
+// cleanupInterruptGit is the git of the bin dir for
+// TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne (fmt verb: the git
+// it wraps, shell-quoted): for the script's git branch -D, it creates
+// $CLEANUP_TEST_AT and waits up to 20 s for $CLEANUP_TEST_GO, then runs the
+// git it wraps, as every other call does.
+const cleanupInterruptGit = `#!/bin/sh
+case " $* " in
+*" branch -D "*)
+  : > "$CLEANUP_TEST_AT"
+  i=0
+  while [ ! -f "$CLEANUP_TEST_GO" ] && [ "$i" -lt 2000 ]; do sleep 0.01; i=$((i + 1)); done ;;
+esac
+exec %s "$@"
+`
+
+// Finding 2 (cross-review cycle 2,
+// docs/reports/cross-review-triage-org-merge-cleanup.md; S-X3 of the plan):
+// an interrupt that comes while the only branch's cleanup runs the script
+// (at its git branch -D, the worktree removed already) does not stop that
+// cleanup, which removes the branch, records worktree_cleaned, and prints its
+// CLEANED: line, but cleanup still exits 1 with the interruption, as its help
+// says, not 0, with and without --branch. The bin dir's git waits at git
+// branch -D until the test has canceled the command's context.
+func TestOrgCleanup_InterruptedDuringTheLastCleanupExitsOne(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra []string
+	}{
+		{"every merged branch", nil},
+		{"--branch", []string{"--branch", "feat/a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newCleanupCLIFixture(t)
+			fx.squashMergeOnGitHub(t)
+			wrapped := filepath.Join(fx.bin, "git-wrapped")
+			if err := os.Rename(filepath.Join(fx.bin, "git"), wrapped); err != nil {
+				t.Fatal(err)
+			}
+			writeStubScript(t, filepath.Join(fx.bin, "git"), fmt.Sprintf(cleanupInterruptGit, shellQuoteIfNeeded(wrapped)))
+			signals := t.TempDir()
+			at, proceed := filepath.Join(signals, "at"), filepath.Join(signals, "go")
+			t.Setenv("CLEANUP_TEST_AT", at)
+			t.Setenv("CLEANUP_TEST_GO", proceed)
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			stop, fired := make(chan struct{}), make(chan bool, 1)
+			go func() {
+				for {
+					if _, err := os.Stat(at); err == nil {
+						cancel(errors.New("test stopped"))
+						fired <- os.WriteFile(proceed, nil, 0o644) == nil
+						return
+					}
+					select {
+					case <-stop:
+						fired <- false
+						return
+					case <-time.After(10 * time.Millisecond):
+					}
+				}
+			}()
+
+			stdout, _, err := runOrgCmdStreamsContext(ctx, append([]string{"cleanup", "--state-dir", fx.stateDir}, tc.extra...)...)
+			close(stop)
+			if !<-fired {
+				t.Fatalf("the script's git branch -D did not run, so nothing was interrupted: err %v, stdout %q", err, stdout)
+			}
+			const want = "org: cleanup: interrupted (test stopped) before the run ended: the lines above say what was cleaned up; " +
+				"run ralph org cleanup again for what is left"
+			if err == nil || err.Error() != want || ExitCode(err) != 1 {
+				t.Errorf("cleanup interrupted at git branch -D: err %v (exit %d); want %q, exit 1", err, ExitCode(err), want)
+			}
+			if stdout != "CLEANED: feat/a org-a\n" {
+				t.Errorf("stdout = %q; want the CLEANED: line of feat/a", stdout)
+			}
+			if _, err := os.Stat(fx.wt); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the worktree %s is still there (stat: %v)", fx.wt, err)
+			}
+			if got := gateCLIGitOut(t, fx.work, "branch", "--list", "feat/a"); got != "" {
+				t.Errorf("the branch feat/a is still there: %q", got)
+			}
+			if got := fx.cleanedEvents(t); len(got) != 1 {
+				t.Errorf("worktree_cleaned events = %+v; want one, the cleanup having run to its end", got)
+			}
+		})
 	}
 }
 

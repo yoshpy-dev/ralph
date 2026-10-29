@@ -323,7 +323,10 @@ func cleanupLookupWhy(e org.MergeOrderEntry) string {
 // unknown set gets its SKIPPED: line, and every other one is cleaned up with
 // CleanupFeatureWorktree (Via cleanup, Cwd the working directory). It stops
 // at the first error of a cleanup, and before the next cleanup when ctx is
-// done; otherwise it returns p.finish().
+// done. ctx done once the steps are dealt with, as when the interrupt comes
+// while the last cleanup removes or records (it runs to its end, and its
+// line is printed), is an interruption too, which comes before p.finish()'s
+// count of the branches left; otherwise it returns p.finish().
 func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []cleanupStep, p *cleanupPrinter) error {
 	for _, s := range steps {
 		if s.unknown != "" {
@@ -340,6 +343,10 @@ func runCleanupSteps(ctx context.Context, rt *org.Org, repoRoot string, steps []
 		if err := p.result(s.branch, res, err); err != nil {
 			return err
 		}
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("org: cleanup: interrupted (%v) before the run ended: the lines above say what was cleaned up; run "+
+			"ralph org cleanup again for what is left", context.Cause(ctx))
 	}
 	return p.finish()
 }

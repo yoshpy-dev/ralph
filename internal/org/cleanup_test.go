@@ -27,9 +27,10 @@ const (
 // worktreeCleanupFixture is a repo of worktreeScriptRepo with a bare origin, the
 // feature worktree org-auth on feat/auth that the script's ensure made, with
 // one commit pushed to origin's feat/auth (head, the head its PR merges) and
-// a .gitignore that names ignored/, and a ledger whose binding of feat/auth
-// to the org auth was disbanded the way Disband leaves it. The Org reads the
-// worktrees through spyWorktrees.
+// a .gitignore that names .harness/state/, as the one ralph init ships does,
+// and ignored/, and a ledger whose binding of feat/auth to the org auth was
+// disbanded the way Disband leaves it. The Org reads the worktrees through
+// spyWorktrees.
 type worktreeCleanupFixture struct {
 	o        *Org
 	spy      *spyWorktrees
@@ -57,7 +58,7 @@ func newWorktreeCleanupFixture(t *testing.T) *worktreeCleanupFixture {
 	if want := filepath.Join(root, ".claude", "worktrees", cleanupTestID); fx.worktree != want {
 		t.Fatalf("ensure made %q, want %s", fx.worktree, want)
 	}
-	writeGateFile(t, fx.worktree, ".gitignore", ".claude/worktrees/\nignored/\n", 0o644)
+	writeGateFile(t, fx.worktree, ".gitignore", ".claude/worktrees/\n.harness/state/\nignored/\n", 0o644)
 	writeGateFile(t, fx.worktree, "internal/auth/auth.go", "package auth\n", 0o644)
 	runGit(t, "-C", fx.worktree, "add", ".")
 	gateCommit(t, fx.worktree, "the feature")
@@ -564,6 +565,125 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 			fx.assertRefused(t, res, err, before, want, manual)
 			if res.OrgID != "auth" || res.Worktree != fx.worktree {
 				t.Errorf("result names org %q and worktree %q; want auth and %s", res.OrgID, res.Worktree, fx.worktree)
+			}
+		})
+	}
+}
+
+// moveLedger moves every file of the fixture's ledger into dir, and the Org
+// then reads the ledger as named, dir or a path to it through a symlink. It
+// returns the files moved, by name, with what each holds.
+func (fx *worktreeCleanupFixture) moveLedger(t *testing.T, dir, named string) map[string]string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(fx.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, e := range entries {
+		files[e.Name()] = fileOrAbsent(t, filepath.Join(fx.stateDir, e.Name()))
+		if err := os.Rename(filepath.Join(fx.stateDir, e.Name()), filepath.Join(dir, e.Name())); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fx.stateDir = named
+	fx.o.Manifest = NewManifestStoreAtPath(ManifestPathIn(named))
+	return files
+}
+
+// TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger covers
+// finding 1 of cross-review cycle 2
+// (docs/reports/cross-review-triage-org-merge-cleanup.md; S-X3 of the plan):
+// a ledger named with --state-dir or RALPH_ORG_STATE_DIR can be in the
+// feature worktree, whose .gitignore names .harness/state/, so check 4
+// passes and the script would remove the ledger with the worktree. The cleanup refuses
+// before it reads the record (no worktree call), with no Manual, through
+// CleanupFeatureWorktree and through the entry ralph org merge uses with
+// regate.lock held, for a ledger below the worktree, at its root, through a
+// symlink, and with the record gone, whose refusal would otherwise name git
+// worktree remove: the worktree, the branch, the record, and every file of
+// the ledger stay, with no worktree_cleaned.
+func TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger(t *testing.T) {
+	below := func(_ *testing.T, fx *worktreeCleanupFixture) (string, string) {
+		dir := filepath.Join(fx.worktree, ".harness", "state", "org")
+		return dir, dir
+	}
+	for _, tc := range []struct {
+		name string
+		// ledger is where the ledger's files go and the path the Org names
+		// the ledger by.
+		ledger       func(t *testing.T, fx *worktreeCleanupFixture) (dir, named string)
+		recordGone   bool
+		viaMergeLock bool // cleanupFeatureWorktreeLocked with regate.lock held, as ralph org merge calls it
+	}{
+		{"below the worktree", below, false, false},
+		{"below the worktree, ralph org merge's entry", below, false, true},
+		{"the worktree's root", func(_ *testing.T, fx *worktreeCleanupFixture) (string, string) {
+			return fx.worktree, fx.worktree
+		}, false, false},
+		{"through a symlink", func(t *testing.T, fx *worktreeCleanupFixture) (string, string) {
+			link := filepath.Join(resolvedOrClean(t.TempDir()), "wt")
+			if err := os.Symlink(fx.worktree, link); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(fx.worktree, ".harness", "state", "org"), filepath.Join(link, ".harness", "state", "org")
+		}, false, false},
+		{"the record gone", below, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFixture(t)
+			writeGateFile(t, fx.stateDir, "inbox.jsonl", `{"item":"another org's"}`+"\n", 0o644)
+			dir, named := tc.ledger(t, fx)
+			files := fx.moveLedger(t, dir, named)
+			if tc.recordGone {
+				if err := os.Remove(fx.recordFile(t)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if dir != fx.worktree {
+				if out := gitOut(t, fx.worktree, "status", "--porcelain", "--untracked-files=all"); out != "" {
+					t.Fatalf("status lists %q; want the ledger below the worktree ignored, so that check 4 passes", out)
+				}
+			}
+			before := fx.snapshot(t)
+			p := fx.params()
+			var res CleanupResult
+			var err error
+			if tc.viaMergeLock {
+				p.Via = CleanupViaMerge
+				lock, lockErr := acquireHeldFileLock(fx.stateDir, regateLockFile, "regate", 0)
+				if lockErr != nil {
+					t.Fatal(lockErr)
+				}
+				res, err = fx.o.cleanupFeatureWorktreeLocked(context.Background(), lock, p)
+				if err := lock.release(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				res, err = fx.cleanup(p)
+			}
+			want := "the ledger's directory " + named + " is inside the feature worktree " + fx.worktree + ", which the cleanup " +
+				"removes with the files .gitignore names, so the ledger would be removed with it, and nothing is removed: move the " +
+				"ledger out of the worktree while nothing uses it, or pick another one outside it, such as the default one, the " +
+				"main worktree's " + fx.root + "/.harness/state/org, and run ralph org cleanup --branch feat/auth again with " +
+				"--state-dir or RALPH_ORG_STATE_DIR naming it"
+			fx.assertRefused(t, res, err, before, want, "")
+			if res.Refused != want || res.OrgID != "auth" || res.Worktree != fx.worktree {
+				t.Errorf("cleanup = %+v; want only the refusal %q, for org auth and the worktree %s", res, want, fx.worktree)
+			}
+			if len(fx.spy.calls) != 0 {
+				t.Errorf("worktree calls = %q; want none, the ledger checked before the record", fx.spy.calls)
+			}
+			for name, data := range files {
+				if got := fileOrAbsent(t, filepath.Join(dir, name)); got != data {
+					t.Errorf("the ledger's %s holds %q after the refusal; want %q", name, got, data)
+				}
+			}
+			if cleaned := cleanedEvents(mustReadEvents(t, fx.o)); len(cleaned) != 0 {
+				t.Errorf("the ledger has worktree_cleaned %+v; want none", cleaned)
 			}
 		})
 	}

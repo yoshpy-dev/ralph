@@ -926,7 +926,14 @@ func TestOrgMerge_WaitChecks(t *testing.T) {
 // AC2 for merge: with no --config and the main worktree's ledger, run from a
 // linked worktree, [org.director].auto_merge comes from the main worktree's
 // ralph.toml, not the linked worktree's, into AUTO MERGE: and pr_merged's
-// auto_merge=, both ways.
+// auto_merge=, both ways. The fixture's binding names the main worktree as
+// the feature worktree, and the main worktree holds the ledger, so the
+// cleanup after the merge refuses on one CLEANUP: skipped line, before it
+// reads the worktree record, since it would remove the ledger with the
+// worktree (finding 1 of cross-review cycle 2,
+// docs/reports/cross-review-triage-org-merge-cleanup.md; S-X3 of plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md), with no CLEANUP
+// MANUAL: line. internal/org's cleanup tests pin the reason's words.
 func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 	const (
 		on  = "[org.director]\nauto_merge = true\n"
@@ -952,7 +959,14 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 			if err != nil || stderr != "" {
 				t.Fatalf("merge from the linked worktree: err %v, stderr %q (stdout %q)", err, stderr, stdout)
 			}
-			assertNoScriptCleanup(t, stdout, mergeCLILines(fx.head, tc.want, ""))
+			lines := mergeCLILines(fx.head, tc.want, "")
+			rest, ok := strings.CutPrefix(stdout, lines)
+			if !ok || !strings.HasPrefix(rest, "CLEANUP: skipped (the ledger's directory "+fx.stateDir+" is inside the feature "+
+				"worktree "+fx.work+", ") || !strings.HasSuffix(rest, ")\n") || strings.Count(rest, "\n") != 1 ||
+				strings.Contains(stdout, "CLEANUP MANUAL:") {
+				t.Errorf("stdout:\n%s\nwant:\n%sCLEANUP: skipped (the ledger's directory %s is inside the feature worktree %s, ...), "+
+					"on one line, with no CLEANUP MANUAL: line", stdout, lines, fx.stateDir, fx.work)
+			}
 			got := fx.prMergedEvents(t)
 			if len(got) != 1 || got[0].Details != mergeCLIDetails(fx.head, tc.want) {
 				t.Errorf("pr_merged in the main worktree's ledger = %+v; want one with %q", got, mergeCLIDetails(fx.head, tc.want))
