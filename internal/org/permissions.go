@@ -214,7 +214,10 @@ func codexWritableRootArgs(role, driver, mode, cwd, stateDir string, featureOrg 
 
 // pathWithinDir reports whether path is dir itself or a descendant of it,
 // both already cleaned absolute paths. It compares path elements via
-// filepath.Rel, so /x/wt-other is not inside /x/wt.
+// filepath.Rel, so /x/wt-other is not inside /x/wt. It compares names only;
+// a check that must also see the same directory under another spelling (a
+// case-insensitive file system) uses pathWithin, which compares by file
+// identity.
 func pathWithinDir(path, dir string) bool {
 	rel, err := filepath.Rel(dir, path)
 	if err != nil {

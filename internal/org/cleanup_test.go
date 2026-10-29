@@ -580,9 +580,9 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 
 // cleanupLedgerMoveStep is the next step of a refusal of a ledger inside a
 // worktree the cleanup of feat/auth would remove (ledgerMoveStep).
-const cleanupLedgerMoveStep = "while no ralph org command runs on the ledger, move its directory to a place outside the " +
-	"worktree where no other ledger is, and run ralph org cleanup --branch feat/auth again with --state-dir or " +
-	"RALPH_ORG_STATE_DIR naming the new place"
+const cleanupLedgerMoveStep = "once no org on the ledger runs and no ralph org command runs on it, move its directory to a " +
+	"place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/auth again with --state-dir " +
+	"or RALPH_ORG_STATE_DIR naming the new place"
 
 // cleanupOtherCase is path with the first ASCII letter of its last element in
 // the other case, when the file system finds the same directory under that

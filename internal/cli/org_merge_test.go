@@ -964,7 +964,8 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 			// (C3-L1 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md).
 			want := mergeCLILines(fx.head, tc.want, "") + "CLEANUP: skipped (the ledger's directory " + fx.stateDir + " is " +
 				"inside the feature worktree " + fx.work + ", which the cleanup removes with the files .gitignore names, so the " +
-				"ledger would be removed with it, and nothing is removed: while no ralph org command runs on the ledger, move its " +
+				"ledger would be removed with it, and nothing is removed: once no org on the ledger runs and no ralph org command " +
+				"runs on it, move its " +
 				"directory to a place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/a " +
 				"again with --state-dir or RALPH_ORG_STATE_DIR naming the new place)\n"
 			if stdout != want {

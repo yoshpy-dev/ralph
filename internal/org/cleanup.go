@@ -486,10 +486,15 @@ func (c *cleanupRun) ledgerDir() string {
 // inside a worktree a cleanup would remove: the binding is in this ledger, so
 // no other ledger can clean the branch up, and the way on is to move this
 // one, while nothing uses it, to a place where no other ledger is, which it
-// would otherwise overwrite, and to clean up again with it there.
+// would otherwise overwrite, and to clean up again with it there. Nothing
+// uses it only once no org on it runs: a running org's leader and director
+// name the ledger's path in their commands, and its lock and manifest
+// writes make the directory again, so a ledger moved between two commands
+// would come back at the old path.
 func (c *cleanupRun) ledgerMoveStep() string {
-	return fmt.Sprintf("while no ralph org command runs on the ledger, move its directory to a place outside the worktree "+
-		"where no other ledger is, and %s with --state-dir or %s naming the new place", cleanupAgain(c.p.Branch), EnvOrgStateDir)
+	return fmt.Sprintf("once no org on the ledger runs and no ralph org command runs on it, move its directory to a place "+
+		"outside the worktree where no other ledger is, and %s with --state-dir or %s naming the new place",
+		cleanupAgain(c.p.Branch), EnvOrgStateDir)
 }
 
 // pathWithin reports whether child is dir or inside it, compared by file
