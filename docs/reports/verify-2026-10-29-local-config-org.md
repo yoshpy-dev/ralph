@@ -58,7 +58,7 @@
 | I2 | INFO | 上の表の tech-debt 209 行の HTML コメント | 同上 | 残してよい。必要なら「S4b で消えた」の 1 文 |
 | I3 | INFO | 上の表の multi-org spec の 2 つの箇条 | 同上 | 任意。#265 と #267 にならい、日付つきの箇条で env をやめたことを書ける |
 | I4 | INFO | 計画の Assumptions の 1 つが外れ、Progress に記録がない | 同上 | 任意。Progress に 1 行(再実行: e13b217a が Progress の 204 行に記録した。対応済み) |
-| V3 | LOW | (再実行で発見)tech-debt 366 行(`TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の race)の Trigger「the next change to `org_watch_test.go`」に、S4b の `internal/cli/org_watch_test.go` の変更(+54/-43)が当たった。行は origin/main と同じバイト列のままで、race も残る(`:1340-1341` は `stdin: eof` を書いてから `trap '' TERM` を置く)。S6 が直した 287 行と同じ形の race | 下の「Re-run after S6」の Trigger の表、`docs/tech-debt/README.md:366`、`internal/cli/org_watch_test.go:1340-1341` | 287 行と同じ判断をする。行の Trigger が書く 1 行の直し(trap を `stdin:` の行の前に移す)を入れるか、/sync-docs で持ち越しの注を足す |
+| V3 | LOW(fixed: c7095378) | (再実行で発見)tech-debt 366 行(`TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の race)の Trigger「the next change to `org_watch_test.go`」に、S4b の `internal/cli/org_watch_test.go` の変更(+54/-43)が当たった。行は origin/main と同じバイト列のままで、race も残る(`:1340-1341` は `stdin: eof` を書いてから `trap '' TERM` を置く)。S6 が直した 287 行と同じ形の race | 下の「Re-run after S6」の Trigger の表、`docs/tech-debt/README.md:366`、`internal/cli/org_watch_test.go:1340-1341` | 287 行と同じ判断をする。行の Trigger が書く 1 行の直し(trap を `stdin:` の行の前に移す)を入れるか、/sync-docs で持ち越しの注を足す |
 | V4 | LOW | (再実行で発見)ほかに 5 行の Trigger にこの branch が当たり、どの行にも持ち越しの注がない: 144(`doctor_codex_writable_root_test.go`)、235 と 364(`gate.go`・`gate_run.go`)、316(`director_start.go`)、367(recipe 2 本の 2 つの写し)、177 の (b)(`newOrgStartCmd`。(b) 自体は main の 216b2cdd ですでに直っている) | 同上 | /sync-docs で各行に「carried over by feat/local-config-org」の注を足す。177 の (b) は取り消す |
 | I5 | INFO | (再実行で発見)287 行の上の HTML コメントの「up to 10 s like the other marker waits of the package」は、ほかの 4 つの `waitForFileWithin` のうち 3 つにしか合わない(`director_cmd_test.go:1155` は 30 s)。描画では見えない | `internal/org/director_cmd_test.go:1073`・`:1155`、`internal/org/director_stop_test.go:1128`・`:1223` | 任意。「like most of the other marker waits」 |
 | I6 | INFO | (再実行で発見)Trigger に当たったかどうかの判断が要る 3 件。170・171 行(`LegacyWorktreeStateDir` の中の呼び出し 2 行の付け替えだけ。I1 と同じ問い)、362 行(leader の template を描画する `TestRenderRolePrompt_AgmsgScriptsIsTheQuotedScriptsDir` を変えたが、行が挙げる 5 ファイルの外)、294 行(org の `isolateGitEnv` は変わっていない。S1 が `internal/gitroot/gitroot_test.go` に同名の写しを `XDG_CONFIG_HOME` なしで足した) | 同上 | I1 と一緒に決める。当たったとみるなら持ち越しの注 |
@@ -168,3 +168,44 @@ pass
 - Insight event: `docs/insights/events/2026-10-29-local-config-org.jsonl` に verify の行を 1 行足した(`--verdict pass --cycle auto --low 2`)。
 - 再実行(6e1f6563)でも pass。static は全体で通り(rc=0)、S6 は Progress に記録した範囲(テストのファイル 1 つの 1 関数と tech-debt の行)に収まり、計画の digest は承認時と同じ。287 行は 5 欄で、register の主な形 `S--S-` と同じ。事実は test report とコミットに合う(I5 の言い回しだけが 4 つのうち 3 つに合う)。ブランチ全体の Trigger の掃き出しで、cycle 1 で見落とした LOW 2 件(V3 366 行、V4 5 行)と INFO 2 件(I5、I6)を足した。I4 は対応済み。開いた所見は LOW 4 件(V1〜V4)と INFO 5 件(I1〜I3、I5、I6)で、どれも merge を止めない。
 - 再実行の insight event: 同じ jsonl に verify の行をもう 1 行足した(`--verdict pass --cycle auto --low 4`)。
+- V3 の直しのあと(fa769eea)も pass。V3 は c7095378 で直った(下の「Re-run after the V3 fix」)。開いた所見は LOW 3 件(V1、V2、V4)と INFO 5 件(I1〜I3、I5、I6)で、どれも merge を止めない。V1・V4・I5・I6 は /sync-docs が扱う。insight event は同じ jsonl に 1 行(`--verdict pass --cycle auto --low 3`)。
+
+## Re-run after the V3 fix (fa769eea)
+
+- Date: 2026-10-30 00:45〜00:48 JST(UTC では 2026-10-29)
+- Verifier: verifier サブエージェント(`/verify` の再実行。cycle は 1 のまま)
+- Scope: 77a415c9..fa769eea の 3 コミット。コードの変更は c7095378 だけで、`internal/cli/org_watch_test.go` の 1 hunk(`TestOrgWatchDetach_StartDetachedProcess_NewSessionDevNullStdinAppendedLog` の中、+5/-2)と `docs/tech-debt/README.md` の 366〜367 行。90f126e9 は計画の Progress checklist の 1 行(210 行)、fa769eea は self-review report と jsonl。テストは打っていない(/test の範囲)。
+- load average(`sysctl -n vm.loadavg`): 開始時 12.62 14.90 33.87、static の直前 21.02 16.62 33.94、直後 18.32 16.51 33.30、終了時 49.50 25.44 35.74。
+- Evidence: `docs/evidence/verify-2026-10-29-local-config-org.log` の「Re-run after the V3 fix」の節。
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc=0、31 秒、00:46:15〜00:46:46) | 範囲は `Language scope: full fallback (unclassified:.gitignore)` で、Go は全体で走った。gofmt `ok`、go vet と staticcheck は無出力、golangci-lint `0 issues.`、check-sync `PASS`(IDENTICAL 172、DRIFTED 0)、check-skill-sync 14 本、ほかの local verifier も OK。secret scan は `5eba4013..fa769eea` で clean。timeout には当たらず、打ち直しもしていない。run-verify 自身のログは `docs/evidence/verify-2026-10-29-154616.log` |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-29-local-config-org.md` | `1609f175543b` | 承認時と同じ。90f126e9 の変更は Progress checklist の 210 行の 1 行だけ |
+| `git diff --name-only <c>^ <c>`(3 コミット) | 説明どおり | c7095378 は上の 2 ファイル、90f126e9 は計画、fa769eea は self-review report と jsonl |
+| `gofmt -l internal/cli/org_watch_test.go`、`git diff --check 77a415c9..HEAD`、U+FFFD の grep | すべて空 | |
+
+### V3 が直ったか
+
+直った。
+
+- コード: 子のスクリプトの 1 行目が `if [ "$2" = ignore-term ]; then trap '' TERM; fi` になり(`internal/cli/org_watch_test.go:1343`)、`stdin: eof` を書く行(`:1344`)より前で trap を張る。テストは `stdin: eof` を待ってから SIGTERM を送る(`:1355`・`:1360`)ので、その時点で trap は張られている。trap は何も出力しないので、ログの期待値(`:1375`)は変わらない。行の Trigger が書いていた直し方そのもの。
+- 行の形: 行は 367 行に移り、366 行に HTML コメントが入った。見出し(14 行)と 367 行は 5 欄。表全体の欄の数の分布は 77a415c9 と同じ(5 欄が 286 行、前からの 3 行は変わらない)。367 行の形は `S--S-` で、`<!-- RESOLVED` の下の行でいちばん多い形(63 行)と同じ。Debt の欄は `~~...~~ (RESOLVED 2026-10-30 in feat/local-config-org)`、Trigger の欄は `~~...~~ — RESOLVED: ...`。Impact と Why deferred の欄は 77a415c9 と同じで、Related の欄には verify report(V3)が足された。HTML コメントは `<!-- RESOLVED 2026-10-30 in feat/local-config-org:` で始まり `Row preserved for traceability. -->` で終わる。
+- 事実: コメントの「子のスクリプトの 1 行目で trap」は `:1343` に合う。「この PR は `org_watch_test.go` を変える(S4b、相対の `agmsg_home` を断るテスト)」は 1c530966(S4b)が直前までに同じファイルを変えた唯一のコミットであることに合う。「`/verify` の再実行(V3)が見つけた」は上の Findings に合う。計画の Progress の 210 行も同じことを書く。
+- ほかの開いた行で、Trigger が `org_watch_test.go` を名指すものはもうない。このテストの名前が出るのは 367 行だけ。
+
+### Notes(所見にしないもの)
+
+- 同じ夜の 2 つの RESOLVED で日付の付け方が違う。287 行(S6、321203dc は JST 10-30 00:09)は計画の日付で UTC の日付でもある 2026-10-29、367 行(c7095378 は JST 10-30 00:40)は JST の日付 2026-10-30。どちらも事実に反しないので直しは求めない。
+- 計画の Progress の 210 行は直した行を「366 行」と呼ぶ。直す前の番号で、いまの行は 367 行。
+
+### 前の所見の扱い
+
+- V3: fixed(c7095378)。
+- V1、V2、V4、I1〜I3、I5、I6: この再実行の 3 コミットは触らないので、そのまま残す。V1・V4・I5・I6 は /sync-docs が扱う。
+
+### Coverage gaps(再実行)
+
+- 直したテストを負荷の下で走らせることは /test の範囲で、ここでは打っていない(計画の Progress の 210 行に、インラインで直したときの `-count=20` の記録がある)。
