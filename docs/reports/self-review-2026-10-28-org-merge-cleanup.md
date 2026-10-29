@@ -11,7 +11,7 @@
 
 この report の verdict(下の「Findings」の先頭の表と「Recommendation」の `Merge:` の行)は HEAD afe9c1ed のブランチについてのもの。run 1・run 2 の所見は、その下に当時の文のまま残し、扱いを別の表にした。run 2 の所見の ID は run 1 の L1〜L6 と取り違えないよう `R2-L<n>`、run 3 は `R3-L<n>` にした。
 
-パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 33b78f8c)の review は、末尾の「cycle 2(HEAD 33b78f8c)」の節にある。いまのブランチの verdict はその節の `Merge:` の行で、上の verdict は cycle 1 の記録として残している。cycle 2 の所見の ID は `C2-L<n>`。
+パイプラインの cycle 2(cross-review cycle 1 の指摘の直し、HEAD 33b78f8c)の review は、末尾の「cycle 2(HEAD 33b78f8c)」の節にある。その所見の直しの review は、さらに後ろの「cycle 2 run 2(HEAD 21785882)」の節にある。いまのブランチの verdict は「cycle 2 run 2」の節の `Merge:` の行で、上の verdict は cycle 1 の記録として、「cycle 2(HEAD 33b78f8c)」の verdict はその run の記録として残している。cycle 2 の所見の ID は `C2-L<n>`、run 2 の所見は `C2R2-L<n>`。
 
 ## Evidence reviewed
 
@@ -244,3 +244,76 @@ CRITICAL 0、HIGH 0、MEDIUM 0、LOW 6(HEAD 33b78f8c について)。
   - ssh の alias の origin は、merge と同じく gh が host を読めず、ブランチごとに SKIPPED になる(決定済み、PR の既知の穴)。
   - cleanup は origin、ls-remote、gh を打った場所で読み、消すのは state dir から引いた main worktree の下。`--state-dir` で別の repo を指すと、読む origin は打った場所のもの。cycle 1 からの作り(Dir を空のまま渡す)で、違う repo の PR なら確かめ 5 の head の比べで止まる。
   - lock された登録は、`remove` の `git worktree remove` も Manual も `-f -f` なしでは外せない。cycle 1 からの作り。
+
+## cycle 2 run 2(HEAD 21785882)
+
+- Scope: `git diff 04c83f5c..21785882`(7 ファイル、+290/-93)。コミットは 060102bb(C2-L5、台帳の 2 行)、54fa6351(C2-L1・C2-L2・C2-L3・C2-L4・C2-L6)、21785882(計画の Progress の行)。C2-L1〜C2-L6 の直しが所見どおりか、直しが新しい問題を持ち込んでいないかだけを見た。ブランチの残りは読み直していない。
+- 命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。テスト、静的解析、文書のずれの確かめは打っていない。確かめたのは、読むことと `git` の読み取り、scratchpad の小さな git の実験(git 2.49.0)だけ。
+- 行番号は HEAD 21785882 のもの。
+
+### Evidence reviewed(cycle 2 run 2)
+
+- `registrationAtRisk`(`internal/org/cleanup.go:793-844`)の分かれを、git が出す登録の形と照らした。
+  - 登録がない、または登録が binding のブランチにいてそのブランチもある: why と keep はどちらも `""`。`checkRegistration` は `st.registered` のときだけ呼ばれ、`recordGone` は文を足さない。
+  - detached でコミットを指す HEAD: 「removing the registration would drop its HEAD and reflog」と、退避のコマンド `git -C <root> branch <branch>-unmerged-<sha7> <HEAD>`。
+  - 別のブランチの先頭を指す HEAD: 退避のコマンドを出さない。HEAD はそのブランチの先頭で片付けのあとも残り、消えるのは reflog だけ、と言う(C2-L6 の Recommendation どおり)。reflog の場所も出すが、これは Recommendation になかった足し分。detached で作ってから別のブランチへ移ったコミットは登録の reflog にしか残らないので、出してよい。
+  - HEAD がゼロ(binding のブランチが消えた、別のブランチが消えた、HEAD が読めない): reflog の場所だけを出す。scratchpad で登録の HEAD に `ref: refs/heads/nosuch`、`ref: refs/remotes/origin/x`、`ref: FOO`、`garbage` を書くと、どれも `HEAD 0000…` になった。前の 3 つは `branch` の行を持ち、`garbage` は branch も detached も持たない。どれもゼロの分かれに入る。
+  - ディレクトリが残る場合も消えた場合も、`readState` は同じ porcelain から `regHead`・`regBranch`・`regDetached` を読む。`recordGone` の 2 つの形で同じ文になる(新しいテストの 2 ケース)。
+- `recordGone` が、危ない登録について退避の文なしに `git worktree remove` を名指すことはあるか。Manual に `git worktree remove` が入るのは `st.dirExists || st.registered` のとき(`:504-507`)。登録があって危ない形なら `registrationAtRisk` が文を返し、理由に入る(`:519-521`)。登録がなくディレクトリだけがある形には、守る登録がない(`git worktree remove` が失敗するだけで、cycle 1 からの作り)。登録が binding のブランチにいてブランチもある形は、cycle 2 の Known gaps(reflog にだけ残るコミット)のまま。退避の文が抜ける道はなかった。
+- C2-L1 のコマンド。`cleanupShellWord` の安全な文字(`:85`)に `=` がないので、文は `git -C <root> rev-parse '--path-format=absolute' --git-common-dir` になる。shell は引用を外して同じ引数を渡す。scratchpad で `/` から打つと絶対パスが出た。symlink を通した `-C`(`/tmp/…`)でも、解決したパス(`/private/tmp/…`)が出る。
+- gitdir のパス。git は `worktree add` に渡したパスを解決して gitdir に書く。scratchpad で `/tmp/…/wt one` を渡すと、gitdir の中身は `/private/tmp/…/wt one/.git` だった。ralph の feature worktree のパスは、`StartFeature` が `resolvedOrClean` を通した root からつくる(`internal/org/feature.go:206-207`)。文の `<worktree>/.git` は gitdir の中身と文字のまま合う。テストの `registrationReflog`(`internal/org/cleanup_test.go:284`)は `/` からコマンドを打ち、gitdir の中身を文字列で比べる。macOS の `/var` と `/private/var` の違いは、fixture の `resolvedOrClean` が吸収する。合わない形は Known gaps に書いた。
+- C2-L2。`foreignPRWhy`(`internal/org/mergeorigin.go:42-53`)の文は「check origin (git remote get-url origin)」で終わり、merge の断り(`internal/org/merge.go:433-437`)と同じ次の手になった。cleanup の 2 つの行(`internal/cli/org_cleanup.go:253-254`、`:279-281`)は理由を括弧で出すので、どちらにも入る。所見の Recommendation の後半(名前が変わったなら `git remote set-url`)は、計画の記録(「原因は書かない」)どおり書いていない。名前の変更は所見でも未確認の推測だったので、merge にそろえた形でよい。括弧のあとの「once gh reads its PR, run ralph org cleanup again」は、gh が答えなかった場合と共通の文として残る。次の手は括弧の中にあるので、所見にしない。
+- C2-L4。2 か所の注釈(`internal/cli/org_cleanup_test.go:222`、`internal/org/cleanup_test.go:787`)が「cross-review cycle 1」と書く。
+- C2-L5。R3-L2 の行(`docs/tech-debt/README.md:386`)は断りを 4 つに数え、`checkRegistration` を名指す。`git log <head>..<branch>` を fetch なしで名指す場所は、コードでも 4 つ(`internal/org/cleanup.go:525`、`:557`、`:562`、`:787`)。R3-L3 の行(`:387`)は `internal/cli/org_cleanup_test.go` も越えたと書き、数は書かない。
+- テストが意図を見ているか。テストの `registrationAtRisk`(`internal/org/cleanup_test.go:252`)は製品の関数と同じ分かれを持つ。どの分かれに入るかはケースの `named`・`other` で別に決めているので、分け方を誤れば落ちる。新しいテスト `TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead`(`:1008`)は、理由を全文で比べ、退避と Manual を `sh -c` で文のとおりに打つ。そのあと、登録と feat/auth が消え、detached のコミットが退避したブランチから届くことを見る。別のブランチのケースは、Manual のあとも `other` が登録の HEAD にあることを見る(`:920-924`)。
+- 端末に出す文。新しい文も `refuse` の `PrintableInboxText` を通る(`internal/org/cleanup.go:376-378`)。
+- 古い文の写し。「this worktree's directory」や `--path-format` のない `rev-parse --git-common-dir` の文は、skill、文書、コードのどこにも残っていない(`git grep`)。
+- 行数(04c83f5c → HEAD)。`internal/org/cleanup.go` 935 → 979、`internal/org/cleanup_test.go` 1387 → 1528、`internal/cli/org_cleanup_test.go` 987 → 991、`internal/org/mergeorigin.go` 110 → 112、`internal/org/mergeorder_test.go` 2893 → 2895。800 行を越えるファイルは、どれも台帳の行(L5 と R3-L3)か、この PR の前から越えていたもの。
+
+### cycle 2 run 2 の所見
+
+CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3(HEAD 21785882 について)。
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | C2R2-L1: `recordGone` の理由に足した一文のせいで、そのあとの「remove it by hand」の it が取り違えやすくなった。文は「…: the feature worktree W and the branch B at H left; git still has the feature worktree's registration, whose HEAD …: keep what you need on another branch made from the main worktree once you have found it in that reflog (…), and remove it by hand once you have checked …」と続く。直前の it は what you need を指すので、続く it も同じものと読める。退避したものを手で消せと読むと、退避の意味が逆になる。前からの「X and Y left; remove it by hand」も 2 つのものを it で受けていたが、間に一文が入って近い先行詞ができた。Manual が消すのは worktree とブランチなので、Manual を見れば読み直せる | `internal/org/cleanup.go:517-522`。期待文で固定しているのは `internal/org/cleanup_test.go:950`、`:955`、`:969`、`:1035` | 「remove it by hand」を「remove what is left by hand」にする(4 か所の期待文も)。退避の一文のあとで文を切る(「; then remove …」)でもよい |
+| LOW | maintainability | C2R2-L2: `registrationAtRisk` の注釈は「A HEAD that is detached or on no branch git can read is kept on a new branch (keptBranch)」と書くが、branch も detached もない登録には git が `HEAD 0000…` を出す(scratchpad で `garbage` を書いた HEAD。cycle 2 の probe の「HEAD が読めない」も同じ)。そのため「on no branch git can read」の登録はいつもゼロの分かれに入り、keptBranch には届かない。テストの「a HEAD git cannot read」も `named=false`。注釈の同じ段落が、同じ状態に 2 つの扱いを書いている | `internal/org/cleanup.go:802-807`、`:819-820`、`:833-835`。`internal/org/cleanup_test.go:831` | 注釈を「A HEAD that is detached is kept on a new branch (keptBranch)」にし、ブランチのない HEAD はゼロの文(「its branch is gone, or git cannot read it」)に任せる。コードは変えない |
+| LOW | maintainability | C2R2-L3: 台帳の R3-L3 の行の Trigger は、移す関数に `branchMovedSteps`、`fetchHeadCmd`、`cleanupShellWord`、`cleanupGitCmd` を挙げる。この直しで足した `registrationAtRisk`(注釈とで 52 行)と、F4 で足した `keptBranch` が入っていない。一覧のとおりに移すと、断りの文をつくる関数のうち一番長いものが残る。Related の列は R3-L3 だけで、Debt item の列が挙げる C2-L5 がない(R3-L2 の行は Related にも C2-L5 を足した)。R3-L2 の行は括弧が 2 つ続く(「(`checkRegistration`, added in cycle 2; self-review cycle 2, C2-L5) (`internal/org/cleanup.go`)」) | `docs/tech-debt/README.md:386`、`:387`。`internal/org/cleanup.go:702-709`、`:793-844` | Trigger の一覧に `registrationAtRisk` と `keptBranch` を足すか、「such as」を付けて例にする。Related に C2-L5 を足す。R3-L2 の 2 つの括弧を 1 つにまとめる |
+
+### cycle 2 の所見の扱い(HEAD 21785882 で確かめた)
+
+| ID | 扱い | 状態 |
+| --- | --- | --- |
+| C2-L1 | 名指すコマンドを `git -C <root> rev-parse --path-format=absolute --git-common-dir` にし、ディレクトリを「gitdir file holds `<worktree>/.git`」で言う。テストは `/` から打って絶対パスを確かめ、gitdir の中身を文字列で比べる | 解消 |
+| C2-L2 | `foreignPRWhy` が「check origin (git remote get-url origin)」で終わり、merge の断りと同じ次の手になった。`set-url` の半分は、原因を書かない判断で入れていない | 解消 |
+| C2-L3 | `recordGone` は、登録が危ない形(detached、別のブランチ、ブランチなし、HEAD がゼロ)なら、ディレクトリが残っていても消えていても `registrationAtRisk` の文を出す。新しいテストの 2 ケースが、文のとおりに打てば detached のコミットが残ることを見る | 解消。文の it は C2R2-L1 |
+| C2-L4 | 2 か所の注釈が「cross-review cycle 1」と書く | 解消 |
+| C2-L5 | R3-L2 の行が 4 つ目の断り(`checkRegistration`)を数え、R3-L3 の行が `internal/cli/org_cleanup_test.go` も越えたと書く | 解消。行の細部は C2R2-L3 |
+| C2-L6 | 別のブランチの登録では退避のコマンドを出さず、HEAD はそのブランチが持って残り、消えるのは reflog だけと言う。テストは Manual のあとも `other` が残ることを見る | 解消 |
+
+### Positive notes(cycle 2 run 2)
+
+- 断りの一文を `registrationAtRisk` にまとめ、`checkRegistration` と `recordGone` が同じ文を出す。cycle 2 の Tech debt の (c) が求めた形になった。
+- テストの `registrationReflog` は、名指すコマンドを `/` から打ち、出たパスの下で gitdir の中身が `<worktree>/.git` のディレクトリを 1 つだけ探す。文が言うとおりにたどれることを、そのまま確かめている。
+- 別のブランチのケースで、Manual のあとも `other` が登録の HEAD にあることを確かめ、文の「which the cleanup leaves」を挙動で裏づけている。
+
+### Tech debt identified(cycle 2 run 2)
+
+この run の変更はこの report と insight event だけで、台帳は書き換えていない。cycle の上限(既定 2)に届いたパイプラインの中の run なので、C2R2-L1〜C2R2-L3 のうち直さないものは、`/pr` のあとに運ぶ場所が台帳しかない。直さずに進めるなら、次の 1 行を足す(C2R2-L3 の直しは同じ編集で済む)。
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+| merge のあとの片付け(#263)の self-review cycle 2 の直しの残り。(a) 記録がないときの断りは、登録の退避の一文のあとに「remove it by hand」と続き、it が退避するものと読める(C2R2-L1)。(b) `registrationAtRisk` の注釈は、ブランチのない HEAD を keptBranch で退避すると書くが、git はその登録の HEAD をゼロで出すので、その道に届かない(C2R2-L2) | (a) 人が読み違えても、Manual が消すのは worktree とブランチだけで、退避したブランチは消えない。(b) 注釈を読んでコードを変える人が、届かない分かれを残すか誤って直す | cycle の上限に届いた run の LOW だけで、どちらも何かを消す道ではない | 次に `internal/org/cleanup.go` の断りの文か `registrationAtRisk` を変えるとき | `docs/plans/active/2026-10-28-org-merge-cleanup.md`、この report の C2R2-L1・C2R2-L2 |
+
+### Recommendation(cycle 2 run 2)
+
+- Merge: 可(CRITICAL 0、HIGH 0、MEDIUM 0、LOW 3。HEAD 21785882 について)。C2-L1〜C2-L6 は 6 つとも解消した。
+- Follow-ups:
+  - C2R2-L1 は理由の 1 語と期待文 4 か所、C2R2-L2 は注釈の 1 文。どちらもコードのファイルを変えるので、記録だけの直しの例外には入らない。直すなら、この run と同じく直しだけを読む短い run を回す。直さないなら上の台帳の行に入れる。
+  - C2R2-L3 は台帳の行の文で、上の行を足すときに一緒に直せる。
+  - `/verify` と `/test` は、この run が打たなかった `go test`・`go vet`・`golangci-lint`・`run-static-verify.sh`・`run-test.sh` を打つ。
+- Known gaps(所見にしていないもの):
+  - `worktree.useRelativePaths=true`(git 2.48 から)の repo では、gitdir の中身が相対パスになり(scratchpad で `../../../../wt3/.git`)、文の `<worktree>/.git` と文字では合わない。`worktrees/` の下のディレクトリを開けばたどれる。script は `--relative-paths` を付けない(`scripts/ralph-worktree.sh:315`)ので、人の git の設定でだけ起こる。
+  - 手で壊した登録(HEAD にない object の SHA を書くと `HEAD deadbeef…` と `detached` が出る)では、退避のコマンドを打つと失敗する。何も消えない。手で壊した repo の形なので、所見にしない。
+  - 手で HEAD を `ref: refs/tags/v1` にした登録は `branch refs/tags/v1` と出て、文は「the branch refs/tags/v1」と言う。tag は片付けのあとも残るので、言うことは合う。
+  - 括弧のあとの「once gh reads its PR, run ralph org cleanup again」は、origin の PR でない場合にも残る(上の Evidence)。
