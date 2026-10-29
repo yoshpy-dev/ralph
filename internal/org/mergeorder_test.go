@@ -2257,8 +2257,10 @@ func TestMergeOrder_PinnedOriginReadsThePRsInItsRepository(t *testing.T) {
 // another repository name, of o/r on another host, with an http url, or with
 // a url that names no repository leaves every branch skipped with no PR, a
 // branch found or failed before it and one gh was never asked about included,
-// each with the same PRLookupWhy, which names the PR, and a note with it. gh
-// is not run again, and no get-url runs.
+// each with the same PRLookupWhy, which names the PR and says to check origin
+// as ralph org merge's refusal does (C2-L2 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md), and a note with
+// it. gh is not run again, and no get-url runs.
 func TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository(t *testing.T) {
 	for _, tc := range []struct{ name, url string }{
 		{"another owner", "https://github.com/x/r/pull/9"},
@@ -2279,7 +2281,7 @@ func TestMergeOrder_PinnedOriginLeavesEveryPROutForAPROfAnotherRepository(t *tes
 				t.Fatalf("MergeOrder: %v", err)
 			}
 			why := "gh pr list --head feat/c -R github.com/o/r returned PR #9 with the url " + strconv.Quote(tc.url) +
-				", which is not a PR of origin's repository github.com/o/r"
+				", which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url origin)"
 			for _, e := range res.Entries {
 				if e.PRLookup != MergeOrderPRLookupSkipped || e.PR != nil || e.PRLookupWhy != why {
 					t.Errorf("%s: pr_lookup %q, PR %+v, PRLookupWhy %q; want skipped, no PR, and %q", e.Branch, e.PRLookup, e.PR,

@@ -219,11 +219,14 @@ func TestOrgCleanup_BranchWhosePRIsNotMergedIsRefused(t *testing.T) {
 	}
 }
 
-// Finding 1 of docs/reports/cross-review-triage-org-merge-cleanup.md (S-X1 of
-// the plan): gh's PR lookup is pinned to origin's repository o/r, as ralph org
-// merge pins its own, so a MERGED PR at feat/a's head that gh returns with the
-// url of another owner/name, or of o/r on another host, is not used: cleanup
-// skips feat/a with a SKIPPED: line that names the PR gh returned, exit 1, and
+// Finding 1 (cross-review cycle 1,
+// docs/reports/cross-review-triage-org-merge-cleanup.md; S-X1 of the plan):
+// gh's PR lookup is pinned to origin's repository o/r, as ralph org merge
+// pins its own, so a MERGED PR at feat/a's head that gh returns with the url
+// of another owner/name, or of o/r on another host, is not used: cleanup
+// skips feat/a with a SKIPPED: line that names the PR gh returned and says
+// to check origin (C2-L2 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md), exit 1, and
 // --branch feat/a is refused with the same reason and nothing on stdout. Both
 // gh calls carry -R github.com/o/r, and nothing is removed or recorded.
 func TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing(t *testing.T) {
@@ -240,7 +243,8 @@ func TestOrgCleanup_MergedPROfAnotherRepositoryRemovesNothing(t *testing.T) {
 			before := fx.snapshot(t)
 
 			why := "no answer of gh was used: gh pr list --head feat/a -R github.com/o/r returned PR #7 with the url " +
-				strconv.Quote(tc.url) + ", which is not a PR of origin's repository github.com/o/r"
+				strconv.Quote(tc.url) + ", which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url " +
+				"origin)"
 			stdout, stderr, err := fx.cleanup(t)
 			want := "SKIPPED: feat/a whether its PR was merged is not known (" + why + "), so nothing was removed: once gh reads " +
 				"its PR, run ralph org cleanup again\n"
@@ -629,7 +633,7 @@ func TestCleanupSteps_PicksTheMergedBranches(t *testing.T) {
 	const (
 		failedWhy  = "exit status 1: HTTP 502\x1b[31m"
 		skippedWhy = `gh pr list --head feat/x -R github.com/o/r returned PR #9 with the url "https://github.com/x/r/pull/9", ` +
-			"which is not a PR of origin's repository github.com/o/r"
+			"which is not a PR of origin's repository github.com/o/r; check origin (git remote get-url origin)"
 	)
 	found := org.MergeOrderPRLookupFound
 	res := org.MergeOrderResult{GHAvailable: true, Entries: []org.MergeOrderEntry{

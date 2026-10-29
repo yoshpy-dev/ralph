@@ -241,6 +241,76 @@ func cleanupKeptBranch(tip string) string {
 	return "feat/auth-unmerged-" + tip[:7]
 }
 
+// registrationAtRisk is what a refusal says of git's registration of the
+// feature worktree when it is not on feat/auth with feat/auth there
+// (registrationAtRisk of cleanup.go): why, from "whose HEAD <head> <on>", and
+// keep. A HEAD that names a commit (named) and is not the tip of another
+// branch (other, "" for none) is kept with the command that makes
+// cleanupKeptBranch of it; otherwise keep points at the registration's
+// reflog, with the command that prints git's common directory
+// (registrationCommonCmd).
+func (fx *worktreeCleanupFixture) registrationAtRisk(head, on string, named bool, other string) (why, keep string) {
+	why = "whose HEAD " + head + " " + on
+	reflog := "keep what you need on another branch made from the main worktree once you have found it in that reflog " +
+		"(logs/HEAD of the directory under worktrees/ whose gitdir file holds " + fx.worktree + "/.git, in git's common " +
+		"directory, which " + fx.registrationCommonCmd() + " prints)"
+	switch {
+	case !named:
+		return why + ": that HEAD names no commit, and removing the registration would drop its reflog, which may be the last " +
+			"record of a commit made there", reflog
+	case other != "":
+		return why + ": that HEAD is the tip of the branch " + other + ", which the cleanup leaves, and removing the registration " +
+			"would drop only its reflog, which may be the last record of a commit made there", reflog
+	}
+	keep = "keep what you need on another branch made from the main worktree (git -C " + fx.root + " branch " +
+		cleanupKeptBranch(head) + " " + head + ")"
+	return why + ": removing the registration would drop its HEAD and reflog, which may be the last references to a commit made " +
+		"there", keep
+}
+
+// registrationCommonCmd is the command a refusal names to print git's common
+// directory, an absolute path: --path-format=absolute is quoted, since
+// cleanupShellWord quotes a word with "=", and git rev-parse takes the option
+// only with its "=".
+func (fx *worktreeCleanupFixture) registrationCommonCmd() string {
+	return "git -C " + fx.root + " rev-parse '--path-format=absolute' --git-common-dir"
+}
+
+// registrationReflog checks the reflog the reason points at for a HEAD it
+// gives no command to keep (registrationAtRisk) and returns what it holds:
+// the command it names prints, from any directory, an absolute path, under
+// whose worktrees/ admin, git's directory of the registration, is the one
+// directory whose gitdir file holds the worktree's .git.
+func (fx *worktreeCleanupFixture) registrationReflog(t *testing.T, admin string) string {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", fx.registrationCommonCmd())
+	cmd.Dir = "/"
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	common := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(common) {
+		t.Fatalf("the command the reason names prints %q, not an absolute path", common)
+	}
+	entries, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, e := range entries {
+		dir := filepath.Join(common, "worktrees", e.Name())
+		if gitdir, err := os.ReadFile(filepath.Join(dir, "gitdir")); err == nil && strings.TrimSpace(string(gitdir)) == fx.worktree+"/.git" {
+			found = append(found, dir)
+		}
+	}
+	if len(found) != 1 || resolvedOrClean(found[0]) != resolvedOrClean(admin) {
+		t.Fatalf("the directories under %s/worktrees whose gitdir file holds %s/.git are %q; want only %s", common, fx.worktree,
+			found, admin)
+	}
+	return fileOrAbsent(t, filepath.Join(found[0], "logs", "HEAD"))
+}
+
 // countCalls counts call in calls.
 func countCalls(calls []string, call string) int {
 	n := 0
@@ -714,19 +784,24 @@ func TestCleanupFeatureWorktree_ResumesWhatAnEarlierCleanupLeft(t *testing.T) {
 
 // TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 // covers S-X2 of plan docs/plans/active/2026-10-28-org-merge-cleanup.md
-// (finding 2 of docs/reports/cross-review-triage-org-merge-cleanup.md): with
-// the feature worktree's directory deleted and git's registration of it left,
-// git worktree remove would drop the registration's HEAD and reflog, so the
+// (finding 2 of cross-review cycle 1,
+// docs/reports/cross-review-triage-org-merge-cleanup.md): with the feature
+// worktree's directory deleted and git's registration of it left, git
+// worktree remove would drop the registration's HEAD and reflog, so the
 // registration is checked first (D2's 6 of the registration). One on a
 // detached HEAD with a commit the PR did not merge, on another branch, on the
 // binding's branch once that branch was deleted, or with a HEAD git cannot
 // read is refused: the registration, the branch, and the record stay, and
 // nothing is recorded. The reason gives the registered HEAD and, when it
-// names a commit, the command that keeps it, which runs as written, else
-// where the reflog that holds the branch's last commit is. The next
+// names a commit that is no other branch's tip, the command that keeps it,
+// which runs as written. For the tip of another branch, which the cleanup
+// leaves, and for a HEAD that names no commit, it gives no such command but
+// where the registration's reflog is, by a command that prints an absolute
+// path (C2-L1 and C2-L6 of
+// docs/reports/self-review-2026-10-28-org-merge-cleanup.md). The next
 // cleanup would refuse the registration again, so the reason does not say to
 // run it again, and Manual, run as written, removes the registration, the
-// branch, and the record by hand.
+// branch, and the record by hand, and leaves the other branch.
 func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing(t *testing.T) {
 	zeros := strings.Repeat("0", 40)
 	for _, tc := range []struct {
@@ -736,25 +811,26 @@ func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 		inWorktree func(t *testing.T, fx *worktreeCleanupFixture)
 		inGit      func(t *testing.T, fx *worktreeCleanupFixture, admin string)
 		on         string // what the reason says of the registration's HEAD
-		named      bool   // the registration's HEAD names a commit, which the reason says how to keep
+		named      bool   // the registration's HEAD names a commit
+		other      string // the branch whose tip the registration's HEAD is, "" for none
 		branchLeft bool   // feat/auth is left, which the reason says to check
 	}{
 		{"a detached HEAD with a commit the PR did not merge", func(t *testing.T, fx *worktreeCleanupFixture) {
 			runGit(t, "-C", fx.worktree, "checkout", "--quiet", "--detach")
 			gateCommit(t, fx.worktree, "on a detached HEAD")
-		}, nil, "is detached, not on the branch feat/auth", true, true},
+		}, nil, "is detached, not on the branch feat/auth", true, "", true},
 		{"another branch", func(t *testing.T, fx *worktreeCleanupFixture) {
 			runGit(t, "-C", fx.worktree, "switch", "--quiet", "-c", "other")
 			gateCommit(t, fx.worktree, "on another branch")
-		}, nil, "is on the branch other, not feat/auth", true, true},
+		}, nil, "is on the branch other, not feat/auth", true, "other", true},
 		{"the binding's branch, deleted", nil, func(t *testing.T, fx *worktreeCleanupFixture, _ string) {
 			// git branch -D refuses a branch a registered worktree has checked
 			// out, even one whose directory is gone.
 			runGit(t, "-C", fx.root, "update-ref", "-d", "refs/heads/"+cleanupTestBranch)
-		}, "is on the branch feat/auth, which no longer exists", false, false},
+		}, "is on the branch feat/auth, which no longer exists", false, "", false},
 		{"a HEAD git cannot read", nil, func(t *testing.T, _ *worktreeCleanupFixture, admin string) {
 			writeGateFile(t, admin, "HEAD", "not a ref\n", 0o644)
-		}, "is on no branch git can read", false, true},
+		}, "is on no branch git can read", false, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newWorktreeCleanupFixture(t)
@@ -778,18 +854,11 @@ func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 			before, tip := fx.snapshot(t), fx.branchTip()
 
 			res, err := fx.cleanup(fx.params())
+			kept := tc.named && tc.other == "" // the reason names the command that keeps the HEAD
 			keep := "git -C " + fx.root + " branch " + cleanupKeptBranch(head) + " " + head
-			want := "the directory of the feature worktree " + fx.worktree + " is gone, but git still has its registration, whose " +
-				"HEAD " + head + " " + tc.on
-			if tc.named {
-				want += ": removing the registration would drop its HEAD and reflog, which may be the last references to a commit " +
-					"made there, so nothing is removed: keep what you need on another branch made from the main worktree (" + keep + ")"
-			} else {
-				want += ": that HEAD names no commit, and removing the registration would drop its reflog, which may be the last " +
-					"record of a commit made there, so nothing is removed: keep what you need on another branch made from the main " +
-					"worktree once you have found it in that reflog (logs/HEAD of this worktree's directory under worktrees/ in " +
-					"git's common directory, which git -C " + fx.root + " rev-parse --git-common-dir prints)"
-			}
+			why, keepStep := fx.registrationAtRisk(head, tc.on, tc.named, tc.other)
+			want := "the directory of the feature worktree " + fx.worktree + " is gone, but git still has its registration, " + why +
+				", so nothing is removed: " + keepStep
 			if tc.branchLeft {
 				want += ", check that the branch feat/auth holds nothing that was not merged (git -C " + fx.root + " log " + fx.head +
 					"..feat/auth)"
@@ -813,26 +882,22 @@ func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 				t.Errorf("the refusal recorded %+v", events)
 			}
 
-			if tc.named {
+			if kept {
 				if out, err := exec.Command("sh", "-c", keep).CombinedOutput(); err != nil {
 					t.Fatalf("%s: %v\n%s", keep, err, out)
 				}
 			} else {
-				// The reflog the reason points at is under the directory its
-				// command prints, and holds the branch's last commit.
-				out, err := exec.Command("sh", "-c", "git -C "+fx.root+" rev-parse --git-common-dir").Output()
-				if err != nil {
-					t.Fatal(err)
+				if strings.Contains(res.Refused, cleanupKeptBranch(head)) {
+					t.Errorf("refusal %q names %s; want no command that keeps the HEAD", res.Refused, cleanupKeptBranch(head))
 				}
-				common := strings.TrimSpace(string(out))
-				if !filepath.IsAbs(common) {
-					common = filepath.Join(fx.root, common)
+				// The reflog the reason points at holds the branch's last
+				// commit, or the HEAD that is the other branch's tip.
+				in := fx.head
+				if tc.named {
+					in = head
 				}
-				if dir := filepath.Join(resolvedOrClean(common), "worktrees"); filepath.Dir(admin) != dir {
-					t.Errorf("git's directory of the registration is %s; want it under %s", admin, dir)
-				}
-				if log := fileOrAbsent(t, filepath.Join(admin, "logs", "HEAD")); !strings.Contains(log, fx.head) {
-					t.Errorf("the registration's reflog does not hold %s:\n%s", fx.head, log)
+				if log := fx.registrationReflog(t, admin); !strings.Contains(log, in) {
+					t.Errorf("the registration's reflog does not hold %s:\n%s", in, log)
 				}
 			}
 			if out, err := exec.Command("sh", "-c", manual).CombinedOutput(); err != nil {
@@ -847,9 +912,14 @@ func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 			if record := fileOrAbsent(t, fx.recordFile(t)); record != "<absent>" {
 				t.Errorf("the record is still there after the Manual:\n%s", record)
 			}
-			if tc.named {
-				if kept := gitOut(t, fx.root, "rev-parse", "refs/heads/"+cleanupKeptBranch(head)); kept != head {
-					t.Errorf("%s is at %s; want %s, the registration's HEAD", cleanupKeptBranch(head), kept, head)
+			if kept {
+				if at := gitOut(t, fx.root, "rev-parse", "refs/heads/"+cleanupKeptBranch(head)); at != head {
+					t.Errorf("%s is at %s; want %s, the registration's HEAD", cleanupKeptBranch(head), at, head)
+				}
+			}
+			if tc.other != "" {
+				if at := gitOut(t, fx.root, "rev-parse", "refs/heads/"+tc.other); at != head {
+					t.Errorf("%s is at %s after the Manual; want %s, the registration's HEAD, left", tc.other, at, head)
 				}
 			}
 		})
@@ -859,9 +929,12 @@ func TestCleanupFeatureWorktree_GoneWorktreeRegisteredOffItsBranchRemovesNothing
 // TestCleanupFeatureWorktree_RecordGoneRemovesNothing covers AC3b's missing
 // record: nothing is removed, and Manual removes by hand what git still has
 // of the worktree and the branch, the reason saying to check the branch
-// first. Only with nothing left at all (no record, no worktree or
-// registration of it, no branch) is NothingLeft set, with the refusal and no
-// Manual (plan docs/plans/active/2026-10-28-org-merge-cleanup.md, S3).
+// first. A registration on the binding's branch once that branch was deleted
+// is named as the refusal of 6 of the registration names it, and one on
+// feat/auth with feat/auth there is not. Only with nothing left at all (no
+// record, no worktree or registration of it, no branch) is NothingLeft set,
+// with the refusal and no Manual (plan
+// docs/plans/active/2026-10-28-org-merge-cleanup.md, S3).
 func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -878,7 +951,8 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 				"have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head + "..feat/auth"
 		}, func(fx *worktreeCleanupFixture) string { return "git -C " + fx.root + " branch -D feat/auth" }, false},
 		{"the worktree and the branch left", nil, func(fx *worktreeCleanupFixture) string {
-			return "removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head + " left"
+			return "removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head + " left; " +
+				"remove it by hand once"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
 		}, false},
@@ -890,7 +964,9 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			// out, even one whose directory is gone.
 			runGit(t, "-C", fx.root, "update-ref", "-d", "refs/heads/"+cleanupTestBranch)
 		}, func(fx *worktreeCleanupFixture) string {
-			return "removes nothing: the feature worktree " + fx.worktree + " left; remove it by hand"
+			why, keep := fx.registrationAtRisk(strings.Repeat("0", 40), "is on the branch feat/auth, which no longer exists", false, "")
+			return "removes nothing: the feature worktree " + fx.worktree + " left; git still has the feature worktree's " +
+				"registration, " + why + ": " + keep + ", and remove it by hand"
 		}, func(fx *worktreeCleanupFixture) string {
 			return "git -C " + fx.root + " worktree remove " + fx.worktree
 		}, false},
@@ -915,6 +991,71 @@ func TestCleanupFeatureWorktree_RecordGoneRemovesNothing(t *testing.T) {
 			fx.assertRefused(t, res, err, before, tc.want(fx), tc.manual(fx))
 			if res.NothingLeft != tc.nothingLeft {
 				t.Errorf("NothingLeft = %v, want %v", res.NothingLeft, tc.nothingLeft)
+			}
+		})
+	}
+}
+
+// TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead covers
+// C2-L3 of docs/reports/self-review-2026-10-28-org-merge-cleanup.md: with the
+// record gone and the feature worktree detached at a commit the PR did not
+// merge, its directory there or deleted, nothing is removed, and the reason
+// gives the registration's HEAD and the command that keeps it, in the same
+// sentence as the refusal of 6 of the registration, before Manual's git
+// worktree remove would drop it. Running that command as written, then
+// Manual as written, removes the registration and feat/auth and leaves the
+// commit on the branch kept.
+func TestCleanupFeatureWorktree_RecordGoneNamesADetachedRegistrationsHead(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		deleted bool // the worktree's directory is deleted
+	}{
+		{"the directory there", false},
+		{"the directory deleted", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newWorktreeCleanupFixture(t)
+			runGit(t, "-C", fx.worktree, "checkout", "--quiet", "--detach")
+			gateCommit(t, fx.worktree, "on a detached HEAD")
+			head := gitOut(t, fx.worktree, "rev-parse", "HEAD")
+			if tc.deleted {
+				if err := os.RemoveAll(fx.worktree); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Remove(fx.recordFile(t)); err != nil {
+				t.Fatal(err)
+			}
+			before := fx.snapshot(t)
+
+			res, err := fx.cleanup(fx.params())
+			why, keepStep := fx.registrationAtRisk(head, "is detached, not on the branch feat/auth", true, "")
+			want := "the worktree record org-auth of the branch feat/auth does not exist, so ralph cannot tell that what is left is " +
+				"this feature's and removes nothing: the feature worktree " + fx.worktree + " and the branch feat/auth at " + fx.head +
+				" left; git still has the feature worktree's registration, " + why + ": " + keepStep + ", and remove it by hand " +
+				"once you have checked that the branch holds nothing that was not merged (git -C " + fx.root + " log " + fx.head +
+				"..feat/auth lists what " + fx.head + ", the head its PR merged, does not have)"
+			manual := "git -C " + fx.root + " worktree remove " + fx.worktree + " && git -C " + fx.root + " branch -D feat/auth"
+			fx.assertRefused(t, res, err, before, want, manual)
+			if res.Refused != want {
+				t.Errorf("refusal %q; want exactly %q", res.Refused, want)
+			}
+
+			keep := "git -C " + fx.root + " branch " + cleanupKeptBranch(head) + " " + head
+			for _, cmd := range []string{keep, manual} {
+				if out, err := exec.Command("sh", "-c", cmd).CombinedOutput(); err != nil {
+					t.Fatalf("%s: %v\n%s", cmd, err, out)
+				}
+			}
+			if list := gitOut(t, fx.root, "worktree", "list", "--porcelain") + "\n"; strings.Contains(list, "worktree "+fx.worktree+"\n") {
+				t.Errorf("git still lists the registration of %s after the Manual:\n%s", fx.worktree, list)
+			}
+			if now := fx.branchTip(); now != "" {
+				t.Errorf("feat/auth is still at %s after the Manual", now)
+			}
+			kept := "refs/heads/" + cleanupKeptBranch(head)
+			if err := exec.Command("git", "-C", fx.root, "merge-base", "--is-ancestor", head, kept).Run(); err != nil {
+				t.Errorf("%s is not reachable from %s after the keep and the Manual: %v", head, kept, err)
 			}
 		})
 	}

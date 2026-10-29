@@ -41,13 +41,15 @@ func (o MergeOrigin) hasPR(u string) bool {
 
 // foreignPRWhy is "" when pr, the PR `gh pr list --head <branch> -R
 // <o.Arg()>` returned, is a PR of o's repository (hasPR), else why it is not
-// used.
+// used, which says to check origin, as ralph org merge's refusal of such a PR
+// does (mergeForeignPRRefusal): gh answered, so the same lookup run again
+// would return the same PR.
 func (o MergeOrigin) foreignPRWhy(branch string, pr *MergeOrderPR) string {
 	if o.hasPR(pr.URL) {
 		return ""
 	}
-	return fmt.Sprintf("gh pr list --head %s -R %s returned PR #%d with the url %q, which is not a PR of origin's repository %s",
-		branch, o.Arg(), pr.Number, pr.URL, o.Arg())
+	return fmt.Sprintf("gh pr list --head %s -R %s returned PR #%d with the url %q, which is not a PR of origin's repository %s; "+
+		"check origin (git remote get-url origin)", branch, o.Arg(), pr.Number, pr.URL, o.Arg())
 }
 
 // MergeOriginProblem is why ReadMergeOrigin read no repository of origin.
