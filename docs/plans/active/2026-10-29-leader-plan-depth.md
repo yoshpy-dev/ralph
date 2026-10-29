@@ -87,14 +87,14 @@
 
 ## Acceptance criteria
 
-- [ ] AC1: leader の雛形の「機能ごとの org」に、計画を書く前に AGENTS.md・`.claude/rules/`・計画が触るコードを読む手順がある
-- [ ] AC2: leader の雛形が、機能の内側の分かれ目(3 条件)を推奨つきの選択肢で `## Design decisions` に書き、per-plan では承認の QUESTION の本文に `FORK` の行ですべて載せ、split では推奨の案を採って記録することを書く。承認の QUESTION の例に、推奨つきの分かれ目の行がある。2 往復目の QUESTION は決まった分かれ目を `(決定済み)` で載せる
-- [ ] AC3: director の skill の「計画の承認」に、`FORK` の行を AskUserQuestion(Codex では番号つきの選択肢)で聞く手順(3 つまでなら承認と合わせて 1 回、4 つ以上なら 4 問ずつ分けて全部の答えがそろうまで approve を打たない)、人が会話にいないときは notify する手順、推奨と違う答えなら approve を打たずに直しの DECISION を送る手順がある
-- [ ] AC4: leader の雛形が、計画助言の前に `ralph config get org.review.plan_advisory` を打ち、`false` なら計画助言を呼ばないこと、終了コードの扱いを書く
-- [ ] AC5: leader の雛形が、`true` なら `pick_reviewer "$RALPH_PRIMARY_CLI"` で相手の CLI を選び、claude の leader は codex を、codex の leader は claude を読むだけの形で呼ぶこと、どちらも助言者の MCP の server を止め、止められなければ呼ばないこと、呼ぶ前後の git の状態を比べること、呼べなければ飛ばして記録することを書く
-- [ ] AC8: codex の MCP の server を止める打ち方(`-c mcp_servers.<名前>.enabled=false` を server ごとに付け、止めたあとの `codex mcp list --json` で `enabled` が 0)を、この machine の codex で実際に打って確かめ、証跡を残す(モデルは呼ばない)
-- [ ] AC6: 雛形のテスト(新しいテストを含む)、`./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` が通る
-- [ ] AC7: `[org.review]` のコメントと doc comment と `/org` skill が、leader が `plan_advisory` を読むことを書く
+- [x] AC1: leader の雛形の「機能ごとの org」に、計画を書く前に AGENTS.md・`.claude/rules/`・計画が触るコードを読む手順がある
+- [x] AC2: leader の雛形が、機能の内側の分かれ目(3 条件)を推奨つきの選択肢で `## Design decisions` に書き、per-plan では承認の QUESTION の本文に `FORK` の行ですべて載せ、split では推奨の案を採って記録することを書く。承認の QUESTION の例に、推奨つきの分かれ目の行がある。2 往復目の QUESTION は決まった分かれ目を `(決定済み)` で載せる
+- [x] AC3: director の skill の「計画の承認」に、`FORK` の行を AskUserQuestion(Codex では番号つきの選択肢)で聞く手順(3 つまでなら承認と合わせて 1 回、4 つ以上なら 4 問ずつ分けて全部の答えがそろうまで approve を打たない)、人が会話にいないときは notify する手順、推奨と違う答えなら approve を打たずに直しの DECISION を送る手順がある
+- [x] AC4: leader の雛形が、計画助言の前に `ralph config get org.review.plan_advisory` を打ち、`false` なら計画助言を呼ばないこと、終了コードの扱いを書く
+- [x] AC5: leader の雛形が、`true` なら `pick_reviewer "$RALPH_PRIMARY_CLI"` で相手の CLI を選び、claude の leader は codex を、codex の leader は claude を読むだけの形で呼ぶこと、どちらも助言者の MCP の server を止め、止められなければ呼ばないこと、呼ぶ前後の git の状態を比べること、呼べなければ飛ばして記録することを書く
+- [x] AC8: codex の MCP の server を止める打ち方(`-c mcp_servers.<名前>.enabled=false` を server ごとに付け、止めたあとの `codex mcp list --json` で `enabled` が 0)を、この machine の codex で実際に打って確かめ、証跡を残す(モデルは呼ばない)
+- [x] AC6: 雛形のテスト(新しいテストを含む)、`./scripts/check-skill-sync.sh`、`./scripts/check-sync.sh` が通る
+- [x] AC7: `[org.review]` のコメントと doc comment と `/org` skill が、leader が `plan_advisory` を読むことを書く
 
 ## Implementation outline
 
@@ -180,7 +180,8 @@
     - 計画の本文(Scope の S2、D5、AC4・AC5、Test plan、Edge cases)には古い動き(`unknown command` の 1 だけ off、`pick_reviewer "$RALPH_PRIMARY_CLI"`、変数のない pane は claude とみなす)が残る。digest を変えないため本文は直さず、ここで読み替える: 終了コードは 0(true/false)、`unknown command "config"` の 1 と 127 は off と記録、ほかは BLOCKED。driver は leader 自身の CLI で、`RALPH_PRIMARY_CLI` が `claude` か `codex` のときだけそれに代わる
   - self-review Run 5(bbbd1ad8、reviewer は sonnet): L9、L10、nit は直った。新しい所見は LOW 1 件(L11: driver の `case` の `claude` の枝を外す変異を落とす行が run の表にない。テストの doc comment も `gemini` と末尾の空白の行が codex の leader だけで走ることを書いていない)。直さず PR の Known gaps に書く。理由: テストの網の 1 行の追加で、雛形の動きは `/plan` 11.b と同じ形であることを reviewer が bash・zsh・sh の 7 通りで確かめている。self-review の LOW は直すかを選べる(ユーザーの指示は CRITICAL と HIGH を直す、MEDIUM は直すか理由を書く)。直すと self-review から回し直しになり、LOW の直しごとに次の LOW が出る流れが続いているため、ここで止める
     - /sync-docs に渡すもの(追加): `scripts/xreview-helpers.sh:63`(root と `templates/base/`)の「Both skills pass the driver they resolved」は、leader の雛形が 3 つ目の呼び手になった
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created
+- [x] Verification artifact created
+- [x] Test artifact created
+- [x] Sync-docs report created
 - [ ] PR created

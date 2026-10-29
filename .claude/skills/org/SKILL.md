@@ -29,9 +29,10 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   herdr の agent の名前を変えないようにする。2 つ目の値は、pane の中の
   Claude Code のセッションの hook が、セッションの終わりと compaction の前に
   未コミットの変更を `wip:` でコミットしないようにする。3 つ目の値は座席の
-  driver(`claude` か `codex`)で、座席の cross-review がもう一方の CLI を
-  選ぶときに使う `scripts/xreview-helpers.sh` の `pick_reviewer` に、座席の
-  driver を読ませる。`--env` のない herdr でも動くが、
+  driver(`claude` か `codex`)で、座席の cross-review と機能の org の leader
+  の計画助言がもう一方の CLI を選ぶときに使う `scripts/xreview-helpers.sh`
+  の `pick_reviewer` に、座席の driver を読ませる。`--env` のない herdr でも
+  動くが、
   `warning: herdr tab create has no --env flag` で始まる警告が stderr に
   1 行出て、どの値も付かない。そのときは、座席の
   agmsg が名前を変えると ralph が座席に届かなくなることがあり
@@ -39,6 +40,9 @@ Leader(座席の編成・統括を行う識別子)がその機構をどう操作
   ある(機能の org の leader は、ブランチにそのコミットがあれば push せずに
   BLOCKED を上げる)。また `pick_reviewer` は driver を claude とみなすので、
   codex の座席の cross-review がもう一方の CLI を取り違えることがある。
+  leader の計画助言は、変数がなければ leader 自身の CLI で相手を選ぶので、
+  取り違えるのは、herdr の server の環境に `claude` か `codex` の値の同じ
+  変数があって pane がそれを引き継ぐときだけになる。
   ralph 自身が打つ agmsg には、herdr の版によらず
   `AGMSG_SELF_NAME=off` が付く。
 - `ralph.toml` の `[org]` エンベロープ(`model_pool` / `max_seats` /
@@ -926,6 +930,16 @@ DECISION を送る(`/director` skill の「計画の承認」)。leader は計�
 行にした新しい QUESTION を上げる。本文が `approved` の DECISION は、すべての
 分かれ目が推奨の案で決まったことも表す。split の org では、leader は人に
 聞かずに推奨の案を採り、そのことを計画の `## Design decisions` に書く。
+
+`[org.review].plan_advisory` が on のとき、leader は承認の QUESTION の前
+(split では implementer を spawn する前)に、相手のモデル(claude の leader
+は codex、codex の leader は claude)に、計画を読むだけの形で助言を頼む
+(1 回、最長 20 分。助言者の MCP の server は止め、止められなければ呼ばずに
+飛ばす。呼ぶ前後で git の状態が変わっていれば BLOCKED を上げる)。所見と
+leader の扱いの要約は、QUESTION の本文の `ADVISORY:` で始まる 1 行に書き
+(飛ばしたときは、そのことと理由。off のときは頼まず、この行も書かない)、
+director が計画の要点と一緒に人に伝える。split では計画の
+`## Design decisions` に書く。
 
 approve について、次のことに気をつける。
 
