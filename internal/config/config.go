@@ -27,9 +27,9 @@ type DoctorConfig struct {
 }
 
 // StandardConfig holds the `[standard]` table: the settings of the standard
-// flow (/plan, /implement, and the post-implementation pipeline). The skills
-// read them with `ralph config get <key>` (they start to in issue #266), and
-// the other standard-flow settings join this table in issue #276. Their
+// flow (/plan, /implement, and the post-implementation pipeline). The /plan
+// and /cross-review skills read them with `ralph config get <key>`, and the
+// other standard-flow settings join this table in issue #276. Their
 // defaults are kept in lock-step with templates/base/ralph.toml
 // (defaults_sync_test.go).
 type StandardConfig struct {

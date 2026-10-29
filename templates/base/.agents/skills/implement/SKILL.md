@@ -56,7 +56,7 @@ Work from the active plan, not from memory alone.
     matching `.codex/agents/` custom agents and keep the same order. If a
     subagent dispatch fails, run that step inline and note the fallback in the
     report.
-    e. **Invoke `/cross-review` via the Skill tool** (optional, inline — if the reviewer CLI is unavailable, skip to `/pr`). The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
+    e. **Invoke `/cross-review` via the Skill tool** (inline). The review runs when `[standard].cross_review` is on, the reviewer CLI exists, and the diff against the base branch is not empty; otherwise `/cross-review` records the skip in its triage report and goes on to `/pr`. The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, plan archiving, and task worktree/local branch cleanup. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline

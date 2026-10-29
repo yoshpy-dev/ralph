@@ -27,6 +27,8 @@ The full pipeline must run in this order — no steps may be skipped:
 /self-review → /verify → /test → /sync-docs → /cross-review → /pr
 ```
 
+`/cross-review` runs even when its reviewer does not: with `[standard].cross_review` off in `ralph.toml` (the default), the other CLI unavailable, or an empty diff, it writes a triage report with `Reviewer status: skipped (<reason>)`. The PR body's Verification carries that outcome and the plan advisory's (`plan advisory: <outcome>` on the plan's Progress checklist).
+
 If `/cross-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/cross-review` again. `/sync-docs` must not be skipped in the re-run. The one exception is a fix confined to this task's own pipeline records (report wording, insight event values) that changes no verdict line: it skips the re-run, is recorded in the cross-review triage report and the PR body, and does not raise the cycle count. The three conditions and the checks are in `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records").
 
 The pipeline is capped at **2 total runs by default** (initial + 1 re-run), controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). See `.claude/rules/ralph/post-implementation-pipeline.md` for cap semantics and state files.

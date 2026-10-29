@@ -31,16 +31,17 @@ func SeatPaneEnv() []string {
 	return []string{AgmsgSelfNameOff, WIPCheckpointOff}
 }
 
-// PrimaryCLIEnv is the variable /cross-review (its step 2) and
-// scripts/xreview-helpers.sh's pick_reviewer read as the CLI a session runs
-// on, its driver (claude or codex, case-insensitive), to call the other one
-// as the reviewer. Without it pick_reviewer treats the driver as claude and
-// picks codex, and /cross-review does the same when both CLIs are installed.
-// Of the reviews, /cross-review and a feature org leader's plan advisory (the
-// 計画助言 subsection of the 機能ごとの org section of
-// internal/org/prompts/leader.md) read it. The advisory uses the leader's own
-// CLI only when the variable is unset, so a value the pane takes from the
-// herdr server's environment wins over it.
+// PrimaryCLIEnv is the variable /plan's plan advisory (its step 11.b) and
+// /cross-review (its step 2) read as the CLI a session runs on, its driver
+// (claude or codex, case-insensitive): it overrides the CLI running the
+// skill, and the skill passes the driver to scripts/xreview-helpers.sh's
+// pick_reviewer to call the other one as the reviewer. pick_reviewer called
+// without a driver reads it too, and treats the driver as claude and picks
+// codex when it is unset. A feature org leader's plan advisory (the 計画助言
+// subsection of the 機能ごとの org section of internal/org/prompts/leader.md)
+// reads it as well, and uses the leader's own CLI only when the variable is
+// unset or empty, so a value the pane takes from the herdr server's
+// environment wins over it.
 const PrimaryCLIEnv = "RALPH_PRIMARY_CLI"
 
 // PrimaryCLIEntry returns the entry PrimaryCLIEnv=driverName, which spawn

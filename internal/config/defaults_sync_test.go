@@ -307,9 +307,10 @@ func TestDefaultsLockStep(t *testing.T) {
 		// This is table-driven so every (skill, var) pair is checked the same
 		// way and every occurrence in the file (not only the first) is
 		// verified: for cross-review that means both the codex-exec invocation
-		// line and the "CLI execution modes" table row (plan has no such
-		// table; its only occurrence is the step 11.c invocation line) must
-		// carry the current default (issue #184, AC-4).
+		// line and the "CLI execution modes" table row (plan's table names no
+		// fallback; its occurrences are the step 11.c codex and claude
+		// invocation lines) must carry the current default (issue #184, AC-4;
+		// the plan skill's claude fallback since issue #266).
 		//
 		// Skip scope: a single gate below, before the loop, skips the rest of
 		// this sub-test when .claude/skills itself is absent (a
@@ -330,6 +331,7 @@ func TestDefaultsLockStep(t *testing.T) {
 			{"cross-review", "RALPH_CLAUDE_REVIEWER_MODEL"},
 			{"cross-review", "RALPH_CODEX_REVIEWER_MODEL"},
 			{"cross-review", "RALPH_CODEX_REASONING_EFFORT"},
+			{"plan", "RALPH_CLAUDE_REVIEWER_MODEL"},
 			{"plan", "RALPH_CODEX_REVIEWER_MODEL"},
 			{"plan", "RALPH_CODEX_REASONING_EFFORT"},
 		}

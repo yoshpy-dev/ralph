@@ -70,9 +70,9 @@ slice.
 `RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
 path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
 `gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
-Codex plan advisory reads the same two codex-side variables. Keep these
-fallback defaults in sync when changing any of the three vars in
-`scripts/ralph-config.sh`.
+plan advisory reads the same three variables, with the same fallbacks, for
+whichever reviewer it calls. Keep these fallback defaults in sync when
+changing any of the three vars in `scripts/ralph-config.sh`.
 
 ## Rules
 
