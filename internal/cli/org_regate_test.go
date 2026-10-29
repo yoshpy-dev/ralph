@@ -157,7 +157,7 @@ func TestOrgRegate_MergesPushesAndThenIsUpToDate(t *testing.T) {
 	if err != nil || stderr != "" {
 		t.Fatalf("regate again: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
 	}
-	want = "UP_TO_DATE: the latest gate record of feat/a is a gate_passed of HEAD, origin's tip of the branch, on origin/main's tip: " +
+	want = "UP_TO_DATE: the latest gate record of feat/a is a pass of HEAD, origin's tip of the branch, on origin/main's tip: " +
 		"nothing was run, recorded, or pushed\nHEAD: " + merge + "\nBASE: " + tip + "\nLOG: " + logPath + "\n"
 	if stdout != want {
 		t.Fatalf("stdout of the second regate =\n%s\nwant\n%s", stdout, want)
@@ -409,7 +409,7 @@ func TestOrgRegate_OrgIDRefusedBranchRequiredNoArguments(t *testing.T) {
 // PR's checks; only checks_pending exits 6.
 func TestOrgRegate_PrintRegateResult(t *testing.T) {
 	const (
-		upToDate = "UP_TO_DATE: the latest gate record of feat/a is a gate_passed of HEAD, origin's tip of the branch, on origin/main's " +
+		upToDate = "UP_TO_DATE: the latest gate record of feat/a is a pass of HEAD, origin's tip of the branch, on origin/main's " +
 			"tip: nothing was run, recorded, or pushed\n"
 		pushOnly = "PUSH_ONLY: the latest gate record of feat/a is a gate_passed of HEAD on origin/main's tip, and origin's feat/a is " +
 			"behind HEAD: nothing was run or recorded\n"
@@ -957,7 +957,8 @@ func regateCLIAllGateEvents(t *testing.T, stateDir string) []org.ManifestEvent {
 // and merges and pushes nothing, reads PR #7's head and checks, records one
 // gate_ci_passed of HEAD via=regate_ci with a log that holds the checks'
 // JSON, prints exactly GATE: pass, CHECKS: passed (PR #7), HEAD:, BASE: and
-// LOG:, and exits 0 with nothing on stderr.
+// LOG:, and exits 0 with nothing on stderr; the next regate is UP_TO_DATE,
+// with the line a gate_passed gets.
 func TestOrgRegate_CIGateOnlyPassRecordsFromThePRChecks(t *testing.T) {
 	fx := newRegateCIFixture(t)
 	tip := gateCLIGitOut(t, fx.origin, "rev-parse", "refs/heads/main")
@@ -993,6 +994,17 @@ func TestOrgRegate_CIGateOnlyPassRecordsFromThePRChecks(t *testing.T) {
 	}
 	if after := gateCLIGitOut(t, fx.origin, "for-each-ref"); after != originBefore {
 		t.Errorf("a gate-only ci regate changed origin:\nbefore %s\nafter  %s", originBefore, after)
+	}
+
+	// The UP_TO_DATE: line of the next regate names no event, so it holds
+	// for this gate_ci_passed as for a gate_passed.
+	stdout, stderr, err = fx.regate(t, "--config", fx.config)
+	if err != nil || stderr != "" {
+		t.Fatalf("regate again: err %v, stderr %q (stdout: %s)", err, stderr, stdout)
+	}
+	if want := "UP_TO_DATE: the latest gate record of feat/a is a pass of HEAD, origin's tip of the branch, on origin/main's tip: " +
+		"nothing was run, recorded, or pushed\nHEAD: " + fx.head + "\nBASE: " + tip + "\nLOG: " + logPath + "\n"; stdout != want {
+		t.Fatalf("stdout of the second regate =\n%s\nwant\n%s", stdout, want)
 	}
 }
 

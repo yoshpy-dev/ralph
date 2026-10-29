@@ -345,7 +345,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 			_, _ = fmt.Fprintf(w, "UP_TO_DATE: while regate waited for the checks of PR #%d, another regate recorded a pass of HEAD "+
 				"on %s's tip: this one recorded nothing\n", res.PR, base)
 		} else {
-			_, _ = fmt.Fprintf(w, "UP_TO_DATE: the latest gate record of %s is a gate_passed of HEAD, origin's tip of the branch, on "+
+			_, _ = fmt.Fprintf(w, "UP_TO_DATE: the latest gate record of %s is a pass of HEAD, origin's tip of the branch, on "+
 				"%s's tip: nothing was run, recorded, or pushed\n", res.Branch, base)
 		}
 		merged()
