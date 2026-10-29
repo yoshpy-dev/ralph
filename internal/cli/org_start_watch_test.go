@@ -775,7 +775,9 @@ func TestOrgStart_AnAbsoluteOrHomeAgmsgHomeInConfigLaunchesTheWatch(t *testing.T
 func TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes(t *testing.T) {
 	cases := map[string][]string{
 		"start": {"when none is running, start launches one as `ralph org watch --all --detach` does",
-			"it is refused when a watch holds the lock but is stale, stopping, or a --once run"},
+			"it is refused when a watch holds the lock but is stale, stopping, or a --once run",
+			"When it would launch one, a --config whose [org].agmsg_home is a relative path is refused before the launch, " +
+				"wherever start runs, and no leader is started"},
 		"spawn": {"A spawn, --dry-run included, is refused while no long-running `ralph org watch --all` (not stopping, not a --once run) runs on the ledger"},
 		"send": {"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run included, is refused while no long-running " +
 			"`ralph org watch --all` (not stopping, not a --once run) runs on the ledger"},

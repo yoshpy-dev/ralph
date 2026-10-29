@@ -163,7 +163,8 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 
 // withMainWorktreeOrgLimits returns cfg with MaxOrgs, MaxTotalSeats and
 // Approval taken from <main worktree root>/ralph.toml (built-in defaults when
-// that file does not exist, as config.Load reads it) when configPath is empty
+// that file does not exist, with the ralph.local.toml of that root applied
+// on top, as config.Load reads them) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
 // --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
@@ -313,7 +314,8 @@ func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, re
 
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
 // root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist) for withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
+// exist, with the ralph.local.toml of that root applied on top) for
+// withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
 // withMainWorktreeDirectorStartConfig, and
 // withMainWorktreeDirectorWakeConfigFrom.
 // ok is false, with nothing loaded, when configPath is set or the ledger is
@@ -607,7 +609,8 @@ func shellQuoteIfNeeded(s string) string {
 // resolveOrgConfig loads the [org] envelope from configPath, falling back
 // to ./ralph.toml when configPath is empty, and to config.Default().Org
 // when the file it reads does not exist -- matching the plan's documented
-// --config default. config.Load decides what "does not exist" means: only
+// --config default -- with ralph.local.toml (config.LocalPath) applied on
+// top either way. config.Load decides what "does not exist" means: only
 // fs.ErrNotExist. A ./ralph.toml that exists but cannot be read (no
 // permission, or a symlink into a directory it may not enter) is an error,
 // not the defaults: the defaults would turn a file that says
@@ -950,7 +953,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"launches one as `ralph org watch --all --detach` does (in the ledger's\n" +
 			"main worktree root when it has one, logging to <state dir>/watch.log)\n" +
 			"and waits up to 10s for it, and it is refused when a watch holds the\n" +
-			"lock but is stale, stopping, or a --once run.\n" +
+			"lock but is stale, stopping, or a --once run. When it would launch\n" +
+			"one, a --config whose [org].agmsg_home is a relative path is refused\n" +
+			"before the launch, wherever start runs, and no leader is started: the\n" +
+			"watch may resolve it from that root, not from here.\n" +
 			"\n" +
 			"Both forms are refused, with nothing recorded, while\n" +
 			"`ralph org regate` works on the org's branch; run start again once\n" +

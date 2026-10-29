@@ -90,7 +90,10 @@ func newOrgWatchCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"                  one), without HERDR_PANE_ID, HERDR_TAB_ID,\n" +
 			"                  HERDR_WORKSPACE_ID, and HERDR_ENV. It exits 0 when a\n" +
 			"                  watch already runs, and 1 when a stale, stopping, or\n" +
-			"                  --once one holds the lock\n" +
+			"                  --once one holds the lock. Before it launches one, it\n" +
+			"                  refuses a --config whose [org].agmsg_home is a\n" +
+			"                  relative path, wherever it runs: the watch may\n" +
+			"                  resolve it from that root, not from here\n" +
 			"  --stop          ask the running watch to stop: write\n" +
 			"                  <state-dir>/watch-stop.json (no signal is sent) and\n" +
 			"                  wait up to 30s for it to end\n\n" +

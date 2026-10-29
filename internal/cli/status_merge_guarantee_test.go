@@ -333,7 +333,7 @@ exit 1
 
 // statusMGMaxRevParsePerRun is the most `git rev-parse` calls one `ralph
 // status --state-dir` run of TestStatusCmd_MergeGuaranteeRunsNoGH may make.
-// It is the number one run makes today: the two of gitMainWorktree in a
+// It is the number one run makes today: the two of gitroot.MainWorktree in a
 // main checkout (rev-parse --git-dir --git-common-dir, then rev-parse
 // --show-toplevel), run once, when withMainWorktreeDirectorEnabled tells
 // whether --state-dir names the main worktree's ledger. A second read of
