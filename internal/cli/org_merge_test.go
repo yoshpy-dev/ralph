@@ -1063,11 +1063,14 @@ func TestOrgMerge_Help(t *testing.T) {
 				"and records worktree_cleaned in the ledger.",
 			"that the worktree has no uncommitted change or untracked file and no rebase or merge in progress (files .gitignore " +
 				"names do not count and go with the worktree); that the local branch is at the head the gate passed; and that the " +
-				"worktree has that branch checked out at that head. When a check fails, it removes nothing.",
+				"worktree has that branch checked out at that head. When a check fails, it removes nothing. For a worktree " +
+				"whose directory is gone but which git still registers, that last check is made on the registration: it must be " +
+				"on that branch, and the branch must still exist.",
 			"After the lines above, merge prints CLEANUP: done, with (resumed: <what was left>) when it went on from such a " +
 				"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by CLEANUP MANUAL: <the command that cleans up " +
 				"by hand once the reason is checked>. Only a cleanup ralph cannot go on with by itself has such a command (the " +
-				"record is gone or is not the binding's, the worktree is left with no local branch, or the removal itself " +
+				"record is gone or is not the binding's, the worktree is left with no local branch, the worktree's directory is " +
+				"gone while git's registration of it has a HEAD that removing it would drop, or the removal itself " +
 				"failed); after any other skip, fix what the reason says and run ralph org cleanup --branch <branch> again. The " +
 				"cleanup never changes the exit code.",
 			"an interrupt once pr_merged is recorded skips the cleanup or stops it, and the CLEANUP: line says how it ended.",

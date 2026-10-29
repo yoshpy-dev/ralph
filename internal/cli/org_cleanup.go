@@ -79,8 +79,11 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"progress (files .gitignore names do not count and go with the\n" +
 			"worktree); that the local branch is at the head the PR merged; and that\n" +
 			"the worktree has that branch checked out at that head, so that no\n" +
-			"commit that was not merged is lost. When a check fails, it removes\n" +
-			"nothing. A cleanup that stopped part way goes on from what is left.\n" +
+			"commit that was not merged is lost. For a worktree whose directory is\n" +
+			"gone but which git still registers, that last check is made on the\n" +
+			"registration: it must be on that branch, and the branch must still\n" +
+			"exist. When a check fails, it removes nothing. A cleanup that stopped\n" +
+			"part way goes on from what is left.\n" +
 			"While it cleans up a branch, ralph org regate, ralph org merge, and\n" +
 			"another cleanup are refused on the ledger (one runs at a time; it waits\n" +
 			"up to 1 s for regate.lock), and so are ralph org spawn and start of the\n" +
@@ -93,9 +96,10 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"checked>. With no such line, it prints nothing to clean up. Only a\n" +
 			"branch ralph cannot go on with by itself gets a MANUAL: line (the\n" +
 			"record is gone or is not the binding's, the worktree is left with no\n" +
-			"local branch, or the removal itself failed); after any other SKIPPED:\n" +
-			"line, fix what the reason says and run ralph org cleanup --branch\n" +
-			"<branch> again. Exit codes: 0 when every branch was cleaned up or\n" +
+			"local branch, the worktree's directory is gone while git's registration\n" +
+			"of it has a HEAD that removing it would drop, or the removal itself\n" +
+			"failed); after any other SKIPPED: line, fix what the reason says and\n" +
+			"run ralph org cleanup --branch <branch> again. Exit codes: 0 when every branch was cleaned up or\n" +
 			"there was nothing to clean up; 1 when a branch was skipped, gh is not\n" +
 			"on PATH (whether a PR was merged cannot be told, so nothing is\n" +
 			"removed), the main worktree is not found, --branch is refused, origin\n" +

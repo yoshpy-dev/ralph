@@ -124,16 +124,21 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"and no rebase or merge in progress (files .gitignore names do not count\n" +
 			"and go with the worktree); that the local branch is at the head the gate\n" +
 			"passed; and that the worktree has that branch checked out at that head.\n" +
-			"When a check fails, it removes nothing. A cleanup that stopped part way\n" +
-			"goes on from what is left. After the lines above, merge prints CLEANUP:\n" +
+			"When a check fails, it removes nothing. For a worktree whose directory\n" +
+			"is gone but which git still registers, that last check is made on the\n" +
+			"registration: it must be on that branch, and the branch must still\n" +
+			"exist. A cleanup that stopped part way goes on from what is left. After\n" +
+			"the lines above, merge prints CLEANUP:\n" +
 			"done, with (resumed: <what was left>) when it went on from such a\n" +
 			"cleanup, or CLEANUP: skipped (<why>) followed, when there is one, by\n" +
 			"CLEANUP MANUAL: <the command that cleans up by hand once the reason is\n" +
 			"checked>. Only a cleanup ralph cannot go on with by itself has such a\n" +
 			"command (the record is gone or is not the binding's, the worktree is\n" +
-			"left with no local branch, or the removal itself failed); after any\n" +
-			"other skip, fix what the reason says and run ralph org cleanup\n" +
-			"--branch <branch> again. The cleanup never changes the exit code.\n" +
+			"left with no local branch, the worktree's directory is gone while git's\n" +
+			"registration of it has a HEAD that removing it would drop, or the\n" +
+			"removal itself failed); after any other skip, fix what the reason says\n" +
+			"and run ralph org cleanup --branch <branch> again. The cleanup never\n" +
+			"changes the exit code.\n" +
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +

@@ -881,7 +881,8 @@ var directorSkillMergeCleanupRules = []string{
 // SKIPPED: stopped is not run again until the human says
 // the reason is fixed, no command by hand is run unasked, and a new branch
 // is named with --branch meanwhile, since a run without it prints the same
-// SKIPPED: again; and with no gh it removes nothing and exits 1.
+// SKIPPED: again; and with no gh, or with an origin that names no GitHub
+// repository or cannot be read, it removes nothing and exits 1.
 var directorSkillGitHubMergeCleanupSteps = []string{
 	"人が GitHub で直接 merge した PR の機能の worktree・ローカルのブランチ・記録は、`ralph org cleanup` で片付ける",
 	"`auto_merge` の値によらず打ってよい",
@@ -900,6 +901,7 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 	"ほかのブランチのために `--branch` なしで打つと同じ `SKIPPED:` がまた出るので、そのときは新しいブランチを `--branch` で" +
 		"名指して打つ",
 	"`gh` がないと merge されたかを判定できないので、何も消さずに終了コード 1 で終わる",
+	"origin が GitHub の repository を名指さない(ローカルのパスなど)か読めないときも、台帳を読む前に何も消さず 1 で終わる",
 }
 
 // TestDirectorSkill_PinsTheCleanupAfterAMerge pins what the /director skill

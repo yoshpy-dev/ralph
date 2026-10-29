@@ -910,8 +910,11 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"CLEANED: <branch> org-<org_id>, with (resumed: <what was left>)",
 			"SKIPPED: <branch> <why>, followed, when there is one, by MANUAL: <the command that cleans up by hand once the reason is checked>",
 			"With no such line, it prints nothing to clean up.",
+			"For a worktree whose directory is gone but which git still registers, that last check is made on the registration: " +
+				"it must be on that branch, and the branch must still exist.",
 			"Only a branch ralph cannot go on with by itself gets a MANUAL: line (the record is gone or is not the binding's, " +
-				"the worktree is left with no local branch, or the removal itself failed); after any other SKIPPED: line, fix " +
+				"the worktree is left with no local branch, the worktree's directory is gone while git's registration of it " +
+				"has a HEAD that removing it would drop, or the removal itself failed); after any other SKIPPED: line, fix " +
 				"what the reason says and run ralph org cleanup --branch <branch> again.",
 			"Exit codes: 0 when every branch was cleaned up or there was nothing to clean up; 1 when a branch was skipped, gh is " +
 				"not on PATH (whether a PR was merged cannot be told, so nothing is removed), the main worktree is not found, " +

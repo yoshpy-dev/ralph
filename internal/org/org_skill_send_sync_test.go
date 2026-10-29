@@ -150,11 +150,15 @@ var orgSkillCleanupRules = []struct {
 	{"the verb-table row of cleanup", func(text string) string { return orgSkillVerbRow(text, "cleanup") }, []string{
 		"GitHub で(ブラウザか `gh pr merge` で)merge された PR の機能の worktree・ローカルのブランチ・`scripts/ralph-worktree.sh` の記録を消す",
 		"打つ場所は main worktree(機能の worktree の中から打つと断られる)",
+		"`gh pr list` は `git remote get-url origin` から読んだ `-R <host>/<owner>/<repo>` に固定する",
 		"PR の head(`headRefOid`)で片付ける",
 		"merge されたか分からないので `SKIPPED:` の行を出す",
+		"`gh` が origin 以外の repository の PR(url の host か owner/repo が origin と違う)を返したときも、どのブランチでも" +
+			"その PR を使わず",
 		"数えず行も出さない",
 		"何も消さずに断る",
 		"gitignore されたファイルは数えず、worktree と一緒に消える",
+		"ディレクトリのない worktree は、git に残る登録がそのブランチにいて、ブランチが残っている",
 		"`./scripts/ralph-worktree.sh cleanup --id org-<org_id> --force-branch` を打ち、`worktree_cleaned` を `via=cleanup` で記録する",
 		"打ち直すと残ったものから続ける",
 		"その org の `spawn` と `start` が断られる",
@@ -163,9 +167,11 @@ var orgSkillCleanupRules = []struct {
 		"`SKIPPED:` は片付けが終わっていないことで、断り(何も消していない)と、消す作業の失敗(script の途中なら消した分は" +
 			"消えたまま、script の前の登録の外しなら何も消していない)と、PR を読めなかったブランチを含む",
 		"`MANUAL:` が出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
-			"ブランチがなく worktree だけがある、消す途中で失敗した)で、ほかの `SKIPPED:` のブランチは、理由を直してから " +
-			"`--branch` で打ち直せば続きから片付く",
+			"ブランチがなく worktree だけがある、ディレクトリのない worktree の登録に消すと失う HEAD がある、消す途中で失敗した)で、" +
+			"ほかの `SKIPPED:` のブランチは、理由を直してから `--branch` で打ち直せば続きから片付く",
 		"`SKIPPED:` が 1 本でもあれば 1",
+		"origin が GitHub の repository を名指さないか(ローカルのパスなど)`git remote get-url origin` が落ちるか時間切れになるとき" +
+			"(台帳を読む前に、何も消さず断る",
 		"`--org-id` は断る",
 	}},
 	{"the verb-table row of merge", func(text string) string { return orgSkillVerbRow(text, "merge") }, []string{
@@ -177,7 +183,7 @@ var orgSkillCleanupRules = []struct {
 		"片付けは終了コードを変えない",
 		"片付かなかったブランチは、理由を直してから `ralph org cleanup --branch <ブランチ>` で片付ける",
 		"手で消すコマンドが出るのは、ralph が先に進めず人の判断が要るときだけ(記録 `org-<org_id>` がないか結びつきと合わない、" +
-			"ブランチがなく worktree だけがある、消す途中で失敗した)",
+			"ブランチがなく worktree だけがある、ディレクトリのない worktree の登録に消すと失う HEAD がある、消す途中で失敗した)",
 		"その org の `spawn` と `start` は、merge の続きの片付けの間だけ断られる",
 	}},
 	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
@@ -195,13 +201,17 @@ var orgSkillCleanupRules = []struct {
 		"worktree に未コミットの変更か未追跡のファイルがある",
 		"ローカルのブランチの先頭か worktree の HEAD が、merge された PR の head と違う",
 		"worktree が detached HEAD か、別のブランチにいる",
+		"ディレクトリのない worktree は、git に残る登録の HEAD がそうなっているか、そのブランチが消えている",
 		"記録 `org-<org_id>` が結びつきと合わない",
 		"ralph をその worktree の中から打った",
 		"次の手はたいてい、理由を直してから `ralph org cleanup --branch <ブランチ>` を打ち直すことで、打ち直せば残ったものから片付く",
 		"手で消すコマンド(`CLEANUP MANUAL:` と `MANUAL:` の行)は、ralph が先に進めず人の判断が要るときだけ出る",
-		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、消す作業が失敗した" +
-			"とき(script が途中で止まったなら消した分は消えたまま、script の前の、ディレクトリのない worktree の登録の外しで" +
-			"止まったなら何も消していない)の 3 つ",
+		"記録 `org-<org_id>` が結びつきと合わないか、もうないとき、ブランチがなく worktree だけがあるとき、ディレクトリのない " +
+			"worktree の登録に消すと失う HEAD があるとき、消す作業が失敗したとき(script が途中で止まったなら消した分は消えた" +
+			"まま、script の前の、ディレクトリのない worktree の登録の外しで止まったなら何も消していない)の 4 つ",
+		"登録の断りは、消すと登録の HEAD と reflog を失うので何も消さず、理由が HEAD を残す方法を出し",
+		"手で消すコマンドは `git worktree remove` と script の cleanup になる",
+		"打ち直しても同じ断りになる",
 		"gitignore されたファイル",
 		"止める理由にならず、worktree と一緒に消える",
 		"squash merge のあとにリモートのブランチが消えていても止まらない",
