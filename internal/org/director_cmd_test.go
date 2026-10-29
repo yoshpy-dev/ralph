@@ -298,9 +298,13 @@ func TestStopDirectorProcess_SIGTERMEndsThisLaunchsProcess(t *testing.T) {
 // after the stop returned.
 func TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime(t *testing.T) {
 	// An ignored signal stays ignored across exec, so sleep ignores TERM and
-	// has no child of its own.
-	p := startTestProcess(t, "/bin/sh", "-c", "trap '' TERM; exec "+shellQuote(sleepPath(t))+" 30")
-	time.Sleep(100 * time.Millisecond) // let sh reach the exec
+	// has no child of its own. sh creates ready only after the trap, so the
+	// test waits for it before the SIGTERM: from then on TERM is ignored
+	// whether or not sh has reached the exec. A fixed sleep in its place let
+	// a loaded machine send the SIGTERM before the trap, and sh ended.
+	ready := filepath.Join(t.TempDir(), "ready")
+	p := startTestProcess(t, "/bin/sh", "-c", "trap '' TERM; : > "+shellQuote(ready)+"; exec "+shellQuote(sleepPath(t))+" 30")
+	waitForFileWithin(t, ready, 5*time.Second)
 	reg := cmdRegistrationOf(t, p)
 	o := &Org{DirectorStopWait: 300 * time.Millisecond}
 	start := time.Now()
