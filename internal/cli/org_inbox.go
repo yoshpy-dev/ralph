@@ -85,8 +85,8 @@ func newOrgEscalateCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			}
 			// newOrgRuntime's steps, split so that a ralph.toml that does
 			// not load can still reach the human below.
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			params := org.EscalateParams{OrgID: *orgID, Text: text, Banner: cmd.ErrOrStderr()}
@@ -315,8 +315,8 @@ func newOrgInboxRuntime(cmd *cobra.Command, verb, stateDir, configPath string, a
 	if cmd.Flags().Changed("org-id") {
 		return nil, fmt.Errorf("org: %s: --org-id does not apply: the inbox holds the items of every org in the ledger", verb)
 	}
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
+	resolvedStateDir, _, err := resolveOrgLedger(cmd, stateDir, access)
+	if err != nil {
 		return nil, err
 	}
 	rt, err := newOrgRuntimeAt(resolvedStateDir, configPath)

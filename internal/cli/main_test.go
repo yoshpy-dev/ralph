@@ -140,14 +140,14 @@ func TestMain(m *testing.M) {
 		noSuchHome := filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")
 		return codexSandboxEnv{Home: noSuchHome, ConfigPath: filepath.Join(noSuchHome, ".codex", "config.toml")}, nil
 	}
-	doctorMergeGuaranteeEnv = func(targetDir string) (org.MergeGuaranteeParams, string) {
+	doctorMergeGuaranteeEnv = func(targetDir string) (org.MergeGuaranteeParams, string, error) {
 		return org.MergeGuaranteeParams{
 			Dir: targetDir,
 			Exec: func(_ context.Context, _ string, _ []string, name string, args ...string) (string, error) {
 				return "", fmt.Errorf("%s %s not run: commands are disabled in tests", name, strings.Join(args, " "))
 			},
 			LookPath: func(string) (string, error) { return "", errors.New("gh lookup disabled in tests") },
-		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist")
+		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist"), nil
 	}
 	doctorProbeTimeout = time.Minute
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")

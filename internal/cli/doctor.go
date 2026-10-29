@@ -72,9 +72,10 @@ func runDoctor(targetDir string) error {
 // opt-in and off by default. Beyond them, the checks that spawn subprocesses
 // are the --version probes (Checks 1 and 2) and the merge guarantee (Check
 // 11c): `git rev-parse` to find the org state dir (unless
-// RALPH_ORG_STATE_DIR names it), then `git remote get-url origin` and up to
-// four `gh api` calls under one 20 s deadline, with no gh call when gh is
-// not on PATH.
+// RALPH_ORG_STATE_DIR names it; also to find the personal ralph.local.toml
+// whose [org].state_dir may name it), then `git remote get-url origin` and
+// up to four `gh api` calls under one 20 s deadline, with no gh call when gh
+// is not on PATH.
 //
 // Signature/behavior preserved exactly (never runs under --strict, always
 // strict=false) so pre-existing callers/tests that predate FR-9 doctor
@@ -176,8 +177,10 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// for pr_checks_only, info for unknown, never fail. The result is cached
 	// in the org state dir, only when that dir already exists, for `ralph
 	// status` and `ralph org merge-order`; a stale cache that can be neither
-	// replaced nor removed is warn too -- see checkMergeGuarantee.
-	results = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv))
+	// replaced nor removed is warn too. An org state dir that cannot be
+	// resolved (a broken personal ralph.local.toml) adds a fail line before
+	// it, and the result is not cached -- see checkMergeGuarantee.
+	results = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv)...)
 
 	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {

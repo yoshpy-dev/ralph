@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -183,6 +184,11 @@ func TestOrgLegacyLedger_ExplicitStateDirSkipsGuard(t *testing.T) {
 		}},
 		{"env", func(t *testing.T, r legacyLedgerRepo) []string {
 			t.Setenv(org.EnvOrgStateDir, r.legacyDir)
+			return nil
+		}},
+		{"config", func(t *testing.T, r legacyLedgerRepo) []string {
+			t.Setenv(config.LocalConfigEnv, "")
+			writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+r.legacyDir+"\"\n")
 			return nil
 		}},
 	}

@@ -45,8 +45,8 @@ Use --json for machine-readable output of the full aggregate.`,
 				eventsDir = "docs/insights/events"
 			}
 			if receiptsPath == "" {
-				stateDir, stateDirSource := org.ResolveOrgStateDir("", false)
-				if err := guardLegacyOrgStateDir(cmd, stateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+				stateDir, _, err := resolveOrgLedger(cmd, "", orgLedgerReadOnly)
+				if err != nil {
 					return err
 				}
 				receiptsPath = org.ReceiptsPathIn(stateDir)

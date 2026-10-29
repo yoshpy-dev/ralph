@@ -28,13 +28,38 @@ const (
 	orgLedgerMutating
 )
 
+// resolveOrgLedger resolves the org ledger of cmd's invocation with
+// org.ResolveOrgStateDir and then runs guardLegacyOrgStateDir on it with
+// access. explicit is the --state-dir value; whether it was passed is
+// cmd.Flags().Changed("state-dir"), false for a command without that flag
+// (`ralph insights`). Every verb that resolves the ledger from --state-dir
+// and its defaults goes through this function once per invocation (plan
+// 2026-10-30-org-state-dir-local, D6).
+//
+// A ledger that cannot be resolved (a personal ralph.local.toml that cannot
+// be read or parsed, or whose [org].state_dir is neither absolute nor starts
+// with "~/") is an error that names the command and, through
+// org.ResolveOrgStateDir's error, the file, so the verb exits 1 instead of
+// falling back to another ledger (D4). guardLegacyOrgStateDir's error is
+// returned as it is.
+func resolveOrgLedger(cmd *cobra.Command, explicit string, access orgLedgerAccess) (dir, source string, err error) {
+	dir, source, err = org.ResolveOrgStateDir(explicit, cmd.Flags().Changed("state-dir"))
+	if err != nil {
+		return "", "", fmt.Errorf("%s: cannot resolve the org ledger: %w", cmd.CommandPath(), err)
+	}
+	if err := guardLegacyOrgStateDir(cmd, dir, source, access); err != nil {
+		return "", "", err
+	}
+	return dir, source, nil
+}
+
 // guardLegacyOrgStateDir handles the per-worktree org ledger a linked
 // worktree kept before org.ResolveOrgStateDir resolved every worktree to the
 // main worktree's ledger (plan 2026-10-07-org-state-dir-common; see
 // org.LegacyWorktreeStateDir, which finds it). resolvedDir and source are
-// what org.ResolveOrgStateDir returned for this invocation. A flag or env
-// choice (any source other than "git-main-worktree") has no legacy ledger,
-// so this does nothing for it.
+// what org.ResolveOrgStateDir returned for this invocation. A flag, env, or
+// personal-file choice (any source other than "git-main-worktree") has no
+// legacy ledger, so this does nothing for it.
 //
 // A mutating verb gets an error while the legacy ledger still records an
 // active seat, or cannot be read: acting on the shared ledger then would,

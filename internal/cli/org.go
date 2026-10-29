@@ -112,22 +112,24 @@ func requireSeatIdentifier(flag, value string) error {
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
 // and manifest/receipt stores rooted at the resolved state directory. cmd is
-// used to detect whether --state-dir was explicitly passed
-// (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
-// env > git-main-worktree > git-toplevel > cwd precedence -- see that
-// function's doc comment for the full rationale (fixes the leader/operator
-// cwd-split, tech-debt "state-dir の cwd 相対解決", and shares one ledger
-// across linked worktrees) -- and to print guardLegacyOrgStateDir's note.
-// access is the calling verb's orgLedgerAccess: a mutating verb gets
-// guardLegacyOrgStateDir's refusal as the error, before any manifest, herdr,
-// or agmsg call. A caller that also needs the resolved config.OrgConfig for
-// its own purposes beyond wiring (e.g. resolveModelOrWarn's --model default
-// resolution via org.DefaultModelForDriverAndRole) reads it back off the
-// returned *org.Org's exported Config field rather than newOrgRuntime
-// returning a second value.
+// used by resolveOrgLedger to detect whether --state-dir was explicitly
+// passed (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's
+// flag > env > config > git-main-worktree > git-toplevel > cwd precedence --
+// see that function's doc comment for the full rationale (fixes the
+// leader/operator cwd-split, tech-debt "state-dir の cwd 相対解決", and
+// shares one ledger across linked worktrees) -- and to print
+// guardLegacyOrgStateDir's note. access is the calling verb's
+// orgLedgerAccess: a mutating verb gets guardLegacyOrgStateDir's refusal as
+// the error, before any manifest, herdr, or agmsg call, and so does a ledger
+// that cannot be resolved. A caller that also needs the resolved
+// config.OrgConfig for its own purposes beyond wiring (e.g.
+// resolveModelOrWarn's --model default resolution via
+// org.DefaultModelForDriverAndRole) reads it back off the returned
+// *org.Org's exported Config field rather than newOrgRuntime returning a
+// second value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLedgerAccess) (*org.Org, error) {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
+	resolvedStateDir, _, err := resolveOrgLedger(cmd, stateDir, access)
+	if err != nil {
 		return nil, err
 	}
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
@@ -138,17 +140,15 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 // org-wide limits: it also replaces the config's MaxOrgs and MaxTotalSeats
 // via withMainWorktreeOrgLimits, so the ledger shared by every worktree gets
 // one set of limits. Every other verb keeps reading only the caller's config.
-// It takes a state dir that org.ResolveOrgStateDir already resolved, the same
-// split as newOrgRuntimeAt: each caller also passes the directory on, to
-// wireOrgWatchGate (spawn) or wireOrgStartWatchGate (start), and `ralph org
-// start --plan` to StartFeatureParams.StateDir and org.FeatureRepoRoot with
-// its source. It sets InboxHintStateDir (orgInboxHintStateDir), so the
-// `ralph org stop` commands Spawn's errors print for a seat left with an
-// unfinished spawn repeat --state-dir when it was given.
+// It takes a state dir that resolveOrgLedger already resolved and guarded
+// (orgLedgerMutating), the same split as newOrgRuntimeAt: each caller also
+// passes the directory on, to wireOrgWatchGate (spawn) or
+// wireOrgStartWatchGate (start), and `ralph org start --plan` to
+// StartFeatureParams.StateDir and org.FeatureRepoRoot with its source. It
+// sets InboxHintStateDir (orgInboxHintStateDir), so the `ralph org stop`
+// commands Spawn's errors print for a seat left with an unfinished spawn
+// repeat --state-dir when it was given.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
-		return nil, err
-	}
 	rt, err := newOrgRuntimeAt(resolvedStateDir, configPath)
 	if err != nil {
 		return nil, err
@@ -167,8 +167,9 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // on top, as config.Load reads them) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
-// --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
-// worktree of the repository spawn runs in, as a feature org's leader does.
+// --state-dir, RALPH_ORG_STATE_DIR, or the personal file's [org].state_dir
+// names the .harness/state/org of the main worktree of the repository spawn
+// runs in, as a feature org's leader does with --state-dir.
 // Every org_id in that ledger then gets the same org-wide limits, whichever
 // subdirectory or linked worktree (with its own ./ralph.toml) spawn runs in
 // (plan 2026-10-08-org-limits-reserve, Codex plan advisory 2). Approval
@@ -176,9 +177,10 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // in the org's feature binding, by the same rule, so a feature worktree's
 // copy of ralph.toml, which its leader can change, does not choose the mode
 // (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
-// --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
-// another directory, or any other source, cfg is returned unchanged. No
-// other setting is taken from the main worktree here; escalate, director
+// --config, a state dir from --state-dir, RALPH_ORG_STATE_DIR, or
+// [org].state_dir naming another directory, or any other source, cfg is
+// returned unchanged.
+// No other setting is taken from the main worktree here; escalate, director
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
 // director attach also Director.Wake and Director.WakeCmd
@@ -341,10 +343,9 @@ func loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource stri
 // already-resolved state directory instead of resolving it itself. A caller
 // that also needs the resolved directory for its own purposes beyond wiring
 // (newOrgSendCmd's read hint, newOrgWatchCmd's banner +
-// WatchAllParams.StatusDir) resolves it once via org.ResolveOrgStateDir, calls
-// guardLegacyOrgStateDir itself, and calls this directly, instead of
-// resolving twice (self-review LOW fix -- each resolution shells out to
-// git).
+// WatchAllParams.StatusDir) resolves and guards it once via
+// resolveOrgLedger and calls this directly, instead of resolving twice
+// (self-review LOW fix -- each resolution shells out to git).
 func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -801,7 +802,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
+				return err
+			}
 			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
@@ -990,7 +994,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
+				return err
+			}
 			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
@@ -1077,17 +1084,21 @@ type orgStartPlanParams struct {
 }
 
 // runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
-// it resolves the state dir once, builds the spawn runtime on it (the
-// legacy-ledger guard and the main worktree's org-wide limits, as for every
-// start) with start's watch gate (wireOrgStartWatchGate, which launches the
-// watch when none runs; StartFeature runs it before it makes the worktree),
-// and runs (*org.Org).StartFeature with that dir and the main worktree root
+// it resolves the state dir once with the legacy-ledger guard
+// (resolveOrgLedger), builds the spawn runtime on it (the main worktree's
+// org-wide limits, as for every start) with start's watch gate
+// (wireOrgStartWatchGate, which launches the watch when none runs;
+// StartFeature runs it before it makes the worktree), and runs
+// (*org.Org).StartFeature with that dir and the main worktree root
 // (org.FeatureRepoRoot). The result is printed as a spawn's, followed on
 // success by the worktree, the branch and the status hint; a refusal or
 // failure is returned as StartFeature's error, which already says whether
 // the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(p.stateDir, cmd.Flags().Changed("state-dir"))
+	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
+	if err != nil {
+		return err
+	}
 	rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, p.configPath)
 	if err != nil {
 		return err
@@ -1175,8 +1186,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// printing the raw --state-dir flag text, which breaks if the
 			// operator's cwd differs when they run the printed command).
 			stateDirFlagSet := cmd.Flags().Changed("state-dir")
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, stateDirFlagSet)
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, _, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

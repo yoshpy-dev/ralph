@@ -176,8 +176,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			}
 			// newOrgRuntime's steps, split so that auto_merge is read by the
 			// main worktree rule of ralph org escalate.
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

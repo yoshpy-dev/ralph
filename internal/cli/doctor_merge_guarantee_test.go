@@ -106,19 +106,25 @@ func (e *doctorMGExec) assertDir(t *testing.T, dir string) {
 
 // doctorMGEnv is a checkMergeGuarantee resolver that runs e, finds gh only
 // when ghFound, and caches into stateDir.
-func doctorMGEnv(e *doctorMGExec, ghFound bool, stateDir string) func(string) (org.MergeGuaranteeParams, string) {
+func doctorMGEnv(e *doctorMGExec, ghFound bool, stateDir string) func(string) (org.MergeGuaranteeParams, string, error) {
 	lookPath := func(string) (string, error) { return "/usr/local/bin/gh", nil }
 	if !ghFound {
 		lookPath = func(file string) (string, error) { return "", &exec.Error{Name: file, Err: exec.ErrNotFound} }
 	}
-	return func(targetDir string) (org.MergeGuaranteeParams, string) {
-		return org.MergeGuaranteeParams{Dir: targetDir, Exec: e.run, LookPath: lookPath}, stateDir
+	return func(targetDir string) (org.MergeGuaranteeParams, string, error) {
+		return org.MergeGuaranteeParams{Dir: targetDir, Exec: e.run, LookPath: lookPath}, stateDir, nil
 	}
 }
 
-// doctorMGCheck is checkMergeGuarantee for /repo with doctorMGEnv.
-func doctorMGCheck(e *doctorMGExec, ghFound bool, stateDir string) checkResult {
-	return checkMergeGuarantee(context.Background(), "/repo", doctorMGEnv(e, ghFound, stateDir))
+// doctorMGCheck is checkMergeGuarantee for /repo with doctorMGEnv, which
+// resolves the ledger, so the check gives its one line.
+func doctorMGCheck(t *testing.T, e *doctorMGExec, ghFound bool, stateDir string) checkResult {
+	t.Helper()
+	rs := checkMergeGuarantee(context.Background(), "/repo", doctorMGEnv(e, ghFound, stateDir))
+	if len(rs) != 1 {
+		t.Fatalf("checkMergeGuarantee gave %d lines, want 1: %+v", len(rs), rs)
+	}
+	return rs[0]
 }
 
 // readDoctorMGCache reads the cache in stateDir.
@@ -137,7 +143,7 @@ func readDoctorMGCache(t *testing.T, stateDir string) org.MergeGuaranteeCheck {
 
 // useDoctorMGEnv sets doctorMergeGuaranteeEnv to env for the test, and puts
 // TestMain's pin back afterwards.
-func useDoctorMGEnv(t *testing.T, env func(string) (org.MergeGuaranteeParams, string)) {
+func useDoctorMGEnv(t *testing.T, env func(string) (org.MergeGuaranteeParams, string, error)) {
 	t.Helper()
 	orig := doctorMergeGuaranteeEnv
 	doctorMergeGuaranteeEnv = env
@@ -181,7 +187,7 @@ func TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			e := newDoctorMGExec(t, tc.fixture)
 			stateDir := t.TempDir()
-			r := doctorMGCheck(e, tc.ghFound, stateDir)
+			r := doctorMGCheck(t, e, tc.ghFound, stateDir)
 			if r.Name != "Merge guarantee" || r.Status != tc.wantStatus {
 				t.Errorf("result = %q %q, want Merge guarantee %q (Detail: %s)", r.Name, r.Status, tc.wantStatus, r.Detail)
 			}
@@ -211,7 +217,7 @@ func TestCheckMergeGuarantee_StatusFollowsTheKindAndTheResultIsCached(t *testing
 // (AC5).
 func TestCheckMergeGuarantee_NoLedgerDirIsNotCreated(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "org")
-	r := doctorMGCheck(newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection), true, stateDir)
+	r := doctorMGCheck(t, newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection), true, stateDir)
 	if r.Status != "pass" {
 		t.Errorf("Status = %q, want pass (Detail: %s)", r.Status, r.Detail)
 	}
@@ -233,7 +239,7 @@ func TestCheckMergeGuarantee_FailedWriteRemovesTheOldCache(t *testing.T) {
 	if err := os.Mkdir(cache, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	r := doctorMGCheck(newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection), true, stateDir)
+	r := doctorMGCheck(t, newDoctorMGExec(t, org.MergeGuaranteeGitHubProtection), true, stateDir)
 	if r.Status != "pass" {
 		t.Errorf("Status = %q, want pass (Detail: %s)", r.Status, r.Detail)
 	}
@@ -265,7 +271,7 @@ func TestCheckMergeGuarantee_StaleCacheThatCannotBeRemovedWarns(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(cache, "held"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			r := doctorMGCheck(newDoctorMGExec(t, tc.fixture), tc.ghFound, stateDir)
+			r := doctorMGCheck(t, newDoctorMGExec(t, tc.fixture), tc.ghFound, stateDir)
 			if r.Status != "warn" {
 				t.Errorf("Status = %q, want warn (Detail: %s)", r.Status, r.Detail)
 			}
@@ -354,7 +360,10 @@ func TestMergeGuaranteeResult_EscapesControlCharacters(t *testing.T) {
 func TestMergeGuaranteeEnvFromOS_RealCommandsAndTheResolvedStateDir(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv(org.EnvOrgStateDir, stateDir)
-	params, got := mergeGuaranteeEnvFromOS("some/project")
+	params, got, err := mergeGuaranteeEnvFromOS("some/project")
+	if err != nil {
+		t.Fatalf("mergeGuaranteeEnvFromOS: %v", err)
+	}
 	if params.Dir != "some/project" || params.Exec != nil || params.LookPath != nil || params.Now != nil || params.Timeout != 0 {
 		t.Errorf("params = %+v, want Dir some/project and every other field zero", params)
 	}
@@ -406,7 +415,7 @@ func TestRunDoctorFull_PrintsTheMergeGuarantee(t *testing.T) {
 			stateDir := t.TempDir()
 			env := doctorMGEnv(e, tc.ghFound, stateDir)
 			var gotDir string
-			useDoctorMGEnv(t, func(targetDir string) (org.MergeGuaranteeParams, string) {
+			useDoctorMGEnv(t, func(targetDir string) (org.MergeGuaranteeParams, string, error) {
 				gotDir = targetDir
 				return env(targetDir)
 			})
@@ -447,7 +456,10 @@ func TestRunDoctor_TestMainPinRunsNoGitOrGh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	params, stateDir := doctorMergeGuaranteeEnv(dir)
+	params, stateDir, err := doctorMergeGuaranteeEnv(dir)
+	if err != nil {
+		t.Fatalf("TestMain's pin returned an error: %v", err)
+	}
 	if params.Exec == nil || params.LookPath == nil {
 		t.Errorf("TestMain's pin leaves Exec or LookPath nil (real commands): %+v", params)
 	}

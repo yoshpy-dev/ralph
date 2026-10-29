@@ -51,8 +51,8 @@ func runOrgWaitInboxDirector(cmd *cobra.Command, stateDir, configPath string, ti
 	if err := org.CheckDirectorWaitID(id); err != nil {
 		return err
 	}
-	resolved, source := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	if err := guardLegacyOrgStateDir(cmd, resolved, source, orgLedgerReadOnly); err != nil {
+	resolved, _, err := resolveOrgLedger(cmd, stateDir, orgLedgerReadOnly)
+	if err != nil {
 		return err
 	}
 	rt, err := newOrgRuntimeAt(resolved, configPath)

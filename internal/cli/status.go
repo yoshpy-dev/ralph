@@ -129,8 +129,8 @@ func newStatusCmd() *cobra.Command {
 			"scope the org-runtime portion above. It is omitted entirely when the current\n" +
 			"directory has no `.ralph/manifest.toml` (not a ralph project).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, stateDir, orgLedgerReadOnly)
+			if err != nil {
 				return err
 			}
 			return runStatus(cmd, resolvedStateDir, stateDirSource, orgID, jsonOut)
@@ -213,8 +213,9 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	// read once here (no lock) and shown on both paths, with the switch
 	// read as `ralph org escalate` reads it and auto_merge from the same
 	// file. Reading them runs the local git rev-parse calls of
-	// withMainWorktreeDirectorEnabled when --state-dir or
-	// RALPH_ORG_STATE_DIR names the ledger.
+	// withMainWorktreeDirectorEnabled when --state-dir,
+	// RALPH_ORG_STATE_DIR, or the personal file's [org].state_dir names the
+	// ledger.
 	director := readOrgDirectorReport(stateDir, statusDirectorConfig(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
 	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
