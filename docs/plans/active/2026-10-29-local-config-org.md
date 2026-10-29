@@ -182,6 +182,9 @@ Critical forks: 人には聞かず、ユーザーの指示どおり consult(cons
   - S1 ab012b7d(impl-276a1-s1): `internal/gitroot`(MainWorktree・Toplevel・SamePath・ResolvedOrClean)。検証 rc=0(gitroot 4s、org 655s)。self-check は 5 項目とも clean。`resolvedOrClean` は範囲外の permissions.go・split.go・feature_test.go・feature.go も使うので、statedir.go に gitroot を呼ぶ 1 行の wrapper を残した(実装は gitroot の 1 つだけ)。
   - S5 で直す古い参照(S1 の報告): `internal/cli/status_merge_guarantee_test.go:336` の注釈の `gitMainWorktree`、`internal/org/seat.go:7` の package doc の「git (statedir.go, ...)」、`docs/tech-debt/README.md` の 170 行と 198 行の `samePath`。
   - S2 の handoff に入れる(consult が S1 の implementer に返した点): `-C` に渡す dir は `filepath.Abs` してから渡す。gitroot の package doc(config が ralph.local.toml を探すのに使う)と食い違わない形にする。
+  - S2 9ed3793d と 08d1d949(impl-276a1-s2): `internal/config/local.go`(LocalPath、LocalConfigEnv、個人用のファイルの読み込みと相対の agmsg_home の拒否)、Load の重ね合わせ(検査は `validateLoaded` に抜き出し)、`ralph config get` の help。go-toml v2.3.0 は配列と `[[org.model_pool]]` を置き換え、`[org.roles]` はキーごとに重なる(テストで固定)。検証 rc=0、変異 4 つをテストが落とした。self-check は 5 項目とも clean。
+  - 計画からのずれ: S2 だけでは cli の 2 本(`TestStatusCmd_MergeGuaranteeRunsNoGH`、`TestOrgMergeOrder_NoLedgerPrintsTheNoBranchesNoteWithoutRunningGit`)が、Load が個人用のファイルを探す `git -C <dir> rev-parse` を想定外の git として落ちた。cli の TestMain の `RALPH_LOCAL_CONFIG=off` を S3 から S2 に前倒しした(08d1d949)。S3 に残るのは org と config の TestMain、gate の env、`.gitignore`。
+  - S5 の文書に足す点: 本番の `ralph status` と `ralph org merge-order` は個人用のファイルを探すために git を 2 回多く呼ぶ。linked worktree やサブディレクトリに置いた `ralph.local.toml` は読まれない(何も言わずに無視される)。`internal/cli/org.go` の 165・315・608 行付近の注釈「ファイルがなければ既定」に個人用のファイルを足す。`statedir.go` の `resolvedOrClean` の wrapper(呼び出し 7 か所を `gitroot.ResolvedOrClean` に寄せれば消せる)を tech-debt に 1 行。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
