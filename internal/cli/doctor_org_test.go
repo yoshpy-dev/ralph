@@ -218,7 +218,7 @@ func TestRunDoctorOpts_HerdrAgmsgAbsent_ExitCodeUnaffected(t *testing.T) {
 	// Pin agmsg home to a guaranteed-empty directory so this test is
 	// deterministic regardless of whether the machine running it happens to
 	// have a real agmsg install at the default ~/.agents/skills/agmsg.
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -1229,7 +1229,7 @@ func TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing(t *testing.T) {
 		writeStubBin(t, binDir, bin, "")
 	}
 	t.Setenv("PATH", binDir)
-	t.Setenv("RALPH_ORG_AGMSG_HOME", filepath.Join(dir, "no-such-agmsg-home"))
+	setAgmsgHomeOverride(t, filepath.Join(dir, "no-such-agmsg-home"))
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()

@@ -21,6 +21,9 @@ __pycache__/
 !.env.example
 !.env.sample
 
+# Personal ralph settings (machine-specific values over ralph.toml)
+ralph.local.toml
+
 # Terraform / OpenTofu state and cache (often contain provider secrets)
 .terraform/
 *.tfstate

@@ -190,7 +190,7 @@ type Org struct {
 	// prompt (RolePromptVars.AgmsgHome), so the leader's inbox commands read
 	// the store ralph's agmsg calls write to. The CLI sets it to the same
 	// driver.ResolveAgmsgHome value it gives driver.Agmsg's Home. Empty (the
-	// field's default) means driver.ResolveAgmsgHome("").
+	// field's default) means driver.ResolveAgmsgHome(""), the default home.
 	AgmsgHome string
 	// AgentStartRetryInterval overrides the wait between agent_pane_busy
 	// retries in agentStartWithRetry. Zero (the field's default) means "use

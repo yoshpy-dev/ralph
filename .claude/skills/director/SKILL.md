@@ -226,10 +226,9 @@ director も守る(「headless の director」節)。
   断る。あれば `attached`(`launch = "cmd"`)を書いてから、台帳の下に起動
   スクリプト `launch/director_<token>.sh`(0700)を書き、launch_cmd を打つ。
 - 開いた端末で起動スクリプトが走る。スクリプトは `{cwd}` に移り、
-  `RALPH_DIRECTOR_TOKEN` を export し(start を打った環境に
-  `RALPH_ORG_AGMSG_HOME` があればそれも)、`AGMSG_SELF_NAME=off` と
-  `RALPH_WIP_CHECKPOINT=off` を export する(agmsg home の有無によらない。
-  1 つ目は agmsg が herdr の agent や pane の名前を変えないようにし、2 つ目は
+  `RALPH_DIRECTOR_TOKEN` を export し、`AGMSG_SELF_NAME=off` と
+  `RALPH_WIP_CHECKPOINT=off` を export する(1 つ目は agmsg が herdr の
+  agent や pane の名前を変えないようにし、2 つ目は
   director の Claude Code のセッションの hook が、セッションの終わりと
   compaction の前に `wip:` のコミットを作らないようにする)。そのあと、start を
   打った ralph の絶対パスで check-in(隠れた動詞 `ralph org director launched`)
@@ -252,7 +251,8 @@ start の設定と、director が動く場所は次のとおり。
 - `--config` がなく、台帳が main worktree のものなら、
   `[org.director].enabled`、`[org.director].launch_cmd`、`wake`、`wake_cmd`、
   `[org.permissions]`、`[org.roles]`、`model_pool` を main worktree の
-  `ralph.toml` から読む。feature worktree の `ralph.toml` では選べない
+  `ralph.toml`(とそのルートの `ralph.local.toml`)から読む。feature
+  worktree の `ralph.toml` では選べない
   (ralph が打つ launch_cmd も変えられない)。読めない `ralph.toml` は
   エラーになる。
 - start は `[org.director].wake` を登録に書く(start に `--wake` はない)。
@@ -279,18 +279,17 @@ start の設定と、director が動く場所は次のとおり。
   当たる。「実装しない」(「してはいけないこと」節)を守らせるのは雛形と
   この skill の指示だけで、permission では止まらない。
 - `--config` の設定の `[org].agmsg_home` が絶対パスでも `~/` で始まるのでも
-  なければ、start は断る。相対の値を director は自分が動く場所(次の項)から
-  解き、見張りは start を打った場所から解く。2 つの場所が違えば別の agmsg を
-  使ってしまうので、start は場所を比べず、どこで打っても断る。絶対パスで書く。
-  この断りは launch_cmd で立てるときも同じ。
-- 人の shell の `RALPH_ORG_AGMSG_HOME` は、herdr で立てた director には届かない
-  (herdr の pane の環境は herdr server のもので、ralph が足す
-  `AGMSG_SELF_NAME=off` と `RALPH_WIP_CHECKPOINT=off` だけが加わる)。
-  設定されていれば start は警告を 1 行出して続ける。herdr の director に
-  届くのは `ralph.toml` の `[org].agmsg_home` のほうになる。launch_cmd で
-  立てた director には、起動スクリプトがその値を export するので届き、start は
-  警告しない。相対の値は、start が起こす見張りと同じく、start を打った場所から
-  絶対パスにして渡す。
+  なければ、start は断る。director と、start が起こす見張りは、台帳が main
+  worktree のものならそのルートで動き(この節の最後の項)、相対の値をそこから
+  解く。start を打った場所から解いたときとは別の agmsg を指しうるので、start
+  は場所を比べず、どこで打っても断る。絶対パスで書く。この断りは launch_cmd
+  で立てるときも同じ。
+- director が使う agmsg は、herdr で立てても launch_cmd で立てても、設定の
+  `[org].agmsg_home` で決まる。人の shell の環境変数では変わらない。自分の
+  機械だけの場所は、main worktree のルートの `ralph.local.toml`(git が無視
+  する個人用の設定ファイル)の `[org].agmsg_home` に、絶対パスか `~/` で
+  始まる値で書く。ralph は、どの worktree やサブディレクトリで動いても、
+  main worktree のルートの `ralph.local.toml` を読む。
 - herdr で立てる director の pane は、ralph が
   `herdr tab create --env AGMSG_SELF_NAME=off --env RALPH_WIP_CHECKPOINT=off`
   で作る。1 つ目は、agmsg が pane の agent の名前を変えると、ralph がその

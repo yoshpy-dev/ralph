@@ -1,4 +1,8 @@
 # ralph.toml — project-level configuration for the ralph CLI.
+# ralph.local.toml, a personal file of the same shape that git ignores,
+# overrides this file key by key (a table merges per key, an array is
+# replaced). ralph reads it from the root of the repository's main
+# worktree, so every linked worktree and subdirectory uses the same one.
 
 [doctor]
 # `ralph doctor` passes when either the claude or the codex CLI is usable.
@@ -81,8 +85,9 @@ max_total_seats = 30
 # larger of this value (10 when it is below 1) and two watch intervals.
 deadman_minutes = 10
 # agmsg_home points at the agmsg installation -- a directory of scripts
-# (scripts/send.sh, scripts/join.sh, etc.), not a single binary. Env
-# RALPH_ORG_AGMSG_HOME overrides this value at runtime.
+# (scripts/send.sh, scripts/join.sh, etc.), not a single binary. Put a
+# value for your machine only in ralph.local.toml, as an absolute path or
+# one that starts with ~/ (a relative one is refused there).
 agmsg_home = "~/.agents/skills/agmsg"
 
 # [org.roles] restricts which model_pool model names a role may run under.

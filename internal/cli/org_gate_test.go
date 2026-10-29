@@ -804,6 +804,7 @@ func TestOrgGateHelp(t *testing.T) {
 		"./scripts/run-static-verify.sh and ./scripts/run-test.sh are executable files in the worktree's root",
 		"When a check fails, gate runs nothing and records nothing",
 		"without the RALPH_VERIFY_* and HARNESS_VERIFY_* variables and with RALPH_VERIFY_SCOPE=full",
+		"and with RALPH_LOCAL_CONFIG=off whatever the caller set, so no ralph.local.toml changes it either.",
 		"a log under <state dir>/gates/",
 		"They can take minutes",
 		"records gate_passed in the manifest",

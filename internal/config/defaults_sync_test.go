@@ -15,12 +15,10 @@ package config
 // value and pass.
 //
 // Its "shell_and_skills" sub-test reads scripts/ralph-config.sh (shell
-// defaults, VAR="${VAR:-value}" idiom). org.agmsg_home, the one [org] key
-// the shell file still carries (RALPH_ORG_AGMSG_HOME, #276), is compared
-// there with Default(); with the "org" sub-test's template check, that
-// keeps all three surfaces equal. org.review.max_cross_review_cycles is
-// compared with RALPH_STANDARD_MAX_PIPELINE_CYCLES's default, the standard
-// flow's cap it follows. It also checks that the /plan and /cross-review
+// defaults, VAR="${VAR:-value}" idiom). The shell file carries no [org]
+// key; org.review.max_cross_review_cycles is compared with
+// RALPH_STANDARD_MAX_PIPELINE_CYCLES's default, the standard flow's cap it
+// follows. It also checks that the /plan and /cross-review
 // SKILL.md fallback tokens for RALPH_CLAUDE_REVIEWER_MODEL,
 // RALPH_CODEX_REVIEWER_MODEL, and RALPH_CODEX_REASONING_EFFORT match the
 // shell defaults.
@@ -270,24 +268,14 @@ func TestDefaultsLockStep(t *testing.T) {
 		})
 	}
 
-	// ── scripts/ralph-config.sh: org.agmsg_home, org.review's cycle cap, and
-	// SKILL.md fallbacks ────────────────────────────────────────────────────
+	// ── scripts/ralph-config.sh: org.review's cycle cap and SKILL.md
+	// fallbacks ─────────────────────────────────────────────────────────────
 	t.Run("shell_and_skills", func(t *testing.T) {
 		shellPath := filepath.Join(root, "scripts", "ralph-config.sh")
 		if _, err := os.Stat(shellPath); err != nil {
 			t.Skipf("scripts/ralph-config.sh not found (%v) — skipping lock-step check (vendored repo?)", err)
 		}
 		shell := parseShellDefaults(t, shellPath)
-
-		// org.agmsg_home: the shell default against Default(). The template
-		// against Default() is the "org" sub-test's job, so when both pass
-		// the three surfaces agree, and this sub-test needs no template.
-		agmsgShell := mustShell(t, shell, "RALPH_ORG_AGMSG_HOME")
-		agmsgDefault := Default().Org.AgmsgHome
-		if agmsgShell != agmsgDefault {
-			t.Errorf("lock-step mismatch for org.agmsg_home:\n  scripts/ralph-config.sh RALPH_ORG_AGMSG_HOME default = %q\n  config.Default() = %q",
-				agmsgShell, agmsgDefault)
-		}
 
 		// org.review.max_cross_review_cycles: an org's cap on cross-review
 		// runs (the first one included) counts as the standard flow's

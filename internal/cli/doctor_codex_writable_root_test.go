@@ -1788,7 +1788,7 @@ func TestRunDoctorOpts_CodexSandboxCheck_HermeticByDefault(t *testing.T) {
 
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
-	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+	setAgmsgHomeOverride(t, agmsgHome)
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -1845,7 +1845,7 @@ func TestRunDoctorOpts_CodexSandboxCheck_WarnsThroughTheSeam(t *testing.T) {
 
 	agmsgHome := t.TempDir()
 	writeAgmsgHome(t, agmsgHome, "")
-	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+	setAgmsgHomeOverride(t, agmsgHome)
 
 	cfgDir := t.TempDir()
 	noSuchCfg := filepath.Join(cfgDir, "config.toml")
@@ -1921,7 +1921,7 @@ func TestRunDoctorOpts_CodexSandboxCheck_StoreInsideProjectThroughTheSeam(t *tes
 	orig := doctorCodexSandboxEnv
 	doctorCodexSandboxEnv = codexSandboxTestEnv(noSuchCfg, "")
 	t.Cleanup(func() { doctorCodexSandboxEnv = orig })
-	t.Setenv("RALPH_ORG_AGMSG_HOME", agmsgHome)
+	setAgmsgHomeOverride(t, agmsgHome)
 
 	origStdout := os.Stdout
 	r, w, _ := os.Pipe()

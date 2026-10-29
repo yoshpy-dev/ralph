@@ -235,6 +235,106 @@ func TestConfigGet_HelpStatesTheExitCodeContract(t *testing.T) {
 	}
 }
 
+// AC2 of plan 2026-10-29-local-config-org, and the regression test of its
+// Codex plan advisory 1: `ralph config get org.agmsg_home` prints the value
+// of the personal file at the main worktree's root when run from that root,
+// from a subdirectory with no ralph.toml, and from a linked worktree's root
+// and subdirectory. The main root's ralph.toml sets another value, and the
+// same-named personal files in the linked worktree and the subdirectories
+// are not read.
+func TestConfigGet_ReadsTheMainWorktreesLocalFileFromAnyWorktree(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	isolateFeatureGitEnv(t)
+	tmp := t.TempDir()
+	main, linked := filepath.Join(tmp, "main"), filepath.Join(tmp, "linked")
+	runLedgerTestGit(t, "init", "--quiet", main)
+	runLedgerTestGit(t, "-C", main, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+		"commit", "--quiet", "--allow-empty", "-m", "init")
+	runLedgerTestGit(t, "-C", main, "worktree", "add", "--quiet", linked, "-b", "linked")
+	want := filepath.Join(tmp, "agmsg-of-the-main-root")
+	writeTestFile(t, filepath.Join(main, config.LocalConfigFileName), "[org]\nagmsg_home = \""+want+"\"\n")
+	writeTestFile(t, filepath.Join(main, "ralph.toml"), "[org]\nagmsg_home = \"/agmsg-of-ralph-toml\"\n")
+
+	for _, dir := range []string{
+		main,
+		filepath.Join(main, "pkg", "sub"),
+		linked,
+		filepath.Join(linked, "pkg", "sub"),
+	} {
+		if dir != main {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(dir, config.LocalConfigFileName), "[org]\nagmsg_home = \"/agmsg-of-"+filepath.Base(dir)+"\"\n")
+		}
+		t.Chdir(dir)
+		stdout, stderr, code := runConfigGet(t, "org.agmsg_home")
+		if code != 0 || stdout != want+"\n" || stderr != "" {
+			t.Errorf("in %s: config get org.agmsg_home = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", dir, stdout, stderr, code, want+"\n")
+		}
+	}
+}
+
+// AC3 of plan 2026-10-29-local-config-org: a personal file that is a
+// directory, is not valid TOML, fails validation, or sets a relative
+// [org].agmsg_home exits 3 like ralph.toml, with its path in the error, also
+// when no ralph.toml exists.
+func TestConfigGet_LocalFileThatCannotBeReadOrIsInvalidExits3(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T)
+	}{
+		{"a directory", func(t *testing.T) {
+			if err := os.Mkdir(config.LocalConfigFileName, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"unparsable", func(t *testing.T) {
+			writeTestFile(t, config.LocalConfigFileName, "[org\nmax_seats = 2\n")
+		}},
+		{"fails validation", func(t *testing.T) {
+			writeTestFile(t, config.LocalConfigFileName, "[org]\nmax_seats = 0\n")
+		}},
+		{"relative agmsg_home", func(t *testing.T) {
+			writeTestFile(t, config.LocalConfigFileName, "[org]\nagmsg_home = \"agmsg\"\n")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			tc.setup(t)
+			stdout, _, err := runRootCmdSplit(t, "config", "get", "standard.plan_advisory")
+			if code := ExitCode(err); code != 3 || stdout != "" {
+				t.Fatalf("config get standard.plan_advisory = (stdout %q, exit %d, err %v); want (\"\", 3)", stdout, code, err)
+			}
+			if !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), config.LocalConfigFileName) {
+				t.Errorf("err = %v; want ErrConfigLoad naming %s", err, config.LocalConfigFileName)
+			}
+		})
+	}
+}
+
+// The help of get says where the values come from besides ralph.toml: the
+// personal file applied on top, read from the main worktree's root, and
+// skipped with RALPH_LOCAL_CONFIG=off (plan 2026-10-29-local-config-org).
+func TestConfigGet_HelpNamesThePersonalFile(t *testing.T) {
+	stdout, _, err := runRootCmdSplit(t, "config", "get", "--help")
+	if err != nil {
+		t.Fatalf("config get --help: %v", err)
+	}
+	help := strings.Join(strings.Fields(stdout), " ")
+	for _, want := range []string{
+		"ralph.local.toml, the git-ignored personal file, is applied on top of ralph.toml key by key",
+		"It is read from the main worktree root of the git repository the config file's directory is in",
+		"RALPH_LOCAL_CONFIG=off skips it.",
+		"A ralph.local.toml that cannot be read, cannot be parsed, or fails validation exits 3, like ralph.toml.",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("config get --help lacks %q:\n%s", want, stdout)
+		}
+	}
+}
+
 // ExitCode maps the two sentinels of `ralph config get` to 2 and 3, also
 // when wrapped.
 func TestExitCode_ConfigGet(t *testing.T) {

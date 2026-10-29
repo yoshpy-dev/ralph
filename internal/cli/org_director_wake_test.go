@@ -542,7 +542,6 @@ func TestOrgDirectorStart_ReadsTheWakeFromTheMainWorktree(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			herdrLog, _ := setupOrgStubPATH(t)
-			unsetOrgAgmsgHomeEnv(t)
 			setDirectorLaunchSeams(t)
 			r := newLegacyLedgerRepo(t)
 			marks := t.TempDir()

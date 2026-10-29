@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/yoshpy-dev/ralph/internal/config"
+	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
 // `ralph org start --plan <split plan> --feature <slug>` (plan
@@ -232,7 +233,7 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	if err != nil {
 		return refuse(ensureFailureErr(err, root, orgID, worktree, branch))
 	}
-	if !samePath(made, worktree) {
+	if !gitroot.SamePath(made, worktree) {
 		res.Spawn = SpawnResult{Outcome: SpawnOutcomeFailed, Err: fmt.Errorf(
 			"org: %s ensure --id %s printed the worktree %q, not %s; the leader is not started",
 			worktreeScriptRel, featureWorktreeID(orgID), made, worktree)}
@@ -572,7 +573,7 @@ func featureWorktreeMismatch(worktrees FeatureWorktrees, rec, want WorktreeRecor
 	if rec.CanonicalRef != want.CanonicalRef {
 		diffs = append(diffs, fmt.Sprintf("canonical_ref %q, not %q", rec.CanonicalRef, want.CanonicalRef))
 	}
-	if !samePath(rec.WorktreePath, want.WorktreePath) {
+	if !gitroot.SamePath(rec.WorktreePath, want.WorktreePath) {
 		diffs = append(diffs, fmt.Sprintf("worktree_path %q, not %q", rec.WorktreePath, want.WorktreePath))
 	}
 	if rec.Branch != want.Branch {

@@ -739,10 +739,7 @@ var (
 // ralph.toml), so the director, which runs in Cwd, reads the settings start
 // read. TimeoutMS bounds the herdr agent start, and on the launch_cmd path
 // the wait for the launch script's check-in; 0 or less means
-// defaultSpawnTimeoutMS. AgmsgHome is used on the launch_cmd path only:
-// when it is not empty (the CLI gives start's RALPH_ORG_AGMSG_HOME), the
-// launch script exports it as RALPH_ORG_AGMSG_HOME (plan
-// 2026-10-16-org-director-launch-cmd, D3). Who is who writes the events.
+// defaultSpawnTimeoutMS. Who is who writes the events.
 // Notice gets the one line start writes when it cleaned up a current
 // headless registration that its check found ended (plan
 // 2026-10-18-org-director-liveness, D6), as soon as that cleanup is
@@ -755,7 +752,6 @@ type DirectorStartParams struct {
 	Cwd        string
 	ConfigPath string
 	TimeoutMS  int
-	AgmsgHome  string
 	Who        DirectorWho
 	Notice     io.Writer
 }

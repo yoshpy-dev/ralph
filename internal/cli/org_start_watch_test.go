@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/yoshpy-dev/ralph/internal/org"
+	"github.com/yoshpy-dev/ralph/internal/org/driver"
 )
 
 // Tests for `ralph org start` launching the cross-org watch (plan
@@ -679,52 +680,72 @@ func TestOrgStart_TheWatchRunsInTheMainWorktreeWithoutTheHerdrPaneEnv(t *testing
 	}
 }
 
-// Cross-review cycle 2 #1 of org-watch-gate for start: `ralph org start
-// <task>` from a subdirectory of the main checkout launches the watch in the
-// main worktree root with a relative agmsg home made absolute from that
-// subdirectory, as its one RALPH_ORG_AGMSG_HOME: the variable's value, or,
-// with the variable unset, the agmsg_home of the --config given. The
-// relative home names the stub agmsg home from the subdirectory, so the
-// leader is spawned through it.
-func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
-	cases := []struct {
-		name     string
-		inConfig bool // the relative home is the --config's agmsg_home, with RALPH_ORG_AGMSG_HOME unset
-	}{
-		{name: "a relative env value"},
-		{name: "env unset, a relative agmsg_home in --config", inConfig: true},
+// Plan 2026-10-29-local-config-org AC7 (D7) for start: both forms of `ralph
+// org start`, on a ledger with no watch, with a --config whose
+// [org].agmsg_home is relative, are refused before the watch is launched,
+// with start's prefix and the sentence of director start's refusal, and
+// launch, record, call, or make nothing. RALPH_ORG_AGMSG_HOME, which ralph
+// no longer reads, is set to the stub agmsg home and changes nothing. These
+// ledgers are outside the repository, so the watch would keep this working
+// directory: the refusal does not depend on where start runs.
+func TestOrgStart_ARelativeAgmsgHomeInConfigIsRefusedAndNothingLaunched(t *testing.T) {
+	for _, form := range orgStartForms() {
+		t.Run(form.name, func(t *testing.T) {
+			useRealOrgWatchGate(t)
+			refuseOrgWatchLaunch(t)
+			herdrLog, agmsgLog := setupOrgStubPATH(t)
+			t.Setenv(legacyAgmsgHomeEnv, driver.AgmsgHomeOverride)
+			stateDir, run := form.setup(t)
+			configPath := writeOrgConfig(t, t.TempDir(), 5)
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, configPath, strings.Replace(string(data), "[org]\n", "[org]\nagmsg_home = \"rel/agmsg\"\n", 1))
+
+			stdout, _, err := run("--config", configPath)
+			want := relativeAgmsgHomeRefusal("org: start: the cross-org watch did not start, so no leader was started: ", "the watch runs", "rel/agmsg", configPath)
+			if err == nil || err.Error() != want {
+				t.Fatalf("start with a relative agmsg_home in --config = %v; want %q", err, want)
+			}
+			if stdout != "rejected: "+want+"\n" {
+				t.Errorf("stdout = %q; want only the rejected line", stdout)
+			}
+			checkNothingStarted(t, stateDir, herdrLog, agmsgLog)
+			form.noWorktree(t)
+		})
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+}
+
+// AC7 of plan 2026-10-29-local-config-org, the other side: `ralph org start
+// <task>` from a subdirectory of the main checkout, with a --config whose
+// [org].agmsg_home is absolute (the stub agmsg home) or starts with "~/",
+// launches the watch in the main worktree root and spawns the leader. The
+// watch's environment keeps RALPH_ORG_AGMSG_HOME as it was inherited,
+// relative and not made absolute, since nothing reads it (AC6).
+func TestOrgStart_AnAbsoluteOrHomeAgmsgHomeInConfigLaunchesTheWatch(t *testing.T) {
+	for _, home := range []string{"<stub>", "~/agmsg"} {
+		t.Run(home, func(t *testing.T) {
 			useRealOrgWatchGate(t)
 			setupOrgStubPATH(t)
-			stubHome := os.Getenv(orgAgmsgHomeEnv)
+			if home == "<stub>" {
+				home = driver.AgmsgHomeOverride
+				setAgmsgHomeOverride(t, "")
+			}
+			t.Setenv(legacyAgmsgHomeEnv, "rel/agmsg")
 			root := newFeatureRepo(t, ".claude/worktrees/\n.harness/\n")
 			sub := filepath.Join(root, "pkg", "sub")
 			if err := os.MkdirAll(sub, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			configPath := writeOrgConfig(t, sub, 5)
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, configPath, strings.Replace(string(data), "[org]\n", fmt.Sprintf("[org]\nagmsg_home = %q\n", home), 1))
 			ledger := filepath.Join(root, ".harness", "state", "org")
 			t.Chdir(sub)
-			wd, err := os.Getwd()
-			if err != nil {
-				t.Fatal(err)
-			}
-			rel, err := filepath.Rel(wd, stubHome)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.inConfig {
-				data, err := os.ReadFile(configPath)
-				if err != nil {
-					t.Fatal(err)
-				}
-				writeTestFile(t, configPath, strings.Replace(string(data), "[org]\n", fmt.Sprintf("[org]\nagmsg_home = %q\n", rel), 1))
-				setOrUnsetEnv(t, orgAgmsgHomeEnv, "", true)
-			} else {
-				t.Setenv(orgAgmsgHomeEnv, rel)
-			}
 			var got []orgWatchLaunchRequest
 			setOrgWatchLaunch(t, inProcessLauncher(t, ledger, &got))
 
@@ -739,8 +760,8 @@ func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
 			if got[0].dir != root {
 				t.Errorf("child dir = %q; want %q", got[0].dir, root)
 			}
-			if homes, want := agmsgHomeEnvValues(got[0].env), []string{filepath.Join(wd, rel)}; !slices.Equal(homes, want) {
-				t.Errorf("child %s = %q; want %q", orgAgmsgHomeEnv, homes, want)
+			if homes := legacyAgmsgHomeEnvValues(got[0].env); !slices.Equal(homes, []string{"rel/agmsg"}) {
+				t.Errorf("child %s = %q; want only the inherited %q", legacyAgmsgHomeEnv, homes, "rel/agmsg")
 			}
 			if ev := lastSeatEvent(t, ledger, "org-a", org.LeaderIdentity); ev.Event != org.EventSpawned {
 				t.Errorf("last leader event = %s; want %s", ev.Event, org.EventSpawned)
@@ -754,7 +775,9 @@ func TestOrgStart_ARelativeAgmsgHomeIsPassedAbsoluteToTheWatch(t *testing.T) {
 func TestOrgStartSpawnSendHelp_SayWhatTheWatchGateDoes(t *testing.T) {
 	cases := map[string][]string{
 		"start": {"when none is running, start launches one as `ralph org watch --all --detach` does",
-			"it is refused when a watch holds the lock but is stale, stopping, or a --once run"},
+			"it is refused when a watch holds the lock but is stale, stopping, or a --once run",
+			"When it would launch one, a --config whose [org].agmsg_home is a relative path is refused before the launch, " +
+				"wherever start runs, and no leader is started"},
 		"spawn": {"A spawn, --dry-run included, is refused while no long-running `ralph org watch --all` (not stopping, not a --once run) runs on the ledger"},
 		"send": {"A TASK (TYPE: TASK, also on the first line of --raw text), --dry-run included, is refused while no long-running " +
 			"`ralph org watch --all` (not stopping, not a --once run) runs on the ledger"},
