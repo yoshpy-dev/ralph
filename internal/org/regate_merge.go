@@ -14,7 +14,9 @@ import (
 // (regateUndoMerge, D5), the push and its retry (regatePush,
 // regateHeadNotOnOrigin, D4), and the git they run that ctx does not stop
 // (regateUncancelledGit). The check of what is on disk in the merge's way
-// (regateCheckInTheWay, regateMergeWrites) is in regate_inway.go.
+// (regateCheckInTheWay, regateMergeWrites) is in regate_inway.go; a ci
+// regate's push and checks after the merge commit (regateCIMerged) are in
+// regate_ci.go.
 
 // regateUncancelledGit runs git args in dir with env (regateBoundedGit) in a
 // process group of its own, on a context ctx's cancellation does not reach
@@ -215,10 +217,14 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // recorded head_moved or tree_changed it is kept, and res.NotUndone says how
 // to undo it (after tree_changed, also how to set the scripts' changes aside
 // first). An error or refusal after the merge says what became of the merge
-// commit (regateUndoneText). stderr gets the line regateUncancelledGit
-// writes.
-func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, stderr io.Writer, w gateWording,
-	res RegateResult) (RegateResult, error) {
+// commit (regateUndoneText). With ci set, for a ci regate (regateCIPreCheck),
+// the checks before the merge and the merge commit are the same, and what
+// comes after the merge commit is regateCIMerged's: no script, the push
+// before any record, then the PR's checks (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D2, D3). stderr gets the
+// line regateUncancelledGit writes.
+func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
+	w gateWording, res RegateResult) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
 		return RegateResult{}, regateInterrupted(ctx, err, "")
@@ -243,6 +249,9 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	}
 	res.Head, res.Merge, res.PreMergeHead = merge, merge, t.head
 	t.head = merge
+	if ci != nil {
+		return o.regateCIMerged(ctx, b, t, ci, env, stderr, w, res)
+	}
 	if ctx.Err() != nil {
 		res = regateUndoMerge(ctx, t, env, stderr, res)
 		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))

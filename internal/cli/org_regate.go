@@ -172,13 +172,14 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 //	merged      GATE: pass|fail, REASON: (on a fail), MERGED:, HEAD:, BASE:,
 //	            LOG:, PUSHED: (once pushed)
 //
-// LOG: is left out when res has no log, PUSHED: when nothing was pushed. A
-// pass, up_to_date, and a push that landed return nil (exit 0). A push that
-// failed returns res.PushFailed (exit 1). A recorded gate_failed is followed
-// by a blank line and the detail ralph org gate prints (printGateFailDetail,
-// worded for regate), then, after a merge, a blank line and what became of
-// the merge commit: undone, or res.NotUndone; its error (exit 1) is one line
-// naming the reason.
+// LOG: is left out when res has no log, PUSHED: when nothing was pushed.
+// Another outcome gets only HEAD:, BASE:, LOG: and PUSHED:, and an error
+// that names it (exit 1). A pass, up_to_date, and a push that landed return
+// nil (exit 0). A push that failed returns res.PushFailed (exit 1). A
+// recorded gate_failed is followed by a blank line and the detail ralph org
+// gate prints (printGateFailDetail, worded for regate), then, after a merge,
+// a blank line and what became of the merge commit: undone, or
+// res.NotUndone; its error (exit 1) is one line naming the reason.
 func printRegateResult(w io.Writer, res org.RegateResult, err error) error {
 	if err != nil {
 		if res.Outcome != "" {
@@ -196,7 +197,19 @@ func printRegateResult(w io.Writer, res org.RegateResult, err error) error {
 	if res.PushFailed != "" {
 		return errors.New(res.PushFailed)
 	}
-	if res.Outcome == org.RegateOutcomeUpToDate || res.Outcome == org.RegateOutcomePushOnly || res.Passed {
+	switch res.Outcome {
+	case org.RegateOutcomeUpToDate, org.RegateOutcomePushOnly:
+		return nil
+	case org.RegateOutcomeGated, org.RegateOutcomeMerged:
+	default:
+		// An outcome this command does not print yet, such as
+		// org.RegateOutcomeChecksPending, which only a regate with
+		// [org.gate].regate_checks = "ci" gives and this command does not
+		// ask for yet, gets no GATE: line: it records nothing.
+		return fmt.Errorf("org: regate: the regate of %s ended with the outcome %s, which this command does not print", res.Branch,
+			res.Outcome)
+	}
+	if res.Passed {
 		return nil
 	}
 
@@ -226,7 +239,7 @@ func printRegateLines(w io.Writer, res org.RegateResult) {
 	case org.RegateOutcomePushOnly:
 		_, _ = fmt.Fprintf(w, "PUSH_ONLY: the latest gate record of %s is a gate_passed of HEAD on %s's tip, and origin's %s is "+
 			"behind HEAD: nothing was run or recorded\n", res.Branch, base, res.Branch)
-	default:
+	case org.RegateOutcomeGated, org.RegateOutcomeMerged:
 		if res.Passed {
 			_, _ = fmt.Fprintln(w, "GATE: pass")
 		} else {

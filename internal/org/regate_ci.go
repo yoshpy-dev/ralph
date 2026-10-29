@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -16,10 +17,12 @@ import (
 // made before anything changes (regateCIPreCheck, D2 step 1) and the
 // decision from the PR's head and checks to a gate_ci_passed, a
 // gate_ci_failed, or no record (regateChecks, D4), which the gate-only path
-// (D6) runs in place of regateGate. A ci regate whose HEAD does not contain
-// origin's default branch tip is refused (regateCIMergeRefusal): its merge
-// and push are not here yet. Every gh call goes through prchecks.go, pinned
-// to origin's repository with -R, as ralph org merge's do.
+// (D6) runs in place of regateGate; and the merge path's steps after the
+// merge commit regateMerged makes (regateCIMerged, D2 steps 3 and 4): the push
+// before any record, with the read-back of origin's tip after a push that
+// failed (regateCIPush, D3), and then the same decision on the pushed merge
+// commit. Every gh call goes through prchecks.go, pinned to origin's
+// repository with -R, as ralph org merge's do.
 
 // regateCIDone is what a ci regate refused by regateCIPreCheck did.
 const regateCIDone = "nothing was merged, pushed, or recorded"
@@ -139,27 +142,182 @@ func regateCIInterrupted(ctx context.Context, step, done string) error {
 	return fmt.Errorf("org: regate: interrupted (%v) while %s: %s", context.Cause(ctx), step, done)
 }
 
-// regateCIMergeRefusal is the refusal of a ci regate whose HEAD, origin's
-// tip of the branch, does not contain t's base tip: the merge of that tip
-// with the push before the checks (D2 steps 2 to 4, D3) is not in this
-// regate, which does not fall back to the gate scripts either (the plan's
-// first critical fork). It is refused before anything changed.
-func regateCIMergeRefusal(t gateTarget, w gateWording) string {
-	return w.prefix + fmt.Sprintf("HEAD %s of %s in %s does not contain origin's tip %s of %s, and this ralph does not merge it "+
-		"in with [org.gate].regate_checks = \"ci\", so %s: merge it yourself (git -C %s merge %s), push, and %s, which then "+
-		"reads the PR's checks; or set [org.gate].regate_checks = \"local\" and %s, which merges and runs the gate scripts "+
-		"here", t.head, t.branch, t.root, t.base.sha, t.base.branch, regateCIDone, t.root, t.base.ref, w.again, w.again)
+// regateCIMerged is regateMerged's path for a ci regate once it has made its
+// merge commit res.Merge of t's base tip on res.PreMergeHead, origin's tip of
+// the branch, with t.head the merge commit (D2 steps 3 and 4): it runs no gate
+// script, pushes the merge commit before anything is recorded (regateCIPush,
+// which reads origin's tip back after a push that failed, D3), and once
+// origin has it, decides the gate from the PR's head and checks on it
+// (regateChecks). A gate_ci_passed or gate_ci_failed it records is of the
+// merge commit on t's base tip and ref, with RegateOutcomeMerged; when the
+// checks are not done, as right after the push, when the PR's head is
+// usually not the merge commit yet or its checks are pending, it records
+// nothing, with RegateOutcomeChecksPending, and the next Regate finds HEAD on
+// origin's tip of the branch and reads the checks again (D6). Once origin has
+// the merge commit, nothing undoes it: an interrupt, an error, or a refusal
+// after the push records nothing and says that the merge commit stays on
+// origin. stderr gets the line regateUncancelledGit writes for an undo.
+func (o *Org) regateCIMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
+	w gateWording, res RegateResult) (RegateResult, error) {
+	res, err := regateCIPush(ctx, t, env, stderr, w, res)
+	switch {
+	case err != nil && res.Pushed:
+		// regateSetTrackingRef failed after the push; its error says the
+		// merge commit was pushed.
+		return res, fmt.Errorf("%w; nothing was recorded: %s, which reads the PR's checks of it", err, w.again)
+	case err != nil, !res.Pushed:
+		return res, err
+	case ctx.Err() != nil:
+		return res, fmt.Errorf("org: regate: interrupted (%v) after %s was pushed to origin's %s, so nothing was recorded: the merge "+
+			"commit stays on origin and HEAD is kept; %s, which reads the PR's checks of it", context.Cause(ctx), t.head, t.branch, w.again)
+	}
+	res, err = o.regateChecks(ctx, b, t, ci, env, res)
+	switch {
+	case err != nil:
+		return res, fmt.Errorf("%w; %s: %s, which reads the PR's checks of it", err, regateCIPushedText(t), w.again)
+	case res.Refused != "":
+		res.Refused += "; " + regateCIPushedText(t)
+	case res.Outcome == "":
+		res.Outcome = RegateOutcomeMerged
+	}
+	return res, nil
+}
+
+// regateCIPushedText says that t's HEAD, a ci regate's merge commit, is on
+// origin, for an error or a refusal after its push.
+func regateCIPushedText(t gateTarget) string {
+	return fmt.Sprintf("the merge commit %s was pushed to origin's %s and stays there", t.head, t.branch)
+}
+
+// regateCIPush pushes t's HEAD, the merge commit res.Merge on res.PreMergeHead,
+// to origin's branch without force for a ci regate, with nothing recorded yet
+// (D2 step 3): `git push origin <sha>:refs/heads/<branch>` with env and
+// GIT_TERMINAL_PROMPT=0 (regateRemoteEnv) in ralph's process group
+// (regateRemoteGit, D8), as regatePush does. Once origin has the merge commit,
+// it sets res.Pushed and points refs/remotes/origin/<branch> at it
+// (regateSetTrackingRef, from the value it read right before the push); its
+// error is then that ref's update. Origin has it when the push succeeds, or
+// when the push failed (an exit, a push past regateGitTimeout or ended by a
+// signal, a git that cannot run) and origin's tip read back from origin
+// (regateReadOriginTip) is the merge commit: the push landed and its answer
+// was lost (D3). Otherwise res.Pushed stays false and nothing more is done:
+//
+//   - ctx done before the push, or the remote-tracking ref that cannot be
+//     read before it: nothing was pushed, so the merge commit is undone
+//     (regateUndoMerge), and the error says so;
+//   - a push that failed with origin's tip read back as res.PreMergeHead,
+//     the tip the merge commit was made on: the push did not land, so the
+//     merge commit is undone, and res.Refused says how the push failed, with
+//     what git said, and to run Regate again once that is fixed;
+//   - a push that failed with origin's tip read back as another commit (a
+//     descendant of the merge commit, or any other), with no such branch on
+//     origin, or not read: whether origin has the merge commit cannot be
+//     told, so HEAD is kept, and res.Refused names what was read and how to
+//     check origin and HEAD before running Regate again;
+//   - ctx done while the push or the read-back runs: the same cannot be
+//     told, HEAD is kept, and the error says so.
+//
+// The undo writes its line to stderr (regateUncancelledGit).
+func regateCIPush(ctx context.Context, t gateTarget, env []string, stderr io.Writer, w gateWording, res RegateResult) (RegateResult,
+	error) {
+	if ctx.Err() != nil {
+		res = regateUndoMerge(ctx, t, env, stderr, res)
+		return res, fmt.Errorf("org: regate: interrupted (%v) before %s was pushed to origin's %s, so nothing was pushed or recorded; %s",
+			context.Cause(ctx), t.head, t.branch, regateUndoneText(res))
+	}
+	spec := t.head + ":refs/heads/" + t.branch
+	command := "git push origin " + spec + " in " + t.root
+	before, err := regateTrackingRef(ctx, t)
+	if err != nil {
+		res = regateUndoMerge(ctx, t, env, stderr, res)
+		if ctx.Err() != nil {
+			return res, fmt.Errorf("org: regate: interrupted (%v) before %s was pushed to origin's %s, so nothing was pushed or "+
+				"recorded; %s", context.Cause(ctx), t.head, t.branch, regateUndoneText(res))
+		}
+		return res, fmt.Errorf("%w, so %s was not pushed to origin's %s and nothing was recorded; %s; %s", err, t.head, t.branch,
+			regateUndoneText(res), w.again)
+	}
+	unknown := func(while string) error {
+		return fmt.Errorf("org: regate: interrupted (%v) while %s, so origin may or may not have %s, and nothing was recorded: HEAD, "+
+			"the merge commit, is kept; %s", context.Cause(ctx), while, t.head, regateCICheckOrigin(t, w))
+	}
+
+	r, timedOut, err := regateRemoteGit(ctx, t.root, regateRemoteEnv(env), "push", "origin", spec)
+	var failed string
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return res, unknown(fmt.Sprintf("%s was pushed to origin's %s", t.head, t.branch))
+	case err != nil:
+		// A signal (regateGitSignaled) or a git that cannot run: err says
+		// which, after the prefix and the command.
+		failed = strings.TrimPrefix(err.Error(), regatePrefix)
+	case timedOut:
+		failed = fmt.Sprintf("%s ran past %s and was stopped", command, regateGitTimeout)
+	case r.code != 0:
+		failed = fmt.Sprintf("%s failed (exit %d)", command, r.code)
+	default:
+		return regateCILanded(ctx, t, before, res)
+	}
+
+	if hook := regateTestHooks.beforeReadBack; hook != nil {
+		hook()
+	}
+	tip, unread, err := regateReadOriginTip(ctx, t, env)
+	if err != nil {
+		return res, unknown(fmt.Sprintf("origin's tip of %s was read back after %s", t.branch, failed))
+	}
+	said := regateStderrTail(r.stderr)
+	var read string
+	switch {
+	case unread == "" && tip == res.PreMergeHead:
+		res = regateUndoMerge(ctx, t, env, stderr, res)
+		res.Refused = w.prefix + fmt.Sprintf("%s, and origin's %s is still %s, the tip the merge commit was made on, so the push did "+
+			"not land and nothing was recorded: fix it and %s%s; %s", failed, t.branch, tip, w.again, said,
+			regateUndoneText(res))
+		return res, nil
+	case unread == "" && tip == t.head:
+		return regateCILanded(ctx, t, before, res)
+	case unread != "":
+		read = fmt.Sprintf("origin's tip of %s could not be read back (%s)", t.branch, unread)
+	case tip == "":
+		read = fmt.Sprintf("origin has no branch %s now", t.branch)
+	default:
+		read = fmt.Sprintf("origin's %s is now %s, neither the tip %s the merge commit was made on nor the merge commit", t.branch, tip,
+			res.PreMergeHead)
+	}
+	res.Refused = w.prefix + fmt.Sprintf("%s, and %s, so whether origin has %s cannot be told, and nothing was recorded: HEAD, the "+
+		"merge commit, is kept; %s%s", failed, read, t.head, regateCICheckOrigin(t, w), said)
+	return res, nil
+}
+
+// regateCILanded is regateCIPush once origin has t's HEAD: it sets
+// res.Pushed and points refs/remotes/origin/<branch> at HEAD from before, its
+// value right before the push (regateSetTrackingRef), whose error it returns.
+func regateCILanded(ctx context.Context, t gateTarget, before string, res RegateResult) (RegateResult, error) {
+	res.Pushed = true
+	if hook := regateTestHooks.afterPush; hook != nil {
+		hook()
+	}
+	return res, regateSetTrackingRef(context.WithoutCancel(ctx), t, before)
+}
+
+// regateCICheckOrigin is the next step after a ci regate's push whose landing
+// cannot be told: check origin and t's HEAD, then run Regate again.
+func regateCICheckOrigin(t gateTarget, w gateWording) string {
+	return fmt.Sprintf("check origin and HEAD (git -C %s fetch origin, then git -C %s log --oneline --graph HEAD "+
+		"refs/remotes/origin/%s) and %s", t.root, t.root, t.branch, w.again)
 }
 
 // regateChecks is the gate of a ci regate on t's HEAD, origin's tip of the
-// branch, decided from ci's PR in place of the scripts (D4, D6): it reads the
-// PR's head (readPRHead) and, when that is HEAD, its checks (readPRChecks),
-// and then
+// branch or the merge commit regateCIMerged pushed, decided from ci's PR in
+// place of the scripts (D4, D6): it reads the PR's head (readPRHead) and,
+// when that is HEAD, its checks (readPRChecks), and then
 //
 //   - when the PR's head is not HEAD yet (GitHub may not have updated the PR
 //     after a push), a check is pending, others that failed included, or gh
-//     reported no checks: it records nothing and sets res.ChecksPending to
-//     why and res.ChecksNext to running Regate again once CI has finished;
+//     reported no checks: it records nothing, sets res.Outcome to
+//     RegateOutcomeChecksPending, res.ChecksPending to why, and
+//     res.ChecksNext to running Regate again once CI has finished;
 //   - when a check ended and is not pass or skipping, and none is pending: it
 //     records a gate_ci_failed with reason ci_failed, and res.FailedChecks
 //     names those checks;
@@ -175,7 +333,9 @@ func regateCIMergeRefusal(t gateTarget, w gateWording) string {
 // printed, appended by recordRegate after its check that the branch's binding
 // and its org are as the first check found them. res keeps what it held, with
 // res.PR set to the PR's number and, after a record, LogPath, Passed, and
-// Reason. Texts from gh are escaped (PrintableInboxText). The error is for ctx
+// Reason, and Outcome left to the caller (RegateOutcomeGated, or
+// RegateOutcomeMerged after regateCIMerged's push). Texts from gh are
+// escaped (PrintableInboxText). The error is for ctx
 // done, a log that cannot be written, and a record that cannot be appended;
 // nothing is recorded then.
 func (o *Org) regateChecks(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, res RegateResult) (RegateResult,
@@ -188,6 +348,7 @@ func (o *Org) regateChecks(ctx context.Context, b regateBranch, t gateTarget, ci
 		return res, nil
 	}
 	pending := func(format string, args ...any) (RegateResult, error) {
+		res.Outcome = RegateOutcomeChecksPending
 		res.ChecksPending = PrintableInboxText(fmt.Sprintf(format, args...), false)
 		res.ChecksNext = fmt.Sprintf("%s once CI on PR #%d has finished", w.again, n)
 		return res, nil
