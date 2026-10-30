@@ -207,7 +207,11 @@ gate の記録を選ぶ箇所(merge-order の収集 `mergeorder.go:458`、regate
   - F2 69f80d8f(L1・L2・L6・L7・L8): CI の pass の先に origin が進んだ(子孫)なら force push とは言わず `--ff-only` の手を出す、undo の文を git の出力の外へ、help と skill の「regate は台帳ごとに 1 つ」に ci の待ちの例外、template の ralph.toml からこの repo の値を消す、新しい文のコマンドを quote。検証: internal/org 614 秒、internal/cli 80 秒、internal/config、check-skill-sync・check-sync
   - F3 aff0dcb0(M1 の一部): `regate_ci_test.go`(約 2,300 行)を 4 つ(767・571・726・300 行)に分けた。宣言 61 件の中身とテストの一覧 1,320 件が移動の前後で同じ
   - 5c850e50: 台帳に 3 行(`regate.go` 994 行と `org_regate_test.go` 1267 行、まだ作られていない check を数えない L5、regate の断りの末尾の打ち直しの案内を quote しない)と、290 行目の行に「この PR も払っていない」
-- [ ] Review artifact created
+  - self-review cycle 1 run 2(report は c94c22dc、HEAD f103777d): CRITICAL・HIGH・MEDIUM は 0、LOW 5(R2-1〜R2-5)、Merge 可。文の 3 件(R2-3〜R2-5)は F4 で直し、台帳の正しさ(R2-1)と前からある local の文の quote(R2-2)は台帳に入れる。F3 までの前例にならい、run 3 は回さずに verify へ進む
+  - F4 8e86b75d(R2-3・R2-4・R2-5): `--wait-checks` の help に止まり方をすべて書いた(checks が終わる、gh が失敗する、PR の head が別のコミットで origin の先頭が HEAD でない・読めない、取り直しの確かめで違えば exit 1)。`regateCIWait` とファイル冒頭の doc に、時間切れと割り込みでは取り直さないことを書いた。gh の失敗で待ちが止まったときは「again」と言わない(`regateChecksRead.ghFailed`)。push の失敗の出力は「git push said:」と名指す(`regateCIPushSaid`)。検証: gofmt・vet、`internal/org -run 'RegateCI|Regate_'` 783 秒、`internal/cli -run 'OrgRegate'` 44 秒、`-overlay` で新しいテストが前の版で落ちる。機械的な確かめは 5 項目とも clean
+  - 513b22a0(inline、1 ファイルの doc の直し): F4 の報告の範囲外の所見。`RegateOutcomeChecksPending` と `ChecksPending` の doc に、gh の失敗で止まった待ちを足した。gofmt・vet が通過。機械的な確かめは 5 項目とも clean
+  - 台帳(inline): 395 行に `regate_ci.go`(901 行)を足し、「the row above」を RESOLVED の行の日付で言い直し、払い方に待ちを `regate_ci_wait.go` へ出す手を先に置いた(R2-1)。290 行の「+85」を「+114」に(R2-1)。397 行に、前からある local の文(`regateCheckOriginHead`、`regateResetHint`、`regateMergeTip`、`regateMergeLeft`)も quote しないことを足した(R2-2)
+- [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
 - [ ] PR created
