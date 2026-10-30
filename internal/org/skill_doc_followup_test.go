@@ -689,6 +689,42 @@ func TestDirectorSkill_DocFollowupGatheringReservesEveryCopyOfASet(t *testing.T)
 	}
 }
 
+// TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs pins
+// cross-review cycle 2 ACTION_REQUIRED #1 of plan 2026-10-30-leader-sync-docs
+// (D4) for step 6 of ### 予約外の文書の follow-up: before the director shows
+// the human the draft, it looks for the tests and fixtures that read the
+// follow-up files or pin their sentences (for example by searching the
+// repository's test files for each file's path and for the sentences the
+// follow-up changes), puts the ones it finds in the docs feature's - Reserve:
+// too, and tells the human which it added and why. A docs org that rewords a
+// pinned sentence fails its gate, and its implementer, which stages only the
+// reserved paths (see
+// TestDirectorSkill_DocFollowupGatheringReservesEveryCopyOfASet), cannot fix
+// a test outside the reservation. The skill ships to downstream projects, so
+// the step names no test file of this repository.
+func TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs(t *testing.T) {
+	checkDirectorSkillPlaces(t, "doc follow-up tests", []skillPlace{
+		{"step 6 of " + directorDocFollowupHeading, func(text string) string { return directorSkillDocFollowupStep(text, 6) }, []string{
+			"`- Reserve:` に一覧のファイルを並べる",
+			"案を見せる前に、一覧のファイルを読むか、その文を固定するテストと fixture を探し",
+			"(repo のテストのファイルを、一覧の各ファイルのパスと follow-up で変わる文で検索するなど)",
+			"見つけたものも `- Reserve:` に入れる",
+			"(テストを予約しないと、文書の org の implementer が変わった文に合わせてテストを直せず、gate のテストが落ちる)",
+			"足したテストと fixture は、どれをなぜ足したかを案と一緒に人に言う",
+		}},
+	})
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's doc follow-up test-file check (vendored repo?)", rel, err)
+		}
+		if step := directorSkillDocFollowupStep(string(data), 6); strings.Contains(step, "_test.go") {
+			t.Errorf("%s: expected step 6 of %s to name no test file (the skill ships to downstream projects), got:\n%s", rel, directorDocFollowupHeading, step)
+		}
+	}
+}
+
 // TestDirectorSkill_DocFollowupGatheringStartsOnceEveryFeatureIsMergedOrClosed
 // pins self-review L4 (c) of plan 2026-10-30-leader-sync-docs (D4) for
 // ### 予約外の文書の follow-up: the director checks a split plan's branches
