@@ -1038,6 +1038,11 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `.codex/agents/doc-maintainer.toml`)か、呼び出しが失敗したら(Codex で
    custom agent を呼べない、など)、sync-docs を飛ばし、
    `SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて 2 に進む。
+   doc-maintainer が report を書かずに終わったとき(途中で止まった、
+   時間切れになった、など)も、呼び出しの失敗と同じく sync-docs を
+   飛ばしたものとし、次の段落の戻し方で sync-docs の変更をすべて戻してから
+   (report がないので残すものはない)、`SYNC_DOCS: skipped (<理由>)` の行を
+   6 のために控えて 2 に進む。
    doc-maintainer への指示には、機能の計画のパス、比べる base の
    `origin/<既定のブランチ>`、予約したパス(タスクの `- 予約したパス:` の行)と
    その読み方(ralph の予約と同じく、ファイルはそのパス、`/` で終わる

@@ -21,6 +21,15 @@ const (
 	leaderStep10FirstLine   = "10. `ralph org report --org-id org-a --state-dir <台帳>` を打ち(report"
 )
 
+// syncDocsNoReportSkip is the start of the sentence, the same in step 9 of
+// the leader template and in item 1 of the /org skill's ### org の終わり方,
+// that counts a doc-maintainer that ended without the report as a failed call
+// (plan 2026-10-30-leader-sync-docs, S3). Each goes on with its own step
+// numbers.
+const syncDocsNoReportSkip = "doc-maintainer が report を書かずに終わったとき(途中で止まった、時間切れになった、など)も、" +
+	"呼び出しの失敗と同じく sync-docs を飛ばしたものとし、次の段落の戻し方で sync-docs の変更をすべて戻してから" +
+	"(report がないので残すものはない)、" + syncDocsSkipLine + " の行を"
+
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9 pins AC1 of plan
 // 2026-10-30-leader-sync-docs (D1): sync-docs is two paragraphs at the end of
 // step 9, after the reviewer's report is committed and the branch fetched and
@@ -183,6 +192,31 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsSkipsWithoutTheDocMaintainer(
 				t.Errorf("expected %s to define the agent step 9 of the leader template calls, with the line %q, got:\n%s", c.rel, c.nameLine, body)
 			}
 		})
+	}
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip
+// pins S3 of plan 2026-10-30-leader-sync-docs: a doc-maintainer that ended
+// without writing the report (it stopped part way, it timed out) is taken as a
+// failed call, so sync-docs is skipped, every change it made is undone the way
+// the next paragraph undoes them (there is no report to keep), and
+// SYNC_DOCS: skipped is kept for step 14. The sentence comes right after the
+// skip for a missing definition or a failed call, before the hand-off's list,
+// and the paragraph after it is the one that starts with the leader's check
+// and holds the undo.
+func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *testing.T) {
+	step9 := leaderFeatureOrgItem(t, step9Marker)
+	const undo = "report のほかの sync-docs の変更をすべて戻し(追跡しているファイルは `git restore <パス>`、新しいファイルは消す)"
+	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
+		"呼び出しが失敗した(Codex で custom agent を呼べない、など)ときは、sync-docs を飛ばし、" + syncDocsSkipLine + " の行を手順 14 のために控えて手順 10 に進む",
+		syncDocsNoReportSkip + "手順 14 のために控えて手順 10 に進む",
+		"doc-maintainer への指示には、次のことを書く",
+		syncDocsCheck,
+		undo,
+	})
+	next, ok := skillParagraphAfter(step9, syncDocsNoReportSkip)
+	if !ok || !strings.HasPrefix(squashSpace(next), squashSpace(syncDocsCheck)) || !containsPhrase(next, undo) {
+		t.Errorf("expected the paragraph after the one that says %q to start with %q and hold the undo it points at, got item:\n%s", syncDocsNoReportSkip, syncDocsCheck, step9)
 	}
 }
 

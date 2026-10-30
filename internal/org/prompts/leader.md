@@ -354,6 +354,11 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    `.codex/agents/doc-maintainer.toml`)か、呼び出しが失敗した(Codex で
    custom agent を呼べない、など)ときは、sync-docs を飛ばし、
    `SYNC_DOCS: skipped (<理由>)` の行を手順 14 のために控えて手順 10 に進む。
+   doc-maintainer が report を書かずに終わったとき(途中で止まった、
+   時間切れになった、など)も、呼び出しの失敗と同じく sync-docs を
+   飛ばしたものとし、次の段落の戻し方で sync-docs の変更をすべて戻してから
+   (report がないので残すものはない)、`SYNC_DOCS: skipped (<理由>)` の行を
+   手順 14 のために控えて手順 10 に進む。
    doc-maintainer への指示には、次のことを書く。機能の計画のパスと、比べる
    base の `origin/<既定のブランチ>`(既定のブランチは上の決め方で決める)。
    予約したパス(タスクの `- 予約したパス:` の行)と、その読み方(ralph の
