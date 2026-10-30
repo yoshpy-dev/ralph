@@ -111,3 +111,46 @@ _(この cycle では台帳に足していない。所見を直さずに残す�
 - Follow-ups:
   - R2-1〜R2-3 は雛形と skill の文の直しで、テストの固定も変わる。直すなら `/self-review` から通し直す。この cycle で直さずに残すなら、3 件をまとめて `docs/tech-debt/README.md` に 1 行足す(この run では台帳に書いていない)。
   - Codex の leader が pane の中で custom agent を呼べるかは、run 1 のとおり実機で確かめていない。
+
+## cycle 1 run 3(HEAD 3247c0af)
+
+- Date: 2026-10-30
+- Scope: `git diff b95f8d8c 3247c0af` のうち、F3 7f33188b(R2-1・R2-3)、1286ab79(計画の D2c と台帳の 2 行)、F4 d8e73710(verify の V1・V2)の雛形・skill・テスト・台帳の直し。0dfc49f0 で merge した #290 の差分は対象にせず、今回の文と食い違わないかだけを見た。この節の所見の番号は R3-1。この節の `Merge:` の行が run 2 の行に代わる。
+
+### Evidence reviewed(run 3)
+
+- `leader.md` の手順 9(356〜380 行の失敗の枝と前のコミットの引き方、392 行の写しの検査)と手順 14(560〜567 行)。`/org` skill の受信箱の resolve の箇条(473〜478 行)と「org の終わり方」の 1 と 6(1058〜1080 行、1232〜1242 行)。台帳の新しい 2 行(`docs/tech-debt/README.md:404-405`)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。新しいコマンドは雛形と skill に 1 つずつあり、字が同じ。`git log --grep` は「使わない理由」の文にだけ残る(`leader.md:372`、`org/SKILL.md:1073`)。
+- merge 0dfc49f0: `git show --cc` で雛形・2 つの skill・2 つのテストファイルに手の解消がないことを確かめた(出力 0 行)。#290 が雛形で変えたのは `RALPH_ORG_STATE_DIR` を消す文(今の 124〜132 行)と escalate の断りの文(今の 844〜847 行)で、今回の手順 9・14 とは重ならない。新しい文に `RALPH_ORG_STATE_DIR` は出てこない。director の新しい節の `ralph org merge-order --all`・`inbox --all` は、skill のほかのコマンドと同じく `--state-dir` を付けず、main のチェックアウトで打つ。#290 の後の台帳の決め方(`--state-dir`、`[org].state_dir`、既定の場所)とも食い違わない。
+- probe(scratchpad の使い捨ての repo、確かめたあと消した):
+  - `pre_bash_guard.sh` に新しい `git log … | awk '…'` と `git restore --source=HEAD --staged --worktree -- <パス>` を渡すと、どちらも何も出さず(deny しない)、rc 0。
+  - `git show --name-only --format=` と `git status --porcelain` の書き方を比べた。`core.quotePath=true`(git の既定)では、日本語のパスは両方が同じ 8 進の書き方で引用する。空白のあるパスは porcelain だけが `"docs/sp ace.md"` と引用し、`git show --name-only` は引用しない。`core.quotePath=false` でも空白の形は同じだった(R3-1)。
+- awk のプログラムが使う関数は POSIX の `substr` と `index` だけ。CI(`.github/workflows/verify.yml` は `ubuntu-latest` で `run-verify.sh`)は、`TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage` で同じコマンドを Linux の awk で走らせる。
+- テスト: 新しい形の固定は 1 つの定数 `syncDocsEarlierCommits` を雛形と skill の両方に使う。repo での実行は、本文の行のコミット、件名にタブのあるコミット、`grep.patternType` の basic と fixed を足した。slug の確かめは、awk の文字列と shell の引用を閉じる 4 つ(`"`・`'`・`\`・改行)に変わった。F4 は `syncDocsCopyChecks` を 2 つの固定で共有し、描いた雛形全体に `check-sync.sh` がないことと、`/org` skill の受信箱の箇条を見る。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### run 2 の所見の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| R2-1 | 直った | 件名を完全一致で比べる `git log --format='%H %s' … \| awk …` にした(`leader.md:368-375`、`org/SKILL.md:1069-1078`)。本文の行と `grep.patternType` に左右されない。テストが両方の形を持つ。`git show --name-only` の書き方の残りは台帳の 2 行目に入った(R3-1 も参照)。 |
+| R2-2 | 直していない(台帳へ) | 台帳の 1 行目に、「要らない」と「なかった」の記録が残らないことが書かれた。 |
+| R2-3 | 直った | 失敗の枝は自分の戻し方を書き、`## 戻した変更` を書かないと言う(`leader.md:358-367`、`org/SKILL.md:1060-1068`)。手順 14 と skill の 6 は、最後の回で飛ばしたときに report を読まない(`leader.md:564-567`、`org/SKILL.md:1239-1242`)。`SYNC_DOCS:` の控えが記憶にしかないことは台帳の 1 行目に入った。 |
+
+### Findings(run 3)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R3-1 台帳の新しい 2 行に、repo と合わない書き方が 2 つある。(1) 1 行目は、leader の `SYNC_DOCS: skipped` の控えが「its `HEAD:` and `BASE:` already are」と同じく記憶にしかないと書く。`HEAD:` と `BASE:` は手順 12 で `.harness/state/gate-{{ORG_ID}}.out` から読み、そのファイルは worktree に残るので、compaction のあとも読み直せる。記憶にしかないのは `SYNC_DOCS:` の行だけで、比べた相手の方が強い。(2) 2 行目は、`core.quotePath` の影響を日本語のパスの引用として書き、凍らせたファイルを見落としうると言う。probe では、既定の設定で日本語のパスは `git show --name-only` と `git status --porcelain` が同じ書き方で引用するので、leader の突き合わせは合う。書き方が分かれるのは空白(と引用符・バックスラッシュ)のあるパスで、porcelain だけが引用する。払い方に挙げた `git diff-tree … -z` も、比べる側の porcelain に `-z` を付けないと揃わない。どちらも記録の文で、雛形と skill の動きは変わらない。 | `docs/tech-debt/README.md:404`(「as its `HEAD:` and `BASE:` already are」)、`:405`(「non-ASCII paths printed quoted with octal escapes」、`git diff-tree --no-commit-id --name-only -r -z`)。`internal/org/prompts/leader.md:482-486`、`:534`(gate の出力ファイル)。probe の出力: `git show` は `docs/sp ace.md`、porcelain は ` M "docs/sp ace.md"` | 1 行目は「`HEAD:` と `BASE:` は gate の出力ファイルから読み直せるが、`SYNC_DOCS:` の行には読み直す場所がない」に直す。2 行目は、引き金を「空白などのあるパスで、porcelain だけが引用する」に直し、払い方を「両方を `-z` で読む(`git diff-tree --no-commit-id --name-only -r -z` と `git status --porcelain -z`)」にする。台帳の文だけの直しで、記録だけの直しの例外の条件 2(この task の report と event だけ)には入らない点に注意。 |
+
+### 所見にしなかったこと(run 3)
+
+- F4 の V1 で、doc-maintainer に名指す写しの検査は `scripts/check-skill-sync.sh` と「など」だけになった。この repo の機能の org では `check-sync.sh` も写しの検査だが、「など」で読めることと、写しの組の決まり(組のすべてが予約の中のときだけ直す)が先にあることから、所見にしない。雛形は binary に入って全プロジェクトに配られるので、この repo にしかないスクリプトを名指さない判断は妥当。
+- `/org` skill の受信箱の箇条は PR の URL を merge-order の PR の列から取ると書くが、列が `-` のときの扱い(形を確かめた本文の URL か、件数だけ)は書かず、`/director` skill の項を指す。指し先に全文があるので所見にしない。
+- 最後の回で飛ばしたとき、前の回の sync-docs の report にあった follow-up は PR の本文にも RESULT にも出ない。director はその機能を「確かめていない機能」として人と予約を決めるので、run 1 からの「最後の回のものだけを使う」決めのままとする。
+
+### Recommendation(run 3)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。R2-1 と R2-3 は直り、R2-2 は台帳に入った。新しい所見は台帳の文の LOW 1 件)
+- Follow-ups:
+  - R3-1 は `docs/tech-debt/README.md` の 2 行の言い直しだけで済む。直すなら、記録だけの直しの例外には入らない(台帳は task の report でも event でもない)。
