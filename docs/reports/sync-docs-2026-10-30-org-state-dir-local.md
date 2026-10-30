@@ -137,3 +137,66 @@
 ## Insight event
 
 `docs/insights/events/2026-10-30-org-state-dir-local.jsonl` の末尾に `sync_docs` の 1 行を足した(`./scripts/insights-append.sh --slug org-state-dir-local --flow standard --phase sync_docs --verdict pass --cycle auto --source skill`、rc 0、ts 2026-10-30T04:51:40Z、cycle 1、findings は 0)。file は 5 行になった。`git status --short` は、既存の jsonl の ` M` とこの report の `??` だけで、`<date>-<date>-<slug>.jsonl` のような余分な file はできていない。
+
+## cycle 2
+
+- Date: 2026-10-30
+- Pipeline cycle: 2(`cycle-count.json`)。run 開始時の HEAD は `23af7887`。回し直しの原因は cross-review cycle 1 の ACTION_REQUIRED #1(`ralph.toml` の `[ORG]` / `STATE_DIR` が local-only の検査をすり抜ける)と、その直しの S9(`6415aabd`、`internal/config/local.go` と `local_test.go`、`checkLocalOnlyKeys` を go-toml の decoder と同じく大文字小文字を区別せずに引く)
+- 先行 report: self-review cycle 2(Merge: yes。S9 の差分に所見なし、LOW は C2-L1 の 1 件)、verify cycle 2(pass。S9 で文書のずれなし)、test cycle 2(pass。S9 で新しい穴なし)
+- 制約: 依頼で plan は編集していない(Progress への記録は orchestrator)。コードも触っていない。`go test` などは打っていない。AC の checkbox も触っていない
+- origin/main は進んでいる: `1e266f96`(#289 `feat/regate-ci-checks`)が入り、`README.md`、`AGENTS.md`、`docs/tech-debt/README.md`(表の末尾に 3 行、287 行付近に 1 行の変更)、`internal/config/` に触れている。この branch の merge-base は `c03647f9` のまま。取り込むときは tech-debt の表の末尾で衝突する(両方の行を残す)
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/tech-debt/README.md` 399 行(新しい行) | 依頼 1。self-review の C2-L1 に従い、L2 と L5 を 1 行にまとめた。(a) L2: `checkRetiredOrgStateDirEnv` の拒否が `errOrgLedgerUnresolved` で包まれ、頭が「cannot resolve the org ledger:」になるのに、直後で「the ledger ralph finds by default is X」と言う。`guardLegacyOrgStateDir` は「org: refusing to change the org ledger:」で始まり、印も付かない。全文を固定するテスト(`TestOrgCleanup_RefusedWhileTheRetiredStateDirEnvNamesAnotherLedger` と `org_retired_state_dir_env_test.go` の start・spawn・send)と、印を見る escalate の not-recorded の振り分けが、直す範囲を決める。(b) L5: 既定の段で `gitroot.MainWorktree` を `config.LocalPath` の中と main worktree の段で 2 回呼び、git が 2 回から 4 回になる。`LocalOrgStateDir` が返す path はテストしか読まず、拒否の文は `config.LocalPath` を計算し直す(さらに 2 回)。Trigger は (a) が `resolveOrgLedger`・拒否・escalate の not-recorded の経路の次の変更、(b) が `ResolveOrgStateDir` か `LocalOrgStateDir` の次の変更。(a) は変数を `retiredEnvs` から外すと消える。L7(source 名 `config`)は計画の決定なので足していない |
+| `docs/tech-debt/README.md` 400 行(新しい行、依頼にない) | `internal/config/local_test.go` が 800 行を超えた(`c03647f9` で 570、`23af7887` で 981)。この branch の Go ファイルで、800 行を越えたのはこの 1 つだけ(`git diff --name-only c03647f9...HEAD` の Go ファイルを、`c03647f9` と HEAD の `wc -l` で突き合わせた。ほかの 800 行超は前から超えていた)。cycle 1 の sync-docs は大きさを見ていなかった。#263 の 386・390 行と同じ形で Trigger は「次の変更で `LocalOrgStateDir` と `LocalOnlyKeys` のテストを先に別ファイルへ出す」。要らなければ lead が外してよい |
+| `docs/reports/sync-docs-2026-10-30-org-state-dir-local.md` | この節 |
+| `docs/insights/events/2026-10-30-org-state-dir-local.jsonl` | `sync_docs` の行(`--cycle auto`、cycle 2) |
+
+### S9 の文書の確認
+
+| Surface | 結果 | 根拠 |
+|---------|------|------|
+| `README.md` の `:135`(`config get`)と `:148`(`[org].state_dir` の段落) | 変更なし | 「`ralph.toml` に `[org].state_dir` があると読み込みが失敗する」は、decoder が同じキーと読むどの綴りにも成り立つ。大文字小文字に触れる文はない |
+| `AGENTS.md:89` | 変更なし | `LocalOnlyKeys` を「その file だけが書けるキー」と書くだけで、照合の細部は書いていない |
+| `.claude/rules/ralph/`、`/org` と `/director` skill、recipe、`templates/base/ralph.toml`、`config get --help` | 変更なし | `git grep` で、local-only のキーの照合が大文字小文字を区別すると書いた文も、区別しないと書いた文もない。template の注釈(「only ralph.local.toml may set it, and this file fails to load with it」)も合う |
+| tech-debt の Trigger(`local.go`、`local_test.go`、`checkLocalOnlyKeys`、`tomlDocHasKey`、`LocalOnlyKeys` と 2 本のテスト) | 当たった行なし | `local.go` を名指すのは 269 行(RESOLVED の HTML コメント)と 396 行。396 行の (a) が挙げる 4 つの関数は S9 で変わらず、(b) の「`config.Load` のエラーの道」は、S9 がどの文書が `checkLocalOnlyKeys` のエラーになるかを変えただけで、エラーのあとの扱い(`Default()` を返す)を変えていないので、verify の判断どおり当たっていない。294 行は `isolateLocalGitEnv` を名指すが、S9 は触れていない |
+| 欄数・backtick・plan 参照 | 通った | 変えた行は新しい 2 行だけ。ともに 5 欄で、backtick と `~~` が偶数、`file:line` の参照 0 件。`docs/plans/(active\|archive)/` の参照は missing 0 件 |
+
+**判断: 大文字小文字を文書に書かない。** 書かない理由は 3 つある。
+- ralph.toml のどのキーも、go-toml の decoder は大文字小文字を区別せずに struct の field に当てる。`[org].state_dir` のときだけそう書くと、ほかのキーは区別するように読める。
+- 契約は「`ralph.toml` に `[org].state_dir` を置くと断られる」で、ralph が `[org].state_dir` として読む綴りはすべてその「置く」に入る。綴りの数え上げは契約を狭めずに長くするだけ。
+- 断られた人が見るエラーは正規の綴り `[org].state_dir` とファイルのパス、書く先の `ralph.local.toml` を名指す(C2-N1)。`STATE_DIR` と書いた人は、それでも直し方にたどり着く。
+
+文書に足すと決めるとしたら、エラーの文に文書の綴りを併記する Go の変更になる。それは C2-N1 が「迷う時間は短い」として所見にしなかったもので、ここでは扱わない。
+
+### PR の Known gaps(最新の一覧)
+
+register に入っていないもの。
+
+- source 名 `config`(self-review の L7)。計画の決定で、`--config` のファイルと取り違えうる。直すなら `statedir.go` と `org_legacy_ledger.go` の比較も合わせる。
+- test report の Test gaps 1〜4(`FeatureRepoRoot` の bare repository のエラー分岐、`filepath.Abs` の失敗、実物の HOME での手動確認、`watch --detach` の子の注意の 1 行)。
+- `ralph config get --help` の exit 3 の説明が local-only のキーを名指さないこと(Go、`config_test.go` が固定。README は直した)。
+- verify の I2(`model-routing.md:151`、B の範囲)と I3(`docs/specs/` の日付つきの箇条、依頼で外した)。
+- 注(所見にしないもの): self-review cycle 2 の C2-N1(エラーは正規の綴りを名指す)、C2-N2(「一致したキーをすべて辿る」を固定する行は map の順しだいで、決定的には落とせない)、C2-N3(`tomlDocHasKey` の doc は go-toml の版を書かない)。
+
+register に入れたもの(Known gaps ではなく tech-debt から辿れる): 395〜398 行(cycle 1)、399 行(L2・L5)、400 行(`local_test.go` の大きさ)。
+
+### Verification(cycle 2)
+
+| Check | Result |
+|-------|--------|
+| `./scripts/check-sync.sh` | `PASS: all files in sync.`(DRIFTED 0) |
+| `./scripts/check-skill-sync.sh` | `[ok] check-skill-sync: 14 skill(s) in lock-step` |
+| `git diff --check` | rc 0、出力なし |
+| tech-debt | `git show HEAD:` と突き合わせて、変わった既存の行は 0、増えた行は 2(399・400)。5 欄、backtick と `~~` が偶数、`file:line` の参照 0 件 |
+| tech-debt の plan 参照 | missing 0 件 |
+| `./scripts/plan-visual.sh digest ...` | `1ea27c42968f`(この run は plan を編集していない) |
+| 変えたファイルの U+FFFD | `docs/tech-debt/README.md` に 0 件 |
+| 打っていない | `go test`、`go build`、`golangci-lint`、`run-static-verify.sh`、`run-test.sh`、`run-verify.sh`。この run が変えたのは文書、この report、insight event だけ |
+
+### Insight event(cycle 2)
+
+`./scripts/insights-append.sh --slug org-state-dir-local --flow standard --phase sync_docs --verdict pass --cycle auto --source skill`、rc 0、ts 2026-10-30T06:13:09Z、cycle 2、findings は 0。jsonl は 10 行になり、`git status --short` は既存の jsonl と tech-debt の ` M` だけで、余分な file はできていない。
