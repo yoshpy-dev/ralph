@@ -141,9 +141,10 @@ var errFileLockHeld = errors.New("the lock is held")
 // (regate.go's regate.lock), for minutes rather than for the watch's life,
 // with its marker written into the file for a spawn to read once its
 // fileLockHeld check finds the lock held (regateSpawnErr); a regate under
-// [org.gate].regate_checks = "ci" with --wait-checks releases it for every
-// sleep of its wait for the PR's checks and takes it again before it reads
-// them (regate_ci.go's regateChecksWithWait), so that a merge, a cleanup, or
+// [org.gate].regate_checks = "ci" with --wait-checks releases it while its
+// wait for the PR's checks only reads them and takes it again once, when the
+// wait stops, to check again what its record relies on and to record
+// (regate_ci.go's regateChecksWithWait), so that a merge, a cleanup, or
 // another regate can run meanwhile. ralph org merge
 // holds regate.lock too, from its checks through gh pr merge and the record
 // (merge_run.go's mergeLocked), with the marker emptied and none written, so

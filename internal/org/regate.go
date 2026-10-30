@@ -119,8 +119,9 @@ const (
 	// checks were read, a check is pending, also with others failed, or gh
 	// reported no checks (RegateResult.ChecksPending says which, ChecksNext
 	// the next step), also once RegateParams.WaitChecks ran out, or when the
-	// wait's read with regate.lock taken again found them not done again
-	// (ChecksPending then says so too).
+	// wait's read with regate.lock taken again found them not done again, or
+	// still not done after the wait stopped at a PR's head other than HEAD
+	// with origin's tip still HEAD (ChecksPending then says so too).
 	// Nothing was recorded. When HEAD contained the tip, nothing was pushed
 	// either; otherwise Regate merged the tip in first (Merge) and pushed the
 	// merge commit (Pushed), which stays on origin, and the next Regate finds
@@ -252,17 +253,22 @@ type RegateParams struct {
 	// no lock and no write. When WaitChecks is used up with them not done, it
 	// ends in RegateOutcomeChecksPending (ChecksPending saying so) without
 	// taking the lock again; ctx done ends it too. Once a read finds them
-	// done (or cannot read them), it takes the lock again, once, refusing
-	// when another regate, merge, or cleanup holds it then, as ralph org
-	// merge's wait does, checks again what the record relies on (the
-	// branch's binding and its stopped org, HEAD, and origin's tip of the
-	// branch, read from origin: regateCIRecheck), and reads again under the
-	// lock, which records, refuses, or finds them not done again
-	// (RegateOutcomeChecksPending, with no more wait); another Regate's pass
-	// of HEAD recorded meanwhile ends it RegateOutcomeUpToDate. A value below 0
-	// or above maxMergeWaitChecks (MergeWaitChecksRefusal), and one above 0
-	// with local checks, which run the scripts and have no checks to wait
-	// for, are refused before anything is done.
+	// done (or cannot read them), or finds the PR's head at a commit that can
+	// show the branch moved (one other than HEAD and, on the merge path, the
+	// head the merge commit was made on, which the PR shows until GitHub has
+	// updated it to the push, or one that moved while the checks were read),
+	// it takes the lock again, once, refusing when another regate, merge, or
+	// cleanup holds it then, as ralph org merge's wait does, checks again
+	// what the record relies on (the branch's binding and its stopped org,
+	// HEAD, and origin's tip of the branch, read from origin, which refuses
+	// when the branch moved: regateCIRecheck), and reads again under the
+	// lock, which records, refuses, or finds them not done again, or still
+	// not done after such a head (RegateOutcomeChecksPending, with no more
+	// wait); another Regate's pass of HEAD recorded meanwhile ends it
+	// RegateOutcomeUpToDate. A value below 0 or above maxMergeWaitChecks
+	// (MergeWaitChecksRefusal), and one above 0 with local checks, which run
+	// the scripts and have no checks to wait for, are refused before anything
+	// is done.
 	WaitChecks time.Duration
 	// waitTest replaces the wait's interval, clock, and sleep in a test.
 	waitTest mergeWaitTest
@@ -365,8 +371,10 @@ type RegateResult struct {
 	// Head yet, or moved while its checks were read, a check is pending, also
 	// with others failed, or gh reported no checks), for a `CHECKS: pending
 	// (<why>)` line, and, once RegateParams.WaitChecks ran out, or when the
-	// wait's read with regate.lock taken again found them not done again, how
-	// long Regate waited. Nothing was recorded; ChecksNext is the next step.
+	// wait's read with regate.lock taken again found them not done again, or
+	// still not done after the wait stopped at a PR's head other than HEAD
+	// with origin's tip still HEAD, how long Regate waited and why it
+	// stopped. Nothing was recorded; ChecksNext is the next step.
 	ChecksPending, ChecksNext string
 	// FailedChecks are the checks of a recorded gate_ci_failed that ended
 	// and are not pass or skipping, each as `<workflow> / <name> (<bucket>,

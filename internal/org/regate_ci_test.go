@@ -1956,6 +1956,118 @@ func TestRegateCI_WaitChecksPendingAgainUnderTheLock(t *testing.T) {
 	fx.assertNothingWritten(t, manifest)
 }
 
+// TestRegateCI_WaitChecksStopsOnceThePRsHeadShowsTheBranchMoved covers the
+// wait's reads after a sleep that find PR #7's head not HEAD (D5): on the
+// merge path, a head still at the one the merge commit was made on, which
+// GitHub shows until it has updated the PR to the push, keeps the wait
+// going; a head at another commit, as when someone pushed to origin's
+// feat/auth, and on the gate-only path any head other than HEAD, one that
+// moved while the checks were read included, stops the wait at that read,
+// with no sleep after it, and the single retake of regate.lock reads origin's
+// tip from origin and refuses with its new tip, recording nothing. With
+// origin's tip still HEAD (GitHub has not updated the PR yet), the read under
+// the lock ends the wait as RegateOutcomeChecksPending, saying why it
+// stopped. The read-only wait of self-review L3 slept on until the checks were
+// done or the limit.
+func TestRegateCI_WaitChecksStopsOnceThePRsHeadShowsTheBranchMoved(t *testing.T) {
+	const found = "org: regate: after it waited for the checks of PR #7, regate found origin's feat/auth at "
+	refused := rcWaitEnd("1m0s", "it was refused, so nothing was recorded")
+	t.Run("merge path: the head the merge commit was made on, then a push", func(t *testing.T) {
+		fx := newRCWaitFixture(t, time.Hour)
+		pre := fx.head
+		tip := fx.pushToOrigin(t, "main")
+		var newer string
+		fx.onSleep = func(n int) {
+			if n == 2 {
+				newer = fx.pushToOrigin(t, "feat/auth")
+				fx.reply(mxPRView, rcPRHead(newer))
+			}
+		}
+		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+		res, err := fx.run()
+		merge := fx.worktreeHead(t)
+		want := RegateResult{Refused: found + newer + ", no longer HEAD " + merge + ", so nothing was recorded: " + fx.rcCheckOrigin() +
+			"; the merge commit " + merge + " was pushed to origin's feat/auth and stays there", OrgID: "auth", Worktree: fx.worktree,
+			Branch: "feat/auth", Head: merge, Base: tip, BaseRef: "refs/remotes/origin/main", Merge: merge, PreMergeHead: pre, Pushed: true,
+			PR: 7}
+		if err != nil || !reflect.DeepEqual(res, want) {
+			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+		}
+		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView, mxPRView, mxPRView})
+		fx.assertReads(t, "L"+"."+".")
+		fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcHeadNotPushed(pre, merge), "1h0m0s"),
+			refused})
+		fx.assertNothingWritten(t, manifest)
+	})
+	t.Run("gate-only: a push while the checks are pending", func(t *testing.T) {
+		fx := newRCWaitFixture(t, time.Hour)
+		fx.exec.replies[mxPRChecks] = rcPending
+		var newer string
+		fx.onSleep = func(n int) {
+			if n == 2 {
+				newer = fx.pushToOrigin(t, "feat/auth")
+				fx.reply(mxPRView, rcPRHead(newer))
+			}
+		}
+		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+		res, err := fx.run()
+		want := RegateResult{Refused: found + newer + ", no longer HEAD " + fx.head + ", so nothing was recorded: " + fx.rcCheckOrigin(),
+			OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head, Base: fx.tip, BaseRef: "refs/remotes/origin/main", PR: 7}
+		if err != nil || !reflect.DeepEqual(res, want) {
+			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+		}
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, rcPendingRead, []string{mxPRView}))
+		fx.assertReads(t, "LL"+".."+".")
+		fx.assertWaited(t, []time.Duration{30 * time.Second, 30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"), refused})
+		fx.assertNothingWritten(t, manifest)
+	})
+	t.Run("gate-only: a push while the checks were read", func(t *testing.T) {
+		fx := newRCWaitFixture(t, time.Hour)
+		fx.exec.replies[mxPRChecks] = rcPending
+		fx.onSleep = func(int) { fx.reply(mxPRChecks, mgReply{out: mxChecks(mxPass("verify"))}) }
+		var newer string
+		fx.afterCall = func(n int) {
+			if n == 5 { // gh pr checks of the read after the sleep, which passed
+				newer = fx.pushToOrigin(t, "feat/auth")
+				fx.reply(mxPRView, rcPRHead(newer))
+			}
+		}
+		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+		res, err := fx.run()
+		want := RegateResult{Refused: found + newer + ", no longer HEAD " + fx.head + ", so nothing was recorded: " + fx.rcCheckOrigin(),
+			OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head, Base: fx.tip, BaseRef: "refs/remotes/origin/main", PR: 7}
+		if err != nil || !reflect.DeepEqual(res, want) {
+			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+		}
+		fx.assertKeys(t, slices.Concat(rcChecksKeys, rcDoneRead))
+		fx.assertReads(t, "LL"+"...")
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcPendingWhy, "1h0m0s"),
+			rcWaitEnd("30s", "it was refused, so nothing was recorded")})
+		fx.assertNothingWritten(t, manifest)
+	})
+	t.Run("gate-only: GitHub has not updated the PR yet", func(t *testing.T) {
+		fx := newRCWaitFixture(t, time.Hour)
+		other := strings.Repeat("e", 40)
+		fx.exec.replies[mxPRView] = rcPRHead(other)
+		manifest := fileOrAbsent(t, fx.o.Manifest.Path())
+		res, err := fx.run()
+		const stopped = "the PR's head was a commit other than HEAD, as it is when origin's feat/auth moved, but origin's feat/auth was " +
+			"still HEAD when it read it with regate.lock taken again, and the checks were not done then"
+		want := RegateResult{Outcome: RegateOutcomeChecksPending, OrgID: "auth", Worktree: fx.worktree, Branch: "feat/auth", Head: fx.head,
+			Base: fx.tip, BaseRef: "refs/remotes/origin/main", PR: 7, ChecksNext: rcNext,
+			ChecksPending: rcHeadNotYet(other, fx.head) + "; ralph org regate waited 30s for the checks of PR #7 (--wait-checks 1h0m0s), " +
+				"and it stopped once " + stopped}
+		if err != nil || !reflect.DeepEqual(res, want) {
+			t.Fatalf("regate = %#v, %v\nwant     %#v", res, err, want)
+		}
+		fx.assertKeys(t, []string{mxGetURL, mxPRList, mxPRView, mxPRView, mxPRView})
+		fx.assertReads(t, "L"+"."+"L")
+		fx.assertWaited(t, []time.Duration{30 * time.Second}, []string{rcWaitStart(rcHeadNotYet(other, fx.head), "1h0m0s"),
+			rcWaitEnd("30s", stopped+", so nothing was recorded")})
+		fx.assertNothingWritten(t, manifest)
+	})
+}
+
 // TestRegateCI_WaitChecksIsCheckedBeforeAnythingIsDone covers the validation
 // of RegateParams.WaitChecks: below 0 or above 6 h, the range of ralph org
 // merge --wait-checks, and above 0 with local checks, which run the gate
