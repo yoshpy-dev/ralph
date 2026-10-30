@@ -147,6 +147,8 @@
   - cycle 2 の verify(b0845cd3、pass、LOW 1 は仕様 FR-4 の注の古い書き方)、test(147e84bc、pass、`run-test.sh` rc 0、変異 21 個がすべて落ちる)、sync-docs(822acf62、仕様 FR-4 の注を直した)
   - cross-review cycle 2(triage は 308409a7、HEAD 822acf62): codex の所見 1 件(P2)を ACTION_REQUIRED にした。director が書く文書だけの機能の予約に、follow-up の文書の文を固定するテストが入らず、文書の org が gate を通れない。上限 2 に届いたので、ユーザーの決めどおり上限を 3 に上げて回し直す(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`、`cycle-count.json` は 2 のまま)
   - F7 44694f5b(cross-review cycle 2 #1): `/director` skill の手順 6 に、案を見せる前に follow-up の文書を読むテストや文を固定するテストと fixture を探して `- Reserve:` に入れ、足したものと理由を人に言う 2 文を足した(この repo のテストの名前は書かない。否定の検査で固定)。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`・`run-static-verify.sh` が通過、新しい固定は前の版の 4 つの写しすべてで落ちる。機械的な確かめは 5 項目とも clean。計画の D4 に同じことを書き、digest を取り直して承認を付け直した(220fa1f3994f → 94dc29701d29、自動承認。図解は予約の中身を描いていないので変えない)
+  - self-review cycle 3(report は eea3eb84、HEAD ebc2b64a): CRITICAL・HIGH・MEDIUM は 0、LOW 1、Merge yes。C2-1・C2-2・cross-review cycle 2 の P2 は直った。C3-1(F7 の「一覧のファイルを読むか、…テストと fixture を探し」は「文書を読む、またはテストを探す」とも読める)は F8 で直す。仕様 FR-4 の注に予約のテストを足すことは cycle 3 の sync-docs に渡す
+  - F8 b6a8060a(inline、C3-1): `/director` skill の 4 つの写しの文を「一覧のファイルを読むテストと、その文を固定するテストと fixture を探し」にし、テストの固定を合わせた(5 ファイル、各 1 行。写しは `sync-skills.sh` で作った)。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check` が通過。機械的な確かめは 5 項目とも clean
   - 2026-10-30: 計画の Progress を書く途中でディスクが満杯(Data ボリュームの空き 944MiB、ENOSPC)になった。Go の build cache(38G)のうち 24 時間使われていない項目(26.4GB)を消し、空きは 30GiB に戻った。ほかのセッションの一時ファイル(stoic-app の 22G)には触れていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
