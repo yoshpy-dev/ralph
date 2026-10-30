@@ -193,4 +193,5 @@ PR は `Refs #276` です。3 本目(B)が標準フローの値とスクリプ�
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
+- [x] Sync-docs report created — `docs/reports/sync-docs-2026-10-30-org-state-dir-local.md`(run 開始時の HEAD は 4045df27)。tech-debt は、Trigger に当たった 15 行に持ち越しの注(verify の V1 は 14 行、192 行を足した)、186 行の (c) F-7 を閉じ、148・170・192 行の env の記述と 188・198 行の注を直し、新しい 4 行を足した。README の `config get` と `status` の行、AGENTS.md の `internal/config/` の行も直した。AC の checkbox と docs/specs は触っていない。digest は前後で `1ea27c42968f`。
 - [ ] PR created
