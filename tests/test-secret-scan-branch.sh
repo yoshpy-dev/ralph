@@ -6,10 +6,17 @@
 # a whole secret-looking literal on one source line): this file's own
 # history is read by the same branch-history scan it tests.
 #
-# Every invocation below explicitly unsets GITHUB_BASE_REF, RALPH_XREVIEW_BASE,
-# and RALPH_SECRET_ALLOWLIST before running: this suite's own CI run sets
+# Every invocation below explicitly unsets GITHUB_BASE_REF and
+# RALPH_SECRET_ALLOWLIST before running: this suite's own CI run sets
 # GITHUB_BASE_REF for real, and a leaked value would silently pick the wrong
 # base branch or allowlist for these ad hoc test repos.
+#
+# A fixture chooses its base with [standard].base_branch, which
+# detect_base_branch reads with `ralph config get` through the fixture's own
+# scripts/ralph-config.sh: run_with_base_branch puts a copy there for one run
+# and a stand-in ralph (tests/lib/fake-ralph.sh) first on PATH. Every other
+# run finds no scripts/ralph-config.sh in the fixture, so no ralph is asked
+# and the base is the automatic one.
 #
 # Hermeticity: HOME/GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM are isolated to a
 # throwaway dir (same pattern as tests/test-terraform-gitignore.sh), because
@@ -54,7 +61,7 @@ export HOME GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_TERMINAL
 unset XDG_CONFIG_HOME RALPH_SECRET_SCAN_ATTR_SOURCE GIT_ATTR_SOURCE
 
 # run_bin <binary> <cwd> [args...] -- runs <binary> from <cwd> with a clean
-# slate for the three env vars this script reads. Captures stdout/stderr
+# slate for the two env vars this script reads. Captures stdout/stderr
 # into out_file/err_file and the exit code into run_rc.
 run_bin() {
   _bin="$1"
@@ -63,7 +70,7 @@ run_bin() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
     "$_bin" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
@@ -82,7 +89,7 @@ run_outside() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
     GIT_CEILING_DIRECTORIES="$(dirname "$_cwd")" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
@@ -96,25 +103,47 @@ run_with_github_base_ref() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    unset RALPH_SECRET_ALLOWLIST
     GITHUB_BASE_REF="$_base" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
   set -e
 }
 
-run_with_xreview_base() {
-  _cwd="$1"
+# The stand-in ralph that answers `ralph config get standard.base_branch`
+# for run_with_base_branch and the cases that set its answer themselves.
+# shellcheck source=lib/fake-ralph.sh
+. "$PROJECT_ROOT/tests/lib/fake-ralph.sh"
+fake_bin="$workdir/fake-bin"
+fake_ralph_install "$fake_bin"
+
+# with_ralph_config <repo> / without_ralph_config <repo> -- put a copy of
+# scripts/ralph-config.sh into the fixture's root, untracked, so
+# detect_base_branch asks ralph for [standard].base_branch there, and take
+# it away again.
+with_ralph_config() {
+  mkdir -p "$1/scripts"
+  cp "$PROJECT_ROOT/scripts/ralph-config.sh" "$1/scripts/ralph-config.sh"
+}
+
+without_ralph_config() {
+  rm -f "$1/scripts/ralph-config.sh"
+  rmdir "$1/scripts" 2>/dev/null || true
+}
+
+# run_with_base_branch <repo> <base> [args...] -- runs the script from the
+# fixture's root <repo> with [standard].base_branch set to <base>: the
+# stand-in ralph first on PATH answers it, through the fixture's
+# scripts/ralph-config.sh, for this run only.
+run_with_base_branch() {
+  _repo="$1"
   _base="$2"
   shift 2
-  set +e
-  (
-    cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
-    RALPH_XREVIEW_BASE="$_base" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
-  )
-  run_rc=$?
-  set -e
+  fake_ralph_reset "$fake_bin"
+  fake_ralph_value "$fake_bin" standard.base_branch "$_base"
+  with_ralph_config "$_repo"
+  run_with_env "$_repo" "PATH=$fake_bin:$PATH" "$@"
+  without_ralph_config "$_repo"
 }
 
 run_with_allowlist_override() {
@@ -124,7 +153,7 @@ run_with_allowlist_override() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE
+    unset GITHUB_BASE_REF
     RALPH_SECRET_ALLOWLIST="$_allow" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
@@ -217,7 +246,7 @@ run_with_env() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
     env "$_assign" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
@@ -235,7 +264,7 @@ run_with_two_env() {
   set +e
   (
     cd "$_cwd" || exit 127
-    unset GITHUB_BASE_REF RALPH_XREVIEW_BASE RALPH_SECRET_ALLOWLIST
+    unset GITHUB_BASE_REF RALPH_SECRET_ALLOWLIST
     env "$_assign1" "$_assign2" "$SCANNER_BRANCH" "$@" >"$out_file" 2>"$err_file"
   )
   run_rc=$?
@@ -523,9 +552,9 @@ test_strict_closes_base_override_bypass() {
   # Pointing the base at the CURRENT branch's own name makes
   # "HEAD is the base branch" fire even though feature carries an unpushed
   # commit with a fixture: this used to exit 0 under --strict too.
-  run_with_xreview_base "$repo" feature
+  run_with_base_branch "$repo" feature
   assert_exit "base-override bypass: default mode still exits 0" 0
-  run_with_xreview_base "$repo" feature --strict
+  run_with_base_branch "$repo" feature --strict
   assert_exit "base-override bypass: strict mode now exits 3" 3
   assert_stderr_contains "base-override bypass: reason is HEAD is the base branch" "HEAD is the base branch"
 }
@@ -612,12 +641,10 @@ test_origin_preference_and_fallback() {
   assert_scanned_clean "origin preference: report names origin/main" "origin/main"
 }
 
-# ---------------------------------------------------------------------------
-# GITHUB_BASE_REF and RALPH_XREVIEW_BASE both select an alternate base, and
-# the report line names the base actually used.
-# ---------------------------------------------------------------------------
-test_base_override_reporting() {
-  repo="$workdir/base-override"
+# base_override_repo <repo> -- a fixture with clean commits on main, then
+# develop, then feature (HEAD), so main and develop are both possible bases.
+base_override_repo() {
+  repo="$1"
   git_repo "$repo"
   (
     cd "$repo"
@@ -636,6 +663,15 @@ test_base_override_reporting() {
     git add README.md
     git commit -q -m 'feature change'
   )
+}
+
+# ---------------------------------------------------------------------------
+# GITHUB_BASE_REF and [standard].base_branch both select an alternate base,
+# and the report line names the base actually used. RALPH_XREVIEW_BASE,
+# which earlier versions read, selects nothing.
+# ---------------------------------------------------------------------------
+test_base_override_reporting() {
+  base_override_repo "$workdir/base-override"
   run "$repo"
   assert_exit "default base resolution exits 0" 0
   assert_stderr_contains "default base resolution uses main" "against main"
@@ -644,9 +680,73 @@ test_base_override_reporting() {
   assert_exit "GITHUB_BASE_REF=develop exits 0" 0
   assert_stderr_contains "GITHUB_BASE_REF selects develop" "against develop"
 
-  run_with_xreview_base "$repo" develop
-  assert_exit "RALPH_XREVIEW_BASE=develop exits 0" 0
-  assert_stderr_contains "RALPH_XREVIEW_BASE selects develop" "against develop"
+  run_with_base_branch "$repo" develop
+  assert_exit "[standard].base_branch=develop exits 0" 0
+  assert_stderr_contains "[standard].base_branch selects develop" "against develop"
+
+  # The variable the script read before, with the setting empty: still main.
+  fake_ralph_reset "$fake_bin"
+  fake_ralph_value "$fake_bin" standard.base_branch ""
+  with_ralph_config "$repo"
+  run_with_two_env "$repo" "PATH=$fake_bin:$PATH" "RALPH_XREVIEW_BASE=develop"
+  without_ralph_config "$repo"
+  assert_exit "RALPH_XREVIEW_BASE=develop with an empty setting exits 0" 0
+  assert_scanned_clean "RALPH_XREVIEW_BASE=develop changes nothing: the base is main" "main"
+}
+
+# assert_fake_ralph_calls <desc> <want> -- the stand-in's log since the last
+# reset equals <want> ("" for no call).
+assert_fake_ralph_calls() {
+  _desc="$1"
+  _want="$2"
+  _got="$(fake_ralph_calls "$fake_bin")"
+  if [ "$_got" = "$_want" ]; then
+    ok "$_desc"
+  else
+    not_ok "$_desc (ralph calls: '$_got', want '$_want')"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# [standard].base_branch that cannot be read: CI's GITHUB_BASE_REF never
+# asks ralph; a ralph that fails on the settings stops the scan ("cannot
+# scan": exit 3 under --strict) instead of scanning against the automatic
+# base; a ralph older than `config get` gives the automatic base silently.
+# ---------------------------------------------------------------------------
+test_base_branch_setting_errors() {
+  base_override_repo "$workdir/base-branch-setting"
+  root_call="$(cd "$repo" && pwd -P)|config get standard.base_branch"
+  fake_ralph_reset "$fake_bin"
+  fake_ralph_fail "$fake_bin" standard.base_branch 3 "config get: ralph.local.toml: plan_visual.browser: not an absolute path"
+  with_ralph_config "$repo"
+
+  run_with_two_env "$repo" "PATH=$fake_bin:$PATH" "GITHUB_BASE_REF=develop" --strict
+  assert_exit "GITHUB_BASE_REF with a failing ralph: --strict exits 0" 0
+  assert_scanned_clean "GITHUB_BASE_REF with a failing ralph: scans against develop" "develop"
+  assert_fake_ralph_calls "GITHUB_BASE_REF: ralph is not run" ""
+
+  run_with_env "$repo" "PATH=$fake_bin:$PATH" --strict
+  assert_exit "settings error: --strict exits 3" 3
+  assert_stderr_contains "settings error: the reason names ralph.local.toml" "secret-scan-branch: cannot scan, the base branch could not be read from ralph.local.toml"
+  assert_stderr_contains "settings error: ralph's exit is reported" "ralph config get standard.base_branch exited 3"
+  assert_stderr_not_contains "settings error: no scan against the automatic base" "against main"
+  assert_fake_ralph_calls "settings error: ralph is asked once, in the root" "$root_call"
+
+  fake_ralph_clear_calls "$fake_bin"
+  run_with_env "$repo" "PATH=$fake_bin:$PATH"
+  assert_exit "settings error: default mode exits 0" 0
+  assert_stderr_contains "settings error: default mode reports cannot scan" "secret-scan-branch: cannot scan, the base branch could not be read from ralph.local.toml"
+  assert_stderr_not_contains "settings error: default mode does not scan against main" "against main"
+
+  fake_ralph_reset "$fake_bin"
+  fake_ralph_old "$fake_bin"
+  run_with_env "$repo" "PATH=$fake_bin:$PATH" --strict
+  assert_exit "older ralph: --strict exits 0" 0
+  assert_scanned_clean "older ralph: scans against the automatic base" "main"
+  assert_stderr_not_contains "older ralph: no note of ralph-config.sh" "ralph-config.sh"
+  assert_fake_ralph_calls "older ralph: asked once, in the root" "$root_call"
+
+  without_ralph_config "$repo"
 }
 
 # ---------------------------------------------------------------------------
@@ -671,7 +771,7 @@ test_base_name_with_slash() {
     git add leaked.txt
     git commit -q -m 'add leaked token'
   )
-  run_with_xreview_base "$repo" "release/1.0"
+  run_with_base_branch "$repo" "release/1.0"
   assert_exit "slash-containing local base: still detects" 1
   assert_stderr_contains "slash-containing local base: reports the full name" "against release/1.0"
 
@@ -679,7 +779,7 @@ test_base_name_with_slash() {
     cd "$repo"
     git update-ref "refs/remotes/origin/release/1.0" "release/1.0"
   )
-  run_with_xreview_base "$repo" "release/1.0"
+  run_with_base_branch "$repo" "release/1.0"
   assert_exit "slash-containing origin base: still detects" 1
   assert_stderr_contains "slash-containing origin base: reports the full name" "against origin/release/1.0"
 }
@@ -720,7 +820,7 @@ test_ac3b_tag_shadows_base_branch() {
     git add README.md
     git commit -q -m 'advance feature (head)'
   )
-  run_with_xreview_base "$repo" main
+  run_with_base_branch "$repo" main
   assert_exit "AC-3b tag shadow: finding still detected" 1
   assert_stderr_contains "AC-3b tag shadow: reports findings" "findings"
 }
@@ -763,7 +863,7 @@ test_ac3b_local_branch_shadows_remote_tracking_ref() {
     # bound) would exclude the leak and cover only the later commit.
     git branch origin/main "$leak_sha"
   )
-  run_with_xreview_base "$repo" main
+  run_with_base_branch "$repo" main
   assert_exit "AC-3b remote shadow: finding still detected" 1
   assert_stderr_contains "AC-3b remote shadow: reports findings" "findings"
 }
@@ -785,10 +885,10 @@ test_cannot_scan_no_base_ref() {
     git add README.md
     git commit -q -m change
   )
-  run_with_xreview_base "$repo" does-not-exist-anywhere
+  run_with_base_branch "$repo" does-not-exist-anywhere
   assert_exit "no base ref: default mode exits 0" 0
   assert_stderr_contains "no base ref: reports cannot scan" "cannot scan"
-  run_with_xreview_base "$repo" does-not-exist-anywhere --strict
+  run_with_base_branch "$repo" does-not-exist-anywhere --strict
   assert_exit "no base ref: strict mode exits 3" 3
 }
 
@@ -2071,6 +2171,7 @@ test_strict_closes_base_override_bypass
 test_strict_closes_local_base_fast_forward_bypass
 test_origin_preference_and_fallback
 test_base_override_reporting
+test_base_branch_setting_errors
 test_base_name_with_slash
 test_ac3b_tag_shadows_base_branch
 test_ac3b_local_branch_shadows_remote_tracking_ref
