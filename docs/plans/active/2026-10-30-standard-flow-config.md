@@ -455,6 +455,26 @@
       - `config.go:875`・`:927` と `config_test.go:419` の古い `PipelineConfig` の参照(前から)。
       - B2 の個人用の値のための README の `ralph.local.toml` の節(B2 で)。
   - S1〜S6 の実装はそろった。次は /self-review(cycle 1)。
+  - /self-review(review-276b1、3c165805): CRITICAL・HIGH・MEDIUM 0、LOW 5、`Merge: yes`。LOW の扱い:
+    - L1(doctor の「no longer reads」が upgrade 前のプロジェクトでは事実と違う)、L2(TASK の値の検証が config にしかない)、L4(有効な上限を読む手順が文だけ)、L5(leader に「`:` のあとの 2 語」と書いてあり、`:` を含むモデル名で読み違える)は、安く直せて実害があるので S7 で直した。
+    - L3(`ralph org start` で設定を 2 回読む)は直さない。start 1 回につき git が 1 回増えるだけで、ほかの org のコマンドと同じ読み方。
+  - S7 759550eb(impl-276b1-s7)
+    - L5: leader の文を「行の頭の `- reviewer の codex:`(claude)のあと括弧の前の 2 語」にし、モデルは `:` を含みうるので頭の文字列のあとから読む、と足した。テストの TASK と `advisoryReviewer` に `:` 入りのモデル名を使う。
+    - L4
+      - cross-review 1.d に `jq -r '.cap | select(type == "number" and . >= 1 and . == floor)' "$f"` を足した(空なら設定の値だけ)。
+      - 手順 9 に、表示に新しい `cap` がなければ回し直さずに止まる規則を足した。
+      - `defaults_sync_test.go` で固定した。
+    - L2
+      - `config.ValidateReviewer` を export した。
+      - `StartFeature` は `checkSpawnInput` の直後、watch gate より前に、埋めた値を検証して `refuse` する。文は `org: the leader's task copies the [reviewer] values into its shell commands: …`。
+      - テストで 5 通りの値が spawn の前に断られることを見る。
+    - L1: 4 行の `effect` に「`ralph upgrade` がプロジェクトの skill と `scripts/ralph-config.sh` を入れ替えるまでは、それらが読む」の 1 句を足した。
+    - 検証
+      - check-skill-sync・check-sync PASS、config ok、org `-run 'Leader|Prompt|Feature'` ok(247 秒)、cli `-run 'Retired|Doctor|OrgStart|Feature'` ok(119 秒)、golangci-lint 0 件。
+      - 変異 2 つは、どちらもテストが落とした。
+      - jq の 1 行は jq 1.7.1 で、cap なし → 空、3 → 3、"3" → 空、2.5 → 空。
+    - self-check は 5 項目とも clean。consult は 4 点とも「変更なし」(コミットのあと)。
+    - 範囲外(直さない): rules の文書(model-routing の「Where the values live」、post-implementation-pipeline)の「ralph no longer reads」。rules は skill と同じく `ralph upgrade` で一緒に入れ替わるので、文書と skill の版はずれない。ずれうるのは binary の doctor で、L1 はそれを直した。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
