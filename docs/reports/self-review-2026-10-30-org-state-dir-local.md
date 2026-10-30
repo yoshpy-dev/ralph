@@ -59,5 +59,36 @@
 
 ## Recommendation
 
-- Merge: yes(CRITICAL・HIGH・MEDIUM なし。LOW 9 件、うち 1 件は範囲外)
-- Follow-ups: L1 と L6 はそれぞれ数行で直る。L2 は文を固定しているテストの書き換えを伴う。L3・L4 は直すか register に 1 行。L8 は /sync-docs で引き取れる。
+- Merge: yes(S7 まで見た判定。CRITICAL・HIGH・MEDIUM なし。LOW 9 件のうち L1・L4・L6 は S7 で直り、残りは LOW 6 件、うち 1 件は範囲外。S7 で新しい所見はない)
+- Follow-ups: L1 と L6 はそれぞれ数行で直る。L2 は文を固定しているテストの書き換えを伴う。L3・L4 は直すか register に 1 行。L8 は /sync-docs で引き取れる。S7 の後の扱いは末尾の「S7 の見直し」を見る。
+
+## S7 の見直し(187eaf8d)
+
+- Date: 2026-10-30
+- Reviewer: reviewer サブエージェント(`/self-review`、cycle 1 の続き。cross-review の前なので cycle は 1 のまま)
+- Scope: `git diff 2f801336..187eaf8d`(9 ファイル、+113/-12)。本番のコードは `internal/config/config.go`、`internal/org/statedir.go`、`internal/cli/org_legacy_ledger.go`、`org_watch.go`、`status.go`。テストは `internal/config/local_test.go`、`internal/org/statedir_test.go`、`internal/cli/doctor_org_test.go`、`org_test.go`(注釈だけ)。記録のコミット 305e7b99 は計画の Progress に 2 行足しただけで、コードに触れていない。
+- 新しい所見: なし。
+
+### 直ったか
+
+| ID | 判定 | 根拠 |
+| --- | --- | --- |
+| L1 | 直った | 3 か所の並びが `flag/config/git-main-worktree/git-toplevel/cwd` になった(`org_watch.go:109`、`status.go:451`、`org_test.go:2915`)。`git grep 'flag/env'` の出現は 0 件。`orgLedgerAccess` の doc は `checkRetiredOrgStateDirEnv` の扱いも決めると書き、`orgLedgerReadOnly` は注意、`orgLedgerMutating` は拒否、とそれぞれに env の場合を足した(`org_legacy_ledger.go:17-40`)。 |
+| L4 | 直った(「using defaults」の食い違い) | `checkLocalOnlyKeys` が失敗すると `Default()` を返す(`config.go:731-733`)。案 (a) なので Unmarshal の後ろという順はそのままで、型の誤りと local-only のキーが両方あるときは、前と同じく型の誤りが先に返る。Load の error のあとも `cfg` を使う呼び出しは doctor だけ(`cli/config.go:82`、`cli/org.go:337`、`:632` は error で抜ける)なので、ほかの経路への影響はない。doc の追記は、この 1 つの経路のことだけを言っていて正しい。名前 `ralph.toml` と「parse error」という呼び方は残る。報告の推奨どおり A1 の L3 と一緒に扱う分(N5)。 |
+| L6 | 直った | config の段は `mustAbs(local)` を返す(`statedir.go:81`)。flag の段と同じ関数を通るので、`Abs` が失敗したときに値をそのまま返す扱いも 2 つの段でそろった。doc は相対の home を cwd から解くことを書き足した。サブテスト「a value under a relative home directory」が linked worktree から相対の `$HOME` で、cwd を基準にした絶対パスを期待している。 |
+
+### 確かめたこと
+
+- 3 本のテストの形。`TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults` は `RALPH_LOCAL_CONFIG` を空と `off` の両方で回し、ralph.toml のほかの値(`max_seats`、`ack_minutes`)と個人用のファイルの値(`max_orgs`)のどちらも返らないことを `reflect.DeepEqual(cfg, Default())` で見ている。`TestRunDoctorOpts_LocalOnlyKeyInRalphTomlUsesDefaults` は同じ ralph.toml に `agmsg_home` を置き、doctor の agmsg の検査が既定の home を見て、ralph.toml の値を見ないことを、肯定と否定の両方で確かめている。どれも直しを戻すと落ちる形になっている(計画の記録では、L4・L6 を戻した変異 2 つでテストが落ちた)。
+- テストの書き方は周りに合っている。`Version = "0.1.0-test"` と `setupTestEmbedFS` は `doctor_org_test.go` のほかの 3 本と同じ組み立てで、`setAgmsgHomeOverride(t, "")` は `t.Cleanup` で戻る既存の helper。`t.Setenv("PATH", binDir)` と `t.Setenv("HOME", …)` は test の終わりに戻る。
+- 確かめていない: テストと静的検査は走らせていない(skill の規則どおり)。
+
+### Notes(所見にしないもの)
+
+- N5 新しい doctor のテストは、方針で断る error に付く「parse error」の呼び方を want の文字列に入れて固定している(`doctor_org_test.go` の `"⚠ ralph.toml: warn — parse error: " + tomlPath + ...`)。A1 の L3(doctor の枠の名前と文)を直すときは、このテストの want も一緒に変わる。いまの文を正しく写しているので、所見にはしない。
+- N6 Load のほかのエラーの道(Unmarshal、pool キー、個人用のファイル、validate)は、途中まで値の入った `cfg` をこれまでどおり返し、doctor はそこでも「using defaults」と出す。計画の記録(S7 の範囲外)に書かれており、A1 の L3 と同じ論点で、この PR が増やしたものではない。
+- N7 `statedir.go` の 2 段目の doc は、書き足しのあとで折り返しが不ぞろいになった(`... the file is not read. A` / `file that cannot be read or parsed, or whose` / `state_dir is ...`)。読むのに支障はない。
+
+### 残る所見
+
+L2・L3・L5・L7・L8・L9(すべて LOW、L9 は範囲外)。扱いは計画の Progress(305e7b99)にある。L2・L5・L7 は残す。L3・L8 は /sync-docs で tech-debt に入れる。L9 は tech-debt と PR の Known gaps に入れる。
