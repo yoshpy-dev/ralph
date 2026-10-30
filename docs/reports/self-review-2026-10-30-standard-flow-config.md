@@ -67,7 +67,7 @@
 
 ## Recommendation
 
-- Merge: yes(S7 759550eb の見直しのあとも CRITICAL・HIGH・MEDIUM はない。L1・L2・L4・L5 は直り、残る L3 は直さないと決めた LOW)
+- Merge: yes(S9 e430ac4c までの見直しで CRITICAL・HIGH・MEDIUM はない。S7 で L1・L2・L4・L5 が直り、S8・S9 に新しい所見はない。残る L3 は直さないと決めた LOW)
 - Follow-ups:
   - L1〜L5 は任意。直すなら、L1 と L5 は文だけの変更で、L5 はテストの文も一緒に直す。(S7 の見直しの節を参照。L3 だけが残る)
   - /sync-docs に回すもの(計画の S6 の一覧と同じ): `docs/tech-debt/README.md:161` の (b) への 1 文、`ralph org start --help` の `[reviewer]` の読む元。
@@ -89,3 +89,24 @@
   - doctor の文は「ralph no longer reads it, once `ralph upgrade` has replaced …」と、binary が読まなくなったとも読める並びになる。続く句が誰が読むかを言うので、誤解の余地は小さい。
   - `ValidateReviewer` は、空を `featureReviewer` が既定値で埋めたあとに走るので、空の値は断られない。これは S4 で決めた振る舞いのままで、Load は空を断る。
 - 確かめていないこと: テストと静的検査は走らせていない(依頼と skill の規則どおり)。S7 の検証結果は計画の Progress の記録による。
+
+## S8・S9 の見直し
+
+- 見た差分: `git diff 6848f496..e430ac4c`(4 ファイル、+196/−26。`internal/cli/config.go`、`internal/cli/org.go` と、それぞれのテスト)。HEAD 505f4f5b は計画の Progress だけを足す記録のコミット。
+- 新しい所見: なし。L3 は LOW 1 件として残る。
+
+### S8(745a5407): help の文
+
+- `config get --help`(`internal/cli/config.go:77-83`): 終了コードの案内は、`ralph config get` を自分で打つ skill と座席向けだと断ったうえで、`ralph_setting` が止まらずに既定値で続けること、黙る場合(ralph が PATH にない、`config get` のない古い ralph)、1 行知らせる場合(exit 2・3 を含むそれ以外)を書いた。`scripts/ralph-config.sh` の頭の注釈と分岐が合っていて、verify の V1 の食い違いは解けた。
+- `org start --help`(`internal/cli/org.go:1004-1009`): `[reviewer]` の読む元を、承認方式と同じ「the same ralph.toml as max_orgs and max_total_seats below」と書き、TASK の 2 行と、leader が自分では読まないことを書いた。S9 のコードと合っている。
+
+### S9(e430ac4c): `[reviewer]` の読む元
+
+- `resolveOrgStartReviewer`(`internal/cli/org.go:665-678`)は、`loadMainWorktreeConfig` の `ok` が真なら主 worktree の `ralph.toml` の Reviewer を使う。偽なら `resolveConfig`(`--config` か `./ralph.toml`)の Reviewer を使う。`ok` を決める条件(`--config` がなく、台帳が主 worktree のもの)は `withMainWorktreeOrgLimits` が承認方式に使う関数と同じなので、承認方式と reviewer の値は同じファイルから来る。
+- `loadMainWorktreeOrgConfig`(`:324-327`)は `loadMainWorktreeConfig`(`:337-351`)の包みになり、4 つの呼び出し側への返り値は前と同じ(エラーのときは空の `OrgConfig` とパス)。`ok` と `path` の意味は、包まれる側の doc にまとめた。
+- エラーの文 `org: load [reviewer] from the main worktree's <path>: …` は、隣の `withMainWorktreeOrgLimits` の文(`org: load max_orgs, max_total_seats and [org.approval].mode from the main worktree's …`)と同じ形をしている。主 worktree の `ralph.toml` が読めない場合は、先に `newOrgSpawnRuntimeAt`(`:159`)がエラーで止まるので、この文が出るのは 2 回の読み込みのあいだにファイルが変わったときだけ。
+- 依頼の 4 点目(読む元の違い)の Notes に書いた「サブディレクトリから打つと既定値になる」は、この直しで解けた。linked worktree の `ralph.toml` も、`--config` がなければ値を決めない。
+- 見たが所見にしなかったこと
+  - 1 回の start で主 worktree の `ralph.toml` を 2 回読む(承認方式と上限に 1 回、reviewer に 1 回)。回数は S9 の前と同じで、L3 のまま。どちらも同じファイルを読むようになったので、直すなら `loadMainWorktreeConfig` を 1 回呼んで両方に渡せる。2 回のあいだにファイルが変わると、承認方式と reviewer が別の版から来るが、1 回の start の途中で設定を書き換えた場合に限られるので、害は小さい。
+  - org skill の「start が読んだ設定(`--config`、省略時は cwd の `./ralph.toml`…)」(4 つの写しの 711〜713 行)が、S9 のあとのコードと合わなくなった。計画が /sync-docs に回す一覧に入っている(Progress の「/sync-docs に回すもの(S8・S9 まで)」)ので、ここでは所見にしない。
+- 確かめていないこと: テストと静的検査は走らせていない。S8・S9 の検証結果は計画の Progress の記録による。
