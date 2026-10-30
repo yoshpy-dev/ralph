@@ -39,6 +39,17 @@ const (
 	syncDocsUndoneHeading  = "## 戻した変更"
 )
 
+// The condition of the all-or-nothing undo after the doc-maintainer and the
+// reason it names a frozen file, the same words in step 9 of the leader
+// template and in item 1 of the /org skill's ### org の終わり方 (plan
+// 2026-10-30-leader-sync-docs, D2 and D2c): a change to a frozen file undoes
+// every change but the report even inside the reservation, so the redo's
+// sync-docs cannot commit the change that failed the gate again.
+const (
+	syncDocsUndoCondition    = "report のほかに、予約の外のパスか、凍らせたファイルか、機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻す"
+	syncDocsFrozenUndoReason = "凍らせたファイルが変わったときも戻すのは、予約の中でもその変更がコミットに入ると、sync-docs の変更で落ちた gate が同じ理由でまた落ちうるため"
+)
+
 // syncDocsNoReportSkip is the start of the sentence, the same in step 9 of
 // the leader template and in item 1 of the /org skill's ### org の終わり方,
 // that takes a failed call and a doc-maintainer that ended without the
@@ -151,28 +162,34 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimit
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone pins
 // the leader's check of AC2 and AC8 of plan 2026-10-30-leader-sync-docs (D2):
 // after the doc-maintainer, the leader reads git status --porcelain, and when a
-// path outside the reservation or the feature plan changed, it undoes every
-// sync-docs change but the report, never only the outside half (a set of
-// copies half changed fails the gate's copy check, which the implementer
-// cannot fix outside the reservation). The undo restores tracked files and
-// staged new files from HEAD in the index and the work tree (a plain
-// git restore leaves a staged change in place for the commit) and deletes
-// untracked files. What is left goes in one commit with the report under the
-// fixed message the redo's git log --grep looks for, not an example of one;
-// the report alone when nothing else changed, and nothing when nothing
-// changed. The plan is undone because step 6's approval check refuses a TASK
-// after the plan changed, which step 6 says.
+// path outside the reservation, a frozen file (one of the union of the earlier
+// sync-docs commits' files handed to the doc-maintainer, even inside the
+// reservation), or the feature plan changed, it undoes every sync-docs change
+// but the report, never only the outside half (a set of copies half changed
+// fails the gate's copy check, which the implementer cannot fix outside the
+// reservation). The undo restores tracked files and staged new files from
+// HEAD in the index and the work tree (a plain git restore leaves a staged
+// change in place for the commit) and deletes untracked files. What is left
+// goes in one commit with the report under the fixed message the redo's
+// git log --grep looks for, not an example of one; the report alone when
+// nothing else changed, and nothing when nothing changed. The plan is undone
+// because step 6's approval check refuses a TASK after the plan changed,
+// which step 6 says; a frozen file is, because its change in the commit
+// would bring back the gate failure the freeze is there to stop (self-review
+// M1). With three conditions the sentence that keeps the changes says どれも,
+// where it said どちらも for two.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone(t *testing.T) {
 	step9 := leaderFeatureOrgItem(t, step9Marker)
 	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
 		syncDocsCheck,
 		"(ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)",
-		"report のほかに、予約の外のパスか機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻す",
+		syncDocsUndoCondition,
 		"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し" +
 			"(ステージした新しいファイルは index からも作業ツリーからも消える)、未追跡のファイルは消す",
 		"予約の外の分だけを戻すと、写しの組の片方だけが変わったまま残って gate の写しの検査が落ち、予約の外を直せない implementer も直せないので、一部だけを戻すことはしない",
 		"計画を戻すのは、per-plan では承認のあとに計画が変わると implementer への TASK が断られるため(手順 6)",
-		"どちらもなければ変更はそのまま残す",
+		syncDocsFrozenUndoReason,
+		"どれもなければ変更はそのまま残す",
 		"残った変更と report を、決まったメッセージ " + syncDocsCommitMessage + " の 1 つのコミットにし" +
 			"(上の `git log --grep` はこのメッセージで探すので、言い方を変えない)、`git status --porcelain` が何も出さないことを確かめる",
 		"report のほかに変更がなければ、report だけで同じメッセージのコミットにする(report が前の回のコミットと同じで何も出なければ、コミットせずに手順 10 に進む)",
