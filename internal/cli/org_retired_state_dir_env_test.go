@@ -362,7 +362,8 @@ func TestOrgRetiredStateDirEnv_NamingTheLegacyLedgerRefusesStop(t *testing.T) {
 // retired variable set to a non-empty value, RALPH_ORG_AGMSG_HOME first,
 // and none for one that is empty or unset. The RALPH_ORG_STATE_DIR line
 // names the value, says ralph no longer reads it and that the verbs that
-// change the ledger are refused while it names another one, and says where
+// change the ledger are refused while neither --state-dir nor
+// [org].state_dir names the ledger and it names another one, and says where
 // the value goes now.
 func TestCheckRetiredEnv(t *testing.T) {
 	getenv := func(env map[string]string) func(string) string {
@@ -371,7 +372,8 @@ func TestCheckRetiredEnv(t *testing.T) {
 	stateDirRow := checkResult{
 		Name:   "RALPH_ORG_STATE_DIR",
 		Status: "warn",
-		Detail: `set to "/old ledger", but ralph no longer reads it, and while it names another directory than the ledger ralph finds by default, ` +
+		Detail: `set to "/old ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger ` +
+			"and the variable names another directory than the ledger ralph finds by default, " +
 			"the org verbs that change the ledger are refused; write the value in [org].state_dir of ralph.local.toml " +
 			"(next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, " +
 			"or pass --state-dir, and unset RALPH_ORG_STATE_DIR",
@@ -442,7 +444,7 @@ func TestRunDoctorOpts_RetiredOrgStateDirEnv(t *testing.T) {
 		if err != nil {
 			t.Fatalf("a RALPH_ORG_STATE_DIR warning must not fail doctor: %v\noutput:\n%s", err, out)
 		}
-		if want := `⚠ RALPH_ORG_STATE_DIR: warn — set to "/old ledger", but ralph no longer reads it, and while it names another directory`; !strings.Contains(out, want) {
+		if want := `⚠ RALPH_ORG_STATE_DIR: warn — set to "/old ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger`; !strings.Contains(out, want) {
 			t.Errorf("doctor output does not contain %q:\n%s", want, out)
 		}
 	})
