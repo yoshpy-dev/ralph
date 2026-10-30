@@ -796,6 +796,8 @@ func TestOrgRegate_Help(t *testing.T) {
 			"so --org-id is refused", "git merge --no-ff --no-edit -m 'Merge origin/<default branch> <12 hex> into <branch>'",
 			// Plan 2026-10-17-org-auto-merge, AC10: merge holds the same lock.
 			"First, regate checks that no other ralph org regate, merge, or cleanup runs on the ledger (one runs at a time; it waits up to 1 s for the lock)",
+			// Sync-docs: a ci regate's gate_ci_passed is up to date too.
+			"gate record is a pass of HEAD on that tip (a gate_passed, or a gate_ci_passed that a ci regate recorded), regate runs, records, and pushes nothing",
 			"It never rebases and never force-pushes", "with via=regate", "GATE: pass, MERGED:, HEAD:, BASE:, LOG: and PUSHED: and exits 0",
 			"After static_failed or test_failed it undoes its merge commit", "After head_moved or tree_changed it keeps it",
 			"(PUSH_ONLY:, HEAD:, BASE:, LOG: and PUSHED:, exit 0)", "An interrupt (SIGINT, SIGTERM, or SIGHUP)",

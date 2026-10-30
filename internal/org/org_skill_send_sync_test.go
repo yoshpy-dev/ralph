@@ -294,10 +294,12 @@ func TestOrgSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 // are, each list in the skill's order: the verb-table row of regate (the
 // pre-checks before every path, no script, the push before the record, the
 // two events with via=regate_ci, the pending outcome and its exit 6,
-// --wait-checks with regate.lock released, and exit 6 among the exit codes);
-// the subsection ### gate の記録 (the same record shape under event names of
-// their own, so that an older binary skips them after a revert); and the
-// subsection ### merge してよい順 (what ci_failed leaves on origin, the run
+// --wait-checks with regate.lock released, exit 6 among the exit codes, and
+// the ci wait as the exception to one regate at a time and to the refusal of
+// spawn and start); the verb-table rows of spawn and start (the same
+// exception); the subsection ### gate の記録 (the same record shape under
+// event names of their own, so that an older binary skips them after a
+// revert); and the subsection ### merge してよい順 (what ci_failed leaves on origin, the run
 // with --wait-checks and its duration for both values, exit 6 as neither a
 // refusal nor a failure, and the ci cases of exit 1).
 var orgSkillCIRegateRules = []struct {
@@ -306,6 +308,10 @@ var orgSkillCIRegateRules = []struct {
 	fragments []string
 }{
 	{"the verb-table row of regate", func(text string) string { return orgSkillVerbRow(text, "regate") }, []string{
+		// Sync-docs: the one-at-a-time rule has the ci wait as its exception,
+		// and a gate_ci_passed is up to date like a gate_passed.
+		"(台帳ごとに 1 つ。`ci` の regate が checks を待つ間を除く。ロックは 1 秒まで待つ)",
+		"その HEAD とその先頭の `gate_passed` か `gate_ci_passed` なら",
 		"ここまでは `[org.gate].regate_checks = \"local\"`(既定)の動き",
 		"fetch のあと、どの道よりも前に、origin が GitHub の repository を名指すこと、`gh` が PATH にあること、そのブランチの OPEN で" +
 			"既定のブランチ向きの PR が `merge` と同じ読み方で見つかることを確かめ、どれかが通らなければ何もせずに断る",
@@ -317,6 +323,15 @@ var orgSkillCIRegateRules = []struct {
 		"`--wait-checks <時間>`(`ci` のときだけ。既定 0 は 1 回だけ読む。上限 6h)を付けると、`regate.lock` を外して 30 秒ごとに" +
 			"読み直し、checks が終わるまで待つ",
 		"`ci` で checks が終わっていないときに 6",
+		"ただし `ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られず、" +
+			"待ちのあとにその org が走っていれば regate のほうが断る(ほかの org は止めない)",
+	}},
+	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
+		"`--dry-run` でない spawn は何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、" +
+			"ロックを外しているので断られない)",
+	}},
+	{"the verb-table row of start", func(text string) string { return orgSkillVerbRow(text, "start") }, []string{
+		"何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られない)",
 	}},
 	{"the subsection ### gate の記録", func(text string) string { return directorSkillSubsection(text, "### gate の記録") }, []string{
 		"同じ形の記録を別の event `gate_ci_passed` と `gate_ci_failed`(reason `ci_failed`)で、`via=regate_ci` を付けて書く",

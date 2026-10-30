@@ -214,4 +214,5 @@ gate の記録を選ぶ箇所(merge-order の収集 `mergeorder.go:458`、regate
 - [x] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
+- [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-29-regate-ci-checks.md`、cycle 1、run 開始時の HEAD は bcd143e2)。verify の V1〜V5 を直した。`ralph org regate --help` の `UP_TO_DATE:` の条件と `printRegateResult` の注釈に `gate_ci_passed` を入れ、`quality-gates.md` とその template の写しに `ci` の動きを足し、`/org` skill の regate の行(台帳ごとに 1 つの例外、`UP_TO_DATE:` の条件、spawn と start の断りの例外)とその写し 3 つ、README(事前の確かめの位置、待つ間の例外)を直した。同じ例外が抜けていた `ralph org spawn --help` と `ralph org start --help`、`/org` skill の spawn と start の行も直し、固定するテストを足した。tech-debt の `org_regate_test.go` の行数を 1273 にした。AC の checkbox は触れていない。計画の digest は前後で 994880bfa86d
 - [ ] PR created

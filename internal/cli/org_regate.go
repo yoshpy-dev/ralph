@@ -68,9 +68,10 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"as they were, says why and what to do next on stderr, and exits 1.\n" +
 			"\n" +
 			"When HEAD contains origin's default branch tip and the branch's latest\n" +
-			"gate record is a gate_passed of HEAD on that tip, regate runs, records,\n" +
-			"and pushes nothing, prints UP_TO_DATE:, HEAD:, BASE: and that gate's\n" +
-			"LOG: on stdout, and exits 0. When HEAD contains the tip otherwise, it\n" +
+			"gate record is a pass of HEAD on that tip (a gate_passed, or a\n" +
+			"gate_ci_passed that a ci regate recorded), regate runs, records, and\n" +
+			"pushes nothing, prints UP_TO_DATE:, HEAD:, BASE: and that gate's LOG: on\n" +
+			"stdout, and exits 0. When HEAD contains the tip otherwise, it\n" +
 			"runs the gate on HEAD. When HEAD does not contain the tip, it first\n" +
 			"merges the tip in with a merge commit, git merge --no-ff --no-edit -m\n" +
 			"'Merge origin/<default branch> <12 hex> into <branch>', with the\n" +
@@ -243,8 +244,9 @@ var ErrRegateChecksPending = errors.New("the checks of the branch's PR are not d
 // the command's error.
 //
 // An error is the command's error as Regate wrote it. When Regate had
-// recorded a gate_passed or reached the push before it (res.Outcome set), the
-// lines below are printed first, so stdout says what was recorded and pushed.
+// recorded a pass (a gate_passed, or a gate_ci_passed) or reached the push
+// before it (res.Outcome set), the lines below are printed first, so stdout
+// says what was recorded and pushed.
 // A refusal prints nothing on stdout and is the error (exit 1); a refusal at
 // the record also names the log: the scripts' output, or, for a ci regate
 // (res.PR set), the JSON of the PR's checks it read.

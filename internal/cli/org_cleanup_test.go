@@ -1111,11 +1111,15 @@ func TestOrgStartSpawnAndMergeOrder_HelpFollowTheCleanupAfterAMerge(t *testing.T
 				"main worktree once the branch is not needed.",
 			"Both forms are refused, with nothing recorded, while `ralph org regate` works on the org's branch, or while " +
 				"`ralph org merge` or `ralph org cleanup` removes the org's merged feature worktree; run start again once it ends.",
+			// Plan 2026-10-29-regate-ci-checks, sync-docs: a ci regate's wait releases regate.lock.
+			"A ci regate that waits for the PR's checks has released regate.lock and does not refuse them meanwhile (see ralph org regate --help).",
 		}, []string{"`./scripts/ralph-worktree.sh cleanup --id org-<org_id>` removes them", "run start again once the regate ends"}},
 		{[]string{"spawn", "--help"}, []string{
 			"A spawn (not a --dry-run) into an org is refused, with nothing recorded, while `ralph org regate` works on that " +
 				"org's branch, or while `ralph org merge` or `ralph org cleanup` removes that org's merged feature worktree; run " +
 				"the spawn again once it ends.",
+			// Plan 2026-10-29-regate-ci-checks, sync-docs: a ci regate's wait releases regate.lock.
+			"A ci regate that waits for the PR's checks has released regate.lock and does not refuse it meanwhile (see ralph org regate --help).",
 		}, []string{"run the spawn again once the regate ends"}},
 		{[]string{"merge-order", "--help"}, []string{
 			"Each --json entry with a binding also has bound_to in it, which the text does not show either: the branch of the " +
