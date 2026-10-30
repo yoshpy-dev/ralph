@@ -2,11 +2,11 @@
 
 - Date: 2026-10-30
 - Plan: `docs/plans/active/2026-10-30-leader-sync-docs.md`(`## Test plan` と AC1〜AC8。issue #268)
-- Tester: tester サブエージェント(`/test`、パイプラインの cycle 1 と cycle 2)
+- Tester: tester サブエージェント(`/test`、パイプラインの cycle 1・2・3)
 - Scope: `git diff origin/main...HEAD`(merge-base 0351800d、HEAD 91e82463)。本番の Go のコードは変わっていない(`git diff origin/main...HEAD -- '*.go' ':!*_test.go'` は空)。変わったのは埋め込みの雛形 `internal/org/prompts/leader.md`、`/org` と `/director` の skill(写しを含めて 8 ファイル)、仕様、README、tech-debt と、新しいテスト 2 ファイル(`internal/org/prompts_leader_syncdocs_test.go` 10 本、`internal/org/skill_doc_followup_test.go` 16 本)。`./scripts/run-test.sh` は changed scope のまま打ち、detector は `changed_languages` で golang だけを選んだ。test mode なので `tests/test-*.sh` の 45 本もすべて走った
-- Evidence: `docs/evidence/test-2026-10-30-leader-sync-docs.log`(gitignore。`run-test.sh` の全出力、絞った回の `-v` の出力、変異 12 個の差分とテストの出力、変更前の雛形と skill で新しいテストを打った回の出力。cycle 1 の分が 1〜14,376 行目、cycle 2 の分がそのあとに続き、全体で 37,093 行)。wrapper 自身の写しは cycle 1 が `docs/evidence/verify-2026-10-30-095405.log`、cycle 2 が `docs/evidence/verify-2026-10-30-114133.log`(どちらも gitignore)
+- Evidence: `docs/evidence/test-2026-10-30-leader-sync-docs.log`(gitignore。`run-test.sh` の全出力、絞った回の `-v` の出力、変異 12 個の差分とテストの出力、変更前の雛形と skill で新しいテストを打った回の出力。cycle 1 の分が 1〜14,376 行目、cycle 2 の分が 37,093 行目まで、cycle 3 の分がそのあとに続き、全体で 55,886 行)。wrapper 自身の写しは cycle 1 が `docs/evidence/verify-2026-10-30-095405.log`、cycle 2 が `docs/evidence/verify-2026-10-30-114133.log`、cycle 3 が `docs/evidence/verify-2026-10-30-124930.log`(どれも gitignore)
 
-この下の「Test execution」から「Test gaps」までは cycle 1(HEAD 91e82463)の記録で、行番号もその時点のもの。cross-review cycle 1 の ACTION_REQUIRED を直したあとの cycle 2(HEAD b0845cd3)の test は、「Test gaps」のあと、「Verdict」の前にある「cycle 2(HEAD b0845cd3)」の節に書いた。「Verdict」の節は先頭の行が cycle 2 の判定で、cycle 1 の判定はその下に残している。
+この下の「Test execution」から「Test gaps」までは cycle 1(HEAD 91e82463)の記録で、行番号もその時点のもの。cross-review cycle 1 の ACTION_REQUIRED を直したあとの cycle 2(HEAD b0845cd3)の test は、「Test gaps」のあとの「cycle 2(HEAD b0845cd3)」の節に書いた。cross-review cycle 2 の ACTION_REQUIRED を直したあとの cycle 3(HEAD d751a6e3)の test は、その次の「cycle 3(HEAD d751a6e3)」の節にある。最後の「Verdict」の節は先頭の行が cycle 3 の判定で、cycle 2 と cycle 1 の判定はその下に残している。
 
 ## Test execution
 
@@ -160,9 +160,53 @@ AC7: `git diff origin/main...HEAD -- <5 ファイル>` は今回も 0 行で、5
 
 pass。`run-test.sh` が rc 0、AC7 の 5 ファイルは差分 0 行、新しいテスト 29 本を含む 121 本が通り、変異 21 個はすべて落ちた。
 
+## cycle 3(HEAD d751a6e3)
+
+cross-review cycle 2 の ACTION_REQUIRED の直しのあとの回(上限を 3 に上げた回し直し)。147e84bc(cycle 2 の test のコミット)からのテストに関わる変更は、`/director` skill の「予約外の文書の follow-up」の手順 6 だけ。F7(44694f5b)は、案を見せる前に follow-up の文書を読むテストと、文を固定するテストと fixture を探して `- Reserve:` に入れ、人に言う文を足した。F8(b6a8060a)はその文を言い直した(「一覧のファイルを読むか、」を「一覧のファイルを読むテストと、」に)。新しいテストは `TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs` の 1 本で、合わせて 30 本(`prompts_leader_syncdocs_test.go` 12 本、`skill_doc_followup_test.go` 18 本)。雛形、`/org` skill、`prompts_leader_syncdocs_test.go` は cycle 2 から変わっていない(`git diff --quiet 147e84bc HEAD -- <それらのファイル>` が通る)。本番の Go のコードも今回も変わっていない。
+
+### Test execution(cycle 3)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `GOFLAGS="-timeout=30m -count=1" ./scripts/run-test.sh`(changed scope、golang、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 4,796)、Go 10 パッケージ ok | 0 | 1(cycle 1・2 と同じ git 2.41 の行) | 1,762 秒(21:49:29〜22:18:51 JST)。開始時の load 14.28 / 14.08 / 11.19、終了時 15.58 / 30.87 / 30.66。途中の見本は 22.16(22:01)、13.24 / 29.24 / 29.13(22:12) |
+| └ Go: `internal/org` | 1,357 本(トップレベル、`go test -list`) | ok | 0 | 0 | 776.6 秒 |
+| └ Go: `internal/cli` | — | ok | 0 | 0 | 580.1 秒 |
+| └ Go: `internal/config`、`internal/gitroot` | — | ok | 0 | 0 | 65.0 秒、24.1 秒 |
+| └ Go: `cmd/ralph`、`internal/{insights,org/driver,org/protocol,scaffold,upgrade}` | — | ok | 0 | 0 | 0.7〜4.8 秒 |
+| 絞った回(変異なし): 7 ファイルのテスト関数を `-v` で | 122(AC7 の 5 ファイルの 92 本 + 新しい 30 本) | 122 | 0 | 0 | 33 秒(22:01、load 22.16) |
+| 変異 27 個(当て直し 21 個、手順 6 の 6 個。下の表) | 27 | 26 個が落ち、1 個(handoff の外で足した D6f)が残った | — | — | 雛形 23〜34 秒、skill 8〜46 秒。load 8.56〜19.47 |
+
+起動の仕方は cycle 1・2 と同じ。変異と確かめの回(21:50〜22:02)は `run-test.sh` の shell の段と重なった(22:00 の時点で log は shell の段の途中だった)。落ちたテストはなく、打ち直しはしていない。
+
+AC7: `git diff origin/main...HEAD -- <5 ファイル>` は今回も 0 行で、5 ファイルの 92 本は絞った回で PASS した。
+
+### 変異(cycle 3)
+
+当て直し: cycle 2 の 21 個を今の HEAD に当てた。雛形の 13 個は、雛形と `prompts_leader_syncdocs_test.go` が cycle 2 から変わっていないので、cycle 2 の overlay をそのまま使った。skill の 8 個は HEAD d751a6e3 の `git archive` の写しで当てた。D5b の文は手順 6 の折り返しが変わったので、今の改行の位置に合わせた。21 個とも落ち、落ちたテストの組は cycle 2 と同じだった(1 個ずつ比べた)。
+
+手順 6 の新しい変異:
+
+| # | 変異 | 結果 | 落ちたテスト |
+| --- | --- | --- | --- |
+| D6a | 手順 6 からテストと fixture を予約する文(「案を見せる前に、…gate のテストが落ちる)。」と「足したテストと fixture は、…人に言う。」)を消す(`.claude/skills/director/SKILL.md` だけ) | 落ちた | `TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs`(`skill_doc_followup_test.go:706`) |
+| D6b | F8 より前の「一覧のファイルを読むか、その文を固定するテストと fixture を探し」の形に戻す(`templates/base/.claude/skills/director/SKILL.md` だけ) | 落ちた | 同上(`:706`) |
+| D6c | 「足したテストと fixture は、どれをなぜ足したかを案と一緒に人に言う。」だけを消す(`.agents/skills/director/SKILL.md` だけ。handoff の外で足した) | 落ちた | 同上(`:706`) |
+| D6d | 検索の例の括弧の中に `internal/org/skill_doc_followup_test.go` を足す(`templates/base/.agents/skills/director/SKILL.md` だけ。handoff の外で足した) | 落ちた | 同上(`:706` と、テストのファイルを名指さないことの確かめ `:723`) |
+| D6e | 手順 6 の終わりに「テストの例は `docs_test.go`。」を足すだけ(固定した文は壊さない。handoff の外で足した) | 落ちた | 同上(`:723` だけ) |
+| D6f | 手順 6 の終わりに「テストの例は `tests/test-check-sync.sh` と `internal/org/testdata/`。」を足すだけ(handoff の外で足した) | 残った | なし(rc 0) |
+
+新しいテストは、変更前の版の 3 つでも落ちた。`origin/main`、cycle 2 の 147e84bc、F7 だけの 44694f5b の director の skill を archive の写しに書いて打ったところ、どれも FAIL だった。
+
+### Test gaps(cycle 3 で変わったこと)
+
+- 新しい穴(LOW): 手順 6 がこの repo のテストを名指さないことの確かめ(`skill_doc_followup_test.go:723`)は `_test.go` の文字だけを見る。D6f のとおり、shell のテスト(`tests/test-*.sh`)や `testdata/` の名前を足しても通る。足すなら、同じ否定の確かめに `tests/test-` と `testdata/` を加える 1 行が一番小さい
+- 残る穴: director が実際にテストと fixture を探し当てて予約に入れるかは、director の動き(LLM)なので、実機でないと確かめられない。テストが固定するのは手順の文だけ
+- cycle 2 までの残りの穴は変わっていない
+
 ## Verdict
 
-- Pass: cycle 2(HEAD b0845cd3)。`./scripts/run-test.sh` が rc 0(shell 45 本、Go 10 パッケージ)。AC7 の 5 ファイルは差分 0 行で 92 本とも通り、新しいテスト 29 本も通った。変異 21 個はすべて新しいテストで落ちた
+- Pass: cycle 3(HEAD d751a6e3)。`./scripts/run-test.sh` が rc 0(shell 45 本、Go 10 パッケージ)。AC7 の 5 ファイルは差分 0 行で 92 本とも通り、新しいテスト 30 本も通った。当て直しの 21 個と、頼まれた手順 6 の 2 個を含む変異 26 個が落ちた。handoff の外で足した D6f だけが残り、Test gaps に書いた
+- Pass(cycle 2、HEAD b0845cd3)。`./scripts/run-test.sh` が rc 0(shell 45 本、Go 10 パッケージ)。AC7 の 5 ファイルは差分 0 行で 92 本とも通り、新しいテスト 29 本も通った。変異 21 個はすべて新しいテストで落ちた
 - Pass(cycle 1、HEAD 91e82463): `./scripts/run-test.sh` が rc 0(shell 45 本、Go 10 パッケージ)。AC7 の 5 ファイルは差分 0 行で 92 本とも通り、新しいテスト 26 本も通った。変異 12 個はすべて新しいテストで落ちた
 - Fail: 0
 - Blocked: 0
