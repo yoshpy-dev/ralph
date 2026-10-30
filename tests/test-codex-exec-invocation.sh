@@ -1,5 +1,4 @@
 #!/usr/bin/env sh
-# shellcheck disable=SC1090  # the whole point is sourcing $CONFIG dynamically
 # test-codex-exec-invocation.sh — regression guard for the codex-exec-stdin-and-model
 # fix (issue #184).
 #
@@ -9,9 +8,16 @@
 # codex invocation line inside the /plan (plan advisory, reviewer = codex)
 # and /cross-review (reviewer = codex) skill bodies to a fixed shape:
 #
-#   command codex -m "${RALPH_CODEX_REVIEWER_MODEL:-<default>}" \
-#     -c "model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-<default>}" \
+#   command codex -m "$model" -c "model_reasoning_effort=$effort" \
 #     exec ... -o <file> </dev/null
+#
+# The model and the effort come from [reviewer] in ralph.toml (plan
+# 2026-10-30-standard-flow-config): the invocation's line, or the line
+# above it, sources scripts/ralph-config.sh and then sets
+# model=$(ralph_setting reviewer.codex_model) and
+# effort=$(ralph_setting reviewer.codex_effort) before `command codex`. No
+# environment variable changes them, so no face may read
+# RALPH_CODEX_REVIEWER_MODEL or RALPH_CODEX_REASONING_EFFORT any more.
 #
 # Issue #197 adds a read-only sandbox to the same lines. The project's
 # .codex/config.toml sets sandbox_mode = "danger-full-access" and
@@ -47,10 +53,10 @@
 #
 # This test checks that shape holds across all four skill-body faces
 # (.claude/skills, .agents/skills, templates/base/.claude/skills,
-# templates/base/.agents/skills) and that the documented fallback values
-# match the defaults in scripts/ralph-config.sh's table
-# (ralph_setting_default), so a drift in either place fails loudly instead
-# of silently reintroducing the stdin hang or the alias/model conflict.
+# templates/base/.agents/skills) and that no face expands
+# RALPH_CODEX_REVIEWER_MODEL or RALPH_CODEX_REASONING_EFFORT, so a drift
+# fails loudly instead of silently reintroducing the stdin hang, the
+# alias/model conflict, or an environment override.
 #
 # It also checks (AC-8) that /cross-review's four faces document the
 # "reviewer incomplete" path for a codex background call that does not
@@ -61,8 +67,6 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
-
-CONFIG="$PROJECT_ROOT/scripts/ralph-config.sh"
 
 _pass=0
 _fail=0
@@ -79,17 +83,6 @@ fail() {
   _total=$((_total + 1))
   printf '  FAIL: %s\n' "$1"
 }
-
-# ═══════════════════════════════════════════════════════════════════
-# Expected fallback values, read from the helper's table of defaults
-# (ralph_setting_default) so a default change there (mutation iv in the
-# plan's red evidence) fails this test rather than requiring a second
-# hardcoded copy here. A key the table does not know fails the assignment,
-# and set -e stops the test.
-# ═══════════════════════════════════════════════════════════════════
-
-EXPECT_MODEL="$(. "$CONFIG"; ralph_setting_default reviewer.codex_model)"
-EXPECT_EFFORT="$(. "$CONFIG"; ralph_setting_default reviewer.codex_effort)"
 
 FACES=".claude/skills .agents/skills templates/base/.claude/skills templates/base/.agents/skills"
 SKILLS="plan cross-review"
@@ -334,13 +327,14 @@ report_sandbox_tokens() {
   fi
 }
 
-# check_invocation_line <face> <skill> <lineno> <content>
+# check_invocation_line <face> <skill> <lineno> <content> <line above>
 # Verifies one codex-exec invocation line carries the five required tokens
-# from #184, then hands the #197 checks (read-only sandbox, no widening
-# option, `--ignore-rules`, no -c after `exec`) for each codex invocation
-# on the line to check_sandbox_tokens.
+# from #184, checks that the line or the line above it reads the model and
+# the effort with ralph_setting, then hands the #197 checks (read-only
+# sandbox, no widening option, `--ignore-rules`, no -c after `exec`) for
+# each codex invocation on the line to check_sandbox_tokens.
 check_invocation_line() {
-  face="$1"; skill="$2"; lineno="$3"; content="$4"
+  face="$1"; skill="$2"; lineno="$3"; content="$4"; above="$5"
   label="$face/$skill/SKILL.md:$lineno"
 
   case "$content" in
@@ -354,13 +348,28 @@ check_invocation_line() {
   esac
 
   case "$content" in
-    *'-m "${RALPH_CODEX_REVIEWER_MODEL:-'*) pass "$label: has -m \"\${RALPH_CODEX_REVIEWER_MODEL:-...}\"" ;;
-    *) fail "$label: missing -m \"\${RALPH_CODEX_REVIEWER_MODEL:-...}\" -- $content" ;;
+    *'-m "$model" '*) pass "$label: has -m \"\$model\"" ;;
+    *) fail "$label: missing -m \"\$model\" -- $content" ;;
   esac
 
   case "$content" in
-    *'model_reasoning_effort=${RALPH_CODEX_REASONING_EFFORT:-'*) pass "$label: has model_reasoning_effort=\${RALPH_CODEX_REASONING_EFFORT:-...}" ;;
-    *) fail "$label: missing model_reasoning_effort=\${RALPH_CODEX_REASONING_EFFORT:-...} -- $content" ;;
+    *'-c "model_reasoning_effort=$effort" '*) pass "$label: has -c \"model_reasoning_effort=\$effort\"" ;;
+    *) fail "$label: missing -c \"model_reasoning_effort=\$effort\" -- $content" ;;
+  esac
+
+  # The fenced launch sets the two variables on the line above; the CLI
+  # execution modes table row sets them on its own line. Either way the
+  # helper is sourced first and `command codex` comes after.
+  case "$above $content" in
+    *'. ./scripts/ralph-config.sh;'*'model=$(ralph_setting reviewer.codex_model)'*'command codex '*)
+      pass "$label: model comes from ralph_setting reviewer.codex_model" ;;
+    *) fail "$label: missing '. ./scripts/ralph-config.sh;' then 'model=\$(ralph_setting reviewer.codex_model)' before 'command codex ' on this line or the line above -- $content" ;;
+  esac
+
+  case "$above $content" in
+    *'. ./scripts/ralph-config.sh;'*'effort=$(ralph_setting reviewer.codex_effort)'*'command codex '*)
+      pass "$label: effort comes from ralph_setting reviewer.codex_effort" ;;
+    *) fail "$label: missing '. ./scripts/ralph-config.sh;' then 'effort=\$(ralph_setting reviewer.codex_effort)' before 'command codex ' on this line or the line above -- $content" ;;
   esac
 
   case "$content" in
@@ -371,54 +380,22 @@ check_invocation_line() {
   check_sandbox_tokens "$label" "$content"
 }
 
-# check_fallback_values <face> <skill> <file>
-# Extracts every ${RALPH_CODEX_REVIEWER_MODEL:-X} / ${RALPH_CODEX_REASONING_EFFORT:-Y}
-# occurrence in the file and confirms X == EXPECT_MODEL, Y == EXPECT_EFFORT.
-check_fallback_values() {
+# check_no_env_reads <face> <skill> <file>
+# The skill reads the codex reviewer's model and effort only with
+# ralph_setting: no line expands RALPH_CODEX_REVIEWER_MODEL or
+# RALPH_CODEX_REASONING_EFFORT, braced (a ${VAR:-fallback} form) or bare.
+check_no_env_reads() {
   face="$1"; skill="$2"; file="$3"
   label="$face/$skill/SKILL.md"
 
-  model_matches="$(grep -oE '\$\{RALPH_CODEX_REVIEWER_MODEL:-[^}]*\}' "$file" || true)"
-  if [ -z "$model_matches" ]; then
-    fail "$label: no \${RALPH_CODEX_REVIEWER_MODEL:-...} fallback found"
-  else
-    old_ifs=$IFS
-    IFS='
-'
-    set -f
-    for m in $model_matches; do
-      fb="${m#*:-}"
-      fb="${fb%\}}"
-      if [ "$fb" = "$EXPECT_MODEL" ]; then
-        pass "$label: RALPH_CODEX_REVIEWER_MODEL fallback matches ralph-config.sh default ($EXPECT_MODEL)"
-      else
-        fail "$label: RALPH_CODEX_REVIEWER_MODEL fallback = '$fb', want '$EXPECT_MODEL' (scripts/ralph-config.sh default)"
-      fi
-    done
-    set +f
-    IFS=$old_ifs
-  fi
-
-  effort_matches="$(grep -oE '\$\{RALPH_CODEX_REASONING_EFFORT:-[^}]*\}' "$file" || true)"
-  if [ -z "$effort_matches" ]; then
-    fail "$label: no \${RALPH_CODEX_REASONING_EFFORT:-...} fallback found"
-  else
-    old_ifs=$IFS
-    IFS='
-'
-    set -f
-    for m in $effort_matches; do
-      fb="${m#*:-}"
-      fb="${fb%\}}"
-      if [ "$fb" = "$EXPECT_EFFORT" ]; then
-        pass "$label: RALPH_CODEX_REASONING_EFFORT fallback matches ralph-config.sh default ($EXPECT_EFFORT)"
-      else
-        fail "$label: RALPH_CODEX_REASONING_EFFORT fallback = '$fb', want '$EXPECT_EFFORT' (scripts/ralph-config.sh default)"
-      fi
-    done
-    set +f
-    IFS=$old_ifs
-  fi
+  for var in RALPH_CODEX_REVIEWER_MODEL RALPH_CODEX_REASONING_EFFORT; do
+    hits="$(grep -nE '\$\{?'"$var" "$file" || true)"
+    if [ -z "$hits" ]; then
+      pass "$label: expands no $var (the value comes from ralph_setting)"
+    else
+      fail "$label: expands $var, which ralph no longer reads -- $(printf '%s\n' "$hits" | sed -n 1p)"
+    fi
+  done
 }
 
 # check_face_skill <face> <skill>
@@ -463,13 +440,17 @@ check_face_skill() {
     for line in $invocation_lines; do
       lineno="${line%%:*}"
       content="${line#*:}"
-      check_invocation_line "$face" "$skill" "$lineno" "$content"
+      above=""
+      if [ "$lineno" -gt 1 ]; then
+        above="$(sed -n "$((lineno - 1))p" "$file")"
+      fi
+      check_invocation_line "$face" "$skill" "$lineno" "$content" "$above"
     done
     set +f
     IFS=$old_ifs
   fi
 
-  check_fallback_values "$face" "$skill" "$file"
+  check_no_env_reads "$face" "$skill" "$file"
 }
 
 # check_reviewer_incomplete <face>
@@ -494,7 +475,6 @@ check_reviewer_incomplete() {
 
 main() {
   echo "=== codex exec invocation tests ==="
-  echo "  EXPECT_MODEL=$EXPECT_MODEL EXPECT_EFFORT=$EXPECT_EFFORT (from scripts/ralph-config.sh)"
 
   for face in $FACES; do
     for skill in $SKILLS; do

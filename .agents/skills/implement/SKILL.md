@@ -21,13 +21,13 @@ Work from the active plan, not from memory alone.
    e. If this `/implement` invocation is already running inside the returned worktree path, continue. If it is running outside that path, switch all subsequent commands and edits to the returned worktree path.
    f. If the resolved plan file is a legacy plan outside the task worktree, stop and migrate it intentionally instead of silently copying it; new `/plan` runs should already create plans inside the task worktree.
    g. Update the resolved plan file inside the task worktree: replace `Branch: TBD` (or any TBD variant) with the actual branch name.
-3. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the 2-cycle cap):
+3. **Pin the plan identity and initialize the pipeline cycle counter** (enforces the pipeline cycle cap):
    a. Create `.harness/state/standard-pipeline/` if missing (`mkdir -p`). This directory is already covered by the existing `.harness/state/` gitignore.
    b. Write the Step-1 resolved absolute path plus worktree metadata to `.harness/state/standard-pipeline/active-plan.json` as `{"plan_path": "<absolute-path>", "worktree_path": "<absolute-worktree-path>", "branch": "<branch>", "base_sha": "<base-sha>", "worktree_state_id": "plan-<slug>", "created_at": "<UTC ISO8601>"}`. If the file already exists with a different `plan_path` or `worktree_state_id`, warn the user and ask whether to overwrite (resume) or abort.
    c. Handle `.harness/state/standard-pipeline/cycle-count.json`:
       - If the file is missing: initialize as `{"plan_path": "<absolute-path>", "cycle": 1}`.
-      - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Inform the user of the resumed cycle number.
-      - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort.
+      - If the file exists AND its `plan_path` matches the pinned plan: **preserve the existing counter** (do NOT reset to 1). This keeps the cap effective when the user resumes a plan after context compaction or a later session. Keep the file as it is, its `cap` included when it has one: `/cross-review` writes `cap` when the user raises the cap for this task (its step 9), so do not rewrite the file without it. Inform the user of the resumed cycle number.
+      - If the file exists AND its `plan_path` differs from the pinned plan: warn and prompt via AskUserQuestion whether to reset the counter for the new plan or abort. A reset writes the missing-file form above, without the other plan's `cap`.
       - The counter reflects the **current** pipeline run (1 = first run, 2 = one re-run after cross-review ACTION_REQUIRED).
 4. Read the current active plan using the path recorded in `active-plan.json`, then check that it passed the `/plan` approval gate (`/plan` step 12). Run this check on every `/implement` start, resumes included:
    - Read the plan's `- Status:` and `- Approved:` lines and run `./scripts/plan-visual.sh digest <plan-path>`.
@@ -56,7 +56,7 @@ Work from the active plan, not from memory alone.
     matching `.codex/agents/` custom agents and keep the same order. If a
     subagent dispatch fails, run that step inline and note the fallback in the
     report.
-    e. **Invoke `/cross-review` via the Skill tool** (inline). The review runs when `[standard].cross_review` is on, the reviewer CLI exists, and the diff against the base branch is not empty; otherwise `/cross-review` records the skip in its triage report and goes on to `/pr`. The skill reads `cycle-count.json` and enforces `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default 2). On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
+    e. **Invoke `/cross-review` via the Skill tool** (inline). The review runs when `[standard].cross_review` is on, the reviewer CLI exists, and the diff against the base branch is not empty; otherwise `/cross-review` records the skip in its triage report and goes on to `/pr`. The skill reads `cycle-count.json` and enforces the pipeline cap: the larger of `[standard].max_pipeline_cycles` (default 2) and the `cap` in `cycle-count.json`, when it has one. On re-run after ACTION_REQUIRED fixes, `/cross-review` increments `cycle-count.json`.
     f. **Invoke `/pr` via the Skill tool** — do NOT run `gh pr create` directly. The `/pr` skill enforces the Japanese template, pre-checks, plan archiving, and task worktree/local branch cleanup. On success, `/pr` deletes `.harness/state/standard-pipeline/active-plan.json` and `cycle-count.json`.
 
 ## Scope discipline

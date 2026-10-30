@@ -24,11 +24,12 @@ package config
 // Its "shell_and_skills" sub-test reads the table of defaults in
 // scripts/ralph-config.sh (ralph_setting_default) and checks that it holds
 // standard.max_pipeline_cycles and the four [reviewer] keys, each with
-// Default()'s value. It also checks that the /plan and /cross-review
-// SKILL.md fallback tokens for RALPH_CODEX_REVIEWER_MODEL and
-// RALPH_CODEX_REASONING_EFFORT match the table, and that the one for
-// RALPH_CLAUDE_REVIEWER_MODEL is opus, until the skills read the settings
-// with ralph_setting (plan 2026-10-30-standard-flow-config, S3).
+// Default()'s value. It also checks the four copies of the /plan,
+// /cross-review, and /implement SKILL.md: they expand none of the
+// environment variables the settings replaced, they read the settings with
+// ralph_setting and only keys of the table, the claude reviewer gets
+// --effort, and /cross-review and /implement state the cap rule of
+// cycle-count.json's cap (plan 2026-10-30-standard-flow-config, D8).
 //
 // Any mismatch is a test failure naming the surface and key.  The test uses
 // runtime.Caller to resolve paths relative to this file so it works from any
@@ -367,8 +368,8 @@ func TestDefaultsLockStep(t *testing.T) {
 		}
 	})
 
-	// ── scripts/ralph-config.sh: its table of defaults and SKILL.md
-	// fallbacks ─────────────────────────────────────────────────────────────
+	// ── scripts/ralph-config.sh: its table of defaults and the SKILL.md
+	// bodies that read it ───────────────────────────────────────────────────
 	t.Run("shell_and_skills", func(t *testing.T) {
 		shellPath := filepath.Join(root, "scripts", "ralph-config.sh")
 		if _, err := os.Stat(shellPath); err != nil {
@@ -397,22 +398,10 @@ func TestDefaultsLockStep(t *testing.T) {
 			}
 		}
 
-		// ── SKILL.md fallback tokens match the shell defaults ─────────────────
-		// Both /plan and /cross-review document `${VAR:-fallback}` tokens for
-		// the model/effort env vars of the reviewer calls. This is
-		// table-driven so every (skill, var) pair is checked the same way and
-		// every occurrence in the file (not only the first) is verified: for
-		// cross-review that means both the codex-exec invocation line and the
-		// "CLI execution modes" table row (plan's table names no fallback; its
-		// occurrences are the step 11.c codex and claude invocation lines)
-		// must carry the current default (issue #184, AC-4; the plan skill's
-		// claude fallback since issue #266).
-		//
-		// RALPH_CLAUDE_REVIEWER_MODEL's fallback stays opus, the default
-		// before [reviewer].claude_model, so it differs from the table's
-		// value on purpose. The skills drop these fallbacks, and this check
-		// with them, when they read the settings with ralph_setting (plan
-		// 2026-10-30-standard-flow-config, S3).
+		// ── The SKILL.md bodies read the settings with ralph_setting ──────────
+		// Every copy of /plan, /cross-review, and /implement is checked:
+		// .claude/skills, its .agents/skills mirror, and the templates/base
+		// pair. checkSkillSettings says what a body must hold.
 		//
 		// Skip scope: a single gate below, before the loop, skips the rest of
 		// this sub-test when .claude/skills itself is absent (a
@@ -422,55 +411,123 @@ func TestDefaultsLockStep(t *testing.T) {
 		// t.Errorf and continues instead of skipping.
 		skillsRoot := filepath.Join(root, ".claude", "skills")
 		if _, err := os.Stat(skillsRoot); err != nil {
-			t.Skipf(".claude/skills not found (%v) — skipping /plan and /cross-review SKILL.md fallback checks (vendored repo?)", err)
+			t.Skipf(".claude/skills not found (%v) — skipping the /plan, /cross-review, and /implement SKILL.md checks (vendored repo?)", err)
 		}
-
-		type skillVarCheck struct {
-			skillDir string // under .claude/skills/
-			envVar   string
-			want     string // the fallback
-			source   string // where want comes from, for the failure
-		}
-		const claudeFallback = "opus"
-		codexModel, codexEffort := shell["reviewer.codex_model"], shell["reviewer.codex_effort"]
-		skillVarChecks := []skillVarCheck{
-			{"cross-review", "RALPH_CLAUDE_REVIEWER_MODEL", claudeFallback, "the default before [reviewer].claude_model"},
-			{"cross-review", "RALPH_CODEX_REVIEWER_MODEL", codexModel, "scripts/ralph-config.sh reviewer.codex_model default"},
-			{"cross-review", "RALPH_CODEX_REASONING_EFFORT", codexEffort, "scripts/ralph-config.sh reviewer.codex_effort default"},
-			{"plan", "RALPH_CLAUDE_REVIEWER_MODEL", claudeFallback, "the default before [reviewer].claude_model"},
-			{"plan", "RALPH_CODEX_REVIEWER_MODEL", codexModel, "scripts/ralph-config.sh reviewer.codex_model default"},
-			{"plan", "RALPH_CODEX_REASONING_EFFORT", codexEffort, "scripts/ralph-config.sh reviewer.codex_effort default"},
-		}
-
-		for _, c := range skillVarChecks {
-			skillPath := filepath.Join(root, ".claude", "skills", c.skillDir, "SKILL.md")
-			if _, err := os.Stat(skillPath); err != nil {
-				t.Errorf(".claude/skills/%s/SKILL.md not found (%v) — skipping %s fallback check", c.skillDir, err, c.envVar)
-				continue
-			}
-
-			data, err := os.ReadFile(skillPath)
-			if err != nil {
-				t.Fatalf("cannot read %s/SKILL.md: %v", c.skillDir, err)
-			}
-
-			// Pattern: ${VAR:-<fallback>}
-			re := regexp.MustCompile(`\$\{` + regexp.QuoteMeta(c.envVar) + `:-([^}]+)\}`)
-			matches := re.FindAllSubmatch(data, -1)
-			if len(matches) == 0 {
-				t.Errorf(".claude/skills/%s/SKILL.md: no ${%s:-<fallback>} pattern found — update the regex if the wording changed", c.skillDir, c.envVar)
-				continue
-			}
-
-			for _, m := range matches {
-				skillFallback := string(m[1])
-				if skillFallback != c.want {
-					t.Errorf("%s/SKILL.md %s fallback = %q, want %q (%s)",
-						c.skillDir, c.envVar, skillFallback, c.want, c.source)
+		for _, skill := range slices.Sorted(maps.Keys(skillSettingUses)) {
+			for _, face := range []string{".claude/skills", ".agents/skills", "templates/base/.claude/skills", "templates/base/.agents/skills"} {
+				rel := face + "/" + skill + "/SKILL.md"
+				data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+				if err != nil {
+					t.Errorf("cannot read %s: %v", rel, err)
+					continue
 				}
+				checkSkillSettings(t, rel, skill, string(data), shell)
 			}
 		}
 	})
+}
+
+// retiredSettingEnvs are the environment variables the standard flow read
+// before [standard].max_pipeline_cycles and [reviewer]. ralph no longer
+// reads them, so no skill may expand one.
+var retiredSettingEnvs = []string{
+	"RALPH_STANDARD_MAX_PIPELINE_CYCLES",
+	"RALPH_CLAUDE_REVIEWER_MODEL",
+	"RALPH_CODEX_REVIEWER_MODEL",
+	"RALPH_CODEX_REASONING_EFFORT",
+}
+
+// skillSettingKey matches a key a skill body passes to ralph_setting, such
+// as `ralph_setting reviewer.codex_model`. A key has at least one dot, so
+// prose such as "ralph_setting prints" does not match.
+var skillSettingKey = regexp.MustCompile(`ralph_setting ([a-z_]+(?:\.[a-z_]+)+)`)
+
+// skillSettingUses holds, per skill, the keys its body must pass to
+// ralph_setting, the number of claude reviewer launches it holds (lines
+// with `claude -p --model`: /plan's step 11.c, and /cross-review's step 4
+// and its CLI execution modes row), and the sentences that state the cap
+// rule of plan 2026-10-30-standard-flow-config's D8: the cap is the larger
+// of [standard].max_pipeline_cycles and a positive integer `cap` in
+// cycle-count.json, the cap-reached Option 1 writes `cap` without
+// incrementing `cycle`, and /implement keeps `cap` when it keeps the file.
+var skillSettingUses = map[string]struct {
+	keys           []string
+	claudeLaunches int
+	capRule        []string
+}{
+	"plan": {
+		keys:           []string{"reviewer.codex_model", "reviewer.codex_effort", "reviewer.claude_model", "reviewer.claude_effort"},
+		claudeLaunches: 1,
+	},
+	"cross-review": {
+		keys:           []string{"standard.max_pipeline_cycles", "reviewer.codex_model", "reviewer.codex_effort", "reviewer.claude_model", "reviewer.claude_effort"},
+		claudeLaunches: 2,
+		capRule: []string{
+			"the cap is the larger of the configured value and that `cap`",
+			"Otherwise (no `cap`, or a `cap` that is not a positive integer) the cap is the configured value.",
+			"Do **NOT** increment `cycle`.",
+			`jq -c '.cap = .cycle + 1' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`,
+		},
+	},
+	"implement": {
+		capRule: []string{"Keep the file as it is, its `cap` included when it has one"},
+	},
+}
+
+// checkSkillSettings checks the body text of one copy of skill, named rel
+// in failures: it expands none of retiredSettingEnvs; it passes each key of
+// skillSettingUses[skill] to ralph_setting, and every key it passes is in
+// table, the helper's table of defaults; each claude reviewer launch
+// passes --model "$model" --effort "$effort", with both variables set by
+// ralph_setting earlier on its line or on the line above; and it holds
+// each sentence of the cap rule.
+func checkSkillSettings(t *testing.T, rel, skill, text string, table map[string]string) {
+	t.Helper()
+	use := skillSettingUses[skill]
+	for _, env := range retiredSettingEnvs {
+		if strings.Contains(text, "${"+env) {
+			t.Errorf("%s expands ${%s, which ralph no longer reads; read the setting with ralph_setting", rel, env)
+		}
+	}
+	for _, key := range use.keys {
+		if !strings.Contains(text, "ralph_setting "+key) {
+			t.Errorf("%s does not read %s with `ralph_setting %s`", rel, key, key)
+		}
+	}
+	for _, m := range skillSettingKey.FindAllStringSubmatch(text, -1) {
+		if _, ok := table[m[1]]; !ok {
+			t.Errorf("%s passes %s to ralph_setting, a key that is not in the table of defaults of scripts/ralph-config.sh", rel, m[1])
+		}
+	}
+	lines := strings.Split(text, "\n")
+	launches := 0
+	for i, line := range lines {
+		at := strings.Index(line, "claude -p --model")
+		if at < 0 {
+			continue
+		}
+		launches++
+		if !strings.Contains(line[at:], `claude -p --model "$model" --effort "$effort" `) {
+			t.Errorf("%s:%d: the claude reviewer launch does not pass --model \"$model\" --effort \"$effort\": %s", rel, i+1, line)
+		}
+		before := line[:at]
+		if i > 0 {
+			before = lines[i-1] + "\n" + before
+		}
+		for _, set := range []string{"model=$(ralph_setting reviewer.claude_model)", "effort=$(ralph_setting reviewer.claude_effort)"} {
+			if !strings.Contains(before, set) {
+				t.Errorf("%s:%d: the claude reviewer launch is not preceded by %s on its line or the line above", rel, i+1, set)
+			}
+		}
+	}
+	if launches != use.claudeLaunches {
+		t.Errorf("%s holds %d claude reviewer launches (`claude -p --model`), want %d", rel, launches, use.claudeLaunches)
+	}
+	for _, sentence := range use.capRule {
+		if !strings.Contains(text, sentence) {
+			t.Errorf("%s does not state the cap rule %q", rel, sentence)
+		}
+	}
 }
 
 // TestOrgTemplateDrift_DetectsChangedAndMissingKeys pins that
