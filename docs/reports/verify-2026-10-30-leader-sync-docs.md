@@ -74,7 +74,8 @@
 
 pass
 
-- re-run(HEAD feeb1e80)の判定。V1 と V2 は d8e73710(F4)で直り、`run-static-verify.sh` と `check-template-purity.sh` は rc=0 になった。開いている所見は INFO 2 件だけで、merge を止めない。下の「re-run(HEAD feeb1e80)」の節を見る
+- cycle 2(HEAD e21d89c3)の判定。cross-review cycle 1 の ACTION_REQUIRED #1(P2)を直した F5・F5b・F6 のあと、sync-docs の段落の `git status` は雛形と `/org` skill の両方で 5 か所とも `git status --porcelain --untracked-files=all` になった。`run-static-verify.sh` と `check-template-purity.sh` は rc=0。所見は LOW 1 件(V3 仕様 FR-4 の注のコマンドが古い)で、merge を止めない。V3 は cycle 2 の /sync-docs が扱う。下の「cycle 2(HEAD e21d89c3)」の節を見る
+- re-run(HEAD feeb1e80)の判定は pass だった。V1 と V2 は d8e73710(F4)で直り、`run-static-verify.sh` と `check-template-purity.sh` は rc=0 になった。開いている所見は INFO 2 件だけで、merge を止めない。下の「re-run(HEAD feeb1e80)」の節を見る
 - 初回(HEAD 0dfc49f0)の判定は fail だった。AC1・AC2・AC3・AC4・AC5・AC6・AC8 の文は雛形と skill の該当行にあり、check-skill-sync、check-sync、`git diff --check`、`go build`、`go vet`、gofmt、golangci-lint、secret scan は通り、計画の digest は承認時と同じだった。所見は HIGH 1 件(V1 `check-template-purity.sh` の失敗。CI も落ちる)、LOW 1 件(V2 `/org` skill の受信箱の resolve の文)、INFO 2 件。insight event は `--verdict fail --cycle auto --high 1 --low 1`
 - Partially verified: AC7(静的の部分だけ)
 - Not verified: Go のテストの結果(/test)、leader と director が実機でこの手順を走らせること
@@ -120,3 +121,58 @@ pass
 ### re-run の判定
 
 pass。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle auto`、findings は 0)。
+
+## cycle 2(HEAD e21d89c3)
+
+- Date: 2026-10-30
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 2。`cycle-count.json` は `"cycle": 2`)
+- Scope: re-run の report(91e82463)のあとの 10 コミット、`git diff 91e82463..HEAD`(14 ファイル、+739/−145)。a5e28500(test の report)、e5f90219(sync-docs が `/org` skill に足した 2 か所)、da707a0d(cross-review cycle 1 の triage、ACTION_REQUIRED 1 件 P2)、F5 4d0f70e4、F5b aec1381f、ef4a15a7(計画の D2 と Risks、承認し直し)、8bd985fb(self-review cycle 2、LOW 2、Merge yes)、94c10923(台帳の行)、F6 41468881、e21d89c3(計画の記録)。origin/main は 0351800d のままで、HEAD はそれを含む(`git merge-base --is-ancestor` rc=0)。テストは打っていない(/test)
+- Evidence: 同じ `docs/evidence/verify-2026-10-30-leader-sync-docs.log` の末尾に足した(コミットしない)。run-static-verify 自身のログは `docs/evidence/verify-2026-10-30-113457.log`
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc=0) | `All verifiers passed.`。ログに `FAIL` の行はない。golangci-lint `0 issues.`、secret scan は `0351800d..e21d89c3` で clean |
+| `./scripts/check-template-purity.sh` | pass(rc=0) | `PASS: no meta-repo-specific references found in templates.` |
+| `./scripts/check-skill-sync.sh` | pass | 14 skill が一致 |
+| `./scripts/check-sync.sh` | pass | DRIFTED 0、ROOT_ONLY 0 |
+| `cmp`(`.claude/skills/org/SKILL.md` と写し 3 つ) | 同じ | `.agents/`、`templates/base/.claude/`、`templates/base/.agents/` |
+| `git diff --check origin/main...HEAD` | pass(rc=0、無出力) | |
+| `go build ./...` / `go vet ./internal/org/` / `gofmt -l internal/org` | pass | どれも無出力 |
+| `grep -rn 'check-sync.sh'`(`internal/org/prompts/` と `templates/base/` の skill) | 0 件(rc=1) | |
+| `./scripts/plan-visual.sh digest <plan>` | `220fa1f3994f` | 計画の `- Approved:` の digest と同じ(ef4a15a7 で付け直したもの) |
+
+### sync-docs の段落の `git status` の形
+
+雛形の手順 9(`internal/org/prompts/leader.md:348-447`)と `/org` skill の「org の終わり方」の 1(`.claude/skills/org/SKILL.md:1050-1150`)で、`git status` を名指す箇所はどちらも 5 つ。5 つとも `git status --porcelain --untracked-files=all` で、`--untracked-files=all` のない `git status --porcelain` は 0 か所だった。
+
+| 場所 | 雛形 | `/org` skill |
+| --- | --- | --- |
+| 失敗の枝: 戻すパスの一覧 | `leader.md:359` | `SKILL.md:1061` |
+| 失敗の枝: 戻したあと、何も出ないことの確かめ | `:365` | `:1067` |
+| 呼ぶ前の確かめ(F5b) | `:369` | `:1071` |
+| 終わったあとの照らし合わせ | `:411` | `:1113` |
+| コミットのあとの確かめ | `:439` | `:1142` |
+
+- 段落の行を連結して空白を除き、9 つの文(上の 5 つのコマンドを含む文、未追跡のファイルを「一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)」、呼ぶ前の確かめの理由、振り分けの「(per-plan では `PLAN:` のヘッダを付ける)」、`--untracked-files=all` を付ける理由)を雛形と skill で探した。どれも両方に 1 回ずつあった。呼ぶ前の確かめの振り分けの終わりは、雛形が手順 8 の往復と BLOCKED の上げ方を書き、skill が「reviewer にレビューを頼み直し、それ以外なら `BLOCKED` を escalate する」と縮めている。手順 9 の最初の段落の雛形と skill の書き分け(`SKILL.md:1031-1048`)と同じ縮め方で、食い違いはない
+- 手順 9 の最初の段落の確かめ(`leader.md:325`、`SKILL.md:1032`)は `--untracked-files=all` のないまま。`prompts_test.go` が固定していて変えないこと、その穴を呼ぶ前の確かめが埋めることは、計画の F5b の記録(Progress)に書いてある
+- `ralph org gate` の汚れた作業ツリーの判定も `git status --porcelain --untracked-files=all`(`SKILL.md:255` の gate の項)なので、leader の確かめは gate と同じ見方になった
+- probe(使い捨ての repo、git 2.49.0): git の既定(`status.showUntrackedFiles=normal`)の `--porcelain` は、新しいディレクトリの 2 つのファイルを `?? docs/` の 1 行で出し、`--untracked-files=all` は 1 ファイルずつ出した。`status.showUntrackedFiles=no` では、`--porcelain` は何も出さず、`--untracked-files=all` は 1 ファイルずつ出した。ignore したディレクトリのファイルはどちらにも出ない。1 つずつ消したあとに残る空のディレクトリは、`--untracked-files=all` にも出ない。この環境の利用者の git の設定は `status.showUntrackedFiles=all`(`~/.config/git/config`)なので、probe では `-c status.showUntrackedFiles=normal` を付けた
+
+### AC と文書のずれの見直し
+
+- AC1〜AC6・AC8: met のまま。F5・F5b で文が増えたので行番号がずれた。雛形では sync-docs の段落が `:348-447`、doc-maintainer への指示が `:391-409`、写しの組が `:397-401`、一部だけ戻さないことが `:429-431`、1 コミットが `:435-442`、やり直しが `:444-447`、手順 10 が `:449`、手順 12 が `:470`、`GATE: fail` の追記が `:538-543`、PR の本文が `:576-584`、RESULT の例が `:607-608`。skill では sync-docs の段落が `:1050-1150`、`GATE: fail` が `:1214`、PR の本文が `:1253`、座席内 fan-out が `:1599`、完了条件が `:1945`。中身は変わっていない。AC2・AC8 の「変わったパスの確かめ」はファイルごとに照らし合わせるようになり、P2 の穴(新しいディレクトリの中の予約したファイルを外と読む、予約の外の兄弟のファイルが見えない)は塞がった
+- AC7: partly のまま。名指された 5 本のテストは今も diff に入っていない。テストが通るかは /test が確かめる
+- e5f90219 が `/org` skill に足した 2 か所(`SKILL.md:1772-1776` の「Leader 運用 2 経路」の 7、`:1924` の締めの順)は、雛形の手順 9〜14 の順と合う
+- 計画(ef4a15a7、e21d89c3): D2 と Risks は `--untracked-files=all` と呼ぶ前の確かめになり、雛形と合う。Progress の F5・F5b・F6 の記録は diff と合う。AC の checkbox は未記入のまま
+- 台帳(94c10923、`docs/tech-debt/README.md:405`): 照らし合わせる側を `git status --porcelain --untracked-files=all`、払い方を `-z` 付きの同じコマンドと書き、雛形と合う
+- `/director` skill と README `:280` は `git status` を名指さないので、変える必要はない
+
+### V3(LOW): 仕様 FR-4 の注のコマンドが F5 の前のまま
+
+`docs/specs/2026-10-07-org-multi-org-director.md:93`(2026-10-30 に決めたこと)は「leader は `git status --porcelain` で変わったパスを読み」と書く。雛形と `/org` skill と計画の D2 は `git status --porcelain --untracked-files=all` になり、呼ぶ前の確かめも足された。注は要約なので呼ぶ前の確かめまで書く必要はないが、名指したコマンドは今の形に合わせるのがよい。cycle 2 の /sync-docs で 1 か所直せば足りる。
+
+### cycle 2 の判定
+
+pass。所見は LOW 1 件(V3)と、前からの INFO 2 件。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle auto --low 1`、cycle 2)。
