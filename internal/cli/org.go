@@ -188,9 +188,10 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // director attach also Director.Wake and Director.WakeCmd
 // (withMainWorktreeDirectorWakeConfig), `ralph org watch --all` also
 // Director.Wake and Director.WakeCmd, through orgWatchDirectorWake
-// (withMainWorktreeDirectorWakeConfigFrom), and director start the settings
+// (withMainWorktreeDirectorWakeConfigFrom), director start the settings
 // of the headless director, those two included
-// (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
+// (withMainWorktreeDirectorStartConfig), and `ralph org start --plan` also
+// [reviewer] (resolveOrgStartReviewer). A main worktree ralph.toml that
 // fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
@@ -317,28 +318,36 @@ func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, re
 }
 
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
-// root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist, with the ralph.local.toml of that root applied on top) for
-// withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
-// withMainWorktreeDirectorStartConfig, and
+// root>/ralph.toml (loadMainWorktreeConfig) for withMainWorktreeOrgLimits,
+// withMainWorktreeDirectorEnabled, withMainWorktreeDirectorStartConfig, and
 // withMainWorktreeDirectorWakeConfigFrom.
-// ok is false, with nothing loaded, when configPath is set or the ledger is
-// not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
-// loaded, also when err (the load error, unwrapped) is set.
 func loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource string) (mainCfg config.OrgConfig, path string, ok bool, err error) {
+	cfg, path, ok, err := loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource)
+	return cfg.Org, path, ok, err
+}
+
+// loadMainWorktreeConfig loads every table of <main worktree
+// root>/ralph.toml (config.Load: built-in defaults when the file does not
+// exist, with the ralph.local.toml of that root applied on top), for
+// loadMainWorktreeOrgConfig and for resolveOrgStartReviewer, which takes
+// [reviewer] from it. ok is false, with nothing loaded, when configPath is
+// set or the ledger is not the main worktree's (org.LedgerMainWorktreeRoot).
+// path is the file it loaded, also when err (the load error, unwrapped) is
+// set.
+func loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource string) (mainCfg config.Config, path string, ok bool, err error) {
 	if configPath != "" {
-		return config.OrgConfig{}, "", false, nil
+		return config.Config{}, "", false, nil
 	}
 	root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource)
 	if !ok {
-		return config.OrgConfig{}, "", false, nil
+		return config.Config{}, "", false, nil
 	}
 	path = filepath.Join(root, "ralph.toml")
 	cfg, err := config.Load(path)
 	if err != nil {
-		return config.OrgConfig{}, path, true, err
+		return config.Config{}, path, true, err
 	}
-	return cfg.Org, path, true, nil
+	return cfg, path, true, nil
 }
 
 // newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
@@ -633,14 +642,39 @@ func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
 }
 
 // resolveConfig is resolveOrgConfig with every table of the config, for a
-// verb that also needs one outside [org]: `ralph org start --plan` passes
-// its [reviewer] to the feature org's leader (runOrgStartPlan).
+// verb that also needs one outside [org]: `ralph org start --plan` takes its
+// [reviewer] from it when the main worktree's ralph.toml does not apply
+// (resolveOrgStartReviewer).
 func resolveConfig(configPath string) (config.Config, error) {
 	path := configPath
 	if path == "" {
 		path = "ralph.toml"
 	}
 	return config.Load(path)
+}
+
+// resolveOrgStartReviewer returns the [reviewer] table `ralph org start
+// --plan` writes in the feature org's leader's task, read by the rule
+// withMainWorktreeOrgLimits follows for [org.approval]: from <main worktree
+// root>/ralph.toml (loadMainWorktreeConfig) when configPath is empty and the
+// ledger is the main worktree's, else from the --config file or ./ralph.toml
+// (resolveConfig), ralph.local.toml on top either way. A subdirectory or a
+// linked worktree with a ralph.toml of its own then does not choose the
+// models and efforts of the leader's plan advisory, any more than the org's
+// approval mode (plan 2026-10-30-standard-flow-config, D5).
+func resolveOrgStartReviewer(configPath, resolvedStateDir, stateDirSource string) (config.ReviewerConfig, error) {
+	mainCfg, path, ok, err := loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return config.ReviewerConfig{}, fmt.Errorf("org: load [reviewer] from the main worktree's %s: %w", path, err)
+	}
+	if ok {
+		return mainCfg.Reviewer, nil
+	}
+	cfg, err := resolveConfig(configPath)
+	if err != nil {
+		return config.ReviewerConfig{}, fmt.Errorf("org: load config: %w", err)
+	}
+	return cfg.Reviewer, nil
 }
 
 // resolveModelOrWarn resolves the effective --model value for driver/role:
@@ -969,11 +1003,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"orgs started after it; starting a running feature org again with\n" +
 			"another mode is refused. The four keys of [reviewer], the model and\n" +
 			"effort of the reviewers the leader's plan advisory calls, are read\n" +
-			"from the --config file, else the ./ralph.toml of the directory start\n" +
-			"runs in, with the ralph.local.toml of the main worktree's root on top,\n" +
-			"and written in the leader's task as two lines, one for codex and one\n" +
-			"for claude: the leader uses them as they were when the org started\n" +
-			"and does not read them itself.\n" +
+			"from the same ralph.toml as max_orgs and max_total_seats below and\n" +
+			"written in the leader's task as two lines, one for codex and one for\n" +
+			"claude: the leader uses them as they were when the org started and\n" +
+			"does not read them itself.\n" +
 			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
@@ -1123,9 +1156,9 @@ type orgStartPlanParams struct {
 // (wireOrgStartWatchGate, which launches the watch when none runs;
 // StartFeature runs it before it makes the worktree), and runs
 // (*org.Org).StartFeature with that dir, the main worktree root
-// (org.FeatureRepoRoot), and the [reviewer] table of the config start loads
-// (resolveConfig: --config or ./ralph.toml, with ralph.local.toml on top),
-// which the runtime does not keep since it holds only [org]. The result is
+// (org.FeatureRepoRoot), and the [reviewer] table read from the ralph.toml
+// the approval mode comes from (resolveOrgStartReviewer), which the runtime
+// does not keep since it holds only [org]. The result is
 // printed as a spawn's, followed on success by the worktree, the branch and
 // the status hint; a refusal or failure is returned as StartFeature's error,
 // which already says whether the worktree stays and how to remove it.
@@ -1147,14 +1180,14 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := resolveConfig(p.configPath)
+	reviewer, err := resolveOrgStartReviewer(p.configPath, resolvedStateDir, stateDirSource)
 	if err != nil {
-		return fmt.Errorf("org: load config: %w", err)
+		return err
 	}
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
-		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: cfg.Reviewer,
+		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
 	if res.Spawn.Err != nil {
