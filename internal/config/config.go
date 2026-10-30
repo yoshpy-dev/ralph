@@ -57,9 +57,12 @@ type StandardConfig struct {
 // accept (reviewerClaudeEfforts). It also refuses a claude_model,
 // codex_model, or codex_effort with a character outside reviewerWordPattern:
 // the values are copied into the shell commands of the skills and the leader
-// as one word, so a quote, a `$`, or a space must not split them. Their
-// defaults are kept in lock-step with templates/base/ralph.toml, which writes
-// every key as a comment (defaults_sync_test.go).
+// as one word, so a quote, a `$`, a backquote, a backslash, a space, or
+// another character a shell reads must not split or expand them. A full
+// model ID may hold ':', '@', '/', and '+' (a Bedrock ID or an ARN), which a
+// shell leaves alone, bare or in double quotes. Their defaults are kept in
+// lock-step with templates/base/ralph.toml, which writes every key as a
+// comment (defaults_sync_test.go).
 type ReviewerConfig struct {
 	// ClaudeModel is the model of a claude reviewer, passed to
 	// `claude --model`. The default is the alias "fable".
@@ -740,8 +743,9 @@ var reviewerClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // reviewerWordPattern is the shape of [reviewer].claude_model, codex_model,
 // and codex_effort: one word the skills and a feature org's leader can copy
-// into a shell command as it is (ReviewerConfig).
-var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+// into a shell command as it is (ReviewerConfig). Besides ASCII letters and
+// digits it allows only '.', '_', ':', '@', '/', '+', and '-'.
+var reviewerWordPattern = regexp.MustCompile(`^[A-Za-z0-9._:@/+-]+$`)
 
 // orgPoolKeysPresent reports whether the source document explicitly sets
 // [org].driver_pool and/or [org].model_pool. toml.Unmarshal into a
@@ -1050,5 +1054,5 @@ func checkReviewerWord(key, value string) error {
 	if reviewerWordPattern.MatchString(value) {
 		return nil
 	}
-	return fmt.Errorf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', and '-'", key, value)
+	return fmt.Errorf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-'", key, value)
 }

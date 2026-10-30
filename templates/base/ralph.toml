@@ -53,8 +53,9 @@ cross_review = false
 # codex_model and codex_effort for a codex reviewer (codex -m <codex_model>
 # with -c model_reasoning_effort=<codex_effort>). claude_effort is one of
 # low, medium, high, xhigh, and max. The other three must be one word of
-# A-Z, a-z, 0-9, ".", "_", and "-", since they are copied into shell
-# commands. An empty value, or one outside these rules, fails the load.
+# A-Z, a-z, 0-9, ".", "_", ":", "@", "/", "+", and "-" (so a full model ID
+# such as a Bedrock one fits), since they are copied into shell commands.
+# An empty value, or one outside these rules, fails the load.
 # /plan and /cross-review read these keys as /cross-review reads
 # max_pipeline_cycles above; a feature org's leader uses the values
 # `ralph org start --plan` read when it started the org. The keys are

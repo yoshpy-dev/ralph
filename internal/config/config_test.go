@@ -2069,10 +2069,12 @@ func TestLoad_StandardMaxPipelineCyclesBoundary(t *testing.T) {
 // 2026-10-30-standard-flow-config, D4 and AC1). claude_effort must be one of
 // the five efforts `claude --effort` accepts, in that letter case, and each
 // accepted one loads. claude_model, codex_model, and codex_effort must be
-// one word of A-Z, a-z, 0-9, '.', '_', and '-', since the skills and the
-// leader copy them into a shell command: a space, a $, a quote, a backquote,
-// a semicolon, a non-ASCII letter, and "" are each refused. Every error
-// names the key and the value.
+// one word of A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-', since
+// the skills and the leader copy them into a shell command: a full model ID
+// with ':', '@', '/', or '+' loads as written, and a space, a $, a quote, a
+// backquote, a backslash, a character a shell reads as an operator, a glob,
+// a tilde, a comment, or a history expansion, a non-ASCII letter, and "" are
+// each refused. Every error names the key and the value.
 func TestLoad_ReviewerValidation(t *testing.T) {
 	writeReviewer := func(t *testing.T, key, value string) string {
 		t.Helper()
@@ -2106,17 +2108,34 @@ func TestLoad_ReviewerValidation(t *testing.T) {
 	}
 
 	for _, key := range []string{"claude_model", "codex_model", "codex_effort"} {
-		for _, good := range []string{"gpt-5.6-sol", "claude_opus.4-7", "XHIGH", "a"} {
+		for _, good := range []string{
+			"gpt-5.6-sol", "claude_opus.4-7", "XHIGH", "a",
+			"anthropic.claude-x-v1:0", "model@2026", "org/model", "a+b",
+			"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-x-v1:0",
+		} {
 			t.Run(fmt.Sprintf("%s %q accepted", key, good), func(t *testing.T) {
-				if _, err := Load(writeReviewer(t, key, good)); err != nil {
+				cfg, err := Load(writeReviewer(t, key, good))
+				if err != nil {
 					t.Fatalf("Load: %v", err)
+				}
+				got := map[string]string{
+					"claude_model": cfg.Reviewer.ClaudeModel,
+					"codex_model":  cfg.Reviewer.CodexModel,
+					"codex_effort": cfg.Reviewer.CodexEffort,
+				}[key]
+				if got != good {
+					t.Errorf("reviewer.%s = %q, want %q", key, got, good)
 				}
 			})
 		}
-		for _, bad := range []string{"gpt 6", "a$b", `"`, "", "a'b", "a`b", "a;b", "gpt-6\n", "gpt-ä", "a/b"} {
+		for _, bad := range []string{
+			"gpt 6", "a$b", `"`, "", "a'b", "a`b", `a\b`, "a;b", "a&b", "a|b", "a<b", "a>b",
+			"a(b", "a)b", "a*b", "a?b", "a[b", "a]b", "~/m", "a#b", "a!b", "a=b", "a,b",
+			"a\tb", "gpt-6\n", "gpt-ä",
+		} {
 			t.Run(fmt.Sprintf("%s %q rejected", key, bad), func(t *testing.T) {
 				_, err := Load(writeReviewer(t, key, bad))
-				want := fmt.Sprintf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', and '-'", key, bad)
+				want := fmt.Sprintf("[reviewer].%s %q must be non-empty and hold only A-Z, a-z, 0-9, '.', '_', ':', '@', '/', '+', and '-'", key, bad)
 				if err == nil || err.Error() != want {
 					t.Fatalf("Load: err = %v, want exactly %q", err, want)
 				}
