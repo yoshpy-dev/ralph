@@ -513,4 +513,13 @@
   - `-count=3` は毎回同じ、変異 5 個はすべて落ちた。
   - `zsh -f` で `tests/test-ralph-config.sh` を打つと、runner の単語分割で rc 1(shebang は sh で gate の外、tech-debt に入れた)。
   - AC8: run-verify.sh の既定(all)は static と test の 2 つの mode を打つ。static は /verify の run-static-verify.sh、test は /test の run-test.sh で、どちらも rc 0 なので満たす(orchestrator の判断。all を 1 回で打ち直してはいない)。AC1〜AC8 にチェックを付けた。
-- [ ] PR created
+- [x] Cross-review cycle 1 — triage dee8a9e6。codex rc 0、所見 0(Case C)、前後の git の状態は同じ。手順は main のチェックアウトの skill(この PR の前の版)で回した。reviewer の値は skill の fallback(gpt-6-astra、xhigh)。
+- [x] Done consult(consult-done-standardcfg276b)— 判定「進めてよい」。PR 本文に次を足した。
+  - Known gaps: leader の TASK の 2 行の通しの確かめ、`--effort` の確かめは haiku だけ。
+  - release のノート: `ralph upgrade` は配布先の ralph.toml にキーを足さない。
+  - D6 の例外は B2 で `Closes #276` にしたあとも残ること。
+  - 上限の手順の読み替え(export → cycle-count.json の `cap`)の理解は正しい。B2 の前に main を pull して skill の版を切り替える。
+- [x] PR created — https://github.com/yoshpy-dev/ralph/pull/291(`Refs #276`)
+  - 全体図は `--attach` で載せた。ファイルの地図に S4・S8・S9 の cli の 2 ファイルと README・org の skill を足し、lint exit 0 で撮り直した。
+  - walkthrough は 3b6384df。
+  - 記録だけの修正の例外は使っていない。
