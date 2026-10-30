@@ -1028,6 +1028,47 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    と衝突の解消を TASK で頼み(per-plan では `PLAN:` のヘッダを付ける)、
    reviewer にレビューを頼み直す。fetch が失敗したら(ネットワークのない
    sandbox など)、打ち直さずに `BLOCKED` を escalate する。
+
+   rebase が済んだら(要らなかったときも)、leader は sync-docs を
+   doc-maintainer のサブエージェントに任せ、文書は自分では直さない(leader の
+   コンテキストを使わないため。「座席内 fan-out」)。Claude Code では
+   `Task(subagent_type="doc-maintainer")` で、Codex では custom agent の
+   `.codex/agents/doc-maintainer.toml` で呼ぶ。その定義が worktree にない
+   (Claude Code では `.claude/agents/doc-maintainer.md`、Codex では
+   `.codex/agents/doc-maintainer.toml`)か、呼び出しが失敗したら(Codex で
+   custom agent を呼べない、など)、sync-docs を飛ばし、
+   `SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて 2 に進む。
+   doc-maintainer への指示には、機能の計画のパス、比べる base の
+   `origin/<既定のブランチ>`、予約したパス(タスクの `- 予約したパス:` の行)と
+   その読み方(ralph の予約と同じく、ファイルはそのパス、`/` で終わる
+   ディレクトリはその下、`.` は repo 全体)を書き、次のことを頼む。直すのは
+   予約の中のファイルだけ。repo の検査が中身をそろえる写しの組(skill の写し
+   など)は、組のすべてが予約の中にあるときだけ直し、1 つでも予約の外にあれば
+   組のどれも直さずに follow-up に書く。直したあと、写しの検査
+   (`scripts/check-skill-sync.sh`・`scripts/check-sync.sh`)があれば打ち、
+   落ちる自分の変更を戻して follow-up に回す。report を
+   `docs/reports/sync-docs-<YYYY-MM-DD>-<機能の slug>.md` に書き、予約の外で
+   見つけた文書のずれを、その `## 予約外の文書の follow-up` の節に 1 件 1 行
+   (パスと、何が古いか)で書く(なければ `なし` の 1 行)。insight event を
+   付けず、コミットせず、機能の計画を変えず、`ralph org` のコマンドを打たない。
+
+   doc-maintainer が終わったら、leader は `git status --porcelain` で変わった
+   パスを読む(ここまでで何も出なくなっているので、出たものはすべて sync-docs
+   の変更)。report のほかに、予約の外のパスか機能の計画が 1 つでも変わって
+   いれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルは
+   `git restore <パス>`、新しいファイルは消す)、戻した変更を 1 件ずつ
+   follow-up として 6 のために控える。予約の外の分だけを戻すと、写しの組の
+   片方だけが変わったまま残って gate の写しの検査が落ち、予約の外を直せない
+   implementer も直せないので、一部だけを戻すことはしない。計画を戻すのは、
+   per-plan では承認のあとに計画が変わると implementer への TASK が断られる
+   ため(「機能の計画の承認」)。どちらもなければ変更はそのまま残す。残った
+   変更と report を 1 つのコミットにし、`git status --porcelain` が何も出さない
+   ことを確かめる。report のほかに変更がなければ report だけでコミットし、
+   report も前の回のコミットと同じで何も出なければ、コミットせずに 2 に進む。
+   gate をやり直すとき(4 の `GATE: fail` や、implementer の手が要る gate の
+   断りのあと)は、implementer と reviewer の往復のあとに 1 を通り直すので、
+   sync-docs も新しい HEAD でもう一度走る。控えた follow-up と `SYNC_DOCS:` の
+   行は、そのたびに最後の回のものに置き換える。
 2. `ralph org report --org-id <org_id>` を打ち(report は worktree の
    `docs/reports/` に書かれる)、report だけをコミットする(reviewer の
    レポートは 1 でコミットした)。続けて `scripts/archive-plan.sh` があれば
@@ -1091,7 +1132,10 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
      なければ `BLOCKED` を escalate する。次の手のないエラー(台帳や git の
      失敗)なら、頼み直さずに `BLOCKED` を escalate する。
    - `GATE: fail` の `BLOCKED`: `REASON:` と `LOG:` を本文に書いて implementer
-     に直しを TASK で頼み、reviewer が通したら 1 からやり直す。
+     に直しを TASK で頼み、reviewer が通したら 1 からやり直す。1 の sync-docs の
+     コミットが変えたファイルで落ちたとき(写しの検査など)も同じで、implementer
+     に予約の中で直しを頼む。1 からやり直すと、その終わりで sync-docs がもう一度
+     走る。
    - reviewer の `QUESTION`(本文のコマンドが gate の TASK の 2 つと違うので
      打たなかった): TASK の本文を、この項の 2 つのコマンド
      (`mkdir -p .harness/state` と gate のコマンド)だけを打つよう直し、
@@ -1125,11 +1169,21 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `.agents/skills/pr/SKILL.md`)のうちタイトルと本文の決まり(言語、
    タイトルの prefix など)と、本文の雛形 `template.md` に合わせる。ただし
    `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
-   ので、leader の cwd が消える)。push か `gh pr create` が失敗したら
-   (ネットワークのない sandbox など)、打ち直さずにエラーを本文に書いて
-   `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
+   ので、leader の cwd が消える)。PR の本文には
+   `## 予約外の文書の follow-up` の節を置き、1 で最後に走らせた sync-docs の
+   report の同じ名前の節の項と、1 で戻して控えた変更を、1 件 1 行(パスと、
+   何が古いか)で書く(どちらもなければ `なし`。sync-docs を飛ばしたときは、
+   控えた `SYNC_DOCS: skipped (<理由>)` の理由)。push か `gh pr create` が
+   失敗したら(ネットワークのない sandbox など)、打ち直さずにエラーを本文に
+   書いて `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
    `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて
-   `RESULT` を escalate する(TASK_ID は org_id)。
+   `RESULT` を escalate する(TASK_ID は org_id)。RESULT の本文には、PR の
+   本文の follow-up の節と同じ項を、1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`
+   で書く(なければ `DOC_FOLLOWUP: なし` の 1 行)。本文が 2,000 字に収まら
+   なければ、その行の代わりに、件数と PR の本文の節を指す 1 行
+   (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
+   書く。sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の代わりに、控えた
+   `SYNC_DOCS: skipped (<理由>)` の行を書く。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
 gate のあとにコミットを足さない。足したら gate を頼み直す。座席を gate の
@@ -1455,6 +1509,14 @@ reviewer は、レビューの TASK のゲート(TASK が指示したコマン�
 なければ `run-static-verify.sh` と `run-test.sh`)の実行を安いモデルの子
 サブエージェントに任せ、子にも同じコマンドだけを打たせたうえで、
 正確性/セキュリティ/仕様適合の観点を並列レビューする。
+
+leader も自分のドライバのサブエージェントに作業を任せてよい。機能ごとの org
+では、leader は sync-docs を doc-maintainer の子サブエージェントに任せる
+(Claude Code: `Task(subagent_type="doc-maintainer")`、Codex:
+`.codex/agents/doc-maintainer.toml`。「org の終わり方」の 1)。この子にも上の
+決まりが当てはまる。org の座席でないので manifest に現れず、`max_seats` に
+数えず、`ralph org` のコマンドを打たないので誰にも送信しない。文書を直して
+report を書くだけで、コミットは leader がする。
 
 ## 役割
 
