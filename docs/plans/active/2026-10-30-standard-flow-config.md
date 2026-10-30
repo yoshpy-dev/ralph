@@ -475,6 +475,36 @@
       - jq の 1 行は jq 1.7.1 で、cap なし → 空、3 → 3、"3" → 空、2.5 → 空。
     - self-check は 5 項目とも clean。consult は 4 点とも「変更なし」(コミットのあと)。
     - 範囲外(直さない): rules の文書(model-routing の「Where the values live」、post-implementation-pipeline)の「ralph no longer reads」。rules は skill と同じく `ralph upgrade` で一緒に入れ替わるので、文書と skill の版はずれない。ずれうるのは binary の doctor で、L1 はそれを直した。
+  - S7 の見直し(review-276b1、f1685e87): L1・L2・L4・L5 は直った。新しい所見はなく、`Merge: yes`。
+  - /verify(verify-276b1、6848f496): Verdict pass。
+    - probe(HEAD の binary と一時の repo)で AC1〜AC7 を満たした。
+      - AC1: 既定値、上書き、検証の exit 3、完全な ID が通ること。
+      - AC2・AC3: env が効かない。helper は 9 通りを sh・bash・dash・zsh で確かめた。
+      - AC5: jq を実地に打った。
+      - AC6: doctor の warn。
+    - AC4 の leader の側は、コードとテストの存在まで。AC8 は静的の部分が rc 0。
+    - V1(LOW): `ralph config get --help` が exit 2・3 で「stop and report」と案内し、`ralph_setting` の扱いと食い違う。
+    - I3: release 済みの 6.0.0 は、新しいキーを書いた ralph.toml を warn なしで読む(Rollout の「未確認」を確かめた)。
+  - S8 745a5407(impl-276b1-s8): help の文。
+    - `config get --help` に、switch は止まるが標準フローの値は `ralph_setting` が 1 行知らせて既定値で続ける、と足した(V1)。
+    - `org start --help` に `[reviewer]` の読む元と TASK の 2 行を足した。
+    - テストを足し、HEAD の help に戻すと落ちることを overlay で確かめた。cli `-run 'Config|OrgStart|Help'` ok、golangci-lint 0 件。self-check は 5 項目とも clean。
+  - S9 e430ac4c(impl-276b1-s9): `ralph org start --plan` の `[reviewer]` の読む元を、承認方式と上限の読む元にそろえた。
+    - 直す前は、`[reviewer]` だけが cwd の `./ralph.toml` から読まれた。そのため、サブディレクトリや linked worktree から打つと repo の値を黙って無視した(S8 の報告で見つかった)。
+    - 変えたこと
+      - `loadMainWorktreeConfig`(全体を返す)を足し、`loadMainWorktreeOrgConfig` はその包みにした。
+      - `resolveOrgStartReviewer` は、主 worktree の設定が読めればその Reviewer を使い、そうでなければ `resolveConfig(--config)` の Reviewer を使う。
+      - help の文は「the same ralph.toml as max_orgs and max_total_seats」に直した。
+    - テスト `TestOrgStartPlan_ReviewerFromMainWorktree` の 6 通り: サブディレクトリ、linked、主に `[reviewer]` なし、`ralph.local.toml`、`--config`、`--config` と `ralph.local.toml`。
+    - 2 回読みの回数は変わらない(二重に読むファイルが cwd から主に移っただけ。L3 の判断どおり)。
+    - 検証: cli `-run 'OrgStart|Feature|MainWorktree|Limits|Approval|Help'` 98 本 ok、golangci-lint 0 件。変異(`resolveConfig` に戻す)は主 worktree の 4 件が落とした。
+    - self-check: doc の 1 語を fixed、ほかは clean。consult は「変更なし」(主の ralph.toml が読めないときは、上限の読み込みが先にエラーで止める)。
+  - /sync-docs に回すもの(S8・S9 まで)
+    - `docs/tech-debt/README.md:161` の (b)
+    - `README.md:135` の `config get` の行(V1 と同じずれ)
+    - org skill の 712〜713 行あたり(4 つの写し)の reviewer の読む元(S9 で承認方式と同じ規則になった)
+    - 古い `PipelineConfig` の参照(`config.go:883`・`:935`、`config_test.go:419`)
+    - verify の I3 を Rollout の記録か PR 本文に書く
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
