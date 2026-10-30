@@ -837,7 +837,7 @@ func TestOrgRegate_Help(t *testing.T) {
 		}},
 		{[]string{"--help"}, []string{
 			"`ralph org regate` merges the default branch into a disbanded feature org's branch",
-			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it",
+			"stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, the inbox verbs, and the followup verbs, which refuse it",
 		}},
 	} {
 		out, err := runOrgCmd(t, tc.args...)

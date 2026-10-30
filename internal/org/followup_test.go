@@ -437,6 +437,62 @@ func TestValidateFollowupAdd(t *testing.T) {
 	}
 }
 
+// D3: a given follow-up note follows the rules of an inbox resolve note, so
+// validateFollowupNote, which copies ValidateInboxNote's checks, must decide
+// every input as ValidateInboxNote does: accept the same notes and refuse
+// the others by the same rule, which the order of the checks decides for an
+// input that breaks two. ValidateFollowupAdd decides a given note the same
+// way. A change to one of the two that the other does not get fails here.
+func TestFollowupNote_DecidesAsValidateInboxNote(t *testing.T) {
+	rule := func(err error) string {
+		if err == nil {
+			return "accepted"
+		}
+		msg := err.Error()
+		for _, r := range []struct{ name, sub string }{
+			{"blank", "is required"}, {"blank", "is blank"}, {"single line", "single line"},
+			{"UTF-8", "not valid UTF-8"}, {"length", "; at most "}, {"control", "control character"},
+		} {
+			if strings.Contains(msg, r.sub) {
+				return r.name
+			}
+		}
+		return "unknown rule: " + msg
+	}
+	for _, tc := range []struct{ name, note, want string }{
+		{"empty", "", "blank"},
+		{"spaces only", "   ", "blank"},
+		{"plain", "docs/reports/x.md", "accepted"},
+		{"500 multibyte characters", strings.Repeat("あ", InboxNoteMaxRunes), "accepted"},
+		{"501 characters", strings.Repeat("a", InboxNoteMaxRunes+1), "length"},
+		{"multi-line", "one\ntwo", "single line"},
+		{"a CR", "one\rtwo", "single line"},
+		{"a line separator", "one" + string(rune(0x2028)) + "two", "single line"},
+		{"a paragraph separator", "one" + string(rune(0x2029)) + "two", "single line"},
+		{"a tab", "a\tb", "control"},
+		{"an escape", "a" + string(rune(0x1b)) + "[2J", "control"},
+		{"DEL", "a" + string(rune(0x7f)), "control"},
+		{"a C1 control (NEL)", "a" + string(rune(0x85)) + "b", "control"},
+		{"invalid UTF-8", "a\xffb", "UTF-8"},
+		{"multi-line and too long", "one\n" + strings.Repeat("a", InboxNoteMaxRunes+1), "single line"},
+		{"a control character and too long", "\t" + strings.Repeat("a", InboxNoteMaxRunes), "length"},
+		{"invalid UTF-8 and a control character", "\xff\t", "UTF-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inbox, followup := rule(ValidateInboxNote(tc.note)), rule(validateFollowupNote(tc.note))
+			if inbox != tc.want || followup != tc.want {
+				t.Fatalf("ValidateInboxNote: %s, validateFollowupNote: %s; want both %s", inbox, followup, tc.want)
+			}
+			if tc.note == "" {
+				return
+			}
+			if got := rule(ValidateFollowupAdd(FollowupAdd{Issue: 1, AfterBranch: "feat/a", Note: tc.note})); got != tc.want {
+				t.Fatalf("ValidateFollowupAdd with the note: %s; want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // D3: a refused add creates neither the record nor its lock, and a done with
 // a refused note writes nothing and leaves the follow-up open.
 func TestFollowupAddAndDone_RefusedInputWritesNothing(t *testing.T) {
@@ -658,6 +714,14 @@ func TestFollowupRecordedMerge(t *testing.T) {
 			name: "a pr_merged in the second of the add", f: followup,
 			events: []ManifestEvent{prMergedEvent(added, "feat/a")},
 			wantAt: added, wantEvent: EventPRMerged,
+		},
+		{
+			// Both times are whole seconds, so a merge recorded in the second
+			// the follow-up was added counts even when it came a fraction of a
+			// second before the add: the comparison is at or after.
+			name: "a worktree_cleaned in the second of the add", f: followup,
+			events: []ManifestEvent{worktreeCleanedEvent(added, "feat/a", "/repo/wt")},
+			wantAt: added, wantEvent: EventWorktreeCleaned,
 		},
 		{
 			name: "a pr_merged before the add (a branch name used again)", f: followup,
