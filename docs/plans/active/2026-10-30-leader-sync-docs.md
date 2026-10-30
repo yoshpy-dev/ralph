@@ -142,4 +142,5 @@
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
+- [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-30-leader-sync-docs.md`、cycle 1、run 開始時の HEAD は a5e28500)。直したのは `/org` skill の 2 か所(座席の責務の 7 と「タスク終了時は必ず」の、機能の org の締めの順に sync-docs を足した)とその写し 3 つだけ。AGENTS.md の地図、quality-gates.md とその template の写し、definition-of-done.md、recipes、仕様の FR-7 の注、agent-messaging.md、subagent-policy.md、model-routing.md は見て、変えていない。AC の checkbox と計画の本文は触っていない。digest は前後で ab78e5f0645b
 - [ ] PR created

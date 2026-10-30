@@ -1750,11 +1750,11 @@ receipts / 役割雛形)を使うため、手順は共通。
 6. 座席は作業が終わるたびに `stop` する。
 7. 座席の作業がすべて終わったら、`report` で編成履歴を `docs/reports/` に
    成果物化する(最終責任)。機能ごとの org では、reviewer が通したら先に
-   reviewer のレポートをコミットして既定のブランチに rebase し、座席を止める
-   前に report を打って、report の
-   コミット・計画の archive のコミット・secret scan のあとに reviewer に
-   `gate` を TASK で頼み(leader は自分では打たない)、通ったら座席を止め、
-   push・`gh pr create` で PR を作る(「org の終わり方」)。
+   reviewer のレポートをコミットして既定のブランチに rebase し、sync-docs を
+   doc-maintainer に任せてコミットし、座席を止める前に report を打って、
+   report のコミット・計画の archive のコミット・secret scan のあとに
+   reviewer に `gate` を TASK で頼み(leader は自分では打たない)、通ったら
+   座席を止め、push・`gh pr create` で PR を作る(「org の終わり方」)。
 8. 最後に `disband` で組織を解散する。disband は org の herdr workspace を
    閉じるので、その中で動く headless の leader では、disband がそのセッション
    の最後のコマンドになる(ralph は記録と出力を済ませてから閉じる)。
@@ -1902,8 +1902,8 @@ Codex の reviewer は前面で打つので、そのあいだは reviewer に
   2 つ目の `watch --all` を起動すると断られる。
 - タスク終了時は必ず: 各座席を `stop` → `ralph org report --org-id <id>`
   で成果物化 → 組織を `disband`、の順で締める。機能ごとの org では順が違い、
-  reviewer のレポートのコミット → rebase → report → report と計画の移動の
-  コミット → secret scan →
+  reviewer のレポートのコミット → rebase → sync-docs のコミット → report →
+  report と計画の移動のコミット → secret scan →
   reviewer が leader の TASK で打つ `ralph org gate` → 座席の `stop` →
   push・`gh pr create` → `disband` の順になる(「org の終わり方」)。disband は
   org の herdr workspace を閉じるので最後に打つ。止めた座席の pane と org の
