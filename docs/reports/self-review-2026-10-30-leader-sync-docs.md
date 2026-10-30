@@ -1,0 +1,234 @@
+# Self-review report: leader-sync-docs
+
+- Date: 2026-10-30
+- Plan: `docs/plans/active/2026-10-30-leader-sync-docs.md`(issue #268、D1〜D5、AC1〜AC8、スライス S1 2d480eb4・S2 4a437059・S3 44275a04)
+- Reviewer: reviewer サブエージェント(`/self-review`、パイプラインの cycle 1)
+- Scope: `git diff origin/main...HEAD`(base 1e266f96、HEAD f9234b39、14 ファイル、+1519/-33)。leader の雛形 `internal/org/prompts/leader.md`、`/org` と `/director` の skill(写し 3 つずつ)、仕様の FR-4 の注、README の `ralph org gate` の段落、新しいテスト 2 本。雛形と skill は agent が従う指示なので、agent が読む順に読み、手順の番号、今の手順 9・10・12・14 と per-plan の手順 6 との食い違い、書いたとおりには動かないコマンド、読み違えうる文を見た。命名、読みやすさ、null の扱い、例外処理、security、保守性の 6 項目で見た。機械的な項目(不要な変更、誤字、デバッグ残り、秘密情報、slice 外のファイル)は実装側が見る範囲なので探していない。
+- ID: 所見は M1・M2(MEDIUM)と L1〜L6(LOW)。
+
+## Evidence reviewed
+
+- 計画の D1〜D5、AC1〜AC8、Progress checklist(S1 の implementer が挙げた `GATE: fail` の繰り返し、S3 の consult の申し送り)。
+- `leader.md` の「機能ごとの org」の全体(110〜561 行)。追加の 3 段落(348〜396 行)を、手順 9 の前半(322〜346 行)、手順 10 の終わりの戻し方(407〜413 行)、手順 12 の上限(442〜445 行)と 3 つの枝(447〜494 行)、手順 14(496〜550 行)、ミッションの 5(77〜86 行)と突き合わせた。
+- `/org` skill の「org の終わり方」の 1〜7(989〜1197 行)、「座席内 fan-out」(1503〜1524 行)、「完了条件」(1856〜1880 行)。`/director` skill の「件の処理」(643〜690 行)と新しい節「予約外の文書の follow-up」(1077〜1116 行)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。
+- 雛形が名指すものが今のコードと合うか: 予約の読み方(`internal/org/reserve.go:209-250` の `normalizeReservePath` と `reservePathsOverlap`。ディレクトリは `/` で終わり、`.` は repo 全体)、タスクの `- 機能:` と `- 予約したパス:` の行(`internal/org/feature.go:420`、`:423`)、機能のブランチ `<type>/<slug>`(`feature.go:209`)と `- Type:` の値に `docs` があること(`split.go:69-72`)、`ralph org inbox --all` が resolved を出し ORG と TYPE の列を持つこと(`internal/cli/org_inbox.go:127-131`、`:395`)、merge-order の ORG と PR の列(`internal/cli/org_merge_order.go:207-218`)、`ValidateInboxNote` の 1 行・500 字(`internal/org/inbox.go:401-416`)。
+- doc-maintainer の定義(`.claude/agents/doc-maintainer.md`、`templates/base/` の写し、`.codex/agents/doc-maintainer.toml`)と `/sync-docs` skill。skill は計画の進み具合の更新と insight event を指示するが、雛形の渡す指示は両方を禁じている。定義の `memory: project` が書く `.claude/agent-memory/` は、root と `templates/base/` の `.gitignore`(44 行)が無視するので、`git status --porcelain` に出ず、全部を戻す判定を起こさない。
+- probe(scratchpad の使い捨ての repo、確かめたあと消した): ステージした変更に `git restore <パス>` を打つと rc 0 で何も戻らず、そのあとのコミットに入る(L1)。
+- テスト: `prompts_leader_syncdocs_test.go`(298 行、7 本)と `skill_doc_followup_test.go`(514 行、9 本と補助のテスト `TestSkillParagraphAfter` 1 本)。比べ方は `squashSpace`(`prompts_test.go:139-147`)と `skillOrderedFragmentProblems` で、空白と改行を除いて比べるので、折り返しを変えても通る。順は `assertPhrasesInOrder` が位置で見る。例の RESULT は `validateEscalation` に通し、`DOC_FOLLOWUP:` がヘッダでなく本文にあることも見る。
+- 追加行の表示幅: 中央値は雛形 73、`/org` 74、`/director` 72。段落の途中の短い行は `leader.md:371` の 1 行だけで、所見にはしない。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+## Findings
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| MEDIUM | maintainability | M1 sync-docs の変更で gate が落ちると、同じ `GATE: fail` が上限なしに繰り返されうる。やり直しでは手順 9 の終わりで sync-docs が新しい HEAD でもう一度走るが、doc-maintainer には前の gate が何で落ちたかを渡さない。doc-maintainer が自分で打つのは写しの検査だけで、gate が走らせる `run-static-verify.sh` と `run-test.sh` は打たない。文書の変更は写しの検査のほかでも gate を落とす(この repo なら、skill の文を実行時に読んで固定する Go のテスト)。implementer の直しが「sync-docs の変更を戻す」なら、次の sync-docs は同じずれを見つけて同じ変更を入れ直し、gate はまた同じ理由で落ちる。手順 12 の「2 回続けて通らなければ BLOCKED」は `HEAD:` の食い違い、`GATE: pass` の行のないファイル、同じ環境の `GATE: unrunnable` だけを数え、`GATE: fail` を数えない。1 回の往復は implementer・レビュー・sync-docs・数十分の gate で、座席は動いているので見張りの停滞の ALERT も出ない。 | `internal/org/prompts/leader.md:369-371`(doc-maintainer が打つ検査)、`:393-396`(やり直しで sync-docs が走り直す)、`:442-445`(上限の対象)、`:482-489`(`GATE: fail` の枝)、`:81-82`(ミッションの 5)。`.claude/skills/org/SKILL.md:1073-1076`、`:1139-1143`。`internal/org/skill_doc_followup_test.go:68`(SKILL.md を `os.ReadFile` で読む) | やり直しの sync-docs には、前の `GATE: fail` の `REASON:` と、`LOG:` が名指す sync-docs のコミットのファイルを渡し、そのファイルはもう直さずに follow-up に回すよう頼む。あわせて、sync-docs のコミットのファイルで落ちた `GATE: fail` が 2 回続いたら 3 回目の gate を頼まずに BLOCKED を上げる、と手順 12 の上限に足す。`/org` skill の 1 と 4 も同じに直し、2 つのテストファイルの固定を足す。 |
+| MEDIUM | maintainability | M2 director が書く文書だけの機能の予約が、写しの組の一部しか覆わないことがある。leader の手順 9 は、写しの組の 1 つでも予約の外にあれば doc-maintainer に組のどれも直させず follow-up に書かせる(AC8)。follow-up の形は 1 件 1 行の「パスと、何が古いか」で、パスは 1 つ。director の手順 6 は `- Reserve:` に「一覧のファイル」を並べるので、`.claude/skills/x/SKILL.md` の 1 行だけなら、その 1 つだけを予約する。文書の org の implementer は scope の中のパスだけを `git add` するので残りの写しを直せず、gate の写しの検査(`check-skill-sync.sh`)が落ち、M1 の往復か BLOCKED になる。その org の sync-docs も同じ AC8 の決まりで組を直さず、同じ follow-up をまた書く。AC8 が生む follow-up にちょうど当たる形。 | `internal/org/prompts/leader.md:366-368`(組の扱い)、`:372-375`(1 件 1 行)、`:532`(`DOC_FOLLOWUP: <パス>: <ずれ>`)、`:267`(implementer は scope の中だけを `git add`)。`.claude/skills/director/SKILL.md:1101-1102`、`:1105-1108` | director の手順 6 に「写しの組のファイルの follow-up は、repo の写しの検査がそろえる組のファイル(`.claude/skills/<name>/` と `.agents/skills/<name>/`、`templates/base/` の写しなど)をすべて `- Reserve:` に入れる」と書く。または leader の渡す指示で、直さなかった組は写しを 1 つ 1 行ずつ follow-up に書くよう頼む。どちらかをテストで固定する。 |
+| LOW | exception-handling | L1 全部を戻す手の `git restore <パス>` は、ステージされた変更を戻さない。`git restore` は index から作業ツリーへ戻すので、doc-maintainer が `git add` した変更には rc 0 のまま何もしない。渡す指示は「コミットしないこと」とだけ書き、ステージを禁じていない。そのあとの「残った変更と report を 1 つのコミット」は index をそのままコミットするので、予約の外のステージ済みの変更がコミットに入り、コミットのあとの `git status --porcelain` も空になる(新しいファイルなら ` D` が残って気づける)。reviewer は sync-docs の変更をレビューせず、gate は予約を見ないので、あとで止めるものがない。M1・M2 より起きにくいのは、doc-maintainer が予約の外を直し、しかもステージする、の 2 つが重なったときに限るため。 | `internal/org/prompts/leader.md:375-377`(禁じること)、`:381-383`(戻し方)、`:388-390`(コミット)。`.claude/skills/org/SKILL.md:1063-1065`。probe: `M  out.md` と `A  newout.md` に `git restore out.md`(rc 0)と `rm newout.md` を打ち、`git add in.md` のあとのコミットに `out.md` と `newout.md` が入った | 戻し方を `git restore --source=HEAD --staged --worktree -- <パス>`(追跡しているファイルとステージした新しいファイル)と、未追跡のファイルを消すことに分ける。渡す指示に「ステージしないこと」を足す。2 つのテストの固定(`prompts_leader_syncdocs_test.go:140`、`:209`、`skill_doc_followup_test.go:173-174`、`:340`)も合わせて直す。 |
+| LOW | exception-handling | L2 「呼び出しが失敗した」ときの枝は、戻さずに手順 10 へ進む。すぐあとの「report を書かずに終わった」枝は、変更をすべて戻してから進む。Task が途中で落ちた、Codex の custom agent が途中で止まった、のように、ファイルを書いたあとで呼び出しが失敗したときは、leader はどちらの枝にも読める。前の枝を選ぶと、汚れた作業ツリーのまま手順 10 に進み、report のコミットに文書の変更が混ざるか、手順 12 の gate が汚れた作業ツリーとして断り、その枝が「誰が残したかわからない変更」として BLOCKED を上げる。 | `internal/org/prompts/leader.md:352-356`、`:357-361`、`:459-468`。`.claude/skills/org/SKILL.md:1037-1040`、`:1041-1045` | 2 つの枝を 1 つにする: 「定義がないときは飛ばす。呼び出しが失敗したか report を書かずに終わったときは、次の段落の戻し方で変更をすべて戻し、`git status --porcelain` が何も出さないことを確かめてから飛ばす」。テストの固定(`prompts_leader_syncdocs_test.go:163-164`、`:211`、`skill_doc_followup_test.go:131-132`、`:343`)も合わせる。 |
+| LOW | maintainability | L3 全部を戻したときの記録が、コミットした report とも PR とも合わない。report は doc-maintainer が書いたままなので、戻した変更を「直した」と書いたままコミットされる。戻した変更の控えは leader のコンテキストにしかなく、手順 12 の gate(数十分)を挟んで手順 14 まで持ち越す。`HEAD:` と `BASE:` は gate の出力ファイルから読み直せるが、戻した変更は `git restore` のあとはどこにも残らないので、そのあいだに compaction や leader のやり直しがあると、PR の本文の節から落ちる。また「何が古いか」は戻す前の差分からしか読めないが、文は「戻し、控える」の順に書いている。予約の中の変更も戻すので、それが「予約外の文書の follow-up」の節に入る。 | `internal/org/prompts/leader.md:381-384`、`:395-396`、`:521-525`。`.claude/skills/org/SKILL.md:1062-1066` | 戻す前に `git diff -- <パス>` と report の項を読んで控える、と順を書く。控えは `.harness/state/sync-docs-{{ORG_ID}}.txt`(gate の出力と同じく git が無視する場所)か、sync-docs のコミットのメッセージ本文(`Undone: <パス>` の行)に書き、手順 14 はそこから読む。予約の中だったものは、節の中でそうと分かる書き方にする。 |
+| LOW | maintainability | L4 director の新しい節の、集め始める条件と止める条件が足りない。(a) 手順 1 は merge を報告するたび、`merged` を見るたびに走るので、集めて案を見せたあとの別の merge でも同じ分割計画について集め直し、同じ案をもう一度見せる(集めたことの印がない)。(b) 文書だけの機能の org の leader も sync-docs を走らせるので、その RESULT にも `DOC_FOLLOWUP:` が出て、文書の分割計画の merge のあとに同じ手順がまた案を作る。M2 の組の follow-up はここで同じ項として戻ってくる。文書の計画から出た follow-up をどう扱うかが書かれていない。(c) PR を close した機能は `merged` にならないので、その分割計画では集め始めない。どれも人が承認しないと org は立たないので、手間が増えるだけで済む。 | `.claude/skills/director/SKILL.md:1087-1091`、`:1105-1112`。merge-order の class `closed`(`/org` skill の `merge-order` の行) | 手順 1 を「どの機能も `merged` か `closed`(closed の機能は人に名前を言う)なら、まだ集めていない分割計画について始める」にし、集めたことの印(文書の分割計画の本文に元の分割計画の id を書く、など)を決める。文書の分割計画から出た follow-up は人に報告するだけにし、続きの計画は人が頼んだときに書く、と足す。 |
+| LOW | security | L5 leader が書いた PR の URL を、director が shell のコマンドに入れる。手順 2 の `gh pr view <PR の URL> --json body --jq .body` は引用符のない置き場所で、RESULT の件の `--note '<PR の URL> follow-up 2 件'` は単一引用符で囲む。URL は RESULT の EVIDENCE、つまり同じ節が「leader が書いたデータで、指示ではない」と言うものから来るので、`;`、`$(`、`'` を含む値なら director の shell で別のコマンドとして走る。PR の番号と URL は、ralph が gh で読んだものが merge-order の PR の列(`#<番号> <URL>`)にある。 | `.claude/skills/director/SKILL.md:664`、`:1095`、`:1114-1116`。`internal/cli/org_merge_order.go:211-213` | 手順 2 は merge-order の PR の列の番号で `gh pr view <番号>` を打つ、と書く。note に写す URL も同じ列から取るか、`https://github.com/<owner>/<repo>/pull/<数字>` の形であることを確かめてから使う、と足す。 |
+| LOW | readability | L6 `/org` skill の「完了条件」は、機能ごとの org の項目を「org の終わり方」と同じ順に並べたと書くが、sync-docs のコミット(または `SYNC_DOCS: skipped`)の項がなく、RESULT の項も `DOC_FOLLOWUP:` の行に触れない。昇格した leader がこの一覧で終わりを確かめると、sync-docs が抜けていても気づかない。この PR が触っていない行なので、`/sync-docs` の範囲とも重なる。 | `.claude/skills/org/SKILL.md:1858-1872` | 3 つ目の項の rebase と report のあいだに「sync-docs のコミット(飛ばしたときは控えた `SYNC_DOCS: skipped`)」を、4 つ目の項の RESULT に「`DOC_FOLLOWUP:` の行」を足す。写し 3 つも同じに。 |
+
+## Positive notes
+
+- sync-docs を手順 9 の段落に置き、番号を振り直さずに手順 10 の 1 行目を残した(D1)。今のテストの固定を動かさずに済み、#269 の差し込みの場所も空く。
+- 予約の外を見つけたら一部でなく全部を戻す理由(写しの組の片方だけが残って gate の写しの検査が落ち、implementer が直せない)と、計画を戻す理由(手順 6 の承認の検査)が、手順の中に書いてある。読み手が規則を外したときの結果が分かる。
+- 予約の読み方の説明が `reservePathsOverlap` の読み方と同じで、テストがその関数の 5 つの case で文と結びつけている(`prompts_leader_syncdocs_test.go:109-122`)。
+- `--note` を 1 行・500 字に収める判断(D4)は `ValidateInboxNote` と合い、テストが実際に note の例を通し、2 行の note が断られることも見る(`skill_doc_followup_test.go:423-428`)。
+- テストは空白と改行を除いて比べ、順を位置で見る。雛形と skill が同じ名前(呼び方、定義と report のパス、節の名前、skip の行)を使うことを 1 本のテストで固定した(`skill_doc_followup_test.go:252-293`)。
+- 件の本文と PR の本文をデータとして読む文を、新しい節にも置いた(`director/SKILL.md:1114-1116`)。
+
+## Tech debt identified
+
+| Debt item | Impact | Why deferred | Trigger to pay down | Related plan/report |
+| --- | --- | --- | --- | --- |
+
+_(この cycle では台帳に足していない。所見を直さずに残すなら、M1 と M2 は 1 行ずつ、LOW はまとめて 1 行にして `docs/tech-debt/README.md` に足す。)_
+
+## Recommendation
+
+- Merge: yes(CRITICAL・HIGH は 0 件。M1 と M2 は、機能の org が先に進めなくなる形なので、PR の前に直すことを勧める)
+- Follow-ups:
+  - M1・M2 と L1・L2 は雛形と `/org`・`/director` skill の文の直しで、テストの固定も変わる。記録だけの直しの例外には入らないので、直したら `/self-review` から通し直す。
+  - Codex の leader が herdr の pane の中で custom agent を呼べるかは、計画のとおり実機で確かめていない(known gap)。
+  - 挙動を変える雛形と skill の変更だが、コミットは `feat:` 1 つと `docs:` で、release のノートの文は計画の Rollout にある。`/pr` で PR の本文に載せる。
+
+## cycle 1 run 2(HEAD b95f8d8c)
+
+- Date: 2026-10-30
+- Scope: run 1 の report のコミット 117ab006 から HEAD b95f8d8c までの 5 コミット(c2370794 計画の書き換えと承認のし直し、dadd4daa F1、738e7bf8 F2、8556265e 仕様と README、b95f8d8c 計画の Progress)。14 ファイル、+1177/-398。run 1 の所見が直ったかと、直しで新しく入った問題を見た。見方は run 1 と同じ 6 項目。この節の所見の番号は R2-1〜R2-3。この節の `Merge:` の行が run 1 の行に代わる。
+
+### Evidence reviewed(run 2)
+
+- 計画の D2・D2c・D3・D4・AC6 の書き換えと Progress の F1・F2・8556265e の記録。digest は c8485493b418。
+- `leader.md` の手順 9 の 3 段落(348〜423 行)、手順 12 の `GATE: fail` の枝(509〜518 行)、手順 14(548〜584 行)。`/org` skill の「org の終わり方」の 1・4・6(1032〜1225 行)と「完了条件」(1890〜1910 行)。`/director` skill の RESULT の箇条(655〜675 行)と「予約外の文書の follow-up」(1085〜1148 行)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。
+- probe(scratchpad の使い捨ての repo、確かめたあと消した):
+  - `git log --format=%H --grep='^docs: sync docs for auth$'` は、件名が `docs: sync docs for auth-token` のコミットを拾わない。件名がその文のコミットは本文があっても拾う。件名が `fix: something` で、本文の 1 行がその文のコミットも拾う(R2-1)。
+  - 同じコマンドは `grep.patternType` が `basic`・`extended`・`perl` と未設定のとき 1 件、`fixed` のとき 0 件を返した。`--basic-regexp` を付けると `fixed` でも 1 件になる(R2-1)。
+  - `git show --name-only --format= <コミット>` は空行を出さず、ファイル名だけを出す。
+  - `git restore --source=HEAD --staged --worktree -- <パス>` は `A `・`AM` を index と作業ツリーから消し、` M`・`M `・`MM`・` D`・`D ` を HEAD に戻した(rc 0)。`??` は rc 1。計画の F1 の記録と同じ。
+- 機能の slug は `ValidateIdentifier`(`^[a-z][a-z0-9-]{0,29}$`、`internal/org/identifier.go:38`)を通るので、`--grep` の正規表現にも単一引用符にも特別な文字は入らない。
+- 文書の分割計画の印 `元の分割計画: <id>` は、分割計画の読み手では機能の本文の行になる(`internal/org/split.go:530-536` の `read` は `- <key>:` の形でない行を本文にする)。digest もこの行を覆う(テスト `TestDirectorSkill_DocFollowupGatheringMarksAGatheredSplitPlanAndNeverGathersItAgain` が読み手と digest の両方を見る)。
+- merge-order の PR の列は `#<番号> <URL>` で、gh が origin の repository の PR を返したときだけ埋まる(`internal/cli/org_merge_order.go:211-213`)。そのため列に番号があれば、同じディレクトリで打つ `gh pr view <番号>` は同じ repository を読む。`merged` は gh がないと分からないので、`merged` の行の PR の列は空にならない。
+- テスト: `prompts_leader_syncdocs_test.go`(493 行)と `skill_doc_followup_test.go`(790 行)。新しい定数(コミットのメッセージ、2 つのコマンド、report の接頭辞、戻し方、`## 戻した変更`)を雛形と skill の両方の固定に使い、`TestOrgSkill_EndOfOrgNamesTheSyncDocsLikeTheLeaderTemplate` が両方に同じ名前があることを見る。`TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage` は雛形の 2 つのコマンドを使い捨ての repo で走らせ、前方一致の slug(`a-b`)と origin の上のコミットを外すことを確かめる。消した文が戻らないことも、古い言い方の否定で固定した。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### run 1 の所見の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| M1 | 直った | やり直しでは、これまでの sync-docs のコミットのファイルの和集合を git から引いて凍らせ(`leader.md:364-373`)、凍らせたファイルが変わったら全部を戻す(`:396-397`、`:410-412`)。手順 12 の `GATE: fail` の枝もそれを言う(`:516-518`)。和集合は回ごとに増えるだけなので、同じ変更の入れ直しも、別のファイルとのあいだの往復も、doc-maintainer が直せるファイルがなくなったところで止まる。`/org` skill は 1047〜1056 行。検索の確かさに R2-1 が残る。 |
+| M2 | 直った | leader 側は、直さなかった写しの組の写しを 1 つ 1 行ずつ書かせる(`leader.md:380-384`)。director 側は、組のファイルをすべて `- Reserve:` に入れる(`director/SKILL.md:1127-1132`)。 |
+| L1 | 直った | 戻し方は `git restore --source=HEAD --staged --worktree -- <パス>` と未追跡の削除(`leader.md:399-402`)、渡す指示に「ステージしないこと」(`:391`)。probe で 7 つの状態を確かめた。 |
+| L2 | 直った | 呼び出しの失敗と report なしの終わりを 1 つの枝にし、report も含めて戻して `git status --porcelain` が空なのを確かめてから飛ばす(`leader.md:356-363`)。指し先の文に R2-3 が残る。 |
+| L3 | 直った | 戻す前に `git diff HEAD -- <パス>` を読み(`leader.md:397-399`)、戻したものを report の `## 戻した変更` と follow-up の節に書き(`:402-406`)、手順 14 は最も新しい sync-docs のコミットの report を読み直す(`:551-557`)。飛ばしたときの記録は記憶のままで、R2-3 に書いた。 |
+| L4 | 一部 | (b) 文書の分割計画の follow-up は報告だけにした(`director/SKILL.md:1107-1108`、`:1141-1143`)。(c) `merged` か `closed` で始める(`:1095-1101`)。(a) 集めて承認された分割計画は `splits/` の印で見分けられるが、人が要らないと言った分割計画と follow-up のなかった分割計画には残る記録がない(R2-2)。 |
+| L5 | 直った | note の URL も `gh pr view` の番号も merge-order の PR の列から取り、列が `-` のときだけ形を確かめた本文の URL を使う(`director/SKILL.md:664-673`、`:1111-1115`)。 |
+| L6 | 直った | 「完了条件」に sync-docs のコミットと `DOC_FOLLOWUP:` の行を足した(`org/SKILL.md:1897-1900`、`:1904-1907`)。 |
+
+### Findings(run 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | exception-handling | R2-1 凍らせるファイルを探す `git log --grep='^docs: sync docs for <機能の slug>$'` は、利用者の git の設定と本文の行で結果が変わる。(1) `grep.patternType=fixed` の設定では `^` と `$` を文字として読むので 0 件になり、和集合が空のまま、凍らせずに sync-docs が走る。M1 の守りが黙って外れる。(2) `^` と `$` は行ごとに当たるので、本文の 1 行がその文のコミット(probe の `fix: something`)も拾う。そのファイルが凍り、それが最も新しければ、手順 14 が読み直す「そのコミットが入れた `docs/reports/sync-docs-` のファイル」がない。どちらも起きにくい(`fixed` を既定にする人は少なく、leader が本文にその文だけの行を書く手順はない)。テストの repo にはどちらの形もない。 | `internal/org/prompts/leader.md:366`、`:552-553`。`.claude/skills/org/SKILL.md:1049`。`internal/org/prompts_leader_syncdocs_test.go:274-334`。probe: `-c grep.patternType=fixed` で 0 件、`--basic-regexp` を足すと 1 件 | コマンドに `--basic-regexp` を足す(probe で `fixed` の設定より優先した)。本文の行まで外すなら、`git log --format='%H %s'` の出力から件名がメッセージと等しい行だけを残す形にする。テストに本文の行で当たるコミットを 1 つ足す。 |
+| LOW | maintainability | R2-2 director が集め直さない分割計画のうち、印が残るのは集めて承認されたものだけ。印 `元の分割計画: <id>` は、人が「進める」と言ってから書く文書の分割計画の中にあるので、案を見せてから答えが来るまでのあいだにはまだない。「人が要らないと言った分割計画」と「follow-up がなかった分割計画」には、どこにも記録がない。director は merge を報告するたびに手順 1 を通るので、全機能が終わったそれらの分割計画について、そのたびに受信箱と PR を読み直す。compaction や headless の director の起動し直しのあとは、要らないと言われた案をもう一度人に見せうる。どれも人の承認がないと org は立たないので、手間が増えるだけで済む。 | `.claude/skills/director/SKILL.md:1102-1108`、`:1123-1124`、`:1136-1140` | 人の答えと「follow-up なし」を、`splits/` の分割計画として読まれない決まった置き場(台帳の下の別のファイルなど)に 1 行ずつ残し、手順 1 はそれも読む、と書く。置き場を足さないなら、手順 1 に「記録のない分割計画をもう一度集めたときは、前に人に見せたかを人に聞いてから案を見せる」と書く。 |
+| LOW | readability | R2-3 呼び出しが失敗したときの枝(L2 の直し)は「次の段落の戻し方で sync-docs の変更を report も含めてすべて戻し」と書くが、次の段落の戻し方は「report のほかの sync-docs の変更をすべて戻す」で始まり、`git diff HEAD` を読んで控えることと、report に `## 戻した変更` の節を足すことで終わる。この枝では report も消すので、指し先の手順の範囲と最後の手が合わない。文のとおりに次の段落をなぞる leader は、report を残すか、消した report に節を書き足しうる。もう 1 つ、この枝の記録 `SYNC_DOCS: skipped (<理由>)` は記憶にしかない。前の回に sync-docs のコミットがあれば、手順 14 が git で引く最も新しいコミットは前の回のもので、git からは最後の回が飛ばされたと分からない。L3 の直しの理由(記憶でなく report から読む)が、この枝には届いていない。 | `internal/org/prompts/leader.md:356-363`、`:394-406`、`:419-423`、`:551-557`。`.claude/skills/org/SKILL.md:1040-1046` | 枝の中に戻し方を直接書く(「`git restore --source=HEAD --staged --worktree -- <パス>` と未追跡のファイルの削除で、report も含めて戻す。`## 戻した変更` は書かない」)。飛ばした記録は、gate の出力と同じく git が無視する `.harness/state/` の下のファイル(`sync-docs-{{ORG_ID}}.txt` など)に書き、手順 14 はそこから読む、とする。2 つのテストの `syncDocsNoReportSkip` の固定も合わせる。 |
+
+### 所見にしなかったこと(run 2)
+
+- 凍らせる和集合は、`GATE: fail` の原因が文書かどうかを見ずに広がる(D2c の「`LOG:` を読まない」)。そのため、やり直しで implementer のコードが前の回に直した文書をまた古くしても、その文書は直さずに follow-up になる。予約の中の文書が `## 予約外の文書の follow-up` の節に入ることもある。計画が決めた引き換えで、follow-up として PR と RESULT に残るので、所見にはしない。
+- report を凍らせる一覧から外すので、gate が sync-docs の report そのもので落ちる形(markdown の lint など)は凍らせても止まらない。report は予約の外にあり implementer は直せないので、往復は implementer の BLOCKED で終わる。
+- `gh pr view <番号>` は `-R` を付けないが、merge-order の PR の列は gh が origin の repository の PR を返したときだけ埋まるので、同じディレクトリで打つ限り同じ repository を読む。
+- 新しいテストの git は、パッケージのほかの git のテスト(`runGit`、`gateCommit`)と同じく利用者の設定を引き継ぐ。R2-1 の `fixed` の設定の人の手元では、このテストが落ちて知らせる。
+
+### Recommendation(run 2)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。run 1 の 8 件のうち 7 件が直り、L4 は一部。新しい所見は LOW 3 件)
+- Follow-ups:
+  - R2-1〜R2-3 は雛形と skill の文の直しで、テストの固定も変わる。直すなら `/self-review` から通し直す。この cycle で直さずに残すなら、3 件をまとめて `docs/tech-debt/README.md` に 1 行足す(この run では台帳に書いていない)。
+  - Codex の leader が pane の中で custom agent を呼べるかは、run 1 のとおり実機で確かめていない。
+
+## cycle 1 run 3(HEAD 3247c0af)
+
+- Date: 2026-10-30
+- Scope: `git diff b95f8d8c 3247c0af` のうち、F3 7f33188b(R2-1・R2-3)、1286ab79(計画の D2c と台帳の 2 行)、F4 d8e73710(verify の V1・V2)の雛形・skill・テスト・台帳の直し。0dfc49f0 で merge した #290 の差分は対象にせず、今回の文と食い違わないかだけを見た。この節の所見の番号は R3-1。この節の `Merge:` の行が run 2 の行に代わる。
+
+### Evidence reviewed(run 3)
+
+- `leader.md` の手順 9(356〜380 行の失敗の枝と前のコミットの引き方、392 行の写しの検査)と手順 14(560〜567 行)。`/org` skill の受信箱の resolve の箇条(473〜478 行)と「org の終わり方」の 1 と 6(1058〜1080 行、1232〜1242 行)。台帳の新しい 2 行(`docs/tech-debt/README.md:404-405`)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。新しいコマンドは雛形と skill に 1 つずつあり、字が同じ。`git log --grep` は「使わない理由」の文にだけ残る(`leader.md:372`、`org/SKILL.md:1073`)。
+- merge 0dfc49f0: `git show --cc` で雛形・2 つの skill・2 つのテストファイルに手の解消がないことを確かめた(出力 0 行)。#290 が雛形で変えたのは `RALPH_ORG_STATE_DIR` を消す文(今の 124〜132 行)と escalate の断りの文(今の 844〜847 行)で、今回の手順 9・14 とは重ならない。新しい文に `RALPH_ORG_STATE_DIR` は出てこない。director の新しい節の `ralph org merge-order --all`・`inbox --all` は、skill のほかのコマンドと同じく `--state-dir` を付けず、main のチェックアウトで打つ。#290 の後の台帳の決め方(`--state-dir`、`[org].state_dir`、既定の場所)とも食い違わない。
+- probe(scratchpad の使い捨ての repo、確かめたあと消した):
+  - `pre_bash_guard.sh` に新しい `git log … | awk '…'` と `git restore --source=HEAD --staged --worktree -- <パス>` を渡すと、どちらも何も出さず(deny しない)、rc 0。
+  - `git show --name-only --format=` と `git status --porcelain` の書き方を比べた。`core.quotePath=true`(git の既定)では、日本語のパスは両方が同じ 8 進の書き方で引用する。空白のあるパスは porcelain だけが `"docs/sp ace.md"` と引用し、`git show --name-only` は引用しない。`core.quotePath=false` でも空白の形は同じだった(R3-1)。
+- awk のプログラムが使う関数は POSIX の `substr` と `index` だけ。CI(`.github/workflows/verify.yml` は `ubuntu-latest` で `run-verify.sh`)は、`TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage` で同じコマンドを Linux の awk で走らせる。
+- テスト: 新しい形の固定は 1 つの定数 `syncDocsEarlierCommits` を雛形と skill の両方に使う。repo での実行は、本文の行のコミット、件名にタブのあるコミット、`grep.patternType` の basic と fixed を足した。slug の確かめは、awk の文字列と shell の引用を閉じる 4 つ(`"`・`'`・`\`・改行)に変わった。F4 は `syncDocsCopyChecks` を 2 つの固定で共有し、描いた雛形全体に `check-sync.sh` がないことと、`/org` skill の受信箱の箇条を見る。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### run 2 の所見の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| R2-1 | 直った | 件名を完全一致で比べる `git log --format='%H %s' … \| awk …` にした(`leader.md:368-375`、`org/SKILL.md:1069-1078`)。本文の行と `grep.patternType` に左右されない。テストが両方の形を持つ。`git show --name-only` の書き方の残りは台帳の 2 行目に入った(R3-1 も参照)。 |
+| R2-2 | 直していない(台帳へ) | 台帳の 1 行目に、「要らない」と「なかった」の記録が残らないことが書かれた。 |
+| R2-3 | 直った | 失敗の枝は自分の戻し方を書き、`## 戻した変更` を書かないと言う(`leader.md:358-367`、`org/SKILL.md:1060-1068`)。手順 14 と skill の 6 は、最後の回で飛ばしたときに report を読まない(`leader.md:564-567`、`org/SKILL.md:1239-1242`)。`SYNC_DOCS:` の控えが記憶にしかないことは台帳の 1 行目に入った。 |
+
+### Findings(run 3)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | maintainability | R3-1 台帳の新しい 2 行に、repo と合わない書き方が 2 つある。(1) 1 行目は、leader の `SYNC_DOCS: skipped` の控えが「its `HEAD:` and `BASE:` already are」と同じく記憶にしかないと書く。`HEAD:` と `BASE:` は手順 12 で `.harness/state/gate-{{ORG_ID}}.out` から読み、そのファイルは worktree に残るので、compaction のあとも読み直せる。記憶にしかないのは `SYNC_DOCS:` の行だけで、比べた相手の方が強い。(2) 2 行目は、`core.quotePath` の影響を日本語のパスの引用として書き、凍らせたファイルを見落としうると言う。probe では、既定の設定で日本語のパスは `git show --name-only` と `git status --porcelain` が同じ書き方で引用するので、leader の突き合わせは合う。書き方が分かれるのは空白(と引用符・バックスラッシュ)のあるパスで、porcelain だけが引用する。払い方に挙げた `git diff-tree … -z` も、比べる側の porcelain に `-z` を付けないと揃わない。どちらも記録の文で、雛形と skill の動きは変わらない。 | `docs/tech-debt/README.md:404`(「as its `HEAD:` and `BASE:` already are」)、`:405`(「non-ASCII paths printed quoted with octal escapes」、`git diff-tree --no-commit-id --name-only -r -z`)。`internal/org/prompts/leader.md:482-486`、`:534`(gate の出力ファイル)。probe の出力: `git show` は `docs/sp ace.md`、porcelain は ` M "docs/sp ace.md"` | 1 行目は「`HEAD:` と `BASE:` は gate の出力ファイルから読み直せるが、`SYNC_DOCS:` の行には読み直す場所がない」に直す。2 行目は、引き金を「空白などのあるパスで、porcelain だけが引用する」に直し、払い方を「両方を `-z` で読む(`git diff-tree --no-commit-id --name-only -r -z` と `git status --porcelain -z`)」にする。台帳の文だけの直しで、記録だけの直しの例外の条件 2(この task の report と event だけ)には入らない点に注意。 |
+
+### 所見にしなかったこと(run 3)
+
+- F4 の V1 で、doc-maintainer に名指す写しの検査は `scripts/check-skill-sync.sh` と「など」だけになった。この repo の機能の org では `check-sync.sh` も写しの検査だが、「など」で読めることと、写しの組の決まり(組のすべてが予約の中のときだけ直す)が先にあることから、所見にしない。雛形は binary に入って全プロジェクトに配られるので、この repo にしかないスクリプトを名指さない判断は妥当。
+- `/org` skill の受信箱の箇条は PR の URL を merge-order の PR の列から取ると書くが、列が `-` のときの扱い(形を確かめた本文の URL か、件数だけ)は書かず、`/director` skill の項を指す。指し先に全文があるので所見にしない。
+- 最後の回で飛ばしたとき、前の回の sync-docs の report にあった follow-up は PR の本文にも RESULT にも出ない。director はその機能を「確かめていない機能」として人と予約を決めるので、run 1 からの「最後の回のものだけを使う」決めのままとする。
+
+### Recommendation(run 3)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。R2-1 と R2-3 は直り、R2-2 は台帳に入った。新しい所見は台帳の文の LOW 1 件)
+- Follow-ups:
+  - R3-1 は `docs/tech-debt/README.md` の 2 行の言い直しだけで済む。直すなら、記録だけの直しの例外には入らない(台帳は task の report でも event でもない)。
+
+## cycle 2(HEAD ef4a15a7)
+
+- Date: 2026-10-30
+- Scope: `git diff 3247c0af ef4a15a7` の雛形・skill・テストの差分。中心は F5 4d0f70e4(cross-review cycle 1 の ACTION_REQUIRED #1、codex の P2「既定の git status は新しいディレクトリを 1 行にまとめる」)、F5b aec1381f(呼ぶ前の確かめ)、e5f90219 で sync-docs が `/org` skill に足した 2 か所。feeb1e80(R3-1 の台帳の直し)も読んだ。pipeline の cycle は 2(`.harness/state/standard-pipeline/cycle-count.json`)。この節の所見の番号は C2-1・C2-2。この節の `Merge:` の行が run 3 の行に代わる。
+
+### Evidence reviewed(cycle 2)
+
+- 雛形の手順 9 の 3 段落(`leader.md:348-448`)。失敗の枝(356〜368 行)、呼ぶ前の確かめ(369〜377 行)、照らし合わせの理由(411〜417 行)、戻し方(418〜427 行)、コミットのあとの確かめ(436〜440 行)を、手順 9 の最初の段落の振り分け(322〜332 行)と、手順 12 の `GATE: unrunnable` の作業ツリーの枝(`leader.md:512` から)に照らした。
+- `/org` skill の「org の終わり方」の 1(1050〜1150 行)、「leader の責務」の 7(1769〜1775 行)、「タスク終了時は必ず」(1921〜1926 行)。4 つの写しは `cmp` で一致した。
+- cross-review の分類の報告(`docs/reports/cross-review-triage-leader-sync-docs.md`)の #1。
+- gate と後始末の作業ツリーの判定: `ralph org gate` は `git status --porcelain --untracked-files=all` で見る(`internal/org/gate.go:595-599`)。`ralph org cleanup` も同じ(`internal/org/cleanup.go:727-739`)で、そのあとの `scripts/ralph-worktree.sh` の片付けは `git worktree remove "$path"`(`scripts/ralph-worktree.sh:393`、`--force` なし)。`scripts/check-skill-sync.sh` は `SKILL.md` のファイルで skill を数え(53 行)、`scripts/check-sync.sh` は `find … -type f` でファイルだけを比べる(207 行など)。
+- probe(scratchpad の使い捨ての repo と linked worktree、確かめたあと消した): 新しいディレクトリ `docs/new/` と `docs/new/sub/` にファイルを置き、`status.showUntrackedFiles=no` では `git status --porcelain` が 0 行、`--untracked-files=all` を付けると 2 行を出した(コマンドの flag が設定に勝つ)。ファイルを 1 つずつ消すと空のディレクトリが残り、`git status --porcelain --untracked-files=all` は 0 行で、`git worktree remove` は rc 0 で worktree を消した。
+- テスト: `TestRenderRolePrompt_Leader_FeatureOrgSyncDocsStatusListsEachNewFile` は、repo の設定で `status.showUntrackedFiles` を `normal` と `no` にして、短い形が `?? docs/new/` か何も出さないこと、新しい形が 2 つのファイルを 1 行ずつ出し、無視されるファイルを出さないこと、`reservePathsOverlap` で予約の中と外に分かれること、1 つずつ消したあとに何も出ず、無視されるファイルが残ることを確かめる。手順 9 の sync-docs の段落に短い形が残らないことも見る。呼ぶ前の確かめは、雛形と skill の両方で、失敗の枝のすぐあと、前のコミットの引き方のすぐ前にあることを 1 つの句でつないで固定した。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### 頼まれた点への答え(cycle 2)
+
+1. F5 と F5b は P2 を直している。sync-docs の段落の git status はすべて `--untracked-files=all` になり、予約と凍らせたファイルとの照らし合わせが新しいファイルを 1 つずつ見る(`leader.md:411-417`、`org/SKILL.md:1111-1118`)。F5b の呼ぶ前の確かめが、利用者の `status.showUntrackedFiles=no` のときにも「ここまでで何も出なくなっている」を本当にする。
+2. 空のディレクトリは、gate・cleanup・`git worktree remove`・2 つの写しの検査のどれも数えない(上の Evidence)。所見にしない。呼ぶ前の確かめの振り分けは、手順 9 の最初の段落と同じ 3 つに分ける。ずれは C2-2 の 1 点。
+3. e5f90219 の 2 か所は、雛形の順(reviewer のレポートのコミット → fetch と rebase → sync-docs のコミット → report → archive → secret scan → gate)と同じ。
+4. 雛形と skill は、呼ぶ前の確かめの振り分けの書き方が違う(雛形は「終わったら手順 8 の往復に戻り」と「残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる」、skill は「reviewer にレビューを頼み直し」と「`BLOCKED` を escalate する」)。どちらもそれぞれの最初の段落の書き方に合わせたもので、中身は同じ。
+
+### Findings(cycle 2)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | C2-1 F5 の前の書き方が 2 か所に残る。(1) `TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip` の doc コメントは、失敗の枝が「checks that git status --porcelain prints nothing」と書き、未追跡のファイルを「deletes it」とまとめる。固定している `syncDocsNoReportSkip` は `--untracked-files=all` と 1 つずつの削除に変わっている(lead が挙げた点)。(2) 台帳の 2 行目は、leader が凍らせたファイルと比べる相手を「the paths `git status --porcelain` prints」と書き、払い方も `git status --porcelain -z` を挙げる。F5 のあとの手順 9 は `--untracked-files=all` を付けて読むので、払い方のコマンドもそれを付けないと、新しいディレクトリの下のファイルがまた 1 行にまとまる。 | `internal/org/skill_doc_followup_test.go:359-370`(366 行)。`docs/tech-debt/README.md:405`。`internal/org/prompts/leader.md:411-417` | (1) コメントを `syncDocsStatus` と「deletes the listed untracked files one by one」に直す。(2) 台帳の行の 2 つのコマンドを `git status --porcelain --untracked-files=all` と `git status --porcelain --untracked-files=all -z` にする。 |
+| LOW | readability | C2-2 呼ぶ前の確かめの振り分けは「fetch の前に変更が残っていたときと同じく扱う」と書いたあと、括弧で 3 つの扱いを言い直すが、implementer への TASK に per-plan では `PLAN:` のヘッダを付けることが、雛形にも skill にも抜けている。指し先の最初の段落には書いてある。括弧のとおりに打つと per-plan の org では TASK が承認の検査で断られ、手順 7 の断りの扱いに回る(断りの文が次の手を言うので、先に進めなくはならない)。 | `internal/org/prompts/leader.md:373-377`(指し先は `:328-330`)。`.claude/skills/org/SKILL.md:1075-1078`(指し先は `:1036-1037`) | 括弧の implementer の項に「(per-plan では `PLAN:` のヘッダを付ける)」を足す。2 つのテストの固定の句も合わせる。 |
+
+### 所見にしなかったこと(cycle 2)
+
+- 手順 9 の最初の段落の確かめは、今も短い `git status --porcelain` のまま。`status.showUntrackedFiles=no` では未追跡のファイルを見落とすが、F5b の呼ぶ前の確かめが拾い、拾えなかった分も gate(`--untracked-files=all`)が作業ツリーの汚れとして断る。今のテスト(`prompts_test.go`)の固定を動かさない判断と読める。
+- `/org` skill の「leader の責務」の 7 と「タスク終了時は必ず」は、sync-docs を飛ばしたとき(コミットがない)を言わない。どちらも「org の終わり方」を指し、「完了条件」は飛ばしたときの `SYNC_DOCS:` の行を書くので、所見にしない。
+- `--untracked-files=all` でも、空白のあるパスは porcelain が引用する(run 3 の probe)。台帳の 2 行目の範囲。
+
+### Recommendation(cycle 2)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。cross-review cycle 1 の #1 は直った。新しい所見は LOW 2 件で、どちらも文の直し)
+- Follow-ups:
+  - C2-1 の (1) はテストのコメント、(2) は台帳の文、C2-2 は雛形と skill の括弧の 1 句。pipeline の上限(2 回)に届いているので、直さずに残すなら 2 件をまとめて台帳に 1 行足す。直すなら、C2-1 の (1) と C2-2 はテストのファイルと雛形に触るので、記録だけの直しの例外には入らない。
+
+## cycle 3(HEAD ebc2b64a)
+
+- Date: 2026-10-30
+- Scope: `git diff 8bd985fb ebc2b64a` の雛形・skill・仕様・テスト・台帳。94c10923 と F6 41468881(C2-1・C2-2)、822acf62 の仕様 FR-4 の注、F7 44694f5b(cross-review cycle 2 の ACTION_REQUIRED #1、P2「文書の org の予約に、文を固定するテストが入らない」)。pipeline の上限は 3 に上げてあり、`cycle-count.json` は 2 のままなので insight event の cycle は 2 になる(lead の説明どおり)。この節の所見の番号は C3-1。この節の `Merge:` の行が cycle 2 の行に代わる。
+
+### Evidence reviewed(cycle 3)
+
+- 雛形の手順 9 の呼ぶ前の確かめ(`leader.md:369-377`)と `/org` skill の「org の終わり方」の 1(`org/SKILL.md:1071-1079`)。`/director` skill の「予約外の文書の follow-up」の手順 6(`director/SKILL.md:1126-1141`)。台帳の 2 行目(`docs/tech-debt/README.md:405`)。仕様 FR-4 の #268 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)。
+- 写し: `/org` と `/director` の 4 つの写しは `cmp` で一致した。
+- テスト: `syncDocsLeftoverSort` は implementer の項の `PLAN:` の句までを持ち、雛形と skill の両方の固定がそれを使い、そのあとはそれぞれの書き方で固定する。新しい `TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs`(`skill_doc_followup_test.go:705`)は手順 6 の F7 の文を 6 つの句で固定し、4 つの写しの手順 6 に `_test.go` の名前が出ないことを見る。
+- 確かめていない: テストと静的検査(skill の規則どおり、走らせていない)。
+
+### cycle 2 の所見と P2 の状態
+
+| ID | 状態 | 根拠 |
+| --- | --- | --- |
+| C2-1 | 直った | (1) テストのコメントは `--untracked-files=all`(`syncDocsStatus`)と 1 つずつの削除を言う(`skill_doc_followup_test.go:359-371`)。(2) 台帳の 2 行目は、比べる相手と払い方の 2 つのコマンドに `--untracked-files=all` を付けた(`docs/tech-debt/README.md:405`)。 |
+| C2-2 | 直った | 呼ぶ前の確かめの括弧の implementer の項に「(per-plan では `PLAN:` のヘッダを付ける)」が入った(`leader.md:375-376`、`org/SKILL.md:1077-1078`)。指し先の最初の段落と同じ言い方。 |
+| P2(cross-review cycle 2 #1) | 直った(文に C3-1) | 手順 6 は、案を見せる前に follow-up の文書を読むテストと文を固定するテスト・fixture を探して `- Reserve:` に入れ、足したものと理由を人に言う(`director/SKILL.md:1133-1139`)。探し方は「repo のテストのファイルを、パスと変わる文で検索する」で、言語や test のフレームワークを名指さないので、downstream の repo でも読める。テストを予約する理由(implementer は予約の中だけを `git add` するので、予約の外のテストを直せない)も書いてある。 |
+
+### Findings(cycle 3)
+
+| Severity | Area | Finding | Evidence | Recommendation |
+| --- | --- | --- | --- | --- |
+| LOW | readability | C3-1 F7 の文「一覧のファイルを読むか、その文を固定するテストと fixture を探し」は、読点のせいで 2 通りに読める。意図(テストの doc コメントとコミットのメッセージ)は「一覧のファイルを読むテストと、その文を固定するテスト・fixture を探す」で、「一覧のファイルを読むか」は「テスト」にかかる。読点のところで切ると「一覧のファイルを読む、または テストを探す」になり、director が一覧の文書を読むだけで手順を済ませたと受け取れる。そう読むと、P2 で足した予約が入らない。 | `.claude/skills/director/SKILL.md:1133-1134`(写し 3 つも同じ)。意図は `internal/org/skill_doc_followup_test.go:692-704` の doc コメントの「the tests and fixtures that read the follow-up files or pin their sentences」と、44694f5b のメッセージの「follow-up の文書を読むテストや文を固定するテストと fixture」 | 「一覧のファイルを読むテストと、その文を固定するテストや fixture を探し」のように、「テスト」を両方に付けて読点の前で文が切れないようにする。テストの固定の句(`skill_doc_followup_test.go:709`)も合わせる。 |
+
+### 所見にしなかったこと(cycle 3)
+
+- 仕様 FR-4 の #268 の注は、822acf62 で呼ぶ前の確かめを足したが、F7 より前なので、文書の機能の予約には「写しの組の follow-up は組のすべてを予約に入れ」とだけ書き、テストと fixture を言わない。注は「詳細は計画に書いた」で終わり、計画の D4 は F7 で書き換えてあるので、所見にせず、この cycle の sync-docs に渡す。
+- 手順 6 で見つけたテストが、走っているほかの org の予約に入っていれば、`ralph org start --plan` が予約の重なりで断る。今の「分割計画と機能ごとの org」の断りの扱いに乗るので、手順 6 に書き足すことはない。
+
+### Recommendation(cycle 3)
+
+- Merge: yes(CRITICAL・HIGH・MEDIUM は 0 件。C2-1・C2-2・cross-review cycle 2 の #1 は直った。新しい所見は文の LOW 1 件)
+- Follow-ups:
+  - C3-1 は skill の 1 句とテストの固定の句の直し。直すなら skill(写し 4 つ)とテストのファイルに触るので、記録だけの直しの例外には入らない。直さずに残すなら台帳に 1 行足す。
