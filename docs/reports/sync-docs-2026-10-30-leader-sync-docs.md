@@ -69,3 +69,55 @@
 ## Insight event
 
 `./scripts/insights-append.sh --slug leader-sync-docs --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` に 1 行足した。
+
+## cycle 2
+
+- Date: 2026-10-30
+- Pipeline cycle: 2(`cycle-count.json` の値)。run 開始時の HEAD は `147e84bc`、前の sync-docs の commit は `e5f90219`。計画の digest は `220fa1f3994f`(cross-review cycle 1 の直しのあと `ef4a15a7` で付け直したもの)で、この run の前後で同じ
+- 先行 report: `docs/reports/cross-review-triage-leader-sync-docs.md`(cycle 1 の ACTION_REQUIRED 1 件)、self-review cycle 2(`8bd985fb`、Merge: yes)、verify cycle 2(`b0845cd3`、pass、LOW の V3)、test cycle 2(`147e84bc`、pass。変異 21 個がすべて落ちた)
+- 前回から変わったもの: F5 `4d0f70e4`(`git status --porcelain --untracked-files=all` にそろえ、未追跡のファイルは一覧に出たものを 1 つずつ消す)、F5b `aec1381f`(doc-maintainer を呼ぶ前に何も出ないことを確かめる)、F6 `41468881`(その振り分けに per-plan の `PLAN:` のヘッダ)。雛形、`/org` skill とその写し 3 つ、テスト、台帳の行(`94c10923`)に入っている
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-4 の 2026-10-30 の注、93 行) | verify の V3。「leader は `git status --porcelain` で変わったパスを読み」を、呼ぶ前に `git status --porcelain --untracked-files=all` が何も出さないことを確かめ(出れば呼ばず、fetch の前に変更が残っていたときと同じく扱う)、終わったら同じコマンドで変わったパスを 1 ファイルずつ読む、に直した。日付つきの決定の記録なので、ほかの文は変えていない |
+| `docs/plans/active/2026-10-30-leader-sync-docs.md` | `## Progress checklist` に cycle 2 の行を 1 つ足した。本文と AC の checkbox は触っていない |
+| `docs/reports/sync-docs-2026-10-30-leader-sync-docs.md` | この節 |
+| `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` | `sync_docs` の cycle 2 の行 |
+
+### Surfaces checked for drift
+
+| Surface | 結果 | 根拠 |
+|---------|------|------|
+| README(268 行、280 行の gate の段落) | 変更なし | `git status` を名指さない。280 行の sync-docs の説明は要約で、呼ぶ前の確かめや `PLAN:` のヘッダの細部までは書かない |
+| `AGENTS.md` | 変更なし | 地図で、leader の手順を載せていない |
+| `/director` skill(「予約外の文書の follow-up」) | 変更なし | `git status` を名指さない。leader の sync-docs の説明は要約で、今の動きと矛盾しない |
+| `/org` skill の要約 2 か所(前回足した「leader の責務」の 7 と「タスク終了時は必ず」) | 変更なし | 締めの順だけを書く。F5・F5b・F6 は sync-docs の段落の中の確かめ方の変更で、順は変わらない |
+| `/org` skill の完了条件(「worktree の `git status --porcelain` が空」) | 変更なし | 終わりの状態の条件。長い形(`--untracked-files=all`)で何も出なければ短い形でも何も出ないので、矛盾しない。この文は `skill_doc_followup_test.go` が固定している |
+| 雛形の手順 9 の最初の段落と `/org` skill の同じ段落(fetch の前の確かめ、`git status --porcelain` のまま) | 変更なし | `prompts_test.go` が固定していて変えない。短い形が見落とす未追跡のファイルは、F5b の呼ぶ前の確かめが埋める(計画の F5b の記録、verify cycle 2) |
+| `docs/quality/quality-gates.md`、`definition-of-done.md`、template の写し | 変更なし | cycle 1 と同じ。F5・F5b・F6 は検証の段の書き方に触れない |
+| `.claude/rules/ralph/`(`model-routing.md` の `git status --porcelain` など) | 変更なし | `model-routing.md:43` は implementer の報告の証拠の書き方で、leader の sync-docs とは別の話。ほかの rules は sync-docs の確かめ方を書かない |
+| `docs/recipes/`(`codex-setup.md:183`、`worktrees.md:62`) | 変更なし | どちらも leader の sync-docs とは関係のない `git status --porcelain` |
+| `docs/tech-debt/README.md` の 405 行 | 変更なし | `94c10923` が照らし合わせる側を `--untracked-files=all` に、払い方を `-z` つきの同じコマンドに直済み。雛形と合う |
+| 仕様 FR-4 の注の、`git status` 以外の文 | 変更なし | director の集め方、凍らせたファイル、飛ばすときの条件は雛形と skill の今の文と合う |
+
+### Commands run
+
+| Command | Result |
+|---------|--------|
+| `./scripts/check-template-purity.sh` | PASS |
+| `./scripts/check-skill-sync.sh` | rc 0、14 skill が一致 |
+| `./scripts/check-sync.sh` | PASS。IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6 |
+| `git diff --check` | rc 0、出力なし |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill\|RenderRolePrompt'` | ok、15.3 秒(この run は skill も雛形も直していないが、依頼のとおり打った) |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-leader-sync-docs.md` | `220fa1f3994f`(承認の行と同じ) |
+
+### Not done
+
+- AC の checkbox は付けていない。雛形の手順を leader が実機の org で走らせること、Codex の leader が custom agent を呼べることは、cycle 1 のとおり確かめていない
+- 仕様 FR-4 の注に、`--untracked-files=all` を付ける理由(新しいディレクトリが 1 行にまとまること、`status.showUntrackedFiles=no`)は書いていない。理由は雛形と `/org` skill の段落が持ち、注は要約のため
+
+### Insight event
+
+`./scripts/insights-append.sh --slug leader-sync-docs --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` に cycle 2 の行を足した。
