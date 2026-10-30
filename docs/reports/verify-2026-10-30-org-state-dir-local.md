@@ -54,7 +54,7 @@
 
 | ID | Severity | Finding | Evidence | Recommendation |
 | --- | --- | --- | --- | --- |
-| V1 | LOW | tech-debt の Trigger にこの branch が当たったのに、持ち越しの注がない行が 13 ある。どの行も origin/main と同じバイト列のまま(この branch は `docs/tech-debt/README.md` を変えていない)。148・170 行は lead の一覧にある env の記述とは別に、Trigger にも当たっている。148 は `ResolveOrgStateDir` の変更、170 は `guardLegacyOrgStateDir` の変更(insights の分岐を外した)。ほかに 135(`doctor_codex_writable_root.go` の注釈 1 行)、177 の (a)(`/org` skill の命令の表の `cleanup` の行)、188(`orgWideLimitsHelp` の文。(b)・(c)・(e) が開いたまま)、198 の (j)(`LedgerMainWorktreeRoot` の `case`)、208 の (b)(`newOrgRuntimeAt` の doc を直したが、まだ呼び出し元を 2 つ名指す)、246(`org_merge_order.go` とテスト)、362(leader の雛形のテスト 2 本。`prompts_test.go` は 2683 行で +300 の閾値には届かない)、368(`codex-seat-permissions.md` の 2 つの写し。`docs/evidence/` の引用は 2 のまま)、386(4 ファイルのうち `org_merge_test.go`、`cleanup_test.go`、`director_skill_sync_test.go` の 3 つ)、390(`cleanup.go` の `ledgerMoveStep`。1086 → 1089 行、`org_cleanup_test.go` は 1142 → 1262 行)、391(断りの文の `ledgerMoveStep`)、392(`statedir.go` と呼び出し元の `feature.go`・`cleanup.go`。行は呼び出し元に `cleanup.go` を数えていない) | evidence の「tech-debt Trigger sweep」と、各行の Trigger の欄 | /sync-docs で各行に「carried over by feat/org-state-dir-local」の注を足す。392 は呼び出し元の数も直す |
+| V1 | LOW | tech-debt の Trigger にこの branch が当たったのに、持ち越しの注がない行が 14 ある(cycle 1 の版は「13」と書いていた。下の行番号は 14 個で、cycle 2 で直した)。どの行も origin/main と同じバイト列のまま(この branch は `docs/tech-debt/README.md` を変えていない)。148・170 行は lead の一覧にある env の記述とは別に、Trigger にも当たっている。148 は `ResolveOrgStateDir` の変更、170 は `guardLegacyOrgStateDir` の変更(insights の分岐を外した)。ほかに 135(`doctor_codex_writable_root.go` の注釈 1 行)、177 の (a)(`/org` skill の命令の表の `cleanup` の行)、188(`orgWideLimitsHelp` の文。(b)・(c)・(e) が開いたまま)、198 の (j)(`LedgerMainWorktreeRoot` の `case`)、208 の (b)(`newOrgRuntimeAt` の doc を直したが、まだ呼び出し元を 2 つ名指す)、246(`org_merge_order.go` とテスト)、362(leader の雛形のテスト 2 本。`prompts_test.go` は 2683 行で +300 の閾値には届かない)、368(`codex-seat-permissions.md` の 2 つの写し。`docs/evidence/` の引用は 2 のまま)、386(4 ファイルのうち `org_merge_test.go`、`cleanup_test.go`、`director_skill_sync_test.go` の 3 つ)、390(`cleanup.go` の `ledgerMoveStep`。1086 → 1089 行、`org_cleanup_test.go` は 1142 → 1262 行)、391(断りの文の `ledgerMoveStep`)、392(`statedir.go` と呼び出し元の `feature.go`・`cleanup.go`。行は呼び出し元に `cleanup.go` を数えていない) | evidence の「tech-debt Trigger sweep」と、各行の Trigger の欄 | /sync-docs で各行に「carried over by feat/org-state-dir-local」の注を足す。392 は呼び出し元の数も直す |
 | V2 | LOW | tech-debt 186 行の (c) F-7 は、この PR で解消したのに開いたまま。F-7 は「`newOrgRuntime` の解決と guard の 2 段が spawn・start・start --plan に写され、`newOrgSpawnRuntimeAt` が guard を繰り返す」という指摘。いまは 15 か所が `resolveOrgLedger` を通り、`newOrgSpawnRuntimeAt` は guard を呼ばない(`org.go:154-160`)。Trigger「the next change to `newOrgRuntime` (F-7: one shared function for the resolve and guard steps)」が求める形そのもの | `docs/tech-debt/README.md:186`、`internal/cli/org_legacy_ledger.go:74-86`、`internal/cli/org.go:134`・`:814`・`:1013`・`:1114` | /sync-docs で (c) を閉じる。Debt・Impact・Why deferred・Trigger の 4 つの欄の F-7 の記述をそろえて直す |
 | V3 | LOW | doctor の warn の文が、台帳を変える動詞が断られる条件を言い切れていない。文は「while it names another directory than the ledger ralph finds by default, the org verbs that change the ledger are refused」だが、拒否は `--state-dir` も `[org].state_dir` も台帳を名指さないときだけ起きる(`org_legacy_ledger.go:116`)。probe で、個人用のファイルが `<W>/ledger` を、env が `<W>/env-ledger` を指すとき、doctor は同じ warn を出し、`ralph org stop --all` は注意だけで exit 0 になった。escalate の help の最後の文(`org_inbox.go:83-84`)も同じ条件を省いている。README `:148` と `/org` skill `:116-118` は条件を書いている | `internal/cli/doctor.go:884-887`、evidence の「Probes 3」 | 2 つの文に「and neither --state-dir nor [org].state_dir names the ledger」に当たる条件を足す。文を固定するテストも合わせる。Go の文字列なので /sync-docs では直せない。直すならパイプラインの次の実行で、直さないなら PR の Known gaps に書く |
 | I1 | INFO | 上の文書のずれの表の、198 行の (h) と 188 行の閉じた (d) | 同上 | /sync-docs で、148・170・192 行と一緒に直す |
@@ -93,10 +93,11 @@ pass
 - Verified: AC1〜AC10 は、コードの該当箇所と probe か grep で確かめた。静的解析(gofmt、go vet、golangci-lint、staticcheck、shellcheck、check-sync、check-skill-sync、check-template-purity、secret scan)はすべて通り、計画の digest は承認時と同じ。
 - Partially verified: AC2 の `--config` の側、AC6 の start と spawn の拒否、escalate の NOT RECORDED は、コードとテストの存在まで。AC11 は静的の部分だけ。
 - Not verified: Go のテストの結果(/test)、本物の herdr と agmsg での通し。
-- 所見: LOW 3 件(V1 tech-debt の Trigger 13 行、V2 186 行の F-7 の解消、V3 doctor の warn と escalate の help の条件)、INFO 6 件。どれも merge を止めない。
-- /sync-docs に回すもの: tech-debt 148・170・192 行の env の記述(lead の指示)、198 行の (h) と 188 行の (d) の注(I1)、V1 の 13 行の持ち越しの注、V2 の 186 行の (c) を閉じること、README `:135` と `ralph config get --help` の exit 3 が local-only のキーを名指さないこと(lead の指示。help は Go なので /sync-docs では README だけ)、`ralph doctor --help` の `--strict` の値の名前(前からの問題、lead の指示)。任意: I2・I3・I5・I6。
+- 所見: LOW 3 件(V1 tech-debt の Trigger 14 行、V2 186 行の F-7 の解消、V3 doctor の warn と escalate の help の条件)、INFO 6 件。どれも merge を止めない。
+- /sync-docs に回すもの: tech-debt 148・170・192 行の env の記述(lead の指示)、198 行の (h) と 188 行の (d) の注(I1)、V1 の 14 行の持ち越しの注、V2 の 186 行の (c) を閉じること、README `:135` と `ralph config get --help` の exit 3 が local-only のキーを名指さないこと(lead の指示。help は Go なので /sync-docs では README だけ)、`ralph doctor --help` の `--strict` の値の名前(前からの問題、lead の指示)。任意: I2・I3・I5・I6。
 - Insight event: `docs/insights/events/2026-10-30-org-state-dir-local.jsonl` に verify の行を 1 行足した(`--verdict pass --cycle auto --low 3`)。
 - S8(cb33a636)まで見ても pass。V3 は直った(下の「S8 の確認」)。S8 で新しい所見はない。開いた所見は LOW 2 件(V1、V2)と INFO 6 件で、どれも merge を止めない。V1・V2 と I1 は /sync-docs が扱う。insight event は同じ jsonl に 1 行(`--verdict pass --cycle auto --low 2`)。
+- cycle 2(S9 6415aabd、HEAD a689bac7)まで見ても pass。run-static-verify は rc=0(41 秒)。cross-review の ACTION_REQUIRED #1 が破っていた AC4 は、大文字小文字を混ぜた 5 つの綴りで、`RALPH_LOCAL_CONFIG` を外しても `off` にしても Load が断る。S9 の前の binary は同じ `ralph.toml` で `/x` を返した。ほかの AC は、cycle 1 の probe を HEAD の binary で打ち直して出力が S8 の 1 行のほか変わらないことで確かめた。S9 で新しい所見はない。V1・V2・I1・I5・I6 は /sync-docs(3a6d1b11)で扱われた。開いているのは INFO の I2(B の範囲)、I3(依頼で specs を外した)、I4(記録済みの逸脱)だけ。insight event は同じ jsonl に 1 行(`--verdict pass --cycle auto --low 0`、cycle 2)。下の「cycle 2」の節を見る。
 
 ## S8 の確認
 
@@ -140,3 +141,69 @@ pass
 
 - V3: fixed(cb33a636)。
 - V1、V2、I1〜I6: S8 は触らないので、そのまま残す。V1・V2・I1 は /sync-docs が扱う。
+
+## cycle 2
+
+- Date: 2026-10-30 14:20〜14:50 JST
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの cycle 2。`cycle-count.json` は 2)
+- Scope: e5d5a5a4..a689bac7 の 8 コミット。コードの変更は S9 6415aabd だけで、`internal/config/local.go`(`checkLocalOnlyKeys` の doc と `tomlDocHasKey`)と `local_test.go`。残りの 7 コミットは記録と文書(test report、/sync-docs の 3a6d1b11 と 5602c49d、計画の 84930e3e と 845b4eff、cross-review の triage の ca7c651f、self-review の a689bac7)。static はブランチ全体で打った。テストは打っていない(/test の範囲)。
+- 直す元の所見: `docs/reports/cross-review-triage-org-state-dir-local.md` の ACTION_REQUIRED #1。`ralph.toml` の `[ORG]` / `STATE_DIR` が local-only の検査をすり抜け、AC4 が破れていた。
+- load average(`sysctl -n vm.loadavg`): static の直前 9.50、直後 17.58。build の直前 16.38。
+- Evidence: `docs/evidence/verify-2026-10-30-org-state-dir-local.md` の「cycle 2」の節。全出力は同じ名前の `.log` の末尾。run-verify 自身のログは `docs/evidence/verify-2026-10-30-052232.log`。
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh` | pass(rc=0、41 秒、14:22:31〜14:23:13 JST) | 範囲は `Language scope: full fallback (unclassified:templates/base/ralph.toml)` で、Go は全体で走った。gofmt `ok`、go vet と staticcheck は無出力(Skipping の行なし)、golangci-lint `0 issues.`。check-sync `PASS`(IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0)、check-pipeline-sync、check-skill-sync(14 本)、check-template-purity、tech-debt の計画参照、local verifier もすべて OK。secret scan は `c03647f9..a689bac7` で clean。timeout には当たらず、打ち直しもしていない |
+| `go build -o <scratch>/ralph-c2 ./cmd/ralph` | pass(rc=0) | probe 用。HEAD a689bac7 から build した。build の前後で `git status --porcelain` は空 |
+| `git archive ca7c651f` を scratch に展開して `go build` | pass(rc=0) | S9 の直前の binary。比べるためだけに使い、展開した木は消した |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-org-state-dir-local.md` | `1ea27c42968f` | 承認時と同じ。この間の計画の変更は AC の checkbox(84930e3e)と Progress の記録(3a6d1b11、845b4eff)だけ |
+
+### AC4(大文字小文字を混ぜた綴り)
+
+満たす。
+
+- コード: `tomlDocHasKey`(`internal/config/local.go:153`)は、区切りごとに `strings.ToLower` が同じキーをすべて辿る。go-toml v2.3.0(`go.mod:8`)の `structFieldPath`(module cache の `unmarshaler.go:1386-1414`)は、field の名前とその `strings.ToLower` を表に入れ、キーをそのまま、なければ `strings.ToLower(キー)` で引く。local-only のキーの各区切りは小文字の tag と同じなので、2 つの規則は同じキーを拾う。`checkLocalOnlyKeys`(`:129`)が失敗すると、Load は前と同じく `Default()` を返す。
+- probe(HEAD の binary、一時 repo の main の root に `ralph.toml` だけを置いた): `[ORG]` / `STATE_DIR = "/x"`、`[Org]` / `State_Dir`、`ORG.STATE_DIR`、`ORG = { STATE_DIR = ... }`、`[org]` のあとの 2 つ目の table `[ORG]` の 5 つの綴りで、結果は次のとおり。
+  - `ralph config get org.state_dir` は、`RALPH_LOCAL_CONFIG` を外しても `off` にしても exit 3 になった。文は `config get: ralph.toml: cannot be read or is invalid: ralph.toml: [org].state_dir can be set only in ralph.local.toml, ... set it in ralph.local.toml instead` で、ファイルのパスと書く先の `ralph.local.toml` を名指す。
+  - `ralph org status --org-id a` は `org: load config: ralph.toml: ...` で exit 1 になった。doctor は `⚠ ralph.toml: warn — parse error: <同じ文> — using defaults` を出した。
+  - `ralph status` は、どちらの設定でも exit 0 のまま、stderr に `warning: status: load ralph.toml: ralph.toml: [org].state_dir can be set only in ralph.local.toml, ...` を出し、既定の値で続けた。読めない `ralph.toml` で status を止めない #274 の振る舞いで、文はパスと `ralph.local.toml` を名指している。依頼の「`ralph status` がエラーになる」とは形が違うが、AC4 が求めるのは Load のエラーなので、AC4 の外れではない。
+- 対照: `[ORGANIZATION]` / `STATE_DIR` と `[org]` / `state_dirs` は断られない。`config get org.state_dir` は空で exit 0、`org status` も exit 0 になった。
+- S9 の前(ca7c651f の binary): 同じ `[ORG]` / `STATE_DIR = "/x"` で、`ralph config get org.state_dir` は `RALPH_LOCAL_CONFIG` のどちらの設定でも `/x` を返して exit 0 になった。cross-review の所見のとおりの穴で、HEAD では exit 3 になる。
+- 個人用のファイルの側: `ralph.local.toml` に `[ORG]` / `STATE_DIR = "<W>/ledger"` と書くと、`ralph status --json` は `state_dir` が `<W>/ledger`、source `config` を返した。`LocalOrgStateDir` は struct に読むので、もとから decoder の規則で引いている。
+- テスト: `TestLoad_LocalOnlyKeyInRalphToml`(`local_test.go:585`)の 7 行と、`TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder`(`:729`)。後者は各行を本物の `toml.Unmarshal` で `Config` に読み、その結果を期待値にする。通ることは /test の範囲。
+
+### ほかの AC が崩れていないか
+
+崩れていない。cycle 1 の probe(`Probes 1`)を HEAD の binary で同じ手順で打ち直し、出力を cycle 1 のものと `diff` した。違うのは doctor の `RALPH_ORG_STATE_DIR` の warn の 1 行だけで、これは S8 で変えた文。AC1〜AC7 の probe の出力(AC4 の小文字の `[org].state_dir` の 3 通りを含む)は同じだった。S9 が変えたのは `checkLocalOnlyKeys` と `tomlDocHasKey` だけで、`LocalOrgStateDir`、`ResolveOrgStateDir`、cli には触れていない。
+
+### 文書のずれ
+
+S9 で新しいずれは出ていない。
+
+- README `:135`(`config get` の行、/sync-docs が 3a6d1b11 で直した)と `:148` は「`ralph.toml` に `[org].state_dir` があると読み込みが失敗する」と書く。大文字小文字には触れないが、どの綴りでも断る今の動きと食い違う文はない。`git grep` で、README、AGENTS.md、skill、recipe、テンプレートの `ralph.toml`、tech-debt に、local-only のキーの照合を大文字小文字を区別すると書いた文はない。
+- エラーは、文書の綴り(`STATE_DIR`)ではなく `[org].state_dir` と名指す。doc comment(`local.go:122-128`)とテストがそう固定している(self-review の C2-N1)。
+- 計画の Progress(845b4eff)の S9 の記録は、コードの `strings.ToLower` と、`EqualFold` を使わない理由(U+0130、U+017F)に合う。
+- tech-debt の Trigger を S9 の名前(`local.go`、`local_test`、`checkLocalOnlyKeys`、`tomlDocHasKey`、`LocalOnlyKeys`、2 本のテストの名前)で引いた。当たった 78・134 行は閉じた行。199・259・294 行は別の関数を名指している。396 行の (b)「`config.Load` のエラーの道の次の変更」は当たっていないと判断した。S9 は、どの文書が `checkLocalOnlyKeys` のエラーになるかを変えたが、エラーのあとの扱い(`Default()` を返す)は変えていない。396 行の (a) が名指す 4 つの関数も変わっていない。
+- self-review cycle 2 の C2-L1(L2 と L5 が register にない)は、lead の指示どおり /sync-docs に回す。判断し直していない。
+
+### cycle 1 の所見の扱い
+
+| ID | いまの状態 | 根拠 |
+| --- | --- | --- |
+| V1 | /sync-docs で対応済み(3a6d1b11) | 14 行すべてに `org-state-dir-local` の注がある(`sed -n <行>p` で数えた: 135、148、170、177、188、198、208、246、362、368、386、390、391、392)。cycle 1 の V1 は「13 行」と書いていたが、挙げた番号は 14 個で、14 が正しい。sync-docs の報告がこの数え違いを指摘したので、この版で上の Findings と Verdict の数を 14 に直した |
+| V2 | /sync-docs で対応済み(3a6d1b11) | 186 行の (c) を `~~` で取り消し、4 つの欄に `Closed in feat/org-state-dir-local` がある |
+| V3 | fixed(cb33a636) | 上の「S8 の確認」 |
+| I1 | /sync-docs で対応済み | 198 行の (h) は `Moot since feat/org-state-dir-local`、188 行の閉じた (d) に今の文の注。148・170・192 行の env の記述は「もう読まない」の注になった |
+| I2 | 開いたまま(B の範囲) | `model-routing.md:151`。sync-docs の報告は PR の Known gaps に入れる |
+| I3 | 開いたまま | 依頼で `docs/specs/` を外した(sync-docs の報告の「直さなかったもの」) |
+| I4 | 記録済みの逸脱 | 対応は要らない |
+| I5 | /sync-docs で対応済み | README `:132` の見出しが `ralph status [--org-id <id>] [--state-dir <dir>]` になった |
+| I6 | /sync-docs で対応済み | `AGENTS.md:89` に `LocalOnlyKeys` と `LocalOrgStateDir` |
+
+### Coverage gaps(cycle 2)
+
+- Go のテスト(S9 の 2 本を含む)と run-verify の既定モードは打っていない(/test の範囲)。
+- go-toml の規則は v2.3.0 の source を読んで確かめた。版が上がったときの追従は、`TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder` が decoder と突き合わせることに頼る。
+- 「一致したキーをすべて辿る」規則は、2 つ目の table に置いた probe 1 件で見た。map の順は決まらないので、1 回の probe では「最初の一致だけ辿る」変異を必ず落とせるとは言えない(self-review の C2-N2)。

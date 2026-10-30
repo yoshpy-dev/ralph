@@ -551,3 +551,88 @@ exit=1
 46-RALPH_ORG_STATE_DIR, which ralph no longer reads, names another directory
 47:than the ledger found by default.
 ```
+
+## cycle 2 (HEAD a689bac7)
+
+The full output of every command below is at the end of the `.log`.
+
+### run-static-verify.sh
+
+```
+## cycle 2: run-static-verify.sh start 2026-10-30 14:22:31 JST HEAD a689bac7 load { 9.50 7.77 7.26 }
+==> scripts/check-sync.sh
+  IDENTICAL:      172
+  DRIFTED:        0
+  ROOT_ONLY:      0
+PASS: all files in sync.
+==> scripts/check-pipeline-sync.sh
+==> scripts/check-skill-sync.sh
+[ok] check-skill-sync: 14 skill(s) in lock-step
+==> scripts/check-template-purity.sh
+PASS: no meta-repo-specific references found in templates.
+==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+==> Language packs selected: golang
+==> Running golang verifier
+==> Go project root: .
+gofmt: ok
+0 issues.
+==> Running branch secret scan
+secret-scan-branch: scanned c03647f9..a689bac7 against origin/main: clean
+==> All verifiers passed.
+## cycle 2: run-static-verify.sh rc=0 elapsed=41s end 2026-10-30 14:23:13 JST load { 17.58 10.44 8.29 }
+```
+
+### AC4 in mixed letter case (HEAD binary, scratch repo `<W>/main`)
+
+Each `ralph.toml` below was written alone at the main worktree's root, with no `ralph.local.toml`. Every refusal reads, in full: `ralph.toml: [org].state_dir can be set only in ralph.local.toml, the git-ignored personal file, since its value belongs to one machine; remove it from this file and set it in ralph.local.toml instead`. `ralph status` prints it as `warning: status: load ralph.toml: ...` on stderr and goes on with the defaults (the #274 behavior for a `ralph.toml` that does not load). doctor exits 1 in every case because the narrowed PATH has neither claude nor codex; its `ralph.toml` line is `⚠ ralph.toml: warn — parse error: <the refusal> — using defaults` for the refused documents.
+
+```
+ralph.toml                          | config get org.state_dir | same, RALPH_LOCAL_CONFIG=off | status | status, off | org status --org-id a
+[ORG] STATE_DIR = "/x"              | exit 3 (refusal)         | exit 3 (refusal)             | 0+warn | 0+warn      | exit 1 (org: load config: <refusal>)
+[Org] State_Dir = "/x"              | exit 3                   | exit 3                       | 0+warn | 0+warn      | exit 1
+ORG.STATE_DIR = "/x"                | exit 3                   | exit 3                       | 0+warn | 0+warn      | exit 1
+ORG = { STATE_DIR = "/x" }          | exit 3                   | exit 3                       | 0+warn | 0+warn      | exit 1
+[org] max_seats=2 + [ORG] STATE_DIR | exit 3                   | exit 3                       | 0+warn | 0+warn      | exit 1
+[ORGANIZATION] STATE_DIR = "/x"     | exit 0, ""               | exit 0, ""                   | 0      | 0           | exit 0 (no seats)
+[org] state_dirs = "/x"             | exit 0, ""               | exit 0, ""                   | 0      | 0           | exit 0 (no seats)
+```
+
+```
+### personal file in upper case names the ledger: ralph.local.toml = [ORG] STATE_DIR = <W>/ledger
+$ ralph status --json
+  exit=0
+  parsed: state_dir=<W>/ledger source=config
+```
+
+### the same ralph.toml with the binary of ca7c651f (before S9) and of HEAD
+
+```
+### ralph-pre-s9 (RALPH_LOCAL_CONFIG unset): ralph config get org.state_dir with [ORG] STATE_DIR = "/x"
+/x
+  exit=0
+### ralph-pre-s9 RALPH_LOCAL_CONFIG=off: ralph config get org.state_dir with [ORG] STATE_DIR = "/x"
+/x
+  exit=0
+### ralph-c2 (RALPH_LOCAL_CONFIG unset): ralph config get org.state_dir with [ORG] STATE_DIR = "/x"
+config get: ralph.toml: cannot be read or is invalid: ralph.toml: [org].state_dir can be set only in ralph.local.toml, the git-ignored personal file, since its 
+  exit=3
+### ralph-c2 RALPH_LOCAL_CONFIG=off: ralph config get org.state_dir with [ORG] STATE_DIR = "/x"
+config get: ralph.toml: cannot be read or is invalid: ralph.toml: [org].state_dir can be set only in ralph.local.toml, the git-ignored personal file, since its 
+  exit=3
+```
+
+### cycle 1 probes run again with the HEAD binary
+
+`diff` of the cycle 1 probe output (`Probes 1` above, at e0ffa2aa) against the same script run with the HEAD binary: one line differs, the doctor warn S8 changed.
+
+```
+248c248
+<   grep: 18:  ⚠ RALPH_ORG_STATE_DIR: warn — set to "<W>/env-ledger", but ralph no longer reads it, and while it names another directory than the ledger ralph finds by default, the org verbs that change the ledger are refused; ...
+---
+>   grep: 18:  ⚠ RALPH_ORG_STATE_DIR: warn — set to "<W>/env-ledger", but ralph no longer reads it, and while neither --state-dir nor [org].state_dir names the ledger and the variable names another directory than the ledger ralph finds by default, the org verbs that change the ledger are refused; ...
+diff rc=1
+```
+
+### go-toml v2.3.0 `structFieldPath` (`unmarshaler.go:1386-1414` in the module cache)
+
+The field table holds each field's name and its `strings.ToLower`; a key is looked up as it is, then as `strings.ToLower(key)` (lines 1396, 1398, 1409, 1411).
