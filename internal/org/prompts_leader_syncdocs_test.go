@@ -1,7 +1,9 @@
 package org
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,7 +17,7 @@ import (
 // 2026-10-30-leader-sync-docs).
 const (
 	syncDocsHandOff         = "rebase が済んだら(要らなかったときも)、sync-docs を doc-maintainer の subagent に任せる"
-	syncDocsCheck           = "doc-maintainer が終わったら、`git status --porcelain` で変わったパスを読む"
+	syncDocsCheck           = "doc-maintainer が終わったら、" + syncDocsStatus + " で変わったパスを読む"
 	syncDocsFollowupHeading = "## 予約外の文書の follow-up"
 	syncDocsSkipLine        = "`SYNC_DOCS: skipped (<理由>)`"
 	docFollowupKey          = "DOC_FOLLOWUP"
@@ -29,18 +31,38 @@ const (
 // commit's fixed message, the commands that list the branch's earlier
 // sync-docs commits, by a subject equal to that message, and the files each
 // changed (the files a redo freezes), the start of the sync-docs reports
-// those files leave out, the undo, and the report section that records what
-// was undone. The list compares each subject with awk instead of using
-// git log --grep, which reads ^ and $ by the user's grep.patternType and
-// matches a body line too (self-review R2-1).
+// those files leave out, the git status that lists what the sync-docs
+// changed with each new file on a line of its own, the undo, its deletion of
+// the untracked files of that list one by one, and the report section that
+// records what was undone. The list compares each subject with awk instead of
+// using git log --grep, which reads ^ and $ by the user's grep.patternType and
+// matches a body line too (self-review R2-1). The sync-docs paragraphs no
+// longer run syncDocsShortStatus, which folds a new directory into one line
+// (cross-review cycle 1 #1).
 const (
-	syncDocsCommitMessage  = "`docs: sync docs for <機能の slug>`"
-	syncDocsEarlierCommits = "`git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, \" \") + 1) == \"docs: sync docs for <機能の slug>\" { print $1 }'`"
-	syncDocsCommitFiles    = "`git show --name-only --format= <コミット>`"
-	syncDocsReportPrefix   = "docs/reports/sync-docs-"
-	syncDocsRestore        = "`git restore --source=HEAD --staged --worktree -- <パス>`"
-	syncDocsUndoneHeading  = "## 戻した変更"
+	syncDocsCommitMessage   = "`docs: sync docs for <機能の slug>`"
+	syncDocsEarlierCommits  = "`git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, \" \") + 1) == \"docs: sync docs for <機能の slug>\" { print $1 }'`"
+	syncDocsCommitFiles     = "`git show --name-only --format= <コミット>`"
+	syncDocsReportPrefix    = "docs/reports/sync-docs-"
+	syncDocsStatus          = "`git status --porcelain --untracked-files=all`"
+	syncDocsShortStatus     = "`git status --porcelain`"
+	syncDocsRestore         = "`git restore --source=HEAD --staged --worktree -- <パス>`"
+	syncDocsDeleteUntracked = "未追跡のファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)"
+	syncDocsUndoneHeading   = "## 戻した変更"
 )
+
+// syncDocsUntrackedAllReason is the sentence, the same in step 9 of the
+// leader template and in item 1 of the /org skill's ### org の終わり方, that
+// says why the check after the doc-maintainer runs syncDocsStatus: under
+// git's default status.showUntrackedFiles=normal a new directory is one
+// ?? <dir>/ line, so the check of each path against the reservation and the
+// frozen files cannot see the files under it (a new file inside the
+// reservation undone, an unreserved one beside it committed), and a user's
+// status.showUntrackedFiles=no shows no untracked file at all (plan
+// 2026-10-30-leader-sync-docs, cross-review cycle 1 #1).
+const syncDocsUntrackedAllReason = "`--untracked-files=all` を付けるのは、新しいファイルを 1 つずつ出して、予約と凍らせたファイルの照らし合わせがすべてのファイルを見られるようにするため" +
+	"(付けないと、git の既定では新しいディレクトリが `?? docs/new/` の 1 行にまとまってその下のファイルが見えず、" +
+	"利用者の git の設定が `status.showUntrackedFiles=no` なら未追跡のファイルが 1 つも出ない)"
 
 // The condition of the all-or-nothing undo after the doc-maintainer and the
 // reason it names a frozen file, the same words in step 9 of the leader
@@ -65,19 +87,19 @@ const syncDocsCopyChecks = "写しの検査(`scripts/check-skill-sync.sh` など
 // syncDocsNoReportSkip is the start of the sentence, the same in step 9 of
 // the leader template and in item 1 of the /org skill's ### org の終わり方,
 // that takes a failed call and a doc-maintainer that ended without the
-// report as one branch with its own undo: every path git status --porcelain
-// shows, the report included, restored from HEAD or deleted, no
-// ## 戻した変更 section (no report is kept to hold it), a check that
-// git status --porcelain prints nothing, then the skip (plan
+// report as one branch with its own undo: every path syncDocsStatus shows,
+// the report included, restored from HEAD or, untracked, deleted file by
+// file, no ## 戻した変更 section (no report is kept to hold it), a check that
+// syncDocsStatus prints nothing, then the skip (plan
 // 2026-10-30-leader-sync-docs, D5). It no longer points at the next
 // paragraph's undo, which keeps the report and ends with that section
 // (self-review R2-3). Each goes on with its own step numbers.
 const syncDocsNoReportSkip = "呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で止まった、時間切れになった、など)と、" +
 	"doc-maintainer が report を書かずに終わったときは、同じ 1 つの枝で扱う。" +
-	"どちらも、`git status --porcelain` に出るパス(ここまでで何も出なくなっているので、すべて sync-docs の変更)を report も含めてすべて戻す。" +
-	"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し、未追跡のファイルは消す。" +
+	"どちらも、" + syncDocsStatus + " に出るパス(ここまでで何も出なくなっているので、すべて sync-docs の変更)を report も含めてすべて戻す。" +
+	"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し、" + syncDocsDeleteUntracked + "。" +
 	"残す report がないので、`" + syncDocsUndoneHeading + "` の節は書かない。" +
-	"`git status --porcelain` が何も出さないことを確かめてから sync-docs を飛ばし、" + syncDocsSkipLine + " の行を"
+	syncDocsStatus + " が何も出さないことを確かめてから sync-docs を飛ばし、" + syncDocsSkipLine + " の行を"
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9 pins AC1 of plan
 // 2026-10-30-leader-sync-docs (D1): sync-docs is two paragraphs at the end of
@@ -183,15 +205,17 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimit
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone pins
 // the leader's check of AC2 and AC8 of plan 2026-10-30-leader-sync-docs (D2):
-// after the doc-maintainer, the leader reads git status --porcelain, and when a
-// path outside the reservation, a frozen file (one of the union of the earlier
-// sync-docs commits' files handed to the doc-maintainer, even inside the
-// reservation), or the feature plan changed, it undoes every sync-docs change
+// after the doc-maintainer, the leader reads syncDocsStatus, which lists each
+// new file (syncDocsUntrackedAllReason), and when a path outside the
+// reservation, a frozen file (one of the union of the earlier sync-docs
+// commits' files handed to the doc-maintainer, even inside the reservation),
+// or the feature plan changed, it undoes every sync-docs change
 // but the report, never only the outside half (a set of copies half changed
 // fails the gate's copy check, which the implementer cannot fix outside the
 // reservation). The undo restores tracked files and staged new files from
 // HEAD in the index and the work tree (a plain git restore leaves a staged
-// change in place for the commit) and deletes untracked files. What is left
+// change in place for the commit) and deletes the untracked files of that
+// list one by one, not their directories. What is left
 // goes in one commit with the report under the fixed message the redo's
 // git log looks for by subject, not an example of one; the report alone when
 // nothing else changed, and nothing when nothing changed. The plan is undone
@@ -205,15 +229,16 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone(t *te
 	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
 		syncDocsCheck,
 		"(ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)",
+		syncDocsUntrackedAllReason,
 		syncDocsUndoCondition,
 		"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し" +
-			"(ステージした新しいファイルは index からも作業ツリーからも消える)、未追跡のファイルは消す",
+			"(ステージした新しいファイルは index からも作業ツリーからも消える)、" + syncDocsDeleteUntracked,
 		"予約の外の分だけを戻すと、写しの組の片方だけが変わったまま残って gate の写しの検査が落ち、予約の外を直せない implementer も直せないので、一部だけを戻すことはしない",
 		"計画を戻すのは、per-plan では承認のあとに計画が変わると implementer への TASK が断られるため(手順 6)",
 		syncDocsFrozenUndoReason,
 		"どれもなければ変更はそのまま残す",
 		"残った変更と report を、決まったメッセージ " + syncDocsCommitMessage + " の 1 つのコミットにし" +
-			"(上の `git log` は件名がこのメッセージと等しいコミットを探すので、言い方を変えない)、`git status --porcelain` が何も出さないことを確かめる",
+			"(上の `git log` は件名がこのメッセージと等しいコミットを探すので、言い方を変えない)、" + syncDocsStatus + " が何も出さないことを確かめる",
 		"report のほかに変更がなければ、report だけで同じメッセージのコミットにする(report が前の回のコミットと同じで何も出なければ、コミットせずに手順 10 に進む)",
 	})
 	for _, old := range []string{"たとえば `docs: sync docs for", "追跡しているファイルは `git restore <パス>`"} {
@@ -223,6 +248,97 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone(t *te
 	}
 	if item := leaderFeatureOrgItem(t, "6. (per-plan)"); !containsPhrase(item, "承認のあとに計画が変わると、implementer の spawn と TASK が断られる") {
 		t.Errorf("expected step 6, which step 9's plan undo points at, to say a plan changed after the approval gets the implementer's TASK refused, got item:\n%s", item)
+	}
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgSyncDocsStatusListsEachNewFile pins
+// cross-review cycle 1 #1 of plan 2026-10-30-leader-sync-docs: every git
+// status the sync-docs paragraphs of step 9 run, from the hand-off on, is
+// syncDocsStatus, which lists each new file, not syncDocsShortStatus, and the
+// check after the doc-maintainer says why (syncDocsUntrackedAllReason). It
+// then runs the command as the template writes it where the doc-maintainer
+// left a new directory docs/new/ with a file a file reservation names, one
+// beside it, and an ignored one: under git's default
+// status.showUntrackedFiles=normal and under no, set in the repository's
+// config over the user's own, it lists the two new files one line each and
+// not the ignored one, so the reservation reading (reservePathsOverlap) tells
+// them apart, where syncDocsShortStatus prints the one line ?? docs/new/, or
+// nothing. Deleting the listed files one by one (syncDocsDeleteUntracked)
+// leaves it printing nothing and the ignored file in place.
+func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsStatusListsEachNewFile(t *testing.T) {
+	step9 := leaderFeatureOrgItem(t, step9Marker)
+	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
+		syncDocsHandOff,
+		syncDocsCheck,
+		"(ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)。" + syncDocsUntrackedAllReason,
+	})
+	_, afterHandOff, ok := strings.Cut(squashSpace(step9), squashSpace(syncDocsHandOff))
+	if !ok {
+		t.Fatalf("expected step 9 to say %q, got item:\n%s", syncDocsHandOff, step9)
+	}
+	if strings.Contains(afterHandOff, squashSpace(syncDocsShortStatus)) {
+		t.Errorf("expected every git status of step 9's sync-docs paragraphs to be %s, which lists each new file, not %s, got item:\n%s", syncDocsStatus, syncDocsShortStatus, step9)
+	}
+
+	dir := t.TempDir()
+	runGit(t, "init", "--quiet", "--template=", dir)
+	for _, f := range []struct{ rel, content string }{{".gitignore", "*.tmp\n"}, {"docs/old.md", "old\n"}} {
+		writeGateFile(t, dir, f.rel, f.content, 0o644)
+		runGit(t, "-C", dir, "add", f.rel)
+	}
+	gateCommit(t, dir, "init")
+	reserve, beside, ignored := "docs/new/guide.md", "docs/new/other.md", "docs/new/cache.tmp"
+	for _, f := range []string{reserve, beside, ignored} {
+		writeGateFile(t, dir, f, "new\n", 0o644)
+	}
+	shell := func(cmdline string) string {
+		t.Helper()
+		cmd := exec.Command("sh", "-c", cmdline)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("sh -c %q: %v", cmdline, err)
+		}
+		return string(out)
+	}
+	statusCmd, shortCmd := strings.Trim(syncDocsStatus, "`"), strings.Trim(syncDocsShortStatus, "`")
+	for _, c := range []struct{ setting, short string }{
+		{"normal", "?? docs/new/\n"},
+		{"no", ""},
+	} {
+		runGit(t, "-C", dir, "config", "status.showUntrackedFiles", c.setting)
+		if got := shell(shortCmd); got != c.short {
+			t.Fatalf("with status.showUntrackedFiles=%s, expected %q to print %q, the case step 9's form is for, got %q", c.setting, shortCmd, c.short, got)
+		}
+		got := shell(statusCmd)
+		if want := "?? " + reserve + "\n?? " + beside + "\n"; got != want {
+			t.Fatalf("with status.showUntrackedFiles=%s, expected %q to list each new file, and not the ignored %s, as %q, got %q", c.setting, statusCmd, ignored, want, got)
+		}
+		var inside, outside []string
+		for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+			if path := strings.TrimPrefix(line, "?? "); reservePathsOverlap(reserve, path) {
+				inside = append(inside, path)
+			} else {
+				outside = append(outside, path)
+			}
+		}
+		if !slices.Equal(inside, []string{reserve}) || !slices.Equal(outside, []string{beside}) {
+			t.Errorf("with status.showUntrackedFiles=%s, expected the reservation %s to keep %s inside and %s outside, got inside %q, outside %q", c.setting, reserve, reserve, beside, inside, outside)
+		}
+	}
+
+	for _, line := range strings.Split(strings.TrimSuffix(shell(statusCmd), "\n"), "\n") {
+		if path, ok := strings.CutPrefix(line, "?? "); ok {
+			if err := os.Remove(filepath.Join(dir, filepath.FromSlash(path))); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got := shell(statusCmd); got != "" {
+		t.Errorf("expected %q to print nothing once the listed untracked files are deleted one by one, got %q", statusCmd, got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(ignored))); err != nil {
+		t.Errorf("expected deleting the listed files one by one, not their directory, to leave the ignored %s in place: %v", ignored, err)
 	}
 }
 
@@ -427,7 +543,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsSkipsWithoutTheDocMaintainer(
 // report are one branch, so a call that fails after it wrote files cannot be
 // read as a skip that undoes nothing. The branch says its own undo: every
 // change, the report included, is restored from HEAD or deleted, with no
-// ## 戻した変更 section since no report is kept, git status --porcelain is
+// ## 戻した変更 section since no report is kept, syncDocsStatus is
 // checked to print nothing, and only then is sync-docs skipped with
 // SYNC_DOCS: skipped kept for step 14. It no longer points at the next
 // paragraph's undo, which keeps the report and adds that section to it. The

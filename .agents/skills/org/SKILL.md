@@ -1057,15 +1057,17 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    (戻す変更はない)、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
    2 に進む。呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で
    止まった、時間切れになった、など)と、doc-maintainer が report を書かずに
-   終わったときは、同じ 1 つの枝で扱う。どちらも、`git status --porcelain` に
-   出るパス(ここまでで何も出なくなっているので、すべて sync-docs の変更)を
-   report も含めてすべて戻す。追跡しているファイルとステージした新しい
-   ファイルは `git restore --source=HEAD --staged --worktree -- <パス>` で
-   戻し、未追跡のファイルは消す。残す report がないので、`## 戻した変更` の
-   節は書かない。`git status --porcelain` が何も出さないことを確かめてから
-   sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
-   2 に進む(書いたあとで失敗したときも、汚れた作業ツリーのまま 2 に進まない
-   ため)。
+   終わったときは、同じ 1 つの枝で扱う。どちらも、
+   `git status --porcelain --untracked-files=all` に出るパス(ここまでで何も
+   出なくなっているので、すべて sync-docs の変更)を report も含めてすべて
+   戻す。追跡しているファイルとステージした新しいファイルは
+   `git restore --source=HEAD --staged --worktree -- <パス>` で戻し、未追跡の
+   ファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)。
+   残す report がないので、`## 戻した変更` の節は書かない。
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめてから sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を
+   6 のために控えて 2 に進む(書いたあとで失敗したときも、汚れた作業ツリーの
+   まま 2 に進まないため)。
    呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
    次の段落のとおり決まっている)を、件名がそのメッセージと等しいコミット
    だけを残す
@@ -1098,16 +1100,23 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    付けず、ステージせず、コミットせず、機能の計画を変えず、`ralph org` の
    コマンドを打たない。
 
-   doc-maintainer が終わったら、leader は `git status --porcelain` で変わった
-   パスを読む(ここまでで何も出なくなっているので、出たものはすべて sync-docs
-   の変更)。report のほかに、予約の外のパスか、凍らせたファイルか、機能の
+   doc-maintainer が終わったら、leader は
+   `git status --porcelain --untracked-files=all` で変わったパスを読む
+   (ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)。
+   `--untracked-files=all` を付けるのは、新しいファイルを 1 つずつ出して、
+   予約と凍らせたファイルの照らし合わせがすべてのファイルを見られるように
+   するため(付けないと、git の既定では新しいディレクトリが `?? docs/new/` の
+   1 行にまとまってその下のファイルが見えず、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルが 1 つも出ない)。
+   report のほかに、予約の外のパスか、凍らせたファイルか、機能の
    計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて
    戻す。戻す前に、戻すパスごとに `git diff HEAD -- <パス>`(未追跡の
    ファイルは中身)を読み、何を変えていたかを控える。追跡しているファイルと
    ステージした新しいファイルは
    `git restore --source=HEAD --staged --worktree -- <パス>` で戻し(ステージ
    した新しいファイルは index からも作業ツリーからも消える)、未追跡の
-   ファイルは消す。戻したら、report に `## 戻した変更` の節を足して戻した
+   ファイルは、一覧に出たファイルを 1 つずつ消す(ディレクトリごとは消さない)。
+   戻したら、report に `## 戻した変更` の節を足して戻した
    パスと変えていた中身の要点を 1 件 1 行で書き、同じ項を
    `## 予約外の文書の follow-up` の節にも足す(`なし` の行は消す)。コミット
    した report が戻した変更を直したままのように読めず、6 が記憶でなく report
@@ -1121,7 +1130,8 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の
    1 つのコミットにし(上の `git log` は件名がこのメッセージと等しいコミットを
    探す)、
-   `git status --porcelain` が何も出さないことを確かめる。report のほかに
+   `git status --porcelain --untracked-files=all` が何も出さないことを
+   確かめる。report のほかに
    変更がなければ report だけを同じメッセージでコミットし、report も前の回の
    コミットと同じで何も出なければ、コミットせずに 2 に進む。
    gate をやり直すとき(4 の `GATE: fail` や、implementer の手が要る gate の

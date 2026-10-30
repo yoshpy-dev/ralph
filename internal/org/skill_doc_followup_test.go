@@ -17,7 +17,7 @@ import (
 // sync-docs commit are the leader template's (prompts_leader_syncdocs_test.go).
 const (
 	orgSkillSyncDocsHandOff   = "rebase が済んだら(要らなかったときも)、leader は sync-docs を doc-maintainer のサブエージェントに任せ、文書は自分では直さない"
-	orgSkillSyncDocsCheck     = "doc-maintainer が終わったら、leader は `git status --porcelain` で変わったパスを読む"
+	orgSkillSyncDocsCheck     = "doc-maintainer が終わったら、leader は " + syncDocsStatus + " で変わったパスを読む"
 	orgSkillEndStep2FirstLine = "2. `ralph org report --org-id <org_id>` を打ち(report は worktree の"
 )
 
@@ -161,31 +161,36 @@ func TestOrgSkill_EndOfOrgStep1HandsSyncDocsToTheDocMaintainerAfterTheRebase(t *
 
 // TestOrgSkill_EndOfOrgStep1UndoesEveryChangeOrNoneAndCommitsOnce pins AC8 of
 // plan 2026-10-30-leader-sync-docs (D2) for item 1 of ### org の終わり方:
-// after the doc-maintainer, the leader reads git status --porcelain, undoes
-// every sync-docs change but the report when a path outside the reservation,
-// a frozen file (even inside the reservation), or the feature plan changed,
-// never only the outside half (a set of copies half changed fails the gate's
-// copy check, which the implementer cannot fix outside the reservation),
-// reading what each path changed first, restoring tracked and staged new
-// files from HEAD in the index and the work tree and deleting untracked ones,
-// and records the undone changes in the report's ## 戻した変更 and follow-up
+// after the doc-maintainer, the leader reads syncDocsStatus, which lists each
+// new file (syncDocsUntrackedAllReason), undoes every sync-docs change but
+// the report when a path outside the reservation, a frozen file (even inside
+// the reservation), or the feature plan changed, never only the outside half
+// (a set of copies half changed fails the gate's copy check, which the
+// implementer cannot fix outside the reservation), reading what each path
+// changed first, restoring tracked and staged new files from HEAD in the
+// index and the work tree and deleting the untracked files of that list one
+// by one, not their directories, and records the undone changes in the
+// report's ## 戻した変更 and follow-up
 // sections for item 6 to read. It commits what is left with the report as
 // one commit under the fixed message, the report alone when nothing else
 // changed, and nothing when nothing changed. The plan is undone because of
 // the approval check that ### 機能の計画の承認 describes, and a frozen file
 // because its change in the commit would bring back the gate failure the
-// freeze stops (self-review M1). The condition and the frozen file's reason
-// are the leader template's words (syncDocsUndoCondition,
-// syncDocsFrozenUndoReason).
+// freeze stops (self-review M1). The condition, the frozen file's reason,
+// and the reason for --untracked-files=all are the leader template's words
+// (syncDocsUndoCondition, syncDocsFrozenUndoReason,
+// syncDocsUntrackedAllReason), and from the hand-off on no copy's item 1
+// runs syncDocsShortStatus (cross-review cycle 1 #1).
 func TestOrgSkill_EndOfOrgStep1UndoesEveryChangeOrNoneAndCommitsOnce(t *testing.T) {
 	checkOrgSkillPlaces(t, "sync-docs undo", []skillPlace{
 		{"item 1 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 1) }, []string{
 			orgSkillSyncDocsCheck,
 			"(ここまでで何も出なくなっているので、出たものはすべて sync-docs の変更)",
+			syncDocsUntrackedAllReason,
 			syncDocsUndoCondition,
 			"戻す前に、戻すパスごとに `git diff HEAD -- <パス>`(未追跡のファイルは中身)を読み、何を変えていたかを控える",
 			"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し" +
-				"(ステージした新しいファイルは index からも作業ツリーからも消える)、未追跡のファイルは消す",
+				"(ステージした新しいファイルは index からも作業ツリーからも消える)、" + syncDocsDeleteUntracked,
 			"戻したら、report に `" + syncDocsUndoneHeading + "` の節を足して戻したパスと変えていた中身の要点を 1 件 1 行で書き、" +
 				"同じ項を `" + syncDocsFollowupHeading + "` の節にも足す(`なし` の行は消す)",
 			"コミットした report が戻した変更を直したままのように読めず、6 が記憶でなく report から読めるようにするため",
@@ -195,13 +200,30 @@ func TestOrgSkill_EndOfOrgStep1UndoesEveryChangeOrNoneAndCommitsOnce(t *testing.
 			syncDocsFrozenUndoReason,
 			"どれもなければ変更はそのまま残す",
 			"残った変更と report を、決まったメッセージ " + syncDocsCommitMessage + " の 1 つのコミットにし" +
-				"(上の `git log` は件名がこのメッセージと等しいコミットを探す)、`git status --porcelain` が何も出さないことを確かめる",
+				"(上の `git log` は件名がこのメッセージと等しいコミットを探す)、" + syncDocsStatus + " が何も出さないことを確かめる",
 			"report のほかに変更がなければ report だけを同じメッセージでコミットし、report も前の回のコミットと同じで何も出なければ、コミットせずに 2 に進む",
 		}},
 		{"the subsection ### 機能の計画の承認", func(text string) string { return directorSkillSubsection(text, "### 機能の計画の承認") }, []string{
 			"今のファイルの digest(`scripts/plan-visual.sh digest` と同じ値)がその digest と一致する",
 		}},
 	})
+
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's sync-docs git status check (vendored repo?)", rel, err)
+		}
+		step := orgSkillEndOfOrgStep(string(data), 1)
+		_, afterHandOff, ok := strings.Cut(squashSpace(step), squashSpace(orgSkillSyncDocsHandOff))
+		if !ok {
+			t.Errorf("%s: expected item 1 of ### org の終わり方 to say %q, got item:\n%s", rel, orgSkillSyncDocsHandOff, step)
+			continue
+		}
+		if strings.Contains(afterHandOff, squashSpace(syncDocsShortStatus)) {
+			t.Errorf("%s: expected every git status of item 1's sync-docs paragraphs to be %s, which lists each new file, not %s, got item:\n%s", rel, syncDocsStatus, syncDocsShortStatus, step)
+		}
+	}
 }
 
 // TestOrgSkill_EndOfOrgSyncDocsRunsAgainOnARedo pins AC6 of plan
@@ -277,7 +299,8 @@ func TestOrgSkill_EndOfOrgStep6CarriesTheDocFollowups(t *testing.T) {
 // self-review fixes): the doc-maintainer's call and definitions, the report's
 // path and follow-up section, the skip line, the sync-docs commit's fixed
 // message and the commands that find the earlier ones and their files, the
-// undo, the section that records it, and the DOC_FOLLOWUP: lines. A leader
+// git status that lists each new file, the undo, the section that records
+// it, and the DOC_FOLLOWUP: lines. A leader
 // runs the template and a director or human reads the skill, so a name
 // changed in one and not the other would have them look for different files,
 // commits, and lines.
@@ -300,6 +323,7 @@ func TestOrgSkill_EndOfOrgNamesTheSyncDocsLikeTheLeaderTemplate(t *testing.T) {
 			syncDocsEarlierCommits,
 			syncDocsCommitFiles,
 			"`" + syncDocsReportPrefix + "`",
+			syncDocsStatus,
 			syncDocsRestore,
 			"`" + syncDocsUndoneHeading + "`",
 		}},
