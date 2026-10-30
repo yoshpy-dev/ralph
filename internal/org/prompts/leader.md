@@ -372,9 +372,9 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
    ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
    ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
-   implementer の変更なら implementer にコミットを TASK で頼んで、終わったら
-   手順 8 の往復に戻り、それ以外なら残ったファイルを本文に書いて
-   `ralph org escalate` で BLOCKED を上げる)。
+   implementer の変更なら implementer にコミットを TASK で頼んで(per-plan
+   では `PLAN:` のヘッダを付ける)、終わったら手順 8 の往復に戻り、それ以外
+   なら残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる)。
    呼ぶ前に、このブランチのこれまでの sync-docs のコミット(メッセージは次の
    段落のとおり決まっている)を、件名がそのメッセージと等しいコミットだけを
    残す

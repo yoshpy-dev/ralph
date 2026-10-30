@@ -361,9 +361,10 @@ func TestOrgSkill_EndOfOrgNamesTheSyncDocsLikeTheLeaderTemplate(t *testing.T) {
 // の終わり方, with the words of step 9 of the leader template
 // (syncDocsNoReportSkip): a failed call and a doc-maintainer that ended
 // without writing the report are one branch with its own undo, which
-// restores every change, the report included, from HEAD or deletes it, writes
-// no ## 戻した変更 section since no report is kept, checks that
-// git status --porcelain prints nothing, and only then skips with
+// restores every change, the report included, from HEAD or deletes the listed
+// untracked files one by one, writes no ## 戻した変更 section since no report
+// is kept, checks that git status --porcelain --untracked-files=all
+// (syncDocsStatus) prints nothing, and only then skips with
 // SYNC_DOCS: skipped kept for item 6. It no longer points at the next
 // paragraph's undo, which keeps the report. The sentence comes after the skip
 // for a missing definition and before the hand-off's list, and no other
@@ -402,8 +403,9 @@ func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 // right after the skip branches and right before the lookup of the earlier
 // sync-docs commits, syncDocsLeftoverCheck and syncDocsLeftoverSort, with the
 // item's own sort of what is left (the reviewer's report committed and the
-// check run again, the implementer's change asked for in a TASK and the review
-// asked for again, anything else a BLOCKED). The check before the fetch that
+// check run again, the implementer's change asked for in a TASK, with the
+// PLAN: header in a per-plan org, and the review asked for again, anything
+// else a BLOCKED). The check before the fetch that
 // the sentence points at comes first and still runs syncDocsShortStatus.
 func TestOrgSkill_EndOfOrgStep1ChecksForLeftoversBeforeTheCall(t *testing.T) {
 	checkOrgSkillPlaces(t, "sync-docs leftover check", []skillPlace{
@@ -414,8 +416,7 @@ func TestOrgSkill_EndOfOrgStep1ChecksForLeftoversBeforeTheCall(t *testing.T) {
 			"なら、呼ばずに sync-docs を飛ばし(戻す変更はない)",
 			syncDocsNoReportSkip + "6 のために控えて 2 に進む(書いたあとで失敗したときも、汚れた作業ツリーのまま 2 に進まないため)。" +
 				syncDocsLeftoverCheck + "。" + syncDocsLeftoverSort +
-				"(reviewer のレポートならコミットして確かめ直し、implementer の変更なら implementer にコミットを TASK で頼んで reviewer にレビューを頼み直し、" +
-				"それ以外なら `BLOCKED` を escalate する)。" +
+				"reviewer にレビューを頼み直し、それ以外なら `BLOCKED` を escalate する)。" +
 				"呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット",
 			syncDocsEarlierCommits,
 			"doc-maintainer への指示には、機能の計画のパス",

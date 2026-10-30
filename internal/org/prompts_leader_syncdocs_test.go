@@ -103,7 +103,7 @@ const syncDocsNoReportSkip = "呼び出しが失敗したとき(Codex で custom
 
 // syncDocsLeftoverCheck and syncDocsLeftoverSort are the two sentences, the
 // same in step 9 of the leader template and in item 1 of the /org skill's
-// ### org の終わり方 up to the parenthesis after syncDocsLeftoverSort, that
+// ### org の終わり方 up to the implementer's item of the sort, that
 // come right after the skip branches and right before the lookup of the
 // earlier sync-docs commits: before the call the leader checks that
 // syncDocsStatus prints nothing, since the check before the fetch runs
@@ -114,12 +114,17 @@ const syncDocsNoReportSkip = "呼び出しが失敗したとき(Codex で custom
 // someone else left as a sync-docs change. When it prints something, the
 // leader calls no doc-maintainer and sorts what is left the way the check
 // before the fetch does (plan 2026-10-30-leader-sync-docs, the consult's
-// follow-up to cross-review cycle 1 #1).
+// follow-up to cross-review cycle 1 #1), the implementer's TASK with the
+// PLAN: header in a per-plan org in the words that check uses (self-review
+// cycle 2 C2-2). Each copy then goes on with its own words for the rest of
+// the implementer's item.
 const (
 	syncDocsLeftoverCheck = "呼ぶ前には、まず " + syncDocsStatus + " が何も出さないことを確かめる" +
 		"(fetch の前の確かめは、利用者の git の設定が `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、" +
 		"誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さないため)"
-	syncDocsLeftoverSort = "何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていたときと同じく扱う"
+	syncDocsLeftoverSort = "何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていたときと同じく扱う" +
+		"(reviewer のレポートならコミットして確かめ直し、" +
+		"implementer の変更なら implementer にコミットを TASK で頼んで(per-plan では `PLAN:` のヘッダを付ける)、"
 )
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9 pins AC1 of plan
@@ -594,7 +599,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *
 // syncDocsStatus prints nothing (syncDocsLeftoverCheck) and, when it prints
 // something, calls no doc-maintainer and sorts what is left as the check
 // before the fetch does: the reviewer's report committed and the check run
-// again, the implementer's change asked for in a TASK and back through step 8,
+// again, the implementer's change asked for in a TASK (with the PLAN: header
+// in a per-plan org, self-review cycle 2 C2-2) and back through step 8,
 // anything else a BLOCKED (syncDocsLeftoverSort). The undo after the call
 // then reads, as it says, only sync-docs changes. The check before the fetch
 // that the sentence points at still runs syncDocsShortStatus, as the tests of
@@ -607,8 +613,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsChecksForLeftoversBeforeTheCa
 		syncDocsNoReportSkip + "手順 14 のために控えて手順 10 に進む" +
 			"(ファイルを書いたあとで失敗したときも、汚れた作業ツリーのまま手順 10 に進まないため)。" +
 			syncDocsLeftoverCheck + "。" + syncDocsLeftoverSort +
-			"(reviewer のレポートならコミットして確かめ直し、implementer の変更なら implementer にコミットを TASK で頼んで、終わったら手順 8 の往復に戻り、" +
-			"それ以外なら残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる)。" +
+			"終わったら手順 8 の往復に戻り、それ以外なら残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる)。" +
 			"呼ぶ前に、このブランチのこれまでの sync-docs のコミット",
 		syncDocsEarlierCommits,
 		"doc-maintainer への指示には、次のことを書く",

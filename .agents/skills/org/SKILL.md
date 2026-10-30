@@ -1074,8 +1074,9 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
    ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
    ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
-   implementer の変更なら implementer にコミットを TASK で頼んで reviewer に
-   レビューを頼み直し、それ以外なら `BLOCKED` を escalate する)。
+   implementer の変更なら implementer にコミットを TASK で頼んで(per-plan
+   では `PLAN:` のヘッダを付ける)、reviewer にレビューを頼み直し、それ以外
+   なら `BLOCKED` を escalate する)。
    呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
    次の段落のとおり決まっている)を、件名がそのメッセージと等しいコミット
    だけを残す
