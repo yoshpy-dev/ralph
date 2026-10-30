@@ -1,7 +1,7 @@
 # leader-sync-docs
 
 - Status: Approved
-- Approved: 2026-10-30 sha256:220fa1f3994f
+- Approved: 2026-10-30 sha256:94dc29701d29
 - Owner: Claude Code
 - Date: 2026-10-30
 - Related request: org: leader が sync-docs を行い、予約外の文書のずれを文書の org にまとめる(https://github.com/yoshpy-dev/ralph/issues/268)
@@ -58,7 +58,7 @@
 - D2b doc-maintainer に渡す内容: 機能の計画のパス、比べる base(`origin/<既定のブランチ>`)、予約したパス、予約の中のファイルだけを直すこと、repo の検査がそろえる写しの組(skill の写しなど)は組のすべてが予約の中のときだけ直し、1 つでも外なら直さずに follow-up に書くこと、直したあと repo にある写しの検査(`scripts/check-skill-sync.sh`・`scripts/check-sync.sh` があれば)を打ち、落ちる自分の変更を戻して follow-up に回すこと、report を `docs/reports/sync-docs-<日付>-<機能の slug>.md` に書き、予約の外のずれを `## 予約外の文書の follow-up` の節に書くこと、insight event を付けないこと、コミットしないこと、計画を変えないこと、`ralph org` のコマンドを打たないこと(consult)
 - D2c やり直しの sync-docs で凍らせるファイル: ブランチにすでに sync-docs のコミットがあれば(`git log --format='%H %s' origin/<既定のブランチ>..HEAD` の件名を `docs: sync docs for <機能の slug>` と完全一致で比べて引く。`--grep` は利用者の `grep.patternType` で結果が変わり、本文の行にも当たるので使わない。self-review R2-1)、それらのコミットが変えたファイルの和集合(`git show --name-only`)を doc-maintainer に渡し、そのファイルはもう直さず、残るずれは follow-up に書かせる。sync-docs の変更で落ちた `GATE: fail` を、sync-docs が同じ変更を入れ直して繰り返さないため(self-review M1)。直前の 1 回分だけでは、別のファイルとのあいだで往復しうるので和集合にする。一覧は leader の記憶でなく git から引くので、compaction と rebase にも耐える(consult)。LOG を読んで原因を推し量ることはしない
 - D3 follow-up の置き場: doc-maintainer は予約の外のずれを sync-docs の report の `## 予約外の文書の follow-up` の節に書く。直さなかった写しの組は、組の写しを 1 つ 1 行ずつ書く(self-review M2)。report は PR に入るので、leader が RESULT と PR の本文を書くときの元になり、あとから director も読める。RESULT には 1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`(なければ `DOC_FOLLOWUP: なし`)を書き、2,000 字に収まらなければ件数と PR の本文を指す 1 行にする。PR の本文には `## 予約外の文書の follow-up` の節を置く
-- D4 director の集め方: RESULT の件を resolve するとき、`DOC_FOLLOWUP:` の行を人に報告し、`--note` には件数と PR の URL だけを 1 行で書く(`ValidateInboxNote` は 1 行・500 字までなので、follow-up そのものは入れない。中身は RESULT の件と PR の本文に残る。codex の計画助言 MEDIUM)。分割計画の全機能が merge されたら(`ralph org merge-order --all` で全機能が `merged`)、`ralph org inbox --all` の RESULT の件と各 PR の本文から follow-up を集めて重複をまとめ、文書の機能 1 つの分割計画の案を人に見せる。人が承認したら、今までの「分割計画と機能ごとの org」の手順で org を立てる。follow-up がなければ何もしない。self-review の直しで足したこと: 写しの組の follow-up は組のすべてのファイルを `- Reserve:` に入れる(M2)。集め始めるのは分割計画のどの機能も `merged` か `closed` になったとき(closed は人に名前を言う)で、文書の分割計画の本文に元の分割計画の id を書いて集めた印にし、印のある分割計画と、人が要らないと言った分割計画は集め直さない。文書の分割計画から出た follow-up は人に報告するだけにし、続きの計画は人が頼んだときに書く(L4)。PR は merge-order の PR の列の番号で読む(L5)
+- D4 director の集め方: RESULT の件を resolve するとき、`DOC_FOLLOWUP:` の行を人に報告し、`--note` には件数と PR の URL だけを 1 行で書く(`ValidateInboxNote` は 1 行・500 字までなので、follow-up そのものは入れない。中身は RESULT の件と PR の本文に残る。codex の計画助言 MEDIUM)。分割計画の全機能が merge されたら(`ralph org merge-order --all` で全機能が `merged`)、`ralph org inbox --all` の RESULT の件と各 PR の本文から follow-up を集めて重複をまとめ、文書の機能 1 つの分割計画の案を人に見せる。人が承認したら、今までの「分割計画と機能ごとの org」の手順で org を立てる。follow-up がなければ何もしない。self-review の直しで足したこと: 写しの組の follow-up は組のすべてのファイルを `- Reserve:` に入れる(M2)。follow-up の文書を読むテストや文を固定するテストと fixture も探して `- Reserve:` に入れ、人に言う(予約の外のテストを直せず文書の org が gate を通れないため。cross-review cycle 2)。集め始めるのは分割計画のどの機能も `merged` か `closed` になったとき(closed は人に名前を言う)で、文書の分割計画の本文に元の分割計画の id を書いて集めた印にし、印のある分割計画と、人が要らないと言った分割計画は集め直さない。文書の分割計画から出た follow-up は人に報告するだけにし、続きの計画は人が頼んだときに書く(L4)。PR は merge-order の PR の列の番号で読む(L5)
 - D5 doc-maintainer がないとき: 飛ばして、RESULT に `SYNC_DOCS: skipped (<理由>)`、PR の本文の follow-up の節にも同じ理由を書く。leader が自分で文書を直すことはしない(leader のコンテキストを使わないという issue の決め)
 - Critical forks: None(D1〜D5 は、雛形と issue の決めと今の手順の形と今のテストから決まる。consult は D1 の置き場所を手順 9 の末尾に直したうえで、ほかを妥当とした)
 
@@ -144,6 +144,9 @@
   - 計画の D2 と Risks の `git status --porcelain` を、呼ぶ前の空の確かめと `--untracked-files=all` に書き換え、digest を取り直して承認を付け直した(ab78e5f0645b → 220fa1f3994f、自動承認。図解は `git status --porcelain` のノードがあるが、意味は同じなので変えない)
   - self-review cycle 2(report は 8bd985fb、HEAD ef4a15a7): CRITICAL・HIGH・MEDIUM は 0、LOW 2、Merge yes。P2 は直った。空のディレクトリは gate・cleanup・`git worktree remove`・写しの検査のどれにも掛からない。C2-1(F5 の前の書き方がテストのコメントと台帳の行に残る)と C2-2(呼ぶ前の確かめの振り分けが per-plan の `PLAN:` のヘッダを落とす)は直す。台帳の行は 94c10923(inline、1 ファイル、機械的な確かめは 5 項目とも clean)、残りは F6
   - F6 41468881(C2-1 のテストのコメント、C2-2): 呼ぶ前の確かめの implementer の項に「(per-plan では `PLAN:` のヘッダを付ける)」を足し(雛形と `/org` skill、共通の定数 `syncDocsLeftoverSort` を伸ばした)、テストのコメントを今の文に合わせた。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`・`run-static-verify.sh` が通過、新しい固定は前の版で落ちる。機械的な確かめは 5 項目とも clean。#264 の前例にならい、cycle 2 の self-review の run 2 は回さずに verify へ進む
+  - cycle 2 の verify(b0845cd3、pass、LOW 1 は仕様 FR-4 の注の古い書き方)、test(147e84bc、pass、`run-test.sh` rc 0、変異 21 個がすべて落ちる)、sync-docs(822acf62、仕様 FR-4 の注を直した)
+  - cross-review cycle 2(triage は 308409a7、HEAD 822acf62): codex の所見 1 件(P2)を ACTION_REQUIRED にした。director が書く文書だけの機能の予約に、follow-up の文書の文を固定するテストが入らず、文書の org が gate を通れない。上限 2 に届いたので、ユーザーの決めどおり上限を 3 に上げて回し直す(`RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`、`cycle-count.json` は 2 のまま)
+  - F7 44694f5b(cross-review cycle 2 #1): `/director` skill の手順 6 に、案を見せる前に follow-up の文書を読むテストや文を固定するテストと fixture を探して `- Reserve:` に入れ、足したものと理由を人に言う 2 文を足した(この repo のテストの名前は書かない。否定の検査で固定)。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`・`run-static-verify.sh` が通過、新しい固定は前の版の 4 つの写しすべてで落ちる。機械的な確かめは 5 項目とも clean。計画の D4 に同じことを書き、digest を取り直して承認を付け直した(220fa1f3994f → 94dc29701d29、自動承認。図解は予約の中身を描いていないので変えない)
   - 2026-10-30: 計画の Progress を書く途中でディスクが満杯(Data ボリュームの空き 944MiB、ENOSPC)になった。Go の build cache(38G)のうち 24 時間使われていない項目(26.4GB)を消し、空きは 30GiB に戻った。ほかのセッションの一時ファイル(stoic-app の 22G)には触れていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
