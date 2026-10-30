@@ -383,6 +383,39 @@
       - cap のコマンドを sh・bash・zsh -f で実地に打ち、`{"cycle": 2}` が `"cap":3` になり、壊れた JSON では元のファイルが残った。
     - self-check は 5 項目とも clean。consult(consult-plan-standardcfg276b)はコミットのあとで 3 点とも「変更なし」。orchestrator の確かめ: 4 つの写しに `${RALPH_…` の読み出しがないことを grep の否定で見た。
     - 範囲外: `scripts/ralph-config.sh:42-43`(と写し)の注釈が「tests/test-codex-exec-invocation.sh calls this function」と書くが、S3 でもう呼ばない。S4 で直す。rules・definition-of-done・codex-setup の export の文は S6。
+  - S4 54119962(impl-276b1-s4)
+    - `StartFeatureParams.Reviewer`(`config.ReviewerConfig`)を足した。
+      - `featureLeaderTask` は `- 台帳:` の直後に 2 行を書く。
+        - `- reviewer の codex: <model> <effort>(… -m と model_reasoning_effort に使う)`
+        - `- reviewer の claude: <model> <effort>(… --model と --effort に使う)`
+      - 頭の文字列は定数(`featureReviewerCodexLead`・`featureReviewerClaudeLead`)。
+      - 空のフィールドは `featureReviewer` が `config.Default().Reviewer` で埋める。
+      - shellQuote は使わない。雛形が値を二重引用符で囲むので、単一引用符が値の一部になってしまう。Load の検証を通る文字は二重引用符の中で展開されない。
+    - cli の受け渡し
+      - `resolveOrgConfig` の読み込みを `resolveConfig(configPath) (config.Config, error)` に分けた。
+      - `runOrgStartPlan` がそれを呼び、`Reviewer: cfg.Reviewer` を渡す(`--config` か `./ralph.toml` に `ralph.local.toml` を重ねたもの)。
+      - 設定は runtime と合わせて 2 回読む。runtime は `[org]` しか持たないため。
+      - 読む元は、`[org.approval]`(主 worktree の `ralph.toml`)と違う。self-review で見てもらう。
+    - leader.md
+      - codex・claude の起動から `. ./scripts/ralph-config.sh;` を外し、TASK の値の置き場所を使う。claude には `--effort` を渡す。
+      - `ralph-config.sh` の存在の確かめを外し、`xreview-helpers.sh` の確かめは残した。
+      - TASK に行がなければ incomplete と記録する文を足した。
+    - テスト
+      - 雛形の照合: 4 つの変数名と `ralph-config.sh`・`ralph config get reviewer` がないこと、`${RALPH_` の当たりがちょうど `${RALPH_PRIMARY_CLI` の 1 件であること。
+      - コマンドを動かすテストは、TASK の 2 行から値を取り出し、bash・zsh で動かす。撤去した変数に別の値を入れても効かないことも見る。
+      - feature の TASK の 2 行と空の扱い。cli で ralph.toml と ralph.local.toml の値が TASK に出ること。
+    - `scripts/ralph-config.sh`(と写し)の注釈のテストの名指しを直した。
+    - 検証
+      - org `-run 'Leader|Prompt|Feature'` 211 本(215 秒)、cli `-run 'OrgStart|Feature'` 50 本、check-sync rc=0、test-ralph-config 370/370、golangci-lint 0 件。
+      - 4 つの変数に絞った grep の否定は rc=0。handoff の広い grep(`${RALPH_`)は、残す `RALPH_PRIMARY_CLI` の 517 行の 1 件だけに当たる。handoff の grep が広すぎたので、orchestrator が承認して絞った。
+      - 変異 2 つは、どちらもテストが落とした。
+    - self-check: unnecessary changes(意味のない loop を消した)と typos(gofmt が見つけた空白、テストのコメント)が fixed、ほかは clean。
+    - コミット本文の「reads RALPH_* variables」は不正確(正しくは reviewer の変数を読まない)。amend しないので残した。
+    - template の注釈と S2〜S4 の実装の突き合わせ(consult の注意 1): 読めないときの扱い、許す文字、leader が start のときの値を使うこと、はどれも合っている。`max_pipeline_cycles` の注釈に cycle-count.json の `cap` の 1 文がないので、S6 で足す。
+    - 範囲外(S6 で扱う)
+      - model-routing.md の 78・86・90・148・152 行、codex-setup.md:105 の ralph-config.sh の古い説明。
+      - org skill の 697 行あたりのタスクの行の説明。
+      - `ralph org start --help` の reviewer の行。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
