@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	toml "github.com/pelletier/go-toml/v2"
+
 	"github.com/yoshpy-dev/ralph/internal/gitroot"
 )
 
@@ -575,14 +577,24 @@ func TestLoad_LinkedWorktreeReadsTheMainWorktreesLocalFile(t *testing.T) {
 // TestLoad_LocalOnlyKeyInRalphToml covers AC4 (D3): a ralph.toml that sets
 // [org].state_dir, also to "" and in the dotted and inline-table forms, is an
 // error naming the file and saying to set the key in ralph.local.toml,
-// whether the personal file is read or off. A --config file of another name
-// is refused the same way.
+// whether the personal file is read or off. So is one that spells the table
+// or the key in other letter cases, which toml.Unmarshal reads into the key
+// all the same (cross-review cycle 1 of plan 2026-10-30-org-state-dir-local);
+// the error names the key in lower case. A --config file of another name is
+// refused the same way.
 func TestLoad_LocalOnlyKeyInRalphToml(t *testing.T) {
 	for _, tc := range []struct{ name, ralphToml string }{
 		{"a value", "[org]\nmax_seats = 2\nstate_dir = \"/ledger\"\n"},
 		{"an empty value", "[org]\nstate_dir = \"\"\n"},
 		{"a dotted key", "org.state_dir = \"/ledger\"\n"},
 		{"an inline table", "org = { state_dir = \"/ledger\" }\n"},
+		{"an upper-case table and key", "[ORG]\nSTATE_DIR = \"/ledger\"\n"},
+		{"a capitalized table and key", "[Org]\nState_Dir = \"/ledger\"\n"},
+		{"an upper-case key", "[org]\nSTATE_DIR = \"/ledger\"\n"},
+		{"an upper-case table", "[ORG]\nstate_dir = \"/ledger\"\n"},
+		{"an upper-case dotted key", "ORG.STATE_DIR = \"/ledger\"\n"},
+		{"an upper-case inline table", "ORG = { STATE_DIR = \"/ledger\" }\n"},
+		{"the second of two tables", "[org]\nmax_seats = 2\n\n[ORG]\nSTATE_DIR = \"/ledger\"\n"},
 	} {
 		for _, env := range []string{"", "off"} {
 			t.Run(tc.name+" with "+LocalConfigEnv+"="+env, func(t *testing.T) {
@@ -704,12 +716,59 @@ func TestLocalOnlyKeys(t *testing.T) {
 	}
 }
 
+// TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder pins that
+// checkLocalOnlyKeys refuses a document exactly when toml.Unmarshal reads it
+// into a Config with [org].state_dir set (cross-review cycle 1 of plan
+// 2026-10-30-org-state-dir-local). go-toml v2 matches a key to a field by its
+// name, else by strings.ToLower of both, not by strings.EqualFold: a key with
+// U+0130 (capital I with dot above), which lowercases to "i" but does not
+// fold to it, is read and refused, and one with U+017F (long s), which folds
+// to "s" but lowercases to itself, is neither. Two keys, or two tables, that
+// differ in letter case only are both read; a key of another name or table is
+// not. The error names the key in lower case.
+func TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder(t *testing.T) {
+	for _, tc := range []struct {
+		doc     string
+		decoded bool
+	}{
+		{"[ORG]\nSTATE_DIR = \"/ledger\"\n", true},
+		{"[oRg]\nsTaTe_DiR = \"/ledger\"\n", true},
+		{"[org]\n\"STATE_D\U00000130R\" = \"/ledger\"\n", true},
+		{"[org]\nstate_dir = \"/a\"\nSTATE_DIR = \"/b\"\n", true},
+		{"[ORG]\nmax_seats = 2\n\n[org]\nstate_dir = \"/ledger\"\n", true},
+		{"[org]\nmax_seats = 2\n\n[ORG]\nSTATE_DIR = \"/ledger\"\n", true},
+		{"[org]\n\"\U0000017Ftate_dir\" = \"/ledger\"\n", false},
+		{"[ORG]\nSTATE_DIRS = \"/ledger\"\n", false},
+		{"[org]\nstate_dirs = \"/ledger\"\n", false},
+		{"[ORGANIZATION]\nSTATE_DIR = \"/ledger\"\n", false},
+		{"[organization]\nstate_dir = \"/ledger\"\n", false},
+		{"[ORG.DIRECTOR]\nSTATE_DIR = \"/ledger\"\n", false},
+	} {
+		var cfg Config
+		if err := toml.Unmarshal([]byte(tc.doc), &cfg); err != nil {
+			t.Fatalf("toml.Unmarshal(%q): %v", tc.doc, err)
+		}
+		if decoded := cfg.Org.StateDir != ""; decoded != tc.decoded {
+			t.Fatalf("toml.Unmarshal(%q) set [org].state_dir to %q, but the case says decoded=%v", tc.doc, cfg.Org.StateDir, tc.decoded)
+		}
+		err := checkLocalOnlyKeys("/p/ralph.toml", []byte(tc.doc))
+		if refused := err != nil; refused != tc.decoded {
+			t.Errorf("checkLocalOnlyKeys(%q) = %v, want refused=%v, since toml.Unmarshal sets [org].state_dir to %q", tc.doc, err, tc.decoded, cfg.Org.StateDir)
+		}
+		if want := "/p/ralph.toml: [org].state_dir can be set only in ralph.local.toml"; err != nil && !strings.Contains(err.Error(), want) {
+			t.Errorf("checkLocalOnlyKeys(%q): err = %v, want it to contain %q", tc.doc, err, want)
+		}
+	}
+}
+
 // TestLocalOrgStateDir_Values covers AC3's config half (D2): an absolute
 // value is returned cleaned and one starting with ~/ with the home directory
 // in place of ~; an empty or absent state_dir, an empty personal file, and no
 // personal file give "". path is the personal file's, also when it does not
-// exist. ralph.toml is never read: one that sets the key, or that is not
-// valid TOML, changes nothing.
+// exist. [ORG] STATE_DIR is read too, by the letter-case rule Load's check of
+// ralph.toml follows (TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder).
+// ralph.toml is never read: one that sets the key, or that is not valid TOML,
+// changes nothing.
 func TestLocalOrgStateDir_Values(t *testing.T) {
 	t.Setenv(LocalConfigEnv, "")
 	home := t.TempDir()
@@ -722,6 +781,7 @@ func TestLocalOrgStateDir_Values(t *testing.T) {
 	}{
 		{name: "absolute", local: "[org]\nstate_dir = \"" + abs + "\"\n", want: abs},
 		{name: "absolute, cleaned", local: "[org]\nstate_dir = \"" + abs + "/../ledger/./\"\n", want: abs},
+		{name: "upper-case table and key", local: "[ORG]\nSTATE_DIR = \"" + abs + "\"\n", want: abs},
 		{name: "under home", local: "[org]\nstate_dir = \"~/ledgers/a\"\n", want: filepath.Join(home, "ledgers", "a")},
 		{name: "home itself", local: "[org]\nstate_dir = \"~/\"\n", want: home},
 		{name: "empty", local: "[org]\nstate_dir = \"\"\n"},

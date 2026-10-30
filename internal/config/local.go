@@ -120,10 +120,12 @@ func LocalOnlyKeys() []string {
 }
 
 // checkLocalOnlyKeys refuses data, the ralph.toml Load read from path, when
-// it sets a key of LocalOnlyKeys, with any value, an empty one included. It
+// it sets a key of LocalOnlyKeys, with any value, an empty one included, in
+// any letter case toml.Unmarshal reads into the key (tomlDocHasKey). It
 // reads that document alone, the way checkLocalAgmsgHome reads the personal
 // one: once the personal file is applied on top, the merged config no longer
-// tells which document set a key.
+// tells which document set a key. The error names the key as LocalOnlyKeys
+// spells it, not as the document does.
 func checkLocalOnlyKeys(path string, data []byte) error {
 	var doc map[string]any
 	if err := toml.Unmarshal(data, &doc); err != nil {
@@ -141,19 +143,31 @@ func checkLocalOnlyKeys(path string, data []byte) error {
 }
 
 // tomlDocHasKey reports whether doc, a TOML document read into a map, sets
-// key, a dotted name such as "org.state_dir".
+// key, a dotted name such as "org.state_dir", the way toml.Unmarshal reads
+// the document into a struct. go-toml v2 matches a key to a field by the
+// field's name, else by strings.ToLower of both (structFieldPath), so
+// [ORG] STATE_DIR sets org.state_dir too. TOML keeps keys that differ in
+// letter case only apart, and the decoder applies each of them to the one
+// field, so every such key of a table is followed: [org] and [ORG] are two
+// tables of one document, and state_dir and STATE_DIR two keys of one table.
 func tomlDocHasKey(doc map[string]any, key string) bool {
-	var v any = doc
-	for _, segment := range strings.Split(key, ".") {
-		table, ok := v.(map[string]any)
-		if !ok {
-			return false
+	segment, rest, nested := strings.Cut(key, ".")
+	// strings.ToLower as the decoder has it, not strings.EqualFold, which
+	// differs for a few letters: U+0130 lowercases to "i" but does not fold
+	// to it, and U+017F folds to "s" but lowercases to itself.
+	lower := strings.ToLower(segment)
+	for name, v := range doc {
+		if strings.ToLower(name) != lower {
+			continue
 		}
-		if v, ok = table[segment]; !ok {
-			return false
+		if !nested {
+			return true
+		}
+		if table, ok := v.(map[string]any); ok && tomlDocHasKey(table, rest) {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // LocalOrgStateDir returns the [org].state_dir of the personal file of the
