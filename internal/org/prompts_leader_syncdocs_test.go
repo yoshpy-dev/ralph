@@ -27,12 +27,15 @@ const (
 // ### org の終わり方 both use for the sync-docs commit and for what the
 // leader does around it (plan 2026-10-30-leader-sync-docs, D2 and D2c): the
 // commit's fixed message, the commands that list the branch's earlier
-// sync-docs commits and the files each changed (the files a redo freezes),
-// the start of the sync-docs reports those files leave out, the undo, and
-// the report section that records what was undone.
+// sync-docs commits, by a subject equal to that message, and the files each
+// changed (the files a redo freezes), the start of the sync-docs reports
+// those files leave out, the undo, and the report section that records what
+// was undone. The list compares each subject with awk instead of using
+// git log --grep, which reads ^ and $ by the user's grep.patternType and
+// matches a body line too (self-review R2-1).
 const (
 	syncDocsCommitMessage  = "`docs: sync docs for <機能の slug>`"
-	syncDocsEarlierCommits = "`git log --format=%H --grep='^docs: sync docs for <機能の slug>$' origin/<既定のブランチ>..HEAD`"
+	syncDocsEarlierCommits = "`git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, \" \") + 1) == \"docs: sync docs for <機能の slug>\" { print $1 }'`"
 	syncDocsCommitFiles    = "`git show --name-only --format= <コミット>`"
 	syncDocsReportPrefix   = "docs/reports/sync-docs-"
 	syncDocsRestore        = "`git restore --source=HEAD --staged --worktree -- <パス>`"
@@ -53,12 +56,18 @@ const (
 // syncDocsNoReportSkip is the start of the sentence, the same in step 9 of
 // the leader template and in item 1 of the /org skill's ### org の終わり方,
 // that takes a failed call and a doc-maintainer that ended without the
-// report as one branch: undo every change, report included, check that
-// git status --porcelain prints nothing, then skip (plan
-// 2026-10-30-leader-sync-docs, D5). Each goes on with its own step numbers.
+// report as one branch with its own undo: every path git status --porcelain
+// shows, the report included, restored from HEAD or deleted, no
+// ## 戻した変更 section (no report is kept to hold it), a check that
+// git status --porcelain prints nothing, then the skip (plan
+// 2026-10-30-leader-sync-docs, D5). It no longer points at the next
+// paragraph's undo, which keeps the report and ends with that section
+// (self-review R2-3). Each goes on with its own step numbers.
 const syncDocsNoReportSkip = "呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で止まった、時間切れになった、など)と、" +
 	"doc-maintainer が report を書かずに終わったときは、同じ 1 つの枝で扱う。" +
-	"どちらも、次の段落の戻し方で sync-docs の変更を report も含めてすべて戻し、" +
+	"どちらも、`git status --porcelain` に出るパス(ここまでで何も出なくなっているので、すべて sync-docs の変更)を report も含めてすべて戻す。" +
+	"追跡しているファイルとステージした新しいファイルは " + syncDocsRestore + " で戻し、未追跡のファイルは消す。" +
+	"残す report がないので、`" + syncDocsUndoneHeading + "` の節は書かない。" +
 	"`git status --porcelain` が何も出さないことを確かめてから sync-docs を飛ばし、" + syncDocsSkipLine + " の行を"
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9 pins AC1 of plan
@@ -171,7 +180,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsHandsTheDocMaintainerItsLimit
 // HEAD in the index and the work tree (a plain git restore leaves a staged
 // change in place for the commit) and deletes untracked files. What is left
 // goes in one commit with the report under the fixed message the redo's
-// git log --grep looks for, not an example of one; the report alone when
+// git log looks for by subject, not an example of one; the report alone when
 // nothing else changed, and nothing when nothing changed. The plan is undone
 // because step 6's approval check refuses a TASK after the plan changed,
 // which step 6 says; a frozen file is, because its change in the commit
@@ -191,7 +200,7 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone(t *te
 		syncDocsFrozenUndoReason,
 		"どれもなければ変更はそのまま残す",
 		"残った変更と report を、決まったメッセージ " + syncDocsCommitMessage + " の 1 つのコミットにし" +
-			"(上の `git log --grep` はこのメッセージで探すので、言い方を変えない)、`git status --porcelain` が何も出さないことを確かめる",
+			"(上の `git log` は件名がこのメッセージと等しいコミットを探すので、言い方を変えない)、`git status --porcelain` が何も出さないことを確かめる",
 		"report のほかに変更がなければ、report だけで同じメッセージのコミットにする(report が前の回のコミットと同じで何も出なければ、コミットせずに手順 10 に進む)",
 	})
 	for _, old := range []string{"たとえば `docs: sync docs for", "追跡しているファイルは `git restore <パス>`"} {
@@ -212,12 +221,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsUndoesEveryChangeOrNone(t *te
 // the committed report does not read as if they were fixed and the record is
 // in a file, not in the leader's memory. Step 14 reads the follow-ups for the
 // PR body and the RESULT from the last sync-docs report, found from the newest
-// sync-docs commit, and no longer adds undone changes kept in memory.
+// sync-docs commit (the first line step 9's git log and awk command prints),
+// and no longer adds undone changes kept in memory.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsRecordsTheUndoneChangesInTheReport(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
 		syncDocsCheck,
 		"戻す前に、戻すパスごとに `git diff HEAD -- <パス>`(未追跡のファイルは中身)を読み、何を変えていたかを控える",
-		syncDocsRestore,
+		syncDocsRestore + " で戻し(ステージした新しいファイルは index からも作業ツリーからも消える)",
 		"戻したら、report に `" + syncDocsUndoneHeading + "` の節を足して戻したパスと変えていた中身の要点を 1 件 1 行で書き、" +
 			"同じ項を report の `" + syncDocsFollowupHeading + "` の節にも足す(`なし` の行は消す)",
 		"コミットした report が戻した変更を直したままのように読めず、手順 14 が記憶でなく report から読めるようにするため",
@@ -226,9 +236,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsRecordsTheUndoneChangesInTheR
 	step14 := leaderFeatureOrgItem(t, leaderStep14Marker)
 	assertPhrasesInOrder(t, step14, leaderItemWhere(leaderStep14Marker), []string{
 		"PR の本文には `" + syncDocsFollowupHeading + "` の節を置き、手順 9 で最後に走らせた sync-docs の report" +
-			"(手順 9 と同じ `git log --grep` の 1 行目の、最も新しい sync-docs のコミットが入れた `" + syncDocsReportPrefix + "` のファイル)" +
+			"(手順 9 と同じ `git log` と `awk` のコマンドが出す 1 行目の、最も新しい sync-docs のコミットが入れた `" + syncDocsReportPrefix + "` のファイル)" +
 			"をファイルから読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が古いか)で書く",
-		"(手順 9 で戻した変更もその節に足してあるので、記憶からは足さない。なければ `なし`。",
+		"(手順 9 で戻した変更もその節に足してあるので、記憶からは足さない。なければ `なし`)",
 		"本文には、PR の本文と同じく、その report の follow-up の節の項を、1 件 1 行の `" + docFollowupKey + ": <パス>: <ずれ>` で書く",
 	})
 	if containsPhrase(step14, "戻して控えた変更") {
@@ -239,17 +249,22 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsRecordsTheUndoneChangesInTheR
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezesEarlierSyncDocsFiles
 // pins AC6 and D2c of plan 2026-10-30-leader-sync-docs (self-review M1):
 // before it calls the doc-maintainer, the leader lists the branch's earlier
-// sync-docs commits from git by their fixed message and the union of the
-// files they changed, the sync-docs reports left out, and hands that union to
-// the doc-maintainer as frozen files, so a GATE: fail caused by a sync-docs
-// change does not come back with the same change put back. The list comes
-// from git, not from the gate's LOG or the leader's memory. The commit the
-// list finds is the one the next paragraph makes with that message.
+// sync-docs commits from git, newest first, by a subject equal to their fixed
+// message, and the union of the files they changed, the sync-docs reports
+// left out, and hands that union to the doc-maintainer as frozen files, so a
+// GATE: fail caused by a sync-docs change does not come back with the same
+// change put back. The list comes from git, not from the gate's LOG or the
+// leader's memory, and the template says why it does not use git log --grep
+// (self-review R2-1). The commit the list finds is the one the next paragraph
+// makes with that message.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezesEarlierSyncDocsFiles(t *testing.T) {
-	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
+	step9 := leaderFeatureOrgItem(t, step9Marker)
+	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
 		syncDocsHandOff,
-		"呼ぶ前に、このブランチのこれまでの sync-docs のコミット(メッセージは次の段落のとおり決まっている)を " + syncDocsEarlierCommits +
-			" で引き、それぞれの " + syncDocsCommitFiles + " が出すファイルの和集合を作る" +
+		"呼ぶ前に、このブランチのこれまでの sync-docs のコミット(メッセージは次の段落のとおり決まっている)を、" +
+			"件名がそのメッセージと等しいコミットだけを残す " + syncDocsEarlierCommits + " で新しい順に引く" +
+			"(`git log --grep` で探さないのは、利用者の git の設定 `grep.patternType` で `^` と `$` の読み方が変わり、本文の 1 行にも当たるため)",
+		"引いたコミットそれぞれの " + syncDocsCommitFiles + " が出すファイルの和集合を作る" +
 			"(`" + syncDocsReportPrefix + "` で始まる sync-docs の report は除く)",
 		"和集合が空でなければ、そのファイルを凍らせたファイルとして doc-maintainer に渡す",
 		"sync-docs の変更で `GATE: fail` になったあと、sync-docs が同じ変更を入れ直して同じ理由でまた落ちないためで、" +
@@ -260,17 +275,24 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezesEarlierSyncDocsFiles(t
 		syncDocsCheck,
 		"決まったメッセージ " + syncDocsCommitMessage,
 	})
+	if containsPhrase(step9, "--grep='") {
+		t.Errorf("expected step 9 to no longer list the earlier sync-docs commits with git log --grep, got item:\n%s", step9)
+	}
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage
 // runs step 9's two commands for the files a redo freezes, as the template
 // writes them, in a repository whose branch has two sync-docs commits made
 // with the fixed message, besides one on origin's default branch, one of a
-// feature whose slug starts with this one's, and an implementer's commit:
-// git log lists the two, newest first, and the union of what git show
-// --name-only lists for them, less the sync-docs reports, is the files they
-// changed. The slug a leader puts in the --grep pattern is one
-// ValidateIdentifier accepts, which has no regular expression metacharacter.
+// feature whose slug starts with this one's, one whose body has the message
+// as a line, one whose subject has the message before a tab, and an
+// implementer's commit: under grep.patternType basic and fixed in the
+// repository's config, git log and awk list the two, newest first, and the
+// union of what git show --name-only lists for them, less the sync-docs
+// reports, is the files they changed (self-review R2-1: the git log --grep
+// form also listed the body's commit, and nothing under fixed). The slug a
+// leader puts in the awk string is one ValidateIdentifier accepts, which has
+// no quote or backslash to end the string or the shell's quoting.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage(t *testing.T) {
 	step9 := leaderFeatureOrgItem(t, step9Marker)
 	for _, want := range []string{syncDocsEarlierCommits, syncDocsCommitFiles, syncDocsCommitMessage, "`" + syncDocsReportPrefix + "`"} {
@@ -295,6 +317,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage(t 
 	commit(message, "README.md", syncDocsReportPrefix+"2026-10-30-a.md")
 	commit("feat: the feature", "a.go")
 	commit("docs: sync docs for a-b", "b.md")
+	commit("fix: something\n\n"+message, "body.md")
+	commit(message+"\tx", "tab.md")
 	commit(message+"\n\nThe redo's sync-docs.", "docs/x.md", syncDocsReportPrefix+"2026-10-31-a.md")
 	newest := gitOut(t, dir, "rev-parse", "HEAD")
 
@@ -309,9 +333,13 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage(t 
 		return strings.Fields(string(out))
 	}
 	logCmd := strings.NewReplacer("<機能の slug>", "a", "<既定のブランチ>", "main").Replace(strings.Trim(syncDocsEarlierCommits, "`"))
-	commits := shell(logCmd)
-	if len(commits) != 2 || commits[0] != newest {
-		t.Fatalf("expected %q to list the branch's two sync-docs commits of a, the newest (%s) first, got %q", logCmd, newest, commits)
+	var commits []string
+	for _, patternType := range []string{"basic", "fixed"} {
+		runGit(t, "-C", dir, "config", "grep.patternType", patternType)
+		commits = shell(logCmd)
+		if len(commits) != 2 || commits[0] != newest {
+			t.Fatalf("with grep.patternType=%s, expected %q to list the branch's two sync-docs commits of a, the newest (%s) first, got %q", patternType, logCmd, newest, commits)
+		}
 	}
 	var frozen []string
 	for _, c := range commits {
@@ -326,9 +354,9 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsFreezeFindsTheFixedMessage(t 
 		t.Errorf("expected the frozen files of the two sync-docs commits, less the reports, to be %q, got %q", want, frozen)
 	}
 
-	for _, slug := range []string{"a.b", "a*", "a+", "a?", "a[b]", "a$", "a^b", `a\b`, "a|b", "a(b)"} {
+	for _, slug := range []string{`a"b`, "a'b", `a\b`, "a\nb"} {
 		if ValidateIdentifier("feature slug", slug) == nil {
-			t.Errorf("ValidateIdentifier accepted the feature slug %q, which would change what step 9's git log --grep pattern matches", slug)
+			t.Errorf("ValidateIdentifier accepted the feature slug %q, which would end or escape step 9's awk string or its shell quoting", slug)
 		}
 	}
 }
@@ -349,8 +377,8 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsSkipsWithoutTheDocMaintainer(
 	})
 	step14 := leaderFeatureOrgItem(t, leaderStep14Marker)
 	for _, want := range []string{
-		"sync-docs を飛ばしたときは、控えた " + syncDocsSkipLine + " の理由",
-		"sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
+		"最後の回で sync-docs を飛ばしたときは、report を読まずに、控えた " + syncDocsSkipLine + " の理由を書く",
+		"最後の回で sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
 	} {
 		if !containsPhrase(step14, want) {
 			t.Errorf("expected step 14 to say %q, got item:\n%s", want, step14)
@@ -380,17 +408,18 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsSkipsWithoutTheDocMaintainer(
 }
 
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip
-// pins D5 of plan 2026-10-30-leader-sync-docs (self-review L2): a failed call
-// (Codex cannot call the custom agent, the doc-maintainer stopped part way or
-// timed out) and a doc-maintainer that ended without writing the report are
-// one branch, so a call that fails after it wrote files cannot be read as a
-// skip that undoes nothing: every change, the report included, is undone the
-// way the next paragraph undoes them, git status --porcelain is checked to
-// print nothing, and only then is sync-docs skipped with SYNC_DOCS: skipped
-// kept for step 14. The sentence comes after the skip for a missing
-// definition and before the hand-off's list, no other sentence of step 9
-// speaks of a failed call, and the paragraph after it is the one that starts
-// with the leader's check and holds the undo.
+// pins D5 of plan 2026-10-30-leader-sync-docs (self-review L2 and R2-3): a
+// failed call (Codex cannot call the custom agent, the doc-maintainer stopped
+// part way or timed out) and a doc-maintainer that ended without writing the
+// report are one branch, so a call that fails after it wrote files cannot be
+// read as a skip that undoes nothing. The branch says its own undo: every
+// change, the report included, is restored from HEAD or deleted, with no
+// ## 戻した変更 section since no report is kept, git status --porcelain is
+// checked to print nothing, and only then is sync-docs skipped with
+// SYNC_DOCS: skipped kept for step 14. It no longer points at the next
+// paragraph's undo, which keeps the report and adds that section to it. The
+// sentence comes after the skip for a missing definition and before the
+// hand-off's list, and no other sentence of step 9 speaks of a failed call.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *testing.T) {
 	step9 := leaderFeatureOrgItem(t, step9Marker)
 	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
@@ -399,14 +428,12 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *
 		"(ファイルを書いたあとで失敗したときも、汚れた作業ツリーのまま手順 10 に進まないため)",
 		"doc-maintainer への指示には、次のことを書く",
 		syncDocsCheck,
-		syncDocsRestore,
 	})
 	if n := strings.Count(squashSpace(step9), "呼び出しが失敗"); n != 1 {
 		t.Errorf("expected step 9 to speak of a failed call once, in the one branch it shares with an end without the report, got %d; item:\n%s", n, step9)
 	}
-	next, ok := skillParagraphAfter(step9, syncDocsNoReportSkip)
-	if !ok || !strings.HasPrefix(squashSpace(next), squashSpace(syncDocsCheck)) || !containsPhrase(next, syncDocsRestore) {
-		t.Errorf("expected the paragraph after the one that says %q to start with %q and hold the undo it points at, got item:\n%s", syncDocsNoReportSkip, syncDocsCheck, step9)
+	if containsPhrase(step9, "次の段落の戻し方") {
+		t.Errorf("expected step 9's branch for a failed call to say its own undo instead of pointing at the next paragraph's, which keeps the report, got item:\n%s", step9)
 	}
 }
 
@@ -414,15 +441,24 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *
 // plan 2026-10-30-leader-sync-docs: a GATE: fail, or a gate refusal whose fix
 // needs the implementer, goes back through step 8 to step 9, so sync-docs runs
 // again on the new head, and step 14 uses the last run's report or
-// SYNC_DOCS: line. A GATE: fail in files the sync-docs commit changed (a copy
-// check, say) takes the same path: the implementer fixes it inside the
-// reservation, and the redo's sync-docs gets the earlier sync-docs commits'
-// files frozen (step 9), so it does not put the same change back.
+// SYNC_DOCS: line. When the last run was skipped, step 14 writes the held
+// SYNC_DOCS: skipped line and does not read the report of the newest
+// sync-docs commit, which an earlier run made (self-review R2-3). A
+// GATE: fail in files the sync-docs commit changed (a copy check, say) takes
+// the same path: the implementer fixes it inside the reservation, and the
+// redo's sync-docs gets the earlier sync-docs commits' files frozen (step 9),
+// so it does not put the same change back.
 func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsRunsAgainOnARedo(t *testing.T) {
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, step9Marker), leaderItemWhere(step9Marker), []string{
 		syncDocsCheck,
 		"gate をやり直すとき(手順 12 の `GATE: fail` や、implementer の手が要る gate の断りのあと)は、手順 8 の往復を経てこの手順を通り直すので、sync-docs も新しい HEAD でもう一度走る",
 		"手順 14 が使うのは最後の回のもの(最後の回の report か、最後の回で控えた `SYNC_DOCS:` の行)で、前の回の控えは使わない",
+	})
+	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, leaderStep14Marker), leaderItemWhere(leaderStep14Marker), []string{
+		"PR の本文には `" + syncDocsFollowupHeading + "` の節を置き、手順 9 で最後に走らせた sync-docs の report",
+		"最後の回で sync-docs を飛ばしたときは、report を読まずに、控えた " + syncDocsSkipLine + " の理由を書く" +
+			"(最も新しい sync-docs のコミットは前の回のもので、その report は最後の回のものではない)",
+		"最後の回で sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
 	})
 	assertPhrasesInOrder(t, leaderFeatureOrgItem(t, gateFailMarker), leaderItemWhere(gateFailMarker), []string{
 		"implementer への TASK に書いて直しを頼み、手順 8 の往復に戻る",

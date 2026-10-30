@@ -1039,17 +1039,25 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    (戻す変更はない)、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
    2 に進む。呼び出しが失敗したとき(Codex で custom agent を呼べない、途中で
    止まった、時間切れになった、など)と、doc-maintainer が report を書かずに
-   終わったときは、同じ 1 つの枝で扱う。どちらも、次の段落の戻し方で
-   sync-docs の変更を report も含めてすべて戻し、`git status --porcelain` が
-   何も出さないことを確かめてから sync-docs を飛ばし、
-   `SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて 2 に進む(書いた
-   あとで失敗したときも、汚れた作業ツリーのまま 2 に進まないため)。
+   終わったときは、同じ 1 つの枝で扱う。どちらも、`git status --porcelain` に
+   出るパス(ここまでで何も出なくなっているので、すべて sync-docs の変更)を
+   report も含めてすべて戻す。追跡しているファイルとステージした新しい
+   ファイルは `git restore --source=HEAD --staged --worktree -- <パス>` で
+   戻し、未追跡のファイルは消す。残す report がないので、`## 戻した変更` の
+   節は書かない。`git status --porcelain` が何も出さないことを確かめてから
+   sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を 6 のために控えて
+   2 に進む(書いたあとで失敗したときも、汚れた作業ツリーのまま 2 に進まない
+   ため)。
    呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
-   次の段落のとおり決まっている)を
-   `git log --format=%H --grep='^docs: sync docs for <機能の slug>$' origin/<既定のブランチ>..HEAD`
-   で引き、それぞれの `git show --name-only --format= <コミット>` が出す
-   ファイルの和集合(`docs/reports/sync-docs-` で始まる sync-docs の report は
-   除く)を、凍らせたファイルとして渡す(和集合が空なら渡すものはない)。
+   次の段落のとおり決まっている)を、件名がそのメッセージと等しいコミット
+   だけを残す
+   `git log --format='%H %s' origin/<既定のブランチ>..HEAD | awk 'substr($0, index($0, " ") + 1) == "docs: sync docs for <機能の slug>" { print $1 }'`
+   で新しい順に引く(`git log --grep` で探さないのは、利用者の git の設定
+   `grep.patternType` で `^` と `$` の読み方が変わり、本文の 1 行にも当たる
+   ため)。引いたコミットそれぞれの `git show --name-only --format= <コミット>`
+   が出すファイルの和集合(`docs/reports/sync-docs-` で始まる sync-docs の
+   report は除く)を、凍らせたファイルとして渡す(和集合が空なら渡すものは
+   ない)。
    sync-docs の変更で `GATE: fail` になったあと、同じ変更が入り直して同じ
    理由でまた落ちないためで、gate の `LOG:` から原因を推し量ることはしない。
    一覧を記憶でなく git から引くので、compaction や rebase のあとも
@@ -1093,7 +1101,8 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    予約の中でもその変更がコミットに入ると、sync-docs の変更で落ちた gate が
    同じ理由でまた落ちうるため。どれもなければ変更はそのまま残す。残った
    変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の
-   1 つのコミットにし(上の `git log --grep` はこのメッセージで探す)、
+   1 つのコミットにし(上の `git log` は件名がこのメッセージと等しいコミットを
+   探す)、
    `git status --porcelain` が何も出さないことを確かめる。report のほかに
    変更がなければ report だけを同じメッセージでコミットし、report も前の回の
    コミットと同じで何も出なければ、コミットせずに 2 に進む。
@@ -1205,12 +1214,14 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    `/pr` skill は実行しない(PR のあと task worktree と local branch を消す
    ので、leader の cwd が消える)。PR の本文には
    `## 予約外の文書の follow-up` の節を置き、1 で最後に走らせた sync-docs の
-   report(1 と同じ `git log --grep` の 1 行目の、最も新しい sync-docs の
-   コミットが入れた `docs/reports/sync-docs-` のファイル)をファイルから
-   読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が古いか)で書く
-   (1 で戻した変更もその節に足してあるので、記憶からは足さない。なければ
-   `なし`。最後の回で sync-docs を飛ばしたときは、控えた
-   `SYNC_DOCS: skipped (<理由>)` の理由)。push か `gh pr create` が
+   report(1 と同じ `git log` と `awk` のコマンドが出す 1 行目の、最も新しい
+   sync-docs のコミットが入れた `docs/reports/sync-docs-` のファイル)を
+   ファイルから読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が
+   古いか)で書く(1 で戻した変更もその節に足してあるので、記憶からは
+   足さない。なければ `なし`)。最後の回で sync-docs を飛ばしたときは、
+   report を読まずに、控えた `SYNC_DOCS: skipped (<理由>)` の理由を書く
+   (最も新しい sync-docs のコミットは前の回のもので、その report は最後の
+   回のものではない)。push か `gh pr create` が
    失敗したら(ネットワークのない sandbox など)、打ち直さずにエラーを本文に
    書いて `ralph org escalate` で `BLOCKED` を上げる。PR ができたら、4 で控えた
    `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて
@@ -1220,8 +1231,8 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    1 行)。本文が 2,000 字に収まらなければ、その行の代わりに、件数と PR の
    本文の節を指す 1 行
    (`DOC_FOLLOWUP: 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を
-   書く。sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の代わりに、控えた
-   `SYNC_DOCS: skipped (<理由>)` の行を書く。
+   書く。最後の回で sync-docs を飛ばしたときは、`DOC_FOLLOWUP:` の行の
+   代わりに、控えた `SYNC_DOCS: skipped (<理由>)` の行を書く。
 7. 最後のコマンドとして `ralph org disband --org-id <org_id>` を打つ。
 
 gate のあとにコミットを足さない。足したら gate を頼み直す。座席を gate の

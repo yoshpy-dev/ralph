@@ -195,7 +195,7 @@ func TestOrgSkill_EndOfOrgStep1UndoesEveryChangeOrNoneAndCommitsOnce(t *testing.
 			syncDocsFrozenUndoReason,
 			"どれもなければ変更はそのまま残す",
 			"残った変更と report を、決まったメッセージ " + syncDocsCommitMessage + " の 1 つのコミットにし" +
-				"(上の `git log --grep` はこのメッセージで探す)、`git status --porcelain` が何も出さないことを確かめる",
+				"(上の `git log` は件名がこのメッセージと等しいコミットを探す)、`git status --porcelain` が何も出さないことを確かめる",
 			"report のほかに変更がなければ report だけを同じメッセージでコミットし、report も前の回のコミットと同じで何も出なければ、コミットせずに 2 に進む",
 		}},
 		{"the subsection ### 機能の計画の承認", func(text string) string { return directorSkillSubsection(text, "### 機能の計画の承認") }, []string{
@@ -240,27 +240,30 @@ func TestOrgSkill_EndOfOrgSyncDocsRunsAgainOnARedo(t *testing.T) {
 // 2026-10-30-leader-sync-docs (D3, D5) for item 6 of ### org の終わり方: the
 // PR body has the follow-up section the sync-docs report has, with the items
 // of the last report's section, read again from the file the newest
-// sync-docs commit added (it holds the changes item 1 undid too, so none are
-// added from memory; なし when none, the skip reason when the last run
-// skipped), and the RESULT's body carries the same items as one DOC_FOLLOWUP:
-// line each, DOC_FOLLOWUP: なし when none, one line with the count pointing at
-// the PR body when they do not fit the body cap, and the SYNC_DOCS: skipped
-// line instead when sync-docs was skipped.
+// sync-docs commit added (the first line item 1's git log and awk command
+// prints; it holds the changes item 1 undid too, so none are added from
+// memory; なし when none), the skip reason, with no report read, when the
+// last run skipped (the newest sync-docs commit is then an earlier run's,
+// self-review R2-3), and the RESULT's body carries the same items as one
+// DOC_FOLLOWUP: line each, DOC_FOLLOWUP: なし when none, one line with the
+// count pointing at the PR body when they do not fit the body cap, and the
+// SYNC_DOCS: skipped line instead when the last run skipped sync-docs.
 func TestOrgSkill_EndOfOrgStep6CarriesTheDocFollowups(t *testing.T) {
 	checkOrgSkillPlaces(t, "doc follow-up", []skillPlace{
 		{"item 6 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 6) }, []string{
 			"`/pr` skill は実行しない",
 			"PR の本文には `" + syncDocsFollowupHeading + "` の節を置き、1 で最後に走らせた sync-docs の report" +
-				"(1 と同じ `git log --grep` の 1 行目の、最も新しい sync-docs のコミットが入れた `" + syncDocsReportPrefix + "` のファイル)" +
+				"(1 と同じ `git log` と `awk` のコマンドが出す 1 行目の、最も新しい sync-docs のコミットが入れた `" + syncDocsReportPrefix + "` のファイル)" +
 				"をファイルから読み直して、その同じ名前の節の項を 1 件 1 行(パスと、何が古いか)で書く",
-			"(1 で戻した変更もその節に足してあるので、記憶からは足さない。なければ `なし`。最後の回で sync-docs を飛ばしたときは、控えた " +
-				syncDocsSkipLine + " の理由)",
+			"(1 で戻した変更もその節に足してあるので、記憶からは足さない。なければ `なし`)",
+			"最後の回で sync-docs を飛ばしたときは、report を読まずに、控えた " + syncDocsSkipLine + " の理由を書く" +
+				"(最も新しい sync-docs のコミットは前の回のもので、その report は最後の回のものではない)",
 			"PR ができたら、4 で控えた `HEAD:` と `BASE:` の 2 行をヘッダに写し、PR の URL を EVIDENCE に書いて `RESULT` を escalate する(TASK_ID は org_id)",
 			"RESULT の本文には、PR の本文と同じく、その report の follow-up の節の項を、1 件 1 行の `" + docFollowupKey + ": <パス>: <ずれ>` で書く" +
 				"(なければ `" + docFollowupKey + ": なし` の 1 行)",
 			"本文が 2,000 字に収まらなければ、その行の代わりに、件数と PR の本文の節を指す 1 行" +
 				"(`" + docFollowupKey + ": 14 件(PR の本文の「予約外の文書の follow-up」の節)` など)を書く",
-			"sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
+			"最後の回で sync-docs を飛ばしたときは、`" + docFollowupKey + ":` の行の代わりに、控えた " + syncDocsSkipLine + " の行を書く",
 		}},
 	})
 	if protocol.DefaultMaxBodyChars != 2000 {
@@ -303,7 +306,7 @@ func TestOrgSkill_EndOfOrgNamesTheSyncDocsLikeTheLeaderTemplate(t *testing.T) {
 		{"step 14 / item 6", step14, 6, []string{
 			"`" + syncDocsFollowupHeading + "`",
 			syncDocsSkipLine,
-			"`git log --grep`",
+			"`git log` と `awk` のコマンドが出す 1 行目",
 			"`" + syncDocsReportPrefix + "`",
 			"`" + docFollowupKey + ": <パス>: <ずれ>`",
 			"`" + docFollowupKey + ": なし`",
@@ -329,52 +332,18 @@ func TestOrgSkill_EndOfOrgNamesTheSyncDocsLikeTheLeaderTemplate(t *testing.T) {
 	}
 }
 
-// skillParagraphAfter returns the paragraph of text, paragraphs being split
-// at blank lines, right after the first one that contains phrase
-// (containsPhrase). ok is false when no paragraph contains phrase or that
-// paragraph is the last one.
-func skillParagraphAfter(text, phrase string) (next string, ok bool) {
-	paragraphs := strings.Split(text, "\n\n")
-	for i, p := range paragraphs {
-		if containsPhrase(p, phrase) {
-			if i+1 < len(paragraphs) {
-				return paragraphs[i+1], true
-			}
-			return "", false
-		}
-	}
-	return "", false
-}
-
-// TestSkillParagraphAfter runs skillParagraphAfter on a phrase that wraps, a
-// phrase in the last paragraph, and a phrase no paragraph has.
-func TestSkillParagraphAfter(t *testing.T) {
-	const text = "1. one\n   two\n\n   three\n   four\n\n   five"
-	for _, tc := range []struct {
-		phrase, want string
-		ok           bool
-	}{
-		{"one two", "   three\n   four", true},
-		{"five", "", false},
-		{"six", "", false},
-	} {
-		if got, ok := skillParagraphAfter(text, tc.phrase); got != tc.want || ok != tc.ok {
-			t.Errorf("skillParagraphAfter(text, %q) = %q, %t, want %q, %t", tc.phrase, got, ok, tc.want, tc.ok)
-		}
-	}
-}
-
 // TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip pins D5 of plan
-// 2026-10-30-leader-sync-docs (self-review L2) for item 1 of ### org
+// 2026-10-30-leader-sync-docs (self-review L2 and R2-3) for item 1 of ### org
 // の終わり方, with the words of step 9 of the leader template
 // (syncDocsNoReportSkip): a failed call and a doc-maintainer that ended
-// without writing the report are one branch, which undoes every change, the
-// report included, the way the next paragraph undoes them, checks that
+// without writing the report are one branch with its own undo, which
+// restores every change, the report included, from HEAD or deletes it, writes
+// no ## 戻した変更 section since no report is kept, checks that
 // git status --porcelain prints nothing, and only then skips with
-// SYNC_DOCS: skipped kept for item 6. The sentence comes after the skip for a
-// missing definition and before the hand-off's list, no other sentence of the
-// item speaks of a failed call, and the paragraph after it is the one that
-// starts with the leader's check and holds the undo.
+// SYNC_DOCS: skipped kept for item 6. It no longer points at the next
+// paragraph's undo, which keeps the report. The sentence comes after the skip
+// for a missing definition and before the hand-off's list, and no other
+// sentence of the item speaks of a failed call.
 func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 	checkOrgSkillPlaces(t, "no-report skip", []skillPlace{
 		{"item 1 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 1) }, []string{
@@ -383,7 +352,6 @@ func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 			"(書いたあとで失敗したときも、汚れた作業ツリーのまま 2 に進まないため)",
 			"doc-maintainer への指示には、機能の計画のパス",
 			orgSkillSyncDocsCheck,
-			syncDocsRestore,
 		}},
 	})
 
@@ -397,10 +365,8 @@ func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 		if n := strings.Count(squashSpace(step), "呼び出しが失敗"); n != 1 {
 			t.Errorf("%s: expected item 1 of ### org の終わり方 to speak of a failed call once, in the one branch it shares with an end without the report, got %d; item:\n%s", rel, n, step)
 		}
-		next, ok := skillParagraphAfter(step, syncDocsNoReportSkip)
-		if !ok || !strings.HasPrefix(squashSpace(next), squashSpace(orgSkillSyncDocsCheck)) || !containsPhrase(next, syncDocsRestore) {
-			t.Errorf("%s: expected the paragraph after the one that says %q to start with %q and hold the undo it points at, got item:\n%s",
-				rel, syncDocsNoReportSkip, orgSkillSyncDocsCheck, step)
+		if containsPhrase(step, "次の段落の戻し方") {
+			t.Errorf("%s: expected item 1's branch for a failed call to say its own undo instead of pointing at the next paragraph's, which keeps the report, got item:\n%s", rel, step)
 		}
 	}
 }
@@ -409,19 +375,23 @@ func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 // plan 2026-10-30-leader-sync-docs (self-review M1) for item 1 of ### org
 // の終わり方, with the leader template's commands (syncDocsEarlierCommits,
 // syncDocsCommitFiles): before the call, the leader lists the branch's
-// earlier sync-docs commits by their fixed message and hands the union of
-// the files they changed, the sync-docs reports left out, as frozen files,
-// so a GATE: fail caused by a sync-docs change does not come back with the
-// same change put back; the list comes from git, not the gate's LOG, and the
-// hand-off asks the doc-maintainer to leave those files alone and write what
-// is left to the follow-ups. The commit it finds is the one the next
-// paragraph makes with that message.
+// earlier sync-docs commits, newest first, by a subject equal to their fixed
+// message (not with git log --grep, whose ^ and $ follow the user's
+// grep.patternType and which matches a body line too, self-review R2-1) and
+// hands the union of the files they changed, the sync-docs reports left out,
+// as frozen files, so a GATE: fail caused by a sync-docs change does not come
+// back with the same change put back; the list comes from git, not the gate's
+// LOG, and the hand-off asks the doc-maintainer to leave those files alone and
+// write what is left to the follow-ups. The commit it finds is the one the
+// next paragraph makes with that message.
 func TestOrgSkill_EndOfOrgStep1FreezesEarlierSyncDocsFiles(t *testing.T) {
 	checkOrgSkillPlaces(t, "sync-docs freeze", []skillPlace{
 		{"item 1 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 1) }, []string{
 			orgSkillSyncDocsHandOff,
-			"呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは次の段落のとおり決まっている)を " + syncDocsEarlierCommits +
-				" で引き、それぞれの " + syncDocsCommitFiles + " が出すファイルの和集合(`" + syncDocsReportPrefix + "` で始まる sync-docs の report は除く)を、" +
+			"呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは次の段落のとおり決まっている)を、" +
+				"件名がそのメッセージと等しいコミットだけを残す " + syncDocsEarlierCommits + " で新しい順に引く" +
+				"(`git log --grep` で探さないのは、利用者の git の設定 `grep.patternType` で `^` と `$` の読み方が変わり、本文の 1 行にも当たるため)",
+			"引いたコミットそれぞれの " + syncDocsCommitFiles + " が出すファイルの和集合(`" + syncDocsReportPrefix + "` で始まる sync-docs の report は除く)を、" +
 				"凍らせたファイルとして渡す(和集合が空なら渡すものはない)",
 			"sync-docs の変更で `GATE: fail` になったあと、同じ変更が入り直して同じ理由でまた落ちないためで、gate の `LOG:` から原因を推し量ることはしない",
 			"一覧を記憶でなく git から引くので、compaction や rebase のあとも同じものが出る",
@@ -431,6 +401,17 @@ func TestOrgSkill_EndOfOrgStep1FreezesEarlierSyncDocsFiles(t *testing.T) {
 			"決まったメッセージ " + syncDocsCommitMessage,
 		}},
 	})
+
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's sync-docs freeze check (vendored repo?)", rel, err)
+		}
+		if step := orgSkillEndOfOrgStep(string(data), 1); containsPhrase(step, "--grep='") {
+			t.Errorf("%s: expected item 1 of ### org の終わり方 to no longer list the earlier sync-docs commits with git log --grep, got item:\n%s", rel, step)
+		}
+	}
 }
 
 // TestOrgSkill_CompletionCriteriaHaveTheSyncDocsCommitAndTheDocFollowups pins
