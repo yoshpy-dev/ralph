@@ -70,12 +70,10 @@
 - `awk` を gawk と mawk で、`git show --name-only` を `core.quotePath` と署名つきのコミットで確かめていない(tech-debt に記録済み)
 - 足すと効く検査: `templates/` に触れるスライスの検証のコマンドに `./scripts/check-template-purity.sh` を入れる。新しい verifier は要らない。run-static-verify が今回それを捕まえた
 
-## Verdict
+## 初回(HEAD 0dfc49f0)の判定
 
-pass
+fail。判定はすべての節のあとの `## Verdict` に置いた(cycle 3 で、test の report と同じく `## Verdict` を最後の節にした)。
 
-- cycle 2(HEAD e21d89c3)の判定。cross-review cycle 1 の ACTION_REQUIRED #1(P2)を直した F5・F5b・F6 のあと、sync-docs の段落の `git status` は雛形と `/org` skill の両方で 5 か所とも `git status --porcelain --untracked-files=all` になった。`run-static-verify.sh` と `check-template-purity.sh` は rc=0。所見は LOW 1 件(V3 仕様 FR-4 の注のコマンドが古い)で、merge を止めない。V3 は cycle 2 の /sync-docs が扱う。下の「cycle 2(HEAD e21d89c3)」の節を見る
-- re-run(HEAD feeb1e80)の判定は pass だった。V1 と V2 は d8e73710(F4)で直り、`run-static-verify.sh` と `check-template-purity.sh` は rc=0 になった。開いている所見は INFO 2 件だけで、merge を止めない。下の「re-run(HEAD feeb1e80)」の節を見る
 - 初回(HEAD 0dfc49f0)の判定は fail だった。AC1・AC2・AC3・AC4・AC5・AC6・AC8 の文は雛形と skill の該当行にあり、check-skill-sync、check-sync、`git diff --check`、`go build`、`go vet`、gofmt、golangci-lint、secret scan は通り、計画の digest は承認時と同じだった。所見は HIGH 1 件(V1 `check-template-purity.sh` の失敗。CI も落ちる)、LOW 1 件(V2 `/org` skill の受信箱の resolve の文)、INFO 2 件。insight event は `--verdict fail --cycle auto --high 1 --low 1`
 - Partially verified: AC7(静的の部分だけ)
 - Not verified: Go のテストの結果(/test)、leader と director が実機でこの手順を走らせること
@@ -176,3 +174,65 @@ pass。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle 
 ### cycle 2 の判定
 
 pass。所見は LOW 1 件(V3)と、前からの INFO 2 件。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle auto --low 1`、cycle 2)。
+
+## cycle 3(HEAD 7f14d8bc)
+
+- Date: 2026-10-30
+- Verifier: verifier サブエージェント(`/verify`、パイプラインの 3 回目の run。上限は `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げてあり、`cycle-count.json` は `"cycle": 2` のままなので、`--cycle auto` は 2 を出す。計画の Progress のとおり)
+- Scope: cycle 2 の report(b0845cd3)のあとの 8 コミット、`git diff b0845cd3..HEAD`(12 ファイル、+248/−24)。147e84bc(cycle 2 の test)、822acf62(cycle 2 の sync-docs、仕様 FR-4 の注)、308409a7(cross-review cycle 2 の triage、ACTION_REQUIRED 1 件 P2)、F7 44694f5b、ebc2b64a(計画の D4、承認し直し)、eea3eb84(self-review cycle 3、LOW 1、Merge yes)、F8 b6a8060a、7f14d8bc(計画の記録)。雛形 `leader.md` と `/org` skill は変わっていない。origin/main は 0351800d のままで、HEAD はそれを含む(`git merge-base --is-ancestor` rc=0)。テストは打っていない(/test)
+- Evidence: 同じ `docs/evidence/verify-2026-10-30-leader-sync-docs.log` の末尾に足した(コミットしない)。run-static-verify 自身のログは `docs/evidence/verify-2026-10-30-124509.log`
+
+### 打ったもの
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `./scripts/run-static-verify.sh`(changed scope) | pass(rc=0) | `All verifiers passed.`。ログに `FAIL` の行はない。golangci-lint `0 issues.`、secret scan は clean |
+| `./scripts/check-template-purity.sh` | pass(rc=0) | `PASS: no meta-repo-specific references found in templates.` |
+| `./scripts/check-skill-sync.sh` | pass | 14 skill が一致 |
+| `./scripts/check-sync.sh` | pass | DRIFTED 0、ROOT_ONLY 0 |
+| `cmp`(`.claude/skills/director/SKILL.md` と写し 3 つ) | 同じ | `.agents/`、`templates/base/.claude/`、`templates/base/.agents/` |
+| `git diff --check origin/main...HEAD` | pass(rc=0、無出力) | |
+| `go build ./...` / `go vet ./internal/org/` / `gofmt -l internal/org` | pass | どれも無出力 |
+| `grep -n '_test.go\|check-sync.sh' .claude/skills/director/SKILL.md` | 0 件(rc=1) | 配られる skill がこの repo のテストの名前も meta-repo の検査も名指さない |
+| `./scripts/plan-visual.sh digest <plan>` | `94dc29701d29` | 計画の `- Approved:` の digest と同じ(ebc2b64a で付け直したもの) |
+
+### AC5 の director の手順(F7・F8)
+
+- 「### 予約外の文書の follow-up」の 6(`.claude/skills/director/SKILL.md:1126-1141`)は、写しの組の予約(`:1128-1133`)のあとに、案を見せる前に「一覧のファイルを読むテストと、その文を固定するテストと fixture を探し」、見つけたものも `- Reserve:` に入れ、どれをなぜ足したかを案と一緒に人に言う、と書く(`:1133-1138`)。理由(テストを予約しないと、文書の org の implementer が変わった文に合わせてテストを直せず、gate のテストが落ちる)もある。cross-review cycle 2 の P2(文書の org の予約に文を固定するテストが入らない)は塞がった
+- F8 の言い直しで、「文書を読む」と「テストを探す」の 2 つの動作とも読めた C3-1 の曖昧さはなくなった。探すのはテスト(文書を読むテストと、文を固定するテスト)と fixture
+- 新しいテスト `TestDirectorSkill_DocFollowupGatheringReservesTheTestsThatPinTheDocs`(`internal/org/skill_doc_followup_test.go:692-726`)が 6 の文を 6 つの語句で固定し、4 つの写しのどれも 6 に `_test.go` を書かないことを確かめる
+- 1〜5、7、8 と「件の処理」の RESULT の項は変わっていない。AC5 は met のまま
+- 案に足すのは人に見せる予約で、承認は人がする(7)。テストを予約に入れても、start が予約を検査するときの読み方は今までと同じ(ファイルはそのパス)なので、ralph の動きに新しい前提はない
+
+### AC と文書のずれの見直し
+
+- AC1〜AC4・AC6・AC8: met のまま。雛形と `/org` skill は b0845cd3 から変わっていない(`git diff b0845cd3..HEAD -- internal/org/prompts/leader.md .claude/skills/org/SKILL.md` は空)
+- AC5: met(上の節)
+- AC7: partly のまま。名指された 5 本のテストは今も diff に入っていない。テストが通るかは /test が確かめる
+- V3(cycle 2、LOW): 直った。822acf62 で、仕様 FR-4 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)は、呼ぶ前の `git status --porcelain --untracked-files=all` の確かめと、終わったあとに同じコマンドで 1 ファイルずつ読むことを書く
+- 計画(ebc2b64a、7f14d8bc): D4 に、テストと fixture を探して `- Reserve:` に入れ人に言うことが入り、skill と合う。Progress の F7・F8 の記録は diff と合う。AC の checkbox は未記入のまま
+- README `:280` は director の文書の機能を「drafts with the human once every feature is merged or closed」とだけ書き、予約の中身に触れないので、変える必要はない
+
+### V4(LOW): 仕様 FR-4 の注が、文書の機能の予約にテストを入れることを言っていない
+
+`docs/specs/2026-10-07-org-multi-org-director.md:93` は director の集め方を「写しの組の follow-up は組のすべてを予約に入れ」までで終え、F7 の「follow-up の文書を読むテストと文を固定するテストと fixture を探して `- Reserve:` に入れ、人に言う」がない(この行に「テスト」は 0 回)。計画の D4 と `/director` skill の 6 にはある。lead の連絡のとおり、cycle 3 の /sync-docs で 1 文足せば足りる。
+
+### INFO(新規): 計画の D2b が `scripts/check-sync.sh` を挙げたまま
+
+計画の D2b(`docs/plans/active/2026-10-30-leader-sync-docs.md:58`)は、写しの検査を「`scripts/check-skill-sync.sh`・`scripts/check-sync.sh` があれば」と書く。雛形と `/org` skill は F4(d8e73710)で「`scripts/check-skill-sync.sh` など」にした。変えた理由は Progress の F4 の行にあり、計画は配られないので purity には掛からない。直すと承認のし直しが要るので、このままでよい。
+
+### cycle 3 の判定
+
+pass。所見は LOW 1 件(V4)と INFO 3 件(前からの 2 件と D2b)。insight event は同じ jsonl に 1 行足した(`--verdict pass --cycle auto --low 1`。`cycle-count.json` が 2 なので cycle 2 と出る)。
+
+## Verdict
+
+pass
+
+- cycle 3(HEAD 7f14d8bc)の判定。cross-review cycle 2 の ACTION_REQUIRED #1(P2)は F7・F8 で直り、`/director` skill の 6 は follow-up の文書を読むテストと文を固定するテストと fixture も予約に入れる。`run-static-verify.sh` と `check-template-purity.sh` は rc=0。所見は LOW 1 件(V4 仕様 FR-4 の注にテストの予約がない)で、merge を止めない。V4 は cycle 3 の /sync-docs が扱う。上の「cycle 3(HEAD 7f14d8bc)」の節を見る
+- cycle 2(HEAD e21d89c3)の判定は pass だった。sync-docs の段落の `git status` は、雛形と `/org` skill で 5 か所とも `--untracked-files=all` になった。LOW 1 件(V3)は 822acf62 で直った
+- re-run(HEAD feeb1e80)の判定は pass だった。V1 と V2 は d8e73710(F4)で直った
+- 初回(HEAD 0dfc49f0)の判定は fail だった(V1 `check-template-purity.sh` の失敗)。上の「初回(HEAD 0dfc49f0)の判定」の節を見る
+- Verified: AC1〜AC6・AC8 の文は雛形と skill の該当行にある。static の一式(run-static-verify、purity、check-skill-sync、check-sync、`git diff --check`、build、vet、gofmt、golangci-lint、secret scan)は通り、計画の digest は承認時と同じ
+- Partially verified: AC7(静的の部分だけ)
+- Not verified: Go のテストの結果(/test)、leader と director が実機でこの手順を走らせること
