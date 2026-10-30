@@ -366,6 +366,15 @@ spawn と implementer への TASK を断ります(reviewer への TASK と、TAS
    確かめてから sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を
    手順 14 のために控えて手順 10 に進む(ファイルを書いたあとで失敗した
    ときも、汚れた作業ツリーのまま手順 10 に進まないため)。
+   呼ぶ前には、まず `git status --porcelain --untracked-files=all` が何も
+   出さないことを確かめる(fetch の前の確かめは、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、
+   誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
+   ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
+   ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
+   implementer の変更なら implementer にコミットを TASK で頼んで、終わったら
+   手順 8 の往復に戻り、それ以外なら残ったファイルを本文に書いて
+   `ralph org escalate` で BLOCKED を上げる)。
    呼ぶ前に、このブランチのこれまでの sync-docs のコミット(メッセージは次の
    段落のとおり決まっている)を、件名がそのメッセージと等しいコミットだけを
    残す

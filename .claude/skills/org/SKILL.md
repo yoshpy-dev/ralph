@@ -1068,6 +1068,14 @@ leader は新しい TASK_ID でレビューの TASK を送り直す。2 回続�
    確かめてから sync-docs を飛ばし、`SYNC_DOCS: skipped (<理由>)` の行を
    6 のために控えて 2 に進む(書いたあとで失敗したときも、汚れた作業ツリーの
    まま 2 に進まないため)。
+   呼ぶ前には、まず `git status --porcelain --untracked-files=all` が何も
+   出さないことを確かめる(fetch の前の確かめは、利用者の git の設定が
+   `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、
+   誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さない
+   ため)。何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていた
+   ときと同じく扱う(reviewer のレポートならコミットして確かめ直し、
+   implementer の変更なら implementer にコミットを TASK で頼んで reviewer に
+   レビューを頼み直し、それ以外なら `BLOCKED` を escalate する)。
    呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット(メッセージは
    次の段落のとおり決まっている)を、件名がそのメッセージと等しいコミット
    だけを残す

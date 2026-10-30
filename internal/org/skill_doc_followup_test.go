@@ -395,6 +395,35 @@ func TestOrgSkill_EndOfOrgStep1CountsANoReportEndAsASkip(t *testing.T) {
 	}
 }
 
+// TestOrgSkill_EndOfOrgStep1ChecksForLeftoversBeforeTheCall pins, for item 1
+// of ### org の終わり方, the check before the call that step 9 of the leader
+// template has
+// (TestRenderRolePrompt_Leader_FeatureOrgSyncDocsChecksForLeftoversBeforeTheCall):
+// right after the skip branches and right before the lookup of the earlier
+// sync-docs commits, syncDocsLeftoverCheck and syncDocsLeftoverSort, with the
+// item's own sort of what is left (the reviewer's report committed and the
+// check run again, the implementer's change asked for in a TASK and the review
+// asked for again, anything else a BLOCKED). The check before the fetch that
+// the sentence points at comes first and still runs syncDocsShortStatus.
+func TestOrgSkill_EndOfOrgStep1ChecksForLeftoversBeforeTheCall(t *testing.T) {
+	checkOrgSkillPlaces(t, "sync-docs leftover check", []skillPlace{
+		{"item 1 of ### org の終わり方", func(text string) string { return orgSkillEndOfOrgStep(text, 1) }, []string{
+			syncDocsShortStatus + " が何も出さないことを確かめる",
+			"`git fetch origin <既定のブランチ>` を打ち",
+			orgSkillSyncDocsHandOff,
+			"なら、呼ばずに sync-docs を飛ばし(戻す変更はない)",
+			syncDocsNoReportSkip + "6 のために控えて 2 に進む(書いたあとで失敗したときも、汚れた作業ツリーのまま 2 に進まないため)。" +
+				syncDocsLeftoverCheck + "。" + syncDocsLeftoverSort +
+				"(reviewer のレポートならコミットして確かめ直し、implementer の変更なら implementer にコミットを TASK で頼んで reviewer にレビューを頼み直し、" +
+				"それ以外なら `BLOCKED` を escalate する)。" +
+				"呼ぶ前に、leader はブランチのこれまでの sync-docs のコミット",
+			syncDocsEarlierCommits,
+			"doc-maintainer への指示には、機能の計画のパス",
+			orgSkillSyncDocsCheck,
+		}},
+	})
+}
+
 // TestOrgSkill_EndOfOrgStep1FreezesEarlierSyncDocsFiles pins AC6 and D2c of
 // plan 2026-10-30-leader-sync-docs (self-review M1) for item 1 of ### org
 // の終わり方, with the leader template's commands (syncDocsEarlierCommits,

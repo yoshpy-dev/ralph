@@ -101,6 +101,27 @@ const syncDocsNoReportSkip = "呼び出しが失敗したとき(Codex で custom
 	"残す report がないので、`" + syncDocsUndoneHeading + "` の節は書かない。" +
 	syncDocsStatus + " が何も出さないことを確かめてから sync-docs を飛ばし、" + syncDocsSkipLine + " の行を"
 
+// syncDocsLeftoverCheck and syncDocsLeftoverSort are the two sentences, the
+// same in step 9 of the leader template and in item 1 of the /org skill's
+// ### org の終わり方 up to the parenthesis after syncDocsLeftoverSort, that
+// come right after the skip branches and right before the lookup of the
+// earlier sync-docs commits: before the call the leader checks that
+// syncDocsStatus prints nothing, since the check before the fetch runs
+// syncDocsShortStatus, which prints no untracked file under a user's
+// status.showUntrackedFiles=no (the case
+// TestRenderRolePrompt_Leader_FeatureOrgSyncDocsStatusListsEachNewFile
+// runs), and the undo after the call would then delete an untracked file
+// someone else left as a sync-docs change. When it prints something, the
+// leader calls no doc-maintainer and sorts what is left the way the check
+// before the fetch does (plan 2026-10-30-leader-sync-docs, the consult's
+// follow-up to cross-review cycle 1 #1).
+const (
+	syncDocsLeftoverCheck = "呼ぶ前には、まず " + syncDocsStatus + " が何も出さないことを確かめる" +
+		"(fetch の前の確かめは、利用者の git の設定が `status.showUntrackedFiles=no` なら未追跡のファイルを 1 つも出さないので、" +
+		"誰かが残した未追跡のファイルを、あとで sync-docs の変更として消さないため)"
+	syncDocsLeftoverSort = "何か出たら doc-maintainer は呼ばず、fetch の前に変更が残っていたときと同じく扱う"
+)
+
 // TestRenderRolePrompt_Leader_FeatureOrgSyncDocsEndsStep9 pins AC1 of plan
 // 2026-10-30-leader-sync-docs (D1): sync-docs is two paragraphs at the end of
 // step 9, after the reviewer's report is committed and the branch fetched and
@@ -563,6 +584,39 @@ func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsCountsANoReportEndAsASkip(t *
 	}
 	if containsPhrase(step9, "次の段落の戻し方") {
 		t.Errorf("expected step 9's branch for a failed call to say its own undo instead of pointing at the next paragraph's, which keeps the report, got item:\n%s", step9)
+	}
+}
+
+// TestRenderRolePrompt_Leader_FeatureOrgSyncDocsChecksForLeftoversBeforeTheCall
+// pins the consult's follow-up to cross-review cycle 1 #1 of plan
+// 2026-10-30-leader-sync-docs: right after the skip branches and right before
+// the lookup of the earlier sync-docs commits, step 9 checks that
+// syncDocsStatus prints nothing (syncDocsLeftoverCheck) and, when it prints
+// something, calls no doc-maintainer and sorts what is left as the check
+// before the fetch does: the reviewer's report committed and the check run
+// again, the implementer's change asked for in a TASK and back through step 8,
+// anything else a BLOCKED (syncDocsLeftoverSort). The undo after the call
+// then reads, as it says, only sync-docs changes. The check before the fetch
+// that the sentence points at still runs syncDocsShortStatus, as the tests of
+// prompts_test.go pin.
+func TestRenderRolePrompt_Leader_FeatureOrgSyncDocsChecksForLeftoversBeforeTheCall(t *testing.T) {
+	step9 := leaderFeatureOrgItem(t, step9Marker)
+	assertPhrasesInOrder(t, step9, leaderItemWhere(step9Marker), []string{
+		syncDocsHandOff,
+		"ときは、呼ばずに sync-docs を飛ばし(戻す変更はない)",
+		syncDocsNoReportSkip + "手順 14 のために控えて手順 10 に進む" +
+			"(ファイルを書いたあとで失敗したときも、汚れた作業ツリーのまま手順 10 に進まないため)。" +
+			syncDocsLeftoverCheck + "。" + syncDocsLeftoverSort +
+			"(reviewer のレポートならコミットして確かめ直し、implementer の変更なら implementer にコミットを TASK で頼んで、終わったら手順 8 の往復に戻り、" +
+			"それ以外なら残ったファイルを本文に書いて `ralph org escalate` で BLOCKED を上げる)。" +
+			"呼ぶ前に、このブランチのこれまでの sync-docs のコミット",
+		syncDocsEarlierCommits,
+		"doc-maintainer への指示には、次のことを書く",
+		syncDocsCheck,
+	})
+	beforeFetch, _, ok := strings.Cut(squashSpace(step9), squashSpace("`git fetch origin <既定のブランチ>` を打つ"))
+	if !ok || !strings.Contains(beforeFetch, squashSpace(syncDocsShortStatus+" が何も出さないことを確かめる")) {
+		t.Errorf("expected step 9 to check with %s before the fetch, the check its sync-docs paragraphs point at as fetch の前の確かめ, got item:\n%s", syncDocsShortStatus, step9)
 	}
 }
 
