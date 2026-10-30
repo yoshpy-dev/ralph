@@ -362,6 +362,27 @@
     - self-check は 5 項目とも clean。
     - S3 までの一時の挙動: cross-review の上限は skill の本文どおり `${RALPH_STANDARD_MAX_PIPELINE_CYCLES:-2}` を読み、reviewer の呼び出しも skill の fallback を使う。
     - 注意: `zsh -c` は `-f` がないとユーザーの zshenv を読み、PATH の古い ralph を拾う。
+  - S3 2ee62950(impl-276b1-s3)
+    - 変えた skill: plan・cross-review・implement の元 2 つを Edit で直し、sync-skills.sh で写し 2 つを作り直した(15 ファイル)。
+    - reviewer の呼び出し
+      - `/plan` 11.c と `/cross-review` 手順 4 は `. ./scripts/ralph-config.sh; model=$(ralph_setting reviewer.<…>); effort=$(ralph_setting reviewer.<…>)` で読む。
+      - codex には `-m "$model" -c "model_reasoning_effort=$effort"` を渡す(`-c` は exec の前)。
+      - claude には `--model "$model" --effort "$effort"` を `--restricted` の前に置く。cross-review の claude の道(`--permission-mode auto`)にも `--effort` を足した。
+      - /plan 11.c に値の出どころと終了コードの扱いを書いた(stderr の 1 行はユーザーに伝える)。cross-review はそこを参照する。
+    - 上限の規則と上げ方
+      - cross-review 1.d は、persisted-identity mode でだけ、設定の値と cycle-count.json の正の整数(JSON の数)の `cap` の大きいほうを使う。fallback mode は ∞ のまま。
+      - Cap-reached Option 1 は、skill が `f=.harness/state/standard-pipeline/cycle-count.json; jq -c '.cap = .cycle + 1' "$f" > "$f.tmp" && mv "$f.tmp" "$f" || rm -f "$f.tmp"` で書く(`.cycle` から計算し、失敗なら元が残る)。
+      - implement 3.c は `cap` も保つ。13.e の上限の文も直した。
+    - テスト
+      - `test-codex-exec-invocation.sh` は skill が `ralph_setting` を使い `${RALPH_…:-…}` がないことを照合する(S2 の一時の照合は消した)。
+      - `defaults_sync_test.go` は 4 つの写しに env の読み出しがないこと、helper のキーの使い方、claude の `--effort`(行数も)、上限の規則の文と jq のコマンド、implement の cap の文を照合する。
+      - `test-insights-append.sh` に `cap` のある cycle-count.json の行(8a2)を足した。
+    - 検証
+      - handoff の 7 つのコマンドはすべて rc=0(load 6〜8)。codex-exec 160/160、insights-append 52、ralph-config 370/370、config の照合 73 本。
+      - 変異 4 つ(env の fallback を戻す、`--effort` を消す、cap の文を消す、jq を `.cap = 3` に)は、すべてテストが落とした。
+      - cap のコマンドを sh・bash・zsh -f で実地に打ち、`{"cycle": 2}` が `"cap":3` になり、壊れた JSON では元のファイルが残った。
+    - self-check は 5 項目とも clean。consult(consult-plan-standardcfg276b)はコミットのあとで 3 点とも「変更なし」。orchestrator の確かめ: 4 つの写しに `${RALPH_…` の読み出しがないことを grep の否定で見た。
+    - 範囲外: `scripts/ralph-config.sh:42-43`(と写し)の注釈が「tests/test-codex-exec-invocation.sh calls this function」と書くが、S3 でもう呼ばない。S4 で直す。rules・definition-of-done・codex-setup の export の文は S6。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
