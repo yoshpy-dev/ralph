@@ -264,6 +264,29 @@
     - `go test -list` は移す前と後で同じ 104 本。移した範囲は `cmp` で一致。
     - tech-debt の行は 2 つに分けた。`defaults_sync_test.go` の分は閉じ、`org_feature_test.go` の分は残した。
     - 範囲外: `scripts/ralph-config.sh:41`(と写し)の注釈が、表を読むテストのファイルを `defaults_sync_test.go` と書いている。S2 で `defaults_sync_settings_test.go` に直す。
+  - S2 e4794cd7(impl-276b2-s2)
+    - helper
+      - 分け方は `_ralph_setting_get` の 1 か所。`ralph_setting` は失敗で既定値を出して 0 を返す(空の既定なら「using the empty default」)。
+      - `ralph_setting_or_fail` は失敗で「not using the default」を出し、stdout には何も出さずに 1 を返す(mktemp の失敗も失敗に数える)。
+      - exit 0 の空は、既定値が空のキーだけ値として扱う。
+      - 表に 5 つ(空と `false`)を足し、注釈のテストのファイル名を直した。
+    - 偽の ralph `tests/lib/fake-ralph.sh`
+      - 使い方は `fake_ralph_install`・`_value`・`_fail`・`_old`・`_calls`・`_reset`。状態は `BIN/ralph.fake/` に置き、env は読まない。
+      - 答えのないキーは exit 2、`config get` 以外は exit 99。
+      - `_old` の stderr は本物の v6.0.0 と同じ 1 行(`unknown command "config" for "ralph"`、`Error:` なし)で、手元で確かめた。
+    - `tests/test-ralph-config.sh` は共通の偽の ralph に置き換えた。
+      - 1 つの shell で複数のキーを順に呼ぶ形にした(1 ケース 1 shell では 243 秒かかった)。全キーを回すのは /bin/sh だけで、ほかの shell は代表の 3 キー。所要は約 120 秒で、元と同じ程度。
+      - tech-debt の「Three test gaps of standard-flow-config」(a) の Trigger に当たったので、mktemp が失敗するケースを 4 つの shell で足した。
+    - Go の照合: 期待値は `shellSettingWant(def)` にまとめ、bool は `strconv.FormatBool` で表す。
+    - 検証
+      - shellcheck rc 0、test-ralph-config 272/272、test-codex-exec-invocation 160/160、check-sync rc 0。gofmt・vet・go test(`shell_and_skills` は PASS)も通った。
+      - 変異: shell の 7 つと Go の 3 つは、どれもテストが落とした。
+    - self-check: typos を 1 つ fixed(Go の doc の `''` を言葉にした)、ほかは clean。
+    - S7 / /sync-docs に回すもの
+      - tech-debt のその行の (a) を閉じる。
+      - `internal/cli/config.go:77-83` の `config get --help` は、`ralph_setting` を読むのは skill だけ、と書いている(`config_test.go:302` が固定)。スクリプトと `_or_fail` に合わせる。
+      - template の model-routing.md の「one of those five keys」。
+      - `scripts/verify.local.sh` の shellcheck が `tests/lib/*.sh` を見ていない。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
