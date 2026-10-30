@@ -26,11 +26,12 @@ import (
 // commit. Both paths decide through regateChecksWithWait, which, with
 // RegateParams.WaitChecks, waits for checks that are not done yet the way
 // ralph org merge --wait-checks waits (merge_wait.go, D5): it releases
-// regate.lock, only reads the PR's head and checks while they are pending
-// and the PR's head does not show that the branch moved, and then takes the
-// lock again, once, and checks again what the record relies on
-// (regateCIRecheck) before it decides again. That wait is the only place
-// where a Regate lets go of regate.lock before it returns.
+// regate.lock, only reads the PR's head and checks while they are pending,
+// and origin's tip of the branch when the PR's head is another commit, until
+// they are done or origin's tip is not HEAD, and then takes the lock again,
+// once, and checks again what the record relies on (regateCIRecheck) before
+// it decides again. That wait is the only place where a Regate lets go of
+// regate.lock before it returns.
 // Every gh call goes through prchecks.go, pinned to origin's repository with
 // -R, as ralph org merge's do.
 
@@ -352,9 +353,11 @@ type regateChecksRead struct {
 //     read again is not HEAD any more (it moved while the checks were read);
 //     moved is set for a head that is another commit and for one that moved
 //     while the checks were read, which can show that the branch moved, so
-//     that the wait's poll stops at once and regateCIRecheck reads origin's
-//     tip (D5), but not for preMerge, which the PR shows until GitHub has
-//     updated it to the push;
+//     that the wait's poll reads origin's tip and stops when it is not HEAD
+//     (D5), but not for preMerge, which the PR shows until GitHub has
+//     updated it to the push. A head read again that moved back to preMerge
+//     is moved too: the PR showed HEAD before, which GitHub does not undo
+//     unless origin's branch was set back;
 //   - checks with reason GateReasonCIFailed, when a check ended and is not
 //     pass or skipping and none is pending;
 //   - checks with reason "", when every check is pass or skipping and one
@@ -610,12 +613,12 @@ func newRegateCIWait(p RegateParams, held *regateHeldLock, progress io.Writer) *
 // lock). Once the PR's head and checks are no longer pending, or a read after
 // a sleep finds the PR's head at a commit that can show the branch moved (a
 // commit other than HEAD and, on the merge path, res.PreMergeHead, or one
-// that moved while the checks were read), it takes the lock again, once, and
-// checks what the record relies on (regateCIRecheck), which reads origin's
-// tip of the branch from origin, and then decides and records under the lock
-// with regateChecks, so that a record comes from a read made with the lock
-// held, and the poll's read counts for nothing but ending the wait. The wait
-// ends:
+// that moved while the checks were read) and origin's tip of the branch, read
+// then from origin, is not HEAD or cannot be read, it takes the lock again,
+// once, and checks what the record relies on (regateCIRecheck), which reads
+// origin's tip again, and then decides and records under the lock with
+// regateChecks, so that a record comes from a read made with the lock held,
+// and the poll's read counts for nothing but ending the wait. The wait ends:
 //
 //   - when the budget, counted from the start of the wait, is used up with
 //     them still pending: in RegateOutcomeChecksPending, why the last read
@@ -624,15 +627,15 @@ func newRegateCIWait(p RegateParams, held *regateHeldLock, progress io.Writer) *
 //   - when ctx is done while it sleeps or reads, with the lock not taken
 //     again either;
 //   - when regateCIRecheck refuses, the lock held by another and origin's
-//     tip that moved (as the PR's head showed) included, or another Regate
-//     recorded a pass of HEAD on t's base tip meanwhile
-//     (RegateOutcomeUpToDate, LogPath the log of that pass);
+//     tip that moved included, or another Regate recorded a pass of HEAD on
+//     t's base tip meanwhile (RegateOutcomeUpToDate, LogPath the log of that
+//     pass);
 //   - otherwise as regateChecks under the lock ends: a record or a refusal,
 //     or, when the checks are pending again (CI ran again), or still pending
-//     after the PR's head stopped the poll with origin's tip still HEAD (as
-//     when GitHub has not updated the PR yet), in RegateOutcomeChecksPending
-//     with ChecksPending saying so; it does not wait again with the lock
-//     held.
+//     after the poll stopped at origin's tip that was not HEAD or could not
+//     be read and is HEAD when read again under the lock, in
+//     RegateOutcomeChecksPending with ChecksPending saying so; it does not
+//     wait again with the lock held.
 //
 // The record is still checked against b, as the first check found the branch
 // (recordRegate). A line says why the wait ended. The error is
@@ -652,7 +655,7 @@ func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTa
 	w.held.release()
 	pending := res.ChecksPending
 	res.Outcome, res.ChecksPending, res.ChecksNext = "", "", ""
-	last, ranOut, err := w.poll(ctx, start.Add(w.budget), t, ci, res.PreMergeHead, pending)
+	last, ranOut, err := w.poll(ctx, start.Add(w.budget), t, ci, env, res.PreMergeHead, pending)
 	waited := func() string {
 		return fmt.Sprintf("ralph org regate waited %s for the checks of PR #%d (--wait-checks %s)", mergeWaitDuration(w.now().Sub(start)),
 			res.PR, w.budget)
@@ -683,8 +686,8 @@ func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTa
 	found, line := "they were not done again when it read them with regate.lock taken again",
 		"the checks were not done again when it read them with regate.lock taken again"
 	if last.moved {
-		line = fmt.Sprintf("the PR's head was a commit other than HEAD, as it is when origin's %s moved, but origin's %s was still "+
-			"HEAD when it read it with regate.lock taken again, and the checks were not done then", t.branch, t.branch)
+		line = fmt.Sprintf("the PR's head was a commit other than HEAD and origin's %s, read then, was not HEAD or could not be "+
+			"read, but it was HEAD when regate read it again with regate.lock taken again, and the checks were not done then", t.branch)
 		found = "it stopped once " + line
 	}
 	res.ChecksPending += "; " + waited() + ", and " + found
@@ -697,16 +700,21 @@ func (o *Org) regateChecksWithWait(ctx context.Context, b regateBranch, t gateTa
 // deadline when that is less, and reads ci's PR for t's HEAD
 // (readRegateChecks, on preMerge), which writes nothing and takes no lock,
 // until that read is not pending (done, or a refusal: regateChecks decides it
-// again under the lock), finds the PR's head at a commit that can show the
-// branch moved (moved: a commit other than HEAD and preMerge, or one that
-// moved while the checks were read; regateCIRecheck then reads origin's tip),
-// the deadline is reached, or ctx is done. A PR's head still at preMerge, the
-// head the merge commit was made on, shows that GitHub has not updated the PR
-// to the push yet, and the poll goes on. It returns the last read (on ranOut,
-// the first read's pending, why the PR's head and checks were pending, until
-// a read after a sleep), and ranOut when the deadline was reached with them
-// pending. The error says the wait was interrupted and nothing was recorded.
-func (w *regateCIWait) poll(ctx context.Context, deadline time.Time, t gateTarget, ci *regateCI, preMerge,
+// again under the lock), the deadline is reached, or ctx is done. When a read
+// finds the PR's head at a commit that can show the branch moved (moved: a
+// commit other than HEAD and preMerge, or one that moved while the checks
+// were read), it reads origin's tip of the branch from origin with env
+// (regateReadOriginTip, which changes no ref; no lock either): still HEAD
+// means GitHub has not updated the PR yet, and the poll goes on; another tip,
+// no branch, or a tip that cannot be read ends the poll, and regateCIRecheck
+// reads it again under the lock. A PR's head still at preMerge, the head the
+// merge commit was made on, shows that GitHub has not updated the PR to the
+// push yet, and the poll goes on without reading origin. It returns the last
+// read (on ranOut, the first read's pending, why the PR's head and checks
+// were pending, until a read after a sleep), and ranOut when the deadline was
+// reached with them pending. The error says the wait was interrupted and
+// nothing was recorded.
+func (w *regateCIWait) poll(ctx context.Context, deadline time.Time, t gateTarget, ci *regateCI, env []string, preMerge,
 	pending string) (regateChecksRead, bool, error) {
 	interrupted := func() error {
 		return regateCIInterrupted(ctx, fmt.Sprintf("waiting for the checks of PR #%d", ci.pr.Number), "nothing was recorded")
@@ -724,8 +732,16 @@ func (w *regateCIWait) poll(ctx context.Context, deadline time.Time, t gateTarge
 		switch {
 		case err != nil || ctx.Err() != nil:
 			return regateChecksRead{}, false, interrupted()
-		case read.pending == "", read.moved:
+		case read.pending == "":
 			return read, false, nil
+		case read.moved:
+			tip, unread, err := regateReadOriginTip(ctx, t, env)
+			switch {
+			case err != nil || ctx.Err() != nil:
+				return regateChecksRead{}, false, interrupted()
+			case unread != "" || tip != t.head:
+				return read, false, nil
+			}
 		}
 		last = read
 	}
