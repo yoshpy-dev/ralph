@@ -287,6 +287,29 @@
       - `internal/cli/config.go:77-83` の `config get --help` は、`ralph_setting` を読むのは skill だけ、と書いている(`config_test.go:302` が固定)。スクリプトと `_or_fail` に合わせる。
       - template の model-routing.md の「one of those five keys」。
       - `scripts/verify.local.sh` の shellcheck が `tests/lib/*.sh` を見ていない。
+  - S3 674b193c(impl-276b2-s3)
+    - `plan-visual.sh`(と写し)は、新しい関数 `plan_visual_setting` で `[plan_visual].opener`・`browser` を読む。読む場所は、スクリプトのある repo の root(`scripts/` の親)で、呼んだ人の cwd には依らない。
+    - 読むのは `open` で opener を 1 回、`shot` で browser を 1 回だけ。`lint`・`digest`・usage では `ralph` を打たない(呼び出し記録で確かめた)。
+    - 値の意味は env と同じ(空は自動、`none` は使わない)。warn・注釈・`--help` はキー名に直した。
+    - テスト
+      - 偽の ralph で値を渡す形にした。env が効かないことを見るケースを足した。127・古い ralph・exit 3 は opener のケースで見る。
+      - ブラウザの自動検出の 2 件は、`/Applications` に本物のブラウザがあると起動してしまうので、手元では SKIP。Linux の CI で走る。PR の CI のログで、SKIP でなく通ったかを確かめる。
+    - 検証: shellcheck rc 0、test-plan-visual 272 passed(SKIP 1)、check-sync rc 0、grep の否定 rc 0、変異 3 つはテストが落とした。self-check: 改行 1 つを fixed、ほかは clean。
+    - consult の注意 1(スクリプトを PATH 経由で裸の名前で呼ぶと、`ralph-config.sh` の source に失敗しうる)は直さない。PATH 経由では `$0` はスラッシュ付きで、`.` になるのは `scripts/` の中で打つときだけ。そのときは `.` が正しい。PR の Known gaps に 1 行書く。
+  - S4 7803a530(impl-276b2-s4)
+    - `detect_base_branch`(と写し)は、`git rev-parse --show-toplevel` の `scripts/ralph-config.sh` を subshell の中で source し、root で `ralph_setting_or_fail standard.base_branch` を打つ。
+      - 失敗(設定の誤り)では、stderr に 1 行出して 0 以外を返し、自動の段に戻らない。
+      - root がない、またはファイルがないときは、黙って自動の段に進む。
+      - 注釈の「Pure function」を直した。
+    - `secret-scan-branch.sh`: `detect_base_branch` が失敗したら `cannot_scan` で止まる(`--strict` では exit 3、既定のモードは今の cannot_scan と同じく報告だけ)。`GITHUB_BASE_REF` があるときは helper を打たない。
+    - `/cross-review` の skill: 手順 4 の 3 か所を `BASE=$(detect_base_branch) || exit 1` にし、解決順の説明を `[standard].base_branch` に直した。4 つの写し。
+    - 検証
+      - shellcheck rc 0、test-xreview-helpers 53/53、test-secret-scan-branch 263/263、check-skill-sync・check-sync ok、go test(Sync|Settings|Skill)ok。
+      - 変異 7 つは、どれもテストが落とした。
+      - この repo の `secret-scan-branch.sh --strict` は、PATH の v6.0.0 で今どおり rc 0。
+    - handoff の広い grep(`RALPH_XREVIEW_BASE`)は、S2 の `ralph-config.sh` の「もう読まない」の注釈 2 行だけに当たる。範囲のファイルと展開の形の grep は 0 件(orchestrator が承認)。
+    - self-check は 5 項目とも clean。
+    - 範囲外(S5 で直す): `tests/test-run-verify-branch-secret-scan.sh:74,91` と `test-run-verify-concurrency.sh:34` に、`unset … RALPH_XREVIEW_BASE` が残っている。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created
