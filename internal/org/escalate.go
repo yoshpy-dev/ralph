@@ -220,20 +220,20 @@ func (o *Org) Escalate(p EscalateParams) EscalateResult {
 }
 
 // EscalateNotRecorded is Escalate for a caller that could not set up the
-// org runtime, such as `ralph org escalate` when ralph.toml does not load
-// (cause). It checks p the same way, so a refused message still writes
-// nothing and notifies no one. Otherwise it tells the human that the item
-// was not recorded, the way Escalate does when the inbox cannot record it
-// (the banner, the desktop notification, and a best-effort
-// escalations.jsonl line), and returns an error. It needs only Inbox (for
-// the path in the banner), EscalationsPath, and DesktopNotify.
+// org runtime, such as `ralph org escalate` when ralph.toml does not load or
+// when the ledger cannot be resolved (cause). It checks p the same way, so a
+// refused message still writes nothing and notifies no one. Otherwise it
+// tells the human that the item was not recorded, the way Escalate does when
+// the inbox cannot record it (the banner, the desktop notification, and a
+// best-effort escalations.jsonl line), and returns an error. It uses only
+// Inbox (for the path in the banner), EscalationsPath, and DesktopNotify,
+// and Inbox and EscalationsPath may be unset: an Org with neither (the
+// CLI's Org for a ledger it cannot resolve) writes nothing and names only
+// cause in the banner (alertUnrecordedEscalation).
 func (o *Org) EscalateNotRecorded(p EscalateParams, cause error) EscalateResult {
 	m, err := validateEscalation(p.OrgID, p.Text)
 	if err != nil {
 		return EscalateResult{Err: err}
-	}
-	if o.Inbox == nil {
-		return EscalateResult{Err: errors.New("org: escalate: no inbox store is configured")}
 	}
 	o.alertUnrecordedEscalation(p.OrgID, m.Type, cause, bannerOrStderr(p.Banner))
 	return EscalateResult{Err: fmt.Errorf("org: escalate: the item could not be recorded: %w", cause)}
@@ -540,11 +540,17 @@ func alertIDSeat(alertID string) string {
 // alertUnrecordedEscalation tells the human about an escalate that was not
 // recorded: the banner (marked not recorded, with the cause), the desktop
 // notification, and a best-effort escalations.jsonl line, which is in the
-// same ledger and may fail for the same cause. orgID and typ have passed
-// validateEscalation.
+// same ledger and may fail for the same cause. With no Inbox
+// (EscalateNotRecorded with no ledger) the banner says the item is not in
+// any inbox instead of naming the inbox's path, and with no EscalationsPath
+// no line is written. orgID and typ have passed validateEscalation.
 func (o *Org) alertUnrecordedEscalation(orgID, typ string, cause error, banner io.Writer) {
+	where := "any inbox"
+	if o.Inbox != nil {
+		where = o.Inbox.Path()
+	}
 	_, _ = fmt.Fprintf(banner, "ORG ESCALATION (NOT RECORDED): org=%s type=%s -- the item is not in %s: %v\n",
-		orgID, typ, o.Inbox.Path(), cause)
+		orgID, typ, where, cause)
 	_ = o.inboxDesktopNotify(inboxNotifyTitleEscalate, fmt.Sprintf("org %s could not record a %s escalation; see the leader's pane", orgID, typ))
 	if o.EscalationsPath != "" {
 		_ = appendJSONLine(o.EscalationsPath, escalationRecord{

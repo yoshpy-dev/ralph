@@ -110,10 +110,11 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 			"says to move the ledger's directory out of the worktree, to a place\n" +
 			"where no other ledger is, once no org on the ledger runs and no ralph\n" +
 			"org command runs on it, and to run ralph org cleanup --branch <branch>\n" +
-			"again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So\n" +
-			"does a record that is not the binding's (its path or kind) when the\n" +
-			"worktree at the record's path holds the ledger; after the ledger is\n" +
-			"moved, that cleanup is refused with the MANUAL: line above.\n" +
+			"again with --state-dir or [org].state_dir in ralph.local.toml naming\n" +
+			"the new place. So does a record that is not the binding's (its path or\n" +
+			"kind) when the worktree at the record's path holds the ledger; after\n" +
+			"the ledger is moved, that cleanup is refused with the MANUAL: line\n" +
+			"above.\n" +
 			"\n" +
 			"Exit codes: 0 when every branch was cleaned up or\n" +
 			"there was nothing to clean up; 1 when a branch was skipped, gh is not\n" +
@@ -137,8 +138,8 @@ func newOrgCleanupCmd(stateDir, configPath *string) *cobra.Command {
 				return errors.New("org: cleanup: --branch is empty: name the merged feature branch to clean up, or leave --branch " +
 					"out to clean up every merged one")
 			}
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

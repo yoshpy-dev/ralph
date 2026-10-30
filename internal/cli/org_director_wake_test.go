@@ -358,9 +358,9 @@ func TestOrgDirectorAttach_ReadsTheWakeFromTheMainWorktree(t *testing.T) {
 func TestWithMainWorktreeDirectorWakeConfig(t *testing.T) {
 	r := newLegacyLedgerRepo(t)
 	mainToml := filepath.Join(r.mainRoot, "ralph.toml")
-	shared, sharedSource := org.ResolveOrgStateDir("", false)
-	if shared != r.sharedDir {
-		t.Fatalf("the resolved ledger = %s; want the main worktree's %s", shared, r.sharedDir)
+	shared, sharedSource, err := org.ResolveOrgStateDir("", false)
+	if err != nil || shared != r.sharedDir {
+		t.Fatalf("the resolved ledger = %s, %v; want the main worktree's %s", shared, err, r.sharedDir)
 	}
 	in := config.OrgConfig{MaxOrgs: 3, Director: config.OrgDirectorConfig{
 		Enabled: true, AutoMerge: true, LaunchCmd: []string{"open", "{script}"}, Wake: []string{"pull"},
@@ -378,7 +378,10 @@ func TestWithMainWorktreeDirectorWakeConfig(t *testing.T) {
 		t.Errorf("withMainWorktreeDirectorWakeConfig =\n%+v\nwant only wake and wake_cmd taken\n%+v", got, want)
 	}
 
-	other, otherSource := org.ResolveOrgStateDir(filepath.Join(t.TempDir(), "org"), true)
+	other, otherSource, err := org.ResolveOrgStateDir(filepath.Join(t.TempDir(), "org"), true)
+	if err != nil {
+		t.Fatalf("resolve another ledger: %v", err)
+	}
 	for _, c := range []struct {
 		name, configPath, stateDir, source string
 	}{

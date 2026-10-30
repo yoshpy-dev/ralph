@@ -579,10 +579,13 @@ func TestCleanupFeatureWorktree_RefusedInTheWorktree(t *testing.T) {
 }
 
 // cleanupLedgerMoveStep is the next step of a refusal of a ledger inside a
-// worktree the cleanup of feat/auth would remove (ledgerMoveStep).
+// worktree the cleanup of feat/auth would remove (ledgerMoveStep): the new
+// place is named with --state-dir or the personal file's [org].state_dir,
+// not with RALPH_ORG_STATE_DIR, which ralph no longer reads (plan
+// 2026-10-30-org-state-dir-local, AC10).
 const cleanupLedgerMoveStep = "once no org on the ledger runs and no ralph org command runs on it, move its directory to a " +
 	"place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/auth again with --state-dir " +
-	"or RALPH_ORG_STATE_DIR naming the new place"
+	"or [org].state_dir in ralph.local.toml naming the new place"
 
 // cleanupOtherCase is path with the first ASCII letter of its last element in
 // the other case, when the file system finds the same directory under that
@@ -640,7 +643,7 @@ func (fx *worktreeCleanupFixture) moveLedger(t *testing.T, dir, named string) ma
 // TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger covers
 // finding 1 of cross-review cycle 2
 // (docs/reports/cross-review-triage-org-merge-cleanup.md; S-X3 of the plan):
-// a ledger named with --state-dir or RALPH_ORG_STATE_DIR can be in the
+// a ledger named with --state-dir or [org].state_dir can be in the
 // feature worktree, whose .gitignore names .harness/state/, so check 4
 // passes and the script would remove the ledger with the worktree. The cleanup refuses
 // before it reads the record (no worktree call), with no Manual, through
@@ -723,6 +726,10 @@ func TestCleanupFeatureWorktree_RefusesTheWorktreeThatHoldsItsLedger(t *testing.
 			fx.assertRefused(t, res, err, before, want, "")
 			if res.Refused != want || res.OrgID != "auth" || res.Worktree != fx.worktree {
 				t.Errorf("cleanup = %+v; want only the refusal %q, for org auth and the worktree %s", res, want, fx.worktree)
+			}
+			if !strings.Contains(res.Refused, "[org].state_dir") || strings.Contains(res.Refused, "RALPH_ORG_STATE_DIR") {
+				t.Errorf("refusal %q; want the move of the ledger to name [org].state_dir, not RALPH_ORG_STATE_DIR, which ralph "+
+					"no longer reads", res.Refused)
 			}
 			if len(fx.spy.calls) != 0 {
 				t.Errorf("worktree calls = %q; want none, the ledger checked before the record", fx.spy.calls)

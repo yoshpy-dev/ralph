@@ -31,12 +31,12 @@ import (
 //
 // It also pins the merge-guarantee check's resolver (doctorMergeGuaranteeEnv)
 // to an Exec that runs nothing and fails, a gh lookup that always fails, and
-// a state dir that does not exist, for the same reason: without this seam,
-// every runDoctor*-based test would silently start running the real `git
-// remote get-url origin` and `gh api` against GitHub, and writing
-// merge-guarantee.json into the repository's own org ledger whenever that
-// ledger exists. A test of the check sets its own resolver and restores
-// this one.
+// a state dir that does not exist, whatever doctor's --state-dir names, for
+// the same reason: without this seam, every runDoctor*-based test would
+// silently start running the real `git remote get-url origin` and `gh api`
+// against GitHub, and writing merge-guarantee.json into the repository's
+// own org ledger whenever that ledger exists. A test of the check sets its
+// own resolver and restores this one.
 //
 // It also raises probeBinary's bound (doctorProbeTimeout) to a minute: the
 // stub binaries' `--version` can take more than 5 s on a heavily loaded
@@ -115,10 +115,17 @@ import (
 //
 // It also unsets RALPH_ORG_AGMSG_HOME (legacyAgmsgHomeEnv), which ralph no
 // longer reads but `ralph doctor` warns about while it is set
-// (checkLegacyAgmsgHomeEnv): a developer whose shell still sets it would
+// (checkRetiredEnv): a developer whose shell still sets it would
 // otherwise see one more warn line in every runDoctor*-based test. A test of
 // that warning, or of a command that must not read the variable, sets it
 // with t.Setenv.
+//
+// It also unsets RALPH_ORG_STATE_DIR (retiredOrgStateDirEnv) for the same
+// reason, and for a stronger one: every verb that resolves the ledger
+// checks it (checkRetiredOrgStateDirEnv), so a developer whose shell still
+// sets it would see a note in every such test, and a refusal in every test
+// of a verb that changes the default ledger. A test of the note, the
+// refusal, or doctor's warning sets it with t.Setenv.
 func TestMain(m *testing.M) {
 	if err := disableGitAutoMaintenance(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -128,9 +135,11 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: set %s: %v\n", config.LocalConfigEnv, err)
 		os.Exit(1)
 	}
-	if err := os.Unsetenv(legacyAgmsgHomeEnv); err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", legacyAgmsgHomeEnv, err)
-		os.Exit(1)
+	for _, name := range []string{legacyAgmsgHomeEnv, retiredOrgStateDirEnv} {
+		if err := os.Unsetenv(name); err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: unset %s: %v\n", name, err)
+			os.Exit(1)
+		}
 	}
 	driver.AgmsgHomeOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "agmsg")
 	doctorShellAliasEnv = func() (shellAliasEnv, error) {
@@ -140,14 +149,14 @@ func TestMain(m *testing.M) {
 		noSuchHome := filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home")
 		return codexSandboxEnv{Home: noSuchHome, ConfigPath: filepath.Join(noSuchHome, ".codex", "config.toml")}, nil
 	}
-	doctorMergeGuaranteeEnv = func(targetDir string) (org.MergeGuaranteeParams, string) {
+	doctorMergeGuaranteeEnv = func(targetDir, _ string, _ bool) (org.MergeGuaranteeParams, string, error) {
 		return org.MergeGuaranteeParams{
 			Dir: targetDir,
 			Exec: func(_ context.Context, _ string, _ []string, name string, args ...string) (string, error) {
 				return "", fmt.Errorf("%s %s not run: commands are disabled in tests", name, strings.Join(args, " "))
 			},
 			LookPath: func(string) (string, error) { return "", errors.New("gh lookup disabled in tests") },
-		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist")
+		}, filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", "org-state-do-not-exist"), nil
 	}
 	doctorProbeTimeout = time.Minute
 	orgCodexSessionsDirOverride = filepath.Join(os.TempDir(), "ralph-cli-test-no-such-home", ".codex-sessions-do-not-exist")

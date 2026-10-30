@@ -386,13 +386,12 @@ func newOrgDirectorRuntime(cmd *cobra.Command, verb, stateDir, configPath string
 	if cmd.Flags().Changed("org-id") {
 		return nil, fmt.Errorf("org: %s: --org-id does not apply: the director registration belongs to the whole ledger, not to one org", verb)
 	}
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
+	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, stateDir, access)
+	if err != nil {
 		return nil, err
 	}
 	var cfg config.OrgConfig
 	if loadConfig {
-		var err error
 		if cfg, err = resolveOrgConfig(configPath); err != nil {
 			return nil, fmt.Errorf("org: load config: %w", err)
 		}

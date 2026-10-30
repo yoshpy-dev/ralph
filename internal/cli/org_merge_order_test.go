@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -1191,17 +1192,18 @@ func TestOrgMergeOrder_OrgIDIsRefusedBeforeAnythingIsRead(t *testing.T) {
 	}
 }
 
-// --state-dir picks the ledger over RALPH_ORG_STATE_DIR, which picks it when
-// --state-dir is not given.
+// --state-dir picks the ledger over the personal file's [org].state_dir,
+// which picks it when --state-dir is not given.
 func TestOrgMergeOrder_StateDirFlagPicksTheLedger(t *testing.T) {
 	fx := newMergeOrderFixture(t, false)
 	fx.bind(t, "f", "flag", "feat/flag")
-	envDir := filepath.Join(filepath.Dir(fx.stateDir), "env-state")
-	appendSeedEvent(t, envDir, org.ManifestEvent{
-		OrgID: "e", Event: org.EventScopeReserved, Worktree: fx.work,
-		Details: "paths=internal/e/ split=demo feature=env digest=0123456789ab branch=feat/env approval=per-plan",
+	configDir := filepath.Join(filepath.Dir(fx.stateDir), "config-state")
+	appendSeedEvent(t, configDir, org.ManifestEvent{
+		OrgID: "c", Event: org.EventScopeReserved, Worktree: fx.work,
+		Details: "paths=internal/c/ split=demo feature=config digest=0123456789ab branch=feat/config approval=per-plan",
 	})
-	t.Setenv(org.EnvOrgStateDir, envDir)
+	t.Setenv(config.LocalConfigEnv, "")
+	writeTestFile(t, filepath.Join(fx.work, config.LocalConfigFileName), "[org]\nstate_dir = \""+configDir+"\"\n")
 
 	branches := func(args ...string) []string {
 		t.Helper()
@@ -1218,8 +1220,8 @@ func TestOrgMergeOrder_StateDirFlagPicksTheLedger(t *testing.T) {
 	if got := branches("--state-dir", fx.stateDir); !slices.Equal(got, []string{"feat/flag"}) {
 		t.Errorf("with --state-dir, branches = %q; want only feat/flag from that ledger", got)
 	}
-	if got := branches(); !slices.Equal(got, []string{"feat/env"}) {
-		t.Errorf("without --state-dir, branches = %q; want only feat/env from RALPH_ORG_STATE_DIR's ledger", got)
+	if got := branches(); !slices.Equal(got, []string{"feat/config"}) {
+		t.Errorf("without --state-dir, branches = %q; want only feat/config from the personal file's ledger", got)
 	}
 }
 

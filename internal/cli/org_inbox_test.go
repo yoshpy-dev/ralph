@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 	"github.com/yoshpy-dev/ralph/internal/org/protocol"
 )
@@ -417,11 +418,11 @@ func TestOrgEscalate_BrokenConfig_AlertsTheHumanAndExitsOne(t *testing.T) {
 
 // Self-review L2: the `ralph org inbox` commands that escalate, inbox
 // notify, and inbox show print carry --state-dir when it was passed, and
-// stay bare when the ledger came from RALPH_ORG_STATE_DIR (the rule of
-// orgReadCommandHint).
+// stay bare when the ledger came from the personal file's [org].state_dir
+// (the rule of orgReadCommandHint).
 func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
 	for _, explicit := range []bool{true, false} {
-		t.Run(map[bool]string{true: "flag", false: "env"}[explicit], func(t *testing.T) {
+		t.Run(map[bool]string{true: "flag", false: "config"}[explicit], func(t *testing.T) {
 			recordDesktopNotify(t, nil)
 			stateDir := t.TempDir()
 			// A directory where escalations.jsonl should be: the item is
@@ -432,7 +433,7 @@ func TestOrgInbox_RecoveryCommandsRepeatAnExplicitStateDir(t *testing.T) {
 			ledger := []string{"--state-dir", stateDir}
 			suffix := " --state-dir '" + stateDir + "'"
 			if !explicit {
-				t.Setenv(org.EnvOrgStateDir, stateDir)
+				usePersonalStateDir(t, stateDir)
 				ledger, suffix = nil, ""
 			}
 
@@ -658,9 +659,10 @@ func TestOrgEscalate_DirectorEnabledFromTheMainWorktreeRalphToml(t *testing.T) {
 			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
 			return []string{"--state-dir", r.sharedDir}, ""
 		}, ""},
-		{"no main ralph.toml, the worktree says false, RALPH_ORG_STATE_DIR names the shared ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
+		{"no main ralph.toml, the worktree says false, [org].state_dir names the shared ledger", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
 			writeTestFile(t, filepath.Join(r.worktree, "ralph.toml"), disabled)
-			t.Setenv(org.EnvOrgStateDir, r.sharedDir)
+			t.Setenv(config.LocalConfigEnv, "")
+			writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+r.sharedDir+"\"\n")
 			return nil, ""
 		}, ""},
 		{"--config says false", "", func(t *testing.T, r legacyLedgerRepo) ([]string, string) {
@@ -760,6 +762,12 @@ func TestOrgEscalateAndInboxHelp_DescribeTheDirectorSwitch(t *testing.T) {
 			"Whether a director is attached does not change this.", "inbox_no_watch", "it is a --once run",
 			"inbox_director_disabled", "Without --config, enabled is read from the main worktree's ralph.toml",
 			"A main worktree ralph.toml that does not load is handled like a ralph.toml that does not load",
+			// Plan 2026-10-30-org-state-dir-local, S2b.
+			"The same holds, with nothing written to any ledger, when without --state-dir the ledger cannot be resolved",
+			// Plan 2026-10-30-org-state-dir-local, S5: the refusal of D5.
+			"and when neither --state-dir nor [org].state_dir names the ledger and RALPH_ORG_STATE_DIR, which ralph no longer reads, " +
+				"names another directory than the ledger found by default.",
+			"named with --state-dir or [org].state_dir (built-in default when that file does not exist)",
 		}},
 		{[]string{"inbox", "--help"}, []string{"deferred for one escalate or the cross-org watch left to the director", "A resolved item is yes or no."}},
 		{[]string{"inbox", "notify", "--help"}, []string{"reason inbox_manual_notify", "(NOTIFIED deferred)"}},
@@ -1430,13 +1438,17 @@ func TestOrgInbox_LinkedWorktreeSharesTheMainCheckoutsInbox(t *testing.T) {
 
 // escalate, ack, resolve, and notify change the ledger, so a legacy
 // worktree ledger with active seats refuses them; the list, show, and wait
-// --inbox only read it and print the note.
+// --inbox only read it and print the note. The refusal is a plain error:
+// unlike for a ledger that cannot be resolved, escalate sends no banner and
+// no desktop notification then (plan 2026-10-30-org-state-dir-local, S2b).
 func TestOrgInbox_LegacyLedgerGuard(t *testing.T) {
 	setupOrgStubPATH(t)
 	r := newLegacyLedgerRepo(t)
 	escalateOK(t, r.sharedDir, "org-a", inboxQuestion("seeded"))
 	spawnLedgerSeat(t, r.legacyDir, "seat-1")
 	before := readFileBytes(t, org.InboxPathIn(r.sharedDir))
+	escalationsBefore := readFileBytes(t, org.EscalationsPathIn(r.sharedDir))
+	rec := recordDesktopNotify(t, nil)
 
 	for _, args := range [][]string{
 		{"escalate", "--org-id", "org-a", "--text", inboxQuestion("refused")},
@@ -1444,16 +1456,25 @@ func TestOrgInbox_LegacyLedgerGuard(t *testing.T) {
 		{"inbox", "resolve", "e1", "--note", "docs/reports/x.md"},
 		{"inbox", "notify", "e1"},
 	} {
-		stdout, _, err := runOrgCmdStreams(t, args...)
-		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") {
+		stdout, stderr, err := runOrgCmdStreams(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "refusing to change the org ledger") || errors.Is(err, errOrgLedgerUnresolved) {
 			t.Errorf("%v error = %v; want the legacy-ledger refusal", args, err)
 		}
 		if stdout != "" {
 			t.Errorf("%v stdout = %q; want nothing", args, stdout)
 		}
+		if strings.Contains(stderr, "ESCALATION") {
+			t.Errorf("%v stderr = %q; want no banner for a refusal", args, stderr)
+		}
+	}
+	if calls := rec.calls(); len(calls) != 0 {
+		t.Errorf("a refused verb sent desktop notifications %q, want none", calls)
 	}
 	if after := readFileBytes(t, org.InboxPathIn(r.sharedDir)); !bytes.Equal(before, after) {
 		t.Errorf("a refused verb wrote to the inbox:\nbefore: %s\nafter:  %s", before, after)
+	}
+	if after := readFileBytes(t, org.EscalationsPathIn(r.sharedDir)); !bytes.Equal(escalationsBefore, after) {
+		t.Errorf("a refused verb wrote to escalations.jsonl:\nbefore: %s\nafter:  %s", escalationsBefore, after)
 	}
 
 	for _, args := range [][]string{{"inbox"}, {"inbox", "show", "e1"}, {"wait", "--inbox", "--timeout-ms", "1000"}} {

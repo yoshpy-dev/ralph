@@ -952,8 +952,8 @@ func TestDirectorSkillBullet(t *testing.T) {
 // on with ralph org cleanup --branch once the reason is fixed, since that
 // line comes only where ralph cannot go on by itself, but for a ledger inside
 // the feature worktree, whose reason says to move the ledger first and to name
-// the new place with --state-dir or RALPH_ORG_STATE_DIR; and the director runs
-// no command by hand unasked, moving the ledger included.
+// the new place with --state-dir or [org].state_dir in ralph.local.toml; and
+// the director runs no command by hand unasked, moving the ledger included.
 var directorSkillMergeCleanupRules = []string{
 	"merge は済んでいる。片付けがどうなっても、記録した merge の終了コードは 0 のまま",
 	"行が `CLEANUP: done` で始まれば片付いた",
@@ -965,7 +965,7 @@ var directorSkillMergeCleanupRules = []string{
 	"どちらでも、理由と、続く `CLEANUP MANUAL:` の行があればそのコマンドを、そのまま人に伝える",
 	"`CLEANUP MANUAL:` の行がない断りは、理由を直して `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く",
 	"ただし、台帳のディレクトリが機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには " +
-		"`--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す",
+		"`--state-dir` か `ralph.local.toml` の `[org].state_dir` で新しい場所を指す",
 	"`CLEANUP MANUAL:` の行は、ralph が先に進めず人の判断が要るときだけ出る",
 	"手のコマンド(`git branch -D` などを含む)は、人に頼まれないまま打たない。台帳を動かす手も同じ",
 }
@@ -1008,7 +1008,7 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 	"同じ実行に `CLEANED:` の行もあれば(`--branch` なしで打ち、1 本を片付けて別の 1 本で断られたとき)、そのブランチは" +
 		"片付いたので、手順 2 と同じく人に報告する",
 	"台帳のディレクトリが機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには " +
-		"`--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。台帳を動かす手も、人に頼まれないまま打たない",
+		"`--state-dir` か `ralph.local.toml` の `[org].state_dir` で新しい場所を指す。台帳を動かす手も、人に頼まれないまま打たない",
 	"stderr の文が中断と言うときは(最後のブランチの片付けの途中でも終了コード 1 になる)、`CLEANED:` の行を手順 2 と同じく報告し、" +
 		"残りは `ralph org cleanup` を打ち直せば続きから片付く",
 	"`SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、手のコマンドも人に頼まれないまま打たない",
@@ -1031,9 +1031,11 @@ var directorSkillGitHubMergeCleanupSteps = []string{
 // fragment of directorSkillGitHubMergeCleanupSteps in order; the
 // merge-order bullet of ## 進捗の報告 pointing --all's merged branches to
 // that subsection; and the rule of ## してはいけないこと on the commands by
-// hand, compared with spaces and line breaks removed (withoutSpaces).
-// scripts/check-skill-sync.sh keeps the copies identical but does not read
-// Go.
+// hand, compared with spaces and line breaks removed (withoutSpaces). None of
+// these names RALPH_ORG_STATE_DIR, which ralph no longer reads (plan
+// 2026-10-30-org-state-dir-local, AC10), for the new place of a moved
+// ledger. scripts/check-skill-sync.sh keeps the copies identical but does
+// not read Go.
 //
 // If this test fails after a deliberate change to a rule, put the rule's new
 // words, short and verbatim, in its fragment in the skill's order; otherwise
@@ -1074,6 +1076,9 @@ func TestDirectorSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 		} {
 			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
 				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+			if strings.Contains(in.text, "RALPH_ORG_STATE_DIR") {
+				t.Errorf("%s: %s still names RALPH_ORG_STATE_DIR -- see this test's doc comment for what to update", rel, in.name)
 			}
 		}
 	}

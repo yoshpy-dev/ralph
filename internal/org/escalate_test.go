@@ -1279,6 +1279,63 @@ func TestEscalateNotRecorded_ChecksTheMessageThenAlertsTheHuman(t *testing.T) {
 	})
 }
 
+// Plan 2026-10-30-org-state-dir-local, S2b: with no Inbox and no
+// EscalationsPath, the CLI's Org for a ledger it cannot resolve,
+// EscalateNotRecorded still checks the message first, and otherwise writes
+// the not-recorded banner naming the cause instead of an inbox path, sends
+// one desktop notification, and writes nothing.
+func TestEscalateNotRecorded_WithNoLedgerWritesNothing(t *testing.T) {
+	cause := errors.New(`ralph org escalate: cannot resolve the org ledger: /repo/ralph.local.toml: [org].state_dir "ledger" must be an absolute path or start with ~/`)
+	noLedger := func(t *testing.T) *escalateFixture {
+		f := newEscalateFixture(t)
+		f.o.Inbox, f.o.EscalationsPath = nil, ""
+		return f
+	}
+	assertNothingWritten := func(t *testing.T, f *escalateFixture) {
+		t.Helper()
+		entries, err := os.ReadDir(f.stateDir)
+		if err != nil || len(entries) != 0 {
+			t.Errorf("state dir %s holds %v (read: %v), want nothing written", f.stateDir, entries, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name, text, want string
+	}{
+		{"a missing TASK_ID", "TYPE: BLOCKED\n\nno task id", "message rejected by protocol validation"},
+		{"a TYPE escalate refuses", "TYPE: ALERT\n\nstuck", "TYPE ALERT cannot be escalated"},
+	} {
+		t.Run(tc.name+" notifies no one", func(t *testing.T) {
+			f := noLedger(t)
+			res := f.o.EscalateNotRecorded(EscalateParams{OrgID: "org-a", Text: tc.text, Banner: &f.banner}, cause)
+			if res.Err == nil || !strings.Contains(res.Err.Error(), tc.want) || errors.Is(res.Err, cause) || res.Recorded {
+				t.Fatalf("EscalateNotRecorded = %+v; want the refusal %q", res, tc.want)
+			}
+			if f.banner.Len() != 0 || len(f.notifications()) != 0 {
+				t.Errorf("a refusal notified: banner %q, calls %v", f.banner.String(), f.notifications())
+			}
+			assertNothingWritten(t, f)
+		})
+	}
+
+	t.Run("an accepted message reaches the human as not recorded", func(t *testing.T) {
+		f := noLedger(t)
+		res := f.o.EscalateNotRecorded(EscalateParams{OrgID: "org-a", Text: "TYPE: BLOCKED\nTASK_ID: org-a\n\nstuck", Banner: &f.banner}, cause)
+		if res.Err == nil || !errors.Is(res.Err, cause) || !strings.Contains(res.Err.Error(), "could not be recorded") ||
+			res.ID != "" || res.Recorded || res.Notified || res.Deferred {
+			t.Fatalf("EscalateNotRecorded = %+v; want an error wrapping the cause, no ID, not recorded", res)
+		}
+		want := "ORG ESCALATION (NOT RECORDED): org=org-a type=BLOCKED -- the item is not in any inbox: " + cause.Error() + "\n"
+		if got := f.banner.String(); got != want {
+			t.Errorf("banner = %q; want %q", got, want)
+		}
+		if calls := f.notifications(); len(calls) != 1 || !strings.Contains(calls[0], "org-a") || strings.Contains(calls[0], "stuck") {
+			t.Errorf("desktop notifications = %v; want one naming org-a without the body", calls)
+		}
+		assertNothingWritten(t, f)
+	})
+}
+
 // The watch and inbox lines share escalations.jsonl: the line of a watch
 // escalation the inbox could not take keeps its alert_id and gets no
 // inbox_id, and the line of a leader's inbox item the other way round. The

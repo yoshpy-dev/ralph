@@ -1247,3 +1247,58 @@ func TestRunDoctorOpts_RetiredRoleKey_WarnsWithoutFailing(t *testing.T) {
 		t.Errorf("expected the retired-key warning naming the key in doctor output:\n%s", out)
 	}
 }
+
+// TestRunDoctorOpts_LocalOnlyKeyInRalphTomlUsesDefaults covers self-review
+// L4 of plan 2026-10-30-org-state-dir-local through runDoctorOpts on an
+// initialized project with claude, codex, and go stubbed: a ralph.toml that
+// sets [org].state_dir gets the warn line that ends in "using defaults",
+// and the checks after it do use the defaults: the agmsg check looks at the
+// default agmsg home under $HOME, not at the [org].agmsg_home the same
+// file sets.
+func TestRunDoctorOpts_LocalOnlyKeyInRalphTomlUsesDefaults(t *testing.T) {
+	setupTestEmbedFS(t)
+	Version = "0.1.0-test"
+	dir := t.TempDir()
+	if err := executeInit(dir, initConfig{ProjectName: "test", Packs: []string{"golang"}}, false); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	tomlPath := filepath.Join(dir, "ralph.toml")
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "[org]") {
+		t.Fatalf("the test scaffold's ralph.toml has an [org] table already:\n%s", data)
+	}
+	tomlHome := filepath.Join(dir, "no-such-agmsg-home")
+	orgTable := "\n[org]\nagmsg_home = " + strconv.Quote(tomlHome) + "\nstate_dir = \"/ledger\"\n"
+	if err := os.WriteFile(tomlPath, append(data, []byte(orgTable)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, bin := range []string{"claude", "codex", "go"} {
+		writeStubBin(t, binDir, bin, "")
+	}
+	t.Setenv("PATH", binDir)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	setAgmsgHomeOverride(t, "")
+
+	var out string
+	if err := captureStdoutText(t, &out, func() error { return runDoctorOpts(dir, false) }); err != nil {
+		t.Fatalf("a ralph.toml warning must not fail doctor: %v\noutput:\n%s", err, out)
+	}
+	if want := "⚠ ralph.toml: warn — parse error: " + tomlPath + ": [org].state_dir can be set only in ralph.local.toml"; !strings.Contains(out, want) || !strings.Contains(out, " — using defaults\n") {
+		t.Errorf("doctor output does not contain %q ... — using defaults:\n%s", want, out)
+	}
+	if want := "agmsg: warn — agmsg not installed at " + filepath.Join(home, ".agents", "skills", "agmsg"); !strings.Contains(out, want) {
+		t.Errorf("doctor output does not contain %q (the agmsg check must use the default [org].agmsg_home):\n%s", want, out)
+	}
+	if strings.Contains(out, "not installed at "+tomlHome) {
+		t.Errorf("doctor's agmsg check used ralph.toml's [org].agmsg_home %s after saying it uses the defaults:\n%s", tomlHome, out)
+	}
+}

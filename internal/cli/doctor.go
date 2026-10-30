@@ -27,11 +27,12 @@ import (
 
 func newDoctorCmd() *cobra.Command {
 	var probeModels, strict bool
+	var stateDir string
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check environment and project setup",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctorFull(".", probeModels, strict)
+			return runDoctorStateDir(".", probeModels, strict, stateDir, cmd.Flags().Changed("state-dir"))
 		},
 	}
 	cmd.Flags().BoolVar(&probeModels, "probe-models", false,
@@ -50,6 +51,9 @@ func newDoctorCmd() *cobra.Command {
 			"not-yet-applied template update fails --strict even though nothing is actually broken. (a) core "+
 			"file hashes deliberately tolerates that same pending-update state (FR-4) and does not flag it; "+
 			"this asymmetry between (a) and (b)/(c) is intentional, not a bug")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "",
+		"org state directory the merge guarantee check caches its result in (default: the ledger ralph resolves -- "+
+			"[org].state_dir in ralph.local.toml, else the main worktree's .harness/state/org)")
 	return cmd
 }
 
@@ -71,16 +75,16 @@ func runDoctor(targetDir string) error {
 // 12). Model probes launch one CLI invocation per pool entry, so they stay
 // opt-in and off by default. Beyond them, the checks that spawn subprocesses
 // are the --version probes (Checks 1 and 2) and the merge guarantee (Check
-// 11c): `git rev-parse` to find the org state dir (unless
-// RALPH_ORG_STATE_DIR names it), then `git remote get-url origin` and up to
-// four `gh api` calls under one 20 s deadline, with no gh call when gh is
-// not on PATH.
+// 11c): `git rev-parse` to find the org state dir (unless --state-dir names
+// it; also to find the personal ralph.local.toml whose [org].state_dir may
+// name it), then `git remote get-url origin` and up to four `gh api` calls
+// under one 20 s deadline, with no gh call when gh is not on PATH.
 //
 // Signature/behavior preserved exactly (never runs under --strict, always
 // strict=false) so pre-existing callers/tests that predate FR-9 doctor
 // --strict (docs/specs/2026-08-17-overlay-scaffold-v2.md) keep working
 // unchanged, mirroring how runDoctor itself wraps this function.
-// runDoctorFull is the --strict-aware superset newDoctorCmd calls directly.
+// runDoctorFull is the --strict-aware superset.
 func runDoctorOpts(targetDir string, probeModels bool) error {
 	return runDoctorFull(targetDir, probeModels, false)
 }
@@ -88,8 +92,17 @@ func runDoctorOpts(targetDir string, probeModels bool) error {
 // runDoctorFull is runDoctorOpts plus the --strict opt-in (FR-9, Phase 5):
 // when true, violations found by checkScaffoldIntegrity's five FR-9
 // sub-checks are reported as "fail" (and therefore flip doctor's exit code)
-// instead of "warn". strict never affects any other check in this function.
+// instead of "warn". strict never affects any other check.
 func runDoctorFull(targetDir string, probeModels, strict bool) error {
+	return runDoctorStateDir(targetDir, probeModels, strict, "", false)
+}
+
+// runDoctorStateDir is runDoctorFull plus --state-dir, which newDoctorCmd
+// calls directly: when stateDirSet, stateDir is the org state dir the merge
+// guarantee (Check 11c) is cached in, the way --state-dir names the ledger
+// for the org verbs, so neither git nor the personal ralph.local.toml is
+// read to find it. stateDir never affects any other check.
+func runDoctorStateDir(targetDir string, probeModels, strict bool, stateDir string, stateDirSet bool) error {
 	cfg, cfgErr := config.Load(filepath.Join(targetDir, "ralph.toml"))
 	var results []checkResult
 
@@ -136,10 +149,10 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// Check 9: agmsg availability (org runtime driver adapter).
 	results = append(results, checkAgmsgAvailable(driver.ResolveAgmsgHome(cfg.Org.AgmsgHome)))
 
-	// Check 9b: RALPH_ORG_AGMSG_HOME, which ralph no longer reads, still set
-	// in the environment. Only then is there a line -- see
-	// checkLegacyAgmsgHomeEnv.
-	results = append(results, checkLegacyAgmsgHomeEnv(os.Getenv(legacyAgmsgHomeEnv))...)
+	// Check 9b: variables ralph no longer reads (RALPH_ORG_AGMSG_HOME,
+	// RALPH_ORG_STATE_DIR) still set in the environment. Only then is there
+	// a line, one per variable -- see checkRetiredEnv.
+	results = append(results, checkRetiredEnv(os.Getenv)...)
 
 	// Check 10: [org] envelope summary (pool size / max_seats).
 	results = append(results, checkOrgEnvelope(cfg))
@@ -174,10 +187,16 @@ func runDoctorFull(targetDir string, probeModels, strict bool) error {
 	// branch before it merges, read with git and gh under one 20 s deadline
 	// (no gh call when gh is not on PATH). pass for github_protection, warn
 	// for pr_checks_only, info for unknown, never fail. The result is cached
-	// in the org state dir, only when that dir already exists, for `ralph
-	// status` and `ralph org merge-order`; a stale cache that can be neither
-	// replaced nor removed is warn too -- see checkMergeGuarantee.
-	results = append(results, checkMergeGuarantee(context.Background(), targetDir, doctorMergeGuaranteeEnv))
+	// in the org state dir (--state-dir when passed), only when that dir
+	// already exists, for `ralph status` and `ralph org merge-order`; a
+	// stale cache that can be neither replaced nor removed is warn too. An
+	// org state dir that cannot be resolved (a broken personal
+	// ralph.local.toml) adds a fail line before it, and the result is not
+	// cached -- see checkMergeGuarantee.
+	resolveMergeGuaranteeEnv := func(targetDir string) (org.MergeGuaranteeParams, string, error) {
+		return doctorMergeGuaranteeEnv(targetDir, stateDir, stateDirSet)
+	}
+	results = append(results, checkMergeGuarantee(context.Background(), targetDir, resolveMergeGuaranteeEnv)...)
 
 	// Check 12: optional model-pool probes (--probe-models).
 	if probeModels {
@@ -839,28 +858,58 @@ func checkAgmsgAvailable(home string) checkResult {
 // legacyAgmsgHomeEnv is the variable that named the agmsg home before
 // [org].agmsg_home and ralph.local.toml took its place (plan
 // 2026-10-29-local-config-org, D8). ralph no longer reads it for the agmsg
-// home; checkLegacyAgmsgHomeEnv is the only reader, and only to say so.
+// home; checkRetiredEnv is the only reader, and only to say so.
 const legacyAgmsgHomeEnv = "RALPH_ORG_AGMSG_HOME"
 
-// checkLegacyAgmsgHomeEnv is `ralph doctor`'s migration hint for value, the
-// legacyAgmsgHomeEnv of doctor's environment: nothing when it is empty or
-// unset, and otherwise one warn that names the value, says that ralph no
-// longer reads it, and says where the value goes now: [org].agmsg_home of
-// ralph.local.toml, as an absolute path or one that starts with "~/" (the
-// only forms config.Load accepts there). Without the hint, a user who set
-// the variable would see the seats reach another agmsg with no word why. It
-// never fails: the variable changes nothing.
-func checkLegacyAgmsgHomeEnv(value string) []checkResult {
-	if value == "" {
-		return nil
+// retiredEnv is an environment variable ralph no longer reads, with what
+// `ralph doctor` says about it while it is still set (checkRetiredEnv).
+type retiredEnv struct {
+	name string
+	// effect follows "but ralph no longer reads it" in the warn: what the
+	// variable still does, if anything ("" for nothing).
+	effect string
+	// instead says where the value goes now.
+	instead string
+}
+
+// retiredEnvs are the variables checkRetiredEnv warns about, in the order
+// of doctor's lines: RALPH_ORG_AGMSG_HOME (plan 2026-10-29-local-config-org,
+// D8) and RALPH_ORG_STATE_DIR (plan 2026-10-30-org-state-dir-local, D5).
+// The new places take an absolute path or one that starts with "~/" (the
+// only forms config.Load and config.LocalOrgStateDir accept there).
+var retiredEnvs = []retiredEnv{
+	{name: legacyAgmsgHomeEnv,
+		instead: "write the value in [org].agmsg_home of " + config.LocalConfigFileName +
+			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/"},
+	{name: retiredOrgStateDirEnv,
+		effect: ", and while neither --state-dir nor [org].state_dir names the ledger and the variable names another directory than the ledger ralph finds by default, " +
+			"the org verbs that change the ledger are refused",
+		instead: "write the value in [org].state_dir of " + config.LocalConfigFileName +
+			" (next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, or pass --state-dir"},
+}
+
+// checkRetiredEnv is `ralph doctor`'s migration hint for the retiredEnvs,
+// read with getenv (os.Getenv in doctor): one warn for each variable set to
+// a non-empty value, which names the value, says that ralph no longer reads
+// it, and says where the value goes now; nothing for one that is empty or
+// unset. Without the hint, a user who set RALPH_ORG_AGMSG_HOME would see
+// the seats reach another agmsg with no word why, and one who set
+// RALPH_ORG_STATE_DIR would see another ledger. It never fails: neither
+// variable changes a value ralph uses.
+func checkRetiredEnv(getenv func(string) string) []checkResult {
+	var results []checkResult
+	for _, v := range retiredEnvs {
+		value := getenv(v.name)
+		if value == "" {
+			continue
+		}
+		results = append(results, checkResult{
+			Name:   v.name,
+			Status: "warn",
+			Detail: fmt.Sprintf("set to %q, but ralph no longer reads it%s; %s, and unset %s", value, v.effect, v.instead, v.name),
+		})
 	}
-	return []checkResult{{
-		Name:   legacyAgmsgHomeEnv,
-		Status: "warn",
-		Detail: fmt.Sprintf("set to %q, but ralph no longer reads it; write the value in [org].agmsg_home of %s "+
-			"(next to ralph.toml in the main worktree root, ignored by git), as an absolute path or one that starts with ~/, and unset %s",
-			value, config.LocalConfigFileName, legacyAgmsgHomeEnv),
-	}}
+	return results
 }
 
 // checkOrgEnvelope summarizes the loaded [org] envelope (model_pool size,

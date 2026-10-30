@@ -316,6 +316,39 @@ func TestConfigGet_LocalFileThatCannotBeReadOrIsInvalidExits3(t *testing.T) {
 	}
 }
 
+// `ralph config get org.state_dir` prints the personal file's value as
+// written: not cleaned, not expanded, and a relative one too, since Load does
+// not check it (plan 2026-10-30-org-state-dir-local, D2). With no personal
+// file it prints the default, an empty line.
+func TestConfigGet_OrgStateDirPrintsThePersonalFilesValueAsWritten(t *testing.T) {
+	t.Setenv(config.LocalConfigEnv, "")
+	for _, value := range []string{"/abs/../ledger", "~/ledger", "rel/ledger", ""} {
+		t.Chdir(t.TempDir())
+		if value != "" {
+			writeTestFile(t, config.LocalConfigFileName, "[org]\nstate_dir = \""+value+"\"\n")
+		}
+		stdout, stderr, code := runConfigGet(t, "org.state_dir")
+		if code != 0 || stdout != value+"\n" || stderr != "" {
+			t.Errorf("config get org.state_dir with state_dir %q = (stdout %q, stderr %q, exit %d); want (%q, \"\", 0)", value, stdout, stderr, code, value+"\n")
+		}
+	}
+}
+
+// AC4 of plan 2026-10-30-org-state-dir-local: a ralph.toml that sets
+// [org].state_dir exits 3, naming the file and saying to set the key in
+// ralph.local.toml, also with the personal file off (TestMain's setting).
+func TestConfigGet_RalphTomlThatSetsALocalOnlyKeyExits3(t *testing.T) {
+	t.Chdir(t.TempDir())
+	writeTestFile(t, "ralph.toml", "[org]\nstate_dir = \"/ledger\"\n")
+	stdout, _, err := runRootCmdSplit(t, "config", "get", "standard.plan_advisory")
+	if code := ExitCode(err); code != 3 || stdout != "" {
+		t.Fatalf("config get standard.plan_advisory = (stdout %q, exit %d, err %v); want (\"\", 3)", stdout, code, err)
+	}
+	if want := "ralph.toml: [org].state_dir can be set only in ralph.local.toml"; !errors.Is(err, ErrConfigLoad) || !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v; want ErrConfigLoad containing %q", err, want)
+	}
+}
+
 // The help of get says where the values come from besides ralph.toml: the
 // personal file applied on top, read from the main worktree's root, and
 // skipped with RALPH_LOCAL_CONFIG=off (plan 2026-10-29-local-config-org).

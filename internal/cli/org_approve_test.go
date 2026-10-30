@@ -417,18 +417,18 @@ func TestOrgApprove_RefusesOrgID(t *testing.T) {
 }
 
 // The DECISION and resolve commands repeat --state-dir when approve was
-// given it, and not when the ledger came from RALPH_ORG_STATE_DIR (the rule
-// of orgInboxHintStateDir).
+// given it, and not when the ledger came from the personal file's
+// [org].state_dir (the rule of orgInboxHintStateDir).
 func TestOrgApprove_TheDecisionCommandRepeatsAnExplicitStateDir(t *testing.T) {
 	for _, explicit := range []bool{true, false} {
-		t.Run(map[bool]string{true: "flag", false: "env"}[explicit], func(t *testing.T) {
+		t.Run(map[bool]string{true: "flag", false: "config"}[explicit], func(t *testing.T) {
 			approveEnv(t)
 			stateDir := filepath.Join(t.TempDir(), "state")
 			ref := writeWorktreePlan(t, seedApprovalOrg(t, stateDir, "a", "per-plan"), approveTestPlanRel, approveTestPlanDraft)
 			id := escalateOK(t, stateDir, "a", planQuestion(ref))
 			ledger, flag := []string{"--state-dir", stateDir}, " --state-dir '"+stateDir+"'"
 			if !explicit {
-				t.Setenv(org.EnvOrgStateDir, stateDir)
+				usePersonalStateDir(t, stateDir)
 				ledger, flag = nil, ""
 			}
 

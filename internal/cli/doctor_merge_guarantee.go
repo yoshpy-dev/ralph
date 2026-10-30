@@ -20,21 +20,32 @@ import (
 // mergeGuaranteeCheckName is the check's name in doctor's report.
 const mergeGuaranteeCheckName = "Merge guarantee"
 
+// orgLedgerCheckName is the name of the fail line checkMergeGuarantee adds
+// when the org ledger cannot be resolved.
+const orgLedgerCheckName = "Org ledger"
+
 // mergeGuaranteeEnvFromOS is the production resolver for
 // checkMergeGuarantee: real git and gh (nil Exec and LookPath) run in
 // targetDir, and the cache goes into the org state dir
-// org.ResolveOrgStateDir("", false) names (RALPH_ORG_STATE_DIR, else the
-// main worktree's .harness/state/org, found with git rev-parse). That state
-// dir is resolved from the process's working directory, not from targetDir;
-// the CLI always passes ".", so both name the same repository.
-func mergeGuaranteeEnvFromOS(targetDir string) (params org.MergeGuaranteeParams, stateDir string) {
-	stateDir, _ = org.ResolveOrgStateDir("", false)
-	return org.MergeGuaranteeParams{Dir: targetDir}, stateDir
+// org.ResolveOrgStateDir(explicitStateDir, explicitSet) names: doctor's
+// --state-dir when explicitSet is true (explicitStateDir, made absolute;
+// neither git nor the personal file is read then), else the personal file's
+// [org].state_dir, else the main worktree's .harness/state/org, found with
+// git rev-parse. RALPH_ORG_STATE_DIR is not read: doctor warns about it
+// separately (checkRetiredEnv). That state dir is resolved from the
+// process's working directory, not from
+// targetDir; the CLI always passes ".", so both name the same repository.
+// err is org.ResolveOrgStateDir's (a personal file that cannot be read, or
+// whose state_dir is not absolute), and stateDir is "" with it.
+func mergeGuaranteeEnvFromOS(targetDir, explicitStateDir string, explicitSet bool) (params org.MergeGuaranteeParams, stateDir string, err error) {
+	stateDir, _, err = org.ResolveOrgStateDir(explicitStateDir, explicitSet)
+	return org.MergeGuaranteeParams{Dir: targetDir}, stateDir, err
 }
 
-// doctorMergeGuaranteeEnv is the resolver runDoctorFull hands to
-// checkMergeGuarantee. It is a package variable (rather than a direct call
-// to mergeGuaranteeEnvFromOS) so internal/cli's TestMain (main_test.go) can
+// doctorMergeGuaranteeEnv is the resolver runDoctorStateDir hands to
+// checkMergeGuarantee, with doctor's --state-dir value and whether it was
+// passed. It is a package variable (rather than a direct call to
+// mergeGuaranteeEnvFromOS) so internal/cli's TestMain (main_test.go) can
 // pin it to an Exec and a gh lookup that run nothing and a state dir that
 // does not exist, keeping every runDoctor*-based test from running the real
 // git and gh against GitHub and from writing merge-guarantee.json into the
@@ -49,29 +60,49 @@ var doctorMergeGuaranteeEnv = mergeGuaranteeEnvFromOS
 // every gh call together, no gh call when gh is not on PATH), and an
 // unknown kind is never "fail", so doctor's exit code never changes because
 // of it.
-func checkMergeGuarantee(ctx context.Context, targetDir string, resolveEnv func(targetDir string) (org.MergeGuaranteeParams, string)) checkResult {
-	params, stateDir := resolveEnv(targetDir)
+//
+// When resolveEnv cannot resolve the org ledger, the check still runs and
+// its line says the result was not cached, after a fail line
+// (orgLedgerCheckName) with the error, which names the personal file: the
+// verbs that resolve the ledger exit 1 on the same error, and doctor, which
+// reports such breakage, goes on with its other checks (plan
+// 2026-10-30-org-state-dir-local, D4).
+func checkMergeGuarantee(ctx context.Context, targetDir string, resolveEnv func(targetDir string) (org.MergeGuaranteeParams, string, error)) []checkResult {
+	params, stateDir, err := resolveEnv(targetDir)
 	c := org.CheckMergeGuarantee(ctx, params)
-	return mergeGuaranteeResult(c, org.SaveMergeGuarantee(stateDir, c))
+	if err != nil {
+		ledger := checkResult{Name: orgLedgerCheckName, Status: "fail",
+			Detail: org.PrintableInboxText("cannot resolve the org ledger: "+err.Error(), false)}
+		r := checkResult{Name: mergeGuaranteeCheckName, Status: mergeGuaranteeStatus(c.Kind),
+			Detail: org.PrintableInboxText(c.Kind+": "+c.Detail+"; not cached: the org ledger could not be resolved", false)}
+		return []checkResult{ledger, r}
+	}
+	return []checkResult{mergeGuaranteeResult(c, org.SaveMergeGuarantee(stateDir, c))}
+}
+
+// mergeGuaranteeStatus is doctor's status for the kind (C3): pass for
+// github_protection, warn for pr_checks_only, info for unknown.
+func mergeGuaranteeStatus(kind string) string {
+	switch kind {
+	case org.MergeGuaranteeGitHubProtection:
+		return "pass"
+	case org.MergeGuaranteePRChecksOnly:
+		return "warn"
+	default:
+		return "info"
+	}
 }
 
 // mergeGuaranteeResult is doctor's result for the check c and its save s.
-// The status follows the kind (C3): pass for github_protection, warn for
-// pr_checks_only (c.Detail says what to set), info for unknown (c.Detail
-// says why). A save that failed and could not remove the old cache either
-// is warn whatever the kind, since `ralph status` and `ralph org
-// merge-order` then read that stale cache (C5). The Detail is one line: the
-// kind, c.Detail, then where the result was cached or why it was not.
+// The status follows the kind (mergeGuaranteeStatus): pass for
+// github_protection, warn for pr_checks_only (c.Detail says what to set),
+// info for unknown (c.Detail says why). A save that failed and could not
+// remove the old cache either is warn whatever the kind, since `ralph
+// status` and `ralph org merge-order` then read that stale cache (C5). The
+// Detail is one line: the kind, c.Detail, then where the result was cached
+// or why it was not.
 func mergeGuaranteeResult(c org.MergeGuaranteeCheck, s org.MergeGuaranteeSave) checkResult {
-	r := checkResult{Name: mergeGuaranteeCheckName}
-	switch c.Kind {
-	case org.MergeGuaranteeGitHubProtection:
-		r.Status = "pass"
-	case org.MergeGuaranteePRChecksOnly:
-		r.Status = "warn"
-	default:
-		r.Status = "info"
-	}
+	r := checkResult{Name: mergeGuaranteeCheckName, Status: mergeGuaranteeStatus(c.Kind)}
 	var saved string
 	switch {
 	case s.NoLedger:

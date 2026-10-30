@@ -10,14 +10,23 @@ import (
 )
 
 // TestCheckLegacyAgmsgHomeEnv pins AC9 of plan 2026-10-29-local-config-org
-// at the check: no line for an empty or unset RALPH_ORG_AGMSG_HOME, and one
-// warn otherwise that names the value, says ralph no longer reads it, and
-// says where the value goes now and in which forms.
+// at the check (checkRetiredEnv's RALPH_ORG_AGMSG_HOME row): no line for an
+// empty or unset RALPH_ORG_AGMSG_HOME, and one warn otherwise that names the
+// value, says ralph no longer reads it, and says where the value goes now
+// and in which forms.
 func TestCheckLegacyAgmsgHomeEnv(t *testing.T) {
-	if got := checkLegacyAgmsgHomeEnv(""); len(got) != 0 {
-		t.Errorf("checkLegacyAgmsgHomeEnv(\"\") = %+v; want no line", got)
+	agmsgHomeOnly := func(value string) func(string) string {
+		return func(name string) string {
+			if name == legacyAgmsgHomeEnv {
+				return value
+			}
+			return ""
+		}
 	}
-	got := checkLegacyAgmsgHomeEnv("rel/agmsg")
+	if got := checkRetiredEnv(agmsgHomeOnly("")); len(got) != 0 {
+		t.Errorf("checkRetiredEnv with RALPH_ORG_AGMSG_HOME empty = %+v; want no line", got)
+	}
+	got := checkRetiredEnv(agmsgHomeOnly("rel/agmsg"))
 	want := checkResult{
 		Name:   "RALPH_ORG_AGMSG_HOME",
 		Status: "warn",
@@ -26,7 +35,7 @@ func TestCheckLegacyAgmsgHomeEnv(t *testing.T) {
 			"and unset RALPH_ORG_AGMSG_HOME",
 	}
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("checkLegacyAgmsgHomeEnv(%q) = %+v; want [%+v]", "rel/agmsg", got, want)
+		t.Errorf("checkRetiredEnv with RALPH_ORG_AGMSG_HOME=%q = %+v; want [%+v]", "rel/agmsg", got, want)
 	}
 }
 
