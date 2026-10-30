@@ -45,7 +45,11 @@ type StandardConfig struct {
 	// post-implementation pipeline, the first one included: 2, the default,
 	// is the first run and one re-run after a fix. /cross-review reads it,
 	// and once a task reaches the cap it drops its fix-and-re-run option and
-	// asks how to go on. Load refuses a value below 1.
+	// asks how to go on. To raise the cap of one task only, /cross-review
+	// writes a cap into that task's
+	// .harness/state/standard-pipeline/cycle-count.json, and the cap in
+	// effect is the larger of this value and that cap. Load refuses a value
+	// below 1.
 	MaxPipelineCycles int `toml:"max_pipeline_cycles"`
 }
 
