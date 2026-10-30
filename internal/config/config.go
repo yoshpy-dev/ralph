@@ -124,6 +124,9 @@ type OrgConfig struct {
 	// Review holds the review switches of a feature org. See
 	// OrgReviewConfig's doc comment.
 	Review OrgReviewConfig `toml:"review"`
+	// Gate holds where the gate after `ralph org regate`'s merge runs. See
+	// OrgGateConfig's doc comment.
+	Gate OrgGateConfig `toml:"gate"`
 }
 
 // OrgPermissionsConfig is the `[org.permissions]` envelope: a driver-
@@ -586,6 +589,29 @@ type OrgReviewConfig struct {
 	MaxCrossReviewCycles int `toml:"max_cross_review_cycles"`
 }
 
+// The two values of [org.gate].regate_checks.
+const (
+	// RegateChecksLocal makes `ralph org regate` run the gate scripts
+	// (run-static-verify.sh and run-test.sh) on this machine after its merge
+	// and record their result before it pushes, as before [org.gate] existed.
+	RegateChecksLocal = "local"
+	// RegateChecksCI makes `ralph org regate` push its merge without running
+	// the gate scripts and record the gate from the checks of the pull
+	// request whose head is the pushed commit.
+	RegateChecksCI = "ci"
+)
+
+// OrgGateConfig holds the `[org.gate]` setting of where the gate after
+// `ralph org regate`'s merge runs (issue #264). regate reads it from its own
+// config, the --config file or ./ralph.toml, like the rest of its settings.
+type OrgGateConfig struct {
+	// RegateChecks is RegateChecksLocal (the default: regate runs the gate
+	// scripts on this machine) or RegateChecksCI (regate records the gate from
+	// the CI checks of the branch's pull request, so it needs gh, an origin
+	// on GitHub, and an open pull request that CI runs on).
+	RegateChecks string `toml:"regate_checks"`
+}
+
 // Default returns a Config with sensible defaults.
 func Default() Config {
 	return Config{
@@ -641,6 +667,9 @@ func Default() Config {
 				PlanAdvisory:         false,
 				CrossReview:          false,
 				MaxCrossReviewCycles: 2,
+			},
+			Gate: OrgGateConfig{
+				RegateChecks: RegateChecksLocal,
 			},
 		},
 	}
@@ -924,6 +953,14 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 	// has no validation.
 	if cfg.Org.Review.MaxCrossReviewCycles < 1 {
 		return fmt.Errorf("[org.review].max_cross_review_cycles must be >= 1, got %d", cfg.Org.Review.MaxCrossReviewCycles)
+	}
+
+	// [org.gate] validation. Same strict pattern as [org.approval] above: an
+	// absent [org.gate] section (or an absent regate_checks) keeps Default()'s
+	// local, and an explicit `regate_checks = ""` is an error, like any value
+	// other than the two.
+	if checks := cfg.Org.Gate.RegateChecks; checks != RegateChecksLocal && checks != RegateChecksCI {
+		return fmt.Errorf("[org.gate].regate_checks %q must be %q or %q", checks, RegateChecksLocal, RegateChecksCI)
 	}
 
 	return nil

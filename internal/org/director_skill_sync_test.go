@@ -1083,3 +1083,89 @@ func TestDirectorSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 		}
 	}
 }
+
+// directorSkillCIRegateRules are fragments of the /director skill's
+// subsection ### merge のあとの取り直し, in order (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, S7: AC9): the director
+// reads [org.gate].regate_checks where it runs regate, since regate reads
+// that ralph.toml; with ci, regate runs no script, pushes the merge commit
+// before it reads the PR's checks and records from them, and refuses with
+// nothing done when origin, gh, or the open PR is missing; the old sentence
+// on the scripts' tens of minutes now holds for both values; a ci regate is
+// run with --wait-checks 60m and waits with regate.lock released, a local
+// one without it; a ci_failed leaves the pushed merge commit on origin; and
+// exit 6, told apart by the exit code and the CHECKS: and NEXT: lines and
+// not by a GATE: line, is neither a refusal nor a failure, so the director
+// runs the same regate again without asking, until it ends 6 twice in a
+// row.
+var directorSkillCIRegateRules = []string{
+	"regate の検査の仕方は `[org.gate].regate_checks` で決まる",
+	"regate は打った場所の `ralph.toml` を読むので、打つ前に同じ場所で `ralph config get org.gate.regate_checks` を打って値を読む",
+	"`ci`: regate はスクリプトを走らせない。merge commit を force なしで push してから、そのブランチの PR の checks を読み、その結果を記録する",
+	"origin が GitHub の repository を名指すこと、`gh` が PATH にあること、そのブランチに既定のブランチへの open な PR があることを" +
+		"確かめ、どれかが欠ければ何もせずに断る(終了コード 1)",
+	"どちらの値でも数十分かかることがある",
+	"`ci` なら `--wait-checks 60m` を付けて打つ。regate は `regate.lock` を外して 30 秒ごとに checks を読み直し、最大 60 分待つ",
+	"`local` では `--wait-checks` を付けない(0 より大きい値は断られる)",
+	"ralph org regate --branch feat/auth-token --wait-checks 60m > .harness/state/regate-feat-auth-token.out 2>&1",
+	"`ci` で `GATE: fail` と `REASON: ci_failed` が出たら、PR の CI が落ちている",
+	"regate が push した merge commit は origin に残る(force push をしないので戻さない)",
+	"終了コード 6 は `ci` のときだけ出る",
+	"regate は何も記録していない。`GATE:` の行は出ず、`CHECKS: pending (<理由>)` と `NEXT:` の行が出る",
+	"待ちを見分けるのは、終了コードとこの 2 つの行で、`GATE:` の行ではない",
+	"断りでも失敗でもないので、人に頼まれた regate でも人に聞き直さずに、同じ regate を `--wait-checks 60m` で打ち直してよい",
+	"2 回続けて終了コード 6 なら(CI が走らない、止まっているなど)、`CHECKS:` と `NEXT:` の行を人に伝え、人に頼まれるまでそのブランチに打たない",
+}
+
+// directorSkillOldRegateDuration is the sentence the subsection had before
+// [org.gate].regate_checks, which held only while regate ran the scripts.
+const directorSkillOldRegateDuration = "gate のスクリプトが走るので、repo のテストの量とマシンの負荷によっては数十分かかる"
+
+// TestDirectorSkill_PinsTheCIRegate pins what the /director skill says about
+// a regate under [org.gate].regate_checks = "ci" (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, S7: AC9). ralph org
+// regate's exit 6 is not a refusal, and the skill tells the director to stop
+// a branch at exit 1 and run nothing again unasked, so the skill's text is
+// all that keeps a director from stopping at checks still running, or from
+// reading a pending regate's missing GATE: line as a failure. Each copy's
+// subsection ### merge のあとの取り直し must contain every fragment of
+// directorSkillCIRegateRules in order and not directorSkillOldRegateDuration,
+// and the bullet of ### merge と auto_merge on exit 1 must point exit 6 to
+// it, compared with spaces and line breaks removed (withoutSpaces).
+// scripts/check-skill-sync.sh keeps the copies identical but does not read
+// Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/director/SKILL.md and
+// templates/base/.claude/skills/director/SKILL.md and run
+// scripts/sync-skills.sh for the two .agents copies, as for the first test in
+// this file.
+func TestDirectorSkill_PinsTheCIRegate(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range directorSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's ci regate check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		regate := directorSkillSubsection(text, "### merge のあとの取り直し")
+		for _, in := range []struct {
+			name      string
+			text      string
+			fragments []string
+		}{
+			{"the subsection ### merge のあとの取り直し", regate, directorSkillCIRegateRules},
+			{"the bullet of ### merge と auto_merge on exit 1",
+				directorSkillBullet(directorSkillSubsection(text, "### merge と auto_merge"), "- `ralph org merge` か `ralph org regate` が終了コード 1"),
+				[]string{"`ralph org regate` の終了コード 6 は断りでも失敗でもない(「merge のあとの取り直し」の 4)"}},
+		} {
+			for _, p := range skillOrderedFragmentProblems(in.text, in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+		if strings.Contains(withoutSpaces(regate), withoutSpaces(directorSkillOldRegateDuration)) {
+			t.Errorf("%s still says %q in ### merge のあとの取り直し -- see this test's doc comment", rel, directorSkillOldRegateDuration)
+		}
+	}
+}

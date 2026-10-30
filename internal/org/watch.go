@@ -1377,7 +1377,11 @@ func (w *watchRun) sendAlert(status *watchStatusFile, orgID, seatID, condType, m
 //	    pending alert whose baseline lacks a gate record a newer gate
 //	    wrote, and restarting watch on the newer binary while that alert is
 //	    pending reads one higher and clears it. An older watch that keeps
-//	    running does not count them at all.
+//	    running does not count them at all. The CI gate records
+//	    (EventGateCIPassed, EventGateCIFailed) are not counted: only
+//	    ralph org regate writes them, so never while the watch counts that
+//	    org's activity, and leaving them out keeps the count, and so a
+//	    pending alert's baseline, the same across an upgrade or a rollback.
 //
 // The orgID filter excludes another org's activity in the same shared
 // manifest: without it, a new event in a different, active org would clear

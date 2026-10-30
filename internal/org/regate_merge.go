@@ -14,7 +14,9 @@ import (
 // (regateUndoMerge, D5), the push and its retry (regatePush,
 // regateHeadNotOnOrigin, D4), and the git they run that ctx does not stop
 // (regateUncancelledGit). The check of what is on disk in the merge's way
-// (regateCheckInTheWay, regateMergeWrites) is in regate_inway.go.
+// (regateCheckInTheWay, regateMergeWrites) is in regate_inway.go; a ci
+// regate's push and checks after the merge commit (regateCIMerged) are in
+// regate_ci.go.
 
 // regateUncancelledGit runs git args in dir with env (regateBoundedGit) in a
 // process group of its own, on a context ctx's cancellation does not reach
@@ -69,11 +71,28 @@ func regateMergeEnv(env []string) []string {
 // head (a force push), pushing it again would undo what someone did to
 // origin. For a pass with no via (ralph org gate, run while the org ran),
 // any HEAD with originHead under it will do: the leader's push of the gated
-// head may have failed. Otherwise it refuses with regateCheckOriginHead's
-// reason and regateResetHint's.
+// head may have failed. A pass Regate wrote from the PR's checks
+// (via=regate_ci) is never retried: it is written only once its head is on
+// origin, so origin's tip of the branch not being HEAD means someone moved
+// origin's branch since. When that tip has HEAD under it (commits pushed on
+// top from elsewhere), Regate refuses with regateCIPassBehindText, which asks
+// to bring the worktree up to date; otherwise pushing HEAD would undo the
+// move, and it refuses with regateCIPassMovedText (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D7, AC10). Otherwise it
+// refuses with regateCheckOriginHead's reason and regateResetHint's.
 func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, originHead string, env []string, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	if b.passedOn(t) {
+		if b.gate.record.Via == gateViaRegateCI {
+			behind, err := regateIsAncestor(ctx, t.root, t.head, originHead)
+			switch {
+			case err != nil:
+				return RegateResult{}, regateInterrupted(ctx, err, "")
+			case behind:
+				return RegateResult{Refused: regateCIPassBehindText(t, originHead, w)}, nil
+			}
+			return RegateResult{Refused: regateCIPassMovedText(t, originHead, w)}, nil
+		}
 		var retry bool
 		var err error
 		if b.gate.record.Via == gateViaRegate {
@@ -100,6 +119,35 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 	return RegateResult{Refused: refused + hint}, nil
 }
 
+// regateCIPassMovedText is the refusal of t's HEAD, the head of a pass Regate
+// wrote from the PR's checks (via=regate_ci), when originHead, origin's tip of
+// the branch after the fetch, is neither HEAD nor a descendant of it: that
+// pass is written only once HEAD is on origin, so someone moved origin's
+// branch since, and Regate does not push HEAD back over that
+// (regateHeadNotOnOrigin). Its commands quote the worktree and the branch
+// (regateCIOriginLog).
+func regateCIPassMovedText(t gateTarget, originHead string, w gateWording) string {
+	return w.prefix + fmt.Sprintf("the latest gate record of %s is a pass of the PR's checks (via=regate_ci) of HEAD %s in %s, "+
+		"recorded after its push reached origin, but origin's tip of the branch is now %s: someone moved origin's branch since "+
+		"(with a force push, for one), and pushing HEAD again would undo that; check origin (%s) and %s once HEAD and origin's "+
+		"tip agree", t.branch, t.head, t.root, originHead, regateCIOriginLog(t), w.again)
+}
+
+// regateCIPassBehindText is the refusal of t's HEAD, the head of a pass Regate
+// wrote from the PR's checks (via=regate_ci), when originHead, origin's tip of
+// the branch after the fetch, is a descendant of HEAD: someone pushed commits
+// on top of HEAD from elsewhere, so nothing is to be pushed and nothing of
+// theirs would be undone. The next step is to bring the worktree up to date
+// with a fast-forward and run Regate again, which then regates that tip. Its
+// commands quote the worktree and the ref (cleanupGitCmd).
+func regateCIPassBehindText(t gateTarget, originHead string, w gateWording) string {
+	return w.prefix + fmt.Sprintf("the latest gate record of %s is a pass of the PR's checks (via=regate_ci) of HEAD %s in %s, "+
+		"but origin's tip of the branch is now %s, which has commits on top of HEAD (they were pushed from elsewhere): bring the "+
+		"worktree up to date (%s, then %s) and %s, which then regates origin's tip", t.branch, t.head, t.root, originHead,
+		cleanupGitCmd(t.root, "fetch", "origin"), cleanupGitCmd(t.root, "merge", "--ff-only", "refs/remotes/origin/"+t.branch),
+		w.again)
+}
+
 // regateResetHint is what the refusal of a HEAD that is not originHead adds
 // when HEAD is a merge commit an earlier Regate made and could not push (D4):
 // b's latest gate record is readable with no corrupt line after it, is one
@@ -111,7 +159,9 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 // merges anew. For any other HEAD it is "": the reset could drop commits
 // nobody pushed, a head the org's gate passed among them, or a commit origin
 // had until its branch was put back under it, such as a person's merge of
-// the default branch tip with the conflicts it resolved.
+// the default branch tip with the conflicts it resolved. A record Regate
+// wrote from the PR's checks (via=regate_ci) gets none either: Regate writes
+// it only for a head on origin, so its merge commit was pushed.
 func regateResetHint(ctx context.Context, b regateBranch, t gateTarget, originHead string, w gateWording) (string, error) {
 	g := b.gate
 	if g == nil || !g.readable || b.corruptAfterGate || g.record.Head != t.head || g.record.Via != gateViaRegate {
@@ -192,10 +242,14 @@ func regateParents(ctx context.Context, root, commit string) ([]string, error) {
 // recorded head_moved or tree_changed it is kept, and res.NotUndone says how
 // to undo it (after tree_changed, also how to set the scripts' changes aside
 // first). An error or refusal after the merge says what became of the merge
-// commit (regateUndoneText). stderr gets the line regateUncancelledGit
-// writes.
-func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, env []string, stderr io.Writer, w gateWording,
-	res RegateResult) (RegateResult, error) {
+// commit (regateUndoneText). With ci set, for a ci regate (regateCIPreCheck),
+// the checks before the merge and the merge commit are the same, and what
+// comes after the merge commit is regateCIMerged's: no script, the push
+// before any record, then the PR's checks (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, D2, D3). stderr gets the
+// line regateUncancelledGit writes.
+func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, ci *regateCI, env []string, stderr io.Writer,
+	w gateWording, res RegateResult) (RegateResult, error) {
 	refused, err := regateCheckIdentity(ctx, t, env, w)
 	if err != nil {
 		return RegateResult{}, regateInterrupted(ctx, err, "")
@@ -220,6 +274,9 @@ func (o *Org) regateMerged(ctx context.Context, b regateBranch, t gateTarget, en
 	}
 	res.Head, res.Merge, res.PreMergeHead = merge, merge, t.head
 	t.head = merge
+	if ci != nil {
+		return o.regateCIMerged(ctx, b, t, ci, env, stderr, w, res)
+	}
 	if ctx.Err() != nil {
 		res = regateUndoMerge(ctx, t, env, stderr, res)
 		return res, fmt.Errorf("%w; %s", regateInterrupted(ctx, ctx.Err(), ""), regateUndoneText(res))

@@ -1338,3 +1338,29 @@ func TestOrgMergeOrder_WritesNothingAndTakesNoLock(t *testing.T) {
 		t.Errorf("the work repository's refs changed (a fetch?):\nbefore %s\nafter  %s", refsBefore, got)
 	}
 }
+
+// merge-order's help names the gate records a regate with
+// [org.gate].regate_checks = "ci" writes (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, S6): a gate_ci_passed
+// makes a branch ready as a gate_passed does, and a gate_ci_failed is
+// failed, no longer only gate_passed and gate_failed.
+func TestOrgMergeOrder_HelpNamesTheCIGateRecords(t *testing.T) {
+	out, err := runOrgCmd(t, "merge-order", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"A branch is ready when its latest gate record (`ralph org gate`, or `ralph org regate`) is a gate_passed, or a gate_ci_passed " +
+			"that regate records from the checks of the branch's PR under [org.gate].regate_checks = \"ci\" (via=regate_ci), whose head " +
+			"is the branch's tip on origin",
+		"failed its latest gate record is a gate_failed, or a gate_ci_failed (reason ci_failed); the reason is shown",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("merge-order --help does not say %q:\n%s", want, out)
+		}
+	}
+	if old := "(`ralph org gate`) is a gate_passed whose head"; strings.Contains(help, old) {
+		t.Errorf("merge-order --help still says %q", old)
+	}
+}

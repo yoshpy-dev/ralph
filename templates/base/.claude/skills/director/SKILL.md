@@ -868,7 +868,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   regate を名指すブランチもなくなったら終わる。merge と regate のたびに、
   結果を人に報告する。merge なら `MERGED:` の行、`METHOD:`、
   `MERGE COMMIT:`、出ていれば `NOTE:` と、`CLEANUP:` の行(下の箇条の
-  読み方)を、regate なら `GATE:`・`HEAD:`・`PUSHED:` の行を伝える。
+  読み方)を、regate なら `GATE:`・`CHECKS:`(`ci` のとき)・`HEAD:`・
+  `PUSHED:` の行を伝える。
 
 どちらの値でも、次のことは変わらない。
 
@@ -878,7 +879,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   断る(`/org` skill の動詞リファレンスの `merge` の行)。
 - `ralph org merge` か `ralph org regate` が終了コード 1 で終わったら(断りか
   失敗)、そのブランチはそこで止め、stderr の文(理由と次の手)をそのまま
-  人に伝える。人に頼まれないまま打ち直さない。
+  人に伝える。人に頼まれないまま打ち直さない。`ralph org regate` の
+  終了コード 6 は断りでも失敗でもない(「merge のあとの取り直し」の 4)。
 - 終了コード 1 でも `MERGED:` の行が出ていれば、PR は merge されている
   (`pr_merged` を記録できなかったか、merge の途中で中断された)。merge した
   ことを人に伝え、merge-order を打ち直す。
@@ -957,18 +959,41 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
 なら人が頼んだときだけで、`auto_merge = true` なら上の手順の 3 で打つ
 (`/org` skill の動詞リファレンスの `regate` の行と「merge してよい順」)。
 
-1. 1 本ずつ打つ。regate は台帳ごとに 1 つしか走らない。gate のスクリプトが
-   走るので、repo のテストの量とマシンの負荷によっては数十分かかる。
+regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate は打った
+場所の `ralph.toml` を読むので、打つ前に同じ場所で
+`ralph config get org.gate.regate_checks` を打って値を読む。
+
+- `local`(既定): regate は機能の worktree で gate のスクリプトを走らせ、
+  結果を記録してから push する。
+- `ci`: regate はスクリプトを走らせない。merge commit を force なしで push
+  してから、そのブランチの PR の checks を読み、その結果を記録する。すべて
+  通れば `gate_ci_passed`、すべて終わって落ちた check があれば
+  `gate_ci_failed` になる。merge の前に、origin が GitHub の repository を
+  名指すこと、`gh` が PATH にあること、そのブランチに既定のブランチへの
+  open な PR があることを確かめ、どれかが欠ければ何もせずに断る
+  (終了コード 1)。
+
+1. 1 本ずつ打つ。`ci` の regate が checks を待つ間を除いて、regate は
+   台帳ごとに 1 つしか走らない。どちらの値でも数十分かかることがある。
+   `local` では gate のスクリプトが走り、repo のテストの量とマシンの負荷で
+   長さが変わる。`ci` では PR の CI が終わるのを待つ。`ci` なら
+   `--wait-checks 60m` を付けて打つ。regate は `regate.lock` を外して 30 秒
+   ごとに checks を読み直し、最大 60 分待つ。`local` では `--wait-checks` を
+   付けない(0 より大きい値は断られる)。
    Claude Code では Bash の `run_in_background` で走らせ、stdout と stderr
    を cwd の `.harness/state/regate-<名前>.out` に書き、終わってから
-   終了コードと `GATE:`・`HEAD:`・`PUSHED:` の行を読む。
+   終了コードと `GATE:`・`CHECKS:`・`HEAD:`・`PUSHED:`・`NEXT:` の行を読む。
    `<名前>` はブランチ名の `/` を `-` にしたもの(`feat/auth-token` なら
    `feat-auth-token`)にする。`/` が残ると、ないディレクトリへの書き込みに
    なって失敗する。前景で打つなら、ツールの timeout を regate にかかる時間
-   より長くする。
+   より長くする(`ci` では、待ちの上限の 60 分に merge と push の時間を
+   足す)。
 
    ```sh
+   # local
    ralph org regate --branch feat/auth-token > .harness/state/regate-feat-auth-token.out 2>&1
+   # ci
+   ralph org regate --branch feat/auth-token --wait-checks 60m > .harness/state/regate-feat-auth-token.out 2>&1
    ```
 
 2. 終了コード 0 なら、merge-order を打ち直して、そのブランチが `ready` に
@@ -980,8 +1005,23 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
    `LOG:`、push の失敗の理由、断りの理由と次の手)をそのまま人に伝え、その
    ブランチはそこで止める。衝突を直さない。force push をしない。断りと失敗の
    あとに、人に頼まれないまま打ち直さない。直すのは人か、立て直した機能の
-   org。
-4. 理由の欄が `ralph org gate --org-id <org>` を名指すブランチ(機能の org が
+   org。`ci` で `GATE: fail` と `REASON: ci_failed` が出たら、PR の CI が
+   落ちている。`CHECKS: failed (PR #<番号>)` のあとに落ちた check が並ぶ。
+   regate が push した merge commit は origin に残る(force push をしないので
+   戻さない)。直す人は、その上に直しを積んで push する。そのあとの regate は
+   merge せずに PR の checks を読む。
+4. 終了コード 6 は `ci` のときだけ出る。PR の checks がまだ終わっていない
+   (PR の head がまだ push した commit でない、走っている check がある、
+   check がまだ 1 件も出ていない、`--wait-checks` の時間が尽きた)ので、
+   regate は何も記録していない。`GATE:` の行は出ず、
+   `CHECKS: pending (<理由>)` と `NEXT:` の行が出る。待ちを見分けるのは、
+   終了コードとこの 2 つの行で、`GATE:` の行ではない。断りでも失敗でも
+   ないので、人に頼まれた regate でも人に聞き直さずに、同じ regate を
+   `--wait-checks 60m` で打ち直してよい。打ち直した regate は、既定の
+   ブランチが進んでいなければ merge せずに PR の checks を読み直す。2 回
+   続けて終了コード 6 なら(CI が走らない、止まっているなど)、`CHECKS:` と
+   `NEXT:` の行を人に伝え、人に頼まれるまでそのブランチに打たない。
+5. 理由の欄が `ralph org gate --org-id <org>` を名指すブランチ(機能の org が
    走っている)には打たない。そのブランチは、leader が reviewer に頼んで
    gate を打たせる。同じ org_id が別の機能で走っているブランチも、その org が
    disband するまで打たない。

@@ -268,3 +268,15 @@ mode = "per-plan"
 plan_advisory = false
 cross_review = false
 max_cross_review_cycles = 2
+
+# [org.gate] — where the gate runs after `ralph org regate` merges the
+# default branch into a feature branch. regate_checks = "local" (default):
+# regate runs run-static-verify.sh and run-test.sh on this machine, records
+# the result, and pushes the merge when they pass. regate_checks = "ci":
+# regate pushes the merge without running them and records the gate from
+# the CI checks of the branch's pull request, so it needs gh, an origin on
+# GitHub, an open pull request into the default branch, and CI that runs on
+# it. Any other value, "" included, is an error. regate reads it from its
+# own ralph.toml (the --config file, else ./ralph.toml).
+[org.gate]
+regate_checks = "local"

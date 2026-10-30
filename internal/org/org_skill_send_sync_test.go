@@ -294,3 +294,104 @@ func TestOrgSkill_PinsTheCleanupAfterAMerge(t *testing.T) {
 		}
 	}
 }
+
+// orgSkillCIRegateRules are fragments of the /org skill on a regate under
+// [org.gate].regate_checks = "ci" (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, S7: AC9), by where they
+// are, each list in the skill's order: the verb-table row of regate (the
+// pre-checks before every path, no script, the push before the record, the
+// two events with via=regate_ci, the pending outcome and its exit 6,
+// --wait-checks with regate.lock released, exit 6 among the exit codes, and
+// the ci wait as the exception to one regate at a time and to the refusal of
+// spawn and start); the verb-table rows of spawn and start (the same
+// exception); the subsection ### gate の記録 (the same record shape under
+// event names of their own, so that an older binary skips them after a
+// revert); and the subsection ### merge してよい順 (what ci_failed leaves on origin, the run
+// with --wait-checks and its duration for both values, exit 6 as neither a
+// refusal nor a failure, and the ci cases of exit 1).
+var orgSkillCIRegateRules = []struct {
+	name      string
+	section   func(text string) string
+	fragments []string
+}{
+	{"the verb-table row of regate", func(text string) string { return orgSkillVerbRow(text, "regate") }, []string{
+		// Sync-docs: the one-at-a-time rule has the ci wait as its exception,
+		// and a gate_ci_passed is up to date like a gate_passed.
+		"(台帳ごとに 1 つ。`ci` の regate が checks を待つ間を除く。ロックは 1 秒まで待つ)",
+		"その HEAD とその先頭の `gate_passed` か `gate_ci_passed` なら",
+		"ここまでは `[org.gate].regate_checks = \"local\"`(既定)の動き",
+		"fetch のあと、どの道よりも前に、origin が GitHub の repository を名指すこと、`gh` が PATH にあること、そのブランチの OPEN で" +
+			"既定のブランチ向きの PR が `merge` と同じ読み方で見つかることを確かめ、どれかが通らなければ何もせずに断る",
+		"gate のスクリプトは走らせず、merge commit を記録の前に force なしで push してから PR の head と checks を読み",
+		"`gate_ci_passed`",
+		"`gate_ci_failed`(reason `ci_failed`。push した merge commit は origin に残るので、ブランチで直して push してから打ち直す)を、" +
+			"どちらも `via=regate_ci` 付きで記録し",
+		"何も記録せず、`CHECKS: pending (<理由>)` と `NEXT:` を出して終了コード 6 で終わり",
+		"`--wait-checks <時間>`(`ci` のときだけ。既定 0 は 1 回だけ読む。上限 6h)を付けると、`regate.lock` を外して 30 秒ごとに" +
+			"読み直し、checks が終わるまで待つ",
+		"`ci` で checks が終わっていないときに 6",
+		"ただし `ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られず、" +
+			"待ちのあとにその org が走っていれば regate のほうが断る(ほかの org は止めない)",
+	}},
+	{"the verb-table row of spawn", func(text string) string { return orgSkillVerbRow(text, "spawn") }, []string{
+		"`--dry-run` でない spawn は何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、" +
+			"ロックを外しているので断られない)",
+	}},
+	{"the verb-table row of start", func(text string) string { return orgSkillVerbRow(text, "start") }, []string{
+		"何も記録せずに断られる(`ci` の regate が `--wait-checks` で checks を待つ間は、ロックを外しているので断られない)",
+	}},
+	{"the subsection ### gate の記録", func(text string) string { return directorSkillSubsection(text, "### gate の記録") }, []string{
+		"同じ形の記録を別の event `gate_ci_passed` と `gate_ci_failed`(reason `ci_failed`)で、`via=regate_ci` を付けて書く",
+		"古い binary がこの記録を読み飛ばすようにするため",
+		"merge-order と merge は `gate_ci_passed` を `gate_passed` と、`gate_ci_failed` を `gate_failed` と同じに読む",
+	}},
+	{"the subsection ### merge してよい順", func(text string) string { return directorSkillSubsection(text, "### merge してよい順") }, []string{
+		"`ci_failed`(`ci` の regate の `gate_ci_failed`)は PR の CI が落ちた記録で、その head は origin にあるので、戻すものはない",
+		"`ci` では `--wait-checks 60m` のように待ちを付けて打つ。regate は `regate.lock` を外して CI を待つ",
+		"どちらの値でも数十分かかることがある",
+		"ralph org regate --branch feat/auth-token --wait-checks 60m > .harness/state/regate-feat-auth-token.out 2>&1",
+		"終了コード 6(`ci` だけ)なら、PR の checks がまだ終わっていないので、何も記録されていない",
+		"`GATE:` の行はなく、`CHECKS: pending (<理由>)` と `NEXT:` の行が出る。断りでも失敗でもないので、しばらくしてから同じ regate を打ち直す",
+		"`ci` の `ci_failed` では、`CHECKS: failed (PR #<番号>)` のあとに落ちた check が並び、push した merge commit は origin に残る",
+		"`ci` では記録の前に push するので、何も記録されていない",
+	}},
+}
+
+// orgSkillOldRegateDuration is the sentence ### merge してよい順 had before
+// [org.gate].regate_checks, which held only while regate ran the scripts.
+const orgSkillOldRegateDuration = "スクリプトは repo のテストの量とマシンの負荷によっては数十分かかるので"
+
+// TestOrgSkill_PinsTheCIRegate pins what the /org skill says about a regate
+// under [org.gate].regate_checks = "ci" (plan
+// docs/plans/active/2026-10-29-regate-ci-checks.md, S7: AC9). A director, a
+// leader, and a human read the verb table, ### gate の記録, and ### merge
+// してよい順 to know that a ci regate pushes before it records, which events
+// it writes, and that its exit 6 is checks to wait for and not a failure, so
+// each copy must have every fragment of orgSkillCIRegateRules where it says,
+// in order, and not orgSkillOldRegateDuration, compared with spaces and line
+// breaks removed (withoutSpaces). scripts/check-skill-sync.sh keeps the
+// copies identical but does not read Go.
+//
+// If this test fails after a deliberate change to a rule, put the rule's new
+// words, short and verbatim, in its fragment in the skill's order; otherwise
+// restore the text in .claude/skills/org/SKILL.md and
+// templates/base/.claude/skills/org/SKILL.md and run scripts/sync-skills.sh
+// for the two .agents copies, as for the first test in this file.
+func TestOrgSkill_PinsTheCIRegate(t *testing.T) {
+	root := directorSkillRepoRoot(t)
+	for _, rel := range orgSkillCopies {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Skipf("%s not found (%v) -- skipping the skill's ci regate check (vendored repo?)", rel, err)
+		}
+		text := string(data)
+		for _, in := range orgSkillCIRegateRules {
+			for _, p := range skillOrderedFragmentProblems(in.section(text), in.name, in.fragments) {
+				t.Errorf("%s: %s -- see this test's doc comment for what to update", rel, p)
+			}
+		}
+		if strings.Contains(withoutSpaces(text), withoutSpaces(orgSkillOldRegateDuration)) {
+			t.Errorf("%s still says %q -- see this test's doc comment for what to update", rel, orgSkillOldRegateDuration)
+		}
+	}
+}

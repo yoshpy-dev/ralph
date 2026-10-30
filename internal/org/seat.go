@@ -99,6 +99,23 @@ const (
 	// count as running.
 	EventGatePassed = "gate_passed"
 	EventGateFailed = "gate_failed"
+	// EventGateCIPassed and EventGateCIFailed are the gate records that
+	// `ralph org regate` writes under [org.gate].regate_checks = "ci" (plan
+	// docs/plans/active/2026-10-29-regate-ci-checks.md, D4): the checks of
+	// the PR of the branch's head on origin, which it pushed or found there,
+	// all passed, or one failed (reason ci_failed). They are org-level,
+	// non-state events like gate_passed and gate_failed, with the same
+	// Details (gateRecord.details) and ` via=regate_ci` before `log=`, whose
+	// log holds the checks it read. Their names differ so that a binary
+	// older than them, which picks the gate records by event name, skips
+	// them: after a revert, an old regate must not read a CI pass as one of
+	// its own and push it again (regateHeadNotOnOrigin). ralph org
+	// merge-order, merge, and regate read them as a pass and a failure
+	// (collectMergeTargets). The watch does not count them as leader
+	// activity (leaderActivityEventCount), and Roster skips them like every
+	// org-level event.
+	EventGateCIPassed = "gate_ci_passed"
+	EventGateCIFailed = "gate_ci_failed"
 	// EventPRMerged is an org-level, non-state event (SeatID empty, absent
 	// from stateEvents below) that only `ralph org merge` writes (Merge,
 	// merge_run.go): gh pr merge merged the PR of a branch ralph org
