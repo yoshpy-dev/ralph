@@ -1,7 +1,7 @@
 # leader-sync-docs
 
 - Status: Approved
-- Approved: 2026-10-30 sha256:ab78e5f0645b
+- Approved: 2026-10-30 sha256:220fa1f3994f
 - Owner: Claude Code
 - Date: 2026-10-30
 - Related request: org: leader が sync-docs を行い、予約外の文書のずれを文書の org にまとめる(https://github.com/yoshpy-dev/ralph/issues/268)
@@ -54,7 +54,7 @@
 ## Design decisions
 
 - D1 sync-docs の位置: 手順 9 の末尾(reviewer のレポートのコミット、fetch と rebase のあと)に段落として置き、番号を振り直さない。org の report と archive(手順 10)の前、手順 12 の gate の前になる。gate の `GATE: fail` と、implementer の手が要る断りは、今までどおり手順 8 の往復と手順 9 に戻るので、やり直しのたびに sync-docs がもう一度走る。手順 10 の先頭には置かない: 今のテスト(`internal/org/prompts_test.go` の 884〜889・923・963・977 行)が、手順 10 の 1 行目に `` `ralph org report`` が続くことを固定している(consult)。番号の振り直しは、雛形とテストの参照を 50 か所以上動かし、#269 もこの雛形を触るので避けた
-- D2 コミットするのは leader: doc-maintainer は文書を直して sync-docs の report を書くだけで、コミットしない。leader は `git status --porcelain` で変わったパスを読む。予約の外のファイルか機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルとステージした新しいファイルは `git restore --source=HEAD --staged --worktree -- <パス>`、未追跡のファイルは消す。doc-maintainer にはステージさせない。self-review L1)、戻したものをすべて follow-up に足す。一部だけを戻すと、写し(skill の写しなど)の片方だけが変わり、`check-skill-sync.sh` のような検査が gate で落ち、implementer も予約の外を直せずに進めなくなるため(codex の計画助言 HIGH)。計画を戻すのは、per-plan では承認の検査が断るため。すべて戻したときは、戻したパスと中身の要点を report の `## 戻した変更` の節と follow-up の節に足す(report が「直した」と書いたまま残らず、控えがファイルに残る。self-review L3)。残った変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の 1 つのコミットにする。手順 9 で reviewer のレポートを leader がコミットするのと同じ形
+- D2 コミットするのは leader: doc-maintainer は文書を直して sync-docs の report を書くだけで、コミットしない。leader は呼ぶ前に `git status --porcelain --untracked-files=all` が何も出さないことを確かめ(出れば手順 9 の最初の段落の分け方で扱い、呼ばない)、終わったら同じコマンドで変わったパスを 1 ファイルずつ読む(既定の出し方では新しいディレクトリが 1 行にまとまり、予約と照らせないため。cross-review cycle 1)。予約の外のファイルか機能の計画が 1 つでも変わっていれば、report のほかの sync-docs の変更をすべて戻し(追跡しているファイルとステージした新しいファイルは `git restore --source=HEAD --staged --worktree -- <パス>`、未追跡のファイルは消す。doc-maintainer にはステージさせない。self-review L1)、戻したものをすべて follow-up に足す。一部だけを戻すと、写し(skill の写しなど)の片方だけが変わり、`check-skill-sync.sh` のような検査が gate で落ち、implementer も予約の外を直せずに進めなくなるため(codex の計画助言 HIGH)。計画を戻すのは、per-plan では承認の検査が断るため。すべて戻したときは、戻したパスと中身の要点を report の `## 戻した変更` の節と follow-up の節に足す(report が「直した」と書いたまま残らず、控えがファイルに残る。self-review L3)。残った変更と report を、決まったメッセージ `docs: sync docs for <機能の slug>` の 1 つのコミットにする。手順 9 で reviewer のレポートを leader がコミットするのと同じ形
 - D2b doc-maintainer に渡す内容: 機能の計画のパス、比べる base(`origin/<既定のブランチ>`)、予約したパス、予約の中のファイルだけを直すこと、repo の検査がそろえる写しの組(skill の写しなど)は組のすべてが予約の中のときだけ直し、1 つでも外なら直さずに follow-up に書くこと、直したあと repo にある写しの検査(`scripts/check-skill-sync.sh`・`scripts/check-sync.sh` があれば)を打ち、落ちる自分の変更を戻して follow-up に回すこと、report を `docs/reports/sync-docs-<日付>-<機能の slug>.md` に書き、予約の外のずれを `## 予約外の文書の follow-up` の節に書くこと、insight event を付けないこと、コミットしないこと、計画を変えないこと、`ralph org` のコマンドを打たないこと(consult)
 - D2c やり直しの sync-docs で凍らせるファイル: ブランチにすでに sync-docs のコミットがあれば(`git log --format='%H %s' origin/<既定のブランチ>..HEAD` の件名を `docs: sync docs for <機能の slug>` と完全一致で比べて引く。`--grep` は利用者の `grep.patternType` で結果が変わり、本文の行にも当たるので使わない。self-review R2-1)、それらのコミットが変えたファイルの和集合(`git show --name-only`)を doc-maintainer に渡し、そのファイルはもう直さず、残るずれは follow-up に書かせる。sync-docs の変更で落ちた `GATE: fail` を、sync-docs が同じ変更を入れ直して繰り返さないため(self-review M1)。直前の 1 回分だけでは、別のファイルとのあいだで往復しうるので和集合にする。一覧は leader の記憶でなく git から引くので、compaction と rebase にも耐える(consult)。LOG を読んで原因を推し量ることはしない
 - D3 follow-up の置き場: doc-maintainer は予約の外のずれを sync-docs の report の `## 予約外の文書の follow-up` の節に書く。直さなかった写しの組は、組の写しを 1 つ 1 行ずつ書く(self-review M2)。report は PR に入るので、leader が RESULT と PR の本文を書くときの元になり、あとから director も読める。RESULT には 1 件 1 行の `DOC_FOLLOWUP: <パス>: <ずれ>`(なければ `DOC_FOLLOWUP: なし`)を書き、2,000 字に収まらなければ件数と PR の本文を指す 1 行にする。PR の本文には `## 予約外の文書の follow-up` の節を置く
@@ -96,7 +96,7 @@
 
 ## Risks and mitigations
 
-- doc-maintainer が予約の外を直す: leader が `git status --porcelain` で確かめ、1 つでもあれば report のほかの変更をすべて戻して follow-up に足す(D2)。予約の中かの読み方は ralph の予約と同じにする
+- doc-maintainer が予約の外を直す: leader が `git status --porcelain --untracked-files=all` で確かめ、1 つでもあれば report のほかの変更をすべて戻して follow-up に足す(D2)。予約の中かの読み方は ralph の予約と同じにする
 - 写しの組の片方だけが予約の中にある(codex の計画助言 HIGH): doc-maintainer はどちらも直さず follow-up に書き、自分で写しの検査を打つ(D2b)。leader の戻し方も一部ではなくすべてなので、片方だけ変わった状態で gate に進まない(AC8)
 - per-plan で sync-docs が計画を書き換え、そのあとの implementer への TASK が承認の検査で断られる: 渡す内容で計画を変えないよう書き、leader が計画の変更を戻す(D2)
 - sync-docs の変更が reviewer のレビューを通らない: issue で決めた順。gate が `run-static-verify.sh` と `check-sync.sh` などを走らせ、落ちたら `GATE: fail` のやり直しに乗る(AC6)
@@ -138,6 +138,10 @@
   - origin/main(0351800d、lane B の #290 org-state-dir-local)を 0dfc49f0 で merge した。重なった 11 ファイルに衝突はなく、check-skill-sync・check-sync・build・vet・`-run 'Skill|RenderRolePrompt'` が通過
   - verify cycle 1(report は ad820f13、HEAD 0dfc49f0): fail。V1(HIGH)`/org` skill の template の写しが meta-repo にしかない `scripts/check-sync.sh` を名指し、`check-template-purity.sh` が落ちる(CI の verify も落ちる。スライスの検証コマンドに purity を入れていなかった)。V2(LOW)`/org` skill の受信箱の文が「PR の URL を `--note` に書いて resolve」のまま。AC1〜AC6・AC8 は met、AC7 は /test 待ち
   - F4 d8e73710(V1・V2): 雛形と `/org` skill の写しの検査を「`scripts/check-skill-sync.sh` など」にし(配布される検査だけを名指す)、雛形全体に `check-sync.sh` が出ないことの否定のテストを足した(`internal/org/prompts/` は purity の対象外だが binary で配られる)。`/org` skill の受信箱の文を `/director` の RESULT の項に合わせた(note は merge-order の PR の列の URL と件数の 1 行、飛ばしたときはそのこと)。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`・`run-static-verify.sh` が通過。機械的な確かめは 5 項目とも clean。consult(進めてよい): この meta-repo では doc-maintainer が `check-sync.sh` を打たないことがあるが、半分だけ変えれば gate で落ちて凍結と follow-up の道に乗る
+  - cross-review cycle 1(triage は da707a0d、HEAD e5f90219): codex の所見 1 件(P2)を ACTION_REQUIRED にした。既定の `git status --porcelain` は新しい未追跡のディレクトリを `?? docs/new/` の 1 行にまとめるので、予約との照らし合わせがファイルごとにできない。`cycle-count.json` を 2 に上げ(上限 2)、直して pipeline を回し直す
+  - F5 4d0f70e4(cross-review #1): sync-docs の段落の `git status` 4 か所を `git status --porcelain --untracked-files=all` にそろえ、未追跡のファイルは一覧に出たものを 1 つずつ消す(ディレクトリごとは消さない。ignore されたファイルを消さないため)。probe: 短い形は `?? docs/` の 1 行で予約の中の新しいファイルを「外」と読む、長い形は 1 行ずつ出す、ignore は出ない、`status.showUntrackedFiles=no` では短い形が何も出さない。新しいテストは雛形のコマンドを使い捨ての repo で走らせる。検証: purity・check-skill-sync・check-sync・gofmt・vet・`-run 'Skill|RenderRolePrompt'`・`git diff --check`・`run-static-verify.sh` が通過。機械的な確かめは 5 項目とも clean
+  - F5b aec1381f(consult の勧め): doc-maintainer を呼ぶ前に `git status --porcelain --untracked-files=all` が何も出さないことを確かめ、出れば手順 9 の最初の段落と同じく振り分けて呼ばない、の 2 文を雛形と `/org` skill に足した(手順 9 の最初の確かめは短い形で、`status.showUntrackedFiles=no` では他人の未追跡ファイルが見えないため。最初の段落は `prompts_test.go` が固定するので変えない)。検証は F5 と同じ一式が通過。機械的な確かめは 5 項目とも clean。範囲外: `skill_doc_followup_test.go` の 1 つのテストのコメントに F5 の前の書き方が残る(cycle 2 の直しで扱う)
+  - 計画の D2 と Risks の `git status --porcelain` を、呼ぶ前の空の確かめと `--untracked-files=all` に書き換え、digest を取り直して承認を付け直した(ab78e5f0645b → 220fa1f3994f、自動承認。図解は `git status --porcelain` のノードがあるが、意味は同じなので変えない)
   - 2026-10-30: 計画の Progress を書く途中でディスクが満杯(Data ボリュームの空き 944MiB、ENOSPC)になった。Go の build cache(38G)のうち 24 時間使われていない項目(26.4GB)を消し、空きは 30GiB に戻った。ほかのセッションの一時ファイル(stoic-app の 22G)には触れていない
 - [ ] Review artifact created
 - [ ] Verification artifact created
