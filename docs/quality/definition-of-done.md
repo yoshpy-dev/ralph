@@ -31,7 +31,7 @@ The full pipeline must run in this order — no steps may be skipped:
 
 If `/cross-review` finds ACTION_REQUIRED issues and the user chooses to fix them, the **full pipeline** re-runs from `/self-review` through `/cross-review` again. `/sync-docs` must not be skipped in the re-run. The one exception is a fix confined to this task's own pipeline records (report wording, insight event values) that changes no verdict line: it skips the re-run, is recorded in the cross-review triage report and the PR body, and does not raise the cycle count. The three conditions and the checks are in `.claude/rules/ralph/post-implementation-pipeline.md` ("Exception: fixes confined to this task's pipeline records").
 
-The pipeline is capped at **2 total runs by default** (initial + 1 re-run), controlled by `RALPH_STANDARD_MAX_PIPELINE_CYCLES` (default `2`). See `.claude/rules/ralph/post-implementation-pipeline.md` for cap semantics and state files.
+The pipeline is capped at **2 total runs by default** (initial + 1 re-run), set by `[standard].max_pipeline_cycles` in `ralph.toml` (default `2`; `ralph.local.toml` changes it on one machine only). To raise the cap of one task, `/cross-review` writes a `cap` into that task's `.harness/state/standard-pipeline/cycle-count.json` when it reaches the cap, and the cap is the larger of the two. See `.claude/rules/ralph/post-implementation-pipeline.md` for cap semantics and state files.
 
 Phase boundaries are part of the definition of done. A passing pipeline that
 runs tests during `/verify`, static analysis during `/test`, or broad

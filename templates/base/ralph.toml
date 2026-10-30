@@ -37,8 +37,11 @@ cross_review = false
 # max_pipeline_cycles caps the runs of one task's pipeline after /implement,
 # the first run included: the default 2 is the first run and one re-run
 # after a fix (it must be >= 1). Once a task reaches it, /cross-review
-# drops its fix-and-re-run option and asks how to go on. /cross-review
-# reads it with `ralph config get standard.max_pipeline_cycles` and uses
+# drops its fix-and-re-run option and asks how to go on. To raise the cap
+# of that task only, /cross-review writes a cap into the task's
+# .harness/state/standard-pipeline/cycle-count.json, and the cap in effect
+# is the larger of max_pipeline_cycles and that cap. /cross-review reads
+# this key with `ralph config get standard.max_pipeline_cycles` and uses
 # the built-in default when that fails: silently when ralph is not on PATH
 # or has no `config get`, with a line on stderr otherwise. It is a comment
 # so that it keeps the built-in default, which a later release may change;
