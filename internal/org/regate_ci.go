@@ -58,8 +58,10 @@ type regateCI struct {
 // (findOriginPR), is a PR of that repository, OPEN, and merges into the
 // default branch. It returns what they found, or the refusal of the first that
 // fails, worded with w, which says that nothing was merged, pushed, or
-// recorded and names one next step; control characters from gh in it are
-// escaped (PrintableInboxText). The error is for ctx done.
+// recorded and names one next step, with the worktree and the branches in its
+// command as one shell word each (cleanupGitCmd, cleanupShellWord); control
+// characters from gh in it are escaped (PrintableInboxText). The error is for
+// ctx done.
 func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateWording) (*regateCI, string, error) {
 	ci := &regateCI{run: p.Exec, timeout: p.GHTimeout}
 	if ci.run == nil {
@@ -86,13 +88,15 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 			mergeGuaranteeGetURL, t.root, ci.timeout, regateCIDone, w.again)
 	case MergeOriginGetURLFailed:
 		return refuse("%s in %s failed (%s), so origin's repository, whose PR checks a regate with "+
-			"[org.gate].regate_checks = \"ci\" reads, is unknown and %s: add origin (git -C %s remote add origin <URL>) and %s",
-			mergeGuaranteeGetURL, t.root, mergeGuaranteeErrText(err), regateCIDone, t.root, w.again)
+			"[org.gate].regate_checks = \"ci\" reads, is unknown and %s: add origin (%s <URL>) and %s",
+			mergeGuaranteeGetURL, t.root, mergeGuaranteeErrText(err), regateCIDone, cleanupGitCmd(t.root, "remote", "add", "origin"),
+			w.again)
 	case MergeOriginNoRepository:
 		return refuse("origin's URL in %s names no host and owner/repo (a local path, file://, or a scheme other than https, "+
 			"http, ssh and git), so there is no GitHub repository whose PR checks a regate with [org.gate].regate_checks = "+
-			"\"ci\" could read, and %s: point origin at the GitHub repository (git -C %s remote set-url origin <URL>), or set "+
-			"[org.gate].regate_checks = \"local\" to run the gate scripts here, and %s", t.root, regateCIDone, t.root, w.again)
+			"\"ci\" could read, and %s: point origin at the GitHub repository (%s <URL>), or set [org.gate].regate_checks = "+
+			"\"local\" to run the gate scripts here, and %s", t.root, regateCIDone, cleanupGitCmd(t.root, "remote", "set-url", "origin"),
+			w.again)
 	}
 	if _, err := lookPath("gh"); err != nil {
 		return refuse("%s", regateCIGHMissing(origin, err, regateCIDone, w))
@@ -112,10 +116,11 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 		return refuse("%s found no PR of the branch %s in origin's repository %s, whose checks a regate with "+
 			"[org.gate].regate_checks = \"ci\" reads, so %s: push the branch and open its PR into %s (gh pr create --head %s "+
 			"--base %s -R %s), and once CI ran on it, %s", f.cmd, t.branch, origin.Arg(), regateCIDone, t.base.branch,
-			t.branch, t.base.branch, origin.Arg(), w.again)
+			cleanupShellWord(t.branch), cleanupShellWord(t.base.branch), origin.Arg(), w.again)
 	case originPRForeign:
 		return refuse("%s returned PR #%d with the url %s, which is not a PR of origin's repository %s, so %s: check origin "+
-			"(git -C %s remote get-url origin) and %s", f.cmd, f.pr.Number, f.pr.URL, origin.Arg(), regateCIDone, t.root, w.again)
+			"(%s) and %s", f.cmd, f.pr.Number, f.pr.URL, origin.Arg(), regateCIDone, cleanupGitCmd(t.root, "remote", "get-url", "origin"),
+			w.again)
 	case originPRNotOpen:
 		return refuse("PR #%d of the branch %s is %s, not OPEN, so its checks are not those of a PR to merge, and %s: when "+
 			"it was merged, there is nothing to regate; when it was closed, reopen it (gh pr reopen %d -R %s) or open another "+
@@ -123,7 +128,7 @@ func regateCIPreCheck(ctx context.Context, p RegateParams, t gateTarget, w gateW
 	case originPRWrongBase:
 		return refuse("PR #%d of the branch %s merges into %s, not origin's default branch %s, so %s: change its base (gh pr "+
 			"edit %d --base %s -R %s) and %s", f.pr.Number, t.branch, f.pr.BaseRefName, t.base.branch, regateCIDone,
-			f.pr.Number, t.base.branch, origin.Arg(), w.again)
+			f.pr.Number, cleanupShellWord(t.base.branch), origin.Arg(), w.again)
 	}
 	ci.origin, ci.pr = origin, *f.pr
 	return ci, "", nil
@@ -289,8 +294,7 @@ func regateCIPush(ctx context.Context, t gateTarget, env []string, stderr io.Wri
 	case unread == "" && tip == res.PreMergeHead:
 		res = regateUndoMerge(ctx, t, env, stderr, res)
 		res.Refused = w.prefix + fmt.Sprintf("%s, and origin's %s is still %s, the tip the merge commit was made on, so the push did "+
-			"not land and nothing was recorded: fix it and %s%s; %s", failed, t.branch, tip, w.again, said,
-			regateUndoneText(res))
+			"not land and nothing was recorded: fix it and %s; %s%s", failed, t.branch, tip, w.again, regateUndoneText(res), said)
 		return res, nil
 	case unread == "" && tip == t.head:
 		return regateCILanded(ctx, t, before, res)
@@ -321,8 +325,16 @@ func regateCILanded(ctx context.Context, t gateTarget, before string, res Regate
 // regateCICheckOrigin is the next step after a ci regate's push whose landing
 // cannot be told: check origin and t's HEAD, then run Regate again.
 func regateCICheckOrigin(t gateTarget, w gateWording) string {
-	return fmt.Sprintf("check origin and HEAD (git -C %s fetch origin, then git -C %s log --oneline --graph HEAD "+
-		"refs/remotes/origin/%s) and %s", t.root, t.root, t.branch, w.again)
+	return fmt.Sprintf("check origin and HEAD (%s) and %s", regateCIOriginLog(t), w.again)
+}
+
+// regateCIOriginLog is the commands a ci regate's refusal names to compare
+// t's HEAD with origin's tip of the branch: a fetch, then a git log of both,
+// with the worktree and the ref as one shell word each (cleanupGitCmd), so
+// they run as written whatever the path and the branch name hold.
+func regateCIOriginLog(t gateTarget) string {
+	return cleanupGitCmd(t.root, "fetch", "origin") + ", then " +
+		cleanupGitCmd(t.root, "log", "--oneline", "--graph", "HEAD", "refs/remotes/origin/"+t.branch)
 }
 
 // regateChecksRead is what readRegateChecks found of a ci regate's PR, one of

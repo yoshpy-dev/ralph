@@ -288,6 +288,97 @@ func TestRegateCI_ChecksOriginGHAndThePRBeforeEveryPath(t *testing.T) {
 	}
 }
 
+// TestRegateCI_CommandsQuoteTheWorktreeAndTheBranch covers self-review L8:
+// the commands a ci regate's texts name hold the worktree's path and the
+// branches as one shell word each, so a path with a space, a $, and a ; and
+// branch names git accepts with a $ and a ; are not split or expanded by a
+// shell. The pre-checks' refusals are read from regateCIPreCheck with mxExec
+// answering; the commands to check origin after a push (regateCICheckOrigin),
+// to check origin after a ci pass whose head origin moved off
+// (regateCIPassMovedText), and to fast-forward after a ci pass whose head
+// origin has commits on top of (self-review L1, through
+// regateHeadNotOnOrigin) are run with sh -c as written, in a repository at
+// that path whose origin has the branch one commit past HEAD.
+func TestRegateCI_CommandsQuoteTheWorktreeAndTheBranch(t *testing.T) {
+	isolateGitEnv(t)
+	tmp := resolved(t, t.TempDir())
+	const branch, base = "feat/a$HOME;b", "rel$x"
+	origin, root := filepath.Join(tmp, "origin.git"), filepath.Join(tmp, "wt $HOME; x")
+	runGit(t, "init", "--quiet", "--bare", "-b", base, origin)
+	runGit(t, "init", "--quiet", "-b", branch, root)
+	gateCommit(t, root, "first")
+	head := gitOut(t, root, "rev-parse", "HEAD")
+	gateCommit(t, root, "on top")
+	onTop := gitOut(t, root, "rev-parse", "HEAD")
+	runGit(t, "-C", root, "remote", "add", "origin", origin)
+	runGit(t, "-C", root, "push", "--quiet", "origin", "HEAD:refs/heads/"+branch)
+	runGit(t, "-C", root, "reset", "--quiet", "--hard", head)
+	tgt := gateTarget{root: root, branch: branch, head: head, base: gateBase{branch: base, ref: "refs/remotes/origin/" + base, sha: head}}
+	w := regateWords(branch)
+
+	// Written by hand, not with cleanupShellWord: the path has no '.
+	inRoot := "git -C '" + root + "' "
+	ref := "'refs/remotes/origin/" + branch + "'"
+	checkOrigin := inRoot + "fetch origin, then " + inRoot + "log --oneline --graph HEAD " + ref
+	fastForward := inRoot + "fetch origin, then " + inRoot + "merge --ff-only " + ref
+	sh := func(t *testing.T, cmd string) {
+		t.Helper()
+		c := exec.Command("sh", "-c", cmd)
+		c.Dir = tmp
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("sh -c %q: %v\n%s", cmd, err, out)
+		}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		setup func(e *mxExec)
+		want  string
+	}{
+		{"origin's URL cannot be read", func(e *mxExec) { e.originErr = errors.New("exit status 2") },
+			"add origin (" + inRoot + "remote add origin <URL>)"},
+		{"origin is a local path", func(e *mxExec) { e.origin = origin + "\n" },
+			"point origin at the GitHub repository (" + inRoot + "remote set-url origin <URL>)"},
+		{"no PR", func(e *mxExec) { e.replies[mxPRList] = mgReply{out: "[]"} },
+			"(gh pr create --head 'feat/a$HOME;b' --base 'rel$x' -R " + mxRepoArg + ")"},
+		{"a PR of another repository", func(e *mxExec) {
+			e.replies[mxPRList] = mgReply{out: rcPRList("https://github.com/x/y/pull/7", head, "OPEN", base)}
+		}, "check origin (" + inRoot + "remote get-url origin)"},
+		{"a PR into another branch", func(e *mxExec) { e.replies[mxPRList] = mgReply{out: rcPRList(rcPRURL, head, "OPEN", "main")} },
+			"(gh pr edit 7 --base 'rel$x' -R " + mxRepoArg + ")"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &mxExec{origin: moOriginURL + "\n", replies: map[string]mgReply{}}
+			tc.setup(e)
+			p := RegateParams{Exec: e.run, LookPath: mgFound, GHTimeout: time.Second}
+			ci, refused, err := regateCIPreCheck(context.Background(), p, tgt, w)
+			if err != nil || ci != nil || !strings.Contains(refused, tc.want) {
+				t.Fatalf("regateCIPreCheck = %v, %q, %v; want a refusal with %q", ci, refused, err, tc.want)
+			}
+		})
+	}
+	sh(t, inRoot+"remote get-url origin")
+
+	if got := regateCICheckOrigin(tgt, w); !strings.Contains(got, "("+checkOrigin+")") {
+		t.Errorf("regateCICheckOrigin = %q; want it to name %q", got, checkOrigin)
+	}
+	if got := regateCIPassMovedText(tgt, onTop, w); !strings.Contains(got, "("+checkOrigin+")") {
+		t.Errorf("regateCIPassMovedText = %q; want it to name %q", got, checkOrigin)
+	}
+	b := regateBranch{gate: &mergeGateRecord{readable: true, record: gateRecord{Head: head, Base: head, BaseRef: tgt.base.ref,
+		Via: gateViaRegateCI}}}
+	res, err := regateHeadNotOnOrigin(context.Background(), b, tgt, onTop, nil, w, RegateResult{})
+	if err != nil || !strings.Contains(res.Refused, "("+fastForward+")") {
+		t.Fatalf("regateHeadNotOnOrigin = %+v, %v; want a refusal that names %q", res, err, fastForward)
+	}
+	for cmd := range strings.SplitSeq(checkOrigin+", then "+fastForward, ", then ") {
+		sh(t, cmd)
+	}
+	if got := gitOut(t, root, "rev-parse", "HEAD"); got != onTop {
+		t.Fatalf("HEAD = %s after the fast-forward the refusal names; want origin's tip %s", got, onTop)
+	}
+}
+
 // TestRegateCI_GateOnlyRecordsFromThePRsChecks covers AC2 and AC4 of the
 // plan on the gate-only path (D4, D6): with HEAD origin's tip of feat/auth,
 // containing origin's main, and no pass of it as the latest record, a ci
@@ -858,10 +949,11 @@ func TestRegateCI_AFailedPushIsDecidedByOriginsTipReadBack(t *testing.T) {
 			var prefix, suffix string
 			switch tc.outcome {
 			case undone:
+				// Self-review L2: the undo is ralph's sentence, before what
+				// git said, not a line of git's indented output.
 				want.Undone = true
 				prefix = failed + "origin's feat/auth is still " + pre + ", the tip the merge commit was made on, so the push did not land " +
-					"and nothing was recorded: fix it and " + rcAgain
-				suffix = "; " + regateUndoneTextFor(merge, pre)
+					"and nothing was recorded: fix it and " + rcAgain + "; " + regateUndoneTextFor(merge, pre)
 			case kept:
 				prefix = failed + read + ", so whether origin has " + merge + " cannot be told, and nothing was recorded: HEAD, the merge " +
 					"commit, is kept; " + fx.rcCheckOrigin()
@@ -875,6 +967,10 @@ func TestRegateCI_AFailedPushIsDecidedByOriginsTipReadBack(t *testing.T) {
 			}
 			if !strings.HasPrefix(res.Refused, prefix) || !strings.HasSuffix(res.Refused, suffix) {
 				t.Errorf("refusal = %q\nwant it to start with %q and end with %q", res.Refused, prefix, suffix)
+			}
+			if rest := strings.TrimPrefix(res.Refused, prefix); tc.outcome == undone && rest != "" &&
+				(!strings.HasPrefix(rest, "; git said:\n  ") || strings.Contains(rest, "undone")) {
+				t.Errorf("refusal = %q\nwant only what git said after %q", res.Refused, prefix)
 			}
 			if tc.outcome != landed && !tc.signal && (!strings.Contains(res.Refused, "; git said:\n  ") ||
 				!strings.Contains(res.Refused, "pushes are closed")) {

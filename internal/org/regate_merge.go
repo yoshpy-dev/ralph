@@ -74,14 +74,23 @@ func regateMergeEnv(env []string) []string {
 // head may have failed. A pass Regate wrote from the PR's checks
 // (via=regate_ci) is never retried: it is written only once its head is on
 // origin, so origin's tip of the branch not being HEAD means someone moved
-// origin's branch since, and pushing HEAD would undo that; Regate refuses
-// with regateCIPassMovedText (plan
+// origin's branch since. When that tip has HEAD under it (commits pushed on
+// top from elsewhere), Regate refuses with regateCIPassBehindText, which asks
+// to bring the worktree up to date; otherwise pushing HEAD would undo the
+// move, and it refuses with regateCIPassMovedText (plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md, D7, AC10). Otherwise it
 // refuses with regateCheckOriginHead's reason and regateResetHint's.
 func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, originHead string, env []string, w gateWording,
 	res RegateResult) (RegateResult, error) {
 	if b.passedOn(t) {
 		if b.gate.record.Via == gateViaRegateCI {
+			behind, err := regateIsAncestor(ctx, t.root, t.head, originHead)
+			switch {
+			case err != nil:
+				return RegateResult{}, regateInterrupted(ctx, err, "")
+			case behind:
+				return RegateResult{Refused: regateCIPassBehindText(t, originHead, w)}, nil
+			}
 			return RegateResult{Refused: regateCIPassMovedText(t, originHead, w)}, nil
 		}
 		var retry bool
@@ -112,15 +121,31 @@ func regateHeadNotOnOrigin(ctx context.Context, b regateBranch, t gateTarget, or
 
 // regateCIPassMovedText is the refusal of t's HEAD, the head of a pass Regate
 // wrote from the PR's checks (via=regate_ci), when originHead, origin's tip of
-// the branch after the fetch, is not HEAD: that pass is written only once
-// HEAD is on origin, so someone moved origin's branch since, and Regate does
-// not push HEAD back over that (regateHeadNotOnOrigin).
+// the branch after the fetch, is neither HEAD nor a descendant of it: that
+// pass is written only once HEAD is on origin, so someone moved origin's
+// branch since, and Regate does not push HEAD back over that
+// (regateHeadNotOnOrigin). Its commands quote the worktree and the branch
+// (regateCIOriginLog).
 func regateCIPassMovedText(t gateTarget, originHead string, w gateWording) string {
 	return w.prefix + fmt.Sprintf("the latest gate record of %s is a pass of the PR's checks (via=regate_ci) of HEAD %s in %s, "+
 		"recorded after its push reached origin, but origin's tip of the branch is now %s: someone moved origin's branch since "+
-		"(with a force push, for one), and pushing HEAD again would undo that; check origin (git -C %s fetch origin, then git -C %s "+
-		"log --oneline --graph HEAD refs/remotes/origin/%s) and %s once HEAD and origin's tip agree", t.branch, t.head, t.root,
-		originHead, t.root, t.root, t.branch, w.again)
+		"(with a force push, for one), and pushing HEAD again would undo that; check origin (%s) and %s once HEAD and origin's "+
+		"tip agree", t.branch, t.head, t.root, originHead, regateCIOriginLog(t), w.again)
+}
+
+// regateCIPassBehindText is the refusal of t's HEAD, the head of a pass Regate
+// wrote from the PR's checks (via=regate_ci), when originHead, origin's tip of
+// the branch after the fetch, is a descendant of HEAD: someone pushed commits
+// on top of HEAD from elsewhere, so nothing is to be pushed and nothing of
+// theirs would be undone. The next step is to bring the worktree up to date
+// with a fast-forward and run Regate again, which then regates that tip. Its
+// commands quote the worktree and the ref (cleanupGitCmd).
+func regateCIPassBehindText(t gateTarget, originHead string, w gateWording) string {
+	return w.prefix + fmt.Sprintf("the latest gate record of %s is a pass of the PR's checks (via=regate_ci) of HEAD %s in %s, "+
+		"but origin's tip of the branch is now %s, which has commits on top of HEAD (they were pushed from elsewhere): bring the "+
+		"worktree up to date (%s, then %s) and %s, which then regates origin's tip", t.branch, t.head, t.root, originHead,
+		cleanupGitCmd(t.root, "fetch", "origin"), cleanupGitCmd(t.root, "merge", "--ff-only", "refs/remotes/origin/"+t.branch),
+		w.again)
 }
 
 // regateResetHint is what the refusal of a HEAD that is not originHead adds

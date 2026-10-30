@@ -1486,27 +1486,52 @@ func TestRegate_AnUnreadableLatestRecordGivesNoPushOnlyAndNoReset(t *testing.T) 
 // TestRegate_ACIPassIsNotPushedAgainOnceOriginMovedOff covers AC10 of plan
 // docs/plans/active/2026-10-29-regate-ci-checks.md (D7): a gate_ci_passed of
 // HEAD on origin's main is written only once HEAD is on origin, so when
-// origin's feat/auth was put back under HEAD (a force push to its parent) or
-// moved to another commit, running Regate again is no push-only retry. It
-// refuses with the reason that someone moved origin's branch and the commands
-// to check origin, pushes nothing (origin's feat/auth stays where it was put),
-// runs and records nothing, and names no git reset --keep.
+// origin's feat/auth was put back under HEAD (a force push to its parent),
+// moved to another commit, or got commits on top of HEAD, running Regate
+// again is no push-only retry. It pushes nothing (origin's feat/auth stays
+// where it was put), runs and records nothing, and names no git reset --keep.
+// For the first two it refuses with the reason that someone moved origin's
+// branch and the commands to check origin. For commits on top (self-review
+// L1), where a push would undo nothing, it says neither force push nor undo
+// and names the fast-forward of the worktree, after which Regate gates
+// origin's tip.
 func TestRegate_ACIPassIsNotPushedAgainOnceOriginMovedOff(t *testing.T) {
+	commitOnOrigin := func(t *testing.T, fx *regateFixture, parent, tree, msg string) string {
+		c := gitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", parent, "-m", msg, tree)
+		runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", c)
+		return c
+	}
+	movedText := func(fx *regateFixture, head, moved string) string {
+		return "org: regate: the latest gate record of feat/auth is a pass of the PR's checks (via=regate_ci) of HEAD " + head + " in " +
+			fx.worktree + ", recorded after its push reached origin, but origin's tip of the branch is now " + moved + ": someone moved " +
+			"origin's branch since (with a force push, for one), and pushing HEAD again would undo that; check origin (git -C " +
+			fx.worktree + " fetch origin, then git -C " + fx.worktree + " log --oneline --graph HEAD refs/remotes/origin/feat/auth) and " +
+			"run ralph org regate --branch feat/auth again once HEAD and origin's tip agree"
+	}
 	for _, tc := range []struct {
-		name string
-		move func(t *testing.T, fx *regateFixture, head string) string // origin's feat/auth after the move
+		name    string
+		move    func(t *testing.T, fx *regateFixture, head string) string // origin's feat/auth after the move
+		want    func(fx *regateFixture, head, moved string) string
+		notWant []string
+		onTop   bool // origin's feat/auth has HEAD under it
 	}{
 		{"put back under HEAD", func(t *testing.T, fx *regateFixture, head string) string {
 			parent := gitOut(t, fx.worktree, "rev-parse", head+"^")
 			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", parent)
 			return parent
-		}},
+		}, movedText, []string{"reset --keep"}, false},
 		{"moved to another commit", func(t *testing.T, fx *regateFixture, head string) string {
-			other := gitOut(t, fx.origin, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit-tree", "-p", head+"^", "-m",
-				"another", head+"^{tree}")
-			runGit(t, "-C", fx.origin, "update-ref", "refs/heads/feat/auth", other)
-			return other
-		}},
+			return commitOnOrigin(t, fx, head+"^", head+"^{tree}", "another")
+		}, movedText, []string{"reset --keep"}, false},
+		{"commits on top of HEAD", func(t *testing.T, fx *regateFixture, head string) string {
+			return commitOnOrigin(t, fx, head, head+"^{tree}", "on top")
+		}, func(fx *regateFixture, head, moved string) string {
+			return "org: regate: the latest gate record of feat/auth is a pass of the PR's checks (via=regate_ci) of HEAD " + head +
+				" in " + fx.worktree + ", but origin's tip of the branch is now " + moved + ", which has commits on top of HEAD (they " +
+				"were pushed from elsewhere): bring the worktree up to date (git -C " + fx.worktree + " fetch origin, then git -C " +
+				fx.worktree + " merge --ff-only refs/remotes/origin/feat/auth) and run ralph org regate --branch feat/auth again, which " +
+				"then regates origin's tip"
+		}, []string{"reset --keep", "force", "undo", "someone moved"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fx := newRegateFixture(t)
@@ -1515,14 +1540,18 @@ func TestRegate_ACIPassIsNotPushedAgainOnceOriginMovedOff(t *testing.T) {
 			moved := tc.move(t, fx, head)
 			before := fx.snapshot(t)
 			res, err := fx.regate(context.Background())
-			fx.assertRefused(t, res, err, before, []string{"org: regate: the latest gate record of feat/auth is a pass of the PR's " +
-				"checks (via=regate_ci) of HEAD " + head + " in " + fx.worktree + ", recorded after its push reached origin, but " +
-				"origin's tip of the branch is now " + moved + ": someone moved origin's branch since (with a force push, for one), " +
-				"and pushing HEAD again would undo that; check origin (git -C " + fx.worktree + " fetch origin, then git -C " +
-				fx.worktree + " log --oneline --graph HEAD refs/remotes/origin/feat/auth) and run ralph org regate --branch " +
-				"feat/auth again once HEAD and origin's tip agree"}, []string{"reset --keep"})
+			fx.assertRefused(t, res, err, before, []string{tc.want(fx, head, moved)}, tc.notWant)
 			if got := fx.originBranch(t); got != moved {
 				t.Fatalf("origin's feat/auth = %s; want it left at %s", got, moved)
+			}
+			if !tc.onTop {
+				return
+			}
+			runGit(t, "-C", fx.worktree, "fetch", "--quiet", "origin")
+			runGit(t, "-C", fx.worktree, "merge", "--quiet", "--ff-only", "refs/remotes/origin/feat/auth")
+			res, err = fx.regate(context.Background())
+			if err != nil || res.Refused != "" || res.Outcome != RegateOutcomeGated || !res.Passed || res.Head != moved {
+				t.Fatalf("regate after the fast-forward = %+v, %v; want a gated pass of origin's tip %s", res, err, moved)
 			}
 		})
 	}

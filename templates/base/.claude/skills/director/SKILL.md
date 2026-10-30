@@ -973,12 +973,13 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
   open な PR があることを確かめ、どれかが欠ければ何もせずに断る
   (終了コード 1)。
 
-1. 1 本ずつ打つ。regate は台帳ごとに 1 つしか走らない。どちらの値でも
-   数十分かかることがある。`local` では gate のスクリプトが走り、repo の
-   テストの量とマシンの負荷で長さが変わる。`ci` では PR の CI が終わるのを
-   待つ。`ci` なら `--wait-checks 60m` を付けて打つ。regate は `regate.lock`
-   を外して 30 秒ごとに checks を読み直し、最大 60 分待つ。`local` では
-   `--wait-checks` を付けない(0 より大きい値は断られる)。
+1. 1 本ずつ打つ。`ci` の regate が checks を待つ間を除いて、regate は
+   台帳ごとに 1 つしか走らない。どちらの値でも数十分かかることがある。
+   `local` では gate のスクリプトが走り、repo のテストの量とマシンの負荷で
+   長さが変わる。`ci` では PR の CI が終わるのを待つ。`ci` なら
+   `--wait-checks 60m` を付けて打つ。regate は `regate.lock` を外して 30 秒
+   ごとに checks を読み直し、最大 60 分待つ。`local` では `--wait-checks` を
+   付けない(0 より大きい値は断られる)。
    Claude Code では Bash の `run_in_background` で走らせ、stdout と stderr
    を cwd の `.harness/state/regate-<名前>.out` に書き、終わってから
    終了コードと `GATE:`・`CHECKS:`・`HEAD:`・`PUSHED:`・`NEXT:` の行を読む。

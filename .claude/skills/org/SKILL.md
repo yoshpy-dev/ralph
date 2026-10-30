@@ -1352,7 +1352,8 @@ ralph org merge-order --all --json
   1. 先頭の `ready` を `ralph org merge --branch <ブランチ>` で 1 本 merge
      したら、merge-order を打ち直す。ほかの `ready` は `rebase` になる。
   2. 理由の欄が `ralph org regate --branch <ブランチ>` を名指すブランチに、
-     1 本ずつ regate を打つ(台帳ごとに 1 つしか走らない)。regate は機能の
+     1 本ずつ regate を打つ(`ci` の regate が checks を待つ間を除いて、
+     台帳ごとに 1 つしか走らない)。regate は機能の
      worktree(`.claude/worktrees/org-<org_id>`)で origin の既定のブランチを
      merge commit で取り込み、gate のスクリプトを走らせて記録し、force なしで
      push する。rebase も force push もしないので、PR の差分は変わらない
@@ -1408,9 +1409,12 @@ ralph org merge-order --all --json
   立て直して走っているときは、理由の欄と regate の断りがそう言うので、その
   org の disband のあとに打つ。逆に regate が走っている間は、その org_id の
   `ralph org spawn`(`--dry-run` を除く)と `ralph org start` が断られるので、regate が
-  終わってから打ち直す。`ralph org merge` も同じ台帳のロック(`regate.lock`)を
-  持つので、merge の間は regate が、regate の間は merge が断られる
-  (`--wait-checks` で待つ間は、merge はロックを外している)。merge
+  終わってから打ち直す。ただし、`ci` の regate が `--wait-checks` で checks を
+  待つ間はロックを外しているので、spawn と start は regate を理由には断られず、
+  待ちのあとにその org が走っていれば regate のほうが断る。`ralph org merge` も
+  同じ台帳のロック(`regate.lock`)を持つので、merge の間は regate が、regate の
+  間は merge が断られる(`--wait-checks` で待つ間は、merge も `ci` の regate も
+  ロックを外している)。merge
   そのものは worktree を変えないので、merge の間は spawn と start は
   断られない。merge が記録のあとに機能の worktree を片付ける間と、同じ
   ロックを持つ `ralph org cleanup` が片付ける間は、片付ける org の spawn と

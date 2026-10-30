@@ -183,7 +183,9 @@ func newOrgRegateCmd(stateDir, configPath *string) *cobra.Command {
 			"failed, an interrupt, and any other error. regate\n" +
 			"starts no autonomous work, so it needs no running watch and no approved\n" +
 			"plan. While it runs, ralph org spawn (not a --dry-run) and ralph org\n" +
-			"start (either form) of the org it works on are refused; other orgs are\n" +
+			"start (either form) of the org it works on are refused, except while a\n" +
+			"ci regate waits for the checks with regate.lock released (when it takes\n" +
+			"the lock again and finds that org running, it refuses); other orgs are\n" +
 			"not affected.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

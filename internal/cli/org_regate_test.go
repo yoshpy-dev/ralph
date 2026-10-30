@@ -804,7 +804,10 @@ func TestOrgRegate_Help(t *testing.T) {
 				"hangup of the terminal does not reach either, and regate says on stderr that it waits for one (at most 120 s)",
 			"When git has no user.name and user.email to make the merge commit with, regate merges nothing, records nothing, and exits 1",
 			"it needs no running watch and no approved plan",
-			"While it runs, ralph org spawn (not a --dry-run) and ralph org start (either form) of the org it works on are refused",
+			// Self-review L6: the ci wait releases regate.lock.
+			"While it runs, ralph org spawn (not a --dry-run) and ralph org start (either form) of the org it works on are refused, " +
+				"except while a ci regate waits for the checks with regate.lock released (when it takes the lock again and finds that " +
+				"org running, it refuses); other orgs are not affected.",
 			"--branch string",
 			// Plan 2026-10-29-regate-ci-checks, S6: [org.gate].regate_checks.
 			"All of the above is [org.gate].regate_checks = \"local\", the default.",
