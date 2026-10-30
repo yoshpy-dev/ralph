@@ -416,8 +416,8 @@ reviewer = ["opus"]
 // TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault verifies that an
 // explicit `agmsg_home = ""` in the source document falls back to the
 // default rather than being treated as a validation error -- AgmsgHome
-// follows PipelineConfig's zero-value backfill pattern, not the strict
-// "[org] fields must be explicitly valid" pattern used by max_seats etc.
+// follows the zero-value backfill pattern of the string defaults, not the
+// strict "[org] fields must be explicitly valid" pattern used by max_seats etc.
 func TestLoad_OrgAgmsgHomeExplicitEmptyBackfillsDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ralph.toml")

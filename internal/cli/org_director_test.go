@@ -1117,6 +1117,9 @@ func TestOrgDirectorHelp_DescribesTheRegistration(t *testing.T) {
 		{[]string{"--help"}, []string{
 			"`ralph org director` registers the interactive session the human talks to as the director of the ledger, or launches a headless director in herdr (ralph org director start)",
 			"approve, the director verbs, and the inbox verbs, which refuse it",
+			// Plan 2026-10-30-standard-flow-config, S9: start --plan reads
+			// [reviewer] from the same ralph.toml as the approval mode.
+			"start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach",
 			"escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), " +
 				"director status reads it and [org.director].auto_merge, merge reads auto_merge, " +
 				"director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, " +

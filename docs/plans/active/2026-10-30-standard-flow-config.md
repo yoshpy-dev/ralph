@@ -505,6 +505,7 @@
     - org skill の 712〜713 行あたり(4 つの写し)の reviewer の読む元(S9 で承認方式と同じ規則になった)
     - 古い `PipelineConfig` の参照(`config.go:883`・`:935`、`config_test.go:419`)
     - verify の I3 を Rollout の記録か PR 本文に書く
+  - /sync-docs(cycle 1、doc-maintainer): `docs/reports/sync-docs-2026-10-30-standard-flow-config.md`。上の 5 項目はすべて直した(README の `config get` の行、org skill の 4 つの写し、`--config` の usage とテストの pin、`PipelineConfig` のコメント 3 か所、tech-debt の 161 行)。tech-debt は、Trigger に当たった 7 行に持ち越しの注、新しい 3 行(800 行を超えた 2 ファイル、`ralph org start --plan` の 2 回読み、test gaps 3 つ)。README の `ralph.local.toml` の節に、標準フローの値と撤去した 4 つの変数の段落を足した。コードの変更はコメントと help の文字列と pin の 1 行だけ。plan 本文は触れておらず、digest は d8e03ef62de9 のまま。
 - [ ] Review artifact created
 - [ ] Verification artifact created
 - [ ] Test artifact created

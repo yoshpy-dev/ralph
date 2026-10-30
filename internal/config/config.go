@@ -880,12 +880,13 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 
 	// [org] validation.
 	//
-	// Unlike PipelineConfig's ints (which silently backfill on zero), Org's
-	// fields are validated strictly: toml.Unmarshal only overwrites fields
-	// present in the source document (cfg already carries Default()'s Org
-	// values before Unmarshal runs), so an absent [org] section — or an
-	// absent individual key within a present [org] section — never reaches
-	// these checks with a zero/invalid value, with one deliberate exception:
+	// Unlike the string defaults backfilled below (an `agmsg_home = ""` falls
+	// back to the default), Org's other fields are validated strictly:
+	// toml.Unmarshal only overwrites fields present in the source document
+	// (cfg already carries Default()'s Org values before Unmarshal runs), so
+	// an absent [org] section — or an absent individual key within a present
+	// [org] section — never reaches these checks with a zero/invalid value,
+	// with one deliberate exception:
 	// when driver_pool is set but model_pool is not, the inherited default
 	// model_pool is filtered to the declared driver_pool above (so a
 	// claude-only driver_pool override doesn't inherit codex's default
@@ -931,10 +932,10 @@ func validateLoaded(cfg *Config, driverPoolSet, modelPoolSet bool) error {
 		return fmt.Errorf("[org].max_total_seats must be >= 1, got %d", cfg.Org.MaxTotalSeats)
 	}
 	// AgmsgHome is a string default, so (unlike the strict-validation fields
-	// above) it follows the same explicit zero-value backfill pattern as
-	// PipelineConfig: an explicit `agmsg_home = ""` in the source document
-	// falls back to the default rather than being treated as a validation
-	// error.
+	// above) it follows the explicit zero-value backfill pattern, the one
+	// [org.permissions].default follows below: an explicit `agmsg_home = ""`
+	// in the source document falls back to the default rather than being
+	// treated as a validation error.
 	if cfg.Org.AgmsgHome == "" {
 		cfg.Org.AgmsgHome = Default().Org.AgmsgHome
 	}

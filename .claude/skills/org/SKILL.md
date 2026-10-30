@@ -308,8 +308,9 @@ present in [org].model_pool` で通らない。`ralph org` の動詞はどれも
 使う。`--config` を渡したとき、`--state-dir` か `[org].state_dir` でほかの
 場所の台帳を指したとき、台帳を git の toplevel から決めたとき(main worktree を
 決められない bare リポジトリの linked worktree)、git の外のときがこれに
-当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode` も同じ
-規則で読む(「機能の計画の承認」)。`max_seats` とほかの設定の読み方は
+当たる。`ralph org start --plan` は、承認方式の `[org.approval].mode`
+(「機能の計画の承認」)と `[reviewer]` の 4 つのキー(「機能ごとの org」節の
+手順 6 のタスクの 2 行)も同じ規則で読む。`max_seats` とほかの設定の読み方は
 変わらない。
 
 ### 担当範囲の予約(`--reserve`)
@@ -709,8 +710,10 @@ leader の側では当てにできない。付けないと leader の座席が�
 決める場合にも、start と同じ台帳を使わせるため。
 
 タスクの `- reviewer の codex:` と `- reviewer の claude:` の行には、start が
-読んだ設定(`--config`、省略時は cwd の `./ralph.toml`。主 worktree の
-ルートの `ralph.local.toml` が上書きする)の `[reviewer]` の値が、モデルと
+承認方式や上限と同じ `ralph.toml`(`--config` がなく台帳が main worktree の
+ものなら main worktree のルートの `ralph.toml`、それ以外は `--config` の
+ファイル、なければ cwd の `./ralph.toml`。主 worktree のルートの
+`ralph.local.toml` が上書きする)から読んだ `[reviewer]` の値が、モデルと
 effort の順に 2 語で入る。leader の計画助言は、codex を呼ぶときは前の行の
 2 語を `-m` と `model_reasoning_effort` に、claude を呼ぶときは後の行の 2 語を
 `--model` と `--effort` に使い、自分では設定を読まない(`ralph config get
