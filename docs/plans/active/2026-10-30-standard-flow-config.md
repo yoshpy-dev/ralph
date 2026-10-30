@@ -1,0 +1,336 @@
+# standard-flow-config
+
+- Status: Approved
+- Approved: 2026-10-30 sha256:af46dcbdd0f8
+- Owner: Claude Code
+- Date: 2026-10-30
+- Related request: #276 の 3 本目(B)の前半(B1)。標準フローの値(パイプラインの回し直しの上限、reviewer のモデルと effort)を `ralph.toml` と `ralph.local.toml` に移し、環境変数での上書きをやめる
+- Related issue: 276
+- Type: feat
+- Branch: feat/standard-flow-config
+
+## Objective
+
+#276 は、人が決める値を `ralph.toml` と git が無視する個人用のファイル `ralph.local.toml` だけで決め、環境変数での上書きをやめる issue です。docs/plans/archive/2026-10-29-local-config-org.md の D1 で 3 本に分けました。
+
+- A1(PR #287): 個人用のファイルの仕組みを足し、`RALPH_ORG_AGMSG_HOME` を撤去した。
+- A2(PR #290): `RALPH_ORG_STATE_DIR` を撤去した。
+
+残りの B は、この計画でさらに 2 本に分けます(D1)。
+
+- **B1(この計画、`Refs #276`)**: 標準フローの値を受け持つ。
+  - `RALPH_STANDARD_MAX_PIPELINE_CYCLES` → `[standard].max_pipeline_cycles`(既定 2)
+  - `RALPH_CLAUDE_REVIEWER_MODEL` → `[reviewer].claude_model`(既定を opus から fable に変える)
+  - claude の reviewer の effort(新設)→ `[reviewer].claude_effort`(既定 xhigh)
+  - `RALPH_CODEX_REVIEWER_MODEL` → `[reviewer].codex_model`(既定 gpt-6-astra)
+  - `RALPH_CODEX_REASONING_EFFORT` → `[reviewer].codex_effort`(既定 xhigh)
+- **B2(次の計画、`Closes #276`)**: スクリプトが読む個人用の値を受け持つ。対象は `RALPH_PLAN_VISUAL_BROWSER`、`RALPH_PLAN_VISUAL_OPENER`、`RALPH_XREVIEW_BASE`、`RALPH_VERIFY_BASE`、`RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN`。
+
+この計画の最初に、issue が求める「全変数を分けた一覧」を置きます(B2 の分も含む)。
+
+## 全変数の一覧(issue の規則で分ける)
+
+規則は issue のとおりです。人が決める値は `ralph.toml`(と個人用のファイル)だけで決め、環境変数での上書きはやめます。ralph やスクリプトが内部で受け渡す変数は残します。出典は scratchpad の 276b-env-inventory.md(main 0351800d、file:line 付き)です。
+
+| 変数 | 誰が設定するか | 分け方 | 行き先・扱い |
+|---|---|---|---|
+| `RALPH_STANDARD_MAX_PIPELINE_CYCLES` | 人 | 人が決める値 | B1: `[standard].max_pipeline_cycles` |
+| `RALPH_CLAUDE_REVIEWER_MODEL` | 人 | 人が決める値 | B1: `[reviewer].claude_model` |
+| (新設)claude の reviewer の effort | 人 | 人が決める値 | B1: `[reviewer].claude_effort` |
+| `RALPH_CODEX_REVIEWER_MODEL` | 人 | 人が決める値 | B1: `[reviewer].codex_model` |
+| `RALPH_CODEX_REASONING_EFFORT` | 人 | 人が決める値 | B1: `[reviewer].codex_effort` |
+| `RALPH_PLAN_VISUAL_BROWSER`、`RALPH_PLAN_VISUAL_OPENER` | 人(テスト) | 人が決める値 | B2: 個人用のファイル |
+| `RALPH_XREVIEW_BASE`、`RALPH_VERIFY_BASE` | 人(テスト) | 人が決める値 | B2: 個人用のファイル |
+| `RALPH_VERIFY_SKIP_BRANCH_SECRET_SCAN` | 人(テスト) | 人が決める値 | B2: 個人用のファイル |
+| `RALPH_ORG_AGMSG_HOME`、`RALPH_ORG_STATE_DIR` | 人 | 人が決める値 | A1・A2 で撤去済み(doctor が warn、`RALPH_ORG_STATE_DIR` は台帳を変えるコマンドの拒否にだけ読む) |
+| `HARNESS_VERIFY_MODE` | `run-static-verify.sh`・`run-test.sh` | 内部の受け渡し | 残す |
+| `RALPH_VERIFY_SCOPE` | CI の workflow、org の gate、wrapper | 内部の受け渡し | 残す |
+| `RALPH_VERIFY_PROJECT_ROOTS` | `run-verify.sh` がパックに渡す | 内部の受け渡し | 残す |
+| `RALPH_WIP_CHECKPOINT` | ralph が pane と `claude -p` に渡す | 内部の受け渡し | 残す |
+| `RALPH_PRIMARY_CLI` | ralph が座席の pane に渡す。Codex のセッションは `.codex/AGENTS.override.md` の指示で自分で設定する | 内部の受け渡し(例外の注あり) | 残す。値は「いま動いている CLI」で、人が好みで決める値ではない。Codex の場合も、AGENTS.override.md が CLI 自身に設定させている |
+| `RALPH_DIRECTOR_TOKEN` | director の起動スクリプト | 内部の受け渡し | 残す |
+| `RALPH_LOCAL_CONFIG` | org の gate・regate、テスト。人が `off` にもする | 設定ファイル自体の切り替え | 残す。個人用のファイルを読むかどうかの切り替えなので、そのファイルには書けない |
+| `RALPH_SECRET_ALLOWLIST`、`RALPH_SECRET_SCAN_ATTR_SOURCE`、`RALPH_SECRET_SCAN_BINARY_AUTO` | `secret-scan-branch.sh`・`secret-scan.sh` | 内部の受け渡し | 残す |
+| `RALPH_COMMON_SOURCED` | `ralph-common.sh` 自身 | 内部(source の印) | 残す |
+| `RALPH_GUARD` | 生成する git hook の中の shell 変数 | env ではない | 対象外 |
+| `RALPH_TEST_*`、`RALPH_ORG_TEST_*`、`RALPH_CLI_TEST_*`、`RALPH_DRIVER_TEST_INHERITED`、`HARNESS_VERIFY_EXTRA`、`RALPH_PURITY_SCAN_ROOT`、`HOOK_REPO_ROOT`、`CLAUDE_ROOT`、`CODEX_ROOT` | テスト | テスト用 | 残す |
+| `RALPH_TERRAFORM_INIT_VALIDATE` | 人(terraform のパックを使う人、CI でも) | 人が決める値(例外) | 残す。理由は D6 |
+| `COVERAGE_THRESHOLD` | CI の workflow(`"80"`) | CI が渡す値(例外) | 残す。理由は D6 |
+| `INSTALL_DIR` | 人(`scripts/install.sh`、ralph を入れる前) | 外部の道具の設定 | 残す。ralph がまだない段階で読む |
+| `GITHUB_BASE_REF`、`GOCACHE`、`STATICCHECK_CACHE`、`GOFLAGS`、`CODEX_HOME` ほか | GitHub Actions・Go・codex など | 外部の道具の env | 対象外 |
+
+## Scope
+
+- **config**(`internal/config/`)
+  - `[standard].max_pipeline_cycles`(int、既定 2、1 以上)を足す。
+  - 新しい表 `[reviewer]` を足す。
+    - `claude_model`(既定 "fable")
+    - `claude_effort`(既定 "xhigh"。low・medium・high・xhigh・max のどれか)
+    - `codex_model`(既定 "gpt-6-astra")
+    - `codex_effort`(既定 "xhigh")
+    - どの値も、空ならエラーにする。`claude_model`・`codex_model`・`codex_effort` は `[A-Za-z0-9._-]+` に限る。値は skill と leader の shell のコマンドに 1 語で写るので、引用符や `$` で割れないようにする(D4)。
+  - 値の誤りは Load がキーを名指してエラーにする(`ralph config get` は終了コード 3)。
+  - `ralph config get <key>` は reflection で引くので、キーを足すだけで読める。テストで固定する。
+  - `[org.review].max_cross_review_cycles` の既定と `[standard].max_pipeline_cycles` の既定の一致は、Go の中で照合する(今は shell の変数と照合している)。
+- **helper**(`scripts/ralph-config.sh` と `templates/base/scripts/` の写し)
+  - 人が決める値を持たない、内部用の読み出しにする(D2)。
+  - `ralph_setting <key>` が `ralph config get <key>` を打ち、終了コードで次のように分ける。
+    - 0 なら、その値を出す。
+    - 127(ralph がない)と、exit 1 で `unknown command "config"`(古い ralph)は、黙って既定値を出す。
+    - exit 2(知らないキー。#265〜B1 のあいだの binary など)、exit 3(読めない・正しくない設定)、そのほかの失敗は、stderr にキー名・終了コード・使う既定値を 1 行出し、既定値を出す。
+  - 既定値は helper の中の 1 つの表にだけ置く。呼び出し側はキーだけを渡す。
+  - 環境変数は読まない。`validate_numeric` などの関数は、要らなくなれば消す。
+- **skill**(`.claude/skills/` の plan・cross-review・implement と、`templates/base/.claude/skills/` の写し。`.agents/skills/` の 2 つは `sync-skills.sh` で作り直す)
+  - `/plan` の手順 11 と `/cross-review` の手順 4 の reviewer の呼び出しは、helper でモデルと effort を読む。
+  - claude の reviewer には `--effort <claude_effort>` を渡す(D4)。
+  - `/cross-review` の手順 1 は、上限を次の規則で決める(D8)。
+    - 設定の上限は `standard.max_pipeline_cycles` で読む。
+    - task worktree の `.harness/state/standard-pipeline/cycle-count.json` に正の整数の `cap` があれば、有効な上限は設定の値と `cap` の大きいほう。なければ設定の値。整数でない `cap` は、無いものとして扱う。
+  - 上限に当たったときの「上げて回し直す」(Cap-reached Option 1、`export RALPH_STANDARD_MAX_PIPELINE_CYCLES=…` を頼んでいた手順)は、skill 自身が cycle-count.json に `cap: <cycle + 1>` を書く形にする。`cycle` は増やさない。
+    - `/pr` の成功でこのファイルは消える(今と同じ)ので、上げた上限は残らない。
+    - 中止したときは残り、再開したその作業だけが上げた上限で続く。
+  - `/implement` の手順 3 は、cycle-count.json を保つときに `cap` も保つ。上限の名前も合わせる。
+- **leader の雛形**(`internal/org/prompts/leader.md`)と feature org の起こし方(`internal/org/feature.go`、`internal/cli/` の `ralph org start`)(D5)
+  - `ralph org start --plan` は、読み込んだ設定の `[reviewer]` の 4 つの値を `StartFeatureParams` で受け取る。
+  - `featureLeaderTask` は、受け取った値を名前付きの 2 行で TASK に書く。今の `- 台帳:` の行と同じ作り。
+    - `- reviewer の codex: <model> <effort>`
+    - `- reviewer の claude: <model> <effort>`
+  - 計画助言の codex・claude の呼び出しは、この 2 行の値を使う。claude には `--effort` を渡す。
+  - 雛形は `scripts/ralph-config.sh` を source せず、`ralph config get reviewer.*` も打たない。leader の PATH にある ralph の版にも、プロジェクトの `scripts/ralph-config.sh` の版にも頼らない。
+- **doctor**(`internal/cli/doctor.go` の `retiredEnvs`): 撤去する 4 つの変数を足し、それぞれ代わりのキーを名指す warn を出す。
+- **文書**
+  - `.claude/rules/ralph/model-routing.md`(「Rules」の full ID の pin と effort、「Cross-review sync note」、「Where the values live」)と templates/base の写し。
+  - `post-implementation-pipeline.md`(上限の名前と、「Raise the cap」を cycle-count.json の `cap` に)、`subagent-policy.md`、`docs/quality/definition-of-done.md`、`docs/recipes/codex-setup.md`(と写し)。どれも `export RALPH_STANDARD_MAX_PIPELINE_CYCLES` を名指している箇所を直す。
+  - `templates/base/ralph.toml`: `[standard]` と `[reviewer]` の新しいキーを注釈で書く(D3)。`[org.review]` の注釈の変数名も直す。
+  - `internal/config/config.go` の注釈。
+  - `claude -p --effort` を確かめた結果を `docs/evidence/` に置く。
+- **テスト**
+  - `tests/test-ralph-config.sh` を helper のテストに書き直す。偽の `ralph` を PATH に置き、終了コード 0、127、unknown command、2、3 と、env が効かないことを見る。
+  - `tests/test-codex-exec-invocation.sh`(skill の fallback の照合を helper の呼び出しの照合に)。
+  - `internal/config/defaults_sync_test.go`(helper の表と `Default()`、template の注釈)。
+  - `internal/org/prompts_leader_plan_test.go`。
+  - config・cli のテスト。
+
+## Non-goals
+
+- B2 の 5 つの変数(plan-visual のブラウザと opener、cross-review の base、verify の base、secret scan の skip)。B2 の計画で扱う。
+- `[standard]` と `[org.review]` の review の on/off の値と、その読み方(#265・#266 で決めた)。
+- subagent の frontmatter の `model:` と、`.claude/agents/*.md` の tier の表。
+- `RALPH_TERRAFORM_INIT_VALIDATE` と `COVERAGE_THRESHOLD` の移動(D6)。
+- `RALPH_PRIMARY_CLI` の扱い(driver の上書きの重複は #266 の残り)。
+- leader が PATH の `ralph` を打つこと自体。`ralph config get org.review.plan_advisory`(leader.md の計画助言の switch)と `ralph org` の動詞は、これまでどおり PATH の ralph を打つ。新しい binary を絶対パスで起こし、PATH に古い ralph がある場合のずれは残る(計画助言の指摘 1 のうち、この計画が直すのは reviewer の値だけ)。
+- 古い `ralph` binary を入れ直すこと。
+
+## Assumptions
+
+- `ralph config get` は `config.Load` で `ralph.toml` と `ralph.local.toml` を合わせて読む(A1)。キーを足せば読める(`internal/cli/config.go` の `configValue`)。
+- skill と `scripts/ralph-config.sh` は、配布先では `ralph upgrade` で同じ版がそろう。この repo では両方が同じ tree にある。
+- leader の雛形は binary に埋め込まれているので、leader が打つ `ralph` は雛形と同じ版を持つ(`ralph org start` が起こす)。
+- `claude -p --effort` は効く。2026-10-30 に claude 2.1.308(haiku)で確かめた。
+  - 正しくない値は「Unknown --effort value … using the default effort」の warning が出る。
+  - 同じ質問で、thinking のトークンは `low` 0、`max` 1066 だった。
+  - 結果は S6 で `docs/evidence/` に置く。
+- この repo の PATH の ralph は v6.0.0 で `config get` がない。helper は既定値に戻る。
+
+## Affected areas
+
+- `internal/config/`(`config.go`、テスト、`defaults_sync_test.go`)
+- `internal/cli/`(`config.go` のテスト、`doctor.go` の `retiredEnvs` とテスト)
+- `internal/org/prompts/leader.md`、`internal/org/prompts_leader_plan_test.go`、`internal/org/feature.go`(`StartFeatureParams`、`featureLeaderTask`)とテスト、`internal/cli/` の `ralph org start --plan`(設定の受け渡し)
+- `tests/test-insights-append.sh`(`cap` のある cycle-count.json)
+- `scripts/ralph-config.sh`(と `templates/base/scripts/` の写し)
+- `.claude/skills/{plan,cross-review,implement}/SKILL.md`(と 3 つの写し)
+- `.claude/rules/ralph/{model-routing,post-implementation-pipeline,subagent-policy}.md`(と templates/base の写し)
+- `docs/quality/definition-of-done.md`、`docs/recipes/codex-setup.md`(と写し)、`templates/base/ralph.toml`
+- `tests/test-ralph-config.sh`、`tests/test-codex-exec-invocation.sh`
+
+## Visual review
+
+- ページ: `.harness/state/plan-visual/standard-flow-config.html`。かんたん版の図は `overview`(今とこれから)の 1 つ。折りたたみの中に、詳しい図が 3 つある。
+  - `detail-overview`: ファイルの地図
+  - `detail-read`: `ralph_setting` の読み方と終了コード
+  - `detail-keys`: 変数とキーの対応
+- lint: `./scripts/plan-visual.sh lint` が exit 0。
+- self-check: 全体と 4 つの図を `shot` で撮り、PNG を読んだ。はみ出し、重なり、線の行き違いはない。
+- 計画助言を受けて直した箇所: D5 と D8 に合わせて、ファイルの地図の leader の箱、2 つの注、「承認の前に」の S4 と気をつけることの 2 項目を書き直した。lint(exit 0)のあと、全体・`detail-overview`・`detail-read` を撮り直して確かめた。
+
+## Design decisions
+
+分かれ目は consult(consult-plan-standardcfg276b)に聞き、推奨案を選んだ(ユーザーの指示)。
+
+- D1 B を 2 本に分ける。B1(この計画、標準フローの値、`Refs #276`)と B2(スクリプトの個人用の値、`Closes #276`)。分けないと、差分は 1,500 行前後になりそう(見積もり、未確認)。書き換えるテストも、shell 9 本と Go 3 本に広がる。B1 と B2 は触るスクリプトがほとんど重ならない(B1 は ralph-config.sh と skill、B2 は plan-visual.sh・xreview-helpers.sh・detect-changed-languages.sh・run-verify.sh)。前例は A1・A2。
+- D2 値の読み方: `scripts/ralph-config.sh` を、`ralph config get` で読む内部用の helper `ralph_setting <key>` に作り替える(案 a)。
+  - 既定値は helper の中の 1 つの表だけに置き、`Default()` との一致は `defaults_sync_test.go` で見る。
+  - 黙って既定値に戻るのは、127 と `unknown command "config"` の exit 1 だけ。
+  - exit 2・3 とそのほかの失敗は、stderr に 1 行出して既定値に戻る。`ralph config get --help` と template の注釈が「exit 2 は止まって知らせる」と約束しており、キーの打ち間違いや改名を見えるようにするため(consult の指摘)。
+  - 退けた案は 2 つ。各 skill に `ralph config get` を直に書く案は、既定値と分岐が 4 つの写しと雛形に散らばる。shell で TOML を読む案は壊れやすい。
+- D3 キーの置き場所と書き方
+  - 上限は `[standard].max_pipeline_cycles`。
+  - reviewer のモデルと effort は、新しい共有の表 `[reviewer]`(`claude_model`、`claude_effort`、`codex_model`、`codex_effort`)。`/plan`・`/cross-review`・feature org の leader の 3 か所が同じ値を使うので、`[standard]` に置いて leader が `standard.*` を読む形は避けた。
+  - `templates/base/ralph.toml` には注釈で書く。有効な行で書くと、ralph.toml は seed で `ralph upgrade` が上書きしないため、`Default()` を変えても配布先に古い値が残る。
+  - この repo のルートの `ralph.toml` は、テンプレートとの違いだけを書く形のままにする(#265)。
+  - 4 つのキーは local-only にしない。モデルは repo で決める値で、自分の機械だけで変えたいときは個人用のファイルが上書きする。
+- D4 claude の reviewer に `--effort` を渡す。値は `[reviewer].claude_effort`。`-p` で効くことを確かめた(Assumptions)。
+  - Load は `claude_effort` を claude の 5 つ(low・medium・high・xhigh・max)に限る。claude は正しくない値を warning を出して無視するので、先に断る。
+  - codex の effort は、モデルによって受け付ける値が違う。そのため形だけを見る。
+  - モデル名と codex の effort は `[A-Za-z0-9._-]+` に限る。skill と leader のコマンドに 1 語で写るので、引用符や `$` で shell が割れないようにする(consult の指摘)。
+- D5 leader の reviewer の値は、`ralph org start` が TASK に書く。
+  - 計画助言の指摘 1(MEDIUM)を受けて変えた。leader が打つ `ralph` は PATH で決まり、雛形を埋め込んだ binary と同じ版とは限らない。
+  - 雛形を埋める binary(StartFeature)は `[reviewer]` を知っている版なので、その値を TASK に名前付きの 2 行で書く。leader は実行時に読まない。
+  - 値は org を起こしたときのものに固定され、org の寿命のあいだ変わらない。
+  - 雛形の「`scripts/ralph-config.sh` があるか」の確かめは外し、`xreview-helpers.sh` の確かめは残す。
+  - 退けた案:
+    - `ralph config get reviewer.*` を雛形で打つ(初めの案)。PATH の古い ralph では exit 2 になる。
+    - `os.Executable` のパスを雛形に渡し、すべての ralph の呼び出しに使う。範囲が広い。
+- D6 表にない 2 つの変数は残し、一覧と PR 本文に例外として理由を書く。
+  - `COVERAGE_THRESHOLD`: CI の workflow が渡す値で、CI には ralph がない。`ralph.toml` に移すと、CI では黙って既定の 80 になる。
+  - `RALPH_TERRAFORM_INIT_VALIDATE`: terraform のパックの選択で、CI で使うことがある。理由は同じ。
+  - issue の受け入れ条件「残した環境変数がすべて内部の受け渡し」は、字句どおりには満たさない。`RALPH_PRIMARY_CLI` も同じ書き方で注を付ける(consult の指摘)。
+- D7 撤去した 4 つの変数がまだ設定されているとき: 値として読まない。doctor の `retiredEnvs` に足して warn を出すだけにする(A1 の D8 と同じ)。値を読まなくなったときの害は、どれも既定値に戻ることなので小さい。helper は環境を見ない。
+- D8 その作業だけ上限を上げるときは、task worktree の cycle-count.json に `cap` を書く。
+  - 計画助言の指摘 2(MEDIUM)を受けて変えた。`ralph.local.toml` は主 worktree の root の 1 つのファイルなので、そこに書くと、ほかの linked worktree の作業にも効く。完了しても中止しても元に戻らない。
+  - `.harness/state` は worktree ごとにあり、`/pr` の成功で cycle-count.json は消える。だから上げた上限はその作業の中だけで効き、残らない。
+  - 有効な上限は、設定の値と正の整数の `cap` の大きいほう。上げる手順では上限は下がらない。整数でない `cap` は無いものとして扱う。
+  - `cycle` は今どおり増やさない。`insights-append.sh` は `.cycle` だけを読むので、`cap` が増えても壊れない。
+  - `[standard].max_pipeline_cycles` は、「この repo(個人用のファイルならこの機械)の既定の上限」として残す。
+
+## Acceptance criteria
+
+- [ ] AC1 既定値と上書き
+  - `ralph config get` の既定値は次のとおり。
+    - `standard.max_pipeline_cycles`: `2`
+    - `reviewer.claude_model`: `fable`
+    - `reviewer.claude_effort`: `xhigh`
+    - `reviewer.codex_model`: `gpt-6-astra`
+    - `reviewer.codex_effort`: `xhigh`
+  - `ralph.toml` の値と、それを上書きする `ralph.local.toml` の値が効く。
+  - 次の値では、Load がキーを名指してエラーにする(`config get` は exit 3)。
+    - `max_pipeline_cycles` が 1 未満
+    - `claude_effort` が 5 つの外
+    - 4 つの文字列のどれかが空
+    - `claude_model`・`codex_model`・`codex_effort` に `[A-Za-z0-9._-]` 以外の文字(引用符、`$`、空白など)がある
+- [ ] AC2 skill(plan、cross-review、implement の 4 つの写し)は、この 5 つの値を設定から読む。leader の雛形は、`ralph org start` が TASK に書いた reviewer の 2 行の値を使う(AC4)。
+  - `RALPH_STANDARD_MAX_PIPELINE_CYCLES`、`RALPH_CLAUDE_REVIEWER_MODEL`、`RALPH_CODEX_REVIEWER_MODEL`、`RALPH_CODEX_REASONING_EFFORT` を設定しても、使われる値は変わらない(helper のテストで env を設定して確かめる)。
+  - skill、スクリプト、雛形の本文に `${RALPH_…:-…}` の形の読み出しが残らない(grep の否定)。
+- [ ] AC3 helper の `ralph_setting <key>` の振る舞い
+  - exit 0 ではその値を出す。
+  - 127 と `unknown command "config"` では、黙って既定値を出す。
+  - exit 2・3 とそのほかの失敗では、stderr に 1 行(キー、終了コード、既定値)を出して既定値を出す。
+  - 表にないキーでは、空を出して失敗する。
+  - helper の既定値の表は `Default()` と一致する(`defaults_sync_test.go`)。
+- [ ] AC4 claude の reviewer の呼び出しに `--effort` が付く。
+  - 対象は `/plan` の計画助言、`/cross-review`、leader の計画助言の 3 つで、値は `reviewer.claude_effort`。
+  - leader の分は、`featureLeaderTask` が設定の値で `- reviewer の codex: <model> <effort>` と `- reviewer の claude: <model> <effort>` の 2 行を書き、雛形がその値を使う。雛形には `scripts/ralph-config.sh` の source も `ralph config get reviewer` もない。
+  - `claude -p --effort` を確かめた結果が `docs/evidence/` にある。
+- [ ] AC5 `/cross-review` の上限
+  - 有効な上限は、設定の `standard.max_pipeline_cycles` と、task worktree の cycle-count.json の正の整数の `cap` の大きいほう。`cap` がない、または整数でないときは設定の値。
+  - 上限に当たって上げるときは、skill が cycle-count.json に `cap: <cycle + 1>` を書き、`cycle` は増やさない。環境変数も `ralph.local.toml` も頼まない。
+  - `/implement` の手順 3 は `cap` を保つ。`/pr` の成功でファイルごと消える(今と同じ)。
+- [ ] AC6 `ralph doctor` は撤去した 4 つの変数が空でない値で設定されているとき、それぞれ代わりのキーを名指す warn を出す。設定されていなければ何も出さない。
+- [ ] AC7 文書
+  - model-routing.md の full ID の pin、effort、sync note、「Where the values live」を新しい置き場所と既定値に合わせる。post-implementation-pipeline.md、subagent-policy.md、definition-of-done.md、codex-setup.md、template の ralph.toml の注釈も同じ。
+  - 4 つの変数に触れるのは「もう読まない」の説明だけになる。
+- [ ] AC8 `go build ./...`、gofmt、`go vet`、golangci-lint、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
+
+## Implementation outline
+
+1. S1 config: `[standard].max_pipeline_cycles` と `[reviewer]` の 4 つのキー、検証、`Default()`、template の注釈、`standardTemplateDrift` と template の照合の直し、`[org.review]` の上限との Go の中の照合、`ralph config get` のテスト — verify: `go test ./internal/config/ && go test ./internal/cli/ -run 'Config'`
+2. S2 helper: `scripts/ralph-config.sh` を `ralph_setting` に作り替え(写しも)、`tests/test-ralph-config.sh` を書き直し、`defaults_sync_test.go` で helper の表と `Default()` を照合 — verify: `sh tests/test-ralph-config.sh && go test ./internal/config/ -run 'Sync|Drift|Default' && ./scripts/check-sync.sh`
+3. S3 skill: plan・cross-review・implement の 2 つの元を直し(reviewer の値、claude の `--effort`、上限の規則と cycle-count.json の `cap`)、`sync-skills.sh` で写しを作り直し、`tests/test-codex-exec-invocation.sh` を合わせる — verify: `./scripts/check-skill-sync.sh && ./scripts/check-sync.sh && sh tests/test-codex-exec-invocation.sh && sh tests/test-insights-append.sh && go test ./internal/config/ -run 'Sync'`
+4. S4 leader: `StartFeatureParams` で `[reviewer]` を受け取り(`ralph org start` が読み込んだ設定から)、`featureLeaderTask` に 2 行、雛形はその値を使い claude に `--effort`、`prompts_leader_plan_test.go` と feature の TASK のテスト — verify: `go test ./internal/org/ -run 'Leader|Prompt|Feature' && go test ./internal/cli/ -run 'OrgStart|Feature'`
+5. S5 doctor の `retiredEnvs` に 4 行とテスト — verify: `go test ./internal/cli/ -run 'Retired|Doctor'`
+6. S6 文書と evidence: model-routing.md・post-implementation-pipeline.md・subagent-policy.md(と写し)、definition-of-done.md、codex-setup.md(と写し)、`config.go` の注釈、`docs/evidence/` に effort の確かめ — verify: `./scripts/check-sync.sh && sh tests/test-agent-models.sh && ! grep -rnE '\$\{RALPH_(STANDARD_MAX_PIPELINE_CYCLES|CLAUDE_REVIEWER_MODEL|CODEX_REVIEWER_MODEL|CODEX_REASONING_EFFORT)' .claude scripts templates internal --include='*.md' --include='*.sh' --include='*.go'`
+
+## Verify plan
+
+- 静的解析: gofmt、`go vet`、golangci-lint、shellcheck(`run-static-verify.sh` に含まれる)。
+- 仕様の適合: AC1〜AC7 を、HEAD から build した binary の probe(一時 repo の `ralph config get`、`ralph doctor`)と、grep とコードの行で確かめる。
+- 文書のずれ: 4 つの変数の名前の grep(「もう読まない」の説明と、記録の docs/plans・docs/reports・docs/specs を除く)。`check-sync.sh`(写しの一致)、`check-skill-sync.sh`。
+- `standardTemplateDrift` の直し方を確かめる。注釈にしたキーは「template に set されている」照合から外し、注釈の値が `Default()` と同じであることを別に照合する。
+- evidence: probe の出力、grep の結果。
+
+## Test plan
+
+- 単体(Go)
+  - 5 つのキーの既定値、`ralph.toml` の値、`ralph.local.toml` の上書き。
+  - 検証のエラー: 上限 0 と負、claude_effort の外の値、空の文字列。どれもキーを名指す。
+  - `ralph config get` の 5 つのキー(exit 0)。
+  - doctor の 4 行(設定あり・空・未設定)。
+- 照合(Go)
+  - helper の既定値の表と `Default()`。
+  - `[org.review].max_cross_review_cycles` と `[standard].max_pipeline_cycles` の既定。
+  - template の注釈と `Default()`。
+  - skill と雛形の本文が helper か `ralph config get` で読むこと(`${RALPH_…:-…}` がないこと)。
+- shell
+  - `tests/test-ralph-config.sh`: 偽の `ralph` を PATH に置き、exit 0・127・unknown command・2・3 と表にないキーを確かめる。env を設定しても値が変わらないことも見る。
+  - `tests/test-codex-exec-invocation.sh`: skill の codex の呼び出しの形(`-c` が exec の前、`</dev/null` など)と helper の使い方。
+- 雛形と feature org
+  - `prompts_leader_plan_test.go` で、leader の計画助言の codex・claude の呼び出しが TASK の reviewer の 2 行の値を使い、claude に `--effort` が付くことを見る。雛形に `ralph-config.sh` と `ralph config get reviewer` がないことも見る。
+  - `featureLeaderTask` の 2 行が、`ralph.toml` と `ralph.local.toml` で決めた値になることを見る(cli の `ralph org start --plan` の経路で)。
+- 上限(skill の本文の照合と、cycle-count.json の形)
+  - 有効な上限の規則(設定と `cap` の大きいほう、整数でない `cap` は無視)が cross-review の本文にあること。
+  - 上げる手順が `cap` を書き、`cycle` を増やさないこと。
+  - `/implement` の手順 3 が `cap` を保つこと。
+  - `tests/test-insights-append.sh` に `cap` のある cycle-count.json の行を足し、`--cycle auto` が `.cycle` を読み続けることを見る。
+- 回帰: `run-test.sh` 全体。
+- 端の場合
+  - #265〜B1 のあいだの binary(`config get` はあるがキーがない、exit 2)で、warn を出して既定値に戻る。
+  - 個人用のファイルが壊れている(exit 3)ときも、warn を出して既定値に戻る。
+- evidence: テストの出力、変異(helper の分岐を変えるとテストが落ちる)。
+
+## Risks and mitigations
+
+- この repo の PATH の ralph(v6.0.0)は `config get` がないので、helper は常に既定値に戻る。
+  - 上限を上げる手順は cycle-count.json の `cap` を使うので、古い binary でも効く(D8)。
+  - 対策: release のあとに新しい binary を入れるよう、PR 本文と最終の報告に書く。
+  - この PR 自身のパイプラインは main のチェックアウトの skill(この PR の前の版)で回るので、上限は今の手順で上げる。
+- leader は、reviewer の値を TASK で受け取る。ただし switch(`org.review.plan_advisory`)と `ralph org` の動詞は、これまでどおり PATH の ralph を打つ(Non-goals)。
+- ユーザーの今の進め方の指示(上限に当たったら `export RALPH_STANDARD_MAX_PIPELINE_CYCLES=3`)は、この PR のあとの skill では効かない。代わりに cycle-count.json の `cap` を使う。最終の報告で伝える。
+- 既定のモデルが opus から fable に変わる。Codex が driver で claude が reviewer のとき、使うモデルが変わる。
+  - 対策: release のノートに書く。ralph.toml か ralph.local.toml の `[reviewer].claude_model` で戻せる。
+- 4 つの変数を設定していた人は、更新のあと黙って既定値に戻る。
+  - 対策: doctor の warn と release のノート。害は小さい(既定値に戻るだけ)。
+- `ralph upgrade` をしていないプロジェクトで、新しい binary の leader が古い `scripts/ralph-config.sh` に出会う。
+  - 対策: D5。leader は helper に頼らない。
+- 3 セッションの並行で、skill の 4 つの写し、template の ralph.toml、`docs/tech-debt/README.md`、model-routing.md が衝突しうる。
+  - 対策: `git merge origin/main` で取り込み、両方の変更を残す。skill は元の 2 つを直して `sync-skills.sh` で作り直す。
+
+## Rollout or rollback notes
+
+- release のノートに書くこと:
+  - ralph は、`RALPH_STANDARD_MAX_PIPELINE_CYCLES`、`RALPH_CLAUDE_REVIEWER_MODEL`、`RALPH_CODEX_REVIEWER_MODEL`、`RALPH_CODEX_REASONING_EFFORT` を読まなくなった。代わりに `ralph.toml` に書く。自分の機械だけで変えるなら `ralph.local.toml` に書く。置き場所は `[standard].max_pipeline_cycles` と `[reviewer]` の 4 つのキー。
+  - claude の reviewer の既定は fable と xhigh になり、`--effort` を渡すようになった。
+  - パイプラインの上限に当たって 1 つの作業だけ上げるときは、`/cross-review` がその作業の cycle-count.json に `cap` を書く。環境変数で上げる手順はなくなった。
+  - feature org の leader の計画助言は、`ralph org start` のときの `[reviewer]` の値を使う。
+  - `ralph doctor` は、まだ設定されている 4 つの変数に warn を出す。
+  - skill と helper を使うには、新しい binary が要る。古い binary では既定値になる。
+- 戻すときは、この PR を revert する。設定ファイルの形式は、キーが増えるだけ。revert した ralph は `[reviewer]` を知らないキーとして無視する(A1 の Load は知らないキーを無視する。推測、未確認)。env での上書きが戻る。
+
+## Open questions
+
+- なし。B2 の範囲は Objective のとおり。
+
+## Progress checklist
+
+- [x] Plan reviewed — plan advisory: ran with codex
+  - 設定と実行: switch は scratchpad の ralph(main 7522835c から build)で `standard.plan_advisory` = true と読んだ。PATH の ralph は v6.0.0 で `config get` がない。codex は gpt-6-astra、xhigh、read-only。前後の git の状態は同じ。
+  - 指摘 2 件(どちらも MEDIUM)は、ユーザーの指示(HIGH と MEDIUM は聞かずに反映)どおり計画に入れた。直し方は consult(consult-plan-standardcfg276b)に聞き、「変更なし」の判定を受けた。
+  1. [MEDIUM] leader が打つ `ralph` は PATH で決まり、雛形を埋め込んだ binary と同じ版とは限らない。古い版では `reviewer.*` がなく、計画助言が incomplete になる。
+     - D5 を変えた。`ralph org start` が読み込んだ `[reviewer]` を `StartFeatureParams` で受け取り、`featureLeaderTask` が名前付きの 2 行で TASK に書く。雛形はその値を使い、実行時には読まない。
+     - consult の指摘で 2 つ足した。モデル名と codex の effort を `[A-Za-z0-9._-]+` に限る(D4、AC1)。switch と `ralph org` の動詞が PATH の ralph を打つことは Non-goals に書いた。
+  2. [MEDIUM] 「上限を一時的に上げる」を `ralph.local.toml` に書くと、主 worktree の 1 つのファイルなので、ほかの作業にも効き、元に戻らない。
+     - D8 を足した。上げる手順では skill が task worktree の cycle-count.json に `cap: <cycle + 1>` を書く。有効な上限は、設定の値と `cap` の大きいほう。`/pr` の成功でファイルが消えるので、上げた値は残らない。
+     - Scope、AC5、Test plan(`tests/test-insights-append.sh` の `cap` の行を含む)、Risks、Rollout と図を直した。
+- [x] Plan approved — 自動承認(ユーザーの指示)。digest sha256:af46dcbdd0f8。分かれ目は consult(consult-plan-standardcfg276b)に聞いて推奨案を選び、理由は Design decisions(D1〜D8)に書いた。
+  - `claude -p --effort` の確かめ(2026-10-30、claude 2.1.308、haiku、git の外の scratchpad で `RALPH_WIP_CHECKPOINT=off`):
+    - `--effort bogus` は rc 0 で、stderr に「Unknown --effort value 'bogus' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.」が出た。
+    - 同じ質問で、thinking のトークンは `--effort low` 0、`--effort max` 1066 だった。
+    - 別の短い質問では、既定(bogus)58、`xhigh` 236 だった。
+    - `-p` でも効くと判断した。S6 で `docs/evidence/` に置く。
+  - 全変数の一覧の出典: scratchpad の 276b-env-inventory.md(Explore の agent が main 0351800d で作った、137 行)。
+- [x] Branch created — feat/standard-flow-config(worktree `.claude/worktrees/standard-flow-config`、state id `plan-standard-flow-config`、base 0351800d)
+- [ ] Implementation started
+- [ ] Review artifact created
+- [ ] Verification artifact created
+- [ ] Test artifact created
+- [ ] PR created
