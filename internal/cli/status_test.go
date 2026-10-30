@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -1092,11 +1093,13 @@ func TestStatusCmd_DirectorLineShowsLaunchCmdDirectors(t *testing.T) {
 // Self-review L3 of org-director-start: the stop command on the director:
 // line repeats --state-dir exactly when it was given, through `ralph status`
 // and `ralph org director status` alike, shell-quoted so a state dir with a
-// space stays one argument, and names none when RALPH_ORG_STATE_DIR names
-// the ledger instead, as the other director commands do
-// (org.CommandWithStateDir).
+// space stays one argument, and names none when the personal file's
+// [org].state_dir names the ledger instead, as the other director commands
+// do (org.CommandWithStateDir). The working directory is outside git, so
+// the personal file is the one in it (config.LocalPath).
 func TestStatusCmd_DirectorStopCommandRepeatsTheStateDir(t *testing.T) {
-	t.Chdir(t.TempDir())
+	cwd := t.TempDir()
+	t.Chdir(cwd)
 	stateDir := filepath.Join(t.TempDir(), "a ledger")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -1125,13 +1128,14 @@ func TestStatusCmd_DirectorStopCommandRepeatsTheStateDir(t *testing.T) {
 		}
 	}
 
-	t.Setenv("RALPH_ORG_STATE_DIR", stateDir)
+	t.Setenv(config.LocalConfigEnv, "")
+	writeTestFile(t, filepath.Join(cwd, config.LocalConfigFileName), "[org]\nstate_dir = \""+stateDir+"\"\n")
 	for name, line := range map[string]string{
 		"ralph status":              statusLine(),
 		"ralph org director status": directorStatusLine(t),
 	} {
 		if !strings.HasSuffix(line, stop) || strings.Contains(line, "--state-dir") {
-			t.Errorf("%s with RALPH_ORG_STATE_DIR: director line %q; want it to end with %q and name no --state-dir", name, line, stop)
+			t.Errorf("%s with [org].state_dir: director line %q; want it to end with %q and name no --state-dir", name, line, stop)
 		}
 	}
 }
@@ -1289,6 +1293,10 @@ func TestStatusCmd_HelpDescribesTheDirectorLine(t *testing.T) {
 		"for this line git runs only the local `git remote get-url origin` in the current directory, and only when the cache is fresh",
 		"status runs no gh and does not use the network.",
 		"the local git rev-parse (and git worktree list --porcelain in a linked worktree) that finds the main worktree",
+		// Plan 2026-10-30-org-state-dir-local, AC10: the personal file's
+		// [org].state_dir in place of RALPH_ORG_STATE_DIR.
+		"without --state-dir, to find the ralph.local.toml whose [org].state_dir names the state directory when it is set, " +
+			"and to resolve the state directory when neither names it;",
 		"when one of them does, to tell whether it names the main worktree's ledger, whose ralph.toml then holds [org.director].enabled, whether or not the cache is fresh",
 		// Plan 2026-10-16-org-director-launch-cmd, AC8.
 		"(for one launched with [org.director].launch_cmd, `launch cmd`, the name of its terminal, director_<token>, and the pid its launch script checked in with, " +

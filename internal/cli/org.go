@@ -56,7 +56,7 @@ func newOrgCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
-	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
+	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
@@ -115,22 +115,24 @@ func requireSeatIdentifier(flag, value string) error {
 // newOrgRuntime constructs an org.Org wired to real driver adapters
 // (driver.ExecRunner, which shells out to the herdr/agmsg binaries on PATH)
 // and manifest/receipt stores rooted at the resolved state directory. cmd is
-// used to detect whether --state-dir was explicitly passed
-// (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's flag >
-// env > git-main-worktree > git-toplevel > cwd precedence -- see that
-// function's doc comment for the full rationale (fixes the leader/operator
-// cwd-split, tech-debt "state-dir の cwd 相対解決", and shares one ledger
-// across linked worktrees) -- and to print guardLegacyOrgStateDir's note.
-// access is the calling verb's orgLedgerAccess: a mutating verb gets
-// guardLegacyOrgStateDir's refusal as the error, before any manifest, herdr,
-// or agmsg call. A caller that also needs the resolved config.OrgConfig for
-// its own purposes beyond wiring (e.g. resolveModelOrWarn's --model default
-// resolution via org.DefaultModelForDriverAndRole) reads it back off the
-// returned *org.Org's exported Config field rather than newOrgRuntime
-// returning a second value.
+// used by resolveOrgLedger to detect whether --state-dir was explicitly
+// passed (cmd.Flags().Changed("state-dir")) for org.ResolveOrgStateDir's
+// flag > config > git-main-worktree > git-toplevel > cwd precedence --
+// see that function's doc comment for the full rationale (fixes the
+// leader/operator cwd-split, tech-debt "state-dir の cwd 相対解決", and
+// shares one ledger across linked worktrees) -- and to print the notes of
+// checkRetiredOrgStateDirEnv and guardLegacyOrgStateDir. access is the
+// calling verb's orgLedgerAccess: a mutating verb gets their refusals as
+// the error, before any manifest, herdr, or agmsg call, and so does a ledger
+// that cannot be resolved. A caller that also needs the resolved
+// config.OrgConfig for its own purposes beyond wiring (e.g.
+// resolveModelOrWarn's --model default resolution via
+// org.DefaultModelForDriverAndRole) reads it back off the returned
+// *org.Org's exported Config field rather than newOrgRuntime returning a
+// second value.
 func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLedgerAccess) (*org.Org, error) {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, access); err != nil {
+	resolvedStateDir, _, err := resolveOrgLedger(cmd, stateDir, access)
+	if err != nil {
 		return nil, err
 	}
 	return newOrgRuntimeAt(resolvedStateDir, configPath)
@@ -141,17 +143,15 @@ func newOrgRuntime(cmd *cobra.Command, stateDir, configPath string, access orgLe
 // org-wide limits: it also replaces the config's MaxOrgs and MaxTotalSeats
 // via withMainWorktreeOrgLimits, so the ledger shared by every worktree gets
 // one set of limits. Every other verb keeps reading only the caller's config.
-// It takes a state dir that org.ResolveOrgStateDir already resolved, the same
-// split as newOrgRuntimeAt: each caller also passes the directory on, to
-// wireOrgWatchGate (spawn) or wireOrgStartWatchGate (start), and `ralph org
-// start --plan` to StartFeatureParams.StateDir and org.FeatureRepoRoot with
-// its source. It sets InboxHintStateDir (orgInboxHintStateDir), so the
-// `ralph org stop` commands Spawn's errors print for a seat left with an
-// unfinished spawn repeat --state-dir when it was given.
+// It takes a state dir that resolveOrgLedger already resolved and guarded
+// (orgLedgerMutating), the same split as newOrgRuntimeAt: each caller also
+// passes the directory on, to wireOrgWatchGate (spawn) or
+// wireOrgStartWatchGate (start), and `ralph org start --plan` to
+// StartFeatureParams.StateDir and org.FeatureRepoRoot with its source. It
+// sets InboxHintStateDir (orgInboxHintStateDir), so the `ralph org stop`
+// commands Spawn's errors print for a seat left with an unfinished spawn
+// repeat --state-dir when it was given.
 func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, configPath string) (*org.Org, error) {
-	if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
-		return nil, err
-	}
 	rt, err := newOrgRuntimeAt(resolvedStateDir, configPath)
 	if err != nil {
 		return nil, err
@@ -170,8 +170,9 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // on top, as config.Load reads them) when configPath is empty
 // and the ledger is the main worktree's (org.LedgerMainWorktreeRoot):
 // org.ResolveOrgStateDir placed it there (source "git-main-worktree"), or
-// --state-dir or RALPH_ORG_STATE_DIR names the .harness/state/org of the main
-// worktree of the repository spawn runs in, as a feature org's leader does.
+// --state-dir or the personal file's [org].state_dir names the
+// .harness/state/org of the main worktree of the repository spawn
+// runs in, as a feature org's leader does with --state-dir.
 // Every org_id in that ledger then gets the same org-wide limits, whichever
 // subdirectory or linked worktree (with its own ./ralph.toml) spawn runs in
 // (plan 2026-10-08-org-limits-reserve, Codex plan advisory 2). Approval
@@ -179,9 +180,9 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // in the org's feature binding, by the same rule, so a feature worktree's
 // copy of ralph.toml, which its leader can change, does not choose the mode
 // (plan 2026-10-12-org-plan-approval, A8); spawn carries it unused. With
-// --config, a state dir from --state-dir or RALPH_ORG_STATE_DIR naming
-// another directory, or any other source, cfg is returned unchanged. No
-// other setting is taken from the main worktree here; escalate, director
+// --config, a state dir from --state-dir or [org].state_dir naming another
+// directory, or any other source, cfg is returned unchanged.
+// No other setting is taken from the main worktree here; escalate, director
 // attach and status, merge, and `ralph status` take Director.Enabled and
 // Director.AutoMerge by the same rule (withMainWorktreeDirectorEnabled),
 // director attach also Director.Wake and Director.WakeCmd
@@ -344,10 +345,9 @@ func loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource stri
 // already-resolved state directory instead of resolving it itself. A caller
 // that also needs the resolved directory for its own purposes beyond wiring
 // (newOrgSendCmd's read hint, newOrgWatchCmd's banner +
-// WatchAllParams.StatusDir) resolves it once via org.ResolveOrgStateDir, calls
-// guardLegacyOrgStateDir itself, and calls this directly, instead of
-// resolving twice (self-review LOW fix -- each resolution shells out to
-// git).
+// WatchAllParams.StatusDir) resolves and guards it once via
+// resolveOrgLedger and calls this directly, instead of resolving twice
+// (self-review LOW fix -- each resolution shells out to git).
 func newOrgRuntimeAt(resolvedStateDir, configPath string) (*org.Org, error) {
 	orgCfg, err := resolveOrgConfig(configPath)
 	if err != nil {
@@ -563,20 +563,20 @@ var orgEscalateWatchOverride func() org.WatchLiveness
 // --state-dir resolvedStateDir only when stateDirFlagSet is true (--state-dir
 // was explicitly passed to this invocation of `send`): a bare `ralph org
 // read --org-id ... --seat ...` would otherwise resolve the DEFAULT state
-// dir (env/git-main-worktree/git-toplevel/cwd, see org.ResolveOrgStateDir),
-// which either fails with "seat not found" or -- worse -- silently reads a
-// different seat that happens to share the same org_id/seat_id in that
-// default manifest. An env-resolved or default-resolved state dir is
-// deliberately NOT appended: the same shell, run from the same directory
-// with the same environment, resolves it the same way when the operator
-// runs the printed command themselves, so repeating it would be redundant
-// as long as neither changes between the two commands (RALPH_ORG_STATE_DIR
-// can go stale if the env changes; the git-main-worktree, git-toplevel,
-// and cwd fallbacks depend on cwd the same way, since org.ResolveOrgStateDir
-// runs git in the current directory). resolvedStateDir must be the value
-// org.ResolveOrgStateDir already returned (always absolute), not the raw
-// flag text, so the hint survives a cwd change before the operator acts on
-// it.
+// dir (config/git-main-worktree/git-toplevel/cwd, see
+// org.ResolveOrgStateDir), which either fails with "seat not found" or --
+// worse -- silently reads a different seat that happens to share the same
+// org_id/seat_id in that default manifest. A state dir from the personal
+// file or a default tier is deliberately NOT appended: the same shell, run
+// from the same directory, resolves it the same way when the operator runs
+// the printed command themselves, so repeating it would be redundant as
+// long as neither changes between the two commands (the personal file's
+// [org].state_dir can be edited in between; it and the git-main-worktree,
+// git-toplevel, and cwd fallbacks depend on cwd, since
+// org.ResolveOrgStateDir runs git in the current directory).
+// resolvedStateDir must be the value org.ResolveOrgStateDir already
+// returned (always absolute), not the raw flag text, so the hint survives a
+// cwd change before the operator acts on it.
 //
 // --config is deliberately not included: newOrgReadCmd's RunE loads
 // *configPath into org.Org.Config, but (*org.Org).Read never reads that
@@ -712,12 +712,13 @@ const orgWideLimitsHelp = "Before a seat starts, `ralph org spawn` and `ralph or
 	"seats across all orgs). Those two are read from the main worktree's\n" +
 	"ralph.toml (built-in defaults when it has none) when --config is not\n" +
 	"given and the ledger is the main worktree's .harness/state/org, whether\n" +
-	"found by default or named with --state-dir or RALPH_ORG_STATE_DIR (as a\n" +
-	"feature org's leader does), so every subdirectory and linked worktree\n" +
-	"gets the same limits. In every other case (--config, a --state-dir or\n" +
-	"RALPH_ORG_STATE_DIR naming another ledger, a ledger found from the git\n" +
-	"toplevel, no git repository) the --config file, else ./ralph.toml, is\n" +
-	"used. A refusal says how to free a slot with `ralph org disband`."
+	"found by default or named with --state-dir (as a feature org's leader\n" +
+	"does) or with [org].state_dir in ralph.local.toml, so every subdirectory\n" +
+	"and linked worktree gets the same limits. In every other case (--config,\n" +
+	"a --state-dir or [org].state_dir naming another ledger, a ledger found\n" +
+	"from the git toplevel, no git repository) the --config file, else\n" +
+	"./ralph.toml, is used. A refusal says how to free a slot with\n" +
+	"`ralph org disband`."
 
 // orgReserveFlagUsage is the --reserve usage `ralph org spawn` and `ralph org
 // start` share. No backticks: pflag would take the first backticked word as
@@ -812,7 +813,10 @@ func newOrgSpawnCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return err
 			}
 
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
+				return err
+			}
 			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
@@ -1010,7 +1014,10 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 				return fmt.Errorf("org: --cwd is required")
 			}
 
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
+				return err
+			}
 			rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, *configPath)
 			if err != nil {
 				return err
@@ -1097,17 +1104,21 @@ type orgStartPlanParams struct {
 }
 
 // runOrgStartPlan is `ralph org start --plan <split plan> --feature <slug>`:
-// it resolves the state dir once, builds the spawn runtime on it (the
-// legacy-ledger guard and the main worktree's org-wide limits, as for every
-// start) with start's watch gate (wireOrgStartWatchGate, which launches the
-// watch when none runs; StartFeature runs it before it makes the worktree),
-// and runs (*org.Org).StartFeature with that dir and the main worktree root
+// it resolves the state dir once with the legacy-ledger guard
+// (resolveOrgLedger), builds the spawn runtime on it (the main worktree's
+// org-wide limits, as for every start) with start's watch gate
+// (wireOrgStartWatchGate, which launches the watch when none runs;
+// StartFeature runs it before it makes the worktree), and runs
+// (*org.Org).StartFeature with that dir and the main worktree root
 // (org.FeatureRepoRoot). The result is printed as a spawn's, followed on
 // success by the worktree, the branch and the status hint; a refusal or
 // failure is returned as StartFeature's error, which already says whether
 // the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
-	resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(p.stateDir, cmd.Flags().Changed("state-dir"))
+	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
+	if err != nil {
+		return err
+	}
 	rt, err := newOrgSpawnRuntimeAt(cmd, resolvedStateDir, stateDirSource, p.configPath)
 	if err != nil {
 		return err
@@ -1195,8 +1206,8 @@ func newOrgSendCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			// printing the raw --state-dir flag text, which breaks if the
 			// operator's cwd differs when they run the printed command).
 			stateDirFlagSet := cmd.Flags().Changed("state-dir")
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, stateDirFlagSet)
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, _, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

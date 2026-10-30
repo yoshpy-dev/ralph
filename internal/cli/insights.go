@@ -17,6 +17,7 @@ func newInsightsCmd() *cobra.Command {
 	var (
 		eventsDir    string
 		receiptsPath string
+		stateDir     string
 		jsonMode     bool
 	)
 
@@ -26,10 +27,11 @@ func newInsightsCmd() *cobra.Command {
 		Long: `Aggregate insight events from docs/insights/events/ and org runtime model
 receipts (<org-state-dir>/model-receipts.jsonl) into a pipeline summary.
 
-The org state dir is resolved with the same precedence "ralph org" verbs
-use (env RALPH_ORG_STATE_DIR, the main worktree shared by its linked
-worktrees, git toplevel, then cwd) -- see internal/org/statedir.go's
-ResolveOrgStateDir. Pass --receipts to point at an explicit file instead.
+The org state dir is --state-dir, else resolved with the same precedence
+"ralph org" verbs use ([org].state_dir in ralph.local.toml, the main
+worktree shared by its linked worktrees, git toplevel, then cwd) -- see
+internal/org/statedir.go's ResolveOrgStateDir. Pass --receipts to point at
+an explicit file instead.
 
 Sections:
   Events     — per-phase table: phase / events / verdicts / findings / triage
@@ -45,18 +47,19 @@ Use --json for machine-readable output of the full aggregate.`,
 				eventsDir = "docs/insights/events"
 			}
 			if receiptsPath == "" {
-				stateDir, stateDirSource := org.ResolveOrgStateDir("", false)
-				if err := guardLegacyOrgStateDir(cmd, stateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+				ledger, _, err := resolveOrgLedger(cmd, stateDir, orgLedgerReadOnly)
+				if err != nil {
 					return err
 				}
-				receiptsPath = org.ReceiptsPathIn(stateDir)
+				receiptsPath = org.ReceiptsPathIn(ledger)
 			}
 			return runInsights(eventsDir, receiptsPath, jsonMode, cmd)
 		},
 	}
 
 	cmd.Flags().StringVar(&eventsDir, "events-dir", "", "directory containing insight event JSONL files (default: docs/insights/events)")
-	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to the org runtime's model-receipts.jsonl (default: resolved via the org state-dir precedence -- env RALPH_ORG_STATE_DIR, the main worktree, git toplevel, or cwd)")
+	cmd.Flags().StringVar(&receiptsPath, "receipts", "", "path to the org runtime's model-receipts.jsonl; overrides --state-dir (default: model-receipts.jsonl in the org state directory, see --state-dir)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org state directory whose model-receipts.jsonl is read (default: the ledger ralph resolves -- [org].state_dir in ralph.local.toml, else the main worktree's .harness/state/org); --receipts overrides it")
 	cmd.Flags().BoolVar(&jsonMode, "json", false, "emit the aggregate as JSON")
 
 	cmd.AddCommand(newInsightsBackfillCmd())

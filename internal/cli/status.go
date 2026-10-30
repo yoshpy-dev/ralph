@@ -117,11 +117,12 @@ func newStatusCmd() *cobra.Command {
 			"checked or cannot be read here.\n\n" +
 			"status runs no gh and does not use the network. Besides that get-url, the\n" +
 			"git it runs is the local git rev-parse (and git worktree list --porcelain in\n" +
-			"a linked worktree) that finds the main worktree: to resolve the state\n" +
-			"directory when neither --state-dir nor RALPH_ORG_STATE_DIR names it, and,\n" +
-			"when one of them does, to tell whether it names the main worktree's ledger,\n" +
-			"whose ralph.toml then holds [org.director].enabled, whether or not the\n" +
-			"cache is fresh.\n\n" +
+			"a linked worktree) that finds the main worktree: without --state-dir, to\n" +
+			"find the ralph.local.toml whose [org].state_dir names the state directory\n" +
+			"when it is set, and to resolve the state directory when neither names it;\n" +
+			"and, when one of them does, to tell whether it names the main worktree's\n" +
+			"ledger, whose ralph.toml then holds [org.director].enabled, whether or not\n" +
+			"the cache is fresh.\n\n" +
 			"Also displays a scaffold-ownership section (FR-12): each `.ralph/manifest.toml`-\n" +
 			"tracked path's owner attribute (core/fork/seed/block) and any unresolved drift.\n" +
 			"This section always reads the current working directory's project (the same\n" +
@@ -129,15 +130,15 @@ func newStatusCmd() *cobra.Command {
 			"scope the org-runtime portion above. It is omitted entirely when the current\n" +
 			"directory has no `.ralph/manifest.toml` (not a ralph project).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, stateDir, orgLedgerReadOnly)
+			if err != nil {
 				return err
 			}
 			return runStatus(cmd, resolvedStateDir, stateDirSource, orgID, jsonOut)
 		},
 	}
 
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- env RALPH_ORG_STATE_DIR, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
 	cmd.Flags().StringVar(&orgID, "org-id", "", "filter roster to a single org_id (default: every org found in the manifest)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 
@@ -213,8 +214,8 @@ func runStatus(cmd *cobra.Command, stateDir, stateDirSource, filterOrgID string,
 	// read once here (no lock) and shown on both paths, with the switch
 	// read as `ralph org escalate` reads it and auto_merge from the same
 	// file. Reading them runs the local git rev-parse calls of
-	// withMainWorktreeDirectorEnabled when --state-dir or
-	// RALPH_ORG_STATE_DIR names the ledger.
+	// withMainWorktreeDirectorEnabled when --state-dir or the personal
+	// file's [org].state_dir names the ledger.
 	director := readOrgDirectorReport(stateDir, statusDirectorConfig(cmd.ErrOrStderr(), orgCfg, orgCfgLoaded, stateDir, stateDirSource))
 	warnDirectorDamage(cmd.ErrOrStderr(), org.DirectorPathIn(stateDir), director)
 
@@ -447,7 +448,7 @@ func readOrgWatchHeartbeat(stateDir, orgID string) (heartbeat orgWatchHeartbeat,
 }
 
 // printStateDirLine prints the resolved org state directory alongside the
-// org.ResolveOrgStateDir precedence tier that produced it (flag/env/
+// org.ResolveOrgStateDir precedence tier that produced it (flag/config/
 // git-main-worktree/git-toplevel/cwd) -- tech-debt "watchdog deferred LOW
 // (1)": the source was being resolved everywhere but discarded (`_`) at
 // every production call site, so an operator debugging "why did

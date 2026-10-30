@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -45,8 +46,8 @@ type legacyLedgerRepo struct {
 
 // newLegacyLedgerRepo builds a legacyLedgerRepo and chdirs into its
 // worktree. It isolates git from the developer's config and from GIT_DIR-style
-// variables a git hook may export, and clears RALPH_ORG_STATE_DIR so the
-// git tiers are the ones under test.
+// variables a git hook may export. TestMain unsets RALPH_ORG_STATE_DIR, so no
+// note or refusal of checkRetiredOrgStateDirEnv gets in the way.
 func newLegacyLedgerRepo(t *testing.T) legacyLedgerRepo {
 	t.Helper()
 	isolateGitConfig(t)
@@ -56,7 +57,6 @@ func newLegacyLedgerRepo(t *testing.T) legacyLedgerRepo {
 			t.Fatalf("unsetenv %s: %v", key, err)
 		}
 	}
-	t.Setenv(org.EnvOrgStateDir, "")
 
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -173,6 +173,11 @@ func TestOrgLegacyLedger_MutatingVerbsRefusedWhileLegacySeatsActive(t *testing.T
 	}
 }
 
+// TestOrgLegacyLedger_ExplicitStateDirSkipsGuard: a ledger chosen with
+// --state-dir or the personal file's [org].state_dir gets no legacy-ledger
+// guard. RALPH_ORG_STATE_DIR is no longer such a choice (plan
+// 2026-10-30-org-state-dir-local, D5);
+// TestOrgRetiredStateDirEnv_NamingTheLegacyLedgerRefusesStop covers it.
 func TestOrgLegacyLedger_ExplicitStateDirSkipsGuard(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -181,8 +186,9 @@ func TestOrgLegacyLedger_ExplicitStateDirSkipsGuard(t *testing.T) {
 		{"flag", func(t *testing.T, r legacyLedgerRepo) []string {
 			return []string{"--state-dir", r.legacyDir}
 		}},
-		{"env", func(t *testing.T, r legacyLedgerRepo) []string {
-			t.Setenv(org.EnvOrgStateDir, r.legacyDir)
+		{"config", func(t *testing.T, r legacyLedgerRepo) []string {
+			t.Setenv(config.LocalConfigEnv, "")
+			writeTestFile(t, filepath.Join(r.mainRoot, config.LocalConfigFileName), "[org]\nstate_dir = \""+r.legacyDir+"\"\n")
 			return nil
 		}},
 	}
@@ -290,9 +296,7 @@ func TestOrgLegacyLedger_ReadOnlyVerbsNoteAndContinue(t *testing.T) {
 		// neither git nor gh (setupOrgStubPATH keeps the developer's PATH).
 		{"org_merge_order", []string{"org", "merge-order"}, false, stateDirHint},
 		{"org_merge_order_json", []string{"org", "merge-order", "--json"}, true, stateDirHint},
-		// insights has no --state-dir flag; the note names the env var.
-		{"insights_json", []string{"insights", "--json", "--events-dir", t.TempDir()}, true,
-			org.EnvOrgStateDir + "=" + shellQuoteIfNeeded(r.legacyDir)},
+		{"insights_json", []string{"insights", "--json", "--events-dir", t.TempDir()}, true, stateDirHint},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -591,6 +591,23 @@ func TestStandardTemplateDrift_EachKeyIsComparedOnBothSides(t *testing.T) {
 	checkEachKeyIsComparedOnBothSides(t, standardTemplateDrift, reflect.TypeFor[standardTemplateProbe](), rows)
 }
 
+// TestTemplateDriftProbesHoldNoLocalOnlyKey pins that neither drift check
+// requires templates/base/ralph.toml to set a key of LocalOnlyKeys, such as
+// org.state_dir: Load refuses a ralph.toml that sets one (plan
+// 2026-10-30-org-state-dir-local, D3), so the template only mentions it in a
+// comment, and the probes leave it out.
+func TestTemplateDriftProbesHoldNoLocalOnlyKey(t *testing.T) {
+	probeKeys := slices.Concat(
+		tomlKeys(reflect.TypeFor[orgTemplateProbe](), ""),
+		tomlKeys(reflect.TypeFor[standardTemplateProbe](), ""),
+	)
+	for _, key := range LocalOnlyKeys() {
+		if slices.Contains(probeKeys, key) {
+			t.Errorf("%s is in a template drift probe, but it is local-only (LocalOnlyKeys): the template cannot set it", key)
+		}
+	}
+}
+
 // tomlKeys returns the dotted toml key of each field of t that is not a
 // struct, under prefix, reading a struct field as the table of its keys.
 func tomlKeys(t reflect.Type, prefix string) []string {

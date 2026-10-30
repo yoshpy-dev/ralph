@@ -149,10 +149,10 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			"ledger's directory out of the worktree, to a place where no other\n" +
 			"ledger is, once no org on the ledger runs and no ralph org command\n" +
 			"runs on it, and to run ralph org cleanup --branch <branch> again with\n" +
-			"--state-dir or RALPH_ORG_STATE_DIR naming the new place. So does a\n" +
-			"record that is not the binding's (its path or kind) when the worktree\n" +
-			"at the record's path holds the ledger; after the ledger is moved, that\n" +
-			"ralph org cleanup is refused with a MANUAL: line.\n" +
+			"--state-dir or [org].state_dir in ralph.local.toml naming the new\n" +
+			"place. So does a record that is not the binding's (its path or kind)\n" +
+			"when the worktree at the record's path holds the ledger; after the\n" +
+			"ledger is moved, that ralph org cleanup is refused with a MANUAL: line.\n" +
 			"\n" +
 			"With --wait-checks <duration> (Go's form, such as 60m; 0, the default,\n" +
 			"waits not at all; at most 6h, and a negative value or one over 6h is\n" +
@@ -225,8 +225,8 @@ func newOrgMergeCmd(stateDir, configPath *string) *cobra.Command {
 			}
 			// newOrgRuntime's steps, split so that auto_merge is read by the
 			// main worktree rule of ralph org escalate.
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerMutating); err != nil {
+			resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, *stateDir, orgLedgerMutating)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

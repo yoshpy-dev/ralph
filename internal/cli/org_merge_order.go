@@ -141,8 +141,8 @@ func newOrgMergeOrderCmd(stateDir, configPath *string) *cobra.Command {
 			if cmd.Flags().Changed("org-id") {
 				return errors.New("org: merge-order: --org-id does not apply: merge-order lists the feature branches of every org in the ledger")
 			}
-			resolvedStateDir, stateDirSource := org.ResolveOrgStateDir(*stateDir, cmd.Flags().Changed("state-dir"))
-			if err := guardLegacyOrgStateDir(cmd, resolvedStateDir, stateDirSource, orgLedgerReadOnly); err != nil {
+			resolvedStateDir, _, err := resolveOrgLedger(cmd, *stateDir, orgLedgerReadOnly)
+			if err != nil {
 				return err
 			}
 			rt, err := newOrgRuntimeAt(resolvedStateDir, *configPath)

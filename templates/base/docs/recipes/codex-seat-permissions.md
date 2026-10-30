@@ -81,11 +81,12 @@ recorded in `docs/evidence/codex-seat-permissions-2026-09-18.md`.
 
 ## The org ledger and `--add-dir`
 
-Without `--state-dir` or `RALPH_ORG_STATE_DIR`, ralph uses one org ledger
-per repository: from the main checkout and from every linked worktree, the
-state directory is the main worktree's `.harness/state/org/` (the `/org`
-skill's prerequisites give the full order and the exceptions, such as the
-worktrees of a bare repository). A leader whose cwd is a linked worktree
+Without `--state-dir` or an `[org].state_dir` in `ralph.local.toml`, ralph
+uses one org ledger per repository: from the main checkout and from every
+linked worktree, the state directory is the main worktree's
+`.harness/state/org/` (the `/org` skill's prerequisites give the full order
+and the exceptions, such as the worktrees of a bare repository). ralph no
+longer reads `RALPH_ORG_STATE_DIR`. A leader whose cwd is a linked worktree
 therefore writes the ledger outside its own cwd, which
 `--sandbox workspace-write` refuses. ralph adds `--add-dir <state dir>` right
 after the sandbox flags of a codex leader seat, and of the codex reviewer

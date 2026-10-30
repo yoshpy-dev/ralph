@@ -967,7 +967,7 @@ func TestOrgMerge_AutoMergeComesFromTheMainWorktreeRalphToml(t *testing.T) {
 				"ledger would be removed with it, and nothing is removed: once no org on the ledger runs and no ralph org command " +
 				"runs on it, move its " +
 				"directory to a place outside the worktree where no other ledger is, and run ralph org cleanup --branch feat/a " +
-				"again with --state-dir or RALPH_ORG_STATE_DIR naming the new place)\n"
+				"again with --state-dir or [org].state_dir in ralph.local.toml naming the new place)\n"
 			if stdout != want {
 				t.Errorf("stdout:\n%s\nwant:\n%s(the CLEANUP: skipped line, with no CLEANUP MANUAL: line)", stdout, want)
 			}
@@ -1100,7 +1100,8 @@ func TestOrgMerge_Help(t *testing.T) {
 			"A skip because the ledger's directory is inside the feature worktree has no CLEANUP MANUAL: either, since cleaning " +
 				"up by hand would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, " +
 				"to a place where no other ledger is, once no org on the ledger runs and no ralph org command runs on it, and to " +
-				"run ralph org cleanup --branch <branch> again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So " +
+				"run ralph org cleanup --branch <branch> again with --state-dir or [org].state_dir in ralph.local.toml naming the " +
+				"new place. So " +
 				"does a record that is not the binding's (its path or kind) when the worktree at the record's path holds the " +
 				"ledger; after the ledger is moved, that ralph org cleanup is refused with a MANUAL: line.",
 			"an interrupt once pr_merged is recorded skips the cleanup or stops it, and the CLEANUP: line says how it ended.",
@@ -1148,6 +1149,12 @@ func TestOrgMerge_Help(t *testing.T) {
 			if !strings.Contains(help, want) {
 				t.Errorf("%v does not say %q:\n%s", tc.args, want, out)
 			}
+		}
+		// ralph no longer reads RALPH_ORG_STATE_DIR (plan
+		// 2026-10-30-org-state-dir-local, AC10), so the move of the ledger
+		// names the new place with --state-dir or [org].state_dir alone.
+		if strings.Contains(help, "RALPH_ORG_STATE_DIR") {
+			t.Errorf("%v still names RALPH_ORG_STATE_DIR:\n%s", tc.args, out)
 		}
 	}
 }

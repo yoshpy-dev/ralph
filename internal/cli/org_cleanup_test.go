@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yoshpy-dev/ralph/internal/config"
 	"github.com/yoshpy-dev/ralph/internal/org"
 )
 
@@ -583,6 +584,118 @@ func TestOrgCleanup_RefusedWhileALegacyLedgerHasActiveSeats(t *testing.T) {
 	}
 }
 
+// cleanup changes the ledger, so with RALPH_ORG_STATE_DIR, which ralph no
+// longer reads, naming another directory than the default ledger, it is
+// refused as the other verbs that change the ledger are (plan
+// 2026-10-30-org-state-dir-local, D5 and AC6; checkRetiredOrgStateDirEnv):
+// exit 1, an error marked errOrgLedgerUnresolved that names both
+// directories and the ways out, nothing on stdout and no note, no gh call,
+// and nothing removed or recorded, the merged feat/a's worktree, its
+// registration, its branch, its record, and the ledger all as they were.
+// With --state-dir naming the ledger, the same cleanup cleans up feat/a with
+// one note, so the refusal is the variable's alone.
+func TestOrgCleanup_RefusedWhileTheRetiredStateDirEnvNamesAnotherLedger(t *testing.T) {
+	fx := newCleanupCLIFixture(t)
+	fx.squashMergeOnGitHub(t)
+	before := fx.snapshot(t)
+	envDir := filepath.Join(mergeOrderTempDir(t), "old ledger")
+	t.Setenv(retiredOrgStateDirEnv, envDir)
+
+	stdout, stderr, err := runOrgCmdStreams(t, "cleanup")
+	want := "ralph org cleanup: cannot resolve the org ledger: RALPH_ORG_STATE_DIR names " + envDir + ", which ralph no " +
+		"longer reads, and the ledger ralph finds by default is " + fx.stateDir + ", so nothing was changed; to keep using " +
+		envDir + ", write [org].state_dir = " + strconv.Quote(envDir) + " in " + filepath.Join(fx.work, config.LocalConfigFileName) +
+		" or pass --state-dir " + shellQuoteIfNeeded(envDir) + ", and unset RALPH_ORG_STATE_DIR; to use " + fx.stateDir +
+		", unset RALPH_ORG_STATE_DIR"
+	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) || err.Error() != want {
+		t.Errorf("cleanup = exit %d, %v\nwant exit 1 with\n%s", code, err, want)
+	}
+	if stdout != "" || strings.Contains(stderr, retiredEnvNote) {
+		t.Errorf("cleanup printed stdout %q, stderr %q; want nothing beside the error", stdout, stderr)
+	}
+	if got := fx.ghCalls(t); len(got) != 0 {
+		t.Errorf("gh ran: %q", got)
+	}
+	if after := fx.snapshot(t); after != before {
+		t.Errorf("a refused cleanup changed something:\n%s\n->\n%s", before, after)
+	}
+	if _, err := os.Stat(envDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a refused cleanup made the variable's directory %s (stat: %v)", envDir, err)
+	}
+
+	stdout, stderr, err = fx.cleanup(t)
+	if err != nil || stdout != "CLEANED: feat/a org-a\n" {
+		t.Fatalf("cleanup --state-dir with the variable set: err %v, stdout %q, stderr %q; want feat/a cleaned up", err, stdout, stderr)
+	}
+	checkRetiredEnvNote(t, "ralph org cleanup --state-dir", stderr, envDir, fx.stateDir, false)
+	if got := len(fx.cleanedEvents(t)); got != 1 {
+		t.Errorf("the ledger has %d worktree_cleaned; want 1", got)
+	}
+}
+
+// Without --state-dir, cleanup reads the ledger [org].state_dir names in the
+// personal file at the main worktree's root (source config; plan
+// 2026-10-30-org-state-dir-local, AC1, AC5, and AC8). The fixture's ledger is
+// moved out of the repository, so the default ledger holds nothing. A
+// relative value is refused first: exit 1, an error marked
+// errOrgLedgerUnresolved that names the file, no gh call, and nothing removed
+// or recorded. With the moved ledger's absolute path, cleanup finds feat/a's
+// binding there, cleans up its feature worktree in the main worktree
+// (org.FeatureRepoRoot for source config), and records worktree_cleaned in
+// that ledger, none in the default one.
+func TestOrgCleanup_PersonalFileNamesTheLedger(t *testing.T) {
+	fx := newCleanupCLIFixture(t)
+	fx.squashMergeOnGitHub(t)
+	defaultLedger := fx.stateDir
+	moved := filepath.Join(mergeOrderTempDir(t), "ledger")
+	if err := os.Rename(defaultLedger, moved); err != nil {
+		t.Fatal(err)
+	}
+	fx.stateDir = moved
+	before := fx.snapshot(t)
+	t.Setenv(config.LocalConfigEnv, "")
+	path := filepath.Join(fx.work, config.LocalConfigFileName)
+
+	writeTestFile(t, path, "[org]\nstate_dir = \"ledger\"\n")
+	stdout, _, err := runOrgCmdStreams(t, "cleanup")
+	want := "ralph org cleanup: cannot resolve the org ledger: " + path + `: [org].state_dir "ledger" must be an absolute path ` +
+		"or start with ~/"
+	if code := ExitCode(err); code != 1 || !errors.Is(err, errOrgLedgerUnresolved) || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("cleanup with a relative [org].state_dir = exit %d, %v\nwant exit 1 with an error that starts\n%s", code, err, want)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q; want nothing", stdout)
+	}
+	if got := fx.ghCalls(t); len(got) != 0 {
+		t.Errorf("gh ran: %q", got)
+	}
+	if after := fx.snapshot(t); after != before {
+		t.Errorf("a refused cleanup changed something:\n%s\n->\n%s", before, after)
+	}
+
+	writeTestFile(t, path, fmt.Sprintf("[org]\nstate_dir = %q\n", moved))
+	stdout, stderr, err := runOrgCmdStreams(t, "cleanup")
+	if err != nil || stderr != "" || stdout != "CLEANED: feat/a org-a\n" {
+		t.Fatalf("cleanup with [org].state_dir = %s: err %v, stdout %q, stderr %q; want feat/a cleaned up", moved, err, stdout, stderr)
+	}
+	if _, err := os.Stat(fx.wt); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the worktree %s is still there (stat: %v)", fx.wt, err)
+	}
+	if got := fx.worktreeRecord(t); got != "<absent>" {
+		t.Errorf("the record org-a is still there:\n%s", got)
+	}
+	wantDetails := "branch=feat/a head=" + fx.head + " via=cleanup worktree=" + strconv.Quote(fx.wt)
+	if cleaned := fx.cleanedEvents(t); len(cleaned) != 1 || cleaned[0].OrgID != "a" || cleaned[0].Details != wantDetails {
+		t.Errorf("worktree_cleaned in %s = %+v; want org a's one with %q", moved, cleaned, wantDetails)
+	}
+	if _, err := os.Stat(org.ManifestPathIn(defaultLedger)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the default ledger %s has a manifest (stat: %v); want the cleanup recorded in %s alone", defaultLedger, err, moved)
+	}
+	if got := fx.ghCalls(t); !slices.Equal(got, []string{cleanupGHCall("feat/a")}) {
+		t.Errorf("gh calls = %q; want only merge-order's gh pr list of feat/a, with -R github.com/o/r", got)
+	}
+}
+
 // The command's context reaches the reads before the removal: with it done
 // before the command runs, cleanup exits 1 with the interruption of the first
 // of them, the read of origin (S-X1 of the plan), nothing on stdout, and
@@ -1058,7 +1171,8 @@ func TestOrgCleanup_Help(t *testing.T) {
 			"A ledger whose directory is inside the feature worktree gets no MANUAL: line either, since cleaning up by hand " +
 				"would remove the ledger with it: the reason says to move the ledger's directory out of the worktree, to a place " +
 				"where no other ledger is, once no org on the ledger runs and no ralph org command runs on it, and to run ralph " +
-				"org cleanup --branch <branch> again with --state-dir or RALPH_ORG_STATE_DIR naming the new place. So does a " +
+				"org cleanup --branch <branch> again with --state-dir or [org].state_dir in ralph.local.toml naming the new " +
+				"place. So does a " +
 				"record that is not the binding's (its path or kind) when the worktree at the record's path holds the ledger; " +
 				"after the ledger is moved, that cleanup is refused with the MANUAL: line above.",
 			"Exit codes: 0 when every branch was cleaned up or there was nothing to clean up; 1 when a branch was skipped, gh is " +
@@ -1087,6 +1201,12 @@ func TestOrgCleanup_Help(t *testing.T) {
 			if !strings.Contains(help, want) {
 				t.Errorf("%v does not say %q:\n%s", tc.args, want, out)
 			}
+		}
+		// ralph no longer reads RALPH_ORG_STATE_DIR (plan
+		// 2026-10-30-org-state-dir-local, AC10), so the move of the ledger
+		// names the new place with --state-dir or [org].state_dir alone.
+		if strings.Contains(help, "RALPH_ORG_STATE_DIR") {
+			t.Errorf("%v still names RALPH_ORG_STATE_DIR:\n%s", tc.args, out)
 		}
 	}
 }

@@ -918,8 +918,8 @@ merge と取り直し(`ralph org regate`)を人に聞かずに打ってよいか
   `ralph org cleanup --branch <ブランチ>` を打ち直せば続きから片付く
   (下の「GitHub で merge した PR の後始末」)。ただし、台帳のディレクトリが
   機能の worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち
-  直しには `--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。
-  `CLEANUP MANUAL:` の行は、
+  直しには `--state-dir` か `ralph.local.toml` の `[org].state_dir` で新しい
+  場所を指す。`CLEANUP MANUAL:` の行は、
   ralph が先に進めず人の判断が要るときだけ出る。手のコマンド
   (`git branch -D` などを含む)は、人に頼まれないまま打たない。台帳を動かす
   手も同じ。
@@ -1069,8 +1069,9 @@ regate の検査の仕方は `[org.gate].regate_checks` で決まる。regate �
    なしで打ち、1 本を片付けて別の 1 本で断られたとき)、そのブランチは
    片付いたので、手順 2 と同じく人に報告する。台帳のディレクトリが機能の
    worktree の中にある断りは、理由が先に台帳を動かす手を言い、打ち直しには
-   `--state-dir` か `RALPH_ORG_STATE_DIR` で新しい場所を指す。台帳を動かす手
-   も、人に頼まれないまま打たない。stderr の文が中断と言うときは(最後の
+   `--state-dir` か `ralph.local.toml` の `[org].state_dir` で新しい場所を
+   指す。台帳を動かす手も、人に頼まれないまま打たない。stderr の文が中断と
+   言うときは(最後の
    ブランチの片付けの途中でも終了コード 1 になる)、`CLEANED:` の行を手順 2 と
    同じく報告し、残りは `ralph org cleanup` を打ち直せば続きから片付く。
 4. `SKIPPED:` で止まったブランチは、人が理由を直したと言うまで打ち直さず、

@@ -563,6 +563,11 @@ func TestRenderRolePrompt_Leader_FeatureOrgProcedure(t *testing.T) {
 		!containsPhrase(intro, "start と別の台帳を使うことがあります") {
 		t.Errorf("expected the 機能ごとの org intro to have every ralph org command carry the --state-dir of the task's `%s` line, and why, got section:\n%s", ledgerLine, section)
 	}
+	// ralph no longer reads RALPH_ORG_STATE_DIR (plan
+	// 2026-10-30-org-state-dir-local), so the template does not name it.
+	if strings.Contains(text, "RALPH_ORG_STATE_DIR") {
+		t.Errorf("expected the leader template not to name RALPH_ORG_STATE_DIR, got:\n%s", text)
+	}
 	// The seats' spawns carry the --scope in the brackets of the task's
 	// reserved paths line, one shell word ralph quotes
 	// (TestFeatureLeaderTask_ScopeIsOneShellWord).
@@ -1840,6 +1845,9 @@ func TestRenderRolePrompt_Leader_EscalatesThroughRalphOrgEscalate(t *testing.T) 
 		{"出た: 件は記録済み", "打ち直さずに `ralph org inbox notify --state-dir <台帳> <id>` を打つ"},
 		{"出ない: 件は記録されていない", "メッセージを直して打ち直す"},
 		{"出ない: 件は記録されていない", "`ralph.toml` を読めない、など)は打ち直さず"},
+		// Plan 2026-10-30-org-state-dir-local: a ledger that cannot be
+		// resolved is not recorded either (S2b, S4).
+		{"出ない: 件は記録されていない", "それ以外(台帳を決められない・読めない・書けない、"},
 		{"出ない: 件は記録されていない", "打ち直さず、pane にメッセージとエラー(手で閉じる herdr のコマンドがあればそれも)を書いて止まる"},
 	} {
 		if item, ok := markdownItem(section, c.marker); !ok || !containsPhrase(item, c.want) {

@@ -877,7 +877,8 @@ func keepLockOrgWatchLaunch(t *testing.T, stateDir string, pid int) {
 // stopping one, and `ralph status` after a stopped child that keeps
 // watch.lock) repeat --state-dir, quoted, when it was given, as the gate's
 // refusal does (TestOrgWatchGate_TheCommandsRepeatAnExplicitStateDir), and
-// name none for a ledger found without it (here RALPH_ORG_STATE_DIR).
+// name none for a ledger found without it (here the personal file's
+// [org].state_dir).
 func TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -910,12 +911,11 @@ func TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 				stateDir := filepath.Join(t.TempDir(), "led ger")
 				tc.setup(t, stateDir)
 				args, part := []string{"watch", "--all", "--detach"}, ""
-				t.Setenv(org.EnvOrgStateDir, "")
 				if given {
 					args = append(args, "--state-dir", stateDir)
 					part = " --state-dir '" + stateDir + "'"
 				} else {
-					t.Setenv(org.EnvOrgStateDir, stateDir)
+					usePersonalStateDir(t, stateDir)
 				}
 
 				stdout, _, err := runOrgCmdStreams(t, args...)
@@ -924,7 +924,7 @@ func TestOrgWatchDetach_TheCommandsRepeatAnExplicitStateDir(t *testing.T) {
 					t.Fatalf("--detach = %v (stdout %q); want an error naming %q", err, stdout, want)
 				}
 				if !given && strings.Contains(err.Error(), "--state-dir") {
-					t.Errorf("error with the ledger from %s = %q; want no --state-dir", org.EnvOrgStateDir, err)
+					t.Errorf("error with the ledger from [org].state_dir = %q; want no --state-dir", err)
 				}
 			})
 		}

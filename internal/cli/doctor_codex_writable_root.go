@@ -85,7 +85,7 @@ func codexSandboxEnvFromOS() (codexSandboxEnv, error) {
 	}, nil
 }
 
-// doctorCodexSandboxEnv is the environment resolver runDoctorFull hands to
+// doctorCodexSandboxEnv is the environment resolver runDoctorStateDir hands to
 // checkCodexAgmsgWritableRoot. It is a package variable (rather than a
 // direct call to codexSandboxEnvFromOS) so internal/cli's TestMain
 // (main_test.go) can pin it to a config path that does not exist, keeping
