@@ -95,20 +95,20 @@ PR は `Refs #276` です。3 本目(B)が標準フローの値とスクリプ�
 
 ## Acceptance criteria
 
-- [ ] AC1 `--state-dir` を渡さないとき、個人用のファイルの `[org].state_dir`(絶対パスか `~/`)が台帳の場所になる。対象は `ralph org` の動詞、`ralph status`、`ralph insights`、`ralph doctor` で、source は `config`。`--state-dir` を渡せばそちらが勝つ。
-- [ ] AC2 個人用のファイルは、cwd の repository の主 worktree の root のもの。linked worktree からもサブディレクトリからも同じ値になり、`--config` に別のファイルを渡しても変わらない。
-- [ ] AC3 個人用のファイルの相対の `state_dir` は、台帳を決めるときにエラーになり、パスを名指す。`~/` は home に展開する。Load はこの値を検査しないので、`--state-dir` を渡したコマンド(Load を通る `ralph org stop` など)は値の誤りに妨げられずに動く(CLI の経路のテストで確かめる)。
-- [ ] AC4 `ralph.toml` に `[org].state_dir` があると Load がエラーにし、ファイルのパスと `ralph.local.toml` に書くことを言う。`templates/base/ralph.toml` は注釈でだけ触れ、init した project の Load は通る。
-- [ ] AC5 個人用のファイルが読めない・正しくないとき、`--state-dir` のない org の動詞、status、insights は終了コード 1 でパスを名指す。`ralph.toml` が壊れていても台帳の場所は決まる。doctor は fail の検査 1 行を出して残りを続け、merge guarantee のキャッシュは書かない。TOML として読めない個人用のファイルは、`--state-dir` を渡しても Load がエラーにする(A1 から。エラーがパスを名指す)。
-- [ ] AC6 本番のコードは `RALPH_ORG_STATE_DIR` を値として読まない。env を設定しても台帳は変わらない。空でない値で設定されているときは次のとおり(D5)。
+- [x] AC1 `--state-dir` を渡さないとき、個人用のファイルの `[org].state_dir`(絶対パスか `~/`)が台帳の場所になる。対象は `ralph org` の動詞、`ralph status`、`ralph insights`、`ralph doctor` で、source は `config`。`--state-dir` を渡せばそちらが勝つ。
+- [x] AC2 個人用のファイルは、cwd の repository の主 worktree の root のもの。linked worktree からもサブディレクトリからも同じ値になり、`--config` に別のファイルを渡しても変わらない。
+- [x] AC3 個人用のファイルの相対の `state_dir` は、台帳を決めるときにエラーになり、パスを名指す。`~/` は home に展開する。Load はこの値を検査しないので、`--state-dir` を渡したコマンド(Load を通る `ralph org stop` など)は値の誤りに妨げられずに動く(CLI の経路のテストで確かめる)。
+- [x] AC4 `ralph.toml` に `[org].state_dir` があると Load がエラーにし、ファイルのパスと `ralph.local.toml` に書くことを言う。`templates/base/ralph.toml` は注釈でだけ触れ、init した project の Load は通る。
+- [x] AC5 個人用のファイルが読めない・正しくないとき、`--state-dir` のない org の動詞、status、insights は終了コード 1 でパスを名指す。`ralph.toml` が壊れていても台帳の場所は決まる。doctor は fail の検査 1 行を出して残りを続け、merge guarantee のキャッシュは書かない。TOML として読めない個人用のファイルは、`--state-dir` を渡しても Load がエラーにする(A1 から。エラーがパスを名指す)。
+- [x] AC6 本番のコードは `RALPH_ORG_STATE_DIR` を値として読まない。env を設定しても台帳は変わらない。空でない値で設定されているときは次のとおり(D5)。
   - 台帳が `--state-dir` か `[org].state_dir` で決まったとき、または既定の台帳が env の値と同じ場所のときは、stderr に 1 行の注意を出す。
   - 既定の台帳が env の値と違う場所のときは、台帳を変えるコマンドは終了コード 1 で断り、台帳に何も書かず、見張りを起こさず、driver を呼ばない。読むだけのコマンドは注意を出して続ける。
   - doctor は warn を出す。
-- [ ] AC7 `ralph insights --state-dir <dir>` と `ralph doctor --state-dir <dir>` がその台帳を使う。insights は `--receipts` があればそちらが勝つ。古い台帳の案内(`org_legacy_ledger.go`)は、どのコマンドにも `--state-dir` を言う。
-- [ ] AC8 source `config` は、これまでの `env` と同じに扱う。対象は `LedgerMainWorktreeRoot`、`FeatureRepoRoot`、`loadMainWorktreeOrgConfig` の判定、エラーの hint(`--state-dir` を付けない)。watch の子、director、leader には、これまでどおり `--state-dir` を明示で渡す。
-- [ ] AC9 `RALPH_LOCAL_CONFIG=off` のとき、個人用のファイルの段は飛ばす(gate、regate、テスト)。
-- [ ] AC10 文書と help: README、`/org` skill の 4 つの写し、recipe 2 本の 2 つの写し、`templates/base/ralph.toml`、leader の雛形、help 文が、台帳の場所を `--state-dir` と `[org].state_dir` で説明する。`RALPH_ORG_STATE_DIR` に触れるのは「もう読まない」の説明だけ。
-- [ ] AC11 `go build ./...`、gofmt、`go vet`、golangci-lint、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
+- [x] AC7 `ralph insights --state-dir <dir>` と `ralph doctor --state-dir <dir>` がその台帳を使う。insights は `--receipts` があればそちらが勝つ。古い台帳の案内(`org_legacy_ledger.go`)は、どのコマンドにも `--state-dir` を言う。
+- [x] AC8 source `config` は、これまでの `env` と同じに扱う。対象は `LedgerMainWorktreeRoot`、`FeatureRepoRoot`、`loadMainWorktreeOrgConfig` の判定、エラーの hint(`--state-dir` を付けない)。watch の子、director、leader には、これまでどおり `--state-dir` を明示で渡す。
+- [x] AC9 `RALPH_LOCAL_CONFIG=off` のとき、個人用のファイルの段は飛ばす(gate、regate、テスト)。
+- [x] AC10 文書と help: README、`/org` skill の 4 つの写し、recipe 2 本の 2 つの写し、`templates/base/ralph.toml`、leader の雛形、help 文が、台帳の場所を `--state-dir` と `[org].state_dir` で説明する。`RALPH_ORG_STATE_DIR` に触れるのは「もう読まない」の説明だけ。
+- [x] AC11 `go build ./...`、gofmt、`go vet`、golangci-lint、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
 
 ## Implementation outline
 
@@ -190,8 +190,8 @@ PR は `Refs #276` です。3 本目(B)が標準フローの値とスクリプ�
   - S7 の見直し(review-276a2、e0ffa2aa): L1・L4・L6 は直った、新しい所見 0、`Merge: yes`。
   - /verify(verify-276a2、5e65830a): Verdict pass。run-static-verify rc=0(175 秒)、AC1〜AC10 を満たす(一部はコードとテストの存在で確認: AC2 の `--config`、AC6 の start・spawn、escalate の NOT RECORDED)、AC11 は静的の部分のみ。所見 LOW 3: V1(tech-debt の 13 行に持ち越しの注がない)と V2(186 行 (c) F-7 は `resolveOrgLedger` で解消)は /sync-docs に回す。V3(doctor の warn と escalate の help が拒否の条件「`--state-dir` も `[org].state_dir` も台帳を名指さないとき」を省き、個人用のファイルで台帳を決めた人にも「断られる」と読める)は Go の文で安く直せるので S8 で直した。
   - S8 cb33a636(impl-276a2-s8): doctor の warn と escalate の help に条件を入れた(「by default」は cwd の段でも拒否するのでそのまま)。テストの期待値を全文一致のまま合わせた。README:148、org の skill、recipe はすでに条件を書いているか拒否に触れないので変えていない。読むだけの注意と変える動詞のエラーは source が flag か config、または SamePath のときに先に返るので変えていない。「`[org].state_dir` が別の台帳、env がさらに別」で注意だけになるテストは既存(`TestOrgRetiredStateDirEnv_OnlyANoteWhenTheLedgerIsChosenOrTheSame`)。検証: gofmt・build・vet rc=0、cli 98 本(-run で絞った)rc=0、golangci-lint 0 件。self-check は 5 項目とも clean。範囲外: `orgLedgerMutating` の doc と `statedir.go:26-28` の注釈は条件を省いた大まかな書き方のまま(利用者の読む文ではない)。判定と文を同じ定数から作る形は tech-debt の候補。
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-10-30-org-state-dir-local.md`(2f801336、S7 の見直し e0ffa2aa、S8 の見直し b55e877b)。CRITICAL・HIGH・MEDIUM 0、残る LOW 6(L2・L3・L5・L7・L8・L9。L8 は /sync-docs で済み、L9 は範囲外)、`Merge: yes`。
+- [x] Verification artifact created — `docs/reports/verify-2026-10-30-org-state-dir-local.md`(5e65830a、S8 の確認 e5d5a5a4)。Verdict pass、AC1〜AC10 を満たす、V3 は S8 で直り、V1・V2 は /sync-docs で済み。
+- [x] Test artifact created — `docs/reports/test-2026-10-30-org-state-dir-local.md`(4045df27)。Verdict pass: `run-test.sh` rc 0(1,375 秒、shell 45 本、Go 10 パッケージ、org 1,285 本・cli 910 本、打ち直しなし)、変異 5 個はすべて落ちた。AC11: run-verify.sh の既定(all)は static と test の 2 つの mode を打つもので、static は /verify の run-static-verify.sh、test は /test の run-test.sh で、どちらも rc 0 なので満たす(orchestrator の判断。all を 1 回で打ち直してはいない)。AC1〜AC11 にチェックを付けた。
 - [x] Sync-docs report created — `docs/reports/sync-docs-2026-10-30-org-state-dir-local.md`(run 開始時の HEAD は 4045df27)。tech-debt は、Trigger に当たった 15 行に持ち越しの注(verify の V1 は 14 行、192 行を足した)、186 行の (c) F-7 を閉じ、148・170・192 行の env の記述と 188・198 行の注を直し、新しい 4 行を足した。README の `config get` と `status` の行、AGENTS.md の `internal/config/` の行も直した。AC の checkbox と docs/specs は触っていない。digest は前後で `1ea27c42968f`。
 - [ ] PR created
