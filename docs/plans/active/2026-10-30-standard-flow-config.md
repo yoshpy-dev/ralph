@@ -196,7 +196,7 @@
 
 ## Acceptance criteria
 
-- [ ] AC1 既定値と上書き
+- [x] AC1 既定値と上書き
   - `ralph config get` の既定値は次のとおり。
     - `standard.max_pipeline_cycles`: `2`
     - `reviewer.claude_model`: `fable`
@@ -209,28 +209,28 @@
     - `claude_effort` が 5 つの外
     - 4 つの文字列のどれかが空
     - `claude_model`・`codex_model`・`codex_effort` に `[A-Za-z0-9._:@/+-]` 以外の文字(引用符、`$`、空白など)がある
-- [ ] AC2 skill(plan、cross-review、implement の 4 つの写し)は、この 5 つの値を設定から読む。leader の雛形は、`ralph org start` が TASK に書いた reviewer の 2 行の値を使う(AC4)。
+- [x] AC2 skill(plan、cross-review、implement の 4 つの写し)は、この 5 つの値を設定から読む。leader の雛形は、`ralph org start` が TASK に書いた reviewer の 2 行の値を使う(AC4)。
   - `RALPH_STANDARD_MAX_PIPELINE_CYCLES`、`RALPH_CLAUDE_REVIEWER_MODEL`、`RALPH_CODEX_REVIEWER_MODEL`、`RALPH_CODEX_REASONING_EFFORT` を設定しても、使われる値は変わらない(helper のテストで env を設定して確かめる)。
   - skill、スクリプト、雛形の本文に `${RALPH_…:-…}` の形の読み出しが残らない(grep の否定)。
-- [ ] AC3 helper の `ralph_setting <key>` の振る舞い
+- [x] AC3 helper の `ralph_setting <key>` の振る舞い
   - exit 0 ではその値を出す。
   - 127 と `unknown command "config"` では、黙って既定値を出す。
   - exit 2・3 とそのほかの失敗では、stderr に 1 行(キー、終了コード、既定値)を出して既定値を出す。
   - 表にないキーでは、空を出して失敗する。
   - helper の既定値の表は `Default()` と一致する(`defaults_sync_test.go`)。
-- [ ] AC4 claude の reviewer の呼び出しに `--effort` が付く。
+- [x] AC4 claude の reviewer の呼び出しに `--effort` が付く。
   - 対象は `/plan` の計画助言、`/cross-review`、leader の計画助言の 3 つで、値は `reviewer.claude_effort`。
   - leader の分は、`featureLeaderTask` が設定の値で `- reviewer の codex: <model> <effort>` と `- reviewer の claude: <model> <effort>` の 2 行を書き、雛形がその値を使う。雛形には `scripts/ralph-config.sh` の source も `ralph config get reviewer` もない。
   - `claude -p --effort` を確かめた結果が `docs/evidence/` にある。
-- [ ] AC5 `/cross-review` の上限
+- [x] AC5 `/cross-review` の上限
   - 有効な上限は、設定の `standard.max_pipeline_cycles` と、task worktree の cycle-count.json の正の整数の `cap` の大きいほう。`cap` がない、または整数でないときは設定の値。
   - 上限に当たって上げるときは、skill が cycle-count.json に `cap: <cycle + 1>` を書き、`cycle` は増やさない。環境変数も `ralph.local.toml` も頼まない。
   - `/implement` の手順 3 は `cap` を保つ。`/pr` の成功でファイルごと消える(今と同じ)。
-- [ ] AC6 `ralph doctor` は撤去した 4 つの変数が空でない値で設定されているとき、それぞれ代わりのキーを名指す warn を出す。設定されていなければ何も出さない。
-- [ ] AC7 文書
+- [x] AC6 `ralph doctor` は撤去した 4 つの変数が空でない値で設定されているとき、それぞれ代わりのキーを名指す warn を出す。設定されていなければ何も出さない。
+- [x] AC7 文書
   - model-routing.md の full ID の pin、effort、sync note、「Where the values live」を新しい置き場所と既定値に合わせる。post-implementation-pipeline.md、subagent-policy.md、definition-of-done.md、codex-setup.md、template の ralph.toml の注釈も同じ。
   - 4 つの変数に触れるのは「もう読まない」の説明だけになる。
-- [ ] AC8 `go build ./...`、gofmt、`go vet`、golangci-lint、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
+- [x] AC8 `go build ./...`、gofmt、`go vet`、golangci-lint、`check-sync.sh`、`check-skill-sync.sh`、`./scripts/run-verify.sh` が通る。
 
 ## Implementation outline
 
@@ -506,7 +506,11 @@
     - 古い `PipelineConfig` の参照(`config.go:883`・`:935`、`config_test.go:419`)
     - verify の I3 を Rollout の記録か PR 本文に書く
   - /sync-docs(cycle 1、doc-maintainer): `docs/reports/sync-docs-2026-10-30-standard-flow-config.md`。上の 5 項目はすべて直した(README の `config get` の行、org skill の 4 つの写し、`--config` の usage とテストの pin、`PipelineConfig` のコメント 3 か所、tech-debt の 161 行)。tech-debt は、Trigger に当たった 7 行に持ち越しの注、新しい 3 行(800 行を超えた 2 ファイル、`ralph org start --plan` の 2 回読み、test gaps 3 つ)。README の `ralph.local.toml` の節に、標準フローの値と撤去した 4 つの変数の段落を足した。コードの変更はコメントと help の文字列と pin の 1 行だけ。plan 本文は触れておらず、digest は d8e03ef62de9 のまま。
-- [ ] Review artifact created
-- [ ] Verification artifact created
-- [ ] Test artifact created
+- [x] Review artifact created — `docs/reports/self-review-2026-10-30-standard-flow-config.md`(3c165805、S7 の見直し f1685e87、S8・S9 の見直し 0b713b43)。CRITICAL・HIGH・MEDIUM 0、残る LOW は L3(tech-debt に入れた)、`Merge: yes`。
+- [x] Verification artifact created — `docs/reports/verify-2026-10-30-standard-flow-config.md`(6848f496、S8・S9 の確認 5e400dac)。Verdict pass。V1 は S8 で直り、V2 は /sync-docs で直した。
+- [x] Test artifact created — `docs/reports/test-2026-10-30-standard-flow-config.md`(d041e080)。Verdict pass。
+  - `run-test.sh` rc 0(1,587 秒、shell 45 本、Go 10 パッケージ、org 1,331 本・cli 926 本・config 100 本、打ち直しなし)。
+  - `-count=3` は毎回同じ、変異 5 個はすべて落ちた。
+  - `zsh -f` で `tests/test-ralph-config.sh` を打つと、runner の単語分割で rc 1(shebang は sh で gate の外、tech-debt に入れた)。
+  - AC8: run-verify.sh の既定(all)は static と test の 2 つの mode を打つ。static は /verify の run-static-verify.sh、test は /test の run-test.sh で、どちらも rc 0 なので満たす(orchestrator の判断。all を 1 回で打ち直してはいない)。AC1〜AC8 にチェックを付けた。
 - [ ] PR created
