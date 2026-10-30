@@ -121,3 +121,50 @@
 ### Insight event
 
 `./scripts/insights-append.sh --slug leader-sync-docs --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` に cycle 2 の行を足した。
+
+## cycle 3
+
+- Date: 2026-10-30
+- Pipeline cycle: `cycle-count.json` は 2 のまま(cross-review cycle 2 の ACTION_REQUIRED を受けて、上限を `RALPH_STANDARD_MAX_PIPELINE_CYCLES=3` に上げて回し直した run。計画の Progress の記録)。run 開始時の HEAD は `bc00d1d1`、前の sync-docs の commit は `822acf62`。計画の digest は `94dc29701d29`(cross-review cycle 2 の直しのあと `ebc2b64a` で付け直したもの)で、この run の前後で同じ
+- 先行 report: `docs/reports/cross-review-triage-leader-sync-docs.md`(cycle 2 の ACTION_REQUIRED 1 件)、self-review cycle 3(`eea3eb84`、Merge: yes)、verify cycle 3(`d751a6e3`、pass、LOW の V4)、test cycle 3(`bc00d1d1`)
+- 前回から変わったもの: F7 `44694f5b`(`/director` skill の手順 6 に、案を見せる前に follow-up の文書を読むテストと文を固定するテストと fixture を探して `- Reserve:` に入れ、人に言う)、F8 `b6a8060a`(その文を「一覧のファイルを読むテストと、その文を固定するテストと fixture を探し」に言い直した)。`/director` skill の写し 3 つ、テスト、計画の D4 に入っている
+
+### Changes made
+
+| File | Change |
+|------|--------|
+| `docs/specs/2026-10-07-org-multi-org-director.md`(FR-4 の 2026-10-30 の注、93 行) | verify の V4。「写しの組の follow-up は組のすべてを予約に入れ」のあとに、案を見せる前に follow-up の文書を読むテストと、その文を固定するテストと fixture も探して予約に入れ(予約の外のテストを implementer が直せず、文書の org が gate を通れないため)、足したものとその理由を人に言う、を足した。日付つきの決定の記録なので、ほかの文は変えていない |
+| `docs/plans/active/2026-10-30-leader-sync-docs.md` | `## Progress checklist` に cycle 3 の行を 1 つ足した。本文と AC の checkbox は触っていない |
+| `docs/reports/sync-docs-2026-10-30-leader-sync-docs.md` | この節 |
+| `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` | `sync_docs` の行(`--cycle auto` は `cycle-count.json` を読むので、cycle 2 と出る) |
+
+### Surfaces checked for drift
+
+| Surface | 結果 | 根拠 |
+|---------|------|------|
+| README(280 行の gate の段落) | 変更なし | director が文書だけの機能を人と書くことまでを要約する。予約の中身は書かない |
+| `/org` skill(「org の終わり方」の 1、doc-maintainer への指示の「組のすべてを予約できるように」) | 変更なし | doc-maintainer が follow-up に書くのは文書のずれと写しの組で、テストは探さない。テストを探すのは director で、`/director` skill の 6 にある |
+| `/director` skill の概説(1093 行の「文書だけの機能 1 つの分割計画を人と書く」) | 変更なし | 要約で、手順 6 の予約の細部と矛盾しない |
+| `docs/quality/`、`.claude/rules/ralph/`、`AGENTS.md`、template の写し | 変更なし | director の分割計画の予約の書き方を書いていない |
+| `docs/tech-debt/README.md`(404 行の director の集めの印の行) | 変更なし | 集めの印と記録の場所の話で、予約にテストを入れることとは別 |
+| 仕様 FR-4 の注の、テスト以外の文 | 変更なし | cycle 2 の確かめのとおり、雛形と skill の今の文と合う |
+
+### Commands run
+
+| Command | Result |
+|---------|--------|
+| `./scripts/check-template-purity.sh` | PASS |
+| `./scripts/check-skill-sync.sh` | rc 0、14 skill が一致 |
+| `./scripts/check-sync.sh` | PASS。IDENTICAL 172、DRIFTED 0、ROOT_ONLY 0、TEMPLATE_ONLY 10、KNOWN_DIFF 6 |
+| `git diff --check` | rc 0、出力なし |
+| `GOFLAGS="-timeout=30m $(go env GOFLAGS)" go test -count=1 ./internal/org/ -run 'Skill\|RenderRolePrompt'` | ok、23.8 秒(この run は skill も雛形も直していないが、依頼のとおり打った) |
+| `./scripts/plan-visual.sh digest docs/plans/active/2026-10-30-leader-sync-docs.md` | `94dc29701d29`(承認の行と同じ) |
+
+### Not done
+
+- AC の checkbox は付けていない。director が実機で文書の機能の予約にテストを入れること、leader が実機で手順を走らせること、Codex の leader が custom agent を呼べることは、cycle 1 のとおり確かめていない
+- 仕様 FR-4 の注には、director がテストを探す方法(repo のテストのファイルを、一覧の各ファイルのパスと follow-up で変わる文で検索する、など)は書いていない。方法は `/director` skill の手順 6 が持つ
+
+### Insight event
+
+`./scripts/insights-append.sh --slug leader-sync-docs --flow standard --phase sync_docs --verdict pass --cycle auto --source skill` で `docs/insights/events/2026-10-30-leader-sync-docs.jsonl` に 1 行足した。

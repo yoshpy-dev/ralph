@@ -155,4 +155,5 @@
 - [ ] Test artifact created
 - [x] Sync-docs report created(`docs/reports/sync-docs-2026-10-30-leader-sync-docs.md`、cycle 1、run 開始時の HEAD は a5e28500)。直したのは `/org` skill の 2 か所(座席の責務の 7 と「タスク終了時は必ず」の、機能の org の締めの順に sync-docs を足した)とその写し 3 つだけ。AGENTS.md の地図、quality-gates.md とその template の写し、definition-of-done.md、recipes、仕様の FR-7 の注、agent-messaging.md、subagent-policy.md、model-routing.md は見て、変えていない。AC の checkbox と計画の本文は触っていない。digest は前後で ab78e5f0645b
 - [x] Sync-docs cycle 2(report の末尾の「cycle 2」の節、run 開始時の HEAD は 147e84bc)。verify の V3 を直した: 仕様 FR-4 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)の `git status --porcelain` を、呼ぶ前の確かめと `--untracked-files=all` の形にした。F5・F5b・F6 の影響を README、AGENTS.md、`/director` skill、`/org` skill の要約 2 か所、品質の文書、rules で見て、ほかに古い文はなかった。計画の本文と digest(220fa1f3994f)は触っていない
+- [x] Sync-docs cycle 3(report の末尾の「cycle 3」の節、run 開始時の HEAD は bc00d1d1)。verify の V4 を直した: 仕様 FR-4 の注(`docs/specs/2026-10-07-org-multi-org-director.md:93`)に、director が案を見せる前に follow-up の文書を読むテストと文を固定するテストと fixture も探して予約に入れ、足したものと理由を人に言うことを足した。README、`/org` skill、品質の文書、rules に、ほかに古い文はなかった。計画の本文と digest(94dc29701d29)は触っていない
 - [ ] PR created
