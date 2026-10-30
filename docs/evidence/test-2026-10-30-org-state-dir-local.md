@@ -176,3 +176,145 @@ FAIL	internal/org	24.541s
     --- FAIL: TestResolveOrgStateDir_PersonalFileErrors/not_TOML (0.17s)
 FAIL	internal/org	242.537s
 ```
+
+## cycle 2 (HEAD fcbd5dbf)
+
+Excerpts of the cycle 2 /test run (S9 6415aabd: local-only keys in ralph.toml refused in any letter case the go-toml decoder reads). The full log is `docs/evidence/test-2026-10-30-org-state-dir-local-cycle2.log` (gitignored, 5,194 lines of run-test.sh output, then the sections below). Launched the same way as cycle 1.
+
+### run-test.sh (cycle 2)
+
+```
+## run-test.sh start 2026-10-30 14:30:49 JST load { 15.09 14.08 10.88 } HEAD fcbd5dbf
+# Verification run
+- Timestamp: 2026-10-30T05:30:49Z
+- Mode: test
+- Requested scope: changed
+
+5175:==> Language scope: full fallback (unclassified:templates/base/ralph.toml)
+5176:==> Language packs selected: golang
+5177:==> Running golang verifier
+5178:==> Go project root: .
+5191:==> All verifiers passed.
+?   	github.com/yoshpy-dev/ralph	[no test files]
+ok  	github.com/yoshpy-dev/ralph/cmd/ralph	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/cli	760.324s
+ok  	github.com/yoshpy-dev/ralph/internal/config	14.853s
+ok  	github.com/yoshpy-dev/ralph/internal/gitroot	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/insights	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/org	915.284s
+ok  	github.com/yoshpy-dev/ralph/internal/org/driver	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/org/protocol	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/scaffold	(cached)
+ok  	github.com/yoshpy-dev/ralph/internal/upgrade	(cached)
+
+==> All verifiers passed.
+
+Evidence saved to: docs/evidence/verify-2026-10-30-053049.log
+## run-test.sh rc=0 elapsed=1766s end 2026-10-30 15:00:16 JST load { 20.75 34.35 43.08 }
+```
+
+### Shell suites (cycle 2): files, OK, lines containing PASS
+
+```
+45 files, 45 OK, 4796 PASS lines
+4129:  SKIP: the real git older than 2.41 case (git 2.50.1 is 2.41 or later; the stubbed old git covers it)
+```
+
+### Uncached rerun, -count=5, -count=20, m6 (cycle 2)
+
+```
+## uncached rerun of the packages run-test.sh served from the cache (go test -count=1)
+ok  	cmd/ralph	1.312s
+ok  	internal/gitroot	11.050s
+ok  	internal/insights	3.045s
+ok  	internal/org/driver	3.580s
+ok  	internal/org/protocol	3.177s
+ok  	internal/scaffold	2.454s
+ok  	internal/upgrade	2.291s
+
+## go test ./internal/config/ -run 'LocalOnly|LetterCase|LocalOrgStateDir' -count=5 -v (rc 0, 32 s)
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_--config_file_of_another_name
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_capitalized_table_and_key_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_capitalized_table_and_key_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_dotted_key_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_dotted_key_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_value_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/a_value_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_empty_value_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_empty_value_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_inline_table_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_inline_table_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_dotted_key_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_dotted_key_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_inline_table_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_inline_table_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_key_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_key_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_table_and_key_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_table_and_key_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_table_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/an_upper-case_table_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/the_second_of_two_tables_with_RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphToml/the_second_of_two_tables_with_RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults/RALPH_LOCAL_CONFIG=
+   5     --- PASS: TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults/RALPH_LOCAL_CONFIG=off
+   5     --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath/a_directory
+   5     --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath/no_home_directory
+   5     --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath/not_a_string
+   5     --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath/not_valid_TOML
+   5     --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath/unreadable
+   5     --- PASS: TestLocalOrgStateDir_LocalConfigEnv/empty_reads_the_file
+   5     --- PASS: TestLocalOrgStateDir_LocalConfigEnv/OFF_reads_the_file
+   5     --- PASS: TestLocalOrgStateDir_LocalConfigEnv/off_skips_the_file_and_git
+   5     --- PASS: TestLocalOrgStateDir_LocalConfigEnv/on_reads_the_file
+   5     --- PASS: TestLocalOrgStateDir_LocalConfigEnv/unset_reads_the_file
+   5     --- PASS: TestLocalOrgStateDir_ReadsTheMainWorktreesFile/a_bare_repository's_linked_worktree
+   5     --- PASS: TestLocalOrgStateDir_ReadsTheMainWorktreesFile/the_working_directory
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/_/ledger
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/../ledger
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/./ledger
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/~
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/~user/ledger
+   5     --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute/ledger
+   5     --- PASS: TestLocalOrgStateDir_Values/absent
+   5     --- PASS: TestLocalOrgStateDir_Values/absolute
+   5     --- PASS: TestLocalOrgStateDir_Values/absolute,_cleaned
+   5     --- PASS: TestLocalOrgStateDir_Values/an_empty_file
+   5     --- PASS: TestLocalOrgStateDir_Values/empty
+   5     --- PASS: TestLocalOrgStateDir_Values/home_itself
+   5     --- PASS: TestLocalOrgStateDir_Values/no_file
+   5     --- PASS: TestLocalOrgStateDir_Values/ralph.toml_is_not_valid_TOML
+   5     --- PASS: TestLocalOrgStateDir_Values/ralph.toml_sets_it
+   5     --- PASS: TestLocalOrgStateDir_Values/under_home
+   5     --- PASS: TestLocalOrgStateDir_Values/upper-case_table_and_key
+   5 --- PASS: TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder
+   5 --- PASS: TestLoad_LocalOnlyKeyInRalphToml
+   5 --- PASS: TestLoad_LocalOnlyKeyInRalphTomlReturnsDefaults
+   5 --- PASS: TestLocalOnlyKeys
+   5 --- PASS: TestLocalOrgStateDir_FileErrorsNameItsPath
+   5 --- PASS: TestLocalOrgStateDir_LocalConfigEnv
+   5 --- PASS: TestLocalOrgStateDir_ReadsTheMainWorktreesFile
+   5 --- PASS: TestLocalOrgStateDir_RefusesValuesThatAreNotAbsolute
+   5 --- PASS: TestLocalOrgStateDir_Values
+   5 --- PASS: TestTemplateDriftProbesHoldNoLocalOnlyKey
+ok  	internal/config	31.898s
+
+## go test ./internal/config/ -run 'LetterCase|LocalOnlyKeyInRalphToml$' -count=20 -v (rc 0, 36 s)
+  20 --- PASS: TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder
+  20 --- PASS: TestLoad_LocalOnlyKeyInRalphToml
+ok  	internal/config	35.066s
+
+## m6: order-dependent tomlDocHasKey (return on the first lower-case match), same -run, -count=20, -overlay (rc 1, 46 s)
+  166,168c166,167
+  < 		if table, ok := v.(map[string]any); ok && tomlDocHasKey(table, rest) {
+  < 			return true
+  < 		}
+  ---
+  > 		table, ok := v.(map[string]any)
+  > 		return ok && tomlDocHasKey(table, rest)
+  19     --- FAIL: TestLoad_LocalOnlyKeyInRalphToml/the_second_of_two_tables_with_RALPH_LOCAL_CONFIG=
+  16     --- FAIL: TestLoad_LocalOnlyKeyInRalphToml/the_second_of_two_tables_with_RALPH_LOCAL_CONFIG=off
+  20 --- FAIL: TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder
+  20 --- FAIL: TestLoad_LocalOnlyKeyInRalphToml
+FAIL
+```

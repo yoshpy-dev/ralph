@@ -6,6 +6,8 @@
 - Scope: `git diff origin/main...HEAD`(merge-base c03647f9、HEAD e5d5a5a4)。Go は `internal/config`、`internal/org`、`internal/cli`、ほかに skill・文書・template。`./scripts/run-test.sh` は changed scope のまま打った。detector は `templates/base/ralph.toml` を分類できず full に落ち(`unclassified:templates/base/ralph.toml`)、選ばれた pack は golang だけだった。test mode なので `tests/test-*.sh` の 45 本もすべて走った。テストの関数はこの diff で 41 本増え、2 本が消えた(`TestResolveOrgStateDir_EnvWinsOverGitAndCwd` と `TestOrgSend_StateDirHint_OmitsFlagWhenResolvedFromEnv`。env の段を外したため。個人用のファイルの段のテストに置き換わっている)
 - Evidence: `docs/evidence/test-2026-10-30-org-state-dir-local.md`(要点。commit する)、`docs/evidence/test-2026-10-30-org-state-dir-local.log`(gitignore。`run-test.sh` の全出力 5,194 行、`go test -list` の本数、coverage の数字、変異 5 個の差分と FAIL の行)。wrapper 自身の写しは `docs/evidence/verify-2026-10-30-034021.log`
 
+この下の「Test execution」から「Test gaps」までは cycle 1(HEAD e5d5a5a4)の記録で、行番号もその時点のもの。パイプラインの cycle 2(cross-review cycle 1 の ACTION_REQUIRED の直し S9、HEAD fcbd5dbf)の test は、「Test gaps」と「Verdict」の間の「cycle 2(HEAD fcbd5dbf)」の節にある。いまのブランチの verdict は「Verdict」の節の先頭の cycle 2 の行で、cycle 1 の verdict はその下に残している。
+
 ## Test execution
 
 | Suite / Command | Tests | Passed | Failed | Skipped | Duration |
@@ -104,7 +106,60 @@
 
 どれも計画の判定(台帳の決め方の順、env の拒否、source `config` の扱い)を変えない道で、その判定は上の変異で落ちることを確かめた。
 
+## cycle 2(HEAD fcbd5dbf)
+
+- Date: 2026-10-30
+- Tester: tester サブエージェント(`/test`、cycle 2。`cycle-count.json` は 2)
+- Scope: cycle 1 のあとでコードが変わったのは S9 6415aabd だけ(`git diff ca7c651f..6415aabd`、`internal/config/local.go` と `internal/config/local_test.go`)。`ralph.toml` の local-only のキーを、go-toml v2 の decoder と同じく `strings.ToLower` で大文字小文字を区別せずに断る(`tomlDocHasKey`、`internal/config/local.go:153`)。テストは `TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder`(`internal/config/local_test.go:729`)が 1 本増え(config は 90 本から 91 本)、`TestLoad_LocalOnlyKeyInRalphToml`(`:585`)に 7 行(env の 2 通りで 14 サブテスト)、`TestLocalOrgStateDir_Values`(`:772`)に 1 行が足された。ほかのコミット(4045df27..fcbd5dbf)は README、AGENTS.md、tech-debt、計画と report で、Go のファイルは変わっていない
+- Evidence: `docs/evidence/test-2026-10-30-org-state-dir-local.md` の「cycle 2」の節(commit する)、`docs/evidence/test-2026-10-30-org-state-dir-local-cycle2.log`(gitignore。`run-test.sh` の全出力 5,194 行と、下の追加の回の結果)。wrapper 自身の写しは `docs/evidence/verify-2026-10-30-053049.log`。cycle 1 のログは書き換えていない
+
+### Test execution(cycle 2)
+
+| Suite / Command | Tests | Passed | Failed | Skipped | Duration |
+| --- | --- | --- | --- | --- | --- |
+| `./scripts/run-test.sh`(changed scope、rc 0) | shell 45 本 + Go 10 パッケージ | shell 45 本 OK(PASS を含む行 4,796)、Go 10 パッケージ ok | 0 | 1(cycle 1 と同じ「git 2.41 より古い実物の git」の行) | 1,766 秒(14:30:49〜15:00:16 JST)。開始時の load 15.09 / 14.08 / 10.88、終了時 20.75 / 34.35 / 43.08。Go の途中でほかのセッションの負荷が入り、49.60 / 101.16 / 63.23 まで上がった |
+| └ Go: `internal/org` | 1,285 本 | ok | 0 | 0 | 915.3 秒 |
+| └ Go: `internal/cli` | 910 本 | ok | 0 | 0 | 760.3 秒 |
+| └ Go: `internal/config` | 91 本 | ok | 0 | 0 | 14.9 秒 |
+| └ Go: `cmd/ralph`、`internal/{gitroot,insights,org/driver,org/protocol,scaffold,upgrade}` | — | ok(`(cached)`) | 0 | 0 | — |
+| 上の 7 パッケージの打ち直し: `go test -count=1` | — | ok | 0 | 0 | 14 秒(1.3〜11.1 秒、load 14.0 / 30.2 / 41.0) |
+| `go test ./internal/config/ -run 'LocalOnly\|LetterCase\|LocalOrgStateDir' -count=5 -v` | 10 本(サブテスト込み 64 の名前)× 5 | 320 | 0 | 0 | 32 秒(load 約 15) |
+| `go test ./internal/config/ -run 'LetterCase\|LocalOnlyKeyInRalphToml$' -count=20 -v` | 2 本 × 20 | 40 | 0 | 0 | 36 秒 |
+| 変異 m6(`-overlay`、同じ `-run`、`-count=20`) | 1 | 落ちた | — | — | 46 秒 |
+
+起動の仕方は cycle 1 と同じ(perl の fork と setsid、前景の `caffeinate -w`)。打つ前の load は 15.09 / 14.08 で 30 未満だった。
+
+`run-test.sh` の `go test ./...` は `-count=1` を付けないので、変わった `internal/config` と、それを import する `internal/org`・`internal/cli` は打ち直されたが、7 パッケージは `(cached)` だった。そのうち `cmd/ralph` と `internal/insights` は `go list -test -deps` で `internal/config` に依存する。cache の結果は同じ入力のものだが、念のため 7 パッケージを `-count=1` で打ち直し、すべて ok だった。
+
+30 分の時間切れはなく、既知の flaky な `TestStopDirectorProcess_AProcessThatIgnoresSIGTERMIsNotEndedInTime` も通った。打ち直しはしていない。
+
+### map の巡回順(cycle 2)
+
+`tomlDocHasKey` は TOML の文書を読んだ `map[string]any` を `range` で巡回する。Go の map の巡回順は毎回変わるので、結果がその順に左右されないかを 2 つの方法で見た。
+
+- 実物のコード: `-count=5` で 64 の名前(トップレベル 10 本とサブテスト 54)がどれも 5 回とも PASS した。大文字小文字の違う 2 つの表を持つ行の 2 本は、`-count=20` でも 20 回とも PASS した
+- 感度の確かめ(m6): 巡回順に左右される形、つまり小文字にして一致した最初の名前で `return` する形に変えた。同じ `-count=20` で、`TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder` は 20 回とも落ちた。`TestLoad_LocalOnlyKeyInRalphToml` も 20 回とも落ち、そのうち `the second of two tables` は env が空の行で 19 回、`off` の行で 16 回落ちた。`[ORG]` と `[org]` の両方の並びを持つ行があるので、順に左右される実装は 1 回の実行でほぼ確実に落ちる。実物のコードが 20 回とも通ったことは、順に左右されないことの証拠になる
+
+`tomlDocHasKey` は一致したすべての名前をたどって 1 つでも見つかれば true を返すので、結果は順に依らない。エラーの文はキーを `LocalOnlyKeys` の綴り(小文字)で名指し、文書の綴りを使わないので、文も順に依らない。
+
+### Failure analysis(cycle 2)
+
+| Test | Error | Root cause | Proposed fix |
+| --- | --- | --- | --- |
+| (なし) | — | — | — |
+
+### Test gaps(cycle 2)
+
+cycle 1 の 1〜4 はそのまま残る。S9 で新しい穴は見つからなかった。`TestCheckLocalOnlyKeys_LetterCaseFollowsTheDecoder` は各行で、`toml.Unmarshal` が `[org].state_dir` を埋めるかどうかを先に確かめてから `checkLocalOnlyKeys` の判定と比べる。このため、decoder の振る舞いが go-toml の更新で変われば、検査より先にテストの前提が落ちる。
+
 ## Verdict
+
+- Verdict(cycle 2、HEAD fcbd5dbf): pass
+- Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 10 パッケージ ok。`internal/org`・`internal/cli`・`internal/config` は `(cached)` なし、残りの 7 パッケージも `-count=1` の打ち直しで ok)。S9 のテストは `-count=5` と `-count=20` で毎回同じ結果になり、巡回順に左右される変異 m6 は落ちた。AC11 のうちテストの部分は満たす
+- Fail: 0
+- Blocked: 0
+
+### cycle 1(HEAD e5d5a5a4)
 
 - Pass: `./scripts/run-test.sh` rc 0(shell 45 本 OK、Go 10 パッケージ ok)、coverage の 3 回 ok、変異 5 個すべてがテストで落ちた。AC11 のうちテストの部分は満たす(静的の部分は verify の report で pass)
 - Fail: 0
