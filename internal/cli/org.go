@@ -57,7 +57,7 @@ func newOrgCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&orgID, "org-id", "", "org execution namespace (required by every verb except stop --all, disband --all, merge-order, merge, cleanup, regate, wait --inbox, watch, approve, the director verbs, and the inbox verbs, which refuse it, and start --plan, which defaults it to the feature's slug; with --plan it is at most 20 characters)")
 	cmd.PersistentFlags().StringVar(&stateDir, "state-dir", "", "org manifest/receipts/inbox state directory (default: resolved by org.ResolveOrgStateDir -- [org].state_dir in the ralph.local.toml at the main worktree's root, else the main worktree's .harness/state/org (shared by its linked worktrees), else the enclosing git toplevel's .harness/state/org, else cwd's .harness/state/org)")
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to ralph.toml (default: ./ralph.toml if present, else built-in defaults; without --config, spawn and start read the org-wide limits (see ralph org spawn --help), start --plan also [org.approval].mode and the four keys of [reviewer] (see ralph org start --help), escalate and director attach read [org.director].enabled (director attach also [org.director].wake and wake_cmd), director status reads it and [org.director].auto_merge, merge reads auto_merge, director start reads enabled with [org.permissions], [org.roles], model_pool and [org.director].launch_cmd, wake and wake_cmd, and watch --all reads [org.director].wake and wake_cmd (and runs wake_cmd in the main worktree root), from the main worktree's ralph.toml when the ledger is the main worktree's; ralph status, which has no --config, reads enabled and auto_merge by the same rule)")
 
 	cmd.AddCommand(
 		newOrgSpawnCmd(&orgID, &stateDir, &configPath),
@@ -188,9 +188,10 @@ func newOrgSpawnRuntimeAt(cmd *cobra.Command, resolvedStateDir, stateDirSource, 
 // director attach also Director.Wake and Director.WakeCmd
 // (withMainWorktreeDirectorWakeConfig), `ralph org watch --all` also
 // Director.Wake and Director.WakeCmd, through orgWatchDirectorWake
-// (withMainWorktreeDirectorWakeConfigFrom), and director start the settings
+// (withMainWorktreeDirectorWakeConfigFrom), director start the settings
 // of the headless director, those two included
-// (withMainWorktreeDirectorStartConfig). A main worktree ralph.toml that
+// (withMainWorktreeDirectorStartConfig), and `ralph org start --plan` also
+// [reviewer] (resolveOrgStartReviewer). A main worktree ralph.toml that
 // fails to load is an error, not a fallback.
 func withMainWorktreeOrgLimits(cfg config.OrgConfig, configPath, resolvedStateDir, stateDirSource string) (config.OrgConfig, error) {
 	mainCfg, path, ok, err := loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource)
@@ -317,28 +318,36 @@ func withMainWorktreeDirectorWakeConfigFrom(cfg config.OrgConfig, configPath, re
 }
 
 // loadMainWorktreeOrgConfig loads the [org] config of <main worktree
-// root>/ralph.toml (config.Load: built-in defaults when the file does not
-// exist, with the ralph.local.toml of that root applied on top) for
-// withMainWorktreeOrgLimits, withMainWorktreeDirectorEnabled,
-// withMainWorktreeDirectorStartConfig, and
+// root>/ralph.toml (loadMainWorktreeConfig) for withMainWorktreeOrgLimits,
+// withMainWorktreeDirectorEnabled, withMainWorktreeDirectorStartConfig, and
 // withMainWorktreeDirectorWakeConfigFrom.
-// ok is false, with nothing loaded, when configPath is set or the ledger is
-// not the main worktree's (org.LedgerMainWorktreeRoot). path is the file it
-// loaded, also when err (the load error, unwrapped) is set.
 func loadMainWorktreeOrgConfig(configPath, resolvedStateDir, stateDirSource string) (mainCfg config.OrgConfig, path string, ok bool, err error) {
+	cfg, path, ok, err := loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource)
+	return cfg.Org, path, ok, err
+}
+
+// loadMainWorktreeConfig loads every table of <main worktree
+// root>/ralph.toml (config.Load: built-in defaults when the file does not
+// exist, with the ralph.local.toml of that root applied on top), for
+// loadMainWorktreeOrgConfig and for resolveOrgStartReviewer, which takes
+// [reviewer] from it. ok is false, with nothing loaded, when configPath is
+// set or the ledger is not the main worktree's (org.LedgerMainWorktreeRoot).
+// path is the file it loaded, also when err (the load error, unwrapped) is
+// set.
+func loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource string) (mainCfg config.Config, path string, ok bool, err error) {
 	if configPath != "" {
-		return config.OrgConfig{}, "", false, nil
+		return config.Config{}, "", false, nil
 	}
 	root, ok := org.LedgerMainWorktreeRoot(resolvedStateDir, stateDirSource)
 	if !ok {
-		return config.OrgConfig{}, "", false, nil
+		return config.Config{}, "", false, nil
 	}
 	path = filepath.Join(root, "ralph.toml")
 	cfg, err := config.Load(path)
 	if err != nil {
-		return config.OrgConfig{}, path, true, err
+		return config.Config{}, path, true, err
 	}
-	return cfg.Org, path, true, nil
+	return cfg, path, true, nil
 }
 
 // newOrgRuntimeAt is newOrgRuntime's shared implementation, taking an
@@ -625,15 +634,47 @@ func shellQuoteIfNeeded(s string) string {
 // codex_verified = false or auto_merge = false into true (cross-review
 // cycle 1 of codex-verified-auto-merge-on).
 func resolveOrgConfig(configPath string) (config.OrgConfig, error) {
-	path := configPath
-	if path == "" {
-		path = "ralph.toml"
-	}
-	cfg, err := config.Load(path)
+	cfg, err := resolveConfig(configPath)
 	if err != nil {
 		return config.OrgConfig{}, err
 	}
 	return cfg.Org, nil
+}
+
+// resolveConfig is resolveOrgConfig with every table of the config, for a
+// verb that also needs one outside [org]: `ralph org start --plan` takes its
+// [reviewer] from it when the main worktree's ralph.toml does not apply
+// (resolveOrgStartReviewer).
+func resolveConfig(configPath string) (config.Config, error) {
+	path := configPath
+	if path == "" {
+		path = "ralph.toml"
+	}
+	return config.Load(path)
+}
+
+// resolveOrgStartReviewer returns the [reviewer] table `ralph org start
+// --plan` writes in the feature org's leader's task, read by the rule
+// withMainWorktreeOrgLimits follows for [org.approval]: from <main worktree
+// root>/ralph.toml (loadMainWorktreeConfig) when configPath is empty and the
+// ledger is the main worktree's, else from the --config file or ./ralph.toml
+// (resolveConfig), ralph.local.toml on top either way. A subdirectory or a
+// linked worktree with a ralph.toml of its own then does not choose the
+// models and efforts of the leader's plan advisory, any more than the org's
+// approval mode (plan 2026-10-30-standard-flow-config, D5).
+func resolveOrgStartReviewer(configPath, resolvedStateDir, stateDirSource string) (config.ReviewerConfig, error) {
+	mainCfg, path, ok, err := loadMainWorktreeConfig(configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return config.ReviewerConfig{}, fmt.Errorf("org: load [reviewer] from the main worktree's %s: %w", path, err)
+	}
+	if ok {
+		return mainCfg.Reviewer, nil
+	}
+	cfg, err := resolveConfig(configPath)
+	if err != nil {
+		return config.ReviewerConfig{}, fmt.Errorf("org: load config: %w", err)
+	}
+	return cfg.Reviewer, nil
 }
 
 // resolveModelOrWarn resolves the effective --model value for driver/role:
@@ -960,7 +1001,12 @@ func newOrgStartCmd(orgID, stateDir, configPath *string) *cobra.Command {
 			"max_total_seats below, recorded with the org's binding to the feature\n" +
 			"and named in the leader's task, so a change to the setting applies to\n" +
 			"orgs started after it; starting a running feature org again with\n" +
-			"another mode is refused.\n" +
+			"another mode is refused. The four keys of [reviewer], the model and\n" +
+			"effort of the reviewers the leader's plan advisory calls, are read\n" +
+			"from the same ralph.toml as max_orgs and max_total_seats below and\n" +
+			"written in the leader's task as two lines, one for codex and one for\n" +
+			"claude: the leader uses them as they were when the org started and\n" +
+			"does not read them itself.\n" +
 			"\n" +
 			"`ralph org start <task>` spawns the leader in --cwd with <task> as its\n" +
 			"task, as before --plan existed. It is not tied to a split plan: it\n" +
@@ -1109,11 +1155,13 @@ type orgStartPlanParams struct {
 // org-wide limits, as for every start) with start's watch gate
 // (wireOrgStartWatchGate, which launches the watch when none runs;
 // StartFeature runs it before it makes the worktree), and runs
-// (*org.Org).StartFeature with that dir and the main worktree root
-// (org.FeatureRepoRoot). The result is printed as a spawn's, followed on
-// success by the worktree, the branch and the status hint; a refusal or
-// failure is returned as StartFeature's error, which already says whether
-// the worktree stays and how to remove it.
+// (*org.Org).StartFeature with that dir, the main worktree root
+// (org.FeatureRepoRoot), and the [reviewer] table read from the ralph.toml
+// the approval mode comes from (resolveOrgStartReviewer), which the runtime
+// does not keep since it holds only [org]. The result is
+// printed as a spawn's, followed on success by the worktree, the branch and
+// the status hint; a refusal or failure is returned as StartFeature's error,
+// which already says whether the worktree stays and how to remove it.
 func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	resolvedStateDir, stateDirSource, err := resolveOrgLedger(cmd, p.stateDir, orgLedgerMutating)
 	if err != nil {
@@ -1132,10 +1180,14 @@ func runOrgStartPlan(cmd *cobra.Command, p orgStartPlanParams) error {
 	if err != nil {
 		return err
 	}
+	reviewer, err := resolveOrgStartReviewer(p.configPath, resolvedStateDir, stateDirSource)
+	if err != nil {
+		return err
+	}
 
 	res := rt.StartFeature(org.StartFeatureParams{
 		StateDir: resolvedStateDir, RepoRoot: repoRoot, SplitPath: p.plan, Feature: p.feature, OrgID: p.orgID,
-		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS,
+		Driver: p.driverName, Model: resolvedModel, TimeoutMS: p.timeoutMS, Reviewer: reviewer,
 	})
 	printSpawnResult(cmd, res.Spawn)
 	if res.Spawn.Err != nil {

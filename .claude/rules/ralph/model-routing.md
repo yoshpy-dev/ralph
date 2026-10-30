@@ -66,16 +66,27 @@ no new env knob. Typical cases: `opus` on the `reviewer` call for a
 security-sensitive diff, or `sonnet` on an `implementer` call for a mechanical
 slice.
 
-**Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` reads
-`RALPH_CLAUDE_REVIEWER_MODEL` (with an `opus` fallback) for the claude reviewer
-path, and `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (with
-`gpt-6-astra` / `xhigh` fallbacks) for the codex reviewer path — `.claude/skills/plan/SKILL.md`'s
-plan advisory reads the same three variables, with the same fallbacks, for
-whichever reviewer it calls, and so does the plan advisory of a feature org's
-leader (its role prompt, `internal/org/prompts/leader.md` in the `ralph`
-repository source, not part of a scaffolded project). Keep these fallback
-defaults in sync when changing any of the three vars in
-`scripts/ralph-config.sh`.
+**Cross-review sync note:** `.claude/skills/cross-review/SKILL.md` and the
+plan advisory of `.claude/skills/plan/SKILL.md` take the other CLI's reviewer
+model and effort from the four keys of `[reviewer]` in `ralph.toml`:
+`claude_model` and `claude_effort` for a claude reviewer
+(`claude -p --model <claude_model> --effort <claude_effort>`), and
+`codex_model` and `codex_effort` for a codex reviewer
+(`codex -m <codex_model> -c model_reasoning_effort=<codex_effort>`). A
+`ralph.local.toml` in the main worktree's root overrides them on one machine.
+Both skills read a key with `ralph_setting <key>`, the internal helper in
+`scripts/ralph-config.sh`, which runs `ralph config get <key>` and falls back
+to its own table of the same defaults when that fails. The plan advisory of a
+feature org's leader (its role prompt, `internal/org/prompts/leader.md` in the
+`ralph` repository source, not part of a scaffolded project) reads no
+setting: `ralph org start --plan` writes the values it read into the leader's
+task as two lines, `- reviewer の codex: <model> <effort>` and
+`- reviewer の claude: <model> <effort>`, and the leader uses those, so an org
+keeps the values it started with. No environment variable changes these
+values. When a default changes, change `Default()` in
+`internal/config/config.go`, the helper's table, and the comments of
+`templates/base/ralph.toml` together; `internal/config/defaults_sync_test.go`
+fails until they agree.
 
 ## Rules
 
@@ -83,13 +94,18 @@ defaults in sync when changing any of the three vars in
   `inherit` — a subagent spawned from an expensive main session silently runs
   on that expensive model, multiplied by parallel fan-out.
 - **Use stable aliases (`fable`, `opus`, `sonnet`, `haiku`), not full model IDs**, in
-  agent frontmatter, `ralph.toml`, `scripts/ralph-config.sh`, and skill docs.
-  Full IDs go stale and can break `claude -p` at runtime. Pin a full ID only
-  via environment variable when a specific run must be reproducible.
-- **Codex has no model aliases.** `RALPH_CODEX_REVIEWER_MODEL` in
-  `scripts/ralph-config.sh` pins a literal codex model slug (e.g.
-  `gpt-6-astra`), unlike the Claude-side aliases above. Update it when
-  `ralph doctor` reports the pinned slug's retirement.
+  agent frontmatter, `[reviewer].claude_model` of `ralph.toml` (and its
+  built-in default), and skill docs. Full IDs go stale and can break
+  `claude -p` at runtime. When a reviewer run must be reproducible, pin a full
+  ID in `[reviewer].claude_model` of `ralph.toml`, or of `ralph.local.toml` to
+  pin it on your machine only; the key accepts the characters of a full ID
+  (`A-Z a-z 0-9 . _ : @ / + -`). Agent frontmatter keeps its alias.
+- **Codex has no model aliases.** `[reviewer].codex_model` holds a literal
+  codex model slug (`gpt-6-astra` by default, from `config.Default()` in
+  `internal/config/config.go`), unlike the Claude-side aliases above. Change
+  it when codex retires the slug: `ralph doctor` checks the slugs of
+  `[org].model_pool`, whose default holds the same slug, and reports one that
+  is retiring or retired.
 - **Do not export `CLAUDE_CODE_SUBAGENT_MODEL`.** It silently overrides every
   frontmatter `model:` and per-call `model` parameter. Treat it as an
   emergency-only blunt instrument.
@@ -102,8 +118,16 @@ defaults in sync when changing any of the three vars in
 - **Switch models at task boundaries, not mid-conversation.** A mid-session
   model or effort switch invalidates the prompt cache and re-reads the full
   history uncached on the next response.
-- Keep `effort` at the default (`high`) unless measured evidence justifies a
-  change; `xhigh`/`max` have documented diminishing returns.
+- Keep a subagent's `effort` at the default (`high`) unless measured evidence
+  justifies a change; `xhigh`/`max` have documented diminishing returns. The
+  other CLI's reviewer (`/plan`'s plan advisory, `/cross-review`, and a
+  feature org leader's plan advisory) is set apart: `[reviewer].claude_effort`
+  (one of `low`, `medium`, `high`, `xhigh`, `max`) and `[reviewer].codex_effort`
+  set its effort, `xhigh` by default for both. The claude reviewer gets it as
+  `claude -p --effort`, which `-p` honors
+  (`docs/evidence/claude-effort-probe-2026-10-30.md`). Lower either key in
+  `ralph.toml` or `ralph.local.toml` when measured evidence shows the reviews
+  do not need it.
 
 ## Org runtime model receipts
 
@@ -145,11 +169,23 @@ seats are not observed and stay `unknown`.
 ## Where the values live
 
 - `.claude/agents/*.md` — pipeline subagent tiers (frontmatter `model:`)
-- `scripts/ralph-config.sh` — effective Ralph defaults (`RALPH_CLAUDE_REVIEWER_MODEL`,
-  `RALPH_CODEX_REVIEWER_MODEL`, `RALPH_CODEX_REASONING_EFFORT`,
-  `RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-- `internal/config/defaults_sync_test.go` — asserts the plan/cross-review SKILL.md fallbacks match `RALPH_CLAUDE_REVIEWER_MODEL` / `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` in ralph-config.sh, and that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` keys set in the template with `Default()`'s values, and that `[org.review].max_cross_review_cycles` defaults to the same value as `RALPH_STANDARD_MAX_PIPELINE_CYCLES` in ralph-config.sh
-- `internal/org/prompts_leader_plan_test.go` — asserts the feature org leader's plan advisory commands fall back to the values `scripts/ralph-config.sh` sets for `RALPH_CODEX_REVIEWER_MODEL` / `RALPH_CODEX_REASONING_EFFORT` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and `RALPH_CLAUDE_REVIEWER_MODEL` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
+- `ralph.toml`, and `ralph.local.toml` in the main worktree's root for one
+  machine — the values a person sets: `[standard].max_pipeline_cycles` (the
+  pipeline cycle cap) and the four `[reviewer]` keys (`claude_model`,
+  `claude_effort`, `codex_model`, `codex_effort`). A key neither file sets
+  keeps its built-in default, `Default()` in `internal/config/config.go`, which
+  `templates/base/ralph.toml` writes as comments. ralph no longer reads
+  `RALPH_STANDARD_MAX_PIPELINE_CYCLES`, `RALPH_CLAUDE_REVIEWER_MODEL`,
+  `RALPH_CODEX_REVIEWER_MODEL`, or `RALPH_CODEX_REASONING_EFFORT`, and
+  `ralph doctor` warns when one is still set.
+- `scripts/ralph-config.sh` — the internal helper `ralph_setting <key>` that
+  the skills source to read one of those five keys with `ralph config get`.
+  It holds no value a person sets, only a table of the defaults it prints when
+  `ralph` cannot answer (silently when `ralph` is not on PATH or has no
+  `config get`, with one line on stderr otherwise), and reads no environment
+  variable.
+- `internal/config/defaults_sync_test.go` — asserts that `config.Default()`'s `[org]` values match `templates/base/ralph.toml` for the `[org]` keys `orgTemplateDrift` reads (each key set, same value; not `[org.roles]`, `[org.permissions].roles`, `launch_cmd`, or `wake_cmd`; `[org.review]` and `[org.gate]` are covered), that `standardTemplateDrift` finds the two `[standard]` switches set in the template with `Default()`'s values, that `commentedTemplateDrift` finds `[standard].max_pipeline_cycles` and the four `[reviewer]` keys only as comments in the template, each once and with `Default()`'s value, that `[org.review].max_cross_review_cycles` defaults to the same value as `[standard].max_pipeline_cycles` in `Default()`, that the table of `scripts/ralph-config.sh` holds exactly those five keys with `Default()`'s values, and that the four copies of the `/plan`, `/cross-review`, and `/implement` SKILL.md expand none of the four variables above, read the settings with `ralph_setting` and only keys of its table, pass `--effort` to each claude reviewer launch, and state the cap rule of `cycle-count.json`'s `cap`
+- `internal/org/prompts_leader_plan_test.go` — asserts that the feature org leader's plan advisory takes the reviewer's model and effort from the task's two reviewer lines, which `featureLeaderTask` writes from `[reviewer]`, and that the role prompt names none of `scripts/ralph-config.sh`, `ralph config get reviewer`, and the four variables above (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryTakesTheReviewerFromTheTask`), and that its codex and claude commands hold the placeholders those lines fill in, at `-m` and `model_reasoning_effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryCodexTurnsMCPOff`) and at `--model` and `--effort` (`TestRenderRolePrompt_Leader_FeatureOrgPlanAdvisoryClaudeReadsOnly`)
 - `tests/test-agent-models.sh` — asserts the tier table and the implementer
   pin sentence above match `.claude/agents/*.md` frontmatter, on both the root
   and `templates/base/` sides

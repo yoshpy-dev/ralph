@@ -72,7 +72,15 @@ func newConfigGetCmd(configPath *string) *cobra.Command {
 			"  2  the key is not a key of ralph.toml, or names a table or an array\n" +
 			"     rather than one value: stop and report it, do not treat it as off.\n" +
 			"  3  ralph.toml cannot be read, cannot be parsed, or fails validation:\n" +
-			"     stop and report it, do not treat it as off.",
+			"     stop and report it, do not treat it as off.\n" +
+			"\n" +
+			"These are for a skill or seat that runs ralph config get itself, as for\n" +
+			"the review switches of [standard] and [org.review]. The skills read\n" +
+			"standard.max_pipeline_cycles and the four keys of [reviewer] with\n" +
+			"ralph_setting of scripts/ralph-config.sh instead, which does not stop:\n" +
+			"when it gets no value it goes on with the key's built-in default,\n" +
+			"silently when ralph is not on PATH or is an older ralph without this\n" +
+			"verb, and after one line on stderr otherwise, exits 2 and 3 included.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := *configPath

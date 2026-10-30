@@ -98,5 +98,7 @@ If Codex cannot dispatch a subagent (tool error, missing agent definition, or
 environment limitation), run that step inline and note the fallback in the
 report. Do not silently skip the phase.
 
-Cap protection: the same `RALPH_STANDARD_MAX_PIPELINE_CYCLES` ceiling applies,
-so a runaway inline pipeline cannot loop more than `cap` total runs.
+Cap protection: the same pipeline cycle cap applies (the larger of
+`[standard].max_pipeline_cycles` and a positive integer `cap` in the task's
+`cycle-count.json`; see `post-implementation-pipeline.md`), so a runaway
+inline pipeline cannot loop more than `cap` total runs.

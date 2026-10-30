@@ -24,7 +24,9 @@ import (
 //
 //  1. the split plan and the feature, with no side effect;
 //  2. the leader spawn's own checks, in Spawn's order (spawn.go):
-//     checkSpawnInput, the watch gate (Org.WatchGate, when set;
+//     checkSpawnInput (and right after it the [reviewer] values of the
+//     leader's task, featureReviewer's, with config.ValidateReviewer, which
+//     Spawn does not run), the watch gate (Org.WatchGate, when set;
 //     watchgate.go), then spawnPrecheckErr on an unlocked read of the
 //     manifest: max_orgs, max_total_seats, the reservation and its binding,
 //     and the rest of what Spawn refuses, then regateSpawnErr: no
@@ -95,6 +97,14 @@ type StartFeatureParams struct {
 	// the SpawnParams fields of the same names.
 	Driver, Model, LeaderDriver string
 	TimeoutMS                   int
+	// Reviewer is the [reviewer] table of the config `ralph org start`
+	// loaded (ralph.toml with ralph.local.toml on top). featureLeaderTask
+	// writes its values on the task's two reviewer lines, which the leader's
+	// plan advisory copies into its codex and claude commands, so the leader
+	// reads no setting itself. An empty field takes its default
+	// (featureReviewer), and StartFeature refuses, before anything is
+	// made, a value config.ValidateReviewer refuses after that.
+	Reviewer config.ReviewerConfig
 }
 
 // StartFeatureResult is StartFeature's return value. Spawn is the leader
@@ -183,11 +193,12 @@ func featureWorktreeCleanup(orgID string) string {
 // worktree as its cwd, the feature's `- Reserve:` paths, the binding (split
 // plan id, slug, approval digest, branch, worktree, and the approval mode of
 // o.Config, featureApprovalMode), a one-line scope, and a task made of what
-// the org was started for, the ledger p.StateDir and the approval mode
-// included, the split plan's preamble in a code fence, and the feature's
-// body (featureLeaderTask). Running the same start again reuses the worktree
-// and, while the leader is active, records nothing; with another approval
-// mode it is another binding, which the spawn refuses (reservationDecision).
+// the org was started for, the ledger p.StateDir, the approval mode and the
+// plan advisory's reviewer values (p.Reviewer) included, the split plan's
+// preamble in a code fence, and the feature's body (featureLeaderTask).
+// Running the same start again reuses the worktree and, while the leader is
+// active, records nothing; with another approval mode it is another binding,
+// which the spawn refuses (reservationDecision).
 // A worktree whose record was made for another split plan's feature is not
 // used, whether it was there before ensure (checkFeatureWorktreeReuse) or
 // another start made it while this one ran (checkEnsuredFeatureWorktree).
@@ -212,6 +223,9 @@ func (o *Org) StartFeature(p StartFeatureParams) StartFeatureResult {
 	checked, err := checkSpawnInput(leader)
 	if err != nil {
 		return refuse(err)
+	}
+	if err := config.ValidateReviewer(featureReviewer(p.Reviewer)); err != nil {
+		return refuse(fmt.Errorf("org: the leader's task copies the [reviewer] values into its shell commands: %w", err))
 	}
 	if err := o.checkWatchGate(); err != nil {
 		return refuse(err)
@@ -365,6 +379,28 @@ func featureApprovalMode(cfg config.OrgConfig) string {
 	return cfg.Approval.Mode
 }
 
+// featureReviewer is the [reviewer] table featureLeaderTask writes: r, with
+// each empty field taken from config.Default().Reviewer, so a hand-built
+// StartFeatureParams without Reviewer (config.Load always fills it) still
+// gives the leader a model and an effort for each reviewer rather than an
+// empty word in its command.
+func featureReviewer(r config.ReviewerConfig) config.ReviewerConfig {
+	def := config.Default().Reviewer
+	if r.ClaudeModel == "" {
+		r.ClaudeModel = def.ClaudeModel
+	}
+	if r.ClaudeEffort == "" {
+		r.ClaudeEffort = def.ClaudeEffort
+	}
+	if r.CodexModel == "" {
+		r.CodexModel = def.CodexModel
+	}
+	if r.CodexEffort == "" {
+		r.CodexEffort = def.CodexEffort
+	}
+	return r
+}
+
 // startFeatureLeaderParams is the leader spawn StartFeature asks for feature
 // f of plan in orgID with the approval mode approval (see StartFeature).
 func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeature, orgID, worktree, branch, approval string) SpawnParams {
@@ -375,7 +411,7 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 		Scope:   fmt.Sprintf("split %s feature %s (reserve: %s)", plan.ID, f.Slug, strings.Join(f.Reserve, ", ")),
 		Reserve: f.Reserve,
 		Feature: &FeatureBinding{Split: plan.ID, Feature: f.Slug, Digest: plan.Digest, Branch: branch, Worktree: worktree, Approval: approval},
-		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval),
+		Task:    featureLeaderTask(plan, f, mustAbs(p.StateDir), worktree, branch, approval, p.Reviewer),
 	}
 }
 
@@ -385,17 +421,28 @@ func startFeatureLeaderParams(p StartFeatureParams, plan *SplitPlan, f SplitFeat
 // 全機能の座席に適用する決まり.
 const featurePreambleLead = "全機能の座席に適用する決まり(分割計画の `## Features` より前の節を、原文のまま下の囲みに入れた):"
 
+// featureReviewerCodexLead and featureReviewerClaudeLead start the task's two
+// reviewer lines, which featureLeaderTask writes after the ledger line. The
+// 計画助言 subsection of prompts/leader.md names the lines by these words and
+// copies their two values into its codex and claude commands.
+const (
+	featureReviewerCodexLead  = "- reviewer の codex:"
+	featureReviewerClaudeLead = "- reviewer の claude:"
+)
+
 // featureLeaderTask is the leader's {{TASK}} (prompts/leader.md) for feature
 // f of plan: one line each for the split plan, the feature, the worktree,
 // the branch, the reserved paths with the --scope to pass to every seat's
 // spawn, the features it depends on, the approval mode recorded in the
-// binding (approval), the procedure to follow, and the ledger stateDir with
-// the --state-dir to pass to every `ralph org` command; then, when
-// plan.Preamble is not blank, a blank line, the line
-// featurePreambleLead and the preamble as the plan has it in a code fence
-// (fenceFor), so that its `## ` headings are not read as sections of the
-// role prompt; then a blank line and f's body as the plan has it. A blank
-// preamble adds nothing, and an empty body adds nothing either.
+// binding (approval), the procedure to follow, the ledger stateDir with the
+// --state-dir to pass to every `ralph org` command, and the model and effort
+// of the codex reviewer and of the claude reviewer of the leader's plan
+// advisory (reviewer, through featureReviewer), each with the flags of the
+// command they go to; then, when plan.Preamble is not blank, a blank line,
+// the line featurePreambleLead and the preamble as the plan has it in a code
+// fence (fenceFor), so that its `## ` headings are not read as sections of
+// the role prompt; then a blank line and f's body as the plan has it. A
+// blank preamble adds nothing, and an empty body adds nothing either.
 // The leader's pane has the herdr server's environment, which is not
 // necessarily the one start ran in, and ralph does not pass the --state-dir
 // given to start to the pane, so the leader's own commands cannot count on
@@ -409,12 +456,23 @@ const featurePreambleLead = "全機能の座席に適用する決まり(分割�
 // it is: normalizeReservePath lets a `$`, a backtick and quotes through, and
 // the paths are joined with ", ", so a value the leader quoted itself could
 // be split or expanded by the shell.
-func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval string) string {
+// The reviewer values are written as they are, not with shellQuote: the
+// template puts each in double quotes, where shellQuote's single quotes would
+// become part of the value, and config.ValidateReviewer, which config.Load
+// and StartFeature run, lets through only a claude effort `claude --effort`
+// accepts and, for the other three, the characters of its
+// reviewerWordPattern, none of which a shell reads in double quotes.
+// The leader takes the values from here rather than from `ralph config get`
+// or scripts/ralph-config.sh, so neither the ralph on its PATH nor the
+// project's copy of the script decides them (plan
+// 2026-10-30-standard-flow-config, D5).
+func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, branch, approval string, reviewer config.ReviewerConfig) string {
 	deps := "なし"
 	if len(f.DependsOn) > 0 {
 		deps = strings.Join(f.DependsOn, ", ")
 	}
 	reserve := strings.Join(f.Reserve, ", ")
+	r := featureReviewer(reviewer)
 	task := strings.Join([]string{
 		fmt.Sprintf("- 分割計画: %s(%s、承認の digest %s)", plan.ID, plan.Path, plan.Digest),
 		"- 機能: " + f.Slug,
@@ -425,6 +483,10 @@ func featureLeaderTask(plan *SplitPlan, f SplitFeature, stateDir, worktree, bran
 		"- 承認方式: " + approval,
 		"- 進め方: `/org` skill の「機能ごとの org」の手順に従う",
 		fmt.Sprintf("- 台帳: %s(ralph org のコマンドには必ず --state-dir %s を付ける)", stateDir, shellQuote(stateDir)),
+		fmt.Sprintf("%s %s %s(モデルと effort。計画助言で codex を呼ぶときの -m と model_reasoning_effort に使う)",
+			featureReviewerCodexLead, r.CodexModel, r.CodexEffort),
+		fmt.Sprintf("%s %s %s(モデルと effort。計画助言で claude を呼ぶときの --model と --effort に使う)",
+			featureReviewerClaudeLead, r.ClaudeModel, r.ClaudeEffort),
 	}, "\n")
 	if strings.TrimSpace(plan.Preamble) != "" {
 		fence := fenceFor(plan.Preamble)

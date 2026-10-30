@@ -90,9 +90,10 @@ Keep that order so phase boundaries, report writes, and the cycle cap stay
 predictable.
 
 If Codex cannot dispatch a subagent, run that step inline and record the
-fallback in the report. The cycle cap (`RALPH_STANDARD_MAX_PIPELINE_CYCLES`)
-still applies, so a fix-and-revalidate run cannot exceed two passes by
-default.
+fallback in the report. The cycle cap (`[standard].max_pipeline_cycles` in
+`ralph.toml`, or a larger `cap` that `$cross-review` wrote into the task's
+`.harness/state/standard-pipeline/cycle-count.json`) still applies, so a
+fix-and-revalidate run cannot exceed two passes by default.
 
 ## Running `codex exec` from an agent's Bash tool
 
@@ -102,8 +103,10 @@ with `</dev/null` so codex never blocks on "Reading additional input from
 stdin...". Run `command codex` (not a bare `codex`) so a shell alias that
 injects its own `-m` cannot collide with the explicit one below (codex
 rejects a duplicated flag). Pass an explicit `-m` and `-c
-model_reasoning_effort=` sourced from `scripts/ralph-config.sh` so the call
-does not depend on `.codex/config.toml`'s project-level model. Run the
+model_reasoning_effort=` with the values of `[reviewer].codex_model` and
+`[reviewer].codex_effort` in `ralph.toml` (read with `ralph_setting` of
+`scripts/ralph-config.sh`) so the call does not depend on
+`.codex/config.toml`'s project-level model. Run the
 commands both calls execute in a read-only sandbox, which blocks file
 writes and, by default, network access: the advisory passes
 `--sandbox read-only`, and the reviewer passes `-c sandbox_mode=read-only`
